@@ -335,6 +335,41 @@ void InkCanvas::draw_8bit(const std::function<void(Image&)>& draw) {
     }
 }
 
+void InkCanvas::recolour(const ink::Correction& change, double opacity, bool clip, const Image* mask) {
+    if (mask && (mask->mode() != "L" || mask->size() != impl_->size)) throw core::Error("value", "the correction's mask does not match the canvas");
+    const unsigned n = impl_->n;
+    const core::InkSpace space = impl_->color.space;
+    std::vector<double> inks, fixed;
+    std::vector<std::size_t> where;
+    std::vector<double> amounts;
+    for (int y = 0; y < impl_->size.height; ++y) {
+        const auto* shown = mask ? reinterpret_cast<const unsigned char*>(mask->raw()->image[y]) : nullptr;
+        inks.clear();
+        where.clear();
+        amounts.clear();
+        for (int x = 0; x < impl_->size.width; ++x) {
+            const std::size_t i = std::size_t(y) * impl_->size.width + x;
+            const double* p = impl_->px.data() + i * impl_->stride;
+            double amount = std::clamp(opacity, 0.0, 1.0) * (clip && impl_->previous ? p[n + 1] : 1.0);
+            if (shown) amount *= shown[x] / 255.0;
+            if (!(amount > 0)) continue;
+            for (unsigned c = 0; c < n; ++c) inks.push_back(from_canvas(space, c, p[c]));
+            where.push_back(i);
+            amounts.push_back(amount);
+        }
+        if (where.empty()) continue;
+        fixed.resize(inks.size());
+        ink::correct(impl_->color, inks.data(), fixed.data(), where.size(), change);
+        for (std::size_t j = 0; j < where.size(); ++j) {
+            double* p = impl_->px.data() + where[j] * impl_->stride;
+            for (unsigned c = 0; c < n; ++c) {
+                const double now = to_canvas(space, c, fixed[j * n + c]);
+                p[c] = std::clamp(p[c] + (now - p[c]) * amounts[j], 0.0, 1.0);
+            }
+        }
+    }
+}
+
 void InkCanvas::forget_clip() { impl_->previous = false; }
 
 Image InkCanvas::display() const {

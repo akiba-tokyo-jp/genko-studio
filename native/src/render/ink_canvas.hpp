@@ -7,6 +7,7 @@
 
 #include "core/ink.hpp"
 #include "render/image.hpp"
+#include "render/ink.hpp"
 
 // The compositor of a CMYK or Lab page (color-mode@1, SPEC.md COLOR-02): the page's inks composited in its own space,
 // never through RGB. Its values are held as doubles: CMYK inks 0..1, Lab as its normalized encoding (L/100,
@@ -51,6 +52,10 @@ public:
     void draw_8bit(const std::function<void(Image&)>& draw);
     // A layer that sets nothing for the next to clip to (a tone layer: the 8-bit page forgets the alpha before).
     void forget_clip();
+    // A correction layer (SPEC.md COLOR-02, 群C): the colours the page's inks mean through `change` and back by its
+    // rules (ink::correct: what it leaves as it was keeps its inks), mixed in by the opacity × the mask ("L"), × the
+    // alpha of the layer before when clipped. The alpha stays; nothing is set for the next layer to clip to.
+    void recolour(const ink::Correction& change, double opacity, bool clip, const Image* mask = nullptr);
 
     // The page as the screen shows it ("RGB", sRGB).
     Image display() const;

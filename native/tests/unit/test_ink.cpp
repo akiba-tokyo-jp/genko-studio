@@ -384,18 +384,14 @@ private slots:
         QVERIFY(!refusal(doc, Json::array({Json{{"op", "set_color_mode"}, {"mode", "cmyk"}}})).empty());
         QVERIFY(!refusal(doc, Json::array({Json{{"op", "set_color_mode"}, {"mode", "lab"}, {"icc", core::b64encode(icc_bytes())}}})).empty());
         QVERIFY(!refusal(doc, Json::array({Json{{"op", "set_color_mode"}, {"mode", "cmyk"}, {"icc", core::b64encode("nope")}}})).empty());
-        // an op that does not know inks yet: not_yet_ported, nothing done
-        const core::Document cmyk = run_ops(doc, Json::array({to_cmyk_op()})).doc;
-        const std::string filtered = refusal(cmyk, Json::array({Json{{"op", "filter_raster"}, {"page", 1}, {"layer", "ink"}, {"kind", "mosaic"}, {"block", 4}}}));
-        QVERIFY2(filtered.rfind("not_yet_ported", 0) == 0, filtered.c_str());
         // set_inks on an RGB page
         QVERIFY(!refusal(doc, Json::array({Json{{"op", "set_inks"}, {"page", 1}, {"inks", Json::array()}}})).empty());
     }
 
     // What the group's review found: a fill stops at an ink layer's lines (its reference), an export written from the
-    // screen's colours says so, an op not ported yet is refused whatever the page number's type, a LAB picture fails to
-    // other modes as Pillow, an ink page with a correction layer is drawn in tiles (the layer left out), and a book no
-    // op could leave opens read-only with its reason.
+    // screen's colours says so, an op finds the ink page whatever the page number's type, a LAB picture fails to other
+    // modes as Pillow, an ink page with a correction layer that moves shapes is drawn in tiles (the layer left out),
+    // and a book no op could leave opens read-only with its reason.
     void reviewFixes() {
         core::Document doc = run_ops(small_book(), Json::array({Json{{"op", "add_layer"}, {"page", 1}, {"kind", "paint"}, {"id", "pic"}, {"title", "線"}},
                                                                 to_cmyk_op()})).doc;
@@ -425,10 +421,10 @@ private slots:
         QVERIFY2(tiff.value("ok", false) && !tiff.contains("notes"), tiff.dump().c_str());
         QVERIFY(formats::ink_note(doc, "pack", "auto")->find("TIFF") != std::string::npos);
         QVERIFY(formats::ink_note(doc.page(0)));
-        // not ported yet on an ink page: page 1, 1.0 or true alike
+        // a filter on an ink page (群C): page 1, 1.0 or true alike, the layer in inks
         for (const Json& page : {Json(1), Json(1.0), Json(true)}) {
-            const std::string refused = refusal(doc, Json::array({Json{{"op", "filter_raster"}, {"page", page}, {"layer", "ink"}, {"kind", "mosaic"}, {"block", 4}}}));
-            QVERIFY2(refused.rfind("not_yet_ported", 0) == 0, refused.c_str());
+            const core::Document mosaic = run_ops(doc, Json::array({Json{{"op", "filter_raster"}, {"page", page}, {"id", "pic"}, {"kind", "mosaic"}, {"block", 4}}})).doc;
+            QVERIFY(mosaic.page(0).layers.back().ink_raster && !mosaic.page(0).layers.back().raster_png);
         }
         // LAB to a mode other than RGB, RGBA and RGBX: Pillow's words
         const render::Image lab = render::Image::frombytes("LAB", render::Size{1, 1}, std::string("\x80\x00\x00", 3));
@@ -440,7 +436,8 @@ private slots:
                 QCOMPARE(QString::fromUtf8(error.what()), QStringLiteral("conversion from LAB to RGB not supported"));
             }
         }
-        // a blur correction layer on an ink page: left out (said), the page drawn as its tiles, the same as whole
+        // a blur correction layer on an ink page (one that moves shapes: an old book's): left out (said, as on precise
+        // pixels), the page drawn as its tiles, the same as whole
         core::Document blurred = doc;
         {
             core::Layer blur;
@@ -453,7 +450,7 @@ private slots:
         o.skip_unported = true;  // (the screen; an export refuses it: not_yet_ported)
         o.region = render::RenderRegion{10, 20, 120, 90};
         const render::RenderResult part = render::render_page(blurred.page(0), dpi, o, &blurred);
-        QVERIFY(std::find(part.omitted.begin(), part.omitted.end(), "ink_adjust") != part.omitted.end());
+        QVERIFY(std::find(part.omitted.begin(), part.omitted.end(), "adjust:blur") != part.omitted.end());
         o.region.reset();
         const render::Image whole = render::render_page(blurred.page(0), dpi, o, &blurred).image;
         QCOMPARE(part.image.tobytes(), whole.crop(render::Box{10, 20, 130, 110}).tobytes());

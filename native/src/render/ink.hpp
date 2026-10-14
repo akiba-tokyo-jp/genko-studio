@@ -2,6 +2,7 @@
 
 #include <array>
 #include <cstddef>
+#include <functional>
 #include <optional>
 #include <string>
 #include <string_view>
@@ -67,6 +68,18 @@ std::string picture_icc(std::string_view bytes);
 // A picture's file (any this build opens) as the page's ink pixels: CMYK from its own profile (or the page's), Lab,
 // else RGB (its alpha kept).
 core::InkPixels picture_inks(std::string_view bytes, const core::PageColor& color);
+
+// The corrections of CMYK and Lab pages (SPEC.md COLOR-02, 群C) work the RGB colour inks mean by the page's rules
+// (sRGB 0..1 each): a grey for inks on K alone (Lab: a = b = 0; no ink is white, K 100% Genko's black), the table's
+// colour for its inks, else the colour the screen shows them as. And back by the rules: the table's colour (an 8-bit
+// colour exactly) its inks, Genko's blacks and white theirs, another grey on K alone (Lab: on L), the rest through the
+// profile. Values: inks as above (channels each), rgb 3 each.
+void meaning_of(const core::PageColor& color, const double* inks, double* rgb, std::size_t count);
+void inks_by_rules(const core::PageColor& color, const double* rgb, double* inks, std::size_t count);
+// A correction of the colours inks mean (`change`: an sRGB colour, 0..1 each, to another): `out` the inks each pixel's
+// changed colour takes by the rules — a pixel whose colour it leaves as it was keeps its inks.
+using Correction = std::function<std::array<double, 3>(const std::array<double, 3>&)>;
+void correct(const core::PageColor& color, const double* inks, double* out, std::size_t count, const Correction& change);
 
 // Are two inks the same at the page's depth (as stored)?
 bool same_inks(const core::PageColor& color, const std::vector<double>& a, const std::vector<double>& b);

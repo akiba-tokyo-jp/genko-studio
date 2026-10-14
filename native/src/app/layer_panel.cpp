@@ -29,6 +29,7 @@
 #include "service/wording.hpp"
 #include "core/ids.hpp"
 #include "core/pyconv.hpp"
+#include "render/ink.hpp"
 #include "render/plugins.hpp"
 #include "render/page.hpp"
 
@@ -771,6 +772,28 @@ void LayerPanel::screen() {
 std::optional<std::vector<int>> LayerPanel::histogram(const core::Page& page, const core::Layer& layer) const {
     // how many of the layer's drawn pixels have each lightness (for レベル補正 and トーンカーブ)
     try {
+        if (page.color && layer.ink_raster) {  // (color-mode@1: the lightness of the colours its inks mean, which the
+                                               // corrections work: a line on K 100% alone is black; every other pixel)
+            const core::InkPixels p = core::decode_ink_raster(*layer.ink_raster);
+            const unsigned n = p.channels() - 1;
+            std::vector<double> inks;
+            for (std::uint32_t y = 0; y < p.height; y += 2) {
+                for (std::uint32_t x = 0; x < p.width; x += 2) {
+                    const std::uint16_t* s = p.samples.data() + (std::size_t(y) * p.width + x) * p.channels();
+                    if (s[n] == 0) continue;
+                    for (unsigned c = 0; c < n; ++c) inks.push_back(render::ink::decode_sample(p.space, c, s[c], p.depth));
+                }
+            }
+            const std::size_t count = inks.size() / n;
+            std::vector<double> rgb(count * 3);
+            render::ink::meaning_of(*page.color, inks.data(), rgb.data(), count);
+            std::vector<int> counts(256, 0);
+            for (std::size_t i = 0; i < count; ++i) {  // (as Image.convert("L"): 299, 587, 114)
+                const double l = (rgb[i * 3] * 299 + rgb[i * 3 + 1] * 587 + rgb[i * 3 + 2] * 114) / 1000 * 255;
+                ++counts[static_cast<std::size_t>(std::clamp(std::lround(l), 0L, 255L))];
+            }
+            return counts;
+        }
         const render::Image image = render::layer_image(page, layer, 100, &window_->book(), true);
         const std::string grey = image.convert("L").tobytes(), alpha = image.getchannel(3).tobytes();
         std::vector<int> counts(256, 0);

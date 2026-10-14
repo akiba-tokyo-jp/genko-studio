@@ -25,7 +25,8 @@
 // converted to paint) composites the layers it takes in inks, as the page draws them (render::composite_ink_layers).
 //
 // What draws new colours or mixes them (smudge and liquify, the fills, shapes, 3D, rulers, the light table, precise RGB
-// pixels) works the picture the screen shows of the layers it works on: those ink layers lend the op their picture (an
+// pixels, a filter plugin — a person's program working 8-bit pictures —) works the picture the screen shows of the
+// layers it works on: those ink layers lend the op their picture (an
 // RGB paint layer's PNG, 8-bit RGBA, as ink::to_rgba8 shows it); after it, what the op left goes back into inks:
 //   - a pixel whose colour the op did not change (or changed by 2 a channel at most) keeps its inks, and its alpha when
 //     the op did not change that either;
@@ -86,10 +87,20 @@ std::string relayout_inks(const std::string& gkir, const core::PageSpec& spec, c
 // page's rules, laid over the inks; the layer keeps none.
 void bake_marks(core::Document& doc);
 
+// A layer's inks with its lines and pictures drawn into them by the page's rules (as the 8-bit tools bake them before
+// they work the pixels): a clear raster at the working 200 dpi when it has none.
+core::InkPixels with_marks(const core::Page& page, const core::Layer& layer, const core::Document* episode);
+
+// A raster's pixels (width × height, stretched over the page) an area covers (one byte each, 0..255) and its pixels
+// per pixel of the working 200 dpi (render/ink_filters: a filter's sizes on its raster).
+std::string area_coverage(const core::Page& page, std::uint32_t width, std::uint32_t height, const core::Json& area);
+double raster_scale(const core::Page& page, std::uint32_t width, std::uint32_t height);
+
 // --- through the picture the screen shows ---------------------------------------------------------------------------
 
-// The ops that go this way.
-bool lends(std::string_view op);
+// The ops that go this way (by their name and settings: filter_raster with a plugin, a person's program that works
+// 8-bit pictures).
+bool lends(std::string_view op, const core::Json& args);
 
 class Lending {
 public:

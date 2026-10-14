@@ -2,6 +2,7 @@
 
 #include "render/ink.hpp"
 #include "render/ink_edit.hpp"
+#include "render/ink_filters.hpp"
 #include "render/plugins.hpp"
 
 #include <QCryptographicHash>
@@ -2161,7 +2162,8 @@ void filter_raster(OpContext& c) {
     Layer& layer = page.layers[resolve_layer(page, op)];
     if (layer.locked) throw OpError("the layer is locked");  // (Python filters it)
     // (precise pen lines become precise pixels, so the filter reaches them: as 8-bit lines become pixels below)
-    if (core::has_color_strokes(layer)) precise_lines_to_paint(doc, page, layer);
+    // (color-mode@1: on a CMYK or Lab page they are drawn into its inks by the rules, below)
+    if (core::has_color_strokes(layer) && !page.color) precise_lines_to_paint(doc, page, layer);
     if (layer.color_raster) {  // the precise pixels themselves (render/color_filters)
         const std::string kind = core::truthy_at(op, "kind") ? core::py_str(op["kind"]) : std::string();
         Json params = Json::object();
@@ -2186,6 +2188,38 @@ void filter_raster(OpContext& c) {
         const std::optional<Json> area = core::truthy_at(op, "area") ? std::optional<Json>(core::op_area(op)) : std::nullopt;
         std::string pixels = refused([&] { return color_filters::apply(page, layer, kind, params, area ? &*area : nullptr); });
         layer.color_raster = std::make_shared<const std::string>(std::move(pixels));
+        return;
+    }
+    // color-mode@1: a CMYK or Lab page's paint layer filtered in its inks (render/ink_filters), its lines and pictures
+    // drawn into them first as the 8-bit filter bakes them; a plugin works the picture the layer lent (render/ink_edit)
+    if (const std::string kind = core::truthy_at(op, "kind") ? core::py_str(op["kind"]) : std::string();
+        page.color && !layer.raster_png && !kind.starts_with("plugin:")) {
+        Json params = Json::object();
+        for (const auto& [key, value] : op.items()) {
+            if (key != "op" && key != "page" && key != "layer" && key != "id" && key != "kind" && key != "area") params[key] = value;
+        }
+        const auto refused = [](const auto& work) {  // (Python's ValueError and TypeError become the op's error)
+            try {
+                return work();
+            } catch (const core::PyUncaught&) {
+                throw;
+            } catch (const core::Error& error) {
+                if (error.code() != "value" && error.code() != "type") throw;
+                throw OpError(error.what());
+            }
+        };
+        refused([&] { color_filters::check(kind, params); });
+        const std::optional<Json> area = core::truthy_at(op, "area") ? std::optional<Json>(core::op_area(op)) : std::nullopt;
+        const bool marks = layer.stroke_count() > 0 || !layer.patches.empty();
+        const core::InkPixels inks = ink_edit::with_marks(page, layer, &doc);
+        std::string pixels = refused([&] { return ink_filters::apply(page, inks, kind, params, area ? &*area : nullptr); });
+        layer.ink_raster = std::make_shared<const std::string>(std::move(pixels));
+        layer.ink_memo = {};
+        if (marks) {  // (as raster.bake_vectors leaves the layer: its marks in its pixels)
+            layer.strokes = core::empty_strokes();
+            layer.patches.clear();
+            layer.kind = LayerKind::Raster;
+        }
         return;
     }
     // (pen lines and shape fills become pixels, so the filter reaches them)

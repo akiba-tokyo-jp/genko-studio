@@ -37,14 +37,6 @@ std::vector<std::size_t> ink_pages_of(const core::OpContext& c) {
     return out;
 }
 
-// color-mode@1: the pixel ops that do not yet know the inks of a CMYK or Lab page (a later step of the colour modes,
-// SPEC.md COLOR-02: the filters): refused there, never done in RGB or left undone without a word.
-void refuse_on_ink_pages(const core::OpContext& c, const std::string& name) {
-    static const std::vector<std::string_view> kPending{"filter_raster"};
-    if (std::find(kPending.begin(), kPending.end(), name) == kPending.end()) return;
-    if (!ink_pages_of(c).empty()) core::not_yet_ported(name + " on a CMYK or Lab page is not in this build yet");
-}
-
 }  // namespace
 
 void register_render_ops(core::OpRegistry& registry) {
@@ -87,7 +79,7 @@ const core::OpRegistry& ops_registry() {
                 // (color-mode@1: an op that draws new colours on a CMYK or Lab page works the pictures the ink layers
                 // it works on show, then puts what it left back into inks, render/ink_edit; the ops that only take,
                 // move or clear pixels work the inks themselves, render/raster_ops)
-                if (ink_edit::lends(name)) {
+                if (ink_edit::lends(name, c.op)) {
                     if (const std::vector<std::size_t> pages = ink_pages_of(c); !pages.empty()) {
                         std::vector<ink_edit::Lending> lent;
                         lent.reserve(pages.size());
@@ -99,7 +91,6 @@ const core::OpRegistry& ops_registry() {
                         return;
                     }
                 }
-                refuse_on_ink_pages(c, name);
                 op(c);
                 color_edit::bake_marks(c.doc);
                 ink_edit::bake_marks(c.doc);

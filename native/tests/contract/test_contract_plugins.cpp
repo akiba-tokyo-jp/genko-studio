@@ -21,7 +21,9 @@
 #include "core/base64.hpp"
 #include "core/command_bus.hpp"
 #include "core/error.hpp"
+#include "core/ink.hpp"
 #include "core/paths.hpp"
+#include "render/ink.hpp"
 #include "render/ops_registry.hpp"
 #include "render/page.hpp"
 #include "render/plugins.hpp"
@@ -187,6 +189,25 @@ private slots:
         const auto blue = out.getpixel(30, 30);
         QVERIFY(blue[0] > blue[2] && blue[3] == 255);  // (blue became sepia)
         QCOMPARE(out.getpixel(90, 130)[3], 0.0);         // (the clear part stays clear)
+        // on a CMYK page (color-mode@1, 群C): the plugin works the picture the layer shows, the layer stays in inks
+        {
+            const std::string icc = genko::test::read_bytes(genko::test::test_data(QStringLiteral("colour/photocraft-coated-cmyk.icc")));
+            genko::core::Document cmyk = genko::core::new_episode("p", genko::core::Num(1), 1, genko::core::PageSpec::a4_mono());
+            cmyk = bus.apply(cmyk, Json::array({Json{{"op", "set_color_mode"}, {"mode", "cmyk"}, {"icc", genko::core::b64encode(icc)}},
+                                                Json{{"op", "add_layer"}, {"page", 1}, {"kind", "paint"}, {"id", "p"}}, put,
+                                                Json{{"op", "filter_raster"}, {"page", 1}, {"id", "p"}, {"kind", "plugin:sepia"}, {"amount", 1}}}),
+                             person, false)
+                       .doc;
+            const genko::core::Layer* inked = nullptr;
+            for (const auto& l : cmyk.page(0).layers) {
+                if (l.id == "p") inked = &l;
+            }
+            QVERIFY(inked != nullptr && inked->ink_raster && !inked->raster_png);
+            const genko::render::Image shown = genko::render::ink::to_rgba8(genko::core::decode_ink_raster(*inked->ink_raster), *cmyk.page(0).color);
+            const auto sepia = shown.getpixel(30, 30);
+            QVERIFY(sepia[0] > sepia[2] && sepia[3] == 255);
+            QCOMPARE(shown.getpixel(90, 130)[3], 0.0);
+        }
         const QString none = error_of([&] {
             (void)bus.apply(doc, Json::parse(R"([{"op": "filter_raster", "page": 1, "id": "p", "kind": "plugin:none"}])"), person, false);
         });

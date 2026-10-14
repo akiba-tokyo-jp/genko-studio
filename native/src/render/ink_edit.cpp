@@ -406,11 +406,12 @@ InkPixels into_inks(const Image& picture, const PageColor& color, const Lending:
     return out;
 }
 
-// The layer an op names to work on, as it finds it: layer_id (unless the op looks at the role alone, as flood_fill
-// does), else the role in "layer" (ink by default).
-const core::Layer* target_of(const core::Page& page, const core::Json& args, bool role_alone) {
-    if (!role_alone && core::truthy_at(args, "layer_id")) {
-        const std::string id = core::py_str(args["layer_id"]);
+// The layer an op names to work on, as it finds it: layer_id (filter_raster: id; flood_fill looks at the role alone),
+// else the role in "layer" (ink by default).
+const core::Layer* target_of(const core::Page& page, const core::Json& args, std::string_view op) {
+    const char* key = op == "filter_raster" ? "id" : "layer_id";
+    if (op != "flood_fill" && core::truthy_at(args, key)) {
+        const std::string id = core::py_str(args[key]);
         for (const core::Layer& layer : page.layers) {
             if (layer.id == id) return &layer;
         }
@@ -667,6 +668,35 @@ std::string relayout_inks(const std::string& gkir, const core::PageSpec& spec, c
     return out.take();
 }
 
+InkPixels with_marks(const core::Page& page, const core::Layer& layer, const core::Document* episode) {
+    if (!page.color) throw core::OpError("an RGB page holds no ink pixels");
+    if (layer.stroke_count() == 0 && layer.patches.empty()) {
+        if (layer.ink_raster) return core::decode_ink_raster(*layer.ink_raster);
+        return core::blank_ink_pixels(page.color->space, page.color->depth,
+                                      static_cast<std::uint32_t>(mm_to_px(page.spec.width_mm.value(), raster::kWorkingDpi)),
+                                      static_cast<std::uint32_t>(mm_to_px(page.spec.height_mm.value(), raster::kWorkingDpi)));
+    }
+    core::Layer marks;  // (its lines and pictures as the layer draws them, before its own settings)
+    marks.id = layer.id;
+    marks.role = core::LayerRole::User;
+    marks.kind = core::LayerKind::Raster;
+    marks.panel_clip = layer.panel_clip;
+    marks.panel_each = layer.panel_each;
+    marks.strokes = layer.strokes;
+    marks.patches = layer.patches;
+    const InkPixels drawn = composite_ink_layers(page, {marks}, raster::kWorkingDpi, episode);
+    return core::decode_ink_raster(lay_piece(page, layer, drawn, {0.0, 0.0, page.spec.width_mm.value(), page.spec.height_mm.value()}));
+}
+
+std::string area_coverage(const core::Page& page, std::uint32_t width, std::uint32_t height, const core::Json& area) {
+    return area_on_raster(area, grid_of(page, width, height)).tobytes();
+}
+
+double raster_scale(const core::Page& page, std::uint32_t width, std::uint32_t height) {
+    const Grid g = grid_of(page, width, height);
+    return std::sqrt(g.sx * g.sy) / (raster::kWorkingDpi / 25.4);
+}
+
 void bake_marks(core::Document& doc) {
     for (std::size_t p = 0; p < doc.pages.size(); ++p) {
         if (doc.is_deferred(p) || !doc.page(p).color) continue;
@@ -774,7 +804,8 @@ bool shown_in_page(const core::Page& page, const core::Layer& layer) {
 
 }  // namespace
 
-bool lends(std::string_view op) {
+bool lends(std::string_view op, const core::Json& args) {
+    if (op == "filter_raster") return core::truthy_at(args, "kind") && core::py_str(args["kind"]).starts_with("plugin:");
     static constexpr std::array<std::string_view, 7> kOnTarget{"smudge", "liquify", "add_shape", "flood_fill", "gradient_fill",
                                                               "fill_gaps", "ruler_to_layer"};
     return std::find(kPageWide.begin(), kPageWide.end(), op) != kPageWide.end() ||
@@ -848,7 +879,7 @@ Lending::Lending(core::Document& doc, std::size_t at, std::string_view op, const
         for (const core::Layer& layer : doc.page(at).layers) {
             if (layer.ink_raster) ids.push_back(layer.id);
         }
-    } else if (const core::Layer* target = target_of(doc.page(at), args, op == "flood_fill"); target != nullptr && target->ink_raster) {
+    } else if (const core::Layer* target = target_of(doc.page(at), args, op); target != nullptr && target->ink_raster) {
         ids.push_back(target->id);
     }
     if (ids.empty()) return;
@@ -888,7 +919,20 @@ void Lending::take_back(core::Document& doc) const {
         const PageColor& color = *page.color;
         for (core::Layer& layer : page.layers) {
             std::optional<InkPixels> made;
-            if (layer.color_raster) {  // (precise RGB pixels: through the profile)
+            const bool has_pixels = (layer.raster_png && !layer.raster_png->empty()) || layer.color_raster;
+            if (merge_ && before_ && has_pixels &&
+                (merge_->target ? layer.id == *merge_->target
+                                : std::find(ids_before_.begin(), ids_before_.end(), layer.id) == ids_before_.end())) {
+                // (the merge's layer — 8-bit or precise, as the op composited it —: what it composited, made again in
+                // inks; precise lines by the rules, as the page draws them)
+                InkPixels merged = composite_ink_layers(*before_, merge_->layers, raster::kWorkingDpi, &doc, merge_->paper);
+                layer.ink_raster = nullptr;
+                made = std::move(merged);
+                layer.color_raster = nullptr;
+                layer.raster_png = nullptr;
+                layer.raster_memo = {};
+                layer.raster_relpath.reset();
+            } else if (layer.color_raster) {  // (precise RGB pixels: through the profile)
                 const core::ColorRasterView view(*layer.color_raster);
                 std::vector<float> rgba(std::size_t(view.width()) * view.height() * 4);
                 for (std::size_t i = 0; i < std::size_t(view.width()) * view.height(); ++i) {
@@ -897,16 +941,6 @@ void Lending::take_back(core::Document& doc) const {
                 }
                 made = ink::from_srgb(rgba, view.width(), view.height(), color);
                 layer.color_raster = nullptr;
-            } else if (merge_ && before_ && layer.raster_png && !layer.raster_png->empty() &&
-                       (merge_->target ? layer.id == *merge_->target
-                                       : std::find(ids_before_.begin(), ids_before_.end(), layer.id) == ids_before_.end())) {
-                // (the merge's layer: what it composited, made again in inks at the 8-bit merge's size)
-                InkPixels merged = composite_ink_layers(*before_, merge_->layers, raster::kWorkingDpi, &doc, merge_->paper);
-                layer.ink_raster = nullptr;
-                made = std::move(merged);
-                layer.raster_png = nullptr;
-                layer.raster_memo = {};
-                layer.raster_relpath.reset();
             } else if (layer.raster_png && !layer.raster_png->empty()) {
                 const auto loan = std::find_if(loans_.begin(), loans_.end(), [&](const Loan& l) { return l.layer == layer.id; });
                 const Loan* lent = loan != loans_.end() ? &*loan : nullptr;

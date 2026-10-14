@@ -936,8 +936,40 @@ void ink_layer(InkCanvas& canvas, const Ctx& ctx, const Layer& layer, const Box&
         skip_unported(ctx, "ink_blend:" + layer.blend);
         return;
     }
-    if (layer.kind == LayerKind::Adjust) {  // (corrections on inks: a later step of the colour modes)
-        skip_unported(ctx, "ink_adjust");
+    if (layer.kind == LayerKind::Adjust) {  // a correction of the colours the inks mean (SPEC.md COLOR-02, 群C)
+        if (!layer.blend.empty() && layer.blend != "normal") {  // (as on precise pixels: not yet)
+            skip_unported(ctx, "ink_adjust_blend:" + layer.blend);
+            return;
+        }
+        const Json kind = layer.adjust && layer.adjust->is_object() ? layer.adjust->value("kind", Json()) : Json();
+        if (kind.is_string()) {
+            const std::string name = kind.get<std::string>();
+            if (name.starts_with("plugin:")) {  // (a person's filter plugin runs in the external runner)
+                skip_unported(ctx, "adjust:plugin");
+                return;
+            }
+            if (std::find(core::kShapeFilters.begin(), core::kShapeFilters.end(), name) != core::kShapeFilters.end()) {
+                skip_unported(ctx, "adjust:" + name);  // (one that moves shapes too: an old book's, as on precise pixels)
+                return;
+            }
+        }
+        const bool exposure = kind == Json("exposure");
+        std::optional<Image> mask;  // (its mask as the precise page resizes it)
+        if (layer.mask && layer.mask->enabled && layer.mask->png && !layer.mask->png->empty())
+            mask = decoded(layer.mask->png, "L").resize_region(ctx.size, area, exposure ? Resample::Bilinear : Resample::Bicubic);
+        if (exposure) {
+            const core::Exposure e = core::Exposure::parse(*layer.adjust);
+            canvas.recolour(
+                [&e](const std::array<double, 3>& rgb) {
+                    std::array<double, 3> out{};
+                    for (unsigned c = 0; c < 3; ++c) out[c] = core::linear_to_srgb(e.apply(core::srgb_to_linear(rgb[c])));
+                    return out;
+                },
+                layer.opacity, layer.clip, mask ? &*mask : nullptr);
+        } else if (const auto correction = correction_of(layer)) {
+            canvas.recolour([&correction](const std::array<double, 3>& rgb) { return (*correction)(rgb); }, layer.opacity, layer.clip,
+                            mask ? &*mask : nullptr);
+        }
         return;
     }
     if (layer.ink_raster) {

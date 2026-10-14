@@ -2,7 +2,7 @@
 // (render/ink_edit). What an op does not change keeps its inks exactly (16 bits as they were); what it moves, copies or
 // lays on new paper keeps them (a rich black whose screen colour is a Genko black among them); a line merged into the
 // pixels takes the page's rules (Genko's black: K alone) while what was there keeps its inks; every op of the step
-// leaves the page in inks; the filters still wait (not_yet_ported); the eyedropper's inks at a point; a colour for
+// leaves the page in inks; the eyedropper's inks at a point; a colour for
 // chosen inks (a grey the rules give them, else one not the rules' nor the table's for other inks); the gamut mark.
 
 #include <QtTest>
@@ -36,15 +36,6 @@ std::string icc_bytes() { return genko::test::read_bytes(genko::test::test_data(
 
 core::ApplyResult run_ops(const core::Document& doc, const Json& ops) {
     return core::CommandBus(render::ops_registry()).apply(doc, ops, core::Actor("human:test"));
-}
-
-std::string refusal(const core::Document& doc, const Json& ops) {
-    try {
-        run_ops(doc, ops);
-    } catch (const core::ApplyError& error) {
-        return error.code() + ": " + error.what();
-    }
-    return {};
 }
 
 const core::Layer& layer_of(const core::Document& doc, const std::string& id) {
@@ -460,13 +451,6 @@ private slots:
                                         .doc;
         all_in_inks(after);
         QVERIFY(std::find(after.features.begin(), after.features.end(), core::kColorRasterFeature) == after.features.end());
-    }
-
-    // The filters wait for their own step: not_yet_ported, nothing done.
-    void filtersWaitTheirTurn() {
-        const std::string refused =
-            refusal(ink_book(), Json::array({Json{{"op", "filter_raster"}, {"page", 1}, {"id", "pic"}, {"kind", "mosaic"}, {"block", 4}}}));
-        QVERIFY2(refused.rfind("not_yet_ported", 0) == 0, refused.c_str());
     }
 
     // スポイト: the inks at a point (the page as drawn, or the layer's own pixel); a colour for inks.

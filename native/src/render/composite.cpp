@@ -569,7 +569,8 @@ Image layer_effects(const core::Layer& layer, Image raster, int dpi) {
 }
 
 bool needs_whole_page(const core::Page& page) {
-    // (a CMYK or Lab page leaves its correction layers out for now — skip_unported "ink_adjust" —: none needs it)
+    // (a CMYK or Lab page corrects each pixel alone, and leaves out a correction that moves shapes or is a plugin —
+    // skip_unported "adjust:…" —: none needs it)
     if (page.color) return false;
     for (const core::Layer& layer : page.layers) {
         if (layer.kind != core::LayerKind::Adjust || !layer.visible || !layer.adjust || !layer.adjust->is_object()) continue;

@@ -286,6 +286,142 @@ std::array<double, 3> srgb_of(const PageColor& color, const std::vector<double>&
     return {out[0], out[1], out[2]};
 }
 
+namespace {
+
+// Inks by their samples at the page's depth (a key of up to four 16-bit samples).
+std::uint64_t ink_key(const PageColor& color, const double* ink) {
+    std::uint64_t key = 0;
+    for (unsigned c = 0; c < core::colour_channels(color.space); ++c) key = (key << 16) | encode_sample(color.space, c, ink[c], color.depth);
+    return key;
+}
+
+// An sRGB value as an 8-bit level when it is one exactly (within a float's rounding), else -1.
+int level_of(double v) {
+    const double k = std::round(v * 255.0);
+    return k >= 0 && k <= 255 && std::abs(v * 255.0 - k) < 1e-6 ? static_cast<int>(k) : -1;
+}
+
+}  // namespace
+
+void meaning_of(const PageColor& color, const double* inks, double* rgb, std::size_t count) {
+    const unsigned ch = core::colour_channels(color.space);
+    const bool cmyk = color.space == InkSpace::Cmyk;
+    std::unordered_map<std::uint64_t, std::array<int, 3>> table;
+    for (const core::InkEntry& entry : color.inks) {
+        if (entry.ink.size() >= ch) table.try_emplace(ink_key(color, entry.ink.data()), entry.rgb);
+    }
+    const std::uint16_t neutral = encode_sample(InkSpace::Lab, 1, 0.0, color.depth);
+    std::vector<double> shown;  // (the inks the screen colour stands for; a Lab grey with a = b = 0)
+    std::vector<std::size_t> where;
+    std::vector<bool> grey;
+    for (std::size_t i = 0; i < count; ++i) {
+        const double* p = inks + i * ch;
+        double* out = rgb + i * 3;
+        if (const auto it = table.find(ink_key(color, p)); it != table.end()) {
+            for (unsigned c = 0; c < 3; ++c) out[c] = it->second[c] / 255.0;
+            continue;
+        }
+        if (cmyk && encode_sample(color.space, 0, p[0], color.depth) == 0 && encode_sample(color.space, 1, p[1], color.depth) == 0 &&
+            encode_sample(color.space, 2, p[2], color.depth) == 0) {
+            const double v = 1.0 - std::clamp(p[3], 0.0, 1.0);
+            out[0] = out[1] = out[2] = v;
+            continue;
+        }
+        const bool flat = !cmyk && encode_sample(color.space, 1, p[1], color.depth) == neutral && encode_sample(color.space, 2, p[2], color.depth) == neutral;
+        shown.insert(shown.end(), p, p + ch);
+        if (flat) shown[shown.size() - 2] = shown[shown.size() - 1] = 0.0;
+        where.push_back(i);
+        grey.push_back(flat);
+    }
+    if (where.empty()) return;
+    std::vector<float> srgb(where.size() * 3);
+    to_srgb(color, shown.data(), srgb.data(), where.size());
+    for (std::size_t j = 0; j < where.size(); ++j) {
+        double* out = rgb + where[j] * 3;
+        if (grey[j]) {  // (a Lab grey: the grey its lightness shows)
+            const double v = (double(srgb[j * 3]) + srgb[j * 3 + 1] + srgb[j * 3 + 2]) / 3.0;
+            out[0] = out[1] = out[2] = v;
+        } else {
+            for (unsigned c = 0; c < 3; ++c) out[c] = srgb[j * 3 + c];
+        }
+    }
+}
+
+void inks_by_rules(const PageColor& color, const double* rgb, double* inks, std::size_t count) {
+    const unsigned ch = core::colour_channels(color.space);
+    const bool cmyk = color.space == InkSpace::Cmyk;
+    std::vector<float> profile, lab_greys;
+    std::vector<std::size_t> where, grey_where;
+    for (std::size_t i = 0; i < count; ++i) {
+        double v[3];
+        for (unsigned c = 0; c < 3; ++c) v[c] = std::isfinite(rgb[i * 3 + c]) ? std::clamp(rgb[i * 3 + c], 0.0, 1.0) : 0.0;
+        double* out = inks + i * ch;
+        const int l0 = level_of(v[0]), l1 = level_of(v[1]), l2 = level_of(v[2]);
+        if (l0 >= 0 && l1 >= 0 && l2 >= 0) {
+            if (const core::InkEntry* entry = core::ink_for(color, {l0, l1, l2})) {
+                for (unsigned c = 0; c < ch; ++c) out[c] = entry->ink[c];
+                continue;
+            }
+        }
+        if (std::abs(v[0] - v[1]) < 1e-9 && std::abs(v[1] - v[2]) < 1e-9) {
+            if (l0 == 0 || l0 == 10 || l0 == 15 || l0 == 20 || l0 == 255) {  // (Genko's blacks and white: the rules' own)
+                grey_ink(color, l0, out);
+                continue;
+            }
+            if (cmyk) {
+                out[0] = out[1] = out[2] = 0.0;
+                out[3] = 1.0 - v[0];
+                continue;
+            }
+            lab_greys.insert(lab_greys.end(), {static_cast<float>(v[0]), static_cast<float>(v[0]), static_cast<float>(v[0])});
+            grey_where.push_back(i);
+            continue;
+        }
+        profile.insert(profile.end(), {static_cast<float>(v[0]), static_cast<float>(v[1]), static_cast<float>(v[2])});
+        where.push_back(i);
+    }
+    if (!grey_where.empty()) {  // (a Lab grey: its lightness, a = b = 0)
+        std::vector<float> lab(grey_where.size() * 3);
+        cmsDoTransform(from_srgb_transform(color, TYPE_RGB_FLT, TYPE_Lab_FLT)->handle, lab_greys.data(), lab.data(),
+                       static_cast<cmsUInt32Number>(grey_where.size()));
+        for (std::size_t j = 0; j < grey_where.size(); ++j) {
+            double* out = inks + grey_where[j] * ch;
+            out[0] = std::clamp<double>(lab[j * 3], 0.0, 100.0);
+            out[1] = out[2] = 0.0;
+        }
+    }
+    if (!where.empty()) {
+        std::vector<float> made(where.size() * ch);
+        cmsDoTransform(from_srgb_transform(color, TYPE_RGB_FLT, float_format(color.space))->handle, profile.data(), made.data(),
+                       static_cast<cmsUInt32Number>(where.size()));
+        from_lcms(color.space, made.data(), where.size());
+        for (std::size_t j = 0; j < where.size(); ++j) {
+            for (unsigned c = 0; c < ch; ++c) inks[where[j] * ch + c] = made[j * ch + c];
+        }
+    }
+}
+
+void correct(const PageColor& color, const double* inks, double* out, std::size_t count, const Correction& change) {
+    const unsigned ch = core::colour_channels(color.space);
+    std::copy_n(inks, count * ch, out);
+    std::vector<double> meant(count * 3);
+    meaning_of(color, inks, meant.data(), count);
+    std::vector<double> changed;
+    std::vector<std::size_t> where;
+    for (std::size_t i = 0; i < count; ++i) {
+        const std::array<double, 3> was{meant[i * 3], meant[i * 3 + 1], meant[i * 3 + 2]};
+        const std::array<double, 3> now = change(was);
+        // (its colour as it was — within a float's rounding of the way there and back —: its inks)
+        if (std::abs(now[0] - was[0]) < 1e-9 && std::abs(now[1] - was[1]) < 1e-9 && std::abs(now[2] - was[2]) < 1e-9) continue;
+        changed.insert(changed.end(), now.begin(), now.end());
+        where.push_back(i);
+    }
+    if (where.empty()) return;
+    std::vector<double> made(where.size() * ch);
+    inks_by_rules(color, changed.data(), made.data(), where.size());
+    for (std::size_t j = 0; j < where.size(); ++j) std::copy_n(made.data() + j * ch, ch, out + where[j] * ch);
+}
+
 InkPixels from_rgb(const Image& image, const PageColor& color, bool gray_on_k) {
     const Image rgba = image.mode() == "RGBA" ? image : image.convert("RGBA");
     InkPixels out;
