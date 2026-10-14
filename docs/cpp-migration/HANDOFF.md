@@ -12,6 +12,24 @@
 - ICC は原稿に埋め込む（`.icc` の素材、16 MiB まで。CMYK にするとき選ぶ）。
 - 精度は 8bit と 16bit（32bit は RGB だけ）。
 
+### V2（群D）— 統合済み（Release は出口の V3 で）
+- **凍結SHA**: `a686c8010ea7a86aa3252dcc6d71fec17fc8e040`（native/integration へ早送り。8d7a2a3 の上に 66e5fac・51104ab・26c7336・a686c80）。計画は `validation_policy.py --base 8d7a2a3 --head a686c80 --phase integration`（tier full、各 120 試験、性能は別・必須でない）。
+- **実行環境**: 群B と同じ。
+- **結果**（validation_run.py の result.json。ASan は failures が空、除いた契約なし）:
+  - linux-asan: 120/120 合格、サニタイザ指摘なし、CLI23 合格、SKIP 0（10/14 17:36–23:01 UTC）
+  - linux-release: 流さずに止めた（10/14 23:20 UTC、120 試験中 46 まで失敗なし）。利用者の決定（2026-10-14）: 最後の群の V2 と出口の V3 は同じコード（違いは HANDOFF の記録だけ）なので、Release は V3 で確かめる。V2 の Release の result.json は無い（止めたため）。
+
+### 群D（CL-D。66e5fac・51104ab・26c7336・a686c80）
+- レイヤースタイル: インキのペイントレイヤーの効果は 8 bit の層と同じ形（効果の届く分だけ広く描いて切る）でインキに掛ける（`render/composite` の `ink_layer_effects`）。水彩の縁は縁の α だけ Genko の墨へ寄せ（層の α はそのまま）、フチはその色の規則のインキを下に敷く（形は 8 bit の絵の α から）。表示の色（`color`）は画面でその色の規則のインキ（印刷では `color_prints` のときだけ）。トーン化（`screen`）は網点にするときだけ、インキが意味する灰色を 8 bit で網点にして規則で（K）。ノイズのトーン化は分けて描くときも上の帯から同じ粒で作る（全体と同じ画素）。
+- 編集可能な文字の PSD（PSD-01）を CMYK・Lab のページでも書く（`psd_text_ink` の断りを外した）。文字の層の画素はインキ、グループの記録はページの版の数。CMYK のページの文字の色は規則のインキ（EngineData の FillColor Type 2: α・C・M・Y・K）、縁取り（lfx2）の色は CMYC（%）。Lab のページの縁取りは LbCl、文字の色は RGB（Type 1）。8・16 bit。
+- 試験（QtTest の Totals: test_ink_filters 55・test_psd_text 32・test_contract_ink 6）: test_ink_filters inkLayerStyles・stylesInPartsAsWhole（範囲を分けて描いた結果が全体と同じ。フチとノイズのトーン化）、test_psd_text editableOnInkPages（このビルドの読み手）、test_contract_ink editableTextKeepsTheInks（psd-tools で CMYK 8・16 bit と Lab の文字の色・縁取り・版の数・精度）。`tools/migration/ink_check.py` に文字の層の色を読む `texts`。
+- レビュー（1回。P2×1・P3×2）で直した所: ノイズのトーン化を分けて描くとき上の帯を表示の RGB で作っていた（P2。インキが意味する灰色で作る）、古い説明（P3）、16 bit の編集可能な PSD の試験が無かった（P3）。
+- 凍結の前に作業ツリーで Release の全体（性能を除く 120 試験）を 1 回流し、全合格を確かめてから凍結した（群B の V2 の ASan と並べて最低優先度で。その記録は残さない。上の V2 が証跡）。
+
+### 既知の制限（群D の時点）
+- Lab のページの編集可能な文字の色は RGB（Type 1）で書く。Lab の Type の値を確かめる手段（Photoshop・仕様）が無いため。
+- 書いた PSD は psd-tools とこのビルドの読み手で照合した。Photoshop での確認はしていない。
+
 ### V2（群C）— 統合済み
 - **凍結SHA**: `d592657710e81365b6ba0537dd033d950b232152`（native/integration へ早送り。24d60dd の上に ea85cf0・186785e・d592657）。計画は `validation_policy.py --base 24d60dd --head d592657 --phase integration`（tier full、各 120 試験、性能は別・必須でない）。
 - **実行環境**: 群B と同じ（4 CPU / RAM 16GB / Ubuntu 24.04.5 / kernel 6.18.44、Qt 6.11.2、参照 Python 3.12＋Pillow 12.3.0、CAP を外して実行。ASan（ctest 1並列）→ Release）。
@@ -91,7 +109,7 @@
 - 16bit の PSD の取り込みは 8bit で読む。
 
 ### 残課題・次
-- 群D（レイヤースタイル・編集可能な文字の PSD）は作業ツリー cl-d で実装とレビューの直しまで済み（未統合）。凍結・V2・統合の後、工程の出口 V3（Debug・Release・ASan の全体と CLI23、`--pair`、実 xcb の GUI・E2E・AC-PERF・PERF-F）。
+- 工程の出口 V3（Debug・Release・ASan の全体と CLI23、`--pair`、実 xcb の GUI・E2E・AC-PERF・PERF-F）を最後の凍結（群D の統合の記録）で 1 回。
 - Windows は開発中 deferred（配布前の実機受入は必須）。M6 は着手前に止めて利用者に確かめる。
 
 ## M5出口受入（Linux）— 2026-10-13 記録
