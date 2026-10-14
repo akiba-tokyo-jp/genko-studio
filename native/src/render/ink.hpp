@@ -6,6 +6,7 @@
 #include <optional>
 #include <string>
 #include <string_view>
+#include <unordered_map>
 #include <vector>
 
 #include "core/ink.hpp"
@@ -80,6 +81,19 @@ void inks_by_rules(const core::PageColor& color, const double* rgb, double* inks
 // changed colour takes by the rules — a pixel whose colour it leaves as it was keeps its inks.
 using Correction = std::function<std::array<double, 3>(const std::array<double, 3>&)>;
 void correct(const core::PageColor& color, const double* inks, double* out, std::size_t count, const Correction& change);
+// The same with the page's table looked up once (a correction layer over a whole page, row by row).
+class Rules {
+public:
+    explicit Rules(const core::PageColor& color);
+    void meaning(const double* inks, double* rgb, std::size_t count) const;
+    void inks(const double* rgb, double* inks, std::size_t count) const;
+    void correct(const double* inks, double* out, std::size_t count, const Correction& change) const;
+
+private:
+    core::PageColor color_;
+    std::unordered_map<std::uint64_t, std::array<int, 3>> by_inks_;  // (the table by its inks' samples)
+    std::unordered_map<std::uint32_t, std::vector<double>> by_rgb_;  // (and by its colour)
+};
 
 // Are two inks the same at the page's depth (as stored)?
 bool same_inks(const core::PageColor& color, const std::vector<double>& a, const std::vector<double>& b);

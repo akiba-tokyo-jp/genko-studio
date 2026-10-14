@@ -339,6 +339,7 @@ void InkCanvas::recolour(const ink::Correction& change, double opacity, bool cli
     if (mask && (mask->mode() != "L" || mask->size() != impl_->size)) throw core::Error("value", "the correction's mask does not match the canvas");
     const unsigned n = impl_->n;
     const core::InkSpace space = impl_->color.space;
+    const ink::Rules rules(impl_->color);  // (the table looked up once for the whole canvas)
     std::vector<double> inks, fixed;
     std::vector<std::size_t> where;
     std::vector<double> amounts;
@@ -359,7 +360,7 @@ void InkCanvas::recolour(const ink::Correction& change, double opacity, bool cli
         }
         if (where.empty()) continue;
         fixed.resize(inks.size());
-        ink::correct(impl_->color, inks.data(), fixed.data(), where.size(), change);
+        rules.correct(inks.data(), fixed.data(), where.size(), change);
         for (std::size_t j = 0; j < where.size(); ++j) {
             double* p = impl_->px.data() + where[j] * impl_->stride;
             for (unsigned c = 0; c < n; ++c) {

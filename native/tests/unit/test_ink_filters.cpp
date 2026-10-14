@@ -117,6 +117,21 @@ void lines_stay_on_k(const core::InkPixels& p, const char* what) {
     QVERIFY2(shown > 1000, what);
 }
 
+// And for a filter that only moves, blurs or lights from what shows: the lines' pixels that still show (alpha at
+// least half) are Genko's black as they were (K 100%; Lab: L 0) — no paper of no ink, no light from nothing.
+void lines_stay_black(const core::InkPixels& p, const char* what) {
+    const bool cmyk = p.space == core::InkSpace::Cmyk;
+    const unsigned n = p.channels() - 1;
+    for (std::uint32_t y = px(2); y < px(28); ++y) {
+        for (std::uint32_t x = px(2); x < px(18); ++x) {
+            const std::uint16_t* s = at(p, x, y);
+            if (s[n] < 32768) continue;
+            const bool black = cmyk ? s[3] == 65535 : s[0] == 0;
+            if (!black) QFAIL(qPrintable(QStringLiteral("%1: (%2, %3) shows, not as Genko's black").arg(QString::fromUtf8(what)).arg(x).arg(y)));
+        }
+    }
+}
+
 }  // namespace
 
 class TestInkFilters : public QObject {
@@ -171,6 +186,11 @@ private slots:
         QCOMPARE(got.depth, 16);
         QVERIFY(got.samples != pixels_of(doc, "pic").samples);
         lines_stay_on_k(got, qPrintable(op));
+        const std::string kind = filter["kind"].get<std::string>();
+        for (const char* moving : {"blur", "mosaic", "motion_blur", "radial_blur", "zoom_blur", "wave", "twirl", "despeckle", "glow"}) {
+            if (kind == moving) lines_stay_black(got, qPrintable(op));
+        }
+        QCOMPARE(layer_of(after, "pic").kind, core::LayerKind::Raster);
     }
 
     // A blur keeps what it does not reach (16 bits) and a line's inks where it fades (weighted by alpha: no paper mixed
@@ -272,6 +292,30 @@ private slots:
         QCOMPARE(pen.kind, core::LayerKind::Raster);
         const std::uint16_t* s = at(pixels_of(doc, "pen"), px(15), px(50));
         QVERIFY(s[0] == 0 && s[1] == 0 && s[2] == 0 && s[3] == 65535 && s[4] == 65535);
+    }
+
+    // A layer whose alpha is locked (透明保護): its lines drawn into its inks only inside its pixels, as the page shows
+    // them — a line over what is clear stays unseen.
+    void lockedAlphaKeepsLinesInside() {
+        core::Document doc = filter_book();
+        doc = run_ops(doc, Json::array({Json{{"op", "add_stroke"}, {"page", 1}, {"layer_id", "pic"},
+                                             {"points", Json::array({Json::array({35, 60}), Json::array({55, 60})})}, {"width_mm", 3}}}))
+                  .doc;
+        for (auto& layer : doc.edit_page(0).layers) {
+            if (layer.id == "pic") layer.lock_alpha = true;
+        }
+        const core::Document after = run_ops(doc, Json::array({Json{{"op", "filter_raster"}, {"page", 1}, {"id", "pic"}, {"kind", "blur"}, {"radius", 1}}})).doc;
+        QCOMPARE(at(pixels_of(after, "pic"), px(45), px(60))[4], std::uint16_t(0));
+    }
+
+    // A layer with nothing to bake filtered: a paint layer after it, as the 8-bit filter leaves one.
+    void filteredLayerIsPaint() {
+        core::Document doc = filter_book();
+        doc = run_ops(doc, Json::array({Json{{"op", "add_layer"}, {"page", 1}, {"kind", "pen"}, {"id", "empty"}},
+                                        Json{{"op", "filter_raster"}, {"page", 1}, {"id", "empty"}, {"kind", "blur"}}}))
+                  .doc;
+        QCOMPARE(layer_of(doc, "empty").kind, core::LayerKind::Raster);
+        QVERIFY(layer_of(doc, "empty").ink_raster);
     }
 
     // Precise lines (color_rgb) on a pen layer of an ink page are drawn by the rules (their 8-bit colour): filtered or

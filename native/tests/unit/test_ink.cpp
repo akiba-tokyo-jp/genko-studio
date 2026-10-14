@@ -424,7 +424,8 @@ private slots:
         // a filter on an ink page (群C): page 1, 1.0 or true alike, the layer in inks
         for (const Json& page : {Json(1), Json(1.0), Json(true)}) {
             const core::Document mosaic = run_ops(doc, Json::array({Json{{"op", "filter_raster"}, {"page", page}, {"id", "pic"}, {"kind", "mosaic"}, {"block", 4}}})).doc;
-            QVERIFY(mosaic.page(0).layers.back().ink_raster && !mosaic.page(0).layers.back().raster_png);
+            const core::Layer& pic = mosaic.page(0).layers.back();
+            QVERIFY(pic.id == "pic" && pic.ink_raster && !pic.raster_png && *pic.ink_raster != *doc.page(0).layers.back().ink_raster);
         }
         // LAB to a mode other than RGB, RGBA and RGBX: Pillow's words
         const render::Image lab = render::Image::frombytes("LAB", render::Size{1, 1}, std::string("\x80\x00\x00", 3));

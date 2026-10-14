@@ -272,6 +272,22 @@ std::optional<std::pair<std::string, Box>> leave(Inks& out, const core::Json& ar
     return std::make_pair(std::move(covered), *box);
 }
 
+// A layer's marks drawn for its inks (lines, pictures) kept inside its own pixels when its alpha is locked (透明保護),
+// as the page and the 8-bit bake clip them: their alpha times the layer's.
+void inside_own_pixels(InkPixels& drawn, const core::Layer& layer) {
+    if (!layer.lock_alpha || !layer.ink_raster) return;
+    InkPixels own = core::decode_ink_raster(*layer.ink_raster);
+    if (own.width != drawn.width || own.height != drawn.height) {
+        own = resize_inks(own, Size{static_cast<int>(drawn.width), static_cast<int>(drawn.height)}, Resample::Bicubic);
+    }
+    const unsigned n = core::colour_channels(drawn.space), on = core::colour_channels(own.space);
+    const double own_most = own.max();
+    for (std::size_t i = 0; i < drawn.pixel_count(); ++i) {
+        std::uint16_t& a = drawn.samples[i * (n + 1) + n];
+        a = static_cast<std::uint16_t>(std::lround(a * (own.samples[i * (on + 1) + on] / own_most)));
+    }
+}
+
 Inks layer_inks(const core::Layer& layer) {
     if (!layer.ink_raster) throw core::OpError("the layer " + layer.id + " holds no ink pixels");
     return Inks(core::decode_ink_raster(*layer.ink_raster));
@@ -684,7 +700,8 @@ InkPixels with_marks(const core::Page& page, const core::Layer& layer, const cor
     marks.panel_each = layer.panel_each;
     marks.strokes = layer.strokes;
     marks.patches = layer.patches;
-    const InkPixels drawn = composite_ink_layers(page, {marks}, raster::kWorkingDpi, episode);
+    InkPixels drawn = composite_ink_layers(page, {marks}, raster::kWorkingDpi, episode);
+    inside_own_pixels(drawn, layer);
     return core::decode_ink_raster(lay_piece(page, layer, drawn, {0.0, 0.0, page.spec.width_mm.value(), page.spec.height_mm.value()}));
 }
 
@@ -710,7 +727,8 @@ void bake_marks(core::Document& doc) {
             marks.kind = core::LayerKind::Raster;
             marks.panel_clip = marks.panel_each = false;
             marks.patches = layer.patches;
-            const core::InkPixels drawn = composite_ink_layers(seen, {marks}, raster::kWorkingDpi, &doc);
+            core::InkPixels drawn = composite_ink_layers(seen, {marks}, raster::kWorkingDpi, &doc);
+            inside_own_pixels(drawn, layer);
             core::Page& page = doc.edit_page(p);
             core::Layer& target = page.layers[l];
             const std::array<double, 4> whole{0.0, 0.0, page.spec.width_mm.value(), page.spec.height_mm.value()};

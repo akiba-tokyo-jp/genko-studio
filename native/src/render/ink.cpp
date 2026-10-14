@@ -303,13 +303,21 @@ int level_of(double v) {
 
 }  // namespace
 
-void meaning_of(const PageColor& color, const double* inks, double* rgb, std::size_t count) {
+Rules::Rules(const PageColor& color) : color_(color) {
+    const unsigned ch = core::colour_channels(color.space);
+    for (const core::InkEntry& entry : color.inks) {  // (the first entry of a colour, as core::ink_for finds it)
+        if (entry.ink.size() < ch) continue;
+        by_inks_.try_emplace(ink_key(color, entry.ink.data()), entry.rgb);
+        const std::uint32_t key = (std::uint32_t(entry.rgb[0] & 0xff) << 16) | (std::uint32_t(entry.rgb[1] & 0xff) << 8) | std::uint32_t(entry.rgb[2] & 0xff);
+        by_rgb_.try_emplace(key, std::vector<double>(entry.ink.begin(), entry.ink.begin() + ch));
+    }
+}
+
+void Rules::meaning(const double* inks, double* rgb, std::size_t count) const {
+    const PageColor& color = color_;
     const unsigned ch = core::colour_channels(color.space);
     const bool cmyk = color.space == InkSpace::Cmyk;
-    std::unordered_map<std::uint64_t, std::array<int, 3>> table;
-    for (const core::InkEntry& entry : color.inks) {
-        if (entry.ink.size() >= ch) table.try_emplace(ink_key(color, entry.ink.data()), entry.rgb);
-    }
+    const auto& table = by_inks_;
     const std::uint16_t neutral = encode_sample(InkSpace::Lab, 1, 0.0, color.depth);
     std::vector<double> shown;  // (the inks the screen colour stands for; a Lab grey with a = b = 0)
     std::vector<std::size_t> where;
@@ -347,7 +355,8 @@ void meaning_of(const PageColor& color, const double* inks, double* rgb, std::si
     }
 }
 
-void inks_by_rules(const PageColor& color, const double* rgb, double* inks, std::size_t count) {
+void Rules::inks(const double* rgb, double* inks, std::size_t count) const {
+    const PageColor& color = color_;
     const unsigned ch = core::colour_channels(color.space);
     const bool cmyk = color.space == InkSpace::Cmyk;
     std::vector<float> profile, lab_greys;
@@ -358,8 +367,8 @@ void inks_by_rules(const PageColor& color, const double* rgb, double* inks, std:
         double* out = inks + i * ch;
         const int l0 = level_of(v[0]), l1 = level_of(v[1]), l2 = level_of(v[2]);
         if (l0 >= 0 && l1 >= 0 && l2 >= 0) {
-            if (const core::InkEntry* entry = core::ink_for(color, {l0, l1, l2})) {
-                for (unsigned c = 0; c < ch; ++c) out[c] = entry->ink[c];
+            if (const auto it = by_rgb_.find((std::uint32_t(l0) << 16) | (std::uint32_t(l1) << 8) | std::uint32_t(l2)); it != by_rgb_.end()) {
+                std::copy_n(it->second.begin(), ch, out);
                 continue;
             }
         }
@@ -401,11 +410,11 @@ void inks_by_rules(const PageColor& color, const double* rgb, double* inks, std:
     }
 }
 
-void correct(const PageColor& color, const double* inks, double* out, std::size_t count, const Correction& change) {
-    const unsigned ch = core::colour_channels(color.space);
+void Rules::correct(const double* inks, double* out, std::size_t count, const Correction& change) const {
+    const unsigned ch = core::colour_channels(color_.space);
     std::copy_n(inks, count * ch, out);
     std::vector<double> meant(count * 3);
-    meaning_of(color, inks, meant.data(), count);
+    meaning(inks, meant.data(), count);
     std::vector<double> changed;
     std::vector<std::size_t> where;
     for (std::size_t i = 0; i < count; ++i) {
@@ -418,8 +427,14 @@ void correct(const PageColor& color, const double* inks, double* out, std::size_
     }
     if (where.empty()) return;
     std::vector<double> made(where.size() * ch);
-    inks_by_rules(color, changed.data(), made.data(), where.size());
+    this->inks(changed.data(), made.data(), where.size());
     for (std::size_t j = 0; j < where.size(); ++j) std::copy_n(made.data() + j * ch, ch, out + where[j] * ch);
+}
+
+void meaning_of(const PageColor& color, const double* inks, double* rgb, std::size_t count) { Rules(color).meaning(inks, rgb, count); }
+void inks_by_rules(const PageColor& color, const double* rgb, double* inks, std::size_t count) { Rules(color).inks(rgb, inks, count); }
+void correct(const PageColor& color, const double* inks, double* out, std::size_t count, const Correction& change) {
+    Rules(color).correct(inks, out, count, change);
 }
 
 InkPixels from_rgb(const Image& image, const PageColor& color, bool gray_on_k) {

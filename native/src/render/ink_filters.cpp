@@ -335,6 +335,7 @@ void glow(Plane& p, const Json& params, double scale, const core::PageColor& col
     const std::vector<double> rgb = meant(p, color);
     Plane light(p.width(), p.height(), n);
     for (std::size_t i = 0; i < p.size(); ++i) {
+        if (!(p.at(i)[n] > 0)) continue;  // (nothing there: no light — the 8-bit picture's clear pixels are black)
         const double luma = (rgb[i * 3] * 19595.0 + rgb[i * 3 + 1] * 38470.0 + rgb[i * 3 + 2] * 7471.0) / 65536.0;
         if (std::floor(luma * 255 + 0.5) < cut) continue;
         if (cmyk) {
@@ -385,7 +386,9 @@ void mosaic(Plane& p, const Json& params, double scale, InkSpace space) {
                 black_colours(space, v);
                 continue;
             }
-            std::copy_n(source.at(sx, sy), n, v);
+            // (the sample's colour, the pixel's alpha kept; a clear sample black, as the 8-bit picture's clear pixels are)
+            if (source.at(sx, sy)[n] > 0) std::copy_n(source.at(sx, sy), n, v);
+            else black_colours(space, v);
             darken(v, space, 0.88);  // (ImageEnhance.Brightness(0.88))
         }
     }

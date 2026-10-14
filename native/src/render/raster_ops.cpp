@@ -2218,8 +2218,8 @@ void filter_raster(OpContext& c) {
         if (marks) {  // (as raster.bake_vectors leaves the layer: its marks in its pixels)
             layer.strokes = core::empty_strokes();
             layer.patches.clear();
-            layer.kind = LayerKind::Raster;
         }
+        layer.kind = LayerKind::Raster;  // (as the 8-bit filter leaves it: a paint layer)
         return;
     }
     // (pen lines and shape fills become pixels, so the filter reaches them)
