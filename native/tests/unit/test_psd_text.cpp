@@ -532,7 +532,7 @@ private slots:
         const Read p3 = read_ink(files.at(2));
         QCOMPARE(p3.file.mode_name(), std::string("cmyk"));
         const genko::core::PageColor& cmyk = *doc.page(2).color;
-        const psd::TextStyle& red = text_of(p3, "本文 #p3a").runs.front().style;
+        const psd::TextStyle red = text_of(p3, "本文 #p3a").runs.front().style;
         QVERIFY(red.fill_cmyk.has_value());
         const std::vector<double> want = genko::render::ink::ink_of(cmyk, {200, 30, 30});
         for (std::size_t i = 0; i < 4; ++i) QVERIFY(near((*red.fill_cmyk)[i], want[i], 1e-5));
@@ -544,7 +544,7 @@ private slots:
         QVERIFY(p3.named("フキダシ") != nullptr || !p3.in("台詞 ドーン").empty());
         const Read p1 = read_ink(files.at(0));
         QCOMPARE(p1.file.mode_name(), std::string("lab"));
-        const psd::TextStyle& down = text_of(p1, "本文 #p1a").runs.front().style;
+        const psd::TextStyle down = text_of(p1, "本文 #p1a").runs.front().style;
         QVERIFY(!down.fill_cmyk.has_value());
         QVERIFY(p1.named("ルビ「とうきょう」 #p1a-r0") != nullptr);
     }
