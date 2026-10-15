@@ -154,7 +154,7 @@ private slots:
         QVERIFY(pen != nullptr);
         b.window->choose_tool(QStringLiteral("eraser"));
         pen->click();
-        QCOMPARE(b.window->canvas()->tool, QStringLiteral("pen"));
+        QCOMPARE(b.window->canvas()->tool(), QStringLiteral("pen"));
         // chosen in its dialog (the test answers it): 履歴… first, then 消しゴム
         b.on_dialog = [](QDialog* dialog) {
             auto* choose = qobject_cast<app::ChooseCommands*>(dialog);
@@ -351,7 +351,7 @@ private slots:
         for (QPushButton* button : first->findChildren<QPushButton*>()) {
             if (button->text() == QStringLiteral("コマを割る（F）")) button->click();
         }
-        QCOMPARE(b.window->canvas()->tool, QStringLiteral("frame"));
+        QCOMPARE(b.window->canvas()->tool(), QStringLiteral("frame"));
         QVERIFY(first->height() < 60);
         // the first panels
         const core::Page& page = b.window->book().page(0);
@@ -366,9 +366,9 @@ private slots:
         QCOMPARE(button("draw")->text(), QStringLiteral("ペンで描く（B）"));
         QCOMPARE(button("line")->text(), QStringLiteral("台詞を入れる（T）"));
         button("draw")->click();
-        QCOMPARE(b.window->canvas()->tool, QStringLiteral("pen"));
+        QCOMPARE(b.window->canvas()->tool(), QStringLiteral("pen"));
         button("line")->click();
-        QCOMPARE(b.window->canvas()->tool, QStringLiteral("text"));
+        QCOMPARE(b.window->canvas()->tool(), QStringLiteral("text"));
         // done: marked
         QVERIFY(b.window->apply_ops(Json::array({Json{{"op", "add_stroke"}, {"page", 1}, {"layer", "ink"},
                                                       {"points", Json::array({Json::array({20, 20}), Json::array({80, 90})})}}})));

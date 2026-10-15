@@ -35,6 +35,7 @@
 #include <QTabBar>
 #include <QTabWidget>
 #include <QToolBar>
+#include <QVBoxLayout>
 #include <QVariantAnimation>
 #include <QWheelEvent>
 
@@ -61,6 +62,7 @@
 #include "app/workspace.hpp"
 #include "gui_support.hpp"
 #include "render/zip.hpp"
+#include "testsupport.hpp"
 
 using namespace genko;
 using core::Json;
@@ -931,4 +933,3 @@ private slots:
 
 QTEST_MAIN(TestGuiLook)
 #include "test_gui_look.moc"
-#include "testsupport.hpp"
