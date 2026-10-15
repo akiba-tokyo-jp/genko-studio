@@ -330,6 +330,7 @@ private slots:
         };
         const int before = folders();
         b.window->activateWindow();
+        QVERIFY(QTest::qWaitForWindowActive(b.window.get()));  // (on xcb the window becomes active later; a key before goes nowhere)
         b.window->canvas()->setFocus();
         QTest::keyClick(b.window->canvas(), Qt::Key_G, Qt::ControlModifier);
         QCOMPARE(folders(), before + 1);
