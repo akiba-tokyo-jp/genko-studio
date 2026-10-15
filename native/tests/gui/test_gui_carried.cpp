@@ -224,11 +224,11 @@ private slots:
         panel->mask_edit_action()->setChecked(true);
         QVERIFY(w->mask_edit);
         const std::string before = *book.layer(0, "u")->mask->png;
-        const std::size_t strokes = book.layer(0, "u")->strokes->size();
+        const std::size_t strokes = book.layer(0, "u")->strokes->items.size();
         book.act("act_pen")->trigger();
         app::inject::mouse_stroke(w->canvas(), {QPointF(60, 240), QPointF(62, 250), QPointF(64, 260)});
         QVERIFY(*book.layer(0, "u")->mask->png != before);  // (the mask changed, not the lines)
-        QCOMPARE(book.layer(0, "u")->strokes->size(), strokes);
+        QCOMPARE(book.layer(0, "u")->strokes->items.size(), strokes);
         panel->mask_edit_action()->setChecked(false);
         QVERIFY(!w->mask_edit);
         // a layer without a mask: one that shows everything first
