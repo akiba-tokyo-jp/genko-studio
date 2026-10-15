@@ -386,11 +386,14 @@ private slots:
             const QImage& picture = shown->image();
             QVERIFY2(!picture.isNull(), qPrintable(when));
             const QRectF at = shown->shown_rect();
-            QVERIFY2(QRectF(shown->rect()).contains(at), qPrintable(when + QStringLiteral(": the page goes out of the preview")));
+            // (all of it where the person sees it: in the preview and in the part of the scrolling body in sight)
+            QVERIFY2(shown->visibleRegion().boundingRect().contains(at.adjusted(1, 1, -1, -1).toAlignedRect()),
+                     qPrintable(when + QStringLiteral(": the page is not wholly in sight")));
             QVERIFY2(std::abs(at.width() / at.height() - static_cast<double>(picture.width()) / picture.height()) < 0.01,
                      qPrintable(when + QStringLiteral(": the page is not in its proportions")));
-            // (as large as the room lets it be: one side meets the margin)
-            QVERIFY2(at.width() >= shown->width() - 13 || at.height() >= shown->height() - 13, qPrintable(when + QStringLiteral(": the page is not fitted")));
+            // (as large as the part in sight lets it be: one side meets the margin)
+            const QRect room = shown->in_sight();
+            QVERIFY2(at.width() >= room.width() - 13 || at.height() >= room.height() - 13, qPrintable(when + QStringLiteral(": the page is not fitted")));
         };
         bool seen = false;
         s.on_export = [&](app::ExportDialog* d) {
@@ -408,7 +411,8 @@ private slots:
                 QCOMPARE(shown->image().size(), QSize(cut.width(), cut.height()));
                 whole(shown, qs(std::string(key)));
             }
-            for (const QSize size : {QSize(640, 420), QSize(1400, 900), QSize(820, 1000)}) {
+            // (the last two narrow: the page above the choices, in sight without scrolling)
+            for (const QSize size : {QSize(640, 420), QSize(1400, 900), QSize(820, 1000), QSize(560, 420), QSize(500, 320)}) {
                 d->resize(size);
                 for (int i = 0; i < 5; ++i) QCoreApplication::processEvents();
                 whole(shown, QStringLiteral("at %1×%2").arg(d->size().width()).arg(d->size().height()));

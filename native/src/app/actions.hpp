@@ -28,9 +28,11 @@ namespace actions {
 std::filesystem::path path();
 // The actions kept ({name: {"ops": […], "made": "YYYY-MM-DD HH:MM"}}, in their order); none readable: empty.
 core::Json load();
-void save(const core::Json& all);
-void store(const QString& name, const core::Json& ops);
-void remove(const QString& name);
+// Kept in actions.json; why it could not be written (a folder that cannot be written, a full disk) when it was not —
+// said by the caller, never ending the app (Python's raised OSError is only logged by Qt).
+std::optional<QString> save(const core::Json& all);
+std::optional<QString> store(const QString& name, const core::Json& ops);
+std::optional<QString> remove(const QString& name);
 // The ops worth recording (not undo, the book's pages, the gates …), copied.
 core::Json recordable(const core::Json& ops);
 // For each step: does it change one particular thing that was on the recorded page (a line, a stroke, an effect…)?

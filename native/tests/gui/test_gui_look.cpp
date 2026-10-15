@@ -108,7 +108,7 @@ struct Book {
     }
 };
 
-QSettings* store() { return app::settings(); }
+std::unique_ptr<QSettings> store() { return app::settings(); }
 
 bool any_ink(const QImage& image) {
     for (int y = 0; y < image.height(); ++y) {
@@ -838,6 +838,49 @@ private slots:
 
     // --- the backups (test_w15_color) -------------------------------------------------------------------------------
 
+    // zip64 (a backup past 4 GiB or 65535 files, Python's zipfile writes it so): its end records written and read back,
+    // and Python's zipfile reading the same archives whole
+    void bigBackupsAreZip64() {
+        QTemporaryDir tmp;
+        const auto source = gui_test::path_of(tmp.path() + QStringLiteral("/s.txt"));
+        genko::test::write_bytes(gui_test::qpath(source), "abc");
+        const auto forced = gui_test::path_of(tmp.path() + QStringLiteral("/forced.zip"));
+        render::zip::pack(forced, {{"a.genko/project.json", source}, {"x/y.txt", source}}, 1);
+        std::vector<std::pair<std::string, std::filesystem::path>> many;
+        for (int i = 0; i < 65537; ++i) many.emplace_back("n/" + std::to_string(i) + ".txt", source);
+        const auto crowded = gui_test::path_of(tmp.path() + QStringLiteral("/crowded.zip"));
+        render::zip::pack(crowded, many);
+        for (const auto& [archive, count] : {std::pair{forced, std::size_t{2}}, std::pair{crowded, std::size_t{65537}}}) {
+            // (the end records: zip64's with the true count, the old one with its 16-bit count or 0xFFFF when it does not fit)
+            const std::string bytes = genko::test::read_bytes(gui_test::qpath(archive));
+            const auto number = [&bytes](std::size_t at, int size) {
+                std::uint64_t value = 0;
+                for (int i = size - 1; i >= 0; --i) value = (value << 8) | static_cast<unsigned char>(bytes[at + static_cast<std::size_t>(i)]);
+                return value;
+            };
+            const std::size_t end64 = bytes.rfind(std::string("PK\x06\x06", 4));
+            const std::size_t locator = bytes.rfind(std::string("PK\x06\x07", 4));
+            const std::size_t end = bytes.rfind(std::string("PK\x05\x06", 4));
+            QVERIFY(end64 != std::string::npos && locator != std::string::npos && end != std::string::npos && end64 < locator && locator < end);
+            QCOMPARE(number(end64 + 32, 8), static_cast<std::uint64_t>(count));
+            QCOMPARE(number(locator + 8, 8), static_cast<std::uint64_t>(end64));  // (the locator points at the zip64 end record)
+            const std::uint64_t old_count = number(end + 10, 2);
+            QVERIFY(old_count == 0xffff || (count < 0xffff && old_count == count));
+            if (count > 0xffff) QCOMPARE(old_count, std::uint64_t{0xffff});
+        }
+        if (genko::test::python_ref().isEmpty()) QSKIP("no reference Python: set GENKO_PYREF or install /opt/pyref/bin/python");
+        for (const auto& [archive, count] : {std::pair{forced, 2}, std::pair{crowded, 65537}}) {
+            const genko::test::Run check = genko::test::run(
+                genko::test::python_ref(),
+                {QStringLiteral("-I"), QStringLiteral("-c"),
+                 QStringLiteral("import sys, zipfile; z = zipfile.ZipFile(sys.argv[1]); assert z.testzip() is None; print(len(z.namelist()))"),
+                 gui_test::qpath(archive)},
+                QProcessEnvironment::systemEnvironment(), 120000);
+            QVERIFY2(check.finished && check.exit_code == 0, qPrintable(check.described()));
+            QCOMPARE(check.out.trimmed().toInt(), count);
+        }
+    }
+
     void backupsAreZippedElsewhereAndTheOldestDropped() {
         QTemporaryDir tmp;
         const auto book = gui_test::path_of(tmp.path() + QStringLiteral("/a.genko"));
@@ -855,21 +898,14 @@ private slots:
         QVERIFY(!app::backup::due(folder, QStringLiteral("a"), 30));
         QVERIFY_THROWS_EXCEPTION(std::invalid_argument, app::backup::make(book, book / "backups"));
         QVERIFY_THROWS_EXCEPTION(std::invalid_argument, app::backup::make(book, book));
-        // Python's zipfile reads it whole, and a big one in zip64 too
-        const QByteArray python = qgetenv("GENKO_PYREF");
-        if (!python.isEmpty()) {
-            const auto big = gui_test::path_of(tmp.path() + QStringLiteral("/big.zip"));
-            render::zip::pack(big, {{"a.genko/project.json", book / "project.json"}, {"x/y.txt", book / "project.json"}}, 1);
-            for (const auto& archive : {kept.back(), big}) {
-                QProcess check;
-                check.start(QString::fromLocal8Bit(python),
-                            {QStringLiteral("-c"), QStringLiteral("import sys, zipfile; z = zipfile.ZipFile(sys.argv[1]); assert z.testzip() is None; "
-                                                                  "print(len(z.namelist()))"),
-                             gui_test::qpath(archive)});
-                QVERIFY(check.waitForFinished(60000));
-                QCOMPARE(check.exitCode(), 0);
-            }
-        }
+        // what is being written (.tmp) and the lock are never in it; no part is left, after a backup or a failed one
+        genko::test::write_bytes(gui_test::qpath(book / "assets" / "x.png.tmp"), "half");
+        genko::test::write_bytes(gui_test::qpath(book / "project.lock"), "");
+        const auto later = app::backup::make(book, folder, 5, start.addSecs(600));
+        const auto held = render::zip::read(later);
+        QVERIFY(held.contains("a.genko/project.json") && !held.contains("a.genko/assets/x.png.tmp") && !held.contains("a.genko/project.lock"));
+        QVERIFY_THROWS_EXCEPTION(std::exception, app::backup::make(gui_test::path_of(tmp.path() + QStringLiteral("/gone.genko")), folder, 5));
+        QVERIFY(QDir(gui_test::qpath(folder)).entryList({QStringLiteral("*.part")}, QDir::Files).isEmpty());
         // after a save in the window: kept in the folder chosen in 環境設定
         Book open;
         store()->setValue(QStringLiteral("backup/folder"), gui_test::qpath(folder));
@@ -883,3 +919,4 @@ private slots:
 
 QTEST_MAIN(TestGuiLook)
 #include "test_gui_look.moc"
+#include "support/testsupport.hpp"

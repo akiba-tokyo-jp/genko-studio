@@ -31,6 +31,7 @@
 #include "app/layer_dialogs.hpp"
 #include "app/main_window.hpp"
 #include "app/theme.hpp"
+#include "app/comfort.hpp"
 #include "service/wording.hpp"
 #include "core/ids.hpp"
 #include "core/pyconv.hpp"
@@ -259,6 +260,7 @@ LayerPanel::LayerPanel(MainWindow* window) : window_(window) {
     mask_menu_->addAction(QStringLiteral("全部見せるマスクを作る"), this, [this] { mask(Json{{"fill", "show"}}); });
     mask_edit_ = mask_menu_->addAction(QStringLiteral("マスクを編集する（ペンで見せる・消しゴムで隠す）"));
     mask_edit_->setCheckable(true);
+    mask_edit_->setProperty("genko_attribute", QStringLiteral("act_mask_edit"));  // (named, as the window's commands: the help finds it by it)
     connect(mask_edit_, &QAction::toggled, this, [this](bool on) { edit_mask(on); });
     mask_menu_->addAction(QStringLiteral("マスクを反転"), this, [this] { mask(Json{{"invert", true}}); });
     mask_off_ = mask_menu_->addAction(QStringLiteral("マスクを使わない"));
@@ -341,6 +343,7 @@ LayerPanel::LayerPanel(MainWindow* window) : window_(window) {
 
 void LayerPanel::show_details(bool on, bool save) {
     details_->setVisible(on);
+    if (on && save) fade_in(details_, 160);  // (opened by the person: its fields come in softly)
     details_toggle_->setText((on ? QStringLiteral("▾ ") : QStringLiteral("▸ ")) + QStringLiteral("レイヤーの設定"));
     details_toggle_->setToolTip(QStringLiteral("不透明度・合成・ロック・下描き・マスク・フィルターなど"));
     if (save) settings()->setValue(QStringLiteral("ui/layer_details"), on ? QStringLiteral("true") : QStringLiteral("false"));

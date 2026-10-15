@@ -204,12 +204,14 @@ QDialog* MainWindow::manage_actions() {
 
 void MainWindow::start_recording() {
     recording_ = Json::array();
-    flash(QStringLiteral("オートアクションを記録しています。終わったら ファイル → オートアクション → 記録を止める"), 6000);
+    // (as Python's: the page's status at once, its 「● オートアクションを記録中」 showing that it records)
+    flash_timer_.stop();
     refresh_status();
 }
 
 void MainWindow::drop_recording() {
     recording_.reset();
+    flash_timer_.stop();
     refresh_status();
 }
 
@@ -225,7 +227,10 @@ bool MainWindow::stop_recording(std::optional<QString> name) {
         name = ask::get_text(this, QStringLiteral("オートアクション"), QStringLiteral("名前（%1 手: %2）").arg(ops.size()).arg(actions::describe(ops)));
         if (!name || name->trimmed().isEmpty()) return false;
     }
-    actions::store(name->trimmed(), ops);
+    if (const auto failed = actions::store(name->trimmed(), ops)) {
+        ask::warning(this, QStringLiteral("オートアクション"), *failed);
+        return false;
+    }
     flash(QStringLiteral("「%1」を残しました（ファイル → オートアクション から実行）").arg(name->trimmed()), 4000);
     return true;
 }
@@ -247,7 +252,7 @@ bool MainWindow::play_action(const QString& name) {
     }
     if (!apply_ops(ops)) return false;
     const QString extra = skipped > 0 ? QStringLiteral("。%1 手はこのページではできないので飛ばしました").arg(skipped) : QString();
-    flash(QStringLiteral("「%1」を実行しました（%2 手。元に戻すは 1 回で%3）").arg(name).arg(ops.size()).arg(extra), 4000);
+    flash(QStringLiteral("「%1」を実行しました（%2 手。元に戻すは 1 回で%3）").arg(name, QString::number(ops.size()), extra), 4000);
     return true;
 }
 
@@ -270,7 +275,8 @@ bool MainWindow::play_action_on_all(const QString& name) {
 }
 
 void MainWindow::remove_action(const QString& name) {
-    if (ask::question(this, QStringLiteral("オートアクション"), QStringLiteral("「%1」を消しますか？").arg(name))) actions::remove(name);
+    if (!ask::question(this, QStringLiteral("オートアクション"), QStringLiteral("「%1」を消しますか？").arg(name))) return;
+    if (const auto failed = actions::remove(name)) ask::warning(this, QStringLiteral("オートアクション"), *failed);
 }
 
 bool MainWindow::hold_key_released(int key, std::optional<double> now) {
@@ -295,7 +301,7 @@ bool MainWindow::hold_key_released(int key, std::optional<double> now) {
 }
 
 void MainWindow::show_help(const QString& what) {
-    if (help_dialog_ != nullptr) help_dialog_->close();
+    // (each its own window, as Python's: the F1 list can stay open beside the guide; help_dialog() is the last one)
     if (what == QLatin1String("keys")) {
         help_dialog_ = new help::HelpDialog(this, QStringLiteral("ショートカット一覧"), help::shortcut_html(this));
     } else if (what == QLatin1String("guide")) {

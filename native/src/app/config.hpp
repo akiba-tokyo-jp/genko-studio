@@ -20,7 +20,8 @@ std::filesystem::path config_dir();
 std::unique_ptr<QSettings> settings();
 
 // The Python app's settings (QSettings("Genko", "Genko Studio"): ~/.config/Genko/Genko Studio.conf, or the registry on
-// Windows), to be read only; none when $GENKO_CONFIG_DIR is set (the folder chosen holds this app's own).
+// Windows), to be read only; none when they are not there or $GENKO_CONFIG_DIR is set (the folder chosen holds this
+// app's own).
 std::unique_ptr<QSettings> legacy_settings();
 
 // human:<name> from $GENKO_USER, else the login name (Python's session.default_actor).

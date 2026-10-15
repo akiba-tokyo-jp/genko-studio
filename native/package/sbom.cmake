@@ -27,16 +27,17 @@ endfunction()
 # their names), "built-in" (inside the program) or "system" (the computer's own, not in the folder))
 set(_packages
   "qt~Qt 6~qt~LGPL-3.0-only~bundled:(^|/)(lib)?Qt6|^plugins/|(^|/)(opengl32sw|d3dcompiler_47)\\.dll$"
-  "icu~ICU (Qt's)~=73.2~Unicode-3.0~bundled:^(lib/)?libicu"
-  "xcb-extras~libxcb utility libraries (Qt's xcb platform)~=NOASSERTION~MIT~bundled:^(lib/)?libxcb-|^(lib/)?libxkbcommon-x11"
+  "icu~ICU (Qt's)~=73.2~Unicode-DFS-2016 AND ICU AND BSD-3-Clause AND NAIST-2003~bundled:^lib/libicu(data|i18n|uc|io|tu|test)\\.so"
+  "xcb-extras~libxcb utility libraries (Qt's xcb platform)~=NOASSERTION~MIT~bundled:^lib/libxcb-(cursor|icccm|image|keysyms|render-util|util)\\.so"
   "nlohmann-json~nlohmann/json~nlohmann_json~MIT~built-in"
   "freetype~FreeType~freetype~FTL~built-in"
   "pillow-libimaging~Pillow libImaging~=12.3.0~MIT-CMU~built-in"
   "optimized-routines~Arm optimized-routines~=v25.01~MIT~built-in"
+  "photocraft~PhotoCraft (the exposure adjustment, ported)~=v0.2.0~MIT~built-in"
   "cpython-re~CPython re (ported)~=3.12.3~PSF-2.0 AND Unicode-3.0~built-in"
   "fonts~Bundled fonts (Dela Gothic One, Reggae One, Yomogi, Zen Kaku Gothic New, Zen Maru Gothic, Zen Old Mincho, IBM Plex Sans JP)~=NOASSERTION~OFL-1.1~built-in"
   "lucide~Lucide icons~=NOASSERTION~ISC~built-in")
-if(WIN32)
+if(CMAKE_HOST_WIN32)
   list(APPEND _packages
     "zlib~zlib~zlib~Zlib~built-in" "libpng~libpng~libpng~libpng-2.0~built-in" "libjpeg-turbo~libjpeg-turbo~libjpeg_turbo~IJG AND BSD-3-Clause AND Zlib~built-in"
     "libtiff~libtiff~libtiff~libtiff~built-in" "harfbuzz~HarfBuzz~harfbuzz~MIT~built-in" "libwebp~libwebp~webp~BSD-3-Clause~built-in"
@@ -48,6 +49,13 @@ else()
     "libtiff~libtiff~libtiff~libtiff~system" "harfbuzz~HarfBuzz~harfbuzz~MIT~system" "libwebp~libwebp~webp~BSD-3-Clause~system"
     "lcms2~Little CMS 2~lcms2~MIT~system")
 endif()
+
+# a file of the folder: its name, its id and its checksums (SPDX 2.3 asks for SHA1; SHA256 for the person)
+function(_file_entry file index out)
+  file(SHA1 "${GENKO_SBOM_PREFIX}/${file}" _sha1)
+  file(SHA256 "${GENKO_SBOM_PREFIX}/${file}" _sha256)
+  set(${out} "{\"fileName\": \"./${file}\", \"SPDXID\": \"SPDXRef-File-${index}\", \"checksums\": [{\"algorithm\": \"SHA1\", \"checksumValue\": \"${_sha1}\"}, {\"algorithm\": \"SHA256\", \"checksumValue\": \"${_sha256}\"}]}" PARENT_SCOPE)
+endfunction()
 
 _version(genko _genko_version)
 string(TIMESTAMP _now "%Y-%m-%dT%H:%M:%SZ" UTC)
@@ -61,6 +69,10 @@ string(JSON _doc SET "${_doc}" creationInfo "{\"created\": \"${_now}\", \"creato
 string(JSON _doc SET "${_doc}" packages "[]")
 string(JSON _doc SET "${_doc}" files "[]")
 string(JSON _doc SET "${_doc}" relationships "[]")
+if(CMAKE_HOST_WIN32)
+  # (a licence SPDX has no id for: named and described here)
+  string(JSON _doc SET "${_doc}" hasExtractedLicensingInfos "[{\"licenseId\": \"LicenseRef-MSVC-Redistributable\", \"name\": \"Microsoft Visual C++ Redistributable\", \"extractedText\": \"The Microsoft Visual C++ runtime files listed as Distributable Code in the Microsoft Software License Terms for Visual Studio 2022 (https://visualstudio.microsoft.com/license-terms/).\"}]")
+endif()
 
 set(_root "{\"SPDXID\": \"SPDXRef-genko-studio\", \"name\": \"Genko Studio\", \"versionInfo\": \"${_genko_version}\", \"downloadLocation\": \"NOASSERTION\", \"licenseConcluded\": \"NOASSERTION\", \"filesAnalyzed\": false}")
 string(JSON _doc SET "${_doc}" packages 0 "${_root}")
@@ -104,8 +116,8 @@ foreach(_entry IN LISTS _packages)
     string(SUBSTRING "${_where}" 8 -1 _pattern)
     foreach(_file IN LISTS _files)
       if(_file MATCHES "${_pattern}" AND NOT IS_SYMLINK "${GENKO_SBOM_PREFIX}/${_file}")
-        file(SHA256 "${GENKO_SBOM_PREFIX}/${_file}" _sum)
-        string(JSON _doc SET "${_doc}" files ${_f} "{\"fileName\": \"./${_file}\", \"SPDXID\": \"SPDXRef-File-${_f}\", \"checksums\": [{\"algorithm\": \"SHA256\", \"checksumValue\": \"${_sum}\"}]}")
+        _file_entry("${_file}" ${_f} _entry)
+        string(JSON _doc SET "${_doc}" files ${_f} "${_entry}")
         string(JSON _doc SET "${_doc}" relationships ${_r} "{\"spdxElementId\": \"SPDXRef-Package-${_id}\", \"relationshipType\": \"CONTAINS\", \"relatedSpdxElement\": \"SPDXRef-File-${_f}\"}")
         math(EXPR _f "${_f} + 1")
         math(EXPR _r "${_r} + 1")
@@ -118,8 +130,8 @@ endforeach()
 # the program itself
 foreach(_file IN LISTS _files)
   if(_file MATCHES "^bin/genko(\\.exe)?$")
-    file(SHA256 "${GENKO_SBOM_PREFIX}/${_file}" _sum)
-    string(JSON _doc SET "${_doc}" files ${_f} "{\"fileName\": \"./${_file}\", \"SPDXID\": \"SPDXRef-File-${_f}\", \"checksums\": [{\"algorithm\": \"SHA256\", \"checksumValue\": \"${_sum}\"}]}")
+    _file_entry("${_file}" ${_f} _entry)
+    string(JSON _doc SET "${_doc}" files ${_f} "${_entry}")
     string(JSON _doc SET "${_doc}" relationships ${_r} "{\"spdxElementId\": \"SPDXRef-genko-studio\", \"relationshipType\": \"CONTAINS\", \"relatedSpdxElement\": \"SPDXRef-File-${_f}\"}")
     math(EXPR _f "${_f} + 1")
     math(EXPR _r "${_r} + 1")

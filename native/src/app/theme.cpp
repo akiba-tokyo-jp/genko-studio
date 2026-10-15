@@ -385,7 +385,8 @@ void apply(QApplication* app) {
             apply(app);
             refresh_icons();
             for (QWidget* top : QApplication::topLevelWidgets()) {
-                QMetaObject::invokeMethod(top, "refresh_icons", Qt::DirectConnection);  // (a main window draws its pictures again)
+                // (a main window draws its pictures again: only a window that has refresh_icons is asked)
+                if (top->metaObject()->indexOfMethod("refresh_icons()") >= 0) QMetaObject::invokeMethod(top, "refresh_icons", Qt::DirectConnection);
                 top->update();
             }
         });

@@ -1,5 +1,7 @@
 #include "app/session.hpp"
 
+#include <QPointer>
+
 #include <QCoreApplication>
 #include <QElapsedTimer>
 #include <QFileInfo>
@@ -1083,6 +1085,24 @@ void Session::run(Job job) {
         [self, job = std::move(job)]() {
             JobResult result = execute(job);
             QMetaObject::invokeMethod(self, [self, result = std::move(result)]() { self->job_done(result); }, Qt::QueuedConnection);
+        },
+        Qt::QueuedConnection);
+}
+
+void Session::beside_saves(std::function<QString()> work, std::function<void(const QString&)> done) {
+    ++worker_jobs_;
+    QPointer<Session> self(this);
+    QMetaObject::invokeMethod(
+        worker_,
+        [self, work = std::move(work), done = std::move(done)]() {
+            const QString result = work();
+            QMetaObject::invokeMethod(
+                QCoreApplication::instance(),
+                [self, result, done]() {
+                    if (self && self->worker_jobs_ > 0) --self->worker_jobs_;
+                    done(result);
+                },
+                Qt::QueuedConnection);
         },
         Qt::QueuedConnection);
 }

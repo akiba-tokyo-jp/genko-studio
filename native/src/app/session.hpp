@@ -194,6 +194,9 @@ public:
     void save_as(const std::filesystem::path& dir);
     // Write a recovery point now (the 復旧用コピーの作成 button).
     void write_recovery_copy();
+    // Run `work` on the worker thread, between the saves (never while one is written), and then `done` with what it
+    // returned, on this thread (バックアップ: a book never zipped halfway through its save). wait_idle waits for it.
+    void beside_saves(std::function<QString()> work, std::function<void(const QString&)> done);
     // The book on disk may have changed (the window's file watcher): read its revision, and rebase when it moved.
     void check_outside();
     // Throw away the changes not saved (the explicit 保存せずに閉じる): nothing more is written, and the recovery

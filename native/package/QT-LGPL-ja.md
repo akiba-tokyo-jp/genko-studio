@@ -5,8 +5,8 @@ Genko Studio は画面の部品に **Qt 6.11.2** を使っています。Qt は 
 - ライセンス文: `licenses/qt/LGPL-3.0.txt` と、LGPL v3 が条件として含む `licenses/qt/GPL-3.0.txt`。
 - Qt はプログラムに静的に組み込まず、別のファイルとして入れています（動的リンク）。
   - Linux: `lib/libQt6*.so.6`、`plugins/`
-  - Windows: `bin\Qt6*.dll`、`bin\` の下のプラグインのフォルダー
-- 入っている Qt のモジュール: Core、Gui、Widgets、Network、Concurrent、Svg、PrintSupport、OpenGL、OpenGLWidgets と、画面・画像形式などのプラグイン。Linux では、Qt に付いている ICU も入っています。Qt の GPL 専用のモジュールは使っていません。
+  - Windows: `bin\Qt6*.dll` と、Qt のプラグインのフォルダー
+- 入っている Qt のモジュール: Core、Gui、Widgets、Network、Concurrent、Svg、PrintSupport、OpenGL、OpenGLWidgets と、画面・画像形式などのプラグイン、そのプラグインが使う Qt のライブラリ（DBus、XcbQpa、WaylandClient、EglFS など。`lib/` にあるもの）。Linux では、Qt に付いている ICU（ライセンス文は `licenses/icu/LICENSE`）も入っています。Qt の GPL 専用のモジュールは使っていません。
 
 ## Qt のソースコード
 

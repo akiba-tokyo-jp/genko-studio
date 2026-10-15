@@ -268,7 +268,7 @@ public:
     // 原稿だけを表示 (Tab), the rest reminder, and the round menu last opened at the pen (null: none open).
     CanvasOnly* canvas_only() const { return canvas_only_; }
     RestReminder* rest() const { return rest_; }
-    RadialMenu* radial() const { return radial_; }
+    RadialMenu* radial() const;  // (out of line: RadialMenu is only declared here)
     // キーを押している間だけ持ち替え: the tool last chosen (its key), the one before and when (seconds); the key of the
     // tool chosen last let go after a hold brings back the tool before (true when it did; `now`: tests).
     struct ToolSwitch {
@@ -681,8 +681,10 @@ private:
     int save_after_ms_ = 2000;
     // バックアップ: after a save, the book zipped into the folder chosen in 環境設定 (one at a time, on a worker)
     void maybe_backup();
-    bool backup_running_ = false;
-    std::int64_t backup_seen_revision_ = -1;
+    void back_up(const std::shared_ptr<Session>& session);
+    // (by the book's folder: each book of the window, its tab in front or not)
+    std::map<std::string, std::int64_t> backup_seen_;  // the revision last zipped (or skipped as not due)
+    std::set<std::string> backups_running_;
     PageList* pages_ = nullptr;
     Navigator* navigator_ = nullptr;
     QDockWidget* pages_dock_ = nullptr;

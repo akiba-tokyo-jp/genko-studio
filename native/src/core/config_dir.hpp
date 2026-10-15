@@ -16,4 +16,13 @@ std::filesystem::path config_dir();
 // $XDG_CONFIG_HOME/genko or ~/.config/genko elsewhere.
 std::filesystem::path legacy_config_dir();
 
+// The Python app's settings are there (QSettings("Genko", "Genko Studio"): $XDG_CONFIG_HOME/Genko/Genko Studio.conf, or
+// the registry key HKCU\Software\Genko\Genko Studio, looked at without making it).
+bool legacy_settings_exist();
+
+// The Python app's things are there and the person has not been asked about them yet (app/migration asks on the app's
+// first start): $GENKO_CONFIG_DIR unset, the two folders apart, no answer in this app's settings.ini, and the Python
+// app's settings or a file of its folder there. The command line says so, so that a key the AI uses is not missed.
+bool import_pending();
+
 }  // namespace genko::core

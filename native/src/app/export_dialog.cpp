@@ -294,8 +294,10 @@ ExportDialog::ExportDialog(QWidget* parent, DocPtr episode, std::optional<fs::pa
     auto* body = new QVBoxLayout;
     body->addLayout(form_);
     body->addStretch(1);
-    look::frame(this, look::header(QStringLiteral("書き出し"), QStringLiteral("形式を選ぶと、その形式で決められることだけが並びます。右は書き出される 1 ページ目です。")),
-                body, look::card(side, QStringLiteral("書き出される形")), look::footer(buttons));
+    QFrame* shape = look::card(side, QStringLiteral("書き出される形"));
+    shape->setProperty("genko_side_first", true);  // (a narrow dialog shows the page first, the choices under it)
+    look::frame(this, look::header(QStringLiteral("書き出し"), QStringLiteral("形式を選ぶと、その形式で決められることだけが並びます。「書き出される形」は書き出される 1 ページ目です。")),
+                body, shape, look::footer(buttons));
     look::fit_to_screen(this, QSize(900, 600));
     format->setCurrentIndex(std::max(0, format->findData(QStringLiteral("png"))));  // (PNG unless another is chosen)
     connect(format, &QComboBox::currentIndexChanged, this, [this] { format_changed(); });

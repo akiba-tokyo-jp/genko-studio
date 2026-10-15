@@ -26,6 +26,7 @@
 #include "api/buildinfo.hpp"
 #include "api/server_cli.hpp"
 #include "api/studio_cli.hpp"
+#include "core/config_dir.hpp"
 #include "core/actor.hpp"
 #include "core/command_bus.hpp"
 #include "core/error.hpp"
@@ -830,6 +831,13 @@ int run_cli(int argc, char** argv) {
         if (command == QLatin1String("--version") || command == QLatin1String("version")) {
             write_json({{"ok", true}, {"build", build_info()}});
             return 0;
+        }
+        if (core::import_pending()) {
+            // (the Python app's settings — the AI keys among them — are taken over only when the app asks: said here,
+            // on stderr, so that a command or an AI working without the app knows why its keys are not found)
+            std::fputs("genko: 以前の Genko Studio（Python 版）の設定はまだ引き継いでいません。`genko app` を起動すると、引き継ぐかを聞きます"
+                       "（AI 接続の鍵もそのときに写せます）。\n",
+                       stderr);
         }
         if (command == QLatin1String("inspect")) return inspect(args, ascii);
         if (command == QLatin1String("schema")) return schema(args, ascii);

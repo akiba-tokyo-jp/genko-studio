@@ -1,6 +1,5 @@
 #include "core/poses.hpp"
 
-#include <QDir>
 #include <QFile>
 #include <QSaveFile>
 #include <QString>
@@ -17,8 +16,6 @@
 namespace genko::core::poses {
 
 namespace {
-
-std::filesystem::path path_of(const QString& text) { return path_from_utf8(text.toStdString()); }
 
 std::filesystem::path poses_file() { return config_dir() / "poses.json"; }
 

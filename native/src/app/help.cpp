@@ -17,6 +17,7 @@
 #include <functional>
 #include <optional>
 
+#include "app/look.hpp"
 #include "core/version.hpp"
 
 namespace genko::app::help {
@@ -38,7 +39,7 @@ const char* const kGuide = R"HTML(
 <p>レイヤー パネルで「ネーム」を選び、ペン（{key:act_pen}）で描きます。レイヤーを足して「下描き（書き出さない）」にすると、
 印刷には出ない下描きになります。表示色を青にすると見分けやすくなります。</p>
 <h3>4. ペン入れ</h3>
-<p>「ペン入れ」レイヤーを選び、ブラシ（G ペン・丸ペン・筆…）と太さを選んで描きます。[ と ] で太さ、Shift で直線、
+<p>「ペン入れ」レイヤーを選び、ブラシ（G ペン・丸ペン・筆…）と太さを選んで描きます。{key:act_thinner} と {key:act_thicker} で太さ、Shift で直線、
 消しゴム（{key:act_eraser}）は線を触れた所で切ります。ペンの後ろ側でなぞっても消えます。回して描きたいときは{menu:act_turn_right}、
 形の狂いは{key:act_mirror}（{menu:act_mirror}）で確かめます。細かい所は Ctrl＋ホイールで拡大します。拡大すると一瞬あとに細かい描画に替わり、
 線がくっきりします。左の「全体図」をクリック・ドラッグすると、その場所へ飛べます。</p>
@@ -48,7 +49,7 @@ const char* const kGuide = R"HTML(
 <p>テキストの道具（{key:act_text}）で置きたい所をクリックして打ちます。ルビは ｜約束《やくそく》、傍点は 《《強調》》、
 一部だけ大きく・太くするのは {大|ドン}・{太|本当に}（ほかに {特大|…}・{小|…}・{赤|…}）。
 フキダシの形・しっぽ・回転は、選択ツール（{key:act_select}）でフキダシをクリックし、左の「ツールの設定」に出る欄とハンドルで変えます。
-形は、普通・角丸・雲・心の声・叫び（トゲ）・フラッシュ・電子音・ささやきなど。線を揺らす・二重線にするのは設定の欄で。フキダシペンで好きな形に描くこともできます。</p>
+形は、普通・角丸・雲・心の声・叫び（トゲ）・フラッシュ・電子音・ささやきなど。線を揺らす・二重線にするのは設定の欄で。{menu:act_balloon_pen}で好きな形に描くこともできます。</p>
 <h3>6. トーン・効果線・仕上げ</h3>
 <p>範囲を選んで{menu:act_tone_here}、効果線の道具（{key:act_effect}）でコマをクリックすると集中線などが入ります。
 投げ縄などで範囲を選んでからクリックすると、その中にだけ描きます。顔や人物を投げ縄で囲んで効果線を選び、
@@ -69,7 +70,7 @@ AI が承認の依頼を出すと、原稿の下に小さな知らせが出て�
 AI に 1 つのコマを伝えるときは、コマを右クリックして「AI 用の参照をコピー」を貼ります。</p>
 <h3>9. 長い時間の作業に</h3>
 <p>原稿の上で {key:act_canvas_only} を押すと、パネルが全部隠れて原稿だけになります（{menu:act_canvas_only}）。左右の端にカーソルを寄せると、その側のパネルが出ます。
-{submenu:作業の段階}で、ネーム・作画・仕上げ・写植・承認のそれぞれに合うパネルの並びにできます。
+{submenu:作業の段階}の{items:作業の段階}で、その段階でよく使うパネルだけの並びにできます。
 ペンなどで右クリックすると、道具を持ち替える円形のメニューが出ます（Shift＋右クリックでふだんのメニュー）。
 縦読みの原稿では、スマホ 1 画面に入る範囲が出ます（{menu:act_phone}）。
 休憩の案内・動きを減らす・画面の文字の大きさ・画面の色と明るさは、{menu:act_prefs}で選べます。</p>
@@ -79,7 +80,7 @@ const char* const kFaq = R"HTML(
 <h2>困ったとき</h2>
 <h3>線が描けない</h3>
 <p>下の欄に「描けません」と出ていないか見ます。レイヤー パネルで選んでいるレイヤーがロックされているか、
-ペンかペイントのレイヤーでないと描けません。マスクの編集中だと、ペンはマスクを描きます（{menu:マスクを編集する（ペンで見せる・消しゴムで隠す）}）。</p>
+ペンかペイントのレイヤーでないと描けません。マスクの編集中だと、ペンはマスクを描きます（レイヤー パネルの「マスク ▾」、または{menu:act_mask_edit}）。</p>
 <h3>描いた線が印刷に出ない</h3>
 <p>そのレイヤーが「下描き（書き出さない）」になっていないか、ネームのレイヤーでないかを確かめます。
 コマの外に描いた線は、レイヤーの「コマの外にもはみ出す」を入れないとコマで切れます。</p>
@@ -88,7 +89,7 @@ const char* const kFaq = R"HTML(
 <h3>画面が回った・反転したまま</h3>
 <p>{menu:act_turn_reset}（{key:act_turn_reset}）。</p>
 <h3>パネルを閉じてしまった</h3>
-<p>{top:ウィンドウ}から出し直せます。{submenu:ワークスペース}の「はじめの配置に戻す」で、最初の並びに戻ります。</p>
+<p>{top:ウィンドウ}から出し直せます。{menu:はじめの配置に戻す}で、最初の並びに戻ります。</p>
 <h3>文字が枠からはみ出す・小さすぎる</h3>
 <p>{menu:act_checks}（{key:act_checks}）で場所が分かります。台詞パネルで文字の大きさを「自動」にすると、フキダシに合わせて縮みます。</p>
 <h3>ほかのパソコンで開いたら線の見た目が違う</h3>
@@ -106,6 +107,20 @@ const char* const kFaq = R"HTML(
 namespace {
 
 QString words(const QAction* action) { return QString(action->text()).remove(QLatin1Char('&')); }
+
+// The menus that are filled as they open (recent books, actions, workspaces…) filled now, so what they hold is found.
+void fill(QMenu* menu) {
+    emit menu->aboutToShow();
+    for (QAction* action : menu->actions()) {
+        if (action->menu() != nullptr) fill(action->menu());
+    }
+}
+
+void fill_all(QMainWindow* window) {
+    for (QAction* top : window->menuBar()->actions()) {
+        if (top->menu() != nullptr) fill(top->menu());
+    }
+}
 
 // Every command of the menus (by its window's attribute name "act_x" when it has one, else by its words), with its path.
 struct Found {
@@ -125,13 +140,19 @@ void walk(QMenu* menu, QStringList path, const std::function<void(QAction*, cons
     }
 }
 
+QAction* named(QMainWindow* window, const QString& name) {
+    QAction* wanted = nullptr;
+    for (QAction* action : window->findChildren<QAction*>()) {
+        if (action->property("genko_attribute").toString() == name) wanted = action;
+    }
+    return wanted;
+}
+
 std::optional<Found> find(QMainWindow* window, const QString& name, bool submenu) {
     // (an attribute name: the window's own command by it; else the words of a command or a menu)
     QAction* wanted = nullptr;
     if (name.startsWith(QStringLiteral("act_"))) {
-        for (QAction* action : window->findChildren<QAction*>()) {
-            if (action->property("genko_attribute").toString() == name) wanted = action;
-        }
+        wanted = named(window, name);
         if (wanted == nullptr) return std::nullopt;
     }
     std::optional<Found> found;
@@ -156,7 +177,8 @@ QString keys_of(const QAction* action) {
 }  // namespace
 
 Rendered render(QMainWindow* window, const QString& text) {
-    static const QRegularExpression reference(QStringLiteral("\\{(menu|key|submenu|top):([^}|]+)\\}"));
+    static const QRegularExpression reference(QStringLiteral("\\{(menu|key|submenu|top|items):([^}|]+)\\}"));
+    fill_all(window);
     Rendered out;
     QString html;
     qsizetype at = 0;
@@ -169,18 +191,34 @@ Rendered render(QMainWindow* window, const QString& text) {
         QString said;
         if (kind == QLatin1String("top")) {
             for (QAction* top : window->menuBar()->actions()) {
-                if (top->menu() != nullptr && words(top) == name) said = QStringLiteral("「%1」メニュー").arg(name);
+                if (top->menu() != nullptr && words(top) == name) said = QStringLiteral("「%1」メニュー").arg(name.toHtmlEscaped());
             }
-        } else if (const auto found = find(window, name, kind == QLatin1String("submenu"))) {
+        } else if (const auto found = find(window, name, kind == QLatin1String("submenu") || kind == QLatin1String("items"))) {
             if (kind == QLatin1String("key")) {
-                said = keys_of(found->action);
+                said = keys_of(found->action).toHtmlEscaped();
+                if (said.isEmpty()) {  // (the person took its keys away in 環境設定)
+                    out.keyless << m.captured(0);
+                    said = QStringLiteral("キーなし");
+                }
+            } else if (kind == QLatin1String("items")) {
+                QStringList items;
+                for (QAction* item : found->action->menu()->actions()) {
+                    if (!item->isSeparator() && !item->text().isEmpty()) items << QStringLiteral("「%1」").arg(words(item).toHtmlEscaped());
+                }
+                said = items.join(QString());
             } else {
-                said = QStringLiteral("「%1」").arg((found->path + QStringList{words(found->action)}).join(QStringLiteral(" → ")));
+                said = QStringLiteral("「%1」").arg((found->path + QStringList{words(found->action)}).join(QStringLiteral(" → ")).toHtmlEscaped());
             }
         }
-        if (said.isEmpty()) {  // (not in the menus, or no keys: said as missing, never described as if it were)
+        if (said.isEmpty()) {
+            // (not in the menus: found by the test, never described — nor its inner name shown: the command's own words
+            // when it has them, else nothing)
             out.missing << m.captured(0);
-            said = QStringLiteral("（%1）").arg(name);
+            if (const QAction* action = name.startsWith(QStringLiteral("act_")) ? named(window, name) : nullptr) {
+                said = QStringLiteral("「%1」").arg(words(action).toHtmlEscaped());
+            } else if (!name.startsWith(QStringLiteral("act_"))) {
+                said = QStringLiteral("「%1」").arg(name.toHtmlEscaped());
+            }
         }
         html += said;
     }
@@ -194,21 +232,22 @@ QString faq(QMainWindow* window) { return render(window, QString::fromUtf8(kFaq)
 
 QString about() {
     return QStringLiteral("<h2>Genko Studio</h2><p>版 %1</p><p>マンガの原稿を、ネームから入稿まで描く道具。AIと分担して進めることもできます。</p>")
-        .arg(QString::fromUtf8(genko::version().data(), static_cast<qsizetype>(genko::version().size())));
+        .arg(QString::fromUtf8(genko::version().data(), static_cast<qsizetype>(genko::version().size())).toHtmlEscaped());
 }
 
 std::vector<std::tuple<QString, QString, QString>> shortcut_rows(QMainWindow* window) {
     std::vector<std::tuple<QString, QString, QString>> out;
     QSet<QString> seen;
+    fill_all(window);
     for (QAction* top : window->menuBar()->actions()) {
         if (top->menu() == nullptr) continue;
-        walk(top->menu(), {top->text()}, [&](QAction* action, const QStringList& path) {
+        walk(top->menu(), {words(top)}, [&](QAction* action, const QStringList& path) {
             if (action->menu() != nullptr) return;  // (the menus inside a menu: ツール → 定規, ページ → コマ…)
             QStringList keys;
             for (const QKeySequence& key : action->shortcuts()) keys << key.toString(QKeySequence::NativeText);
-            if (!keys.isEmpty() && !seen.contains(action->text())) {
-                seen.insert(action->text());
-                out.emplace_back(path.join(QStringLiteral(" → ")), action->text(), keys.join(QStringLiteral(", ")));
+            if (!keys.isEmpty() && !seen.contains(words(action))) {
+                seen.insert(words(action));
+                out.emplace_back(path.join(QStringLiteral(" → ")), words(action), keys.join(QStringLiteral(", ")));
             }
         });
     }
@@ -220,19 +259,19 @@ QString shortcut_html(QMainWindow* window) {
     QString last;
     for (const auto& [menu, command, keys] : shortcut_rows(window)) {
         if (menu != last) {
-            rows += QStringLiteral("<tr><th colspan=2 align=left style='padding-top:8px'>%1</th></tr>").arg(menu);
+            rows += QStringLiteral("<tr><th colspan=2 align=left style='padding-top:8px'>%1</th></tr>").arg(menu.toHtmlEscaped());
             last = menu;
         }
-        rows += QStringLiteral("<tr><td>%1</td><td><b>%2</b></td></tr>").arg(command, keys);
+        rows += QStringLiteral("<tr><td>%1</td><td><b>%2</b></td></tr>").arg(command.toHtmlEscaped(), keys.toHtmlEscaped());
     }
-    return QStringLiteral("<h2>ショートカット一覧</h2><p>ほかに: スペース＋ドラッグで表示を動かす、Shift＋スペース＋ドラッグで回す、"
-                          "Ctrl＋ホイールで拡大縮小。キーは「環境設定」で変えられます。</p><table cellspacing=4>") +
+    return render(window, QStringLiteral("<h2>ショートカット一覧</h2><p>ほかに: スペース＋ドラッグで表示を動かす、Shift＋スペース＋ドラッグで回す、"
+                                         "Ctrl＋ホイールで拡大縮小。キーは{menu:act_prefs}で変えられます。</p><table cellspacing=4>"))
+               .html +
            rows + QStringLiteral("</table>");
 }
 
 HelpDialog::HelpDialog(QWidget* parent, const QString& title, const QString& html) : QDialog(parent) {
     setWindowTitle(title);
-    resize(620, 560);
     text = new QTextBrowser;
     text->setOpenExternalLinks(true);
     text->setHtml(html);
@@ -242,6 +281,7 @@ HelpDialog::HelpDialog(QWidget* parent, const QString& title, const QString& htm
     auto* layout = new QVBoxLayout(this);
     layout->addWidget(text, 1);
     layout->addWidget(buttons);
+    look::fit_to_screen(this, QSize(620, 560));  // (620 × 560 as Python's, never bigger than the screen: 閉じる stays in sight)
 }
 
 }  // namespace genko::app::help

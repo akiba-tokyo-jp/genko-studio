@@ -14,6 +14,7 @@
 #include <QMenuBar>
 #include <QTextBrowser>
 #include <QPainter>
+#include <QRegularExpression>
 
 #include <memory>
 
@@ -110,9 +111,11 @@ private slots:
         QVERIFY(titles.contains(QStringLiteral("実行: 影と集中線")));
         // every page but the covers, as one step
         const std::size_t layers_on_two = book.page(1).layers.size();
+        const std::size_t before_all = w->session().history().done.size();
         QVERIFY(w->play_action_on_all(QStringLiteral("影と集中線")));
         QCOMPARE(book.page(1).layers.size(), layers_on_two + 1);
-        app::actions::remove(QStringLiteral("影と集中線"));
+        QCOMPARE(w->session().history().done.size(), before_all + 1);  // (every page in one undo)
+        QVERIFY(!app::actions::remove(QStringLiteral("影と集中線")));
         QVERIFY(!app::actions::load().contains("影と集中線"));
         // nothing recorded: nothing kept
         w->start_recording();
@@ -275,25 +278,42 @@ private slots:
     void theHelpNamesTheMenusAndKeysAsTheyAre() {
         Book book;
         app::MainWindow* w = book.window.get();
+        static const QRegularExpression token(QStringLiteral("\\{(menu|key|submenu|top|items)"));
         for (const char* text : {app::help::kGuide, app::help::kFaq}) {
             const app::help::Rendered done = app::help::render(w, QString::fromUtf8(text));
             QVERIFY2(done.missing.isEmpty(), qPrintable(done.missing.join(QStringLiteral(", "))));  // (every entrance named is in the menus)
-            QVERIFY(!done.html.contains(QStringLiteral("{menu:")) && !done.html.contains(QStringLiteral("{key:")));
+            QVERIFY2(done.keyless.isEmpty(), qPrintable(done.keyless.join(QStringLiteral(", "))));  // (and every key named is there)
+            QVERIFY(!done.html.contains(token) && !done.html.contains(QStringLiteral("act_")));
         }
         const QString guide = app::help::guide(w);
         QVERIFY(guide.contains(QStringLiteral("「ファイル → 新しい原稿…」")));
-        QVERIFY(guide.contains(QStringLiteral("「ウィンドウ → 作業の段階」")));  // (where the stages are: Python's guide said 表示)
+        QVERIFY(guide.contains(QStringLiteral("「ウィンドウ → 作業の段階」の「ネームの並び」「作画の並び」")));  // (where the stages are: Python's guide said 表示)
         QVERIFY(guide.contains(QStringLiteral("ペン（B）")));
+        QVERIFY(guide.contains(QStringLiteral("[ と ] で太さ")));
+        QVERIFY(guide.contains(QStringLiteral("「ページ → 台詞 → フキダシを手で描く」")));
+        const QString faq = app::help::faq(w);
+        QVERIFY(faq.contains(QStringLiteral("「ウィンドウ → ワークスペース → はじめの配置に戻す」")));  // (a menu filled as it opens)
+        QVERIFY(faq.contains(QStringLiteral("「マスク ▾」、または「レイヤー → マスク → マスクを編集する（ペンで見せる・消しゴムで隠す）」")));
+        QVERIFY(app::help::shortcut_html(w).contains(QStringLiteral("キーは「ファイル → 環境設定…」で変えられます")));
         // a key changed: the guide and the list say the new one
         book.act("act_pen")->setShortcut(QKeySequence(QStringLiteral("P")));
         QVERIFY(app::help::guide(w).contains(QStringLiteral("ペン（P）")));
         bool listed = false;
         for (const auto& [menu, command, keys] : app::help::shortcut_rows(w)) listed = listed || (command == QStringLiteral("ペン") && keys == QStringLiteral("P"));
         QVERIFY(listed);
+        // keys taken away: said so, never the command's inner name; a key that is a sign of HTML: written as the sign
+        book.act("act_pen")->setShortcuts({});
+        const app::help::Rendered keyless = app::help::render(w, QString::fromUtf8(app::help::kGuide));
+        QVERIFY(keyless.html.contains(QStringLiteral("ペン（キーなし）")) && !keyless.html.contains(QStringLiteral("act_")));
+        QCOMPARE(keyless.keyless, QStringList{QStringLiteral("{key:act_pen}")});
+        book.act("act_pen")->setShortcut(QKeySequence(Qt::Key_Less));
+        QVERIFY(app::help::guide(w).contains(QStringLiteral("ペン（&lt;）")));
+        QVERIFY(app::help::shortcut_html(w).contains(QStringLiteral("<td>ペン</td><td><b>&lt;</b></td>")));
         book.act("act_pen")->setShortcut(QKeySequence(QStringLiteral("B")));
-        // a command not in the menus is found, never described
+        // a command not in the menus is found, never described (nor its inner name shown)
         const app::help::Rendered unknown = app::help::render(w, QStringLiteral("{menu:act_no_such_thing} {key:act_pen} {top:ありません}"));
         QCOMPARE(unknown.missing.size(), 2);
+        QVERIFY(!unknown.html.contains(QStringLiteral("act_no_such_thing")));
         // the help menu, last of the bar, and its pages
         QCOMPARE(w->menuBar()->actions().back()->text(), QStringLiteral("ヘルプ"));
         book.act("act_help_guide")->trigger();
@@ -306,10 +326,12 @@ private slots:
         shown = qobject_cast<app::help::HelpDialog*>(w->help_dialog());
         QVERIFY(shown != nullptr && shown->text->toPlainText().contains(QStringLiteral("ペン")));
         QCOMPARE(book.act("act_help_keys")->shortcut(), QKeySequence(Qt::Key_F1));
+        auto* keys_window = shown;
         book.act("act_about")->trigger();
         shown = qobject_cast<app::help::HelpDialog*>(w->help_dialog());
         QVERIFY(shown != nullptr && shown->text->toPlainText().contains(QStringLiteral("Genko Studio")));
-        shown->close();
+        QVERIFY(keys_window->isVisible());  // (each its own window, as Python's: the list stays open beside the others)
+        for (auto* help : w->findChildren<app::help::HelpDialog*>()) help->close();
     }
 
     // --- 本の形でプレビュー -------------------------------------------------------------------------------------------

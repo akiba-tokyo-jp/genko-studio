@@ -433,14 +433,14 @@ bool MainWindow::effect_shape_stroke(const StrokeInput& stroke, const core::Page
 // --- スキャン画像の線画抽出 ---------------------------------------------------------------------------------------------
 
 bool MainWindow::import_image(std::optional<QString> chosen) {
-    const core::Page* page = current_page();
-    if (page == nullptr) return false;
+    if (current_page() == nullptr) return false;
+    const Asked asked = asking();  // (the book and page asked about: the file dialog waits for the person)
     if (!session_->path()) {
         flash(QStringLiteral("画像を読み込む前に、原稿を保存します（ファイル → 別の場所に保存）"), 6000);
         return false;
     }
     const QString file = chosen ? *chosen : ask::open_path(this, QStringLiteral("画像を読み込む"), QStringLiteral("画像 (*.png *.jpg *.jpeg *.tif *.tiff *.bmp *.webp *.psd)"));
-    if (file.isEmpty()) return false;
+    if (file.isEmpty() || !still(asked)) return false;
     std::string png;
     try {
         std::ifstream in(core::path_from_utf8(file.toStdString()), std::ios::binary);
@@ -461,6 +461,9 @@ bool MainWindow::import_image(std::optional<QString> chosen) {
         flash(wording::error(QString::fromUtf8(error.what())), 6000, true);
         return false;
     }
+    // (the page and the panel taken now, after the book was saved: never a pointer from before the dialog)
+    const core::Page* page = current_page();
+    if (page == nullptr) return false;
     const QFileInfo info(file);
     const core::Frame* frame = selected_frame();
     Json place{{"op", "place_asset"}, {"page", page->index.json()}, {"asset", ref}, {"to", "art"}, {"title", info.completeBaseName().toStdString()}};

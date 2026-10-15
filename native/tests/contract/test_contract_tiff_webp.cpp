@@ -1,13 +1,15 @@
 // TIFF and WebP pictures read as the Python baseline's Pillow reads them (M6: Image.open and load through libtiff and
-// libwebp): each case is made by the reference Python's Pillow (every mode its TIFF writer writes, with no compression,
-// LZW, Deflate, PackBits, Group 4 and JPEG; strips and tiles; the EXIF orientation; WebP lossless, lossy, with alpha,
-// and an animation's first frame), and this build's render::open_image gives the same mode, size and bytes — and the
+// libwebp): each case is made by the reference Python's Pillow (the modes its TIFF writer writes — 1, L, LA, P, RGB, RGBA,
+// CMYK, I;16, I, F with compressions, I;16B (big-endian), LAB, PA — with no compression, LZW, Deflate, PackBits,
+// Group 4 and JPEG; strips and tiles; the EXIF orientation; big-endian 32-bit integers and floats and RGBA without an
+// ExtraSamples tag written by hand; WebP lossless, lossy, with alpha, and an animation's first frame), and this build's render::open_image gives the same mode, size and bytes — and the
 // same RGBA picture after convert, as the app takes it — without tolerance. A TIFF whose samples lie in separate
 // planes is the one kind this build does not read yet: it says so (NotYetPorted "image_format") rather than drawing
 // something else, and knows it from the file's directory alone (unported_image_format).
 
 #include <QtTest>
 
+#include "core/base64.hpp"
 #include "core/json.hpp"
 #include "core/pyconv.hpp"
 #include "render/not_yet_ported.hpp"
@@ -41,6 +43,14 @@ def picture(mode, size=(37, 23)):
         return im.convert("L").point(lambda v: 255 if v > 128 else 0).convert("1")
     if mode == "I;16":
         return im.convert("L").convert("I").point(lambda v: v * 257).convert("I;16")
+    if mode == "I;16B":
+        return Image.frombytes("I;16B", size, picture("I;16", size).tobytes("raw", "I;16B"))
+    if mode == "I":
+        return im.convert("L").convert("I").point(lambda v: v * 70000 - 9000000)
+    if mode == "F":
+        return im.convert("L").convert("F").point(lambda v: v / 7.0 - 3.25)
+    if mode == "LAB":
+        return Image.merge("LAB", (im.convert("L"), Image.new("L", size, 120), Image.linear_gradient("L").resize(size)))
     return im.convert(mode)
 
 cases = []
@@ -60,6 +70,11 @@ def tiff(name, im, **kw):
 for mode in ("1", "L", "LA", "P", "RGB", "RGBA", "CMYK", "I;16"):
     for compression in (None, "tiff_lzw", "tiff_adobe_deflate", "packbits"):
         tiff(f"tiff {mode} {compression}", picture(mode), compression=compression)
+for mode in ("I", "F"):
+    for compression in (None, "tiff_lzw"):
+        tiff(f"tiff {mode} {compression}", picture(mode), compression=compression)
+for mode in ("I;16B", "LAB", "PA"):  # (Pillow cannot read back its own uncompressed YCbCr)
+    tiff(f"tiff {mode} None", picture(mode))
 tiff("tiff 1 group4", picture("1"), compression="group4")
 tiff("tiff RGB jpeg", picture("RGB"), compression="jpeg", quality=90)
 tiff("tiff L rows per strip", picture("L", (40, 33)), compression="tiff_lzw", tiffinfo={278: 4})
@@ -90,6 +105,35 @@ blob += b"".join(struct.pack("<I", data_at + i * tw * th) for i in range(len(til
 blob += b"".join(struct.pack("<I", tw * th) for _ in tiles)
 assert len(blob) == data_at
 add("tiff tiled", blob + b"".join(tiles))
+
+# uncompressed, written by hand: big-endian 32-bit samples (Pillow reads them in the file's order) and RGBA without an
+# ExtraSamples tag (Pillow takes the fourth sample as alpha; libtiff would call it unspecified)
+def raw_tiff(name, order, w, h, photo, bits, fmt, extra, data):
+    e = "<" if order == "II" else ">"
+    tags = [(256, 4, [w]), (257, 4, [h]), (258, 3, bits), (259, 3, [1]), (262, 3, [photo]), (273, 4, [0]), (277, 3, [len(bits)]),
+            (278, 4, [h]), (279, 4, [len(data)]), (339, 3, [fmt] * len(bits))]
+    if extra is not None:
+        tags.append((338, 3, extra))
+    tags.sort()
+    pack = lambda typ, vals: b"".join(struct.pack(e + ("H" if typ == 3 else "I"), v) for v in vals)
+    at = 8 + 2 + 12 * len(tags) + 4
+    blobs, where = b"", {}
+    for tag, typ, vals in tags:
+        if len(pack(typ, vals)) > 4:
+            where[tag] = at + len(blobs)
+            blobs += pack(typ, vals)
+    data_at = at + len(blobs)
+    entries = b""
+    for tag, typ, vals in tags:
+        vals = [data_at] if tag == 273 else vals
+        payload = pack(typ, vals)
+        entries += struct.pack(e + "HHI", tag, typ, len(vals)) + (struct.pack(e + "I", where[tag]) if tag in where else payload.ljust(4, b"\0"))
+    head = (b"II*\x00" if order == "II" else b"MM\x00*") + struct.pack(e + "I", 8)
+    add(name, head + struct.pack(e + "H", len(tags)) + entries + struct.pack(e + "I", 0) + blobs + data)
+
+raw_tiff("tiff I;32BS big", "MM", 5, 3, 1, [32], 2, None, b"".join(struct.pack(">i", (i * 7919 - 50000) * 997) for i in range(15)))
+raw_tiff("tiff F;32BF big", "MM", 5, 3, 1, [32], 3, None, b"".join(struct.pack(">f", i * 1.25 - 7.5) for i in range(15)))
+raw_tiff("tiff RGBA no ExtraSamples", "II", 5, 3, 2, [8, 8, 8, 8], 1, None, bytes((i * 37) % 256 for i in range(60)))
 
 def webp(name, im, **kw):
     out = io.BytesIO()
@@ -148,11 +192,12 @@ private slots:
                 std::string palette;
                 for (const auto& [r, g, b] : image.palette()) palette += {static_cast<char>(r), static_cast<char>(g), static_cast<char>(b)};
                 const std::string theirs = genko::core::a2b_base64(c["palette"].get<std::string>());
+                QVERIFY2(!palette.empty() || theirs.empty(), (name + ": no palette").c_str());
                 QVERIFY2(theirs.starts_with(palette) || palette.starts_with(theirs), (name + ": the palette").c_str());
             }
             (name.starts_with("tiff") ? tiffs : webps) += 1;
         }
-        QCOMPARE(tiffs, 8 * 4 + 1 + 1 + 1 + 7 + 1);
+        QCOMPARE(tiffs, 8 * 4 + 2 * 2 + 3 + 1 + 1 + 1 + 7 + 1 + 3);
         QCOMPARE(webps, 5);
     }
 

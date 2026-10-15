@@ -27,6 +27,7 @@
 #include "app/save_status.hpp"
 #include "app/theme.hpp"
 #include "app/viewer.hpp"
+#include "app/comfort.hpp"
 #include "core/error.hpp"
 #include "core/paths.hpp"
 #include "core/pyconv.hpp"
@@ -477,6 +478,7 @@ void ApprovalBox::show_item(int, bool follow) {
     if (sheet) sheet_choices(*item);
     if (follow && !item->pages.empty()) window_->go_to_page(static_cast<int>(page_number(item->pages.front())));
     show_preview();
+    if (follow) fade_in(preview, 140);  // (another request chosen: its page fades in)
     QTimer::singleShot(0, window_, [window = window_] { window->fit_box(); });  // (the box as tall as this request needs)
 }
 

@@ -8,6 +8,7 @@
 
 #include <algorithm>
 #include <cstring>
+#include <limits>
 #include <memory>
 #include <optional>
 #include <string>
@@ -233,16 +234,36 @@ struct Setup {
     std::string rawmode;
 };
 
-std::vector<int> u16_list(TIFF* tif, ttag_t tag, int count) {
-    std::vector<int> out;
-    uint16_t* values = nullptr;
-    if (TIFFGetFieldDefaulted(tif, tag, &values) == 1 && values != nullptr) {
-        for (int i = 0; i < count; ++i) out.push_back(values[i]);
+// Whether the file's first directory holds `tag`, read from the bytes as Pillow reads its directory (libtiff makes some
+// tags up itself: ExtraSamples for the samples beyond the colours when the file has none).
+bool stored_tag(std::string_view b, std::uint16_t tag) {
+    if (b.size() < 8) return false;
+    const bool little = b[0] == 'I';
+    const auto number = [&](std::size_t at, int size) -> std::optional<std::uint64_t> {
+        if (at > b.size() || static_cast<std::size_t>(size) > b.size() - at) return std::nullopt;
+        std::uint64_t value = 0;
+        for (int i = 0; i < size; ++i) {
+            const auto byte = static_cast<std::uint64_t>(static_cast<unsigned char>(b[at + static_cast<std::size_t>(little ? size - 1 - i : i)]));
+            value = (value << 8) | byte;
+        }
+        return value;
+    };
+    const auto version = number(2, 2);
+    if (!version) return false;
+    const bool big = *version == 43;
+    const auto first = big ? number(8, 8) : number(4, 4);
+    if (!first || *first >= b.size()) return false;
+    const auto count = big ? number(static_cast<std::size_t>(*first), 8) : number(static_cast<std::size_t>(*first), 2);
+    if (!count) return false;
+    const std::size_t entry = big ? 20 : 12;
+    const std::size_t start = static_cast<std::size_t>(*first) + (big ? 8 : 2);
+    for (std::uint64_t i = 0; i < *count && start + (i + 1) * entry <= b.size(); ++i) {
+        if (number(start + static_cast<std::size_t>(i) * entry, 2) == tag) return true;
     }
-    return out;
+    return false;
 }
 
-Setup setup(TIFF* tif) {
+Setup setup(TIFF* tif, std::string_view bytes) {
     Setup s;
     uint16_t compression = 1;
     TIFFGetFieldDefaulted(tif, TIFFTAG_COMPRESSION, &compression);
@@ -258,6 +279,11 @@ Setup setup(TIFF* tif) {
     uint32_t width = 0;
     uint32_t height = 0;
     if (TIFFGetField(tif, TIFFTAG_IMAGEWIDTH, &width) != 1 || TIFFGetField(tif, TIFFTAG_IMAGELENGTH, &height) != 1) unidentified("Missing dimensions");
+    if (width > static_cast<uint32_t>(std::numeric_limits<int>::max()) || height > static_cast<uint32_t>(std::numeric_limits<int>::max())) {
+        // (never a negative size from a header: Pillow refuses such a picture as a decompression bomb)
+        throw core::Error("image_too_large", "Image size (" + std::to_string(static_cast<std::uint64_t>(width) * height) +
+                                                 " pixels) exceeds limit, could be decompression bomb DOS attack.");
+    }
     s.width = static_cast<int>(width);
     s.height = static_cast<int>(height);
     uint16_t orientation = 1;
@@ -274,7 +300,7 @@ Setup setup(TIFF* tif) {
     std::vector<int> extra;
     uint16_t extra_count = 0;
     uint16_t* extra_values = nullptr;
-    if (TIFFGetField(tif, TIFFTAG_EXTRASAMPLES, &extra_count, &extra_values) == 1) {
+    if (stored_tag(bytes, TIFFTAG_EXTRASAMPLES) && TIFFGetField(tif, TIFFTAG_EXTRASAMPLES, &extra_count, &extra_values) == 1) {
         for (int i = 0; i < extra_count; ++i) extra.push_back(extra_values[i]);
     }
     std::vector<int> bits(static_cast<std::size_t>(std::max(1, samples)), bps_one);
@@ -303,10 +329,20 @@ Setup setup(TIFF* tif) {
     s.mode = info->mode;
     s.rawmode = info->rawmode;
     if (s.photo == 6 && s.compression == 7 && s.planar == 1) s.rawmode = "RGB";  // (JPEG's YCbCr given as RGB)
-    if (s.rawmode == "I;16") {
-        s.rawmode = "I;16N";
-    } else if (s.rawmode.size() > 4 && (s.rawmode.ends_with(";16B") || s.rawmode.ends_with(";16L"))) {
-        s.rawmode = s.rawmode.substr(0, s.rawmode.size() - 1) + "N";
+    const auto replace = [&s](std::string_view from, std::string_view to) {
+        if (const auto at = s.rawmode.find(from); at != std::string::npos) s.rawmode.replace(at, from.size(), to);
+    };
+    if (s.compression != 1) {
+        // (Pillow reads a compressed picture through libtiff, which gives the samples in this computer's order, and makes
+        // these raw modes native — only these: TiffImagePlugin's own rule)
+        if (s.rawmode == "I;16") s.rawmode = "I;16N";
+        replace(";16B", ";16N");
+        replace(";16L", ";16N");
+    } else if (TIFFIsByteSwapped(tif)) {
+        // (Pillow reads an uncompressed picture's bytes itself, in the file's order; libtiff gave them in this computer's)
+        replace(";16B", ";16N");
+        replace(";32BS", ";32NS");
+        replace(";32BF", ";32NF");
     }
     return s;
 }
@@ -337,7 +373,7 @@ bool tiff_signature(std::string_view b) {
 Size tiff_size(std::string_view bytes, const PngLimits& limits) {
     Tiff t(bytes);
     if (t.tif == nullptr) unidentified("not a TIFF file");
-    const Setup s = setup(t.tif);
+    const Setup s = setup(t.tif, bytes);
     check_size(s.width, s.height, limits);
     return s.orientation >= 5 && s.orientation <= 8 ? Size{s.height, s.width} : Size{s.width, s.height};
 }
@@ -346,7 +382,7 @@ bool tiff_unported(std::string_view bytes) {
     if (!tiff_signature(bytes)) return false;
     try {
         Tiff t(bytes);
-        return t.tif != nullptr && setup(t.tif).planar == 2;
+        return t.tif != nullptr && setup(t.tif, bytes).planar == 2;
     } catch (const core::Error&) {
         return false;  // (not a picture Pillow opens: no picture, as Python's)
     }
@@ -356,7 +392,7 @@ Image read_tiff(std::string_view bytes, const PngLimits& limits) {
     Tiff t(bytes);
     if (t.tif == nullptr) unidentified("not a TIFF file");
     TIFF* tif = t.tif;
-    const Setup s = setup(tif);
+    const Setup s = setup(tif, bytes);
     check_size(s.width, s.height, limits);
     if (s.planar == 2) throw NotYetPorted("image_format");  // (the samples in separate planes)
     const Size size{s.width, s.height};
@@ -388,6 +424,8 @@ Image read_tiff(std::string_view bytes, const PngLimits& limits) {
             const tmsize_t tile_row = TIFFTileRowSize(tif);
             const tmsize_t tile_bytes = TIFFTileSize(tif);
             if (tile_w == 0 || tile_h == 0 || tile_row <= 0 || tile_bytes <= 0) undecodable("decoder error -2");
+            // (a tile is never much larger than the picture: a few bytes of header never make the reader zero gigabytes)
+            if (tile_bytes > static_cast<tmsize_t>(row) * static_cast<tmsize_t>(s.height) + (tmsize_t{64} << 20)) undecodable("decoder error -2");
             std::vector<unsigned char> tile(static_cast<std::size_t>(tile_bytes));
             for (uint32_t y = 0; y < static_cast<uint32_t>(s.height); y += tile_h) {
                 for (uint32_t x = 0; x < static_cast<uint32_t>(s.width); x += tile_w) {

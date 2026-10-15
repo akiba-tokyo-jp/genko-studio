@@ -379,6 +379,7 @@ protected:
     void tabletEvent(QTabletEvent* event) override;
     void keyPressEvent(QKeyEvent* event) override;
     void keyReleaseEvent(QKeyEvent* event) override;
+    void focusOutEvent(QFocusEvent* event) override;  // (a held key's tool let go: its release goes elsewhere)
     void leaveEvent(QEvent* event) override;
     void contextMenuEvent(QContextMenuEvent* event) override;
     bool event(QEvent* event) override;

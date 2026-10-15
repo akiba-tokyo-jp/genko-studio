@@ -1,7 +1,15 @@
 #include "core/config_dir.hpp"
 
 #include <QDir>
+#include <QFileInfo>
+#include <QSettings>
 #include <QString>
+
+#include <system_error>
+
+#ifdef _WIN32
+#include <windows.h>
+#endif
 
 #include "core/paths.hpp"
 
@@ -30,5 +38,30 @@ std::filesystem::path config_dir() {
 }
 
 std::filesystem::path legacy_config_dir() { return folder("genko", "genko"); }
+
+bool legacy_settings_exist() {
+#ifdef _WIN32
+    HKEY key = nullptr;
+    if (RegOpenKeyExW(HKEY_CURRENT_USER, L"Software\\Genko\\Genko Studio", 0, KEY_READ, &key) != ERROR_SUCCESS) return false;
+    RegCloseKey(key);
+    return true;
+#else
+    QString base = qEnvironmentVariable("XDG_CONFIG_HOME");
+    if (base.isEmpty()) base = QDir::homePath() + QStringLiteral("/.config");
+    return QFileInfo(base + QStringLiteral("/Genko/Genko Studio.conf")).isFile();
+#endif
+}
+
+bool import_pending() {
+    if (!qEnvironmentVariableIsEmpty("GENKO_CONFIG_DIR")) return false;
+    const std::filesystem::path dir = config_dir();
+    const std::filesystem::path legacy = legacy_config_dir();
+    std::error_code ec;
+    if (std::filesystem::equivalent(dir, legacy, ec) || dir == legacy) return false;
+    const QSettings own(QString::fromStdString(path_to_utf8(dir / "settings.ini")), QSettings::IniFormat);
+    if (!own.value(QStringLiteral("migration/done")).toString().isEmpty()) return false;
+    if (legacy_settings_exist()) return true;
+    return std::filesystem::is_directory(legacy, ec) && !std::filesystem::is_empty(legacy, ec) && !ec;
+}
 
 }  // namespace genko::core

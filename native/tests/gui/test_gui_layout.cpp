@@ -3,10 +3,11 @@
 //   4  the start screen, 新しい原稿, 用紙の設定 (for a new book and for the book's own), ノンブルの設定, 表紙・カバーを足す,
 //      the templates, the question before closing, the whole path, the main window, 書き出し… and 印刷…, and the main
 //      window with its 点検 and 履歴 panels opened, AI と作る and the change to an AI client's settings, a book made
-//      with agents with a request in its approval box (M5④), on screens of 1024 × 640,
+//      with agents with a request in its approval box (M5④), ヘルプ's guide (M6), on screens of 1024 × 640,
 //      1366 × 768 and 1920 × 1080 at 100, 125, 150 and 200 % scaling: each window is inside the screen, and its buttons
-//      (閉じる, 作る, やめる, 決める, キャンセル…) are wholly in sight — the rest of the body scrolls. The size asked for
-//      and the size each window got are both written to the log.
+//      (閉じる, 作る, やめる, 決める, キャンセル…) are wholly in sight — the rest of the body scrolls — and the page of the
+//      export's preview is wholly in sight from the first. The size asked for and the size each window got are both
+//      written to the log.
 //   5  a path of more than 200 characters (Japanese folder names) is cut in the middle to fit, never only in part: a
 //      click shows all of it, コピー puts all of it on the clipboard.
 //   and the preview that fits a page whatever its shape (I08), the entrance for typed Japanese (input method events:
@@ -54,6 +55,7 @@
 #include "app/dialogs.hpp"
 #include "app/export_dialog.hpp"
 #include "app/fit_preview.hpp"
+#include "app/help.hpp"
 #include "app/history_panel.hpp"
 #include "app/icons.hpp"
 #include "app/ime.hpp"
@@ -112,6 +114,11 @@ Json look_at(const QString& name, QWidget* window, const QSize& asked, const std
                                   {"visible", s.widget->isVisible()},
                                   {"whole", visible == s.widget->rect()},
                                   {"footer", s.footer}});
+        if (const auto* preview = qobject_cast<const app::FitPreview*>(s.widget)) {
+            // (a page shown whole: all of it where the person sees it, from the first time the window is shown)
+            item["page_whole"] = !preview->shown_rect().isEmpty() &&
+                                 visible.contains(preview->shown_rect().adjusted(1, 1, -1, -1).toAlignedRect());
+        }
         // in a body that scrolls: where its viewport is in the window, and whether the item is in the scrolled content
         for (QWidget* up = s.widget->parentWidget(); up != nullptr && up != window; up = up->parentWidget()) {
             if (auto* scroll = qobject_cast<QScrollArea*>(up)) {
@@ -159,8 +166,9 @@ std::vector<Seen> bars_and_panels(QMainWindow* window) {
                 if (tabs->tabText(i) == dock->windowTitle()) reached = tabs;
             }
         }
-        // (none: the panel is neither in sight nor behind a tab — "hidden" below)
-        out.push_back(Seen{QStringLiteral("tab of ") + dock->windowTitle(), reached != nullptr ? static_cast<QWidget*>(reached) : static_cast<QWidget*>(dock), false});
+        // (none: the panel is neither in sight nor behind a tab — then it must be wholly in sight, which it is not: failed below)
+        out.push_back(Seen{QStringLiteral("tab of ") + dock->windowTitle(), reached != nullptr ? static_cast<QWidget*>(reached) : static_cast<QWidget*>(dock),
+                           reached == nullptr});
     }
     return out;
 }
@@ -252,9 +260,14 @@ int probe(int argc, char** argv) {
         app::ExportDialog exporting(&window, window.session().snapshot(), window.session().path(), "human:tester");
         seen = buttons_of(&exporting, true);
         for (QWidget* field : std::vector<QWidget*>{exporting.format, exporting.which, exporting.dpi, exporting.area, exporting.color, exporting.folder,
-                                                    exporting.preview})
+                                                    exporting.folder_whole, exporting.preview})
             seen.push_back(Seen{field->objectName().isEmpty() ? QStringLiteral("field") : field->objectName(), field, false});
         out << look_at(QStringLiteral("export"), &exporting, exporting.size(), seen).dump() << "\n";
+        // ヘルプ (M6): the guide, its 閉じる in sight
+        app::help::HelpDialog guide(&window, QStringLiteral("はじめての使い方"), app::help::guide(&window));
+        seen = buttons_of(&guide, true);
+        seen.push_back(Seen{QStringLiteral("guide text"), guide.text, false});
+        out << look_at(QStringLiteral("help"), &guide, QSize(620, 560), seen).dump() << "\n";
         app::PrintDialog printing(&window);
         seen = buttons_of(&printing, true);
         for (QWidget* field : std::vector<QWidget*>{printing.pages, printing.area, printing.scale, printing.spreads})
@@ -445,9 +458,12 @@ private slots:
                 if (item["footer"].get<bool>()) {
                     QVERIFY2(item["whole"].get<bool>(), qPrintable(name + QStringLiteral(": 「") + label + QStringLiteral("」 is not wholly in sight")));
                 }
+                if (item.contains("page_whole")) {
+                    QVERIFY2(item["page_whole"].get<bool>(), qPrintable(name + QStringLiteral(": the page of 「") + label + QStringLiteral("」 is not wholly in sight")));
+                }
             }
         }
-        QCOMPARE(windows, 18);
+        QCOMPARE(windows, 19);
     }
 
     // 試験 5: a long Japanese path, cut to fit, all of it one click away, copied whole

@@ -6,6 +6,7 @@
 #include <QWidget>
 
 #include <map>
+#include <memory>
 #include <optional>
 #include <string>
 #include <utility>
@@ -73,7 +74,7 @@ protected:
     void keyPressEvent(QKeyEvent* event) override;
 
 private:
-    DocPtr doc_;
+    std::shared_ptr<const core::Document> doc_;
     std::vector<std::pair<std::string, const core::Page*>> pages_;
     std::vector<std::vector<int>> groups_;
     bool rtl_ = true;

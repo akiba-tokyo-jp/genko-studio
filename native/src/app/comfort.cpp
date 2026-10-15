@@ -334,7 +334,9 @@ double last_input() {
         input_watch = new InputWatch;
         input_watch->setParent(app);
         app->installEventFilter(input_watch);
-        QObject::connect(input_watch, &QObject::destroyed, [] { input_watch = nullptr; });
+        QObject::connect(input_watch, &QObject::destroyed, [watch = input_watch] {
+            if (input_watch == watch) input_watch = nullptr;  // (a newer watch made meanwhile is kept)
+        });
     }
     return input_watch != nullptr ? input_watch->last : monotonic_seconds();
 }
@@ -440,9 +442,13 @@ void fade_in(QWidget* widget, int ms, int rise) {
     move->setEndValue(1.0);
     move->setEasingCurve(QEasingCurve::OutCubic);
     QPointer<QWidget> alive(widget);
-    QObject::connect(move, &QPropertyAnimation::finished, widget, [alive, fade] {
-        if (alive && alive->graphicsEffect() == fade) alive->setGraphicsEffect(nullptr);
-    });
+    // (queued: the effect owns the animation, and is let go only after its signal has returned)
+    QObject::connect(
+        move, &QPropertyAnimation::finished, widget,
+        [alive, fade] {
+            if (alive && alive->graphicsEffect() == fade) alive->setGraphicsEffect(nullptr);
+        },
+        Qt::QueuedConnection);
     move->start();
     if (rise != 0) {
         const QPoint end = widget->pos();

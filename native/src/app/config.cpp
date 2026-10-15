@@ -34,6 +34,9 @@ std::unique_ptr<QSettings> settings() {
 
 std::unique_ptr<QSettings> legacy_settings() {
     if (!qEnvironmentVariableIsEmpty("GENKO_CONFIG_DIR")) return nullptr;
+    // (looked at first: Qt opens the first registry key for writing and makes it when it is missing — the Python app's
+    // settings are never made or changed)
+    if (!core::legacy_settings_exist()) return nullptr;
     auto legacy = std::make_unique<QSettings>(QStringLiteral("Genko"), QStringLiteral("Genko Studio"));
     legacy->setFallbacksEnabled(false);  // (its own keys, not the organisation's or the computer's)
     return legacy;

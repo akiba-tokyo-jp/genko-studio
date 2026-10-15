@@ -24,6 +24,7 @@
 #include "core/paths.hpp"
 #include "core/pyconv.hpp"
 #include "storage/fsutil.hpp"
+#include "service/wording.hpp"
 
 namespace genko::app::actions {
 
@@ -92,23 +93,28 @@ Json load() {
     return out;
 }
 
-void save(const Json& all) {
+std::optional<QString> save(const Json& all) {
     core::DumpOptions options;
     options.indent = 1;
     options.item_separator = ",";
-    storage::write_atomic(path(), core::dump(all, options));
+    try {
+        storage::write_atomic(path(), core::dump(all, options));
+    } catch (const std::exception& error) {
+        return QStringLiteral("オートアクションを書けませんでした（%1）").arg(wording::error(std::string(error.what())));
+    }
+    return std::nullopt;
 }
 
-void store(const QString& name, const Json& ops) {
+std::optional<QString> store(const QString& name, const Json& ops) {
     Json all = load();
     all[name.toStdString()] = Json{{"ops", ops}, {"made", QDateTime::currentDateTime().toString(QStringLiteral("yyyy-MM-dd HH:mm")).toStdString()}};
-    save(all);
+    return save(all);
 }
 
-void remove(const QString& name) {
+std::optional<QString> remove(const QString& name) {
     Json all = load();
     all.erase(name.toStdString());
-    save(all);
+    return save(all);
 }
 
 Json recordable(const Json& ops) {
@@ -255,7 +261,7 @@ void ActionsDialog::fill_steps() {
 }
 
 void ActionsDialog::keep() {
-    save(data_);
+    if (const auto failed = save(data_)) ask::warning(this, QStringLiteral("オートアクション"), *failed);
     fill_steps();
 }
 
@@ -291,7 +297,7 @@ void ActionsDialog::rename() {
     Json again = Json::object();
     for (const auto& [key, value] : data_.items()) again[key == name->toStdString() ? renamed.toStdString() : key] = value;
     data_ = again;
-    save(data_);
+    if (const auto failed = save(data_)) ask::warning(this, QStringLiteral("オートアクション"), *failed);
     fill_names(renamed);
 }
 
@@ -299,7 +305,7 @@ void ActionsDialog::remove_current() {
     const auto name = current();
     if (name && ask::question(this, QStringLiteral("オートアクション"), QStringLiteral("「%1」を消しますか？").arg(*name))) {
         data_.erase(name->toStdString());
-        save(data_);
+        if (const auto failed = save(data_)) ask::warning(this, QStringLiteral("オートアクション"), *failed);
         fill_names();
     }
 }

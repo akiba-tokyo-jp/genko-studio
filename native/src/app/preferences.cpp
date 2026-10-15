@@ -42,6 +42,7 @@
 #include "app/theme.hpp"
 #include "app/workspace.hpp"
 #include "core/model.hpp"
+#include "core/pynum.hpp"
 
 namespace genko::app::preferences {
 
@@ -101,7 +102,7 @@ double gamma_for(const std::vector<double>& pressures) {
     if (usable.size() < 10) throw std::invalid_argument("もう少し長く試し描きします");
     const double median = usable[usable.size() / 2];
     const double gamma = std::max(0.3, std::min(3.0, std::log(0.5) / std::log(median)));
-    return std::round(gamma * 100.0) / 100.0;
+    return core::py_round(gamma, 2);  // (Python's round(x, 2): correctly rounded, ties to even)
 }
 
 // --- the commands and their keys ----------------------------------------------------------------------------------------
@@ -141,8 +142,8 @@ const std::map<QString, QString>& renamed() {
 }
 
 void apply_shortcuts(MainWindow* window) {
-    QSettings* store = settings();
-    for (QAction* action : commands(window)) {
+    const auto store = settings();
+    for (QAction* action : preferences::commands(window)) {
         QString key = QStringLiteral("shortcuts/%1").arg(action->text());
         const auto old = renamed().find(action->text());
         if (!store->contains(key) && old != renamed().end() && store->contains(QStringLiteral("shortcuts/%1").arg(old->second))) {
@@ -159,7 +160,7 @@ void apply_shortcuts(MainWindow* window) {
 }
 
 void retip(MainWindow* window) {
-    for (QAction* action : commands(window)) {
+    for (QAction* action : preferences::commands(window)) {
         const QString keys = action->shortcut().toString(QKeySequence::NativeText);
         const QString what = action->statusTip();
         action->setToolTip(QString(action->text()).remove(QLatin1Char('&')) + (keys.isEmpty() ? QString() : QStringLiteral("（%1）").arg(keys)) +
@@ -282,7 +283,7 @@ PreferencesDialog::PreferencesDialog(MainWindow* window) : QDialog(window), wind
     table->setHorizontalHeaderLabels({QStringLiteral("コマンド"), QStringLiteral("ショートカット")});
     table->horizontalHeader()->setSectionResizeMode(0, QHeaderView::Stretch);
     table->verticalHeader()->setVisible(false);
-    for (QAction* action : commands(window)) {
+    for (QAction* action : preferences::commands(window)) {
         const int row = table->rowCount();
         table->insertRow(row);
         auto* item = new QTableWidgetItem(action->text());
@@ -533,9 +534,9 @@ void PreferencesDialog::save() {
         tabs->setCurrentIndex(0);
         return;
     }
-    QSettings* store = settings();
+    const auto store = settings();
     std::map<QString, QStringList> chosen(keys.begin(), keys.end());
-    for (QAction* action : commands(window_)) {
+    for (QAction* action : preferences::commands(window_)) {
         const QStringList now = chosen[action->text()];
         const auto found = window_->default_shortcuts.find(action->text());
         const QList<QKeySequence> defaults = found != window_->default_shortcuts.end() ? found->second : QList<QKeySequence>();

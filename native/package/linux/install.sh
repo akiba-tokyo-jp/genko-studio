@@ -8,6 +8,13 @@ version=$(basename "$here" | sed -n 's/^genko-studio-\(.*\)-linux-x86_64$/\1/p')
 [ -n "$version" ] || version=dev
 data=${XDG_DATA_HOME:-$HOME/.local/share}
 target=$HOME/.local/opt/genko-studio-$version
+# (メニューの項目の Exec に、そのまま書けない文字: " ` $ \ % と改行)
+case "$target" in
+  *[\"\`\$\\%]* | *"
+"*)
+    echo "入れる場所の名前に使えない文字（\" \` \$ \\ % や改行）があります: $target" >&2
+    exit 1 ;;
+esac
 if [ -e "$target" ]; then
   echo "すでに入っています: $target（先に uninstall.sh で外します）" >&2
   exit 1
@@ -15,6 +22,12 @@ fi
 mkdir -p "$HOME/.local/opt" "$HOME/.local/bin" "$data/applications"
 cp -R "$here" "$target"
 ln -sf "$target/bin/genko" "$HOME/.local/bin/genko-studio"
-sed "s|@GENKO@|$target/bin/genko|g" "$here/share/applications/genko-studio.desktop" > "$data/applications/genko-studio-$version.desktop"
+entry="$data/applications/genko-studio-$version.desktop"
+while IFS= read -r line || [ -n "$line" ]; do
+  case "$line" in
+    Exec=*) printf 'Exec="%s" app %%f\n' "$target/bin/genko" ;;
+    *) printf '%s\n' "$line" ;;
+  esac
+done < "$here/share/genko-studio/genko-studio.desktop.in" > "$entry"
 echo "入れました: $target"
 echo "起動: genko-studio（~/.local/bin が PATH にないときは $target/bin/genko）"

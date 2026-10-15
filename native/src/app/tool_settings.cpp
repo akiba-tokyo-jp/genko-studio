@@ -19,6 +19,7 @@
 
 #include "app/lettering.hpp"
 #include "app/theme.hpp"
+#include "app/comfort.hpp"
 
 namespace genko::app {
 
@@ -259,6 +260,7 @@ QWidget* ToolSettings::page_for(const QString& tool) const {
 void ToolSettings::set_folded(bool on) {
     folded_ = on;
     fold_->setText(on ? QStringLiteral("▸") : QStringLiteral("▾"));
+    if (!on && isVisible()) fade_in(stack_widget_, 160);
     hint_->setVisible(!on && theme::show_hints() && !hint_->text().isEmpty());
     stack_widget_->setVisible(!on && page_for(tool_) != nullptr);
     QWidget* dock = parentWidget();
@@ -274,6 +276,7 @@ void ToolSettings::show_tool(const QString& tool) {
     hint_->setVisible(!folded_ && theme::show_hints() && !hint_->text().isEmpty());
     QWidget* page = page_for(tool);
     if (page != current_) {
+        if (page != nullptr && isVisible()) fade_in(page, 140);  // (the new tool's settings come in softly)
         if (current_ != nullptr) current_->hide();
         current_ = page;
         if (current_ != nullptr) current_->show();

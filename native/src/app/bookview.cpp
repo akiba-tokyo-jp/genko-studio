@@ -19,6 +19,7 @@
 #include "core/covers.hpp"
 #include "formats/export.hpp"
 #include "render/page.hpp"
+#include "service/wording.hpp"
 
 namespace genko::app::bookview {
 
@@ -147,24 +148,42 @@ BookPreview::BookPreview(MainWindow* window) : QDialog(window), doc_(window->ses
 const QPixmap& BookPreview::pixmap(int index) {
     if (const auto kept = cache_.find(index); kept != cache_.end()) return kept->second;
     const auto& [kind, page] = pages_[static_cast<std::size_t>(index)];
-    render::RenderOptions options;
-    options.mode = "print";
-    options.finish = false;
-    render::Image image = render::render_page(*page, kPreviewDpi, options, doc_.get()).image;
-    const core::Json* cover = core::cover_of(*page);
-    if (cover != nullptr && core::is_wrap_kind(cover->value("kind", std::string()))) {
-        const std::string part = kind == "front" ? "表紙" : "裏表紙";
-        for (const core::Fold& fold : core::folds(*page, core::to_string(doc_->binding))) {
-            if (fold.name != part) continue;
-            const core::Rect t = page->trim_rect_mm();
-            image = image.crop(render::Box{render::mm_to_px(fold.x0, kPreviewDpi), render::mm_to_px(t.y.value(), kPreviewDpi),
-                                           render::mm_to_px(fold.x1, kPreviewDpi), render::mm_to_px(t.y.value() + t.height.value(), kPreviewDpi)});
-            break;
+    QPixmap shown;
+    try {
+        render::RenderOptions options;
+        options.mode = "print";
+        options.finish = false;
+        options.skip_unported = true;  // (a preview on screen: what this build cannot draw yet is left out)
+        render::Image image = render::render_page(*page, kPreviewDpi, options, doc_.get()).image;
+        const core::Json* cover = core::cover_of(*page);
+        if (cover != nullptr && core::is_wrap_kind(cover->value("kind", std::string()))) {
+            const std::string part = kind == "front" ? "表紙" : "裏表紙";
+            for (const core::Fold& fold : core::folds(*page, core::to_string(doc_->binding))) {
+                if (fold.name != part) continue;
+                const core::Rect t = page->trim_rect_mm();
+                image = image.crop(render::Box{render::mm_to_px(fold.x0, kPreviewDpi), render::mm_to_px(t.y.value(), kPreviewDpi),
+                                               render::mm_to_px(fold.x1, kPreviewDpi), render::mm_to_px(t.y.value() + t.height.value(), kPreviewDpi)});
+                break;
+            }
+        } else if (cover == nullptr || !core::is_wrap_kind(cover->value("kind", std::string()))) {
+            image = formats::crop_to(image, *page, "trim", kPreviewDpi);
         }
-    } else if (cover == nullptr || !core::is_wrap_kind(cover->value("kind", std::string()))) {
-        image = formats::crop_to(image, *page, "trim", kPreviewDpi);
+        shown = QPixmap::fromImage(to_qimage(image));
+    } catch (const std::exception& error) {
+        // (a page that cannot be drawn — a broken asset, a cover that cannot be folded: said on a blank page of its size,
+        // never ending the app)
+        const core::Rect t = page->trim_rect_mm();
+        QImage blank(std::max(40, render::mm_to_px(t.width.value(), kPreviewDpi)), std::max(40, render::mm_to_px(t.height.value(), kPreviewDpi)),
+                     QImage::Format_RGB32);
+        blank.fill(Qt::white);
+        QPainter painter(&blank);
+        painter.setPen(QColor(110, 110, 110));
+        painter.drawText(blank.rect().adjusted(8, 8, -8, -8), Qt::AlignCenter | Qt::TextWordWrap,
+                         QStringLiteral("このページは表示できません\n%1").arg(wording::error(std::string(error.what()))));
+        painter.end();
+        shown = QPixmap::fromImage(blank);
     }
-    return cache_[index] = QPixmap::fromImage(to_qimage(image));
+    return cache_[index] = shown;
 }
 
 std::pair<std::optional<int>, std::optional<int>> BookPreview::sides(int spread) const {

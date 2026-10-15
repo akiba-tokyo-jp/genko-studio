@@ -497,6 +497,19 @@ void PageCanvas::hold_modifier(const QString& key, bool down) {
     }
 }
 
+void PageCanvas::focusOutEvent(QFocusEvent* event) {
+    QWidget::focusOutEvent(event);
+    // (the canvas no longer hears the key being let go — a click on a panel, a menu, another window: the tool the key
+    // held is let go now, never left stuck)
+    if (held_tool_) {
+        tool_ = *held_tool_;
+        held_tool_.reset();
+        update_cursor();
+        update();
+        emit toolHeld(tool_);
+    }
+}
+
 void PageCanvas::keyPressEvent(QKeyEvent* event) {
     if (event->key() == Qt::Key_Space && !event->isAutoRepeat()) {
         space_ = true;

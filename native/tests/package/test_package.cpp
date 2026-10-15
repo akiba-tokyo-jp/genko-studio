@@ -3,7 +3,8 @@
 // - the folder runs on its own: with a bare environment (no LD_LIBRARY_PATH, no Qt, no Python, a home of the test's
 //   own) `genko --version` answers, `genko new` makes a book and the app opens it and shows its first page;
 // - (Linux) every library the program and Qt's plugins load is in the folder or the computer's own — none missing,
-//   none from the Qt or the build it was made with — and none of the computer's image libraries is in the folder;
+//   none from the Qt or the build it was made with — and lib/ holds Qt's libraries, its ICU and the six xcb utility
+//   libraries (all six), nothing else;
 // - the notes and the licences are there, and the SBOM lists every library file in the folder with its SHA-256 and
 //   every package with a row of THIRD_PARTY.md that names its licence (the computer's own on Linux are said so);
 // - (Linux) install.sh puts it in ~/.local/opt for the person alone (refusing a second time), the menu item and the
@@ -187,11 +188,20 @@ private slots:
             }
         }
         QVERIFY(links > 0);
-        // the computer's own image, text and runtime libraries are never put in the folder
-        static const QRegularExpression computers(
-            QStringLiteral("^lib/(libz|libpng|libjpeg|libtiff|libwebp|libsharpyuv|libjbig|libLerc|libdeflate|liblcms2|libharfbuzz|libgraphite2|libfreetype|"
-                           "libfontconfig|libstdc\\+\\+|libgcc_s|libc|libm|libGL|libEGL|libX11|libxcb\\.|libxkbcommon\\.|libglib|libdbus)[.-]"));
-        for (const QString& name : files_in(prefix_)) QVERIFY2(!computers.match(name).hasMatch(), qPrintable(name));
+        // in lib/: Qt's libraries, the ICU they come with and the six xcb utility libraries — all six there (the computer's
+        // own would be found by ldd above even without them), and nothing else: never the computer's image, text or
+        // runtime libraries
+        static const QRegularExpression allowed(QStringLiteral(
+            "^lib/(libQt6[A-Za-z]+\\.so(\\.[0-9]+)*|libicu(data|i18n|uc|io|tu|test)\\.so\\.[0-9.]+|libxcb-(cursor|icccm|image|keysyms|render-util|util)\\.so\\.[0-9.]+)$"));
+        static const QRegularExpression util(QStringLiteral("^lib/(libxcb-[a-z-]+)\\.so"));
+        std::set<QString> xcb;
+        for (const QString& name : files_in(prefix_)) {
+            if (!name.startsWith(QStringLiteral("lib/"))) continue;
+            QVERIFY2(allowed.match(name).hasMatch(), qPrintable(name + QStringLiteral(" is in lib/")));
+            if (const auto m = util.match(name); m.hasMatch()) xcb.insert(m.captured(1));
+        }
+        QCOMPARE(xcb, (std::set<QString>{QStringLiteral("libxcb-cursor"), QStringLiteral("libxcb-icccm"), QStringLiteral("libxcb-image"),
+                                         QStringLiteral("libxcb-keysyms"), QStringLiteral("libxcb-render-util"), QStringLiteral("libxcb-util")}));
     }
 #endif
 
@@ -200,10 +210,17 @@ private slots:
         for (const char* there : {"README-ja.md", "QT-LGPL-ja.md", "THIRD_PARTY.md", "sbom.spdx.json", "licenses/qt/LGPL-3.0.txt",
                                   "licenses/qt/GPL-3.0.txt", "licenses/pillow/LICENSE", "licenses/freetype/FTL.TXT", "licenses/freetype/LICENSE.TXT",
                                   "licenses/cpython/LICENSE", "licenses/cpython/LICENSE-SRE", "licenses/cpython/LICENSE-Unicode",
-                                  "licenses/optimized-routines/LICENSE-MIT", "licenses/lucide/LICENSE"}) {
+                                  "licenses/optimized-routines/LICENSE-MIT", "licenses/lucide/LICENSE", "licenses/photocraft/LICENSE-MIT"}) {
             QVERIFY2(QFileInfo(doc + QLatin1Char('/') + QString::fromLatin1(there)).size() > 0, there);
         }
         QCOMPARE(QDir(doc + QStringLiteral("/licenses/fonts")).entryList({QStringLiteral("*-OFL.txt")}, QDir::Files).size(), 7);
+#ifndef _WIN32
+        QVERIFY(QFileInfo(doc + QStringLiteral("/licenses/icu/LICENSE")).size() > 0);
+        QCOMPARE(QDir(doc + QStringLiteral("/licenses/xcb-util")).entryList({QStringLiteral("*.copyright")}, QDir::Files).size(), 6);
+        // (the menu item's template for install.sh, not itself a menu item of the folder)
+        QVERIFY(QFileInfo(prefix_ + QStringLiteral("/share/genko-studio/genko-studio.desktop.in")).isFile());
+        QVERIFY(!QFileInfo::exists(prefix_ + QStringLiteral("/share/applications")));
+#endif
         QCOMPARE(gt::read_bytes(doc + QStringLiteral("/THIRD_PARTY.md")), gt::read_bytes(gt::repo_root() + QStringLiteral("/docs/cpp-migration/THIRD_PARTY.md")));
         const QString readme = QString::fromUtf8(gt::read_bytes(doc + QStringLiteral("/README-ja.md")).c_str());
         for (const char* said : {"Ubuntu 24.04", "Windows 10 / 11", "電子署名がありません", "SHA-256", "install.sh", "uninstall.sh", "~/.config/genko-studio",
@@ -229,6 +246,7 @@ private slots:
             {"qt", QStringLiteral("| Qt 6")}, {"icu", QStringLiteral("| ICU")}, {"xcb-extras", QStringLiteral("| libxcb の補助ライブラリ")},
             {"nlohmann-json", QStringLiteral("| nlohmann/json")}, {"freetype", QStringLiteral("| FreeType")},
             {"pillow-libimaging", QStringLiteral("| Pillow の `libImaging`")}, {"optimized-routines", QStringLiteral("| Arm optimized-routines")},
+            {"photocraft", QStringLiteral("| PhotoCraft（")},
             {"cpython-re", QStringLiteral("| CPython の `re`")}, {"fonts", QStringLiteral("| Dela Gothic One")}, {"lucide", QStringLiteral("| Lucide")},
             {"zlib", QStringLiteral("| zlib")}, {"libpng", QStringLiteral("| libpng")}, {"libjpeg-turbo", QStringLiteral("| libjpeg-turbo")},
             {"libtiff", QStringLiteral("| libtiff")}, {"harfbuzz", QStringLiteral("| HarfBuzz")}, {"libwebp", QStringLiteral("| libwebp")},
@@ -288,9 +306,13 @@ private slots:
         QCOMPARE(QFileInfo(link).symLinkTarget(), target + QStringLiteral("/bin/genko"));
         const QString entry = QString::fromUtf8(gt::read_bytes(menu).c_str());
         QVERIFY2(entry.contains(QStringLiteral("Exec=\"%1/bin/genko\" app %f").arg(target)), qPrintable(entry));
-        // (run through the link, as the menu runs it: the libraries found beside the real file)
+        // (run through the link, and as the menu item says: the libraries found beside the real file)
         const gt::Run version = gt::run(link, {QStringLiteral("--version")}, env, 120000);
         QVERIFY2(version.finished && version.exit_code == 0, qPrintable(version.described()));
+        const QRegularExpressionMatch exec = QRegularExpression(QStringLiteral("^Exec=\"([^\"]+)\" app %f$"), QRegularExpression::MultilineOption).match(entry);
+        QVERIFY(exec.hasMatch());
+        const gt::Run from_menu = gt::run(exec.captured(1), {QStringLiteral("--version")}, env, 120000);
+        QVERIFY2(from_menu.finished && from_menu.exit_code == 0, qPrintable(from_menu.described()));
         // a second time: refused, nothing changed
         const auto installed_tree = gt::tree_hashes(target);
         const gt::Run again = gt::run(QStringLiteral("/bin/sh"), {prefix_ + QStringLiteral("/install.sh")}, env, 300000);

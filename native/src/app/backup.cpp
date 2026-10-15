@@ -12,6 +12,7 @@
 #include "core/error.hpp"
 #include "core/paths.hpp"
 #include "render/zip.hpp"
+#include "storage/fsutil.hpp"
 
 namespace genko::app::backup {
 
@@ -63,26 +64,63 @@ fs::path make(const fs::path& project, const fs::path& folder, int keep, std::op
     const fs::path out = folder / core::path_from_utf8((stem + QLatin1Char('_') + stamp + QStringLiteral(".zip")).toStdString());
     fs::path part = out;
     part.replace_extension(".zip.part");
-    // the book's files, in Python's order (rglob sorted), as "<book>/<path inside>"
-    std::vector<fs::path> found;
-    for (fs::recursive_directory_iterator it(project, error), end; !error && it != end; it.increment(error)) {
-        const std::string name = core::path_to_utf8(it->path().filename());
-        if (it->is_regular_file(error) && !name.ends_with(".tmp") && !name.ends_with(".lock")) found.push_back(it->path());
+    // (a part left by a backup that was stopped — one runs at a time — is gone first)
+    for (fs::directory_iterator it(folder, error), end; !error && it != end; it.increment(error)) {
+        const QString name = qpath(it->path().filename());
+        if (name.startsWith(stem + QLatin1Char('_')) && name.endsWith(QStringLiteral(".zip.part"))) fs::remove(it->path(), error);
     }
-    if (error) throw core::Error("io", "cannot read " + core::path_to_utf8(project) + ": " + error.message());
-    std::sort(found.begin(), found.end(), path_before);
-    std::vector<std::pair<std::string, fs::path>> files;
-    const std::string top = core::path_to_utf8(project.filename().empty() ? project.parent_path().filename() : project.filename());
-    for (const fs::path& file : found) {
-        std::string inside = core::path_to_utf8(file.lexically_relative(project));
+    error.clear();
+    // the book as one state: its project.json and journal the same before and after (a save by another program while
+    // it is zipped: zipped again, never a backup that mixes two states)
+    const auto state = [&project]() {
+        std::error_code ignored;
+        const fs::path journal = project / "studio" / "journal.jsonl";
+        std::string out;
+        try {
+            out = storage::sha256_file(project / "project.json");
+        } catch (const std::exception&) {
+            out = "missing";
+        }
+        return out + ":" + std::to_string(fs::exists(journal, ignored) ? fs::file_size(journal, ignored) : 0);
+    };
+    for (int attempt = 0;; ++attempt) {
+        const std::string before = state();
+        // the book's files, in Python's order (rglob sorted), as "<book>/<path inside>"
+        std::vector<fs::path> found;
+        for (fs::recursive_directory_iterator it(project, error), end; !error && it != end; it.increment(error)) {
+            const std::string name = core::path_to_utf8(it->path().filename());
+            if (it->is_regular_file(error) && !name.ends_with(".tmp") && !name.ends_with(".lock")) found.push_back(it->path());
+        }
+        if (error) throw core::Error("io", "cannot read " + core::path_to_utf8(project) + ": " + error.message());
+        std::sort(found.begin(), found.end(), path_before);
+        std::vector<std::pair<std::string, fs::path>> files;
+        const std::string top = core::path_to_utf8(project.filename().empty() ? project.parent_path().filename() : project.filename());
+        for (const fs::path& file : found) {
+            std::string inside = core::path_to_utf8(file.lexically_relative(project));
 #ifdef _WIN32
-        std::replace(inside.begin(), inside.end(), '\\', '/');  // (zip names part with "/", as ZipFile writes them)
+            std::replace(inside.begin(), inside.end(), '\\', '/');  // (zip names part with "/", as ZipFile writes them)
 #endif
-        files.emplace_back(top + "/" + inside, file);
+            files.emplace_back(top + "/" + inside, file);
+        }
+        try {
+            render::zip::pack(part, files);
+        } catch (...) {
+            fs::remove(part, error);
+            if (state() != before && attempt < 2) continue;  // (a file went away while it was read: the book was saved)
+            throw;
+        }
+        if (state() != before) {
+            fs::remove(part, error);
+            if (attempt < 2) continue;
+            throw core::Error("io", "the book kept changing while it was being backed up");
+        }
+        break;
     }
     try {
-        render::zip::pack(part, files);
-        fs::rename(part, out);
+        // (written through before it takes the name, and the oldest dropped only after: a power cut never leaves no
+        // good backup)
+        storage::truncate_durable(part, fs::file_size(part));
+        storage::rename_new(part, out);
     } catch (...) {
         fs::remove(part, error);
         throw;

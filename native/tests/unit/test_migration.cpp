@@ -151,13 +151,21 @@ private slots:
         const QString base = home.filePath(QStringLiteral("AppData/Roaming"));
         QCOMPARE(genko::core::config_dir(), path_of(base) / "GenkoStudio");
         QCOMPARE(genko::core::legacy_config_dir(), path_of(base) / "genko");
-        // (the Python app's settings are in the registry: only where it is is looked at)
-        QCOMPARE(genko::app::legacy_settings()->fileName(), QStringLiteral("\\HKEY_CURRENT_USER\\Software\\Genko\\Genko Studio"));
+        // (the Python app's settings are in the registry, the person's own: only looked at, never made — and where they are)
+        if (const auto legacy = genko::app::legacy_settings()) {
+            QCOMPARE(legacy->fileName(), QStringLiteral("\\HKEY_CURRENT_USER\\Software\\Genko\\Genko Studio"));
+        }
 #else
         const QString base = home.filePath(QStringLiteral("xdg"));
         QCOMPARE(genko::core::config_dir(), path_of(base) / "genko-studio");
         QCOMPARE(genko::core::legacy_config_dir(), path_of(base) / "genko");
+        // (none while the Python app has no settings: nothing made by looking)
+        QVERIFY(genko::app::legacy_settings() == nullptr && !genko::core::legacy_settings_exist());
+        QVERIFY(!QFileInfo::exists(base + QStringLiteral("/Genko")));
+        write(base + QStringLiteral("/Genko/Genko Studio.conf"), "[ui]\ntheme=dark\n");
+        QVERIFY(genko::core::legacy_settings_exist());
         QCOMPARE(QDir::cleanPath(genko::app::legacy_settings()->fileName()), QDir::cleanPath(base + QStringLiteral("/Genko/Genko Studio.conf")));
+        QVERIFY(QFile::remove(base + QStringLiteral("/Genko/Genko Studio.conf")));
 #endif
         QCOMPARE(QDir::cleanPath(genko::app::settings()->fileName()), QDir::cleanPath(text_of(genko::core::config_dir() / "settings.ini")));
         QCOMPARE(genko::app::config_dir(), genko::core::config_dir());
@@ -183,11 +191,12 @@ private slots:
     }
 
     void whatIsKeptBack() {
-        for (const char* back : {"recovery", "recovery/a/journal", "cache/x", "plugin-runs/r/out.png", "settings.ini", "brushes.json.lock",
-                                 "tokens.json.tmp", "a/b.part", "notes~", ".#recent.json"}) {
+        for (const char* back : {"recovery", "recovery/a/journal", "cache/x", "thumbs/a.png", "fonts.json", "plugin-runs/r/out.png", "settings.ini",
+                                 "migration.lock", "brushes.json.lock", "tokens.json.tmp", "a/b.part", "notes~", ".#recent.json"}) {
             QVERIFY2(migration::kept_back(path_of(QString::fromUtf8(back))), back);
         }
-        for (const char* taken : {"recent.json", "tokens.json", "materials/cache/x.png", "plugins/tint/plugin.json", "brush_papers/p.png"}) {
+        for (const char* taken : {"recent.json", "tokens.json", "tools.json", "upscalers.json", "materials/cache/x.png", "plugins/tint/plugin.json",
+                                  "brush_papers/p.png"}) {
             QVERIFY2(!migration::kept_back(path_of(QString::fromUtf8(taken))), taken);
         }
     }
@@ -197,8 +206,16 @@ private slots:
         // this app's own already: never written over
         write(legacy.own_dir + QStringLiteral("/actions.json"), "{\"mine\": 2}\n");
         legacy.own->setValue(QStringLiteral("ui/default_paper"), QStringLiteral("A4"));
+        // the Python app's caches: not taken
+        write(legacy.dir + QStringLiteral("/thumbs/a.png"), "t");
+        write(legacy.dir + QStringLiteral("/fonts.json"), "{}");
 #ifndef _WIN32
-        QVERIFY(QFile::link(QStringLiteral("../../elsewhere/dev-plugin"), legacy.dir + QStringLiteral("/plugins/dev")));
+        // links: a file's bytes copied (never the link: this app's changes never reach the Python app's things), a folder
+        // left and said
+        write(legacy.root.filePath(QStringLiteral("old/elsewhere/dev.json")), "{\"dev\": 1}");
+        QDir().mkpath(legacy.root.filePath(QStringLiteral("old/elsewhere/devdir")));
+        QVERIFY(QFile::link(QStringLiteral("../../elsewhere/dev.json"), legacy.dir + QStringLiteral("/plugins/dev.json")));
+        QVERIFY(QFile::link(QStringLiteral("../../elsewhere/devdir"), legacy.dir + QStringLiteral("/plugins/devdir")));
 #endif
         const auto before = snapshot(legacy.root.filePath(QStringLiteral("old")));
         Answers answers;
@@ -206,7 +223,13 @@ private slots:
         QCOMPARE(answers.asked.size(), 1);
         QVERIFY(answers.asked.front().contains(QStringLiteral("引き継ぎますか")));
         QVERIFY(answers.asked.front().contains(QStringLiteral("以前の版の設定はそのまま残り、変更しません")));
-        QVERIFY(answers.warned.isEmpty());
+        // what was left is said: this app's own actions.json kept (and, on Linux, the folder reached through a link)
+        QCOMPARE(answers.warned.size(), 1);
+        QVERIFY(answers.warned.front().startsWith(QStringLiteral("引き継ぎました。")));
+        QVERIFY(answers.warned.front().contains(QStringLiteral("この版にすでにあるため")) && answers.warned.front().contains(QStringLiteral("actions.json")));
+#ifndef _WIN32
+        QVERIFY(answers.warned.front().contains(QStringLiteral("フォルダーへのリンクは写していません")) && answers.warned.front().contains(QStringLiteral("devdir")));
+#endif
         // the files
         for (const char* taken : {"recent.json", "brushes.json", "colorsets.json", "tokens.json", "materials/folder/one.png", "brush_papers/p.png",
                                   "plugins/tint/plugin.json"}) {
@@ -214,15 +237,19 @@ private slots:
             QCOMPARE(read(legacy.own_dir + QLatin1Char('/') + name), read(legacy.dir + QLatin1Char('/') + name));
         }
         QCOMPARE(read(legacy.own_dir + QStringLiteral("/actions.json")), QByteArray("{\"mine\": 2}\n"));
-        for (const char* back : {"recovery", "cache", "plugin-runs", "brushes.json.lock", "tokens.json.tmp", "recent.json.part"}) {
+        for (const char* back : {"recovery", "cache", "thumbs", "fonts.json", "plugin-runs", "brushes.json.lock", "tokens.json.tmp", "recent.json.part",
+                                 "migration.lock"}) {
             QVERIFY2(!QFileInfo::exists(legacy.own_dir + QLatin1Char('/') + QString::fromUtf8(back)), back);
         }
         QVERIFY(QDir(legacy.own_dir).entryList(QStringList{QStringLiteral("*.part")}, QDir::Files).isEmpty());
 #ifndef _WIN32
         QCOMPARE(fs::status(path_of(legacy.own_dir + QStringLiteral("/tokens.json"))).permissions() & fs::perms::all,
                  fs::perms::owner_read | fs::perms::owner_write);  // (the AI keys stay the person's own)
-        QCOMPARE(QFileInfo(legacy.own_dir + QStringLiteral("/plugins/dev")).symLinkTarget(), QFileInfo(legacy.dir + QStringLiteral("/plugins/dev")).symLinkTarget());
-        QVERIFY(QFileInfo(legacy.own_dir + QStringLiteral("/plugins/dev")).isSymLink());
+        QVERIFY(!QFileInfo(legacy.own_dir + QStringLiteral("/plugins/dev.json")).isSymLink());
+        QCOMPARE(read(legacy.own_dir + QStringLiteral("/plugins/dev.json")), QByteArray("{\"dev\": 1}"));
+        QVERIFY(!QFileInfo::exists(legacy.own_dir + QStringLiteral("/plugins/devdir")) && !QFileInfo(legacy.own_dir + QStringLiteral("/plugins/devdir")).isSymLink());
+        // (the new folder made with the old folder's permissions)
+        QCOMPARE(fs::status(path_of(legacy.own_dir)).permissions(), fs::status(path_of(legacy.dir)).permissions());
 #endif
         // the settings: the Python app's keys, but not over this app's own
         QSettings own(legacy.own_dir + QStringLiteral("/settings.ini"), QSettings::IniFormat);
@@ -284,9 +311,16 @@ private slots:
     void whatCannotBeCopiedIsSaidAndAskedAgain() {
         Legacy legacy;
         write(legacy.own_dir + QStringLiteral("/materials"), "a file where the folder would go");
+#ifndef _WIN32
+        // (a link to nothing: what it was cannot be known — not copied, said, asked again)
+        QVERIFY(QFile::link(QStringLiteral("nothing-here.json"), legacy.dir + QStringLiteral("/broken.json")));
+#endif
         Answers answers;
         QCOMPARE(migration::offer(nullptr, legacy.places()), QString());
         QCOMPARE(answers.warned.size(), 1);
+#ifndef _WIN32
+        QVERIFY(answers.warned.front().contains(QStringLiteral("broken.json（リンクの先がありません）")));
+#endif
         QVERIFY(answers.warned.front().contains(QStringLiteral("one.png")));
         QVERIFY(answers.warned.front().contains(QStringLiteral("次に起動したときにもう一度聞きます")));
         QCOMPARE(read(legacy.own_dir + QStringLiteral("/recent.json")), read(legacy.dir + QStringLiteral("/recent.json")));  // (the rest copied)
@@ -294,20 +328,27 @@ private slots:
         QVERIFY(QDir(legacy.own_dir).entryList(QStringList{QStringLiteral("*.part")}, QDir::Files).isEmpty());
         // the next start: asked again, the rest copied, nothing twice
         QVERIFY(QFile::remove(legacy.own_dir + QStringLiteral("/materials")));
+#ifndef _WIN32
+        QVERIFY(QFile::remove(legacy.dir + QStringLiteral("/broken.json")));
+#endif
         write(legacy.own_dir + QStringLiteral("/recent.json"), "[\"/books/new\"]\n");  // (used since)
         QCOMPARE(migration::offer(nullptr, legacy.places()), QStringLiteral("copied"));
         QCOMPARE(answers.asked.size(), 2);
         QCOMPARE(read(legacy.own_dir + QStringLiteral("/materials/folder/one.png")), QByteArray("png"));
         QCOMPARE(read(legacy.own_dir + QStringLiteral("/recent.json")), QByteArray("[\"/books/new\"]\n"));
+        // (said: only the file used since — not the ones copied the first time)
+        QCOMPARE(answers.warned.size(), 2);
+        QVERIFY(answers.warned.back().contains(QStringLiteral("recent.json")) && !answers.warned.back().contains(QStringLiteral("brushes.json")));
     }
 
 #ifndef _WIN32
     void theFirstStartFindsThePythonAppsOwn() {
         // (the app's own places, under the test's own home: the Python app's settings file and folder as it leaves
         // them on Linux; on Windows its settings are the person's registry, which a test never reads)
-        const QString conf = genko::app::legacy_settings()->fileName();
-        QVERIFY(conf.startsWith(home.path()));
+        const QString conf = home.filePath(QStringLiteral("xdg/Genko/Genko Studio.conf"));
         write(conf, "[ui]\nfont_pt=14\n");
+        QCOMPARE(QDir::cleanPath(genko::app::legacy_settings()->fileName()), QDir::cleanPath(conf));
+        QVERIFY(genko::core::import_pending());  // (the command line says so until the app has asked)
         write(home.filePath(QStringLiteral("xdg/genko/recent.json")), "[]\n");
         {
             Answers answers;
@@ -317,6 +358,7 @@ private slots:
             QCOMPARE(read(home.filePath(QStringLiteral("xdg/genko-studio/recent.json"))), QByteArray("[]\n"));
             QCOMPARE(migration::offer_on_first_start(), QStringLiteral("copied"));
             QCOMPARE(answers.asked.size(), 1);
+            QVERIFY(!genko::core::import_pending());
         }
         QCOMPARE(read(conf), QByteArray("[ui]\nfont_pt=14\n"));
     }

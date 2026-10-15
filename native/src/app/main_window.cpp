@@ -145,6 +145,7 @@ MainWindow::MainWindow(std::shared_ptr<Session> session) {
     session_ = session ? std::move(session)
                        : std::make_shared<Session>(core::new_episode("無題", core::Num(1), 8, core::PageSpec::a4_mono()), std::nullopt);
     documents_.push_back(Document{session_});
+    connect(session_.get(), &Session::statusChanged, this, &MainWindow::maybe_backup);  // (each book's saves: バックアップ)
     documents::add(this);
     inputs::install();  // (number fields select their value; the wheel leaves unused fields alone)
     pen_ = PenSettings::load();  // (until the brush panel is made: it drives the pen from then on)
@@ -389,33 +390,44 @@ void MainWindow::refresh_icons() {
 
 void MainWindow::maybe_backup() {
     // バックアップ (Python's _backup): after a save, the book zipped into the folder chosen in 環境設定, not more often
-    // than set; on a worker, one at a time, so the page never waits for it
-    const SaveStatus status = session_->status();
-    if (!session_->path() || status.kind != SaveKind::Saved || !status.last_saved.isValid() || status.last_revision == backup_seen_revision_) return;
-    backup_seen_revision_ = status.last_revision;
-    QSettings* store = settings();
+    // than set — each book of the window, its tab in front or not
+    for (const Document& document : documents_) {
+        if (document.session) back_up(document.session);
+    }
+}
+
+void MainWindow::back_up(const std::shared_ptr<Session>& session) {
+    const SaveStatus status = session->status();
+    if (!session->path() || status.kind != SaveKind::Saved || !status.last_saved.isValid()) return;
+    const std::string key = core::path_to_utf8(*session->path());
+    if (const auto seen = backup_seen_.find(key); (seen != backup_seen_.end() && seen->second == status.last_revision) || backups_running_.contains(key)) {
+        return;
+    }
+    const auto store = settings();
     const QString folder = store->value(QStringLiteral("backup/folder"), QString()).toString();
-    if (folder.isEmpty() || backup_running_) return;
+    if (folder.isEmpty()) return;
+    backup_seen_[key] = status.last_revision;
     const double minutes = std::max(0.0, store->value(QStringLiteral("backup/minutes"), 30).toDouble());
     const int keep = store->value(QStringLiteral("backup/keep"), 10).toInt();
-    const fs::path project = *session_->path();
+    const fs::path project = *session->path();
     const fs::path into = core::path_from_utf8(folder.toStdString());
-    backup_running_ = true;
-    auto* watcher = new QFutureWatcher<QString>(this);
-    connect(watcher, &QFutureWatcher<QString>::finished, this, [this, watcher] {
-        backup_running_ = false;
-        const QString problem = watcher->result();
-        watcher->deleteLater();
-        if (!problem.isEmpty()) flash(QStringLiteral("バックアップを残せませんでした: %1").arg(problem), 6000, true);
-    });
-    watcher->setFuture(QtConcurrent::run([project, into, minutes, keep]() -> QString {
-        try {
-            if (backup::due(into, QString::fromStdString(core::path_to_utf8(project.stem())), minutes)) backup::make(project, into, keep);
-            return {};
-        } catch (const std::exception& error) {
-            return QString::fromUtf8(error.what());
-        }
-    }));
+    backups_running_.insert(key);
+    QPointer<MainWindow> self(this);
+    // (on the book's own worker, between its saves: never zipped halfway through one; the page never waits for it)
+    session->beside_saves(
+        [project, into, minutes, keep]() -> QString {
+            try {
+                if (backup::due(into, QString::fromStdString(core::path_to_utf8(project.stem())), minutes)) backup::make(project, into, keep);
+                return {};
+            } catch (const std::exception& error) {
+                return QString::fromUtf8(error.what());
+            }
+        },
+        [self, key](const QString& problem) {
+            if (!self) return;
+            self->backups_running_.erase(key);
+            if (!problem.isEmpty()) self->flash(QStringLiteral("バックアップを残せませんでした: %1").arg(wording::error(problem)), 6000, true);
+        });
 }
 
 MainWindow::~MainWindow() {
@@ -431,6 +443,12 @@ void MainWindow::showEvent(QShowEvent* event) {
     if (!settled_) {
         settled_ = true;
         settle_docks();
+        // (a tab brought to the front fades in — only once the window is up, not while it is laid out)
+        for (QDockWidget* dock : findChildren<QDockWidget*>()) {
+            connect(dock, &QDockWidget::visibilityChanged, this, [this, dock](bool shown) {
+                if (shown && isVisible() && !dock->isFloating()) fade_in(dock->widget(), 140);
+            });
+        }
         default_state_ = saveState();  // (ウィンドウ → ワークスペース → はじめの配置に戻す)
         quick_access_->refresh();
     }
@@ -927,6 +945,7 @@ void MainWindow::next_document(int step) {
 
 void MainWindow::add_document(std::shared_ptr<Session> session) {
     if (session) session->set_idle(std::chrono::milliseconds(save_after_ms_));  // (環境設定's 変更を保存するまで)
+    if (session) connect(session.get(), &Session::statusChanged, this, &MainWindow::maybe_backup, Qt::UniqueConnection);
     const bool untouched = documents_.size() == 1 && !session_->path() && session_->generation() == 0 &&
                            session_->waiting() == 0 && session_->status().kind != SaveKind::Saving;
     if (!untouched && session_->unsaved() && !settle(doc_, QStringLiteral("切り替える"))) return;
