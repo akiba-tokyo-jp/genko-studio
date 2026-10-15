@@ -139,6 +139,23 @@ bool other_image_format(std::string_view b) {
     return starts("\xff\xd8\xff") || starts("GIF87a") || starts("GIF89a") || starts("BM") || starts("8BPS");
 }
 
+// Formats Pillow opens that this build does not read (known by their first bytes): the netpbm family (PBM, PGM, PPM,
+// PAM), ICO, ICNS, JPEG 2000, QOI, SGI, DDS and AVIF. A picture in one is said "not read by this build"
+// (NotYetPorted("image_format")), not "no picture" (M7: a recorded limit).
+bool pillow_only_format(std::string_view b) {
+    const auto starts = [&](std::string_view p) { return b.substr(0, p.size()) == p; };
+    // (each as the plugin's _accept: netpbm P0–P6, Pf and Py; ICO; CUR; …; AVIF's coding and container brands)
+    if (b.size() >= 2 && b[0] == 'P' && std::string_view("0123456fy").find(b[1]) != std::string_view::npos) return true;
+    if (starts(std::string_view("\0\0\1\0", 4)) || starts(std::string_view("\0\0\2\0", 4)) || starts("icns") || starts("qoif") ||
+        starts("DDS ") || starts("\x01\xda")) {
+        return true;
+    }
+    if (starts(std::string_view("\0\0\0\x0cjP  \r\n\x87\n", 12)) || starts("\xff\x4f\xff\x51")) return true;
+    if (b.size() < 12 || b.substr(4, 4) != "ftyp") return false;
+    const std::string_view brand = b.substr(8, 4);
+    return brand == "avif" || brand == "avis" || brand == "mif1" || brand == "msf1";
+}
+
 // PngImagePlugin._MODES
 bool mode_of(int bit_depth, int color_type, const char** mode, const char** rawmode) {
     struct Entry {
@@ -516,7 +533,7 @@ bool unported_image_format(std::string_view bytes) {
     if (bytes.substr(0, 4) == "8BPS") return false;  // (a PSD of Lab colours too: as Pillow, through Little CMS)
     if (tiff_signature(bytes)) return tiff_unported(bytes);  // (render/tiff_webp: the samples in separate planes, from its directory)
     if (webp_signature(bytes)) return false;
-    return other_image_format(bytes);  // (Pillow would open these; the remaining formats are not ported yet)
+    return other_image_format(bytes) || pillow_only_format(bytes);  // (Pillow would open these; this build does not)
 }
 
 Size picture_size(std::string_view bytes) {

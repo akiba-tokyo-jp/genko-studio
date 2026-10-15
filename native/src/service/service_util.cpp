@@ -63,11 +63,8 @@ std::string name_part(std::string_view id) {
 }
 
 bool inside(const std::filesystem::path& folder, const std::filesystem::path& path) {
-    std::error_code ec;
-    std::filesystem::path base = std::filesystem::weakly_canonical(folder, ec);
-    if (ec) base = folder.lexically_normal();
-    std::filesystem::path where = std::filesystem::weakly_canonical(path, ec);
-    if (ec) where = path.lexically_normal();
+    const std::filesystem::path base = core::resolve_path(folder);
+    const std::filesystem::path where = core::resolve_path(path);
     auto w = where.begin();
     for (auto b = base.begin(); b != base.end(); ++b, ++w) {
         if (b->empty() && std::next(b) == base.end()) break;  // (a folder given with a trailing "/")

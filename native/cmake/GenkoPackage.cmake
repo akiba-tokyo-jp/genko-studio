@@ -46,6 +46,13 @@ install(DIRECTORY "${GENKO_REPO_ROOT}/src/genko/fonts/licenses/" DESTINATION "${
 install(FILES "${GENKO_REPO_ROOT}/src/genko/app/lucide/LICENSE" DESTINATION "${_genko_doc}/licenses/lucide")
 install(FILES "${GENKO_SOURCE_ROOT}/package/licenses/qt/LGPL-3.0.txt" "${GENKO_SOURCE_ROOT}/package/licenses/qt/GPL-3.0.txt"
         DESTINATION "${_genko_doc}/licenses/qt")
+# (what Qt's own libraries and plugins carry inside them: PCRE2, HarfBuzz, libpng, libjpeg-turbo, libtiff, libwebp, MD4C…)
+install(FILES "${GENKO_SOURCE_ROOT}/package/licenses/qt-3rdparty/NOTICES.txt" DESTINATION "${_genko_doc}/licenses/qt-3rdparty")
+install(FILES "${GENKO_SOURCE_ROOT}/package/licenses/nlohmann-json/copyright" DESTINATION "${_genko_doc}/licenses/nlohmann-json")
+if(WIN32)
+  # (built into genko.exe on Windows: x64-windows-static-md)
+  install(DIRECTORY "${GENKO_SOURCE_ROOT}/package/licenses/windows/" DESTINATION "${_genko_doc}/licenses")
+endif()
 if(UNIX AND NOT APPLE)
   install(FILES "${GENKO_SOURCE_ROOT}/package/licenses/icu/LICENSE" DESTINATION "${_genko_doc}/licenses/icu")
   install(DIRECTORY "${GENKO_SOURCE_ROOT}/package/licenses/xcb-util/" DESTINATION "${_genko_doc}/licenses/xcb-util")

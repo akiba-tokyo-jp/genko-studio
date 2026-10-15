@@ -11,6 +11,7 @@
 
 #include "core/error.hpp"
 #include "core/pyconv.hpp"
+#include "render/not_yet_ported.hpp"
 
 namespace genko::render::text {
 
@@ -151,7 +152,14 @@ bool is_kana_like(std::u32string_view ch) {
 Fonts::Fonts(std::stop_token stop) : fonts_(std::move(stop)) {}
 
 const TrueTypeFont& Fonts::truetype(const std::string& path, std::int64_t size) {
-    return fonts_.truetype(path, static_cast<int>(std::clamp<std::int64_t>(size, 6, 0x10000)));
+    try {
+        return fonts_.truetype(path, static_cast<int>(std::clamp<std::int64_t>(size, 6, 0x10000)));
+    } catch (const NotYetPorted& e) {
+        // genko.fonts.truetype: a font file that cannot be read (moved with the book to another computer, not a font) is
+        // drawn with Pillow's own default font at its size 10 (`except (OSError, ValueError): ImageFont.load_default()`)
+        if (e.element() != "default_font") throw;
+        return fonts_.load_default();
+    }
 }
 
 bool Fonts::has_glyph(const std::string& path, std::u32string_view ch) {

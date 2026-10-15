@@ -133,6 +133,20 @@ private slots:
         QTest::keyClick(search->query, Qt::Key_Return);
         QCOMPARE(b.act("act_mirror")->isChecked(), !was);
         QCOMPARE(b.act("act_find_command")->shortcut(), QKeySequence(QStringLiteral("Ctrl+Shift+F")));
+        // a command its menu has deleted while the finder was open (a menu that makes its items again as it opens): not
+        // run, the list found again
+        QMenu* view = b.menu(QStringLiteral("表示"));
+        QVERIFY(view != nullptr);
+        auto* gone = new QAction(QStringLiteral("消える試しのコマンド"), view);
+        view->addAction(gone);
+        bool ran = false;
+        connect(gone, &QAction::triggered, [&ran] { ran = true; });
+        search->query->setText(QStringLiteral("消える試しのコマンド"));
+        QCOMPARE(search->found().size(), std::size_t{1});
+        delete gone;
+        QTest::keyClick(search->query, Qt::Key_Return);
+        QVERIFY(!ran);
+        QVERIFY(search->found().empty());
     }
 
     // クイックアクセス: Python's eight commands as buttons (two to a row, a long name on its own row), each doing its
@@ -171,7 +185,7 @@ private slots:
             choose->add->click();  // (twice: once in the list)
             return static_cast<int>(QDialog::Accepted);
         };
-        QVERIFY(panel->edit());
+        b.act("act_edit_quick")->trigger();  // (表示 → クイックアクセスを変える…)
         QCOMPARE(panel->names(), (QStringList{QStringLiteral("履歴…"), QStringLiteral("消しゴム")}));
         QCOMPARE(app::settings()->value(QStringLiteral("ui/quick")).toString(), QStringLiteral("履歴…\t消しゴム"));
         QCOMPARE(panel->buttons.size(), std::size_t{2});
@@ -209,6 +223,10 @@ private slots:
         b.act("act_edit_commandbar")->trigger();
         QCOMPARE(commands_on(), (QStringList{QStringLiteral("書き出し…"), QStringLiteral("|"), QStringLiteral("元に戻す")}));
         QCOMPARE(b.window->doc_tabs()->isVisibleTo(bar), true);
+        // ファイル → 環境設定… opens the preferences (asked before another window takes the answers)
+        b.answers.asked.clear();
+        b.act("act_prefs")->trigger();
+        QVERIFY2(b.answers.asked == QStringList{QStringLiteral("genko::app::preferences::PreferencesDialog")}, qPrintable(b.answers.asked.join(QStringLiteral(" | "))));
         // a new window reads the same
         Book other;
         QCOMPARE(other.window->quick_access()->names(), app::kDefaultQuick);

@@ -97,6 +97,46 @@ private slots:
         QVERIFY(!missing.exists && missing.values.empty() && missing.tail.empty());
     }
 
+    // What every save reads (PERF-G): the same lines without their "ops", the lines read before kept while the file only
+    // grows, and the file read again whole when it was rewritten (its first bytes or those where the last read ended differ).
+    void readLinesWithoutOps() {
+        const QString dir = new_book();
+        const fs::path file = to_path(dir) / "studio" / "journal.jsonl";
+        Json first = prepare(txn_id('a'), "edit", 1, nullptr, state('1'));
+        first["ops"] = Json::array({Json::object({{"op", "add_stroke"}})});
+        first["ops_asset"] = state('9');
+        genko::test::write_bytes(dir + "/studio/journal.jsonl", lines({first, journal::commit_line(txn_id('a'), 1)}) + "garbage\n{\"v\":4,");
+        const auto read = journal::read_lines_without_ops(file);
+        QVERIFY(read.exists);
+        QCOMPARE(read.values.size(), std::size_t{2});
+        QVERIFY(!read.values[0].contains("ops"));
+        QCOMPARE(read.values[0]["ops_asset"], Json(state('9')));
+        QCOMPARE(read.unreadable, std::vector<std::size_t>({3}));
+        QCOMPARE(read.tail, std::string("{\"v\":4,"));
+        QVERIFY(journal::read_lines(file).values[0].contains("ops"));  // (read_lines keeps them)
+        // grown: the cut line completed and a line more; the lines read before stand as read
+        genko::test::write_bytes(dir + "/studio/journal.jsonl", genko::test::read_bytes(dir + "/studio/journal.jsonl") +
+                                 "\"kind\":\"abort\",\"txn\":\"" + txn_id('b') + "\"}\n" + journal::line_text(journal::commit_line(txn_id('c'), 2)));
+        const auto grown = journal::read_lines_without_ops(file);
+        QCOMPARE(grown.values.size(), std::size_t{4});
+        QCOMPARE(grown.values[2], journal::abort_line(txn_id('b')));
+        QCOMPARE(grown.unreadable, std::vector<std::size_t>({3}));
+        QVERIFY(grown.tail.empty());
+        const auto whole = journal::read_lines(file);
+        QCOMPARE(grown.complete_size, whole.complete_size);
+        QCOMPARE(grown.values.size(), whole.values.size());
+        // rewritten (the same length or longer, other bytes): read again whole
+        genko::test::write_bytes(dir + "/studio/journal.jsonl", lines({journal::commit_line(txn_id('d'), 5)}) + std::string(1000, '\n'));
+        const auto rewritten = journal::read_lines_without_ops(file);
+        QCOMPARE(rewritten.values.size(), std::size_t{1});
+        QCOMPARE(rewritten.values[0], journal::commit_line(txn_id('d'), 5));
+        QVERIFY(rewritten.unreadable.empty());
+        // cut shorter (as a repair cuts a broken last line): read again
+        genko::test::write_bytes(dir + "/studio/journal.jsonl", lines({journal::commit_line(txn_id('d'), 5)}));
+        QCOMPARE(journal::read_lines_without_ops(file).values.size(), std::size_t{1});
+        QVERIFY(!journal::read_lines_without_ops(to_path(dir) / "nothing.jsonl").exists);
+    }
+
     void transactionsAndOutcomes() {
         const QString dir = new_book();
         const auto a = txn_id('a'), b = txn_id('b'), c = txn_id('c');

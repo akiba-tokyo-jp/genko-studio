@@ -29,6 +29,7 @@
 #include "app/pages_panel.hpp"
 #include "app/templates.hpp"
 #include "app/theme.hpp"
+#include "core/frames.hpp"
 #include "gui_support.hpp"
 #include "render/ops_registry.hpp"
 
@@ -608,6 +609,26 @@ private slots:
         QCOMPARE(studio.leaves(), std::size_t{1});
         studio.trigger("act_redo");
         QCOMPARE(studio.leaves(), made);
+        // a page with 台詞 and drawn panels: made blank first as Python's dialog does (its lines deleted, the drawn panels
+        // set back to the basic frame), then the template (M7: this build refused both)
+        const std::size_t at = static_cast<std::size_t>(w->page_index());
+        const core::Num number = studio.doc().pages[at]->index;
+        QVERIFY(w->apply_ops(Json::array({Json{{"op", "add_line"}, {"page", number.json()}, {"text", "消える台詞"}, {"x_mm", 40}, {"y_mm", 60}}})));
+        const core::Rect inner = studio.doc().pages[at]->inner_rect_mm();
+        const double x = inner.x.value(), y = inner.y.value(), wd = inner.width.value(), ht = inner.height.value();
+        const Json tree = Json{{"rect_mm", Json::array({x, y, wd, ht})}, {"axis", "free"},
+                               {"children", Json::array({Json{{"rect_mm", Json::array({x, y, wd, ht / 2})}, {"poly", Json::array({Json::array({x, y}), Json::array({x + wd, y}), Json::array({x + wd, y + ht / 3}), Json::array({x, y + ht / 2})})}},
+                                                          Json{{"rect_mm", Json::array({x, y + ht / 3, wd, ht * 2 / 3})}, {"poly", Json::array({Json::array({x, y + ht / 2}), Json::array({x + wd, y + ht / 3}), Json::array({x + wd, y + ht}), Json::array({x, y + ht})})}}})}};
+        QVERIFY(w->apply_ops(Json::array({Json{{"op", "set_layout"}, {"page", number.json()}, {"tree", tree}, {"force", true}}})));
+        QVERIFY(core::is_free(studio.doc().pages[at]->frames[0]));
+        studio.answers->asked.clear();
+        studio.answers->responder->question = [](const QString&, const QString& text) {
+            return text.contains(QStringLiteral("コマと台詞を消して、テンプレートで割り直します"));  // (asked first, as Python's)
+        };
+        studio.trigger("act_template");
+        QVERIFY2(studio.doc().story_for_page(number).empty(), qPrintable(studio.answers->asked.join(QStringLiteral(" | "))));
+        QVERIFY(!core::is_free(studio.doc().pages[at]->frames[0]));
+        QCOMPARE(studio.leaves(), std::size_t{6});
     }
 
     void thePageCommands() {

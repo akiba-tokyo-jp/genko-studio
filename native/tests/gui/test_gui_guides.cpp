@@ -162,8 +162,9 @@ private slots:
         // the 16 ruler kinds, the 8 props, the 4 backgrounds and the poses, in their menus
         for (const char* title : {"直線定規", "パース定規（3 点）", "対称定規（回転）…", "図形定規（多角形）"}) QVERIFY2(s.titled(QString::fromUtf8(title)), title);
         QVERIFY(s.menus_of(s.titled(QStringLiteral("小物: 車"))).contains(QStringLiteral("ツール/3D/小物")));
-        QVERIFY(s.menus_of(s.titled(QStringLiteral("背景: 教室"))).contains(QStringLiteral("ツール/3D")));
-        QVERIFY(s.menus_of(s.titled(QStringLiteral("ポーズ: ピース"))).contains(QStringLiteral("ツール/3D")));
+        // (the scenes and the poses in menus of their own under 3D, as Python's "scenes" and "poses" entries)
+        QVERIFY(s.menus_of(s.titled(QStringLiteral("背景: 教室"))).contains(QStringLiteral("ツール/3D/背景の 3D を置く")));
+        QVERIFY(s.menus_of(s.titled(QStringLiteral("ポーズ: ピース"))).contains(QStringLiteral("ツール/3D/ポーズ")));
     }
 
     void rulersPlacedEditedAndUsed() {

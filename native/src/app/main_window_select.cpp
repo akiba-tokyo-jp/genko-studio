@@ -130,6 +130,7 @@ void MainWindow::build_selection_menu(QMenu* menu) {
     menu->addSeparator();
     menu->addAction(action(QStringLiteral("act_sel_keep")));
     stock_menu_ = menu->addMenu(QStringLiteral("ストックから選ぶ"));
+    stock_menu_->setProperty("remade", true);
     connect(stock_menu_, &QMenu::aboutToShow, this, [this] { fill_stock(); });
     menu->addAction(action(QStringLiteral("act_quick_mask")));
     menu->addSeparator();
@@ -316,6 +317,7 @@ bool MainWindow::keep_selection(std::optional<QString> name) {
 
 void MainWindow::fill_stock() {
     QMenu* menu = stock_menu_;
+    for (QMenu* sub : menu->findChildren<QMenu*>(Qt::FindDirectChildrenOnly)) sub->deleteLater();  // (clear() leaves them)
     menu->clear();
     const core::Page* page = current_page();
     Json saved = Json::object();

@@ -174,15 +174,17 @@ template<class Fn> auto with_text_font(std::string_view font,int size,Fn&& fn) {
     const auto name=QString::fromUtf8(font.data(),static_cast<qsizetype>(font.size()));
     QFile source(bundled_text_font(font)?QStringLiteral(":/genko/text/")+name:name);
     if(!source.open(QIODevice::ReadOnly|QIODevice::Unbuffered))throw core::Error("file","text font unavailable");
-    constexpr qint64 cap=32*1024*1024;
-    if(source.size()<=0 || source.size()>cap)throw core::Error("value","text font exceeds byte limit");
+    constexpr qint64 cap=256*1024*1024;  // (as TrueTypeFonts reads: past it, NotYetPorted("large_font"))
+    if(source.size()>cap)throw NotYetPorted("large_font");
+    if(source.size()<=0)throw core::Error("value","text font exceeds byte limit");
     ImageAllocationBudget budget(512ULL*1024*1024); // Shares, never enlarges, the enclosing image budget.
     genko_imaging_clear_error();
     ImagingMemoryInstance source_owner{};
     const auto release=[](ImagingMemoryInstance* p){genko_imaging_budget_release(p);};
     std::unique_ptr<ImagingMemoryInstance,decltype(release)> source_hold(&source_owner,release);
     const qint64 expected=source.size();
-    if(expected<=0 || expected>cap)throw core::Error("value","text font exceeds byte limit");
+    if(expected>cap)throw NotYetPorted("large_font");
+    if(expected<=0)throw core::Error("value","text font exceeds byte limit");
     if(!genko_imaging_budget_reserve(&source_owner,static_cast<std::uint64_t>(expected)+4096))detail::throw_imaging_error();
     QByteArray bytes(static_cast<qsizetype>(expected),Qt::Uninitialized);
     if(source.read(bytes.data(),expected)!=expected || !source.atEnd())throw core::Error("value","text font changed during read");
@@ -544,6 +546,14 @@ std::shared_ptr<const QByteArray> bundled_bytes(const std::string& name) {
 
 }  // namespace
 
+bool bundled_font_present(const std::string& name) {
+    try {
+        return !bundled_bytes(name)->isEmpty();
+    } catch (const core::Error&) {
+        return false;
+    }
+}
+
 struct TrueTypeFonts::State {
     // (members are destroyed in reverse: the fonts, then the library, then the files' bytes and their reservations)
     ImageAllocationBudget budget{512ULL * 1024 * 1024};  // shares, never enlarges, the enclosing image budget
@@ -570,7 +580,7 @@ struct TrueTypeFonts::State {
     const File& file(const std::string& font) {
         if (const auto it = files.find(font); it != files.end()) return *it->second;
         auto entry = std::make_unique<File>();
-        constexpr qint64 cap = 32 * 1024 * 1024;
+        constexpr qint64 cap = 256 * 1024 * 1024;
         if (bundled_text_font(font)) {
             entry->bytes = bundled_bytes(font);
         } else if (font == kPillowDefaultKey) {
@@ -580,8 +590,8 @@ struct TrueTypeFonts::State {
             if (font.size() > 4096) throw core::Error("value", "font name exceeded");
             QFile source(QString::fromStdString(font));
             if (!source.open(QIODevice::ReadOnly | QIODevice::Unbuffered)) throw NotYetPorted("default_font");
-            // (a font file past the 32 MB this build reads — Python's Pillow reads any — is not drawn with: said by name, so
-            // a page leaves out the letters in it and says so; one with nothing in it is a file FreeType cannot read)
+            // (a font file past the 256 MB this build reads — Python's Pillow reads any — is not drawn with: said by name,
+            // so a page leaves out the letters in it and says so; one with nothing in it is a file FreeType cannot read)
             if (source.size() > cap) throw NotYetPorted("large_font");
             if (source.size() <= 0) throw NotYetPorted("default_font");
             auto bytes = std::make_shared<QByteArray>(source.readAll());
@@ -625,14 +635,15 @@ const TrueTypeFont& TrueTypeFonts::truetype(const std::string& font, int size) {
     if (size > 0xFFFF) throw core::Error("value", "invalid text geometry");
     const auto key = std::make_pair(font, size);
     if (const auto it = s.fonts.find(key); it != s.fonts.end()) return *it->second;
+    const bool ours = bundled_text_font(font) || font == kPillowDefaultKey;
     const State::File& file = s.file(font);
     FT_Face face = nullptr;
     const FT_Error error = FT_New_Memory_Face(s.library, reinterpret_cast<const FT_Byte*>(file.bytes->constData()),
                                               static_cast<FT_Long>(file.bytes->size()), 0, &face);
     if (error) {
         if (genko_imaging_error_kind() != 0 || s.memory.second) detail::throw_imaging_error();
-        if (bundled_text_font(font) || font == kPillowDefaultKey) check_text(error);
-        throw NotYetPorted("default_font");  // (genko.fonts.truetype: Pillow's load_default())
+        if (ours) check_text(error);
+        throw NotYetPorted("default_font");  // (ImageFont.truetype's OSError: genko.fonts.truetype falls back, text::Fonts)
     }
     auto opened = std::unique_ptr<TrueTypeFont>(new TrueTypeFont(face, s.library, size, s.stop));
     // getfont: FT_Request_Size, nominal, size * 64 both ways, no resolution
@@ -644,8 +655,8 @@ const TrueTypeFont& TrueTypeFonts::truetype(const std::string& font, int size) {
     request.vertResolution = 0;
     if (const FT_Error sized = FT_Request_Size(face, &request); sized) {
         if (genko_imaging_error_kind() != 0 || s.memory.second) detail::throw_imaging_error();
-        if (bundled_text_font(font) || font == kPillowDefaultKey) check_text(sized);
-        throw NotYetPorted("default_font");
+        if (ours) check_text(sized);
+        throw NotYetPorted("default_font");  // (the face let go with `opened`)
     }
     if (s.memory.second) detail::throw_imaging_error();
     return *s.fonts.emplace(key, std::move(opened)).first->second;

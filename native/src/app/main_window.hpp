@@ -265,6 +265,8 @@ public:
     int save_after() const { return save_after_ms_; }
     // The tool pictures drawn again (after the screen's colours change).
     Q_INVOKABLE void refresh_icons();
+    // The first steps and the next steps over the page: shown while they apply, with the keys as they are now.
+    void refresh_first_steps();
     // 原稿だけを表示 (Tab), the rest reminder, and the round menu last opened at the pen (null: none open).
     CanvasOnly* canvas_only() const { return canvas_only_; }
     RestReminder* rest() const { return rest_; }
@@ -307,6 +309,8 @@ public:
 
     // --- the commands (the actions by Python's attribute names: "act_new" …) ---------------------------------
     QAction* action(const QString& attribute) const;
+    // "（B）": a command's key as it is now (the person may have changed it), for the hints; nothing when it has none.
+    QString key_hint(const char* attribute) const;
     const std::map<QString, QAction*>& actions_by_name() const { return actions_; }
     const std::map<QString, QAction*>& tool_actions() const { return tool_actions_; }
     const std::vector<QAction*>& border_kind_actions() const { return border_kind_actions_; }
@@ -717,7 +721,7 @@ private:
     bool first_steps_closed_ = false;
     QWidget* next_steps_ = nullptr;
     std::map<QString, QPushButton*> next_buttons_;
-    void refresh_first_steps();
+    std::vector<QPushButton*> first_buttons_;  // (the first steps' buttons: their words and action, the key shown again)
     QWidget* first_steps_bar();
     QWidget* next_steps_bar();
     QMenu* layer_special_menu_ = nullptr;

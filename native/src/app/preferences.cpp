@@ -114,7 +114,7 @@ std::vector<QAction*> commands(QMainWindow* window) {
     for (QAction* action : window->findChildren<QAction*>()) {
         const QString text = action->text();
         if (text.isEmpty() || action->isSeparator() || action->menu() != nullptr || seen.contains(text) ||
-            !action->objectName().startsWith(QStringLiteral("cmd:"))) {
+            !action->objectName().startsWith(QStringLiteral("cmd:")) || remade(action)) {
             continue;
         }
         seen.insert(text);
@@ -128,7 +128,7 @@ void name_commands(MainWindow* window) {
     window->default_shortcuts.clear();
     for (QAction* action : window->findChildren<QAction*>()) {
         const QString text = action->text();
-        if (text.isEmpty() || action->isSeparator() || action->menu() != nullptr) continue;
+        if (text.isEmpty() || action->isSeparator() || action->menu() != nullptr || remade(action)) continue;
         if (action->objectName().isEmpty()) action->setObjectName(QStringLiteral("cmd:%1").arg(text));
         if (action->objectName().startsWith(QStringLiteral("cmd:")) && !window->default_shortcuts.contains(text)) {
             window->default_shortcuts[text] = action->shortcuts();
@@ -194,6 +194,7 @@ void apply_all(MainWindow* window) {
     apply_motion(app);
     apply_font(app);
     window->refresh_icons();
+    window->refresh_first_steps();  // (the keys its buttons show)
     canvas->cursor_kind = cursor_kind();
     canvas->modifier_tools = {{QStringLiteral("alt"), modifier_tool(QStringLiteral("alt"))}, {QStringLiteral("ctrl"), modifier_tool(QStringLiteral("ctrl"))}};
     canvas->tool_modifiers = tool_modifiers();

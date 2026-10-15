@@ -85,10 +85,9 @@ const char* const kPsdLab =
 
 // A WebP, 2×2, as Pillow writes one (opened since M6).
 const char* const kWebp = "UklGRh4AAABXRUJQVlA4TBEAAAAvAUAAAAdQhSJXof+BiOh/AAA=";
-// A TIFF of 2×2 with its red, green and blue in three planes, which Pillow opens and this build does not yet.
-const char* const kPlanarTiff =
-    "SUkqAAgAAAAKAAABAwABAAAAAgAAAAEBAwABAAAAAgAAAAIBAwADAAAAhgAAAAMBAwABAAAAAQAAAAYBAwABAAAAAgAAABEBBAADAAAAjAAAABUBAwABAAAAAwAAABYBAwAB"
-    "AAAAAgAAABcBBAADAAAAmAAAABwBAwABAAAAAgAAAAAAAAAIAAgACACkAAAAqAAAAKwAAAAEAAAABAAAAAQAAAD/AAD/AP8AAAAA/wA=";
+// A PPM of 2×2 (netpbm), which Pillow opens and this build does not read (M7: a recorded limit; TIFFs in planes are
+// read since M7).
+const char* const kUnreadPicture = "UDYKMiAyCjI1NQr/AAAA/wAAAP////8=";
 
 const genko::core::CommandBus& bus() {
     static const genko::core::CommandBus b(render::ops_registry());
@@ -439,7 +438,7 @@ private slots:
         QVERIFY2(said.starts_with("apply: ops[0] place_asset: asset sha256:ab:cd is not in assets/"), said.c_str());
     }
 
-    void aTiffInPlanesIsNotOpenedYet() {
+    void aPictureInAFormatNotReadIsRefusedAndSaid() {
         QTemporaryDir tmp;
         Document doc = book_in(tmp.path());
         // (a WebP is placed and drawn, as Python places and draws it)
@@ -447,21 +446,24 @@ private slots:
         const auto with_webp = bus().apply(doc, Json::array({Json::object({{"op", "place_asset"}, {"page", 1}, {"asset", webp}})}), Actor("human:作者"));
         render::clear_render_caches();
         (void)render::render_page(with_webp.doc.page(0), 60, render::RenderOptions{}, &with_webp.doc);
-        // a TIFF in planes: placed, its size from its directory (as Image.open), and the drawing says it is not drawn
-        // yet — never another picture in its place; a preview leaves it out
-        const std::string ref = put(tmp.path(), genko::core::a2b_base64(kPlanarTiff));
-        const auto placed = bus().apply(doc, Json::array({Json::object({{"op", "place_asset"}, {"page", 1}, {"asset", ref}})}), Actor("human:作者"));
+        // a picture in a format this build does not read (a PPM): placing it is refused as not read by this build (its
+        // size is not read as Image.open reads it); one a book has (placed by the Python app) is said not drawn — never
+        // another picture in its place; a preview leaves it out
+        const std::string ref = put(tmp.path(), genko::core::a2b_base64(kUnreadPicture));
+        const std::string said_placing = refused(doc, Json::array({Json::object({{"op", "place_asset"}, {"page", 1}, {"asset", ref}})}));
+        QVERIFY2(QString::fromStdString(said_placing).contains(QStringLiteral("image_format")), said_placing.c_str());
+        const Document placed = with_placed(doc, ref);
         render::clear_render_caches();
         std::string said;
         try {
-            (void)render::render_page(placed.doc.page(0), 60, render::RenderOptions{}, &placed.doc);
+            (void)render::render_page(placed.page(0), 60, render::RenderOptions{}, &placed);
         } catch (const render::NotYetPorted& e) {
             said = e.element();
         }
         QCOMPARE(QString::fromStdString(said), QStringLiteral("image_format"));
         render::RenderOptions preview;
         preview.skip_unported = true;
-        (void)render::render_page(placed.doc.page(0), 60, preview, &placed.doc);
+        (void)render::render_page(placed.page(0), 60, preview, &placed);
     }
 
     void aScreenTooCoarseIsRefused() {

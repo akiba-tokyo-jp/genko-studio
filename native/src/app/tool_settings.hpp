@@ -35,6 +35,10 @@ QPushButton* menu_button(const QString& label, const std::vector<std::vector<QAc
 // A tool's page: sections (a string starts one) of command rows and switches; nullptr is a gap.
 using PageItem = std::variant<QString, QAction*, QWidget*, std::nullptr_t>;
 QWidget* action_page(const std::vector<PageItem>& items);
+// tool_settings.fit_narrow: a side panel let shrink to the side's width — lists of choices show their start and open
+// wide, long labels wrap, form rows put the field under its name, a box's note goes under its title, and buttons are
+// only as wide as their words — instead of pushing the panel past the edge where the rest is cut off.
+void fit_narrow(QWidget* root);
 
 // How a new line typed with the text tool starts (Python's TextToolSettings): its balloon, direction, face and size,
 // and whether the balloon is drawn by hand.

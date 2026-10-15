@@ -14,6 +14,7 @@
 #include <QMenu>
 #include <QPushButton>
 #include <QSettings>
+#include <QSignalBlocker>
 #include <QSlider>
 #include <QSpinBox>
 #include <QTabWidget>
@@ -30,6 +31,7 @@
 #include "app/config.hpp"
 #include "app/fields.hpp"
 #include "app/look.hpp"
+#include "app/preferences.hpp"
 #include "app/theme.hpp"
 #include "service/wording.hpp"
 #include "core/brushes.hpp"
@@ -403,6 +405,7 @@ BrushPanel::BrushPanel(QWidget* parent) : QWidget(parent) {
     layout->addWidget(crossing);
     layout->addStretch(1);
     loading_ = true;
+    set_personal_pressure(preferences::tablet_gamma());  // (offered before the kept choice is read, so it can be the one)
     load();
     loading_ = false;
     forget->setEnabled(kind().starts_with("my_"));
@@ -629,11 +632,19 @@ void BrushPanel::pick() {
 }
 
 void BrushPanel::set_personal_pressure(std::optional<double> gamma) {
-    for (int at = pressure->count() - 1; at >= 0; --at) {
-        if (pressure->itemText(at).startsWith(QStringLiteral("自分に合わせた"))) pressure->removeItem(at);
+    // (the one chosen stays chosen: measured again, the new curve; taken away, the ordinary one — not whichever item
+    // Qt moves to when the chosen one is removed)
+    const bool chosen = pressure->currentText().startsWith(QStringLiteral("自分に合わせた"));
+    {
+        const QSignalBlocker quiet(pressure);
+        for (int at = pressure->count() - 1; at >= 0; --at) {
+            if (pressure->itemText(at).startsWith(QStringLiteral("自分に合わせた"))) pressure->removeItem(at);
+        }
+        personal_gamma = gamma;
+        if (gamma) pressure->addItem(QStringLiteral("自分に合わせた（γ %1）").arg(QString::number(*gamma, 'g', 6)), *gamma);
+        if (chosen) pressure->setCurrentIndex(-1);
     }
-    personal_gamma = gamma;
-    if (gamma) pressure->addItem(QStringLiteral("自分に合わせた（γ %1）").arg(QString::number(*gamma, 'g', 6)), *gamma);
+    if (chosen) pressure->setCurrentIndex(gamma ? pressure->count() - 1 : std::max(0, pressure->findData(1.0)));
 }
 
 double BrushPanel::nudge_size(int step) {
@@ -927,8 +938,7 @@ Json BrushDialog::data() const {
 }
 
 void BrushDialog::pick_tip() {
-    // (Python offers *.webp too: WebP pictures are not read by this build yet, so they are not offered)
-    const QString path = ask::open_path(this, QStringLiteral("先端にする画像"), QStringLiteral("画像 (*.png *.jpg *.jpeg *.bmp)"));
+    const QString path = ask::open_path(this, QStringLiteral("先端にする画像"), QStringLiteral("画像 (*.png *.jpg *.jpeg *.webp *.bmp)"));
     if (path.isEmpty()) return;
     try {
         tip_png = render::abr::tip_from_picture(std::filesystem::path(path.toStdU16String()));

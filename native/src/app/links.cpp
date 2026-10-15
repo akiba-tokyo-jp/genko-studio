@@ -131,6 +131,18 @@ void Listener::read(QLocalSocket* socket, bool final) {
 
 QStringList command() { return {QCoreApplication::applicationFilePath(), QStringLiteral("app")}; }
 
+QString desktop_argument(const QString& text) {
+    QString quoted;
+    for (const QChar c : text) {
+        if (c == QLatin1Char('"') || c == QLatin1Char('`') || c == QLatin1Char('$') || c == QLatin1Char('\\')) quoted += QLatin1Char('\\');
+        if (c == QLatin1Char('%')) quoted += QLatin1Char('%');
+        quoted += c;
+    }
+    // (the string value's own escape of "\\", applied before the quoting: a backslash is four)
+    quoted.replace(QStringLiteral("\\"), QStringLiteral("\\\\"));
+    return QLatin1Char('"') + quoted + QLatin1Char('"');
+}
+
 std::pair<bool, QString> register_links() {
 #if defined(_WIN32)
     QStringList parts;
@@ -154,8 +166,17 @@ std::pair<bool, QString> register_links() {
     QDir().mkpath(folder);
     const QString entry = folder + QStringLiteral("/genko-links.desktop");
     QFile file(entry);
+    // (each argument quoted as the Desktop Entry Specification asks: a home folder with a space in its name still
+    // runs this program; Python wrote them bare)
+    QStringList exec;
+    for (const QString& part : command()) {
+        if (part.contains(QLatin1Char('\n')) || part.contains(QLatin1Char('\r'))) {
+            return {false, QStringLiteral("登録できませんでした（プログラムの場所に改行があります: %1）").arg(part)};
+        }
+        exec << desktop_argument(part);
+    }
     const QString text = QStringLiteral("[Desktop Entry]\nType=Application\nName=Genko Studio\nNoDisplay=true\nExec=%1 %u\nMimeType=x-scheme-handler/genko;\n")
-                             .arg(command().join(QLatin1Char(' ')));
+                             .arg(exec.join(QLatin1Char(' ')));
     if (!file.open(QIODevice::WriteOnly | QIODevice::Truncate) || file.write(text.toUtf8()) < 0) {
         return {false, QStringLiteral("登録できませんでした（%1 に書けません）").arg(entry)};
     }

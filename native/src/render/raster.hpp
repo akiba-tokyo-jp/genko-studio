@@ -31,6 +31,13 @@ void bake_vectors(const core::Page& page, core::Layer& layer);
 // ops.layer_pixels: the layer's pixels as it shows (its lines and fills drawn in on a copy: the layer is not changed).
 Image layer_pixels(const core::Page& page, const core::Layer& layer);
 
+// ops._mixed_pieces (下地混色・色延び): the line as short pieces (every 1.5 mm, each starting where the last ended), each
+// in the brush's colour mixed with what is on the layer under it (`mix`), the colour picked up carried along
+// (`stretch`: 0 lets go at once, near 1 it is dragged far past where it was picked up). As numpy computes it: the
+// colours in float32, each piece's the mean of its points' (rounded half to even). The first piece keeps the line's id.
+std::vector<core::Stroke> mixed_pieces(const core::Page& page, const core::Layer& layer, const core::Stroke& stroke, double mix,
+                                       double stretch);
+
 // raster.erase_raster: the eraser along `points` (mm) on the layer's pixels: "" (hard, a clean edge), "soft" (the edge
 // fades out) or "rough" (a grain left behind; its random grain seeded with `seed`, Python's f"{layer.id}{points[0]}").
 void erase_raster(const core::Page& page, core::Layer& layer, const core::PenPoints& points, double width_mm, int dpi,

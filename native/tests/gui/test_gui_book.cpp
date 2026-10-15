@@ -406,8 +406,9 @@ private slots:
             QCOMPARE(a->text(), QString::fromUtf8(e.text));
             QVERIFY2(a->shortcuts().isEmpty(), e.attribute);
             QCOMPARE(a->statusTip(), QString::fromUtf8(e.tip));
-            // (Python's tooltip: "<title>  <key>\n<tip>".strip(); without a tip, Qt's own: the title)
-            QCOMPARE(a->toolTip(), *e.tip != '\0' ? QString::fromUtf8(e.text) + QStringLiteral("  \n") + QString::fromUtf8(e.tip) : QString::fromUtf8(e.text));
+            // (as Python's window has it once preferences.retip has run at the start: "<title>（<keys>）\n<tip>", no keys
+            // here; without a tip, the title)
+            QCOMPARE(a->toolTip(), *e.tip != '\0' ? QString::fromUtf8(e.text) + QStringLiteral("\n") + QString::fromUtf8(e.tip) : QString::fromUtf8(e.text));
             QVERIFY2(!a->isCheckable(), e.attribute);
             QVERIFY2(a->isEnabled(), e.attribute);  // (Python's are always on: what cannot be done is said when chosen)
             QCOMPARE(menus_of(s.window.get(), a), QStringList{QString::fromUtf8(e.menu)});

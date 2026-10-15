@@ -374,9 +374,7 @@ private slots:
         const QString assets = scratch_.path() + "/unported-assets";
         QVERIFY(QDir().mkpath(assets));
         doc.asset_dir = path_of(assets);
-        const std::string planar = genko::core::a2b_base64(  // (2×2, red, green and blue in three planes)
-            "SUkqAAgAAAAKAAABAwABAAAAAgAAAAEBAwABAAAAAgAAAAIBAwADAAAAhgAAAAMBAwABAAAAAQAAAAYBAwABAAAAAgAAABEBBAADAAAAjAAAABUBAwABAAAAAwAAABYBAwAB"
-            "AAAAAgAAABcBBAADAAAAmAAAABwBAwABAAAAAgAAAAAAAAAIAAgACACkAAAAqAAAAKwAAAAEAAAABAAAAAQAAAD/AAD/AP8AAAAA/wA=");
+        const std::string planar = genko::core::a2b_base64("UDYKMiAyCjI1NQr/AAAA/wAAAP////8=");  // (a PPM of 2×2: Pillow opens it, this build does not)
         genko::core::Layer placed;
         placed.id = "placed000001";
         placed.kind = genko::core::LayerKind::Placed;

@@ -213,6 +213,12 @@ set_tests_properties(test_contract_pipeline PROPERTIES ENVIRONMENT "QT_QPA_PLATF
 # refused (and `genko studio`'s exit 3), one save for several sheets, chat approvals checked under the lock, another
 # process's lock, confine kept from callers, the command line's own refusals, PDF numbers whatever the locale.
 genko_test(test_service SOURCES unit/test_service.cpp DEPS genko_test_support genko_service LABELS unit)
+# M7 (the ledger counted against the C++ tree): the checks of Python's tests no C++ test made before, ported a Python test
+# to a slot (tools/migration/build_ledger.py TEST_CPP names them)
+genko_test(test_ledger_service_a SOURCES unit/test_ledger_service_a.cpp DEPS genko_test_support genko_service LABELS unit TIMEOUT 900)
+genko_test(test_ledger_service_c SOURCES unit/test_ledger_service_c.cpp DEPS genko_test_support genko_service LABELS unit TIMEOUT 900)
+genko_test(test_ledger_service_b SOURCES unit/test_ledger_service_b.cpp DEPS genko_test_support genko_service genko_api LABELS unit TIMEOUT 2400)
+set_tests_properties(test_ledger_service_b PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen;QTEST_FUNCTION_TIMEOUT=2300000")
 # import_psd (M4②b): psd.read_psd and the op against Python's on the PSD and PSB files of psd_cases.json (every file,
 # a few cut after every byte, all of them changed at a few bytes; each step's reply, snapshot and payload, the layers'
 # pixels, the book read back), and hostile files refused without the memory Python would take.
@@ -331,6 +337,10 @@ if(GENKO_BUILD_APP)
   genko_test(test_gui_workspace SOURCES gui/test_gui_workspace.cpp DEPS genko_app genko_test_support GUI TIMEOUT 600)
   genko_test(test_gui_look SOURCES gui/test_gui_look.cpp DEPS genko_app genko_test_support GUI TIMEOUT 600)
   genko_test(test_gui_carried SOURCES gui/test_gui_carried.cpp DEPS genko_app genko_test_support GUI TIMEOUT 600)
+  # M7 (the ledger counted against the C++ tree): the checks of Python's window tests no C++ test made before
+  genko_test(test_gui_ledger_a SOURCES gui/test_gui_ledger_a.cpp DEPS genko_app genko_test_support GUI TIMEOUT 900)
+  genko_test(test_gui_ledger_c SOURCES gui/test_gui_ledger_c.cpp DEPS genko_app genko_test_support GUI TIMEOUT 900)
+  genko_test(test_gui_ledger_b SOURCES gui/test_gui_ledger_b.cpp DEPS genko_app genko_test_support GUI TIMEOUT 900)
   # the distribution (M6, AC-PACKAGE): this build installed into a folder of its own, run from it with a bare
   # environment, its libraries, notes, licences and SBOM (against docs/cpp-migration/THIRD_PARTY.md), install.sh and
   # uninstall.sh leaving books and settings as they were

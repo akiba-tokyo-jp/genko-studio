@@ -377,6 +377,11 @@ MainWindow::MainWindow(std::shared_ptr<Session> session) {
     preferences::apply_all(this);
     if (gpu_available()) canvas_->use_gpu(true);  // (the page drawn by the graphics card, when chosen and real)
     theme::name_buttons(this);
+    // (tool_settings.fit_narrow, as Python's window does to the side panels and the tool settings: each shrinks to the
+    // side's width instead of being cut off at its edge)
+    for (QDockWidget* dock : findChildren<QDockWidget*>()) {
+        if (dock == tool_settings_dock_ || dockWidgetArea(dock) == Qt::RightDockWidgetArea) fit_narrow(dock->widget());
+    }
     // (within the screen again: the panels laid out while they were made, their title bars not yet taken away, may
     // have made it larger than the room given at the start — a small screen, a large display scaling: SPEC UX-02)
     layout()->activate();
@@ -778,7 +783,13 @@ void MainWindow::refresh_status() {
     if (colours_ != nullptr) colours_->set_page_color(current_page() != nullptr ? current_page()->color : std::nullopt);  // (color-mode@1)
     refresh_first_steps();
     maybe_backup();  // (after a save: バックアップ, when chosen in 環境設定)
-    if (flash_timer_.isActive()) return;  // (a notice is showing: it goes back to the page's status after its time)
+    if (flash_timer_.isActive()) {
+        // (a notice is showing: the status line goes back to the page's status after its time; the view's label and the
+        // commands follow the book and the view meanwhile, as Python's _refresh_zoom)
+        refresh_zoom();
+        refresh_actions();
+        return;
+    }
     const QString saved = state_words(status) + (recording_ ? QStringLiteral(" ・ ● オートアクションを記録中") : QString());
     const core::Page* page = current_page();
     if (page == nullptr) {
@@ -876,6 +887,12 @@ void MainWindow::watch() {
         const QString file = qpath(*session_->path() / "project.json");
         if (QFileInfo::exists(file)) watcher_.addPath(file);
     }
+}
+
+QString MainWindow::key_hint(const char* attribute) const {
+    const QAction* act = action(QString::fromLatin1(attribute));
+    const QString key = act != nullptr ? act->shortcut().toString(QKeySequence::NativeText) : QString();
+    return key.isEmpty() ? QString() : QStringLiteral("（%1）").arg(key);
 }
 
 QString MainWindow::links_kept() const {
@@ -1287,8 +1304,12 @@ QWidget* MainWindow::first_steps_bar() {
     auto* words = new QLabel(QStringLiteral("まだ何もない原稿です。最初の一歩:"));
     theme::role(words, "hint");
     row->addWidget(words);
-    for (const auto& [label, tool, key] : {std::tuple{"コマを割る", "frame", "F"}, {"ペンで描く", "pen", "B"}, {"台詞を入れる", "text", "T"}}) {
-        auto* button = new QPushButton(QStringLiteral("%1（%2）").arg(QString::fromUtf8(label), QString::fromLatin1(key)));
+    for (const auto& [label, tool, attribute] : {std::tuple{"コマを割る", "frame", "act_frame"}, {"ペンで描く", "pen", "act_pen"},
+                                                 {"台詞を入れる", "text", "act_text"}}) {
+        auto* button = new QPushButton(QString::fromUtf8(label) + key_hint(attribute));
+        button->setProperty("words", QString::fromUtf8(label));
+        button->setProperty("attribute", QByteArray(attribute));
+        first_buttons_.push_back(button);
         const QString which = QString::fromLatin1(tool);
         connect(button, &QPushButton::clicked, this, [this, which] { choose_tool(which); });
         row->addWidget(button);
@@ -1361,6 +1382,9 @@ void MainWindow::refresh_first_steps() {
         column_->insertWidget(column_->indexOf(canvas_), first_steps_);
     }
     if (first_steps_ != nullptr) first_steps_->setVisible(empty);
+    for (QPushButton* button : first_buttons_) {  // (the keys as they are now: 環境設定 may have changed them)
+        button->setText(button->property("words").toString() + key_hint(button->property("attribute").toByteArray().constData()));
+    }
     // (I11) after the first panels: the next steps, marked as they are done, until closed
     QAction* wanted = action(QStringLiteral("act_next_steps"));
     const bool next = panels && wanted != nullptr && wanted->isChecked() && !(first_steps_ != nullptr && first_steps_->isVisible());
@@ -1371,8 +1395,8 @@ void MainWindow::refresh_first_steps() {
     if (next_steps_ == nullptr) return;
     const bool saved = session_->path().has_value() && session_->status().kind == SaveKind::Saved;
     const auto mark = [](bool done, const QString& words) { return (done ? QStringLiteral("✓ ") : QString()) + words; };
-    next_buttons_[QStringLiteral("draw")]->setText(mark(drawn, QStringLiteral("ペンで描く（B）")));
-    next_buttons_[QStringLiteral("line")]->setText(mark(lines, QStringLiteral("台詞を入れる（T）")));
+    next_buttons_[QStringLiteral("draw")]->setText(mark(drawn, QStringLiteral("ペンで描く") + key_hint("act_pen")));
+    next_buttons_[QStringLiteral("line")]->setText(mark(lines, QStringLiteral("台詞を入れる") + key_hint("act_text")));
     next_buttons_[QStringLiteral("save")]->setText(mark(saved, QStringLiteral("保存")));
     next_buttons_[QStringLiteral("export")]->setText(QStringLiteral("書き出し…"));
     next_steps_->setVisible(next);

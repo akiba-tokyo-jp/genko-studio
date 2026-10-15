@@ -9,6 +9,8 @@
 #include <QNetworkRequest>
 #include <QUrl>
 
+#include <algorithm>
+#include <cctype>
 #include <chrono>
 #include <ctime>
 #include <set>
@@ -78,32 +80,57 @@ std::string read_data_url(const std::string& url) {
     return urls::unquote_to_bytes(data);
 }
 
+// The same scheme, host and port.
+bool same_origin(const std::string& a, const std::string& b) {
+    const urls::Parts x = urls::urlsplit(a);
+    const urls::Parts y = urls::urlsplit(b);
+    std::string hx = x.netloc, hy = y.netloc;
+    std::transform(hx.begin(), hx.end(), hx.begin(), [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+    std::transform(hy.begin(), hy.end(), hy.begin(), [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+    return x.scheme == y.scheme && hx == hy;
+}
+
 std::string http_get(const std::string& url) {
     QNetworkAccessManager manager;
     QNetworkProxyFactory::setUseSystemConfiguration(true);  // (urllib reads the proxy from the environment)
-    QNetworkRequest request{QUrl(QString::fromStdString(url))};
-    request.setRawHeader("User-Agent", "GenkoStudio");
-    request.setRawHeader("Accept", "application/json, image/*");
     const std::string token = env("GENKO_STYLE_CATALOG_TOKEN");
-    if (!token.empty()) request.setRawHeader("Authorization", QByteArray::fromStdString("Bearer " + token));
-    request.setAttribute(QNetworkRequest::RedirectPolicyAttribute, QNetworkRequest::NoLessSafeRedirectPolicy);
-    request.setTransferTimeout(std::chrono::seconds(kTimeoutSeconds));
-    QNetworkReply* reply = manager.get(request);
-    QEventLoop loop;
-    QObject::connect(reply, &QNetworkReply::finished, &loop, &QEventLoop::quit);
-    if (!reply->isFinished()) loop.exec();
-    const QVariant status = reply->attribute(QNetworkRequest::HttpStatusCodeAttribute);
-    const QByteArray body = reply->readAll();
-    const QNetworkReply::NetworkError failure = reply->error();
-    reply->deleteLater();
-    if (status.isValid() && status.toInt() >= 400) {
-        const int code = status.toInt();
-        if (code == 404) throw CatalogError("絵柄カタログにその絵柄がない（id を確かめる）");
-        if (code == 401) throw CatalogError("絵柄カタログが限定公開になっている（GENKO_STYLE_CATALOG_TOKEN が要る）");
-        throw CatalogError("絵柄カタログが答えなかった（HTTP " + std::to_string(code) + "）");
+    std::string at = url;
+    for (int hop = 0;; ++hop) {
+        QNetworkRequest request{QUrl(QString::fromStdString(at))};
+        request.setRawHeader("User-Agent", "GenkoStudio");
+        request.setRawHeader("Accept", "application/json, image/*");
+        // (the catalog's token goes to the catalog only: not to another host a reply names, as Python sent it, nor to
+        // one a redirect names — those followed here, so that a hop to another host goes without it; M7 review)
+        const bool with_token = !token.empty() && same_origin(at, base());
+        if (with_token) request.setRawHeader("Authorization", QByteArray::fromStdString("Bearer " + token));
+        request.setAttribute(QNetworkRequest::RedirectPolicyAttribute,
+                             with_token ? QNetworkRequest::ManualRedirectPolicy : QNetworkRequest::NoLessSafeRedirectPolicy);
+        request.setTransferTimeout(std::chrono::seconds(kTimeoutSeconds));
+        QNetworkReply* reply = manager.get(request);
+        QEventLoop loop;
+        QObject::connect(reply, &QNetworkReply::finished, &loop, &QEventLoop::quit);
+        if (!reply->isFinished()) loop.exec();
+        const QVariant status = reply->attribute(QNetworkRequest::HttpStatusCodeAttribute);
+        const QVariant target = reply->attribute(QNetworkRequest::RedirectionTargetAttribute);
+        const QByteArray body = reply->readAll();
+        const QNetworkReply::NetworkError failure = reply->error();
+        reply->deleteLater();
+        if (with_token && target.isValid() && status.isValid() && status.toInt() >= 300 && status.toInt() < 400) {
+            // (as the policy without the token: at most Qt's 50 hops, never from https to http)
+            const QUrl next = request.url().resolved(target.toUrl());
+            if (hop >= 50 || (request.url().scheme() == QLatin1String("https") && next.scheme() == QLatin1String("http"))) unreachable();
+            at = next.toString().toStdString();
+            continue;
+        }
+        if (status.isValid() && status.toInt() >= 400) {
+            const int code = status.toInt();
+            if (code == 404) throw CatalogError("絵柄カタログにその絵柄がない（id を確かめる）");
+            if (code == 401) throw CatalogError("絵柄カタログが限定公開になっている（GENKO_STYLE_CATALOG_TOKEN が要る）");
+            throw CatalogError("絵柄カタログが答えなかった（HTTP " + std::to_string(code) + "）");
+        }
+        if (failure != QNetworkReply::NoError) unreachable();
+        return body.toStdString();
     }
-    if (failure != QNetworkReply::NoError) unreachable();
-    return body.toStdString();
 }
 
 Json reply_json(const std::string& path) {
@@ -280,7 +307,13 @@ std::optional<std::string> sample_png(const Json& data) {
     if (!core::py_truthy(samples)) return std::nullopt;
     const Json sample = sample_at(samples, index);
     if (!sample.is_object() || !core::truthy_at(sample, "url")) return std::nullopt;
-    const std::string raw = get(py_str(core::subscript(sample, "url")));
+    // (a sample's address comes from the catalog's reply: a file of this computer only from a catalog that is itself
+    // a folder here — not from one on the network; M7 review)
+    const std::string sample_url = py_str(core::subscript(sample, "url"));
+    if (urls::urlsplit(sample_url).scheme == "file" && urls::urlsplit(base()).scheme != "file") {
+        throw CatalogError("絵柄の見本の絵が読めない");
+    }
+    const std::string raw = get(sample_url);
     render::Image picture;
     try {
         picture = render::open_image(raw);

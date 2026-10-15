@@ -120,7 +120,12 @@ QString test_data(const QString& relative) {
     return relative.isEmpty() ? root : root + QLatin1Char('/') + relative;
 }
 
-QString genko_cli() { return QString::fromUtf8(GENKO_CLI); }
+QString genko_cli() {
+    // (GENKO_TEST_GENKO: another genko to run instead of this build's — M7 runs the MCP contract with the official SDK's
+    // client against the program installed from the package)
+    const QString other = qEnvironmentVariable("GENKO_TEST_GENKO");
+    return other.isEmpty() ? QString::fromUtf8(GENKO_CLI) : other;
+}
 
 QString lock_helper() { return QString::fromUtf8(GENKO_LOCK_HELPER); }
 QString argv_helper() { return QString::fromUtf8(GENKO_ARGV_HELPER); }

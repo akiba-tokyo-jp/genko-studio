@@ -354,6 +354,11 @@ def api_job() -> dict:
             {"method": "GET", "path": "/v1/inspect?path=link_out"},
             {"method": "POST", "path": "/v1/assets?path=link_out", "base64": img, "headers": {"Content-Type": "image/png"}},
             {"method": "POST", "path": "/v1/export", "json": {"path": "api.genko", "out": "link_out/x"}},
+            # a name that is not there, then "..", then the link: still the link's place (Path.resolve follows it)
+            {"method": "POST", "path": "/v1/export", "json": {"path": "api.genko", "out": "nope/../link_out/x"}},
+            {"method": "POST", "path": "/v1/new", "json": {"dest": "nope/../link_out/escape.genko"}},
+            {"method": "GET", "path": "/v1/inspect?path=nope%2F..%2Flink_out"},
+            {"method": "POST", "path": "/v1/assets?path=nope%2F..%2Flink_out", "base64": img, "headers": {"Content-Type": "image/png"}},
             {"method": "POST", "path": "/v1/apply", "json": {"path": "api.genko", "ops": [{"op": "add_line", "page": 1, "text": "こんにちは",
                                                                                           "x_mm": 30, "y_mm": 40}]}},
             {"method": "POST", "path": "/v1/apply", "json": {"path": "api.genko", "ops": [{"op": "set_note", "page": 1, "text": "x"}],
@@ -369,6 +374,8 @@ def api_job() -> dict:
             {"method": "POST", "path": "/v1/apply", "json": {"path": "api.genko", "ops": [{"op": "put_raster", "page": 1, "path": "/etc/passwd"}]}},
             {"method": "POST", "path": "/v1/apply", "json": {"path": "api.genko", "ops": [{"op": "set_meta", "font_path": "../x.ttf"}]}},
             {"method": "POST", "path": "/v1/apply", "json": {"path": "api.genko", "ops": [{"op": "put_raster", "page": 1, "path": "link_out/secret.png"}]}},
+            {"method": "POST", "path": "/v1/apply", "json": {"path": "api.genko", "ops": [{"op": "put_raster", "page": 1,
+                                                                                          "path": "nope/../link_out/secret.png"}]}},
             # paths given as numbers or lists to the ops that read a file: read as their text, inside the root
             {"method": "POST", "path": "/v1/apply", "json": {"path": "api.genko", "ops": [{"op": "put_raster", "page": 1, "path": 5}]}},
             {"method": "POST", "path": "/v1/apply", "json": {"path": "api.genko", "ops": [{"op": "put_raster", "page": 1, "path": ["x"]}]}},

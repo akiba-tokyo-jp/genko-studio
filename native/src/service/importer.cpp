@@ -28,11 +28,7 @@ using core::py_truthy;
 
 namespace {
 
-fs::path resolved(const fs::path& path) {
-    std::error_code ec;
-    fs::path out = fs::weakly_canonical(path, ec);
-    return ec ? path.lexically_normal() : out;
-}
+fs::path resolved(const fs::path& path) { return core::resolve_path(path); }
 
 bool strictly_under(const fs::path& path, const fs::path& root) {
     auto p = path.begin();

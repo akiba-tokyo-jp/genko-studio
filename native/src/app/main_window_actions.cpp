@@ -163,6 +163,7 @@ bool key_releases_watched() { return key_watch != nullptr && key_watch->on; }
 
 void MainWindow::fill_actions_menu() {
     QMenu* menu = actions_menu_;
+    for (QMenu* sub : menu->findChildren<QMenu*>(Qt::FindDirectChildrenOnly)) sub->deleteLater();  // (clear() leaves them)
     menu->clear();
     if (!recording_) {
         menu->addAction(QStringLiteral("記録を始める"), this, [this] { start_recording(); });
@@ -458,7 +459,9 @@ void MainWindow::build_actions() {
     make("act_point_wider", QStringLiteral("選んだ点を太く"), [this] { point_width(1.25); }, keys({QKeySequence(QStringLiteral("Ctrl+Alt+]"))}),
          QStringLiteral("線の編集で選んだ制御点のところだけ、線を太くします"));
     make("act_color", QStringLiteral("ペンの色…"), [this] { pick_colour(); }, keys({QKeySequence(QStringLiteral("C"))}));
-    make("act_layer_merge_down", QStringLiteral("下のレイヤーと結合"), [this] { layer_operation("merge_down"); });
+    // (one chosen in a list, then merged with the one under it: named apart from Python's 下のレイヤーと結合, which
+    // merges the panel's chosen layer at once — a command's name says one thing)
+    make("act_layer_merge_down", QStringLiteral("レイヤーを選んで下と結合…"), [this] { layer_operation("merge_down"); });
     make("act_layer_merge_layers", QStringLiteral("選んだレイヤーを結合…"), [this] { layer_operation("merge_layers"); });
     make("act_layer_merge_visible", QStringLiteral("表示レイヤーの結合コピーを作る"), [this] { layer_operation("merge_visible"); });
     make("act_layer_flatten", QStringLiteral("画像をフラット化…"), [this] { layer_operation("flatten"); });
@@ -568,6 +571,7 @@ void MainWindow::build_menus() {
     file->addAction(action("act_new"));
     file->addAction(action("act_open"));
     recent_menu_ = file->addMenu(QStringLiteral("最近使った原稿"));
+    recent_menu_->setProperty("remade", true);
     connect(recent_menu_, &QMenu::aboutToShow, this, [this] {
         recent_menu_->clear();
         const auto paths = recent_projects();
@@ -599,6 +603,7 @@ void MainWindow::build_menus() {
     file->addAction(action("act_timelapse_export"));
     file->addSeparator();
     actions_menu_ = file->addMenu(QStringLiteral("オートアクション"));
+    actions_menu_->setProperty("remade", true);
     connect(actions_menu_, &QMenu::aboutToShow, this, &MainWindow::fill_actions_menu);
     fill_actions_menu();
     file->addSeparator();
@@ -720,6 +725,7 @@ void MainWindow::build_menus() {
     view_menu_->addAction(action("act_prev_doc"));
     view_menu_->addSeparator();
     workspace_menu_ = view_menu_->addMenu(QStringLiteral("ワークスペース"));
+    workspace_menu_->setProperty("remade", true);
     connect(workspace_menu_, &QMenu::aboutToShow, this, &MainWindow::fill_workspaces);
     view_menu_->addAction(action("act_edit_commandbar"));
     view_menu_->addAction(action("act_edit_quick"));
@@ -1693,6 +1699,7 @@ void MainWindow::show_tool_names(bool on, bool save) {
 }
 
 void MainWindow::fill_workspaces() {
+    for (QMenu* sub : workspace_menu_->findChildren<QMenu*>(Qt::FindDirectChildrenOnly)) sub->deleteLater();  // (clear() leaves them)
     workspace_menu_->clear();
     workspace_menu_->addAction(action(QStringLiteral("act_save_workspace")));
     workspace_menu_->addAction(QStringLiteral("はじめの配置に戻す"), this, [this] { default_layout(); });
@@ -1711,6 +1718,11 @@ bool MainWindow::save_workspace(std::optional<QString> name) {
         name = *typed;
     }
     const QString kept = name->trimmed();
+    if (kept.contains(QLatin1Char('/')) || kept.contains(QLatin1Char('\\'))) {
+        // (the settings keep a workspace under its name: "/" and "\" would make it a group inside another)
+        flash(QStringLiteral("ワークスペースの名前に「/」「\\」は使えません"), 5000, true);
+        return false;
+    }
     genko::app::save_workspace(this, kept);
     flash(QStringLiteral("ワークスペース「%1」を残しました（ウィンドウ → ワークスペース）").arg(kept), 3000);
     return true;

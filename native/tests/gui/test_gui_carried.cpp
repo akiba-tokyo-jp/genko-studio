@@ -184,7 +184,14 @@ private slots:
         QVERIFY(picture.save(file, "JPEG"));
         const std::string frame = book.page(0).leaf_frames()[0]->id;
         QVERIFY(book.window->apply_ops(Json::array({Json{{"op", "select_frame"}, {"page", 1}, {"frame_id", frame}}})));
-        QVERIFY(book.window->import_image(file));
+        // (ファイル → 画像を読み込む…: the file chosen in its dialog, answered here)
+        QString filter;
+        book.answers.responder->open_path = [&filter, file](const QString&, const QString& f) {
+            filter = f;
+            return file;
+        };
+        book.act("act_import")->trigger();
+        QVERIFY2(filter.contains(QStringLiteral("*.jpg")) && filter.contains(QStringLiteral("*.psd")), qPrintable(filter));
         const core::Layer* placed = nullptr;
         for (const core::Layer& l : book.page(0).layers) {
             if (l.kind == core::LayerKind::Placed) placed = &l;

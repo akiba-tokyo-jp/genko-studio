@@ -64,10 +64,12 @@ fs::path make(const fs::path& project, const fs::path& folder, int keep, std::op
     const fs::path out = folder / core::path_from_utf8((stem + QLatin1Char('_') + stamp + QStringLiteral(".zip")).toStdString());
     fs::path part = out;
     part.replace_extension(".zip.part");
-    // (a part left by a backup that was stopped — one runs at a time — is gone first)
+    // (a part left by a backup of this book that was stopped — one runs at a time — is gone first; only this book's
+    // name and a time: book "a" leaves book "a_b"'s part alone, which may be being written)
+    const QRegularExpression stopped(QStringLiteral("^%1_\\d{8}-\\d{6}\\.zip\\.part$").arg(QRegularExpression::escape(stem)),
+                                     QRegularExpression::UseUnicodePropertiesOption);
     for (fs::directory_iterator it(folder, error), end; !error && it != end; it.increment(error)) {
-        const QString name = qpath(it->path().filename());
-        if (name.startsWith(stem + QLatin1Char('_')) && name.endsWith(QStringLiteral(".zip.part"))) fs::remove(it->path(), error);
+        if (stopped.match(qpath(it->path().filename())).hasMatch()) fs::remove(it->path(), error);
     }
     error.clear();
     // the book as one state: its project.json and journal the same before and after (a save by another program while

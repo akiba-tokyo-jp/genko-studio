@@ -35,7 +35,7 @@ bool same_content(const core::Json& a, const core::Json& b, std::string* where =
 
 QString repo_root();
 QString test_data(const QString& relative = {});
-// The genko executable of this build.
+// The genko executable of this build (or the one $GENKO_TEST_GENKO names: an installed package's).
 QString genko_cli();
 // The genko_lock_helper executable of this build (holds a book's project lock in another process).
 QString lock_helper();

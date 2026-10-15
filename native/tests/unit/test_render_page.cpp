@@ -43,11 +43,9 @@ using genko::core::Num;
 
 namespace {
 
-// A TIFF of 2 × 2 whose red, green and blue lie in three planes (PlanarConfiguration 2), as base64: Pillow opens it;
-// this build does not read it yet (render::NotYetPorted "image_format", known from its directory).
-const char* const kPlanarTiff =
-    "SUkqAAgAAAAKAAABAwABAAAAAgAAAAEBAwABAAAAAgAAAAIBAwADAAAAhgAAAAMBAwABAAAAAQAAAAYBAwABAAAAAgAAABEBBAADAAAAjAAAABUBAwABAAAAAwAAABYBAwAB"
-    "AAAAAgAAABcBBAADAAAAmAAAABwBAwABAAAAAgAAAAAAAAAIAAgACACkAAAAqAAAAKwAAAAEAAAABAAAAAQAAAD/AAD/AP8AAAAA/wA=";
+// A PPM of 2 × 2 (red, green, blue, white), as base64: Pillow opens it; this build does not read the netpbm formats
+// (render::NotYetPorted "image_format", known from its first bytes; M7: a recorded limit).
+const char* const kUnreadPicture = "UDYKMiAyCjI1NQr/AAAA/wAAAP////8=";
 
 genko::core::StrokePtr line(double x, double y, double dx, double dy, std::string kind = "gpen") {
     auto s = std::make_shared<genko::core::Stroke>();
@@ -292,14 +290,14 @@ private slots:
         if (w == "nombre") page.numero = true;
         if (w == "anim") page.extra["anim"] = Json::object({{"fps", 12}, {"tracks", Json::array()}});
         QTemporaryDir assets;
-        if (w == "image_format") {  // (a placed picture whose asset is a TIFF of 2×2 in three planes, which Pillow opens)
+        if (w == "image_format") {  // (a placed picture whose asset is a PPM of 2×2, which Pillow opens)
             QVERIFY(assets.isValid());
             doc.asset_dir = std::filesystem::path(assets.path().toStdString());
             Layer placed;
             placed.id = genko::core::new_id();
             placed.kind = LayerKind::Placed;
             placed.asset = genko::storage::AssetStore(*doc.asset_dir)
-                               .put_bytes(genko::core::a2b_base64(kPlanarTiff), ".png");
+                               .put_bytes(genko::core::a2b_base64(kUnreadPicture), ".png");
             placed.placement_mm = genko::core::Rect{Num(5), Num(5), Num(30), Num(30)};
             page.layers.push_back(placed);
         }
@@ -451,8 +449,9 @@ private slots:
         // skip_unported, is left out and reported — that line's letters: the page, the other lines and the balloons are
         // drawn, and parts of the page are the same as the whole page cut. (1) OpenType features on letters across:
         // Pillow without raqm (the BASIC layout the reference is held to) raises KeyError, which text_layout keeps; (2)
-        // a font file past the 32 MB this build reads (Python reads any), the book's, for a balloon's letters and for a
-        // line not placed (its label).
+        // a font file that cannot be read (33 MB of nothing), the book's, for a balloon's letters and for a line not
+        // placed (its label): drawn with Pillow's own default font, as genko.fonts.truetype falls back — nothing left out
+        // (M7).
         const Document base = book();
         const Num index = base.pages[0]->index;
         Document plain = base;
@@ -505,10 +504,10 @@ private slots:
             fonted.add_line(index, "自分の書体", "", std::nullopt, "", Num(20), Num(50), Num(30), Num(20), "box").style["font"] = "mincho";
             render::RenderOptions options;
             options.mode = "proof";
-            QCOMPARE(unported_element(*fonted.pages[0], fonted, options), std::string("large_font"));
+            QCOMPARE(unported_element(*fonted.pages[0], fonted, options), std::string());
             options.skip_unported = true;
             const render::RenderResult r = render::render_page(*fonted.pages[0], 150, options, &fonted);
-            QCOMPARE(r.omitted, std::vector<std::string>{"large_font"});
+            QVERIFY(r.omitted.empty());
             QVERIFY(r.image.tobytes() != render::render_page(*base.pages[0], 150, options, &base).image.tobytes());
         }
         QVERIFY(QFile::remove(big));
@@ -523,7 +522,7 @@ private slots:
         const Document plain = doc;
         const Num index = doc.pages[0]->index;
         doc.add_line(index, "絵", "", std::nullopt, "", Num(2), Num(2), Num(12), Num(8), "picture").style["picture"] =
-            std::string(kPlanarTiff);
+            std::string(kUnreadPicture);
         render::RenderOptions proof;
         proof.mode = "proof";
         QCOMPARE(unported_element(*doc.pages[0], doc, proof), std::string("image_format"));
@@ -538,14 +537,14 @@ private slots:
     }
 
     void unported_picture_leaves_its_group_out_everywhere() {
-        // A joined group (style.group) with a picture balloon this build cannot open yet (a TIFF in planes): the whole page drawn with
+        // A joined group (style.group) with a picture balloon this build does not read (a PPM): the whole page drawn with
         // skip_unported leaves the whole group out and says so; so does every part of the page — one the picture reaches,
         // and one it does not that the group's other balloon reaches — so each part is the whole page cut.
         Document doc = book();
         const Num index = doc.pages[0]->index;
         {
             genko::core::StoryLine& picture = doc.add_line(index, "絵", "", std::nullopt, "", Num(2), Num(2), Num(12), Num(8), "picture");
-            picture.style["picture"] = std::string(kPlanarTiff);
+            picture.style["picture"] = std::string(kUnreadPicture);
             picture.style["group"] = "g";
         }
         doc.add_line(index, "遠くの台詞", "", std::nullopt, "", Num(40), Num(70), Num(25), Num(18), "speech").style["group"] = "g";

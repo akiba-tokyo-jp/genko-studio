@@ -95,7 +95,6 @@ Json doctor(const fs::path& dir) {
     out["version"] = get(payload, "version") != nullptr ? *get(payload, "version") : Json(nullptr);
     out["revision"] = get(payload, "revision") != nullptr ? *get(payload, "revision") : Json(nullptr);
     out["problems"] = Json::array();
-    out["checks_skipped"] = Json::array({"bundled font (the text module brings the fonts: M4)"});
     if (version < 4) {
         out["needs_migration"] = true;
         out["problems"] = std::move(problems);

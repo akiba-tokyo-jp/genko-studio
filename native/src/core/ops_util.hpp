@@ -122,6 +122,13 @@ using PaperTakeIn = std::function<std::string(std::string_view file_bytes)>;
 // render/paper's. Without `take_in` (core's own registry) a paper given as "png" is refused with not_yet_ported; one
 // given by the "asset" of a paper the book keeps is taken either way.
 void register_define_brush(OpRegistry& registry, PaperTakeIn take_in = {});
+// ops._mixed_pieces (下地混色・色延び): a line drawn with `mix` > 0 on a layer that has something on it, as short pieces,
+// each in the brush's colour mixed with what is on the layer under it (`stretch`: how far the colour picked up is
+// carried). render's (render/raster.hpp mixed_pieces, which sees the layer's pixels).
+using MixPieces = std::function<std::vector<Stroke>(const Page& page, const Layer& layer, const Stroke& stroke, double mix, double stretch)>;
+// add_stroke again, able to mix (render::ops_registry registers it with render's mixed_pieces). Without `mix` (core's own
+// registry) such a line is refused with not_yet_ported.
+void register_add_stroke(OpRegistry& registry, MixPieces mix);
 void register_layer_ops(OpRegistry& registry);
 void register_color_ops(OpRegistry& registry);
 // Register the ops of M3-A that draw nothing (move_layers, group_layers, set_paper, set_timelapse, store_area,

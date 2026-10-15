@@ -230,6 +230,7 @@ struct Setup {
     int photo = 0;
     int compression = 1;
     int planar = 1;
+    int samples = 1;  // (the bands: without the unspecified extra samples a file in planes drops, as Pillow)
     std::string mode;
     std::string rawmode;
 };
@@ -310,6 +311,7 @@ Setup setup(TIFF* tif, std::string_view bytes) {
         extra.clear();
     }
     if (static_cast<std::size_t>(samples) > kMaxSamplesPerPixel) unidentified("Invalid value for samples per pixel");
+    s.samples = samples;
     if (bits.size() != static_cast<std::size_t>(samples)) bits.assign(static_cast<std::size_t>(std::max(0, samples)), bps_one);
     const int big = TIFFIsBigEndian(tif) ? 1 : 0;
     const auto find = [&](int fill_order) -> const OpenInfo* {
@@ -360,6 +362,17 @@ Image oriented(Image image, int orientation) {
     }
 }
 
+// Pillow's libtiff decoder: YCbCr through libtiff's RGBA reader, but JPEG's own YCbCr in one plane (given as RGB).
+bool rgba_reader(const Setup& s) { return s.photo == 6 && !(s.compression == 7 && s.planar == 1); }
+
+// The samples in separate planes (PlanarConfiguration 2) of more than one sample, read plane by plane; a file of one
+// sample in planes is laid out as a contiguous one.
+bool in_planes(TIFF* tif, const Setup& s) {
+    uint16_t file_samples = 1;
+    TIFFGetFieldDefaulted(tif, TIFFTAG_SAMPLESPERPIXEL, &file_samples);
+    return s.planar == 2 && file_samples > 1 && !rgba_reader(s);
+}
+
 }  // namespace
 
 bool tiff_signature(std::string_view b) {
@@ -382,7 +395,12 @@ bool tiff_unported(std::string_view bytes) {
     if (!tiff_signature(bytes)) return false;
     try {
         Tiff t(bytes);
-        return t.tif != nullptr && setup(t.tif, bytes).planar == 2;
+        if (t.tif == nullptr) return false;
+        const Setup s = setup(t.tif, bytes);
+        if (!in_planes(t.tif, s)) return false;
+        uint16_t bits = 8;
+        TIFFGetFieldDefaulted(t.tif, TIFFTAG_BITSPERSAMPLE, &bits);
+        return bits % 8 != 0;  // (the planes read_tiff does not put together)
     } catch (const core::Error&) {
         return false;  // (not a picture Pillow opens: no picture, as Python's)
     }
@@ -394,11 +412,72 @@ Image read_tiff(std::string_view bytes, const PngLimits& limits) {
     TIFF* tif = t.tif;
     const Setup s = setup(tif, bytes);
     check_size(s.width, s.height, limits);
-    if (s.planar == 2) throw NotYetPorted("image_format");  // (the samples in separate planes)
     const Size size{s.width, s.height};
     Image image;
-    if (s.photo == 6 && s.compression != 7) {
-        // old-style YCbCr: through libtiff's RGBA reader, as Pillow's decoder reads it (raw mode RGBX)
+    if (in_planes(tif, s)) {
+        // the samples in separate planes (PlanarConfiguration 2), as Pillow's libtiff decoder reads them: each of the
+        // image's bands read whole (not the unspecified extra samples dropped), then put side by side as a contiguous
+        // file holds them
+        const auto samples = static_cast<uint16_t>(s.samples);
+        uint16_t bits = 8;
+        TIFFGetFieldDefaulted(tif, TIFFTAG_BITSPERSAMPLE, &bits);
+        if (bits % 8 != 0 || samples == 0) throw NotYetPorted("image_format");
+        const std::size_t width = static_cast<std::size_t>(s.width), height = static_cast<std::size_t>(s.height);
+        const std::size_t sample_bytes = bits / 8;
+        const tmsize_t plane_row = TIFFScanlineSize(tif);  // (one sample's row)
+        if (plane_row <= 0 || static_cast<std::size_t>(plane_row) < width * sample_bytes) undecodable("decoder error -2");
+        std::vector<std::string> planes(samples, std::string(static_cast<std::size_t>(plane_row) * height, '\0'));
+        if (TIFFIsTiled(tif)) {
+            uint32_t tile_w = 0;
+            uint32_t tile_h = 0;
+            TIFFGetField(tif, TIFFTAG_TILEWIDTH, &tile_w);
+            TIFFGetField(tif, TIFFTAG_TILELENGTH, &tile_h);
+            const tmsize_t tile_row = TIFFTileRowSize(tif);
+            const tmsize_t tile_bytes = TIFFTileSize(tif);
+            if (tile_w == 0 || tile_h == 0 || tile_row <= 0 || tile_bytes <= 0) undecodable("decoder error -2");
+            if (tile_bytes > plane_row * static_cast<tmsize_t>(height) + (tmsize_t{64} << 20)) undecodable("decoder error -2");
+            std::vector<unsigned char> tile(static_cast<std::size_t>(tile_bytes));
+            for (uint16_t sample = 0; sample < samples; ++sample) {
+                for (uint32_t y = 0; y < static_cast<uint32_t>(height); y += tile_h) {
+                    for (uint32_t x = 0; x < static_cast<uint32_t>(width); x += tile_w) {
+                        if (TIFFReadTile(tif, tile.data(), x, y, 0, sample) < 0) undecodable("decoder error -2");
+                        const std::size_t at = static_cast<std::size_t>(x / tile_w) * static_cast<std::size_t>(tile_row);
+                        for (uint32_t r = 0; r < tile_h && y + r < static_cast<uint32_t>(height); ++r) {
+                            if (at >= static_cast<std::size_t>(plane_row)) break;
+                            const std::size_t take = std::min(static_cast<std::size_t>(tile_row), static_cast<std::size_t>(plane_row) - at);
+                            std::memcpy(planes[sample].data() + static_cast<std::size_t>(y + r) * static_cast<std::size_t>(plane_row) + at,
+                                        tile.data() + r * static_cast<std::size_t>(tile_row), take);
+                        }
+                    }
+                }
+            }
+        } else {
+            uint32_t rows_per_strip = static_cast<uint32_t>(height);
+            TIFFGetFieldDefaulted(tif, TIFFTAG_ROWSPERSTRIP, &rows_per_strip);
+            rows_per_strip = std::max<uint32_t>(1, std::min<uint32_t>(rows_per_strip, static_cast<uint32_t>(height)));
+            for (uint16_t sample = 0; sample < samples; ++sample) {
+                for (std::size_t first = 0; first < height; first += rows_per_strip) {
+                    const tstrip_t strip = TIFFComputeStrip(tif, static_cast<uint32_t>(first), sample);
+                    const std::size_t rows = std::min<std::size_t>(rows_per_strip, height - first);
+                    if (TIFFReadEncodedStrip(tif, strip, planes[sample].data() + first * static_cast<std::size_t>(plane_row),
+                                             static_cast<tmsize_t>(rows) * plane_row) < 0) {
+                        undecodable("decoder error -2");
+                    }
+                }
+            }
+        }
+        std::string data(width * height * samples * sample_bytes, '\0');
+        for (std::size_t y = 0; y < height; ++y) {
+            for (std::size_t x = 0; x < width; ++x) {
+                for (std::size_t c = 0; c < samples; ++c) {
+                    std::memcpy(data.data() + ((y * width + x) * samples + c) * sample_bytes,
+                                planes[c].data() + y * static_cast<std::size_t>(plane_row) + x * sample_bytes, sample_bytes);
+                }
+            }
+        }
+        image = Image::frombytes(s.mode, size, data, s.rawmode);
+    } else if (rgba_reader(s)) {
+        // YCbCr (old-style, or JPEG's in planes): through libtiff's RGBA reader, as Pillow's decoder reads it (raw mode RGBX)
         std::vector<uint32_t> raster(static_cast<std::size_t>(s.width) * static_cast<std::size_t>(s.height));
         if (TIFFReadRGBAImageOriented(tif, static_cast<uint32_t>(s.width), static_cast<uint32_t>(s.height), raster.data(), ORIENTATION_TOPLEFT, 0) != 1) {
             undecodable("decoder error -2");

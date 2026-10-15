@@ -12,10 +12,10 @@ Genko Studio は画面の部品に **Qt 6.11.2** を使っています。Qt は 
 
 Qt 6.11.2 の対応するソースコードは、次から入手できます。
 
-- https://download.qt.io/official_releases/qt/6.11/6.11.2/single/ （`qt-everywhere-src-6.11.2.tar.xz`）
-- https://download.qt.io/official_releases/qt/6.11/6.11.2/submodules/ （モジュールごと）
+- https://download.qt.io/archive/qt/6.11/6.11.2/single/ （`qt-everywhere-src-6.11.2.tar.xz`）
+- https://download.qt.io/archive/qt/6.11/6.11.2/submodules/ （モジュールごと）
 
-上の場所で入手できなくなったときの受け取り方は、配布元の案内に従ってください。
+（download.qt.io の `official_releases/` には新しい版だけが残り、古い版は `archive/` に移ります。上は移った後の場所です）
 
 ## Qt を差し替える
 
@@ -30,6 +30,4 @@ Qt 6.11.2 の対応するソースコードは、次から入手できます。
 
 ## Qt が中に含む第三者のソフトウェア
 
-Qt のライブラリには、Qt 自身が取り込んだ第三者のソフトウェア（PCRE2、HarfBuzz、FreeType、libpng、double-conversion、MD4C など。ビルドによって違います）が含まれます。それぞれのライセンスと帰属表示は、Qt の文書「Licenses Used in Qt」（https://doc.qt.io/qt-6/licenses-used-in-qt.html）にあります。
-
-この配布物には、まだその全文を入れていません（既知の制限。最終の配布の前に入れます）。
+Qt のライブラリとプラグインには、Qt 自身が取り込んだ第三者のソフトウェア（PCRE2、HarfBuzz、libpng、libjpeg-turbo、libtiff、libwebp、double-conversion、MD4C など）が含まれます。それぞれの名前・版・ライセンス・著作権表示・ライセンス文の全文を `licenses/qt-3rdparty/NOTICES.txt` に入れています（Qt 6.11.2 のソースの帰属表示から。Qt の文書「Licenses Used in Qt」https://doc.qt.io/qt-6/licenses-used-in-qt.html も参照）。

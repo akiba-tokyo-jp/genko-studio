@@ -45,6 +45,7 @@ cd genko-studio-<版>-linux-x86_64
 - 起動: メニューの「Genko Studio」、または `genko-studio`（`~/.local/bin` が PATH にないときは `~/.local/opt/genko-studio-<版>/bin/genko`）。
 - 入れずに、展開したフォルダーの `bin/genko` をそのまま起動することもできます。
 - 外す: `~/.local/opt/genko-studio-<版>/uninstall.sh`。外すのはプログラムのフォルダーとメニューの項目・起動のリンクだけです。**原稿・設定・旧版（Python 版）は消しません。**
+- 新しい版にする: 新しい版の `install.sh` で入れます（版ごとのフォルダーに入り、メニューには版の付いた項目が並びます。`genko-studio` の起動のリンクは新しい版を指します）。新しい版で困らなければ、古い版の `uninstall.sh` で古い版を外します（原稿・設定はそのまま使えます）。
 
 ### Windows
 

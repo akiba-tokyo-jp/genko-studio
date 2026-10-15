@@ -1,6 +1,7 @@
 #pragma once
 
 #include <QDialog>
+#include <QPointer>
 #include <QString>
 #include <QStringList>
 #include <QWidget>
@@ -28,6 +29,10 @@ std::vector<QAction*> commands(QMainWindow* window);
 std::map<QString, QAction*> by_text(QMainWindow* window);
 // The menu path of a command ("ページ → コマ"; empty when it is in no menu).
 QString where(QMainWindow* window, const QAction* action);
+// An item a menu makes again each time it opens (recent books, オートアクション, ワークスペース, ストック: the menus with
+// the property "remade"), deleted then: not a command to keep in the quick access, the command bar or the keys, nor to
+// find.
+bool remade(const QAction* action);
 // The commands whose name, menu or explanation holds every word (in any order, any case).
 std::vector<QAction*> search(QMainWindow* window, const QString& words);
 
@@ -52,6 +57,9 @@ protected:
 private:
     QMainWindow* window_;
     std::vector<QAction*> found_;
+    // (the same, held so that one a menu has since deleted — its items made again as it opens — is not run: the window
+    // stays usable while this is open)
+    std::vector<QPointer<QAction>> alive_;
 };
 
 // The command names kept under a setting ("|" for a line between), and keep them. A command renamed since keeps its

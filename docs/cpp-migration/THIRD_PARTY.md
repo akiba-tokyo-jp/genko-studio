@@ -6,11 +6,11 @@
 
 | 名前 | 版（Linux CI / Windows vcpkg） | ライセンス | 用途 | 配布 |
 |---|---|---|---|---|
-| Qt 6（Core, Gui, Widgets, Network, Concurrent, Svg, PrintSupport, OpenGL, OpenGLWidgets, 画面・画像形式などのプラグイン） | 6.11.2（公式バイナリ） | LGPL-3.0-only | GUI、画像、ネットワーク、印刷、GPU のキャンバス表示 | 動的リンク。`lib/`・`plugins/`（Windows は `bin\`）。Qt のライセンス文（`licenses/qt/`）、対応ソースの入手先、差し替え方法（`QT-LGPL-ja.md`）を同梱。Qt が中に含む第三者のソフトウェアの帰属表示の全文は未同梱（既知の制限） |
+| Qt 6（Core, Gui, Widgets, Network, Concurrent, Svg, PrintSupport, OpenGL, OpenGLWidgets, 画面・画像形式などのプラグイン） | 6.11.2（公式バイナリ） | LGPL-3.0-only | GUI、画像、ネットワーク、印刷、GPU のキャンバス表示 | 動的リンク。`lib/`・`plugins/`（Windows は `bin\`）。Qt のライセンス文（`licenses/qt/`）、対応ソースの入手先、差し替え方法（`QT-LGPL-ja.md`）を同梱。Qt が中に含む第三者のソフトウェアの帰属表示とライセンス文の全文は `licenses/qt-3rdparty/NOTICES.txt` |
 | ICU（Qt の公式バイナリに付くもの） | 73.2 / なし | Unicode-DFS-2016 AND ICU AND BSD-3-Clause AND NAIST-2003（辞書・時刻帯のデータの条件を含む。全文は `licenses/icu/LICENSE`） | Qt の文字処理（Linux） | Linux: 動的リンク、`lib/libicu*.so.73` を同梱 |
 | libxcb の補助ライブラリ（libxcb-cursor・icccm・image・keysyms・render-util・util） | 0.1.4・0.4.1・0.4.0・0.4.0・0.3.9・0.4.0（Ubuntu 24.04）/ なし | MIT | Qt の X11（xcb）の画面プラグインが使う。デスクトップに無いことがある | Linux: 動的リンク、`lib/` に同梱。著作権表示は `licenses/xcb-util/` |
 | Microsoft Visual C++ の再頒布可能ランタイム | なし / Visual Studio 2022 | LicenseRef-MSVC-Redistributable | Windows の実行時ライブラリ | Windows: `bin\` に同梱（Windows の実機での受け入れは未了） |
-| nlohmann/json | 3.11.3 | MIT | JSON | ヘッダーのみ |
+| nlohmann/json | 3.11.3 | MIT | JSON | ヘッダーのみ（プログラムに組み込まれる。ライセンス文は `licenses/nlohmann-json/`） |
 | zlib | 1.3 / 1.3.1 | Zlib | 圧縮（PNG、PDF、PSD） | Windows: 静的。Linux: コンピューターのもの |
 | libpng | 1.6.43 / 1.6.x | libpng-2.0 | PNG | Windows: 静的。Linux: コンピューターのもの |
 | libjpeg-turbo | 2.1.5 / 3.x | IJG AND BSD-3-Clause AND Zlib | JPEG | Windows: 静的。Linux: コンピューターのもの |

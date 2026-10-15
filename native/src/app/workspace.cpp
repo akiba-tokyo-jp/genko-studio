@@ -41,7 +41,7 @@ void walk(QMenu* menu, const std::function<void(QAction*)>& each) {
         if (action->isSeparator()) continue;
         if (action->menu() != nullptr) {
             walk(action->menu(), each);
-        } else {
+        } else if (!remade(action)) {
             each(action);
         }
     }
@@ -69,6 +69,14 @@ const std::map<QString, QString>& renamed() {
 const QString kLine = QStringLiteral("――（区切り）");
 
 }  // namespace
+
+bool remade(const QAction* action) {
+    for (const QObject* up = action->parent(); up != nullptr; up = up->parent()) {
+        if (qobject_cast<const QMenu*>(up) == nullptr) return false;
+        if (up->property("remade").toBool()) return true;
+    }
+    return false;
+}
 
 std::vector<QAction*> commands(QMainWindow* window) {
     std::vector<QAction*> out;
@@ -132,9 +140,11 @@ CommandSearch::CommandSearch(QMainWindow* window) : QDialog(window), window_(win
 void CommandSearch::refresh() {
     results->clear();
     found_.clear();
+    alive_.clear();
     for (QAction* action : search(window_, query->text())) {
         if (!action->isEnabled()) continue;
         found_.push_back(action);
+        alive_.emplace_back(action);
         if (found_.size() == 60) break;
     }
     for (QAction* action : found_) {
@@ -158,8 +168,12 @@ void CommandSearch::keyPressEvent(QKeyEvent* event) {
 
 void CommandSearch::run() {
     const int row = results->currentRow();
-    if (row < 0 || row >= static_cast<int>(found_.size())) return;
-    QAction* action = found_[static_cast<std::size_t>(row)];
+    if (row < 0 || row >= static_cast<int>(alive_.size())) return;
+    const QPointer<QAction> action = alive_[static_cast<std::size_t>(row)];
+    if (action.isNull()) {
+        refresh();  // (its menu made its items again: the list found again, nothing run)
+        return;
+    }
     accept();
     action->trigger();
 }

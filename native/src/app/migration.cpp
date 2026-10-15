@@ -177,8 +177,10 @@ QString offer(QWidget* parent, const Places& places) {
     } catch (const std::exception&) {
         return {};
     }
-    if (made && fs::is_directory(places.legacy_dir, ec)) {  // (an owner-only folder stays so)
-        fs::permissions(places.dir, fs::status(places.legacy_dir, ec).permissions(), fs::perm_options::replace, ec);
+    if (made && fs::is_directory(places.legacy_dir, ec)) {
+        // (an owner-only folder stays so; and this app writes in its own, whatever the old one allowed — a read-only
+        // old folder, a link into a store, would leave the new one unwritable)
+        fs::permissions(places.dir, fs::status(places.legacy_dir, ec).permissions() | fs::perms::owner_all, fs::perm_options::replace, ec);
     }
     QLockFile lock(QString::fromStdString(core::path_to_utf8(places.dir / "migration.lock")));
     lock.setStaleLockTime(0);

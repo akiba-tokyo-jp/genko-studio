@@ -130,9 +130,9 @@ std::map<std::string, std::string> parse_query(const std::string& query) {
 
 // Path.resolve() (strict=False): symbolic links followed as far as the path exists, the rest normalised.
 fs::path resolved(const fs::path& path) {
-    std::error_code ec;
-    fs::path out = fs::weakly_canonical(path, ec);
-    if (ec) throw Forbidden{"path cannot be resolved: " + core::path_to_utf8(path)};
+    fs::path out = core::resolve_path(path);
+    // (Python 3.12's Path.resolve: a loop of symbolic links is RuntimeError, never a path to serve)
+    if (core::symlink_loop(out)) throw Forbidden{"path cannot be resolved: " + core::path_to_utf8(path)};
     return out;
 }
 

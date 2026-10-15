@@ -248,7 +248,8 @@ private:
         std::size_t held = 0;          // the precise colour pictures it replaced (kept alive by `before` alone)
         std::uint64_t undone_seq = 0;  // undo(): when it was undone (in the order of the actions' seq)
         // Written to the journal even when it is undone before it is saved (made, then undone): it ends what the journal
-        // holds to redo, as Python's journal, where every change is written at once (apply()).
+        // holds to redo, as Python's journal, where every change is written at once (apply()); or the journal may be read
+        // back under it while it is undone (undo()).
         bool journal = false;
     };
 
@@ -325,6 +326,9 @@ private:
     // changes before them, and the ones undone): with the queue, journal_after() gives what they will be.
     std::int64_t journal_undo_ = 0;
     std::int64_t journal_redo_ = 0;
+    // An adopted recovery point left memory (trim_history): the journal's Undo depth under it — Undo stops there
+    // (recover_undo), as it stops at the point while it is in memory.
+    std::optional<std::int64_t> recover_floor_;
     bool trimmed_ = false;        // trim_history let changes of this session go to the journal
     std::uint64_t redo_floor_ = 0;  // apply(): what was undone before it (an action's seq below this) is not redone
     mutable std::shared_ptr<const JournalRead> journal_read_;  // history(): the journal as last read
@@ -354,11 +358,17 @@ private:
     QTimer retry_timer_;
     QThread thread_;
     QObject* worker_ = nullptr;  // lives on thread_: the jobs run there, one at a time, in order
+    // The recovery points (written and removed, in order) on their own thread: never behind a long save or a backup
+    // zipped between the saves (beside_saves), so one is there within the checkpoint's time (SAVE-03). They read only
+    // the book in memory and write only its recovery folder.
+    QThread recovery_thread_;
+    QObject* recovery_worker_ = nullptr;
     std::uint64_t next_seq_ = 0;
     std::uint64_t next_ticket_ = 0;
     std::uint64_t save_as_ticket_ = 0;
     std::vector<std::uint64_t> before_save_as_;  // the actions queued when save_as was asked (the old place's)
     bool recovery_job_ = false;
+    bool recovery_superseded_ = false;  // the recovery point being written is removed after it (the book holds it all)
     bool recovery_requested_ = false;
     std::size_t worker_jobs_ = 0;  // jobs given to the worker and not back yet (every kind)
 };

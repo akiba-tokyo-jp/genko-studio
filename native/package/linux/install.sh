@@ -26,6 +26,7 @@ entry="$data/applications/genko-studio-$version.desktop"
 while IFS= read -r line || [ -n "$line" ]; do
   case "$line" in
     Exec=*) printf 'Exec="%s" app %%f\n' "$target/bin/genko" ;;
+    Name=*) printf '%s %s\n' "$line" "$version" ;;  # (版ごとの項目: 新しい版を並べて入れても見分けられる)
     *) printf '%s\n' "$line" ;;
   esac
 done < "$here/share/genko-studio/genko-studio.desktop.in" > "$entry"

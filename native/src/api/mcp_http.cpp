@@ -120,8 +120,16 @@ public:
 
     void bound(std::uint16_t port) {
         port_ = port;
-        // (a host that is not a loopback name: only that host and port, where the SDK checks nothing)
-        if (!loopback(options_.host)) hosts_.push_back(options_.host + ":" + std::to_string(port));
+        // (a host that is not a loopback name: only that host and port, where the SDK checks nothing — an IPv6
+        // address in brackets, as a client writes it; a wildcard address (every interface) has no one name the clients
+        // use, so there, as in the SDK, the Host is not checked)
+        if (loopback(options_.host)) return;
+        if (options_.host.empty() || options_.host == "0.0.0.0" || options_.host == "::" || options_.host == "[::]") {
+            check_host_ = false;
+            return;
+        }
+        const bool v6 = options_.host.find(':') != std::string::npos && options_.host.front() != '[';
+        hosts_.push_back((v6 ? "[" + options_.host + "]" : options_.host) + ":" + std::to_string(port));
     }
 
     void handle(const http::Request& request, http::Responder& r) {
@@ -218,7 +226,7 @@ private:
         for (const std::string& allowed : hosts_) {
             if (host == allowed || (allowed.ends_with(":*") && host.rfind(allowed.substr(0, allowed.size() - 1), 0) == 0)) host_ok = true;
         }
-        if (host.empty() || !host_ok) {
+        if (check_host_ && (host.empty() || !host_ok)) {
             text(421, "Invalid Host header");
             return false;
         }
@@ -648,6 +656,7 @@ private:
     HttpOptions options_;
     std::uint16_t port_ = 0;
     std::vector<std::string> hosts_;
+    bool check_host_ = true;
     std::vector<std::string> origins_;
     std::mutex mutex_;
     std::map<std::string, std::shared_ptr<Session>> sessions_;
