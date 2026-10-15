@@ -3,7 +3,6 @@
 #include <algorithm>
 #include <chrono>
 #include <map>
-#include <memory>
 #include <mutex>
 #include <set>
 #include <system_error>
@@ -196,14 +195,16 @@ std::size_t parse_lines(std::string_view data, std::size_t& number, std::vector<
     return complete;
 }
 
-// A file's lines as read last (without their "ops"), and its first bytes and the last before complete_size: the file
-// is taken as grown from them when it is no shorter and has the same bytes there (as Python's journal._edges). The lines
-// are shared: a read takes the entry, parses what the file gained outside the lock, and puts the entry back.
+// A file's lines as read last, kept as text: each complete line that is a JSON object, without its "ops", written again
+// compactly — one string, not the parsed values (PERF-G: those, thousands of small pieces made one save after another on
+// the save thread, kept its heap from going back to the system); and the file's first bytes and the last before
+// complete_size: the file is taken as grown from them when it is no shorter and has the same bytes there (as Python's
+// journal._edges). A read takes a copy of the entry, adds what the file gained, and puts it back.
 struct Parsed {
     std::string edges;
     std::uintmax_t complete_size = 0;
     std::size_t numbered = 0;
-    std::vector<std::shared_ptr<const Json>> values;
+    std::string light;
     std::vector<std::size_t> unreadable;
     std::uint64_t used = 0;
 };
@@ -250,13 +251,13 @@ Lines read_lines_without_ops(const fs::path& file) {
     std::vector<Json> added;
     std::size_t numbered = p.numbered;
     const std::size_t complete = parse_lines(std::string_view(data).substr(p.complete_size), numbered, added, p.unreadable, true);
-    p.values.reserve(p.values.size() + added.size());
-    for (Json& value : added) p.values.push_back(std::make_shared<const Json>(std::move(value)));
+    for (const Json& value : added) p.light += line_text(value);
     p.numbered = numbered;
     p.complete_size += complete;
     p.edges = edges_of(data, p.complete_size);
-    out.values.reserve(p.values.size());
-    for (const auto& value : p.values) out.values.push_back(*value);
+    std::size_t light_lines = 0;
+    std::vector<std::size_t> none;
+    parse_lines(p.light, light_lines, out.values, none, false);
     out.unreadable = p.unreadable;
     out.complete_size = p.complete_size;
     out.tail = data.substr(p.complete_size);

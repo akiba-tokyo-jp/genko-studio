@@ -16,14 +16,20 @@ namespace genko::app::memory {
 namespace {
 
 constexpr int kIdleMs = 10000;
+constexpr int kAgainMs = 5000;
 
-// (an application-wide filter: any input starts the wait again; after it, the room goes back once)
+// (an application-wide filter: any input starts the wait again; after it, the room goes back, and again every 5 s while
+// nothing comes — the work that ends meanwhile, a page's fine picture drawn after it was turned or a save, leaves its
+// room too, instead of keeping it until the next pause after the next input: PERF-G)
 class IdleWatch : public QObject {
 public:
     IdleWatch() : QObject(QCoreApplication::instance()) {
         timer_.setSingleShot(true);
         timer_.setInterval(kIdleMs);
-        connect(&timer_, &QTimer::timeout, this, [] { give_back(); });
+        connect(&timer_, &QTimer::timeout, this, [this] {
+            give_back();
+            timer_.start(kAgainMs);
+        });
         QCoreApplication::instance()->installEventFilter(this);
         timer_.start();
     }
@@ -40,7 +46,7 @@ public:
             case QEvent::Wheel:
             case QEvent::TouchBegin:
             case QEvent::InputMethod:
-                timer_.start();
+                timer_.start(kIdleMs);
                 break;
             default:
                 break;

@@ -11,7 +11,8 @@ namespace genko::app::memory {
 // blocks of 256 KiB and more — the tiles and pictures — from the system and back to it when freed). At the start of the
 // program, before any thread (`genko app` does it first); later calls do nothing.
 void tune();
-// Watch the application's input (once; later calls do nothing): after 10 s without any, the free room goes back once.
+// Watch the application's input (once; later calls do nothing): after 10 s without any, the free room goes back, and
+// again every 5 s while none comes (the work that ends meanwhile leaves its room too).
 void watch_idle();
 // The free room back to the system now.
 void give_back();

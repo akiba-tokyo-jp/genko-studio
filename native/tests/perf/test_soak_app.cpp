@@ -29,6 +29,7 @@
 #include <algorithm>
 #include <cctype>
 #include <cmath>
+#include <cstdio>
 #include <fstream>
 #if defined(__GLIBC__)
 #include <malloc.h>
@@ -145,6 +146,38 @@ std::string private_by_kind() {
 
 // The C library's heap (glibc): what is in use, and what is free but still held (kB); -1 elsewhere. (Shown with each
 // round, to tell the memory the program holds from the heap's own room.)
+// GENKO_SOAK_TRACE (a file): after each round, the C library's account of each arena (malloc_info) and every anonymous
+// mapping of 16 MiB or more with its private memory — to tell a heap growing from one held by a few live pieces.
+void trace_round(std::size_t round, double minute) {
+    const QByteArray where = qgetenv("GENKO_SOAK_TRACE");
+    FILE* out = std::fopen(where.constData(), "a");
+    if (out == nullptr) return;
+    std::fprintf(out, "=== round %zu at %.1f min\n", round, minute);
+#if defined(__GLIBC__)
+    malloc_info(0, out);
+#endif
+    std::ifstream in("/proc/self/smaps");
+    std::string line, range;
+    bool anon = false;
+    long long size_kb = 0;
+    while (std::getline(in, line)) {
+        if (!line.empty() && std::isxdigit(static_cast<unsigned char>(line[0])) && line.find('-') != std::string::npos &&
+            line.find(':') > line.find(' ')) {
+            std::istringstream fields(line);
+            std::string perms, offset, dev, inode, path;
+            fields >> range >> perms >> offset >> dev >> inode;
+            std::getline(fields, path);
+            anon = path.find_first_not_of(' ') == std::string::npos;
+            continue;
+        }
+        if (line.rfind("Size:", 0) == 0) size_kb = std::stoll(line.substr(5));
+        if (anon && size_kb >= 16 * 1024 && line.rfind("Private_Dirty:", 0) == 0) {
+            std::fprintf(out, "anon %s size %lld kB private_dirty %lld kB\n", range.c_str(), size_kb, std::stoll(line.substr(14)));
+        }
+    }
+    std::fclose(out);
+}
+
 std::pair<long long, long long> heap_kb() {
 #if defined(__GLIBC__)
     const struct mallinfo2 m = mallinfo2();
@@ -371,6 +404,7 @@ private slots:
                   "private by kind: %s",
                   samples.size(), samples.back().minute, samples.back().kb / 1024, status_kb("VmHWM") / 1024, in_use / 1024, free_kb / 1024,
                   window->session().changes_in_memory(), private_by_kind().c_str());
+            if (qEnvironmentVariableIsSet("GENKO_SOAK_TRACE")) trace_round(samples.size(), samples.back().minute);
         }
         QVERIFY2(samples.size() >= 2, "too short for two rounds");
         QVERIFY2(samples.front().kb >= 0, "no /proc/self/smaps_rollup here");
