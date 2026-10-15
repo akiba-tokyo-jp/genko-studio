@@ -797,7 +797,13 @@ void MainWindow::build_docks() {
     quick_access_ = new QuickAccess(this);
     quick_dock_ = new QDockWidget(QStringLiteral("クイックアクセス"), this);
     quick_dock_->setObjectName(QStringLiteral("クイックアクセス"));
-    quick_dock_->setWidget(quick_access_);
+    // (scrolls on a small screen instead of making the window wider or taller, as the layers: SPEC UX-02)
+    auto* quick_scroll = new QScrollArea;
+    quick_scroll->setWidgetResizable(true);
+    quick_scroll->setFrameShape(QFrame::NoFrame);
+    quick_scroll->setHorizontalScrollBarPolicy(Qt::ScrollBarAsNeeded);  // (its buttons reachable on a narrow panel too)
+    quick_scroll->setWidget(quick_access_);
+    quick_dock_->setWidget(quick_scroll);
     quick_dock_->setFeatures(navigator_dock_->features());
     addDockWidget(Qt::LeftDockWidgetArea, quick_dock_);
     tabifyDockWidget(navigator_dock_, quick_dock_);

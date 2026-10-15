@@ -248,8 +248,13 @@ private slots:
         // act_page_nombre, act_add_cover, act_assignee, act_merge_book, act_import_psd; act_nombre, Python's now, was
         // here before) theirs (test_gui_book), the 6 of the book going out (M4③b: act_export, act_print, act_history,
         // act_phone, act_scale, act_checks) theirs (test_gui_output), the 2 of the studio (M5④: act_chat_approval,
-        // act_style) theirs (test_gui_studio), the colour mode of pages (CMYK/Lab: act_color_mode) its own (test_gui_book).
-        QCOMPARE(w->actions_by_name().size(), std::size_t{195});
+        // act_style) theirs (test_gui_studio), the colour mode of pages (CMYK/Lab: act_color_mode) its own (test_gui_book), the
+        // 17 of M6 — 環境設定 and the work (act_prefs, act_canvas_only, act_hints, act_tool_names, act_edit_commandbar,
+        // act_edit_quick, act_save_workspace, act_next_steps, act_find_command, act_ai) theirs (test_gui_look,
+        // test_gui_workspace, test_gui_studio), the help (act_help_keys, act_help_guide, act_help_faq, act_about), the
+        // book preview, the border detail and the picture taken in (act_book_preview, act_border_detail, act_import) theirs
+        // (test_gui_carried).
+        QCOMPARE(w->actions_by_name().size(), std::size_t{212});
         QVERIFY(w->action("act_chat_approval"));
         QVERIFY(w->action("act_style"));
         QVERIFY(w->action("act_exposure"));
@@ -270,16 +275,16 @@ private slots:
             QCOMPARE(a->isCheckable(), e.checkable);
             const QStringList where = menus_of(w, a);
             QVERIFY2(where.contains(QString::fromUtf8(e.menu)), qPrintable(name + QStringLiteral(" is in ") + where.join(QStringLiteral(", "))));
-            // the tooltip: Python's "<title>  <key>\n<tip>", and for the tools on the palette "<name>（<key>）\n<tip>"
+            // the tooltip, as Python's window has it from its start (preferences.retip): "<name>（<keys>）\n<tip>" — the
+            // palette's tools so from the first
             const bool palette_tool = name == QLatin1String("act_select") || name == QLatin1String("act_pen") || name == QLatin1String("act_eraser") ||
                                       name == QLatin1String("act_frame") || name == QLatin1String("act_move");
             if (palette_tool) {
                 QCOMPARE(a->toolTip(), QStringLiteral("%1（%2）\n%3").arg(a->text(), a->shortcut().toString(), a->statusTip()));
             } else if (*e.tip != '\0') {
-                QCOMPARE(a->toolTip(),
-                         (QString::fromUtf8(e.text) + QStringLiteral("  ") + a->shortcut().toString(QKeySequence::NativeText) + QStringLiteral("\n") +
-                          QString::fromUtf8(e.tip))
-                             .trimmed());
+                const QString keys = a->shortcut().toString(QKeySequence::NativeText);
+                QCOMPARE(a->toolTip(), QString::fromUtf8(e.text) + (keys.isEmpty() ? QString() : QStringLiteral("（%1）").arg(keys)) + QStringLiteral("\n") +
+                                           QString::fromUtf8(e.tip));
             }
         }
         // the palette and the command bar (Python's order); with M3's eight ways of the marquee (test_gui_select) and its

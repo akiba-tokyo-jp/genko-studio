@@ -233,7 +233,10 @@ private slots:
         std::set<QString> named;
         for (const Json& file : sbom["files"]) {
             const QString name = QString::fromStdString(file["fileName"].get<std::string>()).mid(2);  // ("./…")
-            QCOMPARE(QString::fromStdString(file["checksums"][0]["checksumValue"].get<std::string>()), sha256(prefix_ + QLatin1Char('/') + name));
+            std::map<std::string, QString> sums;
+            for (const Json& sum : file["checksums"]) sums[sum["algorithm"].get<std::string>()] = QString::fromStdString(sum["checksumValue"].get<std::string>());
+            QCOMPARE(sums["SHA256"], sha256(prefix_ + QLatin1Char('/') + name));
+            QCOMPARE(sums["SHA1"].size(), 40);  // (SPDX 2.3 asks for it)
             named.insert(name);
         }
         QVERIFY(named.contains(kProgram));

@@ -29,6 +29,7 @@
 #include "app/ask.hpp"
 #include "app/config.hpp"
 #include "app/fields.hpp"
+#include "app/look.hpp"
 #include "app/theme.hpp"
 #include "service/wording.hpp"
 #include "core/brushes.hpp"
@@ -779,7 +780,7 @@ BrushDialog::BrushDialog(QWidget* parent, const std::string& base, bool editing)
     paper_seed->setValue(static_cast<int>(paper.seed));
     paper_seed->setToolTip(QStringLiteral("紙の画像をどこから敷き始めるか。同じ値なら、どの PC でも同じ紙目になります"));
 
-    auto* form = new QFormLayout;
+    auto* form = look::form();
     form->addRow(QStringLiteral("名前"), name);
     form->addRow(section(QStringLiteral("線の太さと筆圧")));
     form->addRow(QStringLiteral("太さ（はじめの値）"), width);
@@ -798,7 +799,7 @@ BrushDialog::BrushDialog(QWidget* parent, const std::string& base, bool editing)
     form->addRow(QStringLiteral("色延び"), stretch);
     form->addRow(QString(), fixed);
     form->addRow(QString(), white);
-    auto* tips = new QFormLayout;
+    auto* tips = look::form();
     tips->addRow(section(QStringLiteral("先端")));
     tips->addRow(QStringLiteral("先端の形"), tip);
     tips->addRow(QString(), tip_picture);
@@ -814,7 +815,7 @@ BrushDialog::BrushDialog(QWidget* parent, const std::string& base, bool editing)
     tips->addRow(QStringLiteral("大きさの乱れ"), jitter);
     tips->addRow(QString(), turn);
     tips->addRow(QStringLiteral("一度に置く数"), count);
-    auto* papers = new QFormLayout;
+    auto* papers = look::form();
     papers->addRow(section(QStringLiteral("紙質"), QStringLiteral("先端の画像とは別に、線の下に敷く紙の画像です")));
     papers->addRow(QString(), paper_on);
     papers->addRow(QString(), paper_picture);
@@ -830,6 +831,7 @@ BrushDialog::BrushDialog(QWidget* parent, const std::string& base, bool editing)
     papers->addRow(QStringLiteral("紙目の位置"), paper_coords);
     papers->addRow(QStringLiteral("継ぎ目"), paper_seam);
     papers->addRow(QStringLiteral("乱数の種"), paper_seed);
+    for (QFormLayout* rows : {form, tips, papers}) look::quiet_labels(rows);
     auto* tabs = new QTabWidget;
     auto* basic = new QWidget;
     auto* shape = new QWidget;
@@ -848,23 +850,19 @@ BrushDialog::BrushDialog(QWidget* parent, const std::string& base, bool editing)
     sample->setMinimumSize(260, 160);
     sample->setAlignment(Qt::AlignCenter);
     sample->setStyleSheet(QStringLiteral("background: white; border-radius: 6px"));
-    auto* header = new QLabel(editing ? QStringLiteral("「%1」の設定を直します。これから描く線に効きます。").arg(QString::fromStdString(b.label))
-                                      : QStringLiteral("「%1」をもとに、自分のブラシを作ります。元のブラシは変わりません。").arg(QString::fromStdString(b.label)));
-    header->setWordWrap(true);
-    theme::role(header, "hint");
     auto* change = new QLabel(QStringLiteral("値を変えると、すぐにこの線が描き直されます（弱く・強く・弱くと押した線）。"));
     change->setWordWrap(true);
     theme::role(change, "hint");
     auto* side = new QVBoxLayout;
     side->addWidget(sample, 1);
     side->addWidget(change);
-    auto* body = new QHBoxLayout;
-    body->addWidget(tabs, 3);
-    body->addLayout(side, 2);
-    auto* layout = new QVBoxLayout(this);
-    layout->addWidget(header);
-    layout->addLayout(body, 1);
-    layout->addWidget(buttons);
+    // (the dialogs' parts, as Python's dialog_look: the heading, the settings, the sample on its card, the footer)
+    const QString label = QString::fromStdString(b.label);
+    look::frame(this,
+                editing ? look::header(QStringLiteral("ブラシの詳細"), QStringLiteral("「%1」の設定を直します。これから描く線に効きます。").arg(label))
+                        : look::header(QStringLiteral("ブラシを複製して調整"),
+                                       QStringLiteral("「%1」をもとに、自分のブラシを作ります。元のブラシは変わりません。").arg(label)),
+                tabs, look::card(side, QStringLiteral("試し描き")), look::footer(buttons));
     resize(900, 600);
     for (QSpinBox* w : {thin, opacity, steady, tip_angle, tip_ratio, spacing, scatter, stamp, jitter, count, speed, post})
         connect(w, &QSpinBox::valueChanged, this, [this] { draw_sample(); });

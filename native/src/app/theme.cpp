@@ -293,6 +293,10 @@ QString style_sheet(const Tokens& t, double pt) {
     s += QStringLiteral("QListWidget::item { padding: 4px 8px; border-radius: 4px; }\n");
     s += QStringLiteral("QListWidget::item:hover { background: %1; }\n").arg(t.hover);
     s += QStringLiteral("QListWidget::item:selected { background: %1; color: %2; }\n").arg(t.selected, t.text);
+    // (the layers' eyes, as Python's theme: an eye to show, a struck-through one to hide)
+    s += QStringLiteral("QListWidget#layerList::indicator { width: 18px; height: 18px; padding: 3px; margin-right: 1px; }\n");
+    s += QStringLiteral("QListWidget#layerList::indicator:checked { image: url(%1); }\n").arg(indicator("eye", t.text));
+    s += QStringLiteral("QListWidget#layerList::indicator:unchecked { image: url(%1); }\n").arg(indicator("eye_off", t.faint));
     s += QStringLiteral("QScrollBar:vertical { background: transparent; width: 10px; margin: 0; }\n");
     s += QStringLiteral("QScrollBar:horizontal { background: transparent; height: 10px; margin: 0; }\n");
     s += QStringLiteral("QScrollBar::handle { background: %1; border-radius: 4px; min-height: 24px; min-width: 24px; margin: 1px; }\n").arg(t.border);

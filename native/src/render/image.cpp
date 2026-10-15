@@ -590,7 +590,7 @@ Image Image::quantize(int colors) const {
 
 std::vector<std::array<std::uint8_t, 3>> Image::palette() const {
     std::vector<std::array<std::uint8_t, 3>> out;
-    if (im_ == nullptr || im_->palette == nullptr || mode() != "P") return out;
+    if (im_ == nullptr || im_->palette == nullptr || (mode() != "P" && mode() != "PA")) return out;  // (getpalette)
     const int size = std::clamp(im_->palette->size, 0, 256);
     for (int i = 0; i < size; ++i) {
         const UINT8* entry = im_->palette->palette + i * 4;

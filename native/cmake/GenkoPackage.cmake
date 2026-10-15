@@ -32,6 +32,8 @@ qt_generate_deploy_app_script(
   TARGET genko
   OUTPUT_SCRIPT GENKO_DEPLOY_SCRIPT
   NO_UNSUPPORTED_PLATFORM_ERROR
+  # (the screenless platform too: `genko` for scripts and the command line where there is no display)
+  INCLUDE_PLUGINS qoffscreen
   POST_INCLUDE_REGEXES "/libxcb-cursor[.]so" "/libxcb-icccm[.]so" "/libxcb-image[.]so" "/libxcb-keysyms[.]so"
                        "/libxcb-render-util[.]so" "/libxcb-util[.]so")
 install(SCRIPT "${GENKO_DEPLOY_SCRIPT}")

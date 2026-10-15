@@ -157,7 +157,9 @@ std::vector<Seen> bars_and_panels(QMainWindow* window) {
     }
     for (QDockWidget* dock : window->findChildren<QDockWidget*>()) {
         if (!dock->isVisible() || dock->isFloating()) continue;
-        if (!dock->visibleRegion().isEmpty()) {
+        // (in sight: in the window — Qt moves a panel behind another's tab out of it. Not its visible region, which is
+        // empty too when the panel's own opaque contents cover it)
+        if (window->rect().intersects(QRect(dock->mapTo(window, QPoint(0, 0)), dock->size()))) {
             out.push_back(Seen{QStringLiteral("panel ") + dock->windowTitle(), dock, false});
             continue;
         }

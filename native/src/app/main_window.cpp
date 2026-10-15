@@ -23,6 +23,8 @@
 #include <QPushButton>
 #include <QMenu>
 #include <QScreen>
+#include <QScrollBar>
+#include <QScrollArea>
 #include <QSpinBox>
 #include <QStatusBar>
 #include <QTabBar>
@@ -155,9 +157,10 @@ MainWindow::MainWindow(std::shared_ptr<Session> session) {
     canvas_ = new PageCanvas;
     if (const QScreen* screen = QGuiApplication::primaryScreen()) {
         // (Python's 300 × 280 at least for the page; less on a small screen or a large display scaling — 1024 × 640 at
-        // 200 % is 512 × 320 — so the window with its bars and panels stays within the screen: SPEC UX-02)
+        // 200 % is 512 × 320 — so the window with its bars and panels (the tool palette, the tabs on both sides) stays
+        // within the screen: SPEC UX-02)
         const QRect room = screen->availableGeometry();
-        canvas_->setMinimumSize(std::clamp(room.width() - 420, 160, 300), std::clamp(room.height() - 260, 110, 280));
+        canvas_->setMinimumSize(std::clamp(room.width() - 420, 100, 300), std::clamp(room.height() - 260, 110, 280));
     }
     pages_ = new PageList;
     pages_->setMinimumWidth(120);
@@ -372,6 +375,10 @@ MainWindow::MainWindow(std::shared_ptr<Session> session) {
     preferences::apply_all(this);
     if (gpu_available()) canvas_->use_gpu(true);  // (the page drawn by the graphics card, when chosen and real)
     theme::name_buttons(this);
+    // (within the screen again: the panels laid out while they were made, their title bars not yet taken away, may
+    // have made it larger than the room given at the start — a small screen, a large display scaling: SPEC UX-02)
+    layout()->activate();
+    look::fit_to_screen(this, QSize(1280, 800), false);
     perf::watch_loop(this);
 }
 
@@ -1227,12 +1234,52 @@ namespace {
 
 bool drawn_on(const core::Layer& layer) { return layer.stroke_count() > 0 || layer.raster_png || layer.color_raster || layer.ink_raster; }
 
+// A row of hints over the page, one line high: on a window narrower than the row (a small screen, a large display
+// scaling) it scrolls sideways instead of making the window wider than the screen (SPEC UX-02).
+class HintStrip : public QScrollArea {
+public:
+    HintStrip(const QString& name, QWidget* row) {
+        setObjectName(name);
+        setWidget(row);
+        setWidgetResizable(true);
+        row->setAutoFillBackground(false);  // (the strip's own background shows: theme.cpp)
+        viewport()->setAutoFillBackground(false);
+        setFrameShape(QFrame::NoFrame);
+        setVerticalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
+        setHorizontalScrollBarPolicy(Qt::ScrollBarAsNeeded);
+        setSizePolicy(QSizePolicy::Preferred, QSizePolicy::Fixed);
+    }
+    QSize sizeHint() const override { return QSize(widget()->sizeHint().width(), height_for(width())); }
+    QSize minimumSizeHint() const override { return QSize(0, height_for(width())); }
+
+protected:
+    void resizeEvent(QResizeEvent* event) override {
+        QScrollArea::resizeEvent(event);
+        fit();
+    }
+    void showEvent(QShowEvent* event) override {
+        QScrollArea::showEvent(event);
+        fit();
+    }
+
+private:
+    // (the row's height, and the scroll bar's under it when the row does not fit)
+    int height_for(int width) const {
+        const bool sideways = widget()->minimumSizeHint().width() > width;
+        return std::max(0, widget()->sizeHint().height()) + (sideways ? horizontalScrollBar()->sizeHint().height() : 0);
+    }
+    void fit() {
+        const int wanted = height_for(width());
+        if (height() != wanted || minimumHeight() != wanted) setFixedHeight(wanted);
+    }
+};
+
 }  // namespace
 
 QWidget* MainWindow::first_steps_bar() {
-    auto* bar = new QWidget;
-    bar->setObjectName(QStringLiteral("firstSteps"));
-    auto* row = new QHBoxLayout(bar);
+    auto* inside = new QWidget;
+    auto* bar = new HintStrip(QStringLiteral("firstSteps"), inside);
+    auto* row = new QHBoxLayout(inside);
     row->setContentsMargins(12, 6, 8, 6);
     row->setSpacing(6);
     auto* words = new QLabel(QStringLiteral("まだ何もない原稿です。最初の一歩:"));
@@ -1264,9 +1311,9 @@ QWidget* MainWindow::first_steps_bar() {
 }
 
 QWidget* MainWindow::next_steps_bar() {
-    auto* bar = new QWidget;
-    bar->setObjectName(QStringLiteral("nextSteps"));
-    auto* row = new QHBoxLayout(bar);
+    auto* inside = new QWidget;
+    auto* bar = new HintStrip(QStringLiteral("nextSteps"), inside);
+    auto* row = new QHBoxLayout(inside);
     row->setContentsMargins(12, 4, 8, 4);
     row->setSpacing(6);
     auto* words = new QLabel(QStringLiteral("コマができました。次は:"));

@@ -215,7 +215,7 @@ private slots:
     void theMaskIsEditedWithThePen() {
         Book book;
         app::MainWindow* w = book.window.get();
-        QVERIFY(w->apply_ops(Json::array({Json{{"op", "add_layer"}, {"page", 1}, {"kind", "strokes"}, {"name", "u"}, {"id", "u"}}})));
+        QVERIFY(w->apply_ops(Json::array({Json{{"op", "add_layer"}, {"page", 1}, {"kind", "pen"}, {"name", "u"}, {"id", "u"}}})));
         w->set_target_layer("u");
         app::LayerPanel* panel = w->layer_panel();
         panel->refresh();
@@ -232,7 +232,7 @@ private slots:
         panel->mask_edit_action()->setChecked(false);
         QVERIFY(!w->mask_edit);
         // a layer without a mask: one that shows everything first
-        QVERIFY(w->apply_ops(Json::array({Json{{"op", "add_layer"}, {"page", 1}, {"kind", "strokes"}, {"name", "v"}, {"id", "v"}}})));
+        QVERIFY(w->apply_ops(Json::array({Json{{"op", "add_layer"}, {"page", 1}, {"kind", "pen"}, {"name", "v"}, {"id", "v"}}})));
         w->set_target_layer("v");
         panel->refresh();
         panel->mask_edit_action()->setChecked(true);

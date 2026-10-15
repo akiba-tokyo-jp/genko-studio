@@ -391,7 +391,13 @@ private slots:
         b.act("act_next_steps")->trigger();
         QVERIFY(next->isVisible());
         // a book with panels already: no first steps, what comes next
-        Book other(gui_test::new_doc(2));
+        core::Document panelled = gui_test::new_doc(2);
+        {
+            core::Page& first_page = panelled.edit_page(0);
+            const std::string root = first_page.leaf_frames().front()->id;  // (a copy: the split changes the frames)
+            first_page.split_frame(root, "horizontal", core::Num(0.5), core::Num(3));
+        }
+        Book other(panelled);
         QVERIFY(other.window->first_steps() == nullptr || !other.window->first_steps()->isVisible());
     }
 
@@ -409,7 +415,9 @@ private slots:
         }
         QCOMPARE(words, (QStringList{QStringLiteral("塗る"), QStringLiteral("消す"), QStringLiteral("トーン"), QStringLiteral("反転"), QStringLiteral("広げる"),
                                      QStringLiteral("変形"), QStringLiteral("コピー"), QStringLiteral("解除")}));
-        b.window->canvas()->set_selection(Json{{"rect", Json::array({30, 40, 60, 50})}});
+        // (an area as the selection tools give it: its outline in mm)
+        b.window->canvas()->set_selection(
+            Json{{"poly", Json::array({Json::array({30, 40}), Json::array({90, 40}), Json::array({90, 90}), Json::array({30, 90})})}});
         b.window->canvas()->update();
         QVERIFY(gui_test::wait_for([&] { return launcher->isVisible(); }, 5000));
         // within the canvas, under the selection's middle
@@ -430,8 +438,9 @@ private slots:
     void thePaletteFitsAShortWindowAndTheLayersAreInFront() {
         Book b;
         QDockWidget* layers = b.dock(QStringLiteral("レイヤー"));
-        QVERIFY(layers != nullptr && !layers->visibleRegion().isEmpty());
-        b.window->resize(1024, 520);
+        // (in front: in the window — Qt keeps a panel behind another's tab out of it)
+        QVERIFY(layers != nullptr && b.window->rect().intersects(QRect(layers->mapTo(b.window.get(), QPoint(0, 0)), layers->size())));
+        b.window->resize(1366, 700);  // (Python's test_every_tool_is_within_reach_on_a_short_screen: 1366 × 768, its window 700 high)
         QVERIFY(gui_test::wait_for([&] {
             QToolBar* palette = b.window->tool_palette();
             QAction* last = nullptr;

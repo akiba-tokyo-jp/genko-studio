@@ -234,8 +234,10 @@ private slots:
             QCOMPARE(a->text(), QString::fromUtf8(e.text));
             QCOMPARE(a->shortcuts(), *e.key == '\0' ? QList<QKeySequence>() : QList<QKeySequence>{QKeySequence(QString::fromLatin1(e.key))});
             QCOMPARE(a->statusTip(), QString::fromUtf8(e.tip));
-            QCOMPARE(a->toolTip(), (QString::fromUtf8(e.text) + QStringLiteral("  ") + a->shortcut().toString(QKeySequence::NativeText) +
-                                    QStringLiteral("\n") + QString::fromUtf8(e.tip)).trimmed());
+            // (as Python's window has it: preferences.retip at its start — the name, its keys now in （）, what it does)
+            const QString keys = a->shortcut().toString(QKeySequence::NativeText);
+            QCOMPARE(a->toolTip(), QString::fromUtf8(e.text) + (keys.isEmpty() ? QString() : QStringLiteral("（%1）").arg(keys)) + QStringLiteral("\n") +
+                                       QString::fromUtf8(e.tip));
             QCOMPARE(a->isCheckable(), e.checkable);
             QVERIFY2(menus_of(w, a) == QStringList{QString::fromUtf8(e.menu)}, e.name);
         }
@@ -251,7 +253,9 @@ private slots:
         QCOMPARE(view.mid(guides, 4), (QStringList{QStringLiteral("仕上がり線・基本枠を表示"), QStringLiteral("スマホの画面の範囲を表示"),
                                                    QStringLiteral("目盛りを表示"), QStringLiteral("前のページを透かす（オニオンスキン）")}));
         const QStringList pages = menu_items(w, QStringLiteral("ページ"));
-        QCOMPARE(pages.indexOf(QStringLiteral("入稿前の点検")), pages.indexOf(QStringLiteral("台詞の検索・置換…")) + 1);
+        // (Python's row: 台詞の検索・置換…, 本の形でプレビュー… (M6), 入稿前の点検)
+        QCOMPARE(pages.indexOf(QStringLiteral("本の形でプレビュー…")), pages.indexOf(QStringLiteral("台詞の検索・置換…")) + 1);
+        QCOMPARE(pages.indexOf(QStringLiteral("入稿前の点検")), pages.indexOf(QStringLiteral("本の形でプレビュー…")) + 1);
         QCOMPARE(pages.at(pages.indexOf(QStringLiteral("入稿前の点検")) + 1), QStringLiteral("|"));
         // 書き出し… at the end of the command bar (workspace.DEFAULT_COMMANDBAR), with its picture
         QToolBar* bar = w->findChild<QToolBar*>(QStringLiteral("commands"));

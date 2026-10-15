@@ -221,6 +221,7 @@ private slots:
         bool right = false;
         for (QDockWidget* d : shown) right = right || (book.window->dockWidgetArea(d) == Qt::RightDockWidgetArea && d->isVisible());
         QVERIFY(right);
+        QCoreApplication::processEvents();  // (the panels laid out where they show, before the cursor leaves: CanvasOnly looks every 120 ms)
         book.window->canvas_only()->watch_at(QPoint(book.window->width() / 2, 200));  // (away again)
         QVERIFY(book.window->canvas_only()->peek().isEmpty());
         book.window->canvas_only()->toggle();
@@ -510,7 +511,11 @@ private slots:
 
     void theGpuCanvasIsTheSameCanvasOnOpenGL() {
         app::PageCanvas canvas;
+        // (shown, as the page is: Qt keeps a hidden widget's resize until it is shown — not drawn on the offscreen screen,
+        // which has no card)
+        canvas.setAttribute(Qt::WA_DontShowOnScreen);
         canvas.resize(400, 300);
+        canvas.show();
         QVERIFY(!canvas.gpu());
         canvas.use_gpu(true);
         auto* surface = qobject_cast<QOpenGLWidget*>(canvas.gpu_surface());
@@ -755,7 +760,8 @@ private slots:
         QCOMPARE(book.act("act_pen")->shortcut().toString(), QStringLiteral("P"));
         QVERIFY(book.act("act_pen")->toolTip().startsWith(QStringLiteral("ペン（P）")));  // (the tooltip says the new key)
         QCOMPARE(w->save_after(), 5000);
-        QCOMPARE(w->session().idle(), std::chrono::milliseconds(5000));
+        // (never past the longest wait: a test book saves within 0.4 s, a person's within 10 s)
+        QCOMPARE(w->session().idle(), std::min(std::chrono::milliseconds(5000), w->session().longest()));
         QCOMPARE(book.canvas()->pen_button, QStringLiteral("picker"));
         QComboBox* pressure = w->brush_panel()->pressure;
         QVERIFY(pressure->itemText(pressure->count() - 1).startsWith(QStringLiteral("自分に合わせた")));

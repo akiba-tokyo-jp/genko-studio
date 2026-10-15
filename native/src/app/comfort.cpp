@@ -119,7 +119,8 @@ void CanvasOnly::watch_at(const QPoint& pos) {
     } else if (!peek_.isEmpty()) {
         std::vector<QWidget*> shown;
         for (const auto& [widget, was] : saved_) {
-            if (widget && was && side_of(widget) == peek_ && widget->isVisible()) shown.push_back(widget);
+            // (in sight: a panel behind another's tab is visible to Qt but kept out of the window, away from the edge)
+            if (widget && was && side_of(widget) == peek_ && widget->isVisible() && window_->rect().intersects(widget->geometry())) shown.push_back(widget);
         }
         bool away = true;
         if (!shown.empty()) {
