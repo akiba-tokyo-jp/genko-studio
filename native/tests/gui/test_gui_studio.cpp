@@ -41,6 +41,7 @@
 #include "app/config.hpp"
 #include "app/export_dialog.hpp"
 #include "app/links.hpp"
+#include "app/comfort.hpp"
 #include "app/main_window.hpp"
 #include "app/reply_box.hpp"
 #include "app/review_model.hpp"
@@ -1244,11 +1245,14 @@ private slots:
         StudioBook book(false);
         Desk desk(book.path, book.root / "recovery");
         QVERIFY(!desk.dock(QStringLiteral("承認箱"))->isVisible());
+        desk.window->canvas_only()->toggle();  // (the page alone: a request brings the panels back, Python's UI-C)
+        QVERIFY(desk.window->canvas_only()->on());
         QVERIFY(book.ai(Json::array({Json{{"op", "request_approval"}, {"gate", "name"}, {"pages", {3}}},
                                      Json{{"op", "ask_human"}, {"text", "どちらがいいですか"}, {"page", 2}}})).ok);
         desk.session->check_outside();
         QVERIFY(gui_test::wait_for([&] { return desk.box()->items().size() == 2; }, 60000));
         QVERIFY(desk.dock(QStringLiteral("承認箱"))->isVisible());
+        QVERIFY(!desk.window->canvas_only()->on());
         QLabel* note = desk.window->canvas()->findChild<QLabel*>(QStringLiteral("toast"));
         QVERIFY(note != nullptr);
         QCOMPARE(note->text(), QStringLiteral("承認の依頼が届きました: 相談（2 ページ） ほか 1 件"));

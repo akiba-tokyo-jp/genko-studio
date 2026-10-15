@@ -135,7 +135,7 @@ QIcon icon(const char* name, const QString& ink, const QString& accent) {
 
 QIcon icon(const char* name) {
     const theme::Tokens t = theme::tokens();
-    return icon(name, t.text, t.accent);
+    return icon(name, t.text, theme::mono_icons() ? t.muted : t.accent);  // (grey only when chosen: アイコンをグレーだけで描く)
 }
 
 }  // namespace genko::app::icons

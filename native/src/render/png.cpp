@@ -2,6 +2,7 @@
 // owns no C++ object created after it, and the callbacks keep no C++ objects alive when they call png_error.
 
 #include "render/png.hpp"
+#include "render/tiff_webp.hpp"
 #include "render/bmp.hpp"
 #include "render/gif.hpp"
 #include "render/psd_image.hpp"
@@ -132,12 +133,10 @@ bool read_rows(png_structp png, png_bytepp rows) {
     throw core::Error("format", std::string("broken PNG file: ") + state.message);
 }
 
-// The first bytes of the other formats Pillow opens.
+// The first bytes of the other formats Pillow opens (TIFF and WebP: render/tiff_webp).
 bool other_image_format(std::string_view b) {
     const auto starts = [&](std::string_view p) { return b.substr(0, p.size()) == p; };
-    return starts("\xff\xd8\xff") || starts("GIF87a") || starts("GIF89a") || starts("BM") || starts("II*\0") ||
-           starts(std::string_view("MM\0*", 4)) || (starts("RIFF") && b.size() >= 12 && b.substr(8, 4) == "WEBP") ||
-           starts("8BPS");
+    return starts("\xff\xd8\xff") || starts("GIF87a") || starts("GIF89a") || starts("BM") || starts("8BPS");
 }
 
 // PngImagePlugin._MODES
@@ -515,6 +514,8 @@ bool unported_image_format(std::string_view bytes) {
         return false;
     }
     if (bytes.substr(0, 4) == "8BPS") return false;  // (a PSD of Lab colours too: as Pillow, through Little CMS)
+    if (tiff_signature(bytes)) return tiff_unported(bytes);  // (render/tiff_webp: the samples in separate planes, from its directory)
+    if (webp_signature(bytes)) return false;
     return other_image_format(bytes);  // (Pillow would open these; the remaining formats are not ported yet)
 }
 
@@ -524,6 +525,8 @@ Size picture_size(std::string_view bytes) {
         if (bytes.substr(0, 2) == "BM") return bmp_size(bytes, kPillowOpenLimits);
         if (bytes.substr(0, 6) == "GIF87a" || bytes.substr(0, 6) == "GIF89a") return gif_size(bytes, kPillowOpenLimits);
         if (bytes.substr(0, 4) == "8BPS") return psd_image_size(bytes, kPillowOpenLimits);  // (a Lab one's too)
+        if (tiff_signature(bytes)) return tiff_size(bytes, kPillowOpenLimits);
+        if (webp_signature(bytes)) return webp_size(bytes, kPillowOpenLimits);
         return open_image(bytes, kPillowOpenLimits).size();  // (NotYetPorted, or not a picture)
     }
     ReadState state;
@@ -563,6 +566,8 @@ Image open_image(std::string_view bytes, const PngLimits& limits) {
     if (bytes.substr(0, 2) == "BM") return read_bmp(bytes, limits);
     if (bytes.substr(0, 6) == "GIF87a" || bytes.substr(0, 6) == "GIF89a") return read_gif(bytes, limits);
     if (bytes.substr(0, 4) == "8BPS") return read_psd_image(bytes, limits);  // (Lab: a "LAB" picture, as Pillow's)
+    if (tiff_signature(bytes)) return read_tiff(bytes, limits);
+    if (webp_signature(bytes)) return read_webp(bytes, limits);
     if (unported_image_format(bytes)) throw NotYetPorted("image_format");
     throw core::Error("unidentified_image", "cannot identify image file");
 }

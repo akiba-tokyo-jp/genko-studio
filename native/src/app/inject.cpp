@@ -76,6 +76,22 @@ void tablet(PageCanvas* canvas, Phase phase, const PenInput& point, bool eraser_
     }
 }
 
+void tablet_side(PageCanvas* canvas, Phase phase, const QPointF& mm) {
+    const QPointF at = canvas->to_widget(mm);
+    const PenInput point{mm, 0.5};
+    switch (phase) {
+    case Phase::Press:
+        send_tablet(canvas, QEvent::TabletPress, point, at, false, Qt::RightButton, Qt::RightButton);
+        break;
+    case Phase::Move:
+        send_tablet(canvas, QEvent::TabletMove, point, at, false, Qt::NoButton, Qt::RightButton);
+        break;
+    case Phase::Release:
+        send_tablet(canvas, QEvent::TabletRelease, point, at, false, Qt::RightButton, Qt::NoButton);
+        break;
+    }
+}
+
 void mouse_stroke(PageCanvas* canvas, const std::vector<QPointF>& mm, Qt::KeyboardModifiers modifiers, bool pump) {
     if (mm.empty()) return;
     send_mouse(canvas, QEvent::MouseButtonPress, canvas->to_widget(mm.front()), Qt::LeftButton, Qt::LeftButton, modifiers);

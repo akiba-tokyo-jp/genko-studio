@@ -94,6 +94,13 @@ QLabel* section(const QString& title) {
 
 }  // namespace
 
+QString short_words(const QString& text) {
+    const auto found = shorts().find(text);
+    return found != shorts().end() ? found->second : text;
+}
+
+QIcon icon_or_blank(const QIcon& icon) { return or_blank(icon); }
+
 QWidget* action_button(QAction* action) {
     if (const auto found = shorts().find(action->text()); found != shorts().end()) action->setIconText(found->second);
     if (action->isCheckable()) {

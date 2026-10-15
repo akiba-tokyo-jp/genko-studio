@@ -46,6 +46,8 @@ public:
     explicit PaperDiagram(QWidget* parent = nullptr);
     void show_spec(const core::PageSpec& spec, bool error = false);
     const std::optional<core::PageSpec>& spec() const { return spec_; }
+    // The numbers do not make a paper (the picture says so).
+    bool error() const { return error_; }
 
 protected:
     void paintEvent(QPaintEvent* event) override;

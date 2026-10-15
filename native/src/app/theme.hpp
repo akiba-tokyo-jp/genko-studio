@@ -4,6 +4,9 @@
 #include <QString>
 #include <QVariant>
 
+#include <utility>
+#include <vector>
+
 class QApplication;
 class QWidget;
 class QLabel;
@@ -30,6 +33,20 @@ Tokens tokens();
 
 bool show_hints();
 void set_hints(bool on);
+// The settings of the look as chosen (環境設定): system | light | dark; -2 … +2; grey icons; auto or a grey 0…255; the
+// screen's letters (genko | system) — and the choices with their words.
+QString mode();
+int brightness();
+bool mono_icons();
+QString surround_setting();
+QString font_choice();
+const std::vector<std::pair<QString, QString>>& modes();
+const std::vector<std::pair<QString, QString>>& font_choices();
+// The bundled screen letters (IBM Plex Sans JP; empty when they cannot be loaded).
+QString ui_family();
+// A button's or a command's picture (Python's iconic): set now and drawn again by refresh_icons when the look changes.
+void iconed(QObject* target, const char* name);
+void refresh_icons();
 
 // The accent and the canvas's surround, for drawing.
 QColor accent();

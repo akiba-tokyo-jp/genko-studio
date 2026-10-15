@@ -1046,6 +1046,10 @@ void Session::schedule_save() {
     emit statusChanged();
 }
 
+void Session::set_idle(std::chrono::milliseconds idle) {
+    options_.idle = std::clamp(idle, std::chrono::milliseconds(1), options_.longest);
+}
+
 void Session::save_now() {
     idle_timer_.stop();
     longest_timer_.stop();

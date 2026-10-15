@@ -3,6 +3,7 @@
 // tests/data/paper/samples.json).
 
 #include "render/paper.hpp"
+#include "render/tiff_webp.hpp"
 
 #include <algorithm>
 #include <array>
@@ -229,8 +230,8 @@ std::string take_in(std::string_view file_bytes) {
     const auto other_format = [] {
         throw core::Error("paper_format", "this build does not read that kind of picture (TIFF, WebP, PSD): give the paper as PNG, JPEG, BMP or GIF");
     };
-    // (a PSD, which open_image opens as one picture, is not a paper's picture either: BRUSH-01 takes those four)
-    if (file_bytes.substr(0, 4) == "8BPS") other_format();
+    // (a PSD, a TIFF or a WebP, which open_image opens as one picture, is not a paper's picture: BRUSH-01 takes those four)
+    if (file_bytes.substr(0, 4) == "8BPS" || tiff_signature(file_bytes) || webp_signature(file_bytes)) other_format();
     Image image;
     try {
         image = open_image(file_bytes, kPaperLimits);

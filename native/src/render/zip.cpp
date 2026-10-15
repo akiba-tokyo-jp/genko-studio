@@ -3,6 +3,7 @@
 #include "render/zip.hpp"
 
 #include <QDateTime>
+#include <QFileInfo>
 
 #include <algorithm>
 #include <fstream>
@@ -302,6 +303,175 @@ std::string archive(const std::vector<Entry>& entries) {
     put32(out, dir_at);
     put16(out, 0);
     return out;
+}
+
+namespace {
+
+void put64(std::string& out, std::uint64_t v) {
+    put32(out, static_cast<std::uint32_t>(v & 0xffffffffu));
+    put32(out, static_cast<std::uint32_t>(v >> 32));
+}
+
+std::string read_whole(const std::filesystem::path& path) {
+    std::ifstream in(path, std::ios::binary);
+    if (!in) throw core::Error("io", "cannot read " + core::path_to_utf8(path));
+    std::string data((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
+    if (in.bad()) throw core::Error("io", "cannot read " + core::path_to_utf8(path));
+    return data;
+}
+
+// raw deflate (zlib's default level), in steps a uInt can count
+std::string deflated(const std::string& content) {
+    z_stream z{};
+    if (deflateInit2(&z, Z_DEFAULT_COMPRESSION, Z_DEFLATED, -MAX_WBITS, 8, Z_DEFAULT_STRATEGY) != Z_OK) throw core::Error("io", "zlib");
+    std::string out;
+    std::string chunk(1 << 20, '\0');
+    std::size_t at = 0;
+    int result = Z_OK;
+    do {
+        const std::size_t take = std::min<std::size_t>(content.size() - at, 1u << 30);
+        z.next_in = reinterpret_cast<Bytef*>(const_cast<char*>(content.data() + at));
+        z.avail_in = static_cast<uInt>(take);
+        at += take;
+        const int flush = at == content.size() ? Z_FINISH : Z_NO_FLUSH;
+        do {
+            z.next_out = reinterpret_cast<Bytef*>(chunk.data());
+            z.avail_out = static_cast<uInt>(chunk.size());
+            result = deflate(&z, flush);
+            if (result == Z_STREAM_ERROR) {
+                deflateEnd(&z);
+                throw core::Error("io", "zlib");
+            }
+            out.append(chunk.data(), chunk.size() - z.avail_out);
+        } while (z.avail_out == 0);
+    } while (at < content.size());
+    deflateEnd(&z);
+    if (result != Z_STREAM_END) throw core::Error("io", "zlib");
+    return out;
+}
+
+std::uint32_t crc_of(const std::string& content) {
+    uLong crc = crc32(0, nullptr, 0);
+    for (std::size_t at = 0; at < content.size();) {
+        const std::size_t take = std::min<std::size_t>(content.size() - at, 1u << 30);
+        crc = crc32(crc, reinterpret_cast<const Bytef*>(content.data() + at), static_cast<uInt>(take));
+        at += take;
+    }
+    return static_cast<std::uint32_t>(crc);
+}
+
+}  // namespace
+
+void pack(const std::filesystem::path& path, const std::vector<std::pair<std::string, std::filesystem::path>>& files, std::uint64_t zip64_from) {
+    std::ofstream out(path, std::ios::binary | std::ios::trunc);
+    if (!out) throw core::Error("io", "cannot write " + core::path_to_utf8(path));
+    std::string directory;
+    std::uint64_t offset = 0;
+    bool any64 = false;
+    const auto big = [zip64_from](std::uint64_t v) { return v >= zip64_from; };
+    for (const auto& [name, source] : files) {
+        if (name.size() > 0xffff) throw core::Error("io", "a file name is too long for the archive");
+        const std::string content = read_whole(source);
+        const std::string packed = deflated(content);
+        const std::uint32_t crc = crc_of(content);
+        // (the file's own time, as ZipFile.write takes it: local time, two-second steps)
+        const QDateTime when = QFileInfo(QString::fromStdString(core::path_to_utf8(source))).lastModified();
+        const std::uint32_t dos_time = std::uint32_t(when.time().hour()) << 11 | std::uint32_t(when.time().minute()) << 5 | std::uint32_t(when.time().second() / 2);
+        const std::uint32_t dos_date = std::uint32_t(std::max(0, when.date().year() - 1980)) << 9 | std::uint32_t(when.date().month()) << 5 | std::uint32_t(when.date().day());
+        const std::uint64_t size = content.size();
+        const std::uint64_t csize = packed.size();
+        const bool sizes64 = big(size) || big(csize);
+        const bool offset64 = big(offset);
+        any64 = any64 || sizes64 || offset64;
+        const bool ascii = std::all_of(name.begin(), name.end(), [](char ch) { return static_cast<unsigned char>(ch) < 0x80; });
+        // the local header (zip64: both sizes in its extra field)
+        std::string local;
+        put32(local, 0x04034b50);
+        put16(local, sizes64 ? 45 : 20);
+        put16(local, ascii ? 0 : 0x800);
+        put16(local, 8);
+        put16(local, dos_time);
+        put16(local, dos_date);
+        put32(local, crc);
+        put32(local, sizes64 ? 0xffffffffu : static_cast<std::uint32_t>(csize));
+        put32(local, sizes64 ? 0xffffffffu : static_cast<std::uint32_t>(size));
+        put16(local, static_cast<std::uint32_t>(name.size()));
+        put16(local, sizes64 ? 20 : 0);
+        local += name;
+        if (sizes64) {
+            put16(local, 0x0001);
+            put16(local, 16);
+            put64(local, size);
+            put64(local, csize);
+        }
+        out.write(local.data(), static_cast<std::streamsize>(local.size()));
+        out.write(packed.data(), static_cast<std::streamsize>(packed.size()));
+        if (!out) throw core::Error("io", "cannot write " + core::path_to_utf8(path));
+        // its entry in the central directory (zip64: the fields that overflowed, in order)
+        std::string extra;
+        if (big(size)) put64(extra, size);
+        if (big(csize)) put64(extra, csize);
+        if (offset64) put64(extra, offset);
+        put32(directory, 0x02014b50);
+        put16(directory, 3 << 8 | (extra.empty() ? 20 : 45));  // (made on Unix)
+        put16(directory, extra.empty() ? 20 : 45);
+        put16(directory, ascii ? 0 : 0x800);
+        put16(directory, 8);
+        put16(directory, dos_time);
+        put16(directory, dos_date);
+        put32(directory, crc);
+        put32(directory, big(csize) ? 0xffffffffu : static_cast<std::uint32_t>(csize));
+        put32(directory, big(size) ? 0xffffffffu : static_cast<std::uint32_t>(size));
+        put16(directory, static_cast<std::uint32_t>(name.size()));
+        put16(directory, extra.empty() ? 0 : static_cast<std::uint32_t>(extra.size() + 4));
+        put16(directory, 0);
+        put16(directory, 0);
+        put16(directory, 0);
+        put32(directory, 0100644u << 16);  // (a plain file, -rw-r--r--)
+        put32(directory, offset64 ? 0xffffffffu : static_cast<std::uint32_t>(offset));
+        directory += name;
+        if (!extra.empty()) {
+            put16(directory, 0x0001);
+            put16(directory, static_cast<std::uint32_t>(extra.size()));
+            directory += extra;
+        }
+        offset += local.size() + packed.size();
+    }
+    const std::uint64_t count = files.size();
+    const std::uint64_t dir_at = offset;
+    const std::uint64_t dir_size = directory.size();
+    std::string end;
+    if (any64 || count >= 0xffff || big(dir_at) || big(dir_size)) {
+        // the zip64 end of the central directory and its locator
+        put32(end, 0x06064b50);
+        put64(end, 44);
+        put16(end, 3 << 8 | 45);
+        put16(end, 45);
+        put32(end, 0);
+        put32(end, 0);
+        put64(end, count);
+        put64(end, count);
+        put64(end, dir_size);
+        put64(end, dir_at);
+        put32(end, 0x07064b50);
+        put32(end, 0);
+        put64(end, dir_at + dir_size);
+        put32(end, 1);
+    }
+    put32(end, 0x06054b50);
+    put16(end, 0);
+    put16(end, 0);
+    put16(end, count >= 0xffff ? 0xffffu : static_cast<std::uint32_t>(count));
+    put16(end, count >= 0xffff ? 0xffffu : static_cast<std::uint32_t>(count));
+    put32(end, big(dir_size) ? 0xffffffffu : static_cast<std::uint32_t>(dir_size));
+    put32(end, big(dir_at) ? 0xffffffffu : static_cast<std::uint32_t>(dir_at));
+    put16(end, 0);
+    out.write(directory.data(), static_cast<std::streamsize>(directory.size()));
+    out.write(end.data(), static_cast<std::streamsize>(end.size()));
+    out.flush();
+    if (!out) throw core::Error("io", "cannot write " + core::path_to_utf8(path));
+    out.close();
+    if (!out) throw core::Error("io", "cannot write " + core::path_to_utf8(path));
 }
 
 void write(const std::filesystem::path& path, const std::vector<std::pair<std::string, std::string>>& files) {

@@ -10,6 +10,7 @@
 #include "core/json.hpp"
 
 class QAction;
+class QIcon;
 class QCheckBox;
 class QComboBox;
 class QDoubleSpinBox;
@@ -23,6 +24,10 @@ class QVBoxLayout;
 
 namespace genko::app {
 
+// A command's words on a narrow page (Python's SHORT: the words themselves when they are short already).
+QString short_words(const QString& text);
+// Rows without a picture keep its room, so every row's words start at the same place.
+QIcon icon_or_blank(const QIcon& icon);
 // A command as a quiet row (its picture and words, left-aligned), or a switch as a check box.
 QWidget* action_button(QAction* action);
 // One button that opens a menu of actions (groups split by lines): a long list kept short.
@@ -67,6 +72,10 @@ public:
     QWidget* current_page() const { return current_; }
     QLabel* title() const { return title_; }
     QLabel* hint() const { return hint_; }
+    // Folded to the tool's name (the fold button and the pages under it).
+    bool folded() const { return folded_; }
+    QPushButton* fold_button() const { return fold_; }
+    QWidget* stack() const { return stack_widget_; }
 
 private:
     QLabel* title_ = nullptr;

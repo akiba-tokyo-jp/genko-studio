@@ -1295,9 +1295,11 @@ private slots:
     // preview, and its own 印刷 button printing nothing, would say nothing); a sheet that cannot be drawn at the
     // printer's resolution, said after the preview has tried it.
     void printPreviewSaysWhatItCannotDraw() {
-        // (a picture placed on page 2 whose asset is a WebP, 2×2 as Pillow writes one: Python draws it, this build does
-        // not open a WebP yet. Placed pictures themselves are drawn since M5①.)
-        const std::string webp = genko::core::a2b_base64("UklGRh4AAABXRUJQVlA4TBEAAAAvAUAAAAdQhSJXof+BiOh/AAA=");
+        // (a picture placed on page 2 whose asset is a TIFF of 2×2 with its colours in three planes: Python draws it,
+        // this build does not open one yet. Placed pictures themselves are drawn since M5①, TIFF and WebP since M6.)
+        const std::string webp = genko::core::a2b_base64(
+            "SUkqAAgAAAAKAAABAwABAAAAAgAAAAEBAwABAAAAAgAAAAIBAwADAAAAhgAAAAMBAwABAAAAAQAAAAYBAwABAAAAAgAAABEBBAADAAAAjAAAABUBAwABAAAAAwAAABYBAwAB"
+            "AAAAAgAAABcBBAADAAAAmAAAABwBAwABAAAAAgAAAAAAAAAIAAgACACkAAAAqAAAAKwAAAAEAAAABAAAAAQAAAD/AAD/AP8AAAAA/wA=");
         core::Document book = gui_test::new_doc(2);
         core::Layer placed;
         placed.id = "placed000001";

@@ -12,10 +12,13 @@
 #include <QLineEdit>
 #include <QListWidget>
 #include <QMenu>
+#include <QPainter>
 #include <QPixmap>
 #include <QPushButton>
 #include <QSettings>
 #include <QSlider>
+#include <QStyle>
+#include <QStyledItemDelegate>
 #include <QVBoxLayout>
 
 #include <algorithm>
@@ -24,8 +27,10 @@
 #include "app/ask.hpp"
 #include "app/canvas.hpp"
 #include "app/config.hpp"
+#include "app/icons.hpp"
 #include "app/layer_dialogs.hpp"
 #include "app/main_window.hpp"
+#include "app/theme.hpp"
 #include "service/wording.hpp"
 #include "core/ids.hpp"
 #include "core/pyconv.hpp"
@@ -77,6 +82,50 @@ QPushButton* button(const QString& text, const QString& tip, const QString& name
     return b;
 }
 
+// A layer's row (Python's _LayerRow): the eye, a framed picture of what it holds, its name, and on the right its marks,
+// opacity and blend (only when not the usual); the chosen row has the accent bar on its left edge.
+class LayerRow : public QStyledItemDelegate {
+public:
+    using QStyledItemDelegate::QStyledItemDelegate;
+
+protected:
+    void initStyleOption(QStyleOptionViewItem* option, const QModelIndex& index) const override {
+        QStyledItemDelegate::initStyleOption(option, index);
+        const QString name = index.data(Qt::UserRole + 3).toString();
+        if (!name.isEmpty()) option->text = name;
+    }
+
+    void paint(QPainter* painter, const QStyleOptionViewItem& option, const QModelIndex& index) const override {
+        QStyleOptionViewItem opt(option);
+        initStyleOption(&opt, index);
+        const QString meta = index.data(Qt::UserRole + 2).toString();
+        const theme::Tokens t = theme::tokens();
+        const int width = meta.isEmpty() ? 0 : opt.fontMetrics.horizontalAdvance(meta) + 12;
+        if (!meta.isEmpty()) opt.rect = option.rect.adjusted(0, 0, -width, 0);
+        QStyle* style = opt.widget != nullptr ? opt.widget->style() : QApplication::style();
+        painter->save();
+        const bool chosen = (option.state & QStyle::State_Selected) != 0;
+        if (chosen) painter->fillRect(option.rect.adjusted(0, 1, 0, -1), QColor(t.selected));  // (the whole row lit, then the bar)
+        style->drawControl(QStyle::CE_ItemViewItem, &opt, painter, opt.widget);
+        const QRect picture = style->subElementRect(QStyle::SE_ItemViewItemDecoration, &opt, opt.widget);
+        if (index.data(Qt::UserRole + 1).toString() == QLatin1String("picture") && picture.isValid()) {
+            painter->setPen(QColor(t.divider));
+            painter->drawRect(picture.adjusted(0, 0, -1, -1));
+        }
+        if (chosen) painter->fillRect(QRect(option.rect.left(), option.rect.top() + 6, 3, option.rect.height() - 12), QColor(t.accent));
+        if (!meta.isEmpty()) {
+            painter->setPen(QColor(t.muted));
+            painter->drawText(option.rect.adjusted(0, 0, -8, 0), Qt::AlignRight | Qt::AlignVCenter, meta);
+        }
+        painter->restore();
+    }
+
+    QSize sizeHint(const QStyleOptionViewItem& option, const QModelIndex& index) const override {
+        const QSize hint = QStyledItemDelegate::sizeHint(option, index);
+        return QSize(hint.width(), std::max(hint.height(), 44));
+    }
+};
+
 }  // namespace
 
 LayerPanel::LayerPanel(MainWindow* window) : window_(window) {
@@ -89,6 +138,7 @@ LayerPanel::LayerPanel(MainWindow* window) : window_(window) {
     list_->setMinimumHeight(96);
     list_->setSelectionMode(QAbstractItemView::ExtendedSelection);  // Ctrl / Shift+click: several
     list_->setIconSize(QSize(30, 38));
+    list_->setItemDelegate(new LayerRow(list_));
     connect(list_, &QListWidget::itemChanged, this, [this](QListWidgetItem* item) { visibility(item); });
     connect(list_, &QListWidget::itemDoubleClicked, this, [this](QListWidgetItem*) { edit_special(); });
     connect(list_, &QListWidget::currentRowChanged, this, [this](int) { selected(); });
@@ -207,6 +257,9 @@ LayerPanel::LayerPanel(MainWindow* window) : window_(window) {
     mask_menu_ = new QMenu(mask_button_);
     mask_menu_->addAction(QStringLiteral("選択範囲からマスクを作る"), this, [this] { mask_from_selection(); });
     mask_menu_->addAction(QStringLiteral("全部見せるマスクを作る"), this, [this] { mask(Json{{"fill", "show"}}); });
+    mask_edit_ = mask_menu_->addAction(QStringLiteral("マスクを編集する（ペンで見せる・消しゴムで隠す）"));
+    mask_edit_->setCheckable(true);
+    connect(mask_edit_, &QAction::toggled, this, [this](bool on) { edit_mask(on); });
     mask_menu_->addAction(QStringLiteral("マスクを反転"), this, [this] { mask(Json{{"invert", true}}); });
     mask_off_ = mask_menu_->addAction(QStringLiteral("マスクを使わない"));
     mask_off_->setCheckable(true);
@@ -228,6 +281,28 @@ LayerPanel::LayerPanel(MainWindow* window) : window_(window) {
         }
         return line;
     };
+    // small picture buttons under the list, in groups (Python's): what adds a layer (and, apart on the right, what takes one
+    // away), then what moves and combines them; their words in the tooltips
+    for (const auto& [b, picture, tip] :
+         std::vector<std::tuple<QPushButton*, const char*, QString>>{
+             {add_pen, "pen_layer", QStringLiteral("ペンのレイヤーを足す（線を描く。線はあとから消しゴムで切れる）")},
+             {add_paint, "paint_layer", QStringLiteral("ペイントのレイヤーを足す（塗りや筆のにじみ）")},
+             {add_folder, "folder", QStringLiteral("フォルダを足す（レイヤーをまとめる）")},
+             {add_special_button, "add", QStringLiteral("塗り・グラデーション・色調補正のレイヤーを足す")},
+             {duplicate_button, "duplicate", QStringLiteral("選んだレイヤーを複製")},
+             {merge, "merge", QStringLiteral("下のレイヤーと結合")},
+             {several_button, "more", QStringLiteral("まとめて: 選んだレイヤーの結合・フォルダにまとめる・変換など")},
+             {up, "up", QStringLiteral("選んだレイヤーを上へ")},
+             {down, "down", QStringLiteral("選んだレイヤーを下へ")},
+             {delete_button, "delete", QStringLiteral("選んだレイヤーを消す")}}) {
+        b->setText(QString());
+        b->setToolTip(tip);
+        b->setAccessibleName(tip);
+        theme::iconed(b, picture);
+        b->setFixedSize(30, 28);
+        b->setIconSize(QSize(18, 18));
+        b->setProperty("iconbtn", true);  // (flat pictures, lit on hover: theme.cpp)
+    }
     auto* adds = new QVBoxLayout;
     adds->setSpacing(4);
     adds->addLayout(row({add_pen, add_paint, add_folder, add_special_button, nullptr, delete_button}));
@@ -287,6 +362,18 @@ void LayerPanel::reload_filters() {
     filter_->blockSignals(false);
 }
 
+void LayerPanel::edit_mask(bool on) {
+    const auto [page, layer] = this->layer();
+    if (on && layer != nullptr && !layer->mask) mask(Json{{"fill", "show"}});
+    window_->mask_edit = on;
+    window_->flash(on ? QStringLiteral("マスクの編集中: ペンで見せる所を足し、消しゴムで隠します") : QStringLiteral("マスクの編集を終えました"), 4000);
+}
+
+void LayerPanel::refresh_look() {
+    marks_.clear();
+    refresh();
+}
+
 void LayerPanel::refresh() {
     const core::Page* page = window_->current_page();
     loading_ = true;
@@ -308,8 +395,12 @@ void LayerPanel::refresh() {
             if (layer.opacity < 0.995) meta << QStringLiteral("%1%").arg(std::lround(layer.opacity * 100));
             auto* item = new QListWidgetItem(indent + wording::layer_label(layer) + (marks.isEmpty() ? QString() : QStringLiteral("　· ") + marks.join(QStringLiteral(" · "))));
             item->setData(Qt::UserRole + 2, meta.join(QStringLiteral(" · ")));
+            item->setData(Qt::UserRole + 3, indent + wording::layer_label(layer));  // (the name alone: the marks go right)
             item->setToolTip(kind_name(layer.kind));
-            item->setIcon(thumbnail(*page, layer));
+            // its picture, or (nothing drawn yet) a quiet mark of its kind; every row the same height
+            const QIcon picture = thumbnail(*page, layer);
+            item->setIcon(picture.isNull() ? kind_mark(layer.kind) : picture);
+            item->setData(Qt::UserRole + 1, picture.isNull() ? QStringLiteral("mark") : QStringLiteral("picture"));
             item->setFlags(item->flags() | Qt::ItemIsUserCheckable);
             item->setCheckState(layer.visible ? Qt::Checked : Qt::Unchecked);
             list_->addItem(item);
@@ -391,7 +482,10 @@ void LayerPanel::selected(bool from_list) {
         target_->hide();
         return;
     }
-    if (from_list && !loading_) window_->set_target_layer(layer->id);
+    if (from_list && !loading_) {
+        if (window_->target_layer() != layer && mask_edit_->isChecked()) mask_edit_->setChecked(false);  // (the mask being edited was the other layer's)
+        window_->set_target_layer(layer->id);
+    }
     loading_ = true;
     name_->setText(wording::layer_label(*layer));
     opacity_->setValue(static_cast<int>(std::lround(100 * layer->opacity)));
@@ -842,6 +936,32 @@ void LayerPanel::apply_filter() {
     op.update(*params);
     if (area) op["area"] = *area;
     window_->apply_ops(Json::array({op}));
+}
+
+QIcon LayerPanel::kind_mark(core::LayerKind kind) {
+    // a small grey picture of the layer's kind, in the room a thumbnail takes (kept per kind and colour)
+    static const std::map<core::LayerKind, const char*> names{
+        {core::LayerKind::Strokes, "kind_strokes"}, {core::LayerKind::Raster, "kind_raster"}, {core::LayerKind::Folder, "kind_folder"},
+        {core::LayerKind::Placed, "kind_placed"},   {core::LayerKind::Tone, "kind_tone"},     {core::LayerKind::Fill, "kind_fill"},
+        {core::LayerKind::Adjust, "kind_adjust"}};
+    const theme::Tokens t = theme::tokens();
+    const auto found = names.find(kind);
+    const QString key = QString::fromLatin1(found != names.end() ? found->second : "kind_other") + t.muted;
+    if (const auto kept = marks_.find(key); kept != marks_.end()) return kept->second;
+    const QSize size = list_->iconSize();
+    QPixmap pixmap(size);
+    pixmap.fill(Qt::transparent);
+    const int side = std::min({18, size.width(), size.height()});  // (a small quiet mark in the picture's room)
+    QPainter painter(&pixmap);
+    painter.setRenderHint(QPainter::SmoothPixmapTransform);
+    painter.drawPixmap((size.width() - side) / 2, (size.height() - side) / 2,
+                       icons::icon(found != names.end() ? found->second : "kind_other", t.muted, t.muted).pixmap(side, side));
+    painter.end();
+    QIcon mark;
+    mark.addPixmap(pixmap, QIcon::Normal);
+    mark.addPixmap(pixmap, QIcon::Selected);  // (still: not tinted when its row is chosen)
+    marks_[key] = mark;
+    return mark;
 }
 
 }  // namespace genko::app

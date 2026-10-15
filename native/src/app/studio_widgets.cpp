@@ -9,6 +9,9 @@
 #include <QPushButton>
 #include <QTextEdit>
 #include <QTimer>
+#include <QEasingCurve>
+#include <QPropertyAnimation>
+#include <QGraphicsOpacityEffect>
 #include <QVBoxLayout>
 
 #include <algorithm>
@@ -68,7 +71,7 @@ QIcon still_icon(const QPixmap& pixmap) {
 
 // theme.iconic: a button with its picture.
 QPushButton* iconic(QPushButton* button, const char* name) {
-    button->setIcon(icons::icon(name));
+    theme::iconed(button, name);
     return button;
 }
 
@@ -183,7 +186,32 @@ QLabel* toast(MainWindow* window, const QString& text, int ms) {
     note->adjustSize();
     note->move(std::max(8, (canvas->width() - note->width()) / 2), std::max(8, canvas->height() - note->height() - 24));
     note->show();
-    QTimer::singleShot(ms, note, &QObject::deleteLater);
+    if (reduce_motion()) {
+        QTimer::singleShot(ms, note, &QObject::deleteLater);
+        return note;
+    }
+    // it fades in rising a little, and fades out when its time is up (fewer moving things: it just comes and goes)
+    auto* fade = new QGraphicsOpacityEffect(note);
+    note->setGraphicsEffect(fade);
+    fade->setOpacity(0.0);
+    const auto animate = [note, fade](double start, double end, bool then_close) {
+        auto* move = new QPropertyAnimation(fade, "opacity", note);
+        move->setDuration(160);
+        move->setStartValue(start);
+        move->setEndValue(end);
+        move->setEasingCurve(QEasingCurve::OutCubic);
+        if (then_close) QObject::connect(move, &QPropertyAnimation::finished, note, &QObject::deleteLater);
+        move->start(QAbstractAnimation::DeleteWhenStopped);
+    };
+    const QPoint rise = note->pos();
+    auto* slide = new QPropertyAnimation(note, "pos", note);
+    slide->setDuration(180);
+    slide->setStartValue(rise + QPoint(0, 10));
+    slide->setEndValue(rise);
+    slide->setEasingCurve(QEasingCurve::OutCubic);
+    slide->start(QAbstractAnimation::DeleteWhenStopped);
+    animate(0.0, 1.0, false);
+    QTimer::singleShot(ms, note, [animate] { animate(1.0, 0.0, true); });
     return note;
 }
 

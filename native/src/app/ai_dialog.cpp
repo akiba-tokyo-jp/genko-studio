@@ -177,7 +177,7 @@ AiDialog::AiDialog(QWidget* parent, std::optional<fs::path> book, AiTarget* targ
     text->setMinimumHeight(120);
     text->setAccessibleName(QStringLiteral("AI の設定に貼る文"));
     copy = new QPushButton(QStringLiteral("設定をコピー"));
-    copy->setIcon(icons::icon("duplicate"));
+    theme::iconed(copy, "duplicate");
     connect(copy, &QPushButton::clicked, this, [this] {
         copy_text(text->toPlainText(), copy, QStringLiteral("設定をコピー"));
         copied_ = true;
@@ -263,7 +263,7 @@ AiDialog::AiDialog(QWidget* parent, std::optional<fs::path> book, AiTarget* targ
     ask->setMaximumHeight(72);
     ask->setAccessibleName(QStringLiteral("AI に最初に送る文"));
     ask_copy = new QPushButton(QStringLiteral("文をコピー"));
-    ask_copy->setIcon(icons::icon("duplicate"));
+    theme::iconed(ask_copy, "duplicate");
     connect(ask_copy, &QPushButton::clicked, this, [this] { copy_text(ask->toPlainText(), ask_copy, QStringLiteral("文をコピー")); });
     auto* ask_row = new QHBoxLayout;
     ask_row->addWidget(ask, 1);

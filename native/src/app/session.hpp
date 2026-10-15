@@ -185,6 +185,10 @@ public:
     bool unsaved() const { return status().kind != SaveKind::Saved; }
     // Save what is not saved now (the autosave's wait skipped); a no-op when everything is.
     void save_now();
+    // 環境設定's 変更を保存するまで: the pause after a change before it is saved (never past the longest wait, which
+    // keeps the work going on saved within 10 s).
+    void set_idle(std::chrono::milliseconds idle);
+    std::chrono::milliseconds idle() const { return options_.idle; }
     // Write the book to a new folder (a copy with a new book id, schema-v4 §2) and go on there. Asynchronous:
     // savedAs(true) when it is written. Changes made meanwhile go to the new place.
     void save_as(const std::filesystem::path& dir);

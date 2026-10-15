@@ -15,6 +15,14 @@ genko_library(genko_app
     ask.cpp
     path_label.cpp
     fit_preview.cpp
+    workspace.cpp
+    preferences.cpp
+    comfort.cpp
+    inputs.cpp
+    glass.cpp
+    backup.cpp
+    actions.cpp
+    bookview.cpp
     look.cpp
     pen.cpp
     live_ink.cpp
@@ -23,6 +31,7 @@ genko_library(genko_app
     perf.cpp
     canvas.cpp
     canvas_paint.cpp
+    canvas_gpu.cpp
     canvas_input.cpp
     canvas_select.cpp
     thumbs.cpp
@@ -90,4 +99,4 @@ genko_library(genko_app
     ${GENKO_APP_RESOURCES}
     ${GENKO_APP_FONTS}
   PUBLIC_DEPS genko_core genko_storage genko_render genko_render_ops genko_formats genko_service Qt6::Core Qt6::Gui Qt6::Widgets Qt6::Svg Qt6::Concurrent
-              Qt6::PrintSupport Qt6::Network)
+              Qt6::PrintSupport Qt6::Network Qt6::OpenGL Qt6::OpenGLWidgets)

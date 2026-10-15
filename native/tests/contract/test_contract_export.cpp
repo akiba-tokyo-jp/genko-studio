@@ -365,19 +365,22 @@ private slots:
     }
 
     // What this build does not draw yet stops an export: a placed picture on the last page of a book whose asset is a
-    // WebP (Python draws it; this build cannot open a WebP yet and says so, render::NotYetPorted "image_format"; placed
-    // pictures themselves are drawn since M5①) — and none of the files of the pages before it is left behind.
+    // TIFF with its samples in separate planes (Python draws it; this build cannot open one yet and says so,
+    // render::NotYetPorted "image_format"; placed pictures themselves are drawn since M5①, TIFF and WebP since M6) — and
+    // none of the files of the pages before it is left behind.
     void notYetPorted() {
         const auto loaded = genko::storage::load_document(path_of(books_ + "/mono.genko"));
         genko::core::Document doc = loaded.document;
         const QString assets = scratch_.path() + "/unported-assets";
         QVERIFY(QDir().mkpath(assets));
         doc.asset_dir = path_of(assets);
-        const std::string webp = genko::core::a2b_base64("UklGRh4AAABXRUJQVlA4TBEAAAAvAUAAAAdQhSJXof+BiOh/AAA=");  // (2×2, Pillow's)
+        const std::string planar = genko::core::a2b_base64(  // (2×2, red, green and blue in three planes)
+            "SUkqAAgAAAAKAAABAwABAAAAAgAAAAEBAwABAAAAAgAAAAIBAwADAAAAhgAAAAMBAwABAAAAAQAAAAYBAwABAAAAAgAAABEBBAADAAAAjAAAABUBAwABAAAAAwAAABYBAwAB"
+            "AAAAAgAAABcBBAADAAAAmAAAABwBAwABAAAAAgAAAAAAAAAIAAgACACkAAAAqAAAAKwAAAAEAAAABAAAAAQAAAD/AAD/AP8AAAAA/wA=");
         genko::core::Layer placed;
         placed.id = "placed000001";
         placed.kind = genko::core::LayerKind::Placed;
-        placed.asset = genko::storage::AssetStore(path_of(assets)).put_bytes(webp, ".png");
+        placed.asset = genko::storage::AssetStore(path_of(assets)).put_bytes(planar, ".png");
         placed.placement_mm = genko::core::Rect{genko::core::Num(10), genko::core::Num(10), genko::core::Num(40), genko::core::Num(40)};
         doc.edit_page(doc.pages.size() - 1).layers.push_back(placed);
         genko::render::brushes::clear_custom();

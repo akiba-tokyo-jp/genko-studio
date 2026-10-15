@@ -808,7 +808,7 @@ QString unported_element(const QString& element) {
         {"text_features", "横書きの文字の字形の指定（OpenType 機能）"}, {"text_warp", "文字のゆがみ"}, {"tones", "トーン"}, {"effects", "効果線"},
         {"prims", "3D"}, {"placed", "配置した画像"}, {"nombre", "ノンブル"}, {"covers", "表紙の折り目"}, {"anim", "アニメーション"},
         {"screen", "トーン化"}, {"finish", "仕上げの白黒化"}, {"brush_library", "自作ブラシの読み込み"},
-        {"image_format", "まだ読めない形式の画像（TIFF、WebP）"}};
+        {"image_format", "まだ読めない形式の画像（色を面ごとに分けて持つ TIFF）"}};
     if (const auto it = words.find(element); it != words.end()) return it->second;
     if (element.startsWith(QStringLiteral("adjust:"))) return QStringLiteral("色調補正（%1）").arg(element.mid(7));
     return element;

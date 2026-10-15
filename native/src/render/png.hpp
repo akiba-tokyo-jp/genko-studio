@@ -41,20 +41,19 @@ Image read_png(std::string_view bytes, const PngLimits& limits = {});
 // Decoders reject incomplete pixel output; BMP retains complete short RLE packets and optional row padding.
 // GIF87a/89a first-frame P/L pixels: global/local palette, transparency, frame extents and interlace.
 // Other GIF metadata extensions are skipped as Pillow does; the first frame is decoded completely.
-// PSD as one picture (its merged picture, as Pillow's PsdImagePlugin: render/psd_image.hpp), but for one of Lab
-// colours (Pillow turns those into RGB through Little CMS, not ported yet).
-// That and other formats Pillow opens (TIFF, WebP) throw NotYetPorted("image_format");
+// PSD as one picture (its merged picture, as Pillow's PsdImagePlugin: render/psd_image.hpp), TIFF and WebP
+// (render/tiff_webp.hpp: a TIFF whose samples lie in separate planes throws NotYetPorted("image_format"));
 // anything else core::Error("unidentified_image").
 Image open_image(std::string_view bytes, const PngLimits& limits = {});
 // Image.open(bytes).size: a PNG's from its chunks before the image data, a JPEG's, BMP's or GIF's from its header, a
 // PSD's from its header and sections (psd_image_size; one of Lab colours too, whose size Pillow reads), read as Pillow
 // reads them when it opens a file (the pixels are not decoded: a picture whose pixels are cut short or broken has a
 // size, and open_image refuses it). core::Error as read_png and open_image throw them: "unidentified_image",
-// "image_too_large" (above kPillowOpenLimits: Pillow's DecompressionBombError), "format"; and NotYetPorted("image_format")
-// for TIFF and WebP.
+// "image_too_large" (above kPillowOpenLimits: Pillow's DecompressionBombError), "format"; a TIFF's and a WebP's from
+// their headers too.
 Size picture_size(std::string_view bytes);
 // Whether open_image refuses these bytes as one of those other formats (NotYetPorted("image_format")): known by their
-// first bytes, without reading the rest.
+// first bytes (a TIFF by its directory), without reading the pixels.
 bool unported_image_format(std::string_view bytes);
 
 // The image as PNG bytes ("1", "L", "LA", "I;16", "RGB", "RGBA" and "P"); compress_level as zlib's (0..9).

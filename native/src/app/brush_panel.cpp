@@ -627,6 +627,14 @@ void BrushPanel::pick() {
         set_colour({colour->red(), colour->green(), colour->blue()});
 }
 
+void BrushPanel::set_personal_pressure(std::optional<double> gamma) {
+    for (int at = pressure->count() - 1; at >= 0; --at) {
+        if (pressure->itemText(at).startsWith(QStringLiteral("自分に合わせた"))) pressure->removeItem(at);
+    }
+    personal_gamma = gamma;
+    if (gamma) pressure->addItem(QStringLiteral("自分に合わせた（γ %1）").arg(QString::number(*gamma, 'g', 6)), *gamma);
+}
+
 double BrushPanel::nudge_size(int step) {
     const double value = size->value();
     const auto presets = sizes();

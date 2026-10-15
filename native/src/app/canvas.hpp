@@ -10,6 +10,7 @@
 
 #include <array>
 #include <functional>
+#include <map>
 #include <memory>
 #include <optional>
 #include <utility>
@@ -130,6 +131,10 @@ public:
     QString marquee = QStringLiteral("rect");
     double selection_pen_mm = 4.0;
     bool quick_mask = false;  // the selection shown in red where it is not, to be painted with the selection pen
+    // 選択範囲ランチャー (M6, Python's launcher): what is usually done next with a selection, kept just under it (hidden
+    // while there is none, while it is dragged or warped). Made by the window; null: none.
+    QWidget* launcher = nullptr;
+    void place_launcher();
     bool pivot_mode = false;  // 基準位置を動かす: the next press with the marquee tool puts the pivot there
     // How a new area joins the selection: Shift adds, Alt takes away, both keep the overlap.
     static QString how_from(Qt::KeyboardModifiers modifiers);
@@ -262,6 +267,34 @@ public:
     // A two-finger gesture: spread to zoom about the fingers, twist to turn the view, slide to move.
     void pinch(double factor, double turn_deg, const QPointF& centre, const QPointF& moved);
 
+    // --- 環境設定 (M6: Python's canvas.pen_button, cursor_kind, modifier_tools, tool_modifiers) ----------------------
+    // The pen's side button (or its middle one): menu (the right click's menu) | picker (スポイト) | hand (moves the view).
+    QString pen_button = QStringLiteral("menu");
+    // The pen's pointer on the page: circle (the brush's circle and a dot) | circle_cross | cross | dot.
+    QString cursor_kind = QStringLiteral("circle_cross");
+    // The tool a held Alt or Ctrl switches to for a moment ("": none).
+    std::map<QString, QString> modifier_tools{{QStringLiteral("alt"), QStringLiteral("picker")}, {QStringLiteral("ctrl"), QStringLiteral("select")}};
+    // 道具ごとの修飾キー: {tool: {alt | ctrl | shift: a tool, or "none"}} — a tool's own wins over the common one; Shift
+    // switches only where a tool says so.
+    std::map<QString, std::map<QString, QString>> tool_modifiers;
+    // Alt / Ctrl (or a tool's own Shift) held: the chosen tool for a moment, back to the tool before when let go.
+    void hold_modifier(const QString& key, bool down);
+    // The pointer as the tool and cursor_kind say now.
+    void refresh_cursor() { update_cursor(); }
+
+    // --- the graphics card (Python's GpuPageCanvas, 環境設定 ui/gpu_canvas) -------------------------------------------
+    // The same drawing done through OpenGL: a QOpenGLWidget under the canvas's other children paints the canvas (the
+    // canvas keeps the events, the cursor and the focus). Off: drawn by the processor again.
+    void use_gpu(bool on);
+    bool gpu() const { return gpu_surface_ != nullptr; }
+    QWidget* gpu_surface() const { return gpu_surface_; }
+    // (every repaint asked of the canvas reaches the surface too)
+    void update();
+    void update(const QRect& area);
+    void update(const QRegion& area);
+    // Draw the canvas as it is now (the page, the overlays) with this painter: the canvas's own paint or the surface's.
+    void paint_frame(QPainter& painter);
+
     // --- tests ----------------------------------------------------------------------------------------------
     // Wait (processing events) until every tile wanted now is drawn for the page as it is now.
     bool wait_rendered(int ms);
@@ -389,7 +422,6 @@ private:
     void begin_stroke(const QPointF& mm, double pressure, double rotation, bool tablet);
     void extend_stroke(const QPointF& mm, double pressure, double rotation, bool straight);
     void finish_stroke();
-    void hold_modifier(const QString& key, bool down);
     void back_from_eraser_end();
 
     // painting
@@ -651,10 +683,19 @@ private:
     double glide_t_ = 1.0;
     QVariantAnimation* glide_motion_ = nullptr;
     QTimer rerender_;
+
+    QWidget* gpu_surface_ = nullptr;  // use_gpu
 };
 
 // Whether motion should be reduced (環境設定 ui/reduce_motion; with no choice, as the system says).
 bool reduce_motion();
+
+// The page drawn by the graphics card (Python's canvas.gpu_available): only when the person turned it on (ui/gpu_canvas:
+// some drivers give a blank white page), on a real screen (not offscreen, minimal or vnc), with an OpenGL context that
+// can be made and is not done by the processor.
+bool gpu_available();
+// OpenGL done by the processor (a virtual machine, a remote desktop): slower than drawing without it.
+bool software_renderer(const QString& name);
 
 }  // namespace genko::app
 

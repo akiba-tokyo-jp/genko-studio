@@ -16,7 +16,11 @@
 #include <QFileInfo>
 #include <QFutureWatcher>
 #include <QGuiApplication>
+#include <QHBoxLayout>
 #include <QLabel>
+#include <QResizeEvent>
+#include <QLayout>
+#include <QPushButton>
 #include <QMenu>
 #include <QScreen>
 #include <QSpinBox>
@@ -27,11 +31,18 @@
 #include <QtConcurrent>
 
 #include <algorithm>
+#include <chrono>
 
+#include "app/actions.hpp"
 #include "app/ask.hpp"
+#include "app/backup.hpp"
+#include "app/comfort.hpp"
+#include "app/config.hpp"
+#include "app/preferences.hpp"
 #include "app/dialogs.hpp"
 #include "app/documents.hpp"
 #include "app/ime.hpp"
+#include "app/inputs.hpp"
 #include "app/look.hpp"
 #include "app/navigator.hpp"
 #include "app/pages_panel.hpp"
@@ -39,7 +50,9 @@
 #include "app/reply_box.hpp"
 #include "app/save_status.hpp"
 #include "app/studio_widgets.hpp"
+#include "app/icons.hpp"
 #include "app/theme.hpp"
+#include "app/workspace.hpp"
 #include "app/colours.hpp"
 #include "service/wording.hpp"
 #include "core/actor.hpp"
@@ -64,6 +77,7 @@ QString qpath(const fs::path& path) { return QString::fromStdString(core::path_t
 Session::Options opening_options() {
     Session::Options options;
     options.defer_pages = true;
+    options.idle = std::min(options.longest, std::chrono::milliseconds(preferences::save_after_ms()));  // (環境設定)
     return options;
 }
 
@@ -132,6 +146,7 @@ MainWindow::MainWindow(std::shared_ptr<Session> session) {
                        : std::make_shared<Session>(core::new_episode("無題", core::Num(1), 8, core::PageSpec::a4_mono()), std::nullopt);
     documents_.push_back(Document{session_});
     documents::add(this);
+    inputs::install();  // (number fields select their value; the wheel leaves unused fields alone)
     pen_ = PenSettings::load();  // (until the brush panel is made: it drives the pen from then on)
     // the book's own brushes are known to the drawing (as Python's reader registers them)
     render::brushes::register_book(book());  // (and the pictures of their papers)
@@ -280,6 +295,7 @@ MainWindow::MainWindow(std::shared_ptr<Session> session) {
 
     auto* central = new QWidget;
     auto* column = new QVBoxLayout(central);
+    column_ = column;
     column->setContentsMargins(0, 0, 0, 0);
     column->setSpacing(0);
     unported_ = new QLabel;
@@ -340,8 +356,66 @@ MainWindow::MainWindow(std::shared_ptr<Session> session) {
     known_requests_ = request_ids();
     studio_follow(true);
     refresh_ai();
+    // comfort (comfort.cpp): 原稿だけを表示 — Tab on the page only (elsewhere Tab moves between fields) — at the top of
+    // the window menu, and the rest reminder
+    canvas_only_ = new CanvasOnly(this);
+    QAction* only = make("act_canvas_only", QStringLiteral("原稿だけを表示"), [this] { canvas_only_->toggle(); }, {QKeySequence(Qt::Key_Tab)},
+                         QStringLiteral("パネルとバーを隠して原稿だけにします（Tab で戻る）。左右の端にカーソルを寄せるとその側のパネルが出ます"));
+    removeAction(only);
+    only->setShortcutContext(Qt::WidgetWithChildrenShortcut);
+    canvas_->addAction(only);
+    view_menu_->insertAction(view_menu_->actions().isEmpty() ? nullptr : view_menu_->actions().front(), only);
+    rest_ = new RestReminder(this);
+    // the person's own keys and ways (環境設定): every command named by its words, its keys as chosen
+    preferences::name_commands(this);
+    preferences::apply_all(this);
+    if (gpu_available()) canvas_->use_gpu(true);  // (the page drawn by the graphics card, when chosen and real)
     theme::name_buttons(this);
     perf::watch_loop(this);
+}
+
+void MainWindow::set_save_after(int ms) {
+    save_after_ms_ = ms;
+    for (const Document& document : documents_) {
+        if (document.session) document.session->set_idle(std::chrono::milliseconds(ms));
+    }
+}
+
+void MainWindow::refresh_icons() {
+    theme::refresh_icons();
+    if (quick_access_ != nullptr) quick_access_->refresh();
+    if (layer_panel_ != nullptr) layer_panel_->refresh_look();
+}
+
+void MainWindow::maybe_backup() {
+    // バックアップ (Python's _backup): after a save, the book zipped into the folder chosen in 環境設定, not more often
+    // than set; on a worker, one at a time, so the page never waits for it
+    const SaveStatus status = session_->status();
+    if (!session_->path() || status.kind != SaveKind::Saved || !status.last_saved.isValid() || status.last_revision == backup_seen_revision_) return;
+    backup_seen_revision_ = status.last_revision;
+    QSettings* store = settings();
+    const QString folder = store->value(QStringLiteral("backup/folder"), QString()).toString();
+    if (folder.isEmpty() || backup_running_) return;
+    const double minutes = std::max(0.0, store->value(QStringLiteral("backup/minutes"), 30).toDouble());
+    const int keep = store->value(QStringLiteral("backup/keep"), 10).toInt();
+    const fs::path project = *session_->path();
+    const fs::path into = core::path_from_utf8(folder.toStdString());
+    backup_running_ = true;
+    auto* watcher = new QFutureWatcher<QString>(this);
+    connect(watcher, &QFutureWatcher<QString>::finished, this, [this, watcher] {
+        backup_running_ = false;
+        const QString problem = watcher->result();
+        watcher->deleteLater();
+        if (!problem.isEmpty()) flash(QStringLiteral("バックアップを残せませんでした: %1").arg(problem), 6000, true);
+    });
+    watcher->setFuture(QtConcurrent::run([project, into, minutes, keep]() -> QString {
+        try {
+            if (backup::due(into, QString::fromStdString(core::path_to_utf8(project.stem())), minutes)) backup::make(project, into, keep);
+            return {};
+        } catch (const std::exception& error) {
+            return QString::fromUtf8(error.what());
+        }
+    }));
 }
 
 MainWindow::~MainWindow() {
@@ -352,7 +426,49 @@ MainWindow::~MainWindow() {
 
 void MainWindow::showEvent(QShowEvent* event) {
     QMainWindow::showEvent(event);
+    inputs::watch(this);  // (its number fields and lists take input the app's way)
     canvas_->setFocus();
+    if (!settled_) {
+        settled_ = true;
+        settle_docks();
+        default_state_ = saveState();  // (ウィンドウ → ワークスペース → はじめの配置に戻す)
+        quick_access_->refresh();
+    }
+}
+
+void MainWindow::resizeEvent(QResizeEvent* event) {
+    QMainWindow::resizeEvent(event);
+    QTimer::singleShot(0, this, &MainWindow::fit_tools);  // (after the palette has its new height)
+}
+
+void MainWindow::settle_docks() {
+    fit_box();
+    if (tool_settings_dock_ != nullptr && navigator_dock_ != nullptr) {
+        resizeDocks({tool_settings_dock_, navigator_dock_}, {std::max(300, height() - 330), 170}, Qt::Vertical);
+    }
+    // the row of tabs whole, without arrows, from 1366 px up; under that the page keeps the room
+    constexpr int kSide = 230;
+    const int wide = width() >= 1360 ? std::max(kSide, std::min(320, width() / 5)) : kSide;
+    if (layers_dock_ != nullptr && !layers_dock_->isFloating()) resizeDocks({layers_dock_}, {wide}, Qt::Horizontal);
+    if (layers_dock_ != nullptr && !fronted_) {
+        fronted_ = true;
+        layers_dock_->raise();
+    }
+}
+
+void MainWindow::fit_tools() {
+    if (palette_ == nullptr || palette_->toolButtonStyle() != Qt::ToolButtonIconOnly) return;
+    QList<QAction*> tools;
+    for (QAction* act : palette_->actions()) {
+        if (!act->isSeparator() && act->isVisible()) tools << act;
+    }
+    if (tools.isEmpty()) return;
+    for (int size = 24; size >= 16; --size) {  // (the largest pictures that let the last tool show)
+        palette_->setIconSize(QSize(size, size));
+        palette_->layout()->activate();
+        QWidget* last = palette_->widgetForAction(tools.back());
+        if (last != nullptr && last->isVisibleTo(palette_)) return;
+    }
 }
 
 const core::Page* MainWindow::current_page() const {
@@ -484,6 +600,9 @@ bool MainWindow::apply_ops(const Json& ops, const std::vector<std::string>& ids)
         return false;
     }
     perf::event("applied", {{"ms", clock.nsecsElapsed() / 1e6}, {"op", ops.size() > 0 && ops[0].contains("op") ? ops[0]["op"] : Json()}});
+    if (recording_) {  // (オートアクション: what was done goes into the recording)
+        for (Json& op : actions::recordable(ops)) recording_->push_back(std::move(op));
+    }
     return true;
 }
 
@@ -628,8 +747,10 @@ void MainWindow::refresh_status() {
         read_only_->hide();
     }
     if (colours_ != nullptr) colours_->set_page_color(current_page() != nullptr ? current_page()->color : std::nullopt);  // (color-mode@1)
+    refresh_first_steps();
+    maybe_backup();  // (after a save: バックアップ, when chosen in 環境設定)
     if (flash_timer_.isActive()) return;  // (a notice is showing: it goes back to the page's status after its time)
-    const QString saved = state_words(status);
+    const QString saved = state_words(status) + (recording_ ? QStringLiteral(" ・ ● オートアクションを記録中") : QString());
     const core::Page* page = current_page();
     if (page == nullptr) {
         status_->setText(saved);
@@ -805,6 +926,7 @@ void MainWindow::next_document(int step) {
 }
 
 void MainWindow::add_document(std::shared_ptr<Session> session) {
+    if (session) session->set_idle(std::chrono::milliseconds(save_after_ms_));  // (環境設定's 変更を保存するまで)
     const bool untouched = documents_.size() == 1 && !session_->path() && session_->generation() == 0 &&
                            session_->waiting() == 0 && session_->status().kind != SaveKind::Saving;
     if (!untouched && session_->unsaved() && !settle(doc_, QStringLiteral("切り替える"))) return;
@@ -1078,6 +1200,112 @@ bool MainWindow::save_as_and_wait(const QString&, std::shared_ptr<Session> origi
     refresh_status();
     flash(QStringLiteral("保存しました: %1").arg(QDir::toNativeSeparators(target)), 3000);
     return true;
+}
+
+namespace {
+
+bool drawn_on(const core::Layer& layer) { return layer.stroke_count() > 0 || layer.raster_png || layer.color_raster || layer.ink_raster; }
+
+}  // namespace
+
+QWidget* MainWindow::first_steps_bar() {
+    auto* bar = new QWidget;
+    bar->setObjectName(QStringLiteral("firstSteps"));
+    auto* row = new QHBoxLayout(bar);
+    row->setContentsMargins(12, 6, 8, 6);
+    row->setSpacing(6);
+    auto* words = new QLabel(QStringLiteral("まだ何もない原稿です。最初の一歩:"));
+    theme::role(words, "hint");
+    row->addWidget(words);
+    for (const auto& [label, tool, key] : {std::tuple{"コマを割る", "frame", "F"}, {"ペンで描く", "pen", "B"}, {"台詞を入れる", "text", "T"}}) {
+        auto* button = new QPushButton(QStringLiteral("%1（%2）").arg(QString::fromUtf8(label), QString::fromLatin1(key)));
+        const QString which = QString::fromLatin1(tool);
+        connect(button, &QPushButton::clicked, this, [this, which] { choose_tool(which); });
+        row->addWidget(button);
+    }
+    auto* ai = new QPushButton(QStringLiteral("AI に頼む…"));
+    connect(ai, &QPushButton::clicked, this, &MainWindow::open_ai_dialog);
+    row->addWidget(ai);
+    row->addStretch(1);
+    auto* close = new QPushButton;
+    theme::iconed(close, "close");
+    close->setToolTip(QStringLiteral("この案内を閉じる"));
+    close->setAccessibleName(QStringLiteral("この案内を閉じる"));
+    close->setProperty("iconbtn", true);
+    close->setFixedSize(24, 24);
+    connect(close, &QPushButton::clicked, this, [this, bar] {
+        first_steps_closed_ = true;
+        bar->hide();
+    });
+    row->addWidget(close);
+    bar->hide();
+    return bar;
+}
+
+QWidget* MainWindow::next_steps_bar() {
+    auto* bar = new QWidget;
+    bar->setObjectName(QStringLiteral("nextSteps"));
+    auto* row = new QHBoxLayout(bar);
+    row->setContentsMargins(12, 4, 8, 4);
+    row->setSpacing(6);
+    auto* words = new QLabel(QStringLiteral("コマができました。次は:"));
+    theme::role(words, "hint");
+    row->addWidget(words);
+    const auto step = [this, row](const QString& key, std::function<void()> go) {
+        auto* button = new QPushButton;
+        button->setObjectName(QStringLiteral("next_") + key);
+        connect(button, &QPushButton::clicked, this, std::move(go));
+        row->addWidget(button);
+        next_buttons_[key] = button;
+    };
+    step(QStringLiteral("draw"), [this] { choose_tool(QStringLiteral("pen")); });
+    step(QStringLiteral("line"), [this] { choose_tool(QStringLiteral("text")); });
+    step(QStringLiteral("save"), [this] { action(QStringLiteral("act_save"))->trigger(); });
+    step(QStringLiteral("export"), [this] { action(QStringLiteral("act_export"))->trigger(); });
+    row->addStretch(1);
+    auto* close = new QPushButton;
+    theme::iconed(close, "close");
+    close->setToolTip(QStringLiteral("この案内を閉じる（ヘルプ → 次の作業の案内を表示 で、また出せます）"));
+    close->setAccessibleName(QStringLiteral("この案内を閉じる"));
+    close->setProperty("iconbtn", true);
+    close->setFixedSize(22, 22);
+    connect(close, &QPushButton::clicked, this, [this] { action(QStringLiteral("act_next_steps"))->setChecked(false); });
+    row->addWidget(close);
+    bar->hide();
+    return bar;
+}
+
+void MainWindow::refresh_first_steps() {
+    if (column_ == nullptr) return;
+    const core::Document& b = book();
+    bool drawn = false;
+    bool lines = !b.story.empty();
+    bool panels = false;
+    for (const auto& page : b.pages) {
+        if (page->leaf_frames().size() > 1) panels = true;
+        for (const core::Layer& layer : page->layers) drawn = drawn || drawn_on(layer);
+    }
+    const bool empty = !first_steps_closed_ && !lines && !drawn && !panels;
+    if (empty && first_steps_ == nullptr) {
+        first_steps_ = first_steps_bar();
+        column_->insertWidget(column_->indexOf(canvas_), first_steps_);
+    }
+    if (first_steps_ != nullptr) first_steps_->setVisible(empty);
+    // (I11) after the first panels: the next steps, marked as they are done, until closed
+    QAction* wanted = action(QStringLiteral("act_next_steps"));
+    const bool next = panels && wanted != nullptr && wanted->isChecked() && !(first_steps_ != nullptr && first_steps_->isVisible());
+    if (next && next_steps_ == nullptr) {
+        next_steps_ = next_steps_bar();
+        column_->insertWidget(column_->indexOf(canvas_), next_steps_);
+    }
+    if (next_steps_ == nullptr) return;
+    const bool saved = session_->path().has_value() && session_->status().kind == SaveKind::Saved;
+    const auto mark = [](bool done, const QString& words) { return (done ? QStringLiteral("✓ ") : QString()) + words; };
+    next_buttons_[QStringLiteral("draw")]->setText(mark(drawn, QStringLiteral("ペンで描く（B）")));
+    next_buttons_[QStringLiteral("line")]->setText(mark(lines, QStringLiteral("台詞を入れる（T）")));
+    next_buttons_[QStringLiteral("save")]->setText(mark(saved, QStringLiteral("保存")));
+    next_buttons_[QStringLiteral("export")]->setText(QStringLiteral("書き出し…"));
+    next_steps_->setVisible(next);
 }
 
 }  // namespace genko::app

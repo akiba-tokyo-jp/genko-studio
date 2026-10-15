@@ -5,7 +5,7 @@
 // (a Photoshop file too, opened as one picture; one of Lab colours, not opened yet, placed and said not drawn);
 // one that came in without being placed here (a book written elsewhere) stopping the drawing and the export with an
 // error that says so, nothing written; an asset file past what the store reads refused (C++ only); a digest naming
-// another place no asset (C++ only); a WebP not opened yet (not_yet_ported); a finish whose screen is too coarse for the
+// another place no asset (C++ only); a TIFF with its colours in planes not opened yet (not_yet_ported; a WebP is, since M6); a finish whose screen is too coarse for the
 // resolution refused (C++ only: Python takes minutes and gigabytes); and the pictures remembered between tiles let go.
 // (The drawing against Python's: test_contract_studio's placedPicturesLikePython; the refusals through the command
 // line: its brokenPicturesAreNotPlaced.)
@@ -82,8 +82,12 @@ const char* const kPsdLab =
     "AAoACgAKAAYACgAKAAYIBQgXIiooOjlK/c398gAXCAsbHSI1OzpGWwgLIScuNUJAU1n97v0TADgIIhwmMjtGUlhc/cf97AARCBAnIy43RUpXWggeKigzR1Ba"
     "Vl/96P0NADIIHzc6OkdbXmRvCCQ1NkROW1pteQglMTY/SlNSYmkIIjI8Q0pUWGJr/eL9BwAsCDE8TE5RY2RwfQgxSEpPWWxyc4P9A/0oAE0=";
 
-// A WebP, 2×2, as Pillow writes one (this build does not open a WebP yet).
+// A WebP, 2×2, as Pillow writes one (opened since M6).
 const char* const kWebp = "UklGRh4AAABXRUJQVlA4TBEAAAAvAUAAAAdQhSJXof+BiOh/AAA=";
+// A TIFF of 2×2 with its red, green and blue in three planes, which Pillow opens and this build does not yet.
+const char* const kPlanarTiff =
+    "SUkqAAgAAAAKAAABAwABAAAAAgAAAAEBAwABAAAAAgAAAAIBAwADAAAAhgAAAAMBAwABAAAAAQAAAAYBAwABAAAAAgAAABEBBAADAAAAjAAAABUBAwABAAAAAwAAABYBAwAB"
+    "AAAAAgAAABcBBAADAAAAmAAAABwBAwABAAAAAgAAAAAAAAAIAAgACACkAAAAqAAAAKwAAAAEAAAABAAAAAQAAAD/AAD/AP8AAAAA/wA=";
 
 const genko::core::CommandBus& bus() {
     static const genko::core::CommandBus b(render::ops_registry());
@@ -434,10 +438,13 @@ private slots:
         QVERIFY2(said.starts_with("apply: ops[0] place_asset: asset sha256:ab:cd is not in assets/"), said.c_str());
     }
 
-    void aWebpIsNotOpenedYet() {
+    void aTiffInPlanesIsNotOpenedYet() {
         QTemporaryDir tmp;
         Document doc = book_in(tmp.path());
-        const std::string ref = put(tmp.path(), genko::core::a2b_base64(kWebp));
+        // (a WebP is placed, as Python places it)
+        const std::string webp = put(tmp.path(), genko::core::a2b_base64(kWebp));
+        (void)bus().apply(doc, Json::array({Json::object({{"op", "place_asset"}, {"page", 1}, {"asset", webp}})}), Actor("human:作者"));
+        const std::string ref = put(tmp.path(), genko::core::a2b_base64(kPlanarTiff));
         std::string said;
         try {
             (void)bus().apply(doc, Json::array({Json::object({{"op", "place_asset"}, {"page", 1}, {"asset", ref}})}), Actor("human:作者"));

@@ -37,6 +37,8 @@ public:
     explicit LayerPanel(MainWindow* window);
     // The page's layers again (after a change, another page).
     void refresh();
+    // The kinds' marks drawn again in the look's colours now (after the screen's colours change).
+    void refresh_look();
     // The filters again (the plugins chosen to run, after their settings changed).
     void reload_filters();
     // The layer drawn on chosen in the list (the list as it is: the other layers chosen with it stay chosen).
@@ -49,8 +51,18 @@ public:
     QMenu* special_menu() const { return special_; }
     QMenu* many_menu() const { return many_; }
     QMenu* mask_menu() const { return mask_menu_; }
+    // マスクを編集する（ペンで見せる・消しゴムで隠す）: checked while the pen and the eraser paint the mask (a layer without
+    // one gets a mask showing everything first).
+    QAction* mask_edit_action() const { return mask_edit_; }
+    void edit_mask(bool on);
     QMenu* effects_menu() const { return effects_; }
     const std::vector<std::string>& ids() const { return ids_; }
+    // The layer's settings folded away under ▸ (and the toggle); the search and the "drawn on" row (shown only when
+    // needed).
+    QPushButton* details_toggle() const { return details_toggle_; }
+    QWidget* details() const { return details_; }
+    QLineEdit* search_box() const { return search_; }
+    QLabel* target_row() const { return target_; }
     // Alt+クリック: this layer alone shown; again: the others back.
     void solo(const std::string& layer_id);
     // The buttons' work (tests call them as the buttons do).
@@ -109,9 +121,12 @@ private:
     QComboBox* tint_ = nullptr;
     QPushButton* mask_button_ = nullptr;
     QPushButton* effect_button_ = nullptr;
+    std::map<QString, QIcon> marks_;  // (the kinds' marks, per colour)
+    QIcon kind_mark(core::LayerKind kind);
     QMenu* special_ = nullptr;
     QMenu* many_ = nullptr;
     QMenu* mask_menu_ = nullptr;
+    QAction* mask_edit_ = nullptr;
     QMenu* effects_ = nullptr;
     QAction* mask_off_ = nullptr;
     QAction* color_prints_ = nullptr;

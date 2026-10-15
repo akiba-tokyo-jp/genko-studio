@@ -228,6 +228,10 @@ genko_test(test_contract_ink SOURCES contract/test_contract_ink.cpp DEPS genko_t
 genko_test(test_contract_psd_text SOURCES contract/test_contract_psd_text.cpp DEPS genko_test_support genko_formats genko_render_ops
            LABELS contract TIMEOUT 1800)
 set_tests_properties(test_contract_psd_text PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
+# TIFF and WebP read as the Python baseline's Pillow reads them (M6): every case made by the reference Pillow, the
+# same mode, size and bytes; a TIFF in planes said not yet read.
+genko_test(test_contract_tiff_webp SOURCES contract/test_contract_tiff_webp.cpp DEPS genko_test_support genko_render
+           LABELS contract TIMEOUT 900)
 # The text of a line (M4): tategaki and the text side of balloons (cells, kinsoku, glyphs, ruby, 傍点, the letters set
 # across and down, their effects, text on a path) against Python's (render_harness.py text-cases), byte for byte (a
 # warped line's pictures within ARCHITECTURE.md §9: Python's homography comes from numpy's SVD).
@@ -323,6 +327,8 @@ if(GENKO_BUILD_APP)
   genko_test(test_gui_paint SOURCES gui/test_gui_paint.cpp DEPS genko_app GUI TIMEOUT 600)
   genko_test(test_gui_guides SOURCES gui/test_gui_guides.cpp DEPS genko_app GUI TIMEOUT 900)
   genko_test(test_gui_colours SOURCES gui/test_gui_colours.cpp DEPS genko_app genko_test_support GUI TIMEOUT 600)
+  genko_test(test_gui_workspace SOURCES gui/test_gui_workspace.cpp DEPS genko_app genko_test_support GUI TIMEOUT 600)
+  genko_test(test_gui_look SOURCES gui/test_gui_look.cpp DEPS genko_app genko_test_support GUI TIMEOUT 600)
   genko_test(test_gui_effects SOURCES gui/test_gui_effects.cpp DEPS genko_app genko_test_support GUI TIMEOUT 900)
   # 台詞 (M4①c): the text tool, the balloon pen, a balloon's handles and menu, the 台詞 panel, the story editor and
   # 台詞の検索・置換, each gesture's ops against Python's window, the page drawn after them

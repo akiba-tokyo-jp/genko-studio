@@ -43,6 +43,12 @@ using genko::core::Num;
 
 namespace {
 
+// A TIFF of 2 × 2 whose red, green and blue lie in three planes (PlanarConfiguration 2), as base64: Pillow opens it;
+// this build does not read it yet (render::NotYetPorted "image_format", known from its directory).
+const char* const kPlanarTiff =
+    "SUkqAAgAAAAKAAABAwABAAAAAgAAAAEBAwABAAAAAgAAAAIBAwADAAAAhgAAAAMBAwABAAAAAQAAAAYBAwABAAAAAgAAABEBBAADAAAAjAAAABUBAwABAAAAAwAAABYBAwAB"
+    "AAAAAgAAABcBBAADAAAAmAAAABwBAwABAAAAAgAAAAAAAAAIAAgACACkAAAAqAAAAKwAAAAEAAAABAAAAAQAAAD/AAD/AP8AAAAA/wA=";
+
 genko::core::StrokePtr line(double x, double y, double dx, double dy, std::string kind = "gpen") {
     auto s = std::make_shared<genko::core::Stroke>();
     s->id = genko::core::new_id();
@@ -272,7 +278,8 @@ private slots:
         QTest::addColumn<QString>("mode");
         // (tones, effect lines and screens are drawn since M3-B, the 3D guides since M3-C, a page's animation since
         // M3-③: anim_is_drawn, lines and their balloons since M4: balloons_are_drawn, a jacket's folds since M4②:
-        // folds_are_drawn, placed pictures since M5①: placed_is_drawn; a placed WebP is not opened yet)
+        // folds_are_drawn, placed pictures since M5①: placed_is_drawn, TIFF and WebP since M6; a placed TIFF whose
+        // samples lie in separate planes is not opened yet)
         for (const char* what : {"image_format"}) QTest::newRow(what) << QString(what) << QString("print");
     }
 
@@ -285,14 +292,14 @@ private slots:
         if (w == "nombre") page.numero = true;
         if (w == "anim") page.extra["anim"] = Json::object({{"fps", 12}, {"tracks", Json::array()}});
         QTemporaryDir assets;
-        if (w == "image_format") {  // (a placed picture whose asset is a WebP, 2×2, as Pillow writes one)
+        if (w == "image_format") {  // (a placed picture whose asset is a TIFF of 2×2 in three planes, which Pillow opens)
             QVERIFY(assets.isValid());
             doc.asset_dir = std::filesystem::path(assets.path().toStdString());
             Layer placed;
             placed.id = genko::core::new_id();
             placed.kind = LayerKind::Placed;
             placed.asset = genko::storage::AssetStore(*doc.asset_dir)
-                               .put_bytes(genko::core::a2b_base64("UklGRh4AAABXRUJQVlA4TBEAAAAvAUAAAAdQhSJXof+BiOh/AAA="), ".png");
+                               .put_bytes(genko::core::a2b_base64(kPlanarTiff), ".png");
             placed.placement_mm = genko::core::Rect{Num(5), Num(5), Num(30), Num(30)};
             page.layers.push_back(placed);
         }
@@ -516,7 +523,7 @@ private slots:
         const Document plain = doc;
         const Num index = doc.pages[0]->index;
         doc.add_line(index, "絵", "", std::nullopt, "", Num(2), Num(2), Num(12), Num(8), "picture").style["picture"] =
-            genko::core::b64encode(std::string("II*\0", 4) + std::string(60, '\x01'));
+            std::string(kPlanarTiff);
         render::RenderOptions proof;
         proof.mode = "proof";
         QCOMPARE(unported_element(*doc.pages[0], doc, proof), std::string("image_format"));
@@ -531,14 +538,14 @@ private slots:
     }
 
     void unported_picture_leaves_its_group_out_everywhere() {
-        // A joined group (style.group) with a picture balloon this build cannot open yet (TIFF): the whole page drawn with
+        // A joined group (style.group) with a picture balloon this build cannot open yet (a TIFF in planes): the whole page drawn with
         // skip_unported leaves the whole group out and says so; so does every part of the page — one the picture reaches,
         // and one it does not that the group's other balloon reaches — so each part is the whole page cut.
         Document doc = book();
         const Num index = doc.pages[0]->index;
         {
             genko::core::StoryLine& picture = doc.add_line(index, "絵", "", std::nullopt, "", Num(2), Num(2), Num(12), Num(8), "picture");
-            picture.style["picture"] = genko::core::b64encode(std::string("II*\0", 4) + std::string(60, '\x01'));
+            picture.style["picture"] = std::string(kPlanarTiff);
             picture.style["group"] = "g";
         }
         doc.add_line(index, "遠くの台詞", "", std::nullopt, "", Num(40), Num(70), Num(25), Num(18), "speech").style["group"] = "g";

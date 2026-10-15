@@ -512,4 +512,29 @@ void PageCanvas::draw_marquee(QPainter& painter) const {
     }
 }
 
+void PageCanvas::place_launcher() {
+    if (launcher == nullptr) return;
+    if (!selection_ || selection_->outline.empty() || sel_drag_ || warp_ || page() == nullptr) {
+        launcher->hide();
+        return;
+    }
+    const QTransform turned = view_transform();
+    double centre = 0;
+    double bottom = -1e300;
+    for (const QPointF& p : selection_->outline) {
+        const QPointF at = turned.map(pt(p.x(), p.y()));
+        centre += at.x();
+        bottom = std::max(bottom, at.y());
+    }
+    const QSize hint = launcher->sizeHint();
+    double x = centre / static_cast<double>(selection_->outline.size()) - hint.width() / 2.0;
+    double y = bottom + 10;
+    x = std::max(4.0, std::min(width() - hint.width() - 4.0, x));
+    y = std::max(4.0, std::min(height() - hint.height() - 4.0, y));
+    launcher->adjustSize();
+    launcher->move(static_cast<int>(x), static_cast<int>(y));
+    launcher->show();
+    launcher->raise();
+}
+
 }  // namespace genko::app
