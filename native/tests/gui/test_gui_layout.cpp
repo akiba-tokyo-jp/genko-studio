@@ -40,6 +40,7 @@
 #include <QStatusBar>
 #include <QTabBar>
 #include <QToolBar>
+#include <QTextBrowser>
 
 #include <fstream>
 #include <memory>
