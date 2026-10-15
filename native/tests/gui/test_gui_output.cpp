@@ -20,6 +20,7 @@
 #include <QtTest>
 
 #include <QCheckBox>
+#include <QClipboard>
 #include <QComboBox>
 #include <QDialogButtonBox>
 #include <QDockWidget>
@@ -48,6 +49,8 @@
 #include "app/check_panel.hpp"
 #include "app/config.hpp"
 #include "app/export_dialog.hpp"
+#include "app/fit_preview.hpp"
+#include "app/path_label.hpp"
 #include "app/history_panel.hpp"
 #include "app/icons.hpp"
 #include "app/main_window.hpp"
@@ -356,7 +359,7 @@ private slots:
             d->range->setText(QStringLiteral("2-3"));
             emit d->range->editingFinished();
             QCOMPARE(d->preview_note->text(), QStringLiteral("2 ページ（全 2 ページを書き出す）"));
-            QVERIFY(!d->preview->pixmap().isNull());
+            QVERIFY(!d->preview->image().isNull());
             // the official switch takes all the pages
             d->format->setCurrentIndex(d->format->findData(QStringLiteral("pdf")));
             d->official->setChecked(true);
@@ -367,6 +370,108 @@ private slots:
         };
         s.act("act_export")->trigger();
         QVERIFY(seen);
+    }
+
+    // I08 (UX-02): 書き出し…'s preview holds the whole page from the first time it is shown, its proportions kept, and
+    // again after the window changes size — a page wider than it is tall too. What the preview cuts (the area chosen)
+    // is checked apart from what is written (the file's size at the dpi chosen).
+    void exportPreviewShowsTheWholePage() {
+        core::Document book = gui_test::new_doc(2);
+        core::PageSpec& wide = book.edit_page(0).spec;
+        std::swap(wide.width_mm, wide.height_mm);  // (a page wider than it is tall)
+        if (wide.trim_w_mm && wide.trim_h_mm) std::swap(*wide.trim_w_mm, *wide.trim_h_mm);
+        Studio s(book);
+        s.window->go_to_page(1);
+        const auto whole = [](app::FitPreview* shown, const QString& when) {
+            const QImage& picture = shown->image();
+            QVERIFY2(!picture.isNull(), qPrintable(when));
+            const QRectF at = shown->shown_rect();
+            QVERIFY2(QRectF(shown->rect()).contains(at), qPrintable(when + QStringLiteral(": the page goes out of the preview")));
+            QVERIFY2(std::abs(at.width() / at.height() - static_cast<double>(picture.width()) / picture.height()) < 0.01,
+                     qPrintable(when + QStringLiteral(": the page is not in its proportions")));
+            // (as large as the room lets it be: one side meets the margin)
+            QVERIFY2(at.width() >= shown->width() - 13 || at.height() >= shown->height() - 13, qPrintable(when + QStringLiteral(": the page is not fitted")));
+        };
+        bool seen = false;
+        s.on_export = [&](app::ExportDialog* d) {
+            seen = true;
+            d->show();
+            for (int i = 0; i < 5; ++i) QCoreApplication::processEvents();
+            auto* shown = qobject_cast<app::FitPreview*>(d->findChild<QWidget*>(QStringLiteral("preview")));
+            QVERIFY(shown != nullptr);
+            whole(shown, QStringLiteral("the first time"));
+            for (const std::string_view key : formats::kAreas) {
+                d->area->setCurrentIndex(d->area->findData(qs(std::string(key))));
+                QCoreApplication::processEvents();
+                // the preview cuts what the area cuts (the page as it is written, at the preview's 30 dpi)
+                const render::Image cut = printed(s.doc(), s.doc().page(0), std::string(key), 30);
+                QCOMPARE(shown->image().size(), QSize(cut.width(), cut.height()));
+                whole(shown, qs(std::string(key)));
+            }
+            for (const QSize size : {QSize(640, 420), QSize(1400, 900), QSize(820, 1000)}) {
+                d->resize(size);
+                for (int i = 0; i < 5; ++i) QCoreApplication::processEvents();
+                whole(shown, QStringLiteral("at %1×%2").arg(d->size().width()).arg(d->size().height()));
+            }
+            d->reject();
+        };
+        s.act("act_export")->trigger();
+        QVERIFY(seen);
+        // what is written, cut by itself: the file of each area at its dpi
+        for (const std::string_view key : formats::kAreas) {
+            const QString out = s.tmp.path() + QStringLiteral("/cut-") + qs(std::string(key));
+            s.on_export = [&](app::ExportDialog* d) {
+                d->format->setCurrentIndex(d->format->findData(QStringLiteral("png")));
+                d->which->setCurrentIndex(d->which->findData(QStringLiteral("range")));
+                d->range->setText(QStringLiteral("1"));
+                d->dpi->setValue(72);
+                d->area->setCurrentIndex(d->area->findData(qs(std::string(key))));
+                d->folder->setText(out);
+                s.clicks << QStringLiteral("閉じる");
+                d->run();
+            };
+            s.act("act_export")->trigger();
+            const QStringList files = QDir(out).entryList(QDir::Files);
+            QCOMPARE(files.size(), 1);
+            const render::Image cut = printed(s.doc(), s.doc().page(0), std::string(key), 72);
+            QCOMPARE(QImage(out + QStringLiteral("/") + files.front()).size(), QSize(cut.width(), cut.height()));
+        }
+    }
+
+    // I12 (UX-02): 書き出し…'s folder, however long its Japanese name: the whole of it in a window (全文…) to read, copy
+    // or open (off while it is not made yet), its tooltip the whole of it; after writing, the path copied whole.
+    void exportFolderShownWhole() {
+        Studio s;
+        const QString deep = s.tmp.path() + QStringLiteral("/") + QStringLiteral("とても長い日本語のフォルダー名").repeated(5) + QStringLiteral("/第一話の書き出し");
+        bool seen = false;
+        s.on_export = [&](app::ExportDialog* d) {
+            seen = true;
+            QVERIFY(d->folder_whole != nullptr && d->folder_whole->isVisibleTo(d));
+            d->folder->setText(deep);
+            QCOMPARE(d->folder->toolTip(), deep);
+            app::PathDialog* whole = d->show_folder();
+            QCOMPARE(whole->shown(), QDir::toNativeSeparators(deep));
+            QVERIFY(!whole->open_button()->isEnabled());  // (not made yet)
+            QApplication::clipboard()->clear();
+            whole->copy_button()->click();
+            QCOMPARE(QApplication::clipboard()->text(), QDir::toNativeSeparators(deep));
+            whole->close();
+            d->format->setCurrentIndex(d->format->findData(QStringLiteral("png")));
+            d->which->setCurrentIndex(d->which->findData(QStringLiteral("range")));
+            d->range->setText(QStringLiteral("1"));
+            d->dpi->setValue(72);
+            QApplication::clipboard()->clear();
+            s.clicks << QStringLiteral("パスをコピー");
+            d->run();
+            QCOMPARE(d->result(), static_cast<int>(QDialog::Accepted));
+            QCOMPARE(QApplication::clipboard()->text(), QDir::toNativeSeparators(deep));
+            app::PathDialog* made = d->show_folder();
+            QVERIFY(made->open_button()->isEnabled());  // (made now: it can be opened)
+            made->close();
+        };
+        s.act("act_export")->trigger();
+        QVERIFY(seen);
+        QCOMPARE(QDir(deep).entryList(QDir::Files).size(), 1);
     }
 
     // 書き出す for every format: formats::run writes the same files as `genko export` does for the same choices.
@@ -1286,9 +1391,9 @@ private slots:
         core::Document empty = gui_test::new_doc(1);
         empty.pages.clear();
         app::ExportDialog dialog(s.window.get(), std::make_shared<const core::Document>(empty), std::nullopt, "human:tester");
-        QVERIFY(dialog.preview->pixmap().isNull());
+        QVERIFY(dialog.preview->image().isNull());
         dialog.format->setCurrentIndex(dialog.format->findData(QStringLiteral("pdf")));
-        QVERIFY(dialog.preview->pixmap().isNull());
+        QVERIFY(dialog.preview->image().isNull());
     }
 };
 

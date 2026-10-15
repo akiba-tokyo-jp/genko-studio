@@ -18,7 +18,7 @@
 
 namespace genko::app {
 
-PathDialog::PathDialog(QWidget* parent, const QString& title, const QString& path) : QDialog(parent), path_(path) {
+PathDialog::PathDialog(QWidget* parent, const QString& title, const QString& path, bool folder) : QDialog(parent), path_(path), folder_(folder) {
     setWindowTitle(title);
     setAttribute(Qt::WA_DeleteOnClose);
     auto* layout = new QVBoxLayout(this);
@@ -37,14 +37,21 @@ PathDialog::PathDialog(QWidget* parent, const QString& title, const QString& pat
     copy_ = buttons->addButton(QStringLiteral("コピー"), QDialogButtonBox::ActionRole);
     copy_->setToolTip(QStringLiteral("この場所をクリップボードに写します"));
     open_ = buttons->addButton(QStringLiteral("フォルダーを開く"), QDialogButtonBox::ActionRole);
-    open_->setToolTip(QStringLiteral("原稿の入っているフォルダーを開きます"));
+    open_->setToolTip(folder ? QStringLiteral("このフォルダーを開きます") : QStringLiteral("原稿の入っているフォルダーを開きます"));
+    open_->setEnabled(!folder || QFileInfo(path).isDir());
     QPushButton* close = buttons->addButton(QStringLiteral("閉じる"), QDialogButtonBox::RejectRole);
     close->setDefault(true);
     connect(copy_, &QPushButton::clicked, this, [this] {
         PathLabel::copy(path_);
         copy_->setText(QStringLiteral("コピーしました"));
     });
-    connect(open_, &QPushButton::clicked, this, [this] { PathLabel::open_folder(path_); });
+    connect(open_, &QPushButton::clicked, this, [this] {
+        if (folder_) {
+            QDesktopServices::openUrl(QUrl::fromLocalFile(path_));
+        } else {
+            PathLabel::open_folder(path_);
+        }
+    });
     connect(buttons, &QDialogButtonBox::rejected, this, &QDialog::reject);
     layout->addWidget(buttons);
     look::fit_to_screen(this, QSize(560, 220));

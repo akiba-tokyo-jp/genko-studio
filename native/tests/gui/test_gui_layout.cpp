@@ -22,11 +22,13 @@
 #include <QClipboard>
 #include <QComboBox>
 #include <QDialogButtonBox>
+#include <QDockWidget>
 #include <QDoubleSpinBox>
 #include <QInputMethodEvent>
 #include <QLabel>
 #include <QLineEdit>
 #include <QListWidget>
+#include <QMainWindow>
 #include <QPlainTextEdit>
 #include <QProcess>
 #include <QPushButton>
@@ -35,6 +37,8 @@
 #include <QSignalSpy>
 #include <QSpinBox>
 #include <QStatusBar>
+#include <QTabBar>
+#include <QToolBar>
 
 #include <fstream>
 #include <memory>
@@ -133,6 +137,34 @@ std::vector<Seen> buttons_of(QWidget* parent, bool footer) {
     return out;
 }
 
+// (I09) The window's bars and the panels it shows (the tool palette, the command bar, the panels): each in the window,
+// reachable on every screen. Collected with the window shown, as the person sees it: a panel in sight is itself in the
+// window; one behind another in its tabs (Qt keeps it out of the window) is reached by its tab, which is in the window.
+std::vector<Seen> bars_and_panels(QMainWindow* window) {
+    window->show();
+    for (int i = 0; i < 5; ++i) QCoreApplication::processEvents();
+    std::vector<Seen> out;
+    for (QToolBar* bar : window->findChildren<QToolBar*>()) {
+        if (bar->isVisible()) out.push_back(Seen{QStringLiteral("bar ") + bar->windowTitle(), bar, false});
+    }
+    for (QDockWidget* dock : window->findChildren<QDockWidget*>()) {
+        if (!dock->isVisible() || dock->isFloating()) continue;
+        if (!dock->visibleRegion().isEmpty()) {
+            out.push_back(Seen{QStringLiteral("panel ") + dock->windowTitle(), dock, false});
+            continue;
+        }
+        QTabBar* reached = nullptr;
+        for (QTabBar* tabs : window->findChildren<QTabBar*>()) {
+            for (int i = 0; tabs->isVisible() && i < tabs->count(); ++i) {
+                if (tabs->tabText(i) == dock->windowTitle()) reached = tabs;
+            }
+        }
+        // (none: the panel is neither in sight nor behind a tab — "hidden" below)
+        out.push_back(Seen{QStringLiteral("tab of ") + dock->windowTitle(), reached != nullptr ? static_cast<QWidget*>(reached) : static_cast<QWidget*>(dock), false});
+    }
+    return out;
+}
+
 int probe(int argc, char** argv) {
     QApplication application(argc, argv);
     app::icons::init_resources();
@@ -214,6 +246,7 @@ int probe(int argc, char** argv) {
         app::MainWindow window(app::Session::open(book, quick(path_of(dir.filePath("recovery")))));
         std::vector<Seen> seen = {{QStringLiteral("canvas"), window.canvas(), false},
                                   {QStringLiteral("status"), window.statusBar(), true}};
+        for (const Seen& more : bars_and_panels(&window)) seen.push_back(more);
         out << look_at(QStringLiteral("main"), &window, QSize(1280, 800), seen).dump() << "\n";
         // 書き出し… and 印刷… (M4③b): their buttons in sight, their rows reachable
         app::ExportDialog exporting(&window, window.session().snapshot(), window.session().path(), "human:tester");
@@ -238,6 +271,7 @@ int probe(int argc, char** argv) {
         std::vector<Seen> seen = {{QStringLiteral("canvas"), window.canvas(), false},
                                   {QStringLiteral("status"), window.statusBar(), true},
                                   {QStringLiteral("点検する"), window.checks()->run_button, false}};
+        for (const Seen& more : bars_and_panels(&window)) seen.push_back(more);
         out << look_at(QStringLiteral("main-checks"), &window, QSize(1280, 800), seen).dump() << "\n";
     }
     {
@@ -247,6 +281,7 @@ int probe(int argc, char** argv) {
         window.show_dock(QStringLiteral("点検"));
         window.show_dock(QStringLiteral("履歴"));
         std::vector<Seen> seen = {{QStringLiteral("履歴"), window.history()->list(), false}, {QStringLiteral("status"), window.statusBar(), true}};
+        for (const Seen& more : bars_and_panels(&window)) seen.push_back(more);
         out << look_at(QStringLiteral("main-history"), &window, QSize(1280, 800), seen).dump() << "\n";
     }
     {
@@ -278,6 +313,7 @@ int probe(int argc, char** argv) {
                 {QStringLiteral("承認"), window.approvals()->approve_button, false},
                 {QStringLiteral("差し戻す"), window.approvals()->back_button, false},
                 {QStringLiteral("理由"), window.approvals()->reason, false}};
+        for (const Seen& more : bars_and_panels(&window)) seen.push_back(more);
         out << look_at(QStringLiteral("main-studio"), &window, QSize(1280, 800), seen).dump() << "\n";
     }
     {

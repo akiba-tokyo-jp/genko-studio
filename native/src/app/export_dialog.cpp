@@ -32,7 +32,9 @@
 
 #include "app/ask.hpp"
 #include "app/config.hpp"
+#include "app/fit_preview.hpp"
 #include "app/look.hpp"
+#include "app/path_label.hpp"
 #include "app/theme.hpp"
 #include "service/human_service.hpp"
 #include "service/wording.hpp"
@@ -140,11 +142,9 @@ ExportDialog::ExportDialog(QWidget* parent, DocPtr episode, std::optional<fs::pa
         show_preview();
     });
     connect(range, &QLineEdit::editingFinished, this, &ExportDialog::show_preview);
-    preview = new QLabel;
+    preview = new FitPreview;
     preview->setObjectName(QStringLiteral("preview"));
-    preview->setAlignment(Qt::AlignCenter);
     preview->setMinimumSize(220, 300);
-    preview->setStyleSheet(QStringLiteral("background:%1; border-radius: 6px").arg(theme::tokens().surround));
     preview_note = new QLabel;
     theme::role(preview_note, "hint");
     format = new QComboBox;
@@ -244,11 +244,18 @@ ExportDialog::ExportDialog(QWidget* parent, DocPtr episode, std::optional<fs::pa
                                          : QDir::homePath() + QStringLiteral("/genko_書き出し");
     folder = new QLineEdit(QDir::toNativeSeparators(default_dir));
     folder->setObjectName(QStringLiteral("folder"));
+    folder->setToolTip(folder->text());
+    connect(folder, &QLineEdit::textChanged, folder, [this](const QString& text) { folder->setToolTip(text); });
     auto* pick = new QPushButton(QStringLiteral("選ぶ…"));
     connect(pick, &QPushButton::clicked, this, &ExportDialog::pick_folder);
+    folder_whole = new QPushButton(QStringLiteral("全文…"));  // (I12: a long Japanese folder is never only seen in part)
+    folder_whole->setObjectName(QStringLiteral("folder_whole"));
+    folder_whole->setToolTip(QStringLiteral("書き出し先を省かずに見る・コピーする・フォルダーを開く"));
+    connect(folder_whole, &QPushButton::clicked, this, [this] { show_folder(); });
     auto* where = new QHBoxLayout;
     where->addWidget(folder, 1);
     where->addWidget(pick);
+    where->addWidget(folder_whole);
     form_ = look::form();
     form_->addRow(look::section(QStringLiteral("形式")));
     form_->addRow(QStringLiteral("形式"), format);
@@ -425,13 +432,19 @@ bool ExportDialog::psd_text_go(const std::vector<std::int64_t>& chosen) {
     return exec_box(box) == go;
 }
 
+PathDialog* ExportDialog::show_folder() {
+    auto* dialog = new PathDialog(this, QStringLiteral("書き出し先"), QString::fromStdString(core::path_to_utf8(out())), true);
+    dialog->show();
+    return dialog;
+}
+
 void ExportDialog::show_preview() {
     if (psd_text != nullptr) psd_changed();  // (PSD-01: what the pages chosen have)
     std::vector<std::int64_t> chosen;
     try {
         chosen = pages();
     } catch (const std::exception& error) {
-        preview->clear();
+        preview->set_image(QImage());
         preview_note->setText(QString::fromUtf8(error.what()));
         return;
     }
@@ -454,10 +467,9 @@ void ExportDialog::show_preview() {
         if (fmt != nullptr && std::find(fmt->options.begin(), fmt->options.end(), "area") != fmt->options.end()) {
             image = formats::crop_to(image, *page, area->currentData().toString().toStdString(), kDpi);
         }
-        const int room = std::max(200, preview->height() - 24);
-        preview->setPixmap(QPixmap::fromImage(to_qimage(image)).scaledToHeight(room, Qt::SmoothTransformation));
+        preview->set_image(to_qimage(image));
     } catch (const std::exception& error) {
-        preview->clear();
+        preview->set_image(QImage());
         preview_note->setText(wording::error(QString::fromUtf8(error.what())));
         return;
     }
@@ -628,8 +640,14 @@ void ExportDialog::run() {
     box.setWindowTitle(QStringLiteral("Genko"));
     box.setText(said);
     QPushButton* open_button = box.addButton(QStringLiteral("フォルダを開く"), QMessageBox::ActionRole);
+    QPushButton* copy_button = box.addButton(QStringLiteral("パスをコピー"), QMessageBox::ActionRole);  // (I12)
     box.addButton(QStringLiteral("閉じる"), QMessageBox::AcceptRole);
-    if (exec_box(box) == open_button) QDesktopServices::openUrl(QUrl::fromLocalFile(QString::fromStdString(core::path_to_utf8(dest))));
+    QAbstractButton* const answer = exec_box(box);
+    if (answer == open_button) {
+        QDesktopServices::openUrl(QUrl::fromLocalFile(QString::fromStdString(core::path_to_utf8(dest))));
+    } else if (answer == copy_button) {
+        PathLabel::copy(QString::fromStdString(core::path_to_utf8(dest)));
+    }
     accept();
 }
 
