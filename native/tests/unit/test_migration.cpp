@@ -141,9 +141,12 @@ private slots:
     }
 
     void cleanupTestCase() {
-        chosen_.isNull() ? qunsetenv("GENKO_CONFIG_DIR") : (void)qputenv("GENKO_CONFIG_DIR", chosen_);
-        xdg_.isNull() ? qunsetenv("XDG_CONFIG_HOME") : (void)qputenv("XDG_CONFIG_HOME", xdg_);
-        appdata_.isNull() ? qunsetenv("APPDATA") : (void)qputenv("APPDATA", appdata_);
+        if (chosen_.isNull()) qunsetenv("GENKO_CONFIG_DIR");
+        else qputenv("GENKO_CONFIG_DIR", chosen_);
+        if (xdg_.isNull()) qunsetenv("XDG_CONFIG_HOME");
+        else qputenv("XDG_CONFIG_HOME", xdg_);
+        if (appdata_.isNull()) qunsetenv("APPDATA");
+        else qputenv("APPDATA", appdata_);
     }
 
     void theFoldersAreApart() {
