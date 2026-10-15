@@ -12,9 +12,24 @@
 - R7 統合前の群の commit は、作業ツリーだけに置かず、native/integration ではない作業ブランチへ push して保全する（CI は無効なので試験は走らない）。
 - 当て方: CMYK・Lab の工程の出口の V3（e099da5）から。ASan の後に Release・Debug を流す順をやめ、ASan を走らせたまま Release・Debug を並べた（`run.sh` の親だけ止め、ASan の validation_run は続けた）。残る重複は群D の V2 と同じ中身の ASan 1 回分だけ（計画が違うので `--pair` に使えない）。
 - 次: M6 は Linux の開発を Windows deferred のまま進め、Windows 実機は M6 の出口（配布候補）と M7 で行う（実行場所は利用者に確かめる）。
+- **利用者の決定（2026-10-15）: Windows は、すべての実装と Linux での試験が終わり、マージした後に、別の環境で行う。** このセッションでは Windows の実機の build・受入をしない（VALIDATION.md §0 の「配布前の Windows 実機受入は必須」は変えない。Windows の受入が済むまで両 OS の配布完了とは言わない）。同じ日の決定: Windows の実機の作業は M7 まで保留、MCP の `inspect` の説明文は Python と同じ文のまま、Qt のソースの入手先は download.qt.io を案内する。
 
 
-## CMYK・Lab の編集（color-mode@1、COLOR-02）— 2026-10-13〜14 記録（この節が最新。M5 の後、M6 の前の独立した工程）
+## CMYK・Lab の編集（color-mode@1、COLOR-02）— 2026-10-13〜15 記録（この節が最新。M5 の後、M6 の前の独立した工程）
+
+### 工程の出口 V3（e099da5）— Linux で合格
+- **凍結SHA**: `e099da5a09ecc1653c1caa4da6f09bafdd921cc8`（群D の統合の記録）。V3 は main tree の HEAD 2404922（その上は docs/ の再計画だけ。固定するフォルダー native・src・tools は凍結と同じことを確かめてから流した）。計画は `validation_policy.py --base 9f97117 --head e099da5 --phase milestone`（基点は M5 出口の凍結。tier full、各 120 試験、性能は別に必須）。
+- **実行環境**（資源上限は固定しない＝利用者決定）: Claude Code クラウドコンテナ、4 CPU（Intel Xeon @ 2.80GHz）/ RAM 16GB / Ubuntu 24.04.5 / kernel 6.18.44。Qt 6.11.2、GCC 13.3。参照 Python 3.12＋Pillow 12.3.0・numpy 2.4.6・psd-tools 1.10.9、GENKO_MCP_PYTHON（mcp 2.2.0）、native.yml の数値用環境変数、root から CAP_DAC_OVERRIDE/DAC_READ_SEARCH/FOWNER を外して実行。R3 のとおり ASan を走らせたまま Release・Debug を並べた（各構成内 ctest 1 並列）。
+- **結果**（validation_run.py の result.json。3 構成とも failures は空、除いた契約なし、CLI23 合格）:
+  - linux-release: 120/120 合格（10/15 00:19–01:47 UTC）。故障注入が Debug・ASan だけのための SKIP 33（test_transaction 10・test_save_e2e 16・test_session 3・test_contract_save 1・test_migrate_e2e 1・test_gui_save 1・test_app_e2e 1。M4・M5 出口と同じ組）は合格に数えない。
+  - linux-debug: 120/120 合格、SKIP 0（03:30–05:37）。
+  - linux-asan: 120/120 合格、サニタイザ指摘なし、SKIP 0（03:05–08:55）。
+  - `--pair`: 失敗は「構成artifactの欠落・重複」1 件のみ＝Windows 2 構成が開発中 deferred。Linux 3 構成どうしの照合は指摘なし。**Windows を含む --pair 合格ではない。**
+- **実 xcb（Xvfb 1920×1080）GUI・E2E**（凍結のビルド）: Release で gui_actions 14・gui_ai 62・gui_anim 8・gui_book 32・gui_brushes 8・gui_canvas 78・gui_color 60・gui_colours 4・gui_effects 15・gui_guides 7・gui_layers 12・gui_layout 32・gui_lines 20・gui_materials 36・gui_output 21・gui_paint 11・gui_paper 14・gui_pen 51・gui_ruby 18・gui_select 13・gui_studio 29、Debug で gui_save 36・app_e2e 8、全合格・FAIL 0。Release の gui_save は故障注入が Debug だけのため SKIP 1（Debug で 36 合格）。
+- **PERF-F**（Release、test_perf_pipeline、ctest 経由。合否判定あり。測定機は基準クラスではない）: F3 の工程 80.2 秒・88 作業。全呼び出し n=314 p95 1034 ms・p99 1919 ms（除外なし。MCP の道具 306 件 p95 1020 ms、人の `genko studio` 8 件 p95 7.03 s、書き出し 4 件 最大 9.62 s を含む）／情報取得 n=100 p95 862 ms／編集の確定 p95 149 ms／候補の採用 p95 1782 ms／ページの仕上げ p95 991 ms（合格値は各 p95 2 秒）／8 ページの校正出力 10 回: 呼び出しから PDF の完成まで 8.27〜9.32 s（各 30 秒以内。仕事の記録は呼び出しから開始まで最大 8.1 ms）。**全項目合格**（Totals 3 passed、ctest exit 0。08:55 以降、load 1.1〜1.9）。
+- **AC-PERF 注入計測**（Release、Xvfb、F1＝32頁×1500線。表示のみで合否判定なし）: 開いて最初の頁 1536 ms・全頁 1536 ms／入力→ライブ線 p95 1.56・p99 7.06 ms（n=43780）／線確定→表示 p95 21.8 ms／Undo→表示 p95 37.2 ms／頁切替 最初 p95 26.9・精細 p95 113 ms（n=4）／自動保存 p95 2.34 s／保存中のイベントループの遅れ p99 11.8 ms（250 ms 超 0）。F1頁 350dpi 全描画 1359 ms・1線追加 682 ms・512px部分 68 ms。M5 出口とほぼ同じ。
+- **V3 の中で起きたこと（製品の失敗ではない。R4 の環境だけの原因として、その構成だけやり直した）**: (1) ディスクが満杯（Errno 28）になり、Release の test_contract_raster_ops が書けずに失敗し、Debug のビルドが止まった。空きを作って Release を流し直した（上の値）。(2) 機械が再起動し（10/15 03:00 UTC ごろ）、走っていた ASan（70/120）と Debug（53/120）が止まった（失敗なし）。2 構成を初めから流し直した（上の値。止まった分の記録は使わない）。Debug は空きのため、試験の実行物のデバッグ情報を `objcopy --compress-debug-sections=zlib` で圧縮してから流した（同じコード、ninja は作り直すものなしと確認）。
+- **CMYK・Lab の工程の出口は Linux で合格**（Windows は開発中 deferred。上の利用者の決定のとおり、マージ後に別の環境で受入）。
 
 ### 進め方
 - 群ごとに「実装（対象試験）→レビュー1回→凍結→V2（Release＋ASan）→統合」。工程の出口だけ V3。群A（CL-A: 色モードの土台）→群B（描画道具・色パネル・スポイト）→群C（補正・フィルター）→群D（文字・トーン・効果・編集可能な文字の PSD・レイヤースタイル）→出口 V3。
@@ -123,8 +138,8 @@
 - 16bit の PSD の取り込みは 8bit で読む。
 
 ### 残課題・次
-- 工程の出口 V3（Debug・Release・ASan の全体と CLI23、`--pair`、実 xcb の GUI・E2E・AC-PERF・PERF-F）を最後の凍結（群D の統合の記録）で 1 回。
-- Windows は開発中 deferred（配布前の実機受入は必須）。M6 は着手前に止めて利用者に確かめる。
+- ~~工程の出口 V3~~ 済み（上の「工程の出口 V3」）。
+- Windows は開発中 deferred（配布前の実機受入は必須。利用者の決定（2026-10-15）: マージ後に別の環境で）。
 
 ## M5出口受入（Linux）— 2026-10-13 記録
 
