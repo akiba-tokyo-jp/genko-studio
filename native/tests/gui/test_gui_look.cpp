@@ -21,6 +21,7 @@
 #include <QLineEdit>
 #include <QListWidget>
 #include <QMenu>
+#include <QTimer>
 #include <QMenuBar>
 #include <QOpenGLWidget>
 #include <QPalette>
@@ -256,8 +257,19 @@ private slots:
         QVERIFY(target >= 0);
         menu->choose(target);
         QCOMPARE(book.canvas()->tool(), QStringLiteral("eraser"));
-        // Shift+right click, or a tool that does not draw: the usual menu (no round one)
         QCoreApplication::processEvents();
+        QVERIFY(book.window->radial() == nullptr);  // (gone once chosen)
+        // a tool that does not draw: the usual menu (no round one)
+        book.act("act_select")->trigger();
+        bool usual = false;
+        QTimer::singleShot(0, [&usual] {
+            if (auto* popup = qobject_cast<QMenu*>(QApplication::activePopupWidget())) {
+                usual = !popup->actions().isEmpty();
+                popup->close();
+            }
+        });
+        emit book.canvas()->contextMenuAt(QString(), book.canvas()->mapToGlobal(QPoint(400, 300)));
+        QVERIFY(usual);
         QVERIFY(book.window->radial() == nullptr);
         store()->setValue(QStringLiteral("ui/radial"), QStringLiteral("false"));
         QVERIFY(!app::radial_on());
