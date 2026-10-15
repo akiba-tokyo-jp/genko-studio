@@ -16,6 +16,7 @@
 #include "app/icons.hpp"
 #include "app/links.hpp"
 #include "app/main_window.hpp"
+#include "app/memory.hpp"
 #include "app/migration.hpp"
 #include "app/perf.hpp"
 #include "app/test_script.hpp"
@@ -28,6 +29,7 @@ namespace genko::app {
 namespace fs = std::filesystem;
 
 int run_app(int argc, char** argv) {
+    memory::tune();  // (the heap set for a long session, before any thread: PERF-G)
     // Validate control arguments before Qt consumes its own switches or initializes the display.
     // Only the ASCII controls are read from CRT argv; the accepted path is decoded by Qt below.
     bool has_path = false;

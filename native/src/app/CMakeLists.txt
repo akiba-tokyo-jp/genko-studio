@@ -19,6 +19,7 @@ genko_library(genko_app
     workspace.cpp
     preferences.cpp
     comfort.cpp
+    memory.cpp
     inputs.cpp
     glass.cpp
     backup.cpp

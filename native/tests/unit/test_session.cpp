@@ -419,6 +419,38 @@ private slots:
         }
     }
 
+    // Hours of line work (PERF-G): past the changes kept in memory, the oldest saved ones leave memory too — each
+    // holds its page as it was before it — and are undone and redone through the journal, the book coming back as it
+    // was, line by line.
+    void aLongLineHistoryLeavesMemory() {
+        QTemporaryDir tmp;
+        const fs::path book = path_of(tmp.filePath("book.genko"));
+        make_book(book);
+        Session::Options options = quick(path_of(tmp.filePath("recovery")));
+        options.autosave = false;
+        options.history_changes = 3;
+        auto session = Session::open(book, options);
+        for (int i = 0; i < 6; ++i) session->apply(stroke_op(20 + i * 10));
+        session->save_now();
+        QVERIFY(session->wait_saved(10000ms));
+        QCOMPARE(session->changes_in_memory(), std::size_t{3});  // (the last three: the others through the journal)
+        for (int i = 5; i >= 0; --i) {
+            QVERIFY(session->can_undo());
+            session->undo();
+            QVERIFY(session->wait_saved(10000ms));
+            QCOMPARE(ink_strokes(session->document()), std::size_t(i));
+            QCOMPARE(ink_strokes_on_disk(book), std::size_t(i));
+        }
+        QVERIFY(!session->can_undo());
+        for (int i = 1; i <= 6; ++i) {
+            QVERIFY(session->can_redo());
+            session->redo();
+            QVERIFY(session->wait_saved(10000ms));
+            QCOMPARE(ink_strokes(session->document()), std::size_t(i));
+        }
+        QCOMPARE(ink_strokes_on_disk(book), std::size_t{6});
+    }
+
     // After the history went to the journal, a change undone before it was saved still comes back with Redo, after
     // an Undo that reached through the journal (and read the book again).
     void aChangeUndoneBeforeItWasSavedIsRedoneAfterTheJournal() {

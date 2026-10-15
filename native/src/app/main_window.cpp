@@ -46,6 +46,7 @@
 #include "app/ime.hpp"
 #include "app/inputs.hpp"
 #include "app/look.hpp"
+#include "app/memory.hpp"
 #include "app/navigator.hpp"
 #include "app/pages_panel.hpp"
 #include "app/perf.hpp"
@@ -150,6 +151,7 @@ MainWindow::MainWindow(std::shared_ptr<Session> session) {
     connect(session_.get(), &Session::statusChanged, this, &MainWindow::maybe_backup);  // (each book's saves: バックアップ)
     documents::add(this);
     inputs::install();  // (number fields select their value; the wheel leaves unused fields alone)
+    memory::watch_idle();  // (the heap's free room back to the system after 10 s without input: PERF-G)
     pen_ = PenSettings::load();  // (until the brush panel is made: it drives the pen from then on)
     // the book's own brushes are known to the drawing (as Python's reader registers them)
     render::brushes::register_book(book());  // (and the pictures of their papers)

@@ -726,7 +726,7 @@ core::ApplyResult Session::apply(const Json& ops, const std::vector<std::string>
 void Session::trim_history() {
     std::size_t held = 0;
     for (const auto& change : done_) held += change->held;
-    while (held > options_.history_bytes && done_.size() > 1 && path_) {
+    while ((held > options_.history_bytes || done_.size() > options_.history_changes) && done_.size() > 1 && path_) {
         const std::shared_ptr<Change> oldest = done_.front();
         if (!oldest->on_disk || oldest->undone_on_disk || oldest->recover) break;
         if (waits(oldest)) break;

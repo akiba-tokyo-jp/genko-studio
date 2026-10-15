@@ -103,6 +103,10 @@ public:
         // the changes in memory, the oldest changes already in the journal leave memory, and Undo reaches them
         // through the journal (as a change saved before this session).
         std::size_t history_bytes = std::size_t(1) << 30;
+        // Past this many changes in memory, the oldest already in the journal leave memory too (PERF-G: hours of
+        // line work keep the memory flat — each change holds the page as it was before it; Python keeps none once
+        // saved): the last ones are undone in memory, older ones through the journal.
+        std::size_t history_changes = 100;
     };
 
     // A book read from its folder, not yet a session (read() may run on any thread; the session is made on the thread
