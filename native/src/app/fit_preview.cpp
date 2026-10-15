@@ -1,6 +1,8 @@
 #include "app/fit_preview.hpp"
 
 #include <QPainter>
+#include <QScrollArea>
+#include <QScrollBar>
 
 #include <algorithm>
 
@@ -27,14 +29,44 @@ QRectF FitPreview::fit(const QSizeF& picture, const QSizeF& room, double margin)
     return QRectF((room.width() - shown.width()) / 2, (room.height() - shown.height()) / 2, shown.width(), shown.height());
 }
 
+QRect FitPreview::in_sight() const {
+    for (QWidget* up = parentWidget(); up != nullptr; up = up->parentWidget()) {
+        if (auto* scroll = qobject_cast<QScrollArea*>(up)) {
+            const QWidget* port = scroll->viewport();
+            const QRect seen = QRect(mapFrom(port, QPoint(0, 0)), port->size()).intersected(rect());
+            return seen.isEmpty() ? rect() : seen;
+        }
+    }
+    return rect();
+}
+
 QRectF FitPreview::shown_rect() const {
     if (image_.isNull()) return {};
-    return fit(QSizeF(image_.size()), QSizeF(size()));
+    const QRect room = in_sight();
+    return fit(QSizeF(image_.size()), QSizeF(room.size())).translated(room.topLeft());
+}
+
+void FitPreview::showEvent(QShowEvent* event) {
+    QWidget::showEvent(event);
+    if (watching_) return;
+    for (QWidget* up = parentWidget(); up != nullptr; up = up->parentWidget()) {
+        if (auto* scroll = qobject_cast<QScrollArea*>(up)) {
+            // (the body scrolled: the part in sight moved, the page is fitted to it again)
+            for (QScrollBar* bar : {scroll->verticalScrollBar(), scroll->horizontalScrollBar()}) {
+                connect(bar, &QScrollBar::valueChanged, this, [this] { update(); });
+            }
+            watching_ = true;
+            break;
+        }
+    }
 }
 
 void FitPreview::paintEvent(QPaintEvent*) {
     QPainter painter(this);
-    painter.fillRect(rect(), theme::surround());
+    painter.setRenderHint(QPainter::Antialiasing);
+    painter.setPen(Qt::NoPen);
+    painter.setBrush(theme::surround());
+    painter.drawRoundedRect(QRectF(rect()), 6, 6);  // (as Python's preview: border-radius 6px)
     if (image_.isNull()) return;
     painter.setRenderHint(QPainter::SmoothPixmapTransform);
     painter.drawImage(shown_rect(), image_);

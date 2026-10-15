@@ -31,6 +31,11 @@ struct Lines {
     std::uintmax_t complete_size = 0;       // the bytes up to and including the last "\n"
 };
 Lines read_lines(const std::filesystem::path& file);
+// The same lines without each one's "ops" (the operations a change made: the bulk of a journal), for what reads the
+// journal at every save (the repair, the transactions and their revisions, the stacks). Lines read before are kept, and
+// not parsed again while the file only grows (as Python's journal.entries keeps its parsed lines: a thick book's journal
+// holds megabytes of operations, and a save that parsed it whole fell behind the drawing — PERF-G).
+Lines read_lines_without_ops(const std::filesystem::path& file);
 
 // A line: compact JSON ("," and ":", no spaces, keys in their order, UTF-8) and "\n".
 std::string line_text(const core::Json& value);

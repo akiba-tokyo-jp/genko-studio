@@ -1,10 +1,12 @@
 #include "render/raster.hpp"
 
 #include <algorithm>
+#include <array>
 #include <cmath>
 #include <cstdio>
 
 #include "core/command_bus.hpp"
+#include "core/ids.hpp"
 #include "core/pynum.hpp"
 #include "core/pyrandom.hpp"
 #include "core/strokes.hpp"
@@ -148,6 +150,104 @@ Image layer_pixels(const core::Page& page, const core::Layer& layer) {
         return baked(page, copy);
     }
     return ensure_raster(page, layer);
+}
+
+std::vector<core::Stroke> mixed_pieces(const core::Page& page, const core::Layer& layer, const core::Stroke& stroke, double mix,
+                                       double stretch) {
+    constexpr double kStepMm = 1.5;
+    const Image under = layer_pixels(page, layer).convert("RGBA");
+    const std::string px = under.tobytes();
+    const int w = under.width(), h = under.height();
+    const double scale = static_cast<double>(w) / page.spec.width_mm.value();
+    std::array<float, 3> base{20.0f, 20.0f, 20.0f};
+    if (stroke.rgb && !stroke.rgb->empty()) {
+        for (std::size_t i = 0; i < 3 && i < stroke.rgb->size(); ++i) base[i] = static_cast<float>((*stroke.rgb)[i]);
+    }
+    std::array<float, 3> carried = base;
+    // (long straight parts get points in between, so the colour can change)
+    std::vector<core::PointF> points{stroke.points.front()};
+    std::vector<double> pressure, rotation;
+    if (!stroke.pressure.empty()) pressure.push_back(stroke.pressure.front());
+    if (!stroke.rotation.empty()) rotation.push_back(stroke.rotation.front());
+    for (std::size_t i = 1; i < stroke.points.size(); ++i) {
+        const core::PointF a = stroke.points[i - 1], b = stroke.points[i];
+        const auto steps = std::max<std::int64_t>(1, static_cast<std::int64_t>(core::py_ceil(core::py_dist(a.x, a.y, b.x, b.y) / (kStepMm / 3))));
+        for (std::int64_t k = 1; k <= steps; ++k) {
+            const double t = static_cast<double>(k) / static_cast<double>(steps);
+            points.push_back({core::py_round(a.x + (b.x - a.x) * t, 3), core::py_round(a.y + (b.y - a.y) * t, 3)});
+            if (!stroke.pressure.empty() && i < stroke.pressure.size()) {
+                pressure.push_back(core::py_round(stroke.pressure[i - 1] + (stroke.pressure[i] - stroke.pressure[i - 1]) * t, 3));
+            }
+            if (!stroke.rotation.empty() && i < stroke.rotation.size()) {
+                rotation.push_back(stroke.rotation[i - 1] + (stroke.rotation[i] - stroke.rotation[i - 1]) * t);
+            }
+        }
+    }
+    // numpy's float32 with Python floats as weak scalars (NEP 50): each Python float cast to float32 first
+    const float mix_f = static_cast<float>(mix), unmix_f = static_cast<float>(1 - mix);
+    std::vector<std::array<float, 3>> colours;
+    colours.reserve(points.size());
+    core::PointF last = points.front();
+    for (const core::PointF& p : points) {
+        std::array<float, 3> target = base;
+        const auto x = static_cast<std::int64_t>(p.x * scale);  // (int(): toward zero)
+        const auto y = static_cast<std::int64_t>(p.y * scale);
+        if (0 <= x && x < w && 0 <= y && y < h) {
+            const auto* at = reinterpret_cast<const unsigned char*>(px.data()) + (static_cast<std::size_t>(y) * w + static_cast<std::size_t>(x)) * 4;
+            const float alpha = static_cast<float>(at[3]) / 255.0f;  // (see-through places give nothing to pick up)
+            for (int c = 0; c < 3; ++c) {
+                const float diff = static_cast<float>(at[c]) - base[c];
+                const float scaled = diff * alpha;
+                target[c] = base[c] + scaled;
+            }
+        }
+        // the colour on the brush moves toward what is under it (or back to its own); stretch keeps it longer
+        const double keep = core::py_pow(stretch, std::max(core::py_dist(last.x, last.y, p.x, p.y), 0.05) / 2.0);
+        const float keep_f = static_cast<float>(keep), let_f = static_cast<float>(1 - keep);
+        std::array<float, 3> colour{};
+        for (int c = 0; c < 3; ++c) {
+            const float held = carried[c] * keep_f;
+            const float taken = target[c] * let_f;
+            carried[c] = held + taken;
+            const float own = base[c] * unmix_f;
+            const float picked = carried[c] * mix_f;
+            colour[c] = own + picked;
+        }
+        last = p;
+        colours.push_back(colour);
+    }
+    std::vector<core::Stroke> pieces;
+    std::size_t start = 0;
+    double walked = 0.0;
+    for (std::size_t i = 1; i < points.size(); ++i) {
+        walked += core::py_dist(points[i - 1].x, points[i - 1].y, points[i].x, points[i].y);
+        if (walked >= kStepMm || i == points.size() - 1) {
+            core::Stroke piece = stroke;
+            piece.id = pieces.empty() ? stroke.id : core::new_id();
+            piece.points.assign(points.begin() + static_cast<std::ptrdiff_t>(start), points.begin() + static_cast<std::ptrdiff_t>(i + 1));
+            const auto slice = [&](const std::vector<double>& v) {
+                const std::size_t from = std::min(start, v.size()), to = std::min(i + 1, v.size());
+                return std::vector<double>(v.begin() + static_cast<std::ptrdiff_t>(from), v.begin() + static_cast<std::ptrdiff_t>(to));
+            };
+            piece.pressure = slice(pressure);
+            piece.rotation = slice(rotation);
+            // np.mean(colours[start:i + 1], axis=0): each column added in order in float32 (a reduction across rows),
+            // then divided by the count as an intp — in float64 — into the float32 result
+            std::vector<std::int64_t> rgb;
+            const auto n = static_cast<double>(i + 1 - start);
+            for (int c = 0; c < 3; ++c) {
+                float sum = 0.0f;
+                for (std::size_t k = start; k <= i; ++k) sum = sum + colours[k][c];
+                const auto mean = static_cast<float>(static_cast<double>(sum) / n);
+                rgb.push_back(static_cast<std::int64_t>(std::nearbyint(mean)));  // (round(): half to even)
+            }
+            piece.rgb = rgb;
+            pieces.push_back(std::move(piece));
+            start = i;
+            walked = 0.0;
+        }
+    }
+    return pieces;
 }
 
 void erase_raster(const core::Page& page, core::Layer& layer, const core::PenPoints& points, double width_mm, int dpi,

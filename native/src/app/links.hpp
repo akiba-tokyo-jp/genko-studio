@@ -54,6 +54,9 @@ private:
 
 // How the system should start Genko for a link: this build's genko and "app".
 QStringList command();
+// One argument of a desktop entry's Exec line (the Desktop Entry Specification): in double quotes, " ` $ \ escaped,
+// % doubled, then the backslashes escaped again for the string value.
+QString desktop_argument(const QString& text);
 // Make genko:// links open Genko for this user: (done, what happened in the person's words).
 std::pair<bool, QString> register_links();
 // `genko register-links`: {"ok", "message"} on stdout; 0 when done, else 1.

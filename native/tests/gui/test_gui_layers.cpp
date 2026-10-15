@@ -101,7 +101,9 @@ private slots:
             const auto* layer = book.layer(order[static_cast<std::size_t>(row)]);
             QCOMPARE(panel.list()->item(row)->checkState(), layer->visible ? Qt::Checked : Qt::Unchecked);
             const bool drawn = layer->stroke_count() > 0;
-            QCOMPARE(!panel.list()->item(row)->icon().isNull(), drawn);
+            // (its picture when drawn on, else a quiet mark of its kind: every row has one)
+            QVERIFY(!panel.list()->item(row)->icon().isNull());
+            QCOMPARE(panel.list()->item(row)->data(Qt::UserRole + 1).toString() == QStringLiteral("picture"), drawn);
         }
         QVERIFY(book.window->target_layer() != nullptr);
         QCOMPARE(panel.ids()[static_cast<std::size_t>(panel.list()->currentRow())], book.window->target_layer()->id);

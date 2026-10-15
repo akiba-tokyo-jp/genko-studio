@@ -2,7 +2,7 @@
 # Qt: the official 6.11.2 binaries (aqtinstall), LGPL modules only — never Qt HTTP Server or other GPL-only modules.
 # Every library and its licence is listed in docs/cpp-migration/THIRD_PARTY.md (SBOM source).
 
-find_package(Qt6 6.11 REQUIRED COMPONENTS Core Gui Widgets Network Concurrent Svg PrintSupport Test)
+find_package(Qt6 6.11 REQUIRED COMPONENTS Core Gui Widgets OpenGL OpenGLWidgets Network Concurrent Svg PrintSupport Test)
 qt_standard_project_setup()
 
 find_package(nlohmann_json 3.11 REQUIRED)

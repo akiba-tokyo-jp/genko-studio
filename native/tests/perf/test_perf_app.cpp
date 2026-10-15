@@ -29,6 +29,7 @@
 #include "app/icons.hpp"
 #include "app/inject.hpp"
 #include "app/main_window.hpp"
+#include "app/memory.hpp"
 #include "app/perf.hpp"
 #include "app/session.hpp"
 #include "app/theme.hpp"
@@ -387,6 +388,7 @@ int main(int argc, char** argv) {
             return child.exitCode();
         }
     }
+    app::memory::tune();  // (as `genko app` does at its start, before any thread)
     QTemporaryDir logs;
     if (!qEnvironmentVariableIsSet("GENKO_PERF_LOG")) qputenv("GENKO_PERF_LOG", logs.filePath(QStringLiteral("perf.jsonl")).toUtf8());
     if (!qEnvironmentVariableIsSet("GENKO_CONFIG_DIR")) qputenv("GENKO_CONFIG_DIR", logs.filePath(QStringLiteral("config")).toUtf8());

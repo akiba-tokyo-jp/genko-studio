@@ -1,0 +1,158 @@
+#pragma once
+
+#include <QDialog>
+#include <QKeySequence>
+#include <QList>
+#include <QPointF>
+#include <QString>
+#include <QStringList>
+#include <QWidget>
+
+#include <functional>
+#include <map>
+#include <optional>
+#include <utility>
+#include <vector>
+
+class QAction;
+class QCheckBox;
+class QComboBox;
+class QKeySequenceEdit;
+class QLabel;
+class QLineEdit;
+class QListWidget;
+class QMainWindow;
+class QPushButton;
+class QSlider;
+class QSpinBox;
+class QTableWidget;
+class QTabWidget;
+
+// 環境設定 (Python's genko/app/preferences.py): the person's own ways of working, kept in the app's settings (not in
+// the book).
+// - Shortcuts: any command's keys can be changed; two commands on the same keys are refused.
+// - The pen tablet: a scribble pad measures how hard the person presses and sets the pressure curve to match; the
+//   pen's side button can be the eyedropper, the hand (move the view) or the right click.
+// - The screen and the work: the letters, the colours, the pointer, the keys held, the round menu, the rest reminder,
+//   fewer moving things, the paper a new book starts on, how soon changes are saved, the backups.
+
+namespace genko::app {
+
+class MainWindow;
+
+namespace preferences {
+
+// The pen's side button: (the words shown, the value kept).
+const std::vector<std::pair<QString, QString>>& pen_buttons();
+// How soon a change is saved (ms): 環境設定's 変更を保存するまで, 2 s unless chosen (SPEC: the pause after a change
+// before it is saved is 2 s by default and the work goes on saving within 10 s: 1 … 10 s can be chosen).
+constexpr int kSaveAfterMin = 500;
+constexpr int kSaveAfterMax = 10000;
+constexpr int kSaveAfterDefault = 2000;
+
+int ui_font_pt();  // 0: the system's size
+QString default_paper();
+int save_after_ms();
+std::optional<double> tablet_gamma();
+QString pen_button();
+// The pressure curve that turns the person's usual pressing (the median) into the middle width. Throws
+// std::invalid_argument("もう少し長く試し描きします") with too few presses.
+double gamma_for(const std::vector<double>& pressures);
+
+// Every command (an action with words, not a menu or a line) named "cmd:<its words>" once, in the order of the names;
+// name_commands gives the unnamed ones their name and remembers each command's own keys (MainWindow::default_shortcuts).
+std::vector<QAction*> commands(QMainWindow* window);
+void name_commands(MainWindow* window);
+// (new name: old name) a command renamed later keeps the keys chosen under its old name
+const std::map<QString, QString>& renamed();
+void apply_shortcuts(MainWindow* window);
+// Every command's tooltip says its name, its keys as they are now, and what it does (written again when the keys
+// change, so a changed key never shows the old one).
+void retip(MainWindow* window);
+// (keys, one command, the other) for keys given to two commands — the commands in their order.
+struct Clash {
+    QString keys;
+    QString first;
+    QString second;
+};
+std::vector<Clash> conflicts(const std::vector<std::pair<QString, QStringList>>& mapping);
+// Everything the preferences change, applied to an open window.
+void apply_all(MainWindow* window);
+// 道具ごとの修飾キー: for each tool, what Alt, Ctrl and Shift held switch to (共通の設定のまま: the common one). The dialog
+// is exec'ed; `before_exec` (tests) is called with it first. True when kept.
+bool tool_keys_dialog(QWidget* parent, MainWindow* window, const std::function<void(QDialog&)>& before_exec = {});
+
+// Scribble here as usual: the pad keeps the pressures the pen reported.
+class PressurePad : public QWidget {
+    Q_OBJECT
+
+public:
+    PressurePad();
+    std::vector<double> pressures;
+    std::vector<std::pair<QPointF, double>> points;
+    void clear();
+
+protected:
+    void tabletEvent(QTabletEvent* event) override;
+    void paintEvent(QPaintEvent* event) override;
+};
+
+class PreferencesDialog : public QDialog {
+    Q_OBJECT
+
+public:
+    explicit PreferencesDialog(MainWindow* window);
+
+    // the pages, chosen at the side (as the main window's panels), not by tabs across the top
+    QTabWidget* tabs = nullptr;
+    QListWidget* pages_list = nullptr;
+    // ショートカット
+    QTableWidget* table = nullptr;
+    std::vector<std::pair<QString, QKeySequenceEdit*>> editors;  // (the command's words, its keys) in order
+    QKeySequenceEdit* editor(const QString& command) const;
+    QLabel* clash = nullptr;
+    // ペンタブレット
+    PressurePad* pad = nullptr;
+    QLabel* gamma_note = nullptr;
+    std::optional<double> gamma;
+    QComboBox* button = nullptr;
+    // 表示・作業
+    QComboBox* ui_font = nullptr;
+    QSpinBox* font_pt = nullptr;
+    QComboBox* paper = nullptr;
+    QSpinBox* save_after = nullptr;
+    QComboBox* theme = nullptr;
+    QSlider* brightness = nullptr;
+    QComboBox* surround = nullptr;
+    QCheckBox* mono_icons = nullptr;
+    QCheckBox* hints = nullptr;
+    QCheckBox* radial = nullptr;
+    QComboBox* rest = nullptr;
+    QCheckBox* requests = nullptr;
+    QCheckBox* gpu = nullptr;
+    QCheckBox* motion = nullptr;
+    QComboBox* cursor = nullptr;
+    QComboBox* alt_tool = nullptr;
+    QComboBox* ctrl_tool = nullptr;
+    QLineEdit* backup_folder = nullptr;
+    QSpinBox* backup_minutes = nullptr;
+    QSpinBox* backup_keep = nullptr;
+    QCheckBox* hold_swap = nullptr;
+    QPushButton* per_tool = nullptr;
+
+    void measure();
+    void forget_gamma();
+    void reset_keys();
+    std::vector<std::pair<QString, QStringList>> mapping() const;
+    // 決める: kept and applied, the dialog accepted — or, with two commands on one key, the clash said and nothing kept.
+    void save();
+
+private:
+    void show_gamma();
+    void pick_backup();
+
+    MainWindow* window_;
+};
+
+}  // namespace preferences
+}  // namespace genko::app

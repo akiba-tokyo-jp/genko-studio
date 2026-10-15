@@ -1,8 +1,8 @@
 // The ops of M2-O1 end to end through the command line, each step its own process. A book made by `genko new` gets
 // every op through `genko apply`, batch by batch (by a person and by an AI; for_pages too); after each batch
 // `genko inspect` shows the book the reply showed (a studio op, set_bible, too). Batches that may not be applied (an AI
-// approving, a page locked by a person, what this build does not do yet — a line mixing with what is under it (mix) on
-// a layer with lines —, a stale --expect-revision, a dry run) leave the book's files as they were. Then `genko undo` takes the
+// approving, a page locked by a person, a stale --expect-revision, a dry run) leave the book's files as they were; a line
+// mixing with what is under it (mix) on a layer with lines is made, as Python makes it (M7). Then `genko undo` takes the
 // batches back one by one (the book each time as it was before that batch), `genko redo` puts them back, and
 // [{"op": "undo"}] given to `genko apply` undoes as `genko undo` does, once for a --txn given twice.
 
@@ -214,13 +214,12 @@ private slots:
         step("the bible", Json::parse(R"([{"op": "set_note", "page": 1, "note": "設定"}, {"op": "set_bible", "plot": "屋上で鞄を拾う",
                                            "characters": [{"id": "c-yuki", "name": "ユキ"}], "constraints": ["8ページ"]}])"),
              person);
-        // (a line mixing with what is under it, on a layer with a line already: the C++ colour mixing comes later; the
-        // two ops before it are not written either)
-        refused("what this build does not do yet",
-                 Json::parse(R"([{"op": "set_note", "page": 1, "note": "refused prefix"},
-                                 {"op": "add_stroke", "page": 1, "layer": "ink", "points": [[20, 220], [180, 220]]},
-                                 {"op": "add_stroke", "page": 1, "layer": "ink", "points": [[20, 230], [180, 230]], "mix": 0.5}])"),
-                 person, "not_yet_ported", "ops[2] add_stroke: add_stroke with mix (下地混色) on a layer that has something on it");
+        // (a line mixing with what is under it, on a layer with a line already: made in pieces of the colours picked up,
+        // as Python's — M7)
+        step("mix", Json::parse(R"([{"op": "set_note", "page": 1, "note": "混ぜる"},
+                                    {"op": "add_stroke", "page": 1, "layer": "ink", "points": [[20, 220], [180, 220]]},
+                                    {"op": "add_stroke", "page": 1, "layer": "ink", "points": [[20, 230], [180, 230]], "mix": 0.5}])"),
+             person);
         step("for_pages", Json::parse(R"([{"op": "for_pages", "pages": [1, 2, 4], "ops": [{"op": "set_note", "note": "全"}]}])"), ai);
         step("unlock", Json::parse(R"([{"op": "unlock_page", "page": 3}])"), person);
         const std::int64_t last = revision;

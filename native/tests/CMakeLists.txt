@@ -213,6 +213,12 @@ set_tests_properties(test_contract_pipeline PROPERTIES ENVIRONMENT "QT_QPA_PLATF
 # refused (and `genko studio`'s exit 3), one save for several sheets, chat approvals checked under the lock, another
 # process's lock, confine kept from callers, the command line's own refusals, PDF numbers whatever the locale.
 genko_test(test_service SOURCES unit/test_service.cpp DEPS genko_test_support genko_service LABELS unit)
+# M7 (the ledger counted against the C++ tree): the checks of Python's tests no C++ test made before, ported a Python test
+# to a slot (tools/migration/build_ledger.py TEST_CPP names them)
+genko_test(test_ledger_service_a SOURCES unit/test_ledger_service_a.cpp DEPS genko_test_support genko_service LABELS unit TIMEOUT 900)
+genko_test(test_ledger_service_c SOURCES unit/test_ledger_service_c.cpp DEPS genko_test_support genko_service LABELS unit TIMEOUT 900)
+genko_test(test_ledger_service_b SOURCES unit/test_ledger_service_b.cpp DEPS genko_test_support genko_service genko_api LABELS unit TIMEOUT 2400)
+set_tests_properties(test_ledger_service_b PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen;QTEST_FUNCTION_TIMEOUT=2300000")
 # import_psd (M4②b): psd.read_psd and the op against Python's on the PSD and PSB files of psd_cases.json (every file,
 # a few cut after every byte, all of them changed at a few bytes; each step's reply, snapshot and payload, the layers'
 # pixels, the book read back), and hostile files refused without the memory Python would take.
@@ -228,6 +234,10 @@ genko_test(test_contract_ink SOURCES contract/test_contract_ink.cpp DEPS genko_t
 genko_test(test_contract_psd_text SOURCES contract/test_contract_psd_text.cpp DEPS genko_test_support genko_formats genko_render_ops
            LABELS contract TIMEOUT 1800)
 set_tests_properties(test_contract_psd_text PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
+# TIFF and WebP read as the Python baseline's Pillow reads them (M6): every case made by the reference Pillow, the
+# same mode, size and bytes; a TIFF in planes said not yet read.
+genko_test(test_contract_tiff_webp SOURCES contract/test_contract_tiff_webp.cpp DEPS genko_test_support genko_render
+           LABELS contract TIMEOUT 900)
 # The text of a line (M4): tategaki and the text side of balloons (cells, kinsoku, glyphs, ruby, 傍点, the letters set
 # across and down, their effects, text on a path) against Python's (render_harness.py text-cases), byte for byte (a
 # warped line's pictures within ARCHITECTURE.md §9: Python's homography comes from numpy's SVD).
@@ -308,6 +318,7 @@ if(GENKO_BUILD_APP)
   genko_test(test_gui_materials SOURCES gui/test_gui_materials.cpp DEPS genko_app GUI TIMEOUT 300)
   # the disposable material preview cache alone (keys, restarts, corrupt files, budgets, originals kept)
   genko_test(test_material_preview_cache SOURCES unit/test_material_preview_cache.cpp DEPS genko_app LABELS unit)
+  genko_test(test_migration SOURCES unit/test_migration.cpp DEPS genko_app LABELS unit)
   genko_test(test_gui_color SOURCES gui/test_gui_color.cpp DEPS genko_app GUI TIMEOUT 300)
   # the layer panel: its list, buttons, settings, menus (several at once, masks, effects), fill and correction layers,
   # a filter with its result on the page while its numbers change
@@ -323,6 +334,20 @@ if(GENKO_BUILD_APP)
   genko_test(test_gui_paint SOURCES gui/test_gui_paint.cpp DEPS genko_app GUI TIMEOUT 600)
   genko_test(test_gui_guides SOURCES gui/test_gui_guides.cpp DEPS genko_app GUI TIMEOUT 900)
   genko_test(test_gui_colours SOURCES gui/test_gui_colours.cpp DEPS genko_app genko_test_support GUI TIMEOUT 600)
+  genko_test(test_gui_workspace SOURCES gui/test_gui_workspace.cpp DEPS genko_app genko_test_support GUI TIMEOUT 600)
+  genko_test(test_gui_look SOURCES gui/test_gui_look.cpp DEPS genko_app genko_test_support GUI TIMEOUT 600)
+  genko_test(test_gui_carried SOURCES gui/test_gui_carried.cpp DEPS genko_app genko_test_support GUI TIMEOUT 600)
+  # M7 (the ledger counted against the C++ tree): the checks of Python's window tests no C++ test made before
+  genko_test(test_gui_ledger_a SOURCES gui/test_gui_ledger_a.cpp DEPS genko_app genko_test_support GUI TIMEOUT 900)
+  genko_test(test_gui_ledger_c SOURCES gui/test_gui_ledger_c.cpp DEPS genko_app genko_test_support GUI TIMEOUT 900)
+  genko_test(test_gui_ledger_b SOURCES gui/test_gui_ledger_b.cpp DEPS genko_app genko_test_support GUI TIMEOUT 900)
+  # the distribution (M6, AC-PACKAGE): this build installed into a folder of its own, run from it with a bare
+  # environment, its libraries, notes, licences and SBOM (against docs/cpp-migration/THIRD_PARTY.md), install.sh and
+  # uninstall.sh leaving books and settings as they were
+  genko_test(test_package SOURCES package/test_package.cpp DEPS genko_test_support LABELS package TIMEOUT 900)
+  target_compile_definitions(test_package PRIVATE GENKO_CMAKE_COMMAND="${CMAKE_COMMAND}" GENKO_BUILD_DIR="${CMAKE_BINARY_DIR}"
+                                                  GENKO_VERSION="${PROJECT_VERSION}")
+  add_dependencies(test_package genko)
   genko_test(test_gui_effects SOURCES gui/test_gui_effects.cpp DEPS genko_app genko_test_support GUI TIMEOUT 900)
   # 台詞 (M4①c): the text tool, the balloon pen, a balloon's handles and menu, the 台詞 panel, the story editor and
   # 台詞の検索・置換, each gesture's ops against Python's window, the page drawn after them
@@ -398,4 +423,7 @@ if(GENKO_BUILD_APP)
   # the app's internal timings: five minutes of G pen input on the F1 book in `genko app` on Xvfb (ACCEPTANCE.md §6)
   genko_test(test_perf_app SOURCES perf/test_perf_app.cpp DEPS genko_app LABELS perf TIMEOUT 3600)
   set_tests_properties(test_perf_app PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen;QTEST_FUNCTION_TIMEOUT=3500000")
+  # PERF-G and M7's two hours of continuous work (perf: run on its own, on the quiet machine)
+  genko_test(test_soak_app SOURCES perf/test_soak_app.cpp DEPS genko_app LABELS perf TIMEOUT 10800)
+  set_tests_properties(test_soak_app PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen;QTEST_FUNCTION_TIMEOUT=10000000")
 endif()

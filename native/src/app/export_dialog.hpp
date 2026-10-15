@@ -22,6 +22,7 @@ class QDoubleSpinBox;
 class QFormLayout;
 class QLabel;
 class QLineEdit;
+class QPushButton;
 class QSpinBox;
 
 // 書き出し… (Python's genko/app/dialogs.py ExportDialog): a format (formats/exporting: the table of formats and their
@@ -35,6 +36,9 @@ class QSpinBox;
 // those lines as pictures — the fonts it names (never put in the file) and that a ruby does not follow its text.
 
 namespace genko::app {
+
+class FitPreview;
+class PathDialog;
 
 // The CMYK profile chosen last (dialogs.icc_setting: settings color/icc, while its file is there), and keep one.
 QString icc_setting();
@@ -56,6 +60,8 @@ public:
     void run();
     // The folder the files go to (Path(folder).expanduser()).
     std::filesystem::path out() const;
+    // (I12) The folder the files go to, the whole of it, in a window (全文…): to read, copy or open (modeless; tests).
+    PathDialog* show_folder();
 
     // The person chose to fix what the check found first (the window opens 点検 then).
     bool fix_requested = false;
@@ -67,7 +73,7 @@ public:
 
     QComboBox* which = nullptr;
     QLineEdit* range = nullptr;
-    QLabel* preview = nullptr;
+    FitPreview* preview = nullptr;  // (I08: the whole page from the first time it is shown, fitted again as the window changes)
     QLabel* preview_note = nullptr;
     QComboBox* format = nullptr;
     QLabel* note = nullptr;
@@ -91,6 +97,7 @@ public:
     QComboBox* psd_unsupported = nullptr;  // (editable) stop | rasterize
     QLabel* psd_notes = nullptr;           // (editable) what it cannot keep, the fonts, the ruby
     QLineEdit* folder = nullptr;
+    QPushButton* folder_whole = nullptr;  // (I12) 全文…
     QDialogButtonBox* buttons = nullptr;
     std::map<std::string, QWidget*> rows;  // option key → its field (shown only for the formats that take it)
 

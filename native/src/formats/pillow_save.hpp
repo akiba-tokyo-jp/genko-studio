@@ -69,7 +69,8 @@ struct JpegSave {
 std::string jpeg_bytes(const render::Image& image, const JpegSave& params = {});
 
 // Image.save(…, format="TIFF", compression=…, dpi=…, icc_profile=…) through libtiff (Pillow's libtiff encoder): modes
-// 1, L, RGB, CMYK; compression "tiff_lzw" or "group4" (1-bit only); strips of about 64 KiB; little-endian.
+// 1, L, RGB, CMYK; compression "tiff_lzw", "group4" (1-bit only) or "raw" (none: Image.save's default); strips of about
+// 64 KiB; little-endian.
 struct TiffSave {
     std::string compression = "tiff_lzw";
     std::optional<std::array<double, 2>> dpi;

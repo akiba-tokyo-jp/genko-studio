@@ -28,6 +28,7 @@ genko_library(genko_core
     pyconv.cpp
     ids.cpp
     paths.cpp
+    config_dir.cpp
     base64.cpp
     geometry.cpp
     model.cpp

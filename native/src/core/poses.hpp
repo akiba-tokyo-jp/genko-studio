@@ -12,8 +12,8 @@
 
 namespace genko::core::poses {
 
-// Python's genko.tokens.config_dir: $GENKO_CONFIG_DIR, else %APPDATA%\genko on Windows, else
-// $XDG_CONFIG_HOME/genko or ~/.config/genko.
+// The app's own folder (core::config_dir: $GENKO_CONFIG_DIR, else %APPDATA%\GenkoStudio on Windows, else
+// $XDG_CONFIG_HOME/genko-studio or ~/.config/genko-studio).
 std::filesystem::path config_dir();
 
 // [{name, joints, hands}], oldest first (nothing when the file is missing or not JSON).

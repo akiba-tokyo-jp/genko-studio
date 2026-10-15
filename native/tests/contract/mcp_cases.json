@@ -1969,6 +1969,33 @@
      },
      {
       "method": "POST",
+      "path": "/v1/export",
+      "json": {
+       "path": "api.genko",
+       "out": "nope/../link_out/x"
+      }
+     },
+     {
+      "method": "POST",
+      "path": "/v1/new",
+      "json": {
+       "dest": "nope/../link_out/escape.genko"
+      }
+     },
+     {
+      "method": "GET",
+      "path": "/v1/inspect?path=nope%2F..%2Flink_out"
+     },
+     {
+      "method": "POST",
+      "path": "/v1/assets?path=nope%2F..%2Flink_out",
+      "base64": "iVBORw0KGgoAAAANSUhEUgAAABgAAAAQCAIAAACDRijCAAAAHElEQVR4nGM8oaHBQA3ARBVTRg0aNWjUoBFsEABJywE4xZmKkAAAAABJRU5ErkJggg==",
+      "headers": {
+       "Content-Type": "image/png"
+      }
+     },
+     {
+      "method": "POST",
       "path": "/v1/apply",
       "json": {
        "path": "api.genko",
@@ -2129,6 +2156,20 @@
          "op": "put_raster",
          "page": 1,
          "path": "link_out/secret.png"
+        }
+       ]
+      }
+     },
+     {
+      "method": "POST",
+      "path": "/v1/apply",
+      "json": {
+       "path": "api.genko",
+       "ops": [
+        {
+         "op": "put_raster",
+         "page": 1,
+         "path": "nope/../link_out/secret.png"
         }
        ]
       }

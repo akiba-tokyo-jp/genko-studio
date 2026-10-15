@@ -115,7 +115,9 @@ void PageCanvas::update_cursor(std::optional<QPointF> pos) {
     } else if (space_) {
         setCursor(Qt::OpenHandCursor);
     } else if (is_drawing_tool(tool_)) {
-        setCursor(Qt::CrossCursor);  // (the brush's circle is drawn on the page)
+        // the brush's circle is drawn on the page (paint_page); the pointer itself as chosen in 環境設定
+        const bool blank = cursor_kind == QLatin1String("circle") || cursor_kind == QLatin1String("dot");
+        setCursor(blank ? Qt::BlankCursor : Qt::CrossCursor);
     } else if (tool_ == QLatin1String("move")) {
         setCursor(Qt::SizeAllCursor);
     } else if (tool_ == QLatin1String("picker") || tool_ == QLatin1String("fill")) {
@@ -138,6 +140,7 @@ void PageCanvas::update_cursor(std::optional<QPointF> pos) {
     } else {
         setCursor(Qt::ArrowCursor);
     }
+    if (gpu_surface_ != nullptr) gpu_surface_->setCursor(cursor());  // (the card's surface shows the same pointer)
 }
 
 void PageCanvas::start_pan(const QPointF& pos) {
@@ -458,11 +461,20 @@ bool PageCanvas::event(QEvent* e) {
 // --- the keys ------------------------------------------------------------------------------------------------------
 
 void PageCanvas::hold_modifier(const QString& key, bool down) {
-    // Ctrl held: the select tool for a moment, Alt the eyedropper (スポイト); back to the tool before when let go
-    // (環境設定's own choice of these comes with the preferences)
+    // Alt / Ctrl held: the tool chosen in 環境設定 for a moment (スポイト and 選択 unless chosen otherwise); back to the
+    // tool before when let go
     const QString base = held_tool_.value_or(tool_);
-    QString tool = key == QLatin1String("ctrl") ? QStringLiteral("select") : key == QLatin1String("alt") ? QStringLiteral("picker") : QString();
-    if ((base == QLatin1String("zoom") || base == QLatin1String("marquee")) && key == QLatin1String("alt")) tool.clear();
+    const auto common = modifier_tools.find(key);
+    QString tool = common != modifier_tools.end() ? common->second : QString();
+    if ((base == QLatin1String("zoom") || base == QLatin1String("marquee")) && key == QLatin1String("alt")) {
+        tool.clear();  // (Alt takes away from the selection there, and zooms out with the magnifier)
+    }
+    if (const auto own_tool = tool_modifiers.find(base); own_tool != tool_modifiers.end()) {
+        // (this tool's own setting wins; Shift switches only when a tool says so)
+        if (const auto own = own_tool->second.find(key); own != own_tool->second.end() && !own->second.isEmpty()) {
+            tool = own->second == QLatin1String("none") ? QString() : own->second;
+        }
+    }
     if (down) {
         // (not while a line, a selection or its handles are being dragged: the drag ends with the tool it began with)
         const bool dragging = !stroke_.empty() || !marquee_stroke_.empty() || sel_drag_ || ellipse_drag_ || !lasso_fill_.empty() || shape_drag_ ||
@@ -477,6 +489,19 @@ void PageCanvas::hold_modifier(const QString& key, bool down) {
             emit toolHeld(tool_);
         }
     } else if (held_tool_ && held_key_ == key) {
+        tool_ = *held_tool_;
+        held_tool_.reset();
+        update_cursor();
+        update();
+        emit toolHeld(tool_);
+    }
+}
+
+void PageCanvas::focusOutEvent(QFocusEvent* event) {
+    QWidget::focusOutEvent(event);
+    // (the canvas no longer hears the key being let go — a click on a panel, a menu, another window: the tool the key
+    // held is let go now, never left stuck)
+    if (held_tool_) {
         tool_ = *held_tool_;
         held_tool_.reset();
         update_cursor();
@@ -557,6 +582,33 @@ void PageCanvas::back_from_eraser_end() {
 void PageCanvas::tabletEvent(QTabletEvent* event) {
     const auto type = event->type();
     last_pressure_ = event->pressure();  // (the vector tool's traces take the pen's pressure)
+    // the pen's side button (or its middle one) as chosen in 環境設定: the eyedropper or the hand (the right click's
+    // menu otherwise, below)
+    const Qt::MouseButtons side_buttons = Qt::RightButton | Qt::MiddleButton;
+    const bool side = (event->button() & side_buttons) != 0 || (type == QEvent::TabletMove && (event->buttons() & side_buttons) != 0);
+    if (side && pen_button != QLatin1String("menu") && page() != nullptr) {
+        const QPointF pos = unturned(event->position());
+        if (pen_button == QLatin1String("picker") && type == QEvent::TabletPress) {
+            pick_colour(pos);
+        } else if (pen_button == QLatin1String("hand")) {
+            if (type == QEvent::TabletPress) {
+                start_pan(pos);
+            } else if (type == QEvent::TabletMove && panning_) {
+                view_.pan += pos - last_pos_;
+                last_pos_ = pos;
+                view_.fitted = false;
+                rerender_.start();
+                update();
+            }
+        }
+        if (type == QEvent::TabletRelease) {
+            panning_ = false;
+            update_cursor();
+            request_tiles();
+        }
+        event->accept();
+        return;
+    }
     const bool eraser_end = event->pointerType() == QPointingDevice::PointerType::Eraser;
     if (type == QEvent::TabletPress && eraser_end && page() != nullptr && tool_ != QLatin1String("eraser") && !space_) {
         eraser_end_ = tool_;  // the pen turned over: erase for this stroke, then back

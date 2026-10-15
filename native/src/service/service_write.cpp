@@ -76,12 +76,7 @@ fs::path expanduser(const std::string& text) {
     return core::path_from_utf8(home + (slash == std::string::npos ? std::string() : text.substr(slash)));
 }
 
-fs::path resolved(const fs::path& path) {
-    std::error_code ec;
-    fs::path out = fs::weakly_canonical(path, ec);
-    if (ec) out = path.lexically_normal();
-    return out;
-}
+fs::path resolved(const fs::path& path) { return core::resolve_path(path); }
 
 bool strictly_under(const fs::path& path, const fs::path& root) {
     auto p = path.begin();

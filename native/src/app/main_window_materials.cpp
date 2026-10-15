@@ -13,6 +13,8 @@
 #include <QDockWidget>
 #include <QFile>
 #include <QFileInfo>
+
+#include <fstream>
 #include <QKeyEvent>
 #include <QMenu>
 #include <QScrollArea>
@@ -30,9 +32,11 @@
 #include "app/tiles.hpp"
 #include "app/tool_settings.hpp"
 #include "service/wording.hpp"
+#include "storage/asset_store.hpp"
 #include "core/base64.hpp"
 #include "core/ids.hpp"
 #include "core/pyconv.hpp"
+#include "core/paths.hpp"
 #include "core/pynum.hpp"
 #include "core/pyops.hpp"
 #include "render/effects.hpp"
@@ -96,7 +100,9 @@ void MainWindow::build_material_actions() {
         canvas_->renderer().set_screen_dots(on);
         canvas_->update();
     });
-    // the paper read in
+    // a picture read in, and the paper
+    make("act_import", QStringLiteral("画像を読み込む…"), [this] { import_image(); }, {QKeySequence(QStringLiteral("Ctrl+Shift+I"))},
+         QStringLiteral("選んだコマに（選んでいなければページに）画像を置きます"));
     make("act_import_scan", QStringLiteral("スキャン画像を線画にして取り込む…"), [this] { import_scan(false); }, {},
          QStringLiteral("紙に描いた絵の画像を新しいレイヤーに置き、線だけを抜き出します（強さ・下描きの青を消す・ゴミ取りを見ながら決める）"));
     make("act_scanner", QStringLiteral("スキャナーから取り込む…"), [this] { import_scan(true); }, {},
@@ -426,6 +432,55 @@ bool MainWindow::effect_shape_stroke(const StrokeInput& stroke, const core::Page
 }
 
 // --- スキャン画像の線画抽出 ---------------------------------------------------------------------------------------------
+
+bool MainWindow::import_image(std::optional<QString> chosen) {
+    if (current_page() == nullptr) return false;
+    const Asked asked = asking();  // (the book and page asked about: the file dialog waits for the person)
+    if (!session_->path()) {
+        flash(QStringLiteral("画像を読み込む前に、原稿を保存します（ファイル → 別の場所に保存）"), 6000);
+        return false;
+    }
+    const QString file = chosen ? *chosen : ask::open_path(this, QStringLiteral("画像を読み込む"), QStringLiteral("画像 (*.png *.jpg *.jpeg *.tif *.tiff *.bmp *.webp *.psd)"));
+    if (file.isEmpty() || !still(asked)) return false;
+    std::string png;
+    try {
+        std::ifstream in(core::path_from_utf8(file.toStdString()), std::ios::binary);
+        if (!in) throw core::Error("io", "cannot read " + file.toStdString());
+        const std::string bytes((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
+        const render::Image picture = render::open_image(bytes, render::kPillowOpenLimits);
+        const std::string_view mode = picture.mode();
+        png = render::write_png(picture.convert(mode == "RGBA" || mode == "LA" || mode == "P" ? "RGBA" : "RGB"));
+    } catch (const std::exception& error) {  // (a file that cannot be read as a picture)
+        flash(QStringLiteral("読み込めない画像です:\n%1").arg(wording::error(QString::fromUtf8(error.what()))), 6000, true);
+        return false;
+    }
+    session_->save_now();  // (Python's commit_now)
+    std::string ref;
+    try {
+        ref = storage::AssetStore(*session_->path()).put_bytes(png, ".png");
+    } catch (const std::exception& error) {
+        flash(wording::error(QString::fromUtf8(error.what())), 6000, true);
+        return false;
+    }
+    // (the page and the panel taken now, after the book was saved: never a pointer from before the dialog)
+    const core::Page* page = current_page();
+    if (page == nullptr) return false;
+    const QFileInfo info(file);
+    const core::Frame* frame = selected_frame();
+    Json place{{"op", "place_asset"}, {"page", page->index.json()}, {"asset", ref}, {"to", "art"}, {"title", info.completeBaseName().toStdString()}};
+    if (frame != nullptr) {
+        place["frame_id"] = frame->id;
+    } else {
+        const core::Rect b = page->bleed_rect_mm();  // the whole page, out to the bleed
+        place["placement_mm"] = Json::array({b.x.json(), b.y.json(), b.width.json(), b.height.json()});
+    }
+    const Json ops = Json::array({Json{{"op", "register_assets"},
+                                       {"assets", Json{{ref, Json{{"kind", "image"}, {"origin", Json{{"kind", "self"}, {"file", info.fileName().toStdString()}}}}}}}},
+                                  place});
+    if (!apply_ops(ops)) return false;
+    flash(QStringLiteral("%1に「%2」を置きました").arg(frame != nullptr ? QStringLiteral("選んだコマ") : QStringLiteral("ページ全体"), info.fileName()), 4000);
+    return true;
+}
 
 void MainWindow::import_scan(bool from_scanner) {
     // the paper (a file, or the scanner) laid on a new layer over the page, then its lines drawn out with the settings

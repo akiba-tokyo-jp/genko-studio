@@ -50,6 +50,8 @@ public:
     core::Json op() const;
     QPushButton* ok_button() const { return ok_; }
     QPushButton* cancel_button() const { return cancel_; }
+    // The picture of the paper (it follows the numbers).
+    look::PaperDiagram* diagram() const { return diagram_; }
 
     QComboBox* preset = nullptr;
     QDoubleSpinBox *paper_w = nullptr, *paper_h = nullptr, *trim_w = nullptr, *trim_h = nullptr, *bleed = nullptr;

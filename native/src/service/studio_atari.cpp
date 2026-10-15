@@ -48,9 +48,7 @@ std::pair<fs::path, bool> resolve_under(const fs::path& root, const Json& name) 
     if (!name.is_string()) throw core::PyTypeError("expected str, bytes or os.PathLike object, not " + core::py_type_name(name));
     fs::path source = core::path_from_utf8(name.get<std::string>());
     source = source.is_absolute() ? source : root / source;
-    std::error_code ec;
-    fs::path resolved = fs::weakly_canonical(source, ec);
-    if (ec) resolved = source.lexically_normal();
+    const fs::path resolved = core::resolve_path(source);
     auto p = resolved.begin();
     auto r = root.begin();
     for (; r != root.end() && p != resolved.end() && *p == *r; ++r, ++p) {

@@ -1,5 +1,7 @@
 #include "app/session.hpp"
 
+#include <QPointer>
+
 #include <QCoreApplication>
 #include <QElapsedTimer>
 #include <QFileInfo>
@@ -106,7 +108,7 @@ std::pair<std::int64_t, std::int64_t> journal_depths(const fs::path& dir) {
 // The revision a committed transaction made, if it is committed.
 std::optional<std::int64_t> committed_revision(const fs::path& dir, const std::string& txn) {
     if (txn.empty()) return std::nullopt;
-    const auto txns = storage::journal::transactions(storage::journal::read_lines(storage::journal::journal_file(dir)));
+    const auto txns = storage::journal::transactions(storage::journal::read_lines_without_ops(storage::journal::journal_file(dir)));
     if (const auto* done = storage::journal::find_committed(txns, txn)) return done->rev;
     return std::nullopt;
 }
@@ -270,7 +272,7 @@ Session::JobResult Session::execute(const Job& job) {
             lock.acquire(job.lock_wait);
             storage::journal::repair(job.dir);
             if (!job.txns.empty()) {
-                const auto txns = storage::journal::transactions(storage::journal::read_lines(storage::journal::journal_file(job.dir)));
+                const auto txns = storage::journal::transactions(storage::journal::read_lines_without_ops(storage::journal::journal_file(job.dir)));
                 for (const std::string& txn : job.txns) {
                     if (storage::journal::find_committed(txns, txn) != nullptr) r.written.insert(txn);
                 }
@@ -664,6 +666,10 @@ Session::Session(core::Document doc, std::optional<fs::path> dir, Options option
     worker_->moveToThread(&thread_);
     thread_.setObjectName(QStringLiteral("genko-save"));
     thread_.start();
+    recovery_worker_ = new QObject;
+    recovery_worker_->moveToThread(&recovery_thread_);
+    recovery_thread_.setObjectName(QStringLiteral("genko-recovery"));
+    recovery_thread_.start();
 }
 
 Session::~Session() {
@@ -674,8 +680,12 @@ Session::~Session() {
     // never left half written by closing), and the recovery point of work thrown away is removed.
     QThread* thread = &thread_;
     QMetaObject::invokeMethod(worker_, [thread] { thread->quit(); }, Qt::QueuedConnection);
+    QThread* recovery = &recovery_thread_;
+    QMetaObject::invokeMethod(recovery_worker_, [recovery] { recovery->quit(); }, Qt::QueuedConnection);
     thread_.wait();
+    recovery_thread_.wait();
     delete worker_;
+    delete recovery_worker_;
 }
 
 // --- editing -------------------------------------------------------------------------------------------------------
@@ -724,10 +734,13 @@ core::ApplyResult Session::apply(const Json& ops, const std::vector<std::string>
 void Session::trim_history() {
     std::size_t held = 0;
     for (const auto& change : done_) held += change->held;
-    while (held > options_.history_bytes && done_.size() > 1 && path_) {
+    while ((held > options_.history_bytes || done_.size() > options_.history_changes) && done_.size() > 1 && path_) {
         const std::shared_ptr<Change> oldest = done_.front();
-        if (!oldest->on_disk || oldest->undone_on_disk || oldest->recover) break;
+        if (!oldest->on_disk || oldest->undone_on_disk) break;
         if (waits(oldest)) break;
+        // (an adopted recovery point, saved, goes too — or the history would stay in memory from then on — and Undo
+        // still stops at it: recover_floor_)
+        if (oldest->recover) recover_floor_ = journal_undo_;
         held -= oldest->held;
         done_.erase(done_.begin());
         forget(*oldest);  // (in the journal, under the changes still in memory)
@@ -752,7 +765,19 @@ void Session::undo() {
             return std::find_if(queue_.rbegin(), queue_.rend(),
                                 [&](const Action& a) { return a.kind == kind && a.change == change && !a.in_flight && !a.sent; });
         };
-        if (auto it = queued(Action::Kind::Edit); it != queue_.rend() && !trimmed_ && !change->journal) {
+        // A change made and undone before it was saved stays off the disk only while nothing can read the journal back
+        // under it (Python commits before each undo, so its journal has every change, and a redo after a later read of the
+        // journal still finds it): not when the journal holds a change below this session's ones that an Undo reaching past
+        // them takes (the book read again, its redo from the journal), nor when the history may be trimmed (trim_history)
+        // before this change is redone or let go.
+        if (path_ && !change->journal && !change->recover) {  // (a recovery point not written yet: never written)
+            std::size_t held = 0;
+            for (const auto& c : done_) held += c->held;
+            if (trimmed_ || journal_after().undo > 0 || done_.size() > options_.history_changes || held > options_.history_bytes) {
+                change->journal = true;
+            }
+        }
+        if (auto it = queued(Action::Kind::Edit); it != queue_.rend() && !change->journal) {
             queue_.erase(std::next(it).base());  // (it never reached the disk: undone in memory only)
         } else if (it != queue_.rend()) {
             // Once changes of this session are undone through the journal (trim_history), an Undo reaching past
@@ -777,6 +802,9 @@ void Session::undo() {
         queue_.pop_back();
         emit statusChanged();
         return;
+    }
+    if (recover_floor_ && journal_after().undo <= *recover_floor_) {
+        throw core::ApplyError("復旧用コピーの採用は、原稿に保存した後は元に戻せません", "recover_undo");
     }
     if (path_ && journal_after().undo > 0) {
         // a change saved before this session: undone through the journal, and the book read again after it
@@ -1021,7 +1049,9 @@ Session::History Session::history() const {
 }
 
 bool Session::can_undo() const {
-    return !saving_as_ && read_only_.empty() && (!done_.empty() || (path_ && !loading_ && journal_after().undo > 0));
+    const std::int64_t undo = journal_after().undo;
+    return !saving_as_ && read_only_.empty() &&
+           (!done_.empty() || (path_ && !loading_ && undo > 0 && !(recover_floor_ && undo <= *recover_floor_)));
 }
 
 bool Session::can_redo() const {
@@ -1044,6 +1074,10 @@ void Session::schedule_save() {
     idle_timer_.start(options_.idle);
     if (!longest_timer_.isActive()) longest_timer_.start(options_.longest);
     emit statusChanged();
+}
+
+void Session::set_idle(std::chrono::milliseconds idle) {
+    options_.idle = std::clamp(idle, std::chrono::milliseconds(1), options_.longest);
 }
 
 void Session::save_now() {
@@ -1074,11 +1108,30 @@ void Session::save_now() {
 void Session::run(Job job) {
     Session* self = this;
     ++worker_jobs_;
+    const bool recovery = job.kind == Job::Kind::Recovery || job.kind == Job::Kind::DeleteRecovery;
     QMetaObject::invokeMethod(
-        worker_,
+        recovery ? recovery_worker_ : worker_,
         [self, job = std::move(job)]() {
             JobResult result = execute(job);
             QMetaObject::invokeMethod(self, [self, result = std::move(result)]() { self->job_done(result); }, Qt::QueuedConnection);
+        },
+        Qt::QueuedConnection);
+}
+
+void Session::beside_saves(std::function<QString()> work, std::function<void(const QString&)> done) {
+    ++worker_jobs_;
+    QPointer<Session> self(this);
+    QMetaObject::invokeMethod(
+        worker_,
+        [self, work = std::move(work), done = std::move(done)]() {
+            const QString result = work();
+            QMetaObject::invokeMethod(
+                QCoreApplication::instance(),
+                [self, result, done]() {
+                    if (self && self->worker_jobs_ > 0) --self->worker_jobs_;
+                    done(result);
+                },
+                Qt::QueuedConnection);
         },
         Qt::QueuedConnection);
 }
@@ -1208,13 +1261,15 @@ void Session::job_done(const JobResult& r) {
         }
         simplify_queue();
         trim_history();  // (the changes just written may leave memory now)
-        if (r.ok && queue_.empty() && recovery_written_ && doc_ && !doc_->book_id.empty()) {
-            // the book holds everything now: its recovery point is of no more use
+        if (r.ok && queue_.empty() && (recovery_written_ || recovery_job_) && doc_ && !doc_->book_id.empty()) {
+            // the book holds everything now: its recovery point is of no more use (one still being written is removed
+            // after it: the jobs of the recovery thread run in order)
             Job remove;
             remove.kind = Job::Kind::DeleteRecovery;
             remove.root = options_.recovery_root.empty() ? recovery_root() : options_.recovery_root;
             remove.book_id = doc_->book_id;
             recovery_written_ = false;
+            recovery_superseded_ = recovery_job_;
             run(std::move(remove));
         }
         if (save_wanted_ && !queue_.empty() && !rebasing_) start_job();
@@ -1250,7 +1305,9 @@ void Session::job_done(const JobResult& r) {
         break;
     case Job::Kind::Recovery:
         recovery_job_ = false;
-        if (r.ok) {
+        if (std::exchange(recovery_superseded_, false)) {
+            // (removed again after it: the book came to hold everything while it was written)
+        } else if (r.ok) {
             recovery_written_ = true;
             recovery_failed_ = false;
             recovery_failure_.clear();
@@ -1288,6 +1345,7 @@ void Session::job_done(const JobResult& r) {
             failure_code_.clear();
             journal_undo_ = 0;
             journal_redo_ = 0;
+            recover_floor_.reset();
             auto copy = std::make_shared<core::Document>(*r.doc);
             copy->revision = r.revision;
             // (the book's folder, where import_psd reads a relative path from: save_episode sets episode.asset_dir when
@@ -1297,12 +1355,13 @@ void Session::job_done(const JobResult& r) {
             last_revision_ = r.revision;
             rebase_onto(copy, r.revision, 0, 0);
             recovery_requested_ = false;  // the latest snapshot is durable in the confirmed copy
-            if (recovery_written_ && !old_book.empty()) {
+            if ((recovery_written_ || recovery_job_) && !old_book.empty()) {
                 Job remove;
                 remove.kind = Job::Kind::DeleteRecovery;
                 remove.root = options_.recovery_root.empty() ? recovery_root() : options_.recovery_root;
                 remove.book_id = old_book;
                 recovery_written_ = false;
+                recovery_superseded_ = recovery_job_;
                 run(std::move(remove));
             }
             emit savedAs(true, QString());
@@ -1607,6 +1666,7 @@ void Session::discard() {
         remove.kind = Job::Kind::DeleteRecovery;
         remove.root = options_.recovery_root.empty() ? recovery_root() : options_.recovery_root;
         remove.book_id = doc_->book_id;
+        recovery_superseded_ = recovery_job_;
         run(std::move(remove));
     }
     recovery_written_ = false;

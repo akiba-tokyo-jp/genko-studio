@@ -103,6 +103,10 @@ public:
         // the changes in memory, the oldest changes already in the journal leave memory, and Undo reaches them
         // through the journal (as a change saved before this session).
         std::size_t history_bytes = std::size_t(1) << 30;
+        // Past this many changes in memory, the oldest already in the journal leave memory too (PERF-G: hours of
+        // line work keep the memory flat — each change holds the page as it was before it; Python keeps none once
+        // saved): the last ones are undone in memory, older ones through the journal.
+        std::size_t history_changes = 100;
     };
 
     // A book read from its folder, not yet a session (read() may run on any thread; the session is made on the thread
@@ -185,11 +189,19 @@ public:
     bool unsaved() const { return status().kind != SaveKind::Saved; }
     // Save what is not saved now (the autosave's wait skipped); a no-op when everything is.
     void save_now();
+    // 環境設定's 変更を保存するまで: the pause after a change before it is saved (never past the longest wait, which
+    // keeps the work going on saved within 10 s).
+    void set_idle(std::chrono::milliseconds idle);
+    std::chrono::milliseconds idle() const { return options_.idle; }
+    std::chrono::milliseconds longest() const { return options_.longest; }
     // Write the book to a new folder (a copy with a new book id, schema-v4 §2) and go on there. Asynchronous:
     // savedAs(true) when it is written. Changes made meanwhile go to the new place.
     void save_as(const std::filesystem::path& dir);
     // Write a recovery point now (the 復旧用コピーの作成 button).
     void write_recovery_copy();
+    // Run `work` on the worker thread, between the saves (never while one is written), and then `done` with what it
+    // returned, on this thread (バックアップ: a book never zipped halfway through its save). wait_idle waits for it.
+    void beside_saves(std::function<QString()> work, std::function<void(const QString&)> done);
     // The book on disk may have changed (the window's file watcher): read its revision, and rebase when it moved.
     void check_outside();
     // Throw away the changes not saved (the explicit 保存せずに閉じる): nothing more is written, and the recovery
@@ -236,7 +248,8 @@ private:
         std::size_t held = 0;          // the precise colour pictures it replaced (kept alive by `before` alone)
         std::uint64_t undone_seq = 0;  // undo(): when it was undone (in the order of the actions' seq)
         // Written to the journal even when it is undone before it is saved (made, then undone): it ends what the journal
-        // holds to redo, as Python's journal, where every change is written at once (apply()).
+        // holds to redo, as Python's journal, where every change is written at once (apply()); or the journal may be read
+        // back under it while it is undone (undo()).
         bool journal = false;
     };
 
@@ -313,6 +326,9 @@ private:
     // changes before them, and the ones undone): with the queue, journal_after() gives what they will be.
     std::int64_t journal_undo_ = 0;
     std::int64_t journal_redo_ = 0;
+    // An adopted recovery point left memory (trim_history): the journal's Undo depth under it — Undo stops there
+    // (recover_undo), as it stops at the point while it is in memory.
+    std::optional<std::int64_t> recover_floor_;
     bool trimmed_ = false;        // trim_history let changes of this session go to the journal
     std::uint64_t redo_floor_ = 0;  // apply(): what was undone before it (an action's seq below this) is not redone
     mutable std::shared_ptr<const JournalRead> journal_read_;  // history(): the journal as last read
@@ -342,11 +358,17 @@ private:
     QTimer retry_timer_;
     QThread thread_;
     QObject* worker_ = nullptr;  // lives on thread_: the jobs run there, one at a time, in order
+    // The recovery points (written and removed, in order) on their own thread: never behind a long save or a backup
+    // zipped between the saves (beside_saves), so one is there within the checkpoint's time (SAVE-03). They read only
+    // the book in memory and write only its recovery folder.
+    QThread recovery_thread_;
+    QObject* recovery_worker_ = nullptr;
     std::uint64_t next_seq_ = 0;
     std::uint64_t next_ticket_ = 0;
     std::uint64_t save_as_ticket_ = 0;
     std::vector<std::uint64_t> before_save_as_;  // the actions queued when save_as was asked (the old place's)
     bool recovery_job_ = false;
+    bool recovery_superseded_ = false;  // the recovery point being written is removed after it (the book holds it all)
     bool recovery_requested_ = false;
     std::size_t worker_jobs_ = 0;  // jobs given to the worker and not back yet (every kind)
 };

@@ -1,11 +1,13 @@
 #include "app/tool_settings.hpp"
 
+#include <QAbstractItemView>
 #include <QAction>
 #include <QCheckBox>
 #include <QComboBox>
 #include <QDockWidget>
 #include <QDoubleSpinBox>
 #include <QFormLayout>
+#include <QGroupBox>
 #include <QHBoxLayout>
 #include <QIcon>
 #include <QLabel>
@@ -13,12 +15,15 @@
 #include <QPixmap>
 #include <QPointer>
 #include <QPushButton>
+#include <QScrollArea>
 #include <QVBoxLayout>
 
+#include <algorithm>
 #include <utility>
 
 #include "app/lettering.hpp"
 #include "app/theme.hpp"
+#include "app/comfort.hpp"
 
 namespace genko::app {
 
@@ -93,6 +98,13 @@ QLabel* section(const QString& title) {
 }
 
 }  // namespace
+
+QString short_words(const QString& text) {
+    const auto found = shorts().find(text);
+    return found != shorts().end() ? found->second : text;
+}
+
+QIcon icon_or_blank(const QIcon& icon) { return or_blank(icon); }
 
 QWidget* action_button(QAction* action) {
     if (const auto found = shorts().find(action->text()); found != shorts().end()) action->setIconText(found->second);
@@ -252,6 +264,7 @@ QWidget* ToolSettings::page_for(const QString& tool) const {
 void ToolSettings::set_folded(bool on) {
     folded_ = on;
     fold_->setText(on ? QStringLiteral("▸") : QStringLiteral("▾"));
+    if (!on && isVisible()) fade_in(stack_widget_, 160);
     hint_->setVisible(!on && theme::show_hints() && !hint_->text().isEmpty());
     stack_widget_->setVisible(!on && page_for(tool_) != nullptr);
     QWidget* dock = parentWidget();
@@ -267,11 +280,62 @@ void ToolSettings::show_tool(const QString& tool) {
     hint_->setVisible(!folded_ && theme::show_hints() && !hint_->text().isEmpty());
     QWidget* page = page_for(tool);
     if (page != current_) {
+        if (page != nullptr && isVisible()) fade_in(page, 140);  // (the new tool's settings come in softly)
         if (current_ != nullptr) current_->hide();
         current_ = page;
         if (current_ != nullptr) current_->show();
     }
     stack_widget_->setVisible(!folded_ && page != nullptr);
+}
+
+void fit_narrow(QWidget* root) {
+    if (root == nullptr) return;
+    auto* scroll = qobject_cast<QScrollArea*>(root);
+    QWidget* panel = scroll != nullptr ? scroll->widget() : root;
+    if (panel != nullptr && panel->layout() != nullptr) {
+        const QMargins margins = panel->layout()->contentsMargins();
+        panel->layout()->setContentsMargins(4, margins.top(), 4, margins.bottom());
+    }
+    for (QComboBox* combo : root->findChildren<QComboBox*>()) {
+        combo->setSizeAdjustPolicy(QComboBox::AdjustToMinimumContentsLengthWithIcon);
+        combo->setMinimumContentsLength(6);
+        combo->setMinimumWidth(60);  // (the cached minimum hint would otherwise stay as wide as the longest item)
+        combo->view()->setMinimumWidth(std::max(combo->view()->sizeHintForColumn(0) + 24, 120));
+    }
+    for (QLabel* label : root->findChildren<QLabel*>()) {
+        if (label->text().size() > 12 && label->pixmap().isNull()) label->setWordWrap(true);
+    }
+    for (QFormLayout* form : root->findChildren<QFormLayout*>()) {
+        form->setRowWrapPolicy(QFormLayout::WrapLongRows);
+        form->setFieldGrowthPolicy(QFormLayout::AllNonFixedFieldsGrow);
+    }
+    for (QGroupBox* box : root->findChildren<QGroupBox*>()) {
+        const QString title = box->title();
+        if (!title.contains(QChar(u'（')) || !title.endsWith(QChar(u'）')) || box->layout() == nullptr || title.size() <= 10) continue;
+        const qsizetype at = title.indexOf(QChar(u'（'));
+        box->setTitle(title.left(at));
+        auto* hint = new QLabel(title.mid(at + 1, title.size() - at - 2));
+        hint->setWordWrap(true);
+        theme::hint(hint);
+        if (auto* line = qobject_cast<QBoxLayout*>(box->layout())) {
+            line->insertWidget(0, hint);
+        } else if (auto* form = qobject_cast<QFormLayout*>(box->layout())) {
+            form->insertRow(0, hint);
+        }
+    }
+    for (QPushButton* button : root->findChildren<QPushButton*>()) {
+        if (!button->text().isEmpty() && button->maximumWidth() > 1000) {  // (fixed-size buttons stay as they are)
+            button->setMinimumWidth(button->fontMetrics().horizontalAdvance(button->text()) + 18 +
+                                    (!button->icon().isNull() ? button->iconSize().width() + 4 : 0));
+        }
+    }
+    // hidden pages don't tell their parents they got narrower: every layout counted again once
+    QList<QWidget*> widgets = root->findChildren<QWidget*>();
+    widgets.prepend(root);
+    for (QWidget* widget : widgets) {
+        if (widget->layout() != nullptr) widget->layout()->invalidate();
+        widget->updateGeometry();
+    }
 }
 
 }  // namespace genko::app

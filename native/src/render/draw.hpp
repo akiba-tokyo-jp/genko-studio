@@ -86,9 +86,10 @@ public:
     TrueTypeFonts(const TrueTypeFonts&) = delete;
     TrueTypeFonts& operator=(const TrueTypeFonts&) = delete;
 
-    // ImageFont.truetype(font, size) for a size of 1 or more. A file FreeType cannot read is where genko.fonts falls
-    // back to Pillow's built-in default font, which this build does not have: NotYetPorted("default_font"). A font file
-    // past 32 MB is not read: NotYetPorted("large_font").
+    // ImageFont.truetype(font, size) for a size of 1 or more. A font file that cannot be opened or that FreeType cannot
+    // read is ImageFont.truetype's OSError: NotYetPorted("default_font") (genko.fonts.truetype, text::Fonts::truetype,
+    // draws with load_default() then; render._font tries its next font). A font file past 256 MB is not read:
+    // NotYetPorted("large_font").
     const TrueTypeFont& truetype(const std::string& font, int size);
     // ImageFont.load_default(size) under FreeType: Pillow 12.3.0's own Aileron Regular (the subset its ImageFont.py
     // carries, native/third_party/pillow/fonts/load_default.ttf) at `size` (Pillow's default: 10).
@@ -171,5 +172,9 @@ private:
     std::unique_ptr<Draw> draw_;
     bool committed_ = false;
 };
+
+// maintenance.doctor's check of the bundled font (render._DELA): the fonts are in the program's resources here, so whether
+// the one named ("sfx": Dela Gothic One) reads.
+bool bundled_font_present(const std::string& name);
 
 }  // namespace genko::render

@@ -60,6 +60,9 @@ public:
     void set_sizes(const std::vector<double>& values);
     // The size one preset up or down ([ ]).
     double nudge_size(int step);
+    // The pressure curve measured in 環境設定, as 「自分に合わせた」 in the 筆圧 list (none: taken out).
+    void set_personal_pressure(std::optional<double> gamma);
+    std::optional<double> personal_gamma;
 
     // The fields (the window and the tests use them as Python's attributes).
     QListWidget* kinds = nullptr;

@@ -198,9 +198,7 @@ void build(Builder& b, const Json& node, const std::string& frame_id) {
     const std::string axis = node.contains("axis") && node["axis"].is_string() ? node["axis"].get<std::string>() : std::string();
     if (has_children) {
         const Json& kids = node["children"];
-        if (axis == "free") {
-            throw core::Error("value", "描いたコマのテンプレートは、この版ではまだ割れません（割ったコマのテンプレートは使えます）");
-        }
+        if (axis == "free") throw core::Error("value", "描いたコマのテンプレートは set_layout で置きます");  // (plan: has_free)
         if (node.contains("split") && node["split"].is_object() && node["split"].contains("a") && kids.size() == 2) {
             // the cut as it was kept (in the panel's own box: it fits this panel's size)
             core::Frame cut = b.find(frame_id);
@@ -338,18 +336,30 @@ bool is_blank(const core::Document& doc, const core::Page& page) {
     return page.leaf_frames().size() == 1 && doc.story_for_page(page.index).empty();
 }
 
+// A tree with drawn (free) panels anywhere in it.
+bool has_free(const Json& node) {
+    if (node.contains("axis") && node["axis"] == Json("free")) return true;
+    if (node.contains("children") && node["children"].is_array()) {
+        for (const Json& child : node["children"]) {
+            if (has_free(child)) return true;
+        }
+    }
+    return false;
+}
+
 Plan plan(const core::Document& doc, std::size_t page_index, const Template& chosen, const std::string& actor) {
     const core::Page& page = doc.page(page_index);
-    if (!doc.story_for_page(page.index).empty()) {
-        throw core::Error("value", "台詞のあるページは、この版ではまだテンプレートで割り直せません（台詞の操作は次の段階で入ります）");
-    }
     if (page.frames.empty()) throw core::Error("value", "このページにはコマがありません");
-    if (core::is_free(page.frames[0])) {
-        throw core::Error("value", "描いたコマのページは、この版ではまだテンプレートで割り直せません（コマを基本枠に戻す操作は次の段階で入ります）");
-    }
     Builder b(doc, page_index, actor);
-    // merge_frame collapses the root's cuts: the page is back to its basic frame
-    if (!page.frames[0].children.empty()) {
+    // layout.clear_page (TemplateDialog: the page made blank first): its lines deleted, its panels merged back — drawn
+    // panels are not merged, the page set back to its basic frame
+    for (const core::StoryLine* line : doc.story_for_page(page.index)) b.apply(Json::object({{"op", "delete_line"}, {"id", line->id}}));
+    if (core::is_free(page.frames[0])) {
+        const core::Rect inner = page.inner_rect_mm(doc.start_side ? std::string_view(*doc.start_side) : std::string_view());
+        b.apply(Json::object({{"op", "set_layout"}, {"page", b.number()}, {"force", true},
+                              {"tree", Json::object({{"rect_mm", Json::array({inner.x.json(), inner.y.json(), inner.width.json(), inner.height.json()})}})}}));
+    } else if (!page.frames[0].children.empty()) {
+        // merge_frame collapses the root's cuts: the page is back to its basic frame
         b.apply(Json::object({{"op", "merge_frame"}, {"page", b.number()}, {"frame_id", page.frames[0].children[0].id}}));
     }
     if (chosen.mine) {
@@ -358,7 +368,12 @@ Plan plan(const core::Document& doc, std::size_t page_index, const Template& cho
         const double h = f(size[1]);
         const Json tree = scaled(chosen.spec.at("tree"), page.spec.width_mm.value() / (w != 0.0 ? w : 1.0),
                                  page.spec.height_mm.value() / (h != 0.0 ? h : 1.0));
-        build(b, tree, b.page().frames.at(0).id);
+        if (has_free(tree)) {
+            // a layout of one's own with drawn panels: set as it is, as Python's dialog sets every one of one's own
+            b.apply(Json::object({{"op", "set_layout"}, {"page", b.number()}, {"tree", tree}, {"force", true}}));
+        } else {
+            build(b, tree, b.page().frames.at(0).id);
+        }
     } else {
         lay_out(b, chosen.spec);
     }

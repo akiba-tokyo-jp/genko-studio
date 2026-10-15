@@ -10,6 +10,7 @@
 #include "core/json.hpp"
 
 class QAction;
+class QIcon;
 class QCheckBox;
 class QComboBox;
 class QDoubleSpinBox;
@@ -23,6 +24,10 @@ class QVBoxLayout;
 
 namespace genko::app {
 
+// A command's words on a narrow page (Python's SHORT: the words themselves when they are short already).
+QString short_words(const QString& text);
+// Rows without a picture keep its room, so every row's words start at the same place.
+QIcon icon_or_blank(const QIcon& icon);
 // A command as a quiet row (its picture and words, left-aligned), or a switch as a check box.
 QWidget* action_button(QAction* action);
 // One button that opens a menu of actions (groups split by lines): a long list kept short.
@@ -30,6 +35,10 @@ QPushButton* menu_button(const QString& label, const std::vector<std::vector<QAc
 // A tool's page: sections (a string starts one) of command rows and switches; nullptr is a gap.
 using PageItem = std::variant<QString, QAction*, QWidget*, std::nullptr_t>;
 QWidget* action_page(const std::vector<PageItem>& items);
+// tool_settings.fit_narrow: a side panel let shrink to the side's width — lists of choices show their start and open
+// wide, long labels wrap, form rows put the field under its name, a box's note goes under its title, and buttons are
+// only as wide as their words — instead of pushing the panel past the edge where the rest is cut off.
+void fit_narrow(QWidget* root);
 
 // How a new line typed with the text tool starts (Python's TextToolSettings): its balloon, direction, face and size,
 // and whether the balloon is drawn by hand.
@@ -67,6 +76,10 @@ public:
     QWidget* current_page() const { return current_; }
     QLabel* title() const { return title_; }
     QLabel* hint() const { return hint_; }
+    // Folded to the tool's name (the fold button and the pages under it).
+    bool folded() const { return folded_; }
+    QPushButton* fold_button() const { return fold_; }
+    QWidget* stack() const { return stack_widget_; }
 
 private:
     QLabel* title_ = nullptr;

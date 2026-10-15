@@ -49,6 +49,15 @@ std::string tiff_version() {
     return text.substr(start, end == std::string::npos ? std::string::npos : end - start);
 }
 
+std::string jpeg_turbo_version() {
+#ifdef LIBJPEG_TURBO_VERSION_NUMBER
+    const int v = LIBJPEG_TURBO_VERSION_NUMBER;  // e.g. 2001005 for 2.1.5
+    return std::to_string(v / 1000000) + "." + std::to_string((v / 1000) % 1000) + "." + std::to_string(v % 1000);
+#else
+    return "unknown";
+#endif
+}
+
 }  // namespace
 
 nlohmann::json build_info() {
@@ -59,6 +68,7 @@ nlohmann::json build_info() {
         {"zlib", zlibVersion()},
         {"libpng", png_get_libpng_ver(nullptr)},
         {"libjpeg", std::to_string(JPEG_LIB_VERSION)},
+        {"libjpeg_turbo", jpeg_turbo_version()},
         {"libtiff", tiff_version()},
         {"freetype", freetype_version()},
         {"harfbuzz", hb_version_string()},

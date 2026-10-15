@@ -110,7 +110,7 @@ private:
 QPushButton* iconic(const QString& text, const char* icon, const QString& tip) {
     // (flat pictures beside the list)
     auto* button = new QPushButton(text);
-    button->setIcon(icons::icon(icon));
+    theme::iconed(button, icon);
     button->setText(QString());
     button->setToolTip(tip);
     button->setFixedSize(28, 26);
@@ -200,7 +200,7 @@ StoryPanel::StoryPanel(MainWindow* window) : window_(window) {
     vertical->setChecked(true);
     add_button = new QPushButton(QStringLiteral("コマに追加"));
     add_button->setObjectName(QStringLiteral("story_add"));
-    add_button->setIcon(icons::icon("add"));
+    theme::iconed(add_button, "add");
     add_button->setToolTip(QStringLiteral("上の欄の台詞を、選んだコマに加えます"));
     connect(add_button, &QPushButton::clicked, this, [this] { carry_on("add", [this] { add(); }); });
     apply_button = new QPushButton(QStringLiteral("台詞を直す"));

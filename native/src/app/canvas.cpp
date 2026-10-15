@@ -9,6 +9,7 @@
 #include <algorithm>
 #include <cmath>
 
+#include "app/comfort.hpp"
 #include "app/config.hpp"
 #include "app/perf.hpp"
 #include "app/theme.hpp"
@@ -18,7 +19,7 @@ namespace genko::app {
 
 bool reduce_motion() {
     const QString value = settings()->value(QStringLiteral("ui/reduce_motion"), QString()).toString().toLower();
-    if (value.isEmpty()) return false;  // (the system's own setting: Qt does not tell it on every platform)
+    if (value.isEmpty()) return system_reduces_motion();  // (no choice made: as the computer is set)
     return value == QLatin1String("1") || value == QLatin1String("true") || value == QLatin1String("yes");
 }
 

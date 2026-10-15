@@ -204,12 +204,12 @@ void MainWindow::build_guide_menus(QMenu* tools) {
         three->addAction(action(name));
     QMenu* props = three->addMenu(QStringLiteral("小物"));
     for (QAction* act : prop_actions_) props->addAction(act);
-    three->addSeparator();
-    for (QAction* act : scene_actions_) three->addAction(act);
+    // (Python's: the scenes and the poses in menus of their own, so 3D stays short)
+    QMenu* scenes = three->addMenu(QStringLiteral("背景の 3D を置く"));
+    for (QAction* act : scene_actions_) scenes->addAction(act);
     three->addAction(action("act_import_obj"));
-    three->addSeparator();
-    for (QAction* act : pose_actions_) three->addAction(act);
-    three->addSeparator();
+    QMenu* poses = three->addMenu(QStringLiteral("ポーズ"));
+    for (QAction* act : pose_actions_) poses->addAction(act);
     three->addAction(action("act_trace"));
     three->addAction(action("act_del_prim"));
 }

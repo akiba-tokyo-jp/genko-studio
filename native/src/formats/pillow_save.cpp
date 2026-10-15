@@ -531,13 +531,17 @@ std::string tiff_bytes(const render::Image& image, const TiffSave& params) {
     int compression = COMPRESSION_LZW;
     if (params.compression == "group4") {
         compression = COMPRESSION_CCITTFAX4;
+    } else if (params.compression == "raw") {
+        compression = COMPRESSION_NONE;  // (Image.save's default: Pillow writes it itself, the same pixels and tags; the
+                                         // bytes laid out by libtiff here, the data before the directory)
     } else if (params.compression != "tiff_lzw") {
         throw core::Error("value", "unknown compression " + params.compression);
     }
     const std::int64_t w = image.width();
     const std::int64_t h = image.height();
     const std::int64_t stride = samples * ((w * bits + 7) / 8);
-    std::int64_t rows_per_strip = stride == 0 ? 1 : std::min<std::int64_t>(65536 / stride, h);  // (STRIP_SIZE)
+    // (STRIP_SIZE when libtiff writes it; the whole picture in one strip when Pillow writes it itself, uncompressed)
+    std::int64_t rows_per_strip = compression == COMPRESSION_NONE ? h : stride == 0 ? 1 : std::min<std::int64_t>(65536 / stride, h);
     if (rows_per_strip == 0) rows_per_strip = 1;
 
     TiffMemory memory;

@@ -30,6 +30,8 @@ enum class Phase { Press, Move, Release };
 // time in ms as the window system would stamp it (0: now, on the injector's own clock).
 void mouse(PageCanvas* canvas, Phase phase, const QPointF& mm, Qt::KeyboardModifiers modifiers = Qt::NoModifier);
 void tablet(PageCanvas* canvas, Phase phase, const PenInput& point, bool eraser_end = false, quint64 timestamp = 0);
+// The pen's side button (Qt's right button) pressed, moved or let go at a point of the page.
+void tablet_side(PageCanvas* canvas, Phase phase, const QPointF& mm);
 
 // A line drawn with the left mouse button (press, moves, release). pump: let the event loop run between the moves
 // (the screen is painted as with a real mouse).

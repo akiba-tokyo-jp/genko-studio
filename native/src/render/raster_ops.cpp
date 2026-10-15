@@ -40,6 +40,7 @@
 
 #include "core/areas.hpp"
 #include "core/base64.hpp"
+#include "core/config_dir.hpp"
 #include "core/filters.hpp"
 #include "core/frames.hpp"
 #include "core/ids.hpp"
@@ -2123,18 +2124,8 @@ void stamp_material(OpContext& c) {
 
 // --- filters ----------------------------------------------------------------------------------------------------------
 
-// tokens.config_dir()
-std::filesystem::path config_dir() {
-    const QString given = qEnvironmentVariable("GENKO_CONFIG_DIR");
-    if (!given.isEmpty()) return core::path_from_utf8(given.toStdString());
-#ifdef _WIN32
-    const QString appdata = qEnvironmentVariable("APPDATA");
-    if (!appdata.isEmpty()) return core::path_from_utf8(appdata.toStdString()) / "genko";
-#endif
-    QString base = qEnvironmentVariable("XDG_CONFIG_HOME");
-    if (base.isEmpty()) base = qEnvironmentVariable("HOME") + QStringLiteral("/.config");
-    return core::path_from_utf8(base.toStdString()) / "genko";
-}
+// the app's own folder (core::config_dir)
+std::filesystem::path config_dir() { return core::config_dir(); }
 
 // A plugin's own refusals (not chosen, no Python or no Pillow for the runner): the op's error.
 template <typename Work>

@@ -17,7 +17,9 @@ class PathDialog : public QDialog {
     Q_OBJECT
 
 public:
-    PathDialog(QWidget* parent, const QString& title, const QString& path);
+    // folder: the path is a folder (書き出し先), and フォルダーを開く opens it (there when it is not made yet: off);
+    // else the path is a book, and the folder it is in is opened.
+    PathDialog(QWidget* parent, const QString& title, const QString& path, bool folder = false);
 
     QString shown() const;
     QPushButton* copy_button() const { return copy_; }
@@ -25,6 +27,7 @@ public:
 
 private:
     QString path_;
+    bool folder_ = false;
     QPlainTextEdit* text_ = nullptr;
     QPushButton* copy_ = nullptr;
     QPushButton* open_ = nullptr;

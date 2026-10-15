@@ -5,7 +5,8 @@
 // (a Photoshop file too, opened as one picture; one of Lab colours, not opened yet, placed and said not drawn);
 // one that came in without being placed here (a book written elsewhere) stopping the drawing and the export with an
 // error that says so, nothing written; an asset file past what the store reads refused (C++ only); a digest naming
-// another place no asset (C++ only); a WebP not opened yet (not_yet_ported); a finish whose screen is too coarse for the
+// another place no asset (C++ only); a TIFF with its colours in planes placed and not drawn yet (not_yet_ported; a WebP
+// is drawn, since M6); a finish whose screen is too coarse for the
 // resolution refused (C++ only: Python takes minutes and gigabytes); and the pictures remembered between tiles let go.
 // (The drawing against Python's: test_contract_studio's placedPicturesLikePython; the refusals through the command
 // line: its brokenPicturesAreNotPlaced.)
@@ -82,8 +83,11 @@ const char* const kPsdLab =
     "AAoACgAKAAYACgAKAAYIBQgXIiooOjlK/c398gAXCAsbHSI1OzpGWwgLIScuNUJAU1n97v0TADgIIhwmMjtGUlhc/cf97AARCBAnIy43RUpXWggeKigzR1Ba"
     "Vl/96P0NADIIHzc6OkdbXmRvCCQ1NkROW1pteQglMTY/SlNSYmkIIjI8Q0pUWGJr/eL9BwAsCDE8TE5RY2RwfQgxSEpPWWxyc4P9A/0oAE0=";
 
-// A WebP, 2×2, as Pillow writes one (this build does not open a WebP yet).
+// A WebP, 2×2, as Pillow writes one (opened since M6).
 const char* const kWebp = "UklGRh4AAABXRUJQVlA4TBEAAAAvAUAAAAdQhSJXof+BiOh/AAA=";
+// A PPM of 2×2 (netpbm), which Pillow opens and this build does not read (M7: a recorded limit; TIFFs in planes are
+// read since M7).
+const char* const kUnreadPicture = "UDYKMiAyCjI1NQr/AAAA/wAAAP////8=";
 
 const genko::core::CommandBus& bus() {
     static const genko::core::CommandBus b(render::ops_registry());
@@ -434,17 +438,32 @@ private slots:
         QVERIFY2(said.starts_with("apply: ops[0] place_asset: asset sha256:ab:cd is not in assets/"), said.c_str());
     }
 
-    void aWebpIsNotOpenedYet() {
+    void aPictureInAFormatNotReadIsRefusedAndSaid() {
         QTemporaryDir tmp;
         Document doc = book_in(tmp.path());
-        const std::string ref = put(tmp.path(), genko::core::a2b_base64(kWebp));
+        // (a WebP is placed and drawn, as Python places and draws it)
+        const std::string webp = put(tmp.path(), genko::core::a2b_base64(kWebp));
+        const auto with_webp = bus().apply(doc, Json::array({Json::object({{"op", "place_asset"}, {"page", 1}, {"asset", webp}})}), Actor("human:作者"));
+        render::clear_render_caches();
+        (void)render::render_page(with_webp.doc.page(0), 60, render::RenderOptions{}, &with_webp.doc);
+        // a picture in a format this build does not read (a PPM): placing it is refused as not read by this build (its
+        // size is not read as Image.open reads it); one a book has (placed by the Python app) is said not drawn — never
+        // another picture in its place; a preview leaves it out
+        const std::string ref = put(tmp.path(), genko::core::a2b_base64(kUnreadPicture));
+        const std::string said_placing = refused(doc, Json::array({Json::object({{"op", "place_asset"}, {"page", 1}, {"asset", ref}})}));
+        QVERIFY2(QString::fromStdString(said_placing).contains(QStringLiteral("image_format")), said_placing.c_str());
+        const Document placed = with_placed(doc, ref);
+        render::clear_render_caches();
         std::string said;
         try {
-            (void)bus().apply(doc, Json::array({Json::object({{"op", "place_asset"}, {"page", 1}, {"asset", ref}})}), Actor("human:作者"));
-        } catch (const ApplyError& e) {
-            said = e.code() + ": " + e.what();
+            (void)render::render_page(placed.page(0), 60, render::RenderOptions{}, &placed);
+        } catch (const render::NotYetPorted& e) {
+            said = e.element();
         }
-        QVERIFY2(said.starts_with("not_yet_ported: ops[0] place_asset: "), said.c_str());
+        QCOMPARE(QString::fromStdString(said), QStringLiteral("image_format"));
+        render::RenderOptions preview;
+        preview.skip_unported = true;
+        (void)render::render_page(placed.page(0), 60, preview, &placed);
     }
 
     void aScreenTooCoarseIsRefused() {

@@ -3,6 +3,8 @@
 #include <QAction>
 #include <QActionGroup>
 #include <QFileSystemWatcher>
+#include <QKeySequence>
+#include <QList>
 #include <QMainWindow>
 #include <QPointer>
 #include <QTimer>
@@ -31,6 +33,7 @@ class QToolBar;
 class QMenu;
 class QDockWidget;
 class QPushButton;
+class QVBoxLayout;
 
 // The main window (Python's genko/app/main.py MainWindow): the page in the middle, the tools on the left, the
 // commands and the open books' tabs above, the navigator and the page list beside it, and in the status bar the page,
@@ -58,6 +61,11 @@ class StoryEditor;
 class ReplaceDialog;
 class ApprovalBox;
 class PanelView;
+class QuickAccess;
+class CommandSearch;
+class CanvasOnly;
+class RestReminder;
+class RadialMenu;
 class Library;
 class ProcessBar;
 
@@ -224,12 +232,85 @@ public:
     QLabel* unported_band() const { return unported_; }
     QLabel* read_only_band() const { return read_only_; }
     QTabBar* doc_tabs() const { return doc_tabs_; }
+    // (M6) The tool palette, the command bar under the menus and the quick-access panel (workspace.cpp).
+    QToolBar* tool_palette() const { return palette_; }
+    QToolBar* command_bar() const { return commands_; }
+    QuickAccess* quick_access() const { return quick_access_; }
+    QDockWidget* quick_dock() const { return quick_dock_; }
+    // コマンドを探す… (the dialog, shown and modeless; tests).
+    CommandSearch* find_command();
+    // 道具の名前を表示: icons alone, or icons with their names (kept in the settings unless `save` is off).
+    void show_tool_names(bool on, bool save = true);
+    // 今の配置をワークスペースとして残す…: asked for a name when none is given; false when nothing was kept.
+    bool save_workspace(std::optional<QString> name = std::nullopt);
+    // はじめの配置に戻す: the panels as the window first showed them.
+    void default_layout();
+    // Over a book with nothing in it yet, the first steps (Python's first_steps bar: it goes with the first panel, line or
+    // stroke, or with its ×); after the first panels, what comes next (I11: 描く・台詞・保存・書き出し, each marked when
+    // done; × hides it and ヘルプ → 次の作業の案内を表示 brings it back). Null until first needed (tests).
+    QWidget* first_steps() const { return first_steps_; }
+    QWidget* next_steps() const { return next_steps_; }
+    // The canvas's menu (a panel's commands when one is under the pointer), filled (tests).
+    void fill_context_menu(QMenu& menu, const QString& frame_id);
+    // --- 環境設定 and comfort (M6: preferences.cpp, comfort.cpp) ---------------------------------------------------
+    // Each command's own keys (by its words), as the window made them (preferences::name_commands).
+    std::map<QString, QList<QKeySequence>> default_shortcuts;
+    // 環境設定… (the dialog, exec'ed).
+    void open_preferences();
+    // ヘルプ: keys | guide | faq | about, shown (modeless); the one shown last (tests).
+    void show_help(const QString& what);
+    QDialog* help_dialog() const { return help_dialog_; }
+    // How soon a change is saved (ms), for every book of this window and the ones it opens later.
+    void set_save_after(int ms);
+    int save_after() const { return save_after_ms_; }
+    // The tool pictures drawn again (after the screen's colours change).
+    Q_INVOKABLE void refresh_icons();
+    // The first steps and the next steps over the page: shown while they apply, with the keys as they are now.
+    void refresh_first_steps();
+    // 原稿だけを表示 (Tab), the rest reminder, and the round menu last opened at the pen (null: none open).
+    CanvasOnly* canvas_only() const { return canvas_only_; }
+    RestReminder* rest() const { return rest_; }
+    RadialMenu* radial() const;  // (out of line: RadialMenu is only declared here)
+    // キーを押している間だけ持ち替え: the tool last chosen (its key), the one before and when (seconds); the key of the
+    // tool chosen last let go after a hold brings back the tool before (true when it did; `now`: tests).
+    struct ToolSwitch {
+        QString tool;
+        QString before;
+        double since = 0.0;
+    };
+    static constexpr double kHoldSeconds = 0.35;
+    const std::optional<ToolSwitch>& tool_switch() const { return tool_switch_; }
+    bool hold_key_released(int key, std::optional<double> now = std::nullopt);
+    // --- オートアクション (actions.cpp: ファイル → オートアクション) -------------------------------------------------------
+    // What is being recorded (the ops applied since 記録を始める; none: not recording).
+    const std::optional<core::Json>& recording() const { return recording_; }
+    void start_recording();
+    void drop_recording();
+    // Keep what was recorded under a name (asked for when not given). False: nothing kept.
+    bool stop_recording(std::optional<QString> name = std::nullopt);
+    // The action on the page in front (its layer drawn on, its chosen panel), or on every page but the covers (asked
+    // first; one step to undo). False: nothing done.
+    bool play_action(const QString& name);
+    bool play_action_on_all(const QString& name);
+    void remove_action(const QString& name);
+    // 管理（手順を見る・並べ替える・外す）… (shown, modeless; tests)
+    QDialog* manage_actions();
+    QMenu* actions_menu() const { return actions_menu_; }
+    // マスクを編集する (the layer panel's マスク menu): the pen and the eraser paint the mask of the layer drawn on.
+    bool mask_edit = false;
+    // 画像を読み込む…: a picture into the chosen panel (else over the whole page, out to the bleed), kept in the book as a
+    // PNG (asked where when no path is given). False: nothing placed.
+    bool import_image(std::optional<QString> path = std::nullopt);
+    // 選択範囲ランチャー's buttons: (their word, the command) in order.
+    const std::vector<std::pair<QString, QAction*>>& launcher_actions() const { return launcher_actions_; }
     ImeEntry* ime() const { return ime_; }
     const std::vector<Document>& documents() const { return documents_; }
     int current_document() const { return doc_; }
 
     // --- the commands (the actions by Python's attribute names: "act_new" …) ---------------------------------
     QAction* action(const QString& attribute) const;
+    // "（B）": a command's key as it is now (the person may have changed it), for the hints; nothing when it has none.
+    QString key_hint(const char* attribute) const;
     const std::map<QString, QAction*>& actions_by_name() const { return actions_; }
     const std::map<QString, QAction*>& tool_actions() const { return tool_actions_; }
     const std::vector<QAction*>& border_kind_actions() const { return border_kind_actions_; }
@@ -265,6 +346,7 @@ public:
 protected:
     void closeEvent(QCloseEvent* event) override;
     void showEvent(QShowEvent* event) override;
+    void resizeEvent(QResizeEvent* event) override;
     void keyPressEvent(QKeyEvent* event) override;
 
 private:
@@ -305,6 +387,7 @@ private:
     void corner_radius();
     void border_kind(const QString& kind);
     void border_colour();
+    void border_detail();
     void toggle_bleed();
     void frame_to_selection();
     void templates_dialog();
@@ -591,6 +674,21 @@ private:
     double eraser_mm_ = 2.0;
 
     PageCanvas* canvas_ = nullptr;
+    CanvasOnly* canvas_only_ = nullptr;
+    RestReminder* rest_ = nullptr;
+    QPointer<RadialMenu> radial_;
+    std::optional<ToolSwitch> tool_switch_;
+    std::optional<core::Json> recording_;
+    QPointer<QDialog> help_dialog_;
+    QMenu* actions_menu_ = nullptr;
+    void fill_actions_menu();
+    int save_after_ms_ = 2000;
+    // バックアップ: after a save, the book zipped into the folder chosen in 環境設定 (one at a time, on a worker)
+    void maybe_backup();
+    void back_up(const std::shared_ptr<Session>& session);
+    // (by the book's folder: each book of the window, its tab in front or not)
+    std::map<std::string, std::int64_t> backup_seen_;  // the revision last zipped (or skipped as not due)
+    std::set<std::string> backups_running_;
     PageList* pages_ = nullptr;
     Navigator* navigator_ = nullptr;
     QDockWidget* pages_dock_ = nullptr;
@@ -608,6 +706,33 @@ private:
     QToolBar* commands_ = nullptr;
     QMenu* recent_menu_ = nullptr;
     QMenu* view_menu_ = nullptr;
+    QMenu* workspace_menu_ = nullptr;
+    QVBoxLayout* column_ = nullptr;  // (the central column: the bands over the page, the page)
+    QDockWidget* layers_dock_ = nullptr;
+    std::vector<std::pair<QString, QAction*>> launcher_actions_;
+    void make_launcher();
+    bool fronted_ = false;
+    // (Python's _settle_docks, at the first show) the overview small under the tool settings, the row of tabs as wide as
+    // the screen lets it be (from 1366 px up), the layers in front; (_fit_tools) the palette's pictures shrink to keep
+    // every tool within reach on a short screen.
+    void settle_docks();
+    void fit_tools();
+    QWidget* first_steps_ = nullptr;
+    bool first_steps_closed_ = false;
+    QWidget* next_steps_ = nullptr;
+    std::map<QString, QPushButton*> next_buttons_;
+    std::vector<QPushButton*> first_buttons_;  // (the first steps' buttons: their words and action, the key shown again)
+    QWidget* first_steps_bar();
+    QWidget* next_steps_bar();
+    QMenu* layer_special_menu_ = nullptr;
+    QMenu* layer_many_menu_ = nullptr;
+    QMenu* layer_effect_menu_ = nullptr;
+    QMenu* layer_mask_menu_ = nullptr;
+    QuickAccess* quick_access_ = nullptr;
+    QDockWidget* quick_dock_ = nullptr;
+    QByteArray default_state_;  // (the panels as the window first showed them: はじめの配置に戻す)
+    bool settled_ = false;
+    void fill_workspaces();
 
     std::map<QString, QAction*> actions_;
     std::map<QString, QAction*> tool_actions_;
@@ -622,5 +747,10 @@ private:
     std::vector<QMetaObject::Connection> session_links_;
     std::uint64_t move_ticket_ = 0;
 };
+
+// The app-wide watcher of key releases for キーを押している間だけ持ち替え: on from a tool's key until the next key let go
+// (tests: whether it is on now; stopped).
+bool key_releases_watched();
+void stop_key_releases();
 
 }  // namespace genko::app

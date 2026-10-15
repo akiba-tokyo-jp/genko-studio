@@ -41,6 +41,7 @@
 #include "app/config.hpp"
 #include "app/export_dialog.hpp"
 #include "app/links.hpp"
+#include "app/comfort.hpp"
 #include "app/main_window.hpp"
 #include "app/reply_box.hpp"
 #include "app/review_model.hpp"
@@ -1244,11 +1245,14 @@ private slots:
         StudioBook book(false);
         Desk desk(book.path, book.root / "recovery");
         QVERIFY(!desk.dock(QStringLiteral("承認箱"))->isVisible());
+        desk.window->canvas_only()->toggle();  // (the page alone: a request brings the panels back, Python's UI-C)
+        QVERIFY(desk.window->canvas_only()->on());
         QVERIFY(book.ai(Json::array({Json{{"op", "request_approval"}, {"gate", "name"}, {"pages", {3}}},
                                      Json{{"op", "ask_human"}, {"text", "どちらがいいですか"}, {"page", 2}}})).ok);
         desk.session->check_outside();
         QVERIFY(gui_test::wait_for([&] { return desk.box()->items().size() == 2; }, 60000));
         QVERIFY(desk.dock(QStringLiteral("承認箱"))->isVisible());
+        QVERIFY(!desk.window->canvas_only()->on());
         QLabel* note = desk.window->canvas()->findChild<QLabel*>(QStringLiteral("toast"));
         QVERIFY(note != nullptr);
         QCOMPARE(note->text(), QStringLiteral("承認の依頼が届きました: 相談（2 ページ） ほか 1 件"));
@@ -1533,8 +1537,12 @@ private slots:
         QVERIFY2(done.finished && done.exit_code == 0, qPrintable(done.described()));
         QCOMPARE(genko::test::one_line(done.out), (Json{{"ok", true}, {"message", "ブラウザの「この絵柄を使う」で Genko が開くようになりました"}}));
         const std::string entry = genko::test::read_bytes(home.path() + QStringLiteral("/data/applications/genko-links.desktop"));
-        QCOMPARE(qs(entry), QStringLiteral("[Desktop Entry]\nType=Application\nName=Genko Studio\nNoDisplay=true\nExec=%1 app %u\nMimeType=x-scheme-handler/genko;\n")
+        QCOMPARE(qs(entry), QStringLiteral("[Desktop Entry]\nType=Application\nName=Genko Studio\nNoDisplay=true\nExec=\"%1\" \"app\" %u\nMimeType=x-scheme-handler/genko;\n")
                                 .arg(QFileInfo(genko::test::genko_cli()).canonicalFilePath()));
+        // (a home folder with a space, and the characters the Exec line escapes; M7 review)
+        QCOMPARE(genko::app::links::desktop_argument(QStringLiteral("/home/Taro Yamada/.local/bin/genko")),
+                 QStringLiteral("\"/home/Taro Yamada/.local/bin/genko\""));
+        QCOMPARE(genko::app::links::desktop_argument(QStringLiteral("/a/$b`c\"d\\e%f")), QStringLiteral("\"/a/\\\\$b\\\\`c\\\\\"d\\\\\\\\e%%f\""));
         QCOMPARE(qs(genko::test::read_bytes(record)).trimmed(), QStringLiteral("default genko-links.desktop x-scheme-handler/genko"));
         // no xdg-mime: the entry written, the rest left to the person
         env.insert(QStringLiteral("PATH"), home.path() + QStringLiteral("/nothing"));

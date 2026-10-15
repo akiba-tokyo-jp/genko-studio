@@ -212,7 +212,7 @@ bool in_a_panel(const Page& page, const std::vector<PointF>& points_in, double p
     return false;
 }
 
-void add_stroke(OpContext& c) {
+void add_stroke_mixing(OpContext& c, const MixPieces& mix_pieces) {
     Document& doc = c.doc;
     const Json& op = c.op;
     std::size_t at = require_page(doc, op);
@@ -313,15 +313,27 @@ void add_stroke(OpContext& c) {
     if (opacity != nullptr && !opacity->is_null()) stroke.opacity = py_clamp(to_float(*opacity), 0.0, 1.0);
     const Brush brush = brush_for(Json(stroke.kind), doc);
     const Json mix = op.contains("mix") ? op["mix"] : Json(brush.mix);
-    if (py_truthy(mix) && to_float(mix) > 0 &&
-        (target.stroke_count() > 0 || !target.patches.empty() || (target.raster_png && !target.raster_png->empty()))) {
-        not_yet_ported("add_stroke with mix (下地混色) on a layer that has something on it: the C++ colour mixing comes "
-                       "with the canvas (M2)");
+    const Json stretch = op.contains("stretch") ? op["stretch"] : Json(brush.stretch);
+    const bool mixing = py_truthy(mix) && to_float(mix) > 0 &&
+                        (target.stroke_count() > 0 || !target.patches.empty() || (target.raster_png && !target.raster_png->empty()));
+    if (mixing && !mix_pieces) {
+        not_yet_ported("add_stroke with mix (下地混色) on a layer that has something on it: the colour under the line is "
+                       "read by the drawing build (render::ops_registry)");
+    }
+    if (mixing && (stroke.color_rgb || target.color_raster || target.ink_raster)) {
+        // (this build's precise colours and CMYK/Lab inks: Python has neither, nor mixing on them)
+        not_yet_ported("add_stroke with mix (下地混色) on precise colours or on a CMYK or Lab page is not in the C++ build");
     }
     const std::vector<PointF> drawn = stroke.points;
     const double pad = stroke.width_mm / 2;
     std::vector<StrokePtr> items = target.strokes->items;
-    items.push_back(std::make_shared<const Stroke>(stroke));
+    if (mixing) {
+        const double amount = py_clamp(to_float(mix), 0.0, 1.0);
+        const double carried = py_truthy(stretch) ? py_clamp(to_float(stretch), 0.0, 1.0) : 0.0;
+        for (Stroke& piece : mix_pieces(page, target, stroke, amount, carried)) items.push_back(std::make_shared<const Stroke>(std::move(piece)));
+    } else {
+        items.push_back(std::make_shared<const Stroke>(stroke));
+    }
     for (const PenPoints& copy_points : copies) {  // symmetry rulers draw the line again
         Stroke twin = stroke;
         twin.id = new_id();
@@ -558,9 +570,13 @@ void register_define_brush(OpRegistry& registry, PaperTakeIn take_in) {
     });
 }
 
+void register_add_stroke(OpRegistry& registry, MixPieces mix) {
+    registry.add("add_stroke", [mix](OpContext& c) { add_stroke_mixing(c, mix); });
+}
+
 void register_stroke_ops(OpRegistry& registry) {
     register_define_brush(registry);
-    registry.add("add_stroke", add_stroke);
+    registry.add("add_stroke", [](OpContext& c) { add_stroke_mixing(c, {}); });
     registry.add("delete_stroke", delete_stroke);
     registry.add("edit_stroke", edit_stroke);
     registry.add("simplify_stroke", simplify_stroke);

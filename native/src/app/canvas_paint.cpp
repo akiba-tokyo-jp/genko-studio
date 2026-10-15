@@ -22,6 +22,15 @@ const QColor kChosen(QStringLiteral("#1c7ed6"));
 }  // namespace
 
 void PageCanvas::paintEvent(QPaintEvent*) {
+    if (gpu_surface_ != nullptr) {  // (the surface over the whole canvas draws it: canvas_gpu.cpp)
+        gpu_surface_->update();
+        return;
+    }
+    QPainter painter(this);
+    paint_frame(painter);
+}
+
+void PageCanvas::paint_frame(QPainter& painter) {
     if (glide_ && glide_t_ < 1.0) {
         // the scale moves evenly in steps (as a zoom feels), the page point in the middle slides straight
         const ViewState kept = view_;
@@ -34,15 +43,14 @@ void PageCanvas::paintEvent(QPaintEvent*) {
         view_.scale = from.scale * std::pow(to.scale / from.scale, t);
         const QPointF c = c0 + (c1 - c0) * t;
         view_.pan = QPointF(w - c.x() * view_.scale, h - c.y() * view_.scale);
-        QPainter painter(this);
         paint_page(painter);
         view_ = kept;
     } else {
-        QPainter painter(this);
         paint_page(painter);
     }
     static std::uint64_t frames = 0;
     perf::event("paint_done", {{"frame", ++frames}});
+    if (launcher != nullptr) QMetaObject::invokeMethod(this, [this] { place_launcher(); }, Qt::QueuedConnection);  // (not moved while painting)
 }
 
 void PageCanvas::draw_in_page_px(QPainter& painter, const QImage& image, const QRect& box, int dpi) const {
@@ -150,12 +158,18 @@ void PageCanvas::paint_page(QPainter& painter) {
         }
     }
     if (hover_ && stroke_.empty() && is_stroke_tool(tool_)) {
+        // the brush's circle and (circle, dot) its centre, as the pointer chosen in 環境設定 (the cross is the system's)
         const QPointF h = pt(hover_->x(), hover_->y());
         const double size = tool_ == QLatin1String("pen") ? brush_width_mm : tool_ == QLatin1String("eraser") ? eraser_mm : blend_mm;
         const double radius = std::max(2.0, size / 2 * view_.scale);
         painter.setPen(QPen(theme::accent(), 1));
         painter.setBrush(Qt::NoBrush);
-        painter.drawEllipse(h, radius, radius);  // (the circle and the cross cursor: circle_cross, the default)
+        if (cursor_kind == QLatin1String("circle") || cursor_kind == QLatin1String("circle_cross")) painter.drawEllipse(h, radius, radius);
+        if (cursor_kind == QLatin1String("circle") || cursor_kind == QLatin1String("dot")) {
+            painter.setBrush(theme::accent());
+            painter.drawEllipse(h, 1.5, 1.5);
+            painter.setBrush(Qt::NoBrush);
+        }
     }
     draw_guide_drag(painter);  // (a guide line pulled from a scale, and the scales: canvas_scale.cpp)
     draw_scale(painter);

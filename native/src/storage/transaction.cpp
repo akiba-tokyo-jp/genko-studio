@@ -132,7 +132,7 @@ SaveResult Saver::run(const SaveRequest& request, const std::function<Json(Asset
     const DiskState disk = read_disk_state(dir);
     if (disk.exists && disk.version < 4) throw NeedsMigration(dir, disk.version);  // (before anything is written)
     journal::repair(dir);  // (§4.3: before every write; nothing is written when it fails)
-    const journal::Lines lines = journal::read_lines(journal::journal_file(dir));
+    const journal::Lines lines = journal::read_lines_without_ops(journal::journal_file(dir));
     if (!request.txn.empty()) {
         const auto txns = journal::transactions(lines);
         if (const journal::Transaction* done = journal::find_committed(txns, request.txn)) {
@@ -220,7 +220,7 @@ SaveResult Saver::run(const SaveRequest& request, const std::function<Json(Asset
         bool committed = false;
         try {
             journal::repair(dir);
-            committed = journal::find_committed(journal::transactions(journal::read_lines(journal::journal_file(dir))), txn) !=
+            committed = journal::find_committed(journal::transactions(journal::read_lines_without_ops(journal::journal_file(dir))), txn) !=
                         nullptr;
         } catch (const core::Error&) {
             // (the repair failed too: the next write repairs first, and writes nothing until it can)

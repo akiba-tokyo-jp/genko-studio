@@ -2,10 +2,13 @@
 
 #include <algorithm>
 #include <chrono>
+#include <map>
+#include <mutex>
 #include <set>
 #include <system_error>
 
 #include "core/error.hpp"
+#include "core/paths.hpp"
 #include "core/pyconv.hpp"
 #include "storage/fault.hpp"
 #include "storage/fsutil.hpp"
@@ -78,7 +81,7 @@ HistoryItem legacy_item(const Json& entry, std::size_t n) {
 
 Repair run_repair(const fs::path& dir, bool write) {
     Repair out;
-    Lines journal = read_lines(journal_file(dir));
+    Lines journal = read_lines_without_ops(journal_file(dir));
     if (!journal.tail.empty()) {
         out.journal_tail = journal.tail;
         if (write) {
@@ -88,7 +91,7 @@ Repair run_repair(const fs::path& dir, bool write) {
         }
         journal.tail.clear();
     }
-    const Lines audit = read_lines(audit_file(dir));
+    const Lines audit = read_lines_without_ops(audit_file(dir));
     if (!audit.tail.empty()) {
         out.audit_tail = audit.tail;
         if (write) {
@@ -163,33 +166,108 @@ double now_seconds() {
     return std::chrono::duration<double>(std::chrono::system_clock::now().time_since_epoch()).count();
 }
 
-Lines read_lines(const fs::path& file) {
-    Lines out;
-    std::error_code ec;
-    if (!fs::is_regular_file(file, ec)) return out;
-    out.exists = true;
-    const std::string data = read_file(file);
+namespace {
+
+// The complete lines of data (up to its last "\n"), numbered on from `number`: the JSON objects into values (without
+// their "ops" when asked), the numbers of the other lines (not blank) into unreadable. Returns the bytes they take.
+std::size_t parse_lines(std::string_view data, std::size_t& number, std::vector<Json>& values, std::vector<std::size_t>& unreadable,
+                        bool without_ops) {
     const auto last = data.rfind('\n');
-    const std::size_t complete = last == std::string::npos ? 0 : last + 1;
-    out.complete_size = complete;
-    out.tail = data.substr(complete);
+    const std::size_t complete = last == std::string_view::npos ? 0 : last + 1;
     std::size_t start = 0;
-    std::size_t number = 0;
     while (start < complete) {
         const auto end = data.find('\n', start);
-        const std::string_view line(data.data() + start, end - start);
+        const std::string_view line = data.substr(start, end - start);
         start = end + 1;
         ++number;
         if (blank(line)) continue;  // (Python skips blank lines)
         try {
             Json value = core::parse_python_json(line);
             if (value.is_object()) {
-                out.values.push_back(std::move(value));
+                if (without_ops) value.erase("ops");
+                values.push_back(std::move(value));
                 continue;
             }
         } catch (const core::Error&) {
         }
-        out.unreadable.push_back(number);
+        unreadable.push_back(number);
+    }
+    return complete;
+}
+
+// A file's lines as read last, kept as text: each complete line that is a JSON object, without its "ops", written again
+// compactly — one string, not the parsed values (PERF-G: those, thousands of small pieces made one save after another on
+// the save thread, kept its heap from going back to the system); and the file's first bytes and the last before
+// complete_size: the file is taken as grown from them when it is no shorter and has the same bytes there (as Python's
+// journal._edges). A read takes a copy of the entry, adds what the file gained, and puts it back.
+struct Parsed {
+    std::string edges;
+    std::uintmax_t complete_size = 0;
+    std::size_t numbered = 0;
+    std::string light;
+    std::vector<std::size_t> unreadable;
+    std::uint64_t used = 0;
+};
+constexpr std::size_t kEdge = 64;
+constexpr std::size_t kParsedFiles = 8;  // (the books read most recently)
+
+std::string edges_of(std::string_view data, std::size_t size) {
+    return std::string(data.substr(0, std::min(kEdge, size))) + std::string(data.substr(size - std::min(kEdge, size), std::min(kEdge, size)));
+}
+
+}  // namespace
+
+Lines read_lines(const fs::path& file) {
+    Lines out;
+    std::error_code ec;
+    if (!fs::is_regular_file(file, ec)) return out;
+    out.exists = true;
+    const std::string data = read_file(file);
+    std::size_t number = 0;
+    const std::size_t complete = parse_lines(data, number, out.values, out.unreadable, false);
+    out.complete_size = complete;
+    out.tail = data.substr(complete);
+    return out;
+}
+
+Lines read_lines_without_ops(const fs::path& file) {
+    Lines out;
+    std::error_code ec;
+    if (!fs::is_regular_file(file, ec)) return out;
+    out.exists = true;
+    const std::string data = read_file(file);
+    static std::mutex mutex;
+    static std::map<std::string, Parsed> parsed;
+    static std::uint64_t clock = 0;
+    const fs::path whole = fs::absolute(file, ec);
+    const std::string key = core::path_to_utf8((ec ? file : whole).lexically_normal());
+    Parsed p;
+    {
+        const std::lock_guard<std::mutex> lock(mutex);
+        if (const auto found = parsed.find(key); found != parsed.end()) p = found->second;  // (the lines shared, not copied)
+    }
+    if (data.size() < p.complete_size || edges_of(data, p.complete_size) != p.edges) p = Parsed{};
+    // (the lines the file gained, parsed apart: the entry changes only once they all are)
+    std::vector<Json> added;
+    std::size_t numbered = p.numbered;
+    const std::size_t complete = parse_lines(std::string_view(data).substr(p.complete_size), numbered, added, p.unreadable, true);
+    for (const Json& value : added) p.light += line_text(value);
+    p.numbered = numbered;
+    p.complete_size += complete;
+    p.edges = edges_of(data, p.complete_size);
+    std::size_t light_lines = 0;
+    std::vector<std::size_t> none;
+    parse_lines(p.light, light_lines, out.values, none, false);
+    out.unreadable = p.unreadable;
+    out.complete_size = p.complete_size;
+    out.tail = data.substr(p.complete_size);
+    {
+        const std::lock_guard<std::mutex> lock(mutex);
+        p.used = ++clock;
+        parsed[key] = std::move(p);
+        if (parsed.size() > kParsedFiles) {
+            parsed.erase(std::min_element(parsed.begin(), parsed.end(), [](const auto& a, const auto& b) { return a.second.used < b.second.used; }));
+        }
     }
     return out;
 }
@@ -338,7 +416,7 @@ Stacks replay(const Lines& journal, const Json* legacy_map) {
 }
 
 Stacks stacks(const fs::path& dir) {
-    const Lines journal = read_lines(journal_file(dir));
+    const Lines journal = read_lines_without_ops(journal_file(dir));
     std::error_code ec;
     if (!fs::is_regular_file(map_file(dir), ec)) return replay(journal, nullptr);
     Json map;

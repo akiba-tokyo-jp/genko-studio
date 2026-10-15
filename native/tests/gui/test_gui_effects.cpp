@@ -719,7 +719,7 @@ private slots:
                  QStringLiteral("素材の画像を読み込めません（壊れているか、読めない形式の画像です）"));
         QCOMPARE(error(std::string("the finish's line_threshold is not a number")),
                  QStringLiteral("仕上げの線とみなす濃さは数で指定します（この絵は描けません）"));
-        QCOMPARE(genko::wording::unported_element(QStringLiteral("image_format")), QStringLiteral("まだ読めない形式の画像（TIFF、WebP）"));
+        QCOMPARE(genko::wording::unported_element(QStringLiteral("image_format")), QStringLiteral("この版では読めない形式の画像（PPM・ICO・JPEG 2000 など）"));
         QCOMPARE(error(std::string("the screen is too coarse for this resolution (22472 px a side)")),
                  QStringLiteral("網点が粗すぎて、この解像度では作れません（線数を上げるか、解像度を下げてください）"));
         QCOMPARE(error(std::string("ops[0] open_request: a count past 2**64 - 1 is too large for this build (Python's int has no bound)")),

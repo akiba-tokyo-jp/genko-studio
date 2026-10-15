@@ -12,6 +12,7 @@
 #include "render/ops_3d.hpp"
 #include "render/paper.hpp"
 #include "render/placed.hpp"
+#include "render/raster.hpp"
 #include "render/raster_ops.hpp"
 
 namespace genko::render {
@@ -56,6 +57,8 @@ void register_render_ops(core::OpRegistry& registry) {
     // the studio ops again, place_asset and set_placement able to read an asset's picture size, and those placing a
     // picture able to see it can be drawn (render/placed)
     core::register_studio_ops(registry, core::StudioHooks{asset_picture_size, check_asset_picture});
+    // add_stroke again, able to mix the colour under the line in (下地混色・色延び, render/raster)
+    core::register_add_stroke(registry, raster::mixed_pieces);
     // define_brush again, able to take a paper's picture in (BRUSH-01, render/paper)
     core::register_define_brush(registry, [](std::string_view file) {
         try {

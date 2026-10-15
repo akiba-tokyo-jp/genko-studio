@@ -236,7 +236,7 @@ public:
     // quantize(colors): a "P" picture of at most `colors` colours (Pillow's Image.quantize without a palette: median
     // cut, fast octree for RGBA; its dither is not used there).
     Image quantize(int colors = 256) const;
-    // A "P" picture's palette: RGB of each entry it has (nothing for other modes).
+    // A "P" or "PA" picture's palette (getpalette): RGB of each entry it has (nothing for other modes).
     std::vector<std::array<std::uint8_t, 3>> palette() const;
     // Its palette's mode ("RGB" or "RGBA": im.im.getpalettemode()), "" without one; the alpha of each entry it has
     // (im.im.getpalette("RGBA", "A")).

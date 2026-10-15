@@ -40,6 +40,15 @@ std::optional<std::string> inside_path(const std::string& path);
 // all. core::Error("io") when it cannot be written.
 void write(const std::filesystem::path& path, const std::vector<std::pair<std::string, std::string>>& files);
 
+// Files on disk packed one at a time into a new archive at `path` (deflated, as ZipFile.write packs them for a
+// backup): each file is read, deflated and written before the next, so the archive is never held in memory; past
+// 4 GiB or 65535 files the zip64 records are written, as ZipFile writes them. Each entry carries its file's time
+// (local, two-second steps). Written to `path` itself (the caller writes it under a temporary name and renames it);
+// core::Error("io") when a file cannot be read or the archive written. `zip64_from` (tests): the size from which the
+// zip64 records are used.
+void pack(const std::filesystem::path& path, const std::vector<std::pair<std::string, std::filesystem::path>>& files,
+          std::uint64_t zip64_from = 0xffffffffull);
+
 // One file of an archive as ZipFile.writestr writes it: deflated (ZIP_DEFLATED, zlib's default level) or stored
 // (ZIP_STORED).
 struct Entry {

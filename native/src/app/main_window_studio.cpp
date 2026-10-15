@@ -18,6 +18,7 @@
 #include "app/ask.hpp"
 #include "app/config.hpp"
 #include "app/links.hpp"
+#include "app/comfort.hpp"
 #include "app/main_window.hpp"
 #include "app/reply_box.hpp"
 #include "app/review_model.hpp"
@@ -293,6 +294,7 @@ void MainWindow::show_requests(const QString& title, const std::string& newest, 
     toast(this, QStringLiteral("承認の依頼が届きました: %1%2").arg(title, more), 6000);
     QApplication::alert(this);
     if (!raise_requests()) return;
+    if (canvas_only_ != nullptr && canvas_only_->on()) canvas_only_->leave();  // (the page alone: the panels come back)
     show_dock(QStringLiteral("承認箱"));
     if (!box_dock_->isFloating() && box_dock_->height() < 360) {  // (room enough to see the request)
         resizeDocks({box_dock_, pages_dock_}, {static_cast<int>(height() * 0.62), 80}, Qt::Vertical);

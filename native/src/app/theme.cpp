@@ -1,6 +1,7 @@
 #include "app/theme.hpp"
 
 #include <QAbstractButton>
+#include <QAction>
 #include <QApplication>
 #include <QDir>
 #include <QFile>
@@ -16,9 +17,12 @@
 #include <QTranslator>
 
 #include <algorithm>
+#include <optional>
+#include <utility>
 #include <vector>
 
 #include "app/config.hpp"
+#include "app/glass.hpp"
 #include "app/icons.hpp"
 
 namespace genko::app::theme {
@@ -40,17 +44,6 @@ QString rgba(const QString& hex, double alpha) {
 
 QString setting(const char* key, const char* fallback) {
     return settings()->value(QString::fromLatin1(key), QString::fromLatin1(fallback)).toString();
-}
-
-QString mode() {
-    const QString value = setting("ui/theme", "system");
-    return value == QLatin1String("light") || value == QLatin1String("dark") ? value : QStringLiteral("system");
-}
-
-int brightness() {
-    bool ok = false;
-    const int value = setting("ui/brightness", "0").toInt(&ok);
-    return ok ? std::clamp(value, -2, 2) : 0;
 }
 
 bool system_dark() {
@@ -84,7 +77,100 @@ void show_hint(QLabel* label, bool on) {
 
 QString applied_key;  // (the look put on the application: re-styling every widget again is slow)
 
+std::optional<QFont>& system_font() {  // (the computer's own letters, as the app started: パソコンの書体)
+    static std::optional<QFont> font;
+    return font;
+}
+
+std::vector<std::pair<QPointer<QObject>, QByteArray>>& iconed_list() {
+    static std::vector<std::pair<QPointer<QObject>, QByteArray>> list;
+    return list;
+}
+
+void set_icon(QObject* target, const QIcon& icon) {
+    if (auto* action = qobject_cast<QAction*>(target)) {
+        action->setIcon(icon);
+    } else if (auto* button = qobject_cast<QAbstractButton*>(target)) {
+        button->setIcon(icon);
+    }
+}
+
 }  // namespace
+
+QString mode() {
+    const QString value = setting("ui/theme", "system");
+    return value == QLatin1String("light") || value == QLatin1String("dark") ? value : QStringLiteral("system");
+}
+
+int brightness() {
+    bool ok = false;
+    const int value = setting("ui/brightness", "0").toInt(&ok);
+    return ok ? std::clamp(value, -2, 2) : 0;
+}
+
+bool mono_icons() {
+    const QString value = setting("ui/mono_icons", "false").toLower();
+    return value == QLatin1String("1") || value == QLatin1String("true") || value == QLatin1String("yes");
+}
+
+QString surround_setting() {
+    const QString value = setting("ui/surround", "auto");
+    bool digits = !value.isEmpty();
+    for (const QChar ch : value) digits = digits && ch.isDigit();
+    return value == QLatin1String("auto") || digits ? value : QStringLiteral("auto");
+}
+
+QString font_choice() {
+    const QString value = setting("ui/ui_font", "genko");
+    return value == QLatin1String("system") ? value : QStringLiteral("genko");
+}
+
+const std::vector<std::pair<QString, QString>>& font_choices() {
+    static const std::vector<std::pair<QString, QString>> choices{{QStringLiteral("Genko の標準（IBM Plex Sans JP）"), QStringLiteral("genko")},
+                                                                  {QStringLiteral("パソコンの書体"), QStringLiteral("system")}};
+    return choices;
+}
+
+const std::vector<std::pair<QString, QString>>& modes() {
+    static const std::vector<std::pair<QString, QString>> choices{
+        {QStringLiteral("パソコンの設定のまま"), QStringLiteral("system")}, {QStringLiteral("明るい"), QStringLiteral("light")}, {QStringLiteral("暗い"), QStringLiteral("dark")}};
+    return choices;
+}
+
+QString ui_family() {
+    static const QString family = [] {
+        QString found;
+        for (const char* face : {":/genko/fonts/IBMPlexSansJP-Regular.ttf", ":/genko/fonts/IBMPlexSansJP-Medium.ttf",
+                                 ":/genko/fonts/IBMPlexSansJP-Bold.ttf"}) {
+            const int id = QFontDatabase::addApplicationFont(QString::fromLatin1(face));
+            const QStringList families = id >= 0 ? QFontDatabase::applicationFontFamilies(id) : QStringList();
+            if (found.isEmpty() && !families.isEmpty()) found = families.front();
+        }
+        return found;
+    }();
+    return family;
+}
+
+void iconed(QObject* target, const char* name) {
+    if (target == nullptr) return;
+    set_icon(target, icons::icon(name));
+    auto& list = iconed_list();
+    for (auto& [kept, picture] : list) {
+        if (kept == target) {
+            picture = QByteArray(name);
+            return;
+        }
+    }
+    list.emplace_back(target, QByteArray(name));
+}
+
+void refresh_icons() {
+    auto& list = iconed_list();
+    std::erase_if(list, [](const auto& item) { return item.first.isNull(); });
+    const Tokens t = tokens();  // (read once: the settings are read for the look, not for every button)
+    const QString accent_ink = mono_icons() ? t.muted : t.accent;
+    for (const auto& [target, picture] : list) set_icon(target.data(), icons::icon(picture.constData(), t.text, accent_ink));
+}
 
 Tokens light() {
     Tokens t;
@@ -207,6 +293,10 @@ QString style_sheet(const Tokens& t, double pt) {
     s += QStringLiteral("QListWidget::item { padding: 4px 8px; border-radius: 4px; }\n");
     s += QStringLiteral("QListWidget::item:hover { background: %1; }\n").arg(t.hover);
     s += QStringLiteral("QListWidget::item:selected { background: %1; color: %2; }\n").arg(t.selected, t.text);
+    // (the layers' eyes, as Python's theme: an eye to show, a struck-through one to hide)
+    s += QStringLiteral("QListWidget#layerList::indicator { width: 18px; height: 18px; padding: 3px; margin-right: 1px; }\n");
+    s += QStringLiteral("QListWidget#layerList::indicator:checked { image: url(%1); }\n").arg(indicator("eye", t.text));
+    s += QStringLiteral("QListWidget#layerList::indicator:unchecked { image: url(%1); }\n").arg(indicator("eye_off", t.faint));
     s += QStringLiteral("QScrollBar:vertical { background: transparent; width: 10px; margin: 0; }\n");
     s += QStringLiteral("QScrollBar:horizontal { background: transparent; height: 10px; margin: 0; }\n");
     s += QStringLiteral("QScrollBar::handle { background: %1; border-radius: 4px; min-height: 24px; min-width: 24px; margin: 1px; }\n").arg(t.border);
@@ -251,6 +341,9 @@ QString style_sheet(const Tokens& t, double pt) {
     s += QStringLiteral("QPushButton#actionCard:pressed { background: %1; }\n").arg(t.selected);
     s += QStringLiteral("QPushButton#actionCard[main=\"true\"] { border: 2px solid %1; }\n").arg(t.accent);
     s += QStringLiteral("QListWidget#recentBooks { background: transparent; border: none; }\n");
+    // (the first steps over an empty book, and what comes next after the first panels: I11)
+    s += QStringLiteral("QWidget#firstSteps, QWidget#nextSteps { background: %1; border-bottom: 1px solid %2; }\n").arg(t.panel, t.divider);
+    s += QStringLiteral("QWidget#launcher { background: %1; border: 1px solid %2; border-radius: 6px; }\n").arg(t.panel, t.border);
     s += QStringLiteral("QMenu[glass=\"true\"] { background: %1; border: 1px solid %2; }\n").arg(rgba(t.panel, 0.62), rgba(t.border, 0.7));
     return s;
 }
@@ -258,30 +351,23 @@ QString style_sheet(const Tokens& t, double pt) {
 void apply(QApplication* app) {
     if (app == nullptr) return;
     // the screen's letters: the bundled family (the same on every computer) or the computer's own
-    if (setting("ui/ui_font", "genko") != QLatin1String("system")) {
-        static QString family = [] {
-            QString found;
-            for (const char* face : {":/genko/fonts/IBMPlexSansJP-Regular.ttf", ":/genko/fonts/IBMPlexSansJP-Medium.ttf",
-                                     ":/genko/fonts/IBMPlexSansJP-Bold.ttf"}) {
-                const int id = QFontDatabase::addApplicationFont(QString::fromLatin1(face));
-                const QStringList families = id >= 0 ? QFontDatabase::applicationFontFamilies(id) : QStringList();
-                if (found.isEmpty() && !families.isEmpty()) found = families.front();
-            }
-            return found;
-        }();
-        if (!family.isEmpty() && app->font().family() != family) {
-            QFont font = app->font();
-            font.setFamily(family);
-            font.setHintingPreference(QFont::PreferNoHinting);
-            app->setFont(font);
-        }
+    if (!system_font()) system_font() = QApplication::font();
+    const QString bundled = font_choice() == QLatin1String("genko") ? ui_family() : QString();
+    const QString target = bundled.isEmpty() ? system_font()->family() : bundled;
+    if (QApplication::font().family() != target) {
+        QFont font = QApplication::font();
+        font.setFamily(target);
+        font.setHintingPreference(bundled.isEmpty() ? system_font()->hintingPreference() : QFont::PreferNoHinting);
+        QApplication::setFont(font);
     }
     const Tokens t = tokens();
     const double pt = app->font().pointSizeF() > 0 ? app->font().pointSizeF() : 9.0;
     const QString key = t.window + t.accent + t.surround + QString::number(pt) + app->font().family();
     if (key == applied_key) return;
     applied_key = key;
-    if (app->style()->name().toLower() != QLatin1String("fusion")) app->setStyle(QStyleFactory::create(QStringLiteral("Fusion")));
+    if (app->style()->name().toLower() != QLatin1String("fusion") && app->style()->objectName() != QLatin1String("fusion")) {
+        QApplication::setStyle(glass::style());  // (Fusion, which also readies the system's glass where there is one)
+    }
     QPalette p;
     const auto set = [&p](QPalette::ColorRole role, const QString& colour) { p.setColor(role, QColor(colour)); };
     set(QPalette::Window, t.window), set(QPalette::WindowText, t.text), set(QPalette::Base, t.base);
@@ -293,6 +379,22 @@ void apply(QApplication* app) {
     for (const auto role : {QPalette::Text, QPalette::ButtonText, QPalette::WindowText}) p.setColor(QPalette::Disabled, role, QColor(t.faint));
     app->setPalette(p);
     app->setStyleSheet(style_sheet(t, pt));
+    glass::install(app);  // (the system's frosted glass for menus and the like, where there is one)
+    // the computer's light or dark followed while the look is "as the computer is"
+    static bool follows_system = false;
+    if (!follows_system) {
+        follows_system = true;
+        QObject::connect(app->styleHints(), &QStyleHints::colorSchemeChanged, app, [app](Qt::ColorScheme) {
+            if (mode() != QLatin1String("system")) return;
+            apply(app);
+            refresh_icons();
+            for (QWidget* top : QApplication::topLevelWidgets()) {
+                // (a main window draws its pictures again: only a window that has refresh_icons is asked)
+                if (top->metaObject()->indexOfMethod("refresh_icons()") >= 0) QMetaObject::invokeMethod(top, "refresh_icons", Qt::DirectConnection);
+                top->update();
+            }
+        });
+    }
     // Qt's own words in Japanese (はい・いいえ, the file and colour dialogs), whatever language the computer is set to
     static QTranslator* translator = nullptr;
     if (translator == nullptr) {

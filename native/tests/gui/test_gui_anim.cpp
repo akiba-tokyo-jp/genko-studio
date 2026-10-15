@@ -99,12 +99,22 @@ private slots:
         QCOMPARE(panel->table->item(0, 0)->text(), QStringLiteral("1"));
         // the canvas: frame 2 (cel 1 only), and cel 2 faint after it (the onion skin)
         QCOMPARE(w->canvas()->renderer().anim_frame(), std::int64_t{2});
-        QVERIFY(gui_test::wait_for([&] { return w->canvas()->renderer().settled(); }, 30000));
-        const QImage with_onion = w->canvas()->renderer().compose(w->canvas()->base_dpi());
+        // (drawn as the canvas is now: its view moves when the first steps over the empty book go with the first
+        // stroke, and the tiles for it are asked a moment after — asked again while the view still moves)
+        const auto drawn = [w] {
+            QImage out;
+            for (int i = 0; i < 20 && out.isNull(); ++i) {
+                if (!w->canvas()->wait_rendered(30000)) break;
+                out = w->canvas()->renderer().compose(w->canvas()->base_dpi());
+            }
+            return out;
+        };
+        const QImage with_onion = drawn();
         panel->onion->setChecked(false);
-        QVERIFY(gui_test::wait_for([&] { return w->canvas()->renderer().settled(); }, 30000));
-        const QImage without = w->canvas()->renderer().compose(w->canvas()->base_dpi());
-        QVERIFY(!with_onion.isNull() && with_onion.size() == without.size());
+        const QImage without = drawn();
+        QVERIFY2(!with_onion.isNull() && with_onion.size() == without.size(),
+                 qPrintable(QStringLiteral("%1×%2 and %3×%4 at %5 dpi")
+                                .arg(with_onion.width()).arg(with_onion.height()).arg(without.width()).arg(without.height()).arg(w->canvas()->base_dpi())));
         QVERIFY(with_onion != without);
         panel->onion->setChecked(true);
         // playing: one frame at a time, the frames drawn once each

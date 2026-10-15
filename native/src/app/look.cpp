@@ -36,7 +36,9 @@ protected:
     void resizeEvent(QResizeEvent* event) override {
         QWidget::resizeEvent(event);
         if (side_ == nullptr) return;
-        const auto direction = event->size().width() < 600 ? QBoxLayout::TopToBottom : QBoxLayout::LeftToRight;
+        // (narrow: the card under the body — or above it when the card is what must be seen first, as the export's page)
+        const bool first = side_->property("genko_side_first").toBool();
+        const auto direction = event->size().width() < 600 ? (first ? QBoxLayout::BottomToTop : QBoxLayout::TopToBottom) : QBoxLayout::LeftToRight;
         if (layout_->direction() != direction) layout_->setDirection(direction);
     }
 

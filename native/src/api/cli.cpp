@@ -4,6 +4,7 @@
 #include <QStringList>
 
 #include <algorithm>
+#include <array>
 #include <cctype>
 #include <cstdio>
 #include <exception>
@@ -26,7 +27,9 @@
 #include "api/buildinfo.hpp"
 #include "api/server_cli.hpp"
 #include "api/studio_cli.hpp"
+#include "core/config_dir.hpp"
 #include "core/actor.hpp"
+#include "core/clock.hpp"
 #include "core/command_bus.hpp"
 #include "core/error.hpp"
 #include "core/ids.hpp"
@@ -36,8 +39,11 @@
 #include "core/pyconv.hpp"
 #include "formats/export.hpp"
 #include "formats/exporting.hpp"
+#include "formats/pillow_save.hpp"
 #include "render/anim.hpp"
 #include "render/brushes.hpp"
+#include "render/draw.hpp"
+#include "render/movie.hpp"
 #include "render/ops_registry.hpp"
 #include "render/page.hpp"
 #include "render/png.hpp"
@@ -294,8 +300,123 @@ std::optional<std::int64_t> py_int_arg(const QString& raw) {
     return negative ? -value : value;
 }
 
+// The format Image.save picks from an extension among those written here ("" for the others).
+std::string picture_format(const std::string& ext) {
+    if (ext == ".jpg" || ext == ".jpeg" || ext == ".jpe" || ext == ".jfif") return "jpeg";
+    if (ext == ".tif" || ext == ".tiff") return "tiff";
+    if (ext == ".pdf") return "pdf";
+    if (ext == ".webp") return "webp";
+    if (ext == ".bmp") return "bmp";
+    if (ext == ".dib") return "dib";  // (BmpImagePlugin._dib_save: no file header)
+    return {};
+}
+
+// BmpImagePlugin._save: modes 1, L, P (with their palette), RGB and RGBA; rows bottom-up, each padded to 4 bytes;
+// 96 dpi as pixels a metre. Without the file header: _dib_save.
+std::string bmp_bytes(const render::Image& image, bool file_header = true) {
+    const std::string mode(image.mode());
+    int bits = 0;
+    std::vector<std::array<std::uint8_t, 3>> palette;
+    if (mode == "RGB") {
+        bits = 24;
+    } else if (mode == "RGBA") {
+        bits = 32;
+    } else if (mode == "L") {
+        bits = 8;
+        for (int i = 0; i < 256; ++i) palette.push_back({static_cast<std::uint8_t>(i), static_cast<std::uint8_t>(i), static_cast<std::uint8_t>(i)});
+    } else {
+        throw core::Error("io", "cannot write mode " + mode + " as BMP");
+    }
+    const auto le = [](std::string& out, std::uint64_t v, int n) {
+        for (int i = 0; i < n; ++i) out.push_back(static_cast<char>((v >> (8 * i)) & 0xff));
+    };
+    const std::int64_t w = image.width(), h = image.height();
+    const std::int64_t stride = ((w * bits + 7) / 8 + 3) & ~std::int64_t{3};
+    const std::int64_t offset = 14 + 40 + static_cast<std::int64_t>(palette.size()) * 4;
+    const std::int64_t ppm = static_cast<std::int64_t>(96 * 39.3701 + 0.5);
+    std::string out;
+    if (file_header) {
+        if (offset + stride * h > 0xFFFFFFFFLL) throw core::PyValueError("File size is too large for the BMP format");
+        out += "BM";
+        le(out, static_cast<std::uint64_t>(offset + stride * h), 4);
+        le(out, 0, 4);
+        le(out, static_cast<std::uint64_t>(offset), 4);
+    }
+    le(out, 40, 4);
+    le(out, static_cast<std::uint64_t>(w), 4);
+    le(out, static_cast<std::uint64_t>(h), 4);
+    le(out, 1, 2);
+    le(out, static_cast<std::uint64_t>(bits), 2);
+    le(out, 0, 4);
+    le(out, static_cast<std::uint64_t>(stride * h), 4);
+    le(out, static_cast<std::uint64_t>(ppm), 4);
+    le(out, static_cast<std::uint64_t>(ppm), 4);
+    le(out, palette.size(), 4);
+    le(out, palette.size(), 4);
+    for (const auto& c : palette) {
+        out.push_back(static_cast<char>(c[2]));
+        out.push_back(static_cast<char>(c[1]));
+        out.push_back(static_cast<char>(c[0]));
+        out.push_back(0);
+    }
+    const std::string raw = image.tobytes();
+    const int bands = image.bands();
+    for (std::int64_t y = h - 1; y >= 0; --y) {
+        std::string row;
+        row.reserve(static_cast<std::size_t>(stride));
+        for (std::int64_t x = 0; x < w; ++x) {
+            const char* px = raw.data() + (y * w + x) * bands;
+            if (bands == 1) {
+                row.push_back(px[0]);
+            } else {
+                row.push_back(px[2]);
+                row.push_back(px[1]);
+                row.push_back(px[0]);
+                if (bands == 4) row.push_back(px[3]);
+            }
+        }
+        row.resize(static_cast<std::size_t>(stride), '\0');
+        out += row;
+    }
+    return out;
+}
+
+// Image.save(path) with Pillow's defaults for the format.
+std::string picture_bytes(const render::Image& image, const std::string& format, const std::filesystem::path& out) {
+    if (format == "png") return render::write_png(image);
+    if (format == "jpeg") return formats::jpeg_bytes(image);
+    if (format == "tiff") {
+        formats::TiffSave save;
+        save.compression = "raw";
+        return formats::tiff_bytes(image, save);
+    }
+    if (format == "pdf") {
+        return formats::pdf_bytes({image}, 72.0, core::path_to_utf8(out.stem()), core::utc_time_text("%Y%m%d%H%M%SZ"));
+    }
+    if (format == "bmp") return bmp_bytes(image);
+    if (format == "dib") return bmp_bytes(image, false);
+    if (format == "webp") {
+        // (one picture: WebPEncode, lossy, quality 80, method 4 — what Image.save writes)
+        const std::filesystem::path scratch = out.parent_path() / (".genko-render-" + core::new_id() + ".webp");
+        render::movie::write_movie({image.mode() == "RGB" ? image : image.convert("RGB")}, scratch, 1.0, "webp");
+        std::string bytes;
+        try {
+            bytes = storage::read_file(scratch);
+        } catch (...) {
+            std::error_code ignored;
+            std::filesystem::remove(scratch, ignored);
+            throw;
+        }
+        std::error_code ignored;
+        std::filesystem::remove(scratch, ignored);
+        return bytes;
+    }
+    throw render::NotYetPorted("format:" + format);
+}
+
 // `genko render <dir> --page N [--dpi D] [--mode print|proof|name] --out file.png` (Python's render command): the
-// page drawn as `python -m genko render` draws it, written as PNG; {"ok": true, "path", "mode"}.
+// page drawn as `python -m genko render` draws it, written as PNG — or JPEG, TIFF, PDF, WebP or BMP by --out's
+// extension, as Image.save picks; {"ok": true, "path", "mode"}.
 int render_command(const QStringList& args, bool ascii) {
     QString src;
     bool have_src = false;
@@ -372,7 +493,9 @@ int render_command(const QStringList& args, bool ascii) {
         if (std::find(std::begin(kPillowSaves), std::end(kPillowSaves), ext) == std::end(kPillowSaves)) {
             return fail("unknown file extension: " + ext, "value", ascii, 1);
         }
-        throw render::NotYetPorted("format:" + ext.substr(1));
+        // (the formats a picture of a page is saved in: JPEG, TIFF, PDF, WebP and BMP as Image.save writes them; Pillow's
+        // rarer writers — GIF's own palette, PPM, TGA, ICO, JPEG 2000… — are not in the C++ build)
+        if (picture_format(ext).empty()) throw render::NotYetPorted("format:" + ext.substr(1));
     }
 
     const auto loaded = storage::load_document(storage::path_from_utf8(pathlib_text(src.toStdString())));
@@ -390,10 +513,16 @@ int render_command(const QStringList& args, bool ascii) {
     render::RenderOptions options;
     options.mode = mode;
     const render::RenderResult result = render::render_page(*page, static_cast<int>(dpi), options, &doc);
-    const std::string bytes = render::write_png(result.image);
-    if (out_path.has_parent_path()) {
+    if (out_path.has_parent_path()) {  // (args.out.parent.mkdir, before image.save: the WebP is written beside it)
         std::error_code ec;
         std::filesystem::create_directories(out_path.parent_path(), ec);
+    }
+    std::string bytes;
+    const std::string format = ext == ".png" ? std::string("png") : picture_format(ext);
+    try {
+        bytes = picture_bytes(result.image, format, out_path);
+    } catch (const core::Error& error) {
+        return fail(error.what(), error.code(), ascii, 1);  // (Pillow's OSError: "cannot write mode RGBA as JPEG")
     }
     storage::write_atomic(out_path, bytes);
     core::Json json = core::Json::object();
@@ -794,7 +923,12 @@ int gc(const QStringList& args, bool ascii) {
 int doctor(const QStringList& args, bool ascii) {
     Arguments a;
     if (auto error = parse_arguments(args, {}, 1, "src", a)) return usage("genko doctor: " + *error);
-    const Json report = storage::doctor(path_arg(a.positional[0]));
+    Json report = storage::doctor(path_arg(a.positional[0]));
+    // (maintenance.doctor: the bundled font — here in the program's resources)
+    if (!render::bundled_font_present("sfx")) {
+        report["problems"].push_back("bundled font missing: :/genko/text/sfx (DelaGothicOne-Regular.ttf)");
+        report["ok"] = false;
+    }
     print_json(report, ascii);
     return report["ok"].get<bool>() ? 0 : 1;
 }
@@ -830,6 +964,13 @@ int run_cli(int argc, char** argv) {
         if (command == QLatin1String("--version") || command == QLatin1String("version")) {
             write_json({{"ok", true}, {"build", build_info()}});
             return 0;
+        }
+        if (core::import_pending()) {
+            // (the Python app's settings — the AI keys among them — are taken over only when the app asks: said here,
+            // on stderr, so that a command or an AI working without the app knows why its keys are not found)
+            std::fputs("genko: 以前の Genko Studio（Python 版）の設定はまだ引き継いでいません。`genko app` を起動すると、引き継ぐかを聞きます"
+                       "（AI 接続の鍵もそのときに写せます）。\n",
+                       stderr);
         }
         if (command == QLatin1String("inspect")) return inspect(args, ascii);
         if (command == QLatin1String("schema")) return schema(args, ascii);

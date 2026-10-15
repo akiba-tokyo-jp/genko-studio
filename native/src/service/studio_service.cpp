@@ -78,12 +78,7 @@ double now_seconds() {
 }
 
 // Path.resolve() (os.path.realpath: the links followed as far as the path is there, the rest taken as written).
-fs::path resolved(const fs::path& path) {
-    std::error_code ec;
-    fs::path out = fs::weakly_canonical(path, ec);
-    if (ec) out = path.lexically_normal();
-    return out;
-}
+fs::path resolved(const fs::path& path) { return core::resolve_path(path); }
 
 // `root in path.parents`: root is an ancestor of path (path itself is not its own parent).
 bool strictly_under(const fs::path& path, const fs::path& root) {

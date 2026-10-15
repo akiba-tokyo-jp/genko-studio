@@ -1053,8 +1053,7 @@ ToolResult StudioService::import_image(const Json& a) {
         fs::path source = core::path_from_utf8(text);
         source = source.is_absolute() ? source : root_ / source;
         std::error_code ec;
-        fs::path resolved = fs::weakly_canonical(source, ec);
-        if (ec) resolved = source.lexically_normal();
+        const fs::path resolved = core::resolve_path(source);
         if (confine_) {
             bool under = false;
             auto p = resolved.begin();

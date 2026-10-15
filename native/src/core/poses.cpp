@@ -1,12 +1,12 @@
 #include "core/poses.hpp"
 
-#include <QDir>
 #include <QFile>
 #include <QSaveFile>
 #include <QString>
 
 #include <string>
 
+#include "core/config_dir.hpp"
 #include "core/error.hpp"
 #include "core/limits.hpp"
 #include "core/paths.hpp"
@@ -16,8 +16,6 @@
 namespace genko::core::poses {
 
 namespace {
-
-std::filesystem::path path_of(const QString& text) { return path_from_utf8(text.toStdString()); }
 
 std::filesystem::path poses_file() { return config_dir() / "poses.json"; }
 
@@ -71,17 +69,7 @@ void write(const Json& poses) {
 
 }  // namespace
 
-std::filesystem::path config_dir() {
-    const QString own = qEnvironmentVariable("GENKO_CONFIG_DIR");
-    if (!own.isEmpty()) return path_of(own);
-#ifdef _WIN32
-    const QString appdata = qEnvironmentVariable("APPDATA");
-    if (!appdata.isEmpty()) return path_of(appdata) / "genko";
-#endif
-    QString base = qEnvironmentVariable("XDG_CONFIG_HOME");
-    if (base.isEmpty()) base = QDir::homePath() + QStringLiteral("/.config");
-    return path_of(base) / "genko";
-}
+std::filesystem::path config_dir() { return core::config_dir(); }
 
 Json user_poses() {
     QFile file(QString::fromStdString(path_to_utf8(poses_file())));

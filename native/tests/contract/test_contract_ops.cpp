@@ -4,8 +4,8 @@
 //      reply (applied, snapshot, job_id, warnings, results — or the error's words), the full snapshot and the
 //      project.json payload are the same as Python's apply_ops gives, ids counted the same on both sides. Every op of
 //      M2-O1 has 10 or more cases that succeed and 5 or more that fail (undo: test_contract_ops_cli). A case marked
-//      "cpp": "not_yet_ported" is a part of an op this build refuses on purpose (the colour mixing under a line): C++
-//      must refuse it with not_yet_ported. One marked "cpp": "deviates" is one this build answers otherwise than Python
+//      "cpp": "not_yet_ported" is a part of an op this build refuses on purpose: C++ must refuse it with not_yet_ported
+//      (none now: the colour mixing under a line, 下地混色, is ported — M7). One marked "cpp": "deviates" is one this build answers otherwise than Python
 //      on purpose, the user's decision its "cpp_says" names (opsupport.hpp): D2, duplicate_page pointing what names a
 //      layer on the copy (a layer's folder, a line set under a layer, a ruler kept to a layer, an animation's cels) at
 //      the copy's own layers. It is Python's but at its "cpp_differs" and keeps its "cpp_keeps" (and Python's book does

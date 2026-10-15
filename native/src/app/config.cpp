@@ -7,6 +7,7 @@
 #include <cstdlib>
 #include <system_error>
 
+#include "core/config_dir.hpp"
 #include "core/paths.hpp"
 
 namespace genko::app {
@@ -25,21 +26,20 @@ fs::path ensure(const fs::path& dir) {
 
 }  // namespace
 
-fs::path config_dir() {
-    if (const QString chosen = env("GENKO_CONFIG_DIR"); !chosen.isEmpty()) return core::path_from_utf8(chosen.toStdString());
-#ifdef _WIN32
-    if (const QString appdata = env("APPDATA"); !appdata.isEmpty()) return core::path_from_utf8(appdata.toStdString()) / "genko";
-#endif
-    QString base = env("XDG_CONFIG_HOME");
-    if (base.isEmpty()) base = QDir::homePath() + QStringLiteral("/.config");
-    return core::path_from_utf8(base.toStdString()) / "genko";
-}
+fs::path config_dir() { return core::config_dir(); }
 
 std::unique_ptr<QSettings> settings() {
-    if (const QString chosen = env("GENKO_CONFIG_DIR"); !chosen.isEmpty()) {
-        return std::make_unique<QSettings>(chosen + QStringLiteral("/settings.ini"), QSettings::IniFormat);
-    }
-    return std::make_unique<QSettings>(QStringLiteral("Genko"), QStringLiteral("Genko Studio"));
+    return std::make_unique<QSettings>(QString::fromStdString(core::path_to_utf8(config_dir() / "settings.ini")), QSettings::IniFormat);
+}
+
+std::unique_ptr<QSettings> legacy_settings() {
+    if (!qEnvironmentVariableIsEmpty("GENKO_CONFIG_DIR")) return nullptr;
+    // (looked at first: Qt opens the first registry key for writing and makes it when it is missing — the Python app's
+    // settings are never made or changed)
+    if (!core::legacy_settings_exist()) return nullptr;
+    auto legacy = std::make_unique<QSettings>(QStringLiteral("Genko"), QStringLiteral("Genko Studio"));
+    legacy->setFallbacksEnabled(false);  // (its own keys, not the organisation's or the computer's)
+    return legacy;
 }
 
 std::string default_actor() {
