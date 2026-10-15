@@ -388,6 +388,8 @@ void MainWindow::refresh_icons() {
     if (layer_panel_ != nullptr) layer_panel_->refresh_look();
 }
 
+RadialMenu* MainWindow::radial() const { return radial_.data(); }
+
 void MainWindow::maybe_backup() {
     // バックアップ (Python's _backup): after a save, the book zipped into the folder chosen in 環境設定, not more often
     // than set — each book of the window, its tab in front or not
