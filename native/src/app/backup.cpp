@@ -75,13 +75,13 @@ fs::path make(const fs::path& project, const fs::path& folder, int keep, std::op
     const auto state = [&project]() {
         std::error_code ignored;
         const fs::path journal = project / "studio" / "journal.jsonl";
-        std::string out;
+        std::string sum;
         try {
-            out = storage::sha256_file(project / "project.json");
+            sum = storage::sha256_file(project / "project.json");
         } catch (const std::exception&) {
-            out = "missing";
+            sum = "missing";
         }
-        return out + ":" + std::to_string(fs::exists(journal, ignored) ? fs::file_size(journal, ignored) : 0);
+        return sum + ":" + std::to_string(fs::exists(journal, ignored) ? fs::file_size(journal, ignored) : 0);
     };
     for (int attempt = 0;; ++attempt) {
         const std::string before = state();

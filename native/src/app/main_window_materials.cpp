@@ -36,6 +36,7 @@
 #include "core/base64.hpp"
 #include "core/ids.hpp"
 #include "core/pyconv.hpp"
+#include "core/paths.hpp"
 #include "core/pynum.hpp"
 #include "core/pyops.hpp"
 #include "render/effects.hpp"
@@ -474,7 +475,7 @@ bool MainWindow::import_image(std::optional<QString> chosen) {
         place["placement_mm"] = Json::array({b.x.json(), b.y.json(), b.width.json(), b.height.json()});
     }
     const Json ops = Json::array({Json{{"op", "register_assets"},
-                                       {"assets", Json{{ref, Json{{"kind", "image"}, {"origin", Json{{"kind", "self"}, {"file", info.fileName().toStdString()}}}}}}}}},
+                                       {"assets", Json{{ref, Json{{"kind", "image"}, {"origin", Json{{"kind", "self"}, {"file", info.fileName().toStdString()}}}}}}}},
                                   place});
     if (!apply_ops(ops)) return false;
     flash(QStringLiteral("%1に「%2」を置きました").arg(frame != nullptr ? QStringLiteral("選んだコマ") : QStringLiteral("ページ全体"), info.fileName()), 4000);

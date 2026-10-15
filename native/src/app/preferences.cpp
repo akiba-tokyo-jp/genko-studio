@@ -15,6 +15,7 @@
 #include <QLabel>
 #include <QLineEdit>
 #include <QListWidget>
+#include <QMenu>
 #include <QMainWindow>
 #include <QPainter>
 #include <QPushButton>
@@ -212,7 +213,7 @@ bool tool_keys_dialog(QWidget* parent, MainWindow* window, const std::function<v
     for (const auto& [label, tool] : keyed_tools()) {
         grid->addWidget(new QLabel(label), row, 0);
         int at = 1;
-        for (const QString key : {QStringLiteral("alt"), QStringLiteral("ctrl"), QStringLiteral("shift")}) {
+        for (const QString& key : {QStringLiteral("alt"), QStringLiteral("ctrl"), QStringLiteral("shift")}) {
             QString current;
             if (const auto own = now.find(tool); own != now.end()) {
                 if (const auto it = own->second.find(key); it != own->second.end()) current = it->second;

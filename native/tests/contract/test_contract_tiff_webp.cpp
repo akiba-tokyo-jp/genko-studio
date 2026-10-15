@@ -15,7 +15,7 @@
 #include "render/not_yet_ported.hpp"
 #include "render/png.hpp"
 #include "render/tiff_webp.hpp"
-#include "support/testsupport.hpp"
+#include "testsupport.hpp"
 
 using genko::core::Json;
 namespace render = genko::render;

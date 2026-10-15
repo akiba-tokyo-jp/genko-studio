@@ -931,4 +931,4 @@ private slots:
 
 QTEST_MAIN(TestGuiLook)
 #include "test_gui_look.moc"
-#include "support/testsupport.hpp"
+#include "testsupport.hpp"

@@ -27,7 +27,7 @@
 #include <set>
 
 #include "core/json.hpp"
-#include "support/testsupport.hpp"
+#include "testsupport.hpp"
 
 using genko::core::Json;
 namespace gt = genko::test;
