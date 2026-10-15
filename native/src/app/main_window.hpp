@@ -257,6 +257,9 @@ public:
     std::map<QString, QList<QKeySequence>> default_shortcuts;
     // 環境設定… (the dialog, exec'ed).
     void open_preferences();
+    // ヘルプ: keys | guide | faq | about, shown (modeless); the one shown last (tests).
+    void show_help(const QString& what);
+    QDialog* help_dialog() const { return help_dialog_; }
     // How soon a change is saved (ms), for every book of this window and the ones it opens later.
     void set_save_after(int ms);
     int save_after() const { return save_after_ms_; }
@@ -672,6 +675,7 @@ private:
     QPointer<RadialMenu> radial_;
     std::optional<ToolSwitch> tool_switch_;
     std::optional<core::Json> recording_;
+    QPointer<QDialog> help_dialog_;
     QMenu* actions_menu_ = nullptr;
     void fill_actions_menu();
     int save_after_ms_ = 2000;

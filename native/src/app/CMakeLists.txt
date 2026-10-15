@@ -9,6 +9,7 @@ qt_add_big_resources(GENKO_APP_FONTS "${GENKO_SOURCE_ROOT}/resources/genko_fonts
 genko_library(genko_app
   SOURCES
     config.cpp
+    migration.cpp
     session.cpp
     theme.cpp
     icons.cpp
@@ -23,6 +24,7 @@ genko_library(genko_app
     backup.cpp
     actions.cpp
     bookview.cpp
+    help.cpp
     look.cpp
     pen.cpp
     live_ink.cpp

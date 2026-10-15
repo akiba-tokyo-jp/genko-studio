@@ -45,6 +45,7 @@
 #include "app/layer_panel.hpp"
 #include "app/dialogs.hpp"
 #include "app/frame_tools.hpp"
+#include "app/help.hpp"
 #include "app/icons.hpp"
 #include "app/material_panel.hpp"
 #include "app/material_tabs.hpp"
@@ -293,6 +294,21 @@ bool MainWindow::hold_key_released(int key, std::optional<double> now) {
     return true;
 }
 
+void MainWindow::show_help(const QString& what) {
+    if (help_dialog_ != nullptr) help_dialog_->close();
+    if (what == QLatin1String("keys")) {
+        help_dialog_ = new help::HelpDialog(this, QStringLiteral("ショートカット一覧"), help::shortcut_html(this));
+    } else if (what == QLatin1String("guide")) {
+        help_dialog_ = new help::HelpDialog(this, QStringLiteral("はじめての使い方"), help::guide(this));
+    } else if (what == QLatin1String("faq")) {
+        help_dialog_ = new help::HelpDialog(this, QStringLiteral("困ったとき"), help::faq(this));
+    } else {
+        help_dialog_ = new help::HelpDialog(this, QStringLiteral("Genko Studio について"), help::about());
+    }
+    help_dialog_->setAttribute(Qt::WA_DeleteOnClose);
+    help_dialog_->show();
+}
+
 void MainWindow::open_preferences() {
     preferences::PreferencesDialog dialog(this);
     ask::exec(&dialog);
@@ -319,6 +335,7 @@ QAction* MainWindow::make(const QString& attribute, const QString& title, std::f
     }
     act->setCheckable(checkable);
     act->setObjectName(QStringLiteral("cmd:%1").arg(title));
+    act->setProperty("genko_attribute", attribute);  // (the help names its menus and keys through it: help.cpp)
     connect(act, &QAction::triggered, this, [slot = std::move(slot)](bool) { slot(); });
     addAction(act);  // (its keys work wherever the window has the focus)
     actions_[attribute] = act;
@@ -353,6 +370,10 @@ void MainWindow::build_actions() {
                            QStringLiteral("表示だけを左右反転します（絵の歪みを見つける）。原稿は変わりません"), true);
     connect(mirror, &QAction::triggered, this, [c](bool on) { c->flip_view(on); });
     // (M6: workspace.cpp) コマンドを探す, the command bar and the quick access chosen, workspaces, the tools' names
+    make("act_help_keys", QStringLiteral("ショートカット一覧"), [this] { show_help(QStringLiteral("keys")); }, keys({QKeySequence(Qt::Key_F1)}));
+    make("act_help_guide", QStringLiteral("はじめての使い方"), [this] { show_help(QStringLiteral("guide")); });
+    make("act_help_faq", QStringLiteral("困ったとき（よくある質問）"), [this] { show_help(QStringLiteral("faq")); });
+    make("act_about", QStringLiteral("Genko Studio について"), [this] { show_help(QStringLiteral("about")); });
     make("act_prefs", QStringLiteral("環境設定…"), [this] { open_preferences(); }, keys({QKeySequence(QStringLiteral("Ctrl+,"))}),
          QStringLiteral("ショートカット・ペンタブレット・文字の大きさ・新しい原稿の用紙・保存の間隔"));
     make("act_find_command", QStringLiteral("コマンドを探す…"), [this] { find_command(); }, keys({QKeySequence(QStringLiteral("Ctrl+Shift+F"))}),
@@ -708,7 +729,9 @@ void MainWindow::build_menus() {
     QMenu* help = bar->addMenu(QStringLiteral("ヘルプ"));
     help->addAction(action("act_find_command"));
     help->addSeparator();
-    help->addAction(action("act_next_steps"));
+    for (const char* name : {"act_help_guide", "act_help_keys", "act_help_faq", "act_next_steps"}) help->addAction(action(name));
+    help->addSeparator();
+    help->addAction(action("act_about"));
 }
 
 void MainWindow::build_toolbars() {

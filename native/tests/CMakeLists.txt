@@ -312,6 +312,7 @@ if(GENKO_BUILD_APP)
   genko_test(test_gui_materials SOURCES gui/test_gui_materials.cpp DEPS genko_app GUI TIMEOUT 300)
   # the disposable material preview cache alone (keys, restarts, corrupt files, budgets, originals kept)
   genko_test(test_material_preview_cache SOURCES unit/test_material_preview_cache.cpp DEPS genko_app LABELS unit)
+  genko_test(test_migration SOURCES unit/test_migration.cpp DEPS genko_app LABELS unit)
   genko_test(test_gui_color SOURCES gui/test_gui_color.cpp DEPS genko_app GUI TIMEOUT 300)
   # the layer panel: its list, buttons, settings, menus (several at once, masks, effects), fill and correction layers,
   # a filter with its result on the page while its numbers change
@@ -329,6 +330,14 @@ if(GENKO_BUILD_APP)
   genko_test(test_gui_colours SOURCES gui/test_gui_colours.cpp DEPS genko_app genko_test_support GUI TIMEOUT 600)
   genko_test(test_gui_workspace SOURCES gui/test_gui_workspace.cpp DEPS genko_app genko_test_support GUI TIMEOUT 600)
   genko_test(test_gui_look SOURCES gui/test_gui_look.cpp DEPS genko_app genko_test_support GUI TIMEOUT 600)
+  genko_test(test_gui_carried SOURCES gui/test_gui_carried.cpp DEPS genko_app genko_test_support GUI TIMEOUT 600)
+  # the distribution (M6, AC-PACKAGE): this build installed into a folder of its own, run from it with a bare
+  # environment, its libraries, notes, licences and SBOM (against docs/cpp-migration/THIRD_PARTY.md), install.sh and
+  # uninstall.sh leaving books and settings as they were
+  genko_test(test_package SOURCES package/test_package.cpp DEPS genko_test_support LABELS package TIMEOUT 900)
+  target_compile_definitions(test_package PRIVATE GENKO_CMAKE_COMMAND="${CMAKE_COMMAND}" GENKO_BUILD_DIR="${CMAKE_BINARY_DIR}"
+                                                  GENKO_VERSION="${PROJECT_VERSION}")
+  add_dependencies(test_package genko)
   genko_test(test_gui_effects SOURCES gui/test_gui_effects.cpp DEPS genko_app genko_test_support GUI TIMEOUT 900)
   # 台詞 (M4①c): the text tool, the balloon pen, a balloon's handles and menu, the 台詞 panel, the story editor and
   # 台詞の検索・置換, each gesture's ops against Python's window, the page drawn after them

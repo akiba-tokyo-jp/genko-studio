@@ -16,6 +16,7 @@
 #include "app/icons.hpp"
 #include "app/links.hpp"
 #include "app/main_window.hpp"
+#include "app/migration.hpp"
 #include "app/perf.hpp"
 #include "app/test_script.hpp"
 #include "app/theme.hpp"
@@ -81,6 +82,8 @@ int run_app(int argc, char** argv) {
     qRegisterMetaType<StrokeInput>();
     icons::init_resources();
     perf::event("app_start");
+    // (the first start: the Python app's settings offered once, before anything reads this app's own)
+    migration::offer_on_first_start();
     if (const int pt = settings()->value(QStringLiteral("ui/font_pt"), 0).toInt(); pt > 0) {  // the letters' size chosen in 環境設定
         QFont font = QApplication::font();
         font.setPointSize(pt);

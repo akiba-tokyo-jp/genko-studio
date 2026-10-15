@@ -36,6 +36,8 @@ set(GENKO_SOURCE_ROOT "${CMAKE_CURRENT_SOURCE_DIR}")
 set(GENKO_REPO_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/..")
 
 add_subdirectory(src)
+# the distribution: cmake --install, cpack (M6)
+include(GenkoPackage)
 
 if(GENKO_BUILD_TESTS)
   enable_testing()

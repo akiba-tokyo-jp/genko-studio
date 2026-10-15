@@ -1,0 +1,7 @@
+[Desktop Entry]
+Type=Application
+Name=Genko Studio
+Comment=マンガの原稿を、ネームから入稿まで
+Exec="@GENKO@" app %f
+Terminal=false
+Categories=Graphics;2DGraphics;
