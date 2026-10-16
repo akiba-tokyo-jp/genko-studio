@@ -823,7 +823,9 @@ void put_page_psd_inks(detail::Output& output, const core::Document& episode, co
     options.mode = "print";
     options.inks = true;
     const render::RenderResult made = render::render_page(page, static_cast<int>(dpi), options, &episode);
-    const core::InkPixels merged = made.inks->depth == color.depth ? *made.inks : detail::at_16(*made.inks);
+    std::optional<core::InkPixels> halved;  // (a 32-bit CMYK or Lab page's at 16)
+    if (made.inks->depth != color.depth) halved = detail::at_16(*made.inks);
+    const core::InkPixels& merged = halved ? *halved : *made.inks;
     const render::Size size{static_cast<int>(merged.width), static_cast<int>(merged.height)};
     Records records(size, color);
     const auto each = [&](render::PageLayer&& layer) {

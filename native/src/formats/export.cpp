@@ -318,7 +318,8 @@ std::vector<fs::path> detail::print_into(detail::Output& output, const core::Doc
         render::RenderResult made = render::render_page(page, dpi, with_inks, &episode);
         if (!made.inks) throw core::Error("value", "the page's inks were not drawn");
         core::InkPixels inks = inks_crop_to(*made.inks, page, area, dpi);
-        return floats ? inks : detail::at_16(inks);
+        if (!floats && inks.depth == 32) return detail::at_16(inks);
+        return inks;
     };
     const auto values_of = [&](const core::Page& page) {
         return values_crop_to(detail::page_values(page, episode, dpi, options).values, page, area, dpi);
