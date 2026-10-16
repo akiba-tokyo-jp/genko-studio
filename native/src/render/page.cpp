@@ -1236,7 +1236,7 @@ RenderResult render(const Page& page_in, int dpi, const RenderOptions& options, 
                 marks.commit();
             });
         }
-        RenderResult out{canvas.display(), {}, std::nullopt};
+        RenderResult out{canvas.display(), {}, std::nullopt, std::nullopt};
         if (options.inks) out.inks = canvas.ink_pixels(page.color->depth);
         // (what is never printed, over the page as shown)
         if (!print && core::py_truthy(page.prims)) draw_prims(out.image, area, ctx);
@@ -1367,6 +1367,8 @@ RenderResult render(const Page& page_in, int dpi, const RenderOptions& options, 
         prev_alpha = alpha_of(picture);
     }
     Image image = (precision ? precision->image() : rgba).convert("RGB");
+    std::optional<std::string> precise;  // (color-model@1: the page's values, asked for)
+    if (options.precise && precision) precise = precision->color_raster("f32");
 
     if (core::py_truthy(page.effects)) image = draw_effects(ctx, image, area);  // effect lines (M3-B)
     if (!print && core::py_truthy(page.prims)) draw_prims(image, area, ctx);  // 3D guides, never printed (M3-C)
@@ -1386,7 +1388,7 @@ RenderResult render(const Page& page_in, int dpi, const RenderOptions& options, 
         canvas.commit();
     }
     onion(image);
-    return RenderResult{std::move(image), {}, std::nullopt};
+    return RenderResult{std::move(image), {}, std::nullopt, std::move(precise)};
 }
 
 // The first `count` characters of UTF-8 text (Python's text[:count]).
@@ -1667,7 +1669,7 @@ RenderResult render_page(const core::Page& page, int dpi, const RenderOptions& o
         if(pixels>kMaxAreaPixels)throw core::Error("image_too_large","the picture is too large at this resolution");
         if(pixels>1024LL*1024){
             if(options.stop.stop_requested())throw Cancelled();
-            RenderResult out{Image::create_blank("RGB",size_of(area)),{},std::nullopt};
+            RenderResult out{Image::create_blank("RGB",size_of(area)),{},std::nullopt,std::nullopt};
             if(options.inks && page.color){  // (each tile's inks laid in)
                 out.inks=core::blank_ink_pixels(page.color->space,page.color->depth,static_cast<std::uint32_t>(area.width()),
                                                 static_cast<std::uint32_t>(area.height()));

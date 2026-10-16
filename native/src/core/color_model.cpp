@@ -196,6 +196,65 @@ ColorModel color_model_from_json(const Json& value) {
 
 std::string color_raster_space(const std::optional<RgbMode>& rgb) { return rgb && !rgb->profile.empty() ? rgb->profile : std::string("srgb"); }
 
+std::string icc_description(std::string_view icc) {
+    const auto u8 = [&](std::size_t at) { return static_cast<std::uint32_t>(static_cast<unsigned char>(icc[at])); };
+    const auto be16 = [&](std::size_t at) { return (u8(at) << 8) | u8(at + 1); };
+    const auto be32 = [&](std::size_t at) { return (be16(at) << 16) | be16(at + 2); };
+    if (icc.size() < 132) return {};
+    const std::uint32_t tags = be32(128);
+    for (std::uint32_t t = 0; t < tags && 132 + std::size_t(t + 1) * 12 <= icc.size(); ++t) {
+        const std::size_t entry = 132 + std::size_t(t) * 12;
+        if (icc.substr(entry, 4) != "desc") continue;
+        const std::size_t at = be32(entry + 4), size = be32(entry + 8);
+        if (at + size > icc.size() || size < 12) return {};
+        const std::string_view tag = icc.substr(at, size);
+        if (tag.substr(0, 4) == "desc") {  // (v2 textDescriptionType: an ASCII count, then the text)
+            const std::size_t count = be32(at + 8);
+            if (count == 0 || 12 + count > size) return {};
+            std::string out(tag.substr(12, count));
+            while (!out.empty() && out.back() == '\0') out.pop_back();
+            return out;
+        }
+        if (tag.substr(0, 4) == "mluc") {  // (v4: records of UTF-16BE strings; English first)
+            const std::uint32_t records = be32(at + 8), record = be32(at + 12);
+            if (record < 12 || 16 + std::size_t(records) * record > size) return {};
+            std::size_t pick = 0;
+            for (std::uint32_t r = 0; r < records; ++r) {
+                if (tag.substr(16 + std::size_t(r) * record, 2) == "en") {
+                    pick = r;
+                    break;
+                }
+            }
+            if (records == 0) return {};
+            const std::size_t length = be32(at + 16 + pick * record + 4), offset = be32(at + 16 + pick * record + 8);
+            if (offset + length > size) return {};
+            std::string out;
+            for (std::size_t k = 0; k + 1 < length; k += 2) {
+                const std::uint32_t c = be16(at + offset + k);
+                if (c < 0x80) out.push_back(static_cast<char>(c));
+                else if (c < 0x800) {
+                    out.push_back(static_cast<char>(0xc0 | (c >> 6)));
+                    out.push_back(static_cast<char>(0x80 | (c & 0x3f)));
+                } else {
+                    out.push_back(static_cast<char>(0xe0 | (c >> 12)));
+                    out.push_back(static_cast<char>(0x80 | ((c >> 6) & 0x3f)));
+                    out.push_back(static_cast<char>(0x80 | (c & 0x3f)));
+                }
+            }
+            while (!out.empty() && out.back() == '\0') out.pop_back();
+            return out;
+        }
+        return {};
+    }
+    return {};
+}
+
+std::string profile_description(const std::string& ref, const Bytes& icc, bool lab) {
+    if (ref.empty()) return std::string(builtin_profile(lab ? "lab-d50" : "srgb")->description);
+    if (const BuiltinProfile* builtin = builtin_profile_by_ref(ref)) return std::string(builtin->description);
+    return icc ? icc_description(*icc) : std::string();
+}
+
 bool uses_color_model(const Document& doc) {
     const auto model = [](const std::optional<PageColor>& inks, const std::optional<RgbMode>& rgb) {
         return (inks && !inks->color_mode_only()) || rgb.has_value();

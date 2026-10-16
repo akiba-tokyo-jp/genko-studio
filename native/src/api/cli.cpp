@@ -43,6 +43,7 @@
 #include "render/anim.hpp"
 #include "render/brushes.hpp"
 #include "render/draw.hpp"
+#include "render/inspect.hpp"
 #include "render/movie.hpp"
 #include "render/ops_registry.hpp"
 #include "render/page.hpp"
@@ -249,6 +250,19 @@ int inspect(const QStringList& args, bool ascii) {
     bool have_src = false;
     bool full = false;
     QString stroke;
+    // (color-model@1, the C++ build's own: --pixel <page>:<x_mm>,<y_mm> [--layer ID] [--dpi N])
+    QString pixel, layer, dpi_text;
+    const auto value_of = [&](qsizetype& i, const char* name, QString& into) -> bool {
+        const QString& arg = args[i];
+        const QString flag = QString::fromLatin1(name);
+        if (arg == flag) {
+            if (i + 1 >= args.size()) return false;
+            into = args[++i];
+            return true;
+        }
+        into = arg.mid(flag.size() + 1);
+        return true;
+    };
     for (qsizetype i = 0; i < args.size(); ++i) {
         const QString& arg = args[i];
         if (arg == QLatin1String("--full")) {
@@ -258,6 +272,12 @@ int inspect(const QStringList& args, bool ascii) {
             stroke = args[++i];
         } else if (arg.startsWith(QLatin1String("--stroke="))) {
             stroke = arg.mid(9);
+        } else if (arg == QLatin1String("--pixel") || arg.startsWith(QLatin1String("--pixel="))) {
+            if (!value_of(i, "--pixel", pixel)) return usage("argument --pixel: expected one argument");
+        } else if (arg == QLatin1String("--layer") || arg.startsWith(QLatin1String("--layer="))) {
+            if (!value_of(i, "--layer", layer)) return usage("argument --layer: expected one argument");
+        } else if (arg == QLatin1String("--dpi") || arg.startsWith(QLatin1String("--dpi="))) {
+            if (!value_of(i, "--dpi", dpi_text)) return usage("argument --dpi: expected one argument");
         } else if (arg.startsWith(QLatin1Char('-')) && arg.size() > 1) {
             return usage("unrecognized arguments: " + arg.toStdString());
         } else if (!have_src) {
@@ -268,7 +288,41 @@ int inspect(const QStringList& args, bool ascii) {
         }
     }
     if (!have_src) return usage("genko inspect <dir> [--full] [--stroke ID]: the following arguments are required: src");
+    if ((!layer.isEmpty() || !dpi_text.isEmpty()) && pixel.isEmpty()) return usage("argument --layer, --dpi: only with --pixel");
+    std::optional<std::int64_t> pixel_page;
+    double x_mm = 0, y_mm = 0;
+    int dpi = 0;
+    if (!pixel.isEmpty()) {
+        // <page>:<x_mm>,<y_mm>
+        const qsizetype colon = pixel.indexOf(QLatin1Char(':'));
+        const QStringList at = colon < 0 ? QStringList() : pixel.mid(colon + 1).split(QLatin1Char(','));
+        bool ok_page = false, ok_x = false, ok_y = false;
+        if (colon > 0 && at.size() == 2) {
+            pixel_page = pixel.left(colon).toLongLong(&ok_page);
+            x_mm = at[0].toDouble(&ok_x);
+            y_mm = at[1].toDouble(&ok_y);
+        }
+        if (!ok_page || !ok_x || !ok_y) return usage("argument --pixel: <page>:<x_mm>,<y_mm>, e.g. 1:10.5,20");
+        if (!dpi_text.isEmpty()) {
+            bool ok = false;
+            dpi = dpi_text.toInt(&ok);
+            if (!ok || dpi < 1 || dpi > 2400) return usage("argument --dpi: an integer 1..2400");
+        }
+    }
     const auto loaded = storage::load_document(path_arg(src));
+    if (pixel_page) {
+        const core::Document& doc = loaded.document;
+        for (std::size_t i = 0; i < doc.pages.size(); ++i) {
+            if (doc.pages[i]->index != core::Num(*pixel_page)) continue;
+            if (doc.is_deferred(i)) break;
+            const core::Page& page = doc.page(i);
+            const int at_dpi = dpi > 0 ? dpi : std::max(1, static_cast<int>(std::lround(page.spec.dpi.value())));
+            print_json(render::pixel_at(page, &doc, x_mm, y_mm, layer.isEmpty() ? std::nullopt : std::optional<std::string>(layer.toStdString()), at_dpi),
+                       ascii);
+            return 0;
+        }
+        throw core::Error("key", "no page " + std::to_string(*pixel_page));
+    }
     if (!stroke.isEmpty()) {
         print_json(storage::inspect_stroke(loaded.document, stroke.toStdString()), ascii);
     } else {

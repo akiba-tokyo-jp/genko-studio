@@ -18,9 +18,47 @@ namespace genko::render {
 
 // --- RgbSpace ----------------------------------------------------------------------------------------------------------
 
+namespace {
+
+// A profile's tone curve in double precision when it is one of the ICC parametric functions this reads analytically
+// (Little CMS's types 1, 4 and 5: a gamma, IEC 61966-2.1's and its offset form): encoded → linear and back. Values past
+// 0..1 (HDR) follow the same formula (a gamma mirrored below 0).
+struct Parametric {
+    int type = 0;  // (0: not one of them)
+    std::array<double, 7> p{};
+
+    explicit Parametric(const cmsToneCurve* curve) {
+        const int t = cmsGetToneCurveParametricType(curve);
+        if (t != 1 && t != 4 && t != 5) return;
+        const cmsFloat64Number* params = cmsGetToneCurveParams(curve);
+        if (params == nullptr) return;
+        for (std::size_t i = 0; i < p.size(); ++i) p[i] = params[i];
+        type = t;
+        if ((type == 4 || type == 5) && (p[1] <= 0 || p[0] <= 0 || p[3] <= 0)) type = 0;  // (a, g, c: no inverse)
+    }
+    double linear(double x) const {
+        const double g = p[0];
+        if (type == 1) return x < 0 ? -std::pow(-x, g) : std::pow(x, g);
+        const double a = p[1], b = p[2], c = p[3], d = p[4], e = type == 5 ? p[5] : 0.0, f = type == 5 ? p[6] : 0.0;
+        if (x >= d) return std::pow(std::max(0.0, a * x + b), g) + e;
+        return c * x + f;
+    }
+    double encoded(double y) const {
+        const double g = p[0];
+        if (type == 1) return y < 0 ? -std::pow(-y, 1.0 / g) : std::pow(y, 1.0 / g);
+        const double a = p[1], b = p[2], c = p[3], d = p[4], e = type == 5 ? p[5] : 0.0, f = type == 5 ? p[6] : 0.0;
+        const double knee = std::pow(std::max(0.0, a * d + b), g) + e;
+        if (y >= knee) return (std::pow(std::max(0.0, y - e), 1.0 / g) - b) / a;
+        return (y - f) / c;
+    }
+};
+
+}  // namespace
+
 struct RgbSpace::Impl {
     std::array<cmsToneCurve*, 3> curves{};    // (encoded → linear)
     std::array<cmsToneCurve*, 3> reversed{};  // (linear → encoded)
+    std::vector<Parametric> exact;            // (the same in double precision, when they are parametric)
     cmsHTRANSFORM in = nullptr;                // sRGB → the page (its intent, black point compensation)
     cmsHTRANSFORM out = nullptr;               // the page → sRGB (relative colorimetric, black point compensation)
     ~Impl() {
@@ -58,6 +96,7 @@ RgbSpace::RgbSpace(const core::RgbMode& mode) {
         }
         impl->curves[c] = cmsDupToneCurve(curve);
         impl->reversed[c] = cmsReverseToneCurve(curve);
+        impl->exact.emplace_back(curve);
     }
     cmsHPROFILE srgb = cmsCreate_sRGBProfile();
     const auto intent = static_cast<cmsUInt32Number>(std::find(core::kIntents.begin(), core::kIntents.end(), mode.intent) - core::kIntents.begin());
@@ -76,17 +115,29 @@ RgbSpace RgbSpace::of(const core::Page& page) { return page.rgb ? RgbSpace(*page
 
 double RgbSpace::decode(unsigned channel, double encoded) const {
     if (!impl_) return core::srgb_to_linear(encoded);
+    if (impl_->exact[channel].type != 0) return impl_->exact[channel].linear(encoded);
     return cmsEvalToneCurveFloat(impl_->curves[channel], static_cast<cmsFloat32Number>(encoded));
 }
 
 double RgbSpace::encode(unsigned channel, double linear) const {
     if (!impl_) return core::linear_to_srgb(linear);
+    if (impl_->exact[channel].type != 0) return impl_->exact[channel].encoded(linear);
     return cmsEvalToneCurveFloat(impl_->reversed[channel], static_cast<cmsFloat32Number>(linear));
 }
 
 void RgbSpace::from_srgb(double* rgb, std::size_t count) const {
     if (!impl_ || count == 0) return;
+    // (an sRGB colour in 0..1 stays in 0..1: what the profiles' fixed-point matrices leave past it, sRGB's white a few
+    // millionths over 1 in Display P3, is their rounding)
+    std::vector<bool> inside(count);
+    for (std::size_t i = 0; i < count; ++i) {
+        inside[i] = std::all_of(rgb + i * 3, rgb + i * 3 + 3, [](double v) { return v >= 0.0 && v <= 1.0; });
+    }
     cmsDoTransform(impl_->in, rgb, rgb, static_cast<cmsUInt32Number>(count));
+    for (std::size_t i = 0; i < count; ++i) {
+        if (!inside[i]) continue;
+        for (unsigned c = 0; c < 3; ++c) rgb[i * 3 + c] = std::clamp(rgb[i * 3 + c], 0.0, 1.0);
+    }
 }
 
 void RgbSpace::to_srgb(double* rgb, std::size_t count) const {

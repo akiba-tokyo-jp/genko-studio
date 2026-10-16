@@ -68,12 +68,16 @@ struct RenderOptions {
     std::stop_token stop;
     // color-mode@1: a CMYK or Lab page's inks too (RenderResult::inks, at the page's depth). Other pages have none.
     bool inks = false;
+    // color-model@1: an RGB page's values too where it composites in precise colour (RenderResult::precise: its layers,
+    // before the frames and words drawn over them in 8 bits).
+    bool precise = false;
 };
 
 struct RenderResult {
     Image image;                       // "RGB", the page or the region's size (a CMYK or Lab page: as the screen shows it)
     std::vector<std::string> omitted;  // with skip_unported: what was left out (each once, in the order met)
     std::optional<core::InkPixels> inks;  // with RenderOptions::inks on a CMYK or Lab page: its inks (opaque)
+    std::optional<std::string> precise;   // with RenderOptions::precise: GKCR f32 of the page's values (its profile's)
 };
 
 // RenderOptions with mode "proof" (render_frame's default).

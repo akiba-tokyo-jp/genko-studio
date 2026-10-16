@@ -24,6 +24,7 @@
 #include "core/paths.hpp"
 #include "render/color_canvas.hpp"
 #include "render/image.hpp"
+#include "render/inspect.hpp"
 #include "render/ink.hpp"
 #include "render/ink_canvas.hpp"
 #include "render/ops_registry.hpp"
@@ -32,6 +33,7 @@
 #include "storage/asset_store.hpp"
 #include "storage/lock.hpp"
 #include "storage/reader.hpp"
+#include "storage/snapshot.hpp"
 #include "storage/transaction.hpp"
 #include "testsupport.hpp"
 
@@ -651,6 +653,51 @@ private slots:
         const render::RenderResult part = render::render_page(doc.page(0), dpi, options, &doc);
         QCOMPARE(part.image.tobytes(), whole.image.crop(render::Box{3, 5, 73, 85}).tobytes());
         QVERIFY(part.inks->floats == render::crop_inks(*whole.inks, render::Box{3, 5, 73, 85}).floats);
+    }
+
+    // document.inspect: the snapshot of a page with a colour model holds its `color` (as the book keeps it, and its
+    // profile's description) and each layer's precision; an RGB book's snapshot is as it was (none of them).
+    // document.pixel: a layer's own pixel (its values in the page's space, its samples, alpha, the screen's colour) and
+    // the page's as drawn.
+    void inspectAndPixel() {
+        const core::Document plain = painted(picture());
+        const Json before = storage::snapshot(plain, false);
+        QVERIFY(!before["pages"][0].contains("color"));
+        for (const Json& layer : before["pages"][0]["layers"]) QVERIFY(!layer.contains("precision"));
+        const core::Document grey = run_ops(plain, Json::array({Json{{"op", "set_color_mode"}, {"page", 1}, {"mode", "gray"}, {"depth", 16}}})).doc;
+        const Json seen = storage::snapshot(grey, false);
+        QCOMPARE(seen["pages"][0]["color"]["mode"], Json("gray"));
+        QCOMPARE(seen["pages"][0]["color"]["profile_description"], Json("sGray (sRGB tone curve, Photocraft)"));
+        QCOMPARE(seen["pages"][0]["layers"].back()["precision"], Json(16));
+        const core::Document p3 = run_ops(plain, Json::array({Json{{"op", "set_color_mode"}, {"page", 1}, {"mode", "rgb"}, {"depth", 32}, {"profile", "display-p3"}}})).doc;
+        const Json deep = storage::snapshot(p3, false);
+        QCOMPARE(deep["pages"][0]["color"]["profile_description"], Json("Display P3"));
+        QCOMPARE(deep["pages"][0]["layers"].back()["precision"], Json("f32"));
+        QCOMPARE(core::icc_description(*core::builtin_profile("coated-cmyk")->bytes), std::string(core::builtin_profile("coated-cmyk")->description));
+        QCOMPARE(core::icc_description(*core::builtin_profile("rec2020")->bytes), std::string("Rec. ITU-R BT.2020 (Photocraft)"));
+        // a layer's pixel: the grey 128 on the left (lightness 128, k = 1 − 128/255)
+        const std::string id = grey.page(0).layers.back().id;
+        const Json px = render::pixel_at(grey.page(0), &grey, 10, 20, id, 100);
+        QCOMPARE(px["mode"], Json("gray"));
+        QCOMPARE(px["depth"], Json(16));
+        QCOMPARE(px["stored"], Json::array({128 * 257}));
+        QVERIFY(std::abs(px["values"][0].get<double>() - (1 - 128 / 255.0)) < 1e-9);
+        QCOMPARE(px["alpha"], Json(1.0));
+        QCOMPARE(px["srgb"], Json::array({128, 128, 128}));
+        // the page as drawn there
+        const Json drawn = render::pixel_at(grey.page(0), &grey, 10, 20, std::nullopt, 100);
+        QCOMPARE(drawn["srgb"], Json::array({128, 128, 128}));
+        QCOMPARE(drawn["stored"], Json::array({128 * 257}));
+        // a precise RGB page of P3: the page's values (f32) and the screen's colour
+        const Json f32 = render::pixel_at(p3.page(0), &p3, 50, 20, p3.page(0).layers.back().id, 100);
+        QCOMPARE(f32["precision"], Json("f32"));
+        QCOMPARE(f32["alpha"].get<double>(), static_cast<double>(static_cast<float>(200 / 255.0)));
+        const Json composite = render::pixel_at(p3.page(0), &p3, 10, 20, std::nullopt, 100);
+        QCOMPARE(composite["srgb"], Json::array({128, 128, 128}));
+        QVERIFY(composite["stored"][0].is_number_float());
+        // off the page, an unknown layer
+        QVERIFY_THROWS_EXCEPTION(core::Error, render::pixel_at(grey.page(0), &grey, 100, 20, std::nullopt, 100));
+        QVERIFY_THROWS_EXCEPTION(core::Error, render::pixel_at(grey.page(0), &grey, 10, 20, std::string("nope"), 100));
     }
 
     // The book on disk (color-model@1): an RGB page of a profile and 16 bits, a grey page, the book's RGB mode; the

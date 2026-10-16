@@ -74,6 +74,12 @@ const BuiltinProfile* builtin_profile(std::string_view name);
 // The built-in profile whose bytes these are (by their asset ref), or null.
 const BuiltinProfile* builtin_profile_by_ref(std::string_view ref);
 
+// The description an ICC profile gives itself (its 'desc' tag: ICC v2 text or v4 multi-localized, English first), or
+// "" when it has none this reads.
+std::string icc_description(std::string_view icc);
+// The description of a mode's profile: a built-in's, the profile's own, else sRGB's or Lab's (none: Little CMS's own).
+std::string profile_description(const std::string& ref, const Bytes& icc, bool lab = false);
+
 struct Document;
 // Does the book need color-model@1 (a colour model color-mode@1 cannot hold: an RGB mode, a grey page, 32 bits, no
 // black point compensation; GKIR version 2 pixels; precise rasters in a profile's space)?

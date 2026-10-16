@@ -2,6 +2,8 @@
 
 #include <string>
 
+#include "core/color_model.hpp"
+#include "core/color_raster.hpp"
 #include "core/error.hpp"
 #include "core/pyconv.hpp"
 #include "core/strokes.hpp"
@@ -44,7 +46,7 @@ Json line_brief(const core::StoryLine& line) {
     return out;
 }
 
-Json layer_brief(const core::Layer& layer) {
+Json layer_brief(const core::Layer& layer, bool colour_model) {
     Json out = Json::object();
     out["id"] = layer.id;
     out["role"] = core::to_string(layer.role);
@@ -67,6 +69,23 @@ Json layer_brief(const core::Layer& layer) {
     if (core::py_truthy(layer.parent_id)) out["parent_id"] = layer.parent_id;
     if (layer.reference) out["reference"] = true;
     if (!layer.panel_clip) out["panel_clip"] = false;
+    // (color-model@1, on a page of a colour model alone: the precision its pixels are kept in)
+    if (colour_model) {
+        if (layer.ink_raster) out["precision"] = core::ink_raster_header(*layer.ink_raster).depth;
+        else if (layer.color_raster) out["precision"] = static_cast<unsigned char>((*layer.color_raster)[5]) == 2 ? "u16" : "f32";
+        else if (layer.raster_png && !layer.raster_png->empty()) out["precision"] = 8;
+    }
+    return out;
+}
+
+// color-model@1: a page's colour model as the book keeps it, and its profile's description.
+Json colour_brief(const core::Page& page) {
+    Json out = page.color ? core::to_json(*page.color) : core::to_json(*page.rgb);
+    if (page.color) {
+        out["profile_description"] = core::profile_description(page.color->profile, page.color->icc, page.color->space == core::InkSpace::Lab);
+    } else {
+        out["profile_description"] = core::profile_description(page.rgb->profile, page.rgb->icc);
+    }
     return out;
 }
 
@@ -116,8 +135,10 @@ Json snapshot(const core::Document& doc, bool full) {
         item["name_stroke_count"] = count(page, core::LayerRole::Name);
         item["ink_stroke_count"] = count(page, core::LayerRole::Ink);
         item["selected_frame_id"] = page.selected_frame_id;
+        const bool colour_model = page.color.has_value() || page.rgb.has_value();
+        if (colour_model) item["color"] = colour_brief(page);
         Json layers = Json::array();
-        for (const auto& layer : page.layers) layers.push_back(layer_brief(layer));
+        for (const auto& layer : page.layers) layers.push_back(layer_brief(layer, colour_model));
         item["layers"] = std::move(layers);
         Json prims = Json::array();
         for (const Json& prim : page.prims) {
