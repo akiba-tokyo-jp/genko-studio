@@ -27,6 +27,7 @@
 #include "app/main_window.hpp"
 #include "app/navigator.hpp"
 #include "app/pages_panel.hpp"
+#include "app/preferences.hpp"
 #include "app/templates.hpp"
 #include "app/theme.hpp"
 #include "core/frames.hpp"
@@ -323,6 +324,25 @@ private slots:
         QCOMPARE(owner.at(QStringLiteral("Ctrl+Shift+Y")), QStringLiteral("act_gamut_warning"));
         QCOMPARE(owner.at(QStringLiteral("Ctrl+Shift+K")), QStringLiteral("act_color_settings"));
         QCOMPARE(owner.at(QStringLiteral("Ctrl+Y")), QStringLiteral("act_redo"));
+    }
+
+    // A key the person gave to a command before a new command took it as its own (PC1b's Ctrl+Shift+Y, Ctrl+Shift+K,
+    // Ctrl+Alt+Y): the person's stays, the new command's own key is taken off (both would do nothing), and it is said; the
+    // key back to the new command when the person's goes.
+    void aKeyThePersonChoseWinsOverANewOne() {
+        genko::app::settings()->setValue(QStringLiteral("shortcuts/ページを並べて見る"), QStringLiteral("Ctrl+Shift+Y"));
+        {
+            Studio studio;
+            MainWindow* w = studio.window.get();
+            QCOMPARE(w->action(QStringLiteral("act_overview"))->shortcuts(), QList<QKeySequence>{QKeySequence(QStringLiteral("Ctrl+Shift+Y"))});
+            QVERIFY(w->action(QStringLiteral("act_gamut_warning"))->shortcuts().isEmpty());
+            QVERIFY2(w->last_notice().contains(QStringLiteral("色域外警告")) && w->last_notice().contains(QStringLiteral("ページを並べて見る")),
+                     qPrintable(w->last_notice()));
+            genko::app::settings()->remove(QStringLiteral("shortcuts/ページを並べて見る"));
+            genko::app::preferences::apply_all(w);
+            QCOMPARE(w->action(QStringLiteral("act_gamut_warning"))->shortcuts(), QList<QKeySequence>{QKeySequence(QStringLiteral("Ctrl+Shift+Y"))});
+            QCOMPARE(w->action(QStringLiteral("act_overview"))->shortcuts(), QList<QKeySequence>{QKeySequence(QStringLiteral("Ctrl+Shift+O"))});
+        }
     }
 
     // ウィンドウ → 開いている原稿 (document.activate): every book open in the window by its number and title, the one in

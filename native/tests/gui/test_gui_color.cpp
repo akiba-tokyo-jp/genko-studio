@@ -682,6 +682,132 @@ private slots:
         window.hide();
     }
 
+    // 色の校正 as it comes (Ctrl+Alt+Y, nothing chosen in カラー設定): the working CMYK, coated-cmyk (the user's decision:
+    // upstream's), its soft proof — not Python's 「CMYK で見る」, which is 書き出しの CMYK (cmykProofShowsThePageAsItPrints).
+    void theProofAsItComesIsTheWorkingCoatedCmyk() {
+        (void)gui_test::config_folder();QTemporaryDir tmp;
+        for (const char* key : {"color/workingCmyk","color/icc"}) app::settings()->remove(QString::fromLatin1(key));
+        const auto path=gui_test::path_of(tmp.path()+"/book");gui_test::write_book(path,coloured_book("既定の校正"));
+        auto session=app::Session::open(path,gui_test::quick(gui_test::path_of(tmp.path()+"/recovery")));
+        app::MainWindow window(session);window.resize(900,700);window.show();QVERIFY(QTest::qWaitForWindowExposed(&window));
+        QTest::keySequence(&window,QKeySequence(QStringLiteral("Ctrl+Alt+Y")));
+        QVERIFY(window.canvas()->renderer().cmyk_proof());
+        QVERIFY(window.action("act_proof_working_cmyk")->isChecked());
+        QVERIFY(window.canvas()->wait_rendered(10000));
+        const int dpi=window.canvas()->renderer().shown_dpi();QVERIFY(dpi>0);
+        render::RenderOptions options;options.mode="proof";options.skip_unported=true;
+        const auto image=render::render_page(session->document().page(0),dpi,options,&session->document()).image;
+        render::proof::Setup coated;coated.icc=core::builtin_profile("coated-cmyk")->bytes;
+        const auto qimage=[](const render::Image& i) {
+            const auto bytes=i.convert("RGB").tobytes();
+            return QImage(reinterpret_cast<const uchar*>(bytes.data()),i.width(),i.height(),i.width()*3,QImage::Format_RGB888).convertToFormat(QImage::Format_RGB32);
+        };
+        QCOMPARE(window.canvas()->renderer().compose(dpi),qimage(render::proof::apply(image,coated)));
+        QVERIFY(window.canvas()->renderer().compose(dpi)!=qimage(render::colour::proof(image)));
+        window.hide();
+    }
+
+    // The 校正の設定 mark is on the kind shown: a kind chosen after カスタム… (its profile kept for the gamut warning) is
+    // marked, not カスタム….
+    void theProofsMarkIsOnTheKindShown() {
+        (void)gui_test::config_folder();QTemporaryDir tmp;
+        const auto path=gui_test::path_of(tmp.path()+"/book");gui_test::write_book(path,coloured_book("印"));
+        auto session=app::Session::open(path,gui_test::quick(gui_test::path_of(tmp.path()+"/recovery")));
+        app::MainWindow window(session);window.resize(900,700);window.show();QVERIFY(QTest::qWaitForWindowExposed(&window));
+        gui_test::Answers answers;
+        answers.responder->exec=[](QDialog* d) {
+            if (d->objectName()!=QStringLiteral("proof_custom_dialog")) return 0;
+            auto* profile=d->findChild<QComboBox*>(QStringLiteral("proof_profile"));
+            profile->setCurrentIndex(profile->findData(QStringLiteral("display-p3")));
+            return static_cast<int>(QDialog::Accepted);
+        };
+        window.action("act_proof_custom")->trigger();
+        QVERIFY(window.action("act_proof_custom")->isChecked());
+        const auto marked=[&] {
+            QStringList on;
+            for (const char* name : {"act_proof_custom","act_proof_working_cmyk","act_proof_export","act_proof_black","act_proof_srgb","act_proof_monitor",
+                                     "act_proof_legacy_mac","act_proof_protan","act_proof_deutan"})
+                if (window.action(QString::fromLatin1(name))->isChecked()) on<<QString::fromLatin1(name);
+            return on;
+        };
+        for (const char* kind : {"act_proof_protan","act_proof_legacy_mac","act_proof_srgb"}) {
+            window.action(QString::fromLatin1(kind))->trigger();
+            QCOMPARE(marked(),QStringList{QString::fromLatin1(kind)});
+        }
+        QCOMPARE(window.proof_view().profile,QStringLiteral("display-p3"));
+        window.switch_document(0);
+        QCOMPARE(marked(),QStringList{QStringLiteral("act_proof_srgb")});
+        window.hide();
+    }
+
+    // カスタム…'s profile file gone: the proof is not silently another — it is turned off (the gamut warning too), and said.
+    void aCustomProfileGoneTurnsTheProofOff() {
+        (void)gui_test::config_folder();QTemporaryDir tmp;
+        const auto path=gui_test::path_of(tmp.path()+"/book");gui_test::write_book(path,coloured_book("消えた校正"));
+        auto session=app::Session::open(path,gui_test::quick(gui_test::path_of(tmp.path()+"/recovery")));
+        app::MainWindow window(session);window.resize(900,700);window.show();QVERIFY(QTest::qWaitForWindowExposed(&window));
+        const QString icc=tmp.path()+QStringLiteral("/校正.icc");
+        QVERIFY(QFile::copy(QString::fromStdString(core::path_to_utf8(std::filesystem::path(GENKO_TEST_DATA)/"colour"/"photocraft-coated-cmyk.icc")),icc));
+        gui_test::Answers answers;
+        answers.responder->exec=[&](QDialog* d) {
+            if (d->objectName()!=QStringLiteral("proof_custom_dialog")) return 0;
+            auto* profile=d->findChild<QComboBox*>(QStringLiteral("proof_profile"));
+            profile->addItem(QStringLiteral("校正.icc"),icc);
+            profile->setCurrentIndex(profile->findData(icc));
+            return static_cast<int>(QDialog::Accepted);
+        };
+        window.action("act_proof_custom")->trigger();
+        QVERIFY(window.canvas()->renderer().cmyk_proof());
+        QVERIFY(window.canvas()->renderer().proof_setup().icc!=nullptr);
+        window.action("act_gamut_warning")->trigger();
+        QVERIFY(window.canvas()->renderer().gamut().has_value());
+        QVERIFY(QFile::remove(icc));
+        window.action("act_cmyk_proof")->trigger();  // (off, and on again: the file looked for)
+        window.action("act_cmyk_proof")->trigger();
+        QVERIFY(!window.canvas()->renderer().cmyk_proof());
+        QVERIFY(!window.action("act_cmyk_proof")->isChecked());
+        QVERIFY(!window.canvas()->renderer().gamut().has_value());
+        QVERIFY(!window.action("act_gamut_warning")->isChecked());
+        QVERIFY2(window.last_notice().contains(QStringLiteral("校正.icc")),qPrintable(window.last_notice()));
+        QVERIFY(window.canvas()->wait_rendered(10000));
+        window.hide();
+    }
+
+    // カラー設定 and 環境設定 change every window, not only the one they were opened from.
+    void theSettingsChangeEveryWindow() {
+        (void)gui_test::config_folder();QTemporaryDir tmp;
+        for (const char* key : {"color/workingCmyk","color/icc","view/gamut_color","view/gamut_opacity"}) app::settings()->remove(QString::fromLatin1(key));
+        const auto path=gui_test::path_of(tmp.path()+"/book");gui_test::write_book(path,coloured_book("一つ目"));
+        const auto other=gui_test::path_of(tmp.path()+"/other");gui_test::write_book(other,coloured_book("二つ目"));
+        app::MainWindow window(app::Session::open(path,gui_test::quick(gui_test::path_of(tmp.path()+"/recovery"))));
+        window.resize(900,700);window.show();QVERIFY(QTest::qWaitForWindowExposed(&window));
+        app::MainWindow second(app::Session::open(other,gui_test::quick(gui_test::path_of(tmp.path()+"/recovery2"))));
+        second.resize(900,700);second.show();QVERIFY(QTest::qWaitForWindowExposed(&second));
+        second.action("act_proof_working_cmyk")->trigger();
+        second.action("act_gamut_warning")->trigger();
+        QVERIFY(second.canvas()->renderer().proof_setup().icc!=nullptr);
+        gui_test::Answers answers;
+        answers.responder->exec=[](QDialog* d) {
+            if (auto* dialog=qobject_cast<app::color_settings::ColorSettingsDialog*>(d)) {
+                dialog->working_cmyk->setCurrentIndex(dialog->working_cmyk->findData(QStringLiteral("export")));
+                return static_cast<int>(QDialog::Accepted);
+            }
+            if (auto* prefs=qobject_cast<app::preferences::PreferencesDialog*>(d)) {
+                prefs->gamut_percent->setValue(40);
+                prefs->save();
+                return static_cast<int>(QDialog::Accepted);
+            }
+            return 0;
+        };
+        window.action("act_color_settings")->trigger();
+        QVERIFY(second.canvas()->renderer().proof_setup().icc==nullptr);  // (書き出しの CMYK: Genko's own conversion here)
+        window.action("act_prefs")->trigger();
+        QVERIFY(second.canvas()->renderer().gamut().has_value());
+        QCOMPARE(second.canvas()->renderer().gamut()->opacity,0.4);
+        for (const char* key : {"color/workingCmyk","view/gamut_opacity"}) app::settings()->remove(QString::fromLatin1(key));
+        second.hide();window.hide();
+    }
+
     // 表示 → 色域外警告 (Ctrl+Shift+Y): the colours coated-cmyk cannot print marked on screen (環境設定's colour and
     // opacity), counted in the status bar; the page's own pixels (the eyedropper's, compose) as they were.
     void gamutWarningMarksAndCounts() {

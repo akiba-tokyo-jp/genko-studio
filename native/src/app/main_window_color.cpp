@@ -32,6 +32,7 @@
 #include "app/color_settings_dialog.hpp"
 #include "app/config.hpp"
 #include "app/display_color.hpp"
+#include "app/documents.hpp"
 #include "app/look.hpp"
 #include "app/main_window.hpp"
 #include "app/tiles.hpp"
@@ -196,6 +197,7 @@ void MainWindow::apply_proof_view() {
     setup.bpc = v.bpc;
     setup.simulate_paper = v.simulate_paper;
     QString profile = v.profile;
+    PageRenderer& r = canvas_->renderer();
     if (profile == QLatin1String("working")) {
         const cs::Working w = cs::working(cs::Space::Cmyk, cs::load());
         profile = w.spec == QLatin1String("export") ? QStringLiteral("export") : QString();
@@ -203,9 +205,23 @@ void MainWindow::apply_proof_view() {
     } else if (profile != QLatin1String("export")) {
         const core::BuiltinProfile* b = core::builtin_profile(profile.toStdString());
         setup.icc = b != nullptr ? builtin_bytes(*b) : read_profile_file(profile);
+        if (!setup.icc && (v.on || v.gamut)) {
+            // (カスタム…'s file gone or unreadable: not silently another proof — both off, said; the tiles as they were)
+            ProofView& now = documents_[static_cast<std::size_t>(doc_)].proof;
+            now.on = false;
+            now.gamut = false;
+            r.set_proof(false);
+            r.set_gamut(std::nullopt);
+            show_proof_marks();
+            refresh_gamut_count();
+            flash(QStringLiteral("校正のプロファイル「%1」が読めないため、色の校正と色域外警告を切りました（表示 → 校正の設定 → カスタム… で選び直せます）")
+                      .arg(QFileInfo(profile).fileName()),
+                  6000, true);
+            canvas_->update();
+            return;
+        }
     }
     if (profile == QLatin1String("export")) setup.export_icc = cs::export_icc();
-    PageRenderer& r = canvas_->renderer();
     r.set_proof_setup(setup);
     r.set_proof(v.on);
     r.set_gamut(v.gamut ? std::optional<GamutLook>(gamut_look()) : std::nullopt);
@@ -225,10 +241,12 @@ void MainWindow::show_proof_marks() {
     };
     quietly(action(QStringLiteral("act_cmyk_proof")), v.on);
     quietly(action(QStringLiteral("act_gamut_warning")), v.gamut);
+    // (the kind shown; a proof through a profile by where it comes from)
     QString id;
-    if (v.profile != QLatin1String("working") && v.profile != QLatin1String("export")) id = QStringLiteral("custom");
-    else if (v.profile == QLatin1String("export") && v.kind == Kind::Profile) id = QStringLiteral("export");
-    else id = v.kind == Kind::Profile ? QStringLiteral("workingCmyk") : QString::fromStdString(render::proof::kind_id(v.kind, v.plate));
+    if (v.kind != Kind::Profile) id = QString::fromStdString(render::proof::kind_id(v.kind, v.plate));
+    else if (v.profile == QLatin1String("export")) id = QStringLiteral("export");
+    else if (v.profile == QLatin1String("working")) id = QStringLiteral("workingCmyk");
+    else id = QStringLiteral("custom");
     for (const ProofItem& item : proof_items()) quietly(action(QString::fromLatin1(item.attribute)), id == QLatin1String(item.id));
 }
 
@@ -337,7 +355,7 @@ void MainWindow::color_settings_dialog() {
     if (writable && !same && still(asked)) {
         apply_ops(Json::array({Json{{"op", "set_text_gamma"}, {"gamma", wanted ? Json(std::round(*wanted * 100.0) / 100.0) : Json()}}}));
     }
-    apply_proof_view();  // (the working CMYK, the monitor)
+    for (MainWindow* window : documents::windows()) window->apply_proof_view();  // (the working CMYK, the monitor: every window's)
     flash(QStringLiteral("カラー設定を変えました"), 3000);
 }
 

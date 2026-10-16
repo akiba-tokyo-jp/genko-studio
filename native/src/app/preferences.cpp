@@ -40,6 +40,7 @@
 #include "app/canvas.hpp"
 #include "app/comfort.hpp"
 #include "app/config.hpp"
+#include "app/documents.hpp"
 #include "app/icons.hpp"
 #include "app/look.hpp"
 #include "app/main_window.hpp"
@@ -148,6 +149,8 @@ const std::map<QString, QString>& renamed() {
 
 void apply_shortcuts(MainWindow* window) {
     const auto store = settings();
+    std::map<QString, QString> chosen;  // (a key the person gave a command: the command)
+    std::vector<QAction*> own;          // (the commands with their own keys)
     for (QAction* action : preferences::commands(window)) {
         QString key = QStringLiteral("shortcuts/%1").arg(action->text());
         const auto old = renamed().find(action->text());
@@ -157,11 +160,34 @@ void apply_shortcuts(MainWindow* window) {
         if (store->contains(key)) {
             const QString value = store->value(key).toString();
             QList<QKeySequence> keys;
-            for (const QString& one : value.split(QLatin1Char('|'), Qt::SkipEmptyParts)) keys << QKeySequence(one);
+            for (const QString& one : value.split(QLatin1Char('|'), Qt::SkipEmptyParts)) {
+                keys << QKeySequence(one);
+                chosen.emplace(keys.back().toString(QKeySequence::PortableText), action->text());
+            }
             action->setShortcuts(keys);
+        } else {
+            own.push_back(action);
         }
     }
+    // (a command's own key the person has given to another command — a key a later version gave a new command: the
+    // person's stays and the command's own is taken off, as the preferences refuse one key for two; said)
+    QStringList taken;
+    for (QAction* action : own) {
+        const auto found = window->default_shortcuts.find(action->text());
+        if (found == window->default_shortcuts.end()) continue;
+        QList<QKeySequence> keys;
+        for (const QKeySequence& key : found->second) {
+            const auto other = chosen.find(key.toString(QKeySequence::PortableText));
+            if (other == chosen.end() || other->second == action->text()) {
+                keys << key;
+                continue;
+            }
+            taken << QStringLiteral("%1 は「%2」に付けてあるため、「%3」のキーから外しました").arg(key.toString(QKeySequence::NativeText), other->second, action->text());
+        }
+        if (keys != action->shortcuts()) action->setShortcuts(keys);
+    }
     retip(window);
+    if (!taken.isEmpty()) window->flash(taken.join(QLatin1Char('\n')) + QStringLiteral("（環境設定 → ショートカットで変えられます）"), 8000);
 }
 
 void retip(MainWindow* window) {
@@ -734,7 +760,7 @@ void PreferencesDialog::save() {
     store->setValue(QStringLiteral("view/checker_dark"), checker_dark->property("colour").value<QColor>().name());
     store->setValue(QStringLiteral("view/gamut_color"), gamut_button->property("colour").value<QColor>().name());
     store->setValue(QStringLiteral("view/gamut_opacity"), gamut_percent->value());
-    apply_all(window_);
+    for (MainWindow* window : documents::windows()) apply_all(window);  // (this computer's: every window)
     accept();
 }
 

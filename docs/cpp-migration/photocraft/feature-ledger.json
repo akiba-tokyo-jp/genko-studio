@@ -1647,7 +1647,8 @@
         "native/src/app/thumbs.cpp",
         "native/src/app/main_window_book.cpp",
         "native/tests/gui/test_gui_book.cpp",
-        "native/tests/unit/test_color_model.cpp"
+        "native/tests/unit/test_color_model.cpp",
+        "native/src/app/preferences.cpp"
       ],
       "pc0": {
         "date": "2026-10-16",
@@ -3286,7 +3287,8 @@
         "native/src/app/preferences.cpp",
         "native/src/app/layer_panel.cpp",
         "native/src/app/tiles.cpp",
-        "native/tests/gui/test_gui_color.cpp"
+        "native/tests/gui/test_gui_color.cpp",
+        "native/src/app/main_window_color.cpp"
       ],
       "pc0": {
         "date": "2026-10-16",
@@ -31419,7 +31421,10 @@
         "native/src/app/tiles.cpp",
         "native/tests/unit/test_proof.cpp",
         "native/tests/gui/test_gui_color.cpp",
-        "native/tests/gui/test_gui_actions.cpp"
+        "native/tests/gui/test_gui_actions.cpp",
+        "native/src/app/preferences.cpp",
+        "native/src/app/workspace.cpp",
+        "native/tests/gui/test_gui_workspace.cpp"
       ],
       "pc0": {
         "date": "2026-10-16",
