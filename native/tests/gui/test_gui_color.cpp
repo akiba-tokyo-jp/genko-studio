@@ -1013,7 +1013,9 @@ private slots:
             return std::optional<QString>();
         };
         window.open_project(gui_test::path_of(tmp.path()+"/converted"));
-        QTRY_VERIFY_WITH_TIMEOUT(window.documents().size()==2 && !window.book().page(0).rgb,10000);
+        // (in the working sRGB: no profile; the page keeps the 16 bits its pixels are held in — an RGB mode of 16 bits —, PC1a E)
+        const auto in_srgb=[&] { return !window.book().page(0).rgb || window.book().page(0).rgb->profile.empty(); };
+        QTRY_VERIFY_WITH_TIMEOUT(window.documents().size()==2 && in_srgb(),10000);
         QVERIFY(questions.isEmpty());
         {  // (the values in sRGB: at the page's 8 bits, or kept precise)
             const core::Layer& converted=window.book().page(0).layers.back();
@@ -1028,7 +1030,7 @@ private slots:
         app::settings()->setValue(QStringLiteral("color/askOnMismatch"),QStringLiteral("true"));
         answer=QStringLiteral("外して");
         window.open_project(gui_test::path_of(tmp.path()+"/asked"));
-        QTRY_VERIFY_WITH_TIMEOUT(window.documents().size()==3 && !window.book().page(0).rgb,10000);
+        QTRY_VERIFY_WITH_TIMEOUT(window.documents().size()==3 && in_srgb(),10000);
         QCOMPARE(questions,QStringList{QStringLiteral("プロファイルの不一致")});
         QVERIFY(window.book().page(0).layers.back().color_raster);
         QCOMPARE(*window.book().page(0).layers.back().color_raster,raster);
