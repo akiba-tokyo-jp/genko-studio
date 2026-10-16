@@ -15047,7 +15047,10 @@
         "native/src/app/colours.cpp",
         "native/src/app/channel_panel.cpp",
         "native/tests/unit/test_channels.cpp",
-        "native/tests/gui/test_gui_book.cpp"
+        "native/tests/gui/test_gui_book.cpp",
+        "native/src/render/ink_filters.cpp",
+        "native/tests/unit/test_ink_edit.cpp",
+        "native/tests/unit/test_ink_filters.cpp"
       ],
       "pc0": {
         "date": "2026-10-16",

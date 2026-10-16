@@ -8,10 +8,12 @@
 
 #include <algorithm>
 #include <array>
+#include <cmath>
 #include <cstdint>
 #include <functional>
 #include <string>
 #include <string_view>
+#include <tuple>
 #include <vector>
 
 #include "core/base64.hpp"
@@ -92,6 +94,47 @@ core::Document filter_book(const std::string& mode = "cmyk") {
             } else if ((x / 2) % 40 == 0 && (y / 2) % 40 == 0) {
                 set(x, y, black);  // (specks of 2 × 2 pixels on what is clear)
             }
+        }
+    }
+    for (auto& layer : doc.edit_page(0).layers) {
+        if (layer.id != "pic") continue;
+        layer.ink_raster = std::make_shared<const std::string>(core::encode_ink_raster(p));
+        layer.panel_clip = layer.panel_each = false;
+    }
+    return doc;
+}
+
+// A multichannel page of `n` plates (16 bits; 60 × 80 mm; up to 32) with a paint layer "pic" at 200 dpi: its top half M
+// (plate k at density (k + 1) / (n + 1)), its bottom left N (plate k at 1 − (k + 1) / (n + 1)), its bottom right clear.
+core::Document multi_book(unsigned n) {
+    core::PageSpec spec;
+    spec.width_mm = core::Num(60);
+    spec.height_mm = core::Num(80);
+    spec.dpi = core::Num(150);
+    spec.bleed_mm = core::Num(3);
+    spec.inner_margin_mm = core::Num(5);
+    core::Document doc = core::new_episode("multi", core::Num(1), 1, spec, core::Binding::Right);
+    doc = run_ops(doc, Json::array({Json{{"op", "add_layer"}, {"page", 1}, {"kind", "paint"}, {"id", "pic"}}})).doc;
+    core::PageColor color;
+    color.space = core::InkSpace::Multi;
+    color.depth = 16;
+    color.from = "rgb";
+    for (unsigned k = 0; k < n; ++k) {
+        core::Plate plate;
+        plate.name = k == 0 ? std::string("Cyan") : k == 1 ? std::string("Magenta") : k == 2 ? std::string("Yellow") : "Plate " + std::to_string(k + 1);
+        plate.color = {static_cast<int>(k * 7 % 256), 90, static_cast<int>(255 - k * 5)};
+        plate.key = k < 3;
+        color.plates.push_back(std::move(plate));
+    }
+    doc.edit_page(0).color = color;
+    const std::uint32_t w = static_cast<std::uint32_t>(render::mm_to_px(60, 200)), h = static_cast<std::uint32_t>(render::mm_to_px(80, 200));
+    core::InkPixels p = core::blank_ink_pixels(core::InkSpace::Multi, 16, w, h, n);
+    for (std::uint32_t y = 0; y < h; ++y) {
+        for (std::uint32_t x = 0; x < w; ++x) {
+            if (y >= px(40) && x >= px(30)) continue;
+            const std::size_t i = std::size_t(y) * w + x;
+            for (unsigned k = 0; k < n; ++k) p.set(i, k, y < px(40) ? (k + 1.0) / (n + 1) : 1.0 - (k + 1.0) / (n + 1));
+            p.set(i, n, 1.0);
         }
     }
     for (auto& layer : doc.edit_page(0).layers) {
@@ -419,6 +462,48 @@ private slots:
                 const std::uint16_t* a = at(part, x, y);
                 const std::uint16_t* b = at(whole, x + 40, y + 90);
                 if (!std::equal(a, a + 5, b)) QFAIL(qPrintable(QStringLiteral("(%1, %2) differs from the whole page's").arg(x).arg(y)));
+            }
+        }
+    }
+
+    // Review B, F: the filters on a multichannel page of more plates than CMYK's (6, and 32 — the most a page has; each
+    // plate and the alpha were summed in an array of 5 before): the layer stays in its plates; a blur, a motion blur and
+    // a sharpen keep a colour all over that colour on every plate, and what an area leaves out keeps its samples.
+    void manyPlatesFiltered_data() {
+        QTest::addColumn<int>("plates");
+        QTest::addColumn<QString>("op");
+        for (const int n : {6, 32}) {
+            for (const char* op : {R"({"kind": "blur", "radius": 3})", R"({"kind": "motion_blur", "distance": 10, "angle": 30})", R"({"kind": "sharpen", "amount": 2})",
+                                   R"({"kind": "blur", "radius": 2, "area": {"rect": [2, 30, 20, 20]}})"}) {
+                QTest::newRow(qPrintable(QStringLiteral("%1 %2").arg(n).arg(QString::fromLatin1(op)))) << n << QString::fromLatin1(op);
+            }
+        }
+    }
+    void manyPlatesFiltered() {
+        QFETCH(int, plates);
+        QFETCH(QString, op);
+        const unsigned n = static_cast<unsigned>(plates);
+        const core::Document doc = multi_book(n);
+        Json filter = Json::parse(op.toStdString());
+        filter["op"] = "filter_raster";
+        filter["page"] = 1;
+        filter["id"] = "pic";
+        const core::Document after = run_ops(doc, Json::array({filter})).doc;
+        const core::InkPixels before = pixels_of(doc, "pic"), got = pixels_of(after, "pic");
+        QCOMPARE(got.space, core::InkSpace::Multi);
+        QCOMPARE(got.planes, n);
+        QVERIFY(got.samples != before.samples);
+        // (inside M, away from its edges and from where an area reaches; inside N)
+        for (const auto& [x, y, top] : {std::tuple{45.0, 20.0, true}, std::tuple{15.0, 60.0, false}}) {
+            const std::size_t i = std::size_t(px(y)) * got.width + px(x);
+            for (unsigned k = 0; k < n; ++k) {
+                const double want = top ? (k + 1.0) / (n + 1) : 1.0 - (k + 1.0) / (n + 1);
+                QVERIFY2(std::abs(got.value(i, k) - want) <= 1.0 / 65535,
+                         qPrintable(QStringLiteral("(%1, %2) plate %3: %4, not %5").arg(x).arg(y).arg(k).arg(got.value(i, k)).arg(want)));
+            }
+            QVERIFY(std::abs(got.value(i, n) - 1.0) <= 1.0 / 65535);
+            if (filter.contains("area")) {
+                for (unsigned k = 0; k <= n; ++k) QCOMPARE(got.samples[i * (n + 1) + k], before.samples[i * (n + 1) + k]);
             }
         }
     }

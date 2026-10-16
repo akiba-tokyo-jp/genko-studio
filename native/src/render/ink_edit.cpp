@@ -146,6 +146,9 @@ struct Inks {
     std::string take() const { return core::encode_ink_raster(p); }
 };
 
+// A pixel's values: its colours (a multichannel page's plates: up to 32) and its alpha.
+using Values = std::array<double, core::kPlatesMax + 1>;
+
 // `top` (values 0..1, its colours then its alpha) over the pixel, as a normal layer composites: where nothing is under
 // it or it hides all, it is the pixel; else the inks mix (alpha over).
 void lay(Inks& out, std::size_t i, const double* top, bool keep_alpha = false) {
@@ -171,7 +174,7 @@ void lay_whole(Inks& out, std::size_t i, const Inks& from, std::size_t j, double
         out.put(i, out.n, alpha);
         return;
     }
-    std::array<double, 5> top{};
+    Values top{};
     for (unsigned c = 0; c < out.n; ++c) top[c] = from.value(j, c);
     top[out.n] = alpha;
     lay(out, i, top.data());
@@ -192,15 +195,16 @@ public:
         const double a = source_.alpha(i);
         return m == 255 ? a : source_.held(a * (m / 255.0));
     }
-    // Premultiplied values (colours × alpha, alpha) at (x, y).
-    std::array<double, 5> premultiplied(int x, int y) const {
-        std::array<double, 5> out{};
+    // Premultiplied values (colours × alpha, alpha) at (x, y) into out (its colours, then its alpha).
+    void premultiplied(int x, int y, double* out) const {
         const double alpha = whole_alpha(x, y);
-        if (alpha == 0) return out;
+        if (alpha == 0) {
+            std::fill_n(out, source_.n + 1, 0.0);
+            return;
+        }
         const std::size_t i = std::size_t(y) * width_ + x;
         for (unsigned c = 0; c < source_.n; ++c) out[c] = source_.value(i, c) * alpha;
         out[source_.n] = alpha;
-        return out;
     }
     // Lays the lifted pixels seen at (u, v) (raster pixels, a pixel spanning [k, k + 1)) over out's pixel i.
     void lay_at(Inks& out, std::size_t i, double u, double v, Resample resample) const {
@@ -240,13 +244,14 @@ public:
             return w;
         };
         const auto wx = weights(tx), wy = weights(ty);
-        std::array<double, 5> sum{};
-        std::array<double, 4> lo{INFINITY, INFINITY, INFINITY, INFINITY}, hi{-INFINITY, -INFINITY, -INFINITY, -INFINITY};
+        Values sum{}, p{}, lo{}, hi{};
+        std::fill_n(lo.begin(), n, INFINITY);
+        std::fill_n(hi.begin(), n, -INFINITY);
         for (int j = 0; j < 4; ++j) {
             if (wy[j] == 0) continue;
             for (int k = 0; k < 4; ++k) {
                 if (wx[k] == 0) continue;
-                const auto p = premultiplied(ix + k - 1, iy + j - 1);
+                premultiplied(ix + k - 1, iy + j - 1, p.data());
                 for (unsigned c = 0; c <= n; ++c) sum[c] += p[c] * wx[k] * wy[j];
                 if (p[n] > 0) {
                     for (unsigned c = 0; c < n; ++c) { lo[c] = std::min(lo[c], p[c] / p[n]); hi[c] = std::max(hi[c], p[c] / p[n]); }
@@ -255,7 +260,7 @@ public:
         }
         if (!(sum[n] > 1e-12)) return;
         // (a cubic's overshoot, or a value divided by almost no alpha, stays within the inks it was made of)
-        std::array<double, 5> mixed{};
+        Values mixed{};
         for (unsigned c = 0; c < n; ++c) mixed[c] = std::clamp(sum[c] / sum[n], lo[c], hi[c]);
         mixed[n] = std::min(1.0, sum[n]);
         lay(out, i, mixed.data());

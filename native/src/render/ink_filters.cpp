@@ -221,7 +221,7 @@ void box_line(float* line, std::size_t stride, int count, float radius, unsigned
     const double fw = (1.0 - (r * 2 + 1) * w) / 2.0;
     scratch.resize(std::size_t(count) * used);
     const auto in = [&](int x) -> const float* { return line + std::size_t(std::clamp(x, 0, count - 1)) * stride * all; };
-    std::array<double, 5> acc{};
+    std::array<double, core::kPlatesMax + 1> acc{};  // (a multichannel page's plates — up to 32 — and the alpha)
     for (int k = -r; k <= r; ++k)
         for (unsigned c = 0; c < used; ++c) acc[c] += in(k)[c];
     for (int x = 0; x < count; ++x) {

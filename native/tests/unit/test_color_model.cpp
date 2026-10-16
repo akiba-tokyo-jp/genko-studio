@@ -1641,9 +1641,17 @@ private slots:
             const std::size_t at = std::size_t(10) * plates.width + plates.width - 5;  // (the green)
             QVERIFY(std::abs(plates.value(at, 0) - (1.0 - 30 / 255.0)) <= 0.5 / 255 + 1e-6);
             QVERIFY(std::abs(plates.value(at, 1) - (1.0 - 160 / 255.0)) <= 0.5 / 255 + 1e-6);
-            // (shown: the plates printed over white — the paper's white no ink)
+            // (shown: the plates printed over white — the paper's white no ink —, PhotoCraft's formula: each plate at its
+            // density v takes p to (1 − s·v)·p·(1 − v + v·c) + s·v·c; the grey 128 is 1 − 128/255 on all three)
             const auto shown = rgb_at(drawn_page(multi.doc, 0, 200), 3, 3);
-            QVERIFY2(near_rgb(shown, {128, 128, 128}, 140), qPrintable(rgb_text(shown)));
+            std::array<double, 3> printed{1, 1, 1};
+            for (const core::Plate& plate : page.color->plates) {
+                const double v = 1.0 - 128 / 255.0, s = plate.solidity;
+                for (unsigned c = 0; c < 3; ++c) printed[c] = (1 - s * v) * printed[c] * (1 - v + v * plate.color[c] / 255.0) + s * v * plate.color[c] / 255.0;
+            }
+            const std::array<int, 3> want{static_cast<int>(std::lround(printed[0] * 255)), static_cast<int>(std::lround(printed[1] * 255)),
+                                          static_cast<int>(std::lround(printed[2] * 255))};
+            QVERIFY2(near_rgb(shown, want, 1), qPrintable(rgb_text(shown) + QStringLiteral(" ≠ ") + rgb_text(want)));
             const core::ApplyResult back = run_ops(multi.doc, Json::array({Json{{"op", "set_color_mode"}, {"page", 1}, {"mode", "rgb"}, {"depth", depth}}}));
             const core::Layer& again = layer_named(back.doc, id);
             if (depth == 8) {
