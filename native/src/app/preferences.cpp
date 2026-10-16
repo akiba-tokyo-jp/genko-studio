@@ -11,6 +11,7 @@
 #include <QGridLayout>
 #include <QHBoxLayout>
 #include <QHeaderView>
+#include <QIcon>
 #include <QKeySequenceEdit>
 #include <QLabel>
 #include <QLineEdit>
@@ -18,6 +19,7 @@
 #include <QMenu>
 #include <QMainWindow>
 #include <QPainter>
+#include <QPixmap>
 #include <QPushButton>
 #include <QScrollArea>
 #include <QSet>
@@ -29,6 +31,7 @@
 #include <QVBoxLayout>
 
 #include <algorithm>
+#include <map>
 #include <cmath>
 #include <stdexcept>
 
@@ -138,7 +141,8 @@ void name_commands(MainWindow* window) {
 
 const std::map<QString, QString>& renamed() {
     static const std::map<QString, QString> all{{QStringLiteral("レイヤーを消す"), QStringLiteral("レイヤーを削除")},
-                                                {QStringLiteral("このページを消す…"), QStringLiteral("このページを削除…")}};
+                                                {QStringLiteral("このページを消す…"), QStringLiteral("このページを削除…")},
+                                                {QStringLiteral("色の校正"), QStringLiteral("CMYK で見る（色校正）")}};  // (PC1b)
     return all;
 }
 
@@ -183,6 +187,80 @@ std::vector<Clash> conflicts(const std::vector<std::pair<QString, QStringList>>&
     return out;
 }
 
+const std::vector<std::pair<QString, QString>>& checker_sizes() {
+    static const std::vector<std::pair<QString, QString>> sizes{{QStringLiteral("なし"), QStringLiteral("none")},
+                                                                {QStringLiteral("小"), QStringLiteral("small")},
+                                                                {QStringLiteral("中"), QStringLiteral("medium")},
+                                                                {QStringLiteral("大"), QStringLiteral("large")}};
+    return sizes;
+}
+
+const std::vector<std::pair<QString, QString>>& checker_colour_sets() {
+    static const std::vector<std::pair<QString, QString>> sets{
+        {QStringLiteral("明るい"), QStringLiteral("light")}, {QStringLiteral("中間"), QStringLiteral("medium")}, {QStringLiteral("暗い"), QStringLiteral("dark")},
+        {QStringLiteral("赤"), QStringLiteral("red")},       {QStringLiteral("オレンジ"), QStringLiteral("orange")}, {QStringLiteral("緑"), QStringLiteral("green")},
+        {QStringLiteral("青"), QStringLiteral("blue")},      {QStringLiteral("紫"), QStringLiteral("purple")},       {QStringLiteral("カスタム"), QStringLiteral("custom")}};
+    return sets;
+}
+
+namespace {
+
+// (upstream's TransparencyAndGamut::square and ::colors)
+int checker_square(const QString& size) {
+    return size == QLatin1String("none") ? 0 : size == QLatin1String("small") ? 4 : size == QLatin1String("large") ? 16 : 8;
+}
+
+std::pair<QColor, QColor> checker_pair(const QString& set, const QColor& light, const QColor& dark) {
+    static const std::map<QString, std::pair<QColor, QColor>> sets{
+        {QStringLiteral("light"), {QColor(255, 255, 255), QColor(204, 204, 204)}}, {QStringLiteral("medium"), {QColor(153, 153, 153), QColor(102, 102, 102)}},
+        {QStringLiteral("dark"), {QColor(102, 102, 102), QColor(51, 51, 51)}},     {QStringLiteral("red"), {QColor(255, 255, 255), QColor(255, 204, 204)}},
+        {QStringLiteral("orange"), {QColor(255, 255, 255), QColor(255, 229, 204)}}, {QStringLiteral("green"), {QColor(255, 255, 255), QColor(204, 255, 204)}},
+        {QStringLiteral("blue"), {QColor(255, 255, 255), QColor(204, 229, 255)}},   {QStringLiteral("purple"), {QColor(255, 255, 255), QColor(229, 204, 255)}}};
+    if (set == QLatin1String("custom")) return {light.isValid() ? light : QColor(255, 255, 255), dark.isValid() ? dark : QColor(204, 204, 204)};
+    const auto it = sets.find(set);
+    return it != sets.end() ? it->second : sets.at(QStringLiteral("light"));
+}
+
+void show_colour(QPushButton* button, const QColor& colour) {
+    button->setProperty("colour", colour);
+    QPixmap swatch(28, 14);
+    swatch.fill(colour);
+    button->setIcon(QIcon(swatch));
+    button->setText(colour.name());
+}
+
+}  // namespace
+
+Checker checker() {
+    const auto store = settings();
+    Checker out;
+    out.square = checker_square(store->value(QStringLiteral("view/checker_size"), QStringLiteral("medium")).toString());
+    const auto [light, dark] = checker_pair(store->value(QStringLiteral("view/checker_colors"), QStringLiteral("light")).toString(),
+                                            QColor(store->value(QStringLiteral("view/checker_light"), QStringLiteral("#ffffff")).toString()),
+                                            QColor(store->value(QStringLiteral("view/checker_dark"), QStringLiteral("#cccccc")).toString()));
+    out.light = light;
+    out.dark = dark;
+    return out;
+}
+
+void paint_checker(QImage& image, const Checker& c) {
+    if (c.square <= 0) {
+        image.fill(Qt::white);
+        return;
+    }
+    QPainter painter(&image);
+    painter.fillRect(image.rect(), c.light);
+    for (int y = 0; y < image.height(); y += c.square)
+        for (int x = (y / c.square) % 2 == 0 ? c.square : 0; x < image.width(); x += 2 * c.square) painter.fillRect(x, y, c.square, c.square, c.dark);
+}
+
+QColor gamut_colour() {
+    const QColor colour(settings()->value(QStringLiteral("view/gamut_color"), QStringLiteral("#808080")).toString());
+    return colour.isValid() ? colour : QColor(128, 128, 128);
+}
+
+int gamut_opacity() { return std::clamp(settings()->value(QStringLiteral("view/gamut_opacity"), 100).toInt(), 1, 100); }
+
 void apply_all(MainWindow* window) {
     apply_shortcuts(window);
     window->set_save_after(save_after_ms());
@@ -199,6 +277,7 @@ void apply_all(MainWindow* window) {
     canvas->modifier_tools = {{QStringLiteral("alt"), modifier_tool(QStringLiteral("alt"))}, {QStringLiteral("ctrl"), modifier_tool(QStringLiteral("ctrl"))}};
     canvas->tool_modifiers = tool_modifiers();
     canvas->refresh_cursor();
+    window->apply_proof_view();  // (透明部分・色域: the gamut warning's mark)
     canvas->update();
 }
 
@@ -444,6 +523,62 @@ PreferencesDialog::PreferencesDialog(MainWindow* window) : QDialog(window), wind
     scroll->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
     scroll->setWidget(work);
     tabs->addTab(scroll, QStringLiteral("表示・作業"));
+    // 透明部分・色域 (edit.preferences.transparencyAndGamut)
+    {
+        const auto store = settings();
+        checker_size = choice_box(checker_sizes(), store->value(QStringLiteral("view/checker_size"), QStringLiteral("medium")).toString());
+        checker_colours = choice_box(checker_colour_sets(), store->value(QStringLiteral("view/checker_colors"), QStringLiteral("light")).toString());
+        checker_light = new QPushButton;
+        checker_dark = new QPushButton;
+        show_colour(checker_light, QColor(store->value(QStringLiteral("view/checker_light"), QStringLiteral("#ffffff")).toString()));
+        show_colour(checker_dark, QColor(store->value(QStringLiteral("view/checker_dark"), QStringLiteral("#cccccc")).toString()));
+        checker_preview = new QLabel;
+        checker_preview->setFixedSize(96, 48);
+        gamut_button = new QPushButton;
+        show_colour(gamut_button, gamut_colour());
+        gamut_percent = new QSpinBox;
+        gamut_percent->setRange(1, 100);
+        gamut_percent->setSuffix(QStringLiteral(" %"));
+        gamut_percent->setValue(gamut_opacity());
+        for (auto [name, widget] : std::initializer_list<std::pair<const char*, QWidget*>>{{"checker_size", checker_size}, {"checker_colors", checker_colours},
+                                                                                         {"checker_light", checker_light}, {"checker_dark", checker_dark},
+                                                                                         {"gamut_color", gamut_button}, {"gamut_opacity", gamut_percent}})
+            widget->setObjectName(QStringLiteral("prefs_%1").arg(QString::fromLatin1(name)));
+        for (QPushButton* button : {checker_light, checker_dark, gamut_button}) {
+            connect(button, &QPushButton::clicked, this, [this, button] {
+                if (const auto chosen = ask::colour(this, button->property("colour").value<QColor>(), QStringLiteral("色を選ぶ"))) {
+                    show_colour(button, *chosen);
+                    show_checker();
+                }
+            });
+        }
+        connect(checker_size, &QComboBox::currentIndexChanged, this, [this] { show_checker(); });
+        connect(checker_colours, &QComboBox::currentIndexChanged, this, [this] { show_checker(); });
+        auto* page = new QWidget;
+        QFormLayout* rows = look::form();
+        page->setLayout(rows);
+        rows->addRow(look::section(QStringLiteral("透明部分")));
+        rows->addRow(QStringLiteral("市松の大きさ"), checker_size);
+        rows->addRow(QStringLiteral("市松の色"), checker_colours);
+        auto* custom = new QWidget;
+        auto* line = new QHBoxLayout(custom);
+        line->setContentsMargins(0, 0, 0, 0);
+        line->addWidget(checker_light);
+        line->addWidget(checker_dark);
+        line->addStretch(1);
+        rows->addRow(QStringLiteral("カスタムの色"), custom);
+        rows->addRow(QString(), checker_preview);
+        rows->addRow(look::section(QStringLiteral("色域外警告")));
+        rows->addRow(QStringLiteral("印の色"), gamut_button);
+        rows->addRow(QStringLiteral("不透明度"), gamut_percent);
+        auto* hint = new QLabel(QStringLiteral("市松は、レイヤーの縮小図の透明な所に出ます。色域外警告（表示 → 色域外警告）は、校正のプロファイルで刷れない色にこの印を重ねます。"));
+        hint->setWordWrap(true);
+        theme::role(hint, "hint");
+        rows->addRow(QString(), hint);
+        look::quiet_labels(rows);
+        tabs->addTab(page, QStringLiteral("透明部分・色域"));
+        show_checker();
+    }
     auto* buttons = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel);
     buttons->button(QDialogButtonBox::Ok)->setText(QStringLiteral("決める"));
     buttons->button(QDialogButtonBox::Cancel)->setText(QStringLiteral("やめる"));
@@ -456,7 +591,7 @@ PreferencesDialog::PreferencesDialog(MainWindow* window) : QDialog(window), wind
     pages_list->setObjectName(QStringLiteral("prefsNav"));
     pages_list->setFixedWidth(150);
     int page = 0;
-    for (const char* picture : {"search", "pen", "settings"}) {
+    for (const char* picture : {"search", "pen", "settings", "kind_tone"}) {
         pages_list->addItem(new QListWidgetItem(icons::icon(picture), tabs->tabText(page++)));
     }
     connect(pages_list, &QListWidget::currentRowChanged, tabs, &QTabWidget::setCurrentIndex);
@@ -475,6 +610,21 @@ PreferencesDialog::PreferencesDialog(MainWindow* window) : QDialog(window), wind
                 nullptr, look::footer(buttons));
     resize(820, 620);
     show_gamma();
+}
+
+void PreferencesDialog::show_checker() {
+    const bool custom = checker_colours->currentData().toString() == QLatin1String("custom");
+    checker_light->setEnabled(custom);
+    checker_dark->setEnabled(custom);
+    Checker c;
+    c.square = checker_square(checker_size->currentData().toString());
+    const auto [light, dark] = checker_pair(checker_colours->currentData().toString(), checker_light->property("colour").value<QColor>(),
+                                            checker_dark->property("colour").value<QColor>());
+    c.light = light;
+    c.dark = dark;
+    QImage swatch(checker_preview->size(), QImage::Format_RGB32);
+    paint_checker(swatch, c);
+    checker_preview->setPixmap(QPixmap::fromImage(swatch));
 }
 
 QKeySequenceEdit* PreferencesDialog::editor(const QString& command) const {
@@ -578,6 +728,12 @@ void PreferencesDialog::save() {
     store->setValue(QStringLiteral("backup/folder"), backup_folder->text().trimmed());
     store->setValue(QStringLiteral("backup/minutes"), backup_minutes->value());
     store->setValue(QStringLiteral("backup/keep"), backup_keep->value());
+    store->setValue(QStringLiteral("view/checker_size"), checker_size->currentData());
+    store->setValue(QStringLiteral("view/checker_colors"), checker_colours->currentData());
+    store->setValue(QStringLiteral("view/checker_light"), checker_light->property("colour").value<QColor>().name());
+    store->setValue(QStringLiteral("view/checker_dark"), checker_dark->property("colour").value<QColor>().name());
+    store->setValue(QStringLiteral("view/gamut_color"), gamut_button->property("colour").value<QColor>().name());
+    store->setValue(QStringLiteral("view/gamut_opacity"), gamut_percent->value());
     apply_all(window_);
     accept();
 }

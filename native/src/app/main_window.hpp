@@ -22,6 +22,8 @@
 #include "app/canvas.hpp"
 #include "app/pen.hpp"
 #include "app/session.hpp"
+#include "render/image.hpp"
+#include "render/proof.hpp"
 
 class QCheckBox;
 class QComboBox;
@@ -75,6 +77,21 @@ class SaveFailureBar;
 class SaveStatusLabel;
 class ImeEntry;
 
+// 色の校正・校正の設定・色域外警告 of one book in a window (SPEC COLOR-03 PC1b; PhotoCraft's ProofView): display only,
+// never the book's.
+struct ProofView {
+    // "working": カラー設定's 作業用 CMYK; "export": the CMYK profile chosen for export or Genko's own conversion
+    // (Python's 「CMYK で見る」); else a built-in profile's id or an ICC file's path (カスタム…)
+    QString profile = QStringLiteral("working");
+    render::proof::Kind kind = render::proof::Kind::Profile;
+    int plate = 3;
+    QString intent = QStringLiteral("relative");
+    bool bpc = true;
+    bool simulate_paper = false;
+    bool on = false;      // 色の校正
+    bool gamut = false;   // 色域外警告
+};
+
 // One open book in a window: its session and how the window last showed it.
 struct Document {
     explicit Document(std::shared_ptr<Session> s = nullptr) : session(std::move(s)) {}
@@ -83,6 +100,7 @@ struct Document {
     int page_index = 0;
     std::optional<ViewState> view;
     std::optional<std::string> target_layer;
+    ProofView proof;
     QString title() const;
 };
 
@@ -333,6 +351,19 @@ public:
     // Close a book's tab (asking first when it has unsaved changes); the last one closes the window. False: kept.
     bool close_document(int index = -1);
     MainWindow* new_window();
+    // 色の校正・校正の設定・色域外警告・カラー設定 (main_window_color.cpp): the proof of the book in front (choose_proof:
+    // an id of render/proof's kinds, "workingCmyk" or "export"; it turns 色の校正 on), shown again after カラー設定 or 環境設定
+    // change; the gamut warning's count in the status bar.
+    const ProofView& proof_view() const;
+    void choose_proof(const QString& id);
+    void apply_proof_view();
+    QLabel* gamut_label() const { return gamut_label_; }
+    // カラー設定's policies for a book opened (its pages of another profile than the working ones: kept, converted or
+    // their profile replaced, through ops — asked first when chosen); never a book opened read-only.
+    void color_policy_on_open(const std::shared_ptr<Session>& session);
+    // ... and for a picture taken in (its embedded profile, or none and a working space not the default): kept as its
+    // numbers (Python's) or taken to sRGB, as chosen (asked first when chosen; closed without an answer: the policy's).
+    bool picture_policy(const std::string& bytes, render::Image& picture);
     // A notice in the status line that never stops the work (problems in red, a little longer).
     void flash(const QString& message, int ms = 3000, bool error = false);
     QString last_notice() const { return last_notice_; }
@@ -363,6 +394,12 @@ private:
     void show_page();
     void store_document();
     void show_document(int index);
+    void build_color_actions();
+    void color_settings_dialog();
+    void proof_custom_dialog();
+    void show_proof_marks();
+    void refresh_gamut_count();
+    void fill_books_menu();
     void watch();
     void on_disk_change();
     void on_stroke(const StrokeInput& stroke);
@@ -709,6 +746,8 @@ private:
     QToolBar* commands_ = nullptr;
     QMenu* recent_menu_ = nullptr;
     QMenu* view_menu_ = nullptr;
+    QMenu* books_menu_ = nullptr;   // ウィンドウ → 開いている原稿 (document.activate)
+    QLabel* gamut_label_ = nullptr;  // 色域外警告's count
     QMenu* workspace_menu_ = nullptr;
     QVBoxLayout* column_ = nullptr;  // (the central column: the bands over the page, the page)
     QDockWidget* layers_dock_ = nullptr;

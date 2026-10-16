@@ -11,6 +11,7 @@
 #include <mutex>
 #include <unordered_set>
 
+#include "app/display_color.hpp"
 #include "core/anim.hpp"
 #include "core/covers.hpp"
 #include "core/pyconv.hpp"
@@ -20,6 +21,7 @@
 #include "render/anim.hpp"
 #include "render/colour.hpp"
 #include "render/page.hpp"
+#include "render/proof.hpp"
 
 namespace genko::app {
 
@@ -95,9 +97,10 @@ bool same_story(const core::Document& a, const core::Document& b, const core::Nu
 }
 
 // What the book itself gives each page's drawing: the font its lines are drawn in when they name none (set_meta
-// font_path), the nombre's settings and the side the book starts on (where the nombre goes).
+// font_path), the nombre's settings, the side the book starts on (where the nombre goes) and the gamma its letters are
+// mixed in (set_text_gamma).
 bool same_book_look(const core::Document& a, const core::Document& b) {
-    return a.font_path == b.font_path && a.nombre == b.nombre && a.start_side == b.start_side;
+    return a.font_path == b.font_path && a.nombre == b.nombre && a.start_side == b.start_side && a.text_gamma == b.text_gamma;
 }
 
 // How many covers come before the page (by number): the nombre counts the pages from the first that is not one
@@ -138,6 +141,8 @@ struct PageRenderer::Result {
     bool cancelled = false;
     QString error;
     QImage image;
+    QImage shown;  // (null: as image)
+    QImage mask;   // (null: no gamut warning)
     std::vector<std::string> omitted;
 };
 
@@ -242,12 +247,49 @@ void PageRenderer::set_anim(std::int64_t frame, bool onion) {
     dispatch();
 }
 
-void PageRenderer::set_cmyk_proof(std::optional<std::optional<std::filesystem::path>> proof) {
-    if (proof == proof_) return;
-    proof_ = std::move(proof);
+void PageRenderer::redraw_all() {
     ++generation_;
     for (auto& [dpi, level] : levels_) mark(level, QRect(QPoint(0, 0), level.size), generation_);
     dispatch();
+}
+
+void PageRenderer::set_proof_setup(const render::proof::Setup& setup) {
+    if (setup == setup_) return;
+    const bool shown = proof_on_ || gamut_;
+    setup_ = setup;
+    if (shown) redraw_all();
+}
+
+void PageRenderer::set_proof(bool on) {
+    if (on == proof_on_) return;
+    proof_on_ = on;
+    redraw_all();
+}
+
+void PageRenderer::set_gamut(std::optional<GamutLook> look) {
+    if (look == gamut_) return;
+    gamut_ = std::move(look);
+    redraw_all();
+    emit gamutCounted();
+}
+
+void PageRenderer::set_monitor(std::shared_ptr<const display_color::Monitor> monitor) {
+    if (monitor == monitor_) return;
+    monitor_ = std::move(monitor);
+    redraw_all();
+}
+
+std::pair<std::size_t, std::size_t> PageRenderer::gamut_count() const {
+    if (!gamut_) return {0, 0};
+    const auto it = levels_.find(base_dpi_);
+    if (it == levels_.end()) return {0, 0};
+    std::size_t out = 0, all = 0;
+    for (const Tile& tile : it->second.tiles) {
+        if (tile.mask.isNull() || tile.valid == 0) continue;
+        out += tile.out;
+        all += static_cast<std::size_t>(tile.mask.width()) * static_cast<std::size_t>(tile.mask.height());
+    }
+    return {out, all};
 }
 
 void PageRenderer::set_screen_dots(bool on) {
@@ -456,10 +498,11 @@ void PageRenderer::want(int base_dpi, int wanted_dpi, const QRectF& visible_mm) 
 
 void PageRenderer::dispatch() {
     if (!shown_page_ || !doc_) return;
-    if (proof_ && proof_profile_) {  // (the profile as it is now: another one, or its file gone, draws everything again)
+    if ((proof_on_ || gamut_) && !setup_.icc && proof_profile_) {
+        // (the export profile as it is now: another one, or its file gone, draws everything again)
         std::optional<std::filesystem::path> now = proof_profile_();
-        if (now != *proof_) {
-            proof_ = std::move(now);
+        if (now != setup_.export_icc) {
+            setup_.export_icc = std::move(now);
             ++generation_;
             for (auto& [dpi, level] : levels_) mark(level, QRect(QPoint(0, 0), level.size), generation_);
         }
@@ -489,14 +532,20 @@ void PageRenderer::dispatch() {
             const std::uint64_t generation = generation_;
             const int dpi = l->dpi;
             const std::string mode = mode_;
-            const auto proof = proof_;
+            const std::optional<render::proof::Setup> proof = proof_on_ ? std::optional<render::proof::Setup>(setup_) : std::nullopt;
+            const std::optional<std::pair<GamutLook, render::proof::Setup>> gamut =
+                gamut_ ? std::optional<std::pair<GamutLook, render::proof::Setup>>(std::pair{*gamut_, setup_}) : std::nullopt;
+            // (モニターの RGB: the page's numbers go to the monitor as they are)
+            const std::shared_ptr<const display_color::Monitor> monitor =
+                proof && proof->kind == render::proof::Kind::Monitor ? nullptr : monitor_;
             const bool dots = screen_dots_;
             const std::stop_token stop = tile.stop->get_token();
             const std::int64_t frame = frame_;
             const bool onion = onion_;
             if (!onions_) onions_ = std::make_shared<OnionStore>();
             const std::shared_ptr<OnionStore> onions = onions_;
-            pool_.start([self, doc, page_index, page_id, generation, dpi, index, region, rough, mode, proof, dots, stop, frame, onion, onions]() {
+            pool_.start([self, doc, page_index, page_id, generation, dpi, index, region, rough, mode, proof, gamut, monitor, dots, stop, frame, onion,
+                         onions]() {
                 Result result;
                 result.page_id = page_id;
                 result.dpi = dpi;
@@ -513,6 +562,10 @@ void PageRenderer::dispatch() {
                     options.region = render::RenderRegion{region.x(), region.y(), region.width(), region.height()};
                     options.stop = stop;
                     const std::shared_ptr<const core::Page> raw = doc->pages.at(page_index);  // (a page gone meanwhile: caught below)
+                    // (a CMYK page's plates are its own inks: drawn with them)
+                    const bool cmyk_page = raw->color && raw->color->space == core::InkSpace::Cmyk;
+                    const bool plates = proof && (proof->kind == render::proof::Kind::Plate || proof->kind == render::proof::Kind::CmyPlate);
+                    options.inks = cmyk_page && plates;
                     render::RenderResult drawn;
                     if (core::anim::is_animation(*raw)) {  // (the frame shown, with the frames around it faint)
                         options.at_frame = true;
@@ -529,10 +582,45 @@ void PageRenderer::dispatch() {
                     } else {
                         drawn = render::render_page(*raw, dpi, options, doc.get());
                     }
-                    // (per pixel: a tile as the page. A CMYK page shows its inks already: no proof over them)
-                    const bool cmyk_page = raw->color && raw->color->space == core::InkSpace::Cmyk;
-                    if (proof && !cmyk_page) drawn.image = render::colour::proof(drawn.image, *proof);
+                    // (per pixel: a tile as the page. The gamut checked on the colours drawn, before the proof)
+                    std::vector<unsigned char> out_of_gamut;
+                    std::size_t outside = 0;
+                    if (gamut) out_of_gamut = render::proof::Gamut::of(gamut->second)->mask(drawn.image, gamut->first.threshold, &outside);
+                    if (proof) {
+                        if (cmyk_page && plates && drawn.inks) {
+                            drawn.image = render::proof::page_plates(*drawn.inks, raw->color->icc, *proof);
+                        } else if (!(cmyk_page && proof->kind == render::proof::Kind::Profile)) {  // (a CMYK page shows its inks already)
+                            render::proof::Source source;
+                            if (raw->rgb && raw->rgb->icc) source.icc = raw->rgb->icc;
+                            if (raw->color && raw->color->space == core::InkSpace::Gray) source = render::proof::Source{raw->color->icc, true};
+                            drawn.image = render::proof::apply(drawn.image, *proof, source);
+                        }
+                    }
                     result.image = to_qimage(drawn.image);
+                    if (gamut) {
+                        result.mask = QImage(result.image.size(), QImage::Format_Grayscale8);
+                        for (int y = 0; y < result.mask.height(); ++y)
+                            std::copy_n(out_of_gamut.data() + static_cast<std::size_t>(y) * static_cast<std::size_t>(result.mask.width()),
+                                        result.mask.width(), result.mask.scanLine(y));
+                    }
+                    if ((gamut && outside > 0) || monitor) {
+                        result.shown = result.image.copy();
+                        if (gamut && outside > 0) {  // (the mark over the colours out of gamut, at its opacity)
+                            const QColor c = gamut->first.color;
+                            const double a = std::clamp(gamut->first.opacity, 0.0, 1.0);
+                            const auto mix = [a](int under, int over) { return static_cast<int>(std::lround(under + (over - under) * a)); };
+                            for (int y = 0; y < result.shown.height(); ++y) {
+                                auto* row = reinterpret_cast<QRgb*>(result.shown.scanLine(y));
+                                const uchar* m = result.mask.constScanLine(y);
+                                for (int x = 0; x < result.shown.width(); ++x) {
+                                    if (m[x] == 0) continue;
+                                    const QRgb p = row[x];
+                                    row[x] = qRgb(mix(qRed(p), c.red()), mix(qGreen(p), c.green()), mix(qBlue(p), c.blue()));
+                                }
+                            }
+                        }
+                        if (monitor) monitor->apply(result.shown);
+                    }
                     result.omitted = std::move(drawn.omitted);
                 } catch (const render::Cancelled&) {
                     result.cancelled = true;
@@ -603,10 +691,37 @@ void PageRenderer::deliver(const Result& r) {
         tile.image = QImage(rect.size(), QImage::Format_RGB32);
         tile.image.fill(Qt::white);
     }
+    const QPoint at = r.region.topLeft() - rect.topLeft();
     {
         QPainter painter(&tile.image);
         painter.setCompositionMode(QPainter::CompositionMode_Source);
-        painter.drawImage(r.region.topLeft() - rect.topLeft(), r.image);
+        painter.drawImage(at, r.image);
+    }
+    // (as painted: the mark and the monitor's colours, where there are any; the gamut warning's mask and count)
+    if (!r.shown.isNull()) {
+        if (tile.shown.isNull()) tile.shown = tile.image.copy();
+        QPainter painter(&tile.shown);
+        painter.setCompositionMode(QPainter::CompositionMode_Source);
+        painter.drawImage(at, r.shown);
+    } else if (!tile.shown.isNull()) {
+        QPainter painter(&tile.shown);
+        painter.setCompositionMode(QPainter::CompositionMode_Source);
+        painter.drawImage(at, r.image);
+    }
+    if (!r.mask.isNull()) {
+        if (tile.mask.isNull() || tile.mask.size() != rect.size()) {
+            tile.mask = QImage(rect.size(), QImage::Format_Grayscale8);
+            tile.mask.fill(0);
+        }
+        for (int y = 0; y < r.mask.height(); ++y) std::copy_n(r.mask.constScanLine(y), r.mask.width(), tile.mask.scanLine(at.y() + y) + at.x());
+        tile.out = 0;
+        for (int y = 0; y < tile.mask.height(); ++y) {
+            const uchar* m = tile.mask.constScanLine(y);
+            tile.out += static_cast<std::size_t>(std::count(m, m + tile.mask.width(), uchar(255)));
+        }
+    } else {
+        tile.mask = QImage();
+        tile.out = 0;
     }
     if (r.rough) {
         tile.rough = true;
@@ -623,6 +738,7 @@ void PageRenderer::deliver(const Result& r) {
     }
     dispatch();
     emit updated(in_mm(r.region));
+    if (gamut_ && l.dpi == base_dpi_) emit gamutCounted();
     if (settled()) emit settledChanged();
 }
 
@@ -682,7 +798,7 @@ void PageRenderer::paint(QPainter& painter, const QRectF& visible_mm) const {
             if (finer && (tile.valid < tile.changed || !tile.pending.isEmpty() || tile.rough)) continue;  // (only finished ones)
             const QRect rect = tile_rect(l, i);
             if (!rect.intersects(seen)) continue;
-            painter.drawImage(rect.topLeft(), tile.image);
+            painter.drawImage(rect.topLeft(), tile.shown.isNull() ? tile.image : tile.shown);
         }
     }
     painter.setTransform(to_screen);
@@ -701,6 +817,21 @@ std::optional<QColor> PageRenderer::pixel_at(double x_mm, double y_mm) const {
     const Tile& tile = l.tiles[static_cast<std::size_t>((py / kTile) * l.cols + px / kTile)];
     if (tile.image.isNull() || tile.valid == 0) return std::nullopt;
     return tile.image.pixelColor(px % kTile, py % kTile);
+}
+
+QImage PageRenderer::compose_shown(int dpi) const {
+    const auto it = levels_.find(dpi);
+    if (it == levels_.end()) return {};
+    const Level& l = it->second;
+    QImage out(l.size, QImage::Format_RGB32);
+    out.fill(Qt::white);
+    QPainter painter(&out);
+    for (int i = 0; i < static_cast<int>(l.tiles.size()); ++i) {
+        const Tile& tile = l.tiles[static_cast<std::size_t>(i)];
+        if (!tile.image.isNull()) painter.drawImage(tile_rect(l, i).topLeft(), tile.shown.isNull() ? tile.image : tile.shown);
+    }
+    painter.end();
+    return out;
 }
 
 QImage PageRenderer::compose(int dpi) const {

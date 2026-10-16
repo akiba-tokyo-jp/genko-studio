@@ -949,6 +949,7 @@ void MainWindow::show_document(int index) {
     doc_tabs_->setTabText(index, doc.title());
     doc_tabs_->blockSignals(false);
     refresh_status();
+    apply_proof_view();  // (its own 色の校正 and 色域外警告)
     output_panels_follow(true);  // (another book: its history at once; the checks of the last one are out of date)
     known_requests_ = request_ids();  // (another book's requests are not new ones)
     studio_follow(true);
@@ -1047,7 +1048,9 @@ void MainWindow::open_project(const fs::path& path) {
                     opened->decline_recovery();
                 }
             }
+            const std::shared_ptr<Session> added = opened;
             add_document(std::move(opened));
+            if (session_ == added) color_policy_on_open(added);  // (カラー設定's policies: a page of another profile kept, converted or asked)
         } catch (const std::exception& error) {
             ask::warning(this, QStringLiteral("Genko"),
                          QStringLiteral("原稿・復旧用コピーを開けませんでした:\n%1").arg(wording::error(QString::fromUtf8(error.what()))) + links_kept());
