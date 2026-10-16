@@ -14,6 +14,7 @@
 #include "core/pyconv.hpp"
 #include "render/ink.hpp"
 #include "render/page.hpp"
+#include "render/op_limits.hpp"
 #include "render/png.hpp"
 #include "render/raster.hpp"
 
@@ -69,7 +70,81 @@ std::optional<std::size_t> page_by_id(const core::Document& doc, const std::stri
     return std::nullopt;
 }
 
-std::shared_ptr<const core::InkPixels> decoded(const core::Bytes& raster);
+// A channel's raster as the drawing holds it: its density at its own depth (8 bits a byte, 16 bits two, 32 a float —
+// not InkPixels' two bytes a sample, nor a float each: a B4 channel at 600 dpi, 8 bits, is 52 MB). Empty (no pixels)
+// for a raster that cannot be read: the book is read-only then, its problem reported where it was read.
+struct Held {
+    std::uint32_t width = 0;
+    std::uint32_t height = 0;
+    int depth = 8;
+    std::vector<std::uint8_t> bytes;
+    std::vector<std::uint16_t> words;
+    std::vector<float> floats;
+
+    double value(std::size_t i) const { return depth == 8 ? bytes[i] / 255.0 : depth == 16 ? words[i] / 65535.0 : double(floats[i]); }
+    std::size_t held_bytes() const { return bytes.size() + words.size() * 2 + floats.size() * 4; }
+};
+
+Held hold(const std::string& raster) {
+    const core::InkRasterHeader header = core::ink_raster_header(raster);
+    if (header.space != core::InkSpace::Mask) throw core::Error("format", "a channel's raster is a mask");
+    Held out;
+    out.width = header.width;
+    out.height = header.height;
+    out.depth = header.depth;
+    const std::size_t n = std::size_t(header.width) * header.height;
+    if (out.depth == 8) out.bytes.resize(n);
+    else if (out.depth == 16) out.words.resize(n);
+    else out.floats.resize(n);
+    core::read_ink_raster_rows(raster, [&](std::uint32_t y, const float* values) {
+        const std::size_t at = std::size_t(y) * out.width;
+        for (std::uint32_t x = 0; x < out.width; ++x) {
+            if (out.depth == 8) out.bytes[at + x] = static_cast<std::uint8_t>(std::lround(values[x] * 255.0));
+            else if (out.depth == 16) out.words[at + x] = static_cast<std::uint16_t>(std::lround(values[x] * 65535.0));
+            else out.floats[at + x] = values[x];
+        }
+    });
+    return out;
+}
+
+std::shared_ptr<const Held> decoded(const core::Bytes& raster);
+
+// One axis resampled: for each of `to` cells the cells of `from` it reads and their weights (summing to 1) — the cells
+// it covers, by their share, when it is the larger (a mean), else bilinear by the centres, the edges carried on. The
+// same size reads each cell alone.
+using Taps = std::vector<std::vector<std::pair<std::uint32_t, double>>>;
+Taps taps(std::uint32_t from, std::uint32_t to) {
+    Taps out(to);
+    const double scale = double(from) / double(to);
+    for (std::uint32_t i = 0; i < to; ++i) {
+        if (scale > 1.0) {
+            const double a = i * scale, b = (i + 1) * scale;
+            const auto last = static_cast<std::uint32_t>(std::min<double>(from, std::ceil(b)));
+            for (auto j = static_cast<std::uint32_t>(std::floor(a)); j < last; ++j) {
+                const double w = std::min(b, j + 1.0) - std::max(a, double(j));
+                if (w > 0) out[i].emplace_back(j, w / scale);
+            }
+        } else {
+            const double x = (i + 0.5) * scale - 0.5, f = std::floor(x), t = x - f;
+            const auto at = [&](double v) { return static_cast<std::uint32_t>(std::clamp(v, 0.0, double(from - 1))); };
+            const std::uint32_t j0 = at(f), j1 = at(f + 1);
+            if (t > 0 && j1 != j0) {
+                out[i].emplace_back(j0, 1.0 - t);
+                out[i].emplace_back(j1, t);
+            } else {
+                out[i].emplace_back(t > 0 ? j1 : j0, 1.0);
+            }
+        }
+    }
+    return out;
+}
+
+// The density a pixel of a lent channel gives back after the op: its lightness, over black where the op made it clear
+// (a grey page's rules: Genko's blacks, the greys 0, 10, 15 and 20, are none; white is full; another grey v is v/255).
+double density_of(unsigned r, unsigned g, unsigned b, unsigned a) {
+    if (r == g && g == b && (r == 0 || r == 10 || r == 15 || r == 20)) return 0.0;
+    return lightness(r, g, b) * (a / 255.0);
+}
 
 }  // namespace
 
@@ -87,13 +162,13 @@ Plane blank(const core::Page& page, int dpi) {
 
 Plane plane_of(const core::Page& page, const core::Channel& channel) {
     if (!channel.raster) return blank(page, core::channel_dpi(page, channel.kind));
-    const std::shared_ptr<const core::InkPixels> held = decoded(channel.raster);
-    const core::InkPixels& pixels = *held;
+    const std::shared_ptr<const Held> held = decoded(channel.raster);
+    if (held->width == 0) throw core::Error("format", "the channel " + channel.id + "'s raster cannot be read");
     Plane out;
-    out.width = pixels.width;
-    out.height = pixels.height;
-    out.values.resize(pixels.pixel_count());
-    for (std::size_t i = 0; i < out.values.size(); ++i) out.values[i] = static_cast<float>(pixels.value(i, 0));
+    out.width = held->width;
+    out.height = held->height;
+    out.values.resize(std::size_t(out.width) * out.height);
+    for (std::size_t i = 0; i < out.values.size(); ++i) out.values[i] = static_cast<float>(held->value(i));
     return out;
 }
 
@@ -116,21 +191,35 @@ double bilinear(std::uint32_t width, std::uint32_t height, double fx, double fy,
     return top * (1 - ty) + bottom * ty;
 }
 
-// The rasters decoded for the drawing (the screen's tiles each read the same channel), the last few, by their bytes.
-std::shared_ptr<const core::InkPixels> decoded(const core::Bytes& raster) {
+// The rasters decoded for the drawing (the screen's tiles each read the same channel), by their bytes: the last few, in
+// at most kKeptBytes (the newest always), each at its own depth (Held).
+constexpr std::size_t kKept = 4;
+constexpr std::size_t kKeptBytes = 192u << 20;
+
+std::shared_ptr<const Held> decoded(const core::Bytes& raster) {
     static std::mutex lock;
-    static std::vector<std::pair<std::weak_ptr<const std::string>, std::shared_ptr<const core::InkPixels>>> kept;
+    static std::vector<std::pair<std::weak_ptr<const std::string>, std::shared_ptr<const Held>>> kept;
     {
         const std::lock_guard<std::mutex> held(lock);
         for (const auto& [bytes, pixels] : kept) {
             if (bytes.lock() == raster) return pixels;
         }
     }
-    auto pixels = std::make_shared<const core::InkPixels>(core::decode_ink_raster(*raster));
+    std::shared_ptr<const Held> pixels;
+    try {
+        pixels = std::make_shared<const Held>(hold(*raster));
+    } catch (const core::Error&) {
+        pixels = std::make_shared<const Held>();  // (a raster that cannot be read: none, remembered as such)
+    }
     const std::lock_guard<std::mutex> held(lock);
     std::erase_if(kept, [](const auto& entry) { return entry.first.expired(); });
-    if (kept.size() >= 4) kept.erase(kept.begin());
     kept.emplace_back(raster, pixels);
+    const auto total = [&] {
+        std::size_t n = 0;
+        for (const auto& entry : kept) n += entry.second->held_bytes();
+        return n;
+    };
+    while (kept.size() > 1 && (kept.size() > kKept || total() > kKeptBytes)) kept.erase(kept.begin());
     return pixels;
 }
 
@@ -142,12 +231,38 @@ float sample(const Plane& plane, double fx, double fy) {
 
 Density::Density(const core::Channel& channel) {
     if (channel.raster) pixels_ = decoded(channel.raster);
+    if (pixels_ && std::static_pointer_cast<const Held>(pixels_)->width == 0) pixels_.reset();  // (one that cannot be read: none)
 }
 
 float Density::at(double fx, double fy) const {
     if (!pixels_) return 0.0f;
-    const core::InkPixels& p = *pixels_;
-    return static_cast<float>(bilinear(p.width, p.height, fx, fy, [&](std::size_t i) { return p.value(i, 0); }));
+    const Held& p = *std::static_pointer_cast<const Held>(pixels_);
+    return static_cast<float>(bilinear(p.width, p.height, fx, fy, [&](std::size_t i) { return p.value(i); }));
+}
+
+Image thumbnail(const core::Channel& channel, Size size) {
+    std::vector<double> sums(std::size_t(size.width) * size.height, 0.0), counts(sums.size(), 0.0);
+    if (channel.raster) {
+        try {
+            const core::InkRasterHeader header = core::ink_raster_header(*channel.raster);
+            if (header.space != core::InkSpace::Mask) throw core::Error("format", "a channel's raster is a mask");
+            if (header.width < std::uint32_t(size.width) || header.height < std::uint32_t(size.height)) return mask_of(channel, size);
+            std::vector<std::uint32_t> column(header.width);
+            for (std::uint32_t x = 0; x < header.width; ++x) column[x] = static_cast<std::uint32_t>(std::uint64_t(x) * size.width / header.width);
+            core::read_ink_raster_rows(*channel.raster, [&](std::uint32_t y, const float* values) {
+                const std::size_t row = std::size_t(std::uint64_t(y) * size.height / header.height) * size.width;
+                for (std::uint32_t x = 0; x < header.width; ++x) {
+                    sums[row + column[x]] += values[x];
+                    counts[row + column[x]] += 1.0;
+                }
+            });
+        } catch (const core::Error&) {  // (a raster that cannot be read: none)
+            std::fill(sums.begin(), sums.end(), 0.0);
+        }
+    }
+    std::string bytes(sums.size(), '\0');
+    for (std::size_t i = 0; i < sums.size(); ++i) bytes[i] = static_cast<char>(byte_of(counts[i] > 0 ? sums[i] / counts[i] : 0.0));
+    return Image::frombytes("L", size, bytes);
 }
 
 Image mask_of(const core::Channel& channel, Size size) {
@@ -465,10 +580,29 @@ ChannelLending::ChannelLending(core::Document& doc, std::size_t at, std::size_t 
     page_id_ = seen.id;
     channel_id_ = channel.id;
     depth_ = core::page_depth(seen);
-    plane_ = plane_of(seen, channel);
-    std::string rgba(plane_.values.size() * 4, '\xff');
-    for (std::size_t i = 0; i < plane_.values.size(); ++i) std::fill_n(rgba.begin() + std::ptrdiff_t(i * 4), 3, static_cast<char>(byte_of(plane_.values[i])));
-    lent_ = rgba;
+    lent_size_ = page_size(seen, raster::kWorkingDpi);
+    limits::check_picture(lent_size_.width, lent_size_.height, "the page");
+    std::string rgba(std::size_t(lent_size_.width) * lent_size_.height * 4, '\xff');
+    if (channel.raster) {
+        const std::shared_ptr<const Held> held = decoded(channel.raster);
+        if (held->width == 0) throw core::OpError("the channel " + core::py_repr_str(channel.name) + " cannot be read");
+        own_size_ = Size{int(held->width), int(held->height)};
+        // (each pixel lent: the mean of the channel's pixels it covers, or bilinear where the channel is coarser)
+        const Taps across = taps(held->width, static_cast<std::uint32_t>(lent_size_.width));
+        const Taps down = taps(held->height, static_cast<std::uint32_t>(lent_size_.height));
+        for (int y = 0; y < lent_size_.height; ++y) {
+            for (int x = 0; x < lent_size_.width; ++x) {
+                double v = 0.0;
+                for (const auto& [row, wy] : down[std::size_t(y)]) {
+                    for (const auto& [col, wx] : across[std::size_t(x)]) v += wy * wx * held->value(std::size_t(row) * held->width + col);
+                }
+                std::fill_n(rgba.begin() + std::ptrdiff_t((std::size_t(y) * lent_size_.width + x) * 4), 3, static_cast<char>(byte_of(v)));
+            }
+        }
+    } else {
+        own_size_ = page_size(seen, core::channel_dpi(seen, channel.kind));
+        for (std::size_t i = 0; i < rgba.size(); i += 4) std::fill_n(rgba.begin() + std::ptrdiff_t(i), 3, '\0');
+    }
     core::Layer layer;
     layer_id_ = "lent_" + channel.id;
     layer.id = layer_id_;
@@ -478,52 +612,97 @@ ChannelLending::ChannelLending(core::Document& doc, std::size_t at, std::size_t 
     layer.visible = false;  // (never drawn with the page: what the op looks at around it is the page as it is)
     layer.exportable = false;
     layer.panel_clip = false;
-    layer.raster_png = std::make_shared<const std::string>(write_png(Image::frombytes("RGBA", Size{int(plane_.width), int(plane_.height)}, rgba), 1));
+    layer.raster_png = std::make_shared<const std::string>(write_png(Image::frombytes("RGBA", lent_size_, rgba), 1));
+    lent_ = std::move(rgba);
     core::Page& page = doc.edit_page(at);
     page.layers.insert(page.layers.begin(), std::move(layer));  // (the first of its role, for an op that takes a role)
     if (const std::string_view key = layer_key(name); !key.empty()) op[std::string(key)] = layer_id_;
 }
 
-void ChannelLending::take_back(core::Document& doc) const {
+bool ChannelLending::take_back(core::Document& doc) const {
     const auto at = page_by_id(doc, page_id_);
-    if (!at) return;
+    if (!at) return false;
     core::Page& page = doc.edit_page(*at);
     const auto lent = std::find_if(page.layers.begin(), page.layers.end(), [&](const core::Layer& l) { return l.id == layer_id_; });
     if (lent == page.layers.end()) throw core::OpError("the channel lent to the op was taken away");
     core::Layer layer = *lent;
     page.layers.erase(lent);
     const std::size_t index = core::channel_index(page, channel_id_);
-    if (index >= page.channels.size()) return;
+    if (index >= page.channels.size()) return false;
     if (layer.stroke_count() > 0 || !layer.patches.empty()) raster::bake_vectors(page, layer);
-    Plane made = plane_;
+    // what the op changed, at 200 dpi: each pixel's density after it, and whether it changed
+    const std::size_t n = std::size_t(lent_size_.width) * lent_size_.height;
+    std::vector<std::uint8_t> changed(n, 0);
+    std::vector<float> made(n, 0.0f);
+    int x0 = lent_size_.width, y0 = lent_size_.height, x1 = -1, y1 = -1;  // (the changed pixels' box)
+    const auto mark = [&](std::size_t i, double v) {
+        changed[i] = 1;
+        made[i] = static_cast<float>(v);
+        const int x = static_cast<int>(i % std::size_t(lent_size_.width)), y = static_cast<int>(i / std::size_t(lent_size_.width));
+        x0 = std::min(x0, x);
+        y0 = std::min(y0, y);
+        x1 = std::max(x1, x);
+        y1 = std::max(y1, y);
+    };
     if (layer.raster_png && !layer.raster_png->empty()) {
-        const Image picture = open_image(*layer.raster_png, kPillowOpenLimits).convert("RGBA");
+        Image picture = open_image(*layer.raster_png, kPillowOpenLimits).convert("RGBA");
+        const bool same = picture.size() == lent_size_;
+        if (!same) picture = picture.resize(lent_size_, Resample::Bilinear);  // (a picture of another size: all of it)
         const std::string now = picture.tobytes();
-        if (picture.width() == int(plane_.width) && picture.height() == int(plane_.height)) {
-            for (std::size_t i = 0; i < made.values.size(); ++i) {
-                if (std::equal(now.begin() + std::ptrdiff_t(i * 4), now.begin() + std::ptrdiff_t(i * 4 + 4), lent_.begin() + std::ptrdiff_t(i * 4))) continue;
-                const auto r = static_cast<unsigned char>(now[i * 4]), g = static_cast<unsigned char>(now[i * 4 + 1]),
-                           b = static_cast<unsigned char>(now[i * 4 + 2]), a = static_cast<unsigned char>(now[i * 4 + 3]);
-                made.values[i] = static_cast<float>(lightness(r, g, b) * (a / 255.0));  // (over black where it is clear)
-            }
-        } else {  // (a picture of another size: all of it, at the channel's)
-            Plane other;
-            other.width = static_cast<std::uint32_t>(picture.width());
-            other.height = static_cast<std::uint32_t>(picture.height());
-            other.values.resize(std::size_t(other.width) * other.height);
-            for (std::size_t i = 0; i < other.values.size(); ++i) {
-                other.values[i] = static_cast<float>(lightness(static_cast<unsigned char>(now[i * 4]), static_cast<unsigned char>(now[i * 4 + 1]),
-                                                               static_cast<unsigned char>(now[i * 4 + 2])) *
-                                                     (static_cast<unsigned char>(now[i * 4 + 3]) / 255.0));
-            }
-            made = resized(other, plane_.width, plane_.height);
+        for (std::size_t i = 0; i < n; ++i) {
+            const char* px = now.data() + i * 4;
+            if (same && std::equal(px, px + 4, lent_.data() + i * 4)) continue;
+            mark(i, density_of(static_cast<unsigned char>(px[0]), static_cast<unsigned char>(px[1]), static_cast<unsigned char>(px[2]),
+                               static_cast<unsigned char>(px[3])));
         }
     } else {
-        std::fill(made.values.begin(), made.values.end(), 0.0f);
+        for (std::size_t i = 0; i < n; ++i) mark(i, 0.0);  // (the op left the layer with no pixels: all clear)
     }
+    if (x1 < 0) return false;  // (nothing changed: the channel as it was, its bytes too)
     core::Channel& channel = page.channels[index];
-    channel.raster = encode(made, depth_);
+    // (its pixels as they were: from the raster held while it was lent — the same samples —, or none)
+    const std::shared_ptr<const Held> held = channel.raster ? decoded(channel.raster) : nullptr;
+    if (held && held->width == 0) throw core::OpError("the channel " + core::py_repr_str(channel.name) + " cannot be read");
+    core::InkPixels own = core::blank_ink_pixels(core::InkSpace::Mask, held ? held->depth : depth_,
+                                                 held ? held->width : static_cast<std::uint32_t>(own_size_.width),
+                                                 held ? held->height : static_cast<std::uint32_t>(own_size_.height));
+    if (held && held->depth == 32) own.floats = held->floats;
+    else if (held && held->depth == 16) own.samples.assign(held->words.begin(), held->words.end());
+    else if (held) own.samples.assign(held->bytes.begin(), held->bytes.end());
+    // each pixel of the channel by the changed pixels it reads (their share): v(1 − w) + Σ share × density
+    const Taps across = taps(static_cast<std::uint32_t>(lent_size_.width), own.width);
+    const Taps down = taps(static_cast<std::uint32_t>(lent_size_.height), own.height);
+    const auto reaching = [](const Taps& list, int from, int to) {  // (the cells that read a changed one's row or column)
+        std::vector<char> out(list.size(), 0);
+        for (std::size_t k = 0; k < list.size(); ++k) {
+            out[k] = std::any_of(list[k].begin(), list[k].end(), [&](const auto& tap) { return int(tap.first) >= from && int(tap.first) <= to && tap.second > 0; });
+        }
+        return out;
+    };
+    const std::vector<char> rows = reaching(down, y0, y1), columns = reaching(across, x0, x1);
+    for (std::uint32_t y = 0; y < own.height; ++y) {
+        if (!rows[y]) continue;
+        for (std::uint32_t x = 0; x < own.width; ++x) {
+            if (!columns[x]) continue;
+            double share = 0.0, density = 0.0;
+            for (const auto& [row, wy] : down[y]) {
+                for (const auto& [col, wx] : across[x]) {
+                    const std::size_t i = std::size_t(row) * lent_size_.width + col;
+                    if (!changed[i]) continue;
+                    share += wy * wx;
+                    density += wy * wx * made[i];
+                }
+            }
+            if (!(share > 0)) continue;
+            const std::size_t i = std::size_t(y) * own.width + x;
+            own.set(i, 0, share >= 1.0 ? density : own.value(i, 0) * (1.0 - share) + density);
+        }
+    }
+    const bool none = own.depth == 32 ? std::all_of(own.floats.begin(), own.floats.end(), [](float v) { return !(v > 0.0f); })
+                                      : std::all_of(own.samples.begin(), own.samples.end(), [](std::uint16_t v) { return v == 0; });
+    channel.raster = none ? nullptr : std::make_shared<const std::string>(core::encode_ink_raster(own));
     channel.memo = {};
+    return true;
 }
 
 PlateKeep::PlateKeep(const core::Document& doc, std::size_t at, std::size_t plate, const Json& op, std::string_view name) {

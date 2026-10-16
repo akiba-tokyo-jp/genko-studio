@@ -241,8 +241,12 @@ const core::OpRegistry& ops_registry() {
                     const channels::ChannelLending lending(c.doc, at, *target->channel, lent_op, name);
                     core::OpContext inner{c.doc, lent_op, c.actor};
                     plain(inner);
-                    lending.take_back(c.doc);
+                    const bool changed = lending.take_back(c.doc);
                     c.report = std::move(inner.report);
+                    if (changed && lending.depth() > 8) {  // (a 16- or 32-bit channel: what the op changed, drawn at 8 bits)
+                        if (!c.report || c.report->is_null()) c.report = core::Json::object();
+                        if (c.report->is_object()) (*c.report)["channel_precision"] = 8;
+                    }
                     color_edit::bake_marks(c.doc);
                     ink_edit::bake_marks(c.doc);
                     return;

@@ -42,16 +42,21 @@ float sample(const Plane& plane, double fx, double fy);
 // A channel's density where the page's point (fx, fy) is (bilinear as sample()), read from its raster decoded once while
 // it is drawn (the drawing's cache, by the raster's bytes: the screen's tiles and the exports read the same channel); 0
 // for a channel without a raster.
+// A raster that cannot be read (the book is read-only then, its problem reported where it was read) reads 0. The decoded
+// rasters are held at their own depth, a few at a time within a budget.
 class Density {
 public:
     explicit Density(const core::Channel& channel);
     float at(double fx, double fy) const;
 
 private:
-    std::shared_ptr<const core::InkPixels> pixels_;
+    std::shared_ptr<const void> pixels_;
 };
 // The channel as an "L" picture of `size` over the page (255 × its density at each pixel's centre).
 Image mask_of(const core::Channel& channel, Size size);
+// The channel made small (the panel's picture): an "L" picture of `size`, each pixel the mean of the raster's pixels it
+// covers, read row by row (not decoded whole, not kept). 0 for a channel without a raster or one that cannot be read.
+Image thumbnail(const core::Channel& channel, Size size);
 
 // The plane as the channel's GKIR Mask raster at the depth (8 and 16 rounded, 32 as floats), or null when it is all 0.
 core::Bytes encode(const Plane& plane, int depth);
@@ -96,20 +101,29 @@ struct Target {
 };
 std::optional<Target> target_of(const core::Document& doc, const core::Json& op);
 
-// An op working a channel: the channel lent as a hidden paint layer of its own (an opaque grey picture of its density,
-// over the page; outside the panels), the op's layer pointing at it; taken back after the op, its grey (over black where
-// the op made it clear) the channel's density — a pixel the op left as it was keeps its value.
+// An op working a channel: the channel lent as a hidden paint layer of its own — an opaque grey picture of its density
+// over the page at the paint layers' 200 dpi (raster::kWorkingDpi: every pixel op draws there, whatever the channel's own
+// resolution; a larger channel lent as the mean of the pixels each covers), outside the panels —, the op's layer
+// pointing at it. Taken back after the op: the pixels the op changed (their grey, over black where it made them clear, by
+// a grey page's rules: Genko's blacks none, white full) put back into the channel at its own resolution, each of its
+// pixels by the share of it they cover (bilinear when the channel is finer); a pixel of the channel no changed pixel
+// reaches keeps its value, and a channel the op left as it was its very bytes. The changed pixels come back at 8 bits
+// (a channel of 16 or 32 bits: precision() says so).
 class ChannelLending {
 public:
     ChannelLending(core::Document& doc, std::size_t page, std::size_t channel, core::Json& op, std::string_view name);
-    void take_back(core::Document& doc) const;
+    // Whether the op changed the channel.
+    bool take_back(core::Document& doc) const;
+    // The channel's depth (8, 16, 32): above 8, what the op changed was drawn at 8 bits.
+    int depth() const { return depth_; }
 
 private:
     std::string page_id_;
     std::string channel_id_;
     std::string layer_id_;
-    Plane plane_;
-    std::string lent_;  // (the RGBA bytes lent)
+    std::string lent_;  // (the RGBA bytes lent, at 200 dpi)
+    Size lent_size_;
+    Size own_size_;     // (the channel's raster's, or the size it is made at)
     int depth_ = 8;
 };
 

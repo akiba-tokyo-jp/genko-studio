@@ -639,6 +639,162 @@ private slots:
         QCOMPARE(twice.page(1).channels.size(), std::size_t{2});
         QCOMPARE(twice.page(1).channels[0].id, doc.page(0).channels[0].id);
     }
+
+    // A spot channel at the book's 600 dpi worked by the pixel ops, which draw at the paint layers' 200 dpi: the channel
+    // lent at 200 dpi and what the op changed put back at 600 — the eraser where it went (not a third of the way there),
+    // delete_area and a filter within their areas, liquify about its brush —; what an op did not reach keeps its very
+    // samples (the fine pattern of the channel too), and the lent layer is gone.
+    void spotAtTheBooksResolution() {
+        core::Document doc = painted(pattern());
+        doc.edit_page(0).spec.dpi = core::Num(600);
+        doc = applied(doc, Json{{"op", "add_channel"}, {"page", 1}, {"kind", "spot"}, {"fill", "white"}});
+        const std::string id = doc.page(0).channels[0].id;
+        const auto samples = [&](const core::Document& d) { return core::decode_ink_raster(*d.page(0).channels[0].raster); };
+        const core::InkPixels white = samples(doc);
+        QCOMPARE(white.width, std::uint32_t(1417));  // (60 mm at 600 dpi)
+        QCOMPARE(white.height, std::uint32_t(1890));
+        const auto px = [](double mm) { return static_cast<int>(mm / 25.4 * 600); };
+        const auto value = [&](const core::InkPixels& p, double x_mm, double y_mm) { return p.value(std::size_t(px(y_mm)) * p.width + px(x_mm), 0); };
+        // the rows of the channel from y0 to y1 (pixels), as stored
+        const auto rows = [](const core::InkPixels& p, int y0, int y1) {
+            return std::vector<std::uint16_t>(p.samples.begin() + std::ptrdiff_t(std::size_t(y0) * p.width), p.samples.begin() + std::ptrdiff_t(std::size_t(y1) * p.width));
+        };
+        // the eraser along y = 40 mm from x = 5 to 25 mm, 4 mm wide
+        core::Document erased = applied(doc, Json{{"op", "erase_raster"}, {"page", 1}, {"layer_id", "paint0000001"}, {"channel", id}, {"width_mm", 4},
+                                                  {"points", Json::array({Json::array({5, 40}), Json::array({25, 40})})}});
+        core::InkPixels now = samples(erased);
+        QCOMPARE(now.width, white.width);
+        QCOMPARE(value(now, 15, 40), 0.0);
+        QCOMPARE(value(now, 6, 40), 0.0);
+        QCOMPARE(value(now, 15, 13.3), 1.0);  // (where 200-dpi pixels on the 600-dpi channel would have put it)
+        QCOMPARE(value(now, 15, 44), 1.0);
+        QCOMPARE(value(now, 40, 40), 1.0);
+        QVERIFY(rows(now, 0, px(35)) == rows(white, 0, px(35)));
+        QVERIFY(rows(now, px(45), int(now.height)) == rows(white, px(45), int(white.height)));
+        QCOMPARE(erased.page(0).layers.size(), doc.page(0).layers.size());
+        // delete_area within its area (40..50 × 10..20 mm)
+        const Json box{{"poly", Json::array({Json::array({40, 10}), Json::array({50, 10}), Json::array({50, 20}), Json::array({40, 20})})}};
+        now = samples(applied(doc, Json{{"op", "delete_area"}, {"page", 1}, {"layer_id", "paint0000001"}, {"channel", id}, {"area", box}}));
+        QCOMPARE(value(now, 45, 15), 0.0);
+        QCOMPARE(value(now, 41, 11), 0.0);
+        QCOMPARE(value(now, 30, 15), 1.0);
+        QCOMPARE(value(now, 45, 25), 1.0);
+        QVERIFY(rows(now, px(25), int(now.height)) == rows(white, px(25), int(white.height)));
+        // a channel of fine detail (its own 600-dpi pixels: stripes a pixel wide), a filter within an area and liquify:
+        // the detail where they did not reach as it was
+        core::Document fine = doc;
+        render::channels::Plane stripes;
+        stripes.width = white.width;
+        stripes.height = white.height;
+        stripes.values.resize(std::size_t(stripes.width) * stripes.height);
+        for (std::size_t i = 0; i < stripes.values.size(); ++i) stripes.values[i] = (i % stripes.width) % 2 == 0 ? 1.0f : 0.25f;
+        fine.edit_page(0).channels[0].raster = render::channels::encode(stripes, 8);
+        const core::InkPixels striped = samples(fine);
+        const Json bottom{{"poly", Json::array({Json::array({0, 60}), Json::array({60, 60}), Json::array({60, 80}), Json::array({0, 80})})}};
+        now = samples(applied(fine, Json{{"op", "filter_raster"}, {"page", 1}, {"id", "paint0000001"}, {"channel", id}, {"kind", "blur"}, {"radius", 2},
+                                         {"area", bottom}}));
+        QVERIFY(rows(now, 0, px(55)) == rows(striped, 0, px(55)));
+        QVERIFY(rows(now, px(65), int(now.height)) != rows(striped, px(65), int(striped.height)));
+        now = samples(applied(fine, Json{{"op", "liquify"}, {"page", 1}, {"layer_id", "paint0000001"}, {"channel", id}, {"width_mm", 8},
+                                         {"points", Json::array({Json::array({30, 40}), Json::array({34, 40})})}}));
+        QVERIFY(rows(now, 0, px(30)) == rows(striped, 0, px(30)));
+        QVERIFY(rows(now, px(50), int(now.height)) == rows(striped, px(50), int(striped.height)));
+        // an op that leaves it as it was (white filled over white): the channel's very bytes
+        const core::Document same = applied(doc, Json{{"op", "fill_area"}, {"page", 1}, {"layer_id", "paint0000001"}, {"channel", id},
+                                                      {"area", left_half()}, {"rgb", Json::array({255, 255, 255})}});
+        QCOMPARE(*same.page(0).channels[0].raster, *doc.page(0).channels[0].raster);
+    }
+
+    // What a lent channel gives back follows a grey page's rules: Genko's blacks (the greys 0, 10, 15 and 20, the pen's
+    // and the swatches' black) are no ink and not selected, white is all; other greys their lightness.
+    void genkosBlackClearsAChannel() {
+        for (const int black : {20, 15, 10, 0}) {
+            core::Document doc = painted(pattern());
+            doc = applied(doc, Json{{"op", "add_channel"}, {"page", 1}, {"fill", "white"}});
+            const std::string id = doc.page(0).channels[0].id;
+            doc = applied(doc, Json{{"op", "fill_area"}, {"page", 1}, {"layer_id", "paint0000001"}, {"channel", id}, {"area", left_half()},
+                                  {"rgb", Json::array({black, black, black})}});
+            const render::channels::Plane p = plane(doc.page(0), 0);
+            QVERIFY2(at(p, 10, 10) == 0.0f, qPrintable(QString("%1: %2").arg(black).arg(at(p, 10, 10))));
+            QCOMPARE(at(p, 400, 10), 1.0f);
+        }
+        core::Document doc = painted(pattern());
+        doc = applied(doc, Json{{"op", "add_channel"}, {"page", 1}});
+        const std::string id = doc.page(0).channels[0].id;
+        doc = applied(doc, Json{{"op", "fill_area"}, {"page", 1}, {"layer_id", "paint0000001"}, {"channel", id}, {"area", left_half()},
+                              {"rgb", Json::array({128, 128, 128})}});
+        QCOMPARE(at(plane(doc.page(0), 0), 10, 10), 128 / 255.0f);
+        doc = applied(doc, Json{{"op", "fill_area"}, {"page", 1}, {"layer_id", "paint0000001"}, {"channel", id}, {"area", left_half()},
+                              {"rgb", Json::array({255, 255, 255})}});
+        QCOMPARE(at(plane(doc.page(0), 0), 10, 10), 1.0f);
+    }
+
+    // A 16-bit channel worked by a pixel op: what it changed comes back at 8 bits — said in the op's result
+    // (channel_precision: 8); a pixel it did not change keeps its 16-bit value; an 8-bit channel says nothing.
+    void deepChannelSaysItsPrecision() {
+        core::Document doc = applied(painted(pattern()), Json{{"op", "set_color_mode"}, {"page", 1}, {"mode", "rgb"}, {"depth", 16}});
+        doc = applied(doc, Json{{"op", "add_channel"}, {"page", 1}});
+        render::channels::Plane fine = plane(doc.page(0), 0);
+        for (float& v : fine.values) v = 1000.0f / 65535.0f;
+        doc.edit_page(0).channels[0].raster = render::channels::encode(fine, 16);
+        const std::string id = doc.page(0).channels[0].id;
+        const Json fill{{"op", "fill_area"}, {"page", 1}, {"layer_id", "paint0000001"}, {"channel", id}, {"area", left_half()},
+                        {"rgb", Json::array({255, 255, 255})}};
+        const Json said = report(doc, fill);
+        QCOMPARE(said.value("channel_precision", Json()), Json(8));
+        const core::InkPixels after = core::decode_ink_raster(*applied(doc, fill).page(0).channels[0].raster);
+        QCOMPARE(after.samples[std::size_t(10) * after.width + 10], std::uint16_t(65535));
+        QCOMPARE(after.samples[std::size_t(10) * after.width + 400], std::uint16_t(1000));
+        core::Document eight = applied(painted(pattern()), Json{{"op", "add_channel"}, {"page", 1}});
+        const Json plain = report(eight, Json{{"op", "fill_area"}, {"page", 1}, {"layer_id", "paint0000001"}, {"channel", eight.page(0).channels[0].id},
+                                              {"area", left_half()}, {"rgb", Json::array({255, 255, 255})}});
+        QVERIFY(!plain.contains("channel_precision"));
+    }
+
+    // GKIR read a row at a time (core::read_ink_raster_rows, for the large channels): the values decode_ink_raster gives,
+    // at 8, 16 and 32 bits; bytes cut short or following the pixels refused as decode_ink_raster refuses them.
+    void rowsReadOneAtATime() {
+        for (const int depth : {8, 16, 32}) {
+            core::InkPixels pixels = core::blank_ink_pixels(core::InkSpace::Mask, depth, 37, 23);
+            for (std::size_t i = 0; i < pixels.pixel_count(); ++i) pixels.set(i, 0, ((i * 7919) % 1000) / 999.0);
+            const std::string bytes = core::encode_ink_raster(pixels);
+            const core::InkPixels whole = core::decode_ink_raster(bytes);
+            std::uint32_t rows = 0;
+            core::read_ink_raster_rows(bytes, [&](std::uint32_t y, const float* values) {
+                QCOMPARE(y, rows++);
+                for (std::uint32_t x = 0; x < whole.width; ++x) QCOMPARE(values[x], static_cast<float>(whole.value(std::size_t(y) * whole.width + x, 0)));
+            });
+            QCOMPARE(rows, whole.height);
+            const auto refused = [](const std::string& broken) {
+                try {
+                    core::read_ink_raster_rows(broken, [](std::uint32_t, const float*) {});
+                } catch (const core::Error& error) {
+                    return error.code() == "format";
+                }
+                return false;
+            };
+            QVERIFY(refused(bytes.substr(0, bytes.size() - 6)));
+            QVERIFY(refused(bytes + "x"));
+        }
+    }
+
+    // The panel's small picture of a channel: each pixel the mean of the channel's pixels it covers, read row by row
+    // (not decoded whole); none for a channel without pixels or one that cannot be read.
+    void channelThumbnail() {
+        core::Document doc = applied(painted(pattern()), Json{{"op", "add_channel"}, {"page", 1}, {"fill", "area"}, {"area", left_half()}});
+        const core::Channel& channel = doc.page(0).channels[0];
+        const render::Image small = render::channels::thumbnail(channel, render::Size{27, 36});
+        QCOMPARE(small.mode(), std::string_view("L"));
+        QCOMPARE(small.getpixel(3, 20)[0], 255.0);
+        QCOMPARE(small.getpixel(24, 20)[0], 0.0);
+        const double edge = small.getpixel(13, 20)[0];  // (the column over the half's edge: part of it)
+        QVERIFY2(edge > 0 && edge < 255, qPrintable(QString::number(edge)));
+        core::Channel none = channel;
+        none.raster = nullptr;
+        QCOMPARE(render::channels::thumbnail(none, render::Size{27, 36}).getbbox(), std::optional<render::Box>());
+        none.raster = std::make_shared<const std::string>("GKIR broken");
+        QCOMPARE(render::channels::thumbnail(none, render::Size{27, 36}).getbbox(), std::optional<render::Box>());
+    }
 };
 
 QTEST_GUILESS_MAIN(TestChannels)

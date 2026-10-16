@@ -172,7 +172,7 @@ QIcon ChannelPanel::thumbnail(const core::Page& page, const core::Channel& chann
     const int th = w >= h ? std::max(1, static_cast<int>(std::lround(36 * h / w))) : 36;
     QIcon icon;
     try {
-        const render::Image mask = render::channels::mask_of(channel, render::Size{tw, th});
+        const render::Image mask = render::channels::thumbnail(channel, render::Size{tw, th});  // (read row by row, not kept)
         const std::string bytes = mask.tobytes();
         QImage image(reinterpret_cast<const uchar*>(bytes.data()), tw, th, tw, QImage::Format_Grayscale8);
         icon = QIcon(QPixmap::fromImage(image.copy()));
