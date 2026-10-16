@@ -77,4 +77,6 @@ std::string color_raster_space_of(const Json& metadata);
 std::string encode_color_pixels(std::uint32_t width, std::uint32_t height, std::string_view precision,
                                const std::function<std::array<double, 4>(std::size_t)>& pixel);
 void validate_color_document(const Document& doc);
+// How many precise rasters validate_color_document has scanned (each allocation once: its bytes never change) (tests).
+std::uint64_t color_raster_checks();
 } // namespace genko::core

@@ -71,9 +71,13 @@ Json layer_brief(const core::Layer& layer, bool colour_model) {
     if (!layer.panel_clip) out["panel_clip"] = false;
     // (color-model@1, on a page of a colour model alone: the precision its pixels are kept in)
     if (colour_model) {
-        if (layer.ink_raster) out["precision"] = core::ink_raster_header(*layer.ink_raster).depth;
-        else if (layer.color_raster) out["precision"] = static_cast<unsigned char>((*layer.color_raster)[5]) == 2 ? "u16" : "f32";
-        else if (layer.raster_png && !layer.raster_png->empty()) out["precision"] = 8;
+        try {  // (pixels this build cannot read — a read-only book's — have none said)
+            if (layer.ink_raster) out["precision"] = core::ink_raster_header(*layer.ink_raster).depth;
+            else if (layer.color_raster) out["precision"] = static_cast<unsigned char>(layer.color_raster->at(5)) == 2 ? "u16" : "f32";
+            else if (layer.raster_png && !layer.raster_png->empty()) out["precision"] = 8;
+        } catch (const std::exception&) {
+            out.erase("precision");
+        }
     }
     return out;
 }

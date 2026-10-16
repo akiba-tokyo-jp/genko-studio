@@ -36,8 +36,8 @@ struct RgbMode {
 // {"mode": "rgb", "depth", "profile"?, "intent", "bpc"?} in that order ("profile" only for one, "bpc" only when false).
 Json to_json(const RgbMode& mode);
 
-// A page's or book's `color`, read: a mode of inks (core/ink.hpp), or an RGB mode, or neither (null; an RGB mode with
-// every default). core::Error("value") says what is wrong.
+// A page's or book's `color`, read: a mode of inks (core/ink.hpp), or an RGB mode, or neither (null). core::Error("value")
+// says what is wrong — an RGB mode of every default too, which the writer never writes (no `color`).
 struct ColorModel {
     std::optional<PageColor> inks;
     std::optional<RgbMode> rgb;
@@ -75,7 +75,8 @@ const BuiltinProfile* builtin_profile(std::string_view name);
 const BuiltinProfile* builtin_profile_by_ref(std::string_view ref);
 
 // The description an ICC profile gives itself (its 'desc' tag: ICC v2 text or v4 multi-localized, English first), or
-// "" when it has none this reads.
+// "" when it has none this reads. Always UTF-8: a v2 text's bytes past ASCII are '?', a v4 text's lone surrogate halves
+// U+FFFD.
 std::string icc_description(std::string_view icc);
 // The description of a mode's profile: a built-in's, the profile's own, else sRGB's or Lab's (none: Little CMS's own).
 std::string profile_description(const std::string& ref, const Bytes& icc, bool lab = false);

@@ -6,7 +6,9 @@
 #include <array>
 #include <limits>
 
+#include "core/color_raster.hpp"
 #include "core/error.hpp"
+#include "core/ink.hpp"
 #include "core/paths.hpp"
 #include "core/pyconv.hpp"
 #include "core/pyops.hpp"
@@ -201,8 +203,40 @@ std::int64_t default_dpi(const core::Document& episode, std::string_view key) {
     return episode.spec.dpi.truthy() ? core::py_int(episode.spec.dpi) : 600;
 }
 
+namespace {
+
+// color-model@1: can a 32-bit page hold values past 0..1 (HDR) — its precise rasters' colours, a grey page's lightness,
+// or an exposure correction that may make them?
+bool may_hold_hdr(const core::Page& page) {
+    const auto outside = [](double v) { return v < 0.0 || v > 1.0; };
+    for (const core::Layer& layer : page.layers) {
+        if (layer.kind == core::LayerKind::Adjust && layer.visible && layer.adjust && layer.adjust->is_object() &&
+            layer.adjust->value("kind", core::Json()) == "exposure") {
+            return true;
+        }
+        try {
+            if (layer.color_raster) {
+                const core::ColorRasterView view(*layer.color_raster);
+                for (std::size_t i = 0; i < std::size_t(view.width()) * view.height(); ++i) {
+                    const auto p = view.pixel(i);
+                    if (outside(p[0]) || outside(p[1]) || outside(p[2])) return true;
+                }
+            } else if (layer.ink_raster && page.color && page.color->space == core::InkSpace::Gray) {
+                const core::InkPixels pixels = core::decode_ink_raster(*layer.ink_raster);
+                for (std::size_t i = 0; pixels.is_float() && i < pixels.pixel_count(); ++i) {
+                    if (outside(pixels.value(i, 0))) return true;
+                }
+            }
+        } catch (const core::Error&) {  // (pixels this build cannot read: none of theirs written)
+        }
+    }
+    return false;
+}
+
+}  // namespace
+
 std::vector<std::string> export_notes(const core::Document& episode, std::string_view key, std::string_view color) {
-    std::int64_t converted = 0, halved = 0;
+    std::int64_t converted = 0, halved = 0, cut = 0;
     bool inks_only = true;  // (every page converted a CMYK or Lab one)
     for (const auto& page : episode.pages) {
         if (!page->color && !page->rgb) continue;
@@ -217,6 +251,8 @@ std::vector<std::string> export_notes(const core::Document& episode, std::string
         const bool cmyk_or_lab = page->color && page->color->space != core::InkSpace::Gray;
         if (deep && ((key == "pdf" && (inks || values)) || (cmyk_or_lab && (inks || (key == "pack" && detail::as_inks(*page, "tiff", "auto")))))) {
             ++halved;
+            // (a PDF holds values in 0..1: an RGB or grey page's HDR is cut)
+            if (key == "pdf" && !cmyk_or_lab && may_hold_hdr(*page)) ++cut;
         }
     }
     std::vector<std::string> notes;
@@ -229,6 +265,10 @@ std::vector<std::string> export_notes(const core::Document& episode, std::string
                                   : "色モード・プロファイルを持つページ " + n + " ページは、この形式・色ではその値のまま書けないため、画面の色（sRGB）から変換して書き出しました");
     }
     if (halved > 0) notes.push_back("32 bit のページ " + std::to_string(halved) + " ページは、この形式では 16 bit にして書き出しました");
+    if (cut > 0) {
+        notes.push_back("HDR の値（0〜1 の外）を持つ 32 bit のページ " + std::to_string(cut) +
+                        " ページは、PDF では 0〜1 に切って書き出しました（HDR のまま残すには TIFF か PSD で書き出します）");
+    }
     return notes;
 }
 

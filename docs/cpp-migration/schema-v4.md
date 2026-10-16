@@ -269,7 +269,7 @@ v3 の行（`rev`・`actor`・`at`・`changes`・`via`）をそのまま残し�
 色モード（color-mode@1）を広げる。C++ 版だけの機能。色モデルの無いページ（RGB・8 bit・sRGB）は今までどおりで、形式も画素も変わらない。
 
 - ページと本の `color`（color-mode@1 と同じ場所）は次のどれか。無い、または `null` は RGB・8 bit・sRGB。
-  - RGB: `{"mode": "rgb", "depth": 8|16|32, "profile": "sha256:<64>"?, "intent": …, "bpc": false?}`。`profile` は sRGB 以外のときだけ（RGB のマトリックス・シェーパーの ICC。素材 `.icc`）。`bpc`（黒点補正）は false のときだけ書く（既定 true）。色の表は持たない。8 bit・sRGB・`"relative"`・黒点補正ありは書かない（色モデル無し）。
+  - RGB: `{"mode": "rgb", "depth": 8|16|32, "profile": "sha256:<64>"?, "intent": …, "bpc": false?}`。`profile` は sRGB 以外のときだけ（RGB のマトリックス・シェーパーの ICC。素材 `.icc`）。`bpc`（黒点補正）は false のときだけ書く（既定 true）。色の表は持たない。8 bit・sRGB・`"relative"`・黒点補正ありは書かない（色モデル無し）。その形を書いたもの（`{"mode": "rgb", "depth": 8, "intent": "relative"}`）は書き手の形でないので、`"bpc": true` と同じく読み取り専用で開く（保存で黙って消さない）。
   - グレー: `{"mode": "gray", "depth": 8|16|32, "profile": "sha256:<64>", "intent": …, "bpc": false?, "inks": […]}`。`profile` は必須（グレーの ICC）。色の表のインキは `[k]`（0..1、墨の割合。明るさは 1 − k）。
   - CMYK・Lab: color-mode@1 のまま。`depth` に 32 を加え、`bpc` を同じく加える。
   - キーはこの順で書く（読むときは順を問わない）。未知のキー・範囲外の値・色空間の違うプロファイル（RGB のページにグレーの ICC など）は読み取り専用で開く（別のプロファイルで描かない）。プロファイルの素材は color-mode@1 と同じく照合する（内蔵のプロファイルも素材として持つ）。

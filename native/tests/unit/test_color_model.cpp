@@ -297,7 +297,6 @@ private slots:
         QCOMPARE(core::to_json(plain).dump(), std::string(R"({"mode":"rgb","depth":32,"intent":"relative"})"));
         const core::ColorModel back = core::color_model_from_json(core::to_json(rgb));
         QVERIFY(back.rgb && *back.rgb == rgb && !back.inks);
-        QVERIFY(!core::color_model_from_json(core::to_json(core::RgbMode{})).rgb);  // (every default: none)
         core::PageColor gray;
         gray.space = core::InkSpace::Gray;
         gray.depth = 32;
@@ -314,7 +313,7 @@ private slots:
         QVERIFY(!cmyk.color_mode_only());
         QCOMPARE(core::to_json(cmyk)["bpc"], Json(false));
         // refused: an unknown key, a depth, a grey page without its profile, an RGB profile that is not a ref, "bpc": true,
-        // a grey ink of two values
+        // an RGB mode of every default, a grey ink of two values
         const auto refused = [](const Json& value) {
             try {
                 (void)core::color_model_from_json(value);
@@ -335,6 +334,7 @@ private slots:
         j = core::to_json(rgb);
         j["bpc"] = true;
         QVERIFY(refused(j));
+        QVERIFY(refused(core::to_json(core::RgbMode{})));  // (every default: written as no color, never so)
         j = core::to_json(gray);
         j.erase("profile");
         QVERIFY(refused(j));
@@ -1265,6 +1265,45 @@ private slots:
         QVERIFY2(grew < 128LL * 1024 * 1024, qPrintable(QString::number(grew)));
     }
 
+    // document.inspect never stops on a profile's description or a layer's pixels it cannot read (review H): a v2
+    // description's bytes past ASCII and a v4 one's surrogate pairs are text, lone halves the replacement character.
+    void inspectNeverStops() {
+        const auto be32 = [](std::uint32_t v) {
+            return std::string{static_cast<char>(v >> 24), static_cast<char>(v >> 16), static_cast<char>(v >> 8), static_cast<char>(v)};
+        };
+        const auto icc_with = [&](const std::string& tag) {
+            std::string out(128, '\0');
+            out += be32(1) + "desc" + be32(144) + be32(static_cast<std::uint32_t>(tag.size()));
+            out += tag;
+            return out;
+        };
+        const std::string v2 = icc_with("desc" + std::string(4, '\0') + be32(13) + std::string("Caf\xe9 profil\0", 13));
+        QCOMPARE(core::icc_description(v2), std::string("Caf? profil"));
+        const std::string text("\xd8\x3d\xde\x00\x00\x41\xd8\x00\x00\x42", 10);  // (😀 A, a lone high half, B)
+        const std::string v4 = icc_with("mluc" + std::string(4, '\0') + be32(1) + be32(12) + "enUS" + be32(10) + be32(28) + text);
+        QCOMPARE(core::icc_description(v4), std::string("\xf0\x9f\x98\x80" "A\xef\xbf\xbd" "B"));
+        // a CMYK page of such a profile, a grey page whose layer's pixels are not GKIR: inspected
+        core::Document doc = small_book(2);
+        core::PageColor cmyk;
+        cmyk.icc = std::make_shared<const std::string>(v2);
+        cmyk.profile = core::bytes_ref(v2);
+        doc.edit_page(0).color = cmyk;
+        core::PageColor grey;
+        grey.space = core::InkSpace::Gray;
+        grey.profile = core::builtin_profile("sgray")->ref();
+        grey.icc = core::builtin_profile("sgray")->bytes;
+        doc.edit_page(1).color = grey;
+        core::Layer broken;
+        broken.id = "broken";
+        broken.kind = core::LayerKind::Raster;
+        broken.ink_raster = std::make_shared<const std::string>("GKIR\x09 not one");
+        doc.edit_page(1).layers.push_back(broken);
+        const Json seen = storage::snapshot(doc, false);
+        QCOMPARE(seen["pages"][0]["color"]["profile_description"], Json("Caf? profil"));
+        QVERIFY(!seen["pages"][1]["layers"].back().contains("precision"));
+        QVERIFY(!core::dump_python(seen).empty());
+    }
+
     // Export of the layers (review K): an RGB page of a profile's paint layer written in sRGB, as the page shows it.
     void layersExportShowsSrgb() {
         QTemporaryDir tmp;
@@ -1408,6 +1447,40 @@ private slots:
         const core::Document eight = run_ops(doc, Json::array({Json{{"op", "set_color_mode"}, {"page", 1}, {"mode", "rgb"}, {"depth", 8}, {"dither", true}}})).doc;
         const std::string rgba = render::open_image(*eight.page(0).layers.back().raster_png, render::kPillowOpenLimits).convert("RGBA").tobytes();
         QCOMPARE(int(static_cast<unsigned char>(rgba[(std::size_t(1) * 1936 + 1935) * 4 + 1])), 128);
+    }
+
+    // A PDF of a 32-bit page holding HDR (review S): its note says those values were cut.
+    void pdfNotesTheHdrCut() {
+        core::Document doc = run_ops(small_book(2), Json::array({Json{{"op", "put_color_raster"}, {"page", 1}, {"width", 2}, {"height", 1}, {"precision", "f32"},
+                                                                     {"pixels", Json::array({2.0, 0.5, 0.25, 1.0, 0.5, 0.5, 0.5, 1.0})}},
+                                                                Json{{"op", "set_color_mode"}, {"page", 1}, {"mode", "rgb"}, {"depth", 32}},
+                                                                Json{{"op", "set_color_mode"}, {"page", 2}, {"mode", "rgb"}, {"depth", 32}}})).doc;
+        const std::vector<std::string> notes = formats::export_notes(doc, "pdf", "auto");
+        QCOMPARE(notes.size(), std::size_t{2});
+        QCOMPARE(notes[0], std::string("32 bit のページ 2 ページは、この形式では 16 bit にして書き出しました"));
+        QVERIFY2(notes[1].find("HDR") != std::string::npos && notes[1].find("1 ページ") != std::string::npos, notes[1].c_str());
+        QCOMPARE(formats::export_notes(doc, "tiff", "auto"), std::vector<std::string>{});
+    }
+
+    // An RGB `color` written with every default (review T) is not the writer's: read-only, as "bpc": true is.
+    void explicitDefaultIsReadOnly() {
+        bool refused = false;
+        try {
+            (void)core::color_model_from_json(Json::parse(R"({"mode":"rgb","depth":8,"intent":"relative"})"));
+        } catch (const core::Error& error) {
+            refused = error.code() == "value";
+        }
+        QVERIFY(refused);
+    }
+
+    // The precise pixels checked once (review U): an op after another does not scan again the rasters it did not change.
+    void preciseRastersCheckedOnce() {
+        core::Document doc = small_book();
+        doc = run_ops(doc, Json::array({Json{{"op", "put_color_raster"}, {"page", 1}, {"width", 64}, {"height", 64}, {"precision", "f32"},
+                                              {"pixels", Json(std::vector<double>(64 * 64 * 4, 0.5))}}})).doc;
+        const std::uint64_t before = core::color_raster_checks();
+        for (int i = 0; i < 3; ++i) doc = run_ops(doc, Json::array({Json{{"op", "set_meta"}, {"title", "t" + std::to_string(i)}}})).doc;
+        QVERIFY2(core::color_raster_checks() - before <= 1, qPrintable(QString::number(core::color_raster_checks() - before)));
     }
 };
 
