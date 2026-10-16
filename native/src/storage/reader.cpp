@@ -1216,6 +1216,16 @@ core::Document Reader::migrate(const Json& payload) {
         if (!in(kTopKeys, key)) doc.extra[key] = value;
     }
     {
+        // (color-model@1: the book's text_gamma, under its colour model; a value that is not one is reported: read-only)
+        if (const auto it = doc.extra.find("color"); it != doc.extra.end() && it->is_object() && it->contains("text_gamma")) {
+            const Json gamma = (*it)["text_gamma"];
+            if (gamma.is_number() && !gamma.is_boolean() && core::is_text_gamma(gamma.get<double>())) {
+                doc.text_gamma = gamma.get<double>();
+                it->erase("text_gamma");
+            } else {
+                issue("broken_value", "/color/text_gamma", {}, "the book's text_gamma is more than 1 and at most 2.2");
+            }
+        }
         core::ColorModel model = read_color(doc.extra, "");
         doc.color = std::move(model.inks);
         doc.rgb = std::move(model.rgb);

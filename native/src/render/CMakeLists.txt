@@ -41,6 +41,7 @@ genko_library(genko_render
     timelapse.cpp
     plugins.cpp
     colour.cpp
+    proof.cpp
     ink.cpp
     ink_canvas.cpp
     ink_edit.cpp

@@ -642,9 +642,31 @@ void set_inks(OpContext& c) {
     c.report = Json{{"pages", changed}};
 }
 
+// set_text_gamma (color-model@1, SPEC COLOR-03 PC1b; PhotoCraft's Color Settings › blendTextGamma, kept in the book so
+// the book draws the same in the app, on the command line and through MCP): {"op": "set_text_gamma", "gamma": 1..2.2 |
+// false | null}. 1, false or null: none (the letters mixed as Python's).
+void set_text_gamma(OpContext& c) {
+    const auto given = c.op.find("gamma");  // (null is one of its values: none)
+    if (given == c.op.end()) throw OpError("gamma is a number from 1 to 2.2 (1, false or null: none)");
+    const Json* gamma = &*given;
+    std::optional<double> value;
+    if (gamma->is_boolean()) {
+        if (gamma->get<bool>()) value = 1.45;  // (Photoshop's own, as upstream's `true`)
+    } else if (gamma->is_number()) {
+        const double g = gamma->get<double>();
+        if (!std::isfinite(g) || g < 1.0 || g > core::kTextGammaMax) throw OpError("gamma is a number from 1 to 2.2 (1, false or null: none)");
+        if (g > 1.0) value = g;
+    } else if (!gamma->is_null()) {
+        throw OpError("gamma is a number from 1 to 2.2 (1, false or null: none)");
+    }
+    c.doc.text_gamma = value;
+    c.report = Json{{"gamma", value ? Json(*value) : Json()}};
+}
+
 }  // namespace
 
 void register_ink_ops(core::OpRegistry& registry) {
+    registry.add("set_text_gamma", set_text_gamma);
     registry.add("set_color_mode", set_color_mode);
     registry.add("set_inks", set_inks);
     registry.add("assign_profile", assign_profile);

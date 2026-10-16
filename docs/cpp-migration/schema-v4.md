@@ -50,7 +50,7 @@ v3 から外すもの: なし（未知キーも `extra` として書き戻す）
 | `psd-text@1` | M4 | PSD の編集可能文字の出力設定（原稿側の保存項目がある場合のみ） |
 | `native.color_raster_v1` / `native.color_raster_tiles_v1` | M3 | 高精度カラー画素とそのタイル保存（下の節） |
 | `color-mode@1` | CMYK/Lab | ページごとの色モード（CMYK・Lab、8/16 bit、埋め込んだ ICC、色の表、GKIR の画素）。COLOR-02（末尾の「色モード」） |
-| `color-model@1` | PC1a | 色モデル: RGB のプロファイル・精度（8/16/32 bit）・黒点補正、グレースケール、32 bit の CMYK・Lab・グレー（GKIR 版 2）、高精度の画素の `space`。COLOR-03（末尾の「色モデル」） |
+| `color-model@1` | PC1a・PC1b | 色モデル: RGB のプロファイル・精度（8/16/32 bit）・黒点補正、グレースケール、32 bit の CMYK・Lab・グレー（GKIR 版 2）、高精度の画素の `space`、本の文字のガンマ（`text_gamma`、PC1b）。COLOR-03（末尾の「色モデル」） |
 
 拡張を使う op が初めて適用されたときに `features` へ加える。拡張を使わない原稿は `features: []`。
 
@@ -278,4 +278,5 @@ v3 の行（`rev`・`actor`・`at`・`changes`・`via`）をそのまま残し�
   - グレー・CMYK・Lab のページは `ink_raster`（GKIR）。そのページの色空間と精度の画素だけを持つ。
 - GKIR 版 2（版 1 が持てない画素だけ。版 1 が持てる CMYK・Lab の 8・16 bit はいつも版 1 で書く: 同じ画素はいつも同じバイト）: `"GKIR"`、版 2（u8）、色空間（u8。3 = グレー、ほかは版 1 と同じ 1 = CMYK・2 = Lab）、精度（u8。8・16・32）、色の版の数（u8。グレー 1、CMYK 4、Lab 3）、幅・高さ（u32 LE）、zlib の流れ（版 1 と同じ: 行ごとに PNG の行フィルターの種類と標本）。標本は色の版の後にアルファ（straight）。16 bit は big-endian、32 bit は IEEE 754 binary32 の big-endian。32 bit の値は有限で、0..1（グレーの明るさだけは HDR として 0..1 の外も持てる）。グレーの標本は明るさ（0 が黒）。
 - 要素の色: グレーのページは color-mode@1 の規則で当てる（ページの `inks` → Genko の既定の墨（灰色 0・10・15・20）は明るさ 0 → ほかの灰色 v は明るさ v/255（白は 1。ページのプロファイルによらず、CMYK の K だけと同じ考え） → ほかの色は sRGB からページのプロファイルへ、意図・黒点補正）。プロファイル付きの RGB のページは、要素の sRGB の色をページの意図・黒点補正でそのプロファイルへ変換して描く（sRGB のちょうどの白と黒はページの白と黒）。
-- `features` に `color-model@1` を加える（ページか本に RGB のモード・グレー・32 bit・`bpc: false` のどれかがあるとき。GKIR 版 2 の素材を持つときも）。`color-mode@1` も一緒に書く（ページの `color` の場所が同じため）。color-model@1 を知らない読み手は、未知の拡張として読み取り専用で開く。
+- 本の文字のガンマ（PC1b。カラー設定の「文字の色をガンマで混ぜる」、PhotoCraft の blendTextGamma）: 本の `color` の最後のキー `"text_gamma": 数`（1 より大きく 2.2 以下）。台詞・文字の字のふちを、下の色とこのガンマで混ぜて描く（((1 − a)·下^g + a·字^g)^(1/g)）。本に持つので、アプリ・コマンドライン・MCP・書き出しで同じ画素になる（機械の設定では変わらない）。無いときは今までどおり（Python 版と同じ画素）。本の色モデルが既定（RGB・8 bit・sRGB）でも、このキーのために `{"mode": "rgb", "depth": 8, "intent": "relative", "text_gamma": …}` を書く（読むときは `text_gamma` を外して残りを本の色モデルとして読む）。ページの `color` にあるとき・範囲外・数でないときは読み取り専用。op は C++ 版だけの `set_text_gamma`（COLOR-03）。
+- `features` に `color-model@1` を加える（ページか本に RGB のモード・グレー・32 bit・`bpc: false` のどれかがあるとき。GKIR 版 2 の素材を持つときも。本に `text_gamma` があるときも）。`color-mode@1` も一緒に書く（ページの `color` の場所が同じため）。color-model@1 を知らない読み手は、未知の拡張として読み取り専用で開く。

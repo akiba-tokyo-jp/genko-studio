@@ -370,6 +370,10 @@ struct Document {
     std::optional<PageColor> color;
     // color-model@1: the RGB colour model of the pages it makes (none: 8 bits, sRGB). Never with `color`.
     std::optional<RgbMode> rgb;
+    // color-model@1 (SPEC COLOR-03, PC1b): カラー設定's 文字の色をガンマで混ぜる — the gamma (over 1, at most 2.2) the
+    // letters of its lines are mixed with what lies under them in (PhotoCraft's blendTextGamma), kept in the book so it
+    // draws the same everywhere. None: mixed as Python's (Pillow's paste). Written under the book's "color".
+    std::optional<double> text_gamma;
     // Why this book must not be saved (unknown features, missing assets, repairs); empty when it may be.
     std::string read_only_reason;
     // (not saved) The pages whose strokes and pictures are not read yet (storage::LoadOptions::assets_of_page: the
