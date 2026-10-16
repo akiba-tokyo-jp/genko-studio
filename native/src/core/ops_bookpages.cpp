@@ -496,6 +496,7 @@ void add_cover(OpContext& c) {
     const PageSpec spec = spec_for(doc.spec, cover);
     Page page = make_page(Num(static_cast<std::int64_t>(doc.pages.size()) + 1), spec, doc.binding);
     page.color = doc.color;  // (color-mode@1: the book's mode for the pages it makes)
+    page.rgb = doc.rgb;      // (color-model@1)
     page.numero = false;
     page.extra["cover"] = cover;
     const bool bleed = py_truthy(get_or(op, "bleed", Json(true)));

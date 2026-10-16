@@ -1656,10 +1656,9 @@ RenderResult render_page(const core::Page& page, int dpi, const RenderOptions& o
         if(pixels>1024LL*1024){
             if(options.stop.stop_requested())throw Cancelled();
             RenderResult out{Image::create_blank("RGB",size_of(area)),{},std::nullopt};
-            if(options.inks && page.color){
-                out.inks=core::InkPixels{page.color->space,page.color->depth,static_cast<std::uint32_t>(area.width()),
-                                         static_cast<std::uint32_t>(area.height()),{}};
-                out.inks->samples.assign(out.inks->pixel_count()*out.inks->channels(),0);
+            if(options.inks && page.color){  // (each tile's inks laid in)
+                out.inks=core::blank_ink_pixels(page.color->space,page.color->depth,static_cast<std::uint32_t>(area.width()),
+                                                static_cast<std::uint32_t>(area.height()));
             }
             constexpr int tile=512;
             for(int y=area.y0;y<area.y1;y+=tile){

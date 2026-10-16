@@ -49,7 +49,7 @@ std::uint32_t intent_number(std::string_view intent) {
     return static_cast<std::uint32_t>(at - core::kIntents.begin());
 }
 
-// The page's profile (CMYK: its ICC bytes; Lab: Little CMS's D50 Lab v4).
+// The page's profile (CMYK, Gray: its ICC bytes; Lab: Little CMS's D50 Lab v4).
 std::unique_ptr<ProfileHandle> page_profile(const PageColor& color) {
     if (color.space == InkSpace::Lab) return std::make_unique<ProfileHandle>(cmsCreateLab4Profile(nullptr));
     if (!color.icc) throw core::Error("value", "the page's ICC profile " + color.profile + " is not held");
@@ -60,10 +60,40 @@ std::unique_ptr<ProfileHandle> page_profile(const PageColor& color) {
 
 std::string page_key(const PageColor& color) { return color.space == InkSpace::Lab ? std::string("lab") : color.profile; }
 
-cmsUInt32Number float_format(InkSpace space) { return space == InkSpace::Cmyk ? TYPE_CMYK_FLT : TYPE_Lab_FLT; }
+cmsUInt32Number float_format(InkSpace space) {
+    switch (space) {
+        case InkSpace::Cmyk: return TYPE_CMYK_FLT;
+        case InkSpace::Lab: return TYPE_Lab_FLT;
+        case InkSpace::Gray: return TYPE_GRAY_FLT;
+        default: break;
+    }
+    throw core::Error("not_yet_ported", "the colours of a " + std::string(core::to_string(space)) + " raster are not in this build yet");
+}
 cmsUInt32Number int_format(InkSpace space, int depth) {
+    if (depth == 32) return float_format(space);
     if (space == InkSpace::Cmyk) return depth == 16 ? TYPE_CMYK_16 : TYPE_CMYK_8;
-    return depth == 16 ? TYPE_Lab_16 : TYPE_Lab_8;
+    if (space == InkSpace::Gray) return depth == 16 ? TYPE_GRAY_16 : TYPE_GRAY_8;
+    if (space == InkSpace::Lab) return depth == 16 ? TYPE_Lab_16 : TYPE_Lab_8;
+    return float_format(space);
+}
+
+// A normalized value (a GKIR sample's meaning, 0..1: CMYK's ink, Lab's encoding, Gray's lightness) as Little CMS's
+// float encoding of the space (CMYK 0..100, Lab L 0..100 and a, b -128..127, Gray 0..1), and back.
+float to_lcms(InkSpace space, unsigned c, double v) {
+    if (space == InkSpace::Cmyk) return static_cast<float>(v * 100.0);
+    if (space == InkSpace::Lab) return static_cast<float>(c == 0 ? v * 100.0 : v * 255.0 - 128.0);
+    return static_cast<float>(v);
+}
+double from_lcms_value(InkSpace space, unsigned c, float v) {
+    if (space == InkSpace::Cmyk) return std::clamp(v / 100.0, 0.0, 1.0);
+    if (space == InkSpace::Lab) return std::clamp(c == 0 ? v / 100.0 : (v + 128.0) / 255.0, 0.0, 1.0);
+    return std::clamp(static_cast<double>(v), 0.0, 1.0);
+}
+
+// Is the page's profile sGray (a grey v shown as sRGB's (v, v, v), numerically)?
+bool sgray(const PageColor& color) {
+    static const std::string ref = core::builtin_profile("sgray")->ref();
+    return color.space == InkSpace::Gray && color.profile == ref;
 }
 
 std::mutex cache_lock;
@@ -86,13 +116,17 @@ Transform cached(const std::string& key, Make make) {
 
 constexpr cmsUInt32Number kFlags = cmsFLAGS_BLACKPOINTCOMPENSATION | cmsFLAGS_NOCACHE;
 
-// sRGB (`in`) → the page (`out`), the page's intent.
+// The flags colours come into the page with (its black point compensation).
+cmsUInt32Number flags_in(const PageColor& color) { return color.bpc ? kFlags : cmsFLAGS_NOCACHE; }
+
+// sRGB (`in`) → the page (`out`), the page's intent and black point compensation.
 Transform from_srgb_transform(const PageColor& color, cmsUInt32Number in, cmsUInt32Number out) {
-    const std::string key = "srgb>" + page_key(color) + ":" + color.intent + ":" + std::to_string(in) + ":" + std::to_string(out);
+    const std::string key = "srgb>" + page_key(color) + ":" + color.intent + (color.bpc ? "" : ":nobpc") + ":" + std::to_string(in) + ":" +
+                            std::to_string(out);
     return cached(key, [&] {
         const ProfileHandle srgb(cmsCreate_sRGBProfile());
         const auto page = page_profile(color);
-        return cmsCreateTransform(srgb.handle, in, page->handle, out, intent_number(color.intent), kFlags);
+        return cmsCreateTransform(srgb.handle, in, page->handle, out, intent_number(color.intent), flags_in(color));
     });
 }
 
@@ -106,9 +140,10 @@ Transform to_srgb_transform(const PageColor& color, cmsUInt32Number in, cmsUInt3
     });
 }
 
-// One page mode → another (CMYK → CMYK keeps the black plate).
+// One page mode → another (CMYK → CMYK keeps the black plate), the target's intent and black point compensation.
 Transform between_transform(const PageColor& from, const PageColor& to, cmsUInt32Number in, cmsUInt32Number out) {
-    const std::string key = page_key(from) + ">" + page_key(to) + ":" + to.intent + ":" + std::to_string(in) + ":" + std::to_string(out);
+    const std::string key = page_key(from) + ">" + page_key(to) + ":" + to.intent + (to.bpc ? "" : ":nobpc") + ":" + std::to_string(in) + ":" +
+                            std::to_string(out);
     return cached(key, [&] {
         const auto a = page_profile(from);
         const auto b = page_profile(to);
@@ -118,15 +153,19 @@ Transform between_transform(const PageColor& from, const PageColor& to, cmsUInt3
                      : intent == INTENT_SATURATION ? INTENT_PRESERVE_K_ONLY_SATURATION
                                                    : INTENT_PRESERVE_K_ONLY_RELATIVE_COLORIMETRIC;
         }
-        return cmsCreateTransform(a->handle, in, b->handle, out, intent, kFlags);
+        return cmsCreateTransform(a->handle, in, b->handle, out, intent, flags_in(to));
     });
 }
 
-// The ink of a grey v (0..255) by the rules (CMYK: K alone; Lab: its lightness, no colour).
+// The ink of a grey v (0..255) by the rules (CMYK: K alone; Gray: k = 1 − v/255, as K; Lab: its lightness, no colour).
 void grey_ink(const PageColor& color, int v, double* out) {
     if (color.space == InkSpace::Cmyk) {
         out[0] = out[1] = out[2] = 0.0;
         out[3] = v == 0 || v == 10 || v == 15 || v == 20 ? 1.0 : 1.0 - v / 255.0;
+        return;
+    }
+    if (color.space == InkSpace::Gray) {
+        out[0] = v == 0 || v == 10 || v == 15 || v == 20 ? 1.0 : 1.0 - v / 255.0;
         return;
     }
     if (v == 0 || v == 10 || v == 15 || v == 20) {
@@ -145,13 +184,26 @@ void grey_ink(const PageColor& color, int v, double* out) {
     out[1] = out[2] = 0.0;
 }
 
-// Little CMS's float CMYK is 0..100: ours 0..1.
+// Little CMS's float CMYK is 0..100: ours 0..1. Its float grey is lightness: ours the black ink, k = 1 − it.
 void from_lcms(InkSpace space, float* values, std::size_t count) {
+    if (space == InkSpace::Gray) {
+        for (std::size_t i = 0; i < count; ++i) values[i] = std::clamp(1.0f - values[i], 0.0f, 1.0f);
+        return;
+    }
     if (space != InkSpace::Cmyk) return;
     for (std::size_t i = 0; i < count * 4; ++i) values[i] = std::clamp(values[i] / 100.0f, 0.0f, 1.0f);
 }
 
 std::uint16_t clamp_sample(double v, double most) { return static_cast<std::uint16_t>(std::lround(std::clamp(v, 0.0, most))); }
+
+// The colours of a 32-bit raster's row as Little CMS's float encoding of its space.
+void lcms_row(const InkPixels& pixels, std::uint32_t y, float* out) {
+    const unsigned ch = pixels.colours();
+    for (std::uint32_t x = 0; x < pixels.width; ++x) {
+        const std::size_t i = std::size_t(y) * pixels.width + x;
+        for (unsigned c = 0; c < ch; ++c) out[x * ch + c] = to_lcms(pixels.space, c, pixels.value(i, c));
+    }
+}
 
 // The samples of one pixel's colour (not its alpha) of an 8- or 16-bit raster, as a 16-bit transform reads them.
 std::vector<std::uint16_t> widened(const InkPixels& pixels) {
@@ -178,24 +230,40 @@ std::uint16_t alpha_to(std::uint16_t a, int from, int to) {
 // The profile check of the book reader (storage/reader.hpp set_profile_check). (Set when this file is linked: every
 // program that draws a CMYK page draws it through it.)
 const bool kReaderCheck = [] {
-    storage::set_profile_check([](std::string_view icc) { return profile_problem(icc); });
+    storage::set_profile_check([](std::string_view icc, core::ProfileSpace space) { return profile_problem(icc, space); });
     return true;
 }();
 
 }  // namespace
 
-std::optional<std::string> profile_problem(std::string_view icc) {
+std::optional<std::string> profile_problem(std::string_view icc, core::ProfileSpace space) {
     if (icc.empty()) return std::string("the profile is empty");
     if (icc.size() > core::kProfileMaxBytes) return std::string("the profile is larger than 16 MiB");
     cmsHPROFILE handle = cmsOpenProfileFromMem(icc.data(), static_cast<cmsUInt32Number>(icc.size()));
     if (handle == nullptr) return std::string("Little CMS cannot read it as an ICC profile");
     const ProfileHandle held(handle);
-    if (cmsGetColorSpace(handle) != cmsSigCmykData) return std::string("it is not a CMYK profile");
+    cmsUInt32Number format = TYPE_CMYK_8;
+    switch (space) {
+        case core::ProfileSpace::Cmyk:
+            if (cmsGetColorSpace(handle) != cmsSigCmykData) return std::string("it is not a CMYK profile");
+            break;
+        case core::ProfileSpace::Gray:
+            if (cmsGetColorSpace(handle) != cmsSigGrayData) return std::string("it is not a grey profile");
+            format = TYPE_GRAY_8;
+            break;
+        case core::ProfileSpace::Rgb:
+            if (cmsGetColorSpace(handle) != cmsSigRgbData) return std::string("it is not an RGB profile");
+            // (an RGB page's values go to and from linear light by the profile's curves: a matrix and its tone curves)
+            if (!cmsIsMatrixShaper(handle)) return std::string("it is not a matrix-shaper RGB profile");
+            format = TYPE_RGB_8;
+            break;
+        case core::ProfileSpace::Lab: return std::string("a Lab page has no profile");
+    }
     const ProfileHandle srgb(cmsCreate_sRGBProfile());
-    cmsHTRANSFORM probe = cmsCreateTransform(srgb.handle, TYPE_RGB_8, handle, TYPE_CMYK_8, INTENT_RELATIVE_COLORIMETRIC, kFlags);
+    cmsHTRANSFORM probe = cmsCreateTransform(srgb.handle, TYPE_RGB_8, handle, format, INTENT_RELATIVE_COLORIMETRIC, kFlags);
     if (probe == nullptr) return std::string("it cannot take colours in (no transform from sRGB)");
     cmsDeleteTransform(probe);
-    probe = cmsCreateTransform(handle, TYPE_CMYK_8, srgb.handle, TYPE_RGB_8, INTENT_RELATIVE_COLORIMETRIC, kFlags);
+    probe = cmsCreateTransform(handle, format, srgb.handle, TYPE_RGB_8, INTENT_RELATIVE_COLORIMETRIC, kFlags);
     if (probe == nullptr) return std::string("its colours cannot be shown (no transform to sRGB)");
     cmsDeleteTransform(probe);
     return std::nullopt;
@@ -269,7 +337,14 @@ void inks_of(const PageColor& color, const unsigned char* rgb, const unsigned ch
 void to_srgb(const PageColor& color, const double* inks, float* srgb, std::size_t count) {
     const unsigned ch = core::colour_channels(color.space);
     std::vector<float> scaled(inks, inks + count * ch);
-    if (color.space == InkSpace::Cmyk) {
+    if (color.space == InkSpace::Gray) {  // (its lightness, 1 − k; sGray's numerically: (v, v, v))
+        for (float& v : scaled) v = 1.0f - std::clamp(v, 0.0f, 1.0f);
+        if (sgray(color)) {
+            for (std::size_t i = 0; i < count; ++i) srgb[i * 3] = srgb[i * 3 + 1] = srgb[i * 3 + 2] = scaled[i];
+        } else {
+            cmsDoTransform(to_srgb_transform(color, TYPE_GRAY_FLT, TYPE_RGB_FLT)->handle, scaled.data(), srgb, static_cast<cmsUInt32Number>(count));
+        }
+    } else if (color.space == InkSpace::Cmyk) {
         for (float& v : scaled) v = std::clamp(v, 0.0f, 1.0f) * 100.0f;
         cmsDoTransform(to_srgb_transform(color, TYPE_CMYK_FLT, TYPE_RGB_FLT)->handle, scaled.data(), srgb, static_cast<cmsUInt32Number>(count));
     } else {
@@ -335,7 +410,8 @@ void Rules::meaning(const double* inks, double* rgb, std::size_t count) const {
             out[0] = out[1] = out[2] = v;
             continue;
         }
-        const bool flat = !cmyk && encode_sample(color.space, 1, p[1], color.depth) == neutral && encode_sample(color.space, 2, p[2], color.depth) == neutral;
+        const bool flat = color.space == InkSpace::Lab && encode_sample(color.space, 1, p[1], color.depth) == neutral &&
+                          encode_sample(color.space, 2, p[2], color.depth) == neutral;
         shown.insert(shown.end(), p, p + ch);
         if (flat) shown[shown.size() - 2] = shown[shown.size() - 1] = 0.0;
         where.push_back(i);
@@ -380,6 +456,10 @@ void Rules::inks(const double* rgb, double* inks, std::size_t count) const {
             if (cmyk) {
                 out[0] = out[1] = out[2] = 0.0;
                 out[3] = 1.0 - v[0];
+                continue;
+            }
+            if (color.space == InkSpace::Gray) {  // (as K: its value kept)
+                out[0] = 1.0 - v[0];
                 continue;
             }
             lab_greys.insert(lab_greys.end(), {static_cast<float>(v[0]), static_cast<float>(v[0]), static_cast<float>(v[0])});
@@ -439,12 +519,39 @@ void correct(const PageColor& color, const double* inks, double* out, std::size_
 
 InkPixels from_rgb(const Image& image, const PageColor& color, bool gray_on_k) {
     const Image rgba = image.mode() == "RGBA" ? image : image.convert("RGBA");
+    const auto width = static_cast<std::uint32_t>(rgba.width()), height = static_cast<std::uint32_t>(rgba.height());
+    const unsigned ch = core::colour_channels(color.space), all = ch + 1;
+    // (a grey page's greys by their value — sGray's, or asked for —, as a CMYK page's on K alone)
+    const bool grey_by_value = color.space == InkSpace::Gray && (gray_on_k || sgray(color));
+    if (color.depth == 32) {
+        InkPixels out = core::blank_ink_pixels(color.space, 32, width, height);
+        const Transform transform = from_srgb_transform(color, TYPE_RGBA_8, float_format(color.space));
+        std::vector<float> row(static_cast<std::size_t>(width) * ch);
+        for (std::uint32_t y = 0; y < height; ++y) {
+            const auto* src = reinterpret_cast<const unsigned char*>(rgba.raw()->image[y]);
+            cmsDoTransform(transform->handle, src, row.data(), width);
+            for (std::uint32_t x = 0; x < width; ++x) {
+                const std::size_t i = std::size_t(y) * width + x;
+                const unsigned char* p = src + x * 4;
+                for (unsigned c = 0; c < ch; ++c) out.set(i, c, from_lcms_value(color.space, c, row[x * ch + c]));
+                if (p[0] == p[1] && p[1] == p[2]) {
+                    if (gray_on_k && color.space == InkSpace::Cmyk) {
+                        for (unsigned c = 0; c < 3; ++c) out.set(i, c, 0.0);
+                        out.set(i, 3, 1.0 - p[0] / 255.0);
+                    } else if (grey_by_value) {
+                        out.set(i, 0, p[0] / 255.0);
+                    }
+                }
+                out.set(i, ch, p[3] / 255.0);
+            }
+        }
+        return out;
+    }
     InkPixels out;
     out.space = color.space;
     out.depth = color.depth;
-    out.width = static_cast<std::uint32_t>(rgba.width());
-    out.height = static_cast<std::uint32_t>(rgba.height());
-    const unsigned ch = core::colour_channels(color.space), all = ch + 1;
+    out.width = width;
+    out.height = height;
     out.samples.assign(out.pixel_count() * all, 0);
     const Transform transform = from_srgb_transform(color, TYPE_RGBA_8, int_format(color.space, color.depth));
     std::vector<std::uint16_t> row16(static_cast<std::size_t>(out.width) * ch);
@@ -462,6 +569,7 @@ InkPixels from_rgb(const Image& image, const PageColor& color, bool gray_on_k) {
                 samples[x * all] = samples[x * all + 1] = samples[x * all + 2] = 0;
                 samples[x * all + 3] = clamp_sample((1.0 - p[0] / 255.0) * most, most);
             }
+            if (grey_by_value && p[0] == p[1] && p[1] == p[2]) samples[x * all] = color.depth == 16 ? static_cast<std::uint16_t>(p[0] * 257) : p[0];
             samples[x * all + ch] = color.depth == 16 ? static_cast<std::uint16_t>(p[3] * 257) : p[3];
         }
     }
@@ -469,15 +577,42 @@ InkPixels from_rgb(const Image& image, const PageColor& color, bool gray_on_k) {
 }
 
 InkPixels from_srgb(const std::vector<float>& rgba, std::uint32_t width, std::uint32_t height, const PageColor& color, bool gray_on_k) {
+    const unsigned ch = core::colour_channels(color.space), all = ch + 1;
+    const bool grey_by_value = color.space == InkSpace::Gray && (gray_on_k || sgray(color));
+    std::vector<float> clamped(rgba.size());
+    for (std::size_t i = 0; i < rgba.size(); ++i) clamped[i] = std::clamp(rgba[i], 0.0f, 1.0f);
+    if (color.depth == 32) {
+        InkPixels out = core::blank_ink_pixels(color.space, 32, width, height);
+        const Transform transform = from_srgb_transform(color, TYPE_RGBA_FLT, float_format(color.space));
+        std::vector<float> row(static_cast<std::size_t>(width) * ch);
+        for (std::uint32_t y = 0; y < height; ++y) {
+            const float* src = clamped.data() + std::size_t(y) * width * 4;
+            cmsDoTransform(transform->handle, src, row.data(), width);
+            for (std::uint32_t x = 0; x < width; ++x) {
+                const std::size_t i = std::size_t(y) * width + x;
+                const float* p = src + x * 4;
+                for (unsigned c = 0; c < ch; ++c) out.set(i, c, from_lcms_value(color.space, c, row[x * ch + c]));
+                if (p[0] == p[1] && p[1] == p[2]) {
+                    if (gray_on_k && color.space == InkSpace::Cmyk) {
+                        for (unsigned c = 0; c < 3; ++c) out.set(i, c, 0.0);
+                        out.set(i, 3, 1.0 - p[0]);
+                    } else if (grey_by_value) {
+                        // (an HDR grey keeps its value: what came in clamped is the original's)
+                        const float v = rgba[(std::size_t(y) * width + x) * 4];
+                        out.set(i, 0, rgba[(std::size_t(y) * width + x) * 4 + 1] == v && rgba[(std::size_t(y) * width + x) * 4 + 2] == v ? v : p[0]);
+                    }
+                }
+                out.set(i, ch, p[3]);
+            }
+        }
+        return out;
+    }
     InkPixels out;
     out.space = color.space;
     out.depth = color.depth;
     out.width = width;
     out.height = height;
-    const unsigned ch = core::colour_channels(color.space), all = ch + 1;
     out.samples.assign(out.pixel_count() * all, 0);
-    std::vector<float> clamped(rgba.size());
-    for (std::size_t i = 0; i < rgba.size(); ++i) clamped[i] = std::clamp(rgba[i], 0.0f, 1.0f);
     const Transform transform = from_srgb_transform(color, TYPE_RGBA_FLT, int_format(color.space, 16));
     std::vector<std::uint16_t> row(static_cast<std::size_t>(width) * ch);
     const double most = out.max();
@@ -492,6 +627,7 @@ InkPixels from_srgb(const std::vector<float>& rgba, std::uint32_t width, std::ui
                 samples[x * all] = samples[x * all + 1] = samples[x * all + 2] = 0;
                 samples[x * all + 3] = clamp_sample((1.0 - p[0]) * most, most);
             }
+            if (grey_by_value && p[0] == p[1] && p[1] == p[2]) samples[x * all] = clamp_sample(p[0] * most, most);
             samples[x * all + ch] = clamp_sample(p[3] * most, most);
         }
     }
@@ -500,7 +636,38 @@ InkPixels from_srgb(const std::vector<float>& rgba, std::uint32_t width, std::ui
 
 Image to_rgba8(const InkPixels& pixels, const PageColor& color) {
     Image out = Image::create("RGBA", Size{static_cast<int>(pixels.width), static_cast<int>(pixels.height)}, Ink{0, 0, 0, 0});
-    const unsigned ch = core::colour_channels(pixels.space), all = pixels.channels();
+    const unsigned ch = pixels.colours(), all = pixels.channels();
+    const auto byte = [](double v) { return static_cast<unsigned char>(std::lround(std::clamp(v, 0.0, 1.0) * 255.0)); };
+    if (sgray(color) || pixels.is_float()) {
+        // (sGray: a grey v is sRGB's (v, v, v), numerically; 32 bits: through the float transform)
+        std::vector<float> lcms(static_cast<std::size_t>(pixels.width) * ch);
+        std::vector<unsigned char> row(static_cast<std::size_t>(pixels.width) * 3);
+        const bool numeric = sgray(color);
+        const Transform transform = numeric ? nullptr : to_srgb_transform(color, float_format(pixels.space), TYPE_RGB_8);
+        for (std::uint32_t y = 0; y < pixels.height; ++y) {
+            if (!numeric) {
+                lcms_row(pixels, y, lcms.data());
+                cmsDoTransform(transform->handle, lcms.data(), row.data(), pixels.width);
+            }
+            auto* dst = reinterpret_cast<unsigned char*>(out.raw()->image[y]);
+            for (std::uint32_t x = 0; x < pixels.width; ++x) {
+                const std::size_t i = std::size_t(y) * pixels.width + x;
+                if (numeric) {
+                    // (8 and 16 bits as their samples narrow: 16 to 8 by rounding)
+                    const unsigned char v = pixels.is_float() ? byte(pixels.value(i, 0))
+                                            : pixels.depth == 8 ? static_cast<unsigned char>(pixels.samples[i * all])
+                                                                : static_cast<unsigned char>(narrowed(pixels.samples[i * all], 8));
+                    dst[x * 4] = dst[x * 4 + 1] = dst[x * 4 + 2] = v;
+                } else {
+                    for (unsigned c = 0; c < 3; ++c) dst[x * 4 + c] = row[x * 3 + c];
+                }
+                dst[x * 4 + 3] = pixels.is_float() ? byte(pixels.value(i, ch))
+                                 : pixels.depth == 8 ? static_cast<unsigned char>(pixels.samples[i * all + ch])
+                                                     : static_cast<unsigned char>(narrowed(pixels.samples[i * all + ch], 8));
+            }
+        }
+        return out;
+    }
     const Transform transform = to_srgb_transform(color, int_format(pixels.space, 16), TYPE_RGB_8);
     const std::vector<std::uint16_t> wide = widened(pixels);
     std::vector<unsigned char> row(static_cast<std::size_t>(pixels.width) * 3);
@@ -519,11 +686,33 @@ Image to_rgba8(const InkPixels& pixels, const PageColor& color) {
 }
 
 std::vector<float> to_srgb_floats(const InkPixels& pixels, const PageColor& color) {
-    const unsigned ch = core::colour_channels(pixels.space), all = pixels.channels();
+    const unsigned ch = pixels.colours(), all = pixels.channels();
+    std::vector<float> out(pixels.pixel_count() * 4);
+    if (sgray(color)) {  // (numerically: an HDR grey of 32 bits stays one)
+        for (std::size_t i = 0; i < pixels.pixel_count(); ++i) {
+            const auto v = static_cast<float>(pixels.is_float() ? pixels.value(i, 0) : std::clamp(pixels.value(i, 0), 0.0, 1.0));
+            out[i * 4] = out[i * 4 + 1] = out[i * 4 + 2] = v;
+            out[i * 4 + 3] = static_cast<float>(pixels.value(i, ch));
+        }
+        return out;
+    }
+    std::vector<float> row(static_cast<std::size_t>(pixels.width) * 3);
+    if (pixels.is_float()) {
+        const Transform transform = to_srgb_transform(color, float_format(pixels.space), TYPE_RGB_FLT);
+        std::vector<float> lcms(static_cast<std::size_t>(pixels.width) * ch);
+        for (std::uint32_t y = 0; y < pixels.height; ++y) {
+            lcms_row(pixels, y, lcms.data());
+            cmsDoTransform(transform->handle, lcms.data(), row.data(), pixels.width);
+            for (std::uint32_t x = 0; x < pixels.width; ++x) {
+                const std::size_t i = std::size_t(y) * pixels.width + x;
+                for (unsigned c = 0; c < 3; ++c) out[i * 4 + c] = std::clamp(row[x * 3 + c], 0.0f, 1.0f);
+                out[i * 4 + 3] = static_cast<float>(pixels.value(i, ch));
+            }
+        }
+        return out;
+    }
     const Transform transform = to_srgb_transform(color, int_format(pixels.space, 16), TYPE_RGB_FLT);
     const std::vector<std::uint16_t> wide = widened(pixels);
-    std::vector<float> out(pixels.pixel_count() * 4);
-    std::vector<float> row(static_cast<std::size_t>(pixels.width) * 3);
     for (std::uint32_t y = 0; y < pixels.height; ++y) {
         cmsDoTransform(transform->handle, wide.data() + std::size_t(y) * pixels.width * ch, row.data(), pixels.width);
         for (std::uint32_t x = 0; x < pixels.width; ++x) {
@@ -535,20 +724,50 @@ std::vector<float> to_srgb_floats(const InkPixels& pixels, const PageColor& colo
     return out;
 }
 
-InkPixels convert(const InkPixels& pixels, const PageColor& from, const PageColor& to) {
+InkPixels convert(const InkPixels& pixels, const PageColor& from, const PageColor& to, bool gray_on_k) {
+    const unsigned in_ch = pixels.colours(), in_all = pixels.channels();
+    const unsigned out_ch = core::colour_channels(to.space), out_all = out_ch + 1;
+    const bool same = from.space == to.space && (from.space == InkSpace::Lab || from.profile == to.profile);
+    // (a grey page's greys onto K alone, asked for: K = 1 − its lightness)
+    const bool onto_k = gray_on_k && from.space == InkSpace::Gray && to.space == InkSpace::Cmyk;
+    if (pixels.is_float() || to.depth == 32) {
+        InkPixels out = core::blank_ink_pixels(to.space, to.depth, pixels.width, pixels.height);
+        std::optional<Transform> transform;
+        if (!same && !onto_k) transform = between_transform(from, to, float_format(from.space), float_format(to.space));
+        std::vector<float> in(static_cast<std::size_t>(pixels.width) * in_ch), made(static_cast<std::size_t>(pixels.width) * out_ch);
+        for (std::uint32_t y = 0; y < pixels.height; ++y) {
+            if (transform) {
+                lcms_row(pixels, y, in.data());
+                cmsDoTransform((*transform)->handle, in.data(), made.data(), pixels.width);
+            }
+            for (std::uint32_t x = 0; x < pixels.width; ++x) {
+                const std::size_t i = std::size_t(y) * pixels.width + x;
+                if (same) {
+                    for (unsigned c = 0; c < out_ch; ++c) out.set(i, c, pixels.value(i, c));
+                } else if (onto_k) {
+                    for (unsigned c = 0; c < 3; ++c) out.set(i, c, 0.0);
+                    out.set(i, 3, 1.0 - std::clamp(pixels.value(i, 0), 0.0, 1.0));
+                } else {
+                    for (unsigned c = 0; c < out_ch; ++c) out.set(i, c, from_lcms_value(to.space, c, made[x * out_ch + c]));
+                }
+                out.set(i, out_ch, pixels.value(i, in_ch));
+            }
+        }
+        return out;
+    }
     InkPixels out;
     out.space = to.space;
     out.depth = to.depth;
     out.width = pixels.width;
     out.height = pixels.height;
-    const unsigned in_ch = core::colour_channels(pixels.space), in_all = pixels.channels();
-    const unsigned out_ch = core::colour_channels(to.space), out_all = out_ch + 1;
     out.samples.assign(out.pixel_count() * out_all, 0);
-    const bool same = from.space == to.space && (from.space == InkSpace::Lab || from.profile == to.profile);
     std::vector<std::uint16_t> wide = widened(pixels);
     std::vector<std::uint16_t> made;
     if (same) {
         made = std::move(wide);
+    } else if (onto_k) {
+        made.assign(out.pixel_count() * out_ch, 0);
+        for (std::size_t i = 0; i < out.pixel_count(); ++i) made[i * 4 + 3] = static_cast<std::uint16_t>(65535 - wide[i]);
     } else {
         made.resize(out.pixel_count() * out_ch);
         const Transform transform = between_transform(from, to, int_format(from.space, 16), int_format(to.space, 16));
@@ -696,19 +915,21 @@ InkPixels picture_inks(std::string_view bytes, const PageColor& color) {
 }
 
 std::uint16_t encode_sample(InkSpace space, unsigned channel, double value, int depth) {
-    const double most = depth == 16 ? 65535.0 : 255.0;
+    const double most = depth == 8 ? 255.0 : 65535.0;  // (32 bits: compared as 16)
     const unsigned ch = core::colour_channels(space);
     if (channel >= ch || space == InkSpace::Cmyk) return clamp_sample(value * most, most);
+    if (space == InkSpace::Gray) return clamp_sample((1.0 - value) * most, most);  // (its lightness)
     if (channel == 0) return clamp_sample(value / 100.0 * most, most);
-    return clamp_sample(depth == 16 ? (value + 128.0) * 257.0 : value + 128.0, most);
+    return clamp_sample(depth != 8 ? (value + 128.0) * 257.0 : value + 128.0, most);
 }
 
 double decode_sample(InkSpace space, unsigned channel, std::uint16_t sample, int depth) {
-    const double most = depth == 16 ? 65535.0 : 255.0;
+    const double most = depth == 8 ? 255.0 : 65535.0;
     const unsigned ch = core::colour_channels(space);
     if (channel >= ch || space == InkSpace::Cmyk) return sample / most;
+    if (space == InkSpace::Gray) return 1.0 - sample / most;
     if (channel == 0) return sample / most * 100.0;
-    return depth == 16 ? sample / 257.0 - 128.0 : sample - 128.0;
+    return depth != 8 ? sample / 257.0 - 128.0 : sample - 128.0;
 }
 
 bool same_inks(const PageColor& color, const std::vector<double>& a, const std::vector<double>& b) {
@@ -726,8 +947,8 @@ std::array<int, 3> rgb_for_inks(const PageColor& color, const std::vector<double
     for (const int v : {20, 255, 0, 10, 15}) {
         if (same_inks(color, ink_of(color, {v, v, v}), ink)) return {v, v, v};
     }
-    if (color.space == InkSpace::Cmyk && ink.size() == 4 && ink[0] == 0 && ink[1] == 0 && ink[2] == 0) {
-        for (int v = 1; v < 255; ++v) {  // (K alone: the grey whose rules give it)
+    if ((color.space == InkSpace::Cmyk && ink.size() == 4 && ink[0] == 0 && ink[1] == 0 && ink[2] == 0) || color.space == InkSpace::Gray) {
+        for (int v = 1; v < 255; ++v) {  // (K alone, a grey page's k: the grey whose rules give it)
             if (same_inks(color, ink_of(color, {v, v, v}), ink)) return {v, v, v};
         }
     }
@@ -755,7 +976,7 @@ std::array<int, 3> rgb_for_inks(const PageColor& color, const std::vector<double
 }
 
 double gamut_distance(const PageColor& color, const std::array<int, 3>& rgb) {
-    if (color.space != InkSpace::Cmyk) return 0.0;  // (Lab holds every sRGB colour)
+    if (color.space == InkSpace::Lab) return 0.0;  // (Lab holds every sRGB colour; a grey page none but its greys)
     const std::array<double, 3> srgb{rgb[0] / 255.0, rgb[1] / 255.0, rgb[2] / 255.0};
     const std::array<double, 3> back = srgb_of(color, ink_of_srgb(color, srgb));
     const Transform lab = cached("srgb>lab:dbl", [] {

@@ -67,6 +67,13 @@ void mix(InkSpace space, std::string_view mode, const double* b, const double* s
         for (unsigned c = 0; c < 3; ++c) out[c] = separable(mode, b[c], s[c]);
         return;
     }
+    if (space == InkSpace::Gray) {
+        // (its lightness as an RGB grey (v, v, v): hue, saturation and color keep the grey below, luminosity takes the
+        // one above, as the RGB formulas give a grey)
+        if (non_separable(mode)) out[0] = mode == "luminosity" ? s[0] : b[0];
+        else out[0] = separable(mode, b[0], s[0]);
+        return;
+    }
     if (non_separable(mode)) {  // (the inverted C, M, Y as RGB; K from below, or from above for luminosity)
         const RGB cb{1.0 - b[0], 1.0 - b[1], 1.0 - b[2]}, cs{1.0 - s[0], 1.0 - s[1], 1.0 - s[2]};
         RGB r;
@@ -174,17 +181,20 @@ std::array<unsigned char, 3> snapped(const core::PageColor& color, const float* 
 
 }  // namespace
 
-// (sample_ink_raster with Pillow's Lanczos or Bicubic)
+// (sample_ink_raster with Pillow's Lanczos or Bicubic; of a 32-bit raster's floats)
 InkPicture sample_with(const core::InkPixels& raster, Size full, Box area, bool use_lanczos);
+InkPicture sample_floats(const core::InkPixels& raster, Size full, Box area, bool use_lanczos);
 
 double to_canvas(InkSpace space, unsigned channel, double ink) {
-    if (space == InkSpace::Cmyk || channel >= 3) return ink;
+    if (space == InkSpace::Gray) return channel == 0 ? 1.0 - ink : ink;
+    if (space != InkSpace::Lab || channel >= 3) return ink;
     if (channel == 0) return ink / 100.0;
     return (ink + 128.0) / 255.0;
 }
 
 double from_canvas(InkSpace space, unsigned channel, double value) {
-    if (space == InkSpace::Cmyk || channel >= 3) return value;
+    if (space == InkSpace::Gray) return channel == 0 ? 1.0 - value : value;
+    if (space != InkSpace::Lab || channel >= 3) return value;
     if (channel == 0) return value * 100.0;
     return value * 255.0 - 128.0;
 }
@@ -199,8 +209,10 @@ struct InkCanvas::Impl {
     unsigned stride = 6;  // colour, alpha, the alpha of the layer before
     std::vector<double> px;
     bool previous = false;
+    bool hdr = false;  // (a grey page of 32 bits: lightness past 0..1 is kept)
 
-    Impl(const core::PageColor& c, Size s) : color(c), size(s), n(core::colour_channels(c.space)), stride(n + 2) {
+    Impl(const core::PageColor& c, Size s)
+        : color(c), size(s), n(core::colour_channels(c.space)), stride(n + 2), hdr(c.space == InkSpace::Gray && c.depth == 32) {
         if (s.width <= 0 || s.height <= 0) throw core::Error("value", "invalid ink canvas dimensions");
         const auto count = std::uint64_t(s.width) * std::uint64_t(s.height);
         if (count > (512ULL * 1024 * 1024) / (stride * sizeof(double))) throw core::Error("image_too_large", "ink canvas budget exceeded");
@@ -231,7 +243,9 @@ struct InkCanvas::Impl {
         for (unsigned c = 0; c < n; ++c) {
             const double next = normal ? (src[c] * a + dst[c] * da * (1 - a)) / alpha
                                        : (dst[c] * da * (1 - a) + src[c] * a * (1 - da) + mixed[c] * a * da) / alpha;
-            dst[c] = std::clamp(next, 0.0, 1.0);
+            // (a grey page of 32 bits keeps an HDR lightness, as a precise RGB page does)
+            dst[c] = hdr ? next : std::clamp(next, 0.0, 1.0);
+            if (!std::isfinite(dst[c])) throw core::Error("value", "the ink composite exceeds the finite working range");
         }
         dst[n] = alpha;
         if (layer) dst[n + 1] = src_alpha;
@@ -250,9 +264,13 @@ InkCanvas::InkCanvas(const core::PageColor& color, const Image& paper) : impl_(s
 }
 
 InkCanvas::InkCanvas(const core::PageColor& color, Size size) : impl_(std::make_unique<Impl>(color, size)) {
-    if (color.space != InkSpace::Lab) return;  // (CMYK: no ink is 0, the alpha 0)
+    if (color.space != InkSpace::Lab && color.space != InkSpace::Gray) return;  // (CMYK: no ink is 0, the alpha 0)
     for (std::size_t i = 0; i < impl_->px.size() / impl_->stride; ++i) {
         double* p = impl_->px.data() + i * impl_->stride;
+        if (color.space == InkSpace::Gray) {
+            p[0] = 1.0;  // (Gray: white, the paper's)
+            continue;
+        }
         p[0] = to_canvas(InkSpace::Lab, 0, 100.0);  // (Lab: L 100, a and b 0 — the paper's)
         p[1] = p[2] = to_canvas(InkSpace::Lab, 1, 0.0);
     }
@@ -365,7 +383,8 @@ void InkCanvas::recolour(const ink::Correction& change, double opacity, bool cli
             double* p = impl_->px.data() + where[j] * impl_->stride;
             for (unsigned c = 0; c < n; ++c) {
                 const double now = to_canvas(space, c, fixed[j * n + c]);
-                p[c] = std::clamp(p[c] + (now - p[c]) * amounts[j], 0.0, 1.0);
+                const double next = p[c] + (now - p[c]) * amounts[j];
+                p[c] = impl_->hdr ? next : std::clamp(next, 0.0, 1.0);
             }
         }
     }
@@ -404,6 +423,14 @@ core::InkPixels InkCanvas::ink_pixels(int depth, bool alpha) const {
     out.width = static_cast<std::uint32_t>(impl_->size.width);
     out.height = static_cast<std::uint32_t>(impl_->size.height);
     const unsigned n = impl_->n;
+    if (depth == 32) {  // (floats: the canvas's values as they are)
+        out.floats.resize(out.pixel_count() * (n + 1));
+        for (std::size_t i = 0; i < out.pixel_count(); ++i) {
+            for (unsigned c = 0; c < n; ++c) out.set(i, c, impl_->px[i * impl_->stride + c]);
+            out.set(i, n, alpha ? impl_->px[i * impl_->stride + n] : 1.0);
+        }
+        return out;
+    }
     const double most = depth == 16 ? 65535.0 : 255.0;
     out.samples.resize(out.pixel_count() * (n + 1));
     for (std::size_t i = 0; i < out.pixel_count(); ++i) {
@@ -498,13 +525,16 @@ core::InkPixels crop_inks(const core::InkPixels& pixels, Box box) {
     core::InkPixels out;
     out.space = pixels.space;
     out.depth = pixels.depth;
+    out.planes = pixels.planes;
     out.width = static_cast<std::uint32_t>(box.width());
     out.height = static_cast<std::uint32_t>(box.height());
     const unsigned all = pixels.channels();
-    out.samples.resize(out.pixel_count() * all);
+    if (pixels.is_float()) out.floats.resize(out.pixel_count() * all);
+    else out.samples.resize(out.pixel_count() * all);
     for (int y = 0; y < box.height(); ++y) {
-        const std::uint16_t* src = pixels.samples.data() + (std::size_t(box.y0 + y) * pixels.width + box.x0) * all;
-        std::copy_n(src, std::size_t(box.width()) * all, out.samples.data() + std::size_t(y) * out.width * all);
+        const std::size_t from = (std::size_t(box.y0 + y) * pixels.width + box.x0) * all, to = std::size_t(y) * out.width * all;
+        if (pixels.is_float()) std::copy_n(pixels.floats.data() + from, std::size_t(box.width()) * all, out.floats.data() + to);
+        else std::copy_n(pixels.samples.data() + from, std::size_t(box.width()) * all, out.samples.data() + to);
     }
     return out;
 }
@@ -516,8 +546,9 @@ void paste_inks(core::InkPixels& into, const core::InkPixels& part, Point at) {
     const int y1 = std::min<int>(static_cast<int>(into.height), at.y + static_cast<int>(part.height));
     if (x1 <= x0 || y1 <= y0) return;
     for (int y = y0; y < y1; ++y) {
-        const std::uint16_t* src = part.samples.data() + (std::size_t(y - at.y) * part.width + (x0 - at.x)) * all;
-        std::copy_n(src, std::size_t(x1 - x0) * all, into.samples.data() + (std::size_t(y) * into.width + x0) * all);
+        const std::size_t from = (std::size_t(y - at.y) * part.width + (x0 - at.x)) * all, to = (std::size_t(y) * into.width + x0) * all;
+        if (into.is_float()) std::copy_n(part.floats.data() + from, std::size_t(x1 - x0) * all, into.floats.data() + to);
+        else std::copy_n(part.samples.data() + from, std::size_t(x1 - x0) * all, into.samples.data() + to);
     }
 }
 
@@ -531,6 +562,12 @@ core::InkPixels resize_inks(const core::InkPixels& pixels, Size size, Resample r
     out.width = static_cast<std::uint32_t>(size.width);
     out.height = static_cast<std::uint32_t>(size.height);
     const unsigned all = pixels.channels();
+    if (pixels.is_float()) {
+        out.floats.resize(out.pixel_count() * all);
+        for (std::size_t i = 0; i < out.pixel_count(); ++i)
+            for (unsigned c = 0; c < all; ++c) out.set(i, c, picture.values[i * all + c]);
+        return out;
+    }
     const double most = pixels.max();
     out.samples.resize(out.pixel_count() * all);
     for (std::size_t i = 0; i < out.samples.size(); ++i) {
@@ -550,10 +587,11 @@ std::shared_ptr<const core::InkPixels> decoded_ink(const core::Bytes& bytes) {
     std::lock_guard lock(g_ink_mutex);
     std::erase_if(g_ink, [](const DecodedInk& d) { return d.bytes.expired(); });
     g_ink.push_back(DecodedInk{bytes, bytes.get(), pixels});
+    const auto bytes_of = [](const core::InkPixels& p) { return p.samples.size() * sizeof(std::uint16_t) + p.floats.size() * sizeof(float); };
     std::size_t held = 0;
-    for (const auto& d : g_ink) held += d.pixels->samples.size() * sizeof(std::uint16_t);
+    for (const auto& d : g_ink) held += bytes_of(*d.pixels);
     while (g_ink.size() > 1 && (g_ink.size() > kInkCount || held > kInkBytes)) {
-        held -= g_ink.front().pixels->samples.size() * sizeof(std::uint16_t);
+        held -= bytes_of(*g_ink.front().pixels);
         g_ink.erase(g_ink.begin());
     }
     return pixels;
@@ -561,20 +599,24 @@ std::shared_ptr<const core::InkPixels> decoded_ink(const core::Bytes& bytes) {
 
 InkPicture sample_ink_raster(const core::InkPixels& raster, Size full, Box area) { return sample_with(raster, full, area, false); }
 
-InkPicture sample_with(const core::InkPixels& raster, Size full, Box area, bool use_lanczos) {
+namespace {
+
+// sample_with over a raster's values read by `read` (the flat index of a sample: its normalized value); `hdr`: a grey
+// page's 32-bit lightness is not clamped to 0..1.
+template <class Read>
+InkPicture sample_values(const core::InkPixels& raster, Size full, Box area, bool use_lanczos, bool hdr, Read read) {
     InkPicture out;
     out.size = Size{area.width(), area.height()};
     out.channels = core::colour_channels(raster.space);
     const unsigned n = out.channels, all = n + 1;
-    const double most = raster.max();
     out.values.assign(static_cast<std::size_t>(out.size.width) * out.size.height * all, 0.0);
     const int rw = static_cast<int>(raster.width), rh = static_cast<int>(raster.height);
     if (rw == full.width && rh == full.height) {  // (its own size: no resampling)
         for (int y = area.y0; y < area.y1; ++y) {
             for (int x = area.x0; x < area.x1; ++x) {
-                const std::uint16_t* s = raster.samples.data() + (std::size_t(y) * rw + x) * all;
+                const std::size_t s = (std::size_t(y) * rw + x) * all;
                 double* d = out.values.data() + (std::size_t(y - area.y0) * out.size.width + (x - area.x0)) * all;
-                for (unsigned c = 0; c < all; ++c) d[c] = s[c] / most;
+                for (unsigned c = 0; c < all; ++c) d[c] = read(s + c);
             }
         }
         return out;
@@ -592,10 +634,10 @@ InkPicture sample_with(const core::InkPixels& raster, Size full, Box area, bool 
     std::vector<double> horizontal(static_cast<std::size_t>(row1 - row0) * ow * all, 0.0);
     std::vector<double> premultiplied(static_cast<std::size_t>(rw) * all);
     for (int y = row0; y < row1; ++y) {
-        const std::uint16_t* s = raster.samples.data() + std::size_t(y) * rw * all;
+        const std::size_t s = std::size_t(y) * rw * all;
         for (int x = 0; x < rw; ++x) {
-            const double a = s[x * all + n] / most;
-            for (unsigned c = 0; c < n; ++c) premultiplied[x * all + c] = s[x * all + c] / most * a;
+            const double a = read(s + x * all + n);
+            for (unsigned c = 0; c < n; ++c) premultiplied[x * all + c] = read(s + x * all + c) * a;
             premultiplied[x * all + n] = a;
         }
         double* h = horizontal.data() + std::size_t(y - row0) * ow * all;
@@ -618,10 +660,25 @@ InkPicture sample_with(const core::InkPixels& raster, Size full, Box area, bool 
             const double a = std::clamp(v[n], 0.0, 1.0);
             double* d = out.values.data() + (std::size_t(j) * ow + i) * all;
             d[n] = a;
-            for (unsigned c = 0; c < n; ++c) d[c] = a > 0 ? std::clamp(v[c] / a, 0.0, 1.0) : 0.0;
+            for (unsigned c = 0; c < n; ++c) d[c] = a > 0 ? (hdr ? v[c] / a : std::clamp(v[c] / a, 0.0, 1.0)) : 0.0;
         }
     }
     return out;
+}
+
+}  // namespace
+
+InkPicture sample_with(const core::InkPixels& raster, Size full, Box area, bool use_lanczos) {
+    if (raster.is_float()) return sample_floats(raster, full, area, use_lanczos);
+    const double most = raster.max();
+    const std::uint16_t* s = raster.samples.data();
+    return sample_values(raster, full, area, use_lanczos, false, [s, most](std::size_t at) { return s[at] / most; });
+}
+
+InkPicture sample_floats(const core::InkPixels& raster, Size full, Box area, bool use_lanczos) {
+    const float* f = raster.floats.data();
+    return sample_values(raster, full, area, use_lanczos, core::traits(raster.space).hdr,
+                         [f](std::size_t at) { return static_cast<double>(f[at]); });
 }
 
 }  // namespace genko::render

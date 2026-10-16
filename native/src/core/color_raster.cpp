@@ -58,13 +58,23 @@ std::array<double, 4> ColorRasterView::pixel(std::size_t i) const {
     }
     return out;
 }
-Json ColorRasterView::metadata(std::string_view asset) const {
+std::string color_raster_space_of(const Json& m) {
+    if (!m.is_object() || !m.contains("space") || !m["space"].is_string()) return {};
+    const std::string space = m["space"].get<std::string>();
+    if (space == "srgb") return space;
+    const bool ref = space.size() == 71 && space.compare(0, 7, "sha256:") == 0 &&
+                     std::all_of(space.begin() + 7, space.end(), [](char c) { return (c >= '0' && c <= '9') || (c >= 'a' && c <= 'f'); });
+    return ref ? space : std::string();
+}
+Json ColorRasterView::metadata(std::string_view asset, std::string_view space) const {
     return Json{{"asset", std::string(asset)}, {"width", width_}, {"height", height_},
-                {"precision", sample_bytes_ == 2 ? "u16" : "f32"}, {"space", "srgb"}, {"alpha", "straight"}};
+                {"precision", sample_bytes_ == 2 ? "u16" : "f32"}, {"space", std::string(space)}, {"alpha", "straight"}};
 }
 void ColorRasterView::check_metadata(const Json& m) const {
     if (!m.is_object() || !m.contains("asset") || !m["asset"].is_string()) invalid();
-    const auto expected = metadata(m["asset"].get<std::string>());
+    const std::string space = color_raster_space_of(m);
+    if (space.empty()) invalid();
+    const auto expected = metadata(m["asset"].get<std::string>(), space);
     if (m.size() != expected.size()) invalid();
     // Canonical journal snapshots reorder object keys, not the metadata values.
     for (const auto& [key, value] : expected.items())
@@ -159,8 +169,8 @@ std::string join_color_tiles(std::uint32_t width, std::uint32_t height, std::str
     }
     return out;
 }
-Json tiled_metadata(const ColorRasterView& raster, const std::vector<std::string>& refs) {
-    Json out = raster.metadata("");
+Json tiled_metadata(const ColorRasterView& raster, const std::vector<std::string>& refs, std::string_view space) {
+    Json out = raster.metadata("", space);
     out.erase("asset");
     out["tile"] = kColorTile;
     out["tiles"] = refs;
@@ -173,7 +183,9 @@ void check_tiled_metadata(const ColorRasterView& raster, const Json& m) {
         if (!ref.is_string()) invalid();
         refs.push_back(ref.get<std::string>());
     }
-    const Json expected = tiled_metadata(raster, refs);
+    const std::string space = color_raster_space_of(m);
+    if (space.empty()) invalid();
+    const Json expected = tiled_metadata(raster, refs, space);
     if (m.size() != expected.size()) invalid();
     for (const auto& [key, value] : expected.items())
         if (!m.contains(key) || m[key] != value) invalid();

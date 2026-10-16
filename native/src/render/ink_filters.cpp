@@ -67,14 +67,18 @@ private:
     std::vector<float> v_;
 };
 
-// No ink (Lab: L 100, a = b = 0), as a clear pixel holds it.
+// No ink (Lab: L 100, a = b = 0; Gray: white), as a clear pixel holds it.
 void clear_colours(InkSpace space, float* p) {
+    if (space == InkSpace::Gray) {
+        p[0] = 1.0f;
+        return;
+    }
     p[0] = space == InkSpace::Lab ? 1.0f : 0.0f;
     p[1] = p[2] = space == InkSpace::Lab ? static_cast<float>(128.0 / 255.0) : 0.0f;
     if (space == InkSpace::Cmyk) p[3] = 0.0f;
 }
 
-// Genko's black: K 100% alone (Lab: L 0, a = b = 0).
+// Genko's black: K 100% alone (Lab: L 0, a = b = 0; Gray: lightness 0).
 void black_colours(InkSpace space, float* p) {
     clear_colours(space, p);
     p[space == InkSpace::Cmyk ? 3 : 0] = space == InkSpace::Cmyk ? 1.0f : 0.0f;
@@ -83,6 +87,13 @@ void black_colours(InkSpace space, float* p) {
 Plane read(const core::InkPixels& r) {
     const unsigned n = core::colour_channels(r.space);
     Plane p(static_cast<int>(r.width), static_cast<int>(r.height), n);
+    if (r.is_float()) {  // (32 bits: the canvas's values themselves)
+        for (std::size_t i = 0; i < p.size(); ++i) {
+            float* v = p.at(i);
+            for (unsigned c = 0; c <= n; ++c) v[c] = static_cast<float>(r.value(i, c));
+        }
+        return p;
+    }
     const double most = r.max();
     for (std::size_t i = 0; i < p.size(); ++i) {
         const std::uint16_t* s = r.samples.data() + i * (n + 1);
@@ -101,6 +112,12 @@ core::InkPixels write(const Plane& p, InkSpace space, int depth) {
         const float* v = p.at(i);
         for (unsigned c = 0; c <= n; ++c) {
             if (!std::isfinite(v[c])) throw core::Error("value", "the filter exceeds the finite working range");
+        }
+        if (depth == 32) {  // (floats: a grey's HDR kept, the rest 0..1; clear as a blank raster holds it)
+            if (!(v[n] > 0)) continue;
+            for (unsigned c = 0; c < n; ++c) out.set(i, c, v[c]);
+            out.set(i, n, v[n]);
+            continue;
         }
         const auto alpha = static_cast<std::uint16_t>(std::lround(std::clamp(static_cast<double>(v[n]), 0.0, 1.0) * most));
         if (alpha == 0) continue;  // (clear: as a blank raster holds it)

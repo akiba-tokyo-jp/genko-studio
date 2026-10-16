@@ -11,6 +11,7 @@
 #include <utility>
 #include <vector>
 
+#include "core/color_model.hpp"
 #include "core/geometry.hpp"
 #include "core/ink.hpp"
 #include "core/json.hpp"
@@ -296,6 +297,9 @@ struct Page {
     std::optional<Json> plan;
     // color-mode@1: the page's colour mode (none: an RGB page, as Python's).
     std::optional<PageColor> color;
+    // color-model@1: an RGB page's colour model past Python's (none: 8 bits, sRGB). Never with `color`: both are the
+    // page's `color` in the book.
+    std::optional<RgbMode> rgb;
 
     Rect paper_rect_mm() const;
     Rect trim_rect_mm() const;
@@ -364,6 +368,8 @@ struct Document {
     std::vector<std::string> features;
     // color-mode@1: the colour mode of the pages it makes (none: RGB).
     std::optional<PageColor> color;
+    // color-model@1: the RGB colour model of the pages it makes (none: 8 bits, sRGB). Never with `color`.
+    std::optional<RgbMode> rgb;
     // Why this book must not be saved (unknown features, missing assets, repairs); empty when it may be.
     std::string read_only_reason;
     // (not saved) The pages whose strokes and pictures are not read yet (storage::LoadOptions::assets_of_page: the

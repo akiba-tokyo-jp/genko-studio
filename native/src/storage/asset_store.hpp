@@ -47,9 +47,10 @@ private:
     std::filesystem::path project_;
 };
 
-// The most bytes an asset file may hold for copy_assets to take it: the most the store reads of one asset (a
-// precise-colour raster, core::kColorRasterBookBytes, 256 MiB).
-inline constexpr std::uintmax_t kAssetMaxBytes = core::kColorRasterBookBytes;
+// The most bytes an asset file may hold for copy_assets to take it: the most the store reads of one asset, 256 MiB (a
+// precise raster is saved in tiles of 256 pixels square; the book's 1 GiB of them, core::kColorRasterBookBytes, is
+// counted over all of them).
+inline constexpr std::uintmax_t kAssetMaxBytes = 256 * 1024 * 1024;
 
 // merge.copy_assets(src, dest) (作品の結合: the other book's pictures before its pages are taken in by import_pages): every
 // asset file of the book at `src` copied into the book at `dest`, those it already has left; how many were copied. Only

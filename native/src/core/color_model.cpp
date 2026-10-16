@@ -3,6 +3,11 @@
 #include <algorithm>
 #include <cctype>
 #include <memory>
+#include <set>
+
+#include "core/error.hpp"
+#include "core/model.hpp"
+#include "core/pyconv.hpp"
 
 namespace genko::core {
 
@@ -124,6 +129,99 @@ const BuiltinProfile* builtin_profile_by_ref(std::string_view ref) {
         if (!p.sha256.empty() && ref.substr(7) == p.sha256) return &p;
     }
     return nullptr;
+}
+
+namespace {
+
+[[noreturn]] void bad(const std::string& why) { throw Error("value", "the page's colour mode cannot be read: " + why); }
+
+bool is_ref(std::string_view text) {
+    if (text.size() != 71 || text.substr(0, 7) != "sha256:") return false;
+    return std::all_of(text.begin() + 7, text.end(), [](char c) { return (c >= '0' && c <= '9') || (c >= 'a' && c <= 'f'); });
+}
+
+RgbMode rgb_mode_from_json(const Json& value) {
+    static const std::set<std::string> kKeys{"mode", "depth", "profile", "intent", "bpc"};
+    for (const auto& [key, v] : value.items()) {
+        if (!kKeys.contains(key)) bad("unknown key " + py_repr_str(key));
+    }
+    RgbMode out;
+    const auto depth = value.find("depth");
+    if (depth == value.end() || !depth->is_number_integer() ||
+        (depth->get<std::int64_t>() != 8 && depth->get<std::int64_t>() != 16 && depth->get<std::int64_t>() != 32)) {
+        bad("depth is 8, 16 or 32");
+    }
+    out.depth = static_cast<int>(depth->get<std::int64_t>());
+    if (const auto profile = value.find("profile"); profile != value.end()) {
+        if (!profile->is_string() || !is_ref(profile->get<std::string>())) bad("an RGB page's profile is sha256:<64 hex>");
+        out.profile = profile->get<std::string>();
+    }
+    const auto intent = value.find("intent");
+    if (intent == value.end() || !intent->is_string() || !is_intent(intent->get<std::string>())) {
+        bad("intent is perceptual, relative, saturation or absolute");
+    }
+    out.intent = intent->get<std::string>();
+    if (const auto bpc = value.find("bpc"); bpc != value.end()) {
+        if (!bpc->is_boolean() || bpc->get<bool>()) bad("bpc is written only as false");
+        out.bpc = false;
+    }
+    return out;
+}
+
+}  // namespace
+
+Json to_json(const RgbMode& mode) {
+    Json out = Json::object();
+    out["mode"] = "rgb";
+    out["depth"] = mode.depth;
+    if (!mode.profile.empty()) out["profile"] = mode.profile;
+    out["intent"] = mode.intent;
+    if (!mode.bpc) out["bpc"] = false;
+    return out;
+}
+
+ColorModel color_model_from_json(const Json& value) {
+    ColorModel out;
+    if (value.is_null()) return out;
+    if (!value.is_object()) bad("it must be an object");
+    const auto mode = value.find("mode");
+    if (mode != value.end() && mode->is_string() && mode->get<std::string>() == "rgb") {
+        RgbMode rgb = rgb_mode_from_json(value);
+        if (!rgb.is_default()) out.rgb = std::move(rgb);
+        return out;
+    }
+    out.inks = page_color_from_json(value);
+    return out;
+}
+
+std::string color_raster_space(const std::optional<RgbMode>& rgb) { return rgb && !rgb->profile.empty() ? rgb->profile : std::string("srgb"); }
+
+bool uses_color_model(const Document& doc) {
+    const auto model = [](const std::optional<PageColor>& inks, const std::optional<RgbMode>& rgb) {
+        return (inks && !inks->color_mode_only()) || rgb.has_value();
+    };
+    if (model(doc.color, doc.rgb)) return true;
+    for (const auto& page : doc.pages) {
+        if (model(page->color, page->rgb)) return true;
+        for (const Layer& layer : page->layers) {
+            if (layer.ink_raster && ink_raster_header(*layer.ink_raster).version != 1) return true;
+        }
+    }
+    return false;
+}
+
+void validate_color_model(const Document& doc) {
+    const auto check = [](const RgbMode& rgb, const std::string& where) {
+        if (rgb.depth != 8 && rgb.depth != 16 && rgb.depth != 32) throw Error("value", where + ": an RGB page's depth is 8, 16 or 32");
+        if (!rgb.profile.empty() && !is_ref(rgb.profile)) throw Error("value", where + ": an RGB page's profile is sha256:<64 hex>");
+        if (!is_intent(rgb.intent)) throw Error("value", where + ": an unknown intent");
+        if (rgb.icc && bytes_ref(*rgb.icc) != rgb.profile) throw Error("value", where + ": the ICC profile held is not " + rgb.profile);
+    };
+    if (doc.rgb) check(*doc.rgb, "the book");
+    for (const auto& page : doc.pages) {
+        if (std::find(doc.deferred.begin(), doc.deferred.end(), page) != doc.deferred.end()) continue;
+        if (page->rgb) check(*page->rgb, "page " + page->index.repr());
+    }
 }
 
 }  // namespace genko::core

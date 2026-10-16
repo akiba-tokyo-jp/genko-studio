@@ -101,32 +101,47 @@ Box covering(const std::vector<std::pair<double, double>>& points, int margin, s
 
 // --- inks as values ----------------------------------------------------------------------------------------------------
 
-// A raster's samples read and written as values 0..1 (each sample / its most: CMYK's ink, Lab's encoding), the alpha
-// straight. Inks mix linearly in these values, as the page composites them (InkCanvas).
+// A raster's samples read and written as values 0..1 (each sample / its most: CMYK's ink, Lab's encoding, Gray's
+// lightness; 32 bits: the floats themselves), the alpha straight. Inks mix linearly in these values, as the page
+// composites them (InkCanvas).
 struct Inks {
     InkPixels p;
     unsigned n = 0, all = 0;
-    double most = 255;
-    explicit Inks(InkPixels pixels) : p(std::move(pixels)), n(core::colour_channels(p.space)), all(n + 1), most(p.max()) {}
-    std::uint16_t* at(std::size_t i) { return p.samples.data() + i * all; }
-    const std::uint16_t* at(std::size_t i) const { return p.samples.data() + i * all; }
-    double alpha(std::size_t i) const { return at(i)[n] / most; }
-    std::uint16_t sample(double v) const { return static_cast<std::uint16_t>(std::lround(std::clamp(v, 0.0, 1.0) * most)); }
-    void clear(std::size_t i) {  // (no ink, transparent: as a blank raster holds it)
-        std::uint16_t* s = at(i);
-        for (unsigned c = 0; c < n; ++c) s[c] = 0;
+    double most = 255;  // (8, 16 bits: a sample's most; 32: 1)
+    explicit Inks(InkPixels pixels) : p(std::move(pixels)), n(p.colours()), all(p.channels()), most(p.is_float() ? 1.0 : p.max()) {}
+    double value(std::size_t i, unsigned c) const { return p.value(i, c); }
+    void put(std::size_t i, unsigned c, double v) { p.set(i, c, v); }
+    double alpha(std::size_t i) const { return p.value(i, n); }
+    // An alpha as the raster holds it (8 and 16 bits: rounded to a sample).
+    double held(double a) const {
+        a = std::clamp(a, 0.0, 1.0);
+        return p.is_float() ? a : static_cast<double>(std::lround(a * most)) / most;
+    }
+    // Pixel j's colours of `from` (the same space and depth) as pixel i's, as they are.
+    void copy_colours(std::size_t i, const InkPixels& from, std::size_t j) {
+        if (p.is_float()) std::copy_n(from.floats.data() + j * all, n, p.floats.data() + i * all);
+        else std::copy_n(from.samples.data() + j * all, n, p.samples.data() + i * all);
+    }
+    void clear(std::size_t i) {  // (no ink, transparent: as a blank raster holds it — Lab and Gray white)
+        for (unsigned c = 0; c < n; ++c) put(i, c, 0.0);
         if (p.space == core::InkSpace::Lab) {
-            s[0] = static_cast<std::uint16_t>(most);
-            s[1] = s[2] = p.depth == 8 ? 128 : 32896;
+            put(i, 0, 1.0);
+            if (p.is_float()) {
+                p.floats[i * all + 1] = p.floats[i * all + 2] = static_cast<float>(128.0 / 255.0);
+            } else {
+                p.samples[i * all + 1] = p.samples[i * all + 2] = p.depth == 8 ? 128 : 32896;
+            }
+        } else if (p.space == core::InkSpace::Gray) {
+            put(i, 0, 1.0);
         }
-        s[n] = 0;
+        put(i, n, 0.0);
     }
     void set_alpha(std::size_t i, double a) {
         if (!(a > 0)) {
             clear(i);
             return;
         }
-        at(i)[n] = sample(a);
+        put(i, n, a);
     }
     std::string take() const { return core::encode_ink_raster(p); }
 };
@@ -137,55 +152,53 @@ void lay(Inks& out, std::size_t i, const double* top, bool keep_alpha = false) {
     const double under = out.alpha(i);
     const double a = std::clamp(top[out.n], 0.0, 1.0) * (keep_alpha ? under : 1.0);
     if (!(a > 0)) return;
-    std::uint16_t* s = out.at(i);
     if (a >= 1 || under == 0) {
-        for (unsigned c = 0; c < out.n; ++c) s[c] = out.sample(top[c]);
-        s[out.n] = out.sample(a);
+        for (unsigned c = 0; c < out.n; ++c) out.put(i, c, top[c]);
+        out.put(i, out.n, a);
         return;
     }
     const double alpha = a + under * (1 - a);
-    for (unsigned c = 0; c < out.n; ++c) s[c] = out.sample((top[c] * a + (s[c] / out.most) * under * (1 - a)) / alpha);
-    s[out.n] = out.sample(alpha);
+    for (unsigned c = 0; c < out.n; ++c) out.put(i, c, (top[c] * a + out.value(i, c) * under * (1 - a)) / alpha);
+    out.put(i, out.n, alpha);
 }
 
-// A pixel carried whole (its samples, its alpha × a coverage): its own samples when it hides all or nothing is under
-// it; mixed as above otherwise.
-void lay_whole(Inks& out, std::size_t i, const std::uint16_t* samples, std::uint16_t alpha) {
-    if (alpha == 0) return;
-    if (alpha == static_cast<std::uint16_t>(out.most) || out.at(i)[out.n] == 0) {
-        std::copy_n(samples, out.n, out.at(i));
-        out.at(i)[out.n] = alpha;
+// A pixel carried whole (pixel j of `from`, its alpha × a coverage, as the raster holds it): its own colours when it
+// hides all or nothing is under it; mixed as above otherwise.
+void lay_whole(Inks& out, std::size_t i, const Inks& from, std::size_t j, double alpha) {
+    if (!(alpha > 0)) return;
+    if (alpha >= 1 || out.alpha(i) == 0) {
+        out.copy_colours(i, from.p, j);
+        out.put(i, out.n, alpha);
         return;
     }
     std::array<double, 5> top{};
-    for (unsigned c = 0; c < out.n; ++c) top[c] = samples[c] / out.most;
-    top[out.n] = alpha / out.most;
+    for (unsigned c = 0; c < out.n; ++c) top[c] = from.value(j, c);
+    top[out.n] = alpha;
     lay(out, i, top.data());
 }
 
-// The pixels an area lifts from a raster: each its samples and its alpha × the area's coverage, read whole or resampled
-// (premultiplied by the alpha).
+// The pixels an area lifts from a raster: each its colours and its alpha × the area's coverage, read whole or
+// resampled (premultiplied by the alpha).
 class Lifted {
 public:
     Lifted(const Inks& source, std::string inside, const Box& box)
         : source_(source), inside_(std::move(inside)), width_(static_cast<int>(source.p.width)), height_(static_cast<int>(source.p.height)),
           box_(box) {}
-    // The lifted pixel's alpha at (x, y) as a sample (its alpha × the coverage), or 0 outside the area.
-    std::uint16_t whole_alpha(int x, int y) const {
+    // The lifted pixel's alpha at (x, y) as the raster holds it (its alpha × the coverage), or 0 outside the area.
+    double whole_alpha(int x, int y) const {
         if (x < box_.x0 || y < box_.y0 || x >= box_.x1 || y >= box_.y1) return 0;
         const std::size_t i = std::size_t(y) * width_ + x;
         const int m = static_cast<unsigned char>(inside_[i]);
-        const std::uint16_t a = source_.at(i)[source_.n];
-        return m == 255 ? a : static_cast<std::uint16_t>(std::lround(a * (m / 255.0)));
+        const double a = source_.alpha(i);
+        return m == 255 ? a : source_.held(a * (m / 255.0));
     }
     // Premultiplied values (colours × alpha, alpha) at (x, y).
     std::array<double, 5> premultiplied(int x, int y) const {
         std::array<double, 5> out{};
-        const std::uint16_t a = whole_alpha(x, y);
-        if (a == 0) return out;
-        const std::uint16_t* s = source_.at(std::size_t(y) * width_ + x);
-        const double alpha = a / source_.most;
-        for (unsigned c = 0; c < source_.n; ++c) out[c] = s[c] / source_.most * alpha;
+        const double alpha = whole_alpha(x, y);
+        if (alpha == 0) return out;
+        const std::size_t i = std::size_t(y) * width_ + x;
+        for (unsigned c = 0; c < source_.n; ++c) out[c] = source_.value(i, c) * alpha;
         out[source_.n] = alpha;
         return out;
     }
@@ -196,7 +209,7 @@ public:
         if (resample == Resample::Nearest) {
             if (u < -1 || v < -1 || u > width_ + 1 || v > height_ + 1) return;
             const int x = static_cast<int>(std::floor(u)), y = static_cast<int>(std::floor(v));
-            if (const std::uint16_t a = whole_alpha(x, y)) lay_whole(out, i, source_.at(std::size_t(y) * width_ + x), a);
+            if (const double a = whole_alpha(x, y); a > 0) lay_whole(out, i, source_, std::size_t(y) * width_ + x, a);
             return;
         }
         const bool cubic = resample == Resample::Bicubic;
@@ -210,7 +223,7 @@ public:
         if (ty < 1e-9) ty = 0; else if (ty > 1 - 1e-9) { ty = 0; y0 += 1; }
         const int ix = static_cast<int>(x0), iy = static_cast<int>(y0);
         if (tx == 0 && ty == 0) {
-            if (const std::uint16_t a = whole_alpha(ix, iy)) lay_whole(out, i, source_.at(std::size_t(iy) * width_ + ix), a);
+            if (const double a = whole_alpha(ix, iy); a > 0) lay_whole(out, i, source_, std::size_t(iy) * width_ + ix, a);
             return;
         }
         const auto weights = [cubic](double t) {
@@ -280,11 +293,14 @@ void inside_own_pixels(InkPixels& drawn, const core::Layer& layer) {
     if (own.width != drawn.width || own.height != drawn.height) {
         own = resize_inks(own, Size{static_cast<int>(drawn.width), static_cast<int>(drawn.height)}, Resample::Bicubic);
     }
-    const unsigned n = core::colour_channels(drawn.space), on = core::colour_channels(own.space);
-    const double own_most = own.max();
+    const unsigned n = drawn.colours(), on = own.colours();
     for (std::size_t i = 0; i < drawn.pixel_count(); ++i) {
+        if (drawn.is_float()) {
+            drawn.set(i, n, drawn.value(i, n) * own.value(i, on));
+            continue;
+        }
         std::uint16_t& a = drawn.samples[i * (n + 1) + n];
-        a = static_cast<std::uint16_t>(std::lround(a * (own.samples[i * (on + 1) + on] / own_most)));
+        a = static_cast<std::uint16_t>(std::lround(a * own.value(i, on)));
     }
 }
 
@@ -293,24 +309,40 @@ Inks layer_inks(const core::Layer& layer) {
     return Inks(core::decode_ink_raster(*layer.ink_raster));
 }
 
+// An ink of a pixel (its channel c) as render/ink takes inks (CMYK 0..1, Lab L and a, b, Gray k).
+double ink_of_pixel(const InkPixels& p, std::size_t i, unsigned c) {
+    if (p.is_float()) return from_canvas(p.space, c, p.value(i, c));
+    return ink::decode_sample(p.space, c, p.samples[i * p.channels() + c], p.depth);
+}
+
+// An ink as a pixel holds it (its channel c of pixel i).
+void put_ink(InkPixels& p, std::size_t i, unsigned c, double ink) {
+    if (p.is_float()) p.set(i, c, to_canvas(p.space, c, ink));
+    else p.samples[i * p.channels() + c] = ink::encode_sample(p.space, c, ink, p.depth);
+}
+
 // --- through the screen's picture -------------------------------------------------------------------------------------
 
-using Shown = std::unordered_map<std::uint32_t, std::vector<std::uint16_t>>;
+using Shown = std::unordered_map<std::uint32_t, std::vector<double>>;  // (a colour shown: the values of its inks)
 
 std::uint32_t key(const unsigned char* p) { return (std::uint32_t(p[0]) << 16) | (std::uint32_t(p[1]) << 8) | p[2]; }
 
-std::uint16_t alpha_sample(unsigned char a, int depth) { return depth == 16 ? static_cast<std::uint16_t>(a * 257) : a; }
+std::vector<double> colours_of(const InkPixels& p, std::size_t i) {
+    std::vector<double> out(p.colours());
+    for (unsigned c = 0; c < out.size(); ++c) out[c] = p.value(i, c);
+    return out;
+}
 
-// The colours the lent layers showed: each colour's first inks (its colour samples).
+// The colours the lent layers showed: each colour's first inks (its colours' values).
 Shown own_colours(const std::vector<Lending::Loan>& loans) {
     Shown out;
     for (const Lending::Loan& loan : loans) {
         const InkPixels& p = loan.pixels;
-        const unsigned n = core::colour_channels(p.space), all = n + 1;
+        const unsigned n = p.colours();
         const auto* shown = reinterpret_cast<const unsigned char*>(loan.shown.data());
         for (std::size_t i = 0; i < p.pixel_count(); ++i) {
-            if (p.samples[i * all + n] == 0) continue;
-            out.try_emplace(key(shown + i * 4), p.samples.begin() + std::ptrdiff_t(i * all), p.samples.begin() + std::ptrdiff_t(i * all + n));
+            if (p.value(i, n) == 0) continue;
+            out.try_emplace(key(shown + i * 4), colours_of(p, i));
         }
     }
     return out;
@@ -327,24 +359,23 @@ Shown ruled_colours(const PageColor& color) {
         inks.push_back(std::move(ink));
     }
     InkPixels row = core::blank_ink_pixels(color.space, color.depth, static_cast<std::uint32_t>(inks.size()), 1);
-    const unsigned n = core::colour_channels(color.space), all = n + 1;
+    const unsigned n = core::colour_channels(color.space);
     for (std::size_t i = 0; i < inks.size(); ++i) {
-        for (unsigned c = 0; c < n; ++c) row.samples[i * all + c] = ink::encode_sample(color.space, c, inks[i][c], color.depth);
-        row.samples[i * all + n] = static_cast<std::uint16_t>(row.max());
+        for (unsigned c = 0; c < n; ++c) put_ink(row, i, c, inks[i][c]);
+        row.set(i, n, 1.0);
     }
     const std::string shown = ink::to_rgba8(row, color).tobytes();
     Shown out;
     for (std::size_t i = 0; i < inks.size(); ++i) {
-        out.try_emplace(key(reinterpret_cast<const unsigned char*>(shown.data()) + i * 4), row.samples.begin() + std::ptrdiff_t(i * all),
-                        row.samples.begin() + std::ptrdiff_t(i * all + n));
+        out.try_emplace(key(reinterpret_cast<const unsigned char*>(shown.data()) + i * 4), colours_of(row, i));
     }
     return out;
 }
 
 // The nearest colour shown within 2 a channel (what straight alpha's rounding leaves where only the alpha changed).
-const std::vector<std::uint16_t>* near_shown(const Shown& shown, const unsigned char* p) {
+const std::vector<double>* near_shown(const Shown& shown, const unsigned char* p) {
     if (shown.empty()) return nullptr;
-    const std::vector<std::uint16_t>* best = nullptr;
+    const std::vector<double>* best = nullptr;
     int far = 7;  // (more than 3 × 2)
     for (int dr = -2; dr <= 2; ++dr) {
         for (int dg = -2; dg <= 2; ++dg) {
@@ -366,8 +397,8 @@ const std::vector<std::uint16_t>* near_shown(const Shown& shown, const unsigned 
 // An op's picture (RGBA) back in inks (see the header for the order).
 InkPixels into_inks(const Image& picture, const PageColor& color, const Lending::Loan* loan, const Shown& own, const Shown& ruled) {
     const auto w = static_cast<std::uint32_t>(picture.width()), h = static_cast<std::uint32_t>(picture.height());
-    InkPixels out = core::blank_ink_pixels(color.space, color.depth, w, h);
-    const unsigned n = core::colour_channels(color.space), all = n + 1;
+    Inks out(core::blank_ink_pixels(color.space, color.depth, w, h));
+    const unsigned n = out.n;
     const bool same = loan != nullptr && loan->pixels.width == w && loan->pixels.height == h;
     const auto* lent = same ? reinterpret_cast<const unsigned char*>(loan->shown.data()) : nullptr;
     std::vector<unsigned char> rgb;
@@ -378,23 +409,21 @@ InkPixels into_inks(const Image& picture, const PageColor& color, const Lending:
             const unsigned char* p = row + std::size_t(x) * 4;
             if (p[3] == 0) continue;  // (transparent: no ink)
             const std::size_t i = std::size_t(y) * w + x;
-            std::uint16_t* dst = out.samples.data() + i * all;
             if (lent != nullptr) {
                 // (its colour as it was, or within 2 a channel of it — the rounding of a mix that barely reached it, or
                 // of straight alpha where only the alpha changed —: its own inks)
                 const unsigned char* was = lent + i * 4;
                 if (was[3] != 0 && std::abs(was[0] - p[0]) <= 2 && std::abs(was[1] - p[1]) <= 2 && std::abs(was[2] - p[2]) <= 2) {
-                    const std::uint16_t* inks = loan->pixels.samples.data() + i * all;
-                    std::copy_n(inks, n, dst);
-                    dst[n] = was[3] == p[3] ? inks[n] : alpha_sample(p[3], color.depth);
+                    out.copy_colours(i, loan->pixels, i);
+                    out.put(i, n, was[3] == p[3] ? loan->pixels.value(i, n) : p[3] / 255.0);
                     continue;
                 }
             }
-            dst[n] = alpha_sample(p[3], color.depth);
+            out.put(i, n, p[3] / 255.0);
             const std::array<int, 3> c{p[0], p[1], p[2]};
             const bool grey = p[0] == p[1] && p[1] == p[2];
             const bool genko = grey && (p[0] == 0 || p[0] == 10 || p[0] == 15 || p[0] == 20 || p[0] == 255);
-            const std::vector<std::uint16_t>* inks = nullptr;
+            const std::vector<double>* inks = nullptr;
             if (core::ink_for(color, c) == nullptr) {  // (the table's colour: its inks, by the rules below)
                 if (const auto it = own.find(key(p)); it != own.end()) {
                     inks = &it->second;
@@ -404,7 +433,7 @@ InkPixels into_inks(const Image& picture, const PageColor& color, const Lending:
                 }
             }
             if (inks != nullptr) {
-                std::copy(inks->begin(), inks->end(), dst);
+                for (unsigned k = 0; k < n; ++k) out.put(i, k, (*inks)[k]);
                 continue;
             }
             rgb.insert(rgb.end(), p, p + 3);
@@ -415,11 +444,10 @@ InkPixels into_inks(const Image& picture, const PageColor& color, const Lending:
         std::vector<double> inks(where.size() * n);
         ink::inks_of(color, rgb.data(), nullptr, inks.data(), where.size());
         for (std::size_t k = 0; k < where.size(); ++k) {
-            std::uint16_t* dst = out.samples.data() + where[k] * all;
-            for (unsigned c = 0; c < n; ++c) dst[c] = ink::encode_sample(color.space, c, inks[k * n + c], color.depth);
+            for (unsigned c = 0; c < n; ++c) put_ink(out.p, where[k], c, inks[k * n + c]);
         }
     }
-    return out;
+    return std::move(out.p);
 }
 
 // The layer an op names to work on, as it finds it: layer_id (filter_raster: id; flood_fill looks at the role alone),
@@ -572,22 +600,23 @@ std::optional<Piece> lift_piece(const core::Page& page, const core::Layer& layer
     int x0 = static_cast<int>(g.width), y0 = static_cast<int>(g.height), x1 = 0, y1 = 0;
     for (int y = 0; y < static_cast<int>(g.height); ++y) {
         for (int x = 0; x < static_cast<int>(g.width); ++x) {
-            if (lifted.whole_alpha(x, y) == 0) continue;
+            if (!(lifted.whole_alpha(x, y) > 0)) continue;
             x0 = std::min(x0, x); y0 = std::min(y0, y); x1 = std::max(x1, x + 1); y1 = std::max(y1, y + 1);
         }
     }
     if (x1 <= x0 || y1 <= y0) return std::nullopt;
-    Piece piece;
-    piece.pixels = core::blank_ink_pixels(source.p.space, source.p.depth, static_cast<std::uint32_t>(x1 - x0), static_cast<std::uint32_t>(y1 - y0));
+    Inks lifted_inks(core::blank_ink_pixels(source.p.space, source.p.depth, static_cast<std::uint32_t>(x1 - x0), static_cast<std::uint32_t>(y1 - y0)));
     for (int y = y0; y < y1; ++y) {
         for (int x = x0; x < x1; ++x) {
-            const std::uint16_t a = lifted.whole_alpha(x, y);
-            if (a == 0) continue;
-            std::uint16_t* dst = piece.pixels.samples.data() + (std::size_t(y - y0) * piece.pixels.width + (x - x0)) * source.all;
-            std::copy_n(source.at(std::size_t(y) * g.width + x), source.n, dst);
-            dst[source.n] = a;
+            const double a = lifted.whole_alpha(x, y);
+            if (!(a > 0)) continue;
+            const std::size_t at = std::size_t(y - y0) * lifted_inks.p.width + (x - x0);
+            lifted_inks.copy_colours(at, source.p, std::size_t(y) * g.width + x);
+            lifted_inks.put(at, source.n, a);
         }
     }
+    Piece piece;
+    piece.pixels = std::move(lifted_inks.p);
     piece.box_mm = {x0 / g.sx, y0 / g.sy, (x1 - x0) / g.sx, (y1 - y0) / g.sy};
     return piece;
 }
@@ -639,8 +668,8 @@ std::string lay_piece(const core::Page& page, const core::Layer& layer, const co
             for (std::uint32_t x = 0; x < piece.width; ++x) {
                 const long tx = ox + x;
                 if (tx < 0 || tx >= static_cast<long>(g.width)) continue;
-                const std::uint16_t* s = source.at(std::size_t(y) * piece.width + x);
-                lay_whole(out, std::size_t(ty) * g.width + std::size_t(tx), s, s[source.n]);
+                const std::size_t j = std::size_t(y) * piece.width + x;
+                lay_whole(out, std::size_t(ty) * g.width + std::size_t(tx), source, j, source.alpha(j));
             }
         }
         return out.take();
@@ -753,7 +782,7 @@ std::optional<std::vector<double>> inks_at(const core::Page& page, const core::D
     if (!made.inks || made.inks->pixel_count() == 0) return std::nullopt;
     const unsigned n = core::colour_channels(made.inks->space);
     std::vector<double> out(n);
-    for (unsigned c = 0; c < n; ++c) out[c] = ink::decode_sample(made.inks->space, c, made.inks->samples[c], made.inks->depth);
+    for (unsigned c = 0; c < n; ++c) out[c] = ink_of_pixel(*made.inks, 0, c);
     return out;
 }
 
@@ -767,10 +796,10 @@ std::optional<std::vector<double>> layer_inks_at(const core::Page& page, const c
     const auto x = std::min<std::uint32_t>(pixels->width - 1, static_cast<std::uint32_t>(x_mm / w_mm * pixels->width));
     const auto y = std::min<std::uint32_t>(pixels->height - 1, static_cast<std::uint32_t>(y_mm / h_mm * pixels->height));
     const unsigned n = core::colour_channels(pixels->space), all = n + 1;
-    const std::uint16_t* p = pixels->samples.data() + (std::size_t(y) * pixels->width + x) * all;
-    if (p[n] * 255.0 <= 20.0 * pixels->max()) return std::nullopt;
+    const std::size_t i = std::size_t(y) * pixels->width + x;
+    if (pixels->is_float() ? pixels->value(i, n) * 255.0 <= 20.0 : pixels->samples[i * all + n] * 255.0 <= 20.0 * pixels->max()) return std::nullopt;
     std::vector<double> out(n);
-    for (unsigned c = 0; c < n; ++c) out[c] = ink::decode_sample(pixels->space, c, p[c], pixels->depth);
+    for (unsigned c = 0; c < n; ++c) out[c] = ink_of_pixel(*pixels, i, c);
     return out;
 }
 

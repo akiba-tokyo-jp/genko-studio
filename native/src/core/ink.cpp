@@ -5,9 +5,12 @@
 #include <QCryptographicHash>
 
 #include <algorithm>
+#include <array>
+#include <bit>
 #include <cmath>
 #include <cstdlib>
 #include <cstring>
+#include <limits>
 #include <set>
 
 #include "core/error.hpp"
@@ -91,40 +94,60 @@ void unfilter_row(int type, unsigned char* row, const unsigned char* above, std:
     }
 }
 
-// The bytes one row of samples takes (checked against the limits).
-std::size_t row_bytes(std::uint32_t width, unsigned channels, int depth) {
-    return std::size_t(width) * channels * (depth == 16 ? 2 : 1);
-}
+// The bytes a sample takes at a depth, and one row of samples (checked against the limits).
+std::size_t sample_bytes(int depth) { return depth == 8 ? 1 : depth == 16 ? 2 : 4; }
+
+std::size_t row_bytes(std::uint32_t width, unsigned channels, int depth) { return std::size_t(width) * channels * sample_bytes(depth); }
 
 void check_size(std::uint32_t width, std::uint32_t height, unsigned channels, int depth) {
     if (width < 1 || height < 1 || width > kInkRasterMaxSide || height > kInkRasterMaxSide) bad_raster("its size is out of range");
     const std::uint64_t pixels = std::uint64_t(width) * height;
     if (pixels > kInkRasterMaxPixels) bad_raster("it has too many pixels");
-    if (pixels * channels * (depth == 16 ? 2u : 1u) > kInkRasterMaxBytes) bad_raster("it is too large");
+    if (pixels * channels * sample_bytes(depth) > kInkRasterMaxBytes) bad_raster("it is too large");
+}
+
+constexpr std::array<SpaceTraits, 5> kTraits{{
+    {"cmyk", 1, 4, false, false, true},
+    {"lab", 2, 3, false, false, true},
+    {"gray", 3, 1, true, true, true},
+    {"multichannel", 4, 0, false, false, true},
+    {"mask", 5, 1, false, false, false},
+}};
+
+// A 32-bit sample of the space and channel is one it may hold (finite; 0..1 but a Gray colour plane's).
+bool float_ok(InkSpace space, unsigned colours, unsigned c, float v) {
+    if (!std::isfinite(v)) return false;
+    if (c < colours && traits(space).hdr) return true;
+    return v >= 0.0f && v <= 1.0f;
 }
 
 }  // namespace
 
-std::string_view to_string(InkSpace space) { return space == InkSpace::Cmyk ? "cmyk" : "lab"; }
+const SpaceTraits& traits(InkSpace space) { return kTraits[static_cast<std::size_t>(space)]; }
+
+std::string_view to_string(InkSpace space) { return traits(space).name; }
 
 std::optional<InkSpace> ink_space_from(std::string_view text) {
     if (text == "cmyk") return InkSpace::Cmyk;
     if (text == "lab") return InkSpace::Lab;
+    if (text == "gray") return InkSpace::Gray;
     return std::nullopt;
 }
 
-unsigned colour_channels(InkSpace space) { return space == InkSpace::Cmyk ? 4u : 3u; }
+unsigned colour_channels(InkSpace space) { return traits(space).planes; }
 
 bool is_intent(std::string_view intent) { return std::find(kIntents.begin(), kIntents.end(), intent) != kIntents.end(); }
 
 void check_ink(InkSpace space, const std::vector<double>& ink) {
     if (ink.size() != colour_channels(space)) {
-        bad(std::string("an ink of a ") + (space == InkSpace::Cmyk ? "CMYK page has 4 values (c, m, y, k)" : "Lab page has 3 values (L, a, b)"));
+        bad(std::string("an ink of a ") +
+            (space == InkSpace::Cmyk ? "CMYK page has 4 values (c, m, y, k)" : space == InkSpace::Lab ? "Lab page has 3 values (L, a, b)" : "grey page has 1 value (k)"));
     }
     for (std::size_t i = 0; i < ink.size(); ++i) {
         const double v = ink[i];
         if (!std::isfinite(v)) bad("an ink value is not a finite number");
         if (space == InkSpace::Cmyk && !(v >= 0 && v <= 1)) bad("a CMYK ink value is 0..1");
+        if (space == InkSpace::Gray && !(v >= 0 && v <= 1)) bad("a grey ink value is 0..1");
         if (space == InkSpace::Lab && i == 0 && !(v >= 0 && v <= 100)) bad("a Lab L is 0..100");
         if (space == InkSpace::Lab && i > 0 && !(v >= -128 && v <= 127)) bad("a Lab a or b is -128..127");
     }
@@ -134,8 +157,9 @@ Json to_json(const PageColor& color) {
     Json out = Json::object();
     out["mode"] = std::string(to_string(color.space));
     out["depth"] = color.depth;
-    if (color.space == InkSpace::Cmyk) out["profile"] = color.profile;
+    if (color.space != InkSpace::Lab) out["profile"] = color.profile;
     out["intent"] = color.intent;
+    if (!color.bpc) out["bpc"] = false;
     Json inks = Json::array();
     for (const InkEntry& entry : color.inks) {
         Json ink = Json::array();
@@ -148,25 +172,27 @@ Json to_json(const PageColor& color) {
 
 PageColor page_color_from_json(const Json& value) {
     if (!value.is_object()) bad("it must be an object");
-    static const std::set<std::string> kKeys{"mode", "depth", "profile", "intent", "inks"};
+    // (written in this order; read in any: the journal's snapshots keep their keys sorted)
+    static const std::set<std::string> kKeys{"mode", "depth", "profile", "intent", "bpc", "inks"};
     for (const auto& [key, v] : value.items()) {
         if (!kKeys.contains(key)) bad("unknown key " + py_repr_str(key));
     }
     PageColor out;
     const auto mode = value.find("mode");
-    if (mode == value.end() || !mode->is_string()) bad("mode is cmyk or lab");
+    if (mode == value.end() || !mode->is_string()) bad("mode is cmyk, lab or gray");
     const auto space = ink_space_from(mode->get<std::string>());
-    if (!space) bad("mode is cmyk or lab");
+    if (!space) bad("mode is cmyk, lab or gray");
     out.space = *space;
     const auto depth = value.find("depth");
-    if (depth == value.end() || !depth->is_number_integer() || (depth->get<std::int64_t>() != 8 && depth->get<std::int64_t>() != 16)) {
-        bad("depth is 8 or 16");
+    if (depth == value.end() || !depth->is_number_integer() ||
+        (depth->get<std::int64_t>() != 8 && depth->get<std::int64_t>() != 16 && depth->get<std::int64_t>() != 32)) {
+        bad("depth is 8, 16 or 32");
     }
     out.depth = static_cast<int>(depth->get<std::int64_t>());
     const auto profile = value.find("profile");
-    if (out.space == InkSpace::Cmyk) {
+    if (out.space != InkSpace::Lab) {
         if (profile == value.end() || !profile->is_string() || !is_ref(profile->get<std::string>())) {
-            bad("a CMYK page names its ICC profile (sha256:<64 hex>)");
+            bad(std::string("a ") + (out.space == InkSpace::Cmyk ? "CMYK" : "grey") + " page names its ICC profile (sha256:<64 hex>)");
         }
         out.profile = profile->get<std::string>();
     } else if (profile != value.end()) {
@@ -177,6 +203,10 @@ PageColor page_color_from_json(const Json& value) {
         bad("intent is perceptual, relative, saturation or absolute");
     }
     out.intent = intent->get<std::string>();
+    if (const auto bpc = value.find("bpc"); bpc != value.end()) {
+        if (!bpc->is_boolean() || bpc->get<bool>()) bad("bpc is written only as false");
+        out.bpc = false;
+    }
     const auto inks = value.find("inks");
     if (inks == value.end() || !inks->is_array()) bad("inks is a list");
     if (inks->size() > kInksMax) bad("a page has at most " + std::to_string(kInksMax) + " inks");
@@ -222,8 +252,10 @@ bool lab_blend(std::string_view mode) {
 }
 
 void validate_ink_document(const Document& doc) {
+    if (doc.color && doc.rgb) throw Error("value", "the book has two colour models (inks and RGB) for its new pages");
     for (const auto& page : doc.pages) {
         if (std::find(doc.deferred.begin(), doc.deferred.end(), page) != doc.deferred.end()) continue;
+        if (page->color && page->rgb) throw Error("value", "a page has two colour models (inks and RGB)");
         for (const Layer& layer : page->layers) {
             const int kinds = (layer.raster_png && !layer.raster_png->empty()) + (layer.color_raster != nullptr) + (layer.ink_raster != nullptr);
             if (kinds > 1) throw Error("value", "a layer holds one kind of pixels at most (layer " + layer.id + ")");
@@ -232,7 +264,7 @@ void validate_ink_document(const Document& doc) {
             }
             if (page->color && ((layer.raster_png && !layer.raster_png->empty()) || layer.color_raster)) {
                 // (what drew RGB pixels on it does not know the page's inks yet)
-                throw Error("not_yet_ported", "RGB pixels on a CMYK or Lab page are not in this build yet (layer " + layer.id + ")");
+                throw Error("not_yet_ported", "RGB pixels on a CMYK, Lab or grey page are not in this build yet (layer " + layer.id + ")");
             }
             if (!layer.ink_raster) continue;
             if (!page->color) throw Error("value", "an RGB page holds no ink pixels (layer " + layer.id + ")");
@@ -244,20 +276,49 @@ void validate_ink_document(const Document& doc) {
     }
 }
 
-InkPixels blank_ink_pixels(InkSpace space, int depth, std::uint32_t width, std::uint32_t height) {
+void InkPixels::set(std::size_t i, unsigned c, double v) {
+    const std::size_t at = i * channels() + c;
+    if (depth == 32) {
+        if (!(c < colours() && traits(space).hdr)) v = std::clamp(v, 0.0, 1.0);
+        floats[at] = static_cast<float>(v);
+        return;
+    }
+    samples[at] = static_cast<std::uint16_t>(std::lround(std::clamp(v, 0.0, 1.0) * max()));
+}
+
+void InkPixels::copy_pixel(std::size_t i, const InkPixels& from, std::size_t j) {
+    const unsigned all = channels();
+    if (depth == 32) {
+        std::copy_n(from.floats.data() + j * all, all, floats.data() + i * all);
+    } else {
+        std::copy_n(from.samples.data() + j * all, all, samples.data() + i * all);
+    }
+}
+
+InkPixels blank_ink_pixels(InkSpace space, int depth, std::uint32_t width, std::uint32_t height, unsigned planes) {
     InkPixels out;
     out.space = space;
     out.depth = depth;
     out.width = width;
     out.height = height;
-    check_size(width, height, out.channels(), depth);
-    out.samples.assign(out.pixel_count() * out.channels(), 0);
-    if (space == InkSpace::Lab) {  // (white: L 100, a = b = 0, transparent)
-        const std::uint16_t mid = depth == 8 ? 128 : 32896;
+    out.planes = space == InkSpace::Multi ? planes : 0;
+    if (space == InkSpace::Multi && (planes < 1 || planes > 32)) bad_raster("a multichannel raster has 1..32 planes");
+    if (depth != 8 && depth != 16 && depth != 32) bad_raster("its depth is not 8, 16 or 32");
+    const unsigned all = out.channels();
+    check_size(width, height, all, depth);
+    if (depth == 32) out.floats.assign(out.pixel_count() * all, 0.0f);
+    else out.samples.assign(out.pixel_count() * all, 0);
+    if (space == InkSpace::Lab || space == InkSpace::Gray) {  // (white: L 100, a = b = 0; a grey's lightness 1; transparent)
         for (std::size_t i = 0; i < out.pixel_count(); ++i) {
-            out.samples[i * 4] = static_cast<std::uint16_t>(out.max());
-            out.samples[i * 4 + 1] = mid;
-            out.samples[i * 4 + 2] = mid;
+            out.set(i, 0, 1.0);
+            if (space == InkSpace::Lab) {
+                if (depth == 32) {
+                    out.floats[i * all + 1] = out.floats[i * all + 2] = static_cast<float>(128.0 / 255.0);
+                } else {
+                    const std::uint16_t mid = depth == 8 ? 128 : 32896;
+                    out.samples[i * all + 1] = out.samples[i * all + 2] = mid;
+                }
+            }
         }
     }
     return out;
@@ -265,18 +326,34 @@ InkPixels blank_ink_pixels(InkSpace space, int depth, std::uint32_t width, std::
 
 InkRasterHeader ink_raster_header(std::string_view bytes) {
     if (bytes.size() < kHeader || bytes.substr(0, 4) != "GKIR") bad_raster("it is not GKIR");
-    if (static_cast<unsigned char>(bytes[4]) != 1) bad_raster("its version is not 1");
+    const unsigned version = static_cast<unsigned char>(bytes[4]);
+    if (version != 1 && version != 2) bad_raster("its version is not 1 or 2");
     InkRasterHeader out;
+    out.version = version;
     const unsigned space = static_cast<unsigned char>(bytes[5]);
-    if (space != 1 && space != 2) bad_raster("its colour space is not CMYK or Lab");
-    out.space = space == 1 ? InkSpace::Cmyk : InkSpace::Lab;
+    const auto known = std::find_if(kTraits.begin(), kTraits.end(), [&](const SpaceTraits& t) { return t.code == space; });
+    if (known == kTraits.end()) bad_raster("its colour space is not one this build knows");
+    out.space = static_cast<InkSpace>(known - kTraits.begin());
     const unsigned depth = static_cast<unsigned char>(bytes[6]);
-    if (depth != 8 && depth != 16) bad_raster("its depth is not 8 or 16");
+    if (depth != 8 && depth != 16 && depth != 32) bad_raster("its depth is not 8, 16 or 32");
     out.depth = static_cast<int>(depth);
-    if (bytes[7] != 0) bad_raster("its reserved byte is not 0");
+    const unsigned planes = static_cast<unsigned char>(bytes[7]);
+    const bool v1 = (out.space == InkSpace::Cmyk || out.space == InkSpace::Lab) && depth != 32;
+    if (version == 1) {
+        if (!v1) bad_raster("version 1 holds CMYK or Lab at 8 or 16 bits only");
+        if (planes != 0) bad_raster("its reserved byte is not 0");
+        out.planes = colour_channels(out.space);
+    } else {
+        // (version 2 only for what version 1 cannot hold: the same pixels always give the same bytes)
+        if (v1) bad_raster("version 2 does not hold what version 1 does");
+        if (out.space == InkSpace::Multi ? (planes < 1 || planes > 32) : planes != colour_channels(out.space)) {
+            bad_raster("its count of planes is not its colour space's");
+        }
+        out.planes = planes;
+    }
     out.width = le32(bytes, 8);
     out.height = le32(bytes, 12);
-    check_size(out.width, out.height, colour_channels(out.space) + 1, out.depth);
+    check_size(out.width, out.height, out.planes + (traits(out.space).alpha ? 1 : 0), out.depth);
     return out;
 }
 
@@ -287,9 +364,10 @@ InkPixels decode_ink_raster(std::string_view bytes) {
     out.depth = header.depth;
     out.width = header.width;
     out.height = header.height;
+    out.planes = header.space == InkSpace::Multi ? header.planes : 0;
     const unsigned channels = out.channels();
     const std::size_t rb = row_bytes(out.width, channels, out.depth);
-    const std::size_t bpp = std::size_t(channels) * (out.depth == 16 ? 2 : 1);
+    const std::size_t bpp = std::size_t(channels) * sample_bytes(out.depth);
     const std::size_t total = (rb + 1) * out.height;
     std::string raw(total, '\0');
 
@@ -319,40 +397,57 @@ InkPixels decode_ink_raster(std::string_view bytes) {
     if (in_left != 0) bad_raster("bytes follow its pixels");
 
     auto* data = reinterpret_cast<unsigned char*>(raw.data());
-    out.samples.resize(out.pixel_count() * channels);
+    if (out.depth == 32) out.floats.resize(out.pixel_count() * channels);
+    else out.samples.resize(out.pixel_count() * channels);
+    const unsigned colours = out.colours();
     for (std::uint32_t y = 0; y < out.height; ++y) {
         unsigned char* line = data + std::size_t(y) * (rb + 1);
         const int type = line[0];
         if (type > 4) bad_raster("a row has an unknown filter");
         const unsigned char* above = y > 0 ? data + std::size_t(y - 1) * (rb + 1) + 1 : nullptr;
         unfilter_row(type, line + 1, above, rb, bpp);
-        std::uint16_t* samples = out.samples.data() + std::size_t(y) * out.width * channels;
         if (out.depth == 8) {
+            std::uint16_t* samples = out.samples.data() + std::size_t(y) * out.width * channels;
             for (std::size_t i = 0; i < rb; ++i) samples[i] = line[1 + i];
-        } else {
+        } else if (out.depth == 16) {
+            std::uint16_t* samples = out.samples.data() + std::size_t(y) * out.width * channels;
             for (std::size_t i = 0; i < rb / 2; ++i) samples[i] = static_cast<std::uint16_t>((line[1 + 2 * i] << 8) | line[2 + 2 * i]);
+        } else {
+            float* floats = out.floats.data() + std::size_t(y) * out.width * channels;
+            for (std::size_t i = 0; i < rb / 4; ++i) {
+                const unsigned char* b = line + 1 + 4 * i;
+                const std::uint32_t bits = (std::uint32_t(b[0]) << 24) | (std::uint32_t(b[1]) << 16) | (std::uint32_t(b[2]) << 8) | b[3];
+                const float v = std::bit_cast<float>(bits);
+                if (!float_ok(out.space, colours, static_cast<unsigned>(i % channels), v)) bad_raster("a 32-bit sample is not finite or out of its range");
+                floats[i] = v;
+            }
         }
     }
     return out;
 }
 
 std::string encode_ink_raster(const InkPixels& pixels) {
-    const unsigned channels = pixels.channels();
+    static_assert(sizeof(float) == 4 && std::numeric_limits<float>::is_iec559);
+    if (pixels.depth != 8 && pixels.depth != 16 && pixels.depth != 32) bad_raster("its depth is not 8, 16 or 32");
+    if (pixels.space == InkSpace::Multi && (pixels.planes < 1 || pixels.planes > 32)) bad_raster("a multichannel raster has 1..32 planes");
+    const unsigned channels = pixels.channels(), colours = pixels.colours();
     check_size(pixels.width, pixels.height, channels, pixels.depth);
-    if (pixels.depth != 8 && pixels.depth != 16) bad_raster("its depth is not 8 or 16");
-    if (pixels.samples.size() != pixels.pixel_count() * channels) bad_raster("its samples do not fill its size");
+    if (pixels.depth == 32 ? pixels.floats.size() != pixels.pixel_count() * channels : pixels.samples.size() != pixels.pixel_count() * channels) {
+        bad_raster("its samples do not fill its size");
+    }
+    const bool v1 = (pixels.space == InkSpace::Cmyk || pixels.space == InkSpace::Lab) && pixels.depth != 32;
     const std::uint32_t most = pixels.max();
     std::string out;
     out.append("GKIR");
-    out.push_back(1);
-    out.push_back(pixels.space == InkSpace::Cmyk ? 1 : 2);
+    out.push_back(static_cast<char>(v1 ? 1 : 2));
+    out.push_back(static_cast<char>(traits(pixels.space).code));
     out.push_back(static_cast<char>(pixels.depth));
-    out.push_back(0);
+    out.push_back(static_cast<char>(v1 ? 0 : colours));
     put_le32(out, pixels.width);
     put_le32(out, pixels.height);
 
     const std::size_t rb = row_bytes(pixels.width, channels, pixels.depth);
-    const std::size_t bpp = std::size_t(channels) * (pixels.depth == 16 ? 2 : 1);
+    const std::size_t bpp = std::size_t(channels) * sample_bytes(pixels.depth);
     std::vector<unsigned char> row(rb), above(rb), best(rb + 1), trial(rb);
     z_stream z{};
     if (deflateInit(&z, 6) != Z_OK) bad_raster("zlib cannot start");
@@ -372,13 +467,24 @@ std::string encode_ink_raster(const InkPixels& pixels) {
         } while (z.avail_out == 0 || (flush == Z_FINISH && z.avail_in != 0));
     };
     for (std::uint32_t y = 0; y < pixels.height; ++y) {
-        const std::uint16_t* samples = pixels.samples.data() + std::size_t(y) * pixels.width * channels;
         if (pixels.depth == 8) {
+            const std::uint16_t* samples = pixels.samples.data() + std::size_t(y) * pixels.width * channels;
             for (std::size_t i = 0; i < rb; ++i) row[i] = static_cast<unsigned char>(std::min<std::uint32_t>(samples[i], most));
-        } else {
+        } else if (pixels.depth == 16) {
+            const std::uint16_t* samples = pixels.samples.data() + std::size_t(y) * pixels.width * channels;
             for (std::size_t i = 0; i < rb / 2; ++i) {
                 row[2 * i] = static_cast<unsigned char>(samples[i] >> 8);
                 row[2 * i + 1] = static_cast<unsigned char>(samples[i] & 255);
+            }
+        } else {
+            const float* floats = pixels.floats.data() + std::size_t(y) * pixels.width * channels;
+            for (std::size_t i = 0; i < rb / 4; ++i) {
+                if (!float_ok(pixels.space, colours, static_cast<unsigned>(i % channels), floats[i])) {
+                    deflateEnd(&z);
+                    bad_raster("a 32-bit sample is not finite or out of its range");
+                }
+                const std::uint32_t bits = std::bit_cast<std::uint32_t>(floats[i]);
+                for (unsigned k = 0; k < 4; ++k) row[4 * i + k] = static_cast<unsigned char>((bits >> (24 - 8 * k)) & 255);
             }
         }
         // (libpng's choice: the filter whose bytes, read as signed, sum to the least)
