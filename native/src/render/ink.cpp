@@ -119,14 +119,35 @@ constexpr cmsUInt32Number kFlags = cmsFLAGS_BLACKPOINTCOMPENSATION | cmsFLAGS_NO
 // The flags colours come into the page with (its black point compensation).
 cmsUInt32Number flags_in(const PageColor& color) { return color.bpc ? kFlags : cmsFLAGS_NOCACHE; }
 
-// sRGB (`in`) → the page (`out`), the page's intent and black point compensation.
-Transform from_srgb_transform(const PageColor& color, cmsUInt32Number in, cmsUInt32Number out) {
-    const std::string key = "srgb>" + page_key(color) + ":" + color.intent + (color.bpc ? "" : ":nobpc") + ":" + std::to_string(in) + ":" +
-                            std::to_string(out);
+// An RGB profile (its bytes; null: Little CMS's sRGB) opened, and its key in the transforms' cache.
+std::unique_ptr<ProfileHandle> rgb_profile(const core::Bytes& icc) {
+    if (!icc) return std::make_unique<ProfileHandle>(cmsCreate_sRGBProfile());
+    cmsHPROFILE handle = cmsOpenProfileFromMem(icc->data(), static_cast<cmsUInt32Number>(icc->size()));
+    if (handle == nullptr) throw core::Error("value", "the RGB ICC profile cannot be read");
+    return std::make_unique<ProfileHandle>(handle);
+}
+std::string rgb_key(const core::Bytes& icc) { return icc ? core::bytes_ref(*icc) : std::string("srgb"); }
+
+// sRGB, or the RGB profile `source` (`in`) → the page (`out`), the page's intent and black point compensation.
+Transform from_srgb_transform(const PageColor& color, cmsUInt32Number in, cmsUInt32Number out, const core::Bytes& source = nullptr) {
+    const std::string key = rgb_key(source) + ">" + page_key(color) + ":" + color.intent + (color.bpc ? "" : ":nobpc") + ":" + std::to_string(in) +
+                            ":" + std::to_string(out);
     return cached(key, [&] {
-        const ProfileHandle srgb(cmsCreate_sRGBProfile());
+        const auto rgb = rgb_profile(source);
         const auto page = page_profile(color);
-        return cmsCreateTransform(srgb.handle, in, page->handle, out, intent_number(color.intent), flags_in(color));
+        return cmsCreateTransform(rgb->handle, in, page->handle, out, intent_number(color.intent), flags_in(color));
+    });
+}
+
+// The page (`in`) → an RGB page's profile (`out`; null: sRGB), that page's intent and black point compensation.
+Transform to_rgb_transform(const PageColor& color, const core::RgbMode& target, cmsUInt32Number in, cmsUInt32Number out) {
+    const std::string key = page_key(color) + ">" + rgb_key(target.icc) + ":" + target.intent + (target.bpc ? "" : ":nobpc") + ":" +
+                            std::to_string(in) + ":" + std::to_string(out);
+    return cached(key, [&] {
+        const auto page = page_profile(color);
+        const auto rgb = rgb_profile(target.icc);
+        return cmsCreateTransform(page->handle, in, rgb->handle, out, intent_number(target.intent),
+                                  target.bpc ? kFlags : cmsFLAGS_NOCACHE);
     });
 }
 
@@ -517,15 +538,16 @@ void correct(const PageColor& color, const double* inks, double* out, std::size_
     Rules(color).correct(inks, out, count, change);
 }
 
-InkPixels from_rgb(const Image& image, const PageColor& color, bool gray_on_k) {
+InkPixels from_rgb(const Image& image, const PageColor& color, bool gray_on_k, const core::Bytes& source) {
     const Image rgba = image.mode() == "RGBA" ? image : image.convert("RGBA");
     const auto width = static_cast<std::uint32_t>(rgba.width()), height = static_cast<std::uint32_t>(rgba.height());
     const unsigned ch = core::colour_channels(color.space), all = ch + 1;
-    // (a grey page's greys by their value — sGray's, or asked for —, as a CMYK page's on K alone)
-    const bool grey_by_value = color.space == InkSpace::Gray && (gray_on_k || sgray(color));
+    // (a grey page's greys by their value — sGray's, or asked for —, as a CMYK page's on K alone; from sRGB only)
+    gray_on_k = gray_on_k && !source;
+    const bool grey_by_value = !source && color.space == InkSpace::Gray && (gray_on_k || sgray(color));
     if (color.depth == 32) {
         InkPixels out = core::blank_ink_pixels(color.space, 32, width, height);
-        const Transform transform = from_srgb_transform(color, TYPE_RGBA_8, float_format(color.space));
+        const Transform transform = from_srgb_transform(color, TYPE_RGBA_8, float_format(color.space), source);
         std::vector<float> row(static_cast<std::size_t>(width) * ch);
         for (std::uint32_t y = 0; y < height; ++y) {
             const auto* src = reinterpret_cast<const unsigned char*>(rgba.raw()->image[y]);
@@ -553,7 +575,7 @@ InkPixels from_rgb(const Image& image, const PageColor& color, bool gray_on_k) {
     out.width = width;
     out.height = height;
     out.samples.assign(out.pixel_count() * all, 0);
-    const Transform transform = from_srgb_transform(color, TYPE_RGBA_8, int_format(color.space, color.depth));
+    const Transform transform = from_srgb_transform(color, TYPE_RGBA_8, int_format(color.space, color.depth), source);
     std::vector<std::uint16_t> row16(static_cast<std::size_t>(out.width) * ch);
     std::vector<unsigned char> row8(static_cast<std::size_t>(out.width) * ch);
     const double most = out.max();
@@ -576,14 +598,16 @@ InkPixels from_rgb(const Image& image, const PageColor& color, bool gray_on_k) {
     return out;
 }
 
-InkPixels from_srgb(const std::vector<float>& rgba, std::uint32_t width, std::uint32_t height, const PageColor& color, bool gray_on_k) {
+InkPixels from_srgb(const std::vector<float>& rgba, std::uint32_t width, std::uint32_t height, const PageColor& color, bool gray_on_k,
+                    const core::Bytes& source) {
     const unsigned ch = core::colour_channels(color.space), all = ch + 1;
-    const bool grey_by_value = color.space == InkSpace::Gray && (gray_on_k || sgray(color));
+    gray_on_k = gray_on_k && !source;
+    const bool grey_by_value = !source && color.space == InkSpace::Gray && (gray_on_k || sgray(color));
     std::vector<float> clamped(rgba.size());
     for (std::size_t i = 0; i < rgba.size(); ++i) clamped[i] = std::clamp(rgba[i], 0.0f, 1.0f);
     if (color.depth == 32) {
         InkPixels out = core::blank_ink_pixels(color.space, 32, width, height);
-        const Transform transform = from_srgb_transform(color, TYPE_RGBA_FLT, float_format(color.space));
+        const Transform transform = from_srgb_transform(color, TYPE_RGBA_FLT, float_format(color.space), source);
         std::vector<float> row(static_cast<std::size_t>(width) * ch);
         for (std::uint32_t y = 0; y < height; ++y) {
             const float* src = clamped.data() + std::size_t(y) * width * 4;
@@ -613,7 +637,7 @@ InkPixels from_srgb(const std::vector<float>& rgba, std::uint32_t width, std::ui
     out.width = width;
     out.height = height;
     out.samples.assign(out.pixel_count() * all, 0);
-    const Transform transform = from_srgb_transform(color, TYPE_RGBA_FLT, int_format(color.space, 16));
+    const Transform transform = from_srgb_transform(color, TYPE_RGBA_FLT, int_format(color.space, 16), source);
     std::vector<std::uint16_t> row(static_cast<std::size_t>(width) * ch);
     const double most = out.max();
     for (std::uint32_t y = 0; y < height; ++y) {
@@ -722,6 +746,82 @@ std::vector<float> to_srgb_floats(const InkPixels& pixels, const PageColor& colo
         }
     }
     return out;
+}
+
+std::vector<float> to_rgb_floats(const InkPixels& pixels, const PageColor& color, const core::RgbMode& target) {
+    if (!target.icc && target.intent == "relative" && target.bpc) return to_srgb_floats(pixels, color);  // (as the screen shows it)
+    const unsigned ch = pixels.colours(), all = pixels.channels();
+    std::vector<float> out(pixels.pixel_count() * 4);
+    std::vector<float> row(static_cast<std::size_t>(pixels.width) * 3);
+    if (pixels.is_float()) {
+        const Transform transform = to_rgb_transform(color, target, float_format(pixels.space), TYPE_RGB_FLT);
+        std::vector<float> lcms(static_cast<std::size_t>(pixels.width) * ch);
+        for (std::uint32_t y = 0; y < pixels.height; ++y) {
+            lcms_row(pixels, y, lcms.data());
+            cmsDoTransform(transform->handle, lcms.data(), row.data(), pixels.width);
+            for (std::uint32_t x = 0; x < pixels.width; ++x) {
+                const std::size_t i = std::size_t(y) * pixels.width + x;
+                for (unsigned c = 0; c < 3; ++c) out[i * 4 + c] = std::clamp(row[x * 3 + c], 0.0f, 1.0f);
+                out[i * 4 + 3] = static_cast<float>(pixels.value(i, ch));
+            }
+        }
+        return out;
+    }
+    const Transform transform = to_rgb_transform(color, target, int_format(pixels.space, 16), TYPE_RGB_FLT);
+    const std::vector<std::uint16_t> wide = widened(pixels);
+    for (std::uint32_t y = 0; y < pixels.height; ++y) {
+        cmsDoTransform(transform->handle, wide.data() + std::size_t(y) * pixels.width * ch, row.data(), pixels.width);
+        for (std::uint32_t x = 0; x < pixels.width; ++x) {
+            const std::size_t i = std::size_t(y) * pixels.width + x;
+            for (unsigned c = 0; c < 3; ++c) out[i * 4 + c] = std::clamp(row[x * 3 + c], 0.0f, 1.0f);
+            out[i * 4 + 3] = static_cast<float>(pixels.samples[i * all + ch]) / static_cast<float>(pixels.max());
+        }
+    }
+    return out;
+}
+
+Image to_rgb8(const InkPixels& pixels, const PageColor& color, const core::RgbMode& target) {
+    if (!target.icc && target.intent == "relative" && target.bpc) return to_rgba8(pixels, color);  // (as the screen shows it)
+    const std::vector<float> rgba = to_rgb_floats(pixels, color, target);
+    Image out = Image::create("RGBA", Size{static_cast<int>(pixels.width), static_cast<int>(pixels.height)}, Ink{0, 0, 0, 0});
+    for (std::uint32_t y = 0; y < pixels.height; ++y) {
+        auto* dst = reinterpret_cast<unsigned char*>(out.raw()->image[y]);
+        for (std::uint32_t x = 0; x < pixels.width * 4; ++x) {
+            dst[x] = static_cast<unsigned char>(std::lround(std::clamp(rgba[std::size_t(y) * pixels.width * 4 + x], 0.0f, 1.0f) * 255.0f));
+        }
+    }
+    return out;
+}
+
+void rgb_to_rgb(std::vector<float>& rgba, const core::Bytes& from, const core::RgbMode& to) {
+    const std::string key = "rgb:" + rgb_key(from) + ">" + rgb_key(to.icc) + ":" + to.intent + (to.bpc ? "" : ":nobpc");
+    const Transform transform = cached(key, [&] {
+        const auto a = rgb_profile(from);
+        const auto b = rgb_profile(to.icc);
+        return cmsCreateTransform(a->handle, TYPE_RGBA_FLT, b->handle, TYPE_RGBA_FLT, intent_number(to.intent),
+                                  to.bpc ? kFlags | cmsFLAGS_COPY_ALPHA : cmsFLAGS_NOCACHE | cmsFLAGS_COPY_ALPHA);
+    });
+    for (float& v : rgba) v = std::clamp(v, 0.0f, 1.0f);
+    constexpr std::size_t kRow = 4096;
+    for (std::size_t at = 0; at < rgba.size() / 4; at += kRow) {
+        const auto n = static_cast<cmsUInt32Number>(std::min(kRow, rgba.size() / 4 - at));
+        cmsDoTransform(transform->handle, rgba.data() + at * 4, rgba.data() + at * 4, n);
+    }
+    for (float& v : rgba) v = std::clamp(v, 0.0f, 1.0f);
+}
+
+std::optional<core::ProfileSpace> profile_space(std::string_view icc) {
+    if (icc.empty() || icc.size() > core::kProfileMaxBytes) return std::nullopt;
+    cmsHPROFILE handle = cmsOpenProfileFromMem(icc.data(), static_cast<cmsUInt32Number>(icc.size()));
+    if (handle == nullptr) return std::nullopt;
+    const ProfileHandle held(handle);
+    switch (cmsGetColorSpace(handle)) {
+        case cmsSigRgbData: return core::ProfileSpace::Rgb;
+        case cmsSigGrayData: return core::ProfileSpace::Gray;
+        case cmsSigCmykData: return core::ProfileSpace::Cmyk;
+        case cmsSigLabData: return core::ProfileSpace::Lab;
+        default: return std::nullopt;
+    }
 }
 
 InkPixels convert(const InkPixels& pixels, const PageColor& from, const PageColor& to, bool gray_on_k) {

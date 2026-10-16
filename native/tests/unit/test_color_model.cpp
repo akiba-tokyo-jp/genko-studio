@@ -19,8 +19,10 @@
 #include "core/error.hpp"
 #include "core/ink.hpp"
 #include "core/paths.hpp"
+#include "render/image.hpp"
 #include "render/ink.hpp"
 #include "render/ops_registry.hpp"
+#include "render/png.hpp"
 #include "storage/asset_store.hpp"
 #include "storage/lock.hpp"
 #include "storage/reader.hpp"
@@ -33,11 +35,11 @@ namespace fs = std::filesystem;
 
 namespace {
 
-[[maybe_unused]] core::ApplyResult run_ops(const core::Document& doc, const Json& ops) {
+core::ApplyResult run_ops(const core::Document& doc, const Json& ops) {
     return core::CommandBus(render::ops_registry()).apply(doc, ops, core::Actor("human:test"));
 }
 
-[[maybe_unused]] std::string refusal(const core::Document& doc, const Json& ops) {
+std::string refusal(const core::Document& doc, const Json& ops) {
     try {
         run_ops(doc, ops);
     } catch (const core::ApplyError& error) {
@@ -63,6 +65,23 @@ void write_book(const core::Document& doc, const fs::path& dir) {
     request.actor = "human:test";
     request.ops = Json::array();
     storage::Saver(lock).save(doc, request);
+}
+
+// A picture of a grey (128) on the left and a green (alpha 200) on the right.
+render::Image picture() {
+    render::Image out = render::Image::create("RGBA", render::Size{60, 40}, render::Ink{0, 0, 0, 0});
+    out.paste(render::Ink{128, 128, 128, 255}, render::Box{0, 0, 30, 40});
+    out.paste(render::Ink{30, 160, 90, 200}, render::Box{30, 0, 60, 40});
+    return out;
+}
+
+// A book of one page with a paint layer holding the picture, its lines free of the panels (as a precise layer needs).
+core::Document painted(const render::Image& image) {
+    core::Document doc = small_book();
+    doc = run_ops(doc, Json::array({Json{{"op", "add_layer"}, {"page", 1}, {"kind", "paint"}, {"title", "絵"}}})).doc;
+    const std::string id = doc.page(0).layers.back().id;
+    return run_ops(doc, Json::array({Json{{"op", "set_layer"}, {"page", 1}, {"id", id}, {"panel_each", false}, {"panel_clip", false}},
+                                     Json{{"op", "put_raster"}, {"page", 1}, {"id", id}, {"png_base64", core::b64encode(render::write_png(image))}}})).doc;
 }
 
 void save_next(const core::Document& doc, const fs::path& dir, const Json& ops) {
@@ -292,6 +311,215 @@ private slots:
         const core::InkPixels white = core::blank_ink_pixels(core::InkSpace::Gray, 16, 2, 2);
         QCOMPARE(white.samples[0], std::uint16_t(65535));
         QCOMPARE(white.samples[1], std::uint16_t(0));
+    }
+
+    // set_color_mode by depth (image.mode.bits8/16/32): 8 → 16 is v×257 and 8 → 32 is v/255, sample by sample; back to
+    // 8 bits the same PNG pixels; the page's mode follows (16, 32: color-model@1), 8 bits sRGB is none again. A page
+    // whose layer cannot be drawn in precise colour yet is refused with its name (nothing changed).
+    void depths() {
+        core::Document doc = painted(picture());
+        const std::string id = doc.page(0).layers.back().id;
+        const std::string began = render::open_image(*doc.page(0).layers.back().raster_png, render::kPillowOpenLimits).convert("RGBA").tobytes();
+        const core::ApplyResult deep = run_ops(doc, Json::array({Json{{"op", "set_color_mode"}, {"page", 1}, {"mode", "rgb"}, {"depth", 16}}}));
+        QCOMPARE(deep.results.at(0)["converted"], Json(1));
+        const core::Page& p16 = deep.doc.page(0);
+        QVERIFY(p16.rgb && p16.rgb->depth == 16 && p16.rgb->profile.empty());
+        QVERIFY(!p16.layers.back().raster_png && p16.layers.back().color_raster);
+        {
+            const core::ColorRasterView view(*p16.layers.back().color_raster);
+            QCOMPARE(view.width(), 60u);
+            for (std::size_t i = 0; i < std::size_t(60) * 40; ++i) {
+                const auto px = view.pixel(i);
+                for (unsigned c = 0; c < 4; ++c) {
+                    const int v = static_cast<unsigned char>(began[i * 4 + c]);
+                    QCOMPARE(static_cast<int>(std::lround(px[c] * 65535)), v * 257);
+                }
+            }
+        }
+        const core::Document d32 = run_ops(doc, Json::array({Json{{"op", "set_color_mode"}, {"page", 1}, {"mode", "rgb"}, {"depth", 32}}})).doc;
+        {
+            const core::ColorRasterView view(*d32.page(0).layers.back().color_raster);
+            for (std::size_t i = 0; i < std::size_t(60) * 40; ++i) {
+                const auto px = view.pixel(i);
+                for (unsigned c = 0; c < 4; ++c) {
+                    const int v = static_cast<unsigned char>(began[i * 4 + c]);
+                    QCOMPARE(px[c], static_cast<double>(static_cast<float>(v / 255.0)));
+                }
+            }
+        }
+        // 16 → 32 → 8: the PNG's pixels again; the page none (Python's)
+        const core::Document back = run_ops(deep.doc, Json::array({Json{{"op", "set_color_mode"}, {"page", 1}, {"mode", "rgb"}, {"depth", 32}},
+                                                                   Json{{"op", "set_color_mode"}, {"page", 1}, {"mode", "rgb"}}})).doc;
+        QVERIFY(!back.page(0).rgb && !back.page(0).color);
+        QCOMPARE(render::open_image(*back.page(0).layers.back().raster_png, render::kPillowOpenLimits).convert("RGBA").tobytes(), began);
+        // dithered: an 8-bit value stays itself
+        const core::Document dithered = run_ops(deep.doc, Json::array({Json{{"op", "set_color_mode"}, {"page", 1}, {"mode", "rgb"}, {"dither", true}}})).doc;
+        QCOMPARE(render::open_image(*dithered.page(0).layers.back().raster_png, render::kPillowOpenLimits).convert("RGBA").tobytes(), began);
+        // the same mode again: nothing converted
+        QCOMPARE(run_ops(deep.doc, Json::array({Json{{"op", "set_color_mode"}, {"page", 1}, {"mode", "rgb"}, {"depth", 16}}})).results.at(0)["converted"], Json(0));
+        // a layer that keeps its lines inside the panels cannot be precise yet: refused with its name, nothing changed
+        const core::Document clipped = run_ops(doc, Json::array({Json{{"op", "set_layer"}, {"page", 1}, {"id", id}, {"panel_clip", true}}})).doc;
+        const std::string why = refusal(clipped, Json::array({Json{{"op", "set_color_mode"}, {"page", 1}, {"mode", "rgb"}, {"depth", 16}}}));
+        QVERIFY2(why.starts_with("not_yet_ported") && why.find(id) != std::string::npos, why.c_str());
+        // refused: a depth, a mode
+        QVERIFY(!refusal(doc, Json::array({Json{{"op", "set_color_mode"}, {"mode", "rgb"}, {"depth", 12}}})).empty());
+        QVERIFY(!refusal(doc, Json::array({Json{{"op", "set_color_mode"}, {"mode", "hsv"}}})).empty());
+        QVERIFY(refusal(doc, Json::array({Json{{"op", "set_color_mode"}, {"mode", "multichannel"}}})).starts_with("not_yet_ported"));
+    }
+
+    // HDR values going where they cannot be kept (32 → 16 or 8 bits, into inks): refused, nothing changed; cut when
+    // asked (clip_hdr), the pixels counted.
+    void clipHdr() {
+        core::Document doc = small_book();
+        doc = run_ops(doc, Json::array({Json{{"op", "put_color_raster"}, {"page", 1}, {"width", 2}, {"height", 1}, {"precision", "f32"},
+                                              {"pixels", Json::array({2.0, 0.5, 0.25, 1.0, 0.5, 0.5, 0.5, 1.0})}}})).doc;
+        const std::string why = refusal(doc, Json::array({Json{{"op", "set_color_mode"}, {"page", 1}, {"mode", "rgb"}, {"depth", 16}}}));
+        QVERIFY2(why.find("clip_hdr") != std::string::npos, why.c_str());
+        QVERIFY(!refusal(doc, Json::array({Json{{"op", "set_color_mode"}, {"page", 1}, {"mode", "gray"}}})).empty());
+        const core::ApplyResult cut = run_ops(doc, Json::array({Json{{"op", "set_color_mode"}, {"page", 1}, {"mode", "rgb"}, {"depth", 16}, {"clip_hdr", true}}}));
+        QCOMPARE(cut.results.at(0)["clipped"], Json(1));
+        const core::ColorRasterView view(*cut.doc.page(0).layers.back().color_raster);
+        QCOMPARE(view.pixel(0)[0], 1.0);
+        QCOMPARE(view.pixel(1)[0], std::lround(0.5 * 65535) / 65535.0);
+        // 32 bits keeps them
+        const core::Document kept = run_ops(doc, Json::array({Json{{"op", "set_color_mode"}, {"page", 1}, {"mode", "rgb"}, {"depth", 32}}})).doc;
+        QCOMPARE(core::ColorRasterView(*kept.page(0).layers.back().color_raster).pixel(0)[0], 2.0);
+    }
+
+    // The book's precise pixels past its budget (1 GiB): the conversion is refused (nothing changed).
+    void budget() {
+        core::Document doc = small_book();
+        render::Image big = render::Image::create("RGBA", render::Size{4096, 4096}, render::Ink{0, 0, 0, 0});
+        big.paste(render::Ink{10, 20, 30, 255}, render::Box{0, 0, 8, 8});
+        const auto png = std::make_shared<const std::string>(render::write_png(big));
+        for (int i = 0; i < 5; ++i) {
+            core::Layer layer;
+            layer.id = "big" + std::to_string(i);
+            layer.kind = core::LayerKind::Raster;
+            layer.role = core::LayerRole::User;
+            layer.panel_clip = false;
+            layer.raster_png = png;
+            doc.edit_page(0).layers.push_back(std::move(layer));
+        }
+        const std::string why = refusal(doc, Json::array({Json{{"op", "set_color_mode"}, {"page", 1}, {"mode", "rgb"}, {"depth", 32}}}));
+        QVERIFY2(why.find("1 GiB") != std::string::npos, why.c_str());
+    }
+
+    // assign_profile: the pixels as they are (byte for byte), the page's profile named; "none" is sRGB (an RGB page) or
+    // sGray (a grey page); a profile of another space, a Lab page, none on a CMYK page: refused.
+    void assignProfile() {
+        core::Document doc = painted(picture());
+        const core::Bytes png = doc.page(0).layers.back().raster_png;
+        const core::ApplyResult p3 = run_ops(doc, Json::array({Json{{"op", "assign_profile"}, {"page", 1}, {"profile", "display-p3"}}}));
+        QCOMPARE(p3.results.at(0)["assigned"], Json(1));
+        QVERIFY(p3.doc.page(0).rgb && p3.doc.page(0).rgb->profile == core::builtin_profile("display-p3")->ref() && p3.doc.page(0).rgb->depth == 8);
+        QCOMPARE(*p3.doc.page(0).layers.back().raster_png, *png);
+        const core::Document none = run_ops(p3.doc, Json::array({Json{{"op", "assign_profile"}, {"page", 1}, {"profile", "none"}}})).doc;
+        QVERIFY(!none.page(0).rgb);
+        QCOMPARE(*none.page(0).layers.back().raster_png, *png);
+        // a precise page: its GKCR bytes as they were
+        const core::Document deep = run_ops(doc, Json::array({Json{{"op", "set_color_mode"}, {"page", 1}, {"mode", "rgb"}, {"depth", 16}}})).doc;
+        const core::Document deep_p3 = run_ops(deep, Json::array({Json{{"op", "assign_profile"}, {"page", 1}, {"profile", "adobe-rgb-compat"}}})).doc;
+        QCOMPARE(*deep_p3.page(0).layers.back().color_raster, *deep.page(0).layers.back().color_raster);
+        QCOMPARE(deep_p3.page(0).rgb->depth, 16);
+        // a grey page: another grey profile, none = sGray
+        const core::Document grey = run_ops(doc, Json::array({Json{{"op", "set_color_mode"}, {"page", 1}, {"mode", "gray"}}})).doc;
+        QCOMPARE(grey.page(0).color->profile, core::builtin_profile("sgray")->ref());
+        const core::Document g22 = run_ops(grey, Json::array({Json{{"op", "assign_profile"}, {"page", 1}, {"profile", "gray-gamma-2.2"}}})).doc;
+        QCOMPARE(g22.page(0).color->profile, core::builtin_profile("gray-gamma-2.2")->ref());
+        QCOMPARE(*g22.page(0).layers.back().ink_raster, *grey.page(0).layers.back().ink_raster);
+        QCOMPARE(run_ops(g22, Json::array({Json{{"op", "assign_profile"}, {"page", 1}, {"profile", "none"}}})).doc.page(0).color->profile,
+                 core::builtin_profile("sgray")->ref());
+        // refused
+        QVERIFY(!refusal(doc, Json::array({Json{{"op", "assign_profile"}, {"page", 1}, {"profile", "sgray"}}})).empty());
+        QVERIFY(!refusal(grey, Json::array({Json{{"op", "assign_profile"}, {"page", 1}, {"profile", "display-p3"}}})).empty());
+        const core::Document lab = run_ops(doc, Json::array({Json{{"op", "set_color_mode"}, {"page", 1}, {"mode", "lab"}}})).doc;
+        QVERIFY(!refusal(lab, Json::array({Json{{"op", "assign_profile"}, {"page", 1}, {"profile", "none"}}})).empty());
+        const core::Document cmyk = run_ops(doc, Json::array({Json{{"op", "set_color_mode"}, {"page", 1}, {"mode", "cmyk"}, {"profile", "coated-cmyk"}}})).doc;
+        QVERIFY(!refusal(cmyk, Json::array({Json{{"op", "assign_profile"}, {"page", 1}, {"profile", "none"}}})).empty());
+        QVERIFY(!refusal(doc, Json::array({Json{{"op", "assign_profile"}, {"page", 1}, {"profile", "nope"}}})).empty());
+        QVERIFY(!refusal(doc, Json::array({Json{{"op", "assign_profile"}, {"page", 1}}})).empty());
+        // every page and the book's mode
+        const core::Document all = run_ops(small_book(2), Json::array({Json{{"op", "assign_profile"}, {"profile", "rec2020"}}})).doc;
+        QVERIFY(all.rgb && all.rgb->profile == core::builtin_profile("rec2020")->ref());
+        QVERIFY(all.page(1).rgb && all.page(1).rgb->profile == all.rgb->profile);
+    }
+
+    // convert_profile: the pixels into the profile's space (its mode from it: RGB, grey, CMYK, Lab) at each page's depth;
+    // sRGB → Display P3 → sRGB at 16 bits comes back within a step of 8 bits.
+    void convertProfile() {
+        core::Document doc = painted(picture());
+        const std::string began = render::open_image(*doc.page(0).layers.back().raster_png, render::kPillowOpenLimits).convert("RGBA").tobytes();
+        const core::ApplyResult p3 = run_ops(doc, Json::array({Json{{"op", "convert_profile"}, {"page", 1}, {"profile", "display-p3"}}}));
+        QCOMPARE(p3.results.at(0)["converted"], Json(1));
+        QVERIFY(p3.doc.page(0).rgb && p3.doc.page(0).rgb->profile == core::builtin_profile("display-p3")->ref() && p3.doc.page(0).rgb->depth == 8);
+        const std::string in_p3 = render::open_image(*p3.doc.page(0).layers.back().raster_png, render::kPillowOpenLimits).convert("RGBA").tobytes();
+        QVERIFY(in_p3 != began);  // (the green's values in P3)
+        const core::Document back = run_ops(doc, Json::array({Json{{"op", "set_color_mode"}, {"page", 1}, {"mode", "rgb"}, {"depth", 16}},
+                                                             Json{{"op", "convert_profile"}, {"page", 1}, {"profile", "display-p3"}},
+                                                             Json{{"op", "convert_profile"}, {"page", 1}, {"profile", "srgb"}},
+                                                             Json{{"op", "set_color_mode"}, {"page", 1}, {"mode", "rgb"}}})).doc;
+        QVERIFY(!back.page(0).rgb);
+        const std::string again = render::open_image(*back.page(0).layers.back().raster_png, render::kPillowOpenLimits).convert("RGBA").tobytes();
+        for (std::size_t i = 0; i < again.size(); ++i) {
+            QVERIFY2(std::abs(int(static_cast<unsigned char>(again[i])) - int(static_cast<unsigned char>(began[i]))) <= 1, qPrintable(QString::number(i)));
+        }
+        // into CMYK and grey by the profile's space
+        const core::Document cmyk = run_ops(doc, Json::array({Json{{"op", "convert_profile"}, {"page", 1}, {"profile", "coated-cmyk"}}})).doc;
+        QVERIFY(cmyk.page(0).color && cmyk.page(0).color->space == core::InkSpace::Cmyk);
+        const core::Document grey = run_ops(doc, Json::array({Json{{"op", "convert_profile"}, {"page", 1}, {"profile", "sgray"}}})).doc;
+        QVERIFY(grey.page(0).color && grey.page(0).color->space == core::InkSpace::Gray);
+        const core::Document lab = run_ops(doc, Json::array({Json{{"op", "convert_profile"}, {"page", 1}, {"profile", "lab-d50"}}})).doc;
+        QVERIFY(lab.page(0).color && lab.page(0).color->space == core::InkSpace::Lab);
+        // at the page's depth
+        const core::Document deep = run_ops(doc, Json::array({Json{{"op", "set_color_mode"}, {"page", 1}, {"mode", "rgb"}, {"depth", 16}},
+                                                             Json{{"op", "convert_profile"}, {"page", 1}, {"profile", "rec2020"}}})).doc;
+        QVERIFY(deep.page(0).rgb && deep.page(0).rgb->depth == 16 && deep.page(0).rgb->profile == core::builtin_profile("rec2020")->ref());
+        QVERIFY(deep.page(0).layers.back().color_raster);
+        QVERIFY(!refusal(doc, Json::array({Json{{"op", "convert_profile"}, {"page", 1}}})).empty());
+    }
+
+    // A grey page (image.mode.grayscale): sGray's greys by their value both ways (the picture's grey 128 is lightness
+    // 128 and comes back (128, 128, 128)), a colour by its lightness; 16 and 32 bits; gray "k" on another profile.
+    void greyPages() {
+        core::Document doc = painted(picture());
+        for (const int depth : {8, 16, 32}) {
+            const core::Document grey = run_ops(doc, Json::array({Json{{"op", "set_color_mode"}, {"page", 1}, {"mode", "gray"}, {"depth", depth}}})).doc;
+            const core::Page& page = grey.page(0);
+            QVERIFY(page.color && page.color->space == core::InkSpace::Gray && page.color->depth == depth);
+            const core::InkPixels pixels = core::decode_ink_raster(*page.layers.back().ink_raster);
+            QCOMPARE(pixels.depth, depth);
+            QCOMPARE(pixels.value(5 * 60 + 5, 0), depth == 32 ? static_cast<double>(static_cast<float>(128 / 255.0))
+                                                              : depth == 16 ? 128 * 257 / 65535.0 : 128 / 255.0);
+            QCOMPARE(pixels.value(5 * 60 + 40, 1), depth == 32 ? static_cast<double>(static_cast<float>(200 / 255.0))
+                                                               : depth == 16 ? 200 * 257 / 65535.0 : 200 / 255.0);
+            const core::Document back = run_ops(grey, Json::array({Json{{"op", "set_color_mode"}, {"page", 1}, {"mode", "rgb"}}})).doc;
+            const std::string rgba = render::open_image(*back.page(0).layers.back().raster_png, render::kPillowOpenLimits).convert("RGBA").tobytes();
+            const auto* p = reinterpret_cast<const unsigned char*>(rgba.data()) + (5 * 60 + 5) * 4;
+            QCOMPARE(int(p[0]), 128);
+            QCOMPARE(int(p[1]), 128);
+            QCOMPARE(int(p[2]), 128);
+            const auto* q = reinterpret_cast<const unsigned char*>(rgba.data()) + (5 * 60 + 40) * 4;
+            QVERIFY(q[0] == q[1] && q[1] == q[2]);  // (the colour: a grey of its lightness)
+            QCOMPARE(int(q[3]), 200);
+        }
+        // gray "k" on Gray Gamma 2.2: the greys by their value all the same
+        const core::Document g22 = run_ops(doc, Json::array({Json{{"op", "set_color_mode"}, {"page", 1}, {"mode", "gray"}, {"profile", "gray-gamma-2.2"}, {"gray", "k"}}})).doc;
+        QCOMPARE(core::decode_ink_raster(*g22.page(0).layers.back().ink_raster).samples[(5 * 60 + 5) * 2], std::uint16_t(128));
+        // a grey page's element colours: Genko's black 0, white 1, another grey its value, the table first
+        core::PageColor color = *g22.page(0).color;
+        QCOMPARE(render::ink::ink_of(color, {20, 20, 20})[0], 1.0);
+        QCOMPARE(render::ink::ink_of(color, {255, 255, 255})[0], 0.0);
+        QCOMPARE(render::ink::ink_of(color, {51, 51, 51})[0], 1.0 - 51 / 255.0);
+        color.inks.push_back(core::InkEntry{{51, 51, 51}, {0.5}});
+        QCOMPARE(render::ink::ink_of(color, {51, 51, 51})[0], 0.5);
+        // to CMYK on K alone (gray "k"): K = 1 − lightness
+        const core::Document grey = run_ops(doc, Json::array({Json{{"op", "set_color_mode"}, {"page", 1}, {"mode", "gray"}}})).doc;
+        const core::Document k = run_ops(grey, Json::array({Json{{"op", "set_color_mode"}, {"page", 1}, {"mode", "cmyk"}, {"profile", "coated-cmyk"}, {"gray", "k"}}})).doc;
+        const core::InkPixels on_k = core::decode_ink_raster(*k.page(0).layers.back().ink_raster);
+        const std::uint16_t* s = on_k.samples.data() + (5 * 60 + 5) * 5;
+        QCOMPARE(s[0] + s[1] + s[2], 0);
+        QCOMPARE(int(s[3]), 255 - 128);
     }
 
     // The book on disk (color-model@1): an RGB page of a profile and 16 bits, a grey page, the book's RGB mode; the

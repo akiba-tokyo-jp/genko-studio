@@ -47,14 +47,24 @@ void to_srgb(const core::PageColor& color, const double* inks, float* srgb, std:
 std::array<double, 3> srgb_of(const core::PageColor& color, const std::vector<double>& ink);
 
 // The raster's pixels ("RGBA" or "RGB"; 8-bit) as ink pixels of the page's mode (its depth), through the profile and
-// intent; `gray_on_k`: pixels exactly grey (r = g = b) on K alone (CMYK).
-core::InkPixels from_rgb(const Image& image, const core::PageColor& color, bool gray_on_k = false);
-// Precise sRGB pixels (straight RGBA, 0..1, rows from the top; HDR clamped) as ink pixels of the page's mode.
+// intent; `gray_on_k`: pixels exactly grey (r = g = b) on K alone (CMYK; a grey page: by their value, as sGray's are).
+// `source`: the RGB profile the pixels are in (null: sRGB; another: no grey is taken by its value).
+core::InkPixels from_rgb(const Image& image, const core::PageColor& color, bool gray_on_k = false, const core::Bytes& source = nullptr);
+// Precise RGB pixels (straight RGBA, 0..1, rows from the top; HDR clamped) as ink pixels of the page's mode.
 core::InkPixels from_srgb(const std::vector<float>& rgba, std::uint32_t width, std::uint32_t height, const core::PageColor& color,
-                          bool gray_on_k = false);
+                          bool gray_on_k = false, const core::Bytes& source = nullptr);
 // Ink pixels as sRGB: "RGBA" 8-bit, or (`precise`) straight RGBA floats 0..1.
 Image to_rgba8(const core::InkPixels& pixels, const core::PageColor& color);
 std::vector<float> to_srgb_floats(const core::InkPixels& pixels, const core::PageColor& color);
+// Ink pixels as an RGB page's values (its profile, its intent and black point compensation; straight RGBA): 8-bit, or
+// floats 0..1. sRGB, relative colorimetric and black point compensation: as the screen shows them (to_rgba8, to_srgb_floats).
+Image to_rgb8(const core::InkPixels& pixels, const core::PageColor& color, const core::RgbMode& target);
+std::vector<float> to_rgb_floats(const core::InkPixels& pixels, const core::PageColor& color, const core::RgbMode& target);
+// RGB pixels (straight RGBA floats, in place) from one RGB profile (null: sRGB) into an RGB page's (its intent and black
+// point compensation); values out of 0..1 clamped first.
+void rgb_to_rgb(std::vector<float>& rgba, const core::Bytes& from, const core::RgbMode& to);
+// The colour space of ICC bytes Little CMS reads (RGB, grey, CMYK, Lab), or none.
+std::optional<core::ProfileSpace> profile_space(std::string_view icc);
 // Ink pixels of one mode as another's: CMYK → CMYK (another profile: black preserved), CMYK, Lab and Gray between
 // themselves, and the depth (8 → 32 exactly: v/255). `gray_on_k`: a grey page's pixels onto K alone of a CMYK page.
 core::InkPixels convert(const core::InkPixels& pixels, const core::PageColor& from, const core::PageColor& to, bool gray_on_k = false);
