@@ -917,6 +917,74 @@ private slots:
         window.hide();
     }
 
+    // The policy for a book opened takes the book's default (the pages made after it) with its pages of that profile, in the
+    // same op (undone with them); the question names the book it is about.
+    void thePolicyTakesTheBooksDefaultAndNamesTheBook() {
+        (void)gui_test::config_folder();QTemporaryDir tmp;
+        auto p3=core::new_episode("P3 の本",core::Num(1),2,core::PageSpec::custom(20,20,16,16,1,2,2,2,2,72,"color"));
+        p3=core::CommandBus(render::ops_registry()).apply(p3,Json::array({Json{{"op","assign_profile"},{"profile","display-p3"}}}),core::Actor("human:tester")).doc;
+        QVERIFY(p3.rgb && p3.page(0).rgb && p3.page(1).rgb);
+        gui_test::write_book(gui_test::path_of(tmp.path()+"/p3"),p3);
+        app::settings()->setValue(QStringLiteral("color/policyRgb"),QStringLiteral("convert"));
+        app::settings()->setValue(QStringLiteral("color/askOnMismatch"),QStringLiteral("true"));
+        app::settings()->setValue(QStringLiteral("color/intent"),QStringLiteral("perceptual"));
+        const auto start=gui_test::path_of(tmp.path()+"/start");gui_test::write_book(start,gui_test::new_doc(1));
+        auto session=app::Session::open(start,gui_test::quick(gui_test::path_of(tmp.path()+"/recovery")));
+        app::MainWindow window(session);window.resize(900,700);window.show();QVERIFY(QTest::qWaitForWindowExposed(&window));
+        gui_test::Answers answers;
+        QStringList asked;
+        answers.responder->get_item=[&](const QString&,const QString& label,const QStringList& items,int,bool) {
+            asked<<label;
+            for (const QString& item : items) if (item.contains(QStringLiteral("変換"))) return std::optional<QString>(item);
+            return std::optional<QString>();
+        };
+        window.open_project(gui_test::path_of(tmp.path()+"/p3"));
+        QTRY_VERIFY_WITH_TIMEOUT(window.documents().size()==2 && !window.book().page(0).rgb,10000);
+        QCOMPARE(asked.size(),1);
+        QVERIFY2(asked.front().contains(QStringLiteral("「P3 の本 第1話」")),qPrintable(asked.front()));
+        QVERIFY(!window.book().rgb && !window.book().page(1).rgb);  // (the book's default too, the pages without a colour model)
+        window.action("act_undo")->trigger();
+        QVERIFY(window.book().rgb && window.book().page(0).rgb && window.book().page(1).rgb);
+        for (const char* key : {"color/policyRgb","color/askOnMismatch","color/intent"}) app::settings()->remove(QString::fromLatin1(key));
+        window.hide();
+    }
+
+    // A book read in parts (its later pages on the worker) is asked about once it is read — after the read is done with
+    // (the saves it put off, the file watcher), not in the middle of it.
+    void aBookReadInPartsIsAskedOnceRead() {
+        (void)gui_test::config_folder();QTemporaryDir tmp;
+        auto p3=core::new_episode("あとで読む本",core::Num(1),3,core::PageSpec::custom(20,20,16,16,1,2,2,2,2,72,"color"));
+        p3=core::CommandBus(render::ops_registry()).apply(p3,Json::array({Json{{"op","assign_profile"},{"page",3},{"profile","display-p3"}}}),
+            core::Actor("human:tester")).doc;
+        const auto path=gui_test::path_of(tmp.path()+"/later");gui_test::write_book(path,p3);
+        app::settings()->setValue(QStringLiteral("color/policyRgb"),QStringLiteral("convert"));
+        app::settings()->setValue(QStringLiteral("color/askOnMismatch"),QStringLiteral("true"));
+        const auto start=gui_test::path_of(tmp.path()+"/start");gui_test::write_book(start,gui_test::new_doc(1));
+        app::MainWindow window(app::Session::open(start,gui_test::quick(gui_test::path_of(tmp.path()+"/recovery"))));
+        window.resize(900,700);window.show();QVERIFY(QTest::qWaitForWindowExposed(&window));
+        auto options=gui_test::quick(gui_test::path_of(tmp.path()+"/recovery2"));
+        options.defer_pages=true;options.read_rest_now=false;
+        auto session=app::Session::open(path,options);
+        QVERIFY(session->loading());
+        window.add_document(session);
+        window.color_policy_on_open(session);
+        bool told=false;  // (the read's change told to everyone listening, before the question)
+        QObject::connect(session.get(),&app::Session::changed,&window,[&](const app::BookChange&) {if (!session->loading()) told=true;});
+        gui_test::Answers answers;
+        QList<bool> when;
+        answers.responder->get_item=[&](const QString&,const QString&,const QStringList& items,int,bool) {
+            when<<told;
+            return std::optional<QString>(items.at(0));  // (as it is)
+        };
+        session->read_rest();
+        QTRY_VERIFY_WITH_TIMEOUT(!session->loading() && when.size()==1,10000);
+        QCOMPARE(when,QList<bool>{true});
+        QTest::qWait(100);
+        QCOMPARE(when.size(),1);
+        for (const char* key : {"color/policyRgb","color/askOnMismatch"}) app::settings()->remove(QString::fromLatin1(key));
+        window.hide();
+    }
+
     // カラー設定's policy for a picture taken in (画像を読み込む): its own Display P3 profile — kept as its numbers
     // (Python's) when so answered, taken to sRGB when chosen; an sRGB one never asks.
     void importingAPictureFollowsThePolicy() {

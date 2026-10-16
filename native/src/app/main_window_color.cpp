@@ -20,6 +20,7 @@
 #include <QPushButton>
 #include <QSettings>
 #include <QStatusBar>
+#include <QTimer>
 
 #include <algorithm>
 #include <cmath>
@@ -102,6 +103,36 @@ core::Bytes builtin_bytes(const core::BuiltinProfile& b) {
 
 QString policy_of(const cs::Settings& s, cs::Space space) {
     return space == cs::Space::Rgb ? s.policy_rgb : space == cs::Space::Gray ? s.policy_gray : s.policy_cmyk;
+}
+
+// A page's or the book's colour model as the policies see it: its working space (none: Lab), its profile (ref and bytes;
+// "" for sRGB) and its own way (intent, black point compensation).
+struct Model {
+    std::optional<cs::Space> space;
+    std::string ref;
+    core::Bytes icc;
+    std::string intent = "relative";
+    bool bpc = true;
+};
+Model model_of(const std::optional<core::PageColor>& color, const std::optional<core::RgbMode>& rgb) {
+    Model out;
+    if (color) {
+        if (color->space == core::InkSpace::Cmyk) out.space = cs::Space::Cmyk;
+        else if (color->space == core::InkSpace::Gray) out.space = cs::Space::Gray;
+        out.ref = color->profile;
+        out.icc = color->icc;
+        out.intent = color->intent;
+        out.bpc = color->bpc;
+        return out;
+    }
+    out.space = cs::Space::Rgb;
+    if (rgb) {
+        out.ref = rgb->profile;
+        out.icc = rgb->icc;
+        out.intent = rgb->intent;
+        out.bpc = rgb->bpc;
+    }
+    return out;
 }
 
 }  // namespace
@@ -315,7 +346,8 @@ void MainWindow::color_settings_dialog() {
 void MainWindow::color_policy_on_open(const std::shared_ptr<Session>& session) {
     if (!session || !session->read_only_reason().empty()) return;  // (a book opened read-only is never converted)
     if (session->loading()) {
-        // (its later pages are read yet: asked once they are all there)
+        // (its later pages are read yet: asked once they are all there — after the read is done with, not inside the
+        // change it tells: the saves it put off and the file watcher's look come first, then the question and its ops)
         auto once = std::make_shared<QMetaObject::Connection>();
         QPointer<MainWindow> self(this);
         std::weak_ptr<Session> weak = session;
@@ -323,47 +355,44 @@ void MainWindow::color_policy_on_open(const std::shared_ptr<Session>& session) {
             const auto s = weak.lock();
             if (!self || !s || s->loading()) return;
             QObject::disconnect(*once);
-            self->color_policy_on_open(s);
+            QTimer::singleShot(0, self.data(), [self, weak] {
+                if (const auto later = weak.lock(); self && later) self->color_policy_on_open(later);
+            });
         });
         return;
     }
     const DocPtr doc = session->snapshot();
     const cs::Settings s = cs::load();
+    struct Page {
+        Json index;
+        std::string intent;  // (its own way, kept by the conversion)
+        bool bpc = true;
+    };
     struct Group {
         cs::Space space;
         std::string ref;
         QString name;
-        std::vector<Json> pages;
+        std::vector<Page> pages;
     };
     std::vector<Group> groups;
     std::map<int, cs::Working> works;
     for (const cs::Space space : {cs::Space::Rgb, cs::Space::Gray, cs::Space::Cmyk}) works.emplace(static_cast<int>(space), cs::working(space, s));
     for (const auto& page : doc->pages) {
-        std::optional<cs::Space> space;
-        std::string ref;
-        core::Bytes icc;
-        if (page->color && page->color->space == core::InkSpace::Cmyk) space = cs::Space::Cmyk;
-        else if (page->color && page->color->space == core::InkSpace::Gray) space = cs::Space::Gray;
-        else if (!page->color) space = cs::Space::Rgb;
-        if (!space) continue;  // (Lab: never)
-        if (page->color) {
-            ref = page->color->profile;
-            icc = page->color->icc;
-        } else if (page->rgb) {
-            ref = page->rgb->profile;
-            icc = page->rgb->icc;
-        }
-        const cs::Working& w = works.at(static_cast<int>(*space));
-        if (!w.usable || ref == cs::ref_of(w.icc)) continue;
-        auto at = std::find_if(groups.begin(), groups.end(), [&](const Group& g) { return g.space == *space && g.ref == ref; });
+        const Model m = model_of(page->color, page->rgb);
+        if (!m.space) continue;  // (Lab: never)
+        const cs::Working& w = works.at(static_cast<int>(*m.space));
+        if (!w.usable || m.ref == cs::ref_of(w.icc)) continue;
+        auto at = std::find_if(groups.begin(), groups.end(), [&](const Group& g) { return g.space == *m.space && g.ref == m.ref; });
         if (at == groups.end()) {
-            const QString name = QString::fromStdString(core::profile_description(ref, icc));
-            groups.push_back(Group{*space, ref, name.isEmpty() ? QStringLiteral("（名前のないプロファイル）") : name, {}});
+            const QString name = QString::fromStdString(core::profile_description(m.ref, m.icc));
+            groups.push_back(Group{*m.space, m.ref, name.isEmpty() ? QStringLiteral("（名前のないプロファイル）") : name, {}});
             at = groups.end() - 1;
         }
-        at->pages.push_back(page->index.json());
+        at->pages.push_back(Page{page->index.json(), m.intent, m.bpc});
     }
     if (groups.empty()) return;
+    // (the book's default — the mode of the pages made after — goes with its pages of the same space and profile)
+    const Model book = model_of(doc->color, doc->rgb);
     QString action = policy_of(s, groups.front().space);
     if (s.ask_mismatch) {
         QStringList lines;
@@ -375,8 +404,8 @@ void MainWindow::color_policy_on_open(const std::shared_ptr<Session>& session) {
                                   QStringLiteral("プロファイルを外して作業用の空間とみなす")};
         const int now = action == QLatin1String("convert") ? 1 : action == QLatin1String("off") ? 2 : 0;
         const auto chosen = ask::get_item(this, QStringLiteral("プロファイルの不一致"),
-                                          QStringLiteral("この原稿には、作業用の空間と違うプロファイルのページがあります。\n%1\nどうしますか？（変換は取り消せます）")
-                                              .arg(lines.join(QLatin1Char('\n'))),
+                                          QStringLiteral("原稿「%1」には、作業用の空間と違うプロファイルのページがあります。\n%2\nどうしますか？（変換は取り消せます）")
+                                              .arg(Document(session).title(), lines.join(QLatin1Char('\n'))),
                                           choices, now);
         if (!chosen) return;  // (closed without a choice: as it is)
         action = chosen == choices[1] ? QStringLiteral("convert") : chosen == choices[2] ? QStringLiteral("off") : QStringLiteral("preserve");
@@ -386,13 +415,21 @@ void MainWindow::color_policy_on_open(const std::shared_ptr<Session>& session) {
         const QString what = s.ask_mismatch ? action : policy_of(s, g.space);
         if (what != QLatin1String("convert") && what != QLatin1String("off")) continue;
         const cs::Working& w = works.at(static_cast<int>(g.space));
-        for (const Json& index : g.pages) {
-            Json op{{"op", what == QLatin1String("convert") ? "convert_profile" : "assign_profile"}, {"page", index}};
+        bool with_book = book.space == g.space && book.ref == g.ref;
+        for (const Page& page : g.pages) {
+            Json op{{"op", what == QLatin1String("convert") ? "convert_profile" : "assign_profile"}, {"page", page.index}};
             cs::put_profile(op, w);
             if (what == QLatin1String("convert")) {
+                // (converted the settings' way; the page keeps its own: page_intent, page_bpc)
                 op["intent"] = s.intent.toStdString();
                 if (!s.bpc) op["bpc"] = false;
+                if (page.intent != s.intent.toStdString()) op["page_intent"] = page.intent;
+                if (page.bpc != s.bpc) op["page_bpc"] = page.bpc;
                 if (s.dither) op["dither"] = true;
+            }
+            if (with_book && page.intent == book.intent && page.bpc == book.bpc) {  // (the book's own way kept as well)
+                op["default"] = true;
+                with_book = false;
             }
             ops.push_back(std::move(op));
         }
