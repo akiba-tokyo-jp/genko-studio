@@ -279,6 +279,50 @@ private slots:
         QVERIFY(!studio.window->canvas()->page()->channels.at(0).raster);
     }
 
+    // PC1d (channel.delete of a colour plate): a plate deleted from the panel asks first — the page becomes multichannel
+    // (no: nothing) —, then sends delete_channel with to_multichannel; on the multichannel page a plate goes without a
+    // question; the last plate stays (said); undone as any op.
+    void deletePlateToMultichannel() {
+        Studio studio;
+        studio.window->channels_dock()->show();
+        QStringList asked;
+        bool yes = false;
+        studio.answers.responder->question = [&](const QString& title, const QString&) {
+            asked << title;
+            return yes;
+        };
+        const auto remove = [&](const std::string& key) {
+            QListWidgetItem* row = studio.row(key);
+            QVERIFY2(row != nullptr, key.c_str());
+            studio.panel()->list()->setCurrentItem(row);
+            studio.panel()->button(QStringLiteral("channel_delete"))->click();
+        };
+        remove("green");
+        QCOMPARE(asked, QStringList{QStringLiteral("色の版を削除")});
+        QVERIFY(!studio.page().color);
+        yes = true;
+        remove("green");
+        QVERIFY(studio.page().color && studio.page().color->space == core::InkSpace::Multi);
+        QCOMPARE(core::plate_labels(studio.page()), (std::vector<std::string>{"Cyan", "Yellow"}));
+        QCOMPARE(studio.panel()->keys(), (std::vector<std::string>{"composite", "cyan", "yellow"}));
+        QCOMPARE(studio.row("composite")->text(), QStringLiteral("マルチチャンネル"));
+        // the multichannel page's plate: no question
+        asked.clear();
+        remove("yellow");
+        QVERIFY(asked.isEmpty());
+        QCOMPARE(core::plate_labels(studio.page()), (std::vector<std::string>{"Cyan"}));
+        // one plate left: the composite alone (as a grey page's), nothing to delete
+        QCOMPARE(studio.panel()->keys(), (std::vector<std::string>{"composite"}));
+        remove("composite");
+        QCOMPARE(studio.window->last_notice(), QStringLiteral("削除するチャンネルを選びます"));
+        QCOMPARE(studio.page().color->plates.size(), std::size_t{1});
+        // undone: the RGB page again
+        studio.window->action(QStringLiteral("act_undo"))->trigger();
+        studio.window->action(QStringLiteral("act_undo"))->trigger();
+        QVERIFY(!studio.page().color);
+        QCOMPARE(studio.panel()->keys(), (std::vector<std::string>{"composite", "red", "green", "blue"}));
+    }
+
     // The pages' small pictures follow their channels: a channel added, drawn on, its colour, opacity, solidity, kind or
     // what it marks changed gives the page another key (the cache's version raised for the pictures made before), and
     // deleted the key of the page without it; the other page's key stays.

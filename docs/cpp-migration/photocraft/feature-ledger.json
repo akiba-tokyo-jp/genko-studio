@@ -274,13 +274,15 @@
       },
       "upstream_menu": null,
       "genko_status": "一部（2026-10-16 照合）",
-      "implementation_status": "一部実装（PC1c、未統合: アルファ・特色チャンネルの削除。色の版を消してマルチチャンネルにするのは PC1d）",
+      "implementation_status": "実装済み（PC1d、未統合）",
       "acceptance_status": "未実施",
       "evidence": [
         "native/src/render/ops_channels.cpp",
         "native/src/app/channel_panel.cpp",
         "native/src/app/main_window_channels.cpp",
-        "native/tests/unit/test_channels.cpp"
+        "native/tests/unit/test_channels.cpp",
+        "native/tests/unit/test_color_model.cpp",
+        "native/tests/gui/test_gui_channels.cpp"
       ],
       "pc0": {
         "date": "2026-10-16",
@@ -298,7 +300,8 @@
         ],
         "gap": "Genko にはチャンネルの仕組みがなく、名前付きで保存した選択範囲（ストック）を forget_area で消せるだけ。アルファ・スポット・色チャンネル（R/G/B 等を消してマルチチャンネル化）の削除がない",
         "note": "チャンネルの土台（ページごとのアルファ・スポット・色チャンネルの保存と PSD 往復、チャンネル パネル）が要る（channel.new で数えた）"
-      }
+      },
+      "limitations": "色の版の削除（delete_channel の to_multichannel）は Photoshop の動きに合わせた Genko のもの（上流の channel.delete はアルファだけ）。"
     },
     {
       "id": "channel.duplicate",
@@ -14419,9 +14422,26 @@
         "alternate_menus": []
       },
       "genko_status": "一部（2026-10-16 照合）",
-      "implementation_status": "未着手",
+      "implementation_status": "実装済み（PC1d、未統合）",
       "acceptance_status": "未実施",
-      "evidence": [],
+      "evidence": [
+        "native/src/core/ink.cpp",
+        "native/src/core/color_model.cpp",
+        "native/src/render/ops_ink.cpp",
+        "native/src/render/ops_registry.cpp",
+        "native/src/service/wording.cpp",
+        "native/tests/unit/test_color_model.cpp",
+        "native/tests/contract/test_contract_color_model.cpp",
+        "native/src/render/quantize.cpp",
+        "native/src/render/ink_canvas.cpp",
+        "native/src/formats/export.cpp",
+        "native/src/formats/psd_export.cpp",
+        "native/src/formats/pdf.cpp",
+        "native/src/app/mode_dialogs.cpp",
+        "native/src/app/main_window_book.cpp",
+        "native/tests/unit/test_quantize.cpp",
+        "native/tests/gui/test_gui_book.cpp"
+      ],
       "pc0": {
         "date": "2026-10-16",
         "cpp_base": "962faa4",
@@ -14438,7 +14458,8 @@
         ],
         "gap": "書き出しの 2 値（color=bitonal、1 ビット）とレイヤーの網点化（screen: 網点/線/交差/砂目、線数・角度・形）はある。原稿自体を Bitmap モードにする変換と、誤差拡散・パターンディザ・しきい値の方式選択がない",
         "note": "モノクロ漫画の出力としては書き出し側で足りている"
-      }
+      },
+      "limitations": "画素は Gray 8 bit の 0/255（上流は 1 bit の文書）。網点のセルは統合した層の解像度（200 dpi）÷ 線数。PSD は Bitmap（色モード 0）の統合画像だけ（notes）。"
     },
     {
       "id": "image.mode.bits16",
@@ -14708,9 +14729,21 @@
         "alternate_menus": []
       },
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "未着手",
+      "implementation_status": "実装済み（PC1d、未統合）",
       "acceptance_status": "未実施",
-      "evidence": [],
+      "evidence": [
+        "native/src/core/ink.cpp",
+        "native/src/core/color_model.cpp",
+        "native/src/render/ops_ink.cpp",
+        "native/src/render/ops_registry.cpp",
+        "native/src/service/wording.cpp",
+        "native/tests/unit/test_color_model.cpp",
+        "native/tests/contract/test_contract_color_model.cpp",
+        "native/src/render/quantize.cpp",
+        "native/src/app/mode_dialogs.cpp",
+        "native/src/app/main_window_book.cpp",
+        "native/tests/gui/test_gui_book.cpp"
+      ],
       "pc0": {
         "date": "2026-10-16",
         "cpp_base": "962faa4",
@@ -14751,9 +14784,22 @@
         "alternate_menus": []
       },
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "未着手",
+      "implementation_status": "実装済み（PC1d、未統合）",
       "acceptance_status": "未実施",
-      "evidence": [],
+      "evidence": [
+        "native/src/core/ink.cpp",
+        "native/src/core/color_model.cpp",
+        "native/src/render/ops_ink.cpp",
+        "native/src/render/ops_registry.cpp",
+        "native/src/service/wording.cpp",
+        "native/tests/unit/test_color_model.cpp",
+        "native/tests/contract/test_contract_color_model.cpp",
+        "native/src/render/ink_canvas.cpp",
+        "native/src/formats/exporting.cpp",
+        "native/src/app/mode_dialogs.cpp",
+        "native/src/app/main_window_book.cpp",
+        "native/tests/gui/test_gui_book.cpp"
+      ],
       "pc0": {
         "date": "2026-10-16",
         "cpp_base": "962faa4",
@@ -14764,7 +14810,8 @@
         "tests": [],
         "gap": "モノトーン・ダブルトーン・トリプルトーン・クワッドトーン（インキ色と曲線）がない。PSD の Duotone は読み込み時にグレーとして読むだけ（render/psd.cpp:458）",
         "note": "PSD・PDF に Duotone として書く処理も要る"
-      }
+      },
+      "limitations": "PSD・TIFF はグレーの値（PSD は色モード 1）＋notes、PDF・PNG などは刷った見え（sRGB）＋notes。Photoshop の Duotone（色モード 8）とインキ・曲線は書かない。"
     },
     {
       "id": "image.mode.grayscale",
@@ -14858,9 +14905,28 @@
         "alternate_menus": []
       },
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "未着手",
+      "implementation_status": "実装済み（PC1d、未統合）",
       "acceptance_status": "未実施",
-      "evidence": [],
+      "evidence": [
+        "native/src/core/ink.cpp",
+        "native/src/core/color_model.cpp",
+        "native/src/render/ops_ink.cpp",
+        "native/src/render/ops_registry.cpp",
+        "native/src/service/wording.cpp",
+        "native/tests/unit/test_color_model.cpp",
+        "native/tests/contract/test_contract_color_model.cpp",
+        "native/src/render/quantize.cpp",
+        "native/src/render/page.cpp",
+        "native/src/render/inspect.cpp",
+        "native/src/formats/export.cpp",
+        "native/src/formats/psd_export.cpp",
+        "native/src/formats/pdf.cpp",
+        "native/src/formats/pillow_save.cpp",
+        "native/src/app/mode_dialogs.cpp",
+        "native/src/app/main_window_book.cpp",
+        "native/tests/unit/test_quantize.cpp",
+        "native/tests/gui/test_gui_book.cpp"
+      ],
       "pc0": {
         "date": "2026-10-16",
         "cpp_base": "962faa4",
@@ -14871,7 +14937,8 @@
         "tests": [],
         "gap": "インデックスカラーへの変換（パレット 8 種・色数・強制色・透明・ディザ 4 種）がない",
         "note": "render/image.cpp:583 の Pillow 互換 quantize と GIF 書き出しは流用候補。新しい外部ライブラリは要らない"
-      }
+      },
+      "limitations": "ページの画素レイヤーを Genko の統合（merge_visible の flatten。紙の上で合成）で 1 枚にしてから量子化する（利用者の決定。要素とネーム・下描きの層は残す）。統合した層は不透明になるので透明の番号は普通は作られない（set_color_table の transparent で決める）。PSD は Indexed（色モード 2）の統合画像だけ（notes）。"
     },
     {
       "id": "image.mode.lab",
@@ -14958,9 +15025,29 @@
         "alternate_menus": []
       },
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "未着手",
+      "implementation_status": "実装済み（PC1d、未統合）",
       "acceptance_status": "未実施",
-      "evidence": [],
+      "evidence": [
+        "native/src/core/ink.cpp",
+        "native/src/core/color_model.cpp",
+        "native/src/render/ops_ink.cpp",
+        "native/src/render/ops_registry.cpp",
+        "native/src/service/wording.cpp",
+        "native/tests/unit/test_color_model.cpp",
+        "native/tests/contract/test_contract_color_model.cpp",
+        "native/src/render/ink.cpp",
+        "native/src/render/ink_canvas.cpp",
+        "native/src/render/ink_edit.cpp",
+        "native/src/render/ops_channels.cpp",
+        "native/src/core/channels.cpp",
+        "native/src/formats/psd_export.cpp",
+        "native/src/formats/exporting.cpp",
+        "native/src/app/main_window_book.cpp",
+        "native/src/app/colours.cpp",
+        "native/src/app/channel_panel.cpp",
+        "native/tests/unit/test_channels.cpp",
+        "native/tests/gui/test_gui_book.cpp"
+      ],
       "pc0": {
         "date": "2026-10-16",
         "cpp_base": "962faa4",
@@ -14971,7 +15058,8 @@
         "tests": [],
         "gap": "マルチチャンネル（RGB→C/M/Y、CMYK→4 版、Lab→アルファ 1–3 等、統合）への変換がない。PSD の Multichannel は読み込みで扱う区分があるだけ（render/psd.cpp:541）",
         "note": "チャンネルの土台（ページごとのアルファ・スポット・色チャンネルの保存と PSD 往復、チャンネル パネル）が要る（channel.new で数えた）"
-      }
+      },
+      "limitations": "色相・彩度・カラー・輝度の描画モードの層は版で合成できないので断る。PSD は Multichannel（色モード 7）の統合画像だけ（32 bit は 16 bit、notes）。ほかの形式は刷った見え（sRGB）＋notes。"
     },
     {
       "id": "image.mode.rgb",
@@ -36800,7 +36888,16 @@
       "acceptance_status": "Linux Debug V1限定合格。全機能/全構成未完",
       "evidence": [
         "build/photocraft-v1/regression-v6/execution.json",
-        "build/photocraft-v1/gui-settled-probe/visual-observations.json"
+        "build/photocraft-v1/gui-settled-probe/visual-observations.json",
+        "native/src/core/color_model.cpp",
+        "native/src/core/ink.cpp",
+        "native/src/core/channels.cpp",
+        "native/src/render/ops_ink.cpp",
+        "native/src/render/ink_canvas.cpp",
+        "native/src/render/quantize.cpp",
+        "native/tests/unit/test_color_model.cpp",
+        "native/tests/unit/test_channels.cpp",
+        "native/tests/contract/test_contract_color_model.cpp"
       ],
       "implementation_scope": "RGBA16/32の元bytes保存・再読込、露光量調整層、実CLI/PNG出力/disk Undo-Redo/GC/資源拒否、実GUI。汎用ファイル入力・全描画style・形式互換・上流全画素同等性・復旧・全Release/ASan・Windows・配布は未完。",
       "pc0": {
@@ -36826,7 +36923,8 @@
         ],
         "gap": "RGB の高精度の画素（u16/f32、sRGB・ストレートα、タイル保存）、リニアの合成、CMYK/Lab のページ（8/16 ビット）、露光量の調整層はある。グレー・インデックス・2 階調・ダブルトーン・マルチチャンネルの色モデル、任意のチャンネル数、CMYK/Lab の 32 ビット、RGB の文書プロファイル（sRGB 以外・リニア/HDR）がなく、多くの処理（トーン・レイヤースタイル・多くの描画モード・塗り・ぼかし等の描画、結合の一部）が高精度では断る（not_yet_ported）",
         "note": "PC1 の土台そのもの。高精度は既存の 8 ビットの契約と並べて持つ（docs/cpp-migration/photocraft/REPORT.md）。上流の色モデルは crates/color/src/lib.rs:40"
-      }
+      },
+      "note": "PC1a〜PC1d（未統合）で色モデル・深度・チャンネルの部分を実装した: グレー・インデックス・2 階調・ダブルトーン・マルチチャンネル、N 版（1〜32）、CMYK・Lab の 32 bit、RGB の文書プロファイル（sRGB 以外・リニア・HDR）、アルファ・特色チャンネル。行は開けたまま: 高精度・インキのページでまだ断っている処理（render/page.cpp の not_yet_ported: トーンの層・描画モードの補正層・形を動かす補正・書式を持つ高精度の線・高精度で合成できない描画モードなど）が残り、その受入（PC2 以降）が済むまで same にしない。"
     },
     {
       "id": "document:pcraft-format",

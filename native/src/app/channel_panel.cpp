@@ -74,7 +74,7 @@ ChannelPanel::ChannelPanel(MainWindow* window) : QWidget(window), window_(window
     add_button(QStringLiteral("新規"), QStringLiteral("アルファチャンネルを新しく作る（黒: 何も選ばれていない）"), QStringLiteral("channel_new"), [this] { add(false); });
     add_button(QStringLiteral("特色"), QStringLiteral("特色チャンネルを新しく作る（選択範囲があればその所に）"), QStringLiteral("channel_spot"), [this] { add(true); });
     add_button(QStringLiteral("複製"), QStringLiteral("選んだチャンネル（色の版・合成も）を複製する"), QStringLiteral("channel_duplicate"), [this] { duplicate(); });
-    add_button(QStringLiteral("削除"), QStringLiteral("選んだアルファ・特色チャンネルを削除する"), QStringLiteral("channel_delete"), [this] { remove(); });
+    add_button(QStringLiteral("削除"), QStringLiteral("選んだチャンネルを削除する（色の版を削除するとマルチチャンネルになります）"), QStringLiteral("channel_delete"), [this] { remove(); });
     layout->addLayout(row);
     auto* row2 = new QHBoxLayout;
     const auto add_button2 = [&](const QString& text, const QString& tip, const QString& name, auto slot) {

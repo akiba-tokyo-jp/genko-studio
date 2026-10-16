@@ -11,10 +11,14 @@
 #include <QFile>
 #include <QTemporaryDir>
 
+#include <array>
 #include <bit>
 #include <cstdint>
 #include <map>
+#include <set>
 #include <string>
+#include <tuple>
+#include <vector>
 
 #include "core/base64.hpp"
 #include "core/color_model.hpp"
@@ -234,6 +238,169 @@ private slots:
         QVERIFY(exit != 0);
         QVERIFY2(refused.dump().find("read_only") != std::string::npos && refused.dump().find("color-model@99") != std::string::npos, refused.dump().c_str());
         QCOMPARE(project(book)["pages"][0]["color"]["mode"], Json("gray"));
+    }
+
+    // PC1d (SPEC.md COLOR-03「特別な色モード」): a book's pages made indexed, bitmap, duotone and multichannel through the
+    // command line — the pixel layers flattened into one (the lines kept as lines), saved and read again, undone and
+    // done again, drawn, asked (--pixel), written (PSD Indexed, Bitmap, Grayscale and Multichannel; TIFF's palette and
+    // 1 bit; PDF's /Indexed and 1 bpc; the notes).
+    void specialModesThroughTheCommandLine() {
+        namespace r = genko::render;
+        const QString book = path(QStringLiteral("special.genko"));
+        int exit = -1;
+        const auto made = genko::test::run_genko({QStringLiteral("new"), book, QStringLiteral("--pages"), QStringLiteral("4")});
+        QVERIFY2(made.exit_code == 0, qPrintable(made.described()));
+        // page 1: two paint layers (a grey and a green; a red square over them) and a line; pages 2..4: one paint layer
+        r::Image under = r::Image::create("RGBA", r::Size{60, 40}, r::Ink{128, 128, 128, 255});
+        under.paste(r::Ink{30, 160, 90, 255}, r::Box{30, 0, 60, 40});
+        r::Image over = r::Image::create("RGBA", r::Size{60, 40}, r::Ink{0, 0, 0, 0});
+        over.paste(r::Ink{200, 40, 40, 255}, r::Box{10, 10, 20, 20});
+        const auto paint = [](int page, const std::string& id, const r::Image& picture) {
+            return std::vector<Json>{Json{{"op", "add_layer"}, {"page", page}, {"kind", "paint"}, {"id", id}},
+                                     Json{{"op", "set_layer"}, {"page", page}, {"id", id}, {"panel_each", false}, {"panel_clip", false}},
+                                     Json{{"op", "put_raster"}, {"page", page}, {"id", id}, {"png_base64", genko::core::b64encode(r::write_png(picture))}}};
+        };
+        Json ops = Json::array();
+        for (const auto& [page, id, picture] : std::vector<std::tuple<int, std::string, r::Image>>{
+                 {1, "under", under}, {1, "over", over}, {2, "p2", under}, {3, "p3", under}, {4, "p4", under}}) {
+            for (Json& op : paint(page, id, picture)) ops.push_back(std::move(op));
+        }
+        ops.push_back(Json{{"op", "add_line"}, {"page", 1}, {"id", "t1"}, {"text", "台詞"}, {"x_mm", 60}, {"y_mm", 60}});
+        const Json painted = genko({QStringLiteral("apply"), book, write_ops(QStringLiteral("special-paint.json"), ops), QStringLiteral("--agent"), QStringLiteral("human:test")}, &exit);
+        QVERIFY2(exit == 0 && painted.value("ok", false), painted.dump().c_str());
+        const auto pixel_layers = [](const Json& page) {
+            int n = 0;
+            for (const Json& layer : page["layers"]) n += layer.contains("asset") || layer.contains("ink_raster") || layer.contains("color_raster");
+            return n;
+        };
+        const Json before = project(book);
+        QCOMPARE(pixel_layers(before["pages"][0]), 2);
+        const std::size_t layers_before = before["pages"][0]["layers"].size();
+        const Json modes = genko({QStringLiteral("apply"), book,
+                                  write_ops(QStringLiteral("special-modes.json"),
+                                            Json::array({Json{{"op", "to_indexed"}, {"page", 1}, {"colors", 8}},
+                                                         Json{{"op", "set_color_mode"}, {"page", 2}, {"mode", "gray"}},
+                                                         Json{{"op", "to_bitmap"}, {"page", 2}, {"method", "threshold"}},
+                                                         Json{{"op", "set_color_mode"}, {"page", 3}, {"mode", "gray"}},
+                                                         Json{{"op", "set_duotone"}, {"page", 3}},
+                                                         Json{{"op", "set_color_mode"}, {"page", 4}, {"mode", "multichannel"}}})),
+                                  QStringLiteral("--agent"), QStringLiteral("human:test")},
+                                 &exit);
+        QVERIFY2(exit == 0 && modes.value("ok", false), modes.dump().c_str());
+        const auto check_modes = [&](const Json& saved) {
+            QVERIFY2(saved["features"] == Json::array({"color-mode@1", "color-model@1"}), saved["features"].dump().c_str());
+            const Json& indexed = saved["pages"][0]["color"];
+            QCOMPARE(indexed["mode"], Json("indexed"));
+            QVERIFY2(indexed["table"]["colors"].size() >= 4 && indexed["table"]["colors"].size() <= 8, indexed.dump().c_str());
+            QCOMPARE(saved["pages"][1]["color"]["mode"], Json("bitmap"));
+            QCOMPARE(saved["pages"][1]["color"]["bitmap"]["method"], Json("threshold"));
+            QCOMPARE(saved["pages"][2]["color"]["mode"], Json("duotone"));
+            QCOMPARE(saved["pages"][2]["color"]["duotone"].size(), std::size_t(2));
+            QCOMPARE(saved["pages"][3]["color"]["mode"], Json("multichannel"));
+            QCOMPARE(saved["pages"][3]["color"]["from"], Json("rgb"));
+            QCOMPARE(saved["pages"][3]["color"]["plates"].size(), std::size_t(3));
+            // (page 1 flattened: one layer of pixels, the two paint layers gone, its line a line)
+            QCOMPARE(pixel_layers(saved["pages"][0]), 1);
+            QCOMPARE(saved["pages"][0]["layers"].size(), layers_before - 2);
+            QCOMPARE(saved["story"].size(), std::size_t(1));
+            QCOMPARE(saved["story"][0]["id"], Json("t1"));
+        };
+        check_modes(project(book));
+        // undone (the pages as they were: no modes, the two layers again) and done again
+        const Json undone = genko({QStringLiteral("undo"), book, QStringLiteral("--as"), QStringLiteral("human:test")}, &exit);
+        QVERIFY2(exit == 0, undone.dump().c_str());
+        {
+            const Json saved = project(book);
+            for (const Json& page : saved["pages"]) QVERIFY(!page.contains("color"));
+            QCOMPARE(pixel_layers(saved["pages"][0]), 2);
+            QCOMPARE(saved["pages"][0]["layers"].size(), layers_before);
+        }
+        const Json redone = genko({QStringLiteral("redo"), book, QStringLiteral("--as"), QStringLiteral("human:test")}, &exit);
+        QVERIFY2(exit == 0, redone.dump().c_str());
+        check_modes(project(book));
+        // drawn: the bitmap page black and white only, the indexed page in its table's colours only
+        const auto drawn = genko::test::run_genko({QStringLiteral("render"), book, QStringLiteral("--page"), QStringLiteral("2"), QStringLiteral("--dpi"),
+                                                   QStringLiteral("40"), QStringLiteral("--out"), path(QStringLiteral("bitmap.png"))});
+        QVERIFY2(drawn.exit_code == 0, qPrintable(drawn.described()));
+        const std::string bits = r::open_image(genko::test::read_bytes(path(QStringLiteral("bitmap.png"))), r::kPillowOpenLimits).convert("RGB").tobytes();
+        for (const char c : bits) QVERIFY(static_cast<unsigned char>(c) == 0 || static_cast<unsigned char>(c) == 255);
+        const auto drawn_indexed = genko::test::run_genko({QStringLiteral("render"), book, QStringLiteral("--page"), QStringLiteral("1"), QStringLiteral("--dpi"),
+                                                           QStringLiteral("40"), QStringLiteral("--out"), path(QStringLiteral("indexed.png"))});
+        QVERIFY2(drawn_indexed.exit_code == 0, qPrintable(drawn_indexed.described()));
+        {
+            std::set<std::array<int, 3>> table;
+            const Json saved = project(book);  // (kept: a range over a temporary's part would outlive it)
+            for (const Json& c : saved["pages"][0]["color"]["table"]["colors"]) table.insert({c[0].get<int>(), c[1].get<int>(), c[2].get<int>()});
+            const std::string px = r::open_image(genko::test::read_bytes(path(QStringLiteral("indexed.png"))), r::kPillowOpenLimits).convert("RGB").tobytes();
+            for (std::size_t i = 0; i + 2 < px.size(); i += 3) {
+                const std::array<int, 3> c{static_cast<unsigned char>(px[i]), static_cast<unsigned char>(px[i + 1]), static_cast<unsigned char>(px[i + 2])};
+                QVERIFY2(table.contains(c), qPrintable(QStringLiteral("(%1, %2, %3) at %4 not in %5")
+                                                           .arg(c[0]).arg(c[1]).arg(c[2]).arg(i / 3)
+                                                           .arg(QString::fromStdString(saved["pages"][0]["color"].dump()))));
+            }
+        }
+        // asked
+        const Json at_indexed = genko({QStringLiteral("inspect"), book, QStringLiteral("--pixel"), QStringLiteral("1:150,150"), QStringLiteral("--dpi"), QStringLiteral("40")}, &exit);
+        QVERIFY2(exit == 0 && at_indexed["mode"] == Json("indexed") && at_indexed["index"].is_number_integer(), at_indexed.dump().c_str());
+        const Json at_bitmap = genko({QStringLiteral("inspect"), book, QStringLiteral("--pixel"), QStringLiteral("2:150,150"), QStringLiteral("--dpi"), QStringLiteral("40")}, &exit);
+        QVERIFY2(exit == 0 && at_bitmap["mode"] == Json("bitmap") && at_bitmap["values"].size() == 1, at_bitmap.dump().c_str());
+        const Json at_duotone = genko({QStringLiteral("inspect"), book, QStringLiteral("--pixel"), QStringLiteral("3:150,150"), QStringLiteral("--dpi"), QStringLiteral("40")}, &exit);
+        QVERIFY2(exit == 0 && at_duotone["mode"] == Json("duotone"), at_duotone.dump().c_str());
+        const Json at_plates = genko({QStringLiteral("inspect"), book, QStringLiteral("--pixel"), QStringLiteral("4:150,150"), QStringLiteral("--dpi"), QStringLiteral("40")}, &exit);
+        QVERIFY2(exit == 0 && at_plates["mode"] == Json("multichannel") && at_plates["values"].size() == 3, at_plates.dump().c_str());
+        // written: PSD Indexed (2), Bitmap (0, 1 bit), Grayscale (1: the duotone's grey) and Multichannel (7, three plates)
+        const auto psd = genko::test::run_genko({QStringLiteral("export"), book, path(QStringLiteral("special-psd")), QStringLiteral("--format"), QStringLiteral("psd"),
+                                                 QStringLiteral("--dpi"), QStringLiteral("40"), QStringLiteral("--json")});
+        QVERIFY2(psd.exit_code == 0, qPrintable(psd.described()));
+        const Json psd_reply = genko::test::one_line(psd.out);
+        QCOMPARE(psd_reply["count"], Json(4));
+        const std::array<std::array<unsigned, 3>, 4> want{{{1, 8, 2}, {1, 1, 0}, {1, 8, 1}, {3, 8, 7}}};
+        for (std::size_t k = 0; k < 4; ++k) {
+            const Psd p = read_psd(QString::fromStdString(psd_reply["files"][k].get<std::string>()));
+            QVERIFY2(p.channels == want[k][0] && p.depth == want[k][1] && p.mode == want[k][2],
+                     qPrintable(QStringLiteral("page %1: %2 %3 %4").arg(k + 1).arg(p.channels).arg(p.depth).arg(p.mode)));
+        }
+        QCOMPARE(psd_reply["notes"].dump(),
+                 Json::array({"ダブルトーンのページ 1 ページは、この形式ではダブルトーンのインキのまま書けないため、グレーの値で書き出しました（インキの色と曲線は書いていません）",
+                              "マルチチャンネルのページ 1 ページは、PSD ではレイヤーを持てないため、版を統合した画像だけを書き出しました",
+                              "2 階調・インデックスカラーのページ 2 ページは、PSD ではレイヤーを持てないため、統合した画像だけを書き出しました"})
+                     .dump());
+        // TIFF in RGB (the command line's colour): the indexed page as its palette; in grey: the bitmap page in 1 bit
+        const auto tiff = genko::test::run_genko({QStringLiteral("export"), book, path(QStringLiteral("special-tiff")), QStringLiteral("--format"), QStringLiteral("tiff"),
+                                                  QStringLiteral("--dpi"), QStringLiteral("40"), QStringLiteral("--json")});
+        QVERIFY2(tiff.exit_code == 0, qPrintable(tiff.described()));
+        const Json tiff_reply = genko::test::one_line(tiff.out);
+        auto t = tiff_tags(QString::fromStdString(tiff_reply["files"][0].get<std::string>()));
+        QCOMPARE(t[262], 3u);  // (Photometric: palette)
+        QCOMPARE(t[258], 8u);
+        QVERIFY(t.contains(320));  // (its ColorMap)
+        QCOMPARE(tiff_reply["notes"].dump(),
+                 Json::array({"色モード・プロファイルを持つページ 1 ページは、この形式・色ではその値のまま書けないため、画面の色（sRGB）から変換して書き出しました",
+                              "ダブルトーンのページ 1 ページは、この形式・色ではダブルトーンのインキのまま書けないため、刷った見え方（画面の色、sRGB）で書き出しました",
+                              "マルチチャンネルのページ 1 ページは、この形式では版のまま書けないため、刷った見え方（画面の色、sRGB）で書き出しました（PSD なら版のまま書けます）"})
+                     .dump());
+        const auto grey_tiff = genko::test::run_genko({QStringLiteral("export"), book, path(QStringLiteral("special-grey")), QStringLiteral("--format"), QStringLiteral("tiff"),
+                                                       QStringLiteral("--color"), QStringLiteral("gray"), QStringLiteral("--dpi"), QStringLiteral("40"), QStringLiteral("--json")});
+        QVERIFY2(grey_tiff.exit_code == 0, qPrintable(grey_tiff.described()));
+        const Json grey_reply = genko::test::one_line(grey_tiff.out);
+        t = tiff_tags(QString::fromStdString(grey_reply["files"][1].get<std::string>()));
+        QCOMPARE(t[258], 1u);  // (1 bit)
+        QVERIFY2(grey_reply["notes"].dump().find("グレーの値で書き出しました") != std::string::npos, grey_reply.dump().c_str());
+        // PDF: the indexed page /Indexed in RGB, the bitmap page 1 bit a component in grey
+        const auto pdf = genko::test::run_genko({QStringLiteral("export"), book, path(QStringLiteral("special-pdf")), QStringLiteral("--format"), QStringLiteral("pdf"),
+                                                 QStringLiteral("--dpi"), QStringLiteral("40"), QStringLiteral("--json")});
+        QVERIFY2(pdf.exit_code == 0, qPrintable(pdf.described()));
+        const std::string pdf_bytes = genko::test::read_bytes(QString::fromStdString(genko::test::one_line(pdf.out)["files"][0].get<std::string>()));
+        QVERIFY(pdf_bytes.find("/Indexed /DeviceRGB") != std::string::npos);
+        QVERIFY(pdf_bytes.find("/BitsPerComponent 1") == std::string::npos);
+        const auto grey_pdf = genko::test::run_genko({QStringLiteral("export"), book, path(QStringLiteral("special-grey-pdf")), QStringLiteral("--format"),
+                                                      QStringLiteral("pdf"), QStringLiteral("--color"), QStringLiteral("gray"), QStringLiteral("--dpi"),
+                                                      QStringLiteral("40"), QStringLiteral("--json")});
+        QVERIFY2(grey_pdf.exit_code == 0, qPrintable(grey_pdf.described()));
+        const std::string grey_pdf_bytes =
+            genko::test::read_bytes(QString::fromStdString(genko::test::one_line(grey_pdf.out)["files"][0].get<std::string>()));
+        QVERIFY(grey_pdf_bytes.find("/BitsPerComponent 1") != std::string::npos);
+        QVERIFY(grey_pdf_bytes.find("/Indexed") == std::string::npos);
     }
 };
 

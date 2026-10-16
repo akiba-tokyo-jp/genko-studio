@@ -266,8 +266,10 @@ private slots:
         // (test_gui_carried), and the 15 of PC1b (SPEC COLOR-03) — 編集 → カラー設定… (act_color_settings), 表示 → 色域外警告
         // (act_gamut_warning) and the 13 kinds of 表示 → 校正の設定 (act_proof_custom, act_proof_working_cmyk, act_proof_export,
         // act_proof_cyan, act_proof_magenta, act_proof_yellow, act_proof_black, act_proof_cmy, act_proof_srgb, act_proof_monitor,
-        // act_proof_legacy_mac, act_proof_protan, act_proof_deutan) — theirs (test_gui_color).
-        QCOMPARE(w->actions_by_name().size(), std::size_t{245});
+        // act_proof_legacy_mac, act_proof_protan, act_proof_deutan) — theirs (test_gui_color), and the 5 of PC1d (SPEC COLOR-03)
+        // — ページ → 色モード の 2 階調…・インデックスカラー…・ダブルトーン…・マルチチャンネル・カラーテーブル… (act_mode_bitmap,
+        // act_mode_indexed, act_mode_duotone, act_mode_multichannel, act_color_table) — theirs (test_gui_book).
+        QCOMPARE(w->actions_by_name().size(), std::size_t{250});
         QVERIFY(w->action("act_chat_approval"));
         QVERIFY(w->action("act_style"));
         QVERIFY(w->action("act_exposure"));

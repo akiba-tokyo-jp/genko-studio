@@ -149,9 +149,9 @@ core::InkPixels at_16(const core::InkPixels& pixels);
 // are written from the colours on the screen (sRGB).
 bool as_inks(const core::Page& page, std::string_view fmt, std::string_view color);
 bool as_values(const core::Page& page, std::string_view fmt, std::string_view color);
-// color-model@1 (PC1d): a page written in a mode of its own where the format has one (TIFF, PDF; the colour auto):
-// "bitmap" (a bitmap page as 1 bit), "indexed" (an indexed page as its palette: TIFF's Photometric 3, PDF's /Indexed),
-// else "".
+// color-model@1 (PC1d): a page written in a mode of its own where the format has one (TIFF, PDF): "bitmap" (a bitmap
+// page as 1 bit; the colour auto or gray), "indexed" (an indexed page as its palette: TIFF's Photometric 3, PDF's
+// /Indexed; the colour auto or rgb), else "".
 std::string native_mode(const core::Page& page, std::string_view fmt, std::string_view color);
 // An indexed page's picture (its colours its table's) as a palette picture ("P") of its table.
 render::Image indexed_picture(const render::Image& image, const core::ColorTable& table);

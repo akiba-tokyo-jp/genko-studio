@@ -2,7 +2,6 @@
 
 #include <QCheckBox>
 #include <QAbstractButton>
-#include <QColorDialog>
 #include <QComboBox>
 #include <QDialogButtonBox>
 #include <QDoubleSpinBox>
@@ -12,7 +11,6 @@
 #include <QLabel>
 #include <QLineEdit>
 #include <QPushButton>
-#include <QRegularExpression>
 #include <QSpinBox>
 #include <QToolButton>
 #include <QWidget>
@@ -192,8 +190,9 @@ ColorTableDialog::ColorTableDialog(QWidget* parent, const core::Page& page) : QD
         connect(cell, &QToolButton::clicked, this, [this, i] {
             if (i >= static_cast<int>(colors_.size())) return;
             const std::array<int, 3>& c = colors_[static_cast<std::size_t>(i)];
-            const QColor chosen = QColorDialog::getColor(QColor(c[0], c[1], c[2]), this, QStringLiteral("%1 番の色").arg(i));
-            if (chosen.isValid()) set_entry(i, {chosen.red(), chosen.green(), chosen.blue()});
+            if (const auto chosen = ask::colour(this, QColor(c[0], c[1], c[2]), QStringLiteral("%1 番の色").arg(i))) {
+                set_entry(i, {chosen->red(), chosen->green(), chosen->blue()});
+            }
         });
         grid->addWidget(cell, i / 16, i % 16);
         cells.push_back(cell);
@@ -324,9 +323,9 @@ DuotoneDialog::DuotoneDialog(QWidget* parent, const core::Page* page) : QDialog(
         colours[k]->setObjectName(QStringLiteral("duotone_colour_%1").arg(k + 1));
         paint_swatch(colours[k], chosen_[k]);
         connect(colours[k], &QPushButton::clicked, this, [this, k] {
-            const QColor chosen = QColorDialog::getColor(QColor(chosen_[k][0], chosen_[k][1], chosen_[k][2]), this, QStringLiteral("インキ %1 の色").arg(k + 1));
-            if (!chosen.isValid()) return;
-            chosen_[k] = {chosen.red(), chosen.green(), chosen.blue()};
+            const auto chosen = ask::colour(this, QColor(chosen_[k][0], chosen_[k][1], chosen_[k][2]), QStringLiteral("インキ %1 の色").arg(k + 1));
+            if (!chosen) return;
+            chosen_[k] = {chosen->red(), chosen->green(), chosen->blue()};
             paint_swatch(colours[k], chosen_[k]);
         });
         curves[k] = new QLineEdit(curve_text(own ? now[k].curve : core::DuotoneInk{}.curve));

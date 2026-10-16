@@ -65,7 +65,9 @@ if(UNIX AND NOT APPLE)
   install(FILES "${GENKO_SOURCE_ROOT}/package/licenses/icu/LICENSE" DESTINATION "${_genko_doc}/licenses/icu")
   install(DIRECTORY "${GENKO_SOURCE_ROOT}/package/licenses/xcb-util/" DESTINATION "${_genko_doc}/licenses/xcb-util")
 endif()
-install(FILES "${GENKO_SOURCE_ROOT}/third_party/photocraft/LICENSE-MIT" DESTINATION "${_genko_doc}/licenses/photocraft")
+# (PhotoCraft's MIT licence, and what was taken from it: the ported parts and the built-in ICC profiles, CC0)
+install(FILES "${GENKO_SOURCE_ROOT}/third_party/photocraft/LICENSE-MIT" "${GENKO_SOURCE_ROOT}/third_party/photocraft/NOTICE.md"
+        DESTINATION "${_genko_doc}/licenses/photocraft")
 install(FILES "${GENKO_SOURCE_ROOT}/third_party/pillow/LICENSE" DESTINATION "${_genko_doc}/licenses/pillow")
 install(FILES "${GENKO_SOURCE_ROOT}/third_party/freetype/FTL.TXT" "${GENKO_SOURCE_ROOT}/third_party/freetype/LICENSE.TXT"
         DESTINATION "${_genko_doc}/licenses/freetype")

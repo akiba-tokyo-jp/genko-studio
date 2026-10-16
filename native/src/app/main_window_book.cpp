@@ -370,9 +370,13 @@ void MainWindow::show_color_mode() {
 // them back; nothing to ask with one or none.
 bool MainWindow::flatten_asked(const core::Page* page, const QString& what) {
     if (page == nullptr) return true;  // (every page: each one's own merge, said in the dialog)
+    // (the layers the flatten merges that hold something — pixels, lines, patches: a page's empty layers of its own
+    // roles are no question)
     int merged = 0;
     for (const core::Layer& layer : page->layers) {
-        if (layer.kind != core::LayerKind::Folder && layer.role != core::LayerRole::Name && layer.role != core::LayerRole::Draft) ++merged;
+        if (layer.kind == core::LayerKind::Folder || layer.role == core::LayerRole::Name || layer.role == core::LayerRole::Draft) continue;
+        const bool pixels = (layer.raster_png && !layer.raster_png->empty()) || layer.color_raster || layer.ink_raster;
+        if (pixels || layer.stroke_count() > 0 || !layer.patches.empty()) ++merged;
     }
     if (merged < 2) return true;
     return ask::question(this, QStringLiteral("画像を統合"),

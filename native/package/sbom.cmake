@@ -33,7 +33,9 @@ set(_packages
   "freetype~FreeType~freetype~FTL~built-in"
   "pillow-libimaging~Pillow libImaging~=12.3.0~MIT-CMU~built-in"
   "optimized-routines~Arm optimized-routines~=v25.01~MIT~built-in"
-  "photocraft~PhotoCraft (the exposure adjustment, ported)~=v0.2.0~MIT~built-in"
+  "photocraft~PhotoCraft (ported: the exposure adjustment, colour models and modes, quantization, proofing, channels)~=v0.2.0~MIT~built-in"
+  "photocraft-coated-cmyk~PhotoCraft Coated CMYK (the built-in ICC profile coated-cmyk)~=v0.2.0~CC0-1.0~built-in"
+  "icc-profiles~Built-in RGB and grey ICC profiles (made by Genko with Little CMS)~=NOASSERTION~CC0-1.0~built-in"
   "cpython-re~CPython re (ported)~=3.12.3~PSF-2.0 AND Unicode-3.0~built-in"
   "fonts~Bundled fonts (Dela Gothic One, Reggae One, Yomogi, Zen Kaku Gothic New, Zen Maru Gothic, Zen Old Mincho, IBM Plex Sans JP)~=NOASSERTION~OFL-1.1~built-in"
   "lucide~Lucide icons~=NOASSERTION~ISC~built-in")

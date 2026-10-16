@@ -190,9 +190,10 @@ bool detail::as_values(const core::Page& page, std::string_view fmt, std::string
 }
 
 std::string detail::native_mode(const core::Page& page, std::string_view fmt, std::string_view color) {
-    if (color != "auto" || (fmt != "tiff" && fmt != "pdf")) return {};
-    if (page.color && page.color->bitmap) return "bitmap";
-    if (!page.color && page.rgb && page.rgb->table) return "indexed";
+    if (fmt != "tiff" && fmt != "pdf") return {};
+    // (as a grey page's inks and an RGB page's values: a bitmap page in auto or grey, an indexed page in auto or RGB)
+    if (page.color && page.color->bitmap && (color == "auto" || color == "gray")) return "bitmap";
+    if (!page.color && page.rgb && page.rgb->table && (color == "auto" || color == "rgb")) return "indexed";
     return {};
 }
 

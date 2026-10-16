@@ -24,14 +24,17 @@
 #include <QMenu>
 #include <QMenuBar>
 #include <QPushButton>
+#include <QLineEdit>
 #include <QSpinBox>
 #include <QTemporaryDir>
+#include <QToolButton>
 #include <QTimer>
 #include <QtTest>
 
 #include <filesystem>
 #include <fstream>
 #include <functional>
+#include <tuple>
 
 #include "app/canvas.hpp"
 #include "app/config.hpp"
@@ -39,6 +42,7 @@
 #include "app/dialogs.hpp"
 #include "app/layer_panel.hpp"
 #include "app/main_window.hpp"
+#include "app/mode_dialogs.hpp"
 #include "app/pages_panel.hpp"
 #include "app/tiles.hpp"
 #include "app/tool_settings.hpp"
@@ -904,10 +908,14 @@ private slots:
             if (a->menu() != nullptr && a->menu()->title() == QStringLiteral("色モード")) modes = a->menu();
         }
         QVERIFY(modes != nullptr);
-        QCOMPARE(menu_texts(modes), QStringList({QStringLiteral("RGB"), QStringLiteral("グレースケール"), QStringLiteral("CMYK"), QStringLiteral("Lab"), QStringLiteral("|"),
-                                                 QStringLiteral("8 bit/チャンネル"), QStringLiteral("16 bit/チャンネル"), QStringLiteral("32 bit/チャンネル（浮動小数）"),
-                                                 QStringLiteral("|"), QStringLiteral("ページの色モード…")}));
-        for (const char* name : {"act_mode_rgb", "act_mode_gray", "act_mode_cmyk", "act_mode_lab", "act_depth_8", "act_depth_16", "act_depth_32", "act_color_mode"}) {
+        // (PC1d: 2 階調…・インデックスカラー…・ダブルトーン…・マルチチャンネル after the four, カラーテーブル… before ページの色モード…)
+        QCOMPARE(menu_texts(modes), QStringList({QStringLiteral("RGB"), QStringLiteral("グレースケール"), QStringLiteral("CMYK"), QStringLiteral("Lab"),
+                                                 QStringLiteral("2 階調…"), QStringLiteral("インデックスカラー…"), QStringLiteral("ダブルトーン…"),
+                                                 QStringLiteral("マルチチャンネル"), QStringLiteral("|"), QStringLiteral("8 bit/チャンネル"),
+                                                 QStringLiteral("16 bit/チャンネル"), QStringLiteral("32 bit/チャンネル（浮動小数）"), QStringLiteral("|"),
+                                                 QStringLiteral("カラーテーブル…"), QStringLiteral("ページの色モード…")}));
+        for (const char* name : {"act_mode_rgb", "act_mode_gray", "act_mode_cmyk", "act_mode_lab", "act_mode_bitmap", "act_mode_indexed", "act_mode_duotone",
+                                 "act_mode_multichannel", "act_depth_8", "act_depth_16", "act_depth_32", "act_color_table", "act_color_mode"}) {
             QCOMPARE(menus_of(s.window.get(), s.window->action(QString::fromLatin1(name))), QStringList{QStringLiteral("ページ/色モード")});
         }
         for (const char* name : {"act_assign_profile", "act_convert_profile"}) {
@@ -985,6 +993,174 @@ private slots:
     // of an sRGB page is that depth alone (no profile, no intent: the page keeps its own); another mode converts with the
     // settings' intent but leaves the page its own default way (page_intent), so a CMYK page taken to 8-bit RGB in the
     // working sRGB is a page without a colour model again (Python's).
+    // PC1d (SPEC.md COLOR-03「特別な色モード」): ページ → 色モード's 2 階調…・インデックスカラー…・ダブルトーン…・
+    // マルチチャンネル and カラーテーブル…, offered as the page in front's mode allows; each dialog's op; the flatten asked
+    // when two or more layers hold something (no: nothing sent), not asked for a page of one; the mode in the status;
+    // undone as any op.
+    void specialModesInTheMenu() {
+        Studio s;
+        render::Image under = render::Image::create("RGBA", render::Size{60, 40}, render::Ink{128, 128, 128, 255});
+        under.paste(render::Ink{30, 160, 90, 255}, render::Box{30, 0, 60, 40});
+        render::Image over = render::Image::create("RGBA", render::Size{60, 40}, render::Ink{0, 0, 0, 0});
+        over.paste(render::Ink{200, 40, 40, 255}, render::Box{10, 10, 20, 20});
+        Json paint = Json::array();
+        for (const auto& [page, id, picture] : std::vector<std::tuple<int, std::string, render::Image>>{{2, "u", under}, {2, "o", over}, {3, "g", under}}) {
+            paint.push_back(Json{{"op", "add_layer"}, {"page", page}, {"kind", "paint"}, {"id", id}});
+            paint.push_back(Json{{"op", "set_layer"}, {"page", page}, {"id", id}, {"panel_each", false}, {"panel_clip", false}});
+            paint.push_back(Json{{"op", "put_raster"}, {"page", page}, {"id", id}, {"png_base64", core::b64encode(render::write_png(picture))}});
+        }
+        QVERIFY(s.window->apply_ops(paint));
+        QMenu* pages = top_menu(s.window.get(), QStringLiteral("ページ"));
+        QMenu* modes = nullptr;
+        for (QAction* a : pages->actions()) {
+            if (a->menu() != nullptr && a->menu()->title() == QStringLiteral("色モード")) modes = a->menu();
+        }
+        QVERIFY(modes != nullptr);
+        const auto offered = [&] {
+            emit modes->aboutToShow();
+            QStringList out;
+            for (const char* name : {"act_mode_bitmap", "act_mode_indexed", "act_mode_duotone", "act_mode_multichannel", "act_color_table"}) {
+                if (s.window->action(QString::fromLatin1(name))->isEnabled()) out << QString::fromLatin1(name).mid(4);
+            }
+            return out.join(QLatin1Char(' '));
+        };
+        const auto status = [&] { s.window->flash(QString(), 1); };
+        s.on_page(2);
+        QCOMPARE(offered(), QStringLiteral("mode_indexed mode_multichannel"));  // (an RGB page)
+        // インデックスカラー…: 8 colours; the flatten asked (two layers of pixels) and declined: nothing
+        QStringList dialogs;
+        std::function<void(QDialog*)> answer;
+        s.answers.responder->exec = [&](QDialog* d) {
+            dialogs << d->objectName();
+            if (answer) answer(d);
+            return int(QDialog::Accepted);
+        };
+        answer = [](QDialog* d) { d->findChild<QSpinBox*>(QStringLiteral("indexed_colors"))->setValue(8); };
+        std::size_t n = s.ops.size();
+        QVERIFY(s.trigger("act_mode_indexed"));
+        QCOMPARE(dialogs, QStringList{QStringLiteral("indexed_dialog")});
+        QCOMPARE(s.ops.size(), n);
+        QCOMPARE(s.answers.asked, QStringList{QStringLiteral("画像を統合: インデックスカラーにすると、このページの画素レイヤー（2 枚）を 1 枚に統合します。統合しますか？\n"
+                                                             "コマ・台詞・フキダシは要素のまま残ります。編集 → 取り消し で元に戻せます。")});
+        // … and accepted: to_indexed for this page, flattened into one layer
+        s.answers.responder->question = [&](const QString& title, const QString&) {
+            s.answers.asked << title;
+            return true;
+        };
+        QVERIFY(s.trigger("act_mode_indexed"));
+        QCOMPARE(s.since(n), std::string(R"([{"op": "to_indexed", "page": 2, "palette": "selective", "colors": 8, "forced": "blackWhite", )"
+                                         R"("transparency": true, "dither": "diffusion", "amount": 75}])"));
+        QVERIFY(s.book().page(1).rgb && s.book().page(1).rgb->table && !s.book().page(1).color);
+        int pixels = 0;
+        for (const core::Layer& layer : s.book().page(1).layers) pixels += layer.raster_png && !layer.raster_png->empty();
+        QCOMPARE(pixels, 1);
+        QCOMPARE(s.window->last_notice(), QStringLiteral("インデックスカラーにしました"));
+        QCOMPARE(offered(), QStringLiteral("mode_indexed color_table"));
+        status();
+        QTRY_VERIFY2(s.window->status_label()->text().contains(QStringLiteral("インデックスカラー（")), qPrintable(s.window->status_label()->text()));
+        QVERIFY(drawn_as_book(s));
+        // the value under the pointer (genko inspect --pixel's): its index in the table; the colour window: the pen
+        // colour's index
+        auto* value = s.window->findChild<QLabel*>(QStringLiteral("pixelValue"));
+        QVERIFY(value != nullptr);
+        emit s.window->canvas()->pointerOver(100.0, 100.0);
+        QTRY_VERIFY2(!value->isHidden() && value->text().startsWith(QStringLiteral("値 番号 ")), qPrintable(value->text()));
+        auto* table_index = s.window->findChild<QLabel*>(QStringLiteral("colour_table_index"));
+        QVERIFY(table_index != nullptr);
+        QTRY_VERIFY2(!table_index->isHidden() && table_index->text().startsWith(QStringLiteral("カラーテーブル ")), qPrintable(table_index->text()));
+        // カラーテーブル…: the grid holds the table; entry 0 set to a blue, the last one transparent
+        const std::size_t colours = s.book().page(1).rgb->table->colors.size();
+        answer = [&](QDialog* d) {
+            auto* table = qobject_cast<app::ColorTableDialog*>(d);
+            QVERIFY(table != nullptr);
+            QCOMPARE(table->colors().size(), colours);
+            QVERIFY(table->cells.at(0)->isEnabled() && !table->cells.at(colours)->isEnabled());
+            table->set_entry(0, {0, 0, 255});
+            table->transparent->setCurrentIndex(table->transparent->count() - 1);
+        };
+        dialogs.clear();
+        n = s.ops.size();
+        QVERIFY(s.trigger("act_color_table"));
+        QCOMPARE(dialogs, QStringList{QStringLiteral("color_table_dialog")});
+        const Json table_op = Json::parse(s.since(n));
+        QCOMPARE(table_op.size(), std::size_t(1));
+        QCOMPARE(table_op[0]["op"], Json("set_color_table"));
+        QCOMPARE(table_op[0]["colors"][0], Json::array({0, 0, 255}));
+        QCOMPARE(table_op[0]["transparent"], Json(static_cast<int>(colours) - 1));
+        QCOMPARE(s.book().page(1).rgb->table->colors[0], (std::array<int, 3>{0, 0, 255}));
+        QCOMPARE(s.window->last_notice(), QStringLiteral("カラーテーブルを変えました"));
+        // undone twice: the page as it was (two layers, no table)
+        QVERIFY(s.trigger("act_undo"));
+        QVERIFY(s.trigger("act_undo"));
+        QVERIFY(!s.book().page(1).rgb);
+        QCOMPARE(offered(), QStringLiteral("mode_indexed mode_multichannel"));
+        // マルチチャンネル: asked and done — the page's plates
+        s.answers.asked.clear();
+        n = s.ops.size();
+        QVERIFY(s.trigger("act_mode_multichannel"));
+        QCOMPARE(s.answers.asked.size(), 1);
+        QCOMPARE(s.since(n), std::string(R"([{"op": "set_color_mode", "page": 2, "mode": "multichannel"}])"));
+        QVERIFY(s.book().page(1).color && s.book().page(1).color->space == core::InkSpace::Multi);
+        QCOMPARE(offered(), QStringLiteral("mode_multichannel"));  // (no indexed from multichannel: back to RGB first)
+        status();
+        QTRY_VERIFY2(s.window->status_label()->text().contains(QStringLiteral("マルチチャンネル（3 版）")), qPrintable(s.window->status_label()->text()));
+        QVERIFY(drawn_as_book(s));
+        emit s.window->canvas()->pointerOver(100.0, 100.0);  // (the plates' values)
+        QTRY_VERIFY2(value->text().startsWith(QStringLiteral("値 Cyan ")) && value->text().contains(QStringLiteral(" Yellow ")), qPrintable(value->text()));
+        QTRY_VERIFY(table_index->isHidden());
+        // page 3 (one layer of pixels) in grey: 2 階調… and ダブルトーン… offered; 2 階調 with no question (nothing to merge)
+        s.on_page(3);
+        QVERIFY(s.trigger("act_mode_gray"));
+        QCOMPARE(offered(), QStringLiteral("mode_bitmap mode_indexed mode_duotone mode_multichannel"));
+        s.answers.asked.clear();
+        answer = [](QDialog* d) {
+            auto* method = d->findChild<QComboBox*>(QStringLiteral("bitmap_method"));
+            method->setCurrentIndex(method->findData(QStringLiteral("threshold")));
+            QVERIFY(!d->findChild<QDoubleSpinBox*>(QStringLiteral("bitmap_frequency"))->isEnabled());
+        };
+        dialogs.clear();
+        n = s.ops.size();
+        QVERIFY(s.trigger("act_mode_bitmap"));
+        QCOMPARE(dialogs, QStringList{QStringLiteral("bitmap_dialog")});
+        QVERIFY(s.answers.asked.isEmpty());
+        QCOMPARE(s.since(n), std::string(R"([{"op": "to_bitmap", "page": 3, "method": "threshold", "frequency": 53.0, "angle": 45.0, "shape": "round"}])"));
+        QVERIFY(s.book().page(2).color && s.book().page(2).color->bitmap);
+        QCOMPARE(s.window->last_notice(), QStringLiteral("2 階調にしました"));
+        QCOMPARE(offered(), QStringLiteral(""));  // (back by グレースケール first)
+        QVERIFY(drawn_as_book(s));
+        QVERIFY(s.trigger("act_undo"));
+        // ダブルトーン…: a tritone, the second ink's curve written by hand; a curve that cannot be read keeps OK off
+        answer = [](QDialog* d) {
+            auto* type = d->findChild<QComboBox*>(QStringLiteral("duotone_type"));
+            type->setCurrentIndex(type->findData(QStringLiteral("tritone")));
+            auto* curve = d->findChild<QLineEdit*>(QStringLiteral("duotone_curve_2"));
+            auto* ok = d->findChild<QDialogButtonBox*>()->button(QDialogButtonBox::Ok);
+            curve->setText(QStringLiteral("0:0, 50"));
+            QVERIFY(!ok->isEnabled());
+            curve->setText(QStringLiteral("0:0, 50:30, 100:80"));
+            QVERIFY(ok->isEnabled());
+        };
+        dialogs.clear();
+        n = s.ops.size();
+        QVERIFY(s.trigger("act_mode_duotone"));
+        QCOMPARE(dialogs, QStringList{QStringLiteral("duotone_dialog")});
+        const Json duo = Json::parse(s.since(n));
+        QCOMPARE(duo.size(), std::size_t(1));
+        QCOMPARE(duo[0]["op"], Json("set_duotone"));
+        QCOMPARE(duo[0]["type"], Json("tritone"));
+        QCOMPARE(duo[0]["inks"].size(), std::size_t(3));
+        QCOMPARE(duo[0]["inks"][1]["name"], Json("Warm Brown"));
+        QCOMPARE(duo[0]["inks"][1]["curve"], Json::parse("[[0.0, 0.0], [50.0, 30.0], [100.0, 80.0]]"));
+        QCOMPARE(s.book().page(2).color->duotone.size(), std::size_t(3));
+        QCOMPARE(s.window->last_notice(), QStringLiteral("ダブルトーンにしました"));
+        status();
+        QTRY_VERIFY2(s.window->status_label()->text().contains(QStringLiteral("ダブルトーン")), qPrintable(s.window->status_label()->text()));
+        QVERIFY(drawn_as_book(s));
+        // back to grey: the inks off
+        QVERIFY(s.trigger("act_mode_gray"));
+        QVERIFY(s.book().page(2).color && s.book().page(2).color->duotone.empty());
+    }
+
     void colourModesKeepThePagesOwnWay() {
         Studio s;
         app::settings()->setValue(QStringLiteral("color/workingRgb"), QStringLiteral("display-p3"));
