@@ -24,6 +24,13 @@
 | PhotoCraft（露光量の式とパラメータの境界、`crates/compose/src/adjust.rs`・`crates/engine/src/adjust_params.rs`） | v0.2.0（コミット ad863217386440ca968fccc9bfff65ba24e61142） | MIT | 露光量の補正（`native/src/core/exposure.cpp` に移植） | 静的（ソースに移植）。`native/third_party/photocraft/LICENSE-MIT`、配布物の `licenses/photocraft/` |
 | CPython の `re`（`Lib/re/_parser.py`・`_compiler.py`・`_casefix.py`・`_constants.py`、`Modules/_sre/sre_lib.h`・`sre.c`、`Modules/unicodedata.c` の名前の引き方）を C++ に移植したもの、Unicode 15.0.0 の文字の性質と名前の表（参照の Python 3.12 から `tools/migration/pyre_tables.py` で作る。別名は Unicode の NameAliases.txt 15.0.0） | CPython v3.12.3 | PSF-2.0（CNRI の Python 1.6.1 の許諾を含む）、sre は Secret Labs AB の著作権で CNRI's Python 1.6 license により再配布、Unicode の表は Unicode License v3（Unicode-3.0） | 台詞の一括置換・検索の正規表現を Python と同じ結果にする（`native/src/core/pyre*.cpp`） | 静的。`native/third_party/cpython/`に `LICENSE`（Python）・`LICENSE-SRE`（Secret Labs AB の表示）・`LICENSE-Unicode`（全文）と来歴。移植したソースの冒頭にも表示 |
 
+## 同梱データ（プログラムに組み込む）
+
+| 名前 | 出典 | ライセンス | 置き場所 |
+|---|---|---|---|
+| PhotoCraft Coated CMYK（合成 ICC プロファイル、sha256 f7ba9320…a54cc。内蔵プロファイル `coated-cmyk`） | PhotoCraft v0.2.0 `crates/cms/profiles/photocraft-coated-cmyk.icc`（pin ad86321） | CC0-1.0 | `native/src/core/data/profiles/coated-cmyk.icc`（プログラムに組み込む。色モデル color-model@1） |
+| 内蔵の RGB・グレーの ICC プロファイル（display-p3・adobe-rgb-compat・prophoto-compat・linear-srgb・rec2020・gray-gamma-2.2・sgray） | Genko が `tools/migration/make_profiles.cpp` で Little CMS により作ったもの（原色・白色点・トーンカーブは公開の規格の値。選び方と ID・説明は PhotoCraft v0.2.0 `crates/cms/src/builtin.rs`、MIT） | CC0-1.0 | `native/src/core/data/profiles/`（プログラムに組み込む。sha256 は `core/color_model.cpp` と試験 `test_color_model` で照合） |
+
 ## 同梱フォント・アイコン（現行版から継承）
 
 | 名前 | ライセンス | 置き場所 |

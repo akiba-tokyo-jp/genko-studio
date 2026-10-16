@@ -74,6 +74,11 @@ genko_test(test_material_stamp SOURCES unit/test_material_stamp.cpp DEPS genko_c
 # the print's PDF drawn back by poppler's pdftocairo, the command line (no Python: test_contract_paper has that part).
 genko_test(test_paper SOURCES unit/test_paper.cpp DEPS genko_test_support genko_render_ops genko_formats LABELS unit TIMEOUT 900)
 
+# color-model@1 (SPEC.md COLOR-03): the built-in ICC profiles, the colour model's JSON, GKIR version 2, the conversions
+# between modes and depths, assign_profile and convert_profile, their refusals, without Python.
+genko_test(test_color_model SOURCES unit/test_color_model.cpp DEPS genko_test_support genko_render_ops genko_formats ${GENKO_LCMS2}
+           LABELS unit TIMEOUT 600)
+
 # color-mode@1 (SPEC.md COLOR-02): CMYK and Lab pages without Python — GKIR, the colour mode, the ink rules, the ink
 # canvas's blends, a page drawn in parts, set_color_mode and back, set_inks, the book on disk, Undo, the refusals.
 genko_test(test_ink SOURCES unit/test_ink.cpp DEPS genko_test_support genko_render_ops genko_formats LABELS unit TIMEOUT 600)
