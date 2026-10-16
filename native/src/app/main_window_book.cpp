@@ -10,6 +10,8 @@
 #include <filesystem>
 #include <optional>
 #include <system_error>
+#include <tuple>
+#include <utility>
 #include <vector>
 
 #include "app/ask.hpp"
@@ -119,7 +121,26 @@ void MainWindow::build_book_actions() {
     make("act_paper", QStringLiteral("原稿用紙の設定…"), [this] { paper_settings(); }, {},
          QStringLiteral("用紙・仕上がり・裁ち落とし・基本枠。変えるとコマや台詞も新しい枠に合わせて動きます"));
     make("act_color_mode", QStringLiteral("ページの色モード…"), [this] { color_mode_dialog(); }, {},
-         QStringLiteral("RGB・CMYK・Lab と精度（8/16 bit）。CMYK は印刷所のプロファイルを原稿に埋め込みます"));
+         QStringLiteral("RGB・グレースケール・CMYK・Lab、精度（8/16/32 bit）とプロファイル。プロファイルは原稿に埋め込みます"));
+    // ページ → 色モード (image.mode.*, color-model@1): the page in front in RGB, grey, CMYK or Lab, in 8, 16 or 32 bits
+    // a channel; checked as the page is (show_color_mode)
+    auto* modes = new QActionGroup(this);
+    modes->setExclusionPolicy(QActionGroup::ExclusionPolicy::ExclusiveOptional);
+    for (const auto& [name, title, mode] : {std::tuple{"act_mode_rgb", "RGB", "rgb"}, std::tuple{"act_mode_gray", "グレースケール", "gray"},
+                                            std::tuple{"act_mode_cmyk", "CMYK", "cmyk"}, std::tuple{"act_mode_lab", "Lab", "lab"}}) {
+        modes->addAction(make(QString::fromLatin1(name), QString::fromUtf8(title), [this, mode] { set_page_mode(QString::fromLatin1(mode), 0); }, {}, {}, true));
+    }
+    auto* depths = new QActionGroup(this);
+    depths->setExclusionPolicy(QActionGroup::ExclusionPolicy::ExclusiveOptional);
+    for (const auto& [name, title, depth] : {std::tuple{"act_depth_8", "8 bit/チャンネル", 8}, std::tuple{"act_depth_16", "16 bit/チャンネル", 16},
+                                             std::tuple{"act_depth_32", "32 bit/チャンネル（浮動小数）", 32}}) {
+        depths->addAction(make(QString::fromLatin1(name), QString::fromUtf8(title), [this, depth] { set_page_mode(QString(), depth); }, {}, {}, true));
+    }
+    // 編集 → プロファイルの指定… / プロファイルに変換… (edit.assignProfile, edit.convertToProfile)
+    make("act_assign_profile", QStringLiteral("プロファイルの指定…"), [this] { profile_dialog(false); }, {},
+         QStringLiteral("画素の値はそのままで、どのプロファイルの色として見るかを決めます"));
+    make("act_convert_profile", QStringLiteral("プロファイルに変換…"), [this] { profile_dialog(true); }, {},
+         QStringLiteral("見た目の色を保って、画素をほかのプロファイル（RGB・グレー・CMYK）の値に変換します"));
     make("act_page_nombre", QStringLiteral("このページのノンブルを隠す／出す"), [this] { toggle_page_nombre(); });
     make("act_add_cover", QStringLiteral("表紙・カバーを足す…"), [this] { add_cover_dialog(); }, {}, QStringLiteral("表紙・裏表紙、または背と袖のあるカバー 1 枚"));
     make("act_assignee", QStringLiteral("このページの担当…"), [this] { assignee_dialog(); }, {},
@@ -224,6 +245,65 @@ void MainWindow::color_mode_dialog() {
     if (!apply_ops(Json::array({dialog.op()}))) return;
     reload_pages();
     flash(QStringLiteral("色モードを変えました"), 4000);
+}
+
+// 色モード → RGB・グレースケール・CMYK・Lab・8/16/32 bit (image.mode.*, as upstream's Image → Mode): the page in front
+// in another mode (its depth kept) or another depth (the rest of its mode kept: its profile, intent, black point) —
+// set_color_mode, undone as any op. CMYK from another mode in the built-in coated-cmyk (upstream's working CMYK). Nothing
+// when the page is so already; a refusal said (apply_ops) and the marks put back as the page is.
+void MainWindow::set_page_mode(const QString& mode, int depth) {
+    const core::Page* page = current_page();
+    if (page == nullptr) return;
+    const std::string now = page->color ? std::string(core::to_string(page->color->space)) : std::string("rgb");
+    const int now_depth = page->color ? page->color->depth : page->rgb ? page->rgb->depth : 8;
+    const std::string wanted = mode.isEmpty() ? now : mode.toStdString();
+    const int to = depth == 0 ? now_depth : depth;
+    if (wanted == now && to == now_depth) {
+        show_color_mode();
+        return;
+    }
+    Json op{{"op", "set_color_mode"}, {"page", page->index.json()}, {"mode", wanted}, {"depth", to}};
+    if (wanted == now && page->color) {
+        if (page->color->space != core::InkSpace::Lab) op["profile"] = page->color->profile;
+        op["intent"] = page->color->intent;
+        if (!page->color->bpc) op["bpc"] = false;
+    } else if (wanted == now && page->rgb) {
+        op["profile"] = page->rgb->profile;
+        op["intent"] = page->rgb->intent;
+        if (!page->rgb->bpc) op["bpc"] = false;
+    } else if (wanted == "cmyk") {
+        op["profile"] = "coated-cmyk";
+    }
+    if (!apply_ops(Json::array({op}))) {
+        show_color_mode();
+        return;
+    }
+    reload_pages();
+    flash(QStringLiteral("色モードを変えました"), 4000);
+}
+
+// The 色モード marks: the page in front's mode and depth (none without a page).
+void MainWindow::show_color_mode() {
+    const core::Page* page = current_page();
+    const std::string mode = page == nullptr ? std::string() : page->color ? std::string(core::to_string(page->color->space)) : std::string("rgb");
+    const int depth = page == nullptr ? 0 : page->color ? page->color->depth : page->rgb ? page->rgb->depth : 8;
+    for (const auto& [name, its] : {std::pair{"act_mode_rgb", "rgb"}, std::pair{"act_mode_gray", "gray"}, std::pair{"act_mode_cmyk", "cmyk"}, std::pair{"act_mode_lab", "lab"}}) {
+        if (QAction* a = action(QString::fromLatin1(name))) a->setChecked(mode == its);
+    }
+    for (const auto& [name, its] : {std::pair{"act_depth_8", 8}, std::pair{"act_depth_16", 16}, std::pair{"act_depth_32", 32}}) {
+        if (QAction* a = action(QString::fromLatin1(name))) a->setChecked(depth == its);
+    }
+}
+
+// プロファイルの指定… / プロファイルに変換… (edit.assignProfile, edit.convertToProfile): the page in front or every page;
+// assign_profile or convert_profile, undone as any op.
+void MainWindow::profile_dialog(bool convert) {
+    const Asked asked = asking();
+    ProfileDialog dialog(this, *asked.snapshot, current_page(), convert);
+    if (ask::exec(&dialog) != QDialog::Accepted || !still(asked)) return;
+    if (!apply_ops(Json::array({dialog.op()}))) return;
+    reload_pages();
+    flash(convert ? QStringLiteral("プロファイルに変換しました") : QStringLiteral("プロファイルを指定しました"), 4000);
 }
 
 // 表紙・カバーを足す… (_add_cover_dialog): the cover at the end of the book, in front.

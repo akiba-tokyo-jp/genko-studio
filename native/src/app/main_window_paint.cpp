@@ -269,7 +269,7 @@ void MainWindow::choose_inks(const std::vector<double>& ink, bool picked) {
     if (!render::ink::same_inks(color, render::ink::ink_of(color, rgb), ink)) {
         // (the pair in the table of every page of this mode and profile, so the colour prints so on each of them)
         Json values = Json::array();
-        for (const double v : ink) values.push_back(core::py_round(v, color.space == core::InkSpace::Cmyk ? 5 : 3));
+        for (const double v : ink) values.push_back(core::py_round(v, color.space == core::InkSpace::Lab ? 3 : 5));
         const Json pair = Json::array({Json::array({Json::array({rgb[0], rgb[1], rgb[2]}), values})});
         Json ops = Json::array();
         for (const core::Page* other : alike) ops.push_back(Json{{"op", "set_inks"}, {"page", other->index.json()}, {"inks", pair}});
@@ -280,12 +280,13 @@ void MainWindow::choose_inks(const std::vector<double>& ink, bool picked) {
     }
     brush_->set_colour(rgb);
     QStringList said;
-    const bool cmyk = color.space == core::InkSpace::Cmyk;
+    const bool percent = color.space == core::InkSpace::Cmyk || color.space == core::InkSpace::Gray;  // (grey: K, color-model@1)
     const char* names[] = {"C", "M", "Y", "K"};
     const char* lab[] = {"L", "a", "b"};
     for (std::size_t i = 0; i < ink.size(); ++i) {
-        said << (cmyk ? QStringLiteral("%1 %2%").arg(QString::fromLatin1(names[i])).arg(ink[i] * 100.0, 0, 'f', 1)
-                      : QStringLiteral("%1 %2").arg(QString::fromLatin1(lab[i])).arg(ink[i], 0, 'f', 1));
+        const char* name = color.space == core::InkSpace::Gray ? "K" : percent ? names[i] : lab[i];
+        said << (percent ? QStringLiteral("%1 %2%").arg(QString::fromLatin1(name)).arg(ink[i] * 100.0, 0, 'f', 1)
+                         : QStringLiteral("%1 %2").arg(QString::fromLatin1(name)).arg(ink[i], 0, 'f', 1));
     }
     flash((picked ? QStringLiteral("色を拾いました（%1）") : QStringLiteral("色を選びました（%1）")).arg(said.join(QStringLiteral(" "))), 2000);
 }

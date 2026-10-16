@@ -805,9 +805,18 @@ void MainWindow::refresh_status() {
         }
     }
     const auto frames = page->leaf_frames().size();
-    if (page->color) {  // (color-mode@1: the page's mode beside its panels)
-        selected += QStringLiteral(" ・ %1 %2 bit").arg(page->color->space == core::InkSpace::Cmyk ? QStringLiteral("CMYK") : QStringLiteral("Lab"))
-                        .arg(page->color->depth);
+    if (page->color || page->rgb) {  // (color-mode@1, color-model@1: the page's mode beside its panels, and its profile)
+        const bool lab = page->color && page->color->space == core::InkSpace::Lab;
+        const QString name = !page->color                                   ? QStringLiteral("RGB")
+                             : page->color->space == core::InkSpace::Cmyk ? QStringLiteral("CMYK")
+                             : page->color->space == core::InkSpace::Gray ? QStringLiteral("グレー")
+                                                                           : QStringLiteral("Lab");
+        selected += QStringLiteral(" ・ %1 %2 bit").arg(name).arg(page->color ? page->color->depth : page->rgb->depth);
+        if (!lab) {
+            const std::string said = page->color ? core::profile_description(page->color->profile, page->color->icc)
+                                                 : core::profile_description(page->rgb->profile, page->rgb->icc);
+            if (!said.empty()) selected += QStringLiteral("・") + QString::fromStdString(said);
+        }
     }
     if (agent_book()) {
         status_->setText(QStringLiteral("%1 ページ（%2） ・ コマ %3%4 ・ %5")
@@ -842,6 +851,7 @@ void MainWindow::refresh_zoom() {
 }
 
 void MainWindow::refresh_actions() {
+    show_color_mode();
     if (auto* exposure = action("act_exposure")) exposure->setEnabled(current_page() && session_->read_only_reason().empty());
     if (QAction* name_ok = action(QStringLiteral("act_name_ok"))) name_ok->setVisible(agent_book());  // (stages are for books made with agents)
 }

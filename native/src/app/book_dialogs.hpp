@@ -71,14 +71,16 @@ private:
     void enable();
 };
 
-// ページの色モード… (color-mode@1, SPEC.md COLOR-02): the page in front, or every page and the pages to come, in RGB, CMYK
-// or Lab, 8 or 16 bits; a CMYK one with the book's profile or one chosen (.icc), its intent and its greys. op() is the
-// set_color_mode to send (its ICC in base64 when chosen here).
+// ページの色モード… (color-mode@1, color-model@1, SPEC.md COLOR-02, COLOR-03): the page in front, or every page and the
+// pages to come, in RGB, grey, CMYK or Lab, 8, 16 or 32 bits; a profile of the mode's space (a built-in one, the book's,
+// or one chosen as a file: .icc), its intent, black point compensation, its greys, 8 bits dithered and HDR values cut.
+// op() is the set_color_mode to send (its ICC in base64 when chosen here; the defaults left out).
 class ColorModeDialog : public QDialog {
     Q_OBJECT
 
 public:
-    ColorModeDialog(QWidget* parent, const core::Document& book, const core::Page* page);
+    // `preset`: a mode to begin with ("" the page's own).
+    ColorModeDialog(QWidget* parent, const core::Document& book, const core::Page* page, const QString& preset = {});
     core::Json op() const;
     // Why the choice cannot be sent (a CMYK mode without a profile), or "" when it can.
     QString problem() const;
@@ -89,14 +91,48 @@ public:
     QComboBox* profile = nullptr;
     QPushButton* pick = nullptr;
     QComboBox* intent = nullptr;
+    QCheckBox* bpc = nullptr;
     QComboBox* gray = nullptr;
+    QCheckBox* dither = nullptr;
+    QCheckBox* clip_hdr = nullptr;
     QDialogButtonBox* buttons = nullptr;
 
 private:
     void enable();
+    void fill_profiles();
     void choose_file();
+    const core::Document& book_;
     const core::Page* page_ = nullptr;
     std::map<std::string, std::string> chosen_;  // (ICC files chosen here: their ref → their bytes)
+};
+
+// プロファイルの指定… (edit.assignProfile) and プロファイルに変換… (edit.convertToProfile), color-model@1: the page in front
+// or every page; a profile (built-in, the book's, or a file) — to name the one its pixels are in (assign_profile: of its
+// own space, or none: sRGB, sGray) or to convert them into (convert_profile: any space, its intent, black point
+// compensation, dither, HDR cut).
+class ProfileDialog : public QDialog {
+    Q_OBJECT
+
+public:
+    ProfileDialog(QWidget* parent, const core::Document& book, const core::Page* page, bool convert);
+    core::Json op() const;
+    QString problem() const;
+
+    QComboBox* scope = nullptr;
+    QComboBox* profile = nullptr;
+    QPushButton* pick = nullptr;
+    QComboBox* intent = nullptr;
+    QCheckBox* bpc = nullptr;
+    QCheckBox* dither = nullptr;
+    QCheckBox* clip_hdr = nullptr;
+    QDialogButtonBox* buttons = nullptr;
+
+private:
+    void choose_file();
+    const core::Page* page_ = nullptr;
+    bool convert_ = false;
+    std::optional<core::ProfileSpace> space_;  // (assign: the page's space)
+    std::map<std::string, std::string> chosen_;
 };
 
 // main._page_list(text, count): "1-4, 7" → [1, 2, 3, 4, 7] (、 a comma, 〜 and ～ a dash; a range either way round;

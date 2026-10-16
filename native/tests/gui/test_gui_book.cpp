@@ -416,12 +416,13 @@ private slots:
         // ページ: Python's order (絵柄を選ぶ and チャットでの承認 of M5④ in their places)
         QMenu* pages = top_menu(s.window.get(), QStringLiteral("ページ"));
         QVERIFY(pages != nullptr);
-        // (ページの色モード…: CMYK/Lab, the C++ build's own, after Python's)
+        // (色モード: the page's colour mode and its dialog, the C++ build's own, after Python's — a submenu since
+        // color-model@1, as the design's ページ → 色モード has it)
         QCOMPARE(menu_texts(pages).mid(0, 19),
                  QStringList({QStringLiteral("ページを追加（この後ろに）"), QStringLiteral("このページを複製"), QStringLiteral("このページを消す…"), QStringLiteral("|"),
                               QStringLiteral("このページを前へ"), QStringLiteral("このページを後ろへ"), QStringLiteral("次のページと見開きにする／解除"), QStringLiteral("|"),
                               QStringLiteral("原稿用紙の設定…"), QStringLiteral("絵柄を選ぶ…"), QStringLiteral("チャットでの承認…"), QStringLiteral("ノンブルの設定…"), QStringLiteral("このページのノンブルを隠す／出す"),
-                              QStringLiteral("表紙・カバーを足す…"), QStringLiteral("このページの担当…"), QStringLiteral("アニメーション（タイムライン）"), QStringLiteral("ページの色モード…"),
+                              QStringLiteral("表紙・カバーを足す…"), QStringLiteral("このページの担当…"), QStringLiteral("アニメーション（タイムライン）"), QStringLiteral("色モード"),
                               QStringLiteral("|"), QStringLiteral("コマ")}));
         // ファイル: after the scans, before the export (書き出し and 印刷, M4③b: test_gui_output)
         QMenu* file = top_menu(s.window.get(), QStringLiteral("ファイル"));
@@ -830,7 +831,7 @@ private slots:
         std::size_t n = s.ops.size();
         QVERIFY(s.trigger("act_color_mode"));
         QCOMPARE(seen.at(0), QStringLiteral("対象: このページ（2 ページ）=page|すべてのページと、これから足すページ=all @page"));
-        QCOMPARE(seen.at(1), QStringLiteral("色モード: RGB=rgb|CMYK（印刷のインキ）=cmyk|Lab=lab @rgb"));
+        QCOMPARE(seen.at(1), QStringLiteral("色モード: RGB=rgb|グレースケール=gray|CMYK（印刷のインキ）=cmyk|Lab=lab @rgb"));
         QCOMPARE(s.ops.size(), n);
         // CMYK for this page, the profile chosen as a file: OK only once there is one
         result = QDialog::Accepted;
@@ -868,7 +869,7 @@ private slots:
         };
         n = s.ops.size();
         QVERIFY(s.trigger("act_color_mode"));
-        QCOMPARE(seen.at(1), QStringLiteral("色モード: RGB=rgb|CMYK（印刷のインキ）=cmyk|Lab=lab @cmyk"));  // (the page's mode now)
+        QCOMPARE(seen.at(1), QStringLiteral("色モード: RGB=rgb|グレースケール=gray|CMYK（印刷のインキ）=cmyk|Lab=lab @cmyk"));  // (the page's mode now)
         QCOMPARE(s.since(n), std::string(R"([{"op": "set_color_mode", "mode": "lab", "depth": 16, "intent": "relative"}])"));
         for (const auto& page : s.book().pages) QVERIFY(page->color && page->color->space == core::InkSpace::Lab && page->color->depth == 16);
         QVERIFY(s.book().color);
@@ -886,6 +887,292 @@ private slots:
         QVERIFY(s.trigger("act_color_mode"));
         QCOMPARE(depth_before, 16);
         QCOMPARE(depth_after, 8);
+    }
+
+    // ページ → 色モード (image.mode.*, color-model@1): its modes and depths checked as the page in front is; each sends
+    // set_color_mode for that page — another mode at the page's depth, another depth with the rest of the mode kept (its
+    // profile, intent), CMYK in the built-in coated-cmyk; nothing when the page is so already; the mode and its profile in
+    // the status; undone as any op. 編集 → プロファイルの指定… / プロファイルに変換… beside.
+    void colourModesInTheMenu() {
+        Studio s;
+        QMenu* pages = top_menu(s.window.get(), QStringLiteral("ページ"));
+        QVERIFY(pages != nullptr);
+        QMenu* modes = nullptr;
+        for (QAction* a : pages->actions()) {
+            if (a->menu() != nullptr && a->menu()->title() == QStringLiteral("色モード")) modes = a->menu();
+        }
+        QVERIFY(modes != nullptr);
+        QCOMPARE(menu_texts(modes), QStringList({QStringLiteral("RGB"), QStringLiteral("グレースケール"), QStringLiteral("CMYK"), QStringLiteral("Lab"), QStringLiteral("|"),
+                                                 QStringLiteral("8 bit/チャンネル"), QStringLiteral("16 bit/チャンネル"), QStringLiteral("32 bit/チャンネル（浮動小数）"),
+                                                 QStringLiteral("|"), QStringLiteral("ページの色モード…")}));
+        for (const char* name : {"act_mode_rgb", "act_mode_gray", "act_mode_cmyk", "act_mode_lab", "act_depth_8", "act_depth_16", "act_depth_32", "act_color_mode"}) {
+            QCOMPARE(menus_of(s.window.get(), s.window->action(QString::fromLatin1(name))), QStringList{QStringLiteral("ページ/色モード")});
+        }
+        for (const char* name : {"act_assign_profile", "act_convert_profile"}) {
+            QCOMPARE(menus_of(s.window.get(), s.window->action(QString::fromLatin1(name))), QStringList{QStringLiteral("編集")});
+        }
+        QCOMPARE(s.window->action(QStringLiteral("act_assign_profile"))->text(), QStringLiteral("プロファイルの指定…"));
+        QCOMPARE(s.window->action(QStringLiteral("act_convert_profile"))->text(), QStringLiteral("プロファイルに変換…"));
+        const auto checked = [&] {
+            emit modes->aboutToShow();
+            QStringList out;
+            for (QAction* a : modes->actions()) {
+                if (a->isChecked()) out << a->text();
+            }
+            return out.join(QStringLiteral("+"));
+        };
+        const auto status = [&] { s.window->flash(QString(), 1); };  // (the notice's time over: the page's status, with its mode)
+        s.on_page(2);
+        QCOMPARE(checked(), QStringLiteral("RGB+8 bit/チャンネル"));
+        std::size_t n = s.ops.size();
+        QVERIFY(s.trigger("act_mode_rgb"));  // (so already: nothing)
+        QCOMPARE(s.ops.size(), n);
+        QCOMPARE(checked(), QStringLiteral("RGB+8 bit/チャンネル"));
+        // grey at the page's depth
+        QVERIFY(s.trigger("act_mode_gray"));
+        QCOMPARE(s.since(n), std::string(R"([{"op": "set_color_mode", "page": 2, "mode": "gray", "depth": 8}])"));
+        QVERIFY(s.book().page(1).color && s.book().page(1).color->space == core::InkSpace::Gray);
+        QVERIFY(!s.book().page(0).color);
+        QCOMPARE(checked(), QStringLiteral("グレースケール+8 bit/チャンネル"));
+        QCOMPARE(s.window->last_notice(), QStringLiteral("色モードを変えました"));
+        status();
+        QTRY_VERIFY2(s.window->status_label()->text().contains(QStringLiteral("グレー 8 bit・sGray (sRGB tone curve, Photocraft)")), qPrintable(s.window->status_label()->text()));
+        QVERIFY(drawn_as_book(s));
+        // 16 bits: the mode as it is
+        const std::string sgray = core::builtin_profile("sgray")->ref();
+        n = s.ops.size();
+        QVERIFY(s.trigger("act_depth_16"));
+        QCOMPARE(s.since(n), R"([{"op": "set_color_mode", "page": 2, "mode": "gray", "depth": 16, "profile": ")" + sgray + R"(", "intent": "relative"}])");
+        QCOMPARE(s.book().page(1).color->depth, 16);
+        QCOMPARE(checked(), QStringLiteral("グレースケール+16 bit/チャンネル"));
+        // CMYK: the built-in coated-cmyk, at 16 bits
+        n = s.ops.size();
+        QVERIFY(s.trigger("act_mode_cmyk"));
+        QCOMPARE(s.since(n), std::string(R"([{"op": "set_color_mode", "page": 2, "mode": "cmyk", "depth": 16, "profile": "coated-cmyk"}])"));
+        QVERIFY(s.book().page(1).color->space == core::InkSpace::Cmyk);
+        QCOMPARE(s.book().page(1).color->profile, core::builtin_profile("coated-cmyk")->ref());
+        QCOMPARE(checked(), QStringLiteral("CMYK+16 bit/チャンネル"));
+        status();
+        QTRY_VERIFY2(s.window->status_label()->text().contains(QStringLiteral("CMYK 16 bit・Photocraft Coated CMYK")), qPrintable(s.window->status_label()->text()));
+        // 32 bits (floats), then RGB at 32
+        QVERIFY(s.trigger("act_depth_32"));
+        QCOMPARE(s.book().page(1).color->depth, 32);
+        QCOMPARE(checked(), QStringLiteral("CMYK+32 bit/チャンネル（浮動小数）"));
+        QVERIFY(s.trigger("act_mode_rgb"));
+        QVERIFY(!s.book().page(1).color && s.book().page(1).rgb && s.book().page(1).rgb->depth == 32);
+        QCOMPARE(checked(), QStringLiteral("RGB+32 bit/チャンネル（浮動小数）"));
+        status();
+        QTRY_VERIFY2(s.window->status_label()->text().contains(QStringLiteral("RGB 32 bit・sRGB IEC61966-2.1")), qPrintable(s.window->status_label()->text()));
+        QVERIFY(drawn_as_book(s));
+        // Lab, then all undone: the page as it was
+        QVERIFY(s.trigger("act_mode_lab"));
+        QVERIFY(s.book().page(1).color->space == core::InkSpace::Lab && s.book().page(1).color->depth == 32);
+        QCOMPARE(checked(), QStringLiteral("Lab+32 bit/チャンネル（浮動小数）"));
+        for (int i = 0; i < 6; ++i) QVERIFY(s.trigger("act_undo"));
+        QVERIFY(!s.book().page(1).color && !s.book().page(1).rgb);
+        QCOMPARE(checked(), QStringLiteral("RGB+8 bit/チャンネル"));
+        // another page: its own marks
+        QVERIFY(s.window->apply_ops(Json::array({Json{{"op", "set_color_mode"}, {"page", 3}, {"mode", "lab"}, {"depth", 16}}})));
+        s.on_page(3);
+        QCOMPARE(checked(), QStringLiteral("Lab+16 bit/チャンネル"));
+        s.on_page(1);
+        QCOMPARE(checked(), QStringLiteral("RGB+8 bit/チャンネル"));
+    }
+
+    // ページの色モード…, color-model@1: grey and 32 bits among the modes and depths; each mode's profiles — the built-in
+    // ones (RGB's from sRGB, grey's from sGray) and the book's —; black point compensation, dither and the HDR cut sent
+    // only when they are not the defaults; the page's own choices shown when it is opened again.
+    void colourModelInTheDialog() {
+        Studio s;
+        QStringList seen;
+        std::function<void(QDialog*)> answer;
+        int result = QDialog::Accepted;
+        s.answers.responder->exec = [&](QDialog* d) {
+            seen.clear();
+            for (const char* name : {"color_mode_mode", "color_mode_depth", "color_mode_profile", "color_mode_gray"}) {
+                auto* box = d->findChild<QComboBox*>(QString::fromLatin1(name));
+                seen << described(box) + (box != nullptr && !box->isEnabled() ? QStringLiteral(" off") : QString());
+            }
+            for (const char* name : {"color_mode_bpc", "color_mode_dither", "color_mode_clip_hdr"}) seen << described(d->findChild<QCheckBox*>(QString::fromLatin1(name)));
+            if (answer) answer(d);
+            return result;
+        };
+        const QString rgb_profiles = QStringLiteral(
+            "sRGB（プロファイルなし）=srgb|Display P3=display-p3|Adobe RGB (1998)-compatible (Photocraft)=adobe-rgb-compat|"
+            "ProPhoto RGB-compatible (ROMM primaries, Photocraft)=prophoto-compat|Linear sRGB (Photocraft)=linear-srgb|Rec. ITU-R BT.2020 (Photocraft)=rec2020");
+        s.on_page(2);
+        result = QDialog::Rejected;
+        std::size_t n = s.ops.size();
+        QVERIFY(s.trigger("act_color_mode"));
+        QCOMPARE(seen.at(0), QStringLiteral("RGB=rgb|グレースケール=gray|CMYK（印刷のインキ）=cmyk|Lab=lab @rgb"));
+        QCOMPARE(seen.at(1), QStringLiteral("8 bit=8|16 bit=16|32 bit（浮動小数）=32 @8"));
+        QCOMPARE(seen.at(2), rgb_profiles + QStringLiteral(" @srgb"));
+        QCOMPARE(seen.at(3), QStringLiteral("プロファイルで変換=profile|K 版だけ（線画向け）=k @profile off"));
+        QCOMPARE(seen.mid(4), QStringList({QStringLiteral("黒点の補正 [x]"), QStringLiteral("8 bit に下げるときディザをかける [ ]"), QStringLiteral("0〜1 を超える HDR の値を切る [ ]")}));
+        QCOMPARE(s.ops.size(), n);
+        // RGB 16 bits in Display P3, without black point compensation (grey's profiles seen on the way)
+        result = QDialog::Accepted;
+        QString grey_profiles;
+        bool greys_on = false;
+        answer = [&](QDialog* d) {
+            auto* mode = d->findChild<QComboBox*>(QStringLiteral("color_mode_mode"));
+            auto* depth = d->findChild<QComboBox*>(QStringLiteral("color_mode_depth"));
+            auto* profile = d->findChild<QComboBox*>(QStringLiteral("color_mode_profile"));
+            mode->setCurrentIndex(mode->findData(QStringLiteral("gray")));
+            grey_profiles = described(profile);
+            greys_on = d->findChild<QComboBox*>(QStringLiteral("color_mode_gray"))->isEnabled();
+            mode->setCurrentIndex(mode->findData(QStringLiteral("rgb")));
+            depth->setCurrentIndex(depth->findData(16));
+            profile->setCurrentIndex(profile->findData(QStringLiteral("display-p3")));
+            d->findChild<QCheckBox*>(QStringLiteral("color_mode_bpc"))->setChecked(false);
+        };
+        QVERIFY(s.trigger("act_color_mode"));
+        QCOMPARE(grey_profiles, QStringLiteral("Gray Gamma 2.2 (Photocraft)=gray-gamma-2.2|sGray (sRGB tone curve, Photocraft)=sgray @sgray"));
+        QVERIFY(greys_on);
+        QCOMPARE(s.since(n), std::string(R"([{"op": "set_color_mode", "mode": "rgb", "depth": 16, "page": 2, "profile": "display-p3", "bpc": false}])"));
+        const core::Page& page = s.book().page(1);
+        QVERIFY(!page.color && page.rgb);
+        QCOMPARE(page.rgb->depth, 16);
+        QCOMPARE(page.rgb->profile, core::builtin_profile("display-p3")->ref());
+        QVERIFY(!page.rgb->bpc);
+        s.window->flash(QString(), 1);
+        QTRY_VERIFY2(s.window->status_label()->text().contains(QStringLiteral("RGB 16 bit・Display P3")), qPrintable(s.window->status_label()->text()));
+        QVERIFY(drawn_as_book(s));
+        // opened again: the page's own choices
+        result = QDialog::Rejected;
+        answer = nullptr;
+        QVERIFY(s.trigger("act_color_mode"));
+        QCOMPARE(seen.at(1), QStringLiteral("8 bit=8|16 bit=16|32 bit（浮動小数）=32 @16"));
+        QCOMPARE(seen.at(2), rgb_profiles + QStringLiteral(" @display-p3"));
+        QCOMPARE(seen.at(4), QStringLiteral("黒点の補正 [ ]"));
+        // grey, 32 bits (floats), the greys K alone, dither and the HDR cut asked for
+        result = QDialog::Accepted;
+        answer = [](QDialog* d) {
+            auto* mode = d->findChild<QComboBox*>(QStringLiteral("color_mode_mode"));
+            mode->setCurrentIndex(mode->findData(QStringLiteral("gray")));
+            auto* depth = d->findChild<QComboBox*>(QStringLiteral("color_mode_depth"));
+            depth->setCurrentIndex(depth->findData(32));
+            auto* gray = d->findChild<QComboBox*>(QStringLiteral("color_mode_gray"));
+            gray->setCurrentIndex(gray->findData(QStringLiteral("k")));
+            d->findChild<QCheckBox*>(QStringLiteral("color_mode_bpc"))->setChecked(true);
+            d->findChild<QCheckBox*>(QStringLiteral("color_mode_dither"))->setChecked(true);
+            d->findChild<QCheckBox*>(QStringLiteral("color_mode_clip_hdr"))->setChecked(true);
+        };
+        n = s.ops.size();
+        QVERIFY(s.trigger("act_color_mode"));
+        QCOMPARE(s.since(n), std::string(R"([{"op": "set_color_mode", "mode": "gray", "depth": 32, "page": 2, "intent": "relative", "profile": "sgray", "gray": "k", "dither": true, "clip_hdr": true}])"));
+        QVERIFY(s.book().page(1).color && s.book().page(1).color->space == core::InkSpace::Gray && s.book().page(1).color->depth == 32);
+        QVERIFY(!s.book().page(1).rgb);
+        QVERIFY(drawn_as_book(s));
+        // CMYK: the built-in profile offered (none chosen until one is)
+        answer = [](QDialog* d) {
+            auto* mode = d->findChild<QComboBox*>(QStringLiteral("color_mode_mode"));
+            mode->setCurrentIndex(mode->findData(QStringLiteral("cmyk")));
+            auto* profile = d->findChild<QComboBox*>(QStringLiteral("color_mode_profile"));
+            QCOMPARE(described(profile), QStringLiteral("Photocraft Coated CMYK (synthetic, 300% TAC, medium GCR)=coated-cmyk @"));
+            auto* ok = d->findChild<QDialogButtonBox*>()->button(QDialogButtonBox::Ok);
+            QVERIFY(!ok->isEnabled());
+            profile->setCurrentIndex(0);
+            QVERIFY(ok->isEnabled());
+        };
+        n = s.ops.size();
+        QVERIFY(s.trigger("act_color_mode"));
+        const Json sent = Json::parse(s.since(n));
+        QCOMPARE(QString::fromStdString(sent[0]["profile"].get<std::string>()), QStringLiteral("coated-cmyk"));
+        QCOMPARE(sent[0]["depth"].get<int>(), 32);
+        QVERIFY(s.book().page(1).color->space == core::InkSpace::Cmyk && s.book().page(1).color->depth == 32);
+    }
+
+    // プロファイルの指定… / プロファイルに変換… (edit.assignProfile, edit.convertToProfile): the page in front or every
+    // page. Assign: the profiles of the page's own space (none: sRGB or sGray; the page's own chosen to begin with), the
+    // pixels kept and the profile named — none for a Lab page. Convert: any profile (RGB, grey, CMYK, Lab), its intent
+    // and black point compensation; the page in the profile's mode. Undone as any op.
+    void profilesAssignedAndConverted() {
+        Studio s;
+        QStringList seen;
+        std::function<void(QDialog*)> answer;
+        int result = QDialog::Accepted;
+        bool ok_on = false;
+        s.answers.responder->exec = [&](QDialog* d) {
+            seen.clear();
+            seen << d->objectName();
+            for (const char* name : {"profile_scope", "profile_choice", "profile_intent"}) {
+                if (auto* box = d->findChild<QComboBox*>(QString::fromLatin1(name))) seen << described(box);
+            }
+            for (const char* name : {"profile_bpc", "profile_dither", "profile_clip_hdr"}) {
+                if (auto* box = d->findChild<QCheckBox*>(QString::fromLatin1(name))) seen << described(box);
+            }
+            ok_on = d->findChild<QDialogButtonBox*>()->button(QDialogButtonBox::Ok)->isEnabled();
+            if (answer) answer(d);
+            return result;
+        };
+        s.on_page(2);
+        // assign: Display P3 to an RGB page
+        answer = [](QDialog* d) {
+            auto* profile = d->findChild<QComboBox*>(QStringLiteral("profile_choice"));
+            profile->setCurrentIndex(profile->findData(QStringLiteral("display-p3")));
+        };
+        std::size_t n = s.ops.size();
+        QVERIFY(s.trigger("act_assign_profile"));
+        QCOMPARE(seen, QStringList({QStringLiteral("assign_profile_dialog"), QStringLiteral("このページ（2 ページ）=page|すべてのページ=all @page"),
+                                    QStringLiteral("なし（sRGB）=none|Display P3=display-p3|Adobe RGB (1998)-compatible (Photocraft)=adobe-rgb-compat|"
+                                                   "ProPhoto RGB-compatible (ROMM primaries, Photocraft)=prophoto-compat|Linear sRGB (Photocraft)=linear-srgb|"
+                                                   "Rec. ITU-R BT.2020 (Photocraft)=rec2020 @none")}));
+        QCOMPARE(s.since(n), std::string(R"([{"op": "assign_profile", "page": 2, "profile": "display-p3"}])"));
+        QVERIFY(s.book().page(1).rgb && s.book().page(1).rgb->profile == core::builtin_profile("display-p3")->ref());
+        QVERIFY(!s.book().page(1).color);
+        QCOMPARE(s.window->last_notice(), QStringLiteral("プロファイルを指定しました"));
+        QVERIFY(drawn_as_book(s));
+        // assigned again: the page's own chosen first; none takes it back to sRGB
+        answer = [&](QDialog* d) {
+            auto* profile = d->findChild<QComboBox*>(QStringLiteral("profile_choice"));
+            QCOMPARE(profile->currentData().toString(), QStringLiteral("display-p3"));
+            profile->setCurrentIndex(profile->findData(QStringLiteral("none")));
+        };
+        n = s.ops.size();
+        QVERIFY(s.trigger("act_assign_profile"));
+        QCOMPARE(s.since(n), std::string(R"([{"op": "assign_profile", "page": 2, "profile": "none"}])"));
+        QVERIFY(!s.book().page(1).rgb);
+        // convert: into sGray, perceptual, without black point compensation
+        answer = [](QDialog* d) {
+            auto* profile = d->findChild<QComboBox*>(QStringLiteral("profile_choice"));
+            profile->setCurrentIndex(profile->findData(QStringLiteral("sgray")));
+            auto* intent = d->findChild<QComboBox*>(QStringLiteral("profile_intent"));
+            intent->setCurrentIndex(intent->findData(QStringLiteral("perceptual")));
+            d->findChild<QCheckBox*>(QStringLiteral("profile_bpc"))->setChecked(false);
+        };
+        n = s.ops.size();
+        QVERIFY(s.trigger("act_convert_profile"));
+        QCOMPARE(seen.at(0), QStringLiteral("convert_profile_dialog"));
+        QCOMPARE(seen.at(2), QStringLiteral(
+                                 "sRGB（プロファイルなし）=srgb|Display P3=display-p3|Adobe RGB (1998)-compatible (Photocraft)=adobe-rgb-compat|"
+                                 "ProPhoto RGB-compatible (ROMM primaries, Photocraft)=prophoto-compat|Linear sRGB (Photocraft)=linear-srgb|"
+                                 "Rec. ITU-R BT.2020 (Photocraft)=rec2020|Gray Gamma 2.2 (Photocraft)=gray-gamma-2.2|sGray (sRGB tone curve, Photocraft)=sgray|"
+                                 "Photocraft Coated CMYK (synthetic, 300% TAC, medium GCR)=coated-cmyk|Lab D50 identity (Photocraft)=lab-d50 @srgb"));
+        QCOMPARE(seen.at(3), QStringLiteral("相対的な色域を維持=relative|知覚的=perceptual|彩度=saturation|絶対的な色域を維持=absolute @relative"));
+        QCOMPARE(seen.mid(4), QStringList({QStringLiteral("黒点の補正 [x]"), QStringLiteral("8 bit でディザをかける [ ]"), QStringLiteral("0〜1 を超える HDR の値を切る [ ]")}));
+        QCOMPARE(s.since(n), std::string(R"([{"op": "convert_profile", "page": 2, "profile": "sgray", "intent": "perceptual", "bpc": false}])"));
+        QVERIFY(s.book().page(1).color && s.book().page(1).color->space == core::InkSpace::Gray && s.book().page(1).color->depth == 8);
+        QCOMPARE(s.window->last_notice(), QStringLiteral("プロファイルに変換しました"));
+        QVERIFY(drawn_as_book(s));
+        // assign on the grey page: grey's profiles, its own (sGray) first
+        result = QDialog::Rejected;
+        answer = nullptr;
+        QVERIFY(s.trigger("act_assign_profile"));
+        QCOMPARE(seen.at(2), QStringLiteral("なし（sGray）=none|Gray Gamma 2.2 (Photocraft)=gray-gamma-2.2|sGray (sRGB tone curve, Photocraft)=sgray @sgray"));
+        // a Lab page has no profile to assign: OK off
+        QVERIFY(s.window->apply_ops(Json::array({Json{{"op", "set_color_mode"}, {"page", 3}, {"mode", "lab"}}})));
+        s.on_page(3);
+        n = s.ops.size();
+        QVERIFY(s.trigger("act_assign_profile"));
+        QVERIFY(!ok_on);
+        QCOMPARE(s.ops.size(), n);
+        // undone: page 2 back to RGB, sRGB
+        s.on_page(2);
+        result = QDialog::Accepted;
+        for (int i = 0; i < 4; ++i) QVERIFY(s.trigger("act_undo"));
+        QVERIFY(!s.book().page(1).color && !s.book().page(1).rgb);
+        QVERIFY(!s.book().page(2).color);
     }
 
     // color-mode@1, step two: on a CMYK page the colour panel shows the pen colour's inks and marks a colour the page
@@ -948,6 +1235,30 @@ private slots:
             const core::InkEntry* both = core::ink_for(*s.book().page(p).color, panel->rgb());
             QVERIFY(both != nullptr && std::abs(both->ink[1] - 0.7) < 1e-6);
         }
+    }
+
+    // color-model@1: on a grey page the colour panel shows one ink, K in %; K chosen there makes the pen's colour that grey.
+    void greyInTheColourPanel() {
+        Studio s;
+        s.on_page(1);
+        QVERIFY(s.window->apply_ops(Json::array({Json{{"op", "set_color_mode"}, {"page", 1}, {"mode", "gray"}}})));
+        app::ColourPanel* panel = s.window->colours();
+        QVERIFY(panel != nullptr);
+        QTRY_VERIFY(panel->ink_box->isVisibleTo(panel));
+        QCOMPARE(panel->ink_labels[0]->text(), QStringLiteral("K"));
+        QVERIFY(panel->ink_spins[0]->isVisibleTo(panel));
+        for (std::size_t i = 1; i < 4; ++i) QVERIFY(!panel->ink_spins[i]->isVisibleTo(panel));
+        QCOMPARE(panel->ink_spins[0]->suffix(), QStringLiteral("%"));
+        QCOMPARE(panel->ink_spins[0]->maximum(), 100.0);
+        panel->choose({255, 255, 255});
+        QCOMPARE(panel->ink_spins[0]->value(), 0.0);
+        panel->choose({0, 0, 0});
+        QCOMPARE(panel->ink_spins[0]->value(), 100.0);
+        panel->ink_spins[0]->setValue(30.0);
+        emit panel->ink_spins[0]->editingFinished();
+        const auto rgb = panel->rgb();
+        QVERIFY(rgb[0] == rgb[1] && rgb[1] == rgb[2]);
+        QVERIFY2(std::abs(rgb[0] - 179) <= 1, qPrintable(QString::number(rgb[0])));
     }
 
     void coversAreAdded() {

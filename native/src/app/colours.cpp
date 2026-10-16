@@ -600,17 +600,22 @@ void ColourPanel::set_page_color(const std::optional<core::PageColor>& color) {
     page_color_ = color;
     ink_box->setVisible(page_color_.has_value());
     if (!page_color_) return;
+    // (CMYK: its four inks in %; grey: K in % — color-model@1; Lab: L, a, b)
     const bool cmyk = page_color_->space == core::InkSpace::Cmyk;
+    const bool grey = page_color_->space == core::InkSpace::Gray;
+    const bool percent = cmyk || grey;
     const char* names[] = {"C", "M", "Y", "K"};
     const char* lab[] = {"L", "a", "b", ""};
+    const std::size_t used_inks = cmyk ? 4 : grey ? 1 : 3;
     for (std::size_t i = 0; i < ink_spins.size(); ++i) {
-        const bool used = cmyk || i < 3;
-        ink_labels[i]->setText(QString::fromLatin1(cmyk ? names[i] : lab[i]));
+        const bool used = i < used_inks;
+        const QString name = QString::fromLatin1(grey ? "K" : cmyk ? names[i] : lab[i]);
+        ink_labels[i]->setText(name);
         ink_labels[i]->setVisible(used);
         ink_spins[i]->setVisible(used);
-        ink_spins[i]->setRange(cmyk || i == 0 ? 0.0 : -128.0, cmyk || i == 0 ? 100.0 : 127.0);
-        ink_spins[i]->setSuffix(cmyk ? QStringLiteral("%") : QString());
-        ink_spins[i]->setAccessibleName(cmyk ? QStringLiteral("%1 版（%）").arg(QString::fromLatin1(names[i])) : QString::fromLatin1(lab[i]));
+        ink_spins[i]->setRange(percent || i == 0 ? 0.0 : -128.0, percent || i == 0 ? 100.0 : 127.0);
+        ink_spins[i]->setSuffix(percent ? QStringLiteral("%") : QString());
+        ink_spins[i]->setAccessibleName(percent ? QStringLiteral("%1 版（%）").arg(name) : name);
     }
     const bool was = loading_;
     loading_ = true;
@@ -623,10 +628,10 @@ void ColourPanel::show_inks(const Rgb& rgb) {
     if (!page_color_) return;
     try {
         const std::vector<double> ink = render::ink::ink_of(*page_color_, rgb);
-        const bool cmyk = page_color_->space == core::InkSpace::Cmyk;
+        const bool percent = page_color_->space == core::InkSpace::Cmyk || page_color_->space == core::InkSpace::Gray;
         for (std::size_t i = 0; i < ink.size() && i < ink_spins.size(); ++i) {
             const QSignalBlocker quiet(ink_spins[i]);
-            ink_spins[i]->setValue(cmyk ? ink[i] * 100.0 : ink[i]);
+            ink_spins[i]->setValue(percent ? ink[i] * 100.0 : ink[i]);
         }
         inks_edited_ = false;  // (the values shown are the pen's)
         // (the table's colours and the greys print as their own inks: never out)
@@ -641,8 +646,9 @@ void ColourPanel::from_inks() {
     if (loading_ || !page_color_ || !inks_edited_) return;
     inks_edited_ = false;
     const bool cmyk = page_color_->space == core::InkSpace::Cmyk;
+    const bool grey = page_color_->space == core::InkSpace::Gray;
     std::vector<double> ink;
-    for (std::size_t i = 0; i < (cmyk ? 4u : 3u); ++i) ink.push_back(cmyk ? ink_spins[i]->value() / 100.0 : ink_spins[i]->value());
+    for (std::size_t i = 0; i < (cmyk ? 4u : grey ? 1u : 3u); ++i) ink.push_back(cmyk || grey ? ink_spins[i]->value() / 100.0 : ink_spins[i]->value());
     try {
         if (render::ink::same_inks(*page_color_, render::ink::ink_of(*page_color_, brush_->rgb()), ink)) return;  // (as it is)
     } catch (const std::exception&) {

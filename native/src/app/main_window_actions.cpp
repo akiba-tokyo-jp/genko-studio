@@ -619,6 +619,8 @@ void MainWindow::build_menus() {
     for (const char* name : {"act_cut", "act_copy", "act_paste", "act_delete_area"}) edit->addAction(action(name));
     edit->addSeparator();
     for (const char* name : {"act_select_all", "act_deselect"}) edit->addAction(action(name));
+    edit->addSeparator();
+    for (const char* name : {"act_assign_profile", "act_convert_profile"}) edit->addAction(action(name));  // (color-model@1)
     QMenu* view = bar->addMenu(QStringLiteral("表示"));
     for (const char* name : {"act_fit", "act_zoom_in", "act_zoom_out", "act_actual", "act_zoom_value", "act_zoom_tool"}) view->addAction(action(name));
     view->addSeparator();
@@ -693,11 +695,18 @@ void MainWindow::build_menus() {
     pages->addAction(action("act_page_down"));
     pages->addAction(action("act_spread"));
     pages->addSeparator();
-    // (Python's order; then the C++ build's own: the page's colour mode, color-mode@1)
-    for (const char* name : {"act_paper", "act_style", "act_chat_approval", "act_nombre", "act_page_nombre", "act_add_cover", "act_assignee", "act_timeline",
-                             "act_color_mode"}) {
+    // (Python's order; then the C++ build's own: the page's colour mode, color-mode@1 and color-model@1 — its modes and
+    // depths checked as the page is, and the dialog with the rest)
+    for (const char* name : {"act_paper", "act_style", "act_chat_approval", "act_nombre", "act_page_nombre", "act_add_cover", "act_assignee", "act_timeline"}) {
         pages->addAction(action(name));
     }
+    QMenu* modes = pages->addMenu(QStringLiteral("色モード"));
+    for (const char* name : {"act_mode_rgb", "act_mode_gray", "act_mode_cmyk", "act_mode_lab"}) modes->addAction(action(name));
+    modes->addSeparator();
+    for (const char* name : {"act_depth_8", "act_depth_16", "act_depth_32"}) modes->addAction(action(name));
+    modes->addSeparator();
+    modes->addAction(action("act_color_mode"));
+    connect(modes, &QMenu::aboutToShow, this, &MainWindow::show_color_mode);
     pages->addSeparator();
     QMenu* frames = pages->addMenu(QStringLiteral("コマ"));
     for (const char* name : {"act_split_h", "act_split_v", "act_merge", "act_delete_frame", "act_frame_selection"}) frames->addAction(action(name));

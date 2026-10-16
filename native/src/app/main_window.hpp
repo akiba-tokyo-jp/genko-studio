@@ -513,6 +513,9 @@ private:
     void toggle_page_nombre();
     void paper_settings();
     void color_mode_dialog();
+    void set_page_mode(const QString& mode, int depth);
+    void show_color_mode();
+    void profile_dialog(bool convert);
     void add_cover_dialog();
     void assignee_dialog();
     void merge_book();
