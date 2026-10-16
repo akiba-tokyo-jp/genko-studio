@@ -105,7 +105,9 @@ public:
     // channels@1 (this build's own, not psd.py's): the merged picture's extra channels — the alpha and spot channels past
     // its colours (and past a flat file's transparency) —, each with its name (image resource 1045, else 1006) and how
     // it shows (1077: 0 selected areas, 1 masked areas, 2 spot; its RGB colour; its opacity, a spot's solidity, in
-    // percent) and its 8-bit samples over the canvas. None when the file has no merged picture this reads.
+    // percent) and its 8-bit samples over the canvas as stored (the grey Photoshop shows: a spot's and a selected-areas
+    // channel's 0 is its colour, a masked-areas channel's 255 is selected). None when the file has no merged picture this
+    // reads.
     struct ExtraChannel {
         std::string name;
         int kind = 1;

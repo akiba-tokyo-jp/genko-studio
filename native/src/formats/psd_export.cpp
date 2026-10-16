@@ -813,9 +813,16 @@ std::string resources_with_icc(std::int64_t dpi, std::string_view icc) {
 
 // channels@1 (SPEC.md COLOR-03): a page's alpha and spot channels written as the PSD's extra channels, after its colour
 // planes in the panel's order, with their names (1006 in Pascal strings, 1045 in UTF-16) and how they show (1077,
-// DisplayInfo: version 1, then for each an RGB colour of four 16-bit components, its opacity — a spot's solidity — in
-// percent, and 0 selected areas / 1 masked areas / 2 spot: PhotoCraft's io/channel_map.rs). Their samples are their
-// density (255 selected, full ink), as PhotoCraft writes them.
+// DisplayInfo: version 1, then for each 13 bytes — an RGB colour of four 16-bit components, its opacity, a spot's
+// solidity, in percent, and 0 selected areas / 1 masked areas / 2 spot: PhotoCraft's io/channel_map.rs, without the
+// padding byte it writes after the kind, which 1007's records have and 1077's do not: GIMP and psd-tools read 13 a
+// record, and psd-tools refuses the file otherwise). Their samples are the grey
+// Photoshop shows the channel as, its colour where it is dark (as a CMYK plate is stored, 0 the full ink — this
+// writer's CMYK planes, Adobe's colour structure, Pillow's and psd-tools' readers —, and as PhotoCraft's own
+// multichannel_map.rs writes spot planes): a spot channel max − density (0 the full ink), an alpha channel marking the
+// selected areas max − density (0 selected), one marking the masked areas its density (max selected, as GIMP writes its
+// channels with kind 1). (PhotoCraft writes a spot and a selected-areas channel of an RGB or CMYK document as its density:
+// the other way round.)
 std::string image_resource(unsigned id, std::string data) {
     std::string block = "8BIM";
     put_u16(block, id);
@@ -851,8 +858,7 @@ std::string with_channels(const std::string& sized_resources, const core::Page& 
         for (const int c : channel.color) put_u16(display, static_cast<std::uint32_t>(c) * 257);
         put_u16(display, 0);
         put_u16(display, static_cast<std::uint32_t>(std::lround(std::clamp(spot ? channel.solidity : channel.opacity, 0.0, 1.0) * 100.0)));
-        put_u8(display, spot ? 2 : channel.indicates == "selected" ? 0 : 1);
-        put_u8(display, 0);
+        put_u8(display, spot ? 2 : channel.indicates == "selected" ? 0 : 1);  // (13 bytes: 1077 has no padding byte, unlike 1007)
     }
     std::string blocks = sized_resources.substr(4);
     blocks += image_resource(1006, names);
@@ -863,13 +869,18 @@ std::string with_channels(const std::string& sized_resources, const core::Page& 
     return out + blocks;
 }
 
-// A channel's samples over the merged picture (`size`), at `depth` (8 and 16 rounded, 32 floats), big-endian.
+// A channel's samples over the merged picture (`size`), at `depth` (8 and 16 rounded, 32 floats), big-endian: its
+// density, or 1 − its density for a spot and a channel marking the selected areas (dark where its colour shows).
 std::string channel_samples(const core::Page&, const core::Channel& channel, render::Size size, int depth) {
     const render::channels::Density density(channel);
+    const bool dark = channel.kind == core::ChannelKind::Spot || channel.indicates == "selected";
     std::string out;
     out.reserve(std::size_t(size.width) * size.height * std::size_t(depth / 8));
     for (int y = 0; y < size.height; ++y) {
-        for (int x = 0; x < size.width; ++x) put_sample(out, density.at((x + 0.5) / size.width, (y + 0.5) / size.height), depth);
+        for (int x = 0; x < size.width; ++x) {
+            const double v = std::clamp(double(density.at((x + 0.5) / size.width, (y + 0.5) / size.height)), 0.0, 1.0);
+            put_sample(out, dark ? 1.0 - v : v, depth);
+        }
     }
     return out;
 }

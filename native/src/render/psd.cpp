@@ -972,8 +972,11 @@ std::vector<File::ExtraChannel> File::extra_channels() const {
         ExtraChannel channel;
         const std::size_t k = out.size();
         if (k < names.size()) channel.name = names[k];
-        if (display_info_.size() >= 4 + 14 * (k + 1)) {
-            const std::string_view rec = std::string_view(display_info_).substr(4 + 14 * k, 14);
+        // (13 bytes a record, as Photoshop writes 1077; 14 — 1007's padding byte after the kind — when they divide only so)
+        const std::size_t records = display_info_.size() >= 4 ? display_info_.size() - 4 : 0;
+        const std::size_t stride = records % 13 != 0 && records % 14 == 0 ? 14 : 13;
+        if (display_info_.size() >= 4 + stride * (k + 1)) {
+            const std::string_view rec = std::string_view(display_info_).substr(4 + stride * k, stride);
             for (unsigned j = 0; j < 3; ++j) channel.color[j] = static_cast<int>(((byte_at(rec, 2 + 2 * j) << 8) | byte_at(rec, 3 + 2 * j)) / 257);
             channel.opacity = static_cast<int>(std::min(100u, (byte_at(rec, 10) << 8) | byte_at(rec, 11)));
             channel.kind = static_cast<int>(byte_at(rec, 12));

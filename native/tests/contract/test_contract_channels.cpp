@@ -13,6 +13,7 @@
 #include <QTemporaryDir>
 
 #include <cstdint>
+#include <map>
 #include <string>
 
 #include "core/base64.hpp"
@@ -29,8 +30,8 @@ namespace {
 
 unsigned be16(const std::string& b, std::size_t at) { return unsigned(static_cast<unsigned char>(b[at])) << 8 | static_cast<unsigned char>(b[at + 1]); }
 
-// The ids of a PSD's image resources, in order.
-std::vector<unsigned> psd_resources(const std::string& b) {
+// The ids of a PSD's image resources, in order, and the sizes of their data.
+std::vector<unsigned> psd_resources(const std::string& b, std::map<unsigned, std::size_t>* sizes = nullptr) {
     std::vector<unsigned> out;
     std::size_t at = 26;
     const auto be32 = [&](std::size_t p) { return std::uint32_t(be16(b, p)) << 16 | be16(b, p + 2); };
@@ -40,6 +41,7 @@ std::vector<unsigned> psd_resources(const std::string& b) {
         out.push_back(be16(b, r + 4));
         const std::size_t data = r + 6 + ((static_cast<unsigned char>(b[r + 6]) + 2) & ~std::size_t(1));
         const std::size_t size = be32(data);
+        if (sizes != nullptr) (*sizes)[out.back()] = size;
         r = data + 4 + ((size + 1) & ~std::size_t(1));
     }
     return out;
@@ -148,7 +150,12 @@ private slots:
         const std::vector<double> top = shown.getpixel(120, 40), bottom = shown.getpixel(120, 200);
         QCOMPARE(bottom, (std::vector<double>{200, 150, 100}));
         QVERIFY2(top != bottom, "the spot is printed");
-        // written: PSD with two… three extra channels, read back
+        // written: PSD with three extra channels, read back — stored as Photoshop shows a channel in grey (its colour where it
+        // is dark, as a CMYK plate's 0 is full ink): a spot's 0 full ink, an alpha channel marking the masked areas white
+        // where selected, one marking the selected areas black where selected
+        done = apply(book, QStringLiteral("selected.json"),
+                     Json::array({Json{{"op", "set_channel"}, {"page", 1}, {"channel", "反転"}, {"indicates", "selected"}}}));
+        QVERIFY2(done.value("ok", false), done.dump().c_str());
         const auto psd = genko::test::run_genko({QStringLiteral("export"), book, path(QStringLiteral("psd")), QStringLiteral("--format"), QStringLiteral("psd"),
                                                  QStringLiteral("--dpi"), QStringLiteral("20"), QStringLiteral("--json")});
         QVERIFY2(psd.exit_code == 0, qPrintable(psd.described()));
@@ -156,8 +163,10 @@ private slots:
         QVERIFY2(!psd_reply.contains("notes"), psd_reply.dump().c_str());
         const std::string bytes = genko::test::read_bytes(QString::fromStdString(psd_reply["files"][0].get<std::string>()));
         QCOMPARE(be16(bytes, 12), 6u);  // (RGB and three channels)
-        const std::vector<unsigned> ids = psd_resources(bytes);
+        std::map<unsigned, std::size_t> sizes;
+        const std::vector<unsigned> ids = psd_resources(bytes, &sizes);
         for (const unsigned id : {1006u, 1045u, 1077u}) QVERIFY2(std::find(ids.begin(), ids.end(), id) != ids.end(), qPrintable(QString::number(id)));
+        QCOMPARE(sizes[1077], std::size_t{4 + 13 * 3});  // (DisplayInfo: its version, then 13 bytes a channel, as Photoshop, GIMP and psd-tools read it)
         const genko::render::psd::File file = genko::render::psd::File::read(bytes);
         const auto extra = file.extra_channels();
         QCOMPARE(extra.size(), std::size_t{3});
@@ -170,13 +179,15 @@ private slots:
         QCOMPARE(extra[1].opacity, 50);
         QCOMPARE(extra[1].color, (std::array<int, 3>{200, 160, 40}));
         QCOMPARE(extra[2].name, std::string("反転"));
+        QCOMPARE(extra[2].kind, 0);  // (selected areas)
         const int w = static_cast<int>(file.width());
         const auto at = [&](const std::string& samples, int x, int y) { return static_cast<unsigned char>(samples[std::size_t(y) * w + x]); };
-        QCOMPARE(at(extra[0].samples, 10, 200), 255);
+        QCOMPARE(at(extra[0].samples, 10, 200), 255);  // (masked areas: white is selected)
         QCOMPARE(at(extra[0].samples, 120, 200), 0);
-        QCOMPARE(at(extra[1].samples, 120, 40), 255);
-        QCOMPARE(at(extra[1].samples, 120, 200), 0);
-        QCOMPARE(at(extra[2].samples, 120, 200), 255);
+        QCOMPARE(at(extra[1].samples, 120, 40), 0);  // (spot: 0 is the full ink, as a CMYK plate)
+        QCOMPARE(at(extra[1].samples, 120, 200), 255);
+        QCOMPARE(at(extra[2].samples, 120, 200), 0);  // (selected areas: black is selected)
+        QCOMPARE(at(extra[2].samples, 10, 200), 255);
         // the PSD's merged picture without the spot (a channel of its own)
         const auto merged = file.merged();
         QVERIFY(merged.has_value());
