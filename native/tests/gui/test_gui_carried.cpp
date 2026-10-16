@@ -199,7 +199,8 @@ private slots:
         QVERIFY(placed != nullptr && placed->frame_id && *placed->frame_id == frame && placed->title == "pic");
         QVERIFY(book.window->session().wait_saved(std::chrono::milliseconds(30000)));
         bool on_disk = false;
-        for (const core::Layer& l : gui_test::read_book(book.path).pages[0]->layers) on_disk = on_disk || l.kind == core::LayerKind::Placed;
+        const core::Document saved = gui_test::read_book(book.path);  // (kept: a loop over a part of a temporary outlives it)
+        for (const core::Layer& l : saved.pages[0]->layers) on_disk = on_disk || l.kind == core::LayerKind::Placed;
         QVERIFY(on_disk);
         // not a picture: said, nothing placed
         const QString junk = book.tmp.path() + QStringLiteral("/junk.png");

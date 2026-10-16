@@ -372,7 +372,8 @@ Plan plan(const core::Document& doc, std::size_t page_index, const Template& cho
             // a layout of one's own with drawn panels: set as it is, as Python's dialog sets every one of one's own
             b.apply(Json::object({{"op", "set_layout"}, {"page", b.number()}, {"tree", tree}, {"force", true}}));
         } else {
-            build(b, tree, b.page().frames.at(0).id);
+            const std::string root = b.page().frames.at(0).id;  // (copied: the first op replaces the book it is in)
+            build(b, tree, root);
         }
     } else {
         lay_out(b, chosen.spec);

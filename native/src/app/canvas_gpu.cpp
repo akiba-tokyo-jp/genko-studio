@@ -41,6 +41,20 @@ public:
     }
 
 protected:
+    // Where the card's context cannot be made (no OpenGL on the platform, a broken driver), Qt makes a new one at each
+    // resize and show after that and leaks the one before (QOpenGLWidgetPrivate::initialize): one try only.
+    bool event(QEvent* event) override {
+        const QEvent::Type type = event->type();
+        if (gave_up() && (type == QEvent::Show || type == QEvent::WindowChangeInternal || type == QEvent::ScreenChangeInternal)) {
+            return QWidget::event(event);
+        }
+        return QOpenGLWidget::event(event);
+    }
+
+    void resizeEvent(QResizeEvent* event) override {
+        if (!gave_up()) QOpenGLWidget::resizeEvent(event);
+    }
+
     void paintGL() override {
         QPainter painter(this);
         canvas_->paint_frame(painter);
@@ -62,6 +76,8 @@ protected:
     }
 
 private:
+    bool gave_up() const { return context() != nullptr && !context()->isValid(); }
+
     PageCanvas* canvas_;
     QTimer settle_;
     bool watching_screen_ = false;

@@ -191,8 +191,15 @@ private slots:
         // in lib/: Qt's libraries, the ICU they come with and the six xcb utility libraries — all six there (the computer's
         // own would be found by ldd above even without them), and nothing else: never the computer's image, text or
         // runtime libraries
+        // (and, in a sanitizer build only, Genko's own libraries, shared there: GenkoFlags.cmake)
+#ifdef GENKO_SHARED_LIBRARIES
+        static const QString own = QStringLiteral("|libgenko_[a-z_]+\\.so|libpillow_imaging\\.so");
+#else
+        static const QString own;
+#endif
         static const QRegularExpression allowed(QStringLiteral(
-            "^lib/(libQt6[A-Za-z]+\\.so(\\.[0-9]+)*|libicu(data|i18n|uc|io|tu|test)\\.so\\.[0-9.]+|libxcb-(cursor|icccm|image|keysyms|render-util|util)\\.so\\.[0-9.]+)$"));
+            "^lib/(libQt6[A-Za-z]+\\.so(\\.[0-9]+)*|libicu(data|i18n|uc|io|tu|test)\\.so\\.[0-9.]+|libxcb-(cursor|icccm|image|keysyms|render-util|util)\\.so\\.[0-9.]+")
+            + own + QStringLiteral(")$"));
         static const QRegularExpression util(QStringLiteral("^lib/(libxcb-[a-z-]+)\\.so"));
         std::set<QString> xcb;
         for (const QString& name : files_in(prefix_)) {

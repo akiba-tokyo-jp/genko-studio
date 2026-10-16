@@ -347,6 +347,10 @@ if(GENKO_BUILD_APP)
   genko_test(test_package SOURCES package/test_package.cpp DEPS genko_test_support LABELS package TIMEOUT 900)
   target_compile_definitions(test_package PRIVATE GENKO_CMAKE_COMMAND="${CMAKE_COMMAND}" GENKO_BUILD_DIR="${CMAKE_BINARY_DIR}"
                                                   GENKO_VERSION="${PROJECT_VERSION}")
+  if(GENKO_LIBRARY_KIND STREQUAL "SHARED")
+    # (a sanitizer build: Genko's own libraries are shared and go beside the program — GenkoFlags.cmake)
+    target_compile_definitions(test_package PRIVATE GENKO_SHARED_LIBRARIES=1)
+  endif()
   add_dependencies(test_package genko)
   genko_test(test_gui_effects SOURCES gui/test_gui_effects.cpp DEPS genko_app genko_test_support GUI TIMEOUT 900)
   # 台詞 (M4①c): the text tool, the balloon pen, a balloon's handles and menu, the 台詞 panel, the story editor and
