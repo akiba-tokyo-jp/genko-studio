@@ -6,14 +6,18 @@
 #include <algorithm>
 #include <cmath>
 #include <functional>
+#include <unordered_set>
 
 #include "core/base64.hpp"
 #include "core/color_model.hpp"
 #include "core/color_raster.hpp"
 #include "core/error.hpp"
+#include "core/filters.hpp"
 #include "core/ops_util.hpp"
 #include "core/pyconv.hpp"
 #include "core/pyops.hpp"
+#include "core/strokes.hpp"
+#include "render/color_canvas.hpp"
 #include "render/image.hpp"
 #include "render/imaging.hpp"
 #include "render/ink.hpp"
@@ -129,16 +133,43 @@ std::optional<Named> named_profile(const Document& doc, const Json& op) {
     return out;
 }
 
-// The colour model of a page or the book: its inks, or its RGB mode (none: 8 bits, sRGB).
+// The colour model of a page or the book: its inks, or its RGB mode (none: sRGB, Python's), and with none the depth its
+// paint pixels are held in — 8, or that of its most precise raster (put_color_raster's, u16 or f32).
 struct Model {
     std::optional<PageColor> inks;
     std::optional<RgbMode> rgb;
-    int depth() const { return inks ? inks->depth : rgb ? rgb->depth : 8; }
-    RgbMode rgb_mode() const { return rgb.value_or(RgbMode{}); }
-    bool operator==(const Model& other) const { return inks == other.inks && rgb == other.rgb; }
+    int held = 8;
+    int depth() const { return inks ? inks->depth : rgb ? rgb->depth : held; }
+    RgbMode rgb_mode() const {
+        RgbMode out = rgb.value_or(RgbMode{});
+        out.depth = depth();
+        return out;
+    }
+    bool operator==(const Model& other) const { return inks == other.inks && rgb == other.rgb && depth() == other.depth(); }
 };
 
-Model model_of(const core::Page& page) { return Model{page.color, page.rgb}; }
+// The depth a page of no colour model holds its paint pixels in: its most precise raster's.
+int held_depth(const core::Page& page) {
+    int out = 8;
+    for (const core::Layer& layer : page.layers) {
+        if (layer.color_raster && layer.color_raster->size() > 5) out = std::max(out, (*layer.color_raster)[5] == 2 ? 16 : 32);
+    }
+    return out;
+}
+
+Model model_of(const core::Page& page) { return Model{page.color, page.rgb, page.color || page.rgb ? 8 : held_depth(page)}; }
+
+// A page of no colour model whose target — its depth not said — is sRGB at the depth it holds its pixels in already:
+// still none.
+Model kept_plain(Model to, const Model& from) {
+    if (from.inks || from.rgb || to.inks || !to.rgb || to.rgb->depth != from.held) return to;
+    RgbMode plain = *to.rgb;
+    plain.depth = 8;
+    if (!plain.is_default()) return to;
+    to.rgb.reset();
+    to.held = from.held;
+    return to;
+}
 
 // How a conversion goes: greys onto K alone, 8 bits dithered, HDR values cut (counted).
 struct Way {
@@ -232,6 +263,7 @@ Model kept_as(Model to, const Into& into) {
         to.inks->bpc = into.page_bpc;
         return to;
     }
+    if (!to.rgb && into.page_intent == "relative" && into.page_bpc) return to;  // (a page of no colour model, at its held depth, stays one)
     RgbMode rgb = to.rgb_mode();
     rgb.intent = into.page_intent;
     rgb.bpc = into.page_bpc;
@@ -257,11 +289,20 @@ void cut_hdr(std::vector<float>& values, std::size_t stride, Way& way, const std
         }
     }
     if (outside == 0) return;
-    if (!way.clip_hdr) throw OpError(where + " holds HDR values past 0..1: they would be cut (clip_hdr: true cuts them)");
+    if (!way.clip_hdr) throw OpError(where + " holds HDR values past 0..1, which cannot be converted as they are (clip_hdr: true cuts them and converts)");
     way.clipped += outside;
     for (std::size_t i = 0; i + stride <= values.size(); i += stride) {
         for (std::size_t c = 0; c < colours; ++c) values[i + c] = std::clamp(values[i + c], 0.0f, 1.0f);
     }
+}
+
+// A grey raster's HDR (32 bits: lightness past 0..1) going where it cannot be kept: refused, or cut when asked (counted).
+void cut_grey_hdr(core::InkPixels& pixels, Way& way, const std::string& where) {
+    if (!pixels.is_float() || !core::traits(pixels.space).hdr) return;
+    std::vector<float> lightness(pixels.pixel_count());
+    for (std::size_t i = 0; i < pixels.pixel_count(); ++i) lightness[i] = static_cast<float>(pixels.value(i, 0));
+    cut_hdr(lightness, 1, way, where);
+    for (std::size_t i = 0; i < pixels.pixel_count(); ++i) pixels.set(i, 0, lightness[i]);
 }
 
 // A paint layer's RGB pixels (raster_png or color_raster) as straight RGBA floats, the page's values.
@@ -317,7 +358,9 @@ void put_rgb(core::Layer& layer, const RgbPixels& p, int depth, bool dither) {
             auto* row = reinterpret_cast<unsigned char*>(out.raw()->image[y]);
             for (std::uint32_t x = 0; x < p.width; ++x) {
                 for (unsigned c = 0; c < 4; ++c) {
-                    const double v = std::clamp(static_cast<double>(p.rgba[(std::size_t(y) * p.width + x) * 4 + c]), 0.0, 1.0) * 255.0;
+                    double v = std::clamp(static_cast<double>(p.rgba[(std::size_t(y) * p.width + x) * 4 + c]), 0.0, 1.0) * 255.0;
+                    // (an 8-bit value a float's rounding left a hair off: itself, whatever the noise)
+                    if (std::abs(v - std::round(v)) < 1e-4) v = std::round(v);
                     const double q = dither && c < 3 ? std::floor(v + noise(x, y, c)) : std::round(v);
                     row[x * 4 + c] = static_cast<unsigned char>(std::clamp(q, 0.0, 255.0));
                 }
@@ -350,12 +393,8 @@ void convert_layer(const core::Page& page, core::Layer& layer, const Model& from
         if (layer.ink_raster) {
             if (!from.inks) throw OpError("the layer " + layer.id + " holds ink pixels on an RGB page");
             core::InkPixels source = core::decode_ink_raster(*layer.ink_raster);
-            if (source.is_float() && core::traits(source.space).hdr && !(to.inks->space == source.space && to.inks->depth == 32)) {
-                std::vector<float> lightness(source.pixel_count());
-                for (std::size_t i = 0; i < source.pixel_count(); ++i) lightness[i] = static_cast<float>(source.value(i, 0));
-                cut_hdr(lightness, 1, way, where);
-                for (std::size_t i = 0; i < source.pixel_count(); ++i) source.set(i, 0, lightness[i]);
-            }
+            // (a grey's HDR stays only in a grey page of the same profile at 32 bits: the same values)
+            if (!(to.inks->space == source.space && to.inks->profile == from.inks->profile && to.inks->depth == 32)) cut_grey_hdr(source, way, where);
             pixels = ink::convert(source, *from.inks, *to.inks, way.gray_on_k);
         } else if (layer.raster_png && !layer.raster_png->empty()) {
             pixels = ink::from_rgb(open_image(*layer.raster_png, kPillowOpenLimits).convert("RGBA"), *to.inks, way.gray_on_k, from_rgb.icc);
@@ -376,7 +415,11 @@ void convert_layer(const core::Page& page, core::Layer& layer, const Model& from
     const int depth = to.depth();
     if (layer.ink_raster) {
         if (!from.inks) return;
-        const core::InkPixels pixels = core::decode_ink_raster(*layer.ink_raster);
+        core::InkPixels pixels = core::decode_ink_raster(*layer.ink_raster);
+        // (a grey's HDR stays only in sRGB at 32 bits — sGray's greys are sRGB's by their value —; elsewhere it is cut
+        // or the conversion refused, before the transforms clamp it)
+        const bool numeric = from.inks->profile == core::builtin_profile("sgray")->ref() && !to_rgb.icc && to_rgb.intent == "relative" && to_rgb.bpc;
+        if (!(depth == 32 && numeric)) cut_grey_hdr(pixels, way, where);
         if (depth == 8) {
             layer.raster_png = std::make_shared<const std::string>(write_png(ink::to_rgb8(pixels, *from.inks, to_rgb)));
             layer.raster_memo = {};
@@ -385,7 +428,6 @@ void convert_layer(const core::Page& page, core::Layer& layer, const Model& from
             return;
         }
         RgbPixels rgb{pixels.width, pixels.height, ink::to_rgb_floats(pixels, *from.inks, to_rgb), false};
-        if (depth == 16) cut_hdr(rgb.rgba, 4, way, where);
         put_rgb(layer, rgb, depth, way.dither);
         return;
     }
@@ -403,26 +445,107 @@ void convert_layer(const core::Page& page, core::Layer& layer, const Model& from
     put_rgb(layer, *rgb, depth, way.dither);
 }
 
-// Why the page cannot hold its paint layers in precise colour yet (what render::page and core::validate_color_document
-// refuse), naming the first layer that cannot; nothing when it can.
+// Why the page cannot be drawn as it is now yet — in precise colour: a page of 16 or 32 bits (precise pixels), an RGB
+// page of a profile (its values, at 8 bits too) — naming the first layer that cannot (what render::page and
+// core::validate_color_document refuse); nothing when it can.
 std::optional<std::string> precise_blocker(const core::Page& page) {
-    const auto precise = [](const core::Layer& l) { return l.color_raster != nullptr; };
-    if (std::none_of(page.layers.begin(), page.layers.end(), precise)) return std::nullopt;
+    const bool precise = std::any_of(page.layers.begin(), page.layers.end(), [](const core::Layer& l) { return l.color_raster != nullptr; });
+    if (!precise && !core::profiled_rgb(page)) return std::nullopt;
     for (const core::Layer& layer : page.layers) {
         const std::string where = layer_name(page, layer);
         if (layer.color_raster) {
+            if (layer.kind != core::LayerKind::Raster) return where + " is not a paint layer (a layer of lines with pixels)";
             if (layer.role == core::LayerRole::Tone) return where + " is a tone layer";
             if (layer.stroke_count()) return where + " holds lines";
             if (!layer.patches.empty()) return where + " holds pictures laid on it";
             if (layer.panel_clip) return where + " keeps its lines inside the panels (はみ出し off)";
             if (layer.effect || layer.screen || layer.color) return where + " has an effect, a screen or a colour of its own";
         }
-        if (!layer.visible) continue;
+        if (!layer.visible || layer.kind == core::LayerKind::Folder) continue;
+        if (core::has_color_strokes(layer) && (layer.mask || layer.effect || layer.screen || layer.color || layer.panel_each || !layer.patches.empty() ||
+                                               (layer.raster_png && !layer.raster_png->empty()))) {
+            return where + " holds precise lines with a style of its own";
+        }
+        if (!ColorCanvas::supports_blend(layer.blend)) return where + " has the blend " + core::py_repr_str(layer.blend);
         if (layer.kind == core::LayerKind::Adjust && layer.blend != "normal") return where + " is a correction layer in a blend mode";
-        if (core::py_truthy(layer.parent_id)) return where + " is in a folder";
+        if (layer.kind == core::LayerKind::Adjust && layer.adjust && layer.adjust->is_object()) {
+            const auto kind = layer.adjust->find("kind");
+            if (kind != layer.adjust->end() && kind->is_string() &&
+                std::find(core::kShapeFilters.begin(), core::kShapeFilters.end(), kind->get<std::string>()) != core::kShapeFilters.end()) {
+                return where + " is a correction that moves shapes (" + kind->get<std::string>() + ")";
+            }
+        }
+        if (precise && core::py_truthy(layer.parent_id)) return where + " is in a folder";
         if (layer.kind == core::LayerKind::Tone || layer.role == core::LayerRole::Tone) return where + " is a tone layer";
     }
     return std::nullopt;
+}
+
+void refuse_undrawable(const core::Page& page) {
+    if (const auto why = precise_blocker(page)) {
+        throw core::Error("not_yet_ported", *why + ": a page in precise colour (16 or 32 bits, or of a profile) cannot draw it yet");
+    }
+}
+
+// The size of a layer's paint pixels (from the header of its PNG, GKCR or GKIR), or none.
+std::optional<std::pair<std::uint64_t, std::uint64_t>> pixels_size(const core::Layer& layer) {
+    const auto le32 = [](const std::string& b, std::size_t at) {
+        std::uint32_t v = 0;
+        for (int k = 3; k >= 0; --k) v = v << 8 | static_cast<unsigned char>(b[at + k]);
+        return v;
+    };
+    if (layer.color_raster && layer.color_raster->size() >= 16) return std::pair<std::uint64_t, std::uint64_t>{le32(*layer.color_raster, 8), le32(*layer.color_raster, 12)};
+    if (layer.ink_raster) {
+        const core::InkRasterHeader h = core::ink_raster_header(*layer.ink_raster);
+        return std::pair<std::uint64_t, std::uint64_t>{h.width, h.height};
+    }
+    if (!layer.raster_png || layer.raster_png->empty()) return std::nullopt;
+    const std::string& png = *layer.raster_png;
+    if (png.size() >= 24 && png.compare(1, 3, "PNG") == 0 && png.compare(12, 4, "IHDR") == 0) {
+        const auto be32 = [&](std::size_t at) {
+            std::uint32_t v = 0;
+            for (int k = 0; k < 4; ++k) v = v << 8 | static_cast<unsigned char>(png[at + k]);
+            return v;
+        };
+        return std::pair<std::uint64_t, std::uint64_t>{be32(16), be32(20)};
+    }
+    const Image image = open_image(png, kPillowOpenLimits);
+    return std::pair<std::uint64_t, std::uint64_t>{static_cast<std::uint64_t>(image.width()), static_cast<std::uint64_t>(image.height())};
+}
+
+// The book's precise pixels (GKCR) as they will be after converting pages to their targets: past the budget (1 GiB),
+// refused before any pixel is made.
+void check_budget(const Document& doc, const std::vector<std::pair<std::size_t, Model>>& plan) {
+    std::uint64_t bytes = 0;
+    std::unordered_set<const std::string*> held;
+    const auto add = [&](std::uint64_t more) {
+        bytes += more;
+        if (bytes > core::kColorRasterBookBytes) {
+            throw OpError("the precise pixels cannot be kept: high-precision color raster book budget exceeded (the book holds 1 GiB of them at most)");
+        }
+    };
+    for (std::size_t i = 0; i < doc.pages.size(); ++i) {
+        if (doc.is_deferred(i)) continue;
+        const core::Page& page = doc.page(i);
+        const auto planned = std::find_if(plan.begin(), plan.end(), [&](const auto& p) { return p.first == i; });
+        for (const core::Layer& layer : page.layers) {
+            if (planned == plan.end()) {
+                if (layer.color_raster && held.insert(layer.color_raster.get()).second) add(layer.color_raster->size());
+                continue;
+            }
+            const Model& to = planned->second;
+            const int depth = to.depth();
+            if (to.inks || depth == 8) continue;  // (inks, or 8 bits: no precise raster)
+            const Model from = model_of(page);
+            const bool kept = layer.color_raster && !from.inks && from.rgb_mode().profile == to.rgb_mode().profile &&
+                              ((*layer.color_raster)[5] == 2 ? 16 : 32) == depth;
+            if (kept) {
+                if (held.insert(layer.color_raster.get()).second) add(layer.color_raster->size());
+                continue;
+            }
+            if (const auto size = pixels_size(layer)) add(16 + size->first * size->second * 4 * (depth == 16 ? 2 : 4));
+        }
+    }
 }
 
 // Pages converted to a model (each page's own target: `target_for`, its intent and black point compensation the
@@ -430,7 +553,8 @@ std::optional<std::string> precise_blocker(const core::Page& page) {
 // whole: nothing changes when one layer cannot be converted.
 std::int64_t convert_pages(Document& doc, const std::vector<std::size_t>& pages, const std::function<Model(const core::Page&)>& target_for,
                            Way& way, const Into& into) {
-    std::int64_t converted = 0;
+    std::vector<std::pair<std::size_t, Model>> plan;
+    std::vector<Model> keep;  // (each planned page's model as it keeps it)
     for (const std::size_t i : pages) {
         const Model from = model_of(*doc.pages[i]);
         Model to = target_for(*doc.pages[i]);
@@ -445,14 +569,20 @@ std::int64_t convert_pages(Document& doc, const std::vector<std::size_t>& pages,
                 }
             }
         }
+        plan.emplace_back(i, std::move(to));
+        keep.push_back(kept);
+    }
+    check_budget(doc, plan);
+    for (std::size_t k = 0; k < plan.size(); ++k) {
+        const auto& [i, to] = plan[k];
+        const Model from = model_of(*doc.pages[i]);
         core::Page& page = doc.edit_page(i);
         for (core::Layer& layer : page.layers) convert_layer(page, layer, from, to, way);
-        page.color = kept.inks;
-        page.rgb = kept.rgb;
-        if (const auto why = precise_blocker(page)) throw core::Error("not_yet_ported", *why + ": a page of 16 or 32 bits cannot draw it in precise colour yet");
-        ++converted;
+        page.color = std::move(keep[k].inks);
+        page.rgb = std::move(keep[k].rgb);
+        refuse_undrawable(page);
     }
-    return converted;
+    return static_cast<std::int64_t>(plan.size());
 }
 
 Way way_of(const Json& op) {
@@ -504,14 +634,20 @@ void set_color_mode(OpContext& c) {
                              (depth->get<std::int64_t>() != 8 && depth->get<std::int64_t>() != 16 && depth->get<std::int64_t>() != 32))) {
         throw OpError("depth is 8, 16 or 32");
     }
-    const int bits = depth != nullptr ? static_cast<int>(depth->get<std::int64_t>()) : 8;
+    // (no depth said: 8 bits — but a page of no colour model keeps the precision its precise rasters hold)
+    const int bits = depth != nullptr ? static_cast<int>(depth->get<std::int64_t>()) : 0;
+    const std::optional<Named> named = named_profile(doc, op);
     const Into into = into_of(op);
-    const Model target = target_of(mode, bits, named_profile(doc, op), into);
+    const Model target = target_of(mode, bits != 0 ? bits : 8, named, into);
+    const auto target_for = [&](const core::Page& page) {
+        if (bits != 0 || page.color || page.rgb) return target;
+        return kept_plain(target_of(mode, held_depth(page), named, into), model_of(page));
+    };
     Way way = way_of(op);
     bool every = false;
     const std::vector<std::size_t> pages = pages_of(doc, op, every);
     const bool book = every || default_of(op);
-    const std::int64_t converted = convert_pages(doc, pages, [&](const core::Page&) { return target; }, way, into);
+    const std::int64_t converted = convert_pages(doc, pages, target_for, way, into);
     check_precise(doc);
     if (book) {
         const Model kept = kept_as(target, into);
@@ -566,7 +702,8 @@ void assign_profile(OpContext& c) {
     std::int64_t count = 0;
     for (const std::size_t i : pages) {
         const Model from = model_of(*doc.pages[i]);
-        const std::optional<Model> to = assigned(from);
+        std::optional<Model> to = assigned(from);
+        if (to) to = kept_plain(*to, from);
         if (!to) {
             if (every) continue;  // (every page: those of the profile's space)
             const std::string_view mode = mode_of(from);
@@ -579,6 +716,7 @@ void assign_profile(OpContext& c) {
         core::Page& page = doc.edit_page(i);
         page.color = to->inks;
         page.rgb = to->rgb;
+        refuse_undrawable(page);  // (a page of a profile is drawn in precise colour: what it cannot draw yet, refused)
         ++count;
     }
     if (every || book) {
@@ -609,7 +747,7 @@ void convert_profile(OpContext& c) {
     const std::vector<std::size_t> pages = pages_of(doc, op, every);
     const bool book = every || default_of(op);
     // (each page at its own depth)
-    const auto target = [&](const Model& from) { return target_of(mode, from.depth(), named, into); };
+    const auto target = [&](const Model& from) { return kept_plain(target_of(mode, from.depth(), named, into), from); };
     const std::int64_t converted = convert_pages(doc, pages, [&](const core::Page& page) { return target(model_of(page)); }, way, into);
     check_precise(doc);
     if (book) {

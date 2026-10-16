@@ -13,7 +13,10 @@
 #include "core/exposure.hpp"
 #include "core/pyops.hpp"
 #include "core/strokes.hpp"
+#include "core/color_model.hpp"
 #include "render/color_canvas.hpp"
+#include "render/fill.hpp"
+#include "render/selection.hpp"
 #include "render/op_limits.hpp"
 #include "render/page.hpp"
 #include "render/raster.hpp"
@@ -474,6 +477,82 @@ void bake_marks(core::Document& doc) {
             if (pixels != *target.color_raster) target.color_raster = std::make_shared<const std::string>(std::move(pixels));
             target.strokes = core::empty_strokes();
             target.patches.clear();
+        }
+    }
+}
+
+namespace {
+
+// A profile's bytes by its ref: a built-in one's, or one the book holds (an RGB page's); none when neither.
+core::Bytes rgb_profile_bytes(const core::Document& doc, const std::string& ref) {
+    if (const core::BuiltinProfile* builtin = core::builtin_profile_by_ref(ref); builtin != nullptr && builtin->space == core::ProfileSpace::Rgb) {
+        return builtin->bytes;
+    }
+    if (doc.rgb && doc.rgb->profile == ref && doc.rgb->icc) return doc.rgb->icc;
+    for (std::size_t p = 0; p < doc.pages.size(); ++p) {
+        if (doc.is_deferred(p)) continue;
+        const core::Page& page = doc.page(p);
+        if (page.rgb && page.rgb->profile == ref && page.rgb->icc) return page.rgb->icc;
+    }
+    return nullptr;
+}
+
+bool keyed(const core::Patch& patch) { return patch.attrs.is_object() && patch.attrs.contains(kPatchProfileKey); }
+
+}  // namespace
+
+void patch_to_srgb(core::Patch& patch, const core::Document& doc) {
+    if (!keyed(patch)) return;
+    const core::Json key = patch.attrs[std::string(kPatchProfileKey)];
+    patch.attrs.erase(std::string(kPatchProfileKey));
+    if (!key.is_string() || !patch.png || patch.png->empty()) return;
+    core::RgbMode mode;
+    mode.profile = key.get<std::string>();
+    mode.icc = rgb_profile_bytes(doc, mode.profile);
+    if (!mode.icc) return;  // (a profile the book does not hold: its values taken as sRGB)
+    try {
+        const RgbSpace space(mode);
+        patch.png = fills::png_bytes(srgb_from(selection::open_picture(*patch.png).convert("RGBA"), space));
+    } catch (const core::Error&) {  // (a profile that cannot be used: as sRGB)
+    }
+}
+
+void bake_page_values(core::Document& doc) {
+    for (std::size_t p = 0; p < doc.pages.size(); ++p) {
+        if (doc.is_deferred(p)) continue;
+        const core::Page& seen = doc.page(p);
+        const bool any = std::any_of(seen.layers.begin(), seen.layers.end(), [](const core::Layer& layer) {
+            return std::any_of(layer.patches.begin(), layer.patches.end(), keyed);
+        });
+        if (!any) continue;
+        core::Page& page = doc.edit_page(p);
+        for (core::Layer& layer : page.layers) {
+            if (std::none_of(layer.patches.begin(), layer.patches.end(), keyed)) continue;
+            // (its own page's values onto a paint layer's 8-bit pixels: laid as they are)
+            const bool here = core::profiled_rgb(page) && !layer.color_raster && !layer.ink_raster &&
+                              (layer.kind == core::LayerKind::Raster || layer.kind == core::LayerKind::Strokes);
+            std::vector<core::Patch> kept, laid;
+            for (core::Patch& patch : layer.patches) {
+                if (!keyed(patch)) {
+                    kept.push_back(std::move(patch));
+                } else if (here && patch.attrs[std::string(kPatchProfileKey)] == core::Json(page.rgb->profile)) {
+                    patch.attrs.erase(std::string(kPatchProfileKey));
+                    laid.push_back(std::move(patch));
+                } else {
+                    patch_to_srgb(patch, doc);
+                    kept.push_back(std::move(patch));
+                }
+            }
+            layer.patches = std::move(kept);
+            if (laid.empty()) continue;
+            core::Layer marks = layer;
+            marks.strokes = core::empty_strokes();
+            marks.patches = std::move(laid);
+            raster::bake_vectors(page, marks);  // (the page's values onto its values: as they are)
+            layer.raster_png = marks.raster_png;
+            layer.raster_relpath = marks.raster_relpath;
+            layer.raster_memo = {};
+            if (layer.kind == core::LayerKind::Strokes && layer.stroke_count() == 0) layer.kind = core::LayerKind::Raster;
         }
     }
 }

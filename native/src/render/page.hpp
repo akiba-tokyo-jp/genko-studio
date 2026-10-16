@@ -129,6 +129,11 @@ Image layer_image(const core::Page& page, const core::Layer& layer, int dpi, con
                   bool skip_unported = false, bool bake_color = false);
 std::optional<Image> drawable_layer_image(const core::Page& page, const core::Layer& layer, int dpi, const core::Document* episode = nullptr,
                   bool skip_unported = false, bool bake_color = false);
+// color-model@1: does a layer's picture as layer_image and drawable_layer_image make it (`tinted`: its colour laid on)
+// hold the page's values — an RGB page of a profile's paint pixels (core::holds_page_values), the fills and lines drawn
+// on them brought into them —, not sRGB? Not with an effect (drawn in sRGB: the pixels brought to sRGB first), nor
+// tinted (its colour is sRGB).
+bool picture_holds_page_values(const core::Page& page, const core::Layer& layer, bool tinted);
 
 // One layer of a page as the layered exports write it (Python's psd.page_layers): its name, its picture ("RGBA" of the
 // page's size) and, for a pixel layer, its settings (`settings`: opacity, blend, clip, and its mask, "L" of the page's

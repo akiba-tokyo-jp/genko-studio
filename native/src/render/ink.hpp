@@ -86,8 +86,9 @@ std::string picture_icc(std::string_view bytes);
 core::InkPixels picture_inks(std::string_view bytes, const core::PageColor& color);
 
 // The corrections of CMYK and Lab pages (SPEC.md COLOR-02, 群C) work the RGB colour inks mean by the page's rules
-// (sRGB 0..1 each): a grey for inks on K alone (Lab: a = b = 0; no ink is white, K 100% Genko's black), the table's
-// colour for its inks, else the colour the screen shows them as. And back by the rules: the table's colour (an 8-bit
+// (sRGB 0..1 each): a grey for inks on K alone (Lab: a = b = 0; no ink is white, K 100% Genko's black; a grey page's
+// value, whatever its profile: the grey of its value, as the rules take a grey back), the table's colour for its inks,
+// else the colour the screen shows them as. And back by the rules: the table's colour (an 8-bit
 // colour exactly) its inks, Genko's blacks and white theirs, another grey on K alone (Lab: on L), the rest through the
 // profile. Values: inks as above (channels each), rgb 3 each.
 void meaning_of(const core::PageColor& color, const double* inks, double* rgb, std::size_t count);

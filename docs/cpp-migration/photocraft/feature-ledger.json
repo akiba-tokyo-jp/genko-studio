@@ -1356,6 +1356,7 @@
       "evidence": [
         "native/src/render/inspect.cpp",
         "native/src/api/cli.cpp",
+        "native/src/render/page.cpp",
         "native/tests/unit/test_color_model.cpp",
         "native/tests/contract/test_contract_color_model.cpp"
       ],
@@ -1409,6 +1410,7 @@
         "native/src/render/ops_ink.cpp",
         "native/src/app/book_dialogs.cpp",
         "native/src/app/main_window_book.cpp",
+        "native/src/service/wording.cpp",
         "native/tests/unit/test_color_model.cpp",
         "native/tests/gui/test_gui_book.cpp"
       ],
@@ -1776,6 +1778,7 @@
         "native/src/render/ops_ink.cpp",
         "native/src/app/book_dialogs.cpp",
         "native/src/app/main_window_book.cpp",
+        "native/src/service/wording.cpp",
         "native/tests/unit/test_color_model.cpp",
         "native/tests/gui/test_gui_book.cpp"
       ],
@@ -14397,6 +14400,7 @@
         "native/src/formats/psd_export.cpp",
         "native/src/formats/pillow_save.cpp",
         "native/src/app/main_window_book.cpp",
+        "native/src/formats/exporting.cpp",
         "native/tests/unit/test_color_model.cpp",
         "native/tests/contract/test_contract_color_model.cpp",
         "native/tests/unit/test_ink.cpp",
@@ -14868,6 +14872,12 @@
         "native/src/render/page.cpp",
         "native/src/app/main_window_book.cpp",
         "native/src/app/book_dialogs.cpp",
+        "native/src/render/ops_registry.cpp",
+        "native/src/render/raster_ops.cpp",
+        "native/src/render/selection.cpp",
+        "native/src/render/color_edit.cpp",
+        "native/src/render/raster.cpp",
+        "native/src/formats/export.cpp",
         "native/tests/unit/test_color_model.cpp",
         "native/tests/contract/test_contract_color_model.cpp",
         "native/tests/gui/test_gui_book.cpp"

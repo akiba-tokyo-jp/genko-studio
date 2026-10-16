@@ -26,9 +26,12 @@ std::string page_folder(const core::Page& page);
 
 // ops._bake_vectors: the layer's fills (patches) and pen lines drawn into its pixels as they show on the page; the
 // layer is a paint layer with no lines or fills after it.
-void bake_vectors(const core::Page& page, core::Layer& layer);
+// `page_values`: the pixels are an RGB page of a profile's values (color-model@1), and so are the fills and lines
+// drawn into them (their sRGB colours brought in).
+void bake_vectors(const core::Page& page, core::Layer& layer, bool page_values = false);
 
-// ops.layer_pixels: the layer's pixels as it shows (its lines and fills drawn in on a copy: the layer is not changed).
+// ops.layer_pixels: the layer's pixels as it shows (its lines and fills drawn in on a copy: the layer is not changed;
+// color-model@1: an RGB page of a profile's paint pixels are its values, and so are the lines and fills drawn in).
 Image layer_pixels(const core::Page& page, const core::Layer& layer);
 
 // ops._mixed_pieces (下地混色・色延び): the line as short pieces (every 1.5 mm, each starting where the last ended), each

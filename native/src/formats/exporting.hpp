@@ -45,7 +45,8 @@ std::int64_t default_dpi(const core::Document& episode, std::string_view key);
 // color-mode@1 (SPEC.md COLOR-02), color-model@1 (COLOR-03): the export's notes — the words saying how many pages of a
 // colour model (CMYK, Lab, grey; RGB of a profile or of 16 or 32 bits) the format (a key of formats() or the command
 // line's: pdf, tiff, cmyk, png, …) writes from the colours on screen rather than as their inks or values with this
-// colour (auto, rgb, cmyk, gray, bitonal), and how many of 32 bits it writes at 16. PDF and TIFF keep a page's inks
+// colour (auto, rgb, cmyk, gray, bitonal), how many of 32 bits it writes at 16, and how many of those a PDF cuts the HDR
+// of (values past 0..1 an RGB or grey page holds, or an exposure correction may make). PDF and TIFF keep a page's inks
 // with "auto" (a CMYK page's with "cmyk", a grey page's with "gray" too), an RGB page's values with "auto" or "rgb";
 // PSD always (Photoshop's CMYK and Lab at 16 bits); a PDF holds 16 bits at most. run() puts them in its reply's
 // "notes"; never converted without a word. (Only CMYK and Lab pages converted: color-mode@1's words.)

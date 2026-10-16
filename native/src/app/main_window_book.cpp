@@ -272,7 +272,7 @@ void MainWindow::set_page_mode(const QString& mode, int depth) {
         op["intent"] = page->color->intent;
         if (!page->color->bpc) op["bpc"] = false;
     } else if (wanted == now && page->rgb) {
-        op["profile"] = page->rgb->profile;
+        if (!page->rgb->profile.empty()) op["profile"] = page->rgb->profile;  // (sRGB: none named)
         op["intent"] = page->rgb->intent;
         if (!page->rgb->bpc) op["bpc"] = false;
     } else if (wanted == now) {

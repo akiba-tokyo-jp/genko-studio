@@ -188,7 +188,9 @@ ColorModel color_model_from_json(const Json& value) {
     const auto mode = value.find("mode");
     if (mode != value.end() && mode->is_string() && mode->get<std::string>() == "rgb") {
         RgbMode rgb = rgb_mode_from_json(value);
-        if (!rgb.is_default()) out.rgb = std::move(rgb);
+        // (every default is no `color` at all, as "bpc": true is not written: not the writer's)
+        if (rgb.is_default()) bad("an RGB mode of every default is written as no color");
+        out.rgb = std::move(rgb);
         return out;
     }
     out.inks = page_color_from_json(value);
@@ -214,6 +216,9 @@ std::string icc_description(std::string_view icc) {
             if (count == 0 || 12 + count > size) return {};
             std::string out(tag.substr(12, count));
             while (!out.empty() && out.back() == '\0') out.pop_back();
+            for (char& c : out) {  // (bytes past ASCII are not text this knows: '?')
+                if (static_cast<unsigned char>(c) >= 0x80) c = '?';
+            }
             return out;
         }
         if (tag.substr(0, 4) == "mluc") {  // (v4: records of UTF-16BE strings; English first)
@@ -231,7 +236,17 @@ std::string icc_description(std::string_view icc) {
             if (offset + length > size) return {};
             std::string out;
             for (std::size_t k = 0; k + 1 < length; k += 2) {
-                const std::uint32_t c = be16(at + offset + k);
+                std::uint32_t c = be16(at + offset + k);
+                if (c >= 0xd800 && c < 0xdc00 && k + 3 < length && be16(at + offset + k + 2) >= 0xdc00 && be16(at + offset + k + 2) < 0xe000) {
+                    c = 0x10000 + ((c - 0xd800) << 10) + (be16(at + offset + k + 2) - 0xdc00);  // (a surrogate pair)
+                    k += 2;
+                    out.push_back(static_cast<char>(0xf0 | (c >> 18)));
+                    out.push_back(static_cast<char>(0x80 | ((c >> 12) & 0x3f)));
+                    out.push_back(static_cast<char>(0x80 | ((c >> 6) & 0x3f)));
+                    out.push_back(static_cast<char>(0x80 | (c & 0x3f)));
+                    continue;
+                }
+                if (c >= 0xd800 && c < 0xe000) c = 0xfffd;  // (half of a pair alone: the replacement character)
                 if (c < 0x80) out.push_back(static_cast<char>(c));
                 else if (c < 0x800) {
                     out.push_back(static_cast<char>(0xc0 | (c >> 6)));
@@ -257,6 +272,12 @@ std::string profile_description(const std::string& ref, const Bytes& icc, bool l
 }
 
 bool is_text_gamma(double gamma) { return std::isfinite(gamma) && gamma > 1.0 && gamma <= kTextGammaMax; }
+
+bool profiled_rgb(const Page& page) { return !page.color && page.rgb && !page.rgb->profile.empty(); }
+
+bool holds_page_values(const Page& page, const Layer& layer) {
+    return profiled_rgb(page) && layer.kind != LayerKind::Placed && layer.raster_png && !layer.raster_png->empty();
+}
 
 bool uses_color_model(const Document& doc) {
     const auto model = [](const std::optional<PageColor>& inks, const std::optional<RgbMode>& rgb) {

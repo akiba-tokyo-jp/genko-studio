@@ -54,6 +54,7 @@
 #include "render/png.hpp"
 #include "storage/asset_store.hpp"
 #include "render/ink.hpp"
+#include "service/wording.hpp"
 #include "testsupport.hpp"
 
 using namespace genko;
@@ -1002,6 +1003,23 @@ private slots:
         QCOMPARE(s.since(n), std::string(R"([{"op": "set_color_mode", "page": 2, "mode": "rgb", "depth": 8, "intent": "perceptual", "page_intent": "relative"}])"));
         QVERIFY(!s.book().page(1).color && !s.book().page(1).rgb);
         for (const char* key : {"color/workingRgb", "color/intent"}) app::settings()->remove(QString::fromLatin1(key));
+    }
+
+    // ページ → 色モード → a depth on an sRGB page that has an RGB mode of its own (32 bits; review I): the op names no
+    // profile (sRGB has none to name) and is done; the refusals the colour model's ops say, in Japanese (review P).
+    void depthOfAnSrgbPage() {
+        Studio s;
+        QVERIFY(s.window->apply_ops(Json::array({Json{{"op", "set_color_mode"}, {"page", 2}, {"mode", "rgb"}, {"depth", 32}}})));
+        s.on_page(2);
+        const std::size_t n = s.ops.size();
+        QVERIFY(s.trigger("act_depth_16"));
+        QCOMPARE(s.since(n), std::string(R"([{"op": "set_color_mode", "page": 2, "mode": "rgb", "depth": 16, "intent": "relative"}])"));
+        QVERIFY(s.book().page(1).rgb && s.book().page(1).rgb->depth == 16 && s.book().page(1).rgb->profile.empty());
+        QCOMPARE(wording::error(QStringLiteral("page 2: the layer ab12 (絵) holds HDR values past 0..1, which cannot be converted as they are "
+                                               "(clip_hdr: true cuts them and converts)")),
+                 QStringLiteral("レイヤー ab12 (絵) に HDR の値（0〜1 の外）があるので、このままでは変換できません（clip_hdr: true で切って変換します）"));
+        QCOMPARE(wording::error(QStringLiteral("page 2: the layer tn is a tone layer: a page in precise colour (16 or 32 bits, or of a profile) cannot draw it yet")),
+                 QStringLiteral("2 ページのレイヤー tn は、16・32 ビットやプロファイル付きのページではまだ描けません（トーン・描画モード・はみ出し・線・フォルダーなどを確かめてください）"));
     }
 
     // ページの色モード…, color-model@1: grey and 32 bits among the modes and depths; each mode's profiles — the built-in

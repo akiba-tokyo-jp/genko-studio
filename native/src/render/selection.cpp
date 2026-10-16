@@ -7,6 +7,7 @@
 #include <utility>
 
 #include "core/base64.hpp"
+#include "core/color_model.hpp"
 #include "core/command_bus.hpp"
 #include "core/ids.hpp"
 #include "core/ops_util.hpp"
@@ -363,7 +364,8 @@ std::pair<std::optional<core::Patch>, std::optional<core::Patch>> split_patch(co
 }  // namespace
 
 Items lift(core::Layer& layer, const Json& area, const core::Page& page) {
-    (void)page;
+    // (color-model@1: an RGB page of a profile's paint pixels are its values: the picture lifted says so)
+    const bool page_values = core::holds_page_values(page, layer);
     if (layer.color_raster)
         core::not_yet_ported("selection edits on high-precision raster pixels are not supported yet");
     AreaTest test(area);
@@ -398,6 +400,7 @@ Items lift(core::Layer& layer, const Json& area, const core::Page& page) {
             core::Patch templ;
             templ.attrs["mode"] = "image";
             templ.attrs["opacity"] = 1.0;
+            if (page_values) templ.attrs["rgb_profile"] = page.rgb->profile;  // (color_edit::kPatchProfileKey)
             if (auto patch = to_patch(piece, 0, 0, templ, kWorkingDpi)) in.patches.push_back(std::move(*patch));
         }
     }
