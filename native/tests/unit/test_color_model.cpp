@@ -15,13 +15,19 @@
 
 #include "core/base64.hpp"
 #include "core/color_model.hpp"
+#include "core/color_adjust.hpp"
+#include "core/color_raster.hpp"
 #include "core/command_bus.hpp"
 #include "core/error.hpp"
+#include "core/exposure.hpp"
 #include "core/ink.hpp"
 #include "core/paths.hpp"
+#include "render/color_canvas.hpp"
 #include "render/image.hpp"
 #include "render/ink.hpp"
+#include "render/ink_canvas.hpp"
 #include "render/ops_registry.hpp"
+#include "render/page.hpp"
 #include "render/png.hpp"
 #include "storage/asset_store.hpp"
 #include "storage/lock.hpp"
@@ -520,6 +526,131 @@ private slots:
         const std::uint16_t* s = on_k.samples.data() + (5 * 60 + 5) * 5;
         QCOMPARE(s[0] + s[1] + s[2], 0);
         QCOMPARE(int(s[3]), 255 - 128);
+    }
+
+    // The precise canvas's sRGB path is as it was before RgbSpace (its fixed pictures' hashes, taken from the canvas of
+    // the commit before: what it shows and the rasters it makes).
+    void srgbCanvasUnchanged() {
+        const render::Size size{37, 23};
+        std::string paper(std::size_t(37) * 23 * 4, '\0');
+        for (std::size_t i = 0; i < paper.size(); ++i) paper[i] = static_cast<char>((i * 37 + 11) % 256);
+        for (std::size_t i = 3; i < paper.size(); i += 4) paper[i] = static_cast<char>(255);
+        render::ColorCanvas canvas(render::Image::frombytes("RGBA", size, paper));
+        QVERIFY(canvas.space().is_srgb());
+        Json pixels = Json::array();
+        for (int i = 0; i < 19 * 11 * 4; ++i) pixels.push_back((i * 2654435761u) % 65536);
+        for (int i = 3; i < 19 * 11 * 4; i += 4) pixels[i] = (i * 977) % 65536;
+        const std::string raster = core::encode_color_raster(Json{{"precision", "u16"}, {"width", 19}, {"height", 11}, {"pixels", pixels}});
+        const core::ColorRasterView view(raster);
+        const render::Box all{0, 0, 37, 23};
+        for (const char* mode : {"normal", "multiply", "screen", "soft_light", "hue", "luminosity", "difference", "color_dodge"}) {
+            canvas.blend(view, size, all, 0.7, false, mode);
+        }
+        std::string mask(std::size_t(37) * 23, '\0');
+        for (std::size_t i = 0; i < mask.size(); ++i) mask[i] = static_cast<char>((i * 13) % 256);
+        canvas.blend_stroke(render::Image::frombytes("L", size, mask), Json{{"precision", "f32"}, {"values", Json::array({0.2, 0.5, 0.9})}}, 0.8);
+        std::string over(std::size_t(37) * 23 * 4, '\0');
+        for (std::size_t i = 0; i < over.size(); ++i) over[i] = static_cast<char>((i * 7 + 3) % 256);
+        canvas.blend(render::Image::frombytes("RGBA", size, over), 0.5, true, "overlay");
+        const render::Image shown = render::Image::frombytes("L", size, mask);
+        canvas.adjust(core::PreciseAdjustment("brightness_contrast", Json{{"brightness", 15}, {"contrast", 10}}), 0.9, false, &shown);
+        canvas.expose(core::Exposure::parse(Json{{"kind", "exposure"}, {"exposure", 0.5}, {"offset", 0.01}, {"gamma", 1.1}}), 0.6, true);
+        canvas.draw_8bit([](render::Image& picture) { picture.paste(render::Ink{200, 40, 40, 255}, render::Box{3, 4, 12, 9}); });
+        QCOMPARE(core::bytes_ref(canvas.image().tobytes()), std::string("sha256:6c457a9d268976b1c49943f32a9e8191c7b21a0d8c8bcc53eab5eb6ac4141928"));
+        QCOMPARE(core::bytes_ref(canvas.color_raster("u16")), std::string("sha256:794f902e5edb47769de42dca6e914f0a2d2e0e19336175e598427216d54b5c5f"));
+        QCOMPARE(core::bytes_ref(canvas.color_raster("f32")), std::string("sha256:c8e667dcd329c9f96972f8f48e321822dc69e225a10125c9045c67428dd6fc88"));
+    }
+
+    // An RGB page of a profile (image.mode.rgb, edit.assignProfile): drawn in its space (ColorCanvas with RgbSpace) —
+    // its paint layer's values shown through the profile, a grey of a profile with sRGB's curve as itself, sRGB elements
+    // (a line) as their own colour; the page in parts the same as whole; a linear profile's 0.5 shown as sRGB's 188.
+    void profiledPages() {
+        core::Document doc = painted(picture());
+        doc = run_ops(doc, Json::array({Json{{"op", "add_stroke"}, {"page", 1}, {"layer", "ink"},
+                                             {"points", Json::array({Json::array({5, 70}), Json::array({50, 70})})}, {"width_mm", 3}, {"rgb", Json::array({200, 40, 40})}}})).doc;
+        const int dpi = 100;
+        const auto draw_part = [&](const core::Document& book, const render::RenderRegion* region) {
+            render::RenderOptions options;
+            if (region != nullptr) options.region = *region;
+            return render::render_page(book.page(0), dpi, options, &book).image;
+        };
+        const auto draw = [&](const core::Document& book) { return draw_part(book, nullptr); };
+        const render::Image plain = draw(doc);
+        const core::Document p3 = run_ops(doc, Json::array({Json{{"op", "assign_profile"}, {"page", 1}, {"profile", "display-p3"}}})).doc;
+        const render::Image shown = draw(p3);
+        QCOMPARE(shown.size(), plain.size());
+        const auto at = [](const render::Image& image, int x, int y) {
+            const std::string b = image.crop(render::Box{x, y, x + 1, y + 1}).convert("RGB").tobytes();
+            return std::array<int, 3>{static_cast<unsigned char>(b[0]), static_cast<unsigned char>(b[1]), static_cast<unsigned char>(b[2])};
+        };
+        // (the picture lies stretched over the page: its grey on the left, its green on the right)
+        const int w = shown.width(), h = shown.height();
+        const auto grey = at(shown, w / 4, h / 4), was_grey = at(plain, w / 4, h / 4);
+        for (unsigned c = 0; c < 3; ++c) QVERIFY(std::abs(grey[c] - was_grey[c]) <= 1);
+        QVERIFY(at(shown, 3 * w / 4, h / 4) != at(plain, 3 * w / 4, h / 4));  // (the green's values as P3's)
+        // (a line alone on a page of the profile: its sRGB colour, where it covers all)
+        {
+            core::Document lined = run_ops(small_book(), Json::array({Json{{"op", "add_stroke"}, {"page", 1}, {"layer", "ink"},
+                                                                          {"points", Json::array({Json::array({5, 70}), Json::array({50, 70})})},
+                                                                          {"width_mm", 3}, {"rgb", Json::array({200, 40, 40})}}})).doc;
+            const int line_y = static_cast<int>(70 / 25.4 * dpi);
+            const auto was_line = at(draw(lined), w / 2, line_y);
+            lined = run_ops(lined, Json::array({Json{{"op", "assign_profile"}, {"page", 1}, {"profile", "adobe-rgb-compat"}}})).doc;
+            const auto line = at(draw(lined), w / 2, line_y);
+            for (unsigned c = 0; c < 3; ++c) QVERIFY2(std::abs(line[c] - was_line[c]) <= 1, "an sRGB line keeps its colour");
+        }
+        const render::RenderRegion part{7, 9, 50, 60};
+        QCOMPARE(draw_part(p3, &part).tobytes(), shown.crop(render::Box{7, 9, 57, 69}).tobytes());
+        // linear sRGB: a value of 0.5 is sRGB's 188
+        render::Image half = render::Image::create("RGBA", render::Size{60, 40}, render::Ink{128, 128, 128, 255});
+        const core::Document linear = run_ops(painted(half), Json::array({Json{{"op", "assign_profile"}, {"page", 1}, {"profile", "linear-srgb"}}})).doc;
+        const auto lit = at(draw(linear), w / 2, h / 4);
+        for (unsigned c = 0; c < 3; ++c) QVERIFY2(std::abs(lit[c] - 188) <= 1, qPrintable(QString::number(lit[c])));
+        // 16 bits of the profile: the same picture
+        const core::Document deep = run_ops(doc, Json::array({Json{{"op", "set_color_mode"}, {"page", 1}, {"mode", "rgb"}, {"depth", 16}},
+                                                             Json{{"op", "assign_profile"}, {"page", 1}, {"profile", "display-p3"}}})).doc;
+        const render::Image deep_shown = draw(deep);
+        for (const int x : {w / 4, 3 * w / 4}) {
+            const auto a = at(deep_shown, x, h / 4), b = at(shown, x, h / 4);
+            for (unsigned c = 0; c < 3; ++c) QVERIFY(std::abs(a[c] - b[c]) <= 1);
+        }
+        // a fill on its paint layer: sRGB's colour into the page's values (shown as itself)
+        const std::string id = p3.page(0).layers.back().id;
+        const Json area{{"poly", Json::array({Json::array({0, 60}), Json::array({30, 60}), Json::array({30, 80}), Json::array({0, 80})})}};
+        const core::Document filled = run_ops(p3, Json::array({Json{{"op", "fill_area"}, {"page", 1}, {"layer_id", id}, {"area", area},
+                                                               {"rgb", Json::array({40, 90, 200})}}})).doc;
+        QVERIFY(!filled.page(0).layers.back().patches.empty());  // (a fill laid on it: drawn as the page's values)
+        const auto blue = at(draw(filled), w / 6, static_cast<int>(70 / 25.4 * dpi));
+        QVERIFY2(std::abs(blue[0] - 40) <= 1 && std::abs(blue[1] - 90) <= 1 && std::abs(blue[2] - 200) <= 1,
+                 qPrintable(QString("%1 %2 %3").arg(blue[0]).arg(blue[1]).arg(blue[2])));
+    }
+
+    // A grey page drawn (InkCanvas in one plane: its lightness): shown as sGray's numerical grey, its blends, in parts as
+    // whole; its inks at 32 bits as floats.
+    void greyCanvas() {
+        core::Document doc = painted(picture());
+        doc = run_ops(doc, Json::array({Json{{"op", "add_stroke"}, {"page", 1}, {"layer", "ink"},
+                                             {"points", Json::array({Json::array({5, 70}), Json::array({50, 70})})}, {"width_mm", 3}},
+                                        Json{{"op", "set_color_mode"}, {"page", 1}, {"mode", "gray"}, {"depth", 32}}})).doc;
+        const std::string id = doc.page(0).layers.back().id;
+        doc = run_ops(doc, Json::array({Json{{"op", "set_layer"}, {"page", 1}, {"id", id}, {"blend", "multiply"}}})).doc;
+        render::RenderOptions options;
+        options.inks = true;
+        const int dpi = 100;
+        const render::RenderResult whole = render::render_page(doc.page(0), dpi, options, &doc);
+        QVERIFY(whole.inks && whole.inks->depth == 32 && whole.inks->space == core::InkSpace::Gray && !whole.inks->floats.empty());
+        const std::string rgb = whole.image.convert("RGB").tobytes();
+        for (std::size_t i = 0; i + 2 < rgb.size(); i += 3) QVERIFY(rgb[i] == rgb[i + 1] && rgb[i + 1] == rgb[i + 2]);  // (greys)
+        // the grey picture's 128 multiplied over white paper: 128 (its lightness)
+        const int w = whole.image.width(), h = whole.image.height();
+        QCOMPARE(int(static_cast<unsigned char>(rgb[(std::size_t(h / 4) * w + w / 4) * 3])), 128);
+        QCOMPARE(whole.inks->value(std::size_t(h / 4) * w + w / 4, 0), static_cast<double>(static_cast<float>(128 / 255.0)));
+        // the line: Genko's black, lightness 0
+        QCOMPARE(int(static_cast<unsigned char>(rgb[(std::size_t(70 / 25.4 * dpi) * w + w / 2) * 3])), 0);
+        options.region = render::RenderRegion{3, 5, 70, 80};
+        const render::RenderResult part = render::render_page(doc.page(0), dpi, options, &doc);
+        QCOMPARE(part.image.tobytes(), whole.image.crop(render::Box{3, 5, 73, 85}).tobytes());
+        QVERIFY(part.inks->floats == render::crop_inks(*whole.inks, render::Box{3, 5, 73, 85}).floats);
     }
 
     // The book on disk (color-model@1): an RGB page of a profile and 16 bits, a grey page, the book's RGB mode; the

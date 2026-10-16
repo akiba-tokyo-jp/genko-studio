@@ -64,7 +64,7 @@ core::Document filter_book(const std::string& mode = "cmyk") {
     spec.inner_margin_mm = core::Num(5);
     core::Document doc = core::new_episode("ink", core::Num(1), 1, spec, core::Binding::Right);
     Json to = mode == "cmyk" ? Json{{"op", "set_color_mode"}, {"mode", "cmyk"}, {"icc", core::b64encode(icc_bytes())}, {"depth", 16}}
-                             : Json{{"op", "set_color_mode"}, {"mode", "lab"}, {"depth", 16}};
+                             : Json{{"op", "set_color_mode"}, {"mode", mode}, {"depth", 16}};  // (lab; gray: color-model@1)
     doc = run_ops(doc, Json::array({to, Json{{"op", "add_layer"}, {"page", 1}, {"kind", "paint"}, {"id", "pic"}}})).doc;
     const core::PageColor& color = *doc.page(0).color;
     const std::uint32_t w = static_cast<std::uint32_t>(render::mm_to_px(60, 200)), h = static_cast<std::uint32_t>(render::mm_to_px(80, 200));
@@ -75,10 +75,12 @@ core::Document filter_book(const std::string& mode = "cmyk") {
         for (unsigned c = 0; c < n; ++c) s[c] = render::ink::encode_sample(color.space, c, ink[c], 16);
         s[n] = 65535;
     };
-    const std::vector<double> black = color.space == core::InkSpace::Cmyk ? std::vector<double>{0, 0, 0, 1} : std::vector<double>{0, 0, 0};
-    const std::vector<double> grey = color.space == core::InkSpace::Cmyk ? std::vector<double>{0, 0, 0, 0.5} : std::vector<double>{50, 0, 0};
+    const bool gray = color.space == core::InkSpace::Gray;  // (a grey page: k, its black ink)
+    const std::vector<double> black = color.space == core::InkSpace::Cmyk ? std::vector<double>{0, 0, 0, 1} : gray ? std::vector<double>{1} : std::vector<double>{0, 0, 0};
+    const std::vector<double> grey = color.space == core::InkSpace::Cmyk ? std::vector<double>{0, 0, 0, 0.5} : gray ? std::vector<double>{0.5} : std::vector<double>{50, 0, 0};
     const std::vector<double> s_ink = color.space == core::InkSpace::Cmyk ? std::vector<double>{kS[0] / 65535.0, kS[1] / 65535.0, kS[2] / 65535.0, kS[3] / 65535.0}
-                                                                         : std::vector<double>{60, 40, -30};
+                                      : gray ? std::vector<double>{0.3}
+                                             : std::vector<double>{60, 40, -30};
     for (std::uint32_t y = 0; y < h; ++y) {
         for (std::uint32_t x = 0; x < w; ++x) {
             if (y < px(40) && x < px(30)) {
@@ -220,6 +222,45 @@ private slots:
         const core::InkPixels inside = pixels_of(part, "pic"), before = pixels_of(doc, "pic");
         for (unsigned c = 0; c < 5; ++c) QCOMPARE(at(inside, px(15), px(60))[c], at(before, px(15), px(60))[c]);
         QVERIFY(at(inside, px(45), px(20))[1] != kS[1]);
+    }
+
+    // color-model@1: the filters on a grey page (one plane of lightness, 16 bits) and on a CMYK page of 32 bits (floats):
+    // a blur keeps what it does not reach and Genko's black where it fades; invert takes the grey page's black to white
+    // and its 50% grey to itself; on 32 bits the stripes' black stays K 100% where it fades.
+    void greyAndFloatFilters() {
+        const core::Document grey = filter_book("gray");
+        QVERIFY(grey.page(0).color->space == core::InkSpace::Gray);
+        const core::InkPixels before = pixels_of(grey, "pic");
+        QCOMPARE(at(before, px(0.5), px(10))[0], std::uint16_t(0));  // (the stripes: black)
+        const core::InkPixels blurred = pixels_of(run_ops(grey, Json::array({Json{{"op", "filter_raster"}, {"page", 1}, {"id", "pic"}, {"kind", "blur"},
+                                                                                   {"radius", 2}}})).doc, "pic");
+        QCOMPARE(blurred.space, core::InkSpace::Gray);
+        QVERIFY(std::abs(int(at(blurred, px(15), px(60))[0]) - int(at(before, px(15), px(60))[0])) <= 1);  // (the grey all round)
+        int faded = 0;
+        for (std::uint32_t x = px(2); x < px(18); ++x) {
+            const std::uint16_t* s = at(blurred, x, px(10));
+            if (s[1] == 0 || s[1] == 65535) continue;
+            ++faded;
+            QCOMPARE(s[0], std::uint16_t(0));
+        }
+        QVERIFY(faded > 4);
+        const core::InkPixels inverted = pixels_of(run_ops(grey, Json::array({Json{{"op", "filter_raster"}, {"page", 1}, {"id", "pic"}, {"kind", "invert"}}})).doc, "pic");
+        QCOMPARE(at(inverted, px(0.5), px(10))[0], std::uint16_t(65535));
+        QVERIFY(std::abs(int(at(inverted, px(15), px(60))[0]) - (65535 - int(at(before, px(15), px(60))[0]))) <= 257);
+        // 32 bits
+        const core::Document deep = run_ops(filter_book(), Json::array({Json{{"op", "set_color_mode"}, {"mode", "cmyk"}, {"profile", "coated-cmyk"},
+                                                                             {"depth", 32}}})).doc;
+        const core::InkPixels got = pixels_of(run_ops(deep, Json::array({Json{{"op", "filter_raster"}, {"page", 1}, {"id", "pic"}, {"kind", "blur"},
+                                                                               {"radius", 2}}})).doc, "pic");
+        QVERIFY(got.is_float() && got.depth == 32);
+        int soft = 0;
+        for (std::uint32_t x = px(2); x < px(18); ++x) {
+            const std::size_t i = std::size_t(px(10)) * got.width + x;
+            if (got.value(i, 4) == 0 || got.value(i, 4) == 1) continue;
+            ++soft;
+            QVERIFY(std::abs(got.value(i, 3) - 1.0) < 1e-5);
+        }
+        QVERIFY(soft > 4);
     }
 
     // The corrections: a grey on K alone stays on K alone (inverted: K 100% → no ink, K 50% → K 50%), Genko's black by

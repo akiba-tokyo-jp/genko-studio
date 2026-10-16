@@ -822,7 +822,9 @@ std::pair<std::string, bool> composite_color_layers(const Document& doc, const P
         if (!std::binary_search(layers.begin(), layers.end(), i) && page.layers[i].visible &&
             page.layers[i].kind != LayerKind::Folder && merge_draws(page.layers[i]))
             throw NotYetPorted("high-precision merge spans an unselected visible layer");
-    ColorCanvas out(flatten ? page_background(page,size,false) : Image::create("RGBA",size,Ink{0,0,0,0}));
+    // (color-model@1: an RGB page of a profile merges in its space, its paint layers' pixels as its values)
+    ColorCanvas out(flatten ? page_background(page,size,false) : Image::create("RGBA",size,Ink{0,0,0,0}), RgbSpace::of(page));
+    const bool profiled = page.rgb && !page.rgb->profile.empty();
     const Box all{0, 0, size.width, size.height};
     bool floating = !selected_precision(page, layers);
     std::size_t drawn = 0; bool external_clip = false, adjustment = false;
@@ -880,7 +882,8 @@ std::pair<std::string, bool> composite_color_layers(const Document& doc, const P
             auto picture = drawable_layer_image(page, layer, kWorkingDpi, &doc, false, true);
             if (!picture) continue;
             participate(layer);
-            out.blend(*picture, layer.opacity, layer.clip, layer.blend);
+            const bool page_values = profiled && layer.kind == LayerKind::Raster && layer.raster_png && !layer.raster_png->empty();
+            out.blend(*picture, layer.opacity, layer.clip, layer.blend, page_values);
         }
     }
     if (drawn == 0) return {"", false};
@@ -1262,7 +1265,7 @@ void merge_down(OpContext& c) {
 // is f32): its blend, opacity and clipping kept.
 void precise_lines_to_paint(Document& doc, const Page& page, Layer& layer) {
     const auto size=page_px(page,kWorkingDpi);const Box all{0,0,size.width,size.height};
-    ColorCanvas canvas(Image::create("RGBA",size,Ink{0,0,0,0}));
+    ColorCanvas canvas(Image::create("RGBA",size,Ink{0,0,0,0}), RgbSpace::of(page));
     Layer own=layer;own.opacity=1;own.blend="normal";own.clip=false;
     blend_color_strokes(canvas,page,own,kWorkingDpi,all,&doc);
     bool floating=false;

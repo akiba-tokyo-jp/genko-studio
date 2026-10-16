@@ -242,6 +242,40 @@ private slots:
         QVERIFY(close(render::ink::ink_of(lab, {255, 255, 255}), {100, 0, 0}));
     }
 
+    // color-model@1: a grey page's canvas holds its lightness (the paper white) and blends it as RGB's (v, v, v): multiply
+    // and screen as the formulas, hue, saturation and color keep the grey below, luminosity takes the one above; every
+    // mode composites. Its inks at 32 bits are the floats as composited (a grey's HDR past white kept).
+    void greyCanvasBlends() {
+        core::PageColor g;
+        g.space = core::InkSpace::Gray;
+        g.depth = 32;
+        g.icc = std::make_shared<const std::string>(genko::test::read_bytes(genko::test::repo_root() + QStringLiteral("/native/src/core/data/profiles/sgray.icc")));
+        g.profile = core::bytes_ref(*g.icc);
+        const render::Image white = render::Image::create("RGB", render::Size{1, 1}, render::Ink{255, 255, 255});
+        const render::InkPicture half{render::Size{1, 1}, 1, {0.5, 1}}, dark{render::Size{1, 1}, 1, {0.2, 1}};
+        const auto after = [&](const char* mode) -> double {
+            render::InkCanvas canvas(g, white);
+            if (canvas.channels() != 1u || !canvas.supports_blend(mode)) return -1;
+            canvas.blend(half, 1, false, "normal");
+            canvas.blend(dark, 1, false, mode);
+            return canvas.ink_pixels(32).value(0, 0);
+        };
+        QCOMPARE(after("normal"), static_cast<double>(0.2f));
+        QCOMPARE(after("multiply"), static_cast<double>(0.1f));
+        QCOMPARE(after("screen"), static_cast<double>(0.6f));
+        for (const char* keeps : {"hue", "saturation", "color"}) QCOMPARE(after(keeps), static_cast<double>(0.5f));
+        QCOMPARE(after("luminosity"), static_cast<double>(0.2f));
+        // the paper: white; shown as sGray's grey (numerically)
+        render::InkCanvas paper(g, white);
+        QCOMPARE(paper.ink_pixels(32).value(0, 0), 1.0);
+        paper.blend(half, 1, false, "normal");
+        QCOMPARE(paper.display().tobytes(), std::string(3, static_cast<char>(128)));
+        // HDR: a lightness past 1 kept at 32 bits
+        render::InkCanvas bright(g, white);
+        bright.blend(render::InkPicture{render::Size{1, 1}, 1, {3.0, 1}}, 1, false, "normal");
+        QCOMPARE(bright.ink_pixels(32).value(0, 0), 3.0);
+    }
+
     // The ink canvas's blends: CMYK on the inverted plates (multiply adds ink), Lab only in the modes it has.
     void canvasBlends() {
         core::PageColor c;

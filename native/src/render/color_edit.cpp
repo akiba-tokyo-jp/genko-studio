@@ -76,6 +76,17 @@ Image area_on_raster(const core::Json& area, const Grid& g) {
 
 Rgba to_linear(const Rgba& p) { return {core::srgb_to_linear(p[0]), core::srgb_to_linear(p[1]), core::srgb_to_linear(p[2]), p[3]}; }
 
+// A pixel a canvas in the page's space drew (color-model@1: on an RGB page of a profile, sRGB colours drawn into it) in
+// the linear light the edits here mix in (the raster's values through sRGB's curve: the values themselves are kept).
+Rgba drawn_pixel(const ColorCanvas& drawn, std::size_t i) {
+    const auto p = drawn.linear_pixel(i);
+    if (drawn.space().is_srgb()) return p;
+    Rgba out{};
+    for (unsigned c = 0; c < 3; ++c) out[c] = core::srgb_to_linear(drawn.space().encode(c, p[c]));
+    out[3] = p[3];
+    return out;
+}
+
 // Straight linear colour back to the raster's samples: a u16 raster holds 0..1 (a resampling overshoot is cut).
 Rgba to_samples(const Rgba& linear, bool floating) {
     Rgba out{};
@@ -397,12 +408,12 @@ std::string paste(const core::Page& page, const core::Layer& layer, const core::
         page_grid.height = static_cast<std::uint32_t>(g.page.height);
         const Box box = reach.empty() ? Box{0, 0, 0, 0} : intersection(covering(reach, 0, page_grid), all);
         if (box.width() <= 0 || box.height() <= 0) return std::move(out).take();
-        ColorCanvas drawn(Image::create("RGBA", Size{box.width(), box.height()}, Ink{0, 0, 0, 0}));
+        ColorCanvas drawn(Image::create("RGBA", Size{box.width(), box.height()}, Ink{0, 0, 0, 0}), RgbSpace::of(page));
         blend_color_strokes(drawn, page, pasted, g.dpi, box, episode);
         if (g.exact()) {
             for (int y = box.y0; y < box.y1; ++y)
                 for (int x = box.x0; x < box.x1; ++x)
-                    lay(out, std::size_t(y) * g.width + x, drawn.linear_pixel(std::size_t(y - box.y0) * box.width() + (x - box.x0)), layer.lock_alpha);
+                    lay(out, std::size_t(y) * g.width + x, drawn_pixel(drawn, std::size_t(y - box.y0) * box.width() + (x - box.x0)), layer.lock_alpha);
             return std::move(out).take();
         }
         // boxed down onto the raster: each raster pixel the mean of the drawn pixels whose centres fall in it
@@ -419,7 +430,7 @@ std::string paste(const core::Page& page, const core::Layer& layer, const core::
                 const double whole = std::max(1.0, (std::ceil((x + 1) / kx - .5) - std::ceil(x / kx - .5)) * (std::ceil((y + 1) / ky - .5) - std::ceil(y / ky - .5)));
                 for (int py = y0; py < y1; ++py) {
                     for (int px = x0; px < x1; ++px) {
-                        const Rgba p = drawn.linear_pixel(std::size_t(py - box.y0) * box.width() + (px - box.x0));
+                        const Rgba p = drawn_pixel(drawn, std::size_t(py - box.y0) * box.width() + (px - box.x0));
                         for (unsigned c = 0; c < 3; ++c) sum[c] += p[c] * p[3];
                         sum[3] += p[3];
                     }
@@ -435,11 +446,11 @@ std::string paste(const core::Page& page, const core::Layer& layer, const core::
     if (!g.exact()) picture = picture->resize(Size{static_cast<int>(g.width), static_cast<int>(g.height)}, Resample::Box);
     const auto box = picture->getbbox();
     if (!box) return std::move(out).take();
-    ColorCanvas drawn(Image::create("RGBA", Size{box->width(), box->height()}, Ink{0, 0, 0, 0}));
-    drawn.blend(picture->crop(*box), 1, false);
+    ColorCanvas drawn(Image::create("RGBA", Size{box->width(), box->height()}, Ink{0, 0, 0, 0}), RgbSpace::of(page));
+    drawn.blend(picture->crop(*box), 1, false);  // (the picture's sRGB colours, into the page's space)
     for (int y = box->y0; y < box->y1; ++y)
         for (int x = box->x0; x < box->x1; ++x)
-            lay(out, std::size_t(y) * g.width + x, drawn.linear_pixel(std::size_t(y - box->y0) * box->width() + (x - box->x0)), layer.lock_alpha);
+            lay(out, std::size_t(y) * g.width + x, drawn_pixel(drawn, std::size_t(y - box->y0) * box->width() + (x - box->x0)), layer.lock_alpha);
     return std::move(out).take();
 }
 

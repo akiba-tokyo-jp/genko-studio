@@ -652,6 +652,11 @@ std::optional<Image> layer_pixels(const Ctx& ctx, const Layer& layer, const Box&
         raster = ink_picture_rgba(sample_ink_raster(*decoded_ink(layer.ink_raster), ctx.size, area), *ctx.page->color);
     }
     auto lines = layer_strokes(ctx, layer, area, panel_mask, raster ? &*raster : nullptr, rough, true);
+    // (color-model@1: on an RGB page of a profile a paint layer's pixels are the page's values; its lines and fills,
+    // sRGB colours, go over them as the page's values too)
+    if (lines && raster && layer.raster_png && !layer.raster_png->empty() && ctx.page->rgb && !ctx.page->rgb->profile.empty()) {
+        lines = srgb_into(*lines, RgbSpace(*ctx.page->rgb));
+    }
     if (lines) raster = raster ? alpha_composite(*raster, *lines) : std::move(*lines);  // (raster is RGBA)
     return raster;
 }
@@ -894,7 +899,7 @@ Box area_of(const RenderOptions& options, Size size) {
 void precise_strokes(ColorCanvas& target, const Ctx& ctx, const Layer& layer, const Box& area, const Image* panel) {
     if (layer.mask || layer.effect || layer.screen || layer.color || layer.panel_each || !layer.patches.empty() || layer.raster_png)
         throw NotYetPorted("precise stroke layer style");
-    ColorCanvas own(transparent(area));
+    ColorCanvas own(transparent(area), target.space());
     if (ctx.episode != nullptr) paper::keep_all(ctx.episode->papers);  // (BRUSH-01: its brushes' papers)
     for (const auto& stroke : layer.strokes->items) {
         check_cancel(ctx);
@@ -1139,7 +1144,9 @@ RenderResult render(const Page& page_in, int dpi, const RenderOptions& options, 
 
     std::optional<ColorCanvas> precision;
     if (uses_color_precision(page, print))
-        precision.emplace(rgba);
+        precision.emplace(rgba, RgbSpace::of(page));  // (color-model@1: an RGB page of a profile, in its space)
+    // (a paint layer's own pixels on an RGB page of a profile are the page's values; what is drawn in 8 bits is sRGB)
+    const bool profiled = page.rgb && !page.rgb->profile.empty();
     std::optional<Image> prev_alpha;
     const std::optional<Image> panel_mask = clip_mask(page, ctx.size, dpi, area);
     const Image* panel = panel_mask ? &*panel_mask : nullptr;
@@ -1351,8 +1358,12 @@ RenderResult render(const Page& page_in, int dpi, const RenderOptions& options, 
         Image picture = masked(ctx, layer, std::move(*raster), area);
         if (layer.color && !layer.color->empty() && (!print || layer.color_prints)) picture = tinted(picture, *layer.color);
         const Image* clip = layer.clip && prev_alpha ? &*prev_alpha : nullptr;
-        if (precision) precision->blend(picture, layer.opacity, layer.clip, layer.blend);
-        else rgba = blend_over(rgba, picture, layer.blend.empty() ? "normal" : layer.blend, layer.opacity, clip);
+        if (precision) {
+            const bool page_values = profiled && layer.kind == LayerKind::Raster && layer.raster_png && !layer.raster_png->empty();
+            precision->blend(picture, layer.opacity, layer.clip, layer.blend, page_values);
+        } else {
+            rgba = blend_over(rgba, picture, layer.blend.empty() ? "normal" : layer.blend, layer.opacity, clip);
+        }
         prev_alpha = alpha_of(picture);
     }
     Image image = (precision ? precision->image() : rgba).convert("RGB");
@@ -1593,7 +1604,8 @@ Box rect_px(const core::Rect& rect, int dpi) {
 }
 
 bool uses_color_precision(const core::Page& page, bool print) {
-    if (page.color) return false;  // (a CMYK or Lab page has its own canvas)
+    if (page.color) return false;  // (a CMYK, Lab or grey page has its own canvas)
+    if (page.rgb && !page.rgb->profile.empty()) return true;  // (color-model@1: an RGB page of a profile, in its space)
     return std::any_of(page.layers.begin(), page.layers.end(), [print](const Layer& l) {
         return (l.color_raster || core::has_color_strokes(l)) && l.kind != LayerKind::Folder && l.visible &&
                (!print || (l.exportable && !guide_role(l.role)));
