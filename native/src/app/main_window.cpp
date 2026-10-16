@@ -625,7 +625,7 @@ bool MainWindow::apply_ops(const Json& ops, const std::vector<std::string>& ids)
     QElapsedTimer clock;
     clock.start();
     try {
-        session_->apply(ops, ids);
+        session_->apply(with_channel_target(ops), ids);  // (channels@1: the pixel ops on the channel targeted)
     } catch (const core::Error& error) {
         flash(wording::error(QString::fromUtf8(error.what())), 6000, true);
         return false;
@@ -702,6 +702,7 @@ void MainWindow::show_page() {
     refresh_status();
     if (navigator_ != nullptr) navigator_->update();
     if (layer_panel_ != nullptr) layer_panel_->refresh();
+    channel_view_changed();  // (channels@1: this page's view on screen, its panel)
     if (lines_later_) {
         lines_timer_.start();
     } else {

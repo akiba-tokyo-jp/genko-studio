@@ -132,6 +132,11 @@ void MainWindow::build_selection_menu(QMenu* menu) {
     stock_menu_ = menu->addMenu(QStringLiteral("ストックから選ぶ"));
     stock_menu_->setProperty("remade", true);
     connect(stock_menu_, &QMenu::aboutToShow, this, [this] { fill_stock(); });
+    // (channels@1: the selection kept as an alpha channel, and one made from a channel)
+    menu->addAction(action(QStringLiteral("act_sel_to_channel")));
+    channel_load_menu_ = menu->addMenu(QStringLiteral("チャンネルから読み込む"));
+    channel_load_menu_->setProperty("remade", true);
+    connect(channel_load_menu_, &QMenu::aboutToShow, this, [this] { fill_channel_menu(); });
     menu->addAction(action(QStringLiteral("act_quick_mask")));
     menu->addSeparator();
     for (const char* name : {"act_cut", "act_copy", "act_paste", "act_delete_area"}) menu->addAction(action(QString::fromLatin1(name)));

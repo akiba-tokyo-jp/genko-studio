@@ -341,6 +341,8 @@ if(GENKO_BUILD_APP)
   genko_test(test_gui_layers SOURCES gui/test_gui_layers.cpp DEPS genko_app GUI TIMEOUT 600)
   # 範囲選択: the marquee's ways with Shift / Alt, the selection's commands, the chosen part moved, copied, pasted
   genko_test(test_gui_select SOURCES gui/test_gui_select.cpp DEPS genko_app GUI TIMEOUT 600)
+  # チャンネル (channels@1, COLOR-03): the panel, the target keys, a fill on a channel, the view, options, split.
+  genko_test(test_gui_channels SOURCES gui/test_gui_channels.cpp DEPS genko_app GUI TIMEOUT 600)
   # the brush panel and ツールの設定: brushes kept per kind, one's own made, opened, given and read back (.abr too)
   genko_test(test_gui_brushes SOURCES gui/test_gui_brushes.cpp DEPS genko_app GUI TIMEOUT 600)
   # 紙質 (BRUSH-01): the dialog's paper, one's own brush with a paper (the library beside Python's file, read by

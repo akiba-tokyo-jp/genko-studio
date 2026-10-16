@@ -252,13 +252,15 @@ private slots:
         // act_style) theirs (test_gui_studio), the colour mode of pages (CMYK/Lab: act_color_mode) its own (test_gui_book), the
         // 9 of color-model@1 — ページ → 色モード (act_mode_rgb, act_mode_gray, act_mode_cmyk, act_mode_lab, act_depth_8,
         // act_depth_16, act_depth_32) and 編集 → プロファイルの指定… / プロファイルに変換… (act_assign_profile,
-        // act_convert_profile) — theirs (test_gui_book), the
+        // act_convert_profile) — theirs (test_gui_book), the 9 of channels@1 — the targets Ctrl+Alt+2…9 (act_channel_composite,
+        // act_channel_3 … act_channel_9) and 選択 → 選択範囲をチャンネルに保存… (act_sel_to_channel) — theirs (test_gui_channels,
+        // test_gui_select), the
         // 17 of M6 — 環境設定 and the work (act_prefs, act_canvas_only, act_hints, act_tool_names, act_edit_commandbar,
         // act_edit_quick, act_save_workspace, act_next_steps, act_find_command, act_ai) theirs (test_gui_look,
         // test_gui_workspace, test_gui_studio), the help (act_help_keys, act_help_guide, act_help_faq, act_about), the
         // book preview, the border detail and the picture taken in (act_book_preview, act_border_detail, act_import) theirs
         // (test_gui_carried).
-        QCOMPARE(w->actions_by_name().size(), std::size_t{221});
+        QCOMPARE(w->actions_by_name().size(), std::size_t{230});
         QVERIFY(w->action("act_chat_approval"));
         QVERIFY(w->action("act_style"));
         QVERIFY(w->action("act_exposure"));

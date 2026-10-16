@@ -59,6 +59,16 @@ public:
     // without one), or as it is (nothing).
     void set_cmyk_proof(std::optional<std::optional<std::filesystem::path>> proof);
     bool cmyk_proof() const { return proof_.has_value(); }
+    // channels@1: the channel panel's view of the page (render::RenderOptions' planes, overlays and spots); another view
+    // draws all of it again.
+    struct ChannelView {
+        std::optional<std::vector<bool>> planes;
+        std::vector<std::string> overlays;
+        std::optional<std::vector<std::string>> spots;
+        bool operator==(const ChannelView&) const = default;
+    };
+    void set_channel_view(ChannelView view);
+    const ChannelView& channel_view() const { return channel_view_; }
     // 網点を画面で見る (render.SCREEN_DOTS): the tones drawn as their dots on screen too.
     void set_screen_dots(bool on);
     bool screen_dots() const { return screen_dots_; }
@@ -140,6 +150,7 @@ private:
     std::string mode_ = "proof";
     std::optional<std::optional<std::filesystem::path>> proof_;  // set_cmyk_proof
     bool screen_dots_ = false;                                    // set_screen_dots
+    ChannelView channel_view_;                                    // set_channel_view
     std::function<std::optional<std::filesystem::path>()> proof_profile_;
     std::map<int, Level> levels_;
     int base_dpi_ = 0;

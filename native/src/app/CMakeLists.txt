@@ -49,6 +49,7 @@ genko_library(genko_app
     main_window.cpp
     main_window_actions.cpp
     main_window_select.cpp
+    main_window_channels.cpp
     main_window_brushes.cpp
     main_window_anim.cpp
     main_window_paint.cpp
@@ -84,6 +85,7 @@ genko_library(genko_app
     fields.cpp
     tool_settings.cpp
     layer_panel.cpp
+    channel_panel.cpp
     layer_dialogs.cpp
     inject.cpp
     review_model.cpp

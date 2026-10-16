@@ -449,6 +449,7 @@ void MainWindow::build_actions() {
     actions_.at("act_select")->setChecked(true);
     build_selection_actions();  // (範囲選択 and the selection's commands: main_window_select.cpp)
     build_anim_actions();       // (アニメーション, タイムラプス: main_window_anim.cpp)
+    build_channel_actions();    // (channels@1: the channel targets, the selection to a channel: main_window_channels.cpp)
     build_paint_actions();      // (スポイト … ゆがみ, 色の入れ替え, 透明色, 太く・細く: main_window_paint.cpp)
     build_vector_actions();     // (線の修正, 線の編集 and its commands: main_window_vector.cpp)
     build_guide_actions();      // (定規, 3D and their commands: main_window_guides.cpp)
@@ -864,6 +865,7 @@ void MainWindow::build_docks() {
     tabifyDockWidget(pages_dock_, layers);
     view_menu_->addAction(layers->toggleViewAction());
     layers_dock_ = layers;
+    build_channel_dock();  // (チャンネル, a tab beside the layers: main_window_channels.cpp)
     build_line_dock();  // (台詞, a tab beside the pages and the layers: main_window_lines.cpp)
     pages_dock_->raise();
     build_colour_dock();  // (カラー, a tab beside the pages and the layers: main_window_paint.cpp)
