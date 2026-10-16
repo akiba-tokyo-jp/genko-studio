@@ -7,6 +7,7 @@
 #include <utility>
 
 #include "core/base64.hpp"
+#include "core/channels.hpp"
 #include "core/command_bus.hpp"
 #include "core/ids.hpp"
 #include "core/ops_util.hpp"
@@ -14,6 +15,7 @@
 #include "core/pynum.hpp"
 #include "core/pyops.hpp"
 #include "core/strokes.hpp"
+#include "render/channels.hpp"
 #include "render/draw.hpp"
 #include "render/op_limits.hpp"
 #include "render/page.hpp"
@@ -664,6 +666,11 @@ Image base_mask(const Json& area, const core::Page& page, const core::Document* 
         return alpha.resize(size).point([](int v) { return v > 8 ? 255 : 0; });
     }
     if (core::truthy_at(area, "color")) return colour_area(area["color"], page, episode, dpi, size);
+    if (core::truthy_at(area, "channel")) {  // (channels@1: a page's alpha or spot channel, its density; this build's own)
+        const core::Channel* channel = area["channel"].is_string() ? core::find_channel(page, area["channel"].get<std::string>()) : nullptr;
+        if (channel == nullptr) area_error("no channel " + core::py_str(area["channel"]));
+        return channels::mask_image(channels::plane_of(page, *channel), size);
+    }
     if (core::truthy_at(area, "saved")) {
         const Json* kept = core::get(page.extra, "saved_areas");
         const Json saved_areas = kept != nullptr && core::py_truthy(*kept) ? *kept : Json::object();

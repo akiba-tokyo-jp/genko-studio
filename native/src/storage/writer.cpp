@@ -4,6 +4,7 @@
 #include <vector>
 
 #include "core/brushes.hpp"
+#include "core/channels.hpp"
 #include "core/error.hpp"
 #include "core/color_raster.hpp"
 #include "core/exposure.hpp"
@@ -269,6 +270,14 @@ Json page_json(const core::Page& page, AssetStore& store) {
     for (const auto& [role, rgb] : page.fills) fills[std::string(core::to_string(role))] = nums_json(rgb);
     out["fills"] = std::move(fills);
     if (Json color = color_json(store, page.color, page.rgb); !color.is_null()) out["color"] = std::move(color);
+    if (!page.channels.empty()) {  // (channels@1: each one's raster as its asset)
+        Json channels = Json::array();
+        for (const core::Channel& channel : page.channels) {
+            const std::string ref = channel.raster ? put_blob(store, channel.raster, channel.memo, core::kInkRasterSuffix) : std::string();
+            channels.push_back(core::to_json(channel, ref));
+        }
+        out["channels"] = std::move(channels);
+    }
     for (const auto& [key, value] : page.extra.items()) {
         if (!is_known_page_key(key)) out[key] = value;
     }
@@ -339,6 +348,9 @@ Json project_payload_v4(const core::Document& doc, AssetStore& store) {
     for (const auto& page : doc.pages) modes = modes || page->color.has_value() || page->rgb.has_value();
     if (modes) features.emplace_back(core::kColorModeFeature);
     if (core::uses_color_model(doc)) features.emplace_back(core::kColorModelFeature);
+    core::validate_channels(doc);
+    std::erase(features, std::string(core::kChannelsFeature));  // (named while a page has a channel)
+    if (core::uses_channels(doc)) features.emplace_back(core::kChannelsFeature);
     std::sort(features.begin(), features.end());
     features.erase(std::unique(features.begin(), features.end()), features.end());
 

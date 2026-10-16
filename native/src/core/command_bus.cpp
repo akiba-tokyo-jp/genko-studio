@@ -8,6 +8,7 @@
 #include <utility>
 #include <vector>
 
+#include "core/channels.hpp"
 #include "core/covers.hpp"
 #include "core/ops_schema.hpp"
 #include "core/ops_util.hpp"
@@ -56,7 +57,10 @@ std::string usage(const Json& op) {
     if (schema == nullptr) return {};
     std::vector<std::string> strange;
     for (const auto& [key, value] : op.items()) {
-        if (!schema->contains(key) && key != "op" && key != "area" && !key.starts_with("_") && !paper_key(op, key)) strange.push_back(key);
+        if (!schema->contains(key) && key != "op" && key != "area" && !key.starts_with("_") && !paper_key(op, key) &&
+            !(key == "channel" && channel_target(op))) {
+            strange.push_back(key);
+        }
     }
     std::vector<std::string> keys;
     for (const auto& [key, value] : schema->items()) {
@@ -69,8 +73,9 @@ std::string usage(const Json& op) {
 }
 
 // Keys this build's ops take beyond Python's (the precise colour work: merge_visible's flatten, convert_layer's
-// preserve_precision; BRUSH-01: define_brush's paper; TEXT-01's ruby by place: add_line's and edit_line's ruby_spans).
-// They are used, so not reported as ignored; the public list (`genko schema`) stays Python's.
+// preserve_precision; BRUSH-01: define_brush's paper; TEXT-01's ruby by place: add_line's and edit_line's ruby_spans;
+// channels@1: the pixel ops' channel). They are used, so not reported as ignored; the public list (`genko schema`) stays
+// Python's.
 bool native_key(std::string_view op, std::string_view key) {
     return (op == "merge_visible" && key == "flatten") || (op == "convert_layer" && key == "preserve_precision") ||
            (op == "define_brush" && key == "paper") || ((op == "add_line" || op == "edit_line") && key == "ruby_spans");
@@ -87,7 +92,7 @@ std::vector<std::string> unknown_key_warnings(const Json& ops) {
         std::vector<std::string> strange;
         for (const auto& [key, value] : op.items()) {
             const bool known = schema->contains(key) || key == "op" || key == "area" || key == "page" || key == "id" ||
-                               key == "note" || native_key(py_str(*get(op, "op")), key);
+                               key == "note" || native_key(py_str(*get(op, "op")), key) || (key == "channel" && channel_target(op));
             if (!known && !key.starts_with("_")) strange.push_back(key);
         }
         if (!strange.empty()) {
@@ -339,6 +344,16 @@ void check_page_lock(Document& doc, const Json& op, const Actor& actor) {
         for (const auto& each : doc.pages) check_held(doc, *each, each->index, actor);
         return;
     }
+    if (named && name == "merge_channels") {  // (channels@1: every page it takes is asked)
+        const Json* pages = get(op, "pages");
+        for (const Json& wanted : pages != nullptr && pages->is_array() ? *pages : Json::array()) {
+            if (!wanted.is_number_integer()) continue;
+            for (const auto& each : doc.pages) {
+                if (each->index == Num(wanted.get<std::int64_t>())) check_held(doc, *each, each->index, actor);
+            }
+        }
+        return;
+    }
     // (Python takes a lock on a page the book does not have, and lets it go, without a word: refused here)
     const bool lock_op = named && (name == "lock_page" || name == "unlock_page");
     if (const Json* page_value = get(op, "page"); lock_op && page_value != nullptr) {
@@ -531,8 +546,9 @@ Json expand_for_pages(const Document& doc, const Json& op) {
 
 bool area_needs_resolving(const Json& area) {
     if (!area.is_object()) return false;
+    // (channels@1: "channel", a page's alpha or spot channel — this build's own kind)
     for (const char* key : {"rect", "ellipse", "layer", "color", "all", "saved", "union", "intersect", "subtract", "invert",
-                            "grow_mm", "feather_mm"}) {
+                            "grow_mm", "feather_mm", "channel"}) {
         if (area.contains(key)) return true;
     }
     return false;
@@ -850,6 +866,7 @@ ApplyResult CommandBus::apply(const Document& doc, const Json& ops_in, const Act
                 try {
                     validate_ink_document(work);  // (color-mode@1: what an op leaves on a CMYK or Lab page)
                     validate_color_model(work);   // (color-model@1: an RGB page's mode)
+                    validate_channels(work);      // (channels@1: a page's alpha and spot channels)
                 } catch (const Error& error) {
                     if (error.code() == "not_yet_ported") throw;
                     throw OpError(error.what());

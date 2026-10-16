@@ -26,6 +26,7 @@
 #include "core/pyops.hpp"
 #include "core/strokes.hpp"
 #include "render/brushes.hpp"
+#include "render/channels.hpp"
 #include "render/color_canvas.hpp"
 #include "render/covers.hpp"
 #include "render/effects.hpp"
@@ -1685,7 +1686,9 @@ core::InkPixels composite_ink_layers(const core::Page& page, const std::vector<c
     return canvas.ink_pixels(page.color->depth, true);
 }
 
-RenderResult render_page(const core::Page& page, int dpi, const RenderOptions& options, const core::Document* episode) {
+namespace {
+
+RenderResult drawn_page(const core::Page& page, int dpi, const RenderOptions& options, const core::Document* episode) {
     std::vector<std::string> omitted;
     // Keep every layer in high precision within a region; quantize only the final output pixels.
     // Reuse the established global-coordinate region renderer, not an RGBA8 layer intermediate.
@@ -1736,6 +1739,21 @@ RenderResult render_page(const core::Page& page, int dpi, const RenderOptions& o
     }
     RenderResult out = render(page, dpi, options, episode, omitted);
     out.omitted = std::move(omitted);
+    return out;
+}
+
+}  // namespace
+
+RenderResult render_page(const core::Page& page, int dpi, const RenderOptions& options, const core::Document* episode) {
+    const bool hiding = options.planes && std::find(options.planes->begin(), options.planes->end(), false) != options.planes->end();
+    if (page.channels.empty() && !hiding) return drawn_page(page, dpi, options, episode);
+    // (channels@1: the spots printed, the panel's view; a CMYK or Lab page's planes shown from its inks)
+    RenderOptions asked = options;
+    const bool lent_inks = hiding && page.color && !options.inks;
+    if (lent_inks) asked.inks = true;
+    RenderResult out = drawn_page(page, dpi, asked, episode);
+    channels::finish(out, page, dpi, options);
+    if (lent_inks) out.inks.reset();
     return out;
 }
 

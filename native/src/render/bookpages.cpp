@@ -10,6 +10,7 @@
 #include "core/ops_util.hpp"
 #include "core/paths.hpp"
 #include "core/pyconv.hpp"
+#include "render/channels.hpp"
 #include "render/op_limits.hpp"
 #include "render/page.hpp"
 #include "render/png.hpp"
@@ -155,6 +156,7 @@ void register_bookpage_ops(core::OpRegistry& registry) {
     hooks.relayout_raster = relayout_raster;
     hooks.relayout_mask = relayout_mask;
     hooks.relayout_inks = ink_edit::relayout_inks;
+    hooks.relayout_channel = channels::relayout;
     hooks.load_book = load_other_book;
     core::register_bookpage_ops(registry, std::move(hooks));
 }

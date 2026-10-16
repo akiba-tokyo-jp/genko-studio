@@ -87,6 +87,10 @@ genko_test(test_ink SOURCES unit/test_ink.cpp DEPS genko_test_support genko_rend
 genko_test(test_ink_edit SOURCES unit/test_ink_edit.cpp DEPS genko_test_support genko_render_ops LABELS unit TIMEOUT 600)
 # color-mode@1, step three: the filters and the corrections of CMYK and Lab pages in their inks.
 genko_test(test_ink_filters SOURCES unit/test_ink_filters.cpp DEPS genko_test_support genko_render_ops LABELS unit TIMEOUT 600)
+# channels@1 (SPEC.md COLOR-03): a page's alpha and spot channels without Python — their JSON, the channel ops and their
+# refusals, the selection from a channel, the pixel ops on a channel or one colour plate, split and merge back byte for
+# byte, Merge Spot Channel against PhotoCraft's formula, the spots printed and the panel's view, the book on disk.
+genko_test(test_channels SOURCES unit/test_channels.cpp DEPS genko_test_support genko_render_ops genko_formats LABELS unit TIMEOUT 600)
 
 # core/pyre's own bounds (Python 3.12's re, ported; SPEC COMP-01a): a search that backtracks without end stopped when its
 # steps are spent, groups more than 200 deep refused, replace_text refused without a change; without Python.

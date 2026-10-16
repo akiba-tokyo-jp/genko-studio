@@ -2,6 +2,7 @@
 
 #include <string>
 
+#include "core/channels.hpp"
 #include "core/color_model.hpp"
 #include "core/color_raster.hpp"
 #include "core/error.hpp"
@@ -89,6 +90,25 @@ Json colour_brief(const core::Page& page) {
     return out;
 }
 
+// channels@1: a page's channels as the channel panel lists them (their settings, depth and size; not their pixels).
+Json channels_brief(const core::Page& page) {
+    Json out = Json::array();
+    for (const core::Channel& channel : page.channels) {
+        Json item = core::to_json(channel, std::string());
+        item.erase("raster");
+        if (channel.raster) {
+            const core::InkRasterHeader header = core::ink_raster_header(*channel.raster);
+            item["depth"] = header.depth;
+            item["size"] = Json::array({header.width, header.height});
+        } else {
+            item["depth"] = core::page_depth(page);
+            item["size"] = nullptr;  // (none yet: all 0)
+        }
+        out.push_back(std::move(item));
+    }
+    return out;
+}
+
 std::int64_t count(const core::Page& page, core::LayerRole role) {
     std::int64_t n = 0;
     for (const auto& layer : page.layers) {
@@ -137,6 +157,7 @@ Json snapshot(const core::Document& doc, bool full) {
         item["selected_frame_id"] = page.selected_frame_id;
         const bool colour_model = page.color.has_value() || page.rgb.has_value();
         if (colour_model) item["color"] = colour_brief(page);
+        if (!page.channels.empty()) item["channels"] = channels_brief(page);  // (channels@1: on a page with one only)
         Json layers = Json::array();
         for (const auto& layer : page.layers) layers.push_back(layer_brief(layer, colour_model));
         item["layers"] = std::move(layers);
