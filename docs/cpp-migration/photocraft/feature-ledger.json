@@ -23616,19 +23616,43 @@
       "id": "platform:macOS",
       "label_ja": "従来仕様の正式対象外・追加範囲要確認",
       "kind": "cross_cutting",
-      "genko_status": "要詳細設計・照合",
-      "implementation_status": "未着手",
-      "acceptance_status": "未実施",
-      "evidence": []
+      "genko_status": "対象外（利用者の決定 2026-10-16: 新しい対象 OS は加えない）",
+      "implementation_status": "対象外",
+      "acceptance_status": "対象外",
+      "evidence": [],
+      "pc0": {
+        "date": "2026-10-16",
+        "cpp_base": "962faa4",
+        "status": "missing",
+        "size": "L",
+        "upstream": "packaging/macos/package.sh",
+        "cpp": [
+          "native/cmake/GenkoPackage.cmake:19"
+        ],
+        "tests": [],
+        "gap": "macOS の build のプリセット・配布（.app・署名）・試験がない（配布の設定は UNIX AND NOT APPLE と WIN32 だけ）",
+        "note": "SPEC.md:28 で正式対象外。加えるかは利用者の確認が要る。Qt 6 は macOS で動くので主に build・配布・ペン/IME の確認"
+      }
     },
     {
       "id": "platform:browser",
       "label_ja": "従来仕様の正式対象外・追加範囲要確認",
       "kind": "cross_cutting",
-      "genko_status": "要詳細設計・照合",
-      "implementation_status": "未着手",
-      "acceptance_status": "未実施",
-      "evidence": []
+      "genko_status": "対象外（利用者の決定 2026-10-16: 新しい対象 OS は加えない）",
+      "implementation_status": "対象外",
+      "acceptance_status": "対象外",
+      "evidence": [],
+      "pc0": {
+        "date": "2026-10-16",
+        "cpp_base": "962faa4",
+        "status": "missing",
+        "size": "XL",
+        "upstream": "apps/photocraft-web/src/main.rs",
+        "cpp": [],
+        "tests": [],
+        "gap": "ブラウザ（WebAssembly）で動く版がない",
+        "note": "従来仕様の正式対象外で、加えるかは利用者の確認が要る。Qt for WebAssembly（Emscripten）への移植、ファイル・スレッド・メモリの制約があり、外部プロセスのプラグイン・MCP のサーバーは動かない"
+      }
     }
   ],
   "current_development_evidence": {
