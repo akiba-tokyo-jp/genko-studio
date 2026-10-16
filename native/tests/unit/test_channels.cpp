@@ -679,6 +679,20 @@ private slots:
         QCOMPARE(value(now, 30, 15), 1.0);
         QCOMPARE(value(now, 45, 25), 1.0);
         QVERIFY(rows(now, px(25), int(now.height)) == rows(white, px(25), int(white.height)));
+        // transform_area: a box filled at 10..20 × 10..20 mm moved 30 mm to the right
+        const Json square{{"poly", Json::array({Json::array({10, 10}), Json::array({20, 10}), Json::array({20, 20}), Json::array({10, 20})})}};
+        core::Document moved = applied(doc, Json{{"op", "delete_channel"}, {"page", 1}, {"channel", id}});
+        moved = applied(moved, Json{{"op", "add_channel"}, {"page", 1}, {"kind", "spot"}, {"name", "box"}});
+        const std::string boxed = moved.page(0).channels[0].id;
+        moved = applied(moved, Json{{"op", "fill_area"}, {"page", 1}, {"layer_id", "paint0000001"}, {"channel", boxed}, {"area", square},
+                                    {"rgb", Json::array({255, 255, 255})}});
+        moved = applied(moved, Json{{"op", "transform_area"}, {"page", 1}, {"layer_id", "paint0000001"}, {"channel", boxed}, {"area", square},
+                                    {"matrix", Json::array({1, 0, 0, 1, 30, 0})}});
+        now = samples(moved);
+        QCOMPARE(now.width, white.width);
+        QCOMPARE(value(now, 45, 15), 1.0);
+        QCOMPARE(value(now, 15, 15), 0.0);
+        QCOMPARE(value(now, 45, 25), 0.0);
         // a channel of fine detail (its own 600-dpi pixels: stripes a pixel wide), a filter within an area and liquify:
         // the detail where they did not reach as it was
         core::Document fine = doc;
