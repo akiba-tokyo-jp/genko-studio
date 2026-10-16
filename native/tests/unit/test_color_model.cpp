@@ -2117,6 +2117,36 @@ private slots:
         QCOMPARE(inks.samples.at(at * 2 + 1), std::uint16_t(255));
         for (const char c : proof(greyed).tobytes()) QVERIFY(static_cast<unsigned char>(c) == 0 || static_cast<unsigned char>(c) == 255);
     }
+
+    // Review C: the hidden paint layers a conversion's flatten discards are said in its result ("discarded"; not written
+    // when there are none): to_indexed, multichannel, a colour plate deleted, to_bitmap, a spot channel merged.
+    void discardedHiddenLayersAreSaid() {
+        const core::Document plain = painted(working_picture());
+        const core::Document doc = run_ops(plain, Json::array({Json{{"op", "add_layer"}, {"page", 1}, {"kind", "paint"}, {"id", "hid"}},
+                                                               Json{{"op", "set_layer"}, {"page", 1}, {"id", "hid"}, {"panel_each", false}, {"panel_clip", false}},
+                                                               Json{{"op", "put_raster"}, {"page", 1}, {"id", "hid"}, {"png_base64", core::b64encode(render::write_png(picture()))}},
+                                                               Json{{"op", "set_layer"}, {"page", 1}, {"id", "hid"}, {"visible", false}}}))
+                                       .doc;
+        const auto kept = [](const core::Document& d) {
+            return std::any_of(d.page(0).layers.begin(), d.page(0).layers.end(), [](const core::Layer& l) { return l.id == "hid"; });
+        };
+        QVERIFY(kept(doc));
+        const Json grey{{"op", "set_color_mode"}, {"page", 1}, {"mode", "gray"}};
+        const std::vector<Json> conversions{
+            Json::array({Json{{"op", "to_indexed"}, {"page", 1}, {"colors", 8}}}),
+            Json::array({Json{{"op", "set_color_mode"}, {"page", 1}, {"mode", "multichannel"}}}),
+            Json::array({Json{{"op", "delete_channel"}, {"page", 1}, {"channel", "green"}, {"to_multichannel", true}}}),
+            Json::array({grey, Json{{"op", "to_bitmap"}, {"page", 1}}}),
+            Json::array({Json{{"op", "add_channel"}, {"page", 1}, {"kind", "spot"}}, Json{{"op", "merge_spot_channel"}, {"page", 1}}}),
+        };
+        for (const Json& ops : conversions) {
+            const core::ApplyResult done = run_ops(doc, ops);
+            QVERIFY2(done.results.back().value("discarded", Json()) == Json(1), (ops.back().dump() + " → " + done.results.back().dump()).c_str());
+            QVERIFY(!kept(done.doc));
+            const core::ApplyResult none = run_ops(plain, ops);
+            QVERIFY2(!none.results.back().contains("discarded"), none.results.back().dump().c_str());
+        }
+    }
 };
 
 QTEST_GUILESS_MAIN(TestColorModel)

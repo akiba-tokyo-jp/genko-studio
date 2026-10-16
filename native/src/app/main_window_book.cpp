@@ -29,6 +29,7 @@
 #include "core/error.hpp"
 #include "core/paths.hpp"
 #include "core/pyops.hpp"
+#include "render/ops_registry.hpp"
 #include "storage/asset_store.hpp"
 #include "storage/reader.hpp"
 
@@ -365,25 +366,37 @@ void MainWindow::show_color_mode() {
     }
 }
 
+QString MainWindow::flatten_discards(int discarded) {
+    return discarded > 0 ? QStringLiteral("非表示の作画レイヤー（%1 枚）は破棄します（ネーム・下描き・コマ枠は保持）。").arg(discarded)
+                         : QStringLiteral("非表示の作画レイヤーは破棄します（ネーム・下描き・コマ枠は保持）。");
+}
+
 // Whether to go on with a conversion that flattens the page (インデックスカラー, 2 階調, マルチチャンネル, as PhotoCraft and
-// Photoshop do): asked when the page has two or more layers that would be merged ("画像を統合しますか"), saying Undo brings
-// them back; nothing to ask with one or none.
+// Photoshop do, by Genko's 画像をフラット化): asked when the page has two or more layers that would be merged ("画像を
+// 統合しますか") or any hidden layer the flatten would discard — 画像をフラット化's words —, saying Undo brings them back;
+// nothing to ask with one layer or none and nothing hidden. Every page (page null): asked when any page has a hidden
+// layer to discard (the merges are said in the dialog).
 bool MainWindow::flatten_asked(const core::Page* page, const QString& what) {
-    if (page == nullptr) return true;  // (every page: each one's own merge, said in the dialog)
-    // (the layers the flatten merges that hold something — pixels, lines, patches: a page's empty layers of its own
-    // roles are no question)
-    int merged = 0;
-    for (const core::Layer& layer : page->layers) {
-        if (layer.kind == core::LayerKind::Folder || layer.role == core::LayerRole::Name || layer.role == core::LayerRole::Draft) continue;
-        const bool pixels = (layer.raster_png && !layer.raster_png->empty()) || layer.color_raster || layer.ink_raster;
-        if (pixels || layer.stroke_count() > 0 || !layer.patches.empty()) ++merged;
+    // (the layers holding something — pixels, lines, patches, a fill: a page's empty layers of its own roles are no
+    // question —, as render::flatten_count reads the flatten)
+    int merged = 0, discarded = 0;
+    if (page != nullptr) {
+        const render::FlattenCount count = render::flatten_count(*page);
+        merged = count.merged;
+        discarded = count.discarded;
+    } else {
+        const core::Document& doc = session_->document();
+        for (std::size_t i = 0; i < doc.pages.size(); ++i) {
+            if (!doc.is_deferred(i)) discarded += render::flatten_count(doc.page(i)).discarded;
+        }
     }
-    if (merged < 2) return true;
+    if (merged < 2 && discarded == 0) return true;
+    const QString layers = page == nullptr ? QStringLiteral("すべてのページで、ページごとに画素レイヤーを 1 枚に統合します")
+                           : merged >= 2   ? QStringLiteral("このページの画素レイヤー（%1 枚）を 1 枚に統合します").arg(merged)
+                                           : QStringLiteral("このページの画素レイヤーを 1 枚に統合します");
     return ask::question(this, QStringLiteral("画像を統合"),
-                         QStringLiteral("%1にすると、このページの画素レイヤー（%2 枚）を 1 枚に統合します。統合しますか？\n"
-                                        "コマ・台詞・フキダシは要素のまま残ります。編集 → 取り消し で元に戻せます。")
-                             .arg(what)
-                             .arg(merged));
+                         QStringLiteral("%1にすると、%2。統合しますか？\n%3台詞・フキダシは要素のまま残ります。編集 → 取り消し で元に戻せます。")
+                             .arg(what, layers, flatten_discards(discarded)));
 }
 
 // インデックスカラー… (image.mode.indexedColor, PhotoCraft's Indexed Color): the dialog's to_indexed, the flatten asked.

@@ -445,41 +445,74 @@ void set_channel(OpContext& c) {
 
 }  // namespace
 
+namespace {
+
+// Is the layer shown (its folders too, as merge_visible's flatten reads them: layerops._parents_visible)?
+bool shown_in(const Page& page, const core::Layer& layer) {
+    if (!layer.visible) return false;
+    const core::Json* parent = &layer.parent_id;
+    std::vector<std::string> seen;
+    while (parent->is_string()) {
+        const std::string id = parent->get<std::string>();
+        if (std::find(seen.begin(), seen.end(), id) != seen.end()) break;
+        seen.push_back(id);
+        const core::Layer* found = nullptr;
+        for (const core::Layer& item : page.layers) {
+            if (item.id == id) found = &item;
+        }
+        if (found == nullptr) break;
+        if (!found->visible) return false;
+        parent = &found->parent_id;
+    }
+    return true;
+}
+
+// Does the flatten merge or discard the layer (not a folder, nor a name or draft layer, which it keeps)?
+bool flattened(const core::Layer& layer) {
+    return layer.kind != core::LayerKind::Folder && layer.role != core::LayerRole::Name && layer.role != core::LayerRole::Draft;
+}
+
+// Does the layer hold something drawn (pixels, lines, patches, a fill, a correction)? A page's empty layers of its own
+// roles hold nothing.
+bool holds_drawing(const core::Layer& layer) {
+    return (layer.raster_png && !layer.raster_png->empty()) || layer.color_raster || layer.ink_raster || layer.stroke_count() > 0 ||
+           !layer.patches.empty() || (layer.kind == core::LayerKind::Fill && ((layer.fill && core::py_truthy(*layer.fill)) || layer.fill_rgb)) ||
+           (layer.kind == core::LayerKind::Adjust && layer.adjust && core::py_truthy(*layer.adjust));
+}
+
+}  // namespace
+
 // The layers merge_visible's flatten keeps in one: the first shown (as layerops picks it).
 std::optional<std::string> first_shown_layer(const Page& page) {
-    const auto shown_in = [&](const core::Layer& layer) {
-        const core::Json* parent = &layer.parent_id;
-        std::vector<std::string> seen;
-        while (parent->is_string()) {
-            const std::string id = parent->get<std::string>();
-            if (std::find(seen.begin(), seen.end(), id) != seen.end()) break;
-            seen.push_back(id);
-            const core::Layer* found = nullptr;
-            for (const core::Layer& item : page.layers) {
-                if (item.id == id) found = &item;
-            }
-            if (found == nullptr) break;
-            if (!found->visible) return false;
-            parent = &found->parent_id;
-        }
-        return true;
-    };
     for (const core::Layer& layer : page.layers) {
-        if (layer.visible && layer.kind != core::LayerKind::Folder && layer.role != core::LayerRole::Name && layer.role != core::LayerRole::Draft &&
-            shown_in(layer)) {
-            return layer.id;
-        }
+        if (flattened(layer) && shown_in(page, layer)) return layer.id;
     }
     return std::nullopt;
 }
 
-std::optional<std::string> flatten_page(OpContext& c, std::size_t at) {
+FlattenCount flatten_count(const Page& page) {
+    FlattenCount out;
+    if (!first_shown_layer(page)) return out;  // (nothing shows: nothing is flattened)
+    for (const core::Layer& layer : page.layers) {
+        if (!flattened(layer) || !holds_drawing(layer)) continue;
+        if (shown_in(page, layer)) {
+            ++out.merged;
+        } else {
+            ++out.discarded;
+        }
+    }
+    return out;
+}
+
+std::optional<std::string> flatten_page(OpContext& c, std::size_t at, std::int64_t* discarded) {
     const auto target = first_shown_layer(c.doc.page(at));
     if (!target) return std::nullopt;
+    const int hidden = flatten_count(c.doc.page(at)).discarded;
     const Json flatten{{"op", "merge_visible"}, {"page", c.doc.page(at).index.json()}, {"copy", false}, {"flatten", true}};
     if (c.doc.strict_gates) core::check_strict(c.doc, flatten, c.actor);  // (a studio book's rules for a flatten too)
     OpContext inner{c.doc, flatten, c.actor};
     (*ops_registry().find("merge_visible"))(inner);
+    if (discarded != nullptr) *discarded += hidden;
     return target;
 }
 
@@ -507,7 +540,8 @@ void merge_spot_channel(OpContext& c) {
     const std::string page_id = doc.page(at).id;
     // the page's pixel layers flattened into one (Genko's 画像をフラット化: merge_visible, its frames and lines kept as they
     // are — the user's decision: as PhotoCraft flattens), then the spot printed into it
-    const auto target = flatten_page(c, at);
+    std::int64_t discarded = 0;
+    const auto target = flatten_page(c, at, &discarded);
     if (!target) throw OpError("no layer is showing");
     std::size_t p = 0;
     while (p < doc.pages.size() && doc.pages[p]->id != page_id) ++p;
@@ -579,6 +613,7 @@ void merge_spot_channel(OpContext& c) {
     const std::size_t again = core::channel_index(page, spot.id);
     if (again < page.channels.size()) page.channels.erase(page.channels.begin() + static_cast<std::ptrdiff_t>(again));
     c.report = Json{{"layer", *target}};
+    if (discarded > 0) (*c.report)["discarded"] = discarded;  // (the hidden layers the flatten left out)
 }
 
 void split_channels(OpContext& c) {

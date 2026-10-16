@@ -1,5 +1,6 @@
 #pragma once
 
+#include <cstdint>
 #include <optional>
 #include <string>
 
@@ -23,9 +24,18 @@ void register_ink_ops(core::OpRegistry& registry);
 
 // channels@1, color-model@1 (the user's decision 2026-10-16: as PhotoCraft flattens): the layer merge_visible's flatten
 // keeps the page's pixels in (the first shown), and the page's pixel layers flattened into it (Genko's 画像をフラット化:
-// its frames, lines and balloons kept as they are), under a studio book's rules for a flatten too. The flattened
-// layer's id, or none when no layer shows (nothing done). render/ops_channels.cpp.
+// its frames, lines and balloons kept as they are, and its name and draft layers; its hidden layers discarded), under
+// a studio book's rules for a flatten too. The flattened layer's id, or none when no layer shows (nothing done); the
+// hidden layers holding something it discarded added to `discarded`. render/ops_channels.cpp.
 std::optional<std::string> first_shown_layer(const core::Page& page);
-std::optional<std::string> flatten_page(core::OpContext& c, std::size_t at);
+std::optional<std::string> flatten_page(core::OpContext& c, std::size_t at, std::int64_t* discarded = nullptr);
+// What that flatten would do to the page: the layers holding something (pixels, lines, patches, a fill, a correction)
+// it merges into one — those shown — and the hidden ones it discards (none when no layer shows). The window asks
+// before a conversion that flattens with this.
+struct FlattenCount {
+    int merged = 0;
+    int discarded = 0;
+};
+FlattenCount flatten_count(const core::Page& page);
 
 }  // namespace genko::render

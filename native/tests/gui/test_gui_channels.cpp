@@ -19,6 +19,7 @@
 #include "app/main_window.hpp"
 #include "app/thumbs.hpp"
 #include "app/tiles.hpp"
+#include "core/base64.hpp"
 #include "core/channels.hpp"
 #include "core/command_bus.hpp"
 #include "core/ink.hpp"
@@ -321,6 +322,44 @@ private slots:
         studio.window->action(QStringLiteral("act_undo"))->trigger();
         QVERIFY(!studio.page().color);
         QCOMPARE(studio.panel()->keys(), (std::vector<std::string>{"composite", "red", "green", "blue"}));
+    }
+
+    // Review C: deleting a colour plate flattens the page: the question says so in 画像をフラット化's words — the hidden
+    // layer it would discard counted —; declined, nothing changes. Merging a spot channel (which flattens too) asks when
+    // a hidden layer would be discarded.
+    void deletePlateSaysWhatItDiscards() {
+        Studio studio;
+        studio.window->channels_dock()->show();
+        QVERIFY(studio.window->apply_ops(Json::array({Json{{"op", "add_layer"}, {"page", 1}, {"kind", "paint"}, {"id", "hidden000001"}},
+                                                      Json{{"op", "set_layer"}, {"page", 1}, {"id", "hidden000001"}, {"panel_clip", false}},
+                                                      Json{{"op", "put_raster"}, {"page", 1}, {"id", "hidden000001"},
+                                                           {"png_base64", core::b64encode(render::write_png(render::Image::create("RGBA", render::Size{20, 20}, render::Ink{0, 0, 0, 255})))}},
+                                                      Json{{"op", "set_layer"}, {"page", 1}, {"id", "hidden000001"}, {"visible", false}}})));
+        QStringList asked;
+        studio.answers.responder->question = [&](const QString& title, const QString& text) {
+            asked << title + QStringLiteral(": ") + text;
+            return false;
+        };
+        studio.panel()->refresh();
+        studio.panel()->list()->setCurrentItem(studio.row("green"));
+        studio.panel()->button(QStringLiteral("channel_delete"))->click();
+        QCOMPARE(asked, QStringList{QStringLiteral("色の版を削除: 色の版を削除すると、このページはマルチチャンネルになります（画素レイヤーは 1 枚に統合され、"
+                                                   "残りの版はそれぞれインキの版になります）。削除しますか？\n"
+                                                   "非表示の作画レイヤー（1 枚）は破棄します（ネーム・下描き・コマ枠は保持）。編集 → 取り消し で元に戻せます。")});
+        QVERIFY(!studio.page().color);
+        // merging a spot channel flattens the page too: asked as well (declined: the channel stays), then merged
+        QVERIFY(studio.window->apply_ops(Json::array({Json{{"op", "add_channel"}, {"page", 1}, {"kind", "spot"}}})));
+        QAction* merge_spot = nullptr;
+        for (QAction* a : studio.panel()->menu()->actions()) if (a->text() == QStringLiteral("特色チャンネルを合成")) merge_spot = a;
+        QVERIFY(merge_spot != nullptr);
+        asked.clear();
+        merge_spot->trigger();
+        QCOMPARE(asked, QStringList{QStringLiteral("特色チャンネルを合成: 特色を合成すると、このページの画素レイヤーを 1 枚に統合します。統合しますか？\n"
+                                                   "非表示の作画レイヤー（1 枚）は破棄します（ネーム・下描き・コマ枠は保持）。編集 → 取り消し で元に戻せます。")});
+        QCOMPARE(studio.page().channels.size(), std::size_t(1));
+        studio.answers.responder->question = [](const QString&, const QString&) { return true; };
+        merge_spot->trigger();
+        QVERIFY(studio.page().channels.empty());
     }
 
     // The pages' small pictures follow their channels: a channel added, drawn on, its colour, opacity, solidity, kind or

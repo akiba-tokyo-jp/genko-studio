@@ -25,6 +25,7 @@
 #include "app/main_window.hpp"
 #include "core/channels.hpp"
 #include "render/channels.hpp"
+#include "render/ops_registry.hpp"
 
 namespace genko::app {
 
@@ -244,7 +245,8 @@ void ChannelPanel::remove() {
         }
         if (!multi && !ask::question(this, QStringLiteral("色の版を削除"),
                                      QStringLiteral("色の版を削除すると、このページはマルチチャンネルになります（画素レイヤーは 1 枚に統合され、"
-                                                    "残りの版はそれぞれインキの版になります）。削除しますか？\n編集 → 取り消し で元に戻せます。"))) {
+                                                    "残りの版はそれぞれインキの版になります）。削除しますか？\n%1編集 → 取り消し で元に戻せます。")
+                                         .arg(MainWindow::flatten_discards(render::flatten_count(*page).discarded)))) {
             return;
         }
         Json op{{"op", "delete_channel"}, {"page", page->index.json()}, {"channel", key}};
@@ -365,6 +367,13 @@ void ChannelPanel::merge() {
 void ChannelPanel::merge_spot() {
     const core::Page* page = window_->current_page();
     if (page == nullptr) return;
+    // (the page flattened first: asked when that discards a hidden layer, in 画像をフラット化's words)
+    if (const int discarded = render::flatten_count(*page).discarded;
+        discarded > 0 && !ask::question(this, QStringLiteral("特色チャンネルを合成"),
+                                        QStringLiteral("特色を合成すると、このページの画素レイヤーを 1 枚に統合します。統合しますか？\n%1編集 → 取り消し で元に戻せます。")
+                                            .arg(MainWindow::flatten_discards(discarded)))) {
+        return;
+    }
     Json op{{"op", "merge_spot_channel"}, {"page", page->index.json()}};
     if (const std::string id = chosen_channel(); !id.empty()) op["channel"] = id;
     window_->apply_ops(Json::array({op}));

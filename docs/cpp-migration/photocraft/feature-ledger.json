@@ -301,7 +301,7 @@
         "gap": "Genko にはチャンネルの仕組みがなく、名前付きで保存した選択範囲（ストック）を forget_area で消せるだけ。アルファ・スポット・色チャンネル（R/G/B 等を消してマルチチャンネル化）の削除がない",
         "note": "チャンネルの土台（ページごとのアルファ・スポット・色チャンネルの保存と PSD 往復、チャンネル パネル）が要る（channel.new で数えた）"
       },
-      "limitations": "色の版の削除（delete_channel の to_multichannel）は Photoshop の動きに合わせた Genko のもの（上流の channel.delete はアルファだけ）。"
+      "limitations": "色の版の削除（delete_channel の to_multichannel）は Photoshop の動きに合わせた Genko のもの（上流の channel.delete はアルファだけ）。統合は「画像をフラット化」と同じく非表示の作画レイヤーを捨てる: 捨てた数を結果の discarded で知らせ、画面では確かめてから行う。"
     },
     {
       "id": "channel.duplicate",
@@ -435,7 +435,8 @@
         "native/src/app/channel_panel.cpp",
         "native/src/app/main_window_channels.cpp",
         "native/tests/unit/test_channels.cpp",
-        "native/tests/gui/test_gui_channels.cpp"
+        "native/tests/gui/test_gui_channels.cpp",
+        "native/tests/unit/test_color_model.cpp"
       ],
       "pc0": {
         "date": "2026-10-16",
@@ -447,7 +448,8 @@
         "tests": [],
         "gap": "スポットチャンネルを色チャンネルへ合成する操作がない（スポットチャンネル自体がない）",
         "note": "channel.newSpot が先に要る"
-      }
+      },
+      "limitations": "統合は「画像をフラット化」と同じく非表示の作画レイヤーを捨てる: 捨てた数を結果の discarded で知らせ、画面では確かめてから行う。"
     },
     {
       "id": "channel.move",
@@ -14440,7 +14442,8 @@
         "native/src/app/mode_dialogs.cpp",
         "native/src/app/main_window_book.cpp",
         "native/tests/unit/test_quantize.cpp",
-        "native/tests/gui/test_gui_book.cpp"
+        "native/tests/gui/test_gui_book.cpp",
+        "native/src/render/ops_channels.cpp"
       ],
       "pc0": {
         "date": "2026-10-16",
@@ -14459,7 +14462,7 @@
         "gap": "書き出しの 2 値（color=bitonal、1 ビット）とレイヤーの網点化（screen: 網点/線/交差/砂目、線数・角度・形）はある。原稿自体を Bitmap モードにする変換と、誤差拡散・パターンディザ・しきい値の方式選択がない",
         "note": "モノクロ漫画の出力としては書き出し側で足りている"
       },
-      "limitations": "統合した層の画素は Gray 8 bit の 0/255（上流は 1 bit の文書）。ネーム・下描きの層は印刷しないので元の値のまま持ち、表示の写像で 2 値に見せる。網点のセルは統合した層の解像度（200 dpi）÷ 線数。PSD は Bitmap（色モード 0）の統合画像だけ（notes）。"
+      "limitations": "統合した層の画素は Gray 8 bit の 0/255（上流は 1 bit の文書）。ネーム・下描きの層は印刷しないので元の値のまま持ち、表示の写像で 2 値に見せる。網点のセルは統合した層の解像度（200 dpi）÷ 線数。PSD は Bitmap（色モード 0）の統合画像だけ（notes）。統合は「画像をフラット化」と同じく非表示の作画レイヤーを捨てる: 捨てた数を結果の discarded で知らせ、画面では確かめてから行う。"
     },
     {
       "id": "image.mode.bits16",
@@ -14926,7 +14929,8 @@
         "native/src/app/mode_dialogs.cpp",
         "native/src/app/main_window_book.cpp",
         "native/tests/unit/test_quantize.cpp",
-        "native/tests/gui/test_gui_book.cpp"
+        "native/tests/gui/test_gui_book.cpp",
+        "native/src/render/ops_channels.cpp"
       ],
       "pc0": {
         "date": "2026-10-16",
@@ -14939,7 +14943,7 @@
         "gap": "インデックスカラーへの変換（パレット 8 種・色数・強制色・透明・ディザ 4 種）がない",
         "note": "render/image.cpp:583 の Pillow 互換 quantize と GIF 書き出しは流用候補。新しい外部ライブラリは要らない"
       },
-      "limitations": "ページの画素レイヤーを Genko の統合（merge_visible の flatten。紙の上で合成）で 1 枚にしてから量子化する（利用者の決定。要素とネーム・下描きの層は残す。ネーム・下描きの層は印刷しないので画素も表の色に寄せず元のまま持ち、表示の写像で表の色に見せる）。統合した層は不透明になるので透明の番号は普通は作られない（set_color_table の transparent で決める）。PSD は Indexed（色モード 2）の統合画像だけ（notes）。"
+      "limitations": "ページの画素レイヤーを Genko の統合（merge_visible の flatten。紙の上で合成）で 1 枚にしてから量子化する（利用者の決定。要素とネーム・下描きの層は残す。ネーム・下描きの層は印刷しないので画素も表の色に寄せず元のまま持ち、表示の写像で表の色に見せる）。統合した層は不透明になるので透明の番号は普通は作られない（set_color_table の transparent で決める）。PSD は Indexed（色モード 2）の統合画像だけ（notes）。統合は「画像をフラット化」と同じく非表示の作画レイヤーを捨てる: 捨てた数を結果の discarded で知らせ、画面では確かめてから行う。"
     },
     {
       "id": "image.mode.lab",
@@ -15050,7 +15054,8 @@
         "native/tests/gui/test_gui_book.cpp",
         "native/src/render/ink_filters.cpp",
         "native/tests/unit/test_ink_edit.cpp",
-        "native/tests/unit/test_ink_filters.cpp"
+        "native/tests/unit/test_ink_filters.cpp",
+        "native/tests/gui/test_gui_channels.cpp"
       ],
       "pc0": {
         "date": "2026-10-16",
@@ -15063,7 +15068,7 @@
         "gap": "マルチチャンネル（RGB→C/M/Y、CMYK→4 版、Lab→アルファ 1–3 等、統合）への変換がない。PSD の Multichannel は読み込みで扱う区分があるだけ（render/psd.cpp:541）",
         "note": "チャンネルの土台（ページごとのアルファ・スポット・色チャンネルの保存と PSD 往復、チャンネル パネル）が要る（channel.new で数えた）"
       },
-      "limitations": "色相・彩度・カラー・輝度の描画モードの層は版で合成できないので断る。PSD は Multichannel（色モード 7）の統合画像だけ（32 bit は 16 bit、notes）。ほかの形式は刷った見え（sRGB）＋notes。"
+      "limitations": "色相・彩度・カラー・輝度の描画モードの層は版で合成できないので断る。PSD は Multichannel（色モード 7）の統合画像だけ（32 bit は 16 bit、notes）。ほかの形式は刷った見え（sRGB）＋notes。統合は「画像をフラット化」と同じく非表示の作画レイヤーを捨てる: 捨てた数を結果の discarded で知らせ、画面では確かめてから行う。"
     },
     {
       "id": "image.mode.rgb",

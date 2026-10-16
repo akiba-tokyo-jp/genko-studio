@@ -1041,7 +1041,8 @@ private slots:
         QCOMPARE(dialogs, QStringList{QStringLiteral("indexed_dialog")});
         QCOMPARE(s.ops.size(), n);
         QCOMPARE(s.answers.asked, QStringList{QStringLiteral("画像を統合: インデックスカラーにすると、このページの画素レイヤー（2 枚）を 1 枚に統合します。統合しますか？\n"
-                                                             "コマ・台詞・フキダシは要素のまま残ります。編集 → 取り消し で元に戻せます。")});
+                                                             "非表示の作画レイヤーは破棄します（ネーム・下描き・コマ枠は保持）。"
+                                                             "台詞・フキダシは要素のまま残ります。編集 → 取り消し で元に戻せます。")});
         // … and accepted: to_indexed for this page, flattened into one layer
         s.answers.responder->question = [&](const QString& title, const QString&) {
             s.answers.asked << title;
@@ -1159,6 +1160,67 @@ private slots:
         // back to grey: the inks off
         QVERIFY(s.trigger("act_mode_gray"));
         QVERIFY(s.book().page(2).color && s.book().page(2).color->duotone.empty());
+    }
+
+    // Review C: a conversion that flattens asks whenever the flatten would discard a hidden layer that holds something —
+    // in 画像をフラット化's words, with their count —, even with one layer shown; for every page too (the hidden layers of
+    // all of them); declined: nothing. Accepted: the hidden layer gone, said in the result.
+    void flattenAsksOfHiddenLayers() {
+        Studio s;
+        render::Image dot = render::Image::create("RGBA", render::Size{60, 40}, render::Ink{0, 0, 0, 0});
+        dot.paste(render::Ink{200, 40, 40, 255}, render::Box{10, 10, 20, 20});
+        Json paint = Json::array();
+        for (const auto& [page, id] : std::vector<std::pair<int, std::string>>{{2, "shown"}, {2, "hidden"}, {3, "away"}}) {
+            paint.push_back(Json{{"op", "add_layer"}, {"page", page}, {"kind", "paint"}, {"id", id}});
+            paint.push_back(Json{{"op", "set_layer"}, {"page", page}, {"id", id}, {"panel_each", false}, {"panel_clip", false}});
+            paint.push_back(Json{{"op", "put_raster"}, {"page", page}, {"id", id}, {"png_base64", core::b64encode(render::write_png(dot))}});
+        }
+        paint.push_back(Json{{"op", "set_layer"}, {"page", 2}, {"id", "hidden"}, {"visible", false}});
+        paint.push_back(Json{{"op", "set_layer"}, {"page", 3}, {"id", "away"}, {"visible", false}});
+        QVERIFY(s.window->apply_ops(paint));
+        s.on_page(2);
+        bool all = false;
+        s.answers.responder->exec = [&](QDialog* d) {
+            if (all) {
+                auto* scope = d->findChild<QComboBox*>(QStringLiteral("indexed_scope"));
+                scope->setCurrentIndex(scope->findData(QStringLiteral("all")));
+            }
+            return int(QDialog::Accepted);
+        };
+        // the page in front: one layer shown, one hidden — asked, declined: nothing
+        std::size_t n = s.ops.size();
+        QVERIFY(s.trigger("act_mode_indexed"));
+        QCOMPARE(s.ops.size(), n);
+        QCOMPARE(s.answers.asked, QStringList{QStringLiteral("画像を統合: インデックスカラーにすると、このページの画素レイヤーを 1 枚に統合します。統合しますか？\n"
+                                                             "非表示の作画レイヤー（1 枚）は破棄します（ネーム・下描き・コマ枠は保持）。"
+                                                             "台詞・フキダシは要素のまま残ります。編集 → 取り消し で元に戻せます。")});
+        // マルチチャンネル: the same
+        s.answers.asked.clear();
+        QVERIFY(s.trigger("act_mode_multichannel"));
+        QCOMPARE(s.ops.size(), n);
+        QCOMPARE(s.answers.asked.size(), 1);
+        QVERIFY2(s.answers.asked[0].startsWith(QStringLiteral("画像を統合: マルチチャンネルにすると、")) &&
+                     s.answers.asked[0].contains(QStringLiteral("非表示の作画レイヤー（1 枚）は破棄します（ネーム・下描き・コマ枠は保持）。")),
+                 qPrintable(s.answers.asked[0]));
+        // every page: the hidden layers of all the pages
+        all = true;
+        s.answers.asked.clear();
+        QVERIFY(s.trigger("act_mode_indexed"));
+        QCOMPARE(s.ops.size(), n);
+        QCOMPARE(s.answers.asked, QStringList{QStringLiteral("画像を統合: インデックスカラーにすると、すべてのページで、ページごとに画素レイヤーを 1 枚に統合します。統合しますか？\n"
+                                                             "非表示の作画レイヤー（2 枚）は破棄します（ネーム・下描き・コマ枠は保持）。"
+                                                             "台詞・フキダシは要素のまま残ります。編集 → 取り消し で元に戻せます。")});
+        // accepted (the page in front): the hidden layer discarded, said in the result
+        all = false;
+        s.answers.responder->question = [&](const QString& title, const QString&) {
+            s.answers.asked << title;
+            return true;
+        };
+        QVERIFY(s.trigger("act_mode_indexed"));
+        QCOMPARE(s.ops.size(), n + 1);
+        QVERIFY(s.book().page(1).rgb && s.book().page(1).rgb->table);
+        for (const core::Layer& layer : s.book().page(1).layers) QVERIFY(layer.id != "hidden");
+        QVERIFY(std::any_of(s.book().page(2).layers.begin(), s.book().page(2).layers.end(), [](const core::Layer& l) { return l.id == "away"; }));
     }
 
     void colourModesKeepThePagesOwnWay() {

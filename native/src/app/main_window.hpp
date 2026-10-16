@@ -166,6 +166,9 @@ public:
         std::set<std::string> hidden_spots;
     };
     ChannelPanel* channel_panel() const { return channel_panel_; }
+    // What a conversion that flattens a page says it does to its hidden layers (画像をフラット化's words: the hidden
+    // drawing layers discarded — their count when there are any —, the name, draft and frame layers kept).
+    static QString flatten_discards(int discarded);
     QDockWidget* channels_dock() const { return channels_dock_; }
     ChannelView channel_view() const;
     // A row of the panel made what the tools work on (PhotoCraft's click on a row: a channel shown alone, a plate alone,

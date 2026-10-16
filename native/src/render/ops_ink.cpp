@@ -944,6 +944,12 @@ std::optional<std::array<int, 3>> colour_value(const Json& v) {
 struct Special {
     std::int64_t flattened = 0;
     std::int64_t converted = 0;
+    std::int64_t discarded = 0;  // (the hidden layers the flattens left out)
+    // (the report's "flattened", and "discarded" when there were any)
+    void into(Json& report) const {
+        report["flattened"] = flattened;
+        if (discarded > 0) report["discarded"] = discarded;
+    }
 };
 
 // A page converted to a model, its own way kept (how indexed, bitmap and multichannel bring a page to the mode they work
@@ -1047,7 +1053,7 @@ void to_multichannel(OpContext& c) {
         const Model before = model_of(doc.page(at));
         const bool already = before.inks && before.inks->space == InkSpace::Multi;
         if (already && (bits == 0 || bits == before.depth())) continue;
-        if (!already && flatten_page(c, at)) ++done.flattened;  // (PhotoCraft: Multichannel flattens)
+        if (!already && flatten_page(c, at, &done.discarded)) ++done.flattened;  // (PhotoCraft: Multichannel flattens)
         at = page_at(doc, id);
         const Model from = model_of(doc.page(at));
         done.converted += convert_page(doc, at, multichannel_of(from, bits != 0 ? bits : from.depth()), way);
@@ -1059,7 +1065,7 @@ void to_multichannel(OpContext& c) {
         doc.rgb.reset();
     }
     Json report = report_of(done.converted, way);
-    report["flattened"] = done.flattened;
+    done.into(report);
     c.report = std::move(report);
 }
 
@@ -1103,7 +1109,7 @@ void to_indexed(OpContext& c) {
     std::optional<core::ColorTable> first;
     for (const std::string& id : ids_of(doc, pages)) {
         std::size_t at = page_at(doc, id);
-        const std::optional<std::string> flat = flatten_page(c, at);
+        const std::optional<std::string> flat = flatten_page(c, at, &done.discarded);
         if (flat) ++done.flattened;
         at = page_at(doc, id);
         done.converted += convert_page(doc, at, Model{}, way);  // (sRGB at 8 bits: the page's own way)
@@ -1174,7 +1180,7 @@ void to_indexed(OpContext& c) {
         doc.color.reset();
     }
     Json report = each.empty() ? Json::object() : Json{{"colors", each[0]["colors"]}, {"transparent", each[0]["transparent"]}};
-    report["flattened"] = done.flattened;
+    done.into(report);
     report["converted"] = done.converted;
     if (way.clipped > 0) report["clipped"] = way.clipped;
     if (each.size() > 1) report["pages"] = std::move(each);
@@ -1314,7 +1320,7 @@ void to_bitmap(OpContext& c) {
     Special done;
     for (const std::string& id : ids_of(doc, pages)) {
         std::size_t at = page_at(doc, id);
-        const std::optional<std::string> flat = flatten_page(c, at);
+        const std::optional<std::string> flat = flatten_page(c, at, &done.discarded);
         if (flat) ++done.flattened;
         at = page_at(doc, id);
         Model eight = model_of(doc.page(at));
@@ -1358,7 +1364,9 @@ void to_bitmap(OpContext& c) {
         doc.color->depth = 8;
         doc.color->bitmap = look;
     }
-    c.report = Json{{"flattened", done.flattened}};
+    Json report = Json::object();
+    done.into(report);
+    c.report = std::move(report);
 }
 
 // PhotoCraft's default duotone inks: black, then a warm brown, gold and slate blue (its generic names; Photoshop's
