@@ -102,7 +102,9 @@ void MainWindow::build_selection_actions() {
     make("act_copy", QStringLiteral("コピー"), [this] { copy(); }, {QKeySequence(Std::Copy)});
     make("act_cut", QStringLiteral("切り取り"), [this] { cut(); }, {QKeySequence(Std::Cut)});
     make("act_paste", QStringLiteral("貼り付け"), [this] { paste(); }, {QKeySequence(Std::Paste)}, QStringLiteral("新しいレイヤーに貼り付けます（そのまま動かせます）"));
-    QList<QKeySequence> delete_keys = QKeySequence::keyBindings(Std::Delete);
+    // (Python's: the platform's first key of Delete, and Backspace — not all of Delete's keys: on X11 they hold Ctrl+D, which
+    // is 選択を解除's, and a key two commands share does neither)
+    QList<QKeySequence> delete_keys = {QKeySequence(Std::Delete)};
     if (!delete_keys.contains(QKeySequence(QStringLiteral("Backspace")))) delete_keys << QKeySequence(QStringLiteral("Backspace"));
     make("act_delete_area", QStringLiteral("選択範囲を消す"), [this] { delete_area(); }, delete_keys);
     make("act_flip_h", QStringLiteral("左右反転"), [this] { flip(-1, 1); });

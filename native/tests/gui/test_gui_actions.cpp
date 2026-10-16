@@ -328,6 +328,9 @@ private slots:
         QCOMPARE(owner.at(QStringLiteral("Ctrl+Shift+Y")), QStringLiteral("act_gamut_warning"));
         QCOMPARE(owner.at(QStringLiteral("Ctrl+Shift+K")), QStringLiteral("act_color_settings"));
         QCOMPARE(owner.at(QStringLiteral("Ctrl+Y")), QStringLiteral("act_redo"));
+        // (選択を解除 keeps Ctrl+D on X11 too, whose keys for Delete hold it: 選択範囲を消す takes Delete's first and Backspace,
+        // as Python's)
+        QCOMPARE(owner.at(QStringLiteral("Ctrl+D")), QStringLiteral("act_deselect"));
     }
 
     // A key the person gave to a command before a new command took it as its own (PC1b's Ctrl+Shift+Y, Ctrl+Shift+K,
