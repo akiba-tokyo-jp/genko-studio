@@ -11,11 +11,128 @@
 - R6 M7 の最終候補が M6 の出口の V3 と同じソース・実行物なら、全体試験は使い回し、M7 に固有の受入（最終配布物での起動・保存・出力、2 時間試験、全 PERF、IME の注入、全出力、MCP SDK での外部接続、独立レビュー、別のインストール先への導入）だけを行う。
 - R7 統合前の群の commit は、作業ツリーだけに置かず、native/integration ではない作業ブランチへ push して保全する（CI は無効なので試験は走らない）。
 - 当て方: CMYK・Lab の工程の出口の V3（e099da5）から。ASan の後に Release・Debug を流す順をやめ、ASan を走らせたまま Release・Debug を並べた（`run.sh` の親だけ止め、ASan の validation_run は続けた）。残る重複は群D の V2 と同じ中身の ASan 1 回分だけ（計画が違うので `--pair` に使えない）。
-- 次: M6 は Linux の開発を Windows deferred のまま進め、Windows 実機は M6 の出口（配布候補）と M7 で行う（実行場所は利用者に確かめる）。
+- 次: M6・M7 は Linux で合格（凍結 962faa4、下の節）。Windows 実機は、下の利用者の決定のとおりマージ後に別の環境で行う。
 - **利用者の決定（2026-10-15）: Windows は、すべての実装と Linux での試験が終わり、マージした後に、別の環境で行う。** このセッションでは Windows の実機の build・受入をしない（VALIDATION.md §0 の「配布前の Windows 実機受入は必須」は変えない。Windows の受入が済むまで両 OS の配布完了とは言わない）。同じ日の決定: Windows の実機の作業は M7 まで保留、MCP の `inspect` の説明文は Python と同じ文のまま、Qt のソースの入手先は download.qt.io を案内する。
 
 
-## CMYK・Lab の編集（color-mode@1、COLOR-02）— 2026-10-13〜15 記録（この節が最新。M5 の後、M6 の前の独立した工程）
+## M6 導入・ヘルプ・制作導線・配布候補と M7 の受入（Linux）— 2026-10-14〜16 記録（この節が最新）
+
+### 利用者の決定
+- （2026-10-14）設定は旧版と分け、初回に尋ねる: この版は自分の設定のフォルダーを持ち、初めての起動で旧版の設定があれば「引き継ぎますか？」と一度だけ聞き、「はい」のときだけ写す。旧版の設定は変えない。
+- （2026-10-15）Windows の実機の作業は M7 まで保留。MCP の `inspect` の説明文は Python と同じ文のまま。Qt のソースの入手先は download.qt.io を案内する。
+- （2026-10-15）**Windows は、すべての実装と Linux での試験が終わり、マージした後に、別の環境で行う。** このセッションでは Windows の実機の build・受入をしない（VALIDATION.md の「配布前の Windows 実機受入は必須」は変えない。両 OS の配布完了とは言わない）。
+
+### 群（作業ブランチ native/wip-m6。8cc498c・84c2b49・07656c7・c287a75・0794797・b72f851〜f96c119・a7b5be7）
+- 群B1 画面の仕上げ: コマンドを探す・クイックアクセス・コマンドバー・ワークスペース、メニューの残り、最初の一歩と次の作業の案内（I11）、パネルの配置、レイヤーパネルの見た目、選択範囲ランチャー、書き出しのプレビューは初めからページ全体（I08）、書き出し先の全文・コピー（I12）。
+- 群B2 環境設定と快適さ: ショートカット・筆圧の試し書き・サイドボタン・見た目・カーソル・修飾キー・道具ごとの修飾キー・押している間だけ持ち替え・円形メニュー・休憩・動きを減らす・GPU 表示・バックアップ（zip64 も書ける）・保存の間隔、原稿だけを表示、システムのガラス、数値欄の入力。
+- 群B3 持ち越しの機能: オートアクション、画像を読み込む、マスクを編集する、枠線の間隔・長さ・揺れ、本の形でプレビュー、TIFF・WebP の読み込み（Pillow 12 と同じ手順。色を面ごとに分けた TIFF は未移植と言う）。
+- 群B4 ヘルプ（I10）: 使い方・キー一覧・よくある質問・バージョン情報を実際のメニューの経路から作る（help.cpp）。
+- 群C 設定の分離と引き継ぎ（UX-01）: core::config_dir（~/.config/genko-studio・%APPDATA%\GenkoStudio・settings.ini）、migration.cpp（初回に一度だけ聞く、写さないもの、リンクの規則、ロック、失敗は次回また聞く）、引き継ぐ前はコマンドラインが知らせる。
+- 群D 配布物（I03・AC-PACKAGE）: cmake --install と cpack（GenkoPackage.cmake）、SBOM（SPDX 2.3、SHA1・SHA256）、README-ja・QT-LGPL-ja、Linux の install.sh・uninstall.sh、THIRD_PARTY.md v1.1（ICU・xcb-util・MSVC ランタイム・PhotoCraft）、ライセンス文。
+- レビュー（群ごと 1 回、4 本並行）の指摘は c287a75 で直した。
+
+### 関係試験（R1）で直した所（a7b5be7）
+- 31 本（関係する GUI・契約・単体・配布）のうち 10 本が落ちた。製品の直し: 最初の一歩・次の作業の案内の帯が窓を画面より広げていた（横にスクロールする 1 行の帯に）、クイックアクセスをスクロールの中に（最小の高さ）、ごく小さい画面のキャンバスの最小幅の下限 160→100px、窓の組み立て中に題名の帯を外す前のレイアウトで窓が高く広がったまま残る（最後に決め直して画面に収め直す）、ブラシの詳細の窓を共通の部品で（UI-G）、キャンバスだけ表示で端に出したパネルが離れても隠れない（タブの裏のパネルを除いて端を測る。Python も同じ書き方）、レイヤーの目のアイコン、PA の画像のパレット、配布物に offscreen のプラグイン。
+- 試験の前提の誤り（合格の基準は変えていない）: パネルが見えているかを visibleRegion で見ていた（題名の帯を外すと中身が覆うので空）→ 窓の中にあるか、短い窓のパレットの試験を Python の test_every_tool_is_within_reach_on_a_short_screen と同じ 1366×700 に、メニューの並び・ツールチップの形・コマンドの数を Python に、ほか。
+- 31 本すべて合格（アニメの試験は 5 回続けて合格）。
+
+### M7 の 2 時間試験を M6 の候補に入れた（R6）
+- M7 は M6 の出口の V3 と同じソースなら全体試験を使い回す（R6）。M7 に固有の「2 時間の連続制作（入力の注入）」と PERF-G（メモリと安定性）の試験 `test_soak_app`（perf の印。V3 の全体試験 132 本には入らない）を、M6 の凍結の前に入れた。F1 を主の窓で開き、Xvfb の上で G ペンの線・取り消し・やり直し・ページ送り・拡大縮小・台詞を実時間で注入する。最初の 20 分で全ページを回ってキャッシュを満たし、その後 100 分を 2 分ごとの巡回（90 秒の作業、描画のキャッシュの解放、30 秒の休み、私用メモリ（Private_Clean＋Private_Dirty）の読み取り）にする。判定: VmHWM 8 GB 以内、最後の 10 分の平均が最初の 10 分の平均から 128 MiB 以内、最小二乗の増え方 1 MiB/分 以下、描いた線・取り消し・やり直し・台詞の数がページごとに窓の本と一致し、閉じて読み直した本とも一致。
+- 試しで見つけた漏れ（製品の直し）: 取り消しの履歴は、メモリに置く量を「精密なカラー画像の分で 1 GiB まで」と数えていて、線の変更（その前のページの版を持つ）を 0 と数えていた。線を描く作業では履歴がいつまでもメモリに残り、暖機の後も 1 分あたり約 7.5 MiB 増えた（F1、40 分の試し）。Python は保存した変更をメモリに置かない（取り消しは日誌を通す）。C++ はメモリに置く変更を直近 100 件まで（Session::Options::history_changes）にし、古いものは既存の仕組み（trim_history、日誌を通す取り消し・やり直し）へ回す。試験: test_session aLongLineHistoryLeavesMemory（上限 3 件で 6 本の線を引き、保存の後メモリに 3 件、6 回の取り消しが日誌を通って本と画面が 1 本ずつ戻り、6 回のやり直しで元に戻る）。
+- 履歴の上限の後も 1 分あたり約 2.2 MiB 増えた（40 分の試し: 巡回 25 分で 29.8 MiB）。巡回ごとに C ライブラリの割り当て器の内訳を記録すると、プログラムが使っている分は 172→175 MiB でほぼ一定、増えたのは「解放済みで割り当て器が手元に残している分」（99→124 MiB）だった（漏れではなく、描画の作業スレッドなどが返した領域を OS に返していない）。製品の直し（app/memory.cpp、画面のアプリだけ。コマンドライン・MCP は変えない）: (1) `genko app` の始まり（スレッドを作る前）に一度、glibc の割り当て器を arena 2 つまで（M_ARENA_MAX。描画の作業スレッドが領域を分け合う）、256 KiB 以上は mmap（M_MMAP_THRESHOLD。タイル・絵は使い終われば OS に返る）にする（memory::tune）、(2) 入力が 10 秒止まったら一度、割り当て器の空きを OS に返す（Linux は malloc_trim、Windows は _heapmin。memory::watch_idle）。キャッシュ・履歴は捨てない。(2) だけでは水準は下がった（305→223 MiB）が増え方は残った。(1) を主の窓を作るときに設定すると、作業スレッドがすでに arena を作った後で効かず（傾き 6.1 MiB/分）、同じ値を GLIBC_TUNABLES（プロセスの始まりから効く）で与えると 19 分の試しで傾き 0.80 MiB/分・増分 6.3 MiB だったので、プログラムの始まりで設定する形にした。性能の試験（test_perf_app・test_soak_app）も、アプリと同じく始まりで設定する。
+
+- 2 時間の試し（凍結前、試験の木 fab4aea＋直し、2026-10-15 09:39〜11:43 UTC）は不合格だった。暖機の後の巡回 30 分までは「メモリに置く変更」が上限の 100 件で私用メモリ 258〜375 MiB だったが、巡回 34 分（開始から 54 分）から変更が 1 巡回あたり約 58 件ずつ溜まり（98 分で 668 件）、私用メモリは 531 MiB、VmHWM 633 MiB まで増え、最後の「保存済みになるまで 5 分待つ」で落ちた。原因（製品の漏れ）: 保存の 1 歩ごとに原稿の journal（studio/journal.jsonl。試しの終わりで 38 MB・6,736 行）を 2 回（修復と取引の確認）全部読み直して JSON を解いていた（1 回 1〜2 秒。`genko doctor` で 38 MB の読みに 2.3 秒）。journal が 15〜20 MB を超えると保存が描く速さ（1.5 秒に 1 本）に追いつかず、保存を待つ変更がメモリに残った（履歴の上限は保存済みの変更だけを外す）。Python の journal.entries は読んだ行を覚えていて、ファイルが伸びた分だけを解く（_PARSED。先頭と前回の終わりの 64 バイトで同じファイルか確かめる）。直し: `storage::journal::read_lines_without_ops`（同じ確かめ方で、伸びた分の行だけを解いて覚える。覚えるのは各行から ops（変更の操作。journal の大部分）を除いたもの: 修復・取引・やり直しの積み・版の番号はそれを読まない）を、保存のたびに読む所（修復、Saver の取引の確認、stacks、Session の committed_revision・読み直し）で使う。ops を読む所（履歴パネル・gc・migrate・doctor）は今までの read_lines。試験: test_journal readLinesWithoutOps（ops を除く・伸びた分だけ・書き直されたら全部・短くなったら全部）。
+- journal の直しの後の 60 分の試し（暖機 20 分＋巡回 40 分、試しの木の Release、2026-10-15 13:12〜14:12 UTC）: メモリに置く変更は終わりまで 100 件、保存の遅れはなくなった。私用メモリは巡回 30 分まで 219〜232 MiB で横ばいだったが、巡回 32 分で 296 MiB に上がってそのまま残り、傾き（1 MiB/分以下）で不合格。arena ごとの内訳（試験に GENKO_SOAK_TRACE を足して malloc_info と 16 MiB 以上の無名の割り当てを巡回ごとに記録した 2 回目の 60 分の試し）: 作業のスレッドの arena は確保 106 MiB・空き 62 MiB で一定のまま、その 2 つの領域（63 MiB・49 MiB）が巡回 15・16・18・20 では丸ごと常駐し、17 では元に戻っていた（漏れではない）。入力が 10 秒止まったときに一度だけ空きを返していたので、その後に終わる裏の仕事（キャッシュを消した後のページの精細な描き直し — 線が増えた後半ほど長い）が汚した空きが、次の入力の後の休みまで残っていた。直し（app/memory.cpp）: 入力が止まっている間は、10 秒の後も 5 秒ごとに空きを返す（止まっている間だけ。描く間は何もしない）。あわせて、journal の覚えは解いた値（小さな割り当て数万個が保存のスレッドの arena に散らばり残る）でなく、ops を除いた行の文字列 1 本で持つ（読むたびに解く。2 時間の終わりで約 1.7 MB）。
+- 原稿のフォルダーの大きさ: 2 時間で 4.3 GB（assets 4.2 GB・6,300 ファイル）。描くたびに、その層の線の全部（strokes.json、1 本で約 1.6 MB）を新しい資産として書き、取り消しのために残す。Python の v3 と同じ作り（変更ごとの資産、gc は手動）で、この版の不具合ではない（知られた性質として記録する。`genko gc` で減らせる）。
+
+### M7 群（移植の漏れ・試験の漏れ・独立レビューの直し・PERF-G）の R2 レビュー（1 回、2 並行、読取専用）と直し
+- app・配布の側: P1×2・P2×1・P3×2。
+  - P1 採用した復旧用コピーを、原稿に書く前に取り消すと（頁の読み込み中、または別の書き手が原稿を持っていて保存が断られた間）、今回の「やり直しの欠落」の直しが取り消しを journal に書く側に回し、保存で復旧の内容が原稿に書かれ、その取り消しは journal が断り、読み直しで復旧の内容が戻っていた → 復旧の採用（recover）は書く前なら必ずメモリだけで取り消す。試験 test_session anAdoptedRecoveryPointUndoneBeforeItIsWrittenIsNeverWritten。
+  - P1 復旧用コピーを別のスレッドにした（バックアップ中も止まらない）ため、保存が先に終わって「原稿がすべてを持った」後に、書き終わった復旧用コピーが残り、次に開いたとき原稿より新しいとして勧められ得た → 保存（別名保存・閉じるときも）が終わったとき書き中の復旧用コピーがあれば、その後に消す（復旧のスレッドは順に動く）。その書き終わりは「書いた」と数えない。試験 aRecoveryPointWrittenBehindASaveIsRemoved（20 回、両方の順番）。
+  - P2 最初の一歩のボタンのキーが起動のときの既定のまま（環境設定のキーの前に作られる）→ 案内を出し直すたびと環境設定の適用のときに今のキーを出す。
+  - P3 ストックのメニューの子のメニューが開くたびに残る → 作り直す前に消す。復旧の採用の所で「元に戻す」が押せる → 押せない。
+- core・storage・描画・API の側: P1×1・P2×4・P3×9。
+  - P1 journal の読みの覚え（PERF-G の直し）の鍵が Windows で ANSI にない文字のパスで例外 → UTF-8 の鍵。
+  - P2 フォントの代わり（G5）を汎用の読み込み（ImageFont.truetype 相当）に入れていたため、render._font（次の候補へ進む）とフォントの一覧（壊れたファイルを飛ばす）が変わった → 代わりは genko.fonts.truetype 相当（text::Fonts）だけ。
+  - P2 面ごとの TIFF で、Pillow が除く「意味の決まっていない追加の面」も読んでいた（色がずれる、大きな数の面でメモリを使い切る）→ 画像の帯の数だけ読む。YCbCr（JPEG の面ごと）は Pillow と同じく libtiff の RGBA の読み、1 つの面だけのものは続いた形と同じに読む。
+  - P2 絵柄カタログのトークンが転送（リダイレクト）先の別のホストに付いて行き得た → トークンを付けるときは転送を自分でたどり、別のホストへはトークンなしで（最大 50 回、https から http へは行かない）。
+  - P2 `genko render --out 新しいフォルダー/p1.webp` が失敗 → 書く前にフォルダーを作る（Python と同じ順）。
+  - P3: .dib はファイルの見出しなし（_dib_save）、BMP の 4 GiB 超は ValueError、Pillow だけの形式の見分けを各プラグインの _accept に合わせた（netpbm P0〜P6・Pf・Py、CUR、AVIF の mif1・msf1）、文字の大きさを測る所のフォントの上限も 256 MB、journal の読みの覚えは解き終わってから入れ替える（例外で半端に残らない）・解く間は鍵を持たない、無圧縮 TIFF は 1 つのストリップ（Pillow が自分で書くとき）。
+  - 直さずに記録: doctor の問題の並び（同梱のフォントがないときだけ。Python は資産・フォント・パスの順、この版はフォントが最後）。無圧縮 TIFF のバイトの並び（画素とストリップは同じ。libtiff はデータを目次の前に書く）。
+
+### M7 群の関係試験（R1、作業の木の Release、4 CPU・15 GB・Ubuntu 24.04.5）
+- 43 本（変えた所に関係する単体・契約・E2E・GUI・配布と、新しい試験 6 本）: 36 本合格、7 本不合格。
+- 製品の直し:
+  - (1) 自分自身を指すリンク（ループ）を `--root` に与えた `genko serve` が断らずに動き続けた（今回の resolve_path の直しの退行。Python 3.12 の Path.resolve はループで RuntimeError）→ HTTP の場所の確かめはループを断る（core::symlink_loop）。
+  - (2) お知らせを出している間、回転・反転の表示（表示 46% ・ 回転 +30° ・ 左右反転）とコマンドの状態が更新されなかった → お知らせの間も更新する（Python の _refresh_zoom と同じ）。
+  - (3) 1024×640 で台詞パネル（フキダシの種類の選択が 211 px）と文字の道具の設定がパネルの幅（230 px）からはみ出した。Python は右のパネルとツールの設定のすべてに tool_settings.fit_narrow を掛ける（選択は 6 字ぶんに縮んで開くと広い、長いラベルは折り返す、入力行は狭ければ欄を名前の下に、枠の注記は題の下に、ボタンは文字の幅）が、C++ にはなかった（移植の漏れ）→ app::fit_narrow を移し、同じパネルに掛ける。
+- 試験の前提の誤り（合格の基準は変えていない）:
+  - test_placed: 読めない形式の画像の見本を PPM にしたが、PPM は配置のときに断る（大きさが読めない。記録した制限どおり）→ 配置は image_format で断り、Python が置いた本の PPM は描かずに知らせる、の 2 つに分けた。
+  - test_ops_e2e: 下地混色を「この版ではしない」例にしていた → 移したので、適用して本と inspect が一致することを確かめる。
+  - test_gui_workspace: 2 つ目の窓を作った後に環境設定を確かめ、答えの記録が 2 つ目の窓に移っていた → その前に確かめる。
+  - test_gui_actions: 台詞のあるページへのテンプレートは「コマと台詞を消して、テンプレートで割り直します」と先に尋ねる（Python と同じ）→ はいと答える。
+  - test_gui_ledger_a: 読み直した本の余白（Python の読み込みと同じく 16.0）と既定（16）を JSON の文字で比べていた → Python の == と同じく値で比べる。
+- test_session theAutosaveWaitsForAPauseAndAtMostTenSeconds は重い並行の中の 1 回だけ「20 秒以内に保存済み」にならなかった。単独で 4 回・4 本同時でも合格。凍結後の V3 の 3 構成の全体試験で合格（合格の基準は変えていない）。
+
+### 台帳の突き合わせ（LEDGER.md の M6 の 20 行）
+- gui_action 11（act_prefs・act_help_keys・act_help_guide・act_help_faq・act_about・act_find_command・act_edit_commandbar・act_edit_quick・act_save_workspace・act_tool_names・act_quick_mask）、gui_action_group 1（launcher_actions）、cli 1（genko register-links。src/api/main.cpp の入口）、python_module 7（comfort・dialog_look・glass・help・links・preferences・workspace）: すべて C++ にあり、試験（test_gui_actions・test_gui_carried・test_gui_workspace・test_gui_look・test_gui_select・test_gui_studio）がある。ledger.json の status は手で変えない（生成物。M7 の機械集計で）。
+
+### V3（M6 の出口、M7 は R6 で使い回す）— 凍結 962faa4 で Linux 合格
+- **凍結SHA**: `962faa4f87dd7dbe05908937e2e54d3ff3488e29`（native/wip-m7-freeze に push 済み）。計画は `validation_policy.py --base e099da5 --head 962faa4 --phase milestone`（基点は CMYK・Lab の工程の出口の凍結。tier full、plan_hash `deb05491…`、構成は linux-debug・linux-release・linux-asan・windows-debug・windows-release）。2026-10-16 01:11〜07:38 UTC。
+- **実行環境**（資源上限は固定しない＝利用者決定）: Claude Code クラウドコンテナ、4 CPU（Intel Xeon @ 2.80GHz）/ RAM 16GB / Ubuntu 24.04.5 / kernel 6.18.44-fc-v139。Qt 6.11.2、GCC 13.3。参照 Python 3.12＋Pillow 12.3.0・numpy 2.4.6・psd-tools 1.10.9、GENKO_MCP_PYTHON（mcp 2.2.0）、native.yml の数値用環境変数、root から CAP_DAC_OVERRIDE/DAC_READ_SEARCH/FOWNER を外して実行。R3 のとおり Release と ASan を同時に始め、Debug はビルドが済み次第並べた（各構成内 ctest 1 並列）。
+- **結果**（validation_run.py の result.json。3 構成とも status finished・passed true・failures 空、除いた契約なし、CLI23 合格、同じ plan_hash）:
+  - linux-release: 132/132 合格（01:13–02:33 UTC）。故障注入が Debug・ASan だけのための SKIP 33（test_transaction 10・test_save_e2e 16・test_session 3・test_contract_save 1・test_migrate_e2e 1・test_gui_save 1・test_app_e2e 1。これまでの出口と同じ組）は合格に数えない。
+  - linux-debug: 132/132 合格、SKIP 0（01:28–03:14）。
+  - linux-asan: 132/132 合格、サニタイザの指摘なし、SKIP 0（01:13–05:25）。
+  - `--pair`: 失敗は「構成artifactの欠落・重複」1 件のみ＝Windows 2 構成が開発中 deferred。Linux 3 構成どうしの照合は指摘なし。**Windows を含む --pair 合格ではない。**
+- **実 xcb（Xvfb 1920×1080）GUI・E2E**（凍結のビルド）: Release で test_gui_* 28 本すべて合格（actions 14・ai 62・anim 8・book 32・brushes 8・canvas 78・carried 11・color 60・colours 4・effects 15・guides 7・layers 12・layout 32・ledger_a 34・ledger_b 39・ledger_c 27・lines 20・look 42・materials 36・output 23・paint 11・paper 14・pen 51・ruby 18・save は故障注入の SKIP・select 13・studio 29・workspace 10）。Debug で test_gui_save 36・test_app_e2e 8（開く→描く→Undo→保存→終了→別プロセスで再開）。IME の注入（QInputMethodEvent: test_gui_ruby・test_gui_layout・test_gui_lines・test_gui_studio）もこの中で合格。
+- **AC-PERF 注入計測**（Release、Xvfb、F1＝32頁×1500線、静かな機械: 始まりの負荷 1.04。試験は表示のみで合否判定なし。測定機は基準クラスではない＝ACCEPTANCE §6、基準クラスでの合否とは呼ばない）: 開いて最初の頁 626 ms・全頁 805 ms／入力→ライブ線 p95 1.06・p99 3.65 ms、入力→描画 p95 1.79 ms（n=43780）／線確定→表示 p95 18.9 ms／Undo→表示 p95 38.2 ms／頁切替 最初 p95 32.3・精細 p95 113 ms（n=4）／自動保存 p95 1.64 s（n=31）／保存中（計 25.3 s）のイベントループ: 5 ms ごとの刻みの遅れ p99 5.71 ms、250 ms を超える停止 0、4 ms を超えた停止だけの分布では p99・最大とも 54.4 ms（n=65。前の出口の記録はこの分布で 46.1 ms）。test_perf_render: F1 の頁 350 dpi 全体 796 ms・線を足した後 431 ms・512×512 の部分 27 ms、線 200 本の小さな絵 4 ms。
+- **PERF-F**（Release、test_perf_pipeline、ctest 経由。合否判定あり。測定機は基準クラスではない）: F3 の工程 59.4 秒・88 作業。全呼び出し n=314 p95 810 ms・p99 1360 ms（MCP の道具 306 件 p95 777 ms、人の `genko studio` 8 件 p95 5.45 s、書き出し 4 件 最大 7.34 s を含む）／情報取得 n=100 p95 681 ms／編集の確定 p95 87.9 ms／候補の採用 p95 1.40 s／頁の仕上げ p95 799 ms（合格値は各 p95 2 秒）／8 ページの校正出力 10 回: 呼び出しから PDF の完成まで 6.82〜7.33 s（各 30 秒以内。仕事の記録は呼び出しから開始まで最大 6.2 ms）。**全項目合格**（ctest exit 0）。
+- **PERF-G（M7、2 時間の連続制作、test_soak_app）**: 実 xcb で 118.2 分（暖機 20 分＋2 分ごとの巡回 49 回、30 秒の休み）。線 3729 本・取り消し 372・やり直し 186・台詞 62、問題 0、窓の本と閉じて読み直した本の違い 0 頁。VmHWM 407 MiB（≤ 8 GB）、私用メモリ 最初 218 → 最後 248 MiB、増分 29.8 MiB（≤ 128）、傾き 0.365 MiB/分（≤ 1）。**合格**。
+- **配布物（AC-PACKAGE、M7 の最終配布物での確かめ）**: 同じ Release のビルドから cmake --install → genko-studio-0.1.0-linux-x86_64.tar.gz（58 MB）。docker の素の Ubuntu 24.04.5（python・cmake・gcc・qmake なし、管理者権限なしの利用者）で: 導入（~/.local/opt）→ --version → 引き継ぐ前はコマンドラインが知らせる → 起動してマウスで描いて終了 → 線が保存された → 開き直して同じ → PNG・PDF の書き出し → MCP（stdio の initialize・tools/list、道具 41 件）→ **全 14 形式**（png・tiff・pdf・strip・psd・epub・pack・cmyk・layers・webtoon・sns・kindle・timelapse・animation、31 ファイル）→ 設定は ~/.config/genko-studio だけ → 外す（原稿・設定・旧版の設定は残る）: すべて合格。別の場所に展開した配布物の `genko --version` 合格、その genko に対する test_contract_mcp（公式 MCP SDK のクライアントで stdio・HTTP、11 項目）合格。
+- **台帳**: `build_ledger.py --check` 一致（763 行: ported 757・in_progress 3・not_applicable 3。in_progress は Pillow だけの画像形式の 3 モジュール。下の利用者の判断待ち）。
+- **V3 の中で起きたこと（R4: 1 回目・2 回目の記録は使わない）**:
+  - 1 回目（凍結 108b515、2026-10-15 16:24〜19:13 UTC）: Release 132/132・CLI23 合格、ASan 49 本・Debug 52 本まで失敗なし。実 xcb の GUI（Release 28 本）で test_gui_workspace の pythonsMenus だけが落ちた（Ctrl+G でフォルダができない）。試験の書き方の誤り: activateWindow の直後にキーを送っていて、実 xcb では窓が作業中になる前のキーがショートカットに届かない（offscreen ではすぐ作業中になる）。ほかの GUI 試験と同じく qWaitForWindowActive で待つ形に直した（4f04b86。製品・合格の基準は変えていない）。直した試験は実 xcb で 3 回・offscreen で 1 回合格。R4 に従って ASan・Debug を止め、3 構成を初めからやり直した（1 回目の記録は使わない）。
+  - 2 回目（凍結 4f04b86、2026-10-15 19:16〜10-16 01:00 UTC）: Release 132/132・CLI23、Debug 132/132・CLI23、実 xcb の GUI（Release 28 本・Debug の保存の GUI と E2E）は合格。ASan で 4 本が落ちた（M6・M7 で入った GUI・配布の試験は、これまで ASan で流していなかった）。
+    - test_gui_carried（解放後使用、試験のコード）: 読み直した本の一時オブジェクトの部分を範囲 for で回していた → 本を変数に持つ。
+    - test_gui_look（LeakSanitizer、416 バイト）: OpenGL の文脈を作れない画面（offscreen）で、Qt の QOpenGLWidget は大きさの変化・表示のたびに文脈を作り直し、前のものを解放しない（QOpenGLWidgetPrivate::initialize）。製品の直し（app/canvas_gpu.cpp）: 失敗した後は作り直さない（1 回だけ試す）。製品は gpu_available() で文脈が作れるときだけ GPU 表示にするので、利用者の動きは変わらない。漏れの抑止（suppression）は使っていない。
+    - test_package（ASan の構成だけ）: サニタイザーの構成では Genko のライブラリが共有ライブラリで（GenkoFlags.cmake）、Qt の配布の道具が lib/ に写したそれにビルドのフォルダーの探し先（RUNPATH）が残り、libpillow_imaging.so をビルドのフォルダーから読んでいた。SBOM もそれらを数えていなかった。直し: 導入のとき写した libgenko_*.so の RUNPATH を $ORIGIN に（GenkoPackage.cmake）、SBOM は libgenko_*.so を Genko Studio、libpillow_imaging.so を Pillow libImaging の部品として数える（package/sbom.cmake）、test_package はその構成でだけそれらを lib/ に許す（Release・Debug と配布物の確かめは今までどおり Qt・ICU・xcb だけ）。配布物（Release、静的）は変わらない。
+    - test_gui_actions（解放後使用、製品）: 自分のテンプレートの割り付け（app/templates.cpp の plan）が、根のコマの id を作業中の本の中の文字列への参照のまま build に渡していて、最初の操作で本が置き換わった後にそれを読んでいた（Release では読めないコマの id・落ちることがあり得た）→ id を写してから渡す。
+    - 直した 4 本は ASan で合格（test_package は Release でも合格）。凍結 962faa4。R4 に従い、3 構成を初めからやり直した（2 回目の記録は使わない。やり直しの前に機械が再起動した: kernel 6.18.44-fc-v139）。
+
+### M7 の受入（R6: 上の V3 を使い回す。同じソース・実行物）— Linux の分は合格
+- 最終配布物での起動・保存・出力: 上の配布物の確かめ（素の Ubuntu 24.04.5、管理者権限なし）で合格。
+- 2 時間試験（PERF-G）: 合格（試験の判定、上）。PERF-F: 合格（試験の判定、上）。PERF-A〜E: この開発機で測って記録した（上。表示のみで、基準クラスでの合否とは呼ばない: ACCEPTANCE §6）。
+- IME の注入: 実 xcb の GUI（QInputMethodEvent の注入を含む 4 本を含む 28 本）で合格。全出力: 14 形式を配布物で合格。
+- MCP SDK での外部接続: 配布物の genko に対して公式 SDK のクライアント（stdio・HTTP）で合格。
+- 独立レビュー: M7 群の R2 レビュー（上、2 並行・読取専用）と、凍結前の独立レビューの直し（P1×2・P2・P3）。直さずに記録したのは下の P3 の 2 件だけ。
+- 別のインストール先への導入: ~/.local/opt（install.sh）と、別の場所に展開した配布物の両方で合格。
+- **Windows の実機の build・受入（windows-debug・windows-release と、それを含む `--pair`）は未実施**（利用者の決定: マージ後に別の環境で）。それが済むまで、両 OS の配布の完了とは言わない。
+- **AC-RELEASE（最終判定）はまだ**: Windows の受入と、台帳の in_progress 3 行（Pillow だけの画像形式。下の判断待ち）が残る。
+
+### 既知の制限（M6・M7 の出口の時点）
+- Windows の実機の build・受入は未実施（利用者の決定: マージ後に別の環境で）。
+- 色を面ごとに分けた TIFF（PlanarConfiguration 2）のうち、1 画素の深さが 8 ビットの倍数でないものは未移植（置けるが描かずに知らせる）。8・16 ビットの面ごと、YCbCr は Pillow と同じに読む。
+- Pillow だけが読む画像の形式（netpbm・ICO・CUR・icns・QOI・DDS・SGI・JPEG 2000・AVIF）は置くときに image_format で断り、Python が置いた本のその画像は描かずに知らせる（利用者の決定待ち: 既知の制限として記録を推奨）。
+- Lab のページの編集可能な文字の色は RGB で書く。書いた PSD の Photoshop での確認はしていない。
+- Qt が中に含む第三者のソフトウェアの帰属表示の全文は配布物に入れていない（QT-LGPL-ja.md で案内）。
+- アプリのアイコンはまだない。
+- MCP の `inspect` の説明文のプラグインの置き場所の例は旧版の場所のまま（利用者の決定）。
+- `genko render --out` の Pillow だけが書く形式（GIF・ICO・PPM・TGA・JPEG 2000 など）は NotYetPorted format:<ext> と言う（PNG・JPEG・TIFF・PDF・WebP・BMP・DIB は書く）。
+- 原稿のフォルダーは描くたびに変更ごとの資産で大きくなる（2 時間で 4.3 GB。Python の v3 と同じ作り、`genko gc` で減らせる）。
+- R2 レビューで直さずに記録した P3: doctor の問題の並び（同梱のフォントがないときだけ順が違う）、無圧縮 TIFF のバイトの並び（画素とストリップは同じ）。
+
+### 利用者の判断待ち（答えはまだない。いまの状態）
+- PhotoCraft の完全な取り込み: 推奨はこの移行の外の別の工程。いまは露出の調整だけを移植している（THIRD_PARTY.md の PhotoCraft）。
+- コマンドラインからの設定の引き継ぎ: 推奨は `genko settings import` を足すこと。**まだ作っていない**（いまは画面の初回の問いと、引き継ぐ前にコマンドラインが知らせるだけ）。
+- Pillow だけが読む・書く画像の形式: 推奨は既知の制限として記録すること（いまそう記録している。台帳の in_progress 3 行）。
+- 既定の起動を Python 版から C++ 版へ切り替えるか（Windows の受入の後）。
+
+### 次
+- native/integration をマージした後、別の環境で Windows（windows-debug・windows-release の全体試験、実機の GUI、配布物の導入、`--pair`）。上の判断待ちの答えに合わせて直す。
+
+
+## CMYK・Lab の編集（color-mode@1、COLOR-02）— 2026-10-13〜15 記録（M5 の後、M6 の前の独立した工程）
 
 ### 工程の出口 V3（e099da5）— Linux で合格
 - **凍結SHA**: `e099da5a09ecc1653c1caa4da6f09bafdd921cc8`（群D の統合の記録）。V3 は main tree の HEAD 2404922（その上は docs/ の再計画だけ。固定するフォルダー native・src・tools は凍結と同じことを確かめてから流した）。計画は `validation_policy.py --base 9f97117 --head e099da5 --phase milestone`（基点は M5 出口の凍結。tier full、各 120 試験、性能は別に必須）。
