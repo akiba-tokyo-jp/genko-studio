@@ -21,8 +21,30 @@
 #include "core/strokes.hpp"
 #include "render/colour.hpp"
 #include "render/page.hpp"
+#include "render/png.hpp"
+#include "render/proof.hpp"
+#include "render/ops_registry.hpp"
+#include "app/color_settings_dialog.hpp"
+#include "app/preferences.hpp"
+#include "core/color_model.hpp"
+#include "storage/asset_store.hpp"
+#include <QComboBox>
+#include <QCheckBox>
+#include <QMenuBar>
+#include <QLabel>
+#include <zlib.h>
+#include <tuple>
 using namespace genko;
 using core::Json;
+namespace {
+// A page of 20 × 20 mm: a saturated green (out of coated-cmyk's gamut) on its left, a grey on its right (u16 pixels).
+core::Document coloured_book(const std::string& title) {
+    auto doc=core::new_episode(title,core::Num(1),1,core::PageSpec::custom(20,20,16,16,1,2,2,2,2,72,"color"));
+    doc.edit_page(0).numero=false;doc.edit_page(0).layers.clear();doc.edit_page(0).frames.clear();
+    return core::CommandBus().apply(doc,Json::array({Json{{"op","put_color_raster"},{"page",1},{"width",2},{"height",1},{"precision","u16"},
+        {"pixels",Json::array({0,65535,0,65535,32768,32768,32768,65535})}}}),core::Actor("human:tester")).doc;
+}
+}  // namespace
 class TestGuiColor : public QObject {
     Q_OBJECT
 private slots:
@@ -207,6 +229,9 @@ private slots:
     // chosen on this computer), and as it is again once switched off.
     void cmykProofShowsThePageAsItPrints() {
         (void)gui_test::config_folder();QTemporaryDir tmp;
+        // (PC1b: the working CMYK is coated-cmyk unless chosen — the user's decision; Python's 「CMYK で見る」 is the choice
+        // 書き出しの ICC・Genko の変換, chosen here so that what this test sees is still Python's conversion)
+        app::settings()->setValue(QStringLiteral("color/workingCmyk"),QStringLiteral("export"));
         auto doc=core::new_episode("色校正",core::Num(1),1,core::PageSpec::custom(20,20,16,16,1,2,2,2,2,72,"color"));
         doc.edit_page(0).numero=false;doc.edit_page(0).layers.clear();doc.edit_page(0).frames.clear();
         doc=core::CommandBus().apply(doc,Json::array({Json{{"op","put_color_raster"},{"page",1},{"width",2},{"height",1},{"precision","u16"},
@@ -252,6 +277,7 @@ private slots:
         through(std::nullopt);
         window.action("act_cmyk_proof")->trigger();
         app::settings()->remove(QStringLiteral("color/icc"));
+        app::settings()->remove(QStringLiteral("color/workingCmyk"));
         window.hide();
     }
     void precisionPenConversionKeepsDiskUndo_data() {precisionPaintConversionKeepsSource_data();}
@@ -570,6 +596,574 @@ private slots:
         QCOMPARE(session->document().page(0).layers.back().color_raster, raw);
         session->redo();
         QCOMPARE(session->document().page(0).layers.back().adjust->at("exposure"), Json(10.0));
+        window.hide();
+    }
+
+    // --- PC1b (SPEC COLOR-03): 色の校正・校正の設定・色域外警告・カラー設定・方針 ------------------------------------------
+
+    // 表示 → 校正の設定: each kind shows the page as render/proof makes it (the working CMYK: coated-cmyk unless another is
+    // chosen in カラー設定); choosing one turns 色の校正 on (Ctrl+Alt+Y), its mark exclusive; カスタム… a profile of its own;
+    // the proof is the book's in this window (another book in front has its own).
+    void proofSetupKindsShowThePage() {
+        (void)gui_test::config_folder();QTemporaryDir tmp;
+        for (const char* key : {"color/workingCmyk","color/icc"}) app::settings()->remove(QString::fromLatin1(key));
+        const auto path=gui_test::path_of(tmp.path()+"/book");gui_test::write_book(path,coloured_book("校正の設定"));
+        auto session=app::Session::open(path,gui_test::quick(gui_test::path_of(tmp.path()+"/recovery")));
+        app::MainWindow window(session);window.resize(900,700);window.show();QVERIFY(QTest::qWaitForWindowExposed(&window));
+        QCOMPARE(window.action("act_cmyk_proof")->text(),QStringLiteral("色の校正"));
+        QCOMPARE(window.action("act_cmyk_proof")->shortcuts(),QList<QKeySequence>{QKeySequence(QStringLiteral("Ctrl+Alt+Y"))});
+        QCOMPARE(window.action("act_gamut_warning")->shortcuts(),QList<QKeySequence>{QKeySequence(QStringLiteral("Ctrl+Shift+Y"))});
+        QCOMPARE(window.action("act_color_settings")->shortcuts(),QList<QKeySequence>{QKeySequence(QStringLiteral("Ctrl+Shift+K"))});
+        QStringList kinds;
+        for (QAction* top : window.menuBar()->actions()) {
+            if (top->menu()==nullptr || top->menu()->title()!=QStringLiteral("表示")) continue;
+            for (QAction* a : top->menu()->actions())
+                if (a->menu()!=nullptr && a->menu()->title()==QStringLiteral("校正の設定"))
+                    for (QAction* k : a->menu()->actions()) if (!k->isSeparator()) kinds<<k->property("genko_attribute").toString();
+        }
+        QCOMPARE(kinds,(QStringList{"act_proof_custom","act_proof_working_cmyk","act_proof_export","act_proof_cyan","act_proof_magenta",
+            "act_proof_yellow","act_proof_black","act_proof_cmy","act_proof_srgb","act_proof_monitor","act_proof_legacy_mac","act_proof_protan","act_proof_deutan"}));
+        const auto shown=[&](const std::optional<render::proof::Setup>& setup) {
+            QVERIFY(window.canvas()->wait_rendered(10000));
+            const int dpi=window.canvas()->renderer().shown_dpi();QVERIFY(dpi>0);
+            render::RenderOptions options;options.mode="proof";options.skip_unported=true;
+            auto image=render::render_page(session->document().page(0),dpi,options,&session->document()).image;
+            if (setup) image=render::proof::apply(image,*setup);
+            const auto bytes=image.convert("RGB").tobytes();
+            QCOMPARE(window.canvas()->renderer().compose(dpi),QImage(reinterpret_cast<const uchar*>(bytes.data()),image.width(),image.height(),
+                image.width()*3,QImage::Format_RGB888).convertToFormat(QImage::Format_RGB32));
+        };
+        shown(std::nullopt);
+        const core::Bytes coated=core::builtin_profile("coated-cmyk")->bytes;
+        render::proof::Setup setup;
+        setup.kind=render::proof::Kind::Protan;
+        setup.icc=coated;
+        window.action("act_proof_protan")->trigger();
+        QVERIFY(window.canvas()->renderer().cmyk_proof());QVERIFY(window.action("act_cmyk_proof")->isChecked());
+        QVERIFY(window.action("act_proof_protan")->isChecked());QVERIFY(!window.action("act_proof_working_cmyk")->isChecked());
+        shown(setup);
+        window.action("act_proof_working_cmyk")->trigger();
+        setup=render::proof::Setup{};setup.icc=coated;
+        QVERIFY(window.action("act_proof_working_cmyk")->isChecked() && !window.action("act_proof_protan")->isChecked());
+        shown(setup);
+        const QString folder=QString::fromUtf8(qgetenv("GENKO_COLOR_SCREENSHOT_DIR"));
+        if (!folder.isEmpty()) {QVERIFY(QDir().mkpath(folder));QVERIFY(window.grab().save(folder+"/proof-working-cmyk.png"));}
+        window.action("act_proof_black")->trigger();
+        setup.kind=render::proof::Kind::Plate;setup.plate=3;
+        shown(setup);
+        window.action("act_proof_export")->trigger();  // (書き出しの CMYK: Python's 「CMYK で見る」, the plain conversion here)
+        shown(render::proof::Setup{});
+        window.action("act_proof_legacy_mac")->trigger();  // (the kind alone changes: the profile as it was)
+        setup=render::proof::Setup{};setup.kind=render::proof::Kind::LegacyMac;
+        shown(setup);
+        // カスタム…: a grey profile of its own
+        gui_test::Answers answers;
+        answers.responder->exec=[](QDialog* d) {
+            if (d->objectName()!=QStringLiteral("proof_custom_dialog")) return 0;
+            auto* profile=d->findChild<QComboBox*>(QStringLiteral("proof_profile"));
+            profile->setCurrentIndex(profile->findData(QStringLiteral("sgray")));
+            return static_cast<int>(QDialog::Accepted);
+        };
+        window.action("act_proof_custom")->trigger();
+        QVERIFY(window.action("act_proof_custom")->isChecked());
+        setup=render::proof::Setup{};setup.icc=core::builtin_profile("sgray")->bytes;
+        shown(setup);
+        // the book's own: another book in front has none; back, it is there again
+        const auto other=gui_test::path_of(tmp.path()+"/other");gui_test::write_book(other,coloured_book("別の本"));
+        window.add_document(app::Session::open(other,gui_test::quick(gui_test::path_of(tmp.path()+"/recovery2"))));
+        QCOMPARE(window.current_document(),1);
+        QVERIFY(!window.canvas()->renderer().cmyk_proof());QVERIFY(!window.action("act_cmyk_proof")->isChecked());
+        window.switch_document(0);
+        QVERIFY(window.canvas()->renderer().cmyk_proof());QVERIFY(window.action("act_proof_custom")->isChecked());
+        // 色の校正 off: the page as it is
+        window.action("act_cmyk_proof")->trigger();
+        QVERIFY(!window.canvas()->renderer().cmyk_proof());
+        shown(std::nullopt);
+        window.hide();
+    }
+
+    // 色の校正 as it comes (Ctrl+Alt+Y, nothing chosen in カラー設定): the working CMYK, coated-cmyk (the user's decision:
+    // upstream's), its soft proof — not Python's 「CMYK で見る」, which is 書き出しの CMYK (cmykProofShowsThePageAsItPrints).
+    void theProofAsItComesIsTheWorkingCoatedCmyk() {
+        (void)gui_test::config_folder();QTemporaryDir tmp;
+        for (const char* key : {"color/workingCmyk","color/icc"}) app::settings()->remove(QString::fromLatin1(key));
+        const auto path=gui_test::path_of(tmp.path()+"/book");gui_test::write_book(path,coloured_book("既定の校正"));
+        auto session=app::Session::open(path,gui_test::quick(gui_test::path_of(tmp.path()+"/recovery")));
+        app::MainWindow window(session);window.resize(900,700);window.show();QVERIFY(QTest::qWaitForWindowExposed(&window));
+        QTest::keySequence(&window,QKeySequence(QStringLiteral("Ctrl+Alt+Y")));
+        QVERIFY(window.canvas()->renderer().cmyk_proof());
+        QVERIFY(window.action("act_proof_working_cmyk")->isChecked());
+        QVERIFY(window.canvas()->wait_rendered(10000));
+        const int dpi=window.canvas()->renderer().shown_dpi();QVERIFY(dpi>0);
+        render::RenderOptions options;options.mode="proof";options.skip_unported=true;
+        const auto image=render::render_page(session->document().page(0),dpi,options,&session->document()).image;
+        render::proof::Setup coated;coated.icc=core::builtin_profile("coated-cmyk")->bytes;
+        const auto qimage=[](const render::Image& i) {
+            const auto bytes=i.convert("RGB").tobytes();
+            return QImage(reinterpret_cast<const uchar*>(bytes.data()),i.width(),i.height(),i.width()*3,QImage::Format_RGB888).convertToFormat(QImage::Format_RGB32);
+        };
+        QCOMPARE(window.canvas()->renderer().compose(dpi),qimage(render::proof::apply(image,coated)));
+        QVERIFY(window.canvas()->renderer().compose(dpi)!=qimage(render::colour::proof(image)));
+        window.hide();
+    }
+
+    // The 校正の設定 mark is on the kind shown: a kind chosen after カスタム… (its profile kept for the gamut warning) is
+    // marked, not カスタム….
+    void theProofsMarkIsOnTheKindShown() {
+        (void)gui_test::config_folder();QTemporaryDir tmp;
+        const auto path=gui_test::path_of(tmp.path()+"/book");gui_test::write_book(path,coloured_book("印"));
+        auto session=app::Session::open(path,gui_test::quick(gui_test::path_of(tmp.path()+"/recovery")));
+        app::MainWindow window(session);window.resize(900,700);window.show();QVERIFY(QTest::qWaitForWindowExposed(&window));
+        gui_test::Answers answers;
+        answers.responder->exec=[](QDialog* d) {
+            if (d->objectName()!=QStringLiteral("proof_custom_dialog")) return 0;
+            auto* profile=d->findChild<QComboBox*>(QStringLiteral("proof_profile"));
+            profile->setCurrentIndex(profile->findData(QStringLiteral("display-p3")));
+            return static_cast<int>(QDialog::Accepted);
+        };
+        window.action("act_proof_custom")->trigger();
+        QVERIFY(window.action("act_proof_custom")->isChecked());
+        const auto marked=[&] {
+            QStringList on;
+            for (const char* name : {"act_proof_custom","act_proof_working_cmyk","act_proof_export","act_proof_black","act_proof_srgb","act_proof_monitor",
+                                     "act_proof_legacy_mac","act_proof_protan","act_proof_deutan"})
+                if (window.action(QString::fromLatin1(name))->isChecked()) on<<QString::fromLatin1(name);
+            return on;
+        };
+        for (const char* kind : {"act_proof_protan","act_proof_legacy_mac","act_proof_srgb"}) {
+            window.action(QString::fromLatin1(kind))->trigger();
+            QCOMPARE(marked(),QStringList{QString::fromLatin1(kind)});
+        }
+        QCOMPARE(window.proof_view().profile,QStringLiteral("display-p3"));
+        window.switch_document(0);
+        QCOMPARE(marked(),QStringList{QStringLiteral("act_proof_srgb")});
+        window.hide();
+    }
+
+    // カスタム…'s profile file gone: the proof is not silently another — it is turned off (the gamut warning too), and said.
+    void aCustomProfileGoneTurnsTheProofOff() {
+        (void)gui_test::config_folder();QTemporaryDir tmp;
+        const auto path=gui_test::path_of(tmp.path()+"/book");gui_test::write_book(path,coloured_book("消えた校正"));
+        auto session=app::Session::open(path,gui_test::quick(gui_test::path_of(tmp.path()+"/recovery")));
+        app::MainWindow window(session);window.resize(900,700);window.show();QVERIFY(QTest::qWaitForWindowExposed(&window));
+        const QString icc=tmp.path()+QStringLiteral("/校正.icc");
+        QVERIFY(QFile::copy(QString::fromStdString(core::path_to_utf8(std::filesystem::path(GENKO_TEST_DATA)/"colour"/"photocraft-coated-cmyk.icc")),icc));
+        gui_test::Answers answers;
+        answers.responder->exec=[&](QDialog* d) {
+            if (d->objectName()!=QStringLiteral("proof_custom_dialog")) return 0;
+            auto* profile=d->findChild<QComboBox*>(QStringLiteral("proof_profile"));
+            profile->addItem(QStringLiteral("校正.icc"),icc);
+            profile->setCurrentIndex(profile->findData(icc));
+            return static_cast<int>(QDialog::Accepted);
+        };
+        window.action("act_proof_custom")->trigger();
+        QVERIFY(window.canvas()->renderer().cmyk_proof());
+        QVERIFY(window.canvas()->renderer().proof_setup().icc!=nullptr);
+        window.action("act_gamut_warning")->trigger();
+        QVERIFY(window.canvas()->renderer().gamut().has_value());
+        QVERIFY(QFile::remove(icc));
+        window.action("act_cmyk_proof")->trigger();  // (off, and on again: the file looked for)
+        window.action("act_cmyk_proof")->trigger();
+        QVERIFY(!window.canvas()->renderer().cmyk_proof());
+        QVERIFY(!window.action("act_cmyk_proof")->isChecked());
+        QVERIFY(!window.canvas()->renderer().gamut().has_value());
+        QVERIFY(!window.action("act_gamut_warning")->isChecked());
+        QVERIFY2(window.last_notice().contains(QStringLiteral("校正.icc")),qPrintable(window.last_notice()));
+        QVERIFY(window.canvas()->wait_rendered(10000));
+        window.hide();
+    }
+
+    // カラー設定 and 環境設定 change every window, not only the one they were opened from.
+    void theSettingsChangeEveryWindow() {
+        (void)gui_test::config_folder();QTemporaryDir tmp;
+        for (const char* key : {"color/workingCmyk","color/icc","view/gamut_color","view/gamut_opacity"}) app::settings()->remove(QString::fromLatin1(key));
+        const auto path=gui_test::path_of(tmp.path()+"/book");gui_test::write_book(path,coloured_book("一つ目"));
+        const auto other=gui_test::path_of(tmp.path()+"/other");gui_test::write_book(other,coloured_book("二つ目"));
+        app::MainWindow window(app::Session::open(path,gui_test::quick(gui_test::path_of(tmp.path()+"/recovery"))));
+        window.resize(900,700);window.show();QVERIFY(QTest::qWaitForWindowExposed(&window));
+        app::MainWindow second(app::Session::open(other,gui_test::quick(gui_test::path_of(tmp.path()+"/recovery2"))));
+        second.resize(900,700);second.show();QVERIFY(QTest::qWaitForWindowExposed(&second));
+        second.action("act_proof_working_cmyk")->trigger();
+        second.action("act_gamut_warning")->trigger();
+        QVERIFY(second.canvas()->renderer().proof_setup().icc!=nullptr);
+        gui_test::Answers answers;
+        answers.responder->exec=[](QDialog* d) {
+            if (auto* dialog=qobject_cast<app::color_settings::ColorSettingsDialog*>(d)) {
+                dialog->working_cmyk->setCurrentIndex(dialog->working_cmyk->findData(QStringLiteral("export")));
+                return static_cast<int>(QDialog::Accepted);
+            }
+            if (auto* prefs=qobject_cast<app::preferences::PreferencesDialog*>(d)) {
+                prefs->gamut_percent->setValue(40);
+                prefs->save();
+                return static_cast<int>(QDialog::Accepted);
+            }
+            return 0;
+        };
+        window.action("act_color_settings")->trigger();
+        QVERIFY(second.canvas()->renderer().proof_setup().icc==nullptr);  // (書き出しの CMYK: Genko's own conversion here)
+        window.action("act_prefs")->trigger();
+        QVERIFY(second.canvas()->renderer().gamut().has_value());
+        QCOMPARE(second.canvas()->renderer().gamut()->opacity,0.4);
+        for (const char* key : {"color/workingCmyk","view/gamut_opacity"}) app::settings()->remove(QString::fromLatin1(key));
+        second.hide();window.hide();
+    }
+
+    // 表示 → 色域外警告 (Ctrl+Shift+Y): the colours coated-cmyk cannot print marked on screen (環境設定's colour and
+    // opacity), counted in the status bar; the page's own pixels (the eyedropper's, compose) as they were.
+    void gamutWarningMarksAndCounts() {
+        (void)gui_test::config_folder();QTemporaryDir tmp;
+        for (const char* key : {"color/workingCmyk","view/gamut_color","view/gamut_opacity"}) app::settings()->remove(QString::fromLatin1(key));
+        const auto path=gui_test::path_of(tmp.path()+"/book");gui_test::write_book(path,coloured_book("色域外"));
+        auto session=app::Session::open(path,gui_test::quick(gui_test::path_of(tmp.path()+"/recovery")));
+        app::MainWindow window(session);window.resize(900,700);window.show();QVERIFY(QTest::qWaitForWindowExposed(&window));
+        QVERIFY(!window.gamut_label()->isVisible());
+        window.action("act_gamut_warning")->trigger();
+        QVERIFY(window.canvas()->renderer().gamut().has_value());
+        QVERIFY(window.canvas()->wait_rendered(10000));
+        QTRY_VERIFY_WITH_TIMEOUT(window.gamut_label()->isVisible() && window.canvas()->renderer().gamut_count().second>0,10000);
+        const auto [out,all]=window.canvas()->renderer().gamut_count();
+        QVERIFY2(out>0 && out<all,qPrintable(QStringLiteral("%1 of %2").arg(out).arg(all)));
+        QVERIFY(window.gamut_label()->text().startsWith(QStringLiteral("色域外 ")));
+        const int dpi=window.canvas()->renderer().shown_dpi();QVERIFY(dpi>0);
+        render::RenderOptions options;options.mode="proof";options.skip_unported=true;
+        const auto image=render::render_page(session->document().page(0),dpi,options,&session->document()).image;
+        const auto bytes=image.tobytes();
+        const QImage plain=QImage(reinterpret_cast<const uchar*>(bytes.data()),image.width(),image.height(),image.width()*3,QImage::Format_RGB888)
+            .convertToFormat(QImage::Format_RGB32);
+        QCOMPARE(window.canvas()->renderer().compose(dpi),plain);
+        const QPoint green(plain.width()/8,plain.height()/2), grey(plain.width()*7/8,plain.height()/2);
+        QImage marked=window.canvas()->renderer().compose_shown(dpi);
+        QCOMPARE(marked.pixelColor(green),QColor(128,128,128));
+        QCOMPARE(marked.pixelColor(grey),plain.pixelColor(grey));
+        const QString folder=QString::fromUtf8(qgetenv("GENKO_COLOR_SCREENSHOT_DIR"));
+        if (!folder.isEmpty()) {QVERIFY(QDir().mkpath(folder));QVERIFY(window.grab().save(folder+"/gamut-warning.png"));}
+        // 環境設定 → 透明部分・色域: magenta at half
+        app::settings()->setValue(QStringLiteral("view/gamut_color"),QStringLiteral("#ff00ff"));
+        app::settings()->setValue(QStringLiteral("view/gamut_opacity"),50);
+        app::preferences::apply_all(&window);
+        QVERIFY(window.canvas()->wait_rendered(10000));
+        marked=window.canvas()->renderer().compose_shown(dpi);
+        const QColor half=marked.pixelColor(green), was=plain.pixelColor(green);
+        for (const auto& [a,b,c] : {std::tuple{half.red(),was.red(),255},std::tuple{half.green(),was.green(),0},std::tuple{half.blue(),was.blue(),255}})
+            QVERIFY(std::abs(a-(b+c)/2)<=1);
+        QCOMPARE(window.canvas()->renderer().compose(dpi),plain);
+        window.action("act_gamut_warning")->trigger();
+        QVERIFY(!window.canvas()->renderer().gamut());
+        QVERIFY(window.canvas()->wait_rendered(10000));
+        QVERIFY(!window.gamut_label()->isVisible());
+        QCOMPARE(window.canvas()->renderer().compose_shown(dpi),plain);
+        for (const char* key : {"view/gamut_color","view/gamut_opacity"}) app::settings()->remove(QString::fromLatin1(key));
+        window.hide();
+    }
+
+    // A Display P3 page is checked and shown by its own values, not by the screen's sRGB they were cut to (upstream's
+    // composite_profile): its P3 green is out of an sRGB proof's gamut (as sRGB it is sRGB's own green, in), and
+    // インターネット標準の RGB shows its numbers (0, 1, 0) as sRGB's green.
+    void aProfiledPageIsCheckedByItsOwnValues() {
+        (void)gui_test::config_folder();QTemporaryDir tmp;
+        for (const char* key : {"color/workingCmyk","view/gamut_color","view/gamut_opacity"}) app::settings()->remove(QString::fromLatin1(key));
+        auto doc=coloured_book("P3 の色域");
+        doc=core::CommandBus(render::ops_registry()).apply(doc,Json::array({Json{{"op","put_color_raster"},{"page",1},{"width",2},{"height",1},
+            {"precision","u16"},{"pixels",Json::array({0,65535,0,65535,32768,32768,32768,65535})}},Json{{"op","assign_profile"},{"page",1},{"profile","display-p3"}}}),
+            core::Actor("human:tester")).doc;
+        QVERIFY(doc.page(0).rgb);
+        const auto path=gui_test::path_of(tmp.path()+"/book");gui_test::write_book(path,doc);
+        auto session=app::Session::open(path,gui_test::quick(gui_test::path_of(tmp.path()+"/recovery")));
+        app::MainWindow window(session);window.resize(900,700);window.show();QVERIFY(QTest::qWaitForWindowExposed(&window));
+        gui_test::Answers answers;
+        answers.responder->exec=[](QDialog* d) {
+            if (d->objectName()!=QStringLiteral("proof_custom_dialog")) return 0;
+            auto* profile=d->findChild<QComboBox*>(QStringLiteral("proof_profile"));
+            profile->setCurrentIndex(profile->findData(QStringLiteral("srgb")));
+            return static_cast<int>(QDialog::Accepted);
+        };
+        window.action("act_proof_custom")->trigger();
+        window.action("act_cmyk_proof")->trigger();  // (the proof off: the gamut warning alone)
+        QVERIFY(!window.canvas()->renderer().cmyk_proof());
+        window.action("act_gamut_warning")->trigger();
+        QVERIFY(window.canvas()->wait_rendered(10000));
+        QTRY_VERIFY_WITH_TIMEOUT(window.canvas()->renderer().gamut_count().second>0,10000);
+        const int dpi=window.canvas()->renderer().shown_dpi();QVERIFY(dpi>0);
+        const QImage plain=window.canvas()->renderer().compose(dpi);
+        const QPoint green(plain.width()/8,plain.height()/2), grey(plain.width()*7/8,plain.height()/2);
+        const QImage marked=window.canvas()->renderer().compose_shown(dpi);
+        QCOMPARE(marked.pixelColor(green),QColor(128,128,128));
+        QCOMPARE(marked.pixelColor(grey),plain.pixelColor(grey));
+        const auto [out,all]=window.canvas()->renderer().gamut_count();
+        QVERIFY2(out>0 && out<all,qPrintable(QStringLiteral("%1 of %2").arg(out).arg(all)));
+        window.action("act_gamut_warning")->trigger();
+        window.action("act_proof_srgb")->trigger();
+        QVERIFY(window.canvas()->renderer().cmyk_proof());
+        QVERIFY(window.canvas()->wait_rendered(10000));
+        const QImage shown=window.canvas()->renderer().compose(dpi);
+        QCOMPARE(shown.pixelColor(green),QColor(0,255,0));
+        const QColor g=shown.pixelColor(grey);
+        QVERIFY(std::abs(g.red()-128)<=1 && g.red()==g.green() && g.green()==g.blue());
+        window.hide();
+    }
+
+    // 編集 → カラー設定…: kept on this computer (QSettings color/*), 初期設定に戻す; the book's own 文字のガンマ is an op
+    // (set_text_gamma, undone as any) and the page is drawn with it as everywhere.
+    void colorSettingsAreKeptAndTheBookGetsItsGamma() {
+        (void)gui_test::config_folder();QTemporaryDir tmp;
+        auto doc=core::new_episode("カラー設定",core::Num(1),1,core::PageSpec::custom(60,60,50,50,2,2,2,2,2,150,"color"));
+        doc=core::CommandBus(render::ops_registry()).apply(doc,Json::array({Json{{"op","add_line"},{"page",1},{"text","ガンマ"},{"x_mm",10},{"y_mm",10},
+            {"w_mm",40},{"h_mm",30}}}),core::Actor("human:tester")).doc;
+        const auto path=gui_test::path_of(tmp.path()+"/book");gui_test::write_book(path,doc);
+        auto session=app::Session::open(path,gui_test::quick(gui_test::path_of(tmp.path()+"/recovery")));
+        app::MainWindow window(session);window.resize(900,700);window.show();QVERIFY(QTest::qWaitForWindowExposed(&window));
+        gui_test::Answers answers;
+        QStringList seen;  // (what the dialog showed when it opened)
+        answers.responder->exec=[&seen](QDialog* d) {
+            auto* dialog=qobject_cast<app::color_settings::ColorSettingsDialog*>(d);
+            if (dialog==nullptr) return 0;
+            seen<<dialog->working_cmyk->currentData().toString()<<(dialog->gamma_on->isChecked() ? QStringLiteral("gamma") : QStringLiteral("none"));
+            dialog->working_cmyk->setCurrentIndex(dialog->working_cmyk->findData(QStringLiteral("export")));
+            dialog->policy_rgb->setCurrentIndex(dialog->policy_rgb->findData(QStringLiteral("convert")));
+            dialog->ask_mismatch->setChecked(false);
+            dialog->gamma_on->setChecked(true);
+            dialog->gamma->setValue(1.6);
+            return static_cast<int>(QDialog::Accepted);
+        };
+        window.action("act_color_settings")->trigger();
+        QCOMPARE(seen,(QStringList{QStringLiteral("coated-cmyk"),QStringLiteral("none")}));
+        QCOMPARE(app::settings()->value(QStringLiteral("color/workingCmyk")).toString(),QStringLiteral("export"));
+        QCOMPARE(app::settings()->value(QStringLiteral("color/policyRgb")).toString(),QStringLiteral("convert"));
+        QCOMPARE(app::settings()->value(QStringLiteral("color/askOnMismatch")).toString(),QStringLiteral("false"));
+        QCOMPARE(window.book().text_gamma.value_or(0),1.6);
+        QVERIFY(window.canvas()->wait_rendered(10000));
+        {
+            const int dpi=window.canvas()->renderer().shown_dpi();
+            render::RenderOptions options;options.mode="proof";options.skip_unported=true;
+            const auto image=render::render_page(session->document().page(0),dpi,options,&session->document()).image;
+            const auto bytes=image.tobytes();
+            QCOMPARE(window.canvas()->renderer().compose(dpi),QImage(reinterpret_cast<const uchar*>(bytes.data()),image.width(),image.height(),
+                image.width()*3,QImage::Format_RGB888).convertToFormat(QImage::Format_RGB32));
+        }
+        window.action("act_undo")->trigger();
+        QVERIFY(!window.book().text_gamma);
+        // shown again; 初期設定に戻す
+        seen.clear();
+        answers.responder->exec=[&seen](QDialog* d) {
+            auto* dialog=qobject_cast<app::color_settings::ColorSettingsDialog*>(d);
+            if (dialog==nullptr) return 0;
+            seen<<dialog->working_cmyk->currentData().toString()<<dialog->policy_rgb->currentData().toString();
+            dialog->reset->click();
+            seen<<dialog->working_cmyk->currentData().toString()<<dialog->policy_rgb->currentData().toString()
+                <<(dialog->ask_mismatch->isChecked() ? QStringLiteral("ask") : QStringLiteral("quiet"));
+            return static_cast<int>(QDialog::Accepted);
+        };
+        window.action("act_color_settings")->trigger();
+        QCOMPARE(seen,(QStringList{QStringLiteral("export"),QStringLiteral("convert"),QStringLiteral("coated-cmyk"),QStringLiteral("preserve"),
+            QStringLiteral("ask")}));
+        QCOMPARE(app::color_settings::load(),app::color_settings::Settings{});
+        QVERIFY(!window.book().text_gamma);
+        window.hide();
+    }
+
+    // The page list's small pictures are kept by what the page is drawn from: the book's text gamma and the page's RGB
+    // profile change them (a book without either keeps its key).
+    void smallPicturesFollowTheGammaAndTheProfile() {
+        auto doc=core::new_episode("縮小図",core::Num(1),1,core::PageSpec::custom(60,60,50,50,2,2,2,2,2,150,"color"));
+        const core::CommandBus bus(render::ops_registry());
+        doc=bus.apply(doc,Json::array({Json{{"op","add_line"},{"page",1},{"text","ガンマ"},{"x_mm",10},{"y_mm",10},{"w_mm",40},{"h_mm",30}}}),
+            core::Actor("human:tester")).doc;
+        const auto key=[](const core::Document& d) {return app::ThumbCache::key(d,d.page(0),60,"proof");};
+        const auto gamma=bus.apply(doc,Json::array({Json{{"op","set_text_gamma"},{"gamma",1.45}}}),core::Actor("human:tester")).doc;
+        const auto none=bus.apply(gamma,Json::array({Json{{"op","set_text_gamma"},{"gamma",nullptr}}}),core::Actor("human:tester")).doc;
+        const auto p3=bus.apply(doc,Json::array({Json{{"op","assign_profile"},{"page",1},{"profile","display-p3"}}}),core::Actor("human:tester")).doc;
+        QVERIFY(key(gamma)!=key(doc));
+        QCOMPARE(key(none),key(doc));
+        QVERIFY(key(p3)!=key(doc));
+    }
+
+    // カラー設定's policy for a book opened: its page of another RGB profile converted to the working sRGB through an op
+    // (undone as any); asked first when chosen, the answer taken (外す: the profile replaced, the numbers kept); a book
+    // opened read-only is never converted nor asked about.
+    void openingABookFollowsThePolicy() {
+        (void)gui_test::config_folder();QTemporaryDir tmp;
+        auto p3=core::new_episode("P3",core::Num(1),1,core::PageSpec::custom(20,20,16,16,1,2,2,2,2,72,"color"));
+        p3.edit_page(0).numero=false;p3.edit_page(0).layers.clear();p3.edit_page(0).frames.clear();
+        p3=core::CommandBus(render::ops_registry()).apply(p3,Json::array({Json{{"op","put_color_raster"},{"page",1},{"width",1},{"height",1},
+            {"precision","u16"},{"pixels",Json::array({50000,20000,10000,65535})}},Json{{"op","assign_profile"},{"page",1},{"profile","display-p3"}}}),
+            core::Actor("human:tester")).doc;
+        QVERIFY(p3.page(0).rgb);
+        const auto raster=*p3.page(0).layers.back().color_raster;
+        const auto ref=core::builtin_profile("display-p3")->ref();
+        for (const char* name : {"converted","asked","locked"}) gui_test::write_book(gui_test::path_of(tmp.path()+"/"+name),p3);
+        {  // (a feature this build does not know: read-only)
+            const auto project=gui_test::path_of(tmp.path()+"/locked")/"project.json";
+            QFile in(gui_test::qpath(project));QVERIFY(in.open(QIODevice::ReadOnly));
+            Json payload=Json::parse(in.readAll().toStdString());in.close();
+            payload["features"].push_back("zz-future@1");
+            QFile file(gui_test::qpath(project));QVERIFY(file.open(QIODevice::WriteOnly|QIODevice::Truncate));
+            file.write(QByteArray::fromStdString(payload.dump()));
+        }
+        app::settings()->setValue(QStringLiteral("color/policyRgb"),QStringLiteral("convert"));
+        app::settings()->setValue(QStringLiteral("color/askOnMismatch"),QStringLiteral("false"));
+        const auto start=gui_test::path_of(tmp.path()+"/start");gui_test::write_book(start,gui_test::new_doc(1));
+        auto session=app::Session::open(start,gui_test::quick(gui_test::path_of(tmp.path()+"/recovery")));
+        app::MainWindow window(session);window.resize(900,700);window.show();QVERIFY(QTest::qWaitForWindowExposed(&window));
+        gui_test::Answers answers;
+        QStringList questions;
+        QString answer;
+        answers.responder->get_item=[&](const QString& title,const QString&,const QStringList& items,int,bool) {
+            questions<<title;
+            for (const QString& item : items) if (item.contains(answer)) return std::optional<QString>(item);
+            return std::optional<QString>();
+        };
+        window.open_project(gui_test::path_of(tmp.path()+"/converted"));
+        QTRY_VERIFY_WITH_TIMEOUT(window.documents().size()==2 && !window.book().page(0).rgb,10000);
+        QVERIFY(questions.isEmpty());
+        {  // (the values in sRGB: at the page's 8 bits, or kept precise)
+            const core::Layer& converted=window.book().page(0).layers.back();
+            QVERIFY(converted.color_raster ? *converted.color_raster!=raster : converted.raster_png!=nullptr);
+        }
+        QVERIFY(window.session().can_undo());
+        window.action("act_undo")->trigger();
+        QVERIFY(window.book().page(0).rgb && window.book().page(0).rgb->profile==ref);
+        QVERIFY(window.book().page(0).layers.back().color_raster);
+        QCOMPARE(*window.book().page(0).layers.back().color_raster,raster);
+        // asked: 外す (the working sRGB taken for its numbers)
+        app::settings()->setValue(QStringLiteral("color/askOnMismatch"),QStringLiteral("true"));
+        answer=QStringLiteral("外して");
+        window.open_project(gui_test::path_of(tmp.path()+"/asked"));
+        QTRY_VERIFY_WITH_TIMEOUT(window.documents().size()==3 && !window.book().page(0).rgb,10000);
+        QCOMPARE(questions,QStringList{QStringLiteral("プロファイルの不一致")});
+        QVERIFY(window.book().page(0).layers.back().color_raster);
+        QCOMPARE(*window.book().page(0).layers.back().color_raster,raster);
+        // read-only: as it is, nothing asked
+        window.open_project(gui_test::path_of(tmp.path()+"/locked"));
+        QTRY_VERIFY_WITH_TIMEOUT(window.documents().size()==4,10000);
+        QTest::qWait(200);
+        QVERIFY(!window.session().read_only_reason().empty());
+        QVERIFY(window.book().page(0).rgb && window.book().page(0).rgb->profile==ref);
+        QCOMPARE(questions.size(),1);
+        for (const char* key : {"color/policyRgb","color/askOnMismatch"}) app::settings()->remove(QString::fromLatin1(key));
+        window.hide();
+    }
+
+    // The policy for a book opened takes the book's default (the pages made after it) with its pages of that profile, in the
+    // same op (undone with them); the question names the book it is about.
+    void thePolicyTakesTheBooksDefaultAndNamesTheBook() {
+        (void)gui_test::config_folder();QTemporaryDir tmp;
+        auto p3=core::new_episode("P3 の本",core::Num(1),2,core::PageSpec::custom(20,20,16,16,1,2,2,2,2,72,"color"));
+        p3=core::CommandBus(render::ops_registry()).apply(p3,Json::array({Json{{"op","assign_profile"},{"profile","display-p3"}}}),core::Actor("human:tester")).doc;
+        QVERIFY(p3.rgb && p3.page(0).rgb && p3.page(1).rgb);
+        gui_test::write_book(gui_test::path_of(tmp.path()+"/p3"),p3);
+        app::settings()->setValue(QStringLiteral("color/policyRgb"),QStringLiteral("convert"));
+        app::settings()->setValue(QStringLiteral("color/askOnMismatch"),QStringLiteral("true"));
+        app::settings()->setValue(QStringLiteral("color/intent"),QStringLiteral("perceptual"));
+        const auto start=gui_test::path_of(tmp.path()+"/start");gui_test::write_book(start,gui_test::new_doc(1));
+        auto session=app::Session::open(start,gui_test::quick(gui_test::path_of(tmp.path()+"/recovery")));
+        app::MainWindow window(session);window.resize(900,700);window.show();QVERIFY(QTest::qWaitForWindowExposed(&window));
+        gui_test::Answers answers;
+        QStringList asked;
+        answers.responder->get_item=[&](const QString&,const QString& label,const QStringList& items,int,bool) {
+            asked<<label;
+            for (const QString& item : items) if (item.contains(QStringLiteral("変換"))) return std::optional<QString>(item);
+            return std::optional<QString>();
+        };
+        window.open_project(gui_test::path_of(tmp.path()+"/p3"));
+        QTRY_VERIFY_WITH_TIMEOUT(window.documents().size()==2 && !window.book().page(0).rgb,10000);
+        QCOMPARE(asked.size(),1);
+        QVERIFY2(asked.front().contains(QStringLiteral("「P3 の本 第1話」")),qPrintable(asked.front()));
+        QVERIFY(!window.book().rgb && !window.book().page(1).rgb);  // (the book's default too, the pages without a colour model)
+        window.action("act_undo")->trigger();
+        QVERIFY(window.book().rgb && window.book().page(0).rgb && window.book().page(1).rgb);
+        for (const char* key : {"color/policyRgb","color/askOnMismatch","color/intent"}) app::settings()->remove(QString::fromLatin1(key));
+        window.hide();
+    }
+
+    // A book read in parts (its later pages on the worker) is asked about once it is read — after the read is done with
+    // (the saves it put off, the file watcher), not in the middle of it.
+    void aBookReadInPartsIsAskedOnceRead() {
+        (void)gui_test::config_folder();QTemporaryDir tmp;
+        auto p3=core::new_episode("あとで読む本",core::Num(1),3,core::PageSpec::custom(20,20,16,16,1,2,2,2,2,72,"color"));
+        p3=core::CommandBus(render::ops_registry()).apply(p3,Json::array({Json{{"op","assign_profile"},{"page",3},{"profile","display-p3"}}}),
+            core::Actor("human:tester")).doc;
+        const auto path=gui_test::path_of(tmp.path()+"/later");gui_test::write_book(path,p3);
+        app::settings()->setValue(QStringLiteral("color/policyRgb"),QStringLiteral("convert"));
+        app::settings()->setValue(QStringLiteral("color/askOnMismatch"),QStringLiteral("true"));
+        const auto start=gui_test::path_of(tmp.path()+"/start");gui_test::write_book(start,gui_test::new_doc(1));
+        app::MainWindow window(app::Session::open(start,gui_test::quick(gui_test::path_of(tmp.path()+"/recovery"))));
+        window.resize(900,700);window.show();QVERIFY(QTest::qWaitForWindowExposed(&window));
+        auto options=gui_test::quick(gui_test::path_of(tmp.path()+"/recovery2"));
+        options.defer_pages=true;options.read_rest_now=false;
+        auto session=app::Session::open(path,options);
+        QVERIFY(session->loading());
+        window.add_document(session);
+        window.color_policy_on_open(session);
+        bool told=false;  // (the read's change told to everyone listening, before the question)
+        QObject::connect(session.get(),&app::Session::changed,&window,[&](const app::BookChange&) {if (!session->loading()) told=true;});
+        gui_test::Answers answers;
+        QList<bool> when;
+        answers.responder->get_item=[&](const QString&,const QString&,const QStringList& items,int,bool) {
+            when<<told;
+            return std::optional<QString>(items.at(0));  // (as it is)
+        };
+        session->read_rest();
+        QTRY_VERIFY_WITH_TIMEOUT(!session->loading() && when.size()==1,10000);
+        QCOMPARE(when,QList<bool>{true});
+        QTest::qWait(100);
+        QCOMPARE(when.size(),1);
+        for (const char* key : {"color/policyRgb","color/askOnMismatch"}) app::settings()->remove(QString::fromLatin1(key));
+        window.hide();
+    }
+
+    // カラー設定's policy for a picture taken in (画像を読み込む): its own Display P3 profile — kept as its numbers
+    // (Python's) when so answered, taken to sRGB when chosen; an sRGB one never asks.
+    void importingAPictureFollowsThePolicy() {
+        (void)gui_test::config_folder();QTemporaryDir tmp;
+        const auto path=gui_test::path_of(tmp.path()+"/book");gui_test::write_book(path,gui_test::new_doc(1));
+        auto session=app::Session::open(path,gui_test::quick(gui_test::path_of(tmp.path()+"/recovery")));
+        app::MainWindow window(session);window.resize(900,700);window.show();QVERIFY(QTest::qWaitForWindowExposed(&window));
+        const auto picture_with=[&](const std::string& icc,const QString& name) {
+            const std::string png=render::write_png(render::Image::create("RGB",render::Size{4,4},render::Ink{128,64,32}));
+            uLongf size=compressBound(static_cast<uLong>(icc.size()));
+            std::string packed(size,'\0');
+            compress(reinterpret_cast<Bytef*>(packed.data()),&size,reinterpret_cast<const Bytef*>(icc.data()),static_cast<uLong>(icc.size()));
+            packed.resize(size);
+            const std::string data=std::string("icc\0\0",5)+packed;
+            std::string chunk;
+            for (int i=3;i>=0;--i) chunk.push_back(static_cast<char>((data.size()>>(8*i))&0xff));
+            chunk+="iCCP"+data;
+            const uLong crc=crc32(crc32(0,reinterpret_cast<const Bytef*>("iCCP"),4),reinterpret_cast<const Bytef*>(data.data()),static_cast<uInt>(data.size()));
+            for (int i=3;i>=0;--i) chunk.push_back(static_cast<char>((crc>>(8*i))&0xff));
+            const std::string file=png.substr(0,33)+chunk+png.substr(33);  // (after the signature and IHDR)
+            const QString where=tmp.path()+"/"+name;
+            QFile out(where);if (!out.open(QIODevice::WriteOnly)) return QString();
+            out.write(file.data(),static_cast<qint64>(file.size()));
+            return where;
+        };
+        const QString p3=picture_with(*core::builtin_profile("display-p3")->bytes,QStringLiteral("p3.png"));
+        const QString srgb=picture_with(render::colour::srgb_icc(),QStringLiteral("srgb.png"));
+        gui_test::Answers answers;
+        QStringList questions;
+        int choice=0;
+        answers.responder->get_item=[&](const QString& title,const QString&,const QStringList& items,int,bool) {
+            questions<<title;
+            return std::optional<QString>(items.at(choice));
+        };
+        const auto placed=[&]() -> std::vector<double> {
+            const core::Layer* last=nullptr;
+            for (const core::Layer& l : window.book().page(0).layers) if (l.kind==core::LayerKind::Placed) last=&l;
+            if (last==nullptr || !last->asset) return {};
+            const auto bytes=storage::AssetStore(path).get_bytes(*last->asset,".png");
+            if (!bytes) return {};
+            return render::read_png(*bytes).getpixel(0,0);
+        };
+        QVERIFY(window.import_image(p3));
+        QCOMPARE(questions,QStringList{QStringLiteral("埋め込まれたプロファイル")});
+        QCOMPARE(placed(),(std::vector<double>{128,64,32}));
+        choice=1;
+        QVERIFY(window.import_image(p3));
+        QCOMPARE(questions.size(),2);
+        const auto converted=placed();
+        QVERIFY(converted.size()>=3 && converted!=(std::vector<double>{128,64,32}));
+        QVERIFY(window.import_image(srgb));
+        QCOMPARE(questions.size(),2);  // (an sRGB one: as it is, not asked)
+        QCOMPARE(placed(),(std::vector<double>{128,64,32}));
         window.hide();
     }
 };

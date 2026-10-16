@@ -1,6 +1,7 @@
 #include "core/color_model.hpp"
 
 #include <algorithm>
+#include <cmath>
 #include <cctype>
 #include <memory>
 #include <set>
@@ -255,11 +256,13 @@ std::string profile_description(const std::string& ref, const Bytes& icc, bool l
     return icc ? icc_description(*icc) : std::string();
 }
 
+bool is_text_gamma(double gamma) { return std::isfinite(gamma) && gamma > 1.0 && gamma <= kTextGammaMax; }
+
 bool uses_color_model(const Document& doc) {
     const auto model = [](const std::optional<PageColor>& inks, const std::optional<RgbMode>& rgb) {
         return (inks && !inks->color_mode_only()) || rgb.has_value();
     };
-    if (model(doc.color, doc.rgb)) return true;
+    if (model(doc.color, doc.rgb) || doc.text_gamma) return true;
     for (const auto& page : doc.pages) {
         if (model(page->color, page->rgb)) return true;
         for (const Layer& layer : page->layers) {
@@ -277,6 +280,7 @@ void validate_color_model(const Document& doc) {
         if (rgb.icc && bytes_ref(*rgb.icc) != rgb.profile) throw Error("value", where + ": the ICC profile held is not " + rgb.profile);
     };
     if (doc.rgb) check(*doc.rgb, "the book");
+    if (doc.text_gamma && !is_text_gamma(*doc.text_gamma)) throw Error("value", "the book's text_gamma is more than 1 and at most 2.2");
     for (const auto& page : doc.pages) {
         if (std::find(doc.deferred.begin(), doc.deferred.end(), page) != doc.deferred.end()) continue;
         if (page->rgb) check(*page->rgb, "page " + page->index.repr());

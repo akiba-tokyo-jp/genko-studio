@@ -720,10 +720,17 @@ void draw_turned(const PagePart& part, const std::vector<const core::StoryLine*>
     if (overlaps(Box{static_cast<int>(at_x), static_cast<int>(at_y), static_cast<int>(at_x + size), static_cast<int>(at_y + size)},
                  page_box(part))) {
         const bool partial = parts != nullptr && !parts->all();
+        // (the letters are mixed in the book's gamma, TextGamma: drawn on the sheet over their balloon; a group without
+        // balloons — none, sfx — has only letters on its sheet, laid on the page in the gamma as an upright line's are)
+        const std::optional<double> gamma = TextGamma::current();
+        const std::string kind = kind_of(*lines.front());
+        const bool letters_only = (kind == "none" || kind == "sfx") &&
+                                  std::none_of(lines.begin(), lines.end(), [](const core::StoryLine* ln) { return ln->balloon == "picture"; });
         Json group = Json::array();
         for (const core::StoryLine* ln : lines) group.push_back(line_json(*ln));
-        const std::optional<std::string> key =
-            partial ? std::nullopt : detail::memo_key(Json::array({"turned", dpi, font_path ? Json(*font_path) : Json(), group}));
+        const std::optional<std::string> key = partial ? std::nullopt
+                                                       : detail::memo_key(Json::array({"turned", dpi, font_path ? Json(*font_path) : Json(), group,
+                                                                                       gamma ? Json(*gamma) : Json()}));
         std::shared_ptr<const Sheet> sheet = key ? remembered_sheets().get(*key) : nullptr;
         if (!sheet) {
             Image upright_sheet = Image::create("RGBA", Size{static_cast<int>(size), static_cast<int>(size)}, Ink{0, 0, 0, 0});
@@ -741,6 +748,8 @@ void draw_turned(const PagePart& part, const std::vector<const core::StoryLine*>
         }
         if (partial && (parts->text || parts->ruby)) {  // (PSD-01: the letters' own pixels, as paint_text lays a part)
             composite_at(*part.image, sheet->turned, at_x - part.origin.x, at_y - part.origin.y);
+        } else if (gamma && letters_only && !partial) {
+            paste_in_gamma(*part.image, sheet->turned, Point{static_cast<int>(at_x - part.origin.x), static_cast<int>(at_y - part.origin.y)}, *gamma);
         } else {
             part.image->paste(sheet->turned, Point{static_cast<int>(at_x - part.origin.x), static_cast<int>(at_y - part.origin.y)},
                               &sheet->turned);

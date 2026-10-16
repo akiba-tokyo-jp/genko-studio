@@ -1277,9 +1277,13 @@
       },
       "upstream_menu": null,
       "genko_status": "一部（2026-10-16 照合）",
-      "implementation_status": "未着手",
+      "implementation_status": "実装済み（PC1b、未統合）",
       "acceptance_status": "未実施",
-      "evidence": [],
+      "evidence": [
+        "native/src/app/main_window_color.cpp",
+        "native/src/app/main_window_actions.cpp",
+        "native/tests/gui/test_gui_actions.cpp"
+      ],
       "pc0": {
         "date": "2026-10-16",
         "cpp_base": "962faa4",
@@ -1620,13 +1624,32 @@
         "shortcut": "Some(\"Cmd+Shift+K\")",
         "source_line": 142,
         "genko_status": "未判定",
-        "implementation_status": "未着手",
+        "implementation_status": "実装済み（PC1b、未統合）",
         "alternate_menus": []
       },
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "未着手",
+      "implementation_status": "実装済み（PC1b、未統合）",
       "acceptance_status": "未実施",
-      "evidence": [],
+      "evidence": [
+        "native/src/app/color_settings_dialog.cpp",
+        "native/src/app/main_window_color.cpp",
+        "native/src/app/display_color.cpp",
+        "native/src/render/proof.cpp",
+        "native/src/render/ops_ink.cpp",
+        "native/src/render/text/lettering.cpp",
+        "native/src/storage/writer.cpp",
+        "native/src/storage/reader.cpp",
+        "native/tests/unit/test_proof.cpp",
+        "native/tests/gui/test_gui_color.cpp",
+        "native/src/render/text/balloons.cpp",
+        "native/src/render/page.cpp",
+        "native/src/formats/psd_export.cpp",
+        "native/src/app/thumbs.cpp",
+        "native/src/app/main_window_book.cpp",
+        "native/tests/gui/test_gui_book.cpp",
+        "native/tests/unit/test_color_model.cpp",
+        "native/src/app/preferences.cpp"
+      ],
       "pc0": {
         "date": "2026-10-16",
         "cpp_base": "962faa4",
@@ -3254,13 +3277,19 @@
         "shortcut": "None",
         "source_line": 161,
         "genko_status": "未判定",
-        "implementation_status": "未着手",
+        "implementation_status": "実装済み（PC1b、未統合）",
         "alternate_menus": []
       },
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "未着手",
+      "implementation_status": "実装済み（PC1b、未統合）",
       "acceptance_status": "未実施",
-      "evidence": [],
+      "evidence": [
+        "native/src/app/preferences.cpp",
+        "native/src/app/layer_panel.cpp",
+        "native/src/app/tiles.cpp",
+        "native/tests/gui/test_gui_color.cpp",
+        "native/src/app/main_window_color.cpp"
+      ],
       "pc0": {
         "date": "2026-10-16",
         "cpp_base": "962faa4",
@@ -30656,13 +30685,19 @@
         "shortcut": "Some(\"Cmd+Shift+Y\")",
         "source_line": 628,
         "genko_status": "未判定",
-        "implementation_status": "未着手",
+        "implementation_status": "実装済み（PC1b、未統合）",
         "alternate_menus": []
       },
       "genko_status": "一部（2026-10-16 照合）",
-      "implementation_status": "未着手",
+      "implementation_status": "実装済み（PC1b、未統合）",
       "acceptance_status": "未実施",
-      "evidence": [],
+      "evidence": [
+        "native/src/render/proof.cpp",
+        "native/src/app/main_window_color.cpp",
+        "native/src/app/tiles.cpp",
+        "native/tests/unit/test_proof.cpp",
+        "native/tests/gui/test_gui_color.cpp"
+      ],
       "pc0": {
         "date": "2026-10-16",
         "cpp_base": "962faa4",
@@ -31373,13 +31408,24 @@
         "shortcut": "Some(\"Cmd+Y\")",
         "source_line": 627,
         "genko_status": "未判定",
-        "implementation_status": "未着手",
+        "implementation_status": "実装済み（PC1b、未統合）",
         "alternate_menus": []
       },
       "genko_status": "一部（2026-10-16 照合）",
-      "implementation_status": "未着手",
+      "implementation_status": "実装済み（PC1b、未統合）",
       "acceptance_status": "未実施",
-      "evidence": [],
+      "evidence": [
+        "native/src/app/main_window_actions.cpp",
+        "native/src/render/proof.cpp",
+        "native/src/app/main_window_color.cpp",
+        "native/src/app/tiles.cpp",
+        "native/tests/unit/test_proof.cpp",
+        "native/tests/gui/test_gui_color.cpp",
+        "native/tests/gui/test_gui_actions.cpp",
+        "native/src/app/preferences.cpp",
+        "native/src/app/workspace.cpp",
+        "native/tests/gui/test_gui_workspace.cpp"
+      ],
       "pc0": {
         "date": "2026-10-16",
         "cpp_base": "962faa4",
@@ -31413,9 +31459,15 @@
       },
       "upstream_menu": null,
       "genko_status": "一部（2026-10-16 照合）",
-      "implementation_status": "未着手",
+      "implementation_status": "実装済み（PC1b、未統合）",
       "acceptance_status": "未実施",
-      "evidence": [],
+      "evidence": [
+        "native/src/render/proof.cpp",
+        "native/src/app/main_window_color.cpp",
+        "native/src/app/tiles.cpp",
+        "native/tests/unit/test_proof.cpp",
+        "native/tests/gui/test_gui_color.cpp"
+      ],
       "pc0": {
         "date": "2026-10-16",
         "cpp_base": "962faa4",
@@ -31457,13 +31509,19 @@
         "shortcut": "None",
         "source_line": 626,
         "genko_status": "未判定",
-        "implementation_status": "未着手",
+        "implementation_status": "実装済み（PC1b、未統合）",
         "alternate_menus": []
       },
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "未着手",
+      "implementation_status": "実装済み（PC1b、未統合）",
       "acceptance_status": "未実施",
-      "evidence": [],
+      "evidence": [
+        "native/src/render/proof.cpp",
+        "native/src/app/main_window_color.cpp",
+        "native/src/app/tiles.cpp",
+        "native/tests/unit/test_proof.cpp",
+        "native/tests/gui/test_gui_color.cpp"
+      ],
       "pc0": {
         "date": "2026-10-16",
         "cpp_base": "962faa4",
@@ -31500,13 +31558,19 @@
         "shortcut": "None",
         "source_line": 625,
         "genko_status": "未判定",
-        "implementation_status": "未着手",
+        "implementation_status": "実装済み（PC1b、未統合）",
         "alternate_menus": []
       },
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "未着手",
+      "implementation_status": "実装済み（PC1b、未統合）",
       "acceptance_status": "未実施",
-      "evidence": [],
+      "evidence": [
+        "native/src/render/proof.cpp",
+        "native/src/app/main_window_color.cpp",
+        "native/src/app/tiles.cpp",
+        "native/tests/unit/test_proof.cpp",
+        "native/tests/gui/test_gui_color.cpp"
+      ],
       "pc0": {
         "date": "2026-10-16",
         "cpp_base": "962faa4",
@@ -31533,13 +31597,19 @@
         "shortcut": "None",
         "source_line": 612,
         "genko_status": "未判定",
-        "implementation_status": "未着手",
+        "implementation_status": "実装済み（PC1b、未統合）",
         "alternate_menus": []
       },
       "genko_status": "一部（2026-10-16 照合）",
-      "implementation_status": "未着手",
+      "implementation_status": "実装済み（PC1b、未統合）",
       "acceptance_status": "未実施",
-      "evidence": [],
+      "evidence": [
+        "native/src/render/proof.cpp",
+        "native/src/app/main_window_color.cpp",
+        "native/src/app/tiles.cpp",
+        "native/tests/gui/test_gui_color.cpp",
+        "native/tests/unit/test_proof.cpp"
+      ],
       "pc0": {
         "date": "2026-10-16",
         "cpp_base": "962faa4",
@@ -31568,13 +31638,19 @@
         "shortcut": "None",
         "source_line": 622,
         "genko_status": "未判定",
-        "implementation_status": "未着手",
+        "implementation_status": "実装済み（PC1b、未統合）",
         "alternate_menus": []
       },
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "未着手",
+      "implementation_status": "実装済み（PC1b、未統合）",
       "acceptance_status": "未実施",
-      "evidence": [],
+      "evidence": [
+        "native/src/render/proof.cpp",
+        "native/src/app/main_window_color.cpp",
+        "native/src/app/tiles.cpp",
+        "native/tests/unit/test_proof.cpp",
+        "native/tests/gui/test_gui_color.cpp"
+      ],
       "pc0": {
         "date": "2026-10-16",
         "cpp_base": "962faa4",
@@ -31611,13 +31687,19 @@
         "shortcut": "None",
         "source_line": 621,
         "genko_status": "未判定",
-        "implementation_status": "未着手",
+        "implementation_status": "実装済み（PC1b、未統合）",
         "alternate_menus": []
       },
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "未着手",
+      "implementation_status": "実装済み（PC1b、未統合）",
       "acceptance_status": "未実施",
-      "evidence": [],
+      "evidence": [
+        "native/src/render/proof.cpp",
+        "native/src/app/main_window_color.cpp",
+        "native/src/app/tiles.cpp",
+        "native/tests/unit/test_proof.cpp",
+        "native/tests/gui/test_gui_color.cpp"
+      ],
       "pc0": {
         "date": "2026-10-16",
         "cpp_base": "962faa4",
@@ -31644,13 +31726,20 @@
         "shortcut": "None",
         "source_line": 623,
         "genko_status": "未判定",
-        "implementation_status": "未着手",
+        "implementation_status": "実装済み（PC1b、未統合）",
         "alternate_menus": []
       },
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "未着手",
+      "implementation_status": "実装済み（PC1b、未統合）",
       "acceptance_status": "未実施",
-      "evidence": [],
+      "evidence": [
+        "native/src/render/proof.cpp",
+        "native/src/app/main_window_color.cpp",
+        "native/src/app/tiles.cpp",
+        "native/src/app/display_color.cpp",
+        "native/tests/unit/test_proof.cpp",
+        "native/tests/gui/test_gui_color.cpp"
+      ],
       "pc0": {
         "date": "2026-10-16",
         "cpp_base": "962faa4",
@@ -31687,13 +31776,19 @@
         "shortcut": "None",
         "source_line": 618,
         "genko_status": "未判定",
-        "implementation_status": "未着手",
+        "implementation_status": "実装済み（PC1b、未統合）",
         "alternate_menus": []
       },
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "未着手",
+      "implementation_status": "実装済み（PC1b、未統合）",
       "acceptance_status": "未実施",
-      "evidence": [],
+      "evidence": [
+        "native/src/render/proof.cpp",
+        "native/src/app/main_window_color.cpp",
+        "native/src/app/tiles.cpp",
+        "native/tests/unit/test_proof.cpp",
+        "native/tests/gui/test_gui_color.cpp"
+      ],
       "pc0": {
         "date": "2026-10-16",
         "cpp_base": "962faa4",
@@ -31730,13 +31825,19 @@
         "shortcut": "None",
         "source_line": 619,
         "genko_status": "未判定",
-        "implementation_status": "未着手",
+        "implementation_status": "実装済み（PC1b、未統合）",
         "alternate_menus": []
       },
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "未着手",
+      "implementation_status": "実装済み（PC1b、未統合）",
       "acceptance_status": "未実施",
-      "evidence": [],
+      "evidence": [
+        "native/src/render/proof.cpp",
+        "native/src/app/main_window_color.cpp",
+        "native/src/app/tiles.cpp",
+        "native/tests/unit/test_proof.cpp",
+        "native/tests/gui/test_gui_color.cpp"
+      ],
       "pc0": {
         "date": "2026-10-16",
         "cpp_base": "962faa4",
@@ -31763,13 +31864,21 @@
         "shortcut": "None",
         "source_line": 614,
         "genko_status": "未判定",
-        "implementation_status": "未着手",
+        "implementation_status": "実装済み（PC1b、未統合）",
         "alternate_menus": []
       },
       "genko_status": "同等（C++ のソースと試験あり。2026-10-16 照合）",
-      "implementation_status": "未着手",
+      "implementation_status": "実装済み（PC1b、未統合）",
       "acceptance_status": "未実施",
-      "evidence": [],
+      "evidence": [
+        "native/src/render/proof.cpp",
+        "native/src/app/main_window_color.cpp",
+        "native/src/app/tiles.cpp",
+        "native/src/render/colour.cpp",
+        "native/tests/unit/test_proof.cpp",
+        "native/tests/gui/test_gui_color.cpp",
+        "native/tests/contract/test_contract_colour.cpp"
+      ],
       "pc0": {
         "date": "2026-10-16",
         "cpp_base": "962faa4",
@@ -31813,13 +31922,19 @@
         "shortcut": "None",
         "source_line": 615,
         "genko_status": "未判定",
-        "implementation_status": "未着手",
+        "implementation_status": "実装済み（PC1b、未統合）",
         "alternate_menus": []
       },
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "未着手",
+      "implementation_status": "実装済み（PC1b、未統合）",
       "acceptance_status": "未実施",
-      "evidence": [],
+      "evidence": [
+        "native/src/render/proof.cpp",
+        "native/src/app/main_window_color.cpp",
+        "native/src/app/tiles.cpp",
+        "native/tests/unit/test_proof.cpp",
+        "native/tests/gui/test_gui_color.cpp"
+      ],
       "pc0": {
         "date": "2026-10-16",
         "cpp_base": "962faa4",
@@ -31856,13 +31971,19 @@
         "shortcut": "None",
         "source_line": 616,
         "genko_status": "未判定",
-        "implementation_status": "未着手",
+        "implementation_status": "実装済み（PC1b、未統合）",
         "alternate_menus": []
       },
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "未着手",
+      "implementation_status": "実装済み（PC1b、未統合）",
       "acceptance_status": "未実施",
-      "evidence": [],
+      "evidence": [
+        "native/src/render/proof.cpp",
+        "native/src/app/main_window_color.cpp",
+        "native/src/app/tiles.cpp",
+        "native/tests/unit/test_proof.cpp",
+        "native/tests/gui/test_gui_color.cpp"
+      ],
       "pc0": {
         "date": "2026-10-16",
         "cpp_base": "962faa4",
@@ -31899,13 +32020,19 @@
         "shortcut": "None",
         "source_line": 617,
         "genko_status": "未判定",
-        "implementation_status": "未着手",
+        "implementation_status": "実装済み（PC1b、未統合）",
         "alternate_menus": []
       },
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "未着手",
+      "implementation_status": "実装済み（PC1b、未統合）",
       "acceptance_status": "未実施",
-      "evidence": [],
+      "evidence": [
+        "native/src/render/proof.cpp",
+        "native/src/app/main_window_color.cpp",
+        "native/src/app/tiles.cpp",
+        "native/tests/unit/test_proof.cpp",
+        "native/tests/gui/test_gui_color.cpp"
+      ],
       "pc0": {
         "date": "2026-10-16",
         "cpp_base": "962faa4",

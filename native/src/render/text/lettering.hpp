@@ -186,6 +186,27 @@ private:
     std::unique_ptr<Fonts> fonts_;
 };
 
+// カラー設定 → 文字の色をガンマで混ぜる (color-model@1's book text_gamma, SPEC COLOR-03 PC1b; PhotoCraft's
+// blendTextGamma): while one is alive on this thread (render_page makes one from the book), the letters of the lines
+// paint_text and path_text put on a page are mixed with what lies under them in that gamma. None: as Python's (Pillow's
+// paste with the letters' alpha).
+class TextGamma {
+public:
+    explicit TextGamma(std::optional<double> gamma);
+    ~TextGamma();
+    TextGamma(const TextGamma&) = delete;
+    TextGamma& operator=(const TextGamma&) = delete;
+    static std::optional<double> current();
+
+private:
+    std::optional<double> was_;
+};
+
+// The letters ("RGBA") over the picture ("RGB" or "RGBA") at `at`, mixed in `gamma` (PhotoCraft's composite_gamma in
+// the normal mode): each colour ((1 − a)·under^g + a·letter^g)^(1/g) over an opaque picture — weighted by the alphas
+// over a transparent one, whose alpha becomes a + under·(1 − a). Other pictures: Pillow's paste.
+void paste_in_gamma(Image& image, const Image& letters, Point at, double gamma);
+
 // _paint_text(image, line, dpi, show_speaker, font_path): the line's letters on the page (from its box's middle, or
 // its corner for "none"; along its path when it has one) and the speaker's name above the box. `origin`: where the
 // image's top left lies on the page, when it holds a part of it (the same pixels as the whole page cut there). A part

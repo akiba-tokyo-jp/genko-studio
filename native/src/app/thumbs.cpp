@@ -65,6 +65,8 @@ std::string page_fingerprint(const core::Document& doc, const core::Page& page) 
     Hasher h;
     h.add(storage::spec_to_json(page.spec));
     if (page.color) h.add(core::to_json(*page.color));  // (color-mode@1)
+    if (page.rgb) h.add(core::to_json(*page.rgb));      // (color-model@1: its RGB profile and depth)
+    if (doc.text_gamma) h.add(Json{{"text_gamma", *doc.text_gamma}});  // (the book's: the letters mixed in it)
     h.add(core::to_string(page.binding));
     for (const core::Frame& frame : page.frames) h.add(frame_tree(frame));
     for (const auto& [role, rgb] : page.fills) {

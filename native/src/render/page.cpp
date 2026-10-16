@@ -1432,6 +1432,8 @@ std::string first_chars(const std::string& text, std::size_t count) {
 
 void page_layers(const core::Page& page, const core::Document& episode, int dpi, const std::function<void(PageLayer&&)>& each,
                  const std::function<void(const core::StoryLine&)>* line_layers) {
+    // (color-model@1: the book's text_gamma, for the letters of the lines' layers — as render_page draws them)
+    const text::TextGamma gamma(episode.text_gamma);
     Ctx ctx;
     ctx.page = &page;
     ctx.episode = &episode;
@@ -1686,6 +1688,8 @@ core::InkPixels composite_ink_layers(const core::Page& page, const std::vector<c
 }
 
 RenderResult render_page(const core::Page& page, int dpi, const RenderOptions& options, const core::Document* episode) {
+    // (color-model@1: the book's text_gamma, for the letters of its lines drawn on this thread)
+    const text::TextGamma gamma(episode != nullptr ? episode->text_gamma : std::nullopt);
     std::vector<std::string> omitted;
     // Keep every layer in high precision within a region; quantize only the final output pixels.
     // Reuse the established global-coordinate region renderer, not an RGBA8 layer intermediate.

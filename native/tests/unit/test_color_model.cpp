@@ -492,6 +492,40 @@ private slots:
         QVERIFY(!refusal(doc, Json::array({Json{{"op", "convert_profile"}, {"page", 1}}})).empty());
     }
 
+    // The conversion's way (intent, bpc) and what the page keeps as its own (the way the colours drawn come into it) can be
+    // given apart: page_intent, page_bpc (without them, the same as the conversion's). A CMYK page taken to an 8-bit sRGB
+    // page without black point compensation, keeping the page's defaults, is a page without a colour model (Python's).
+    // convert_profile and assign_profile take the book's default too when asked (default: true), as set_color_mode does.
+    void theConversionsWayIsNotThePages() {
+        render::Image image = picture();
+        image.paste(render::Ink{0, 0, 0, 255}, render::Box{0, 0, 10, 10});
+        const core::Document cmyk = run_ops(painted(image), Json::array({Json{{"op", "set_color_mode"}, {"page", 1}, {"mode", "cmyk"}, {"profile", "coated-cmyk"}}})).doc;
+        const core::Document own = run_ops(cmyk, Json::array({Json{{"op", "set_color_mode"}, {"page", 1}, {"mode", "rgb"}, {"intent", "perceptual"}, {"bpc", false},
+                                                                    {"page_intent", "relative"}, {"page_bpc", true}}})).doc;
+        QVERIFY(!own.page(0).color && !own.page(0).rgb);
+        const core::Document plain = run_ops(cmyk, Json::array({Json{{"op", "set_color_mode"}, {"page", 1}, {"mode", "rgb"}}})).doc;
+        QVERIFY(*own.page(0).layers.back().raster_png != *plain.page(0).layers.back().raster_png);  // (converted without black point compensation)
+        const core::Document both = run_ops(cmyk, Json::array({Json{{"op", "set_color_mode"}, {"page", 1}, {"mode", "rgb"}, {"intent", "perceptual"}, {"bpc", false}}})).doc;
+        QVERIFY(both.page(0).rgb && both.page(0).rgb->intent == "perceptual" && !both.page(0).rgb->bpc);
+        QCOMPARE(*both.page(0).layers.back().raster_png, *own.page(0).layers.back().raster_png);
+        const core::Document grey = run_ops(cmyk, Json::array({Json{{"op", "convert_profile"}, {"page", 1}, {"profile", "sgray"}, {"intent", "saturation"},
+                                                                     {"page_intent", "perceptual"}, {"page_bpc", false}}})).doc;
+        QVERIFY(grey.page(0).color && grey.page(0).color->intent == "perceptual" && !grey.page(0).color->bpc);
+        QVERIFY(!refusal(cmyk, Json::array({Json{{"op", "set_color_mode"}, {"page", 1}, {"mode", "rgb"}, {"page_intent", "nope"}}})).empty());
+        QVERIFY(!refusal(cmyk, Json::array({Json{{"op", "convert_profile"}, {"page", 1}, {"profile", "srgb"}, {"page_bpc", 1}}})).empty());
+        // the book's default with one page
+        const core::Document p3 = run_ops(small_book(2), Json::array({Json{{"op", "assign_profile"}, {"profile", "display-p3"}}})).doc;
+        QVERIFY(p3.rgb && p3.page(0).rgb && p3.page(1).rgb);
+        const core::Document converted = run_ops(p3, Json::array({Json{{"op", "convert_profile"}, {"page", 1}, {"profile", "srgb"}, {"default", true}}})).doc;
+        QVERIFY(!converted.rgb && !converted.page(0).rgb && converted.page(1).rgb);
+        const core::Document assigned = run_ops(p3, Json::array({Json{{"op", "assign_profile"}, {"page", 2}, {"profile", "rec2020"}, {"default", true}}})).doc;
+        QVERIFY(assigned.rgb && assigned.rgb->profile == core::builtin_profile("rec2020")->ref());
+        QVERIFY(assigned.page(0).rgb->profile == core::builtin_profile("display-p3")->ref());
+        const core::Document kept = run_ops(p3, Json::array({Json{{"op", "convert_profile"}, {"page", 1}, {"profile", "srgb"}}})).doc;
+        QVERIFY(kept.rgb);  // (without it: the pages alone)
+        QVERIFY(!refusal(p3, Json::array({Json{{"op", "assign_profile"}, {"page", 1}, {"profile", "srgb"}, {"default", "yes"}}})).empty());
+    }
+
     // A grey page (image.mode.grayscale): sGray's greys by their value both ways (the picture's grey 128 is lightness
     // 128 and comes back (128, 128, 128)), a colour by its lightness; 16 and 32 bits; gray "k" on another profile.
     void greyPages() {

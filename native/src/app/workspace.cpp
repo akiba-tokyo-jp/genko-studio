@@ -21,6 +21,7 @@
 
 #include "app/ask.hpp"
 #include "app/config.hpp"
+#include "app/preferences.hpp"
 #include "app/theme.hpp"
 #include "app/tool_settings.hpp"
 
@@ -57,13 +58,6 @@ bool find_in(QMenu* menu, const QAction* action, QStringList& trail) {
         }
     }
     return false;
-}
-
-// preferences' RENAMED (new name: old name): a command renamed later keeps its place
-const std::map<QString, QString>& renamed() {
-    static const std::map<QString, QString> all{{QStringLiteral("レイヤーを消す"), QStringLiteral("レイヤーを削除")},
-                                                {QStringLiteral("このページを消す…"), QStringLiteral("このページを削除…")}};
-    return all;
 }
 
 const QString kLine = QStringLiteral("――（区切り）");
@@ -182,7 +176,7 @@ QStringList chosen(const QString& key, const QStringList& defaults) {
     const QVariant value = settings()->value(key);
     if (!value.isValid() || value.toString().isEmpty()) return defaults;
     std::map<QString, QString> old_to_new;
-    for (const auto& [now, before] : renamed()) old_to_new[before] = now;
+    for (const auto& [now, before] : preferences::renamed()) old_to_new[before] = now;  // (a command renamed later keeps its place)
     QStringList out;
     for (const QString& name : value.toString().split(QLatin1Char('\t'), Qt::SkipEmptyParts)) {
         const auto found = old_to_new.find(name);

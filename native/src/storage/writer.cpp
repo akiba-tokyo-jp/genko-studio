@@ -335,7 +335,7 @@ Json project_payload_v4(const core::Document& doc, AssetStore& store) {
     }
     core::validate_ink_document(doc);
     core::validate_color_model(doc);
-    bool modes = doc.color.has_value() || doc.rgb.has_value();
+    bool modes = doc.color.has_value() || doc.rgb.has_value() || doc.text_gamma.has_value();
     for (const auto& page : doc.pages) modes = modes || page->color.has_value() || page->rgb.has_value();
     if (modes) features.emplace_back(core::kColorModeFeature);
     if (core::uses_color_model(doc)) features.emplace_back(core::kColorModelFeature);
@@ -367,7 +367,12 @@ Json project_payload_v4(const core::Document& doc, AssetStore& store) {
     if (core::py_truthy(doc.brush_custom)) brush["custom"] = doc.brush_custom;
     out["brush"] = std::move(brush);
     out["spec"] = spec_to_json(doc.spec);
-    if (Json color = color_json(store, doc.color, doc.rgb); !color.is_null()) out["color"] = std::move(color);
+    if (Json color = color_json(store, doc.color, doc.rgb); !color.is_null() || doc.text_gamma) {
+        // (the book's text_gamma, last, under its colour model: a default RGB one written for it)
+        if (color.is_null()) color = core::to_json(core::RgbMode{});
+        if (doc.text_gamma) color["text_gamma"] = *doc.text_gamma;
+        out["color"] = std::move(color);
+    }
     Json bible = Json::object();
     bible["plot"] = doc.bible.plot;
     bible["characters"] = doc.bible.characters;

@@ -80,9 +80,13 @@ std::string icc_description(std::string_view icc);
 // The description of a mode's profile: a built-in's, the profile's own, else sRGB's or Lab's (none: Little CMS's own).
 std::string profile_description(const std::string& ref, const Bytes& icc, bool lab = false);
 
+// The book's text_gamma (core::Document): more than 1 (1 is none: Python's mixing) and at most 2.2, as Photoshop's.
+inline constexpr double kTextGammaMax = 2.2;
+bool is_text_gamma(double gamma);
+
 struct Document;
 // Does the book need color-model@1 (a colour model color-mode@1 cannot hold: an RGB mode, a grey page, 32 bits, no
-// black point compensation; GKIR version 2 pixels; precise rasters in a profile's space)?
+// black point compensation; GKIR version 2 pixels; precise rasters in a profile's space; the book's text_gamma)?
 bool uses_color_model(const Document& doc);
 // The book's RGB modes as they must be (core::Error("value") says what is not): a depth of 8, 16 or 32, a profile by its
 // ref and the bytes held for it, a known intent. Pages not read yet are not looked at.

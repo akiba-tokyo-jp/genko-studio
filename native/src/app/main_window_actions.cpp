@@ -413,8 +413,10 @@ void MainWindow::build_actions() {
         c->show_guides = guides->isChecked();
         c->update();
     });
-    QAction* proof = make("act_cmyk_proof", QStringLiteral("CMYK で見る（色校正）"), [] {}, {},
-                          QStringLiteral("印刷したときの色の見当（CMYK の範囲に収めた色）で表示します。プロファイルは書き出しで選んだもの"), true);
+    // 色の校正 (view.proofColors; Python's 「CMYK で見る（色校正）」, its id kept): the page as 校正の設定 shows it — the
+    // working CMYK unless another is chosen there (書き出しの CMYK: Python's own). Ctrl+Y is やり直す: Ctrl+Alt+Y.
+    QAction* proof = make("act_cmyk_proof", QStringLiteral("色の校正"), [] {}, keys({QKeySequence(QStringLiteral("Ctrl+Alt+Y"))}),
+                          QStringLiteral("印刷したときの色など、校正の設定で選んだ見え方で表示します（表示だけ。原稿は変わりません）"), true);
     // (the CMYK profile chosen last for export, kept on this computer, while its file is there)
     const auto profile = [] {
         std::optional<std::filesystem::path> icc;
@@ -423,10 +425,12 @@ void MainWindow::build_actions() {
         return icc;
     };
     c->renderer().set_proof_profile(profile);
-    connect(proof, &QAction::triggered, this, [c, profile](bool on) {
-        c->renderer().set_cmyk_proof(on ? std::optional<std::optional<std::filesystem::path>>(profile()) : std::nullopt);
-        c->update();
+    connect(proof, &QAction::triggered, this, [this](bool on) {
+        if (documents_.empty()) return;
+        documents_[static_cast<std::size_t>(doc_)].proof.on = on;
+        apply_proof_view();
     });
+    build_color_actions();  // (校正の設定, 色域外警告, カラー設定…: main_window_color.cpp)
     // the tools (one at a time: tool_actions)
     make("act_select", QStringLiteral("選択"), [this] { choose_tool(QStringLiteral("select")); }, keys({QKeySequence(QStringLiteral("V"))}),
          QStringLiteral("コマを選ぶ・フキダシを動かす・ドラッグで表示を動かす"), true);
@@ -620,7 +624,7 @@ void MainWindow::build_menus() {
     edit->addSeparator();
     for (const char* name : {"act_select_all", "act_deselect"}) edit->addAction(action(name));
     edit->addSeparator();
-    for (const char* name : {"act_assign_profile", "act_convert_profile"}) edit->addAction(action(name));  // (color-model@1)
+    for (const char* name : {"act_assign_profile", "act_convert_profile", "act_color_settings"}) edit->addAction(action(name));  // (color-model@1)
     QMenu* view = bar->addMenu(QStringLiteral("表示"));
     for (const char* name : {"act_fit", "act_zoom_in", "act_zoom_out", "act_actual", "act_zoom_value", "act_zoom_tool"}) view->addAction(action(name));
     view->addSeparator();
@@ -633,6 +637,18 @@ void MainWindow::build_menus() {
     view->addAction(action("act_scale"));
     view->addAction(action("act_onion"));
     view->addAction(action("act_cmyk_proof"));
+    // 校正の設定 (view.proofSetup.*): what 色の校正 shows; 色域外警告 (view.gamutWarning)
+    QMenu* proofs = view->addMenu(QStringLiteral("校正の設定"));
+    for (const char* name : {"act_proof_custom"}) proofs->addAction(action(name));
+    proofs->addSeparator();
+    for (const char* name : {"act_proof_working_cmyk", "act_proof_export", "act_proof_cyan", "act_proof_magenta", "act_proof_yellow", "act_proof_black",
+                             "act_proof_cmy"})
+        proofs->addAction(action(name));
+    proofs->addSeparator();
+    for (const char* name : {"act_proof_srgb", "act_proof_monitor", "act_proof_legacy_mac"}) proofs->addAction(action(name));
+    proofs->addSeparator();
+    for (const char* name : {"act_proof_protan", "act_proof_deutan"}) proofs->addAction(action(name));
+    view->addAction(action("act_gamut_warning"));
     view->addAction(action("act_screen_dots"));
     view->addSeparator();
     view->addAction(action("act_tool_names"));
@@ -732,6 +748,11 @@ void MainWindow::build_menus() {
     view_menu_->addAction(action("act_new_window"));
     view_menu_->addAction(action("act_next_doc"));
     view_menu_->addAction(action("act_prev_doc"));
+    // the books open in this window, the one in front checked (document.activate): one chosen comes to the front
+    books_menu_ = view_menu_->addMenu(QStringLiteral("開いている原稿"));
+    books_menu_->setProperty("remade", true);
+    connect(books_menu_, &QMenu::aboutToShow, this, &MainWindow::fill_books_menu);
+    fill_books_menu();
     view_menu_->addSeparator();
     workspace_menu_ = view_menu_->addMenu(QStringLiteral("ワークスペース"));
     workspace_menu_->setProperty("remade", true);

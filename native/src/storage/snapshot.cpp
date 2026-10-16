@@ -193,6 +193,7 @@ Json snapshot(const core::Document& doc, bool full) {
     out["pages"] = std::move(pages);
     out["tickets"] = doc.tickets;
     out["autosave"] = doc.autosave;
+    if (doc.text_gamma) out["text_gamma"] = *doc.text_gamma;  // (color-model@1, PC1b: only a book that has one)
     return out;
 }
 

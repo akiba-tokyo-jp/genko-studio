@@ -18,6 +18,7 @@ genko_library(genko_app
     fit_preview.cpp
     workspace.cpp
     preferences.cpp
+    color_settings_dialog.cpp
     comfort.cpp
     memory.cpp
     inputs.cpp
@@ -30,6 +31,7 @@ genko_library(genko_app
     pen.cpp
     live_ink.cpp
     tiles.cpp
+    display_color.cpp
     frame_tools.cpp
     perf.cpp
     canvas.cpp
@@ -57,6 +59,7 @@ genko_library(genko_app
     main_window_materials.cpp
     main_window_lines.cpp
     main_window_book.cpp
+    main_window_color.cpp
     book_dialogs.cpp
     main_window_output.cpp
     export_dialog.cpp
@@ -102,4 +105,9 @@ genko_library(genko_app
     ${GENKO_APP_RESOURCES}
     ${GENKO_APP_FONTS}
   PUBLIC_DEPS genko_core genko_storage genko_render genko_render_ops genko_formats genko_service Qt6::Core Qt6::Gui Qt6::Widgets Qt6::Svg Qt6::Concurrent
-              Qt6::PrintSupport Qt6::Network Qt6::OpenGL Qt6::OpenGLWidgets)
+              Qt6::PrintSupport Qt6::Network Qt6::OpenGL Qt6::OpenGLWidgets
+  PRIVATE_DEPS ${GENKO_LCMS2})
+# (the monitor's profile on Windows: GetICMProfileW, display_color.cpp)
+if(WIN32)
+  target_link_libraries(genko_app PRIVATE gdi32)
+endif()

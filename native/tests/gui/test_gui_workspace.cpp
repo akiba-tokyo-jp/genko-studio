@@ -452,6 +452,17 @@ private slots:
         QVERIFY(gui_test::wait_for([&] { return !launcher->isVisible(); }, 5000));
     }
 
+    // A command renamed since its name was kept in the quick-access panel or the command bar keeps its place under its new
+    // name — PC1b's 色の校正 (Python's 「CMYK で見る（色校正）」) among them, as the keys (preferences' RENAMED).
+    void aRenamedCommandKeepsItsPlace() {
+        Book b;
+        app::settings()->setValue(QStringLiteral("ui/quick"), QStringLiteral("CMYK で見る（色校正）\tレイヤーを削除\t履歴…"));
+        QCOMPARE(app::chosen(QStringLiteral("ui/quick"), app::kDefaultQuick),
+                 (QStringList{QStringLiteral("色の校正"), QStringLiteral("レイヤーを消す"), QStringLiteral("履歴…")}));
+        app::settings()->remove(QStringLiteral("ui/quick"));
+        QVERIFY(app::by_text(b.window.get()).count(QStringLiteral("色の校正")) == 1);
+    }
+
     // A short window: the palette's pictures shrink (down to 16 px) so the last tool stays within reach; the layers'
     // tab in front at the first show.
     void thePaletteFitsAShortWindowAndTheLayersAreInFront() {
