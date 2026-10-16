@@ -1260,6 +1260,8 @@ core::Document Reader::migrate(const Json& payload) {
             if (gamma.is_number() && !gamma.is_boolean() && core::is_text_gamma(gamma.get<double>())) {
                 doc.text_gamma = gamma.get<double>();
                 it->erase("text_gamma");
+                // (a book of no colour model of its own: the writer's default RGB one, written for the gamma alone)
+                if (*it == core::to_json(core::RgbMode{})) doc.extra.erase(it);
             } else {
                 issue("broken_value", "/color/text_gamma", {}, "the book's text_gamma is more than 1 and at most 2.2");
             }
