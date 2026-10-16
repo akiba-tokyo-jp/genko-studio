@@ -23,6 +23,7 @@
 #include "core/ids.hpp"
 #include "core/pyconv.hpp"
 #include "core/pynum.hpp"
+#include "render/color_edit.hpp"
 #include "render/fill_patches.hpp"
 #include "render/raster_ops.hpp"
 #include "render/ink_edit.hpp"
@@ -538,10 +539,13 @@ void MainWindow::paste() {
         return;
     }
     const std::string id = core::new_id();
-    // (color-mode@1: pieces of inks go into a paint layer, which keeps them as they were)
+    // (color-mode@1: pieces of inks go into a paint layer, which keeps them as they were; color-model@1: so do the
+    // values of an RGB page of a profile)
     bool inks = false;
-    if (page->color && clipboard_->contains("patches") && (*clipboard_)["patches"].is_array()) {
-        for (const Json& patch : (*clipboard_)["patches"]) inks = inks || (patch.is_object() && patch.contains("gkir"));
+    if (clipboard_->contains("patches") && (*clipboard_)["patches"].is_array()) {
+        for (const Json& patch : (*clipboard_)["patches"]) {
+            inks = inks || (patch.is_object() && ((page->color && patch.contains("gkir")) || patch.contains(render::color_edit::kPatchProfileKey)));
+        }
     }
     Json add{{"op", "add_layer"}, {"page", page->index.json()}, {"name", "貼り付け"}, {"kind", inks ? "paint" : "pen"}, {"id", id}};
     if (layer != nullptr) add["after"] = layer->id;

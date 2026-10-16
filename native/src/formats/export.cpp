@@ -20,6 +20,7 @@
 #include "formats/output.hpp"
 #include "formats/pdf.hpp"
 #include "formats/pillow_save.hpp"
+#include "render/color_canvas.hpp"
 #include "render/colour.hpp"
 #include "render/covers.hpp"
 #include "render/ink_canvas.hpp"
@@ -430,6 +431,8 @@ std::vector<fs::path> export_layers(const core::Document& episode, const fs::pat
         render::page_layers(page, episode, dpi, [&](render::PageLayer&& layer) {
             ++n;
             Image image = std::move(layer.image);
+            // (color-model@1: a layer of an RGB page of a profile holds its values: written as the sRGB they show)
+            if (layer.page_values) image = render::srgb_from(image.convert("RGBA"), render::RgbSpace::of(page));
             if (layer.mask) {  // (the layer's mask applies: a PNG has no mask of its own)
                 image = image.convert("RGBA");
                 image.putalpha(render::chops::multiply(image.getchannel("A"), layer.mask->convert("L").resize(image.size())));

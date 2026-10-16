@@ -53,4 +53,15 @@ std::string paste(const core::Page& page, const core::Layer& layer, const core::
 // a paint program does: a precise layer keeps no lines or fills of its own. Pages not read yet are not looked at.
 void bake_marks(core::Document& doc);
 
+// color-model@1: a picture lifted off an RGB page of a profile (selection::lift: its paint pixels, the page's values)
+// carries that profile ("rgb_profile": its ref — the C++ build's own key, never saved).
+inline constexpr std::string_view kPatchProfileKey = "rgb_profile";
+// Such a picture as the sRGB its values show (its profile's, a built-in one or one the book holds; another taken as
+// sRGB), the key dropped; any other picture as it is.
+void patch_to_srgb(core::Patch& patch, const core::Document& doc);
+// After an op, those pictures where it left them: on an RGB page of the same profile laid into the paint layer's pixels
+// as the values they are (a layer with none gets them at the working 200 dpi), anywhere else brought to sRGB. No
+// picture keeps the key. Pages not read yet are not looked at.
+void bake_page_values(core::Document& doc);
+
 }  // namespace genko::render::color_edit

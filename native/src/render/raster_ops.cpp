@@ -824,7 +824,6 @@ std::pair<std::string, bool> composite_color_layers(const Document& doc, const P
             throw NotYetPorted("high-precision merge spans an unselected visible layer");
     // (color-model@1: an RGB page of a profile merges in its space, its paint layers' pixels as its values)
     ColorCanvas out(flatten ? page_background(page,size,false) : Image::create("RGBA",size,Ink{0,0,0,0}), RgbSpace::of(page));
-    const bool profiled = page.rgb && !page.rgb->profile.empty();
     const Box all{0, 0, size.width, size.height};
     bool floating = !selected_precision(page, layers);
     std::size_t drawn = 0; bool external_clip = false, adjustment = false;
@@ -882,8 +881,8 @@ std::pair<std::string, bool> composite_color_layers(const Document& doc, const P
             auto picture = drawable_layer_image(page, layer, kWorkingDpi, &doc, false, true);
             if (!picture) continue;
             participate(layer);
-            const bool page_values = profiled && layer.kind == LayerKind::Raster && layer.raster_png && !layer.raster_png->empty();
-            out.blend(*picture, layer.opacity, layer.clip, layer.blend, page_values);
+            out.blend(*picture, layer.opacity, layer.clip, layer.blend,
+                      picture_holds_page_values(page, layer, layer.color && !layer.color->empty()));
         }
     }
     if (drawn == 0) return {"", false};
@@ -1512,6 +1511,7 @@ void paste(OpContext& c) {
                                               : "too many values to unpack (expected 6)");
     }
     if (page.layers[ti].color_raster) {  // drawn into the precise pixels (render/color_edit)
+        for (core::Patch& patch : items.patches) color_edit::patch_to_srgb(patch, doc);  // (color-model@1: its sRGB, brought in)
         Layer pasted;
         pasted.id = page.layers[ti].id;
         pasted.role = LayerRole::User;
@@ -2217,7 +2217,8 @@ void filter_raster(OpContext& c) {
         return;
     }
     // (pen lines and shape fills become pixels, so the filter reaches them)
-    if (layer.stroke_count() > 0 || !layer.patches.empty()) raster::bake_vectors(page, layer);
+    // (color-model@1: on an RGB page of a profile, into its values — not while a plugin works the page lent as sRGB)
+    if (layer.stroke_count() > 0 || !layer.patches.empty()) raster::bake_vectors(page, layer, core::profiled_rgb(page));
     const std::string kind = core::truthy_at(op, "kind") ? core::py_str(op["kind"]) : std::string();
     // ops.filtered_raster
     const Image image = raster::layer_pixels(page, layer);
@@ -2318,7 +2319,7 @@ void erase(OpContext& c) {
     }
     const bool has_raster = target.raster_png && !target.raster_png->empty();
     if (target.kind == LayerKind::Raster && !target.patches.empty() && !has_raster) {
-        raster::bake_vectors(page, target);  // (fills on a paint layer are erased like its pixels)
+        raster::bake_vectors(page, target, core::profiled_rgb(page));  // (fills on a paint layer are erased like its pixels)
     }
     if (target.raster_png && !target.raster_png->empty()) {
         raster::erase_raster(page, target, points, width, kWorkingDpi, texture == "hard" ? "" : texture,

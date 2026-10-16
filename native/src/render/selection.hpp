@@ -96,7 +96,8 @@ struct Items {
 };
 
 // selection.lift: what lies in the area taken off the layer (the layer keeps the rest; its own pixels in the area
-// become an image patch).
+// become an image patch — color-model@1: on an RGB page of a profile, one of its values that says its profile,
+// render/color_edit's kPatchProfileKey).
 Items lift(core::Layer& layer, const core::Json& area, const core::Page& page);
 
 // selection.drop: lifted (or copied) items put back on the layer through m; fresh ids for a paste.

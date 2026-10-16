@@ -255,6 +255,12 @@ std::string profile_description(const std::string& ref, const Bytes& icc, bool l
     return icc ? icc_description(*icc) : std::string();
 }
 
+bool profiled_rgb(const Page& page) { return !page.color && page.rgb && !page.rgb->profile.empty(); }
+
+bool holds_page_values(const Page& page, const Layer& layer) {
+    return profiled_rgb(page) && layer.kind != LayerKind::Placed && layer.raster_png && !layer.raster_png->empty();
+}
+
 bool uses_color_model(const Document& doc) {
     const auto model = [](const std::optional<PageColor>& inks, const std::optional<RgbMode>& rgb) {
         return (inks && !inks->color_mode_only()) || rgb.has_value();

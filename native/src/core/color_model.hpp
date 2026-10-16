@@ -81,6 +81,15 @@ std::string icc_description(std::string_view icc);
 std::string profile_description(const std::string& ref, const Bytes& icc, bool lab = false);
 
 struct Document;
+struct Page;
+struct Layer;
+// Is the page an RGB page of a profile (color-model@1: its paint pixels are that profile's values, not sRGB)?
+bool profiled_rgb(const Page& page);
+// Does a layer's 8-bit picture (raster_png) hold its page's values — on an RGB page of a profile —, not sRGB? Every
+// paint pixel of such a page does, whatever the layer's kind (a paint layer, the raster of a layer of lines a v2 book
+// made, a tone layer's erased raster): converting, drawing, merging, lending and exporting them all ask this.
+bool holds_page_values(const Page& page, const Layer& layer);
+
 // Does the book need color-model@1 (a colour model color-mode@1 cannot hold: an RGB mode, a grey page, 32 bits, no
 // black point compensation; GKIR version 2 pixels; precise rasters in a profile's space)?
 bool uses_color_model(const Document& doc);

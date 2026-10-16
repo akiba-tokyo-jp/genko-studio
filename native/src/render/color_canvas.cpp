@@ -5,6 +5,7 @@
 #include <array>
 #include <cmath>
 #include <map>
+#include <unordered_map>
 #include <mutex>
 #include <vector>
 #include "core/error.hpp"
@@ -228,6 +229,47 @@ std::array<double, 4> linear_srgb(const RgbSpace& space, std::array<double, 4> p
     return p;
 }
 int byte(double x) { return static_cast<int>(std::lround(std::clamp(x, 0.0, 1.0)*255)); }
+// 8-bit sRGB colours into a space's linear light as linear_srgb brings them (the same values), each colour once: a row's
+// colours not met yet go through Little CMS together, the rest are found by their 24 bits (a page's pictures have few
+// colours where most pixels are: the paper, flat paint, the clear parts).
+class SrgbRows {
+public:
+    explicit SrgbRows(const RgbSpace& space) : space_(space) {}
+    // A row of `n` RGBA pixels (bytes) as straight linear RGBA.
+    void row(const unsigned char* rgba, std::size_t n, std::vector<std::array<double, 4>>& out) {
+        out.resize(n);
+        if (space_.is_srgb()) {
+            for (std::size_t x = 0; x < n; ++x)
+                out[x] = linear({rgba[x*4]/255.0, rgba[x*4+1]/255.0, rgba[x*4+2]/255.0, rgba[x*4+3]/255.0});
+            return;
+        }
+        if (known_.size() > (1u << 20)) known_.clear();  // (a picture of very many colours: kept to a bound)
+        pending_.clear();
+        for (std::size_t x = 0; x < n; ++x) {
+            const std::uint32_t key = (std::uint32_t(rgba[x*4]) << 16) | (std::uint32_t(rgba[x*4+1]) << 8) | rgba[x*4+2];
+            if (known_.try_emplace(key, std::array<double, 3>{-1, -1, -1}).second) pending_.push_back(key);
+        }
+        if (!pending_.empty()) {
+            std::vector<double> rgb(pending_.size() * 3);
+            for (std::size_t k = 0; k < pending_.size(); ++k)
+                for (unsigned c = 0; c < 3; ++c) rgb[k*3+c] = ((pending_[k] >> (16 - 8*c)) & 255) / 255.0;
+            space_.from_srgb(rgb.data(), pending_.size());
+            for (std::size_t k = 0; k < pending_.size(); ++k) {
+                auto& made = known_[pending_[k]];
+                for (unsigned c = 0; c < 3; ++c) made[c] = space_.decode(c, rgb[k*3+c]);
+            }
+        }
+        for (std::size_t x = 0; x < n; ++x) {
+            const auto& c = known_.find((std::uint32_t(rgba[x*4]) << 16) | (std::uint32_t(rgba[x*4+1]) << 8) | rgba[x*4+2])->second;
+            out[x] = {c[0], c[1], c[2], rgba[x*4+3]/255.0};
+        }
+    }
+
+private:
+    const RgbSpace& space_;
+    std::unordered_map<std::uint32_t, std::array<double, 3>> known_;
+    std::vector<std::uint32_t> pending_;
+};
 std::array<double, 4> sampled(const core::ColorRasterView& src, double x, double y, const RgbSpace& space) {
     x = std::clamp(x, 0.0, double(src.width()-1));
     y = std::clamp(y, 0.0, double(src.height()-1));
@@ -285,12 +327,12 @@ struct ColorCanvas::Impl {
 };
 ColorCanvas::ColorCanvas(const Image& initial, RgbSpace space) : impl_(std::make_unique<Impl>(initial.size(), std::move(space))) {
     const auto rgba = initial.convert("RGBA");
-    const RgbSpace& in = impl_->space;
+    SrgbRows in(impl_->space);  // (the paper: sRGB colours, into the page's space)
+    std::vector<std::array<double, 4>> line;
     for (int y = 0; y < rgba.height(); ++y) {
-        const auto* row = reinterpret_cast<const unsigned char*>(rgba.raw()->image[y]);
+        in.row(reinterpret_cast<const unsigned char*>(rgba.raw()->image[y]), static_cast<std::size_t>(rgba.width()), line);
         for (int x = 0; x < rgba.width(); ++x) {
-            // (the paper: sRGB colours, into the page's space)
-            const auto p = linear_srgb(in, {row[x*4]/255.0, row[x*4+1]/255.0, row[x*4+2]/255.0, row[x*4+3]/255.0});
+            const auto& p = line[x];
             impl_->pixels[std::size_t(y)*rgba.width()+x] = {p[0], p[1], p[2], p[3], 0};
         }
     }
@@ -307,12 +349,19 @@ void ColorCanvas::blend(const Image& input, double opacity, bool clip, std::stri
     if (input.size() != impl_->size) throw core::Error("value", "color canvas images do not match");
     const auto rgba = input.convert("RGBA");
     const RgbSpace& space = impl_->space;
+    SrgbRows in(space);
+    std::vector<std::array<double, 4>> line;
     for (int y = 0; y < rgba.height(); ++y) {
         const auto* row = reinterpret_cast<const unsigned char*>(rgba.raw()->image[y]);
-        for (int x = 0; x < rgba.width(); ++x) {
-            const std::array<double, 4> p{row[x*4]/255.0, row[x*4+1]/255.0, row[x*4+2]/255.0, row[x*4+3]/255.0};
-            impl_->over(std::size_t(y)*rgba.width()+x, page_values ? linear(space, p) : linear_srgb(space, p), opacity, clip, mode);
+        if (page_values) {
+            for (int x = 0; x < rgba.width(); ++x) {
+                const std::array<double, 4> p{row[x*4]/255.0, row[x*4+1]/255.0, row[x*4+2]/255.0, row[x*4+3]/255.0};
+                impl_->over(std::size_t(y)*rgba.width()+x, linear(space, p), opacity, clip, mode);
+            }
+            continue;
         }
+        in.row(row, static_cast<std::size_t>(rgba.width()), line);
+        for (int x = 0; x < rgba.width(); ++x) impl_->over(std::size_t(y)*rgba.width()+x, line[x], opacity, clip, mode);
     }
     impl_->previous = true;
 }
@@ -391,17 +440,23 @@ void ColorCanvas::draw_8bit(const std::function<void(Image&)>& draw) {
     for (const Image* out : {&drawn, &probe})
         if (out->mode() != "RGBA" || out->size() != impl_->size)
             throw core::Error("value", "8-bit drawing does not match the color canvas");
+    SrgbRows in(impl_->space);
+    std::vector<std::array<double, 4>> line;
     for (int y = 0; y < impl_->size.height; ++y) {
         const auto* was = reinterpret_cast<const unsigned char*>(before.raw()->image[y]);
         const auto* now = reinterpret_cast<const unsigned char*>(drawn.raw()->image[y]);
         const auto* probe_was = reinterpret_cast<const unsigned char*>(probe_before.raw()->image[y]);
         const auto* probe_now = reinterpret_cast<const unsigned char*>(probe.raw()->image[y]);
+        bool converted = false;
         for (int x = 0; x < impl_->size.width; ++x) {
             const auto* d = now + x*4;
             if (std::equal(d, d+4, was + x*4) && std::equal(probe_now + x*4, probe_now + x*4 + 4, probe_was + x*4)) continue;
+            if (!converted) {  // (the row's colours, once a pixel of it is painted)
+                in.row(now, static_cast<std::size_t>(impl_->size.width), line);
+                converted = true;
+            }
             auto& p = impl_->pixels[std::size_t(y)*impl_->size.width+x];
-            const auto v = linear_srgb(impl_->space, {d[0]/255.0, d[1]/255.0, d[2]/255.0, d[3]/255.0});
-            for (unsigned c = 0; c < 4; ++c) p[c] = v[c];  // (p[4], the alpha of the layer before, stays)
+            for (unsigned c = 0; c < 4; ++c) p[c] = line[x][c];  // (p[4], the alpha of the layer before, stays)
         }
     }
 }
@@ -493,6 +548,17 @@ Image srgb_into(const Image& rgba, const RgbSpace& space) {
     for (std::size_t i = 0; i < bytes.size() / 4; ++i)
         for (unsigned c = 0; c < 3; ++c) rgb[i * 3 + c] = static_cast<unsigned char>(bytes[i * 4 + c]) / 255.0;
     space.from_srgb(rgb.data(), bytes.size() / 4);
+    for (std::size_t i = 0; i < bytes.size() / 4; ++i)
+        for (unsigned c = 0; c < 3; ++c) bytes[i * 4 + c] = static_cast<char>(byte(rgb[i * 3 + c]));
+    return Image::frombytes("RGBA", rgba.size(), bytes);
+}
+Image srgb_from(const Image& rgba, const RgbSpace& space) {
+    if (space.is_srgb()) return rgba;
+    std::string bytes = rgba.convert("RGBA").tobytes();
+    std::vector<double> rgb(bytes.size() / 4 * 3);
+    for (std::size_t i = 0; i < bytes.size() / 4; ++i)
+        for (unsigned c = 0; c < 3; ++c) rgb[i * 3 + c] = static_cast<unsigned char>(bytes[i * 4 + c]) / 255.0;
+    space.to_srgb(rgb.data(), bytes.size() / 4);
     for (std::size_t i = 0; i < bytes.size() / 4; ++i)
         for (unsigned c = 0; c < 3; ++c) bytes[i * 4 + c] = static_cast<char>(byte(rgb[i * 3 + c]));
     return Image::frombytes("RGBA", rgba.size(), bytes);

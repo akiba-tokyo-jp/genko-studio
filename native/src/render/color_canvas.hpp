@@ -79,6 +79,9 @@ private:
 Image color_raster_preview(const core::ColorRasterView& source, Size full, Box area, const RgbSpace& space = {});
 // An 8-bit RGBA picture's sRGB colours as the space's values (its alpha kept; sRGB: the picture itself).
 Image srgb_into(const Image& rgba, const RgbSpace& space);
+// And back: an 8-bit RGBA picture of the space's values as the sRGB the screen shows (relative colorimetric, black point
+// compensation; its alpha kept; sRGB: the picture itself).
+Image srgb_from(const Image& rgba, const RgbSpace& space);
 // A correction layer's adjustment (its "adjust": a kind of filters.ADJUSTMENTS but exposure, and its settings), or
 // none when it does nothing: no kind, or settings the 8-bit page refuses with a ValueError (render._adjusted).
 // NotYetPorted for a kind of filter that is not a colour adjustment.
