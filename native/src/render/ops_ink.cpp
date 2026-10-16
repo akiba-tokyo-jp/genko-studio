@@ -1183,10 +1183,12 @@ void to_indexed(OpContext& c) {
 
 // The pixels of an indexed page's paint layers through a change of its table (PhotoCraft's Color Table): each pixel that
 // shows takes its index in the old table — the nearest colour — and the new table's colour there (an index past the new
-// table: its nearest), transparent when that index is the new transparent one.
+// table: its nearest), transparent when that index is the new transparent one. Its name and draft layers (not printed:
+// their pixels are not the table's) keep theirs; the page shows them in the new table.
 void retable(core::Page& page, const core::ColorTable& from, const core::ColorTable& to) {
     for (core::Layer& layer : page.layers) {
         if (!layer.raster_png || layer.raster_png->empty()) continue;
+        if (layer.role == core::LayerRole::Name || layer.role == core::LayerRole::Draft) continue;
         const Image picture = open_image(*layer.raster_png, kPillowOpenLimits).convert("RGBA");
         std::string bytes = picture.tobytes();
         for (std::size_t i = 0; i + 3 < bytes.size(); i += 4) {

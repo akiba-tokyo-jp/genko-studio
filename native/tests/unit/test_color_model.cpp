@@ -183,6 +183,14 @@ const core::Layer& layer_named(const core::Document& doc, const std::string& id,
     throw std::runtime_error("no layer " + id);
 }
 
+// The first layer of a role on the page.
+const core::Layer& role_layer(const core::Document& doc, core::LayerRole role, int page = 0) {
+    for (const core::Layer& layer : doc.page(page).layers) {
+        if (layer.role == role) return layer;
+    }
+    throw std::runtime_error("no layer of the role");
+}
+
 // The layer a flatten (merge_visible's) leaves the first page's pixels in: its first shown layer.
 std::string flat_id(const core::Document& doc) { return render::first_shown_layer(doc.page(0)).value(); }
 
@@ -2018,6 +2026,88 @@ private slots:
             QVERIFY(read.document.page(p).color == doc.page(p).color);
             QVERIFY(read.document.page(p).rgb == doc.page(p).rgb);
         }
+    }
+
+    // Review A: the name and draft layers a conversion keeps as layers (they do not print) keep their pixels as they are
+    // — not taken to the table's colours, not made 0 or full —, and so do what is drawn on them afterwards and a change of
+    // the table; the page shows them through its last map as it shows the rest (an indexed page: each pixel of the page
+    // drawn in RGB its table's nearest; a bitmap page: its lightness 0 or full).
+    void namesAndDraftsKeepTheirPixels() {
+        const int w = render::mm_to_px(60, 200), h = render::mm_to_px(80, 200);
+        // (the paint layer black on the left, white on the right; a pale blue pencil across it on the draft layer and a
+        // dark blue sketch on the name layer, both seen through)
+        render::Image picture = render::Image::create("RGBA", render::Size{w, h}, render::Ink{255, 255, 255, 255});
+        picture.paste(render::Ink{0, 0, 0, 255}, render::Box{0, 0, w / 2, h});
+        render::Image pencil = render::Image::create("RGBA", render::Size{w, h}, render::Ink{0, 0, 0, 0});
+        pencil.paste(render::Ink{120, 170, 255, 170}, render::Box{0, h / 4, w, h / 4 + 40});
+        render::Image sketch = render::Image::create("RGBA", render::Size{w, h}, render::Ink{0, 0, 0, 0});
+        sketch.paste(render::Ink{40, 60, 120, 200}, render::Box{0, h / 2, w, h / 2 + 40});
+        const core::Document doc =
+            run_ops(painted(picture), Json::array({Json{{"op", "put_raster"}, {"page", 1}, {"layer", "draft"}, {"png_base64", core::b64encode(render::write_png(pencil))}},
+                                                   Json{{"op", "put_raster"}, {"page", 1}, {"layer", "name"}, {"png_base64", core::b64encode(render::write_png(sketch))}}}))
+                .doc;
+        const auto own = [](const core::Document& d, core::LayerRole role) -> std::string {
+            const core::Layer& layer = role_layer(d, role);
+            if (layer.ink_raster) return *layer.ink_raster;
+            return layer.raster_png ? *layer.raster_png : std::string();
+        };
+        QVERIFY(!own(doc, core::LayerRole::Draft).empty() && !own(doc, core::LayerRole::Name).empty());
+        const auto proof = [](const core::Document& d) {  // (the page as the screen shows it: its name and draft layers too)
+            render::RenderOptions options;
+            options.mode = "proof";
+            return render::render_page(d.page(0), 100, options, &d).image.convert("RGB");
+        };
+        // (pixels drawn on the layer afterwards: the pencil again with a block of a colour at 12 × 30 mm)
+        const int fx = static_cast<int>(12 * 200 / 25.4), fy = static_cast<int>(30 * 200 / 25.4);
+        const auto draw_on = [&](const core::Document& d, const char* role, render::Ink colour) {
+            render::Image again = pencil;
+            again.paste(colour, render::Box{fx - 20, fy - 20, fx + 20, fy + 20});
+            return run_ops(d, Json::array({Json{{"op", "put_raster"}, {"page", 1}, {"layer", role}, {"png_base64", core::b64encode(render::write_png(again))}}})).doc;
+        };
+        // インデックスカラー: the name and draft layers as they were; the page shows the RGB page's colours in its table
+        const core::ApplyResult indexed = run_ops(doc, Json::array({Json{{"op", "to_indexed"}, {"page", 1}, {"colors", 8}}}));
+        QCOMPARE(indexed.results.at(0)["flattened"], Json(1));
+        for (const auto role : {core::LayerRole::Draft, core::LayerRole::Name}) QVERIFY(own(indexed.doc, role) == own(doc, role));
+        const auto shown_in_table = [&](const core::Document& d) {
+            const core::ColorTable& table = *d.page(0).rgb->table;
+            core::Document plain = d;
+            plain.edit_page(0).rgb.reset();
+            std::string px = proof(plain).tobytes();
+            for (std::size_t i = 0; i + 2 < px.size(); i += 3) {
+                const std::array<int, 3>& c = table.colors[table.nearest(static_cast<unsigned char>(px[i]), static_cast<unsigned char>(px[i + 1]),
+                                                                         static_cast<unsigned char>(px[i + 2]))];
+                for (unsigned k = 0; k < 3; ++k) px[i + k] = static_cast<char>(c[k]);
+            }
+            return proof(d).tobytes() == px;
+        };
+        QVERIFY(shown_in_table(indexed.doc));
+        // … drawn on afterwards: its own colour (10, 200, 250 is none of the table's)
+        const core::Document drawn = draw_on(indexed.doc, "draft", render::Ink{10, 200, 250, 255});
+        const core::Layer& pencil_now = role_layer(drawn, core::LayerRole::Draft);
+        QCOMPARE(rgb_at(render::open_image(*pencil_now.raster_png, render::kPillowOpenLimits), fx, fy), (std::array<int, 3>{10, 200, 250}));
+        QVERIFY(shown_in_table(drawn));
+        // … the table changed: the name and draft layers as they were
+        const core::Document retabled = run_ops(drawn, Json::array({Json{{"op", "set_color_table"}, {"page", 1}, {"entries", Json{{"0", "#ff00ff"}}}}})).doc;
+        for (const auto role : {core::LayerRole::Draft, core::LayerRole::Name}) QVERIFY(own(retabled, role) == own(drawn, role));
+        QVERIFY(shown_in_table(retabled));
+        // 2 階調: the name and draft layers as they were (their grey and alpha); the page shows 0 or full of what it draws —
+        // the pale pencil over the black is dark (not a white line), over the white white; the dark sketch dark
+        const core::Document grey = run_ops(doc, Json::array({Json{{"op", "set_color_mode"}, {"page", 1}, {"mode", "gray"}}})).doc;
+        const core::ApplyResult two = run_ops(grey, Json::array({Json{{"op", "to_bitmap"}, {"page", 1}, {"method", "threshold"}}}));
+        for (const auto role : {core::LayerRole::Draft, core::LayerRole::Name}) QVERIFY(own(two.doc, role) == own(grey, role));
+        const render::Image shown = proof(two.doc);
+        for (const char c : shown.tobytes()) QVERIFY(static_cast<unsigned char>(c) == 0 || static_cast<unsigned char>(c) == 255);
+        const int pencil_y = (h / 4 + 20) / 2, sketch_y = (h / 2 + 20) / 2, left = w / 8, right = w / 2 - w / 8;  // (100 dpi)
+        QCOMPARE(rgb_at(shown, left, pencil_y), (std::array<int, 3>{0, 0, 0}));
+        QCOMPARE(rgb_at(shown, right, pencil_y), (std::array<int, 3>{255, 255, 255}));
+        QCOMPARE(rgb_at(shown, right, sketch_y), (std::array<int, 3>{0, 0, 0}));
+        // … drawn on afterwards: the grey as drawn (100: not 0 nor full)
+        const core::Document greyed = draw_on(two.doc, "draft", render::Ink{100, 100, 100, 255});
+        const core::InkPixels inks = core::decode_ink_raster(*role_layer(greyed, core::LayerRole::Draft).ink_raster);
+        const std::size_t at = std::size_t(fy) * inks.width + std::size_t(fx);
+        QCOMPARE(inks.samples.at(at * 2), std::uint16_t(100));
+        QCOMPARE(inks.samples.at(at * 2 + 1), std::uint16_t(255));
+        for (const char c : proof(greyed).tobytes()) QVERIFY(static_cast<unsigned char>(c) == 0 || static_cast<unsigned char>(c) == 255);
     }
 };
 

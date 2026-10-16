@@ -223,7 +223,9 @@ private:
 // page's pixels 0 or full at 50% (its alpha too: 2 階調), an indexed page's colours its table's nearest (no dither), an
 // RGB page of 16 or 32 bits' new 8-bit pixels on a paint layer widened to its depth exactly (v × 257, v / 255: the
 // layer then composites in precise colour as the others). Only the layers the op changed (their pixels another object
-// than before, or all of a page whose mode it changed) are looked at; the rest keep their bytes.
+// than before, or all of a page whose mode it changed) are looked at; the rest keep their bytes. A bitmap or indexed
+// page's name and draft layers (kept as layers by the flatten, never printed) keep their pixels as they are: the page
+// shows them through its last map — the table's colours, two — as it shows the rest.
 void keep_page_modes(core::Document& doc, const std::vector<core::PagePtr>& before) {
     for (std::size_t p = 0; p < doc.pages.size(); ++p) {
         if (doc.is_deferred(p)) continue;
@@ -252,6 +254,7 @@ void keep_page_modes(core::Document& doc, const std::vector<core::PagePtr>& befo
             const core::Layer& layer = seen.layers[i];
             const bool pixels = bitmap ? layer.ink_raster != nullptr : layer.raster_png && !layer.raster_png->empty();
             if (!pixels || !changed(layer)) continue;
+            if ((bitmap || indexed) && (layer.role == core::LayerRole::Name || layer.role == core::LayerRole::Draft)) continue;
             // (deep: a paint layer a precise raster can hold — render/page's and set_color_mode's rule)
             if (deep && (layer.kind != core::LayerKind::Raster || layer.role == core::LayerRole::Tone || layer.stroke_count() || !layer.patches.empty() ||
                          layer.panel_clip || layer.effect || layer.screen || layer.color)) {
