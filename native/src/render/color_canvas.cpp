@@ -128,15 +128,29 @@ double RgbSpace::encode(unsigned channel, double linear) const {
 void RgbSpace::from_srgb(double* rgb, std::size_t count) const {
     if (!impl_ || count == 0) return;
     // (an sRGB colour in 0..1 stays in 0..1: what the profiles' fixed-point matrices leave past it, sRGB's white a few
-    // millionths over 1 in Display P3, is their rounding)
-    std::vector<bool> inside(count);
+    // millionths over 1 in Display P3, is their rounding; so is what they leave of sRGB's white and black — the white
+    // of paper — a few millionths short of the page's own: snapped to it)
+    enum class Kind : unsigned char { Outside, Inside, White, Black };
+    std::vector<Kind> kinds(count);
     for (std::size_t i = 0; i < count; ++i) {
-        inside[i] = std::all_of(rgb + i * 3, rgb + i * 3 + 3, [](double v) { return v >= 0.0 && v <= 1.0; });
+        const double* p = rgb + i * 3;
+        kinds[i] = p[0] == 1.0 && p[1] == 1.0 && p[2] == 1.0   ? Kind::White
+                   : p[0] == 0.0 && p[1] == 0.0 && p[2] == 0.0 ? Kind::Black
+                   : std::all_of(p, p + 3, [](double v) { return v >= 0.0 && v <= 1.0; }) ? Kind::Inside
+                                                                                           : Kind::Outside;
     }
     cmsDoTransform(impl_->in, rgb, rgb, static_cast<cmsUInt32Number>(count));
+    constexpr double kNear = 1e-4;
     for (std::size_t i = 0; i < count; ++i) {
-        if (!inside[i]) continue;
-        for (unsigned c = 0; c < 3; ++c) rgb[i * 3 + c] = std::clamp(rgb[i * 3 + c], 0.0, 1.0);
+        if (kinds[i] == Kind::Outside) continue;
+        double* p = rgb + i * 3;
+        if (kinds[i] == Kind::White && std::all_of(p, p + 3, [](double v) { return std::abs(v - 1.0) < kNear; })) {
+            std::fill(p, p + 3, 1.0);
+        } else if (kinds[i] == Kind::Black && std::all_of(p, p + 3, [](double v) { return std::abs(v) < kNear; })) {
+            std::fill(p, p + 3, 0.0);
+        } else {
+            for (unsigned c = 0; c < 3; ++c) p[c] = std::clamp(p[c], 0.0, 1.0);
+        }
     }
 }
 
