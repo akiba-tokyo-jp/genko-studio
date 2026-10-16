@@ -352,8 +352,8 @@ const std::vector<Rule>& rules() {
         // (color-model@1: set_color_mode, assign_profile, convert_profile — the C++ build's own)
         r.push_back(rule("mode is rgb, gray, cmyk or lab", "色モードは RGB・グレースケール・CMYK・Lab のどれかです"));
         r.push_back(rule("depth is 8, 16 or 32", "ビット数は 8・16・32 のどれかです"));
-        r.push_back(rule(R"(page \d+: the layer (.*) holds HDR values past 0\.\.1: they would be cut \(clip_hdr: true cuts them\))",
-                         "レイヤー \\1 に 0〜1 を超える HDR の値があります。HDR の値を切ります（clip_hdr: true で切る）"));
+        r.push_back(rule(R"(page \d+: the layer (.*) holds HDR values past 0\.\.1, which cannot be converted as they are \(clip_hdr: true cuts them and converts\))",
+                         "レイヤー \\1 に HDR の値（0〜1 の外）があるので、このままでは変換できません（clip_hdr: true で切って変換します）"));
         r.push_back(rule(R"(the profile is for another colour space \((\w+)\).*)", "プロファイルの色空間（\\1）がページの色モードと合いません"));
         r.push_back(rule("a CMYK page needs its ICC profile.*", "CMYK のページにはカラープロファイルが要ります（内蔵の coated-cmyk か、ファイルを選びます）"));
         r.push_back(rule("a Lab page has no ICC profile", "Lab のページにはカラープロファイルを指定しません"));
@@ -364,8 +364,8 @@ const std::vector<Rule>& rules() {
         r.push_back(rule(R"(the book has no ICC profile .*)", "原稿にそのカラープロファイルがありません（ファイルから選んでください）"));
         r.push_back(rule(R"(the ICC profile cannot be used: .*)", "そのカラープロファイルは使えません"));
         r.push_back(rule(R"(the precise pixels cannot be kept: .*)", "高精度の画素が原稿の上限（1 GiB）を超えるため、変換できません"));
-        r.push_back(rule(R"(page (\d+): the layer (.*) (?:is|holds|keeps|has) .*: a page of 16 or 32 bits cannot draw it in precise colour yet)",
-                         "\\1 ページのレイヤー \\2 は、16・32 ビットのページではまだ描けません（はみ出し・線・フォルダーなどを確かめてください）"));
+        r.push_back(rule(R"(page (\d+): the layer (.*?) (?:is|holds|keeps|has) .*: a page in precise colour \(16 or 32 bits, or of a profile\) cannot draw it yet)",
+                         "\\1 ページのレイヤー \\2 は、16・32 ビットやプロファイル付きのページではまだ描けません（トーン・描画モード・はみ出し・線・フォルダーなどを確かめてください）"));
         r.push_back(rule("Lab PSD files are not supported: save it as RGB or CMYK", "Lab カラーの PSD は読めません。RGB か CMYK で保存し直してください"));
         r.push_back(rule("MP4 needs ffmpeg on this computer; WebP, GIF and PNG need nothing",
                          "MP4 にはこのパソコンに ffmpeg が要ります（WebP・GIF・PNG なら何も要りません）"));

@@ -431,6 +431,11 @@ void Rules::meaning(const double* inks, double* rgb, std::size_t count) const {
             out[0] = out[1] = out[2] = v;
             continue;
         }
+        if (color.space == InkSpace::Gray) {  // (a grey page's value is its grey, whatever its profile: back by its value)
+            const double v = 1.0 - std::clamp(p[0], 0.0, 1.0);
+            out[0] = out[1] = out[2] = v;
+            continue;
+        }
         const bool flat = color.space == InkSpace::Lab && encode_sample(color.space, 1, p[1], color.depth) == neutral &&
                           encode_sample(color.space, 2, p[2], color.depth) == neutral;
         shown.insert(shown.end(), p, p + ch);
