@@ -116,7 +116,8 @@ bool holds_page_values(const Page& page, const Layer& layer);
 // black point compensation; GKIR version 2 pixels; precise rasters in a profile's space; the book's text_gamma)?
 bool uses_color_model(const Document& doc);
 // The book's RGB modes as they must be (core::Error("value") says what is not): a depth of 8, 16 or 32, a profile by its
-// ref and the bytes held for it, a known intent. Pages not read yet are not looked at.
+// ref and the bytes held for it, a known intent; an indexed page's table, and its pixels 8 bits only (no precise
+// raster). Pages not read yet are not looked at.
 void validate_color_model(const Document& doc);
 
 }  // namespace genko::core

@@ -402,6 +402,8 @@ const std::vector<Rule>& rules() {
                          "原稿の新しいページの色モードからはマルチチャンネルにできません"));
         r.push_back(rule(R"(page (\d+): the layer (.*)'s blend '(.*)' is not one a multichannel page composites)",
                          "\\1 ページのレイヤー \\2 の描画モード（\\3）はマルチチャンネルのページでは合成できません（色相・彩度・カラー・輝度は使えません）"));
+        r.push_back(rule(R"(page (\d+) is an indexed page: it holds 8-bit pixels only \(the layer (.*) holds precise colour\))",
+                         "\\1 ページはインデックスカラーのページなので、高精度（16・32 bit）の画素を置けません（8 bit の画素だけです。レイヤー \\2）"));
         r.push_back(rule(R"(page (\d+) is an indexed page: its colours are sRGB's)", "\\1 ページはインデックスカラーのページなので、プロファイルを指定できません（sRGB の色です）"));
         r.push_back(rule(R"(page (\d+) is a multichannel page: its plates have no profile)", "\\1 ページはマルチチャンネルのページなので、プロファイルを指定できません"));
         r.push_back(rule(R"(page (\d+) is an? (indexed|bitmap|duotone|multichannel) page: convert_profile takes .*)", [](const QRegularExpressionMatch& m) {

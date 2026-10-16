@@ -178,7 +178,7 @@ RgbMode rgb_mode_from_json(const Json& value, bool indexed) {
         if (!value.contains("table")) bad("an indexed page has its table");
         out.table = table_from_json(value["table"]);
         if (value.contains("profile")) bad("an indexed page has no profile (sRGB)");
-        if (value["depth"] != Json(8)) bad("an indexed page is 8 bits");
+        if (const auto depth = value.find("depth"); depth == value.end() || *depth != Json(8)) bad("an indexed page is 8 bits");
     }
     const auto depth = value.find("depth");
     if (depth == value.end() || !depth->is_number_integer() ||
@@ -382,6 +382,14 @@ void validate_color_model(const Document& doc) {
     for (const auto& page : doc.pages) {
         if (std::find(doc.deferred.begin(), doc.deferred.end(), page) != doc.deferred.end()) continue;
         if (page->rgb) check(*page->rgb, "page " + page->index.repr());
+        if (page->rgb && page->rgb->table) {  // (an indexed page's pixels: 8 bits, raster_png only — design 2.3)
+            for (const Layer& layer : page->layers) {
+                if (layer.color_raster) {
+                    throw Error("value", "page " + page->index.repr() + " is an indexed page: it holds 8-bit pixels only (the layer " + layer.id +
+                                             " holds precise colour)");
+                }
+            }
+        }
     }
 }
 

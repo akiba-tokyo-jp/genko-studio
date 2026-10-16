@@ -1573,6 +1573,9 @@ private slots:
             R"({"mode":"indexed","depth":8,"intent":"relative","table":{"colors":[],"transparent":null}})",
             R"({"mode":"indexed","depth":8,"intent":"relative","table":{"colors":[[0,0,0]],"transparent":1}})",
             R"({"mode":"indexed","depth":8,"intent":"relative","table":{"colors":[[0,0,0]],"transparent":null,"x":1}})",
+            // (review E: no depth — looked for, not read past the object's end)
+            R"({"mode":"indexed","intent":"relative","bpc":false,"table":{"colors":[[0,0,0]],"transparent":null}})",
+            R"({"mode":"indexed","intent":"relative","table":{"colors":[[0,0,0]],"transparent":null}})",
             R"({"mode":"rgb","depth":8,"intent":"relative","table":{"colors":[[0,0,0]],"transparent":null}})",
             R"({"mode":"bitmap","depth":16,"profile":"@sgray","intent":"relative","inks":[],"bitmap":{"method":"threshold","frequency":53,"angle":45,"shape":"round"}})",
             R"({"mode":"gray","depth":8,"profile":"@sgray","intent":"relative","inks":[],"bitmap":{"method":"threshold","frequency":53,"angle":45,"shape":"round"}})",
@@ -2146,6 +2149,41 @@ private slots:
             const core::ApplyResult none = run_ops(plain, ops);
             QVERIFY2(!none.results.back().contains("discarded"), none.results.back().dump().c_str());
         }
+    }
+
+    // Review D: an indexed page holds 8-bit pixels only (design 2.3): put_color_raster on it is refused, nothing changed;
+    // a book with such a layer on an indexed page opens read-only.
+    void indexedPagesHoldEightBitPixelsOnly() {
+        const Json precise{{"op", "put_color_raster"}, {"page", 1}, {"width", 2}, {"height", 1}, {"precision", "f32"},
+                           {"pixels", Json::array({0.3, 0.7, 0.1, 1.0, 0.9, 0.2, 0.6, 1.0})}};
+        const core::Document indexed = run_ops(painted(working_picture()), Json::array({Json{{"op", "to_indexed"}, {"page", 1}, {"colors", 8}}})).doc;
+        const std::string why = refusal(indexed, Json::array({precise}));
+        QVERIFY2(why.find("indexed page") != std::string::npos, why.c_str());
+        // (on disk: an sRGB page's precise layer, the page then written indexed by hand)
+        const core::Document doc = run_ops(painted(working_picture()), Json::array({precise})).doc;
+        QTemporaryDir dir;
+        const fs::path book = core::path_from_utf8(dir.path().toStdString()) / "b.genko";
+        write_book(doc, book);
+        const QString project = QString::fromStdString(core::path_to_utf8(book / "project.json"));
+        Json saved = Json::parse(genko::test::read_bytes(project));
+        const auto write = [&](const Json& value) {
+            QFile file(project);
+            QVERIFY(file.open(QIODevice::WriteOnly | QIODevice::Truncate));
+            file.write(QByteArray::fromStdString(value.dump()));
+        };
+        for (const char* feature : {"color-mode@1", "color-model@1"}) saved["features"].push_back(feature);
+        saved["pages"][0]["color"] = Json::parse(R"({"mode":"indexed","depth":8,"intent":"relative","table":{"colors":[[0,0,0],[255,255,255]],"transparent":null}})");
+        Json without = saved;  // (the same page without the precise layer: it reads)
+        Json& layers = without["pages"][0]["layers"];
+        layers.erase(std::remove_if(layers.begin(), layers.end(), [](const Json& l) { return l.contains("color_raster"); }), layers.end());
+        QVERIFY(layers.size() + 1 == saved["pages"][0]["layers"].size());
+        write(without);
+        const storage::LoadResult clean = storage::load_document(book);
+        QVERIFY2(clean.document.read_only_reason.empty(), clean.document.read_only_reason.c_str());
+        QVERIFY(clean.document.page(0).rgb && clean.document.page(0).rgb->table);
+        write(saved);
+        const storage::LoadResult read = storage::load_document(book);
+        QVERIFY2(read.document.read_only_reason.find("indexed page") != std::string::npos, read.document.read_only_reason.c_str());
     }
 };
 
