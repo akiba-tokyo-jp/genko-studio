@@ -690,6 +690,8 @@ private slots:
         const auto path=gui_test::path_of(tmp.path()+"/book");gui_test::write_book(path,coloured_book("既定の校正"));
         auto session=app::Session::open(path,gui_test::quick(gui_test::path_of(tmp.path()+"/recovery")));
         app::MainWindow window(session);window.resize(900,700);window.show();QVERIFY(QTest::qWaitForWindowExposed(&window));
+        window.activateWindow();  // (a shortcut reaches the active window only: on a real xcb screen too)
+        QVERIFY(QTest::qWaitForWindowActive(&window));
         QTest::keySequence(&window,QKeySequence(QStringLiteral("Ctrl+Alt+Y")));
         QVERIFY(window.canvas()->renderer().cmyk_proof());
         QVERIFY(window.action("act_proof_working_cmyk")->isChecked());
