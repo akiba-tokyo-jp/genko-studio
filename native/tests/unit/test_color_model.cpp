@@ -23,6 +23,7 @@
 #include <vector>
 
 #include "core/base64.hpp"
+#include "core/channels.hpp"
 #include "core/color_model.hpp"
 #include "core/color_adjust.hpp"
 #include "core/color_raster.hpp"
@@ -181,6 +182,9 @@ const core::Layer& layer_named(const core::Document& doc, const std::string& id,
     }
     throw std::runtime_error("no layer " + id);
 }
+
+// The layer a flatten (merge_visible's) leaves the first page's pixels in: its first shown layer.
+std::string flat_id(const core::Document& doc) { return render::first_shown_layer(doc.page(0)).value(); }
 
 // A layer of lines as a v2 book made it: its raster (a red band at the bottom of the page) and no paint kind.
 core::Layer v2_lines_layer() {
@@ -466,7 +470,8 @@ private slots:
         // refused: a depth, a mode
         QVERIFY(!refusal(doc, Json::array({Json{{"op", "set_color_mode"}, {"mode", "rgb"}, {"depth", 12}}})).empty());
         QVERIFY(!refusal(doc, Json::array({Json{{"op", "set_color_mode"}, {"mode", "hsv"}}})).empty());
-        QVERIFY(refusal(doc, Json::array({Json{{"op", "set_color_mode"}, {"mode", "multichannel"}}})).starts_with("not_yet_ported"));
+        // (multichannel: PC1d's — the page becomes multichannel, test_color_model's multichannel slots)
+        QVERIFY(refusal(doc, Json::array({Json{{"op", "set_color_mode"}, {"mode", "multichannel"}}})).empty());
     }
 
     // HDR values going where they cannot be kept (32 → 16 or 8 bits, into inks): refused, nothing changed; cut when
@@ -1515,6 +1520,504 @@ private slots:
         const std::uint64_t before = core::color_raster_checks();
         for (int i = 0; i < 3; ++i) doc = run_ops(doc, Json::array({Json{{"op", "set_meta"}, {"title", "t" + std::to_string(i)}}})).doc;
         QVERIFY2(core::color_raster_checks() - before <= 1, qPrintable(QString::number(core::color_raster_checks() - before)));
+    }
+
+    // --- PC1d: インデックスカラー・カラーテーブル・2 階調・ダブルトーン・マルチチャンネル (color-model@1) ------------------
+
+    // The JSON of the modes of their own: written in the key order, read back the same; what is not one refused.
+    void specialModesJson() {
+        const std::string sgray = core::builtin_profile("sgray")->ref();
+        const std::string coated = core::builtin_profile("coated-cmyk")->ref();
+        // (moc reads no raw string that ends in a quote: the profiles go in for @names)
+        const auto fill = [&](std::string text) {
+            for (const auto& [name, ref] : {std::pair<std::string, std::string>{"@sgray", sgray}, {"@coated", coated},
+                                            {"@p3", core::builtin_profile("display-p3")->ref()}}) {
+                for (std::size_t at = text.find(name); at != std::string::npos; at = text.find(name)) text.replace(at, name.size(), ref);
+            }
+            return text;
+        };
+        const std::vector<std::string> good{
+            R"({"mode":"indexed","depth":8,"intent":"relative","table":{"colors":[[0,0,0],[255,255,255],[255,0,0]],"transparent":2}})",
+            R"({"mode":"indexed","depth":8,"intent":"relative","bpc":false,"table":{"colors":[[10,20,30]],"transparent":null}})",
+            R"({"mode":"bitmap","depth":8,"profile":"@sgray","intent":"relative","inks":[],"bitmap":{"method":"halftone","frequency":53.0,"angle":45.0,"shape":"round"}})",
+            R"({"mode":"duotone","depth":16,"profile":"@sgray","intent":"relative","inks":[],"duotone":[{"name":"Black","color":[0,0,0],"curve":[[0.0,0.0],[100.0,100.0]]},{"name":"Orange","color":[255,128,0],"curve":[[0.0,0.0],[50.0,30.0],[100.0,80.0]]}]})",
+            R"({"mode":"multichannel","depth":8,"intent":"relative","inks":[[[200,0,0],[0.5,0.25,0.0]]],"plates":[{"name":"Cyan","color":[0,174,239],"solidity":0.0,"key":true},{"name":"Magenta","color":[236,0,140],"solidity":0.0,"key":true},{"name":"Yellow","color":[255,242,0],"solidity":0.5,"key":true}],"from":"rgb"})",
+            R"({"mode":"multichannel","depth":32,"profile":"@coated","intent":"perceptual","inks":[],"plates":[{"name":"Cyan","color":[0,174,239],"solidity":0.0},{"name":"Black","color":[35,31,32],"solidity":0.0,"key":true}],"from":"cmyk"})",
+            R"({"mode":"multichannel","depth":8,"profile":"@sgray","intent":"relative","inks":[],"plates":[{"name":"Gold","color":[219,173,46],"solidity":0.0,"key":true,"curve":[[0.0,0.0],[100.0,70.0]]}],"from":"duotone"})",
+        };
+        for (const std::string& text : good) {
+            const Json value = Json::parse(fill(text));
+            const core::ColorModel model = core::color_model_from_json(value);
+            const Json back = model.rgb ? core::to_json(*model.rgb) : core::to_json(*model.inks);
+            QVERIFY2(back.dump() == value.dump(), (back.dump() + " ≠ " + value.dump()).c_str());
+        }
+        const auto bad = [](const std::string& text) {
+            try {
+                (void)core::color_model_from_json(Json::parse(text));
+            } catch (const core::Error& error) {
+                return error.code() == "value";
+            }
+            return false;
+        };
+        const std::vector<std::string> wrong{
+            R"({"mode":"indexed","depth":16,"intent":"relative","table":{"colors":[[0,0,0]],"transparent":null}})",
+            R"({"mode":"indexed","depth":8,"profile":"@p3","intent":"relative","table":{"colors":[[0,0,0]],"transparent":null}})",
+            R"({"mode":"indexed","depth":8,"intent":"relative","table":{"colors":[],"transparent":null}})",
+            R"({"mode":"indexed","depth":8,"intent":"relative","table":{"colors":[[0,0,0]],"transparent":1}})",
+            R"({"mode":"indexed","depth":8,"intent":"relative","table":{"colors":[[0,0,0]],"transparent":null,"x":1}})",
+            R"({"mode":"rgb","depth":8,"intent":"relative","table":{"colors":[[0,0,0]],"transparent":null}})",
+            R"({"mode":"bitmap","depth":16,"profile":"@sgray","intent":"relative","inks":[],"bitmap":{"method":"threshold","frequency":53,"angle":45,"shape":"round"}})",
+            R"({"mode":"gray","depth":8,"profile":"@sgray","intent":"relative","inks":[],"bitmap":{"method":"threshold","frequency":53,"angle":45,"shape":"round"}})",
+            R"({"mode":"bitmap","depth":8,"profile":"@sgray","intent":"relative","inks":[],"bitmap":{"method":"x","frequency":53,"angle":45,"shape":"round"}})",
+            R"({"mode":"duotone","depth":8,"profile":"@sgray","intent":"relative","inks":[],"duotone":[{"name":"A","color":[0,0,0],"curve":[[50,0],[20,100]]}]})",
+            R"({"mode":"duotone","depth":8,"profile":"@sgray","intent":"relative","inks":[],"duotone":[]})",
+            R"({"mode":"multichannel","depth":8,"intent":"relative","inks":[],"plates":[],"from":"rgb"})",
+            R"({"mode":"multichannel","depth":8,"intent":"relative","inks":[],"plates":[{"name":"A","color":[0,0,0],"solidity":0},{"name":"A","color":[0,0,0],"solidity":0}],"from":"rgb"})",
+            R"({"mode":"multichannel","depth":8,"intent":"relative","inks":[],"plates":[{"name":"A","color":[0,0,0],"solidity":0}],"from":"cmyk"})",
+            R"({"mode":"multichannel","depth":8,"profile":"@coated","intent":"relative","inks":[],"plates":[{"name":"A","color":[0,0,0],"solidity":0}],"from":"rgb"})",
+            R"({"mode":"multichannel","depth":8,"intent":"relative","inks":[[[1,2,3],[0.5,0.5]]],"plates":[{"name":"A","color":[0,0,0],"solidity":0}],"from":"rgb"})",
+            R"({"mode":"multichannel","depth":8,"intent":"relative","inks":[],"plates":[{"name":"A","color":[0,0,0],"solidity":0,"key":false}],"from":"rgb"})",
+        };
+        for (const std::string& text : wrong) QVERIFY2(bad(fill(text)), text.c_str());
+    }
+
+    // PhotoCraft's doc/src/mode.rs tests: the table's nearest colour (ties to the lower index), a black-ink duotone is
+    // grey and a warm second ink warms the middle; the curve straight between its points; plates printed over paper
+    // (compose/src/multichannel.rs inks_multiply_over_paper).
+    void tablesInksAndPlates() {
+        core::ColorTable t;
+        t.colors = {{0, 0, 0}, {255, 255, 255}, {255, 0, 0}};
+        QCOMPARE(t.nearest(230, 26, 26), std::size_t(2));
+        QCOMPARE(t.nearest(153, 153, 153), std::size_t(1));
+        t.colors = {{10, 10, 10}, {10, 10, 10}};
+        QCOMPARE(t.nearest(10, 10, 10), std::size_t(0));
+        const std::vector<core::DuotoneInk> black{core::DuotoneInk{"Black", {0, 0, 0}}};
+        for (const double g : {0.0, 0.25, 1.0}) {
+            const auto c = core::duotone_print(black, g);
+            QVERIFY(std::abs(c[0] - g) < 1e-12 && c[0] == c[2] && c[1] == c[2]);
+        }
+        const auto warm = core::duotone_print({core::DuotoneInk{"Black", {0, 0, 0}}, core::DuotoneInk{"Orange", {255, 128, 0}}}, 0.5);
+        QVERIFY(warm[0] > warm[2]);
+        QCOMPARE(core::curve_at({{0, 0}, {50, 80}, {100, 100}}, 0.25), 0.4);
+        QCOMPARE(core::curve_at({{20, 10}, {80, 90}}, 0.0), 0.1);
+        QCOMPARE(core::curve_at({{20, 10}, {80, 90}}, 1.0), 0.9);
+        QCOMPARE(core::curve_at({}, 0.3), 0.3);
+        std::vector<core::Plate> plates(2);
+        plates[0].color = {0, 255, 255};
+        plates[1].color = {255, 0, 255};
+        const std::array<std::array<double, 2>, 4> density{{{0, 0}, {1, 0}, {1, 1}, {0, 1}}};
+        const std::array<std::array<double, 3>, 4> want{{{1, 1, 1}, {0, 1, 1}, {0, 0, 1}, {1, 0, 1}}};
+        for (std::size_t i = 0; i < 4; ++i) {
+            double p[3] = {1, 1, 1};
+            core::print_plates(plates, density[i].data(), p);
+            for (unsigned c = 0; c < 3; ++c) QCOMPARE(p[c], want[i][c]);
+        }
+    }
+
+    // multichannel_cmds tests.rs rgb_becomes_cmy_inks_and_back_exactly: an RGB page's plates Cyan, Magenta, Yellow (each
+    // 1 − its value), back to RGB the same pixels (8 bits exactly; 16 and 32 within a step), the book before untouched.
+    void multichannelFromRgbAndBack() {
+        const render::Image image = working_picture();
+        const core::Document plain = painted(image);
+        const std::string id = flat_id(plain);
+        for (const int depth : {8, 16, 32}) {
+            const core::Document doc = depth == 8 ? plain : run_ops(plain, Json::array({Json{{"op", "set_color_mode"}, {"page", 1}, {"mode", "rgb"}, {"depth", depth}}})).doc;
+            const core::ApplyResult multi = run_ops(doc, Json::array({Json{{"op", "set_color_mode"}, {"page", 1}, {"mode", "multichannel"}}}));
+            const core::Page& page = multi.doc.page(0);
+            QVERIFY(page.color && page.color->space == core::InkSpace::Multi && page.color->depth == depth);
+            QCOMPARE(page.color->from, std::string("rgb"));
+            QCOMPARE(core::plate_labels(page), (std::vector<std::string>{"Cyan", "Magenta", "Yellow"}));
+            QCOMPARE(multi.results.at(0)["flattened"], Json(1));
+            const core::InkPixels plates = core::decode_ink_raster(*layer_named(multi.doc, id).ink_raster);
+            QCOMPARE(plates.planes, 3u);
+            const std::size_t at = std::size_t(10) * plates.width + plates.width - 5;  // (the green)
+            QVERIFY(std::abs(plates.value(at, 0) - (1.0 - 30 / 255.0)) <= 0.5 / 255 + 1e-6);
+            QVERIFY(std::abs(plates.value(at, 1) - (1.0 - 160 / 255.0)) <= 0.5 / 255 + 1e-6);
+            // (shown: the plates printed over white — the paper's white no ink)
+            const auto shown = rgb_at(drawn_page(multi.doc, 0, 200), 3, 3);
+            QVERIFY2(near_rgb(shown, {128, 128, 128}, 140), qPrintable(rgb_text(shown)));
+            const core::ApplyResult back = run_ops(multi.doc, Json::array({Json{{"op", "set_color_mode"}, {"page", 1}, {"mode", "rgb"}, {"depth", depth}}}));
+            const core::Layer& again = layer_named(back.doc, id);
+            if (depth == 8) {
+                QCOMPARE(render::open_image(*again.raster_png, render::kPillowOpenLimits).convert("RGBA").tobytes(), image.tobytes());
+            } else {
+                const core::ColorRasterView view(*again.color_raster);
+                const auto p = view.pixel(at);
+                QVERIFY(std::abs(p[0] - 30 / 255.0) < 1e-4 && std::abs(p[1] - 160 / 255.0) < 1e-4 && std::abs(p[2] - 90 / 255.0) < 1e-4);
+            }
+            QVERIFY(!doc.page(0).color);  // (the book before: as it was — Undo)
+        }
+    }
+
+    // cmyk_lab_and_gray_channel_sets: CMYK's four plates, Lab's Alpha 1..3, grey's Black, a duotone's inks; back to the
+    // mode the same pixels within a step.
+    void multichannelSets() {
+        const core::Document plain = painted(working_picture());
+        const std::string id = plain.page(0).layers.back().id;
+        const std::vector<std::tuple<Json, std::vector<std::string>, std::string>> cases{
+            {Json{{"op", "set_color_mode"}, {"page", 1}, {"mode", "cmyk"}, {"profile", "coated-cmyk"}}, {"Cyan", "Magenta", "Yellow", "Black"}, "cmyk"},
+            {Json{{"op", "set_color_mode"}, {"page", 1}, {"mode", "lab"}}, {"Alpha 1", "Alpha 2", "Alpha 3"}, "lab"},
+            {Json{{"op", "set_color_mode"}, {"page", 1}, {"mode", "gray"}}, {"Black"}, "gray"},
+        };
+        for (const auto& [to, names, mode] : cases) {
+            for (const int depth : {8, 16}) {
+                Json first = to;
+                first["depth"] = depth;
+                const core::Document doc = run_ops(plain, Json::array({first})).doc;
+                const core::InkPixels before = core::decode_ink_raster(*layer_named(doc, id).ink_raster);
+                const core::Document multi = run_ops(doc, Json::array({Json{{"op", "set_color_mode"}, {"page", 1}, {"mode", "multichannel"}}})).doc;
+                QCOMPARE(core::plate_labels(multi.page(0)), names);
+                QCOMPARE(multi.page(0).color->depth, depth);
+                Json back = to;
+                back["depth"] = depth;
+                if (mode == "cmyk") back["profile"] = multi.page(0).color->profile;
+                const core::InkPixels after = core::decode_ink_raster(*layer_named(run_ops(multi, Json::array({back})).doc, flat_id(plain)).ink_raster);
+                QCOMPARE(after.space, before.space);
+                for (std::size_t i = 0; i < before.pixel_count(); i += 97) {
+                    for (unsigned c = 0; c < before.colours(); ++c) {
+                        QVERIFY2(std::abs(after.value(i, c) - before.value(i, c)) <= 2.0 / 255,
+                                 qPrintable(QStringLiteral("%1/%2 %3").arg(QString::fromStdString(mode)).arg(depth).arg(i)));
+                    }
+                }
+            }
+        }
+        // a duotone's inks: a plate each, through its curve
+        const core::Document grey = run_ops(plain, Json::array({Json{{"op", "set_color_mode"}, {"page", 1}, {"mode", "gray"}}})).doc;
+        const core::Document duo = run_ops(grey, Json::array({Json{{"op", "set_duotone"}, {"page", 1}, {"type", "tritone"}}})).doc;
+        const core::Document multi = run_ops(duo, Json::array({Json{{"op", "set_color_mode"}, {"page", 1}, {"mode", "multichannel"}}})).doc;
+        QCOMPARE(multi.page(0).color->plates.size(), std::size_t(3));
+        QCOMPARE(multi.page(0).color->from, std::string("duotone"));
+        QCOMPARE(core::plate_labels(multi.page(0)), (std::vector<std::string>{"Black", "Warm Brown", "Gold"}));
+    }
+
+    // flattens_layers_and_keeps_alpha_channels: two paint layers flattened into one (the black on the upper solid in all
+    // three plates), the page's frames and lines kept as elements, its alpha channel an alpha channel; back to RGB it
+    // stays.
+    void multichannelFlattensAndKeepsElements() {
+        core::Document doc = painted(working_picture());
+        doc = run_ops(doc, Json::array({Json{{"op", "add_layer"}, {"page", 1}, {"kind", "paint"}, {"id", "top"}},
+                                        Json{{"op", "set_layer"}, {"page", 1}, {"id", "top"}, {"panel_each", false}, {"panel_clip", false}},
+                                        Json{{"op", "fill_area"}, {"page", 1}, {"layer_id", "top"}, {"area", Json{{"poly", Json::array({Json::array({0, 0}), Json::array({10, 0}), Json::array({10, 10}), Json::array({0, 10})})}}},
+                                             {"rgb", Json::array({0, 0, 0})}},
+                                        Json{{"op", "add_channel"}, {"page", 1}, {"name", "a"}},
+                                        Json{{"op", "add_line"}, {"page", 1}, {"text", "台詞"}, {"x_mm", 30}, {"y_mm", 40}}})).doc;
+        const std::size_t frames = doc.page(0).frames.size();
+        const std::size_t lines = doc.story.size();
+        const core::ApplyResult multi = run_ops(doc, Json::array({Json{{"op", "set_color_mode"}, {"page", 1}, {"mode", "multichannel"}}}));
+        const core::Page& page = multi.doc.page(0);
+        int pixels = 0;
+        for (const core::Layer& layer : page.layers) pixels += layer.ink_raster != nullptr;
+        QCOMPARE(pixels, 1);
+        QCOMPARE(page.frames.size(), frames);
+        QCOMPARE(multi.doc.story.size(), lines);
+        QCOMPARE(page.channels.size(), std::size_t(1));
+        const core::Layer* flat = nullptr;
+        for (const core::Layer& layer : page.layers) {
+            if (layer.ink_raster) flat = &layer;
+        }
+        const core::InkPixels plates = core::decode_ink_raster(*flat->ink_raster);
+        const std::size_t corner = std::size_t(20) * plates.width + 20;  // (inside the black fill: solid ink on all three)
+        for (unsigned c = 0; c < 3; ++c) QVERIFY(plates.value(corner, c) > 0.99);
+        const core::Document back = run_ops(multi.doc, Json::array({Json{{"op", "set_color_mode"}, {"page", 1}, {"mode", "rgb"}}})).doc;
+        QCOMPARE(back.page(0).channels.size(), std::size_t(1));
+    }
+
+    // mismatched_channel_count_converts_the_printed_look: two plates left (Yellow deleted) are no RGB page's: back to RGB
+    // the page is the plates as they print.
+    void multichannelMismatchedCountPrintsTheLook() {
+        const core::Document doc = painted(working_picture());
+        const std::string id = flat_id(doc);
+        const core::Document multi = run_ops(doc, Json::array({Json{{"op", "set_color_mode"}, {"page", 1}, {"mode", "multichannel"}},
+                                                               Json{{"op", "delete_channel"}, {"page", 1}, {"channel", "Yellow"}}})).doc;
+        QCOMPARE(multi.page(0).color->plates.size(), std::size_t(2));
+        const core::InkPixels two = core::decode_ink_raster(*layer_named(multi, id).ink_raster);
+        QCOMPARE(two.planes, 2u);
+        const render::Image shown = render::ink::to_rgba8(two, *multi.page(0).color);
+        const core::Document back = run_ops(multi, Json::array({Json{{"op", "set_color_mode"}, {"page", 1}, {"mode", "rgb"}}})).doc;
+        const render::Image now = render::open_image(*layer_named(back, id).raster_png, render::kPillowOpenLimits).convert("RGBA");
+        for (const auto& [x, y] : {std::pair{3, 3}, std::pair{now.width() - 4, 10}}) QVERIFY(near_rgb(rgb_at(now, x, y), rgb_at(shown, x, y), 1));
+    }
+
+    // The refusals (nothing changed): an indexed or bitmap page, an RGB page of a profile, a blend multichannel does not
+    // composite; delete_channel of a plate without to_multichannel, the last plate, a grey page's one.
+    void multichannelRefusals() {
+        const core::Document doc = painted(working_picture());
+        const core::Document p3 = run_ops(doc, Json::array({Json{{"op", "assign_profile"}, {"page", 1}, {"profile", "display-p3"}}})).doc;
+        QVERIFY(refusal(p3, Json::array({Json{{"op", "set_color_mode"}, {"page", 1}, {"mode", "multichannel"}}})).find("of a profile") != std::string::npos);
+        const core::Document indexed = run_ops(doc, Json::array({Json{{"op", "to_indexed"}, {"page", 1}, {"colors", 8}}})).doc;
+        QVERIFY(refusal(indexed, Json::array({Json{{"op", "set_color_mode"}, {"page", 1}, {"mode", "multichannel"}}})).find("indexed page") != std::string::npos);
+        // (the name layer: kept as it is by the flatten, its blend one the plates cannot composite)
+        const core::Document hue = run_ops(doc, Json::array({Json{{"op", "set_layer"}, {"page", 1}, {"layer", "name"}, {"blend", "hue"}}})).doc;
+        const std::string why = refusal(hue, Json::array({Json{{"op", "set_color_mode"}, {"page", 1}, {"mode", "multichannel"}}}));
+        QVERIFY2(why.find("is not one a multichannel page composites") != std::string::npos, why.c_str());
+        const core::Document grey = run_ops(doc, Json::array({Json{{"op", "set_color_mode"}, {"page", 1}, {"mode", "gray"}}})).doc;
+        QVERIFY(refusal(grey, Json::array({Json{{"op", "delete_channel"}, {"page", 1}, {"channel", "gray"}, {"to_multichannel", true}}})).find("only one") != std::string::npos);
+        const core::Document one = run_ops(grey, Json::array({Json{{"op", "set_color_mode"}, {"page", 1}, {"mode", "multichannel"}}})).doc;
+        QVERIFY(refusal(one, Json::array({Json{{"op", "delete_channel"}, {"page", 1}, {"channel", "Black"}}})).find("one plate at least") != std::string::npos);
+    }
+
+    // A colour plate deleted (Photoshop's Delete Channel): the RGB page multichannel first (flattened), the plate taken out
+    // of its pixels — red's is Cyan's —, the others as they were.
+    void deleteColourPlate() {
+        const core::Document doc = painted(working_picture());
+        const std::string id = flat_id(doc);
+        QVERIFY(refusal(doc, Json::array({Json{{"op", "delete_channel"}, {"page", 1}, {"channel", "green"}}})).find("to_multichannel") != std::string::npos);
+        const core::ApplyResult done = run_ops(doc, Json::array({Json{{"op", "delete_channel"}, {"page", 1}, {"channel", "green"}, {"to_multichannel", true}}}));
+        const core::Page& page = done.doc.page(0);
+        QVERIFY(page.color && page.color->space == core::InkSpace::Multi);
+        QCOMPARE(core::plate_labels(page), (std::vector<std::string>{"Cyan", "Yellow"}));
+        QCOMPARE(done.results.at(0)["plates"], Json(2));
+        const core::InkPixels two = core::decode_ink_raster(*layer_named(done.doc, id).ink_raster);
+        const core::Document three = run_ops(doc, Json::array({Json{{"op", "set_color_mode"}, {"page", 1}, {"mode", "multichannel"}}})).doc;
+        const core::InkPixels all = core::decode_ink_raster(*layer_named(three, id).ink_raster);
+        for (std::size_t i = 0; i < all.pixel_count(); i += 131) {
+            QCOMPARE(two.value(i, 0), all.value(i, 0));
+            QCOMPARE(two.value(i, 1), all.value(i, 2));
+            QCOMPARE(two.value(i, 2), all.value(i, 3));  // (the alpha)
+        }
+    }
+
+    // indexed_color_palettes_and_dithers: every palette and dither, the page indexed (8 bits, its table), its pixels the
+    // table's colours only; a computed palette within its count.
+    void indexedPalettesAndDithers() {
+        // (a gradient of many colours at the working resolution)
+        const int w = render::mm_to_px(60, 200), h = render::mm_to_px(80, 200);
+        std::string bytes;
+        for (int y = 0; y < h; ++y) {
+            for (int x = 0; x < w; ++x) {
+                bytes += static_cast<char>(x * 255 / (w - 1));
+                bytes += static_cast<char>(y * 255 / (h - 1));
+                bytes += static_cast<char>(128);
+                bytes += static_cast<char>(255);
+            }
+        }
+        const core::Document doc = painted(render::Image::frombytes("RGBA", render::Size{w, h}, bytes));
+        const std::string id = flat_id(doc);
+        for (const char* palette : {"selective", "perceptual", "adaptive", "web", "uniform", "systemMac", "systemWindows"}) {
+            for (const char* dither : {"none", "diffusion", "pattern", "noise"}) {
+                if (std::string(dither) != "none" && std::string(palette) != "selective" && std::string(palette) != "web") continue;  // (each once)
+                const core::ApplyResult made = run_ops(doc, Json::array({Json{{"op", "to_indexed"}, {"page", 1}, {"palette", palette}, {"colors", 16},
+                                                                             {"dither", dither}, {"forced", "none"}}}));
+                const core::Page& page = made.doc.page(0);
+                QVERIFY(page.rgb && page.rgb->table && page.rgb->depth == 8);
+                const core::ColorTable& table = *page.rgb->table;
+                QCOMPARE(Json(table.colors.size()), made.results.at(0)["colors"]);
+                QCOMPARE(made.results.at(0)["flattened"], Json(1));
+                if (std::string(palette) != "web" && std::string(palette) != "systemMac" && std::string(palette) != "systemWindows") QVERIFY(table.colors.size() <= 16);
+                const std::string px = render::open_image(*layer_named(made.doc, id).raster_png, render::kPillowOpenLimits).convert("RGBA").tobytes();
+                std::set<std::array<int, 3>> own(table.colors.begin(), table.colors.end());
+                for (std::size_t i = 0; i < px.size(); i += 4 * 37) {
+                    const std::array<int, 3> c{static_cast<unsigned char>(px[i]), static_cast<unsigned char>(px[i + 1]), static_cast<unsigned char>(px[i + 2])};
+                    QVERIFY2(own.contains(c), (std::string(palette) + "/" + dither).c_str());
+                }
+            }
+        }
+        // Exact refuses many colours
+        QVERIFY(refusal(doc, Json::array({Json{{"op", "to_indexed"}, {"page", 1}, {"palette", "exact"}}})).find("Exact needs 256 or fewer") != std::string::npos);
+        // the arguments' ranges
+        QVERIFY(!refusal(doc, Json::array({Json{{"op", "to_indexed"}, {"page", 1}, {"colors", 300}}})).empty());
+        QVERIFY(!refusal(doc, Json::array({Json{{"op", "to_indexed"}, {"page", 1}, {"palette", "rainbow"}}})).empty());
+        QVERIFY(!refusal(doc, Json::array({Json{{"op", "to_indexed"}, {"page", 1}, {"amount", 101}}})).empty());
+    }
+
+    // indexed_exact_transparency_and_sources: an exact palette of a page of two colours (flattened over its paper: no
+    // transparent entry — Genko's flatten keeps the paper); grey, CMYK and Lab pages converted to sRGB first (said); back
+    // to RGB the table goes, the pixels stay.
+    void indexedSourcesAndBack() {
+        const core::Document doc = painted(working_picture());
+        const std::string id = flat_id(doc);
+        const core::ApplyResult exact = run_ops(doc, Json::array({Json{{"op", "to_indexed"}, {"page", 1}, {"palette", "exact"}, {"forced", "none"}}}));
+        const core::ColorTable& table = *exact.doc.page(0).rgb->table;
+        QCOMPARE(table.colors, (std::vector<std::array<int, 3>>{{30, 160, 90}, {128, 128, 128}}));
+        QVERIFY(!table.transparent);
+        QCOMPARE(exact.results.at(0)["transparent"], Json());
+        QCOMPARE(render::open_image(*layer_named(exact.doc, id).raster_png, render::kPillowOpenLimits).convert("RGBA").tobytes(), working_picture().tobytes());
+        for (const Json& mode : {Json{{"op", "set_color_mode"}, {"page", 1}, {"mode", "gray"}, {"depth", 16}},
+                                 Json{{"op", "set_color_mode"}, {"page", 1}, {"mode", "cmyk"}, {"profile", "coated-cmyk"}},
+                                 Json{{"op", "set_color_mode"}, {"page", 1}, {"mode", "lab"}}}) {
+            const core::Document other = run_ops(doc, Json::array({mode})).doc;
+            const core::ApplyResult made = run_ops(other, Json::array({Json{{"op", "to_indexed"}, {"page", 1}, {"colors", 8}}}));
+            QVERIFY(!made.doc.page(0).color && made.doc.page(0).rgb && made.doc.page(0).rgb->table);
+            QCOMPARE(made.results.at(0)["converted"], Json(1));
+        }
+        const core::Document back = run_ops(exact.doc, Json::array({Json{{"op", "set_color_mode"}, {"page", 1}, {"mode", "rgb"}}})).doc;
+        QVERIFY(!back.page(0).rgb);
+        QCOMPARE(*layer_named(back, id).raster_png, *layer_named(exact.doc, id).raster_png);
+        // (a profile is not assigned to nor converted on an indexed page)
+        QVERIFY(refusal(exact.doc, Json::array({Json{{"op", "assign_profile"}, {"page", 1}, {"profile", "display-p3"}}})).find("indexed page") != std::string::npos);
+        QVERIFY(refusal(exact.doc, Json::array({Json{{"op", "convert_profile"}, {"page", 1}, {"profile", "display-p3"}}})).find("indexed page") != std::string::npos);
+    }
+
+    // An indexed page shown in its table (its frames and words too: every pixel drawn is one of its colours); what an op
+    // draws on it taken to the table's nearest colours.
+    void indexedShowsAndDrawsInItsTable() {
+        core::Document doc = painted(working_picture());
+        doc = run_ops(doc, Json::array({Json{{"op", "add_line"}, {"page", 1}, {"text", "台詞です"}, {"x_mm", 20}, {"y_mm", 30}},
+                                        Json{{"op", "to_indexed"}, {"page", 1}, {"palette", "exact"}, {"forced", "blackWhite"}}})).doc;
+        const core::ColorTable table = *doc.page(0).rgb->table;
+        const std::set<std::array<int, 3>> own(table.colors.begin(), table.colors.end());
+        const std::string shown = drawn_page(doc, 0, 100).tobytes();
+        for (std::size_t i = 0; i < shown.size(); i += 3) {
+            QVERIFY(own.contains({static_cast<unsigned char>(shown[i]), static_cast<unsigned char>(shown[i + 1]), static_cast<unsigned char>(shown[i + 2])}));
+        }
+        const std::string id = flat_id(doc);
+        const core::Document drawn = run_ops(doc, Json::array({Json{{"op", "fill_area"}, {"page", 1}, {"layer_id", id},
+                                                                     {"area", Json{{"poly", Json::array({Json::array({5, 5}), Json::array({15, 5}), Json::array({15, 15}), Json::array({5, 15})})}}},
+                                                                     {"rgb", Json::array({200, 30, 40})}}})).doc;
+        const std::string px = render::open_image(*layer_named(drawn, id).raster_png, render::kPillowOpenLimits).convert("RGBA").tobytes();
+        for (std::size_t i = 0; i < px.size(); i += 4 * 11) {
+            if (px[i + 3] == 0) continue;
+            QVERIFY(own.contains({static_cast<unsigned char>(px[i]), static_cast<unsigned char>(px[i + 1]), static_cast<unsigned char>(px[i + 2])}));
+        }
+    }
+
+    // color_table_presets_and_entries: an entry replaced (its pixels the new colour), a preset, the transparent entry
+    // (its pixels clear); a page not indexed, an unknown preset and an index past the table refused.
+    void colorTableEntries() {
+        const core::Document doc = run_ops(painted(working_picture()), Json::array({Json{{"op", "to_indexed"}, {"page", 1}, {"palette", "exact"}, {"forced", "none"}}})).doc;
+        const std::string id = flat_id(doc);
+        QVERIFY(refusal(painted(working_picture()), Json::array({Json{{"op", "set_color_table"}, {"page", 1}, {"table", "web"}}})).find("not an indexed page") != std::string::npos);
+        const core::ApplyResult same = run_ops(doc, Json::array({Json{{"op", "set_color_table"}, {"page", 1}}}));
+        QCOMPARE(same.results.at(0)["colors"], (Json::array({Json::array({30, 160, 90}), Json::array({128, 128, 128})})));
+        const core::Document magenta = run_ops(doc, Json::array({Json{{"op", "set_color_table"}, {"page", 1}, {"entries", Json{{"1", "#ff00ff"}}}}})).doc;
+        QCOMPARE(rgb_at(render::open_image(*layer_named(magenta, id).raster_png, render::kPillowOpenLimits), 3, 3), (std::array<int, 3>{255, 0, 255}));
+        const core::Document black_body = run_ops(doc, Json::array({Json{{"op", "set_color_table"}, {"page", 1}, {"table", "blackBody"}}})).doc;
+        QCOMPARE(black_body.page(0).rgb->table->colors.size(), std::size_t(256));
+        const core::Document clear = run_ops(doc, Json::array({Json{{"op", "set_color_table"}, {"page", 1}, {"transparent", 0}}})).doc;
+        QCOMPARE(clear.page(0).rgb->table->transparent, std::optional<int>(0));
+        const render::Image cleared = render::open_image(*layer_named(clear, id).raster_png, render::kPillowOpenLimits).convert("RGBA");
+        QCOMPARE(static_cast<int>(static_cast<unsigned char>(cleared.crop(render::Box{cleared.width() - 3, 3, cleared.width() - 2, 4}).tobytes()[3])), 0);
+        QVERIFY(!refusal(doc, Json::array({Json{{"op", "set_color_table"}, {"page", 1}, {"table", "nope"}}})).empty());
+        QVERIFY(!refusal(doc, Json::array({Json{{"op", "set_color_table"}, {"page", 1}, {"entries", Json{{"999", "#000000"}}}}})).empty());
+    }
+
+    // bitmap_methods_need_grayscale: from a grey page only; each method's pixels 0 or full (its alpha too), the page 8
+    // bits with its look recorded; shown in two (its words too); what an op draws taken to two at 50%.
+    void bitmapMethods() {
+        const core::Document rgb = painted(working_picture());
+        QVERIFY(refusal(rgb, Json::array({Json{{"op", "to_bitmap"}, {"page", 1}}})).find("not a grey page") != std::string::npos);
+        const core::Document grey = run_ops(rgb, Json::array({Json{{"op", "set_color_mode"}, {"page", 1}, {"mode", "gray"}, {"depth", 16}}})).doc;
+        const std::string id = flat_id(grey);
+        for (const char* method : {"threshold", "pattern", "diffusion", "halftone"}) {
+            const core::ApplyResult made = run_ops(grey, Json::array({Json{{"op", "to_bitmap"}, {"page", 1}, {"method", method}, {"frequency", 12}, {"shape", "diamond"}}}));
+            const core::Page& page = made.doc.page(0);
+            QVERIFY(page.color && page.color->bitmap && page.color->depth == 8);
+            QCOMPARE(page.color->bitmap->method, std::string(method));
+            QCOMPARE(page.color->bitmap->shape, std::string("diamond"));
+            const core::InkPixels px = core::decode_ink_raster(*layer_named(made.doc, id).ink_raster);
+            for (const std::uint16_t s : px.samples) QVERIFY(s == 0 || s == 255);
+        }
+        QVERIFY(!refusal(grey, Json::array({Json{{"op", "to_bitmap"}, {"page", 1}, {"method", "nope"}}})).empty());
+        core::Document two = run_ops(grey, Json::array({Json{{"op", "to_bitmap"}, {"page", 1}, {"method", "threshold"}}})).doc;
+        two = run_ops(two, Json::array({Json{{"op", "add_line"}, {"page", 1}, {"text", "台詞"}, {"x_mm", 20}, {"y_mm", 30}},
+                                        Json{{"op", "add_stroke"}, {"page", 1}, {"layer", "ink"}, {"layer_id", id}, {"points", Json::array({Json::array({5, 5}), Json::array({50, 70})})},
+                                             {"width_mm", 1.3}, {"rgb", Json::array({100, 100, 100})}}})).doc;
+        const std::string shown = drawn_page(two, 0, 100).tobytes();
+        for (const char c : shown) QVERIFY(static_cast<unsigned char>(c) == 0 || static_cast<unsigned char>(c) == 255);
+        const core::InkPixels px = core::decode_ink_raster(*layer_named(two, id).ink_raster);
+        for (const std::uint16_t s : px.samples) QVERIFY(s == 0 || s == 255);
+        // back to grey: nothing lost (the pixels as they are)
+        const core::Document back = run_ops(two, Json::array({Json{{"op", "set_color_mode"}, {"page", 1}, {"mode", "gray"},
+                                                                    {"profile", two.page(0).color->profile}}})).doc;
+        QVERIFY(!back.page(0).color->bitmap);
+        QCOMPARE(*layer_named(back, id).ink_raster, *layer_named(two, id).ink_raster);
+    }
+
+    // duotone_inks_and_display: a type it does not know refused; the inks named in the report; shown warm in the middle
+    // (an orange ink) where the grey is neutral, the pixels as they were; tritone's defaults; set_color_mode gray takes
+    // the inks off.
+    void duotoneInksAndDisplay() {
+        const core::Document grey = run_ops(painted(working_picture()), Json::array({Json{{"op", "set_color_mode"}, {"page", 1}, {"mode", "gray"}}})).doc;
+        const std::string id = grey.page(0).layers.back().id;
+        QVERIFY(!refusal(grey, Json::array({Json{{"op", "set_duotone"}, {"page", 1}, {"type", "quintone"}}})).empty());
+        const core::ApplyResult made = run_ops(grey, Json::array({Json{{"op", "set_duotone"}, {"page", 1}, {"type", "duotone"},
+                                                                      {"inks", Json::array({Json{{"name", "Black"}},
+                                                                                            Json{{"name", "Orange"}, {"color", "#ff8000"}, {"curve", Json::array({Json::array({0, 0}), Json::array({100, 80})})}}})}}}));
+        QCOMPARE(made.results.at(0)["inks"], (Json::array({"Black", "Orange"})));
+        const core::Page& page = made.doc.page(0);
+        QCOMPARE(page.color->duotone[1].curve.back()[1], 80.0);
+        QCOMPARE(*layer_named(made.doc, id).ink_raster, *layer_named(grey, id).ink_raster);
+        const auto mid = rgb_at(drawn_page(made.doc, 0, 100), 10, 10);  // (the grey 128)
+        QVERIFY2(mid[0] > mid[2] + 10, qPrintable(rgb_text(mid)));
+        const core::Document three = run_ops(made.doc, Json::array({Json{{"op", "set_duotone"}, {"page", 1}, {"type", "tritone"}}})).doc;
+        QCOMPARE(three.page(0).color->duotone.size(), std::size_t(3));
+        const core::Document off = run_ops(three, Json::array({Json{{"op", "set_color_mode"}, {"page", 1}, {"mode", "gray"}}})).doc;
+        QVERIFY(off.page(0).color->duotone.empty());
+        QCOMPARE(*layer_named(off, id).ink_raster, *layer_named(grey, id).ink_raster);
+        QVERIFY(refusal(painted(working_picture()), Json::array({Json{{"op", "set_duotone"}, {"page", 1}}})).find("not a grey page") != std::string::npos);
+    }
+
+    // The display maps of these modes are pixel by pixel: a part of the page drawn the same as the whole (the tiles).
+    void partsDrawAsTheWhole() {
+        core::Document base = painted(working_picture());
+        base = run_ops(base, Json::array({Json{{"op", "add_line"}, {"page", 1}, {"text", "台詞です"}, {"x_mm", 20}, {"y_mm", 30}}})).doc;
+        const core::Document grey = run_ops(base, Json::array({Json{{"op", "set_color_mode"}, {"page", 1}, {"mode", "gray"}}})).doc;
+        const std::vector<core::Document> books{
+            run_ops(base, Json::array({Json{{"op", "to_indexed"}, {"page", 1}, {"colors", 6}}})).doc,
+            run_ops(grey, Json::array({Json{{"op", "to_bitmap"}, {"page", 1}}})).doc,
+            run_ops(grey, Json::array({Json{{"op", "set_duotone"}, {"page", 1}}})).doc,
+            run_ops(base, Json::array({Json{{"op", "set_color_mode"}, {"page", 1}, {"mode", "multichannel"}}})).doc,
+        };
+        for (const core::Document& doc : books) {
+            render::RenderOptions options;
+            const render::Image whole = render::render_page(doc.page(0), 120, options, &doc).image.convert("RGB");
+            options.region = render::RenderRegion{37, 61, 90, 70};
+            const render::Image part = render::render_page(doc.page(0), 120, options, &doc).image.convert("RGB");
+            QCOMPARE(part.tobytes(), whole.crop(render::Box{37, 61, 127, 131}).tobytes());
+        }
+    }
+
+    // design 4.5 (PC1d F1): an RGB page of 16 or 32 bits takes the 8-bit pixels an op makes into its depth exactly
+    // (v × 257, v / 255): a paint layer's put_raster.
+    void deepPagesWidenNewPixels() {
+        for (const int depth : {16, 32}) {
+            core::Document doc = run_ops(small_book(), Json::array({Json{{"op", "set_color_mode"}, {"page", 1}, {"mode", "rgb"}, {"depth", depth}}})).doc;
+            doc = run_ops(doc, Json::array({Json{{"op", "add_layer"}, {"page", 1}, {"kind", "paint"}, {"id", "p"}},
+                                            Json{{"op", "set_layer"}, {"page", 1}, {"id", "p"}, {"panel_each", false}, {"panel_clip", false}},
+                                            Json{{"op", "put_raster"}, {"page", 1}, {"id", "p"}, {"png_base64", core::b64encode(render::write_png(picture()))}}})).doc;
+            const core::Layer layer = layer_named(doc, "p");
+            QVERIFY(!layer.raster_png && layer.color_raster);
+            const core::ColorRasterView view(*layer.color_raster);
+            QCOMPARE(view.width(), 60u);
+            const auto grey = view.pixel(5), green = view.pixel(45);
+            if (depth == 16) {
+                QCOMPARE(std::lround(grey[0] * 65535), 128L * 257);
+                QCOMPARE(std::lround(green[3] * 65535), 200L * 257);
+            } else {
+                QCOMPARE(static_cast<float>(grey[0]), static_cast<float>(128 / 255.0));
+                QCOMPARE(static_cast<float>(green[1]), static_cast<float>(160 / 255.0));
+            }
+        }
+        // (an 8-bit sRGB page: Python's PNG as it is)
+        QVERIFY(painted(picture()).page(0).layers.back().raster_png);
+    }
+
+    // The book on disk: every mode written and read back the same (features color-model@1), its GKIR plates version 2.
+    void specialModesOnDisk() {
+        const core::Document base = painted(working_picture());
+        core::Document doc = run_ops(core::new_episode("m", core::Num(1), 4, base.spec, core::Binding::Right), Json::array()).doc;
+        doc = run_ops(base, Json::array({Json{{"op", "add_page"}}, Json{{"op", "add_page"}}, Json{{"op", "add_page"}}})).doc;
+        doc = run_ops(doc, Json::array({Json{{"op", "to_indexed"}, {"page", 1}, {"colors", 4}},
+                                        Json{{"op", "set_color_mode"}, {"page", 2}, {"mode", "gray"}},
+                                        Json{{"op", "to_bitmap"}, {"page", 2}},
+                                        Json{{"op", "set_color_mode"}, {"page", 3}, {"mode", "gray"}},
+                                        Json{{"op", "set_duotone"}, {"page", 3}},
+                                        Json{{"op", "set_color_mode"}, {"page", 4}, {"mode", "multichannel"}}})).doc;
+        QTemporaryDir dir;
+        const fs::path book = core::path_from_utf8(dir.path().toStdString()) / "b.genko";
+        write_book(doc, book);
+        const Json saved = Json::parse(genko::test::read_bytes(QString::fromStdString(core::path_to_utf8(book / "project.json"))));
+        QVERIFY2(saved["features"] == Json::array({"color-mode@1", "color-model@1"}), saved["features"].dump().c_str());
+        QCOMPARE(saved["pages"][0]["color"]["mode"], Json("indexed"));
+        QCOMPARE(saved["pages"][1]["color"]["mode"], Json("bitmap"));
+        QCOMPARE(saved["pages"][2]["color"]["mode"], Json("duotone"));
+        QCOMPARE(saved["pages"][3]["color"]["mode"], Json("multichannel"));
+        const storage::LoadResult read = storage::load_document(book);
+        QVERIFY2(read.report.clean() && read.document.read_only_reason.empty(), read.document.read_only_reason.c_str());
+        for (std::size_t p = 0; p < 4; ++p) {
+            QVERIFY(read.document.page(p).color == doc.page(p).color);
+            QVERIFY(read.document.page(p).rgb == doc.page(p).rgb);
+        }
     }
 };
 

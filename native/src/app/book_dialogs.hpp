@@ -16,6 +16,7 @@
 class QCheckBox;
 class QComboBox;
 class QDialogButtonBox;
+class QFormLayout;
 class QDoubleSpinBox;
 class QSpinBox;
 
@@ -26,6 +27,10 @@ class QSpinBox;
 // sight under them (SPEC UX-02).
 
 namespace genko::app {
+
+// The rows of a dialog in a body that scrolls when the screen is small and its buttons under them, always in sight
+// (SPEC UX-02): the layout of these dialogs and of the colour modes' (app/mode_dialogs).
+void lay_out_dialog(QDialog* dialog, QFormLayout* form, QDialogButtonBox* buttons);
 
 // ノンブルの設定: where, the face, the size, the first number and the hidden nombre, as the book has them
 // (nombre.settings: Python's defaults under the book's own).

@@ -1179,7 +1179,8 @@ private slots:
     // Every op this build handles (the registry the studio and the app apply ops through) is in the public catalogue
     // (`genko schema`), and docs/ops.schema.json is that catalogue — but the C++ build's own ops of the CMYK and Lab pages
     // (SPEC COLOR-02: set_color_mode, set_inks, put_color_raster; COLOR-03: assign_profile, convert_profile, PC1b's
-    // set_text_gamma and the channel ops of channels@1; the public `genko schema` stays Python's).
+    // set_text_gamma and the channel ops of channels@1, PC1d's to_indexed, set_color_table, to_bitmap and set_duotone; the
+    // public `genko schema` stays Python's).
     void test_every_handled_op_is_in_the_catalog_and_docs() {
         const Json docs = genko::test::read_json(genko::test::repo_root() + QStringLiteral("/docs/ops.schema.json"));
         std::string where;
@@ -1189,7 +1190,8 @@ private slots:
         std::string missing;
         const std::set<std::string> own = {"set_color_mode", "set_inks", "put_color_raster", "assign_profile", "convert_profile", "set_text_gamma",
                                            "add_channel", "duplicate_channel", "delete_channel", "rename_channel", "move_channel",
-                                           "set_channel", "merge_spot_channel", "split_channels", "merge_channels"};
+                                           "set_channel", "merge_spot_channel", "split_channels", "merge_channels",
+                                           "to_indexed", "set_color_table", "to_bitmap", "set_duotone"};
         for (const std::string& name : genko::render::ops_registry().names()) {
             if (listed.count(name) == 0 && own.count(name) == 0) missing += (missing.empty() ? "" : ", ") + name;
         }

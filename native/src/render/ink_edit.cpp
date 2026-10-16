@@ -354,12 +354,13 @@ Shown ruled_colours(const PageColor& color) {
     for (const core::InkEntry& entry : color.inks) inks.push_back(entry.ink);
     for (int v = 0; v <= 255; ++v) {
         const unsigned char grey[3] = {static_cast<unsigned char>(v), static_cast<unsigned char>(v), static_cast<unsigned char>(v)};
-        std::vector<double> ink(core::colour_channels(color.space));
+        std::vector<double> ink(std::max(4u, color.planes()));
         ink::inks_of(color, grey, nullptr, ink.data(), 1);
+        ink.resize(color.planes());
         inks.push_back(std::move(ink));
     }
-    InkPixels row = core::blank_ink_pixels(color.space, color.depth, static_cast<std::uint32_t>(inks.size()), 1);
-    const unsigned n = core::colour_channels(color.space);
+    InkPixels row = core::blank_ink_pixels(color.space, color.depth, static_cast<std::uint32_t>(inks.size()), 1, color.planes());
+    const unsigned n = color.planes();
     for (std::size_t i = 0; i < inks.size(); ++i) {
         for (unsigned c = 0; c < n; ++c) put_ink(row, i, c, inks[i][c]);
         row.set(i, n, 1.0);
@@ -397,7 +398,7 @@ const std::vector<double>* near_shown(const Shown& shown, const unsigned char* p
 // An op's picture (RGBA) back in inks (see the header for the order).
 InkPixels into_inks(const Image& picture, const PageColor& color, const Lending::Loan* loan, const Shown& own, const Shown& ruled) {
     const auto w = static_cast<std::uint32_t>(picture.width()), h = static_cast<std::uint32_t>(picture.height());
-    Inks out(core::blank_ink_pixels(color.space, color.depth, w, h));
+    Inks out(core::blank_ink_pixels(color.space, color.depth, w, h, color.planes()));
     const unsigned n = out.n;
     const bool same = loan != nullptr && loan->pixels.width == w && loan->pixels.height == h;
     const auto* lent = same ? reinterpret_cast<const unsigned char*>(loan->shown.data()) : nullptr;
@@ -605,7 +606,8 @@ std::optional<Piece> lift_piece(const core::Page& page, const core::Layer& layer
         }
     }
     if (x1 <= x0 || y1 <= y0) return std::nullopt;
-    Inks lifted_inks(core::blank_ink_pixels(source.p.space, source.p.depth, static_cast<std::uint32_t>(x1 - x0), static_cast<std::uint32_t>(y1 - y0)));
+    Inks lifted_inks(core::blank_ink_pixels(source.p.space, source.p.depth, static_cast<std::uint32_t>(x1 - x0), static_cast<std::uint32_t>(y1 - y0),
+                                            source.p.planes));
     for (int y = y0; y < y1; ++y) {
         for (int x = x0; x < x1; ++x) {
             const double a = lifted.whole_alpha(x, y);
@@ -652,8 +654,11 @@ std::string lay_piece(const core::Page& page, const core::Layer& layer, const co
     Inks out = layer.ink_raster ? layer_inks(layer)
                                 : Inks(core::blank_ink_pixels(page.color->space, page.color->depth,
                                                               static_cast<std::uint32_t>(mm_to_px(page.spec.width_mm.value(), raster::kWorkingDpi)),
-                                                              static_cast<std::uint32_t>(mm_to_px(page.spec.height_mm.value(), raster::kWorkingDpi))));
-    if (piece.space != out.p.space || piece.depth != out.p.depth) throw core::OpError("the piece of inks is not in the page's colour mode");
+                                                              static_cast<std::uint32_t>(mm_to_px(page.spec.height_mm.value(), raster::kWorkingDpi)),
+                                                              page.color->planes()));
+    if (piece.space != out.p.space || piece.depth != out.p.depth || piece.planes != out.p.planes) {
+        throw core::OpError("the piece of inks is not in the page's colour mode");
+    }
     const Grid g = grid_of(page, out.p.width, out.p.height);
     const Inks source(piece);
     const double bx = box_mm[0] * g.sx, by = box_mm[1] * g.sy, bw = box_mm[2] * g.sx, bh = box_mm[3] * g.sy;
@@ -702,7 +707,7 @@ std::string relayout_inks(const std::string& gkir, const core::PageSpec& spec, c
     for (const double v : c) {
         if (!std::isfinite(v)) throw core::OpError("the basic frame must be a finite size");
     }
-    Inks out(core::blank_ink_pixels(source.p.space, source.p.depth, static_cast<std::uint32_t>(width), static_cast<std::uint32_t>(height)));
+    Inks out(core::blank_ink_pixels(source.p.space, source.p.depth, static_cast<std::uint32_t>(width), static_cast<std::uint32_t>(height), source.p.planes));
     const Lifted lifted(source, std::string(source.p.pixel_count(), '\xff'),
                         Box{0, 0, static_cast<int>(source.p.width), static_cast<int>(source.p.height)});
     for (int y = 0; y < height; ++y) {
@@ -719,7 +724,7 @@ InkPixels with_marks(const core::Page& page, const core::Layer& layer, const cor
         if (layer.ink_raster) return core::decode_ink_raster(*layer.ink_raster);
         return core::blank_ink_pixels(page.color->space, page.color->depth,
                                       static_cast<std::uint32_t>(mm_to_px(page.spec.width_mm.value(), raster::kWorkingDpi)),
-                                      static_cast<std::uint32_t>(mm_to_px(page.spec.height_mm.value(), raster::kWorkingDpi)));
+                                      static_cast<std::uint32_t>(mm_to_px(page.spec.height_mm.value(), raster::kWorkingDpi)), page.color->planes());
     }
     core::Layer marks;  // (its lines and pictures as the layer draws them, before its own settings)
     marks.id = layer.id;
@@ -780,7 +785,7 @@ std::optional<std::vector<double>> inks_at(const core::Page& page, const core::D
     options.region = RenderRegion{x, y, 1, 1};
     const RenderResult made = render_page(page, dpi, options, episode);
     if (!made.inks || made.inks->pixel_count() == 0) return std::nullopt;
-    const unsigned n = core::colour_channels(made.inks->space);
+    const unsigned n = made.inks->colours();
     std::vector<double> out(n);
     for (unsigned c = 0; c < n; ++c) out[c] = ink_of_pixel(*made.inks, 0, c);
     return out;
@@ -795,7 +800,7 @@ std::optional<std::vector<double>> layer_inks_at(const core::Page& page, const c
     // (the raster lies stretched over the page)
     const auto x = std::min<std::uint32_t>(pixels->width - 1, static_cast<std::uint32_t>(x_mm / w_mm * pixels->width));
     const auto y = std::min<std::uint32_t>(pixels->height - 1, static_cast<std::uint32_t>(y_mm / h_mm * pixels->height));
-    const unsigned n = core::colour_channels(pixels->space), all = n + 1;
+    const unsigned n = pixels->colours(), all = n + 1;
     const std::size_t i = std::size_t(y) * pixels->width + x;
     if (pixels->is_float() ? pixels->value(i, n) * 255.0 <= 20.0 : pixels->samples[i * all + n] * 255.0 <= 20.0 * pixels->max()) return std::nullopt;
     std::vector<double> out(n);

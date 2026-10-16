@@ -238,11 +238,31 @@ bool may_hold_hdr(const core::Page& page) {
 
 std::vector<std::string> export_notes(const core::Document& episode, std::string_view key, std::string_view color) {
     std::int64_t converted = 0, halved = 0, cut = 0;
+    std::int64_t duotone_grey = 0, duotone_look = 0, multi = 0, flat = 0;  // (color-model@1, PC1d: the modes of their own)
+    bool flat_channels = false;
     bool inks_only = true;  // (every page converted a CMYK or Lab one)
     for (const auto& page : episode.pages) {
         if (!page->color && !page->rgb) continue;
         const bool inks = page->color && (key == "psd" || detail::as_inks(*page, key, color));
         const bool values = !page->color && (key == "psd" || detail::as_values(*page, key, color));
+        // (a duotone page's inks and a multichannel page's plates: their own notes, never written as such but by a PSD's
+        // plates; a bitmap or indexed page in its own mode where the format has one)
+        const bool is_duotone = page->color && !page->color->duotone.empty();
+        const bool is_multi = page->color && page->color->space == core::InkSpace::Multi;
+        const bool is_flat = (page->color && page->color->bitmap) || (!page->color && page->rgb->table);
+        // (a duotone page written as its grey where the format holds grey inks — PSD, a TIFF in auto or grey, the pack's
+        // TIFFs —, else as it prints)
+        if (is_duotone) ++(inks || (key == "pack" && detail::as_inks(*page, "tiff", "auto")) ? duotone_grey : duotone_look);
+        if (is_multi) ++multi;
+        if (key == "psd" && is_flat) {
+            ++flat;
+            flat_channels = flat_channels || !page->channels.empty();
+        }
+        if (is_duotone || is_multi || !detail::native_mode(*page, key, color).empty() || (key == "psd" && is_flat)) {
+            const bool deep = page->color && page->color->depth == 32;
+            if (deep && is_multi && key == "psd") ++halved;  // (Photoshop's Multichannel holds 8 or 16 bits)
+            continue;
+        }
         if (!inks && !values) {
             ++converted;
             if (!page->color || page->color->space == core::InkSpace::Gray) inks_only = false;
@@ -264,6 +284,23 @@ std::vector<std::string> export_notes(const core::Document& episode, std::string
     } else if (converted > 0) {
         notes.push_back(inks_only ? "CMYK・Lab のページ " + n + " ページは、この形式・色ではインキの値のまま書けないため、画面の色（sRGB）から変換して書き出しました"
                                   : "色モード・プロファイルを持つページ " + n + " ページは、この形式・色ではその値のまま書けないため、画面の色（sRGB）から変換して書き出しました");
+    }
+    if (duotone_grey > 0) {
+        notes.push_back("ダブルトーンのページ " + std::to_string(duotone_grey) +
+                        " ページは、この形式ではダブルトーンのインキのまま書けないため、グレーの値で書き出しました（インキの色と曲線は書いていません）");
+    }
+    if (duotone_look > 0) {
+        notes.push_back("ダブルトーンのページ " + std::to_string(duotone_look) +
+                        " ページは、この形式・色ではダブルトーンのインキのまま書けないため、刷った見え方（画面の色、sRGB）で書き出しました");
+    }
+    if (multi > 0) {
+        notes.push_back("マルチチャンネルのページ " + std::to_string(multi) +
+                        (key == "psd" ? " ページは、PSD ではレイヤーを持てないため、版を統合した画像だけを書き出しました"
+                                      : " ページは、この形式では版のまま書けないため、刷った見え方（画面の色、sRGB）で書き出しました（PSD なら版のまま書けます）"));
+    }
+    if (flat > 0) {
+        notes.push_back("2 階調・インデックスカラーのページ " + std::to_string(flat) + " ページは、PSD ではレイヤーを持てないため、統合した画像だけを書き出しました" +
+                        (flat_channels ? std::string("（この色モードではアルファ・特色チャンネルも書けません）") : std::string()));
     }
     if (halved > 0) notes.push_back("32 bit のページ " + std::to_string(halved) + " ページは、この形式では 16 bit にして書き出しました");
     if (cut > 0) {

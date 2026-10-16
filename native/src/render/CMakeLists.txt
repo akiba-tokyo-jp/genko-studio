@@ -22,6 +22,7 @@ genko_library(genko_render
     page.cpp
     npcompat.cpp
     libm_float.cpp
+    quantize.cpp
     tones.cpp
     effects.cpp
     fill_patches.cpp

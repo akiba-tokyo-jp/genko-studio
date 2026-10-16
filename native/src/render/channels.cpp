@@ -398,7 +398,7 @@ Plane page_plane(const core::Page& page, const core::Document* episode, std::opt
         const unsigned c = plate ? static_cast<unsigned>(*plate) : 0;
         for (std::size_t i = 0; i < out.values.size(); ++i) {
             const double v = inks.value(i, c);
-            out.values[i] = static_cast<float>(page.color->space == core::InkSpace::Cmyk ? 1.0 - v : v);
+            out.values[i] = static_cast<float>(page.color->space == core::InkSpace::Cmyk || page.color->space == core::InkSpace::Multi ? 1.0 - v : v);
         }
         return out;
     }
@@ -491,7 +491,7 @@ void finish(RenderResult& result, const core::Page& page, int dpi, const RenderO
             if (visible.size() == 1) {
                 for (std::size_t i = 0; i < n; ++i) {
                     const double v = inks.value(i, static_cast<unsigned>(visible[0]));
-                    std::fill_n(out.begin() + std::ptrdiff_t(i * 3), 3, static_cast<char>(byte_of(page.color->space == core::InkSpace::Cmyk ? 1.0 - v : v)));
+                    std::fill_n(out.begin() + std::ptrdiff_t(i * 3), 3, static_cast<char>(byte_of(page.color->space == core::InkSpace::Cmyk || page.color->space == core::InkSpace::Multi ? 1.0 - v : v)));
                 }
             } else {
                 std::vector<double> values(n * colours);

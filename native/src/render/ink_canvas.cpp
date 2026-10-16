@@ -61,8 +61,12 @@ constexpr std::array<std::string_view, 20> kModes{"normal",      "multiply",    
                                                   "soft_light",  "hard_light",  "difference", "exclusion",  "subtract",
                                                   "divide",      "hue",         "saturation", "color",      "luminosity"};
 
-// The mix of a pixel below (b) and above (s) in the canvas's values, as the space composites it.
-void mix(InkSpace space, std::string_view mode, const double* b, const double* s, double* out) {
+// The mix of a pixel below (b) and above (s) in the canvas's values (n colour channels), as the space composites it.
+void mix(InkSpace space, unsigned n, std::string_view mode, const double* b, const double* s, double* out) {
+    if (space == InkSpace::Multi) {  // (each plate as a CMYK plate: on 1 − ink; the separable modes only)
+        for (unsigned c = 0; c < n; ++c) out[c] = 1.0 - separable(mode, 1.0 - b[c], 1.0 - s[c]);
+        return;
+    }
     if (space == InkSpace::Lab) {
         for (unsigned c = 0; c < 3; ++c) out[c] = separable(mode, b[c], s[c]);
         return;
@@ -212,7 +216,7 @@ struct InkCanvas::Impl {
     bool hdr = false;  // (a grey page of 32 bits: lightness past 0..1 is kept)
 
     Impl(const core::PageColor& c, Size s)
-        : color(c), size(s), n(core::colour_channels(c.space)), stride(n + 2), hdr(c.space == InkSpace::Gray && c.depth == 32) {
+        : color(c), size(s), n(c.planes()), stride(n + 2), hdr(c.space == InkSpace::Gray && c.depth == 32) {
         if (s.width <= 0 || s.height <= 0) throw core::Error("value", "invalid ink canvas dimensions");
         const auto count = std::uint64_t(s.width) * std::uint64_t(s.height);
         if (count > (512ULL * 1024 * 1024) / (stride * sizeof(double))) throw core::Error("image_too_large", "ink canvas budget exceeded");
@@ -238,8 +242,8 @@ struct InkCanvas::Impl {
             return;
         }
         const double alpha = a + da * (1 - a);
-        double mixed[4] = {};
-        if (!normal) mix(color.space, mode, dst, src, mixed);
+        std::array<double, core::kPlatesMax> mixed{};
+        if (!normal) mix(color.space, n, mode, dst, src, mixed.data());
         for (unsigned c = 0; c < n; ++c) {
             const double next = normal ? (src[c] * a + dst[c] * da * (1 - a)) / alpha
                                        : (dst[c] * da * (1 - a) + src[c] * a * (1 - da) + mixed[c] * a * da) / alpha;
@@ -284,6 +288,7 @@ unsigned InkCanvas::channels() const { return impl_->n; }
 
 bool InkCanvas::supports_blend(std::string_view mode) const {
     if (impl_->color.space == InkSpace::Lab) return core::lab_blend(mode);
+    if (impl_->color.space == InkSpace::Multi && !core::multi_blend(mode)) return false;
     return mode.empty() || std::find(kModes.begin(), kModes.end(), mode) != kModes.end();
 }
 
@@ -392,15 +397,30 @@ void InkCanvas::recolour(const ink::Correction& change, double opacity, bool cli
 
 void InkCanvas::forget_clip() { impl_->previous = false; }
 
+// color-model@1 (PC1d): a bitmap page's lightness as it prints, 0 or 1 at 50% (per pixel: a part of the page drawn the
+// same as the whole).
+double bitmap_value(double lightness) { return lightness >= 0.5 ? 1.0 : 0.0; }
+
 Image InkCanvas::display() const {
     const unsigned n = impl_->n;
     const std::size_t count = impl_->px.size() / impl_->stride;
+    const core::PageColor& color = impl_->color;
     std::vector<double> inks(count * n);
     std::vector<float> srgb(count * 3);
     for (std::size_t i = 0; i < count; ++i) {
-        for (unsigned c = 0; c < n; ++c) inks[i * n + c] = from_canvas(impl_->color.space, c, impl_->px[i * impl_->stride + c]);
+        for (unsigned c = 0; c < n; ++c) {
+            const double v = impl_->px[i * impl_->stride + c];
+            inks[i * n + c] = from_canvas(color.space, c, color.bitmap ? bitmap_value(v) : v);
+        }
     }
-    ink::to_srgb(impl_->color, inks.data(), srgb.data(), count);
+    if (!color.duotone.empty()) {  // (a duotone page: its grey printed in its inks, PhotoCraft's Duotone::render)
+        for (std::size_t i = 0; i < count; ++i) {
+            const std::array<double, 3> shown = core::duotone_print(color.duotone, impl_->px[i * impl_->stride]);
+            for (unsigned c = 0; c < 3; ++c) srgb[i * 3 + c] = static_cast<float>(shown[c]);
+        }
+    } else {
+        ink::to_srgb(color, inks.data(), srgb.data(), count);
+    }
     Image out = Image::create("RGB", impl_->size, Ink{255, 255, 255});
     for (int y = 0; y < impl_->size.height; ++y) {
         auto* row = reinterpret_cast<unsigned char*>(out.raw()->image[y]);
@@ -423,10 +443,16 @@ core::InkPixels InkCanvas::ink_pixels(int depth, bool alpha) const {
     out.width = static_cast<std::uint32_t>(impl_->size.width);
     out.height = static_cast<std::uint32_t>(impl_->size.height);
     const unsigned n = impl_->n;
+    out.planes = out.space == InkSpace::Multi ? n : 0;
+    // (a bitmap page's lightness as it prints: 0 or 1, as display() shows it)
+    const auto value = [&](std::size_t i, unsigned c) {
+        const double v = impl_->px[i * impl_->stride + c];
+        return impl_->color.bitmap && c < n ? bitmap_value(v) : v;
+    };
     if (depth == 32) {  // (floats: the canvas's values as they are)
         out.floats.resize(out.pixel_count() * (n + 1));
         for (std::size_t i = 0; i < out.pixel_count(); ++i) {
-            for (unsigned c = 0; c < n; ++c) out.set(i, c, impl_->px[i * impl_->stride + c]);
+            for (unsigned c = 0; c < n; ++c) out.set(i, c, value(i, c));
             out.set(i, n, alpha ? impl_->px[i * impl_->stride + n] : 1.0);
         }
         return out;
@@ -435,7 +461,7 @@ core::InkPixels InkCanvas::ink_pixels(int depth, bool alpha) const {
     out.samples.resize(out.pixel_count() * (n + 1));
     for (std::size_t i = 0; i < out.pixel_count(); ++i) {
         for (unsigned c = 0; c < n; ++c) {
-            out.samples[i * (n + 1) + c] = static_cast<std::uint16_t>(std::lround(std::clamp(impl_->px[i * impl_->stride + c], 0.0, 1.0) * most));
+            out.samples[i * (n + 1) + c] = static_cast<std::uint16_t>(std::lround(std::clamp(value(i, c), 0.0, 1.0) * most));
         }
         out.samples[i * (n + 1) + n] =
             alpha ? static_cast<std::uint16_t>(std::lround(std::clamp(impl_->px[i * impl_->stride + n], 0.0, 1.0) * most)) : static_cast<std::uint16_t>(most);
@@ -447,7 +473,7 @@ InkPicture ink_picture(const Image& rgba_in, const core::PageColor& color) {
     const Image rgba = rgba_in.mode() == "RGBA" ? rgba_in : rgba_in.convert("RGBA");
     InkPicture out;
     out.size = rgba.size();
-    out.channels = core::colour_channels(color.space);
+    out.channels = color.planes();
     const unsigned n = out.channels;
     const std::size_t count = static_cast<std::size_t>(rgba.width()) * rgba.height();
     std::vector<unsigned char> rgb(count * 3), alpha(count);
@@ -559,6 +585,7 @@ core::InkPixels resize_inks(const core::InkPixels& pixels, Size size, Resample r
     core::InkPixels out;
     out.space = pixels.space;
     out.depth = pixels.depth;
+    out.planes = pixels.planes;
     out.width = static_cast<std::uint32_t>(size.width);
     out.height = static_cast<std::uint32_t>(size.height);
     const unsigned all = pixels.channels();
@@ -607,7 +634,7 @@ template <class Read>
 InkPicture sample_values(const core::InkPixels& raster, Size full, Box area, bool use_lanczos, bool hdr, Read read) {
     InkPicture out;
     out.size = Size{area.width(), area.height()};
-    out.channels = core::colour_channels(raster.space);
+    out.channels = raster.colours();
     const unsigned n = out.channels, all = n + 1;
     out.values.assign(static_cast<std::size_t>(out.size.width) * out.size.height * all, 0.0);
     const int rw = static_cast<int>(raster.width), rh = static_cast<int>(raster.height);
@@ -652,7 +679,7 @@ InkPicture sample_values(const core::InkPixels& raster, Size full, Box area, boo
     for (int j = 0; j < out.size.height; ++j) {
         const double* w = ky.weights.data() + static_cast<std::size_t>(j) * ky.ksize;
         for (int i = 0; i < ow; ++i) {
-            double v[5] = {};
+            std::array<double, core::kPlatesMax + 1> v{};
             for (int k = 0; k < ky.count[j]; ++k) {
                 const double* h = horizontal.data() + (std::size_t(ky.start[j] + k - row0) * ow + i) * all;
                 for (unsigned c = 0; c < all; ++c) v[c] += h[c] * w[k];

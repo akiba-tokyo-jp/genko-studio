@@ -141,12 +141,45 @@ bool is_ref(std::string_view text) {
     return std::all_of(text.begin() + 7, text.end(), [](char c) { return (c >= '0' && c <= '9') || (c >= 'a' && c <= 'f'); });
 }
 
-RgbMode rgb_mode_from_json(const Json& value) {
+ColorTable table_from_json(const Json& value) {
+    if (!value.is_object()) bad("an indexed page's table is {\"colors\", \"transparent\"}");
+    for (const auto& [key, v] : value.items()) {
+        if (key != "colors" && key != "transparent") bad("the table has an unknown key " + py_repr_str(key));
+    }
+    if (!value.contains("colors") || !value.contains("transparent")) bad("an indexed page's table is {\"colors\", \"transparent\"}");
+    ColorTable out;
+    const Json& colors = value["colors"];
+    if (!colors.is_array()) bad("the table's colors are a list of [r, g, b]");
+    for (const Json& c : colors) {
+        if (!c.is_array() || c.size() != 3) bad("the table's colors are a list of [r, g, b]");
+        std::array<int, 3> rgb{};
+        for (unsigned k = 0; k < 3; ++k) {
+            if (!c[k].is_number_integer() || c[k].get<std::int64_t>() < 0 || c[k].get<std::int64_t>() > 255) bad("a table colour is three integers 0..255");
+            rgb[k] = static_cast<int>(c[k].get<std::int64_t>());
+        }
+        out.colors.push_back(rgb);
+    }
+    const Json& transparent = value["transparent"];
+    if (!transparent.is_null()) {
+        if (!transparent.is_number_integer()) bad("the table's transparent is an index or null");
+        out.transparent = static_cast<int>(std::clamp<std::int64_t>(transparent.get<std::int64_t>(), -1, 1 << 20));
+    }
+    check_color_table(out);
+    return out;
+}
+
+RgbMode rgb_mode_from_json(const Json& value, bool indexed) {
     static const std::set<std::string> kKeys{"mode", "depth", "profile", "intent", "bpc"};
     for (const auto& [key, v] : value.items()) {
-        if (!kKeys.contains(key)) bad("unknown key " + py_repr_str(key));
+        if (!kKeys.contains(key) && !(indexed && key == "table")) bad("unknown key " + py_repr_str(key));
     }
     RgbMode out;
+    if (indexed) {
+        if (!value.contains("table")) bad("an indexed page has its table");
+        out.table = table_from_json(value["table"]);
+        if (value.contains("profile")) bad("an indexed page has no profile (sRGB)");
+        if (value["depth"] != Json(8)) bad("an indexed page is 8 bits");
+    }
     const auto depth = value.find("depth");
     if (depth == value.end() || !depth->is_number_integer() ||
         (depth->get<std::int64_t>() != 8 && depth->get<std::int64_t>() != 16 && depth->get<std::int64_t>() != 32)) {
@@ -171,13 +204,49 @@ RgbMode rgb_mode_from_json(const Json& value) {
 
 }  // namespace
 
+std::size_t ColorTable::nearest(int r, int g, int b) const {
+    std::size_t best = 0;
+    long far = -1;
+    for (std::size_t i = 0; i < colors.size(); ++i) {
+        const long dr = r - colors[i][0], dg = g - colors[i][1], db = b - colors[i][2];
+        const long d = dr * dr + dg * dg + db * db;
+        if (far < 0 || d < far) {
+            far = d;
+            best = i;
+        }
+    }
+    return best;
+}
+
+void check_color_table(const ColorTable& table) {
+    if (table.colors.empty() || table.colors.size() > kColorTableMax) bad("a colour table has 1..256 colours");
+    for (const auto& c : table.colors) {
+        for (const int v : c) {
+            if (v < 0 || v > 255) bad("a table colour is three integers 0..255");
+        }
+    }
+    if (table.transparent && (*table.transparent < 0 || static_cast<std::size_t>(*table.transparent) >= table.colors.size())) {
+        bad("the table's transparent is one of its indices");
+    }
+}
+
+Json to_json(const ColorTable& table) {
+    Json colors = Json::array();
+    for (const auto& c : table.colors) colors.push_back(Json::array({c[0], c[1], c[2]}));
+    Json out = Json::object();
+    out["colors"] = std::move(colors);
+    out["transparent"] = table.transparent ? Json(*table.transparent) : Json();
+    return out;
+}
+
 Json to_json(const RgbMode& mode) {
     Json out = Json::object();
-    out["mode"] = "rgb";
+    out["mode"] = mode.table ? "indexed" : "rgb";
     out["depth"] = mode.depth;
     if (!mode.profile.empty()) out["profile"] = mode.profile;
     out["intent"] = mode.intent;
     if (!mode.bpc) out["bpc"] = false;
+    if (mode.table) out["table"] = to_json(*mode.table);
     return out;
 }
 
@@ -186,8 +255,8 @@ ColorModel color_model_from_json(const Json& value) {
     if (value.is_null()) return out;
     if (!value.is_object()) bad("it must be an object");
     const auto mode = value.find("mode");
-    if (mode != value.end() && mode->is_string() && mode->get<std::string>() == "rgb") {
-        RgbMode rgb = rgb_mode_from_json(value);
+    if (mode != value.end() && mode->is_string() && (mode->get<std::string>() == "rgb" || mode->get<std::string>() == "indexed")) {
+        RgbMode rgb = rgb_mode_from_json(value, mode->get<std::string>() == "indexed");
         // (every default is no `color` at all, as "bpc": true is not written: not the writer's)
         if (rgb.is_default()) bad("an RGB mode of every default is written as no color");
         out.rgb = std::move(rgb);
@@ -299,6 +368,14 @@ void validate_color_model(const Document& doc) {
         if (!rgb.profile.empty() && !is_ref(rgb.profile)) throw Error("value", where + ": an RGB page's profile is sha256:<64 hex>");
         if (!is_intent(rgb.intent)) throw Error("value", where + ": an unknown intent");
         if (rgb.icc && bytes_ref(*rgb.icc) != rgb.profile) throw Error("value", where + ": the ICC profile held is not " + rgb.profile);
+        if (rgb.table) {  // (an indexed page: 8 bits in sRGB, its table)
+            if (rgb.depth != 8 || !rgb.profile.empty()) throw Error("value", where + ": an indexed page is 8 bits in sRGB");
+            try {
+                check_color_table(*rgb.table);
+            } catch (const Error& error) {
+                throw Error("value", where + ": " + error.what());
+            }
+        }
     };
     if (doc.rgb) check(*doc.rgb, "the book");
     if (doc.text_gamma && !is_text_gamma(*doc.text_gamma)) throw Error("value", "the book's text_gamma is more than 1 and at most 2.2");

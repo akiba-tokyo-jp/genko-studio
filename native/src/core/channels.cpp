@@ -202,6 +202,15 @@ std::vector<std::string> plate_names(const Page& page) {
             case InkSpace::Cmyk: return {"cyan", "magenta", "yellow", "black"};
             case InkSpace::Lab: return {"lightness", "a", "b"};
             case InkSpace::Gray: return {"gray"};
+            case InkSpace::Multi: {  // (a multichannel page's plates by their names, lower case)
+                std::vector<std::string> out;
+                for (const Plate& plate : page.color->plates) {
+                    std::string name = plate.name;
+                    std::transform(name.begin(), name.end(), name.begin(), [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+                    out.push_back(std::move(name));
+                }
+                return out;
+            }
             default: return {};
         }
     }
@@ -214,6 +223,11 @@ std::vector<std::string> plate_labels(const Page& page) {
             case InkSpace::Cmyk: return {"シアン", "マゼンタ", "イエロー", "ブラック"};
             case InkSpace::Lab: return {"明度", "a", "b"};
             case InkSpace::Gray: return {"グレー"};
+            case InkSpace::Multi: {
+                std::vector<std::string> out;
+                for (const Plate& plate : page.color->plates) out.push_back(plate.name);
+                return out;
+            }
             default: return {};
         }
     }
@@ -265,7 +279,8 @@ std::optional<ChannelTarget> channel_target(const Document& doc, const Json& op)
     const std::size_t index = channel_index(*page, value);
     if (index < page->channels.size() && (!python || page->channels[index].id == value)) return ChannelTarget{ChannelTarget::Kind::Channel, index};
     if (const auto plate = plate_index(*page, value)) {
-        const bool ink_page = page->color && (page->color->space == InkSpace::Cmyk || page->color->space == InkSpace::Lab);
+        const bool ink_page = page->color && (page->color->space == InkSpace::Cmyk || page->color->space == InkSpace::Lab ||
+                                              page->color->space == InkSpace::Multi);
         if (python && !ink_page) return std::nullopt;  // (an RGB or grey page's plates there: Python's r, g, b, else all three)
         if (plate_names(*page).size() == 1) return ChannelTarget{ChannelTarget::Kind::Composite, 0};  // (a grey page's one plate)
         return ChannelTarget{ChannelTarget::Kind::Plate, *plate};

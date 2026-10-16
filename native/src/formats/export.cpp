@@ -7,6 +7,7 @@
 #include <algorithm>
 #include <cctype>
 #include <optional>
+#include <unordered_map>
 #include <utility>
 
 #include "core/channels.hpp"
@@ -173,14 +174,47 @@ std::string page_color(const core::Page& page, std::string_view color) {
 // (color-model@1: "gray" for a grey page).
 bool detail::as_inks(const core::Page& page, std::string_view fmt, std::string_view color) {
     if (!page.color || (fmt != "pdf" && fmt != "tiff" && fmt != "cmyk")) return false;
+    // (color-model@1, PC1d: a multichannel page's plates are no format's here but PSD's; a bitmap page is 1 bit in its
+    // own colour; a duotone page's grey is a PDF's sRGB, as its inks print)
+    if (page.color->space == core::InkSpace::Multi || !native_mode(page, fmt, color).empty()) return false;
+    if (!page.color->duotone.empty() && fmt == "pdf") return false;
     return color == "auto" || (color == "cmyk" && page.color->space == core::InkSpace::Cmyk) ||
            (color == "gray" && page.color->space == core::InkSpace::Gray);
 }
 
-// color-model@1: an RGB page of a colour model written as its values (PDF and TIFF): its colour "auto" or "rgb".
+// color-model@1: an RGB page of a colour model written as its values (PDF and TIFF): its colour "auto" or "rgb" (an
+// indexed page: its own colours, native_mode).
 bool detail::as_values(const core::Page& page, std::string_view fmt, std::string_view color) {
-    if (!page.rgb || page.color || (fmt != "pdf" && fmt != "tiff")) return false;
+    if (!page.rgb || page.color || page.rgb->table || (fmt != "pdf" && fmt != "tiff")) return false;
     return color == "auto" || color == "rgb";
+}
+
+std::string detail::native_mode(const core::Page& page, std::string_view fmt, std::string_view color) {
+    if (color != "auto" || (fmt != "tiff" && fmt != "pdf")) return {};
+    if (page.color && page.color->bitmap) return "bitmap";
+    if (!page.color && page.rgb && page.rgb->table) return "indexed";
+    return {};
+}
+
+Image detail::indexed_picture(const Image& image, const core::ColorTable& table) {
+    const Image rgb = image.mode() == "RGB" ? image : image.convert("RGB");
+    const std::string bytes = rgb.tobytes();
+    std::string indices(bytes.size() / 3, '\0');
+    std::unordered_map<std::uint32_t, std::size_t> nearest;
+    for (std::size_t i = 0; i < indices.size(); ++i) {
+        const auto* p = reinterpret_cast<const unsigned char*>(bytes.data()) + i * 3;
+        const std::uint32_t key = (std::uint32_t(p[0]) << 16) | (std::uint32_t(p[1]) << 8) | p[2];
+        auto it = nearest.find(key);
+        if (it == nearest.end()) it = nearest.emplace(key, table.nearest(p[0], p[1], p[2])).first;
+        indices[i] = static_cast<char>(it->second);
+    }
+    Image out = Image::frombytes("L", rgb.size(), indices);
+    std::string palette;
+    for (const auto& c : table.colors) {
+        for (const int v : c) palette.push_back(static_cast<char>(v));
+    }
+    out.putpalette("RGB", palette);
+    return out;
 }
 
 detail::PageValues detail::page_values(const core::Page& page, const core::Document& episode, int dpi, render::RenderOptions options) {
@@ -334,6 +368,7 @@ std::vector<fs::path> detail::print_into(detail::Output& output, const core::Doc
     const auto coloured = [&](const Image& image, const std::string& how) {
         if (how == "cmyk") return render::colour::to_cmyk(image, icc_path);
         if (how == "bitonal") return render::to_bitonal(image, threshold, screen_ptr);
+        if (how == "bitmap") return render::to_bitonal(image, 127, nullptr);  // (color-model@1: a bitmap page's own 0 and 255)
         return image.convert(how == "gray" ? "L" : "RGB");
     };
     // (Python reads the printer's profile again for each page: here once, the same bytes)
@@ -352,6 +387,11 @@ std::vector<fs::path> detail::print_into(detail::Output& output, const core::Doc
         std::vector<PdfPage> pages;
         std::vector<std::string> hows;
         for (const auto& page : episode.pages) {
+            if (const std::string own = detail::native_mode(*page, fmt, color); !own.empty()) {  // (color-model@1: 1 bpc, /Indexed)
+                hows.push_back(own);
+                pages.push_back(PdfPage{own == "bitmap" ? "1" : "P", {}, pdf_boxes(*page, area)});
+                continue;
+            }
             if (as_inks(*page, fmt, color)) {  // (color-mode@1: its inks as they are, with its own profile)
                 hows.push_back("ink");
                 pages.push_back(PdfPage{"INK", page_profile(*page), pdf_boxes(*page, area)});
@@ -390,7 +430,12 @@ std::vector<fs::path> detail::print_into(detail::Output& output, const core::Doc
             return page.channels.empty() ? image_of(page) : crop_to(render::render_page(page, dpi, plain, &episode).image, page, area, dpi);
         };
         write_pdf(
-            path, pages, [&](std::size_t n) { return coloured(picture_of(*episode.pages[n]), hows[n]); },
+            path, pages,
+            [&](std::size_t n) {
+                const core::Page& page = *episode.pages[n];
+                if (hows[n] == "indexed") return detail::indexed_picture(picture_of(page), *page.rgb->table);
+                return coloured(picture_of(page), hows[n]);
+            },
             [&](std::size_t n) { return inks_of(*episode.pages[n], false); },
             [&](std::size_t n) {
                 const core::Page& page = *episode.pages[n];
@@ -403,6 +448,14 @@ std::vector<fs::path> detail::print_into(detail::Output& output, const core::Doc
     std::vector<fs::path> written;
     for (const auto& page_ptr : episode.pages) {
         const core::Page& page = *page_ptr;
+        if (const std::string own = detail::native_mode(page, fmt, color); !own.empty()) {  // (color-model@1: 1 bit, a palette)
+            const fs::path path = detail::join(dest, stem(episode) + "_" + core::file_stem(page) + ".tiff");
+            const Image image = image_of(page);
+            output.put(path, own == "bitmap" ? tiff_bytes(coloured(image, own), TiffSave{"group4", dpi_pair(dpi), {}})
+                                             : tiff_bytes(detail::indexed_picture(image, *page.rgb->table), TiffSave{"tiff_lzw", dpi_pair(dpi), {}}));
+            written.push_back(path);
+            continue;
+        }
         if (as_inks(page, fmt, color)) {  // (color-mode@1: a TIFF of its inks, with its own profile)
             const fs::path path = detail::join(dest, stem(episode) + "_" + core::file_stem(page) + ".tiff");
             const bool floats = page.color->space == core::InkSpace::Gray;  // (color-model@1: grey's 32 bits as floats)

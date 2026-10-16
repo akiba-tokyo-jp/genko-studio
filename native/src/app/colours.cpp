@@ -556,6 +556,10 @@ ColourPanel::ColourPanel(BrushPanel* brush, QWidget* parent) : QWidget(parent), 
     layout->addLayout(picker);
     layout->addLayout(numbers);
     layout->addWidget(ink_box);
+    table_index = new QLabel;
+    table_index->setObjectName(QStringLiteral("colour_table_index"));
+    table_index->hide();
+    layout->addWidget(table_index);
     layout->addWidget(pick_source);
     layout->addWidget(tabs, 1);
     sets_ = colours::load_sets(core::poses::config_dir());
@@ -592,7 +596,27 @@ void ColourPanel::show_colour(const Rgb& rgb) {
                      .toUpper());
     fill_near(rgb);
     show_inks(rgb);
+    show_table(rgb);
     loading_ = false;
+}
+
+void ColourPanel::set_color_table(const std::optional<core::ColorTable>& table) {
+    if (table == table_) return;
+    table_ = table;
+    show_table(brush_->rgb());
+}
+
+void ColourPanel::show_table(const Rgb& rgb) {
+    if (table_index == nullptr) return;
+    if (!table_ || table_->colors.empty()) {
+        table_index->hide();
+        return;
+    }
+    const std::size_t at = table_->nearest(rgb[0], rgb[1], rgb[2]);
+    const std::array<int, 3>& c = table_->colors[at];
+    table_index->setText(QStringLiteral("カラーテーブル %1 番（%2）").arg(at).arg(QColor(c[0], c[1], c[2]).name()));
+    table_index->setToolTip(QStringLiteral("インデックスカラーのページでは、この色は表の %1 番の色で描かれます").arg(at));
+    table_index->show();
 }
 
 void ColourPanel::set_page_color(const std::optional<core::PageColor>& color) {
@@ -600,16 +624,19 @@ void ColourPanel::set_page_color(const std::optional<core::PageColor>& color) {
     page_color_ = color;
     ink_box->setVisible(page_color_.has_value());
     if (!page_color_) return;
-    // (CMYK: its four inks in %; grey: K in % — color-model@1; Lab: L, a, b)
+    // (CMYK: its four inks in %; grey: K in % — color-model@1; Lab: L, a, b; a multichannel page's plates in %, PC1d:
+    // 1..4 of them, as Multichannel makes them)
     const bool cmyk = page_color_->space == core::InkSpace::Cmyk;
     const bool grey = page_color_->space == core::InkSpace::Gray;
-    const bool percent = cmyk || grey;
+    const bool multi = page_color_->space == core::InkSpace::Multi;
+    const bool percent = cmyk || grey || multi;
     const char* names[] = {"C", "M", "Y", "K"};
     const char* lab[] = {"L", "a", "b", ""};
-    const std::size_t used_inks = cmyk ? 4 : grey ? 1 : 3;
+    const std::size_t used_inks = multi ? std::min<std::size_t>(page_color_->plates.size(), ink_spins.size()) : cmyk ? 4 : grey ? 1 : 3;
     for (std::size_t i = 0; i < ink_spins.size(); ++i) {
         const bool used = i < used_inks;
-        const QString name = QString::fromLatin1(grey ? "K" : cmyk ? names[i] : lab[i]);
+        const QString name = multi ? (used ? QString::fromStdString(page_color_->plates[i].name) : QString())
+                                   : QString::fromLatin1(grey ? "K" : cmyk ? names[i] : lab[i]);
         ink_labels[i]->setText(name);
         ink_labels[i]->setVisible(used);
         ink_spins[i]->setVisible(used);
@@ -628,7 +655,8 @@ void ColourPanel::show_inks(const Rgb& rgb) {
     if (!page_color_) return;
     try {
         const std::vector<double> ink = render::ink::ink_of(*page_color_, rgb);
-        const bool percent = page_color_->space == core::InkSpace::Cmyk || page_color_->space == core::InkSpace::Gray;
+        const bool percent = page_color_->space == core::InkSpace::Cmyk || page_color_->space == core::InkSpace::Gray ||
+                             page_color_->space == core::InkSpace::Multi;
         for (std::size_t i = 0; i < ink.size() && i < ink_spins.size(); ++i) {
             const QSignalBlocker quiet(ink_spins[i]);
             ink_spins[i]->setValue(percent ? ink[i] * 100.0 : ink[i]);
@@ -647,8 +675,11 @@ void ColourPanel::from_inks() {
     inks_edited_ = false;
     const bool cmyk = page_color_->space == core::InkSpace::Cmyk;
     const bool grey = page_color_->space == core::InkSpace::Gray;
+    const bool multi = page_color_->space == core::InkSpace::Multi;
+    if (multi && page_color_->plates.size() > ink_spins.size()) return;  // (more plates than the boxes: not chosen here)
     std::vector<double> ink;
-    for (std::size_t i = 0; i < (cmyk ? 4u : grey ? 1u : 3u); ++i) ink.push_back(cmyk || grey ? ink_spins[i]->value() / 100.0 : ink_spins[i]->value());
+    const std::size_t count = multi ? page_color_->plates.size() : cmyk ? 4u : grey ? 1u : 3u;
+    for (std::size_t i = 0; i < count; ++i) ink.push_back(cmyk || grey || multi ? ink_spins[i]->value() / 100.0 : ink_spins[i]->value());
     try {
         if (render::ink::same_inks(*page_color_, render::ink::ink_of(*page_color_, brush_->rgb()), ink)) return;  // (as it is)
     } catch (const std::exception&) {

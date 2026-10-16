@@ -582,7 +582,7 @@ void ink_layer_effects(const core::Layer& layer, InkPicture& picture, int dpi, c
         const unsigned char c[3] = {static_cast<unsigned char>(std::clamp<std::int64_t>(rgb.size() > 0 ? rgb[0] : 0, 0, 255)),
                                     static_cast<unsigned char>(std::clamp<std::int64_t>(rgb.size() > 1 ? rgb[1] : 0, 0, 255)),
                                     static_cast<unsigned char>(std::clamp<std::int64_t>(rgb.size() > 2 ? rgb[2] : 0, 0, 255))};
-        std::array<double, 4> ink{};
+        std::array<double, core::kPlatesMax> ink{};
         ink::inks_of(color, c, nullptr, ink.data(), 1);
         for (unsigned k = 0; k < n; ++k) ink[k] = to_canvas(color.space, k, ink[k]);
         return ink;
@@ -595,7 +595,7 @@ void ink_layer_effects(const core::Layer& layer, InkPicture& picture, int dpi, c
         const Image inner = width < 12 ? alpha.filter(Filter::min_filter(width * 2 + 1))
                                        : alpha.filter(Filter::gaussian_blur(width)).point([](int v) { return v > 245 ? 255 : 0; });
         const std::string dark = chops::subtract(alpha, inner).point([&](int v) { return py_int_trunc(v * strength * 0.6); }).tobytes();
-        const std::array<double, 4> black = canvas_inks({0, 0, 0});
+        const auto black = canvas_inks({0, 0, 0});
         for (std::size_t i = 0; i < count; ++i) {  // (black laid over by the rim's alpha, the picture's alpha kept)
             const double da = static_cast<unsigned char>(dark[i]) / 255.0;
             double* v = picture.values.data() + i * all;
@@ -615,7 +615,7 @@ void ink_layer_effects(const core::Layer& layer, InkPicture& picture, int dpi, c
         if (own != nullptr && core::py_truthy(*own)) rgb = core::int_tuple(*own);
         if (rgb.size() > 3) rgb.resize(3);
         const std::string grown = alpha.filter(Filter::gaussian_blur(width / 1.5)).point([](int v) { return v > 12 ? 255 : 0; }).tobytes();
-        const std::array<double, 4> ink = canvas_inks(rgb);
+        const auto ink = canvas_inks(rgb);
         InkPicture border{picture.size, n, std::vector<double>(count * all, 0.0)};
         for (std::size_t i = 0; i < count; ++i) {
             double* v = border.values.data() + i * all;

@@ -24,6 +24,7 @@
 #include "render/ink_canvas.hpp"
 #include "render/ops_registry.hpp"
 #include "render/png.hpp"
+#include "render/quantize.hpp"
 
 namespace genko::render {
 
@@ -569,6 +570,14 @@ std::int64_t convert_pages(Document& doc, const std::vector<std::size_t>& pages,
                 }
             }
         }
+        if (to.inks && to.inks->space == InkSpace::Multi) {  // (nor in a multichannel page's plates: the separable blends only)
+            for (const core::Layer& layer : doc.pages[i]->layers) {
+                if (!core::multi_blend(layer.blend)) {
+                    throw OpError("page " + doc.pages[i]->index.repr() + ": the layer " + layer.id + "'s blend " + core::py_repr_str(layer.blend) +
+                                  " is not one a multichannel page composites");
+                }
+            }
+        }
         plan.emplace_back(i, std::move(to));
         keep.push_back(kept);
     }
@@ -623,12 +632,17 @@ bool default_of(const Json& op) {
     return also != nullptr && also->get<bool>();
 }
 
+void to_multichannel(OpContext& c);
+
 void set_color_mode(OpContext& c) {
     Document& doc = c.doc;
     const Json& op = c.op;
     const std::string mode = text_of(op, "mode", "");
-    if (mode == "multichannel") throw core::Error("not_yet_ported", "set_color_mode to multichannel is not in this build yet");
-    if (mode != "rgb" && mode != "gray" && mode != "cmyk" && mode != "lab") throw OpError("mode is rgb, gray, cmyk or lab");
+    if (mode == "multichannel") {
+        to_multichannel(c);
+        return;
+    }
+    if (mode != "rgb" && mode != "gray" && mode != "cmyk" && mode != "lab") throw OpError("mode is rgb, gray, cmyk, lab or multichannel");
     const Json* depth = field(op, "depth");
     if (depth != nullptr && (!depth->is_number_integer() ||
                              (depth->get<std::int64_t>() != 8 && depth->get<std::int64_t>() != 16 && depth->get<std::int64_t>() != 32))) {
@@ -660,6 +674,15 @@ void set_color_mode(OpContext& c) {
 // The mode a page is in, as an op names it (rgb, gray, cmyk, lab).
 std::string_view mode_of(const Model& model) { return model.inks ? core::to_string(model.inks->space) : std::string_view("rgb"); }
 
+// color-model@1 (PC1d): the mode of a page in one of Image › Mode's own (indexed, bitmap, duotone, multichannel), or none.
+std::optional<std::string> special_mode(const Model& model) {
+    if (model.rgb && model.rgb->table) return std::string("indexed");
+    if (model.inks && (model.inks->bitmap || !model.inks->duotone.empty() || model.inks->space == InkSpace::Multi)) {
+        return std::string(core::mode_name(*model.inks));
+    }
+    return std::nullopt;
+}
+
 void assign_profile(OpContext& c) {
     Document& doc = c.doc;
     const Json& op = c.op;
@@ -674,6 +697,7 @@ void assign_profile(OpContext& c) {
     const auto assigned = [&](const Model& from) -> std::optional<Model> {
         Model to = from;
         const std::string_view mode = mode_of(from);
+        if (from.rgb && from.rgb->table) return std::nullopt;  // (an indexed page is sRGB's: its table's colours)
         if (mode == "rgb") {
             if (named && named->space != core::ProfileSpace::Rgb) return std::nullopt;
             if (named && named->icc) {
@@ -708,6 +732,8 @@ void assign_profile(OpContext& c) {
             if (every) continue;  // (every page: those of the profile's space)
             const std::string_view mode = mode_of(from);
             if (mode == "lab") throw OpError("page " + doc.pages[i]->index.repr() + " is a Lab page: it has no profile");
+            if (from.rgb && from.rgb->table) throw OpError("page " + doc.pages[i]->index.repr() + " is an indexed page: its colours are sRGB's");
+            if (mode == "multichannel") throw OpError("page " + doc.pages[i]->index.repr() + " is a multichannel page: its plates have no profile");
             if (none) throw OpError("page " + doc.pages[i]->index.repr() + " is a CMYK page: none is for an RGB or grey page");
             throw OpError("the profile is for another colour space (" + std::string(core::to_string(named->space)) + ") than page " +
                           doc.pages[i]->index.repr() + "'s (" + std::string(mode) + ")");
@@ -746,6 +772,12 @@ void convert_profile(OpContext& c) {
     bool every = false;
     const std::vector<std::size_t> pages = pages_of(doc, op, every);
     const bool book = every || default_of(op);
+    // (an indexed, bitmap, duotone or multichannel page is not converted into a profile: its mode first, set_color_mode)
+    for (const std::size_t i : pages) {
+        if (const auto special = special_mode(model_of(*doc.pages[i]))) {
+            throw OpError("page " + doc.pages[i]->index.repr() + (*special == "indexed" ? " is an " : " is a ") + *special + " page: convert_profile takes an RGB, grey, CMYK or Lab page");
+        }
+    }
     // (each page at its own depth)
     const auto target = [&](const Model& from) { return kept_plain(target_of(mode, from.depth(), named, into), from); };
     const std::int64_t converted = convert_pages(doc, pages, [&](const core::Page& page) { return target(model_of(page)); }, way, into);
@@ -758,7 +790,7 @@ void convert_profile(OpContext& c) {
     c.report = report_of(converted, way);
 }
 
-std::vector<core::InkEntry> inks_from(const Json& value, InkSpace space) {
+std::vector<core::InkEntry> inks_from(const Json& value, const PageColor& color) {
     if (!value.is_array()) throw OpError("inks is a list of [[r, g, b], [values]]");
     std::vector<core::InkEntry> out;
     for (const Json& item : value) {
@@ -776,7 +808,7 @@ std::vector<core::InkEntry> inks_from(const Json& value, InkSpace space) {
             entry.ink.push_back(v.get<double>());
         }
         try {
-            core::check_ink(space, entry.ink);
+            core::check_ink(color, entry.ink);
         } catch (const core::Error& error) {
             throw OpError(error.what());
         }
@@ -796,7 +828,7 @@ void set_inks(OpContext& c) {
     const std::vector<std::size_t> pages = pages_of(doc, op, every);
     std::int64_t changed = 0;
     const auto apply = [&](PageColor& color) {
-        const std::vector<core::InkEntry> given = inks_from(*inks, color.space);
+        const std::vector<core::InkEntry> given = inks_from(*inks, color);
         std::vector<core::InkEntry> table = replace != nullptr && replace->get<bool>() ? std::vector<core::InkEntry>{} : color.inks;
         for (const core::InkEntry& entry : given) {
             const auto at = std::find_if(table.begin(), table.end(), [&](const core::InkEntry& e) { return e.rgb == entry.rgb; });
@@ -839,6 +871,582 @@ void set_text_gamma(OpContext& c) {
     c.report = Json{{"gamma", value ? Json(*value) : Json()}};
 }
 
+// --- PC1d: Image › Mode's own modes (color-model@1, SPEC.md COLOR-03) -------------------------------------------------
+// to_indexed, set_color_table, to_bitmap, set_duotone and set_color_mode's multichannel: PhotoCraft v0.2.0's
+// mode_cmds.rs and multichannel_cmds.rs (MIT, third_party/photocraft/NOTICE.md), its "document" a page. The user's
+// decision (2026-10-16): indexed, bitmap and multichannel flatten the page's pixel layers into one as PhotoCraft does —
+// by Genko's own flatten (merge_visible's), its frames, lines and balloons kept as they are —; duotone and the colour
+// table change no pixel.
+
+// The page of an id now (an op run inside this one may have made the book's pages anew).
+std::size_t page_at(const Document& doc, const std::string& id) {
+    for (std::size_t i = 0; i < doc.pages.size(); ++i) {
+        if (doc.pages[i]->id == id) return i;
+    }
+    throw OpError("the page is no longer in the book");
+}
+
+std::vector<std::string> ids_of(const Document& doc, const std::vector<std::size_t>& pages) {
+    std::vector<std::string> out;
+    for (const std::size_t i : pages) out.push_back(doc.pages[i]->id);
+    return out;
+}
+
+std::string page_name(const core::Page& page) { return "page " + page.index.repr(); }
+
+// A page's own way of taking colours in (its intent and black point compensation), kept through a conversion.
+Into own_way(const Model& from) {
+    Into out;
+    out.intent = from.inks ? from.inks->intent : from.rgb_mode().intent;
+    out.bpc = from.inks ? from.inks->bpc : from.rgb_mode().bpc;
+    out.page_intent = out.intent;
+    out.page_bpc = out.bpc;
+    return out;
+}
+
+double number_in(const Json& op, const char* key, double fallback, double lo, double hi, bool whole = false) {
+    const Json* v = field(op, key);
+    if (v == nullptr) return fallback;
+    const auto said = [](double d) { return std::to_string(static_cast<long long>(d)); };
+    const std::string why = std::string(key) + " is a " + (whole ? "whole " : "") + "number from " + said(lo) + " to " + said(hi);
+    if (!v->is_number() || v->is_boolean() || (whole && !v->is_number_integer())) throw OpError(why);
+    const double d = v->get<double>();
+    if (!std::isfinite(d) || d < lo || d > hi) throw OpError(why);
+    return d;
+}
+
+bool flag_in(const Json& op, const char* key, bool fallback) {
+    const Json* v = field(op, key);
+    if (v == nullptr) return fallback;
+    if (!v->is_boolean()) throw OpError(std::string(key) + " is true or false");
+    return v->get<bool>();
+}
+
+// A colour as PhotoCraft takes one: "#rrggbb" or [r, g, b] (whole numbers 0..255).
+std::optional<std::array<int, 3>> colour_value(const Json& v) {
+    std::array<int, 3> out{};
+    if (v.is_string()) {
+        std::string s = v.get<std::string>();
+        if (!s.empty() && s[0] == '#') s.erase(0, 1);
+        if (s.size() != 6 || !std::all_of(s.begin(), s.end(), [](char ch) { return std::isxdigit(static_cast<unsigned char>(ch)) != 0; })) return std::nullopt;
+        for (unsigned k = 0; k < 3; ++k) out[k] = std::stoi(s.substr(k * 2, 2), nullptr, 16);
+        return out;
+    }
+    if (!v.is_array() || v.size() != 3) return std::nullopt;
+    for (unsigned k = 0; k < 3; ++k) {
+        if (!v[k].is_number_integer() || v[k].get<std::int64_t>() < 0 || v[k].get<std::int64_t>() > 255) return std::nullopt;
+        out[k] = static_cast<int>(v[k].get<std::int64_t>());
+    }
+    return out;
+}
+
+// The model's pixel layers flattened and converted (a page's own): run on each page an op names, by its id.
+struct Special {
+    std::int64_t flattened = 0;
+    std::int64_t converted = 0;
+};
+
+// A page converted to a model, its own way kept (how indexed, bitmap and multichannel bring a page to the mode they work
+// from: sRGB 8 bits, grey 8 bits, …); whether it changed.
+std::int64_t convert_page(Document& doc, std::size_t at, const Model& to, Way& way) {
+    const Into into = own_way(model_of(doc.page(at)));
+    return convert_pages(doc, {at}, [&](const core::Page&) { return to; }, way, into);
+}
+
+// The process inks as Multichannel shows them (PhotoCraft's multichannel_cmds.rs: CYAN, MAGENTA, YELLOW, BLACK; a grey's
+// and Lab's plates Color::BLACK).
+constexpr std::array<int, 3> kCyan{0, 174, 239}, kMagenta{236, 0, 140}, kYellow{255, 242, 0}, kProcessBlack{35, 31, 32}, kBlack{0, 0, 0};
+
+core::Plate plate_of(std::string name, const std::array<int, 3>& colour, bool key, std::vector<core::CurvePoint> curve = {}) {
+    core::Plate out;
+    out.name = std::move(name);
+    out.color = colour;
+    out.key = key;
+    out.curve = std::move(curve);
+    return out;
+}
+
+// The multichannel model a page's makes at a depth (PhotoCraft's inks_of: RGB → Cyan, Magenta, Yellow — 1 − its values,
+// greys on all three —; CMYK → its four, greys on Black; Lab → Alpha 1..3; grey → Black; duotone → one plate for each
+// ink through its curve). The page's intent, black point compensation and profile (CMYK's, a grey's) stay its own.
+Model multichannel_of(const Model& from, int depth) {
+    core::PageColor made;
+    made.space = InkSpace::Multi;
+    made.depth = depth;
+    if (from.inks && from.inks->space == InkSpace::Multi) {
+        made = *from.inks;
+        made.depth = depth;
+        return Model{made, std::nullopt, 8};
+    }
+    if (from.inks) {
+        const core::PageColor& f = *from.inks;
+        made.intent = f.intent;
+        made.bpc = f.bpc;
+        if (f.space == InkSpace::Cmyk) {
+            made.from = "cmyk";
+            made.profile = f.profile;
+            made.icc = f.icc;
+            made.plates = {plate_of("Cyan", kCyan, false), plate_of("Magenta", kMagenta, false), plate_of("Yellow", kYellow, false),
+                           plate_of("Black", kProcessBlack, true)};
+        } else if (f.space == InkSpace::Lab) {
+            made.from = "lab";
+            made.plates = {plate_of("Alpha 1", kBlack, true), plate_of("Alpha 2", kBlack, false), plate_of("Alpha 3", kBlack, false)};
+        } else if (!f.duotone.empty()) {
+            made.from = "duotone";
+            made.profile = f.profile;
+            made.icc = f.icc;
+            for (const core::DuotoneInk& ink : f.duotone) made.plates.push_back(plate_of(ink.name, ink.color, true, ink.curve));
+        } else {
+            made.from = "gray";
+            made.profile = f.profile;
+            made.icc = f.icc;
+            made.plates = {plate_of("Black", kBlack, true)};
+        }
+        return Model{made, std::nullopt, 8};
+    }
+    const RgbMode rgb = from.rgb_mode();
+    made.from = "rgb";
+    made.intent = rgb.intent;
+    made.bpc = rgb.bpc;
+    made.plates = {plate_of("Cyan", kCyan, true), plate_of("Magenta", kMagenta, true), plate_of("Yellow", kYellow, true)};
+    return Model{made, std::nullopt, 8};
+}
+
+// Why a page's model cannot become multichannel (PhotoCraft's SOURCES: RGB, CMYK, Lab, grey, duotone; an RGB page in
+// sRGB — a multichannel page takes RGB's values as inks), or none.
+std::optional<std::string> not_to_multichannel(const Model& from) {
+    const auto special = special_mode(from);
+    if (special == "indexed" || special == "bitmap") return (*special == "indexed" ? "is an " : "is a ") + *special + " page: convert it to rgb or gray first (set_color_mode)";
+    if (from.rgb && !from.rgb->profile.empty()) return "is an RGB page of a profile: convert it to sRGB first (convert_profile srgb)";
+    return std::nullopt;
+}
+
+void to_multichannel(OpContext& c) {
+    Document& doc = c.doc;
+    const Json& op = c.op;
+    const Json* depth = field(op, "depth");
+    if (depth != nullptr && (!depth->is_number_integer() ||
+                             (depth->get<std::int64_t>() != 8 && depth->get<std::int64_t>() != 16 && depth->get<std::int64_t>() != 32))) {
+        throw OpError("depth is 8, 16 or 32");
+    }
+    const int bits = depth != nullptr ? static_cast<int>(depth->get<std::int64_t>()) : 0;  // (none: each page's own)
+    Way way = way_of(op);
+    bool every = false;
+    const std::vector<std::size_t> pages = pages_of(doc, op, every);
+    const bool book = every || default_of(op);
+    for (const std::size_t i : pages) {
+        if (const auto why = not_to_multichannel(model_of(*doc.pages[i]))) throw OpError(page_name(*doc.pages[i]) + " " + *why);
+    }
+    const Model book_from{doc.color, doc.rgb, 8};
+    if (book) {
+        if (const auto why = not_to_multichannel(book_from)) throw OpError("the book's default mode " + *why);
+    }
+    Special done;
+    for (const std::string& id : ids_of(doc, pages)) {
+        std::size_t at = page_at(doc, id);
+        const Model before = model_of(doc.page(at));
+        const bool already = before.inks && before.inks->space == InkSpace::Multi;
+        if (already && (bits == 0 || bits == before.depth())) continue;
+        if (!already && flatten_page(c, at)) ++done.flattened;  // (PhotoCraft: Multichannel flattens)
+        at = page_at(doc, id);
+        const Model from = model_of(doc.page(at));
+        done.converted += convert_page(doc, at, multichannel_of(from, bits != 0 ? bits : from.depth()), way);
+    }
+    check_precise(doc);
+    if (book) {
+        const Model kept = multichannel_of(book_from, bits != 0 ? bits : book_from.depth());
+        doc.color = kept.inks;
+        doc.rgb.reset();
+    }
+    Json report = report_of(done.converted, way);
+    report["flattened"] = done.flattened;
+    c.report = std::move(report);
+}
+
+// to_indexed (PhotoCraft's Image › Mode › Indexed Color): {"op", "page"?, "palette": selective|perceptual|adaptive|exact|
+// systemMac|systemWindows|web|uniform, "colors": 2..256, "forced": blackWhite|none|primaries|web, "transparency": bool,
+// "dither": diffusion|none|pattern|noise, "amount": 0..100, "default"?, "clip_hdr"?} (PhotoCraft's defaults). Each page:
+// its pixel layers flattened into one, the page in sRGB at 8 bits (a page of another mode, depth or profile converted
+// first — its own intent and black point compensation —, and said in the report), its palette made from that layer's
+// pixels and the layer mapped onto it with the dither; the page indexed (its table). A pixel of alpha under ½ takes the
+// transparent index when the palette has room for one.
+void to_indexed(OpContext& c) {
+    Document& doc = c.doc;
+    const Json& op = c.op;
+    const auto kind = quantize::palette_kind(text_of(op, "palette", "selective"));
+    if (!kind) throw OpError("palette is selective, perceptual, adaptive, exact, systemMac, systemWindows, web or uniform");
+    const auto forced = quantize::forced_of(text_of(op, "forced", "blackWhite"));
+    if (!forced) throw OpError("forced is blackWhite, none, primaries or web");
+    const auto dither = quantize::dither_of(text_of(op, "dither", "diffusion"));
+    if (!dither) throw OpError("dither is diffusion, none, pattern or noise");
+    const auto colors = static_cast<std::size_t>(number_in(op, "colors", 256, 2, 256, true));
+    const auto amount = static_cast<float>(number_in(op, "amount", 75, 0, 100) / 100.0);
+    const bool transparency = flag_in(op, "transparency", true);
+    Way way;
+    way.clip_hdr = flag_in(op, "clip_hdr", false);
+    bool every = false;
+    const std::vector<std::size_t> pages = pages_of(doc, op, every);
+    const bool book = every || default_of(op);
+    for (const std::size_t i : pages) {
+        const auto special = special_mode(model_of(*doc.pages[i]));
+        if (special == "bitmap" || special == "multichannel") {
+            throw OpError(page_name(*doc.pages[i]) + " is a " + *special + " page: Indexed Color takes an RGB, grey, duotone, CMYK, Lab or indexed page");
+        }
+    }
+    const Model book_from{doc.color, doc.rgb, 8};
+    if (book) {
+        const auto special = special_mode(book_from);
+        if (special == "bitmap" || special == "multichannel") throw OpError("the book's default mode is " + *special + ": Indexed Color takes another");
+    }
+    Special done;
+    Json each = Json::array();
+    std::optional<core::ColorTable> first;
+    for (const std::string& id : ids_of(doc, pages)) {
+        std::size_t at = page_at(doc, id);
+        const std::optional<std::string> flat = flatten_page(c, at);
+        if (flat) ++done.flattened;
+        at = page_at(doc, id);
+        done.converted += convert_page(doc, at, Model{}, way);  // (sRGB at 8 bits: the page's own way)
+        at = page_at(doc, id);
+        core::Page& page = doc.edit_page(at);
+        core::Layer* layer = nullptr;
+        for (core::Layer& l : page.layers) {
+            if (flat && l.id == *flat && l.raster_png && !l.raster_png->empty()) layer = &l;
+        }
+        std::vector<quantize::Rgba> px;
+        std::size_t width = 1;
+        Image picture;
+        if (layer != nullptr) {
+            picture = open_image(*layer->raster_png, kPillowOpenLimits).convert("RGBA");
+            width = static_cast<std::size_t>(picture.width());
+            const std::string bytes = picture.tobytes();
+            px.resize(bytes.size() / 4);
+            for (std::size_t i = 0; i < px.size(); ++i) {
+                quantize::Rgba p{};
+                for (unsigned k = 0; k < 4; ++k) p[k] = static_cast<unsigned char>(bytes[i * 4 + k]) / 255.0f;
+                if (!transparency) {  // (over white)
+                    for (unsigned k = 0; k < 3; ++k) p[k] = p[k] * p[3] + (1.0f - p[3]);
+                    p[3] = 1.0f;
+                }
+                px[i] = p;
+            }
+        }
+        const bool clear = transparency && std::any_of(px.begin(), px.end(), [](const quantize::Rgba& p) { return p[3] < 0.5f; });
+        std::vector<quantize::Rgb8> palette;
+        try {
+            palette = quantize::build_palette(px, *kind, clear ? std::max<std::size_t>(colors - 1, 2) : colors, *forced);
+        } catch (const core::Error& error) {
+            throw OpError(page_name(page) + ": " + error.what());
+        }
+        std::optional<std::size_t> transparent;
+        if (clear && palette.size() < 256) {
+            palette.push_back({255, 255, 255});
+            transparent = palette.size() - 1;
+        }
+        if (layer != nullptr) {
+            quantize::quantize(px, width, palette, *dither, amount, transparent);
+            std::string bytes(px.size() * 4, '\0');
+            for (std::size_t i = 0; i < px.size(); ++i) {
+                for (unsigned k = 0; k < 4; ++k) bytes[i * 4 + k] = static_cast<char>(std::lround(std::clamp(px[i][k], 0.0f, 1.0f) * 255.0f));
+            }
+            layer->raster_png = std::make_shared<const std::string>(write_png(Image::frombytes("RGBA", picture.size(), bytes)));
+            layer->raster_memo = {};
+            layer->raster_relpath.reset();
+        }
+        core::ColorTable table;
+        for (const quantize::Rgb8& colour : palette) table.colors.push_back({colour[0], colour[1], colour[2]});
+        if (transparent) table.transparent = static_cast<int>(*transparent);
+        RgbMode mode;
+        mode.table = table;
+        page.rgb = mode;
+        page.color.reset();
+        if (!first) first = table;
+        each.push_back(Json{{"page", page.index.json()}, {"colors", table.colors.size()}, {"transparent", transparent ? Json(*transparent) : Json()}});
+    }
+    if (book) {  // (the pages it makes: the first page's table, or one of nothing)
+        core::ColorTable table = first.value_or(core::ColorTable{});
+        if (!first) {
+            for (const quantize::Rgb8& colour : quantize::build_palette({}, *kind, colors, *forced)) table.colors.push_back({colour[0], colour[1], colour[2]});
+        }
+        RgbMode mode;
+        mode.table = std::move(table);
+        doc.rgb = std::move(mode);
+        doc.color.reset();
+    }
+    Json report = each.empty() ? Json::object() : Json{{"colors", each[0]["colors"]}, {"transparent", each[0]["transparent"]}};
+    report["flattened"] = done.flattened;
+    report["converted"] = done.converted;
+    if (way.clipped > 0) report["clipped"] = way.clipped;
+    if (each.size() > 1) report["pages"] = std::move(each);
+    c.report = std::move(report);
+}
+
+// The pixels of an indexed page's paint layers through a change of its table (PhotoCraft's Color Table): each pixel that
+// shows takes its index in the old table — the nearest colour — and the new table's colour there (an index past the new
+// table: its nearest), transparent when that index is the new transparent one.
+void retable(core::Page& page, const core::ColorTable& from, const core::ColorTable& to) {
+    for (core::Layer& layer : page.layers) {
+        if (!layer.raster_png || layer.raster_png->empty()) continue;
+        const Image picture = open_image(*layer.raster_png, kPillowOpenLimits).convert("RGBA");
+        std::string bytes = picture.tobytes();
+        for (std::size_t i = 0; i + 3 < bytes.size(); i += 4) {
+            auto* p = reinterpret_cast<unsigned char*>(bytes.data() + i);
+            if (p[3] == 0) continue;
+            const std::size_t k = from.nearest(p[0], p[1], p[2]);
+            const std::array<int, 3>& c = k < to.colors.size() ? to.colors[k] : to.colors[to.nearest(p[0], p[1], p[2])];
+            for (unsigned j = 0; j < 3; ++j) p[j] = static_cast<unsigned char>(c[j]);
+            if (to.transparent && static_cast<std::size_t>(*to.transparent) == k) p[3] = 0;
+        }
+        layer.raster_png = std::make_shared<const std::string>(write_png(Image::frombytes("RGBA", picture.size(), bytes)));
+        layer.raster_memo = {};
+        layer.raster_relpath.reset();
+    }
+}
+
+// set_color_table (PhotoCraft's Image › Mode › Color Table): {"op", "page"?, "table": custom|blackBody|grayscale|spectrum|
+// systemMac|systemWindows|web, "colors"?: ["#rrggbb" | [r, g, b], …], "entries"?: {"index": colour}, "transparent"?:
+// index | null}. An indexed page's table replaced (its pixels keep their index: their colour follows the table, as
+// Photoshop's). The table in the report.
+void set_color_table(OpContext& c) {
+    Document& doc = c.doc;
+    const Json& op = c.op;
+    const std::string preset = text_of(op, "table", "custom");
+    std::optional<std::vector<quantize::Rgb8>> named;
+    if (preset != "custom") {
+        named = quantize::preset_table(preset);
+        if (!named) throw OpError("table is custom, blackBody, grayscale, spectrum, systemMac, systemWindows or web");
+    }
+    const auto changed = [&](core::ColorTable table) {
+        if (named) {
+            table.colors.clear();
+            for (const quantize::Rgb8& colour : *named) table.colors.push_back({colour[0], colour[1], colour[2]});
+        }
+        if (const Json* colors = field(op, "colors"); colors != nullptr) {
+            if (!colors->is_array() || colors->empty() || colors->size() > core::kColorTableMax) {
+                throw OpError("colors is a list of 1..256 colours (\"#rrggbb\" or [r, g, b])");
+            }
+            table.colors.clear();
+            for (const Json& v : *colors) {
+                const auto colour = colour_value(v);
+                if (!colour) throw OpError("colors is a list of 1..256 colours (\"#rrggbb\" or [r, g, b])");
+                table.colors.push_back(*colour);
+            }
+        }
+        if (const Json* entries = field(op, "entries"); entries != nullptr) {
+            if (!entries->is_object()) throw OpError("entries is {\"index\": colour, …}");
+            for (const auto& [key, v] : entries->items()) {
+                std::size_t at = 0;
+                if (key.empty() || !std::all_of(key.begin(), key.end(), [](char ch) { return ch >= '0' && ch <= '9'; }) || key.size() > 3 ||
+                    (at = static_cast<std::size_t>(std::stoi(key))) >= table.colors.size()) {
+                    throw OpError("entry " + core::py_repr_str(key) + " is not an index of the table (" + std::to_string(table.colors.size()) + " colours)");
+                }
+                const auto colour = colour_value(v);
+                if (!colour) throw OpError("entry " + key + ": a colour is \"#rrggbb\" or [r, g, b]");
+                table.colors[at] = *colour;
+            }
+        }
+        if (const auto it = op.find("transparent"); it != op.end()) {
+            if (it->is_null()) {
+                table.transparent.reset();
+            } else if (it->is_number_integer() && it->get<std::int64_t>() >= 0 && static_cast<std::size_t>(it->get<std::int64_t>()) < table.colors.size()) {
+                table.transparent = static_cast<int>(it->get<std::int64_t>());
+            } else {
+                throw OpError("transparent is an index of the table or null");
+            }
+        }
+        if (table.transparent && static_cast<std::size_t>(*table.transparent) >= table.colors.size()) table.transparent.reset();
+        return table;
+    };
+    bool every = false;
+    const std::vector<std::size_t> pages = pages_of(doc, op, every);
+    std::optional<core::ColorTable> shown;
+    for (const std::size_t i : pages) {
+        const core::Page& seen = doc.page(i);
+        if (!seen.rgb || !seen.rgb->table) {
+            if (every) continue;  // (every page: the indexed ones)
+            throw OpError(page_name(seen) + " is not an indexed page (to_indexed first)");
+        }
+        const core::ColorTable now = changed(*seen.rgb->table);
+        if (!shown) shown = now;
+        if (now == *seen.rgb->table) continue;
+        core::Page& page = doc.edit_page(i);
+        retable(page, *page.rgb->table, now);
+        page.rgb->table = now;
+    }
+    if (every && doc.rgb && doc.rgb->table) {
+        doc.rgb->table = changed(*doc.rgb->table);
+        if (!shown) shown = doc.rgb->table;
+    }
+    if (!shown) throw OpError("no page is an indexed page (to_indexed first)");
+    c.report = core::to_json(*shown);
+}
+
+// to_bitmap (PhotoCraft's Image › Mode › Bitmap): {"op", "page"?, "method": diffusion|threshold|pattern|halftone,
+// "frequency": 1..999 (53), "angle": -180..180 (45), "shape": round|ellipse|line|square|diamond|cross, "default"?}. A grey
+// page only (as PhotoCraft). Its pixel layers flattened into one, over white, its lightness made 0 or 1 by the method
+// (a halftone's cell: the layer's dpi ÷ the frequency); the page a bitmap page of 8 bits (its look recorded).
+void to_bitmap(OpContext& c) {
+    Document& doc = c.doc;
+    const Json& op = c.op;
+    core::BitmapLook look;
+    look.method = text_of(op, "method", "diffusion");
+    if (look.method == "threshold50") look.method = "threshold";
+    if (std::find(core::kBitmapMethods.begin(), core::kBitmapMethods.end(), look.method) == core::kBitmapMethods.end()) {
+        throw OpError("method is diffusion, threshold, pattern or halftone");
+    }
+    look.frequency = number_in(op, "frequency", 53, 1, 999);
+    look.angle = number_in(op, "angle", 45, -180, 180);
+    look.shape = text_of(op, "shape", "round");
+    if (std::find(core::kHalftoneShapes.begin(), core::kHalftoneShapes.end(), look.shape) == core::kHalftoneShapes.end()) {
+        throw OpError("shape is round, ellipse, line, square, diamond or cross");
+    }
+    bool every = false;
+    const std::vector<std::size_t> pages = pages_of(doc, op, every);
+    const bool book = every || default_of(op);
+    const auto grey_only = [](const Model& m) { return m.inks && m.inks->space == InkSpace::Gray && !m.inks->bitmap && m.inks->duotone.empty(); };
+    for (const std::size_t i : pages) {
+        if (!grey_only(model_of(*doc.pages[i]))) throw OpError(page_name(*doc.pages[i]) + " is not a grey page: Bitmap takes a grey page (set_color_mode gray first)");
+    }
+    const Model book_from{doc.color, doc.rgb, 8};
+    if (book && !grey_only(book_from)) throw OpError("the book's default mode is not grey: Bitmap takes a grey page");
+    Special done;
+    for (const std::string& id : ids_of(doc, pages)) {
+        std::size_t at = page_at(doc, id);
+        const std::optional<std::string> flat = flatten_page(c, at);
+        if (flat) ++done.flattened;
+        at = page_at(doc, id);
+        Model eight = model_of(doc.page(at));
+        eight.inks->depth = 8;
+        Way way;
+        way.clip_hdr = true;  // (HDR lightness past white is white in 1 bit)
+        convert_page(doc, at, eight, way);
+        at = page_at(doc, id);
+        core::Page& page = doc.edit_page(at);
+        for (core::Layer& layer : page.layers) {
+            if (!flat || layer.id != *flat || !layer.ink_raster) continue;
+            const core::InkPixels pixels = core::decode_ink_raster(*layer.ink_raster);
+            std::vector<float> grey(pixels.pixel_count());
+            for (std::size_t i = 0; i < grey.size(); ++i) {  // (over white)
+                const double a = pixels.value(i, 1);
+                grey[i] = static_cast<float>(std::clamp(pixels.value(i, 0), 0.0, 1.0) * a + (1.0 - a));
+            }
+            quantize::BitmapMethod method;
+            method.kind = look.method == "threshold" ? quantize::BitmapMethod::Kind::Threshold
+                          : look.method == "pattern" ? quantize::BitmapMethod::Kind::Pattern
+                          : look.method == "halftone" ? quantize::BitmapMethod::Kind::Halftone
+                                                       : quantize::BitmapMethod::Kind::Diffusion;
+            const double width_mm = page.spec.width_mm.value();
+            const double dpi = width_mm > 0 ? pixels.width / (width_mm / 25.4) : 600.0;  // (the layer's own resolution)
+            method.cell = static_cast<float>(std::max(dpi / look.frequency, 2.0));
+            method.angle = static_cast<float>(look.angle);
+            method.shape = quantize::halftone_shape(look.shape);
+            quantize::to_bitmap(grey, pixels.width, method);
+            core::InkPixels out = core::blank_ink_pixels(InkSpace::Gray, 8, pixels.width, pixels.height);
+            for (std::size_t i = 0; i < grey.size(); ++i) {
+                out.set(i, 0, grey[i]);
+                out.set(i, 1, 1.0);
+            }
+            layer.ink_raster = std::make_shared<const std::string>(core::encode_ink_raster(out));
+            layer.ink_memo = {};
+        }
+        page.color->bitmap = look;
+        page.color->duotone.clear();
+    }
+    if (book) {
+        doc.color->depth = 8;
+        doc.color->bitmap = look;
+    }
+    c.report = Json{{"flattened", done.flattened}};
+}
+
+// PhotoCraft's default duotone inks: black, then a warm brown, gold and slate blue (its generic names; Photoshop's
+// Pantone presets are not reproduced).
+std::vector<core::DuotoneInk> default_inks(std::size_t n) {
+    static const std::array<std::pair<const char*, std::array<int, 3>>, 4> kAll{
+        {{"Black", {0, 0, 0}}, {"Warm Brown", {158, 97, 46}}, {"Gold", {219, 173, 46}}, {"Slate Blue", {69, 97, 148}}}};
+    std::vector<core::DuotoneInk> out;
+    for (std::size_t i = 0; i < n && i < kAll.size(); ++i) {
+        core::DuotoneInk ink;
+        ink.name = kAll[i].first;
+        ink.color = kAll[i].second;
+        out.push_back(std::move(ink));
+    }
+    return out;
+}
+
+// set_duotone (PhotoCraft's Image › Mode › Duotone): {"op", "page"?, "type": monotone|duotone|tritone|quadtone, "inks"?:
+// [{"name", "color": "#rrggbb" | [r, g, b], "curve": [[in, out], …] (0..100)}, …], "default"?}. A grey or duotone page
+// printed in 1..4 inks; its pixels as they are (set_color_mode gray takes the inks off).
+void set_duotone(OpContext& c) {
+    Document& doc = c.doc;
+    const Json& op = c.op;
+    const std::string type = text_of(op, "type", "duotone");
+    const std::size_t n = type == "monotone" ? 1 : type == "duotone" ? 2 : type == "tritone" ? 3 : type == "quadtone" ? 4 : 0;
+    if (n == 0) throw OpError("type is monotone, duotone, tritone or quadtone");
+    std::vector<core::DuotoneInk> inks;
+    if (const Json* given = field(op, "inks"); given != nullptr) {
+        if (!given->is_array()) throw OpError("inks is [{\"name\", \"color\", \"curve\"}, …]");
+        const std::vector<core::DuotoneInk> defaults = default_inks(std::min<std::size_t>(std::max(n, given->size()), 4));
+        for (std::size_t i = 0; i < given->size() && i < 4; ++i) {
+            const Json& item = (*given)[i];
+            if (!item.is_object()) throw OpError("inks is [{\"name\", \"color\", \"curve\"}, …]");
+            core::DuotoneInk ink = i < defaults.size() ? defaults[i] : core::DuotoneInk{"Ink " + std::to_string(i + 1), {0, 0, 0}};
+            if (const Json* name = field(item, "name"); name != nullptr) {
+                if (!name->is_string()) throw OpError("an ink's name is text");
+                ink.name = name->get<std::string>();
+            }
+            if (const Json* colour = field(item, "color"); colour != nullptr) {
+                const auto value = colour_value(*colour);
+                if (!value) throw OpError("an ink's color is \"#rrggbb\" or [r, g, b]");
+                ink.color = *value;
+            }
+            if (const Json* curve = field(item, "curve"); curve != nullptr) {
+                if (!curve->is_array()) throw OpError("an ink's curve is [[in, out], …] (0..100)");
+                std::vector<core::CurvePoint> points;
+                for (const Json& p : *curve) {
+                    if (!p.is_array() || p.size() != 2 || !p[0].is_number() || !p[1].is_number() || p[0].is_boolean() || p[1].is_boolean()) {
+                        throw OpError("an ink's curve is [[in, out], …] (0..100)");
+                    }
+                    points.push_back({p[0].get<double>(), p[1].get<double>()});
+                }
+                std::stable_sort(points.begin(), points.end(), [](const core::CurvePoint& a, const core::CurvePoint& b) { return a[0] < b[0]; });
+                if (points.size() >= 2) ink.curve = std::move(points);  // (PhotoCraft: fewer points keep the ink's)
+            }
+            inks.push_back(std::move(ink));
+        }
+    } else {
+        inks = default_inks(n);
+    }
+    if (inks.size() < n) {
+        const std::vector<core::DuotoneInk> more = default_inks(n);
+        for (std::size_t i = inks.size(); i < n; ++i) inks.push_back(more[i]);
+    }
+    inks.resize(n);
+    try {
+        core::check_duotone(inks);
+    } catch (const core::Error& error) {
+        throw OpError(error.what());
+    }
+    bool every = false;
+    const std::vector<std::size_t> pages = pages_of(doc, op, every);
+    const bool book = default_of(op);
+    const auto takes = [](const std::optional<core::PageColor>& color) { return color && color->space == InkSpace::Gray && !color->bitmap; };
+    for (const std::size_t i : pages) {
+        if (!takes(doc.pages[i]->color)) {
+            if (every) continue;  // (every page: the grey and duotone ones)
+            throw OpError(page_name(*doc.pages[i]) + " is not a grey page: Duotone takes a grey or duotone page (set_color_mode gray first)");
+        }
+        doc.edit_page(i).color->duotone = inks;
+    }
+    if (every || book) {
+        if (takes(doc.color)) doc.color->duotone = inks;
+        else if (book) throw OpError("the book's default mode is not grey: Duotone takes a grey or duotone page");
+    }
+    Json names = Json::array();
+    for (const core::DuotoneInk& ink : inks) names.push_back(ink.name);
+    c.report = Json{{"inks", std::move(names)}};
+}
+
 }  // namespace
 
 void register_ink_ops(core::OpRegistry& registry) {
@@ -847,6 +1455,10 @@ void register_ink_ops(core::OpRegistry& registry) {
     registry.add("set_inks", set_inks);
     registry.add("assign_profile", assign_profile);
     registry.add("convert_profile", convert_profile);
+    registry.add("to_indexed", to_indexed);
+    registry.add("set_color_table", set_color_table);
+    registry.add("to_bitmap", to_bitmap);
+    registry.add("set_duotone", set_duotone);
 }
 
 }  // namespace genko::render

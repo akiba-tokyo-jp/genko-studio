@@ -75,7 +75,7 @@ void put_profile(AssetStore& store, const std::string& profile, const core::Byte
 // A page's or the book's `color`: its mode of inks or its RGB mode (with its profile written), or none (null).
 Json color_json(AssetStore& store, const std::optional<core::PageColor>& inks, const std::optional<core::RgbMode>& rgb) {
     if (inks) {
-        if (inks->space != core::InkSpace::Lab) put_profile(store, inks->profile, inks->icc);
+        if (inks->space != core::InkSpace::Lab && !inks->profile.empty()) put_profile(store, inks->profile, inks->icc);
         return core::to_json(*inks);
     }
     if (rgb && !rgb->is_default()) {

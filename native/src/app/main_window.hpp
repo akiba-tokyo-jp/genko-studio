@@ -424,6 +424,8 @@ private:
     void proof_custom_dialog();
     void show_proof_marks();
     void refresh_gamut_count();
+    void refresh_pixel_value();
+    static QString pixel_words(const core::Page& page, const core::Json& at);
     void fill_books_menu();
     void watch();
     void on_disk_change();
@@ -578,6 +580,14 @@ private:
     void set_page_mode(const QString& mode, int depth);
     void show_color_mode();
     void profile_dialog(bool convert);
+    // ページ → 色モード's own modes (color-model@1, PC1d; app/mode_dialogs): インデックスカラー…, カラーテーブル…, 2 階調…,
+    // ダブルトーン…, マルチチャンネル — those that flatten asked first when the page has layers to merge
+    void indexed_dialog();
+    void color_table_dialog();
+    void bitmap_dialog();
+    void duotone_dialog();
+    void to_multichannel();
+    bool flatten_asked(const core::Page* page, const QString& what);
     void add_cover_dialog();
     void assignee_dialog();
     void merge_book();
@@ -783,6 +793,9 @@ private:
     QMenu* view_menu_ = nullptr;
     QMenu* books_menu_ = nullptr;   // ウィンドウ → 開いている原稿 (document.activate)
     QLabel* gamut_label_ = nullptr;  // 色域外警告's count
+    QLabel* pixel_label_ = nullptr;  // (color-model@1: the values under the pointer)
+    QTimer* pixel_timer_ = nullptr;
+    std::optional<QPointF> pixel_point_;
     QMenu* workspace_menu_ = nullptr;
     QVBoxLayout* column_ = nullptr;  // (the central column: the bands over the page, the page)
     QDockWidget* layers_dock_ = nullptr;

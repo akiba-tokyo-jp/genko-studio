@@ -693,9 +693,10 @@ core::ColorModel Reader::read_color(Json& extra, const std::string& at) {
         extra["color"] = raw;  // (written back as it was: the book is read-only)
         return {};
     }
-    if (model.inks && model.inks->space != core::InkSpace::Lab) {
-        model.inks->icc = read_profile(model.inks->profile, model.inks->space == core::InkSpace::Cmyk ? core::ProfileSpace::Cmyk : core::ProfileSpace::Gray,
-                                       at_key(here, "profile"));
+    if (model.inks && model.inks->space != core::InkSpace::Lab && !model.inks->profile.empty()) {
+        // (a multichannel page's is the profile of the mode it came from: CMYK, or grey for grey and duotone)
+        const bool cmyk = model.inks->space == core::InkSpace::Cmyk || (model.inks->space == core::InkSpace::Multi && model.inks->from == "cmyk");
+        model.inks->icc = read_profile(model.inks->profile, cmyk ? core::ProfileSpace::Cmyk : core::ProfileSpace::Gray, at_key(here, "profile"));
     }
     if (model.rgb && !model.rgb->profile.empty()) model.rgb->icc = read_profile(model.rgb->profile, core::ProfileSpace::Rgb, at_key(here, "profile"));
     return model;
@@ -747,7 +748,8 @@ void Reader::check_ink_rasters(core::Page& page, const Json& raw, const std::str
         try {
             const core::InkRasterHeader header = core::ink_raster_header(*layer.ink_raster);
             if (!page.color) throw core::Error("value", "an RGB page holds no ink pixels");
-            if (header.space != page.color->space || header.depth != page.color->depth) {
+            if (header.space != page.color->space || header.depth != page.color->depth ||
+                (header.space == core::InkSpace::Multi && header.planes != page.color->plates.size())) {
                 throw core::Error("value", "the pixels are not in the page's colour mode");
             }
             if ((layer.raster_png && !layer.raster_png->empty()) || layer.color_raster) {

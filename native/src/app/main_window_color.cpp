@@ -38,7 +38,9 @@
 #include "app/tiles.hpp"
 #include "core/color_model.hpp"
 #include "core/paths.hpp"
+#include "core/channels.hpp"
 #include "render/colour.hpp"
+#include "render/inspect.hpp"
 #include "render/ink.hpp"
 #include "service/wording.hpp"
 
@@ -161,6 +163,70 @@ void MainWindow::build_color_actions() {
     gamut_label_->hide();
     statusBar()->addPermanentWidget(gamut_label_);
     connect(&canvas_->renderer(), &PageRenderer::gamutCounted, this, &MainWindow::refresh_gamut_count);
+    // (color-model@1: the values under the pointer on a page of a colour model — `genko inspect --pixel`'s — a moment
+    // after it stops; a page of none, Python's, shows none)
+    pixel_label_ = new QLabel;
+    pixel_label_->setObjectName(QStringLiteral("pixelValue"));
+    pixel_label_->setToolTip(QStringLiteral("ポインターの下の値（ページの色モードの値。genko inspect --pixel と同じ）"));
+    pixel_label_->hide();
+    statusBar()->addPermanentWidget(pixel_label_);
+    pixel_timer_ = new QTimer(this);
+    pixel_timer_->setSingleShot(true);
+    pixel_timer_->setInterval(150);
+    connect(pixel_timer_, &QTimer::timeout, this, [this] { refresh_pixel_value(); });
+    connect(canvas_, &PageCanvas::pointerOver, this, [this](double x_mm, double y_mm) {
+        pixel_point_ = QPointF(x_mm, y_mm);
+        pixel_timer_->start();
+    });
+}
+
+void MainWindow::refresh_pixel_value() {
+    const core::Page* page = current_page();
+    if (pixel_label_ == nullptr) return;
+    if (page == nullptr || (!page->color && !page->rgb) || !pixel_point_) {
+        pixel_label_->hide();
+        return;
+    }
+    try {
+        const double dpi = book().spec.dpi.truthy() ? std::min(300.0, book().spec.dpi.value()) : 300.0;
+        const core::Json at = render::pixel_at(*page, &book(), pixel_point_->x(), pixel_point_->y(), std::nullopt, static_cast<int>(std::max(1.0, dpi)));
+        pixel_label_->setText(pixel_words(*page, at));
+        pixel_label_->show();
+    } catch (const std::exception&) {  // (off the page, or a page that cannot be drawn: nothing shown)
+        pixel_label_->hide();
+    }
+}
+
+// The values `genko inspect --pixel` gives, in the status bar's words: a CMYK, grey or multichannel page's inks in %,
+// Lab's L a b, an RGB page's values (0..1 of its profile; 8 bits as levels), an indexed page's index and colour.
+QString MainWindow::pixel_words(const core::Page& page, const core::Json& at) {
+    const core::Json& values = at.at("values");
+    if (!values.is_array()) return {};
+    const auto pct = [](double v) { return QString::number(std::lround(std::clamp(v, 0.0, 1.0) * 100.0)); };
+    QStringList parts;
+    if (page.color && page.color->space == core::InkSpace::Lab && values.size() == 3) {
+        parts << QStringLiteral("L %1").arg(values[0].get<double>(), 0, 'f', 1) << QStringLiteral("a %1").arg(values[1].get<double>(), 0, 'f', 1)
+              << QStringLiteral("b %1").arg(values[2].get<double>(), 0, 'f', 1);
+    } else if (page.color) {
+        const std::vector<std::string> names = page.color->space == core::InkSpace::Cmyk ? std::vector<std::string>{"C", "M", "Y", "K"}
+                                               : page.color->space == core::InkSpace::Gray ? std::vector<std::string>{"K"}
+                                                                                            : core::plate_labels(page);
+        for (std::size_t c = 0; c < values.size() && c < names.size(); ++c) {
+            parts << QStringLiteral("%1 %2%").arg(QString::fromStdString(names[c]), pct(values[c].get<double>()));
+        }
+    } else if (page.rgb && page.rgb->table) {
+        const core::Json& srgb = at.at("srgb");
+        const int r = srgb[0].get<int>(), g = srgb[1].get<int>(), b = srgb[2].get<int>();
+        parts << QStringLiteral("番号 %1（%2）").arg(page.rgb->table->nearest(r, g, b)).arg(QColor(r, g, b).name());
+    } else {
+        const bool levels = page.rgb->depth == 8;
+        for (std::size_t c = 0; c < values.size() && c < 3; ++c) {
+            const double v = values[c].get<double>();
+            parts << QStringLiteral("%1 %2").arg(QStringLiteral("RGB").mid(static_cast<qsizetype>(c), 1),
+                                                 levels ? QString::number(std::lround(std::clamp(v, 0.0, 1.0) * 255.0)) : QString::number(v, 'f', 4));
+        }
+    }
+    return QStringLiteral("値 ") + parts.join(QLatin1Char(' '));
 }
 
 const ProofView& MainWindow::proof_view() const { return documents_[static_cast<std::size_t>(doc_)].proof; }

@@ -4,6 +4,8 @@
 #include <unordered_map>
 
 #include "core/channels.hpp"
+#include "core/color_model.hpp"
+#include "core/color_raster.hpp"
 #include "core/command_bus.hpp"
 #include "core/ops_util.hpp"
 #include "core/pyops.hpp"
@@ -217,6 +219,102 @@ private:
     std::vector<std::pair<std::string, core::Bytes>> before_;  // (every layer's picture before the op)
 };
 
+// color-model@1 (PC1d, SPEC.md COLOR-03): what an op left on a page of a mode of its own, made that mode's — a bitmap
+// page's pixels 0 or full at 50% (its alpha too: 2 階調), an indexed page's colours its table's nearest (no dither), an
+// RGB page of 16 or 32 bits' new 8-bit pixels on a paint layer widened to its depth exactly (v × 257, v / 255: the
+// layer then composites in precise colour as the others). Only the layers the op changed (their pixels another object
+// than before, or all of a page whose mode it changed) are looked at; the rest keep their bytes.
+void keep_page_modes(core::Document& doc, const std::vector<core::PagePtr>& before) {
+    for (std::size_t p = 0; p < doc.pages.size(); ++p) {
+        if (doc.is_deferred(p)) continue;
+        const core::Page& seen = doc.page(p);
+        const bool bitmap = seen.color && seen.color->bitmap;
+        const bool indexed = !seen.color && seen.rgb && seen.rgb->table;
+        const bool deep = !seen.color && seen.rgb && seen.rgb->depth > 8 && !seen.rgb->table;
+        if (!bitmap && !indexed && !deep) continue;
+        const core::Page* was = nullptr;
+        for (const core::PagePtr& b : before) {
+            if (b && b->id == seen.id) was = b.get();
+        }
+        if (was == &seen) continue;  // (not edited)
+        // (a page made bitmap or indexed now: all its layers; a deep page's only the pixels an op made — a change of its
+        // depth or profile converts its layers itself, set_color_mode, and assign_profile keeps their bytes)
+        const bool same_mode = was != nullptr && (deep || (was->color == seen.color && was->rgb == seen.rgb));
+        const auto changed = [&](const core::Layer& layer) {
+            if (!same_mode) return true;
+            for (const core::Layer& old : was->layers) {
+                if (old.id == layer.id) return old.raster_png != layer.raster_png || old.ink_raster != layer.ink_raster;
+            }
+            return true;
+        };
+        std::vector<std::size_t> todo;
+        for (std::size_t i = 0; i < seen.layers.size(); ++i) {
+            const core::Layer& layer = seen.layers[i];
+            const bool pixels = bitmap ? layer.ink_raster != nullptr : layer.raster_png && !layer.raster_png->empty();
+            if (!pixels || !changed(layer)) continue;
+            // (deep: a paint layer a precise raster can hold — render/page's and set_color_mode's rule)
+            if (deep && (layer.kind != core::LayerKind::Raster || layer.role == core::LayerRole::Tone || layer.stroke_count() || !layer.patches.empty() ||
+                         layer.panel_clip || layer.effect || layer.screen || layer.color)) {
+                continue;
+            }
+            todo.push_back(i);
+        }
+        if (todo.empty()) continue;
+        core::Page& page = doc.edit_page(p);
+        for (const std::size_t i : todo) {
+            core::Layer& layer = page.layers[i];
+            if (bitmap) {
+                core::InkPixels pixels = core::decode_ink_raster(*layer.ink_raster);
+                if (pixels.depth != 8 || pixels.space != core::InkSpace::Gray) continue;
+                bool any = false;
+                for (std::uint16_t& s : pixels.samples) {
+                    const std::uint16_t two = s >= 128 ? 255 : 0;
+                    any = any || two != s;
+                    s = two;
+                }
+                if (!any) continue;
+                layer.ink_raster = std::make_shared<const std::string>(core::encode_ink_raster(pixels));
+                layer.ink_memo = {};
+                continue;
+            }
+            const Image picture = open_image(*layer.raster_png, kPillowOpenLimits).convert("RGBA");
+            std::string bytes = picture.tobytes();
+            if (indexed) {
+                const core::ColorTable& table = *page.rgb->table;
+                std::unordered_map<std::uint32_t, std::size_t> nearest;
+                bool any = false;
+                for (std::size_t at = 0; at + 3 < bytes.size(); at += 4) {
+                    auto* q = reinterpret_cast<unsigned char*>(bytes.data() + at);
+                    if (q[3] == 0) continue;
+                    const std::uint32_t key = (std::uint32_t(q[0]) << 16) | (std::uint32_t(q[1]) << 8) | q[2];
+                    auto it = nearest.find(key);
+                    if (it == nearest.end()) it = nearest.emplace(key, table.nearest(q[0], q[1], q[2])).first;
+                    const std::array<int, 3>& c = table.colors[it->second];
+                    for (unsigned k = 0; k < 3; ++k) {
+                        any = any || q[k] != c[k];
+                        q[k] = static_cast<unsigned char>(c[k]);
+                    }
+                }
+                if (!any) continue;
+                layer.raster_png = std::make_shared<const std::string>(write_png(Image::frombytes("RGBA", picture.size(), bytes)));
+                layer.raster_memo = {};
+                layer.raster_relpath.reset();
+                continue;
+            }
+            const int depth = page.rgb->depth;
+            const auto* q = reinterpret_cast<const unsigned char*>(bytes.data());
+            layer.color_raster = std::make_shared<const std::string>(core::encode_color_pixels(
+                static_cast<std::uint32_t>(picture.width()), static_cast<std::uint32_t>(picture.height()), depth == 16 ? "u16" : "f32",
+                [&](std::size_t at) {
+                    return std::array<double, 4>{q[at * 4] / 255.0, q[at * 4 + 1] / 255.0, q[at * 4 + 2] / 255.0, q[at * 4 + 3] / 255.0};
+                }));
+            layer.raster_png = nullptr;
+            layer.raster_memo = {};
+            layer.raster_relpath.reset();
+        }
+    }
+}
+
 // The CMYK and Lab pages an op may work on: the page it names (as it finds it: 1, 1.0 and true alike), or every one
 // when it names none (a page it cannot find: none — the op itself says why).
 std::vector<std::size_t> ink_pages_of(const core::OpContext& c) {
@@ -321,10 +419,12 @@ const core::OpRegistry& ops_registry() {
             // or one colour plate of its layer, the others put back after it: render/channels; and a page's channels
             // kept at its depth)
             r.add(name, [plain, op, name](core::OpContext& c) {
+                const std::vector<core::PagePtr> before = c.doc.pages;  // (color-model@1: what the op changed, keep_page_modes)
                 const std::optional<channels::Target> target = core::channel_target_op(name) ? channels::target_of(c.doc, c.op) : std::nullopt;
                 if (!target) {
                     op(c);
                     channels::follow_depth(c.doc);
+                    keep_page_modes(c.doc, before);
                     return;
                 }
                 const std::size_t at = core::require_page(c.doc, c.op);
@@ -352,6 +452,7 @@ const core::OpRegistry& ops_registry() {
                 keep.restore(c.doc);
                 c.report = std::move(inner.report);
                 channels::follow_depth(c.doc);
+                keep_page_modes(c.doc, before);
             });
         }
         return r;

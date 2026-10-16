@@ -16,25 +16,42 @@ namespace genko::core {
 
 inline constexpr std::string_view kColorModelFeature = "color-model@1";
 
+// An indexed page's colour table (color-model@1, PC1d; PhotoCraft's doc/src/mode.rs ColorTable): 1..256 sRGB colours
+// and the one shown as transparent, if any. Every pixel of the page's paint layers that shows (alpha > 0) is one of its
+// colours, and the page is shown in them.
+inline constexpr std::size_t kColorTableMax = 256;
+struct ColorTable {
+    std::vector<std::array<int, 3>> colors;
+    std::optional<int> transparent;
+    bool operator==(const ColorTable&) const = default;
+    // The nearest colour's index (squared distance in 0..255; a tie: the lower index).
+    std::size_t nearest(int r, int g, int b) const;
+};
+void check_color_table(const ColorTable& table);
+
 // An RGB page's colour model past Python's (8 bits, sRGB): its depth (8: raster_png; 16 and 32: precise rasters,
 // GKCR u16 and f32), the RGB profile its pixels are in (none: sRGB, as Python's; else a matrix-shaper RGB ICC profile,
 // an asset "sha256:…"), and the intent and black point compensation colours come in with (sRGB elements, conversions).
-// A page or book with the default (8 bits, sRGB, relative, bpc) has none: its `color` is not written.
+// An indexed page is one of 8 bits in sRGB with its colour table. A page or book with the default (8 bits, sRGB,
+// relative, bpc, no table) has none: its `color` is not written.
 struct RgbMode {
     int depth = 8;
     std::string profile;  // ("": sRGB)
     Bytes icc;            // (the profile's bytes; null for sRGB, or until they are read or given)
     std::string intent = "relative";
     bool bpc = true;
+    std::optional<ColorTable> table;  // (an indexed page's)
 
     bool operator==(const RgbMode& other) const {
-        return depth == other.depth && profile == other.profile && intent == other.intent && bpc == other.bpc;
+        return depth == other.depth && profile == other.profile && intent == other.intent && bpc == other.bpc && table == other.table;
     }
-    bool is_default() const { return depth == 8 && profile.empty() && intent == "relative" && bpc; }
+    bool is_default() const { return depth == 8 && profile.empty() && intent == "relative" && bpc && !table; }
 };
 
-// {"mode": "rgb", "depth", "profile"?, "intent", "bpc"?} in that order ("profile" only for one, "bpc" only when false).
+// {"mode": "rgb", "depth", "profile"?, "intent", "bpc"?} in that order ("profile" only for one, "bpc" only when false);
+// an indexed page's {"mode": "indexed", "depth": 8, "intent", "bpc"?, "table": {"colors", "transparent"}}.
 Json to_json(const RgbMode& mode);
+Json to_json(const ColorTable& table);
 
 // A page's or book's `color`, read: a mode of inks (core/ink.hpp), or an RGB mode, or neither (null). core::Error("value")
 // says what is wrong — an RGB mode of every default too, which the writer never writes (no `color`).

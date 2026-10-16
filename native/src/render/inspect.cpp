@@ -70,7 +70,8 @@ Json pixel_at(const core::Page& page, const core::Document* episode, double x_mm
     }
     Json out = Json::object();
     out["page"] = page.index.json();
-    out["mode"] = page.color ? std::string(core::to_string(page.color->space)) : std::string("rgb");
+    // (color-model@1, PC1d: bitmap, duotone, multichannel, indexed as their own)
+    out["mode"] = page.color ? std::string(core::mode_name(*page.color)) : page.rgb && page.rgb->table ? std::string("indexed") : std::string("rgb");
     const int depth = page.color ? page.color->depth : page.rgb ? page.rgb->depth : 8;
     out["depth"] = depth;
     if (layer_id) {
@@ -155,6 +156,9 @@ Json pixel_at(const core::Page& page, const core::Document* episode, double x_mm
             out["stored"].push_back(stored_rgb(srgb[c].get<int>() / 255.0, depth));
         }
         out["alpha"] = 1.0;
+    }
+    if (!page.color && page.rgb && page.rgb->table) {  // (an indexed page: the colour's index in its table)
+        out["index"] = static_cast<std::int64_t>(page.rgb->table->nearest(srgb[0].get<int>(), srgb[1].get<int>(), srgb[2].get<int>()));
     }
     out["srgb"] = std::move(srgb);
     return out;

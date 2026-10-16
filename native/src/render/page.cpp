@@ -11,6 +11,7 @@
 #include <cmath>
 #include <memory>
 #include <mutex>
+#include <unordered_map>
 #include <utility>
 
 #include <QFileInfo>
@@ -1066,7 +1067,7 @@ void ink_layer(InkCanvas& canvas, const Ctx& ctx, const Layer& layer, const Box&
             const unsigned char c[3] = {static_cast<unsigned char>(std::clamp<std::int64_t>(rgb.size() > 0 ? rgb[0] : 0, 0, 255)),
                                         static_cast<unsigned char>(std::clamp<std::int64_t>(rgb.size() > 1 ? rgb[1] : 0, 0, 255)),
                                         static_cast<unsigned char>(std::clamp<std::int64_t>(rgb.size() > 2 ? rgb[2] : 0, 0, 255))};
-            std::array<double, 4> ink{};
+            std::array<double, core::kPlatesMax> ink{};
             ink::inks_of(color, c, nullptr, ink.data(), 1);
             const unsigned n = picture.channels;
             for (std::size_t i = 0; i < picture.values.size() / (n + 1); ++i)
@@ -1738,7 +1739,7 @@ RenderResult drawn_page(const core::Page& page, int dpi, const RenderOptions& op
             RenderResult out{Image::create_blank("RGB",size_of(area)),{},std::nullopt,std::nullopt};
             if(options.inks && page.color){  // (each tile's inks laid in)
                 out.inks=core::blank_ink_pixels(page.color->space,page.color->depth,static_cast<std::uint32_t>(area.width()),
-                                                static_cast<std::uint32_t>(area.height()));
+                                                static_cast<std::uint32_t>(area.height()),page.color->planes());
             }
             // (color-model@1: each tile's values laid into the page's GKCR f32, row by row)
             if(values){
@@ -1779,14 +1780,44 @@ RenderResult drawn_page(const core::Page& page, int dpi, const RenderOptions& op
 
 }  // namespace
 
+namespace {
+
+// color-model@1 (PC1d): an indexed page shown in its table — the whole picture, its frames, words and marks too, each
+// pixel its nearest colour (no dither: a part of the page drawn the same as the whole; PhotoCraft's ColorTable::nearest).
+void in_table(RenderResult& out, const core::Page& page) {
+    if (page.color || !page.rgb || !page.rgb->table) return;
+    const core::ColorTable& table = *page.rgb->table;
+    Image& image = out.image;
+    const std::string mode(image.mode());
+    if (mode != "RGB" && mode != "RGBA") return;
+    const unsigned bands = static_cast<unsigned>(image.bands());
+    std::string bytes = image.tobytes();
+    std::unordered_map<std::uint32_t, std::size_t> nearest;
+    for (std::size_t at = 0; at + bands <= bytes.size(); at += bands) {
+        auto* q = reinterpret_cast<unsigned char*>(bytes.data() + at);
+        const std::uint32_t key = (std::uint32_t(q[0]) << 16) | (std::uint32_t(q[1]) << 8) | q[2];
+        auto it = nearest.find(key);
+        if (it == nearest.end()) it = nearest.emplace(key, table.nearest(q[0], q[1], q[2])).first;
+        for (unsigned k = 0; k < 3; ++k) q[k] = static_cast<unsigned char>(table.colors[it->second][k]);
+    }
+    image = Image::frombytes(mode, image.size(), bytes);
+}
+
+}  // namespace
+
 RenderResult render_page(const core::Page& page, int dpi, const RenderOptions& options, const core::Document* episode) {
     const bool hiding = options.planes && std::find(options.planes->begin(), options.planes->end(), false) != options.planes->end();
-    if (page.channels.empty() && !hiding) return drawn_page(page, dpi, options, episode);
+    if (page.channels.empty() && !hiding) {
+        RenderResult out = drawn_page(page, dpi, options, episode);
+        in_table(out, page);
+        return out;
+    }
     // (channels@1: the spots printed, the panel's view; a CMYK or Lab page's planes shown from its inks)
     RenderOptions asked = options;
     const bool lent_inks = hiding && page.color && !options.inks;
     if (lent_inks) asked.inks = true;
     RenderResult out = drawn_page(page, dpi, asked, episode);
+    in_table(out, page);
     channels::finish(out, page, dpi, options);
     if (lent_inks) out.inks.reset();
     return out;

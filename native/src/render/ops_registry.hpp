@@ -1,5 +1,8 @@
 #pragma once
 
+#include <optional>
+#include <string>
+
 #include "core/command_bus.hpp"
 
 // All public operations through one registry: core, rulers, raster/selection, tones, effects and 3D.
@@ -17,5 +20,12 @@ void register_file_ops(core::OpRegistry& registry);
 void register_channel_ops(core::OpRegistry& registry);
 // set_color_mode and set_inks (color-mode@1, render/ops_ink.cpp)
 void register_ink_ops(core::OpRegistry& registry);
+
+// channels@1, color-model@1 (the user's decision 2026-10-16: as PhotoCraft flattens): the layer merge_visible's flatten
+// keeps the page's pixels in (the first shown), and the page's pixel layers flattened into it (Genko's 画像をフラット化:
+// its frames, lines and balloons kept as they are), under a studio book's rules for a flatten too. The flattened
+// layer's id, or none when no layer shows (nothing done). render/ops_channels.cpp.
+std::optional<std::string> first_shown_layer(const core::Page& page);
+std::optional<std::string> flatten_page(core::OpContext& c, std::size_t at);
 
 }  // namespace genko::render

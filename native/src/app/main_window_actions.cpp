@@ -719,9 +719,12 @@ void MainWindow::build_menus() {
     }
     QMenu* modes = pages->addMenu(QStringLiteral("色モード"));
     for (const char* name : {"act_mode_rgb", "act_mode_gray", "act_mode_cmyk", "act_mode_lab"}) modes->addAction(action(name));
+    // (color-model@1, PC1d: Image › Mode's own)
+    for (const char* name : {"act_mode_bitmap", "act_mode_indexed", "act_mode_duotone", "act_mode_multichannel"}) modes->addAction(action(name));
     modes->addSeparator();
     for (const char* name : {"act_depth_8", "act_depth_16", "act_depth_32"}) modes->addAction(action(name));
     modes->addSeparator();
+    modes->addAction(action("act_color_table"));
     modes->addAction(action("act_color_mode"));
     connect(modes, &QMenu::aboutToShow, this, &MainWindow::show_color_mode);
     pages->addSeparator();

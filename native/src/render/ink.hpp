@@ -108,6 +108,7 @@ public:
 private:
     core::PageColor color_;
     std::unordered_map<std::uint64_t, std::array<int, 3>> by_inks_;  // (the table by its inks' samples)
+    std::unordered_map<std::string, std::array<int, 3>> by_plates_;  // (a multichannel page's: by its plates' samples)
     std::unordered_map<std::uint32_t, std::vector<double>> by_rgb_;  // (and by its colour)
 };
 

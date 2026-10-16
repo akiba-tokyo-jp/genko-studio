@@ -87,7 +87,8 @@ Json layer_brief(const core::Layer& layer, bool colour_model) {
 Json colour_brief(const core::Page& page) {
     Json out = page.color ? core::to_json(*page.color) : core::to_json(*page.rgb);
     if (page.color) {
-        out["profile_description"] = core::profile_description(page.color->profile, page.color->icc, page.color->space == core::InkSpace::Lab);
+        out["profile_description"] = core::profile_description(page.color->profile, page.color->icc, page.color->space == core::InkSpace::Lab ||
+                                                                        (page.color->space == core::InkSpace::Multi && page.color->from == "lab"));
     } else {
         out["profile_description"] = core::profile_description(page.rgb->profile, page.rgb->icc);
     }

@@ -79,6 +79,10 @@ genko_test(test_paper SOURCES unit/test_paper.cpp DEPS genko_test_support genko_
 genko_test(test_color_model SOURCES unit/test_color_model.cpp DEPS genko_test_support genko_render_ops genko_formats ${GENKO_LCMS2}
            LABELS unit TIMEOUT 600)
 
+# インデックスカラー・2 階調 (SPEC.md COLOR-03, PC1d): render/quantize against PhotoCraft's own tests, and its palettes,
+# dithers and bitmaps the same bits as PhotoCraft's quantize.rs run on the same pictures.
+genko_test(test_quantize SOURCES unit/test_quantize.cpp DEPS genko_test_support genko_render LABELS unit)
+
 # 色の校正・色域外警告・カラー設定 (SPEC.md COLOR-03, PC1b): render/proof against PhotoCraft's own tests, a picture's own
 # profile, set_text_gamma and the letters drawn in it, without Python.
 genko_test(test_proof SOURCES unit/test_proof.cpp DEPS genko_test_support genko_render_ops genko_storage genko_formats ZLIB::ZLIB LABELS unit TIMEOUT 600)

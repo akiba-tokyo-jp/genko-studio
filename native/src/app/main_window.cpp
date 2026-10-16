@@ -783,6 +783,10 @@ void MainWindow::refresh_status() {
         read_only_->hide();
     }
     if (colours_ != nullptr) colours_->set_page_color(current_page() != nullptr ? current_page()->color : std::nullopt);  // (color-mode@1)
+    if (colours_ != nullptr) {  // (color-model@1, PC1d: an indexed page's table)
+        const core::Page* page = current_page();
+        colours_->set_color_table(page != nullptr && !page->color && page->rgb ? page->rgb->table : std::nullopt);
+    }
     refresh_first_steps();
     maybe_backup();  // (after a save: バックアップ, when chosen in 環境設定)
     if (flash_timer_.isActive()) {
@@ -808,11 +812,16 @@ void MainWindow::refresh_status() {
     }
     const auto frames = page->leaf_frames().size();
     if (page->color || page->rgb) {  // (color-mode@1, color-model@1: the page's mode beside its panels, and its profile)
-        const bool lab = page->color && page->color->space == core::InkSpace::Lab;
-        const QString name = !page->color                                   ? QStringLiteral("RGB")
-                             : page->color->space == core::InkSpace::Cmyk ? QStringLiteral("CMYK")
-                             : page->color->space == core::InkSpace::Gray ? QStringLiteral("グレー")
-                                                                           : QStringLiteral("Lab");
+        const bool lab = page->color && (page->color->space == core::InkSpace::Lab || (page->color->space == core::InkSpace::Multi && page->color->profile.empty()));
+        const std::string_view mode = page->color ? core::mode_name(*page->color) : page->rgb->table ? "indexed" : "rgb";
+        const QString name = mode == "rgb"            ? QStringLiteral("RGB")
+                             : mode == "indexed"      ? QStringLiteral("インデックスカラー（%1 色）").arg(page->rgb->table->colors.size())
+                             : mode == "cmyk"         ? QStringLiteral("CMYK")
+                             : mode == "gray"         ? QStringLiteral("グレー")
+                             : mode == "bitmap"       ? QStringLiteral("2 階調")
+                             : mode == "duotone"      ? QStringLiteral("ダブルトーン")
+                             : mode == "multichannel" ? QStringLiteral("マルチチャンネル（%1 版）").arg(page->color->plates.size())
+                                                      : QStringLiteral("Lab");
         selected += QStringLiteral(" ・ %1 %2 bit").arg(name).arg(page->color ? page->color->depth : page->rgb->depth);
         if (!lab) {
             const std::string said = page->color ? core::profile_description(page->color->profile, page->color->icc)

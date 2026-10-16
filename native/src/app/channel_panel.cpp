@@ -40,6 +40,7 @@ QString composite_label(const core::Page& page) {
             case core::InkSpace::Cmyk: return QStringLiteral("CMYK");
             case core::InkSpace::Lab: return QStringLiteral("Lab");
             case core::InkSpace::Gray: return QStringLiteral("グレー");
+            case core::InkSpace::Multi: return QStringLiteral("マルチチャンネル");
             default: break;
         }
     }
@@ -231,8 +232,29 @@ void ChannelPanel::duplicate() {
 void ChannelPanel::remove() {
     const core::Page* page = window_->current_page();
     const std::string id = chosen_channel();
+    const QListWidgetItem* item = list_->currentItem();
+    const std::string key = item != nullptr ? item->data(kKey).toString().toStdString() : std::string();
+    if (page != nullptr && id.empty() && core::plate_index(*page, key)) {
+        // (color-model@1, PC1d: a colour plate deleted makes the page multichannel — Photoshop's Delete Channel —, asked
+        // first: its pixel layers flattened; a multichannel page's plate goes as it is)
+        const bool multi = page->color && page->color->space == core::InkSpace::Multi;
+        if (core::plate_names(*page).size() < 2) {
+            window_->flash(QStringLiteral("色の版が 1 つしかないので削除できません"), 3000);
+            return;
+        }
+        if (!multi && !ask::question(this, QStringLiteral("色の版を削除"),
+                                     QStringLiteral("色の版を削除すると、このページはマルチチャンネルになります（画素レイヤーは 1 枚に統合され、"
+                                                    "残りの版はそれぞれインキの版になります）。削除しますか？\n編集 → 取り消し で元に戻せます。"))) {
+            return;
+        }
+        Json op{{"op", "delete_channel"}, {"page", page->index.json()}, {"channel", key}};
+        if (!multi) op["to_multichannel"] = true;
+        window_->apply_ops(Json::array({op}));
+        refresh();
+        return;
+    }
     if (page == nullptr || id.empty()) {
-        window_->flash(QStringLiteral("削除するアルファ・特色チャンネルを選びます（色の版は削除できません）"), 3000);
+        window_->flash(QStringLiteral("削除するチャンネルを選びます"), 3000);
         return;
     }
     window_->apply_ops(Json::array({Json{{"op", "delete_channel"}, {"page", page->index.json()}, {"channel", id}}}));

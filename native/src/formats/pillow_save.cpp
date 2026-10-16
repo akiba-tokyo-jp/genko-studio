@@ -527,6 +527,8 @@ std::string tiff_bytes(const render::Image& image, const TiffSave& params) {
     } else if (mode == "CMYK") {
         photometric = PHOTOMETRIC_SEPARATED;
         samples = 4;
+    } else if (mode == "P") {  // (color-model@1: an indexed page, Photometric 3 and its ColorMap)
+        photometric = PHOTOMETRIC_PALETTE;
     } else {
         throw core::Error("io", "cannot write mode " + std::string(mode) + " as TIFF");
     }
@@ -569,6 +571,15 @@ std::string tiff_bytes(const render::Image& image, const TiffSave& params) {
     if (params.dpi) ok = ok && TIFFSetField(tif, TIFFTAG_RESOLUTIONUNIT, RESUNIT_INCH) == 1;
     if (!params.icc.empty()) {
         ok = ok && TIFFSetField(tif, TIFFTAG_ICCPROFILE, static_cast<std::uint32_t>(params.icc.size()), params.icc.data()) == 1;
+    }
+    std::vector<std::uint16_t> map[3];  // (the palette's 256 entries a channel, 16 bits each: v × 257; the rest black)
+    if (mode == "P") {
+        const auto palette = image.palette();
+        for (unsigned c = 0; c < 3; ++c) {
+            map[c].assign(256, 0);
+            for (std::size_t i = 0; i < palette.size() && i < 256; ++i) map[c][i] = static_cast<std::uint16_t>(palette[i][c] * 257);
+        }
+        ok = ok && TIFFSetField(tif, TIFFTAG_COLORMAP, map[0].data(), map[1].data(), map[2].data()) == 1;
     }
     if (!ok) throw core::Error("io", "encoder error -9 when writing image file");
     const int band = static_cast<int>(std::max<std::int64_t>(1, (1 << 22) / std::max<std::int64_t>(1, stride)));

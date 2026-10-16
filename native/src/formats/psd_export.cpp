@@ -7,6 +7,7 @@
 #include <bit>
 #include <cmath>
 #include <map>
+#include <unordered_map>
 
 #include "core/channels.hpp"
 #include "core/error.hpp"
@@ -1033,11 +1034,136 @@ void put_page_psd_rgb(detail::Output& output, const core::Document& episode, con
     output.put(dest, body);
 }
 
+// color-model@1 (PC1d, SPEC.md COLOR-03): a page of Image › Mode's own as Photoshop holds that mode — the merged picture
+// only (Bitmap, Indexed Color and Multichannel documents have no layers: said in the export's notes): a bitmap page in
+// Bitmap (mode 0, 1 bit a pixel, 1 black), an indexed page in Indexed Color (mode 2, its table as the colour mode data —
+// 256 reds, greens, blues —, 1046 its count, 1047 its transparent index), a multichannel page in Multichannel (mode 7,
+// each plate a channel dark where its ink is, as a spot channel: max − density; names in 1006 and 1045, colours and
+// solidity in 1077 as spots), its alpha and spot channels after them. A bitmap or indexed page's channels are not
+// written (Photoshop has none in those modes: said in the notes); a multichannel page of 32 bits at 16.
+void put_page_psd_flat(detail::Output& output, const core::Document& episode, const core::Page& page, const fs::path& dest, std::int64_t dpi) {
+    render::RenderOptions options = merged_options(page);
+    const bool indexed = !page.color;
+    const bool bitmap = page.color && page.color->bitmap;
+    options.inks = !indexed;
+    const render::RenderResult made = render::render_page(page, static_cast<int>(dpi), options, &episode);
+    const render::Size size = made.image.size();
+    std::string body = "8BPS";
+    put_u16(body, 1);
+    body.append(6, '\0');
+    if (bitmap) {
+        const core::InkPixels& merged = *made.inks;
+        put_u16(body, 1);
+        put_u32(body, merged.height);
+        put_u32(body, merged.width);
+        put_u16(body, 1);
+        put_u16(body, 0);
+        put_u32(body, 0);  // (no colour mode data)
+        body += resources(dpi);
+        put_u32(body, 0);  // (no layers)
+        put_u16(body, 0);  // (raw)
+        const std::size_t row = (std::size_t(merged.width) + 7) / 8;
+        for (std::uint32_t y = 0; y < merged.height; ++y) {
+            std::string bits(row, '\0');
+            for (std::uint32_t x = 0; x < merged.width; ++x) {
+                if (merged.value(std::size_t(y) * merged.width + x, 0) < 0.5) bits[x / 8] = static_cast<char>(bits[x / 8] | (0x80 >> (x % 8)));
+            }
+            body += bits;
+        }
+    } else if (indexed) {
+        const core::ColorTable& table = *page.rgb->table;
+        put_u16(body, 1);
+        put_u32(body, static_cast<std::uint32_t>(size.height));
+        put_u32(body, static_cast<std::uint32_t>(size.width));
+        put_u16(body, 8);
+        put_u16(body, 2);
+        std::string data(768, '\0');
+        for (std::size_t i = 0; i < table.colors.size() && i < 256; ++i) {
+            for (unsigned c = 0; c < 3; ++c) data[c * 256 + i] = static_cast<char>(table.colors[i][c]);
+        }
+        put_u32(body, 768);
+        body += data;
+        std::string count, transparent;
+        put_u16(count, static_cast<std::uint32_t>(table.colors.size()));
+        std::string blocks = resources(dpi).substr(4) + image_resource(1046, count);
+        if (table.transparent) {
+            put_u16(transparent, static_cast<std::uint32_t>(*table.transparent));
+            blocks += image_resource(1047, transparent);
+        }
+        put_u32(body, u32_of(blocks.size()));
+        body += blocks;
+        put_u32(body, 0);  // (no layers)
+        const std::string rgb = (made.image.mode() == "RGB" ? made.image : made.image.convert("RGB")).tobytes();
+        std::string indices(std::size_t(size.width) * size.height, '\0');
+        std::unordered_map<std::uint32_t, std::size_t> nearest;
+        for (std::size_t i = 0; i < indices.size(); ++i) {
+            const auto* p = reinterpret_cast<const unsigned char*>(rgb.data()) + i * 3;
+            const std::uint32_t key = (std::uint32_t(p[0]) << 16) | (std::uint32_t(p[1]) << 8) | p[2];
+            auto it = nearest.find(key);
+            if (it == nearest.end()) it = nearest.emplace(key, table.nearest(p[0], p[1], p[2])).first;
+            indices[i] = static_cast<char>(it->second);
+        }
+        std::string counts, packed;
+        packbits_rows(Image::frombytes("L", size, indices), counts, packed);
+        put_u16(body, 1);
+        body += counts;
+        body += packed;
+    } else {
+        core::PageColor color = *page.color;
+        const int depth = color.depth == 32 ? 16 : color.depth;  // (Photoshop's Multichannel holds 8 or 16 bits)
+        const core::InkPixels& merged = *made.inks;
+        const unsigned n = merged.colours();
+        put_u16(body, n + static_cast<unsigned>(page.channels.size()));
+        put_u32(body, merged.height);
+        put_u32(body, merged.width);
+        put_u16(body, static_cast<std::uint32_t>(depth));
+        put_u16(body, 7);
+        put_u32(body, 0);  // (no colour mode data)
+        // (the plates' names and looks as spots, then the page's channels')
+        core::Page named = page;
+        std::vector<core::Channel> plates;
+        for (const core::Plate& plate : color.plates) {
+            core::Channel ink;
+            ink.name = plate.name;
+            ink.kind = core::ChannelKind::Spot;
+            ink.color = plate.color;
+            ink.solidity = plate.solidity;
+            plates.push_back(std::move(ink));
+        }
+        named.channels.insert(named.channels.begin(), plates.begin(), plates.end());
+        body += with_channels(resources(dpi), named);
+        put_u32(body, 0);  // (no layers)
+        const auto plane = [&](unsigned c) {
+            std::string bytes;
+            for (std::size_t i = 0; i < merged.pixel_count(); ++i) put_sample(bytes, 1.0 - merged.value(i, c), depth);
+            return bytes;
+        };
+        if (depth == 8) {
+            std::string counts, packed;
+            for (unsigned c = 0; c < n; ++c) packbits_rows(Image::frombytes("L", size, plane(c)), counts, packed);
+            put_channels_rle(page, size, counts, packed);
+            put_u16(body, 1);
+            body += counts;
+            body += packed;
+        } else {
+            put_u16(body, 0);
+            for (unsigned c = 0; c < n; ++c) body += plane(c);
+            for (const core::Channel& channel : page.channels) body += channel_samples(page, channel, size, depth);
+        }
+    }
+    if (dest.has_parent_path()) detail::make_dirs(dest.parent_path());
+    output.put(dest, body);
+}
+
 // The page's PSD (export_page_psd), put into `output` at `dest`.
 void put_page_psd(detail::Output& output, const core::Document& episode, const core::Page& page, const fs::path& dest,
                   std::optional<std::int64_t> dpi_given, const PsdText& text = {}, PsdTextReport* report = nullptr) {
     const std::int64_t dpi = psd_dpi(episode, dpi_given);
     check_dpi(dpi);
+    if ((page.color && (page.color->bitmap || page.color->space == core::InkSpace::Multi)) || (!page.color && page.rgb && page.rgb->table)) {
+        put_page_psd_flat(output, episode, page, dest, dpi);  // (color-model@1, PC1d: the merged picture only)
+        return;
+    }
     if (page.color) {
         put_page_psd_inks(output, episode, page, dest, dpi, text, report);
         return;

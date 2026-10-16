@@ -130,15 +130,279 @@ std::string_view to_string(InkSpace space) { return traits(space).name; }
 std::optional<InkSpace> ink_space_from(std::string_view text) {
     if (text == "cmyk") return InkSpace::Cmyk;
     if (text == "lab") return InkSpace::Lab;
-    if (text == "gray") return InkSpace::Gray;
+    if (text == "gray" || text == "bitmap" || text == "duotone") return InkSpace::Gray;
+    if (text == "multichannel") return InkSpace::Multi;
     return std::nullopt;
+}
+
+std::string_view mode_name(const PageColor& color) {
+    if (color.space == InkSpace::Gray && color.bitmap) return "bitmap";
+    if (color.space == InkSpace::Gray && !color.duotone.empty()) return "duotone";
+    return to_string(color.space);
 }
 
 unsigned colour_channels(InkSpace space) { return traits(space).planes; }
 
 bool is_intent(std::string_view intent) { return std::find(kIntents.begin(), kIntents.end(), intent) != kIntents.end(); }
 
+double curve_at(const std::vector<CurvePoint>& curve, double x) {
+    // (PhotoCraft's curve_eval: before the first point its output, after the last the last's, straight between)
+    if (curve.empty()) return x;
+    if (curve.size() == 1) return curve[0][1] / 100.0;
+    if (x <= curve[0][0] / 100.0) return curve[0][1] / 100.0;
+    for (std::size_t i = 0; i + 1 < curve.size(); ++i) {
+        const double x0 = curve[i][0] / 100.0, x1 = curve[i + 1][0] / 100.0;
+        if (x <= x1) {
+            const double span = std::max(x1 - x0, 1e-6);
+            return curve[i][1] / 100.0 + (curve[i + 1][1] - curve[i][1]) / 100.0 * (x - x0) / span;
+        }
+    }
+    return curve.back()[1] / 100.0;
+}
+
+std::array<double, 3> duotone_print(const std::vector<DuotoneInk>& inks, double grey) {
+    const double density = 1.0 - std::clamp(grey, 0.0, 1.0);
+    std::array<double, 3> out{1.0, 1.0, 1.0};
+    for (const DuotoneInk& ink : inks) {
+        const double d = curve_at(ink.curve, density);
+        for (unsigned c = 0; c < 3; ++c) out[c] *= 1.0 - d * (1.0 - ink.color[c] / 255.0);
+    }
+    return out;
+}
+
+void print_plates(const std::vector<Plate>& plates, const double* density, double* p) {
+    for (std::size_t k = 0; k < plates.size(); ++k) {
+        const double v = std::clamp(density[k], 0.0, 1.0);
+        if (!(v > 0)) continue;
+        const double s = std::clamp(plates[k].solidity, 0.0, 1.0);
+        const double keep = 1.0 - s * v;
+        for (unsigned j = 0; j < 3; ++j) {
+            const double c = plates[k].color[j] / 255.0;
+            p[j] = keep * p[j] * (1.0 - v + v * c) + s * v * c;
+        }
+    }
+}
+
+namespace {
+
+std::size_t code_points(std::string_view text) {
+    std::size_t n = 0;
+    for (const char c : text) {
+        if ((static_cast<unsigned char>(c) & 0xC0) != 0x80) ++n;
+    }
+    return n;
+}
+
+void check_name(const std::string& name, const char* what) {
+    const auto space = [](char c) { return c == ' ' || c == '\t' || c == '\n' || c == '\r'; };
+    if (name.empty() || code_points(name) > kInkNameMax || space(name.front()) || space(name.back())) {
+        bad(std::string(what) + "'s name is 1..64 characters without spaces around it");
+    }
+}
+
+void check_rgb(const std::array<int, 3>& rgb, const char* what) {
+    for (const int c : rgb) {
+        if (c < 0 || c > 255) bad(std::string(what) + "'s colour is three integers 0..255");
+    }
+}
+
+std::array<int, 3> rgb_from(const Json& v, const char* what) {
+    if (!v.is_array() || v.size() != 3) bad(std::string(what) + "'s colour is [r, g, b]");
+    std::array<int, 3> out{};
+    for (unsigned c = 0; c < 3; ++c) {
+        if (!v[c].is_number_integer() || v[c].get<std::int64_t>() < 0 || v[c].get<std::int64_t>() > 255) {
+            bad(std::string(what) + "'s colour is three integers 0..255");
+        }
+        out[c] = static_cast<int>(v[c].get<std::int64_t>());
+    }
+    return out;
+}
+
+// An object's keys: these, in any order (the journal's snapshots keep their keys sorted); `required` among them.
+void check_keys(const Json& value, std::initializer_list<std::string_view> keys, std::initializer_list<std::string_view> required, const char* what) {
+    if (!value.is_object()) bad(std::string(what) + " is an object");
+    for (const auto& [key, v] : value.items()) {
+        if (std::find(keys.begin(), keys.end(), key) == keys.end()) bad(std::string(what) + " has an unknown key " + py_repr_str(key));
+    }
+    for (const std::string_view key : required) {
+        if (!value.contains(std::string(key))) bad(std::string(what) + " has no " + std::string(key));
+    }
+}
+
+}  // namespace
+
+void check_curve(const std::vector<CurvePoint>& curve) {
+    if (curve.size() < 2 || curve.size() > kCurvePointsMax) bad("a curve has 2.." + std::to_string(kCurvePointsMax) + " points");
+    for (std::size_t i = 0; i < curve.size(); ++i) {
+        const double in = curve[i][0], out = curve[i][1];
+        if (!std::isfinite(in) || !std::isfinite(out) || in < 0 || in > 100 || out < 0 || out > 100) bad("a curve's points are 0..100");
+        if (i > 0 && !(in > curve[i - 1][0])) bad("a curve's inputs go up, each past the one before");
+    }
+}
+
+void check_bitmap(const BitmapLook& look) {
+    if (std::find(kBitmapMethods.begin(), kBitmapMethods.end(), look.method) == kBitmapMethods.end()) {
+        bad("a bitmap's method is threshold, pattern, diffusion or halftone");
+    }
+    if (!std::isfinite(look.frequency) || look.frequency < 1 || look.frequency > 999) bad("a bitmap's frequency is 1..999");
+    if (!std::isfinite(look.angle) || look.angle < -180 || look.angle > 180) bad("a bitmap's angle is -180..180");
+    if (std::find(kHalftoneShapes.begin(), kHalftoneShapes.end(), look.shape) == kHalftoneShapes.end()) {
+        bad("a bitmap's shape is round, ellipse, line, square, diamond or cross");
+    }
+}
+
+void check_duotone(const std::vector<DuotoneInk>& inks) {
+    if (inks.empty() || inks.size() > kDuotoneInksMax) bad("a duotone page has 1..4 inks");
+    for (const DuotoneInk& ink : inks) {
+        check_name(ink.name, "a duotone ink");
+        check_rgb(ink.color, "a duotone ink");
+        check_curve(ink.curve);
+    }
+}
+
+void check_plates(const std::vector<Plate>& plates) {
+    if (plates.empty() || plates.size() > kPlatesMax) bad("a multichannel page has 1..32 plates");
+    std::set<std::string> names;
+    for (const Plate& plate : plates) {
+        check_name(plate.name, "a plate");
+        if (!names.insert(plate.name).second) bad("two plates have the name " + py_repr_str(plate.name));
+        check_rgb(plate.color, "a plate");
+        if (!std::isfinite(plate.solidity) || plate.solidity < 0 || plate.solidity > 1) bad("a plate's solidity is 0..1");
+        if (!plate.curve.empty()) check_curve(plate.curve);
+    }
+}
+
+Json curve_json(const std::vector<CurvePoint>& curve) {
+    Json out = Json::array();
+    for (const CurvePoint& p : curve) out.push_back(Json::array({p[0], p[1]}));
+    return out;
+}
+
+std::vector<CurvePoint> curve_from_json(const Json& value) {
+    if (!value.is_array()) bad("a curve is [[in, out], …]");
+    std::vector<CurvePoint> out;
+    for (const Json& p : value) {
+        if (!p.is_array() || p.size() != 2) bad("a curve is [[in, out], …]");
+        const auto in = number(p[0]), o = number(p[1]);
+        if (!in || !o) bad("a curve's points are numbers");
+        out.push_back({*in, *o});
+    }
+    check_curve(out);
+    return out;
+}
+
+Json duotone_json(const std::vector<DuotoneInk>& inks) {
+    Json out = Json::array();
+    for (const DuotoneInk& ink : inks) {
+        Json item = Json::object();
+        item["name"] = ink.name;
+        item["color"] = Json::array({ink.color[0], ink.color[1], ink.color[2]});
+        item["curve"] = curve_json(ink.curve);
+        out.push_back(std::move(item));
+    }
+    return out;
+}
+
+std::vector<DuotoneInk> duotone_from_json(const Json& value) {
+    if (!value.is_array()) bad("duotone is a list of inks");
+    std::vector<DuotoneInk> out;
+    for (const Json& item : value) {
+        check_keys(item, {"name", "color", "curve"}, {"name", "color", "curve"}, "a duotone ink");
+        DuotoneInk ink;
+        if (!item["name"].is_string()) bad("a duotone ink's name is text");
+        ink.name = item["name"].get<std::string>();
+        ink.color = rgb_from(item["color"], "a duotone ink");
+        ink.curve = curve_from_json(item["curve"]);
+        out.push_back(std::move(ink));
+    }
+    check_duotone(out);
+    return out;
+}
+
+namespace {
+
+Json plates_json(const std::vector<Plate>& plates) {
+    Json out = Json::array();
+    for (const Plate& plate : plates) {
+        Json item = Json::object();
+        item["name"] = plate.name;
+        item["color"] = Json::array({plate.color[0], plate.color[1], plate.color[2]});
+        item["solidity"] = plate.solidity;
+        if (plate.key) item["key"] = true;
+        if (!plate.curve.empty()) item["curve"] = curve_json(plate.curve);
+        out.push_back(std::move(item));
+    }
+    return out;
+}
+
+std::vector<Plate> plates_from_json(const Json& value) {
+    if (!value.is_array()) bad("plates is a list");
+    std::vector<Plate> out;
+    for (const Json& item : value) {
+        check_keys(item, {"name", "color", "solidity", "key", "curve"}, {"name", "color", "solidity"}, "a plate");
+        Plate plate;
+        if (!item["name"].is_string()) bad("a plate's name is text");
+        plate.name = item["name"].get<std::string>();
+        plate.color = rgb_from(item["color"], "a plate");
+        const auto solidity = number(item["solidity"]);
+        if (!solidity) bad("a plate's solidity is a number 0..1");
+        plate.solidity = *solidity;
+        if (item.contains("key")) {
+            if (!item["key"].is_boolean() || !item["key"].get<bool>()) bad("a plate's key is written only as true");
+            plate.key = true;
+        }
+        if (item.contains("curve")) plate.curve = curve_from_json(item["curve"]);
+        out.push_back(std::move(plate));
+    }
+    check_plates(out);
+    return out;
+}
+
+Json bitmap_json(const BitmapLook& look) {
+    Json out = Json::object();
+    out["method"] = look.method;
+    out["frequency"] = look.frequency;
+    out["angle"] = look.angle;
+    out["shape"] = look.shape;
+    return out;
+}
+
+BitmapLook bitmap_from_json(const Json& value) {
+    check_keys(value, {"method", "frequency", "angle", "shape"}, {"method", "frequency", "angle", "shape"}, "bitmap");
+    BitmapLook out;
+    if (!value["method"].is_string() || !value["shape"].is_string()) bad("a bitmap's method and shape are text");
+    out.method = value["method"].get<std::string>();
+    out.shape = value["shape"].get<std::string>();
+    const auto frequency = number(value["frequency"]), angle = number(value["angle"]);
+    if (!frequency || !angle) bad("a bitmap's frequency and angle are numbers");
+    out.frequency = *frequency;
+    out.angle = *angle;
+    check_bitmap(out);
+    return out;
+}
+
+constexpr std::array<std::string_view, 5> kFromModes{"rgb", "cmyk", "lab", "gray", "duotone"};
+
+}  // namespace
+
+void check_ink(const PageColor& color, const std::vector<double>& ink) {
+    if (color.space != InkSpace::Multi) {
+        check_ink(color.space, ink);
+        return;
+    }
+    if (ink.size() != color.plates.size()) bad("an ink of a multichannel page has a value for each of its " + std::to_string(color.plates.size()) + " plates");
+    for (const double v : ink) {
+        if (!std::isfinite(v) || v < 0 || v > 1) bad("a plate's ink value is 0..1");
+    }
+}
+
 void check_ink(InkSpace space, const std::vector<double>& ink) {
+    if (space == InkSpace::Multi) {
+        for (const double v : ink) {
+            if (!std::isfinite(v) || v < 0 || v > 1) bad("a plate's ink value is 0..1");
+        }
+        return;
+    }
     if (ink.size() != colour_channels(space)) {
         bad(std::string("an ink of a ") +
             (space == InkSpace::Cmyk ? "CMYK page has 4 values (c, m, y, k)" : space == InkSpace::Lab ? "Lab page has 3 values (L, a, b)" : "grey page has 1 value (k)"));
@@ -155,9 +419,9 @@ void check_ink(InkSpace space, const std::vector<double>& ink) {
 
 Json to_json(const PageColor& color) {
     Json out = Json::object();
-    out["mode"] = std::string(to_string(color.space));
+    out["mode"] = std::string(mode_name(color));
     out["depth"] = color.depth;
-    if (color.space != InkSpace::Lab) out["profile"] = color.profile;
+    if (color.space != InkSpace::Lab && !(color.space == InkSpace::Multi && color.profile.empty())) out["profile"] = color.profile;
     out["intent"] = color.intent;
     if (!color.bpc) out["bpc"] = false;
     Json inks = Json::array();
@@ -167,36 +431,64 @@ Json to_json(const PageColor& color) {
         inks.push_back(Json::array({Json::array({entry.rgb[0], entry.rgb[1], entry.rgb[2]}), std::move(ink)}));
     }
     out["inks"] = std::move(inks);
+    if (color.bitmap) out["bitmap"] = bitmap_json(*color.bitmap);
+    if (!color.duotone.empty()) out["duotone"] = duotone_json(color.duotone);
+    if (color.space == InkSpace::Multi) {
+        out["plates"] = plates_json(color.plates);
+        out["from"] = color.from;
+    }
     return out;
 }
 
 PageColor page_color_from_json(const Json& value) {
     if (!value.is_object()) bad("it must be an object");
     // (written in this order; read in any: the journal's snapshots keep their keys sorted)
-    static const std::set<std::string> kKeys{"mode", "depth", "profile", "intent", "bpc", "inks"};
+    static const std::set<std::string> kKeys{"mode", "depth", "profile", "intent", "bpc", "inks", "bitmap", "duotone", "plates", "from"};
     for (const auto& [key, v] : value.items()) {
         if (!kKeys.contains(key)) bad("unknown key " + py_repr_str(key));
     }
     PageColor out;
     const auto mode = value.find("mode");
-    if (mode == value.end() || !mode->is_string()) bad("mode is cmyk, lab or gray");
-    const auto space = ink_space_from(mode->get<std::string>());
-    if (!space) bad("mode is cmyk, lab or gray");
+    if (mode == value.end() || !mode->is_string()) bad("mode is cmyk, lab, gray, bitmap, duotone or multichannel");
+    const std::string mode_text = mode->get<std::string>();
+    const auto space = ink_space_from(mode_text);
+    if (!space) bad("mode is cmyk, lab, gray, bitmap, duotone or multichannel");
     out.space = *space;
+    // (each mode's own keys, and only its)
+    const bool bitmap = mode_text == "bitmap", duotone = mode_text == "duotone", multi = out.space == InkSpace::Multi;
+    if (bitmap != value.contains("bitmap")) bad(bitmap ? "a bitmap page has its bitmap" : "only a bitmap page has a bitmap");
+    if (duotone != value.contains("duotone")) bad(duotone ? "a duotone page has its inks (duotone)" : "only a duotone page has duotone");
+    if (multi != value.contains("plates") || multi != value.contains("from")) {
+        bad(multi ? "a multichannel page has its plates and from" : "only a multichannel page has plates and from");
+    }
     const auto depth = value.find("depth");
     if (depth == value.end() || !depth->is_number_integer() ||
         (depth->get<std::int64_t>() != 8 && depth->get<std::int64_t>() != 16 && depth->get<std::int64_t>() != 32)) {
         bad("depth is 8, 16 or 32");
     }
     out.depth = static_cast<int>(depth->get<std::int64_t>());
+    if (bitmap && out.depth != 8) bad("a bitmap page is 8 bits");
+    if (multi) {
+        const Json& from = value["from"];
+        if (!from.is_string() || std::find(kFromModes.begin(), kFromModes.end(), from.get<std::string>()) == kFromModes.end()) {
+            bad("from is rgb, cmyk, lab, gray or duotone");
+        }
+        out.from = from.get<std::string>();
+        out.plates = plates_from_json(value["plates"]);
+    }
+    if (bitmap) out.bitmap = bitmap_from_json(value["bitmap"]);
+    if (duotone) out.duotone = duotone_from_json(value["duotone"]);
     const auto profile = value.find("profile");
-    if (out.space != InkSpace::Lab) {
+    // (a multichannel page made from CMYK, grey or duotone keeps that profile: its elements' colours go through it)
+    const bool profiled = out.space == InkSpace::Multi ? out.from == "cmyk" || out.from == "gray" || out.from == "duotone" : out.space != InkSpace::Lab;
+    if (profiled) {
         if (profile == value.end() || !profile->is_string() || !is_ref(profile->get<std::string>())) {
-            bad(std::string("a ") + (out.space == InkSpace::Cmyk ? "CMYK" : "grey") + " page names its ICC profile (sha256:<64 hex>)");
+            bad(std::string("a ") + (out.space == InkSpace::Cmyk ? "CMYK" : out.space == InkSpace::Multi ? "multichannel" : "grey") +
+                " page names its ICC profile (sha256:<64 hex>)");
         }
         out.profile = profile->get<std::string>();
     } else if (profile != value.end()) {
-        bad("a Lab page has no profile");
+        bad(out.space == InkSpace::Lab ? "a Lab page has no profile" : "a multichannel page from RGB or Lab has no profile");
     }
     const auto intent = value.find("intent");
     if (intent == value.end() || !intent->is_string() || !is_intent(intent->get<std::string>())) {
@@ -226,7 +518,7 @@ PageColor page_color_from_json(const Json& value) {
             if (!d) bad("an ink value is not a finite number");
             entry.ink.push_back(*d);
         }
-        check_ink(out.space, entry.ink);
+        check_ink(out, entry.ink);
         if (!seen.insert(entry.rgb).second) bad("an RGB colour is in the table twice");
         out.inks.push_back(std::move(entry));
     }
@@ -251,6 +543,8 @@ bool lab_blend(std::string_view mode) {
     return std::find(kModes.begin(), kModes.end(), mode) != kModes.end();
 }
 
+bool multi_blend(std::string_view mode) { return mode != "hue" && mode != "saturation" && mode != "color" && mode != "luminosity"; }
+
 void validate_ink_document(const Document& doc) {
     if (doc.color && doc.rgb) throw Error("value", "the book has two colour models (inks and RGB) for its new pages");
     for (const auto& page : doc.pages) {
@@ -262,6 +556,9 @@ void validate_ink_document(const Document& doc) {
             if (page->color && page->color->space == InkSpace::Lab && !lab_blend(layer.blend)) {
                 throw Error("value", "a Lab page cannot composite the blend " + py_repr_str(layer.blend) + " (layer " + layer.id + ")");
             }
+            if (page->color && page->color->space == InkSpace::Multi && !multi_blend(layer.blend)) {
+                throw Error("value", "a multichannel page cannot composite the blend " + py_repr_str(layer.blend) + " (layer " + layer.id + ")");
+            }
             if (page->color && ((layer.raster_png && !layer.raster_png->empty()) || layer.color_raster)) {
                 // (what drew RGB pixels on it does not know the page's inks yet)
                 throw Error("not_yet_ported", "RGB pixels on a CMYK, Lab or grey page are not in this build yet (layer " + layer.id + ")");
@@ -269,10 +566,26 @@ void validate_ink_document(const Document& doc) {
             if (!layer.ink_raster) continue;
             if (!page->color) throw Error("value", "an RGB page holds no ink pixels (layer " + layer.id + ")");
             const InkRasterHeader header = ink_raster_header(*layer.ink_raster);
-            if (header.space != page->color->space || header.depth != page->color->depth) {
+            if (header.space != page->color->space || header.depth != page->color->depth ||
+                (header.space == InkSpace::Multi && header.planes != page->color->plates.size())) {
                 throw Error("value", "the layer " + layer.id + "'s pixels are not in its page's colour mode");
             }
         }
+    }
+    // (color-model@1, PC1d: each mode's own parts as they must be)
+    const auto check_mode = [](const PageColor& color) {
+        if (color.bitmap && (color.space != InkSpace::Gray || color.depth != 8 || !color.duotone.empty())) {
+            throw Error("value", "a bitmap page is a grey page of 8 bits");
+        }
+        if (!color.duotone.empty() && color.space != InkSpace::Gray) throw Error("value", "a duotone page is a grey page");
+        if (color.bitmap) check_bitmap(*color.bitmap);
+        if (!color.duotone.empty()) check_duotone(color.duotone);
+        if ((color.space == InkSpace::Multi) != !color.plates.empty()) throw Error("value", "a multichannel page has its plates");
+        if (color.space == InkSpace::Multi) check_plates(color.plates);
+    };
+    if (doc.color) check_mode(*doc.color);
+    for (const auto& page : doc.pages) {
+        if (page->color && std::find(doc.deferred.begin(), doc.deferred.end(), page) == doc.deferred.end()) check_mode(*page->color);
     }
 }
 

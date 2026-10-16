@@ -145,7 +145,7 @@ std::filesystem::path write_pdf(const std::filesystem::path& path, const std::ve
     std::string kids;
     for (std::size_t n = 0; n < pages.size(); ++n) {
         const PdfPage& page = pages[n];
-        if (page.mode != "1" && page.mode != "L" && page.mode != "RGB" && page.mode != "CMYK" && !(page.mode == "INK" && inks) &&
+        if (page.mode != "1" && page.mode != "L" && page.mode != "RGB" && page.mode != "CMYK" && page.mode != "P" && !(page.mode == "INK" && inks) &&
             !(page.mode == "VALUES" && values)) {
             throw core::Error("key", "'" + page.mode + "'");
         }
@@ -324,6 +324,18 @@ std::filesystem::path write_pdf(const std::filesystem::path& path, const std::ve
         if (page.mode == "1") {
             space = "/DeviceGray";
             bits = 1;
+        } else if (page.mode == "P") {  // (color-model@1: an indexed page, its table as /Indexed over DeviceRGB)
+            const std::vector<std::array<std::uint8_t, 3>> palette = made.palette();
+            if (palette.empty() || palette.size() > 256) throw core::Error("value", "an indexed picture has 1..256 colours");
+            std::string lookup = "<";
+            for (const auto& c : palette) {
+                for (const std::uint8_t v : c) {
+                    char hex[3];
+                    std::snprintf(hex, sizeof hex, "%02X", v);
+                    lookup += hex;
+                }
+            }
+            space = "[/Indexed /DeviceRGB " + std::to_string(palette.size() - 1) + " " + lookup + ">]";
         } else if (page.mode == "L") {
             space = "/DeviceGray";
         } else if (page.mode == "RGB") {

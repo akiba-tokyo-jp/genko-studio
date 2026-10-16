@@ -126,6 +126,8 @@ std::optional<std::int64_t> py_int_text(const QString& text) {
 
 }  // namespace
 
+void lay_out_dialog(QDialog* dialog, QFormLayout* form, QDialogButtonBox* buttons) { lay_out(dialog, form, buttons); }
+
 // --- ノンブルの設定 ---------------------------------------------------------------------------------------------------
 
 NombreDialog::NombreDialog(QWidget* parent, const core::Document& book) : QDialog(parent) {

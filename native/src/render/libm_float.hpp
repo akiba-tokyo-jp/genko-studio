@@ -18,5 +18,8 @@ namespace genko::render::libm {
 float sinf(float x);
 float cosf(float x);
 float powf(float x, float y);
+// The cube root, the same bits on every platform (the C libraries' cbrtf differ in their last bit): powf's estimate
+// refined in double by Newton's method, rounded to float once (PC1d: PhotoCraft's palettes and Lab, render/quantize).
+float cbrtf(float x);
 
 }  // namespace genko::render::libm

@@ -322,7 +322,8 @@ private slots:
         QCOMPARE(doc.page(0).channels[0].id, third);
         QCOMPARE(doc.page(0).channels.size(), std::size_t{5});
         QVERIFY(refusal(doc, Json{{"op", "delete_channel"}, {"page", 1}, {"channel", "red"}}).find("to_multichannel") != std::string::npos);
-        QVERIFY(refusal(doc, Json{{"op", "delete_channel"}, {"page", 1}, {"channel", "red"}, {"to_multichannel", true}}).starts_with("not_yet_ported"));
+        // (with to_multichannel: PC1d's — the page multichannel, the plate deleted: test_color_model's deleteColourPlate)
+        QVERIFY(refusal(doc, Json{{"op", "delete_channel"}, {"page", 1}, {"channel", "red"}, {"to_multichannel", true}}).empty());
         QVERIFY(refusal(doc, Json{{"op", "delete_channel"}, {"page", 1}, {"channel", "nope"}}).find("no channel") != std::string::npos);
     }
 

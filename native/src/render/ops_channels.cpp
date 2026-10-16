@@ -316,6 +316,50 @@ void duplicate_channel(OpContext& c) {
     c.report = Json{{"channel", made.id}, {"page", doc.page(into).index.json()}};
 }
 
+// A colour plate of a page deleted (Photoshop's and PhotoCraft's Delete Channel of a colour channel, color-model@1 PC1d):
+// the page made multichannel first (set_color_mode's: its pixel layers flattened, a plate for each of its own — RGB's
+// red, green and blue as Cyan, Magenta and Yellow, CMYK's four, Lab's Alpha 1..3), then that plate taken out of its
+// pixels and its table of inks. A multichannel page keeps one plate at least.
+void delete_plate(OpContext& c, std::size_t at, std::size_t plate) {
+    Document& doc = c.doc;
+    const std::string page_id = doc.page(at).id;
+    Json report = Json::object();
+    if (!doc.page(at).color || doc.page(at).color->space != core::InkSpace::Multi) {
+        if (core::plate_names(doc.page(at)).size() < 2) throw OpError("page " + doc.page(at).index.repr() + " has only one colour plate to keep");
+        const Json multi{{"op", "set_color_mode"}, {"page", doc.page(at).index.json()}, {"mode", "multichannel"}};
+        OpContext inner{doc, multi, c.actor};
+        (*ops_registry().find("set_color_mode"))(inner);
+        if (inner.report && inner.report->is_object()) report = *inner.report;
+    }
+    std::size_t p = 0;
+    while (p < doc.pages.size() && doc.pages[p]->id != page_id) ++p;
+    Page& page = doc.edit_page(p);
+    core::PageColor& color = *page.color;
+    if (color.plates.size() < 2) throw OpError("a multichannel page keeps one plate at least");
+    if (plate >= color.plates.size()) throw OpError("the page has no such plate");
+    const unsigned n = color.planes();
+    for (core::Layer& layer : page.layers) {  // (its plane out of each layer's pixels)
+        if (!layer.ink_raster) continue;
+        const core::InkPixels was = core::decode_ink_raster(*layer.ink_raster);
+        core::InkPixels now = core::blank_ink_pixels(core::InkSpace::Multi, was.depth, was.width, was.height, n - 1);
+        for (std::size_t i = 0; i < was.pixel_count(); ++i) {
+            unsigned k = 0;
+            for (unsigned c2 = 0; c2 <= n; ++c2) {
+                if (c2 == plate) continue;
+                now.set(i, k++, was.value(i, c2));
+            }
+        }
+        layer.ink_raster = std::make_shared<const std::string>(core::encode_ink_raster(now));
+        layer.ink_memo = {};
+    }
+    for (core::InkEntry& entry : color.inks) {
+        if (plate < entry.ink.size()) entry.ink.erase(entry.ink.begin() + static_cast<std::ptrdiff_t>(plate));
+    }
+    color.plates.erase(color.plates.begin() + static_cast<std::ptrdiff_t>(plate));
+    report["plates"] = static_cast<std::int64_t>(color.plates.size());
+    c.report = std::move(report);
+}
+
 void delete_channel(OpContext& c) {
     Document& doc = c.doc;
     const std::size_t at = core::require_page(doc, c.op);
@@ -323,8 +367,11 @@ void delete_channel(OpContext& c) {
     const Json* given = field(c.op, "channel");
     if (given != nullptr && given->is_string() && core::plate_index(page, given->get<std::string>()) &&
         core::channel_index(page, given->get<std::string>()) >= page.channels.size()) {
-        if (flag_of(c.op, "to_multichannel", false)) {
-            throw core::Error("not_yet_ported", "deleting a colour plate (the page into multichannel) is not in this build yet");
+        const std::size_t plate = *core::plate_index(page, given->get<std::string>());
+        // (a multichannel page's plate goes as it is; another page's only when asked to become multichannel)
+        if (flag_of(c.op, "to_multichannel", false) || (page.color && page.color->space == core::InkSpace::Multi)) {
+            delete_plate(c, at, plate);
+            return;
         }
         throw OpError("a colour plate is deleted only with to_multichannel: true (the page becomes multichannel)");
     }
@@ -396,8 +443,10 @@ void set_channel(OpContext& c) {
     doc.edit_page(at).channels[index] = std::move(channel);
 }
 
+}  // namespace
+
 // The layers merge_visible's flatten keeps in one: the first shown (as layerops picks it).
-std::optional<std::string> first_shown(const Page& page) {
+std::optional<std::string> first_shown_layer(const Page& page) {
     const auto shown_in = [&](const core::Layer& layer) {
         const core::Json* parent = &layer.parent_id;
         std::vector<std::string> seen;
@@ -424,6 +473,18 @@ std::optional<std::string> first_shown(const Page& page) {
     return std::nullopt;
 }
 
+std::optional<std::string> flatten_page(OpContext& c, std::size_t at) {
+    const auto target = first_shown_layer(c.doc.page(at));
+    if (!target) return std::nullopt;
+    const Json flatten{{"op", "merge_visible"}, {"page", c.doc.page(at).index.json()}, {"copy", false}, {"flatten", true}};
+    if (c.doc.strict_gates) core::check_strict(c.doc, flatten, c.actor);  // (a studio book's rules for a flatten too)
+    OpContext inner{c.doc, flatten, c.actor};
+    (*ops_registry().find("merge_visible"))(inner);
+    return target;
+}
+
+namespace {
+
 // The spot printed into a colour p (0..1): p + (s·ink + (1 − s)·p·ink − p)·v (PhotoCraft's Merge Spot Channel,
 // channel_cmds.rs:1149-1198).
 inline double spot_into(double p, double ink, double s, double v) { return p + (s * ink + (1 - s) * p * ink - p) * v; }
@@ -443,17 +504,11 @@ void merge_spot_channel(OpContext& c) {
     }
     const Channel spot = doc.page(at).channels[index];
     if (spot.kind != ChannelKind::Spot) throw OpError("the channel " + core::py_repr_str(spot.name) + " is not a spot channel");
-    const auto target = first_shown(doc.page(at));
-    if (!target) throw OpError("no layer is showing");
     const std::string page_id = doc.page(at).id;
     // the page's pixel layers flattened into one (Genko's 画像をフラット化: merge_visible, its frames and lines kept as they
     // are — the user's decision: as PhotoCraft flattens), then the spot printed into it
-    {
-        const Json flatten{{"op", "merge_visible"}, {"page", doc.page(at).index.json()}, {"copy", false}, {"flatten", true}};
-        if (doc.strict_gates) core::check_strict(doc, flatten, c.actor);  // (a studio book's rules for a flatten too)
-        OpContext inner{doc, flatten, c.actor};
-        (*ops_registry().find("merge_visible"))(inner);
-    }
+    const auto target = flatten_page(c, at);
+    if (!target) throw OpError("no layer is showing");
     std::size_t p = 0;
     while (p < doc.pages.size() && doc.pages[p]->id != page_id) ++p;
     Page& page = doc.edit_page(p);

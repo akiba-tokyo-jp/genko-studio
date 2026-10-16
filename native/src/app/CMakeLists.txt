@@ -62,6 +62,7 @@ genko_library(genko_app
     main_window_book.cpp
     main_window_color.cpp
     book_dialogs.cpp
+    mode_dialogs.cpp
     main_window_output.cpp
     export_dialog.cpp
     print_dialog.cpp

@@ -69,6 +69,51 @@ struct InkEntry {
     bool operator==(const InkEntry&) const = default;
 };
 
+// color-model@1 (PC1d, PhotoCraft's Image › Mode): a bitmap page's look (2 階調: its pixels 0 or full, as Bitmap made
+// them — the method recorded), a duotone page's inks (a grey page printed in 1..4 inks through their curves), a
+// multichannel page's plates (each a plane of ink density printed over white paper).
+inline constexpr std::array<std::string_view, 4> kBitmapMethods{"threshold", "pattern", "diffusion", "halftone"};
+inline constexpr std::array<std::string_view, 6> kHalftoneShapes{"round", "ellipse", "line", "square", "diamond", "cross"};
+inline constexpr std::size_t kDuotoneInksMax = 4;
+inline constexpr std::size_t kCurvePointsMax = 13;  // (Photoshop's duotone transfer curves)
+inline constexpr std::size_t kPlatesMax = 32;
+inline constexpr std::size_t kInkNameMax = 64;  // characters
+
+struct BitmapLook {
+    std::string method = "diffusion";  // kBitmapMethods
+    double frequency = 53;             // a halftone's lines per inch, 1..999
+    double angle = 45;                 // its screen's angle, -180..180
+    std::string shape = "round";       // its dots' shape, kHalftoneShapes
+    bool operator==(const BitmapLook&) const = default;
+};
+
+// A transfer curve: points (in, out), both 0..100 — in strictly increasing, 2..13 points —, straight between them.
+using CurvePoint = std::array<double, 2>;
+// The curve at x (0..1), as a fraction (PhotoCraft's doc/src/mode.rs curve_eval; no points: x itself).
+double curve_at(const std::vector<CurvePoint>& curve, double x);
+
+struct DuotoneInk {
+    std::string name;            // 1..64 characters
+    std::array<int, 3> color{};  // the solid ink as it shows (sRGB, 0..255 each)
+    std::vector<CurvePoint> curve{{0.0, 0.0}, {100.0, 100.0}};  // a grey's density (0 paper, 100 solid) to the ink's
+    bool operator==(const DuotoneInk&) const = default;
+};
+// A grey (0 black, 1 white) printed in the inks over white paper, sRGB 0..1 (PhotoCraft's Duotone::render: each ink
+// filters the light, its density by its curve).
+std::array<double, 3> duotone_print(const std::vector<DuotoneInk>& inks, double grey);
+
+struct Plate {
+    std::string name;               // 1..64 characters, one each on the page
+    std::array<int, 3> color{};     // the ink as it shows (sRGB)
+    double solidity = 0;            // 0 an ink seen through, 1 one that covers
+    bool key = false;               // an element's grey goes on it (the page's black)
+    std::vector<CurvePoint> curve;  // (a duotone's ink: a grey's density to its own; none: as it is)
+    bool operator==(const Plate&) const = default;
+};
+// The plates printed over a colour `p` (sRGB 0..1, in place; white paper to start), each at its density (0..1):
+// (1 − s·v)·p·(1 − v + v·c) + s·v·c (PhotoCraft's compose/src/multichannel.rs).
+void print_plates(const std::vector<Plate>& plates, const double* density, double* p);
+
 // A page's colour mode (and the book's, for the pages it makes).
 struct PageColor {
     InkSpace space = InkSpace::Cmyk;
@@ -78,23 +123,50 @@ struct PageColor {
     std::string intent = "relative";
     bool bpc = true;                 // black point compensation when colours come in (false: color-model@1)
     std::vector<InkEntry> inks;
+    // color-model@1 (PC1d): Gray — a bitmap page's look, or a duotone page's inks (one of them at most); Multi — its
+    // plates and the mode it was made from (rgb, cmyk, lab, gray, duotone: how an element's colour goes onto them; its
+    // profile that mode's — CMYK, grey — or none).
+    std::optional<BitmapLook> bitmap;
+    std::vector<DuotoneInk> duotone;
+    std::vector<Plate> plates;
+    std::string from;
 
     // (the profile by its ref: the same bytes)
     bool operator==(const PageColor& other) const {
         return space == other.space && depth == other.depth && profile == other.profile && intent == other.intent &&
-               bpc == other.bpc && inks == other.inks;
+               bpc == other.bpc && inks == other.inks && bitmap == other.bitmap && duotone == other.duotone && plates == other.plates &&
+               from == other.from;
     }
     // Can color-mode@1 hold it (CMYK or Lab, 8 or 16 bits, black point compensation)? Else it is color-model@1's.
     bool color_mode_only() const { return (space == InkSpace::Cmyk || space == InkSpace::Lab) && depth != 32 && bpc; }
+    // Its colour planes (a multichannel page's plates).
+    unsigned planes() const { return space == InkSpace::Multi ? static_cast<unsigned>(plates.size()) : colour_channels(space); }
 };
 
-// {"mode", "depth", "profile"?, "intent", "bpc"?, "inks"} in that order ("bpc" only when false).
+// The mode a page's colour mode is written as: cmyk, lab, gray, bitmap, duotone, multichannel.
+std::string_view mode_name(const PageColor& color);
+
+// {"mode", "depth", "profile"?, "intent", "bpc"?, "inks", "bitmap"?, "duotone"?, "plates"?, "from"?} in that order
+// ("bpc" only when false).
 Json to_json(const PageColor& color);
 // The JSON as the writer writes it, checked (core::Error("value") says what is wrong): a mode of inks (cmyk, lab,
-// gray). The profile's bytes are not looked at (icc stays null).
+// gray, bitmap, duotone, multichannel). The profile's bytes are not looked at (icc stays null).
 PageColor page_color_from_json(const Json& value);
-// Is an ink right for the space (the count of its values, their ranges, finite)?
+// Is an ink right for the space (the count of its values, their ranges, finite)? A multichannel page's: a value 0..1
+// for each of its plates.
 void check_ink(InkSpace space, const std::vector<double>& ink);
+void check_ink(const PageColor& color, const std::vector<double>& ink);
+// A bitmap page's look, a duotone page's inks, a multichannel page's plates, a curve as they must be
+// (core::Error("value") says what is not).
+void check_bitmap(const BitmapLook& look);
+void check_duotone(const std::vector<DuotoneInk>& inks);
+void check_plates(const std::vector<Plate>& plates);
+void check_curve(const std::vector<CurvePoint>& curve);
+// The JSON of a curve ([[in, out], …]), a duotone's inks, plates; and back, checked (core::Error("value")).
+Json curve_json(const std::vector<CurvePoint>& curve);
+std::vector<CurvePoint> curve_from_json(const Json& value);
+Json duotone_json(const std::vector<DuotoneInk>& inks);
+std::vector<DuotoneInk> duotone_from_json(const Json& value);
 // The table's entry for an RGB colour, or none.
 const InkEntry* ink_for(const PageColor& color, const std::array<int, 3>& rgb);
 
@@ -109,6 +181,8 @@ struct Document;
 void validate_ink_document(const Document& doc);
 // The blend modes a Lab page composites (SPEC.md COLOR-02).
 bool lab_blend(std::string_view mode);
+// The blend modes a multichannel page composites: the separable ones (not hue, saturation, color, luminosity).
+bool multi_blend(std::string_view mode);
 
 // --- GKIR: a paint layer's pixels on a CMYK, Lab or grey page, a channel's ------------------------------------------
 
