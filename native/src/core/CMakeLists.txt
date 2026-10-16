@@ -52,6 +52,7 @@ genko_library(genko_core
     color_raster.cpp
     ink.cpp
     color_model.cpp
+    channels.cpp
     exposure.cpp
     ops_color.cpp
     frames.cpp

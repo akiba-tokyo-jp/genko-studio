@@ -419,7 +419,9 @@ private slots:
             "add_shape", "smudge", "liquify", "import_psd",
             "set_color_mode", "set_inks",  // (color-mode@1: the C++ build's own, SPEC.md COLOR-02)
             "assign_profile", "convert_profile",  // (color-model@1: the C++ build's own, SPEC.md COLOR-03)
-            "set_text_gamma"};  // (color-model@1's book text_gamma, PC1b: the C++ build's own, SPEC.md COLOR-03)
+            "set_text_gamma",  // (color-model@1's book text_gamma, PC1b: the C++ build's own, SPEC.md COLOR-03)
+            "add_channel", "duplicate_channel", "delete_channel", "rename_channel", "move_channel", "set_channel",
+            "merge_spot_channel", "split_channels", "merge_channels"};  // (channels@1: the C++ build's own, SPEC.md COLOR-03)
         expected.insert(drawing_names.begin(), drawing_names.end());
         const std::set<std::string> actual(all_names.begin(), all_names.end());
         QCOMPARE(actual, expected);

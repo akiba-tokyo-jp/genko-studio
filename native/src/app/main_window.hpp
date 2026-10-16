@@ -48,6 +48,7 @@ class QVBoxLayout;
 namespace genko::app {
 
 class BrushPanel;
+class ChannelPanel;
 class CheckPanel;
 class ColourPanel;
 class HistoryPanel;
@@ -154,6 +155,30 @@ public:
     // The page shown as these ops would leave it, without changing the book (フィルターのプレビュー); none: as it is.
     void preview_ops(const std::optional<core::Json>& ops);
     LayerPanel* layer_panel() const { return layer_panel_; }
+    // channels@1 (main_window_channels.cpp): the channel panel, and what the pixel tools work on and what is shown of a
+    // page's channels — the window's, never saved; each page its own —: the target ("" the composite, a colour plate's
+    // name, an alpha or spot channel's id; the pixel ops sent are given it as their "channel"), the colour plates
+    // hidden, the alpha channels laid over in their colours, the spot channels not printed on screen.
+    struct ChannelView {
+        std::string target;
+        std::vector<bool> hidden;
+        std::set<std::string> shown;
+        std::set<std::string> hidden_spots;
+    };
+    ChannelPanel* channel_panel() const { return channel_panel_; }
+    QDockWidget* channels_dock() const { return channels_dock_; }
+    ChannelView channel_view() const;
+    // A row of the panel made what the tools work on (PhotoCraft's click on a row: a channel shown alone, a plate alone,
+    // the composite back); Ctrl+Alt+2…9 (2 the composite, then the plates, then the channels).
+    void target_channel(const std::string& target);
+    void target_slot(int slot);
+    // A row's eye: the composite (every plate), a plate, an alpha channel laid over, a spot channel printed.
+    void show_channel(const std::string& key, bool shown);
+    // 選択 → 選択範囲をチャンネルに保存… / チャンネルから読み込む.
+    bool save_selection_to_channel(std::optional<QString> name = std::nullopt);
+    void load_selection_from_channel(const std::string& id);
+    // A kept area (ストック) made the selection (選択 → ストックから選ぶ; the channel panel's rows).
+    void select_stock(const std::string& name) { use_stock(name); }
     BrushPanel* brush_panel() const { return brush_; }
     ColourPanel* colours() const { return colours_; }
     ToolSettings* tool_settings() const { return tool_settings_; }
@@ -620,8 +645,18 @@ private:
     void paste();
     void fill_selection();
     void line_width();
+    // channels@1 (main_window_channels.cpp)
+    void build_channel_actions();
+    void build_channel_dock();
+    void fill_channel_menu();
+    void channel_view_changed();
+    core::Json with_channel_target(const core::Json& ops) const;
 
     std::shared_ptr<Session> session_;
+    std::map<std::string, ChannelView> channel_views_;  // (by page id)
+    ChannelPanel* channel_panel_ = nullptr;
+    QDockWidget* channels_dock_ = nullptr;
+    QMenu* channel_load_menu_ = nullptr;
     std::vector<Document> documents_;
     int doc_ = 0;
     int page_index_ = 0;

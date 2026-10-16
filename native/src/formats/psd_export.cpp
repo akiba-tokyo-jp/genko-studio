@@ -8,6 +8,7 @@
 #include <cmath>
 #include <map>
 
+#include "core/channels.hpp"
 #include "core/error.hpp"
 #include "core/pyconv.hpp"
 #include "core/pynum.hpp"
@@ -17,6 +18,7 @@
 #include "formats/output.hpp"
 #include "formats/pillow_save.hpp"
 #include "formats/psd_text_detail.hpp"
+#include "render/channels.hpp"
 #include "render/color_canvas.hpp"
 #include "render/ink.hpp"
 #include "render/ink_canvas.hpp"
@@ -812,6 +814,94 @@ std::string resources_with_icc(std::int64_t dpi, std::string_view icc) {
     return sized + block;
 }
 
+// channels@1 (SPEC.md COLOR-03): a page's alpha and spot channels written as the PSD's extra channels, after its colour
+// planes in the panel's order, with their names (1006 in Pascal strings, 1045 in UTF-16) and how they show (1077,
+// DisplayInfo: version 1, then for each 13 bytes — an RGB colour of four 16-bit components, its opacity, a spot's
+// solidity, in percent, and 0 selected areas / 1 masked areas / 2 spot: PhotoCraft's io/channel_map.rs, without the
+// padding byte it writes after the kind, which 1007's records have and 1077's do not: GIMP and psd-tools read 13 a
+// record, and psd-tools refuses the file otherwise). Their samples are the grey
+// Photoshop shows the channel as, its colour where it is dark (as a CMYK plate is stored, 0 the full ink — this
+// writer's CMYK planes, Adobe's colour structure, Pillow's and psd-tools' readers —, and as PhotoCraft's own
+// multichannel_map.rs writes spot planes): a spot channel max − density (0 the full ink), an alpha channel marking the
+// selected areas max − density (0 selected), one marking the masked areas its density (max selected, as GIMP writes its
+// channels with kind 1). (PhotoCraft writes a spot and a selected-areas channel of an RGB or CMYK document as its density:
+// the other way round.)
+std::string image_resource(unsigned id, std::string data) {
+    std::string block = "8BIM";
+    put_u16(block, id);
+    block += std::string(2, '\0');
+    put_u32(block, u32_of(data.size()));
+    if (data.size() % 2) data += '\0';
+    return block + data;
+}
+
+std::string utf16_of(const std::string& name) {
+    const std::string luni = unicode_name(name);  // ("8BIMluni", its length, the count of units and the units, padded)
+    const std::uint32_t units = (static_cast<unsigned char>(luni[12]) << 24) | (static_cast<unsigned char>(luni[13]) << 16) |
+                                (static_cast<unsigned char>(luni[14]) << 8) | static_cast<unsigned char>(luni[15]);
+    return luni.substr(16, std::size_t(units) * 2);
+}
+
+std::string with_channels(const std::string& sized_resources, const core::Page& page) {
+    if (page.channels.empty()) return sized_resources;
+    std::string names, unicode, display;
+    put_u32(display, 1);
+    for (const core::Channel& channel : page.channels) {
+        std::string ascii;
+        for (const char c : channel.name) ascii += static_cast<unsigned char>(c) < 0x80 && static_cast<unsigned char>(c) >= 0x20 ? c : '?';
+        if (ascii.size() > 255) ascii.resize(255);
+        names += static_cast<char>(ascii.size());
+        names += ascii;
+        const std::string units = utf16_of(channel.name);
+        put_u32(unicode, static_cast<std::uint32_t>(units.size() / 2 + 1));
+        unicode += units;
+        put_u16(unicode, 0);
+        const bool spot = channel.kind == core::ChannelKind::Spot;
+        put_u16(display, 0);  // (RGB)
+        for (const int c : channel.color) put_u16(display, static_cast<std::uint32_t>(c) * 257);
+        put_u16(display, 0);
+        put_u16(display, static_cast<std::uint32_t>(std::lround(std::clamp(spot ? channel.solidity : channel.opacity, 0.0, 1.0) * 100.0)));
+        put_u8(display, spot ? 2 : channel.indicates == "selected" ? 0 : 1);  // (13 bytes: 1077 has no padding byte, unlike 1007)
+    }
+    std::string blocks = sized_resources.substr(4);
+    blocks += image_resource(1006, names);
+    blocks += image_resource(1045, unicode);
+    blocks += image_resource(1077, display);
+    std::string out;
+    put_u32(out, u32_of(blocks.size()));
+    return out + blocks;
+}
+
+// A channel's samples over the merged picture (`size`), at `depth` (8 and 16 rounded, 32 floats), big-endian: its
+// density, or 1 − its density for a spot and a channel marking the selected areas (dark where its colour shows).
+std::string channel_samples(const core::Page&, const core::Channel& channel, render::Size size, int depth) {
+    const render::channels::Density density(channel);
+    const bool dark = channel.kind == core::ChannelKind::Spot || channel.indicates == "selected";
+    std::string out;
+    out.reserve(std::size_t(size.width) * size.height * std::size_t(depth / 8));
+    for (int y = 0; y < size.height; ++y) {
+        for (int x = 0; x < size.width; ++x) {
+            const double v = std::clamp(double(density.at((x + 0.5) / size.width, (y + 0.5) / size.height)), 0.0, 1.0);
+            put_sample(out, dark ? 1.0 - v : v, depth);
+        }
+    }
+    return out;
+}
+
+// The merged picture's extra channels after its colour planes: 8 bits RLE (their rows' counts after the colours', their
+// packed rows after theirs), 16 and 32 raw.
+void put_channels_rle(const core::Page& page, render::Size size, std::string& counts, std::string& packed) {
+    for (const core::Channel& channel : page.channels) packbits_rows(Image::frombytes("L", size, channel_samples(page, channel, size, 8)), counts, packed);
+}
+
+// The render's options for the merged picture: its spots left out (they are channels of their own).
+render::RenderOptions merged_options(const core::Page& page) {
+    render::RenderOptions options;
+    options.mode = "print";
+    if (!page.channels.empty()) options.spots = std::vector<std::string>{};
+    return options;
+}
+
 // color-mode@1 (SPEC.md COLOR-02): a CMYK or Lab page's PSD in its own colour mode (4 or 9) and depth, every layer and
 // the merged picture as its inks (a paint layer's own; the others' colours by the page's rules), a CMYK page's profile
 // embedded. The editable text of PSD-01 too: its layers' pixels in inks, a CMYK page's text colours as inks.
@@ -822,8 +912,7 @@ void put_page_psd_inks(detail::Output& output, const core::Document& episode, co
     core::PageColor color = *page.color;
     if (color.depth == 32 && color.space != core::InkSpace::Gray) color.depth = 16;  // (the depth written)
     const bool grey = color.space == core::InkSpace::Gray;
-    render::RenderOptions options;
-    options.mode = "print";
+    render::RenderOptions options = merged_options(page);
     options.inks = true;
     const render::RenderResult made = render::render_page(page, static_cast<int>(dpi), options, &episode);
     std::optional<core::InkPixels> halved;  // (a 32-bit CMYK or Lab page's at 16)
@@ -848,13 +937,14 @@ void put_page_psd_inks(detail::Output& output, const core::Document& episode, co
     std::string body = "8BPS";
     put_u16(body, 1);
     body.append(6, '\0');
-    put_u16(body, n);
+    put_u16(body, n + static_cast<unsigned>(page.channels.size()));
     put_u32(body, merged.height);
     put_u32(body, merged.width);
     put_u16(body, static_cast<std::uint32_t>(color.depth));
     put_u16(body, color.space == core::InkSpace::Cmyk ? 4 : grey ? 1 : 9);
     put_u32(body, 0);  // (no colour mode data)
-    body += resources_with_icc(dpi, color.space != core::InkSpace::Lab && color.icc ? std::string_view(*color.icc) : std::string_view());
+    body += with_channels(resources_with_icc(dpi, color.space != core::InkSpace::Lab && color.icc ? std::string_view(*color.icc) : std::string_view()),
+                          page);
     body += records.finish();
     // the merged picture: each colour plane (CMYK inverted); 8 bits RLE (every row's count first), 16 and 32 raw
     const unsigned all = merged.channels();
@@ -875,12 +965,14 @@ void put_page_psd_inks(detail::Output& output, const core::Document& episode, co
     if (color.depth == 8) {
         std::string counts, packed;
         for (unsigned c = 0; c < n; ++c) packbits_rows(Image::frombytes("L", size, plane(c)), counts, packed);
+        put_channels_rle(page, size, counts, packed);
         put_u16(body, 1);
         body += counts;
         body += packed;
     } else {
         put_u16(body, 0);
         for (unsigned c = 0; c < n; ++c) body += plane(c);
+        for (const core::Channel& channel : page.channels) body += channel_samples(page, channel, size, color.depth);
     }
     if (dest.has_parent_path()) detail::make_dirs(dest.parent_path());
     output.put(dest, body);
@@ -893,8 +985,7 @@ void put_page_psd_rgb(detail::Output& output, const core::Document& episode, con
                       const PsdText& text, PsdTextReport* report) {
     const core::RgbMode& mode = *page.rgb;
     const int depth = mode.depth;
-    render::RenderOptions options;
-    options.mode = "print";
+    const render::RenderOptions options = merged_options(page);
     const detail::PageValues made = detail::page_values(page, episode, static_cast<int>(dpi), options);
     const core::ColorRasterView merged(made.values);
     const render::Size size{static_cast<int>(merged.width()), static_cast<int>(merged.height())};
@@ -911,13 +1002,13 @@ void put_page_psd_rgb(detail::Output& output, const core::Document& episode, con
     std::string body = "8BPS";
     put_u16(body, 1);
     body.append(6, '\0');
-    put_u16(body, 3);
+    put_u16(body, 3 + static_cast<std::uint32_t>(page.channels.size()));
     put_u32(body, merged.height());
     put_u32(body, merged.width());
     put_u16(body, static_cast<std::uint32_t>(depth));
     put_u16(body, 3);
     put_u32(body, 0);  // (no colour mode data)
-    body += resources_with_icc(dpi, detail::rgb_icc(mode));
+    body += with_channels(resources_with_icc(dpi, detail::rgb_icc(mode)), page);
     body += records.finish();
     // the merged picture: 8 bits RLE (every row's count first), 16 and 32 raw
     const std::size_t pixels = std::size_t(merged.width()) * merged.height();
@@ -929,12 +1020,14 @@ void put_page_psd_rgb(detail::Output& output, const core::Document& episode, con
     if (depth == 8) {
         std::string counts, packed;
         for (unsigned c = 0; c < 3; ++c) packbits_rows(Image::frombytes("L", size, plane(c)), counts, packed);
+        put_channels_rle(page, size, counts, packed);
         put_u16(body, 1);
         body += counts;
         body += packed;
     } else {
         put_u16(body, 0);
         for (unsigned c = 0; c < 3; ++c) body += plane(c);
+        for (const core::Channel& channel : page.channels) body += channel_samples(page, channel, size, depth);
     }
     if (dest.has_parent_path()) detail::make_dirs(dest.parent_path());
     output.put(dest, body);
@@ -953,8 +1046,7 @@ void put_page_psd(detail::Output& output, const core::Document& episode, const c
         put_page_psd_rgb(output, episode, page, dest, dpi, text, report);
         return;
     }
-    render::RenderOptions options;
-    options.mode = "print";
+    const render::RenderOptions options = merged_options(page);
     const Image merged = render::render_page(page, static_cast<int>(dpi), options, &episode).image;
     const Image rgb = merged.mode() == "RGB" ? merged : merged.convert("RGB");
     Records records(rgb.size());
@@ -970,17 +1062,18 @@ void put_page_psd(detail::Output& output, const core::Document& episode, const c
     std::string body = "8BPS";
     put_u16(body, 1);
     body.append(6, '\0');
-    put_u16(body, 3);
+    put_u16(body, 3 + static_cast<std::uint32_t>(page.channels.size()));
     put_u32(body, static_cast<std::uint32_t>(rgb.height()));
     put_u32(body, static_cast<std::uint32_t>(rgb.width()));
     put_u16(body, 8);
     put_u16(body, 3);
     put_u32(body, 0);  // (no colour mode data)
-    body += resources(dpi);
+    body += with_channels(resources(dpi), page);
     body += records.finish();
     // the merged picture: RLE, every row's count of every channel first
     std::string counts, packed;
     for (const Image& channel : rgb.split()) packbits_rows(channel, counts, packed);
+    put_channels_rle(page, rgb.size(), counts, packed);
     put_u16(body, 1);
     body += counts;
     body += packed;

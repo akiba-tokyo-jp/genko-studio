@@ -87,6 +87,16 @@ public:
     std::pair<std::size_t, std::size_t> gamut_count() const;
     // モニターのプロファイル: the screen's colours (none: sRGB, nothing done).
     void set_monitor(std::shared_ptr<const display_color::Monitor> monitor);
+    // channels@1: the channel panel's view of the page (render::RenderOptions' planes, overlays and spots); another view
+    // draws all of it again.
+    struct ChannelView {
+        std::optional<std::vector<bool>> planes;
+        std::vector<std::string> overlays;
+        std::optional<std::vector<std::string>> spots;
+        bool operator==(const ChannelView&) const = default;
+    };
+    void set_channel_view(ChannelView view);
+    const ChannelView& channel_view() const { return channel_view_; }
     // 網点を画面で見る (render.SCREEN_DOTS): the tones drawn as their dots on screen too.
     void set_screen_dots(bool on);
     bool screen_dots() const { return screen_dots_; }
@@ -179,6 +189,7 @@ private:
     std::optional<GamutLook> gamut_;
     std::shared_ptr<const display_color::Monitor> monitor_;
     bool screen_dots_ = false;                                    // set_screen_dots
+    ChannelView channel_view_;                                    // set_channel_view
     std::function<std::optional<std::filesystem::path>()> proof_profile_;
     std::map<int, Level> levels_;
     int base_dpi_ = 0;

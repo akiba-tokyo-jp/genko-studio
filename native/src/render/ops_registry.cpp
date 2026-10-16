@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <unordered_map>
 
+#include "core/channels.hpp"
 #include "core/command_bus.hpp"
 #include "core/ops_util.hpp"
 #include "core/pyops.hpp"
@@ -10,6 +11,7 @@
 #include "core/studio.hpp"
 #include "render/bookpages.hpp"
 #include "render/color_canvas.hpp"
+#include "render/channels.hpp"
 #include "render/color_edit.hpp"
 #include "render/ink_edit.hpp"
 #include "render/ops_3d.hpp"
@@ -250,6 +252,8 @@ void register_render_ops(core::OpRegistry& registry) {
     register_file_ops(registry);
     // the colour modes of pages (color-mode@1: CMYK and Lab, render/ops_ink)
     register_ink_ops(registry);
+    // a page's alpha and spot channels (channels@1, render/ops_channels)
+    register_channel_ops(registry);
     // the studio ops again, place_asset and set_placement able to read an asset's picture size, and those placing a
     // picture able to see it can be drawn (render/placed)
     core::register_studio_ops(registry, core::StudioHooks{asset_picture_size, check_asset_picture});
@@ -273,8 +277,8 @@ const core::OpRegistry& ops_registry() {
         // a precise paint layer takes what an op drew on it into its pixels (render/color_edit), a paint layer of a CMYK
         // or Lab page into its inks (render/ink_edit)
         for (const std::string& name : r.names()) {
-            const core::OpFunction op = *r.find(name);
-            r.add(name, [op, name](core::OpContext& c) {
+            const core::OpFunction plain = *r.find(name);
+            const core::OpFunction op = [plain, name](core::OpContext& c) {
                 // (color-mode@1: an op that draws new colours on a CMYK or Lab page works the pictures the ink layers
                 // it works on show, then puts what it left back into inks, render/ink_edit; the ops that only take,
                 // move or clear pixels work the inks themselves, render/raster_ops. color-model@1: on an RGB page of a
@@ -287,7 +291,7 @@ const core::OpRegistry& ops_registry() {
                         std::vector<RgbLending> lent;
                         lent.reserve(pages.size());
                         for (const std::size_t at : pages) lent.emplace_back(c.doc, at);
-                        op(c);
+                        plain(c);
                         for (const RgbLending& each : lent) each.take_back(c.doc);
                         color_edit::bake_page_values(c.doc);
                         color_edit::bake_marks(c.doc);
@@ -300,7 +304,7 @@ const core::OpRegistry& ops_registry() {
                         std::vector<ink_edit::Lending> lent;
                         lent.reserve(pages.size());
                         for (const std::size_t at : pages) lent.emplace_back(c.doc, at, name, c.op);
-                        op(c);
+                        plain(c);
                         for (const ink_edit::Lending& each : lent) each.take_back(c.doc);
                         color_edit::bake_page_values(c.doc);
                         color_edit::bake_marks(c.doc);
@@ -308,10 +312,46 @@ const core::OpRegistry& ops_registry() {
                         return;
                     }
                 }
-                op(c);
+                plain(c);
                 color_edit::bake_page_values(c.doc);
                 color_edit::bake_marks(c.doc);
                 ink_edit::bake_marks(c.doc);
+            };
+            // (channels@1: a pixel op's "channel" — a page's alpha or spot channel lent to it as a paint layer of its own,
+            // or one colour plate of its layer, the others put back after it: render/channels; and a page's channels
+            // kept at its depth)
+            r.add(name, [plain, op, name](core::OpContext& c) {
+                const std::optional<channels::Target> target = core::channel_target_op(name) ? channels::target_of(c.doc, c.op) : std::nullopt;
+                if (!target) {
+                    op(c);
+                    channels::follow_depth(c.doc);
+                    return;
+                }
+                const std::size_t at = core::require_page(c.doc, c.op);
+                if (target->channel) {
+                    core::Json lent_op = c.op;
+                    lent_op.erase("channel");
+                    const channels::ChannelLending lending(c.doc, at, *target->channel, lent_op, name);
+                    core::OpContext inner{c.doc, lent_op, c.actor};
+                    plain(inner);
+                    const bool changed = lending.take_back(c.doc);
+                    c.report = std::move(inner.report);
+                    if (changed && lending.depth() > 8) {  // (a 16- or 32-bit channel: what the op changed, drawn at 8 bits)
+                        if (!c.report || c.report->is_null()) c.report = core::Json::object();
+                        if (c.report->is_object()) (*c.report)["channel_precision"] = 8;
+                    }
+                    color_edit::bake_marks(c.doc);
+                    ink_edit::bake_marks(c.doc);
+                    return;
+                }
+                core::Json plate_op = c.op;
+                plate_op.erase("channel");
+                const channels::PlateKeep keep(c.doc, at, *target->plate, plate_op, name);
+                core::OpContext inner{c.doc, plate_op, c.actor};
+                op(inner);
+                keep.restore(c.doc);
+                c.report = std::move(inner.report);
+                channels::follow_depth(c.doc);
             });
         }
         return r;

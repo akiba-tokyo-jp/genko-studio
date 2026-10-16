@@ -14,6 +14,7 @@
 #include "core/pyops.hpp"
 #include "core/ruby.hpp"
 #include "formats/export.hpp"
+#include "formats/pdf.hpp"
 #include "formats/psd_text.hpp"
 #include "render/not_yet_ported.hpp"
 
@@ -268,6 +269,57 @@ std::vector<std::string> export_notes(const core::Document& episode, std::string
     if (cut > 0) {
         notes.push_back("HDR の値（0〜1 の外）を持つ 32 bit のページ " + std::to_string(cut) +
                         " ページは、PDF では 0〜1 に切って書き出しました（HDR のまま残すには TIFF か PSD で書き出します）");
+    }
+    // channels@1: PSD keeps a page's alpha and spot channels as channels of their own, PDF its spot channels as
+    // separations; elsewhere the spots are printed into the picture as the screen shows them (or, where the page is
+    // written as its inks or values, left out), and the alpha channels are left out
+    if (key != "psd") {
+        std::int64_t printed = 0, left = 0, alphas = 0;
+        for (const auto& page : episode.pages) {
+            const bool spot = std::any_of(page->channels.begin(), page->channels.end(),
+                                          [](const core::Channel& c) { return c.kind == core::ChannelKind::Spot && c.raster; });
+            const bool alpha = std::any_of(page->channels.begin(), page->channels.end(), [](const core::Channel& c) { return c.kind == core::ChannelKind::Alpha; });
+            if (alpha) ++alphas;
+            if (!spot || key == "pdf") continue;
+            const bool kept = detail::as_inks(*page, key == "pack" ? "tiff" : key, key == "pack" ? "auto" : color) ||
+                              detail::as_values(*page, key == "pack" ? "tiff" : key, key == "pack" ? "auto" : color);
+            if (kept) ++left;
+            else ++printed;
+        }
+        if (printed > 0) {
+            notes.push_back("特色チャンネルのあるページ " + std::to_string(printed) +
+                            " ページは、この形式では特色を版として書けないため、画面の見え方で刷り込んで書き出しました（PSD・PDF なら版として書けます）");
+        }
+        if (left > 0) {
+            notes.push_back("特色チャンネルのあるページ " + std::to_string(left) +
+                            " ページは、インキ・値のまま書いたため、特色を書き出していません（PSD・PDF なら版として書けます）");
+        }
+        if (alphas > 0) {
+            notes.push_back("アルファチャンネルのあるページ " + std::to_string(alphas) +
+                            " ページは、この形式ではアルファチャンネルを書けないため、書き出していません（PSD なら書けます）");
+        }
+    }
+    if (key == "pdf") {  // (a spot named as one of PDF's own colorants: written under another name)
+        std::vector<std::pair<std::string, std::string>> renamed;
+        for (const auto& page : episode.pages) {
+            std::vector<std::string> names;
+            for (const core::Channel& c : page->channels) {
+                if (c.kind == core::ChannelKind::Spot && c.raster) names.push_back(c.name);
+            }
+            const std::vector<std::string> written = pdf_spot_names(names);
+            for (std::size_t k = 0; k < names.size(); ++k) {
+                const std::pair<std::string, std::string> change{names[k], written[k]};
+                if (written[k] != names[k] && std::find(renamed.begin(), renamed.end(), change) == renamed.end()) renamed.push_back(change);
+            }
+        }
+        if (!renamed.empty()) {
+            std::string from, to;
+            for (const auto& [name, made] : renamed) {
+                from += (from.empty() ? "" : "・") + name;
+                to += (to.empty() ? "" : "・") + made;
+            }
+            notes.push_back("特色チャンネルの名前 " + from + " は PDF では決まった版（プロセスカラー・All・None）の名前のため、" + to + " として書き出しました");
+        }
     }
     return notes;
 }

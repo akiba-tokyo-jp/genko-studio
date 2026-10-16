@@ -57,6 +57,20 @@ bool same_frames(const std::vector<core::Frame>& a, const std::vector<core::Fram
     return true;
 }
 
+// channels@1: a page's channels as they are drawn (a spot printed; an alpha channel laid over).
+bool same_channels(const std::vector<core::Channel>& a, const std::vector<core::Channel>& b) {
+    if (a.size() != b.size()) return false;
+    for (std::size_t i = 0; i < a.size(); ++i) {
+        const core::Channel& x = a[i];
+        const core::Channel& y = b[i];
+        if (x.id != y.id || x.kind != y.kind || x.raster != y.raster || x.color != y.color || x.opacity != y.opacity ||
+            x.indicates != y.indicates || x.solidity != y.solidity) {
+            return false;
+        }
+    }
+    return true;
+}
+
 bool same_spec(const core::PageSpec& a, const core::PageSpec& b) {
     return same_num(a.width_mm, b.width_mm) && same_num(a.height_mm, b.height_mm) && same_num(a.dpi, b.dpi) &&
            same_num(a.bleed_mm, b.bleed_mm) && same_num(a.inner_margin_mm, b.inner_margin_mm) && a.expression == b.expression &&
@@ -292,6 +306,14 @@ std::pair<std::size_t, std::size_t> PageRenderer::gamut_count() const {
     return {out, all};
 }
 
+void PageRenderer::set_channel_view(ChannelView view) {
+    if (view == channel_view_) return;
+    channel_view_ = std::move(view);
+    ++generation_;
+    for (auto& [dpi, level] : levels_) mark(level, QRect(QPoint(0, 0), level.size), generation_);
+    dispatch();
+}
+
 void PageRenderer::set_screen_dots(bool on) {
     if (on == screen_dots_) return;
     screen_dots_ = on;
@@ -339,6 +361,7 @@ void PageRenderer::show(DocPtr doc, std::size_t index) {
         bool whole = !(old.index == page.index && covers_before(*doc_, old) == covers_before(*doc, page) &&
                        same_spec(old.spec, page.spec) && same_frames(old.frames, page.frames) && old.binding == page.binding &&
                        old.color == page.color &&  // (color-mode@1: another mode, profile or table of inks: all of it)
+                       same_channels(old.channels, page.channels) &&  // (channels@1)
                        old.fills == page.fills && old.extra == page.extra && old.effects == page.effects && old.ruler == page.ruler &&
                        old.rulers == page.rulers && old.prims == page.prims && old.numero == page.numero &&
                        old.onion_from == page.onion_from && same_onion && same_book && old.layers.size() == page.layers.size() &&
@@ -539,13 +562,14 @@ void PageRenderer::dispatch() {
             const std::shared_ptr<const display_color::Monitor> monitor =
                 proof && proof->kind == render::proof::Kind::Monitor ? nullptr : monitor_;
             const bool dots = screen_dots_;
+            const ChannelView view = channel_view_;
             const std::stop_token stop = tile.stop->get_token();
             const std::int64_t frame = frame_;
             const bool onion = onion_;
             if (!onions_) onions_ = std::make_shared<OnionStore>();
             const std::shared_ptr<OnionStore> onions = onions_;
-            pool_.start([self, doc, page_index, page_id, generation, dpi, index, region, rough, mode, proof, gamut, monitor, dots, stop, frame, onion,
-                         onions]() {
+            pool_.start([self, doc, page_index, page_id, generation, dpi, index, region, rough, mode, proof, gamut, monitor, dots, view, stop, frame,
+                         onion, onions]() {
                 Result result;
                 result.page_id = page_id;
                 result.dpi = dpi;
@@ -561,6 +585,9 @@ void PageRenderer::dispatch() {
                     options.skip_unported = true;  // (a preview on screen: what is not drawn yet is reported)
                     options.region = render::RenderRegion{region.x(), region.y(), region.width(), region.height()};
                     options.stop = stop;
+                    options.planes = view.planes;  // (channels@1: the channel panel's view)
+                    options.overlays = view.overlays;
+                    options.spots = view.spots;
                     const std::shared_ptr<const core::Page> raw = doc->pages.at(page_index);  // (a page gone meanwhile: caught below)
                     // (a CMYK page's plates are its own inks: drawn with them)
                     const bool cmyk_page = raw->color && raw->color->space == core::InkSpace::Cmyk;

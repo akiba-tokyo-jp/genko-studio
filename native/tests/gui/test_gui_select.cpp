@@ -404,6 +404,50 @@ private slots:
         QVERIFY(!canvas->quick_mask);
     }
 
+    // channels@1 (SPEC.md COLOR-03): 選択範囲をチャンネルに保存… (its name asked; none: Alpha n) and チャンネルから読み込む
+    // (the page's channels, remade each time): the same area back; with nothing chosen, said.
+    void savedToAndLoadedFromAChannel() {
+        Studio studio;
+        auto* canvas = studio.canvas();
+        QMenu* menu = nullptr;
+        for (QAction* top : studio.window->menuBar()->actions())
+            if (top->menu() != nullptr && top->menu()->title() == QStringLiteral("選択")) menu = top->menu();
+        QVERIFY(menu != nullptr);
+        QAction* save = studio.window->action("act_sel_to_channel");
+        QVERIFY(save != nullptr && menu->actions().contains(save));
+        QCOMPARE(save->text(), QStringLiteral("選択範囲をチャンネルに保存…"));
+        QMenu* load = nullptr;
+        for (QMenu* m : studio.window->findChildren<QMenu*>()) if (m->title() == QStringLiteral("チャンネルから読み込む")) load = m;
+        QVERIFY(load != nullptr && menu->actions().contains(load->menuAction()));
+        emit load->aboutToShow();
+        QCOMPARE(load->actions().size(), 1);
+        QVERIFY(!load->actions().first()->isEnabled());  // (none yet)
+        studio.trigger("act_marquee");
+        inject::mouse_stroke(canvas, {QPointF(10, 10), QPointF(30, 30)});
+        const double chosen = studio.size();
+        QVERIFY2(std::abs(chosen - 400) < 30, qPrintable(QString::number(chosen)));
+        studio.answers.responder->get_text = [](const QString&, const QString&, const QString&) { return std::optional<QString>(QStringLiteral(" 空 ")); };
+        studio.trigger("act_sel_to_channel");
+        QCOMPARE(studio.page().channels.size(), std::size_t{1});
+        QCOMPARE(studio.page().channels[0].name, std::string("空"));
+        QVERIFY(studio.page().channels[0].kind == core::ChannelKind::Alpha);
+        studio.answers.responder->get_text = [](const QString&, const QString&, const QString&) { return std::optional<QString>(QString()); };
+        studio.trigger("act_sel_to_channel");
+        QCOMPARE(studio.page().channels.back().name, std::string("Alpha 1"));
+        studio.trigger("act_deselect");
+        QVERIFY(!studio.area());
+        emit load->aboutToShow();
+        QAction* use = nullptr;
+        for (QAction* a : load->actions()) if (a->text() == QStringLiteral("空")) use = a;
+        QVERIFY(use != nullptr);
+        use->trigger();
+        QVERIFY2(std::abs(studio.size() - chosen) < 20, qPrintable(QString::number(studio.size())));
+        // nothing chosen: nothing kept
+        studio.trigger("act_deselect");
+        studio.trigger("act_sel_to_channel");
+        QCOMPARE(studio.page().channels.size(), std::size_t{2});
+    }
+
     // Keys while a drag goes on: Esc (or Enter refused, on a locked layer) while a free transform's point is held
     // stops it, and the point let go afterwards is nothing; Ctrl held in the middle of a lasso does not switch the
     // tool under it.

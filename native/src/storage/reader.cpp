@@ -11,6 +11,7 @@
 #include <utility>
 
 #include "core/brushes.hpp"
+#include "core/channels.hpp"
 #include "core/command_bus.hpp"
 #include "core/covers.hpp"
 #include "core/color_raster.hpp"
@@ -357,6 +358,7 @@ private:
     core::ColorModel read_color(Json& extra, const std::string& at);
     core::Bytes read_profile(const std::string& ref, core::ProfileSpace space, const std::string& at_profile);
     void check_ink_rasters(core::Page& page, const Json& raw, const std::string& at);
+    void read_channels(core::Page& page, const std::string& at);
 };
 
 core::PageSpec Reader::read_spec(const Json& raw) {
@@ -753,6 +755,39 @@ void Reader::check_ink_rasters(core::Page& page, const Json& raw, const std::str
             }
         } catch (const core::Error& error) {
             issue("broken_asset", here, {}, error.what());
+        }
+    }
+}
+
+// channels@1: the page's alpha and spot channels kept under "channels" (taken out of the keys written back as they were
+// read), each one's raster read and checked (a mask at the page's depth). What cannot be read is reported (the book
+// opens read-only) and is kept as it was read: the page is never written without its channels.
+void Reader::read_channels(core::Page& page, const std::string& at) {
+    const auto it = page.extra.find("channels");
+    if (it == page.extra.end()) return;
+    const Json raw = *it;
+    const std::string here = at_key(at, "channels");
+    std::vector<std::string> refs;
+    try {
+        page.channels = core::channels_from_json(raw, refs);
+    } catch (const core::Error& error) {
+        issue("broken_value", here, {}, error.what());
+        return;  // (left in the keys written back as they were: the book is read-only)
+    }
+    page.extra.erase("channels");
+    const int depth = core::page_depth(page);
+    for (std::size_t i = 0; i < page.channels.size(); ++i) {
+        if (refs[i].empty()) continue;
+        core::Channel& channel = page.channels[i];
+        const std::string at_raster = at_key(at_index(here, i), "raster");
+        channel.raster = read_blob(Json(refs[i]), at_raster, &channel.memo, core::kInkRasterSuffix, "channel raster");
+        if (!channel.raster) continue;
+        try {
+            const core::InkRasterHeader header = core::ink_raster_header(*channel.raster);
+            if (header.space != core::InkSpace::Mask) throw core::Error("value", "the channel's raster is not a mask");
+            if (header.depth != depth) throw core::Error("value", "the channel's raster is not at the page's depth");
+        } catch (const core::Error& error) {
+            issue("broken_asset", at_raster, refs[i], error.what());
         }
     }
 }
@@ -1171,6 +1206,7 @@ core::Document Reader::migrate(const Json& payload) {
             page.rgb = std::move(model.rgb);
         }
         check_ink_rasters(page, raw, at);
+        read_channels(page, at);
         page_list.push_back(std::make_shared<core::Page>(std::move(page)));
         if (skip_assets_) deferred.push_back(page_list.back());
     }
@@ -1283,6 +1319,8 @@ core::Document Reader::migrate(const Json& payload) {
     catch (const core::Error& error) { issue("broken_value", "/pages", {}, error.what()); }
     try { core::validate_color_model(doc); }
     catch (const core::Error& error) { issue("broken_value", "/pages", {}, error.what()); }
+    try { core::validate_channels(doc); }
+    catch (const core::Error& error) { issue("broken_value", "/pages", {}, error.what()); }
     return doc;
 }
 
@@ -1343,7 +1381,7 @@ bool is_known_page_key(std::string_view key) { return in(kPageKeys, key); }
 bool is_known_feature(std::string_view feature) {
     return feature == core::kColorRasterFeature || feature == core::kColorTilesFeature || feature == core::kExposureFeature ||
            feature == core::kColorStrokeFeature || feature == core::kPaperFeature || feature == core::kRubyLayoutFeature ||
-           feature == core::kColorModeFeature || feature == core::kColorModelFeature;
+           feature == core::kColorModeFeature || feature == core::kColorModelFeature || feature == core::kChannelsFeature;
 }
 
 int project_version(const Json& payload) {

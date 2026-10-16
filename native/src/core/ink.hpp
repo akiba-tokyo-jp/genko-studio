@@ -3,6 +3,7 @@
 #include <array>
 #include <cstddef>
 #include <cstdint>
+#include <functional>
 #include <memory>
 #include <optional>
 #include <string>
@@ -163,5 +164,9 @@ InkPixels decode_ink_raster(std::string_view bytes);
 // GKIR bytes of the pixels (the same pixels always give the same bytes): version 1 for CMYK and Lab at 8 and 16 bits
 // (as color-mode@1 writes them), version 2 for the rest (color-model@1).
 std::string encode_ink_raster(const InkPixels& pixels);
+// The rows of GKIR bytes one at a time from the top, never the whole raster held (channels@1: a large channel read into
+// fewer bytes, or made small): `row(y, values)` gets row y's normalized values, each pixel's channels in turn (as
+// InkPixels::value reads them; the buffer is reused for the next row). The same checks as decode_ink_raster.
+void read_ink_raster_rows(std::string_view bytes, const std::function<void(std::uint32_t y, const float* values)>& row);
 
 }  // namespace genko::core

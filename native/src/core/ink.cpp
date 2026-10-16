@@ -507,4 +507,67 @@ std::string encode_ink_raster(const InkPixels& pixels) {
     return out;
 }
 
+void read_ink_raster_rows(std::string_view bytes, const std::function<void(std::uint32_t, const float*)>& row) {
+    const InkRasterHeader header = ink_raster_header(bytes);
+    const unsigned colours = header.planes, channels = colours + (traits(header.space).alpha ? 1 : 0);
+    const std::size_t rb = row_bytes(header.width, channels, header.depth);
+    const std::size_t bpp = std::size_t(channels) * sample_bytes(header.depth);
+    const double most = header.depth == 8 ? 255.0 : 65535.0;
+    std::vector<unsigned char> line(rb + 1), above(rb);
+    std::vector<float> values(std::size_t(header.width) * channels);
+    z_stream z{};
+    if (inflateInit(&z) != Z_OK) bad_raster("zlib cannot start");
+    struct End {
+        z_stream* z;
+        ~End() { inflateEnd(z); }
+    } end{&z};
+    const std::string_view stream = bytes.substr(kHeader);
+    z.next_in = reinterpret_cast<Bytef*>(const_cast<char*>(stream.data()));
+    std::size_t in_left = stream.size();
+    int status = Z_OK;
+    // (as decode_ink_raster: every row whole, then the stream's end and nothing after it)
+    const auto fill = [&](unsigned char* out, std::size_t n) {
+        std::size_t out_left = n;
+        while (out_left > 0) {
+            if (status == Z_STREAM_END) return out_left;
+            const uInt in_chunk = static_cast<uInt>(std::min<std::size_t>(in_left, 1u << 30));
+            z.avail_in = in_chunk;
+            z.next_out = out + (n - out_left);
+            z.avail_out = static_cast<uInt>(out_left);
+            status = inflate(&z, Z_NO_FLUSH);
+            const std::size_t took = in_chunk - z.avail_in, gave = out_left - z.avail_out;
+            in_left -= took;
+            out_left -= gave;
+            if (status != Z_OK && status != Z_BUF_ERROR && status != Z_STREAM_END) bad_raster("its pixels are cut short or broken");
+            if (took == 0 && gave == 0 && status != Z_STREAM_END) bad_raster("its pixels are cut short or broken");
+        }
+        return out_left;
+    };
+    for (std::uint32_t y = 0; y < header.height; ++y) {
+        if (fill(line.data(), rb + 1) != 0) bad_raster("it holds fewer pixels than its size");
+        const int type = line[0];
+        if (type > 4) bad_raster("a row has an unknown filter");
+        unfilter_row(type, line.data() + 1, y > 0 ? above.data() : nullptr, rb, bpp);
+        const unsigned char* b = line.data() + 1;
+        for (std::size_t i = 0; i < values.size(); ++i) {
+            if (header.depth == 8) {
+                values[i] = static_cast<float>(b[i] / most);
+            } else if (header.depth == 16) {
+                values[i] = static_cast<float>(((b[2 * i] << 8) | b[2 * i + 1]) / most);
+            } else {
+                const unsigned char* f = b + 4 * i;
+                const float v = std::bit_cast<float>((std::uint32_t(f[0]) << 24) | (std::uint32_t(f[1]) << 16) | (std::uint32_t(f[2]) << 8) | f[3]);
+                if (!float_ok(header.space, colours, static_cast<unsigned>(i % channels), v)) bad_raster("a 32-bit sample is not finite or out of its range");
+                values[i] = v;
+            }
+        }
+        row(y, values.data());
+        std::memcpy(above.data(), line.data() + 1, rb);
+    }
+    unsigned char extra = 0;
+    if (status != Z_STREAM_END && fill(&extra, 1) == 0) bad_raster("it holds more pixels than its size");
+    if (status != Z_STREAM_END) bad_raster("its pixels are cut short or broken");
+    if (in_left != 0) bad_raster("bytes follow its pixels");
+}
+
 }  // namespace genko::core

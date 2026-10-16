@@ -12,6 +12,9 @@ void register_tone_ops(core::OpRegistry& registry);
 void register_effect_ops(core::OpRegistry& registry);
 // import_psd (render/import_psd.cpp)
 void register_file_ops(core::OpRegistry& registry);
+// channels@1: add_channel, duplicate_channel, delete_channel, rename_channel, move_channel, set_channel,
+// merge_spot_channel, split_channels, merge_channels (render/ops_channels.cpp)
+void register_channel_ops(core::OpRegistry& registry);
 // set_color_mode and set_inks (color-mode@1, render/ops_ink.cpp)
 void register_ink_ops(core::OpRegistry& registry);
 

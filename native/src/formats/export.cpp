@@ -9,6 +9,7 @@
 #include <optional>
 #include <utility>
 
+#include "core/channels.hpp"
 #include "core/color_model.hpp"
 #include "core/color_raster.hpp"
 #include "core/covers.hpp"
@@ -21,6 +22,7 @@
 #include "formats/pdf.hpp"
 #include "formats/pillow_save.hpp"
 #include "render/color_canvas.hpp"
+#include "render/channels.hpp"
 #include "render/colour.hpp"
 #include "render/covers.hpp"
 #include "render/ink_canvas.hpp"
@@ -365,12 +367,36 @@ std::vector<fs::path> detail::print_into(detail::Output& output, const core::Doc
             const std::string mode = how == "cmyk" ? "CMYK" : how == "bitonal" ? "1" : how == "gray" ? "L" : "RGB";
             pages.push_back(PdfPage{mode, profile_for(how), pdf_boxes(*page, area)});
         }
+        // (channels@1: a page's spot channels as separations over its picture, overprinting; its picture without them)
+        for (std::size_t n = 0; n < episode.pages.size(); ++n) {
+            const core::Page& page = *episode.pages[n];
+            std::vector<const core::Channel*> spots;
+            for (const core::Channel& channel : page.channels) {
+                if (channel.kind == core::ChannelKind::Spot && channel.raster) spots.push_back(&channel);
+            }
+            if (spots.empty()) continue;
+            std::vector<std::string> names;
+            for (const core::Channel* spot : spots) names.push_back(spot->name);
+            const std::vector<std::string> written = pdf_spot_names(names);  // (not PDF's own colorants' names: said in the notes)
+            for (std::size_t k = 0; k < spots.size(); ++k) pages[n].spots.push_back(PdfSpot{written[k], spots[k]->color});
+            pages[n].spot = [&page, spots, area, dpi](std::size_t k) {
+                const render::Size size{render::mm_to_px(page.spec.width_mm.value(), dpi), render::mm_to_px(page.spec.height_mm.value(), dpi)};
+                return crop_to(render::channels::mask_of(*spots[k], size), page, area, dpi);
+            };
+        }
+        render::RenderOptions plain = options;
+        plain.spots = std::vector<std::string>{};
+        const auto picture_of = [&](const core::Page& page) {
+            return page.channels.empty() ? image_of(page) : crop_to(render::render_page(page, dpi, plain, &episode).image, page, area, dpi);
+        };
         write_pdf(
-            path, pages, [&](std::size_t n) { return coloured(image_of(*episode.pages[n]), hows[n]); },
+            path, pages, [&](std::size_t n) { return coloured(picture_of(*episode.pages[n]), hows[n]); },
             [&](std::size_t n) { return inks_of(*episode.pages[n], false); },
             [&](std::size_t n) {
                 const core::Page& page = *episode.pages[n];
-                return PdfValues{values_of(page), page.rgb->depth == 8 ? 8 : 16};
+                return PdfValues{page.channels.empty() ? values_of(page)
+                                                       : values_crop_to(detail::page_values(page, episode, dpi, plain).values, page, area, dpi),
+                                 page.rgb->depth == 8 ? 8 : 16};
             });
         return {path};
     }

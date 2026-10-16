@@ -20,3 +20,12 @@ PhotoCraft v0.2.0（`ad863217386440ca968fccc9bfff65ba24e61142`、MIT。`LICENSE-
 - `crates/engine/src/display_color.rs`（相対的な色域を維持・黒点補正のモニターの変換、恒等の判定）→ `native/src/app/display_color.cpp`。
 - `crates/engine/src/prefs.rs`（443-490 行）: 透明部分の市松の大きさ・色の組と色域外警告の色・不透明度の既定 → `native/src/app/preferences.cpp`。
 - `crates/compose/src/psblend.rs`（文字のガンマ `composite_gamma`、既定 1.45 と試験の値）→ `native/src/render/text/lettering.cpp`（`paste_in_gamma`）。
+
+## チャンネル（channels@1、PC1c）
+
+PhotoCraft v0.2.0（`ad863217386440ca968fccc9bfff65ba24e61142`、MIT、同梱 `LICENSE-MIT`）の次の部分を参照して C++ へ移した。
+
+- `crates/engine/src/channel_cmds.rs`（781-1296 行）: 新規・特色・複製・削除・名前の変更・並べ替え・オプション・特色を合成・分割・統合の既定値と名前（Alpha n、上流の Spot Color n は「特色 n」）、番号の付け替え、特色を合成の式 `c + (s·ink + (1−s)·c·ink − c)·v`（1149-1198 行）。Genko の op（`native/src/render/ops_channels.cpp`）と画素の op の対象（`native/src/render/channels.cpp`）。
+- `crates/compose/src/multichannel.rs`（14-38 行）: 特色の表示の式 `(1 − s·v)·p·(1 − v + v·c) + s·v·c` を参照した。Genko の画面の特色（`native/src/render/channels.cpp` の print_spots）は、合成の結果と同じに見せるため、上の特色を合成の式に替えた（マルチチャンネルのページは PC1d）。
+- `crates/ui-egui/src/channel_view.rs`（64-128 行）: チャンネル パネルの表示（色の版の 1 枚をグレーで、隠した版は 0、アルファの重ねの覆い方 `overlay_coverage`）。
+- `crates/io/src/channel_map.rs`（1-40 行）と `crates/io/src/psd_export.rs`（448-470 行、654-656 行）: PSD の追加チャンネルの名前（1006・1045）と DisplayInfo（1077）の形（`native/src/formats/psd_export.cpp`、読み戻しは `native/src/render/psd.cpp`）。Genko は 1077 の記録を 13 バイト（上流が種類の後に書く埋めのバイトは書かない）、特色と「選択範囲」のアルファの標本を Photoshop の向き（色の付く所が暗い）で書く。

@@ -71,6 +71,14 @@ struct RenderOptions {
     // color-model@1: an RGB page's values too where it composites in precise colour (RenderResult::precise: its layers'
     // values, and where the frames, words and marks are drawn over them in 8 bits, those colours in its space).
     bool precise = false;
+    // channels@1 (render/channels.hpp): the page's spot channels printed over the picture (their ids; none: every one —
+    // an empty list: none, for the exports that write them as plates of their own). Only the picture: not the inks or
+    // values.
+    std::optional<std::vector<std::string>> spots;
+    // channels@1, the channel panel's view (the screen): the page's colour planes shown (none: every one) and the alpha
+    // channels laid over the picture in their colours (their ids).
+    std::optional<std::vector<bool>> planes;
+    std::vector<std::string> overlays;
 };
 
 struct RenderResult {

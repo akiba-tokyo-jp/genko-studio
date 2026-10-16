@@ -6,6 +6,7 @@ genko_library(genko_render
   SOURCES
     image.cpp
     color_canvas.cpp
+    channels.cpp
     inspect.cpp
     draw.cpp
     png.cpp
@@ -47,6 +48,7 @@ genko_library(genko_render
     ink_edit.cpp
     ink_filters.cpp
     ops_ink.cpp
+    ops_channels.cpp
     raster_ops.cpp
     ops_paint.cpp
     zip.cpp

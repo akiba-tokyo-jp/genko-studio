@@ -91,6 +91,10 @@ genko_test(test_ink SOURCES unit/test_ink.cpp DEPS genko_test_support genko_rend
 genko_test(test_ink_edit SOURCES unit/test_ink_edit.cpp DEPS genko_test_support genko_render_ops LABELS unit TIMEOUT 600)
 # color-mode@1, step three: the filters and the corrections of CMYK and Lab pages in their inks.
 genko_test(test_ink_filters SOURCES unit/test_ink_filters.cpp DEPS genko_test_support genko_render_ops LABELS unit TIMEOUT 600)
+# channels@1 (SPEC.md COLOR-03): a page's alpha and spot channels without Python — their JSON, the channel ops and their
+# refusals, the selection from a channel, the pixel ops on a channel or one colour plate, split and merge back byte for
+# byte, Merge Spot Channel against PhotoCraft's formula, the spots printed and the panel's view, the book on disk.
+genko_test(test_channels SOURCES unit/test_channels.cpp DEPS genko_test_support genko_render_ops genko_formats LABELS unit TIMEOUT 600)
 
 # core/pyre's own bounds (Python 3.12's re, ported; SPEC COMP-01a): a search that backtracks without end stopped when its
 # steps are spent, groups more than 200 deep refused, replace_text refused without a change; without Python.
@@ -242,6 +246,10 @@ genko_test(test_contract_ink SOURCES contract/test_contract_ink.cpp DEPS genko_t
 # color-model@1 (COLOR-03) through the command line: apply, save, undo and redo, render, inspect --pixel, export.
 genko_test(test_contract_color_model SOURCES contract/test_contract_color_model.cpp DEPS genko_test_support genko_render
            LABELS contract TIMEOUT 900)
+# channels@1 (COLOR-03) through the command line: apply, save, gc, undo and redo, a selection and a fill on a channel,
+# render, inspect, export (the PSD's extra channels read back, the PDF's separation, the notes).
+genko_test(test_contract_channels SOURCES contract/test_contract_channels.cpp DEPS genko_test_support genko_render ZLIB::ZLIB
+           LABELS contract TIMEOUT 900)
 
 genko_test(test_contract_psd_text SOURCES contract/test_contract_psd_text.cpp DEPS genko_test_support genko_formats genko_render_ops
            LABELS contract TIMEOUT 1800)
@@ -337,6 +345,8 @@ if(GENKO_BUILD_APP)
   genko_test(test_gui_layers SOURCES gui/test_gui_layers.cpp DEPS genko_app GUI TIMEOUT 600)
   # 範囲選択: the marquee's ways with Shift / Alt, the selection's commands, the chosen part moved, copied, pasted
   genko_test(test_gui_select SOURCES gui/test_gui_select.cpp DEPS genko_app GUI TIMEOUT 600)
+  # チャンネル (channels@1, COLOR-03): the panel, the target keys, a fill on a channel, the view, options, split.
+  genko_test(test_gui_channels SOURCES gui/test_gui_channels.cpp DEPS genko_app GUI TIMEOUT 600)
   # the brush panel and ツールの設定: brushes kept per kind, one's own made, opened, given and read back (.abr too)
   genko_test(test_gui_brushes SOURCES gui/test_gui_brushes.cpp DEPS genko_app GUI TIMEOUT 600)
   # 紙質 (BRUSH-01): the dialog's paper, one's own brush with a paper (the library beside Python's file, read by

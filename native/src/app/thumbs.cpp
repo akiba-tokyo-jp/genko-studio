@@ -14,6 +14,7 @@
 
 #include "app/config.hpp"
 #include "app/frame_tools.hpp"
+#include "core/channels.hpp"
 #include "core/json.hpp"
 #include "core/paths.hpp"
 #include "core/strokes.hpp"
@@ -82,6 +83,12 @@ std::string page_fingerprint(const core::Document& doc, const core::Page& page) 
     h.add(page.prims);
     h.add(Json(page.numero));
     h.add(page.onion_from ? page.onion_from->json() : Json(nullptr));
+    for (const core::Channel& channel : page.channels) {  // (channels@1: the spots printed over the page; each one's look and pixels)
+        Json look = core::to_json(channel, std::string());
+        look.erase("raster");
+        h.add(look);
+        h.add_bytes(channel.raster, &channel.memo);
+    }
     for (const core::Layer& layer : page.layers) {
         Json look = Json::object();
         look["id"] = layer.id;
