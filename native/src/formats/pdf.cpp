@@ -7,6 +7,7 @@
 #include <cstdio>
 #include <map>
 
+#include "core/color_raster.hpp"
 #include "core/error.hpp"
 #include "core/pynum.hpp"
 #include "formats/output.hpp"
@@ -100,7 +101,8 @@ PdfBoxes pdf_boxes(const core::Page& page, std::string_view area) {
 
 std::filesystem::path write_pdf(const std::filesystem::path& path, const std::vector<PdfPage>& pages,
                                 const std::function<render::Image(std::size_t)>& picture,
-                                const std::function<core::InkPixels(std::size_t)>& inks) {
+                                const std::function<core::InkPixels(std::size_t)>& inks,
+                                const std::function<PdfValues(std::size_t)>& values) {
     // The object numbers first (catalog 1, pages 2, then for each page its profile when new, image, content and page),
     // so the catalog and the page tree are written before the pictures are made.
     struct Numbers {
@@ -116,10 +118,11 @@ std::filesystem::path write_pdf(const std::filesystem::path& path, const std::ve
     std::string kids;
     for (std::size_t n = 0; n < pages.size(); ++n) {
         const PdfPage& page = pages[n];
-        if (page.mode != "1" && page.mode != "L" && page.mode != "RGB" && page.mode != "CMYK" && !(page.mode == "INK" && inks)) {
+        if (page.mode != "1" && page.mode != "L" && page.mode != "RGB" && page.mode != "CMYK" && !(page.mode == "INK" && inks) &&
+            !(page.mode == "VALUES" && values)) {
             throw core::Error("key", "'" + page.mode + "'");
         }
-        if (!page.profile.empty() && (page.mode == "RGB" || page.mode == "CMYK" || page.mode == "INK")) {
+        if (!page.profile.empty() && (page.mode == "RGB" || page.mode == "CMYK" || page.mode == "INK" || page.mode == "VALUES")) {
             const auto found = profile_ids.find(page.profile);
             if (found == profile_ids.end()) {
                 profile_ids[page.profile] = ++count;
@@ -146,35 +149,80 @@ std::filesystem::path write_pdf(const std::filesystem::path& path, const std::ve
     object("<< /Type /Pages /Kids [" + kids + "] /Count " + std::to_string(pages.size()) + " >>");
     for (std::size_t n = 0; n < pages.size(); ++n) {
         const PdfPage& page = pages[n];
-        if (page.mode == "INK") {  // (color-mode@1: the page's inks as they are)
-            const core::InkPixels px = inks(n);
-            const bool cmyk = px.space == core::InkSpace::Cmyk;
-            std::string space = cmyk ? "/DeviceCMYK" : "[/Lab << /WhitePoint [0.9642 1 0.8249] /Range [-128 127 -128 127] >>]";
-            if (cmyk && numbers[n].profile != 0) {
-                if (numbers[n].new_profile) {
-                    Deflater deflater;
-                    deflater.add(page.profile, true);
-                    object(stream("/N 4 /Filter /FlateDecode", deflater.take()));
-                }
-                space = "[/ICCBased " + std::to_string(numbers[n].profile) + " 0 R]";
-            }
-            const unsigned colours = core::colour_channels(px.space), all = px.channels();
+        if (page.mode == "INK" || page.mode == "VALUES") {  // (color-mode@1: the page's inks as they are; color-model@1: its values)
+            std::uint32_t width = 0, height = 0;
+            unsigned colours = 3;
+            int bits = 8;
+            std::string space;
             Deflater deflater;
             std::string row;
-            for (std::uint32_t y = 0; y < px.height; ++y) {
-                row.clear();
-                const std::uint16_t* src = px.samples.data() + std::size_t(y) * px.width * all;
-                for (std::uint32_t x = 0; x < px.width; ++x) {
-                    for (unsigned c = 0; c < colours; ++c) {
-                        const std::uint16_t v = src[x * all + c];
-                        if (px.depth == 16) row.push_back(static_cast<char>(v >> 8));
-                        row.push_back(static_cast<char>(v & 255));
+            if (page.mode == "INK") {
+                const core::InkPixels px = inks(n);
+                if (px.depth != 8 && px.depth != 16) throw core::Error("value", "a PDF holds 8 or 16 bits of inks");
+                const bool cmyk = px.space == core::InkSpace::Cmyk;
+                const bool grey = px.space == core::InkSpace::Gray;
+                space = cmyk ? "/DeviceCMYK" : grey ? "/DeviceGray" : "[/Lab << /WhitePoint [0.9642 1 0.8249] /Range [-128 127 -128 127] >>]";
+                if ((cmyk || grey) && numbers[n].profile != 0) {
+                    if (numbers[n].new_profile) {
+                        Deflater icc;
+                        icc.add(page.profile, true);
+                        object(stream(std::string(cmyk ? "/N 4" : "/N 1") + " /Filter /FlateDecode", icc.take()));
                     }
+                    space = "[/ICCBased " + std::to_string(numbers[n].profile) + " 0 R]";
                 }
-                deflater.add(row, y + 1 == px.height);
+                colours = core::colour_channels(px.space);
+                const unsigned all = px.channels();
+                width = px.width;
+                height = px.height;
+                bits = px.depth;
+                for (std::uint32_t y = 0; y < px.height; ++y) {
+                    row.clear();
+                    const std::uint16_t* src = px.samples.data() + std::size_t(y) * px.width * all;
+                    for (std::uint32_t x = 0; x < px.width; ++x) {
+                        for (unsigned c = 0; c < colours; ++c) {
+                            const std::uint16_t v = src[x * all + c];
+                            if (px.depth == 16) row.push_back(static_cast<char>(v >> 8));
+                            row.push_back(static_cast<char>(v & 255));
+                        }
+                    }
+                    deflater.add(row, y + 1 == px.height);
+                }
+            } else {
+                const PdfValues made = values(n);
+                if (made.bits != 8 && made.bits != 16) throw core::Error("value", "a PDF holds 8 or 16 bits of values");
+                const core::ColorRasterView view(made.values);
+                space = "/DeviceRGB";
+                if (numbers[n].profile != 0) {
+                    if (numbers[n].new_profile) {
+                        Deflater icc;
+                        icc.add(page.profile, true);
+                        object(stream("/N 3 /Filter /FlateDecode", icc.take()));
+                    }
+                    space = "[/ICCBased " + std::to_string(numbers[n].profile) + " 0 R]";
+                }
+                width = view.width();
+                height = view.height();
+                bits = made.bits;
+                for (std::uint32_t y = 0; y < height; ++y) {
+                    row.clear();
+                    for (std::uint32_t x = 0; x < width; ++x) {
+                        const std::array<double, 4> p = view.pixel(std::size_t(y) * width + x);
+                        for (unsigned c = 0; c < 3; ++c) {
+                            const double v = std::clamp(p[c], 0.0, 1.0);
+                            if (bits == 16) {
+                                const auto s = static_cast<unsigned>(std::lround(v * 65535.0));
+                                row.push_back(static_cast<char>(s >> 8));
+                                row.push_back(static_cast<char>(s & 255));
+                            } else {
+                                row.push_back(static_cast<char>(std::lround(v * 255.0)));
+                            }
+                        }
+                    }
+                    deflater.add(row, y + 1 == height);
+                }
             }
-            object(stream("/Type /XObject /Subtype /Image /Width " + std::to_string(px.width) + " /Height " + std::to_string(px.height) +
-                              " /ColorSpace " + space + " /BitsPerComponent " + std::to_string(px.depth) + " /Filter /FlateDecode",
+            object(stream("/Type /XObject /Subtype /Image /Width " + std::to_string(width) + " /Height " + std::to_string(height) +
+                              " /ColorSpace " + space + " /BitsPerComponent " + std::to_string(bits) + " /Filter /FlateDecode",
                           deflater.take()));
             const auto& media = page.boxes.media;
             object(stream("", "q " + f3(media[2] - media[0]) + " 0 0 " + f3(media[3] - media[1]) + " 0 0 cm /Im0 Do Q"));

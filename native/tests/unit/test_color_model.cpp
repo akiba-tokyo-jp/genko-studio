@@ -8,10 +8,13 @@
 #include <lcms2.h>
 
 #include <array>
+#include <bit>
 #include <cmath>
 #include <filesystem>
 #include <limits>
+#include <map>
 #include <string>
+#include <vector>
 
 #include "core/base64.hpp"
 #include "core/color_model.hpp"
@@ -22,6 +25,8 @@
 #include "core/exposure.hpp"
 #include "core/ink.hpp"
 #include "core/paths.hpp"
+#include "formats/export.hpp"
+#include "formats/exporting.hpp"
 #include "render/color_canvas.hpp"
 #include "render/image.hpp"
 #include "render/inspect.hpp"
@@ -756,6 +761,165 @@ private slots:
         const auto wrong = storage::load_document(dir);
         QVERIFY(!wrong.document.read_only_reason.empty());
         QVERIFY(wrong.document.page(1).color && !wrong.document.page(1).color->icc);
+    }
+
+    // The exports (COLOR-03, design 4.7): a grey page of 32 bits, an RGB page of Display P3 and 16 bits, a CMYK page of 32
+    // bits. PSD: Grayscale 32 (floats: the page's lightness), RGB 16 (its values) with the profiles as resource 1039,
+    // CMYK at 16; TIFF: grey MinIsBlack floats (SampleFormat 3), RGB 16 with the profile, CMYK at 16; PDF: ICCBased grey
+    // (N 1) and RGB (N 3), 16 bits a channel at most. The notes: 32 bits at 16, pages from the screen's colours.
+    void exports() {
+        QTemporaryDir tmp;
+        const fs::path out = core::path_from_utf8(tmp.path().toStdString());
+        core::Document doc = small_book(3);
+        doc = run_ops(doc, Json::array({Json{{"op", "add_layer"}, {"page", 1}, {"kind", "paint"}, {"title", "絵"}, {"id", "pic"}},
+                                        Json{{"op", "set_layer"}, {"page", 1}, {"id", "pic"}, {"panel_each", false}, {"panel_clip", false}},
+                                        Json{{"op", "put_raster"}, {"page", 1}, {"id", "pic"}, {"png_base64", core::b64encode(render::write_png(picture()))}},
+                                        Json{{"op", "set_color_mode"}, {"page", 1}, {"mode", "gray"}, {"depth", 32}},
+                                        Json{{"op", "set_color_mode"}, {"page", 2}, {"mode", "rgb"}, {"depth", 16}, {"profile", "display-p3"}},
+                                        Json{{"op", "set_color_mode"}, {"page", 3}, {"mode", "cmyk"}, {"depth", 32}, {"profile", "coated-cmyk"}}}))
+                  .doc;
+        const int dpi = 40;
+        const std::string sgray = *core::builtin_profile("sgray")->bytes;
+        const std::string p3 = *core::builtin_profile("display-p3")->bytes;
+        const std::string coated = *core::builtin_profile("coated-cmyk")->bytes;
+        const auto be16 = [](const std::string& b, std::size_t at) { return unsigned(static_cast<unsigned char>(b[at])) << 8 | static_cast<unsigned char>(b[at + 1]); };
+        const auto be32 = [&](const std::string& b, std::size_t at) { return std::uint32_t(be16(b, at)) << 16 | be16(b, at + 2); };
+        // PSD: (channels, depth, mode), resource 1039, the merged picture's start
+        struct Psd {
+            unsigned channels, depth, mode;
+            std::string icc;
+            std::size_t merged;  // (after the compression)
+            unsigned compression;
+        };
+        const auto psd = [&](const fs::path& file) {
+            const std::string b = genko::test::read_bytes(QString::fromStdString(core::path_to_utf8(file)));
+            Psd p{be16(b, 12), be16(b, 22), be16(b, 24), {}, 0, 0};
+            std::size_t at = 26;
+            at += 4 + be32(b, at);  // (colour mode data)
+            const std::size_t resources = be32(b, at);
+            std::size_t r = at + 4;
+            while (r < at + 4 + resources) {
+                const unsigned id = be16(b, r + 4);
+                const std::size_t name = static_cast<unsigned char>(b[r + 6]);
+                std::size_t data = r + 6 + ((name + 2) & ~std::size_t(1));
+                const std::size_t size = be32(b, data);
+                if (id == 1039) p.icc = b.substr(data + 4, size);
+                r = data + 4 + ((size + 1) & ~std::size_t(1));
+            }
+            at += 4 + resources;
+            at += 4 + be32(b, at);  // (layers and masks)
+            p.compression = be16(b, at);
+            p.merged = at + 2;
+            return p;
+        };
+        const auto psds = formats::export_psd_pages(doc, out / "psd", dpi);
+        QCOMPARE(psds.size(), std::size_t{3});
+        {
+            const Psd grey = psd(psds[0]);
+            QCOMPARE(grey.channels, 1u);
+            QCOMPARE(grey.depth, 32u);
+            QCOMPARE(grey.mode, 1u);
+            QVERIFY(grey.icc == sgray);
+            QCOMPARE(grey.compression, 0u);
+            // (its lightness, as the page's inks are: the grey 128 on the left)
+            render::RenderOptions options;
+            options.mode = "print";
+            options.inks = true;
+            const auto made = render::render_page(doc.page(0), dpi, options, &doc);
+            const std::string b = genko::test::read_bytes(QString::fromStdString(core::path_to_utf8(psds[0])));
+            const std::size_t i = std::size_t(render::mm_to_px(20, dpi)) * made.inks->width + render::mm_to_px(10, dpi);
+            const float v = std::bit_cast<float>(be32(b, grey.merged + i * 4));
+            QCOMPARE(v, made.inks->floats[i * made.inks->channels()]);
+            QVERIFY(std::abs(v - 128 / 255.0) < 0.01);
+        }
+        {
+            const Psd rgb = psd(psds[1]);
+            QCOMPARE(rgb.channels, 3u);
+            QCOMPARE(rgb.depth, 16u);
+            QCOMPARE(rgb.mode, 3u);
+            QVERIFY(rgb.icc == p3);
+            QCOMPARE(rgb.compression, 0u);
+            // (its values: the paper white is 1 in every channel)
+            const std::string b = genko::test::read_bytes(QString::fromStdString(core::path_to_utf8(psds[1])));
+            QCOMPARE(be16(b, rgb.merged), 65535u);
+        }
+        {
+            const Psd cmyk = psd(psds[2]);
+            QCOMPARE(cmyk.channels, 4u);
+            QCOMPARE(cmyk.depth, 16u);
+            QCOMPARE(cmyk.mode, 4u);
+            QVERIFY(cmyk.icc == coated);
+        }
+        QCOMPARE(formats::export_notes(doc, "psd", "auto"), std::vector<std::string>{"32 bit のページ 1 ページは、この形式では 16 bit にして書き出しました"});
+        // TIFF: its tags (little-endian: libtiff's on this machine)
+        const auto tiff_tags = [](const fs::path& file) {
+            const std::string b = genko::test::read_bytes(QString::fromStdString(core::path_to_utf8(file)));
+            const auto le = [&](std::size_t at, int n) {
+                std::uint32_t v = 0;
+                for (int k = n - 1; k >= 0; --k) v = v << 8 | static_cast<unsigned char>(b[at + k]);
+                return v;
+            };
+            std::map<unsigned, std::uint32_t> tags;
+            if (b.substr(0, 4) != std::string("II*\0", 4)) return tags;
+            const std::uint32_t ifd = le(4, 4);
+            for (unsigned e = 0; e < le(ifd, 2); ++e) {
+                const std::size_t at = ifd + 2 + e * 12;
+                const unsigned tag = le(at, 2), type = le(at + 2, 2);
+                const std::uint32_t count = le(at + 4, 4);
+                std::uint32_t value = type == 3 && count == 1 ? le(at + 8, 2) : le(at + 8, 4);
+                if (type == 3 && count > 1) value = le(le(at + 8, 4), 2);  // (the first of them)
+                tags[tag] = tag == 34675 ? count : value;
+            }
+            return tags;
+        };
+        const auto tiffs = formats::export_print(doc, out / "tiff", "tiff", dpi);
+        QCOMPARE(tiffs.size(), std::size_t{3});
+        {
+            auto t = tiff_tags(tiffs[0]);
+            QCOMPARE(t[258], 32u);    // BitsPerSample
+            QCOMPARE(t[262], 1u);     // MinIsBlack
+            QCOMPARE(t[277], 1u);     // SamplesPerPixel
+            QCOMPARE(t[339], 3u);     // SampleFormat: IEEE floats
+            QCOMPARE(t[34675], std::uint32_t(sgray.size()));
+            t = tiff_tags(tiffs[1]);
+            QCOMPARE(t[258], 16u);
+            QCOMPARE(t[262], 2u);  // RGB
+            QCOMPARE(t[277], 3u);
+            QVERIFY(!t.contains(339));
+            QCOMPARE(t[34675], std::uint32_t(p3.size()));
+            t = tiff_tags(tiffs[2]);
+            QCOMPARE(t[258], 16u);
+            QCOMPARE(t[262], 5u);  // separated
+            QCOMPARE(t[34675], std::uint32_t(coated.size()));
+        }
+        QCOMPARE(formats::export_notes(doc, "tiff", "auto"), std::vector<std::string>{"32 bit のページ 1 ページは、この形式では 16 bit にして書き出しました"});
+        // PDF: every page by its values or inks, 16 bits a channel
+        const auto pdfs = formats::export_print(doc, out / "pdf", "pdf", dpi);
+        QCOMPARE(pdfs.size(), std::size_t{1});
+        const std::string pdf = genko::test::read_bytes(QString::fromStdString(core::path_to_utf8(pdfs[0])));
+        QVERIFY(pdf.find("/N 1 /Filter") != std::string::npos);
+        QVERIFY(pdf.find("/N 3 /Filter") != std::string::npos);
+        QVERIFY(pdf.find("/N 4 /Filter") != std::string::npos);
+        std::size_t images = 0;
+        for (std::size_t at = pdf.find("/BitsPerComponent "); at != std::string::npos; at = pdf.find("/BitsPerComponent ", at + 1)) {
+            QCOMPARE(pdf.substr(at, 21), std::string("/BitsPerComponent 16 "));
+            ++images;
+        }
+        QCOMPARE(images, std::size_t{3});
+        QCOMPARE(formats::export_notes(doc, "pdf", "auto"), std::vector<std::string>{"32 bit のページ 2 ページは、この形式では 16 bit にして書き出しました"});
+        // the formats of the screen's colours: said
+        QCOMPARE(formats::export_notes(doc, "png", "auto"),
+                 std::vector<std::string>{"色モード・プロファイルを持つページ 3 ページは、この形式・色ではその値のまま書けないため、画面の色（sRGB）から変換して書き出しました"});
+        QCOMPARE(formats::export_notes(doc, "tiff", "bitonal").size(), std::size_t{1});
+        QVERIFY(formats::ink_note(doc.page(1)));
+        // a grey page of 8 bits: its TIFF of 8 bits with its profile, a PNG from the screen
+        const core::Document grey8 = run_ops(small_book(), Json::array({Json{{"op", "set_color_mode"}, {"page", 1}, {"mode", "gray"}}})).doc;
+        const auto grey_tiff = formats::export_print(grey8, out / "grey8", "tiff", dpi);
+        auto t = tiff_tags(grey_tiff[0]);
+        QCOMPARE(t[258], 8u);
+        QCOMPARE(t[262], 1u);
+        QVERIFY(formats::export_notes(grey8, "tiff", "auto").empty());
+        QVERIFY(formats::export_notes(grey8, "tiff", "gray").empty());
     }
 };
 

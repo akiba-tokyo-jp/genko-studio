@@ -68,8 +68,8 @@ struct RenderOptions {
     std::stop_token stop;
     // color-mode@1: a CMYK or Lab page's inks too (RenderResult::inks, at the page's depth). Other pages have none.
     bool inks = false;
-    // color-model@1: an RGB page's values too where it composites in precise colour (RenderResult::precise: its layers,
-    // before the frames and words drawn over them in 8 bits).
+    // color-model@1: an RGB page's values too where it composites in precise colour (RenderResult::precise: its layers'
+    // values, and where the frames, words and marks are drawn over them in 8 bits, those colours in its space).
     bool precise = false;
 };
 
@@ -140,6 +140,8 @@ struct PageLayer {
     // per pixel the colour channels then the alpha); `image` is then how the screen shows them. Other layers: none (their
     // colours are the page's by the rules).
     std::shared_ptr<const std::vector<double>> inks;
+    // color-model@1: on an RGB page of a profile, `image` holds the page's values (a paint layer's pixels), not sRGB.
+    bool page_values = false;
     bool settings = false;
     double opacity = 1.0;
     std::string blend = "normal";

@@ -42,12 +42,17 @@ core::Document subset(const core::Document& episode, const std::vector<std::int6
 // exporting.default_dpi: 150 for epub and strip, else the book's (600 when it has none).
 std::int64_t default_dpi(const core::Document& episode, std::string_view key);
 
-// color-mode@1 (SPEC.md COLOR-02): the words saying how many CMYK and Lab pages the format (a key of formats() or the
-// command line's: pdf, tiff, cmyk, png, …) writes from the colours on screen rather than as their inks with this
-// colour (auto, rgb, cmyk, gray, bitonal), or none. PDF and TIFF keep a page's inks with "auto" (a CMYK page's with
-// "cmyk" too), PSD always. run() puts them in its reply's "notes"; never converted without a word.
+// color-mode@1 (SPEC.md COLOR-02), color-model@1 (COLOR-03): the export's notes — the words saying how many pages of a
+// colour model (CMYK, Lab, grey; RGB of a profile or of 16 or 32 bits) the format (a key of formats() or the command
+// line's: pdf, tiff, cmyk, png, …) writes from the colours on screen rather than as their inks or values with this
+// colour (auto, rgb, cmyk, gray, bitonal), and how many of 32 bits it writes at 16. PDF and TIFF keep a page's inks
+// with "auto" (a CMYK page's with "cmyk", a grey page's with "gray" too), an RGB page's values with "auto" or "rgb";
+// PSD always (Photoshop's CMYK and Lab at 16 bits); a PDF holds 16 bits at most. run() puts them in its reply's
+// "notes"; never converted without a word. (Only CMYK and Lab pages converted: color-mode@1's words.)
+std::vector<std::string> export_notes(const core::Document& episode, std::string_view key, std::string_view color);
+// The first of them (color-mode@1's: the pages converted), or none.
 std::optional<std::string> ink_note(const core::Document& episode, std::string_view key, std::string_view color);
-// The same for an animation of one page (a movie holds RGB only): a CMYK or Lab page's, or none.
+// The same for an animation of one page (a movie holds 8-bit sRGB only): a page of a colour model's, or none.
 std::optional<std::string> ink_note(const core::Page& page);
 
 struct RunOptions {

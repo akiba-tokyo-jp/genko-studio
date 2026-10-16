@@ -9,12 +9,14 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <functional>
 #include <limits>
 #include <vector>
 
 #include <jpeglib.h>
 #include <tiffio.h>
 
+#include "core/color_raster.hpp"
 #include "core/error.hpp"
 #include "core/pynum.hpp"
 #include "render/colour.hpp"
@@ -584,12 +586,14 @@ std::string tiff_bytes(const render::Image& image, const TiffSave& params) {
     return std::move(memory.data);
 }
 
-std::string ink_tiff_bytes(const core::InkPixels& pixels, const TiffSave& params) {
-    const bool cmyk = pixels.space == core::InkSpace::Cmyk;
-    const int samples = cmyk ? 4 : 3;
-    const int bits = pixels.depth;
-    const std::int64_t w = pixels.width;
-    const std::int64_t h = pixels.height;
+namespace {
+
+// A TIFF of `samples` channels (LZW, contiguous, no alpha) of `bits` (8, 16, or 32 as floats), its photometric and its
+// profile; `row(y, line)` fills each row's bytes.
+std::string sampled_tiff_bytes(std::uint32_t width, std::uint32_t height, int samples, int bits, int photometric, bool inkset_cmyk,
+                               const TiffSave& params, const std::function<void(std::uint32_t, void*)>& row) {
+    const std::int64_t w = width;
+    const std::int64_t h = height;
     const std::int64_t stride = samples * w * (bits / 8);
     std::int64_t rows_per_strip = stride == 0 ? 1 : std::min<std::int64_t>(65536 / stride, h);
     if (rows_per_strip == 0) rows_per_strip = 1;
@@ -604,7 +608,7 @@ std::string ink_tiff_bytes(const core::InkPixels& pixels, const TiffSave& params
     ok = ok && TIFFSetField(tif, TIFFTAG_IMAGELENGTH, static_cast<std::uint32_t>(h)) == 1;
     ok = ok && TIFFSetField(tif, TIFFTAG_BITSPERSAMPLE, bits) == 1;
     ok = ok && TIFFSetField(tif, TIFFTAG_COMPRESSION, COMPRESSION_LZW) == 1;
-    ok = ok && TIFFSetField(tif, TIFFTAG_PHOTOMETRIC, cmyk ? PHOTOMETRIC_SEPARATED : PHOTOMETRIC_CIELAB) == 1;
+    ok = ok && TIFFSetField(tif, TIFFTAG_PHOTOMETRIC, photometric) == 1;
     ok = ok && TIFFSetField(tif, TIFFTAG_SAMPLESPERPIXEL, samples) == 1;
     ok = ok && TIFFSetField(tif, TIFFTAG_ROWSPERSTRIP, static_cast<std::uint32_t>(rows_per_strip)) == 1;
     if (params.dpi) {
@@ -613,23 +617,52 @@ std::string ink_tiff_bytes(const core::InkPixels& pixels, const TiffSave& params
     }
     ok = ok && TIFFSetField(tif, TIFFTAG_PLANARCONFIG, PLANARCONFIG_CONTIG) == 1;
     if (params.dpi) ok = ok && TIFFSetField(tif, TIFFTAG_RESOLUTIONUNIT, RESUNIT_INCH) == 1;
-    if (cmyk) ok = ok && TIFFSetField(tif, TIFFTAG_INKSET, INKSET_CMYK) == 1;
-    if (cmyk && !params.icc.empty()) {
+    if (inkset_cmyk) ok = ok && TIFFSetField(tif, TIFFTAG_INKSET, INKSET_CMYK) == 1;
+    if (bits == 32) ok = ok && TIFFSetField(tif, TIFFTAG_SAMPLEFORMAT, SAMPLEFORMAT_IEEEFP) == 1;
+    if (!params.icc.empty()) {
         ok = ok && TIFFSetField(tif, TIFFTAG_ICCPROFILE, static_cast<std::uint32_t>(params.icc.size()), params.icc.data()) == 1;
     }
     if (!ok) throw core::Error("io", "encoder error -9 when writing image file");
+    std::vector<unsigned char> line(static_cast<std::size_t>(stride));
+    for (std::uint32_t y = 0; y < height; ++y) {
+        row(y, line.data());
+        if (TIFFWriteScanline(tif, line.data(), y, 0) == -1) throw core::Error("io", "encoder error -2 when writing image file");
+    }
+    if (!TIFFFlush(tif)) throw core::Error("io", "encoder error -9 when writing image file");
+    return std::move(memory.data);
+}
+
+}  // namespace
+
+std::string ink_tiff_bytes(const core::InkPixels& pixels, const TiffSave& params) {
+    const bool cmyk = pixels.space == core::InkSpace::Cmyk;
+    const bool grey = pixels.space == core::InkSpace::Gray;
+    if (!cmyk && !grey && pixels.space != core::InkSpace::Lab) throw core::Error("value", "only CMYK, Lab and grey inks are written as TIFF");
+    const int bits = pixels.depth;
+    if (bits == 32 && !grey) throw core::Error("value", "a TIFF of CMYK or Lab inks is 8 or 16 bits");
+    const int samples = cmyk ? 4 : grey ? 1 : 3;
+    const int photometric = cmyk ? PHOTOMETRIC_SEPARATED : grey ? PHOTOMETRIC_MINISBLACK : PHOTOMETRIC_CIELAB;
+    // (the profile: a CMYK page's or a grey page's; Lab is the CIELab the TIFF says)
+    TiffSave with = params;
+    if (!cmyk && !grey) with.icc.clear();
     const unsigned all = pixels.channels();
-    std::vector<unsigned char> row8(static_cast<std::size_t>(stride));
-    std::vector<std::uint16_t> row16(static_cast<std::size_t>(w * samples));
-    for (std::uint32_t y = 0; y < pixels.height; ++y) {
-        const std::uint16_t* src = pixels.samples.data() + std::size_t(y) * pixels.width * all;
+    return sampled_tiff_bytes(pixels.width, pixels.height, samples, bits, photometric, cmyk, with, [&](std::uint32_t y, void* line) {
+        const std::size_t first = std::size_t(y) * pixels.width;
+        if (bits == 32) {  // (grey: its lightness as floats, any finite value)
+            auto* out = static_cast<float*>(line);
+            for (std::uint32_t x = 0; x < pixels.width; ++x) out[x] = pixels.floats[(first + x) * all];
+            return;
+        }
+        const std::uint16_t* src = pixels.samples.data() + first * all;
+        auto* row8 = static_cast<unsigned char*>(line);
+        auto* row16 = static_cast<std::uint16_t*>(line);
         for (std::uint32_t x = 0; x < pixels.width; ++x) {
             for (int c = 0; c < samples; ++c) {
                 const std::uint16_t v = src[x * all + c];
                 const std::size_t at = std::size_t(x) * samples + c;
                 if (bits == 8) {
-                    row8[at] = static_cast<unsigned char>(cmyk || c == 0 ? v : static_cast<unsigned char>(static_cast<std::int8_t>(int(v) - 128)));
-                } else if (cmyk || c == 0) {
+                    row8[at] = static_cast<unsigned char>(cmyk || grey || c == 0 ? v : static_cast<unsigned char>(static_cast<std::int8_t>(int(v) - 128)));
+                } else if (cmyk || grey || c == 0) {
                     row16[at] = v;
                 } else {  // (CIELab 16 bits: a and b signed, ×256)
                     const long signed_ab = std::lround((v / 257.0 - 128.0) * 256.0);
@@ -637,11 +670,23 @@ std::string ink_tiff_bytes(const core::InkPixels& pixels, const TiffSave& params
                 }
             }
         }
-        void* line = bits == 8 ? static_cast<void*>(row8.data()) : static_cast<void*>(row16.data());
-        if (TIFFWriteScanline(tif, line, y, 0) == -1) throw core::Error("io", "encoder error -2 when writing image file");
-    }
-    if (!TIFFFlush(tif)) throw core::Error("io", "encoder error -9 when writing image file");
-    return std::move(memory.data);
+    });
+}
+
+std::string values_tiff_bytes(const core::ColorRasterView& values, int depth, const TiffSave& params) {
+    if (depth != 8 && depth != 16 && depth != 32) throw core::Error("value", "an RGB TIFF is 8, 16 or 32 bits");
+    return sampled_tiff_bytes(values.width(), values.height(), 3, depth, PHOTOMETRIC_RGB, false, params, [&](std::uint32_t y, void* line) {
+        const std::size_t first = std::size_t(y) * values.width();
+        for (std::uint32_t x = 0; x < values.width(); ++x) {
+            const std::array<double, 4> p = values.pixel(first + x);
+            for (unsigned c = 0; c < 3; ++c) {
+                const std::size_t at = std::size_t(x) * 3 + c;
+                if (depth == 32) static_cast<float*>(line)[at] = static_cast<float>(p[c]);
+                else if (depth == 16) static_cast<std::uint16_t*>(line)[at] = static_cast<std::uint16_t>(std::lround(std::clamp(p[c], 0.0, 1.0) * 65535.0));
+                else static_cast<unsigned char*>(line)[at] = static_cast<unsigned char>(std::lround(std::clamp(p[c], 0.0, 1.0) * 255.0));
+            }
+        }
+    });
 }
 
 const std::string& srgb_icc_once() {

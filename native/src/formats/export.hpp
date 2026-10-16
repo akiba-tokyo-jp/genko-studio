@@ -12,6 +12,7 @@
 #include "core/model.hpp"
 #include "formats/psd_text.hpp"
 #include "render/image.hpp"
+#include "render/page.hpp"
 
 // The exports (Python's genko/export.py, profiles.py, pack.py and psd.py's writer), writing the same files: the same
 // names, and the same bytes where Python's are fixed (PNG, TIFF, JPEG, PDF, PSD, the text files; formats/pillow_save.hpp
@@ -130,6 +131,24 @@ fs::path join(const fs::path& dest, std::string_view name);
 std::string suffix(const fs::path& path);
 // Path.with_suffix(suffix): the last suffix replaced (profiles._save: "Vol.2_ep01" becomes "Vol.jpg").
 fs::path with_suffix(const fs::path& path, std::string_view suffix);
+
+// color-model@1 (COLOR-03): an RGB page of a colour model drawn in its values — GKCR f32 of its profile's encoded
+// values (render_page's precise; a page that composites in 8 bits: its picture's, which are sRGB's) — and the picture
+// as shown.
+struct PageValues {
+    render::Image shown;
+    std::string values;
+};
+PageValues page_values(const core::Page& page, const core::Document& episode, int dpi, render::RenderOptions options);
+// The ICC profile an RGB page of a colour model is written with: its own, or the built-in sRGB's.
+std::string_view rgb_icc(const core::RgbMode& mode);
+// A 32-bit page's inks at 16 bits (where a format holds no floats); others as they are.
+core::InkPixels at_16(const core::InkPixels& pixels);
+// Which pages of a colour model an export writes as they are: a CMYK, Lab or grey page as its inks (PDF, TIFF, CMYK;
+// the colour auto, or the page's own), an RGB page of a colour model as its values (PDF, TIFF; auto or rgb). The others
+// are written from the colours on the screen (sRGB).
+bool as_inks(const core::Page& page, std::string_view fmt, std::string_view color);
+bool as_values(const core::Page& page, std::string_view fmt, std::string_view color);
 }  // namespace detail
 
 }  // namespace genko::formats

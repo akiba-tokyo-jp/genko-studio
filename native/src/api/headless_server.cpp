@@ -758,7 +758,7 @@ Reply Api::routes(const std::string& method, const std::string& route, const std
         Json listed = Json::array();
         for (const fs::path& f : files) listed.push_back(core::path_to_utf8(f));
         Json reply = Json::object({{"ok", true}, {"count", files.size()}, {"files", listed}});
-        if (const auto note = formats::ink_note(doc, fmt, "auto")) reply["notes"] = Json::array({*note});  // (color-mode@1)
+        if (const auto notes = formats::export_notes(doc, fmt, "auto"); !notes.empty()) reply["notes"] = notes;  // (color-mode@1)
         return json_reply(reply);
     }
     return failure("no route " + method + " " + route, 404);

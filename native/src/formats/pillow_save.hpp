@@ -8,6 +8,7 @@
 #include <string_view>
 #include <vector>
 
+#include "core/color_raster.hpp"
 #include "core/ink.hpp"
 #include "render/image.hpp"
 
@@ -81,7 +82,12 @@ std::string tiff_bytes(const render::Image& image, const TiffSave& params);
 
 // color-mode@1: a CMYK or Lab page's inks as a TIFF (LZW, 8 or 16 bits, no alpha: the page is opaque): CMYK separated
 // (InkSet CMYK) with the page's profile (params.icc), Lab as CIELab (L unsigned, a and b signed; 16 bits: a·256).
+// color-model@1: a grey page's as MinIsBlack (its lightness) with its profile, 8, 16 or 32 bits (floats).
 std::string ink_tiff_bytes(const core::InkPixels& pixels, const TiffSave& params);
+
+// color-model@1: an RGB page's values (GKCR, its profile's encoded values) as an RGB TIFF of `depth` bits (8 and 16
+// rounded and clamped to 0..1; 32 as floats, SampleFormat 3, any finite value) with its profile (params.icc).
+std::string values_tiff_bytes(const core::ColorRasterView& values, int depth, const TiffSave& params);
 
 // images[0].save(path, format="PDF", save_all=True, append_images=images[1:], resolution=…) (PdfImagePlugin with
 // PdfParser's writer): each picture a page of its size at `resolution` dpi, stored as a JPEG (DCTDecode, as

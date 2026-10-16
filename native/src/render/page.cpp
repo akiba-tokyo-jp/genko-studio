@@ -29,6 +29,7 @@
 #include "render/color_canvas.hpp"
 #include "render/covers.hpp"
 #include "render/effects.hpp"
+#include "render/imaging.hpp"
 #include "render/ink.hpp"
 #include "render/ink_canvas.hpp"
 #include "render/op_limits.hpp"
@@ -1082,6 +1083,27 @@ void ink_layer(InkCanvas& canvas, const Ctx& ctx, const Layer& layer, const Box&
     canvas.blend_rgba(picture.mode() == "RGBA" ? picture : picture.convert("RGBA"), layer.opacity, layer.clip, layer.blend);
 }
 
+// color-model@1: the page's values (GKCR f32 of its layers) with what is drawn over them in 8 bits — the panels' borders,
+// the lines of dialogue, the effect lines, the nombres, the crop marks: where the picture differs from its layers as
+// they are shown, the colour drawn (sRGB) in the page's space, opaque.
+std::string with_drawn_over(const std::string& values, const Image& layers_shown, const Image& image, const RgbSpace& space) {
+    const core::ColorRasterView view(values);
+    const auto width = static_cast<std::size_t>(view.width());
+    if (layers_shown.size() != image.size() || static_cast<std::size_t>(image.width()) != width ||
+        static_cast<std::uint32_t>(image.height()) != view.height()) {
+        return values;
+    }
+    return core::encode_color_pixels(view.width(), view.height(), "f32", [&](std::size_t i) {
+        const std::size_t y = i / width, x = i % width;
+        const auto* was = reinterpret_cast<const unsigned char*>(layers_shown.raw()->image[y]) + x * 4;
+        const auto* now = reinterpret_cast<const unsigned char*>(image.raw()->image[y]) + x * 4;
+        if (was[0] == now[0] && was[1] == now[1] && was[2] == now[2]) return view.pixel(i);
+        double rgb[3] = {now[0] / 255.0, now[1] / 255.0, now[2] / 255.0};
+        space.from_srgb(rgb, 1);
+        return std::array<double, 4>{rgb[0], rgb[1], rgb[2], 1.0};
+    });
+}
+
 RenderResult render(const Page& page_in, int dpi, const RenderOptions& options, const core::Document* episode,
                     std::vector<std::string>& omitted) {
     if (!options.at_frame) {  // (an animation page prints as its first frame, not every cel at once)
@@ -1368,7 +1390,11 @@ RenderResult render(const Page& page_in, int dpi, const RenderOptions& options, 
     }
     Image image = (precision ? precision->image() : rgba).convert("RGB");
     std::optional<std::string> precise;  // (color-model@1: the page's values, asked for)
-    if (options.precise && precision) precise = precision->color_raster("f32");
+    std::optional<Image> layers_shown;   // (and how its layers alone are shown: what is drawn over them is told by it)
+    if (options.precise && precision) {
+        precise = precision->color_raster("f32");
+        layers_shown = image.copy();
+    }
 
     if (core::py_truthy(page.effects)) image = draw_effects(ctx, image, area);  // effect lines (M3-B)
     if (!print && core::py_truthy(page.prims)) draw_prims(image, area, ctx);  // 3D guides, never printed (M3-C)
@@ -1388,6 +1414,7 @@ RenderResult render(const Page& page_in, int dpi, const RenderOptions& options, 
         canvas.commit();
     }
     onion(image);
+    if (precise) precise = with_drawn_over(*precise, *layers_shown, image, RgbSpace::of(page));
     return RenderResult{std::move(image), {}, std::nullopt, std::move(precise)};
 }
 
@@ -1466,6 +1493,8 @@ void page_layers(const core::Page& page, const core::Document& episode, int dpi,
         if (!raster) continue;
         PageLayer out;
         out.inks = std::move(own_inks);
+        // (color-model@1: on an RGB page of a profile a paint layer's pixels are the page's values)
+        out.page_values = page.rgb && !page.rgb->profile.empty() && !page.color && (layer.color_raster || layer.raster_png);
         out.name = !layer.title.empty() ? layer.title : std::string(core::to_string(layer.role)) + " " + layer.id.substr(0, 6);
         out.image = std::move(*raster);
         out.settings = true;
@@ -1674,6 +1703,15 @@ RenderResult render_page(const core::Page& page, int dpi, const RenderOptions& o
                 out.inks=core::blank_ink_pixels(page.color->space,page.color->depth,static_cast<std::uint32_t>(area.width()),
                                                 static_cast<std::uint32_t>(area.height()));
             }
+            // (color-model@1: each tile's values laid into the page's GKCR f32, row by row)
+            const bool values=options.precise && !page.color && uses_color_precision(page,options.mode=="print");
+            if(values){
+                std::string gkcr("GKCR\1\4\0\0",8);
+                for(const std::uint32_t v:{static_cast<std::uint32_t>(area.width()),static_cast<std::uint32_t>(area.height())})
+                    for(int b=0;b<4;++b)gkcr+=static_cast<char>(v>>(8*b)&0xff);
+                gkcr.resize(16+static_cast<std::size_t>(pixels)*16,'\0');
+                out.precise=std::move(gkcr);
+            }
             constexpr int tile=512;
             for(int y=area.y0;y<area.y1;y+=tile){
                 for(int x=area.x0;x<area.x1;x+=tile){
@@ -1682,6 +1720,15 @@ RenderResult render_page(const core::Page& page, int dpi, const RenderOptions& o
                     const auto piece=render(page,dpi,part,episode,omitted);
                     out.image.paste(piece.image,Point{x-area.x0,y-area.y0});
                     if(out.inks && piece.inks)paste_inks(*out.inks,*piece.inks,Point{x-area.x0,y-area.y0});
+                    if(values){
+                        if(!piece.precise)throw core::Error("value","the page's values were not drawn");
+                        const core::ColorRasterView tile_values(*piece.precise);
+                        const std::size_t row=std::size_t(tile_values.width())*16;
+                        for(std::uint32_t r=0;r<tile_values.height();++r){
+                            const std::size_t to=16+((std::size_t(y-area.y0)+r)*std::size_t(area.width())+std::size_t(x-area.x0))*16;
+                            out.precise->replace(to,row,*piece.precise,16+r*row,row);
+                        }
+                    }
                 }
             }
             out.omitted=std::move(omitted);return out;

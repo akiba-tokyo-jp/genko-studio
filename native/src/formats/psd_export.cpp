@@ -4,6 +4,8 @@
 // placed line as a group of its balloon, its text and its rubies, the text as Photoshop text layers.
 
 #include <algorithm>
+#include <bit>
+#include <cmath>
 #include <map>
 
 #include "core/error.hpp"
@@ -13,7 +15,9 @@
 #include "core/ruby.hpp"
 #include "formats/export.hpp"
 #include "formats/output.hpp"
+#include "formats/pillow_save.hpp"
 #include "formats/psd_text_detail.hpp"
+#include "render/color_canvas.hpp"
 #include "render/ink.hpp"
 #include "render/ink_canvas.hpp"
 #include "render/not_yet_ported.hpp"
@@ -39,6 +43,19 @@ void put_u32(std::string& out, std::uint32_t v) {
     put_u16(out, v & 0xffff);
 }
 void put_i32(std::string& out, std::int32_t v) { put_u32(out, static_cast<std::uint32_t>(v)); }
+// color-model@1: a sample of `depth` bits, big-endian: 8 and 16 rounded from 0..1 (clamped), 32 a float as it is.
+void put_sample(std::string& out, double v, int depth) {
+    if (depth == 32) put_u32(out, std::bit_cast<std::uint32_t>(static_cast<float>(v)));
+    else if (depth == 16) put_u16(out, static_cast<std::uint32_t>(std::lround(std::clamp(v, 0.0, 1.0) * 65535.0)));
+    else put_u8(out, static_cast<unsigned>(std::lround(std::clamp(v, 0.0, 1.0) * 255.0)));
+}
+
+// color-model@1: the RGB page of a PSD whose layers are written at its depth (8, 16, 32) in its space (`space`: what is
+// drawn in sRGB is converted into it; a paint layer of a profiled page holds its values already).
+struct RgbOut {
+    int depth = 8;
+    render::RgbSpace space;
+};
 
 // struct.pack(">I", n): struct.error past 32 bits
 std::uint32_t u32_of(std::uint64_t n) {
@@ -163,8 +180,10 @@ std::string blend_key(const std::string& blend) {
 // psd._layer_records, one layer at a time: its record and its channels' data.
 class Records {
 public:
-    // (`ink`: a CMYK or Lab page's PSD — its layers in the page's inks)
-    explicit Records(render::Size size, std::optional<core::PageColor> ink = std::nullopt) : size_(size), ink_(std::move(ink)) {}
+    // (`ink`: a CMYK, Lab or grey page's PSD — its layers in the page's inks; `rgb`: an RGB page of a colour model's —
+    // its layers at its depth, in its space)
+    explicit Records(render::Size size, std::optional<core::PageColor> ink = std::nullopt, std::optional<RgbOut> rgb = std::nullopt)
+        : size_(size), ink_(std::move(ink)), rgb_(std::move(rgb)) {}
 
     void add(render::PageLayer&& layer) {
         const Image rgba = layer.image.mode() == "RGBA" ? std::move(layer.image) : layer.image.convert("RGBA");
@@ -176,6 +195,11 @@ public:
         const std::optional<render::Box> found = rgba.getbbox();
         const render::Box box = found ? *found : render::Box{0, 0, 1, 1};  // (an empty layer kept as 1 pixel)
         const double opacity_given = layer.settings ? layer.opacity : 1.0;
+        if (rgb_) {
+            write_rgb(layer.name, rgba.crop(box), box, opacity_given, blend_key(layer.settings ? layer.blend : std::string("normal")),
+                      layer.settings && layer.clip, layer.mask ? &*layer.mask : nullptr, {}, layer.page_values);
+            return;
+        }
         write(layer.name, rgba.crop(box), box, opacity_given, blend_key(layer.settings ? layer.blend : std::string("normal")),
               layer.settings && layer.clip, layer.mask ? &*layer.mask : nullptr, {});
     }
@@ -191,6 +215,10 @@ public:
             const Image crop = rgba.crop(local);
             write_inks(name, render::ink_picture(crop, *ink_).values, crop.size(), render::Point{box.x0, box.y0}, ink_->space, ink_->depth, 1.0,
                        "normal", false, nullptr, blocks);
+            return;
+        }
+        if (rgb_) {
+            write_rgb(name, rgba.crop(local), box, 1.0, "norm", false, nullptr, blocks, false);
             return;
         }
         write(name, rgba.crop(local), box, 1.0, "norm", false, nullptr, blocks);
@@ -221,6 +249,36 @@ private:
         std::vector<std::pair<int, std::string>> channels{{-1, rle(bands[3])}, {0, rle(bands[0])}, {1, rle(bands[1])}, {2, rle(bands[2])}};
         record(name, std::move(channels), box, opacity_given, blend, clip, mask ? std::optional<std::string>(rle(mask->convert("L").resize(size_))) : std::nullopt,
                blocks);
+    }
+
+    // color-model@1: a layer of an RGB page of a colour model at its depth: its colours in the page's space (drawn in
+    // sRGB: converted, unless `page_values`), its alpha and mask at that depth (8 bits RLE, 16 and 32 raw).
+    void write_rgb(const std::string& name, const Image& crop, const render::Box& box, double opacity_given, const std::string& blend, bool clip,
+                   const Image* mask, const std::string& blocks, bool page_values) {
+        const int depth = rgb_->depth;
+        const std::string bytes = crop.tobytes();
+        const std::size_t n = std::size_t(crop.width()) * static_cast<std::size_t>(crop.height());
+        std::vector<double> rgb(n * 3);
+        for (std::size_t i = 0; i < n; ++i) {
+            for (unsigned c = 0; c < 3; ++c) rgb[i * 3 + c] = static_cast<unsigned char>(bytes[i * 4 + c]) / 255.0;
+        }
+        if (!page_values && !rgb_->space.is_srgb()) rgb_->space.from_srgb(rgb.data(), n);
+        const auto plane = [&](unsigned c) {
+            std::string out;
+            for (std::size_t i = 0; i < n; ++i) put_sample(out, c == 3 ? static_cast<unsigned char>(bytes[i * 4 + 3]) / 255.0 : rgb[i * 3 + c], depth);
+            return out;
+        };
+        std::vector<std::pair<int, std::string>> channels;
+        channels.emplace_back(-1, packed_plane(plane(3), crop.width(), crop.height(), depth));
+        for (unsigned c = 0; c < 3; ++c) channels.emplace_back(static_cast<int>(c), packed_plane(plane(c), crop.width(), crop.height(), depth));
+        std::optional<std::string> mask_plane;
+        if (mask != nullptr) {
+            const std::string grey = mask->convert("L").resize(size_).tobytes();
+            std::string samples;
+            for (const char g : grey) put_sample(samples, static_cast<unsigned char>(g) / 255.0, depth);
+            mask_plane = packed_plane(samples, size_.width, size_.height, depth);
+        }
+        record(name, std::move(channels), box, opacity_given, blend, clip, std::move(mask_plane), blocks);
     }
 
 public:
@@ -256,6 +314,10 @@ private:
                 for (int x = box.x0; x < box.x1; ++x) {
                     double v = values[(std::size_t(y) * picture.width + x) * all + channel];
                     if (channel < n && space == core::InkSpace::Cmyk) v = 1.0 - v;
+                    if (depth == 32) {  // (color-model@1: a grey page's lightness as floats; its alpha 0..1)
+                        put_sample(bytes, channel < n ? v : std::clamp(v, 0.0, 1.0), 32);
+                        continue;
+                    }
                     const auto sample = static_cast<std::uint32_t>(std::lround(std::clamp(v, 0.0, 1.0) * most));
                     if (depth == 16) put_u16(bytes, sample);
                     else put_u8(bytes, sample);
@@ -272,7 +334,8 @@ private:
             std::string bytes;
             for (const char g : grey) {
                 const unsigned v = static_cast<unsigned char>(g);
-                if (depth == 16) put_u16(bytes, v * 257);
+                if (depth == 32) put_sample(bytes, v / 255.0, 32);
+                else if (depth == 16) put_u16(bytes, v * 257);
                 else put_u8(bytes, v);
             }
             mask_plane = packed_plane(bytes, size_.width, size_.height, depth);
@@ -366,6 +429,7 @@ private:
 
     render::Size size_;
     std::optional<core::PageColor> ink_;
+    std::optional<RgbOut> rgb_;
     std::string records_;
     std::string data_;
     int count_ = 0;
@@ -748,14 +812,18 @@ std::string resources_with_icc(std::int64_t dpi, std::string_view icc) {
 // color-mode@1 (SPEC.md COLOR-02): a CMYK or Lab page's PSD in its own colour mode (4 or 9) and depth, every layer and
 // the merged picture as its inks (a paint layer's own; the others' colours by the page's rules), a CMYK page's profile
 // embedded. The editable text of PSD-01 too: its layers' pixels in inks, a CMYK page's text colours as inks.
+// color-model@1 (COLOR-03): a grey page's in Grayscale (mode 1), its lightness, its profile embedded; 32 bits as floats
+// for grey — a CMYK or Lab page of 32 bits at 16 (Photoshop has no 32-bit CMYK or Lab: said in the export's notes).
 void put_page_psd_inks(detail::Output& output, const core::Document& episode, const core::Page& page, const fs::path& dest, std::int64_t dpi,
                        const PsdText& text, PsdTextReport* report) {
-    const core::PageColor& color = *page.color;
+    core::PageColor color = *page.color;
+    if (color.depth == 32 && color.space != core::InkSpace::Gray) color.depth = 16;  // (the depth written)
+    const bool grey = color.space == core::InkSpace::Gray;
     render::RenderOptions options;
     options.mode = "print";
     options.inks = true;
     const render::RenderResult made = render::render_page(page, static_cast<int>(dpi), options, &episode);
-    const core::InkPixels& merged = *made.inks;
+    const core::InkPixels merged = made.inks->depth == color.depth ? *made.inks : detail::at_16(*made.inks);
     const render::Size size{static_cast<int>(merged.width), static_cast<int>(merged.height)};
     Records records(size, color);
     const auto each = [&](render::PageLayer&& layer) {
@@ -779,15 +847,19 @@ void put_page_psd_inks(detail::Output& output, const core::Document& episode, co
     put_u32(body, merged.height);
     put_u32(body, merged.width);
     put_u16(body, static_cast<std::uint32_t>(color.depth));
-    put_u16(body, color.space == core::InkSpace::Cmyk ? 4 : 9);
+    put_u16(body, color.space == core::InkSpace::Cmyk ? 4 : grey ? 1 : 9);
     put_u32(body, 0);  // (no colour mode data)
-    body += resources_with_icc(dpi, color.space == core::InkSpace::Cmyk && color.icc ? std::string_view(*color.icc) : std::string_view());
+    body += resources_with_icc(dpi, color.space != core::InkSpace::Lab && color.icc ? std::string_view(*color.icc) : std::string_view());
     body += records.finish();
-    // the merged picture: each colour plane (CMYK inverted); 8 bits RLE (every row's count first), 16 raw
+    // the merged picture: each colour plane (CMYK inverted); 8 bits RLE (every row's count first), 16 and 32 raw
     const unsigned all = merged.channels();
     const auto plane = [&](unsigned c) {
         std::string bytes;
         for (std::size_t i = 0; i < merged.pixel_count(); ++i) {
+            if (color.depth == 32) {
+                put_sample(bytes, merged.floats[i * all + c], 32);
+                continue;
+            }
             std::uint32_t v = merged.samples[i * all + c];
             if (color.space == core::InkSpace::Cmyk) v = merged.max() - v;
             if (color.depth == 16) put_u16(bytes, v);
@@ -809,6 +881,60 @@ void put_page_psd_inks(detail::Output& output, const core::Document& episode, co
     output.put(dest, body);
 }
 
+// color-model@1 (COLOR-03): an RGB page of a colour model's PSD in RGB (mode 3) at its depth (8, 16, 32 as floats), its
+// profile (or sRGB's) embedded: its layers in its values (what is drawn in sRGB converted into its space), the merged
+// picture its values (render_page's precise: what is drawn over the layers in 8 bits taken into them).
+void put_page_psd_rgb(detail::Output& output, const core::Document& episode, const core::Page& page, const fs::path& dest, std::int64_t dpi,
+                      const PsdText& text, PsdTextReport* report) {
+    const core::RgbMode& mode = *page.rgb;
+    const int depth = mode.depth;
+    render::RenderOptions options;
+    options.mode = "print";
+    const detail::PageValues made = detail::page_values(page, episode, static_cast<int>(dpi), options);
+    const core::ColorRasterView merged(made.values);
+    const render::Size size{static_cast<int>(merged.width()), static_cast<int>(merged.height())};
+    Records records(size, std::nullopt, RgbOut{depth, render::RgbSpace::of(page)});
+    const auto each = [&](render::PageLayer&& layer) { records.add(std::move(layer)); };
+    if (text.editable) {  // (PSD-01: each placed line's layers made here)
+        PsdTextReport own;
+        EditableLines lines(records, episode, static_cast<int>(dpi), size, core::py_int(page.index.json()), report != nullptr ? *report : own);
+        const std::function<void(const core::StoryLine&)> line_layers = [&](const core::StoryLine& line) { lines.add(line); };
+        render::page_layers(page, episode, static_cast<int>(dpi), each, &line_layers);
+    } else {
+        render::page_layers(page, episode, static_cast<int>(dpi), each);
+    }
+    std::string body = "8BPS";
+    put_u16(body, 1);
+    body.append(6, '\0');
+    put_u16(body, 3);
+    put_u32(body, merged.height());
+    put_u32(body, merged.width());
+    put_u16(body, static_cast<std::uint32_t>(depth));
+    put_u16(body, 3);
+    put_u32(body, 0);  // (no colour mode data)
+    body += resources_with_icc(dpi, detail::rgb_icc(mode));
+    body += records.finish();
+    // the merged picture: 8 bits RLE (every row's count first), 16 and 32 raw
+    const std::size_t pixels = std::size_t(merged.width()) * merged.height();
+    const auto plane = [&](unsigned c) {
+        std::string bytes;
+        for (std::size_t i = 0; i < pixels; ++i) put_sample(bytes, merged.pixel(i)[c], depth);
+        return bytes;
+    };
+    if (depth == 8) {
+        std::string counts, packed;
+        for (unsigned c = 0; c < 3; ++c) packbits_rows(Image::frombytes("L", size, plane(c)), counts, packed);
+        put_u16(body, 1);
+        body += counts;
+        body += packed;
+    } else {
+        put_u16(body, 0);
+        for (unsigned c = 0; c < 3; ++c) body += plane(c);
+    }
+    if (dest.has_parent_path()) detail::make_dirs(dest.parent_path());
+    output.put(dest, body);
+}
+
 // The page's PSD (export_page_psd), put into `output` at `dest`.
 void put_page_psd(detail::Output& output, const core::Document& episode, const core::Page& page, const fs::path& dest,
                   std::optional<std::int64_t> dpi_given, const PsdText& text = {}, PsdTextReport* report = nullptr) {
@@ -816,6 +942,10 @@ void put_page_psd(detail::Output& output, const core::Document& episode, const c
     check_dpi(dpi);
     if (page.color) {
         put_page_psd_inks(output, episode, page, dest, dpi, text, report);
+        return;
+    }
+    if (page.rgb) {
+        put_page_psd_rgb(output, episode, page, dest, dpi, text, report);
         return;
     }
     render::RenderOptions options;

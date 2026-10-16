@@ -201,24 +201,49 @@ std::int64_t default_dpi(const core::Document& episode, std::string_view key) {
     return episode.spec.dpi.truthy() ? core::py_int(episode.spec.dpi) : 600;
 }
 
-std::optional<std::string> ink_note(const core::Document& episode, std::string_view key, std::string_view color) {
-    std::int64_t converted = 0;
+std::vector<std::string> export_notes(const core::Document& episode, std::string_view key, std::string_view color) {
+    std::int64_t converted = 0, halved = 0;
+    bool inks_only = true;  // (every page converted a CMYK or Lab one)
     for (const auto& page : episode.pages) {
-        if (!page->color) continue;
-        const bool inks = key == "psd" || ((key == "pdf" || key == "tiff" || key == "cmyk") &&
-                                           (color == "auto" || (color == "cmyk" && page->color->space == core::InkSpace::Cmyk)));
-        if (!inks) ++converted;
+        if (!page->color && !page->rgb) continue;
+        const bool inks = page->color && (key == "psd" || detail::as_inks(*page, key, color));
+        const bool values = !page->color && (key == "psd" || detail::as_values(*page, key, color));
+        if (!inks && !values) {
+            ++converted;
+            if (!page->color || page->color->space == core::InkSpace::Gray) inks_only = false;
+        }
+        // (32 bits at 16: a PDF's; a PSD's or a TIFF's of CMYK or Lab inks — the pack's TIFFs too)
+        const bool deep = (page->color ? page->color->depth : page->rgb->depth) == 32;
+        const bool cmyk_or_lab = page->color && page->color->space != core::InkSpace::Gray;
+        if (deep && ((key == "pdf" && (inks || values)) || (cmyk_or_lab && (inks || (key == "pack" && detail::as_inks(*page, "tiff", "auto")))))) {
+            ++halved;
+        }
     }
-    if (converted == 0) return std::nullopt;
-    if (key == "pack") {  // (its TIFFs keep the inks — auto —, its PNGs cannot)
-        return "CMYK・Lab のページ " + std::to_string(converted) + " ページの PNG は、画面の色（sRGB）から変換して書き出しました（TIFF はインキの値のまま）";
+    std::vector<std::string> notes;
+    const std::string n = std::to_string(converted);
+    if (converted > 0 && key == "pack") {  // (its TIFFs keep the inks and values — auto —, its PNGs cannot)
+        notes.push_back(inks_only ? "CMYK・Lab のページ " + n + " ページの PNG は、画面の色（sRGB）から変換して書き出しました（TIFF はインキの値のまま）"
+                                  : "色モード・プロファイルを持つページ " + n + " ページの PNG は、画面の色（sRGB）から変換して書き出しました（TIFF はページの値のまま）");
+    } else if (converted > 0) {
+        notes.push_back(inks_only ? "CMYK・Lab のページ " + n + " ページは、この形式・色ではインキの値のまま書けないため、画面の色（sRGB）から変換して書き出しました"
+                                  : "色モード・プロファイルを持つページ " + n + " ページは、この形式・色ではその値のまま書けないため、画面の色（sRGB）から変換して書き出しました");
     }
-    return "CMYK・Lab のページ " + std::to_string(converted) + " ページは、この形式・色ではインキの値のまま書けないため、画面の色（sRGB）から変換して書き出しました";
+    if (halved > 0) notes.push_back("32 bit のページ " + std::to_string(halved) + " ページは、この形式では 16 bit にして書き出しました");
+    return notes;
+}
+
+std::optional<std::string> ink_note(const core::Document& episode, std::string_view key, std::string_view color) {
+    std::vector<std::string> notes = export_notes(episode, key, color);
+    if (notes.empty()) return std::nullopt;
+    return std::move(notes.front());
 }
 
 std::optional<std::string> ink_note(const core::Page& page) {
-    if (!page.color) return std::nullopt;
-    return "CMYK・Lab のページは、動画にはインキの値のまま書けないため、画面の色（sRGB）から変換して書き出しました";
+    if (page.color && page.color->space != core::InkSpace::Gray) {
+        return "CMYK・Lab のページは、動画にはインキの値のまま書けないため、画面の色（sRGB）から変換して書き出しました";
+    }
+    if (!page.color && !page.rgb) return std::nullopt;
+    return "色モード・プロファイルを持つページは、動画にはその値のまま書けないため、画面の色（sRGB）から変換して書き出しました";
 }
 
 core::Json run(const core::Document& episode_in, const std::optional<std::filesystem::path>& project, std::string_view key,
@@ -256,7 +281,7 @@ core::Json run(const core::Document& episode_in, const std::optional<std::filesy
         // (HumanService.export: preflight and the export approval, the studio's)
         if (o.official_export) {
             Json reply = o.official_export(*project);
-            if (const auto note = ink_note(*episode, key, o.color); note && reply.value("ok", false)) reply["notes"] = Json::array({*note});
+            if (const auto notes = export_notes(*episode, key, o.color); !notes.empty() && reply.value("ok", false)) reply["notes"] = notes;
             return reply;
         }
         Json refused = refuse("official export is not in the C++ build yet");
@@ -313,7 +338,7 @@ core::Json run(const core::Document& episode_in, const std::optional<std::filesy
     for (const auto& f : files) written.push_back(core::path_to_utf8(f));
     Json reply{{"ok", true}, {"files", written}};
     if (psd_report) reply["psd_text"] = *psd_report;
-    if (const auto note = ink_note(*episode, key, key == "cmyk" ? std::string("cmyk") : o.color)) reply["notes"] = Json::array({*note});
+    if (const auto notes = export_notes(*episode, key, key == "cmyk" ? std::string("cmyk") : o.color); !notes.empty()) reply["notes"] = notes;
     return reply;
 }
 

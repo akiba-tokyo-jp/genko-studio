@@ -37,10 +37,19 @@ struct PdfPage {
     PdfBoxes boxes;
 };
 
+// color-model@1: an RGB page's values (GKCR: its profile's encoded values) as a PDF image of `bits` (8 or 16) a channel.
+struct PdfValues {
+    std::string values;
+    int bits = 8;
+};
+
 // color-mode@1: a page of mode "INK" is a CMYK or Lab page's inks, made by `inks(n)` (8 or 16 bits): CMYK with its
-// profile (ICCBased, N 4) or DeviceCMYK, Lab as /Lab (D50, a and b -128..127).
+// profile (ICCBased, N 4) or DeviceCMYK, Lab as /Lab (D50, a and b -128..127); color-model@1: a grey page's, its
+// lightness, with its profile (ICCBased, N 1) or DeviceGray. A page of mode "VALUES" is an RGB page's values, made by
+// `values(n)`, with its profile (ICCBased, N 3) or DeviceRGB.
 std::filesystem::path write_pdf(const std::filesystem::path& path, const std::vector<PdfPage>& pages,
                                 const std::function<render::Image(std::size_t)>& picture,
-                                const std::function<core::InkPixels(std::size_t)>& inks = {});
+                                const std::function<core::InkPixels(std::size_t)>& inks = {},
+                                const std::function<PdfValues(std::size_t)>& values = {});
 
 }  // namespace genko::formats
