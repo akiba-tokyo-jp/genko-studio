@@ -1644,7 +1644,10 @@
         "native/src/render/text/balloons.cpp",
         "native/src/render/page.cpp",
         "native/src/formats/psd_export.cpp",
-        "native/src/app/thumbs.cpp"
+        "native/src/app/thumbs.cpp",
+        "native/src/app/main_window_book.cpp",
+        "native/tests/gui/test_gui_book.cpp",
+        "native/tests/unit/test_color_model.cpp"
       ],
       "pc0": {
         "date": "2026-10-16",

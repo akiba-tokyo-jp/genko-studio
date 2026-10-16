@@ -34,6 +34,7 @@
 #include <functional>
 
 #include "app/canvas.hpp"
+#include "app/config.hpp"
 #include "app/colours.hpp"
 #include "app/dialogs.hpp"
 #include "app/layer_panel.hpp"
@@ -977,6 +978,30 @@ private slots:
         QCOMPARE(checked(), QStringLiteral("Lab+16 bit/チャンネル"));
         s.on_page(1);
         QCOMPARE(checked(), QStringLiteral("RGB+8 bit/チャンネル"));
+    }
+
+    // ページ → 色モード with カラー設定 not at its defaults (a working RGB of Display P3, the perceptual intent): another depth
+    // of an sRGB page is that depth alone (no profile, no intent: the page keeps its own); another mode converts with the
+    // settings' intent but leaves the page its own default way (page_intent), so a CMYK page taken to 8-bit RGB in the
+    // working sRGB is a page without a colour model again (Python's).
+    void colourModesKeepThePagesOwnWay() {
+        Studio s;
+        app::settings()->setValue(QStringLiteral("color/workingRgb"), QStringLiteral("display-p3"));
+        app::settings()->setValue(QStringLiteral("color/intent"), QStringLiteral("perceptual"));
+        s.on_page(2);
+        std::size_t n = s.ops.size();
+        QVERIFY(s.trigger("act_depth_16"));
+        QCOMPARE(s.since(n), std::string(R"([{"op": "set_color_mode", "page": 2, "mode": "rgb", "depth": 16}])"));
+        QVERIFY(s.book().page(1).rgb && s.book().page(1).rgb->depth == 16 && s.book().page(1).rgb->profile.empty() && s.book().page(1).rgb->intent == "relative");
+        QVERIFY(s.trigger("act_undo"));
+        app::settings()->setValue(QStringLiteral("color/workingRgb"), QStringLiteral("srgb"));
+        QVERIFY(s.window->apply_ops(Json::array({Json{{"op", "set_color_mode"}, {"page", 2}, {"mode", "cmyk"}, {"profile", "coated-cmyk"}}})));
+        s.on_page(2);
+        n = s.ops.size();
+        QVERIFY(s.trigger("act_mode_rgb"));
+        QCOMPARE(s.since(n), std::string(R"([{"op": "set_color_mode", "page": 2, "mode": "rgb", "depth": 8, "intent": "perceptual", "page_intent": "relative"}])"));
+        QVERIFY(!s.book().page(1).color && !s.book().page(1).rgb);
+        for (const char* key : {"color/workingRgb", "color/intent"}) app::settings()->remove(QString::fromLatin1(key));
     }
 
     // ページの色モード…, color-model@1: grey and 32 bits among the modes and depths; each mode's profiles — the built-in

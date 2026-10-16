@@ -148,10 +148,13 @@ struct Way {
     std::int64_t clipped = 0;
 };
 
-// The settings colours come into a page with (its intent and black point compensation).
+// How a conversion goes into a page (intent, bpc: its intent and black point compensation) and the settings colours come
+// into the page with afterwards, kept as the page's own (page_intent, page_bpc; without them the conversion's).
 struct Into {
     std::string intent = "relative";
     bool bpc = true;
+    std::string page_intent = "relative";
+    bool page_bpc = true;
 };
 
 Into into_of(const Json& op) {
@@ -161,6 +164,13 @@ Into into_of(const Json& op) {
     if (const Json* bpc = field(op, "bpc"); bpc != nullptr) {
         if (!bpc->is_boolean()) throw OpError("bpc is true or false");
         out.bpc = bpc->get<bool>();
+    }
+    out.page_intent = text_of(op, "page_intent", out.intent);
+    if (!core::is_intent(out.page_intent)) throw OpError("page_intent is perceptual, relative, saturation or absolute");
+    out.page_bpc = out.bpc;
+    if (const Json* bpc = field(op, "page_bpc"); bpc != nullptr) {
+        if (!bpc->is_boolean()) throw OpError("page_bpc is true or false");
+        out.page_bpc = bpc->get<bool>();
     }
     return out;
 }
@@ -212,6 +222,21 @@ Model target_of(std::string_view mode, int depth, const std::optional<Named>& na
     }
     out.inks = std::move(made);
     return out;
+}
+
+// The model a conversion makes (`to`, its intent and black point compensation the conversion's), as the page keeps it:
+// with the page's own (page_intent, page_bpc) — an RGB page at 8 bits in sRGB with the defaults has none.
+Model kept_as(Model to, const Into& into) {
+    if (to.inks) {
+        to.inks->intent = into.page_intent;
+        to.inks->bpc = into.page_bpc;
+        return to;
+    }
+    RgbMode rgb = to.rgb_mode();
+    rgb.intent = into.page_intent;
+    rgb.bpc = into.page_bpc;
+    to.rgb = rgb.is_default() ? std::nullopt : std::optional<RgbMode>(std::move(rgb));
+    return to;
 }
 
 std::string layer_name(const core::Page& page, const core::Layer& layer) {
@@ -400,16 +425,18 @@ std::optional<std::string> precise_blocker(const core::Page& page) {
     return std::nullopt;
 }
 
-// Pages converted to a model (each page's own target: `target_for`), in place; how many changed. Refused as a whole:
-// nothing changes when one layer cannot be converted.
+// Pages converted to a model (each page's own target: `target_for`, its intent and black point compensation the
+// conversion's), in place, keeping the page's own way (`into`'s page_intent, page_bpc); how many changed. Refused as a
+// whole: nothing changes when one layer cannot be converted.
 std::int64_t convert_pages(Document& doc, const std::vector<std::size_t>& pages, const std::function<Model(const core::Page&)>& target_for,
-                           Way& way) {
+                           Way& way, const Into& into) {
     std::int64_t converted = 0;
     for (const std::size_t i : pages) {
         const Model from = model_of(*doc.pages[i]);
         Model to = target_for(*doc.pages[i]);
         if (to.inks && from.inks && from.inks->space == to.inks->space) to.inks->inks = from.inks->inks;  // (the same space keeps its exact inks)
-        if (from == to) continue;
+        const Model kept = kept_as(to, into);
+        if (from == kept) continue;
         if (to.inks && to.inks->space == InkSpace::Lab) {  // (nothing changes when one layer cannot be composited in Lab)
             for (const core::Layer& layer : doc.pages[i]->layers) {
                 if (!core::lab_blend(layer.blend)) {
@@ -420,8 +447,8 @@ std::int64_t convert_pages(Document& doc, const std::vector<std::size_t>& pages,
         }
         core::Page& page = doc.edit_page(i);
         for (core::Layer& layer : page.layers) convert_layer(page, layer, from, to, way);
-        page.color = std::move(to.inks);
-        page.rgb = std::move(to.rgb);
+        page.color = kept.inks;
+        page.rgb = kept.rgb;
         if (const auto why = precise_blocker(page)) throw core::Error("not_yet_ported", *why + ": a page of 16 or 32 bits cannot draw it in precise colour yet");
         ++converted;
     }
@@ -459,6 +486,13 @@ void check_precise(const Document& doc) {
     }
 }
 
+// The op's "default": the book's default model too (new pages), besides the pages it names.
+bool default_of(const Json& op) {
+    const Json* also = field(op, "default");
+    if (also != nullptr && !also->is_boolean()) throw OpError("default is true or false");
+    return also != nullptr && also->get<bool>();
+}
+
 void set_color_mode(OpContext& c) {
     Document& doc = c.doc;
     const Json& op = c.op;
@@ -471,18 +505,18 @@ void set_color_mode(OpContext& c) {
         throw OpError("depth is 8, 16 or 32");
     }
     const int bits = depth != nullptr ? static_cast<int>(depth->get<std::int64_t>()) : 8;
-    const Model target = target_of(mode, bits, named_profile(doc, op), into_of(op));
+    const Into into = into_of(op);
+    const Model target = target_of(mode, bits, named_profile(doc, op), into);
     Way way = way_of(op);
     bool every = false;
     const std::vector<std::size_t> pages = pages_of(doc, op, every);
-    const Json* also = field(op, "default");
-    if (also != nullptr && !also->is_boolean()) throw OpError("default is true or false");
-    const bool book = every || (also != nullptr && also->get<bool>());
-    const std::int64_t converted = convert_pages(doc, pages, [&](const core::Page&) { return target; }, way);
+    const bool book = every || default_of(op);
+    const std::int64_t converted = convert_pages(doc, pages, [&](const core::Page&) { return target; }, way, into);
     check_precise(doc);
     if (book) {
-        doc.color = target.inks;
-        doc.rgb = target.rgb;
+        const Model kept = kept_as(target, into);
+        doc.color = kept.inks;
+        doc.rgb = kept.rgb;
     }
     c.report = report_of(converted, way);
 }
@@ -499,6 +533,7 @@ void assign_profile(OpContext& c) {
     if (!none && !named) throw OpError("profile is a built-in profile's id, sha256:… of one the book holds, or none (or give icc)");
     bool every = false;
     const std::vector<std::size_t> pages = pages_of(doc, op, every);
+    const bool book = default_of(op);
     // (the model with the profile in place of its own, or none when it cannot take it)
     const auto assigned = [&](const Model& from) -> std::optional<Model> {
         Model to = from;
@@ -546,10 +581,12 @@ void assign_profile(OpContext& c) {
         page.rgb = to->rgb;
         ++count;
     }
-    if (every) {
+    if (every || book) {
         if (const std::optional<Model> to = assigned(Model{doc.color, doc.rgb})) {
             doc.color = to->inks;
             doc.rgb = to->rgb;
+        } else if (!every) {
+            throw OpError("the book's default mode is of another colour space than the profile's");
         } else if (count == 0) {
             throw OpError("no page is of the profile's colour space");
         }
@@ -570,14 +607,15 @@ void convert_profile(OpContext& c) {
     Way way = way_of(op);
     bool every = false;
     const std::vector<std::size_t> pages = pages_of(doc, op, every);
+    const bool book = every || default_of(op);
     // (each page at its own depth)
     const auto target = [&](const Model& from) { return target_of(mode, from.depth(), named, into); };
-    const std::int64_t converted = convert_pages(doc, pages, [&](const core::Page& page) { return target(model_of(page)); }, way);
+    const std::int64_t converted = convert_pages(doc, pages, [&](const core::Page& page) { return target(model_of(page)); }, way, into);
     check_precise(doc);
-    if (every) {
-        const Model book = target(Model{doc.color, doc.rgb});
-        doc.color = book.inks;
-        doc.rgb = book.rgb;
+    if (book) {
+        const Model kept = kept_as(target(Model{doc.color, doc.rgb}), into);
+        doc.color = kept.inks;
+        doc.rgb = kept.rgb;
     }
     c.report = report_of(converted, way);
 }

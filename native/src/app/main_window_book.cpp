@@ -251,9 +251,10 @@ void MainWindow::color_mode_dialog() {
 // 色モード → RGB・グレースケール・CMYK・Lab・8/16/32 bit (image.mode.*, as upstream's Image → Mode): the page in front
 // in another mode (its depth kept) or another depth (the rest of its mode kept: its profile, intent, black point) —
 // set_color_mode, undone as any op. Another mode in カラー設定's working space of it (CMYK: the built-in coated-cmyk
-// unless another is chosen; RGB and grey: the op's own default, sRGB and sGray, unless another is chosen) with its intent
-// and black point compensation (written when not the op's default). Nothing when the page is so already; a refusal
-// said (apply_ops) and the marks put back as the page is.
+// unless another is chosen; RGB and grey: the op's own default, sRGB and sGray, unless another is chosen), converted with
+// its intent and black point compensation (written when not the op's default) while the page keeps the default way
+// (page_intent, page_bpc). Another depth of an 8-bit sRGB page: the depth alone. Nothing when the page is so already; a
+// refusal said (apply_ops) and the marks put back as the page is.
 void MainWindow::set_page_mode(const QString& mode, int depth) {
     const core::Page* page = current_page();
     if (page == nullptr) return;
@@ -274,6 +275,8 @@ void MainWindow::set_page_mode(const QString& mode, int depth) {
         op["profile"] = page->rgb->profile;
         op["intent"] = page->rgb->intent;
         if (!page->rgb->bpc) op["bpc"] = false;
+    } else if (wanted == now) {
+        // (an 8-bit sRGB page: its depth alone — sRGB and the default way kept, whatever カラー設定 has)
     } else {
         const color_settings::Settings chosen = color_settings::load();
         const color_settings::Space space = wanted == "cmyk"   ? color_settings::Space::Cmyk
@@ -284,8 +287,15 @@ void MainWindow::set_page_mode(const QString& mode, int depth) {
             if (wanted == "cmyk" && (!w.usable || !w.icc)) op["profile"] = "coated-cmyk";  // (no working CMYK profile: the built-in)
             else if (wanted == "cmyk" || !w.is_default) color_settings::put_profile(op, w);
         }
-        if (chosen.intent != QLatin1String("relative")) op["intent"] = chosen.intent.toStdString();
-        if (!chosen.bpc) op["bpc"] = false;
+        // (converted the settings' way; the page keeps the default way its colours come into it: page_intent, page_bpc)
+        if (chosen.intent != QLatin1String("relative")) {
+            op["intent"] = chosen.intent.toStdString();
+            op["page_intent"] = "relative";
+        }
+        if (!chosen.bpc) {
+            op["bpc"] = false;
+            op["page_bpc"] = true;
+        }
     }
     if (!apply_ops(Json::array({op}))) {
         show_color_mode();
