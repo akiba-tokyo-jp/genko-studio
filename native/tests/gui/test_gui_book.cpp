@@ -1223,6 +1223,41 @@ private slots:
         QVERIFY(std::any_of(s.book().page(2).layers.begin(), s.book().page(2).layers.end(), [](const core::Layer& l) { return l.id == "away"; }));
     }
 
+    // Review G: the refusals of the special modes' arguments name the choices as the dialogs show them (their combo
+    // boxes' words, in order).
+    void modeRefusalsUseTheDialogsWords() {
+        Studio s;
+        core::Page indexed = s.book().page(0);
+        core::RgbMode mode;
+        mode.table = core::ColorTable{};
+        mode.table->colors = {{0, 0, 0}, {255, 255, 255}};
+        indexed.rgb = mode;
+        app::IndexedDialog colours(s.window.get(), &indexed);
+        app::ColorTableDialog table(s.window.get(), indexed);
+        app::BitmapDialog bitmap(s.window.get(), nullptr);
+        app::DuotoneDialog duotone(s.window.get(), nullptr);
+        const auto words = [](const QComboBox* box) {
+            QStringList out;
+            for (int i = 0; i < box->count(); ++i) out << box->itemText(i);
+            return out.join(QStringLiteral("・"));
+        };
+        const std::vector<std::pair<std::string, const QComboBox*>> cases{
+            {"palette is selective, perceptual, adaptive, exact, systemMac, systemWindows, web or uniform", colours.palette},
+            {"forced is blackWhite, none, primaries or web", colours.forced},
+            {"dither is diffusion, none, pattern or noise", colours.dither},
+            {"table is custom, blackBody, grayscale, spectrum, systemMac, systemWindows or web", table.preset},
+            {"method is diffusion, threshold, pattern or halftone", bitmap.method},
+            {"shape is round, ellipse, line, square, diamond or cross", bitmap.shape},
+            {"type is monotone, duotone, tritone or quadtone", duotone.type},
+        };
+        for (const auto& [message, box] : cases) {
+            const QString said = wording::error(message);
+            const QString choices = said.mid(said.indexOf(QStringLiteral("、")) + 1);  // (a space before の after a Latin word)
+            QVERIFY2(choices == words(box) + QStringLiteral("のどれかです") || choices == words(box) + QStringLiteral(" のどれかです"),
+                     qPrintable(said + QStringLiteral(" / ") + words(box)));
+        }
+    }
+
     void colourModesKeepThePagesOwnWay() {
         Studio s;
         app::settings()->setValue(QStringLiteral("color/workingRgb"), QStringLiteral("display-p3"));

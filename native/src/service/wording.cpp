@@ -359,7 +359,7 @@ const std::vector<Rule>& rules() {
         }));
         r.push_back(rule(R"(the book's default mode is (bitmap|multichannel): Indexed Color takes another)",
                          "原稿の新しいページの色モードが 2 階調かマルチチャンネルなので、インデックスカラーにできません"));
-        r.push_back(rule("palette is selective, .*", "パレットは、特定・知覚的・適応・正確・Mac OS・Windows・Web・均等のどれかです"));
+        r.push_back(rule("palette is selective, .*", "パレットは、ローカル（特定）・ローカル（知覚的）・ローカル（割り付け）・正確（256 色まで）・システム（Mac OS）・システム（Windows）・Web・均等のどれかです"));
         r.push_back(rule("forced is blackWhite, none, primaries or web", "強制する色は、白黒・なし・原色・Web のどれかです"));
         r.push_back(rule("dither is diffusion, none, pattern or noise", "ディザは、拡散・なし・パターン・ノイズのどれかです"));
         r.push_back(rule("colors is a whole number from 2 to 256", "色数は 2〜256 の整数です"));
@@ -368,12 +368,12 @@ const std::vector<Rule>& rules() {
                          "画像に \\1 色あるので、「正確」のパレットにできません（256 色までです。ほかのパレットを選んでください）"));
         r.push_back(rule(R"(page (\d+) is not an indexed page \(to_indexed first\))", "\\1 ページはインデックスカラーのページではありません（先にインデックスカラーにします）"));
         r.push_back(rule(R"(no page is an indexed page \(to_indexed first\))", "インデックスカラーのページがありません（先にインデックスカラーにします）"));
-        r.push_back(rule("table is custom, .*", "カラーテーブルは、カスタム・黒体・グレースケール・スペクトル・Mac OS・Windows・Web のどれかです"));
+        r.push_back(rule("table is custom, .*", "カラーテーブルは、カスタム・黒体・グレースケール・スペクトル・システム（Mac OS）・システム（Windows）・Web のどれかです"));
         r.push_back(rule(R"(colors is a list of 1\.\.256 colours.*)", "カラーテーブルの色は 1〜256 色です（#rrggbb か [r, g, b]）"));
         r.push_back(rule(R"(entry (.*) is not an index of the table \((\d+) colours\))", "\\1 はカラーテーブルの番号ではありません（\\2 色あります）"));
         r.push_back(rule(R"(entry (\d+): a colour is .*)", "\\1 番の色が読めません（#rrggbb か [r, g, b]）"));
         r.push_back(rule("transparent is an index of the table or null", "透明にする色は、カラーテーブルの番号か「なし」です"));
-        r.push_back(rule("method is diffusion, threshold, pattern or halftone", "2 階調の方法は、誤差拡散・50% を境界・パターンディザ・ハーフトーンスクリーンのどれかです"));
+        r.push_back(rule("method is diffusion, threshold, pattern or halftone", "2 階調の方法は、誤差拡散法・50% を基準に 2 階調・パターンディザ・ハーフトーンスクリーンのどれかです"));
         r.push_back(rule("shape is round, ellipse, line, square, diamond or cross", "網点の形は、円・楕円・線・正方形・ひし形・十字のどれかです"));
         r.push_back(rule("frequency is a number from 1 to 999", "線数は 1〜999 です"));
         r.push_back(rule("angle is a number from -180 to 180", "角度は -180〜180 です"));
