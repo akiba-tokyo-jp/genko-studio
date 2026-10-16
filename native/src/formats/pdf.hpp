@@ -31,12 +31,21 @@ PdfBoxes pdf_boxes(const core::Page& page, std::string_view area);
 // CMYK only; the bytes are the caller's, kept while the PDF is written) and boxes. The pictures are made one at a time
 // by `picture(n)` (of that mode), so the pages are never all held at once; the file is written beside `path` and moved
 // into place when it is whole.
-// channels@1: a spot channel of a page written as a separation over its picture, overprinting (/Separation with the
-// ink's name, its colour in sRGB as the alternate space; an ExtGState with /OP and /OPM 1).
+// channels@1: a spot channel of a page written as a separation over its picture (/Separation with the ink's name, its
+// colour in sRGB as the alternate space): its samples the channel's density (what a separating RIP prints of it, with or
+// without transparency), a soft mask (DeviceGray) clear where it is 0 and full elsewhere, painted overprinting
+// (/OP true /op true /OPM 1) and multiplied (/BM /Multiply). A viewer that overprints separates it; one that does not
+// (Acrobat's default, browsers, Preview, office printers) multiplies the ink's colour over the picture as the screen shows
+// a spot of solidity 0, and the page shows through where it has no ink. (A soft mask of the density itself would print
+// the density squared where the RIP blends it with transparency.)
 struct PdfSpot {
     std::string name;
     std::array<int, 3> rgb{};
 };
+
+// The names a page's spot channels are written under as separations: their own, but for those PDF keeps for its own
+// colorants (All, None, Cyan, Magenta, Yellow, Black, in any case): "<name> Spot" (" Spot 2", … while another has it).
+std::vector<std::string> pdf_spot_names(const std::vector<std::string>& names);
 
 struct PdfPage {
     std::string mode;

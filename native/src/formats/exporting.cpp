@@ -12,6 +12,7 @@
 #include "core/pyops.hpp"
 #include "core/ruby.hpp"
 #include "formats/export.hpp"
+#include "formats/pdf.hpp"
 #include "formats/psd_text.hpp"
 #include "render/not_yet_ported.hpp"
 
@@ -256,6 +257,28 @@ std::vector<std::string> export_notes(const core::Document& episode, std::string
         if (alphas > 0) {
             notes.push_back("アルファチャンネルのあるページ " + std::to_string(alphas) +
                             " ページは、この形式ではアルファチャンネルを書けないため、書き出していません（PSD なら書けます）");
+        }
+    }
+    if (key == "pdf") {  // (a spot named as one of PDF's own colorants: written under another name)
+        std::vector<std::pair<std::string, std::string>> renamed;
+        for (const auto& page : episode.pages) {
+            std::vector<std::string> names;
+            for (const core::Channel& c : page->channels) {
+                if (c.kind == core::ChannelKind::Spot && c.raster) names.push_back(c.name);
+            }
+            const std::vector<std::string> written = pdf_spot_names(names);
+            for (std::size_t k = 0; k < names.size(); ++k) {
+                const std::pair<std::string, std::string> change{names[k], written[k]};
+                if (written[k] != names[k] && std::find(renamed.begin(), renamed.end(), change) == renamed.end()) renamed.push_back(change);
+            }
+        }
+        if (!renamed.empty()) {
+            std::string from, to;
+            for (const auto& [name, made] : renamed) {
+                from += (from.empty() ? "" : "・") + name;
+                to += (to.empty() ? "" : "・") + made;
+            }
+            notes.push_back("特色チャンネルの名前 " + from + " は PDF では決まった版（プロセスカラー・All・None）の名前のため、" + to + " として書き出しました");
         }
     }
     return notes;

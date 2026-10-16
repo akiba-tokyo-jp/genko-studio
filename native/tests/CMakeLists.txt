@@ -244,7 +244,7 @@ genko_test(test_contract_color_model SOURCES contract/test_contract_color_model.
            LABELS contract TIMEOUT 900)
 # channels@1 (COLOR-03) through the command line: apply, save, gc, undo and redo, a selection and a fill on a channel,
 # render, inspect, export (the PSD's extra channels read back, the PDF's separation, the notes).
-genko_test(test_contract_channels SOURCES contract/test_contract_channels.cpp DEPS genko_test_support genko_render
+genko_test(test_contract_channels SOURCES contract/test_contract_channels.cpp DEPS genko_test_support genko_render ZLIB::ZLIB
            LABELS contract TIMEOUT 900)
 
 genko_test(test_contract_psd_text SOURCES contract/test_contract_psd_text.cpp DEPS genko_test_support genko_formats genko_render_ops

@@ -3,6 +3,7 @@
 #include <zlib.h>
 
 #include <algorithm>
+#include <cctype>
 #include <charconv>
 #include <cstdio>
 #include <map>
@@ -99,6 +100,28 @@ PdfBoxes pdf_boxes(const core::Page& page, std::string_view area) {
     return PdfBoxes{box(m), box(bleed), box(trim)};
 }
 
+std::vector<std::string> pdf_spot_names(const std::vector<std::string>& names) {
+    const auto reserved = [](const std::string& name) {
+        std::string lower;
+        for (const char c : name) lower += static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+        return lower == "all" || lower == "none" || lower == "cyan" || lower == "magenta" || lower == "yellow" || lower == "black";
+    };
+    std::vector<std::string> out;
+    for (const std::string& name : names) {
+        if (!reserved(name)) {
+            out.push_back(name);
+            continue;
+        }
+        const auto taken = [&](const std::string& candidate) {
+            return std::find(names.begin(), names.end(), candidate) != names.end() || std::find(out.begin(), out.end(), candidate) != out.end();
+        };
+        std::string made = name + " Spot";
+        for (int n = 2; taken(made); ++n) made = name + " Spot " + std::to_string(n);
+        out.push_back(made);
+    }
+    return out;
+}
+
 std::filesystem::path write_pdf(const std::filesystem::path& path, const std::vector<PdfPage>& pages,
                                 const std::function<render::Image(std::size_t)>& picture,
                                 const std::function<core::InkPixels(std::size_t)>& inks,
@@ -111,7 +134,7 @@ std::filesystem::path write_pdf(const std::filesystem::path& path, const std::ve
         int image = 0;
         int content = 0;
         int page = 0;
-        std::vector<int> spots;  // (channels@1: its separations' images, then the overprint's ExtGState when new)
+        std::vector<int> spots;  // (channels@1: its separations' images, each followed by its soft mask; then the ExtGState when new)
         int state = 0;
         bool new_state = false;
     };
@@ -139,7 +162,10 @@ std::filesystem::path write_pdf(const std::filesystem::path& path, const std::ve
         numbers[n].page = ++count;
         if (!page.spots.empty()) {
             if (!page.spot) throw core::Error("value", "the page's spot channels are not made");
-            for (std::size_t k = 0; k < page.spots.size(); ++k) numbers[n].spots.push_back(++count);
+            for (std::size_t k = 0; k < page.spots.size(); ++k) {
+                numbers[n].spots.push_back(++count);
+                ++count;  // (its soft mask)
+            }
             if (overprint == 0) {
                 overprint = ++count;
                 numbers[n].new_state = true;
@@ -198,11 +224,14 @@ std::filesystem::path write_pdf(const std::filesystem::path& path, const std::ve
             const auto unit = [](int v) { return f3(v / 255.0); };
             const std::string space = "[/Separation /" + name + " /DeviceRGB << /FunctionType 2 /Domain [0 1] /C0 [1 1 1] /C1 [" + unit(spot.rgb[0]) +
                                       " " + unit(spot.rgb[1]) + " " + unit(spot.rgb[2]) + "] /N 1 >>]";
-            object(stream("/Type /XObject /Subtype /Image /Width " + std::to_string(density.width()) + " /Height " + std::to_string(density.height()) +
-                              " /ColorSpace " + space + " /BitsPerComponent 8 /Filter /FlateDecode",
+            const std::string size = "/Width " + std::to_string(density.width()) + " /Height " + std::to_string(density.height());
+            object(stream("/Type /XObject /Subtype /Image " + size + " /ColorSpace " + space + " /BitsPerComponent 8 /SMask " +
+                              std::to_string(numbers[n].spots[k] + 1) + " 0 R /Filter /FlateDecode",
                           deflated_pixels(density)));
+            object(stream("/Type /XObject /Subtype /Image " + size + " /ColorSpace /DeviceGray /BitsPerComponent 8 /Filter /FlateDecode",
+                          deflated_pixels(density.point([](int v) { return v > 0 ? 255 : 0; }))));
         }
-        if (numbers[n].new_state) object("<< /Type /ExtGState /OP true /op true /OPM 1 >>");
+        if (numbers[n].new_state) object("<< /Type /ExtGState /OP true /op true /OPM 1 /BM /Multiply >>");
     };
     file.write(std::string_view("%PDF-1.6\n%\xe2\xe3\xcf\xd3\n", 15));
     object("<< /Type /Catalog /Pages 2 0 R >>");

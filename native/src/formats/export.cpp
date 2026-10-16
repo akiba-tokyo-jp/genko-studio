@@ -374,7 +374,10 @@ std::vector<fs::path> detail::print_into(detail::Output& output, const core::Doc
                 if (channel.kind == core::ChannelKind::Spot && channel.raster) spots.push_back(&channel);
             }
             if (spots.empty()) continue;
-            for (const core::Channel* spot : spots) pages[n].spots.push_back(PdfSpot{spot->name, spot->color});
+            std::vector<std::string> names;
+            for (const core::Channel* spot : spots) names.push_back(spot->name);
+            const std::vector<std::string> written = pdf_spot_names(names);  // (not PDF's own colorants' names: said in the notes)
+            for (std::size_t k = 0; k < spots.size(); ++k) pages[n].spots.push_back(PdfSpot{written[k], spots[k]->color});
             pages[n].spot = [&page, spots, area, dpi](std::size_t k) {
                 const render::Size size{render::mm_to_px(page.spec.width_mm.value(), dpi), render::mm_to_px(page.spec.height_mm.value(), dpi)};
                 return crop_to(render::channels::mask_of(*spots[k], size), page, area, dpi);
