@@ -789,6 +789,22 @@ private slots:
         window.hide();
     }
 
+    // The page list's small pictures are kept by what the page is drawn from: the book's text gamma and the page's RGB
+    // profile change them (a book without either keeps its key).
+    void smallPicturesFollowTheGammaAndTheProfile() {
+        auto doc=core::new_episode("縮小図",core::Num(1),1,core::PageSpec::custom(60,60,50,50,2,2,2,2,2,150,"color"));
+        const core::CommandBus bus(render::ops_registry());
+        doc=bus.apply(doc,Json::array({Json{{"op","add_line"},{"page",1},{"text","ガンマ"},{"x_mm",10},{"y_mm",10},{"w_mm",40},{"h_mm",30}}}),
+            core::Actor("human:tester")).doc;
+        const auto key=[](const core::Document& d) {return app::ThumbCache::key(d,d.page(0),60,"proof");};
+        const auto gamma=bus.apply(doc,Json::array({Json{{"op","set_text_gamma"},{"gamma",1.45}}}),core::Actor("human:tester")).doc;
+        const auto none=bus.apply(gamma,Json::array({Json{{"op","set_text_gamma"},{"gamma",nullptr}}}),core::Actor("human:tester")).doc;
+        const auto p3=bus.apply(doc,Json::array({Json{{"op","assign_profile"},{"page",1},{"profile","display-p3"}}}),core::Actor("human:tester")).doc;
+        QVERIFY(key(gamma)!=key(doc));
+        QCOMPARE(key(none),key(doc));
+        QVERIFY(key(p3)!=key(doc));
+    }
+
     // カラー設定's policy for a book opened: its page of another RGB profile converted to the working sRGB through an op
     // (undone as any); asked first when chosen, the answer taken (外す: the profile replaced, the numbers kept); a book
     // opened read-only is never converted nor asked about.

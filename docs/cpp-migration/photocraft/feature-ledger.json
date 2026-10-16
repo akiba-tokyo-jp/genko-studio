@@ -1640,7 +1640,11 @@
         "native/src/storage/writer.cpp",
         "native/src/storage/reader.cpp",
         "native/tests/unit/test_proof.cpp",
-        "native/tests/gui/test_gui_color.cpp"
+        "native/tests/gui/test_gui_color.cpp",
+        "native/src/render/text/balloons.cpp",
+        "native/src/render/page.cpp",
+        "native/src/formats/psd_export.cpp",
+        "native/src/app/thumbs.cpp"
       ],
       "pc0": {
         "date": "2026-10-16",

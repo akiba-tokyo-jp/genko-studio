@@ -23,12 +23,15 @@
 #include "core/error.hpp"
 #include "core/ink.hpp"
 #include "core/paths.hpp"
+#include "formats/export.hpp"
 #include "render/colour.hpp"
 #include "render/image.hpp"
 #include "render/ops_registry.hpp"
 #include "render/page.hpp"
 #include "render/proof.hpp"
+#include "render/psd.hpp"
 #include "render/text/lettering.hpp"
+#include "storage/fsutil.hpp"
 #include "storage/lock.hpp"
 #include "storage/reader.hpp"
 #include "storage/transaction.hpp"
@@ -92,6 +95,25 @@ core::Document lettered_book() {
     return run_ops(doc, Json::array({Json{{"op", "add_line"}, {"page", 1}, {"text", "ガンマの字"}, {"x_mm", 10}, {"y_mm", 10}, {"w_mm", 40},
                                           {"h_mm", 30}, {"balloon", "speech"}}}))
         .doc;
+}
+
+// A line turned by 15 degrees (its balloon `balloon`: speech, none…), drawn on its own sheet.
+core::Document turned_book(const std::string& balloon) {
+    const core::Document doc = lettered_book();
+    return run_ops(doc, Json::array({Json{{"op", "add_line"}, {"page", 1}, {"text", "回した字"}, {"x_mm", 12}, {"y_mm", 14}, {"w_mm", 36},
+                                          {"h_mm", 28}, {"balloon", balloon}, {"style", Json{{"rotate_deg", 15}}}}}))
+        .doc;
+}
+
+// How two drawings of the same page differ: the bytes that differ, and of them those lighter in `b`.
+std::pair<std::size_t, std::size_t> lighter(const std::string& a, const std::string& b) {
+    std::size_t differ = 0, light = 0;
+    for (std::size_t i = 0; i < a.size() && i < b.size(); ++i) {
+        if (a[i] == b[i]) continue;
+        ++differ;
+        if (static_cast<unsigned char>(b[i]) > static_cast<unsigned char>(a[i])) ++light;
+    }
+    return {differ, light};
 }
 
 void write_book(const core::Document& doc, const fs::path& dir) {
@@ -462,6 +484,100 @@ private slots:
         render::RenderOptions part;
         part.region = render::RenderRegion{40, 40, 120, 90};
         QCOMPARE(render::render_page(gamma.page(0), 150, part, &gamma).image.tobytes(), b.crop(render::Box{40, 40, 160, 130}).tobytes());
+    }
+
+    // A turned balloon's sheet is remembered between drawings: drawn in the book's gamma, another gamma (or none again)
+    // draws it anew — the same pixels as a process that never drew it before (the app after set_text_gamma or Undo, the
+    // command line, MCP serving other books).
+    void aTurnedBalloonIsDrawnInTheGammaOfNow() {
+        const core::Document plain = turned_book("speech");
+        const core::Document gamma = run_ops(plain, Json::array({Json{{"op", "set_text_gamma"}, {"gamma", 1.45}}})).doc;
+        const auto drawn = [](const core::Document& d) { return render::render_page(d.page(0), 150, render::RenderOptions{}, &d).image.tobytes(); };
+        render::clear_render_caches();
+        const std::string a = drawn(plain);
+        const std::string b = drawn(gamma);
+        render::clear_render_caches();
+        QVERIFY(b == drawn(gamma));
+        QVERIFY(a == drawn(plain));
+        QVERIFY(a != b);
+    }
+
+    // A turned line without a balloon (none): its letters mixed with the page in the gamma as an upright one's are, not laid
+    // on it as Python's turned sheet is — turned half round (an exact turn of the sheet), the upright line's pixels turned.
+    void aTurnedLineWithoutABalloonInTheGamma() {
+        const auto drawn = [](double degrees) {
+            core::Document doc = core::new_episode("letters", core::Num(1), 1, lettered_book().spec, core::Binding::Right);
+            Json style = Json::object();
+            if (degrees != 0) style["rotate_deg"] = degrees;
+            doc = run_ops(doc, Json::array({Json{{"op", "add_line"}, {"page", 1}, {"text", "回した字"}, {"x_mm", 12}, {"y_mm", 20}, {"w_mm", 36},
+                                                 {"h_mm", 14}, {"balloon", "none"}, {"style", style}},
+                                            Json{{"op", "set_text_gamma"}, {"gamma", 1.8}}}))
+                      .doc;
+            return render::render_page(doc.page(0), 150, render::RenderOptions{}, &doc).image;
+        };
+        render::clear_render_caches();
+        const render::Image upright = drawn(0), turned = drawn(180);
+        // (the letters' boxes: where the page is not white)
+        const auto box = [](const render::Image& image) {
+            int x0 = image.width(), y0 = image.height(), x1 = 0, y1 = 0;
+            for (int y = 0; y < image.height(); ++y)
+                for (int x = 0; x < image.width(); ++x) {
+                    const auto p = image.getpixel(x, y);
+                    if (p[0] < 250 || p[1] < 250 || p[2] < 250) x0 = std::min(x0, x), y0 = std::min(y0, y), x1 = std::max(x1, x + 1), y1 = std::max(y1, y + 1);
+                }
+            return render::Box{x0, y0, x1, y1};
+        };
+        // (the page's paper and its frames: only the line's own part is compared)
+        const core::Document blank = core::new_episode("letters", core::Num(1), 1, lettered_book().spec, core::Binding::Right);
+        const std::string paper = render::render_page(blank.page(0), 150, render::RenderOptions{}, &blank).image.tobytes();
+        const auto only = [&](const render::Image& image) {
+            std::string bytes = image.tobytes();
+            for (std::size_t i = 0; i < bytes.size(); i += 3)
+                if (bytes.compare(i, 3, paper, i, 3) == 0) bytes[i] = bytes[i + 1] = bytes[i + 2] = static_cast<char>(255);
+            return render::Image::frombytes("RGB", image.size(), bytes);
+        };
+        const render::Image u = only(upright), t = only(turned);
+        const render::Box bu = box(u), bt = box(t);
+        QVERIFY(bu.width() > 10 && bu.width() == bt.width() && bu.height() == bt.height());
+        std::size_t far = 0, seen = 0;
+        for (int y = bt.y0; y < bt.y1; ++y)
+            for (int x = bt.x0; x < bt.x1; ++x) {
+                const auto a = t.getpixel(x, y), b = u.getpixel(bu.x0 + bt.x1 - 1 - x, bu.y0 + bt.y1 - 1 - y);
+                if (b[0] < 250) ++seen;
+                for (int c = 0; c < 3; ++c)
+                    if (std::abs(a[c] - b[c]) > 1) ++far;
+            }
+        QVERIFY(seen > 100);
+        QVERIFY2(far == 0, qPrintable(QStringLiteral("%1 of %2").arg(far).arg(seen)));
+    }
+
+    // The PSD's layer of a line (its balloon and letters drawn as a picture: Python's way, and a line PSD text cannot keep
+    // in the editable PSD) is mixed in the book's gamma, as the merged picture and the app.
+    void thePsdLineLayersInTheGamma() {
+        QTemporaryDir tmp;
+        const core::Document plain = run_ops(lettered_book(), Json::array({Json{{"op", "add_line"}, {"page", 1}, {"id", "grad"}, {"text", "グラデ"},
+                                                                                 {"x_mm", 30}, {"y_mm", 30}, {"w_mm", 24}, {"h_mm", 24}, {"balloon", "speech"},
+                                                                                 {"style", Json{{"gradient", Json{{"rgb_from", Json::array({0, 0, 0})},
+                                                                                                                  {"rgb_to", Json::array({200, 0, 0})}}}}}}}))
+                                      .doc;
+        const core::Document gamma = run_ops(plain, Json::array({Json{{"op", "set_text_gamma"}, {"gamma", 1.45}}})).doc;
+        const auto layer = [&](const core::Document& doc, const std::string& name, bool editable, const std::string& words) {
+            const fs::path folder = fs::path(tmp.path().toStdString()) / name;
+            const auto written = formats::export_psd_pages(doc, folder, 150, formats::PsdText{editable, true});
+            const render::psd::File file = render::psd::File::read(storage::read_file(written.front()));
+            for (const render::psd::Layer& l : file.layers())
+                if (l.name == "台詞 " + words && l.kind == "pixels") return file.image(l).tobytes();
+            return std::string();
+        };
+        for (const bool editable : {false, true}) {
+            const char* tag = editable ? "editable" : "pictures";
+            const std::string a = layer(plain, std::string(tag) + "-plain", editable, "グラデ");
+            const std::string b = layer(gamma, std::string(tag) + "-gamma", editable, "グラデ");
+            QVERIFY2(!a.empty() && a.size() == b.size(), tag);
+            const auto [differ, light] = lighter(a, b);
+            QVERIFY2(differ > 0, tag);
+            QVERIFY2(light * 10 >= differ * 9, qPrintable(QStringLiteral("%1: %2 of %3").arg(tag).arg(light).arg(differ)));
+        }
     }
 };
 
