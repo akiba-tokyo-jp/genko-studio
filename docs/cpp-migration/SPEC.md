@@ -306,6 +306,33 @@ COLOR-01 の CMYK・Lab での編集。ページごとに色モード（RGB・CM
 - **取り込み**: CMYK のページへ RGB の絵はプロファイルで、CMYK の絵（PSD・JPEG）は絵のプロファイルからページのプロファイルへ（K を保つ。絵にプロファイルが無ければページのプロファイルとみなす）、Lab の PSD は Lab から変換して GKIR に。Lab のページへは Lab へ変換。RGB のページへの Lab の PSD は Pillow と同じ変換（Little CMS の Lab → sRGB）で読む（今までの断りを外す）。
 - **画面**: 「ページ → 色モード…」（モード・精度・ICC の選択・意図・灰色の扱い・対象のページ）、ステータスにページの色モード。色の窓にペンの色のインキ（CMYK は %、Lab は L・a・b）と色域外の印（プロファイルを往復して CIE ΔE 1976 が 3 を超える色。色の表の色と灰色は出さない）。インキの値を選ぶと、その表示の RGB（規則がそのインキを当てる灰色・墨・白があればその色。無ければ表示の色を、Genko の墨と白、表で別のインキの色から 1〜数段ずらす）をペンの色にし、ページの規則がその RGB に別のインキを当てるときは、同じ色空間・同じプロファイルのページすべての色の表に組を入れる（`set_inks`、一つの取り消しで戻る）。スポイトはその点のインキ（見えている色はページを描いた値、描く先のレイヤーはその画素の値）を同じように選ぶ。値の欄は値を変えたときだけ選び直す（欄から出ただけでは何もしない）。
 
+### COLOR-03 色モデル: RGB のプロファイル・グレー・32 bit（C++ 版。PhotoCraft の取り込み PC1a。利用者の決定 2026-10-16）
+
+COLOR-01 の色管理と高精度。COLOR-02 の色モードを広げ、ページごとに RGB のプロファイルと精度（8・16・32 bit）、グレースケール、CMYK・Lab の 32 bit を持つ。形式は schema-v4.md の「色モデル（color-model@1）」。色モデルの無いページ（RGB・8 bit・sRGB）は今までどおり（Python 版と同じバイト・画素）。上流 PhotoCraft の色モード・深度・プロファイルの指定と変換（`image.mode.*`・`edit.assignProfile`・`edit.convertToProfile`）と問い合わせ（`document.inspect`・`document.pixel`）にあたる。上流の「文書」は Genko のページ。
+
+- **内蔵のプロファイル**（PhotoCraft と同じ id。`native/src/core/data/profiles`、CC0。帰属は `native/third_party/photocraft/NOTICE.md`）: RGB の `srgb`（プロファイル無しと同じ）・`display-p3`・`adobe-rgb-compat`・`prophoto-compat`・`linear-srgb`・`rec2020`、グレーの `gray-gamma-2.2`・`sgray`、CMYK の `coated-cmyk`、Lab の `lab-d50`。別名（`p3`・`adobergb`・`prophoto`・`gray` など。大文字小文字・空白・記号は無視）と説明の文でも指せる。ほかに本が持つプロファイル（`"sha256:…"`）と ICC ファイル（`icc`: base64。16 MiB まで）。プロファイルは原稿に素材として埋め込む（内蔵のものも）。
+- **モードと精度**（op `set_color_mode` を広げる。C++ 版だけの op）: `{"op": "set_color_mode", "page": int?（無ければ全ページと本の既定）, "mode": "rgb"|"gray"|"cmyk"|"lab", "depth": 8|16|32?（既定 8）, "profile": 内蔵の id・別名・"sha256:…"?, "icc": "<base64>"?, "intent": "perceptual"|"relative"|"saturation"|"absolute"?（既定 relative）, "bpc": bool?（黒点補正。既定 true）, "gray": "profile"|"k"?（既定 profile）, "dither": bool?, "clip_hdr": bool?, "default": bool?}`。
+  - RGB: プロファイル（既定 sRGB）と精度。画素レイヤーは 8 bit なら PNG、16 なら高精度の u16、32 なら f32（HDR を保つ）。sRGB・8 bit・意図 relative・黒点補正ありなら色モデルの無いページに戻る（`color` を書かない）。
+  - グレー: プロファイル（既定 `sgray`）。画素レイヤーは明るさ（0 が黒）1 版とアルファの GKIR。RGB からはプロファイル（意図・黒点補正）で変換する。ただしちょうど灰色（r = g = b）の画素は、ページが sGray か `gray: "k"` なら明るさ v/255 のまま（sGray の灰色 v は sRGB の (v, v, v) と同じ色。グレーから CMYK へ `gray: "k"` なら K だけ）。
+  - CMYK・Lab: COLOR-02 のまま、32 bit（浮動小数）を加える。CMYK にはプロファイルが要る（内蔵の `coated-cmyk`、本のもの、ファイル）。Lab にはプロファイルを付けない。
+  - 同じモード・同じプロファイルで精度だけを変えるときは値を写す: 8 → 16 は v × 257、8 → 32 は v / 255（バイト一致）、16 → 8 は四捨五入（`dither: true` なら決まった模様のディザ。RGB の 8 bit へ下げるとき）、32 → 8・16 は 0..1 の値を量子化。違うプロファイル・モードへは Little CMS（意図・黒点補正）。透明度とマスクはそのまま。
+  - HDR（32 bit の RGB・グレーの、0..1 の外の値）を残せない変換（8・16 bit へ、ほかのモード・プロファイルへ）は断る。`clip_hdr: true` なら 0..1 に切って変換する。COLOR-02 の変換も同じ（高精度の f32 の層の HDR を黙って切らない）。
+  - 断り（何も変えない）: ほかの色空間のプロファイル、Lab にプロファイル、CMYK にプロファイルが無い、読めない ICC、本の高精度の画素が 1 GiB を超える、16・32 bit の RGB のページで高精度の画素を持てない層（トーンの層、線を持つ層、フォルダーの中など。`not_yet_ported`）、マルチチャンネル（PC1d まで `not_yet_ported`）。
+- **プロファイルの指定**（op `assign_profile`）: `{"op": "assign_profile", "page": int?, "profile": … | "none", "icc"?}`。画素のバイトは変えず、ページのプロファイルだけを替える（見え方が変わる）。ページの色空間のプロファイルだけ（RGB・グレー・CMYK）。`"none"` は RGB で sRGB、グレーで sGray（CMYK には断る）。Lab のページは断る。全ページを指すと、その色空間のページと本の既定だけ（一つも無ければ断る）。
+- **プロファイルに変換**（op `convert_profile`）: `{"op": "convert_profile", "page": int?, "profile"|"icc", "intent"?, "bpc"?, "dither"?, "clip_hdr"?}`。見た目を保って、プロファイルの色空間へ変換する（モードはプロファイルの空間に、精度はページのまま）。
+- Undo・Redo・保存・履歴は他の op と同じ。全ページへの `set_color_mode`・`assign_profile`・`convert_profile` は、ほかの人が押さえているページを一つずつ確かめる（`set_paper` と同じ）。
+- **合成と表示**: プロファイル付きの RGB のページは、そのプロファイルの直線の光（トーンカーブを外した値）で合成する（`RgbSpace`）。画素レイヤーの画素はページの値。8 bit で描く要素（線・塗り・文字・フキダシ・枠など）の sRGB の色は、ページの意図・黒点補正でページの空間へ変換してから合成する（sRGB のちょうどの白と黒はページの白と黒）。画面へは相対的な色域を維持・黒点補正で sRGB にする。グレーのページは明るさで合成し、要素の色は規則（ページの色の表 → 墨は黒・白は白 → 灰色はその明るさ（sGray の値） → ほかはプロファイル）で当てる。sRGB のページの合成は前と同じバイト。
+- **予算**: 本の高精度の画素（GKCR）は合わせて 1 GiB まで（利用者の決定 2026-10-16。B4・600 dpi の f32 が入る）。素材 1 つの読み込みの上限 256 MiB と、メモリー・ディスクの確かめ・PERF-G はそのまま。
+- **問い合わせ**: `inspect`（snapshot）は色モデルを持つページにだけ、ページの `color`（原稿の JSON と、プロファイルの説明 `profile_description`）と層の精度（`precision`: `8`・`u16`・`f32`、GKIR はその精度）を加える（ほかの本の出力は変わらない）。`genko inspect <本> --pixel <ページ>:<x_mm>,<y_mm> [--layer ID] [--dpi N]`（C++ 版だけ。既定の dpi は原稿の dpi）: その点のページの値 `values`（RGB はプロファイルの 0..1、グレー・CMYK・Lab はインキ）、標本 `stored`（8・16 bit は整数、32 bit は float）、`alpha`、`srgb`。`--layer` はその層の画素。高精度の RGB のページの値は、層の値に、層の上に 8 bit で描いたもの（枠・台詞・効果線・ノンブル）の色をページの空間にして入れたもの。
+- **書き出し**（形式に書けないものは `notes` で知らせる）:
+  - PSD: グレーは Grayscale（色モード 1、8・16・32 bit）、色モデルのある RGB は RGB（色モード 3、8・16・32 bit）。ページのプロファイルを画像リソース 1039 に（sRGB のページは sRGB のもの）。CMYK・Lab の 32 bit は 16 bit で書く（Photoshop に 32 bit の CMYK・Lab は無い）。層もその精度で、RGB の層の sRGB で描いたものはページの空間へ変換する。32 bit はページの値の浮動小数（上流と同じ）。
+  - TIFF: グレーのページは色が「自動」か「グレー」なら MinIsBlack（8・16・32 bit。32 は浮動小数 SampleFormat 3）とプロファイル。色モデルのある RGB のページは色が「自動」か「RGB」ならその値（8・16・32 bit）とプロファイル。CMYK・Lab の 32 bit は 16 bit。
+  - PDF: グレーのページは ICCBased（N 1）、RGB のページはそのプロファイルの ICCBased（N 3）。精度は 8・16 bpc（32 bit は 16）。
+  - PNG・WebToon・SNS・EPUB・Kindle・strip・layers・アニメーションなど: 表示の sRGB。
+  - `notes`: 画面の色から書いたページが CMYK・Lab だけなら COLOR-02 の言葉、グレーや RGB の色モデルを含むなら「色モード・プロファイルを持つページ N ページは、この形式・色ではその値のまま書けないため、画面の色（sRGB）から変換して書き出しました」（入稿セットは PNG のこと）。32 bit を 16 bit にしたときは「32 bit のページ N ページは、この形式では 16 bit にして書き出しました」。CLI（JSON の `notes`、ふつうの出力では標準エラー）・MCP の `export`・HTTP の `/v1/export`・正式な書き出しが同じものを返す。
+- **画面**: ページ → 色モード（RGB・グレースケール・CMYK・Lab と 8・16・32 bit/チャンネル。前のページに合わせて印が付く。モードはページの精度のまま、精度はモードとプロファイルのまま変える。CMYK へは内蔵の `coated-cmyk`）、ページの色モード…（対象・モード・精度・プロファイル（内蔵・原稿の・ファイル）・意図・黒点の補正・灰色の扱い・8 bit のディザ・HDR を切る。既定のものは op に書かない）。編集 → プロファイルの指定…（ページの空間のプロファイルとなし）・プロファイルに変換…（どの空間のプロファイルでも。意図・黒点の補正・ディザ・HDR）。ステータスにページのモード・精度・プロファイルの説明（例「グレー 16 bit・sGray (sRGB tone curve, Photocraft)」）。色の窓はグレーのページで K（%）の欄 1 つ。
+- **既知の制限**（PC1a）: 16・32 bit の RGB のページに新しく置く 8 bit の画素（`put_raster` の PNG など）はその精度に広げない（ページの精度の層は `set_color_mode`・`convert_profile` で変換したもの）。プロファイル付きの RGB のページの層の縮小図・層の絵（`layer_image`）はページの値をそのまま表示する。`assign_profile` は要素の色を焼き込まない（要素は描くたびにページの空間へ変換する）。PSD の 16・32 bit の層の値は 8 bit の層の絵から（統合画像はページの値）、層の情報はレイヤーの節に書く（COLOR-02 の 16 bit と同じ。`Lr16`・`Lr32` は使わない）。Photoshop は 32 bit をリニアの値として読む。書き出しの統合画像と `--pixel` の値で、層の上に 8 bit で描いたものは 8 bit の色をページの空間にしたもの。
+
 ### COMP-03 入出力・API
 
 現行CLIのPNG/TIFF/PDF/strip/PSD/EPUB/pack/webtoon/SNS/CMYK/layers/Kindle/timelapse/animationを維持する。PSBは現行の読込範囲を維持し、PSB出力の新規追加は本仕様の必須にしない。各形式の実寸、DPI、色、透過、頁順、レイヤー、フォント、改行、下描き除外を形式別に検証する。
