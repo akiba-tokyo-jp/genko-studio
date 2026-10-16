@@ -274,9 +274,14 @@
       },
       "upstream_menu": null,
       "genko_status": "一部（2026-10-16 照合）",
-      "implementation_status": "未着手",
+      "implementation_status": "一部実装（PC1c、未統合: アルファ・特色チャンネルの削除。色の版を消してマルチチャンネルにするのは PC1d）",
       "acceptance_status": "未実施",
-      "evidence": [],
+      "evidence": [
+        "native/src/render/ops_channels.cpp",
+        "native/src/app/channel_panel.cpp",
+        "native/src/app/main_window_channels.cpp",
+        "native/tests/unit/test_channels.cpp"
+      ],
       "pc0": {
         "date": "2026-10-16",
         "cpp_base": "962faa4",
@@ -308,9 +313,16 @@
       },
       "upstream_menu": null,
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "未着手",
+      "implementation_status": "実装済み（PC1c、未統合）",
       "acceptance_status": "未実施",
-      "evidence": [],
+      "evidence": [
+        "native/src/render/ops_channels.cpp",
+        "native/src/render/channels.cpp",
+        "native/src/app/channel_panel.cpp",
+        "native/src/app/main_window_channels.cpp",
+        "native/tests/unit/test_channels.cpp",
+        "native/tests/gui/test_gui_channels.cpp"
+      ],
       "pc0": {
         "date": "2026-10-16",
         "cpp_base": "962faa4",
@@ -336,9 +348,16 @@
       },
       "upstream_menu": null,
       "genko_status": "一部（2026-10-16 照合）",
-      "implementation_status": "未着手",
+      "implementation_status": "実装済み（PC1c、未統合）",
       "acceptance_status": "未実施",
-      "evidence": [],
+      "evidence": [
+        "native/src/storage/snapshot.cpp",
+        "native/src/app/channel_panel.cpp",
+        "native/src/app/main_window_channels.cpp",
+        "native/tests/unit/test_channels.cpp",
+        "native/tests/contract/test_contract_channels.cpp",
+        "native/tests/gui/test_gui_channels.cpp"
+      ],
       "pc0": {
         "date": "2026-10-16",
         "cpp_base": "962faa4",
@@ -368,9 +387,14 @@
       },
       "upstream_menu": null,
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "未着手",
+      "implementation_status": "実装済み（PC1c、未統合）",
       "acceptance_status": "未実施",
-      "evidence": [],
+      "evidence": [
+        "native/src/render/ops_channels.cpp",
+        "native/src/app/channel_panel.cpp",
+        "native/src/app/main_window_channels.cpp",
+        "native/tests/unit/test_channels.cpp"
+      ],
       "pc0": {
         "date": "2026-10-16",
         "cpp_base": "962faa4",
@@ -396,9 +420,15 @@
       },
       "upstream_menu": null,
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "未着手",
+      "implementation_status": "実装済み（PC1c、未統合）",
       "acceptance_status": "未実施",
-      "evidence": [],
+      "evidence": [
+        "native/src/render/ops_channels.cpp",
+        "native/src/app/channel_panel.cpp",
+        "native/src/app/main_window_channels.cpp",
+        "native/tests/unit/test_channels.cpp",
+        "native/tests/gui/test_gui_channels.cpp"
+      ],
       "pc0": {
         "date": "2026-10-16",
         "cpp_base": "962faa4",
@@ -424,9 +454,12 @@
       },
       "upstream_menu": null,
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "未着手",
+      "implementation_status": "実装済み（PC1c、未統合）",
       "acceptance_status": "未実施",
-      "evidence": [],
+      "evidence": [
+        "native/src/render/ops_channels.cpp",
+        "native/tests/unit/test_channels.cpp"
+      ],
       "pc0": {
         "date": "2026-10-16",
         "cpp_base": "962faa4",
@@ -452,9 +485,22 @@
       },
       "upstream_menu": null,
       "genko_status": "一部（2026-10-16 照合）",
-      "implementation_status": "未着手",
+      "implementation_status": "実装済み（PC1c、未統合）",
       "acceptance_status": "未実施",
-      "evidence": [],
+      "evidence": [
+        "native/src/core/channels.cpp",
+        "native/src/storage/reader.cpp",
+        "native/src/storage/writer.cpp",
+        "native/src/render/ops_channels.cpp",
+        "native/src/app/channel_panel.cpp",
+        "native/src/app/main_window_channels.cpp",
+        "native/src/render/selection.cpp",
+        "native/src/formats/psd_export.cpp",
+        "native/tests/unit/test_channels.cpp",
+        "native/tests/contract/test_contract_channels.cpp",
+        "native/tests/gui/test_gui_channels.cpp",
+        "native/tests/gui/test_gui_select.cpp"
+      ],
       "pc0": {
         "date": "2026-10-16",
         "cpp_base": "962faa4",
@@ -486,9 +532,22 @@
       },
       "upstream_menu": null,
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "未着手",
+      "implementation_status": "実装済み（PC1c、未統合）",
       "acceptance_status": "未実施",
-      "evidence": [],
+      "evidence": [
+        "native/src/core/channels.cpp",
+        "native/src/storage/reader.cpp",
+        "native/src/storage/writer.cpp",
+        "native/src/render/ops_channels.cpp",
+        "native/src/render/channels.cpp",
+        "native/src/app/channel_panel.cpp",
+        "native/src/app/main_window_channels.cpp",
+        "native/src/formats/psd_export.cpp",
+        "native/src/formats/pdf.cpp",
+        "native/tests/unit/test_channels.cpp",
+        "native/tests/contract/test_contract_channels.cpp",
+        "native/tests/gui/test_gui_channels.cpp"
+      ],
       "pc0": {
         "date": "2026-10-16",
         "cpp_base": "962faa4",
@@ -514,9 +573,15 @@
       },
       "upstream_menu": null,
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "未着手",
+      "implementation_status": "実装済み（PC1c、未統合）",
       "acceptance_status": "未実施",
-      "evidence": [],
+      "evidence": [
+        "native/src/render/ops_channels.cpp",
+        "native/src/app/channel_panel.cpp",
+        "native/src/app/main_window_channels.cpp",
+        "native/tests/unit/test_channels.cpp",
+        "native/tests/gui/test_gui_channels.cpp"
+      ],
       "pc0": {
         "date": "2026-10-16",
         "cpp_base": "962faa4",
@@ -542,9 +607,12 @@
       },
       "upstream_menu": null,
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "未着手",
+      "implementation_status": "実装済み（PC1c、未統合）",
       "acceptance_status": "未実施",
-      "evidence": [],
+      "evidence": [
+        "native/src/render/ops_channels.cpp",
+        "native/tests/unit/test_channels.cpp"
+      ],
       "pc0": {
         "date": "2026-10-16",
         "cpp_base": "962faa4",
@@ -570,9 +638,16 @@
       },
       "upstream_menu": null,
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "未着手",
+      "implementation_status": "実装済み（PC1c、未統合）",
       "acceptance_status": "未実施",
-      "evidence": [],
+      "evidence": [
+        "native/src/render/channels.cpp",
+        "native/src/app/tiles.cpp",
+        "native/src/app/channel_panel.cpp",
+        "native/src/app/main_window_channels.cpp",
+        "native/tests/unit/test_channels.cpp",
+        "native/tests/gui/test_gui_channels.cpp"
+      ],
       "pc0": {
         "date": "2026-10-16",
         "cpp_base": "962faa4",
@@ -598,9 +673,16 @@
       },
       "upstream_menu": null,
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "未着手",
+      "implementation_status": "実装済み（PC1c、未統合）",
       "acceptance_status": "未実施",
-      "evidence": [],
+      "evidence": [
+        "native/src/render/ops_channels.cpp",
+        "native/src/render/channels.cpp",
+        "native/src/app/channel_panel.cpp",
+        "native/src/app/main_window_channels.cpp",
+        "native/tests/unit/test_channels.cpp",
+        "native/tests/gui/test_gui_channels.cpp"
+      ],
       "pc0": {
         "date": "2026-10-16",
         "cpp_base": "962faa4",
@@ -626,9 +708,17 @@
       },
       "upstream_menu": null,
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "未着手",
+      "implementation_status": "実装済み（PC1c、未統合）",
       "acceptance_status": "未実施",
-      "evidence": [],
+      "evidence": [
+        "native/src/render/channels.cpp",
+        "native/src/render/ops_registry.cpp",
+        "native/src/app/channel_panel.cpp",
+        "native/src/app/main_window_channels.cpp",
+        "native/tests/unit/test_channels.cpp",
+        "native/tests/contract/test_contract_channels.cpp",
+        "native/tests/gui/test_gui_channels.cpp"
+      ],
       "pc0": {
         "date": "2026-10-16",
         "cpp_base": "962faa4",
@@ -654,9 +744,13 @@
       },
       "upstream_menu": null,
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "未着手",
+      "implementation_status": "実装済み（PC1c、未統合）",
       "acceptance_status": "未実施",
-      "evidence": [],
+      "evidence": [
+        "native/src/app/channel_panel.cpp",
+        "native/src/app/main_window_channels.cpp",
+        "native/tests/gui/test_gui_channels.cpp"
+      ],
       "pc0": {
         "date": "2026-10-16",
         "cpp_base": "962faa4",
@@ -682,9 +776,13 @@
       },
       "upstream_menu": null,
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "未着手",
+      "implementation_status": "実装済み（PC1c、未統合）",
       "acceptance_status": "未実施",
-      "evidence": [],
+      "evidence": [
+        "native/src/app/channel_panel.cpp",
+        "native/src/app/main_window_channels.cpp",
+        "native/tests/gui/test_gui_channels.cpp"
+      ],
       "pc0": {
         "date": "2026-10-16",
         "cpp_base": "962faa4",
@@ -710,9 +808,13 @@
       },
       "upstream_menu": null,
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "未着手",
+      "implementation_status": "実装済み（PC1c、未統合）",
       "acceptance_status": "未実施",
-      "evidence": [],
+      "evidence": [
+        "native/src/app/channel_panel.cpp",
+        "native/src/app/main_window_channels.cpp",
+        "native/tests/gui/test_gui_channels.cpp"
+      ],
       "pc0": {
         "date": "2026-10-16",
         "cpp_base": "962faa4",
@@ -738,9 +840,13 @@
       },
       "upstream_menu": null,
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "未着手",
+      "implementation_status": "実装済み（PC1c、未統合）",
       "acceptance_status": "未実施",
-      "evidence": [],
+      "evidence": [
+        "native/src/app/channel_panel.cpp",
+        "native/src/app/main_window_channels.cpp",
+        "native/tests/gui/test_gui_channels.cpp"
+      ],
       "pc0": {
         "date": "2026-10-16",
         "cpp_base": "962faa4",
@@ -766,9 +872,13 @@
       },
       "upstream_menu": null,
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "未着手",
+      "implementation_status": "実装済み（PC1c、未統合）",
       "acceptance_status": "未実施",
-      "evidence": [],
+      "evidence": [
+        "native/src/app/channel_panel.cpp",
+        "native/src/app/main_window_channels.cpp",
+        "native/tests/gui/test_gui_channels.cpp"
+      ],
       "pc0": {
         "date": "2026-10-16",
         "cpp_base": "962faa4",
@@ -794,9 +904,13 @@
       },
       "upstream_menu": null,
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "未着手",
+      "implementation_status": "実装済み（PC1c、未統合）",
       "acceptance_status": "未実施",
-      "evidence": [],
+      "evidence": [
+        "native/src/app/channel_panel.cpp",
+        "native/src/app/main_window_channels.cpp",
+        "native/tests/gui/test_gui_channels.cpp"
+      ],
       "pc0": {
         "date": "2026-10-16",
         "cpp_base": "962faa4",
@@ -822,9 +936,13 @@
       },
       "upstream_menu": null,
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "未着手",
+      "implementation_status": "実装済み（PC1c、未統合）",
       "acceptance_status": "未実施",
-      "evidence": [],
+      "evidence": [
+        "native/src/app/channel_panel.cpp",
+        "native/src/app/main_window_channels.cpp",
+        "native/tests/gui/test_gui_channels.cpp"
+      ],
       "pc0": {
         "date": "2026-10-16",
         "cpp_base": "962faa4",
@@ -850,9 +968,13 @@
       },
       "upstream_menu": null,
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "未着手",
+      "implementation_status": "実装済み（PC1c、未統合）",
       "acceptance_status": "未実施",
-      "evidence": [],
+      "evidence": [
+        "native/src/app/channel_panel.cpp",
+        "native/src/app/main_window_channels.cpp",
+        "native/tests/gui/test_gui_channels.cpp"
+      ],
       "pc0": {
         "date": "2026-10-16",
         "cpp_base": "962faa4",
