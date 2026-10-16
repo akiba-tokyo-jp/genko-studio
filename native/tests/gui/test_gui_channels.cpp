@@ -17,11 +17,13 @@
 #include "app/channel_panel.hpp"
 #include "app/inject.hpp"
 #include "app/main_window.hpp"
+#include "app/thumbs.hpp"
 #include "app/tiles.hpp"
 #include "core/channels.hpp"
 #include "core/command_bus.hpp"
 #include "core/ink.hpp"
 #include "render/channels.hpp"
+#include "render/ops_registry.hpp"
 #include "render/png.hpp"
 using namespace genko;
 using core::Json;
@@ -230,6 +232,42 @@ private slots:
         split->trigger();
         QCOMPARE(studio.session->document().pages.size(), pages + 2);  // (three grey pages for the one)
         QVERIFY(studio.session->document().page(0).color && studio.session->document().page(0).color->space == core::InkSpace::Gray);
+    }
+
+    // The pages' small pictures follow their channels: a channel added, drawn on, its colour, opacity, solidity, kind or
+    // what it marks changed gives the page another key (the cache's version raised for the pictures made before), and
+    // deleted the key of the page without it; the other page's key stays.
+    void thumbnailsFollowTheChannels() {
+        QCOMPARE(std::string(app::kThumbVersion), std::string("genko-native-render/2"));
+        const core::CommandBus bus(render::ops_registry());
+        const auto run = [&](const core::Document& d, const Json& op) { return bus.apply(d, Json::array({op}), core::Actor("human:test")).doc; };
+        core::Document doc = book_doc();
+        std::vector<std::string> seen{app::page_fingerprint(doc, doc.page(0))};
+        const std::string other = app::page_fingerprint(doc, doc.page(1));
+        const auto changed = [&](const core::Document& d) {
+            const std::string key = app::page_fingerprint(d, d.page(0));
+            const bool fresh = std::find(seen.begin(), seen.end(), key) == seen.end();
+            seen.push_back(key);
+            return fresh && app::page_fingerprint(d, d.page(1)) == other;
+        };
+        doc = run(doc, Json{{"op", "add_channel"}, {"page", 1}, {"kind", "spot"}, {"name", "金"}, {"fill", "white"}});
+        QVERIFY(changed(doc));
+        const std::string spot = doc.page(0).channels[0].id;
+        doc = run(doc, Json{{"op", "erase_raster"}, {"page", 1}, {"layer_id", "paint0000001"}, {"channel", spot}, {"width_mm", 5},
+                            {"points", Json::array({Json::array({10, 10}), Json::array({30, 10})})}});
+        QVERIFY(changed(doc));
+        doc = run(doc, Json{{"op", "set_channel"}, {"page", 1}, {"channel", spot}, {"color", Json::array({0, 0, 255})}});
+        QVERIFY(changed(doc));
+        doc = run(doc, Json{{"op", "set_channel"}, {"page", 1}, {"channel", spot}, {"solidity", 0.5}});
+        QVERIFY(changed(doc));
+        doc = run(doc, Json{{"op", "set_channel"}, {"page", 1}, {"channel", spot}, {"kind", "alpha"}});
+        QVERIFY(changed(doc));
+        doc = run(doc, Json{{"op", "set_channel"}, {"page", 1}, {"channel", spot}, {"opacity", 0.2}});
+        QVERIFY(changed(doc));
+        doc = run(doc, Json{{"op", "set_channel"}, {"page", 1}, {"channel", spot}, {"indicates", "selected"}});
+        QVERIFY(changed(doc));
+        doc = run(doc, Json{{"op", "delete_channel"}, {"page", 1}, {"channel", spot}});
+        QCOMPARE(app::page_fingerprint(doc, doc.page(0)), seen.front());  // (the page as it was before: its picture again)
     }
 };
 
