@@ -229,6 +229,35 @@ std::vector<std::string> export_notes(const core::Document& episode, std::string
                                   : "色モード・プロファイルを持つページ " + n + " ページは、この形式・色ではその値のまま書けないため、画面の色（sRGB）から変換して書き出しました");
     }
     if (halved > 0) notes.push_back("32 bit のページ " + std::to_string(halved) + " ページは、この形式では 16 bit にして書き出しました");
+    // channels@1: PSD keeps a page's alpha and spot channels as channels of their own, PDF its spot channels as
+    // separations; elsewhere the spots are printed into the picture as the screen shows them (or, where the page is
+    // written as its inks or values, left out), and the alpha channels are left out
+    if (key != "psd") {
+        std::int64_t printed = 0, left = 0, alphas = 0;
+        for (const auto& page : episode.pages) {
+            const bool spot = std::any_of(page->channels.begin(), page->channels.end(),
+                                          [](const core::Channel& c) { return c.kind == core::ChannelKind::Spot && c.raster; });
+            const bool alpha = std::any_of(page->channels.begin(), page->channels.end(), [](const core::Channel& c) { return c.kind == core::ChannelKind::Alpha; });
+            if (alpha) ++alphas;
+            if (!spot || key == "pdf") continue;
+            const bool kept = detail::as_inks(*page, key == "pack" ? "tiff" : key, key == "pack" ? "auto" : color) ||
+                              detail::as_values(*page, key == "pack" ? "tiff" : key, key == "pack" ? "auto" : color);
+            if (kept) ++left;
+            else ++printed;
+        }
+        if (printed > 0) {
+            notes.push_back("特色チャンネルのあるページ " + std::to_string(printed) +
+                            " ページは、この形式では特色を版として書けないため、画面の見え方で刷り込んで書き出しました（PSD・PDF なら版として書けます）");
+        }
+        if (left > 0) {
+            notes.push_back("特色チャンネルのあるページ " + std::to_string(left) +
+                            " ページは、インキ・値のまま書いたため、特色を書き出していません（PSD・PDF なら版として書けます）");
+        }
+        if (alphas > 0) {
+            notes.push_back("アルファチャンネルのあるページ " + std::to_string(alphas) +
+                            " ページは、この形式ではアルファチャンネルを書けないため、書き出していません（PSD なら書けます）");
+        }
+    }
     return notes;
 }
 

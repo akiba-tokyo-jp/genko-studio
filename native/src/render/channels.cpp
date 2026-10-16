@@ -2,6 +2,8 @@
 
 #include <algorithm>
 #include <cmath>
+#include <memory>
+#include <mutex>
 
 #include "core/channels.hpp"
 #include "core/color_raster.hpp"
@@ -67,6 +69,8 @@ std::optional<std::size_t> page_by_id(const core::Document& doc, const std::stri
     return std::nullopt;
 }
 
+std::shared_ptr<const core::InkPixels> decoded(const core::Bytes& raster);
+
 }  // namespace
 
 // --- planes ------------------------------------------------------------------------------------------------------------
@@ -83,7 +87,8 @@ Plane blank(const core::Page& page, int dpi) {
 
 Plane plane_of(const core::Page& page, const core::Channel& channel) {
     if (!channel.raster) return blank(page, core::channel_dpi(page, channel.kind));
-    const core::InkPixels pixels = core::decode_ink_raster(*channel.raster);
+    const std::shared_ptr<const core::InkPixels> held = decoded(channel.raster);
+    const core::InkPixels& pixels = *held;
     Plane out;
     out.width = pixels.width;
     out.height = pixels.height;
@@ -92,18 +97,68 @@ Plane plane_of(const core::Page& page, const core::Channel& channel) {
     return out;
 }
 
-float sample(const Plane& plane, double fx, double fy) {
-    if (plane.width == 0 || plane.height == 0) return 0.0f;
-    const double x = fx * plane.width - 0.5, y = fy * plane.height - 0.5;
+namespace {
+
+// Bilinear by the pixels' centres, the edges carried on: value(i) of a width × height raster where the page's point
+// (fx, fy) is.
+template <class Value>
+double bilinear(std::uint32_t width, std::uint32_t height, double fx, double fy, const Value& value) {
+    if (width == 0 || height == 0) return 0.0;
+    const double x = fx * width - 0.5, y = fy * height - 0.5;
     const double xf = std::floor(x), yf = std::floor(y);
     const double tx = x - xf, ty = y - yf;
-    const auto clampx = [&](double v) { return static_cast<std::size_t>(std::clamp(v, 0.0, double(plane.width - 1))); };
-    const auto clampy = [&](double v) { return static_cast<std::size_t>(std::clamp(v, 0.0, double(plane.height - 1))); };
+    const auto clampx = [&](double v) { return static_cast<std::size_t>(std::clamp(v, 0.0, double(width - 1))); };
+    const auto clampy = [&](double v) { return static_cast<std::size_t>(std::clamp(v, 0.0, double(height - 1))); };
     const std::size_t x0 = clampx(xf), x1 = clampx(xf + 1), y0 = clampy(yf), y1 = clampy(yf + 1);
-    const auto at = [&](std::size_t px, std::size_t py) { return double(plane.values[py * plane.width + px]); };
+    const auto at = [&](std::size_t px, std::size_t py) { return value(py * width + px); };
     const double top = at(x0, y0) * (1 - tx) + at(x1, y0) * tx;
     const double bottom = at(x0, y1) * (1 - tx) + at(x1, y1) * tx;
-    return static_cast<float>(top * (1 - ty) + bottom * ty);
+    return top * (1 - ty) + bottom * ty;
+}
+
+// The rasters decoded for the drawing (the screen's tiles each read the same channel), the last few, by their bytes.
+std::shared_ptr<const core::InkPixels> decoded(const core::Bytes& raster) {
+    static std::mutex lock;
+    static std::vector<std::pair<std::weak_ptr<const std::string>, std::shared_ptr<const core::InkPixels>>> kept;
+    {
+        const std::lock_guard<std::mutex> held(lock);
+        for (const auto& [bytes, pixels] : kept) {
+            if (bytes.lock() == raster) return pixels;
+        }
+    }
+    auto pixels = std::make_shared<const core::InkPixels>(core::decode_ink_raster(*raster));
+    const std::lock_guard<std::mutex> held(lock);
+    std::erase_if(kept, [](const auto& entry) { return entry.first.expired(); });
+    if (kept.size() >= 4) kept.erase(kept.begin());
+    kept.emplace_back(raster, pixels);
+    return pixels;
+}
+
+}  // namespace
+
+float sample(const Plane& plane, double fx, double fy) {
+    return static_cast<float>(bilinear(plane.width, plane.height, fx, fy, [&](std::size_t i) { return double(plane.values[i]); }));
+}
+
+Density::Density(const core::Channel& channel) {
+    if (channel.raster) pixels_ = decoded(channel.raster);
+}
+
+float Density::at(double fx, double fy) const {
+    if (!pixels_) return 0.0f;
+    const core::InkPixels& p = *pixels_;
+    return static_cast<float>(bilinear(p.width, p.height, fx, fy, [&](std::size_t i) { return p.value(i, 0); }));
+}
+
+Image mask_of(const core::Channel& channel, Size size) {
+    const Density density(channel);
+    std::string bytes(std::size_t(size.width) * size.height, '\0');
+    for (int y = 0; y < size.height; ++y) {
+        for (int x = 0; x < size.width; ++x) {
+            bytes[std::size_t(y) * size.width + x] = static_cast<char>(byte_of(density.at((x + 0.5) / size.width, (y + 0.5) / size.height)));
+        }
+    }
+    return Image::frombytes("L", size, bytes);
 }
 
 Plane resized(const Plane& plane, std::uint32_t width, std::uint32_t height) {
@@ -261,13 +316,13 @@ void print_spots(Image& image, const core::Page& page, const Box& area, Size siz
     if (mode != "RGB" && mode != "RGBA") return;
     std::string bytes = image.tobytes();
     for (const core::Channel* spot : spots) {
-        const Plane plane = plane_of(page, *spot);
+        const Density plane(*spot);
         const double s = std::clamp(spot->solidity, 0.0, 1.0);
         const double c[3] = {spot->color[0] / 255.0, spot->color[1] / 255.0, spot->color[2] / 255.0};
         for (int y = 0; y < area.height(); ++y) {
             const double fy = (area.y0 + y + 0.5) / size.height;
             for (int x = 0; x < area.width(); ++x) {
-                const double v = std::clamp(double(sample(plane, (area.x0 + x + 0.5) / size.width, fy)), 0.0, 1.0);
+                const double v = std::clamp(double(plane.at((area.x0 + x + 0.5) / size.width, fy)), 0.0, 1.0);
                 if (!(v > 0)) continue;
                 const std::size_t at = (std::size_t(y) * area.width() + x) * bands;
                 const double keep = 1.0 - s * v;
@@ -306,10 +361,10 @@ void finish(RenderResult& result, const core::Page& page, int dpi, const RenderO
                 return c != nullptr && c->kind == core::ChannelKind::Alpha;
             });
             if (first != overlays.end()) {
-                const Plane plane = plane_of(page, *core::find_channel(page, *first));
+                const Density plane(*core::find_channel(page, *first));
                 for (int y = 0; y < area.height(); ++y) {
                     for (int x = 0; x < area.width(); ++x) {
-                        const unsigned char g = byte_of(sample(plane, (area.x0 + x + 0.5) / size.width, (area.y0 + y + 0.5) / size.height));
+                        const unsigned char g = byte_of(plane.at((area.x0 + x + 0.5) / size.width, (area.y0 + y + 0.5) / size.height));
                         std::fill_n(out.begin() + std::ptrdiff_t((std::size_t(y) * area.width() + x) * 3), 3, static_cast<char>(g));
                     }
                 }
@@ -365,13 +420,13 @@ void finish(RenderResult& result, const core::Page& page, int dpi, const RenderO
     const unsigned bands = static_cast<unsigned>(image.bands());
     std::string bytes = image.tobytes();
     for (const core::Channel* channel : laid) {
-        const Plane plane = plane_of(page, *channel);
+        const Density plane(*channel);
         const bool selected = channel->indicates == "selected";
         const double opacity = std::clamp(channel->opacity, 0.0, 1.0);
         for (int y = 0; y < area.height(); ++y) {
             const double fy = (area.y0 + y + 0.5) / size.height;
             for (int x = 0; x < area.width(); ++x) {
-                const double v = std::clamp(double(sample(plane, (area.x0 + x + 0.5) / size.width, fy)), 0.0, 1.0);
+                const double v = std::clamp(double(plane.at((area.x0 + x + 0.5) / size.width, fy)), 0.0, 1.0);
                 const double a = (selected ? v : 1.0 - v) * opacity;
                 if (!(a > 0)) continue;
                 const std::size_t at = (std::size_t(y) * area.width() + x) * bands;

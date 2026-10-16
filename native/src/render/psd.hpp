@@ -1,5 +1,6 @@
 #pragma once
 
+#include <array>
 #include <cstdint>
 #include <map>
 #include <optional>
@@ -101,6 +102,18 @@ public:
     std::optional<core::InkPixels> merged_inks(const core::PageColor& color) const;
     // The ICC profile the file carries (image resource 1039), or "".
     const std::string& icc() const { return icc_; }
+    // channels@1 (this build's own, not psd.py's): the merged picture's extra channels — the alpha and spot channels past
+    // its colours (and past a flat file's transparency) —, each with its name (image resource 1045, else 1006) and how
+    // it shows (1077: 0 selected areas, 1 masked areas, 2 spot; its RGB colour; its opacity, a spot's solidity, in
+    // percent) and its 8-bit samples over the canvas. None when the file has no merged picture this reads.
+    struct ExtraChannel {
+        std::string name;
+        int kind = 1;
+        std::array<int, 3> color{255, 0, 0};
+        int opacity = 50;
+        std::string samples;
+    };
+    std::vector<ExtraChannel> extra_channels() const;
     // PSD-01 (not psd.py's: the structure checks of the editable PSD): a layer's text, read from its TySh block
     // (render/psd_text.hpp), and the stroke of its layer effects (its lfx2 block); nothing for a layer without one.
     // core::Error("format") for a block that cannot be read.
@@ -146,6 +159,9 @@ private:
     double dpi_ = 72.0;
     std::string mode_name_;
     std::string icc_;
+    std::string channel_names_;    // (1045, else 1006)
+    bool unicode_names_ = false;
+    std::string display_info_;     // (1077)
     std::uint64_t merged_at_ = 0;
     Limits limits_{};
     std::vector<Record> records_;

@@ -669,7 +669,7 @@ Image base_mask(const Json& area, const core::Page& page, const core::Document* 
     if (core::truthy_at(area, "channel")) {  // (channels@1: a page's alpha or spot channel, its density; this build's own)
         const core::Channel* channel = area["channel"].is_string() ? core::find_channel(page, area["channel"].get<std::string>()) : nullptr;
         if (channel == nullptr) area_error("no channel " + core::py_str(area["channel"]));
-        return channels::mask_image(channels::plane_of(page, *channel), size);
+        return channels::mask_of(*channel, size);
     }
     if (core::truthy_at(area, "saved")) {
         const Json* kept = core::get(page.extra, "saved_areas");

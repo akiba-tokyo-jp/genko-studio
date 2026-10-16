@@ -2,6 +2,7 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <memory>
 #include <optional>
 #include <string>
 #include <string_view>
@@ -38,6 +39,20 @@ Plane plane_of(const core::Page& page, const core::Channel& channel);
 Plane resized(const Plane& plane, std::uint32_t width, std::uint32_t height);
 // Its value where the page's point (fx, fy) is (each 0..1 across the page), bilinear as resized().
 float sample(const Plane& plane, double fx, double fy);
+// A channel's density where the page's point (fx, fy) is (bilinear as sample()), read from its raster decoded once while
+// it is drawn (the drawing's cache, by the raster's bytes: the screen's tiles and the exports read the same channel); 0
+// for a channel without a raster.
+class Density {
+public:
+    explicit Density(const core::Channel& channel);
+    float at(double fx, double fy) const;
+
+private:
+    std::shared_ptr<const core::InkPixels> pixels_;
+};
+// The channel as an "L" picture of `size` over the page (255 × its density at each pixel's centre).
+Image mask_of(const core::Channel& channel, Size size);
+
 // The plane as the channel's GKIR Mask raster at the depth (8 and 16 rounded, 32 as floats), or null when it is all 0.
 core::Bytes encode(const Plane& plane, int depth);
 // The plane as an "L" picture of `size` (255 × density, sampled at each pixel's centre): the page at that size.

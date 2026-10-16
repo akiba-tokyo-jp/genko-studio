@@ -31,10 +31,20 @@ PdfBoxes pdf_boxes(const core::Page& page, std::string_view area);
 // CMYK only; the bytes are the caller's, kept while the PDF is written) and boxes. The pictures are made one at a time
 // by `picture(n)` (of that mode), so the pages are never all held at once; the file is written beside `path` and moved
 // into place when it is whole.
+// channels@1: a spot channel of a page written as a separation over its picture, overprinting (/Separation with the
+// ink's name, its colour in sRGB as the alternate space; an ExtGState with /OP and /OPM 1).
+struct PdfSpot {
+    std::string name;
+    std::array<int, 3> rgb{};
+};
+
 struct PdfPage {
     std::string mode;
     std::string_view profile;
     PdfBoxes boxes;
+    // channels@1: its spot channels, each one's density made by `spot(k)` ("L" of the picture's size, 255 the full ink)
+    std::vector<PdfSpot> spots = {};
+    std::function<render::Image(std::size_t)> spot = {};
 };
 
 // color-model@1: an RGB page's values (GKCR: its profile's encoded values) as a PDF image of `bits` (8 or 16) a channel.

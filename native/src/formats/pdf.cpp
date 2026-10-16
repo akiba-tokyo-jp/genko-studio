@@ -111,10 +111,14 @@ std::filesystem::path write_pdf(const std::filesystem::path& path, const std::ve
         int image = 0;
         int content = 0;
         int page = 0;
+        std::vector<int> spots;  // (channels@1: its separations' images, then the overprint's ExtGState when new)
+        int state = 0;
+        bool new_state = false;
     };
     std::vector<Numbers> numbers(pages.size());
     std::map<std::string_view, int> profile_ids;
     int count = 2;
+    int overprint = 0;
     std::string kids;
     for (std::size_t n = 0; n < pages.size(); ++n) {
         const PdfPage& page = pages[n];
@@ -133,6 +137,15 @@ std::filesystem::path write_pdf(const std::filesystem::path& path, const std::ve
         numbers[n].image = ++count;
         numbers[n].content = ++count;
         numbers[n].page = ++count;
+        if (!page.spots.empty()) {
+            if (!page.spot) throw core::Error("value", "the page's spot channels are not made");
+            for (std::size_t k = 0; k < page.spots.size(); ++k) numbers[n].spots.push_back(++count);
+            if (overprint == 0) {
+                overprint = ++count;
+                numbers[n].new_state = true;
+            }
+            numbers[n].state = overprint;
+        }
         kids += (kids.empty() ? "" : " ") + std::to_string(numbers[n].page) + " 0 R";
     }
 
@@ -143,6 +156,53 @@ std::filesystem::path write_pdf(const std::filesystem::path& path, const std::ve
         file.write(std::to_string(offsets.size()) + " 0 obj\n");
         file.write(body);
         file.write("\nendobj\n");
+    };
+    // A page's content (its picture over the media box, then each separation overprinting it), its page object, and
+    // after them its separations' images and the overprint's state when it is new.
+    const auto page_end = [&](std::size_t n) {
+        const PdfPage& page = pages[n];
+        const auto& media = page.boxes.media;
+        const std::string cm = f3(media[2] - media[0]) + " 0 0 " + f3(media[3] - media[1]) + " 0 0 cm";
+        std::string content = "q " + cm + " /Im0 Do Q";
+        std::string xobjects = "/Im0 " + std::to_string(numbers[n].image) + " 0 R";
+        for (std::size_t k = 0; k < page.spots.size(); ++k) {
+            content += " q /GS0 gs " + cm + " /Sp" + std::to_string(k) + " Do Q";
+            xobjects += " /Sp" + std::to_string(k) + " " + std::to_string(numbers[n].spots[k]) + " 0 R";
+        }
+        object(stream("", content));
+        std::string boxes;
+        for (const auto& [key, value] : {std::pair{"MediaBox", &page.boxes.media}, std::pair{"BleedBox", &page.boxes.bleed},
+                                         std::pair{"TrimBox", &page.boxes.trim}}) {
+            boxes += (boxes.empty() ? "/" : " /") + std::string(key) + " [" + f3((*value)[0]) + " " + f3((*value)[1]) + " " + f3((*value)[2]) +
+                     " " + f3((*value)[3]) + "]";
+        }
+        const std::string state = page.spots.empty() ? std::string() : " /ExtGState << /GS0 " + std::to_string(numbers[n].state) + " 0 R >>";
+        object("<< /Type /Page /Parent 2 0 R " + boxes + " /Resources << /XObject << " + xobjects + " >>" + state + " >> /Contents " +
+               std::to_string(numbers[n].content) + " 0 R >>");
+        for (std::size_t k = 0; k < page.spots.size(); ++k) {
+            const render::Image density = page.spot(k);
+            if (density.mode() != "L") throw core::Error("value", "a spot channel's density is a grey picture");
+            const PdfSpot& spot = page.spots[k];
+            std::string name;  // (a PDF name: its bytes, those not regular as #xx)
+            for (const char c : spot.name) {
+                const auto b = static_cast<unsigned char>(c);
+                if (b > 0x20 && b < 0x7f && std::string_view("#()<>[]{}/%").find(c) == std::string_view::npos) {
+                    name += c;
+                } else {
+                    char hex[4];
+                    std::snprintf(hex, sizeof hex, "#%02X", b);
+                    name += hex;
+                }
+            }
+            if (name.empty()) name = "Spot";
+            const auto unit = [](int v) { return f3(v / 255.0); };
+            const std::string space = "[/Separation /" + name + " /DeviceRGB << /FunctionType 2 /Domain [0 1] /C0 [1 1 1] /C1 [" + unit(spot.rgb[0]) +
+                                      " " + unit(spot.rgb[1]) + " " + unit(spot.rgb[2]) + "] /N 1 >>]";
+            object(stream("/Type /XObject /Subtype /Image /Width " + std::to_string(density.width()) + " /Height " + std::to_string(density.height()) +
+                              " /ColorSpace " + space + " /BitsPerComponent 8 /Filter /FlateDecode",
+                          deflated_pixels(density)));
+        }
+        if (numbers[n].new_state) object("<< /Type /ExtGState /OP true /op true /OPM 1 >>");
     };
     file.write(std::string_view("%PDF-1.6\n%\xe2\xe3\xcf\xd3\n", 15));
     object("<< /Type /Catalog /Pages 2 0 R >>");
@@ -224,16 +284,7 @@ std::filesystem::path write_pdf(const std::filesystem::path& path, const std::ve
             object(stream("/Type /XObject /Subtype /Image /Width " + std::to_string(width) + " /Height " + std::to_string(height) +
                               " /ColorSpace " + space + " /BitsPerComponent " + std::to_string(bits) + " /Filter /FlateDecode",
                           deflater.take()));
-            const auto& media = page.boxes.media;
-            object(stream("", "q " + f3(media[2] - media[0]) + " 0 0 " + f3(media[3] - media[1]) + " 0 0 cm /Im0 Do Q"));
-            std::string boxes;
-            for (const auto& [key, value] : {std::pair{"MediaBox", &page.boxes.media}, std::pair{"BleedBox", &page.boxes.bleed},
-                                             std::pair{"TrimBox", &page.boxes.trim}}) {
-                boxes += (boxes.empty() ? "/" : " /") + std::string(key) + " [" + f3((*value)[0]) + " " + f3((*value)[1]) + " " + f3((*value)[2]) +
-                         " " + f3((*value)[3]) + "]";
-            }
-            object("<< /Type /Page /Parent 2 0 R " + boxes + " /Resources << /XObject << /Im0 " + std::to_string(numbers[n].image) +
-                   " 0 R >> >> /Contents " + std::to_string(numbers[n].content) + " 0 R >>");
+            page_end(n);
             continue;
         }
         const render::Image made = picture(n);
@@ -264,16 +315,7 @@ std::filesystem::path write_pdf(const std::filesystem::path& path, const std::ve
         object(stream("/Type /XObject /Subtype /Image /Width " + std::to_string(made.width()) + " /Height " + std::to_string(made.height()) +
                           " /ColorSpace " + space + " /BitsPerComponent " + std::to_string(bits) + " /Filter /FlateDecode",
                       deflated_pixels(made)));
-        const auto& media = page.boxes.media;
-        object(stream("", "q " + f3(media[2] - media[0]) + " 0 0 " + f3(media[3] - media[1]) + " 0 0 cm /Im0 Do Q"));
-        std::string boxes;
-        for (const auto& [key, value] : {std::pair{"MediaBox", &page.boxes.media}, std::pair{"BleedBox", &page.boxes.bleed},
-                                         std::pair{"TrimBox", &page.boxes.trim}}) {
-            boxes += (boxes.empty() ? "/" : " /") + std::string(key) + " [" + f3((*value)[0]) + " " + f3((*value)[1]) + " " + f3((*value)[2]) +
-                     " " + f3((*value)[3]) + "]";
-        }
-        object("<< /Type /Page /Parent 2 0 R " + boxes + " /Resources << /XObject << /Im0 " + std::to_string(numbers[n].image) +
-               " 0 R >> >> /Contents " + std::to_string(numbers[n].content) + " 0 R >>");
+        page_end(n);
     }
     const std::uint64_t xref = file.size();
     std::string tail = "xref\n0 " + std::to_string(offsets.size() + 1) + "\n0000000000 65535 f \n";
