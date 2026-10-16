@@ -437,12 +437,11 @@ private slots:
             QCOMPARE(static_cast<unsigned char>(now[i]), inside ? 255 : static_cast<unsigned char>(before[i]));
             for (unsigned k = 1; k < 4; ++k) QCOMPARE(now[i + k], before[i + k]);
         }
-        // composite: as usual; a channel the page has not: refused
+        // composite: as usual; a channel the page has not: the key ignored as Python ignores it (pythonsWayWithTheChannelKey)
         const core::Document plain = applied(doc, Json{{"op", "fill_area"}, {"page", 1}, {"layer_id", layer}, {"channel", "composite"},
                                                      {"area", left_half()}, {"rgb", Json::array({0, 0, 0})}});
         QVERIFY(!layer_of(plain.page(0), layer).patches.empty() || pixels(layer_of(plain.page(0), layer)) != now);
-        QVERIFY(refusal(doc, Json{{"op", "fill_area"}, {"page", 1}, {"layer_id", layer}, {"channel", "Nope"}, {"area", left_half()}})
-                    .find("no channel") != std::string::npos);
+        QCOMPARE(refusal(doc, Json{{"op", "fill_area"}, {"page", 1}, {"layer_id", layer}, {"channel", "Nope"}, {"area", left_half()}}), std::string());
         // (the channel key is this build's own on these ops: no unknown-key warning)
         QVERIFY(run_ops(doc, Json::array({Json{{"op", "fill_area"}, {"page", 1}, {"layer_id", layer}, {"channel", id}, {"area", left_half()},
                                                 {"rgb", Json::array({0, 0, 0})}}}))
@@ -749,6 +748,174 @@ private slots:
         const Json plain = report(eight, Json{{"op", "fill_area"}, {"page", 1}, {"layer_id", "paint0000001"}, {"channel", eight.page(0).channels[0].id},
                                               {"area", left_half()}, {"rgb", Json::array({255, 255, 255})}});
         QVERIFY(!plain.contains("channel_precision"));
+    }
+
+    // The pixel ops' "channel" keeps Python's way with an op where it names nothing this build has (a channel the page has
+    // not, a number, null: Python ignores a key it does not know and says so — the op is not refused, its layer drawn on);
+    // filter_raster's levels, curve and brightness_contrast read a "channel" of their own (Python's r, g, b, else all
+    // three — "red" too, and a channel's name), where only an alpha or spot channel's id, or a plate of a CMYK or Lab page
+    // (pages Python has not), is this build's.
+    void pythonsWayWithTheChannelKey() {
+        core::Document doc = painted(pattern());
+        const std::string layer = "paint0000001";
+        doc = applied(doc, Json{{"op", "add_channel"}, {"page", 1}, {"name", "A"}});
+        const std::string id = doc.page(0).channels[0].id;
+        const Json fill{{"op", "fill_area"}, {"page", 1}, {"layer_id", layer}, {"area", left_half()}, {"rgb", Json::array({0, 0, 0})}};
+        const std::string drawn = render::render_page(run_ops(doc, Json::array({fill})).doc.page(0), 100, render::proof_options(), &doc).image.tobytes();
+        for (const Json& value : {Json("Nope"), Json(5), Json(nullptr), Json("ch_000000000000")}) {
+            Json op = fill;
+            op["channel"] = value;
+            const core::ApplyResult made = run_ops(doc, Json::array({op}));
+            QCOMPARE(render::render_page(made.doc.page(0), 100, render::proof_options(), &made.doc).image.tobytes(), drawn);
+            QVERIFY2(made.warnings.dump().find("ops[0] fill_area: unknown keys ignored: channel") != std::string::npos, made.warnings.dump().c_str());
+            QVERIFY(!made.doc.page(0).channels[0].raster);
+        }
+        Json named = fill;
+        named["channel"] = "A";  // (its name: this build's, no warning)
+        QVERIFY(run_ops(doc, Json::array({named})).warnings.empty());
+        // brightness_contrast: "red" and a channel's name all three colours, as Python; "r" the red alone; the id the channel
+        const Json bc{{"op", "filter_raster"}, {"page", 1}, {"id", layer}, {"kind", "brightness_contrast"}, {"brightness", 40}, {"contrast", 0}};
+        const std::string all = pixels(layer_of(applied(doc, bc).page(0), layer));
+        const std::string before = pixels(layer_of(doc.page(0), layer));
+        QVERIFY(all != before);
+        for (const char* value : {"red", "A", "composite", "rgb"}) {
+            Json op = bc;
+            op["channel"] = value;
+            QVERIFY2(pixels(layer_of(applied(doc, op).page(0), layer)) == all, value);
+        }
+        Json red = bc;
+        red["channel"] = "r";
+        const std::string reds = pixels(layer_of(applied(doc, red).page(0), layer));
+        for (std::size_t i = 0; i < reds.size(); i += 4 * 101) {
+            QCOMPARE(reds[i + 1], before[i + 1]);
+            QCOMPARE(reds[i + 2], before[i + 2]);
+        }
+        Json on_channel = bc;
+        on_channel["channel"] = id;
+        const core::Document lit = applied(doc, on_channel);
+        QCOMPARE(pixels(layer_of(lit.page(0), layer)), before);
+        QVERIFY(lit.page(0).channels[0].raster);
+        // levels on a CMYK page's cyan plate: the cyan alone (the other inks and the alpha as they were)
+        const core::Document cmyk = applied(painted(pattern()), Json{{"op", "set_color_mode"}, {"page", 1}, {"mode", "cmyk"}, {"profile", "coated-cmyk"}});
+        const core::InkPixels was = core::decode_ink_raster(*layer_of(cmyk.page(0), layer).ink_raster);
+        const core::Document levelled = applied(cmyk, Json{{"op", "filter_raster"}, {"page", 1}, {"id", layer}, {"kind", "levels"}, {"black", 0},
+                                                         {"white", 128}, {"channel", "cyan"}});
+        const core::InkPixels now = core::decode_ink_raster(*layer_of(levelled.page(0), layer).ink_raster);
+        bool cyan = false;
+        for (std::size_t i = 0; i < now.pixel_count(); i += 37) {
+            cyan = cyan || now.samples[i * 5] != was.samples[i * 5];
+            for (unsigned c = 1; c < 5; ++c) QCOMPARE(now.samples[i * 5 + c], was.samples[i * 5 + c]);
+        }
+        QVERIFY(cyan);
+    }
+
+    // A studio book's rules (strict_gates) look at what a pixel op changes: before the name is approved a printed layer is
+    // refused, its alpha channel is not (never printed), a spot channel is (printed), a plate of the layer is (the layer).
+    void strictGatesLookAtTheChannel() {
+        core::Document doc = painted(pattern());
+        doc = run_ops(doc, Json::array({Json{{"op", "add_channel"}, {"page", 1}, {"name", "A"}},
+                                        Json{{"op", "add_channel"}, {"page", 1}, {"kind", "spot"}, {"name", "S"}, {"fill", "white"}}})).doc;
+        doc.strict_gates = true;
+        const Json fill{{"op", "fill_area"}, {"page", 1}, {"layer_id", "paint0000001"}, {"area", left_half()}, {"rgb", Json::array({255, 255, 255})}};
+        QVERIFY(refusal(doc, fill).find("needs name_ok") != std::string::npos);
+        Json on_alpha = fill;
+        on_alpha["channel"] = "A";
+        QCOMPARE(refusal(doc, on_alpha), std::string());
+        Json on_spot = fill;
+        on_spot["channel"] = "S";
+        QVERIFY(refusal(doc, on_spot).find("on a spot channel (printed) needs name_ok") != std::string::npos);
+        Json on_plate = fill;
+        on_plate["channel"] = "red";
+        QVERIFY(refusal(doc, on_plate).find("on a printed layer needs name_ok") != std::string::npos);
+    }
+
+    // The page locks and for_pages: duplicate_channel onto another page asks that page's lock too; the ops that make or
+    // take pages (split_channels, merge_channels, duplicate_channel to a new page) are not repeated page by page.
+    void locksAndForPages() {
+        core::Document doc = painted(pattern(), 2);
+        doc = applied(doc, Json{{"op", "add_channel"}, {"page", 1}, {"name", "W"}, {"fill", "white"}});
+        core::Document locked = doc;
+        locked.page_locks[locked.page(1).id] = "ai:other";
+        QVERIFY(refusal(locked, Json{{"op", "duplicate_channel"}, {"page", 1}, {"channel", "W"}, {"to_page", 2}}).find("page 2 locked by ai:other") !=
+                std::string::npos);
+        QCOMPARE(refusal(locked, Json{{"op", "duplicate_channel"}, {"page", 1}, {"channel", "W"}}), std::string());
+        for (const Json& op : {Json{{"op", "split_channels"}}, Json{{"op", "merge_channels"}, {"pages", Json::array({1, 2, 3})}},
+                               Json{{"op", "duplicate_channel"}, {"channel", "W"}, {"to_page", "new"}}}) {
+            const std::string refused = refusal(doc, Json{{"op", "for_pages"}, {"pages", "all"}, {"ops", Json::array({op})}});
+            QVERIFY2(refused.find("cannot be repeated page by page") != std::string::npos, refused.c_str());
+        }
+    }
+
+    // A channel whose raster cannot be read (its asset broken on disk): the book opens read-only with the problem
+    // reported; inspect lists the channel with its problem (the rest of the book as usual), and the page is drawn — the
+    // broken channel as none — rather than the whole failing.
+    void brokenChannelAssetIsReported() {
+        QTemporaryDir dir;
+        core::Document doc = painted(solid(200, 150, 100));
+        doc = applied(doc, Json{{"op", "add_channel"}, {"page", 1}, {"kind", "spot"}, {"name", "S"}, {"fill", "white"}});
+        doc = applied(doc, Json{{"op", "add_channel"}, {"page", 1}, {"name", "A"}, {"fill", "white"}});
+        const fs::path book = fs::path(dir.path().toStdString()) / "b.genko";
+        write_book(doc, book);
+        const Json raw = Json::parse(genko::test::read_bytes(QString::fromStdString((book / "project.json").string())));
+        const std::string ref = raw["pages"][0]["channels"][0]["raster"].get<std::string>();
+        genko::test::write_bytes(QString::fromStdString((book / "assets" / ref.substr(7, 2) / (ref.substr(7) + ".gkir")).string()), "GKIR broken");
+        const storage::LoadResult loaded = storage::load_document(book);
+        QVERIFY(!loaded.report.clean());
+        QVERIFY(!loaded.document.read_only_reason.empty());
+        const Json snapshot = storage::snapshot(loaded.document);
+        const Json listed = snapshot["pages"][0]["channels"];
+        QCOMPARE(listed.size(), std::size_t{2});
+        QVERIFY2(listed[0].contains("problem") && listed[0]["size"].is_null(), listed.dump().c_str());
+        QVERIFY(!listed[1].contains("problem"));
+        QCOMPARE(listed[1]["size"], Json::array({kW, kH}));
+        render::RenderOptions options;
+        options.overlays = {loaded.document.page(0).channels[1].id};
+        const render::Image shown = render::render_page(loaded.document.page(0), 100, options, &loaded.document).image;
+        QCOMPARE(shown.getpixel(20, 100), (std::vector<double>{200, 150, 100}));  // (the broken spot as none; the alpha all selected)
+    }
+
+    // An 8-bit RGB page of a profile (Display P3) split into its plates: the page's values (as a 16- or 32-bit page's),
+    // not the sRGB the screen shows them in.
+    void splitAProfiledPage() {
+        const render::Image image = pattern();
+        core::Document doc = applied(painted(image), Json{{"op", "assign_profile"}, {"page", 1}, {"profile", "display-p3"}});
+        QVERIFY(doc.page(0).rgb && doc.page(0).rgb->depth == 8 && !doc.page(0).rgb->profile.empty());
+        doc = applied(doc, Json{{"op", "split_channels"}, {"page", 1}});
+        const std::string original = image.tobytes();
+        int worst = 0;
+        for (std::size_t k = 0; k < 3; ++k) {
+            const core::InkPixels grey = core::decode_ink_raster(*doc.page(k).layers[1].ink_raster);
+            for (std::size_t i = 0; i < grey.pixel_count(); i += 101) {
+                worst = std::max(worst, std::abs(int(grey.samples[i * 2]) - int(static_cast<unsigned char>(original[i * 4 + k]))));
+            }
+        }
+        QVERIFY2(worst <= 1, qPrintable(QString::number(worst)));
+    }
+
+    // The spot as the screen prints it is what Merge Spot Channel makes of the page (an RGB page: the same formula,
+    // c + (s·ink + (1 − s)·c·ink − c)·v), at solidity 0, 0.5 and 1 and a half density: black ink of solidity 1 at half
+    // over white is a 50 % grey on screen too, not 25 %.
+    void spotOnScreenAsMerged() {
+        for (const double s : {0.0, 0.5, 1.0}) {
+            for (const auto& [paper, ink] : std::vector<std::pair<std::array<int, 3>, std::array<int, 3>>>{{{200, 150, 100}, {30, 90, 250}},
+                                                                                                            {{255, 255, 255}, {0, 0, 0}}}) {
+                core::Document doc = painted(solid(paper[0], paper[1], paper[2]));
+                doc = applied(doc, Json{{"op", "add_channel"}, {"page", 1}, {"kind", "spot"}, {"color", Json::array({ink[0], ink[1], ink[2]})},
+                                      {"solidity", s}, {"fill", "white"}});
+                render::channels::Plane half = plane(doc.page(0), 0);
+                std::fill(half.values.begin(), half.values.end(), 0.5f);
+                doc.edit_page(0).channels[0].raster = render::channels::encode(half, 8);
+                const std::vector<double> shown = render::render_page(doc.page(0), 100, render::RenderOptions{}, &doc).image.getpixel(200, 100);
+                const core::Document merged = applied(doc, Json{{"op", "merge_spot_channel"}, {"page", 1}});
+                const std::vector<double> made = render::render_page(merged.page(0), 100, render::RenderOptions{}, &merged).image.getpixel(200, 100);
+                for (unsigned k = 0; k < 3; ++k) {
+                    const double p = paper[k] / 255.0, c = ink[k] / 255.0, v = 128 / 255.0;
+                    const double want = p + (s * c + (1 - s) * p * c - p) * v;
+                    QVERIFY2(std::abs(shown[k] / 255.0 - want) <= 1.0 / 255.0 + 1e-9 && std::abs(shown[k] - made[k]) <= 1.0,
+                             qPrintable(QString("s %1 k %2: shown %3 merged %4 want %5").arg(s).arg(k).arg(shown[k]).arg(made[k]).arg(want * 255)));
+                }
+            }
+        }
     }
 
     // GKIR read a row at a time (core::read_ink_raster_rows, for the large channels): the values decode_ink_raster gives,

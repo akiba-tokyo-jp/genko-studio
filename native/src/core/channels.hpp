@@ -67,9 +67,23 @@ std::optional<std::size_t> plate_index(const Page& page, std::string_view name);
 // render/ops_channels.cpp): the pen and the eraser, the fills and the gradient, the filters and corrections, an area
 // deleted or moved, smudge, liquify, shapes, closing gaps.
 bool channel_target_op(std::string_view op);
-// Is the op's "channel" this build's own (the channel such an op works on)? filter_raster's levels and curve read their own
-// "channel" (Python's: r, g, b, else all three): there only a channel's id is this build's; its rgb, r, g and b never are.
-bool channel_target(const Json& op);
+// filter_raster's kinds that read a "channel" of their own (Python's filters.py: levels, curve and brightness_contrast —
+// r, g or b, anything else all three).
+bool python_channel_kind(const Json& op);
+
+// What a pixel op's "channel" names on its page as this build reads it: an alpha or spot channel (its index in the
+// page's list), a colour plate of the page (its index), or the composite (nothing to do). None when the key is not this
+// build's there — the op keeps Python's way with it —: no key, or null; a value that names nothing on the page (not a
+// string, no channel of that id or name, no plate of that name), which Python ignores as a key it does not know (and
+// says so); and on filter_raster's levels, curve and brightness_contrast, whose "channel" is Python's (r, g, b, else all
+// three: "red", a channel's name or "composite" too), anything but an alpha or spot channel's id, or a plate of a CMYK or
+// Lab page (pages Python does not have). None too when the op names no page the book has (the op says so itself).
+struct ChannelTarget {
+    enum class Kind { Channel, Plate, Composite };
+    Kind kind = Kind::Composite;
+    std::size_t index = 0;
+};
+std::optional<ChannelTarget> channel_target(const Document& doc, const Json& op);
 
 // Does the book need channels@1 (a page with a channel)?
 bool uses_channels(const Document& doc);

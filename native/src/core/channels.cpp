@@ -5,6 +5,7 @@
 #include <cmath>
 #include <set>
 
+#include "core/command_bus.hpp"
 #include "core/error.hpp"
 #include "core/ids.hpp"
 #include "core/ink.hpp"
@@ -236,21 +237,40 @@ bool channel_target_op(std::string_view op) {
     return std::find(kOps.begin(), kOps.end(), op) != kOps.end();
 }
 
-bool channel_target(const Json& op) {
-    if (!op.is_object()) return false;
+bool python_channel_kind(const Json& op) {
+    const Json* name = get(op, "op");
+    const Json* kind = get(op, "kind");
+    return name != nullptr && *name == Json("filter_raster") && kind != nullptr &&
+           (*kind == Json("levels") || *kind == Json("curve") || *kind == Json("brightness_contrast"));
+}
+
+std::optional<ChannelTarget> channel_target(const Document& doc, const Json& op) {
+    if (!op.is_object()) return std::nullopt;
     const Json* name = get(op, "op");
     const Json* channel = get(op, "channel");
-    if (name == nullptr || !name->is_string() || channel == nullptr || !channel_target_op(name->get<std::string>())) return false;
-    if (name->get<std::string>() == "filter_raster") {
-        if (!channel->is_string()) return false;
-        const std::string& value = channel->get_ref<const std::string&>();
-        // (levels and curve read their own channel, any text — r, g, b, else all three —: a channel's id alone is this
-        // build's there)
-        const Json* kind = get(op, "kind");
-        if (kind != nullptr && (*kind == Json("levels") || *kind == Json("curve"))) return is_channel_id(value);
-        if (value == "rgb" || value == "r" || value == "g" || value == "b") return false;
+    if (name == nullptr || !name->is_string() || channel == nullptr || !channel_target_op(name->get<std::string>())) return std::nullopt;
+    if (!channel->is_string()) return std::nullopt;  // (null, a number…: ignored, as Python ignores the key)
+    const std::string& value = channel->get_ref<const std::string&>();
+    const Page* page = nullptr;
+    try {
+        page = &doc.page(require_page(doc, op));
+    } catch (const std::exception&) {  // (the op's own refusal says it)
+        return std::nullopt;
     }
-    return true;
+    const bool python = python_channel_kind(op);
+    if (value == "composite") {
+        if (python) return std::nullopt;  // (Python's: all three)
+        return ChannelTarget{ChannelTarget::Kind::Composite, 0};
+    }
+    const std::size_t index = channel_index(*page, value);
+    if (index < page->channels.size() && (!python || page->channels[index].id == value)) return ChannelTarget{ChannelTarget::Kind::Channel, index};
+    if (const auto plate = plate_index(*page, value)) {
+        const bool ink_page = page->color && (page->color->space == InkSpace::Cmyk || page->color->space == InkSpace::Lab);
+        if (python && !ink_page) return std::nullopt;  // (an RGB or grey page's plates there: Python's r, g, b, else all three)
+        if (plate_names(*page).size() == 1) return ChannelTarget{ChannelTarget::Kind::Composite, 0};  // (a grey page's one plate)
+        return ChannelTarget{ChannelTarget::Kind::Plate, *plate};
+    }
+    return std::nullopt;
 }
 
 bool uses_channels(const Document& doc) {

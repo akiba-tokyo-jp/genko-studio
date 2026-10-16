@@ -150,14 +150,18 @@ Json MainWindow::with_channel_target(const Json& ops) const {
         } catch (const std::exception&) {
             continue;
         }
-        const bool own = op["op"] == Json("filter_raster") && (op.value("kind", Json()) == Json("levels") || op.value("kind", Json()) == Json("curve"));
-        if (own) {  // (levels and curve take their own channel: a plate of RGB as r, g or b; a channel by its id)
-            if (plate) {
-                static const std::map<std::string, std::string> kLetters{{"red", "r"}, {"green", "g"}, {"blue", "b"}};
-                const auto letter = kLetters.find(view.target);
-                if (letter != kLetters.end() && !page->color) op["channel"] = letter->second;
-            } else if (!op.contains("channel") || op["channel"] == Json("rgb")) {
+        if (core::python_channel_kind(op)) {
+            // (levels, curve and brightness_contrast take Python's own channel — r, g or b, else all three —, which the
+            // target fills in when the op names none (all three): an RGB page's plate as r, g or b; a CMYK or Lab page's
+            // plate by its name and a channel by its id, this build's values there)
+            if (op.contains("channel") && op["channel"] != Json("rgb")) continue;
+            if (!plate) {
                 op["channel"] = view.target;
+            } else if (page->color && (page->color->space == core::InkSpace::Cmyk || page->color->space == core::InkSpace::Lab)) {
+                op["channel"] = core::plate_names(*page).at(*core::plate_index(*page, view.target));
+            } else if (!page->color) {
+                static const std::map<std::string, std::string> kLetters{{"red", "r"}, {"green", "g"}, {"blue", "b"}};
+                if (const auto letter = kLetters.find(view.target); letter != kLetters.end()) op["channel"] = letter->second;
             }
             continue;
         }

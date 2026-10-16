@@ -382,7 +382,8 @@ Plane page_plane(const core::Page& page, const core::Document* episode, std::opt
     options.finish = false;
     options.onion = false;
     options.spots = std::vector<std::string>{};
-    const bool deep = !page.color && page.rgb && page.rgb->depth != 8;
+    // (an RGB page of more than 8 bits or of a profile: its values in its space, not the sRGB the screen shows)
+    const bool deep = !page.color && page.rgb && (page.rgb->depth != 8 || !page.rgb->profile.empty());
     options.inks = page.color.has_value();
     options.precise = deep;
     core::Page shown = page;  // (without its nombre: a page made of the plane draws its own)
@@ -440,10 +441,9 @@ void print_spots(Image& image, const core::Page& page, const Box& area, Size siz
                 const double v = std::clamp(double(plane.at((area.x0 + x + 0.5) / size.width, fy)), 0.0, 1.0);
                 if (!(v > 0)) continue;
                 const std::size_t at = (std::size_t(y) * area.width() + x) * bands;
-                const double keep = 1.0 - s * v;
                 for (unsigned j = 0; j < 3; ++j) {
                     const double p = static_cast<unsigned char>(bytes[at + j]) / 255.0;
-                    bytes[at + j] = static_cast<char>(byte_of(keep * p * (1.0 - v + v * c[j]) + s * v * c[j]));
+                    bytes[at + j] = static_cast<char>(byte_of(p + (s * c[j] + (1.0 - s) * p * c[j] - p) * v));
                 }
             }
         }
@@ -558,20 +558,10 @@ void finish(RenderResult& result, const core::Page& page, int dpi, const RenderO
 // --- the pixel ops' "channel" ----------------------------------------------------------------------------------------
 
 std::optional<Target> target_of(const core::Document& doc, const Json& op) {
-    if (!core::channel_target(op)) return std::nullopt;  // (filter_raster's rgb, r, g, b: the levels' own, Python's)
-    const Json* given = core::get(op, "channel");
-    if (given == nullptr || given->is_null()) return std::nullopt;
-    if (!given->is_string()) throw core::OpError("channel is a channel's id or name, a colour plate (red, cyan, …) or composite");
-    const std::string name = given->get<std::string>();
-    if (name == "composite") return std::nullopt;
-    const core::Page& page = doc.page(core::require_page(doc, op));
-    const std::size_t index = core::channel_index(page, name);
-    if (index < page.channels.size()) return Target{index, std::nullopt};
-    if (const auto plate = core::plate_index(page, name)) {
-        if (core::plate_names(page).size() == 1) return std::nullopt;  // (a grey page's one plate is its composite)
-        return Target{std::nullopt, plate};
-    }
-    throw core::OpError("no channel " + core::py_repr_str(name) + " on page " + page.index.repr());
+    const std::optional<core::ChannelTarget> named = core::channel_target(doc, op);
+    if (!named || named->kind == core::ChannelTarget::Kind::Composite) return std::nullopt;
+    if (named->kind == core::ChannelTarget::Kind::Channel) return Target{named->index, std::nullopt};
+    return Target{std::nullopt, named->index};
 }
 
 ChannelLending::ChannelLending(core::Document& doc, std::size_t at, std::size_t index, Json& op, std::string_view name) {

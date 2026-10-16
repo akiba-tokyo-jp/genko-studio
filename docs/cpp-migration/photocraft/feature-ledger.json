@@ -321,7 +321,8 @@
         "native/src/app/channel_panel.cpp",
         "native/src/app/main_window_channels.cpp",
         "native/tests/unit/test_channels.cpp",
-        "native/tests/gui/test_gui_channels.cpp"
+        "native/tests/gui/test_gui_channels.cpp",
+        "native/src/core/command_bus.cpp"
       ],
       "pc0": {
         "date": "2026-10-16",
@@ -333,7 +334,8 @@
         "tests": [],
         "gap": "チャンネル（色・合成・クイックマスク）を別名・反転・別ドキュメントへ複製する操作がない",
         "note": "チャンネルの土台（ページごとのアルファ・スポット・色チャンネルの保存と PSD 往復、チャンネル パネル）が要る（channel.new で数えた）。Genko には一つの原稿の中で複数の「ドキュメント」を扱う仕組みもない"
-      }
+      },
+      "limitations": "色の版を写すときの CMYK の版は 1 − インキ（Photoshop と同じ向き。上流はインキのまま: 意図的な違い、SPEC.md COLOR-03）。to_page \"new\" は for_pages の中では使えない。"
     },
     {
       "id": "channel.list",
@@ -356,7 +358,8 @@
         "native/src/app/main_window_channels.cpp",
         "native/tests/unit/test_channels.cpp",
         "native/tests/contract/test_contract_channels.cpp",
-        "native/tests/gui/test_gui_channels.cpp"
+        "native/tests/gui/test_gui_channels.cpp",
+        "native/src/app/thumbs.cpp"
       ],
       "pc0": {
         "date": "2026-10-16",
@@ -393,7 +396,8 @@
         "native/src/render/ops_channels.cpp",
         "native/src/app/channel_panel.cpp",
         "native/src/app/main_window_channels.cpp",
-        "native/tests/unit/test_channels.cpp"
+        "native/tests/unit/test_channels.cpp",
+        "native/src/core/command_bus.cpp"
       ],
       "pc0": {
         "date": "2026-10-16",
@@ -405,7 +409,8 @@
         "tests": [],
         "gap": "開いたグレースケール画像を RGB/CMYK/Lab の各チャンネルとして 1 枚に合わせる操作がない（Genko にはグレースケールの原稿も複数文書の結合もない）",
         "note": "チャンネルの土台（ページごとのアルファ・スポット・色チャンネルの保存と PSD 往復、チャンネル パネル）が要る（channel.new で数えた）。image.mode.grayscale の土台も要る"
-      }
+      },
+      "limitations": "CMYK へは 1 − 明るさをインキにする（channel.split の逆。インキのまま使う上流との意図的な違い、SPEC.md COLOR-03）。元のページは既定で置き換える（利用者の決定）。for_pages の中では使えない。"
     },
     {
       "id": "channel.mergeSpot",
@@ -499,7 +504,8 @@
         "native/tests/unit/test_channels.cpp",
         "native/tests/contract/test_contract_channels.cpp",
         "native/tests/gui/test_gui_channels.cpp",
-        "native/tests/gui/test_gui_select.cpp"
+        "native/tests/gui/test_gui_select.cpp",
+        "native/src/render/psd.cpp"
       ],
       "pc0": {
         "date": "2026-10-16",
@@ -546,7 +552,9 @@
         "native/src/formats/pdf.cpp",
         "native/tests/unit/test_channels.cpp",
         "native/tests/contract/test_contract_channels.cpp",
-        "native/tests/gui/test_gui_channels.cpp"
+        "native/tests/gui/test_gui_channels.cpp",
+        "native/src/app/thumbs.cpp",
+        "native/src/formats/exporting.cpp"
       ],
       "pc0": {
         "date": "2026-10-16",
@@ -558,7 +566,8 @@
         "tests": [],
         "gap": "スポットカラー（特色）チャンネルがない。CMYK ページはプロセス 4 色だけ（set_inks は RGB 色ごとの CMYK 値の表）",
         "note": "PSD の特色チャンネル・PDF の DeviceN/Separation 書き出しも要る。新しい外部ライブラリは要らない（lcms2 は既存）"
-      }
+      },
+      "limitations": "PDF は /Separation に /SMask（濃度 0 で透明）と /BM /Multiply・オーバープリント、PSD は Photoshop の向き（0 がインキ 100%）・1077 は 13 バイトの記録。どちらも実機の Acrobat・Photoshop では確かめていない（poppler と psd-tools で確かめた）。"
     },
     {
       "id": "channel.options",
@@ -681,7 +690,8 @@
         "native/src/app/channel_panel.cpp",
         "native/src/app/main_window_channels.cpp",
         "native/tests/unit/test_channels.cpp",
-        "native/tests/gui/test_gui_channels.cpp"
+        "native/tests/gui/test_gui_channels.cpp",
+        "native/src/core/command_bus.cpp"
       ],
       "pc0": {
         "date": "2026-10-16",
@@ -693,7 +703,8 @@
         "tests": [],
         "gap": "チャンネルごとにグレースケールの文書へ分ける操作がない",
         "note": "チャンネルの土台（ページごとのアルファ・スポット・色チャンネルの保存と PSD 往復、チャンネル パネル）が要る（channel.new で数えた）。グレースケールの文書（image.mode.grayscale）も要る"
-      }
+      },
+      "limitations": "CMYK の版は 1 − インキ（インキの所が暗い。Photoshop の「チャンネルを分割」と同じ）で、インキのまま明るさにする上流との意図的な違い（SPEC.md COLOR-03）。元のページは既定で置き換える（利用者の決定）。for_pages の中では使えない。"
     },
     {
       "id": "channel.target",
@@ -717,7 +728,11 @@
         "native/src/app/main_window_channels.cpp",
         "native/tests/unit/test_channels.cpp",
         "native/tests/contract/test_contract_channels.cpp",
-        "native/tests/gui/test_gui_channels.cpp"
+        "native/tests/gui/test_gui_channels.cpp",
+        "native/src/core/channels.cpp",
+        "native/src/core/command_bus.cpp",
+        "native/src/core/ink.cpp",
+        "native/src/app/main_window.cpp"
       ],
       "pc0": {
         "date": "2026-10-16",
@@ -729,7 +744,8 @@
         "tests": [],
         "gap": "描画・フィルターの対象を色チャンネル・アルファ・クイックマスクに切り替える仕組みがない。levels/curve/brightness_contrast の channel=r/g/b は補正のパラメータで、対象チャンネルではない",
         "note": "チャンネルの土台（ページごとのアルファ・スポット・色チャンネルの保存と PSD 往復、チャンネル パネル）が要る（channel.new で数えた）。描画・フィルター・塗りの全 op が対象チャンネルを読む必要がある"
-      }
+      },
+      "limitations": "貸し出しは 200 dpi・8 bit の灰色: 原稿の dpi の特色で op が変えた所は 200 dpi の細かさ、16・32 bit のチャンネルでは変えた画素が 8 bit（結果の channel_precision で知らせる）。Python の op の引数の扱いは変えない（チャンネルを指さない値は無視して警告。levels・curve・brightness_contrast の channel は Python のもの）。"
     },
     {
       "id": "channel.target.composite",

@@ -51,14 +51,15 @@ std::string join(const std::vector<std::string>& items, std::string_view separat
 // define_brush's paper (BRUSH-01): this build's own key, never named an unknown key.
 bool paper_key(const Json& op, std::string_view key) { return key == "paper" && is_op(op, "define_brush"); }
 
-// Python's _usage: the keys given that the op does not take, and how the op is written.
-std::string usage(const Json& op) {
+// Python's _usage: the keys given that the op does not take, and how the op is written. (`channel`: the op's "channel"
+// is this build's own there — it names a channel or plate of its page: core::channel_target —, so not one of them.)
+std::string usage(const Json& op, bool channel = false) {
     const Json* schema = schema_of(op);
     if (schema == nullptr) return {};
     std::vector<std::string> strange;
     for (const auto& [key, value] : op.items()) {
         if (!schema->contains(key) && key != "op" && key != "area" && !key.starts_with("_") && !paper_key(op, key) &&
-            !(key == "channel" && channel_target(op))) {
+            !(key == "channel" && channel)) {
             strange.push_back(key);
         }
     }
@@ -81,8 +82,10 @@ bool native_key(std::string_view op, std::string_view key) {
            (op == "define_brush" && key == "paper") || ((op == "add_line" || op == "edit_line") && key == "ruby_spans");
 }
 
-// Python's _unknown_keys: keys an op was given that it does not take (ignored, so said).
-std::vector<std::string> unknown_key_warnings(const Json& ops) {
+// Python's _unknown_keys: keys an op was given that it does not take (ignored, so said). `channels`: the ops whose
+// "channel" was this build's own (it named a channel or plate of the op's page when the op ran: core::channel_target);
+// another op's "channel" is ignored as Python ignores it, and said as Python says it.
+std::vector<std::string> unknown_key_warnings(const Json& ops, const std::vector<char>& channels) {
     std::vector<std::string> out;
     for (std::size_t i = 0; i < ops.size(); ++i) {
         const Json& op = ops[i];
@@ -92,7 +95,8 @@ std::vector<std::string> unknown_key_warnings(const Json& ops) {
         std::vector<std::string> strange;
         for (const auto& [key, value] : op.items()) {
             const bool known = schema->contains(key) || key == "op" || key == "area" || key == "page" || key == "id" ||
-                               key == "note" || native_key(py_str(*get(op, "op")), key) || (key == "channel" && channel_target(op));
+                               key == "note" || native_key(py_str(*get(op, "op")), key) ||
+                               (key == "channel" && i < channels.size() && channels[i]);
             if (!known && !key.starts_with("_")) strange.push_back(key);
         }
         if (!strange.empty()) {
@@ -180,12 +184,12 @@ std::string_view layer_key(std::string_view name) {
     return "layer_id";
 }
 
-// bookops.NOT_PER_PAGE
+// bookops.NOT_PER_PAGE (and channels@1's ops that make or take pages: split_channels, merge_channels; this build's own)
 bool not_per_page(std::string_view name) {
     return one_of(name, {"add_page", "delete_page", "duplicate_page", "import_pages", "reorder", "move_page",
                          "set_page_spec", "add_cover", "for_pages", "replace_text", "approve", "revoke",
                          "allow_chat_approval", "name_ok", "advance", "set_bible", "set_script", "define_brush",
-                         "set_brush"});
+                         "set_brush", "split_channels", "merge_channels"});
 }
 
 bool printed(const Layer& layer) { return layer.role != LayerRole::Name && layer.role != LayerRole::Draft; }
@@ -344,6 +348,17 @@ void check_page_lock(Document& doc, const Json& op, const Actor& actor) {
         for (const auto& each : doc.pages) check_held(doc, *each, each->index, actor);
         return;
     }
+    if (named && name == "duplicate_channel") {  // (channels@1: the page it copies onto is asked too, then its own)
+        const Json* to = get(op, "to_page");
+        if (to != nullptr && to->is_number_integer()) {
+            for (const auto& each : doc.pages) {
+                if (each->index == Num(to->get<std::int64_t>())) {
+                    check_held(doc, *each, each->index, actor);
+                    break;
+                }
+            }
+        }
+    }
     if (named && name == "merge_channels") {  // (channels@1: every page it takes is asked)
         const Json* pages = get(op, "pages");
         for (const Json& wanted : pages != nullptr && pages->is_array() ? *pages : Json::array()) {
@@ -434,6 +449,15 @@ void check_strict(const Document& doc, const Json& op_in, const Actor& actor) {
         }
         return;
     }
+    // (channels@1: a pixel op on an alpha or spot channel changes that channel, not its layer: an alpha channel is never
+    // printed, a spot channel is)
+    if (const auto target = channel_target(doc, op_in); named && target && target->kind == ChannelTarget::Kind::Channel) {
+        const Page& page = page_of(op_in);
+        if (page.channels.at(target->index).kind == ChannelKind::Spot && !page.name_ok) {
+            throw OpError(name + " on a spot channel (printed) needs name_ok on page " + page.index.repr() + " (strict_gates)");
+        }
+        return;
+    }
     Json op = op_in;
     if (named && one_of(name, {"set_layer_mask", "paint_mask", "merge_down", "delete_layer", "duplicate_layer", "convert_layer"}) &&
         truthy_at(op_in, "id")) {
@@ -507,6 +531,12 @@ Json expand_for_pages(const Document& doc, const Json& op) {
     if (names.size() != ops->size()) throw OpError("ops is the list of ops to run on each page");
     for (const std::string& name : names) {
         if (not_per_page(name)) throw OpError(name + " cannot be repeated page by page");
+    }
+    for (const Json& item : *ops) {  // (channels@1: a channel copied into a new page makes a page)
+        const Json* to = get(item, "to_page");
+        if (is_op(item, "duplicate_channel") && to != nullptr && *to == Json("new")) {
+            throw OpError("duplicate_channel to a new page cannot be repeated page by page");
+        }
     }
     const Json* pages_value = get(op, "pages");
     const Json wanted = pages_value != nullptr && py_truthy(*pages_value) ? *pages_value : Json("body");
@@ -824,6 +854,7 @@ ApplyResult CommandBus::apply(const Document& doc, const Json& ops_in, const Act
     read_as_touched_pages_does(ops);
     refuse_unread_pages(doc, ops);
     Document work = doc;  // (the pages stay shared until an op changes one)
+    std::vector<char> channels(ops.size(), 0);  // (channels@1: the ops whose "channel" named a channel or plate of their page)
     for (std::size_t i = 0; i < ops.size(); ++i) {
         Json& op = ops[i];
         if (!op.is_object()) throw ApplyError("ops[" + std::to_string(i) + "] must be an object");
@@ -848,6 +879,7 @@ ApplyResult CommandBus::apply(const Document& doc, const Json& ops_in, const Act
                 current = &resolved;
             }
             const Json& seen = *current;
+            channels[i] = channel_target(work, seen).has_value() ? 1 : 0;
             if (name != nullptr) require_hashable(*name);  // (Python looks the name up in sets of ops)
             check_page_lock(work, *current, actor);
             if (work.strict_gates) check_strict(work, *current, actor);
@@ -876,17 +908,17 @@ ApplyResult CommandBus::apply(const Document& doc, const Json& ops_in, const Act
         } catch (const ApplyError&) {
             throw;
         } catch (const OpError& error) {
-            throw ApplyError(prefix + error.what() + usage(*current));
+            throw ApplyError(prefix + error.what() + usage(*current, channels[i]));
         } catch (const OpKeyError& error) {
             throw ApplyError(prefix + "not found: " + error.what() +
-                             " (a key the op needs, or an id the book does not have)" + usage(*current));
+                             " (a key the op needs, or an id the book does not have)" + usage(*current, channels[i]));
         } catch (const PyUncaught& error) {
             // (a traceback's last line: the exception's type alone when it has no message)
             const std::string what = error.what();
             throw ApplyError(prefix + error.type() + (what.empty() ? std::string() : ": " + what), "python_error");
         } catch (const Error& error) {
             if (error.code() == "not_yet_ported") throw ApplyError(prefix + error.what(), "not_yet_ported");
-            throw ApplyError(prefix + "a value of the wrong type (" + error.what() + ")" + usage(*current));
+            throw ApplyError(prefix + "a value of the wrong type (" + error.what() + ")" + usage(*current, channels[i]));
         }
         result.applied.push_back(name_text);
         // (Python: op.pop("_report") — what the op reported, or the key as it was given)
@@ -907,7 +939,7 @@ ApplyResult CommandBus::apply(const Document& doc, const Json& ops_in, const Act
     }
     refuse_changed_unread_pages(doc, work);
     for (auto& warning : validate_document(work)) result.warnings.push_back(std::move(warning));
-    for (auto& warning : unknown_key_warnings(ops)) result.warnings.push_back(std::move(warning));
+    for (auto& warning : unknown_key_warnings(ops, channels)) result.warnings.push_back(std::move(warning));
     for (const Json& op : ops) result.journal_ops.push_back(journal_op(op));
     result.doc = std::move(work);
     return result;

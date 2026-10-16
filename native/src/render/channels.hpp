@@ -74,14 +74,16 @@ core::Bytes relayout(const core::Bytes& raster, const core::PageSpec& old_paper,
 void follow_depth(core::Document& doc);
 
 // A colour plane of the page as it shows (proof, the spots not printed), at 200 dpi: its values 0..1 as the panel shows a
-// plate alone (RGB its value; CMYK 1 − its ink; Lab L/100, (a + 128)/255, (b + 128)/255; grey its lightness) — or, for
-// `plate` none, the page's lightness (0.299 R + 0.587 G + 0.114 B).
+// plate alone (RGB its value — of a page of 16 or 32 bits or of a profile, in its space —; CMYK 1 − its ink; Lab L/100,
+// (a + 128)/255, (b + 128)/255; grey its lightness) — or, for `plate` none, the page's lightness as the screen shows it
+// (0.299 R + 0.587 G + 0.114 B).
 Plane page_plane(const core::Page& page, const core::Document* episode, std::optional<std::size_t> plate);
 
 // The spot channels printed over the picture of the page as it shows (`image`: "RGB" or "RGBA", the part `area` of a page
 // of `size` pixels): each spot's density v in its ink c (sRGB) and solidity s takes a colour p to
-// (1 − s·v)·p·(1 − v + v·c) + s·v·c (PhotoCraft's compose/multichannel.rs). `shown`: the spot channels printed (their
-// ids; none: every one).
+// p + (s·c + (1 − s)·p·c − p)·v — what Merge Spot Channel makes of the page (PhotoCraft's channel_cmds.rs:1149-1198; not
+// compose/multichannel.rs's (1 − s·v)·p·(1 − v + v·c) + s·v·c, a multichannel document's, which differs where 0 < s and
+// v < 1). `shown`: the spot channels printed (their ids; none: every one).
 void print_spots(Image& image, const core::Page& page, const Box& area, Size size, const std::optional<std::vector<std::string>>& shown);
 
 // The channel panel's view of the page (RenderOptions::planes, overlays, spots) laid on what was drawn: the colour planes
@@ -92,9 +94,10 @@ void finish(RenderResult& result, const core::Page& page, int dpi, const RenderO
 
 // --- the pixel ops' "channel" ---------------------------------------------------------------------------------------
 
-// What an op's "channel" names on its page: a channel's index (an alpha or spot channel, by its id or name), a colour
-// plate's (red, cyan, … — the page's), or the composite ("composite", or the page's one plate on a grey page): nothing to
-// do. core::OpError for anything else.
+// What an op's "channel" names on its page (core::channel_target): a channel's index (an alpha or spot channel, by its id
+// or name), a colour plate's (red, cyan, … — the page's). Nothing for the composite ("composite", or the page's one plate
+// on a grey page) and for a "channel" that is not this build's there (Python's way with the op: a value that names
+// nothing on the page ignored, filter_raster's levels, curve and brightness_contrast their own r, g, b).
 struct Target {
     std::optional<std::size_t> channel;
     std::optional<std::size_t> plate;

@@ -234,6 +234,51 @@ private slots:
         QVERIFY(studio.session->document().page(0).color && studio.session->document().page(0).color->space == core::InkSpace::Gray);
     }
 
+    // The window gives the pixel ops it sends — and the previews it shows — the target: levels on a CMYK page with the
+    // cyan plate targeted change the cyan alone (a CMYK page's plate is this build's "channel" there, Python having no
+    // such pages); a filter previewed with an alpha channel targeted shows the channel changed and the layer as it was, as
+    // the filter applied does.
+    void targetForLevelsAndPreviews() {
+        {
+            Studio studio;
+            QVERIFY(studio.window->apply_ops(Json::array({Json{{"op", "set_color_mode"}, {"page", 1}, {"mode", "cmyk"}, {"profile", "coated-cmyk"}}})));
+            const auto inks = [&] {
+                for (const auto& l : studio.page().layers) {
+                    if (l.id == "paint0000001") return core::decode_ink_raster(*l.ink_raster);
+                }
+                return core::InkPixels{};
+            };
+            const core::InkPixels was = inks();
+            studio.window->target_channel("cyan");
+            QCOMPARE(studio.window->channel_view().target, std::string("cyan"));
+            QVERIFY(studio.window->apply_ops(Json::array({Json{{"op", "filter_raster"}, {"page", 1}, {"id", "paint0000001"}, {"kind", "levels"},
+                                                                {"black", 0}, {"white", 128}, {"channel", "rgb"}}})));
+            const core::InkPixels now = inks();
+            QCOMPARE(now.pixel_count(), was.pixel_count());
+            bool cyan = false;
+            for (std::size_t i = 0; i < now.pixel_count(); i += 53) {
+                cyan = cyan || now.samples[i * 5] != was.samples[i * 5];
+                for (unsigned c = 1; c < 5; ++c) QCOMPARE(now.samples[i * 5 + c], was.samples[i * 5 + c]);
+            }
+            QVERIFY(cyan);
+        }
+        Studio studio;
+        QVERIFY(studio.window->apply_ops(Json::array({Json{{"op", "add_channel"}, {"page", 1}}})));
+        const std::string alpha = studio.page().channels[0].id;
+        studio.window->target_channel(alpha);
+        const std::string before = studio.pixels();
+        studio.window->preview_ops(Json::array({Json{{"op", "filter_raster"}, {"page", 1}, {"id", "paint0000001"}, {"kind", "brightness_contrast"},
+                                                     {"brightness", 60}, {"contrast", 0}}}));
+        const core::Page* shown = studio.window->canvas()->page();
+        QVERIFY(shown != nullptr);
+        for (const auto& l : shown->layers) {
+            if (l.id == "paint0000001") QCOMPARE(render::open_image(*l.raster_png).convert("RGBA").tobytes(), before);
+        }
+        QVERIFY(shown->channels.at(0).raster);  // (the channel brightened in the preview)
+        studio.window->preview_ops(std::nullopt);
+        QVERIFY(!studio.window->canvas()->page()->channels.at(0).raster);
+    }
+
     // The pages' small pictures follow their channels: a channel added, drawn on, its colour, opacity, solidity, kind or
     // what it marks changed gives the page another key (the cache's version raised for the pictures made before), and
     // deleted the key of the page without it; the other page's key stays.

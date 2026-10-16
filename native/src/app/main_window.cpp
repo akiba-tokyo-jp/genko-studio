@@ -558,7 +558,8 @@ void MainWindow::preview_ops(const std::optional<core::Json>& ops) {
     }
     try {
         const core::CommandBus bus(render::ops_registry());
-        auto result = bus.apply(*session_->snapshot(), *ops, core::Actor(session_->actor()));
+        // (channels@1: what is previewed is what is applied: the pixel ops on the channel targeted)
+        auto result = bus.apply(*session_->snapshot(), with_channel_target(*ops), core::Actor(session_->actor()));
         canvas_->set_page(std::make_shared<const core::Document>(std::move(result.doc)), static_cast<std::size_t>(page_index_));
     } catch (const core::Error&) {
         show_page();  // (a preview that cannot be made: the page as it is)
