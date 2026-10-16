@@ -565,7 +565,18 @@ void PageRenderer::dispatch() {
                     // (a CMYK page's plates are its own inks: drawn with them)
                     const bool cmyk_page = raw->color && raw->color->space == core::InkSpace::Cmyk;
                     const bool plates = proof && (proof->kind == render::proof::Kind::Plate || proof->kind == render::proof::Kind::CmyPlate);
-                    options.inks = cmyk_page && plates;
+                    // (the page's own colours — its profile, and its values where render_page gives them: an RGB page of a
+                    // profile's, a grey or CMYK page's inks — checked by the gamut warning and shown by the kinds that show
+                    // the page's numbers, as upstream reads its composite in its own profile)
+                    render::proof::Source source;
+                    if (raw->rgb && raw->rgb->icc) source.icc = raw->rgb->icc;
+                    if (raw->color && raw->color->space == core::InkSpace::Gray) source = render::proof::Source{raw->color->icc, true, false, nullptr};
+                    if (cmyk_page) source = render::proof::Source{raw->color->icc, false, true, nullptr};
+                    const bool numbers = proof && (proof->kind == render::proof::Kind::Srgb || proof->kind == render::proof::Kind::Monitor ||
+                                                   proof->kind == render::proof::Kind::LegacyMac);
+                    const bool values = source.icc && (gamut || numbers) && !core::anim::is_animation(*raw);
+                    options.inks = (cmyk_page && plates) || (values && raw->color);
+                    options.precise = values && !raw->color;
                     render::RenderResult drawn;
                     if (core::anim::is_animation(*raw)) {  // (the frame shown, with the frames around it faint)
                         options.at_frame = true;
@@ -582,17 +593,26 @@ void PageRenderer::dispatch() {
                     } else {
                         drawn = render::render_page(*raw, dpi, options, doc.get());
                     }
-                    // (per pixel: a tile as the page. The gamut checked on the colours drawn, before the proof)
+                    if (values) {
+                        if (drawn.precise && !raw->color) source.values = render::proof::values_of(*drawn.precise);
+                        else if (drawn.inks && raw->color) source.values = render::proof::values_of(*drawn.inks);
+                    }
+                    // (per pixel: a tile as the page. The gamut checked on the page's colours, before the proof: its values,
+                    // or the colours drawn)
                     std::vector<unsigned char> out_of_gamut;
                     std::size_t outside = 0;
-                    if (gamut) out_of_gamut = render::proof::Gamut::of(gamut->second)->mask(drawn.image, gamut->first.threshold, &outside);
+                    if (gamut) {
+                        const auto check = render::proof::Gamut::of(gamut->second, source);
+                        if (check->of_source() && source.values) {
+                            out_of_gamut = check->mask(*source.values, drawn.image, gamut->first.threshold, &outside);
+                        } else {
+                            out_of_gamut = render::proof::Gamut::of(gamut->second)->mask(drawn.image, gamut->first.threshold, &outside);
+                        }
+                    }
                     if (proof) {
                         if (cmyk_page && plates && drawn.inks) {
                             drawn.image = render::proof::page_plates(*drawn.inks, raw->color->icc, *proof);
                         } else if (!(cmyk_page && proof->kind == render::proof::Kind::Profile)) {  // (a CMYK page shows its inks already)
-                            render::proof::Source source;
-                            if (raw->rgb && raw->rgb->icc) source.icc = raw->rgb->icc;
-                            if (raw->color && raw->color->space == core::InkSpace::Gray) source = render::proof::Source{raw->color->icc, true};
                             drawn.image = render::proof::apply(drawn.image, *proof, source);
                         }
                     }

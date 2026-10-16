@@ -52,13 +52,30 @@ struct Setup {
     bool operator==(const Setup& other) const;
 };
 
-// The page's own numbers (Srgb, Monitor, LegacyMac read them): what the screen's sRGB came from — an RGB page's
-// profile (an RGB ICC), a grey page's (a grey ICC), or none (sRGB: the picture is its numbers).
+// The page's own numbers (Srgb, Monitor, LegacyMac show them; the gamut warning checks them): what the screen's sRGB
+// came from — an RGB page's profile (an RGB ICC), a grey page's (a grey ICC), a CMYK page's (its inks: the gamut check
+// alone reads them), or none (sRGB: the picture is its numbers).
 struct Source {
+    Source() = default;
+    Source(core::Bytes profile, bool grey, bool inks = false, std::shared_ptr<const std::vector<float>> own = nullptr)
+        : icc(std::move(profile)), gray(grey), cmyk(inks), values(std::move(own)) {}
+
     core::Bytes icc;
     bool gray = false;
-    bool operator==(const Source& other) const;
+    bool cmyk = false;
+    // The page's values where render_page gives them (an RGB page of a profile: RenderResult::precise; a grey or CMYK
+    // page: its inks), pixel by pixel as the picture's: channels() a pixel, 0..1 (CMYK: ink). None: worked back from the
+    // picture (through the profile: relative, black point compensated, as the page was shown).
+    std::shared_ptr<const std::vector<float>> values;
+
+    unsigned channels() const { return cmyk ? 4u : gray ? 1u : 3u; }
+    bool operator==(const Source& other) const;  // (its profile and kind)
 };
+
+// A Source's values from what render_page gives: a GKCR (RenderResult::precise: the colours, the alpha left out) or a
+// grey or CMYK page's inks (its colour channels).
+std::shared_ptr<const std::vector<float>> values_of(std::string_view gkcr);
+std::shared_ptr<const std::vector<float>> values_of(const core::InkPixels& inks);
 
 // The picture ("RGB" or "RGBA", sRGB; "RGBA" keeps its alpha) as the proof shows it. core::Error("value") when the
 // proof cannot be made (a plate of a profile that is not CMYK, a profile Little CMS cannot use).
@@ -74,25 +91,41 @@ std::array<float, 3> dichromat(std::array<float, 3> linear, bool protan);
 
 // 色域外警告 (upstream's GamutCheck): a colour is out of the proof profile's gamut when going to it and back to Lab
 // (relative colorimetric, no black point compensation, the device values clipped) moves it by more than the threshold
-// (CIE ΔE 1976). The ΔE is tabulated over sRGB on a 33³ grid and read between its points (trilinear).
+// (CIE ΔE 1976). The colours are the page's own (upstream's composite_profile: an RGB page's of its profile, a grey or
+// CMYK page's inks), or the screen's sRGB. The ΔE is tabulated over them — 33³ points for RGB, 256 grey, 17⁴ CMYK — and
+// read between its points as upstream's Clut does (tetrahedra; CMYK: two of them, along the cyan).
 inline constexpr double kDefaultThreshold = 4.0;
 
 class Gamut {
 public:
     // The check against the setup's proof profile (its ICC; none: the export profile, or the plain conversion's round
-    // trip). Made once for each profile (kept). core::Error("value") when the profile cannot be used.
-    static std::shared_ptr<const Gamut> of(const Setup& setup);
+    // trip) of the source's colours (its profile; none: sRGB. The plain conversion checks sRGB alone). Made once for each
+    // profile and source (kept; the export profile read once for its file as it is: path, size, time).
+    // core::Error("value") when a profile cannot be used.
+    static std::shared_ptr<const Gamut> of(const Setup& setup, const Source& source = {});
 
-    // ΔE76 between an sRGB colour (0..255) and its round trip.
+    // How many values a colour it checks has (3: RGB, 1: grey, 4: CMYK), and whether they are the source's (false: the
+    // screen's sRGB, the picture's).
+    unsigned inputs() const { return inputs_; }
+    bool of_source() const { return of_source_; }
+    // ΔE76 between an sRGB colour (0..255) and its round trip (a check of sRGB's colours).
     float delta_e(int r, int g, int b) const;
+    // ... between a colour (inputs() values, 0..1; CMYK: ink) and its round trip.
+    float delta_e(const float* values) const;
     // Each pixel of the picture ("RGB" or "RGBA"; a transparent pixel never is): 255 out of gamut, else 0 — one byte a
-    // pixel, row by row — and how many are.
+    // pixel, row by row — and how many are. (A check of sRGB's colours.)
     std::vector<unsigned char> mask(const Image& image, double threshold, std::size_t* out = nullptr) const;
+    // The same of the source's values (inputs() a pixel); `image` (the picture they are shown as) tells the transparent ones.
+    std::vector<unsigned char> mask(const std::vector<float>& values, const Image& image, double threshold, std::size_t* out = nullptr) const;
 
     static constexpr int kGrid = 33;
 
 private:
-    std::vector<float> grid_;  // (r fastest)
+    unsigned inputs_ = 3;
+    bool of_source_ = false;
+    int points_ = kGrid;             // (along each input)
+    std::vector<std::size_t> stride_;  // (the first input slowest, as an ICC table)
+    std::vector<float> grid_;
     friend struct GamutMaker;
 };
 

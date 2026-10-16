@@ -31599,7 +31599,8 @@
         "native/src/render/proof.cpp",
         "native/src/app/main_window_color.cpp",
         "native/src/app/tiles.cpp",
-        "native/tests/gui/test_gui_color.cpp"
+        "native/tests/gui/test_gui_color.cpp",
+        "native/tests/unit/test_proof.cpp"
       ],
       "pc0": {
         "date": "2026-10-16",

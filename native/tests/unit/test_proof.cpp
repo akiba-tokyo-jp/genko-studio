@@ -14,7 +14,9 @@
 
 #include <array>
 #include <cmath>
+#include <chrono>
 #include <filesystem>
+#include <fstream>
 #include <string>
 #include <vector>
 
@@ -210,7 +212,8 @@ private slots:
     }
 
     // 書き出しの CMYK: render/colour::proof itself (Python's 「CMYK で見る」), byte for byte, with and without the profile
-    // chosen for export; through a CMYK profile's bytes (作業用 CMYK) Little CMS's soft proof, near the same round trip.
+    // chosen for export; through a CMYK profile's bytes (作業用 CMYK) the soft proof, near the same round trip but in the
+    // dark end (shown with black point compensation, as upstream's).
     void theExportProofIsPythons() {
         const render::Image picture = spread();
         proof::Setup setup;
@@ -222,11 +225,18 @@ private slots:
         const std::string soft = proof::apply(picture, working).tobytes();
         const std::string trip = render::colour::proof(picture, kIcc).tobytes();
         QCOMPARE(soft.size(), trip.size());
-        // (the round trip keeps the inks in 8 bits and goes through two optimized transforms; the soft proof is one
-        // transform in floats: dark and saturated colours out of the gamut differ by a few levels — 8 here)
+        // (the round trip keeps the inks in 8 bits and comes back without black point compensation, as Python's; the soft
+        // proof comes back with it, as upstream's Transform::proof: away from the dark end they differ by a few levels — 8
+        // here — and in it the soft proof is deeper, the ink's black shown as the screen's)
         int worst = 0;
-        for (std::size_t i = 0; i < soft.size(); ++i)
-            worst = std::max(worst, std::abs(int(static_cast<unsigned char>(soft[i])) - int(static_cast<unsigned char>(trip[i]))));
+        for (std::size_t i = 0; i < soft.size(); i += 3) {
+            const auto u = [](const std::string& b, std::size_t k) { return int(static_cast<unsigned char>(b[k])); };
+            const bool dark = std::min({u(trip, i), u(trip, i + 1), u(trip, i + 2)}) < 96;
+            for (std::size_t c = i; c < i + 3; ++c) {
+                if (!dark) worst = std::max(worst, std::abs(u(soft, c) - u(trip, c)));
+                else QVERIFY2(u(soft, c) <= u(trip, c) + 10, qPrintable(QStringLiteral("%1: %2 %3").arg(c).arg(u(soft, c)).arg(u(trip, c))));
+            }
+        }
         QVERIFY2(worst <= 10, qPrintable(QString::number(worst)));
         // a saturated green comes back duller; the paper white stays white (relative)
         const render::Image shown = proof::apply(pixels({{0, 255, 0}, {255, 255, 255}}), working);
@@ -315,6 +325,125 @@ private slots:
         QCOMPARE(none, std::size_t(0));
         const auto plain = proof::Gamut::of(proof::Setup{});
         for (const int v : {0, 128, 255}) QVERIFY(plain->delta_e(v, v, v) < proof::kDefaultThreshold);
+    }
+
+    // 色の校正 through a profile (作業用 CMYK, カスタム…) is shown on the screen relative with black point compensation, as
+    // upstream's Transform::proof (the ink's black is the screen's black, the dark greys kept apart); absolute without it
+    // when the paper is simulated (the paper's white and the ink's black as they print). 書き出しの CMYK stays Python's.
+    void theSoftProofShowsTheInksBlackAsTheScreens() {
+        proof::Setup working;
+        working.icc = coated();
+        const render::Image shown = proof::apply(pixels({{0, 0, 0}, {20, 20, 20}, {255, 255, 255}}), working);
+        const auto black = at(shown, 0), dark = at(shown, 1), white = at(shown, 2);
+        QVERIFY2(black[0] <= 3 && black[1] <= 3 && black[2] <= 3, qPrintable(QStringLiteral("%1 %2 %3").arg(black[0]).arg(black[1]).arg(black[2])));
+        QVERIFY(dark[0] > black[0] + 3 && dark[0] < 60);
+        QVERIFY(white[0] >= 250 && white[1] >= 250 && white[2] >= 250);
+        working.simulate_paper = true;
+        const render::Image paper = proof::apply(pixels({{0, 0, 0}, {255, 255, 255}}), working);
+        QVERIFY(at(paper, 0)[0] > 10 && at(paper, 0)[1] > 10);
+        QVERIFY(at(paper, 1) != (std::array<int, 3>{255, 255, 255}));
+    }
+
+    // The gamut check's ΔE is read between its grid points in tetrahedra (upstream's Clut, as Little CMS reads a table):
+    // along the greys, a straight line between the two points of the cell (trilinear would bend it through the cell's
+    // other corners).
+    void theGamutIsReadInTetrahedra() {
+        proof::Setup setup;
+        setup.icc = coated();
+        const auto check = proof::Gamut::of(setup);
+        // (the cell from black: the 8-bit greys 1, 3 and 6 are at 1/8, 3/8 and 6/8 of its way… 255/32 a cell)
+        const auto t = [](int v) { return v / (255.0 / 32.0); };
+        const double d1 = check->delta_e(1, 1, 1), d3 = check->delta_e(3, 3, 3), d6 = check->delta_e(6, 6, 6);
+        const double slope_a = (d3 - d1) / (t(3) - t(1)), slope_b = (d6 - d3) / (t(6) - t(3));
+        QVERIFY2(std::abs(slope_a - slope_b) < 1e-3 * std::max(1.0, std::abs(slope_a)), qPrintable(QStringLiteral("%1 %2").arg(slope_a).arg(slope_b)));
+    }
+
+    // The gamut of the page's own colours (upstream's composite_profile): a Display P3 page's green is out of an sRGB
+    // proof's gamut, its grey in; a grey page's greys (one value) in coated-cmyk's; a CMYK page's inks in the gamut of its
+    // own profile. Read in tetrahedra between the grid's points (float), as the 8-bit reading of sRGB's colours.
+    void theGamutOfThePagesOwnColours() {
+        proof::Setup srgb;
+        srgb.icc = std::make_shared<const std::string>(render::colour::srgb_icc());
+        const auto p3 = proof::Gamut::of(srgb, proof::Source{core::builtin_profile("display-p3")->bytes, false});
+        QVERIFY(p3->of_source() && p3->inputs() == 3);
+        const std::array<float, 3> green{0, 1, 0}, grey{0.5f, 0.5f, 0.5f};
+        QVERIFY(p3->delta_e(green.data()) > proof::kDefaultThreshold);
+        QVERIFY(p3->delta_e(grey.data()) < proof::kDefaultThreshold);
+        QVERIFY(proof::Gamut::of(srgb)->delta_e(0, 255, 0) < proof::kDefaultThreshold);  // (sRGB's own green: in)
+        std::size_t out = 0;
+        const std::vector<float> values{0, 1, 0, 0.5f, 0.5f, 0.5f};
+        QCOMPARE(p3->mask(values, pixels({{0, 255, 0}, {128, 128, 128}}), proof::kDefaultThreshold, &out), (std::vector<unsigned char>{255, 0}));
+        QCOMPARE(out, std::size_t(1));
+        proof::Setup working;
+        working.icc = coated();
+        const auto gray = proof::Gamut::of(working, proof::Source{core::builtin_profile("sgray")->bytes, true});
+        QVERIFY(gray->of_source() && gray->inputs() == 1);
+        for (const float v : {0.1f, 0.33f, 0.5f, 0.77f, 1.0f}) QVERIFY2(gray->delta_e(&v) < proof::kDefaultThreshold, qPrintable(QString::number(v)));
+        const auto cmyk = proof::Gamut::of(working, proof::Source{coated(), false, true});
+        QVERIFY(cmyk->of_source() && cmyk->inputs() == 4);
+        for (const std::array<float, 4>& ink : {std::array<float, 4>{1, 0, 0, 0}, std::array<float, 4>{0, 1, 1, 0}, std::array<float, 4>{0.3f, 0.6f, 0.1f, 0.2f}})
+            QVERIFY(cmyk->delta_e(ink.data()) < proof::kDefaultThreshold);
+        // (the plain conversion checks the screen's sRGB alone)
+        QVERIFY(!proof::Gamut::of(proof::Setup{}, proof::Source{core::builtin_profile("display-p3")->bytes, false})->of_source());
+        // in tetrahedra: inside a cell, with rx ≥ ry ≥ rz, v000 + (v100 − v000)·rx + (v110 − v100)·ry + (v111 − v110)·rz
+        const auto check = proof::Gamut::of(working);
+        const float step = 1.0f / (proof::Gamut::kGrid - 1);
+        const auto node = [&](int x, int y, int z) {
+            const std::array<float, 3> v{(28 + x) * step, (5 + y) * step, (2 + z) * step};
+            return check->delta_e(v.data());
+        };
+        const float rx = 0.7f, ry = 0.4f, rz = 0.15f;
+        const std::array<float, 3> inside{(28 + rx) * step, (5 + ry) * step, (2 + rz) * step};
+        const float want = node(0, 0, 0) + (node(1, 0, 0) - node(0, 0, 0)) * rx + (node(1, 1, 0) - node(1, 0, 0)) * ry + (node(1, 1, 1) - node(1, 1, 0)) * rz;
+        QVERIFY2(std::abs(check->delta_e(inside.data()) - want) < 1e-3f, qPrintable(QStringLiteral("%1 %2").arg(check->delta_e(inside.data())).arg(want)));
+        for (const std::array<int, 3>& c : {std::array<int, 3>{0, 255, 0}, std::array<int, 3>{17, 200, 99}, std::array<int, 3>{250, 3, 128}}) {
+            const std::array<float, 3> f{c[0] / 255.0f, c[1] / 255.0f, c[2] / 255.0f};
+            QVERIFY(std::abs(check->delta_e(c[0], c[1], c[2]) - check->delta_e(f.data())) < 1e-3f);
+        }
+    }
+
+    // インターネット標準の RGB, モニターの RGB, 旧 Macintosh の RGB show the page's own values where they are given (not
+    // worked back from the screen's sRGB, which cut a Display P3 green).
+    void theNumbersAreThePagesOwn() {
+        auto values = std::make_shared<const std::vector<float>>(std::vector<float>{0, 1, 0, 0.5f, 0.5f, 0.5f});
+        const proof::Source p3{core::builtin_profile("display-p3")->bytes, false, false, values};
+        for (const proof::Kind kind : {proof::Kind::Srgb, proof::Kind::Monitor}) {
+            proof::Setup setup;
+            setup.kind = kind;
+            const render::Image shown = proof::apply(pixels({{0, 255, 0}, {128, 128, 128}}), setup, p3);
+            QCOMPARE(at(shown, 0), (std::array<int, 3>{0, 255, 0}));
+            QCOMPARE(at(shown, 1), (std::array<int, 3>{128, 128, 128}));
+        }
+        auto grey = std::make_shared<const std::vector<float>>(std::vector<float>{0.25f});
+        proof::Setup setup;
+        setup.kind = proof::Kind::Srgb;
+        QCOMPARE(at(proof::apply(pixels({{90, 90, 90}}), setup, proof::Source{core::builtin_profile("gray-gamma-2.2")->bytes, true, false, grey}), 0),
+                 (std::array<int, 3>{64, 64, 64}));
+    }
+
+    // The export profile (書き出しの CMYK) is read once for its file as it is — its path, size and time — not for each
+    // tile: its check kept while the file is the same (here even when it can no longer be read), made again when it changes.
+    void theExportProfileIsReadOncePerFile() {
+        QTemporaryDir tmp;
+        const fs::path icc = fs::path(tmp.path().toStdString()) / "export.icc";
+        fs::copy_file(kIcc, icc);
+        proof::Setup setup;
+        setup.export_icc = icc;
+        const auto first = proof::Gamut::of(setup);
+        fs::permissions(icc, fs::perms::none);
+        const auto again = proof::Gamut::of(setup);
+        fs::permissions(icc, fs::perms::owner_read | fs::perms::owner_write);
+        QCOMPARE(again.get(), first.get());
+        QVERIFY(first->delta_e(0, 255, 0) > proof::kDefaultThreshold);  // (coated-cmyk's check, not the plain conversion's)
+        // another profile in its place (Display P3, which holds sRGB's green): checked again
+        {
+            std::ofstream out(icc, std::ios::binary | std::ios::trunc);
+            out << *core::builtin_profile("display-p3")->bytes;
+        }
+        fs::last_write_time(icc, fs::last_write_time(icc) + std::chrono::seconds(5));
+        const auto other = proof::Gamut::of(setup);
+        QVERIFY(other.get() != first.get());
+        QVERIFY(other->delta_e(0, 255, 0) < proof::kDefaultThreshold);
     }
 
     // A picture's own profile, from each kind of file, and what it does: an sRGB one changes nothing, a Display P3 one

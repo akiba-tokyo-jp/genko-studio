@@ -730,6 +730,52 @@ private slots:
         window.hide();
     }
 
+    // A Display P3 page is checked and shown by its own values, not by the screen's sRGB they were cut to (upstream's
+    // composite_profile): its P3 green is out of an sRGB proof's gamut (as sRGB it is sRGB's own green, in), and
+    // インターネット標準の RGB shows its numbers (0, 1, 0) as sRGB's green.
+    void aProfiledPageIsCheckedByItsOwnValues() {
+        (void)gui_test::config_folder();QTemporaryDir tmp;
+        for (const char* key : {"color/workingCmyk","view/gamut_color","view/gamut_opacity"}) app::settings()->remove(QString::fromLatin1(key));
+        auto doc=coloured_book("P3 の色域");
+        doc=core::CommandBus(render::ops_registry()).apply(doc,Json::array({Json{{"op","put_color_raster"},{"page",1},{"width",2},{"height",1},
+            {"precision","u16"},{"pixels",Json::array({0,65535,0,65535,32768,32768,32768,65535})}},Json{{"op","assign_profile"},{"page",1},{"profile","display-p3"}}}),
+            core::Actor("human:tester")).doc;
+        QVERIFY(doc.page(0).rgb);
+        const auto path=gui_test::path_of(tmp.path()+"/book");gui_test::write_book(path,doc);
+        auto session=app::Session::open(path,gui_test::quick(gui_test::path_of(tmp.path()+"/recovery")));
+        app::MainWindow window(session);window.resize(900,700);window.show();QVERIFY(QTest::qWaitForWindowExposed(&window));
+        gui_test::Answers answers;
+        answers.responder->exec=[](QDialog* d) {
+            if (d->objectName()!=QStringLiteral("proof_custom_dialog")) return 0;
+            auto* profile=d->findChild<QComboBox*>(QStringLiteral("proof_profile"));
+            profile->setCurrentIndex(profile->findData(QStringLiteral("srgb")));
+            return static_cast<int>(QDialog::Accepted);
+        };
+        window.action("act_proof_custom")->trigger();
+        window.action("act_cmyk_proof")->trigger();  // (the proof off: the gamut warning alone)
+        QVERIFY(!window.canvas()->renderer().cmyk_proof());
+        window.action("act_gamut_warning")->trigger();
+        QVERIFY(window.canvas()->wait_rendered(10000));
+        QTRY_VERIFY_WITH_TIMEOUT(window.canvas()->renderer().gamut_count().second>0,10000);
+        const int dpi=window.canvas()->renderer().shown_dpi();QVERIFY(dpi>0);
+        const QImage plain=window.canvas()->renderer().compose(dpi);
+        const QPoint green(plain.width()/8,plain.height()/2), grey(plain.width()*7/8,plain.height()/2);
+        const QImage marked=window.canvas()->renderer().compose_shown(dpi);
+        QCOMPARE(marked.pixelColor(green),QColor(128,128,128));
+        QCOMPARE(marked.pixelColor(grey),plain.pixelColor(grey));
+        const auto [out,all]=window.canvas()->renderer().gamut_count();
+        QVERIFY2(out>0 && out<all,qPrintable(QStringLiteral("%1 of %2").arg(out).arg(all)));
+        window.action("act_gamut_warning")->trigger();
+        window.action("act_proof_srgb")->trigger();
+        QVERIFY(window.canvas()->renderer().cmyk_proof());
+        QVERIFY(window.canvas()->wait_rendered(10000));
+        const QImage shown=window.canvas()->renderer().compose(dpi);
+        QCOMPARE(shown.pixelColor(green),QColor(0,255,0));
+        const QColor g=shown.pixelColor(grey);
+        QVERIFY(std::abs(g.red()-128)<=1 && g.red()==g.green() && g.green()==g.blue());
+        window.hide();
+    }
+
     // 編集 → カラー設定…: kept on this computer (QSettings color/*), 初期設定に戻す; the book's own 文字のガンマ is an op
     // (set_text_gamma, undone as any) and the page is drawn with it as everywhere.
     void colorSettingsAreKeptAndTheBookGetsItsGamma() {

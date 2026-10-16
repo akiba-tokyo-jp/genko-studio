@@ -13,6 +13,7 @@
 #include <mutex>
 #include <utility>
 
+#include "core/color_raster.hpp"
 #include "core/error.hpp"
 #include "render/colour.hpp"
 
@@ -91,15 +92,25 @@ cmsUInt32Number format_of(cmsColorSpaceSignature space, bool floats) {
     }
 }
 
-// The picture's RGB bytes (3 a pixel) through an 8-bit transform to `out_bytes` a pixel.
-std::string through(const std::string& rgb, cmsHTRANSFORM transform, std::size_t pixels, std::size_t out_bytes) {
+// The picture's bytes (`in_bytes` a pixel: RGB 3) through a transform to `out_bytes` a pixel.
+std::string through(const std::string& rgb, cmsHTRANSFORM transform, std::size_t pixels, std::size_t out_bytes, std::size_t in_bytes = 3) {
     std::string out(pixels * out_bytes, '\0');
     constexpr std::size_t kRun = 1 << 16;
     for (std::size_t at = 0; at < pixels; at += kRun) {
         const std::size_t n = std::min(kRun, pixels - at);
-        cmsDoTransform(transform, rgb.data() + at * 3, out.data() + at * out_bytes, static_cast<cmsUInt32Number>(n));
+        cmsDoTransform(transform, rgb.data() + at * in_bytes, out.data() + at * out_bytes, static_cast<cmsUInt32Number>(n));
     }
     return out;
+}
+
+// 16 bits a value of the profile's space (its device values between the two steps of a soft proof: kept within 0..1).
+cmsUInt32Number format16_of(cmsColorSpaceSignature space) {
+    switch (space) {
+        case cmsSigCmykData: return TYPE_CMYK_16;
+        case cmsSigGrayData: return TYPE_GRAY_16;
+        case cmsSigRgbData: return TYPE_RGB_16;
+        default: refuse("the proof profile is not RGB, CMYK or grey");
+    }
 }
 
 float srgb_decode(float v) { return v <= 0.04045f ? v / 12.92f : std::pow((v + 0.055f) / 1.055f, 2.4f); }
@@ -134,10 +145,19 @@ unsigned char encode8(float linear) {
     return encode_table()[static_cast<std::size_t>(v * 65535.0f + 0.5f)];
 }
 
-// The page's numbers from the screen's sRGB (back through the source profile: relative, black point compensated, as
-// the page was shown), 3 bytes a pixel.
+// The page's numbers, 3 bytes a pixel: its own values where they are given, else from the screen's sRGB (back through the
+// source profile: relative, black point compensated, as the page was shown).
 std::string numbers(const std::string& rgb, std::size_t pixels, const Source& source) {
-    if (!source.icc) return rgb;
+    if (source.values && !source.cmyk && source.values->size() == pixels * source.channels()) {
+        const std::vector<float>& v = *source.values;
+        std::string out(pixels * 3, '\0');
+        const auto byte = [](float x) { return static_cast<char>(static_cast<unsigned char>(std::lround(std::clamp(x, 0.0f, 1.0f) * 255.0f))); };
+        for (std::size_t i = 0; i < pixels; ++i) {
+            for (unsigned c = 0; c < 3; ++c) out[i * 3 + c] = byte(source.gray ? v[i] : v[i * 3 + c]);
+        }
+        return out;
+    }
+    if (!source.icc || source.cmyk) return rgb;
     const Profile page = open(source.icc);
     const cmsColorSpaceSignature space = cmsGetColorSpace(page.handle);
     if (space != (source.gray ? cmsSigGrayData : cmsSigRgbData)) refuse("the page's profile is not of its mode");
@@ -234,7 +254,27 @@ bool Setup::operator==(const Setup& other) const {
            intent == other.intent && bpc == other.bpc && simulate_paper == other.simulate_paper;
 }
 
-bool Source::operator==(const Source& other) const { return gray == other.gray && same_bytes(icc, other.icc); }
+bool Source::operator==(const Source& other) const { return gray == other.gray && cmyk == other.cmyk && same_bytes(icc, other.icc); }
+
+std::shared_ptr<const std::vector<float>> values_of(std::string_view gkcr) {
+    const core::ColorRasterView view(gkcr);
+    const std::size_t pixels = static_cast<std::size_t>(view.width()) * view.height();
+    auto out = std::make_shared<std::vector<float>>(pixels * 3);
+    for (std::size_t i = 0; i < pixels; ++i) {
+        const auto p = view.pixel(i);
+        for (unsigned c = 0; c < 3; ++c) (*out)[i * 3 + c] = static_cast<float>(p[c]);
+    }
+    return out;
+}
+
+std::shared_ptr<const std::vector<float>> values_of(const core::InkPixels& inks) {
+    const std::size_t pixels = inks.pixel_count();
+    const unsigned colours = inks.colours();
+    auto out = std::make_shared<std::vector<float>>(pixels * colours);
+    for (std::size_t i = 0; i < pixels; ++i)
+        for (unsigned c = 0; c < colours; ++c) (*out)[i * colours + c] = static_cast<float>(inks.value(i, c));
+    return out;
+}
 
 std::array<float, 3> dichromat(std::array<float, 3> linear, bool protan) {
     // (the paper's matrices, kept verbatim: linear RGB → LMS, and back)
@@ -281,16 +321,27 @@ Image apply(const Image& image, const Setup& setup, const Source& source) {
         std::string shown;
         switch (setup.kind) {
             case Kind::Profile: {
+                // (upstream's Transform::proof: the screen's sRGB to the proof profile with the setup's intent and black
+                // point compensation, kept within the device's values, then to the screen relative with black point
+                // compensation — or absolute without it, the paper simulated. Little CMS's own soft proof never compensates
+                // the second step)
                 const Profile proof = open(setup.icc);
                 const cmsColorSpaceSignature space = cmsGetColorSpace(proof.handle);
-                (void)format_of(space, false);  // (refused when not RGB, CMYK or grey)
-                const TransformPtr t = kept("proof:" + bytes_key(setup.icc) + ":" + setup.intent + (setup.bpc ? ":bpc" : "") + (setup.simulate_paper ? ":paper" : ""), [&] {
+                const cmsUInt32Number device = format16_of(space);
+                const std::size_t device_bytes = 2 * static_cast<std::size_t>(space == cmsSigCmykData ? 4 : space == cmsSigGrayData ? 1 : 3);
+                const std::string key = bytes_key(setup.icc);
+                const TransformPtr to = kept("proof-to:" + key + ":" + setup.intent + (setup.bpc ? ":bpc" : ""), [&] {
                     const Profile srgb(cmsCreate_sRGBProfile());
-                    return cmsCreateProofingTransform(srgb.handle, TYPE_RGB_8, srgb.handle, TYPE_RGB_8, proof.handle, intent_number(setup.intent),
-                                                      setup.simulate_paper ? INTENT_ABSOLUTE_COLORIMETRIC : INTENT_RELATIVE_COLORIMETRIC,
-                                                      cmsFLAGS_SOFTPROOFING | (setup.bpc ? cmsFLAGS_BLACKPOINTCOMPENSATION : 0) | kNoCache);
+                    return cmsCreateTransform(srgb.handle, TYPE_RGB_8, proof.handle, device, intent_number(setup.intent),
+                                              (setup.bpc ? cmsFLAGS_BLACKPOINTCOMPENSATION : 0) | kNoCache);
                 });
-                shown = through(bytes, t->handle, pixels, 3);
+                const TransformPtr back = kept("proof-back:" + key + (setup.simulate_paper ? ":paper" : ""), [&] {
+                    const Profile srgb(cmsCreate_sRGBProfile());
+                    return cmsCreateTransform(proof.handle, device, srgb.handle, TYPE_RGB_8,
+                                              setup.simulate_paper ? INTENT_ABSOLUTE_COLORIMETRIC : INTENT_RELATIVE_COLORIMETRIC,
+                                              (setup.simulate_paper ? 0 : cmsFLAGS_BLACKPOINTCOMPENSATION) | kNoCache);
+                });
+                shown = through(through(bytes, to->handle, pixels, device_bytes), back->handle, pixels, 3, device_bytes);
                 break;
             }
             case Kind::Plate:
@@ -352,30 +403,76 @@ Image page_plates(const core::InkPixels& inks, const core::Bytes& page_icc, cons
 // --- 色域外警告 ---------------------------------------------------------------------------------------------------------
 
 struct GamutMaker {
-    static std::shared_ptr<Gamut> make(std::vector<float> grid) {
+    static std::shared_ptr<Gamut> make(unsigned inputs, bool of_source, std::vector<float> grid) {
         auto out = std::make_shared<Gamut>();
+        out->inputs_ = inputs;
+        out->of_source_ = of_source;
+        out->points_ = points_for(inputs);
+        out->stride_.assign(inputs, 1);
+        for (unsigned d = inputs - 1; d > 0; --d) out->stride_[d - 1] = out->stride_[d] * static_cast<std::size_t>(out->points_);
         out->grid_ = std::move(grid);
         return out;
     }
+    // (upstream's GamutCheck: 256 points for one value, 33³ for three, 17⁴ for four)
+    static int points_for(unsigned inputs) { return inputs == 1 ? 256 : inputs == 4 ? 17 : Gamut::kGrid; }
 };
 
 namespace {
 
-constexpr int kG = Gamut::kGrid;
-constexpr std::size_t kPoints = static_cast<std::size_t>(kG) * kG * kG;
+// The grid's points (`inputs` values each, the first slowest), 0..1.
+std::vector<float> grid_points(unsigned inputs) {
+    const auto n = static_cast<std::size_t>(GamutMaker::points_for(inputs));
+    std::size_t total = 1;
+    for (unsigned d = 0; d < inputs; ++d) total *= n;
+    std::vector<float> out(total * inputs);
+    for (std::size_t node = 0; node < total; ++node) {
+        std::size_t rest = node;
+        for (unsigned d = inputs; d-- > 0;) {
+            out[node * inputs + d] = static_cast<float>(rest % n) / static_cast<float>(n - 1);
+            rest /= n;
+        }
+    }
+    return out;
+}
 
-// The grid's sRGB points (r fastest), 0..1.
-std::vector<float> grid_points() {
-    std::vector<float> rgb(kPoints * 3);
-    for (int b = 0; b < kG; ++b)
-        for (int g = 0; g < kG; ++g)
-            for (int r = 0; r < kG; ++r) {
-                const std::size_t i = static_cast<std::size_t>(r + g * kG + b * kG * kG) * 3;
-                rgb[i] = static_cast<float>(r) / (kG - 1);
-                rgb[i + 1] = static_cast<float>(g) / (kG - 1);
-                rgb[i + 2] = static_cast<float>(b) / (kG - 1);
-            }
-    return rgb;
+cmsUInt32Number float_format(unsigned inputs) { return inputs == 1 ? TYPE_GRAY_FLT : inputs == 4 ? TYPE_CMYK_FLT : TYPE_RGB_FLT; }
+
+std::vector<float> delta_es(const std::vector<float>& a, const std::vector<float>& b) {
+    std::vector<float> out(a.size() / 3);
+    for (std::size_t i = 0; i < out.size(); ++i) {
+        const double dl = a[i * 3] - b[i * 3], da = a[i * 3 + 1] - b[i * 3 + 1], db = a[i * 3 + 2] - b[i * 3 + 2];
+        out[i] = static_cast<float>(std::sqrt(dl * dl + da * da + db * db));
+    }
+    return out;
+}
+
+// The source's colours (`inputs` values each, 0..1; its profile, none: sRGB) to Lab, and through an ICC proof profile:
+// the source to the profile (relative, no black point compensation), clipped, to Lab — their ΔE76.
+std::vector<float> gamut_grid(const core::Bytes& icc, const core::Bytes& source_icc, unsigned inputs) {
+    const Profile proof = open(icc);
+    const cmsColorSpaceSignature space = cmsGetColorSpace(proof.handle);
+    const cmsUInt32Number format = format_of(space, true);
+    const unsigned channels = space == cmsSigCmykData ? 4 : space == cmsSigGrayData ? 1 : 3;
+    const float most = space == cmsSigCmykData ? 100.0f : 1.0f;  // (Little CMS's float CMYK is in %)
+    cmsHPROFILE from = source_icc ? cmsOpenProfileFromMem(source_icc->data(), static_cast<cmsUInt32Number>(source_icc->size())) : cmsCreate_sRGBProfile();
+    if (from == nullptr) refuse("the page's profile cannot be read");
+    const Profile source(from);
+    std::vector<float> points = grid_points(inputs);
+    if (inputs == 4)
+        for (float& v : points) v *= 100.0f;
+    const std::size_t count = points.size() / inputs;
+    const Profile lab(cmsCreateLab4Profile(nullptr));
+    const cmsUInt32Number in = float_format(inputs);
+    const Transform direct(cmsCreateTransform(source.handle, in, lab.handle, TYPE_Lab_FLT, INTENT_RELATIVE_COLORIMETRIC, kNoCache));
+    const Transform to(cmsCreateTransform(source.handle, in, proof.handle, format, INTENT_RELATIVE_COLORIMETRIC, kNoCache));
+    const Transform back(cmsCreateTransform(proof.handle, format, lab.handle, TYPE_Lab_FLT, INTENT_RELATIVE_COLORIMETRIC, kNoCache));
+    if (direct.handle == nullptr || to.handle == nullptr || back.handle == nullptr) refuse("the gamut check cannot be made with this profile");
+    std::vector<float> a(count * 3), device(count * channels), b(count * 3);
+    cmsDoTransform(direct.handle, points.data(), a.data(), static_cast<cmsUInt32Number>(count));
+    cmsDoTransform(to.handle, points.data(), device.data(), static_cast<cmsUInt32Number>(count));
+    for (float& v : device) v = std::clamp(v, 0.0f, most);
+    cmsDoTransform(back.handle, device.data(), b.data(), static_cast<cmsUInt32Number>(count));
+    return delta_es(a, b);
 }
 
 std::vector<float> lab_of(const std::vector<float>& rgb) {
@@ -388,44 +485,14 @@ std::vector<float> lab_of(const std::vector<float>& rgb) {
     return out;
 }
 
-std::vector<float> delta_es(const std::vector<float>& a, const std::vector<float>& b) {
-    std::vector<float> out(a.size() / 3);
-    for (std::size_t i = 0; i < out.size(); ++i) {
-        const double dl = a[i * 3] - b[i * 3], da = a[i * 3 + 1] - b[i * 3 + 1], db = a[i * 3 + 2] - b[i * 3 + 2];
-        out[i] = static_cast<float>(std::sqrt(dl * dl + da * da + db * db));
-    }
-    return out;
-}
-
-// Through an ICC proof profile: sRGB → the profile (relative, no black point compensation), clipped, → Lab.
-std::vector<float> gamut_grid(const core::Bytes& icc) {
-    const Profile proof = open(icc);
-    const cmsColorSpaceSignature space = cmsGetColorSpace(proof.handle);
-    const cmsUInt32Number format = format_of(space, true);
-    const unsigned channels = space == cmsSigCmykData ? 4 : space == cmsSigGrayData ? 1 : 3;
-    const float most = space == cmsSigCmykData ? 100.0f : 1.0f;  // (Little CMS's float CMYK is in %)
-    const std::vector<float> rgb = grid_points();
-    const Profile srgb(cmsCreate_sRGBProfile());
-    const Profile lab(cmsCreateLab4Profile(nullptr));
-    const Transform to(cmsCreateTransform(srgb.handle, TYPE_RGB_FLT, proof.handle, format, INTENT_RELATIVE_COLORIMETRIC, kNoCache));
-    const Transform back(cmsCreateTransform(proof.handle, format, lab.handle, TYPE_Lab_FLT, INTENT_RELATIVE_COLORIMETRIC, kNoCache));
-    if (to.handle == nullptr || back.handle == nullptr) refuse("the gamut check cannot be made with this profile");
-    std::vector<float> device(kPoints * channels);
-    cmsDoTransform(to.handle, rgb.data(), device.data(), static_cast<cmsUInt32Number>(kPoints));
-    for (float& v : device) v = std::clamp(v, 0.0f, most);
-    std::vector<float> via(kPoints * 3);
-    cmsDoTransform(back.handle, device.data(), via.data(), static_cast<cmsUInt32Number>(kPoints));
-    return delta_es(lab_of(rgb), via);
-}
-
-// Through Genko's plain conversion for print (no profile): render/colour::proof's round trip, in 8 bits.
+// Through Genko's plain conversion for print (no profile): render/colour::proof's round trip of sRGB, in 8 bits.
 std::vector<float> plain_grid() {
-    std::string bytes(kPoints * 3, '\0');
-    const std::vector<float> rgb = grid_points();
+    const std::vector<float> rgb = grid_points(3);
+    const std::size_t count = rgb.size() / 3;
+    std::string bytes(rgb.size(), '\0');
     for (std::size_t i = 0; i < bytes.size(); ++i) bytes[i] = static_cast<char>(static_cast<unsigned char>(std::lround(rgb[i] * 255.0f)));
-    const Size size{static_cast<int>(kPoints), 1};
-    const std::string proofed = colour::proof(Image::frombytes("RGB", size, bytes)).tobytes();
-    std::vector<float> a(kPoints * 3), b(kPoints * 3);
+    const std::string proofed = colour::proof(Image::frombytes("RGB", Size{static_cast<int>(count), 1}, bytes)).tobytes();
+    std::vector<float> a(rgb.size()), b(rgb.size());
     for (std::size_t i = 0; i < a.size(); ++i) {
         a[i] = static_cast<float>(static_cast<unsigned char>(bytes[i])) / 255.0f;
         b[i] = static_cast<float>(static_cast<unsigned char>(proofed[i])) / 255.0f;
@@ -440,10 +507,20 @@ core::Bytes read_file(const std::filesystem::path& path) {
     return bytes.empty() ? nullptr : std::make_shared<const std::string>(std::move(bytes));
 }
 
+// The export profile's file as it is (its path, size and time), without reading it; none when it is not there.
+std::optional<std::string> file_key(const std::filesystem::path& path) {
+    std::error_code ec;
+    const auto size = std::filesystem::file_size(path, ec);
+    if (ec) return std::nullopt;
+    const auto when = std::filesystem::last_write_time(path, ec);
+    if (ec) return std::nullopt;
+    return "file:" + path.string() + ":" + std::to_string(size) + ":" + std::to_string(when.time_since_epoch().count());
+}
+
 std::mutex gamut_lock;
 std::vector<std::pair<std::string, std::shared_ptr<const Gamut>>> gamuts;
 
-// Grid coordinates of the 8-bit values: the cell and the weight of its far side.
+// Grid coordinates of the 8-bit values on the 33-point grid: the cell and the weight of its far side.
 struct Axis {
     std::array<int, 256> cell{};
     std::array<float, 256> t{};
@@ -452,8 +529,8 @@ const Axis& axis() {
     static const Axis a = [] {
         Axis out;
         for (int v = 0; v < 256; ++v) {
-            const float x = static_cast<float>(v) / 255.0f * (kG - 1);
-            const int i = std::min(static_cast<int>(x), kG - 2);
+            const float x = static_cast<float>(v) / 255.0f * (Gamut::kGrid - 1);
+            const int i = std::min(static_cast<int>(x), Gamut::kGrid - 2);
             out.cell[static_cast<std::size_t>(v)] = i;
             out.t[static_cast<std::size_t>(v)] = x - static_cast<float>(i);
         }
@@ -462,18 +539,48 @@ const Axis& axis() {
     return a;
 }
 
+// Upstream's Clut::tetra: inside one cube of three dimensions (its corner at `base`, the strides along x, y, z), the
+// tetrahedron holding (rx, ry, rz) and the path through the cube's corners.
+float tetra(const std::vector<float>& d, std::size_t base, std::size_t sx, std::size_t sy, std::size_t sz, float rx, float ry, float rz) {
+    const std::size_t c100 = base + sx, c010 = base + sy, c001 = base + sz;
+    const std::size_t c110 = base + sx + sy, c101 = base + sx + sz, c011 = base + sy + sz, c111 = base + sx + sy + sz;
+    std::size_t p1 = 0, p2 = 0;
+    float w1 = 0, w2 = 0, w3 = 0;
+    if (rx >= ry) {
+        if (ry >= rz) p1 = c100, p2 = c110, w1 = rx, w2 = ry, w3 = rz;
+        else if (rx >= rz) p1 = c100, p2 = c101, w1 = rx, w2 = rz, w3 = ry;
+        else p1 = c001, p2 = c101, w1 = rz, w2 = rx, w3 = ry;
+    } else if (rx >= rz) {
+        p1 = c010, p2 = c110, w1 = ry, w2 = rx, w3 = rz;
+    } else if (ry >= rz) {
+        p1 = c010, p2 = c011, w1 = ry, w2 = rz, w3 = rx;
+    } else {
+        p1 = c001, p2 = c011, w1 = rz, w2 = ry, w3 = rx;
+    }
+    const float v0 = d[base], v1 = d[p1], v2 = d[p2], v3 = d[c111];
+    return v0 + (v1 - v0) * w1 + (v2 - v1) * w2 + (v3 - v2) * w3;
+}
+
 }  // namespace
 
-std::shared_ptr<const Gamut> Gamut::of(const Setup& setup) {
-    core::Bytes icc = setup.icc;
-    if (!icc && setup.export_icc) icc = read_file(*setup.export_icc);
-    const std::string key = icc ? bytes_key(icc) : std::string("plain");
+std::shared_ptr<const Gamut> Gamut::of(const Setup& setup, const Source& source) {
+    // (the proof profile: its bytes, or the export profile's file — read only when its check is made)
+    std::optional<std::string> proof_key;
+    if (setup.icc) proof_key = bytes_key(setup.icc);
+    else if (setup.export_icc) proof_key = file_key(*setup.export_icc);
+    // (the plain conversion checks sRGB alone: the screen's colours)
+    const bool of_source = proof_key && source.icc;
+    const unsigned inputs = of_source ? source.channels() : 3;
+    const std::string key = (proof_key ? *proof_key : std::string("plain")) + "|" +
+                            (of_source ? bytes_key(source.icc) + ":" + std::to_string(inputs) : std::string("srgb"));
     {
         const std::lock_guard<std::mutex> held(gamut_lock);
         for (const auto& [k, g] : gamuts)
             if (k == key) return g;
     }
-    std::shared_ptr<const Gamut> made = GamutMaker::make(icc ? gamut_grid(icc) : plain_grid());
+    const core::Bytes icc = setup.icc ? setup.icc : proof_key ? read_file(*setup.export_icc) : nullptr;
+    std::vector<float> grid = icc ? gamut_grid(icc, of_source ? source.icc : nullptr, inputs) : plain_grid();
+    std::shared_ptr<const Gamut> made = GamutMaker::make(icc ? inputs : 3, icc && of_source, std::move(grid));
     const std::lock_guard<std::mutex> held(gamut_lock);
     if (gamuts.size() >= 8) gamuts.erase(gamuts.begin());
     gamuts.emplace_back(key, made);
@@ -481,16 +588,35 @@ std::shared_ptr<const Gamut> Gamut::of(const Setup& setup) {
 }
 
 float Gamut::delta_e(int r, int g, int b) const {
+    if (inputs_ != 3) {
+        const std::array<float, 3> v{static_cast<float>(r) / 255.0f, static_cast<float>(g) / 255.0f, static_cast<float>(b) / 255.0f};
+        return delta_e(v.data());
+    }
     const Axis& a = axis();
-    const auto at = [&](int x, int y, int z) { return grid_[static_cast<std::size_t>(x + y * kG + z * kG * kG)]; };
-    const int x = a.cell[static_cast<std::size_t>(std::clamp(r, 0, 255))], y = a.cell[static_cast<std::size_t>(std::clamp(g, 0, 255))],
-              z = a.cell[static_cast<std::size_t>(std::clamp(b, 0, 255))];
-    const float tx = a.t[static_cast<std::size_t>(std::clamp(r, 0, 255))], ty = a.t[static_cast<std::size_t>(std::clamp(g, 0, 255))],
-                tz = a.t[static_cast<std::size_t>(std::clamp(b, 0, 255))];
-    const auto lerp = [](float p, float q, float t) { return p + (q - p) * t; };
-    const float c00 = lerp(at(x, y, z), at(x + 1, y, z), tx), c10 = lerp(at(x, y + 1, z), at(x + 1, y + 1, z), tx);
-    const float c01 = lerp(at(x, y, z + 1), at(x + 1, y, z + 1), tx), c11 = lerp(at(x, y + 1, z + 1), at(x + 1, y + 1, z + 1), tx);
-    return lerp(lerp(c00, c10, ty), lerp(c01, c11, ty), tz);
+    const auto u = [](int v) { return static_cast<std::size_t>(std::clamp(v, 0, 255)); };
+    const std::size_t base = static_cast<std::size_t>(a.cell[u(r)]) * stride_[0] + static_cast<std::size_t>(a.cell[u(g)]) * stride_[1] +
+                             static_cast<std::size_t>(a.cell[u(b)]) * stride_[2];
+    return tetra(grid_, base, stride_[0], stride_[1], stride_[2], a.t[u(r)], a.t[u(g)], a.t[u(b)]);
+}
+
+float Gamut::delta_e(const float* values) const {
+    // (upstream's Clut::locate: each value's cell, the weight of its far side, and the stride along it)
+    std::array<std::size_t, 4> base{};
+    std::array<float, 4> r{};
+    for (unsigned d = 0; d < inputs_; ++d) {
+        const float p = std::clamp(std::isfinite(values[d]) ? values[d] : 0.0f, 0.0f, 1.0f) * static_cast<float>(points_ - 1);
+        const int i = std::min(static_cast<int>(p), points_ - 2);
+        base[d] = static_cast<std::size_t>(i) * stride_[d];
+        r[d] = p - static_cast<float>(i);
+    }
+    if (inputs_ == 1) return grid_[base[0]] + (grid_[base[0] + stride_[0]] - grid_[base[0]]) * r[0];
+    if (inputs_ == 3) return tetra(grid_, base[0] + base[1] + base[2], stride_[0], stride_[1], stride_[2], r[0], r[1], r[2]);
+    // (four: two tetrahedral readings of the last three, along the first)
+    const std::size_t at = base[0] + base[1] + base[2] + base[3];
+    const float lo = tetra(grid_, at, stride_[1], stride_[2], stride_[3], r[1], r[2], r[3]);
+    if (r[0] <= 0.0f) return lo;
+    const float hi = tetra(grid_, at + stride_[0], stride_[1], stride_[2], stride_[3], r[1], r[2], r[3]);
+    return lo + (hi - lo) * r[0];
 }
 
 std::vector<unsigned char> Gamut::mask(const Image& image, double threshold, std::size_t* out) const {
@@ -505,6 +631,23 @@ std::vector<unsigned char> Gamut::mask(const Image& image, double threshold, std
         const std::size_t at = i * step;
         if (rgba && bytes[at + 3] == 0) continue;
         if (delta_e(u(at), u(at + 1), u(at + 2)) > threshold) {
+            mask[i] = 255;
+            ++count;
+        }
+    }
+    if (out != nullptr) *out = count;
+    return mask;
+}
+
+std::vector<unsigned char> Gamut::mask(const std::vector<float>& values, const Image& image, double threshold, std::size_t* out) const {
+    const std::size_t pixels = static_cast<std::size_t>(image.width()) * static_cast<std::size_t>(image.height());
+    if (values.size() != pixels * inputs_) refuse("the page's values are not the picture's");
+    const std::string alpha = image.mode() == "RGBA" ? image.getchannel(3).tobytes() : std::string();
+    std::vector<unsigned char> mask(pixels, 0);
+    std::size_t count = 0;
+    for (std::size_t i = 0; i < pixels; ++i) {
+        if (!alpha.empty() && alpha[i] == 0) continue;
+        if (delta_e(values.data() + i * inputs_) > threshold) {
             mask[i] = 255;
             ++count;
         }
