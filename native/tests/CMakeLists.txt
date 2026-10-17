@@ -358,6 +358,8 @@ if(GENKO_BUILD_APP)
   # the layer panel: its list, buttons, settings, menus (several at once, masks, effects), fill and correction layers,
   # a filter with its result on the page while its numbers change
   genko_test(test_gui_layers SOURCES gui/test_gui_layers.cpp DEPS genko_app GUI TIMEOUT 600)
+  # PC2b: レイヤー → 色調補正 の色の補正 (their windows with the result shown, the keys), the forms, the correction layers
+  genko_test(test_gui_adjust_color SOURCES gui/test_gui_adjust_color.cpp DEPS genko_app GUI TIMEOUT 600)
   # 範囲選択: the marquee's ways with Shift / Alt, the selection's commands, the chosen part moved, copied, pasted
   genko_test(test_gui_select SOURCES gui/test_gui_select.cpp DEPS genko_app GUI TIMEOUT 600)
   # チャンネル (channels@1, COLOR-03): the panel, the target keys, a fill on a channel, the view, options, split.

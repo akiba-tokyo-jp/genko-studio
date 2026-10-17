@@ -204,11 +204,16 @@ LayerPanel::LayerPanel(MainWindow* window) : window_(window) {
     special_->addAction(QStringLiteral("ベタ塗りのレイヤー…"), this, [this] { add_fill(); });
     special_->addAction(QStringLiteral("グラデーションのレイヤー…"), this, [this] { add_gradient(); });
     QMenu* adjust = special_->addMenu(QStringLiteral("色調補正のレイヤー"));
-    for (const auto& [key, label] : adjustment_kinds()) adjust->addAction(label + QStringLiteral("…"), this, [this, key = key] { add_adjust(key); });
+    for (const auto& [key, label] : adjustment_kinds()) {
+        // (PC2b, the user's decision 3: a new 色相・彩度 is the upstream form, hue_saturation, in its place; a layer of
+        // Python's hue is still mended in its own window)
+        const std::string made = key == "hue" && adjust_forms::form_kind("hue_saturation") != nullptr ? std::string("hue_saturation") : key;
+        adjust->addAction(label + QStringLiteral("…"), this, [this, made] { add_adjust(made); });
+    }
     // (PC2: the C++ build's own kinds that have a form — app/adjust_forms, each group's)
     for (const adjust_forms::FormKind& form : adjust_forms::form_kinds()) {
         const core::AdjustKind* kind = core::adjust_kind(form.kind);
-        if (kind == nullptr || !kind->layer || kind->group == "Python") continue;
+        if (kind == nullptr || !kind->layer || kind->group == "Python" || form.kind == "hue_saturation") continue;
         adjust->addAction(form.title + QStringLiteral("…"), this, [this, key = std::string(form.kind)] { add_adjust(key); });
     }
     special_->addSeparator();
