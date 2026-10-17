@@ -472,7 +472,7 @@ private slots:
         form.reset();
         QCOMPARE(form.values()["vibrance"], Json(0));
         QCOMPARE(form.values()["native"]["blend"], Json("normal"));
-        QVERIFY(!app::adjust_forms::adjust_dialog(nullptr, "vibrance", Json::object(), {}));  // (no form yet: its group's)
+        QVERIFY(!app::adjust_forms::adjust_dialog(nullptr, "blur", Json::object(), {}));  // (a kind without a form: no window)
     }
 
     // かける: after the question, the filter's numbers in a dialog while the page shows the result; かける applies it

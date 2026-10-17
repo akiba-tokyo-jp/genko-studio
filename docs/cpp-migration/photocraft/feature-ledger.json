@@ -12293,9 +12293,20 @@
         "alternate_menus": []
       },
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "未着手",
+      "implementation_status": "実装済み（PC2b、未統合）",
       "acceptance_status": "未実施",
-      "evidence": [],
+      "evidence": [
+        "native/src/core/adjust_color.cpp",
+        "native/src/core/adjust_color.hpp",
+        "native/src/core/adjust_kinds.cpp",
+        "native/src/render/adjust.cpp",
+        "native/tests/unit/test_adjust_color.cpp",
+        "native/tests/contract/test_contract_adjust_color.cpp",
+        "native/tests/gui/test_gui_adjust_color.cpp",
+        "native/src/render/ops_adjust.cpp",
+        "native/src/render/raster_ops.cpp",
+        "native/src/app/adjust_forms_color.cpp"
+      ],
       "pc0": {
         "date": "2026-10-16",
         "cpp_base": "962faa4",
@@ -12400,9 +12411,20 @@
         "alternate_menus": []
       },
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "未着手",
+      "implementation_status": "実装済み（PC2b、未統合）",
       "acceptance_status": "未実施",
-      "evidence": [],
+      "evidence": [
+        "native/src/core/adjust_color.cpp",
+        "native/src/core/adjust_color.hpp",
+        "native/src/core/adjust_kinds.cpp",
+        "native/src/render/adjust.cpp",
+        "native/tests/unit/test_adjust_color.cpp",
+        "native/tests/contract/test_contract_adjust_color.cpp",
+        "native/tests/gui/test_gui_adjust_color.cpp",
+        "native/src/render/ops_adjust.cpp",
+        "native/src/render/raster_ops.cpp",
+        "native/src/app/adjust_forms_color.cpp"
+      ],
       "pc0": {
         "date": "2026-10-16",
         "cpp_base": "962faa4",
@@ -12413,7 +12435,8 @@
         "tests": [],
         "gap": "出力チャンネルごとに R/G/B の割合と定数を混ぜる補正（モノクロ含む）がない",
         "note": "8 ビット表（core/filters）・高精度（render/color_filters の u16/f32）・CMYK/Lab（render/ink_filters）の 3 経路、補正レイヤー（add_layer kind=adjust）、GUI の値の画面、試験を足す。新しい外部ライブラリは要らない"
-      }
+      },
+      "limitations": "PSD: モノクロのミキサーの赤の出力の行は書かない（最初の記録はグレーの行）。CMYK の K を元に使うミキサーは読まない。"
     },
     {
       "id": "image.adjustments.colorBalance",
@@ -12443,9 +12466,20 @@
         "alternate_menus": []
       },
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "未着手",
+      "implementation_status": "実装済み（PC2b、未統合）",
       "acceptance_status": "未実施",
-      "evidence": [],
+      "evidence": [
+        "native/src/core/adjust_color.cpp",
+        "native/src/core/adjust_color.hpp",
+        "native/src/core/adjust_kinds.cpp",
+        "native/src/render/adjust.cpp",
+        "native/tests/unit/test_adjust_color.cpp",
+        "native/tests/contract/test_contract_adjust_color.cpp",
+        "native/tests/gui/test_gui_adjust_color.cpp",
+        "native/src/render/ops_adjust.cpp",
+        "native/src/render/raster_ops.cpp",
+        "native/src/app/adjust_forms_color.cpp"
+      ],
       "pc0": {
         "date": "2026-10-16",
         "cpp_base": "962faa4",
@@ -12621,9 +12655,20 @@
         "alternate_menus": []
       },
       "genko_status": "一部（2026-10-16 照合）",
-      "implementation_status": "未着手",
+      "implementation_status": "実装済み（PC2b、未統合）",
       "acceptance_status": "未実施",
-      "evidence": [],
+      "evidence": [
+        "native/src/core/adjust_color.cpp",
+        "native/src/core/adjust_color.hpp",
+        "native/src/core/adjust_kinds.cpp",
+        "native/src/render/adjust.cpp",
+        "native/tests/unit/test_adjust_color.cpp",
+        "native/tests/contract/test_contract_adjust_color.cpp",
+        "native/tests/gui/test_gui_adjust_color.cpp",
+        "native/src/render/ops_adjust.cpp",
+        "native/src/render/raster_ops.cpp",
+        "native/src/app/adjust_forms_color.cpp"
+      ],
       "pc0": {
         "date": "2026-10-16",
         "cpp_base": "962faa4",
@@ -12639,7 +12684,8 @@
         ],
         "gap": "専用の操作がない。hue の saturation=0 で灰色にはできるが HSV の明度（最大値）になり、上流（HSL の彩度 -100）と結果が違う",
         "note": ""
-      }
+      },
+      "limitations": "hue_saturation の彩度 −100（HSL の明度）。Python の hue の彩度 0（HSV の明度）とは結果が違う。"
     },
     {
       "id": "image.adjustments.equalize",
@@ -12878,11 +12924,19 @@
         "alternate_menus": []
       },
       "genko_status": "一部（2026-10-16 照合）",
-      "implementation_status": "未着手",
+      "implementation_status": "実装済み（PC2b、未統合）",
       "acceptance_status": "未実施",
       "evidence": [
-        "native/src/core/filters.cpp:252",
-        "Python src/genko/filters.py:13-17"
+        "native/src/core/adjust_color.cpp",
+        "native/src/core/adjust_color.hpp",
+        "native/src/core/adjust_kinds.cpp",
+        "native/src/render/adjust.cpp",
+        "native/tests/unit/test_adjust_color.cpp",
+        "native/tests/contract/test_contract_adjust_color.cpp",
+        "native/tests/gui/test_gui_adjust_color.cpp",
+        "native/src/render/ops_adjust.cpp",
+        "native/src/render/raster_ops.cpp",
+        "native/src/app/adjust_forms_color.cpp"
       ],
       "genko_candidate": {
         "op": "filter_raster / add_layer(kind=adjust)",
@@ -12912,7 +12966,8 @@
         ],
         "gap": "hue（HSV で色相 ±180・彩度と明度の倍率）はあるが、上流の HSL の彩度 ±100・明度 ±100、色彩の統一（colorize）、6 つの色域ごとの指定と範囲がない",
         "note": "PSD の hue2 調整レイヤーの再編集もない"
-      }
+      },
+      "limitations": "Python の hue の層は PSD の hue2 にしない（統合画像に入る）。レイヤーパネルのフィルターの一覧の「色相・彩度・明度」は Python の hue のまま。"
     },
     {
       "id": "image.adjustments.invert",
@@ -13119,9 +13174,20 @@
         "alternate_menus": []
       },
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "未着手",
+      "implementation_status": "実装済み（PC2b、未統合）",
       "acceptance_status": "未実施",
-      "evidence": [],
+      "evidence": [
+        "native/src/core/adjust_color.cpp",
+        "native/src/core/adjust_color.hpp",
+        "native/src/core/adjust_kinds.cpp",
+        "native/src/render/adjust.cpp",
+        "native/tests/unit/test_adjust_color.cpp",
+        "native/tests/contract/test_contract_adjust_color.cpp",
+        "native/tests/gui/test_gui_adjust_color.cpp",
+        "native/src/render/ops_adjust.cpp",
+        "native/src/render/raster_ops.cpp",
+        "native/src/app/adjust_forms_color.cpp"
+      ],
       "pc0": {
         "date": "2026-10-16",
         "cpp_base": "962faa4",
@@ -13132,7 +13198,8 @@
         "tests": [],
         "gap": "色フィルター（20 種のプリセット・任意色・濃度・輝度を保つ）がない",
         "note": "8 ビット表（core/filters）・高精度（render/color_filters の u16/f32）・CMYK/Lab（render/ink_filters）の 3 経路、補正レイヤー（add_layer kind=adjust）、GUI の値の画面、試験を足す。新しい外部ライブラリは要らない"
-      }
+      },
+      "limitations": "既定の名前（filter）は op の入力だけで保存しない（その色を color に）。PSD の色は版 2 の RGB（原稿の色は 8 bit）。"
     },
     {
       "id": "image.adjustments.posterize",
@@ -13276,9 +13343,20 @@
         "alternate_menus": []
       },
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "未着手",
+      "implementation_status": "実装済み（PC2b、未統合）",
       "acceptance_status": "未実施",
-      "evidence": [],
+      "evidence": [
+        "native/src/core/adjust_color.cpp",
+        "native/src/core/adjust_color.hpp",
+        "native/src/core/adjust_kinds.cpp",
+        "native/src/render/adjust.cpp",
+        "native/tests/unit/test_adjust_color.cpp",
+        "native/tests/contract/test_contract_adjust_color.cpp",
+        "native/tests/gui/test_gui_adjust_color.cpp",
+        "native/src/render/ops_adjust.cpp",
+        "native/src/render/raster_ops.cpp",
+        "native/src/app/adjust_forms_color.cpp"
+      ],
       "pc0": {
         "date": "2026-10-16",
         "cpp_base": "962faa4",
@@ -13434,9 +13512,20 @@
         "alternate_menus": []
       },
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "未着手",
+      "implementation_status": "実装済み（PC2b、未統合）",
       "acceptance_status": "未実施",
-      "evidence": [],
+      "evidence": [
+        "native/src/core/adjust_color.cpp",
+        "native/src/core/adjust_color.hpp",
+        "native/src/core/adjust_kinds.cpp",
+        "native/src/render/adjust.cpp",
+        "native/tests/unit/test_adjust_color.cpp",
+        "native/tests/contract/test_contract_adjust_color.cpp",
+        "native/tests/gui/test_gui_adjust_color.cpp",
+        "native/src/render/ops_adjust.cpp",
+        "native/src/render/raster_ops.cpp",
+        "native/src/app/adjust_forms_color.cpp"
+      ],
       "pc0": {
         "date": "2026-10-16",
         "cpp_base": "962faa4",
@@ -13447,7 +13536,8 @@
         "tests": [],
         "gap": "自然な彩度（彩度の低い色ほど強く上げる）と彩度の補正がない",
         "note": "8 ビット表（core/filters）・高精度（render/color_filters の u16/f32）・CMYK/Lab（render/ink_filters）の 3 経路、補正レイヤー（add_layer kind=adjust）、GUI の値の画面、試験を足す。新しい外部ライブラリは要らない。画素ごとの彩度に依存するので 256 段の表では書けない"
-      }
+      },
+      "limitations": "灰色（色相の無い色）は動かさない（上流は色相 0 の赤として染める。Photoshop に合わせた意図的な違い）。"
     },
     {
       "id": "image.analysis.countTool",
@@ -19222,9 +19312,21 @@
         "alternate_menus": []
       },
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "未着手",
+      "implementation_status": "実装済み（PC2b、未統合）",
       "acceptance_status": "未実施",
-      "evidence": [],
+      "evidence": [
+        "native/src/core/adjust_color.cpp",
+        "native/src/core/adjust_color.hpp",
+        "native/src/core/adjust_kinds.cpp",
+        "native/src/render/adjust.cpp",
+        "native/tests/unit/test_adjust_color.cpp",
+        "native/tests/contract/test_contract_adjust_color.cpp",
+        "native/tests/gui/test_gui_adjust_color.cpp",
+        "native/src/core/ops_layers.cpp",
+        "native/src/render/psd_adjust_color.cpp",
+        "native/src/app/layer_panel.cpp",
+        "native/src/app/adjust_forms_color.cpp"
+      ],
       "pc0": {
         "date": "2026-10-16",
         "cpp_base": "962faa4",
@@ -19327,9 +19429,21 @@
         "alternate_menus": []
       },
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "未着手",
+      "implementation_status": "実装済み（PC2b、未統合）",
       "acceptance_status": "未実施",
-      "evidence": [],
+      "evidence": [
+        "native/src/core/adjust_color.cpp",
+        "native/src/core/adjust_color.hpp",
+        "native/src/core/adjust_kinds.cpp",
+        "native/src/render/adjust.cpp",
+        "native/tests/unit/test_adjust_color.cpp",
+        "native/tests/contract/test_contract_adjust_color.cpp",
+        "native/tests/gui/test_gui_adjust_color.cpp",
+        "native/src/core/ops_layers.cpp",
+        "native/src/render/psd_adjust_color.cpp",
+        "native/src/app/layer_panel.cpp",
+        "native/src/app/adjust_forms_color.cpp"
+      ],
       "pc0": {
         "date": "2026-10-16",
         "cpp_base": "962faa4",
@@ -19340,7 +19454,8 @@
         "tests": [],
         "gap": "チャンネルミキサー（出力チャンネルごとの R・G・B・定数 %、モノクロ）が無い",
         "note": "補正を足すときは 8 bit の表・高精度（u16・f32、render/color_canvas）・インキ（CMYK・Lab、render/ink）の 3 つの道をそろえる。Genko は PSD の補正レイヤー（levl・hue2 など）を読み飛ばし（render/psd.cpp:615）、書き出しでは空の層にする（render/page.cpp:1792）共通の差がある"
-      }
+      },
+      "limitations": "PSD: モノクロのミキサーの赤の出力の行は書かない（最初の記録はグレーの行）。CMYK の K を元に使うミキサーは読まない。"
     },
     {
       "id": "layer.newAdjustmentLayer.colorBalance",
@@ -19370,9 +19485,21 @@
         "alternate_menus": []
       },
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "未着手",
+      "implementation_status": "実装済み（PC2b、未統合）",
       "acceptance_status": "未実施",
-      "evidence": [],
+      "evidence": [
+        "native/src/core/adjust_color.cpp",
+        "native/src/core/adjust_color.hpp",
+        "native/src/core/adjust_kinds.cpp",
+        "native/src/render/adjust.cpp",
+        "native/tests/unit/test_adjust_color.cpp",
+        "native/tests/contract/test_contract_adjust_color.cpp",
+        "native/tests/gui/test_gui_adjust_color.cpp",
+        "native/src/core/ops_layers.cpp",
+        "native/src/render/psd_adjust_color.cpp",
+        "native/src/app/layer_panel.cpp",
+        "native/src/app/adjust_forms_color.cpp"
+      ],
       "pc0": {
         "date": "2026-10-16",
         "cpp_base": "962faa4",
@@ -19635,10 +19762,20 @@
         "alternate_menus": []
       },
       "genko_status": "一部（2026-10-16 照合）",
-      "implementation_status": "未着手",
+      "implementation_status": "実装済み（PC2b、未統合）",
       "acceptance_status": "未実施",
       "evidence": [
-        "native/src/core/filters.cpp:252"
+        "native/src/core/adjust_color.cpp",
+        "native/src/core/adjust_color.hpp",
+        "native/src/core/adjust_kinds.cpp",
+        "native/src/render/adjust.cpp",
+        "native/tests/unit/test_adjust_color.cpp",
+        "native/tests/contract/test_contract_adjust_color.cpp",
+        "native/tests/gui/test_gui_adjust_color.cpp",
+        "native/src/core/ops_layers.cpp",
+        "native/src/render/psd_adjust_color.cpp",
+        "native/src/app/layer_panel.cpp",
+        "native/src/app/adjust_forms_color.cpp"
       ],
       "genko_candidate": {
         "op": "add_layer",
@@ -19665,7 +19802,8 @@
         ],
         "gap": "Genko の hue は HSV で色相を回し彩度・明度を倍率で掛けるだけ（shift・saturation・value）。上流の彩度・明度 −100〜100（Photoshop 型）、colorize（色相 0〜360・彩度 0〜100）、6 色域ごとの調整（range の 4 つの角度）が無い。PSD の hue2 の読み書きも無い",
         "note": "補正を足すときは 8 bit の表・高精度（u16・f32、render/color_canvas）・インキ（CMYK・Lab、render/ink）の 3 つの道をそろえる。Genko は PSD の補正レイヤー（levl・hue2 など）を読み飛ばし（render/psd.cpp:615）、書き出しでは空の層にする（render/page.cpp:1792）共通の差がある"
-      }
+      },
+      "limitations": "Python の hue の層は PSD の hue2 にしない（統合画像に入る）。レイヤーパネルのフィルターの一覧の「色相・彩度・明度」は Python の hue のまま。"
     },
     {
       "id": "layer.newAdjustmentLayer.invert",
@@ -19814,9 +19952,21 @@
         "alternate_menus": []
       },
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "未着手",
+      "implementation_status": "実装済み（PC2b、未統合）",
       "acceptance_status": "未実施",
-      "evidence": [],
+      "evidence": [
+        "native/src/core/adjust_color.cpp",
+        "native/src/core/adjust_color.hpp",
+        "native/src/core/adjust_kinds.cpp",
+        "native/src/render/adjust.cpp",
+        "native/tests/unit/test_adjust_color.cpp",
+        "native/tests/contract/test_contract_adjust_color.cpp",
+        "native/tests/gui/test_gui_adjust_color.cpp",
+        "native/src/core/ops_layers.cpp",
+        "native/src/render/psd_adjust_color.cpp",
+        "native/src/app/layer_panel.cpp",
+        "native/src/app/adjust_forms_color.cpp"
+      ],
       "pc0": {
         "date": "2026-10-16",
         "cpp_base": "962faa4",
@@ -19827,7 +19977,8 @@
         "tests": [],
         "gap": "レンズフィルター（20 の既定色・任意色、適用量、輝度を保持）の補正がない",
         "note": "塗りレイヤー＋合成モード（color・multiply）で近いことはできる。PSD の調整レイヤーの読み書き（上流 crates/io/src/adjust_map.rs 相当）は全種共通の土台で L"
-      }
+      },
+      "limitations": "既定の名前（filter）は op の入力だけで保存しない（その色を color に）。PSD の色は版 2 の RGB（原稿の色は 8 bit）。"
     },
     {
       "id": "layer.newAdjustmentLayer.posterize",
@@ -19916,9 +20067,21 @@
         "alternate_menus": []
       },
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "未着手",
+      "implementation_status": "実装済み（PC2b、未統合）",
       "acceptance_status": "未実施",
-      "evidence": [],
+      "evidence": [
+        "native/src/core/adjust_color.cpp",
+        "native/src/core/adjust_color.hpp",
+        "native/src/core/adjust_kinds.cpp",
+        "native/src/render/adjust.cpp",
+        "native/tests/unit/test_adjust_color.cpp",
+        "native/tests/contract/test_contract_adjust_color.cpp",
+        "native/tests/gui/test_gui_adjust_color.cpp",
+        "native/src/core/ops_layers.cpp",
+        "native/src/render/psd_adjust_color.cpp",
+        "native/src/app/layer_panel.cpp",
+        "native/src/app/adjust_forms_color.cpp"
+      ],
       "pc0": {
         "date": "2026-10-16",
         "cpp_base": "962faa4",
@@ -20017,9 +20180,21 @@
         "alternate_menus": []
       },
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "未着手",
+      "implementation_status": "実装済み（PC2b、未統合）",
       "acceptance_status": "未実施",
-      "evidence": [],
+      "evidence": [
+        "native/src/core/adjust_color.cpp",
+        "native/src/core/adjust_color.hpp",
+        "native/src/core/adjust_kinds.cpp",
+        "native/src/render/adjust.cpp",
+        "native/tests/unit/test_adjust_color.cpp",
+        "native/tests/contract/test_contract_adjust_color.cpp",
+        "native/tests/gui/test_gui_adjust_color.cpp",
+        "native/src/core/ops_layers.cpp",
+        "native/src/render/psd_adjust_color.cpp",
+        "native/src/app/layer_panel.cpp",
+        "native/src/app/adjust_forms_color.cpp"
+      ],
       "pc0": {
         "date": "2026-10-16",
         "cpp_base": "962faa4",
@@ -20030,7 +20205,8 @@
         "tests": [],
         "gap": "自然な彩度（vibrance）の補正がない",
         "note": "hue 補正の saturation（倍率）で彩度だけは変えられる。PSD の調整レイヤーの読み書き（上流 crates/io/src/adjust_map.rs 相当）は全種共通の土台で L"
-      }
+      },
+      "limitations": "灰色（色相の無い色）は動かさない（上流は色相 0 の赤として染める。Photoshop に合わせた意図的な違い）。"
     },
     {
       "id": "layer.newFillLayer.gradient",

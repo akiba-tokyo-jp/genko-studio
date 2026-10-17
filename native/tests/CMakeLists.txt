@@ -109,6 +109,9 @@ genko_test(test_tone_ops SOURCES unit/test_tone_ops.cpp DEPS genko_test_support 
 # PC2c (COLOR-04): Apply Image and Calculations (Blending, the sources, a layer, a channel, inks; the three results),
 # trapping (algo/trap.rs's tests and the op) and the fade (its mix, the op reading the pixels before from the assets).
 genko_test(test_image_calc SOURCES unit/test_image_calc.cpp DEPS genko_test_support genko_render_ops LABELS unit TIMEOUT 600)
+# PC2b: the colour corrections' formulas (PhotoCraft's own tests), their settings read and stored, the three ways, the
+# PSD's colour adjustment layers (round trips, hand-built blocks, what is not read).
+genko_test(test_adjust_color SOURCES unit/test_adjust_color.cpp DEPS genko_test_support genko_render_ops genko_formats LABELS unit TIMEOUT 600)
 
 # core/pyre's own bounds (Python 3.12's re, ported; SPEC COMP-01a): a search that backtracks without end stopped when its
 # steps are spent, groups more than 200 deep refused, replace_text refused without a change; without Python.
@@ -260,6 +263,10 @@ genko_test(test_contract_ink SOURCES contract/test_contract_ink.cpp DEPS genko_t
 # color-model@1 (COLOR-03) through the command line: apply, save, undo and redo, render, inspect --pixel, export.
 genko_test(test_contract_color_model SOURCES contract/test_contract_color_model.cpp DEPS genko_test_support genko_render
            LABELS contract TIMEOUT 900)
+# PC2b (COLOR-04) through the command line: the colour corrections applied, saved, undone and redone, drawn, written as
+# a PSD's adjustment layers (psd-tools reads them) and read back.
+genko_test(test_contract_adjust_color SOURCES contract/test_contract_adjust_color.cpp DEPS genko_test_support genko_render
+           LABELS contract TIMEOUT 900)
 # channels@1 (COLOR-03) through the command line: apply, save, gc, undo and redo, a selection and a fill on a channel,
 # render, inspect, export (the PSD's extra channels read back, the PDF's separation, the notes).
 genko_test(test_contract_channels SOURCES contract/test_contract_channels.cpp DEPS genko_test_support genko_render ZLIB::ZLIB
@@ -361,6 +368,8 @@ if(GENKO_BUILD_APP)
   # the layer panel: its list, buttons, settings, menus (several at once, masks, effects), fill and correction layers,
   # a filter with its result on the page while its numbers change
   genko_test(test_gui_layers SOURCES gui/test_gui_layers.cpp DEPS genko_app GUI TIMEOUT 600)
+  # PC2b: レイヤー → 色調補正 の色の補正 (their windows with the result shown, the keys), the forms, the correction layers
+  genko_test(test_gui_adjust_color SOURCES gui/test_gui_adjust_color.cpp DEPS genko_app GUI TIMEOUT 600)
   # 範囲選択: the marquee's ways with Shift / Alt, the selection's commands, the chosen part moved, copied, pasted
   genko_test(test_gui_select SOURCES gui/test_gui_select.cpp DEPS genko_app GUI TIMEOUT 600)
   # チャンネル (channels@1, COLOR-03): the panel, the target keys, a fill on a channel, the view, options, split.

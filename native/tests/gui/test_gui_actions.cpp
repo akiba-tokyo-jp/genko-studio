@@ -272,7 +272,10 @@ private slots:
         // PC2c (SPEC COLOR-04) — レイヤー → 色調補正 の シャドウ・ハイライト…・HDR トーン…・色の置き換え…・色の一致…・画像操作…・
         // 演算…・トラッピング… and 編集 → フェード… (act_shadows_highlights, act_hdr_toning, act_replace_color, act_match_color,
         // act_apply_image, act_calculations, act_trap, act_fade) — theirs (test_gui_image_ops).
-        QCOMPARE(w->actions_by_name().size(), std::size_t{258});
+        // PC2b (SPEC COLOR-04) — レイヤー → 色調補正 の色の補正 (act_adjust_vibrance, act_adjust_hue_saturation,
+        // act_adjust_color_balance, act_adjust_black_white, act_adjust_photo_filter, act_adjust_channel_mixer,
+        // act_adjust_selective_color, act_adjust_desaturate) — theirs (test_gui_adjust_color).
+        QCOMPARE(w->actions_by_name().size(), std::size_t{266});
         QVERIFY(w->action("act_chat_approval"));
         QVERIFY(w->action("act_style"));
         QVERIFY(w->action("act_exposure"));
