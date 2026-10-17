@@ -332,6 +332,8 @@ namespace {
 
 // A profile's information (render::proof::profile_info) in the dialog's words.
 QString profile_text(const core::Json& info) {
+    if (info.contains("description") && info.at("description").is_null())  // (a page whose plates have none)
+        return QStringLiteral("プロファイルはありません（マルチチャンネルのページの版はプロファイルを持ちません）");
     QStringList rows;
     const auto text = [&](const char* key) { return info.contains(key) && info.at(key).is_string() ? QString::fromStdString(info.at(key).get<std::string>()) : QString(); };
     static const std::map<std::string, QString> spaces{{"rgb", QStringLiteral("RGB")}, {"gray", QStringLiteral("グレー")}, {"cmyk", QStringLiteral("CMYK")},

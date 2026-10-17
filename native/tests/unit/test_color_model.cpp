@@ -41,6 +41,7 @@
 #include "render/ink_canvas.hpp"
 #include "render/ops_registry.hpp"
 #include "render/page.hpp"
+#include "render/proof.hpp"
 #include "render/selection.hpp"
 #include "render/png.hpp"
 #include "storage/asset_store.hpp"
@@ -1397,7 +1398,6 @@ private slots:
                 const auto [ix, iy] = at(20, 40);
                 QVERIFY(rgb_at(shown, rx, ry)[0] < rgb_at(shown, ix, iy)[0] - 20);
                 QVERIFY(rgb_at(eight, rx, ry)[0] < rgb_at(eight, ix, iy)[0] - 20);
-            }
                 // (and as dark as there, across the rim's band — the grey's left and top edges, the green's right one —:
                 // its black laid over the page's encoded values as the 8-bit page lays it over sRGB's; independent review
                 // B (B))
@@ -1412,6 +1412,7 @@ private slots:
                     QVERIFY2(near_rgb(rgb_at(shown, x, y), rgb_at(eight, x, y), most),
                              qPrintable(QStringLiteral("rim %1,%2: %3 %4").arg(x).arg(y).arg(rgb_text(rgb_at(shown, x, y)), rgb_text(rgb_at(eight, x, y)))));
                 }
+            }
             return;
         }
         // (the rest: every pixel; a shape-moving filter's 8-bit passes round otherwise in a few)
@@ -1517,6 +1518,14 @@ private slots:
             if (diff > 1) ++off;
         }
         QVERIFY2(off == 0, qPrintable(QStringLiteral("%1 samples off the 8-bit page (worst %2)").arg(off).arg(worst)));
+    }
+
+    // Independent review B (D): a multichannel page's profile (inspect --profile, プロファイルの情報…) is none — its plates
+    // have none, as assign_profile refuses one —, not Little CMS's sRGB.
+    void multichannelPagesHaveNoProfile() {
+        const core::Document doc = run_ops(painted(picture()), Json::array({Json{{"op", "set_color_mode"}, {"page", 1}, {"mode", "multichannel"}}})).doc;
+        const Json info = render::proof::profile_info_of(doc, "1");
+        QVERIFY2(info["page"] == Json(1) && info["space"] == Json("multichannel") && info["description"].is_null(), info.dump().c_str());
     }
 
     // A page with no colour model holding precise pixels (put_color_raster) keeps their precision when an op does not say

@@ -3763,7 +3763,8 @@
         "native/src/app/info_panels.cpp",
         "native/src/app/main_window_color.cpp",
         "native/tests/contract/test_contract_profile.cpp",
-        "native/tests/gui/test_gui_info.cpp"
+        "native/tests/gui/test_gui_info.cpp",
+        "native/tests/unit/test_color_model.cpp"
       ],
       "pc0": {
         "date": "2026-10-16",

@@ -151,8 +151,9 @@ core::Json profile_info(const core::Bytes& icc, bool lab = false);
 // The built-in profiles: [{"id", "description", "space"}], PhotoCraft's order.
 core::Json builtin_profile_list();
 // The profile `spec` names in the book — a built-in's id (or alias, or its sha256:…), a page's number (its mode's
-// profile: an RGB page's, sRGB for none; a CMYK or grey page's; a Lab page's D50 Lab), "sha256:…" of one the book
-// holds — as profile_info says it, with "builtins" (builtin_profile_list) and, for a page, "page": its number.
+// profile: an RGB page's, sRGB for none; a CMYK or grey page's; a Lab page's D50 Lab; a multichannel page's plates
+// none: {"description": null, "space": "multichannel"}), "sha256:…" of one the book holds — as profile_info says it,
+// with "builtins" (builtin_profile_list) and, for a page, "page": its number.
 // core::Error("key") when it names none.
 core::Json profile_info_of(const core::Document& doc, std::string_view spec);
 // The colour (sRGB, 0..255) in the proof's own values (情報パネル, PC2d): {"space": "cmyk"|"rgb"|"gray", "values": 0..1

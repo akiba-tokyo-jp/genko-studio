@@ -181,9 +181,11 @@ private slots:
     void profileInfo() {
         const QString book = path(QStringLiteral("info.genko"));
         int exit = -1;
-        const auto made = genko::test::run_genko({QStringLiteral("new"), book, QStringLiteral("--pages"), QStringLiteral("2")});
+        const auto made = genko::test::run_genko({QStringLiteral("new"), book, QStringLiteral("--pages"), QStringLiteral("3")});
         QVERIFY2(made.exit_code == 0, qPrintable(made.described()));
-        const Json moded = apply(book, Json::array({Json{{"op", "set_color_mode"}, {"page", 2}, {"mode", "cmyk"}, {"profile", "coated-cmyk"}}}), &exit);
+        const Json moded = apply(book, Json::array({Json{{"op", "set_color_mode"}, {"page", 2}, {"mode", "cmyk"}, {"profile", "coated-cmyk"}},
+                                                    Json{{"op", "set_color_mode"}, {"page", 3}, {"mode", "multichannel"}}}),
+                                 &exit);
         QVERIFY2(exit == 0, moded.dump().c_str());
         const Json p3 = genko({QStringLiteral("inspect"), book, QStringLiteral("--profile"), QStringLiteral("display-p3")}, &exit);
         QVERIFY2(exit == 0, p3.dump().c_str());
@@ -205,6 +207,10 @@ private slots:
         QCOMPARE(two["space"], Json("cmyk"));
         QCOMPARE(two["class"], Json("output"));
         QVERIFY(two["lut"].get<bool>());
+        // a multichannel page's plates have no profile (as assign_profile refuses one): none said, not sRGB (independent
+        // review B (D))
+        const Json three = genko({QStringLiteral("inspect"), book, QStringLiteral("--profile"), QStringLiteral("3")}, &exit);
+        QVERIFY2(exit == 0 && three["page"] == Json(3) && three["space"] == Json("multichannel") && three["description"].is_null(), three.dump().c_str());
         // by its sha256: the same
         const std::string ref = genko::core::builtin_profile("coated-cmyk")->ref();
         const Json by_ref = genko({QStringLiteral("inspect"), book, QStringLiteral("--profile"), QString::fromStdString(ref)}, &exit);

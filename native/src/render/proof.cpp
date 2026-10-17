@@ -965,7 +965,10 @@ core::Json profile_info_of(const core::Document& doc, std::string_view spec) {
             if (doc.pages[i]->index == core::Num(*page_number) && !doc.is_deferred(i)) page = &doc.page(i);
         }
         if (page == nullptr) throw core::Error("key", "no page " + name);
-        if (page->color) {
+        if (page->color && page->color->space == core::InkSpace::Multi) {
+            // (its plates have no profile — assign_profile refuses one —: none said, not Little CMS's sRGB)
+            out = core::Json{{"description", nullptr}, {"space", "multichannel"}};
+        } else if (page->color) {
             out = profile_info(page->color->space == core::InkSpace::Lab ? nullptr : page->color->icc, page->color->space == core::InkSpace::Lab);
         } else {
             out = profile_info(page->rgb ? page->rgb->icc : nullptr);
