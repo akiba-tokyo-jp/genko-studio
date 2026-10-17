@@ -15,6 +15,7 @@
 #include <algorithm>
 #include <array>
 #include <cmath>
+#include <cstdio>
 #include <filesystem>
 #include <functional>
 #include <string>
@@ -47,6 +48,7 @@
 #include "storage/asset_store.hpp"
 #include "storage/reader.hpp"
 #include "storage/writer.hpp"
+#include "comma_locale.hpp"
 #include "testsupport.hpp"
 
 using namespace genko;
@@ -1034,6 +1036,209 @@ private slots:
             const std::size_t at[3] = {i % 9, (i / 9) % 9, i / 81};
             for (std::size_t c = 0; c < 3; ++c) QVERIFY(std::abs(nine.data[i * 3 + c] - (1.0f - static_cast<float>(at[c]) / 8.0f)) < 1e-5f);
         }
+    }
+
+    // A correction's lookup table is the book's own: drawn only from the book (not from a table another book's op made
+    // in this process), and no op leaves a correction whose table the book does not hold (it could not be written);
+    // taking that correction away is allowed.
+    void lookupTableOfTheBook() {
+        std::string cube = "LUT_3D_SIZE 2\n";
+        for (int b = 0; b < 2; ++b)
+            for (int g = 0; g < 2; ++g)
+                for (int r = 0; r < 2; ++r) cube += std::to_string(1 - r) + " " + std::to_string(1 - g) + " " + std::to_string(1 - b) + "\n";
+        const auto doc = eight_bit_page();
+        const auto made = run(doc, Json{{"op", "add_layer"}, {"page", 1}, {"kind", "adjust"}, {"id", "adj"},
+                                        {"adjust", Json{{"kind", "color_lookup"}, {"data", cube}, {"file_name", "inv.cube"}}}});
+        QVERIFY(shown(made) != shown(doc));
+        // the same correction in a book without its table: it is not drawn with the other book's
+        const auto other = with_correction(doc, *correction(made).adjust);
+        QVERIFY(other.luts.empty());
+        QVERIFY(shown(other) == shown(doc));
+        QVERIFY(refusal(other, Json{{"op", "set_layer"}, {"page", 1}, {"id", "paint"}, {"name", "x"}}).starts_with("apply: "));
+        QVERIFY(refusal(other, Json{{"op", "delete_layer"}, {"page", 1}, {"id", "adj"}}).empty());
+    }
+
+    // A PSD whose only layer records are adjustment layers, its picture in the merged image only: the merged picture as
+    // one layer, as Python reads it (psd.read_psd: no layers, the adjustment layer skipped) — the adjustment layer is
+    // not laid over it again (the merged picture shows it already).
+    void psdOfAdjustmentLayersOnly() {
+        const auto be16 = [](std::string& out, unsigned v) {
+            out += static_cast<char>((v >> 8) & 0xff);
+            out += static_cast<char>(v & 0xff);
+        };
+        const auto be32 = [](std::string& out, std::uint32_t v) {
+            for (int shift = 24; shift >= 0; shift -= 8) out += static_cast<char>((v >> shift) & 0xff);
+        };
+        constexpr std::uint32_t w = 40, h = 30;
+        std::string psd = "8BPS";
+        be16(psd, 1);
+        psd += std::string(6, '\0');
+        be16(psd, 3);
+        be32(psd, h);
+        be32(psd, w);
+        be16(psd, 8);
+        be16(psd, 3);
+        be32(psd, 0);  // (colour mode data)
+        be32(psd, 0);  // (image resources)
+        std::string rec;
+        for (int i = 0; i < 4; ++i) be32(rec, 0);  // (top, left, bottom, right)
+        be16(rec, 4);
+        for (const int c : {-1, 0, 1, 2}) {
+            be16(rec, static_cast<unsigned>(c) & 0xffff);
+            be32(rec, 2);
+        }
+        rec += "8BIMnorm";
+        rec += std::string{static_cast<char>(255), 0, 0, 0};
+        std::string extra;
+        be32(extra, 0);  // (no mask)
+        be32(extra, 0);  // (no blending ranges)
+        extra += "\x03inv";
+        extra += "8BIMnvrt";
+        be32(extra, 0);
+        be32(rec, static_cast<std::uint32_t>(extra.size()));
+        rec += extra;
+        std::string info;
+        be16(info, 1);
+        info += rec;
+        for (int i = 0; i < 4; ++i) be16(info, 0);  // (each channel: raw, nothing)
+        if (info.size() % 2 != 0) info += '\0';
+        std::string layer_info;
+        be32(layer_info, static_cast<std::uint32_t>(info.size()));
+        layer_info += info;
+        be32(layer_info, 0);  // (global mask)
+        be32(psd, static_cast<std::uint32_t>(layer_info.size()));
+        psd += layer_info;
+        be16(psd, 0);
+        psd += std::string(w * h, static_cast<char>(200)) + std::string(w * h, static_cast<char>(120)) + std::string(w * h, static_cast<char>(60));
+        QTemporaryDir tmp;
+        const std::string file = tmp.path().toStdString() + "/only.psd";
+        genko::test::write_bytes(QString::fromStdString(file), psd);
+        const auto done = run_ops(blank(), Json::array({Json{{"op", "import_psd"}, {"page", 1}, {"path", file}, {"id", "psd"}}}));
+        const auto& layers = done.doc.page(0).layers;
+        QCOMPARE(layers.size(), std::size_t(1));
+        QCOMPARE(layers[0].kind, core::LayerKind::Raster);
+        QCOMPARE(layers[0].title, std::string("PSD"));
+        QCOMPARE(done.results[0]["skipped"], Json::array({"inv"}));
+        const std::string pixels = render::raster::layer_pixels(done.doc.page(0), layers[0]).convert("RGBA").tobytes();
+        bool found = false;
+        for (std::size_t i = 0; i + 3 < pixels.size() && !found; i += 4) {
+            if (static_cast<unsigned char>(pixels[i + 3]) != 255) continue;
+            found = true;
+            QCOMPARE(static_cast<int>(static_cast<unsigned char>(pixels[i])), 200);
+            QCOMPARE(static_cast<int>(static_cast<unsigned char>(pixels[i + 1])), 120);
+            QCOMPARE(static_cast<int>(static_cast<unsigned char>(pixels[i + 2])), 60);
+        }
+        QVERIFY(found);
+    }
+
+    // A LUT file's numbers and a .cube's are C's whatever the locale (the app and the command line run in the
+    // environment's: a German or French one has a comma for the decimal point).
+    void lookupNumbersWhateverTheLocale() {
+        const genko::test::CommaLocale comma;
+        QVERIFY2(comma.ok(), "no locale with a comma for the decimal point could be set (de_DE, fr_FR, or made by localedef)");
+        std::string cube = "LUT_3D_SIZE 2\n";
+        for (int b = 0; b < 2; ++b)
+            for (int g = 0; g < 2; ++g)
+                for (int r = 0; r < 2; ++r) cube += std::to_string(1 - r) + ".0000 " + std::to_string(1 - g) + ".0000 " + std::to_string(1 - b) + ".0000\n";
+        const auto doc = eight_bit_page();
+        const auto made = run_ops(doc, Json::array({Json{{"op", "add_layer"}, {"page", 1}, {"kind", "adjust"}, {"id", "adj"},
+                                                         {"adjust", Json{{"kind", "color_lookup"}, {"data", cube}}}}}));
+        QCOMPARE((*correction(made.doc).adjust)["size"], Json(2));
+        const auto half = with_correction(eight_bit_page(), Json{{"kind", "invert"}}, 0.5);
+        const std::string baked = formats::bake_cube(half, half.page(0), 2, "t");
+        QVERIFY2(baked.find(',') == std::string::npos, baked.c_str());
+        QVERIFY2(baked.find("\n0.500000 0.500000 0.500000\n") != std::string::npos, baked.c_str());
+    }
+
+    // The journal keeps a LUT file's text an op gave as its length (the table is the book's asset; the op is not done
+    // again from the journal), as a picture's base64.
+    void journalLeavesTheFileOut() {
+        std::string cube = "LUT_3D_SIZE 2\n";
+        for (int b = 0; b < 2; ++b)
+            for (int g = 0; g < 2; ++g)
+                for (int r = 0; r < 2; ++r) cube += std::to_string(r) + " " + std::to_string(g) + " " + std::to_string(b) + "\n";
+        const std::string said = "<" + std::to_string(cube.size()) + " chars>";
+        const auto done = run_ops(eight_bit_page(), Json::array({Json{{"op", "add_layer"}, {"page", 1}, {"kind", "adjust"}, {"id", "adj"},
+                                                                      {"adjust", Json{{"kind", "color_lookup"}, {"data", cube}}}},
+                                                                 Json{{"op", "set_adjustment"}, {"page", 1}, {"id", "adj"}, {"data", cube}},
+                                                                 Json{{"op", "set_layer"}, {"page", 1}, {"id", "adj"}, {"adjust", Json{{"kind", "color_lookup"}, {"data", cube}}}},
+                                                                 Json{{"op", "filter_raster"}, {"page", 1}, {"id", "paint"}, {"kind", "color_lookup"}, {"data", cube}}}));
+        QCOMPARE(done.journal_ops[0]["adjust"]["data"], Json(said));
+        QCOMPARE(done.journal_ops[1]["data"], Json(said));
+        QCOMPARE(done.journal_ops[2]["adjust"]["data"], Json(said));
+        QCOMPARE(done.journal_ops[3]["data"], Json(said));
+        QCOMPARE(done.journal_ops[0]["adjust"]["kind"], Json("color_lookup"));
+    }
+
+    // The largest table: a .cube of 129³ with six decimals (what a table holds at most) read from an op's text.
+    void largestTableRead() {
+        std::string cube = "LUT_3D_SIZE 129\n";
+        cube.reserve(129 * 129 * 129 * 27 + 32);
+        char line[64];
+        for (int b = 0; b < 129; ++b)
+            for (int g = 0; g < 129; ++g)
+                for (int r = 0; r < 129; ++r) {
+                    const int n = std::snprintf(line, sizeof line, "%.6f %.6f %.6f\n", r / 128.0, g / 128.0, b / 128.0);
+                    cube.append(line, static_cast<std::size_t>(n));
+                }
+        QVERIFY(cube.size() > std::size_t(32) * 1024 * 1024);
+        const auto made = run_ops(eight_bit_page(), Json::array({Json{{"op", "add_layer"}, {"page", 1}, {"kind", "adjust"}, {"id", "adj"},
+                                                                      {"adjust", Json{{"kind", "color_lookup"}, {"data", cube}}}}}));
+        QCOMPARE((*correction(made.doc).adjust)["size"], Json(129));
+    }
+
+    // The largest .cube written: 256 (each place of the lattice where it is, a dither's too) — inverted, then a dither of
+    // PhotoCraft's (a lookup of no table): each entry 1 − v, then ± ½ level by its place.
+    void largestCubeWritten() {
+        auto doc = with_correction(eight_bit_page(), Json{{"kind", "invert"}});
+        core::Layer dither;
+        dither.id = "dither";
+        dither.role = core::LayerRole::User;
+        dither.kind = core::LayerKind::Adjust;
+        dither.adjust = Json{{"kind", "color_lookup"}, {"interpolation", "trilinear"}, {"dither", true}};
+        doc.edit_page(0).layers.push_back(std::move(dither));
+        const core::lut3d::Table baked = core::lut3d::parse_cube(formats::bake_cube(doc, doc.page(0), 256, "big"));
+        QCOMPARE(baked.size, std::size_t(256));
+        for (const std::array<std::size_t, 3> at : {std::array<std::size_t, 3>{0, 0, 0}, {255, 255, 255}, {3, 77, 130}, {128, 1, 254}, {250, 200, 255}}) {
+            const std::size_t i = (at[2] * 256 + at[1]) * 256 + at[0];
+            const double d = core::lut3d::bayer4(static_cast<int>(at[2] * 256 + at[0]), static_cast<int>(at[1])) / 255.0;
+            for (std::size_t c = 0; c < 3; ++c) {
+                const double want = std::clamp(1.0 - static_cast<double>(at[c]) / 255.0 + d, 0.0, 1.0);
+                QVERIFY2(std::abs(baked.data[i * 3 + c] - want) < 2e-6, qPrintable(QStringLiteral("%1,%2,%3.%4: %5 / %6").arg(at[0]).arg(at[1]).arg(at[2]).arg(c).arg(baked.data[i * 3 + c]).arg(want)));
+            }
+        }
+    }
+
+    // Channel records in another space than the page's: each colour through the conversions once, however many pixels
+    // have it (a page of few colours is not converted pixel by pixel).
+    void recordsInAnotherSpaceOncePerColour() {
+        int into = 0, back = 0;
+        core::set_tone_bridge([&into, &back](const core::Page&, std::string_view) {
+            core::ToneBridge bridge;
+            bridge.into = [&into](const std::array<double, 3>& rgb) {
+                ++into;
+                return std::vector<double>{rgb[0], rgb[1], rgb[2], 1.0};
+            };
+            bridge.back = [&back](const std::vector<double>& tones) {
+                ++back;
+                return std::array<double, 3>{tones[0], tones[1], tones[2]};
+            };
+            return bridge;
+        });
+        const auto doc = eight_bit_page();
+        const core::AdjustPtr f = core::adjust_function(
+            Json{{"kind", "levels"}, {"native", Json{{"method", "upstream"}, {"space", "cmyk"}, {"channels", Json{{"cyan", Json{{"out_white", 128}}}}}}}}, doc.page(0));
+        render::adjust::install_tone_bridge();  // (the drawing's own again)
+        QVERIFY(f);
+        const std::array<std::array<double, 3>, 3> few{{{0.25, 0.5, 0.75}, {0.1, 0.2, 0.3}, {1.0, 1.0, 1.0}}};
+        std::array<std::array<double, 3>, 3> first{};
+        for (int i = 0; i < 3000; ++i) {
+            const auto out = f->apply(few[std::size_t(i % 3)], i % 50, i / 50);
+            if (i < 3) first[std::size_t(i)] = out;
+            QVERIFY(out == first[std::size_t(i % 3)]);
+        }
+        QVERIFY(std::abs(first[0][0] - 0.25 * 128 / 255) < 1e-9);  // (cyan's brightness: its record)
+        QVERIFY2(into <= 3 && back <= 6, qPrintable(QStringLiteral("%1 into, %2 back").arg(into).arg(back)));
     }
 };
 

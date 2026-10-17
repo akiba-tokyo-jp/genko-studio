@@ -7,7 +7,7 @@
 // The user's decision 5 (PC2a, SPEC.md COLOR-04): this build writes a book's correction layers into its PSDs as
 // adjustment layers, where psd.py puts them into the merged picture only; the calls are compared with Python's as
 // psd.py writes PSDs (render::psd::PythonView), and each PSD call is made again as this build writes them: the same
-// files but adjustment layers among the layers (psdAdjustmentLayers).
+// files but adjustment layers among the layers (psdAdjustmentLayers) — a PSD of no correction layer Python's very bytes.
 // Skipped without the Python reference.
 
 #include <QtTest>
@@ -649,7 +649,7 @@ private slots:
         if (view_results_.empty()) QSKIP("exports() did not run");
         const std::string out_root = u8(out_);
         const std::string own_root = u8(scratch_.path() + "/out_own");
-        int calls = 0, files = 0, adjustments = 0;
+        int calls = 0, files = 0, adjustments = 0, same = 0;
         for (const Json& job : jobs_) {
             const std::string id = job["id"].get<std::string>();
             const std::string fn = job["call"].get<std::string>();
@@ -694,14 +694,22 @@ private slots:
                 const Json view_layers = psd_layers(theirs, &view_adjustments);
                 QCOMPARE(view_adjustments, 0);
                 QVERIFY2(genko::test::strict_equal(own_layers, view_layers, &where), qPrintable(own_file + QStringLiteral(": ") + QString::fromStdString(where)));
+                if (own_adjustments == 0) {  // (no correction layer written: Python's very bytes, as this build writes PSDs)
+                    const QString python_file = QString::fromStdString(u8(out_py_) + own_path.substr(own_root.size()));
+                    QVERIFY2(mine == genko::test::read_bytes(python_file), qPrintable(own_file + QStringLiteral(" differs from Python's ") + python_file));
+                    QVERIFY2(mine == theirs, qPrintable(own_file));
+                    ++same;
+                }
                 adjustments += own_adjustments;
                 ++files;
             }
             ++calls;
         }
-        qInfo("decision 5: %d PSD calls, %d PSD files: %d adjustment layers among their layers", calls, files, adjustments);
+        qInfo("decision 5: %d PSD calls, %d PSD files: %d adjustment layers among their layers; %d files of no correction layer Python's bytes",
+              calls, files, adjustments, same);
         QVERIFY(calls >= 8 && files >= 10);
         QVERIFY(adjustments > 0);
+        QVERIFY(same > 0);
     }
 };
 

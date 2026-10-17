@@ -14,6 +14,7 @@
 #include <QTemporaryDir>
 
 #include <cmath>
+#include <cstdio>
 #include <set>
 #include <string>
 #include <vector>
@@ -307,6 +308,89 @@ private slots:
         QCOMPARE(adjustments[7]["reversed"], Json(true));
         QCOMPARE(adjustments[8]["kind"], Json("colorlookup"));
         QCOMPARE(adjustments[8]["size"], Json(33));
+    }
+
+    // A 2³ .cube whose every entry is scaled by k (another k: another table).
+    static std::string scaled_cube(double k) {
+        std::string out = "LUT_3D_SIZE 2\n";
+        char line[64];
+        for (int b = 0; b < 2; ++b)
+            for (int g = 0; g < 2; ++g)
+                for (int r = 0; r < 2; ++r) {
+                    std::snprintf(line, sizeof line, "%.4f %.4f %.4f\n", r * k, g * k, b * k);
+                    out += line;
+                }
+        return out;
+    }
+    // A new book of `pages` with a picture of one colour on page 1 (a paint layer "pic").
+    QString picture_book(const QString& name, int pages = 1) {
+        const QString book = path(name);
+        const auto made = genko::test::run_genko({QStringLiteral("new"), book, QStringLiteral("--pages"), QString::number(pages)});
+        if (made.exit_code != 0) qWarning("%s", qPrintable(made.described()));
+        const genko::render::Image picture = genko::render::Image::create("RGBA", genko::render::Size{60, 40}, genko::render::Ink{200, 120, 60, 255});
+        (void)apply(book, name + QStringLiteral("-pic.json"),
+                    Json::array({Json{{"op", "add_layer"}, {"page", 1}, {"kind", "paint"}, {"id", "pic"}},
+                                 Json{{"op", "set_layer"}, {"page", 1}, {"id", "pic"}, {"panel_each", false}, {"panel_clip", false}},
+                                 Json{{"op", "put_raster"}, {"page", 1}, {"id", "pic"}, {"png_base64", genko::core::b64encode(genko::render::write_png(picture))}}}));
+        return book;
+    }
+    // The book is read again and can be changed (not read-only).
+    bool opens(const QString& book, const QString& name) {
+        return apply(book, name, Json::array({Json{{"op", "add_layer"}, {"page", 1}, {"kind", "paint"}}})).value("ok", false);
+    }
+    std::vector<std::string> lookup_refs(const Json& saved, int page) {
+        std::vector<std::string> out;
+        for (const Json& layer : saved["pages"][page - 1]["layers"])
+            if (layer.value("kind", std::string()) == "adjust" && layer["adjust"].contains("lut")) out.push_back(layer["adjust"]["lut"].get<std::string>());
+        return out;
+    }
+
+    // A page of another book whose correction uses a 3D LUT's table (import_pages, 作品の結合): the table comes with the
+    // page — the book is written, read again (not read-only) and drawn as the other book draws that page —, each command
+    // a process of its own (no table an earlier op made in it).
+    void importPagesTakeTheirTables() {
+        const QString a = picture_book(QStringLiteral("lut-a.genko"));
+        const Json made = apply(a, QStringLiteral("lut-a.json"),
+                                Json::array({Json{{"op", "add_layer"}, {"page", 1}, {"kind", "adjust"}, {"id", "half"},
+                                                  {"adjust", Json{{"kind", "color_lookup"}, {"data", scaled_cube(0.5)}, {"file_name", "half.cube"}}}}}));
+        QVERIFY2(made.value("ok", false), made.dump().c_str());
+        const QString b = path(QStringLiteral("lut-b.genko"));
+        QCOMPARE(genko::test::run_genko({QStringLiteral("new"), b, QStringLiteral("--pages"), QStringLiteral("1")}).exit_code, 0);
+        const Json imported = apply(b, QStringLiteral("lut-import.json"), Json::array({Json{{"op", "import_pages"}, {"from", a.toStdString()}}}));
+        QVERIFY2(imported.value("ok", false), imported.dump().c_str());
+        const std::vector<std::string> refs = lookup_refs(project(b), 2);
+        QCOMPARE(refs.size(), std::size_t(1));
+        QCOMPARE(refs, lookup_refs(project(a), 1));
+        QVERIFY(QFile::exists(asset(b, refs[0], ".gklut")));
+        const Json there = genko({QStringLiteral("inspect"), a, QStringLiteral("--pixel"), QStringLiteral("1:10,20"), QStringLiteral("--dpi"), QStringLiteral("40")});
+        const Json here = genko({QStringLiteral("inspect"), b, QStringLiteral("--pixel"), QStringLiteral("2:10,20"), QStringLiteral("--dpi"), QStringLiteral("40")});
+        QVERIFY2(there.contains("values") && here["values"] == there["values"], (here.dump() + " / " + there.dump()).c_str());
+        QVERIFY2(std::abs(there["values"][0].get<double>() - 100 / 255.0) < 3 / 255.0, there.dump().c_str());  // (the table: half of 200)
+        QVERIFY(opens(b, QStringLiteral("lut-b-again.json")));
+    }
+
+    // A PSD of nine color_lookup adjustment layers, each its own table, read into a book that holds none of them: every
+    // table comes into the book with its correction (written as its asset), each command a process of its own.
+    void psdOfNineTables() {
+        const QString c = picture_book(QStringLiteral("nine.genko"));
+        Json ops = Json::array();
+        for (int i = 0; i < 9; ++i)
+            ops.push_back(Json{{"op", "add_layer"}, {"page", 1}, {"kind", "adjust"}, {"id", "lut" + std::to_string(i)}, {"name", "表" + std::to_string(i)},
+                               {"adjust", Json{{"kind", "color_lookup"}, {"data", scaled_cube(0.5 + i * 0.05)}, {"file_name", "t" + std::to_string(i) + ".cube"}}}});
+        QVERIFY(apply(c, QStringLiteral("nine.json"), ops).value("ok", false));
+        const std::vector<std::string> made = lookup_refs(project(c), 1);
+        QCOMPARE(std::set<std::string>(made.begin(), made.end()).size(), std::size_t(9));
+        const auto exported = genko::test::run_genko({QStringLiteral("export"), c, path(QStringLiteral("nine.psd")), QStringLiteral("--format"), QStringLiteral("psd"),
+                                                      QStringLiteral("--page"), QStringLiteral("1"), QStringLiteral("--dpi"), QStringLiteral("40"), QStringLiteral("--json")});
+        QVERIFY2(exported.exit_code == 0, qPrintable(exported.described()));
+        const QString d = picture_book(QStringLiteral("nine-in.genko"));
+        const Json imported = apply(d, QStringLiteral("nine-import.json"),
+                                    Json::array({Json{{"op", "import_psd"}, {"page", 1}, {"path", path(QStringLiteral("nine.psd")).toStdString()}}}));
+        QVERIFY2(imported.value("ok", false), imported.dump().c_str());
+        const std::vector<std::string> read = lookup_refs(project(d), 1);
+        QCOMPARE(read.size(), std::size_t(9));
+        for (const std::string& ref : read) QVERIFY2(QFile::exists(asset(d, ref, ".gklut")), ref.c_str());
+        QVERIFY(opens(d, QStringLiteral("nine-again.json")));
     }
 };
 

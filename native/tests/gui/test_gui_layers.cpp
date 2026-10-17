@@ -451,6 +451,76 @@ private slots:
         const core::Layer* adjust = book.layer("adj");
         QCOMPARE((*adjust->adjust)["black"], Json(40.0));
         QCOMPARE((*adjust->adjust)["native"], (Json{{"blend", "multiply"}}));
+        QVERIFY2(!adjust->adjust->contains("gamma"), adjust->adjust->dump().c_str());  // (what was not changed: not added)
+    }
+
+    // (the user's decision 3: an existing correction is set again in its own form) Python's levels and tone curve on one
+    // colour only (`channel`: r, g, b) keep it through their windows — the window shows it and changes it —, and what a
+    // window does not change stays as it was (nothing changed: the same correction).
+    void correctionKeepsItsChannel() {
+        auto doc = book_doc();
+        doc = core::CommandBus().apply(doc, Json::array({Json{{"op", "add_layer"}, {"page", 1}, {"kind", "adjust"}, {"id", "red"},
+                                                              {"adjust", Json{{"kind", "levels"}, {"black", 20}, {"white", 200}, {"channel", "r"}}}},
+                                                         Json{{"op", "add_layer"}, {"page", 1}, {"kind", "adjust"}, {"id", "green"},
+                                                              {"adjust", Json{{"kind", "curve"}, {"points", Json::array({Json::array({0, 0}), Json::array({128, 160}), Json::array({255, 255})})},
+                                                                              {"channel", "g"}}}}}),
+                                       core::Actor("human:tester")).doc;
+        Book book(doc);
+        gui_test::Answers answers;
+        auto& panel = book.panel();
+        QString shown;
+        answers.responder->exec = [&shown](QDialog* dialog) {
+            if (dialog->objectName() != QStringLiteral("adjust_dialog")) return int(QDialog::Rejected);
+            auto* channel = dialog->findChild<QComboBox*>(QStringLiteral("field_channel"));
+            shown = channel != nullptr ? channel->currentText() : QStringLiteral("(no field)");
+            return int(QDialog::Accepted);
+        };
+        for (const auto& [id, words] : {std::pair<std::string, QString>{"red", QStringLiteral("赤")}, std::pair<std::string, QString>{"green", QStringLiteral("緑")}}) {
+            const Json before = *book.layer(id)->adjust;
+            QVERIFY(book.choose(id));
+            panel.edit_special();
+            QCOMPARE(shown, words);
+            QVERIFY2(*book.layer(id)->adjust == before, book.layer(id)->adjust->dump().c_str());
+        }
+        // the colour changed in the window: blue only
+        answers.responder->exec = [](QDialog* dialog) {
+            if (dialog->objectName() != QStringLiteral("adjust_dialog")) return int(QDialog::Rejected);
+            auto* channel = dialog->findChild<QComboBox*>(QStringLiteral("field_channel"));
+            channel->setCurrentIndex(channel->findText(QStringLiteral("青")));
+            return int(QDialog::Accepted);
+        };
+        QVERIFY(book.choose("red"));
+        panel.edit_special();
+        QCOMPARE(*book.layer("red")->adjust, (Json{{"kind", "levels"}, {"black", 20}, {"white", 200}, {"channel", "b"}}));
+    }
+
+    // (the user's decision 2) A correction layer's 合成 in the layer panel is its native.blend — what it is drawn by —,
+    // not the layer's own blend, which a correction does not use: shown, set (set_adjustment) and listed so.
+    void correctionBlendIsItsNative() {
+        auto doc = book_doc();
+        doc = core::CommandBus().apply(doc, Json::array({Json{{"op", "add_layer"}, {"page", 1}, {"kind", "adjust"}, {"id", "adj"},
+                                                              {"adjust", Json{{"kind", "invert"}, {"native", Json{{"blend", "screen"}}}}}}}),
+                                       core::Actor("human:tester")).doc;
+        Book book(doc);
+        auto& panel = book.panel();
+        QVERIFY(book.choose("adj"));
+        auto* blend = book.child<QComboBox>("layer_blend");
+        QCOMPARE(blend->currentData().toString(), QStringLiteral("screen"));
+        const int multiply = blend->findData(QStringLiteral("multiply"));
+        blend->setCurrentIndex(multiply);
+        emit blend->activated(multiply);
+        const core::Layer* layer = book.layer("adj");
+        QCOMPARE((*layer->adjust)["native"]["blend"], Json("multiply"));
+        QCOMPARE(layer->blend, std::string("normal"));
+        const auto& ids = panel.ids();
+        const auto row = static_cast<int>(std::find(ids.begin(), ids.end(), std::string("adj")) - ids.begin());
+        QVERIFY2(panel.list()->item(row)->data(Qt::UserRole + 2).toString().contains(QStringLiteral("乗算")),
+                 qPrintable(panel.list()->item(row)->data(Qt::UserRole + 2).toString()));
+        // back to normal: the native's blend taken out
+        const int normal = blend->findData(QStringLiteral("normal"));
+        blend->setCurrentIndex(normal);
+        emit blend->activated(normal);
+        QVERIFY2(!book.layer("adj")->adjust->contains("native"), book.layer("adj")->adjust->dump().c_str());
     }
 
     // PC2's form of a correction's settings (app/adjust_forms): its fields from the kinds' table or its own, a native

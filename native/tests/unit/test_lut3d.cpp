@@ -2,7 +2,8 @@
 // read as PhotoCraft reads them (cms/lutfile.rs's tests: a .cube written and read back, red varying fastest, a 1D .cube
 // spread to 33³, a .3dl's blue-fastest rows and output depth, a .look's hexadecimal floats, broken ones refused), the
 // eight generated looks in 0..1, the lookup's identity both ways (compose/adjust.rs 605-616) and its dither's balance
-// (637-642), and the table as a book holds it (GKLU: the same table the same bytes; what is not one refused).
+// (637-642), and the table as a book holds it (GKLU: the same table the same bytes; what is not one refused); the
+// numbers read and written whatever the locale.
 
 #include <QtTest/QtTest>
 
@@ -17,6 +18,7 @@
 #include "core/error.hpp"
 #include "core/ink.hpp"
 #include "core/lut3d.hpp"
+#include "../support/comma_locale.hpp"
 
 using namespace genko;
 namespace lut3d = core::lut3d;
@@ -93,6 +95,40 @@ private slots:
         } catch (const core::Error& error) {
             QCOMPARE(QString::fromUtf8(error.what()), QStringLiteral("expected 8 entries, found 1"));
         }
+    }
+
+    // A file's numbers are read as Rust reads them (a sign, ".5", "5.", an exponent; past a float's range an infinity —
+    // refused as not finite — or 0; no hexadecimal), and a table is written with a point, whatever the locale: the app and
+    // the command line run in the environment's (a German or French one has a comma for the decimal point).
+    void numbersWhateverTheLocale() {
+        const auto check = [] {
+            const lut3d::Table t = lut3d::parse_cube("LUT_3D_SIZE 2\n0.0000 0.0000 0.0000\n+.5 0 0\n0 1. 0\n1 1 0\n0 0 5e-1\n1 0 1e-60\n0 1 1\n1 1 1.0E0\n");
+            QCOMPARE(t.data[3], 0.5f);
+            QCOMPARE(t.data[7], 1.0f);
+            QCOMPARE(t.data[14], 0.5f);
+            QCOMPARE(t.data[17], 0.0f);
+            QCOMPARE(t.data[23], 1.0f);
+            for (const char* bad : {"1e40", "-inf", "nan", "0x1p-1", "0,5", "+-1", "1e", ""}) {
+                const std::string text = std::string("LUT_3D_SIZE 2\n") + bad + " 0 0\n1 0 0\n0 1 0\n1 1 0\n0 0 1\n1 0 1\n0 1 1\n1 1 1\n";
+                QVERIFY_EXCEPTION_THROWN(lut3d::parse_cube(text), core::Error);
+            }
+            // a .3dl's numbers too
+            std::string dl = "0 1023\n";
+            for (int r = 0; r < 2; ++r)
+                for (int g = 0; g < 2; ++g)
+                    for (int b = 0; b < 2; ++b) dl += std::to_string(r * 1023) + ".0 " + std::to_string(g * 1023) + " " + std::to_string(b * 1023) + "\n";
+            QCOMPARE(lut3d::parse_3dl(dl).data, lut3d::identity(2).data);
+            lut3d::Table half = lut3d::identity(2);
+            half.data[3] = 0.5f;
+            const std::string written = lut3d::write_cube(half);
+            QVERIFY2(written.find(',') == std::string::npos, written.c_str());
+            QVERIFY2(written.find("\n0.500000 0.000000 0.000000\n") != std::string::npos, written.c_str());
+            QCOMPARE(lut3d::parse_cube(written).data, half.data);
+        };
+        check();  // (the C locale)
+        const genko::test::CommaLocale comma;
+        QVERIFY2(comma.ok(), "no locale with a comma for the decimal point could be set (de_DE, fr_FR, or made by localedef)");
+        check();
     }
 
     void builtinsInRange() {

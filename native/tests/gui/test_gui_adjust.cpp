@@ -352,6 +352,90 @@ private slots:
         QCOMPARE((*book.window->target_layer()->adjust)["native"]["method"], Json("modern"));
         QCOMPARE((*book.window->target_layer()->adjust)["brightness"], Json(25));
     }
+
+    // (the user's decision 3: an existing correction keeps its own form) 属性 sends only what is changed: Python's forms —
+    // a tone curve of a gamma (no points), a levels' gamma of three places, a gradient map's colours — stay as they are
+    // when only the opacity or the blend is changed (no set_adjustment at all for the opacity).
+    void propertiesChangeOnlyWhatIsChanged() {
+        auto doc = book_doc();
+        const std::vector<std::pair<std::string, Json>> kept{
+            {"gam", Json{{"kind", "curve"}, {"gamma", 2.0}}},
+            {"lev", Json{{"kind", "levels"}, {"black", 10}, {"gamma", 1.234}}},
+            {"map", Json{{"kind", "gradient_map"}, {"colors", Json::array({Json::array({0, 0, 80}), Json::array({255, 240, 200})})}}}};
+        Json ops = Json::array();
+        for (const auto& [id, adjust] : kept) ops.push_back(Json{{"op", "add_layer"}, {"page", 1}, {"kind", "adjust"}, {"id", id}, {"adjust", adjust}});
+        doc = core::CommandBus(render::ops_registry()).apply(doc, ops, core::Actor("human:tester")).doc;
+        Book book(doc);
+        auto* properties = book.window->findChild<QDockWidget*>(QStringLiteral("属性"));
+        properties->show();
+        auto* panel = qobject_cast<app::adjust_forms::PropertiesPanel*>(properties->widget());
+        QVERIFY(panel != nullptr);
+        for (const auto& [id, adjust] : kept) {
+            book.window->set_target_layer(id);
+            panel->refresh();
+            QVERIFY(panel->form() != nullptr);
+            panel->opacity()->setValue(60);
+            panel->commit();
+            QCOMPARE(book.layer(id)->opacity, 0.6);
+            QVERIFY2(*book.layer(id)->adjust == adjust, (id + ": " + book.layer(id)->adjust->dump()).c_str());
+            panel->refresh();
+            panel->blend()->setCurrentIndex(panel->blend()->findData(QStringLiteral("multiply")));
+            panel->commit();
+            Json blended = adjust;
+            blended["native"] = Json{{"blend", "multiply"}};
+            QVERIFY2(*book.layer(id)->adjust == blended, (id + ": " + book.layer(id)->adjust->dump()).c_str());
+        }
+    }
+
+    // 属性: a channel record set back to doing nothing is taken out while another stays (levels' numbers, a tone curve's
+    // points made straight).
+    void propertiesTakeOutARecord() {
+        auto doc = book_doc();
+        const Json straight = Json::array({Json::array({0, 0}), Json::array({255, 255})});
+        Json ops = Json::array({Json{{"op", "add_layer"}, {"page", 1}, {"kind", "adjust"}, {"id", "lev"},
+                                     {"adjust", Json{{"kind", "levels"}, {"native", Json{{"space", "rgb"}, {"channels", Json{{"red", Json{{"black", 20}}}, {"green", Json{{"black", 40}}}}}}}}}},
+                                Json{{"op", "add_layer"}, {"page", 1}, {"kind", "adjust"}, {"id", "crv"},
+                                     {"adjust", Json{{"kind", "curve"}, {"points", straight},
+                                                     {"native", Json{{"space", "rgb"}, {"channels", Json{{"red", Json::array({Json::array({0, 20}), Json::array({255, 255})})},
+                                                                                                        {"green", Json::array({Json::array({0, 40}), Json::array({255, 255})})}}}}}}}}});
+        doc = core::CommandBus(render::ops_registry()).apply(doc, ops, core::Actor("human:tester")).doc;
+        Book book(doc);
+        auto* properties = book.window->findChild<QDockWidget*>(QStringLiteral("属性"));
+        properties->show();
+        auto* panel = qobject_cast<app::adjust_forms::PropertiesPanel*>(properties->widget());
+        QVERIFY(panel != nullptr);
+        // levels: green's black back to 0
+        book.window->set_target_layer("lev");
+        panel->refresh();
+        auto* which = panel->form()->findChild<QComboBox*>(QStringLiteral("adjust_channel"));
+        which->setCurrentIndex(which->findData(QStringLiteral("green")));
+        panel->form()->findChild<QDoubleSpinBox*>(QStringLiteral("adjust_channel_black"))->setValue(0);
+        panel->commit();
+        Json channels = (*book.layer("lev")->adjust)["native"]["channels"];
+        QVERIFY2(channels.contains("red") && !channels.contains("green"), channels.dump().c_str());
+        // a tone curve: green's points straight
+        book.window->set_target_layer("crv");
+        panel->refresh();
+        which = panel->form()->findChild<QComboBox*>(QStringLiteral("adjust_channel"));
+        which->setCurrentIndex(which->findData(QStringLiteral("green")));
+        auto* own = panel->form()->findChild<app::CurveEditor*>(QStringLiteral("adjust_channel_curve"));
+        own->set_points({{0, 0}, {255, 255}});
+        emit own->changed();
+        panel->commit();
+        channels = (*book.layer("crv")->adjust)["native"]["channels"];
+        QVERIFY2(channels.contains("red") && !channels.contains("green"), channels.dump().c_str());
+    }
+
+    // The formula's choice says it in the person's words: Photoshop's or Genko's (not the maker's word 上流).
+    void formulaInPlainWords() {
+        for (const std::string kind : {"levels", "curve"}) {
+            app::adjust_forms::Form form;
+            app::adjust_forms::form_kind(kind)->build(form, {});
+            auto* method = form.findChild<QComboBox*>(QStringLiteral("field_native.method"));
+            QVERIFY(method != nullptr);
+            for (int i = 0; i < method->count(); ++i) QVERIFY2(!method->itemText(i).contains(QStringLiteral("上流")), qPrintable(method->itemText(i)));
+        }
+    }
 };
 
 QTEST_MAIN(TestGuiAdjust)
