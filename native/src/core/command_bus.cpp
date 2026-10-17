@@ -8,6 +8,7 @@
 #include <utility>
 #include <vector>
 
+#include "core/adjust.hpp"
 #include "core/channels.hpp"
 #include "core/covers.hpp"
 #include "core/ops_schema.hpp"
@@ -901,6 +902,7 @@ ApplyResult CommandBus::apply(const Document& doc, const Json& ops_in, const Act
                     validate_ink_document(work);  // (color-mode@1: what an op leaves on a CMYK or Lab page)
                     validate_color_model(work);   // (color-model@1: an RGB page's mode)
                     validate_channels(work);      // (channels@1: a page's alpha and spot channels)
+                    validate_adjustments(work);   // (adjustments@1: a correction's native and own kinds)
                 } catch (const Error& error) {
                     if (error.code() == "not_yet_ported") throw;
                     throw OpError(error.what());

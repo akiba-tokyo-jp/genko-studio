@@ -5,6 +5,7 @@
 #include <string_view>
 #include <vector>
 
+#include "core/adjust.hpp"
 #include "core/exposure.hpp"
 #include "core/filters.hpp"
 #include "core/json.hpp"
@@ -14,16 +15,18 @@
 // functions instead of its 256-entry tables. On an 8-bit value the result is the table's within its rounding; between
 // the 8-bit steps the samples keep their place; an HDR sample beyond 0..1 goes on through the same formula where the
 // adjustment is a curve of its own (gamma, invert, hue, value), and is held to 0..1 where the adjustment itself maps
-// onto that range (levels, a tone curve through points, posterize, a threshold, a gradient map).
+// onto that range (levels, a tone curve through points, posterize, a threshold, a gradient map). PC2: the
+// AdjustFunction of Python's form (core/adjust.hpp; where the pixel is is not looked at).
 
 namespace genko::core {
 
-class PreciseAdjustment {
+class PreciseAdjustment : public AdjustFunction {
 public:
     // core::adjustment(kind, params)'s exceptions for settings it refuses; PyValueError "unknown filter" otherwise.
     PreciseAdjustment(std::string_view kind, const Json& params);
     // One pixel's red, green and blue (straight sRGB samples).
     std::array<double, 3> operator()(const std::array<double, 3>& rgb) const;
+    std::array<double, 3> apply(const std::array<double, 3>& rgb, int, int) const override { return (*this)(rgb); }
 
 private:
     enum class Way { Levels, Simple, Tone, Gamma, Brightness, Hue, Invert, Posterize, Bitonal, Threshold, Gradient, Stops, Exposure };

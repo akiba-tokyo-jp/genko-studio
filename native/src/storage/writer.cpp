@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <vector>
 
+#include "core/adjust.hpp"
 #include "core/brushes.hpp"
 #include "core/channels.hpp"
 #include "core/error.hpp"
@@ -351,6 +352,9 @@ Json project_payload_v4(const core::Document& doc, AssetStore& store) {
     core::validate_channels(doc);
     std::erase(features, std::string(core::kChannelsFeature));  // (named while a page has a channel)
     if (core::uses_channels(doc)) features.emplace_back(core::kChannelsFeature);
+    core::validate_adjustments(doc);
+    std::erase(features, std::string(core::kAdjustmentsFeature));  // (named while a correction uses it)
+    if (core::uses_adjustments(doc)) features.emplace_back(core::kAdjustmentsFeature);
     std::sort(features.begin(), features.end());
     features.erase(std::unique(features.begin(), features.end()), features.end());
 

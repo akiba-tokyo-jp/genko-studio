@@ -52,6 +52,7 @@ v3 から外すもの: なし（未知キーも `extra` として書き戻す）
 | `color-mode@1` | CMYK/Lab | ページごとの色モード（CMYK・Lab、8/16 bit、埋め込んだ ICC、色の表、GKIR の画素）。COLOR-02（末尾の「色モード」） |
 | `color-model@1` | PC1a・PC1b・PC1d | 色モデル: RGB のプロファイル・精度（8/16/32 bit）・黒点補正、グレースケール、32 bit の CMYK・Lab・グレー（GKIR 版 2）、高精度の画素の `space`、本の文字のガンマ（`text_gamma`、PC1b）、インデックスカラー・2 階調・ダブルトーン・マルチチャンネル（GKIR の Multichannel、PC1d）。COLOR-03（末尾の「色モデル」） |
 | `channels@1` | PC1c | ページの `channels`（アルファ・特色チャンネル。GKIR 版 2 の Mask の画素）。COLOR-03（末尾の「チャンネル」） |
+| `adjustments@1` | PC2-0〜PC2b | 補正レイヤーの `adjust` の C++ 版だけの種類と、Python の種類に足す `native` の設定（描画モード・式の選び方・チャンネルの組など）。COLOR-04（末尾の「補正」） |
 
 拡張を使う op が初めて適用されたときに `features` へ加える。拡張を使わない原稿は `features: []`。
 
@@ -276,7 +277,7 @@ v3 の行（`rev`・`actor`・`at`・`changes`・`via`）をそのまま残し�
   - インデックスカラー（PC1d）: `{"mode": "indexed", "depth": 8, "intent": …, "bpc": false?, "table": {"colors": [[r, g, b], …], "transparent": 番号|null}}`。RGB の系（ページの `rgb`）で、精度は 8 だけ、`profile` は書かない（sRGB）。`colors` は 1〜256 色（0..255 の整数）、`transparent` は表の番号か null（いつも書く）。`table` のキーはこの 2 つだけ。
   - 2 階調（PC1d）: `{"mode": "bitmap", "depth": 8, "profile": "sha256:<64>", "intent": …, "bpc": false?, "inks": […], "bitmap": {"method": "threshold"|"pattern"|"diffusion"|"halftone", "frequency": 1..999, "angle": -180..180, "shape": "round"|"ellipse"|"line"|"square"|"diamond"|"cross"}}`。グレーの系（`profile` はグレーの ICC で必須）、精度は 8 だけ。`bitmap` は作ったときの記録（描き方は変えない）。
   - ダブルトーン（PC1d）: `{"mode": "duotone", "depth": 8|16|32, "profile": "sha256:<64>", "intent": …, "bpc": false?, "inks": […], "duotone": [{"name": 1〜64 字, "color": [r, g, b], "curve": [[in, out], …]}, …]}`。グレーの系。インキは 1〜4 つ、曲線は 2〜13 点（`in` は 0..100 の狭義増加、`out` は 0..100）。
-  - マルチチャンネル（PC1d）: `{"mode": "multichannel", "depth": 8|16|32, "profile": "sha256:<64>"?, "intent": …, "bpc": false?, "inks": […], "plates": [{"name": 1〜64 字, "color": [r, g, b], "solidity": 0..1, "key": true?, "curve": [[in, out], …]?}, …], "from": "rgb"|"cmyk"|"lab"|"gray"|"duotone"}`。版は 1〜32（名前はページの中で一つ。`key`（灰色の要素を置く版）は true のときだけ書く、`curve` はダブルトーンから作った版のその曲線）。`from` は作った元のモード（要素の色の当て方）で、`profile` は `from` が cmyk（CMYK の ICC）・gray・duotone（グレーの ICC）のとき必須、rgb・lab のときは書かない。色の表のインキの値は版の数だけ（濃度 0..1）。色相・彩度・カラー・輝度の描画モードの層は版で合成できないので、それを持つマルチチャンネルのページは読み取り専用。
+  - マルチチャンネル（PC1d）: `{"mode": "multichannel", "depth": 8|16|32, "profile": "sha256:<64>"?, "intent": …, "bpc": false?, "inks": […], "plates": [{"name": 1〜64 字, "color": [r, g, b], "solidity": 0..1, "key": true?, "curve": [[in, out], …]?}, …], "from": "rgb"|"cmyk"|"lab"|"gray"|"duotone"}`。版は 1〜32（名前はページの中で一つ。`key`（灰色の要素を置く版）は true のときだけ書く、`curve` はダブルトーンから作った版のその曲線）。`from` は作った元のモード（要素の色の当て方）で、`profile` は `from` が cmyk（CMYK の ICC）・gray・duotone（グレーの ICC）のとき必須、rgb・lab のときは書かない。色の表のインキの値は版の数だけ（濃度 0..1）。色相・彩度・カラー・輝度の描画モードの層は版で合成できないので、それを持つマルチチャンネルのページは読み取り専用（補正レイヤーは層の描画モードを見ないので、その `native.blend` で決める: 末尾の「補正」）。
   - キーはこの順で書く（`mode, depth, profile, intent, bpc, inks, table, bitmap, duotone, plates, from`。読むときは順を問わない）。未知のキー・そのモードに無いキー（グレーの `bitmap` など）・範囲外の値・色空間の違うプロファイル（RGB のページにグレーの ICC など）は読み取り専用で開く（別のプロファイルで描かない）。プロファイルの素材は color-mode@1 と同じく照合する（内蔵のプロファイルも素材として持つ）。
 - 層の画素:
   - RGB のページの画素レイヤーは、8 bit なら `raster_png`、16・32 bit なら高精度の画素（`color_raster`。u16・f32）。プロファイル付きのページでは画素はそのプロファイルの値（`space` が参照）。`raster_png` は層の種類（画素レイヤー・v2 の線の層のラスター・消しゴムを掛けたトーンなど）によらず、プロファイル付きのページではいつもそのプロファイルの値。精度はページの `depth` と同じでなくてもよい（16 bit のページの 8 bit の PNG など）。
@@ -299,3 +300,14 @@ v3 の行（`rev`・`actor`・`at`・`changes`・`via`）をそのまま残し�
 - 保存しないもの: 描く先のチャンネル、目（見せる・隠す）、重ねの表示（ウィンドウの状態）。
 - 選択範囲をストック（`saved_areas`、Python のもの）は今までの形のまま（チャンネルではない）。
 - `features` に `channels@1` を加える（チャンネルを持つページがあるとき。無くなれば外す）。channels@1 を知らない読み手は、未知の拡張として読み取り専用で開く。
+
+## 補正（adjustments@1。補正レイヤーの C++ 版だけの設定と種類、COLOR-04）
+
+補正レイヤー（`kind: "adjust"`）の `adjust` を広げる。C++ 版だけの機能。Python の形の補正（Python の種類 `levels`・`curve`・`hue`・`invert`・`posterize`・`threshold`・`gradient_map`・`bitonal`・`brightness_contrast` と露光量 `exposure`（`native.exposure_v1`）に、その種類のキーだけ）は今までどおりで、形式も画素も変わらない（`features` に足さない）。
+
+- **`native`**（Python の種類の `adjust` の最後のキー。C++ 版だけの設定を 1 つの物で）: どの種類も `"blend"`（Genko の 20 の描画モード。補正後の絵を下の絵にこのモードで重ねる。層の `blend` は補正レイヤーでは見ない）。`levels`・`curve` は `"method": "genko"|"upstream"`（式。無ければ genko）、`"space": "rgb"|"cmyk"|"lab"|"gray"`、`"channels": {名前: 組}`（名前は space ごと: rgb は red・green・blue、cmyk は cyan・magenta・yellow・black、lab は lightness・a・b、gray は gray。levels の組は `{"black": 0..253, "white": 2..255（black + 2 以上）, "gamma": 0.01..9.99, "out_black": 0..255, "out_white": 0..255}`、curve の組は `[[in, out], …]`（0..255、2〜19 点、in の順に 0.5 以上離れる））。`channels` を持つなら `space` も書く。`brightness_contrast` は `"method": "modern"|"legacy"`、`posterize` は `"method": "floor"`、`gradient_map` は `"reverse"`・`"dither"`（bool）。
+  - 書くのは与えられたキーだけ、この順（blend、method、space、channels／reverse、dither）。空の `native` は書かない。
+  - 知らないキー・型の違い・範囲外・非有限・`channels` の space に無い名前・ページが合成できない `blend`（Lab のページの Lab で使えない描画モード、マルチチャンネルのページの色相・彩度・カラー・輝度。マルチチャンネルのページは `channels` を持たない）は読み取り専用で開く。
+- **C++ 版だけの種類**（`adjust` の `kind`）: `hue_saturation`・`vibrance`・`color_balance`・`black_white`・`photo_filter`・`channel_mixer`・`selective_color`・`color_lookup`。設定は種類の表（`native/src/core/adjust_kinds.cpp`。既定と範囲は COLOR-04・設計 2.3）のキーを、既定を埋めて表の順に書く（正規形）。`native` は `blend` だけ。知らないキー・型の違い・範囲外・非有限は読み取り専用。補正レイヤーに置けない種類（`filter_raster` だけの `desaturate`・`equalize`・局所の補正）も読み取り専用。
+- 種類の式がまだ入っていない版（PC2-0）は、形を確かめるだけで描くときに省いて記録し（`adjust:<種類>`）、書き出しは断る（`not_yet_ported`）。
+- `features` に `adjustments@1` を加える（`native` を持つか C++ 版だけの種類の補正レイヤーがあるとき。無くなれば外す）。露光量はこれまでどおり `native.exposure_v1` も書く。adjustments@1 を知らない読み手（PC1 までの C++ 版）は、未知の拡張として読み取り専用で開く。

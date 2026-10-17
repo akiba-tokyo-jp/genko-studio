@@ -10,6 +10,7 @@
 #include <unordered_set>
 #include <utility>
 
+#include "core/adjust.hpp"
 #include "core/brushes.hpp"
 #include "core/channels.hpp"
 #include "core/command_bus.hpp"
@@ -1325,6 +1326,9 @@ core::Document Reader::migrate(const Json& payload) {
     catch (const core::Error& error) { issue("broken_value", "/pages", {}, error.what()); }
     try { core::validate_channels(doc); }
     catch (const core::Error& error) { issue("broken_value", "/pages", {}, error.what()); }
+    // (adjustments@1: a correction's native or own kind that is not well formed)
+    try { core::validate_adjustments(doc); }
+    catch (const core::Error& error) { issue("broken_value", "/pages", {}, error.what()); }
     return doc;
 }
 
@@ -1385,7 +1389,8 @@ bool is_known_page_key(std::string_view key) { return in(kPageKeys, key); }
 bool is_known_feature(std::string_view feature) {
     return feature == core::kColorRasterFeature || feature == core::kColorTilesFeature || feature == core::kExposureFeature ||
            feature == core::kColorStrokeFeature || feature == core::kPaperFeature || feature == core::kRubyLayoutFeature ||
-           feature == core::kColorModeFeature || feature == core::kColorModelFeature || feature == core::kChannelsFeature;
+           feature == core::kColorModeFeature || feature == core::kColorModelFeature || feature == core::kChannelsFeature ||
+           feature == core::kAdjustmentsFeature;
 }
 
 int project_version(const Json& payload) {
