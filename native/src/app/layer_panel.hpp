@@ -93,7 +93,7 @@ private:
     void drafts(const core::Json& fields);
     void paper();
     void add_special(const std::string& kind, const QString& title, const core::Json& fields);
-    std::optional<core::Json> adjust_fields(const std::string& kind, const core::Json& now = core::Json::object());
+    std::optional<core::Json> adjust_fields(const std::string& kind, const core::Json& now = core::Json::object(), core::Json* opened = nullptr);
     void border();
     void water_edge();
     void screen();

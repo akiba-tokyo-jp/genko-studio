@@ -239,7 +239,61 @@ QString command_title(std::string_view kind) {
     return kind == "invert" ? found->title : found->title + QStringLiteral("…");
 }
 
-std::optional<Json> adjust_dialog(QWidget* parent, const std::string& kind, const Json& now, const FormContext& context, FilterPreview preview) {
+Json changes(const Json& before, const Json& after) {
+    Json out = Json::object();
+    if (!after.is_object()) return out;
+    for (const auto& [key, value] : after.items()) {
+        const auto was = before.is_object() ? before.find(key) : before.end();
+        if (!before.is_object() || was == before.end()) {
+            if (!value.is_null()) out[key] = value;
+        } else if (*was == value) {
+            continue;
+        } else if (was->is_object() && value.is_object()) {
+            Json inner = changes(*was, value);
+            if (!inner.empty()) out[key] = std::move(inner);
+        } else {
+            out[key] = value;
+        }
+    }
+    if (before.is_object()) {
+        for (const auto& [key, value] : before.items()) {
+            if (!after.contains(key) && !value.is_null()) out[key] = nullptr;
+        }
+    }
+    return out;
+}
+
+void lay_changes(Json& adjust, const Json& changes) {
+    for (const auto& [key, value] : changes.items()) {
+        if (value.is_null()) {
+            adjust.erase(key);
+        } else if (value.is_object() && adjust.contains(key) && adjust[key].is_object()) {
+            lay_changes(adjust[key], value);
+            if (key == "native" && adjust[key].empty()) adjust.erase(key);  // (a native that says nothing: Python's form)
+        } else {
+            adjust[key] = value;
+        }
+    }
+}
+
+Json without_nulls(const Json& values) {
+    Json out = Json::object();
+    for (const auto& [key, value] : values.items()) {
+        if (value.is_null()) continue;
+        if (key == "native" && value.is_object()) {
+            Json native = Json::object();
+            for (const auto& [k, v] : value.items())
+                if (!v.is_null()) native[k] = v;
+            if (!native.empty()) out[key] = std::move(native);
+            continue;
+        }
+        out[key] = value;
+    }
+    return out;
+}
+
+std::optional<Json> adjust_dialog(QWidget* parent, const std::string& kind, const Json& now, const FormContext& context, FilterPreview preview,
+                                  Json* opened) {
     const FormKind* found = form_kind(kind);
     if (found == nullptr || !found->build) return std::nullopt;
     QDialog dialog(parent);
@@ -250,6 +304,7 @@ std::optional<Json> adjust_dialog(QWidget* parent, const std::string& kind, cons
     found->build(*form, context);
     const Json given = now.is_object() ? now : Json::object();
     form->set_values(found->prepare ? found->prepare(given) : given);
+    if (opened != nullptr) *opened = form->values();
     layout->addRow(form);
     auto* row = new QDialogButtonBox;
     QPushButton* reset = row->addButton(QStringLiteral("既定に戻す"), QDialogButtonBox::ResetRole);

@@ -68,6 +68,7 @@ private:
     QTimer* settle_ = nullptr;
     QTimer* watch_ = nullptr;
     std::string page_id_, layer_id_, kind_;
+    core::Json opened_;  // (the form's settings as shown: only what is changed from them is sent)
     const void* seen_ = nullptr;  // (the book as it was shown: a change from anywhere shows it again)
     bool editing_ = false;
     bool loading_ = false;

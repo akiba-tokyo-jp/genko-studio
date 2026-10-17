@@ -35,6 +35,7 @@
 #include "app/theme.hpp"
 #include "app/comfort.hpp"
 #include "service/wording.hpp"
+#include "core/adjust.hpp"
 #include "core/ids.hpp"
 #include "core/pyconv.hpp"
 #include "render/ink.hpp"
@@ -165,7 +166,18 @@ LayerPanel::LayerPanel(MainWindow* window) : window_(window) {
     blend_ = new QComboBox;
     blend_->setObjectName(QStringLiteral("layer_blend"));
     for (const auto& [key, label] : blend_modes()) blend_->addItem(label, QString::fromStdString(key));
-    connect(blend_, &QComboBox::activated, this, [this](int) { set("blend", blend_->currentData().toString().toStdString()); });
+    connect(blend_, &QComboBox::activated, this, [this](int) {
+        const auto [page, layer] = this->layer();
+        const std::string blend = blend_->currentData().toString().toStdString();
+        // (a correction layer is drawn by its native.blend — the user's decision 2 —; its own blend is not looked at)
+        if (layer != nullptr && !loading_ && layer->kind == core::LayerKind::Adjust && layer->adjust && layer->adjust->is_object()) {
+            if (blend != core::native_of(*layer->adjust).blend)
+                window_->apply_ops(Json::array({Json{{"op", "set_adjustment"}, {"page", page->index.json()}, {"id", layer->id},
+                                                     {"native", Json{{"blend", blend == "normal" ? Json() : Json(blend)}}}}}));
+            return;
+        }
+        set("blend", blend);
+    });
     const auto box = [this](const QString& text, const char* name, std::function<void(bool)> on, const QString& tip = {}) {
         auto* b = new QCheckBox(text);
         b->setObjectName(QString::fromLatin1(name));
@@ -420,7 +432,9 @@ void LayerPanel::refresh() {
             if (layer.mask) marks << QStringLiteral("マスク");
             if (layer.locked) marks << QStringLiteral("ロック");
             QString blend;
-            for (const auto& [key, label] : blend_modes()) if (key == layer.blend && key != "normal") blend = label;
+            const bool correction = layer.kind == core::LayerKind::Adjust && layer.adjust && layer.adjust->is_object();
+            const std::string drawn = correction ? core::native_of(*layer.adjust).blend : layer.blend;  // (a correction's: its native's)
+            for (const auto& [key, label] : blend_modes()) if (key == drawn && key != "normal") blend = label;
             QStringList meta = marks;
             if (!blend.isEmpty()) meta << blend;
             if (layer.opacity < 0.995) meta << QStringLiteral("%1%").arg(std::lround(layer.opacity * 100));
@@ -534,7 +548,9 @@ void LayerPanel::selected(bool from_list) {
     loading_ = true;
     name_->setText(wording::layer_label(*layer));
     opacity_->setValue(static_cast<int>(std::lround(100 * layer->opacity)));
-    blend_->setCurrentIndex(std::max(0, blend_->findData(QString::fromStdString(layer->blend.empty() ? "normal" : layer->blend))));
+    const bool correction = layer->kind == core::LayerKind::Adjust && layer->adjust && layer->adjust->is_object();
+    const std::string blend = correction ? core::native_of(*layer->adjust).blend : layer->blend;  // (a correction's: its native's)
+    blend_->setCurrentIndex(std::max(0, blend_->findData(QString::fromStdString(blend.empty() ? "normal" : blend))));
     clip_->setChecked(layer->clip);
     protect_->setChecked(layer->lock_alpha);
     locked_->setChecked(layer->locked);
@@ -831,13 +847,13 @@ void LayerPanel::add_gradient() {
     if (spec && window_->still(asked)) add_special("gradient", QStringLiteral("グラデーション"), Json{{"gradient", *spec}});
 }
 
-std::optional<Json> LayerPanel::adjust_fields(const std::string& kind, const Json& now) {
+std::optional<Json> LayerPanel::adjust_fields(const std::string& kind, const Json& now, Json* opened) {
     if (adjust_forms::form_kind(kind) != nullptr) {  // (PC2: a kind with a form of its own, app/adjust_forms)
         adjust_forms::FormContext context;
         context.page = window_->current_page();
         const auto& rgb = window_->pen().rgb;
         context.pen = {static_cast<int>(rgb[0]), static_cast<int>(rgb[1]), static_cast<int>(rgb[2])};
-        return adjust_forms::adjust_dialog(this, kind, now, context);
+        return adjust_forms::adjust_dialog(this, kind, now, context, {}, opened);
     }
     if (kind == "gradient_map") {
         const auto& rgb = window_->pen().rgb;
@@ -858,7 +874,7 @@ void LayerPanel::add_adjust(const std::string& kind) {
     if (const adjust_forms::FormKind* form = adjust_forms::form_kind(kind)) title = form->title;
     for (const auto& [key, label] : adjustment_kinds()) if (key == kind) title = label;
     Json spec{{"kind", kind}};
-    spec.update(*params);
+    spec.update(adjust_forms::without_nulls(*params));
     add_special("adjust", title, Json{{"adjust", spec}});
 }
 
@@ -872,15 +888,25 @@ void LayerPanel::edit_special() {
             window_->action(QStringLiteral("act_exposure"))->trigger();  // (its own dialog)
             return;
         }
-        const auto params = adjust_fields(kind, *layer->adjust);
+        Json opened;
+        const auto params = adjust_fields(kind, *layer->adjust, &opened);
         if (!params || !window_->still(asked)) return;
-        Json spec{{"kind", kind}};
-        spec.update(*params);
-        // (PC2: its native settings — the blend, the C++ build's own formulas — kept where the window does not hold them)
-        Json native = layer->adjust->contains("native") && (*layer->adjust)["native"].is_object() ? (*layer->adjust)["native"] : Json::object();
-        if (params->contains("native") && (*params)["native"].is_object()) native.update((*params)["native"]);
-        spec.erase("native");
-        if (!native.empty()) spec["native"] = native;
+        Json spec;
+        if (opened.is_object()) {
+            // (PC2, the user's decision 3: a window of PC2's forms — what the person changed laid over the correction as it
+            // is: what the window does not hold or did not change stays, Python's `channel` and form among it)
+            spec = *layer->adjust;
+            adjust_forms::lay_changes(spec, adjust_forms::changes(opened, *params));
+            if (spec == *layer->adjust) return;
+        } else {
+            spec = Json{{"kind", kind}};
+            spec.update(*params);
+            // (PC2: its native settings — the blend, the C++ build's own formulas — kept where the window does not hold them)
+            Json native = layer->adjust->contains("native") && (*layer->adjust)["native"].is_object() ? (*layer->adjust)["native"] : Json::object();
+            if (params->contains("native") && (*params)["native"].is_object()) native.update((*params)["native"]);
+            spec.erase("native");
+            if (!native.empty()) spec["native"] = native;
+        }
         set("adjust", spec);
     } else if (layer->kind == core::LayerKind::Fill && layer->fill && layer->fill->is_object() && layer->fill->contains("gradient")) {
         if (const auto spec = gradient_dialog(this, page, (*layer->fill)["gradient"]); spec && window_->still(asked)) set("fill", Json{{"gradient", *spec}});

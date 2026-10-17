@@ -214,11 +214,14 @@ Json reset_of(const Json& current) {
 }
 
 // The settings given laid over the current ones: an object over an object key by key (a range of hue_saturation, the
-// native and its channel records), anything else in its place.
+// native and its channel records), a null taking the setting out (a channel record set back to doing nothing; Python's
+// `channel` back to all three), anything else in its place.
 void lay_over(Json& now, const Json& given) {
     for (const auto& [key, value] : given.items()) {
         const auto it = now.find(key);
-        if (it != now.end() && it->is_object() && value.is_object()) {
+        if (value.is_null()) {
+            if (it != now.end()) now.erase(it);
+        } else if (it != now.end() && it->is_object() && value.is_object()) {
             lay_over(*it, value);
         } else {
             now[key] = value;
