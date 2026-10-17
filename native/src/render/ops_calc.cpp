@@ -76,6 +76,7 @@ Plane luminosity(const Pixels& p) {
         for (std::size_t i = 0; i < p.size(); ++i) out[i] = p.at(i)[0];
         return out;
     }
+    const image_ops::Held held(std::uint64_t(p.size()) * sizeof(image_ops::Rgba));  // (their RGBA, in the budget)
     const std::vector<image_ops::Rgba> rgb = image_ops::rgba_of(p);
     for (std::size_t i = 0; i < p.size(); ++i) out[i] = 0.299f * rgb[i][0] + 0.587f * rgb[i][1] + 0.114f * rgb[i][2];
     return out;

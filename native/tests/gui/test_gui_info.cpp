@@ -202,6 +202,17 @@ private slots:
         QVERIFY2(seen[1].contains(QStringLiteral("色空間: CMYK")) && seen[1].contains(QStringLiteral("種類: 出力（印刷）")), qPrintable(seen[1]));
         const Json info = render::proof::profile_info(core::builtin_profile("coated-cmyk")->bytes);
         QVERIFY(seen[1].contains(QString::fromStdString(info["description"].get<std::string>())));
+        // a multichannel page: no profile (its plates have none), not sRGB (independent review B (D))
+        QVERIFY(s.window->apply_ops(Json::array({Json{{"op", "set_color_mode"}, {"page", 1}, {"mode", "multichannel"}}})));
+        seen.clear();
+        s.answers.responder->exec = [&seen](QDialog* d) {
+            if (d->objectName() != QStringLiteral("profile_info_dialog")) return 0;
+            seen << d->findChild<QLabel*>(QStringLiteral("profile_info"))->text();
+            return static_cast<int>(QDialog::Rejected);
+        };
+        act->trigger();
+        QCOMPARE(seen.size(), 1);
+        QVERIFY2(seen[0].contains(QStringLiteral("プロファイルはありません")) && !seen[0].contains(QStringLiteral("sRGB")), qPrintable(seen[0]));
     }
 };
 

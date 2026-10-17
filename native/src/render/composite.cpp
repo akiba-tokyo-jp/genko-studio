@@ -640,12 +640,15 @@ void color_layer_effects(const core::Layer& layer, ColorPicture& picture, int dp
         const Image inner = width < 12 ? alpha.filter(Filter::min_filter(width * 2 + 1))
                                        : alpha.filter(Filter::gaussian_blur(width)).point([](int v) { return v > 245 ? 255 : 0; });
         const std::string dark = chops::subtract(alpha, inner).point([&](int v) { return py_int_trunc(v * strength * 0.6); }).tobytes();
-        for (std::size_t i = 0; i < count; ++i) {  // (black laid over by the rim's alpha, the picture's alpha kept)
+        // (black laid over by the rim's alpha, the picture's alpha kept: on the page's encoded values, as the 8-bit page
+        // lays it on sRGB's — as dark as there; in linear light the rim would show lighter —, as PC2-0 lays an exposure's
+        // blend)
+        for (std::size_t i = 0; i < count; ++i) {
             const double da = static_cast<unsigned char>(dark[i]) / 255.0;
             auto& v = picture.pixels[i];
             const double oa = v[3], a = da + oa * (1 - da);
             if (da == 0 || !(a > 0)) continue;
-            for (unsigned c = 0; c < 3; ++c) v[c] = v[c] * oa * (1 - da) / a;
+            for (unsigned c = 0; c < 3; ++c) v[c] = space.decode(c, space.encode(c, v[c]) * oa * (1 - da) / a);
         }
     }
     const Json* border_spec = get(effect, "border");

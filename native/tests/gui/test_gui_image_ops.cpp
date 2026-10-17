@@ -20,6 +20,7 @@
 #include "core/base64.hpp"
 #include "render/ops_registry.hpp"
 #include "render/png.hpp"
+#include "service/wording.hpp"
 using namespace genko;
 using core::Json;
 
@@ -148,6 +149,36 @@ private slots:
         answers.responder->exec = [](QDialog*) { return int(QDialog::Rejected); };
         book.act("act_shadows_highlights")->trigger();
         QCOMPARE(*book.layer("pic")->raster_png, *before);
+    }
+
+    // Independent review B (E): on a precise layer (a page of 16 bits) フェード… hands the op the pixels before as the
+    // book saves them — its tiles —, so a layer of any size fades; 0 %: the pixels before, their very bytes. The refusals
+    // of a work too large (C) and of pixels before too large to read whole (E) are said in plain words.
+    void fadeOfAPreciseLayer() {
+        const core::Document deep = core::CommandBus(render::ops_registry())
+                                        .apply(book_doc(), Json::array({Json{{"op", "set_color_mode"}, {"page", 1}, {"mode", "rgb"}, {"depth", 16}}}),
+                                               core::Actor("human:tester"))
+                                        .doc;
+        Book book(deep);
+        gui_test::Answers answers;
+        book.window->set_target_layer("pic");
+        QVERIFY(book.layer("pic")->color_raster);
+        const core::Bytes before = book.layer("pic")->color_raster;
+        answers.responder->exec = answer(QStringLiteral("shadows_highlights"), [](QDialog* d) { set_number(d, "shadow_amount", 80); });
+        book.act("act_shadows_highlights")->trigger();
+        QVERIFY(*book.layer("pic")->color_raster != *before);
+        QVERIFY(book.act("act_fade")->isEnabled());
+        answers.responder->exec = answer(QStringLiteral("fade_layer"), [](QDialog* d) { set_number(d, "opacity", 0); });
+        book.act("act_fade")->trigger();
+        QCOMPARE(*book.layer("pic")->color_raster, *before);
+        const Json sent = book.session->history().done.back().ops.at(0);
+        QCOMPARE(sent["op"], Json("fade_layer"));
+        QVERIFY2(sent["from"].is_object() && sent["from"].contains("tiles"), sent.dump().c_str());
+        const QString large = wording::error(QStringLiteral("ops[0] filter_raster: the pixels are too large to work on at once (past the memory the work may use)"));
+        QVERIFY2(large.contains(QStringLiteral("大きすぎ")), qPrintable(large));
+        const QString whole = wording::error(QStringLiteral("ops[0] fade_layer: the pixels before are too large to read whole (at most 256 MiB; give a precise "
+                                                            "layer's tiles)"));
+        QVERIFY2(whole.contains(QStringLiteral("大きすぎ")), qPrintable(whole));
     }
 
     // 色の置き換え… (the main colour by default), 色の一致… (its sources: none, the page merged, the page's layers, the

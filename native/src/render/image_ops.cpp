@@ -216,6 +216,23 @@ Rgba fade_rgba(const Rgba& before, const Rgba& after, std::string_view mode, flo
     return out;
 }
 
+// --- the work's memory ---------------------------------------------------------------------------------------------------
+
+struct Held::Work {
+    ImagingMemoryInstance reservation{};
+    ~Work() { genko_imaging_budget_release(&reservation); }
+};
+
+Held::Held(std::uint64_t bytes) : work_(std::make_unique<Work>()) {
+    if (!genko_imaging_budget_reserve(&work_->reservation, bytes)) too_large();
+}
+Held::~Held() = default;
+
+void too_large() {
+    genko_imaging_clear_error();  // (the budget's own words are of a selection's masks)
+    throw OpError("the pixels are too large to work on at once (past the memory the work may use)");
+}
+
 // --- a paint layer's pixels ----------------------------------------------------------------------------------------------
 
 struct Pixels::Work {
@@ -226,7 +243,7 @@ struct Pixels::Work {
 Pixels::Pixels(Kind kind, std::uint32_t width, std::uint32_t height, unsigned colours)
     : kind_(kind), width_(width), height_(height), colours_(colours), work_(std::make_unique<Work>()) {
     const std::uint64_t n = std::uint64_t(width) * height * (colours + 1);
-    if (!genko_imaging_budget_reserve(&work_->reservation, n * sizeof(float))) detail::throw_imaging_error();
+    if (!genko_imaging_budget_reserve(&work_->reservation, n * sizeof(float))) too_large();
     v_.assign(static_cast<std::size_t>(n), 0.0f);
 }
 Pixels::Pixels(const Pixels& other) : Pixels(other.kind_, other.width_, other.height_, other.colours_) {
@@ -390,30 +407,37 @@ void put_layer_pixels(core::Document& doc, std::size_t at, const std::string& id
     layer.kind = core::LayerKind::Raster;
 }
 
-std::vector<double> meant(const Pixels& p) {
-    const core::PageColor& color = *p.ink;
-    const unsigned n = p.colours();
-    std::vector<double> inks(p.size() * n);
-    for (std::size_t i = 0; i < p.size(); ++i)
-        for (unsigned c = 0; c < n; ++c) inks[i * n + c] = from_canvas(color.space, c, p.at(i)[c]);
-    std::vector<double> rgb(p.size() * 3);
-    ink::Rules(color).meaning(inks.data(), rgb.data(), p.size());
-    return rgb;
-}
+namespace {
 
-void from_meant(Pixels& p, const std::vector<double>& rgb) {
+// How many of an ink layer's pixels go between their inks and colours at a time (the bands' double arrays, and
+// render/ink's own for them, held in the budget: not the layer's whole in double).
+constexpr std::size_t kBand = 16384;
+
+}  // namespace
+
+void from_rgba(Pixels& p, const std::vector<Rgba>& px) {
     const core::PageColor& color = *p.ink;
     const unsigned n = p.colours();
-    std::vector<double> inks(p.size() * n), out(p.size() * n);
-    for (std::size_t i = 0; i < p.size(); ++i)
-        for (unsigned c = 0; c < n; ++c) inks[i * n + c] = from_canvas(color.space, c, p.at(i)[c]);
-    std::size_t k = 0;  // (asked for each pixel once, in their order)
-    ink::Rules(color).correct(inks.data(), out.data(), p.size(), [&](const std::array<double, 3>&) {
-        const std::size_t i = k++;
-        return std::array<double, 3>{rgb[i * 3], rgb[i * 3 + 1], rgb[i * 3 + 2]};
-    });
-    for (std::size_t i = 0; i < p.size(); ++i)
-        for (unsigned c = 0; c < n; ++c) p.at(i)[c] = static_cast<float>(to_canvas(color.space, c, out[i * n + c]));
+    const ink::Rules rules(color);
+    const std::size_t band = std::min(kBand, p.size());
+    // (a band's inks and those they become; correct's colours, the changed ones, where they are and their inks)
+    const Held held(std::uint64_t(band) * (4 * n + 8) * sizeof(double));
+    std::vector<double> inks(band * n), out(band * n);
+    for (std::size_t start = 0; start < p.size(); start += band) {
+        const std::size_t count = std::min(band, p.size() - start);
+        for (std::size_t i = 0; i < count; ++i)
+            for (unsigned c = 0; c < n; ++c) inks[i * n + c] = from_canvas(color.space, c, p.at(start + i)[c]);
+        std::size_t k = start;  // (asked for each pixel once, in their order)
+        rules.correct(inks.data(), out.data(), count, [&](const std::array<double, 3>&) {
+            const Rgba& q = px[k++];
+            return std::array<double, 3>{q[0], q[1], q[2]};
+        });
+        for (std::size_t i = 0; i < count; ++i) {
+            float* v = p.at(start + i);
+            for (unsigned c = 0; c < n; ++c) v[c] = static_cast<float>(to_canvas(color.space, c, out[i * n + c]));
+            v[n] = px[start + i][3];
+        }
+    }
 }
 
 Pixels page_pixels(const core::Document& doc, const core::Page& page) {
@@ -446,9 +470,21 @@ Pixels shown_layer_pixels(const core::Document& doc, const core::Page& page, con
 std::vector<Rgba> rgba_of(const Pixels& p) {
     std::vector<Rgba> out(p.size());
     if (p.kind() == Pixels::Kind::Inks) {
-        const std::vector<double> rgb = meant(p);
-        for (std::size_t i = 0; i < p.size(); ++i)
-            out[i] = Rgba{static_cast<float>(rgb[i * 3]), static_cast<float>(rgb[i * 3 + 1]), static_cast<float>(rgb[i * 3 + 2]), p.at(i)[p.colours()]};
+        const core::PageColor& color = *p.ink;
+        const unsigned n = p.colours();
+        const ink::Rules rules(color);
+        const std::size_t band = std::min(kBand, p.size());
+        const Held held(std::uint64_t(band) * (2 * n + 8) * sizeof(double));  // (a band's inks and colours, and meaning's own)
+        std::vector<double> inks(band * n), rgb(band * 3);
+        for (std::size_t start = 0; start < p.size(); start += band) {
+            const std::size_t count = std::min(band, p.size() - start);
+            for (std::size_t i = 0; i < count; ++i)
+                for (unsigned c = 0; c < n; ++c) inks[i * n + c] = from_canvas(color.space, c, p.at(start + i)[c]);
+            rules.meaning(inks.data(), rgb.data(), count);
+            for (std::size_t i = 0; i < count; ++i)
+                out[start + i] = Rgba{static_cast<float>(rgb[i * 3]), static_cast<float>(rgb[i * 3 + 1]), static_cast<float>(rgb[i * 3 + 2]),
+                                      p.at(start + i)[n]};
+        }
         return out;
     }
     for (std::size_t i = 0; i < p.size(); ++i) {

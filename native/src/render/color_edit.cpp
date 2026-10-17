@@ -466,11 +466,12 @@ void bake_marks(core::Document& doc) {
             if (!layer.color_raster || (layer.stroke_count() == 0 && layer.patches.empty())) continue;
             core::Page& page = doc.edit_page(p);
             core::Layer& target = page.layers[l];
-            core::Layer marks;
+            core::Layer marks;  // (its lines and pictures as the layer draws them: cut at the panels as its own are)
             marks.id = target.id;
             marks.role = core::LayerRole::User;
             marks.kind = core::LayerKind::Raster;
-            marks.panel_clip = false;
+            marks.panel_clip = target.panel_clip;
+            marks.panel_each = target.panel_each;
             marks.strokes = target.strokes;
             marks.patches = target.patches;
             std::string pixels = paste(page, target, marks, &doc);

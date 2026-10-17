@@ -201,6 +201,8 @@ std::array<std::size_t, 3> gauss_box_radii(float sigma) {
 
 void gauss_blur(std::vector<float>& buf, std::size_t w, std::size_t h, std::size_t n, float sigma) {
     if (sigma < 0.3f) return;
+    // (box_cols copies the buffer whole, and keeps a row of sums in double: held in the budget)
+    const Held held(std::uint64_t(w) * h * n * sizeof(float) + std::uint64_t(w) * n * sizeof(double));
     std::vector<float> scratch;
     scratch.reserve(std::max(w, h) * n);
     const auto radii = gauss_box_radii(sigma);
@@ -210,8 +212,11 @@ void gauss_blur(std::vector<float>& buf, std::size_t w, std::size_t h, std::size
 
 void shadows_highlights(std::vector<Rgba>& px, std::size_t w, std::size_t h, const ShadowsHighlights& p) {
     if (px.empty()) return;
+    const bool one = std::fabs(p.highlight_radius - p.shadow_radius) < 1e-3f;
+    const Held lumas(std::uint64_t(px.size()) * sizeof(float) * (one ? 1 : 2));  // (the blurred luminances, in the budget)
     const std::vector<float> ls = blurred_luma(px, w, h, p.shadow_radius);
-    const std::vector<float> lh = std::fabs(p.highlight_radius - p.shadow_radius) < 1e-3f ? ls : blurred_luma(px, w, h, p.highlight_radius);
+    const std::vector<float> own = one ? std::vector<float>() : blurred_luma(px, w, h, p.highlight_radius);
+    const std::vector<float>& lh = one ? ls : own;
     const float sa = p.shadow_amount / 100.0f, ha = p.highlight_amount / 100.0f;
     const float st = std::max(p.shadow_tone / 100.0f, 0.01f), ht = std::max(p.highlight_tone / 100.0f, 0.01f);
     const float color = p.color / 100.0f;
@@ -274,6 +279,7 @@ std::array<float, 3> hsl_to_rgb(const std::array<float, 3>& c) {
 
 std::vector<float> replace_color(std::vector<Rgba>& px, const std::array<float, 3>& color, float fuzziness, float hue, float saturation,
                                  float lightness) {
+    const Held held(std::uint64_t(px.size()) * sizeof(float));  // (its coverage, in the budget while it works)
     std::vector<float> mask = color_range(px, color, fuzziness);
     for (std::size_t i = 0; i < px.size(); ++i) {
         const float k = mask[i];
@@ -363,6 +369,7 @@ void match_color(std::vector<Rgba>& px, const LabStats& target, const LabStats* 
 void hdr_toning(std::vector<Rgba>& px, std::size_t w, std::size_t h, const HdrToning& p) {
     if (px.empty()) return;
     constexpr float kEps = 1e-4f;
+    const Held held(std::uint64_t(px.size()) * sizeof(float) * 2);  // (the log luminance and its blur, in the budget)
     std::vector<float> logl(px.size());
     for (std::size_t i = 0; i < px.size(); ++i) logl[i] = std::log(std::max(luma(px[i]), 0.0f) + kEps);
     std::vector<float> base = logl;
@@ -423,20 +430,14 @@ bool flag(const Json& params, std::string_view key) {
     return v != nullptr && v->is_boolean() && v->get<bool>();
 }
 
-// A buffer of straight RGBA in the imaging budget.
+// The pixels' straight RGBA (image_ops::rgba_of), held in the imaging budget.
 class Buffer {
 public:
-    explicit Buffer(std::size_t n) {
-        if (!genko_imaging_budget_reserve(&reservation_, std::uint64_t(n) * sizeof(Rgba))) detail::throw_imaging_error();
-        px.assign(n, Rgba{0, 0, 0, 0});
-    }
-    ~Buffer() { genko_imaging_budget_release(&reservation_); }
-    Buffer(const Buffer&) = delete;
-    Buffer& operator=(const Buffer&) = delete;
+    explicit Buffer(const Pixels& p) : held_(std::uint64_t(p.size()) * sizeof(Rgba)) { px = image_ops::rgba_of(p); }
     std::vector<Rgba> px;
 
 private:
-    ImagingMemoryInstance reservation_{};
+    image_ops::Held held_;
 };
 
 // The worked RGB back into the pixels, only where `cover` (none: everywhere) reaches, by its share: an ink layer's by the
@@ -444,11 +445,7 @@ private:
 void put_rgb(Pixels& p, const std::vector<Rgba>& px, const std::vector<float>* cover) {
     if (p.kind() == Pixels::Kind::Inks) {
         const Pixels original = cover != nullptr ? p : Pixels(Pixels::Kind::Inks, 1, 1, p.colours());
-        std::vector<double> rgb(p.size() * 3);
-        for (std::size_t i = 0; i < p.size(); ++i)
-            for (unsigned c = 0; c < 3; ++c) rgb[i * 3 + c] = px[i][c];
-        image_ops::from_meant(p, rgb);
-        for (std::size_t i = 0; i < p.size(); ++i) p.at(i)[p.colours()] = px[i][3];
+        image_ops::from_rgba(p, px);
         if (cover == nullptr) return;
         for (std::size_t i = 0; i < p.size(); ++i) {
             const float m = (*cover)[i];
@@ -470,11 +467,11 @@ void put_rgb(Pixels& p, const std::vector<Rgba>& px, const std::vector<float>* c
 using Work = std::function<void(std::vector<Rgba>& px, std::size_t w, std::size_t h, double scale, const std::vector<float>* cover)>;
 
 void run(Pixels& p, const core::Page& page, const Json* area, const Work& work) {
+    const image_ops::Held covered(area != nullptr ? std::uint64_t(p.size()) * sizeof(float) : 0);
     const std::optional<std::vector<float>> cover =
         area != nullptr ? std::optional<std::vector<float>>(image_ops::coverage(page, *area, p.width(), p.height(), p.kind() == Pixels::Kind::Eight))
                         : std::nullopt;
-    Buffer buffer(p.size());
-    buffer.px = image_ops::rgba_of(p);
+    Buffer buffer(p);
     work(buffer.px, p.width(), p.height(), image_ops::grid_scale(page, p.width(), p.height()), cover ? &*cover : nullptr);
     put_rgb(p, buffer.px, cover ? &*cover : nullptr);
 }
@@ -486,8 +483,7 @@ LocalFilter local(const std::function<Work(const Json& params, const core::Page&
     out.eight = [made](const Image& rgba, const Json& params, const core::Page& page, const core::Document& doc) {
         const ImageAllocationBudget budget{2ULL * 1024 * 1024 * 1024};
         Pixels p = image_ops::from_image(rgba);
-        Buffer buffer(p.size());
-        buffer.px = image_ops::rgba_of(p);
+        Buffer buffer(p);
         made(params, page, doc)(buffer.px, p.width(), p.height(), image_ops::grid_scale(page, p.width(), p.height()), nullptr);
         put_rgb(p, buffer.px, nullptr);
         return image_ops::to_image(p);
@@ -495,9 +491,9 @@ LocalFilter local(const std::function<Work(const Json& params, const core::Page&
     out.eight_in = [made](const Image& rgba, const Json& params, const core::Page& page, const core::Document& doc, const Json& area) {
         const ImageAllocationBudget budget{2ULL * 1024 * 1024 * 1024};
         Pixels p = image_ops::from_image(rgba);
+        const image_ops::Held covered(std::uint64_t(p.size()) * sizeof(float));
         const std::vector<float> cover = image_ops::coverage(page, area, p.width(), p.height(), true);
-        Buffer buffer(p.size());
-        buffer.px = image_ops::rgba_of(p);
+        Buffer buffer(p);
         made(params, page, doc)(buffer.px, p.width(), p.height(), image_ops::grid_scale(page, p.width(), p.height()), &cover);
         put_rgb(p, buffer.px, nullptr);  // (the caller keeps it to the area)
         return image_ops::to_image(p);
@@ -624,6 +620,7 @@ image_ops::LabStats stats_of_source(const Json& source, const core::Page& target
     }
     if (layer_id != "merged" && found == nullptr) throw OpError("adjust match_color.source: no layer " + layer_id + " on page " + page.index.repr());
     const Pixels pixels = found != nullptr ? image_ops::shown_layer_pixels(doc, page, *found) : image_ops::page_pixels(doc, page);
+    const image_ops::Held held(std::uint64_t(pixels.size()) * (sizeof(Rgba) + sizeof(float)));  // (their RGBA and the area's coverage)
     const std::vector<Rgba> px = image_ops::rgba_of(pixels);
     std::optional<std::vector<float>> mask;
     if (const Json* area = core::get(source, "area"); area != nullptr && !area->is_null()) {

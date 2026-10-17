@@ -24,6 +24,7 @@
 #include "app/main_window.hpp"
 #include "app/session.hpp"
 #include "core/channels.hpp"
+#include "core/color_model.hpp"
 #include "core/color_raster.hpp"
 #include "core/command_bus.hpp"
 #include "core/ink.hpp"
@@ -511,18 +512,31 @@ void fade(MainWindow* window) {
     }
     const auto asked = window->asking();
     const FadeSource kept = *source;
-    std::string ref;
-    try {  // (the pixels before into the book's assets: the op names them)
-        ref = storage::AssetStore(*window->session().path()).put_bytes(*kept.before, kept.suffix);
-    } catch (const std::exception& error) {
-        window->flash(wording::error(QString::fromUtf8(error.what())), 6000, true);
-        return;
-    }
     const core::Document& book = window->book();
     std::size_t at = 0;
     while (at < book.pages.size() && book.pages[at]->id != kept.page_id) ++at;
     if (at >= book.pages.size()) return;
-    const Json op{{"op", "fade_layer"}, {"page", book.page(at).index.json()}, {"id", kept.layer_id}, {"from", ref}};
+    const bool precise = kept.suffix == core::kColorRasterSuffix;
+    if (!precise && kept.before->size() > storage::kAssetMaxBytes) {  // (more than the op reads of one asset)
+        window->flash(QStringLiteral("このレイヤーは大きすぎてフェードできません（前の画素が 256 MiB を超えます）"), 6000, true);
+        return;
+    }
+    Json from;
+    try {  // (the pixels before into the book's assets: the op names them — a precise layer's in tiles, as the book saves
+           // them, so a layer of any size fades)
+        storage::AssetStore store(*window->session().path());
+        if (precise) {
+            std::vector<std::string> refs;
+            for (const std::string& tile : core::color_tiles(*kept.before)) refs.push_back(store.put_bytes(tile, core::kColorRasterSuffix));
+            from = core::tiled_metadata(core::ColorRasterView(*kept.before), refs, core::color_raster_space(book.page(at).rgb));
+        } else {
+            from = store.put_bytes(*kept.before, kept.suffix);
+        }
+    } catch (const std::exception& error) {
+        window->flash(wording::error(QString::fromUtf8(error.what())), 6000, true);
+        return;
+    }
+    const Json op{{"op", "fade_layer"}, {"page", book.page(at).index.json()}, {"id", kept.layer_id}, {"from", from}};
     const auto values = image_dialog(window, QStringLiteral("フェード: %1").arg(kept.label), "fade_layer",
                                      [](Form& form) {
                                          form.number("opacity", QStringLiteral("不透明度（%）"), 0, 100, 100, 0);
