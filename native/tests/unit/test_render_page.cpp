@@ -758,6 +758,60 @@ private slots:
         QVERIFY_THROWS_EXCEPTION(genko::core::Error, render::render_page(*doc.pages[0], 150, outside, &doc));
     }
 
+    void precise_layers_in_parts() {
+        // PC2d (document:color-depth-model): layers holding precise pixels drawn with what the 8-bit page draws on a
+        // layer — the ink layer's lines (each in the panel it begins in) and effects (a border and a water edge) over its
+        // pixels, a noise screen (トーン化) and a mask on another — give in a part of the page the whole page's pixels cut
+        // there, as the 8-bit page does: the effects worked on a box widened by their reach, the noise from the top of
+        // the page, nothing left out
+        Document doc = book();
+        genko::core::Page& page = doc.edit_page(0);
+        const auto precise = [](int w, int h, int shade) {
+            Json pixels = Json::array();
+            for (int y = 0; y < h; ++y) {
+                for (int x = 0; x < w; ++x) {
+                    const bool in = (x - w / 2) * (x - w / 2) + (y - h / 2) * (y - h / 2) < w * h / 6;
+                    for (const int v : {shade * 257, (255 - shade) * 257, (x * 9 % 256) * 257, in ? 65535 : 0}) pixels.push_back(v);
+                }
+            }
+            return std::make_shared<const std::string>(genko::core::encode_color_raster(Json{{"width", w}, {"height", h}, {"precision", "u16"}, {"pixels", pixels}}));
+        };
+        for (auto& layer : page.layers) {
+            if (layer.role == LayerRole::Ink) layer.color_raster = precise(16, 20, 90);  // (a layer of lines with precise pixels)
+        }
+        Layer screened;
+        screened.id = genko::core::new_id();
+        screened.kind = LayerKind::Raster;
+        screened.role = LayerRole::User;
+        screened.panel_clip = false;
+        screened.color_raster = precise(12, 14, 160);
+        screened.screen = Json::object({{"pattern", "noise"}});
+        render::Image half = render::Image::create("L", {40, 40}, render::Ink(255));
+        half.paste(render::Ink(0), render::Box{0, 0, 20, 40});
+        screened.mask = genko::core::Mask{};
+        screened.mask->png = std::make_shared<const std::string>(render::write_png(half));
+        screened.mask->enabled = true;
+        page.layers.push_back(screened);
+        QVERIFY(render::uses_color_precision(*doc.pages[0], true));
+        for (const char* mode : {"print", "proof"}) {
+            render::RenderOptions options;
+            options.mode = mode;
+            const render::RenderResult whole = render::render_page(*doc.pages[0], 150, options, &doc);
+            QVERIFY(whole.omitted.empty());
+            const render::Image all = whole.image;
+            for (const render::RenderRegion r : {render::RenderRegion{0, 0, 1, 1}, render::RenderRegion{17, 33, 120, 77},
+                                                 render::RenderRegion{0, 200, all.width(), 60},
+                                                 render::RenderRegion{all.width() - 40, all.height() - 25, 40, 25}}) {
+                render::clear_render_caches();
+                render::RenderOptions part = options;
+                part.region = r;
+                const render::Image got = render::render_page(*doc.pages[0], 150, part, &doc).image;
+                QCOMPARE(got.size(), (render::Size{r.w, r.h}));
+                QVERIFY2(got.tobytes() == all.crop(render::Box{r.x, r.y, r.x + r.w, r.y + r.h}).tobytes(), mode);
+            }
+        }
+    }
+
     void remembered_lines() {
         Document doc = book();
         genko::core::Page& page = doc.edit_page(0);

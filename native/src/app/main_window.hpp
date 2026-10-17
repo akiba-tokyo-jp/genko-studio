@@ -49,6 +49,8 @@ namespace genko::app {
 
 class BrushPanel;
 class ChannelPanel;
+class HistogramPanel;
+class InfoPanel;
 class CheckPanel;
 class ColourPanel;
 class HistoryPanel;
@@ -115,6 +117,7 @@ class MainWindow : public QMainWindow {
     friend class MaterialPanel;  // (likewise)
     friend class StoryPanel;     // (the chosen panel, a line's panel)
     friend class HistoryPanel;   // (after its undo and redo: the book watched and shown again)
+    friend class InfoPanel;      // (PC2d: the page's values in the status bar's words)
 
 public:
     // A window on a book (shared with any other window on it); none: a new untitled book in memory (8 pages, A4).
@@ -170,6 +173,12 @@ public:
     // drawing layers discarded — their count when there are any —, the name, draft and frame layers kept).
     static QString flatten_discards(int discarded);
     QDockWidget* channels_dock() const { return channels_dock_; }
+    // PC2d (app/info_panels.cpp): ウィンドウ → ヒストグラム and 情報 (F8), and 編集 → プロファイルの情報….
+    HistogramPanel* histogram_panel() const { return histogram_panel_; }
+    InfoPanel* info_panel() const { return info_panel_; }
+    QDockWidget* histogram_dock() const { return histogram_dock_; }
+    QDockWidget* info_dock() const { return info_dock_; }
+    void profile_info_dialog();
     ChannelView channel_view() const;
     // A row of the panel made what the tools work on (PhotoCraft's click on a row: a channel shown alone, a plate alone,
     // the composite back); Ctrl+Alt+2…9 (2 the composite, then the plates, then the channels).
@@ -669,6 +678,11 @@ private:
     void fill_channel_menu();
     void channel_view_changed();
     core::Json with_channel_target(const core::Json& ops) const;
+    void build_info_docks();  // (PC2d: app/info_panels.cpp)
+    HistogramPanel* histogram_panel_ = nullptr;
+    InfoPanel* info_panel_ = nullptr;
+    QDockWidget* histogram_dock_ = nullptr;
+    QDockWidget* info_dock_ = nullptr;
 
     std::shared_ptr<Session> session_;
     std::map<std::string, ChannelView> channel_views_;  // (by page id)

@@ -424,8 +424,9 @@ private slots:
 
     // What the group's review found: a fill stops at an ink layer's lines (its reference), an export written from the
     // screen's colours says so, an op finds the ink page whatever the page number's type, a LAB picture fails to other
-    // modes as Pillow, an ink page with a correction layer that moves shapes is drawn in tiles (the layer left out),
-    // and a book no op could leave opens read-only with its reason.
+    // modes as Pillow, an ink page with a correction layer that moves shapes is drawn whole for a part of it (PC2d: the
+    // layer drawn on the page's inks, render/ink_filters — it was left out before), and a book no op could leave opens
+    // read-only with its reason.
     void reviewFixes() {
         core::Document doc = run_ops(small_book(), Json::array({Json{{"op", "add_layer"}, {"page", 1}, {"kind", "paint"}, {"id", "pic"}, {"title", "線"}},
                                                                 to_cmyk_op()})).doc;
@@ -471,8 +472,8 @@ private slots:
                 QCOMPARE(QString::fromUtf8(error.what()), QStringLiteral("conversion from LAB to RGB not supported"));
             }
         }
-        // a blur correction layer on an ink page (one that moves shapes: an old book's): left out (said, as on precise
-        // pixels), the page drawn as its tiles, the same as whole
+        // a blur correction layer on an ink page (one that moves shapes: an old book's): PC2d draws it on the page's inks
+        // so far (render/ink_filters), the page drawn whole for a part of it, the same as whole; an export writes it
         core::Document blurred = doc;
         {
             core::Layer blur;
@@ -482,15 +483,15 @@ private slots:
             blurred.edit_page(0).layers.push_back(std::move(blur));
         }
         render::RenderOptions o;
-        o.skip_unported = true;  // (the screen; an export refuses it: not_yet_ported)
         o.region = render::RenderRegion{10, 20, 120, 90};
         const render::RenderResult part = render::render_page(blurred.page(0), dpi, o, &blurred);
-        QVERIFY(std::find(part.omitted.begin(), part.omitted.end(), "adjust:blur") != part.omitted.end());
+        QVERIFY(part.omitted.empty());
         o.region.reset();
         const render::Image whole = render::render_page(blurred.page(0), dpi, o, &blurred).image;
         QCOMPARE(part.image.tobytes(), whole.crop(render::Box{10, 20, 130, 110}).tobytes());
-        const Json refused = formats::run(blurred, std::nullopt, "tiff", out / "blurred", options);
-        QVERIFY2(!refused.value("ok", true) && refused.value("code", std::string()) == "not_yet_ported", refused.dump().c_str());
+        QVERIFY(whole.tobytes() != render::render_page(doc.page(0), dpi, o, &doc).image.tobytes());  // (the ring's edges softened)
+        const Json written = formats::run(blurred, std::nullopt, "tiff", out / "blurred", options);
+        QVERIFY2(written.value("ok", false), written.dump().c_str());
         // a Lab page with a blend it cannot composite, written by hand: read-only, with its reason
         const fs::path dir = out / "book.genko";
         const core::Document lab_book = run_ops(small_book(), Json::array({Json{{"op", "set_color_mode"}, {"mode", "lab"}}})).doc;

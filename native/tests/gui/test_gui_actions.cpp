@@ -281,7 +281,8 @@ private slots:
         // (act_adjust_brightness, act_adjust_levels, act_adjust_curves, act_adjust_exposure, act_adjust_lookup,
         // act_adjust_invert, act_adjust_posterize, act_adjust_threshold, act_adjust_gradient_map, act_adjust_equalize,
         // act_auto_tone, act_auto_contrast, act_auto_color, act_export_lookup) — theirs (test_gui_adjust).
-        QCOMPARE(w->actions_by_name().size(), std::size_t{280});
+        // and the 1 of PC2d (SPEC COLOR-04) — 編集 → プロファイルの情報… (act_profile_info) — its own (test_gui_info).
+        QCOMPARE(w->actions_by_name().size(), std::size_t{281});
         QVERIFY(w->action("act_chat_approval"));
         QVERIFY(w->action("act_style"));
         QVERIFY(w->action("act_exposure"));

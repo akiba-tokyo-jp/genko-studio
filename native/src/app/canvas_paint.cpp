@@ -19,15 +19,30 @@ namespace {
 
 const QColor kChosen(QStringLiteral("#1c7ed6"));
 
+// Does every pixel this paint can change (`region`, the canvas's: none — the whole canvas) lie inside `rect` (in the
+// painter's coordinates now), with two pixels to spare? Then what is drawn outside it changes none of them: a large
+// fill there is left out (the same pixels on the screen, the pen not held up by it while drawing).
+bool painted_within(const QPainter& painter, const QRegion& region, const QRectF& rect) {
+    if (region.isEmpty()) return false;
+    bool invertible = false;
+    const QTransform back = painter.transform().inverted(&invertible);
+    if (!invertible) return false;
+    const double scale = std::max(1e-6, std::sqrt(std::abs(painter.transform().determinant())));
+    const double spare = 2.0 / scale;
+    return rect.adjusted(spare, spare, -spare, -spare).contains(back.map(QPolygonF(QRectF(region.boundingRect()))).boundingRect());
+}
+
 }  // namespace
 
-void PageCanvas::paintEvent(QPaintEvent*) {
+void PageCanvas::paintEvent(QPaintEvent* event) {
     if (gpu_surface_ != nullptr) {  // (the surface over the whole canvas draws it: canvas_gpu.cpp)
         gpu_surface_->update();
         return;
     }
     QPainter painter(this);
+    painting_ = event->region();  // (the part asked to be painted again: a line being drawn asks for its piece)
     paint_frame(painter);
+    painting_ = QRegion();
 }
 
 void PageCanvas::paint_frame(QPainter& painter) {
@@ -176,7 +191,9 @@ void PageCanvas::paint_page(QPainter& painter) {
 }
 
 void PageCanvas::draw_shadow(QPainter& painter, const QRectF& page_rect) const {
-    // a soft shadow under the sheet, so the page sits on the surround like paper on a desk
+    // a soft shadow under the sheet, so the page sits on the surround like paper on a desk (none of it shows where
+    // this paint is all under the sheet's white)
+    if (painted_within(painter, painting_, page_rect)) return;
     const double scale = std::max(0.2, std::sqrt(std::abs(painter.transform().determinant())));
     painter.setPen(Qt::NoPen);
     const bool dark = theme::tokens().dark;
@@ -197,16 +214,18 @@ void PageCanvas::draw_guides(QPainter& painter, const QRectF& page_rect) const {
     };
     const QRectF bleed = box(p->bleed_rect_mm());
     const QRectF trim = box(p->trim_rect_mm());
-    QPainterPath outside;
-    outside.addRect(page_rect);
-    QPainterPath inside;
-    inside.addRect(bleed);
-    painter.fillPath(outside.subtracted(inside), QColor(90, 92, 100, 26));
-    QPainterPath band;
-    band.addRect(bleed);
-    QPainterPath cut;
-    cut.addRect(trim);
-    painter.fillPath(band.subtracted(cut), QColor(120, 122, 130, 22));
+    if (!painted_within(painter, painting_, trim)) {  // (the shaded bands lie outside the trim line)
+        QPainterPath outside;
+        outside.addRect(page_rect);
+        QPainterPath inside;
+        inside.addRect(bleed);
+        painter.fillPath(outside.subtracted(inside), QColor(90, 92, 100, 26));
+        QPainterPath band;
+        band.addRect(bleed);
+        QPainterPath cut;
+        cut.addRect(trim);
+        painter.fillPath(band.subtracted(cut), QColor(120, 122, 130, 22));
+    }
     painter.setBrush(Qt::NoBrush);
     if (p->spec.bleed_mm.value() > 0) {
         painter.setPen(QPen(QColor(120, 122, 130, 110), 1, Qt::DotLine));

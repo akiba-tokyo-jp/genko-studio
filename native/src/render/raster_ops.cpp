@@ -58,6 +58,8 @@
 #include "render/draw.hpp"
 #include "render/fill.hpp"
 #include "render/filters.hpp"
+#include "render/import_profile.hpp"
+#include "render/proof.hpp"
 #include "render/op_limits.hpp"
 #include "render/ops_adjust.hpp"
 #include "render/ops_registry.hpp"
@@ -869,6 +871,12 @@ std::pair<std::string, bool> composite_color_layers(const Document& doc, const P
                 throw NotYetPorted("high-precision merge adjustment depends on external background");
             out.expose(exposure, layer.opacity, layer.clip, mask ? &*mask : nullptr, blend);
             floating = true; // An adjustment can produce HDR even from a u16 input.
+        } else if (precise_layer_styled(layer)) {
+            // (PC2d: with what is drawn on it — lines on its pixels, pictures, effects, its colour — as the page draws it)
+            participate(layer);
+            if (layer.color_raster) floating = floating || core::ColorRasterView(*layer.color_raster).metadata("")["precision"] == "f32";
+            if (layer.strokes) for (const auto& stroke : layer.strokes->items) if (stroke->color_rgb && (*stroke->color_rgb)["precision"]=="f32") floating=true;
+            blend_precise_layer(out, page, layer, kWorkingDpi, all, &doc);
         } else if (core::has_color_strokes(layer)) {
             participate(layer);
             for (const auto& stroke : layer.strokes->items) if (stroke->color_rgb && (*stroke->color_rgb)["precision"]=="f32") floating=true;
@@ -1868,9 +1876,19 @@ void put_raster(OpContext& c) {
     }
     Layer& layer = page.layers[li];
     if (layer.locked) throw OpError("the layer is locked");  // (Python replaces its pixels)
+    // (PC2d, the C++ build's own embedded_profile: the picture's colours taken from its profile or the op's into the
+    // page's space; none, or keep: its numbers as they are, Python's)
+    std::optional<Image> picture;
+    import_profile::Taking way;
+    if (op.contains("embedded_profile")) {
+        picture = open_image(blob, kPillowOpenLimits);
+        way = import_profile::taking(doc, page, op, proof::embedded_profile(blob), picture->mode());
+        c.report = Json::object({{"embedded_profile", import_profile::report(way)}});
+    }
     layer.kind = LayerKind::Raster;
     if (page.color) {  // (color-mode@1: a CMYK or Lab page's paint layer holds the picture as the page's inks)
-        layer.ink_raster = std::make_shared<const std::string>(core::encode_ink_raster(ink::picture_inks(blob, *page.color)));
+        const core::InkPixels inks = way.converting ? import_profile::taken_inks(*picture, way, *page.color) : ink::picture_inks(blob, *page.color);
+        layer.ink_raster = std::make_shared<const std::string>(core::encode_ink_raster(inks));
         layer.ink_memo = {};
         layer.raster_png = nullptr;
         layer.raster_memo = {};
@@ -1879,6 +1897,7 @@ void put_raster(OpContext& c) {
         if (layer.role == LayerRole::Name || layer.role == LayerRole::Draft) layer.exportable = false;
         return;
     }
+    if (way.converting) blob = write_png(import_profile::taken(*picture, way, page));
     layer.raster_png = std::make_shared<const std::string>(std::move(blob));
     const std::string name = layer.role == LayerRole::User ? "user-" + layer.id : std::string(core::to_string(layer.role));
     layer.raster_relpath = raster::page_folder(page) + "/" + name + ".png";

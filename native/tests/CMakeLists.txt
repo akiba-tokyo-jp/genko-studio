@@ -277,6 +277,9 @@ genko_test(test_contract_adjust_color SOURCES contract/test_contract_adjust_colo
 # psd-tools (tools/migration/psd_adjust_check.py) and by import_psd.
 genko_test(test_contract_adjust SOURCES contract/test_contract_adjust.cpp DEPS genko_test_support genko_render
            LABELS contract TIMEOUT 1800)
+# PC2d (COLOR-04) through the command line: put_raster and import_psd with embedded_profile, inspect --profile.
+genko_test(test_contract_profile SOURCES contract/test_contract_profile.cpp DEPS genko_test_support genko_render ZLIB::ZLIB
+           LABELS contract TIMEOUT 900)
 # channels@1 (COLOR-03) through the command line: apply, save, gc, undo and redo, a selection and a fill on a channel,
 # render, inspect, export (the PSD's extra channels read back, the PDF's separation, the notes).
 genko_test(test_contract_channels SOURCES contract/test_contract_channels.cpp DEPS genko_test_support genko_render ZLIB::ZLIB
@@ -390,6 +393,8 @@ if(GENKO_BUILD_APP)
   # 自動, a LUT from a file) with the result on the page, the 色調補正 and 属性 panels (one set_adjustment, one Undo), the
   # .cube written from ファイル.
   genko_test(test_gui_adjust SOURCES gui/test_gui_adjust.cpp DEPS genko_app genko_test_support GUI TIMEOUT 600)
+  # PC2d (COLOR-04): ヒストグラム and 情報 panels, プロファイルの情報.
+  genko_test(test_gui_info SOURCES gui/test_gui_info.cpp DEPS genko_app GUI TIMEOUT 300)
   # the brush panel and ツールの設定: brushes kept per kind, one's own made, opened, given and read back (.abr too)
   genko_test(test_gui_brushes SOURCES gui/test_gui_brushes.cpp DEPS genko_app GUI TIMEOUT 600)
   # 紙質 (BRUSH-01): the dialog's paper, one's own brush with a paper (the library beside Python's file, read by

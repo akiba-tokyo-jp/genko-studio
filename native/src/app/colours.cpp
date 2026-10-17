@@ -13,6 +13,7 @@
 #include <QSettings>
 #include <QSpinBox>
 #include <QTabWidget>
+#include <QTimer>
 #include <QVBoxLayout>
 
 #include <algorithm>
@@ -424,11 +425,29 @@ QString write_colours(const std::vector<Rgb>& colours) {
     return items.join(QLatin1Char(';'));
 }
 
+// 履歴 as it waits to be written to settings.ini: a colour is remembered at every line drawn, and each write of the
+// settings locks the file and syncs it to the disk (QLockFile, QSaveFile) — a stall while drawing. It is written a
+// moment after a run of lines (kHistoryWrite), when a panel reads the settings, and when the panel goes: the same
+// value as before, written fewer times.
+std::optional<QString> pending_history;
+constexpr int kHistoryWrite = 3000;  // ms
+
+void write_pending_history() {
+    if (!pending_history) return;
+    settings()->setValue(QStringLiteral("colour/history"), *pending_history);
+    pending_history.reset();
+}
+
 }  // namespace
 
 // --- the panel ------------------------------------------------------------------------------------------------------
 
 ColourPanel::ColourPanel(BrushPanel* brush, QWidget* parent) : QWidget(parent), brush_(brush) {
+    write_pending_history();  // (another panel's 履歴 not written yet: read as it is)
+    history_write_ = new QTimer(this);
+    history_write_->setSingleShot(true);
+    history_write_->setInterval(kHistoryWrite);
+    connect(history_write_, &QTimer::timeout, this, [] { write_pending_history(); });
     {
         const auto store = settings();
         const auto sub_read = read_colours(store->value(QStringLiteral("colour/sub"), QStringLiteral("255,255,255")).toString());
@@ -735,13 +754,17 @@ void ColourPanel::swap() {
     choose(new_main);
 }
 
+ColourPanel::~ColourPanel() { write_pending_history(); }
+
 void ColourPanel::remember(const Rgb& rgb) {
+    if (!history_.empty() && history_.front() == rgb) return;  // (the front already: nothing changes)
     std::vector<Rgb> history{rgb};
     for (const Rgb& c : history_)
         if (c != rgb) history.push_back(c);
     if (history.size() > static_cast<std::size_t>(colours::kHistory)) history.resize(colours::kHistory);
     history_ = std::move(history);
-    settings()->setValue(QStringLiteral("colour/history"), write_colours(history_));
+    pending_history = write_colours(history_);
+    history_write_->start();
     fill_history();
 }
 

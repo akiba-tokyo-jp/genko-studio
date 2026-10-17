@@ -65,3 +65,7 @@ PhotoCraft v0.2.0（`ad863217386440ca968fccc9bfff65ba24e61142`、MIT、同梱 `L
   - `crates/engine/src/extra_cmds.rs`（156-187 行）: 平均化（R・G・B をまとめた度数の累積）→ `native/src/core/adjust_tone.cpp`（`equalize_table`）、`native/src/render/ops_adjust.cpp`。
   - `crates/engine/src/file_cmds.rs`（828-882 行）: 補正レイヤーを .cube に焼く（格子・TITLE・LUT_3D_SIZE・DOMAIN）→ `native/src/formats/exporting.cpp`（`bake_cube`）、`native/src/api/cli.cpp`（`export --format cube`）。
   - `crates/io/src/adjust_map.rs`（21-110 行、160-316 行、331-375 行、487-640 行）・`crates/io/src/gradient_bake.rs`: PSD の調整レイヤー（`levl`・`curv`・`brit`/`CgEd`・`post`・`thrs`・`nvrt`・`expA`・`grdm`・`clrL`）の読み書きと記述子、グラデーションの焼き方（なめらかさ・中間点・Oklab）→ `native/src/render/psd_adjust.cpp`。
+- `crates/engine/src/color_cmds.rs`（496-506 行、746-762 行）: プロファイルの情報の項目（説明・色空間・種類・版・変換の表・意図、内蔵の一覧）→ `native/src/render/proof.cpp`（`profile_info`・`builtin_profile_list`・`profile_info_of`。白色点とトーンカーブは Genko が足した）、`genko inspect --profile`、編集 → プロファイルの情報…（PC2d）。
+- `crates/engine/src/color_cmds.rs`（880-911 行）: 埋め込みプロファイルの不一致の答え（そのまま・変換・破棄・作業用を割り当て）の考え → `native/src/render/import_profile.cpp`（`put_raster`・`import_psd` の `embedded_profile`: keep・convert・assign。PC2d）。
+- `crates/ui-egui/src/tone.rs`（20-120 行、157-180 行、213-275 行）: ヒストグラムの数え方（透明でない画素、RGB は 3 つの平均、大きな山で潰れないよう高い段で目盛る）と数値（平均・標準偏差・中央値・画素数）→ `native/src/app/info_panels.cpp`（`histogram_of`・`stats_of`・`HistogramPanel`。輝度とカラーは Genko が足した。PC2d）。
+- `crates/ui-egui/src/panels.rs`（831-889 行）: 情報パネルの項目（ポインターの下の色・位置・選択範囲の大きさ）→ `native/src/app/info_panels.cpp`（`InfoPanel`。値は Genko の `render::pixel_at`、校正の値はそのプロファイルへの変換。PC2d）。

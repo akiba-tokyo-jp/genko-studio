@@ -63,6 +63,11 @@ public:
     // PC2 (design 4.2): a correction's records laid on the plates directly (core::InkRecords: each plate's tone — CMYK
     // its brightness, Lab its normalized value, grey its lightness — through its function), mixed in as recolour.
     void adjust_planes(const core::InkRecords& records, double opacity, bool clip, const Image* mask = nullptr, std::string_view mode = "normal");
+    // PC2d: a correction that moves shapes, worked on the page's inks so far (ink_pixels with their alpha, through
+    // render/ink_filters): `changed` (the canvas's size, its values) laid over them as the 8-bit page composites its
+    // result — every value, the alpha too, mixed by the opacity × the mask, × the alpha of the layer before when clipped;
+    // `mode` (its native.blend) laid on the inks first by the page's formula.
+    void correct(const InkPicture& changed, double opacity, bool clip, const Image* mask = nullptr, std::string_view mode = "normal");
 
     // The page as the screen shows it ("RGB", sRGB).
     Image display() const;
