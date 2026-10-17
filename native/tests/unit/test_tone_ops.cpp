@@ -3,7 +3,7 @@
 // light only; Replace Color on the matching pixels only; Match Color moving the statistics, neutralize to grey; HDR
 // toning within 0..1, an inverted curve turning the order round) and the box Gaussian, Color Range and Lab; then the
 // ops: filter_raster's shadows_highlights, replace_color and match_color on an 8-bit layer (within the area), a
-// precise one (the 8-bit result within a level) and a CMYK one (a grey kept on K), match_color's sources (a layer, the
+// precise one (the 8-bit result within a level), a CMYK one (a grey kept on K) and an alpha channel, match_color's sources (a layer, the
 // page merged, statistics given, the target's in the area) and its refusals, hdr_toning flattening the page (the count
 // merged and discarded; the panels kept).
 
@@ -20,6 +20,7 @@
 #include "core/command_bus.hpp"
 #include "core/error.hpp"
 #include "core/ink.hpp"
+#include "render/channels.hpp"
 #include "render/image_ops.hpp"
 #include "render/ink.hpp"
 #include "render/ink_canvas.hpp"
@@ -342,6 +343,13 @@ private slots:
         QCOMPARE(at(after, 10, 150, 0), at(before, 10, 150, 0));
         // the colour is required
         QVERIFY(refusal(doc, Json{{"op", "filter_raster"}, {"page", 1}, {"id", "paint"}, {"kind", "replace_color"}}).starts_with("apply: "));
+        // on an alpha channel (PC1c's "channel": lent as a grey paint layer): its white made grey
+        const auto chan = run(doc, Json{{"op", "add_channel"}, {"page", 1}, {"name", "α"}, {"fill", "white"}}).doc;
+        const auto worked = run(chan, Json{{"op", "filter_raster"}, {"page", 1}, {"id", "paint"}, {"kind", "replace_color"}, {"channel", "α"},
+                                           {"color", Json::array({255, 255, 255})}, {"lightness", -50}}).doc;
+        const render::channels::Plane plane = render::channels::plane_of(worked.page(0), worked.page(0).channels[0]);
+        QVERIFY(std::fabs(plane.values[plane.values.size() / 2] - 0.5f) < 0.02f);
+        QCOMPARE(*layer_of(worked, "paint").raster_png, *layer_of(doc, "paint").raster_png);
     }
 
     // match_color: a layer's colours to another layer's statistics (a flat colour: every pixel to it), to the page
