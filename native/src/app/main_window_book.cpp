@@ -10,14 +10,18 @@
 #include <filesystem>
 #include <optional>
 #include <system_error>
+#include <tuple>
+#include <utility>
 #include <vector>
 
 #include "app/ask.hpp"
 #include "app/book_dialogs.hpp"
+#include "app/color_settings_dialog.hpp"
 #include "app/canvas.hpp"
 #include "app/dialogs.hpp"
 #include "app/layer_panel.hpp"
 #include "app/main_window.hpp"
+#include "app/mode_dialogs.hpp"
 #include "app/pages_panel.hpp"
 #include "app/save_status.hpp"
 #include "service/wording.hpp"
@@ -25,6 +29,7 @@
 #include "core/error.hpp"
 #include "core/paths.hpp"
 #include "core/pyops.hpp"
+#include "render/ops_registry.hpp"
 #include "storage/asset_store.hpp"
 #include "storage/reader.hpp"
 
@@ -119,7 +124,37 @@ void MainWindow::build_book_actions() {
     make("act_paper", QStringLiteral("原稿用紙の設定…"), [this] { paper_settings(); }, {},
          QStringLiteral("用紙・仕上がり・裁ち落とし・基本枠。変えるとコマや台詞も新しい枠に合わせて動きます"));
     make("act_color_mode", QStringLiteral("ページの色モード…"), [this] { color_mode_dialog(); }, {},
-         QStringLiteral("RGB・CMYK・Lab と精度（8/16 bit）。CMYK は印刷所のプロファイルを原稿に埋め込みます"));
+         QStringLiteral("RGB・グレースケール・CMYK・Lab、精度（8/16/32 bit）とプロファイル。プロファイルは原稿に埋め込みます"));
+    // ページ → 色モード (image.mode.*, color-model@1): the page in front in RGB, grey, CMYK or Lab, in 8, 16 or 32 bits
+    // a channel; checked as the page is (show_color_mode)
+    auto* modes = new QActionGroup(this);
+    modes->setExclusionPolicy(QActionGroup::ExclusionPolicy::ExclusiveOptional);
+    for (const auto& [name, title, mode] : {std::tuple{"act_mode_rgb", "RGB", "rgb"}, std::tuple{"act_mode_gray", "グレースケール", "gray"},
+                                            std::tuple{"act_mode_cmyk", "CMYK", "cmyk"}, std::tuple{"act_mode_lab", "Lab", "lab"}}) {
+        modes->addAction(make(QString::fromLatin1(name), QString::fromUtf8(title), [this, mode] { set_page_mode(QString::fromLatin1(mode), 0); }, {}, {}, true));
+    }
+    // (color-model@1, PC1d: Image › Mode's own — the ones that flatten ask first; the dialogs app/mode_dialogs)
+    modes->addAction(make(QStringLiteral("act_mode_bitmap"), QStringLiteral("2 階調…"), [this] { bitmap_dialog(); }, {},
+                          QStringLiteral("グレースケールのページを、画素レイヤーを統合して黒と白の 2 階調にします"), true));
+    modes->addAction(make(QStringLiteral("act_mode_indexed"), QStringLiteral("インデックスカラー…"), [this] { indexed_dialog(); }, {},
+                          QStringLiteral("画素レイヤーを統合して、256 色までの表（カラーテーブル）の色にします"), true));
+    modes->addAction(make(QStringLiteral("act_mode_duotone"), QStringLiteral("ダブルトーン…"), [this] { duotone_dialog(); }, {},
+                          QStringLiteral("グレースケールのページを 1〜4 色のインキとカーブで刷った見え方にします（画素はそのまま）"), true));
+    modes->addAction(make(QStringLiteral("act_mode_multichannel"), QStringLiteral("マルチチャンネル"), [this] { to_multichannel(); }, {},
+                          QStringLiteral("画素レイヤーを統合して、色の版をそれぞれインキの版（シアン・マゼンタ・イエロー・ブラックなど）にします"), true));
+    make("act_color_table", QStringLiteral("カラーテーブル…"), [this] { color_table_dialog(); }, {},
+         QStringLiteral("インデックスカラーのページの表の色を変えます（画素は番号を保ちます）"));
+    auto* depths = new QActionGroup(this);
+    depths->setExclusionPolicy(QActionGroup::ExclusionPolicy::ExclusiveOptional);
+    for (const auto& [name, title, depth] : {std::tuple{"act_depth_8", "8 bit/チャンネル", 8}, std::tuple{"act_depth_16", "16 bit/チャンネル", 16},
+                                             std::tuple{"act_depth_32", "32 bit/チャンネル（浮動小数）", 32}}) {
+        depths->addAction(make(QString::fromLatin1(name), QString::fromUtf8(title), [this, depth] { set_page_mode(QString(), depth); }, {}, {}, true));
+    }
+    // 編集 → プロファイルの指定… / プロファイルに変換… (edit.assignProfile, edit.convertToProfile)
+    make("act_assign_profile", QStringLiteral("プロファイルの指定…"), [this] { profile_dialog(false); }, {},
+         QStringLiteral("画素の値はそのままで、どのプロファイルの色として見るかを決めます"));
+    make("act_convert_profile", QStringLiteral("プロファイルに変換…"), [this] { profile_dialog(true); }, {},
+         QStringLiteral("見た目の色を保って、画素をほかのプロファイル（RGB・グレー・CMYK）の値に変換します"));
     make("act_page_nombre", QStringLiteral("このページのノンブルを隠す／出す"), [this] { toggle_page_nombre(); });
     make("act_add_cover", QStringLiteral("表紙・カバーを足す…"), [this] { add_cover_dialog(); }, {}, QStringLiteral("表紙・裏表紙、または背と袖のあるカバー 1 枚"));
     make("act_assignee", QStringLiteral("このページの担当…"), [this] { assignee_dialog(); }, {},
@@ -224,6 +259,234 @@ void MainWindow::color_mode_dialog() {
     if (!apply_ops(Json::array({dialog.op()}))) return;
     reload_pages();
     flash(QStringLiteral("色モードを変えました"), 4000);
+}
+
+// 色モード → RGB・グレースケール・CMYK・Lab・8/16/32 bit (image.mode.*, as upstream's Image → Mode): the page in front
+// in another mode (its depth kept) or another depth (the rest of its mode kept: its profile, intent, black point) —
+// set_color_mode, undone as any op. Another mode in カラー設定's working space of it (CMYK: the built-in coated-cmyk
+// unless another is chosen; RGB and grey: the op's own default, sRGB and sGray, unless another is chosen), converted with
+// its intent and black point compensation (written when not the op's default) while the page keeps the default way
+// (page_intent, page_bpc). Another depth of an 8-bit sRGB page: the depth alone. Nothing when the page is so already; a
+// refusal said (apply_ops) and the marks put back as the page is.
+namespace {
+
+// The mode a page is in as the menu marks it: rgb, gray, cmyk, lab, and color-model@1's bitmap, duotone, multichannel,
+// indexed.
+std::string page_mode(const core::Page& page) {
+    if (page.color) return std::string(core::mode_name(*page.color));
+    return page.rgb && page.rgb->table ? std::string("indexed") : std::string("rgb");
+}
+
+}  // namespace
+
+void MainWindow::set_page_mode(const QString& mode, int depth) {
+    const core::Page* page = current_page();
+    if (page == nullptr) return;
+    const std::string now = page_mode(*page);
+    const int now_depth = page->color ? page->color->depth : page->rgb ? page->rgb->depth : 8;
+    const std::string wanted = mode.isEmpty() ? now : mode.toStdString();
+    const int to = depth == 0 ? now_depth : depth;
+    if (wanted == now && to == now_depth) {
+        show_color_mode();
+        return;
+    }
+    Json op{{"op", "set_color_mode"}, {"page", page->index.json()}, {"mode", wanted}, {"depth", to}};
+    if (wanted == now && now == "multichannel") {
+        // (a multichannel page's depth alone: its plates kept)
+    } else if ((now == "bitmap" || now == "duotone") && wanted == "gray") {
+        // (back to grey: the look or the inks taken off, the page's own profile and way kept)
+        op["profile"] = page->color->profile;
+        op["intent"] = page->color->intent;
+        if (!page->color->bpc) op["bpc"] = false;
+    } else if (wanted == now && page->color) {
+        if (page->color->space != core::InkSpace::Lab) op["profile"] = page->color->profile;
+        op["intent"] = page->color->intent;
+        if (!page->color->bpc) op["bpc"] = false;
+    } else if (wanted == now && page->rgb) {
+        if (!page->rgb->profile.empty()) op["profile"] = page->rgb->profile;  // (sRGB: none named)
+        op["intent"] = page->rgb->intent;
+        if (!page->rgb->bpc) op["bpc"] = false;
+    } else if (wanted == now) {
+        // (an 8-bit sRGB page: its depth alone — sRGB and the default way kept, whatever カラー設定 has)
+    } else {
+        const color_settings::Settings chosen = color_settings::load();
+        const color_settings::Space space = wanted == "cmyk"   ? color_settings::Space::Cmyk
+                                            : wanted == "gray" ? color_settings::Space::Gray
+                                                               : color_settings::Space::Rgb;
+        if (wanted != "lab") {
+            const color_settings::Working w = color_settings::working(space, chosen);
+            if (wanted == "cmyk" && (!w.usable || !w.icc)) op["profile"] = "coated-cmyk";  // (no working CMYK profile: the built-in)
+            else if (wanted == "cmyk" || !w.is_default) color_settings::put_profile(op, w);
+        }
+        // (converted the settings' way; the page keeps the default way its colours come into it: page_intent, page_bpc)
+        if (chosen.intent != QLatin1String("relative")) {
+            op["intent"] = chosen.intent.toStdString();
+            op["page_intent"] = "relative";
+        }
+        if (!chosen.bpc) {
+            op["bpc"] = false;
+            op["page_bpc"] = true;
+        }
+    }
+    if (!apply_ops(Json::array({op}))) {
+        show_color_mode();
+        return;
+    }
+    reload_pages();
+    flash(QStringLiteral("色モードを変えました"), 4000);
+}
+
+// The 色モード marks: the page in front's mode and depth (none without a page); color-model@1's own modes offered where
+// PhotoCraft offers them (2 階調 and ダブルトーン from a grey page, インデックスカラー not from a bitmap or multichannel one,
+// マルチチャンネル not from an indexed, bitmap or profiled RGB one; カラーテーブル on an indexed page; the depths not for a
+// bitmap, indexed or duotone page, which keep theirs).
+void MainWindow::show_color_mode() {
+    const core::Page* page = current_page();
+    const std::string mode = page == nullptr ? std::string() : page_mode(*page);
+    const int depth = page == nullptr ? 0 : page->color ? page->color->depth : page->rgb ? page->rgb->depth : 8;
+    for (const auto& [name, its] : {std::pair{"act_mode_rgb", "rgb"}, std::pair{"act_mode_gray", "gray"}, std::pair{"act_mode_cmyk", "cmyk"},
+                                    std::pair{"act_mode_lab", "lab"}, std::pair{"act_mode_bitmap", "bitmap"}, std::pair{"act_mode_indexed", "indexed"},
+                                    std::pair{"act_mode_duotone", "duotone"}, std::pair{"act_mode_multichannel", "multichannel"}}) {
+        if (QAction* a = action(QString::fromLatin1(name))) a->setChecked(mode == its);
+    }
+    const bool profiled = page != nullptr && !page->color && page->rgb && !page->rgb->profile.empty();
+    const auto enable = [&](const char* name, bool on) {
+        if (QAction* a = action(QString::fromLatin1(name))) a->setEnabled(page != nullptr && on);
+    };
+    enable("act_mode_bitmap", mode == "gray");
+    enable("act_mode_duotone", mode == "gray" || mode == "duotone");
+    enable("act_mode_indexed", mode != "bitmap" && mode != "multichannel");
+    enable("act_mode_multichannel", mode != "indexed" && mode != "bitmap" && !profiled);
+    enable("act_color_table", mode == "indexed");
+    for (const auto& [name, its] : {std::pair{"act_depth_8", 8}, std::pair{"act_depth_16", 16}, std::pair{"act_depth_32", 32}}) {
+        if (QAction* a = action(QString::fromLatin1(name))) {
+            a->setChecked(depth == its);
+            a->setEnabled(mode != "bitmap" && mode != "indexed" && mode != "duotone");
+        }
+    }
+}
+
+QString MainWindow::flatten_discards(int discarded) {
+    return discarded > 0 ? QStringLiteral("非表示の作画レイヤー（%1 枚）は破棄します（ネーム・下描き・コマ枠は保持）。").arg(discarded)
+                         : QStringLiteral("非表示の作画レイヤーは破棄します（ネーム・下描き・コマ枠は保持）。");
+}
+
+// Whether to go on with a conversion that flattens the page (インデックスカラー, 2 階調, マルチチャンネル, as PhotoCraft and
+// Photoshop do, by Genko's 画像をフラット化): asked when the page has two or more layers that would be merged ("画像を
+// 統合しますか") or any hidden layer the flatten would discard — 画像をフラット化's words —, saying Undo brings them back;
+// nothing to ask with one layer or none and nothing hidden. Every page (page null): asked when any page has a hidden
+// layer to discard (the merges are said in the dialog).
+bool MainWindow::flatten_asked(const core::Page* page, const QString& what) {
+    // (the layers holding something — pixels, lines, patches, a fill: a page's empty layers of its own roles are no
+    // question —, as render::flatten_count reads the flatten)
+    int merged = 0, discarded = 0;
+    if (page != nullptr) {
+        const render::FlattenCount count = render::flatten_count(*page);
+        merged = count.merged;
+        discarded = count.discarded;
+    } else {
+        const core::Document& doc = session_->document();
+        for (std::size_t i = 0; i < doc.pages.size(); ++i) {
+            if (!doc.is_deferred(i)) discarded += render::flatten_count(doc.page(i)).discarded;
+        }
+    }
+    if (merged < 2 && discarded == 0) return true;
+    const QString layers = page == nullptr ? QStringLiteral("すべてのページで、ページごとに画素レイヤーを 1 枚に統合します")
+                           : merged >= 2   ? QStringLiteral("このページの画素レイヤー（%1 枚）を 1 枚に統合します").arg(merged)
+                                           : QStringLiteral("このページの画素レイヤーを 1 枚に統合します");
+    return ask::question(this, QStringLiteral("画像を統合"),
+                         QStringLiteral("%1にすると、%2。統合しますか？\n%3台詞・フキダシは要素のまま残ります。編集 → 取り消し で元に戻せます。")
+                             .arg(what, layers, flatten_discards(discarded)));
+}
+
+// インデックスカラー… (image.mode.indexedColor, PhotoCraft's Indexed Color): the dialog's to_indexed, the flatten asked.
+void MainWindow::indexed_dialog() {
+    const Asked asked = asking();
+    IndexedDialog dialog(this, current_page());
+    if (ask::exec(&dialog) != QDialog::Accepted || !still(asked)) {
+        show_color_mode();
+        return;
+    }
+    const Json op = dialog.op();
+    if (!flatten_asked(op.contains("page") ? current_page() : nullptr, QStringLiteral("インデックスカラー")) || !still(asked) || !apply_ops(Json::array({op}))) {
+        show_color_mode();
+        return;
+    }
+    reload_pages();
+    flash(QStringLiteral("インデックスカラーにしました"), 4000);
+}
+
+// カラーテーブル… (image.mode.colorTable): the page in front's table, set_color_table.
+void MainWindow::color_table_dialog() {
+    const core::Page* page = current_page();
+    if (page == nullptr || page->color || !page->rgb || !page->rgb->table) {
+        flash(QStringLiteral("カラーテーブルはインデックスカラーのページで使えます"), 4000);
+        return;
+    }
+    const Asked asked = asking();
+    ColorTableDialog dialog(this, *page);
+    if (ask::exec(&dialog) != QDialog::Accepted || !still(asked)) return;
+    if (!apply_ops(Json::array({dialog.op()}))) return;
+    reload_pages();
+    flash(QStringLiteral("カラーテーブルを変えました"), 4000);
+}
+
+// 2 階調… (image.mode.bitmap): the dialog's to_bitmap, the flatten asked.
+void MainWindow::bitmap_dialog() {
+    const Asked asked = asking();
+    BitmapDialog dialog(this, current_page());
+    if (ask::exec(&dialog) != QDialog::Accepted || !still(asked)) {
+        show_color_mode();
+        return;
+    }
+    const Json op = dialog.op();
+    if (!flatten_asked(op.contains("page") ? current_page() : nullptr, QStringLiteral("2 階調")) || !still(asked) || !apply_ops(Json::array({op}))) {
+        show_color_mode();
+        return;
+    }
+    reload_pages();
+    flash(QStringLiteral("2 階調にしました"), 4000);
+}
+
+// ダブルトーン… (image.mode.duotone): the dialog's set_duotone (no pixel changes: nothing to flatten).
+void MainWindow::duotone_dialog() {
+    const Asked asked = asking();
+    DuotoneDialog dialog(this, current_page());
+    if (ask::exec(&dialog) != QDialog::Accepted || !still(asked) || !apply_ops(Json::array({dialog.op()}))) {
+        show_color_mode();
+        return;
+    }
+    reload_pages();
+    flash(QStringLiteral("ダブルトーンにしました"), 4000);
+}
+
+// マルチチャンネル (image.mode.multichannel): the page in front, set_color_mode's multichannel, the flatten asked.
+void MainWindow::to_multichannel() {
+    const core::Page* page = current_page();
+    if (page == nullptr) return;
+    if (page->color && page->color->space == core::InkSpace::Multi) {
+        show_color_mode();
+        return;
+    }
+    const Asked asked = asking();
+    if (!flatten_asked(page, QStringLiteral("マルチチャンネル")) || !still(asked) ||
+        !apply_ops(Json::array({Json{{"op", "set_color_mode"}, {"page", page->index.json()}, {"mode", "multichannel"}}}))) {
+        show_color_mode();
+        return;
+    }
+    reload_pages();
+    flash(QStringLiteral("マルチチャンネルにしました"), 4000);
+}
+
+// プロファイルの指定… / プロファイルに変換… (edit.assignProfile, edit.convertToProfile): the page in front or every page;
+// assign_profile or convert_profile, undone as any op.
+void MainWindow::profile_dialog(bool convert) {
+    const Asked asked = asking();
+    ProfileDialog dialog(this, *asked.snapshot, current_page(), convert);
+    if (ask::exec(&dialog) != QDialog::Accepted || !still(asked)) return;
+    if (!apply_ops(Json::array({dialog.op()}))) return;
+    reload_pages();
+    flash(convert ? QStringLiteral("プロファイルに変換しました") : QStringLiteral("プロファイルを指定しました"), 4000);
 }
 
 // 表紙・カバーを足す… (_add_cover_dialog): the cover at the end of the book, in front.

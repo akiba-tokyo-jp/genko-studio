@@ -27,6 +27,7 @@
 #include "app/main_window.hpp"
 #include "app/navigator.hpp"
 #include "app/pages_panel.hpp"
+#include "app/preferences.hpp"
 #include "app/templates.hpp"
 #include "app/theme.hpp"
 #include "core/frames.hpp"
@@ -89,7 +90,10 @@ const std::vector<Expected>& expected() {
         {"act_prev", "◀ 前のページ", k({QKeySequence(Std::MoveToPreviousPage), s("Ctrl+Left")}), "", false, "表示"},
         {"act_next", "次のページ ▶", k({QKeySequence(Std::MoveToNextPage), s("Ctrl+Right")}), "", false, "表示"},
         {"act_guides", "仕上がり線・基本枠を表示", k({s("Ctrl+;")}), "断ち切り（裁ち落とし）・仕上がり線・基本枠", true, "表示"},
-        {"act_cmyk_proof", "CMYK で見る（色校正）", {}, "印刷したときの色の見当（CMYK の範囲に収めた色）で表示します。プロファイルは書き出しで選んだもの", true, "表示"},
+        // (PC1b, SPEC COLOR-03: Python's 「CMYK で見る（色校正）」 is now 色の校正 — View → Proof Colors — on Ctrl+Alt+Y
+        // (Ctrl+Y is やり直す); it shows what 校正の設定 chooses, the working CMYK unless another: the user's decision
+        // (working CMYK coated-cmyk), Python's own conversion kept there as 書き出しの CMYK)
+        {"act_cmyk_proof", "色の校正", k({s("Ctrl+Alt+Y")}), "印刷したときの色など、校正の設定で選んだ見え方で表示します（表示だけ。原稿は変わりません）", true, "表示"},
         {"act_select", "選択", k({s("V")}), "コマを選ぶ・フキダシを動かす・ドラッグで表示を動かす", true, "ツール"},
         {"act_pen", "ペン", k({s("B")}), "レイヤー パネルで選んだレイヤーに描きます", true, "ツール"},
         {"act_eraser", "消しゴム", k({s("E")}), "ペンの線は触れた所で切れます", true, "ツール"},
@@ -250,12 +254,22 @@ private slots:
         // here before) theirs (test_gui_book), the 6 of the book going out (M4③b: act_export, act_print, act_history,
         // act_phone, act_scale, act_checks) theirs (test_gui_output), the 2 of the studio (M5④: act_chat_approval,
         // act_style) theirs (test_gui_studio), the colour mode of pages (CMYK/Lab: act_color_mode) its own (test_gui_book), the
+        // 9 of color-model@1 — ページ → 色モード (act_mode_rgb, act_mode_gray, act_mode_cmyk, act_mode_lab, act_depth_8,
+        // act_depth_16, act_depth_32) and 編集 → プロファイルの指定… / プロファイルに変換… (act_assign_profile,
+        // act_convert_profile) — theirs (test_gui_book), the 9 of channels@1 — the targets Ctrl+Alt+2…9 (act_channel_composite,
+        // act_channel_3 … act_channel_9) and 選択 → 選択範囲をチャンネルに保存… (act_sel_to_channel) — theirs (test_gui_channels,
+        // test_gui_select), the
         // 17 of M6 — 環境設定 and the work (act_prefs, act_canvas_only, act_hints, act_tool_names, act_edit_commandbar,
         // act_edit_quick, act_save_workspace, act_next_steps, act_find_command, act_ai) theirs (test_gui_look,
         // test_gui_workspace, test_gui_studio), the help (act_help_keys, act_help_guide, act_help_faq, act_about), the
         // book preview, the border detail and the picture taken in (act_book_preview, act_border_detail, act_import) theirs
-        // (test_gui_carried).
-        QCOMPARE(w->actions_by_name().size(), std::size_t{212});
+        // (test_gui_carried), and the 15 of PC1b (SPEC COLOR-03) — 編集 → カラー設定… (act_color_settings), 表示 → 色域外警告
+        // (act_gamut_warning) and the 13 kinds of 表示 → 校正の設定 (act_proof_custom, act_proof_working_cmyk, act_proof_export,
+        // act_proof_cyan, act_proof_magenta, act_proof_yellow, act_proof_black, act_proof_cmy, act_proof_srgb, act_proof_monitor,
+        // act_proof_legacy_mac, act_proof_protan, act_proof_deutan) — theirs (test_gui_color), and the 5 of PC1d (SPEC COLOR-03)
+        // — ページ → 色モード の 2 階調…・インデックスカラー…・ダブルトーン…・マルチチャンネル・カラーテーブル… (act_mode_bitmap,
+        // act_mode_indexed, act_mode_duotone, act_mode_multichannel, act_color_table) — theirs (test_gui_book).
+        QCOMPARE(w->actions_by_name().size(), std::size_t{250});
         QVERIFY(w->action("act_chat_approval"));
         QVERIFY(w->action("act_style"));
         QVERIFY(w->action("act_exposure"));
@@ -292,6 +306,83 @@ private slots:
         // drawing tools and line editing (test_gui_paint), the effect lines and the material tool (test_gui_effects), the
         // text tool (test_gui_lines)
         QCOMPARE(w->tools_group()->actions().size(), 28);
+    }
+
+    // No two commands share a key (Qt would take the key as ambiguous and do neither): PC1b's 色の校正 (Ctrl+Alt+Y — Ctrl+Y
+    // is やり直す), 色域外警告 (Ctrl+Shift+Y) and カラー設定… (Ctrl+Shift+K) among them.
+    void noTwoCommandsShareAKey() {
+        Studio studio;
+        MainWindow* w = studio.window.get();
+        std::map<QString, QString> owner;
+        QStringList clashes;
+        for (const auto& [name, action] : w->actions_by_name()) {
+            for (const QKeySequence& key : action->shortcuts()) {
+                const QString text = key.toString(QKeySequence::PortableText);
+                if (text.isEmpty()) continue;
+                const auto [it, fresh] = owner.emplace(text, name);
+                if (!fresh) clashes << QStringLiteral("%1: %2 / %3").arg(text, it->second, name);
+            }
+        }
+        QVERIFY2(clashes.isEmpty(), qPrintable(clashes.join(QStringLiteral(", "))));
+        QCOMPARE(owner.at(QStringLiteral("Ctrl+Alt+Y")), QStringLiteral("act_cmyk_proof"));
+        QCOMPARE(owner.at(QStringLiteral("Ctrl+Shift+Y")), QStringLiteral("act_gamut_warning"));
+        QCOMPARE(owner.at(QStringLiteral("Ctrl+Shift+K")), QStringLiteral("act_color_settings"));
+        QCOMPARE(owner.at(QStringLiteral("Ctrl+Y")), QStringLiteral("act_redo"));
+        // (選択を解除 keeps Ctrl+D on X11 too, whose keys for Delete hold it: 選択範囲を消す takes Delete's first and Backspace,
+        // as Python's)
+        QCOMPARE(owner.at(QStringLiteral("Ctrl+D")), QStringLiteral("act_deselect"));
+    }
+
+    // A key the person gave to a command before a new command took it as its own (PC1b's Ctrl+Shift+Y, Ctrl+Shift+K,
+    // Ctrl+Alt+Y): the person's stays, the new command's own key is taken off (both would do nothing), and it is said; the
+    // key back to the new command when the person's goes.
+    void aKeyThePersonChoseWinsOverANewOne() {
+        genko::app::settings()->setValue(QStringLiteral("shortcuts/ページを並べて見る"), QStringLiteral("Ctrl+Shift+Y"));
+        {
+            Studio studio;
+            MainWindow* w = studio.window.get();
+            QCOMPARE(w->action(QStringLiteral("act_overview"))->shortcuts(), QList<QKeySequence>{QKeySequence(QStringLiteral("Ctrl+Shift+Y"))});
+            QVERIFY(w->action(QStringLiteral("act_gamut_warning"))->shortcuts().isEmpty());
+            QVERIFY2(w->last_notice().contains(QStringLiteral("色域外警告")) && w->last_notice().contains(QStringLiteral("ページを並べて見る")),
+                     qPrintable(w->last_notice()));
+            genko::app::settings()->remove(QStringLiteral("shortcuts/ページを並べて見る"));
+            genko::app::preferences::apply_all(w);
+            QCOMPARE(w->action(QStringLiteral("act_gamut_warning"))->shortcuts(), QList<QKeySequence>{QKeySequence(QStringLiteral("Ctrl+Shift+Y"))});
+            QCOMPARE(w->action(QStringLiteral("act_overview"))->shortcuts(), QList<QKeySequence>{QKeySequence(QStringLiteral("Ctrl+Shift+O"))});
+        }
+    }
+
+    // ウィンドウ → 開いている原稿 (document.activate): every book open in the window by its number and title, the one in
+    // front checked; one chosen comes to the front (the same as its tab).
+    void theOpenBooksAreListed() {
+        Studio studio;
+        MainWindow* w = studio.window.get();
+        const fs::path other = path_of(studio.dir.filePath("other.genko"));
+        write_book(other, new_doc(2, "別の本"));
+        w->open_project(other);
+        QVERIFY(wait_for([&] { return w->documents().size() == 2; }));
+        QMenu* books = nullptr;
+        for (QAction* top : w->menuBar()->actions()) {
+            if (top->menu() == nullptr || top->menu()->title() != QStringLiteral("ウィンドウ")) continue;
+            for (QAction* a : top->menu()->actions())
+                if (a->menu() != nullptr && a->menu()->title() == QStringLiteral("開いている原稿")) books = a->menu();
+        }
+        QVERIFY(books != nullptr);
+        emit books->aboutToShow();
+        QCOMPARE(books->actions().size(), 2);
+        QVERIFY(books->actions().at(0)->text().contains(QStringLiteral("試し")));
+        QVERIFY(books->actions().at(1)->text().contains(QStringLiteral("別の本")));
+        QVERIFY(!books->actions().at(0)->isChecked() && books->actions().at(1)->isChecked());
+        books->actions().at(0)->trigger();
+        QCOMPARE(w->current_document(), 0);
+        QCOMPARE(w->book().title, std::string("試し"));
+        emit books->aboutToShow();
+        QVERIFY(books->actions().at(0)->isChecked() && !books->actions().at(1)->isChecked());
+        books->actions().at(0)->trigger();  // (the one in front: nothing)
+        QCOMPARE(w->current_document(), 0);
+        books->actions().at(1)->trigger();
+        QCOMPARE(w->current_document(), 1);
+        QCOMPARE(w->book().title, std::string("別の本"));
     }
 
     void theToolsAreOneGroup() {

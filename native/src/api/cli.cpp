@@ -43,6 +43,7 @@
 #include "render/anim.hpp"
 #include "render/brushes.hpp"
 #include "render/draw.hpp"
+#include "render/inspect.hpp"
 #include "render/movie.hpp"
 #include "render/ops_registry.hpp"
 #include "render/page.hpp"
@@ -249,6 +250,19 @@ int inspect(const QStringList& args, bool ascii) {
     bool have_src = false;
     bool full = false;
     QString stroke;
+    // (color-model@1, the C++ build's own: --pixel <page>:<x_mm>,<y_mm> [--layer ID] [--dpi N])
+    QString pixel, layer, dpi_text;
+    const auto value_of = [&](qsizetype& i, const char* name, QString& into) -> bool {
+        const QString& arg = args[i];
+        const QString flag = QString::fromLatin1(name);
+        if (arg == flag) {
+            if (i + 1 >= args.size()) return false;
+            into = args[++i];
+            return true;
+        }
+        into = arg.mid(flag.size() + 1);
+        return true;
+    };
     for (qsizetype i = 0; i < args.size(); ++i) {
         const QString& arg = args[i];
         if (arg == QLatin1String("--full")) {
@@ -258,6 +272,12 @@ int inspect(const QStringList& args, bool ascii) {
             stroke = args[++i];
         } else if (arg.startsWith(QLatin1String("--stroke="))) {
             stroke = arg.mid(9);
+        } else if (arg == QLatin1String("--pixel") || arg.startsWith(QLatin1String("--pixel="))) {
+            if (!value_of(i, "--pixel", pixel)) return usage("argument --pixel: expected one argument");
+        } else if (arg == QLatin1String("--layer") || arg.startsWith(QLatin1String("--layer="))) {
+            if (!value_of(i, "--layer", layer)) return usage("argument --layer: expected one argument");
+        } else if (arg == QLatin1String("--dpi") || arg.startsWith(QLatin1String("--dpi="))) {
+            if (!value_of(i, "--dpi", dpi_text)) return usage("argument --dpi: expected one argument");
         } else if (arg.startsWith(QLatin1Char('-')) && arg.size() > 1) {
             return usage("unrecognized arguments: " + arg.toStdString());
         } else if (!have_src) {
@@ -268,7 +288,41 @@ int inspect(const QStringList& args, bool ascii) {
         }
     }
     if (!have_src) return usage("genko inspect <dir> [--full] [--stroke ID]: the following arguments are required: src");
+    if ((!layer.isEmpty() || !dpi_text.isEmpty()) && pixel.isEmpty()) return usage("argument --layer, --dpi: only with --pixel");
+    std::optional<std::int64_t> pixel_page;
+    double x_mm = 0, y_mm = 0;
+    int dpi = 0;
+    if (!pixel.isEmpty()) {
+        // <page>:<x_mm>,<y_mm>
+        const qsizetype colon = pixel.indexOf(QLatin1Char(':'));
+        const QStringList at = colon < 0 ? QStringList() : pixel.mid(colon + 1).split(QLatin1Char(','));
+        bool ok_page = false, ok_x = false, ok_y = false;
+        if (colon > 0 && at.size() == 2) {
+            pixel_page = pixel.left(colon).toLongLong(&ok_page);
+            x_mm = at[0].toDouble(&ok_x);
+            y_mm = at[1].toDouble(&ok_y);
+        }
+        if (!ok_page || !ok_x || !ok_y) return usage("argument --pixel: <page>:<x_mm>,<y_mm>, e.g. 1:10.5,20");
+        if (!dpi_text.isEmpty()) {
+            bool ok = false;
+            dpi = dpi_text.toInt(&ok);
+            if (!ok || dpi < 1 || dpi > 2400) return usage("argument --dpi: an integer 1..2400");
+        }
+    }
     const auto loaded = storage::load_document(path_arg(src));
+    if (pixel_page) {
+        const core::Document& doc = loaded.document;
+        for (std::size_t i = 0; i < doc.pages.size(); ++i) {
+            if (doc.pages[i]->index != core::Num(*pixel_page)) continue;
+            if (doc.is_deferred(i)) break;
+            const core::Page& page = doc.page(i);
+            const int at_dpi = dpi > 0 ? dpi : std::max(1, static_cast<int>(std::lround(page.spec.dpi.value())));
+            print_json(render::pixel_at(page, &doc, x_mm, y_mm, layer.isEmpty() ? std::nullopt : std::optional<std::string>(layer.toStdString()), at_dpi),
+                       ascii);
+            return 0;
+        }
+        throw core::Error("key", "no page " + std::to_string(*pixel_page));
+    }
     if (!stroke.isEmpty()) {
         print_json(storage::inspect_stroke(loaded.document, stroke.toStdString()), ascii);
     } else {
@@ -683,9 +737,12 @@ int export_command(const QStringList& args, bool ascii) {
                                       a.value("--icc").value_or(QString()).toStdString(), screen);
     }
     // (color-mode@1: an animation says its page's; a time-lapse is the history's pictures)
-    const std::optional<std::string> note = animated != nullptr ? formats::ink_note(*animated)
-                                            : f == "timelapse"  ? std::nullopt
-                                                                : formats::ink_note(doc, f, f == "cmyk" ? std::string("cmyk") : *color);
+    std::vector<std::string> notes;
+    if (animated != nullptr) {
+        if (const auto note = formats::ink_note(*animated)) notes.push_back(*note);
+    } else if (f != "timelapse") {
+        notes = formats::export_notes(doc, f, f == "cmyk" ? std::string("cmyk") : *color);
+    }
     if (a.flag("--json")) {
         Json files = Json::array();
         for (const auto& p : paths) files.push_back(core::path_to_utf8(p));
@@ -694,13 +751,13 @@ int export_command(const QStringList& args, bool ascii) {
         json["count"] = static_cast<std::int64_t>(paths.size());
         json["files"] = files;
         if (psd_choice.editable) json["psd_text"] = psd_report.to_json();  // (what the editable PSD did)
-        if (note) json["notes"] = Json::array({*note});  // (color-mode@1: pages written from the colours on screen)
+        if (!notes.empty()) json["notes"] = notes;  // (color-mode@1: pages written from the colours on screen; 32 bits at 16)
         print_json(json, ascii);
     } else {
         std::string lines;
         for (const auto& p : paths) lines += core::path_to_utf8(p) + "\n";
         write_text(lines, stdout);
-        if (note) write_text(*note + "\n", stderr);
+        for (const std::string& note : notes) write_text(note + "\n", stderr);
         // (the editable PSD's lines drawn as pictures and its font warnings, said on stderr)
         if (psd_choice.editable && (!psd_report.rasterized.empty() || !psd_report.warnings.empty())) {
             write_text(core::dump_python(Json{{"psd_text", psd_report.to_json()}}, ascii) + "\n", stderr);

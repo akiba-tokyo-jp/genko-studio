@@ -7,8 +7,12 @@
 #include <algorithm>
 #include <cctype>
 #include <optional>
+#include <unordered_map>
 #include <utility>
 
+#include "core/channels.hpp"
+#include "core/color_model.hpp"
+#include "core/color_raster.hpp"
 #include "core/covers.hpp"
 #include "core/error.hpp"
 #include "core/paths.hpp"
@@ -18,6 +22,8 @@
 #include "formats/output.hpp"
 #include "formats/pdf.hpp"
 #include "formats/pillow_save.hpp"
+#include "render/color_canvas.hpp"
+#include "render/channels.hpp"
 #include "render/colour.hpp"
 #include "render/covers.hpp"
 #include "render/ink_canvas.hpp"
@@ -164,10 +170,105 @@ std::string page_color(const core::Page& page, std::string_view color) {
     return page.color || page.spec.expression == "color" || core::is_cover(page) ? "rgb" : "gray";
 }
 
-// color-mode@1: a CMYK or Lab page written as its inks (PDF and TIFF): its colour "auto", or "cmyk" for a CMYK page.
-bool as_inks(const core::Page& page, std::string_view fmt, std::string_view color) {
+// color-mode@1: a CMYK or Lab page written as its inks (PDF and TIFF): its colour "auto", or "cmyk" for a CMYK page
+// (color-model@1: "gray" for a grey page).
+bool detail::as_inks(const core::Page& page, std::string_view fmt, std::string_view color) {
     if (!page.color || (fmt != "pdf" && fmt != "tiff" && fmt != "cmyk")) return false;
-    return color == "auto" || (color == "cmyk" && page.color->space == core::InkSpace::Cmyk);
+    // (color-model@1, PC1d: a multichannel page's plates are no format's here but PSD's; a bitmap page is 1 bit in its
+    // own colour; a duotone page's grey is a PDF's sRGB, as its inks print)
+    if (page.color->space == core::InkSpace::Multi || !native_mode(page, fmt, color).empty()) return false;
+    if (!page.color->duotone.empty() && fmt == "pdf") return false;
+    return color == "auto" || (color == "cmyk" && page.color->space == core::InkSpace::Cmyk) ||
+           (color == "gray" && page.color->space == core::InkSpace::Gray);
+}
+
+// color-model@1: an RGB page of a colour model written as its values (PDF and TIFF): its colour "auto" or "rgb" (an
+// indexed page: its own colours, native_mode).
+bool detail::as_values(const core::Page& page, std::string_view fmt, std::string_view color) {
+    if (!page.rgb || page.color || page.rgb->table || (fmt != "pdf" && fmt != "tiff")) return false;
+    return color == "auto" || color == "rgb";
+}
+
+std::string detail::native_mode(const core::Page& page, std::string_view fmt, std::string_view color) {
+    if (fmt != "tiff" && fmt != "pdf") return {};
+    // (as a grey page's inks and an RGB page's values: a bitmap page in auto or grey, an indexed page in auto or RGB)
+    if (page.color && page.color->bitmap && (color == "auto" || color == "gray")) return "bitmap";
+    if (!page.color && page.rgb && page.rgb->table && (color == "auto" || color == "rgb")) return "indexed";
+    return {};
+}
+
+Image detail::indexed_picture(const Image& image, const core::ColorTable& table) {
+    const Image rgb = image.mode() == "RGB" ? image : image.convert("RGB");
+    const std::string bytes = rgb.tobytes();
+    std::string indices(bytes.size() / 3, '\0');
+    std::unordered_map<std::uint32_t, std::size_t> nearest;
+    for (std::size_t i = 0; i < indices.size(); ++i) {
+        const auto* p = reinterpret_cast<const unsigned char*>(bytes.data()) + i * 3;
+        const std::uint32_t key = (std::uint32_t(p[0]) << 16) | (std::uint32_t(p[1]) << 8) | p[2];
+        auto it = nearest.find(key);
+        if (it == nearest.end()) it = nearest.emplace(key, table.nearest(p[0], p[1], p[2])).first;
+        indices[i] = static_cast<char>(it->second);
+    }
+    Image out = Image::frombytes("L", rgb.size(), indices);
+    std::string palette;
+    for (const auto& c : table.colors) {
+        for (const int v : c) palette.push_back(static_cast<char>(v));
+    }
+    out.putpalette("RGB", palette);
+    return out;
+}
+
+detail::PageValues detail::page_values(const core::Page& page, const core::Document& episode, int dpi, render::RenderOptions options) {
+    options.precise = true;
+    render::RenderResult made = render::render_page(page, dpi, options, &episode);
+    PageValues out{made.image.mode() == "RGB" ? std::move(made.image) : made.image.convert("RGB"), {}};
+    if (made.precise) {
+        out.values = std::move(*made.precise);
+    } else {  // (drawn in 8 bits: an sRGB page's values are its picture's)
+        const std::string rgb = out.shown.tobytes();
+        out.values = core::encode_color_pixels(static_cast<std::uint32_t>(out.shown.width()), static_cast<std::uint32_t>(out.shown.height()), "f32",
+                                               [&](std::size_t i) {
+                                                   const auto* p = reinterpret_cast<const unsigned char*>(rgb.data()) + i * 3;
+                                                   return std::array<double, 4>{p[0] / 255.0, p[1] / 255.0, p[2] / 255.0, 1.0};
+                                               });
+    }
+    return out;
+}
+
+std::string_view detail::rgb_icc(const core::RgbMode& mode) {
+    if (mode.icc && !mode.icc->empty()) return *mode.icc;
+    if (const core::BuiltinProfile* builtin = core::builtin_profile_by_ref(mode.profile); builtin != nullptr && builtin->bytes) {
+        return *builtin->bytes;
+    }
+    return srgb_icc_once();
+}
+
+core::InkPixels detail::at_16(const core::InkPixels& pixels) {
+    if (pixels.depth != 32) return pixels;
+    core::InkPixels out = core::blank_ink_pixels(pixels.space, 16, pixels.width, pixels.height, pixels.planes);
+    const unsigned all = pixels.channels();
+    for (std::size_t i = 0; i < pixels.pixel_count(); ++i) {
+        for (unsigned c = 0; c < all; ++c) out.set(i, c, pixels.value(i, c));
+    }
+    return out;
+}
+
+using detail::as_inks;
+using detail::as_values;
+
+// color-model@1: the values of the area written (as crop_to cuts the picture).
+static std::string values_crop_to(const std::string& values, const core::Page& page, std::string_view area, int dpi) {
+    if (area == "paper") return values;
+    const core::ColorRasterView view(values);
+    const core::Rect r = area == "bleed" ? page.bleed_rect_mm() : page.trim_rect_mm();
+    const int x0 = std::clamp(render::mm_to_px(r.x.value(), dpi), 0, static_cast<int>(view.width()));
+    const int y0 = std::clamp(render::mm_to_px(r.y.value(), dpi), 0, static_cast<int>(view.height()));
+    const int x1 = std::clamp(x0 + render::mm_to_px(r.width.value(), dpi), x0 + 1, static_cast<int>(view.width()));
+    const int y1 = std::clamp(y0 + render::mm_to_px(r.height.value(), dpi), y0 + 1, static_cast<int>(view.height()));
+    const auto width = static_cast<std::size_t>(x1 - x0);
+    return core::encode_color_pixels(static_cast<std::uint32_t>(x1 - x0), static_cast<std::uint32_t>(y1 - y0), "f32", [&](std::size_t i) {
+        return view.pixel((std::size_t(y0) + i / width) * view.width() + std::size_t(x0) + i % width);
+    });
 }
 
 core::InkPixels inks_crop_to(const core::InkPixels& inks, const core::Page& page, std::string_view area, int dpi) {
@@ -248,19 +349,27 @@ std::vector<fs::path> detail::print_into(detail::Output& output, const core::Doc
     render::RenderOptions options = print_options();
     options.crop_marks = crop_marks && area == "paper";
     const auto image_of = [&](const core::Page& page) { return crop_to(render::render_page(page, dpi, options, &episode).image, page, area, dpi); };
-    const auto inks_of = [&](const core::Page& page) {
+    // (color-model@1: a 32-bit page's inks at 16 bits where the format holds no floats: a PDF, a CMYK or Lab TIFF)
+    const auto inks_of = [&](const core::Page& page, bool floats) {
         render::RenderOptions with_inks = options;
         with_inks.inks = true;
         render::RenderResult made = render::render_page(page, dpi, with_inks, &episode);
         if (!made.inks) throw core::Error("value", "the page's inks were not drawn");
-        return inks_crop_to(*made.inks, page, area, dpi);
+        core::InkPixels inks = inks_crop_to(*made.inks, page, area, dpi);
+        if (!floats && inks.depth == 32) return detail::at_16(inks);
+        return inks;
+    };
+    const auto values_of = [&](const core::Page& page) {
+        return values_crop_to(detail::page_values(page, episode, dpi, options).values, page, area, dpi);
     };
     const auto page_profile = [](const core::Page& page) -> std::string_view {
-        return page.color && page.color->space == core::InkSpace::Cmyk && page.color->icc ? std::string_view(*page.color->icc) : std::string_view();
+        if (page.rgb && !page.color) return detail::rgb_icc(*page.rgb);
+        return page.color && page.color->space != core::InkSpace::Lab && page.color->icc ? std::string_view(*page.color->icc) : std::string_view();
     };
     const auto coloured = [&](const Image& image, const std::string& how) {
         if (how == "cmyk") return render::colour::to_cmyk(image, icc_path);
         if (how == "bitonal") return render::to_bitonal(image, threshold, screen_ptr);
+        if (how == "bitmap") return render::to_bitonal(image, 127, nullptr);  // (color-model@1: a bitmap page's own 0 and 255)
         return image.convert(how == "gray" ? "L" : "RGB");
     };
     // (Python reads the printer's profile again for each page: here once, the same bytes)
@@ -279,9 +388,19 @@ std::vector<fs::path> detail::print_into(detail::Output& output, const core::Doc
         std::vector<PdfPage> pages;
         std::vector<std::string> hows;
         for (const auto& page : episode.pages) {
+            if (const std::string own = detail::native_mode(*page, fmt, color); !own.empty()) {  // (color-model@1: 1 bpc, /Indexed)
+                hows.push_back(own);
+                pages.push_back(PdfPage{own == "bitmap" ? "1" : "P", {}, pdf_boxes(*page, area)});
+                continue;
+            }
             if (as_inks(*page, fmt, color)) {  // (color-mode@1: its inks as they are, with its own profile)
                 hows.push_back("ink");
                 pages.push_back(PdfPage{"INK", page_profile(*page), pdf_boxes(*page, area)});
+                continue;
+            }
+            if (as_values(*page, fmt, color)) {  // (color-model@1: its values, with its own profile; 32 bits at 16)
+                hows.push_back("values");
+                pages.push_back(PdfPage{"VALUES", page_profile(*page), pdf_boxes(*page, area)});
                 continue;
             }
             const std::string how = page_color(*page, color);
@@ -289,16 +408,67 @@ std::vector<fs::path> detail::print_into(detail::Output& output, const core::Doc
             const std::string mode = how == "cmyk" ? "CMYK" : how == "bitonal" ? "1" : how == "gray" ? "L" : "RGB";
             pages.push_back(PdfPage{mode, profile_for(how), pdf_boxes(*page, area)});
         }
-        write_pdf(path, pages, [&](std::size_t n) { return coloured(image_of(*episode.pages[n]), hows[n]); },
-                  [&](std::size_t n) { return inks_of(*episode.pages[n]); });
+        // (channels@1: a page's spot channels as separations over its picture, overprinting; its picture without them)
+        for (std::size_t n = 0; n < episode.pages.size(); ++n) {
+            const core::Page& page = *episode.pages[n];
+            std::vector<const core::Channel*> spots;
+            for (const core::Channel& channel : page.channels) {
+                if (channel.kind == core::ChannelKind::Spot && channel.raster) spots.push_back(&channel);
+            }
+            if (spots.empty()) continue;
+            std::vector<std::string> names;
+            for (const core::Channel* spot : spots) names.push_back(spot->name);
+            const std::vector<std::string> written = pdf_spot_names(names);  // (not PDF's own colorants' names: said in the notes)
+            for (std::size_t k = 0; k < spots.size(); ++k) pages[n].spots.push_back(PdfSpot{written[k], spots[k]->color});
+            pages[n].spot = [&page, spots, area, dpi](std::size_t k) {
+                const render::Size size{render::mm_to_px(page.spec.width_mm.value(), dpi), render::mm_to_px(page.spec.height_mm.value(), dpi)};
+                return crop_to(render::channels::mask_of(*spots[k], size), page, area, dpi);
+            };
+        }
+        render::RenderOptions plain = options;
+        plain.spots = std::vector<std::string>{};
+        const auto picture_of = [&](const core::Page& page) {
+            return page.channels.empty() ? image_of(page) : crop_to(render::render_page(page, dpi, plain, &episode).image, page, area, dpi);
+        };
+        write_pdf(
+            path, pages,
+            [&](std::size_t n) {
+                const core::Page& page = *episode.pages[n];
+                if (hows[n] == "indexed") return detail::indexed_picture(picture_of(page), *page.rgb->table);
+                return coloured(picture_of(page), hows[n]);
+            },
+            [&](std::size_t n) { return inks_of(*episode.pages[n], false); },
+            [&](std::size_t n) {
+                const core::Page& page = *episode.pages[n];
+                return PdfValues{page.channels.empty() ? values_of(page)
+                                                       : values_crop_to(detail::page_values(page, episode, dpi, plain).values, page, area, dpi),
+                                 page.rgb->depth == 8 ? 8 : 16};
+            });
         return {path};
     }
     std::vector<fs::path> written;
     for (const auto& page_ptr : episode.pages) {
         const core::Page& page = *page_ptr;
+        if (const std::string own = detail::native_mode(page, fmt, color); !own.empty()) {  // (color-model@1: 1 bit, a palette)
+            const fs::path path = detail::join(dest, stem(episode) + "_" + core::file_stem(page) + ".tiff");
+            const Image image = image_of(page);
+            output.put(path, own == "bitmap" ? tiff_bytes(coloured(image, own), TiffSave{"group4", dpi_pair(dpi), {}})
+                                             : tiff_bytes(detail::indexed_picture(image, *page.rgb->table), TiffSave{"tiff_lzw", dpi_pair(dpi), {}}));
+            written.push_back(path);
+            continue;
+        }
         if (as_inks(page, fmt, color)) {  // (color-mode@1: a TIFF of its inks, with its own profile)
             const fs::path path = detail::join(dest, stem(episode) + "_" + core::file_stem(page) + ".tiff");
-            output.put(path, ink_tiff_bytes(inks_of(page), TiffSave{"tiff_lzw", dpi_pair(dpi), std::string(page_profile(page))}));
+            const bool floats = page.color->space == core::InkSpace::Gray;  // (color-model@1: grey's 32 bits as floats)
+            output.put(path, ink_tiff_bytes(inks_of(page, floats), TiffSave{"tiff_lzw", dpi_pair(dpi), std::string(page_profile(page))}));
+            written.push_back(path);
+            continue;
+        }
+        if (as_values(page, fmt, color)) {  // (color-model@1: a TIFF of its values at its depth, with its own profile)
+            const fs::path path = detail::join(dest, stem(episode) + "_" + core::file_stem(page) + ".tiff");
+            const std::string values = values_of(page);
+            output.put(path, values_tiff_bytes(core::ColorRasterView(values), page.rgb->depth,
+                                               TiffSave{"tiff_lzw", dpi_pair(dpi), std::string(page_profile(page))}));
             written.push_back(path);
             continue;
         }
@@ -341,6 +511,8 @@ std::vector<fs::path> export_layers(const core::Document& episode, const fs::pat
         render::page_layers(page, episode, dpi, [&](render::PageLayer&& layer) {
             ++n;
             Image image = std::move(layer.image);
+            // (color-model@1: a layer of an RGB page of a profile holds its values: written as the sRGB they show)
+            if (layer.page_values) image = render::srgb_from(image.convert("RGBA"), render::RgbSpace::of(page));
             if (layer.mask) {  // (the layer's mask applies: a PNG has no mask of its own)
                 image = image.convert("RGBA");
                 image.putalpha(render::chops::multiply(image.getchannel("A"), layer.mask->convert("L").resize(image.size())));

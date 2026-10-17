@@ -9,21 +9,25 @@
 #include <unordered_map>
 #include <vector>
 
+#include "core/color_model.hpp"
 #include "core/ink.hpp"
 #include "render/image.hpp"
 
-// The colour work of CMYK and Lab pages (color-mode@1, SPEC.md COLOR-02) through Little CMS: RGB colours into a page's
-// inks (its table of inks, Genko's blacks and white, greys on K alone, the rest through its profile), inks out to sRGB
-// for the screen, and whole rasters from one space into another (a page's conversion).
+// The colour work of CMYK, Lab and grey pages (color-mode@1, color-model@1, SPEC.md COLOR-02, COLOR-03) through Little
+// CMS: RGB colours into a page's inks (its table of inks, Genko's blacks and white, greys on K alone — a grey page's by
+// their value —, the rest through its profile, its intent and black point compensation), inks out to sRGB for the
+// screen (relative colorimetric, black point compensation; sGray numerically), and whole rasters from one space into
+// another (a page's conversion), at 8, 16 and 32 bits.
 //
-// Values: CMYK inks 0..1 (no ink .. 100%), Lab L 0..100 and a, b -128..127 (D50), sRGB 0..1 (encoded). Transforms are
-// made once for a profile, an intent and a direction, without Little CMS's one-pixel cache (they run on the drawing
-// pool's threads).
+// Values: CMYK inks 0..1 (no ink .. 100%), Lab L 0..100 and a, b -128..127 (D50), Gray k 0..1 (its black ink; its pixels
+// hold the lightness 1 − k), sRGB 0..1 (encoded). Transforms are made once for a profile, an intent and a direction,
+// without Little CMS's one-pixel cache (they run on the drawing pool's threads).
 
 namespace genko::render::ink {
 
-// Can these bytes be a CMYK page's profile? Nothing when they can, else why not (in English).
-std::optional<std::string> profile_problem(std::string_view icc);
+// Can these bytes be the profile of a page of the space (CMYK; grey; RGB, a matrix-shaper)? Nothing when they can, else
+// why not (in English).
+std::optional<std::string> profile_problem(std::string_view icc, core::ProfileSpace space = core::ProfileSpace::Cmyk);
 // The profile's description, or "".
 std::string profile_description(std::string_view icc);
 
@@ -43,16 +47,27 @@ void to_srgb(const core::PageColor& color, const double* inks, float* srgb, std:
 std::array<double, 3> srgb_of(const core::PageColor& color, const std::vector<double>& ink);
 
 // The raster's pixels ("RGBA" or "RGB"; 8-bit) as ink pixels of the page's mode (its depth), through the profile and
-// intent; `gray_on_k`: pixels exactly grey (r = g = b) on K alone (CMYK).
-core::InkPixels from_rgb(const Image& image, const core::PageColor& color, bool gray_on_k = false);
-// Precise sRGB pixels (straight RGBA, 0..1, rows from the top; HDR clamped) as ink pixels of the page's mode.
+// intent; `gray_on_k`: pixels exactly grey (r = g = b) on K alone (CMYK; a grey page: by their value, as sGray's are).
+// `source`: the RGB profile the pixels are in (null: sRGB; another: no grey is taken by its value).
+core::InkPixels from_rgb(const Image& image, const core::PageColor& color, bool gray_on_k = false, const core::Bytes& source = nullptr);
+// Precise RGB pixels (straight RGBA, 0..1, rows from the top; HDR clamped) as ink pixels of the page's mode.
 core::InkPixels from_srgb(const std::vector<float>& rgba, std::uint32_t width, std::uint32_t height, const core::PageColor& color,
-                          bool gray_on_k = false);
+                          bool gray_on_k = false, const core::Bytes& source = nullptr);
 // Ink pixels as sRGB: "RGBA" 8-bit, or (`precise`) straight RGBA floats 0..1.
 Image to_rgba8(const core::InkPixels& pixels, const core::PageColor& color);
 std::vector<float> to_srgb_floats(const core::InkPixels& pixels, const core::PageColor& color);
-// Ink pixels of one mode as another's: CMYK → CMYK (another profile: black preserved), CMYK ↔ Lab, and the depth.
-core::InkPixels convert(const core::InkPixels& pixels, const core::PageColor& from, const core::PageColor& to);
+// Ink pixels as an RGB page's values (its profile, its intent and black point compensation; straight RGBA): 8-bit, or
+// floats 0..1. sRGB, relative colorimetric and black point compensation: as the screen shows them (to_rgba8, to_srgb_floats).
+Image to_rgb8(const core::InkPixels& pixels, const core::PageColor& color, const core::RgbMode& target);
+std::vector<float> to_rgb_floats(const core::InkPixels& pixels, const core::PageColor& color, const core::RgbMode& target);
+// RGB pixels (straight RGBA floats, in place) from one RGB profile (null: sRGB) into an RGB page's (its intent and black
+// point compensation); values out of 0..1 clamped first.
+void rgb_to_rgb(std::vector<float>& rgba, const core::Bytes& from, const core::RgbMode& to);
+// The colour space of ICC bytes Little CMS reads (RGB, grey, CMYK, Lab), or none.
+std::optional<core::ProfileSpace> profile_space(std::string_view icc);
+// Ink pixels of one mode as another's: CMYK → CMYK (another profile: black preserved), CMYK, Lab and Gray between
+// themselves, and the depth (8 → 32 exactly: v/255). `gray_on_k`: a grey page's pixels onto K alone of a CMYK page.
+core::InkPixels convert(const core::InkPixels& pixels, const core::PageColor& from, const core::PageColor& to, bool gray_on_k = false);
 
 // The CMYK pixels of a CMYK JPEG or PSD (Pillow's "CMYK" image: 0 is no ink) as the page's inks: through the
 // picture's own profile into the page's (black preserved), or taken as the page's when it has none.
@@ -71,8 +86,9 @@ std::string picture_icc(std::string_view bytes);
 core::InkPixels picture_inks(std::string_view bytes, const core::PageColor& color);
 
 // The corrections of CMYK and Lab pages (SPEC.md COLOR-02, 群C) work the RGB colour inks mean by the page's rules
-// (sRGB 0..1 each): a grey for inks on K alone (Lab: a = b = 0; no ink is white, K 100% Genko's black), the table's
-// colour for its inks, else the colour the screen shows them as. And back by the rules: the table's colour (an 8-bit
+// (sRGB 0..1 each): a grey for inks on K alone (Lab: a = b = 0; no ink is white, K 100% Genko's black; a grey page's
+// value, whatever its profile: the grey of its value, as the rules take a grey back), the table's colour for its inks,
+// else the colour the screen shows them as. And back by the rules: the table's colour (an 8-bit
 // colour exactly) its inks, Genko's blacks and white theirs, another grey on K alone (Lab: on L), the rest through the
 // profile. Values: inks as above (channels each), rgb 3 each.
 void meaning_of(const core::PageColor& color, const double* inks, double* rgb, std::size_t count);
@@ -92,6 +108,7 @@ public:
 private:
     core::PageColor color_;
     std::unordered_map<std::uint64_t, std::array<int, 3>> by_inks_;  // (the table by its inks' samples)
+    std::unordered_map<std::string, std::array<int, 3>> by_plates_;  // (a multichannel page's: by its plates' samples)
     std::unordered_map<std::uint32_t, std::vector<double>> by_rgb_;  // (and by its colour)
 };
 

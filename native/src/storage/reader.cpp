@@ -11,6 +11,7 @@
 #include <utility>
 
 #include "core/brushes.hpp"
+#include "core/channels.hpp"
 #include "core/command_bus.hpp"
 #include "core/covers.hpp"
 #include "core/color_raster.hpp"
@@ -354,8 +355,10 @@ private:
     core::Bytes read_blob(const Json& ref_value, const std::string& at, core::BlobMemo* memo, std::string_view suffix,
                           std::string_view noun);
     core::Bytes read_legacy_raster(const std::string& relpath, const std::string& at);
-    std::optional<core::PageColor> read_color(Json& extra, const std::string& at);
-    void check_ink_rasters(core::Page& page, const std::string& at);
+    core::ColorModel read_color(Json& extra, const std::string& at);
+    core::Bytes read_profile(const std::string& ref, core::ProfileSpace space, const std::string& at_profile);
+    void check_ink_rasters(core::Page& page, const Json& raw, const std::string& at);
+    void read_channels(core::Page& page, const std::string& at);
 };
 
 core::PageSpec Reader::read_spec(const Json& raw) {
@@ -670,61 +673,83 @@ core::Bytes Reader::read_blob(const Json& ref_value, const std::string& at, core
     return shared;
 }
 
-// color-mode@1: the colour mode kept under "color" (taken out of the keys written back as they were read), its ICC
-// profile read and checked. What cannot be read is reported (the book opens read-only) and is not taken as a mode:
-// the page is never drawn in another space or with another profile, nor written without its mode.
-std::optional<core::PageColor> Reader::read_color(Json& extra, const std::string& at) {
+
+// color-mode@1, color-model@1: the colour model kept under "color" (taken out of the keys written back as they were
+// read; a mode of inks or an RGB mode), its ICC profile read and checked. What cannot be read is reported (the book
+// opens read-only) and is not taken as a mode: the page is never drawn in another space or with another profile, nor
+// written without its mode.
+core::ColorModel Reader::read_color(Json& extra, const std::string& at) {
     const auto it = extra.find("color");
-    if (it == extra.end()) return std::nullopt;
+    if (it == extra.end()) return {};
     const Json raw = *it;
     extra.erase(it);
-    if (raw.is_null()) return std::nullopt;
+    if (raw.is_null()) return {};
     const std::string here = at_key(at, "color");
-    core::PageColor color;
+    core::ColorModel model;
     try {
-        color = core::page_color_from_json(raw);
+        model = core::color_model_from_json(raw);
     } catch (const core::Error& error) {
         issue("broken_value", here, {}, error.what());
         extra["color"] = raw;  // (written back as it was: the book is read-only)
-        return std::nullopt;
+        return {};
     }
-    if (color.space != core::InkSpace::Cmyk) return color;
-    const std::string& ref = color.profile;
-    if (const auto known = profiles_.find(ref); known != profiles_.end()) {
-        color.icc = known->second;
-        return color;
+    if (model.inks && model.inks->space != core::InkSpace::Lab && !model.inks->profile.empty()) {
+        // (a multichannel page's is the profile of the mode it came from: CMYK, or grey for grey and duotone)
+        const bool cmyk = model.inks->space == core::InkSpace::Cmyk || (model.inks->space == core::InkSpace::Multi && model.inks->from == "cmyk");
+        model.inks->icc = read_profile(model.inks->profile, cmyk ? core::ProfileSpace::Cmyk : core::ProfileSpace::Gray, at_key(here, "profile"));
     }
-    const std::string at_profile = at_key(here, "profile");
+    if (model.rgb && !model.rgb->profile.empty()) model.rgb->icc = read_profile(model.rgb->profile, core::ProfileSpace::Rgb, at_key(here, "profile"));
+    return model;
+}
+
+// An ICC profile of the book by its ref, read once, hashed and checked for its space (null when it cannot be used: the
+// problem reported). A built-in profile's bytes are known by their ref: a book without its file takes them.
+core::Bytes Reader::read_profile(const std::string& ref, core::ProfileSpace space, const std::string& at_profile) {
+    const std::string key = ref + ":" + std::string(core::to_string(space));
+    if (const auto known = profiles_.find(key); known != profiles_.end()) return known->second;
     core::Bytes icc;
     // (read for a page whose pictures are not read yet too: it is small, and the page is drawn with it when it is read)
     auto bytes = store_.get_bytes(ref, core::kProfileSuffix, core::kProfileMaxBytes + 1);
+    const core::BuiltinProfile* builtin = core::builtin_profile_by_ref(ref);
+    if (!bytes && builtin != nullptr && builtin->bytes) bytes = *builtin->bytes;
     if (!bytes) {
         issue("missing_asset", at_profile, ref, "the ICC profile " + AssetStore::relpath(ref, core::kProfileSuffix) + " is missing");
     } else if (bytes->size() > core::kProfileMaxBytes) {
         issue("broken_asset", at_profile, ref, "the ICC profile " + AssetStore::relpath(ref, core::kProfileSuffix) + " is larger than 16 MiB");
     } else if (AssetStore::ref(*bytes) != ref) {
         issue("hash_mismatch", at_profile, ref, "the ICC profile " + AssetStore::relpath(ref, core::kProfileSuffix) + " does not hold the bytes its name says");
-    } else if (const auto why = profile_check() ? profile_check()(*bytes) : std::nullopt) {
+    } else if (const auto why = profile_check() ? profile_check()(*bytes, space) : std::nullopt) {
         issue("broken_asset", at_profile, ref, "the ICC profile " + AssetStore::relpath(ref, core::kProfileSuffix) + " cannot be used: " + *why);
     } else {
         icc = std::make_shared<const std::string>(std::move(*bytes));
     }
-    profiles_[ref] = icc;
-    color.icc = icc;
-    return color;
+    profiles_[key] = icc;
+    return icc;
 }
 
 // color-mode@1: each paint layer's ink pixels are in its page's space and depth (their header read); none on an RGB
-// page; a layer holds one kind of pixels.
-void Reader::check_ink_rasters(core::Page& page, const std::string& at) {
+// page; a layer holds one kind of pixels. color-model@1: a precise raster's space is its page's ("srgb", or the page's
+// RGB profile).
+void Reader::check_ink_rasters(core::Page& page, const Json& raw, const std::string& at) {
+    const Json* raw_layers = find(raw, "layers");
+    const std::string space = core::color_raster_space(page.rgb);
     for (std::size_t i = 0; i < page.layers.size(); ++i) {
         core::Layer& layer = page.layers[i];
+        if (layer.color_raster && raw_layers != nullptr && raw_layers->is_array() && i < raw_layers->size()) {
+            const Json* meta = (*raw_layers)[i].is_object() ? find((*raw_layers)[i], "color_raster") : nullptr;
+            const Json* said = meta != nullptr && meta->is_object() ? find(*meta, "space") : nullptr;
+            if (said == nullptr || *said != Json(space)) {
+                issue("broken_asset", at_key(at_index(at_key(at, "layers"), i), "color_raster"), {},
+                      "the precise raster's space is not its page's (" + space + ")");
+            }
+        }
         if (!layer.ink_raster) continue;
         const std::string here = at_key(at_index(at_key(at, "layers"), i), "ink_raster");
         try {
             const core::InkRasterHeader header = core::ink_raster_header(*layer.ink_raster);
             if (!page.color) throw core::Error("value", "an RGB page holds no ink pixels");
-            if (header.space != page.color->space || header.depth != page.color->depth) {
+            if (header.space != page.color->space || header.depth != page.color->depth ||
+                (header.space == core::InkSpace::Multi && header.planes != page.color->plates.size())) {
                 throw core::Error("value", "the pixels are not in the page's colour mode");
             }
             if ((layer.raster_png && !layer.raster_png->empty()) || layer.color_raster) {
@@ -732,6 +757,39 @@ void Reader::check_ink_rasters(core::Page& page, const std::string& at) {
             }
         } catch (const core::Error& error) {
             issue("broken_asset", here, {}, error.what());
+        }
+    }
+}
+
+// channels@1: the page's alpha and spot channels kept under "channels" (taken out of the keys written back as they were
+// read), each one's raster read and checked (a mask at the page's depth). What cannot be read is reported (the book
+// opens read-only) and is kept as it was read: the page is never written without its channels.
+void Reader::read_channels(core::Page& page, const std::string& at) {
+    const auto it = page.extra.find("channels");
+    if (it == page.extra.end()) return;
+    const Json raw = *it;
+    const std::string here = at_key(at, "channels");
+    std::vector<std::string> refs;
+    try {
+        page.channels = core::channels_from_json(raw, refs);
+    } catch (const core::Error& error) {
+        issue("broken_value", here, {}, error.what());
+        return;  // (left in the keys written back as they were: the book is read-only)
+    }
+    page.extra.erase("channels");
+    const int depth = core::page_depth(page);
+    for (std::size_t i = 0; i < page.channels.size(); ++i) {
+        if (refs[i].empty()) continue;
+        core::Channel& channel = page.channels[i];
+        const std::string at_raster = at_key(at_index(here, i), "raster");
+        channel.raster = read_blob(Json(refs[i]), at_raster, &channel.memo, core::kInkRasterSuffix, "channel raster");
+        if (!channel.raster) continue;
+        try {
+            const core::InkRasterHeader header = core::ink_raster_header(*channel.raster);
+            if (header.space != core::InkSpace::Mask) throw core::Error("value", "the channel's raster is not a mask");
+            if (header.depth != depth) throw core::Error("value", "the channel's raster is not at the page's depth");
+        } catch (const core::Error& error) {
+            issue("broken_asset", at_raster, refs[i], error.what());
         }
     }
 }
@@ -1144,8 +1202,13 @@ core::Document Reader::migrate(const Json& payload) {
         if (const Json* cover = find(page.extra, "cover"); cover && cover->is_object()) {
             page.spec = core::spec_for(spec, *cover);
         }
-        page.color = read_color(page.extra, at);
-        check_ink_rasters(page, at);
+        {
+            core::ColorModel model = read_color(page.extra, at);
+            page.color = std::move(model.inks);
+            page.rgb = std::move(model.rgb);
+        }
+        check_ink_rasters(page, raw, at);
+        read_channels(page, at);
         page_list.push_back(std::make_shared<core::Page>(std::move(page)));
         if (skip_assets_) deferred.push_back(page_list.back());
     }
@@ -1190,7 +1253,23 @@ core::Document Reader::migrate(const Json& payload) {
     for (const auto& [key, value] : payload.items()) {
         if (!in(kTopKeys, key)) doc.extra[key] = value;
     }
-    doc.color = read_color(doc.extra, "");
+    {
+        // (color-model@1: the book's text_gamma, under its colour model; a value that is not one is reported: read-only)
+        if (const auto it = doc.extra.find("color"); it != doc.extra.end() && it->is_object() && it->contains("text_gamma")) {
+            const Json gamma = (*it)["text_gamma"];
+            if (gamma.is_number() && !gamma.is_boolean() && core::is_text_gamma(gamma.get<double>())) {
+                doc.text_gamma = gamma.get<double>();
+                it->erase("text_gamma");
+                // (a book of no colour model of its own: the writer's default RGB one, written for the gamma alone)
+                if (*it == core::to_json(core::RgbMode{})) doc.extra.erase(it);
+            } else {
+                issue("broken_value", "/color/text_gamma", {}, "the book's text_gamma is more than 1 and at most 2.2");
+            }
+        }
+        core::ColorModel model = read_color(doc.extra, "");
+        doc.color = std::move(model.inks);
+        doc.rgb = std::move(model.rgb);
+    }
     doc.revision = truthy_at(payload, "revision") ? core::py_int(*find(payload, "revision")) : 0;
     doc.start_side = asis_opt_str(payload, "start_side", "");
     doc.strict_gates = to_bool(payload, "strict_gates", false);
@@ -1241,6 +1320,10 @@ core::Document Reader::migrate(const Json& payload) {
     // (color-mode@1: what no op may leave on a CMYK or Lab page — an RGB picture, a blend Lab does not composite —
     // opens read-only with its reason, rather than every op and the save failing on it)
     try { core::validate_ink_document(doc); }
+    catch (const core::Error& error) { issue("broken_value", "/pages", {}, error.what()); }
+    try { core::validate_color_model(doc); }
+    catch (const core::Error& error) { issue("broken_value", "/pages", {}, error.what()); }
+    try { core::validate_channels(doc); }
     catch (const core::Error& error) { issue("broken_value", "/pages", {}, error.what()); }
     return doc;
 }
@@ -1302,7 +1385,7 @@ bool is_known_page_key(std::string_view key) { return in(kPageKeys, key); }
 bool is_known_feature(std::string_view feature) {
     return feature == core::kColorRasterFeature || feature == core::kColorTilesFeature || feature == core::kExposureFeature ||
            feature == core::kColorStrokeFeature || feature == core::kPaperFeature || feature == core::kRubyLayoutFeature ||
-           feature == core::kColorModeFeature;
+           feature == core::kColorModeFeature || feature == core::kColorModelFeature || feature == core::kChannelsFeature;
 }
 
 int project_version(const Json& payload) {

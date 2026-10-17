@@ -137,7 +137,7 @@ void check_strict(const Document& doc, const Json& op, const Actor& actor);
 Json expand_for_pages(const Document& doc, const Json& op);
 
 // selops.needs_resolving: an area of a kind beyond {poly} and {mask} (rect, ellipse, layer, color, all, saved,
-// union, intersect, subtract, invert, grow_mm, feather_mm).
+// union, intersect, subtract, invert, grow_mm, feather_mm; channels@1: channel, this build's own).
 bool area_needs_resolving(const Json& area);
 
 // selops.resolve for the areas that are only geometry: {rect: [x, y, w, h]} or {ellipse: [x, y, w, h]} alone as

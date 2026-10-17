@@ -558,7 +558,8 @@ void MainWindow::preview_ops(const std::optional<core::Json>& ops) {
     }
     try {
         const core::CommandBus bus(render::ops_registry());
-        auto result = bus.apply(*session_->snapshot(), *ops, core::Actor(session_->actor()));
+        // (channels@1: what is previewed is what is applied: the pixel ops on the channel targeted)
+        auto result = bus.apply(*session_->snapshot(), with_channel_target(*ops), core::Actor(session_->actor()));
         canvas_->set_page(std::make_shared<const core::Document>(std::move(result.doc)), static_cast<std::size_t>(page_index_));
     } catch (const core::Error&) {
         show_page();  // (a preview that cannot be made: the page as it is)
@@ -625,7 +626,7 @@ bool MainWindow::apply_ops(const Json& ops, const std::vector<std::string>& ids)
     QElapsedTimer clock;
     clock.start();
     try {
-        session_->apply(ops, ids);
+        session_->apply(with_channel_target(ops), ids);  // (channels@1: the pixel ops on the channel targeted)
     } catch (const core::Error& error) {
         flash(wording::error(QString::fromUtf8(error.what())), 6000, true);
         return false;
@@ -702,6 +703,7 @@ void MainWindow::show_page() {
     refresh_status();
     if (navigator_ != nullptr) navigator_->update();
     if (layer_panel_ != nullptr) layer_panel_->refresh();
+    channel_view_changed();  // (channels@1: this page's view on screen, its panel)
     if (lines_later_) {
         lines_timer_.start();
     } else {
@@ -781,6 +783,10 @@ void MainWindow::refresh_status() {
         read_only_->hide();
     }
     if (colours_ != nullptr) colours_->set_page_color(current_page() != nullptr ? current_page()->color : std::nullopt);  // (color-mode@1)
+    if (colours_ != nullptr) {  // (color-model@1, PC1d: an indexed page's table)
+        const core::Page* page = current_page();
+        colours_->set_color_table(page != nullptr && !page->color && page->rgb ? page->rgb->table : std::nullopt);
+    }
     refresh_first_steps();
     maybe_backup();  // (after a save: バックアップ, when chosen in 環境設定)
     if (flash_timer_.isActive()) {
@@ -805,9 +811,23 @@ void MainWindow::refresh_status() {
         }
     }
     const auto frames = page->leaf_frames().size();
-    if (page->color) {  // (color-mode@1: the page's mode beside its panels)
-        selected += QStringLiteral(" ・ %1 %2 bit").arg(page->color->space == core::InkSpace::Cmyk ? QStringLiteral("CMYK") : QStringLiteral("Lab"))
-                        .arg(page->color->depth);
+    if (page->color || page->rgb) {  // (color-mode@1, color-model@1: the page's mode beside its panels, and its profile)
+        const bool lab = page->color && (page->color->space == core::InkSpace::Lab || (page->color->space == core::InkSpace::Multi && page->color->profile.empty()));
+        const std::string_view mode = page->color ? core::mode_name(*page->color) : page->rgb->table ? "indexed" : "rgb";
+        const QString name = mode == "rgb"            ? QStringLiteral("RGB")
+                             : mode == "indexed"      ? QStringLiteral("インデックスカラー（%1 色）").arg(page->rgb->table->colors.size())
+                             : mode == "cmyk"         ? QStringLiteral("CMYK")
+                             : mode == "gray"         ? QStringLiteral("グレー")
+                             : mode == "bitmap"       ? QStringLiteral("2 階調")
+                             : mode == "duotone"      ? QStringLiteral("ダブルトーン")
+                             : mode == "multichannel" ? QStringLiteral("マルチチャンネル（%1 版）").arg(page->color->plates.size())
+                                                      : QStringLiteral("Lab");
+        selected += QStringLiteral(" ・ %1 %2 bit").arg(name).arg(page->color ? page->color->depth : page->rgb->depth);
+        if (!lab) {
+            const std::string said = page->color ? core::profile_description(page->color->profile, page->color->icc)
+                                                 : core::profile_description(page->rgb->profile, page->rgb->icc);
+            if (!said.empty()) selected += QStringLiteral("・") + QString::fromStdString(said);
+        }
     }
     if (agent_book()) {
         status_->setText(QStringLiteral("%1 ページ（%2） ・ コマ %3%4 ・ %5")
@@ -842,6 +862,7 @@ void MainWindow::refresh_zoom() {
 }
 
 void MainWindow::refresh_actions() {
+    show_color_mode();
     if (auto* exposure = action("act_exposure")) exposure->setEnabled(current_page() && session_->read_only_reason().empty());
     if (QAction* name_ok = action(QStringLiteral("act_name_ok"))) name_ok->setVisible(agent_book());  // (stages are for books made with agents)
 }
@@ -939,6 +960,7 @@ void MainWindow::show_document(int index) {
     doc_tabs_->setTabText(index, doc.title());
     doc_tabs_->blockSignals(false);
     refresh_status();
+    apply_proof_view();  // (its own 色の校正 and 色域外警告)
     output_panels_follow(true);  // (another book: its history at once; the checks of the last one are out of date)
     known_requests_ = request_ids();  // (another book's requests are not new ones)
     studio_follow(true);
@@ -1037,7 +1059,9 @@ void MainWindow::open_project(const fs::path& path) {
                     opened->decline_recovery();
                 }
             }
+            const std::shared_ptr<Session> added = opened;
             add_document(std::move(opened));
+            if (session_ == added) color_policy_on_open(added);  // (カラー設定's policies: a page of another profile kept, converted or asked)
         } catch (const std::exception& error) {
             ask::warning(this, QStringLiteral("Genko"),
                          QStringLiteral("原稿・復旧用コピーを開けませんでした:\n%1").arg(wording::error(QString::fromUtf8(error.what()))) + links_kept());

@@ -14,10 +14,12 @@ inline constexpr std::string_view kColorRasterFeature = "native.color_raster_v1"
 inline constexpr std::string_view kColorRasterSuffix = ".colorrgba";
 // A book's precise rasters saved in tiles (each tile its own content-addressed asset, so a change to part of a
 // raster adds only the tiles it changed): metadata {"tiles": [refs, row by row], "tile": side, width, height,
-// precision, space, alpha}. A raster saved whole (metadata {"asset": ref, …}) is still read.
+// precision, space, alpha}. A raster saved whole (metadata {"asset": ref, …}) is still read. The space is "srgb", or
+// (color-model@1) the ref of its page's RGB profile: the samples are that profile's values.
 inline constexpr std::string_view kColorTilesFeature = "native.color_raster_tiles_v1";
 inline constexpr std::uint32_t kColorTile = 256;
-inline constexpr std::size_t kColorRasterBookBytes = 256 * 1024 * 1024;
+// The most bytes of precise rasters a book holds (PC1: 1 GiB, a B4 page at 600 dpi in f32).
+inline constexpr std::size_t kColorRasterBookBytes = 1024ULL * 1024 * 1024;
 // Use the existing book byte ceiling (worst-case RGBA f32 plus GKCR header),
 // rather than a prototype-only 4M limit. Book/work/allocator budgets stay intact.
 inline constexpr std::size_t kColorRasterMaxPixels = (kColorRasterBookBytes - 16) / (4 * 4);
@@ -29,7 +31,8 @@ public:
     std::uint32_t width() const { return width_; }
     std::uint32_t height() const { return height_; }
     std::array<double, 4> pixel(std::size_t i) const;
-    Json metadata(std::string_view asset) const;
+    Json metadata(std::string_view asset, std::string_view space = "srgb") const;
+    // The metadata is this raster's (its space any this build reads: "srgb" or a profile's ref).
     void check_metadata(const Json& metadata) const;
 private:
     std::string_view bytes_;
@@ -65,11 +68,15 @@ std::vector<std::string> color_tiles(std::string_view raster);
 // precision. `tile(i)` gives the i-th tile's bytes.
 std::string join_color_tiles(std::uint32_t width, std::uint32_t height, std::string_view precision,
                              const std::function<std::string(std::size_t)>& tile);
-// The metadata of a raster saved in tiles (the refs as given), and its check against the raster read.
-Json tiled_metadata(const ColorRasterView& raster, const std::vector<std::string>& refs);
+// The metadata of a raster saved in tiles (the refs as given; its space), and its check against the raster read.
+Json tiled_metadata(const ColorRasterView& raster, const std::vector<std::string>& refs, std::string_view space = "srgb");
 void check_tiled_metadata(const ColorRasterView& raster, const Json& metadata);
+// A precise raster's space as its metadata says it ("srgb" or a profile's "sha256:…"), or "" when it is neither.
+std::string color_raster_space_of(const Json& metadata);
 // Serializes computed straight sRGB samples without an RGBA8 intermediate or a large JSON pixel array.
 std::string encode_color_pixels(std::uint32_t width, std::uint32_t height, std::string_view precision,
                                const std::function<std::array<double, 4>(std::size_t)>& pixel);
 void validate_color_document(const Document& doc);
+// How many precise rasters validate_color_document has scanned (each allocation once: its bytes never change) (tests).
+std::uint64_t color_raster_checks();
 } // namespace genko::core

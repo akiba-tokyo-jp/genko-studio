@@ -6,12 +6,15 @@
 #include <array>
 #include <limits>
 
+#include "core/color_raster.hpp"
 #include "core/error.hpp"
+#include "core/ink.hpp"
 #include "core/paths.hpp"
 #include "core/pyconv.hpp"
 #include "core/pyops.hpp"
 #include "core/ruby.hpp"
 #include "formats/export.hpp"
+#include "formats/pdf.hpp"
 #include "formats/psd_text.hpp"
 #include "render/not_yet_ported.hpp"
 
@@ -201,24 +204,175 @@ std::int64_t default_dpi(const core::Document& episode, std::string_view key) {
     return episode.spec.dpi.truthy() ? core::py_int(episode.spec.dpi) : 600;
 }
 
-std::optional<std::string> ink_note(const core::Document& episode, std::string_view key, std::string_view color) {
-    std::int64_t converted = 0;
+namespace {
+
+// color-model@1: can a 32-bit page hold values past 0..1 (HDR) — its precise rasters' colours, a grey page's lightness,
+// or an exposure correction that may make them?
+bool may_hold_hdr(const core::Page& page) {
+    const auto outside = [](double v) { return v < 0.0 || v > 1.0; };
+    for (const core::Layer& layer : page.layers) {
+        if (layer.kind == core::LayerKind::Adjust && layer.visible && layer.adjust && layer.adjust->is_object() &&
+            layer.adjust->value("kind", core::Json()) == "exposure") {
+            return true;
+        }
+        try {
+            if (layer.color_raster) {
+                const core::ColorRasterView view(*layer.color_raster);
+                for (std::size_t i = 0; i < std::size_t(view.width()) * view.height(); ++i) {
+                    const auto p = view.pixel(i);
+                    if (outside(p[0]) || outside(p[1]) || outside(p[2])) return true;
+                }
+            } else if (layer.ink_raster && page.color && page.color->space == core::InkSpace::Gray) {
+                const core::InkPixels pixels = core::decode_ink_raster(*layer.ink_raster);
+                for (std::size_t i = 0; pixels.is_float() && i < pixels.pixel_count(); ++i) {
+                    if (outside(pixels.value(i, 0))) return true;
+                }
+            }
+        } catch (const core::Error&) {  // (pixels this build cannot read: none of theirs written)
+        }
+    }
+    return false;
+}
+
+}  // namespace
+
+std::vector<std::string> export_notes(const core::Document& episode, std::string_view key, std::string_view color) {
+    std::int64_t converted = 0, halved = 0, cut = 0;
+    std::int64_t duotone_grey = 0, duotone_look = 0, multi = 0, flat = 0;  // (color-model@1, PC1d: the modes of their own)
+    bool flat_channels = false;
+    bool inks_only = true;  // (every page converted a CMYK or Lab one)
     for (const auto& page : episode.pages) {
-        if (!page->color) continue;
-        const bool inks = key == "psd" || ((key == "pdf" || key == "tiff" || key == "cmyk") &&
-                                           (color == "auto" || (color == "cmyk" && page->color->space == core::InkSpace::Cmyk)));
-        if (!inks) ++converted;
+        if (!page->color && !page->rgb) continue;
+        const bool inks = page->color && (key == "psd" || detail::as_inks(*page, key, color));
+        const bool values = !page->color && (key == "psd" || detail::as_values(*page, key, color));
+        // (a duotone page's inks and a multichannel page's plates: their own notes, never written as such but by a PSD's
+        // plates; a bitmap or indexed page in its own mode where the format has one)
+        const bool is_duotone = page->color && !page->color->duotone.empty();
+        const bool is_multi = page->color && page->color->space == core::InkSpace::Multi;
+        const bool is_flat = (page->color && page->color->bitmap) || (!page->color && page->rgb->table);
+        // (a duotone page written as its grey where the format holds grey inks — PSD, a TIFF in auto or grey, the pack's
+        // TIFFs —, else as it prints)
+        if (is_duotone) ++(inks || (key == "pack" && detail::as_inks(*page, "tiff", "auto")) ? duotone_grey : duotone_look);
+        if (is_multi) ++multi;
+        if (key == "psd" && is_flat) {
+            ++flat;
+            flat_channels = flat_channels || !page->channels.empty();
+        }
+        if (is_duotone || is_multi || !detail::native_mode(*page, key, color).empty() || (key == "psd" && is_flat)) {
+            const bool deep = page->color && page->color->depth == 32;
+            if (deep && is_multi && key == "psd") ++halved;  // (Photoshop's Multichannel holds 8 or 16 bits)
+            continue;
+        }
+        if (!inks && !values) {
+            ++converted;
+            if (!page->color || page->color->space == core::InkSpace::Gray) inks_only = false;
+        }
+        // (32 bits at 16: a PDF's; a PSD's or a TIFF's of CMYK or Lab inks — the pack's TIFFs too)
+        const bool deep = (page->color ? page->color->depth : page->rgb->depth) == 32;
+        const bool cmyk_or_lab = page->color && page->color->space != core::InkSpace::Gray;
+        if (deep && ((key == "pdf" && (inks || values)) || (cmyk_or_lab && (inks || (key == "pack" && detail::as_inks(*page, "tiff", "auto")))))) {
+            ++halved;
+            // (a PDF holds values in 0..1: an RGB or grey page's HDR is cut)
+            if (key == "pdf" && !cmyk_or_lab && may_hold_hdr(*page)) ++cut;
+        }
     }
-    if (converted == 0) return std::nullopt;
-    if (key == "pack") {  // (its TIFFs keep the inks — auto —, its PNGs cannot)
-        return "CMYK・Lab のページ " + std::to_string(converted) + " ページの PNG は、画面の色（sRGB）から変換して書き出しました（TIFF はインキの値のまま）";
+    std::vector<std::string> notes;
+    const std::string n = std::to_string(converted);
+    if (converted > 0 && key == "pack") {  // (its TIFFs keep the inks and values — auto —, its PNGs cannot)
+        notes.push_back(inks_only ? "CMYK・Lab のページ " + n + " ページの PNG は、画面の色（sRGB）から変換して書き出しました（TIFF はインキの値のまま）"
+                                  : "色モード・プロファイルを持つページ " + n + " ページの PNG は、画面の色（sRGB）から変換して書き出しました（TIFF はページの値のまま）");
+    } else if (converted > 0) {
+        notes.push_back(inks_only ? "CMYK・Lab のページ " + n + " ページは、この形式・色ではインキの値のまま書けないため、画面の色（sRGB）から変換して書き出しました"
+                                  : "色モード・プロファイルを持つページ " + n + " ページは、この形式・色ではその値のまま書けないため、画面の色（sRGB）から変換して書き出しました");
     }
-    return "CMYK・Lab のページ " + std::to_string(converted) + " ページは、この形式・色ではインキの値のまま書けないため、画面の色（sRGB）から変換して書き出しました";
+    if (duotone_grey > 0) {
+        notes.push_back("ダブルトーンのページ " + std::to_string(duotone_grey) +
+                        " ページは、この形式ではダブルトーンのインキのまま書けないため、グレーの値で書き出しました（インキの色と曲線は書いていません）");
+    }
+    if (duotone_look > 0) {
+        notes.push_back("ダブルトーンのページ " + std::to_string(duotone_look) +
+                        " ページは、この形式・色ではダブルトーンのインキのまま書けないため、刷った見え方（画面の色、sRGB）で書き出しました");
+    }
+    if (multi > 0) {
+        notes.push_back("マルチチャンネルのページ " + std::to_string(multi) +
+                        (key == "psd" ? " ページは、PSD ではレイヤーを持てないため、版を統合した画像だけを書き出しました"
+                                      : " ページは、この形式では版のまま書けないため、刷った見え方（画面の色、sRGB）で書き出しました（PSD なら版のまま書けます）"));
+    }
+    if (flat > 0) {
+        notes.push_back("2 階調・インデックスカラーのページ " + std::to_string(flat) + " ページは、PSD ではレイヤーを持てないため、統合した画像だけを書き出しました" +
+                        (flat_channels ? std::string("（この色モードではアルファ・特色チャンネルも書けません）") : std::string()));
+    }
+    if (halved > 0) notes.push_back("32 bit のページ " + std::to_string(halved) + " ページは、この形式では 16 bit にして書き出しました");
+    if (cut > 0) {
+        notes.push_back("HDR の値（0〜1 の外）を持つ 32 bit のページ " + std::to_string(cut) +
+                        " ページは、PDF では 0〜1 に切って書き出しました（HDR のまま残すには TIFF か PSD で書き出します）");
+    }
+    // channels@1: PSD keeps a page's alpha and spot channels as channels of their own, PDF its spot channels as
+    // separations; elsewhere the spots are printed into the picture as the screen shows them (or, where the page is
+    // written as its inks or values, left out), and the alpha channels are left out
+    if (key != "psd") {
+        std::int64_t printed = 0, left = 0, alphas = 0;
+        for (const auto& page : episode.pages) {
+            const bool spot = std::any_of(page->channels.begin(), page->channels.end(),
+                                          [](const core::Channel& c) { return c.kind == core::ChannelKind::Spot && c.raster; });
+            const bool alpha = std::any_of(page->channels.begin(), page->channels.end(), [](const core::Channel& c) { return c.kind == core::ChannelKind::Alpha; });
+            if (alpha) ++alphas;
+            if (!spot || key == "pdf") continue;
+            const bool kept = detail::as_inks(*page, key == "pack" ? "tiff" : key, key == "pack" ? "auto" : color) ||
+                              detail::as_values(*page, key == "pack" ? "tiff" : key, key == "pack" ? "auto" : color);
+            if (kept) ++left;
+            else ++printed;
+        }
+        if (printed > 0) {
+            notes.push_back("特色チャンネルのあるページ " + std::to_string(printed) +
+                            " ページは、この形式では特色を版として書けないため、画面の見え方で刷り込んで書き出しました（PSD・PDF なら版として書けます）");
+        }
+        if (left > 0) {
+            notes.push_back("特色チャンネルのあるページ " + std::to_string(left) +
+                            " ページは、インキ・値のまま書いたため、特色を書き出していません（PSD・PDF なら版として書けます）");
+        }
+        if (alphas > 0) {
+            notes.push_back("アルファチャンネルのあるページ " + std::to_string(alphas) +
+                            " ページは、この形式ではアルファチャンネルを書けないため、書き出していません（PSD なら書けます）");
+        }
+    }
+    if (key == "pdf") {  // (a spot named as one of PDF's own colorants: written under another name)
+        std::vector<std::pair<std::string, std::string>> renamed;
+        for (const auto& page : episode.pages) {
+            std::vector<std::string> names;
+            for (const core::Channel& c : page->channels) {
+                if (c.kind == core::ChannelKind::Spot && c.raster) names.push_back(c.name);
+            }
+            const std::vector<std::string> written = pdf_spot_names(names);
+            for (std::size_t k = 0; k < names.size(); ++k) {
+                const std::pair<std::string, std::string> change{names[k], written[k]};
+                if (written[k] != names[k] && std::find(renamed.begin(), renamed.end(), change) == renamed.end()) renamed.push_back(change);
+            }
+        }
+        if (!renamed.empty()) {
+            std::string from, to;
+            for (const auto& [name, made] : renamed) {
+                from += (from.empty() ? "" : "・") + name;
+                to += (to.empty() ? "" : "・") + made;
+            }
+            notes.push_back("特色チャンネルの名前 " + from + " は PDF では決まった版（プロセスカラー・All・None）の名前のため、" + to + " として書き出しました");
+        }
+    }
+    return notes;
+}
+
+std::optional<std::string> ink_note(const core::Document& episode, std::string_view key, std::string_view color) {
+    std::vector<std::string> notes = export_notes(episode, key, color);
+    if (notes.empty()) return std::nullopt;
+    return std::move(notes.front());
 }
 
 std::optional<std::string> ink_note(const core::Page& page) {
-    if (!page.color) return std::nullopt;
-    return "CMYK・Lab のページは、動画にはインキの値のまま書けないため、画面の色（sRGB）から変換して書き出しました";
+    if (page.color && page.color->space != core::InkSpace::Gray) {
+        return "CMYK・Lab のページは、動画にはインキの値のまま書けないため、画面の色（sRGB）から変換して書き出しました";
+    }
+    if (!page.color && !page.rgb) return std::nullopt;
+    return "色モード・プロファイルを持つページは、動画にはその値のまま書けないため、画面の色（sRGB）から変換して書き出しました";
 }
 
 core::Json run(const core::Document& episode_in, const std::optional<std::filesystem::path>& project, std::string_view key,
@@ -256,7 +410,7 @@ core::Json run(const core::Document& episode_in, const std::optional<std::filesy
         // (HumanService.export: preflight and the export approval, the studio's)
         if (o.official_export) {
             Json reply = o.official_export(*project);
-            if (const auto note = ink_note(*episode, key, o.color); note && reply.value("ok", false)) reply["notes"] = Json::array({*note});
+            if (const auto notes = export_notes(*episode, key, o.color); !notes.empty() && reply.value("ok", false)) reply["notes"] = notes;
             return reply;
         }
         Json refused = refuse("official export is not in the C++ build yet");
@@ -313,7 +467,7 @@ core::Json run(const core::Document& episode_in, const std::optional<std::filesy
     for (const auto& f : files) written.push_back(core::path_to_utf8(f));
     Json reply{{"ok", true}, {"files", written}};
     if (psd_report) reply["psd_text"] = *psd_report;
-    if (const auto note = ink_note(*episode, key, key == "cmyk" ? std::string("cmyk") : o.color)) reply["notes"] = Json::array({*note});
+    if (const auto notes = export_notes(*episode, key, key == "cmyk" ? std::string("cmyk") : o.color); !notes.empty()) reply["notes"] = notes;
     return reply;
 }
 

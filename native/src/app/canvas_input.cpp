@@ -286,6 +286,7 @@ void PageCanvas::mouseMoveEvent(QMouseEvent* event) {
         hover_ = mm_of(pos);
         update_cursor(pos);
         update();
+        emit pointerOver(hover_->x(), hover_->y());
         return;
     }
     const std::uint64_t seq = perf::input(event, "mouse");

@@ -1,5 +1,6 @@
 #pragma once
 
+#include <array>
 #include <cstdint>
 #include <filesystem>
 #include <map>
@@ -11,6 +12,7 @@
 #include <utility>
 #include <vector>
 
+#include "core/color_model.hpp"
 #include "core/geometry.hpp"
 #include "core/ink.hpp"
 #include "core/json.hpp"
@@ -265,6 +267,24 @@ struct StoryLine {
     std::vector<Json> tails;
 };
 
+// channels@1 (core/channels.hpp, docs/cpp-migration/schema-v4.md「チャンネル」): a page's alpha or spot channel — one plane
+// of density (0: not selected, no ink; 1: selected, full ink) over the whole page, kept as a GKIR Mask raster at the
+// page's depth (null: all 0), with how it shows (an alpha channel's overlay colour, opacity and what it marks; a spot
+// channel's ink colour and solidity).
+enum class ChannelKind { Alpha, Spot };
+
+struct Channel {
+    std::string id;    // "ch_" and 12 hex digits, one per page
+    std::string name;  // 1..64 characters, one per page
+    ChannelKind kind = ChannelKind::Alpha;
+    Bytes raster;      // GKIR Mask (null: all 0)
+    BlobMemo memo;
+    std::array<int, 3> color{255, 0, 0};  // alpha: the overlay's colour; spot: the ink as it shows (sRGB)
+    double opacity = 0.5;                 // alpha: 0..1
+    std::string indicates = "masked";     // alpha: masked | selected
+    double solidity = 0.0;                // spot: 0..1
+};
+
 struct Bible {
     std::string plot;
     Json characters = Json::array();
@@ -296,6 +316,11 @@ struct Page {
     std::optional<Json> plan;
     // color-mode@1: the page's colour mode (none: an RGB page, as Python's).
     std::optional<PageColor> color;
+    // color-model@1: an RGB page's colour model past Python's (none: 8 bits, sRGB). Never with `color`: both are the
+    // page's `color` in the book.
+    std::optional<RgbMode> rgb;
+    // channels@1: its alpha and spot channels, in the order the channel panel lists them.
+    std::vector<Channel> channels;
 
     Rect paper_rect_mm() const;
     Rect trim_rect_mm() const;
@@ -364,6 +389,12 @@ struct Document {
     std::vector<std::string> features;
     // color-mode@1: the colour mode of the pages it makes (none: RGB).
     std::optional<PageColor> color;
+    // color-model@1: the RGB colour model of the pages it makes (none: 8 bits, sRGB). Never with `color`.
+    std::optional<RgbMode> rgb;
+    // color-model@1 (SPEC COLOR-03, PC1b): カラー設定's 文字の色をガンマで混ぜる — the gamma (over 1, at most 2.2) the
+    // letters of its lines are mixed with what lies under them in (PhotoCraft's blendTextGamma), kept in the book so it
+    // draws the same everywhere. None: mixed as Python's (Pillow's paste). Written under the book's "color".
+    std::optional<double> text_gamma;
     // Why this book must not be saved (unknown features, missing assets, repairs); empty when it may be.
     std::string read_only_reason;
     // (not saved) The pages whose strokes and pictures are not read yet (storage::LoadOptions::assets_of_page: the

@@ -67,22 +67,45 @@ private:
     std::vector<float> v_;
 };
 
-// No ink (Lab: L 100, a = b = 0), as a clear pixel holds it.
-void clear_colours(InkSpace space, float* p) {
+// No ink (Lab: L 100, a = b = 0; Gray: white), as a clear pixel holds it (n colour channels).
+void clear_colours(InkSpace space, float* p, unsigned n) {
+    if (space == InkSpace::Multi) {
+        std::fill_n(p, n, 0.0f);
+        return;
+    }
+    if (space == InkSpace::Gray) {
+        p[0] = 1.0f;
+        return;
+    }
     p[0] = space == InkSpace::Lab ? 1.0f : 0.0f;
     p[1] = p[2] = space == InkSpace::Lab ? static_cast<float>(128.0 / 255.0) : 0.0f;
     if (space == InkSpace::Cmyk) p[3] = 0.0f;
 }
 
-// Genko's black: K 100% alone (Lab: L 0, a = b = 0).
-void black_colours(InkSpace space, float* p) {
-    clear_colours(space, p);
+// Genko's black: K 100% alone (Lab: L 0, a = b = 0; Gray: lightness 0; a multichannel page: every plate solid, as RGB's
+// black is through 1 − its values).
+void black_colours(InkSpace space, float* p, unsigned n) {
+    clear_colours(space, p, n);
+    if (space == InkSpace::Multi) {
+        std::fill_n(p, n, 1.0f);
+        return;
+    }
     p[space == InkSpace::Cmyk ? 3 : 0] = space == InkSpace::Cmyk ? 1.0f : 0.0f;
 }
 
+// Is the space one of inks on every channel (0 none, 1 solid: CMYK, a multichannel page's plates)?
+bool inky(InkSpace space) { return space == InkSpace::Cmyk || space == InkSpace::Multi; }
+
 Plane read(const core::InkPixels& r) {
-    const unsigned n = core::colour_channels(r.space);
+    const unsigned n = r.colours();
     Plane p(static_cast<int>(r.width), static_cast<int>(r.height), n);
+    if (r.is_float()) {  // (32 bits: the canvas's values themselves)
+        for (std::size_t i = 0; i < p.size(); ++i) {
+            float* v = p.at(i);
+            for (unsigned c = 0; c <= n; ++c) v[c] = static_cast<float>(r.value(i, c));
+        }
+        return p;
+    }
     const double most = r.max();
     for (std::size_t i = 0; i < p.size(); ++i) {
         const std::uint16_t* s = r.samples.data() + i * (n + 1);
@@ -94,13 +117,20 @@ Plane read(const core::InkPixels& r) {
 }
 
 core::InkPixels write(const Plane& p, InkSpace space, int depth) {
-    core::InkPixels out = core::blank_ink_pixels(space, depth, static_cast<std::uint32_t>(p.width()), static_cast<std::uint32_t>(p.height()));
+    core::InkPixels out = core::blank_ink_pixels(space, depth, static_cast<std::uint32_t>(p.width()), static_cast<std::uint32_t>(p.height()),
+                                                 space == InkSpace::Multi ? p.n() : 0);
     const unsigned n = p.n();
     const double most = out.max();
     for (std::size_t i = 0; i < p.size(); ++i) {
         const float* v = p.at(i);
         for (unsigned c = 0; c <= n; ++c) {
             if (!std::isfinite(v[c])) throw core::Error("value", "the filter exceeds the finite working range");
+        }
+        if (depth == 32) {  // (floats: a grey's HDR kept, the rest 0..1; clear as a blank raster holds it)
+            if (!(v[n] > 0)) continue;
+            for (unsigned c = 0; c < n; ++c) out.set(i, c, v[c]);
+            out.set(i, n, v[n]);
+            continue;
         }
         const auto alpha = static_cast<std::uint16_t>(std::lround(std::clamp(static_cast<double>(v[n]), 0.0, 1.0) * most));
         if (alpha == 0) continue;  // (clear: as a blank raster holds it)
@@ -167,7 +197,7 @@ void unpremultiply(Plane& p, InkSpace space) {
             for (unsigned c = 0; c < p.n(); ++c) v[c] = std::clamp(v[c] / a, 0.0f, 1.0f);
             v[p.n()] = std::min(a, 1.0f);
         } else {
-            clear_colours(space, v);
+            clear_colours(space, v, p.n());
             v[p.n()] = 0;
         }
     }
@@ -191,7 +221,7 @@ void box_line(float* line, std::size_t stride, int count, float radius, unsigned
     const double fw = (1.0 - (r * 2 + 1) * w) / 2.0;
     scratch.resize(std::size_t(count) * used);
     const auto in = [&](int x) -> const float* { return line + std::size_t(std::clamp(x, 0, count - 1)) * stride * all; };
-    std::array<double, 5> acc{};
+    std::array<double, core::kPlatesMax + 1> acc{};  // (a multichannel page's plates — up to 32 — and the alpha)
     for (int k = -r; k <= r; ++k)
         for (unsigned c = 0; c < used; ++c) acc[c] += in(k)[c];
     for (int x = 0; x < count; ++x) {
@@ -241,8 +271,9 @@ void unsharp(Plane& p, double radius, double percent, double threshold) {
 }
 
 // Darker by a factor (ImageEnhance.Brightness below 1): more K (Lab: less L), the other inks as they are.
-void darken(float* v, InkSpace space, double factor) {
-    if (space == InkSpace::Cmyk) v[3] = held(1.0 - factor * (1.0 - v[3]));
+void darken(float* v, InkSpace space, double factor, unsigned n) {
+    if (space == InkSpace::Multi) for (unsigned c = 0; c < n; ++c) v[c] = held(1.0 - factor * (1.0 - v[c]));
+    else if (space == InkSpace::Cmyk) v[3] = held(1.0 - factor * (1.0 - v[3]));
     else v[0] = held(v[0] * factor);
 }
 
@@ -302,7 +333,7 @@ void sharpen(Plane& p, const Json& params, double scale, InkSpace space) {
     const unsigned n = p.n();
     for (std::size_t i = 0; i < p.size(); ++i) {
         float* v = p.at(i);
-        if (space == InkSpace::Cmyk) {
+        if (inky(space)) {
             for (unsigned c = 0; c < n; ++c) v[c] = held(v[c] - 12.0 / 255);
         } else {
             v[0] = held(v[0] + 12.0 / 255);
@@ -310,7 +341,7 @@ void sharpen(Plane& p, const Json& params, double scale, InkSpace space) {
     }
     // ImageEnhance.Contrast(1.3) from the mean (a whole level): each ink from its own mean (Lab: L from its mean, a and
     // b from no colour)
-    std::array<double, 4> mean{};
+    std::array<double, core::kPlatesMax> mean{};
     for (unsigned c = 0; c < n; ++c) {
         if (space == InkSpace::Lab && c > 0) {
             mean[c] = 128.0 / 255.0;
@@ -329,7 +360,7 @@ void glow(Plane& p, const Json& params, double scale, const core::PageColor& col
     const double radius = core::py_max(0.5, number(params, "radius", 12)) * scale;
     const double amount = core::py_max(0.0, core::py_min(3.0, number(params, "amount", 0.8)));
     const double cut = whole(params, "threshold", 170);
-    const bool cmyk = color.space == InkSpace::Cmyk;
+    const bool cmyk = inky(color.space);
     const unsigned n = p.n();
     // the light: the bright pixels' lightness (CMYK: each ink's 1 − ink; Lab: L), nothing elsewhere
     const std::vector<double> rgb = meant(p, color);
@@ -383,13 +414,13 @@ void mosaic(Plane& p, const Json& params, double scale, InkSpace space) {
             const int sx = mx < 0 ? -1 : down_x[static_cast<std::size_t>(mx)];
             float* v = p.at(x, y);
             if (sx < 0 || sy < 0) {  // (nothing there: black, as the resized picture leaves it)
-                black_colours(space, v);
+                black_colours(space, v, n);
                 continue;
             }
             // (the sample's colour, the pixel's alpha kept; a clear sample black, as the 8-bit picture's clear pixels are)
             if (source.at(sx, sy)[n] > 0) std::copy_n(source.at(sx, sy), n, v);
-            else black_colours(space, v);
-            darken(v, space, 0.88);  // (ImageEnhance.Brightness(0.88))
+            else black_colours(space, v, n);
+            darken(v, space, 0.88, n);  // (ImageEnhance.Brightness(0.88))
         }
     }
 }
@@ -579,10 +610,10 @@ void despeckle(Plane& p, const Json& params, double scale, const core::PageColor
             if (target.cells[i] == 0 || static_cast<double>(sizes[i]) >= limit) continue;
             float* v = p.at(i);
             if (part == "ink") {  // (a speck gone: the paper, or nothing)
-                clear_colours(color.space, v);
+                clear_colours(color.space, v, n);
                 v[n] = opaque ? 1.0f : 0.0f;
             } else {  // (a hole filled: Genko's black)
-                black_colours(color.space, v);
+                black_colours(color.space, v, n);
                 v[n] = 1.0f;
             }
         }
@@ -615,7 +646,7 @@ void lineart(Plane& p, const Json& params_in, double scale, const core::PageColo
         float* v = p.at(i);
         for (unsigned c = 0; c < n; ++c) v[c] = static_cast<float>(to_canvas(color.space, c, inks[i * n + c]));
         v[n] = alpha[i] / 255.0f;
-        if (alpha[i] == 0) clear_colours(color.space, v);
+        if (alpha[i] == 0) clear_colours(color.space, v, n);
     }
 }
 

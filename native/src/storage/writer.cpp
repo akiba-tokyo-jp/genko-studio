@@ -4,6 +4,7 @@
 #include <vector>
 
 #include "core/brushes.hpp"
+#include "core/channels.hpp"
 #include "core/error.hpp"
 #include "core/color_raster.hpp"
 #include "core/exposure.hpp"
@@ -58,17 +59,30 @@ std::string put_blob(AssetStore& store, const core::Bytes& bytes, const core::Bl
 
 std::string put_png(AssetStore& store, const core::Bytes& png, const core::BlobMemo& memo) { return put_blob(store, png, memo, ".png"); }
 
-// color-mode@1: a CMYK mode's profile written as its asset (the bytes held, or the asset already in the book).
-void put_profile(AssetStore& store, const core::PageColor& color) {
-    if (color.space != core::InkSpace::Cmyk) return;
-    if (color.icc) {
-        if (core::bytes_ref(*color.icc) != color.profile) {
-            throw core::Error("value", "the ICC profile held is not " + color.profile + ": the book is not written");
+// color-mode@1, color-model@1: a mode's profile written as its asset (the bytes held, or the asset already in the book).
+void put_profile(AssetStore& store, const std::string& profile, const core::Bytes& icc) {
+    if (profile.empty()) return;
+    if (icc) {
+        if (core::bytes_ref(*icc) != profile) {
+            throw core::Error("value", "the ICC profile held is not " + profile + ": the book is not written");
         }
-        store.put_known(color.profile, *color.icc, core::kProfileSuffix);
-    } else if (!store.has(color.profile, core::kProfileSuffix)) {
-        throw core::Error("value", "the ICC profile " + color.profile + " is not held: the book is not written");
+        store.put_known(profile, *icc, core::kProfileSuffix);
+    } else if (!store.has(profile, core::kProfileSuffix)) {
+        throw core::Error("value", "the ICC profile " + profile + " is not held: the book is not written");
     }
+}
+
+// A page's or the book's `color`: its mode of inks or its RGB mode (with its profile written), or none (null).
+Json color_json(AssetStore& store, const std::optional<core::PageColor>& inks, const std::optional<core::RgbMode>& rgb) {
+    if (inks) {
+        if (inks->space != core::InkSpace::Lab && !inks->profile.empty()) put_profile(store, inks->profile, inks->icc);
+        return core::to_json(*inks);
+    }
+    if (rgb && !rgb->is_default()) {
+        put_profile(store, rgb->profile, rgb->icc);
+        return core::to_json(*rgb);
+    }
+    return Json();
 }
 
 // io._frame_to_dict
@@ -98,7 +112,7 @@ Json frame_json(const core::Frame& frame) {
 }
 
 // io._layer_to_dict(layer, strokes=False) without "strokes" and "raster_relpath", then io._layer_to_v3.
-Json layer_json(const core::Layer& layer, AssetStore& store) {
+Json layer_json(const core::Layer& layer, AssetStore& store, const std::string& space) {
     const bool placed = layer.kind == core::LayerKind::Placed;
     Json out = Json::object();
     out["id"] = layer.id;
@@ -122,7 +136,7 @@ Json layer_json(const core::Layer& layer, AssetStore& store) {
         const core::ColorRasterView view(*layer.color_raster);
         std::vector<std::string> refs;
         for (const std::string& tile : core::color_tiles(*layer.color_raster)) refs.push_back(store.put_bytes(tile, core::kColorRasterSuffix));
-        out["color_raster"] = core::tiled_metadata(view, refs);
+        out["color_raster"] = core::tiled_metadata(view, refs, space);
     }
     if (!layer.patches.empty()) {
         Json patches = Json::array();
@@ -249,14 +263,20 @@ Json page_json(const core::Page& page, AssetStore& store) {
     for (const auto& frame : page.frames) frames.push_back(frame_json(frame));
     out["frames"] = std::move(frames);
     Json layers = Json::array();
-    for (const auto& layer : page.layers) layers.push_back(layer_json(layer, store));
+    const std::string space = core::color_raster_space(page.rgb);  // (color-model@1: its precise rasters' space)
+    for (const auto& layer : page.layers) layers.push_back(layer_json(layer, store, space));
     out["layers"] = std::move(layers);
     Json fills = Json::object();
     for (const auto& [role, rgb] : page.fills) fills[std::string(core::to_string(role))] = nums_json(rgb);
     out["fills"] = std::move(fills);
-    if (page.color) {
-        put_profile(store, *page.color);
-        out["color"] = core::to_json(*page.color);
+    if (Json color = color_json(store, page.color, page.rgb); !color.is_null()) out["color"] = std::move(color);
+    if (!page.channels.empty()) {  // (channels@1: each one's raster as its asset)
+        Json channels = Json::array();
+        for (const core::Channel& channel : page.channels) {
+            const std::string ref = channel.raster ? put_blob(store, channel.raster, channel.memo, core::kInkRasterSuffix) : std::string();
+            channels.push_back(core::to_json(channel, ref));
+        }
+        out["channels"] = std::move(channels);
     }
     for (const auto& [key, value] : page.extra.items()) {
         if (!is_known_page_key(key)) out[key] = value;
@@ -323,9 +343,14 @@ Json project_payload_v4(const core::Document& doc, AssetStore& store) {
         if (core::ruby::uses_feature(line)) features.emplace_back(core::kRubyLayoutFeature);
     }
     core::validate_ink_document(doc);
-    bool modes = doc.color.has_value();
-    for (const auto& page : doc.pages) modes = modes || page->color.has_value();
+    core::validate_color_model(doc);
+    bool modes = doc.color.has_value() || doc.rgb.has_value() || doc.text_gamma.has_value();
+    for (const auto& page : doc.pages) modes = modes || page->color.has_value() || page->rgb.has_value();
     if (modes) features.emplace_back(core::kColorModeFeature);
+    if (core::uses_color_model(doc)) features.emplace_back(core::kColorModelFeature);
+    core::validate_channels(doc);
+    std::erase(features, std::string(core::kChannelsFeature));  // (named while a page has a channel)
+    if (core::uses_channels(doc)) features.emplace_back(core::kChannelsFeature);
     std::sort(features.begin(), features.end());
     features.erase(std::unique(features.begin(), features.end()), features.end());
 
@@ -354,9 +379,11 @@ Json project_payload_v4(const core::Document& doc, AssetStore& store) {
     if (core::py_truthy(doc.brush_custom)) brush["custom"] = doc.brush_custom;
     out["brush"] = std::move(brush);
     out["spec"] = spec_to_json(doc.spec);
-    if (doc.color) {
-        put_profile(store, *doc.color);
-        out["color"] = core::to_json(*doc.color);
+    if (Json color = color_json(store, doc.color, doc.rgb); !color.is_null() || doc.text_gamma) {
+        // (the book's text_gamma, last, under its colour model: a default RGB one written for it)
+        if (color.is_null()) color = core::to_json(core::RgbMode{});
+        if (doc.text_gamma) color["text_gamma"] = *doc.text_gamma;
+        out["color"] = std::move(color);
     }
     Json bible = Json::object();
     bible["plot"] = doc.bible.plot;

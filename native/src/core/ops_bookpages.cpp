@@ -352,6 +352,12 @@ bool relayout(Document& doc, const PageSpec& spec, bool move, const BookPageHook
         const Map m(*old_frame, page.inner_rect_mm(start_side), overflow);
         for (Frame& frame : page.frames) move_frame(frame, m);
         for (Layer& layer : page.layers) move_layer(layer, m, page.spec, old_papers[i], hooks);
+        for (Channel& channel : page.channels) {  // (channels@1: moved with the layers, by the drawing build)
+            if (!channel.raster) continue;
+            if (!hooks.relayout_channel) not_yet_ported("set_page_spec moving a page's channels: they are moved by the drawing build");
+            channel.raster = hooks.relayout_channel(channel.raster, old_papers[i], page.spec, m.old_frame(), m.new_frame());
+            channel.memo = {};
+        }
         for (StoryLine& line : doc.story) {
             if (!(line.page_index == page.index)) continue;
             if (line.x_mm.truthy() || line.y_mm.truthy()) {
@@ -496,6 +502,7 @@ void add_cover(OpContext& c) {
     const PageSpec spec = spec_for(doc.spec, cover);
     Page page = make_page(Num(static_cast<std::int64_t>(doc.pages.size()) + 1), spec, doc.binding);
     page.color = doc.color;  // (color-mode@1: the book's mode for the pages it makes)
+    page.rgb = doc.rgb;      // (color-model@1)
     page.numero = false;
     page.extra["cover"] = cover;
     const bool bleed = py_truthy(get_or(op, "bleed", Json(true)));

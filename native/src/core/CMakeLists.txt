@@ -18,6 +18,23 @@ string(REGEX REPLACE "(${_b}${_b}${_b}${_b}${_b}${_b}${_b}${_b}${_b}${_b}${_b}${
 configure_file(pyre_names_data.cpp.in "${CMAKE_CURRENT_BINARY_DIR}/pyre_names_data.cpp" @ONLY)
 set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS "${GENKO_PYRE_NAMES_FILE}")
 
+# The built-in ICC profiles (color-model@1: core/color_model.cpp's table), embedded from data/profiles/<id>.icc
+# (tools/migration/make_profiles.cpp makes the RGB and grey ones; coated-cmyk is PhotoCraft's, CC0-1.0); a change to a
+# file re-runs CMake.
+set(GENKO_PROFILE_IDS display-p3 adobe-rgb-compat prophoto-compat linear-srgb rec2020 gray-gamma-2.2 sgray coated-cmyk)
+set(GENKO_PROFILES_DATA "")
+foreach(_id IN LISTS GENKO_PROFILE_IDS)
+  set(_file "${CMAKE_CURRENT_SOURCE_DIR}/data/profiles/${_id}.icc")
+  file(READ "${_file}" _hex HEX)
+  string(REGEX REPLACE "([0-9a-f][0-9a-f])" "0x\\1," _bytes "${_hex}")
+  string(REGEX REPLACE "(${_b}${_b}${_b}${_b}${_b}${_b}${_b}${_b}${_b}${_b}${_b}${_b}${_b}${_b}${_b}${_b})" "\\1\n" _bytes "${_bytes}")
+  string(MAKE_C_IDENTIFIER "${_id}" _name)
+  string(APPEND GENKO_PROFILES_DATA "extern const unsigned char kProfile_${_name}[] = {\n${_bytes}\n};\n"
+         "extern const std::size_t kProfile_${_name}_size = sizeof(kProfile_${_name});\n")
+  set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS "${_file}")
+endforeach()
+configure_file(builtin_profiles_data.cpp.in "${CMAKE_CURRENT_BINARY_DIR}/builtin_profiles_data.cpp" @ONLY)
+
 genko_library(genko_core
   SOURCES
     version.cpp
@@ -34,6 +51,8 @@ genko_library(genko_core
     model.cpp
     color_raster.cpp
     ink.cpp
+    color_model.cpp
+    channels.cpp
     exposure.cpp
     ops_color.cpp
     frames.cpp
@@ -83,6 +102,7 @@ genko_library(genko_core
     ops_studio.cpp
     "${CMAKE_CURRENT_BINARY_DIR}/ops_schema_data.cpp"
     "${CMAKE_CURRENT_BINARY_DIR}/pyre_names_data.cpp"
+    "${CMAKE_CURRENT_BINARY_DIR}/builtin_profiles_data.cpp"
   PUBLIC_DEPS Qt6::Core nlohmann_json::nlohmann_json
   PRIVATE_DEPS ZLIB::ZLIB)
 

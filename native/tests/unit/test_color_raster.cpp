@@ -134,6 +134,33 @@ private slots:
         QCOMPARE(*a,*original); QCOMPARE(*b,*original);
         QVERIFY2(a==b,"one immutable high-precision asset must not be allocated once per layer");
     }
+    // color-model@1: a precise raster's "space" is "srgb" or (on an RGB page of a profile) that profile's ref; the
+    // metadata is checked with the space it says, and one that is neither is refused. The writer writes the page's.
+    void metadataSpace() {
+        auto doc=core::new_episode("空間",core::Num(1),1,core::PageSpec::custom(20,20,16,16,1,2,2,2,2,72,"color"));
+        const Json put={{"op","put_color_raster"},{"page",1},{"width",1},{"height",1},
+            {"precision","u16"},{"pixels",Json::array({1,2,3,65535})}};
+        doc=core::CommandBus().apply(doc,Json::array({put}),core::Actor("human:test")).doc;
+        const core::ColorRasterView view(*doc.page(0).layers.back().color_raster);
+        const std::string ref="sha256:"+std::string(64,'a');
+        QCOMPARE(view.metadata("x")["space"],Json("srgb"));
+        QCOMPARE(view.metadata("x",ref)["space"],Json(ref));
+        view.check_metadata(view.metadata("x",ref));
+        view.check_metadata(view.metadata("x"));
+        QCOMPARE(core::color_raster_space_of(view.metadata("x",ref)),ref);
+        Json wrong=view.metadata("x");
+        wrong["space"]="display-p3";
+        QVERIFY_EXCEPTION_THROWN(view.check_metadata(wrong),core::Error);
+        QCOMPARE(core::color_raster_space_of(wrong),std::string());
+        core::check_tiled_metadata(view,core::tiled_metadata(view,{"a"},ref));
+        Json tiled=core::tiled_metadata(view,{"a"});
+        tiled["space"]=1;
+        QVERIFY_EXCEPTION_THROWN(core::check_tiled_metadata(view,tiled),core::Error);
+        // the writer: the page's space (an RGB page of a profile: its ref)
+        QTemporaryDir tmp; QVERIFY(tmp.isValid());
+        storage::AssetStore assets(std::filesystem::path(tmp.path().toStdString()));
+        QCOMPARE(storage::project_payload_v4(doc,assets)["pages"][0]["layers"].back()["color_raster"]["space"],Json("srgb"));
+    }
     void sharedColorAssetBudget() {
         QTemporaryDir tmp; QVERIFY(tmp.isValid());
         const std::filesystem::path dir(tmp.path().toStdString());
@@ -144,12 +171,13 @@ private slots:
         doc=core::CommandBus().apply(doc,Json::array({put}),core::Actor("human:test")).doc;
         storage::AssetStore assets(dir);
         auto payload=storage::project_payload_v4(doc,assets);
-        // A valid 2048x2048 f32 fixture: one HDR pixel and transparent zero padding.
-        // Four references exceed 256MiB only if the same allocation is charged four times.
+        // A valid 4096x4096 f32 fixture: one HDR pixel and transparent zero padding.
+        // Four references exceed 1GiB (the book's budget, PC1: the user's decision) only if the same allocation is
+        // charged four times.
         auto bytes=*doc.page(0).layers.back().color_raster;
-        bytes.resize(16+2048*2048*16,0);
+        bytes.resize(16+std::size_t(4096)*4096*16,0);
         for (const std::size_t offset : {std::size_t(8),std::size_t(12)}) {
-            bytes[offset]=0; bytes[offset+1]=8; bytes[offset+2]=0; bytes[offset+3]=0;
+            bytes[offset]=0; bytes[offset+1]=16; bytes[offset+2]=0; bytes[offset+3]=0;
         }
         const auto ref=assets.put_bytes(bytes,core::kColorRasterSuffix);
         auto layer=payload["pages"][0]["layers"].back();

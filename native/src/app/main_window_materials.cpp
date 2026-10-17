@@ -39,6 +39,7 @@
 #include "core/paths.hpp"
 #include "core/pynum.hpp"
 #include "core/pyops.hpp"
+#include "render/color_edit.hpp"
 #include "render/effects.hpp"
 #include "render/materials.hpp"
 #include "render/page.hpp"
@@ -308,6 +309,8 @@ std::optional<Json> MainWindow::copy_selection_items() {
     try {
         core::Layer copy = *layer;
         items = render::selection::lift(copy, *area, *page);
+        // (color-model@1: an RGB page of a profile's values as the sRGB they show: a material is sRGB)
+        for (core::Patch& patch : items.patches) render::color_edit::patch_to_srgb(patch, book());
         if (page->color && layer->ink_raster) {  // (color-mode@1: its inks there as the picture they show — a material's)
             if (const auto piece = render::ink_edit::lift_piece(*page, *layer, *area)) {
                 core::Patch patch = render::ink_edit::piece_patch(*piece, *page->color);
@@ -447,7 +450,9 @@ bool MainWindow::import_image(std::optional<QString> chosen) {
         std::ifstream in(core::path_from_utf8(file.toStdString()), std::ios::binary);
         if (!in) throw core::Error("io", "cannot read " + file.toStdString());
         const std::string bytes((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
-        const render::Image picture = render::open_image(bytes, render::kPillowOpenLimits);
+        render::Image picture = render::open_image(bytes, render::kPillowOpenLimits);
+        // (カラー設定's policy for its own profile: kept as its numbers, as Python's, unless chosen — and asked)
+        if (!picture_policy(bytes, picture) || !still(asked)) return false;
         const std::string_view mode = picture.mode();
         png = render::write_png(picture.convert(mode == "RGBA" || mode == "LA" || mode == "P" ? "RGBA" : "RGB"));
     } catch (const std::exception& error) {  // (a file that cannot be read as a picture)

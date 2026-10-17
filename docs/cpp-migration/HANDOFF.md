@@ -11,7 +11,7 @@
 - R6 M7 の最終候補が M6 の出口の V3 と同じソース・実行物なら、全体試験は使い回し、M7 に固有の受入（最終配布物での起動・保存・出力、2 時間試験、全 PERF、IME の注入、全出力、MCP SDK での外部接続、独立レビュー、別のインストール先への導入）だけを行う。
 - R7 統合前の群の commit は、作業ツリーだけに置かず、native/integration ではない作業ブランチへ push して保全する（CI は無効なので試験は走らない）。
 - 当て方: CMYK・Lab の工程の出口の V3（e099da5）から。ASan の後に Release・Debug を流す順をやめ、ASan を走らせたまま Release・Debug を並べた（`run.sh` の親だけ止め、ASan の validation_run は続けた）。残る重複は群D の V2 と同じ中身の ASan 1 回分だけ（計画が違うので `--pair` に使えない）。
-- 次: M6・M7 は Linux で合格（凍結 962faa4）。続いて PhotoCraft の全機能の取り込み（PC 工程、利用者の決定 2026-10-16）。Windows 実機は、下の利用者の決定のとおりマージ後に別の環境で行う。
+- 次: M6・M7 は Linux で合格（凍結 962faa4）。PhotoCraft の取り込みは PC1（色・精度の土台）が Linux で合格（凍結 af06f45、下の「PC1 の出口 V3」）。続いて PC2。Windows 実機は、下の利用者の決定のとおりマージ後に別の環境で行う。
 - **利用者の決定（2026-10-15）: Windows は、すべての実装と Linux での試験が終わり、マージした後に、別の環境で行う。** このセッションでは Windows の実機の build・受入をしない（VALIDATION.md §0 の「配布前の Windows 実機受入は必須」は変えない。Windows の受入が済むまで両 OS の配布完了とは言わない）。同じ日の決定: Windows の実機の作業は M7 まで保留、MCP の `inspect` の説明文は Python と同じ文のまま、Qt のソースの入手先は download.qt.io を案内する。
 
 
@@ -34,6 +34,30 @@
 - 台帳の macOS とブラウザ（WebAssembly）の 2 行は**加えない**（SPEC・DECISIONS のとおり対象外。台帳に利用者の判断として記録）。
 - カメラの RAW は **LibRaw** を使う（LGPL-2.1 / CDDL-1.0。動的リンク、差し替えの案内とライセンス文を配布物に足す）。
 - 新しい外部ライブラリ（OpenEXR か tinyexr・libavif＋libaom・zstd・BLAKE3・WASM の実行系）は**入れてよい**（要る群で入れ、THIRD_PARTY.md・SBOM・ライセンス文に記録）。
+
+### PC1 の設計と利用者の決定（2026-10-16）
+- 設計: 原稿の拡張 `color-model@1`（ページ・本の色モデル: RGB のプロファイルと 16/32 bit、グレー・2 階調・インデックス・ダブルトーン・マルチチャンネル、CMYK/Lab の 32 bit、黒点補正の指定。GKIR 版 2）と `channels@1`（アルファ・特色チャンネル）。RGB 8 bit・sRGB のページは Python と同じバイト。小群 PC1a（形式・深度・グレー・RGB プロファイル・変換・inspect）→ PC1b（カラー設定・校正・色域外警告）→ PC1c（チャンネル）→ PC1d（インデックス・2 階調・ダブルトーン・マルチチャンネル）。新しい外部ライブラリは要らない（Little CMS）。仕様は実装とともに SPEC.md（COLOR-03）・schema-v4.md に書く。
+- 利用者の決定: (1) インデックス・2 階調・マルチチャンネルへの変換と特色の合成は**上流どおり統合する**（画素レイヤーを 1 枚に。要素は要素のまま）。(2) 高精度の画素の本の上限（GKCR の予算）を **256 MiB → 1 GiB**。(3) 文字のガンマは画素に効かせる・カラー設定の方針は開いた原稿にも当てる・作業用 CMYK の既定は coated-cmyk・チャンネルの分割/統合は元のページを置き換える（**上流に合わせる**）。既定の設定のままの RGB 8 bit・sRGB のページは Python と同じ。
+
+### PC1 の出口 V3 — 凍結 af06f45 で Linux 合格（2026-10-17）
+- **凍結SHA**: `af06f454149d571cd51f7e9e16cf70d34978c63f`（native/wip-pc に push 済み）。計画は `validation_policy.py --base 962faa4 --head af06f45 --phase milestone`（基点は M6・M7 の出口の凍結。tier full、構成は linux-debug・linux-release・linux-asan・windows-debug・windows-release）。4 回目の実行 2026-10-17 03:58〜08:43 UTC。
+- **実行環境**（資源上限は固定しない＝利用者決定）: Claude Code クラウドコンテナ、4 CPU（Intel Xeon @ 2.80GHz）/ RAM 16GB / Ubuntu 24.04.5 / kernel 6.18.44-fc-v139。Qt 6.11.2、GCC 13.3、参照 Python 3.12＋Pillow 12.3.0・numpy 2.4.6・psd-tools 1.10.9、GENKO_MCP_PYTHON、native.yml の数値用環境変数、root から CAP_DAC_OVERRIDE/DAC_READ_SEARCH/FOWNER を外して実行。R3 のとおり Release と ASan を同時に始め、Debug を並べた（各構成内 ctest 1 並列）。Debug は空き容量のため一から `-gz`（デバッグ情報の圧縮。コードとデバッグ情報は同じ。validation_run が確かめる構成の値 — build type・故障注入・-Werror・サニタイザー — は preset のまま）でビルドした。
+- **結果**（validation_run.py の result.json。3 構成とも status finished・passed true・failures 空、除いた契約なし、CLI23 合格、同じ plan_hash）:
+  - linux-release: 139/139 合格（03:58–05:16）。故障注入が Debug・ASan だけのための SKIP はこれまでの出口と同じ組で、合格に数えない。
+  - linux-debug: 139/139 合格（04:00–05:50）。
+  - linux-asan: 139/139 合格、サニタイザの指摘なし（03:58–08:32）。
+  - `--pair`: 失敗は「構成artifactの欠落・重複」1 件のみ＝Windows 2 構成が開発中 deferred。Linux 3 構成どうしの照合は指摘なし。**Windows を含む --pair 合格ではない。**
+- **実 xcb（Xvfb 1920×1080）GUI・E2E**（凍結のビルド）: Release で test_gui_* 29 本すべて合格（新しい test_gui_channels を含む。save は故障注入の SKIP）。Debug で test_gui_save・test_app_e2e（開く→描く→Undo→保存→終了→別プロセスで再開）合格。
+- **AC-PERF 注入計測**（Release、Xvfb、F1＝32頁×1500線、始まりの負荷 1.37。表示のみで合否判定なし。測定機は基準クラスではない＝ACCEPTANCE §6）: 開いて最初の頁 1065 ms・全頁 1234 ms／入力→ライブ線 p95 1.79・p99 5.33 ms（n=43780）／線確定→表示 p95 21.2 ms／Undo→表示 p95 32.6 ms／頁切替 最初 p95 37.2・精細 p95 120 ms（n=4）／自動保存 p95 2.16 s（n=31）／保存中（計 31.4 s）のイベントループ: 5 ms ごとの刻みの遅れ p99 9.81 ms、250 ms を超える停止 0、4 ms を超えた停止の分布 p99 74.1・最大 89.1 ms（n=110）。走行全体の 4 ms を超えた停止の最大 638 ms（1 回、保存の外）。test_perf_render: F1 の頁 350 dpi 全体 861 ms・線を足した後 485 ms・512×512 の部分 31 ms、線 200 本の小さな絵 5 ms。**M6 の出口（962faa4）より遅い**: 最初の頁 626→1065 ms、全頁 805→1234 ms、自動保存 p95 1.64→2.16 s、保存中の停止 p99 54.4→74.1 ms、走行全体の停止の最大 54→638 ms（負荷 1.04→1.37 の違いもある）。合否のない表示の値だが、原因（色モデルの検査・読み込み・縮小図の鍵など）を PC2 の最初に調べる（残課題）。
+- **PERF-F**（Release、test_perf_pipeline、ctest 経由。合否判定あり）: F3 の工程 61.0 秒・88 作業。全呼び出し n=314 p95 805 ms／情報取得 p95 680 ms／編集の確定 p95 86.0 ms／候補の採用 p95 1.44 s／頁の仕上げ p95 821 ms（合格値は各 p95 2 秒）／8 ページの校正出力 10 回 6.80〜7.20 s（各 30 秒以内）。**全項目合格**。
+- **台帳**: feature-ledger.json の PC1 の 56 行のうち 55 行を実装済み（PC1a 11・PC1b 18・PC1c 20・PC1d 6）。document:color-depth-model は、高精度・インキのページでまだ断る処理（トーンの層・描画モードの補正層・形を動かす補正・書式を持つ高精度の線など）が残るため、PC2 以降まで開けたまま（行の note）。
+- **群の経過**: PC1a（形式・深度・グレー・RGB プロファイル・変換・問い合わせ）→ PC1b（カラー設定・色の校正・色域外警告・文字のガンマ）→ PC1c（アルファ・特色チャンネル）→ PC1d（インデックス・カラーテーブル・2 階調・ダブルトーン・マルチチャンネル・色版の削除）。どれも 実装（関係する試験）→読取専用の独立レビュー 1 回→直し。指摘: PC1a 21（P1 2）、PC1b 約 18（P1 1）、PC1c 約 17（P1 2）、PC1d 7（P1 1: 統合で残すネーム・下描きの層の画素を寄せていた）。すべて直した。群を重ねた所の食い違い 2 件（文字のガンマだけを持つ本が読み取り専用になる・16 bit のページの方針の試験）も直した。
+- **V3 の中で起きたこと（R4: 1〜3 回目の記録は使わない。記録は scratchpad の pc1-v3/attempt1〜3）**:
+  - 1 回目（凍結 ac43bde）: Release 合格。実 xcb で test_gui_actions noTwoCommandsShareAKey（PC1b で足したキーの重なりの試験）が落ちた。**製品の不具合**: 「選択範囲を消す」が X11 の標準の Delete のキーを全部取り、その中の Ctrl+D が「選択を解除」と重なっていた（Qt はあいまいなキーをどちらも動かさない。PC1 より前からの違い）。Python と同じ Delete の最初のキーと Backspace にした（66f07ba）。
+  - 2 回目（凍結 66f07ba）: Release 合格。実 xcb で test_gui_color theProofAsItComesIsTheWorkingCoatedCmyk が落ちた（試験の書き方: 窓を前に出さずにショートカットを送っていた）。activateWindow と qWaitForWindowActive で待つ形に直し、やり直す前に Release の GUI 試験を全部実 xcb で流して確かめた（b4fafbf）。
+  - 3 回目（凍結 b4fafbf）: Release・Debug・実 xcb の GUI 31 本は合格。ASan で test_color_model だけが落ちた（試験の確保の数え方が nothrow の new を置き換えず、ライブラリの一時領域が置き換えた delete で返された alloc-dealloc-mismatch。製品のコードではない）。test_image_split_oom と同じく nothrow の形も置き換えた（af06f45、ASan で合格）。
+- **工数の較正**（利用者の問い「1,050 人日は人が行う場合の工数？」への答え）: 1,050 人日は人が行う場合の目安。PC1 の 56 行の目安は 78 人日（S 33・M 13・L 8・XL 1）。実際は、実装の始め（10-16 10:21 UTC）から最後の凍結（10-17 03:38）まで約 17 時間（作業役の延べ約 16 時間、並行 3〜4）、V3 は 4 回で約 13 時間（合格した回は 4 時間 45 分）、合わせて約 1 日。
+- **残課題**: Windows（deferred、配布前の実機受入は必須）。上の性能の遅れの原因調べ（PC2 の最初）。document:color-depth-model の残り（PC2 以降）。マルチチャンネル・特色・インデックスの PSD は psd-tools では確かめたが Photoshop の実機では確かめていない（SPEC COLOR-03 の既知の制限）。
 
 ### 群（R1〜R7 のとおり: 群の中は 実装（関係する試験）→レビュー 1 回→直し。群ごとに一つの工程とし、その出口で V3 1 回・統合）
 - PC0 照合: 961 行を今の C++ と上流の実装（crates/…）で突き合わせ、行ごとに「同等（C++ のソースと試験を示す）／一部（足りないものを書く）／ない」を feature-ledger.json の既存の欄に書く。以後の群の範囲はこれで決める。

@@ -7,6 +7,8 @@
 #include <utility>
 
 #include "core/base64.hpp"
+#include "core/color_model.hpp"
+#include "core/channels.hpp"
 #include "core/command_bus.hpp"
 #include "core/ids.hpp"
 #include "core/ops_util.hpp"
@@ -14,6 +16,7 @@
 #include "core/pynum.hpp"
 #include "core/pyops.hpp"
 #include "core/strokes.hpp"
+#include "render/channels.hpp"
 #include "render/draw.hpp"
 #include "render/op_limits.hpp"
 #include "render/page.hpp"
@@ -363,7 +366,8 @@ std::pair<std::optional<core::Patch>, std::optional<core::Patch>> split_patch(co
 }  // namespace
 
 Items lift(core::Layer& layer, const Json& area, const core::Page& page) {
-    (void)page;
+    // (color-model@1: an RGB page of a profile's paint pixels are its values: the picture lifted says so)
+    const bool page_values = core::holds_page_values(page, layer);
     if (layer.color_raster)
         core::not_yet_ported("selection edits on high-precision raster pixels are not supported yet");
     AreaTest test(area);
@@ -398,6 +402,7 @@ Items lift(core::Layer& layer, const Json& area, const core::Page& page) {
             core::Patch templ;
             templ.attrs["mode"] = "image";
             templ.attrs["opacity"] = 1.0;
+            if (page_values) templ.attrs["rgb_profile"] = page.rgb->profile;  // (color_edit::kPatchProfileKey)
             if (auto patch = to_patch(piece, 0, 0, templ, kWorkingDpi)) in.patches.push_back(std::move(*patch));
         }
     }
@@ -664,6 +669,11 @@ Image base_mask(const Json& area, const core::Page& page, const core::Document* 
         return alpha.resize(size).point([](int v) { return v > 8 ? 255 : 0; });
     }
     if (core::truthy_at(area, "color")) return colour_area(area["color"], page, episode, dpi, size);
+    if (core::truthy_at(area, "channel")) {  // (channels@1: a page's alpha or spot channel, its density; this build's own)
+        const core::Channel* channel = area["channel"].is_string() ? core::find_channel(page, area["channel"].get<std::string>()) : nullptr;
+        if (channel == nullptr) area_error("no channel " + core::py_str(area["channel"]));
+        return channels::mask_of(*channel, size);
+    }
     if (core::truthy_at(area, "saved")) {
         const Json* kept = core::get(page.extra, "saved_areas");
         const Json saved_areas = kept != nullptr && core::py_truthy(*kept) ? *kept : Json::object();

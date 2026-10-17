@@ -31,14 +31,11 @@ ported は C++ のソースにあり C++ の試験（両方の版で流す契約
 | mcp_resource | 0 | 0 | 4 | 0 | 0 | 0 |
 | mcp_tool | 0 | 0 | 41 | 0 | 0 | 0 |
 | op | 0 | 0 | 168 | 0 | 0 | 0 |
-| python_module | 0 | 3 | 140 | 0 | 0 | 3 |
+| python_module | 0 | 0 | 143 | 0 | 0 | 3 |
 | test_file | 0 | 0 | 118 | 0 | 0 | 0 |
 
 ### ported でない行
 
-- `module:__main__`（in_progress）: `genko render --out` in a format Pillow writes and this build does not (GIF, ICO, PPM, TGA, JPEG 2000 ...): NotYetPorted format:<ext>; PNG, JPEG, TIFF, PDF, WebP, BMP and DIB are written
 - `module:app/__init__`（not_applicable）: Package docstring only ("Desktop UI."); nothing to port.
-- `module:materials/__init__`（in_progress）: import_image of Pillow-only picture formats (netpbm, ICO, CUR, ICNS, QOI, SGI, DDS, JPEG 2000, AVIF) are said not read by this build (NotYetPorted image_format): a recorded limit
 - `module:mcp/__init__`（not_applicable）: Package docstring only; the server is src/genko/mcp/server.py.
 - `module:studio/__init__`（not_applicable）: Package docstring only.
-- `module:studio/importer`（in_progress）: importing pictures in Pillow-only picture formats (netpbm, ICO, CUR, ICNS, QOI, SGI, DDS, JPEG 2000, AVIF) are said not read by this build (NotYetPorted image_format): a recorded limit

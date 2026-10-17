@@ -5,6 +5,8 @@
 
 #include <zlib.h>
 
+#include <QString>
+
 #include <algorithm>
 #include <climits>
 #include <cmath>
@@ -535,6 +537,13 @@ File File::read(std::string data, const Limits& limits, bool lab) {
             f.dpi_ = fixed == 0 ? 72.0 : fixed / 65536.0;
         }
         if (rid == 1039) f.icc_ = std::string(block.substr(0, size));  // (color-mode@1: the file's ICC profile)
+        // (channels@1: the extra channels' names and how they show)
+        if (rid == 1045) {
+            f.channel_names_ = std::string(block.substr(0, size));
+            f.unicode_names_ = true;
+        }
+        if (rid == 1006 && !f.unicode_names_) f.channel_names_ = std::string(block.substr(0, size));
+        if (rid == 1077) f.display_info_ = std::string(block.substr(0, size));
     }
     r.pos = res_end;
     static const std::map<int, std::string> kModeNames{{0, "bitmap"}, {1, "gray"},         {2, "indexed"}, {3, "rgb"},
@@ -909,6 +918,84 @@ std::optional<core::InkPixels> File::merged_inks(const core::PageColor& color) c
     const auto channels = merged_channels();
     if (!channels) return std::nullopt;
     return to_inks(mode_, *channels, Size{as_int(width_), as_int(height_)}, color, icc_);
+}
+
+std::vector<File::ExtraChannel> File::extra_channels() const {
+    const MergedPlan plan = plan_merged();
+    if (!plan.exists || depth_ == 1) return {};
+    const int colour = colour_bands(mode_);
+    const int first = colour + (records_.empty() ? 1 : 0);  // (a flat file's transparency is not one)
+    if (nchan_ <= first) return {};
+    canvas_fits(width_, height_);
+    const std::uint64_t rowbytes = row_bytes(width_, depth_);
+    const auto rows = static_cast<std::uint64_t>(height_);
+    const unsigned count_bytes = psb_ ? 4 : 2;
+    const std::string_view d = data_;
+    const auto count_at = [&](std::uint64_t c, std::uint64_t y) {
+        const std::string_view b = d.substr(static_cast<std::size_t>(plan.counts_at + (c * rows + y) * count_bytes), count_bytes);
+        return count_bytes == 4 ? std::uint64_t{be32(b)} : std::uint64_t{(byte_at(b, 0) << 8) | byte_at(b, 1)};
+    };
+    // (where each plane starts: after the ones before it)
+    std::vector<std::uint64_t> starts(static_cast<std::size_t>(nchan_));
+    std::uint64_t at = plan.compression == 1 ? plan.counts_at + rows * static_cast<std::uint64_t>(nchan_) * count_bytes : merged_at_ + 2;
+    for (int c = 0; c < nchan_; ++c) {
+        starts[static_cast<std::size_t>(c)] = at;
+        if (plan.compression == 1) {
+            for (std::uint64_t y = 0; y < rows; ++y) at += count_at(static_cast<std::uint64_t>(c), y);
+        } else {
+            at += rowbytes * rows;
+        }
+    }
+    // names: Unicode (each its count of UTF-16 units and the units, a null at the end) or Pascal strings
+    std::vector<std::string> names;
+    for (std::size_t k = 0; k < channel_names_.size();) {
+        if (unicode_names_) {
+            if (k + 4 > channel_names_.size()) break;
+            const std::uint64_t units = be32(std::string_view(channel_names_).substr(k, 4));
+            k += 4;
+            if (k + units * 2 > channel_names_.size()) break;
+            QString name;
+            for (std::uint64_t u = 0; u < units; ++u) {
+                const auto unit = static_cast<char16_t>((byte_at(channel_names_, k + 2 * u) << 8) | byte_at(channel_names_, k + 2 * u + 1));
+                if (unit != 0) name += QChar(unit);
+            }
+            names.push_back(name.toStdString());
+            k += units * 2;
+        } else {
+            const std::size_t n = byte_at(channel_names_, k);
+            names.push_back(channel_names_.substr(k + 1, n));
+            k += 1 + n;
+        }
+    }
+    std::vector<ExtraChannel> out;
+    for (int c = first; c < nchan_; ++c) {
+        ExtraChannel channel;
+        const std::size_t k = out.size();
+        if (k < names.size()) channel.name = names[k];
+        // (13 bytes a record, as Photoshop writes 1077; 14 — 1007's padding byte after the kind — when they divide only so)
+        const std::size_t records = display_info_.size() >= 4 ? display_info_.size() - 4 : 0;
+        const std::size_t stride = records % 13 != 0 && records % 14 == 0 ? 14 : 13;
+        if (display_info_.size() >= 4 + stride * (k + 1)) {
+            const std::string_view rec = std::string_view(display_info_).substr(4 + stride * k, stride);
+            for (unsigned j = 0; j < 3; ++j) channel.color[j] = static_cast<int>(((byte_at(rec, 2 + 2 * j) << 8) | byte_at(rec, 3 + 2 * j)) / 257);
+            channel.opacity = static_cast<int>(std::min(100u, (byte_at(rec, 10) << 8) | byte_at(rec, 11)));
+            channel.kind = static_cast<int>(byte_at(rec, 12));
+        }
+        std::string raw(static_cast<std::size_t>(rowbytes * rows), '\0');
+        if (plan.compression == 0) {
+            if (!raw.empty()) std::memcpy(raw.data(), d.data() + starts[static_cast<std::size_t>(c)], raw.size());
+        } else {
+            std::uint64_t from = starts[static_cast<std::size_t>(c)];
+            for (std::uint64_t y = 0; y < rows; ++y) {
+                const std::uint64_t n = count_at(static_cast<std::uint64_t>(c), y);
+                unpackbits(d.substr(static_cast<std::size_t>(from), static_cast<std::size_t>(n)), raw.data() + rowbytes * y, rowbytes);
+                from += n;
+            }
+        }
+        channel.samples = depth8(&raw, raw.size(), width_, height_, depth_).bytes;
+        out.push_back(std::move(channel));
+    }
+    return out;
 }
 
 }  // namespace genko::render::psd

@@ -2,6 +2,9 @@
 
 #include <string>
 
+#include "core/channels.hpp"
+#include "core/color_model.hpp"
+#include "core/color_raster.hpp"
 #include "core/error.hpp"
 #include "core/pyconv.hpp"
 #include "core/strokes.hpp"
@@ -44,7 +47,7 @@ Json line_brief(const core::StoryLine& line) {
     return out;
 }
 
-Json layer_brief(const core::Layer& layer) {
+Json layer_brief(const core::Layer& layer, bool colour_model) {
     Json out = Json::object();
     out["id"] = layer.id;
     out["role"] = core::to_string(layer.role);
@@ -67,6 +70,55 @@ Json layer_brief(const core::Layer& layer) {
     if (core::py_truthy(layer.parent_id)) out["parent_id"] = layer.parent_id;
     if (layer.reference) out["reference"] = true;
     if (!layer.panel_clip) out["panel_clip"] = false;
+    // (color-model@1, on a page of a colour model alone: the precision its pixels are kept in)
+    if (colour_model) {
+        try {  // (pixels this build cannot read — a read-only book's — have none said)
+            if (layer.ink_raster) out["precision"] = core::ink_raster_header(*layer.ink_raster).depth;
+            else if (layer.color_raster) out["precision"] = static_cast<unsigned char>(layer.color_raster->at(5)) == 2 ? "u16" : "f32";
+            else if (layer.raster_png && !layer.raster_png->empty()) out["precision"] = 8;
+        } catch (const std::exception&) {
+            out.erase("precision");
+        }
+    }
+    return out;
+}
+
+// color-model@1: a page's colour model as the book keeps it, and its profile's description.
+Json colour_brief(const core::Page& page) {
+    Json out = page.color ? core::to_json(*page.color) : core::to_json(*page.rgb);
+    if (page.color) {
+        out["profile_description"] = core::profile_description(page.color->profile, page.color->icc, page.color->space == core::InkSpace::Lab ||
+                                                                        (page.color->space == core::InkSpace::Multi && page.color->from == "lab"));
+    } else {
+        out["profile_description"] = core::profile_description(page.rgb->profile, page.rgb->icc);
+    }
+    return out;
+}
+
+// channels@1: a page's channels as the channel panel lists them (their settings, depth and size; not their pixels). A
+// raster that cannot be read (its asset broken: the book is read-only) is listed with its problem, the rest as usual.
+Json channels_brief(const core::Page& page) {
+    Json out = Json::array();
+    for (const core::Channel& channel : page.channels) {
+        Json item = core::to_json(channel, std::string());
+        item.erase("raster");
+        if (channel.raster) {
+            try {
+                const core::InkRasterHeader header = core::ink_raster_header(*channel.raster);
+                if (header.space != core::InkSpace::Mask) throw core::Error("format", "the channel's raster is not a mask");
+                item["depth"] = header.depth;
+                item["size"] = Json::array({header.width, header.height});
+            } catch (const core::Error& error) {
+                item["depth"] = core::page_depth(page);
+                item["size"] = nullptr;
+                item["problem"] = error.what();
+            }
+        } else {
+            item["depth"] = core::page_depth(page);
+            item["size"] = nullptr;  // (none yet: all 0)
+        }
+        out.push_back(std::move(item));
+    }
     return out;
 }
 
@@ -116,8 +168,11 @@ Json snapshot(const core::Document& doc, bool full) {
         item["name_stroke_count"] = count(page, core::LayerRole::Name);
         item["ink_stroke_count"] = count(page, core::LayerRole::Ink);
         item["selected_frame_id"] = page.selected_frame_id;
+        const bool colour_model = page.color.has_value() || page.rgb.has_value();
+        if (colour_model) item["color"] = colour_brief(page);
+        if (!page.channels.empty()) item["channels"] = channels_brief(page);  // (channels@1: on a page with one only)
         Json layers = Json::array();
-        for (const auto& layer : page.layers) layers.push_back(layer_brief(layer));
+        for (const auto& layer : page.layers) layers.push_back(layer_brief(layer, colour_model));
         item["layers"] = std::move(layers);
         Json prims = Json::array();
         for (const Json& prim : page.prims) {
@@ -172,6 +227,7 @@ Json snapshot(const core::Document& doc, bool full) {
     out["pages"] = std::move(pages);
     out["tickets"] = doc.tickets;
     out["autosave"] = doc.autosave;
+    if (doc.text_gamma) out["text_gamma"] = *doc.text_gamma;  // (color-model@1, PC1b: only a book that has one)
     return out;
 }
 

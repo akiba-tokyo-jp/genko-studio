@@ -1,6 +1,8 @@
 #pragma once
 
+#include <QColor>
 #include <QDialog>
+#include <QImage>
 #include <QKeySequence>
 #include <QList>
 #include <QPointF>
@@ -78,6 +80,23 @@ struct Clash {
 std::vector<Clash> conflicts(const std::vector<std::pair<QString, QStringList>>& mapping);
 // Everything the preferences change, applied to an open window.
 void apply_all(MainWindow* window);
+
+// 透明部分・色域 (PhotoCraft v0.2.0's prefs.rs TransparencyAndGamut, MIT; SPEC COLOR-03 PC1b): the checker shown under
+// what is transparent (the layers' small pictures) — its square's side in pixels (0: none, white) and its two colours —
+// and the gamut warning's mark (色域外警告): its colour and opacity (%).
+struct Checker {
+    int square = 8;
+    QColor light = QColor(255, 255, 255);
+    QColor dark = QColor(204, 204, 204);
+};
+Checker checker();
+// The picture filled with the checker (or white without one).
+void paint_checker(QImage& image, const Checker& checker);
+// The checker sizes and colour sets: (the words shown, the value kept).
+const std::vector<std::pair<QString, QString>>& checker_sizes();
+const std::vector<std::pair<QString, QString>>& checker_colour_sets();
+QColor gamut_colour();
+int gamut_opacity();
 // 道具ごとの修飾キー: for each tool, what Alt, Ctrl and Shift held switch to (共通の設定のまま: the common one). The dialog
 // is exec'ed; `before_exec` (tests) is called with it first. True when kept.
 bool tool_keys_dialog(QWidget* parent, MainWindow* window, const std::function<void(QDialog&)>& before_exec = {});
@@ -139,6 +158,15 @@ public:
     QSpinBox* backup_keep = nullptr;
     QCheckBox* hold_swap = nullptr;
     QPushButton* per_tool = nullptr;
+    // 透明部分・色域
+    QComboBox* checker_size = nullptr;
+    QComboBox* checker_colours = nullptr;
+    QPushButton* checker_light = nullptr;
+    QPushButton* checker_dark = nullptr;
+    QLabel* checker_preview = nullptr;
+    QPushButton* gamut_button = nullptr;
+    QSpinBox* gamut_percent = nullptr;
+    void show_checker();
 
     void measure();
     void forget_gamma();

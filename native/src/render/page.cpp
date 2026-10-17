@@ -11,6 +11,7 @@
 #include <cmath>
 #include <memory>
 #include <mutex>
+#include <unordered_map>
 #include <utility>
 
 #include <QFileInfo>
@@ -26,9 +27,11 @@
 #include "core/pyops.hpp"
 #include "core/strokes.hpp"
 #include "render/brushes.hpp"
+#include "render/channels.hpp"
 #include "render/color_canvas.hpp"
 #include "render/covers.hpp"
 #include "render/effects.hpp"
+#include "render/imaging.hpp"
 #include "render/ink.hpp"
 #include "render/ink_canvas.hpp"
 #include "render/op_limits.hpp"
@@ -618,6 +621,18 @@ tones::Page tone_page(const Ctx& ctx) {
 // render._screen_dots: the tones as dots on screen too (render.SCREEN_DOTS, at a size where a dot is a pixel or two).
 bool screen_dots(const Ctx& ctx) { return ctx.screen_dots && ctx.mode != "print" && ctx.dpi >= 96 && ctx.dots; }
 
+// Is the layer screened as this drawing draws it (トーン化: its greys as dots)?
+bool screened_here(const Ctx& ctx, const Layer& layer) {
+    return layer.screen && core::py_truthy(*layer.screen) && ((ctx.mode == "print" && ctx.dots) || screen_dots(ctx));
+}
+
+// color-model@1: is the layer's picture as this drawing makes it the page's values (an RGB page of a profile's paint
+// pixels, with the fills and lines drawn on them brought into them)? Not where an effect or a screen is laid on it:
+// those are drawn in sRGB, the pixels brought to sRGB first.
+bool drawn_in_values(const Ctx& ctx, const Layer& layer) {
+    return core::holds_page_values(*ctx.page, layer) && !(layer.effect && core::py_truthy(*layer.effect)) && !screened_here(ctx, layer);
+}
+
 // tones.screened for the layer's picture over `area` (トーン化). A noise screen runs from the top of the page: the rows
 // above the area are drawn too.
 Image screened_layer(const Ctx& ctx, const Layer& layer, const Image& raster, const Box& area, const Image* panel_mask);
@@ -651,7 +666,12 @@ std::optional<Image> layer_pixels(const Ctx& ctx, const Layer& layer, const Box&
     } else if (layer.ink_raster && ctx.page->color) {  // (color-mode@1: its inks as the screen shows them)
         raster = ink_picture_rgba(sample_ink_raster(*decoded_ink(layer.ink_raster), ctx.size, area), *ctx.page->color);
     }
+    // (color-model@1: on an RGB page of a profile a paint layer's pixels are the page's values; its lines and fills,
+    // sRGB colours, go over them as the page's values too — or, where an effect or a screen is drawn on the layer in
+    // sRGB, its pixels come to sRGB first)
+    if (raster && core::holds_page_values(*ctx.page, layer) && !drawn_in_values(ctx, layer)) raster = srgb_from(*raster, RgbSpace(*ctx.page->rgb));
     auto lines = layer_strokes(ctx, layer, area, panel_mask, raster ? &*raster : nullptr, rough, true);
+    if (lines && raster && drawn_in_values(ctx, layer)) lines = srgb_into(*lines, RgbSpace(*ctx.page->rgb));
     if (lines) raster = raster ? alpha_composite(*raster, *lines) : std::move(*lines);  // (raster is RGBA)
     return raster;
 }
@@ -894,7 +914,7 @@ Box area_of(const RenderOptions& options, Size size) {
 void precise_strokes(ColorCanvas& target, const Ctx& ctx, const Layer& layer, const Box& area, const Image* panel) {
     if (layer.mask || layer.effect || layer.screen || layer.color || layer.panel_each || !layer.patches.empty() || layer.raster_png)
         throw NotYetPorted("precise stroke layer style");
-    ColorCanvas own(transparent(area));
+    ColorCanvas own(transparent(area), target.space());
     if (ctx.episode != nullptr) paper::keep_all(ctx.episode->papers);  // (BRUSH-01: its brushes' papers)
     for (const auto& stroke : layer.strokes->items) {
         check_cancel(ctx);
@@ -1047,7 +1067,7 @@ void ink_layer(InkCanvas& canvas, const Ctx& ctx, const Layer& layer, const Box&
             const unsigned char c[3] = {static_cast<unsigned char>(std::clamp<std::int64_t>(rgb.size() > 0 ? rgb[0] : 0, 0, 255)),
                                         static_cast<unsigned char>(std::clamp<std::int64_t>(rgb.size() > 1 ? rgb[1] : 0, 0, 255)),
                                         static_cast<unsigned char>(std::clamp<std::int64_t>(rgb.size() > 2 ? rgb[2] : 0, 0, 255))};
-            std::array<double, 4> ink{};
+            std::array<double, core::kPlatesMax> ink{};
             ink::inks_of(color, c, nullptr, ink.data(), 1);
             const unsigned n = picture.channels;
             for (std::size_t i = 0; i < picture.values.size() / (n + 1); ++i)
@@ -1077,6 +1097,36 @@ void ink_layer(InkCanvas& canvas, const Ctx& ctx, const Layer& layer, const Box&
     canvas.blend_rgba(picture.mode() == "RGBA" ? picture : picture.convert("RGBA"), layer.opacity, layer.clip, layer.blend);
 }
 
+// color-model@1: the page's values (GKCR f32 of its layers) with what is drawn over them in 8 bits — the panels' borders,
+// the lines of dialogue, the effect lines, the nombres, the crop marks: where the picture differs from its layers as
+// they are shown, the colour drawn (sRGB) in the page's space, opaque.
+std::string with_drawn_over(const std::string& values, const Image& layers_shown, const Image& image, const RgbSpace& space) {
+    const core::ColorRasterView view(values);
+    const auto width = static_cast<std::size_t>(view.width());
+    if (layers_shown.size() != image.size() || static_cast<std::size_t>(image.width()) != width ||
+        static_cast<std::uint32_t>(image.height()) != view.height()) {
+        return values;
+    }
+    return core::encode_color_pixels(view.width(), view.height(), "f32", [&](std::size_t i) {
+        const std::size_t y = i / width, x = i % width;
+        const auto* was = reinterpret_cast<const unsigned char*>(layers_shown.raw()->image[y]) + x * 4;
+        const auto* now = reinterpret_cast<const unsigned char*>(image.raw()->image[y]) + x * 4;
+        if (was[0] == now[0] && was[1] == now[1] && was[2] == now[2]) return view.pixel(i);
+        double rgb[3] = {now[0] / 255.0, now[1] / 255.0, now[2] / 255.0};
+        space.from_srgb(rgb, 1);
+        return std::array<double, 4>{rgb[0], rgb[1], rgb[2], 1.0};
+    });
+}
+
+// color-model@1: the values (GKCR f32) of a box of them, as a picture's crop cuts it.
+std::string crop_values(const std::string& values, const Box& box) {
+    const core::ColorRasterView view(values);
+    const auto width = static_cast<std::size_t>(box.width());
+    return core::encode_color_pixels(static_cast<std::uint32_t>(box.width()), static_cast<std::uint32_t>(box.height()), "f32", [&](std::size_t i) {
+        return view.pixel((std::size_t(box.y0) + i / width) * view.width() + std::size_t(box.x0) + i % width);
+    });
+}
+
 RenderResult render(const Page& page_in, int dpi, const RenderOptions& options, const core::Document* episode,
                     std::vector<std::string>& omitted) {
     if (!options.at_frame) {  // (an animation page prints as its first frame, not every cel at once)
@@ -1094,6 +1144,7 @@ RenderResult render(const Page& page_in, int dpi, const RenderOptions& options, 
         RenderResult out = render(page_in, dpi, whole, episode, omitted);
         out.image = out.image.crop(box);
         if (out.inks) out.inks = crop_inks(*out.inks, box);
+        if (out.precise) out.precise = crop_values(*out.precise, box);
         return out;
     }
     Ctx ctx;
@@ -1125,6 +1176,7 @@ RenderResult render(const Page& page_in, int dpi, const RenderOptions& options, 
             RenderResult out = render(page_in, dpi, widened, episode, omitted);
             out.image = out.image.crop(shifted(area, -expanded.x0, -expanded.y0));
             if (out.inks) out.inks = crop_inks(*out.inks, shifted(area, -expanded.x0, -expanded.y0));
+            if (out.precise) out.precise = crop_values(*out.precise, shifted(area, -expanded.x0, -expanded.y0));
             return out;
         }
     }
@@ -1139,7 +1191,7 @@ RenderResult render(const Page& page_in, int dpi, const RenderOptions& options, 
 
     std::optional<ColorCanvas> precision;
     if (uses_color_precision(page, print))
-        precision.emplace(rgba);
+        precision.emplace(rgba, RgbSpace::of(page));  // (color-model@1: an RGB page of a profile, in its space)
     std::optional<Image> prev_alpha;
     const std::optional<Image> panel_mask = clip_mask(page, ctx.size, dpi, area);
     const Image* panel = panel_mask ? &*panel_mask : nullptr;
@@ -1229,7 +1281,7 @@ RenderResult render(const Page& page_in, int dpi, const RenderOptions& options, 
                 marks.commit();
             });
         }
-        RenderResult out{canvas.display(), {}, std::nullopt};
+        RenderResult out{canvas.display(), {}, std::nullopt, std::nullopt};
         if (options.inks) out.inks = canvas.ink_pixels(page.color->depth);
         // (what is never printed, over the page as shown)
         if (!print && core::py_truthy(page.prims)) draw_prims(out.image, area, ctx);
@@ -1330,8 +1382,8 @@ RenderResult render(const Page& page_in, int dpi, const RenderOptions& options, 
         std::optional<Image> raster = layer_with_effects(ctx, layer, area, panel, ctx.rough);
         if (!raster) continue;
         const Json* source_kind = layer.source ? get(*layer.source, "kind") : nullptr;
-        if (ctx.finish && (print || mode == "proof") && source_kind != nullptr && *source_kind == "psd" &&
-            !truthy_json(layer.screen)) {
+        const bool finished = ctx.finish && (print || mode == "proof") && source_kind != nullptr && *source_kind == "psd" && !truthy_json(layer.screen);
+        if (finished) {
             // (a picture from a painting app on a monochrome page is finished like placed art: grey and tones. The
             // finish looks at each pixel's neighbourhood and lays its dots from the page's corner: the whole picture.)
             const Box all{0, 0, ctx.size.width, ctx.size.height};
@@ -1349,13 +1401,26 @@ RenderResult render(const Page& page_in, int dpi, const RenderOptions& options, 
             raster = screened_layer(ctx, layer, *raster, area, panel);  // トーン化: its greys as dots in print
         }
         Image picture = masked(ctx, layer, std::move(*raster), area);
-        if (layer.color && !layer.color->empty() && (!print || layer.color_prints)) picture = tinted(picture, *layer.color);
+        const bool tint = layer.color && !layer.color->empty() && (!print || layer.color_prints);
+        if (tint) picture = tinted(picture, *layer.color);
         const Image* clip = layer.clip && prev_alpha ? &*prev_alpha : nullptr;
-        if (precision) precision->blend(picture, layer.opacity, layer.clip, layer.blend);
-        else rgba = blend_over(rgba, picture, layer.blend.empty() ? "normal" : layer.blend, layer.opacity, clip);
+        if (precision) {
+            // (color-model@1: a paint layer's pixels on a page of a profile are its values — as drawn here: not once a
+            // tint, an effect, a screen or the monochrome finish makes the picture in sRGB)
+            const bool page_values = drawn_in_values(ctx, layer) && !tint && !finished;
+            precision->blend(picture, layer.opacity, layer.clip, layer.blend, page_values);
+        } else {
+            rgba = blend_over(rgba, picture, layer.blend.empty() ? "normal" : layer.blend, layer.opacity, clip);
+        }
         prev_alpha = alpha_of(picture);
     }
     Image image = (precision ? precision->image() : rgba).convert("RGB");
+    std::optional<std::string> precise;  // (color-model@1: the page's values, asked for)
+    std::optional<Image> layers_shown;   // (and how its layers alone are shown: what is drawn over them is told by it)
+    if (options.precise && precision) {
+        precise = precision->color_raster("f32");
+        layers_shown = image.copy();
+    }
 
     if (core::py_truthy(page.effects)) image = draw_effects(ctx, image, area);  // effect lines (M3-B)
     if (!print && core::py_truthy(page.prims)) draw_prims(image, area, ctx);  // 3D guides, never printed (M3-C)
@@ -1375,7 +1440,8 @@ RenderResult render(const Page& page_in, int dpi, const RenderOptions& options, 
         canvas.commit();
     }
     onion(image);
-    return RenderResult{std::move(image), {}, std::nullopt};
+    if (precise) precise = with_drawn_over(*precise, *layers_shown, image, RgbSpace::of(page));
+    return RenderResult{std::move(image), {}, std::nullopt, std::move(precise)};
 }
 
 // The first `count` characters of UTF-8 text (Python's text[:count]).
@@ -1392,6 +1458,8 @@ std::string first_chars(const std::string& text, std::size_t count) {
 
 void page_layers(const core::Page& page, const core::Document& episode, int dpi, const std::function<void(PageLayer&&)>& each,
                  const std::function<void(const core::StoryLine&)>* line_layers) {
+    // (color-model@1: the book's text_gamma, for the letters of the lines' layers — as render_page draws them)
+    const text::TextGamma gamma(episode.text_gamma);
     Ctx ctx;
     ctx.page = &page;
     ctx.episode = &episode;
@@ -1453,6 +1521,8 @@ void page_layers(const core::Page& page, const core::Document& episode, int dpi,
         if (!raster) continue;
         PageLayer out;
         out.inks = std::move(own_inks);
+        // (color-model@1: on an RGB page of a profile a paint layer's pixels are the page's values)
+        out.page_values = (core::profiled_rgb(page) && layer.color_raster) || core::holds_page_values(page, layer);
         out.name = !layer.title.empty() ? layer.title : std::string(core::to_string(layer.role)) + " " + layer.id.substr(0, 6);
         out.image = std::move(*raster);
         out.settings = true;
@@ -1593,7 +1663,8 @@ Box rect_px(const core::Rect& rect, int dpi) {
 }
 
 bool uses_color_precision(const core::Page& page, bool print) {
-    if (page.color) return false;  // (a CMYK or Lab page has its own canvas)
+    if (page.color) return false;  // (a CMYK, Lab or grey page has its own canvas)
+    if (page.rgb && !page.rgb->profile.empty()) return true;  // (color-model@1: an RGB page of a profile, in its space)
     return std::any_of(page.layers.begin(), page.layers.end(), [print](const Layer& l) {
         return (l.color_raster || core::has_color_strokes(l)) && l.kind != LayerKind::Folder && l.visible &&
                (!print || (l.exportable && !guide_role(l.role)));
@@ -1642,7 +1713,11 @@ core::InkPixels composite_ink_layers(const core::Page& page, const std::vector<c
     return canvas.ink_pixels(page.color->depth, true);
 }
 
-RenderResult render_page(const core::Page& page, int dpi, const RenderOptions& options, const core::Document* episode) {
+namespace {
+
+RenderResult drawn_page(const core::Page& page, int dpi, const RenderOptions& options, const core::Document* episode) {
+    // (color-model@1: the book's text_gamma, for the letters of its lines drawn on this thread)
+    const text::TextGamma gamma(episode != nullptr ? episode->text_gamma : std::nullopt);
     std::vector<std::string> omitted;
     // Keep every layer in high precision within a region; quantize only the final output pixels.
     // Reuse the established global-coordinate region renderer, not an RGBA8 layer intermediate.
@@ -1653,13 +1728,26 @@ RenderResult render_page(const core::Page& page, int dpi, const RenderOptions& o
         const Box area=area_of(options,size);
         const auto pixels=static_cast<std::int64_t>(area.width())*area.height();
         if(pixels>kMaxAreaPixels)throw core::Error("image_too_large","the picture is too large at this resolution");
+        // (color-model@1: the page's values, held whole in GKCR f32 as a precise raster is: past the most pixels one
+        // holds, refused before anything is made)
+        const bool values=options.precise && !page.color && uses_color_precision(page,options.mode=="print");
+        if(values && static_cast<std::uint64_t>(pixels)>core::kColorRasterMaxPixels)
+            throw core::Error("image_too_large","the page's values are too large at this resolution (at most "+
+                              std::to_string(core::kColorRasterMaxPixels)+" pixels)");
         if(pixels>1024LL*1024){
             if(options.stop.stop_requested())throw Cancelled();
-            RenderResult out{Image::create_blank("RGB",size_of(area)),{},std::nullopt};
-            if(options.inks && page.color){
-                out.inks=core::InkPixels{page.color->space,page.color->depth,static_cast<std::uint32_t>(area.width()),
-                                         static_cast<std::uint32_t>(area.height()),{}};
-                out.inks->samples.assign(out.inks->pixel_count()*out.inks->channels(),0);
+            RenderResult out{Image::create_blank("RGB",size_of(area)),{},std::nullopt,std::nullopt};
+            if(options.inks && page.color){  // (each tile's inks laid in)
+                out.inks=core::blank_ink_pixels(page.color->space,page.color->depth,static_cast<std::uint32_t>(area.width()),
+                                                static_cast<std::uint32_t>(area.height()),page.color->planes());
+            }
+            // (color-model@1: each tile's values laid into the page's GKCR f32, row by row)
+            if(values){
+                std::string gkcr("GKCR\1\4\0\0",8);
+                for(const std::uint32_t v:{static_cast<std::uint32_t>(area.width()),static_cast<std::uint32_t>(area.height())})
+                    for(int b=0;b<4;++b)gkcr+=static_cast<char>(v>>(8*b)&0xff);
+                gkcr.resize(16+static_cast<std::size_t>(pixels)*16,'\0');
+                out.precise=std::move(gkcr);
             }
             constexpr int tile=512;
             for(int y=area.y0;y<area.y1;y+=tile){
@@ -1669,6 +1757,17 @@ RenderResult render_page(const core::Page& page, int dpi, const RenderOptions& o
                     const auto piece=render(page,dpi,part,episode,omitted);
                     out.image.paste(piece.image,Point{x-area.x0,y-area.y0});
                     if(out.inks && piece.inks)paste_inks(*out.inks,*piece.inks,Point{x-area.x0,y-area.y0});
+                    if(values){
+                        if(!piece.precise)throw core::Error("value","the page's values were not drawn");
+                        const core::ColorRasterView tile_values(*piece.precise);
+                        if(static_cast<int>(tile_values.width())!=piece.image.width() || static_cast<int>(tile_values.height())!=piece.image.height())
+                            throw core::Error("value","the page's values do not match its picture");
+                        const std::size_t row=std::size_t(tile_values.width())*16;
+                        for(std::uint32_t r=0;r<tile_values.height();++r){
+                            const std::size_t to=16+((std::size_t(y-area.y0)+r)*std::size_t(area.width())+std::size_t(x-area.x0))*16;
+                            out.precise->replace(to,row,*piece.precise,16+r*row,row);
+                        }
+                    }
                 }
             }
             out.omitted=std::move(omitted);return out;
@@ -1676,6 +1775,51 @@ RenderResult render_page(const core::Page& page, int dpi, const RenderOptions& o
     }
     RenderResult out = render(page, dpi, options, episode, omitted);
     out.omitted = std::move(omitted);
+    return out;
+}
+
+}  // namespace
+
+namespace {
+
+// color-model@1 (PC1d): an indexed page shown in its table — the whole picture, its frames, words and marks too, each
+// pixel its nearest colour (no dither: a part of the page drawn the same as the whole; PhotoCraft's ColorTable::nearest).
+void in_table(RenderResult& out, const core::Page& page) {
+    if (page.color || !page.rgb || !page.rgb->table) return;
+    const core::ColorTable& table = *page.rgb->table;
+    Image& image = out.image;
+    const std::string mode(image.mode());
+    if (mode != "RGB" && mode != "RGBA") return;
+    const unsigned bands = static_cast<unsigned>(image.bands());
+    std::string bytes = image.tobytes();
+    std::unordered_map<std::uint32_t, std::size_t> nearest;
+    for (std::size_t at = 0; at + bands <= bytes.size(); at += bands) {
+        auto* q = reinterpret_cast<unsigned char*>(bytes.data() + at);
+        const std::uint32_t key = (std::uint32_t(q[0]) << 16) | (std::uint32_t(q[1]) << 8) | q[2];
+        auto it = nearest.find(key);
+        if (it == nearest.end()) it = nearest.emplace(key, table.nearest(q[0], q[1], q[2])).first;
+        for (unsigned k = 0; k < 3; ++k) q[k] = static_cast<unsigned char>(table.colors[it->second][k]);
+    }
+    image = Image::frombytes(mode, image.size(), bytes);
+}
+
+}  // namespace
+
+RenderResult render_page(const core::Page& page, int dpi, const RenderOptions& options, const core::Document* episode) {
+    const bool hiding = options.planes && std::find(options.planes->begin(), options.planes->end(), false) != options.planes->end();
+    if (page.channels.empty() && !hiding) {
+        RenderResult out = drawn_page(page, dpi, options, episode);
+        in_table(out, page);
+        return out;
+    }
+    // (channels@1: the spots printed, the panel's view; a CMYK or Lab page's planes shown from its inks)
+    RenderOptions asked = options;
+    const bool lent_inks = hiding && page.color && !options.inks;
+    if (lent_inks) asked.inks = true;
+    RenderResult out = drawn_page(page, dpi, asked, episode);
+    in_table(out, page);
+    channels::finish(out, page, dpi, options);
+    if (lent_inks) out.inks.reset();
     return out;
 }
 
@@ -1804,6 +1948,10 @@ Image layer_image(const core::Page& page, const core::Layer& layer, int dpi, con
 Image tone_mask(const core::Page& page, const core::Layer& layer, Size size, int dpi) {
     const tones::Page p{&page, dpi, size, [dpi](Image& out, const Box& box, const core::Patch& patch) { paint_patch(out, box, patch, dpi, nullptr); }};
     return tones::mask(layer, p);
+}
+
+bool picture_holds_page_values(const core::Page& page, const core::Layer& layer, bool tinted) {
+    return core::holds_page_values(page, layer) && !(layer.effect && core::py_truthy(*layer.effect)) && !tinted;
 }
 
 std::optional<Image> drawable_layer_image(const core::Page& page, const core::Layer& layer, int dpi, const core::Document* episode,

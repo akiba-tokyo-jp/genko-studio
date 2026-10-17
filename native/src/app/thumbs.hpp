@@ -23,11 +23,12 @@ namespace genko::app {
 
 using DocPtr = std::shared_ptr<const core::Document>;
 
-// The renderer's version for cached pictures (a change to drawing makes all of them new).
-inline constexpr const char* kThumbVersion = "genko-native-render/1";
+// The renderer's version for cached pictures (a change to drawing makes all of them new; 2: channels@1's spots printed,
+// the channels in the page's fingerprint).
+inline constexpr const char* kThumbVersion = "genko-native-render/2";
 
-// A hash of everything a page's picture depends on (its paper, panels, layers and their lines and pictures, the
-// book's own brushes), as 64 hex digits.
+// A hash of everything a page's picture depends on (its paper, panels, layers and their lines and pictures, its
+// channels — each one's settings and pixels —, the book's own brushes), as 64 hex digits.
 std::string page_fingerprint(const core::Document& doc, const core::Page& page);
 
 class ThumbCache {

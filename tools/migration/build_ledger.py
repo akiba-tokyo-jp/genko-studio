@@ -268,7 +268,7 @@ MODULE_CPP: dict[str, dict] = {
   "note": "Only __version__ = \"0.1.0\"; genko::version() returns the same string and `genko --version` reports it."
  },
  "src/genko/__main__.py": {
-  "verdict": "partial",
+  "verdict": "covered",
   "cpp": [
    "native/src/api/cli.cpp",
    "native/src/api/main.cpp",
@@ -282,10 +282,7 @@ MODULE_CPP: dict[str, dict] = {
    "native/tests/contract/test_contract_ops_cli.cpp",
    "native/tests/contract/test_contract_render_cli.cpp"
   ],
-  "missing": [
-   "`genko render --out` in a format Pillow writes and this build does not (GIF, ICO, PPM, TGA, JPEG 2000 ...): NotYetPorted format:<ext>; PNG, JPEG, TIFF, PDF, WebP, BMP and DIB are written"
-  ],
-  "note": "Every argparse subcommand (new, export, inspect, apply, render, schema, serve, undo, redo, gc, doctor, token, app, register-links, studio, mcp) is dispatched by api/cli.cpp / api/main.cpp."
+  "note": "Every argparse subcommand (new, export, inspect, apply, render, schema, serve, undo, redo, gc, doctor, token, app, register-links, studio, mcp) is dispatched by api/cli.cpp / api/main.cpp. Known limit by the user's decision (2026-10-16, README-ja): `genko render --out` in a format Pillow writes and this build does not (GIF, ICO, PPM, TGA, JPEG 2000 ...): NotYetPorted format:<ext>; PNG, JPEG, TIFF, PDF, WebP, BMP and DIB are written"
  },
  "src/genko/abr.py": {
   "verdict": "ported",
@@ -1231,7 +1228,7 @@ MODULE_CPP: dict[str, dict] = {
   "note": "Posable figure skeleton and its lines."
  },
  "src/genko/materials/__init__.py": {
-  "verdict": "partial",
+  "verdict": "covered",
   "cpp": [
    "native/src/render/materials.cpp",
    "native/src/render/materials.hpp",
@@ -1242,10 +1239,7 @@ MODULE_CPP: dict[str, dict] = {
    "native/tests/gui/test_gui_materials.cpp",
    "native/tests/unit/test_material_stamp.cpp"
   ],
-  "missing": [
-   "import_image of Pillow-only picture formats (netpbm, ICO, CUR, ICNS, QOI, SGI, DDS, JPEG 2000, AVIF) are said not read by this build (NotYetPorted image_format): a recorded limit"
-  ],
-  "note": "Catalog, library, folders, packs and stamping ported; all_tags() (unused in Python) has no C++ counterpart."
+  "note": "Catalog, library, folders, packs and stamping ported; all_tags() (unused in Python) has no C++ counterpart. Known limit by the user's decision (2026-10-16, README-ja): import_image of Pillow-only picture formats (netpbm, ICO, CUR, ICNS, QOI, SGI, DDS, JPEG 2000, AVIF) are said not read by this build (NotYetPorted image_format): a recorded limit"
  },
  "src/genko/materials/builtin.py": {
   "verdict": "ported",
@@ -1727,7 +1721,7 @@ MODULE_CPP: dict[str, dict] = {
   "note": "Generation requests, prompts and their files."
  },
  "src/genko/studio/importer.py": {
-  "verdict": "partial",
+  "verdict": "covered",
   "cpp": [
    "native/src/service/importer.cpp",
    "native/src/service/importer.hpp"
@@ -1737,10 +1731,7 @@ MODULE_CPP: dict[str, dict] = {
    "native/tests/unit/test_service.cpp",
    "native/tests/e2e/test_mcp_api_e2e.cpp"
   ],
-  "missing": [
-   "importing pictures in Pillow-only picture formats (netpbm, ICO, CUR, ICNS, QOI, SGI, DDS, JPEG 2000, AVIF) are said not read by this build (NotYetPorted image_format): a recorded limit"
-  ],
-  "note": "PNG/JPEG/GIF/BMP/WebP/TIFF/PSD candidates imported with Python's checks."
+  "note": "PNG/JPEG/GIF/BMP/WebP/TIFF/PSD candidates imported with Python's checks. Known limit by the user's decision (2026-10-16, README-ja): importing pictures in Pillow-only picture formats (netpbm, ICO, CUR, ICNS, QOI, SGI, DDS, JPEG 2000, AVIF) are said not read by this build (NotYetPorted image_format): a recorded limit"
  },
  "src/genko/studio/issues.py": {
   "verdict": "ported",

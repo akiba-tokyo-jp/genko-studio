@@ -5580,7 +5580,7 @@
    ],
    "status": "ported",
    "cpp": "native/src/app/main_window_actions.cpp:380",
-   "cpp_test": "native/tests/gui/test_gui_carried.cpp:332"
+   "cpp_test": "native/tests/gui/test_gui_carried.cpp:333"
   },
   {
    "id": "gui:act_help_guide",
@@ -5596,7 +5596,7 @@
    ],
    "status": "ported",
    "cpp": "native/src/app/main_window_actions.cpp:381",
-   "cpp_test": "native/tests/gui/test_gui_carried.cpp:326"
+   "cpp_test": "native/tests/gui/test_gui_carried.cpp:327"
   },
   {
    "id": "gui:act_help_faq",
@@ -5612,7 +5612,7 @@
    ],
    "status": "ported",
    "cpp": "native/src/app/main_window_actions.cpp:382",
-   "cpp_test": "native/tests/gui/test_gui_carried.cpp:329"
+   "cpp_test": "native/tests/gui/test_gui_carried.cpp:330"
   },
   {
    "id": "gui:act_about",
@@ -5628,7 +5628,7 @@
    ],
    "status": "ported",
    "cpp": "native/src/app/main_window_actions.cpp:383",
-   "cpp_test": "native/tests/gui/test_gui_carried.cpp:337"
+   "cpp_test": "native/tests/gui/test_gui_carried.cpp:338"
   },
   {
    "id": "gui:act_history",
@@ -7868,7 +7868,7 @@
    ],
    "status": "ported",
    "cpp": "native/src/app/main_window_actions.cpp:498",
-   "cpp_test": "native/tests/gui/test_gui_carried.cpp:259"
+   "cpp_test": "native/tests/gui/test_gui_carried.cpp:260"
   },
   {
    "id": "gui:act_no_border",
@@ -8220,7 +8220,7 @@
    ],
    "status": "ported",
    "cpp": "native/src/app/main_window_actions.cpp:493",
-   "cpp_test": "native/tests/gui/test_gui_carried.cpp:374"
+   "cpp_test": "native/tests/gui/test_gui_carried.cpp:375"
   },
   {
    "id": "gui:act_timeline",
@@ -8730,7 +8730,7 @@
    ],
    "status": "ported",
    "cpp": "native/src/app/main_window.hpp:305",
-   "cpp_test": "native/tests/gui/test_gui_workspace.cpp:430"
+   "cpp_test": "native/tests/gui/test_gui_workspace.cpp:431"
   },
   {
    "id": "module:__init__",
@@ -8762,7 +8762,7 @@
    "acceptance": [
     "AC-PARITY"
    ],
-   "status": "in_progress",
+   "status": "ported",
    "cpp": [
     "native/src/api/cli.cpp",
     "native/src/api/main.cpp",
@@ -8774,10 +8774,7 @@
     "native/tests/contract/test_contract_render_cli.cpp",
     "native/tests/e2e/test_cli_e2e.cpp"
    ],
-   "missing": [
-    "`genko render --out` in a format Pillow writes and this build does not (GIF, ICO, PPM, TGA, JPEG 2000 ...): NotYetPorted format:<ext>; PNG, JPEG, TIFF, PDF, WebP, BMP and DIB are written"
-   ],
-   "note": "Every argparse subcommand (new, export, inspect, apply, render, schema, serve, undo, redo, gc, doctor, token, app, register-links, studio, mcp) is dispatched by api/cli.cpp / api/main.cpp."
+   "note": "Every argparse subcommand (new, export, inspect, apply, render, schema, serve, undo, redo, gc, doctor, token, app, register-links, studio, mcp) is dispatched by api/cli.cpp / api/main.cpp. Known limit by the user's decision (2026-10-16, README-ja): `genko render --out` in a format Pillow writes and this build does not (GIF, ICO, PPM, TGA, JPEG 2000 ...): NotYetPorted format:<ext>; PNG, JPEG, TIFF, PDF, WebP, BMP and DIB are written"
   },
   {
    "id": "module:abr",
@@ -10267,7 +10264,7 @@
    "acceptance": [
     "AC-PARITY"
    ],
-   "status": "in_progress",
+   "status": "ported",
    "cpp": [
     "native/src/render/materials.cpp",
     "native/src/render/materials.hpp",
@@ -10276,10 +10273,7 @@
     "native/tests/gui/test_gui_materials.cpp",
     "native/tests/unit/test_material_stamp.cpp"
    ],
-   "missing": [
-    "import_image of Pillow-only picture formats (netpbm, ICO, CUR, ICNS, QOI, SGI, DDS, JPEG 2000, AVIF) are said not read by this build (NotYetPorted image_format): a recorded limit"
-   ],
-   "note": "Catalog, library, folders, packs and stamping ported; all_tags() (unused in Python) has no C++ counterpart."
+   "note": "Catalog, library, folders, packs and stamping ported; all_tags() (unused in Python) has no C++ counterpart. Known limit by the user's decision (2026-10-16, README-ja): import_image of Pillow-only picture formats (netpbm, ICO, CUR, ICNS, QOI, SGI, DDS, JPEG 2000, AVIF) are said not read by this build (NotYetPorted image_format): a recorded limit"
   },
   {
    "id": "module:materials/builtin",
@@ -11049,7 +11043,7 @@
    "acceptance": [
     "AC-PARITY"
    ],
-   "status": "in_progress",
+   "status": "ported",
    "cpp": [
     "native/src/service/importer.cpp",
     "native/src/service/importer.hpp",
@@ -11057,10 +11051,7 @@
     "native/tests/e2e/test_mcp_api_e2e.cpp",
     "native/tests/unit/test_service.cpp"
    ],
-   "missing": [
-    "importing pictures in Pillow-only picture formats (netpbm, ICO, CUR, ICNS, QOI, SGI, DDS, JPEG 2000, AVIF) are said not read by this build (NotYetPorted image_format): a recorded limit"
-   ],
-   "note": "PNG/JPEG/GIF/BMP/WebP/TIFF/PSD candidates imported with Python's checks."
+   "note": "PNG/JPEG/GIF/BMP/WebP/TIFF/PSD candidates imported with Python's checks. Known limit by the user's decision (2026-10-16, README-ja): importing pictures in Pillow-only picture formats (netpbm, ICO, CUR, ICNS, QOI, SGI, DDS, JPEG 2000, AVIF) are said not read by this build (NotYetPorted image_format): a recorded limit"
   },
   {
    "id": "module:studio/issues",

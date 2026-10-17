@@ -322,6 +322,8 @@ signals:
     void toolHeld(const QString& tool);
     void omittedChanged(const QStringList& elements);
     void renderFailed(const QString& message);
+    // the pointer over the page with no button down (mm): the status bar's values there (color-model@1)
+    void pointerOver(double x_mm, double y_mm);
     // the selection: a new area and how it joins (replace | add | subtract | intersect); the selection pen's line
     // (true: add, false: take away); auto-select and colour-select asked at a point; the chosen area moved, scaled,
     // turned or slanted ([a, b, c, d, e, f]) or pulled freely ({perspective | mesh: points, grid?})

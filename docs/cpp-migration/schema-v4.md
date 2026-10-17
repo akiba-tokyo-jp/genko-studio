@@ -50,6 +50,8 @@ v3 から外すもの: なし（未知キーも `extra` として書き戻す）
 | `psd-text@1` | M4 | PSD の編集可能文字の出力設定（原稿側の保存項目がある場合のみ） |
 | `native.color_raster_v1` / `native.color_raster_tiles_v1` | M3 | 高精度カラー画素とそのタイル保存（下の節） |
 | `color-mode@1` | CMYK/Lab | ページごとの色モード（CMYK・Lab、8/16 bit、埋め込んだ ICC、色の表、GKIR の画素）。COLOR-02（末尾の「色モード」） |
+| `color-model@1` | PC1a・PC1b・PC1d | 色モデル: RGB のプロファイル・精度（8/16/32 bit）・黒点補正、グレースケール、32 bit の CMYK・Lab・グレー（GKIR 版 2）、高精度の画素の `space`、本の文字のガンマ（`text_gamma`、PC1b）、インデックスカラー・2 階調・ダブルトーン・マルチチャンネル（GKIR の Multichannel、PC1d）。COLOR-03（末尾の「色モデル」） |
+| `channels@1` | PC1c | ページの `channels`（アルファ・特色チャンネル。GKIR 版 2 の Mask の画素）。COLOR-03（末尾の「チャンネル」） |
 
 拡張を使う op が初めて適用されたときに `features` へ加える。拡張を使わない原稿は `features: []`。
 
@@ -137,7 +139,7 @@ v3 の行（`rev`・`actor`・`at`・`changes`・`via`）をそのまま残し�
 
 層の `color_raster` は straight sRGB の RGBA16（u16）または RGBA32F（f32、HDR可）で、ページ全面に引き伸ばして表示する。資産は GKCR（`"GKCR"`、版1、標本バイト数2/4、予約0、LE幅・高さ、LE標本）で拡張子 `.colorrgba`。
 
-- 保存は256px角のタイル単位（M3①-1）: `{"tiles": [ref…（行ごと）], "tile": 256, "width", "height", "precision", "space": "srgb", "alpha": "straight"}`。各タイルはそれ自体がGKCR資産で、内容アドレスのため変更のないタイルは共有される。一部を描き替えた保存は触れたタイルだけを増やす（履歴が全面の複製で膨らまない）。`features` に `native.color_raster_tiles_v1` を加える。
+- 保存は256px角のタイル単位（M3①-1）: `{"tiles": [ref…（行ごと）], "tile": 256, "width", "height", "precision", "space": "srgb", "alpha": "straight"}`。`space` は画素の色空間: `"srgb"`、またはプロファイル付きの RGB のページ（color-model@1）ではそのプロファイルの参照 `"sha256:…"`（画素はそのプロファイルの符号化した値）。ページの空間と違えば読み取り専用。本の高精度の画素は合わせて 1 GiB まで（color-model@1 から。前は 256 MiB）。各タイルはそれ自体がGKCR資産で、内容アドレスのため変更のないタイルは共有される。一部を描き替えた保存は触れたタイルだけを増やす（履歴が全面の複製で膨らまない）。`features` に `native.color_raster_tiles_v1` を加える。
 - 旧形式 `{"asset": ref, …}`（全面1資産）も読む。
 - 消しゴム・範囲削除・移動/変形/ワープ・貼り付け、ペン・塗り・グラデーション等の描込み、マスク（表示・結合）は画素の精度のまま行う（`render/color_edit`）。道具の届かない画素はバイト不変。描込みは層に線・塗りを残さず画素へ焼き込む。
 
@@ -262,3 +264,38 @@ v3 の行（`rev`・`actor`・`at`・`changes`・`via`）をそのまま残し�
   - 標本の意味: CMYK は 0 がインキなし、最大値が 100%。Lab は ICC の符号化（8 bit: L×255/100、a+128、b+128。16 bit: L×65535/100、(a+128)×257、(b+128)×257。四捨五入）。白色点は D50。
 - 要素の色: 線・塗り・グラデーション・文字・フキダシ・枠線・効果線・トーン・紙の色などは、どのページでも今までどおり RGB で持つ（op も同じ）。CMYK・Lab のページでは描くときに次の順でインキに当てる: (1) そのページの `inks`、(2) Genko の既定の墨（RGB の灰色 0・10・15・20）は CMYK で K 100%・Lab で L 0、白（255）はインキなし・L 100、(3) ほかの灰色（r = g = b）は CMYK で K だけ（K = 1 − v/255）、Lab で a = b = 0（L は sRGB から D50 の Lab へ変換した値）、(4) それ以外の色は sRGB からページのプロファイル（Lab は D50 の Lab）へ、ページの `intent`・黒点補正で変換。高精度の線の色（`color_rgb`）は RGB のページの精度で、CMYK・Lab のページでは線の `rgb`（8 bit）にこの規則を当てる（インキの精度は色の表とプロファイルが決める）。
 - `features` に `color-mode@1` を加える（ページか本に `color` があるとき）。
+
+## 色モデル（color-model@1。RGB のプロファイル・グレー・32 bit・特別な色モード、COLOR-03）
+
+色モード（color-mode@1）を広げる。C++ 版だけの機能。色モデルの無いページ（RGB・8 bit・sRGB）は今までどおりで、形式も画素も変わらない。
+
+- ページと本の `color`（color-mode@1 と同じ場所）は次のどれか。無い、または `null` は RGB・8 bit・sRGB。
+  - RGB: `{"mode": "rgb", "depth": 8|16|32, "profile": "sha256:<64>"?, "intent": …, "bpc": false?}`。`profile` は sRGB 以外のときだけ（RGB のマトリックス・シェーパーの ICC。素材 `.icc`）。`bpc`（黒点補正）は false のときだけ書く（既定 true）。色の表は持たない。8 bit・sRGB・`"relative"`・黒点補正ありは書かない（色モデル無し）。その形を書いたもの（`{"mode": "rgb", "depth": 8, "intent": "relative"}`）は書き手の形でないので、`"bpc": true` と同じく読み取り専用で開く（保存で黙って消さない）。
+  - グレー: `{"mode": "gray", "depth": 8|16|32, "profile": "sha256:<64>", "intent": …, "bpc": false?, "inks": […]}`。`profile` は必須（グレーの ICC）。色の表のインキは `[k]`（0..1、墨の割合。明るさは 1 − k）。
+  - CMYK・Lab: color-mode@1 のまま。`depth` に 32 を加え、`bpc` を同じく加える。
+  - インデックスカラー（PC1d）: `{"mode": "indexed", "depth": 8, "intent": …, "bpc": false?, "table": {"colors": [[r, g, b], …], "transparent": 番号|null}}`。RGB の系（ページの `rgb`）で、精度は 8 だけ、`profile` は書かない（sRGB）。`colors` は 1〜256 色（0..255 の整数）、`transparent` は表の番号か null（いつも書く）。`table` のキーはこの 2 つだけ。
+  - 2 階調（PC1d）: `{"mode": "bitmap", "depth": 8, "profile": "sha256:<64>", "intent": …, "bpc": false?, "inks": […], "bitmap": {"method": "threshold"|"pattern"|"diffusion"|"halftone", "frequency": 1..999, "angle": -180..180, "shape": "round"|"ellipse"|"line"|"square"|"diamond"|"cross"}}`。グレーの系（`profile` はグレーの ICC で必須）、精度は 8 だけ。`bitmap` は作ったときの記録（描き方は変えない）。
+  - ダブルトーン（PC1d）: `{"mode": "duotone", "depth": 8|16|32, "profile": "sha256:<64>", "intent": …, "bpc": false?, "inks": […], "duotone": [{"name": 1〜64 字, "color": [r, g, b], "curve": [[in, out], …]}, …]}`。グレーの系。インキは 1〜4 つ、曲線は 2〜13 点（`in` は 0..100 の狭義増加、`out` は 0..100）。
+  - マルチチャンネル（PC1d）: `{"mode": "multichannel", "depth": 8|16|32, "profile": "sha256:<64>"?, "intent": …, "bpc": false?, "inks": […], "plates": [{"name": 1〜64 字, "color": [r, g, b], "solidity": 0..1, "key": true?, "curve": [[in, out], …]?}, …], "from": "rgb"|"cmyk"|"lab"|"gray"|"duotone"}`。版は 1〜32（名前はページの中で一つ。`key`（灰色の要素を置く版）は true のときだけ書く、`curve` はダブルトーンから作った版のその曲線）。`from` は作った元のモード（要素の色の当て方）で、`profile` は `from` が cmyk（CMYK の ICC）・gray・duotone（グレーの ICC）のとき必須、rgb・lab のときは書かない。色の表のインキの値は版の数だけ（濃度 0..1）。色相・彩度・カラー・輝度の描画モードの層は版で合成できないので、それを持つマルチチャンネルのページは読み取り専用。
+  - キーはこの順で書く（`mode, depth, profile, intent, bpc, inks, table, bitmap, duotone, plates, from`。読むときは順を問わない）。未知のキー・そのモードに無いキー（グレーの `bitmap` など）・範囲外の値・色空間の違うプロファイル（RGB のページにグレーの ICC など）は読み取り専用で開く（別のプロファイルで描かない）。プロファイルの素材は color-mode@1 と同じく照合する（内蔵のプロファイルも素材として持つ）。
+- 層の画素:
+  - RGB のページの画素レイヤーは、8 bit なら `raster_png`、16・32 bit なら高精度の画素（`color_raster`。u16・f32）。プロファイル付きのページでは画素はそのプロファイルの値（`space` が参照）。`raster_png` は層の種類（画素レイヤー・v2 の線の層のラスター・消しゴムを掛けたトーンなど）によらず、プロファイル付きのページではいつもそのプロファイルの値。精度はページの `depth` と同じでなくてもよい（16 bit のページの 8 bit の PNG など）。
+  - グレー・CMYK・Lab のページは `ink_raster`（GKIR）。そのページの色空間と精度の画素だけを持つ。
+  - インデックスのページは 8 bit の `raster_png` だけ（印刷する画素レイヤーの見える画素の色は表の色に寄せる: op の後で。ネーム・下描きの層は印刷しないので元の色のまま持ち、表示の写像で表の色に見える）。2 階調・ダブルトーンのページはグレーの GKIR（2 階調は 8 bit。印刷する画素レイヤーは標本と α が 0・255 だけ、ネーム・下描きの層は元の値のまま）。インデックスのページの層は高精度の画素（`color_raster`）を持たない（あれば読み取り専用）。マルチチャンネルのページは GKIR の Multichannel（版の数はページの `plates` の数）。
+- GKIR 版 2（版 1 が持てない画素だけ。版 1 が持てる CMYK・Lab の 8・16 bit はいつも版 1 で書く: 同じ画素はいつも同じバイト）: `"GKIR"`、版 2（u8）、色空間（u8。3 = グレー、4 = マルチチャンネル（PC1d）、ほかは版 1 と同じ 1 = CMYK・2 = Lab）、精度（u8。8・16・32）、色の版の数（u8。グレー 1、CMYK 4、Lab 3、マルチチャンネル 1〜32）、幅・高さ（u32 LE）、zlib の流れ（版 1 と同じ: 行ごとに PNG の行フィルターの種類と標本）。標本は色の版の後にアルファ（straight）。16 bit は big-endian、32 bit は IEEE 754 binary32 の big-endian。32 bit の値は有限で、0..1（グレーの明るさだけは HDR として 0..1 の外も持てる）。グレーの標本は明るさ（0 が黒）。マルチチャンネルの標本は版ごとの濃度（0 = インキなし、最大値 = インキ 100%）。
+- 要素の色: マルチチャンネルのページは ページの `inks` → 灰色（Genko の墨は濃度 1）は `key` の版（曲線があれば通す）→ ほかの色は `from` のモードの規則（rgb は 1 − 値、cmyk はプロファイル、lab は D50、gray・duotone はプロファイルの灰色を `key` の版に）。インデックスのページは RGB と同じに描いて表の最も近い色、2 階調はグレーと同じに描いて 50% で 2 値、ダブルトーンはグレーの規則（PC1d）。グレーのページは color-mode@1 の規則で当てる（ページの `inks` → Genko の既定の墨（灰色 0・10・15・20）は明るさ 0 → ほかの灰色 v は明るさ v/255（白は 1。ページのプロファイルによらず、CMYK の K だけと同じ考え） → ほかの色は sRGB からページのプロファイルへ、意図・黒点補正）。プロファイル付きの RGB のページは、要素の sRGB の色をページの意図・黒点補正でそのプロファイルへ変換して描く（sRGB のちょうどの白と黒はページの白と黒）。
+- 本の文字のガンマ（PC1b。カラー設定の「文字の色をガンマで混ぜる」、PhotoCraft の blendTextGamma）: 本の `color` の最後のキー `"text_gamma": 数`（1 より大きく 2.2 以下）。台詞・文字の字のふちを、下の色とこのガンマで混ぜて描く（((1 − a)·下^g + a·字^g)^(1/g)）。本に持つので、アプリ・コマンドライン・MCP・書き出しで同じ画素になる（機械の設定では変わらない）。無いときは今までどおり（Python 版と同じ画素）。本の色モデルが既定（RGB・8 bit・sRGB）でも、このキーのために `{"mode": "rgb", "depth": 8, "intent": "relative", "text_gamma": …}` を書く（読むときは `text_gamma` を外して残りを本の色モデルとして読む）。ページの `color` にあるとき・範囲外・数でないときは読み取り専用。op は C++ 版だけの `set_text_gamma`（COLOR-03）。
+- `features` に `color-model@1` を加える（ページか本に RGB のモード・グレー・32 bit・`bpc: false`・インデックスカラー・2 階調・ダブルトーン・マルチチャンネルのどれかがあるとき。GKIR 版 2 の素材を持つときも。本に `text_gamma` があるときも）。`color-mode@1` も一緒に書く（ページの `color` の場所が同じため）。color-model@1 を知らない読み手は、未知の拡張として読み取り専用で開く。
+
+## チャンネル（channels@1。アルファ・特色チャンネル、COLOR-03）
+
+ページごとのアルファチャンネルと特色チャンネル。C++ 版だけの機能。チャンネルの無いページは今までどおりで、形式も画素も変わらない。
+
+- ページの `channels`（無い、または空はチャンネル無し。空なら書かない）: パネルの順のリスト（1 ページ 50 個まで）。
+  - アルファ: `{"id": "ch_<12 桁の 16 進>", "name": "Alpha 1", "kind": "alpha", "raster": "sha256:<64>"|null, "color": [r, g, b], "opacity": 0..1, "indicates": "masked"|"selected"}`。`color`（0..255 の整数）は重ねて見せる色（sRGB）、`opacity` はその不透明度、`indicates` は色を付ける所（`masked`: 選ばれていない所、`selected`: 選ばれた所）。
+  - 特色: `{"id", "name", "kind": "spot", "raster", "color": [r, g, b], "solidity": 0..1}`。`color` はインキの画面での見え方（sRGB）、`solidity` はインキの濃度（0 透明・1 不透明）。
+  - キーは種類のものだけ、この順で書く（読むときは順を問わない）。`id` はページの中で一つ。`name` は 1〜64 字、前後に空白が無く、ページの中で一つ。未知のキー・範囲外の値・重なりは読み取り専用で開く（そのまま書き戻す）。
+  - `raster`: チャンネルの画素の素材（`assets/<ab>/<64>.gkir`）。`null` は全部 0（何も選ばれていない・インキなし）。GKIR 版 2 の Mask（色空間 5、色の版の数 1、アルファ無し）で、精度はページの深度（色モデルの `depth`。無ければ 8）。標本は濃度（0 = 選ばれていない・インキなし、最大値 = 選ばれた・インキ 100%。32 bit は 0..1 の float）。ページ全面に引き伸ばす（作るときの解像度はアルファ 200 dpi、特色は原稿の dpi。ほかの大きさも読む。画素の op で描いても解像度は変わらない: op には 200 dpi で貸し、変えた画素だけをチャンネルの解像度へ戻すので、変わらない画素の標本はそのまま）。ページの深度と違う精度・Mask でない画素は読み取り専用。
+- 保存しないもの: 描く先のチャンネル、目（見せる・隠す）、重ねの表示（ウィンドウの状態）。
+- 選択範囲をストック（`saved_areas`、Python のもの）は今までの形のまま（チャンネルではない）。
+- `features` に `channels@1` を加える（チャンネルを持つページがあるとき。無くなれば外す）。channels@1 を知らない読み手は、未知の拡張として読み取り専用で開く。

@@ -30,6 +30,7 @@
 #include "app/icons.hpp"
 #include "app/layer_dialogs.hpp"
 #include "app/main_window.hpp"
+#include "app/preferences.hpp"
 #include "app/theme.hpp"
 #include "app/comfort.hpp"
 #include "service/wording.hpp"
@@ -374,6 +375,7 @@ void LayerPanel::edit_mask(bool on) {
 
 void LayerPanel::refresh_look() {
     marks_.clear();
+    thumbs_.clear();  // (環境設定's 透明部分: the pictures drawn over the checker again)
     refresh();
 }
 
@@ -455,11 +457,24 @@ QIcon LayerPanel::thumbnail(const core::Page& page, const core::Layer& layer) {
     QIcon icon;
     try {
         const render::Image image = render::layer_image(page, layer, 10, &window_->book(), true);
-        render::Image paper = render::Image::create("RGBA", image.size(), render::Ink{255, 255, 255, 255});
-        paper = render::alpha_composite(paper, image.convert("RGBA"));
-        const std::string bytes = paper.convert("RGB").tobytes();
-        const QImage picture(reinterpret_cast<const uchar*>(bytes.data()), paper.width(), paper.height(), paper.width() * 3, QImage::Format_RGB888);
-        icon = QIcon(QPixmap::fromImage(picture.copy()));
+        const preferences::Checker checker = preferences::checker();
+        if (checker.square <= 0) {  // (no checker: on white)
+            render::Image paper = render::Image::create("RGBA", image.size(), render::Ink{255, 255, 255, 255});
+            paper = render::alpha_composite(paper, image.convert("RGBA"));
+            const std::string bytes = paper.convert("RGB").tobytes();
+            const QImage picture(reinterpret_cast<const uchar*>(bytes.data()), paper.width(), paper.height(), paper.width() * 3, QImage::Format_RGB888);
+            icon = QIcon(QPixmap::fromImage(picture.copy()));
+        } else {  // (環境設定 → 透明部分・色域: the transparent parts over the checker)
+            const render::Image rgba = image.convert("RGBA");
+            const std::string bytes = rgba.tobytes();
+            const QImage layer_picture(reinterpret_cast<const uchar*>(bytes.data()), rgba.width(), rgba.height(), rgba.width() * 4, QImage::Format_RGBA8888);
+            QImage picture(rgba.width(), rgba.height(), QImage::Format_RGB32);
+            preferences::paint_checker(picture, checker);
+            QPainter painter(&picture);
+            painter.drawImage(0, 0, layer_picture);
+            painter.end();
+            icon = QIcon(QPixmap::fromImage(picture));
+        }
     } catch (const std::exception&) {
         return {};
     }

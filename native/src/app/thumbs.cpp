@@ -14,6 +14,7 @@
 
 #include "app/config.hpp"
 #include "app/frame_tools.hpp"
+#include "core/channels.hpp"
 #include "core/json.hpp"
 #include "core/paths.hpp"
 #include "core/strokes.hpp"
@@ -65,6 +66,8 @@ std::string page_fingerprint(const core::Document& doc, const core::Page& page) 
     Hasher h;
     h.add(storage::spec_to_json(page.spec));
     if (page.color) h.add(core::to_json(*page.color));  // (color-mode@1)
+    if (page.rgb) h.add(core::to_json(*page.rgb));      // (color-model@1: its RGB profile and depth)
+    if (doc.text_gamma) h.add(Json{{"text_gamma", *doc.text_gamma}});  // (the book's: the letters mixed in it)
     h.add(core::to_string(page.binding));
     for (const core::Frame& frame : page.frames) h.add(frame_tree(frame));
     for (const auto& [role, rgb] : page.fills) {
@@ -80,6 +83,12 @@ std::string page_fingerprint(const core::Document& doc, const core::Page& page) 
     h.add(page.prims);
     h.add(Json(page.numero));
     h.add(page.onion_from ? page.onion_from->json() : Json(nullptr));
+    for (const core::Channel& channel : page.channels) {  // (channels@1: the spots printed over the page; each one's look and pixels)
+        Json look = core::to_json(channel, std::string());
+        look.erase("raster");
+        h.add(look);
+        h.add_bytes(channel.raster, &channel.memo);
+    }
     for (const core::Layer& layer : page.layers) {
         Json look = Json::object();
         look["id"] = layer.id;

@@ -10,6 +10,7 @@
 #include <utility>
 #include <vector>
 
+#include "core/color_model.hpp"
 #include "core/ink.hpp"
 
 class QCheckBox;
@@ -132,6 +133,9 @@ public:
     // color-mode@1: the page's colour mode (none: an RGB page). On a CMYK or Lab page the colour's inks are shown and can
     // be chosen (インキ), and an RGB colour the page cannot print as it is gets a mark (色域外).
     void set_page_color(const std::optional<core::PageColor>& color);
+    // color-model@1 (PC1d): an indexed page's table (none: another page). The colour's index in it and the colour it is
+    // shown as (the nearest) are shown.
+    void set_color_table(const std::optional<core::ColorTable>& table);
 
     const std::vector<Rgb>& history() const { return history_; }
     const std::array<Rgb, 4>& corners() const { return corners_; }
@@ -157,6 +161,7 @@ public:
     std::array<QDoubleSpinBox*, 4> ink_spins{};    // C M Y K in %, or L a b
     std::array<QLabel*, 4> ink_labels{};
     QLabel* gamut = nullptr;
+    QLabel* table_index = nullptr;  // (an indexed page: the colour's index in its table)
 
 signals:
     // スポイト: where the picker takes its colour ("view" | "layer").
@@ -181,6 +186,8 @@ private:
 
     BrushPanel* brush_ = nullptr;
     std::optional<core::PageColor> page_color_;
+    std::optional<core::ColorTable> table_;  // (an indexed page's)
+    void show_table(const Rgb& rgb);
     bool inks_edited_ = false;  // (an ink value changed by the user since it was shown)
     bool loading_ = false;
     Rgb sub_rgb_{255, 255, 255};

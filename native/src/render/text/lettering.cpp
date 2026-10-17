@@ -18,6 +18,7 @@
 #include "core/pyops.hpp"
 #include "core/ruby.hpp"
 #include "render/draw.hpp"
+#include "render/imaging.hpp"
 #include "render/not_yet_ported.hpp"
 #include "render/png.hpp"
 #include "render/text/fonts.hpp"
@@ -1572,10 +1573,52 @@ void path_text(Image& image, const core::StoryLine& line, int dpi, const std::op
         }
         const Image turned = cell.rotate(-angle, Resample::Bicubic, false,
                                          std::pair<double, double>{static_cast<double>(cell.width()) / 2, static_cast<double>(cell.height()) / 2});
-        image.paste(turned,
-                    Point{static_cast<int>(core::py_round_int(x - static_cast<double>(turned.width()) / 2) - origin.x),
-                          static_cast<int>(core::py_round_int(y - static_cast<double>(turned.height()) / 2) - origin.y)},
-                    &turned);
+        const Point to{static_cast<int>(core::py_round_int(x - static_cast<double>(turned.width()) / 2) - origin.x),
+                       static_cast<int>(core::py_round_int(y - static_cast<double>(turned.height()) / 2) - origin.y)};
+        if (const auto gamma = TextGamma::current()) paste_in_gamma(image, turned, to, *gamma);
+        else image.paste(turned, to, &turned);
+    }
+}
+
+namespace {
+thread_local std::optional<double> text_gamma_now;
+}  // namespace
+
+TextGamma::TextGamma(std::optional<double> gamma) : was_(text_gamma_now) { text_gamma_now = gamma; }
+TextGamma::~TextGamma() { text_gamma_now = was_; }
+std::optional<double> TextGamma::current() { return text_gamma_now; }
+
+void paste_in_gamma(Image& image, const Image& letters, Point at, double gamma) {
+    const bool rgba = image.mode() == "RGBA";
+    if ((!rgba && image.mode() != "RGB") || letters.mode() != "RGBA" || !(gamma > 1.0)) {
+        image.paste(letters, at, &letters);
+        return;
+    }
+    const float g = static_cast<float>(gamma);
+    std::array<float, 256> power{};  // (v / 255)^g
+    for (int v = 0; v < 256; ++v) power[static_cast<std::size_t>(v)] = std::pow(static_cast<float>(v) / 255.0f, g);
+    const int x0 = std::max(0, at.x), y0 = std::max(0, at.y);
+    const int x1 = std::min(image.width(), at.x + letters.width()), y1 = std::min(image.height(), at.y + letters.height());
+    const auto byte = [](float v) { return static_cast<unsigned char>(std::lround(std::clamp(v, 0.0f, 1.0f) * 255.0f)); };
+    for (int y = y0; y < y1; ++y) {
+        auto* row = reinterpret_cast<unsigned char*>(image.raw()->image[y]);
+        const auto* from = reinterpret_cast<const unsigned char*>(letters.raw()->image[y - at.y]);
+        for (int x = x0; x < x1; ++x) {
+            const unsigned char* s = from + static_cast<std::size_t>(x - at.x) * 4;
+            unsigned char* d = row + static_cast<std::size_t>(x) * 4;
+            const unsigned a8 = s[3];
+            if (a8 == 0) continue;
+            const float as = static_cast<float>(a8) / 255.0f;
+            const float ab = rgba ? static_cast<float>(d[3]) / 255.0f : 1.0f;
+            const float ao = as + ab * (1.0f - as);
+            if (ao <= 0.0f) continue;
+            const float wb = (1.0f - as) * ab / ao, ws = as / ao;
+            for (int c = 0; c < 3; ++c) {
+                const float mixed = wb * power[d[c]] + ws * power[s[c]];
+                d[c] = byte(std::pow(mixed, 1.0f / g));
+            }
+            if (rgba) d[3] = byte(ao);
+        }
     }
 }
 
@@ -1623,7 +1666,8 @@ void paint_text(Image& image, const core::StoryLine& line, int dpi, bool show_sp
     const auto reaches = [&here](const Box& b) { return b.x0 < here.x1 && here.x0 < b.x1 && b.y0 < here.y1 && here.y0 < b.y1; };
     if (reaches(Box{at_page.x, at_page.y, at_page.x + shape->width, at_page.y + shape->height})) {
         if (!layout) layout = layout_by_key(key, line, dpi, font_path, stop);
-        image.paste(layout->image, Point{at_page.x - origin.x, at_page.y - origin.y}, &layout->image);
+        if (const auto gamma = TextGamma::current()) paste_in_gamma(image, layout->image, Point{at_page.x - origin.x, at_page.y - origin.y}, *gamma);
+        else image.paste(layout->image, Point{at_page.x - origin.x, at_page.y - origin.y}, &layout->image);
     }
     if (show_speaker && !line.speaker.empty() && kind != "none") {
         const std::int64_t size = std::max<std::int64_t>(8, floordiv(shape->em * 2, 3));

@@ -1,5 +1,9 @@
 #include "core/color_raster.hpp"
 #include <algorithm>
+#include <atomic>
+#include <memory>
+#include <mutex>
+#include <unordered_map>
 #include <bit>
 #include <cmath>
 #include <limits>
@@ -58,13 +62,23 @@ std::array<double, 4> ColorRasterView::pixel(std::size_t i) const {
     }
     return out;
 }
-Json ColorRasterView::metadata(std::string_view asset) const {
+std::string color_raster_space_of(const Json& m) {
+    if (!m.is_object() || !m.contains("space") || !m["space"].is_string()) return {};
+    const std::string space = m["space"].get<std::string>();
+    if (space == "srgb") return space;
+    const bool ref = space.size() == 71 && space.compare(0, 7, "sha256:") == 0 &&
+                     std::all_of(space.begin() + 7, space.end(), [](char c) { return (c >= '0' && c <= '9') || (c >= 'a' && c <= 'f'); });
+    return ref ? space : std::string();
+}
+Json ColorRasterView::metadata(std::string_view asset, std::string_view space) const {
     return Json{{"asset", std::string(asset)}, {"width", width_}, {"height", height_},
-                {"precision", sample_bytes_ == 2 ? "u16" : "f32"}, {"space", "srgb"}, {"alpha", "straight"}};
+                {"precision", sample_bytes_ == 2 ? "u16" : "f32"}, {"space", std::string(space)}, {"alpha", "straight"}};
 }
 void ColorRasterView::check_metadata(const Json& m) const {
     if (!m.is_object() || !m.contains("asset") || !m["asset"].is_string()) invalid();
-    const auto expected = metadata(m["asset"].get<std::string>());
+    const std::string space = color_raster_space_of(m);
+    if (space.empty()) invalid();
+    const auto expected = metadata(m["asset"].get<std::string>(), space);
     if (m.size() != expected.size()) invalid();
     // Canonical journal snapshots reorder object keys, not the metadata values.
     for (const auto& [key, value] : expected.items())
@@ -159,8 +173,8 @@ std::string join_color_tiles(std::uint32_t width, std::uint32_t height, std::str
     }
     return out;
 }
-Json tiled_metadata(const ColorRasterView& raster, const std::vector<std::string>& refs) {
-    Json out = raster.metadata("");
+Json tiled_metadata(const ColorRasterView& raster, const std::vector<std::string>& refs, std::string_view space) {
+    Json out = raster.metadata("", space);
     out.erase("asset");
     out["tile"] = kColorTile;
     out["tiles"] = refs;
@@ -173,7 +187,9 @@ void check_tiled_metadata(const ColorRasterView& raster, const Json& m) {
         if (!ref.is_string()) invalid();
         refs.push_back(ref.get<std::string>());
     }
-    const Json expected = tiled_metadata(raster, refs);
+    const std::string space = color_raster_space_of(m);
+    if (space.empty()) invalid();
+    const Json expected = tiled_metadata(raster, refs, space);
     if (m.size() != expected.size()) invalid();
     for (const auto& [key, value] : expected.items())
         if (!m.contains(key) || m[key] != value) invalid();
@@ -212,6 +228,26 @@ bool is_shape_filter(const Layer& layer) {
            std::find(kShapeFilters.begin(), kShapeFilters.end(), it->get<std::string>()) != kShapeFilters.end();
 }
 }  // namespace
+namespace {
+std::atomic<std::uint64_t> raster_checks{0};
+// A precise raster's samples checked (finite, its alpha 0..1): once for its bytes, which never change while they are
+// held — each op keeps the rasters it did not change, so the book's check after it looks at the new ones alone.
+void check_once(const Bytes& raster) {
+    static std::mutex lock;
+    static std::unordered_map<const std::string*, std::weak_ptr<const std::string>> checked;
+    {
+        const std::lock_guard<std::mutex> held(lock);
+        const auto it = checked.find(raster.get());
+        if (it != checked.end() && !it->second.expired()) return;  // (the same bytes, still held: checked)
+    }
+    (void)ColorRasterView(*raster);
+    ++raster_checks;
+    const std::lock_guard<std::mutex> held(lock);
+    if (checked.size() >= 4096) std::erase_if(checked, [](const auto& entry) { return entry.second.expired(); });
+    checked[raster.get()] = raster;
+}
+}  // namespace
+std::uint64_t color_raster_checks() { return raster_checks.load(); }
 void validate_color_document(const Document& doc) {
     std::size_t bytes = 0;
     std::unordered_set<const std::string*> allocations;
@@ -230,7 +266,7 @@ void validate_color_document(const Document& doc) {
                     if (layer.color_raster->size() > kColorRasterBookBytes - bytes)
                         throw Error("value", "high-precision color raster book budget exceeded");
                     bytes += layer.color_raster->size();
-                    (void)ColorRasterView(*layer.color_raster);
+                    check_once(layer.color_raster);
                 }
                 if (layer.kind != LayerKind::Raster || layer.role == LayerRole::Tone || layer.raster_png || layer.stroke_count() || !layer.patches.empty() ||
                     layer.panel_clip || layer.effect || layer.screen || layer.color)

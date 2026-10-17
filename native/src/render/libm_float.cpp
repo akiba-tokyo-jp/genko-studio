@@ -327,4 +327,13 @@ float powf(float x, float y) {
     return static_cast<float>(exp2_inline(ylogx, sign_bias));
 }
 
+float cbrtf(float x) {
+    if (!(x == x) || x == 0.0f || std::isinf(x)) return x;  // (NaN, ±0, ±inf as they are)
+    const double a = std::fabs(static_cast<double>(x));
+    double y = static_cast<double>(powf(static_cast<float>(a), 1.0f / 3.0f));
+    for (int i = 0; i < 3; ++i) y -= (y * y * y - a) / (3.0 * y * y);  // (Newton: float's estimate to double's)
+    const auto r = static_cast<float>(y);
+    return x < 0 ? -r : r;
+}
+
 }  // namespace genko::render::libm

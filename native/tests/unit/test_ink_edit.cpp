@@ -8,7 +8,9 @@
 #include <QtTest>
 
 #include <array>
+#include <cmath>
 #include <cstdint>
+#include <functional>
 #include <random>
 #include <string>
 #include <vector>
@@ -97,6 +99,50 @@ core::Document ink_book() {
     return doc;
 }
 
+// A multichannel page of `n` plates (Cyan, Magenta, Yellow, Black, then more: up to 32; 16 bits; 60 × 80 mm) with a
+// paint layer "pic" at 200 dpi: its top half M (plate k at density (k + 1) / (n + 1)), its bottom left N (plate k at
+// 1 − (k + 1) / (n + 1)), its bottom right clear.
+core::Document multi_book(unsigned n) {
+    core::PageSpec spec;
+    spec.width_mm = core::Num(60);
+    spec.height_mm = core::Num(80);
+    spec.dpi = core::Num(150);
+    spec.bleed_mm = core::Num(3);
+    spec.inner_margin_mm = core::Num(5);
+    core::Document doc = core::new_episode("multi", core::Num(1), 1, spec, core::Binding::Right);
+    doc = run_ops(doc, Json::array({Json{{"op", "add_layer"}, {"page", 1}, {"kind", "paint"}, {"id", "pic"}, {"name", "絵"}}})).doc;
+    core::PageColor color;
+    color.space = core::InkSpace::Multi;
+    color.depth = 16;
+    color.from = "rgb";
+    const std::array<std::pair<const char*, std::array<int, 3>>, 6> named{
+        {{"Cyan", {0, 174, 239}}, {"Magenta", {236, 0, 140}}, {"Yellow", {255, 242, 0}}, {"Black", {35, 31, 32}}, {"Orange", {255, 128, 0}}, {"Green", {0, 160, 80}}}};
+    for (unsigned k = 0; k < n; ++k) {
+        core::Plate plate;
+        plate.name = k < named.size() ? named[k].first : "Plate " + std::to_string(k + 1);
+        plate.color = k < named.size() ? named[k].second : std::array<int, 3>{static_cast<int>(k * 7 % 256), 90, static_cast<int>(255 - k * 5)};
+        plate.key = k < 3;
+        color.plates.push_back(std::move(plate));
+    }
+    doc.edit_page(0).color = color;
+    const std::uint32_t w = static_cast<std::uint32_t>(render::mm_to_px(60, 200)), h = static_cast<std::uint32_t>(render::mm_to_px(80, 200));
+    core::InkPixels p = core::blank_ink_pixels(core::InkSpace::Multi, 16, w, h, n);
+    for (std::uint32_t y = 0; y < h; ++y) {
+        for (std::uint32_t x = 0; x < w; ++x) {
+            const std::size_t i = std::size_t(y) * w + x;
+            if (y >= px(40) && x >= px(30)) continue;
+            for (unsigned k = 0; k < n; ++k) p.set(i, k, y < px(40) ? (k + 1.0) / (n + 1) : 1.0 - (k + 1.0) / (n + 1));
+            p.set(i, n, 1.0);
+        }
+    }
+    for (auto& layer : doc.edit_page(0).layers) {
+        if (layer.id != "pic") continue;
+        layer.ink_raster = std::make_shared<const std::string>(core::encode_ink_raster(p));
+        layer.panel_clip = layer.panel_each = false;
+    }
+    return doc;
+}
+
 // The page is in inks after an op: no RGB pixels left on it, its rasters in its space and depth.
 void all_in_inks(const core::Document& doc) {
     for (const auto& page : doc.pages) {
@@ -159,6 +205,80 @@ private slots:
             }
         }
         QVERIFY(partly > 0);
+    }
+
+    // color-model@1: a grey page of 32 bits (lightness as floats, HDR kept) and a CMYK page of 32 bits: delete_area clears
+    // the area and leaves every other float as it was; transform_area carries what it moves whole (an HDR lightness
+    // too); the eraser lowers the alpha alone.
+    void greyAndFloatPages() {
+        core::Document doc = ink_book();
+        doc = run_ops(doc, Json::array({Json{{"op", "set_color_mode"}, {"mode", "gray"}, {"depth", 32}}})).doc;
+        for (auto& layer : doc.edit_page(0).layers) {  // (an HDR stripe at the top right)
+            if (layer.id != "pic") continue;
+            core::InkPixels p = core::decode_ink_raster(*layer.ink_raster);
+            QVERIFY(p.is_float() && p.space == core::InkSpace::Gray);
+            for (std::uint32_t y = px(5); y < px(25); ++y)
+                for (std::uint32_t x = px(35); x < px(55); ++x) p.set(std::size_t(y) * p.width + x, 0, 2.5);
+            layer.ink_raster = std::make_shared<const std::string>(core::encode_ink_raster(p));
+        }
+        const core::InkPixels before = pixels_of(doc, "pic");
+        const core::Document deleted =
+            run_ops(doc, Json::array({Json{{"op", "delete_area"}, {"page", 1}, {"layer_id", "pic"}, {"area", Json{{"rect", Json::array({0, 0, 20, 20})}}}}})).doc;
+        all_in_inks(deleted);
+        const core::InkPixels got = pixels_of(deleted, "pic");
+        QVERIFY(got.is_float());
+        for (std::uint32_t y = 0; y < got.height; y += 3) {
+            for (std::uint32_t x = 0; x < got.width; x += 3) {
+                const std::size_t i = std::size_t(y) * got.width + x;
+                if (x + 2 < px(20) && y + 2 < px(20)) {
+                    QCOMPARE(got.value(i, 1), 0.0);
+                    QCOMPARE(got.value(i, 0), 1.0);  // (clear: white, as a blank grey raster)
+                } else if (x > px(20) + 2 || y > px(20) + 2) {
+                    QCOMPARE(got.floats[i * 2], before.floats[i * 2]);
+                    QCOMPARE(got.floats[i * 2 + 1], before.floats[i * 2 + 1]);
+                }
+            }
+        }
+        // moved by whole pixels: the HDR lightness carried as it is
+        const core::Document moved =
+            run_ops(doc, Json::array({Json{{"op", "transform_area"}, {"page", 1}, {"layer_id", "pic"}, {"area", Json{{"rect", Json::array({32, 2, 26, 30})}}},
+                                           {"matrix", Json::array({1, 0, 0, 1, -30, 45})}}})).doc;
+        const core::InkPixels shifted = pixels_of(moved, "pic");
+        QCOMPARE(shifted.value(std::size_t(px(60)) * shifted.width + px(15), 0), 2.5);
+        QCOMPARE(shifted.value(std::size_t(px(60)) * shifted.width + px(15), 1), 1.0);
+        // the eraser: the alpha lower, the lightness as it was
+        const core::Document erased = run_ops(doc, Json::array({Json{{"op", "erase_raster"}, {"page", 1}, {"layer_id", "pic"},
+                                                                    {"points", Json::array({Json::array({35, 15}), Json::array({55, 15})})},
+                                                                    {"width_mm", 4}, {"texture", "soft"}}})).doc;
+        const core::InkPixels rubbed = pixels_of(erased, "pic");
+        int partly = 0;
+        for (std::uint32_t y = px(5); y < px(25); ++y) {
+            for (std::uint32_t x = px(35); x < px(55); ++x) {
+                const std::size_t i = std::size_t(y) * rubbed.width + x;
+                if (rubbed.value(i, 1) == 0) continue;
+                QCOMPARE(rubbed.value(i, 0), 2.5);
+                if (rubbed.value(i, 1) < 1) ++partly;
+            }
+        }
+        QVERIFY(partly > 0);
+        // a CMYK page of 32 bits: delete_area leaves the other floats as they were
+        const core::Document cmyk = run_ops(ink_book(), Json::array({Json{{"op", "set_color_mode"}, {"mode", "cmyk"}, {"profile", "coated-cmyk"}, {"depth", 32}}})).doc;
+        const core::InkPixels was = pixels_of(cmyk, "pic");
+        QVERIFY(was.is_float() && was.space == core::InkSpace::Cmyk);
+        const core::InkPixels now = pixels_of(run_ops(cmyk, Json::array({Json{{"op", "delete_area"}, {"page", 1}, {"layer_id", "pic"},
+                                                                              {"area", Json{{"rect", Json::array({0, 0, 20, 20})}}}}})).doc, "pic");
+        const std::size_t far = std::size_t(px(60)) * now.width + px(10);
+        for (unsigned c = 0; c < 5; ++c) QCOMPARE(now.floats[far * 5 + c], was.floats[far * 5 + c]);
+        // an op through the picture the layer shows (smudge) on a grey page of 8 bits: what it did not change keeps its
+        // samples
+        const core::Document grey8 = run_ops(ink_book(), Json::array({Json{{"op", "set_color_mode"}, {"mode", "gray"}}})).doc;
+        const core::Document smudged = run_ops(grey8, Json::array({Json{{"op", "smudge"}, {"page", 1}, {"layer_id", "pic"}, {"mode", "blur"},
+                                                                       {"points", Json::array({Json::array({33, 40}), Json::array({57, 40})})}, {"width_mm", 6}}})).doc;
+        all_in_inks(smudged);
+        const core::InkPixels g0 = pixels_of(grey8, "pic"), g1 = pixels_of(smudged, "pic");
+        const std::size_t corner = std::size_t(px(75)) * g0.width + px(5);
+        QCOMPARE(g1.samples[corner * 2], g0.samples[corner * 2]);
+        QCOMPARE(g1.samples[corner * 2 + 1], g0.samples[corner * 2 + 1]);
     }
 
     // transform_area: what moved keeps its inks (resampled, a colour all over stays that colour).
@@ -485,6 +605,84 @@ private slots:
         core::PageColor lab;
         lab.space = core::InkSpace::Lab;
         QCOMPARE(render::ink::gamut_distance(lab, {0, 255, 0}), 0.0);
+    }
+
+    // Review B, F: a multichannel page of more plates than CMYK's (6, and 32 — the most a page has): what an op moves
+    // (by whole pixels, and resampled bicubic), lends (smudge) or lays on new paper (set_page_spec) keeps every plate's
+    // density; what it does not reach keeps its samples. (Each plate and the alpha were held in arrays of 5 before.)
+    void manyPlatesKeepTheirInks_data() {
+        QTest::addColumn<int>("plates");
+        QTest::newRow("6") << 6;
+        QTest::newRow("32") << 32;
+    }
+    void manyPlatesKeepTheirInks() {
+        QFETCH(int, plates);
+        const unsigned n = static_cast<unsigned>(plates);
+        const core::Document doc = multi_book(n);
+        const core::InkPixels before = pixels_of(doc, "pic");
+        QCOMPARE(before.planes, n);
+        const auto m_at = [&](unsigned k) { return (k + 1.0) / (n + 1); };
+        const auto n_at = [&](unsigned k) { return 1.0 - (k + 1.0) / (n + 1); };
+        // the plates of a pixel (x, y in mm) against a colour, within a sample
+        const auto is = [&](const core::InkPixels& p, double x_mm, double y_mm, const std::function<double(unsigned)>& want, const char* what) {
+            const std::size_t i = std::size_t(px(y_mm)) * p.width + px(x_mm);
+            QCOMPARE(p.planes, n);
+            QVERIFY2(std::abs(p.value(i, n) - 1.0) <= 1.0 / 65535, what);
+            for (unsigned k = 0; k < n; ++k) {
+                QVERIFY2(std::abs(p.value(i, k) - want(k)) <= 1.0 / 65535,
+                         qPrintable(QStringLiteral("%1: plate %2 is %3, not %4").arg(QString::fromLatin1(what)).arg(k).arg(p.value(i, k)).arg(want(k))));
+            }
+        };
+        // moved resampled (a fraction of a pixel: bicubic): the colour all over stays the colour, where it was clear
+        const core::Document resampled =
+            run_ops(doc, Json::array({Json{{"op", "transform_area"}, {"page", 1}, {"layer_id", "pic"}, {"area", Json{{"rect", Json::array({5, 5, 50, 30})}}},
+                                           {"matrix", Json::array({1, 0, 0, 1, 0.37, 40.29})}, {"interp", "bicubic"}}})).doc;
+        all_in_inks(resampled);
+        const core::InkPixels r = pixels_of(resampled, "pic");
+        is(r, 45, 60, m_at, "moved resampled");
+        QCOMPARE(r.value(std::size_t(px(20)) * r.width + px(30), n), 0.0);  // (where it was: clear)
+        is(r, 2, 2, m_at, "not reached");
+        // moved by whole pixels (200 px = 25.4 mm) over N: inside, M as it was; at its edges (part of a pixel covered) M
+        // mixed over N plate by plate
+        const core::Document whole =
+            run_ops(doc, Json::array({Json{{"op", "transform_area"}, {"page", 1}, {"layer_id", "pic"}, {"area", Json{{"rect", Json::array({5.1, 5.1, 20, 30})}}},
+                                           {"matrix", Json::array({1, 0, 0, 1, 0, 25.4})}}})).doc;
+        const core::InkPixels wp = pixels_of(whole, "pic");
+        is(wp, 15, 50, m_at, "moved whole");
+        const std::size_t edge = std::size_t(px(50)) * wp.width + std::size_t(std::floor(5.1 * 200 / 25.4));  // (its left edge: part covered)
+        for (unsigned k = 0; k < n; ++k) {
+            const double v = wp.value(edge, k);
+            QVERIFY2(v >= std::min(m_at(k), n_at(k)) - 1e-4 && v <= std::max(m_at(k), n_at(k)) + 1e-4, qPrintable(QStringLiteral("edge plate %1: %2").arg(k).arg(v)));
+        }
+        // lent (smudge works the picture the layer shows): what it did not reach keeps every plate's sample
+        const core::Document smudged = run_ops(doc, Json::array({Json{{"op", "smudge"}, {"page", 1}, {"layer_id", "pic"}, {"mode", "blur"},
+                                                                     {"points", Json::array({Json::array({10, 38}), Json::array({25, 42})})}, {"width_mm", 4}}})).doc;
+        all_in_inks(smudged);
+        const core::InkPixels sm = pixels_of(smudged, "pic");
+        QCOMPARE(sm.planes, n);
+        for (const auto& [x, y] : {std::pair{50.0, 10.0}, std::pair{5.0, 70.0}}) {
+            const std::size_t i = std::size_t(px(y)) * sm.width + px(x);
+            for (unsigned k = 0; k <= n; ++k) QCOMPARE(sm.samples[i * (n + 1) + k], before.samples[i * (n + 1) + k]);
+        }
+        // new paper (set_page_spec: the layer laid on the B5 page): M and N kept on every plate
+        const core::Document b5 = run_ops(doc, Json::array({Json{{"op", "set_page_spec"}, {"preset", "b5"}}})).doc;
+        all_in_inks(b5);
+        const core::InkPixels laid = pixels_of(b5, "pic");
+        QCOMPARE(laid.planes, n);
+        QVERIFY(laid.width != before.width);
+        int m_seen = 0, n_seen = 0;
+        const std::size_t probe = std::size_t(px(10)) * before.width + px(10), probe_n = std::size_t(px(70)) * before.width + px(10);
+        for (std::size_t i = 0; i < laid.pixel_count(); ++i) {
+            const auto same = [&](std::size_t j) {
+                for (unsigned k = 0; k <= n; ++k) {
+                    if (laid.samples[i * (n + 1) + k] != before.samples[j * (n + 1) + k]) return false;
+                }
+                return true;
+            };
+            m_seen += same(probe);
+            n_seen += same(probe_n);
+        }
+        QVERIFY2(m_seen > 1000 && n_seen > 1000, qPrintable(QStringLiteral("M %1, N %2").arg(m_seen).arg(n_seen)));
     }
 };
 

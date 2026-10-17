@@ -23,6 +23,7 @@
 #include "core/ids.hpp"
 #include "core/pyconv.hpp"
 #include "core/pynum.hpp"
+#include "render/color_edit.hpp"
 #include "render/fill_patches.hpp"
 #include "render/raster_ops.hpp"
 #include "render/ink_edit.hpp"
@@ -101,7 +102,9 @@ void MainWindow::build_selection_actions() {
     make("act_copy", QStringLiteral("コピー"), [this] { copy(); }, {QKeySequence(Std::Copy)});
     make("act_cut", QStringLiteral("切り取り"), [this] { cut(); }, {QKeySequence(Std::Cut)});
     make("act_paste", QStringLiteral("貼り付け"), [this] { paste(); }, {QKeySequence(Std::Paste)}, QStringLiteral("新しいレイヤーに貼り付けます（そのまま動かせます）"));
-    QList<QKeySequence> delete_keys = QKeySequence::keyBindings(Std::Delete);
+    // (Python's: the platform's first key of Delete, and Backspace — not all of Delete's keys: on X11 they hold Ctrl+D, which
+    // is 選択を解除's, and a key two commands share does neither)
+    QList<QKeySequence> delete_keys = {QKeySequence(Std::Delete)};
     if (!delete_keys.contains(QKeySequence(QStringLiteral("Backspace")))) delete_keys << QKeySequence(QStringLiteral("Backspace"));
     make("act_delete_area", QStringLiteral("選択範囲を消す"), [this] { delete_area(); }, delete_keys);
     make("act_flip_h", QStringLiteral("左右反転"), [this] { flip(-1, 1); });
@@ -132,6 +135,11 @@ void MainWindow::build_selection_menu(QMenu* menu) {
     stock_menu_ = menu->addMenu(QStringLiteral("ストックから選ぶ"));
     stock_menu_->setProperty("remade", true);
     connect(stock_menu_, &QMenu::aboutToShow, this, [this] { fill_stock(); });
+    // (channels@1: the selection kept as an alpha channel, and one made from a channel)
+    menu->addAction(action(QStringLiteral("act_sel_to_channel")));
+    channel_load_menu_ = menu->addMenu(QStringLiteral("チャンネルから読み込む"));
+    channel_load_menu_->setProperty("remade", true);
+    connect(channel_load_menu_, &QMenu::aboutToShow, this, [this] { fill_channel_menu(); });
     menu->addAction(action(QStringLiteral("act_quick_mask")));
     menu->addSeparator();
     for (const char* name : {"act_cut", "act_copy", "act_paste", "act_delete_area"}) menu->addAction(action(QString::fromLatin1(name)));
@@ -538,10 +546,13 @@ void MainWindow::paste() {
         return;
     }
     const std::string id = core::new_id();
-    // (color-mode@1: pieces of inks go into a paint layer, which keeps them as they were)
+    // (color-mode@1: pieces of inks go into a paint layer, which keeps them as they were; color-model@1: so do the
+    // values of an RGB page of a profile)
     bool inks = false;
-    if (page->color && clipboard_->contains("patches") && (*clipboard_)["patches"].is_array()) {
-        for (const Json& patch : (*clipboard_)["patches"]) inks = inks || (patch.is_object() && patch.contains("gkir"));
+    if (clipboard_->contains("patches") && (*clipboard_)["patches"].is_array()) {
+        for (const Json& patch : (*clipboard_)["patches"]) {
+            inks = inks || (patch.is_object() && ((page->color && patch.contains("gkir")) || patch.contains(render::color_edit::kPatchProfileKey)));
+        }
     }
     Json add{{"op", "add_layer"}, {"page", page->index.json()}, {"name", "貼り付け"}, {"kind", inks ? "paint" : "pen"}, {"id", id}};
     if (layer != nullptr) add["after"] = layer->id;

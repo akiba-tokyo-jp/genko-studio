@@ -22,6 +22,8 @@
 #include "app/canvas.hpp"
 #include "app/pen.hpp"
 #include "app/session.hpp"
+#include "render/image.hpp"
+#include "render/proof.hpp"
 
 class QCheckBox;
 class QComboBox;
@@ -46,6 +48,7 @@ class QVBoxLayout;
 namespace genko::app {
 
 class BrushPanel;
+class ChannelPanel;
 class CheckPanel;
 class ColourPanel;
 class HistoryPanel;
@@ -75,6 +78,21 @@ class SaveFailureBar;
 class SaveStatusLabel;
 class ImeEntry;
 
+// 色の校正・校正の設定・色域外警告 of one book in a window (SPEC COLOR-03 PC1b; PhotoCraft's ProofView): display only,
+// never the book's.
+struct ProofView {
+    // "working": カラー設定's 作業用 CMYK; "export": the CMYK profile chosen for export or Genko's own conversion
+    // (Python's 「CMYK で見る」); else a built-in profile's id or an ICC file's path (カスタム…)
+    QString profile = QStringLiteral("working");
+    render::proof::Kind kind = render::proof::Kind::Profile;
+    int plate = 3;
+    QString intent = QStringLiteral("relative");
+    bool bpc = true;
+    bool simulate_paper = false;
+    bool on = false;      // 色の校正
+    bool gamut = false;   // 色域外警告
+};
+
 // One open book in a window: its session and how the window last showed it.
 struct Document {
     explicit Document(std::shared_ptr<Session> s = nullptr) : session(std::move(s)) {}
@@ -83,6 +101,7 @@ struct Document {
     int page_index = 0;
     std::optional<ViewState> view;
     std::optional<std::string> target_layer;
+    ProofView proof;
     QString title() const;
 };
 
@@ -136,6 +155,33 @@ public:
     // The page shown as these ops would leave it, without changing the book (フィルターのプレビュー); none: as it is.
     void preview_ops(const std::optional<core::Json>& ops);
     LayerPanel* layer_panel() const { return layer_panel_; }
+    // channels@1 (main_window_channels.cpp): the channel panel, and what the pixel tools work on and what is shown of a
+    // page's channels — the window's, never saved; each page its own —: the target ("" the composite, a colour plate's
+    // name, an alpha or spot channel's id; the pixel ops sent are given it as their "channel"), the colour plates
+    // hidden, the alpha channels laid over in their colours, the spot channels not printed on screen.
+    struct ChannelView {
+        std::string target;
+        std::vector<bool> hidden;
+        std::set<std::string> shown;
+        std::set<std::string> hidden_spots;
+    };
+    ChannelPanel* channel_panel() const { return channel_panel_; }
+    // What a conversion that flattens a page says it does to its hidden layers (画像をフラット化's words: the hidden
+    // drawing layers discarded — their count when there are any —, the name, draft and frame layers kept).
+    static QString flatten_discards(int discarded);
+    QDockWidget* channels_dock() const { return channels_dock_; }
+    ChannelView channel_view() const;
+    // A row of the panel made what the tools work on (PhotoCraft's click on a row: a channel shown alone, a plate alone,
+    // the composite back); Ctrl+Alt+2…9 (2 the composite, then the plates, then the channels).
+    void target_channel(const std::string& target);
+    void target_slot(int slot);
+    // A row's eye: the composite (every plate), a plate, an alpha channel laid over, a spot channel printed.
+    void show_channel(const std::string& key, bool shown);
+    // 選択 → 選択範囲をチャンネルに保存… / チャンネルから読み込む.
+    bool save_selection_to_channel(std::optional<QString> name = std::nullopt);
+    void load_selection_from_channel(const std::string& id);
+    // A kept area (ストック) made the selection (選択 → ストックから選ぶ; the channel panel's rows).
+    void select_stock(const std::string& name) { use_stock(name); }
     BrushPanel* brush_panel() const { return brush_; }
     ColourPanel* colours() const { return colours_; }
     ToolSettings* tool_settings() const { return tool_settings_; }
@@ -333,6 +379,19 @@ public:
     // Close a book's tab (asking first when it has unsaved changes); the last one closes the window. False: kept.
     bool close_document(int index = -1);
     MainWindow* new_window();
+    // 色の校正・校正の設定・色域外警告・カラー設定 (main_window_color.cpp): the proof of the book in front (choose_proof:
+    // an id of render/proof's kinds, "workingCmyk" or "export"; it turns 色の校正 on), shown again after カラー設定 or 環境設定
+    // change; the gamut warning's count in the status bar.
+    const ProofView& proof_view() const;
+    void choose_proof(const QString& id);
+    void apply_proof_view();
+    QLabel* gamut_label() const { return gamut_label_; }
+    // カラー設定's policies for a book opened (its pages of another profile than the working ones: kept, converted or
+    // their profile replaced, through ops — asked first when chosen); never a book opened read-only.
+    void color_policy_on_open(const std::shared_ptr<Session>& session);
+    // ... and for a picture taken in (its embedded profile, or none and a working space not the default): kept as its
+    // numbers (Python's) or taken to sRGB, as chosen (asked first when chosen; closed without an answer: the policy's).
+    bool picture_policy(const std::string& bytes, render::Image& picture);
     // A notice in the status line that never stops the work (problems in red, a little longer).
     void flash(const QString& message, int ms = 3000, bool error = false);
     QString last_notice() const { return last_notice_; }
@@ -363,6 +422,14 @@ private:
     void show_page();
     void store_document();
     void show_document(int index);
+    void build_color_actions();
+    void color_settings_dialog();
+    void proof_custom_dialog();
+    void show_proof_marks();
+    void refresh_gamut_count();
+    void refresh_pixel_value();
+    static QString pixel_words(const core::Page& page, const core::Json& at);
+    void fill_books_menu();
     void watch();
     void on_disk_change();
     void on_stroke(const StrokeInput& stroke);
@@ -513,6 +580,17 @@ private:
     void toggle_page_nombre();
     void paper_settings();
     void color_mode_dialog();
+    void set_page_mode(const QString& mode, int depth);
+    void show_color_mode();
+    void profile_dialog(bool convert);
+    // ページ → 色モード's own modes (color-model@1, PC1d; app/mode_dialogs): インデックスカラー…, カラーテーブル…, 2 階調…,
+    // ダブルトーン…, マルチチャンネル — those that flatten asked first when the page has layers to merge
+    void indexed_dialog();
+    void color_table_dialog();
+    void bitmap_dialog();
+    void duotone_dialog();
+    void to_multichannel();
+    bool flatten_asked(const core::Page* page, const QString& what);
     void add_cover_dialog();
     void assignee_dialog();
     void merge_book();
@@ -580,8 +658,18 @@ private:
     void paste();
     void fill_selection();
     void line_width();
+    // channels@1 (main_window_channels.cpp)
+    void build_channel_actions();
+    void build_channel_dock();
+    void fill_channel_menu();
+    void channel_view_changed();
+    core::Json with_channel_target(const core::Json& ops) const;
 
     std::shared_ptr<Session> session_;
+    std::map<std::string, ChannelView> channel_views_;  // (by page id)
+    ChannelPanel* channel_panel_ = nullptr;
+    QDockWidget* channels_dock_ = nullptr;
+    QMenu* channel_load_menu_ = nullptr;
     std::vector<Document> documents_;
     int doc_ = 0;
     int page_index_ = 0;
@@ -706,6 +794,11 @@ private:
     QToolBar* commands_ = nullptr;
     QMenu* recent_menu_ = nullptr;
     QMenu* view_menu_ = nullptr;
+    QMenu* books_menu_ = nullptr;   // ウィンドウ → 開いている原稿 (document.activate)
+    QLabel* gamut_label_ = nullptr;  // 色域外警告's count
+    QLabel* pixel_label_ = nullptr;  // (color-model@1: the values under the pointer)
+    QTimer* pixel_timer_ = nullptr;
+    std::optional<QPointF> pixel_point_;
     QMenu* workspace_menu_ = nullptr;
     QVBoxLayout* column_ = nullptr;  // (the central column: the bands over the page, the page)
     QDockWidget* layers_dock_ = nullptr;

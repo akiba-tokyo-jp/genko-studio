@@ -10,6 +10,7 @@
 #include "core/pynum.hpp"
 #include "core/pyrandom.hpp"
 #include "core/strokes.hpp"
+#include "render/color_canvas.hpp"
 #include "render/draw.hpp"
 #include "render/fill.hpp"
 #include "render/op_limits.hpp"
@@ -89,8 +90,9 @@ void bake_stroke(const core::Page& page, core::Layer& layer, const core::PenPoin
     if (layer.kind == core::LayerKind::Strokes) layer.kind = core::LayerKind::Raster;
 }
 
-// _bake_vectors' picture: the layer's pixels with its fills and lines drawn in
-Image baked(const core::Page& page, const core::Layer& layer) {
+// _bake_vectors' picture: the layer's pixels with its fills and lines drawn in (`page_values`: color-model@1, those of
+// an RGB page of a profile, the fills and lines brought into them)
+Image baked(const core::Page& page, const core::Layer& layer, bool page_values = false) {
     Image base = ensure_raster(page, layer);
     const Size size = base.size();
     int dpi = kWorkingDpi;
@@ -111,7 +113,8 @@ Image baked(const core::Page& page, const core::Layer& layer) {
     ctx.omitted = &omitted;
     std::optional<Image> mask;
     if (layer.panel_clip) mask = detail::clip_mask(page, size, dpi, Box{0, 0, size.width, size.height});
-    const auto drawn = detail::layer_lines(ctx, layer, mask ? &*mask : nullptr, &base, true);
+    auto drawn = detail::layer_lines(ctx, layer, mask ? &*mask : nullptr, &base, true);
+    if (drawn && page_values && page.rgb) drawn = srgb_into(*drawn, RgbSpace(*page.rgb));
     if (drawn) base = alpha_composite(base, *drawn);
     return base;
 }
@@ -134,8 +137,8 @@ void save_raster(const core::Page& page, core::Layer& layer, const Image& image)
     layer.raster_relpath = folder + "/" + std::string(core::to_string(layer.role)) + ".png";
 }
 
-void bake_vectors(const core::Page& page, core::Layer& layer) {
-    const Image base = baked(page, layer);
+void bake_vectors(const core::Page& page, core::Layer& layer, bool page_values) {
+    const Image base = baked(page, layer, page_values);
     layer.strokes = core::empty_strokes();
     layer.patches.clear();
     save_raster(page, layer, base);
@@ -147,7 +150,7 @@ Image layer_pixels(const core::Page& page, const core::Layer& layer) {
     if (layer.stroke_count() > 0 || !layer.patches.empty()) {
         core::Layer copy = layer;
         (void)index3(page.index);  // (save_raster's page number)
-        return baked(page, copy);
+        return baked(page, copy, core::holds_page_values(page, layer));
     }
     return ensure_raster(page, layer);
 }
@@ -155,7 +158,9 @@ Image layer_pixels(const core::Page& page, const core::Layer& layer) {
 std::vector<core::Stroke> mixed_pieces(const core::Page& page, const core::Layer& layer, const core::Stroke& stroke, double mix,
                                        double stretch) {
     constexpr double kStepMm = 1.5;
-    const Image under = layer_pixels(page, layer).convert("RGBA");
+    // (color-model@1: the colour under it on an RGB page of a profile is its value: picked up as the sRGB it shows)
+    const Image under = core::holds_page_values(page, layer) ? srgb_from(layer_pixels(page, layer).convert("RGBA"), RgbSpace(*page.rgb))
+                                                              : layer_pixels(page, layer).convert("RGBA");
     const std::string px = under.tobytes();
     const int w = under.width(), h = under.height();
     const double scale = static_cast<double>(w) / page.spec.width_mm.value();

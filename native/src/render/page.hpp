@@ -68,12 +68,24 @@ struct RenderOptions {
     std::stop_token stop;
     // color-mode@1: a CMYK or Lab page's inks too (RenderResult::inks, at the page's depth). Other pages have none.
     bool inks = false;
+    // color-model@1: an RGB page's values too where it composites in precise colour (RenderResult::precise: its layers'
+    // values, and where the frames, words and marks are drawn over them in 8 bits, those colours in its space).
+    bool precise = false;
+    // channels@1 (render/channels.hpp): the page's spot channels printed over the picture (their ids; none: every one —
+    // an empty list: none, for the exports that write them as plates of their own). Only the picture: not the inks or
+    // values.
+    std::optional<std::vector<std::string>> spots;
+    // channels@1, the channel panel's view (the screen): the page's colour planes shown (none: every one) and the alpha
+    // channels laid over the picture in their colours (their ids).
+    std::optional<std::vector<bool>> planes;
+    std::vector<std::string> overlays;
 };
 
 struct RenderResult {
     Image image;                       // "RGB", the page or the region's size (a CMYK or Lab page: as the screen shows it)
     std::vector<std::string> omitted;  // with skip_unported: what was left out (each once, in the order met)
     std::optional<core::InkPixels> inks;  // with RenderOptions::inks on a CMYK or Lab page: its inks (opaque)
+    std::optional<std::string> precise;   // with RenderOptions::precise: GKCR f32 of the page's values (its profile's)
 };
 
 // RenderOptions with mode "proof" (render_frame's default).
@@ -125,6 +137,11 @@ Image layer_image(const core::Page& page, const core::Layer& layer, int dpi, con
                   bool skip_unported = false, bool bake_color = false);
 std::optional<Image> drawable_layer_image(const core::Page& page, const core::Layer& layer, int dpi, const core::Document* episode = nullptr,
                   bool skip_unported = false, bool bake_color = false);
+// color-model@1: does a layer's picture as layer_image and drawable_layer_image make it (`tinted`: its colour laid on)
+// hold the page's values — an RGB page of a profile's paint pixels (core::holds_page_values), the fills and lines drawn
+// on them brought into them —, not sRGB? Not with an effect (drawn in sRGB: the pixels brought to sRGB first), nor
+// tinted (its colour is sRGB).
+bool picture_holds_page_values(const core::Page& page, const core::Layer& layer, bool tinted);
 
 // One layer of a page as the layered exports write it (Python's psd.page_layers): its name, its picture ("RGBA" of the
 // page's size) and, for a pixel layer, its settings (`settings`: opacity, blend, clip, and its mask, "L" of the page's
@@ -136,6 +153,8 @@ struct PageLayer {
     // per pixel the colour channels then the alpha); `image` is then how the screen shows them. Other layers: none (their
     // colours are the page's by the rules).
     std::shared_ptr<const std::vector<double>> inks;
+    // color-model@1: on an RGB page of a profile, `image` holds the page's values (a paint layer's pixels), not sRGB.
+    bool page_values = false;
     bool settings = false;
     double opacity = 1.0;
     std::string blend = "normal";

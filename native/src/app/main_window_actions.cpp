@@ -413,8 +413,10 @@ void MainWindow::build_actions() {
         c->show_guides = guides->isChecked();
         c->update();
     });
-    QAction* proof = make("act_cmyk_proof", QStringLiteral("CMYK で見る（色校正）"), [] {}, {},
-                          QStringLiteral("印刷したときの色の見当（CMYK の範囲に収めた色）で表示します。プロファイルは書き出しで選んだもの"), true);
+    // 色の校正 (view.proofColors; Python's 「CMYK で見る（色校正）」, its id kept): the page as 校正の設定 shows it — the
+    // working CMYK unless another is chosen there (書き出しの CMYK: Python's own). Ctrl+Y is やり直す: Ctrl+Alt+Y.
+    QAction* proof = make("act_cmyk_proof", QStringLiteral("色の校正"), [] {}, keys({QKeySequence(QStringLiteral("Ctrl+Alt+Y"))}),
+                          QStringLiteral("印刷したときの色など、校正の設定で選んだ見え方で表示します（表示だけ。原稿は変わりません）"), true);
     // (the CMYK profile chosen last for export, kept on this computer, while its file is there)
     const auto profile = [] {
         std::optional<std::filesystem::path> icc;
@@ -423,10 +425,12 @@ void MainWindow::build_actions() {
         return icc;
     };
     c->renderer().set_proof_profile(profile);
-    connect(proof, &QAction::triggered, this, [c, profile](bool on) {
-        c->renderer().set_cmyk_proof(on ? std::optional<std::optional<std::filesystem::path>>(profile()) : std::nullopt);
-        c->update();
+    connect(proof, &QAction::triggered, this, [this](bool on) {
+        if (documents_.empty()) return;
+        documents_[static_cast<std::size_t>(doc_)].proof.on = on;
+        apply_proof_view();
     });
+    build_color_actions();  // (校正の設定, 色域外警告, カラー設定…: main_window_color.cpp)
     // the tools (one at a time: tool_actions)
     make("act_select", QStringLiteral("選択"), [this] { choose_tool(QStringLiteral("select")); }, keys({QKeySequence(QStringLiteral("V"))}),
          QStringLiteral("コマを選ぶ・フキダシを動かす・ドラッグで表示を動かす"), true);
@@ -449,6 +453,7 @@ void MainWindow::build_actions() {
     actions_.at("act_select")->setChecked(true);
     build_selection_actions();  // (範囲選択 and the selection's commands: main_window_select.cpp)
     build_anim_actions();       // (アニメーション, タイムラプス: main_window_anim.cpp)
+    build_channel_actions();    // (channels@1: the channel targets, the selection to a channel: main_window_channels.cpp)
     build_paint_actions();      // (スポイト … ゆがみ, 色の入れ替え, 透明色, 太く・細く: main_window_paint.cpp)
     build_vector_actions();     // (線の修正, 線の編集 and its commands: main_window_vector.cpp)
     build_guide_actions();      // (定規, 3D and their commands: main_window_guides.cpp)
@@ -619,6 +624,8 @@ void MainWindow::build_menus() {
     for (const char* name : {"act_cut", "act_copy", "act_paste", "act_delete_area"}) edit->addAction(action(name));
     edit->addSeparator();
     for (const char* name : {"act_select_all", "act_deselect"}) edit->addAction(action(name));
+    edit->addSeparator();
+    for (const char* name : {"act_assign_profile", "act_convert_profile", "act_color_settings"}) edit->addAction(action(name));  // (color-model@1)
     QMenu* view = bar->addMenu(QStringLiteral("表示"));
     for (const char* name : {"act_fit", "act_zoom_in", "act_zoom_out", "act_actual", "act_zoom_value", "act_zoom_tool"}) view->addAction(action(name));
     view->addSeparator();
@@ -631,6 +638,18 @@ void MainWindow::build_menus() {
     view->addAction(action("act_scale"));
     view->addAction(action("act_onion"));
     view->addAction(action("act_cmyk_proof"));
+    // 校正の設定 (view.proofSetup.*): what 色の校正 shows; 色域外警告 (view.gamutWarning)
+    QMenu* proofs = view->addMenu(QStringLiteral("校正の設定"));
+    for (const char* name : {"act_proof_custom"}) proofs->addAction(action(name));
+    proofs->addSeparator();
+    for (const char* name : {"act_proof_working_cmyk", "act_proof_export", "act_proof_cyan", "act_proof_magenta", "act_proof_yellow", "act_proof_black",
+                             "act_proof_cmy"})
+        proofs->addAction(action(name));
+    proofs->addSeparator();
+    for (const char* name : {"act_proof_srgb", "act_proof_monitor", "act_proof_legacy_mac"}) proofs->addAction(action(name));
+    proofs->addSeparator();
+    for (const char* name : {"act_proof_protan", "act_proof_deutan"}) proofs->addAction(action(name));
+    view->addAction(action("act_gamut_warning"));
     view->addAction(action("act_screen_dots"));
     view->addSeparator();
     view->addAction(action("act_tool_names"));
@@ -693,11 +712,21 @@ void MainWindow::build_menus() {
     pages->addAction(action("act_page_down"));
     pages->addAction(action("act_spread"));
     pages->addSeparator();
-    // (Python's order; then the C++ build's own: the page's colour mode, color-mode@1)
-    for (const char* name : {"act_paper", "act_style", "act_chat_approval", "act_nombre", "act_page_nombre", "act_add_cover", "act_assignee", "act_timeline",
-                             "act_color_mode"}) {
+    // (Python's order; then the C++ build's own: the page's colour mode, color-mode@1 and color-model@1 — its modes and
+    // depths checked as the page is, and the dialog with the rest)
+    for (const char* name : {"act_paper", "act_style", "act_chat_approval", "act_nombre", "act_page_nombre", "act_add_cover", "act_assignee", "act_timeline"}) {
         pages->addAction(action(name));
     }
+    QMenu* modes = pages->addMenu(QStringLiteral("色モード"));
+    for (const char* name : {"act_mode_rgb", "act_mode_gray", "act_mode_cmyk", "act_mode_lab"}) modes->addAction(action(name));
+    // (color-model@1, PC1d: Image › Mode's own)
+    for (const char* name : {"act_mode_bitmap", "act_mode_indexed", "act_mode_duotone", "act_mode_multichannel"}) modes->addAction(action(name));
+    modes->addSeparator();
+    for (const char* name : {"act_depth_8", "act_depth_16", "act_depth_32"}) modes->addAction(action(name));
+    modes->addSeparator();
+    modes->addAction(action("act_color_table"));
+    modes->addAction(action("act_color_mode"));
+    connect(modes, &QMenu::aboutToShow, this, &MainWindow::show_color_mode);
     pages->addSeparator();
     QMenu* frames = pages->addMenu(QStringLiteral("コマ"));
     for (const char* name : {"act_split_h", "act_split_v", "act_merge", "act_delete_frame", "act_frame_selection"}) frames->addAction(action(name));
@@ -723,6 +752,11 @@ void MainWindow::build_menus() {
     view_menu_->addAction(action("act_new_window"));
     view_menu_->addAction(action("act_next_doc"));
     view_menu_->addAction(action("act_prev_doc"));
+    // the books open in this window, the one in front checked (document.activate): one chosen comes to the front
+    books_menu_ = view_menu_->addMenu(QStringLiteral("開いている原稿"));
+    books_menu_->setProperty("remade", true);
+    connect(books_menu_, &QMenu::aboutToShow, this, &MainWindow::fill_books_menu);
+    fill_books_menu();
     view_menu_->addSeparator();
     workspace_menu_ = view_menu_->addMenu(QStringLiteral("ワークスペース"));
     workspace_menu_->setProperty("remade", true);
@@ -855,6 +889,7 @@ void MainWindow::build_docks() {
     tabifyDockWidget(pages_dock_, layers);
     view_menu_->addAction(layers->toggleViewAction());
     layers_dock_ = layers;
+    build_channel_dock();  // (チャンネル, a tab beside the layers: main_window_channels.cpp)
     build_line_dock();  // (台詞, a tab beside the pages and the layers: main_window_lines.cpp)
     pages_dock_->raise();
     build_colour_dock();  // (カラー, a tab beside the pages and the layers: main_window_paint.cpp)
