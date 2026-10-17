@@ -11,6 +11,8 @@
 #include <stdexcept>
 #include <tuple>
 
+#include "core/adjust.hpp"
+#include "core/adjust_kinds.hpp"
 #include "core/command_bus.hpp"
 #include "core/error.hpp"
 #include "core/filters.hpp"
@@ -18,6 +20,7 @@
 #include "core/pynum.hpp"
 #include "core/pyops.hpp"
 #include "core/paths.hpp"
+#include "render/adjust.hpp"
 #include "render/plugins.hpp"
 #include "render/filters.hpp"
 #include "render/ink.hpp"
@@ -462,26 +465,22 @@ Image blend_over(const Image& base, const Image& over_in, std::string_view mode,
     const std::vector<Image> o = over.split();
     const Image base_rgb = Image::merge("RGB", {b[0], b[1], b[2]});
     const Image over_rgb = Image::merge("RGB", {o[0], o[1], o[2]});
-    Image mixed;
-    if (mode == "multiply") {
-        mixed = chops::multiply(base_rgb, over_rgb);
-    } else if (mode == "screen") {
-        mixed = chops::screen(base_rgb, over_rgb);
-    } else if (mode == "add") {
-        mixed = chops::add(base_rgb, over_rgb);
-    } else if (mode == "overlay") {
-        mixed = chops::overlay(base_rgb, over_rgb);
-    } else if (mode == "darken" || mode == "lighten" || mode == "color_burn" || mode == "color_dodge" ||
-               mode == "linear_burn" || mode == "soft_light" || mode == "hard_light" || mode == "difference" ||
-               mode == "exclusion" || mode == "subtract" || mode == "divide" || mode == "hue" || mode == "saturation" ||
-               mode == "color" || mode == "luminosity") {
-        mixed = blend_math(base_rgb, over_rgb, mode);
-    } else {
-        mixed = over_rgb;
-    }
-    Image mixed_rgba = mixed.convert("RGBA");
+    Image mixed_rgba = blend_colours(base_rgb, over_rgb, mode).convert("RGBA");
     mixed_rgba.putalpha(o[3]);
     return alpha_composite(base_rgba, mixed_rgba);
+}
+
+Image blend_colours(const Image& base_rgb, const Image& over_rgb, std::string_view mode) {
+    if (mode == "multiply") return chops::multiply(base_rgb, over_rgb);
+    if (mode == "screen") return chops::screen(base_rgb, over_rgb);
+    if (mode == "add") return chops::add(base_rgb, over_rgb);
+    if (mode == "overlay") return chops::overlay(base_rgb, over_rgb);
+    if (mode == "darken" || mode == "lighten" || mode == "color_burn" || mode == "color_dodge" || mode == "linear_burn" ||
+        mode == "soft_light" || mode == "hard_light" || mode == "difference" || mode == "exclusion" || mode == "subtract" ||
+        mode == "divide" || mode == "hue" || mode == "saturation" || mode == "color" || mode == "luminosity") {
+        return blend_math(base_rgb, over_rgb, mode);
+    }
+    return over_rgb;
 }
 
 // --- fill layers ------------------------------------------------------------------------------------------------------
@@ -654,13 +653,33 @@ Image adjusted(const Ctx& ctx, Image rgba, const core::Layer& layer, const Image
     }
     if (kind.empty()) return rgba;
     Image changed;
-    try {
-        bool skipped = false;
-        changed = apply_filter(ctx, rgba, kind, spec, &skipped);
-        if (skipped) return rgba;
-    } catch (const core::PyValueError&) {
-        return rgba;  // (a ValueError: the layer does nothing)
+    // PC2 (adjustments@1, core/adjust.hpp): a kind of the C++ build's own, or a native that changes Python's formula,
+    // through its AdjustFunction; Python's form as Python draws it (its native, if any, is not Python's setting)
+    if (core::adjust_kind(kind) != nullptr && !core::python_way(*layer.adjust)) {
+        core::AdjustPtr function;
+        try {
+            function = core::adjust_function(*layer.adjust, *ctx.page, ctx.episode);
+        } catch (const core::Error& error) {
+            if (error.code() != "not_yet_ported") throw;
+            skip_unported(ctx, "adjust:" + kind);  // (one whose formula is not in this build yet: never drawn as if not there)
+            return rgba;
+        }
+        if (!function) return rgba;
+        changed = adjust::apply_8bit(rgba, *function, Point{area.x0, area.y0});
+    } else {
+        spec.erase("native");
+        try {
+            bool skipped = false;
+            changed = apply_filter(ctx, rgba, kind, spec, &skipped);
+            if (skipped) return rgba;
+        } catch (const core::PyValueError&) {
+            return rgba;  // (a ValueError: the layer does nothing)
+        }
     }
+    // (native.blend: the corrected picture laid over what it corrected by the 8-bit blend formulas, the user's decision
+    // 2 of PC2; a correction layer's own blend is not looked at, as in Python)
+    if (const core::AdjustNative native = core::native_of(*layer.adjust); native.blend != "normal")
+        changed = adjust::blend_8bit(rgba, changed, native.blend);
     const double opacity = layer.opacity;
     Image strength = Image::create("L", rgba.size(), Ink(py_round_i(255 * py_max(0.0, py_min(1.0, opacity)))));
     if (layer.mask && layer.mask->enabled && layer.mask->png && !layer.mask->png->empty()) {

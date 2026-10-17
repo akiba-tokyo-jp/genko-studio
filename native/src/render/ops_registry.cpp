@@ -17,6 +17,7 @@
 #include "render/color_edit.hpp"
 #include "render/ink_edit.hpp"
 #include "render/ops_3d.hpp"
+#include "render/ops_adjust.hpp"
 #include "render/paper.hpp"
 #include "render/placed.hpp"
 #include "render/image.hpp"
@@ -355,6 +356,8 @@ void register_render_ops(core::OpRegistry& registry) {
     register_ink_ops(registry);
     // a page's alpha and spot channels (channels@1, render/ops_channels)
     register_channel_ops(registry);
+    // the corrections' own ops (PC2, adjustments@1: render/ops_adjust)
+    register_adjust_ops(registry);
     // the studio ops again, place_asset and set_placement able to read an asset's picture size, and those placing a
     // picture able to see it can be drawn (render/placed)
     core::register_studio_ops(registry, core::StudioHooks{asset_picture_size, check_asset_picture});

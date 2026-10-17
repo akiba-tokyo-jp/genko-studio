@@ -422,7 +422,9 @@ private slots:
             "set_text_gamma",  // (color-model@1's book text_gamma, PC1b: the C++ build's own, SPEC.md COLOR-03)
             "add_channel", "duplicate_channel", "delete_channel", "rename_channel", "move_channel", "set_channel",
             "merge_spot_channel", "split_channels", "merge_channels",  // (channels@1: the C++ build's own, SPEC.md COLOR-03)
-            "to_indexed", "set_color_table", "to_bitmap", "set_duotone"};  // (color-model@1's own modes, PC1d: the C++ build's own, SPEC.md COLOR-03)
+            "to_indexed", "set_color_table", "to_bitmap", "set_duotone",  // (color-model@1's own modes, PC1d: the C++ build's own, SPEC.md COLOR-03)
+            "set_adjustment", "auto_adjust", "hdr_toning", "apply_image", "calculations", "trap",
+            "fade_layer"};  // (PC2's corrections, adjustments@1: the C++ build's own, SPEC.md COLOR-04)
         expected.insert(drawing_names.begin(), drawing_names.end());
         const std::set<std::string> actual(all_names.begin(), all_names.end());
         QCOMPARE(actual, expected);

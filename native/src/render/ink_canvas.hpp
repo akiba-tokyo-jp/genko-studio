@@ -5,6 +5,7 @@
 #include <string_view>
 #include <vector>
 
+#include "core/adjust.hpp"
 #include "core/ink.hpp"
 #include "render/image.hpp"
 #include "render/ink.hpp"
@@ -54,8 +55,14 @@ public:
     void forget_clip();
     // A correction layer (SPEC.md COLOR-02, 群C): the colours the page's inks mean through `change` and back by its
     // rules (ink::correct: what it leaves as it was keeps its inks), mixed in by the opacity × the mask ("L"), × the
-    // alpha of the layer before when clipped. The alpha stays; nothing is set for the next layer to clip to.
-    void recolour(const ink::Correction& change, double opacity, bool clip, const Image* mask = nullptr);
+    // alpha of the layer before when clipped. The alpha stays; nothing is set for the next layer to clip to. `mode`
+    // (PC2: its native.blend): the changed inks laid over those below by the page's blend formula (as a layer's, here
+    // on its whole colour), then mixed in. `at`: the canvas's top left on the page (where a pixel is, for a dither).
+    void recolour(const core::AdjustFunction& change, double opacity, bool clip, const Image* mask = nullptr, std::string_view mode = "normal",
+                  Point at = Point{0, 0});
+    // PC2 (design 4.2): a correction's records laid on the plates directly (core::InkRecords: each plate's tone — CMYK
+    // its brightness, Lab its normalized value, grey its lightness — through its function), mixed in as recolour.
+    void adjust_planes(const core::InkRecords& records, double opacity, bool clip, const Image* mask = nullptr, std::string_view mode = "normal");
 
     // The page as the screen shows it ("RGB", sRGB).
     Image display() const;

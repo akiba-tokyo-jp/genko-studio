@@ -24,6 +24,7 @@
 #include <algorithm>
 #include <cmath>
 
+#include "app/adjust_forms.hpp"
 #include "app/ask.hpp"
 #include "app/canvas.hpp"
 #include "app/config.hpp"
@@ -204,6 +205,12 @@ LayerPanel::LayerPanel(MainWindow* window) : window_(window) {
     special_->addAction(QStringLiteral("グラデーションのレイヤー…"), this, [this] { add_gradient(); });
     QMenu* adjust = special_->addMenu(QStringLiteral("色調補正のレイヤー"));
     for (const auto& [key, label] : adjustment_kinds()) adjust->addAction(label + QStringLiteral("…"), this, [this, key = key] { add_adjust(key); });
+    // (PC2: the C++ build's own kinds that have a form — app/adjust_forms, each group's)
+    for (const adjust_forms::FormKind& form : adjust_forms::form_kinds()) {
+        const core::AdjustKind* kind = core::adjust_kind(form.kind);
+        if (kind == nullptr || !kind->layer || kind->group == "Python") continue;
+        adjust->addAction(form.title + QStringLiteral("…"), this, [this, key = std::string(form.kind)] { add_adjust(key); });
+    }
     special_->addSeparator();
     special_->addAction(QStringLiteral("塗り・補正を直す…"), this, [this] { edit_special(); });
     add_special_button->setMenu(special_);
@@ -805,6 +812,13 @@ void LayerPanel::add_gradient() {
 }
 
 std::optional<Json> LayerPanel::adjust_fields(const std::string& kind, const Json& now) {
+    if (adjust_forms::form_kind(kind) != nullptr) {  // (PC2: a kind with a form of its own, app/adjust_forms)
+        adjust_forms::FormContext context;
+        context.page = window_->current_page();
+        const auto& rgb = window_->pen().rgb;
+        context.pen = {static_cast<int>(rgb[0]), static_cast<int>(rgb[1]), static_cast<int>(rgb[2])};
+        return adjust_forms::adjust_dialog(this, kind, now, context);
+    }
     if (kind == "gradient_map") {
         const auto& rgb = window_->pen().rgb;
         return gradient_map_dialog(this, now, {{static_cast<int>(rgb[0]), static_cast<int>(rgb[1]), static_cast<int>(rgb[2])}, {255, 255, 255}});
@@ -817,6 +831,7 @@ void LayerPanel::add_adjust(const std::string& kind) {
     const auto params = adjust_fields(kind);
     if (!params || !window_->still(asked)) return;
     QString title = QStringLiteral("色調補正");
+    if (const adjust_forms::FormKind* form = adjust_forms::form_kind(kind)) title = form->title;
     for (const auto& [key, label] : adjustment_kinds()) if (key == kind) title = label;
     Json spec{{"kind", kind}};
     spec.update(*params);
@@ -837,6 +852,11 @@ void LayerPanel::edit_special() {
         if (!params || !window_->still(asked)) return;
         Json spec{{"kind", kind}};
         spec.update(*params);
+        // (PC2: its native settings — the blend, the C++ build's own formulas — kept where the window does not hold them)
+        Json native = layer->adjust->contains("native") && (*layer->adjust)["native"].is_object() ? (*layer->adjust)["native"] : Json::object();
+        if (params->contains("native") && (*params)["native"].is_object()) native.update((*params)["native"]);
+        spec.erase("native");
+        if (!native.empty()) spec["native"] = native;
         set("adjust", spec);
     } else if (layer->kind == core::LayerKind::Fill && layer->fill && layer->fill->is_object() && layer->fill->contains("gradient")) {
         if (const auto spec = gradient_dialog(this, page, (*layer->fill)["gradient"]); spec && window_->still(asked)) set("fill", Json{{"gradient", *spec}});

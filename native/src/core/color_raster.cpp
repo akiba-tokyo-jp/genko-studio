@@ -276,7 +276,9 @@ void validate_color_document(const Document& doc) {
                 layer.adjust->value("kind", Json()) == "exposure") (void)Exposure::parse(*layer.adjust);
             if (!color || !layer.visible) continue;
             (void)blend_mode(Json(layer.blend));
-            if ((layer.kind == LayerKind::Adjust && layer.blend != "normal") || py_truthy(layer.parent_id) || layer.kind == LayerKind::Tone || layer.role == LayerRole::Tone)
+            // (a correction layer's own blend is not looked at, as Python does not: the user's decision 2 of PC2 —
+            // its native.blend is drawn on precise pixels too, render/page)
+            if (py_truthy(layer.parent_id) || layer.kind == LayerKind::Tone || layer.role == LayerRole::Tone)
                 throw Error("not_yet_ported", "high-precision color composition style is not supported yet");
             if (layer.kind == LayerKind::Adjust && is_shape_filter(layer))
                 throw Error("not_yet_ported", "high-precision correction that moves shapes is not supported yet");

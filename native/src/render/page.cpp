@@ -16,6 +16,7 @@
 
 #include <QFileInfo>
 
+#include "core/adjust.hpp"
 #include "core/anim.hpp"
 #include "core/covers.hpp"
 #include "core/error.hpp"
@@ -966,6 +967,48 @@ Image meant_rgba(const InkPicture& p, const core::PageColor& color) {
     return Image::frombytes("RGBA", p.size, bytes);
 }
 
+// color-mode@1: a correction layer on a CMYK or Lab page (SPEC.md COLOR-02, 群C): the colours the inks mean through its
+// function and back by the page's rules, or (PC2) its records laid on the plates directly. Its own blend is not looked
+// at, as Python does not; its native.blend is laid by the page's blend formula (the user's decision 2 of PC2) — one the
+// page does not composite left out as a layer's is.
+void ink_correction(InkCanvas& canvas, const Ctx& ctx, const Layer& layer, const Box& area) {
+    const Json kind = layer.adjust && layer.adjust->is_object() ? layer.adjust->value("kind", Json()) : Json();
+    if (kind.is_string()) {
+        const std::string name = kind.get<std::string>();
+        if (name.starts_with("plugin:")) {  // (a person's filter plugin runs in the external runner)
+            skip_unported(ctx, "adjust:plugin");
+            return;
+        }
+        if (std::find(core::kShapeFilters.begin(), core::kShapeFilters.end(), name) != core::kShapeFilters.end()) {
+            skip_unported(ctx, "adjust:" + name);  // (one that moves shapes too: an old book's, as on precise pixels)
+            return;
+        }
+    }
+    const std::string blend = layer.adjust ? core::native_of(*layer.adjust).blend : std::string("normal");
+    if (!canvas.supports_blend(blend)) {
+        skip_unported(ctx, "ink_blend:" + blend);
+        return;
+    }
+    const bool exposure = kind == Json("exposure");
+    std::optional<Image> mask;  // (its mask as the precise page resizes it)
+    if (layer.mask && layer.mask->enabled && layer.mask->png && !layer.mask->png->empty())
+        mask = decoded(layer.mask->png, "L").resize_region(ctx.size, area, exposure ? Resample::Bilinear : Resample::Bicubic);
+    if (exposure) (void)core::Exposure::parse(*layer.adjust);  // (settings it refuses: refused, as they were)
+    core::AdjustPtr correction;
+    try {
+        correction = correction_of(layer, *ctx.page, ctx.episode);
+    } catch (const NotYetPorted& error) {
+        skip_unported(ctx, error.element());
+        return;
+    }
+    if (!correction) return;
+    if (const auto records = correction->ink_records(); records && records->space == ctx.page->color->space) {
+        canvas.adjust_planes(*records, layer.opacity, layer.clip, mask ? &*mask : nullptr, blend);
+        return;
+    }
+    canvas.recolour(*correction, layer.opacity, layer.clip, mask ? &*mask : nullptr, blend, Point{area.x0, area.y0});
+}
+
 // color-mode@1: one layer of a CMYK or Lab page into the page's canvas (SPEC.md COLOR-02). Its own inks (an ink raster,
 // resampled as a paint layer is) are composited as they are; everything drawn in 8 bits (lines, fills, placed
 // pictures, a raster in RGB) as the page's inks of its colours; tones as drawn over the page.
@@ -979,44 +1022,12 @@ void ink_layer(InkCanvas& canvas, const Ctx& ctx, const Layer& layer, const Box&
         canvas.forget_clip();
         return;
     }
-    if (!canvas.supports_blend(layer.blend)) {
-        skip_unported(ctx, "ink_blend:" + layer.blend);
+    if (layer.kind == LayerKind::Adjust) {  // a correction of the colours the inks mean (SPEC.md COLOR-02, 群C)
+        ink_correction(canvas, ctx, layer, area);
         return;
     }
-    if (layer.kind == LayerKind::Adjust) {  // a correction of the colours the inks mean (SPEC.md COLOR-02, 群C)
-        if (!layer.blend.empty() && layer.blend != "normal") {  // (as on precise pixels: not yet)
-            skip_unported(ctx, "ink_adjust_blend:" + layer.blend);
-            return;
-        }
-        const Json kind = layer.adjust && layer.adjust->is_object() ? layer.adjust->value("kind", Json()) : Json();
-        if (kind.is_string()) {
-            const std::string name = kind.get<std::string>();
-            if (name.starts_with("plugin:")) {  // (a person's filter plugin runs in the external runner)
-                skip_unported(ctx, "adjust:plugin");
-                return;
-            }
-            if (std::find(core::kShapeFilters.begin(), core::kShapeFilters.end(), name) != core::kShapeFilters.end()) {
-                skip_unported(ctx, "adjust:" + name);  // (one that moves shapes too: an old book's, as on precise pixels)
-                return;
-            }
-        }
-        const bool exposure = kind == Json("exposure");
-        std::optional<Image> mask;  // (its mask as the precise page resizes it)
-        if (layer.mask && layer.mask->enabled && layer.mask->png && !layer.mask->png->empty())
-            mask = decoded(layer.mask->png, "L").resize_region(ctx.size, area, exposure ? Resample::Bilinear : Resample::Bicubic);
-        if (exposure) {
-            const core::Exposure e = core::Exposure::parse(*layer.adjust);
-            canvas.recolour(
-                [&e](const std::array<double, 3>& rgb) {
-                    std::array<double, 3> out{};
-                    for (unsigned c = 0; c < 3; ++c) out[c] = core::linear_to_srgb(e.apply(core::srgb_to_linear(rgb[c])));
-                    return out;
-                },
-                layer.opacity, layer.clip, mask ? &*mask : nullptr);
-        } else if (const auto correction = correction_of(layer)) {
-            canvas.recolour([&correction](const std::array<double, 3>& rgb) { return (*correction)(rgb); }, layer.opacity, layer.clip,
-                            mask ? &*mask : nullptr);
-        }
+    if (!canvas.supports_blend(layer.blend)) {
+        skip_unported(ctx, "ink_blend:" + layer.blend);
         return;
     }
     if (layer.ink_raster) {
@@ -1328,7 +1339,9 @@ RenderResult render(const Page& page_in, int dpi, const RenderOptions& options, 
                              shown ? &*shown : nullptr);
             continue;
         }
-        if (precision && !ColorCanvas::supports_blend(layer.blend)) throw NotYetPorted("high_precision_blend:"+layer.blend);
+        // (a correction layer's own blend is not looked at, as Python does not: below)
+        if (precision && layer.kind != LayerKind::Adjust && !ColorCanvas::supports_blend(layer.blend))
+            throw NotYetPorted("high_precision_blend:" + layer.blend);
         if (is_tone(layer)) {  // tones sit in the layer order: a layer above can cover them
             if (precision) throw NotYetPorted("high_precision_tone");
             const bool dots = (print && ctx.finish && ctx.dots) || screen_dots(ctx);
@@ -1338,12 +1351,13 @@ RenderResult render(const Page& page_in, int dpi, const RenderOptions& options, 
         }
         if (layer.kind == LayerKind::Adjust) {  // a correction layer changes what is under it
             if (precision) {
-                if (!layer.blend.empty() && layer.blend!="normal")throw NotYetPorted("high_precision_adjustment_blend");
+                // (PC2, the user's decision 2: its native.blend laid by this canvas's blend formula)
+                const std::string blend = layer.adjust ? core::native_of(*layer.adjust).blend : std::string("normal");
                 if (layer.adjust && layer.adjust->is_object() && layer.adjust->value("kind", Json()) == "exposure") {
                     std::optional<Image> mask;
                     if (layer.mask && layer.mask->enabled && layer.mask->png)
                         mask = decoded(layer.mask->png, "L").resize_region(ctx.size, area, Resample::Bilinear);
-                    precision->expose(core::Exposure::parse(*layer.adjust), layer.opacity, layer.clip, mask ? &*mask : nullptr);
+                    precision->expose(core::Exposure::parse(*layer.adjust), layer.opacity, layer.clip, mask ? &*mask : nullptr, blend);
                     continue;
                 }
                 if (layer.adjust && layer.adjust->is_object() && layer.adjust->value("kind", Json()).is_string()) {
@@ -1358,11 +1372,18 @@ RenderResult render(const Page& page_in, int dpi, const RenderOptions& options, 
                         continue;
                     }
                 }
-                if (const auto correction = correction_of(layer)) {  // (its mask as render._adjusted resizes it)
+                core::AdjustPtr correction;
+                try {
+                    correction = correction_of(layer, page, episode);
+                } catch (const NotYetPorted& error) {
+                    skip_unported(ctx, error.element());
+                    continue;
+                }
+                if (correction) {  // (its mask as render._adjusted resizes it)
                     std::optional<Image> mask;
                     if (layer.mask && layer.mask->enabled && layer.mask->png && !layer.mask->png->empty())
                         mask = decoded(layer.mask->png, "L").resize_region(ctx.size, area, Resample::Bicubic);
-                    precision->adjust(*correction, layer.opacity, layer.clip, mask ? &*mask : nullptr);
+                    precision->adjust(*correction, layer.opacity, layer.clip, mask ? &*mask : nullptr, blend, Point{area.x0, area.y0});
                 }
                 continue;
             }
@@ -1457,7 +1478,7 @@ std::string first_chars(const std::string& text, std::size_t count) {
 }  // namespace
 
 void page_layers(const core::Page& page, const core::Document& episode, int dpi, const std::function<void(PageLayer&&)>& each,
-                 const std::function<void(const core::StoryLine&)>* line_layers) {
+                 const std::function<void(const core::StoryLine&)>* line_layers, const std::function<void(const core::Layer&)>* adjust_layers) {
     // (color-model@1: the book's text_gamma, for the letters of the lines' layers — as render_page draws them)
     const text::TextGamma gamma(episode.text_gamma);
     Ctx ctx;
@@ -1492,6 +1513,7 @@ void page_layers(const core::Page& page, const core::Document& episode, int dpi,
         check_cancel(ctx);
         if (!layer.visible || !layer.exportable || guide_role(layer.role)) continue;
         if (layer.kind == LayerKind::Folder) continue;
+        if (adjust_layers != nullptr && layer.kind == LayerKind::Adjust) (*adjust_layers)(layer);  // (PC2: in its place)
         if (layer.kind == LayerKind::Placed) {  // its art before the monochrome finish (mode "name")
             auto art = placed_raster(layer, page, &episode, size, dpi, "name", true, ctx.dots, whole);
             if (art) {

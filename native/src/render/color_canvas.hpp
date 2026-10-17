@@ -50,11 +50,17 @@ public:
                const Image* mask = nullptr);
     void blend(const ColorCanvas& source, double opacity, bool clip, std::string_view mode = "normal");
     void blend_stroke(const Image& mask, const core::Json& color, double opacity);
-    void expose(const core::Exposure& exposure, double opacity, bool clip, const Image* mask = nullptr);
-    // A correction layer of filters.ADJUSTMENTS: its change laid over the pixels below in their encoded samples (sRGB, or
-    // the page's values on a page of a profile), as the 8-bit page composites a correction: by opacity × mask × the
-    // clipped-to layer's alpha.
-    void adjust(const core::PreciseAdjustment& adjustment, double opacity, bool clip, const Image* mask = nullptr);
+    // An exposure in linear light. `mode` (PC2: its native.blend; normal: mixed in linear light as before): the exposed
+    // colour laid over the one below by the blend's formula in their encoded samples, as adjust does.
+    void expose(const core::Exposure& exposure, double opacity, bool clip, const Image* mask = nullptr, std::string_view mode = "normal");
+    // A correction layer (core/adjust.hpp's AdjustFunction: Python's form is PreciseAdjustment): its change laid over the
+    // pixels below in their encoded samples (sRGB, or the page's values on a page of a profile), as the 8-bit page
+    // composites a correction: by opacity × mask × the clipped-to layer's alpha. `mode` (PC2: its native.blend): the
+    // changed colour b' laid over the colour b below by the blend's formula (this canvas's, on the encoded samples),
+    // mix(b, blend(b, b'), amount); the alpha stays. `at`: the canvas's top left on the page (where a pixel is, for a
+    // dither). core::Error("not_yet_ported") for a mode it does not composite.
+    void adjust(const core::AdjustFunction& adjustment, double opacity, bool clip, const Image* mask = nullptr, std::string_view mode = "normal",
+                Point at = Point{0, 0});
     // Drawing in 8 bits on the canvas's own picture (image(), RGBA), as the 8-bit page draws on its picture so far
     // (the balloons set under a layer): each pixel `draw` paints takes the value it is given there, brought in as an
     // 8-bit picture is (its sRGB samples in linear light, as the paper comes in); the others keep their precise values.
@@ -82,8 +88,10 @@ Image srgb_into(const Image& rgba, const RgbSpace& space);
 // And back: an 8-bit RGBA picture of the space's values as the sRGB the screen shows (relative colorimetric, black point
 // compensation; its alpha kept; sRGB: the picture itself).
 Image srgb_from(const Image& rgba, const RgbSpace& space);
-// A correction layer's adjustment (its "adjust": a kind of filters.ADJUSTMENTS but exposure, and its settings), or
-// none when it does nothing: no kind, or settings the 8-bit page refuses with a ValueError (render._adjusted).
-// NotYetPorted for a kind of filter that is not a colour adjustment.
-std::optional<core::PreciseAdjustment> correction_of(const core::Layer& layer);
+// A correction layer's function (its "adjust", core::adjust_function: Python's form — a kind of filters.ADJUSTMENTS or
+// exposure, and its settings — as PreciseAdjustment, the C++ build's own by its kind; `page` and `doc` the layer's), or
+// none when it does nothing: no kind, a kind apply_filter does not know (a plugin, one that moves shapes: the callers'),
+// or settings the 8-bit page refuses with a ValueError (render._adjusted). NotYetPorted("adjust:<kind>") for one whose
+// formula is not in this build yet.
+core::AdjustPtr correction_of(const core::Layer& layer, const core::Page& page, const core::Document* doc = nullptr);
 } // namespace genko::render

@@ -99,6 +99,10 @@ genko_test(test_ink_filters SOURCES unit/test_ink_filters.cpp DEPS genko_test_su
 # refusals, the selection from a channel, the pixel ops on a channel or one colour plate, split and merge back byte for
 # byte, Merge Spot Channel against PhotoCraft's formula, the spots printed and the panel's view, the book on disk.
 genko_test(test_channels SOURCES unit/test_channels.cpp DEPS genko_test_support genko_render_ops genko_formats LABELS unit TIMEOUT 600)
+# PC2-0 (SPEC.md COLOR-04, adjustments@1): the corrections' common ground without Python — Python's form kept, a
+# correction's native read and stored, native.method, the kinds' table and what is not in this build yet, one
+# AdjustFunction to the three ways, native.blend on 8 and 16 bits and on CMYK, the PSD's frame.
+genko_test(test_adjust SOURCES unit/test_adjust.cpp DEPS genko_test_support genko_render_ops genko_formats LABELS unit TIMEOUT 600)
 
 # core/pyre's own bounds (Python 3.12's re, ported; SPEC COMP-01a): a search that backtracks without end stopped when its
 # steps are spent, groups more than 200 deep refused, replace_text refused without a change; without Python.

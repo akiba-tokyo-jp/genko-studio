@@ -388,8 +388,29 @@ void import_psd(core::OpContext& c) {
         layer.clip = item.clip;
         layer.exportable = true;
         layer.parent_id = item.parent ? Json(ids[*item.parent]) : parent;
+        // its mask over the page, as the page holds a layer's (none when it has none)
+        const auto mask_of = [&]() -> std::optional<core::Mask> {
+            const std::optional<Image> mask = file.mask(item);
+            if (!mask) return std::nullopt;
+            limits::check_picture(mask_w, mask_h, "the layer mask");
+            const Size mask_size{static_cast<int>(mask_w), static_cast<int>(mask_h)};
+            Image full = Image::create("L", page_px, Ink(255));
+            full.paste(mask->resize(shown), paste_corner(where));
+            core::Mask kept;
+            kept.png = fills::png_bytes(full.resize(mask_size));
+            kept.enabled = true;
+            return kept;
+        };
         if (item.folder) {
             layer.kind = core::LayerKind::Folder;
+        } else if (item.kind == "adjust" && item.adjust) {
+            // (PC2, the user's decision 5: an adjustment layer a codec read, render/psd_adjust — a correction layer, its
+            // blend its native.blend: a correction layer's own blend is not looked at)
+            layer.kind = core::LayerKind::Adjust;
+            layer.adjust = *item.adjust;
+            if (!item.blend.empty() && item.blend != "normal") (*layer.adjust)["native"]["blend"] = item.blend;
+            layer.blend = "normal";
+            if (auto mask = mask_of()) layer.mask = std::move(*mask);
         } else {
             layer.kind = core::LayerKind::Raster;
             // (a painting app's picture: on a monochrome page it prints in grey and tones)
@@ -410,16 +431,7 @@ void import_psd(core::OpContext& c) {
                 layer.raster_relpath = raster::page_folder(page) + "/user-" + layer.id + ".png";
             }
             if (!merged && !merged_inks) {
-                if (const std::optional<Image> mask = file.mask(item)) {
-                    limits::check_picture(mask_w, mask_h, "the layer mask");
-                    const Size mask_size{static_cast<int>(mask_w), static_cast<int>(mask_h)};
-                    Image full = Image::create("L", page_px, Ink(255));
-                    full.paste(mask->resize(shown), paste_corner(where));
-                    core::Mask kept;
-                    kept.png = fills::png_bytes(full.resize(mask_size));
-                    kept.enabled = true;
-                    layer.mask = std::move(kept);
-                }
+                if (auto mask = mask_of()) layer.mask = std::move(*mask);
             }
         }
         made.push_back(std::move(layer));

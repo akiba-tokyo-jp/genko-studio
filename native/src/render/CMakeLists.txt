@@ -52,6 +52,14 @@ genko_library(genko_render
     ops_channels.cpp
     raster_ops.cpp
     ops_paint.cpp
+    adjust.cpp
+    ops_adjust.cpp
+    tone_ops.cpp
+    ops_calc.cpp
+    trap.cpp
+    ops_fade.cpp
+    psd_adjust.cpp
+    psd_adjust_color.cpp
     zip.cpp
     materials.cpp
     covers.cpp

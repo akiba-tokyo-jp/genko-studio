@@ -467,8 +467,10 @@ std::optional<std::string> precise_blocker(const core::Page& page) {
                                                (layer.raster_png && !layer.raster_png->empty()))) {
             return where + " holds precise lines with a style of its own";
         }
-        if (!ColorCanvas::supports_blend(layer.blend)) return where + " has the blend " + core::py_repr_str(layer.blend);
-        if (layer.kind == core::LayerKind::Adjust && layer.blend != "normal") return where + " is a correction layer in a blend mode";
+        // (a correction layer's own blend is not looked at, as Python does not: its native.blend is drawn — the user's
+        // decision 2 of PC2)
+        if (layer.kind != core::LayerKind::Adjust && !ColorCanvas::supports_blend(layer.blend))
+            return where + " has the blend " + core::py_repr_str(layer.blend);
         if (layer.kind == core::LayerKind::Adjust && layer.adjust && layer.adjust->is_object()) {
             const auto kind = layer.adjust->find("kind");
             if (kind != layer.adjust->end() && kind->is_string() &&
@@ -562,18 +564,23 @@ std::int64_t convert_pages(Document& doc, const std::vector<std::size_t>& pages,
         if (to.inks && from.inks && from.inks->space == to.inks->space) to.inks->inks = from.inks->inks;  // (the same space keeps its exact inks)
         const Model kept = kept_as(to, into);
         if (from == kept) continue;
+        // (a correction layer's blend is its native.blend: its own is not looked at, as Python does not — PC2's decision 2)
+        const auto blend_of = [](const core::Layer& layer) {
+            if (layer.kind != core::LayerKind::Adjust) return layer.blend;
+            return layer.adjust ? core::native_of(*layer.adjust).blend : std::string("normal");
+        };
         if (to.inks && to.inks->space == InkSpace::Lab) {  // (nothing changes when one layer cannot be composited in Lab)
             for (const core::Layer& layer : doc.pages[i]->layers) {
-                if (!core::lab_blend(layer.blend)) {
-                    throw OpError("page " + doc.pages[i]->index.repr() + ": the layer " + layer.id + "'s blend " + core::py_repr_str(layer.blend) +
+                if (!core::lab_blend(blend_of(layer))) {
+                    throw OpError("page " + doc.pages[i]->index.repr() + ": the layer " + layer.id + "'s blend " + core::py_repr_str(blend_of(layer)) +
                                   " is not one a Lab page composites");
                 }
             }
         }
         if (to.inks && to.inks->space == InkSpace::Multi) {  // (nor in a multichannel page's plates: the separable blends only)
             for (const core::Layer& layer : doc.pages[i]->layers) {
-                if (!core::multi_blend(layer.blend)) {
-                    throw OpError("page " + doc.pages[i]->index.repr() + ": the layer " + layer.id + "'s blend " + core::py_repr_str(layer.blend) +
+                if (!core::multi_blend(blend_of(layer))) {
+                    throw OpError("page " + doc.pages[i]->index.repr() + ": the layer " + layer.id + "'s blend " + core::py_repr_str(blend_of(layer)) +
                                   " is not one a multichannel page composites");
                 }
             }
