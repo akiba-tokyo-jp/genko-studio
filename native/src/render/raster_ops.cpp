@@ -1524,11 +1524,12 @@ void paste(OpContext& c) {
     }
     if (page.layers[ti].color_raster) {  // drawn into the precise pixels (render/color_edit)
         for (core::Patch& patch : items.patches) color_edit::patch_to_srgb(patch, doc);  // (color-model@1: its sRGB, brought in)
-        Layer pasted;
+        Layer pasted;  // (cut at the panels as the layer's own lines and pictures are)
         pasted.id = page.layers[ti].id;
         pasted.role = LayerRole::User;
         pasted.kind = LayerKind::Raster;
-        pasted.panel_clip = false;
+        pasted.panel_clip = page.layers[ti].panel_clip;
+        pasted.panel_each = page.layers[ti].panel_each;
         selection::drop(pasted, std::move(items), selection::Matrix{m[0], m[1], m[2], m[3], m[4], m[5]}, true);
         Layer& target = page.layers[ti];
         precise_edit(target, [&] { return color_edit::paste(page, target, pasted, &doc); });

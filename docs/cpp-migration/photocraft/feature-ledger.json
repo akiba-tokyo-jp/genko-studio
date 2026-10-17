@@ -37351,7 +37351,9 @@
         "native/tests/unit/test_render_page.cpp",
         "native/tests/unit/test_color_raster.cpp",
         "native/tests/unit/test_color_filters.cpp",
-        "native/tests/unit/test_ink.cpp"
+        "native/tests/unit/test_ink.cpp",
+        "native/src/render/color_edit.cpp",
+        "native/src/render/ink_edit.cpp"
       ],
       "implementation_scope": "RGBA16/32の元bytes保存・再読込、露光量調整層、実CLI/PNG出力/disk Undo-Redo/GC/資源拒否、実GUI。汎用ファイル入力・全描画style・形式互換・上流全画素同等性・復旧・全Release/ASan・Windows・配布は未完。",
       "pc0": {

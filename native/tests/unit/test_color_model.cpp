@@ -1398,6 +1398,20 @@ private slots:
                 QVERIFY(rgb_at(shown, rx, ry)[0] < rgb_at(shown, ix, iy)[0] - 20);
                 QVERIFY(rgb_at(eight, rx, ry)[0] < rgb_at(eight, ix, iy)[0] - 20);
             }
+                // (and as dark as there, across the rim's band — the grey's left and top edges, the green's right one —:
+                // its black laid over the page's encoded values as the 8-bit page lays it over sRGB's; independent review
+                // B (B))
+                const int rim = render::mm_to_px(1.2, 100) + 2;
+                std::vector<std::pair<int, int>> band;
+                for (int k = 0; k < rim; ++k) {
+                    band.emplace_back(w / 6 + k, h / 2);
+                    band.emplace_back(w / 3, h / 6 + k);
+                    band.emplace_back(5 * w / 6 - 1 - k, h / 2);
+                }
+                for (const auto& [x, y] : band) {
+                    QVERIFY2(near_rgb(rgb_at(shown, x, y), rgb_at(eight, x, y), most),
+                             qPrintable(QStringLiteral("rim %1,%2: %3 %4").arg(x).arg(y).arg(rgb_text(rgb_at(shown, x, y)), rgb_text(rgb_at(eight, x, y)))));
+                }
             return;
         }
         // (the rest: every pixel; a shape-moving filter's 8-bit passes round otherwise in a few)
@@ -1416,6 +1430,93 @@ private slots:
         part.region = render::RenderRegion{31, 47, 90, 70};
         QCOMPARE(render::render_page(precise.page(0), 100, part, &precise).image.convert("RGB").tobytes(),
                  got.image.convert("RGB").crop(render::Box{31, 47, 121, 117}).tobytes());
+    }
+
+    // Independent review B (A): a paint layer that keeps its lines inside the panels (はみ出し off, add_layer's
+    // default) keeps what is drawn on it there on a page of 16 or 32 bits and on a CMYK page, as the 8-bit page does —
+    // a line, a fill, a line that stays in the panel it begins in (コマごと) —, whether the 8-bit page with the mark is
+    // made so or the mark is drawn on the page made so: where the 8-bit page shows nothing of the mark (the panels cut
+    // it), the page shows nothing of it either; the mark's inside is the 8-bit page's (16, 32 bits: within a step); and
+    // the page made 8 bits again is the 8-bit page's (within a step: the mark is in its pixels then).
+    void marksStayInsideThePanels_data() {
+        QTest::addColumn<QString>("what");
+        QTest::addColumn<QString>("into");
+        for (const char* what : {"line", "fill", "each"})
+            for (const char* into : {"16", "32", "cmyk"}) QTest::newRow(qPrintable(QStringLiteral("%1-%2").arg(what, into))) << QString(what) << QString(into);
+    }
+    void marksStayInsideThePanels() {
+        QFETCH(QString, what);
+        QFETCH(QString, into);
+        const int w = render::mm_to_px(60, 100), h = render::mm_to_px(80, 100);
+        render::Image art = render::Image::create("RGBA", render::Size{w, h}, render::Ink{0, 0, 0, 0});
+        art.paste(render::Ink{128, 128, 128, 255}, render::Box{w / 6, h / 6, w / 2, 5 * h / 6});
+        art.paste(render::Ink{30, 160, 90, 255}, render::Box{w / 2, h / 6, 5 * w / 6, 5 * h / 6});
+        core::Document doc = small_book();
+        if (what == "each") {  // (two panels, the line begun in the first crossing into the second)
+            doc = run_ops(doc, Json::array({Json{{"op", "split_frame"}, {"page", 1}, {"frame_id", doc.page(0).frames.at(0).id}, {"axis", "horizontal"},
+                                                 {"ratio", 0.5}}})).doc;
+        }
+        doc = run_ops(doc, Json::array({Json{{"op", "add_layer"}, {"page", 1}, {"kind", "paint"}, {"id", "pic"}},
+                                        Json{{"op", "put_raster"}, {"page", 1}, {"id", "pic"}, {"png_base64", core::b64encode(render::write_png(art))}}})).doc;
+        QVERIFY(layer_named(doc, "pic").panel_clip);
+        if (what == "each") doc = run_ops(doc, Json::array({Json{{"op", "set_layer"}, {"page", 1}, {"id", "pic"}, {"panel_each", true}}})).doc;
+        const auto at = [&](double x_mm, double y_mm) { return std::pair{render::mm_to_px(x_mm, 100), render::mm_to_px(y_mm, 100)}; };
+        Json mark;
+        std::pair<int, int> inside;
+        if (what == "fill") {
+            mark = Json{{"op", "fill_area"}, {"page", 1}, {"layer_id", "pic"}, {"area", Json{{"rect", Json::array({0, 30, 60, 12})}}}, {"rgb", Json::array({40, 60, 200})}};
+            inside = at(30, 36);
+        } else {
+            const Json points = what == "each" ? Json::array({Json::array({20, 20}), Json::array({40, 60})}) : Json::array({Json::array({2, 40}), Json::array({58, 45})});
+            mark = Json{{"op", "add_stroke"}, {"page", 1}, {"layer_id", "pic"}, {"points", points}, {"width_mm", 2.5}, {"kind", "mili"}, {"rgb", Json::array({200, 30, 30})}};
+            inside = what == "each" ? at(25, 30) : at(30, 42.5);
+        }
+        const core::Document eight = run_ops(doc, Json::array({mark})).doc;
+        const render::Image plain = drawn_page(doc), marked = drawn_page(eight);
+        const Json to = into == "16"   ? Json{{"op", "set_color_mode"}, {"page", 1}, {"mode", "rgb"}, {"depth", 16}}
+                        : into == "32" ? Json{{"op", "set_color_mode"}, {"page", 1}, {"mode", "rgb"}, {"depth", 32}}
+                                       : Json{{"op", "set_color_mode"}, {"page", 1}, {"mode", "cmyk"}, {"profile", "coated-cmyk"}, {"depth", 16}};
+        const core::Document deep = run_ops(doc, Json::array({to})).doc;
+        const render::Image deep_plain = drawn_page(deep);
+        const std::string p = plain.tobytes(), m = marked.tobytes(), d = deep_plain.tobytes();
+        const core::Document made = run_ops(eight, Json::array({to})).doc;  // (the 8-bit page with its mark, made so)
+        const core::Document drawn_on = run_ops(deep, Json::array({mark})).doc;  // (the mark drawn on the page made so)
+        for (const core::Document* page : {&made, &drawn_on}) {
+            const render::Image shown = drawn_page(*page);
+            QCOMPARE(shown.size(), marked.size());
+            const std::string s = shown.tobytes();
+            std::size_t cut = 0, out = 0;
+            int worst = 0;
+            for (std::size_t i = 0; i + 2 < s.size(); i += 3) {
+                const auto same = [](const std::string& a, const std::string& b, std::size_t k) { return a[k] == b[k] && a[k + 1] == b[k + 1] && a[k + 2] == b[k + 2]; };
+                if (!same(p, m, i)) continue;  // (the 8-bit page shows the mark here)
+                ++cut;
+                for (std::size_t c = i; c < i + 3; ++c) {
+                    const int diff = std::abs(int(static_cast<unsigned char>(s[c])) - int(static_cast<unsigned char>(d[c])));
+                    worst = std::max(worst, diff);
+                    if (diff > 1) ++out;
+                }
+            }
+            QVERIFY(cut > std::size_t(w) * h / 2);
+            QVERIFY2(out == 0, qPrintable(QStringLiteral("%1 samples of the mark where the 8-bit page shows none (worst %2)").arg(out).arg(worst)));
+            if (into != "cmyk") {
+                QVERIFY2(near_rgb(rgb_at(shown, inside.first, inside.second), rgb_at(marked, inside.first, inside.second), 1),
+                         qPrintable(rgb_text(rgb_at(shown, inside.first, inside.second)) + rgb_text(rgb_at(marked, inside.first, inside.second))));
+            }
+        }
+        if (into == "cmyk") return;
+        // back at 8 bits: the 8-bit page's
+        const core::Document back = run_ops(made, Json::array({Json{{"op", "set_color_mode"}, {"page", 1}, {"mode", "rgb"}, {"depth", 8}}})).doc;
+        const std::string b = drawn_page(back).tobytes();
+        QCOMPARE(b.size(), m.size());
+        std::size_t off = 0;
+        int worst = 0;
+        for (std::size_t i = 0; i < b.size(); ++i) {
+            const int diff = std::abs(int(static_cast<unsigned char>(b[i])) - int(static_cast<unsigned char>(m[i])));
+            worst = std::max(worst, diff);
+            if (diff > 1) ++off;
+        }
+        QVERIFY2(off == 0, qPrintable(QStringLiteral("%1 samples off the 8-bit page (worst %2)").arg(off).arg(worst)));
     }
 
     // A page with no colour model holding precise pixels (put_color_raster) keeps their precision when an op does not say

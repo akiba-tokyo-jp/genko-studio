@@ -2179,6 +2179,11 @@ void blend_color_strokes(ColorCanvas& canvas, const core::Page& page, const core
     Ctx ctx;ctx.page=&page;ctx.episode=episode;ctx.dpi=dpi;ctx.mode="proof";ctx.omitted=&omitted;
     ctx.size=Size{mm_to_px(page.spec.width_mm.value(),dpi),mm_to_px(page.spec.height_mm.value(),dpi)};
     const auto panels=clip_mask(page,ctx.size,dpi,area);
+    if (layer.panel_each && !layer.mask && !layer.effect && !layer.screen && !layer.color && layer.patches.empty() && !layer.raster_png) {
+        // (each line in the panel it begins in, as precise_lines lays them for the page)
+        canvas.blend(precise_lines(ctx, layer, area, panels ? &*panels : nullptr, nullptr, canvas.space()), layer.opacity, layer.clip, layer.blend);
+        return;
+    }
     precise_strokes(canvas,ctx,layer,area,panels?&*panels:nullptr);
 }
 bool precise_layer_styled(const core::Layer& layer) {
