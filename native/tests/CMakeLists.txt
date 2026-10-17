@@ -103,6 +103,12 @@ genko_test(test_channels SOURCES unit/test_channels.cpp DEPS genko_test_support 
 # correction's native read and stored, native.method, the kinds' table and what is not in this build yet, one
 # AdjustFunction to the three ways, native.blend on 8 and 16 bits and on CMYK, the PSD's frame.
 genko_test(test_adjust SOURCES unit/test_adjust.cpp DEPS genko_test_support genko_render_ops genko_formats LABELS unit TIMEOUT 600)
+# PC2c (COLOR-04): the local corrections (PhotoCraft's algo/tone.rs tests; filter_raster's shadows_highlights,
+# replace_color and match_color on 8-bit, precise and CMYK layers) and hdr_toning's flatten, without Python.
+genko_test(test_tone_ops SOURCES unit/test_tone_ops.cpp DEPS genko_test_support genko_render_ops LABELS unit TIMEOUT 600)
+# PC2c (COLOR-04): Apply Image and Calculations (Blending, the sources, a layer, a channel, inks; the three results),
+# trapping (algo/trap.rs's tests and the op) and the fade (its mix, the op reading the pixels before from the assets).
+genko_test(test_image_calc SOURCES unit/test_image_calc.cpp DEPS genko_test_support genko_render_ops LABELS unit TIMEOUT 600)
 
 # core/pyre's own bounds (Python 3.12's re, ported; SPEC COMP-01a): a search that backtracks without end stopped when its
 # steps are spent, groups more than 200 deep refused, replace_text refused without a change; without Python.
@@ -258,6 +264,10 @@ genko_test(test_contract_color_model SOURCES contract/test_contract_color_model.
 # render, inspect, export (the PSD's extra channels read back, the PDF's separation, the notes).
 genko_test(test_contract_channels SOURCES contract/test_contract_channels.cpp DEPS genko_test_support genko_render ZLIB::ZLIB
            LABELS contract TIMEOUT 900)
+# PC2c (COLOR-04) through the command line: a local correction saved, undone and done again; fade_layer from the
+# pixels before (an asset gc keeps); apply_image and calculations; hdr_toning's flatten; trap on a CMYK page only.
+genko_test(test_contract_image_ops SOURCES contract/test_contract_image_ops.cpp DEPS genko_test_support genko_render
+           LABELS contract TIMEOUT 900)
 
 genko_test(test_contract_psd_text SOURCES contract/test_contract_psd_text.cpp DEPS genko_test_support genko_formats genko_render_ops
            LABELS contract TIMEOUT 1800)
@@ -355,6 +365,8 @@ if(GENKO_BUILD_APP)
   genko_test(test_gui_select SOURCES gui/test_gui_select.cpp DEPS genko_app GUI TIMEOUT 600)
   # チャンネル (channels@1, COLOR-03): the panel, the target keys, a fill on a channel, the view, options, split.
   genko_test(test_gui_channels SOURCES gui/test_gui_channels.cpp DEPS genko_app GUI TIMEOUT 600)
+  # PC2c (COLOR-04): レイヤー → 色調補正's local corrections and image calculations, 編集 → フェード (only right after).
+  genko_test(test_gui_image_ops SOURCES gui/test_gui_image_ops.cpp DEPS genko_app GUI TIMEOUT 600)
   # the brush panel and ツールの設定: brushes kept per kind, one's own made, opened, given and read back (.abr too)
   genko_test(test_gui_brushes SOURCES gui/test_gui_brushes.cpp DEPS genko_app GUI TIMEOUT 600)
   # 紙質 (BRUSH-01): the dialog's paper, one's own brush with a paper (the library beside Python's file, read by

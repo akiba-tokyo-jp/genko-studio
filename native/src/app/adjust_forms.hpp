@@ -32,6 +32,7 @@ class QMenu;
 namespace genko::app {
 
 class MainWindow;
+struct BookChange;
 
 namespace adjust_forms {
 
@@ -122,6 +123,9 @@ struct MenuContext {
 void build_tone_menu(QMenu* adjust, const MenuContext& context);   // PC2a: app/adjust_forms_tone.cpp
 void build_color_menu(QMenu* adjust, const MenuContext& context);  // PC2b: app/adjust_forms_color.cpp
 void build_image_menu(QMenu* adjust, QMenu* edit, const MenuContext& context);  // PC2c: app/image_dialogs.cpp
+// PC2c (フェード, app/image_dialogs.cpp): after each change of the window's book (MainWindow::on_book_changed), what 編集
+// → フェード would take back — the pixels a filter, a correction or a fill changed — and the command enabled by it.
+void follow_change(MainWindow& window, const BookChange& change);
 
 }  // namespace adjust_forms
 

@@ -83,8 +83,10 @@ FilterWork filter_work(const core::Document& doc, const core::Page& page, std::s
     return work;
 }
 
-Image filter_eight(const FilterWork& work, const core::Document& doc, const core::Page& page, const Image& rgba, std::string_view kind) {
+Image filter_eight(const FilterWork& work, const core::Document& doc, const core::Page& page, const Image& rgba, std::string_view kind,
+                   const Json* area) {
     if (work.function) return adjust::apply_8bit(rgba, *work.function);
+    if (area != nullptr && work.local != nullptr && work.local->eight_in) return work.local->eight_in(rgba, work.params, page, doc, *area);
     if (work.local == nullptr || !work.local->eight) local_not_yet(kind, "an 8-bit layer");
     return work.local->eight(rgba, work.params, page, doc);
 }

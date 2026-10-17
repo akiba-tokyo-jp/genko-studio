@@ -543,6 +543,35 @@ const std::vector<Rule>& rules() {
         }));
         r.push_back(rule(R"(filter \S+: native\.blend is a correction layer's.*)",
                          "描画モードは色調補正のレイヤーのものです（フィルターの結果を描画モードで重ねるには、フェードを使います）"));
+        // (PC2c — the C++ build's own: the local corrections, HDR toning, Apply Image, Calculations, trapping, the fade)
+        r.push_back(rule(R"(adjust replace_color\.color is required)", "置き換える色を選びます"));
+        r.push_back(rule(R"(adjust match_color: give source or source_stats, not both)", "色の一致の元は、原稿の中の画像か、色の統計のどちらか 1 つです"));
+        r.push_back(rule(R"(adjust match_color\.source has no opaque pixels)", "色の一致の元に、色のある画素がありません"));
+        r.push_back(rule(R"(adjust match_color\.source(?:_stats)?(?:\.\S+)?[: ].*)", "色の一致の元の指定が使えません"));
+        r.push_back(rule(R"(trap works on a CMYK page.*)", "トラッピングは CMYK のページでだけ使えます"));
+        r.push_back(rule(R"(the layer \S+ holds no inks to trap)", "このレイヤーには、トラッピングするインキがありません"));
+        r.push_back(rule(R"(give width_px or width_mm, not both)", "トラッピングの幅は、px か mm のどちらかで指定します"));
+        r.push_back(rule(R"(the layer \S+ is not a paint layer \(pen or paint\))", "描画のレイヤー（ペン・ペイント）を選びます"));
+        r.push_back(rule(R"(id \(the (?:paint layer to trap|layer to fade)\) is required)", "対象のレイヤーが要ります"));
+        r.push_back(rule(R"(from \(the asset of the layer's pixels before.*\) is required)", "フェードする前の画素（from）が要ります"));
+        r.push_back(rule(R"(fade_layer reads the pixels before from the book's folder.*)", "フェードの前に、原稿を保存します（ファイル → 別の場所に保存）"));
+        r.push_back(rule(R"(the book has no asset \S+ \(the pixels before\))", "フェードする前の画素が、原稿の素材にありません"));
+        r.push_back(rule(R"(from is not the pixels of this layer before.*)", "フェードする前の画素が、このレイヤーのものと合いません"));
+        r.push_back(rule(R"(the layer \S+ holds no pixels to fade)", "このレイヤーには、フェードする画素がありません"));
+        r.push_back(rule(R"(the layer \S+ holds lines or fills besides its pixels)", "線や塗りの残るレイヤーはフェードできません"));
+        r.push_back(rule(R"(give the layer \(id\) or the alpha or spot channel \(channel\) to apply the image to)",
+                         "画像操作の先は、レイヤーか、アルファ・特色チャンネルのどちらか 1 つです"));
+        r.push_back(rule(R"(no alpha or spot channel '(.*)' on page (\S+) .*)", "ページ \\2 にアルファ・特色チャンネル「\\1」はありません"));
+        r.push_back(rule(R"((?:source|source1|source2|mask): page (\S+) is not the same size as page (\S+))", "元のページ \\1 は、ページ \\2 と大きさが違います"));
+        r.push_back(rule(R"((?:source|source1|source2|mask): no channel '(.*)' on page (\S+))", "ページ \\2 にチャンネル「\\1」はありません"));
+        r.push_back(rule(R"((?:source|source1|source2|mask): no layer \S+ on page (\S+))", "ページ \\1 に元のレイヤーはありません"));
+        r.push_back(rule(R"((?:source|source1|source2|mask): the transparency is a layer's.*)", "透明部分はレイヤーのものです（元のレイヤーを選びます）"));
+        r.push_back(rule(R"((?:source|source1|source2|mask): the layer has no mask)", "元のレイヤーにマスクがありません"));
+        r.push_back(rule(R"(blending '(.*)' is not separable.*)", "描画モード「\\1」は、画像操作・演算では使えません"));
+        r.push_back(rule(R"(blending must be .*)", "描画モードの指定が違います"));
+        r.push_back(rule(R"(result must be channel, page or selection)", "演算の結果は、チャンネル・ページ・選択範囲のどれかです"));
+        r.push_back(rule(R"(curve must be a list of 2 to 19 points.*)", "トーンカーブの点は 2〜19 個です（入力・出力 0〜255）"));
+        r.push_back(rule(R"(no layer is showing)", "表示しているレイヤーがありません"));
         r.push_back(rule("choose two or more layers to merge", "結合するレイヤーを 2 枚以上選びます"));
         r.push_back(rule("effect is .* and/or .*", "境界効果は、フチか水彩境界です"));
         r.push_back(rule("fill is .* or .*", "塗りの設定は、色かグラデーションです"));

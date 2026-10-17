@@ -2244,13 +2244,22 @@
         "shortcut": "Some(\"Cmd+Shift+F\")",
         "source_line": 79,
         "genko_status": "未判定",
-        "implementation_status": "未着手",
+        "implementation_status": "実装済み（PC2c、未統合）",
         "alternate_menus": []
       },
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "未着手",
+      "implementation_status": "実装済み（PC2c、未統合）",
       "acceptance_status": "未実施",
-      "evidence": [],
+      "evidence": [
+        "native/src/render/ops_fade.cpp",
+        "native/src/render/image_ops.cpp",
+        "native/src/render/ops_adjust.cpp",
+        "native/src/app/image_dialogs.cpp",
+        "native/src/app/main_window.cpp",
+        "native/tests/unit/test_image_calc.cpp",
+        "native/tests/contract/test_contract_image_ops.cpp",
+        "native/tests/gui/test_gui_image_ops.cpp"
+      ],
       "pc0": {
         "date": "2026-10-16",
         "cpp_base": "962faa4",
@@ -12813,13 +12822,22 @@
         "shortcut": "None",
         "source_line": 202,
         "genko_status": "未判定",
-        "implementation_status": "未着手",
+        "implementation_status": "実装済み（PC2c、未統合）",
         "alternate_menus": []
       },
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "未着手",
+      "implementation_status": "実装済み（PC2c、未統合）",
       "acceptance_status": "未実施",
-      "evidence": [],
+      "evidence": [
+        "native/src/render/tone_ops.cpp",
+        "native/src/render/image_ops.cpp",
+        "native/src/render/ops_adjust.cpp",
+        "native/src/render/ops_channels.cpp",
+        "native/src/app/image_dialogs.cpp",
+        "native/tests/unit/test_tone_ops.cpp",
+        "native/tests/contract/test_contract_image_ops.cpp",
+        "native/tests/gui/test_gui_image_ops.cpp"
+      ],
       "pc0": {
         "date": "2026-10-16",
         "cpp_base": "962faa4",
@@ -13047,13 +13065,20 @@
         "shortcut": "None",
         "source_line": 205,
         "genko_status": "未判定",
-        "implementation_status": "未着手",
+        "implementation_status": "実装済み（PC2c、未統合）",
         "alternate_menus": []
       },
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "未着手",
+      "implementation_status": "実装済み（PC2c、未統合）",
       "acceptance_status": "未実施",
-      "evidence": [],
+      "evidence": [
+        "native/src/render/tone_ops.cpp",
+        "native/src/render/image_ops.cpp",
+        "native/src/render/ops_adjust.cpp",
+        "native/src/app/image_dialogs.cpp",
+        "native/tests/unit/test_tone_ops.cpp",
+        "native/tests/gui/test_gui_image_ops.cpp"
+      ],
       "pc0": {
         "date": "2026-10-16",
         "cpp_base": "962faa4",
@@ -13197,13 +13222,20 @@
         "shortcut": "None",
         "source_line": 206,
         "genko_status": "未判定",
-        "implementation_status": "未着手",
+        "implementation_status": "実装済み（PC2c、未統合）",
         "alternate_menus": []
       },
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "未着手",
+      "implementation_status": "実装済み（PC2c、未統合）",
       "acceptance_status": "未実施",
-      "evidence": [],
+      "evidence": [
+        "native/src/render/tone_ops.cpp",
+        "native/src/render/image_ops.cpp",
+        "native/src/render/ops_adjust.cpp",
+        "native/src/app/image_dialogs.cpp",
+        "native/tests/unit/test_tone_ops.cpp",
+        "native/tests/gui/test_gui_image_ops.cpp"
+      ],
       "pc0": {
         "date": "2026-10-16",
         "cpp_base": "962faa4",
@@ -13283,13 +13315,22 @@
         "shortcut": "None",
         "source_line": 201,
         "genko_status": "未判定",
-        "implementation_status": "未着手",
+        "implementation_status": "実装済み（PC2c、未統合）",
         "alternate_menus": []
       },
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "未着手",
+      "implementation_status": "実装済み（PC2c、未統合）",
       "acceptance_status": "未実施",
-      "evidence": [],
+      "evidence": [
+        "native/src/render/tone_ops.cpp",
+        "native/src/render/image_ops.cpp",
+        "native/src/render/ops_adjust.cpp",
+        "native/src/core/adjust_kinds.cpp",
+        "native/src/app/image_dialogs.cpp",
+        "native/tests/unit/test_tone_ops.cpp",
+        "native/tests/contract/test_contract_image_ops.cpp",
+        "native/tests/gui/test_gui_image_ops.cpp"
+      ],
       "pc0": {
         "date": "2026-10-16",
         "cpp_base": "962faa4",
@@ -13785,13 +13826,21 @@
         "shortcut": "None",
         "source_line": 227,
         "genko_status": "未判定",
-        "implementation_status": "未着手",
+        "implementation_status": "実装済み（PC2c、未統合）",
         "alternate_menus": []
       },
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "未着手",
+      "implementation_status": "実装済み（PC2c、未統合）",
       "acceptance_status": "未実施",
-      "evidence": [],
+      "evidence": [
+        "native/src/render/ops_calc.cpp",
+        "native/src/render/image_ops.cpp",
+        "native/src/render/ops_adjust.cpp",
+        "native/src/app/image_dialogs.cpp",
+        "native/tests/unit/test_image_calc.cpp",
+        "native/tests/contract/test_contract_image_ops.cpp",
+        "native/tests/gui/test_gui_image_ops.cpp"
+      ],
       "pc0": {
         "date": "2026-10-16",
         "cpp_base": "962faa4",
@@ -13949,13 +13998,21 @@
         "shortcut": "None",
         "source_line": 228,
         "genko_status": "未判定",
-        "implementation_status": "未着手",
+        "implementation_status": "実装済み（PC2c、未統合）",
         "alternate_menus": []
       },
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "未着手",
+      "implementation_status": "実装済み（PC2c、未統合）",
       "acceptance_status": "未実施",
-      "evidence": [],
+      "evidence": [
+        "native/src/render/ops_calc.cpp",
+        "native/src/render/image_ops.cpp",
+        "native/src/render/ops_adjust.cpp",
+        "native/src/app/image_dialogs.cpp",
+        "native/tests/unit/test_image_calc.cpp",
+        "native/tests/contract/test_contract_image_ops.cpp",
+        "native/tests/gui/test_gui_image_ops.cpp"
+      ],
       "pc0": {
         "date": "2026-10-16",
         "cpp_base": "962faa4",
@@ -15247,13 +15304,21 @@
         "shortcut": "None",
         "source_line": 234,
         "genko_status": "未判定",
-        "implementation_status": "未着手",
+        "implementation_status": "実装済み（PC2c、未統合）",
         "alternate_menus": []
       },
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "未着手",
+      "implementation_status": "実装済み（PC2c、未統合）",
       "acceptance_status": "未実施",
-      "evidence": [],
+      "evidence": [
+        "native/src/render/trap.cpp",
+        "native/src/render/image_ops.cpp",
+        "native/src/render/ops_adjust.cpp",
+        "native/src/app/image_dialogs.cpp",
+        "native/tests/unit/test_image_calc.cpp",
+        "native/tests/contract/test_contract_image_ops.cpp",
+        "native/tests/gui/test_gui_image_ops.cpp"
+      ],
       "pc0": {
         "date": "2026-10-16",
         "cpp_base": "962faa4",

@@ -45,6 +45,10 @@ struct LocalFilter {
     std::function<std::string(const core::Page& page, const core::InkPixels& inks, const core::Json& params, const core::Json* area,
                               const core::Document& doc)>
         inks;
+    // (PC2c) The 8-bit way of a filter that reads the op's area itself (match_color's stats_in_area), used when the op
+    // has one (the caller still keeps the result to it). None: `eight`.
+    std::function<Image(const Image& rgba, const core::Json& params, const core::Page& page, const core::Document& doc, const core::Json& area)>
+        eight_in;
 };
 using LocalFilters = std::vector<std::pair<std::string_view, LocalFilter>>;
 LocalFilters adjust_local_filters();  // PC2a: render/ops_adjust.cpp (equalize)
@@ -64,8 +68,10 @@ struct FilterWork {
 };
 FilterWork filter_work(const core::Document& doc, const core::Page& page, std::string_view kind, const core::Json& params);
 // The work on each kind of a layer's pixels (not `python`): an 8-bit picture (the layer's RGBA; `area` is the caller's,
-// filters.within), a precise layer's new raster, an ink raster's new GKIR bytes.
-Image filter_eight(const FilterWork& work, const core::Document& doc, const core::Page& page, const Image& rgba, std::string_view kind);
+// filters.within — given here too for a filter that reads it, LocalFilter::eight_in), a precise layer's new raster, an
+// ink raster's new GKIR bytes.
+Image filter_eight(const FilterWork& work, const core::Document& doc, const core::Page& page, const Image& rgba, std::string_view kind,
+                   const core::Json* area = nullptr);
 std::string filter_precise(const FilterWork& work, const core::Document& doc, const core::Page& page, const core::Layer& layer,
                            std::string_view kind, const core::Json* area);
 std::string filter_inks(const FilterWork& work, const core::Document& doc, const core::Page& page, const core::InkPixels& inks,
