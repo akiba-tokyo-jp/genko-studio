@@ -22,8 +22,10 @@
 //
 // placedPicturesLikePython: placed pictures drawn (render._placed_raster, _finish_placed; psd's placed layers) on the book
 // `studio_harness.py make-placedbook` makes (placements and reported faces far past the page among them, a Photoshop
-// file's merged picture), page by page, layer by layer and in the exports, pixel for pixel and file for file; a
-// Photoshop file of Lab colours placed and drawn as Python draws it (transparent: Pillow's LAB to RGBA).
+// file's merged picture), page by page, layer by layer and in the exports, pixel for pixel and file for file (the PSDs
+// as Python writes them, and this build's own with the book's correction layer among their layers as an adjustment
+// layer: the user's decision 5, PC2); a Photoshop file of Lab colours placed and drawn as Python draws it (transparent:
+// Pillow's LAB to RGBA).
 //
 // peopleOnlyThroughTheCommandLine (C++ only): what only a person holds refused to an agent through `genko apply`, and
 // an approved character's deletion recorded in the audit as an approval gone.
@@ -36,6 +38,7 @@
 #include <QDir>
 #include <QDirIterator>
 #include <QFile>
+#include <QFileInfo>
 #include <QTemporaryDir>
 
 #include <filesystem>
@@ -55,6 +58,8 @@
 #include "render/ops_registry.hpp"
 #include "render/page.hpp"
 #include "render/png.hpp"
+#include "render/psd.hpp"
+#include "render/psd_adjust.hpp"
 #include "rendertest.hpp"
 #include "storage/asset_store.hpp"
 #include "storage/fsutil.hpp"
@@ -1035,6 +1040,10 @@ private slots:
                     got = u8paths(genko::formats::export_print(doc, dest, "png", kw["dpi"].get<std::int64_t>(), 180, true,
                                                                kw.value("area", std::string("paper")), kw.value("color", std::string("auto"))));
                 } else if (call == "export_psd_pages") {
+                    // (the user's decision 5, PC2: this build writes a book's correction layers into its PSDs as
+                    // adjustment layers — this book's fourth page has one —: matched as Python writes them, in that
+                    // view, and this build's own PSDs after the loop)
+                    const genko::render::psd::PythonView python_view;
                     got = u8paths(genko::formats::export_psd_pages(doc, dest, kw["dpi"].get<std::int64_t>()));
                 } else if (call == "export_layers") {
                     got = u8paths(genko::formats::export_layers(doc, dest, kw["dpi"].get<int>()));
@@ -1058,9 +1067,49 @@ private slots:
             }
             exported_files += static_cast<int>(genko::test::exports::tree(theirs).size());
         }
+        // (the user's decision 5) this build's own PSDs: each the view's with the correction layers among its layers as
+        // adjustment layers — the other layers, their pictures and the merged picture the same —, a page of no
+        // correction layer the view's very bytes
+        int psd_adjustments = 0;
+        int psd_same = 0;
+        {
+            const QString own = dir + "/own_psd";
+            const auto written = genko::formats::export_psd_pages(doc, genko::core::path_from_utf8(own.toStdString()), 40);
+            QVERIFY(!written.empty());
+            for (const auto& file : written) {
+                const QString name = QFileInfo(QString::fromStdString(genko::core::path_to_utf8(file))).fileName();
+                const std::string mine = genko::test::read_bytes(own + "/" + name);
+                const std::string view = genko::test::read_bytes(dir + "/out/psd/" + name);
+                const auto ours = genko::render::psd::File::read(mine);
+                const auto theirs = genko::render::psd::File::read(view);
+                const auto layer_pictures = [](const genko::render::psd::File& psd, int* adjustments) {
+                    std::vector<std::string> list;
+                    for (const auto& layer : psd.layers()) {
+                        if (layer.adjust) {
+                            ++*adjustments;
+                            continue;
+                        }
+                        list.push_back(layer.name + "|" + (layer.folder ? std::string() : psd.image(layer).tobytes()));
+                    }
+                    const auto whole = psd.merged();
+                    list.push_back(whole ? whole->tobytes() : std::string());
+                    return list;
+                };
+                int adjustments = 0;
+                int view_adjustments = 0;
+                if (layer_pictures(ours, &adjustments) != layer_pictures(theirs, &view_adjustments) || view_adjustments != 0) {
+                    failures.push_back("own psd " + name.toStdString() + ": not the view's with its adjustment layers");
+                } else if (adjustments == 0 && mine != view) {
+                    failures.push_back("own psd " + name.toStdString() + ": no correction layer, yet not the view's bytes");
+                }
+                psd_adjustments += adjustments;
+                psd_same += adjustments == 0 ? 1 : 0;
+            }
+        }
 
         for (const auto& f : failures) qWarning("%s", f.c_str());
         QVERIFY2(failures.empty(), (std::to_string(failures.size()) + " drawings differ from Python's").c_str());
+        QVERIFY2(psd_adjustments >= 1 && psd_same >= 1, (std::to_string(psd_adjustments) + " " + std::to_string(psd_same)).c_str());
         // C++ only: a finish whose value is not a number where the finish uses it is refused (Python fails with its
         // own TypeError inside Pillow's point())
         {
