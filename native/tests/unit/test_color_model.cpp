@@ -75,6 +75,15 @@ void* operator new(std::size_t n) {
     return p;
 }
 void* operator new[](std::size_t n) { return ::operator new(n); }
+// (the nothrow forms too: what the libraries take with them is given back through this delete — test_image_split_oom's way)
+void* operator new(std::size_t n, const std::nothrow_t&) noexcept {
+    try {
+        return ::operator new(n);
+    } catch (...) {
+        return nullptr;
+    }
+}
+void* operator new[](std::size_t n, const std::nothrow_t& tag) noexcept { return ::operator new(n, tag); }
 void operator delete(void* p) noexcept {
     if (p == nullptr) return;
     allocations::note(-static_cast<std::int64_t>(malloc_usable_size(p)));
@@ -83,6 +92,8 @@ void operator delete(void* p) noexcept {
 void operator delete[](void* p) noexcept { ::operator delete(p); }
 void operator delete(void* p, std::size_t) noexcept { ::operator delete(p); }
 void operator delete[](void* p, std::size_t) noexcept { ::operator delete(p); }
+void operator delete(void* p, const std::nothrow_t&) noexcept { ::operator delete(p); }
+void operator delete[](void* p, const std::nothrow_t&) noexcept { ::operator delete(p); }
 
 using namespace genko;
 using core::Json;
