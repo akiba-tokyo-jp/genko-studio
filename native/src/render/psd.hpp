@@ -76,6 +76,9 @@ struct Layer {
     // (PC2, the user's decision 5) an adjustment layer a codec read (render/psd_adjust.hpp): the correction's adjust.
     // One no codec reads is left out (skipped), as psd.py leaves every one out.
     std::optional<core::Json> adjust;
+    // (PC2a) the lookup tables its adjust uses (a color lookup's: the table its block holds, as GKLU bytes by their
+    // asset ref), which import_psd takes into the book with the correction.
+    std::map<std::string, core::Bytes> luts;
 };
 
 class File {

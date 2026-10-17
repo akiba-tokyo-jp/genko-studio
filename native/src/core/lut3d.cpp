@@ -465,6 +465,7 @@ Table decode(std::string_view bytes) {
 }
 
 std::shared_ptr<const Table> decoded(const std::string& ref, const Bytes& bytes) {
+    if (!bytes) return nullptr;  // (a table not held: not one decoded for another book)
     static std::mutex lock;
     static std::deque<std::pair<std::string, std::shared_ptr<const Table>>> kept;  // (the last used first)
     {
@@ -477,7 +478,6 @@ std::shared_ptr<const Table> decoded(const std::string& ref, const Bytes& bytes)
             return found.second;
         }
     }
-    if (!bytes) return nullptr;
     auto table = std::make_shared<const Table>(decode(*bytes));
     const std::lock_guard<std::mutex> hold(lock);
     kept.emplace_front(ref, table);
@@ -492,58 +492,42 @@ std::shared_ptr<const Table> decoded(const std::string& ref, const Bytes& bytes)
     return table;
 }
 
-namespace {
-std::mutex& made_lock() {
-    static std::mutex lock;
-    return lock;
-}
-std::deque<std::pair<std::string, Bytes>>& made() {
-    static std::deque<std::pair<std::string, Bytes>> all;
-    return all;
-}
-}  // namespace
-
-void remember(const std::string& ref, const Bytes& bytes) {
-    const std::lock_guard<std::mutex> hold(made_lock());
-    auto& all = made();
-    std::erase_if(all, [&ref](const auto& each) { return each.first == ref; });
-    all.emplace_front(ref, bytes);
-    if (all.size() > 8) all.resize(8);
-}
-
-Bytes remembered(const std::string& ref) {
-    const std::lock_guard<std::mutex> hold(made_lock());
-    for (const auto& [each, bytes] : made()) {
-        if (each == ref) return bytes;
-    }
-    return nullptr;
-}
-
-void keep_luts(std::map<std::string, Bytes>& luts, const Json& adjust) {
+void keep_luts(std::map<std::string, Bytes>& luts, const std::map<std::string, Bytes>& made, const Json& adjust) {
     if (!adjust.is_object() || adjust.value("kind", Json()) != Json("color_lookup")) return;
     const auto it = adjust.find("lut");
     if (it == adjust.end() || !it->is_string()) return;
     const std::string& ref = it->get_ref<const std::string&>();
     if (luts.contains(ref)) return;
-    if (Bytes bytes = remembered(ref)) {
-        luts.emplace(ref, std::move(bytes));
+    if (const auto found = made.find(ref); found != made.end() && found->second) {
+        luts.emplace(ref, found->second);
         return;
     }
     throw OpError("adjust color_lookup.lut: the book holds no lookup table " + ref + " (give the file's text as data)");
 }
 
+namespace {
+void add_refs(const Page& page, std::vector<std::string>& out) {
+    for (const Layer& layer : page.layers) {
+        if (layer.kind != LayerKind::Adjust || !layer.adjust || !layer.adjust->is_object()) continue;
+        if (layer.adjust->value("kind", Json()) != Json("color_lookup")) continue;
+        const auto lut = layer.adjust->find("lut");
+        if (lut == layer.adjust->end() || !lut->is_string()) continue;
+        if (std::find(out.begin(), out.end(), lut->get<std::string>()) == out.end()) out.push_back(lut->get<std::string>());
+    }
+}
+}  // namespace
+
 std::vector<std::string> refs_of(const Document& doc) {
     std::vector<std::string> out;
     for (std::size_t i = 0; i < doc.pages.size(); ++i) {
-        if (doc.is_deferred(i)) continue;
-        for (const Layer& layer : doc.page(i).layers) {
-            if (layer.kind != LayerKind::Adjust || !layer.adjust || !layer.adjust->is_object()) continue;
-            if (layer.adjust->value("kind", Json()) != Json("color_lookup")) continue;
-            const auto lut = layer.adjust->find("lut");
-            if (lut == layer.adjust->end() || !lut->is_string()) continue;
-            if (std::find(out.begin(), out.end(), lut->get<std::string>()) == out.end()) out.push_back(lut->get<std::string>());
-        }
+        if (!doc.is_deferred(i)) add_refs(doc.page(i), out);
     }
+    return out;
+}
+
+std::vector<std::string> refs_of(const Page& page) {
+    std::vector<std::string> out;
+    add_refs(page, out);
     return out;
 }
 

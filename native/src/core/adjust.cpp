@@ -72,16 +72,16 @@ Json read_native(const AdjustKind& kind, const Json& given, ReadMode mode, const
 }
 
 // A kind of the C++ build's own: its settings read (Op: clamped, the defaults filled; Stored: as they are) and
-// normalized by its group's hook.
-Json read_own(const AdjustKind& kind, const Json& settings, ReadMode mode, const Page* page) {
+// normalized by its group's hook (`made`: where a lookup table it makes goes).
+Json read_own(const AdjustKind& kind, const Json& settings, ReadMode mode, const Page* page, LookupTables* made) {
     Json read = read_params(kind.params, settings, mode, "adjust " + std::string(kind.name));
-    if (mode == ReadMode::Op && kind.hooks.normalize) read = kind.hooks.normalize(std::move(read), page);
+    if (mode == ReadMode::Op && kind.hooks.normalize) read = kind.hooks.normalize(std::move(read), page, made);
     return read;
 }
 
 // The whole of an adjust read by its kind (the caller found it): Python's settings as given, a kind of the C++ build's
 // own in its normal form, and its native.
-Json read_adjust(const AdjustKind& kind, const Json& adjust, ReadMode mode, const Page* page) {
+Json read_adjust(const AdjustKind& kind, const Json& adjust, ReadMode mode, const Page* page, LookupTables* made = nullptr) {
     Json out = Json::object();
     out["kind"] = std::string(kind.name);
     if (kind.group == "Python") {
@@ -89,7 +89,7 @@ Json read_adjust(const AdjustKind& kind, const Json& adjust, ReadMode mode, cons
             if (key != "kind" && key != "native") out[key] = value;
         }
     } else {
-        const Json own = read_own(kind, settings_of(adjust), mode, page);
+        const Json own = read_own(kind, settings_of(adjust), mode, page, made);
         for (const auto& [key, value] : own.items()) out[key] = value;
     }
     if (const Json* given = native_in(adjust)) {
@@ -170,21 +170,21 @@ Json without_native(const Json& adjust) {
     return out;
 }
 
-Json normalize_adjust(const Json& adjust, const Page* page) {
+Json normalize_adjust(const Json& adjust, const Page* page, LookupTables* made) {
     const std::string kind = kind_of(adjust);
     const AdjustKind* found = adjust_kind(kind);
     if (found == nullptr || !found->layer) throw OpError("adjust kind " + py_repr_str(kind) + " is not a correction layer's kind");
-    Json out = read_adjust(*found, adjust, ReadMode::Op, page);
+    Json out = read_adjust(*found, adjust, ReadMode::Op, page, made);
     require_function(*found, out, "the correction");
     return out;
 }
 
-Json normalize_filter(std::string_view kind, const Json& params, const Page* page) {
+Json normalize_filter(std::string_view kind, const Json& params, const Page* page, LookupTables* made) {
     const AdjustKind* found = adjust_kind(kind);
     if (found == nullptr || !found->filter) throw OpError("unknown filter " + std::string(kind));
     Json adjust = params.is_object() ? params : Json::object();
     adjust["kind"] = std::string(kind);
-    Json out = read_adjust(*found, adjust, ReadMode::Op, page);
+    Json out = read_adjust(*found, adjust, ReadMode::Op, page, made);
     out.erase("kind");
     // (a blend lays a correction layer over what is under it: a filter changes the pixels themselves — fade_layer lays
     // them by a blend afterwards)
@@ -210,6 +210,13 @@ void validate_adjustments(const Document& doc) {
                 const AdjustKind* found = adjust_kind(kind);
                 if (found == nullptr || !found->layer) throw OpError("adjust kind " + py_repr_str(kind) + " is not a correction layer's kind");
                 (void)read_adjust(*found, *layer.adjust, ReadMode::Stored, &page);
+                // (PC2a: a color_lookup's table the book holds — one it does not is never drawn with another table nor
+                // written)
+                if (kind == "color_lookup") {
+                    const auto lut = layer.adjust->find("lut");
+                    if (lut != layer.adjust->end() && lut->is_string() && !doc.luts.contains(lut->get<std::string>()))
+                        throw OpError("adjust color_lookup.lut: the book holds no lookup table " + lut->get<std::string>());
+                }
             } catch (const OpError& error) {
                 throw Error("value", "the correction layer " + layer.id + ": " + error.what());
             }
@@ -239,10 +246,10 @@ AdjustPtr adjust_function(const Json& adjust, const Page& page, const Document* 
             return nullptr;  // (settings it cannot read: as Python's form, the layer does nothing)
         }
     }
-    return found->hooks.function(normal, page, doc);
+    return found->hooks.function(normal, page, doc != nullptr ? &doc->luts : nullptr);
 }
 
-AdjustPtr filter_function(std::string_view kind, const Json& params, const Page& page, const Document* doc) {
+AdjustPtr filter_function(std::string_view kind, const Json& params, const Page& page, const LookupTables* luts) {
     const AdjustKind* found = adjust_kind(kind);
     if (found == nullptr || !found->filter) throw OpError("unknown filter " + std::string(kind));
     Json adjust = Json::object();
@@ -250,7 +257,7 @@ AdjustPtr filter_function(std::string_view kind, const Json& params, const Page&
     for (const auto& [key, value] : params.items()) adjust[key] = value;
     if (found->group == "Python" && python_way(adjust)) return std::make_shared<PreciseAdjustment>(kind, settings_of(adjust));
     require_function(*found, adjust, "the filter");
-    return found->hooks.function(adjust, page, doc);
+    return found->hooks.function(adjust, page, luts);
 }
 
 }  // namespace genko::core

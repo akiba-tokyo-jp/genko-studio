@@ -188,11 +188,11 @@ private slots:
         QVERIFY_EXCEPTION_THROWN(lut3d::decode(a.substr(0, a.size() - 3)), core::Error);
         QVERIFY_EXCEPTION_THROWN(lut3d::decode(a + "x"), core::Error);
         QVERIFY_EXCEPTION_THROWN(lut3d::decode("PNG"), core::Error);
-        // the tables an op made, kept a few at a time until its book takes them
+        // a table decoded from its bytes (kept a few at a time); without its bytes none, though one of its ref was
+        // decoded before (a table is always a book's own)
         const auto bytes = std::make_shared<const std::string>(a);
-        lut3d::remember(core::bytes_ref(a), bytes);
-        QVERIFY(lut3d::remembered(core::bytes_ref(a)) == bytes);
         QVERIFY(lut3d::decoded(core::bytes_ref(a), bytes)->data == look->data);
+        QVERIFY(lut3d::decoded(core::bytes_ref(a), nullptr) == nullptr);
     }
 };
 

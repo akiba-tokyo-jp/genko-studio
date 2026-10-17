@@ -720,8 +720,10 @@ File File::read(std::string data, const Limits& limits, bool lab) {
             // (PC2, the user's decision 5: an adjustment layer a codec reads is a correction layer — render/psd_adjust;
             // one none reads is left out, as psd.py leaves every one out)
             std::vector<std::string> notes;
+            std::map<std::string, core::Bytes> tables;
             AdjustContext context;
             context.mode = adjust_mode(f.mode_);
+            context.tables = &tables;
             if (rec.cged_size > 0)
                 context.companion = std::string_view(f.data_).substr(static_cast<std::size_t>(rec.cged_at), static_cast<std::size_t>(rec.cged_size));
             std::optional<core::Json> adjust = read_adjustment(
@@ -737,6 +739,7 @@ File File::read(std::string data, const Limits& limits, bool lab) {
                 layer.kind = "adjust";
                 layer.record = n;
                 layer.adjust = std::move(adjust);
+                layer.luts = std::move(tables);
                 const ChannelRef* mask = rec.channel(-2);
                 layer.has_mask = rec.mask && mask != nullptr && !rec.mask_disabled;
                 f.layers_.push_back(std::move(layer));

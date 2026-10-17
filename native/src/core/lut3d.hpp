@@ -67,19 +67,17 @@ double bayer4(int x, int y);
 // bytes that are not one (another magic or version, a size beyond 2..129, entries missing or more, a value not finite).
 std::string encode(const Table& table);
 Table decode(std::string_view bytes);
-// A decoded table by its bytes' ref, kept a few at a time (a table is drawn many times; 129³ is about 26 MB).
+// A decoded table by its bytes' ref, kept a few at a time (a table is drawn many times; 129³ is about 26 MB). None
+// without its bytes: a table is always the book's (Document::luts) — never one another book decoded before.
 std::shared_ptr<const Table> decoded(const std::string& ref, const Bytes& bytes);
 
-// The tables an op made of a file's text (normalize: the asset not in a book yet), by their ref, a few kept until the op
-// takes them into its book (keep_luts) or a filter uses one. None when it is not (any more) there.
-void remember(const std::string& ref, const Bytes& bytes);
-Bytes remembered(const std::string& ref);
-
-// A correction's lookup table into the book an op changes (add_layer, set_layer, set_adjustment: a color_lookup with a
-// `lut`), from the tables the op just made: OpError when the book does not hold it and it was not just made (a table of
-// another book).
-void keep_luts(std::map<std::string, Bytes>& luts, const Json& adjust);
-// The tables a book's color_lookup corrections use (their "lut" refs, each once, in their order): what the writer writes.
+// A correction's lookup table into the book an op changes (add_layer, set_layer, set_adjustment, import_psd: a
+// color_lookup with a `lut`): the book's own, or one the op just made of a file's text or read from a PSD (`made`, by
+// ref). OpError when neither holds it (a table of another book: its file's text is given as `data`).
+void keep_luts(std::map<std::string, Bytes>& luts, const std::map<std::string, Bytes>& made, const Json& adjust);
+// The tables a book's (or a page's) color_lookup corrections use (their "lut" refs, each once, in their order): what the
+// writer writes, what a page brings into another book (import_pages).
 std::vector<std::string> refs_of(const Document& doc);
+std::vector<std::string> refs_of(const Page& page);
 
 }  // namespace genko::core::lut3d

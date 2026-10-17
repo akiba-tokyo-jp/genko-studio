@@ -21,13 +21,14 @@ namespace {
 
 // ops._adjust_spec. PC2 (adjustments@1, the C++ build's own: core/adjust.hpp): a kind of the C++ build's own in its
 // normal form, a Python kind's `native` read (Python's own settings checked as Python checks them, kept as given).
-Json adjust_spec(const Json& raw_in, const Page* page) {
+// `made`: the lookup tables it makes of a file's text (color_lookup's data), which the op keeps in its book.
+Json adjust_spec(const Json& raw_in, const Page* page, LookupTables& made) {
     const bool own = uses_adjustments(raw_in);  // (an object, then)
     const auto python_kind = [&raw_in] {
         const Json* kind = get(raw_in, "kind");
         return kind != nullptr && kind->is_string() && python_adjust_kind(kind->get<std::string>());
     };
-    if (own && !python_kind()) return normalize_adjust(raw_in, page);
+    if (own && !python_kind()) return normalize_adjust(raw_in, page, &made);
     const Json raw = without_native(raw_in);
     std::string names;
     // Preserve Python's legacy invalid-input response while accepting native exposure below.
@@ -54,7 +55,7 @@ Json adjust_spec(const Json& raw_in, const Page* page) {
     }
     if (!own) return raw;
     // (its native read; one that says nothing leaves the layer Python's, as given)
-    const Json normal = normalize_adjust(raw_in, page);
+    const Json normal = normalize_adjust(raw_in, page, &made);
     return normal.contains("native") ? normal : raw;
 }
 
@@ -250,8 +251,9 @@ void set_layer_with(Document& doc, const Json& op) {
     }
     if (has(op, "adjust")) {
         if (layer.kind != LayerKind::Adjust) throw OpError("adjust is set on a correction layer");
-        layer.adjust = adjust_spec(op["adjust"], &page);
-        lut3d::keep_luts(doc.luts, *layer.adjust);  // (PC2a: a color_lookup's table into the book)
+        LookupTables made;
+        layer.adjust = adjust_spec(op["adjust"], &page, made);
+        lut3d::keep_luts(doc.luts, made, *layer.adjust);  // (PC2a: a color_lookup's table into the book)
     }
     if (has(op, "effect")) {
         if (py_truthy(op["effect"])) {
@@ -302,8 +304,9 @@ void add_layer(OpContext& c) {
         layer.fill = fill_spec(Json::object({{"gradient", truthy_at(op, "gradient") ? op["gradient"] : Json::object()}}));
         layer.title = truthy_at(op, "name") ? py_str(op["name"]) : std::string("グラデーション");
     } else if (kind_name == "adjust") {
-        layer.adjust = adjust_spec(truthy_at(op, "adjust") ? op["adjust"] : Json::object({{"kind", "levels"}}), &doc.page(at));
-        lut3d::keep_luts(doc.luts, *layer.adjust);  // (PC2a: a color_lookup's table into the book)
+        LookupTables made;
+        layer.adjust = adjust_spec(truthy_at(op, "adjust") ? op["adjust"] : Json::object({{"kind", "levels"}}), &doc.page(at), made);
+        lut3d::keep_luts(doc.luts, made, *layer.adjust);  // (PC2a: a color_lookup's table into the book)
         layer.title = truthy_at(op, "name") ? py_str(op["name"]) : std::string("色調補正");
     }
     Page& page = doc.edit_page(at);

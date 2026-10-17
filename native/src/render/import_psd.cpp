@@ -429,7 +429,7 @@ void import_psd(core::OpContext& c) {
             // blend its native.blend: a correction layer's own blend is not looked at)
             layer.kind = core::LayerKind::Adjust;
             layer.adjust = psd::imported_adjust(*item.adjust, item.blend, page);
-            core::lut3d::keep_luts(doc.luts, *layer.adjust);  // (PC2a: a color lookup's table into the book)
+            core::lut3d::keep_luts(doc.luts, item.luts, *layer.adjust);  // (PC2a: a color lookup's table into the book)
             layer.blend = "normal";
             if (auto mask = mask_of()) layer.mask = std::move(*mask);
         } else {

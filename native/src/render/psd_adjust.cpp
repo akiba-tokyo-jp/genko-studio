@@ -843,6 +843,10 @@ std::optional<Json> read_lookup(std::string_view d, std::vector<std::string>& no
         note_unread(notes, "clrL", "表を持たない（プロファイルによる）");
         return std::nullopt;
     }
+    if (current.tables == nullptr) {  // (no book to take its table: not read)
+        note_unread(notes, "clrL", "表を置く原稿が無い");
+        return std::nullopt;
+    }
     const auto format = text_of(*values, "LUTFormat", "enum");
     const char* file = format == std::optional<std::string>("LUTFormat3DL") ? "x.3dl" : format == std::optional<std::string>("LUTFormatLOOK") ? "x.look" : "x.cube";
     core::lut3d::Table table;
@@ -854,7 +858,7 @@ std::optional<Json> read_lookup(std::string_view d, std::vector<std::string>& no
     }
     const std::string bytes = core::lut3d::encode(table);
     const std::string ref = core::bytes_ref(bytes);
-    core::lut3d::remember(ref, std::make_shared<const std::string>(bytes));  // (import_psd takes it into the book)
+    (*current.tables)[ref] = std::make_shared<const std::string>(bytes);  // (import_psd takes it into the book)
     Json out{{"kind", "color_lookup"}, {"lut", ref}, {"size", static_cast<std::int64_t>(table.size)}};
     std::string name = text_of(*values, "LUT3DFileName", "TEXT").value_or(text_of(*values, "NM  ", "TEXT").value_or(""));
     if (!name.empty() && name.size() <= 1024) out["name"] = name;
@@ -876,11 +880,10 @@ std::optional<std::string> write_lookup(const Json& adjust, const core::Page&, s
             table.title.clear();
         }
     } else if (const auto lut = adjust.find("lut"); lut != adjust.end() && lut->is_string()) {
-        core::Bytes bytes;
+        core::Bytes bytes;  // (the book's own table)
         if (current.doc != nullptr) {
             if (const auto it = current.doc->luts.find(lut->get<std::string>()); it != current.doc->luts.end()) bytes = it->second;
         }
-        if (!bytes) bytes = core::lut3d::remembered(lut->get<std::string>());
         try {
             if (const auto held = core::lut3d::decoded(lut->get<std::string>(), bytes)) table = *held;
         } catch (const core::Error&) {

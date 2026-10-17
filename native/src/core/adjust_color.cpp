@@ -202,7 +202,7 @@ Json number_json(double v) {
 
 // Hue/Saturation: the colorize hue is 0..360 (a shift's −180..180, as it was given: an angle below 0 turned once) and
 // its saturation 0..100; each range's sliders in their canonical form (PhotoCraft's adjust_params hue_saturation).
-Json normal_hue_saturation(Json read, const Page*) {
+Json normal_hue_saturation(Json read, const Page*, LookupTables*) {
     const bool colorize = read.value("colorize", false);
     double hue = read.value("hue", 0.0);
     hue = colorize ? (hue < 0 ? hue + 360 : hue) : std::clamp(hue, -180.0, 180.0);
@@ -219,7 +219,7 @@ Json normal_hue_saturation(Json read, const Page*) {
 
 // Photo Filter: a preset names its colour (it is not kept: the colour is the setting; a later change of the colour
 // alone is not undone by a preset left behind).
-Json normal_photo_filter(Json read, const Page*) {
+Json normal_photo_filter(Json read, const Page*, LookupTables*) {
     const auto it = read.find("filter");
     if (it == read.end()) return read;
     const color_adjust::PhotoFilterPreset* preset = color_adjust::photo_filter(it->get<std::string>());
@@ -239,8 +239,8 @@ Json settings(const Json& adjust) {
         if (key != "kind" && key != "native") given[key] = value;
     }
     Json read = read_params(found->params, given, ReadMode::Op, "adjust " + kind);
-    if (kind == "hue_saturation") return normal_hue_saturation(std::move(read), nullptr);
-    if (kind == "photo_filter") return normal_photo_filter(std::move(read), nullptr);
+    if (kind == "hue_saturation") return normal_hue_saturation(std::move(read), nullptr, nullptr);
+    if (kind == "photo_filter") return normal_photo_filter(std::move(read), nullptr, nullptr);
     return read;
 }
 
@@ -425,7 +425,7 @@ private:
     bool same_ = false;
 };
 
-AdjustPtr function_of(const Json& adjust, const Page&, const Document*) {
+AdjustPtr function_of(const Json& adjust, const Page&, const LookupTables*) {
     const std::string kind = adjust.value("kind", std::string());
     const Json s = settings(adjust);
     if (kind == "hue_saturation") {

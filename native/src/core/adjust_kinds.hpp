@@ -53,11 +53,12 @@ struct AdjustParam {
 struct AdjustHooks {
     // The settings as the table read them (an op's: clamped, defaults filled) → their normal form (what depends on
     // several of them: PhotoCraft's canonical_bounds, a preset's colour, a channel record's white past its black…).
-    // OpError for what it refuses. None: the table's reading is the normal form.
-    std::function<Json(Json read, const Page* page)> normalize;
+    // OpError for what it refuses. None: the table's reading is the normal form. `made`: where a lookup table it makes
+    // of a file's text goes (none: it cannot make one).
+    std::function<Json(Json read, const Page* page, LookupTables* made)> normalize;
     // The correction on a page: `adjust` its normal form with its "kind" (a Python kind: the whole adjust, its native
-    // included). `doc`: where a lookup table's asset is.
-    std::function<AdjustPtr(const Json& adjust, const Page& page, const Document* doc)> function;
+    // included). `luts`: the lookup tables it may use (none: none).
+    std::function<AdjustPtr(const Json& adjust, const Page& page, const LookupTables* luts)> function;
 };
 
 struct AdjustKind {

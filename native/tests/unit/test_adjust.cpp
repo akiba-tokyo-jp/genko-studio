@@ -18,6 +18,7 @@
 #include <cstdio>
 #include <filesystem>
 #include <functional>
+#include <map>
 #include <string>
 #include <vector>
 
@@ -874,13 +875,15 @@ private slots:
     void psdToneCodecs() {
         const auto doc = eight_bit_page();
         const core::Page& page = doc.page(0);
-        const auto round_trip = [&page](const Json& adjust, std::string_view mode = "rgb", const core::Document* book = nullptr) {
+        std::map<std::string, core::Bytes> tables;  // (the lookup tables read: import_psd takes them into the book)
+        const auto round_trip = [&page, &tables](const Json& adjust, std::string_view mode = "rgb", const core::Document* book = nullptr) {
             std::vector<std::string> notes;
             const auto block = render::psd::write_adjustment(adjust, page, notes, book);
             if (!block) return Json();
             render::psd::AdjustContext context;
             context.mode = mode;
             context.companion = block->companion;
+            context.tables = &tables;
             const auto read = render::psd::read_adjustment(block->key, block->payload, notes, context);
             return read ? render::psd::imported_adjust(*read, "normal", page) : Json();
         };
@@ -914,7 +917,8 @@ private slots:
         const Json back = round_trip(*correction(lut).adjust, "rgb", &lut);
         QCOMPARE(back["name"], Json("Cool Filter"));
         QCOMPARE(back["dither"], Json(true));
-        const auto table = core::lut3d::decoded(back["lut"].get<std::string>(), core::lut3d::remembered(back["lut"].get<std::string>()));
+        QVERIFY(tables.contains(back["lut"].get<std::string>()));
+        const auto table = core::lut3d::decoded(back["lut"].get<std::string>(), tables[back["lut"].get<std::string>()]);
         QCOMPARE(table->data.size(), core::lut3d::builtin("cool")->data.size());
         for (std::size_t i = 0; i < table->data.size(); ++i) QVERIFY(std::abs(table->data[i] - core::lut3d::builtin("cool")->data[i]) < 1e-6);  // (6 decimals)
         // Python's forms: the nearest, said

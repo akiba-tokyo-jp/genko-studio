@@ -267,7 +267,7 @@ std::vector<Curve> python_composite(const std::string& kind, const Json& setting
 // levels and curve: the composite (Python's settings) and the channel records in their space, by Genko's formulas
 // (Python's levels_table and monotone cubic: method genko) or PhotoCraft's (upstream) — levels the composite then the
 // channel's record (PhotoCraft adjust.rs:211), a curve the channel's record then the composite (216).
-AdjustPtr tone_function(const Json& adjust, const Page& page, const Document*) {
+AdjustPtr tone_function(const Json& adjust, const Page& page, const LookupTables*) {
     const std::string kind = adjust.value("kind", std::string());
     const Json settings = python_settings(adjust);
     const bool upstream = native_text(adjust, "method") == "upstream";
@@ -408,7 +408,7 @@ AdjustPtr per_channel(const Json& settings, Curve one, const Page& page) {
 
 // brightness_contrast's upstream formulas (native.method modern | legacy): brightness -150..150, contrast modern
 // -50..100, legacy -100..100 (clamped, as PhotoCraft's fields).
-AdjustPtr brightness_function(const Json& adjust, const Page& page, const Document*) {
+AdjustPtr brightness_function(const Json& adjust, const Page& page, const LookupTables*) {
     const Json settings = python_settings(adjust);
     try {
         const bool legacy = native_text(adjust, "method") == "legacy";
@@ -432,7 +432,7 @@ AdjustPtr brightness_function(const Json& adjust, const Page& page, const Docume
 }
 
 // posterize's upstream bins (native.method floor): 2..255 levels (rounded).
-AdjustPtr posterize_function(const Json& adjust, const Page& page, const Document*) {
+AdjustPtr posterize_function(const Json& adjust, const Page& page, const LookupTables*) {
     const Json settings = python_settings(adjust);
     try {
         const double given = setting(settings, "levels", 4);
@@ -469,7 +469,7 @@ private:
     bool reverse_, dither_;
 };
 
-AdjustPtr gradient_function(const Json& adjust, const Page&, const Document*) {
+AdjustPtr gradient_function(const Json& adjust, const Page&, const LookupTables*) {
     try {
         return std::make_shared<GradientFunction>(python_settings(adjust), native_flag(adjust, "reverse"), native_flag(adjust, "dither"));
     } catch (const PyValueError&) {
@@ -509,12 +509,13 @@ std::string base_name(std::string_view path) {
     return std::string(at == std::string_view::npos ? path : path.substr(at + 1));
 }
 
-// An op's color_lookup: a file's text (`data`, its format by `file_name`) made into the book's table (its asset ref in
-// `lut`, its size and name), else a look, else a table the book holds already (`lut`), else none (the colours as they
-// are). The keys in the table's order.
-Json lookup_normalize(Json read, const Page*) {
+// An op's color_lookup: a file's text (`data`, its format by `file_name`) made into a table (its asset ref in `lut`,
+// its size and name; the table into `made`, which the op keeps in its book or a filter uses), else a look, else a table
+// the book holds already (`lut`), else none (the colours as they are). The keys in the table's order.
+Json lookup_normalize(Json read, const Page*, LookupTables* made) {
     if (const auto data = read.find("data"); data != read.end()) {
         if (!data->is_string()) throw OpError("adjust color_lookup.data must be the text of a .cube, .3dl or .look file");
+        if (made == nullptr) throw OpError("adjust color_lookup.data is an op's (a file's text made into the book's table)");
         const std::string& text = data->get_ref<const std::string&>();
         if (text.size() > lut3d::kMaxFileBytes) throw OpError("adjust color_lookup.data is larger than 32 MiB");
         const std::string file = read.contains("file_name") ? read["file_name"].get<std::string>() : std::string("lut.cube");
@@ -526,7 +527,7 @@ Json lookup_normalize(Json read, const Page*) {
         }
         const std::string bytes = lut3d::encode(table);
         const std::string ref = bytes_ref(bytes);
-        lut3d::remember(ref, std::make_shared<const std::string>(bytes));
+        (*made)[ref] = std::make_shared<const std::string>(bytes);
         if (!read.contains("name")) read["name"] = base_name(file);
         read.erase("look");
         read["lut"] = ref;
@@ -548,7 +549,7 @@ Json lookup_normalize(Json read, const Page*) {
     return out;
 }
 
-AdjustPtr lookup_function(const Json& adjust, const Page&, const Document* doc) {
+AdjustPtr lookup_function(const Json& adjust, const Page&, const LookupTables* luts) {
     const bool tetrahedral = adjust.value("interpolation", std::string()) == "tetrahedral";
     const bool dither = adjust.value("dither", false);
     std::shared_ptr<const lut3d::Table> table;
@@ -558,11 +559,10 @@ AdjustPtr lookup_function(const Json& adjust, const Page&, const Document* doc) 
         table = std::shared_ptr<const lut3d::Table>(std::shared_ptr<const lut3d::Table>(), found);
     } else if (const auto lut = adjust.find("lut"); lut != adjust.end() && lut->is_string()) {
         const std::string& ref = lut->get_ref<const std::string&>();
-        Bytes bytes;
-        if (doc != nullptr) {
-            if (const auto it = doc->luts.find(ref); it != doc->luts.end()) bytes = it->second;
+        Bytes bytes;  // (the book's own table, or the one a filter's op just made: never another book's)
+        if (luts != nullptr) {
+            if (const auto it = luts->find(ref); it != luts->end()) bytes = it->second;
         }
-        if (!bytes) bytes = lut3d::remembered(ref);  // (a filter's table: made by its op, not kept in the book)
         try {
             table = lut3d::decoded(ref, bytes);
         } catch (const Error&) {
@@ -573,8 +573,8 @@ AdjustPtr lookup_function(const Json& adjust, const Page&, const Document* doc) 
     return std::make_shared<LookupFunction>(std::move(table), tetrahedral, dither);
 }
 
-AdjustHooks hooks(std::function<AdjustPtr(const Json&, const Page&, const Document*)> function,
-                  std::function<Json(Json, const Page*)> normalize = nullptr) {
+AdjustHooks hooks(std::function<AdjustPtr(const Json&, const Page&, const LookupTables*)> function,
+                  std::function<Json(Json, const Page*, LookupTables*)> normalize = nullptr) {
     AdjustHooks out;
     out.function = std::move(function);
     out.normalize = std::move(normalize);

@@ -12557,7 +12557,10 @@
         "native/tests/unit/test_lut3d.cpp",
         "native/tests/unit/test_adjust.cpp",
         "native/tests/gui/test_gui_adjust.cpp",
-        "native/tests/contract/test_contract_adjust.cpp"
+        "native/tests/contract/test_contract_adjust.cpp",
+        "native/src/render/psd_adjust.cpp",
+        "native/src/core/ops_bookpages.cpp",
+        "native/src/render/import_psd.cpp"
       ],
       "pc0": {
         "date": "2026-10-16",
@@ -19659,7 +19662,11 @@
         "native/tests/unit/test_lut3d.cpp",
         "native/tests/unit/test_adjust.cpp",
         "native/tests/gui/test_gui_adjust.cpp",
-        "native/tests/contract/test_contract_adjust.cpp"
+        "native/tests/contract/test_contract_adjust.cpp",
+        "native/src/core/ops_bookpages.cpp",
+        "native/src/core/adjust.cpp",
+        "native/src/render/psd.cpp",
+        "native/src/render/import_psd.cpp"
       ],
       "pc0": {
         "date": "2026-10-16",

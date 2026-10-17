@@ -1,6 +1,7 @@
 #pragma once
 
 #include <functional>
+#include <map>
 #include <optional>
 #include <string>
 #include <string_view>
@@ -57,7 +58,10 @@ struct AdjustContext {
     // black; lab lightness, a, b; other none).
     std::string_view mode = "rgb";
     std::string_view companion;            // (reading) the layer's CgEd block's payload (brightness_contrast's)
-    const core::Document* doc = nullptr;  // (writing) the book: a lookup table's asset
+    // (reading) where a block's lookup table goes (clrL's: the table its file text holds, by its asset ref — import_psd
+    // takes it into the book with its correction); none: such a block is not read
+    std::map<std::string, core::Bytes>* tables = nullptr;
+    const core::Document* doc = nullptr;  // (writing) the book: a lookup table's asset (only the book's own)
 };
 const AdjustContext& adjust_context();
 // The PSD's mode by its number in the file header (rgb, gray, cmyk, lab, other).

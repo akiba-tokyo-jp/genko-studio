@@ -21,6 +21,7 @@
 #include "core/command_bus.hpp"
 #include "core/covers.hpp"
 #include "core/ids.hpp"
+#include "core/lut3d.hpp"
 #include "core/ops_util.hpp"
 #include "core/pyconv.hpp"
 #include "core/pyops.hpp"
@@ -572,7 +573,8 @@ void set_assignee(OpContext& c) {
 // their lines, their panels, layers and lines under new ids (and what names their layers following them: the user's
 // decision D2, remap_layer_refs). The pages refer to the other book's asset files (placed
 // pictures) without copying them: the import dialog and the MCP tool copy them first (storage::copy_assets, as
-// Python's app and MCP tools do with merge.copy_assets); `genko apply`, as Python's, copies none.
+// Python's app and MCP tools do with merge.copy_assets); `genko apply`, as Python's, copies none. (PC2a: the lookup
+// tables their corrections use come into this book's Document::luts, which the writer writes as its assets.)
 void import_pages(OpContext& c, const BookPageHooks& hooks) {
     Document& doc = c.doc;
     const Json& op = c.op;
@@ -637,6 +639,11 @@ void import_pages(OpContext& c, const BookPageHooks& hooks) {
         std::vector<StoryLine*> copied_lines;
         for (StoryLine& line : lines) copied_lines.push_back(&line);
         remap_layer_refs(clone, copied_lines, layer_map);
+        // (PC2a: the 3D lookup tables of its color_lookup corrections come with it — a book holds every table its
+        // corrections use, or it could not be written)
+        for (const std::string& ref : lut3d::refs_of(clone)) {
+            if (const auto table = other.luts.find(ref); table != other.luts.end() && table->second) doc.luts.emplace(ref, table->second);
+        }
         for (StoryLine& line : lines) doc.story.push_back(std::move(line));
         doc.pages.push_back(std::make_shared<Page>(std::move(clone)));
     }

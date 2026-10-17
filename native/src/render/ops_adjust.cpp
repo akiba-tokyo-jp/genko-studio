@@ -363,7 +363,8 @@ FilterWork filter_work(const core::Document& doc, const core::Page& page, std::s
     const bool python = core::python_adjust_kind(kind);
     Json params = params_in.is_object() ? params_in : Json::object();
     if (!python) params.erase("channel");  // (PC1c's target: render/channels lends it; not a setting of the kind)
-    work.params = core::normalize_filter(kind, params, &page);
+    core::LookupTables made;  // (a color_lookup's table of the op's file text: used, not kept in the book)
+    work.params = core::normalize_filter(kind, params, &page, &made);
     if (python) {
         Json adjust = work.params;
         adjust["kind"] = std::string(kind);
@@ -384,7 +385,12 @@ FilterWork filter_work(const core::Document& doc, const core::Page& page, std::s
         }
         core::adjust_not_yet("the filter " + std::string(kind), found->group);
     }
-    work.function = core::filter_function(kind, work.params, page, &doc);
+    core::LookupTables luts;
+    if (!made.empty()) {
+        luts = doc.luts;
+        luts.insert(made.begin(), made.end());
+    }
+    work.function = core::filter_function(kind, work.params, page, made.empty() ? &doc.luts : &luts);
     if (!work.function) throw core::OpError("the filter " + std::string(kind) + " cannot be used with these settings");
     return work;
 }
