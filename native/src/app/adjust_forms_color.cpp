@@ -436,13 +436,13 @@ void correct(MainWindow* window, const std::string& kind, const QString& title) 
 }  // namespace
 
 std::vector<FormKind> color_forms() {
-    return {{"hue_saturation", "PC2b", QStringLiteral("色相・彩度"), hue_saturation_form},
-            {"vibrance", "PC2b", QStringLiteral("自然な彩度"), vibrance_form},
-            {"color_balance", "PC2b", QStringLiteral("カラーバランス"), color_balance_form},
-            {"black_white", "PC2b", QStringLiteral("白黒"), black_white_form},
-            {"photo_filter", "PC2b", QStringLiteral("レンズフィルター"), photo_filter_form},
-            {"channel_mixer", "PC2b", QStringLiteral("チャンネルミキサー"), channel_mixer_form},
-            {"selective_color", "PC2b", QStringLiteral("特定色域の選択"), selective_color_form}};
+    return {{"hue_saturation", "PC2b", QStringLiteral("色相・彩度"), hue_saturation_form, core::Json::object(), {}},
+            {"vibrance", "PC2b", QStringLiteral("自然な彩度"), vibrance_form, core::Json::object(), {}},
+            {"color_balance", "PC2b", QStringLiteral("カラーバランス"), color_balance_form, core::Json::object(), {}},
+            {"black_white", "PC2b", QStringLiteral("白黒"), black_white_form, core::Json::object(), {}},
+            {"photo_filter", "PC2b", QStringLiteral("レンズフィルター"), photo_filter_form, core::Json::object(), {}},
+            {"channel_mixer", "PC2b", QStringLiteral("チャンネルミキサー"), channel_mixer_form, core::Json::object(), {}},
+            {"selective_color", "PC2b", QStringLiteral("特定色域の選択"), selective_color_form, core::Json::object(), {}}};
 }
 
 void build_color_menu(QMenu* adjust, const MenuContext& context) {
