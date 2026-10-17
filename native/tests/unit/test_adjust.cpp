@@ -32,6 +32,7 @@
 #include "render/ink.hpp"
 #include "render/ink_canvas.hpp"
 #include "render/not_yet_ported.hpp"
+#include "render/ops_adjust.hpp"
 #include "render/ops_registry.hpp"
 #include "render/page.hpp"
 #include "render/psd_adjust.hpp"
@@ -401,10 +402,18 @@ private slots:
                 if (!p.optional) expected.emplace_back(p.key);
             QCOMPARE(keys, expected);
             (void)core::read_params(kind.params, read, core::ReadMode::Stored, name);  // (its normal form is well formed)
-            if (kind.layer) {
+            // (a kind whose group has not written its formula yet: refused, named — its group's own tests take it over)
+            if (kind.layer && !kind.hooks.function) {
                 const std::string why = refusal(doc, Json{{"op", "add_layer"}, {"page", 1}, {"kind", "adjust"}, {"adjust", Json{{"kind", name}}}});
                 QVERIFY2(why.starts_with("not_yet_ported: ") && why.find(name) != std::string::npos, why.c_str());
             }
+            bool missing = false;
+            try {
+                (void)render::adjust_ops::filter_work(doc, doc.page(0), name, given);
+            } catch (const core::Error& error) {
+                missing = error.code() == "not_yet_ported";
+            }
+            if (!missing) continue;
             Json op{{"op", "filter_raster"}, {"page", 1}, {"id", "paint"}, {"kind", name}};
             for (const auto& [key, value] : given.items()) op[key] = value;
             const std::string why = refusal(doc, op);
@@ -415,7 +424,17 @@ private slots:
         QVERIFY_EXCEPTION_THROWN(core::read_params(core::adjust_kind("vibrance")->params, Json{{"vibrance", "a"}}, core::ReadMode::Op, "v"), core::OpError);
         QVERIFY(refusal(doc, Json{{"op", "filter_raster"}, {"page", 1}, {"id", "paint"}, {"kind", "invert"}, {"native", Json{{"blend", "multiply"}}}})
                     .starts_with("apply: "));
-        for (const char* name : {"set_adjustment", "auto_adjust", "hdr_toning", "apply_image", "calculations", "trap", "fade_layer"}) {
+        // (the ops whose bodies are not written yet: each group takes its own out of this list as it writes it)
+        const std::vector<const char*> not_yet{
+            "set_adjustment",  // PC2a
+            "auto_adjust",     // PC2a
+            "hdr_toning",      // PC2c
+            "apply_image",     // PC2c
+            "calculations",    // PC2c
+            "trap",            // PC2c
+            "fade_layer",      // PC2c
+        };
+        for (const char* name : not_yet) {
             const std::string why = refusal(doc, Json{{"op", name}, {"page", 1}});
             QVERIFY2(why.starts_with("not_yet_ported: ") && why.find(name) != std::string::npos, why.c_str());
         }
@@ -545,13 +564,20 @@ private slots:
             QVERIFY(core::adjust_kind(codec.kind) != nullptr);
             QVERIFY(codec.group == "PC2a" || codec.group == "PC2b");
         }
+        const auto codec_of = [&codecs](std::string_view key) {
+            return *std::find_if(codecs.begin(), codecs.end(), [key](const auto& c) { return c.key == key; });
+        };
         std::vector<std::string> notes;
-        QVERIFY(!render::psd::read_adjustment("levl", "", notes));
-        QVERIFY(!notes.empty() && notes.back().find("levels") != std::string::npos);
+        if (!codec_of("levl").read) {  // (until PC2a writes it)
+            QVERIFY(!render::psd::read_adjustment("levl", "", notes));
+            QVERIFY(!notes.empty() && notes.back().find("levels") != std::string::npos);
+        }
         QVERIFY(!render::psd::read_adjustment("SoCo", "", notes));
         const auto doc = with_correction(eight_bit_page(), Json{{"kind", "invert"}});
-        QVERIFY(!render::psd::write_adjustment(Json{{"kind", "invert"}}, doc.page(0), notes));
-        QVERIFY(!formats::psd_adjust_layer(correction(doc), doc.page(0), render::Size{200, 200}, notes));
+        if (!codec_of("nvrt").write) {  // (until PC2a writes it: not written, as Python's PSD)
+            QVERIFY(!render::psd::write_adjustment(Json{{"kind", "invert"}}, doc.page(0), notes));
+            QVERIFY(!formats::psd_adjust_layer(correction(doc), doc.page(0), render::Size{200, 200}, notes));
+        }
         std::vector<std::string> order;
         const std::function<void(render::PageLayer&&)> each = [&](render::PageLayer&& layer) { order.push_back(layer.name); };
         const std::function<void(const core::Layer&)> adjust_layers = [&](const core::Layer& layer) { order.push_back("adjust " + layer.id); };
