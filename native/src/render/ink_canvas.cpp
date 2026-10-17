@@ -438,6 +438,33 @@ void InkCanvas::adjust_planes(const core::InkRecords& records, double opacity, b
     }
 }
 
+void InkCanvas::correct(const InkPicture& changed, double opacity, bool clip, const Image* mask, std::string_view mode) {
+    if (mask && (mask->mode() != "L" || mask->size() != impl_->size)) throw core::Error("value", "the correction's mask does not match the canvas");
+    if (!supports_blend(mode)) throw core::Error("not_yet_ported", "the blend " + std::string(mode) + " on a " + std::string(core::to_string(impl_->color.space)) + " page");
+    if (changed.size != impl_->size || changed.channels != impl_->n) throw core::Error("value", "the corrected inks do not match the canvas");
+    const bool normal = mode.empty() || mode == "normal";
+    const unsigned n = impl_->n;
+    std::array<double, core::kPlatesMax> mixed{};
+    for (int y = 0; y < impl_->size.height; ++y) {
+        const auto* shown = mask ? reinterpret_cast<const unsigned char*>(mask->raw()->image[y]) : nullptr;
+        for (int x = 0; x < impl_->size.width; ++x) {
+            const std::size_t i = std::size_t(y) * impl_->size.width + x;
+            double* p = impl_->px.data() + i * impl_->stride;
+            double amount = std::clamp(opacity, 0.0, 1.0) * (clip && impl_->previous ? p[n + 1] : 1.0);
+            if (shown) amount *= shown[x] / 255.0;
+            if (!(amount > 0)) continue;
+            const double* now = changed.values.data() + i * (n + 1);
+            if (!normal) mix(impl_->color.space, n, mode, p, now, mixed.data());
+            for (unsigned c = 0; c < n; ++c) {
+                const double next = p[c] + ((normal ? now[c] : mixed[c]) - p[c]) * amount;
+                p[c] = impl_->hdr ? next : std::clamp(next, 0.0, 1.0);
+                if (!std::isfinite(p[c])) throw core::Error("value", "the ink composite exceeds the finite working range");
+            }
+            p[n] = std::clamp(p[n] + (now[n] - p[n]) * amount, 0.0, 1.0);  // (the 8-bit page's composite mixes the alpha too)
+        }
+    }
+}
+
 void InkCanvas::forget_clip() { impl_->previous = false; }
 
 // color-model@1 (PC1d): a bitmap page's lightness as it prints, 0 or 1 at 50% (per pixel: a part of the page drawn the

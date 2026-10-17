@@ -108,6 +108,12 @@ bool uses_color_precision(const core::Page& page, bool print);
 class ColorCanvas;
 // Blend an editable precise-colour stroke layer without an RGBA8 intermediate.
 void blend_color_strokes(ColorCanvas& canvas, const core::Page& page, const core::Layer& layer, int dpi, Box area, const core::Document* episode = nullptr);
+// PC2d (document:color-depth-model): whether a layer with precise colour of its own (precise pixels, precise lines) is
+// drawn as more than those alone — with lines on its precise pixels, pictures laid on it, effects, its colour, a
+// screen, or as a tone —, and the layer so drawn as the page draws it in proof (a precise merge composites it so; a
+// tone as the 8-bit merge takes it).
+bool precise_layer_styled(const core::Layer& layer);
+void blend_precise_layer(ColorCanvas& canvas, const core::Page& page, const core::Layer& layer, int dpi, Box area, const core::Document* episode = nullptr);
 // Same paper/legacy-page-fill background used by regular drawing and destructive flatten.
 Image page_background(const core::Page& page, Size size, bool name_or_proof);
 

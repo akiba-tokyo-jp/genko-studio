@@ -9,6 +9,7 @@
 #include "storage/transaction.hpp"
 #include "storage/writer.hpp"
 #include "render/page.hpp"
+#include "render/png.hpp"
 #include "render/ops_registry.hpp"
 using namespace genko;
 using core::Json;
@@ -213,7 +214,7 @@ private slots:
     void sharedColorAssetStillChecksEachLayer_data() {
         QTest::addColumn<QString>("precision"); QTest::addColumn<QString>("badField");
         for (const auto& precision : {QStringLiteral("u16"),QStringLiteral("f32")})
-            for (const auto& bad : {QStringLiteral("width"),QStringLiteral("precision"),QStringLiteral("role")})
+            for (const auto& bad : {QStringLiteral("width"),QStringLiteral("precision"),QStringLiteral("kind")})
                 QTest::newRow((precision+"-"+bad).toUtf8().constData()) << precision << bad;
     }
     void sharedColorAssetStillChecksEachLayer() {
@@ -232,7 +233,9 @@ private slots:
         storage::AssetStore assets(dir);
         auto payload=storage::project_payload_v4(doc,assets);
         auto& bad=payload["pages"][0]["layers"].back();
-        if (badField=="role") bad["role"]="tone";
+        // (PC2d, document:color-depth-model: a tone layer holding precise pixels is drawn as a tone now — the 8-bit page's
+        // way —, so a layer of a kind that holds no pixels is the style no build draws)
+        if (badField=="kind") bad["kind"]="fill";
         else if (badField=="width") bad["color_raster"]["width"]=2;
         else bad["color_raster"]["precision"]=precision=="u16" ? "f32" : "u16";
         const auto loaded=storage::load_document_payload(payload,dir);
@@ -240,9 +243,12 @@ private slots:
         const auto& layers=loaded.document.page(0).layers;
         const auto first=layers.at(layers.size()-2).color_raster;
         QVERIFY(first); QCOMPARE(*first,*original);
-        if (badField=="role") {
+        if (badField=="kind") {
             QVERIFY(first==layers.back().color_raster);
             QVERIFY(loaded.document.read_only_reason.find("high-precision color layer style")!=std::string::npos);
+            auto toned=storage::project_payload_v4(doc,assets);
+            toned["pages"][0]["layers"].back()["role"]="tone";
+            QVERIFY(storage::load_document_payload(toned,dir).document.read_only_reason.empty());
         } else {
             QVERIFY(!layers.back().color_raster);
             QVERIFY(std::any_of(loaded.report.issues.begin(),loaded.report.issues.end(),
@@ -323,9 +329,11 @@ private slots:
         catch(const core::Error&) { refused=true; }
         QVERIFY(refused);
     }
-    void toneRoleCannotHideUnsupportedPrecisionStyle() {
+    // PC2d (document:color-depth-model): a tone layer holding precise pixels — refused before (read-only, not saved, not
+    // drawn) — is a tone as on the 8-bit page: read, saved and drawn as the same tone layer holding 8-bit pixels is.
+    void toneRolePreciseLayerIsDrawnAsATone() {
         QTemporaryDir tmp;
-        auto doc=core::new_episode("トーン拒否",core::Num(1),2,core::PageSpec::custom(20,20,16,16,1,2,2,2,2,72,"color"));
+        auto doc=core::new_episode("トーン",core::Num(1),2,core::PageSpec::custom(20,20,16,16,1,2,2,2,2,72,"color"));
         const Json put={{"op","put_color_raster"},{"page",1},{"width",1},{"height",1},
                         {"precision","u16"},{"pixels",Json::array({1000,1001,1002,65535})}};
         auto base=core::CommandBus().apply(doc,Json::array({put}),core::Actor("human:test")).doc;
@@ -333,13 +341,22 @@ private slots:
         auto payload=storage::project_payload_v4(base,assets);
         payload["pages"][0]["layers"].back()["role"]="tone";
         const auto loaded=storage::load_document_payload(payload,std::filesystem::path(tmp.path().toStdString()));
-        QVERIFY(!loaded.document.read_only_reason.empty());
+        QVERIFY2(loaded.document.read_only_reason.empty(),loaded.document.read_only_reason.c_str());
         base.edit_page(0).layers.back().role=core::LayerRole::Tone;
-        bool saved=false, rendered=false;
-        try { (void)storage::project_payload_v4(base,assets); saved=true; } catch(const core::Error&) {}
-        try { (void)render::render_page(base.page(0),72); rendered=true; } catch(const core::Error&) {}
-        QVERIFY(!saved);
-        QVERIFY(!rendered);
+        (void)storage::project_payload_v4(base,assets);  // (saved)
+        render::RenderOptions options;
+        const auto drawn=render::render_page(base.page(0),72,options,&base);
+        QVERIFY(drawn.omitted.empty());
+        auto eight=base;  // (the same tone layer with 8-bit pixels, on an 8-bit page)
+        auto& layer=eight.edit_page(0).layers.back();
+        layer.color_raster.reset();
+        layer.raster_png=std::make_shared<const std::string>(render::write_png(render::Image::create("RGBA",render::Size{1,1},render::Ink{4,4,4,255})));
+        QVERIFY(!render::uses_color_precision(eight.page(0),false));
+        const std::string a=drawn.image.convert("RGB").tobytes(), b=render::render_page(eight.page(0),72,options,&eight).image.convert("RGB").tobytes();
+        QCOMPARE(a.size(),b.size());
+        int worst=0;
+        for (std::size_t i=0;i<a.size();++i) worst=std::max(worst,std::abs(int(static_cast<unsigned char>(a[i]))-int(static_cast<unsigned char>(b[i]))));
+        QVERIFY2(worst<=1,qPrintable(QString::number(worst)));
     }
     void finiteHdrExposureStaysWhite() {
         auto doc = core::new_episode("HDR",core::Num(1),2,core::PageSpec::custom(20,20,16,16,1,2,2,2,2,72,"color"));
@@ -395,25 +412,24 @@ private slots:
         const auto payload = storage::project_payload_v4(result.doc, assets);
         QVERIFY(std::find(payload.at("features").begin(), payload.at("features").end(), "native.exposure_v1") != payload.at("features").end());
     }
-    void unsupportedColorStyleRollsBackWholeBatch() {
-        auto doc = core::new_episode("拒否試験", core::Num(1), 2, core::PageSpec::b4_comic());
+    // PC2d (document:color-depth-model): a precise layer's colour of its own — refused before (the whole batch rolled
+    // back) — is drawn as the 8-bit page draws a layer's colour: the batch goes through, the pixels keep their bytes,
+    // the page shows the colour where the layer is. (A batch rolled back whole: vectorConversionRefusesPrecisionLoss.)
+    void colourOfAPreciseLayerIsDrawn() {
+        auto doc = core::new_episode("層の色", core::Num(1), 2, core::PageSpec::custom(20, 20, 16, 16, 1, 2, 2, 2, 2, 72, "color"));
+        doc.edit_page(0).numero = false;
         const Json put = {{"op", "put_color_raster"}, {"page", 1}, {"width", 1}, {"height", 1},
                          {"precision", "u16"}, {"pixels", Json::array({1000, 1001, 1002, 65535})}};
         const auto base = core::CommandBus().apply(doc, Json::array({put}), core::Actor("human:test")).doc;
         const auto bytes = base.page(0).layers.back().color_raster;
-        bool rejected = false;
-        try {
-            (void)core::CommandBus().apply(base, Json::array({
+        const auto result = core::CommandBus().apply(base, Json::array({
                 Json{{"op", "set_note"}, {"page", 2}, {"note", "前置変更"}},
-                Json{{"op", "set_layer"}, {"page", 1}, {"id", base.page(0).layers.back().id}, {"color", Json::array({1,2,3})}}}),
+                Json{{"op", "set_layer"}, {"page", 1}, {"id", base.page(0).layers.back().id}, {"color", Json::array({200, 40, 10})}}}),
                 core::Actor("human:test"));
-        } catch (const core::ApplyError& e) {
-            rejected = std::string(e.what()).find("high-precision") != std::string::npos;
-        }
-        QVERIFY(rejected);
-        QVERIFY(base.page(1).note.empty());
-        QCOMPARE(base.page(0).layers.back().blend, std::string("normal"));
-        QCOMPARE(base.page(0).layers.back().color_raster, bytes);
+        QCOMPARE(result.doc.page(1).note, std::string("前置変更"));
+        QCOMPARE(result.doc.page(0).layers.back().color_raster, bytes);
+        const auto image = render::render_page(result.doc.page(0), 72).image;
+        QCOMPARE(image.getpixel(image.width() / 2, image.height() / 2), (std::vector<double>{200, 40, 10}));
     }
     void exposureAdjustmentSeesAllSixteenBits() {
         auto doc = core::new_episode("露光量試験", core::Num(1), 2,

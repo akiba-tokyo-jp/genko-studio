@@ -448,38 +448,21 @@ void convert_layer(const core::Page& page, core::Layer& layer, const Model& from
 
 // Why the page cannot be drawn as it is now yet — in precise colour: a page of 16 or 32 bits (precise pixels), an RGB
 // page of a profile (its values, at 8 bits too) — naming the first layer that cannot (what render::page and
-// core::validate_color_document refuse); nothing when it can.
+// core::validate_color_document refuse); nothing when it can. (PC2d, document:color-depth-model: tone layers, layers in
+// a folder, corrections that move shapes, precise layers with lines, pictures, effects, a screen or a colour of their
+// own, v2 line layers' rasters are drawn: render/page precise_layer.)
 std::optional<std::string> precise_blocker(const core::Page& page) {
     const bool precise = std::any_of(page.layers.begin(), page.layers.end(), [](const core::Layer& l) { return l.color_raster != nullptr; });
     if (!precise && !core::profiled_rgb(page)) return std::nullopt;
     for (const core::Layer& layer : page.layers) {
         const std::string where = layer_name(page, layer);
-        if (layer.color_raster) {
-            if (layer.kind != core::LayerKind::Raster) return where + " is not a paint layer (a layer of lines with pixels)";
-            if (layer.role == core::LayerRole::Tone) return where + " is a tone layer";
-            if (layer.stroke_count()) return where + " holds lines";
-            if (!layer.patches.empty()) return where + " holds pictures laid on it";
-            if (layer.panel_clip) return where + " keeps its lines inside the panels (はみ出し off)";
-            if (layer.effect || layer.screen || layer.color) return where + " has an effect, a screen or a colour of its own";
-        }
+        const bool holds_drawing = layer.kind == core::LayerKind::Raster || layer.kind == core::LayerKind::Strokes || layer.kind == core::LayerKind::Tone;
+        if (layer.color_raster && !holds_drawing) return where + " is not a layer that holds pixels";
         if (!layer.visible || layer.kind == core::LayerKind::Folder) continue;
-        if (core::has_color_strokes(layer) && (layer.mask || layer.effect || layer.screen || layer.color || layer.panel_each || !layer.patches.empty() ||
-                                               (layer.raster_png && !layer.raster_png->empty()))) {
-            return where + " holds precise lines with a style of its own";
-        }
         // (a correction layer's own blend is not looked at, as Python does not: its native.blend is drawn — the user's
         // decision 2 of PC2)
         if (layer.kind != core::LayerKind::Adjust && !ColorCanvas::supports_blend(layer.blend))
             return where + " has the blend " + core::py_repr_str(layer.blend);
-        if (layer.kind == core::LayerKind::Adjust && layer.adjust && layer.adjust->is_object()) {
-            const auto kind = layer.adjust->find("kind");
-            if (kind != layer.adjust->end() && kind->is_string() &&
-                std::find(core::kShapeFilters.begin(), core::kShapeFilters.end(), kind->get<std::string>()) != core::kShapeFilters.end()) {
-                return where + " is a correction that moves shapes (" + kind->get<std::string>() + ")";
-            }
-        }
-        if (precise && core::py_truthy(layer.parent_id)) return where + " is in a folder";
-        if (layer.kind == core::LayerKind::Tone || layer.role == core::LayerRole::Tone) return where + " is a tone layer";
     }
     return std::nullopt;
 }

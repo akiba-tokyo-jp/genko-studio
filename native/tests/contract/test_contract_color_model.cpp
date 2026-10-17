@@ -240,6 +240,57 @@ private slots:
         QCOMPARE(project(book)["pages"][0]["color"]["mode"], Json("gray"));
     }
 
+    // PC2d (document:color-depth-model): a page holding what a page in precise colour refused before — a tone layer, a
+    // layer in a folder with its lines, an effect and a colour of its own — made 16 bits through the command line: the
+    // op goes through (it was not_yet_ported), saved, undone and done again, drawn and written with nothing left out.
+    void preciseLayersThroughTheCommandLine() {
+        const QString book = path(QStringLiteral("precise.genko"));
+        int exit = -1;
+        const auto made = genko::test::run_genko({QStringLiteral("new"), book, QStringLiteral("--pages"), QStringLiteral("1")});
+        QVERIFY2(made.exit_code == 0, qPrintable(made.described()));
+        genko::render::Image picture = genko::render::Image::create("RGBA", genko::render::Size{60, 80}, genko::render::Ink{0, 0, 0, 0});
+        picture.paste(genko::render::Ink{128, 128, 128, 255}, genko::render::Box{10, 10, 50, 70});
+        const Json held = genko(
+            {QStringLiteral("apply"), book,
+             write_ops(QStringLiteral("held.json"),
+                       Json::array({Json{{"op", "add_layer"}, {"page", 1}, {"kind", "paint"}, {"id", "pic"}, {"title", "絵"}},
+                                    Json{{"op", "put_raster"}, {"page", 1}, {"id", "pic"}, {"png_base64", genko::core::b64encode(genko::render::write_png(picture))}},
+                                    Json{{"op", "add_stroke"}, {"page", 1}, {"layer_id", "pic"}, {"points", Json::array({Json::array({20, 40}), Json::array({150, 120})})},
+                                         {"width_mm", 1.5}, {"rgb", Json::array({200, 30, 30})}},
+                                    Json{{"op", "set_layer"}, {"page", 1}, {"id", "pic"}, {"effect", Json{{"border", Json{{"width_mm", 1}, {"rgb", Json::array({20, 60, 200})}}}}},
+                                         {"color", Json::array({40, 120, 60})}},
+                                    Json{{"op", "group_layers"}, {"page", 1}, {"ids", Json::array({"pic"})}, {"id", "fold"}},
+                                    Json{{"op", "add_tone"}, {"page", 1}, {"id", "tn"}, {"area", Json{{"rect", Json::array({30, 50, 60, 60})}}}}})),
+             QStringLiteral("--agent"), QStringLiteral("human:test")},
+            &exit);
+        QVERIFY2(exit == 0 && held.value("ok", false), held.dump().c_str());
+        const Json deep = genko({QStringLiteral("apply"), book,
+                                 write_ops(QStringLiteral("deep.json"), Json::array({Json{{"op", "set_color_mode"}, {"page", 1}, {"mode", "rgb"}, {"depth", 16}}})),
+                                 QStringLiteral("--agent"), QStringLiteral("human:test")},
+                                &exit);
+        QVERIFY2(exit == 0 && deep.value("ok", false), deep.dump().c_str());
+        const auto layer_of = [&](const std::string& id) {
+            const Json saved = project(book);
+            for (const Json& l : saved["pages"][0]["layers"]) if (l.value("id", std::string()) == id) return l;
+            return Json();
+        };
+        QVERIFY2(layer_of("pic").contains("color_raster") && layer_of("pic").value("parent_id", std::string()) == "fold", layer_of("pic").dump().c_str());
+        QCOMPARE(project(book)["pages"][0]["color"]["depth"], Json(16));
+        // undone and done again
+        QVERIFY(genko::test::run_genko({QStringLiteral("undo"), book, QStringLiteral("--as"), QStringLiteral("human:test")}).exit_code == 0);
+        QVERIFY(!project(book)["pages"][0].contains("color"));
+        QVERIFY(genko::test::run_genko({QStringLiteral("redo"), book, QStringLiteral("--as"), QStringLiteral("human:test")}).exit_code == 0);
+        QCOMPARE(project(book)["pages"][0]["color"]["depth"], Json(16));
+        // drawn and written, nothing refused
+        const auto drawn = genko::test::run_genko({QStringLiteral("render"), book, QStringLiteral("--page"), QStringLiteral("1"), QStringLiteral("--dpi"),
+                                                   QStringLiteral("60"), QStringLiteral("--out"), path(QStringLiteral("precise.png"))});
+        QVERIFY2(drawn.exit_code == 0 && QFile::exists(path(QStringLiteral("precise.png"))), qPrintable(drawn.described()));
+        const auto tiff = genko::test::run_genko({QStringLiteral("export"), book, path(QStringLiteral("precise-tiff")), QStringLiteral("--format"),
+                                                  QStringLiteral("tiff"), QStringLiteral("--dpi"), QStringLiteral("60"), QStringLiteral("--json")});
+        QVERIFY2(tiff.exit_code == 0, qPrintable(tiff.described()));
+        QCOMPARE(tiff_tags(QString::fromStdString(genko::test::one_line(tiff.out)["files"][0].get<std::string>()))[258], 16u);
+    }
+
     // PC1d (SPEC.md COLOR-03「特別な色モード」): a book's pages made indexed, bitmap, duotone and multichannel through the
     // command line — the pixel layers flattened into one (the lines kept as lines), saved and read again, undone and
     // done again, drawn, asked (--pixel), written (PSD Indexed, Bitmap, Grayscale and Multichannel; TIFF's palette and

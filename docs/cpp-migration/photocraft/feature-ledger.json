@@ -36893,7 +36893,7 @@
       "label_ja": "高精度・色モデル基盤",
       "kind": "cross_cutting",
       "genko_status": "一部（2026-10-16 照合）",
-      "implementation_status": "部分実装・未統合",
+      "implementation_status": "実装済み（PC2d、未統合）",
       "acceptance_status": "Linux Debug V1限定合格。全機能/全構成未完",
       "evidence": [
         "build/photocraft-v1/regression-v6/execution.json",
@@ -36906,7 +36906,16 @@
         "native/src/render/quantize.cpp",
         "native/tests/unit/test_color_model.cpp",
         "native/tests/unit/test_channels.cpp",
-        "native/tests/contract/test_contract_color_model.cpp"
+        "native/tests/contract/test_contract_color_model.cpp",
+        "native/src/render/page.cpp",
+        "native/src/render/color_canvas.cpp",
+        "native/src/render/composite.cpp",
+        "native/src/render/raster_ops.cpp",
+        "native/src/core/color_raster.cpp",
+        "native/tests/unit/test_render_page.cpp",
+        "native/tests/unit/test_color_raster.cpp",
+        "native/tests/unit/test_color_filters.cpp",
+        "native/tests/unit/test_ink.cpp"
       ],
       "implementation_scope": "RGBA16/32の元bytes保存・再読込、露光量調整層、実CLI/PNG出力/disk Undo-Redo/GC/資源拒否、実GUI。汎用ファイル入力・全描画style・形式互換・上流全画素同等性・復旧・全Release/ASan・Windows・配布は未完。",
       "pc0": {
@@ -36933,7 +36942,8 @@
         "gap": "RGB の高精度の画素（u16/f32、sRGB・ストレートα、タイル保存）、リニアの合成、CMYK/Lab のページ（8/16 ビット）、露光量の調整層はある。グレー・インデックス・2 階調・ダブルトーン・マルチチャンネルの色モデル、任意のチャンネル数、CMYK/Lab の 32 ビット、RGB の文書プロファイル（sRGB 以外・リニア/HDR）がなく、多くの処理（トーン・レイヤースタイル・多くの描画モード・塗り・ぼかし等の描画、結合の一部）が高精度では断る（not_yet_ported）",
         "note": "PC1 の土台そのもの。高精度は既存の 8 ビットの契約と並べて持つ（docs/cpp-migration/photocraft/REPORT.md）。上流の色モデルは crates/color/src/lib.rs:40"
       },
-      "note": "PC1a〜PC1d（未統合）で色モデル・深度・チャンネルの部分を実装した: グレー・インデックス・2 階調・ダブルトーン・マルチチャンネル、N 版（1〜32）、CMYK・Lab の 32 bit、RGB の文書プロファイル（sRGB 以外・リニア・HDR）、アルファ・特色チャンネル。行は開けたまま: 高精度・インキのページでまだ断っている処理（render/page.cpp の not_yet_ported: トーンの層・描画モードの補正層・形を動かす補正・書式を持つ高精度の線・高精度で合成できない描画モードなど）が残り、その受入（PC2 以降）が済むまで same にしない。"
+      "note": "PC1a〜PC1d（未統合）で色モデル・深度・チャンネルの部分を実装し、PC2d で高精度・インキのページの合成の残り（render/page の not_yet_ported: トーンの層・形を動かす補正・書式を持つ高精度の線・線や絵や効果を持つ高精度の層・フォルダーの中）を描くようにした（set_color_mode などもそれらを断らない）。",
+      "limitations": "高精度・インキのページで 8 bit のページの描くもの（トーンの層・フォルダーの中・形を動かす補正・線や絵や効果や層の色やトーン化を持つ高精度の層・v2 の線の層のラスター）を描く（PC2d、SPEC.md COLOR-04）。断ったまま: Lab の分離できない描画モード・マルチチャンネルの色相系のモード（COLOR-02・03 のとおり）、画素を持たない種類の層の高精度の画素、plugin の補正レイヤー。高精度の層の効果の形は 8 bit のアルファから（色はページの精度）、網点は 8 bit、半透明の縁は直線の光で混ぜる。編集の op の断り（高精度の層の選択範囲の編集・判型の変更・下地混色など）はそれぞれの行（edit.*・select.*・image.imageSize/canvasSize・paint.*）で追う。"
     },
     {
       "id": "document:pcraft-format",

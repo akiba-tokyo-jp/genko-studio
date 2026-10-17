@@ -19,7 +19,9 @@
 #include "render/page.hpp"
 
 namespace genko::render {
-struct InkPicture;  // (render/ink_canvas)
+struct InkPicture;    // (render/ink_canvas)
+struct ColorPicture;  // (render/color_canvas)
+class RgbSpace;
 }  // namespace genko::render
 
 namespace genko::render::detail {
@@ -99,6 +101,11 @@ int effect_margin(const core::Layer& layer, int dpi);
 // the water edge darkens its rim towards Genko's black, the border lays the inks of its colour (the page's rules) under
 // it — their shapes from its alpha as the 8-bit picture holds it.
 void ink_layer_effects(const core::Layer& layer, InkPicture& picture, int dpi, const core::PageColor& color);
+// PC2d (the user's decision 6): layer_effects on the picture of a precise layer (its whole picture: the caller gives it
+// a margin) — the water edge darkens its rim towards black, the border lays its colour (sRGB brought into the page's
+// space) under it — their shapes from its alpha as the 8-bit picture holds it, their colours mixed in the page's
+// precision (linear light, as the precise canvas composites).
+void color_layer_effects(const core::Layer& layer, ColorPicture& picture, int dpi, const RgbSpace& space);
 // render._adjusted over `area`: a correction layer at work on what is under it. PC2 (adjustments@1, render/adjust): its
 // native.blend laid by the 8-bit blend formulas, a correction that is not Python's form through its AdjustFunction
 // (one not in this build yet: skip_unported "adjust:<kind>").

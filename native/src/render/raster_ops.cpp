@@ -869,6 +869,12 @@ std::pair<std::string, bool> composite_color_layers(const Document& doc, const P
                 throw NotYetPorted("high-precision merge adjustment depends on external background");
             out.expose(exposure, layer.opacity, layer.clip, mask ? &*mask : nullptr, blend);
             floating = true; // An adjustment can produce HDR even from a u16 input.
+        } else if (precise_layer_styled(layer)) {
+            // (PC2d: with what is drawn on it — lines on its pixels, pictures, effects, its colour — as the page draws it)
+            participate(layer);
+            if (layer.color_raster) floating = floating || core::ColorRasterView(*layer.color_raster).metadata("")["precision"] == "f32";
+            if (layer.strokes) for (const auto& stroke : layer.strokes->items) if (stroke->color_rgb && (*stroke->color_rgb)["precision"]=="f32") floating=true;
+            blend_precise_layer(out, page, layer, kWorkingDpi, all, &doc);
         } else if (core::has_color_strokes(layer)) {
             participate(layer);
             for (const auto& stroke : layer.strokes->items) if (stroke->color_rgb && (*stroke->color_rgb)["precision"]=="f32") floating=true;

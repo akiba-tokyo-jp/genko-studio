@@ -429,7 +429,7 @@ const std::vector<Rule>& rules() {
         r.push_back(rule(R"(the ICC profile cannot be used: .*)", "そのカラープロファイルは使えません"));
         r.push_back(rule(R"(the precise pixels cannot be kept: .*)", "高精度の画素が原稿の上限（1 GiB）を超えるため、変換できません"));
         r.push_back(rule(R"(page (\d+): the layer (.*?) (?:is|holds|keeps|has) .*: a page in precise colour \(16 or 32 bits, or of a profile\) cannot draw it yet)",
-                         "\\1 ページのレイヤー \\2 は、16・32 ビットやプロファイル付きのページではまだ描けません（トーン・描画モード・はみ出し・線・フォルダーなどを確かめてください）"));
+                         "\\1 ページのレイヤー \\2 は、16・32 ビットやプロファイル付きのページではまだ描けません（描画モードとレイヤーの種類を確かめてください）"));
         r.push_back(rule("Lab PSD files are not supported: save it as RGB or CMYK", "Lab カラーの PSD は読めません。RGB か CMYK で保存し直してください"));
         r.push_back(rule("MP4 needs ffmpeg on this computer; WebP, GIF and PNG need nothing",
                          "MP4 にはこのパソコンに ffmpeg が要ります（WebP・GIF・PNG なら何も要りません）"));

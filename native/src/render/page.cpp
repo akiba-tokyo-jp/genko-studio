@@ -18,6 +18,7 @@
 
 #include "core/adjust.hpp"
 #include "core/anim.hpp"
+#include "core/command_bus.hpp"
 #include "core/covers.hpp"
 #include "core/error.hpp"
 #include "core/filters.hpp"
@@ -30,17 +31,20 @@
 #include "render/brushes.hpp"
 #include "render/channels.hpp"
 #include "render/color_canvas.hpp"
+#include "render/color_filters.hpp"
 #include "render/covers.hpp"
 #include "render/effects.hpp"
 #include "render/imaging.hpp"
 #include "render/ink.hpp"
 #include "render/ink_canvas.hpp"
+#include "render/ink_filters.hpp"
 #include "render/op_limits.hpp"
 #include "render/page_internal.hpp"
 #include "render/paper.hpp"
 #include "render/placed.hpp"
 #include "render/png.hpp"
 #include "render/prims.hpp"
+#include "render/raster.hpp"
 #include "render/text/balloons.hpp"
 #include "render/text/fonts.hpp"
 #include "render/text/lettering.hpp"
@@ -940,6 +944,275 @@ void precise_strokes(ColorCanvas& target, const Ctx& ctx, const Layer& layer, co
     }
     target.blend(own,layer.opacity,layer.clip,layer.blend);
 }
+
+// --- PC2d (document:color-depth-model, design 4.3): what a page in precise colour draws as the 8-bit page does --------
+
+// A part of a layer's precise picture (`box` inside it).
+ColorPicture crop_color_picture(const ColorPicture& p, const Box& box) {
+    ColorPicture out{Size{box.width(), box.height()}, {}};
+    out.pixels.reserve(std::size_t(box.width()) * box.height());
+    for (int y = box.y0; y < box.y1; ++y) {
+        const auto row = p.pixels.begin() + std::ptrdiff_t(std::size_t(y) * p.size.width + box.x0);
+        out.pixels.insert(out.pixels.end(), row, row + box.width());
+    }
+    return out;
+}
+
+// Does the layer with precise colour of its own draw as it did before PC2d — its precise pixels alone (their mask,
+// opacity and blend), or its precise lines alone (precise_strokes)? Else it is drawn as one picture (precise_layer).
+bool plain_precise(const Layer& layer) {
+    if (core::has_color_strokes(layer)) {
+        return layer.kind == LayerKind::Strokes && !layer.color_raster && !layer.mask && !layer.effect && !layer.screen && !layer.color &&
+               !layer.panel_each && layer.patches.empty() && !layer.raster_png;
+    }
+    return !layer.effect && !layer.screen && !layer.color && layer.patches.empty() && layer.stroke_count() == 0;
+}
+
+// The lines and pictures laid on a layer with precise lines, over `box`, in the canvas's space: as draw_strokes makes an
+// 8-bit layer's — the pictures, then the lines, each panel's in its turn when they keep to the panel they begin in —,
+// each line in its own colour as precise_strokes lays it; inside the panels (はみ出し off) and, locked, inside
+// `kept`'s alpha (its pixels).
+ColorPicture precise_lines(const Ctx& ctx, const Layer& layer, const Box& box, const Image* panel, const Image* kept, const RgbSpace& space) {
+    ColorCanvas own(transparent(box), space);
+    const bool guide = guide_role(layer.role);
+    if (ctx.episode != nullptr) paper::keep_all(ctx.episode->papers);  // (BRUSH-01: its brushes' papers)
+    if (!layer.patches.empty()) {
+        Image pictures = transparent(box);
+        for (const core::Patch& patch : layer.patches) paint_patch(pictures, box, patch, ctx.dpi, guide ? &kNameColor : nullptr);
+        own.blend(clipped(layer, std::move(pictures), panel, kept), 1, false);
+    }
+    // (each line's panel: the panel it begins in when they keep to it, render._each_panel; the others the page's)
+    const bool each = panel != nullptr && layer.panel_each && layer.panel_clip;
+    std::vector<std::pair<std::string, const core::Frame*>> order{{std::string(), nullptr}};
+    std::vector<std::size_t> group(layer.strokes->items.size(), 0);
+    for (std::size_t k = 0; k < layer.strokes->items.size(); ++k) {
+        const core::Stroke& s = *layer.strokes->items[k];
+        const core::Frame* frame = each && !s.points.empty() ? panel_of(*ctx.page, s.points[0].x, s.points[0].y) : nullptr;
+        if (frame == nullptr) continue;
+        auto it = std::find_if(order.begin(), order.end(), [&](const auto& o) { return o.second == frame; });
+        if (it == order.end()) it = order.insert(order.end(), std::pair<std::string, const core::Frame*>{frame->id, frame});
+        group[k] = static_cast<std::size_t>(it - order.begin());
+    }
+    const std::optional<Image> lock = layer.lock_alpha && kept != nullptr ? std::optional<Image>(alpha_of(*kept)) : std::nullopt;
+    for (std::size_t g = 0; g < order.size(); ++g) {
+        std::optional<Image> frame_mask;
+        if (order[g].second != nullptr) frame_mask = cached_frame_mask(*ctx.page, *order[g].second, ctx.size, ctx.dpi, box);
+        const Image* inside = frame_mask ? &*frame_mask : layer.panel_clip ? panel : nullptr;
+        for (std::size_t k = 0; k < layer.strokes->items.size(); ++k) {
+            if (group[k] != g) continue;
+            check_cancel(ctx);
+            const core::Stroke& stroke = *layer.strokes->items[k];
+            const auto brush = brushes::brush(stroke.kind);
+            const auto reach = brushes::extent(ctx.size, core::stroke_points(stroke), ctx.dpi, stroke_width(stroke), stroke.kind);
+            if (!reach || !intersects(*reach, box)) continue;
+            auto drawn = brushes::draw(ctx.size, core::stroke_points(stroke), ctx.dpi, stroke_width(stroke), stroke.kind, stroke.id, stroke.rotation,
+                                       stroke.pressure_opacity);
+            if (!drawn) continue;
+            const Box at{drawn->origin.x, drawn->origin.y, drawn->origin.x + drawn->mask.width(), drawn->origin.y + drawn->mask.height()};
+            const Box part = intersection(at, box);
+            if (part.width() <= 0 || part.height() <= 0) continue;
+            Image mask = Image::create("L", size_of(box), Ink(0));
+            mask.paste(drawn->mask.crop(shifted(part, -at.x0, -at.y0)), Point{part.x0 - box.x0, part.y0 - box.y0});
+            if (inside != nullptr) mask = chops::multiply(mask, *inside);
+            if (lock) mask = chops::multiply(mask, *lock);
+            Json color;
+            if (stroke.color_rgb && !guide) {
+                color = *stroke.color_rgb;
+            } else {
+                const auto rgb = guide ? kNameColor : stroke_rgb(stroke, brush);
+                color = Json{{"precision", "f32"}, {"values", Json::array({rgb[0] / 255., rgb[1] / 255., rgb[2] / 255.})}};
+            }
+            own.blend_stroke(mask, color, core::py_clamp(stroke.opacity, 0., 1.) * brush.opacity);
+        }
+    }
+    return own.picture();
+}
+
+// A layer's own picture over `box` before its effects, in the canvas's space (layer_pixels for a layer with precise
+// colour): its pixels — precise, or a v2 line layer's 8-bit raster —, the pictures and lines laid on them.
+ColorPicture precise_pixels(const Ctx& ctx, const Layer& layer, const Box& box, const Image* panel, const RgbSpace& space) {
+    ColorPicture picture{size_of(box), std::vector<std::array<double, 4>>(std::size_t(box.width()) * box.height(), {0, 0, 0, 0})};
+    bool pixels = true;
+    if (layer.color_raster) {
+        picture = color_picture(core::ColorRasterView(*layer.color_raster), ctx.size, box, space);
+    } else if (layer.raster_png && !layer.raster_png->empty() && layer.kind != LayerKind::Placed) {
+        picture = color_picture(raster_part(layer.raster_png, ctx.size, box), space, core::holds_page_values(*ctx.page, layer));
+    } else {
+        pixels = false;
+    }
+    if (layer.stroke_count() == 0 && layer.patches.empty()) return picture;
+    // (what a locked layer's lines are kept inside: its pixels' alpha, when it has pixels)
+    Image kept = Image::create("RGBA", size_of(box), Ink{0, 0, 0, 0});
+    if (pixels) kept.putalpha(picture_alpha(picture));
+    const Image* inside = pixels ? &kept : nullptr;
+    if (core::has_color_strokes(layer)) {
+        picture_over(picture, precise_lines(ctx, layer, box, panel, inside, space));
+    } else if (auto lines = layer_strokes(ctx, layer, box, panel, inside, ctx.rough, true)) {
+        picture_over(picture, color_picture(*lines, space));  // (their sRGB colours brought into the page's space)
+    }
+    return picture;
+}
+
+// ... and after its effects (computed over a box widened by their reach, as layer_with_effects does).
+ColorPicture precise_with_effects(const Ctx& ctx, const Layer& layer, const Box& box, const Image* panel, const RgbSpace& space) {
+    const int margin = effect_margin(layer, ctx.dpi);
+    if (margin == 0) {
+        ColorPicture picture = precise_pixels(ctx, layer, box, panel, space);
+        color_layer_effects(layer, picture, ctx.dpi, space);
+        return picture;
+    }
+    const Box wide = intersection(Box{box.x0 - margin, box.y0 - margin, box.x1 + margin, box.y1 + margin}, Box{0, 0, ctx.size.width, ctx.size.height});
+    std::optional<Image> wide_mask;
+    if (panel != nullptr) wide_mask = clip_mask(*ctx.page, ctx.size, ctx.dpi, wide);
+    ColorPicture picture = precise_pixels(ctx, layer, wide, wide_mask ? &*wide_mask : nullptr, space);
+    color_layer_effects(layer, picture, ctx.dpi, space);
+    return crop_color_picture(picture, shifted(box, -wide.x0, -wide.y0));
+}
+
+// A tone layer on a page in precise colour: drawn in 8 bits over the picture so far as on the 8-bit page (as a CMYK or
+// Lab page draws it: its dots are 8-bit), and a layer above clipped to it clips to nothing, as there.
+void precise_tone(ColorCanvas& canvas, const Ctx& ctx, const Layer& layer, const Box& area, const Image* panel) {
+    const bool dots = (ctx.mode == "print" && ctx.finish && ctx.dots) || screen_dots(ctx);
+    canvas.draw_8bit([&](Image& picture) { picture = tones::draw_layer(std::move(picture), layer, tone_page(ctx), area, panel, dots); });
+    canvas.forget_clip();
+}
+
+// A layer with precise colour of its own (precise pixels, precise lines) on a page in precise colour, with what the
+// 8-bit page draws on a layer (render_page): its lines and the pictures laid on it over its pixels, its effects (the
+// user's decision 6 of PC2: color_layer_effects), its screen (トーン化: dots, in 8 bits as they print), its colour (each
+// pixel in the page's precision), its mask. A tone layer as the 8-bit page draws one.
+void precise_layer(ColorCanvas& canvas, const Ctx& ctx, const Layer& layer, const Box& area, const Image* panel) {
+    if (is_tone(layer)) {
+        precise_tone(canvas, ctx, layer, area, panel);
+        return;
+    }
+    if (plain_precise(layer)) {
+        if (core::has_color_strokes(layer)) {
+            precise_strokes(canvas, ctx, layer, area, panel);
+            return;
+        }
+        std::optional<Image> shown;  // (its mask, as masked() takes it)
+        if (layer.mask && layer.mask->png && !layer.mask->png->empty() && layer.mask->enabled)
+            shown = decoded(layer.mask->png, "L").resize_region(ctx.size, area, Resample::Bilinear);
+        canvas.blend(core::ColorRasterView(*layer.color_raster), ctx.size, area, layer.opacity, layer.clip, layer.blend, shown ? &*shown : nullptr);
+        return;
+    }
+    const RgbSpace& space = canvas.space();
+    const bool print = ctx.mode == "print";
+    const bool tint = layer.color && !layer.color->empty() && (!print || layer.color_prints);
+    if (screened_here(ctx, layer)) {
+        // トーン化: the greys of the picture as the screen shows it, as dots in 8 bits as on any page; a noise screen runs
+        // from the top of the page (screened_layer): the band above the area made the same way
+        const Json& spec = *layer.screen;
+        const Json* pattern = get(spec, "pattern");
+        const Box band{0, 0, ctx.size.width, area.y1};
+        Image raster;
+        if (pattern != nullptr && core::py_truthy(*pattern) && core::py_str(*pattern) == "noise" && area != band) {
+            std::optional<Image> band_mask;
+            if (panel != nullptr) band_mask = clip_mask(*ctx.page, ctx.size, ctx.dpi, band);
+            raster = tones::screened(picture_rgba(precise_with_effects(ctx, layer, band, band_mask ? &*band_mask : nullptr, space), space), spec, ctx.dpi,
+                                     ctx.size, band)
+                         .crop(area);
+        } else {
+            raster = tones::screened(picture_rgba(precise_with_effects(ctx, layer, area, panel, space), space), spec, ctx.dpi, ctx.size, area);
+        }
+        Image dots = masked(ctx, layer, std::move(raster), area);
+        if (tint) dots = tinted(dots, *layer.color);
+        canvas.blend(dots, layer.opacity, layer.clip, layer.blend);
+        return;
+    }
+    ColorPicture picture = precise_with_effects(ctx, layer, area, panel, space);
+    if (tint) {  // (shown in its colour, each pixel's alpha kept)
+        const auto rgb = first3(*layer.color);
+        const auto at = [&](std::size_t k) { return static_cast<int>(std::clamp<std::int64_t>(rgb.size() > k ? rgb[k] : 0, 0, 255)); };
+        const auto colour = linear_colour(space, {at(0), at(1), at(2)});
+        for (auto& p : picture.pixels) p = {colour[0], colour[1], colour[2], p[3]};
+    }
+    std::optional<Image> shown;
+    if (layer.mask && layer.mask->png && !layer.mask->png->empty() && layer.mask->enabled)
+        shown = decoded(layer.mask->png, "L").resize_region(ctx.size, area, Resample::Bilinear);
+    canvas.blend(picture, layer.opacity, layer.clip, layer.blend, shown ? &*shown : nullptr);
+}
+
+// A correction layer whose filter moves shapes too (core::kShapeFilters: an old book's may hold one).
+bool shape_correction(const Layer& layer) {
+    if (layer.kind != LayerKind::Adjust || !layer.adjust || !layer.adjust->is_object()) return false;
+    const auto kind = layer.adjust->find("kind");
+    return kind != layer.adjust->end() && kind->is_string() &&
+           std::find(core::kShapeFilters.begin(), core::kShapeFilters.end(), kind->get<std::string>()) != core::kShapeFilters.end();
+}
+
+// A page of a drawing's size at the working 200 dpi: render/color_filters and ink_filters scale their sizes in pixels
+// from 200 dpi to a raster's resolution on its page; on this one they stay as given — the drawing's own pixels, as the
+// 8-bit page's correction layer takes them (filters.apply_filter on its picture).
+Page working_grid(const Page& page, Size size) {
+    Page grid;
+    grid.spec = page.spec;
+    grid.spec.width_mm = Num(size.width * 25.4 / raster::kWorkingDpi);
+    grid.spec.height_mm = Num(size.height * 25.4 / raster::kWorkingDpi);
+    grid.color = page.color;
+    grid.rgb = page.rgb;
+    return grid;
+}
+
+// What the 8-bit page gives filters.apply_filter of a correction layer: its settings without its kind and native.
+Json shape_params(const Layer& layer) {
+    Json params = *layer.adjust;
+    params.erase("kind");
+    params.erase("native");
+    return params;
+}
+
+// A correction that moves shapes on a page in precise colour (the whole page: needs_whole_page): the page's values so
+// far through render/color_filters (in their precision; the sizes in the drawing's pixels), laid over them as the 8-bit
+// page lays its result — by opacity × mask × the clipped-to layer's alpha, its native.blend first. Settings the 8-bit
+// page refuses (a ValueError there): the layer does nothing.
+void precise_shape_correction(ColorCanvas& canvas, const Ctx& ctx, const Layer& layer, const Box& area) {
+    const std::string kind = layer.adjust->value("kind", Json()).get<std::string>();
+    const std::string blend = core::native_of(*layer.adjust).blend;
+    std::string changed;
+    try {
+        Layer drawn;
+        drawn.kind = LayerKind::Raster;
+        drawn.color_raster = std::make_shared<const std::string>(canvas.color_raster("f32"));
+        changed = color_filters::apply(working_grid(*ctx.page, canvas.size()), drawn, kind, shape_params(layer), nullptr);
+    } catch (const core::OpError&) {
+        return;
+    } catch (const core::PyValueError&) {
+        return;
+    }
+    std::optional<Image> mask;  // (its mask as render._adjusted resizes it)
+    if (layer.mask && layer.mask->enabled && layer.mask->png && !layer.mask->png->empty())
+        mask = decoded(layer.mask->png, "L").resize_region(ctx.size, area, Resample::Bicubic);
+    canvas.correct(core::ColorRasterView(changed), layer.opacity, layer.clip, mask ? &*mask : nullptr, blend);
+}
+
+// ... and on a CMYK, Lab or grey page: its inks so far (at the page's depth, with their alpha) through
+// render/ink_filters, laid back over them the same way. A native.blend the page does not composite: left out as a
+// layer's is.
+void ink_shape_correction(InkCanvas& canvas, const Ctx& ctx, const Layer& layer, const Box& area) {
+    const std::string kind = layer.adjust->value("kind", Json()).get<std::string>();
+    const std::string blend = core::native_of(*layer.adjust).blend;
+    if (!canvas.supports_blend(blend)) {
+        skip_unported(ctx, "ink_blend:" + blend);
+        return;
+    }
+    const core::PageColor& color = *ctx.page->color;
+    std::string changed;
+    try {
+        changed = ink_filters::apply(working_grid(*ctx.page, canvas.size()), canvas.ink_pixels(color.depth, true), kind, shape_params(layer), nullptr);
+    } catch (const core::OpError&) {
+        return;
+    } catch (const core::PyValueError&) {
+        return;
+    }
+    std::optional<Image> mask;
+    if (layer.mask && layer.mask->enabled && layer.mask->png && !layer.mask->png->empty())
+        mask = decoded(layer.mask->png, "L").resize_region(ctx.size, area, Resample::Bicubic);
+    const InkPicture picture = sample_ink_raster(core::decode_ink_raster(changed), canvas.size(), Box{0, 0, canvas.size().width, canvas.size().height});
+    canvas.correct(picture, layer.opacity, layer.clip, mask ? &*mask : nullptr, blend);
+}
+
 // A part of an ink picture (`box` inside it).
 InkPicture crop_picture(const InkPicture& p, const Box& box) {
     const unsigned all = p.channels + 1;
@@ -1274,6 +1547,10 @@ RenderResult render(const Page& page_in, int dpi, const RenderOptions& options, 
             if (!layer.visible) continue;
             if (print && !layer.exportable) continue;
             if (guide_role(layer.role) && print) continue;
+            if (shape_correction(layer)) {  // (PC2d: on the page's inks so far)
+                ink_shape_correction(canvas, ctx, layer, area);
+                continue;
+            }
             ink_layer(canvas, ctx, layer, area, panel);
         }
         if (core::py_truthy(page.effects)) canvas.draw_8bit([&](Image& picture) { picture = draw_effects(ctx, picture, area); });
@@ -1324,26 +1601,22 @@ RenderResult render(const Page& page_in, int dpi, const RenderOptions& options, 
         if (!layer.visible) continue;
         if (print && !layer.exportable) continue;
         if (guide_role(layer.role) && print) continue;
-        if (precision && core::has_color_strokes(layer)) {
-            precise_strokes(*precision,ctx,layer,area,panel);continue;
-        }
-        if (precision && layer.color_raster) {
-            if (is_tone(layer)) throw NotYetPorted("high_precision_tone");
-            if (!ColorCanvas::supports_blend(layer.blend) || layer.effect || layer.screen || layer.color ||
-                !layer.patches.empty() || layer.stroke_count() || layer.panel_clip)
-                throw NotYetPorted("high_precision_layer_style");
-            std::optional<Image> shown;  // (its mask, as masked() takes it)
-            if (layer.mask && layer.mask->png && !layer.mask->png->empty() && layer.mask->enabled)
-                shown = decoded(layer.mask->png, "L").resize_region(ctx.size, area, Resample::Bilinear);
-            precision->blend(core::ColorRasterView(*layer.color_raster), ctx.size, area, layer.opacity, layer.clip, layer.blend,
-                             shown ? &*shown : nullptr);
+        if (precision && (core::has_color_strokes(layer) || layer.color_raster)) {
+            precise_layer(*precision, ctx, layer, area, panel);  // (PC2d: with its lines, effects, colour; a tone as tones)
             continue;
         }
         // (a correction layer's own blend is not looked at, as Python does not: below)
         if (precision && layer.kind != LayerKind::Adjust && !ColorCanvas::supports_blend(layer.blend))
             throw NotYetPorted("high_precision_blend:" + layer.blend);
+        if (precision && shape_correction(layer)) {  // (PC2d: on the page's values so far)
+            precise_shape_correction(*precision, ctx, layer, area);
+            continue;
+        }
         if (is_tone(layer)) {  // tones sit in the layer order: a layer above can cover them
-            if (precision) throw NotYetPorted("high_precision_tone");
+            if (precision) {
+                precise_tone(*precision, ctx, layer, area, panel);  // (PC2d: in 8 bits over the page's values)
+                continue;
+            }
             const bool dots = (print && ctx.finish && ctx.dots) || screen_dots(ctx);
             rgba = tones::draw_layer(std::move(rgba), layer, tone_page(ctx), area, panel, dots);
             prev_alpha.reset();
@@ -1907,6 +2180,26 @@ void blend_color_strokes(ColorCanvas& canvas, const core::Page& page, const core
     ctx.size=Size{mm_to_px(page.spec.width_mm.value(),dpi),mm_to_px(page.spec.height_mm.value(),dpi)};
     const auto panels=clip_mask(page,ctx.size,dpi,area);
     precise_strokes(canvas,ctx,layer,area,panels?&*panels:nullptr);
+}
+bool precise_layer_styled(const core::Layer& layer) {
+    return (core::has_color_strokes(layer) || layer.color_raster) && (is_tone(layer) || !plain_precise(layer));
+}
+void blend_precise_layer(ColorCanvas& canvas, const core::Page& page, const core::Layer& layer, int dpi, Box area, const core::Document* episode) {
+    if (is_tone(layer)) {  // (a tone's ink as the 8-bit merge takes it: drawable_layer_image)
+        if (const auto picture = drawable_layer_image(page, layer, dpi, episode, false, true))
+            canvas.blend(picture->crop(area), layer.opacity, layer.clip, layer.blend);
+        return;
+    }
+    std::vector<std::string> omitted;
+    Ctx ctx;
+    ctx.page = &page;
+    ctx.episode = episode;
+    ctx.dpi = dpi;
+    ctx.mode = "proof";
+    ctx.omitted = &omitted;
+    ctx.size = Size{mm_to_px(page.spec.width_mm.value(), dpi), mm_to_px(page.spec.height_mm.value(), dpi)};
+    const auto panels = clip_mask(page, ctx.size, dpi, area);
+    precise_layer(canvas, ctx, layer, area, panels ? &*panels : nullptr);
 }
 Image cel_image(const core::Page& page, const core::Layer& layer, int dpi, const core::Document* episode) {
     std::vector<std::string> omitted;

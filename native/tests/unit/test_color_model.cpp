@@ -440,7 +440,8 @@ private slots:
 
     // set_color_mode by depth (image.mode.bits8/16/32): 8 → 16 is v×257 and 8 → 32 is v/255, sample by sample; back to
     // 8 bits the same PNG pixels; the page's mode follows (16, 32: color-model@1), 8 bits sRGB is none again. A page
-    // whose layer cannot be drawn in precise colour yet is refused with its name (nothing changed).
+    // whose layer cannot be drawn in precise colour yet is refused with its name (nothing changed; PC2d draws the ones it
+    // refused before).
     void depths() {
         core::Document doc = painted(picture());
         const std::string id = doc.page(0).layers.back().id;
@@ -482,10 +483,14 @@ private slots:
         QCOMPARE(render::open_image(*dithered.page(0).layers.back().raster_png, render::kPillowOpenLimits).convert("RGBA").tobytes(), began);
         // the same mode again: nothing converted
         QCOMPARE(run_ops(deep.doc, Json::array({Json{{"op", "set_color_mode"}, {"page", 1}, {"mode", "rgb"}, {"depth", 16}}})).results.at(0)["converted"], Json(0));
-        // a layer that keeps its lines inside the panels cannot be precise yet: refused with its name, nothing changed
+        // a layer that keeps its lines inside the panels is precise too (PC2d, document:color-depth-model: it was refused
+        // with its name before): its pixels shown as the unclipped layer's — the panels keep its lines, it has none
         const core::Document clipped = run_ops(doc, Json::array({Json{{"op", "set_layer"}, {"page", 1}, {"id", id}, {"panel_clip", true}}})).doc;
         const std::string why = refusal(clipped, Json::array({Json{{"op", "set_color_mode"}, {"page", 1}, {"mode", "rgb"}, {"depth", 16}}}));
-        QVERIFY2(why.starts_with("not_yet_ported") && why.find(id) != std::string::npos, why.c_str());
+        QVERIFY2(why.empty(), why.c_str());
+        const core::Document clipped16 = run_ops(clipped, Json::array({Json{{"op", "set_color_mode"}, {"page", 1}, {"mode", "rgb"}, {"depth", 16}}})).doc;
+        QVERIFY(layer_named(clipped16, id).color_raster && layer_named(clipped16, id).panel_clip);
+        QCOMPARE(drawn_page(clipped16).tobytes(), drawn_page(deep.doc).tobytes());
         // refused: a depth, a mode
         QVERIFY(!refusal(doc, Json::array({Json{{"op", "set_color_mode"}, {"mode", "rgb"}, {"depth", 12}}})).empty());
         QVERIFY(!refusal(doc, Json::array({Json{{"op", "set_color_mode"}, {"mode", "hsv"}}})).empty());
@@ -1253,28 +1258,164 @@ private slots:
         QCOMPARE(core::ColorRasterView(*layer_named(kept, "hdr").color_raster).pixel(0)[0], 2.0);
     }
 
-    // A page that becomes an RGB page of a profile is drawn in precise colour (review D, J): what it cannot draw yet — a
-    // tone layer — refuses the op that would make it so, naming the layer, at 8 bits too; a layer of lines with a raster
-    // cannot hold precise pixels: named. (A correction layer in a blend mode was refused too: its own blend is not looked
-    // at, as Python does not — the user's decision 2 of PC2 —, so the op goes through.)
-    void profiledPagesRefuseWhatTheyCannotDraw() {
+    // A page that becomes an RGB page of a profile is drawn in precise colour (review D, J). PC2d (document:color-depth-
+    // model): what it could not draw before — a tone layer, a v2 layer of lines with its raster (at 16 bits: precise
+    // pixels on a layer of lines) — is drawn now, so the ops that make the page so go through and the page shows them as
+    // the 8-bit page does (the op refused them, naming the layer, before PC2d: SPEC.md COLOR-03). (A correction layer in
+    // a blend mode was refused too: its own blend is not looked at, as Python does not — the user's decision 2 of PC2.)
+    void profiledPagesDrawWhatTheyHold() {
         const core::Document doc = painted(picture());
         const core::Document toned = run_ops(doc, Json::array({Json{{"op", "add_tone"}, {"page", 1}, {"id", "tn"}, {"area", Json{{"rect", Json::array({10, 20, 30, 40})}}}}})).doc;
         const core::Document blended = run_ops(doc, Json::array({Json{{"op", "add_layer"}, {"page", 1}, {"kind", "adjust"}, {"id", "adj"}, {"blend", "multiply"},
                                                                       {"adjust", Json{{"kind", "levels"}, {"black", 10}, {"white", 240}, {"gamma", 1.0}}}}})).doc;
+        const render::Image plain_tone = drawn_page(toned);
         for (const Json& op : {Json{{"op", "assign_profile"}, {"page", 1}, {"profile", "display-p3"}},
                                Json{{"op", "convert_profile"}, {"page", 1}, {"profile", "adobe-rgb-compat"}},
                                Json{{"op", "set_color_mode"}, {"page", 1}, {"mode", "rgb"}, {"profile", "rec2020"}}}) {
             const std::string why = refusal(toned, Json::array({op}));
-            QVERIFY2(why.starts_with("not_yet_ported") && why.find("tn") != std::string::npos, qPrintable(QString::fromStdString(why)));
+            QVERIFY2(why.empty(), qPrintable(QString::fromStdString(why)));
             QVERIFY2(refusal(blended, Json::array({op})).empty(), qPrintable(QString::fromStdString(op.dump())));
         }
+        // (converted: the tone's dots where they were, over the opaque grey as it showed — within the profiles' round
+        // trip; the green, half clear, is mixed in linear light on a page of a profile)
+        const core::Document p3 = run_ops(toned, Json::array({Json{{"op", "convert_profile"}, {"page", 1}, {"profile", "display-p3"}}})).doc;
+        render::RenderOptions options;
+        const render::RenderResult shown = render::render_page(p3.page(0), 100, options, &p3);
+        QVERIFY(shown.omitted.empty());
+        QCOMPARE(shown.image.size(), plain_tone.size());
+        const render::Box over_grey{render::mm_to_px(11, 100), render::mm_to_px(21, 100), render::mm_to_px(29, 100), render::mm_to_px(59, 100)};
+        const std::string a = shown.image.convert("RGB").crop(over_grey).tobytes(), b = plain_tone.crop(over_grey).tobytes();
+        int worst = 0;
+        std::size_t dots = 0;
+        for (std::size_t i = 0; i < a.size(); ++i) {
+            worst = std::max(worst, std::abs(int(static_cast<unsigned char>(a[i])) - int(static_cast<unsigned char>(b[i]))));
+            dots += static_cast<unsigned char>(b[i]) < 100;
+        }
+        QVERIFY2(worst <= 2, qPrintable(QString::number(worst)));
+        QVERIFY(dots > 0);  // (the tone is there)
         core::Document lines = doc;
         lines.edit_page(0).layers.push_back(v2_lines_layer());
-        const std::string why = refusal(lines, Json::array({Json{{"op", "set_color_mode"}, {"page", 1}, {"mode", "rgb"}, {"depth", 16}}}));
-        QVERIFY2(why.starts_with("not_yet_ported") && why.find("old") != std::string::npos, why.c_str());
+        const core::ApplyResult deep = run_ops(lines, Json::array({Json{{"op", "set_color_mode"}, {"page", 1}, {"mode", "rgb"}, {"depth", 16}}}));
+        QVERIFY(layer_named(deep.doc, "old").color_raster && layer_named(deep.doc, "old").kind == core::LayerKind::Strokes);
+        const render::Image red = drawn_page(deep.doc);
+        const int w = red.width(), h = red.height();
+        QVERIFY2(near_rgb(rgb_at(red, w / 2, h - 3), {200, 40, 40}, 1), qPrintable(rgb_text(rgb_at(red, w / 2, h - 3))));  // (its band)
+        QVERIFY(near_rgb(rgb_at(red, w / 4, h / 4), rgb_at(drawn_page(lines), w / 4, h / 4), 1));
         // (at 8 bits it is drawn: its raster the page's values)
         QVERIFY(refusal(lines, Json::array({Json{{"op", "assign_profile"}, {"page", 1}, {"profile", "display-p3"}}})).empty());
+    }
+
+    // PC2d (document:color-depth-model, design 4.3): a page in precise colour — 16 bits, 32 bits, an RGB page of a profile
+    // — draws what the 8-bit page draws where set_color_mode refused it before (not_yet_ported): a tone layer, a layer in
+    // a folder, a correction that moves shapes, a precise paint layer with lines and pictures laid on it, an effect and a
+    // colour of its own. The op goes through, nothing is left out, and the page is the 8-bit page's picture: where no
+    // edge of partial cover lies (a precise canvas mixes those in linear light, the 8-bit page in sRGB samples) within a
+    // step of 8 bits (a page of a profile: two, the profile's round trip), a shape-moving filter's few rounding steps
+    // aside (as test_color_filters' corrections).
+    void preciseDrawsWhatTheEightBitPageDraws_data() {
+        QTest::addColumn<QString>("what");
+        QTest::addColumn<QString>("into");
+        for (const char* what : {"tone", "folder", "blur", "lines", "pictures", "border", "water", "tint"})
+            for (const char* into : {"16", "32", "p3"}) QTest::newRow(qPrintable(QStringLiteral("%1-%2").arg(what, into))) << QString(what) << QString(into);
+    }
+    void preciseDrawsWhatTheEightBitPageDraws() {
+        QFETCH(QString, what);
+        QFETCH(QString, into);
+        // (a picture of the page's pixels at the 100 dpi it is drawn at: nothing resampled; a grey and a green
+        // rectangle, opaque, clear around them)
+        const int w = render::mm_to_px(60, 100), h = render::mm_to_px(80, 100);
+        render::Image art = render::Image::create("RGBA", render::Size{w, h}, render::Ink{0, 0, 0, 0});
+        art.paste(render::Ink{128, 128, 128, 255}, render::Box{w / 6, h / 6, w / 2, 5 * h / 6});
+        art.paste(render::Ink{30, 160, 90, 255}, render::Box{w / 2, h / 6, 5 * w / 6, 5 * h / 6});
+        core::Document doc = painted(art);
+        const std::string id = doc.page(0).layers.back().id;
+        Json ops = Json::array();
+        if (what == "tone") ops.push_back(Json{{"op", "add_tone"}, {"page", 1}, {"id", "tn"}, {"area", Json{{"rect", Json::array({12, 20, 30, 40})}}}});
+        if (what == "folder") ops.push_back(Json{{"op", "group_layers"}, {"page", 1}, {"ids", Json::array({id})}});
+        if (what == "blur") {  // (as an old book holds one: no op makes it)
+            core::Layer soft;
+            soft.id = "soft";
+            soft.kind = core::LayerKind::Adjust;
+            soft.role = core::LayerRole::User;
+            soft.adjust = Json{{"kind", "blur"}, {"radius", 3}};
+            doc.edit_page(0).layers.push_back(soft);
+        }
+        if (what == "lines") {
+            ops.push_back(Json{{"op", "add_stroke"}, {"page", 1}, {"layer_id", id}, {"points", Json::array({Json::array({8, 40}), Json::array({52, 40})})},
+                               {"width_mm", 2.5}, {"kind", "mili"}, {"rgb", Json::array({200, 30, 30})}});
+        }
+        if (what == "pictures") {
+            ops.push_back(Json{{"op", "fill_area"}, {"page", 1}, {"layer_id", id}, {"area", Json{{"rect", Json::array({20, 30, 20, 12})}}},
+                               {"rgb", Json::array({40, 60, 200})}});
+        }
+        if (what == "border") ops.push_back(Json{{"op", "set_layer"}, {"page", 1}, {"id", id}, {"effect", Json{{"border", Json{{"width_mm", 1.5}, {"rgb", Json::array({250, 200, 20})}}}}}});
+        if (what == "water") ops.push_back(Json{{"op", "set_layer"}, {"page", 1}, {"id", id}, {"effect", Json{{"water_edge", Json{{"width_mm", 1.2}, {"strength", 1.0}}}}}});
+        if (what == "tint") ops.push_back(Json{{"op", "set_layer"}, {"page", 1}, {"id", id}, {"color", Json::array({200, 40, 40})}});
+        doc = run_ops(doc, ops).doc;
+        const render::Image eight = drawn_page(doc);
+        const Json to = into == "16"   ? Json{{"op", "set_color_mode"}, {"page", 1}, {"mode", "rgb"}, {"depth", 16}}
+                        : into == "32" ? Json{{"op", "set_color_mode"}, {"page", 1}, {"mode", "rgb"}, {"depth", 32}}
+                                       : Json{{"op", "convert_profile"}, {"page", 1}, {"profile", "display-p3"}};
+        const std::string why = refusal(doc, Json::array({to}));
+        QVERIFY2(why.empty(), why.c_str());
+        const core::Document precise = run_ops(doc, Json::array({to})).doc;
+        QVERIFY(render::uses_color_precision(precise.page(0), false));
+        render::RenderOptions options;  // (nothing left out: an unported part would stop the render)
+        const render::RenderResult got = render::render_page(precise.page(0), 100, options, &precise);
+        QVERIFY(got.omitted.empty());
+        const render::Image shown = got.image.convert("RGB");
+        QCOMPARE(shown.size(), eight.size());
+        const int most = into == "p3" ? 2 : 1;
+        if (what == "lines" || what == "pictures" || what == "water" || (what == "blur" && into == "p3")) {
+            // (their edges cover part of a pixel: the line's middle, the picture's, the rim against the plain inside; a
+            // page of a profile blurs its own values, which mix the edges' colours otherwise than sRGB's: the insides)
+            const auto at = [&](double x_mm, double y_mm) { return std::pair{render::mm_to_px(x_mm, 100), render::mm_to_px(y_mm, 100)}; };
+            std::vector<std::pair<int, int>> spots{at(15, 25), at(45, 60), at(30, 70)};
+            if (what == "lines") spots.push_back(at(30, 40));
+            if (what == "pictures") spots.push_back(at(30, 36));
+            for (const auto& [x, y] : spots) {
+                QVERIFY2(near_rgb(rgb_at(shown, x, y), rgb_at(eight, x, y), most),
+                         qPrintable(QStringLiteral("%1,%2: %3 %4").arg(x).arg(y).arg(rgb_text(rgb_at(shown, x, y)), rgb_text(rgb_at(eight, x, y)))));
+            }
+            if (what == "lines") QVERIFY(near_rgb(rgb_at(shown, at(30, 40).first, at(30, 40).second), {200, 30, 30}, most));
+            if ((what == "lines" || what == "pictures") && into != "p3") {
+                // merged down: the precise layer as the page draws it, lines and pictures in its pixels
+                const std::string lower = [&] {
+                    const auto& layers = precise.page(0).layers;
+                    for (std::size_t i = 1; i < layers.size(); ++i)
+                        if (layers[i].id == id) return layers[i - 1].id;
+                    return std::string();
+                }();
+                const core::Document merged = run_ops(precise, Json::array({Json{{"op", "merge_down"}, {"page", 1}, {"id", id}}})).doc;
+                QVERIFY(layer_named(merged, lower).color_raster && layer_named(merged, lower).stroke_count() == 0 && layer_named(merged, lower).patches.empty());
+                const render::Image flat = drawn_page(merged);
+                for (const auto& [x, y] : spots) QVERIFY2(near_rgb(rgb_at(flat, x, y), rgb_at(shown, x, y), 2), qPrintable(rgb_text(rgb_at(flat, x, y))));
+            }
+            if (what == "pictures") QVERIFY(near_rgb(rgb_at(shown, at(30, 36).first, at(30, 36).second), {40, 60, 200}, most));
+            if (what == "water") {  // (the rim darker than the inside, on both pages)
+                const auto [rx, ry] = std::pair{w / 6 + 1, h / 2};
+                const auto [ix, iy] = at(20, 40);
+                QVERIFY(rgb_at(shown, rx, ry)[0] < rgb_at(shown, ix, iy)[0] - 20);
+                QVERIFY(rgb_at(eight, rx, ry)[0] < rgb_at(eight, ix, iy)[0] - 20);
+            }
+            return;
+        }
+        // (the rest: every pixel; a shape-moving filter's 8-bit passes round otherwise in a few)
+        const std::string a = shown.tobytes(), b = eight.tobytes();
+        std::size_t off = 0;
+        int worst = 0;
+        for (std::size_t i = 0; i < a.size(); ++i) {
+            const int diff = std::abs(int(static_cast<unsigned char>(a[i])) - int(static_cast<unsigned char>(b[i])));
+            worst = std::max(worst, diff);
+            if (diff > most) ++off;
+        }
+        const std::size_t allowed = what == "blur" ? a.size() / 500 : 0;
+        QVERIFY2(off <= allowed, qPrintable(QStringLiteral("%1 samples off by more than %2 (worst %3)").arg(off).arg(most).arg(worst)));
+        // a part of the page is the whole page's cut (a page with a correction that moves shapes is drawn whole for it)
+        render::RenderOptions part;
+        part.region = render::RenderRegion{31, 47, 90, 70};
+        QCOMPARE(render::render_page(precise.page(0), 100, part, &precise).image.convert("RGB").tobytes(),
+                 got.image.convert("RGB").crop(render::Box{31, 47, 121, 117}).tobytes());
     }
 
     // A page with no colour model holding precise pixels (put_color_raster) keeps their precision when an op does not say
