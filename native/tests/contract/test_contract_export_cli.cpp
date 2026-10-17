@@ -3,7 +3,9 @@
 // {"ok", "count", "files"}), and the same files (export_files.hpp: the times Python's files carry left out; a moving
 // picture as Pillow plays it: its frames, timing and loop). Python's refusals give the same JSON error and exit code;
 // usage errors exit 2 on both. Python's command line runs with Pillow held to its BASIC text layout, as the reference
-// was measured (render_harness.py does the same). Skipped without the Python reference.
+// was measured (render_harness.py does the same). A book's correction layers are written into this build's PSDs as
+// adjustment layers (the user's decision 5, PC2): such a PSD is Python's with them among its layers. Skipped without
+// the Python reference.
 
 #include <QtTest>
 
@@ -16,9 +18,53 @@
 #include "core/json.hpp"
 #include "export_files.hpp"
 #include "render/colour.hpp"
+#include "render/psd.hpp"
 #include "rendertest.hpp"
 
 using genko::core::Json;
+
+namespace {
+
+// The user's decision 5 (PC2, SPEC.md COLOR-04): this build writes a book's correction layers into its PSDs as
+// adjustment layers. "" when the tree `got_dir` is `want_dir` (Python's) but for PSDs that are Python's with
+// adjustment layers among their layers — the other layers, their pictures and the merged picture the same; a PSD of
+// none must be Python's bytes —, else the first difference.
+QString difference_but_adjustment_layers(const QString& got_dir, const QString& want_dir) {
+    const auto got = genko::test::exports::tree(got_dir);
+    const auto want = genko::test::exports::tree(want_dir);
+    const auto layer_pictures = [](const genko::render::psd::File& psd, int* adjustments) {
+        std::vector<std::string> list;
+        for (const auto& layer : psd.layers()) {
+            if (layer.adjust) {
+                ++*adjustments;
+                continue;
+            }
+            list.push_back(layer.name + "|" + (layer.folder ? std::string() : psd.image(layer).tobytes()));
+        }
+        const auto whole = psd.merged();
+        list.push_back(whole ? whole->tobytes() : std::string());
+        return list;
+    };
+    for (const auto& [name, bytes] : want) {
+        const auto it = got.find(name);
+        if (it == got.end()) return "missing " + name;
+        if (it->second == bytes) continue;
+        if (!name.endsWith(QStringLiteral(".psd"))) return name + " differs";
+        int adjustments = 0;
+        int python_adjustments = 0;
+        if (layer_pictures(genko::render::psd::File::read(it->second), &adjustments) !=
+                layer_pictures(genko::render::psd::File::read(bytes), &python_adjustments) ||
+            python_adjustments != 0)
+            return name + " is not Python's with adjustment layers";
+        if (adjustments == 0) return name + " has no adjustment layer, yet differs from Python's";
+    }
+    for (const auto& [name, bytes] : got) {
+        if (!want.contains(name)) return "extra " + name;
+    }
+    return {};
+}
+
+}  // namespace
 
 class TestContractExportCli : public QObject {
     Q_OBJECT
@@ -66,7 +112,9 @@ class TestContractExportCli : public QObject {
         const bool moving = out.endsWith(".gif") || out.endsWith(".webp") || out.endsWith(".apng") || options.contains("animation") ||
                             options.contains("timelapse");
         if (!moving) {
-            const QString difference = genko::test::exports::tree_difference(dir, py_dir);
+            QString difference = genko::test::exports::tree_difference(dir, py_dir);
+            if (!difference.isEmpty() && options.contains(QStringLiteral("psd")))
+                difference = difference_but_adjustment_layers(dir, py_dir);  // (the user's decision 5)
             QVERIFY2(difference.isEmpty(), qPrintable(name + ": " + difference));
             return;
         }
