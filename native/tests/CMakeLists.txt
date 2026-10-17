@@ -379,7 +379,8 @@ if(GENKO_BUILD_APP)
   # the disposable material preview cache alone (keys, restarts, corrupt files, budgets, originals kept)
   genko_test(test_material_preview_cache SOURCES unit/test_material_preview_cache.cpp DEPS genko_app LABELS unit)
   genko_test(test_migration SOURCES unit/test_migration.cpp DEPS genko_app LABELS unit)
-  genko_test(test_gui_color SOURCES gui/test_gui_color.cpp DEPS genko_app ZLIB::ZLIB GUI TIMEOUT 300)
+  # (about 60 s in Release; under ASan about 270 s, close to the 300 it had: a guard against a hang, as the GUI tests near it)
+  genko_test(test_gui_color SOURCES gui/test_gui_color.cpp DEPS genko_app ZLIB::ZLIB GUI TIMEOUT 900)
   # the layer panel: its list, buttons, settings, menus (several at once, masks, effects), fill and correction layers,
   # a filter with its result on the page while its numbers change
   genko_test(test_gui_layers SOURCES gui/test_gui_layers.cpp DEPS genko_app GUI TIMEOUT 600)
