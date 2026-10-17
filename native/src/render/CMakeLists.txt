@@ -55,6 +55,7 @@ genko_library(genko_render
     adjust.cpp
     ops_adjust.cpp
     tone_ops.cpp
+    image_ops.cpp
     ops_calc.cpp
     trap.cpp
     ops_fade.cpp

@@ -36,6 +36,7 @@
 #include <chrono>
 
 #include "app/actions.hpp"
+#include "app/adjust_forms.hpp"
 #include "app/ask.hpp"
 #include "app/backup.hpp"
 #include "app/comfort.hpp"
@@ -657,6 +658,7 @@ void MainWindow::on_book_changed(const BookChange& change) {
     if (doc_ < doc_tabs_->count()) doc_tabs_->setTabText(doc_, documents_[static_cast<std::size_t>(doc_)].title());
     render::brushes::follow_book(b);  // (a define_brush: the person's own brushes and their edits stay)
     output_panels_follow();  // (履歴 and 点検: main_window_output.cpp)
+    adjust_forms::follow_change(*this, change);  // (PC2c: 編集 → フェード, app/image_dialogs.cpp)
     // (the studio: someone else's changes may bring requests for the person — a note, and the box in front)
     const bool outside = change.why == BookChange::Why::Rebase || change.why == BookChange::Why::Reload;
     const std::set<std::string> before = known_requests_;

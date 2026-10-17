@@ -428,11 +428,6 @@ private slots:
         const std::vector<const char*> not_yet{
             "set_adjustment",  // PC2a
             "auto_adjust",     // PC2a
-            "hdr_toning",      // PC2c
-            "apply_image",     // PC2c
-            "calculations",    // PC2c
-            "trap",            // PC2c
-            "fade_layer",      // PC2c
         };
         for (const char* name : not_yet) {
             const std::string why = refusal(doc, Json{{"op", name}, {"page", 1}});
