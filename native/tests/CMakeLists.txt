@@ -277,6 +277,8 @@ genko_test(test_contract_adjust_color SOURCES contract/test_contract_adjust_colo
 # psd-tools (tools/migration/psd_adjust_check.py) and by import_psd.
 genko_test(test_contract_adjust SOURCES contract/test_contract_adjust.cpp DEPS genko_test_support genko_render
            LABELS contract TIMEOUT 1800)
+# (its command line over every kind of page under ASan takes longer than QtTest's 5 minutes for one function)
+set_property(TEST test_contract_adjust APPEND PROPERTY ENVIRONMENT "QTEST_FUNCTION_TIMEOUT=1700000")
 # PC2d (COLOR-04) through the command line: put_raster and import_psd with embedded_profile, inspect --profile.
 genko_test(test_contract_profile SOURCES contract/test_contract_profile.cpp DEPS genko_test_support genko_render ZLIB::ZLIB
            LABELS contract TIMEOUT 900)
