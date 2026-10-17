@@ -28,4 +28,6 @@ void MainWindow::build_adjust_menus(QMenu* layers, QMenu* edit) {
     layers->addMenu(adjust);
 }
 
+void MainWindow::build_adjust_docks() { adjust_forms::build_tone_docks(this, view_menu_); }
+
 }  // namespace genko::app

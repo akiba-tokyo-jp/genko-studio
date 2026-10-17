@@ -828,7 +828,9 @@ std::optional<Json> LayerPanel::adjust_fields(const std::string& kind, const Jso
 
 void LayerPanel::add_adjust(const std::string& kind) {
     const auto asked = window_->asking();
-    const auto params = adjust_fields(kind);
+    // (PC2a, the user's decision 3: a correction made new starts from PhotoCraft's form, when its kind has a window)
+    const adjust_forms::FormKind* form_of = adjust_forms::form_kind(kind);
+    const auto params = adjust_fields(kind, form_of != nullptr ? form_of->fresh : Json::object());
     if (!params || !window_->still(asked)) return;
     QString title = QStringLiteral("色調補正");
     if (const adjust_forms::FormKind* form = adjust_forms::form_kind(kind)) title = form->title;

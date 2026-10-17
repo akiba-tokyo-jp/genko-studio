@@ -268,8 +268,14 @@ private slots:
         // act_proof_cyan, act_proof_magenta, act_proof_yellow, act_proof_black, act_proof_cmy, act_proof_srgb, act_proof_monitor,
         // act_proof_legacy_mac, act_proof_protan, act_proof_deutan) — theirs (test_gui_color), and the 5 of PC1d (SPEC COLOR-03)
         // — ページ → 色モード の 2 階調…・インデックスカラー…・ダブルトーン…・マルチチャンネル・カラーテーブル… (act_mode_bitmap,
-        // act_mode_indexed, act_mode_duotone, act_mode_multichannel, act_color_table) — theirs (test_gui_book).
-        QCOMPARE(w->actions_by_name().size(), std::size_t{250});
+        // act_mode_indexed, act_mode_duotone, act_mode_multichannel, act_color_table) — theirs (test_gui_book), and the 14
+        // of PC2a (SPEC COLOR-04) — レイヤー → 色調補正 の 明るさ・コントラストを変える…・レベル補正をかける…・トーンカーブを
+        // かける…・露光量…・カラールックアップをかける…・階調の反転・階調化する…・2 値化する…・グラデーションマップをかける…・
+        // 平均化・自動トーン補正・自動コントラスト・自動カラー補正 and ファイル → カラールックアップテーブルを書き出す…
+        // (act_adjust_brightness, act_adjust_levels, act_adjust_curves, act_adjust_exposure, act_adjust_lookup,
+        // act_adjust_invert, act_adjust_posterize, act_adjust_threshold, act_adjust_gradient_map, act_adjust_equalize,
+        // act_auto_tone, act_auto_contrast, act_auto_color, act_export_lookup) — theirs (test_gui_adjust).
+        QCOMPARE(w->actions_by_name().size(), std::size_t{264});
         QVERIFY(w->action("act_chat_approval"));
         QVERIFY(w->action("act_style"));
         QVERIFY(w->action("act_exposure"));

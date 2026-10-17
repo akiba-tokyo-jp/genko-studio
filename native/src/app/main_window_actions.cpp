@@ -891,6 +891,7 @@ void MainWindow::build_docks() {
     view_menu_->addAction(layers->toggleViewAction());
     layers_dock_ = layers;
     build_channel_dock();  // (チャンネル, a tab beside the layers: main_window_channels.cpp)
+    build_adjust_docks();  // (PC2a: 色調補正 and 属性, app/adjust_panels.cpp)
     build_line_dock();  // (台詞, a tab beside the pages and the layers: main_window_lines.cpp)
     pages_dock_->raise();
     build_colour_dock();  // (カラー, a tab beside the pages and the layers: main_window_paint.cpp)

@@ -93,6 +93,7 @@ genko_library(genko_app
     layer_dialogs.cpp
     adjust_forms.cpp
     adjust_forms_tone.cpp
+    adjust_panels.cpp
     adjust_forms_color.cpp
     image_dialogs.cpp
     main_window_adjust.cpp

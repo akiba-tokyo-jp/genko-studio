@@ -35,6 +35,10 @@ public:
     static constexpr int kSide = 200;
     explicit CurveEditor(std::vector<std::array<double, 2>> points = {{0, 0}, {255, 255}}, QWidget* parent = nullptr);
     const std::vector<std::array<double, 2>>& points() const { return points_; }
+    // PC2a: another channel's points shown (no changed signal), and the curve drawn by PhotoCraft's formula (a natural
+    // cubic spline: native.method upstream) or Genko's (Python's monotone cubic).
+    void set_points(std::vector<std::array<double, 2>> points);
+    void set_upstream(bool upstream);
 signals:
     void changed();
 protected:
@@ -48,6 +52,7 @@ private:
     std::optional<std::size_t> near(QPointF pos) const;
     std::vector<std::array<double, 2>> points_;
     std::optional<std::size_t> drag_;
+    bool upstream_ = false;
 };
 
 // The colours of a gradient: each a colour, a place (0..100 %) and how strong it is; ＋ adds one; ready-made rows

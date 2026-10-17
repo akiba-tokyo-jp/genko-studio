@@ -418,6 +418,8 @@ private:
     // PC2 (補正・色管理, app/main_window_adjust.cpp): レイヤー → 色調補正 and the corrections' commands of 編集, each
     // group's added by its own file (app/adjust_forms.hpp); the submenu shown only when it holds a command.
     void build_adjust_menus(QMenu* layers, QMenu* edit);
+    // PC2a: the 色調補正 and 属性 panels (app/adjust_panels.cpp), listed in ウィンドウ.
+    void build_adjust_docks();
     void connect_session();
     void disconnect_session();
     void on_book_changed(const BookChange& change);
