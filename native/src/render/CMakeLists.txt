@@ -53,6 +53,7 @@ genko_library(genko_render
     raster_ops.cpp
     ops_paint.cpp
     adjust.cpp
+    adjust_space.cpp
     ops_adjust.cpp
     tone_ops.cpp
     ops_calc.cpp

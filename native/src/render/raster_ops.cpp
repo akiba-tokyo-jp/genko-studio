@@ -2248,7 +2248,8 @@ void filter_raster(OpContext& c) {
         std::optional<adjust_ops::FilterWork> own;
         if (!kind.starts_with("plugin:") && adjust_ops::handles(op)) own = adjust_ops::filter_work(doc, page, kind, params);
         if (own && !own->python) {
-            filtered = adjust_ops::filter_eight(*own, doc, page, image, kind);
+            const std::optional<Json> area = core::truthy_at(op, "area") ? std::optional<Json>(core::op_area(op)) : std::nullopt;
+            filtered = adjust_ops::filter_eight(*own, doc, page, image, kind, area ? &*area : nullptr);
         } else {
             filtered = kind.starts_with("plugin:") ? plugin_work([&] { return plugins::run(kind, image, params); })
                                                    : filters::apply_filter(image, kind, own ? own->params : params);

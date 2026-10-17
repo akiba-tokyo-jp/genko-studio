@@ -24,6 +24,11 @@
 //      same pixels made RGBA, or the same error at the same stage (open or load); a Lab file decoded the same, though
 //      open_image refuses it as not yet ported (Pillow turns Lab into RGB through Little CMS); pictureMutationsLikePillow:
 //      the same for the files changed at a few bytes each (seeded).
+// The user's decision 5 (PC2a, SPEC.md COLOR-04): this build reads an adjustment layer a codec reads (render/psd_adjust)
+// as a correction layer, where psd.read_psd leaves every one out. The reads are compared with Python's with those
+// layers taken out — Python's skipped this build's with exactly their names among them —, and import_psd's cases as
+// Python reads the files (psd::PythonView: no codec reads), then again as this build reads them: the same but the
+// correction layers made of the adjustment layers Python leaves out.
 // Skipped without the Python reference.
 
 #include <QtTest>
@@ -35,6 +40,7 @@
 #include <QTemporaryDir>
 
 #include <map>
+#include <set>
 #include <optional>
 #include <random>
 #include <string>
@@ -48,6 +54,7 @@
 #include "render/ops_registry.hpp"
 #include "render/png.hpp"
 #include "render/psd.hpp"
+#include "render/psd_adjust.hpp"
 #include "render/psd_image.hpp"
 #include "storage/asset_store.hpp"
 #include "storage/fsutil.hpp"
@@ -79,16 +86,26 @@ Json digest(const std::optional<genko::render::Image>& image) {
     return hash.result().toHex().toStdString();
 }
 
-// The harness's psd_reads record of `data`.
+// The harness's psd_reads record of `data`. (The user's decision 5: the adjustment layers read as correction layers
+// are taken out of "layers" — a folder's index counted without them — and named in "adjusted", this build's own.)
 Json read_record(const std::string& data) {
     try {
         const psd::File file = psd::File::read(data);
+        std::vector<std::int64_t> index(file.layers().size(), -1);
+        std::int64_t kept = 0;
+        for (std::size_t i = 0; i < file.layers().size(); ++i)
+            if (!file.layers()[i].adjust) index[i] = kept++;
+        Json adjusted = Json::array();
         Json layers = Json::array();
         for (const psd::Layer& layer : file.layers()) {
+            if (layer.adjust) {
+                adjusted.push_back(layer.name);
+                continue;
+            }
             Json item = Json::object();
             item["name"] = layer.name;
             item["folder"] = layer.folder;
-            item["parent"] = layer.parent ? Json(static_cast<std::int64_t>(*layer.parent)) : Json(nullptr);
+            item["parent"] = layer.parent ? Json(index[*layer.parent]) : Json(nullptr);
             item["opacity"] = layer.opacity;
             item["visible"] = layer.visible;
             item["blend"] = layer.blend;
@@ -107,12 +124,73 @@ Json read_record(const std::string& data) {
         out["skipped"] = skipped;
         out["merged"] = digest(file.merged());
         out["layers"] = std::move(layers);
+        if (!adjusted.empty()) out["adjusted"] = std::move(adjusted);
         return out;
     } catch (const psd::ReadError& error) {
         return Json::object({{"error", error.type()}, {"message", error.what()}});
     } catch (const std::exception& error) {  // (none: shown as a difference)
         return Json::object({{"error", "C++"}, {"message", error.what()}});
     }
+}
+
+// "" when `cpp`'s skipped layers are `python`'s but the names of the correction layers this build read ("adjusted",
+// the user's decision 5): this build's in their order among Python's, and the rest of Python's exactly those names.
+std::string skipped_but_adjusted(const Json& cpp, const Json& python) {
+    if (!python.contains("skipped") || !python["skipped"].is_array()) return "Python did not read it";
+    const Json& all = python["skipped"];
+    std::size_t at = 0;
+    std::multiset<std::string> rest;
+    for (const Json& name : cpp["skipped"]) {
+        while (at < all.size() && all[at] != name) rest.insert(all[at++].get<std::string>());
+        if (at == all.size()) return "a skipped layer that Python did not skip: " + name.dump();
+        ++at;
+    }
+    while (at < all.size()) rest.insert(all[at++].get<std::string>());
+    std::multiset<std::string> read;
+    for (const Json& name : cpp["adjusted"]) read.insert(name.get<std::string>());
+    if (rest != read) return "the correction layers read are not the layers Python left out but this build's";
+    return {};
+}
+
+// "same" when `own` (import_psd's reply as this build reads the file) is `python_view`'s (as Python reads it); "" when
+// it differs only by correction layers made of adjustment layers (the user's decision 5): each import's layers
+// Python's view's with those among them (their titles, the layers kind adjust in `after`), its skipped layers the
+// view's without exactly those names; else what differs.
+std::string corrections_more(const Json& own, const Json& python_view, const genko::core::Document& after) {
+    if (genko::core::dump_python(own) == genko::core::dump_python(python_view)) return "same";
+    if (!own.value("ok", false) || !python_view.value("ok", false) || !own.contains("results") || !python_view.contains("results") ||
+        own["results"].size() != python_view["results"].size())
+        return "the replies differ: " + genko::core::dump_python(own).substr(0, 600);
+    std::multiset<std::string> made;  // (the titles of the correction layers in the book after)
+    for (const auto& page : after.pages)
+        for (const auto& layer : page->layers)
+            if (layer.kind == genko::core::LayerKind::Adjust) made.insert(layer.title);
+    int more = 0;
+    for (std::size_t r = 0; r < own["results"].size(); ++r) {
+        const Json& mine = own["results"][r];
+        const Json& theirs = python_view["results"][r];
+        if (!mine.contains("layers") || !theirs.contains("layers")) continue;
+        // their layers' titles in order among mine; the others correction layers
+        std::size_t at = 0;
+        std::multiset<std::string> extra;
+        for (const Json& layer : mine["layers"]) {
+            if (at < theirs["layers"].size() && layer["title"] == theirs["layers"][at]["title"]) {
+                ++at;
+                continue;
+            }
+            extra.insert(layer["title"].get<std::string>());
+        }
+        if (at != theirs["layers"].size()) return "a layer Python's view made is not made";
+        for (const std::string& title : extra)
+            if (made.count(title) == 0) return "a layer more that is not a correction layer: " + title;
+        // their skipped: mine with exactly those titles among them
+        Json both = Json::object({{"skipped", mine.value("skipped", Json::array())}, {"adjusted", Json::array()}});
+        for (const std::string& title : extra) both["adjusted"].push_back(title);
+        const std::string why = skipped_but_adjusted(both, Json::object({{"skipped", theirs.value("skipped", Json::array())}}));
+        if (!why.empty()) return why;
+        more += static_cast<int>(extra.size());
+    }
+    return more > 0 ? std::string() : "the replies differ: " + genko::core::dump_python(own).substr(0, 600);
 }
 
 // The harness's psd_images record of `data` (Pillow's Image.open, then load()): what render::psd_image_size refuses
@@ -280,10 +358,22 @@ class TestContractPsd : public QObject {
         std::vector<std::string> failures;
         std::map<std::string, int> outcomes;  // what Python's reads came to (each kind of error, or "read")
         int pictures = 0;
+        int adjusted = 0;  // (reads with adjustment layers read as correction layers: the user's decision 5)
         for (std::size_t n = 0; n < reads.size(); ++n) {
             std::string data = genko::test::read_bytes(QString::fromStdString(reads[n]["file"].get<std::string>()));
             if (reads[n].contains("cut")) data.resize(reads[n]["cut"].get<std::size_t>());
-            const Json got = read_record(data);
+            Json got = read_record(data);
+            if (got.contains("adjusted")) {
+                const std::string why = skipped_but_adjusted(got, records[n]);
+                if (!why.empty()) {
+                    failures.push_back(genko::core::dump_python(reads[n]) + ": " + why + ": " + genko::core::dump_python(got).substr(0, 700) +
+                                       " != " + genko::core::dump_python(records[n]).substr(0, 700));
+                    continue;
+                }
+                got.erase("adjusted");
+                got["skipped"] = records[n]["skipped"];
+                ++adjusted;
+            }
             const std::string want_text = genko::core::dump_python(records[n]);
             const std::string got_text = genko::core::dump_python(got);
             if (got_text != want_text) {
@@ -299,7 +389,8 @@ class TestContractPsd : public QObject {
         }
         for (const auto& f : failures) qWarning("%s", f.c_str());
         for (const auto& [what, count] : outcomes) qInfo("%5d  %s", count, what.c_str());
-        qInfo("%zu reads the same as Python's (%d layers and merged pictures among them)", reads.size() - failures.size(), pictures);
+        qInfo("%zu reads the same as Python's (%d layers and merged pictures among them; %d with adjustment layers read as "
+              "correction layers, the user's decision 5)", reads.size() - failures.size(), pictures, adjusted);
         QVERIFY2(failures.empty(), (std::to_string(failures.size()) + " of " + std::to_string(reads.size()) + " reads differ").c_str());
         QVERIFY(outcomes["read"] >= least_read);
     }
@@ -483,6 +574,7 @@ private slots:
         int successes = 0;
         int refusals = 0;
         int read_back = 0;
+        int corrected = 0;
         genko::test::ReadBackNotes notes;
         std::vector<std::string> failures;
         for (std::size_t n = 0; n < cases.size(); ++n) {
@@ -497,7 +589,11 @@ private slots:
             }
             genko::storage::AssetStore store(genko::storage::path_from_utf8((dir + QStringLiteral("/cpp-store-%1").arg(n)).toStdString()));
             genko::core::Document last;
-            const auto outcomes = genko::test::run_steps(book, steps_of(c), first_id, store, false, &last);
+            std::vector<genko::test::StepOutcome> outcomes;
+            {
+                const psd::PythonView python_view;  // (as psd.read_psd reads the file: every adjustment layer left out)
+                outcomes = genko::test::run_steps(book, steps_of(c), first_id, store, false, &last);
+            }
             if (records.size() != outcomes.size()) {
                 failures.push_back(name + ": Python gave " + std::to_string(records.size()) + " steps");
                 continue;
@@ -525,10 +621,22 @@ private slots:
                 continue;
             }
             ++read_back;
+            // as this build reads the file (the user's decision 5): the same, or the correction layers made of the
+            // adjustment layers Python leaves out more
+            genko::storage::AssetStore own_store(genko::storage::path_from_utf8((dir + QStringLiteral("/cpp5-store-%1").arg(n)).toStdString()));
+            genko::core::Document own_last;
+            const auto own = genko::test::run_steps(book, steps_of(c), first_id, own_store, false, &own_last);
+            const std::string why = corrections_more(own.back().reply, outcomes.back().reply, own_last);
+            if (why == "same") continue;
+            if (!why.empty()) {
+                failures.push_back(name + " (as this build reads it): " + why);
+                continue;
+            }
+            ++corrected;
         }
         for (const auto& f : failures) qWarning("%s", f.c_str());
-        qInfo("import_psd: %d successes and %d refusals the same as Python; saved and read back as they were: %d", successes,
-              refusals, read_back);
+        qInfo("import_psd: %d successes and %d refusals the same as Python; saved and read back as they were: %d; %d with "
+              "correction layers made of adjustment layers (the user's decision 5)", successes, refusals, read_back, corrected);
         QVERIFY2(failures.empty(), (std::to_string(failures.size()) + " of " + std::to_string(cases.size()) +
                                     " cases differ from Python (see the warnings)").c_str());
         QVERIFY(successes >= 70 && refusals >= 60 && read_back == successes);

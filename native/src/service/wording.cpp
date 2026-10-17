@@ -535,6 +535,19 @@ const std::vector<Rule>& rules() {
         r.push_back(rule("adjust kind must be one of .*", "色調補正は、レベル補正・トーンカーブ・色相・反転・階調化・2 値化・グラデーションマップ・白黒から選びます"));
         // (PC2, adjustments@1 — the C++ build's own: a correction's native settings and kinds, core/adjust)
         r.push_back(rule(R"(adjust kind '(.*)' is not a correction layer's kind)", "「\\1」は色調補正のレイヤーの種類ではありません"));
+        // (PC2a — the tone corrections' own: set_adjustment, auto_adjust and a colour lookup's table, render/ops_adjust, core/lut3d)
+        r.push_back(rule("set_adjustment needs the id of a correction layer", "設定を変える色調補正のレイヤーを選びます"));
+        r.push_back(rule(R"(layer \S+ is not a correction layer)", "そのレイヤーは色調補正のレイヤーではありません"));
+        r.push_back(rule(R"(set_adjustment keeps the correction's kind.*)", "色調補正の種類は変えられません（補正のレイヤーを作り直します）"));
+        r.push_back(rule("auto_adjust mode must be one of tone, contrast, color", "自動補正は、自動トーン補正・自動コントラスト・自動カラー補正から選びます"));
+        r.push_back(rule("auto_adjust needs the id of a layer", "自動補正をかけるレイヤーを選びます"));
+        r.push_back(rule(R"(adjust color_lookup\.data must be the text of .*)", "カラールックアップの表は、.cube・.3dl・.look のファイルから読みます"));
+        r.push_back(rule(R"(adjust color_lookup\.data is larger than 32 MiB)", "カラールックアップの表のファイルが大きすぎます（32 MiB まで）"));
+        r.push_back(rule(R"(adjust color_lookup\.data: .*)", "カラールックアップの表のファイルが読めません（.cube・.3dl・.look の中身を確かめます）"));
+        r.push_back(rule(R"(adjust color_lookup\.lut: the book holds no lookup table .*)",
+                         "この原稿にはそのカラールックアップの表がありません（表のファイルを読み込み直します）"));
+        r.push_back(rule(R"(the lookup table \S+ is not held: the book is not written)",
+                         "カラールックアップの表が見つからないので、原稿を保存しませんでした"));
         r.push_back(rule(R"(adjust (\S+?)(?: native)?(?:\.\S+)? has no setting '(.*)')", "色調補正（\\1）に「\\2」という設定はありません"));
         r.push_back(rule(R"(adjust (\S+?)(?: native)?\.(\S+) (?:must|needs|has no channel) .*)", "色調補正（\\1）の「\\2」の値が使えません"));
         r.push_back(rule(R"(adjust (\S+?) native: a (Lab|multichannel) page cannot composite the blend '(.*)')", [](const QRegularExpressionMatch& m) {

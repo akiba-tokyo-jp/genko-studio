@@ -26,8 +26,12 @@ struct PsdAdjustLayer {
 };
 
 // The correction layer `layer` of `page` as an adjustment layer of a PSD of `size` pixels; none when no codec writes
-// its kind (`notes`: what a codec says of it, e.g. a Python form held by the nearest PSD adjustment).
+// its kind (`notes`: what a codec says of it, e.g. a Python form held by the nearest PSD adjustment). `doc`: the book
+// (a lookup table's asset).
 std::optional<PsdAdjustLayer> psd_adjust_layer(const core::Layer& layer, const core::Page& page, render::Size size,
-                                               std::vector<std::string>& notes);
+                                               std::vector<std::string>& notes, const core::Document* doc = nullptr);
+
+// What a PSD of these pages says of their correction layers (the codecs' words, each once): the export's notes.
+std::vector<std::string> psd_adjust_notes(const core::Document& doc);
 
 }  // namespace genko::formats

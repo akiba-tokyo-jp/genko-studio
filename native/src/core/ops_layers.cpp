@@ -11,6 +11,7 @@
 #include "core/adjust_kinds.hpp"
 #include "core/filters.hpp"
 #include "core/ids.hpp"
+#include "core/lut3d.hpp"
 #include "core/ops_util.hpp"
 #include "core/pyconv.hpp"
 
@@ -250,6 +251,7 @@ void set_layer_with(Document& doc, const Json& op) {
     if (has(op, "adjust")) {
         if (layer.kind != LayerKind::Adjust) throw OpError("adjust is set on a correction layer");
         layer.adjust = adjust_spec(op["adjust"], &page);
+        lut3d::keep_luts(doc.luts, *layer.adjust);  // (PC2a: a color_lookup's table into the book)
     }
     if (has(op, "effect")) {
         if (py_truthy(op["effect"])) {
@@ -301,6 +303,7 @@ void add_layer(OpContext& c) {
         layer.title = truthy_at(op, "name") ? py_str(op["name"]) : std::string("グラデーション");
     } else if (kind_name == "adjust") {
         layer.adjust = adjust_spec(truthy_at(op, "adjust") ? op["adjust"] : Json::object({{"kind", "levels"}}), &doc.page(at));
+        lut3d::keep_luts(doc.luts, *layer.adjust);  // (PC2a: a color_lookup's table into the book)
         layer.title = truthy_at(op, "name") ? py_str(op["name"]) : std::string("色調補正");
     }
     Page& page = doc.edit_page(at);

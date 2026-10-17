@@ -1,0 +1,85 @@
+#pragma once
+
+#include <array>
+#include <cstddef>
+#include <functional>
+#include <map>
+#include <memory>
+#include <optional>
+#include <string>
+#include <string_view>
+#include <vector>
+
+#include "core/ink.hpp"
+#include "core/json.hpp"
+#include "core/model.hpp"
+
+// PC2a (SPEC.md COLOR-04, schema-v4.md「補正（adjustments@1）」: the 3D lookup table of color_lookup): the creative LUT
+// files a person gives (.cube — Adobe / Resolve, a 1D one spread to 33³ —, .3dl — Lustre —, .look — SpeedGrade), the
+// eight looks PhotoCraft generates (CC0), a table as a book holds it (the asset assets/<ab>/<64>.gklut), a .cube written
+// back, and a colour looked up (trilinear or tetrahedral, PhotoCraft's ordered dither). PhotoCraft v0.2.0
+// cms/lutfile.rs and compose/adjust.rs (lut3d_sample, bayer4); attribution: native/third_party/photocraft/NOTICE.md.
+//
+// A table: `size`³ RGB triplets in 0..1 (as given: a file may hold values beyond), red varying fastest
+// (((b·size + g)·size + r)·3).
+
+namespace genko::core::lut3d {
+
+inline constexpr std::size_t kMaxSize = 129;                     // (PhotoCraft's MAX_SIZE)
+inline constexpr std::size_t kMaxFileBytes = 32 * 1024 * 1024;  // (a file's text an op takes)
+inline constexpr std::string_view kSuffix = ".gklut";
+
+struct Table {
+    std::string title;
+    std::size_t size = 0;
+    std::vector<float> data;
+};
+
+// The identity of edge `size`, and `f` sampled on a `size`³ grid (each value held to 0..1).
+Table identity(std::size_t size);
+Table from_fn(std::string title, std::size_t size, const std::function<std::array<float, 3>(std::array<float, 3>)>& f);
+
+// A file's table, its format by the name's extension (.3dl, .look; a text starting with "<" is a .look; else .cube).
+// core::Error("value") with PhotoCraft's words for one it cannot read (a size beyond 2..129, entries missing or more,
+// a value not finite, …).
+Table parse(std::string_view file_name, std::string_view text);
+Table parse_cube(std::string_view text);
+Table parse_3dl(std::string_view text);
+Table parse_look(std::string_view text);
+// The table as a .cube file (its TITLE when it has one, LUT_3D_SIZE, each entry with 6 decimals).
+std::string write_cube(const Table& table);
+
+// PhotoCraft's generated looks (procedural, CC0): their ids and labels, in its order; a look's table (33³, made once).
+struct Look {
+    std::string_view id;
+    std::string_view label;
+};
+const std::array<Look, 8>& looks();
+const Table* builtin(std::string_view id);
+
+// The table at a colour (each channel held to 0..1 first), trilinear or tetrahedral (PhotoCraft's lut3d_sample).
+std::array<double, 3> sample(const Table& table, const std::array<double, 3>& rgb, bool tetrahedral);
+// PhotoCraft's ordered dither: the 4×4 Bayer offset in -0.5..0.5 of the page's pixel (x, y).
+double bayer4(int x, int y);
+
+// The table as a book holds it: "GKLU", version 1 (u8), its size (u8), then zlib's stream of size³ × 3 float32 (little
+// endian, red fastest). The same table is always the same bytes (the same asset). decode: core::Error("value") for
+// bytes that are not one (another magic or version, a size beyond 2..129, entries missing or more, a value not finite).
+std::string encode(const Table& table);
+Table decode(std::string_view bytes);
+// A decoded table by its bytes' ref, kept a few at a time (a table is drawn many times; 129³ is about 26 MB).
+std::shared_ptr<const Table> decoded(const std::string& ref, const Bytes& bytes);
+
+// The tables an op made of a file's text (normalize: the asset not in a book yet), by their ref, a few kept until the op
+// takes them into its book (keep_luts) or a filter uses one. None when it is not (any more) there.
+void remember(const std::string& ref, const Bytes& bytes);
+Bytes remembered(const std::string& ref);
+
+// A correction's lookup table into the book an op changes (add_layer, set_layer, set_adjustment: a color_lookup with a
+// `lut`), from the tables the op just made: OpError when the book does not hold it and it was not just made (a table of
+// another book).
+void keep_luts(std::map<std::string, Bytes>& luts, const Json& adjust);
+// The tables a book's color_lookup corrections use (their "lut" refs, each once, in their order): what the writer writes.
+std::vector<std::string> refs_of(const Document& doc);
+
+}  // namespace genko::core::lut3d

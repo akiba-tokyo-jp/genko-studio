@@ -378,6 +378,9 @@ struct Document {
     // BRUSH-01 (paper-texture@1): the grey pictures of the papers its brushes keep (brush_custom[key]["paper"]["asset"]),
     // by their asset ref. Written as assets/<ab>/<64 hex>.png; only those a brush keeps are written and read.
     std::map<std::string, Bytes> papers;
+    // PC2a (adjustments@1): the 3D lookup tables its color_lookup corrections use (their "lut"), by their asset ref
+    // (core/lut3d: GKLU bytes). Written as assets/<ab>/<64 hex>.gklut; only those a correction uses are written and read.
+    std::map<std::string, Bytes> luts;
     Json nombre = Json::object();
     Json extra = Json::object();  // top-level keys this build does not know; written back unchanged
     std::int64_t revision = 0;

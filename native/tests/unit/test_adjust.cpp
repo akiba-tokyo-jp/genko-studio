@@ -3,7 +3,11 @@
 // opens read-only), the formula's choice (native.method), the kinds' table and the ops and filter kinds not in this
 // build yet (refused, named), the three ways a correction is drawn through one AdjustFunction, native.blend on each
 // (the 8-bit page: blend_over's bytes; 16 bits: the 8-bit page's within a level; CMYK: the plates multiplied), a
-// correction layer's own blend not looked at (the user's decision 2), and the PSD's frame.
+// correction layer's own blend not looked at (the user's decision 2), and the PSD's frame. PC2a (階調の補正・3D LUT):
+// the tone kinds' upstream formulas (the soft toe, the natural spline, the composite before the channels; brightness and
+// contrast modern and legacy, posterize's floor, a gradient map's reverse and dither), the channel records in their own
+// space on every kind of page (through Little CMS where the page's differs), auto_adjust, equalize, set_adjustment,
+// color_lookup (its table made the book's asset, saved and read back), the PSD's tone codecs and the .cube export.
 
 #include <QtTest/QtTest>
 #include <QTemporaryDir>
@@ -18,6 +22,7 @@
 
 #include "core/adjust.hpp"
 #include "core/adjust_kinds.hpp"
+#include "core/adjust_tone.hpp"
 #include "core/base64.hpp"
 #include "core/color_adjust.hpp"
 #include "core/color_raster.hpp"
@@ -25,6 +30,8 @@
 #include "core/error.hpp"
 #include "core/filters.hpp"
 #include "core/ink.hpp"
+#include "core/lut3d.hpp"
+#include "formats/exporting.hpp"
 #include "formats/psd_adjust.hpp"
 #include "render/adjust.hpp"
 #include "render/color_canvas.hpp"
@@ -319,33 +326,33 @@ private slots:
         QVERIFY(refusal(own, Json{{"op", "set_color_mode"}, {"mode", "lab"}, {"depth", 16}}).empty());
     }
 
-    // The user's decision 4: native.method — genko (Python's formula, the default: the same bytes) or upstream (PC2a's
-    // formula: refused, named, until it is in this build); a stored upstream layer is well formed and left out of a
-    // preview, never drawn as if it were not there.
+    // The user's decision 4: native.method — genko (Python's formula, the default: the same bytes) or upstream
+    // (PhotoCraft's, PC2a: drawn by it). (PC2-0 refused upstream as not yet ported; PC2a's formulas take it over.)
     void methodChoice() {
         const auto doc = eight_bit_page();
         for (const std::string kind : {"levels", "curve"}) {
             const Json genko{{"kind", kind}, {"native", Json{{"method", "genko"}}}};
             QVERIFY(refusal(doc, Json{{"op", "add_layer"}, {"page", 1}, {"kind", "adjust"}, {"adjust", genko}}).empty());
-            const std::string why = refusal(doc, Json{{"op", "add_layer"}, {"page", 1}, {"kind", "adjust"},
-                                                      {"adjust", Json{{"kind", kind}, {"native", Json{{"method", "upstream"}}}}}});
-            QVERIFY2(why.starts_with("not_yet_ported: ") && why.find(kind) != std::string::npos && why.find("PC2a") != std::string::npos, why.c_str());
+            QVERIFY(refusal(doc, Json{{"op", "add_layer"}, {"page", 1}, {"kind", "adjust"},
+                                      {"adjust", Json{{"kind", kind}, {"native", Json{{"method", "upstream"}}}}}}).empty());
         }
-        for (const Json& later : {Json{{"kind", "brightness_contrast"}, {"native", Json{{"method", "modern"}}}},
-                                  Json{{"kind", "posterize"}, {"native", Json{{"method", "floor"}}}},
-                                  Json{{"kind", "gradient_map"}, {"native", Json{{"reverse", true}}}}}) {
-            QVERIFY2(refusal(doc, Json{{"op", "add_layer"}, {"page", 1}, {"kind", "adjust"}, {"adjust", later}}).starts_with("not_yet_ported: "), later.dump().c_str());
+        for (const Json& now : {Json{{"kind", "brightness_contrast"}, {"native", Json{{"method", "modern"}}}},
+                                Json{{"kind", "posterize"}, {"native", Json{{"method", "floor"}}}},
+                                Json{{"kind", "gradient_map"}, {"native", Json{{"reverse", true}}}}}) {
+            QVERIFY2(refusal(doc, Json{{"op", "add_layer"}, {"page", 1}, {"kind", "adjust"}, {"adjust", now}}).empty(), now.dump().c_str());
         }
         QVERIFY(refusal(doc, Json{{"op", "add_layer"}, {"page", 1}, {"kind", "adjust"},
                                   {"adjust", Json{{"kind", "gradient_map"}, {"native", Json{{"reverse", false}, {"dither", false}}}}}}).empty());
-        const auto upstream = with_correction(doc, Json{{"kind", "levels"}, {"black", 20}, {"native", Json{{"method", "upstream"}}}});
-        core::validate_adjustments(upstream);  // (well formed)
-        QVERIFY_EXCEPTION_THROWN(render::render_page(upstream.page(0), 200, render::proof_options(), &upstream), render::NotYetPorted);
-        auto preview = render::proof_options();
-        preview.skip_unported = true;
-        const auto left_out = render::render_page(upstream.page(0), 200, preview, &upstream);
-        QCOMPARE(left_out.omitted, std::vector<std::string>{"adjust:levels"});
-        QVERIFY(left_out.image.tobytes() == shown(doc));
+        // a straight stretch is the same either way (within a level); a midtone gamma above 1 has Photoshop's soft toe
+        const auto genko = with_correction(doc, Json{{"kind", "levels"}, {"black", 20}, {"white", 230}});
+        const auto upstream = with_correction(doc, Json{{"kind", "levels"}, {"black", 20}, {"white", 230}, {"native", Json{{"method", "upstream"}}}});
+        core::validate_adjustments(upstream);
+        QVERIFY(worst_difference(shown(genko), shown(upstream)) <= 1);
+        const core::AdjustPtr soft = core::adjust_function(Json{{"kind", "levels"}, {"gamma", 3.0}, {"native", Json{{"method", "upstream"}}}}, doc.page(0));
+        const core::AdjustPtr hard = core::adjust_function(Json{{"kind", "levels"}, {"gamma", 3.0}, {"native", Json{{"method", "genko"}}}}, doc.page(0));
+        QVERIFY(soft && hard);
+        QVERIFY(soft->apply({0.002, 0.002, 0.002}, 0, 0)[0] < hard->apply({0.002, 0.002, 0.002}, 0, 0)[0] - 0.05);  // (the toe: bounded slope)
+        QVERIFY(std::abs(soft->apply({0.6, 0.6, 0.6}, 0, 0)[0] - std::pow(0.6, 1 / 3.0)) < 0.01);  // (the body: the power curve)
     }
 
     // levels' and a tone curve's channel records, read as PhotoCraft reads them (their formula is PC2a's).
@@ -426,8 +433,6 @@ private slots:
                     .starts_with("apply: "));
         // (the ops whose bodies are not written yet: each group takes its own out of this list as it writes it)
         const std::vector<const char*> not_yet{
-            "set_adjustment",  // PC2a
-            "auto_adjust",     // PC2a
             "hdr_toning",      // PC2c
             "apply_image",     // PC2c
             "calculations",    // PC2c
@@ -584,6 +589,370 @@ private slots:
         render::page_layers(doc.page(0), doc, 100, each, nullptr, &adjust_layers);
         QVERIFY(std::find(order.begin(), order.end(), "adjust adj") != order.end());
         QVERIFY(std::find(order.begin(), order.end(), "adjust adj") > std::find_if(order.begin(), order.end(), [](const std::string& n) { return n.find("paint") != std::string::npos; }));
+    }
+
+    // --- PC2a (階調の補正・3D LUT) ----------------------------------------------------------------------------------
+
+    // PhotoCraft's tone records in their space (compose/adjust.rs 656-697): identity curves leave every space as it is;
+    // a CMYK black curve darkens (more K everywhere), a Lab lightness lift keeps a grey grey — on an RGB page through the
+    // drawing's conversions (built-in coated-cmyk, D50 Lab).
+    void toneRecordsInTheirSpace() {
+        const auto doc = eight_bit_page();
+        const core::Page& page = doc.page(0);
+        const Json straight = Json::array({Json::array({0, 0}), Json::array({255, 255})});
+        for (const std::string space : {"rgb", "cmyk", "lab", "gray"}) {
+            Json channels = Json::object();
+            for (const std::string_view name : core::tone_channels(space)) channels[std::string(name)] = straight;
+            const core::AdjustPtr f = core::adjust_function(
+                Json{{"kind", "curve"}, {"points", straight}, {"native", Json{{"method", "upstream"}, {"space", space}, {"channels", channels}}}}, page);
+            QVERIFY(f);
+            for (int i = 0; i < 64; ++i) {
+                const std::array<double, 3> c{(i % 8) / 7.0, (i / 8) / 7.0, 0.3};
+                const auto o = f->apply(c, 0, 0);
+                for (int k = 0; k < 3; ++k) QVERIFY2(std::abs(o[k] - c[k]) < 0.02, space.c_str());
+            }
+        }
+        const core::AdjustPtr black = core::adjust_function(
+            Json{{"kind", "curve"}, {"points", straight},
+                 {"native", Json{{"method", "upstream"}, {"space", "cmyk"}, {"channels", Json{{"black", Json::array({Json::array({0, 0}), Json::array({255, 128})})}}}}}},
+            page);
+        QVERIFY(black->apply({0.8, 0.8, 0.8}, 0, 0)[0] < 0.7);
+        QVERIFY(!black->tables());  // (each colour through the conversions, not a table)
+        const core::AdjustPtr lift = core::adjust_function(
+            Json{{"kind", "curve"}, {"points", Json::array({Json::array({0, 255}), Json::array({255, 0})})},  // (the composite on L only)
+                 {"native", Json{{"method", "upstream"}, {"space", "lab"}, {"channels", Json{{"lightness", Json::array({Json::array({0, 51}), Json::array({255, 255})})},
+                                                                                             {"a", straight}}}}}},
+            page);
+        const auto p = lift->apply({0.2, 0.2, 0.2}, 0, 0);
+        QVERIFY2(std::abs(p[0] - p[2]) < 0.02, "grey kept");
+        // on a CMYK page the records lie on its plates themselves
+        const auto cmyk = cmyk_page();
+        const core::AdjustPtr on_plates = core::adjust_function(
+            Json{{"kind", "levels"}, {"native", Json{{"space", "cmyk"}, {"channels", Json{{"black", Json{{"out_white", 128}}}}}}}}, cmyk.page(0));
+        const auto records = on_plates->ink_records();
+        QVERIFY(records && records->space == core::InkSpace::Cmyk && records->plates.size() == 4);
+        QVERIFY(std::abs(records->plates[3](1.0) - 128 / 255.0) < 0.003);  // (no ink, its brightness 1: K at half)
+        QVERIFY(std::abs(records->plates[0](0.4) - 0.4) < 1e-9);
+        const core::InkPixels before = inks_shown(cmyk);
+        const core::InkPixels after = inks_shown(with_correction(cmyk, Json{{"kind", "levels"}, {"native", Json{{"space", "cmyk"}, {"channels", Json{{"black", Json{{"out_white", 128}}}}}}}}));
+        QVERIFY(after.value(0, 3) > before.value(0, 3) + 0.2);  // (K added everywhere)
+        QVERIFY(std::abs(after.value(0, 0) - before.value(0, 0)) < 1e-4);
+    }
+
+    // levels: the composite, then the channel's record (adjust.rs:211); a tone curve: the channel's, then the composite
+    // (216) — in both formulas.
+    void compositeAndChannelOrder() {
+        const auto doc = eight_bit_page();
+        const core::Page& page = doc.page(0);
+        for (const std::string method : {"genko", "upstream"}) {
+            const core::AdjustPtr levels = core::adjust_function(
+                Json{{"kind", "levels"}, {"black", 0}, {"white", 255}, {"gamma", 1.0}, {"out_black", 100}, {"out_white", 255},
+                     {"native", Json{{"method", method}, {"space", "rgb"}, {"channels", Json{{"red", Json{{"black", 50}, {"white", 255}}}}}}}},
+                page);
+            // composite first: 0 → 100 → (100 − 50)/205; the record first would give 100
+            QVERIFY2(std::abs(levels->apply({0, 0, 0}, 0, 0)[0] * 255 - 50.0 * 255 / 205) < 1.0, method.c_str());
+            QVERIFY(std::abs(levels->apply({0, 0, 0}, 0, 0)[1] * 255 - 100) < 1.0);
+            const core::AdjustPtr curve = core::adjust_function(
+                Json{{"kind", "curve"}, {"points", Json::array({Json::array({0, 100}), Json::array({255, 255})})},
+                     {"native", Json{{"method", method}, {"space", "rgb"}, {"channels", Json{{"red", Json::array({Json::array({0, 0}), Json::array({255, 128})})}}}}}},
+                page);
+            // the record first: 0 → 0 → 100; the composite first would give about 50
+            QVERIFY2(std::abs(curve->apply({0, 0, 0}, 0, 0)[0] * 255 - 100) < 1.0, method.c_str());
+            // (the 8-bit page: the same through its tables)
+            const auto t = levels->tables();
+            QVERIFY(t && std::abs(int(t->rgb[0][0]) - 62) <= 1);
+        }
+        // Genko's records are Python's levels_table: a record alone on red is Python's levels with channel r, byte for byte
+        const core::AdjustPtr record = core::adjust_function(
+            Json{{"kind", "levels"}, {"native", Json{{"method", "genko"}, {"space", "rgb"}, {"channels", Json{{"red", Json{{"black", 30}, {"white", 200}, {"gamma", 1.4}}}}}}}},
+            page);
+        const core::Adjustment python = core::adjustment("levels", Json{{"black", 30}, {"white", 200}, {"gamma", 1.4}, {"channel", "r"}});
+        for (int v = 0; v < 256; ++v) {
+            QCOMPARE(int(record->tables()->rgb[0][v]), python.tables[0][v]);
+            QCOMPARE(int(record->tables()->rgb[1][v]), v);
+        }
+    }
+
+    // brightness_contrast (adjust.rs 65-86, 427-451): modern pins black and white and is the identity at 0; legacy is
+    // the linear scale about mid-grey; posterize's floor bins (453-458); a gradient map reversed, or dithered within half
+    // a level by where the pixel is (723-731).
+    void upstreamFormulas() {
+        const auto doc = eight_bit_page();
+        const core::Page& page = doc.page(0);
+        const auto at = [&page](const Json& adjust, double v, int x = 0, int y = 0) { return core::adjust_function(adjust, page)->apply({v, v, v}, x, y)[0]; };
+        const Json zero{{"kind", "brightness_contrast"}, {"native", Json{{"method", "modern"}}}};
+        for (const double v : {0.0, 0.1, 0.5, 0.9, 1.0}) QVERIFY(std::abs(at(zero, v) - v) < 1e-12);
+        const Json modern{{"kind", "brightness_contrast"}, {"brightness", 80}, {"contrast", 60}, {"native", Json{{"method", "modern"}}}};
+        QCOMPARE(at(modern, 0.0), 0.0);
+        QCOMPARE(at(modern, 1.0), 1.0);
+        QVERIFY(at(modern, 0.4) > 0.45);
+        const Json legacy{{"kind", "brightness_contrast"}, {"brightness", 20}, {"contrast", -10}, {"native", Json{{"method", "legacy"}}}};
+        QVERIFY(std::abs(at(legacy, 0.5) - (0.5 + 20 / 255.0)) < 1e-12);
+        QVERIFY(std::abs(at(legacy, 0.2) - ((0.2 - 0.5) * 0.9 + 0.5 + 20 / 255.0)) < 1e-12);
+        const Json floor{{"kind", "posterize"}, {"levels", 3}, {"native", Json{{"method", "floor"}}}};
+        QCOMPARE(at(floor, 0.0), 0.0);
+        QCOMPARE(at(floor, 100 / 255.0), 127 / 255.0);  // (bin ⌊100·3/256⌋ = 1 → ⌊127.5⌋)
+        QCOMPARE(at(floor, 1.0), 1.0);
+        QCOMPARE(at(Json{{"kind", "posterize"}, {"levels", 200}, {"native", Json{{"method", "floor"}}}}, 200 / 255.0), 199 / 255.0);  // (past Python's 64)
+        const Json reversed{{"kind", "gradient_map"}, {"stops", Json::array({Json::array({0, Json::array({0, 0, 0})}), Json::array({1, Json::array({255, 0, 0})})})},
+                            {"native", Json{{"reverse", true}}}};
+        QVERIFY(std::abs(at(reversed, 0.0) - 1.0) < 1e-9);
+        const Json plain{{"kind", "gradient_map"}};
+        const Json dither{{"kind", "gradient_map"}, {"native", Json{{"dither", true}}}};
+        const core::AdjustPtr dithered = core::adjust_function(dither, page);
+        QVERIFY(dithered->positional());
+        bool moved = false;
+        for (int i = 0; i < 64; ++i) {
+            const double v = i / 63.0;
+            const double a = at(plain, v), b = at(dither, v, i % 8, i / 8);
+            QVERIFY(std::abs(a - b) <= 0.5 / 255 + 1e-6);
+            moved = moved || a != b;
+        }
+        QVERIFY(moved);
+        // the 16-bit page within a level of the 8-bit page, for each (as the three ways take one function)
+        for (const Json& adjust : {modern, legacy, floor, reversed, Json{{"kind", "levels"}, {"gamma", 2.0}, {"native", Json{{"method", "upstream"}}}}}) {
+            const int worst = worst_difference(shown(with_correction(precise_page(), adjust)), shown(with_correction(eight_bit_page(), adjust)));
+            QVERIFY2(worst <= 1, qPrintable(QString::fromStdString(adjust.dump()) + QString(" off by %1").arg(worst)));
+        }
+    }
+
+    // auto_adjust (edit_cmds.rs 223-301, 563-590): a layer of low contrast stretched to black and white — each channel
+    // (tone), all by the same points (contrast: the colours kept), each with its median moved (color); the levels' records
+    // said; one step of the history.
+    void autoAdjust() {
+        const auto ramp = [](std::uint32_t x, std::uint32_t) {
+            const double v = 0.3 + 0.4 * x / (kSide - 1.0);
+            return std::array<int, 4>{int(std::lround(v * 255)), int(std::lround(v * 0.9 * 255)), int(std::lround(v * 0.8 * 255)), 255};
+        };
+        auto doc = blank();
+        doc.edit_page(0).layers.push_back(paint_layer(doc.page(0), "paint", picture(ramp)));
+        for (const std::string mode : {"tone", "contrast", "color"}) {
+            const auto applied = run_ops(doc, Json::array({Json{{"op", "auto_adjust"}, {"page", 1}, {"id", "paint"}, {"mode", mode}}}));
+            const std::string bytes = render::raster::layer_pixels(applied.doc.page(0), applied.doc.page(0).layers[0]).convert("RGBA").tobytes();
+            const auto px = [&bytes](std::uint32_t x, int c) { return int(static_cast<unsigned char>(bytes[(std::size_t(40) * kSide + x) * 4 + c])); };
+            // (contrast keeps the colours: only the extreme channels reach 0 and 255)
+            const int lo = mode == "contrast" ? px(0, 2) : px(0, 0), hi = px(kSide - 1, 0);
+            QVERIFY2(lo < 13 && hi > 242, qPrintable(QString::fromStdString(mode) + QString(" %1 %2").arg(lo).arg(hi)));
+            QCOMPARE(applied.results.size(), std::size_t(1));
+            const Json levels = applied.results[0]["levels"];
+            QVERIFY(levels.contains("red") && levels.contains("green") && levels.contains("blue"));
+            if (mode == "contrast") QCOMPARE(levels["red"]["black"], levels["blue"]["black"]);
+            if (mode == "color") QVERIFY(levels["red"]["gamma"] != Json(1));
+        }
+        QVERIFY(refusal(doc, Json{{"op", "auto_adjust"}, {"page", 1}, {"id", "paint"}, {"mode", "nope"}}).starts_with("apply: "));
+        // inside the selection only
+        const Json area{{"poly", Json::array({Json::array({0, 0}), Json::array({5, 0}), Json::array({5, 25.4}), Json::array({0, 25.4})})}};
+        const auto inside = run_ops(doc, Json::array({Json{{"op", "auto_adjust"}, {"page", 1}, {"id", "paint"}, {"mode", "tone"}, {"area", area}}})).doc;
+        const std::string a = render::raster::layer_pixels(inside.page(0), inside.page(0).layers[0]).convert("RGBA").tobytes();
+        const std::string b = render::raster::layer_pixels(doc.page(0), doc.page(0).layers[0]).convert("RGBA").tobytes();
+        QVERIFY(a.substr((40 * kSide + 190) * 4, 4) == b.substr((40 * kSide + 190) * 4, 4));  // (outside: as it was)
+        QVERIFY(a.substr((40 * kSide + 10) * 4, 4) != b.substr((40 * kSide + 10) * 4, 4));
+        // a precise layer and a page of inks are stretched too
+        const auto precise = run_ops(precise_page(), Json::array({Json{{"op", "auto_adjust"}, {"page", 1}, {"id", "paint"}, {"mode", "contrast"}}}));
+        QVERIFY(precise.doc.page(0).layers[0].color_raster);
+        const auto inks = run_ops(cmyk_page(), Json::array({Json{{"op", "auto_adjust"}, {"page", 1}, {"id", "pic"}, {"mode", "tone"}}}));
+        QVERIFY(*inks.doc.page(0).layers.back().ink_raster != *cmyk_page().page(0).layers.back().ink_raster);
+    }
+
+    // equalize (extra_cmds.rs 156-187): one CDF over the red, green and blue values, the picture's values spread over the
+    // whole range; the same on precise pixels (within a level) and on a page of inks.
+    void equalize() {
+        const auto narrow = [](std::uint32_t x, std::uint32_t y) {
+            const int v = 100 + int((x + y) % 50);
+            return std::array<int, 4>{v, v, v, 255};
+        };
+        auto doc = blank();
+        doc.edit_page(0).layers.push_back(paint_layer(doc.page(0), "paint", picture(narrow)));
+        const auto done = run(doc, Json{{"op", "filter_raster"}, {"page", 1}, {"id", "paint"}, {"kind", "equalize"}});
+        const std::string bytes = render::raster::layer_pixels(done.page(0), done.page(0).layers[0]).convert("RGBA").tobytes();
+        int lo = 255, hi = 0;
+        for (std::size_t i = 0; i < bytes.size(); i += 4) {
+            lo = std::min(lo, int(static_cast<unsigned char>(bytes[i])));
+            hi = std::max(hi, int(static_cast<unsigned char>(bytes[i])));
+        }
+        QVERIFY2(lo == 0 && hi == 255, qPrintable(QString("%1..%2").arg(lo).arg(hi)));
+        QVERIFY(refusal(precise_page(), Json{{"op", "filter_raster"}, {"page", 1}, {"id", "paint"}, {"kind", "equalize"}}).empty());
+        QVERIFY(refusal(cmyk_page(), Json{{"op", "filter_raster"}, {"page", 1}, {"id", "pic"}, {"kind", "equalize"}}).empty());
+        // with a selection: what is inside counted and changed, what is outside as it was
+        const Json area{{"poly", Json::array({Json::array({0, 0}), Json::array({10, 0}), Json::array({10, 10}), Json::array({0, 10})})}};
+        const auto part = run(doc, Json{{"op", "filter_raster"}, {"page", 1}, {"id", "paint"}, {"kind", "equalize"}, {"area", area}});
+        const std::string inside = render::raster::layer_pixels(part.page(0), part.page(0).layers[0]).convert("RGBA").tobytes();
+        const std::string before = render::raster::layer_pixels(doc.page(0), doc.page(0).layers[0]).convert("RGBA").tobytes();
+        QVERIFY(inside.substr((150 * kSide + 150) * 4, 4) == before.substr((150 * kSide + 150) * 4, 4));
+    }
+
+    // set_adjustment (PhotoCraft's layer.setAdjustment, adjust_params.rs 753-772): the settings given laid over the
+    // correction's (its native's records too), none given: back to the defaults (the blend, the formula and the
+    // records' space kept, the records not); bad settings refused and the layer left; one step of the history; not on
+    // another layer.
+    void setAdjustment() {
+        const auto doc = run(eight_bit_page(), Json{{"op", "add_layer"}, {"page", 1}, {"kind", "adjust"}, {"id", "adj"},
+                                                    {"adjust", Json{{"kind", "levels"}, {"black", 20}, {"native", Json{{"method", "upstream"}, {"blend", "screen"},
+                                                                                                                         {"channels", Json{{"red", Json{{"gamma", 1.5}}}}}}}}}});
+        const auto merged = run_ops(doc, Json::array({Json{{"op", "set_adjustment"}, {"page", 1}, {"id", "adj"}, {"white", 200},
+                                                           {"native", Json{{"channels", Json{{"blue", Json{{"black", 10}}}}}}}}}));
+        const Json& now = *correction(merged.doc).adjust;
+        QCOMPARE(now["black"], Json(20));
+        QCOMPARE(now["white"], Json(200));
+        QCOMPARE(now["native"]["blend"], Json("screen"));
+        QCOMPARE(now["native"]["channels"]["red"]["gamma"], Json(1.5));
+        QCOMPARE(now["native"]["channels"]["blue"]["black"], Json(10));
+        QCOMPARE(merged.results[0]["adjust"], now);
+        const auto reset = run(merged.doc, Json{{"op", "set_adjustment"}, {"page", 1}, {"id", "adj"}});
+        const Json& back = *correction(reset).adjust;
+        QVERIFY2(back == (Json{{"kind", "levels"}, {"black", 0}, {"white", 255}, {"native", Json{{"blend", "screen"}, {"method", "upstream"}, {"space", "rgb"}}}}),
+                 back.dump().c_str());
+        for (const Json& bad : {Json{{"op", "set_adjustment"}, {"page", 1}, {"id", "adj"}, {"native", Json{{"method", "nope"}}}},
+                                Json{{"op", "set_adjustment"}, {"page", 1}, {"id", "adj"}, {"black", "dark"}},
+                                Json{{"op", "set_adjustment"}, {"page", 1}, {"id", "adj"}, {"kind", "invert"}},
+                                Json{{"op", "set_adjustment"}, {"page", 1}, {"id", "paint"}, {"black", 3}},
+                                Json{{"op", "set_adjustment"}, {"page", 1}}}) {
+            QVERIFY2(refusal(merged.doc, bad).starts_with("apply: "), bad.dump().c_str());
+        }
+        // a kind of the C++ build's own: its normal form (a look chosen)
+        const auto lookup = run(eight_bit_page(), Json{{"op", "add_layer"}, {"page", 1}, {"kind", "adjust"}, {"id", "lut"}, {"adjust", Json{{"kind", "color_lookup"}}}});
+        const auto looked = run(lookup, Json{{"op", "set_adjustment"}, {"page", 1}, {"id", "lut"}, {"look", "warm"}, {"dither", true}});
+        QCOMPARE(*correction(looked).adjust, (Json{{"kind", "color_lookup"}, {"look", "warm"}, {"interpolation", "trilinear"}, {"dither", true}}));
+    }
+
+    // color_lookup (design 2.4): a file's text made into the book's table (its asset, the same table the same ref), drawn
+    // trilinear or tetrahedral, kept on saving and reopening (a missing or broken table: read-only), a table of another
+    // book refused; the eight looks; a filter of it.
+    void colorLookup() {
+        QTemporaryDir tmp;
+        // an inverting 2³ table
+        std::string cube = "TITLE \"inv\"\nLUT_3D_SIZE 2\n";
+        for (int b = 0; b < 2; ++b)
+            for (int g = 0; g < 2; ++g)
+                for (int r = 0; r < 2; ++r) cube += std::to_string(1 - r) + " " + std::to_string(1 - g) + " " + std::to_string(1 - b) + "\n";
+        const auto doc = eight_bit_page();
+        const auto made = run(doc, Json{{"op", "add_layer"}, {"page", 1}, {"kind", "adjust"}, {"id", "adj"},
+                                        {"adjust", Json{{"kind", "color_lookup"}, {"data", cube}, {"file_name", "/x/inv.cube"}}}});
+        const Json& adjust = *correction(made).adjust;
+        QVERIFY(adjust["lut"].get<std::string>().starts_with("sha256:"));
+        QCOMPARE(adjust["size"], Json(2));
+        QCOMPARE(adjust["name"], Json("inv.cube"));
+        QVERIFY(!adjust.contains("data") && !adjust.contains("file_name"));
+        QVERIFY(made.luts.contains(adjust["lut"].get<std::string>()));
+        QVERIFY(worst_difference(shown(made), shown(with_correction(doc, Json{{"kind", "invert"}}))) <= 1);
+        // saved as its asset and read back; the book names adjustments@1
+        const Json payload = payload_of(made, tmp);
+        QVERIFY(names(payload, core::kAdjustmentsFeature));
+        const std::string ref = adjust["lut"].get<std::string>();
+        QVERIFY(std::filesystem::exists(std::filesystem::path(tmp.path().toStdString()) / "assets" / ref.substr(7, 2) / (ref.substr(7) + ".gklut")));
+        const auto loaded = storage::load_document_payload(payload, std::filesystem::path(tmp.path().toStdString()));
+        QVERIFY2(loaded.document.read_only_reason.empty(), loaded.document.read_only_reason.c_str());
+        QVERIFY(loaded.document.luts.contains(ref));
+        QVERIFY(shown(loaded.document) == shown(made));
+        // a table missing: read-only
+        {
+            QTemporaryDir other;
+            Json bad = payload;
+            bad["pages"][0]["layers"].back()["adjust"]["lut"] = "sha256:" + std::string(64, 'a');
+            const auto broken = storage::load_document_payload(bad, std::filesystem::path(tmp.path().toStdString()));
+            QVERIFY(!broken.document.read_only_reason.empty());
+        }
+        // a table of another book: refused (its text must be given)
+        QVERIFY(refusal(doc, Json{{"op", "add_layer"}, {"page", 1}, {"kind", "adjust"},
+                                  {"adjust", Json{{"kind", "color_lookup"}, {"lut", "sha256:" + std::string(64, 'b')}, {"size", 2}}}}).starts_with("apply: "));
+        QVERIFY(refusal(doc, Json{{"op", "add_layer"}, {"page", 1}, {"kind", "adjust"},
+                                  {"adjust", Json{{"kind", "color_lookup"}, {"data", "garbage"}}}}).starts_with("apply: "));
+        // the looks, both interpolations; tetrahedral and trilinear agree on a grid's points
+        for (const auto& look : core::lut3d::looks()) {
+            for (const std::string way : {"trilinear", "tetrahedral"}) {
+                const auto with = run(doc, Json{{"op", "add_layer"}, {"page", 1}, {"kind", "adjust"},
+                                                {"adjust", Json{{"kind", "color_lookup"}, {"look", std::string(look.id)}, {"interpolation", way}}}});
+                QVERIFY(shown(with) != shown(doc));
+            }
+        }
+        // a filter: the same colours as the layer over it
+        const auto filtered = run(doc, Json{{"op", "filter_raster"}, {"page", 1}, {"id", "paint"}, {"kind", "color_lookup"}, {"data", cube}});
+        QVERIFY(worst_difference(shown(filtered), shown(made)) <= 1);
+        QVERIFY(filtered.luts.empty());  // (a filter's table is not kept)
+    }
+
+    // The PSD's adjustment layers of the tone kinds (the user's decision 5): each written and read back as the same
+    // correction — levels' and a curve's records in the PSD's mode, brightness_contrast with its CgEd, posterize's
+    // floor, threshold, invert, exposure, a gradient map's reverse and dither, a lookup's table —; Python's forms by the
+    // nearest, said in the notes.
+    void psdToneCodecs() {
+        const auto doc = eight_bit_page();
+        const core::Page& page = doc.page(0);
+        const auto round_trip = [&page](const Json& adjust, std::string_view mode = "rgb", const core::Document* book = nullptr) {
+            std::vector<std::string> notes;
+            const auto block = render::psd::write_adjustment(adjust, page, notes, book);
+            if (!block) return Json();
+            render::psd::AdjustContext context;
+            context.mode = mode;
+            context.companion = block->companion;
+            const auto read = render::psd::read_adjustment(block->key, block->payload, notes, context);
+            return read ? render::psd::imported_adjust(*read, "normal", page) : Json();
+        };
+        const Json levels{{"kind", "levels"}, {"black", 10}, {"white", 240}, {"gamma", 1.2}, {"out_black", 5}, {"out_white", 250},
+                          {"native", Json{{"method", "upstream"}, {"space", "rgb"}, {"channels", Json{{"red", Json{{"black", 3}, {"white", 255}, {"gamma", 0.8}, {"out_black", 0}, {"out_white", 255}}}}}}}};
+        QCOMPARE(round_trip(levels), levels);
+        const Json curve{{"kind", "curve"}, {"points", Json::array({Json::array({0, 0}), Json::array({128, 150}), Json::array({255, 255})})},
+                         {"native", Json{{"method", "upstream"}, {"space", "rgb"}, {"channels", Json{{"blue", Json::array({Json::array({0, 20}), Json::array({255, 235})})}}}}}};
+        QCOMPARE(round_trip(curve), curve);
+        for (const Json& same : {Json{{"kind", "brightness_contrast"}, {"brightness", 20}, {"contrast", -10}, {"native", Json{{"method", "legacy"}}}},
+                                 Json{{"kind", "brightness_contrast"}, {"brightness", -40}, {"contrast", 60}, {"native", Json{{"method", "modern"}}}},
+                                 Json{{"kind", "posterize"}, {"levels", 7}, {"native", Json{{"method", "floor"}}}}, Json{{"kind", "threshold"}, {"threshold", 100}},
+                                 Json{{"kind", "invert"}}, Json{{"kind", "exposure"}, {"exposure", 1.5}, {"offset", 0.125}, {"gamma", 1.25}},
+                                 Json{{"kind", "gradient_map"},
+                                      {"stops", Json::array({Json::array({0, Json::array({0, 0, 0})}), Json::array({0.5, Json::array({255, 0, 0})}), Json::array({1, Json::array({255, 255, 255})})})},
+                                      {"native", Json{{"reverse", true}, {"dither", true}}}}}) {
+            QCOMPARE(round_trip(same), same);
+        }
+        // a CMYK document's ink records
+        const auto cmyk = cmyk_page();
+        std::vector<std::string> notes;
+        const Json ink_curve{{"kind", "curve"}, {"points", Json::array({Json::array({0, 0}), Json::array({255, 255})})},
+                             {"native", Json{{"method", "upstream"}, {"space", "cmyk"}, {"channels", Json{{"black", Json::array({Json::array({0, 0}), Json::array({255, 180})})}}}}}};
+        const auto block = render::psd::write_adjustment(ink_curve, cmyk.page(0), notes);
+        QVERIFY(block);
+        render::psd::AdjustContext context;
+        context.mode = "cmyk";
+        QCOMPARE(render::psd::imported_adjust(*render::psd::read_adjustment(block->key, block->payload, notes, context), "normal", cmyk.page(0)), ink_curve);
+        // a lookup's table (the book's), and a look written as its table
+        const auto lut = run(doc, Json{{"op", "add_layer"}, {"page", 1}, {"kind", "adjust"}, {"adjust", Json{{"kind", "color_lookup"}, {"look", "cool"}, {"dither", true}}}});
+        const Json back = round_trip(*correction(lut).adjust, "rgb", &lut);
+        QCOMPARE(back["name"], Json("Cool Filter"));
+        QCOMPARE(back["dither"], Json(true));
+        const auto table = core::lut3d::decoded(back["lut"].get<std::string>(), core::lut3d::remembered(back["lut"].get<std::string>()));
+        QCOMPARE(table->data.size(), core::lut3d::builtin("cool")->data.size());
+        for (std::size_t i = 0; i < table->data.size(); ++i) QVERIFY(std::abs(table->data[i] - core::lut3d::builtin("cool")->data[i]) < 1e-6);  // (6 decimals)
+        // Python's forms: the nearest, said
+        notes.clear();
+        QVERIFY(render::psd::write_adjustment(Json{{"kind", "brightness_contrast"}, {"brightness", 30}}, page, notes));
+        QVERIFY(!notes.empty());
+        notes.clear();
+        QVERIFY(render::psd::write_adjustment(Json{{"kind", "bitonal"}}, page, notes));
+        QVERIFY(!notes.empty());
+        // the companion block written after brit
+        notes.clear();
+        const auto layer = formats::psd_adjust_layer(correction(with_correction(doc, Json{{"kind", "brightness_contrast"}, {"native", Json{{"method", "modern"}}}})), page,
+                                                     render::Size{200, 200}, notes);
+        QVERIFY(layer && layer->blocks.find("8BIMbrit") == 0 && layer->blocks.find("8BIMCgEd") != std::string::npos);
+    }
+
+    // The .cube of a page's corrections (file.export.colorLookupTables): an identity lattice through each visible
+    // correction layer in order, by its opacity and blend.
+    void cubeExport() {
+        const auto doc = with_correction(eight_bit_page(), Json{{"kind", "invert"}}, 0.5);
+        const std::string cube = formats::bake_cube(doc, doc.page(0), 3, "t");
+        const core::lut3d::Table t = core::lut3d::parse_cube(cube);
+        QCOMPARE(t.size, std::size_t(3));
+        QCOMPARE(QString::fromStdString(t.title), QStringLiteral("t"));
+        for (const float v : t.data) QVERIFY(std::abs(v - 0.5f) < 1e-5);  // (half inverted: every colour at mid-grey)
+        const auto inverted = with_correction(eight_bit_page(), Json{{"kind", "invert"}});
+        const core::lut3d::Table full = core::lut3d::parse_cube(formats::bake_cube(inverted, inverted.page(0), 2, "x"));
+        QCOMPARE(full.data[0], 1.0f);  // (black → white)
+        QCOMPARE(full.data[3], 0.0f);  // (red → cyan)
+        const core::lut3d::Table nine = core::lut3d::parse_cube(formats::bake_cube(inverted, inverted.page(0), 9, "x"));
+        for (std::size_t i = 0; i < 9 * 9 * 9; ++i) {  // (every colour of a larger lattice: red fastest, then green, blue)
+            const std::size_t at[3] = {i % 9, (i / 9) % 9, i / 81};
+            for (std::size_t c = 0; c < 3; ++c) QVERIFY(std::abs(nine.data[i * 3 + c] - (1.0f - static_cast<float>(at[c]) / 8.0f)) < 1e-5f);
+        }
     }
 };
 

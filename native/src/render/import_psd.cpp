@@ -21,6 +21,7 @@
 #endif
 
 #include "core/ids.hpp"
+#include "core/lut3d.hpp"
 #include "core/ops_util.hpp"
 #include "core/paths.hpp"
 #include "core/pyconv.hpp"
@@ -30,6 +31,7 @@
 #include "render/ops_registry.hpp"
 #include "render/ink_canvas.hpp"
 #include "render/psd.hpp"
+#include "render/psd_adjust.hpp"
 #include "render/raster.hpp"
 #include "render/selection.hpp"
 
@@ -407,8 +409,8 @@ void import_psd(core::OpContext& c) {
             // (PC2, the user's decision 5: an adjustment layer a codec read, render/psd_adjust — a correction layer, its
             // blend its native.blend: a correction layer's own blend is not looked at)
             layer.kind = core::LayerKind::Adjust;
-            layer.adjust = *item.adjust;
-            if (!item.blend.empty() && item.blend != "normal") (*layer.adjust)["native"]["blend"] = item.blend;
+            layer.adjust = psd::imported_adjust(*item.adjust, item.blend, page);
+            core::lut3d::keep_luts(doc.luts, *layer.adjust);  // (PC2a: a color lookup's table into the book)
             layer.blend = "normal";
             if (auto mask = mask_of()) layer.mask = std::move(*mask);
         } else {

@@ -34,6 +34,7 @@
 #include "core/error.hpp"
 #include "core/ids.hpp"
 #include "core/json.hpp"
+#include "core/lut3d.hpp"
 #include "core/ops_schema.hpp"
 #include "core/paths.hpp"
 #include "core/pyconv.hpp"
@@ -245,6 +246,27 @@ bool is_studio_project(const fs::path& dir) {
 
 // --- commands ----------------------------------------------------------------------------------------------------
 
+// PC2a (image.adjustments.colorLookup.list): the looks a color_lookup can take (PhotoCraft's eight, their ids and names)
+// and the book's color_lookup corrections ({page, id, title, look | lut and size, name}).
+core::Json looks_listing(const core::Document& doc) {
+    core::Json looks = core::Json::array();
+    for (const core::lut3d::Look& look : core::lut3d::looks()) looks.push_back(core::Json{{"id", std::string(look.id)}, {"name", std::string(look.label)}});
+    core::Json layers = core::Json::array();
+    for (std::size_t i = 0; i < doc.pages.size(); ++i) {
+        if (doc.is_deferred(i)) continue;
+        const core::Page& page = doc.page(i);
+        for (const core::Layer& layer : page.layers) {
+            if (layer.kind != core::LayerKind::Adjust || !layer.adjust || layer.adjust->value("kind", core::Json()) != core::Json("color_lookup")) continue;
+            core::Json item{{"page", page.index.json()}, {"id", layer.id}, {"title", layer.title}};
+            for (const char* key : {"look", "lut", "size", "name"}) {
+                if (layer.adjust->contains(key)) item[key] = (*layer.adjust)[key];
+            }
+            layers.push_back(std::move(item));
+        }
+    }
+    return core::Json{{"looks", looks}, {"layers", layers}};
+}
+
 int inspect(const QStringList& args, bool ascii) {
     QString src;
     bool have_src = false;
@@ -252,6 +274,7 @@ int inspect(const QStringList& args, bool ascii) {
     QString stroke;
     // (color-model@1, the C++ build's own: --pixel <page>:<x_mm>,<y_mm> [--layer ID] [--dpi N])
     QString pixel, layer, dpi_text;
+    bool looks = false;  // (PC2a, the C++ build's own: --looks, image.adjustments.colorLookup.list)
     const auto value_of = [&](qsizetype& i, const char* name, QString& into) -> bool {
         const QString& arg = args[i];
         const QString flag = QString::fromLatin1(name);
@@ -267,6 +290,8 @@ int inspect(const QStringList& args, bool ascii) {
         const QString& arg = args[i];
         if (arg == QLatin1String("--full")) {
             full = true;
+        } else if (arg == QLatin1String("--looks")) {
+            looks = true;
         } else if (arg == QLatin1String("--stroke")) {
             if (i + 1 >= args.size()) return usage("argument --stroke: expected one argument");
             stroke = args[++i];
@@ -310,6 +335,10 @@ int inspect(const QStringList& args, bool ascii) {
         }
     }
     const auto loaded = storage::load_document(path_arg(src));
+    if (looks) {  // the built-in looks and the book's lookup tables (PC2a: カラールックアップの一覧)
+        print_json(looks_listing(loaded.document), ascii);
+        return 0;
+    }
     if (pixel_page) {
         const core::Document& doc = loaded.document;
         for (std::size_t i = 0; i < doc.pages.size(); ++i) {
@@ -587,6 +616,47 @@ int render_command(const QStringList& args, bool ascii) {
     return 0;
 }
 
+// `genko export <book> <out> --format cube [--page N] [--lut-size 2..256] [--title T] [--json]` (PC2a, the C++ build's own):
+// page N's visible correction layers (1 by default) as a .cube 3D LUT of the size (33) — `out` a .cube file, or a folder
+// that gets p<NNN>.cube —; the path, or with --json {"ok": true, "count", "files", "size", "skipped"?}.
+int export_cube(const Arguments& a, bool ascii) {
+    std::int64_t size = 33, wanted = 1;
+    if (const auto value = a.value("--lut-size")) {
+        const auto n = int_option(*value);
+        if (!n || *n < 2 || *n > 256) return usage("genko export: argument --lut-size: an integer 2..256");
+        size = *n;
+    }
+    if (const auto value = a.value("--page")) {
+        const auto n = int_option(*value);
+        if (!n) return usage("genko export: argument --page: invalid int value: " + core::py_repr_str(value->toStdString()));
+        wanted = *n;
+    }
+    const fs::path src = path_arg(a.positional[0]);
+    const fs::path out = path_arg(a.positional[1]);
+    const auto loaded = storage::load_document(src);
+    const core::Document& doc = loaded.document;
+    const core::Page* page = nullptr;
+    for (std::size_t i = 0; i < doc.pages.size(); ++i) {
+        if (doc.pages[i]->index == core::Num(wanted) && !doc.is_deferred(i)) page = &doc.page(i);
+    }
+    if (page == nullptr) return usage("no page " + std::to_string(wanted), 1);
+    const std::string title = a.value("--title") ? a.value("--title")->toStdString() : (doc.title.empty() ? std::string("Genko") : doc.title);
+    std::vector<std::string> skipped;
+    const std::string cube = formats::bake_cube(doc, *page, static_cast<int>(size), title, &skipped);
+    const bool file_given = !formats::detail::suffix(out).empty();
+    const fs::path dest = file_given ? out : formats::detail::join(out, "p" + formats::detail::padded(page->index, 3) + ".cube");
+    if (!file_given) fs::create_directories(out);
+    storage::write_atomic(dest, cube);
+    if (a.flag("--json")) {
+        core::Json json{{"ok", true}, {"count", 1}, {"files", core::Json::array({core::path_to_utf8(dest)})}, {"size", size}};
+        if (!skipped.empty()) json["skipped"] = skipped;
+        print_json(json, ascii);
+    } else {
+        write_text(core::path_to_utf8(dest) + "\n", stdout);
+    }
+    return 0;
+}
+
 // `genko export <book> <out> [--format F] [options]` (Python's export command, genko/__main__.py): the book written
 // out in one format; the paths of the files one a line, or with --json {"ok": true, "count", "files"}.
 int export_command(const QStringList& args, bool ascii) {
@@ -594,9 +664,14 @@ int export_command(const QStringList& args, bool ascii) {
                                           {"--max-height", true}, {"--long-edge", true}, {"--jpeg", false},      {"--spreads", false},
                                           {"--color", true},      {"--icc", true},       {"--screen-lpi", true}, {"--screen-shape", true},
                                           {"--area", true},       {"--fps", true},       {"--seconds", true},    {"--page", true},
-                                          {"--psd-text", true},   {"--rasterize-unsupported", false}};
+                                          {"--psd-text", true},   {"--rasterize-unsupported", false}, {"--lut-size", true},
+                                          {"--title", true}};
     Arguments a;
     if (auto error = parse_arguments(args, kOptions, 2, "src, out", a)) return usage("genko export: " + *error);
+    // PC2a (file.export.colorLookupTables, the C++ build's own: not among Python's formats, whose choices it leaves as they
+    // are): a page's correction layers as a .cube file
+    if (a.value("--format") == std::optional<QString>(QStringLiteral("cube"))) return export_cube(a, ascii);
+    if (a.value("--lut-size") || a.value("--title")) return usage("genko export: argument --lut-size, --title: only with --format cube");
     // argparse's choices
     const auto choice = [&](const char* name, const char* fallback, std::initializer_list<const char*> choices) -> std::optional<std::string> {
         const std::string value = a.value(name).value_or(QString::fromLatin1(fallback)).toStdString();

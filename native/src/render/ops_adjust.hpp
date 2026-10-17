@@ -26,7 +26,9 @@ namespace adjust_ops {
 
 // The ops' bodies, by group.
 void set_adjustment(core::OpContext& c);  // PC2a (layer.setAdjustment): render/ops_adjust.cpp
-void auto_adjust(core::OpContext& c);     // PC2a (image.autoTone・autoContrast・autoColor): render/ops_adjust.cpp
+// PC2a (image.autoTone・autoContrast・autoColor): render/ops_adjust.cpp — levels' channel records found from the layer's
+// histograms laid on it by filter_raster (`filter_raster`: the op as registered, before the registry's own wrappers).
+void auto_adjust(core::OpContext& c, const core::OpFunction& filter_raster);
 void hdr_toning(core::OpContext& c);      // PC2c (image.adjustments.hdrToning): render/tone_ops.cpp
 void apply_image(core::OpContext& c);     // PC2c (image.applyImage): render/ops_calc.cpp
 void calculations(core::OpContext& c);    // PC2c (image.calculations): render/ops_calc.cpp
@@ -64,8 +66,10 @@ struct FilterWork {
 };
 FilterWork filter_work(const core::Document& doc, const core::Page& page, std::string_view kind, const core::Json& params);
 // The work on each kind of a layer's pixels (not `python`): an 8-bit picture (the layer's RGBA; `area` is the caller's,
-// filters.within), a precise layer's new raster, an ink raster's new GKIR bytes.
-Image filter_eight(const FilterWork& work, const core::Document& doc, const core::Page& page, const Image& rgba, std::string_view kind);
+// filters.within — a local filter that counts the pixels, equalize, counts those inside it), a precise layer's new
+// raster, an ink raster's new GKIR bytes.
+Image filter_eight(const FilterWork& work, const core::Document& doc, const core::Page& page, const Image& rgba, std::string_view kind,
+                   const core::Json* area = nullptr);
 std::string filter_precise(const FilterWork& work, const core::Document& doc, const core::Page& page, const core::Layer& layer,
                            std::string_view kind, const core::Json* area);
 std::string filter_inks(const FilterWork& work, const core::Document& doc, const core::Page& page, const core::InkPixels& inks,
