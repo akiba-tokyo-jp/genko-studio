@@ -744,11 +744,13 @@ File File::read(std::string data, const Limits& limits, bool lab) {
                 layer.has_mask = rec.mask && mask != nullptr && !rec.mask_disabled;
                 f.layers_.push_back(std::move(layer));
                 if (!pending.empty()) pending.back().push_back(f.layers_.size() - 1);
+                f.python_skipped_.push_back(rec.name);  // (psd.py leaves every adjustment layer out)
                 continue;
             }
         }
         if (rec.kind == "adjust" || w <= 0 || h <= 0 || !colour) {
             f.skipped_.push_back(rec.name);
+            f.python_skipped_.push_back(rec.name);
             continue;
         }
         // _to_rgba: Image.frombytes("L", size, data) of a band with too few samples
