@@ -699,6 +699,20 @@ Json journal_op(const Json& op) {
                 }
             }
         }
+        // (PC2a: a 3D LUT file's text a color_lookup gives — add_layer's and set_layer's adjust, set_adjustment's and
+        // filter_raster's own —: its table is the book's asset, and an op is not done again from the journal)
+        const auto file_text = [](Json& holder) {
+            if (const auto data = holder.find("data"); data != holder.end() && data->is_string()) {
+                *data = "<" + std::to_string(code_points(data->get_ref<const std::string&>())) + " chars>";
+            }
+        };
+        if (is_op(out, "add_layer") || is_op(out, "set_layer")) {
+            if (const auto adjust = out.find("adjust"); adjust != out.end() && adjust->is_object() && adjust->value("kind", Json()) == Json("color_lookup")) {
+                file_text(*adjust);
+            }
+        } else if (is_op(out, "set_adjustment") || (is_op(out, "filter_raster") && out.value("kind", Json()) == Json("color_lookup"))) {
+            file_text(out);
+        }
     }
     return out;
 }

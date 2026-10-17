@@ -9,10 +9,13 @@
 
 #include <algorithm>
 #include <cmath>
+#include <cstdint>
+#include <cstring>
 #include <map>
 #include <memory>
 #include <mutex>
 #include <string>
+#include <unordered_map>
 #include <utility>
 
 #include "core/adjust_kinds.hpp"
@@ -179,7 +182,8 @@ double lightness(const std::array<double, 3>& rgb) {
 // Each channel of a space through its own curve (0..1 → 0..1). rgb: red, green, blue of the colour; gray: the one curve
 // on each of them; cmyk and lab: the colour's tones in that space (the page's own plates: its records, ink_records), on
 // another page through the bridge — the change added as the difference of two round trips (PhotoCraft's tone_in_space),
-// so what a curve leaves alone stays exact.
+// so what a curve leaves alone stays exact; each colour through the bridge once (a colour met again is not converted
+// again: a page of few colours is not converted pixel by pixel).
 class ChannelFunction : public AdjustFunction {
 public:
     ChannelFunction(std::string space, std::vector<Curve> rows) : space_(std::move(space)), rows_(std::move(rows)) {}
@@ -211,6 +215,21 @@ private:
         if (space_ == "rgb") return {rows_[0](rgb[0]), rows_[1](rgb[1]), rows_[2](rgb[2])};
         if (space_ == "gray") return {rows_[0](rgb[0]), rows_[0](rgb[1]), rows_[0](rgb[2])};
         if (!bridge_.into || !bridge_.back) adjust_not_yet("the channel records of the space " + space_ + " on this page", "PC2a");
+        Key key{};
+        std::memcpy(key.data(), rgb.data(), sizeof key);
+        {
+            const std::lock_guard<std::mutex> hold(known_lock_);
+            if (const auto it = known_.find(key); it != known_.end()) return it->second;
+        }
+        const std::array<double, 3> out = bridged(rgb);
+        const std::lock_guard<std::mutex> hold(known_lock_);
+        if (known_.size() >= kKnownMost) known_.clear();  // (a picture of very many colours: the latest kept)
+        known_.emplace(key, out);
+        return out;
+    }
+
+    // One colour into the space, through the curves and back (the change added: the difference of two round trips).
+    std::array<double, 3> bridged(const std::array<double, 3>& rgb) const {
         const std::vector<double> tones = bridge_.into(rgb);
         std::vector<double> changed = tones;
         for (std::size_t i = 0; i < changed.size() && i < rows_.size(); ++i) changed[i] = rows_[i](tones[i]);
@@ -220,11 +239,23 @@ private:
                 std::clamp(rgb[2] + after[2] - before[2], 0.0, 1.0)};
     }
 
+    using Key = std::array<std::uint64_t, 3>;  // (a colour's three doubles, bit for bit)
+    struct KeyHash {
+        std::size_t operator()(const Key& k) const {
+            std::uint64_t h = 1469598103934665603ULL;
+            for (const std::uint64_t v : k) h = (h ^ v) * 1099511628211ULL;
+            return static_cast<std::size_t>(h ^ (h >> 29));
+        }
+    };
+    static constexpr std::size_t kKnownMost = std::size_t{1} << 18;
+
     std::string space_;
     std::vector<Curve> rows_;
     std::optional<ChannelTables> tables_;
     ToneBridge bridge_;
     bool dither_ = false;
+    mutable std::mutex known_lock_;
+    mutable std::unordered_map<Key, std::array<double, 3>, KeyHash> known_;
 };
 
 // The 8-bit tables of three curves (each value v / 255 through its curve, rounded).
