@@ -705,6 +705,7 @@ void MainWindow::build_menus() {
     layers->addSeparator();
     layers->addAction(action("act_plugins"));
     layers->addAction(action("act_plugin_settings"));
+    build_adjust_menus(layers, edit);  // (PC2: レイヤー → 色調補正, app/main_window_adjust.cpp)
     QMenu* pages = bar->addMenu(QStringLiteral("ページ"));
     for (const char* name : {"act_add_page", "act_dup_page", "act_del_page"}) pages->addAction(action(name));
     pages->addSeparator();

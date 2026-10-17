@@ -355,13 +355,15 @@ private slots:
             same.edit_page(0).layers.push_back(std::move(layer));
         }
         QVERIFY(render::render_page(same.page(0), dpi, o, &same).inks->samples == plain.samples);
-        // a correction layer in a blend mode: not yet (left out and said, as on precise pixels)
+        // a correction layer's own blend is not looked at, as Python does not (the user's decision 2 of PC2: it was left
+        // out here before): drawn as without it, nothing left out — its native.blend is drawn (test_adjust)
         core::Document blended = inverted;
         blended.edit_page(0).layers.back().blend = "multiply";
         render::RenderOptions skip = o;
         skip.skip_unported = true;
-        const auto omitted = render::render_page(blended.page(0), dpi, skip, &blended).omitted;
-        QVERIFY(std::find(omitted.begin(), omitted.end(), "ink_adjust_blend:multiply") != omitted.end());
+        const render::RenderResult drawn = render::render_page(blended.page(0), dpi, skip, &blended);
+        QVERIFY(drawn.omitted.empty());
+        QVERIFY(drawn.inks->samples == made.inks->samples);
     }
 
     // A pen layer filtered on an ink page: its lines drawn into inks first (K alone), the layer a paint layer of inks.

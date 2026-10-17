@@ -3,6 +3,7 @@
 #include <string>
 #include <string_view>
 
+#include "core/adjust.hpp"
 #include "core/json.hpp"
 #include "core/model.hpp"
 
@@ -25,5 +26,9 @@ void check(std::string_view kind, const core::Json& params);
 // The layer's new raster (its own precision). `area`: only inside it (filters.within), on the page.
 std::string apply(const core::Page& page, const core::Layer& layer, std::string_view kind, const core::Json& params,
                   const core::Json* area);
+
+// PC2: a correction of the C++ build's own (core/adjust.hpp's AdjustFunction) on the layer's precise pixels, each
+// pixel's samples through it (where it is: its place in the raster), the raster's precision kept; `area` as apply.
+std::string apply_function(const core::Page& page, const core::Layer& layer, const core::AdjustFunction& f, const core::Json* area);
 
 }  // namespace genko::render::color_filters

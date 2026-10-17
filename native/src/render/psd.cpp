@@ -2,6 +2,7 @@
 
 #include "render/ink.hpp"
 #include "render/ink_canvas.hpp"
+#include "render/psd_adjust.hpp"
 
 #include <zlib.h>
 
@@ -623,6 +624,11 @@ File File::read(std::string data, const Limits& limits, bool lab) {
                         rec.lfx2_size = body.size();
                     } else if (adjust_tag(tag)) {
                         rec.kind = "adjust";
+                        if (tag != "SoCo" && tag != "GdFl" && tag != "PtFl") {  // (PC2: an adjustment, not a fill layer)
+                            rec.adjust_key = std::string(tag);
+                            rec.adjust_at = static_cast<std::uint64_t>(body.data() - d.data());
+                            rec.adjust_size = body.size();
+                        }
                     }
                     if (size % 2 != 0 && r.pos < extra_end) {
                         const std::string_view next = r.pos < d.size() ? d.substr(static_cast<std::size_t>(r.pos), 4) : std::string_view();
@@ -707,6 +713,30 @@ File File::read(std::string data, const Limits& limits, bool lab) {
         const std::int64_t w = rec.right - rec.left;
         const std::int64_t h = rec.bottom - rec.top;
         const bool colour = std::any_of(rec.data.begin(), rec.data.end(), [](const ChannelRef& c) { return c.id >= 0; });
+        if (rec.kind == "adjust" && !rec.adjust_key.empty()) {
+            // (PC2, the user's decision 5: an adjustment layer a codec reads is a correction layer — render/psd_adjust;
+            // one none reads is left out, as psd.py leaves every one out)
+            std::vector<std::string> notes;
+            std::optional<core::Json> adjust = read_adjustment(
+                rec.adjust_key, std::string_view(f.data_).substr(static_cast<std::size_t>(rec.adjust_at), static_cast<std::size_t>(rec.adjust_size)),
+                notes);
+            if (adjust) {
+                Layer layer;
+                layer.name = rec.name.empty() ? std::string("色調補正") : rec.name;
+                layer.opacity = rec.opacity / 255.0;
+                layer.visible = rec.visible;
+                layer.blend = rec.blend;
+                layer.clip = rec.clip;
+                layer.kind = "adjust";
+                layer.record = n;
+                layer.adjust = std::move(adjust);
+                const ChannelRef* mask = rec.channel(-2);
+                layer.has_mask = rec.mask && mask != nullptr && !rec.mask_disabled;
+                f.layers_.push_back(std::move(layer));
+                if (!pending.empty()) pending.back().push_back(f.layers_.size() - 1);
+                continue;
+            }
+        }
         if (rec.kind == "adjust" || w <= 0 || h <= 0 || !colour) {
             f.skipped_.push_back(rec.name);
             continue;

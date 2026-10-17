@@ -533,6 +533,16 @@ const std::vector<Rule>& rules() {
         r.push_back(rule("kind must be one of tone, effect, image, lines, lettering, brush, prim", "素材の種類が違います"));
         r.push_back(rule("adjust is set on a correction layer", "補正の設定は、色調補正のレイヤーにだけできます"));
         r.push_back(rule("adjust kind must be one of .*", "色調補正は、レベル補正・トーンカーブ・色相・反転・階調化・2 値化・グラデーションマップ・白黒から選びます"));
+        // (PC2, adjustments@1 — the C++ build's own: a correction's native settings and kinds, core/adjust)
+        r.push_back(rule(R"(adjust kind '(.*)' is not a correction layer's kind)", "「\\1」は色調補正のレイヤーの種類ではありません"));
+        r.push_back(rule(R"(adjust (\S+?)(?: native)?(?:\.\S+)? has no setting '(.*)')", "色調補正（\\1）に「\\2」という設定はありません"));
+        r.push_back(rule(R"(adjust (\S+?)(?: native)?\.(\S+) (?:must|needs|has no channel) .*)", "色調補正（\\1）の「\\2」の値が使えません"));
+        r.push_back(rule(R"(adjust (\S+?) native: a (Lab|multichannel) page cannot composite the blend '(.*)')", [](const QRegularExpressionMatch& m) {
+            return QStringLiteral("%1 のページでは、描画モード「%2」の色調補正を合成できません")
+                .arg(m.captured(2) == QStringLiteral("Lab") ? QStringLiteral("Lab") : QStringLiteral("マルチチャンネル"), m.captured(3));
+        }));
+        r.push_back(rule(R"(filter \S+: native\.blend is a correction layer's.*)",
+                         "描画モードは色調補正のレイヤーのものです（フィルターの結果を描画モードで重ねるには、フェードを使います）"));
         r.push_back(rule("choose two or more layers to merge", "結合するレイヤーを 2 枚以上選びます"));
         r.push_back(rule("effect is .* and/or .*", "境界効果は、フチか水彩境界です"));
         r.push_back(rule("fill is .* or .*", "塗りの設定は、色かグラデーションです"));

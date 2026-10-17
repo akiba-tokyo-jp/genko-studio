@@ -91,6 +91,11 @@ genko_library(genko_app
     layer_panel.cpp
     channel_panel.cpp
     layer_dialogs.cpp
+    adjust_forms.cpp
+    adjust_forms_tone.cpp
+    adjust_forms_color.cpp
+    image_dialogs.cpp
+    main_window_adjust.cpp
     inject.cpp
     review_model.cpp
     ai_link.cpp

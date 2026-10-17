@@ -227,9 +227,12 @@ Picture rotated(const Picture& p, double degrees, double cx, double cy) {
 
 // --- the filters -------------------------------------------------------------------------------------------------------
 
-void point(Picture& p, const core::PreciseAdjustment& adjust) {
+// A correction on each pixel (core/adjust.hpp's AdjustFunction: Python's form is PreciseAdjustment), where it is: its
+// place in the raster.
+void point(Picture& p, const core::AdjustFunction& adjust) {
+    const std::size_t w = static_cast<std::size_t>(std::max(1, p.width()));
     for (std::size_t i = 0; i < p.size(); ++i) {
-        const auto out = adjust({p[i][0], p[i][1], p[i][2]});
+        const auto out = adjust.apply({p[i][0], p[i][1], p[i][2]}, static_cast<int>(i % w), static_cast<int>(i / w));
         for (unsigned c = 0; c < 3; ++c) p[i][c] = static_cast<float>(out[c]);
     }
 }
@@ -515,6 +518,24 @@ std::string apply(const core::Page& page, const core::Layer& layer, std::string_
     } else {
         point(p, core::PreciseAdjustment(kind, params));
     }
+    if (area != nullptr) {  // filters.within: the filter only inside the selection
+        const std::string inside = color_edit::area_on(page, raster, *area).tobytes();
+        for (std::size_t i = 0; i < p.size(); ++i) {
+            const double m = static_cast<unsigned char>(inside[i]) / 255.0;
+            if (m == 1) continue;
+            for (unsigned c = 0; c < 4; ++c) p[i][c] = static_cast<float>(p[i][c] * m + original[i][c] * (1 - m));
+        }
+    }
+    return write(p, floating);
+}
+
+std::string apply_function(const core::Page& page, const core::Layer& layer, const core::AdjustFunction& f, const Json* area) {
+    const core::ColorRasterView raster(*layer.color_raster);
+    const bool floating = raster.metadata("")["precision"] == "f32";
+    const ImageAllocationBudget budget{2ULL * 1024 * 1024 * 1024};
+    Picture p = read(raster);
+    const Picture original = area != nullptr ? p : Picture(1, 1);
+    point(p, f);
     if (area != nullptr) {  // filters.within: the filter only inside the selection
         const std::string inside = color_edit::area_on(page, raster, *area).tobytes();
         for (std::size_t i = 0; i < p.size(); ++i) {

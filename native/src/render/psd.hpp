@@ -10,6 +10,7 @@
 
 #include "core/error.hpp"
 #include "core/ink.hpp"
+#include "core/json.hpp"
 #include "render/image.hpp"
 #include "render/psd_text.hpp"
 
@@ -72,6 +73,9 @@ struct Layer {
     std::string kind = "pixels";        // pixels | folder | text | adjust
     bool has_mask = false;
     std::size_t record = 0;  // (pixel layers) the layer record it was read from
+    // (PC2, the user's decision 5) an adjustment layer a codec read (render/psd_adjust.hpp): the correction's adjust.
+    // One no codec reads is left out (skipped), as psd.py leaves every one out.
+    std::optional<core::Json> adjust;
 };
 
 class File {
@@ -147,6 +151,9 @@ public:
         // (PSD-01) where its TySh and lfx2 blocks' payloads are in the file (size 0: none)
         std::uint64_t tysh_at = 0, tysh_size = 0;
         std::uint64_t lfx2_at = 0, lfx2_size = 0;
+        // (PC2) its adjustment block's key and payload (render/psd_adjust.hpp; the key empty: none, or a fill layer's)
+        std::string adjust_key;
+        std::uint64_t adjust_at = 0, adjust_size = 0;
         const ChannelRef* channel(int id) const;
     };
 

@@ -40,3 +40,11 @@ PhotoCraft v0.2.0（`ad863217386440ca968fccc9bfff65ba24e61142`、MIT、同梱 `L
 - `crates/engine/src/multichannel_cmds.rs`（25-29 行、97-119 行、151-199 行と `tests.rs`）: 版の表示色（CYAN・MAGENTA・YELLOW・BLACK）、モードごとの版の作り方と名前、戻すときの読み替えと刷った見え → `native/src/render/ops_ink.cpp`（`multichannel_of`）、`native/src/render/ink.cpp`。
 - `crates/compose/src/multichannel.rs`（14-38 行）: 版を白の上に刷る式 `(1 − s·v)·p·(1 − v + v·c) + s·v·c` → `native/src/core/ink.cpp`（`print_plates`。マルチチャンネルのページの表示。特色チャンネルの表示は PC1c のとおり合成の式）。
 - `crates/engine/src/multichannel_cmds/tests.rs`（`mismatched_channel_count_converts_the_printed_look`。上流は版を文書から直接減らす）: 版の数がモードと合わないマルチチャンネルを戻すと刷った見えになること。色の版の削除そのもの（`delete_channel` の `to_multichannel`、残りの版でマルチチャンネルにする）は Photoshop の動きに合わせた Genko のもの（上流の `channel.delete` はアルファだけを消す）→ `native/src/render/ops_channels.cpp`（`delete_plate`）。
+
+## 補正・色管理（adjustments@1、PC2）
+
+PhotoCraft v0.2.0（`ad863217386440ca968fccc9bfff65ba24e61142`、MIT、同梱 `LICENSE-MIT`）の次の部分を参照して C++ へ移した。各群（PC2a〜PC2d）が式を移すときは、この節にその部分を足す。
+
+- `crates/engine/src/adjust_params.rs`（19-65 行、67-286 行、294-563 行）・`crates/engine/src/adjust_cmds.rs`（24-64 行、207-222 行）・`crates/algo/src/tone.rs`（34-65 行）・`crates/doc/src/adjust.rs`（`HueRange::neutral`、`LevelsChannel`）: 補正の種類ごとの設定の既定と範囲（範囲外は切る、型の誤りは断る）、レンズフィルターの既定の名前、Hue/Saturation の 6 つの範囲の既定、レベル補正の組の範囲（白は黒 + 2 以上）とトーンカーブの点の読み方（入力の順、0.5 以内の重なりは先のもの、2〜19 点）→ `native/src/core/adjust_kinds.cpp`（種類の表・`read_params`・`read_tone_channels`）。
+- `crates/compose/src/lib.rs`（878-902 行、1127-1140 行）: 補正レイヤーの描画モード（下の絵と補正後の絵を描画モードで重ね、不透明度 × マスクで混ぜ、α はそのまま）→ `native/src/render/color_canvas.cpp`（`ColorCanvas::adjust`・`expose`）、`native/src/render/ink_canvas.cpp`（`InkCanvas::recolour`・`adjust_planes`）、`native/src/render/adjust.cpp`（`blend_8bit`。8 bit の式は Genko の `render._blend_over`）。
+- `crates/compose/src/lib.rs`（426-440 行、`adjustment_quantum`）: 8 bit の文書の補正を 8 bit に丸める考え → `native/src/render/adjust.cpp`（`apply_8bit`）。

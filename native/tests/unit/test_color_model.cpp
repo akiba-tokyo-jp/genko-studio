@@ -1254,20 +1254,20 @@ private slots:
     }
 
     // A page that becomes an RGB page of a profile is drawn in precise colour (review D, J): what it cannot draw yet — a
-    // tone layer, a correction in a blend mode — refuses the op that would make it so, naming the layer, at 8 bits too;
-    // a layer of lines with a raster cannot hold precise pixels: named.
+    // tone layer — refuses the op that would make it so, naming the layer, at 8 bits too; a layer of lines with a raster
+    // cannot hold precise pixels: named. (A correction layer in a blend mode was refused too: its own blend is not looked
+    // at, as Python does not — the user's decision 2 of PC2 —, so the op goes through.)
     void profiledPagesRefuseWhatTheyCannotDraw() {
         const core::Document doc = painted(picture());
         const core::Document toned = run_ops(doc, Json::array({Json{{"op", "add_tone"}, {"page", 1}, {"id", "tn"}, {"area", Json{{"rect", Json::array({10, 20, 30, 40})}}}}})).doc;
         const core::Document blended = run_ops(doc, Json::array({Json{{"op", "add_layer"}, {"page", 1}, {"kind", "adjust"}, {"id", "adj"}, {"blend", "multiply"},
                                                                       {"adjust", Json{{"kind", "levels"}, {"black", 10}, {"white", 240}, {"gamma", 1.0}}}}})).doc;
-        for (const auto& [book, id] : {std::pair{&toned, "tn"}, std::pair{&blended, "adj"}}) {
-            for (const Json& op : {Json{{"op", "assign_profile"}, {"page", 1}, {"profile", "display-p3"}},
-                                   Json{{"op", "convert_profile"}, {"page", 1}, {"profile", "adobe-rgb-compat"}},
-                                   Json{{"op", "set_color_mode"}, {"page", 1}, {"mode", "rgb"}, {"profile", "rec2020"}}}) {
-                const std::string why = refusal(*book, Json::array({op}));
-                QVERIFY2(why.starts_with("not_yet_ported") && why.find(id) != std::string::npos, qPrintable(QString::fromStdString(why)));
-            }
+        for (const Json& op : {Json{{"op", "assign_profile"}, {"page", 1}, {"profile", "display-p3"}},
+                               Json{{"op", "convert_profile"}, {"page", 1}, {"profile", "adobe-rgb-compat"}},
+                               Json{{"op", "set_color_mode"}, {"page", 1}, {"mode", "rgb"}, {"profile", "rec2020"}}}) {
+            const std::string why = refusal(toned, Json::array({op}));
+            QVERIFY2(why.starts_with("not_yet_ported") && why.find("tn") != std::string::npos, qPrintable(QString::fromStdString(why)));
+            QVERIFY2(refusal(blended, Json::array({op})).empty(), qPrintable(QString::fromStdString(op.dump())));
         }
         core::Document lines = doc;
         lines.edit_page(0).layers.push_back(v2_lines_layer());

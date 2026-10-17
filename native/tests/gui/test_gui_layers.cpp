@@ -14,6 +14,7 @@
 #include <QMenu>
 #include <QSlider>
 #include "gui_support.hpp"
+#include "app/adjust_forms.hpp"
 #include "app/canvas.hpp"
 #include "app/layer_panel.hpp"
 #include "app/main_window.hpp"
@@ -424,6 +425,54 @@ private slots:
         answers.responder->exec = [](QDialog*) { return int(QDialog::Rejected); };
         panel.add_adjust("hue");
         QCOMPARE(book.order().size(), count);
+    }
+
+    // PC2 (adjustments@1): a correction layer's native settings (its blend…) are kept when its numbers are changed in
+    // Python's window, which does not hold them.
+    void correctionKeepsItsNative() {
+        auto doc = book_doc();
+        doc = core::CommandBus().apply(doc, Json::array({Json{{"op", "add_layer"}, {"page", 1}, {"kind", "adjust"}, {"id", "adj"},
+                                                              {"adjust", Json{{"kind", "levels"}, {"black", 10}, {"native", Json{{"blend", "multiply"}}}}}}}),
+                                       core::Actor("human:tester")).doc;
+        Book book(doc);
+        gui_test::Answers answers;
+        auto& panel = book.panel();
+        QVERIFY(book.choose("adj"));
+        answers.responder->exec = [](QDialog* dialog) {
+            if (dialog->objectName() != QStringLiteral("filter_dialog")) return int(QDialog::Rejected);
+            dialog->findChild<QDoubleSpinBox*>(QStringLiteral("field_black"))->setValue(40);
+            return int(QDialog::Accepted);
+        };
+        panel.edit_special();
+        const core::Layer* adjust = book.layer("adj");
+        QCOMPARE((*adjust->adjust)["black"], Json(40.0));
+        QCOMPARE((*adjust->adjust)["native"], (Json{{"blend", "multiply"}}));
+    }
+
+    // PC2's form of a correction's settings (app/adjust_forms): its fields from the kinds' table or its own, a native
+    // setting by its path, the values set and read back, back to the defaults; a kind without a form has no window.
+    void adjustForm() {
+        app::adjust_forms::Form form;
+        int changes = 0;
+        QObject::connect(&form, &app::adjust_forms::Form::changed, [&changes] { ++changes; });
+        form.from_table(*core::adjust_kind("vibrance"), {{"vibrance", QStringLiteral("自然な彩度")}, {"saturation", QStringLiteral("彩度")},
+                                                         {"native.blend", QStringLiteral("描画モード")}});
+        form.check("preserve", QStringLiteral("輝度を保持"), true);
+        form.colour("color", QStringLiteral("色"), {236, 138, 0});
+        QCOMPARE(form.values(), (Json{{"vibrance", 0}, {"saturation", 0}, {"native", Json{{"blend", "normal"}}}, {"preserve", true},
+                                      {"color", Json::array({236, 138, 0})}}));
+        form.set_values(Json{{"vibrance", 35}, {"native", Json{{"blend", "screen"}}}, {"color", Json::array({1, 2, 3})}});
+        QCOMPARE(changes, 1);
+        QCOMPARE(form.values()["vibrance"], Json(35));
+        QCOMPARE(form.values()["native"]["blend"], Json("screen"));
+        QCOMPARE(form.values()["color"], Json::array({1, 2, 3}));
+        form.findChild<QDoubleSpinBox*>(QStringLiteral("field_saturation"))->setValue(-20);
+        QCOMPARE(changes, 2);
+        QCOMPARE(form.values()["saturation"], Json(-20));
+        form.reset();
+        QCOMPARE(form.values()["vibrance"], Json(0));
+        QCOMPARE(form.values()["native"]["blend"], Json("normal"));
+        QVERIFY(!app::adjust_forms::adjust_dialog(nullptr, "vibrance", Json::object(), {}));  // (no form yet: its group's)
     }
 
     // かける: after the question, the filter's numbers in a dialog while the page shows the result; かける applies it

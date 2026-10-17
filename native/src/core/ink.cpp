@@ -553,10 +553,13 @@ void validate_ink_document(const Document& doc) {
         for (const Layer& layer : page->layers) {
             const int kinds = (layer.raster_png && !layer.raster_png->empty()) + (layer.color_raster != nullptr) + (layer.ink_raster != nullptr);
             if (kinds > 1) throw Error("value", "a layer holds one kind of pixels at most (layer " + layer.id + ")");
-            if (page->color && page->color->space == InkSpace::Lab && !lab_blend(layer.blend)) {
+            // (a correction layer's own blend is not looked at, as Python does not — the user's decision 2 of PC2: its
+            // native.blend is checked by core::validate_adjustments)
+            const bool own_blend = layer.kind != LayerKind::Adjust;
+            if (own_blend && page->color && page->color->space == InkSpace::Lab && !lab_blend(layer.blend)) {
                 throw Error("value", "a Lab page cannot composite the blend " + py_repr_str(layer.blend) + " (layer " + layer.id + ")");
             }
-            if (page->color && page->color->space == InkSpace::Multi && !multi_blend(layer.blend)) {
+            if (own_blend && page->color && page->color->space == InkSpace::Multi && !multi_blend(layer.blend)) {
                 throw Error("value", "a multichannel page cannot composite the blend " + py_repr_str(layer.blend) + " (layer " + layer.id + ")");
             }
             if (page->color && ((layer.raster_png && !layer.raster_png->empty()) || layer.color_raster)) {

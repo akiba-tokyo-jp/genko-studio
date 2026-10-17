@@ -650,12 +650,33 @@ void lineart(Plane& p, const Json& params_in, double scale, const core::PageColo
     }
 }
 
-// A correction (levels, curve, hue …): the colours the inks mean, back by the rules (what it leaves keeps its inks).
-void corrected(Plane& p, const core::PreciseAdjustment& adjust, const core::PageColor& color) {
+// A correction (levels, curve, hue …; core/adjust.hpp's AdjustFunction: Python's form is PreciseAdjustment): the colours
+// the inks mean, back by the rules (what it leaves keeps its inks); where a pixel is: its place in the raster.
+void corrected(Plane& p, const core::AdjustFunction& adjust, const core::PageColor& color) {
     const std::vector<double> inks = inks_of(p, color.space);
     std::vector<double> out(inks.size());
-    ink::correct(color, inks.data(), out.data(), p.size(), [&adjust](const std::array<double, 3>& rgb) { return adjust(rgb); });
+    const std::size_t w = std::max<std::size_t>(1, p.width());
+    std::size_t i = 0;  // (ink::correct asks for each pixel once, in their order)
+    ink::correct(color, inks.data(), out.data(), p.size(), [&](const std::array<double, 3>& rgb) {
+        const std::size_t at = i++;
+        return adjust.apply(rgb, static_cast<int>(at % w), static_cast<int>(at / w));
+    });
     set_inks(p, color.space, out);
+}
+
+// PC2 (design 4.2): a correction's records on the plates directly (each plate's tone: CMYK its brightness 1 − ink, Lab
+// its normalized value, grey its lightness — the plane's values).
+void on_plates(Plane& p, const core::InkRecords& records, core::InkSpace space) {
+    const unsigned n = p.n();
+    for (std::size_t i = 0; i < p.size(); ++i) {
+        float* v = p.at(i);
+        for (unsigned c = 0; c < n && c < records.plates.size(); ++c) {
+            if (!records.plates[c]) continue;
+            const double tone = space == InkSpace::Cmyk ? 1.0 - v[c] : v[c];
+            const double out = records.plates[c](tone);
+            v[c] = static_cast<float>(space == InkSpace::Cmyk ? 1.0 - out : out);
+        }
+    }
 }
 
 }  // namespace
@@ -694,6 +715,29 @@ std::string apply(const core::Page& page, const core::InkPixels& raster, std::st
         lineart(p, params, scale, color);
     } else {
         corrected(p, core::PreciseAdjustment(kind, params), color);
+    }
+    if (area != nullptr) {  // filters.within: the filter only inside the selection
+        const std::string inside = ink_edit::area_coverage(page, raster.width, raster.height, *area);
+        for (std::size_t i = 0; i < p.size(); ++i) {
+            const double m = static_cast<unsigned char>(inside[i]) / 255.0;
+            if (m == 1) continue;
+            for (unsigned c = 0; c < p.all(); ++c) p.at(i)[c] = static_cast<float>(p.at(i)[c] * m + original.at(i)[c] * (1 - m));
+        }
+    }
+    return core::encode_ink_raster(write(p, color.space, color.depth));
+}
+
+std::string apply_function(const core::Page& page, const core::InkPixels& raster, const core::AdjustFunction& f, const Json* area) {
+    if (!page.color) throw core::OpError("an RGB page holds no ink pixels");
+    const core::PageColor& color = *page.color;
+    if (raster.space != color.space || raster.depth != color.depth) throw core::OpError("the ink pixels are not in the page's colour mode");
+    const ImageAllocationBudget budget{2ULL * 1024 * 1024 * 1024};
+    Plane p = read(raster);
+    const Plane original = area != nullptr ? p : Plane(1, 1, p.n());
+    if (const auto records = f.ink_records(); records && records->space == color.space && color.space != InkSpace::Multi) {
+        on_plates(p, *records, color.space);
+    } else {
+        corrected(p, f, color);
     }
     if (area != nullptr) {  // filters.within: the filter only inside the selection
         const std::string inside = ink_edit::area_coverage(page, raster.width, raster.height, *area);

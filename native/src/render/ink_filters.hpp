@@ -3,6 +3,7 @@
 #include <string>
 #include <string_view>
 
+#include "core/adjust.hpp"
 #include "core/ink.hpp"
 #include "core/json.hpp"
 #include "core/model.hpp"
@@ -24,5 +25,10 @@ namespace genko::render::ink_filters {
 // reads them; `area`: only inside it (filters.within), on the page.
 std::string apply(const core::Page& page, const core::InkPixels& raster, std::string_view kind, const core::Json& params,
                   const core::Json* area);
+
+// PC2: a correction of the C++ build's own (core/adjust.hpp's AdjustFunction) on the raster: its records on the plates
+// directly when it has them for the page's space (design 4.2), else the colours the inks mean through it and back by
+// the rules (where a pixel is: its place in the raster); `area` as apply.
+std::string apply_function(const core::Page& page, const core::InkPixels& raster, const core::AdjustFunction& f, const core::Json* area);
 
 }  // namespace genko::render::ink_filters
