@@ -609,16 +609,17 @@ void build_tone_menu(QMenu* adjust, const MenuContext& context) {
     MainWindow* window = context.window;
     const auto window_of = [window](const std::string& kind) { return [window, kind] { run_window(window, kind); }; };
     const auto key = [](const char* text) { return QList<QKeySequence>{QKeySequence(QString::fromLatin1(text))}; };
-    adjust->addAction(context.make(QStringLiteral("act_adjust_brightness"), QStringLiteral("明るさ・コントラストを変える…"), window_of("brightness_contrast"), {}));
-    adjust->addAction(context.make(QStringLiteral("act_adjust_levels"), QStringLiteral("レベル補正をかける…"), window_of("levels"), key("Ctrl+L")));
-    adjust->addAction(context.make(QStringLiteral("act_adjust_curves"), QStringLiteral("トーンカーブをかける…"), window_of("curve"), key("Ctrl+M")));
-    adjust->addAction(context.make(QStringLiteral("act_adjust_exposure"), QStringLiteral("露光量…"), window_of("exposure"), {}));
-    adjust->addAction(context.make(QStringLiteral("act_adjust_lookup"), QStringLiteral("カラールックアップをかける…"), window_of("color_lookup"), {}));
+    // (Photoshop's names, the layer panel's 色調補正のレイヤー's the same: the user's decision 8, command_title)
+    adjust->addAction(context.make(QStringLiteral("act_adjust_brightness"), command_title("brightness_contrast"), window_of("brightness_contrast"), {}));
+    adjust->addAction(context.make(QStringLiteral("act_adjust_levels"), command_title("levels"), window_of("levels"), key("Ctrl+L")));
+    adjust->addAction(context.make(QStringLiteral("act_adjust_curves"), command_title("curve"), window_of("curve"), key("Ctrl+M")));
+    adjust->addAction(context.make(QStringLiteral("act_adjust_exposure"), command_title("exposure"), window_of("exposure"), {}));
+    adjust->addAction(context.make(QStringLiteral("act_adjust_lookup"), command_title("color_lookup"), window_of("color_lookup"), {}));
     adjust->addSeparator();
-    adjust->addAction(context.make(QStringLiteral("act_adjust_invert"), QStringLiteral("階調の反転"), [window] { run_direct(window, "invert"); }, key("Ctrl+I")));
-    adjust->addAction(context.make(QStringLiteral("act_adjust_posterize"), QStringLiteral("階調化する…"), window_of("posterize"), {}));
-    adjust->addAction(context.make(QStringLiteral("act_adjust_threshold"), QStringLiteral("2 値化する…"), window_of("threshold"), {}));
-    adjust->addAction(context.make(QStringLiteral("act_adjust_gradient_map"), QStringLiteral("グラデーションマップをかける…"), window_of("gradient_map"), {}));
+    adjust->addAction(context.make(QStringLiteral("act_adjust_invert"), command_title("invert"), [window] { run_direct(window, "invert"); }, key("Ctrl+I")));
+    adjust->addAction(context.make(QStringLiteral("act_adjust_posterize"), command_title("posterize"), window_of("posterize"), {}));
+    adjust->addAction(context.make(QStringLiteral("act_adjust_threshold"), command_title("threshold"), window_of("threshold"), {}));
+    adjust->addAction(context.make(QStringLiteral("act_adjust_gradient_map"), command_title("gradient_map"), window_of("gradient_map"), {}));
     adjust->addSeparator();
     adjust->addAction(context.make(QStringLiteral("act_adjust_equalize"), QStringLiteral("平均化（イコライズ）"), [window] { run_direct(window, "equalize"); }, {}));
     adjust->addAction(context.make(QStringLiteral("act_auto_tone"), QStringLiteral("自動トーン補正"), [window] { run_auto(window, "tone"); }, {}));

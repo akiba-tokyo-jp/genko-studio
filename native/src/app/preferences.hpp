@@ -61,8 +61,10 @@ QString pen_button();
 // std::invalid_argument("もう少し長く試し描きします") with too few presses.
 double gamma_for(const std::vector<double>& pressures);
 
-// Every command (an action with words, not a menu or a line) named "cmd:<its words>" once, in the order of the names;
-// name_commands gives the unnamed ones their name and remembers each command's own keys (MainWindow::default_shortcuts).
+// Every command (an action with words, not a menu or a line) named "cmd:<its words>" once by its name (workspace's
+// command_names: its words, with its place when another has the same words — the user's decision 8), in the order of
+// the names; name_commands gives the unnamed ones their name and remembers each command's own keys by its name
+// (MainWindow::default_shortcuts). The keys chosen are kept by the name ("shortcuts/<name>").
 std::vector<QAction*> commands(QMainWindow* window);
 void name_commands(MainWindow* window);
 // (new name: old name) a command renamed later keeps the keys chosen under its old name

@@ -113,15 +113,20 @@ double gamma_for(const std::vector<double>& pressures) {
 // --- the commands and their keys ----------------------------------------------------------------------------------------
 
 std::vector<QAction*> commands(QMainWindow* window) {
+    // (by its name: its words, and its place after them when another command has the same words — the user's decision 8,
+    // workspace's command_names)
+    const auto names = command_names(window);
     QSet<QString> seen;
     std::vector<QAction*> out;
     for (QAction* action : window->findChildren<QAction*>()) {
         const QString text = action->text();
-        if (text.isEmpty() || action->isSeparator() || action->menu() != nullptr || seen.contains(text) ||
-            !action->objectName().startsWith(QStringLiteral("cmd:")) || remade(action)) {
+        if (text.isEmpty() || action->isSeparator() || action->menu() != nullptr || !action->objectName().startsWith(QStringLiteral("cmd:")) ||
+            remade(action)) {
             continue;
         }
-        seen.insert(text);
+        const QString name = command_name(names, action);
+        if (seen.contains(name)) continue;
+        seen.insert(name);
         out.push_back(action);
     }
     std::stable_sort(out.begin(), out.end(), [](QAction* a, QAction* b) { return a->objectName() < b->objectName(); });
@@ -134,8 +139,14 @@ void name_commands(MainWindow* window) {
         const QString text = action->text();
         if (text.isEmpty() || action->isSeparator() || action->menu() != nullptr || remade(action)) continue;
         if (action->objectName().isEmpty()) action->setObjectName(QStringLiteral("cmd:%1").arg(text));
-        if (action->objectName().startsWith(QStringLiteral("cmd:")) && !window->default_shortcuts.contains(text)) {
-            window->default_shortcuts[text] = action->shortcuts();
+    }
+    const auto names = command_names(window);
+    for (QAction* action : window->findChildren<QAction*>()) {
+        const QString text = action->text();
+        if (text.isEmpty() || action->isSeparator() || action->menu() != nullptr || remade(action)) continue;
+        const QString name = command_name(names, action);
+        if (action->objectName().startsWith(QStringLiteral("cmd:")) && !window->default_shortcuts.contains(name)) {
+            window->default_shortcuts[name] = action->shortcuts();
         }
     }
 }
@@ -151,18 +162,28 @@ void apply_shortcuts(MainWindow* window) {
     const auto store = settings();
     std::map<QString, QString> chosen;  // (a key the person gave a command: the command)
     std::vector<QAction*> own;          // (the commands with their own keys)
+    const auto names = command_names(window);
+    const auto first = by_text(window);  // (the words alone: the first command of them in the menus)
     for (QAction* action : preferences::commands(window)) {
-        QString key = QStringLiteral("shortcuts/%1").arg(action->text());
-        const auto old = renamed().find(action->text());
+        const QString name = command_name(names, action);
+        QString key = QStringLiteral("shortcuts/%1").arg(name);
+        const auto old = renamed().find(name);
         if (!store->contains(key) && old != renamed().end() && store->contains(QStringLiteral("shortcuts/%1").arg(old->second))) {
             key = QStringLiteral("shortcuts/%1").arg(old->second);  // (keys chosen under the old name)
+        }
+        // (keys chosen under its words alone, before another command had the same words — the user's decision 8: the
+        // first of them in the menus had them then)
+        if (const auto alone = first.find(action->text());
+            !store->contains(key) && name != action->text() && alone != first.end() && alone->second == action &&
+            store->contains(QStringLiteral("shortcuts/%1").arg(action->text()))) {
+            key = QStringLiteral("shortcuts/%1").arg(action->text());
         }
         if (store->contains(key)) {
             const QString value = store->value(key).toString();
             QList<QKeySequence> keys;
             for (const QString& one : value.split(QLatin1Char('|'), Qt::SkipEmptyParts)) {
                 keys << QKeySequence(one);
-                chosen.emplace(keys.back().toString(QKeySequence::PortableText), action->text());
+                chosen.emplace(keys.back().toString(QKeySequence::PortableText), name);
             }
             action->setShortcuts(keys);
         } else {
@@ -173,16 +194,17 @@ void apply_shortcuts(MainWindow* window) {
     // person's stays and the command's own is taken off, as the preferences refuse one key for two; said)
     QStringList taken;
     for (QAction* action : own) {
-        const auto found = window->default_shortcuts.find(action->text());
+        const QString name = command_name(names, action);
+        const auto found = window->default_shortcuts.find(name);
         if (found == window->default_shortcuts.end()) continue;
         QList<QKeySequence> keys;
         for (const QKeySequence& key : found->second) {
             const auto other = chosen.find(key.toString(QKeySequence::PortableText));
-            if (other == chosen.end() || other->second == action->text()) {
+            if (other == chosen.end() || other->second == name) {
                 keys << key;
                 continue;
             }
-            taken << QStringLiteral("%1 は「%2」に付けてあるため、「%3」のキーから外しました").arg(key.toString(QKeySequence::NativeText), other->second, action->text());
+            taken << QStringLiteral("%1 は「%2」に付けてあるため、「%3」のキーから外しました").arg(key.toString(QKeySequence::NativeText), other->second, name);
         }
         if (keys != action->shortcuts()) action->setShortcuts(keys);
     }
@@ -191,10 +213,12 @@ void apply_shortcuts(MainWindow* window) {
 }
 
 void retip(MainWindow* window) {
+    const auto names = command_names(window);
     for (QAction* action : preferences::commands(window)) {
         const QString keys = action->shortcut().toString(QKeySequence::NativeText);
         const QString what = action->statusTip();
-        action->setToolTip(QString(action->text()).remove(QLatin1Char('&')) + (keys.isEmpty() ? QString() : QStringLiteral("（%1）").arg(keys)) +
+        // (its name: its place too when another command has the same words — the command bar's button tells it so)
+        action->setToolTip(QString(command_name(names, action)).remove(QLatin1Char('&')) + (keys.isEmpty() ? QString() : QStringLiteral("（%1）").arg(keys)) +
                            (what.isEmpty() ? QString() : QStringLiteral("\n") + what));
     }
 }
@@ -390,17 +414,19 @@ PreferencesDialog::PreferencesDialog(MainWindow* window) : QDialog(window), wind
     table->setHorizontalHeaderLabels({QStringLiteral("コマンド"), QStringLiteral("ショートカット")});
     table->horizontalHeader()->setSectionResizeMode(0, QHeaderView::Stretch);
     table->verticalHeader()->setVisible(false);
+    const auto names = command_names(window);
     for (QAction* action : preferences::commands(window)) {
+        const QString name = command_name(names, action);  // (its place too when another has the same words)
         const int row = table->rowCount();
         table->insertRow(row);
-        auto* item = new QTableWidgetItem(action->text());
+        auto* item = new QTableWidgetItem(name);
         item->setFlags(item->flags() & ~Qt::ItemIsEditable);
         table->setItem(row, 0, item);
         auto* edit = new QKeySequenceEdit(action->shortcut());
         if (auto* field = edit->findChild<QLineEdit*>()) field->setPlaceholderText(QStringLiteral("キーを押す"));
-        edit->setAccessibleName(QStringLiteral("%1 のショートカット").arg(action->text()));
+        edit->setAccessibleName(QStringLiteral("%1 のショートカット").arg(name));
         table->setCellWidget(row, 1, edit);
-        editors.emplace_back(action->text(), edit);
+        editors.emplace_back(name, edit);
     }
     clash = new QLabel;
     theme::role(clash, "error");
@@ -714,12 +740,14 @@ void PreferencesDialog::save() {
     }
     const auto store = settings();
     std::map<QString, QStringList> chosen(keys.begin(), keys.end());
+    const auto names = command_names(window_);
     for (QAction* action : preferences::commands(window_)) {
-        const QStringList now = chosen[action->text()];
-        const auto found = window_->default_shortcuts.find(action->text());
+        const QString name = command_name(names, action);
+        const QStringList now = chosen[name];
+        const auto found = window_->default_shortcuts.find(name);
         const QList<QKeySequence> defaults = found != window_->default_shortcuts.end() ? found->second : QList<QKeySequence>();
         const QStringList first_default = defaults.isEmpty() ? QStringList() : QStringList{defaults.front().toString()};
-        const QString key = QStringLiteral("shortcuts/%1").arg(action->text());
+        const QString key = QStringLiteral("shortcuts/%1").arg(name);
         if (now == first_default) {
             store->remove(key);
             action->setShortcuts(defaults);

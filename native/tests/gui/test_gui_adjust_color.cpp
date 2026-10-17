@@ -295,7 +295,8 @@ private slots:
         QVERIFY(app::adjust_forms::adjust_dialog(nullptr, "channel_mixer", Json::object(), {}));
     }
 
-    // The layer panel (the user's decision 3): 色調補正のレイヤー → 色相・彩度・明度… makes hue_saturation; the C++ build's own
+    // The layer panel (the user's decision 3): 色調補正のレイヤー → 色相・彩度… makes hue_saturation (named as レイヤー → 色調補正
+    // names it, Photoshop's name: the user's decision 8 — in Python's place, where 色相・彩度・明度… was); the C++ build's own
     // kinds are there; a double click mends one in its window, its native kept. A layer of Python's hue is mended in its
     // own window still.
     void correctionLayers() {
@@ -308,7 +309,7 @@ private slots:
             form_in(dialog)->set_values(Json{{"saturation", -40}});
             return int(QDialog::Accepted);
         };
-        QAction* hue = book.menu_action(panel.special_menu(), QStringLiteral("色相・彩度・明度…"));
+        QAction* hue = book.menu_action(panel.special_menu(), QStringLiteral("色相・彩度…"));
         QVERIFY(hue != nullptr);
         hue->trigger();
         const core::Layer* made = book.window->target_layer();
@@ -320,7 +321,13 @@ private slots:
                                      QStringLiteral("チャンネルミキサー…"), QStringLiteral("特定色域の選択…")}) {
             QVERIFY2(book.menu_action(panel.special_menu(), title) != nullptr, qPrintable(title));
         }
-        QVERIFY(book.menu_action(panel.special_menu(), QStringLiteral("色相・彩度…")) == nullptr);  // (once: in Python's place)
+        QVERIFY(book.menu_action(panel.special_menu(), QStringLiteral("色相・彩度・明度…")) == nullptr);  // (once: in Python's place)
+        QStringList titles;
+        for (QAction* a : panel.special_menu()->actions())
+            if (a->menu() != nullptr)
+                for (QAction* b : a->menu()->actions()) titles << b->text();
+        QCOMPARE(titles.count(QStringLiteral("色相・彩度…")), 1);
+        QCOMPARE(titles.indexOf(QStringLiteral("色相・彩度…")), 2);  // (after レベル補正… and トーンカーブ…, as Python's 色相・彩度・明度…)
         // mended in its window, its native kept
         const std::string id = made->id;
         QVERIFY(book.window->apply_ops(Json::array({Json{{"op", "set_layer"}, {"page", 1}, {"id", id},
@@ -349,6 +356,46 @@ private slots:
         panel.edit_special();
         QCOMPARE(asked, QStringLiteral("filter_dialog"));
         QCOMPARE((*book.layer("py")->adjust)["kind"], Json("hue"));
+    }
+
+    // The layer panel's filters (the user's decision 3): 色相・彩度・明度 is the upstream hue_saturation — its window (the
+    // page showing the result while it is open), one filter_raster of hue_saturation, the same pixels as that op —;
+    // Python's hue op draws as it did.
+    void filterListHueIsTheUpstreamForm() {
+        Book book;
+        gui_test::Answers answers;
+        auto& panel = book.panel();
+        QVERIFY(book.choose("pic"));
+        const core::Document before = book.session->document();
+        auto* canvas = book.window->canvas();
+        answers.responder->question = [](const QString&, const QString&) { return true; };
+        bool previewed = false;
+        answers.responder->exec = [&](QDialog* dialog) {
+            if (dialog->objectName() != QStringLiteral("adjust_dialog") || form_in(dialog) == nullptr) return int(QDialog::Rejected);
+            if (form_in(dialog)->findChild<QCheckBox*>(QStringLiteral("field_colorize")) == nullptr) return int(QDialog::Rejected);
+            form_in(dialog)->set_values(Json{{"hue", 120}, {"saturation", -40}});
+            previewed = gui_test::wait_for([&] { return canvas->doc() != book.session->snapshot(); }, 10000);
+            return int(QDialog::Accepted);
+        };
+        auto* filter = panel.filter_box();
+        filter->setCurrentIndex(filter->findData(QStringLiteral("hue")));
+        QCOMPARE(filter->currentText(), QStringLiteral("色相・彩度・明度"));
+        panel.apply_filter();
+        QVERIFY(previewed);
+        const core::CommandBus bus(render::ops_registry());
+        const core::Document want = bus.apply(before, Json::array({Json{{"op", "filter_raster"}, {"page", 1}, {"id", "pic"}, {"kind", "hue_saturation"},
+                                                                        {"hue", 120}, {"saturation", -40}}}),
+                                              core::Actor("human:tester")).doc;
+        const core::Layer* wanted = nullptr;
+        for (const auto& l : want.page(0).layers) if (l.id == "pic") wanted = &l;
+        QVERIFY(wanted != nullptr);
+        QVERIFY(book.pixels("pic") == render::raster::layer_pixels(want.page(0), *wanted).tobytes());
+        // Python's hue as an op: its own formula still
+        const core::Document python = bus.apply(before, Json::array({Json{{"op", "filter_raster"}, {"page", 1}, {"id", "pic"}, {"kind", "hue"},
+                                                                          {"shift", 120}}}),
+                                                 core::Actor("human:tester")).doc;
+        for (const auto& l : python.page(0).layers)
+            if (l.id == "pic") QVERIFY(render::raster::layer_pixels(python.page(0), l).tobytes() != book.pixels("pic"));
     }
 };
 

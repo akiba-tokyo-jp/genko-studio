@@ -233,6 +233,12 @@ const FormKind* form_kind(std::string_view kind) {
     return nullptr;
 }
 
+QString command_title(std::string_view kind) {
+    const FormKind* found = form_kind(kind);
+    if (found == nullptr) return {};
+    return kind == "invert" ? found->title : found->title + QStringLiteral("…");
+}
+
 std::optional<Json> adjust_dialog(QWidget* parent, const std::string& kind, const Json& now, const FormContext& context, FilterPreview preview) {
     const FormKind* found = form_kind(kind);
     if (found == nullptr || !found->build) return std::nullopt;

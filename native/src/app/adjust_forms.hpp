@@ -109,6 +109,10 @@ struct FormKind {
 // Every kind with a form, by group (each group's file: tone_forms, color_forms).
 const std::vector<FormKind>& form_kinds();
 const FormKind* form_kind(std::string_view kind);
+// The name of a correction's commands (the user's decision 8: Photoshop's, the same for レイヤー → 色調補正's command and
+// the layer panel's 色調補正のレイヤー item — コマンドを探す tells them apart by their place): its form's title and "…"
+// (階調の反転: done at once, no window); none for a kind with no form.
+QString command_title(std::string_view kind);
 std::vector<FormKind> tone_forms();   // PC2a: app/adjust_forms_tone.cpp
 std::vector<FormKind> color_forms();  // PC2b: app/adjust_forms_color.cpp
 

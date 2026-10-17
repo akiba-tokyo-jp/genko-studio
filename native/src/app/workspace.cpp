@@ -72,24 +72,63 @@ bool remade(const QAction* action) {
     return false;
 }
 
-std::vector<QAction*> commands(QMainWindow* window) {
+namespace {
+
+// Every command in the menus once (one in two menus — the layer panel's in レイヤー too — once), in menu order.
+std::vector<QAction*> menu_commands(QMainWindow* window) {
     std::vector<QAction*> out;
-    QSet<QString> seen;
+    QSet<const QAction*> seen;
     for (QAction* top : window->menuBar()->actions()) {
         if (top->menu() == nullptr) continue;
         walk(top->menu(), [&](QAction* action) {
             const QString text = action->text();
-            if (text.isEmpty() || seen.contains(text) || text.startsWith(QStringLiteral("（"))) return;
-            seen.insert(text);
+            if (text.isEmpty() || seen.contains(action) || text.startsWith(QStringLiteral("（"))) return;
+            seen.insert(action);
             out.push_back(action);
         });
     }
     return out;
 }
 
+}  // namespace
+
+std::map<const QAction*, QString> command_names(QMainWindow* window) {
+    const std::vector<QAction*> all = menu_commands(window);
+    std::map<QString, int> count;
+    for (const QAction* action : all) ++count[action->text()];
+    std::map<const QAction*, QString> out;
+    for (const QAction* action : all) {
+        const QString place = count[action->text()] > 1 ? where(window, action) : QString();
+        out[action] = place.isEmpty() ? action->text() : QStringLiteral("%1（%2）").arg(action->text(), place);
+    }
+    return out;
+}
+
+QString command_name(const std::map<const QAction*, QString>& names, const QAction* action) {
+    const auto found = names.find(action);
+    return found != names.end() ? found->second : action->text();
+}
+
+std::vector<QAction*> commands(QMainWindow* window) {
+    const auto names = command_names(window);
+    std::vector<QAction*> out;
+    QSet<QString> seen;
+    for (QAction* action : menu_commands(window)) {
+        const QString name = command_name(names, action);
+        if (seen.contains(name)) continue;
+        seen.insert(name);
+        out.push_back(action);
+    }
+    return out;
+}
+
 std::map<QString, QAction*> by_text(QMainWindow* window) {
+    const auto names = command_names(window);
     std::map<QString, QAction*> out;
-    for (QAction* action : commands(window)) out[action->text()] = action;
+    for (QAction* action : commands(window)) out[command_name(names, action)] = action;
+    // (a name kept before others had the same words — the words alone: the first of them in the menus, the one that had
+    // them then, as the layer panel's 色調補正のレイヤー's before レイヤー → 色調補正)
+    for (QAction* action : commands(window)) out.emplace(action->text(), action);
     return out;
 }
 
@@ -237,7 +276,8 @@ ChooseCommands::ChooseCommands(QMainWindow* window, const QString& title, const 
 
 void ChooseCommands::fill_all() {
     all->clear();
-    for (QAction* action : search(window_, filter->text())) all->addItem(action->text());
+    const auto names = command_names(window_);
+    for (QAction* action : search(window_, filter->text())) all->addItem(command_name(names, action));
 }
 
 void ChooseCommands::add_chosen() {
@@ -287,14 +327,17 @@ void QuickAccess::refresh() {
     }
     buttons.clear();
     const std::map<QString, QAction*> actions = by_text(window_);
+    const auto command_names_now = command_names(window_);
     for (const QString& name : names()) {
         const auto found = actions.find(name);
         if (found == actions.end()) continue;
         QAction* action = found->second;
-        auto* button = new QPushButton(short_words(action->text()));
+        // (one of the same words as another: its place after them, the user's decision 8)
+        const QString called = command_name(command_names_now, action);
+        auto* button = new QPushButton(called == action->text() ? short_words(action->text()) : called);
         button->setProperty("row", true);  // (quiet rows like the tool settings)
-        button->setToolTip(action->statusTip().isEmpty() ? action->text() : action->statusTip());
-        button->setAccessibleName(action->text());
+        button->setToolTip(action->statusTip().isEmpty() ? called : action->statusTip());
+        button->setAccessibleName(called);
         button->setIcon(icon_or_blank(action->icon()));
         connect(button, &QPushButton::clicked, action, &QAction::trigger);
         button->setMinimumWidth(60);

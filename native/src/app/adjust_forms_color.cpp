@@ -452,14 +452,15 @@ void build_color_menu(QMenu* adjust, const MenuContext& context) {
         const char* kind;
         QList<QKeySequence> keys;
     };
+    // (Photoshop's names, the layer panel's 色調補正のレイヤー's the same: the user's decision 8, command_title)
     const std::vector<Command> commands{
-        {"act_adjust_vibrance", QStringLiteral("自然な彩度…"), "vibrance", {}},
-        {"act_adjust_hue_saturation", QStringLiteral("色相・彩度…"), "hue_saturation", {QKeySequence(QStringLiteral("Ctrl+U"))}},
-        {"act_adjust_color_balance", QStringLiteral("カラーバランス…"), "color_balance", {QKeySequence(QStringLiteral("Ctrl+B"))}},
-        {"act_adjust_black_white", QStringLiteral("白黒…"), "black_white", {}},
-        {"act_adjust_photo_filter", QStringLiteral("レンズフィルター…"), "photo_filter", {}},
-        {"act_adjust_channel_mixer", QStringLiteral("チャンネルミキサー…"), "channel_mixer", {}},
-        {"act_adjust_selective_color", QStringLiteral("特定色域の選択…"), "selective_color", {}},
+        {"act_adjust_vibrance", command_title("vibrance"), "vibrance", {}},
+        {"act_adjust_hue_saturation", command_title("hue_saturation"), "hue_saturation", {QKeySequence(QStringLiteral("Ctrl+U"))}},
+        {"act_adjust_color_balance", command_title("color_balance"), "color_balance", {QKeySequence(QStringLiteral("Ctrl+B"))}},
+        {"act_adjust_black_white", command_title("black_white"), "black_white", {}},
+        {"act_adjust_photo_filter", command_title("photo_filter"), "photo_filter", {}},
+        {"act_adjust_channel_mixer", command_title("channel_mixer"), "channel_mixer", {}},
+        {"act_adjust_selective_color", command_title("selective_color"), "selective_color", {}},
         {"act_adjust_desaturate", QStringLiteral("彩度を下げる"), "desaturate", {QKeySequence(QStringLiteral("Ctrl+Shift+U"))}},
     };
     if (!adjust->isEmpty()) adjust->addSeparator();

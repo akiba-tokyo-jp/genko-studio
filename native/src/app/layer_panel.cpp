@@ -206,15 +206,17 @@ LayerPanel::LayerPanel(MainWindow* window) : window_(window) {
     QMenu* adjust = special_->addMenu(QStringLiteral("色調補正のレイヤー"));
     for (const auto& [key, label] : adjustment_kinds()) {
         // (PC2b, the user's decision 3: a new 色相・彩度 is the upstream form, hue_saturation, in its place; a layer of
-        // Python's hue is still mended in its own window)
+        // Python's hue is still mended in its own window. The user's decision 8: each named as レイヤー → 色調補正 names
+        // the same correction, Photoshop's name — 色相・彩度…, 階調の反転)
         const std::string made = key == "hue" && adjust_forms::form_kind("hue_saturation") != nullptr ? std::string("hue_saturation") : key;
-        adjust->addAction(label + QStringLiteral("…"), this, [this, made] { add_adjust(made); });
+        const QString title = adjust_forms::command_title(made);
+        adjust->addAction(title.isEmpty() ? label + QStringLiteral("…") : title, this, [this, made] { add_adjust(made); });
     }
     // (PC2: the C++ build's own kinds that have a form — app/adjust_forms, each group's)
     for (const adjust_forms::FormKind& form : adjust_forms::form_kinds()) {
         const core::AdjustKind* kind = core::adjust_kind(form.kind);
         if (kind == nullptr || !kind->layer || kind->group == "Python" || form.kind == "hue_saturation") continue;
-        adjust->addAction(form.title + QStringLiteral("…"), this, [this, key = std::string(form.kind)] { add_adjust(key); });
+        adjust->addAction(adjust_forms::command_title(form.kind), this, [this, key = std::string(form.kind)] { add_adjust(key); });
     }
     special_->addSeparator();
     special_->addAction(QStringLiteral("塗り・補正を直す…"), this, [this] { edit_special(); });
@@ -846,9 +848,11 @@ std::optional<Json> LayerPanel::adjust_fields(const std::string& kind, const Jso
 
 void LayerPanel::add_adjust(const std::string& kind) {
     const auto asked = window_->asking();
-    // (PC2a, the user's decision 3: a correction made new starts from PhotoCraft's form, when its kind has a window)
+    // (PC2a, the user's decision 3: a correction made new starts from PhotoCraft's form, when its kind has a window. 階調の
+    // 反転 has nothing to ask: made at once, as レイヤー → 色調補正 → 階調の反転 does its work — the user's decision 8)
     const adjust_forms::FormKind* form_of = adjust_forms::form_kind(kind);
-    const auto params = adjust_fields(kind, form_of != nullptr ? form_of->fresh : Json::object());
+    const auto params = kind == "invert" ? std::optional<Json>(Json::object())
+                                         : adjust_fields(kind, form_of != nullptr ? form_of->fresh : Json::object());
     if (!params || !window_->still(asked)) return;
     QString title = QStringLiteral("色調補正");
     if (const adjust_forms::FormKind* form = adjust_forms::form_kind(kind)) title = form->title;
@@ -961,7 +965,10 @@ void LayerPanel::apply_filter() {
     const auto [page, layer] = this->layer();
     if (layer == nullptr) return;
     const QString label = filter_->currentText();
-    const std::string kind = filter_->currentData().toString().toStdString();
+    // (the user's decision 3: 色相・彩度・明度 made new is the upstream form, hue_saturation — its window, app/adjust_forms;
+    // Python's hue stays an op of its own, drawn as before)
+    std::string kind = filter_->currentData().toString().toStdString();
+    if (kind == "hue" && adjust_forms::form_kind("hue_saturation") != nullptr) kind = "hue_saturation";
     const auto area = window_->selection_area();
     const QString extra = layer->stroke_count() > 0 ? QStringLiteral("\nペンの線は画像になり、あとから線として消せなくなります。") : QString();
     const QString where = area ? QStringLiteral("の選択範囲の中") : QStringLiteral("全体");
@@ -973,21 +980,26 @@ void LayerPanel::apply_filter() {
     const std::string layer_id = layer->id;
     const Json index = page->index.json();
     std::optional<Json> params;
+    const FilterPreview preview = [this, index, layer_id, kind, area](const std::optional<Json>& values) {
+        if (!values) {
+            window_->preview_ops(std::nullopt);
+            return;
+        }
+        Json op{{"op", "filter_raster"}, {"page", index}, {"id", layer_id}, {"kind", kind}};
+        op.update(*values);
+        if (area) op["area"] = *area;
+        window_->preview_ops(Json::array({op}));
+    };
     if (kind == "gradient_map") {
         params = adjust_fields(kind);
+    } else if (kind == "hue_saturation") {
+        adjust_forms::FormContext context;
+        context.page = page;
+        const auto& rgb = window_->pen().rgb;
+        context.pen = {static_cast<int>(rgb[0]), static_cast<int>(rgb[1]), static_cast<int>(rgb[2])};
+        params = adjust_forms::adjust_dialog(this, kind, Json::object(), context, preview);
     } else {
-        params = filter_params(this, kind, Json::object(),
-                               [this, index, layer_id, kind, area](const std::optional<Json>& values) {
-                                   if (!values) {
-                                       window_->preview_ops(std::nullopt);
-                                       return;
-                                   }
-                                   Json op{{"op", "filter_raster"}, {"page", index}, {"id", layer_id}, {"kind", kind}};
-                                   op.update(*values);
-                                   if (area) op["area"] = *area;
-                                   window_->preview_ops(Json::array({op}));
-                               },
-                               kind == "levels" || kind == "curve" ? histogram(*page, *layer) : std::nullopt);
+        params = filter_params(this, kind, Json::object(), preview, kind == "levels" || kind == "curve" ? histogram(*page, *layer) : std::nullopt);
     }
     if (!params || !window_->still(asked)) return;
     Json op{{"op", "filter_raster"}, {"page", index}, {"id", layer_id}, {"kind", kind}};

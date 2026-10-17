@@ -774,8 +774,8 @@ private slots:
         const Json stops = (*w->target_layer()->adjust)["stops"];
         QCOMPARE(stops.size(), std::size_t{2});
         QCOMPARE(stops[0][1], Json(w->pen().rgb));
-        // 反転 (its own layer: no numbers to ask)
-        QAction* invert = titled(panel->special_menu(), QStringLiteral("色調反転…"));
+        // 反転 (its own layer: no numbers to ask; named as レイヤー → 色調補正 names it, Photoshop's name: the user's decision 8)
+        QAction* invert = titled(panel->special_menu(), QStringLiteral("階調の反転"));
         QVERIFY(invert != nullptr);
         invert->trigger();
         QCOMPARE(w->target_layer()->kind, core::LayerKind::Adjust);

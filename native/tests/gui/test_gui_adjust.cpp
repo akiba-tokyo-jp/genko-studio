@@ -14,10 +14,13 @@
 #include <QDoubleSpinBox>
 #include <QFileInfo>
 #include <QLabel>
+#include <QLineEdit>
+#include <QListWidget>
 #include <QMenu>
 #include <QMenuBar>
 #include <QPushButton>
 
+#include <algorithm>
 #include <cmath>
 #include <set>
 
@@ -27,6 +30,7 @@
 #include "app/canvas.hpp"
 #include "app/layer_panel.hpp"
 #include "app/main_window.hpp"
+#include "app/workspace.hpp"
 #include "core/base64.hpp"
 #include "core/command_bus.hpp"
 #include "core/lut3d.hpp"
@@ -115,13 +119,47 @@ private slots:
         QStringList texts;
         for (QAction* a : adjust->actions())
             if (!a->isSeparator()) texts << a->text();
-        // (the ones a correction layer of the same kind is named by say what they do: no two commands of the window have the
-        // same words, test_gui_ledger_a)
-        for (const char* text : {"明るさ・コントラストを変える…", "レベル補正をかける…", "トーンカーブをかける…", "露光量…", "カラールックアップをかける…",
-                                 "階調の反転", "階調化する…", "2 値化する…", "グラデーションマップをかける…", "平均化（イコライズ）", "自動トーン補正",
-                                 "自動コントラスト", "自動カラー補正"}) {
+        // (Photoshop's names, the same as the layer panel's 色調補正のレイヤー of the same kind: the user's decision 8 —
+        // コマンドを探す tells them apart by their place, below)
+        for (const char* text : {"明るさ・コントラスト…", "レベル補正…", "トーンカーブ…", "露光量…", "カラールックアップ…", "階調の反転", "階調化…",
+                                 "2 値化…", "グラデーションマップ…", "平均化（イコライズ）", "自動トーン補正", "自動コントラスト", "自動カラー補正"}) {
             QVERIFY2(texts.contains(QString::fromUtf8(text)), text);
         }
+        // コマンドを探す: レベル補正… of レイヤー → 色調補正 and of the layer panel's 色調補正のレイヤー, each found with its
+        // place after its words; the names the quick access and the command bar keep and offer (their chooser) the same
+        // words and place, each its own command
+        QAction* levels = book.window->action(QStringLiteral("act_adjust_levels"));
+        QAction* layer_levels = nullptr;
+        for (QAction* a : book.window->layer_panel()->special_menu()->actions())
+            if (a->menu() != nullptr)
+                for (QAction* b : a->menu()->actions())
+                    if (b->text() == QStringLiteral("レベル補正…")) layer_levels = b;
+        QVERIFY(levels != nullptr && layer_levels != nullptr && levels != layer_levels);
+        const QString menu_place = QStringLiteral("レイヤー → 色調補正");
+        const QString panel_place = QStringLiteral("レイヤー → 塗り・グラデーション・色調補正のレイヤー → 色調補正のレイヤー");
+        QCOMPARE(app::where(book.window.get(), levels), menu_place);
+        QCOMPARE(app::where(book.window.get(), layer_levels), panel_place);
+        app::CommandSearch* search = book.window->find_command();
+        search->query->setText(QStringLiteral("レベル補正"));
+        QVERIFY(std::find(search->found().begin(), search->found().end(), levels) != search->found().end());
+        QVERIFY(std::find(search->found().begin(), search->found().end(), layer_levels) != search->found().end());
+        QStringList rows;
+        for (int i = 0; i < search->results->count(); ++i) rows << search->results->item(i)->text();
+        for (const QString& place : {menu_place, panel_place}) {
+            const QString row = QStringLiteral("レベル補正…　（%1）").arg(place);
+            QVERIFY2(std::any_of(rows.begin(), rows.end(), [&row](const QString& r) { return r.startsWith(row); }), qPrintable(rows.join(QStringLiteral(" | "))));
+        }
+        search->close();
+        const auto names = app::by_text(book.window.get());
+        const QString menu_name = QStringLiteral("レベル補正…（%1）").arg(menu_place);
+        const QString panel_name = QStringLiteral("レベル補正…（%1）").arg(panel_place);
+        QVERIFY(names.count(menu_name) == 1 && names.at(menu_name) == levels);
+        QVERIFY(names.count(panel_name) == 1 && names.at(panel_name) == layer_levels);
+        app::ChooseCommands chooser(book.window.get(), QStringLiteral("クイックアクセスに並べるもの"), {});
+        chooser.filter->setText(QStringLiteral("レベル補正"));
+        QStringList offered;
+        for (int i = 0; i < chooser.all->count(); ++i) offered << chooser.all->item(i)->text();
+        QVERIFY2(offered.contains(menu_name) && offered.contains(panel_name), qPrintable(offered.join(QStringLiteral(" | "))));
         QCOMPARE(book.window->action(QStringLiteral("act_adjust_levels"))->shortcut(), QKeySequence(QStringLiteral("Ctrl+L")));
         QCOMPARE(book.window->action(QStringLiteral("act_adjust_curves"))->shortcut(), QKeySequence(QStringLiteral("Ctrl+M")));
         QCOMPARE(book.window->action(QStringLiteral("act_adjust_invert"))->shortcut(), QKeySequence(QStringLiteral("Ctrl+I")));

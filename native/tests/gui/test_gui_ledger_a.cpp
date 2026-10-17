@@ -70,6 +70,7 @@
 #include "app/theme.hpp"
 #include "app/thumbs.hpp"
 #include "app/tool_settings.hpp"
+#include "app/workspace.hpp"
 #include "core/command_bus.hpp"
 #include "core/pynum.hpp"
 #include "core/pyops.hpp"
@@ -489,9 +490,12 @@ private slots:
         }
     }
 
-    // test_names_say_what_they_are: no two commands of the window have the same words (a panel's own switch aside);
-    // 定規, 3D 操作, 効果線 and 素材を置く are in ツール itself; コマ割り and 3D 操作 are named so; the pen has its picture
-    // and the tool palette stands upright.
+    // test_names_say_what_they_are: two commands of the window with the same words (a panel's own switch aside) are told
+    // apart where コマンドを探す shows them — each found there, its row (its words and its place in the menus) its own.
+    // (The user's decision 8, SPEC COLOR-04: Photoshop's names, レイヤー → 色調補正 → レベル補正… and the layer panel's
+    // 色調補正のレイヤー → レベル補正… alike; Python's rule was no two commands with the same words.) 定規, 3D 操作, 効果線
+    // and 素材を置く are in ツール itself; コマ割り and 3D 操作 are named so; the pen has its picture and the tool palette
+    // stands upright.
     void test_names_say_what_they_are() {
         Book b(book_of(4), QSize(1280, 720));
         MainWindow* w = b.w();
@@ -499,9 +503,17 @@ private slots:
         for (QAction* action : w->findChildren<QAction*>()) {
             if (!action->text().isEmpty() && !action->isSeparator() && action->menu() == nullptr) texts_of[action->text()].insert(action);
         }
+        const std::vector<QAction*> found = genko::app::commands(w);
         QStringList duplicates;
         for (const auto& [text, actions] : texts_of) {
-            if (actions.size() > 1 && !studio_docks().contains(text)) duplicates << text;
+            if (actions.size() < 2 || studio_docks().contains(text)) continue;
+            QSet<QString> rows;
+            for (QAction* action : actions) {
+                const QString place = genko::app::where(w, action);
+                const bool offered = std::find(found.begin(), found.end(), action) != found.end();
+                if (place.isEmpty() || !offered || rows.contains(place)) duplicates << QStringLiteral("%1（%2）").arg(text, place);
+                rows.insert(place);
+            }
         }
         QVERIFY2(duplicates.isEmpty(), qPrintable(duplicates.join(QStringLiteral(" | "))));
         QMenu* tools = b.menu(QStringLiteral("ツール"));

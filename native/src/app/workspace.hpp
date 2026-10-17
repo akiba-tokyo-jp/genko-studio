@@ -24,8 +24,16 @@ class QToolBar;
 
 namespace genko::app {
 
-// The commands, as Python names them: every command in the menus (each once, by its words), in menu order.
+// The commands, as Python names them: every command in the menus (each once, by its name), in menu order. A command's
+// name is its words — and, when another command in the menus has the same words, its place after them (the user's
+// decision 8: レイヤー → 色調補正 → レベル補正… and the layer panel's 色調補正のレイヤー → レベル補正… are
+// 「レベル補正…（レイヤー → 色調補正）」 and 「レベル補正…（レイヤー → 塗り・グラデーション・色調補正のレイヤー → 色調補正のレイヤー）」):
+// what コマンドを探す, the quick access, the command bar and the keys (環境設定) know a command by.
 std::vector<QAction*> commands(QMainWindow* window);
+std::map<const QAction*, QString> command_names(QMainWindow* window);
+QString command_name(const std::map<const QAction*, QString>& names, const QAction* action);  // (not in the menus: its words)
+// The commands by their names (and a name kept before others had the same words — its words alone — the first of them in
+// the menus, which had them then).
 std::map<QString, QAction*> by_text(QMainWindow* window);
 // The menu path of a command ("ページ → コマ"; empty when it is in no menu).
 QString where(QMainWindow* window, const QAction* action);
