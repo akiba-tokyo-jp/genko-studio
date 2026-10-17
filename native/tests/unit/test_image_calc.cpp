@@ -14,11 +14,13 @@
 #include <array>
 #include <cmath>
 #include <filesystem>
+#include <fstream>
 #include <functional>
 #include <string>
 #include <vector>
 
 #include "core/channels.hpp"
+#include "core/color_model.hpp"
 #include "core/color_raster.hpp"
 #include "core/command_bus.hpp"
 #include "core/error.hpp"
@@ -452,6 +454,66 @@ private slots:
             if (layer.id == "pic") layer.ink_raster = std::make_shared<const std::string>(core::encode_ink_raster(more));
         const auto ink_faded = run(changed, Json{{"op", "fade_layer"}, {"page", 1}, {"id", "pic"}, {"from", ink_ref}, {"opacity", 50}}).doc;
         QVERIFY(std::fabs(inks_of(ink_faded, "pic").value(500, 0) - 0.4) < 1e-3);
+    }
+
+    // Independent review B (E): a precise layer's pixels before are given as the book saves them — its tiles, the
+    // layer's color_raster as project.json holds it ({"tiles", "tile", "width", "height", "precision", "space",
+    // "alpha"}) —, so a layer of any size fades, from the window or the command line; half way at 50 %, the very bytes
+    // before at 0 %; tiles of another size or space, or one missing, refused. A whole asset larger than the store reads
+    // of one (256 MiB) is refused in plain words before it is read.
+    void fadeOfAPreciseLayerInTiles() {
+        QTemporaryDir tmp;
+        const std::filesystem::path dir(tmp.path().toStdString());
+        constexpr std::uint32_t w = 300, h = 200;  // (two tiles across)
+        Json pixels = Json::array();
+        for (std::uint32_t y = 0; y < h; ++y)
+            for (std::uint32_t x = 0; x < w; ++x)
+                for (const std::int64_t v : {std::int64_t(x) * 65535 / (w - 1), std::int64_t(32768), std::int64_t(y) * 65535 / (h - 1), std::int64_t(65535)})
+                    pixels.push_back(v);
+        auto doc = run(blank(), Json{{"op", "put_color_raster"}, {"page", 1}, {"width", w}, {"height", h}, {"precision", "u16"}, {"pixels", pixels}}).doc;
+        const std::string id = doc.page(0).layers.back().id;
+        doc.asset_dir = dir;
+        const std::string was = *layer_of(doc, id).color_raster;
+        storage::AssetStore store(dir);
+        std::vector<std::string> refs;
+        for (const std::string& tile : core::color_tiles(was)) refs.push_back(store.put_bytes(tile, core::kColorRasterSuffix));
+        const Json tiles = core::tiled_metadata(core::ColorRasterView(was), refs, core::color_raster_space(doc.page(0).rgb));
+        QCOMPARE(tiles["tiles"].size(), std::size_t(2));
+        const auto filtered = run(doc, Json{{"op", "filter_raster"}, {"page", 1}, {"id", id}, {"kind", "invert"}}).doc;
+        const Json base{{"op", "fade_layer"}, {"page", 1}, {"id", id}, {"from", tiles}};
+        Json half = base;
+        half["opacity"] = 50;
+        const auto faded = run(filtered, half);
+        QCOMPARE(faded.results.at(0)["faded"], Json(id));
+        const core::ColorRasterView before(was), after(*layer_of(filtered, id).color_raster), mid(*layer_of(faded.doc, id).color_raster);
+        for (const std::size_t i : {std::size_t(10), std::size_t(w * 100 + 280)})
+            for (unsigned c = 0; c < 3; ++c) QVERIFY(std::fabs(mid.pixel(i)[c] - (before.pixel(i)[c] + after.pixel(i)[c]) / 2) < 1e-4);
+        Json none = base;
+        none["opacity"] = 0;
+        QCOMPARE(*layer_of(run(filtered, none).doc, id).color_raster, was);
+        // refused: tiles of another size, another space, a tile the book does not have, a form it does not know
+        Json narrower = base;
+        narrower["from"]["width"] = w - 1;
+        QVERIFY(refusal(filtered, narrower).starts_with("apply: "));
+        Json profiled = base;
+        profiled["from"]["space"] = core::builtin_profile("display-p3")->ref();
+        QVERIFY(refusal(filtered, profiled).starts_with("apply: "));
+        Json lost = base;
+        lost["from"]["tiles"][1] = "sha256:" + std::string(64, 'c');
+        QVERIFY(refusal(filtered, lost).starts_with("apply: "));
+        Json strange = base;
+        strange["from"] = Json{{"asset", refs[0]}};
+        QVERIFY(refusal(filtered, strange).starts_with("apply: "));
+        // a whole asset past 256 MiB (a sparse file: nothing of it is read): refused, saying so
+        const std::string big = "sha256:" + std::string(64, 'b');
+        const std::filesystem::path file = store.path(big, core::kColorRasterSuffix);
+        std::filesystem::create_directories(file.parent_path());
+        { std::ofstream made(file, std::ios::binary); }
+        std::filesystem::resize_file(file, storage::kAssetMaxBytes + 1);
+        Json whole = base;
+        whole["from"] = big;
+        const std::string why = refusal(filtered, whole);
+        QVERIFY2(why.starts_with("apply: ") && why.find("too large to read whole") != std::string::npos, why.c_str());
     }
 };
 

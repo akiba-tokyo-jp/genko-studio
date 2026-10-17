@@ -9,10 +9,14 @@
 
 #include <QtTest/QtTest>
 
+#include <malloc.h>
+
 #include <algorithm>
 #include <array>
+#include <atomic>
 #include <cmath>
 #include <functional>
+#include <new>
 #include <string>
 #include <vector>
 
@@ -29,6 +33,50 @@
 #include "render/png.hpp"
 #include "render/raster.hpp"
 #include "testsupport.hpp"
+
+// What the program holds through operator new now and at most since reset_peak (independent review B (C): a local
+// correction's work is held in the imaging budget; test_color_model's way).
+namespace allocations {
+std::atomic<std::int64_t> live{0}, top{0};
+void note(std::int64_t n) {
+    const std::int64_t now = live.fetch_add(n) + n;
+    std::int64_t seen = top.load();
+    while (now > seen && !top.compare_exchange_weak(seen, now)) {
+    }
+}
+std::int64_t reset_peak() {
+    const std::int64_t now = live.load();
+    top.store(now);
+    return now;
+}
+std::int64_t peak() { return top.load(); }
+}  // namespace allocations
+
+void* operator new(std::size_t n) {
+    void* p = std::malloc(n == 0 ? 1 : n);
+    if (p == nullptr) throw std::bad_alloc();
+    allocations::note(static_cast<std::int64_t>(malloc_usable_size(p)));
+    return p;
+}
+void* operator new[](std::size_t n) { return ::operator new(n); }
+void* operator new(std::size_t n, const std::nothrow_t&) noexcept {
+    try {
+        return ::operator new(n);
+    } catch (...) {
+        return nullptr;
+    }
+}
+void* operator new[](std::size_t n, const std::nothrow_t& tag) noexcept { return ::operator new(n, tag); }
+void operator delete(void* p) noexcept {
+    if (p == nullptr) return;
+    allocations::note(-static_cast<std::int64_t>(malloc_usable_size(p)));
+    std::free(p);
+}
+void operator delete[](void* p) noexcept { ::operator delete(p); }
+void operator delete(void* p, std::size_t) noexcept { ::operator delete(p); }
+void operator delete[](void* p, std::size_t) noexcept { ::operator delete(p); }
+void operator delete(void* p, const std::nothrow_t&) noexcept { ::operator delete(p); }
+void operator delete[](void* p, const std::nothrow_t&) noexcept { ::operator delete(p); }
 
 using namespace genko;
 using core::Json;
@@ -53,8 +101,8 @@ std::string refusal(const core::Document& doc, const Json& op) {
     return {};
 }
 
-core::Document blank(bool frames = false) {
-    auto doc = core::new_episode("局所", core::Num(1), 1, core::PageSpec::custom(kInch, kInch, 20, 20, 1, 2, 2, 2, 2, 200, "color"));
+core::Document blank(bool frames = false, double side_mm = kInch) {
+    auto doc = core::new_episode("局所", core::Num(1), 1, core::PageSpec::custom(side_mm, side_mm, 20, 20, 1, 2, 2, 2, 2, 200, "color"));
     auto& p = doc.edit_page(0);
     p.numero = false;
     if (!frames) p.frames.clear();
@@ -118,6 +166,26 @@ core::Document cmyk_page() {
             const std::vector<double> ink = x < kSide / 2 ? std::vector<double>{0, 0, 0, 0.95 - 0.6 * y / kSide} : std::vector<double>{0.2, 0.7, 0.1, 0.05};
             for (unsigned c = 0; c < 4; ++c) p.set(std::size_t(y) * kSide + x, c, ink[c]);
             p.set(std::size_t(y) * kSide + x, 4, 1.0);
+        }
+    doc.edit_page(0).layers.back().ink_raster = std::make_shared<const std::string>(core::encode_ink_raster(p));
+    return doc;
+}
+
+// A larger CMYK page (16 bits): its paint layer side × side pixels at the working 200 dpi, a ramp on K alone on the
+// left, colours of four inks on the right (every pixel opaque).
+core::Document big_cmyk_page(std::uint32_t side) {
+    auto doc = run_ops(blank(false, side * kInch / kSide),
+                       Json::array({Json{{"op", "set_color_mode"}, {"mode", "cmyk"}, {"profile", "coated-cmyk"}, {"depth", 16}},
+                                    Json{{"op", "add_layer"}, {"page", 1}, {"kind", "paint"}, {"id", "pic"}}})).doc;
+    const core::PageColor& color = *doc.page(0).color;
+    core::InkPixels p = core::blank_ink_pixels(color.space, 16, side, side);
+    for (std::uint32_t y = 0; y < side; ++y)
+        for (std::uint32_t x = 0; x < side; ++x) {
+            const std::size_t i = std::size_t(y) * side + x;
+            const std::array<double, 4> ink = x < side / 2 ? std::array<double, 4>{0, 0, 0, 0.95 - 0.6 * x / side}
+                                                           : std::array<double, 4>{0.2, 0.7, 0.1 + 0.3 * y / side, 0.05};
+            for (unsigned c = 0; c < 4; ++c) p.set(i, c, ink[c]);
+            p.set(i, 4, 1.0);
         }
     doc.edit_page(0).layers.back().ink_raster = std::make_shared<const std::string>(core::encode_ink_raster(p));
     return doc;
@@ -400,6 +468,45 @@ private slots:
         refuses(Json{{"source", Json{{"layer", "nothing"}}}});
         refuses(Json{{"source", Json{{"layer", "src"}, {"what", 1}}}});
         refuses(Json{{"luminance", "a"}});
+    }
+
+    // Independent review B (C): a local correction of a large layer holds all its work in the imaging budget
+    // (render::ImageAllocationBudget) — on a CMYK layer the colours its inks mean and the inks they give back too —:
+    // done, the heap grows by what the budget counted and the layer's own bytes (its inks read and written) at most;
+    // past the budget it is refused before the work, the page as it was, rather than the process running out of memory.
+    void largeLayersWorkInsideTheBudget_data() {
+        QTest::addColumn<QString>("kind");
+        for (const char* kind : {"shadows_highlights", "replace_color", "match_color"}) QTest::newRow(kind) << QString(kind);
+    }
+    void largeLayersWorkInsideTheBudget() {
+        QFETCH(QString, kind);
+        constexpr std::uint32_t side = 800;
+        constexpr std::int64_t n = std::int64_t(side) * side;
+        const auto doc = big_cmyk_page(side);
+        Json op{{"op", "filter_raster"}, {"page", 1}, {"id", "pic"}, {"kind", kind.toStdString()}};
+        if (kind == "shadows_highlights") op["shadow_amount"] = 60;
+        if (kind == "replace_color") {  // (the greys of the left lightened)
+            op["color"] = Json::array({128, 128, 128});
+            op["fuzziness"] = 120;
+            op["lightness"] = 30;
+        }
+        if (kind == "match_color") op["source_stats"] = Json{{"mean", Json::array({60, 10, -10})}, {"std", Json::array({20, 8, 8})}};
+        {
+            const std::int64_t base = allocations::reset_peak();
+            const render::ImageAllocationBudget budget{1ULL << 30};
+            const auto made = run(doc, op);
+            QVERIFY(*layer_of(made.doc, "pic").ink_raster != *layer_of(doc, "pic").ink_raster);
+            const std::int64_t grown = allocations::peak() - base;
+            const auto counted = static_cast<std::int64_t>(budget.peak());
+            QVERIFY2(grown <= counted + 40 * n, qPrintable(QStringLiteral("the heap grew by %1 B a pixel, the budget counted %2")
+                                                               .arg(double(grown) / n, 0, 'f', 1)
+                                                               .arg(double(counted) / n, 0, 'f', 1)));
+        }
+        if (kind == "match_color") return;  // (its work is the layer's values and their colours: what the budget below holds)
+        // a budget the layer's values and their RGBA fit in (36 B a pixel), not the rest of the work: refused
+        const render::ImageAllocationBudget budget{38ULL * n};
+        const std::string why = refusal(doc, op);
+        QVERIFY2(why.find("too large to work on") != std::string::npos, why.c_str());
     }
 
     // --- hdr_toning ---------------------------------------------------------------------------------------------------

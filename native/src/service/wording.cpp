@@ -571,9 +571,14 @@ const std::vector<Rule>& rules() {
         r.push_back(rule(R"(give width_px or width_mm, not both)", "トラッピングの幅は、px か mm のどちらかで指定します"));
         r.push_back(rule(R"(the layer \S+ is not a paint layer \(pen or paint\))", "描画のレイヤー（ペン・ペイント）を選びます"));
         r.push_back(rule(R"(id \(the (?:paint layer to trap|layer to fade)\) is required)", "対象のレイヤーが要ります"));
-        r.push_back(rule(R"(from \(the asset of the layer's pixels before.*\) is required)", "フェードする前の画素（from）が要ります"));
+        r.push_back(rule(R"(from \(the layer's pixels before.*\) is required)", "フェードする前の画素（from）が要ります"));
         r.push_back(rule(R"(fade_layer reads the pixels before from the book's folder.*)", "フェードの前に、原稿を保存します（ファイル → 別の場所に保存）"));
-        r.push_back(rule(R"(the book has no asset \S+ \(the pixels before\))", "フェードする前の画素が、原稿の素材にありません"));
+        r.push_back(rule(R"(the book has no asset \S+ \((?:a tile of )?the pixels before\))", "フェードする前の画素が、原稿の素材にありません"));
+        r.push_back(rule(R"(from as tiles is a precise layer's.*)", "タイルの形の前の画素（from）は、高精度のレイヤーのものです（ほかのレイヤーは素材の sha256 を渡します）"));
+        r.push_back(rule(R"(the pixels before are too large to read whole.*)",
+                         "フェードする前の画素が大きすぎて、丸ごとは読めません（素材 1 つ 256 MiB まで。高精度のレイヤーは project.json のタイルの形で渡せます）"));
+        // (independent review B (C): a local correction, a fade or an image calculation past the imaging budget)
+        r.push_back(rule(R"(the pixels are too large to work on at once.*)", "絵が大きすぎて、一度に処理できません（作業に使える記憶の上限を超えます）"));
         r.push_back(rule(R"(from is not the pixels of this layer before.*)", "フェードする前の画素が、このレイヤーのものと合いません"));
         r.push_back(rule(R"(the layer \S+ holds no pixels to fade)", "このレイヤーには、フェードする画素がありません"));
         r.push_back(rule(R"(the layer \S+ holds lines or fills besides its pixels)", "線や塗りの残るレイヤーはフェードできません"));

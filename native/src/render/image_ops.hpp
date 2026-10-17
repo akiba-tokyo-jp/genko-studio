@@ -118,13 +118,32 @@ Blending blending_of(const core::Json& op);
 void fade_values(const float* before, const float* after, float* out, std::size_t n, bool alpha, float k);
 Rgba fade_rgba(const Rgba& before, const Rgba& after, std::string_view mode, float k);
 
+// --- the work's memory -----------------------------------------------------------------------------------------------
+
+// Working memory held in the imaging budget (render::ImageAllocationBudget) while it lives: `bytes` taken from it, or
+// the work refused before they are had (too_large). Outside a budget it holds nothing.
+class Held {
+public:
+    explicit Held(std::uint64_t bytes);
+    ~Held();
+    Held(const Held&) = delete;
+    Held& operator=(const Held&) = delete;
+
+private:
+    struct Work;
+    std::unique_ptr<Work> work_;
+};
+// The refusal of a work past the imaging budget (independent review B (C): refused, not run out of memory): OpError
+// "the pixels are too large to work on at once (…)".
+[[noreturn]] void too_large();
+
 // --- a paint layer's pixels ------------------------------------------------------------------------------------------
 
 // A layer's pixels as straight floats on its own grid (stretched over the page): `colours` values then the alpha for
 // each pixel, rows from the top. An 8-bit layer (RGB page): its bytes / 255 (sRGB, or the page's profile's values) at
 // its resolution; a precise layer: its samples (the page's values, HDR kept); an ink layer: the ink canvas's values
 // (render/ink_canvas: CMYK and a multichannel page's plates their ink 0..1, Lab L/100 and (a, b + 128)/255, grey its
-// lightness). Held in the imaging budget.
+// lightness). Held in the imaging budget (past it: too_large).
 class Pixels {
 public:
     enum class Kind { Eight, Precise, Inks };
@@ -173,10 +192,9 @@ Pixels layer_pixels(core::OpContext& c, std::size_t at, const std::string& id);
 // The pixels written back into that layer as its kind holds them (it is a paint layer after).
 void put_layer_pixels(core::Document& doc, std::size_t at, const std::string& id, const Pixels& p);
 
-// The RGB colours an ink layer's pixels mean (sRGB 0..1, 3 each: render/ink meaning_of), and the pixels set from changed
-// ones by the page's rules (render/ink correct: a colour left as it was keeps its inks).
-std::vector<double> meant(const Pixels& p);
-void from_meant(Pixels& p, const std::vector<double>& rgb);
+// An ink layer's pixels set from changed colours and alphas (`px`, one each: rgba_of's form) by the page's rules
+// (render/ink correct: a colour left as it was keeps its inks). Worked in bands, their arrays in the imaging budget.
+void from_rgba(Pixels& p, const std::vector<Rgba>& px);
 
 // The page as it shows (print, without its finish, onion skin, nombre and spots) at the working 200 dpi: an RGB page's
 // picture (its values on a page of a profile or of more than 8 bits: precise), an ink page's inks (opaque).
@@ -184,7 +202,8 @@ Pixels page_pixels(const core::Document& doc, const core::Page& page);
 // A layer's pixels, nothing changed: a paint layer's (its lines and fills drawn in on a copy), any other layer as it
 // shows alone (layer_image, 8 bits).
 Pixels shown_layer_pixels(const core::Document& doc, const core::Page& page, const core::Layer& layer);
-// The RGB of pixels (an ink layer's: the colours its inks mean) with their alpha.
+// The RGB of pixels (an ink layer's: the colours its inks mean, render/ink meaning_of, worked in bands) with their
+// alpha. The caller holds what it returns in the budget (Held) when it keeps it.
 std::vector<Rgba> rgba_of(const Pixels& p);
 
 // An area of the page (a resolved {poly} or {mask}) as each pixel's coverage (0..1) on a grid of width × height
