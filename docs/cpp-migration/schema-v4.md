@@ -309,5 +309,6 @@ v3 の行（`rev`・`actor`・`at`・`changes`・`via`）をそのまま残し�
   - 書くのは与えられたキーだけ、この順（blend、method、space、channels／reverse、dither）。空の `native` は書かない。
   - 知らないキー・型の違い・範囲外・非有限・`channels` の space に無い名前・ページが合成できない `blend`（Lab のページの Lab で使えない描画モード、マルチチャンネルのページの色相・彩度・カラー・輝度。マルチチャンネルのページは `channels` を持たない）は読み取り専用で開く。
 - **C++ 版だけの種類**（`adjust` の `kind`）: `hue_saturation`・`vibrance`・`color_balance`・`black_white`・`photo_filter`・`channel_mixer`・`selective_color`・`color_lookup`。設定は種類の表（`native/src/core/adjust_kinds.cpp`。既定と範囲は COLOR-04・設計 2.3）のキーを、既定を埋めて表の順に書く（正規形）。`native` は `blend` だけ。知らないキー・型の違い・範囲外・非有限は読み取り専用。補正レイヤーに置けない種類（`filter_raster` だけの `desaturate`・`equalize`・局所の補正）も読み取り専用。
+  - 色の補正（PC2b）の正規形: `hue_saturation` の 6 つの色域（`reds`…`magentas`）はどれも `{"hue", "saturation", "lightness", "range": [4 つの角度]}` を書き、`range` は増える順・1 回転の中・中心が −30..330 の形（op が直す。保存されたものは形と範囲だけ確かめる）。`colorize` が true の `hue` は 0..360、`saturation` は 0..100。`photo_filter` の `filter`（既定の名前）は op の入力だけで、`color` にその色を入れて書かない（保存されていれば名前を確かめ、描くときはその名前の色を使う）。`channel_mixer` は `gray`（モノクロの行）をいつも書く。色は `[r, g, b]`（0..255 の整数）、ほかの数は `[…]` か数。
 - 種類の式がまだ入っていない版（PC2-0）は、形を確かめるだけで描くときに省いて記録し（`adjust:<種類>`）、書き出しは断る（`not_yet_ported`）。
 - `features` に `adjustments@1` を加える（`native` を持つか C++ 版だけの種類の補正レイヤーがあるとき。無くなれば外す）。露光量はこれまでどおり `native.exposure_v1` も書く。adjustments@1 を知らない読み手（PC1 までの C++ 版）は、未知の拡張として読み取り専用で開く。

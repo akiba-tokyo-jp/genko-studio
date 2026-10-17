@@ -103,6 +103,9 @@ genko_test(test_channels SOURCES unit/test_channels.cpp DEPS genko_test_support 
 # correction's native read and stored, native.method, the kinds' table and what is not in this build yet, one
 # AdjustFunction to the three ways, native.blend on 8 and 16 bits and on CMYK, the PSD's frame.
 genko_test(test_adjust SOURCES unit/test_adjust.cpp DEPS genko_test_support genko_render_ops genko_formats LABELS unit TIMEOUT 600)
+# PC2b: the colour corrections' formulas (PhotoCraft's own tests), their settings read and stored, the three ways, the
+# PSD's colour adjustment layers (round trips, hand-built blocks, what is not read).
+genko_test(test_adjust_color SOURCES unit/test_adjust_color.cpp DEPS genko_test_support genko_render_ops genko_formats LABELS unit TIMEOUT 600)
 
 # core/pyre's own bounds (Python 3.12's re, ported; SPEC COMP-01a): a search that backtracks without end stopped when its
 # steps are spent, groups more than 200 deep refused, replace_text refused without a change; without Python.
@@ -253,6 +256,10 @@ genko_test(test_contract_ink SOURCES contract/test_contract_ink.cpp DEPS genko_t
            LABELS contract TIMEOUT 900)
 # color-model@1 (COLOR-03) through the command line: apply, save, undo and redo, render, inspect --pixel, export.
 genko_test(test_contract_color_model SOURCES contract/test_contract_color_model.cpp DEPS genko_test_support genko_render
+           LABELS contract TIMEOUT 900)
+# PC2b (COLOR-04) through the command line: the colour corrections applied, saved, undone and redone, drawn, written as
+# a PSD's adjustment layers (psd-tools reads them) and read back.
+genko_test(test_contract_adjust_color SOURCES contract/test_contract_adjust_color.cpp DEPS genko_test_support genko_render
            LABELS contract TIMEOUT 900)
 # channels@1 (COLOR-03) through the command line: apply, save, gc, undo and redo, a selection and a fill on a channel,
 # render, inspect, export (the PSD's extra channels read back, the PDF's separation, the notes).
