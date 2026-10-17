@@ -465,11 +465,11 @@ private:
 
 // PC2 (the user's decision 5): each correction layer of a page, in its place among the layers, as the PSD's adjustment
 // layer its kind's codec writes (formats/psd_adjust; one none writes yet: not written, its change in the merged picture as
-// in Python's PSD). (What a codec says of a layer is not reported yet: its group's.)
-std::function<void(const core::Layer&)> adjustments(Records& records, const core::Page& page, render::Size size) {
-    return [&records, &page, size](const core::Layer& layer) {
+// in Python's PSD). (What a codec says of a layer: the export's notes, formats::psd_adjust_notes.)
+std::function<void(const core::Layer&)> adjustments(Records& records, const core::Page& page, render::Size size, const core::Document& doc) {
+    return [&records, &page, size, &doc](const core::Layer& layer) {
         std::vector<std::string> notes;
-        if (const auto made = psd_adjust_layer(layer, page, size, notes)) records.add_adjustment(*made);
+        if (const auto made = psd_adjust_layer(layer, page, size, notes, &doc)) records.add_adjustment(*made);
     };
 }
 
@@ -961,7 +961,7 @@ void put_page_psd_inks(detail::Output& output, const core::Document& episode, co
         records.add_inks(layer.name, values, color.space, color.depth, layer.settings ? layer.opacity : 1.0,
                          layer.settings ? layer.blend : std::string("normal"), layer.settings && layer.clip, layer.mask ? &*layer.mask : nullptr);
     };
-    const std::function<void(const core::Layer&)> adjust_layers = adjustments(records, page, size);
+    const std::function<void(const core::Layer&)> adjust_layers = adjustments(records, page, size, episode);
     if (text.editable) {  // (PSD-01: each placed line's layers made here)
         PsdTextReport own;
         EditableLines lines(records, episode, static_cast<int>(dpi), size, core::py_int(page.index.json()), report != nullptr ? *report : own, &color);
@@ -1028,7 +1028,7 @@ void put_page_psd_rgb(detail::Output& output, const core::Document& episode, con
     const render::Size size{static_cast<int>(merged.width()), static_cast<int>(merged.height())};
     Records records(size, std::nullopt, RgbOut{depth, render::RgbSpace::of(page)});
     const auto each = [&](render::PageLayer&& layer) { records.add(std::move(layer)); };
-    const std::function<void(const core::Layer&)> adjust_layers = adjustments(records, page, size);
+    const std::function<void(const core::Layer&)> adjust_layers = adjustments(records, page, size, episode);
     if (text.editable) {  // (PSD-01: each placed line's layers made here)
         PsdTextReport own;
         EditableLines lines(records, episode, static_cast<int>(dpi), size, core::py_int(page.index.json()), report != nullptr ? *report : own);
@@ -1214,7 +1214,7 @@ void put_page_psd(detail::Output& output, const core::Document& episode, const c
     const Image rgb = merged.mode() == "RGB" ? merged : merged.convert("RGB");
     Records records(rgb.size());
     const auto each = [&](render::PageLayer&& layer) { records.add(std::move(layer)); };
-    const std::function<void(const core::Layer&)> adjust_layers = adjustments(records, page, rgb.size());
+    const std::function<void(const core::Layer&)> adjust_layers = adjustments(records, page, rgb.size(), episode);
     if (text.editable) {  // (PSD-01: each placed line's layers made here)
         PsdTextReport own;
         EditableLines lines(records, episode, static_cast<int>(dpi), rgb.size(), core::py_int(page.index.json()), report != nullptr ? *report : own);

@@ -23,4 +23,8 @@ Image apply_8bit(const Image& rgba, const core::AdjustFunction& f, Point origin 
 // the corrected picture as it is.
 Image blend_8bit(const Image& below, const Image& corrected, std::string_view mode);
 
+// PC2a: the conversions of levels' and a tone curve's channel records in another space than the page's (Little CMS:
+// render/adjust_space.cpp) given to core (core::set_tone_bridge). Done once when the drawing starts.
+void install_tone_bridge();
+
 }  // namespace genko::render::adjust

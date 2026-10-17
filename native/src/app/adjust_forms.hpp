@@ -100,6 +100,11 @@ struct FormKind {
     std::string_view group;
     QString title;
     Builder build;
+    // (PC2a, the user's decision 3) the settings a correction made new on the screen starts from — PhotoCraft's form:
+    // levels and a tone curve upstream, brightness_contrast modern, posterize floor —; none: the form's defaults.
+    core::Json fresh = core::Json::object();
+    // An existing correction's settings as the form holds them (a gradient map's colours as its stops); none: as they are.
+    std::function<core::Json(const core::Json&)> prepare;
 };
 // Every kind with a form, by group (each group's file: tone_forms, color_forms).
 const std::vector<FormKind>& form_kinds();
@@ -126,6 +131,9 @@ void build_image_menu(QMenu* adjust, QMenu* edit, const MenuContext& context);  
 // PC2c (フェード, app/image_dialogs.cpp): after each change of the window's book (MainWindow::on_book_changed), what 編集
 // → フェード would take back — the pixels a filter, a correction or a fill changed — and the command enabled by it.
 void follow_change(MainWindow& window, const BookChange& change);
+// PC2a (window.panel.adjustments・window.panel.properties): the 色調補正 and 属性 panels, docked and listed in ウィンドウ
+// (`window_menu`): app/adjust_panels.cpp.
+void build_tone_docks(MainWindow* window, QMenu* window_menu);
 
 }  // namespace adjust_forms
 

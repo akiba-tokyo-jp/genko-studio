@@ -5740,9 +5740,16 @@
         "alternate_menus": []
       },
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "未着手",
+      "implementation_status": "実装済み（PC2a、未統合）",
       "acceptance_status": "未実施",
-      "evidence": [],
+      "evidence": [
+        "native/src/formats/exporting.cpp",
+        "native/src/api/cli.cpp",
+        "native/src/app/adjust_forms_tone.cpp",
+        "native/tests/unit/test_adjust.cpp",
+        "native/tests/gui/test_gui_adjust.cpp",
+        "native/tests/contract/test_contract_adjust.cpp"
+      ],
       "pc0": {
         "date": "2026-10-16",
         "cpp_base": "962faa4",
@@ -12347,11 +12354,15 @@
         "alternate_menus": []
       },
       "genko_status": "一部（2026-10-16 照合）",
-      "implementation_status": "未着手",
+      "implementation_status": "実装済み（PC2a、未統合）",
       "acceptance_status": "未実施",
       "evidence": [
-        "native/src/core/filters.cpp:268",
-        "Python src/genko/filters.py:13-17"
+        "native/src/render/ops_adjust.cpp",
+        "native/src/core/adjust_tone.cpp",
+        "native/src/app/adjust_forms_tone.cpp",
+        "native/tests/unit/test_adjust.cpp",
+        "native/tests/gui/test_gui_adjust.cpp",
+        "native/tests/contract/test_contract_adjust.cpp"
       ],
       "genko_candidate": {
         "op": "filter_raster / add_layer(kind=adjust)",
@@ -12520,9 +12531,18 @@
         "alternate_menus": []
       },
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "未着手",
+      "implementation_status": "実装済み（PC2a、未統合）",
       "acceptance_status": "未実施",
-      "evidence": [],
+      "evidence": [
+        "native/src/render/ops_adjust.cpp",
+        "native/src/core/lut3d.cpp",
+        "native/src/core/adjust_tone.cpp",
+        "native/src/app/adjust_forms_tone.cpp",
+        "native/tests/unit/test_lut3d.cpp",
+        "native/tests/unit/test_adjust.cpp",
+        "native/tests/gui/test_gui_adjust.cpp",
+        "native/tests/contract/test_contract_adjust.cpp"
+      ],
       "pc0": {
         "date": "2026-10-16",
         "cpp_base": "962faa4",
@@ -12548,9 +12568,15 @@
       },
       "upstream_menu": null,
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "未着手",
+      "implementation_status": "実装済み（PC2a、未統合）",
       "acceptance_status": "未実施",
-      "evidence": [],
+      "evidence": [
+        "native/src/api/cli.cpp",
+        "native/src/core/lut3d.cpp",
+        "native/src/app/adjust_forms_tone.cpp",
+        "native/tests/unit/test_lut3d.cpp",
+        "native/tests/contract/test_contract_adjust.cpp"
+      ],
       "pc0": {
         "date": "2026-10-16",
         "cpp_base": "962faa4",
@@ -12591,11 +12617,16 @@
         "alternate_menus": []
       },
       "genko_status": "一部（2026-10-16 照合）",
-      "implementation_status": "未着手",
+      "implementation_status": "実装済み（PC2a、未統合）",
       "acceptance_status": "未実施",
       "evidence": [
-        "native/src/core/filters.cpp:301",
-        "Python src/genko/filters.py:13-17"
+        "native/src/render/ops_adjust.cpp",
+        "native/src/core/adjust_tone.cpp",
+        "native/src/render/adjust_space.cpp",
+        "native/src/app/adjust_forms_tone.cpp",
+        "native/tests/unit/test_adjust.cpp",
+        "native/tests/gui/test_gui_adjust.cpp",
+        "native/tests/contract/test_contract_adjust.cpp"
       ],
       "genko_candidate": {
         "op": "filter_raster / add_layer(kind=adjust)",
@@ -12715,9 +12746,15 @@
         "alternate_menus": []
       },
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "未着手",
+      "implementation_status": "実装済み（PC2a、未統合）",
       "acceptance_status": "未実施",
-      "evidence": [],
+      "evidence": [
+        "native/src/render/ops_adjust.cpp",
+        "native/src/core/adjust_tone.cpp",
+        "native/src/app/adjust_forms_tone.cpp",
+        "native/tests/unit/test_adjust.cpp",
+        "native/tests/gui/test_gui_adjust.cpp"
+      ],
       "pc0": {
         "date": "2026-10-16",
         "cpp_base": "962faa4",
@@ -12758,9 +12795,16 @@
         "alternate_menus": []
       },
       "genko_status": "一部（2026-10-16 照合）",
-      "implementation_status": "未着手",
+      "implementation_status": "実装済み（PC2a、未統合）",
       "acceptance_status": "未実施",
-      "evidence": [],
+      "evidence": [
+        "native/src/render/ops_adjust.cpp",
+        "native/src/core/adjust_tone.cpp",
+        "native/src/app/adjust_forms_tone.cpp",
+        "native/tests/unit/test_adjust.cpp",
+        "native/tests/gui/test_gui_adjust.cpp",
+        "native/tests/contract/test_contract_adjust.cpp"
+      ],
       "pc0": {
         "date": "2026-10-16",
         "cpp_base": "962faa4",
@@ -12809,11 +12853,15 @@
         "alternate_menus": []
       },
       "genko_status": "一部（2026-10-16 照合）",
-      "implementation_status": "未着手",
+      "implementation_status": "実装済み（PC2a、未統合）",
       "acceptance_status": "未実施",
       "evidence": [
-        "native/src/core/filters.cpp:335",
-        "Python src/genko/filters.py:13-17"
+        "native/src/render/ops_adjust.cpp",
+        "native/src/core/adjust_tone.cpp",
+        "native/src/app/adjust_forms_tone.cpp",
+        "native/tests/unit/test_adjust.cpp",
+        "native/tests/gui/test_gui_adjust.cpp",
+        "native/tests/contract/test_contract_adjust.cpp"
       ],
       "genko_candidate": {
         "op": "filter_raster / add_layer(kind=adjust)",
@@ -12997,11 +13045,15 @@
         "alternate_menus": []
       },
       "genko_status": "同等（C++ のソースと試験あり。2026-10-16 照合）",
-      "implementation_status": "未着手",
+      "implementation_status": "実装済み（PC2a、未統合）",
       "acceptance_status": "未実施",
       "evidence": [
-        "native/src/core/filters.cpp:321",
-        "Python src/genko/filters.py:13-17"
+        "native/src/render/ops_adjust.cpp",
+        "native/src/core/adjust_tone.cpp",
+        "native/src/app/adjust_forms_tone.cpp",
+        "native/tests/unit/test_adjust.cpp",
+        "native/tests/gui/test_gui_adjust.cpp",
+        "native/tests/contract/test_contract_adjust.cpp"
       ],
       "genko_candidate": {
         "op": "filter_raster / add_layer(kind=adjust)",
@@ -13060,11 +13112,16 @@
         "alternate_menus": []
       },
       "genko_status": "一部（2026-10-16 照合）",
-      "implementation_status": "未着手",
+      "implementation_status": "実装済み（PC2a、未統合）",
       "acceptance_status": "未実施",
       "evidence": [
-        "native/src/core/filters.cpp:272",
-        "Python src/genko/filters.py:13-17"
+        "native/src/render/ops_adjust.cpp",
+        "native/src/core/adjust_tone.cpp",
+        "native/src/render/adjust_space.cpp",
+        "native/src/app/adjust_forms_tone.cpp",
+        "native/tests/unit/test_adjust.cpp",
+        "native/tests/gui/test_gui_adjust.cpp",
+        "native/tests/contract/test_contract_adjust.cpp"
       ],
       "genko_candidate": {
         "op": "filter_raster / add_layer(kind=adjust)",
@@ -13229,11 +13286,15 @@
         "alternate_menus": []
       },
       "genko_status": "一部（2026-10-16 照合）",
-      "implementation_status": "未着手",
+      "implementation_status": "実装済み（PC2a、未統合）",
       "acceptance_status": "未実施",
       "evidence": [
-        "native/src/core/filters.cpp:326",
-        "Python src/genko/filters.py:13-17"
+        "native/src/render/ops_adjust.cpp",
+        "native/src/core/adjust_tone.cpp",
+        "native/src/app/adjust_forms_tone.cpp",
+        "native/tests/unit/test_adjust.cpp",
+        "native/tests/gui/test_gui_adjust.cpp",
+        "native/tests/contract/test_contract_adjust.cpp"
       ],
       "genko_candidate": {
         "op": "filter_raster / add_layer(kind=adjust)",
@@ -13449,11 +13510,15 @@
         "alternate_menus": []
       },
       "genko_status": "同等（C++ のソースと試験あり。2026-10-16 照合）",
-      "implementation_status": "未着手",
+      "implementation_status": "実装済み（PC2a、未統合）",
       "acceptance_status": "未実施",
       "evidence": [
-        "native/src/core/filters.cpp:311",
-        "Python src/genko/filters.py:13-17"
+        "native/src/render/ops_adjust.cpp",
+        "native/src/core/adjust_tone.cpp",
+        "native/src/app/adjust_forms_tone.cpp",
+        "native/tests/unit/test_adjust.cpp",
+        "native/tests/gui/test_gui_adjust.cpp",
+        "native/tests/contract/test_contract_adjust.cpp"
       ],
       "genko_candidate": {
         "op": "filter_raster / add_layer(kind=adjust)",
@@ -13969,9 +14034,15 @@
         "alternate_menus": []
       },
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "未着手",
+      "implementation_status": "実装済み（PC2a、未統合）",
       "acceptance_status": "未実施",
-      "evidence": [],
+      "evidence": [
+        "native/src/render/ops_adjust.cpp",
+        "native/src/core/adjust_tone.cpp",
+        "native/src/app/adjust_forms_tone.cpp",
+        "native/tests/unit/test_adjust.cpp",
+        "native/tests/gui/test_gui_adjust.cpp"
+      ],
       "pc0": {
         "date": "2026-10-16",
         "cpp_base": "962faa4",
@@ -14010,9 +14081,16 @@
         "alternate_menus": []
       },
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "未着手",
+      "implementation_status": "実装済み（PC2a、未統合）",
       "acceptance_status": "未実施",
-      "evidence": [],
+      "evidence": [
+        "native/src/render/ops_adjust.cpp",
+        "native/src/core/adjust_tone.cpp",
+        "native/src/app/adjust_forms_tone.cpp",
+        "native/tests/unit/test_adjust.cpp",
+        "native/tests/gui/test_gui_adjust.cpp",
+        "native/tests/contract/test_contract_adjust.cpp"
+      ],
       "pc0": {
         "date": "2026-10-16",
         "cpp_base": "962faa4",
@@ -14051,9 +14129,15 @@
         "alternate_menus": []
       },
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "未着手",
+      "implementation_status": "実装済み（PC2a、未統合）",
       "acceptance_status": "未実施",
-      "evidence": [],
+      "evidence": [
+        "native/src/render/ops_adjust.cpp",
+        "native/src/core/adjust_tone.cpp",
+        "native/src/app/adjust_forms_tone.cpp",
+        "native/tests/unit/test_adjust.cpp",
+        "native/tests/gui/test_gui_adjust.cpp"
+      ],
       "pc0": {
         "date": "2026-10-16",
         "cpp_base": "962faa4",
@@ -19367,10 +19451,16 @@
         "alternate_menus": []
       },
       "genko_status": "一部（2026-10-16 照合）",
-      "implementation_status": "未着手",
+      "implementation_status": "実装済み（PC2a、未統合）",
       "acceptance_status": "未実施",
       "evidence": [
-        "native/src/core/filters.cpp:268"
+        "native/src/core/adjust_tone.cpp",
+        "native/src/render/psd_adjust.cpp",
+        "native/src/app/adjust_forms_tone.cpp",
+        "native/src/app/adjust_panels.cpp",
+        "native/tests/unit/test_adjust.cpp",
+        "native/tests/gui/test_gui_adjust.cpp",
+        "native/tests/contract/test_contract_adjust.cpp"
       ],
       "genko_candidate": {
         "op": "add_layer",
@@ -19540,9 +19630,21 @@
         "alternate_menus": []
       },
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "未着手",
+      "implementation_status": "実装済み（PC2a、未統合）",
       "acceptance_status": "未実施",
-      "evidence": [],
+      "evidence": [
+        "native/src/core/lut3d.cpp",
+        "native/src/core/adjust_tone.cpp",
+        "native/src/storage/reader.cpp",
+        "native/src/storage/writer.cpp",
+        "native/src/render/psd_adjust.cpp",
+        "native/src/app/adjust_forms_tone.cpp",
+        "native/src/app/adjust_panels.cpp",
+        "native/tests/unit/test_lut3d.cpp",
+        "native/tests/unit/test_adjust.cpp",
+        "native/tests/gui/test_gui_adjust.cpp",
+        "native/tests/contract/test_contract_adjust.cpp"
+      ],
       "pc0": {
         "date": "2026-10-16",
         "cpp_base": "962faa4",
@@ -19583,10 +19685,18 @@
         "alternate_menus": []
       },
       "genko_status": "一部（2026-10-16 照合）",
-      "implementation_status": "未着手",
+      "implementation_status": "実装済み（PC2a、未統合）",
       "acceptance_status": "未実施",
       "evidence": [
-        "native/src/core/filters.cpp:301"
+        "native/src/core/adjust_tone.cpp",
+        "native/src/render/adjust_space.cpp",
+        "native/src/render/psd_adjust.cpp",
+        "native/src/app/adjust_forms_tone.cpp",
+        "native/src/app/adjust_panels.cpp",
+        "native/tests/unit/test_adjust.cpp",
+        "native/tests/gui/test_gui_adjust.cpp",
+        "native/tests/contract/test_contract_adjust.cpp",
+        "native/src/app/layer_dialogs.cpp"
       ],
       "genko_candidate": {
         "op": "add_layer",
@@ -19643,11 +19753,16 @@
         "alternate_menus": []
       },
       "genko_status": "同等（C++ のソースと試験あり。2026-10-16 照合）",
-      "implementation_status": "部分実装・未統合",
+      "implementation_status": "実装済み（PC2a、未統合）",
       "acceptance_status": "Linux Debug V1限定合格。全機能/全構成未完",
       "evidence": [
-        "build/photocraft-v1/regression-v6/execution.json",
-        "build/photocraft-v1/gui-settled-probe/visual-observations.json"
+        "native/src/core/adjust_tone.cpp",
+        "native/src/render/psd_adjust.cpp",
+        "native/src/app/adjust_forms_tone.cpp",
+        "native/src/app/adjust_panels.cpp",
+        "native/tests/unit/test_adjust.cpp",
+        "native/tests/gui/test_gui_adjust.cpp",
+        "native/tests/contract/test_contract_adjust.cpp"
       ],
       "implementation_scope": "RGBA16/32の元bytes保存・再読込、露光量調整層、実CLI/PNG出力/disk Undo-Redo/GC/資源拒否、実GUI。汎用ファイル入力・全描画style・形式互換・上流全画素同等性・復旧・全Release/ASan・Windows・配布は未完。",
       "pc0": {
@@ -19702,10 +19817,16 @@
         "alternate_menus": []
       },
       "genko_status": "一部（2026-10-16 照合）",
-      "implementation_status": "未着手",
+      "implementation_status": "実装済み（PC2a、未統合）",
       "acceptance_status": "未実施",
       "evidence": [
-        "native/src/core/filters.cpp:335"
+        "native/src/core/adjust_tone.cpp",
+        "native/src/render/psd_adjust.cpp",
+        "native/src/app/adjust_forms_tone.cpp",
+        "native/src/app/adjust_panels.cpp",
+        "native/tests/unit/test_adjust.cpp",
+        "native/tests/gui/test_gui_adjust.cpp",
+        "native/tests/contract/test_contract_adjust.cpp"
       ],
       "genko_candidate": {
         "op": "add_layer",
@@ -19833,10 +19954,16 @@
         "alternate_menus": []
       },
       "genko_status": "一部（2026-10-16 照合）",
-      "implementation_status": "未着手",
+      "implementation_status": "実装済み（PC2a、未統合）",
       "acceptance_status": "未実施",
       "evidence": [
-        "native/src/core/filters.cpp:321"
+        "native/src/core/adjust_tone.cpp",
+        "native/src/render/psd_adjust.cpp",
+        "native/src/app/adjust_forms_tone.cpp",
+        "native/src/app/adjust_panels.cpp",
+        "native/tests/unit/test_adjust.cpp",
+        "native/tests/gui/test_gui_adjust.cpp",
+        "native/tests/contract/test_contract_adjust.cpp"
       ],
       "genko_candidate": {
         "op": "add_layer",
@@ -19892,10 +20019,17 @@
         "alternate_menus": []
       },
       "genko_status": "一部（2026-10-16 照合）",
-      "implementation_status": "未着手",
+      "implementation_status": "実装済み（PC2a、未統合）",
       "acceptance_status": "未実施",
       "evidence": [
-        "native/src/core/filters.cpp:272"
+        "native/src/core/adjust_tone.cpp",
+        "native/src/render/adjust_space.cpp",
+        "native/src/render/psd_adjust.cpp",
+        "native/src/app/adjust_forms_tone.cpp",
+        "native/src/app/adjust_panels.cpp",
+        "native/tests/unit/test_adjust.cpp",
+        "native/tests/gui/test_gui_adjust.cpp",
+        "native/tests/contract/test_contract_adjust.cpp"
       ],
       "genko_candidate": {
         "op": "add_layer",
@@ -20008,10 +20142,16 @@
         "alternate_menus": []
       },
       "genko_status": "一部（2026-10-16 照合）",
-      "implementation_status": "未着手",
+      "implementation_status": "実装済み（PC2a、未統合）",
       "acceptance_status": "未実施",
       "evidence": [
-        "native/src/core/filters.cpp:326"
+        "native/src/core/adjust_tone.cpp",
+        "native/src/render/psd_adjust.cpp",
+        "native/src/app/adjust_forms_tone.cpp",
+        "native/src/app/adjust_panels.cpp",
+        "native/tests/unit/test_adjust.cpp",
+        "native/tests/gui/test_gui_adjust.cpp",
+        "native/tests/contract/test_contract_adjust.cpp"
       ],
       "genko_candidate": {
         "op": "add_layer",
@@ -20122,10 +20262,16 @@
         "alternate_menus": []
       },
       "genko_status": "同等（C++ のソースと試験あり。2026-10-16 照合）",
-      "implementation_status": "未着手",
+      "implementation_status": "実装済み（PC2a、未統合）",
       "acceptance_status": "未実施",
       "evidence": [
-        "native/src/core/filters.cpp:311"
+        "native/src/core/adjust_tone.cpp",
+        "native/src/render/psd_adjust.cpp",
+        "native/src/app/adjust_forms_tone.cpp",
+        "native/src/app/adjust_panels.cpp",
+        "native/tests/unit/test_adjust.cpp",
+        "native/tests/gui/test_gui_adjust.cpp",
+        "native/tests/contract/test_contract_adjust.cpp"
       ],
       "genko_candidate": {
         "op": "add_layer",
@@ -20999,9 +21145,15 @@
       },
       "upstream_menu": null,
       "genko_status": "一部（2026-10-16 照合）",
-      "implementation_status": "未着手",
+      "implementation_status": "実装済み（PC2a、未統合）",
       "acceptance_status": "未実施",
-      "evidence": [],
+      "evidence": [
+        "native/src/render/ops_adjust.cpp",
+        "native/src/app/adjust_panels.cpp",
+        "native/tests/unit/test_adjust.cpp",
+        "native/tests/gui/test_gui_adjust.cpp",
+        "native/tests/contract/test_contract_adjust.cpp"
+      ],
       "pc0": {
         "date": "2026-10-16",
         "cpp_base": "962faa4",
@@ -34385,9 +34537,13 @@
         "alternate_menus": []
       },
       "genko_status": "一部（2026-10-16 照合）",
-      "implementation_status": "未着手",
+      "implementation_status": "実装済み（PC2a、未統合）",
       "acceptance_status": "未実施",
-      "evidence": [],
+      "evidence": [
+        "native/src/app/adjust_panels.cpp",
+        "native/src/app/main_window_adjust.cpp",
+        "native/tests/gui/test_gui_adjust.cpp"
+      ],
       "pc0": {
         "date": "2026-10-16",
         "cpp_base": "962faa4",
@@ -35219,9 +35375,13 @@
         "alternate_menus": []
       },
       "genko_status": "一部（2026-10-16 照合）",
-      "implementation_status": "未着手",
+      "implementation_status": "実装済み（PC2a、未統合）",
       "acceptance_status": "未実施",
-      "evidence": [],
+      "evidence": [
+        "native/src/app/adjust_panels.cpp",
+        "native/src/app/main_window_adjust.cpp",
+        "native/tests/gui/test_gui_adjust.cpp"
+      ],
       "pc0": {
         "date": "2026-10-16",
         "cpp_base": "962faa4",

@@ -39,14 +39,47 @@ using CodecHooks = std::vector<std::pair<std::string_view, AdjustCodec>>;  // (b
 CodecHooks tone_codecs();   // PC2a: render/psd_adjust.cpp (levl, curv, brit, post, thrs, nvrt, expA, grdm, clrL)
 CodecHooks color_codecs();  // PC2b: render/psd_adjust_color.cpp (hue2, vibA, blnc, blwh, phfl, mixr, selc)
 
-// An adjustment block read into a correction's adjust; none when no codec reads it (`notes` says why).
-std::optional<core::Json> read_adjustment(std::string_view key, std::string_view payload, std::vector<std::string>& notes);
+// What a codec may ask of the file it reads or writes (the two ways set it while they call it).
+struct AdjustContext {
+    // The PSD's colour mode (its levels' and curves' channel records: rgb red, green, blue; gray its one; cmyk cyan …
+    // black; lab lightness, a, b; other none).
+    std::string_view mode = "rgb";
+    std::string_view companion;            // (reading) the layer's CgEd block's payload (brightness_contrast's)
+    const core::Document* doc = nullptr;  // (writing) the book: a lookup table's asset
+};
+const AdjustContext& adjust_context();
+// The PSD's mode by its number in the file header (rgb, gray, cmyk, lab, other).
+std::string_view adjust_mode(int psd_mode);
 
-// A correction's adjust as an adjustment block; none when no codec writes its kind (`notes` says why).
+// While one lives (on any thread), no codec reads or writes: every adjustment layer is left out (skipped) as psd.py
+// leaves them, and a correction layer is in the merged picture only, as psd.py writes it — the view of the Python
+// reference, which the contract tests compare with (the user's decision 5: this build reads and writes them).
+class PythonView {
+public:
+    PythonView();
+    ~PythonView();
+    PythonView(const PythonView&) = delete;
+    PythonView& operator=(const PythonView&) = delete;
+};
+
+// An adjustment block read into a correction's adjust; none when no codec reads it (`notes` says why).
+std::optional<core::Json> read_adjustment(std::string_view key, std::string_view payload, std::vector<std::string>& notes,
+                                          const AdjustContext& context = {});
+
+// A correction's adjust as an adjustment block; none when no codec writes its kind (`notes` says why). A companion
+// block written after it (brightness_contrast's CgEd: its modern settings), when it has one.
 struct AdjustBlock {
     std::string key;
     std::string payload;
+    std::string companion_key;
+    std::string companion;
 };
-std::optional<AdjustBlock> write_adjustment(const core::Json& adjust, const core::Page& page, std::vector<std::string>& notes);
+std::optional<AdjustBlock> write_adjustment(const core::Json& adjust, const core::Page& page, std::vector<std::string>& notes,
+                                            const core::Document* doc = nullptr);
+
+// An adjustment layer read (its adjust, its blend in the PSD) as the correction import_psd puts on `page`: its blend its
+// native.blend, read as an op reads it — what the page cannot hold of it (a blend a Lab or multichannel page does not
+// composite, channel records on a multichannel page) left out.
+core::Json imported_adjust(const core::Json& adjust, std::string_view blend, const core::Page& page);
 
 }  // namespace genko::render::psd

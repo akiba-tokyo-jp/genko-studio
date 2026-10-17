@@ -622,6 +622,9 @@ File File::read(std::string data, const Limits& limits, bool lab) {
                     } else if (tag == "lfx2") {
                         rec.lfx2_at = static_cast<std::uint64_t>(body.data() - d.data());
                         rec.lfx2_size = body.size();
+                    } else if (tag == "CgEd") {  // (PC2a: read with its brit)
+                        rec.cged_at = static_cast<std::uint64_t>(body.data() - d.data());
+                        rec.cged_size = body.size();
                     } else if (adjust_tag(tag)) {
                         rec.kind = "adjust";
                         if (tag != "SoCo" && tag != "GdFl" && tag != "PtFl") {  // (PC2: an adjustment, not a fill layer)
@@ -717,9 +720,13 @@ File File::read(std::string data, const Limits& limits, bool lab) {
             // (PC2, the user's decision 5: an adjustment layer a codec reads is a correction layer — render/psd_adjust;
             // one none reads is left out, as psd.py leaves every one out)
             std::vector<std::string> notes;
+            AdjustContext context;
+            context.mode = adjust_mode(f.mode_);
+            if (rec.cged_size > 0)
+                context.companion = std::string_view(f.data_).substr(static_cast<std::size_t>(rec.cged_at), static_cast<std::size_t>(rec.cged_size));
             std::optional<core::Json> adjust = read_adjustment(
                 rec.adjust_key, std::string_view(f.data_).substr(static_cast<std::size_t>(rec.adjust_at), static_cast<std::size_t>(rec.adjust_size)),
-                notes);
+                notes, context);
             if (adjust) {
                 Layer layer;
                 layer.name = rec.name.empty() ? std::string("色調補正") : rec.name;

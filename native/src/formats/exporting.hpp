@@ -56,6 +56,14 @@ std::optional<std::string> ink_note(const core::Document& episode, std::string_v
 // The same for an animation of one page (a movie holds 8-bit sRGB only): a page of a colour model's, or none.
 std::optional<std::string> ink_note(const core::Page& page);
 
+// PC2a (file.export.colorLookupTables, the C++ build's own: `genko export --format cube`, 書き出し → カラールックアップ
+// テーブル): the page's visible correction layers, in their order, laid on an identity lattice of `size`³ (held to
+// 2..256) — each by its opacity and native.blend, its mask and clipping left out (a LUT is the stack's colour mapping,
+// PhotoCraft's file_cmds.rs bake_cube) — as a .cube file (red fastest, values 0..1, 6 decimals). A layer this build does
+// not draw (a plugin's, a filter that moves shapes, one not ported yet) is left out and named in `skipped`.
+std::string bake_cube(const core::Document& doc, const core::Page& page, int size, const std::string& title,
+                      std::vector<std::string>* skipped = nullptr);
+
 struct RunOptions {
     bool official = false;
     std::string actor = "human:user";

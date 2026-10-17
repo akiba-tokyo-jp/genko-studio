@@ -761,9 +761,11 @@ private slots:
         panel->add_fill();
         QCOMPARE(w->target_layer()->kind, core::LayerKind::Fill);
         QCOMPARE(*w->target_layer()->fill, (Json{{"rgb", Json::array({1, 2, 3})}}));
-        // a gradient map: its colours as they first are (the dialog accepted as it opens)
+        // a gradient map: its colours as they first are (the dialog accepted as it opens). (PC2a, the user's decision 3: the
+        // gradient map has the tone corrections' window, app/adjust_forms_tone — "adjust_dialog": the same colours, its
+        // reverse and dither besides)
         desk.answers->responder->exec = [](QDialog* dialog) {
-            return dialog->objectName() == QStringLiteral("gradient_map_dialog") ? static_cast<int>(QDialog::Accepted) : static_cast<int>(QDialog::Rejected);
+            return dialog->objectName() == QStringLiteral("adjust_dialog") ? static_cast<int>(QDialog::Accepted) : static_cast<int>(QDialog::Rejected);
         };
         QAction* map = titled(panel->special_menu(), QStringLiteral("グラデーションマップ…"));
         QVERIFY(map != nullptr);

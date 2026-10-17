@@ -14,6 +14,9 @@ namespace {
 
 unsigned char quantized(double v) { return static_cast<unsigned char>(std::lround(std::clamp(v, 0.0, 1.0) * 255.0)); }
 
+// (PC2a: the records' conversions known to core before any correction is drawn — every way draws through this file)
+[[maybe_unused]] const bool kToneBridge = (install_tone_bridge(), true);
+
 }  // namespace
 
 Image apply_8bit(const Image& rgba_in, const core::AdjustFunction& f, Point origin) {

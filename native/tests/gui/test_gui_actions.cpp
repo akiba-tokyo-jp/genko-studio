@@ -275,7 +275,13 @@ private slots:
         // PC2b (SPEC COLOR-04) — レイヤー → 色調補正 の色の補正 (act_adjust_vibrance, act_adjust_hue_saturation,
         // act_adjust_color_balance, act_adjust_black_white, act_adjust_photo_filter, act_adjust_channel_mixer,
         // act_adjust_selective_color, act_adjust_desaturate) — theirs (test_gui_adjust_color).
-        QCOMPARE(w->actions_by_name().size(), std::size_t{266});
+        // and the 14 of PC2a (SPEC COLOR-04) — レイヤー → 色調補正 の 明るさ・コントラストを変える…・レベル補正をかける…・トーンカーブを
+        // かける…・露光量…・カラールックアップをかける…・階調の反転・階調化する…・2 値化する…・グラデーションマップをかける…・
+        // 平均化・自動トーン補正・自動コントラスト・自動カラー補正 and ファイル → カラールックアップテーブルを書き出す…
+        // (act_adjust_brightness, act_adjust_levels, act_adjust_curves, act_adjust_exposure, act_adjust_lookup,
+        // act_adjust_invert, act_adjust_posterize, act_adjust_threshold, act_adjust_gradient_map, act_adjust_equalize,
+        // act_auto_tone, act_auto_contrast, act_auto_color, act_export_lookup) — theirs (test_gui_adjust).
+        QCOMPARE(w->actions_by_name().size(), std::size_t{280});
         QVERIFY(w->action("act_chat_approval"));
         QVERIFY(w->action("act_style"));
         QVERIFY(w->action("act_exposure"));

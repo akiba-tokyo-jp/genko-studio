@@ -4,6 +4,7 @@
 
 #include <algorithm>
 #include <array>
+#include <cstdio>
 #include <limits>
 
 #include "core/color_raster.hpp"
@@ -15,6 +16,10 @@
 #include "core/ruby.hpp"
 #include "formats/export.hpp"
 #include "formats/pdf.hpp"
+#include "formats/psd_adjust.hpp"
+#include "core/adjust.hpp"
+#include "core/exposure.hpp"
+#include "render/color_canvas.hpp"
 #include "formats/psd_text.hpp"
 #include "render/not_yet_ported.hpp"
 
@@ -358,6 +363,9 @@ std::vector<std::string> export_notes(const core::Document& episode, std::string
             notes.push_back("特色チャンネルの名前 " + from + " は PDF では決まった版（プロセスカラー・All・None）の名前のため、" + to + " として書き出しました");
         }
     }
+    if (key == "psd") {  // (PC2, the user's decision 5: what the PSD's adjustment layers hold of the correction layers)
+        for (std::string& note : psd_adjust_notes(episode)) notes.push_back(std::move(note));
+    }
     return notes;
 }
 
@@ -373,6 +381,52 @@ std::optional<std::string> ink_note(const core::Page& page) {
     }
     if (!page.color && !page.rgb) return std::nullopt;
     return "色モード・プロファイルを持つページは、動画にはその値のまま書けないため、画面の色（sRGB）から変換して書き出しました";
+}
+
+std::string bake_cube(const core::Document& doc, const core::Page& page, int size_in, const std::string& title, std::vector<std::string>* skipped) {
+    const std::uint32_t n = static_cast<std::uint32_t>(std::clamp(size_in, 2, 256));
+    const std::uint32_t w = n * n;  // (the lattice: x = b·n + r, y = g)
+    const double step = 1.0 / (n - 1);
+    const std::string lattice = core::encode_color_pixels(w, n, "f32", [n, step](std::size_t i) {
+        const std::size_t x = i % (std::size_t(n) * n), y = i / (std::size_t(n) * n);
+        return std::array<double, 4>{static_cast<double>(x % n) * step, static_cast<double>(y) * step, static_cast<double>(x / n) * step, 1.0};
+    });
+    const render::RgbSpace space = render::RgbSpace::of(page);
+    render::ColorCanvas canvas(render::Image::create("RGBA", render::Size{static_cast<int>(w), static_cast<int>(n)}, render::Ink{0, 0, 0, 255}), space);
+    canvas.blend(core::ColorRasterView(lattice), render::Size{static_cast<int>(w), static_cast<int>(n)}, render::Box{0, 0, static_cast<int>(w), static_cast<int>(n)},
+                 1.0, false);
+    for (const core::Layer& layer : page.layers) {
+        if (layer.kind != core::LayerKind::Adjust || !layer.visible || !layer.adjust || !layer.adjust->is_object()) continue;
+        const core::Json kind = layer.adjust->value("kind", core::Json());
+        const std::string blend = core::native_of(*layer.adjust).blend;
+        try {
+            if (kind == core::Json("exposure")) {
+                canvas.expose(core::Exposure::parse(*layer.adjust), layer.opacity, false, nullptr, blend);
+                continue;
+            }
+            const core::AdjustPtr f = render::correction_of(layer, page, &doc);
+            if (f) canvas.adjust(*f, layer.opacity, false, nullptr, blend);
+        } catch (const render::NotYetPorted&) {
+            if (skipped != nullptr) skipped->push_back(layer.id);
+        } catch (const core::Error& error) {
+            if (error.code() != "not_yet_ported" && error.code() != "value") throw;
+            if (skipped != nullptr) skipped->push_back(layer.id);
+        }
+    }
+    const std::string baked = canvas.color_raster("f32");  // (held: the view reads these bytes)
+    const core::ColorRasterView out(baked);
+    std::string text = "TITLE \"" + replace_all(title, "\"", "'") + "\"\n# Created by Genko\nLUT_3D_SIZE " + std::to_string(n) +
+                       "\nDOMAIN_MIN 0.0 0.0 0.0\nDOMAIN_MAX 1.0 1.0 1.0\n";
+    char line[96];
+    for (std::uint32_t b = 0; b < n; ++b)  // (.cube: red fastest, then green, then blue)
+        for (std::uint32_t g = 0; g < n; ++g)
+            for (std::uint32_t r = 0; r < n; ++r) {
+                const auto p = out.pixel(std::size_t(g) * w + b * n + r);
+                const int k = std::snprintf(line, sizeof line, "%.6f %.6f %.6f\n", std::clamp(p[0], 0.0, 1.0), std::clamp(p[1], 0.0, 1.0),
+                                            std::clamp(p[2], 0.0, 1.0));
+                text.append(line, static_cast<std::size_t>(std::max(0, k)));
+            }
+    return text;
 }
 
 core::Json run(const core::Document& episode_in, const std::optional<std::filesystem::path>& project, std::string_view key,

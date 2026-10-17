@@ -242,7 +242,8 @@ std::optional<Json> adjust_dialog(QWidget* parent, const std::string& kind, cons
     auto* layout = new QFormLayout(&dialog);
     auto* form = new Form;
     found->build(*form, context);
-    form->set_values(now.is_object() ? now : Json::object());
+    const Json given = now.is_object() ? now : Json::object();
+    form->set_values(found->prepare ? found->prepare(given) : given);
     layout->addRow(form);
     auto* row = new QDialogButtonBox;
     QPushButton* reset = row->addButton(QStringLiteral("既定に戻す"), QDialogButtonBox::ResetRole);

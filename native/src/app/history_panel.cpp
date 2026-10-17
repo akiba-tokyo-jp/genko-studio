@@ -64,6 +64,7 @@ const std::map<std::string, const char*>& names() {
         // (PC2c, the C++ build's own: render/tone_ops, ops_calc, trap, ops_fade)
         {"hdr_toning", "HDR トーンをかけた"}, {"apply_image", "画像操作をした"}, {"calculations", "演算をした"}, {"trap", "トラッピングした"},
         {"fade_layer", "フェードした"},
+        {"set_adjustment", "色調補正の設定を変えた"}, {"auto_adjust", "自動で色調補正した"},  // (PC2a, SPEC COLOR-04)
     };
     return table;
 }

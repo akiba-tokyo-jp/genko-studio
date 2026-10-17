@@ -154,6 +154,7 @@ public:
         // (PC2) its adjustment block's key and payload (render/psd_adjust.hpp; the key empty: none, or a fill layer's)
         std::string adjust_key;
         std::uint64_t adjust_at = 0, adjust_size = 0;
+        std::uint64_t cged_at = 0, cged_size = 0;  // (its CgEd block: brightness_contrast's modern settings)
         const ChannelRef* channel(int id) const;
     };
 

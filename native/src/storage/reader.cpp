@@ -11,6 +11,7 @@
 #include <utility>
 
 #include "core/adjust.hpp"
+#include "core/lut3d.hpp"
 #include "core/brushes.hpp"
 #include "core/channels.hpp"
 #include "core/command_bus.hpp"
@@ -131,6 +132,8 @@ private:
     std::unordered_map<std::string, core::Bytes> color_blobs_;
     // color-mode@1: the ICC profiles read (by ref; null when one could not be read)
     std::unordered_map<std::string, core::Bytes> profiles_;
+    // PC2a (adjustments@1): the 3D lookup tables the color_lookup corrections use (by ref; only those read well)
+    std::map<std::string, core::Bytes> luts_;
 
     void issue(std::string kind, std::string pointer, std::string ref, std::string message) {
         report_.issues.push_back(LoadIssue{std::move(kind), std::move(pointer), std::move(ref), std::move(message)});
@@ -351,6 +354,7 @@ private:
     core::Layer read_layer(const Json& data, const std::string& at);
     core::Stroke read_stroke(const Json& raw, const std::string& at);
     void read_papers(core::Document& doc);
+    void read_lut(const Json& adjust, const std::string& at);
     core::StrokeListPtr read_strokes_blob(const Json& ref_value, const std::string& at);
     core::Bytes read_png(const Json& ref_value, const std::string& at, core::BlobMemo* memo);
     core::Bytes read_blob(const Json& ref_value, const std::string& at, core::BlobMemo* memo, std::string_view suffix,
@@ -467,6 +471,28 @@ core::StoryLine Reader::read_line(const Json& data, const std::string& at) {
     for (const Json& tail : list_or_empty(data, "tails")) line.tails.push_back(core::py_dict(tail));
     check_keys(data, kLineKeys, at, "line");
     return line;
+}
+
+void Reader::read_lut(const Json& adjust, const std::string& at) {
+    // PC2a (adjustments@1): a color_lookup's table (assets/<ab>/<64 hex>.gklut). One that is missing, is not the bytes its
+    // name says or cannot be read makes the book read-only: it is never drawn with another table, nor written without
+    // it. (The same table of several corrections read once.)
+    if (adjust.value("kind", Json()) != Json("color_lookup")) return;
+    const Json* lut = find(adjust, "lut");
+    if (lut == nullptr || lut->is_null()) return;
+    if (lut->is_string() && luts_.contains(lut->get<std::string>())) return;
+    const std::string here = at_key(at, "lut");
+    core::Bytes bytes = read_blob(*lut, here, nullptr, core::lut3d::kSuffix, "lookup table");
+    if (!bytes) return;  // (missing, or not a ref: reported)
+    const std::string& ref = lut->get_ref<const std::string&>();
+    if (AssetStore::ref(*bytes) != ref) return;  // (another table in its place: reported by read_blob)
+    try {
+        (void)core::lut3d::decode(*bytes);
+    } catch (const core::Error& error) {
+        issue("broken_asset", here, ref, "the lookup table " + AssetStore::relpath(ref, core::lut3d::kSuffix) + " cannot be read: " + error.what());
+        return;
+    }
+    luts_.emplace(ref, std::move(bytes));
 }
 
 void Reader::read_papers(core::Document& doc) {
@@ -999,6 +1025,7 @@ core::Layer Reader::read_layer(const Json& data, const std::string& at) {
     layer.reference = to_bool(data, "reference", false);
     layer.fill = dict_if_dict(data, "fill");
     layer.adjust = dict_if_dict(data, "adjust");
+    if (layer.adjust) read_lut(*layer.adjust, at_key(at, "adjust"));
     layer.effect = dict_if_dict(data, "effect");
     layer.color_prints = to_bool(data, "color_prints", false);
     layer.screen = dict_if_dict(data, "screen");
@@ -1225,6 +1252,7 @@ core::Document Reader::migrate(const Json& payload) {
     doc.binding = *binding;
     doc.pages = std::move(page_list);
     doc.deferred = std::move(deferred);
+    doc.luts = std::move(luts_);
     doc.story = std::move(story);
     doc.tickets = list_or_empty(payload, "tickets");
     doc.autosave = to_bool(payload, "autosave", false);

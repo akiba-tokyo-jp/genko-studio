@@ -404,8 +404,10 @@ private slots:
         QVERIFY(book.window->target_layer()->fill && book.window->target_layer()->fill->contains("gradient"));
 
         double black = 33;
+        // (PC2a, the user's decision 3: levels has its own window, app/adjust_forms_tone — "adjust_dialog" —, and a correction
+        // made new starts in PhotoCraft's form: its formula upstream)
         answers.responder->exec = [&black](QDialog* dialog) {
-            if (dialog->objectName() != QStringLiteral("filter_dialog")) return int(QDialog::Rejected);
+            if (dialog->objectName() != QStringLiteral("adjust_dialog")) return int(QDialog::Rejected);
             auto* field = dialog->findChild<QDoubleSpinBox*>(QStringLiteral("field_black"));
             if (field == nullptr) return int(QDialog::Rejected);
             field->setValue(black);
@@ -416,6 +418,7 @@ private slots:
         QCOMPARE(adjust->kind, core::LayerKind::Adjust);
         QCOMPARE((*adjust->adjust)["kind"], Json("levels"));
         QCOMPARE((*adjust->adjust)["black"], Json(33.0));
+        QCOMPARE((*adjust->adjust)["native"]["method"], Json("upstream"));
         black = 50;
         const auto row = static_cast<int>(std::find(panel.ids().begin(), panel.ids().end(), adjust->id) - panel.ids().begin());
         emit panel.list()->itemDoubleClicked(panel.list()->item(row));
@@ -438,8 +441,9 @@ private slots:
         gui_test::Answers answers;
         auto& panel = book.panel();
         QVERIFY(book.choose("adj"));
+        // (PC2a, the user's decision 3: levels' own window, app/adjust_forms_tone — an existing one in its own form, Genko's)
         answers.responder->exec = [](QDialog* dialog) {
-            if (dialog->objectName() != QStringLiteral("filter_dialog")) return int(QDialog::Rejected);
+            if (dialog->objectName() != QStringLiteral("adjust_dialog")) return int(QDialog::Rejected);
             dialog->findChild<QDoubleSpinBox*>(QStringLiteral("field_black"))->setValue(40);
             return int(QDialog::Accepted);
         };

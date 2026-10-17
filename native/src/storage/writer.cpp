@@ -10,6 +10,7 @@
 #include "core/color_raster.hpp"
 #include "core/exposure.hpp"
 #include "core/ids.hpp"
+#include "core/lut3d.hpp"
 #include "core/pyconv.hpp"
 #include "core/ruby.hpp"
 #include "core/strokes.hpp"
@@ -342,6 +343,14 @@ Json project_payload_v4(const core::Document& doc, AssetStore& store) {
     }
     for (const auto& line : doc.story) {
         if (core::ruby::uses_feature(line)) features.emplace_back(core::kRubyLayoutFeature);
+    }
+    // PC2a (adjustments@1): the 3D lookup tables the book's color_lookup corrections use (only those)
+    for (const std::string& ref : core::lut3d::refs_of(doc)) {
+        const auto table = doc.luts.find(ref);
+        if (table == doc.luts.end() || !table->second) {
+            throw core::Error("value", "the lookup table " + ref + " of a color_lookup correction is not held: the book is not written");
+        }
+        store.put_known(ref, *table->second, core::lut3d::kSuffix);
     }
     core::validate_ink_document(doc);
     core::validate_color_model(doc);
