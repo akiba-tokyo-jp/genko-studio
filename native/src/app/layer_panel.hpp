@@ -145,6 +145,7 @@ private:
         std::vector<core::Bytes> patches;
         std::string state;
         QIcon icon;
+        std::string checker;  // (what it is drawn over: the checker's size and colours)
     };
     std::map<std::string, Thumb> thumbs_;
 };

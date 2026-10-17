@@ -380,9 +380,21 @@ void LayerPanel::edit_mask(bool on) {
     window_->flash(on ? QStringLiteral("マスクの編集中: ペンで見せる所を足し、消しゴムで隠します") : QStringLiteral("マスクの編集を終えました"), 4000);
 }
 
+namespace {
+
+// What a layer's small picture is drawn over (環境設定's 透明部分): its checker's size and colours.
+std::string checker_key(const preferences::Checker& c) {
+    return QStringLiteral("%1 %2 %3").arg(c.square).arg(c.light.name(QColor::HexArgb), c.dark.name(QColor::HexArgb)).toStdString();
+}
+
+}  // namespace
+
 void LayerPanel::refresh_look() {
     marks_.clear();
-    thumbs_.clear();  // (環境設定's 透明部分: the pictures drawn over the checker again)
+    // (環境設定's 透明部分: the pictures drawn over another checker again — only those: the look is refreshed for other
+    // reasons too, the computer's light or dark, and drawing every layer's picture again is a stall)
+    const std::string checker = checker_key(preferences::checker());
+    std::erase_if(thumbs_, [&](const auto& thumb) { return thumb.second.checker != checker; });
     refresh();
 }
 
@@ -453,7 +465,7 @@ QIcon LayerPanel::thumbnail(const core::Page& page, const core::Layer& layer) {
                        layer.kind == core::LayerKind::Placed || layer.kind == core::LayerKind::Tone || (layer.fill && core::py_truthy(*layer.fill));
     if (!drawn) return {};
     const std::string key = page.id + "/" + layer.id;
-    Thumb made{layer.strokes, layer.raster_png, layer.color_raster, layer.ink_raster, layer.mask ? layer.mask->png : nullptr, {}, thumb_state(layer), {}};
+    Thumb made{layer.strokes, layer.raster_png, layer.color_raster, layer.ink_raster, layer.mask ? layer.mask->png : nullptr, {}, thumb_state(layer), {}, {}};
     for (const core::Patch& patch : layer.patches) made.patches.push_back(patch.png);
     if (const auto found = thumbs_.find(key); found != thumbs_.end()) {
         const Thumb& was = found->second;
@@ -462,9 +474,10 @@ QIcon LayerPanel::thumbnail(const core::Page& page, const core::Layer& layer) {
             return was.icon;
     }
     QIcon icon;
+    const preferences::Checker checker = preferences::checker();
+    made.checker = checker_key(checker);
     try {
         const render::Image image = render::layer_image(page, layer, 10, &window_->book(), true);
-        const preferences::Checker checker = preferences::checker();
         if (checker.square <= 0) {  // (no checker: on white)
             render::Image paper = render::Image::create("RGBA", image.size(), render::Ink{255, 255, 255, 255});
             paper = render::alpha_composite(paper, image.convert("RGBA"));
