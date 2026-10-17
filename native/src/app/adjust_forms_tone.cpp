@@ -157,14 +157,18 @@ void levels_form(Form& form, const FormContext& context) {
         rows->addRow(words[i], s.box);
     }
     auto loading = std::make_shared<bool>(false);
-    const auto show = [state, which, spins, loading] {
+    // (the state holds this as its `shown`: the state itself only weakly, or the two would keep each other)
+    const std::weak_ptr<Records> weak = state;
+    const auto show = [weak, which, spins, loading] {
+        const auto held = weak.lock();
+        if (!held) return;
         *loading = true;
         const QString was = which->currentData().toString();
         which->clear();
-        for (const auto& [name, label] : channel_words(state->space)) which->addItem(label, QString::fromStdString(name));
+        for (const auto& [name, label] : channel_words(held->space)) which->addItem(label, QString::fromStdString(name));
         which->setCurrentIndex(std::max(0, which->findData(was)));
         const std::string name = which->currentData().toString().toStdString();
-        const Json record = state->records.contains(name) ? state->records[name] : Json::object();
+        const Json record = held->records.contains(name) ? held->records[name] : Json::object();
         for (Spin& s : *spins) s.box->setValue(record.value(s.key, s.fallback));
         *loading = false;
     };
@@ -237,16 +241,20 @@ void curve_form(Form& form, const FormContext& context) {
     rows->addWidget(which);
     rows->addWidget(own);
     auto loading = std::make_shared<bool>(false);
-    const auto show = [state, which, own, loading] {
+    // (the state holds this as its `shown`: the state itself only weakly, or the two would keep each other)
+    const std::weak_ptr<Records> weak = state;
+    const auto show = [weak, which, own, loading] {
+        const auto held = weak.lock();
+        if (!held) return;
         *loading = true;
         const QString was = which->currentData().toString();
         which->clear();
-        for (const auto& [name, label] : channel_words(state->space)) which->addItem(label, QString::fromStdString(name));
+        for (const auto& [name, label] : channel_words(held->space)) which->addItem(label, QString::fromStdString(name));
         which->setCurrentIndex(std::max(0, which->findData(was)));
         const std::string name = which->currentData().toString().toStdString();
         std::vector<std::array<double, 2>> points;
-        if (state->records.contains(name))
-            for (const Json& p : state->records[name]) points.push_back({p[0].get<double>(), p[1].get<double>()});
+        if (held->records.contains(name))
+            for (const Json& p : held->records[name]) points.push_back({p[0].get<double>(), p[1].get<double>()});
         own->set_points(points);
         *loading = false;
     };
