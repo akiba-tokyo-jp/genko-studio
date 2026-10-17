@@ -26,6 +26,7 @@
 #include "core/pyconv.hpp"
 #include "core/pyops.hpp"
 #include "render/fill.hpp"
+#include "render/import_profile.hpp"
 #include "render/op_limits.hpp"
 #include "render/ops_registry.hpp"
 #include "render/ink_canvas.hpp"
@@ -325,6 +326,24 @@ void import_psd(core::OpContext& c) {
         throw core::PyUncaught(error.type(), error.what());
     }
     const psd::File& file = *read;
+    // (PC2d, the C++ build's own embedded_profile: an RGB or grey file's colours taken from its own profile (image
+    // resource 1039) or the op's into the page's space. A CMYK or Lab file comes in as before — onto a page of inks
+    // through its own profile —: one cannot be assigned another.)
+    import_profile::Taking way;
+    std::string numbers;  // (the mode of the file's numbers as the pictures hold them: "L" grey, "RGBA")
+    if (op.contains("embedded_profile")) {
+        const std::string& m = file.mode_name();
+        numbers = m == "gray" || m == "bitmap" || m == "duotone" ? "L" : m == "rgb" || m == "indexed" ? "RGBA" : "";
+        if (!numbers.empty()) {
+            way = import_profile::taking(doc, doc.page(index), op, file.icc().empty() ? std::nullopt : std::optional<std::string>(file.icc()), numbers);
+        } else if (op["embedded_profile"] == "assign") {
+            throw OpError("embedded_profile assign takes an RGB or grey PSD (a " + m + " file comes in through its own profile)");
+        } else {
+            way = import_profile::taking(doc, doc.page(index), op, std::nullopt, "LAB");  // (its arguments checked; kept)
+        }
+    }
+    // (a picture of the file as the way takes it: its numbers, a grey file's as grey)
+    const auto numbers_of = [&](const Image& picture) { return numbers == "L" ? picture.convert("LA") : picture; };
     if (static_cast<std::uint64_t>(file.width()) * static_cast<std::uint64_t>(file.height()) > static_cast<std::uint64_t>(kMaxImagePixels)) {
         throw OpError("image too large: " + std::to_string(file.width()) + "x" + std::to_string(file.height()));
     }
@@ -416,7 +435,9 @@ void import_psd(core::OpContext& c) {
             // (a painting app's picture: on a monochrome page it prints in grey and tones)
             layer.source = Json::object({{"kind", "psd"}});
             if (mode) {  // (color-mode@1: onto a clear layer of the page's inks)
-                core::InkPixels picture = merged_inks ? *merged_inks : file.image_inks(item, *mode);
+                core::InkPixels picture = way.converting ? import_profile::taken_inks(numbers_of(merged_inks ? *file.merged() : file.image(item)), way, *mode)
+                                          : merged_inks ? *merged_inks
+                                                        : file.image_inks(item, *mode);
                 if (!same_size) picture = resize_inks(picture, shown, Resample::Lanczos);
                 core::InkPixels canvas = core::blank_ink_pixels(mode->space, mode->depth, static_cast<std::uint32_t>(page_px.width),
                                                                 static_cast<std::uint32_t>(page_px.height));
@@ -425,7 +446,9 @@ void import_psd(core::OpContext& c) {
             } else {
                 // (onto a clear layer: the pixels as they are)
                 Image canvas = Image::create("RGBA", page_px, Ink{0, 0, 0, 0});
-                const Image picture = merged ? *merged : file.image(item);
+                const Image picture = way.converting ? import_profile::taken(numbers_of(merged ? *merged : file.image(item)), way, page)
+                                                     : merged ? *merged
+                                                              : file.image(item);
                 canvas.paste(same_size ? picture : picture.resize(shown, Resample::Lanczos), paste_corner(where));
                 layer.raster_png = fills::png_bytes(canvas);
                 layer.raster_relpath = raster::page_folder(page) + "/user-" + layer.id + ".png";
@@ -459,6 +482,7 @@ void import_psd(core::OpContext& c) {
     target.layers.insert(target.layers.begin() + static_cast<std::ptrdiff_t>(at), std::make_move_iterator(made.begin()),
                          std::make_move_iterator(made.end()));
     c.report = Json::object({{"layers", std::move(listed)}, {"skipped", std::move(skipped)}});
+    if (op.contains("embedded_profile")) (*c.report)["embedded_profile"] = import_profile::report(way);
 }
 
 }  // namespace

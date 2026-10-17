@@ -44,6 +44,7 @@ genko_library(genko_render
     plugins.cpp
     colour.cpp
     proof.cpp
+    import_profile.cpp
     ink.cpp
     ink_canvas.cpp
     ink_edit.cpp

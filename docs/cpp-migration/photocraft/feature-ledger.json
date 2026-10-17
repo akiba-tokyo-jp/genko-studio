@@ -1161,9 +1161,16 @@
       },
       "upstream_menu": null,
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "未着手",
+      "implementation_status": "実装済み（PC2d、未統合）",
       "acceptance_status": "未実施",
-      "evidence": [],
+      "evidence": [
+        "native/src/render/import_profile.cpp",
+        "native/src/render/raster_ops.cpp",
+        "native/src/render/import_psd.cpp",
+        "native/src/app/main_window_color.cpp",
+        "native/tests/contract/test_contract_profile.cpp",
+        "native/tests/gui/test_gui_color.cpp"
+      ],
       "pc0": {
         "date": "2026-10-16",
         "cpp_base": "962faa4",
@@ -1174,7 +1181,8 @@
         "tests": [],
         "gap": "開いた画像の埋め込みプロファイルが作業用と違うときの「そのまま・変換・破棄・作業用を割り当て」がない。PNG/JPEG/TIFF の取り込みは埋め込み ICC を読まず sRGB とみなす（PSD は CMYK の ICC だけ使う: render/psd.cpp:537）",
         "note": "lcms2（既存、MIT）で足りる。RGB の作業用プロファイルの考え（image.mode.rgb）とも関係する"
-      }
+      },
+      "limitations": "put_raster・import_psd の C++ 版だけの embedded_profile（keep・convert・assign）と、開いた原稿・置く画像のカラー設定の方針（PC1b）で上流の 4 つを表す。import_psd の convert・assign は RGB・グレーの PSD の値に（CMYK・Lab の PSD はインキのページでは今までどおり自分のプロファイルから。assign は断る）。取り込んだ画像の変換は 8 bit の画素として持つ。"
     },
     {
       "id": "command.list",
@@ -3738,9 +3746,16 @@
       },
       "upstream_menu": null,
       "genko_status": "一部（2026-10-16 照合）",
-      "implementation_status": "未着手",
+      "implementation_status": "実装済み（PC2d、未統合）",
       "acceptance_status": "未実施",
-      "evidence": [],
+      "evidence": [
+        "native/src/render/proof.cpp",
+        "native/src/api/cli.cpp",
+        "native/src/app/info_panels.cpp",
+        "native/src/app/main_window_color.cpp",
+        "native/tests/contract/test_contract_profile.cpp",
+        "native/tests/gui/test_gui_info.cpp"
+      ],
       "pc0": {
         "date": "2026-10-16",
         "cpp_base": "962faa4",
@@ -3757,7 +3772,8 @@
         ],
         "gap": "CMYK のプロファイルの説明は色モードの窓の一覧に出る。プロファイルの色空間・白色点・版などの情報表示、組み込みプロファイルの一覧、API の入口が無い",
         "note": ""
-      }
+      },
+      "limitations": "CLI は genko inspect --profile（内蔵の id・ページ番号・sha256）。ファイルのパスは受けない（op と同じく原稿の中のものだけ。画面の校正の設定のファイルは読める）。"
     },
     {
       "id": "edit.puppetWarp",
@@ -34257,9 +34273,15 @@
         "alternate_menus": []
       },
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "未着手",
+      "implementation_status": "実装済み（PC2d、未統合）",
       "acceptance_status": "未実施",
-      "evidence": [],
+      "evidence": [
+        "native/src/app/channel_panel.cpp",
+        "native/src/app/main_window_channels.cpp",
+        "native/src/render/channels.cpp",
+        "native/tests/gui/test_gui_channels.cpp",
+        "native/tests/unit/test_channels.cpp"
+      ],
       "pc0": {
         "date": "2026-10-16",
         "cpp_base": "962faa4",
@@ -34270,7 +34292,8 @@
         "tests": [],
         "gap": "チャンネル パネル（合成・各色・アルファ）がない",
         "note": "保存した選択範囲（store_area）がアルファチャンネルに近い。CMYK・Lab のページはある"
-      }
+      },
+      "limitations": "チャンネル パネル（合成・色の版・アルファ・特色・ストック、目、描く先、新規・複製・削除・選択範囲の読み書き・オプション・分割・統合）は PC1c、PC2d で照合して閉じた（SPEC.md COLOR-03 のチャンネル）。"
     },
     {
       "id": "window.panel.character",
@@ -34495,9 +34518,13 @@
         "alternate_menus": []
       },
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "未着手",
+      "implementation_status": "実装済み（PC2d、未統合）",
       "acceptance_status": "未実施",
-      "evidence": [],
+      "evidence": [
+        "native/src/app/info_panels.cpp",
+        "native/src/app/main_window_actions.cpp",
+        "native/tests/gui/test_gui_info.cpp"
+      ],
       "pc0": {
         "date": "2026-10-16",
         "cpp_base": "962faa4",
@@ -34508,7 +34535,8 @@
         "tests": [],
         "gap": "ヒストグラム パネルがない（レベル補正のダイアログの中だけ）",
         "note": ""
-      }
+      },
+      "limitations": "ページ全体は小さな解像度（長い辺 384 画素ほど）の見えから数える（上流と同じく縮小のキャッシュ）。チャンネルは RGB・赤・緑・青・輝度・カラー（CMYK・Lab の版ごとのヒストグラムは持たない）。"
     },
     {
       "id": "window.panel.history",
@@ -34566,9 +34594,15 @@
         "alternate_menus": []
       },
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "未着手",
+      "implementation_status": "実装済み（PC2d、未統合）",
       "acceptance_status": "未実施",
-      "evidence": [],
+      "evidence": [
+        "native/src/app/info_panels.cpp",
+        "native/src/app/main_window_actions.cpp",
+        "native/src/render/inspect.cpp",
+        "native/src/render/proof.cpp",
+        "native/tests/gui/test_gui_info.cpp"
+      ],
       "pc0": {
         "date": "2026-10-16",
         "cpp_base": "962faa4",
@@ -34579,7 +34613,8 @@
         "tests": [],
         "gap": "情報パネル（カーソルの位置・下の色の値・選択範囲の大きさ）がない",
         "note": ""
-      }
+      },
+      "limitations": "位置は mm と原稿の解像度の画素（上流の単位の設定は持たない）。校正の値は表示 → 校正の設定のプロファイルへの変換（相対的な色域を維持・黒点補正）で、校正の種類（版・色覚など）によらない。"
     },
     {
       "id": "window.panel.layerComps",
@@ -37046,9 +37081,18 @@
       "label_ja": "ICC付き表示・ソフトプルーフ・色域警告",
       "kind": "cross_cutting",
       "genko_status": "一部（2026-10-16 照合）",
-      "implementation_status": "未着手",
+      "implementation_status": "実装済み（PC2d、未統合）",
       "acceptance_status": "未実施",
-      "evidence": [],
+      "evidence": [
+        "native/src/app/display_color.cpp",
+        "native/src/app/tiles.cpp",
+        "native/src/app/main_window_color.cpp",
+        "native/src/render/proof.cpp",
+        "native/src/render/color_canvas.cpp",
+        "native/tests/unit/test_proof.cpp",
+        "native/tests/gui/test_gui_color.cpp",
+        "native/tests/gui/test_gui_info.cpp"
+      ],
       "pc0": {
         "date": "2026-10-16",
         "cpp_base": "962faa4",
@@ -37069,7 +37113,8 @@
         ],
         "gap": "CMYK の色校正表示（選んだ ICC、LittleCMS）と、カラーパネルの色が刷れないときの「色域外」の印はある。モニターのプロファイルへの表示の変換、文書のプロファイル（sRGB 以外）からの表示、任意のプロファイルでのソフトプルーフ、画像の上の色域外の警告表示がなく、変換は 8 ビット",
         "note": "document:color-depth-model（文書プロファイル）と関わる"
-      }
+      },
+      "limitations": "モニターのプロファイルへの表示（カラー設定。自動は Windows だけ、ほかは sRGB）・文書のプロファイルからの表示・任意のプロファイルでの色の校正と色域外警告は PC1b、PC2d で照合（test_gui_info の theMonitorsProfileShowsThePage）。画面のタイルは 8 bit の sRGB から変換する（表示だけ）。"
     },
     {
       "id": "paint:brush-dynamics",

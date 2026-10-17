@@ -268,8 +268,9 @@ private slots:
         // act_proof_cyan, act_proof_magenta, act_proof_yellow, act_proof_black, act_proof_cmy, act_proof_srgb, act_proof_monitor,
         // act_proof_legacy_mac, act_proof_protan, act_proof_deutan) — theirs (test_gui_color), and the 5 of PC1d (SPEC COLOR-03)
         // — ページ → 色モード の 2 階調…・インデックスカラー…・ダブルトーン…・マルチチャンネル・カラーテーブル… (act_mode_bitmap,
-        // act_mode_indexed, act_mode_duotone, act_mode_multichannel, act_color_table) — theirs (test_gui_book).
-        QCOMPARE(w->actions_by_name().size(), std::size_t{250});
+        // act_mode_indexed, act_mode_duotone, act_mode_multichannel, act_color_table) — theirs (test_gui_book), and the 1 of
+        // PC2d (SPEC COLOR-04) — 編集 → プロファイルの情報… (act_profile_info) — its own (test_gui_info).
+        QCOMPARE(w->actions_by_name().size(), std::size_t{251});
         QVERIFY(w->action("act_chat_approval"));
         QVERIFY(w->action("act_style"));
         QVERIFY(w->action("act_exposure"));

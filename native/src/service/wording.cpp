@@ -430,6 +430,11 @@ const std::vector<Rule>& rules() {
         r.push_back(rule(R"(the precise pixels cannot be kept: .*)", "高精度の画素が原稿の上限（1 GiB）を超えるため、変換できません"));
         r.push_back(rule(R"(page (\d+): the layer (.*?) (?:is|holds|keeps|has) .*: a page in precise colour \(16 or 32 bits, or of a profile\) cannot draw it yet)",
                          "\\1 ページのレイヤー \\2 は、16・32 ビットやプロファイル付きのページではまだ描けません（描画モードとレイヤーの種類を確かめてください）"));
+        // (PC2d: 取り込む画像のプロファイル, render/import_profile)
+        r.push_back(rule("embedded_profile is keep, convert or assign", "画像のプロファイルの扱いは keep・convert・assign のどれかです"));
+        r.push_back(rule(R"(embedded_profile assign needs the profile \(profile or icc\))", "割り当てるプロファイル（profile か icc）を指定してください"));
+        r.push_back(rule(R"(the profile is not one for the picture's colours.*)", "そのプロファイルは画像の色の空間のものではありません"));
+        r.push_back(rule(R"(embedded_profile assign takes an RGB or grey PSD.*)", "プロファイルを割り当てられるのは RGB かグレーの PSD だけです（CMYK・Lab の PSD は自分のプロファイルで取り込みます）"));
         r.push_back(rule("Lab PSD files are not supported: save it as RGB or CMYK", "Lab カラーの PSD は読めません。RGB か CMYK で保存し直してください"));
         r.push_back(rule("MP4 needs ffmpeg on this computer; WebP, GIF and PNG need nothing",
                          "MP4 にはこのパソコンに ffmpeg が要ります（WebP・GIF・PNG なら何も要りません）"));

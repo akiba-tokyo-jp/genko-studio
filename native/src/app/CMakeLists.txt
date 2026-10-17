@@ -90,6 +90,7 @@ genko_library(genko_app
     tool_settings.cpp
     layer_panel.cpp
     channel_panel.cpp
+    info_panels.cpp
     layer_dialogs.cpp
     adjust_forms.cpp
     adjust_forms_tone.cpp

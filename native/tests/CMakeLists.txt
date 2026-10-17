@@ -254,6 +254,9 @@ genko_test(test_contract_ink SOURCES contract/test_contract_ink.cpp DEPS genko_t
 # color-model@1 (COLOR-03) through the command line: apply, save, undo and redo, render, inspect --pixel, export.
 genko_test(test_contract_color_model SOURCES contract/test_contract_color_model.cpp DEPS genko_test_support genko_render
            LABELS contract TIMEOUT 900)
+# PC2d (COLOR-04) through the command line: put_raster and import_psd with embedded_profile, inspect --profile.
+genko_test(test_contract_profile SOURCES contract/test_contract_profile.cpp DEPS genko_test_support genko_render ZLIB::ZLIB
+           LABELS contract TIMEOUT 900)
 # channels@1 (COLOR-03) through the command line: apply, save, gc, undo and redo, a selection and a fill on a channel,
 # render, inspect, export (the PSD's extra channels read back, the PDF's separation, the notes).
 genko_test(test_contract_channels SOURCES contract/test_contract_channels.cpp DEPS genko_test_support genko_render ZLIB::ZLIB
@@ -355,6 +358,8 @@ if(GENKO_BUILD_APP)
   genko_test(test_gui_select SOURCES gui/test_gui_select.cpp DEPS genko_app GUI TIMEOUT 600)
   # チャンネル (channels@1, COLOR-03): the panel, the target keys, a fill on a channel, the view, options, split.
   genko_test(test_gui_channels SOURCES gui/test_gui_channels.cpp DEPS genko_app GUI TIMEOUT 600)
+  # PC2d (COLOR-04): ヒストグラム and 情報 panels, プロファイルの情報.
+  genko_test(test_gui_info SOURCES gui/test_gui_info.cpp DEPS genko_app GUI TIMEOUT 300)
   # the brush panel and ツールの設定: brushes kept per kind, one's own made, opened, given and read back (.abr too)
   genko_test(test_gui_brushes SOURCES gui/test_gui_brushes.cpp DEPS genko_app GUI TIMEOUT 600)
   # 紙質 (BRUSH-01): the dialog's paper, one's own brush with a paper (the library beside Python's file, read by

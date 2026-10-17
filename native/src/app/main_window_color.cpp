@@ -141,6 +141,8 @@ Model model_of(const std::optional<core::PageColor>& color, const std::optional<
 }  // namespace
 
 void MainWindow::build_color_actions() {
+    make("act_profile_info", QStringLiteral("プロファイルの情報…"), [this] { profile_info_dialog(); }, {},
+         QStringLiteral("ICC プロファイルの色空間・種類・版・白色点・トーンカーブ（ページのもの、内蔵のもの）を見る（edit.profileInfo）"));
     make("act_color_settings", QStringLiteral("カラー設定…"), [this] { color_settings_dialog(); }, {QKeySequence(QStringLiteral("Ctrl+Shift+K"))},
          QStringLiteral("作業用の空間（RGB・CMYK・グレー）、プロファイルが違う原稿・画像の扱い、変換の意図、モニターのプロファイル"));
     auto* kinds = new QActionGroup(this);

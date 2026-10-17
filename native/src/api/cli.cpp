@@ -44,6 +44,7 @@
 #include "render/brushes.hpp"
 #include "render/draw.hpp"
 #include "render/inspect.hpp"
+#include "render/proof.hpp"
 #include "render/movie.hpp"
 #include "render/ops_registry.hpp"
 #include "render/page.hpp"
@@ -250,8 +251,8 @@ int inspect(const QStringList& args, bool ascii) {
     bool have_src = false;
     bool full = false;
     QString stroke;
-    // (color-model@1, the C++ build's own: --pixel <page>:<x_mm>,<y_mm> [--layer ID] [--dpi N])
-    QString pixel, layer, dpi_text;
+    // (color-model@1, the C++ build's own: --pixel <page>:<x_mm>,<y_mm> [--layer ID] [--dpi N]; PC2d: --profile <id|page|sha256>)
+    QString pixel, layer, dpi_text, profile;
     const auto value_of = [&](qsizetype& i, const char* name, QString& into) -> bool {
         const QString& arg = args[i];
         const QString flag = QString::fromLatin1(name);
@@ -278,6 +279,8 @@ int inspect(const QStringList& args, bool ascii) {
             if (!value_of(i, "--layer", layer)) return usage("argument --layer: expected one argument");
         } else if (arg == QLatin1String("--dpi") || arg.startsWith(QLatin1String("--dpi="))) {
             if (!value_of(i, "--dpi", dpi_text)) return usage("argument --dpi: expected one argument");
+        } else if (arg == QLatin1String("--profile") || arg.startsWith(QLatin1String("--profile="))) {
+            if (!value_of(i, "--profile", profile) || profile.isEmpty()) return usage("argument --profile: expected one argument");
         } else if (arg.startsWith(QLatin1Char('-')) && arg.size() > 1) {
             return usage("unrecognized arguments: " + arg.toStdString());
         } else if (!have_src) {
@@ -309,7 +312,12 @@ int inspect(const QStringList& args, bool ascii) {
             if (!ok || dpi < 1 || dpi > 2400) return usage("argument --dpi: an integer 1..2400");
         }
     }
+    if (!profile.isEmpty() && !pixel.isEmpty()) return usage("argument --profile: not with --pixel");
     const auto loaded = storage::load_document(path_arg(src));
+    if (!profile.isEmpty()) {  // (edit.profileInfo: what the profile says of itself, and the built-in ones)
+        print_json(render::proof::profile_info_of(loaded.document, profile.toStdString()), ascii);
+        return 0;
+    }
     if (pixel_page) {
         const core::Document& doc = loaded.document;
         for (std::size_t i = 0; i < doc.pages.size(); ++i) {
