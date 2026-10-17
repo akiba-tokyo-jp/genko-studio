@@ -395,7 +395,7 @@ void lookup_form(Form& form, const FormContext&) {
         if (path.isEmpty()) return;
         QFile file(path);
         if (!file.open(QIODevice::ReadOnly) || file.size() > static_cast<qint64>(core::lut3d::kMaxFileBytes)) {
-            ask::warning(load, QStringLiteral("カラールックアップ"), QStringLiteral("読めないか、32 MiB より大きいファイルです"));
+            ask::warning(load, QStringLiteral("カラールックアップ"), QStringLiteral("読めないか、64 MiB より大きいファイルです"));
             return;
         }
         const QByteArray bytes = file.readAll();

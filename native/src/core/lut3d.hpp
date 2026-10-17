@@ -26,7 +26,8 @@
 namespace genko::core::lut3d {
 
 inline constexpr std::size_t kMaxSize = 129;                     // (PhotoCraft's MAX_SIZE)
-inline constexpr std::size_t kMaxFileBytes = 32 * 1024 * 1024;  // (a file's text an op takes)
+// (a file's text an op takes: a .cube of 129³ with six decimals, about 56 MiB, within it)
+inline constexpr std::size_t kMaxFileBytes = 64 * 1024 * 1024;
 inline constexpr std::string_view kSuffix = ".gklut";
 
 struct Table {
@@ -41,13 +42,16 @@ Table from_fn(std::string title, std::size_t size, const std::function<std::arra
 
 // A file's table, its format by the name's extension (.3dl, .look; a text starting with "<" is a .look; else .cube).
 // core::Error("value") with PhotoCraft's words for one it cannot read (a size beyond 2..129, entries missing or more,
-// a value not finite, …).
+// a value not finite, …). Its numbers are read as Rust reads them, whatever the C locale (a point for the decimal).
 Table parse(std::string_view file_name, std::string_view text);
 Table parse_cube(std::string_view text);
 Table parse_3dl(std::string_view text);
 Table parse_look(std::string_view text);
-// The table as a .cube file (its TITLE when it has one, LUT_3D_SIZE, each entry with 6 decimals).
+// The table as a .cube file (its TITLE when it has one, LUT_3D_SIZE, each entry with 6 decimals and a point, whatever
+// the C locale).
 std::string write_cube(const Table& table);
+// A value as a .cube writes it: 6 decimals and a point, whatever the C locale (printf's "%.6f" in the C locale).
+void append_fixed6(std::string& out, double v);
 
 // PhotoCraft's generated looks (procedural, CC0): their ids and labels, in its order; a look's table (33³, made once).
 struct Look {

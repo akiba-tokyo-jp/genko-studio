@@ -16,6 +16,7 @@
 #include <array>
 #include <cmath>
 #include <cstdio>
+#include <cstring>
 #include <filesystem>
 #include <functional>
 #include <map>
@@ -1201,16 +1202,34 @@ private slots:
         dither.kind = core::LayerKind::Adjust;
         dither.adjust = Json{{"kind", "color_lookup"}, {"interpolation", "trilinear"}, {"dither", true}};
         doc.edit_page(0).layers.push_back(std::move(dither));
-        const core::lut3d::Table baked = core::lut3d::parse_cube(formats::bake_cube(doc, doc.page(0), 256, "big"));
-        QCOMPARE(baked.size, std::size_t(256));
-        for (const std::array<std::size_t, 3> at : {std::array<std::size_t, 3>{0, 0, 0}, {255, 255, 255}, {3, 77, 130}, {128, 1, 254}, {250, 200, 255}}) {
-            const std::size_t i = (at[2] * 256 + at[1]) * 256 + at[0];
-            const double d = core::lut3d::bayer4(static_cast<int>(at[2] * 256 + at[0]), static_cast<int>(at[1])) / 255.0;
-            for (std::size_t c = 0; c < 3; ++c) {
-                const double want = std::clamp(1.0 - static_cast<double>(at[c]) / 255.0 + d, 0.0, 1.0);
-                QVERIFY2(std::abs(baked.data[i * 3 + c] - want) < 2e-6, qPrintable(QStringLiteral("%1,%2,%3.%4: %5 / %6").arg(at[0]).arg(at[1]).arg(at[2]).arg(c).arg(baked.data[i * 3 + c]).arg(want)));
+        const std::string cube = formats::bake_cube(doc, doc.page(0), 256, "big");
+        // (read here line by line: the reader takes tables of at most 129, as PhotoCraft's)
+        const std::size_t header = cube.find("DOMAIN_MAX 1.0 1.0 1.0\n");
+        QVERIFY(cube.find("\nLUT_3D_SIZE 256\n") != std::string::npos && header != std::string::npos);
+        std::vector<std::array<std::size_t, 3>> wanted{{0, 0, 0}, {3, 77, 130}, {128, 1, 254}, {250, 200, 255}, {255, 255, 255}};
+        std::size_t at_line = 0, next = 0, start = header + std::strlen("DOMAIN_MAX 1.0 1.0 1.0\n");
+        while (start < cube.size()) {
+            const std::size_t end = cube.find('\n', start);
+            QVERIFY(end != std::string::npos);
+            if (next < wanted.size()) {
+                const auto& at = wanted[next];
+                if (at_line == (at[2] * 256 + at[1]) * 256 + at[0]) {
+                    const std::string line = cube.substr(start, end - start);
+                    std::array<double, 3> got{};
+                    QVERIFY2(std::sscanf(line.c_str(), "%lf %lf %lf", &got[0], &got[1], &got[2]) == 3, line.c_str());
+                    const double d = core::lut3d::bayer4(static_cast<int>(at[2] * 256 + at[0]), static_cast<int>(at[1])) / 255.0;
+                    for (std::size_t c = 0; c < 3; ++c) {
+                        const double want = std::clamp(1.0 - static_cast<double>(at[c]) / 255.0 + d, 0.0, 1.0);
+                        QVERIFY2(std::abs(got[c] - want) < 2e-6, qPrintable(QStringLiteral("%1,%2,%3.%4: %5 / %6").arg(at[0]).arg(at[1]).arg(at[2]).arg(c).arg(got[c]).arg(want)));
+                    }
+                    ++next;
+                }
             }
+            ++at_line;
+            start = end + 1;
         }
+        QCOMPARE(at_line, std::size_t(256) * 256 * 256);
+        QCOMPARE(next, wanted.size());
     }
 
     // Channel records in another space than the page's: each colour through the conversions once, however many pixels

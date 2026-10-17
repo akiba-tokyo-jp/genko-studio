@@ -547,7 +547,7 @@ const std::vector<Rule>& rules() {
         r.push_back(rule("auto_adjust mode must be one of tone, contrast, color", "自動補正は、自動トーン補正・自動コントラスト・自動カラー補正から選びます"));
         r.push_back(rule("auto_adjust needs the id of a layer", "自動補正をかけるレイヤーを選びます"));
         r.push_back(rule(R"(adjust color_lookup\.data must be the text of .*)", "カラールックアップの表は、.cube・.3dl・.look のファイルから読みます"));
-        r.push_back(rule(R"(adjust color_lookup\.data is larger than 32 MiB)", "カラールックアップの表のファイルが大きすぎます（32 MiB まで）"));
+        r.push_back(rule(R"(adjust color_lookup\.data is larger than 64 MiB)", "カラールックアップの表のファイルが大きすぎます（64 MiB まで）"));
         r.push_back(rule(R"(adjust color_lookup\.data: .*)", "カラールックアップの表のファイルが読めません（.cube・.3dl・.look の中身を確かめます）"));
         r.push_back(rule(R"((?:the correction layer \S+: )?adjust color_lookup\.lut: the book holds no lookup table .*)",
                          "この原稿にはそのカラールックアップの表がありません（表のファイルを読み込み直します）"));

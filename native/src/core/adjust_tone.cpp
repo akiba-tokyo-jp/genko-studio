@@ -517,7 +517,7 @@ Json lookup_normalize(Json read, const Page*, LookupTables* made) {
         if (!data->is_string()) throw OpError("adjust color_lookup.data must be the text of a .cube, .3dl or .look file");
         if (made == nullptr) throw OpError("adjust color_lookup.data is an op's (a file's text made into the book's table)");
         const std::string& text = data->get_ref<const std::string&>();
-        if (text.size() > lut3d::kMaxFileBytes) throw OpError("adjust color_lookup.data is larger than 32 MiB");
+        if (text.size() > lut3d::kMaxFileBytes) throw OpError("adjust color_lookup.data is larger than 64 MiB");
         const std::string file = read.contains("file_name") ? read["file_name"].get<std::string>() : std::string("lut.cube");
         lut3d::Table table;
         try {
