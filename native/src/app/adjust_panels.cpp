@@ -138,6 +138,7 @@ void PropertiesPanel::build() {
     form_ = nullptr;
     opacity_ = nullptr;
     blend_ = nullptr;
+    opened_ = Json::object();
     const auto [page, layer] = chosen(window_);
     seen_ = window_->session().snapshot().get();
     page_id_ = page != nullptr ? page->id : std::string();
@@ -201,6 +202,7 @@ void PropertiesPanel::build() {
         context.pen = {static_cast<int>(rgb[0]), static_cast<int>(rgb[1]), static_cast<int>(rgb[2])};
         kind->build(*form_, context);
         form_->set_values(kind->prepare ? kind->prepare(*layer->adjust) : *layer->adjust);
+        opened_ = form_->values();
         connect(form_, &Form::changed, this, [this] { changed(); });
         auto* reset = new QPushButton(QStringLiteral("既定に戻す"));
         reset->setObjectName(QStringLiteral("properties_reset"));
@@ -229,8 +231,9 @@ void PropertiesPanel::changed() {
     settle_->start();
 }
 
-// The ops of what is being changed: the correction's settings laid over it (set_adjustment, its blend in its native)
-// and the layer's opacity (set_layer), or another layer's opacity and blend.
+// The ops of what is being changed: the correction's settings the person changed laid over it (set_adjustment, its blend
+// in its native: the user's decision 3 — what is not changed stays as it is) and the layer's opacity (set_layer), or
+// another layer's opacity and blend.
 std::optional<Json> PropertiesPanel::pending() const {
     const core::Document& book = window_->book();
     const core::Page* page = nullptr;
@@ -248,7 +251,7 @@ std::optional<Json> PropertiesPanel::pending() const {
     const Json index = page->index.json();
     if (std::abs(opacity - layer->opacity) > 1e-9) ops.push_back(Json{{"op", "set_layer"}, {"page", index}, {"id", layer_id_}, {"opacity", opacity}});
     if (layer->kind == core::LayerKind::Adjust && layer->adjust) {
-        Json given = form_ != nullptr ? form_->values() : Json::object();
+        Json given = form_ != nullptr ? changes(opened_, form_->values()) : Json::object();
         if (blend != core::native_of(*layer->adjust).blend) given["native"]["blend"] = blend == "normal" ? Json() : Json(blend);
         if (!given.empty()) {
             Json op{{"op", "set_adjustment"}, {"page", index}, {"id", layer_id_}};

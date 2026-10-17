@@ -8,14 +8,14 @@
 
 #include <algorithm>
 #include <cctype>
-#include <cerrno>
+#include <charconv>
 #include <cmath>
 #include <cstdint>
-#include <cstdlib>
 #include <cstring>
+#include <limits>
+#include <system_error>
 #include <deque>
 #include <mutex>
-#include <type_traits>
 #include <utility>
 
 #include "core/command_bus.hpp"
@@ -68,24 +68,68 @@ void each_line(std::string_view text, Each&& each) {
     }
 }
 
-// A number as Rust's str::parse reads it: the whole word a decimal number (an infinity and NaN too; no hexadecimal).
+bool same_letters(std::string_view a, std::string_view b) {
+    return a.size() == b.size() && std::equal(a.begin(), a.end(), b.begin(), [](char x, char y) {
+               return std::tolower(static_cast<unsigned char>(x)) == std::tolower(static_cast<unsigned char>(y));
+           });
+}
+
+// Is a decimal number past its type's range below one (else above)? Its mantissa's first nonzero digit's power of ten
+// with the exponent (core/pyconv's below_one: an exponent of any length saturates at the word's length).
+bool below_one(std::string_view body) {
+    const std::string_view mantissa = body.substr(0, body.find_first_of("eE"));
+    const auto first = mantissa.find_first_of("123456789");
+    if (first == std::string_view::npos) return true;
+    const auto point = std::min(mantissa.find('.'), mantissa.size());
+    const std::int64_t order = first < point ? static_cast<std::int64_t>(point - first - 1) : -static_cast<std::int64_t>(first - point);
+    if (mantissa.size() == body.size()) return order < 0;
+    std::string_view exponent = body.substr(mantissa.size() + 1);
+    const bool negative = exponent.starts_with('-');
+    if (negative || exponent.starts_with('+')) exponent.remove_prefix(1);
+    const auto limit = static_cast<std::int64_t>(body.size());
+    std::int64_t shift = 0;
+    for (const char c : exponent) {
+        const std::int64_t digit = c - '0';
+        if (shift > limit / 10 || (shift == limit / 10 && digit > limit % 10)) shift = limit;
+        else shift = shift * 10 + digit;
+    }
+    return negative ? shift > order : order < 0 && shift < -order;
+}
+
+// A number as Rust's str::parse reads it: the whole word a decimal number — a sign, ".5" and "5.", an exponent; an
+// infinity and NaN too; past the type's range an infinity, or 0 for one too small; no hexadecimal — with a point
+// whatever the C locale (std::from_chars: the app and the command line run in the environment's locale, where a German
+// or French one has a comma).
 template <typename T>
 std::optional<T> number(std::string_view word) {
     if (word.empty() || word.size() > 128) return std::nullopt;
-    for (const char c : word) {
-        if (c == 'x' || c == 'X' || space(c)) return std::nullopt;
+    std::string_view body = word;
+    bool negative = false;
+    if (body.front() == '+' || body.front() == '-') {
+        negative = body.front() == '-';
+        body.remove_prefix(1);
     }
-    const std::string text(word);
-    char* end = nullptr;
-    errno = 0;
+    if (body.empty()) return std::nullopt;
+    if (same_letters(body, "inf") || same_letters(body, "infinity")) return negative ? -std::numeric_limits<T>::infinity() : std::numeric_limits<T>::infinity();
+    if (same_letters(body, "nan")) return std::numeric_limits<T>::quiet_NaN();
+    if (!((body.front() >= '0' && body.front() <= '9') || body.front() == '.')) return std::nullopt;
+    for (const char c : body) {
+        if (c == 'x' || c == 'X') return std::nullopt;
+    }
+    std::string padded;  // (".5": a digit first, as every from_chars reads it)
+    if (body.front() == '.') {
+        padded = "0" + std::string(body);
+        body = padded;
+    }
     T v{};
-    if constexpr (std::is_same_v<T, float>) {
-        v = std::strtof(text.c_str(), &end);
-    } else {
-        v = std::strtod(text.c_str(), &end);
+    const auto [end, error] = std::from_chars(body.data(), body.data() + body.size(), v, std::chars_format::general);
+    if (end != body.data() + body.size()) return std::nullopt;
+    if (error == std::errc::result_out_of_range) {
+        v = below_one(body) ? T(0) : std::numeric_limits<T>::infinity();
+    } else if (error != std::errc{}) {
+        return std::nullopt;
     }
-    if (end != text.c_str() + text.size()) return std::nullopt;
-    return v;  // (out of range: an infinity, or 0 for one too small — as Rust reads it)
+    return negative ? -v : v;
 }
 
 std::optional<std::size_t> whole(std::string_view word) {
@@ -342,13 +386,20 @@ std::string write_cube(const Table& table) {
     }
     out += "LUT_3D_SIZE " + std::to_string(table.size) + "\n";
     out.reserve(out.size() + table.data.size() / 3 * 28);
-    char line[96];
     for (std::size_t i = 0; i + 3 <= table.data.size(); i += 3) {
-        const int n = std::snprintf(line, sizeof line, "%.6f %.6f %.6f\n", static_cast<double>(table.data[i]), static_cast<double>(table.data[i + 1]),
-                                    static_cast<double>(table.data[i + 2]));
-        out.append(line, static_cast<std::size_t>(std::max(0, n)));
+        for (std::size_t k = 0; k < 3; ++k) {
+            if (k > 0) out += ' ';
+            append_fixed6(out, static_cast<double>(table.data[i + k]));
+        }
+        out += '\n';
     }
     return out;
+}
+
+void append_fixed6(std::string& out, double v) {
+    char text[400];  // (any double: 309 digits, the point and six)
+    const auto [end, error] = std::to_chars(text, text + sizeof text, v, std::chars_format::fixed, 6);
+    if (error == std::errc{}) out.append(text, static_cast<std::size_t>(end - text));
 }
 
 const std::array<Look, 8>& looks() {
@@ -465,6 +516,7 @@ Table decode(std::string_view bytes) {
 }
 
 std::shared_ptr<const Table> decoded(const std::string& ref, const Bytes& bytes) {
+    if (!bytes) return nullptr;  // (a table not held: not one decoded for another book)
     static std::mutex lock;
     static std::deque<std::pair<std::string, std::shared_ptr<const Table>>> kept;  // (the last used first)
     {
@@ -477,7 +529,6 @@ std::shared_ptr<const Table> decoded(const std::string& ref, const Bytes& bytes)
             return found.second;
         }
     }
-    if (!bytes) return nullptr;
     auto table = std::make_shared<const Table>(decode(*bytes));
     const std::lock_guard<std::mutex> hold(lock);
     kept.emplace_front(ref, table);
@@ -492,58 +543,42 @@ std::shared_ptr<const Table> decoded(const std::string& ref, const Bytes& bytes)
     return table;
 }
 
-namespace {
-std::mutex& made_lock() {
-    static std::mutex lock;
-    return lock;
-}
-std::deque<std::pair<std::string, Bytes>>& made() {
-    static std::deque<std::pair<std::string, Bytes>> all;
-    return all;
-}
-}  // namespace
-
-void remember(const std::string& ref, const Bytes& bytes) {
-    const std::lock_guard<std::mutex> hold(made_lock());
-    auto& all = made();
-    std::erase_if(all, [&ref](const auto& each) { return each.first == ref; });
-    all.emplace_front(ref, bytes);
-    if (all.size() > 8) all.resize(8);
-}
-
-Bytes remembered(const std::string& ref) {
-    const std::lock_guard<std::mutex> hold(made_lock());
-    for (const auto& [each, bytes] : made()) {
-        if (each == ref) return bytes;
-    }
-    return nullptr;
-}
-
-void keep_luts(std::map<std::string, Bytes>& luts, const Json& adjust) {
+void keep_luts(std::map<std::string, Bytes>& luts, const std::map<std::string, Bytes>& made, const Json& adjust) {
     if (!adjust.is_object() || adjust.value("kind", Json()) != Json("color_lookup")) return;
     const auto it = adjust.find("lut");
     if (it == adjust.end() || !it->is_string()) return;
     const std::string& ref = it->get_ref<const std::string&>();
     if (luts.contains(ref)) return;
-    if (Bytes bytes = remembered(ref)) {
-        luts.emplace(ref, std::move(bytes));
+    if (const auto found = made.find(ref); found != made.end() && found->second) {
+        luts.emplace(ref, found->second);
         return;
     }
     throw OpError("adjust color_lookup.lut: the book holds no lookup table " + ref + " (give the file's text as data)");
 }
 
+namespace {
+void add_refs(const Page& page, std::vector<std::string>& out) {
+    for (const Layer& layer : page.layers) {
+        if (layer.kind != LayerKind::Adjust || !layer.adjust || !layer.adjust->is_object()) continue;
+        if (layer.adjust->value("kind", Json()) != Json("color_lookup")) continue;
+        const auto lut = layer.adjust->find("lut");
+        if (lut == layer.adjust->end() || !lut->is_string()) continue;
+        if (std::find(out.begin(), out.end(), lut->get<std::string>()) == out.end()) out.push_back(lut->get<std::string>());
+    }
+}
+}  // namespace
+
 std::vector<std::string> refs_of(const Document& doc) {
     std::vector<std::string> out;
     for (std::size_t i = 0; i < doc.pages.size(); ++i) {
-        if (doc.is_deferred(i)) continue;
-        for (const Layer& layer : doc.page(i).layers) {
-            if (layer.kind != LayerKind::Adjust || !layer.adjust || !layer.adjust->is_object()) continue;
-            if (layer.adjust->value("kind", Json()) != Json("color_lookup")) continue;
-            const auto lut = layer.adjust->find("lut");
-            if (lut == layer.adjust->end() || !lut->is_string()) continue;
-            if (std::find(out.begin(), out.end(), lut->get<std::string>()) == out.end()) out.push_back(lut->get<std::string>());
-        }
+        if (!doc.is_deferred(i)) add_refs(doc.page(i), out);
     }
+    return out;
+}
+
+std::vector<std::string> refs_of(const Page& page) {
+    std::vector<std::string> out;
+    add_refs(page, out);
     return out;
 }
 

@@ -3,6 +3,7 @@
 #include <array>
 #include <cstdint>
 #include <functional>
+#include <map>
 #include <memory>
 #include <optional>
 #include <string>
@@ -30,6 +31,11 @@
 namespace genko::core {
 
 inline constexpr std::string_view kAdjustmentsFeature = "adjustments@1";
+
+// The 3D lookup tables a correction may use (color_lookup's `lut`), by their asset ref: a book's (Document::luts), or
+// those an op made of a file's text (`data`) — the op keeps them in its book (core/lut3d's keep_luts) or, a filter,
+// uses them and lets them go.
+using LookupTables = std::map<std::string, Bytes>;
 
 // A function as a table per channel: red, green and blue each through its 256 values (0..255). The 8-bit page's fast way.
 struct ChannelTables {
@@ -85,29 +91,33 @@ Json without_native(const Json& adjust);
 // build's own in its normal form. Python's own settings are left as given (the caller checks them as Python does).
 // OpError for what is refused (a value of the wrong type, not finite, a key it does not know, a blend Lab or a
 // multichannel page does not composite); numbers out of range are clamped, as PhotoCraft's fields are.
-// core::Error("not_yet_ported") naming a kind or a native setting whose formula this build does not have yet.
-Json normalize_adjust(const Json& adjust, const Page* page);
+// core::Error("not_yet_ported") naming a kind or a native setting whose formula this build does not have yet. `made`:
+// where the tables it makes of a file's text go (color_lookup's `data`: OpError without it).
+Json normalize_adjust(const Json& adjust, const Page* page, LookupTables* made = nullptr);
 // The settings of a filter_raster kind of the C++ build's own, or of a Python kind with a `native`: its normal form,
 // as normalize_adjust (`params`: the op's settings, without op, page, layer, id, kind, area and channel).
-Json normalize_filter(std::string_view kind, const Json& params, const Page* page);
+Json normalize_filter(std::string_view kind, const Json& params, const Page* page, LookupTables* made = nullptr);
 // Is filter_raster's kind (with these settings) one of the C++ build's own ways (a kind of its own, or a native)?
 bool native_filter(std::string_view kind, const Json& params);
 
 // adjustments@1 as stored: every correction layer's `native` and own kind well formed — known keys, values of the right
-// type in their ranges, a blend its page composites (a Lab or multichannel page: as its layers' blends). core::Error
-// ("value") naming the layer: the book opens read-only, an op that would leave it so is refused. Python's form is not
-// looked at (Python's rule: a setting it cannot read makes the layer do nothing).
+// type in their ranges, a blend its page composites (a Lab or multichannel page: as its layers' blends), a
+// color_lookup's table held by the book (Document::luts: else it could not be written). core::Error ("value") naming
+// the layer: the book opens read-only, an op that would leave it so is refused. Python's form is not looked at
+// (Python's rule: a setting it cannot read makes the layer do nothing).
 void validate_adjustments(const Document& doc);
 
 // The function of a correction (its "adjust") on a page: Python's form as PreciseAdjustment (its continuous formulas
-// of Python's tables), the rest by its kind's hooks (core/adjust_kinds.hpp). `doc`: where a lookup table's asset is.
+// of Python's tables), the rest by its kind's hooks (core/adjust_kinds.hpp). `doc`: the book whose lookup tables a
+// color_lookup uses (its own only: none, or one it does not hold, does nothing).
 // Null for a correction that does nothing (no kind; a kind Python's apply_filter does not know; Python's ValueError).
 // core::Error("not_yet_ported") naming a kind or setting whose formula is not in this build yet.
 AdjustPtr adjust_function(const Json& adjust, const Page& page, const Document* doc = nullptr);
 // The function of a filter_raster kind of the C++ build's own (or a Python kind with a native) and its settings in
 // their normal form; not_yet_ported as adjust_function. A kind that works beyond each pixel (PC2c's local
-// corrections, equalize): not_yet_ported — the op does it (render/ops_adjust.cpp).
-AdjustPtr filter_function(std::string_view kind, const Json& params, const Page& page, const Document* doc = nullptr);
+// corrections, equalize): not_yet_ported — the op does it (render/ops_adjust.cpp). `luts`: the tables it may use (the
+// book's and those the op made).
+AdjustPtr filter_function(std::string_view kind, const Json& params, const Page& page, const LookupTables* luts = nullptr);
 
 // The words of a refusal of a kind or setting not in this build yet (core::Error("not_yet_ported")).
 [[noreturn]] void adjust_not_yet(std::string_view what, std::string_view group);

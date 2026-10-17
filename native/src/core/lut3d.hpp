@@ -26,7 +26,8 @@
 namespace genko::core::lut3d {
 
 inline constexpr std::size_t kMaxSize = 129;                     // (PhotoCraft's MAX_SIZE)
-inline constexpr std::size_t kMaxFileBytes = 32 * 1024 * 1024;  // (a file's text an op takes)
+// (a file's text an op takes: a .cube of 129³ with six decimals, about 56 MiB, within it)
+inline constexpr std::size_t kMaxFileBytes = 64 * 1024 * 1024;
 inline constexpr std::string_view kSuffix = ".gklut";
 
 struct Table {
@@ -41,13 +42,16 @@ Table from_fn(std::string title, std::size_t size, const std::function<std::arra
 
 // A file's table, its format by the name's extension (.3dl, .look; a text starting with "<" is a .look; else .cube).
 // core::Error("value") with PhotoCraft's words for one it cannot read (a size beyond 2..129, entries missing or more,
-// a value not finite, …).
+// a value not finite, …). Its numbers are read as Rust reads them, whatever the C locale (a point for the decimal).
 Table parse(std::string_view file_name, std::string_view text);
 Table parse_cube(std::string_view text);
 Table parse_3dl(std::string_view text);
 Table parse_look(std::string_view text);
-// The table as a .cube file (its TITLE when it has one, LUT_3D_SIZE, each entry with 6 decimals).
+// The table as a .cube file (its TITLE when it has one, LUT_3D_SIZE, each entry with 6 decimals and a point, whatever
+// the C locale).
 std::string write_cube(const Table& table);
+// A value as a .cube writes it: 6 decimals and a point, whatever the C locale (printf's "%.6f" in the C locale).
+void append_fixed6(std::string& out, double v);
 
 // PhotoCraft's generated looks (procedural, CC0): their ids and labels, in its order; a look's table (33³, made once).
 struct Look {
@@ -67,19 +71,17 @@ double bayer4(int x, int y);
 // bytes that are not one (another magic or version, a size beyond 2..129, entries missing or more, a value not finite).
 std::string encode(const Table& table);
 Table decode(std::string_view bytes);
-// A decoded table by its bytes' ref, kept a few at a time (a table is drawn many times; 129³ is about 26 MB).
+// A decoded table by its bytes' ref, kept a few at a time (a table is drawn many times; 129³ is about 26 MB). None
+// without its bytes: a table is always the book's (Document::luts) — never one another book decoded before.
 std::shared_ptr<const Table> decoded(const std::string& ref, const Bytes& bytes);
 
-// The tables an op made of a file's text (normalize: the asset not in a book yet), by their ref, a few kept until the op
-// takes them into its book (keep_luts) or a filter uses one. None when it is not (any more) there.
-void remember(const std::string& ref, const Bytes& bytes);
-Bytes remembered(const std::string& ref);
-
-// A correction's lookup table into the book an op changes (add_layer, set_layer, set_adjustment: a color_lookup with a
-// `lut`), from the tables the op just made: OpError when the book does not hold it and it was not just made (a table of
-// another book).
-void keep_luts(std::map<std::string, Bytes>& luts, const Json& adjust);
-// The tables a book's color_lookup corrections use (their "lut" refs, each once, in their order): what the writer writes.
+// A correction's lookup table into the book an op changes (add_layer, set_layer, set_adjustment, import_psd: a
+// color_lookup with a `lut`): the book's own, or one the op just made of a file's text or read from a PSD (`made`, by
+// ref). OpError when neither holds it (a table of another book: its file's text is given as `data`).
+void keep_luts(std::map<std::string, Bytes>& luts, const std::map<std::string, Bytes>& made, const Json& adjust);
+// The tables a book's (or a page's) color_lookup corrections use (their "lut" refs, each once, in their order): what the
+// writer writes, what a page brings into another book (import_pages).
 std::vector<std::string> refs_of(const Document& doc);
+std::vector<std::string> refs_of(const Page& page);
 
 }  // namespace genko::core::lut3d

@@ -214,11 +214,14 @@ Json reset_of(const Json& current) {
 }
 
 // The settings given laid over the current ones: an object over an object key by key (a range of hue_saturation, the
-// native and its channel records), anything else in its place.
+// native and its channel records), a null taking the setting out (a channel record set back to doing nothing; Python's
+// `channel` back to all three), anything else in its place.
 void lay_over(Json& now, const Json& given) {
     for (const auto& [key, value] : given.items()) {
         const auto it = now.find(key);
-        if (it != now.end() && it->is_object() && value.is_object()) {
+        if (value.is_null()) {
+            if (it != now.end()) now.erase(it);
+        } else if (it != now.end() && it->is_object() && value.is_object()) {
             lay_over(*it, value);
         } else {
             now[key] = value;
@@ -363,7 +366,8 @@ FilterWork filter_work(const core::Document& doc, const core::Page& page, std::s
     const bool python = core::python_adjust_kind(kind);
     Json params = params_in.is_object() ? params_in : Json::object();
     if (!python) params.erase("channel");  // (PC1c's target: render/channels lends it; not a setting of the kind)
-    work.params = core::normalize_filter(kind, params, &page);
+    core::LookupTables made;  // (a color_lookup's table of the op's file text: used, not kept in the book)
+    work.params = core::normalize_filter(kind, params, &page, &made);
     if (python) {
         Json adjust = work.params;
         adjust["kind"] = std::string(kind);
@@ -384,7 +388,12 @@ FilterWork filter_work(const core::Document& doc, const core::Page& page, std::s
         }
         core::adjust_not_yet("the filter " + std::string(kind), found->group);
     }
-    work.function = core::filter_function(kind, work.params, page, &doc);
+    core::LookupTables luts;
+    if (!made.empty()) {
+        luts = doc.luts;
+        luts.insert(made.begin(), made.end());
+    }
+    work.function = core::filter_function(kind, work.params, page, made.empty() ? &doc.luts : &luts);
     if (!work.function) throw core::OpError("the filter " + std::string(kind) + " cannot be used with these settings");
     return work;
 }

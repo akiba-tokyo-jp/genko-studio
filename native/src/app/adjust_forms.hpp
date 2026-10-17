@@ -118,9 +118,21 @@ std::vector<FormKind> color_forms();  // PC2b: app/adjust_forms_color.cpp
 
 // A correction's window (design 5): its form from `now` (its defaults where it has none), 「既定に戻す」, 「自動」 when the
 // context has it, the result shown on the page while it changes (`preview`, 250 ms after the last change, as
-// filter_params), かける / やめる. The settings, or none when the person stopped (or the kind has no form).
+// filter_params), かける / やめる. The settings, or none when the person stopped (or the kind has no form). `opened`: the
+// settings as the form showed them when it opened (changes(): what the person changed).
 std::optional<core::Json> adjust_dialog(QWidget* parent, const std::string& kind, const core::Json& now, const FormContext& context,
-                                        FilterPreview preview = {});
+                                        FilterPreview preview = {}, core::Json* opened = nullptr);
+
+// (the user's decision 3: an existing correction is set again in its own form) What a form's settings changed from
+// those it opened with (`before`; both Form::values()): each setting changed, an object's by its own keys (a native's, a
+// channel record's), one taken out (a record set back to doing nothing) as null; {} for none. lay_changes lays them over
+// a correction as it is (null: the key taken out; a native left empty: taken out) — what the window did not change stays
+// as it was (Python's form kept: a gamma curve's absent points, a levels' gamma of three places, a gradient map's
+// colours).
+core::Json changes(const core::Json& before, const core::Json& after);
+void lay_changes(core::Json& adjust, const core::Json& changes);
+// A form's settings without what it leaves out (a null: Python's default, no native setting), for a correction made new.
+core::Json without_nulls(const core::Json& values);
 
 // The menus' frame (MainWindow::build_adjust_menus, app/main_window_adjust.cpp): each group adds its commands to レイヤー →
 // 色調補正 (`adjust`) and to 編集 (`edit`) with the window's `make` (a command registered by its name).

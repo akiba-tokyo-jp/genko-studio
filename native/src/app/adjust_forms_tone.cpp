@@ -84,7 +84,16 @@ void add_histogram(Form& form, const FormContext& context) {
 // The formula's choice of levels and a tone curve (the user's decision 4): PhotoCraft's (Photoshop's) or Genko's.
 void method_field(Form& form) {
     form.choice("native.method", QStringLiteral("式"),
-                {{QStringLiteral("Photoshop 型（上流の式）"), Json("upstream")}, {QStringLiteral("Genko 型（今までの式）"), Json()}}, Json());
+                {{QStringLiteral("Photoshop 型"), Json("upstream")}, {QStringLiteral("Genko 型（今までの式）"), Json()}}, Json());
+}
+
+// Python's `channel` of levels and a tone curve: the composite on red, green or blue only (an RGB page's: another page's
+// colours are its plates, where Python's channel is not looked at — kept as it is there).
+void python_channel_field(Form& form, const FormContext& context) {
+    if (core::default_tone_space(context.page) != "rgb") return;
+    form.choice("channel", QStringLiteral("合成をかける色"),
+                {{QStringLiteral("RGB（全部）"), Json()}, {QStringLiteral("赤"), Json("r")}, {QStringLiteral("緑"), Json("g")}, {QStringLiteral("青"), Json("b")}},
+                Json());
 }
 
 // The records' space: the page's (shown; its value only while there are records).
@@ -112,6 +121,7 @@ void space_field(Form& form, const std::shared_ptr<Records>& state, std::string_
 void levels_form(Form& form, const FormContext& context) {
     add_histogram(form, context);
     method_field(form);
+    python_channel_field(form, context);
     form.number("black", QStringLiteral("黒くする所（入力の黒）"), 0, 253, 0, 0);
     form.number("white", QStringLiteral("白くする所（入力の白）"), 2, 255, 255, 0);
     form.number("gamma", QStringLiteral("中間（1 より大きいと明るく）"), 0.01, 9.99, 1.0, 2);
@@ -196,6 +206,7 @@ void levels_form(Form& form, const FormContext& context) {
 void curve_form(Form& form, const FormContext& context) {
     add_histogram(form, context);
     method_field(form);
+    python_channel_field(form, context);
     auto* composite = new CurveEditor;
     QObject::connect(composite, &CurveEditor::changed, &form, [&form] { emit form.changed(); });
     form.custom("points", QStringLiteral("合成の曲線"), composite,
@@ -395,7 +406,7 @@ void lookup_form(Form& form, const FormContext&) {
         if (path.isEmpty()) return;
         QFile file(path);
         if (!file.open(QIODevice::ReadOnly) || file.size() > static_cast<qint64>(core::lut3d::kMaxFileBytes)) {
-            ask::warning(load, QStringLiteral("カラールックアップ"), QStringLiteral("読めないか、32 MiB より大きいファイルです"));
+            ask::warning(load, QStringLiteral("カラールックアップ"), QStringLiteral("読めないか、64 MiB より大きいファイルです"));
             return;
         }
         const QByteArray bytes = file.readAll();

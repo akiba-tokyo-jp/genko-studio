@@ -12558,7 +12558,10 @@
         "native/tests/unit/test_lut3d.cpp",
         "native/tests/unit/test_adjust.cpp",
         "native/tests/gui/test_gui_adjust.cpp",
-        "native/tests/contract/test_contract_adjust.cpp"
+        "native/tests/contract/test_contract_adjust.cpp",
+        "native/src/render/psd_adjust.cpp",
+        "native/src/core/ops_bookpages.cpp",
+        "native/src/render/import_psd.cpp"
       ],
       "pc0": {
         "date": "2026-10-16",
@@ -19660,7 +19663,11 @@
         "native/tests/unit/test_lut3d.cpp",
         "native/tests/unit/test_adjust.cpp",
         "native/tests/gui/test_gui_adjust.cpp",
-        "native/tests/contract/test_contract_adjust.cpp"
+        "native/tests/contract/test_contract_adjust.cpp",
+        "native/src/core/ops_bookpages.cpp",
+        "native/src/core/adjust.cpp",
+        "native/src/render/psd.cpp",
+        "native/src/render/import_psd.cpp"
       ],
       "pc0": {
         "date": "2026-10-16",
@@ -19713,7 +19720,9 @@
         "native/tests/unit/test_adjust.cpp",
         "native/tests/gui/test_gui_adjust.cpp",
         "native/tests/contract/test_contract_adjust.cpp",
-        "native/src/app/layer_dialogs.cpp"
+        "native/src/app/layer_dialogs.cpp",
+        "native/src/app/layer_panel.cpp",
+        "native/tests/gui/test_gui_layers.cpp"
       ],
       "genko_candidate": {
         "op": "add_layer",
@@ -19980,7 +19989,8 @@
         "native/src/app/adjust_panels.cpp",
         "native/tests/unit/test_adjust.cpp",
         "native/tests/gui/test_gui_adjust.cpp",
-        "native/tests/contract/test_contract_adjust.cpp"
+        "native/tests/contract/test_contract_adjust.cpp",
+        "native/src/render/import_psd.cpp"
       ],
       "genko_candidate": {
         "op": "add_layer",
@@ -20046,7 +20056,9 @@
         "native/src/app/adjust_panels.cpp",
         "native/tests/unit/test_adjust.cpp",
         "native/tests/gui/test_gui_adjust.cpp",
-        "native/tests/contract/test_contract_adjust.cpp"
+        "native/tests/contract/test_contract_adjust.cpp",
+        "native/src/app/layer_panel.cpp",
+        "native/tests/gui/test_gui_layers.cpp"
       ],
       "genko_candidate": {
         "op": "add_layer",
@@ -21169,7 +21181,9 @@
         "native/src/app/adjust_panels.cpp",
         "native/tests/unit/test_adjust.cpp",
         "native/tests/gui/test_gui_adjust.cpp",
-        "native/tests/contract/test_contract_adjust.cpp"
+        "native/tests/contract/test_contract_adjust.cpp",
+        "native/src/app/layer_panel.cpp",
+        "native/tests/gui/test_gui_layers.cpp"
       ],
       "pc0": {
         "date": "2026-10-16",
@@ -35416,7 +35430,8 @@
       "evidence": [
         "native/src/app/adjust_panels.cpp",
         "native/src/app/main_window_adjust.cpp",
-        "native/tests/gui/test_gui_adjust.cpp"
+        "native/tests/gui/test_gui_adjust.cpp",
+        "native/src/app/adjust_forms.cpp"
       ],
       "pc0": {
         "date": "2026-10-16",

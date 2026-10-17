@@ -349,11 +349,15 @@ void import_psd(core::OpContext& c) {
     if (static_cast<std::uint64_t>(file.width()) * static_cast<std::uint64_t>(file.height()) > static_cast<std::uint64_t>(kMaxImagePixels)) {
         throw OpError("image too large: " + std::to_string(file.width()) + "x" + std::to_string(file.height()));
     }
-    // the file's layers, or (none with a picture) its merged picture as one
+    // the file's layers, or (none with a picture: folders and adjustment layers only) its merged picture as one, as
+    // Python reads it — its adjustment layers then left out (skipped), as psd.py leaves them: the merged picture shows
+    // them already, laid over it again they would be laid twice (PC2, the user's decision 5)
     std::vector<psd::Layer> layers = file.layers();
     std::optional<Image> merged;
     std::optional<core::InkPixels> merged_inks;
-    if (std::all_of(layers.begin(), layers.end(), [](const psd::Layer& l) { return l.folder; })) {
+    bool merged_only = false;
+    if (std::all_of(layers.begin(), layers.end(), [](const psd::Layer& l) { return l.folder || l.kind == "adjust"; })) {
+        merged_only = true;
         if (mode) {
             merged_inks = file.merged_inks(*mode);
             if (!merged_inks) throw OpError("the PSD has no pictures to read");
@@ -429,7 +433,7 @@ void import_psd(core::OpContext& c) {
             // blend its native.blend: a correction layer's own blend is not looked at)
             layer.kind = core::LayerKind::Adjust;
             layer.adjust = psd::imported_adjust(*item.adjust, item.blend, page);
-            core::lut3d::keep_luts(doc.luts, *layer.adjust);  // (PC2a: a color lookup's table into the book)
+            core::lut3d::keep_luts(doc.luts, item.luts, *layer.adjust);  // (PC2a: a color lookup's table into the book)
             layer.blend = "normal";
             if (auto mask = mask_of()) layer.mask = std::move(*mask);
         } else {
@@ -480,7 +484,7 @@ void import_psd(core::OpContext& c) {
     Json listed = Json::array();
     for (const core::Layer& layer : made) listed.push_back(Json::object({{"id", layer.id}, {"title", layer.title}}));
     Json skipped = Json::array();
-    for (const std::string& name : file.skipped()) skipped.push_back(name);
+    for (const std::string& name : merged_only ? file.python_skipped() : file.skipped()) skipped.push_back(name);
     target.layers.insert(target.layers.begin() + static_cast<std::ptrdiff_t>(at), std::make_move_iterator(made.begin()),
                          std::make_move_iterator(made.end()));
     c.report = Json::object({{"layers", std::move(listed)}, {"skipped", std::move(skipped)}});
