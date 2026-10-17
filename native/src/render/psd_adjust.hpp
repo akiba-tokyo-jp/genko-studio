@@ -33,11 +33,23 @@ struct AdjustCodec {
 };
 
 // Every adjustment block this build knows (render/psd.cpp's adjust_tag but the fill layers SoCo, GdFl, PtFl), each with
-// what its group filled.
+// what its group filled. A block may be written from more than one kind (hue2: hue_saturation's, and Python's hue as
+// the nearest, design 4.4); it is read as the first of them (hue2: hue_saturation).
 const std::vector<AdjustCodec>& adjust_codecs();
-using CodecHooks = std::vector<std::pair<std::string_view, AdjustCodec>>;  // (by key: the read and write filled)
+// (by key: the read and write filled — into the rows of that key, or, when the hook names its kind, that kind's row)
+using CodecHooks = std::vector<std::pair<std::string_view, AdjustCodec>>;
 CodecHooks tone_codecs();   // PC2a: render/psd_adjust.cpp (levl, curv, brit, post, thrs, nvrt, expA, grdm, clrL)
-CodecHooks color_codecs();  // PC2b: render/psd_adjust_color.cpp (hue2, vibA, blnc, blwh, phfl, mixr, selc)
+CodecHooks color_codecs();  // PC2b: render/psd_adjust_color.cpp (hue2 — and Python's hue —, vibA, blnc, blwh, phfl, mixr, selc)
+
+// The notes' words (the person's: plain Japanese). An adjustment block's name (its command's, Photoshop's: レベル補正,
+// 色相・彩度 …, the user's decision 8; a block this build does not know: its key), a correction kind's (the name of the
+// block that holds it; another kind: its key), and the notes of a block not read ("PSD の調整レイヤー（levl: レベル補正）は
+// <why>ため、読み込みませんでした") and of a correction layer not written ("レベル補正の補正レイヤーは<why>ため、PSD の調整
+// レイヤーにせず統合画像にだけ入れました").
+std::string adjust_label(std::string_view key);
+std::string kind_label(std::string_view kind);
+void note_unread(std::vector<std::string>& notes, std::string_view key, std::string_view why);
+void note_unwritten(std::vector<std::string>& notes, std::string_view kind, std::string_view why);
 
 // What a codec may ask of the file it reads or writes (the two ways set it while they call it).
 struct AdjustContext {

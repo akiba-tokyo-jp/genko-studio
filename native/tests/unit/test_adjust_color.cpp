@@ -577,6 +577,41 @@ private slots:
         QCOMPARE(made->blend, std::string("multiply"));
     }
 
+    // The descriptors written (vibA, blwh, brightness_contrast's CgEd) byte for byte as before the PSD's descriptors had one
+    // writer (render/psd_descriptor, shared with PSD-01's text layers): a versioned descriptor of an empty name of one
+    // closing 0, the class "null", its items in order (the tint colour an RGBC object of three doubles, the preset's file
+    // name an empty text).
+    void psdDescriptorBytes() {
+        const core::Page page = blank().page(0);
+        std::vector<std::string> notes;
+        const auto written = [&](const std::string& items, std::uint32_t count, std::string_view class_id = "null") {
+            return be32(16) + be32(1) + be({0}) + be32(0) + std::string(class_id) + be32(count) + items;
+        };
+        auto block = render::psd::write_adjustment(core::normalize_adjust(Json{{"kind", "vibrance"}, {"vibrance", 20}, {"saturation", -5}}, &page), page, notes);
+        QVERIFY(block && block->key == "vibA");
+        QVERIFY(block->payload == written(long_item("vibrance", 20) + long_item("Strt", -5), 2));
+        block = render::psd::write_adjustment(core::normalize_adjust(Json{{"kind", "black_white"}, {"tint", true}}, &page), page, notes);
+        QVERIFY(block && block->key == "blwh");
+        std::string items;
+        const char* keys[] = {"Rd  ", "Yllw", "Grn ", "Cyn ", "Bl  ", "Mgnt"};
+        const int weights[] = {40, 60, 40, 60, 20, 80};
+        for (int k = 0; k < 6; ++k) items += long_item(keys[k], weights[k]);
+        items += bool_item("useTint", true);
+        items += key_of("tintColor") + "Objc" + be32(1) + be({0}) + be32(0) + "RGBC" + be32(3) + key_of("Rd  ") + "doub" + double_bytes(225) +
+                 key_of("Grn ") + "doub" + double_bytes(211) + key_of("Bl  ") + "doub" + double_bytes(179);
+        items += long_item("bwPresetKind", 1);
+        items += key_of("blackAndWhitePresetFileName") + "TEXT" + be32(1) + be({0});
+        QVERIFY(block->payload == written(items, 10));
+        block = render::psd::write_adjustment(Json{{"kind", "brightness_contrast"}, {"brightness", 20}, {"contrast", 30}, {"native", Json{{"method", "modern"}}}}, page,
+                                              notes);
+        QVERIFY(block && block->key == "brit" && block->companion_key == "CgEd");
+        QVERIFY(block->companion == written(long_item("Vrsn", 1) + long_item("Brgh", 20) + long_item("Cntr", 30) + long_item("means", 127) +
+                                                bool_item("Lab ", false) + bool_item("useLegacy", false) + bool_item("Auto", false),
+                                            7));
+        // read back by the one reader too
+        QCOMPARE((*render::psd::read_adjustment("vibA", written(long_item("vibrance", 20) + long_item("Strt", -5), 2), notes))["saturation"], Json(-5));
+    }
+
     // Blocks laid out per the Adobe spec by hand (adjust_map.rs: the golden blocks), and what is not read (said, left
     // out); arbitrary bytes never throw.
     void psdBlocks() {

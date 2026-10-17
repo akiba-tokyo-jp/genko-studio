@@ -12,8 +12,8 @@
 #include <cmath>
 #include <cstdint>
 #include <cstring>
-#include <map>
 #include <memory>
+#include <utility>
 
 #include "core/adjust.hpp"
 #include "core/adjust_kinds.hpp"
@@ -24,7 +24,7 @@
 #include "core/lut3d.hpp"
 #include "core/pyconv.hpp"
 #include "core/pyops.hpp"
-#include "render/psd_text.hpp"
+#include "render/psd_descriptor.hpp"
 
 namespace genko::render::psd {
 
@@ -41,18 +41,20 @@ AdjustCodec codec(std::string_view key, std::string_view kind, std::string_view 
 }
 
 std::vector<AdjustCodec> make_table() {
+    // (hue2 twice: hue_saturation's, read and written, then Python's hue written as the nearest — read as the first)
     std::vector<AdjustCodec> all{codec("levl", "levels", "PC2a"),         codec("curv", "curve", "PC2a"),
                                  codec("brit", "brightness_contrast", "PC2a"), codec("post", "posterize", "PC2a"),
                                  codec("thrs", "threshold", "PC2a"),       codec("nvrt", "invert", "PC2a"),
                                  codec("expA", "exposure", "PC2a"),        codec("grdm", "gradient_map", "PC2a"),
                                  codec("clrL", "color_lookup", "PC2a"),    codec("hue2", "hue_saturation", "PC2b"),
-                                 codec("vibA", "vibrance", "PC2b"),        codec("blnc", "color_balance", "PC2b"),
-                                 codec("blwh", "black_white", "PC2b"),     codec("phfl", "photo_filter", "PC2b"),
-                                 codec("mixr", "channel_mixer", "PC2b"),   codec("selc", "selective_color", "PC2b")};
+                                 codec("hue2", "hue", "PC2b"),             codec("vibA", "vibrance", "PC2b"),
+                                 codec("blnc", "color_balance", "PC2b"),   codec("blwh", "black_white", "PC2b"),
+                                 codec("phfl", "photo_filter", "PC2b"),    codec("mixr", "channel_mixer", "PC2b"),
+                                 codec("selc", "selective_color", "PC2b")};
     for (const CodecHooks& hooks : {tone_codecs(), color_codecs()}) {
         for (const auto& [key, given] : hooks) {
             for (AdjustCodec& each : all) {
-                if (each.key != key) continue;
+                if (each.key != key || (!given.kind.empty() && given.kind != each.kind)) continue;
                 if (given.read) each.read = given.read;
                 if (given.write) each.write = given.write;
             }
@@ -110,204 +112,34 @@ void put_f32(std::string& out, double v) {
 }
 std::uint32_t q255(double v) { return static_cast<std::uint32_t>(std::lround(std::clamp(v, 0.0, 255.0))); }
 
-// --- descriptors (Photoshop's ActionDescriptor: what CgEd and clrL hold) --------------------------------------------
+// --- descriptors (what CgEd and clrL hold: render/psd_descriptor, the one reader and writer) ---------------------------
 
-void put_id(std::string& out, std::string_view id) {
-    put32(out, id.size() == 4 ? 0 : static_cast<std::uint32_t>(id.size()));
-    out += id;
-}
-void put_unicode(std::string& out, std::string_view utf8) {
-    const std::u16string text = utf16(utf8);
-    put32(out, static_cast<std::uint32_t>(text.size() + 1));
-    for (const char16_t c : text) put16(out, c);
-    put16(out, 0);
-}
-
-class Descriptor {
-public:
-    void integer(std::string_view key, std::int32_t v) {
-        head(key, "long");
-        put32(body_, static_cast<std::uint32_t>(v));
-    }
-    void boolean(std::string_view key, bool v) {
-        head(key, "bool");
-        body_ += static_cast<char>(v ? 1 : 0);
-    }
-    void enumerated(std::string_view key, std::string_view type, std::string_view value) {
-        head(key, "enum");
-        put_id(body_, type);
-        put_id(body_, value);
-    }
-    void text(std::string_view key, std::string_view utf8) {
-        head(key, "TEXT");
-        put_unicode(body_, utf8);
-    }
-    void raw(std::string_view key, std::string_view bytes) {
-        head(key, "tdta");
-        put32(body_, static_cast<std::uint32_t>(bytes.size()));
-        body_ += bytes;
-    }
-    // A versioned descriptor (version 16) of the class "null".
-    std::string versioned() const {
-        std::string out;
-        put32(out, 16);
-        put_unicode(out, "");
-        put_id(out, "null");
-        put32(out, count_);
-        return out + body_;
-    }
-
-private:
-    void head(std::string_view key, std::string_view type) {
-        put_id(body_, key);
-        body_ += type;
-        ++count_;
-    }
-    std::string body_;
-    std::uint32_t count_ = 0;
-};
-
-// A descriptor's values read back by their keys (what the codecs ask: numbers, truth values, enums, texts, raw data);
-// none for one this reader cannot walk.
-struct Value {
-    std::string type;
-    double number = 0;
-    bool boolean = false;
-    std::string text;  // (TEXT: UTF-8; enum: its value; tdta: the bytes)
-};
-using Values = std::map<std::string, Value>;
-
-class Walk {
-public:
-    explicit Walk(std::string_view d, std::size_t at = 0) : d_(d), at_(at) {}
-    bool ok() const { return ok_; }
-    std::uint32_t u32() {
-        const auto v = be32(d_, at_);
-        if (!v) return fail();
-        at_ += 4;
-        return *v;
-    }
-    std::string_view take(std::size_t n) {
-        if (!ok_ || n > d_.size() - std::min(at_, d_.size())) {
-            fail();
-            return {};
-        }
-        const std::string_view out = d_.substr(at_, n);
-        at_ += n;
-        return out;
-    }
-    std::string id() {
-        const std::uint32_t n = u32();
-        return std::string(take(n == 0 ? 4 : n));
-    }
-    std::string unicode() {
-        const std::uint32_t n = u32();
-        if (!ok_ || n > (d_.size() - std::min(at_, d_.size())) / 2) {
-            fail();
-            return {};
-        }
-        std::u16string text;
-        for (std::uint32_t i = 0; i < n; ++i) {
-            const auto c = be16(d_, at_);
-            at_ += 2;
-            if (c && *c != 0) text.push_back(static_cast<char16_t>(*c));
-        }
-        return utf8_of(text);
-    }
-    // A structure's items (nested ones walked over); the top's kept in `out`.
-    void structure(Values* out, int depth) {
-        if (depth > 16) {
-            fail();
-            return;
-        }
-        (void)unicode();
-        (void)id();
-        const std::uint32_t n = u32();
-        for (std::uint32_t i = 0; ok_ && i < n; ++i) {
-            const std::string key = id();
-            const std::string type(take(4));
-            Value v = value(type, depth);
-            if (out != nullptr && ok_) (*out)[key] = std::move(v);
-        }
-    }
-
-private:
-    Value value(const std::string& type, int depth) {
-        Value v;
-        v.type = type;
-        if (type == "long") {
-            v.number = static_cast<std::int32_t>(u32());
-        } else if (type == "comp") {
-            const std::uint64_t hi = u32();
-            v.number = static_cast<double>(static_cast<std::int64_t>((hi << 32) | u32()));
-        } else if (type == "doub" || type == "UntF") {
-            if (type == "UntF") (void)take(4);
-            const std::uint64_t hi = u32();
-            const std::uint64_t bits = (hi << 32) | u32();
-            std::memcpy(&v.number, &bits, sizeof v.number);
-        } else if (type == "UnFl") {
-            (void)take(4);
-            const std::uint32_t bits = u32();
-            float f = 0;
-            std::memcpy(&f, &bits, sizeof f);
-            v.number = f;
-        } else if (type == "bool") {
-            v.boolean = !take(1).empty() && d_[at_ - 1] != 0;
-        } else if (type == "enum") {
-            (void)id();
-            v.text = id();
-        } else if (type == "TEXT") {
-            v.text = unicode();
-        } else if (type == "tdta" || type == "alis") {
-            v.text = std::string(take(u32()));
-        } else if (type == "Objc" || type == "GlbO") {
-            structure(nullptr, depth + 1);
-        } else if (type == "VlLs") {
-            const std::uint32_t n = u32();
-            for (std::uint32_t i = 0; ok_ && i < n; ++i) (void)value(std::string(take(4)), depth + 1);
-        } else if (type == "type" || type == "GlbC") {
-            (void)unicode();
-            (void)id();
-        } else {
-            fail();
-        }
-        return v;
-    }
-    std::uint32_t fail() {
-        ok_ = false;
-        at_ = d_.size();
-        return 0;
-    }
-    std::string_view d_;
-    std::size_t at_ = 0;
-    bool ok_ = true;
-};
-
-// A versioned descriptor (version 16) at `at`.
-std::optional<Values> versioned(std::string_view d, std::size_t at = 0) {
-    Walk walk(d, at);
-    if (walk.u32() != 16 || !walk.ok()) return std::nullopt;
-    Values out;
-    walk.structure(&out, 0);
-    if (!walk.ok()) return std::nullopt;
-    return out;
-}
-
-std::optional<double> number_of(const Values& v, const char* key) {
-    const auto it = v.find(key);
-    if (it == v.end() || !(it->second.type == "long" || it->second.type == "doub" || it->second.type == "UntF" || it->second.type == "comp"))
+// A versioned descriptor (version 16) at `at`; none when it cannot be read.
+std::optional<descriptor::Object> versioned(std::string_view d, std::size_t at = 0) {
+    try {
+        return descriptor::read_versioned(d, at);
+    } catch (const descriptor::Broken&) {
         return std::nullopt;
-    return it->second.number;
+    }
 }
-std::optional<bool> bool_of(const Values& v, const char* key) {
-    const auto it = v.find(key);
-    if (it == v.end() || it->second.type != "bool") return std::nullopt;
-    return it->second.boolean;
+
+// A descriptor's number (long, doub, UntF, comp), truth value, or text (TEXT: UTF-8; enum: its value; tdta: the bytes).
+std::optional<double> number_of(const descriptor::Object& v, const char* key) {
+    const descriptor::Value* it = v.get(key);
+    if (it == nullptr || !(it->type == "long" || it->type == "doub" || it->type == "UntF" || it->type == "comp")) return std::nullopt;
+    return it->numeric();
 }
-std::optional<std::string> text_of(const Values& v, const char* key, const char* type) {
-    const auto it = v.find(key);
-    if (it == v.end() || it->second.type != type) return std::nullopt;
-    return it->second.text;
+std::optional<bool> bool_of(const descriptor::Object& v, const char* key) {
+    const descriptor::Value* it = v.get(key);
+    if (it == nullptr || it->type != "bool") return std::nullopt;
+    return it->boolean;
+}
+std::optional<std::string> text_of(const descriptor::Object& v, const char* key, std::string_view type) {
+    const descriptor::Value* it = v.get(key);
+    if (it == nullptr || it->type != type) return std::nullopt;
+    if (type == "TEXT") return utf8_of(it->text);
+    if (type == "enum") return it->enum_value;
+    return it->raw;
 }
 
 // --- a correction's settings and its page ----------------------------------------------------------------------------
@@ -406,7 +238,7 @@ Json native_records(std::string_view kind, const Json& raw) {
 std::optional<Json> read_levels(std::string_view d, std::vector<std::string>& notes) {
     const auto master = levels_at(d, 2);
     if (!master || !levels_at(d, 32)) {
-        notes.emplace_back("the levels adjustment is cut short");
+        note_unread(notes, "levl", "途中で切れている");
         return std::nullopt;
     }
     const std::string_view mode = current.mode;
@@ -441,7 +273,7 @@ std::optional<std::string> write_levels(const Json& adjust, const core::Page& pa
         composite.out_black = setting(adjust, "out_black", 0);
         composite.out_white = setting(adjust, "out_white", 255);
     } catch (const core::Error&) {
-        notes.emplace_back("レベル補正の値が読めないため、その補正レイヤーは PSD の調整レイヤーにしていません（統合画像には入っています）");
+        note_unwritten(notes, "levels", "値が読めない");
         return std::nullopt;
     }
     const std::vector<std::string_view> names = core::tone_channels(space);
@@ -501,7 +333,7 @@ std::optional<Json> read_curves(std::string_view d, std::vector<std::string>& no
     const auto version = be16(d, 1);
     const auto bits = be32(d, 3);
     if (!version || (*version != 1 && *version != 4) || !bits) {
-        notes.emplace_back("the curves adjustment is of a version this build does not read");
+        note_unread(notes, "curv", "読めない版の");
         return std::nullopt;
     }
     std::size_t at = 7;
@@ -510,7 +342,7 @@ std::optional<Json> read_curves(std::string_view d, std::vector<std::string>& no
         if ((*bits & (1u << bit)) == 0) continue;
         const auto n = be16(d, at);
         if (!n || *n > 64) {
-            notes.emplace_back("the curves adjustment is cut short");
+            note_unread(notes, "curv", "途中で切れている");
             return std::nullopt;
         }
         at += 2;
@@ -518,7 +350,7 @@ std::optional<Json> read_curves(std::string_view d, std::vector<std::string>& no
         for (std::uint32_t i = 0; i < *n; ++i) {
             const auto out = be16(d, at), in = be16(d, at + 2);
             if (!out || !in) {
-                notes.emplace_back("the curves adjustment is cut short");
+                note_unread(notes, "curv", "途中で切れている");
                 return std::nullopt;
             }
             points.push_back({static_cast<double>(*in), static_cast<double>(*out)});
@@ -538,8 +370,8 @@ std::optional<Json> read_curves(std::string_view d, std::vector<std::string>& no
     Json out{{"kind", "curve"}, {"points", points_json(composite)}};
     try {
         out["native"] = native_records("curve", raw);
-    } catch (const core::OpError& error) {
-        notes.emplace_back(std::string("the curves adjustment's channels cannot be read: ") + error.what());
+    } catch (const core::OpError&) {
+        note_unread(notes, "curv", "チャンネルごとの曲線が使えない");
         return std::nullopt;
     }
     return out;
@@ -599,7 +431,7 @@ std::optional<std::string> write_curves(const Json& adjust, const core::Page& pa
             approximated = true;
         }
     } catch (const core::Error&) {
-        notes.emplace_back("トーンカーブの点が読めないため、その補正レイヤーは PSD の調整レイヤーにしていません（統合画像には入っています）");
+        note_unwritten(notes, "curve", "点が読めない");
         return std::nullopt;
     }
     const std::vector<std::string_view> names = core::tone_channels(space);
@@ -667,7 +499,7 @@ std::optional<Json> read_brightness(std::string_view d, std::vector<std::string>
     }
     const auto b = bei16(d, 0), c = bei16(d, 2);
     if (!b || !c) {
-        notes.emplace_back("the brightness/contrast adjustment is cut short");
+        note_unread(notes, "brit", "途中で切れている");
         return std::nullopt;
     }
     return Json{{"kind", "brightness_contrast"}, {"brightness", std::clamp(*b, -150, 150)}, {"contrast", std::clamp(*c, -100, 100)},
@@ -699,7 +531,7 @@ std::optional<std::string> write_brightness(const Json& adjust, const core::Page
     put_i16(out, contrast);
     put16(out, 127);  // (mean)
     out += '\0';      // (Lab only)
-    Descriptor d;
+    descriptor::Writer d;
     d.integer("Vrsn", 1);
     d.integer("Brgh", static_cast<std::int32_t>(brightness));
     d.integer("Cntr", static_cast<std::int32_t>(contrast));
@@ -707,14 +539,14 @@ std::optional<std::string> write_brightness(const Json& adjust, const core::Page
     d.boolean("Lab ", false);
     d.boolean("useLegacy", legacy);
     d.boolean("Auto", false);
-    pending_companion() = d.versioned();  // (the CgEd block: write_adjustment takes it)
+    pending_companion() = d.versioned("null");  // (the CgEd block: write_adjustment takes it)
     return out;
 }
 
 std::optional<Json> read_posterize(std::string_view d, std::vector<std::string>& notes) {
     const auto n = be16(d, 0);
     if (!n) {
-        notes.emplace_back("the posterize adjustment is cut short");
+        note_unread(notes, "post", "途中で切れている");
         return std::nullopt;
     }
     return Json{{"kind", "posterize"}, {"levels", std::clamp<std::int64_t>(*n, 2, 255)}, {"native", Json{{"method", "floor"}}}};
@@ -739,7 +571,7 @@ std::optional<std::string> write_posterize(const Json& adjust, const core::Page&
 std::optional<Json> read_threshold(std::string_view d, std::vector<std::string>& notes) {
     const auto level = be16(d, 0);
     if (!level) {
-        notes.emplace_back("the threshold adjustment is cut short");
+        note_unread(notes, "thrs", "途中で切れている");
         return std::nullopt;
     }
     return Json{{"kind", "threshold"}, {"threshold", std::clamp<std::int64_t>(*level, 1, 255)}};
@@ -767,7 +599,7 @@ std::optional<std::string> write_threshold(const Json& adjust, const core::Page&
 std::optional<Json> read_exposure(std::string_view d, std::vector<std::string>& notes) {
     const auto e = bef32(d, 2), o = bef32(d, 6), g = bef32(d, 10);
     if (!e || !o || !g || !std::isfinite(*e) || !std::isfinite(*o) || !std::isfinite(*g)) {
-        notes.emplace_back("the exposure adjustment is cut short or not finite");
+        note_unread(notes, "expA", "途中で切れているか、値が数でない");
         return std::nullopt;
     }
     return Json{{"kind", "exposure"}, {"exposure", number_json(std::clamp(*e, -20.0, 20.0))}, {"offset", number_json(std::clamp(*o, -0.5, 0.5))},
@@ -875,44 +707,44 @@ std::vector<Stop> baked(std::vector<Stop> stops, const std::vector<double>& mids
 
 std::optional<Json> read_gradient(std::string_view d, std::vector<std::string>& notes) {
     const auto fail = [&notes](const char* why) -> std::optional<Json> {
-        notes.emplace_back(std::string("the gradient map adjustment ") + why);
+        note_unread(notes, "grdm", why);
         return std::nullopt;
     };
     const auto version = be16(d, 0);
-    if (!version || d.size() < 4) return fail("is cut short");
+    if (!version || d.size() < 4) return fail("途中で切れている");
     const bool reverse = d[2] != 0, dither = d[3] != 0;
     std::string method;
     std::size_t at = 4;
     if (*version == 3) {
-        if (d.size() < 8) return fail("is cut short");
+        if (d.size() < 8) return fail("途中で切れている");
         method = std::string(d.substr(4, 4));
         at = 8;
     } else if (*version != 1) {
-        return fail("is of a version this build does not read");
+        return fail("読めない版の");
     }
     const auto name = be32(d, at);
-    if (!name || *name > d.size()) return fail("is cut short");
+    if (!name || *name > d.size()) return fail("途中で切れている");
     at += 4 + std::size_t(*name) * 2;
     const auto n = be16(d, at);
-    if (!n) return fail("is cut short");
+    if (!n) return fail("途中で切れている");
     at += 2;
     std::vector<Stop> stops;
     std::vector<double> mids;
     for (std::uint32_t i = 0; i < *n; ++i) {
         const auto loc = be32(d, at), mid = be32(d, at + 4), space = be16(d, at + 8);
         const auto r = be16(d, at + 10), g = be16(d, at + 12), b = be16(d, at + 14);
-        if (!loc || !mid || !space || !r || !g || !b) return fail("is cut short");
-        if (*space != 0) return fail("has colours that are not RGB");
+        if (!loc || !mid || !space || !r || !g || !b) return fail("途中で切れている");
+        if (*space != 0) return fail("RGB でない色を持つ");
         stops.push_back({std::clamp(*loc / 4096.0, 0.0, 1.0), {*r / 65535.0, *g / 65535.0, *b / 65535.0}});
         mids.push_back(*mid / 100.0);
         at += 20;
     }
-    if (stops.size() < 2) return fail("has no colour stops (a noise gradient)");
+    if (stops.size() < 2) return fail("ノイズのグラデーションで、色の分岐点を持たない");
     const auto nt = be16(d, at);
-    if (!nt) return fail("is cut short");
+    if (!nt) return fail("途中で切れている");
     at += 2 + std::size_t(*nt) * 10 + 2;  // (the transparency stops, the expansion count)
     const auto smooth = be16(d, at);
-    if (!smooth) return fail("is cut short");
+    if (!smooth) return fail("途中で切れている");
     // (midpoint k is the segment's after stop k in place order)
     std::vector<std::size_t> order(stops.size());
     for (std::size_t i = 0; i < order.size(); ++i) order[i] = i;
@@ -957,7 +789,7 @@ std::optional<std::string> write_gradient(const Json& adjust, const core::Page&,
             }
         }
     } catch (const core::Error&) {
-        notes.emplace_back("グラデーションマップの色が読めないため、その補正レイヤーは PSD の調整レイヤーにしていません（統合画像には入っています）");
+        note_unwritten(notes, "gradient_map", "色が読めない");
         return std::nullopt;
     }
     if (stops.size() < 2) return std::nullopt;
@@ -966,7 +798,7 @@ std::optional<std::string> write_gradient(const Json& adjust, const core::Page&,
     put16(out, 1);
     out += static_cast<char>(native_flag(adjust, "reverse") ? 1 : 0);
     out += static_cast<char>(native_flag(adjust, "dither") ? 1 : 0);
-    put_unicode(out, "Custom");
+    descriptor::put_unicode(out, u"Custom");
     const std::size_t count = std::min<std::size_t>(stops.size(), 0xffff);
     put16(out, static_cast<std::uint32_t>(count));
     for (std::size_t i = 0; i < count; ++i) {
@@ -1003,12 +835,12 @@ std::optional<Json> read_lookup(std::string_view d, std::vector<std::string>& no
     const auto version = be16(d, 0);
     const auto values = version && *version == 1 ? versioned(d, 2) : std::nullopt;
     if (!values) {
-        notes.emplace_back("the color lookup adjustment cannot be read");
+        note_unread(notes, "clrL", "読めない形の");
         return std::nullopt;
     }
     const auto data = text_of(*values, "LUT3DFileData", "tdta");
     if (!data || data->empty()) {
-        notes.emplace_back("the color lookup adjustment holds no table (a profile's lookup)");
+        note_unread(notes, "clrL", "表を持たない（プロファイルによる）");
         return std::nullopt;
     }
     const auto format = text_of(*values, "LUTFormat", "enum");
@@ -1016,8 +848,8 @@ std::optional<Json> read_lookup(std::string_view d, std::vector<std::string>& no
     core::lut3d::Table table;
     try {
         table = core::lut3d::parse(file, *data);
-    } catch (const core::Error& error) {
-        notes.emplace_back(std::string("the color lookup adjustment's table cannot be read: ") + error.what());
+    } catch (const core::Error&) {
+        note_unread(notes, "clrL", "表が読めない");
         return std::nullopt;
     }
     const std::string bytes = core::lut3d::encode(table);
@@ -1055,7 +887,7 @@ std::optional<std::string> write_lookup(const Json& adjust, const core::Page&, s
             bytes = nullptr;
         }
         if (!bytes) {
-            notes.emplace_back("カラールックアップの表が原稿に無いため、その補正レイヤーは PSD の調整レイヤーにしていません");
+            note_unwritten(notes, "color_lookup", "表が原稿に無い");
             return std::nullopt;
         }
     } else {
@@ -1063,19 +895,19 @@ std::optional<std::string> write_lookup(const Json& adjust, const core::Page&, s
     }
     if (adjust.value("interpolation", std::string()) == "tetrahedral")
         notes.emplace_back("カラールックアップの四面体補間は PSD に書けないため、Photoshop では三線形で補間されます");
-    Descriptor d;
+    descriptor::Writer d;
     d.enumerated("lookupType", "colorLookupType", "3DLUT");
-    d.text("NM  ", name);
+    d.text("NM  ", utf16(name));
     d.boolean("Dthr", dither);
     d.raw("profile", "");
     d.enumerated("LUTFormat", "LUTFormatType", "LUTFormatCUBE");
     d.enumerated("dataOrder", "colorLookupOrder", "rgbOrder");
     d.enumerated("tableOrder", "colorLookupOrder", "bgrOrder");
     d.raw("LUT3DFileData", core::lut3d::write_cube(table));
-    d.text("LUT3DFileName", name);
+    d.text("LUT3DFileName", utf16(name));
     std::string out;
     put16(out, 1);
-    return out + d.versioned();
+    return out + d.versioned("null");
 }
 
 AdjustCodec hooks(std::function<std::optional<Json>(std::string_view, std::vector<std::string>&)> read,
@@ -1158,15 +990,46 @@ std::atomic<int> python_views{0};  // (the PythonView scopes alive)
 PythonView::PythonView() { ++python_views; }
 PythonView::~PythonView() { --python_views; }
 
+std::string adjust_label(std::string_view key) {
+    static const std::vector<std::pair<std::string_view, std::string_view>> labels{
+        {"levl", "レベル補正"},     {"curv", "トーンカーブ"},     {"brit", "明るさ・コントラスト"}, {"post", "階調化"},
+        {"thrs", "2 値化"},         {"nvrt", "階調の反転"},       {"expA", "露光量"},               {"grdm", "グラデーションマップ"},
+        {"clrL", "カラールックアップ"}, {"hue2", "色相・彩度"},   {"vibA", "自然な彩度"},           {"blnc", "カラーバランス"},
+        {"blwh", "白黒"},           {"phfl", "レンズフィルター"}, {"mixr", "チャンネルミキサー"},   {"selc", "特定色域の選択"}};
+    for (const auto& [k, label] : labels) {
+        if (k == key) return std::string(label);
+    }
+    return std::string(key);
+}
+
+std::string kind_label(std::string_view kind) {
+    if (kind == "hue") return "色相・彩度・明度";  // (Python's: its own name)
+    if (kind == "bitonal") return "白黒にする";
+    for (const AdjustCodec& each : adjust_codecs()) {
+        if (each.kind == kind) return adjust_label(each.key);
+    }
+    return std::string(kind);
+}
+
+void note_unread(std::vector<std::string>& notes, std::string_view key, std::string_view why) {
+    const std::string label = adjust_label(key);
+    const std::string named = label == key ? std::string(key) : std::string(key) + ": " + label;
+    notes.push_back("PSD の調整レイヤー（" + named + "）は" + std::string(why) + "ため、読み込みませんでした");
+}
+
+void note_unwritten(std::vector<std::string>& notes, std::string_view kind, std::string_view why) {
+    notes.push_back(kind_label(kind) + "の補正レイヤーは" + std::string(why) + "ため、PSD の調整レイヤーにせず統合画像にだけ入れました");
+}
+
 std::optional<core::Json> read_adjustment(std::string_view key, std::string_view payload, std::vector<std::string>& notes, const AdjustContext& context) {
     if (python_views.load() > 0) {
-        notes.push_back("the adjustment layer " + std::string(key) + " is left out (Python's view)");
+        note_unread(notes, key, "Python 版の読み方で読んでいる");
         return std::nullopt;
     }
     for (const AdjustCodec& each : adjust_codecs()) {
         if (each.key != key) continue;
         if (!each.read) {
-            notes.push_back("the adjustment layer " + std::string(key) + " (" + std::string(each.kind) + ") is not read by this build yet");
+            note_unread(notes, key, "この版ではまだ読めない種類の");
             return std::nullopt;
         }
         const AdjustContext was = current;
@@ -1180,7 +1043,7 @@ std::optional<core::Json> read_adjustment(std::string_view key, std::string_view
             throw;
         }
     }
-    notes.push_back("the adjustment layer " + std::string(key) + " is not one this build reads");
+    note_unread(notes, key, "Genko が読める種類でない");
     return std::nullopt;
 }
 

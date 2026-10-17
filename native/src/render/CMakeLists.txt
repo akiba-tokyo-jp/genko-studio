@@ -37,6 +37,7 @@ genko_library(genko_render
     color_filters.cpp
     abr.cpp
     psd.cpp
+    psd_descriptor.cpp
     psd_text.cpp
     movie.cpp
     anim.cpp

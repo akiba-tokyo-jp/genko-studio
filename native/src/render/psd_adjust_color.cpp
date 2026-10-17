@@ -2,8 +2,9 @@
 // (hue_saturation), vibA (vibrance), blnc (color_balance), blwh (black_white), phfl (photo_filter), mixr
 // (channel_mixer), selc (selective_color). PhotoCraft v0.2.0 io/src/adjust_map.rs (177-197, 315-329, 374-485,
 // 508-695; the Adobe spec's "Adjustment layer" section); attribution and the upstream MIT license:
-// native/third_party/photocraft/NOTICE.md. vibA and blwh are ActionDescriptors (a version 16, then the descriptor): a
-// small reader and writer of their own here, for the values these blocks hold.
+// native/third_party/photocraft/NOTICE.md. vibA and blwh are ActionDescriptors (a version 16, then the descriptor),
+// read and written by the PSD's one descriptor reader and writer (render/psd_descriptor). Python's hue is written as the
+// nearest hue2 (design 4.4; read back, a hue2 is hue_saturation).
 //
 // A block read is the correction's normal form (core::normalize_adjust: the table's ranges and defaults, the kind's own
 // normal form — the hue ranges' sliders in their canonical form); one written holds what the PSD can: whole numbers
@@ -15,15 +16,16 @@
 #include <array>
 #include <cmath>
 #include <cstdint>
-#include <cstring>
 #include <memory>
-#include <stdexcept>
 #include <string>
 
 #include "core/adjust.hpp"
 #include "core/adjust_color.hpp"
 #include "core/command_bus.hpp"
 #include "core/error.hpp"
+#include "core/pyconv.hpp"
+#include "core/pyops.hpp"
+#include "render/psd_descriptor.hpp"
 #include "render/quantize.hpp"
 
 namespace genko::render::psd {
@@ -50,226 +52,29 @@ std::optional<std::uint32_t> be32(std::string_view d, std::size_t at) {
     return (*hi << 16) | *lo;
 }
 
-void put_u8(std::string& out, unsigned v) { out += static_cast<char>(v & 0xffU); }
-void put_u16(std::string& out, std::uint32_t v) {
-    put_u8(out, v >> 8);
-    put_u8(out, v);
-}
-void put_u32(std::string& out, std::uint32_t v) {
-    put_u16(out, v >> 16);
-    put_u16(out, v & 0xffffU);
-}
+using descriptor::put_u16;
+using descriptor::put_u32;
+using descriptor::put_u8;
 // A whole number as Photoshop's i16 field (rounded, held to its range).
 void put_i16(std::string& out, double v) {
     const double r = std::clamp(std::round(v), -32768.0, 32767.0);
     put_u16(out, static_cast<std::uint16_t>(static_cast<std::int16_t>(r)));
 }
-void put_f64(std::string& out, double v) {
-    std::uint64_t bits = 0;
-    std::memcpy(&bits, &v, sizeof bits);
-    put_u32(out, static_cast<std::uint32_t>(bits >> 32));
-    put_u32(out, static_cast<std::uint32_t>(bits & 0xffffffffULL));
+// A whole number as a descriptor's long (rounded, held to its range).
+std::int32_t whole(double v) { return static_cast<std::int32_t>(std::clamp(std::round(v), -2147483648.0, 2147483647.0)); }
+
+// --- ActionDescriptor (vibA, blwh: render/psd_descriptor, the one reader and writer) ---------------------------------
+
+// A descriptor's number of any number type, or none.
+std::optional<double> number_in(const descriptor::Object& d, std::string_view key) {
+    const descriptor::Value* v = d.get(key);
+    return v != nullptr ? v->numeric() : std::nullopt;
 }
-
-// --- ActionDescriptor (vibA, blwh) ------------------------------------------------------------------------------------
-
-struct Broken : std::runtime_error {
-    using std::runtime_error::runtime_error;
-};
-
-class Reader {
-public:
-    explicit Reader(std::string_view d) : d_(d) {}
-    std::string_view take(std::size_t n) {
-        if (n > d_.size() - at_) throw Broken("it ends early");
-        const std::string_view out = d_.substr(at_, n);
-        at_ += n;
-        return out;
-    }
-    std::uint32_t u32() {
-        const std::string_view b = take(4);
-        return *be32(b, 0);
-    }
-    double f64() {
-        const std::uint64_t hi = u32();
-        const std::uint64_t bits = (hi << 32) | u32();
-        double v = 0;
-        std::memcpy(&v, &bits, sizeof v);
-        return v;
-    }
-    std::string id() {
-        const std::uint32_t n = u32();
-        return std::string(take(n == 0 ? 4 : n));
-    }
-    void unicode() {
-        const std::uint32_t n = u32();
-        if (n > (d_.size() - at_) / 2) throw Broken("a text is longer than the block");
-        (void)take(std::size_t(n) * 2);
-    }
-
-private:
-    std::string_view d_;
-    std::size_t at_ = 0;
-};
-
-// The values these blocks hold: numbers (long, doub, UntF, UnFl, comp), truth values and objects (a colour); the
-// rest read past.
-struct Value;
-struct Object {
-    std::string class_id;
-    std::vector<std::pair<std::string, std::shared_ptr<Value>>> items;
-    const Value* get(std::string_view key) const {
-        for (const auto& [k, v] : items) {
-            if (k == key) return v.get();
-        }
-        return nullptr;
-    }
-};
-struct Value {
-    std::optional<double> number;
-    std::optional<bool> boolean;
-    std::shared_ptr<Object> object;
-};
-
-Object read_object(Reader& r, int depth);
-
-Value read_value(Reader& r, std::string_view type, int depth) {
-    if (depth > 32) throw Broken("descriptors nested too deep");
-    Value v;
-    if (type == "long") {
-        v.number = static_cast<std::int32_t>(r.u32());
-    } else if (type == "comp") {
-        const std::uint64_t hi = r.u32();
-        v.number = static_cast<double>(static_cast<std::int64_t>((hi << 32) | r.u32()));
-    } else if (type == "doub") {
-        v.number = r.f64();
-    } else if (type == "UntF") {
-        (void)r.take(4);
-        v.number = r.f64();
-    } else if (type == "UnFl") {
-        (void)r.take(4);
-        const std::uint32_t bits = r.u32();
-        float f = 0;
-        std::memcpy(&f, &bits, sizeof f);
-        v.number = f;
-    } else if (type == "bool") {
-        v.boolean = r.take(1)[0] != 0;
-    } else if (type == "TEXT") {
-        r.unicode();
-    } else if (type == "enum") {
-        (void)r.id();
-        (void)r.id();
-    } else if (type == "Objc" || type == "GlbO") {
-        v.object = std::make_shared<Object>(read_object(r, depth + 1));
-    } else if (type == "VlLs") {
-        const std::uint32_t n = r.u32();
-        for (std::uint32_t i = 0; i < n; ++i) {
-            const std::string item(r.take(4));
-            (void)read_value(r, item, depth + 1);
-        }
-    } else if (type == "tdta" || type == "alis") {
-        (void)r.take(r.u32());
-    } else if (type == "type" || type == "GlbC") {
-        r.unicode();
-        (void)r.id();
-    } else {
-        throw Broken("a value of type '" + std::string(type) + "'");
-    }
-    return v;
-}
-
-Object read_object(Reader& r, int depth) {
-    if (depth > 32) throw Broken("descriptors nested too deep");
-    Object out;
-    r.unicode();
-    out.class_id = r.id();
-    const std::uint32_t n = r.u32();
-    for (std::uint32_t i = 0; i < n; ++i) {
-        std::string key = r.id();
-        const std::string type(r.take(4));
-        out.items.emplace_back(std::move(key), std::make_shared<Value>(read_value(r, type, depth)));
-    }
-    return out;
-}
-
-// A versioned descriptor at the start of a block (version 16; what follows it is not looked at).
-Object versioned(std::string_view payload) {
-    Reader r(payload);
-    if (r.u32() != 16) throw Broken("its descriptor is not of version 16");
-    return read_object(r, 0);
-}
-
-std::optional<double> number_in(const Object& d, std::string_view key) {
-    const Value* v = d.get(key);
-    return v != nullptr ? v->number : std::nullopt;
-}
-
-// A descriptor written: its items in order (Photoshop's class structure: an empty name, the class id, the count).
-class Writer {
-public:
-    void integer(std::string_view key, double v) {
-        head(key, "long");
-        put_u32(body_, static_cast<std::uint32_t>(static_cast<std::int32_t>(std::clamp(std::round(v), -2147483648.0, 2147483647.0))));
-    }
-    void number(std::string_view key, double v) {
-        head(key, "doub");
-        put_f64(body_, v);
-    }
-    void boolean(std::string_view key, bool v) {
-        head(key, "bool");
-        put_u8(body_, v ? 1 : 0);
-    }
-    void empty_text(std::string_view key) {
-        head(key, "TEXT");
-        put_u32(body_, 1);  // (its closing 0 alone)
-        put_u16(body_, 0);
-    }
-    void object(std::string_view key, const Writer& value, std::string_view class_id) {
-        head(key, "Objc");
-        body_ += value.structure(class_id);
-    }
-    std::string structure(std::string_view class_id) const {
-        std::string out;
-        put_u32(out, 1);  // (an empty name: its closing 0 alone)
-        put_u16(out, 0);
-        id(out, class_id);
-        put_u32(out, count_);
-        return out + body_;
-    }
-    std::string versioned(std::string_view class_id) const {
-        std::string out;
-        put_u32(out, 16);
-        return out + structure(class_id);
-    }
-
-private:
-    static void id(std::string& out, std::string_view key) {
-        put_u32(out, key.size() == 4 ? 0 : static_cast<std::uint32_t>(key.size()));
-        out += key;
-    }
-    void head(std::string_view key, std::string_view type) {
-        id(body_, key);
-        body_ += type;
-        ++count_;
-    }
-    std::string body_;
-    std::uint32_t count_ = 0;
-};
 
 // --- the codecs -------------------------------------------------------------------------------------------------------
 
-std::string label_of(std::string_view key) {
-    if (key == "hue2") return "色相・彩度";
-    if (key == "vibA") return "自然な彩度";
-    if (key == "blnc") return "カラーバランス";
-    if (key == "blwh") return "白黒";
-    if (key == "phfl") return "レンズフィルター";
-    if (key == "mixr") return "チャンネルミキサー";
-    return "特定色域の選択";
-}
-
-std::optional<Json> unread(std::string_view key, std::vector<std::string>& notes, const std::string& why) {
-    notes.push_back("PSD の調整レイヤー（" + std::string(key) + ": " + label_of(key) + "）は" + why + "ため、読み込みませんでした");
+std::optional<Json> unread(std::string_view key, std::vector<std::string>& notes, std::string_view why) {
+    note_unread(notes, key, why);
     return std::nullopt;
 }
 
@@ -288,7 +93,7 @@ std::optional<Json> settings_of(const Json& adjust, const core::Page& page, std:
     try {
         return core::normalize_adjust(adjust, &page);
     } catch (const std::exception&) {
-        notes.push_back("色調補正（" + adjust.value("kind", std::string()) + "）は設定が読めないため、PSD の調整レイヤーにせず統合画像にだけ入れました");
+        note_unwritten(notes, adjust.value("kind", std::string()), "設定が読めない");
         return std::nullopt;
     }
 }
@@ -343,15 +148,47 @@ std::optional<std::string> write_hue2(const Json& adjust, const core::Page& page
     return v;
 }
 
+// Python's hue (filters.py: HSV — its hue turned by int(float(shift)) % 360°, its saturation and value multiplied, each
+// at least 0) as the nearest Hue/Saturation: the turn its hue (−180..180), the saturation's factor its saturation and
+// the value's its lightness, (f − 1)·100 each (−100..100: the same colours for a saturation up to twice and a value up to
+// once — lighter, Photoshop's lightness goes towards white), said in the notes. Not written when Python cannot read it
+// (the layer does nothing there), said.
+std::optional<std::string> write_python_hue(const Json& adjust, const core::Page& page, std::vector<std::string>& notes) {
+    double turn = 30, saturation = 1, value = 1;
+    try {
+        const auto read = [&adjust](const char* key, double fallback) {
+            const Json* v = core::get(adjust, key);
+            return v == nullptr ? fallback : core::to_float(*v);
+        };
+        turn = read("shift", 30);
+        saturation = std::max(0.0, read("saturation", 1));
+        value = std::max(0.0, read("value", 1));
+    } catch (const core::Error&) {
+        note_unwritten(notes, "hue", "値が読めない");
+        return std::nullopt;
+    }
+    if (!std::isfinite(turn) || !std::isfinite(saturation) || !std::isfinite(value)) {
+        note_unwritten(notes, "hue", "値が数でない");
+        return std::nullopt;
+    }
+    const double whole_turn = std::fmod(std::fmod(std::trunc(turn), 360.0) + 360.0, 360.0);
+    const Json nearest{{"kind", "hue_saturation"},
+                       {"hue", number_json(whole_turn > 180 ? whole_turn - 360 : whole_turn)},
+                       {"saturation", number_json(std::round(std::clamp((saturation - 1) * 100, -100.0, 100.0)))},
+                       {"lightness", number_json(std::round(std::clamp((value - 1) * 100, -100.0, 100.0)))}};
+    notes.push_back("Genko（Python）の色相・彩度・明度の補正レイヤーは、Photoshop の色相・彩度の近い値として書きました（色の変わり方が少し違うことがあります）");
+    return write_hue2(nearest, page, notes);
+}
+
 // vibA: a versioned descriptor of vibrance and Strt (saturation), whole numbers; Photoshop leaves out a 0.
 std::optional<Json> read_viba(std::string_view d, std::vector<std::string>& notes) {
     try {
-        const Object desc = versioned(d);
+        const descriptor::Object desc = descriptor::read_versioned(d);
         return normal("vibA",
                       Json{{"kind", "vibrance"}, {"vibrance", number_json(number_in(desc, "vibrance").value_or(0))},
                            {"saturation", number_json(number_in(desc, "Strt").value_or(0))}},
                       notes);
-    } catch (const Broken&) {
+    } catch (const descriptor::Broken&) {
         return unread("vibA", notes, "読めない形の");
     }
 }
@@ -359,9 +196,9 @@ std::optional<Json> read_viba(std::string_view d, std::vector<std::string>& note
 std::optional<std::string> write_viba(const Json& adjust, const core::Page& page, std::vector<std::string>& notes) {
     const auto s = settings_of(adjust, page, notes);
     if (!s) return std::nullopt;
-    Writer d;
-    d.integer("vibrance", num(*s, "vibrance"));
-    d.integer("Strt", num(*s, "saturation"));
+    descriptor::Writer d;
+    d.integer("vibrance", whole(num(*s, "vibrance")));
+    d.integer("Strt", whole(num(*s, "saturation")));
     return d.versioned("null");
 }
 
@@ -392,7 +229,7 @@ constexpr std::array<std::string_view, 6> kWeightKeys{"Rd  ", "Yllw", "Grn ", "C
 
 // A descriptor's colour as 0..255 RGB (RGBC: 0..255 numbers, or the newer 0..1 floats; Grsc: grey ink %; CMYC: inks %,
 // naively), or none.
-std::optional<std::array<double, 3>> colour_of(const Object& c) {
+std::optional<std::array<double, 3>> colour_of(const descriptor::Object& c) {
     const auto g = [&c](std::string_view k) { return number_in(c, k); };
     if (const auto r = g("redFloat"), gr = g("greenFloat"), b = g("blueFloat"); r && gr && b) return std::array<double, 3>{*r * 255, *gr * 255, *b * 255};
     if (c.class_id == "Grsc") {
@@ -420,18 +257,18 @@ Json rgb_json(const std::array<double, 3>& c) {
 
 std::optional<Json> read_blwh(std::string_view d, std::vector<std::string>& notes) {
     try {
-        const Object desc = versioned(d);
+        const descriptor::Object desc = descriptor::read_versioned(d);
         Json adjust{{"kind", "black_white"}};
         for (std::size_t i = 0; i < 6; ++i) {
             if (const auto w = number_in(desc, kWeightKeys[i])) adjust[std::string(color::kHueRanges[i])] = number_json(*w);
         }
-        const Value* tint = desc.get("useTint");
-        adjust["tint"] = tint != nullptr && tint->boolean.value_or(false);
-        if (const Value* colour = desc.get("tintColor"); colour != nullptr && colour->object) {
+        const descriptor::Value* tint = desc.get("useTint");
+        adjust["tint"] = tint != nullptr && tint->type == "bool" && tint->boolean;
+        if (const descriptor::Value* colour = desc.get("tintColor"); colour != nullptr && colour->object) {
             if (const auto rgb = colour_of(*colour->object)) adjust["tint_color"] = rgb_json(*rgb);
         }
         return normal("blwh", adjust, notes);
-    } catch (const Broken&) {
+    } catch (const descriptor::Broken&) {
         return unread("blwh", notes, "読めない形の");
     }
 }
@@ -439,17 +276,17 @@ std::optional<Json> read_blwh(std::string_view d, std::vector<std::string>& note
 std::optional<std::string> write_blwh(const Json& adjust, const core::Page& page, std::vector<std::string>& notes) {
     const auto s = settings_of(adjust, page, notes);
     if (!s) return std::nullopt;
-    Writer d;
-    for (std::size_t i = 0; i < 6; ++i) d.integer(kWeightKeys[i], num(*s, color::kHueRanges[i]));
+    descriptor::Writer d;
+    for (std::size_t i = 0; i < 6; ++i) d.integer(kWeightKeys[i], whole(num(*s, color::kHueRanges[i])));
     d.boolean("useTint", s->at("tint").get<bool>());
-    Writer colour;
+    descriptor::Writer colour;
     const Json& rgb = s->at("tint_color");
     colour.number("Rd  ", rgb[0].get<double>());
     colour.number("Grn ", rgb[1].get<double>());
     colour.number("Bl  ", rgb[2].get<double>());
     d.object("tintColor", colour, "RGBC");
     d.integer("bwPresetKind", 1);
-    d.empty_text("blackAndWhitePresetFileName");
+    d.text("blackAndWhitePresetFileName", u"");
     return d.versioned("null");
 }
 
@@ -584,8 +421,10 @@ std::optional<std::string> write_selc(const Json& adjust, const core::Page& page
     return v;
 }
 
-AdjustCodec codec(decltype(AdjustCodec::read) read, decltype(AdjustCodec::write) write) {
+// A codec's read and write (`kind`: only that kind's row of its block; none: every row of the block).
+AdjustCodec codec(decltype(AdjustCodec::read) read, decltype(AdjustCodec::write) write, std::string_view kind = {}) {
     AdjustCodec out;
+    out.kind = kind;
     out.read = std::move(read);
     out.write = std::move(write);
     return out;
@@ -594,9 +433,10 @@ AdjustCodec codec(decltype(AdjustCodec::read) read, decltype(AdjustCodec::write)
 }  // namespace
 
 CodecHooks color_codecs() {
-    return {{"hue2", codec(read_hue2, write_hue2)}, {"vibA", codec(read_viba, write_viba)}, {"blnc", codec(read_blnc, write_blnc)},
-            {"blwh", codec(read_blwh, write_blwh)}, {"phfl", codec(read_phfl, write_phfl)}, {"mixr", codec(read_mixr, write_mixr)},
-            {"selc", codec(read_selc, write_selc)}};
+    return {{"hue2", codec(read_hue2, write_hue2, "hue_saturation")}, {"hue2", codec(nullptr, write_python_hue, "hue")},
+            {"vibA", codec(read_viba, write_viba)},                   {"blnc", codec(read_blnc, write_blnc)},
+            {"blwh", codec(read_blwh, write_blwh)},                   {"phfl", codec(read_phfl, write_phfl)},
+            {"mixr", codec(read_mixr, write_mixr)},                   {"selc", codec(read_selc, write_selc)}};
 }
 
 }  // namespace genko::render::psd

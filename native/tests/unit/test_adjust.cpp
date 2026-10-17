@@ -558,7 +558,7 @@ private slots:
     // the correction layers handed to the writer in their places.
     void psdFrame() {
         const auto& codecs = render::psd::adjust_codecs();
-        QCOMPARE(codecs.size(), std::size_t(16));
+        QCOMPARE(codecs.size(), std::size_t(17));  // (hue2 twice: hue_saturation's, and Python's hue written as the nearest)
         for (const auto& codec : codecs) {
             QVERIFY(core::adjust_kind(codec.kind) != nullptr);
             QVERIFY(codec.group == "PC2a" || codec.group == "PC2b");
@@ -927,6 +927,93 @@ private slots:
         const auto layer = formats::psd_adjust_layer(correction(with_correction(doc, Json{{"kind", "brightness_contrast"}, {"native", Json{{"method", "modern"}}}})), page,
                                                      render::Size{200, 200}, notes);
         QVERIFY(layer && layer->blocks.find("8BIMbrit") == 0 && layer->blocks.find("8BIMCgEd") != std::string::npos);
+    }
+
+    // Python's 色相・彩度・明度 (hue: HSV, its hue turned, its saturation and value multiplied) as the nearest PSD
+    // adjustment, hue2 (the user's decision 5: always written; design 4.4): its turn as the hue (−180..180), its factors
+    // as the saturation and the lightness ((f − 1)·100), said in the notes; read back as hue_saturation (a PSD's hue2 is
+    // the upstream form). Python's defaults (a turn of 30°); one Python cannot read is not written (said); a layer of it
+    // is an adjustment layer of the PSD.
+    void psdPythonHue() {
+        const auto doc = eight_bit_page();
+        const core::Page& page = doc.page(0);
+        std::vector<std::string> notes;
+        const auto block = render::psd::write_adjustment(Json{{"kind", "hue"}, {"shift", 200}, {"saturation", 1.5}, {"value", 0.6}}, page, notes);
+        QVERIFY(block);
+        QCOMPARE(block->key, std::string("hue2"));
+        QVERIFY(!notes.empty());
+        const auto read = render::psd::read_adjustment(block->key, block->payload, notes);
+        QVERIFY(read);
+        QCOMPARE((*read)["kind"], Json("hue_saturation"));
+        QCOMPARE((*read)["hue"], Json(-160));
+        QCOMPARE((*read)["saturation"], Json(50));
+        QCOMPARE((*read)["lightness"], Json(-40));
+        QCOMPARE((*read)["colorize"], Json(false));
+        const auto plain = render::psd::write_adjustment(Json{{"kind", "hue"}}, page, notes);
+        QVERIFY(plain);
+        const auto plain_read = render::psd::read_adjustment(plain->key, plain->payload, notes);
+        QVERIFY(plain_read);
+        QCOMPARE((*plain_read)["hue"], Json(30));
+        QCOMPARE((*plain_read)["saturation"], Json(0));
+        QCOMPARE((*plain_read)["lightness"], Json(0));
+        // (a turn of −90: 270 as Python takes it, −90 as Photoshop's)
+        const auto turned = render::psd::write_adjustment(Json{{"kind", "hue"}, {"shift", -90}, {"saturation", 3}, {"value", 2.5}}, page, notes);
+        QVERIFY(turned);
+        const auto turned_read = render::psd::read_adjustment(turned->key, turned->payload, notes);
+        QVERIFY(turned_read);
+        QCOMPARE((*turned_read)["hue"], Json(-90));
+        QCOMPARE((*turned_read)["saturation"], Json(100));
+        QCOMPARE((*turned_read)["lightness"], Json(100));
+        notes.clear();
+        QVERIFY(!render::psd::write_adjustment(Json{{"kind", "hue"}, {"shift", "x"}}, page, notes));
+        QVERIFY(!notes.empty());
+        const auto layered = with_correction(doc, Json{{"kind", "hue"}, {"shift", 90}});
+        const auto made = formats::psd_adjust_layer(correction(layered), layered.page(0), render::Size{200, 200}, notes);
+        QVERIFY(made);
+        QVERIFY(made->blocks.starts_with("8BIMhue2"));
+    }
+
+    // The notes of the PSD's adjustment layers are the person's words (Japanese, plain): what is not read — a block cut
+    // short, of a version or a kind this build does not read, Python's view — and what is written otherwise or not at all
+    // (its settings cannot be read), the corrections named by their names (レベル補正, 自然な彩度 …), not their keys.
+    void psdNotesInJapanese() {
+        std::vector<std::string> notes;
+        for (const char* key : {"levl", "curv", "brit", "post", "thrs", "expA", "grdm", "clrL", "hue2", "vibA", "blnc", "blwh", "phfl", "mixr",
+                                "selc", "SoCo", "abcd"}) {
+            const std::size_t before = notes.size();
+            QVERIFY2(!render::psd::read_adjustment(key, "", notes), key);
+            QVERIFY2(notes.size() > before, key);
+        }
+        {
+            const render::psd::PythonView python;
+            QVERIFY(!render::psd::read_adjustment("levl", "", notes));
+        }
+        const auto doc = eight_bit_page();
+        const core::Page& page = doc.page(0);
+        for (const Json& adjust : {Json{{"kind", "levels"}, {"gamma", 2.0}}, Json{{"kind", "brightness_contrast"}, {"brightness", 30}},
+                                   Json{{"kind", "bitonal"}}, Json{{"kind", "posterize"}, {"levels", 5}}, Json{{"kind", "hue"}, {"shift", 40}},
+                                   Json{{"kind", "levels"}, {"black", "x"}}, Json{{"kind", "curve"}, {"points", "x"}},
+                                   Json{{"kind", "gradient_map"}, {"stops", "x"}}, Json{{"kind", "color_lookup"}, {"lut", "sha256:" + std::string(64, '0')}},
+                                   Json{{"kind", "vibrance"}, {"vibrance", "x"}}, Json{{"kind", "hue_saturation"}, {"hue", "x"}}}) {
+            const std::size_t before = notes.size();
+            (void)render::psd::write_adjustment(adjust, page, notes);
+            QVERIFY2(notes.size() > before, adjust.dump().c_str());
+        }
+        const QRegularExpression japanese(QStringLiteral("[\\x{3041}-\\x{30ff}\\x{4e00}-\\x{9fff}]"));
+        const QRegularExpression english(QStringLiteral("\\b(the|is|are|not|cannot|this|build|adjustment|read|view)\\b"));
+        const QRegularExpression key_word(QStringLiteral("\\b[a-z]+_[a-z_]+\\b"));  // (a kind's key: hue_saturation)
+        for (const std::string& note : notes) {
+            const QString text = QString::fromStdString(note);
+            QVERIFY2(text.contains(japanese), note.c_str());
+            QVERIFY2(!text.contains(english), note.c_str());
+            QVERIFY2(!text.contains(key_word), note.c_str());
+        }
+        const auto said = [&notes](const char* words) {
+            return std::any_of(notes.begin(), notes.end(), [words](const std::string& n) { return n.find(words) != std::string::npos; });
+        };
+        QVERIFY(said("レベル補正"));
+        QVERIFY(said("自然な彩度"));
+        QVERIFY(said("色相・彩度"));
     }
 
     // The .cube of a page's corrections (file.export.colorLookupTables): an identity lattice through each visible
