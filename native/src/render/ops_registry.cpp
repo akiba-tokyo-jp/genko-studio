@@ -25,6 +25,9 @@
 #include "render/png.hpp"
 #include "render/raster.hpp"
 #include "render/raster_ops.hpp"
+#include "render/area_kinds.hpp"
+#include "render/layer_masks.hpp"
+#include "render/ops_pc3.hpp"
 
 namespace genko::render {
 
@@ -371,6 +374,14 @@ void register_render_ops(core::OpRegistry& registry) {
             throw core::OpError(error.what());
         }
     });
+    // PC3 (選択・マスク・修復・パス・変形・判型): the new ops (each group writes its own in its file) and the kinds and
+    // modifiers of an area this build adds, made known to the bus (render/area_kinds)
+    register_select_ops(registry);
+    register_retouch_ops(registry);
+    register_vector2_ops(registry);
+    register_transform_ops(registry);
+    register_pagesize_ops(registry);
+    area_kinds::use_keys();
 }
 
 const core::OpRegistry& ops_registry() {
@@ -427,6 +438,21 @@ const core::OpRegistry& ops_registry() {
             r.add(name, [plain, op, name](core::OpContext& c) {
                 const std::vector<core::PagePtr> before = c.doc.pages;  // (color-model@1: what the op changed, keep_page_modes)
                 const std::optional<channels::Target> target = core::channel_target_op(name) ? channels::target_of(c.doc, c.op) : std::nullopt;
+                // (masks@1, PC3: "layer_mask": true — the op's layer's mask lent to it as a layer to paint, render/layer_masks)
+                const bool lends_mask = layer_masks::lends_to(name) && core::truthy_at(c.op, "layer_mask");
+                if (!target && lends_mask) {
+                    const std::size_t at = core::require_page(c.doc, c.op);
+                    core::Json lent_op = c.op;
+                    lent_op.erase("layer_mask");
+                    const layer_masks::MaskLending lending(c.doc, at, lent_op, name);
+                    core::OpContext inner{c.doc, lent_op, c.actor};
+                    plain(inner);
+                    (void)lending.take_back(c.doc);
+                    c.report = std::move(inner.report);
+                    color_edit::bake_marks(c.doc);
+                    ink_edit::bake_marks(c.doc);
+                    return;
+                }
                 if (!target) {
                     op(c);
                     channels::follow_depth(c.doc);
@@ -434,6 +460,7 @@ const core::OpRegistry& ops_registry() {
                     return;
                 }
                 const std::size_t at = core::require_page(c.doc, c.op);
+                if (lends_mask) throw core::OpError("layer_mask and channel cannot be given together");
                 if (target->channel) {
                     core::Json lent_op = c.op;
                     lent_op.erase("channel");

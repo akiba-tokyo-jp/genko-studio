@@ -105,6 +105,10 @@ genko_library(genko_core
     clock.cpp
     stylecat.cpp
     ops_studio.cpp
+    # PC3 (選択・マスク・パス・変形・判型の土台: masks@1, vector@1, pen-shapes@1, transform@1, page-spec@1)
+    vector.cpp
+    masks.cpp
+    page_geometry.cpp
     "${CMAKE_CURRENT_BINARY_DIR}/ops_schema_data.cpp"
     "${CMAKE_CURRENT_BINARY_DIR}/pyre_names_data.cpp"
     "${CMAKE_CURRENT_BINARY_DIR}/builtin_profiles_data.cpp"

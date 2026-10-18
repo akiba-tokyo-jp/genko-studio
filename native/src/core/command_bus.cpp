@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <cstdint>
 #include <map>
+#include <mutex>
 #include <set>
 #include <unordered_set>
 #include <utility>
@@ -12,6 +13,7 @@
 #include "core/adjust_kinds.hpp"
 #include "core/channels.hpp"
 #include "core/covers.hpp"
+#include "core/masks.hpp"
 #include "core/ops_schema.hpp"
 #include "core/ops_util.hpp"
 #include "core/color_raster.hpp"
@@ -85,7 +87,11 @@ std::string usage(const Json& op, bool channel = false) {
 // Python's.
 bool native_key(std::string_view op, std::string_view key) {
     return (op == "merge_visible" && key == "flatten") || (op == "convert_layer" && key == "preserve_precision") ||
-           (op == "define_brush" && key == "paper") || ((op == "add_line" || op == "edit_line") && key == "ruby_spans");
+           (op == "define_brush" && key == "paper") || ((op == "add_line" || op == "edit_line") && key == "ruby_spans") ||
+           // PC3 (masks@1): set_layer_mask's linked, density and feather_mm; a pixel op's layer_mask (its layer's mask
+           // painted instead of its pixels)
+           (op == "set_layer_mask" && (key == "linked" || key == "density" || key == "feather_mm")) ||
+           (key == "layer_mask" && channel_target_op(op));
 }
 
 // PC2 (SPEC COLOR-04): the settings of this build's own an op of Python's reads by what else it was given —
@@ -609,12 +615,32 @@ Json expand_for_pages(const Document& doc, const Json& op) {
     return out;
 }
 
+namespace {
+
+// (PC3: the kinds and modifiers of an area the drawing build adds, render/area_kinds.cpp)
+std::mutex g_area_keys_mutex;
+std::set<std::string, std::less<>>& area_keys() {
+    static std::set<std::string, std::less<>> keys;
+    return keys;
+}
+
+}  // namespace
+
+void add_area_key(std::string key) {
+    const std::lock_guard lock(g_area_keys_mutex);
+    area_keys().insert(std::move(key));
+}
+
 bool area_needs_resolving(const Json& area) {
     if (!area.is_object()) return false;
     // (channels@1: "channel", a page's alpha or spot channel — this build's own kind)
     for (const char* key : {"rect", "ellipse", "layer", "color", "all", "saved", "union", "intersect", "subtract", "invert",
                             "grow_mm", "feather_mm", "channel"}) {
         if (area.contains(key)) return true;
+    }
+    const std::lock_guard lock(g_area_keys_mutex);
+    for (const auto& [key, value] : area.items()) {
+        if (area_keys().contains(key)) return true;
     }
     return false;
 }
@@ -949,6 +975,8 @@ ApplyResult CommandBus::apply(const Document& doc, const Json& ops_in, const Act
                     validate_color_model(work);   // (color-model@1: an RGB page's mode)
                     validate_channels(work);      // (channels@1: a page's alpha and spot channels)
                     validate_adjustments(work);   // (adjustments@1: a correction's native and own kinds)
+                    validate_masks(work);         // (masks@1, PC3: a mask's settings, a page's Quick Mask)
+                    vector::validate_vector(work);  // (PC3: vector@1, pen-shapes@1, transform@1, page-spec@1)
                 } catch (const Error& error) {
                     if (error.code() == "not_yet_ported") throw;
                     throw OpError(error.what());

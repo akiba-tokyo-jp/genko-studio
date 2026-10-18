@@ -425,7 +425,13 @@ private slots:
             "merge_spot_channel", "split_channels", "merge_channels",  // (channels@1: the C++ build's own, SPEC.md COLOR-03)
             "to_indexed", "set_color_table", "to_bitmap", "set_duotone",  // (color-model@1's own modes, PC1d: the C++ build's own, SPEC.md COLOR-03)
             "set_adjustment", "auto_adjust", "hdr_toning", "apply_image", "calculations", "trap",
-            "fade_layer"};  // (PC2's corrections, adjustments@1: the C++ build's own, SPEC.md COLOR-04)
+            "fade_layer",  // (PC2's corrections, adjustments@1: the C++ build's own, SPEC.md COLOR-04)
+            "quick_mask", "magic_erase", "outline_area", "apply_layer_mask", "mask_from_transparency", "matting", "clone_stamp",
+            "healing_brush", "spot_healing", "history_brush", "content_aware_fill",  // (PC3 節 B's ops, frames until their groups: SPEC.md COLOR-05)
+            "set_path", "delete_path", "rename_path", "make_work_path", "text_to_path", "stroke_path", "set_vector_mask", "add_shape_part",
+            "edit_shape_part", "combine_shape_parts", "move_shape_parts", "transform_layers", "content_aware_scale", "align_layers",
+            "distribute_layers", "arrange_layers", "link_layers", "resize_pages", "set_canvas_size", "crop_page", "trim_page", "reveal_all",
+            "rotate_pages"};  // (PC3 節 C's ops, frames until their groups: SPEC.md COLOR-06)
         expected.insert(drawing_names.begin(), drawing_names.end());
         const std::set<std::string> actual(all_names.begin(), all_names.end());
         QCOMPARE(actual, expected);

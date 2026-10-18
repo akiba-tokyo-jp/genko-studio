@@ -44,6 +44,7 @@
 #include "core/filters.hpp"
 #include "core/frames.hpp"
 #include "core/ids.hpp"
+#include "core/masks.hpp"
 #include "core/ops_util.hpp"
 #include "core/paths.hpp"
 #include "core/pyconv.hpp"
@@ -59,6 +60,7 @@
 #include "render/fill.hpp"
 #include "render/filters.hpp"
 #include "render/import_profile.hpp"
+#include "render/layer_masks.hpp"
 #include "render/proof.hpp"
 #include "render/op_limits.hpp"
 #include "render/ops_adjust.hpp"
@@ -636,6 +638,34 @@ core::Mask mask_of(const Image& image, bool enabled) {
     return mask;
 }
 
+// masks@1 (PC3): what the mask held past its picture kept when its picture is made again (linked, density, feather_mm),
+// then the op's own of them ("linked": bool, "density": 0..1, "feather_mm": 0..100 — this build's).
+void mask_settings(const std::optional<core::Mask>& before, core::Mask& mask, const Json& op) {
+    if (before) {
+        mask.linked = before->linked;
+        mask.density = before->density;
+        mask.feather_mm = before->feather_mm;
+    }
+    Json given = Json::object();
+    for (const char* key : {"linked", "density", "feather_mm"}) {
+        if (const Json* v = core::get(op, key); v != nullptr && !v->is_null()) given[key] = *v;
+    }
+    if (given.empty()) return;
+    try {
+        core::read_mask_settings(given, mask);
+    } catch (const core::Error& error) {
+        throw OpError(error.what());
+    }
+}
+
+// A layer's mask over the whole page at `size` as a merge lays it (masks@1, PC3: its density and feather as the page
+// draws them, render/layer_masks; a mask of none as before)
+Image merge_mask(const Page& page, const core::Mask& mask, Size size, Resample resample) {
+    const Image picture = read_png(*mask.png).convert("L");
+    if (!core::mask_has_settings(mask)) return picture.resize(size, resample);
+    return layer_masks::shown(page, mask, picture, size, Box{0, 0, size.width, size.height}, resample);
+}
+
 void set_layer_mask(OpContext& c) {
     Document& doc = c.doc;
     const Json& op = c.op;
@@ -660,7 +690,9 @@ void set_layer_mask(OpContext& c) {
     }
     if (core::truthy_at(op, "invert")) image = ops::invert(image);
     const bool enabled = core::has(op, "enabled") ? core::py_truthy(op["enabled"]) : (layer.mask ? layer.mask->enabled : true);
+    const std::optional<core::Mask> before = layer.mask;
     layer.mask = mask_of(image, enabled);
+    mask_settings(before, *layer.mask, op);  // (masks@1, PC3)
 }
 
 void paint_mask(OpContext& c) {
@@ -692,7 +724,9 @@ void paint_mask(OpContext& c) {
         Draw draw(image);
         draw_stroke_mm(draw, flat, kMaskDpi, width, Ink(value), false);
     }
+    const std::optional<core::Mask> before = layer.mask;
     layer.mask = mask_of(image, layer.mask ? layer.mask->enabled : true);
+    mask_settings(before, *layer.mask, Json::object());  // (masks@1, PC3: its settings kept)
 }
 
 // --- several layers into one ------------------------------------------------------------------------------------------
@@ -859,13 +893,13 @@ std::pair<std::string, bool> composite_color_layers(const Document& doc, const P
                 if (!out.is_opaque()) throw NotYetPorted("high-precision merge adjustment depends on external background");
                 std::optional<Image> mask;
                 if (layer.mask && layer.mask->enabled && layer.mask->png && !layer.mask->png->empty())
-                    mask = read_png(*layer.mask->png).convert("L").resize(size, Resample::Bicubic);
+                    mask = merge_mask(page, *layer.mask, size, Resample::Bicubic);
                 out.adjust(*correction, layer.opacity, layer.clip, mask ? &*mask : nullptr, blend);
                 continue;
             }
             std::optional<Image> mask;
             if (layer.mask && layer.mask->enabled && layer.mask->png)
-                mask = read_png(*layer.mask->png).convert("L").resize(size, Resample::Bilinear);
+                mask = merge_mask(page, *layer.mask, size, Resample::Bilinear);
             const auto exposure = core::Exposure::parse(*layer.adjust);
             if (layer.opacity > 0 && (exposure.stops != 0 || exposure.offset != 0 || exposure.gamma != 1) && !out.is_opaque())
                 throw NotYetPorted("high-precision merge adjustment depends on external background");
@@ -887,7 +921,7 @@ std::pair<std::string, bool> composite_color_layers(const Document& doc, const P
             floating = floating || pixels.metadata("")["precision"] == "f32";
             std::optional<Image> shown;  // (its mask, as the page shows it)
             if (layer.mask && layer.mask->enabled && layer.mask->png && !layer.mask->png->empty())
-                shown = read_png(*layer.mask->png).convert("L").resize(size, Resample::Bilinear);
+                shown = merge_mask(page, *layer.mask, size, Resample::Bilinear);
             out.blend(pixels, size, all, layer.opacity, layer.clip, layer.blend, shown ? &*shown : nullptr);
         } else {
             auto picture = drawable_layer_image(page, layer, kWorkingDpi, &doc, false, true);

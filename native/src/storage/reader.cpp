@@ -23,6 +23,8 @@
 #include "core/pyconv.hpp"
 #include "core/ruby.hpp"
 #include "core/strokes.hpp"
+#include "core/masks.hpp"
+#include "core/vector.hpp"
 #include "storage/asset_store.hpp"
 #include "storage/fsutil.hpp"
 
@@ -60,15 +62,19 @@ constexpr std::array<std::string_view, 20> kLineKeys{"id", "page_index", "text",
                                                      "x_mm", "y_mm", "w_mm", "h_mm", "balloon", "tail", "wrap",
                                                      "ruby_runs", "ruby_spans", "path", "emphasis_runs", "style_runs",
                                                      "style", "tails"};
-constexpr std::array<std::string_view, 43> kLayerKeys{
+constexpr std::array<std::string_view, 48> kLayerKeys{
     "id", "role", "kind", "visible", "exportable", "strokes", "raster_relpath", "fill_rgb", "lpi", "density",
     "region", "opacity", "material_id", "angle", "title", "blend", "clip", "lock_alpha", "locked", "panel_clip",
     "panel_each", "patches", "tone", "parent_id", "asset", "mask", "color", "reference", "fill", "adjust", "effect",
     "color_prints", "screen", "source", "strokes_blob", "stroke_count",
     // placed layers only
-    "frame_id", "placement_mm", "fit", "clip_to", "finish", "color_raster", "ink_raster"};
+    "frame_id", "placement_mm", "fit", "clip_to", "finish", "color_raster", "ink_raster",
+    // PC3 (pen-shapes@1, vector@1, transform@1)
+    "shapes_blob", "shape_count", "vector_mask", "link", "lock_position"};
 constexpr std::array<std::string_view, 5> kPlacedOnlyKeys{"frame_id", "placement_mm", "fit", "clip_to", "finish"};
-constexpr std::array<std::string_view, 2> kMaskKeys{"enabled", "asset"};
+constexpr std::array<std::string_view, 5> kMaskKeys{"enabled", "asset",
+                                                    // masks@1 (PC3)
+                                                    "linked", "density", "feather_mm"};
 constexpr std::array<std::string_view, 10> kPackedStrokeKeys{"id", "kind", "width_mm", "xy", "p", "rgb", "opacity", "r", "po", "color_rgb"};
 constexpr std::array<std::string_view, 11> kDictStrokeKeys{"id", "points", "pressure", "width_mm", "kind", "rgb",
                                                            "opacity", "rotation", "po", "pressure_opacity", "color_rgb"};
@@ -364,6 +370,11 @@ private:
     core::Bytes read_profile(const std::string& ref, core::ProfileSpace space, const std::string& at_profile);
     void check_ink_rasters(core::Page& page, const Json& raw, const std::string& at);
     void read_channels(core::Page& page, const std::string& at);
+    // PC3 (vector@1, pen-shapes@1, transform@1, page-spec@1)
+    void read_layer_vectors(core::Layer& layer, const Json& data, const std::string& at);
+    core::vector::ShapeListPtr read_shapes_blob(const Json& ref_value, const std::string& at);
+    void read_page_vectors(core::Page& page, const std::string& at);
+    std::unordered_map<std::string, core::vector::ShapeListPtr> shape_blobs_;  // (shapes read in this load)
 };
 
 core::PageSpec Reader::read_spec(const Json& raw) {
@@ -1052,11 +1063,18 @@ core::Layer Reader::read_layer(const Json& data, const std::string& at) {
             if (png && !png->empty()) {
                 m.png = std::move(png);
                 m.enabled = to_bool(*mask, "enabled", true);
+                // (masks@1, PC3: linked, density, feather_mm — one not well formed: the book opens read-only)
+                try {
+                    core::read_mask_settings(*mask, m);
+                } catch (const core::Error& error) {
+                    issue("broken_value", here, {}, error.what());
+                }
                 layer.mask = std::move(m);
             }
         }
         check_keys(*mask, kMaskKeys, here, "mask");
     }
+    read_layer_vectors(layer, data, at);  // (PC3: vector@1's vector mask, transform@1's link and position lock)
     check_keys(data, kLayerKeys, at, "layer");
     if (!placed) {
         for (const auto& key : kPlacedOnlyKeys) {
@@ -1119,7 +1137,97 @@ core::Layer Reader::read_layer(const Json& data, const std::string& at) {
     if (const Json* blob = find(data, "strokes_blob"); blob && core::py_truthy(*blob)) {
         if (auto list = read_strokes_blob(*blob, at_key(at, "strokes_blob"))) layer.strokes = std::move(list);
     }
+    // (pen-shapes@1, PC3: a pen layer's shape parts, assets/<ab>/<64 hex>.shapes.json)
+    if (const Json* blob = find(data, "shapes_blob"); blob && !blob->is_null()) {
+        if (auto list = read_shapes_blob(*blob, at_key(at, "shapes_blob"))) layer.shapes = std::move(list);
+    }
     return layer;
+}
+
+// PC3 (vector@1, transform@1): a layer's vector mask, its link group and its position lock. One not well formed is
+// reported (the book opens read-only: it is never written without it).
+void Reader::read_layer_vectors(core::Layer& layer, const Json& data, const std::string& at) {
+    if (const Json* mask = find(data, "vector_mask"); mask && !mask->is_null()) {
+        try {
+            layer.vector_mask = core::vector::vector_mask_from_json(*mask);
+        } catch (const core::Error& error) {
+            issue("broken_value", at_key(at, "vector_mask"), {}, error.what());
+        }
+    }
+    if (const Json* link = find(data, "link"); link && !link->is_null()) {
+        if (link->is_string() && !link->get_ref<const std::string&>().empty() && link->get_ref<const std::string&>().size() <= 64) {
+            layer.link = link->get<std::string>();
+        } else {
+            issue("broken_value", at_key(at, "link"), {}, "a layer's link must be text (1..64 bytes)");
+        }
+    }
+    if (const Json* lock = find(data, "lock_position"); lock && !lock->is_null()) {
+        if (lock->is_boolean()) {
+            layer.lock_position = lock->get<bool>();
+        } else {
+            issue("broken_value", at_key(at, "lock_position"), {}, "a layer's lock_position must be true or false");
+        }
+    }
+}
+
+// pen-shapes@1 (PC3): a pen layer's shape parts, read and checked once per asset in a load (as the strokes are).
+core::vector::ShapeListPtr Reader::read_shapes_blob(const Json& ref_value, const std::string& at) {
+    const core::Bytes bytes = read_blob(ref_value, at, nullptr, core::vector::kShapesSuffix, "shapes");
+    if (!bytes) return nullptr;
+    const std::string& ref = ref_value.get_ref<const std::string&>();
+    if (const auto it = shape_blobs_.find(ref); it != shape_blobs_.end()) return it->second;
+    try {
+        auto list = core::vector::make_shapes(core::vector::shapes_from_blob(*bytes), ref);
+        shape_blobs_.emplace(ref, list);
+        return list;
+    } catch (const core::Error& error) {
+        issue("broken_asset", at, ref, std::string("the shapes ") + AssetStore::relpath(ref, core::vector::kShapesSuffix) + " cannot be read: " + error.what());
+        return nullptr;
+    }
+}
+
+// PC3 (vector@1, page-spec@1): the page's saved paths, work path and clipping path, and its own paper, kept under
+// "paths", "work_path", "clipping_path" and "native_spec" (taken out of the keys written back as they were read). What
+// cannot be read is reported (the book opens read-only) and is kept as it was read: the page is never written without it.
+void Reader::read_page_vectors(core::Page& page, const std::string& at) {
+    const auto take = [&](const char* key, const auto& read) {
+        const auto it = page.extra.find(key);
+        if (it == page.extra.end()) return;
+        try {
+            read(*it);
+        } catch (const core::Error& error) {
+            issue("broken_value", at_key(at, key), {}, error.what());
+            return;  // (left in the keys written back as they were: the book is read-only)
+        }
+        page.extra.erase(key);
+    };
+    take("paths", [&](const Json& raw) { page.paths = core::vector::paths_from_json(raw); });
+    take("work_path", [&](const Json& raw) {
+        if (!raw.is_null()) page.work_path = core::vector::path_from_json(raw);
+    });
+    take("clipping_path", [&](const Json& raw) {
+        if (!raw.is_null()) page.clipping_path = core::vector::clipping_from_json(raw);
+    });
+    take("native_spec", [&](const Json& raw) {
+        if (!raw.is_object()) throw core::Error("value", "a page's native_spec must be an object");
+        Json spec = raw;
+        std::optional<std::pair<double, double>> origin;
+        if (const auto o = spec.find("trim_origin_mm"); o != spec.end()) {
+            if (!o->is_array() || o->size() != 2 || !(*o)[0].is_number() || !(*o)[1].is_number())
+                throw core::Error("value", "a page's trim_origin_mm must be [x, y]");
+            origin = std::make_pair((*o)[0].get<double>(), (*o)[1].get<double>());
+            spec.erase("trim_origin_mm");
+        }
+        const std::size_t before = report_.issues.size();
+        core::PageSpec own = read_spec(spec);
+        if (report_.issues.size() != before) {  // (said once, here, for the page)
+            report_.issues.erase(report_.issues.begin() + static_cast<std::ptrdiff_t>(before), report_.issues.end());
+            throw core::Error("value", "a page's native_spec is not a paper this build reads");
+        }
+        own.trim_origin_mm = origin;
+        page.spec = std::move(own);
+        page.own_spec = true;
+    });
 }
 
 core::Document Reader::migrate(const Json& payload) {
@@ -1237,6 +1345,7 @@ core::Document Reader::migrate(const Json& payload) {
         }
         check_ink_rasters(page, raw, at);
         read_channels(page, at);
+        read_page_vectors(page, at);
         page_list.push_back(std::make_shared<core::Page>(std::move(page)));
         if (skip_assets_) deferred.push_back(page_list.back());
     }
@@ -1357,6 +1466,11 @@ core::Document Reader::migrate(const Json& payload) {
     // (adjustments@1: a correction's native or own kind that is not well formed)
     try { core::validate_adjustments(doc); }
     catch (const core::Error& error) { issue("broken_value", "/pages", {}, error.what()); }
+    // (PC3: masks@1's settings and Quick Mask; vector@1, pen-shapes@1, transform@1, page-spec@1)
+    try { core::validate_masks(doc); }
+    catch (const core::Error& error) { issue("broken_value", "/pages", {}, error.what()); }
+    try { core::vector::validate_vector(doc); }
+    catch (const core::Error& error) { issue("broken_value", "/pages", {}, error.what()); }
     return doc;
 }
 
@@ -1418,7 +1532,10 @@ bool is_known_feature(std::string_view feature) {
     return feature == core::kColorRasterFeature || feature == core::kColorTilesFeature || feature == core::kExposureFeature ||
            feature == core::kColorStrokeFeature || feature == core::kPaperFeature || feature == core::kRubyLayoutFeature ||
            feature == core::kColorModeFeature || feature == core::kColorModelFeature || feature == core::kChannelsFeature ||
-           feature == core::kAdjustmentsFeature;
+           feature == core::kAdjustmentsFeature ||
+           // PC3 (core/masks.hpp, core/vector.hpp)
+           feature == core::kMasksFeature || feature == core::vector::kVectorFeature || feature == core::vector::kPenShapesFeature ||
+           feature == core::vector::kTransformFeature || feature == core::vector::kPageSpecFeature;
 }
 
 int project_version(const Json& payload) {

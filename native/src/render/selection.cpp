@@ -16,6 +16,7 @@
 #include "core/pynum.hpp"
 #include "core/pyops.hpp"
 #include "core/strokes.hpp"
+#include "render/area_kinds.hpp"
 #include "render/channels.hpp"
 #include "render/draw.hpp"
 #include "render/op_limits.hpp"
@@ -157,7 +158,9 @@ AreaMask area_mask(const Json& area, int dpi, std::string_view what) {
     const double w = std::max(1.0, core::py_round_whole(mm2px(box[2], dpi)));
     const double h = std::max(1.0, core::py_round_whole(mm2px(box[3], dpi)));
     limits::check_sides(w, h, what);
-    Image sized = image.resize(Size{static_cast<int>(w), static_cast<int>(h)}, Resample::Nearest);
+    // (bilinear, PC3 B-0: a grey edge — an anti-aliased or feathered selection's — stays smooth at the patches' 300 dpi
+    // and a precise page's finer grid, and a two-valued one's edge is drawn soft, as Photoshop draws a selection's)
+    Image sized = image.resize(Size{static_cast<int>(w), static_cast<int>(h)}, Resample::Bilinear);
     const double x0 = rounded_corner(mm2px(box[0], dpi), what);
     const double y0 = rounded_corner(mm2px(box[1], dpi), what);
     return AreaMask{std::move(sized), static_cast<std::int64_t>(x0), static_cast<std::int64_t>(y0)};
@@ -639,12 +642,19 @@ Image colour_area(const Json& spec, const core::Page& page, const core::Document
 Image base_mask(const Json& area, const core::Page& page, const core::Document* episode, int dpi, Size size, int depth, Budget& budget) {
     if (core::truthy_at(area, "all")) return Image::create("L", size, Ink(255));
     if (core::truthy_at(area, "rect") || core::truthy_at(area, "ellipse") || core::truthy_at(area, "poly")) {
+        // (PC3: "antialias": true, the edge grey — an ellipse then of 360 corners)
+        const bool smooth = area_kinds::antialiased(area);
         const Json points = core::truthy_at(area, "poly")   ? area["poly"]
                             : core::truthy_at(area, "rect") ? rect_poly(area["rect"])
-                                                            : ellipse_poly(area["ellipse"]);
+                                                            : ellipse_poly(area["ellipse"], smooth ? 360 : 72);
         if (core::length(points) < 3) area_error("an area needs at least three points");
         std::vector<PointD> corners;
         for (const auto& [x, y] : poly_points(points, "area")) corners.push_back(PointD{mm2px(x, dpi), mm2px(y, dpi)});
+        if (smooth) {
+            std::vector<std::pair<double, double>> pixels;
+            for (const PointD& p : corners) pixels.emplace_back(p.x, p.y);
+            return area_kinds::antialiased_polygon(pixels, size);
+        }
         Image mask = Image::create("L", size, Ink(0));
         Draw(mask).polygon(corners, Ink(255));
         return mask;
@@ -708,6 +718,12 @@ Image base_mask(const Json& area, const core::Page& page, const core::Document* 
         if (!out) area_error(std::string(key) + " needs areas");
         return std::move(*out);
     }
+    // (PC3: the kinds this build adds, render/area_kinds)
+    if (const area_kinds::Kind* kind = area_kinds::kind_of(area)) {
+        const area_kinds::Context context{page, episode, dpi, size,
+                                          [&](const Json& inner) { return to_mask_at(inner, page, episode, dpi, depth + 1, budget); }};
+        return area_kinds::solve(*kind, area, context);
+    }
     area_error("an area is poly, mask, rect, ellipse, layer, color, all, saved, union, intersect or subtract");
 }
 
@@ -717,7 +733,13 @@ Image to_mask_at(const Json& area, const core::Page& page, const core::Document*
     const Size size = page_size(page, dpi);
     budget.visit(static_cast<double>(size.width) * static_cast<double>(size.height));
     Image mask = base_mask(area, page, episode, dpi, size, depth, budget);
+    // (PC3, render/area_kinds: the kind → matrix → grow_mm → expand_mm, contract_mm → border_mm → smooth_mm → invert →
+    // feather_mm; an area without the new modifiers as before)
+    const area_kinds::Context context{page, episode, dpi, size,
+                                      [&](const Json& inner) { return to_mask_at(inner, page, episode, dpi, depth + 1, budget); }};
+    mask = area_kinds::before_grow(std::move(mask), area, context);
     if (core::truthy_at(area, "grow_mm")) mask = grow(mask, mm2px(core::finite_float(area["grow_mm"], "grow_mm"), dpi));
+    mask = area_kinds::after_grow(std::move(mask), area, context);
     if (core::truthy_at(area, "invert")) mask = chops::invert(mask);
     if (core::truthy_at(area, "feather_mm")) {
         const double radius = core::py_max(0.1, mm2px(core::finite_float(area["feather_mm"], "feather_mm"), dpi) / 2);

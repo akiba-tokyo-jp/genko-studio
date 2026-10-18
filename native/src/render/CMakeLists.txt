@@ -74,6 +74,18 @@ genko_library(genko_render
     text/tategaki.cpp
     text/lettering.cpp
     text/balloons.cpp
+    # PC3 (選択・マスク・パス・変形・判型の土台: B-0, C-0)
+    selection_ext.cpp
+    area_kinds.cpp
+    layer_masks.cpp
+    mask_lending.cpp
+    path_raster.cpp
+    resample.cpp
+    ops_select.cpp
+    ops_retouch.cpp
+    ops_vector2.cpp
+    ops_transform.cpp
+    ops_pagesize.cpp
     ${GENKO_MATERIAL_RESOURCES}
     ${GENKO_TEXT_RESOURCES}
   PUBLIC_DEPS genko_core Qt6::Core

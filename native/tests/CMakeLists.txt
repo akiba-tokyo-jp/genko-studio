@@ -99,6 +99,15 @@ genko_test(test_ink_filters SOURCES unit/test_ink_filters.cpp DEPS genko_test_su
 # refusals, the selection from a channel, the pixel ops on a channel or one colour plate, split and merge back byte for
 # byte, Merge Spot Channel against PhotoCraft's formula, the spots printed and the panel's view, the book on disk.
 genko_test(test_channels SOURCES unit/test_channels.cpp DEPS genko_test_support genko_render_ops genko_formats LABELS unit TIMEOUT 600)
+# PC3-0 (SPEC.md COLOR-05, COLOR-06): the selection's algorithms (PhotoCraft's algo/selection.rs), the area kinds and
+# modifiers this build adds, masks@1 (settings, the Quick Mask, density and feather on the three ways, a mask lent to a
+# pixel op); a path's coverage (vector/src), the vector data's JSON and the book's frames for vector@1, pen-shapes@1,
+# transform@1 and page-spec@1; pixels drawn again through a map (algo/src/transform.rs, warp.rs, resample.rs); everything
+# on a page moved by one map and the warps (geom/src/warp.rs)
+genko_test(test_selection_ext SOURCES unit/test_selection_ext.cpp DEPS genko_test_support genko_render_ops LABELS unit TIMEOUT 600)
+genko_test(test_path_raster SOURCES unit/test_path_raster.cpp DEPS genko_test_support genko_render_ops LABELS unit)
+genko_test(test_resample SOURCES unit/test_resample.cpp DEPS genko_test_support genko_render_ops LABELS unit)
+genko_test(test_page_geometry SOURCES unit/test_page_geometry.cpp DEPS genko_test_support LABELS unit)
 # PC2-0 (SPEC.md COLOR-04, adjustments@1): the corrections' common ground without Python — Python's form kept, a
 # correction's native read and stored, native.method, the kinds' table and what is not in this build yet, one
 # AdjustFunction to the three ways, native.blend on 8 and 16 bits and on CMYK, the PSD's frame; and PC2a's tone kinds
