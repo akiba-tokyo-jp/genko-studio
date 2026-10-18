@@ -191,6 +191,18 @@ std::string to_inks(const Pixels& p);
 Pixels layer_pixels(core::OpContext& c, std::size_t at, const std::string& id);
 // The pixels written back into that layer as its kind holds them (it is a paint layer after).
 void put_layer_pixels(core::Document& doc, std::size_t at, const std::string& id, const Pixels& p);
+// PC3 (B-0): a part of them — `box` on the layer's own grid (pixels; clamped to it: grid() says how big it is) — as
+// layer_pixels gives the whole (its lines and fills drawn in first), without the rest of the layer held in floats (a
+// precise B4 page at 600 dpi is some 820 MB of floats). Pixels of the box past the grid: none (the box is clamped).
+struct Window {
+    Box box;      // (the part read, clamped to the grid)
+    Size grid;    // (the layer's whole grid)
+};
+Pixels layer_pixels(core::OpContext& c, std::size_t at, const std::string& id, const Box& box, Window* window = nullptr);
+// Those pixels written back at `box` (as layer_pixels clamped it): the layer's pixels outside it keep their bytes (an
+// 8-bit layer's PNG is written again, its other pixels the same; a precise layer's samples outside the box as they were;
+// an ink layer's too).
+void put_layer_pixels(core::Document& doc, std::size_t at, const std::string& id, const Pixels& p, const Box& box);
 
 // An ink layer's pixels set from changed colours and alphas (`px`, one each: rgba_of's form) by the page's rules
 // (render/ink correct: a colour left as it was keeps its inks). Worked in bands, their arrays in the imaging budget.

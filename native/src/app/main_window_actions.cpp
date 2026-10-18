@@ -440,7 +440,7 @@ void MainWindow::build_actions() {
          QStringLiteral("ペンの線は触れた所で切れます"), true);
     make("act_frame", QStringLiteral("コマ割り"), [this] { choose_tool(QStringLiteral("frame")); }, keys({QKeySequence(QStringLiteral("F"))}),
          QStringLiteral("コマの中をドラッグして割る（斜めも。水平・垂直に吸い付く、Alt で自由）・間の白をドラッグで間隔を動かす・選んだコマの角をドラッグで形を変える"), true);
-    make("act_move", QStringLiteral("レイヤー移動"), [this] { choose_tool(QStringLiteral("move")); }, keys({QKeySequence(QStringLiteral("Q"))}),
+    make("act_move", QStringLiteral("移動ツール"), [this] { choose_tool(QStringLiteral("move")); }, keys({QKeySequence(QStringLiteral("Q"))}),
          QStringLiteral("描く先のレイヤーを丸ごとドラッグで動かす（Shift で縦・横・45°）"), true);
     tools_ = new QActionGroup(this);
     for (const auto& [tool, name] : {std::pair{"select", "act_select"}, {"pen", "act_pen"}, {"eraser", "act_eraser"}, {"frame", "act_frame"},
@@ -451,7 +451,7 @@ void MainWindow::build_actions() {
         tool_actions_[QString::fromLatin1(tool)] = act;
     }
     actions_.at("act_select")->setChecked(true);
-    build_selection_actions();  // (範囲選択 and the selection's commands: main_window_select.cpp)
+    build_selection_actions();  // (the selection's tools and commands: main_window_select.cpp)
     build_anim_actions();       // (アニメーション, タイムラプス: main_window_anim.cpp)
     build_channel_actions();    // (channels@1: the channel targets, the selection to a channel: main_window_channels.cpp)
     build_paint_actions();      // (スポイト … ゆがみ, 色の入れ替え, 透明色, 太く・細く: main_window_paint.cpp)
@@ -622,7 +622,7 @@ void MainWindow::build_menus() {
     edit->addAction(action("act_redo"));
     edit->addAction(action("act_history"));
     edit->addSeparator();
-    for (const char* name : {"act_cut", "act_copy", "act_paste", "act_delete_area"}) edit->addAction(action(name));
+    build_clipboard_menu(edit);  // (カット … 描画色で塗りつぶし, 変形: main_window_clipboard.cpp)
     edit->addSeparator();
     for (const char* name : {"act_select_all", "act_deselect"}) edit->addAction(action(name));
     edit->addSeparator();
@@ -662,8 +662,7 @@ void MainWindow::build_menus() {
     for (const char* name : {"act_picker", "act_fill", "act_lassofill", "act_fill_gaps", "act_gradient", "act_reshape", "act_vector", "act_liquify"})
         tools->addAction(action(name));
     tools->addSeparator();
-    for (const char* name : {"act_marquee", "act_lasso", "act_wand"}) tools->addAction(action(name));
-    tools->addSeparator();
+    build_tool_groups(tools);  // (the selection's tools, the retouching's: main_window_select.cpp)
     for (const char* name : {"act_ruler", "act_3d", "act_effect", "act_stamp"}) tools->addAction(action(name));
     tools->addSeparator();
     for (const char* name : {"act_thicker", "act_thinner"}) tools->addAction(action(name));
@@ -684,7 +683,7 @@ void MainWindow::build_menus() {
     tools->addAction(action("act_point_thinner"));
     tools->addSeparator();
     build_guide_menus(tools);  // (定規 and 3D: main_window_guides.cpp)
-    build_selection_menu(bar->addMenu(QStringLiteral("選択")));
+    build_selection_menu(bar->addMenu(QStringLiteral("選択範囲")));
     QMenu* layers = bar->addMenu(QStringLiteral("レイヤー"));
     for (const char* name : {"act_layer_pen", "act_layer_paint", "act_layer_folder"}) layers->addAction(action(name));
     layers->addSeparator();
@@ -695,7 +694,8 @@ void MainWindow::build_menus() {
     layer_special_menu_ = layers->addMenu(QStringLiteral("塗り・グラデーション・色調補正のレイヤー"));
     layer_many_menu_ = layers->addMenu(QStringLiteral("まとめて（複数のレイヤー・表示レイヤー・変換）"));
     layers->addSeparator();
-    for (const char* name : {"act_layer_up", "act_layer_down"}) layers->addAction(action(name));
+    QMenu* arrange = layers->addMenu(QStringLiteral("重ね順"));  // (decision 5; C-d adds 最前面へ・最背面へ・逆順)
+    for (const char* name : {"act_layer_up", "act_layer_down"}) arrange->addAction(action(name));
     layers->addSeparator();
     layers->addAction(action("act_layer_draft"));
     layer_effect_menu_ = layers->addMenu(QStringLiteral("境界効果・表示色の印刷"));
@@ -801,7 +801,7 @@ void MainWindow::build_toolbars() {
     for (const char* name : {"act_marquee", "act_lasso", "act_wand", "act_reshape"}) palette_->addAction(action(name));
     palette_->addSeparator();
     for (const char* name : {"act_ruler", "act_3d", "act_effect"}) palette_->addAction(action(name));
-    for (const auto& [name, label] : {std::pair{"act_marquee", "長方形選択"}, {"act_lasso", "投げ縄選択"}, {"act_reshape", "線の修正"}, {"act_3d", "3D"}})
+    for (const auto& [name, label] : {std::pair{"act_marquee", "長方形選択"}, {"act_lasso", "なげなわ"}, {"act_reshape", "線の修正"}, {"act_3d", "3D"}})
         action(QString::fromLatin1(name))->setIconText(QString::fromUtf8(label));  // (the palette's names stay short; menus keep the full name)
     addToolBar(Qt::LeftToolBarArea, palette_);
     {
@@ -1780,10 +1780,10 @@ void MainWindow::make_launcher() {
     auto* row = new QHBoxLayout(bar);
     row->setContentsMargins(3, 2, 3, 2);
     row->setSpacing(2);
-    launcher_actions_ = {{QStringLiteral("塗る"), action("act_fill_selection")}, {QStringLiteral("消す"), action("act_delete_area")},
+    launcher_actions_ = {{QStringLiteral("塗りつぶし"), action("act_fill_selection")}, {QStringLiteral("消去"), action("act_delete_area")},
                          {QStringLiteral("トーン"), action("act_tone_here")},    {QStringLiteral("反転"), action("act_sel_invert")},
-                         {QStringLiteral("広げる"), action("act_sel_grow")},     {QStringLiteral("変形"), action("act_warp_perspective")},
-                         {QStringLiteral("コピー"), action("act_copy")},         {QStringLiteral("解除"), action("act_deselect")}};
+                         {QStringLiteral("拡張"), action("act_sel_grow")},     {QStringLiteral("変形"), action("act_warp_perspective")},
+                         {QStringLiteral("コピー"), action("act_copy")},         {QStringLiteral("選択を解除"), action("act_deselect")}};
     for (const auto& [label, act] : launcher_actions_) {
         auto* button = new QToolButton;
         button->setText(label);

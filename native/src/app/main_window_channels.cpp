@@ -176,7 +176,7 @@ bool MainWindow::save_selection_to_channel(std::optional<QString> name) {
     if (!area || page == nullptr) return false;
     if (!name) {
         const Asked asked = asking();
-        name = ask::get_text(this, QStringLiteral("選択範囲をチャンネルに保存"), QStringLiteral("チャンネルの名前（空のままなら「Alpha n」）"));
+        name = ask::get_text(this, QStringLiteral("選択範囲を保存"), QStringLiteral("チャンネルの名前（空のままなら「Alpha n」）"));
         if (!name || !still(asked)) return false;
     }
     Json op{{"op", "add_channel"}, {"page", page->index.json()}, {"fill", "area"}, {"area", *area}};
@@ -220,7 +220,7 @@ void MainWindow::build_channel_actions() {
              {QKeySequence(QStringLiteral("Ctrl+Alt+%1").arg(slot))},
              QStringLiteral("チャンネル パネルの %1 番目（合成の次から: 色の版、アルファ・特色の順）を描く先にする").arg(slot - 1));
     }
-    make("act_sel_to_channel", QStringLiteral("選択範囲をチャンネルに保存…"), [this] { save_selection_to_channel(); }, {},
+    make("act_sel_to_channel", QStringLiteral("選択範囲を保存…"), [this] { save_selection_to_channel(); }, {},
          QStringLiteral("選択範囲をアルファチャンネルとしてページに残す（白が選ばれた所。チャンネル パネルで直せる）"));
 }
 

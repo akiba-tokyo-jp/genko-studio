@@ -7,7 +7,11 @@
 //      build writes other PNG bytes for them), the JSON assets are the same bytes. Every op of M3-A1 has 8 or more
 //      cases that succeed and 4 or more that fail. A case marked "cpp": "not_yet_ported" draws a page with what this
 //      build does not draw yet: C++ must refuse it with not_yet_ported (page 3's nombre, tone and line of dialogue are
-//      drawn since M4: the fill that looks at that page is compared with Python's).
+//      drawn since M4: the fill that looks at that page is compared with Python's). A case marked "cpp": "deviates"
+//      (PC3 B-0, the coordinator's decision in the design's chapter 9: a grey area's picture — a feathered one — is
+//      stretched bilinear onto a patch's or a mask's grid) is Python's but at its "cpp_differs" (opsupport.hpp), where it
+//      holds this build's values kept in "cpp_pictures". The random sequences are replayed with Python's stretch of a grey
+//      area's picture (render::selection::set_grey_area_stretch, nearest), every step compared whole.
 //   2. random op sequences (150, made by `pyref_harness.py make-raster-sequences` with a fixed seed: these ops and the
 //      basic ones of M2, 1 to 10 ops each, by several actors, some dry runs, strict_gates and page locks) on 15 random
 //      books for drawing (`render_harness.py make-books`, without what this build does not draw yet): each step the
@@ -294,7 +298,7 @@ private slots:
         }();
         QVERIFY2(loaded.report.clean(), genko::core::dump_python(loaded.report.to_json()).c_str());
         std::map<std::string, std::pair<int, int>> counts;  // op → (successes, failures) matched with Python
-        int not_ported = 0, safety_refused = 0, pictures = 0, unreadable = 0;
+        int not_ported = 0, safety_refused = 0, pictures = 0, unreadable = 0, deviating = 0;
         std::vector<std::string> failures;
         for (std::size_t k = 0; k < taken.size(); ++k) {
             const std::size_t n = taken[k];
@@ -324,6 +328,14 @@ private slots:
                     failures.push_back(name + ": fails in another op: " + error.substr(0, 300));
                     continue;
                 }
+            }
+            if (genko::test::deviates(c)) {  // (PC3 B-0: a grey area's pictures stretched bilinear) Python's but at its places
+                std::string wrong = genko::test::compare_deviating_steps(outcomes, records, c);
+                if (wrong.empty()) wrong = genko::test::pinned_difference(outcomes.back(), c.value("cpp_pictures", Json::object()));
+                if (wrong.empty() && !genko::test::stretches_grey_area(steps_of(c).back()["ops"])) wrong = "marked as deviating, but it stretches no grey area";
+                if (!wrong.empty()) failures.push_back(name + " (" + c.value("cpp_says", std::string()) + "): " + wrong.substr(0, 1500));
+                ++deviating;
+                continue;
             }
             if (c.contains("cpp")) {  // a part this build refuses on purpose
                 const auto& final = outcomes.back();
@@ -389,6 +401,7 @@ private slots:
               "successful cases refer to %d pictures, compared by their pixels (%d unreadable or missing on both sides). %d "
               "perspective warps compared within the tolerance (%d numbers, lines and pictures differing within it)",
               summary.c_str(), bus_ok, bus_failing, not_ported, safety_refused, pictures, unreadable, near, tolerated);
+        qInfo("%d cases Python's but at a grey area's pictures, stretched bilinear (PC3 B-0), this build's kept", deviating);
         QCOMPARE(unreadable, 0);
     }
 
@@ -485,6 +498,9 @@ private slots:
 
         std::map<std::string, genko::core::Document> loaded;  // (each book read once)
         int steps = 0, ops = 0, failed_steps = 0, stopped = 0, warped = 0, tolerated = 0;
+        // (PC3 B-0: Python's books replayed with Python's stretch of a grey area's picture — nearest — and every step
+        // compared whole; the fixed cases check this build's own, bilinear)
+        const genko::test::PythonStretch python_stretch;
         std::map<std::string, int> op_counts;  // Input ops in compared batches, including jointly refused batches.
         std::set<std::pair<std::size_t, std::size_t>> compared_steps;
         std::set<std::string> books_used;
@@ -718,7 +734,7 @@ private slots:
         Json jobs = Json::array();
         std::vector<std::size_t> picked;
         for (std::size_t n = 0; n < cases.size(); ++n) {
-            if (!cases[n]["ok"].get<bool>() || cases[n].contains("cpp")) continue;
+            if (!cases[n]["ok"].get<bool>() || (cases[n].contains("cpp") && !genko::test::deviates(cases[n]))) continue;
             Json job = Json::object();
             job["op"] = "steps";
             job["book"] = rasterbook_.toStdString();
@@ -796,11 +812,15 @@ private slots:
                     continue;
                 }
             }
-            if (!c.contains("near") && !genko::test::strict_equal(after.full, py["full"], &where)) {
+            // (PC3 B-0: a deviating case's grey area's pictures, stretched bilinear here, are not Python's)
+            const std::vector<std::string> apart = genko::test::deviation_paths(c);
+            const Json mine = genko::test::without_deviations(Json::object({{"reply", Json()}, {"full", after.full}, {"payload", after.payload}}), apart);
+            const Json theirs = genko::test::without_deviations(Json::object({{"reply", Json()}, {"full", py["full"]}, {"payload", py["payload"]}}), apart);
+            if (!c.contains("near") && !genko::test::strict_equal(mine["full"], theirs["full"], &where)) {
                 failures.push_back(name + ": read back, full snapshot (Python's read back): " + where.substr(0, 1200));
                 continue;
             }
-            if (!c.contains("near") && !genko::test::strict_equal(after.payload, py["payload"], &where)) {
+            if (!c.contains("near") && !genko::test::strict_equal(mine["payload"], theirs["payload"], &where)) {
                 failures.push_back(name + ": read back, payload (Python's read back): " + where.substr(0, 1200));
                 continue;
             }

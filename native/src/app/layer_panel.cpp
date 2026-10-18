@@ -699,6 +699,8 @@ void LayerPanel::mask(const Json& change) {
     if (layer == nullptr || loading_) return;
     Json op{{"op", "set_layer_mask"}, {"page", page->index.json()}, {"id", layer->id}};
     op.update(change);
+    // (masks@1, the user's decision: a new mask moves with its layer, as Photoshop's; the masks books have keep their place)
+    if (!layer->mask && !change.contains("delete") && !change.contains("linked")) op["linked"] = true;
     window_->apply_ops(Json::array({op}));
     selected(false);
 }
@@ -706,7 +708,7 @@ void LayerPanel::mask(const Json& change) {
 void LayerPanel::mask_from_selection() {
     const auto area = window_->selection_area();
     if (!area) {
-        window_->flash(QStringLiteral("先に範囲選択（M・L・W）で見せたい所を選びます"), 5000);
+        window_->flash(QStringLiteral("先に選択範囲ツール（M・L・W）で見せたい所を選びます"), 5000);
         return;
     }
     mask(Json{{"area", *area}});

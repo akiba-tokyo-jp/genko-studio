@@ -90,3 +90,19 @@ PhotoCraft v0.2.0（`ad863217386440ca968fccc9bfff65ba24e61142`、MIT、同梱 `L
   - `crates/engine/src/smart_cmds.rs`（692-779 行、880-953 行）: スマートフィルターの番号（0 が一番下、既定は一番上）、設定を重ねる・描画オプション（1 を超える不透明度は %）・表示の反転・並べ替え・削除・クリア（フィルターとマスク）・スマートフィルターとフィルターマスクの無効化の振る舞いと断り → `native/src/render/ops_smart_filters.cpp`（`smart_filter_set`・`smart_filter_move`・`smart_filter_delete`・`smart_filter_state`）。
   - `crates/engine/src/filters.rs`（199-207 行）: SO にフィルターをかけると、画素を変えずにスマートフィルターとして記録する → `native/src/app/layer_panel.cpp`（`apply_filter`）、`native/src/app/image_dialogs.cpp`（シャドウ・ハイライト）。
   - `crates/engine/src/smart_cmds/tests.rs`（125-211 行、253-264 行）: 設定を変えても中身から描き直す・同じ設定なら同じ画素・隠せば元の画素、並び・描画モード・不透明度・無効化・削除・クリア、選択範囲がフィルターマスクになる、変形に付いて来ることの試験 → `native/tests/unit/test_smart_filters.cpp`（Genko の 3 つの道・200 dpi の `rasterize_layer`＋`filter_raster` との比べ・部分描画に広げた）。
+
+## 選択・マスク（masks@1、PC3 節 B）
+
+PhotoCraft v0.2.0（`ad863217386440ca968fccc9bfff65ba24e61142`、MIT、同梱 `LICENSE-MIT`）の次の部分を参照して C++ へ移した。各群（B1〜B4）が算法を移すときは、この節にその部分を足す。
+
+- `crates/algo/src/selection.rs`（80-655 行）: 選択の共通の算法（範囲の箱と覆い `Region`、魔法の杖と隣接・色の近さ、色域の量、正確なユークリッド距離変換、拡張・縮小・境界線・滑らかに・ぼかし、AA の多角形の覆い、明るさ・色相の範囲）→ `native/src/render/selection_ext.cpp`（PC3-0）。区域の修飾の順（拡張・縮小・境界線・滑らかに・反転・ぼかし）→ `native/src/render/area_kinds.cpp`。
+
+## パス・ベクトル・変形・判型（vector@1・pen-shapes@1・transform@1・page-spec@1、PC3 節 C）
+
+PhotoCraft v0.2.0（同上、MIT）の次の部分を参照して C++ へ移した。各群（C-a〜C-e）が移すときは、この節にその部分を足す。
+
+- `crates/doc/src/vector.rs`: パス・サブパス・アンカーとハンドル・合わせ方・塗りの決まり・線の設定・生きた形の型 → `native/src/core/vector.hpp`・`vector.cpp`（単位は mm、y は下向き、ページの座標にした。PC3-0）。
+- `crates/vector/src/flatten.rs`（1-132 行）・`raster.rs`（1-419 行）・`stroke.rs`（1-400 行）・`shapes.rs`（1-153 行）・`lib.rs`（40-110 行）と `crates/vector/src/tests.rs` の試験の考え: ベジエを平らにする誤差、画素ごとの正確な面積の走査（巻き数・偶奇）、サブパスの合わせ方、線の輪郭（端・角・マイター・破線）、生きた形（角丸の長方形・楕円・多角形と星・ライン）→ `native/src/render/path_raster.cpp`、`native/tests/unit/test_path_raster.cpp`（PC3-0）。
+- `crates/algo/src/transform.rs`（1-270 行と試験 271 行から）・`warp.rs`（1-290 行と試験 293 行から）・`resample.rs`（1-180 行）: 射影の変形（前乗算の標本化、縮小の前の縮め）、メッシュのワープ（三角形）、画像解像度の 1 次元のフィルター → `native/src/render/resample.cpp`、`native/tests/unit/test_resample.cpp`（PC3-0）。
+- `crates/engine/src/canvas_geom.rs`（200-235 行、`Turn`）と `crates/engine/src/canvas_geom/tests.rs` の試験の考え: 90°・180° の回転と反転の画素の並べ替えと座標の写し方 → `native/src/render/resample.cpp`（`turn`）・`native/src/core/page_geometry.cpp`（`turn_mapping`）、`native/tests/unit/test_page_geometry.cpp`（PC3-0）。
+- `crates/geom/src/warp.rs`（1-620 行）: ワープの形の一覧（円弧・アーチ・旗・波・魚形・膨張・絞り込み・ねじれなど）と曲げ・ゆがみ、ベジエのメッシュ（当てはめ・分割・分割の削除）→ `native/src/core/page_geometry.cpp`（`StyleWarp`・`BezierMesh`・`Warp`。PC3-0）。

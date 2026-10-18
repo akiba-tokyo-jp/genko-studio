@@ -42,7 +42,7 @@ const std::map<QString, std::pair<QString, QString>>& titles() {
         {QStringLiteral("zoom"), {QStringLiteral("虫めがね（Z）"), QStringLiteral("クリックで拡大、Alt＋クリックで縮小、ドラッグで囲んだ所を画面いっぱいに")}},
         {QStringLiteral("fill"), {QStringLiteral("塗りつぶし（G）"), QStringLiteral("線で囲まれた所をクリックで塗る。隙間は「隙間を閉じる」の幅まで閉じる")}},
         {QStringLiteral("lassofill"), {QStringLiteral("囲って塗る（Shift+G）"), QStringLiteral("ドラッグで囲んだ所を塗る")}},
-        {QStringLiteral("marquee"), {QStringLiteral("範囲選択（M・L・W）"), QStringLiteral("ドラッグで選ぶ。中をドラッグで移動、□で拡大縮小、○で回転（Shift で 15° 刻み）")}},
+        {QStringLiteral("marquee"), {QStringLiteral("選択範囲ツール（M・L・W）"), QStringLiteral("ドラッグで選ぶ。中をドラッグで移動、□で拡大縮小、○で回転（Shift で 15° 刻み）")}},
         {QStringLiteral("vector"), {QStringLiteral("線の編集（Shift+Y）"), QStringLiteral("ペンの線の制御点を動かす・足す・消す。線をつなぐ・切る・色を変える")}},
         {QStringLiteral("blend"), {QStringLiteral("色混ぜ（Shift+B）"), QStringLiteral("なぞった所の色をぼかす・のばす・なじませる")}},
         {QStringLiteral("liquify"), {QStringLiteral("ゆがみ（Shift+L）"), QStringLiteral("なぞった所の絵と線を押し流す・縮める・ふくらませる・渦を巻く")}},
@@ -52,7 +52,7 @@ const std::map<QString, std::pair<QString, QString>>& titles() {
         {QStringLiteral("3d"), {QStringLiteral("3D 操作（J）"), QStringLiteral("デッサン人形の関節（○）や箱をドラッグ。箱の上の○で回す")}},
         {QStringLiteral("effect"), {QStringLiteral("効果線（K）"), QStringLiteral("下で種類を選び、コマの中をクリックで入れる。中心の＋をドラッグで動かす")}},
         {QStringLiteral("stamp"), {QStringLiteral("素材を置く"), QStringLiteral("素材パネルで選んだ素材を、クリックした所に置く")}},
-        {QStringLiteral("move"), {QStringLiteral("レイヤー移動（Q）"), QStringLiteral("描く先のレイヤーの線・塗り・絵を、ドラッグで丸ごと動かす。Shift で縦・横・45° に")}},
+        {QStringLiteral("move"), {QStringLiteral("移動ツール（Q）"), QStringLiteral("描く先のレイヤーの線・塗り・絵を、ドラッグで丸ごと動かす。Shift で縦・横・45° に")}},
         {QStringLiteral("gradient"), {QStringLiteral("グラデーション（U）"), QStringLiteral("ドラッグの向きに塗る。始めの点がはじめの色、終わりの点が終わりの色。選択範囲があればその中だけ")}},
     };
     return all;
@@ -220,6 +220,7 @@ ToolSettings::ToolSettings(QWidget* parent) : QWidget(parent) {
     setObjectName(QStringLiteral("tool_settings"));
     title_ = new QLabel;
     theme::role(title_, "heading");
+    title_->setWordWrap(true);  // (a long name — 選択範囲ツール（M・L・W） — goes on two lines rather than past a narrow panel)
     hint_ = new QLabel;
     hint_->setWordWrap(true);
     theme::hint(hint_);
@@ -269,7 +270,8 @@ void ToolSettings::set_folded(bool on) {
     stack_widget_->setVisible(!on && page_for(tool_) != nullptr);
     QWidget* dock = parentWidget();
     while (dock != nullptr && !dock->inherits("QDockWidget")) dock = dock->parentWidget();
-    if (dock != nullptr) dock->setMaximumHeight(on ? title_->sizeHint().height() + 18 : QWIDGETSIZE_MAX);
+    const int title_height = title_->width() > 0 ? title_->heightForWidth(title_->width()) : -1;  // (its lines at its width)
+    if (dock != nullptr) dock->setMaximumHeight(on ? (title_height > 0 ? title_height : title_->sizeHint().height()) + 18 : QWIDGETSIZE_MAX);
 }
 
 void ToolSettings::show_tool(const QString& tool) {

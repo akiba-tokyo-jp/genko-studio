@@ -39,6 +39,7 @@
 #include "render/ink.hpp"
 #include "render/ink_canvas.hpp"
 #include "render/ink_filters.hpp"
+#include "render/layer_masks.hpp"
 #include "render/op_limits.hpp"
 #include "render/page_internal.hpp"
 #include "render/paper.hpp"
@@ -603,7 +604,7 @@ std::optional<Image> layer_strokes(const Ctx& ctx, const Layer& layer, const Box
 // render._masked
 Image masked(const Ctx& ctx, const Layer& layer, Image image, const Box& area) {
     if (!layer.mask || !layer.mask->png || layer.mask->png->empty() || !layer.mask->enabled) return image;
-    const Image shown = decoded(layer.mask->png, "L").resize_region(ctx.size, area, Resample::Bilinear);
+    const Image shown = layer_masks::shown(*ctx.page, *layer.mask, decoded(layer.mask->png, "L"), ctx.size, area, Resample::Bilinear);
     if (image.mode() != "RGBA") image = image.convert("RGBA");
     image.putalpha(chops::multiply(alpha_of(image), shown));
     return image;
@@ -1101,7 +1102,7 @@ void precise_layer(ColorCanvas& canvas, const Ctx& ctx, const Layer& layer, cons
         }
         std::optional<Image> shown;  // (its mask, as masked() takes it)
         if (layer.mask && layer.mask->png && !layer.mask->png->empty() && layer.mask->enabled)
-            shown = decoded(layer.mask->png, "L").resize_region(ctx.size, area, Resample::Bilinear);
+            shown = layer_masks::shown(*ctx.page, *layer.mask, decoded(layer.mask->png, "L"), ctx.size, area, Resample::Bilinear);
         canvas.blend(core::ColorRasterView(*layer.color_raster), ctx.size, area, layer.opacity, layer.clip, layer.blend, shown ? &*shown : nullptr);
         return;
     }
@@ -1138,7 +1139,7 @@ void precise_layer(ColorCanvas& canvas, const Ctx& ctx, const Layer& layer, cons
     }
     std::optional<Image> shown;
     if (layer.mask && layer.mask->png && !layer.mask->png->empty() && layer.mask->enabled)
-        shown = decoded(layer.mask->png, "L").resize_region(ctx.size, area, Resample::Bilinear);
+        shown = layer_masks::shown(*ctx.page, *layer.mask, decoded(layer.mask->png, "L"), ctx.size, area, Resample::Bilinear);
     canvas.blend(picture, layer.opacity, layer.clip, layer.blend, shown ? &*shown : nullptr);
 }
 
@@ -1261,7 +1262,7 @@ void precise_shape_correction(ColorCanvas& canvas, const Ctx& ctx, const Layer& 
     }
     std::optional<Image> mask;  // (its mask as render._adjusted resizes it)
     if (layer.mask && layer.mask->enabled && layer.mask->png && !layer.mask->png->empty())
-        mask = decoded(layer.mask->png, "L").resize_region(ctx.size, area, Resample::Bicubic);
+        mask = layer_masks::shown(*ctx.page, *layer.mask, decoded(layer.mask->png, "L"), ctx.size, area, Resample::Bicubic);
     canvas.correct(core::ColorRasterView(changed), layer.opacity, layer.clip, mask ? &*mask : nullptr, blend);
 }
 
@@ -1286,7 +1287,7 @@ void ink_shape_correction(InkCanvas& canvas, const Ctx& ctx, const Layer& layer,
     }
     std::optional<Image> mask;
     if (layer.mask && layer.mask->enabled && layer.mask->png && !layer.mask->png->empty())
-        mask = decoded(layer.mask->png, "L").resize_region(ctx.size, area, Resample::Bicubic);
+        mask = layer_masks::shown(*ctx.page, *layer.mask, decoded(layer.mask->png, "L"), ctx.size, area, Resample::Bicubic);
     const InkPicture picture = sample_ink_raster(core::decode_ink_raster(changed), canvas.size(), Box{0, 0, canvas.size().width, canvas.size().height});
     canvas.correct(picture, layer.opacity, layer.clip, mask ? &*mask : nullptr, blend);
 }
@@ -1343,7 +1344,7 @@ void ink_correction(InkCanvas& canvas, const Ctx& ctx, const Layer& layer, const
     const bool exposure = kind == Json("exposure");
     std::optional<Image> mask;  // (its mask as the precise page resizes it)
     if (layer.mask && layer.mask->enabled && layer.mask->png && !layer.mask->png->empty())
-        mask = decoded(layer.mask->png, "L").resize_region(ctx.size, area, exposure ? Resample::Bilinear : Resample::Bicubic);
+        mask = layer_masks::shown(*ctx.page, *layer.mask, decoded(layer.mask->png, "L"), ctx.size, area, exposure ? Resample::Bilinear : Resample::Bicubic);
     if (exposure) (void)core::Exposure::parse(*layer.adjust);  // (settings it refuses: refused, as they were)
     core::AdjustPtr correction;
     try {
@@ -1438,7 +1439,7 @@ void ink_layer(InkCanvas& canvas, const Ctx& ctx, const Layer& layer, const Box&
         }
         std::optional<Image> shown;
         if (layer.mask && layer.mask->png && !layer.mask->png->empty() && layer.mask->enabled) {
-            shown = decoded(layer.mask->png, "L").resize_region(ctx.size, area, Resample::Bilinear);
+            shown = layer_masks::shown(*ctx.page, *layer.mask, decoded(layer.mask->png, "L"), ctx.size, area, Resample::Bilinear);
         }
         canvas.blend(picture, layer.opacity, layer.clip, layer.blend, shown ? &*shown : nullptr);
         return;
@@ -1711,7 +1712,7 @@ RenderResult render(const Page& page_in, int dpi, const RenderOptions& options, 
                 if (layer.adjust && layer.adjust->is_object() && layer.adjust->value("kind", Json()) == "exposure") {
                     std::optional<Image> mask;
                     if (layer.mask && layer.mask->enabled && layer.mask->png)
-                        mask = decoded(layer.mask->png, "L").resize_region(ctx.size, area, Resample::Bilinear);
+                        mask = layer_masks::shown(*ctx.page, *layer.mask, decoded(layer.mask->png, "L"), ctx.size, area, Resample::Bilinear);
                     precision->expose(core::Exposure::parse(*layer.adjust), layer.opacity, layer.clip, mask ? &*mask : nullptr, blend);
                     continue;
                 }
@@ -1737,7 +1738,7 @@ RenderResult render(const Page& page_in, int dpi, const RenderOptions& options, 
                 if (correction) {  // (its mask as render._adjusted resizes it)
                     std::optional<Image> mask;
                     if (layer.mask && layer.mask->enabled && layer.mask->png && !layer.mask->png->empty())
-                        mask = decoded(layer.mask->png, "L").resize_region(ctx.size, area, Resample::Bicubic);
+                        mask = layer_masks::shown(*ctx.page, *layer.mask, decoded(layer.mask->png, "L"), ctx.size, area, Resample::Bicubic);
                     precision->adjust(*correction, layer.opacity, layer.clip, mask ? &*mask : nullptr, blend, Point{area.x0, area.y0});
                 }
                 continue;

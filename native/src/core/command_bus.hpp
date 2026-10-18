@@ -137,8 +137,12 @@ void check_strict(const Document& doc, const Json& op, const Actor& actor);
 Json expand_for_pages(const Document& doc, const Json& op);
 
 // selops.needs_resolving: an area of a kind beyond {poly} and {mask} (rect, ellipse, layer, color, all, saved,
-// union, intersect, subtract, invert, grow_mm, feather_mm; channels@1: channel, this build's own).
+// union, intersect, subtract, invert, grow_mm, feather_mm; channels@1: channel, this build's own; PC3: the kinds and
+// modifiers the drawing build adds, add_area_key).
 bool area_needs_resolving(const Json& area);
+// PC3 (render/area_kinds.cpp): a kind or modifier of an area that is this build's own, which the bus then resolves
+// before the op as it resolves the others (the drawing build names its own when its ops are registered).
+void add_area_key(std::string key);
 
 // selops.resolve for the areas that are only geometry: {rect: [x, y, w, h]} or {ellipse: [x, y, w, h]} alone as
 // {poly} (rect_poly, ellipse_poly); Python's ValueError and TypeError for a box that is not four numbers. Nothing for

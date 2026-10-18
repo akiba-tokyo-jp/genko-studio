@@ -30,6 +30,7 @@
 #include "core/paths.hpp"
 #include "render/page.hpp"
 #include "render/png.hpp"
+#include "render/selection.hpp"
 #include "storage/snapshot.hpp"
 #include "storage/transaction.hpp"
 #include "storage/writer.hpp"
@@ -1048,5 +1049,62 @@ std::string kept_by_deviation(const Json& keeps, const core::Document& before, c
     }
     return {};
 }
+
+}  // namespace genko::test
+
+// --- PC3 B-0: a grey area's picture stretched bilinear (the coordinator's decision, design ch. 9) -----------------------
+
+namespace genko::test {
+
+namespace {
+
+bool feathered(const Json& value) {
+    if (value.is_object()) {
+        for (const auto& [key, item] : value.items()) {
+            if (key == "feather_mm" && item.is_number() && !item.is_boolean() && item.get<double>() > 0) return true;
+            if (feathered(item)) return true;
+        }
+    } else if (value.is_array()) {
+        for (const Json& item : value) {
+            if (feathered(item)) return true;
+        }
+    }
+    return false;
+}
+
+}  // namespace
+
+bool stretches_grey_area(const Json& ops) {
+    if (!ops.is_array()) return false;
+    for (const Json& op : ops) {
+        if (op.is_object() && op.contains("area") && feathered(op["area"])) return true;
+    }
+    return false;
+}
+
+std::string pinned_difference(const StepOutcome& outcome, const Json& pinned) {
+    if (!pinned.is_object()) return {};
+    const Json record = as_record(outcome);
+    const auto number = [](const std::string& s) {
+        return !s.empty() && std::all_of(s.begin(), s.end(), [](char c) { return std::isdigit(static_cast<unsigned char>(c)) != 0; });
+    };
+    for (const auto& [place, want] : pinned.items()) {
+        const Json* at = &record;
+        for (const std::string& token : path_tokens(place)) {
+            if (at->is_object() && at->contains(token)) {
+                at = &(*at)[token];
+            } else if (at->is_array() && number(token) && std::stoul(token) < at->size()) {
+                at = &(*at)[std::stoul(token)];
+            } else {
+                return place + ": not in this build's record";
+            }
+        }
+        if (*at != want) return place + ": " + core::dump_python(*at).substr(0, 200) + " where " + core::dump_python(want).substr(0, 200) + " was kept";
+    }
+    return {};
+}
+
+PythonStretch::PythonStretch() { render::selection::set_grey_area_stretch(render::Resample::Nearest); }
+PythonStretch::~PythonStretch() { render::selection::set_grey_area_stretch(render::Resample::Bilinear); }
 
 }  // namespace genko::test

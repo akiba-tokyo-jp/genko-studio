@@ -11,7 +11,9 @@
 #include "core/exposure.hpp"
 #include "core/ids.hpp"
 #include "core/lut3d.hpp"
+#include "core/masks.hpp"
 #include "core/pyconv.hpp"
+#include "core/vector.hpp"
 #include "core/ruby.hpp"
 #include "core/smart.hpp"
 #include "core/strokes.hpp"
@@ -167,6 +169,7 @@ Json layer_json(const core::Layer& layer, AssetStore& store, const std::string& 
         Json mask = Json::object();
         mask["enabled"] = layer.mask->enabled;
         if (layer.mask->png && !layer.mask->png->empty()) mask["asset"] = put_png(store, layer.mask->png, layer.mask->memo);
+        core::write_mask_settings(*layer.mask, mask);  // (masks@1, PC3: only what is not the default)
         out["mask"] = std::move(mask);
     }
     if (layer.color && !layer.color->empty()) out["color"] = ints_json(*layer.color);
@@ -177,6 +180,10 @@ Json layer_json(const core::Layer& layer, AssetStore& store, const std::string& 
     if (layer.color_prints) out["color_prints"] = true;
     if (truthy(layer.screen)) out["screen"] = *layer.screen;
     if (truthy(layer.source) && !placed) out["source"] = *layer.source;
+    // (PC3: vector@1's vector mask, transform@1's link and position lock — none: nothing written)
+    if (layer.vector_mask) out["vector_mask"] = core::vector::to_json(*layer.vector_mask);
+    if (layer.link) out["link"] = *layer.link;
+    if (layer.lock_position) out["lock_position"] = true;
     if (placed) {
         out["asset"] = opt_string(layer.asset);
         out["frame_id"] = opt_string(layer.frame_id);
@@ -208,6 +215,18 @@ Json layer_json(const core::Layer& layer, AssetStore& store, const std::string& 
         }
         out["strokes_blob"] = ref;
         out["stroke_count"] = static_cast<std::int64_t>(list.items.size());
+    }
+    // (pen-shapes@1, PC3: a pen layer's shape parts as their own asset, as its strokes are — none: nothing written)
+    if (layer.shapes && !layer.shapes->items.empty()) {
+        const core::vector::ShapeList& list = *layer.shapes;
+        std::string ref;
+        if (!list.blob_ref.empty() && store.has(list.blob_ref, core::vector::kShapesSuffix)) {
+            ref = list.blob_ref;
+        } else {
+            ref = store.put_bytes(core::vector::shapes_blob(list), core::vector::kShapesSuffix);
+        }
+        out["shapes_blob"] = ref;
+        out["shape_count"] = static_cast<std::int64_t>(list.items.size());
     }
     return out;
 }
@@ -287,6 +306,15 @@ Json page_json(const core::Page& page, AssetStore& store) {
             channels.push_back(core::to_json(channel, ref));
         }
         out["channels"] = std::move(channels);
+    }
+    // (PC3: vector@1's paths, page-spec@1's own paper — none: nothing written)
+    if (!page.paths.empty()) out["paths"] = core::vector::to_json(page.paths);
+    if (page.work_path) out["work_path"] = core::vector::to_json(*page.work_path);
+    if (page.clipping_path) out["clipping_path"] = core::vector::to_json(*page.clipping_path);
+    if (page.own_spec) {
+        Json spec = spec_to_json(page.spec);
+        if (page.spec.trim_origin_mm) spec["trim_origin_mm"] = Json::array({page.spec.trim_origin_mm->first, page.spec.trim_origin_mm->second});
+        out["native_spec"] = std::move(spec);
     }
     for (const auto& [key, value] : page.extra.items()) {
         if (!is_known_page_key(key)) out[key] = value;
@@ -418,6 +446,18 @@ Json project_payload_v4(const core::Document& doc, AssetStore& store) {
     core::validate_adjustments(doc);
     std::erase(features, std::string(core::kAdjustmentsFeature));  // (named while a correction uses it)
     if (core::uses_adjustments(doc)) features.emplace_back(core::kAdjustmentsFeature);
+    // PC3: masks@1, vector@1, pen-shapes@1, transform@1, page-spec@1 (each named while the book uses it)
+    core::validate_masks(doc);
+    core::vector::validate_vector(doc);
+    const std::pair<std::string_view, bool> pc3[] = {{core::kMasksFeature, core::uses_masks(doc)},
+                                                     {core::vector::kVectorFeature, core::vector::uses_vector(doc)},
+                                                     {core::vector::kPenShapesFeature, core::vector::uses_pen_shapes(doc)},
+                                                     {core::vector::kTransformFeature, core::vector::uses_transform(doc)},
+                                                     {core::vector::kPageSpecFeature, core::vector::uses_page_spec(doc)}};
+    for (const auto& [feature, used] : pc3) {
+        std::erase(features, std::string(feature));
+        if (used) features.emplace_back(feature);
+    }
     std::sort(features.begin(), features.end());
     features.erase(std::unique(features.begin(), features.end()), features.end());
 

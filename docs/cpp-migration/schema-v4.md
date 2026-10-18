@@ -54,6 +54,11 @@ v3 から外すもの: なし（未知キーも `extra` として書き戻す）
 | `channels@1` | PC1c | ページの `channels`（アルファ・特色チャンネル。GKIR 版 2 の Mask の画素）。COLOR-03（末尾の「チャンネル」） |
 | `adjustments@1` | PC2-0〜PC2b | 補正レイヤーの `adjust` の C++ 版だけの種類と、Python の種類に足す `native` の設定（描画モード・式の選び方・チャンネルの組など）。COLOR-04（末尾の「補正」） |
 | `smart-objects@1` | PC3（節 A） | 本の `smart_contents`（スマートオブジェクトの中身: 層を包んだページ 1 枚、または置いたファイルそのもの）と、層の `kind: "smart"` の `smart`（中身・行列・補間ほか）。COLOR-05（末尾の「スマートオブジェクト」） |
+| `masks@1` | PC3-0（B1・B2 が使う） | 層のマスクの `linked`・`density`・`feather_mm`、アルファチャンネルの `quick_mask`。COLOR-06（末尾の「マスク」） |
+| `vector@1` | PC3-0（C-a が使う） | ページの `paths`・`work_path`・`clipping_path`、層の `vector_mask`。COLOR-07（末尾の「パスとベクトル」） |
+| `pen-shapes@1` | PC3-0（C-b が使う） | ペンの層の形の部品（`shapes_blob`・`shape_count`）。COLOR-07（末尾の「パスとベクトル」） |
+| `transform@1` | PC3-0（C-d が使う） | 層の `link`・`lock_position`。COLOR-07（末尾の「パスとベクトル」） |
+| `page-spec@1` | PC3-0（C-e が使う） | ページだけの用紙 `native_spec`（`trim_origin_mm` も）。COLOR-07（末尾の「パスとベクトル」） |
 
 拡張を使う op が初めて適用されたときに `features` へ加える。拡張を使わない原稿は `features: []`。
 
@@ -331,3 +336,28 @@ v3 の行（`rev`・`actor`・`at`・`changes`・`via`）をそのまま残し�
 - 複製（`duplicate_layer`・ページの複製）は同じ中身を指す（中身を変えると全部変わる）。`smart_copy` は中身を写して新しい id にする。作品の結合（`import_pages`）は中身も持ってくる（id が重なれば新しい id）。ほかの原稿の素材は今と同じく先に写す。
 - 中身は project.json の中にあるので、履歴の状態・GC・Undo・Redo・復旧（§4）は普通の op と同じに中身と素材を守る（GC は状態の中の `sha256:` を全部拾う）。コマが消えて外れた絵の SO は配置画像と同じく `studio.orphans` に記録し、ファイルの中身を記録の `smart_contents`（id → 元のファイルの形）に持つ。
 - `features` に `smart-objects@1` を加える（書く中身があるとき。無くなれば外す）。smart-objects@1 を知らない読み手は、未知の拡張として読み取り専用で開く（PC2 までの C++ 版は層の種類 `smart` を知らないので、原稿を開かずに形の誤りを言う。どちらも原稿を書き換えない）。
+
+## マスク（masks@1。レイヤーマスクのリンク・濃度・ぼかし、クイックマスク、COLOR-06）
+
+層のマスク（`mask`）とアルファチャンネルに C++ 版だけの設定を足す。設定を持たないマスク・チャンネルは今までどおりで、形式も画素も変わらない。
+
+- 層の `mask` に足すキー（既定のときは書かない。マスクの今のキーの後に、この順）:
+  - `"linked": true` — マスクを層と一緒に動かす。無いときはページに固定（今の原稿のマスクはこのまま描ける）。画面で新しく作るマスクは `true`。
+  - `"density": 0..1` — 濃度。描くときの値は `255 − density·(255 − v)`（0 で全部見せる）。既定 1。
+  - `"feather_mm": 0..100` — ぼかし（mm）。描くときにマスクを箱 3 回で近づけたガウスでぼかす。既定 0。
+  - 数は小数 4 桁に丸めて書く。型の違い・範囲外・非有限は読み取り専用で開く。
+- アルファチャンネル（channels@1 の `kind: "alpha"`）に `"quick_mask": true`（クイックマスクのチャンネル。1 ページに 1 つまで、特色には付けない）。キーは `indicates` の後。
+- `features` に `masks@1` を加える（設定を持つマスクか、クイックマスクのチャンネルがあるとき。無くなれば外す）。masks@1 を知らない読み手は、未知の拡張として読み取り専用で開く。
+
+## パスとベクトル（vector@1・pen-shapes@1・transform@1・page-spec@1。COLOR-07）
+
+パス・ベクトルマスク・ペンの層の形の部品・層のリンクと位置のロック・ページだけの用紙。C++ 版だけの機能。どれも持たない原稿は今までどおりで、形式も画素も変わらない。中身を作る op は C-a〜C-e が入れる（PC3-0 は読み書きと検査の枠）。
+
+- **パス**（単位 mm、y は下向き、ページの座標）: `{"subpaths": [{"closed": bool, "op": "combine"|"subtract"|"intersect"|"exclude", "knots": [点…]}…], "fill_rule": "nonzero"|"evenodd", "inverted": bool}`（この順）。点は角なら `[x, y]`、ハンドルを持てば `{"anchor": [x, y], "in"?: [x, y], "out"?: [x, y], "smooth"?: true}`（`in`・`out` は anchor と同じなら書かない）。座標は ±100000 mm の中の有限の数で、小数 4 桁に丸めて書く。1 つのパスの点は 100000 まで。
+- **ページ**（`vector@1`）: `"paths": [{"name": 1〜64 字（前後に空白なし、ページの中で一つ）, "path": パス}…]`（998 まで）、`"work_path": パス`、`"clipping_path": {"name": 保存したパスの名前, "flatness": 0..100}`。空の `paths` は書かない。
+- **層**（`vector@1`）: `"vector_mask": {"path": パス, "enabled"?: false, "linked"?: false, "density"?: 0..1, "feather_mm"?: 0..100}`（既定 使う・リンク・濃度 1・ぼかし 0 は書かない）。
+- **ペンの層の形の部品**（`pen-shapes@1`。ペンの層だけ）: 層の `"shapes_blob": "sha256:<64>"`（`assets/<ab>/<64>.shapes.json`、部品の配列を正規形の JSON で）と `"shape_count"`。部品は `{"id": 1〜64 バイト（層の中で一つ）, "name"?: 1〜64 字, "path": パス, "fill": null|{"rgb": [r, g, b]|null}|{"gradient": {…}}, "stroke": null|線, "live"?: 生きた形, "opacity"?: 0..1, "over"?: true}`。線は `{"width_mm": 0..200, "fill", "opacity"?, "align"?: "inside"|"center"|"outside", "cap"?: "butt"|"round"|"square", "join"?: "miter"|"round"|"bevel", "miter_limit"?: 1..1000, "dashes"?: [長さ…（64 まで）], "dash_offset"?}`（既定 中央・butt・miter・100 は書かない）。生きた形は `{"kind": "rect", "rect": [x, y, w, h], "radii": [4 つ]}`・`{"kind": "ellipse", "rect"}`・`{"kind": "polygon", "rect", "sides": 3..100, "star_ratio": 0..1, "angle"?}`・`{"kind": "line", "from", "to", "weight_mm"}`。1 つの層の部品は 10000 まで。パターンの塗りはまだ読み取り専用で開く。素材が無い・壊れているときは素材の欠けとして読み取り専用で開く。
+- **層のリンク・位置のロック**（`transform@1`）: 層の `"link": 1〜64 バイトの文字`（同じ文字の層が一緒に動く）・`"lock_position": true`。
+- **ページだけの用紙**（`page-spec@1`）: ページの `"native_spec"`（本の `spec` と同じ形の用紙。本と違う用紙を持つページだけ）。`"trim_origin_mm": [x, y]` は仕上がりの左上の位置（無ければ用紙の真ん中に置いた位置）。
+- 知らないキー・型の違い・範囲外・非有限・名前の重なり・無い名前を指すクリッピングパス・ペンの層でない層の形の部品は、読み取り専用で開く（そのまま書き戻す）。
+- `features` に、使う物があるときだけそれぞれを加える（`vector@1`: パス・作業用パス・クリッピングパス・ベクトルマスク、`pen-shapes@1`: 形の部品を持つ層、`transform@1`: リンクか位置のロックを持つ層、`page-spec@1`: ページだけの用紙）。無くなれば外す。知らない読み手は未知の拡張として読み取り専用で開く。

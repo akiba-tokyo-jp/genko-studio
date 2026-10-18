@@ -17,6 +17,7 @@
 #include "core/ink.hpp"
 #include "core/json.hpp"
 #include "core/pynum.hpp"
+#include "core/vector.hpp"
 
 // The manuscript model (docs/cpp-migration/ARCHITECTURE.md §2): Python's genko/models.py in C++.
 //
@@ -55,6 +56,9 @@ struct PageSpec {
     std::optional<Num> trim_w_mm;
     std::optional<Num> trim_h_mm;
     std::optional<NumList> margins_mm;  // top, bottom, inner (のど), outer (小口)
+    // PC3 (page-spec@1, core/vector.hpp): where the trim's top left is on a page of its own paper whose trim is not in the
+    // paper's middle (none: in the middle)
+    std::optional<std::pair<double, double>> trim_origin_mm;
 
     struct Margins {
         double top = 0, bottom = 0, inner = 0, outer = 0;
@@ -137,6 +141,11 @@ struct Mask {
     Bytes png;
     bool enabled = true;
     BlobMemo memo;
+    // masks@1 (PC3, core/masks.hpp): moves with the layer's pixels (none: fixed to the page, as every mask before it);
+    // its density (0..1: the mask's value m drawn as 1 − density·(1 − m)); its feather (mm: a Gaussian of σ = feather/2)
+    bool linked = false;
+    double density = 1.0;
+    double feather_mm = 0.0;
 };
 
 // A fill or pasted picture kept at its own resolution over a box: {"id", "box", "mode", "rgb", "opacity", …}.
@@ -203,6 +212,13 @@ struct Layer {
     // of kind "smart" (which holds no pixels, lines or fill of its own; frame_id, clip_to, source and finish as a placed
     // picture's).
     std::optional<Json> smart;
+    // PC3 (pen-shapes@1, core/vector.hpp): a pen layer's shape parts (決定 7; never null: the shared empty list)
+    vector::ShapeListPtr shapes = vector::empty_shapes();
+    // PC3 (vector@1): its vector mask
+    std::optional<vector::VectorMask> vector_mask;
+    // PC3 (transform@1): its link group (the layers of one link move together) and its position lock
+    std::optional<std::string> link;
+    bool lock_position = false;
 
     std::size_t stroke_count() const { return strokes ? strokes->items.size() : 0; }
 };
@@ -287,6 +303,7 @@ struct Channel {
     double opacity = 0.5;                 // alpha: 0..1
     std::string indicates = "masked";     // alpha: masked | selected
     double solidity = 0.0;                // spot: 0..1
+    bool quick_mask = false;              // masks@1 (PC3): the page's Quick Mask (an alpha channel; one at most)
 };
 
 struct Bible {
@@ -325,6 +342,12 @@ struct Page {
     std::optional<RgbMode> rgb;
     // channels@1: its alpha and spot channels, in the order the channel panel lists them.
     std::vector<Channel> channels;
+    // PC3 (vector@1, core/vector.hpp): its saved paths (the Paths panel's order), its work path, its clipping path.
+    std::vector<vector::NamedPath> paths;
+    std::optional<vector::Path> work_path;
+    std::optional<vector::ClippingPath> clipping_path;
+    // PC3 (page-spec@1): `spec` is this page's own paper (the book's is doc.spec), written as the page's native_spec.
+    bool own_spec = false;
 
     Rect paper_rect_mm() const;
     Rect trim_rect_mm() const;

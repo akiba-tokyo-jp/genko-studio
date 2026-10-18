@@ -16,12 +16,14 @@
 #include "core/command_bus.hpp"
 #include "core/error.hpp"
 #include "core/filters.hpp"
+#include "core/masks.hpp"
 #include "core/pyconv.hpp"
 #include "core/pynum.hpp"
 #include "core/pyops.hpp"
 #include "core/paths.hpp"
 #include "render/adjust.hpp"
 #include "render/color_canvas.hpp"
+#include "render/layer_masks.hpp"
 #include "render/plugins.hpp"
 #include "render/filters.hpp"
 #include "render/ink.hpp"
@@ -729,8 +731,10 @@ Image adjusted(const Ctx& ctx, Image rgba, const core::Layer& layer, const Image
     const double opacity = layer.opacity;
     Image strength = Image::create("L", rgba.size(), Ink(py_round_i(255 * py_max(0.0, py_min(1.0, opacity)))));
     if (layer.mask && layer.mask->enabled && layer.mask->png && !layer.mask->png->empty()) {
-        const Image shown =
-            resized_part(open_image(*layer.mask->png, kPillowOpenLimits).convert("L"), ctx.size, area, Resample::Bicubic);
+        const Image picture = open_image(*layer.mask->png, kPillowOpenLimits).convert("L");
+        // (masks@1, PC3: its density and feather, render/layer_masks; a mask of none as before)
+        const Image shown = core::mask_has_settings(*layer.mask) ? layer_masks::shown(*ctx.page, *layer.mask, picture, ctx.size, area, Resample::Bicubic)
+                                                                 : resized_part(picture, ctx.size, area, Resample::Bicubic);
         strength = chops::multiply(strength, shown);
     }
     if (clip != nullptr) strength = chops::multiply(strength, clip->convert("L"));

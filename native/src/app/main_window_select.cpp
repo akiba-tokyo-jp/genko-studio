@@ -77,77 +77,108 @@ void MainWindow::build_selection_actions() {
         tools_->addAction(act);
         tool_actions_[name] = act;
     };
-    tool("act_marquee", QStringLiteral("範囲選択（長方形）"), QStringLiteral("rect"), {QKeySequence(QStringLiteral("M"))},
+    tool("act_marquee", QStringLiteral("長方形選択ツール"), QStringLiteral("rect"), {QKeySequence(QStringLiteral("M"))},
          QStringLiteral("ドラッグで選ぶ。中をドラッグで移動、□で拡大縮小、○で回転（Shift で 15° 刻み・縦横比を保つ）"));
-    tool("act_lasso", QStringLiteral("範囲選択（投げ縄）"), QStringLiteral("lasso"), {QKeySequence(QStringLiteral("L"))}, QStringLiteral("ドラッグで囲んで選びます"));
-    tool("act_wand", QStringLiteral("自動選択"), QStringLiteral("wand"), {QKeySequence(QStringLiteral("W"))},
+    tool("act_lasso", QStringLiteral("なげなわツール"), QStringLiteral("lasso"), {QKeySequence(QStringLiteral("L"))}, QStringLiteral("ドラッグで囲んで選びます"));
+    tool("act_wand", QStringLiteral("自動選択ツール"), QStringLiteral("wand"), {QKeySequence(QStringLiteral("W"))},
          QStringLiteral("クリックした所の、線で囲まれた範囲を選びます"));
-    tool("act_sel_ellipse", QStringLiteral("範囲選択（楕円）"), QStringLiteral("ellipse"), {}, QStringLiteral("ドラッグで楕円に選ぶ（Shift で足す、Alt で引く）"));
-    tool("act_sel_polyline", QStringLiteral("範囲選択（折れ線）"), QStringLiteral("polyline"), {}, QStringLiteral("クリックで角を置き、ダブルクリックか Enter で閉じる"));
+    tool("act_sel_ellipse", QStringLiteral("楕円形選択ツール"), QStringLiteral("ellipse"), {}, QStringLiteral("ドラッグで楕円に選ぶ（Shift で足す、Alt で引く）"));
+    tool("act_sel_polyline", QStringLiteral("多角形選択ツール"), QStringLiteral("polyline"), {}, QStringLiteral("クリックで角を置き、ダブルクリックか Enter で閉じる"));
     tool("act_sel_colour", QStringLiteral("色域選択"), QStringLiteral("colour"), {}, QStringLiteral("クリックした所と同じ色の所をページ中から選ぶ"));
     tool("act_sel_pen", QStringLiteral("選択ペン"), QStringLiteral("selpen"), {}, QStringLiteral("なぞった所を選択範囲に足す"));
     tool("act_sel_erase", QStringLiteral("選択消し"), QStringLiteral("selerase"), {}, QStringLiteral("なぞった所を選択範囲から外す"));
 
-    make("act_select_all", QStringLiteral("すべて選択"), [this] { select_all(); }, {QKeySequence(Std::SelectAll)});
+    make("act_select_all", QStringLiteral("すべてを選択"), [this] { select_all(); }, {QKeySequence(Std::SelectAll)});
     make("act_deselect", QStringLiteral("選択を解除"), [this] { canvas_->set_selection(std::nullopt); }, {QKeySequence(QStringLiteral("Ctrl+D"))});
     make("act_sel_invert", QStringLiteral("選択範囲を反転"), [this] { change_selection(Json{{"invert", true}}); }, {QKeySequence(QStringLiteral("Ctrl+Alt+I"))});
-    make("act_sel_grow", QStringLiteral("選択範囲を広げる…"), [this] { change_selection_by("grow_mm", 1); }, {}, QStringLiteral("選択範囲の縁を外へ広げる"));
-    make("act_sel_shrink", QStringLiteral("選択範囲を狭める…"), [this] { change_selection_by("grow_mm", -1); }, {}, QStringLiteral("選択範囲の縁を内へ狭める"));
-    make("act_sel_feather", QStringLiteral("境界をぼかす…"), [this] { change_selection_by("feather_mm", 1); }, {}, QStringLiteral("選択範囲の縁をなめらかにぼかす"));
-    make("act_sel_layer", QStringLiteral("描画部分から選択"), [this] { select_drawn(); }, {}, QStringLiteral("描く先のレイヤーで描いてある所を選ぶ"));
+    make("act_sel_grow", QStringLiteral("拡張…"), [this] { change_selection_by("grow_mm", 1); }, {}, QStringLiteral("選択範囲の縁を外へ広げる"));
+    make("act_sel_shrink", QStringLiteral("縮小…"), [this] { change_selection_by("grow_mm", -1); }, {}, QStringLiteral("選択範囲の縁を内へ狭める"));
+    make("act_sel_feather", QStringLiteral("境界をぼかす…"), [this] { change_selection_by("feather_mm", 1); },
+         {QKeySequence(QStringLiteral("Shift+F6"))}, QStringLiteral("選択範囲の縁をなめらかにぼかす"));
+    make("act_sel_layer", QStringLiteral("ピクセルを選択"), [this] { select_drawn(); }, {}, QStringLiteral("描く先のレイヤーで描いてある所を選ぶ"));
     make("act_sel_keep", QStringLiteral("選択範囲をストック…"), [this] { keep_selection(); }, {},
          QStringLiteral("名前を付けてページに残す（後で「ストックから選ぶ」）"));
-    QAction* quick = make("act_quick_mask", QStringLiteral("クイックマスク"), [] {}, {}, QStringLiteral("選択範囲を赤で見せ、選択ペン・選択消しで直す"), true);
+    QAction* quick = make("act_quick_mask", QStringLiteral("クイックマスクモードで編集"), [] {}, {}, QStringLiteral("選択範囲を赤で見せ、選択ペン・選択消しで直す"), true);
     connect(quick, &QAction::toggled, this, [this](bool on) { quick_mask(on); });
     make("act_copy", QStringLiteral("コピー"), [this] { copy(); }, {QKeySequence(Std::Copy)});
-    make("act_cut", QStringLiteral("切り取り"), [this] { cut(); }, {QKeySequence(Std::Cut)});
-    make("act_paste", QStringLiteral("貼り付け"), [this] { paste(); }, {QKeySequence(Std::Paste)}, QStringLiteral("新しいレイヤーに貼り付けます（そのまま動かせます）"));
+    make("act_cut", QStringLiteral("カット"), [this] { cut(); }, {QKeySequence(Std::Cut)});
+    make("act_paste", QStringLiteral("ペースト"), [this] { paste(); }, {QKeySequence(Std::Paste)}, QStringLiteral("新しいレイヤーにペーストします（そのまま動かせます）"));
     // (Python's: the platform's first key of Delete, and Backspace — not all of Delete's keys: on X11 they hold Ctrl+D, which
     // is 選択を解除's, and a key two commands share does neither)
     QList<QKeySequence> delete_keys = {QKeySequence(Std::Delete)};
     if (!delete_keys.contains(QKeySequence(QStringLiteral("Backspace")))) delete_keys << QKeySequence(QStringLiteral("Backspace"));
-    make("act_delete_area", QStringLiteral("選択範囲を消す"), [this] { delete_area(); }, delete_keys);
-    make("act_flip_h", QStringLiteral("左右反転"), [this] { flip(-1, 1); });
-    make("act_flip_v", QStringLiteral("上下反転"), [this] { flip(1, -1); });
-    make("act_fill_selection", QStringLiteral("選択範囲を塗る"), [this] { fill_selection(); }, {QKeySequence(QStringLiteral("Alt+Backspace"))});
+    make("act_delete_area", QStringLiteral("消去"), [this] { delete_area(); }, delete_keys);
+    make("act_flip_h", QStringLiteral("水平方向に反転"), [this] { flip(-1, 1); });
+    make("act_flip_v", QStringLiteral("垂直方向に反転"), [this] { flip(1, -1); });
+    make("act_fill_selection", QStringLiteral("描画色で塗りつぶし"), [this] { fill_selection(); }, {QKeySequence(QStringLiteral("Alt+Backspace"))});
     make("act_line_width", QStringLiteral("選択範囲の線の太さ…"), [this] { line_width(); });
-    make("act_warp_perspective", QStringLiteral("自由変形（遠近・4 隅）"), [this] { start_warp(QStringLiteral("perspective")); },
+    make("act_warp_perspective", QStringLiteral("自由な形に"), [this] { start_warp(QStringLiteral("perspective")); },
          {QKeySequence(QStringLiteral("Ctrl+Shift+P"))}, QStringLiteral("選択範囲の 4 隅を好きな所へ引っぱる。Enter で確定、Esc でやめる"));
-    make("act_warp_mesh", QStringLiteral("自由変形（メッシュ・3×3）"), [this] { start_warp(QStringLiteral("mesh")); },
+    make("act_warp_mesh", QStringLiteral("ワープ"), [this] { start_warp(QStringLiteral("mesh")); },
          {QKeySequence(QStringLiteral("Ctrl+Shift+W"))}, QStringLiteral("選択範囲の 3×3 の点を引っぱって曲げる。Enter で確定、Esc でやめる"));
-    make("act_warp_mesh_grid", QStringLiteral("自由変形（メッシュ・格子の数を決める）…"), [this] { start_mesh_grid(); }, {},
+    make("act_warp_mesh_grid", QStringLiteral("ワープ（格子の数を決める）…"), [this] { start_mesh_grid(); }, {},
          QStringLiteral("横と縦の格子の数（1〜8）を決めてから、点を引っぱって曲げる"));
     make("act_move_pivot", QStringLiteral("基準位置を動かす"), [this] { move_pivot(); }, {},
          QStringLiteral("次にクリックした所を、選択範囲を回す・数で変形するときの中心にします（置いた＋はドラッグで動かせる）"));
     make("act_transform_numbers", QStringLiteral("変形を数で決める…"), [this] { transform_numbers(); }, {},
          QStringLiteral("選択範囲を、移動（mm）・拡大率（%）・回転（°）の数で変形します。基準位置（選択範囲の中の＋）を中心に"));
-    make("act_warp_apply", QStringLiteral("自由変形を確定"), [this] { canvas_->finish_warp(); });
+    make("act_warp_apply", QStringLiteral("変形を確定"), [this] { canvas_->finish_warp(); });
+}
+
+// The menus (decision 5: Photoshop's names and places). Each group adds its new items to its own list here: 選択範囲
+// (B1 色域指定… 被写体を選択…, B3 選択とマスク…), 選択範囲を変更 (B1 境界線… 滑らかに…), the tools' groups (B1 クイック選択ツール
+// オブジェクト選択ツール, B4 the retouching tools) and 編集 → 変形 (C-c).
+
+const std::vector<const char*>& MainWindow::selection_tools() {
+    static const std::vector<const char*> names{"act_marquee", "act_sel_ellipse", "act_lasso", "act_sel_polyline", "act_wand",
+                                                "act_sel_colour", "act_sel_pen", "act_sel_erase"};
+    return names;
+}
+
+const std::vector<const char*>& MainWindow::retouch_tools() {
+    static const std::vector<const char*> names;  // (B4: スポット修復ブラシツール 修復ブラシツール コピースタンプツール ヒストリーブラシツール)
+    return names;
+}
+
+void MainWindow::build_tool_groups(QMenu* tools) {
+    for (const std::vector<const char*>* group : {&selection_tools(), &retouch_tools()}) {
+        if (group->empty()) continue;
+        for (const char* name : *group) tools->addAction(action(QString::fromLatin1(name)));
+        tools->addSeparator();
+    }
 }
 
 void MainWindow::build_selection_menu(QMenu* menu) {
-    for (const char* name : {"act_marquee", "act_sel_ellipse", "act_lasso", "act_sel_polyline", "act_wand", "act_sel_colour", "act_sel_pen", "act_sel_erase"})
-        menu->addAction(action(QString::fromLatin1(name)));
+    for (const char* name : {"act_select_all", "act_deselect", "act_sel_invert"}) menu->addAction(action(QString::fromLatin1(name)));
     menu->addSeparator();
-    for (const char* name : {"act_select_all", "act_deselect", "act_sel_invert", "act_sel_grow", "act_sel_shrink", "act_sel_feather", "act_sel_layer"})
-        menu->addAction(action(QString::fromLatin1(name)));
+    QMenu* modify = menu->addMenu(QStringLiteral("選択範囲を変更"));
+    for (const char* name : {"act_sel_grow", "act_sel_shrink", "act_sel_feather"}) modify->addAction(action(QString::fromLatin1(name)));
     menu->addSeparator();
+    menu->addAction(action(QStringLiteral("act_quick_mask")));
+    menu->addSeparator();
+    // (channels@1: the selection made from a channel, and kept as an alpha channel)
+    channel_load_menu_ = menu->addMenu(QStringLiteral("選択範囲を読み込む"));
+    channel_load_menu_->setProperty("remade", true);
+    connect(channel_load_menu_, &QMenu::aboutToShow, this, [this] { fill_channel_menu(); });
+    menu->addAction(action(QStringLiteral("act_sel_to_channel")));
+    menu->addSeparator();
+    // Genko's own: its layer's drawing, the kept areas (saved_areas), the lines' width
+    menu->addAction(action(QStringLiteral("act_sel_layer")));
     menu->addAction(action(QStringLiteral("act_sel_keep")));
     stock_menu_ = menu->addMenu(QStringLiteral("ストックから選ぶ"));
     stock_menu_->setProperty("remade", true);
     connect(stock_menu_, &QMenu::aboutToShow, this, [this] { fill_stock(); });
-    // (channels@1: the selection kept as an alpha channel, and one made from a channel)
-    menu->addAction(action(QStringLiteral("act_sel_to_channel")));
-    channel_load_menu_ = menu->addMenu(QStringLiteral("チャンネルから読み込む"));
-    channel_load_menu_->setProperty("remade", true);
-    connect(channel_load_menu_, &QMenu::aboutToShow, this, [this] { fill_channel_menu(); });
-    menu->addAction(action(QStringLiteral("act_quick_mask")));
+    menu->addAction(action(QStringLiteral("act_line_width")));
+}
+
+void MainWindow::build_transform_menu(QMenu* menu) {
+    for (const char* name : {"act_warp_perspective", "act_warp_mesh", "act_warp_mesh_grid"}) menu->addAction(action(QString::fromLatin1(name)));
     menu->addSeparator();
-    for (const char* name : {"act_cut", "act_copy", "act_paste", "act_delete_area"}) menu->addAction(action(QString::fromLatin1(name)));
+    for (const char* name : {"act_flip_h", "act_flip_v"}) menu->addAction(action(QString::fromLatin1(name)));
     menu->addSeparator();
-    for (const char* name : {"act_flip_h", "act_flip_v", "act_warp_perspective", "act_warp_mesh", "act_warp_mesh_grid", "act_warp_apply",
-                             "act_transform_numbers", "act_move_pivot"})
-        menu->addAction(action(QString::fromLatin1(name)));
-    QMenu* interp = menu->addMenu(QStringLiteral("変形の補間"));
+    for (const char* name : {"act_transform_numbers", "act_move_pivot", "act_warp_apply"}) menu->addAction(action(QString::fromLatin1(name)));
+    menu->addSeparator();
+    QMenu* interp = menu->addMenu(QStringLiteral("補間方法"));
     auto* group = new QActionGroup(interp);
     for (const auto& [key, label] : {std::pair{"bilinear", "なめらか（バイリニア）"}, {"bicubic", "よりなめらか（バイキュービック）"},
                                      {"nearest", "ハード（ニアレストネイバー・ドット絵やトーンに）"}}) {
@@ -157,16 +188,13 @@ void MainWindow::build_selection_menu(QMenu* menu) {
         item->setChecked(chosen == transform_interp_);
         group->addAction(item);
     }
-    menu->addSeparator();
-    menu->addAction(action(QStringLiteral("act_fill_selection")));
-    menu->addAction(action(QStringLiteral("act_line_width")));
 }
 
 // --- the area ---------------------------------------------------------------------------------------------------------
 
 std::optional<Json> MainWindow::need_area() {
     auto area = selection_area();
-    if (!area) flash(QStringLiteral("先に範囲を選びます（範囲選択 M・投げ縄 L・自動選択 W）"), 3000);
+    if (!area) flash(QStringLiteral("先に選択範囲を作ります（長方形選択ツール M・なげなわツール L・自動選択ツール W）"), 3000);
     return area;
 }
 
@@ -303,7 +331,7 @@ void MainWindow::select_drawn() {
     Json area;
     try {
         render::use_brushes_of(book());
-        area = render::selection::resolve(Json{{"layer", layer->id}}, *page, &book());
+        area = render::selection::resolve(Json{{"transparency", layer->id}}, *page, &book());  // (its alpha, grey as it is)
     } catch (const core::OpError&) {
         flash(QStringLiteral("描く先のレイヤーには、まだ何も描いてありません"), 3000);
         return;
@@ -360,7 +388,7 @@ void MainWindow::quick_mask(bool on) {
     canvas_->quick_mask = on;
     if (on) {
         choose_tool(QStringLiteral("selpen"));
-        flash(QStringLiteral("クイックマスク: 選択ペンで足し、選択消しで外します。終わったらもう一度「クイックマスク」"), 5000);
+        flash(QStringLiteral("クイックマスクモードで編集: 選択ペンで足し、選択消しで外します。終わったらもう一度「クイックマスクモードで編集」"), 5000);
     }
     canvas_->update();
 }
@@ -404,7 +432,7 @@ void MainWindow::start_warp(const QString& kind, int columns, int rows) {
     if (!need_area()) return;
     if (canvas_->tool() != QLatin1String("marquee")) canvas_->set_tool(QStringLiteral("marquee"));
     canvas_->start_warp(kind, columns, rows);
-    flash(QStringLiteral("点を引っぱって形を決め、Enter（または「自由変形を確定」）で確定します。Esc でやめます"), 6000);
+    flash(QStringLiteral("点を引っぱって形を決め、Enter（または「変形を確定」）で確定します。Esc でやめます"), 6000);
 }
 
 void MainWindow::start_mesh_grid() {
@@ -501,68 +529,6 @@ void MainWindow::delete_area() {
     if (!area) return;
     if (const core::Layer* layer = paint_layer())
         apply_ops(Json::array({Json{{"op", "delete_area"}, {"page", current_page()->index.json()}, {"layer_id", layer->id}, {"area", *area}}}));
-}
-
-bool MainWindow::copy() {
-    const auto area = need_area();
-    const core::Layer* layer = target_layer();
-    const core::Page* page = current_page();
-    if (!area || layer == nullptr || page == nullptr) return false;
-    Json items;
-    try {
-        render::use_brushes_of(book());
-        core::Layer copy = *layer;  // (lifted from a copy: the layer itself keeps everything)
-        auto lifted = render::selection::lift(copy, *area, *page);
-        if (page->color && layer->ink_raster) {  // (color-mode@1: its inks there, as a piece that keeps them)
-            if (const auto piece = render::ink_edit::lift_piece(*page, *layer, *area)) {
-                lifted.patches.push_back(render::ink_edit::piece_patch(*piece, *page->color));
-            }
-        }
-        if (lifted.strokes.empty() && lifted.patches.empty()) {
-            flash(QStringLiteral("選んだ範囲に、このレイヤーの絵がありません"), 3000);
-            return false;
-        }
-        items = render::selection::items_to_json(lifted);
-    } catch (const std::exception& error) {
-        flash(wording::error(QString::fromUtf8(error.what())), 3000, true);
-        return false;
-    }
-    clipboard_ = std::move(items);
-    clipboard_outline_ = canvas_->selection()->outline;
-    clipboard_area_ = area;
-    flash(QStringLiteral("コピーしました（Ctrl+V で新しいレイヤーに貼り付け）"), 2500);
-    return true;
-}
-
-void MainWindow::cut() {
-    if (copy()) delete_area();
-}
-
-void MainWindow::paste() {
-    const core::Page* page = current_page();
-    const core::Layer* layer = target_layer();
-    if (page == nullptr || !clipboard_) {
-        flash(QStringLiteral("貼り付けるものがありません（先にコピー）"), 2500);
-        return;
-    }
-    const std::string id = core::new_id();
-    // (color-mode@1: pieces of inks go into a paint layer, which keeps them as they were; color-model@1: so do the
-    // values of an RGB page of a profile)
-    bool inks = false;
-    if (clipboard_->contains("patches") && (*clipboard_)["patches"].is_array()) {
-        for (const Json& patch : (*clipboard_)["patches"]) {
-            inks = inks || (patch.is_object() && ((page->color && patch.contains("gkir")) || patch.contains(render::color_edit::kPatchProfileKey)));
-        }
-    }
-    Json add{{"op", "add_layer"}, {"page", page->index.json()}, {"name", "貼り付け"}, {"kind", inks ? "paint" : "pen"}, {"id", id}};
-    if (layer != nullptr) add["after"] = layer->id;
-    const Json ops = Json::array({add, Json{{"op", "paste"}, {"page", page->index.json()}, {"layer_id", id}, {"items", *clipboard_}}});
-    if (apply_ops(ops)) {
-        set_target_layer(id);
-        if (canvas_->tool() != QLatin1String("marquee")) choose_tool(QStringLiteral("rect"));
-        canvas_->set_selection(clipboard_area_, clipboard_outline_);
-        flash(QStringLiteral("新しいレイヤー「貼り付け」に置きました。選択範囲の中をドラッグで動かせます"), 3500);
-    }
 }
 
 void MainWindow::fill_selection() {

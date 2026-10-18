@@ -124,6 +124,7 @@ std::pair<Num, Num> PageSpec::trim_size() const {
 }
 
 std::pair<double, double> PageSpec::trim_origin() const {
+    if (trim_origin_mm) return *trim_origin_mm;  // (page-spec@1: a page's own paper whose trim was cropped off the middle)
     const auto [w, h] = trim_size();
     return {((width_mm - w) / Num(2)).value(), ((height_mm - h) / Num(2)).value()};
 }

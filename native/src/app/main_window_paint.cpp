@@ -380,7 +380,7 @@ void MainWindow::fill_gaps() {
         brush_->lasso_mode->setCurrentIndex(std::max(0, brush_->lasso_mode->findData(QStringLiteral("gaps"))));
         choose_tool(QStringLiteral("lassofill"));
         flash(QStringLiteral("塗り残しの所をなぞると、そこだけ塗ります（囲って塗る・なぞった所の塗り残し）。"
-                             "レイヤー全体なら、先にすべて選択（Ctrl+A）してから"),
+                             "レイヤー全体なら、先にすべてを選択（Ctrl+A）してから"),
               6000);
         return;
     }

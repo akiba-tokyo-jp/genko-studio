@@ -690,6 +690,12 @@ private:
     // the selection (main_window_select.cpp)
     void build_selection_actions();
     void build_selection_menu(QMenu* menu);
+    // (decision 5: 編集 → 変形, the tools menu's groups; 編集's clipboard items: main_window_clipboard.cpp)
+    void build_transform_menu(QMenu* menu);
+    void build_tool_groups(QMenu* tools);
+    void build_clipboard_menu(QMenu* edit);
+    static const std::vector<const char*>& selection_tools();
+    static const std::vector<const char*>& retouch_tools();
     void choose_marquee(const QString& tool);
     std::optional<core::Json> need_area();
     void join_selection(const std::optional<core::Json>& area, const QString& how);
