@@ -77,6 +77,9 @@ const std::map<std::string, const char*>& names() {
         {"smart_filter_state", "スマートフィルターを切り替えた"},
         // (PC3 A4: render/ops_smart)
         {"smart_stack", "スタックモードを変えた"}, {"rasterize_lines", "台詞をラスタライズした"},
+        // (PC3 B2: render/ops_masks)
+        {"outline_area", "境界線を描いた"}, {"apply_layer_mask", "レイヤーマスクを適用した"},
+        {"mask_from_transparency", "透明部分からマスクを作った"},
     };
     return table;
 }

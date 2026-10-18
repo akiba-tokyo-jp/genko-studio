@@ -181,7 +181,12 @@ const std::multimap<QString, QString>& renamed() {
                                                      {QStringLiteral("変形を確定"), QStringLiteral("自由変形を確定")},
                                                      {QStringLiteral("移動ツール"), QStringLiteral("レイヤー移動")},
                                                      {QStringLiteral("前面へ"), QStringLiteral("レイヤーを前へ")},
-                                                     {QStringLiteral("背面へ"), QStringLiteral("レイヤーを後ろへ")}};
+                                                     {QStringLiteral("背面へ"), QStringLiteral("レイヤーを後ろへ")},
+                                                     // (PC3 B2: レイヤー → レイヤーマスク by Photoshop's names)
+                                                     {QStringLiteral("すべての領域を表示"), QStringLiteral("全部見せるマスクを作る")},
+                                                     {QStringLiteral("選択範囲外をマスク"), QStringLiteral("選択範囲からマスクを作る")},
+                                                     {QStringLiteral("削除"), QStringLiteral("マスクを消す")},
+                                                     {QStringLiteral("使用しない"), QStringLiteral("マスクを使わない")}};
     return all;
 }
 

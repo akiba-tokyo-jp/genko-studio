@@ -150,6 +150,9 @@ void MainWindow::build_tool_groups(QMenu* tools) {
 
 void MainWindow::build_selection_menu(QMenu* menu) {
     for (const char* name : {"act_select_all", "act_deselect", "act_sel_invert"}) menu->addAction(action(QString::fromLatin1(name)));
+    // (PC3 B2: the layers chosen, main_window_masks.cpp)
+    for (const char* name : {"act_select_all_layers", "act_deselect_layers", "act_find_layers", "act_isolate_layers"})
+        menu->addAction(action(QString::fromLatin1(name)));
     menu->addSeparator();
     QMenu* modify = menu->addMenu(QStringLiteral("選択範囲を変更"));
     for (const char* name : {"act_sel_grow", "act_sel_shrink", "act_sel_feather"}) modify->addAction(action(QString::fromLatin1(name)));

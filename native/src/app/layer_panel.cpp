@@ -159,6 +159,7 @@ LayerPanel::LayerPanel(MainWindow* window) : window_(window) {
     search_->setPlaceholderText(QStringLiteral("レイヤーを探す（名前）"));
     search_->setClearButtonEnabled(true);
     connect(search_, &QLineEdit::textChanged, this, [this](const QString& text) { search(text); });
+    connect(search_, &QLineEdit::returnPressed, this, [this] { choose_found(); });  // (PC3 B2: レイヤーを検索)
     name_ = new QLineEdit;
     name_->setObjectName(QStringLiteral("layer_name"));
     name_->setPlaceholderText(QStringLiteral("レイヤーの名前"));
@@ -292,17 +293,31 @@ LayerPanel::LayerPanel(MainWindow* window) : window_(window) {
     mask_button_ = button(QStringLiteral("マスク ▾"), QStringLiteral("レイヤーの一部を隠す。選択範囲から作り、ペンで見せる所を足し、消しゴムで隠す"),
                           QStringLiteral("layer_mask"));
     mask_menu_ = new QMenu(mask_button_);
-    mask_menu_->addAction(QStringLiteral("選択範囲からマスクを作る"), this, [this] { mask_from_selection(); });
-    mask_menu_->addAction(QStringLiteral("全部見せるマスクを作る"), this, [this] { mask(Json{{"fill", "show"}}); });
+    // (PC3 B2, the user's decision 5: レイヤー → レイヤーマスク by Photoshop's names; マスクを編集する and マスクを反転 Genko's own)
+    mask_menu_->addAction(QStringLiteral("すべての領域を表示"), this, [this] { mask(Json{{"fill", "show"}}); });
+    mask_menu_->addAction(QStringLiteral("すべての領域を隠す"), this, [this] { mask(Json{{"fill", "hide"}}); });
+    mask_menu_->addAction(QStringLiteral("選択範囲外をマスク"), this, [this] { mask_from_selection(); });
+    mask_menu_->addAction(QStringLiteral("選択範囲をマスク"), this, [this] { hide_selection(); });
+    mask_menu_->addAction(QStringLiteral("透明部分から"), this, [this] { mask_from_transparency(); });
+    mask_menu_->addSeparator();
     mask_edit_ = mask_menu_->addAction(QStringLiteral("マスクを編集する（ペンで見せる・消しゴムで隠す）"));
     mask_edit_->setCheckable(true);
     mask_edit_->setProperty("genko_attribute", QStringLiteral("act_mask_edit"));  // (named, as the window's commands: the help finds it by it)
     connect(mask_edit_, &QAction::toggled, this, [this](bool on) { edit_mask(on); });
     mask_menu_->addAction(QStringLiteral("マスクを反転"), this, [this] { mask(Json{{"invert", true}}); });
-    mask_off_ = mask_menu_->addAction(QStringLiteral("マスクを使わない"));
+    mask_menu_->addSeparator();
+    mask_menu_->addAction(QStringLiteral("削除"), this, [this] { mask(Json{{"delete", true}}); });
+    mask_menu_->addAction(QStringLiteral("適用"), this, [this] { apply_mask(); });
+    mask_off_ = mask_menu_->addAction(QStringLiteral("使用しない"));
     mask_off_->setCheckable(true);
     connect(mask_off_, &QAction::toggled, this, [this](bool on) { if (!loading_) mask(Json{{"enabled", !on}}); });
-    mask_menu_->addAction(QStringLiteral("マスクを消す"), this, [this] { mask(Json{{"delete", true}}); });
+    mask_link_ = mask_menu_->addAction(QStringLiteral("リンク"));
+    mask_link_->setCheckable(true);
+    mask_link_->setToolTip(QStringLiteral("マスクをレイヤーと一緒に動かします（外すと、マスクはページに固定）"));
+    connect(mask_link_, &QAction::toggled, this, [this](bool on) {
+        const auto [page, layer] = this->layer();
+        if (!loading_ && layer != nullptr && layer->mask && layer->mask->linked != on) mask(Json{{"linked", on}});
+    });
     mask_button_->setMenu(mask_menu_);
     filter_ = new QComboBox;
     filter_->setObjectName(QStringLiteral("layer_filter"));
@@ -439,7 +454,7 @@ void LayerPanel::refresh() {
             QStringList marks;
             if (!layer.exportable && layer.role != core::LayerRole::Name && layer.role != core::LayerRole::Draft) marks << QStringLiteral("下描き");
             if (layer.reference) marks << QStringLiteral("参照");
-            if (layer.mask) marks << QStringLiteral("マスク");
+            if (layer.mask) marks << (layer.mask->linked ? QStringLiteral("マスク（リンク）") : QStringLiteral("マスク"));  // (PC3 B2: masks@1)
             if (layer.locked) marks << QStringLiteral("ロック");
             if (layer.kind == core::LayerKind::Smart) {  // (smart-objects@1: its contents in the book, or a file linked)
                 const core::SmartContents* contents = core::smart::contents_of(window_->book(), layer);
@@ -591,6 +606,8 @@ void LayerPanel::selected(bool from_list) {
             if (tints()[i].second == Json(*layer->color)) tint = static_cast<int>(i);
     tint_->setCurrentIndex(tint);
     mask_off_->setChecked(layer->mask && !layer->mask->enabled);
+    mask_link_->setChecked(layer->mask && layer->mask->linked);  // (PC3 B2: masks@1)
+    mask_link_->setEnabled(layer->mask.has_value());
     mask_button_->setText(layer->mask ? QStringLiteral("マスク ◐ ▾") : QStringLiteral("マスク ▾"));
     color_prints_->setChecked(layer->color_prints);
     effect_button_->setText(layer->effect && core::py_truthy(*layer->effect) ? QStringLiteral("効果 ✓ ▾") : QStringLiteral("効果 ▾"));
@@ -712,6 +729,7 @@ void LayerPanel::mask_from_selection() {
         return;
     }
     mask(Json{{"area", *area}});
+    window_->canvas()->set_selection(std::nullopt);  // (PC3 B2: made, the selection let go — as Photoshop does)
 }
 
 void LayerPanel::move(int delta) {
@@ -750,12 +768,15 @@ std::vector<std::string> LayerPanel::selected_ids() const {
 void LayerPanel::search(const QString& text) {
     const core::Page* page = window_->current_page();
     const QString words = text.trimmed().toLower();
+    // (PC3 B2, レイヤーを分離: on its page, only the layers isolated are listed)
+    const bool alone = page != nullptr && !isolated_.empty() && isolated_page_ == page->id;
     for (std::size_t row = 0; row < ids_.size(); ++row) {
         QString label;
         if (page != nullptr)
             for (const core::Layer& l : page->layers)
                 if (l.id == ids_[row]) label = wording::layer_label(l).toLower();
-        if (QListWidgetItem* item = list_->item(static_cast<int>(row))) item->setHidden(!words.isEmpty() && !label.contains(words));
+        const bool apart = alone && std::find(isolated_.begin(), isolated_.end(), ids_[row]) == isolated_.end();
+        if (QListWidgetItem* item = list_->item(static_cast<int>(row))) item->setHidden(apart || (!words.isEmpty() && !label.contains(words)));
     }
 }
 

@@ -169,7 +169,7 @@ private slots:
             {"act_layer_pen", "新しいペンのレイヤー", "Ctrl+Shift+N", "", false, "レイヤー"},
             {"act_layer_paint", "新しいペイントのレイヤー", "", "", false, "レイヤー"},
             {"act_layer_folder", "新しいフォルダ", "", "", false, "レイヤー"},
-            {"act_layer_dup", "レイヤーを複製", "Ctrl+J", "", false, "レイヤー"},
+            {"act_layer_dup", "レイヤーを複製", "", "", false, "レイヤー"},
             {"act_layer_merge", "下のレイヤーと結合", "Ctrl+Shift+E", "", false, "レイヤー"},
             {"act_layer_delete", "レイヤーを消す", "", "", false, "レイヤー"},
             {"act_layer_up", "前面へ", "Ctrl+]", "", false, "レイヤー/重ね順"},

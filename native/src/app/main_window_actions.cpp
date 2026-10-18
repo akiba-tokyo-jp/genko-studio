@@ -452,6 +452,8 @@ void MainWindow::build_actions() {
     }
     actions_.at("act_select")->setChecked(true);
     build_selection_actions();  // (the selection's tools and commands: main_window_select.cpp)
+    build_clipboard_actions();  // (PC3 B2: 結合部分をコピー, 特殊ペースト, 塗りつぶし…, 境界線を描く…: main_window_clipboard.cpp)
+    build_mask_actions();       // (PC3 B2: すべてのマスクを統合, the layers chosen: main_window_masks.cpp)
     build_anim_actions();       // (アニメーション, タイムラプス: main_window_anim.cpp)
     build_channel_actions();    // (channels@1: the channel targets, the selection to a channel: main_window_channels.cpp)
     build_paint_actions();      // (スポイト … ゆがみ, 色の入れ替え, 透明色, 太く・細く: main_window_paint.cpp)
@@ -608,6 +610,7 @@ void MainWindow::build_menus() {
     file->addAction(action("act_timelapse"));
     file->addAction(action("act_timelapse_export"));
     file->addSeparator();
+    file->addMenu(QStringLiteral("スクリプト"))->addAction(action("act_flatten_masks"));  // (PC3 B2: file.scripts.*)
     actions_menu_ = file->addMenu(QStringLiteral("オートアクション"));
     actions_menu_->setProperty("remade", true);
     connect(actions_menu_, &QMenu::aboutToShow, this, &MainWindow::fill_actions_menu);
@@ -686,6 +689,8 @@ void MainWindow::build_menus() {
     build_selection_menu(bar->addMenu(QStringLiteral("選択範囲")));
     QMenu* layers = bar->addMenu(QStringLiteral("レイヤー"));
     for (const char* name : {"act_layer_pen", "act_layer_paint", "act_layer_folder"}) layers->addAction(action(name));
+    QMenu* made = layers->addMenu(QStringLiteral("新規"));  // (PC3 B2: Photoshop's レイヤー → 新規)
+    for (const char* name : {"act_layer_via_copy", "act_layer_via_cut"}) made->addAction(action(name));
     layers->addSeparator();
     for (const char* name : {"act_layer_dup", "act_layer_merge", "act_layer_delete"}) layers->addAction(action(name));
     layers->addSeparator();
@@ -699,7 +704,7 @@ void MainWindow::build_menus() {
     layers->addSeparator();
     layers->addAction(action("act_layer_draft"));
     layer_effect_menu_ = layers->addMenu(QStringLiteral("境界効果・表示色の印刷"));
-    layer_mask_menu_ = layers->addMenu(QStringLiteral("マスク"));
+    layer_mask_menu_ = layers->addMenu(QStringLiteral("レイヤーマスク"));  // (PC3 B2, decision 5: Photoshop's name)
     layers->addSeparator();
     for (const char* name : {"act_layer_merge_down", "act_layer_merge_layers", "act_layer_merge_visible", "act_layer_flatten", "act_layer_convert_paint", "act_layer_convert_pen"})
         layers->addAction(action(name));
@@ -1718,11 +1723,13 @@ void MainWindow::layer_moved(double dx, double dy) {
     const core::Num h = page->spec.height_mm;
     const Json whole = Json::object({{"poly", Json::array({Json::array({(-m).json(), (-m).json()}), Json::array({(w + m).json(), (-m).json()}),
                                                            Json::array({(w + m).json(), (h + m).json()}), Json::array({(-m).json(), (h + m).json()})})}});
-    apply_ops(Json::array({Json::object({{"op", "transform_area"},
-                                         {"page", page->index.json()},
-                                         {"layer_id", layer->id},
-                                         {"area", whole},
-                                         {"matrix", Json::array({1, 0, 0, 1, dx, dy})}})}));
+    Json op = Json::object({{"op", "transform_area"},
+                            {"page", page->index.json()},
+                            {"layer_id", layer->id},
+                            {"area", whole},
+                            {"matrix", Json::array({1, 0, 0, 1, dx, dy})}});
+    if (layer->mask && layer->mask->linked) op["mask"] = "follow";  // (PC3 B2, masks@1: a linked mask moves with the layer)
+    apply_ops(Json::array({op}));
 }
 
 CommandSearch* MainWindow::find_command() {

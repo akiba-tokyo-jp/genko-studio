@@ -119,7 +119,9 @@ void MainWindow::build_material_actions() {
     make("act_layer_pen", QStringLiteral("新しいペンのレイヤー"), layers([](LayerPanel& p) { p.add("pen", QStringLiteral("ペン")); }), key("Ctrl+Shift+N"));
     make("act_layer_paint", QStringLiteral("新しいペイントのレイヤー"), layers([](LayerPanel& p) { p.add("paint", QStringLiteral("ペイント")); }));
     make("act_layer_folder", QStringLiteral("新しいフォルダ"), layers([](LayerPanel& p) { p.add("folder", QStringLiteral("フォルダ")); }));
-    make("act_layer_dup", QStringLiteral("レイヤーを複製"), layers([](LayerPanel& p) { p.duplicate(); }), key("Ctrl+J"));
+    // (PC3 B2, the user's decision 5: Ctrl+J is Photoshop's 選択範囲をコピーしたレイヤー's — without a selection it duplicates
+    // the layer as this did —, main_window_clipboard.cpp)
+    make("act_layer_dup", QStringLiteral("レイヤーを複製"), layers([](LayerPanel& p) { p.duplicate(); }));
     make("act_layer_merge", QStringLiteral("下のレイヤーと結合"), layers([](LayerPanel& p) { p.merge_down(); }), key("Ctrl+Shift+E"));
     make("act_layer_delete", QStringLiteral("レイヤーを消す"), layers([](LayerPanel& p) { p.remove(); }));
     make("act_layer_up", QStringLiteral("前面へ"), layers([](LayerPanel& p) { p.move(1); }), key("Ctrl+]"));

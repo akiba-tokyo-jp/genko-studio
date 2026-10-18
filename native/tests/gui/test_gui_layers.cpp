@@ -13,14 +13,20 @@
 #include <QListWidget>
 #include <QMenu>
 #include <QSlider>
+#include <QSpinBox>
 #include "gui_support.hpp"
 #include "app/adjust_forms.hpp"
 #include "app/canvas.hpp"
+#include "app/config.hpp"
 #include "app/layer_panel.hpp"
 #include "app/main_window.hpp"
+#include "app/preferences.hpp"
+#include "app/workspace.hpp"
 #include "core/color_raster.hpp"
 #include "core/command_bus.hpp"
 #include "core/pyconv.hpp"
+#include "render/image.hpp"
+#include "render/png.hpp"
 using namespace genko;
 using core::Json;
 
@@ -342,19 +348,19 @@ private slots:
         gui_test::Answers answers;
         auto& panel = book.panel();
         QVERIFY(book.choose(ink));
-        book.menu_action(panel.mask_menu(), QStringLiteral("選択範囲からマスクを作る"))->trigger();
+        book.menu_action(panel.mask_menu(), QStringLiteral("選択範囲外をマスク"))->trigger();
         QVERIFY(!book.layer(ink)->mask);
-        book.menu_action(panel.mask_menu(), QStringLiteral("全部見せるマスクを作る"))->trigger();
+        book.menu_action(panel.mask_menu(), QStringLiteral("すべての領域を表示"))->trigger();
         QVERIFY(book.layer(ink)->mask && book.layer(ink)->mask->enabled);
         const auto shown = book.layer(ink)->mask->png;
         book.menu_action(panel.mask_menu(), QStringLiteral("マスクを反転"))->trigger();
         QVERIFY(*book.layer(ink)->mask->png != *shown);
-        auto* off = book.menu_action(panel.mask_menu(), QStringLiteral("マスクを使わない"));
+        auto* off = book.menu_action(panel.mask_menu(), QStringLiteral("使用しない"));
         off->setChecked(true);
         QVERIFY(!book.layer(ink)->mask->enabled);
         off->setChecked(false);
         QVERIFY(book.layer(ink)->mask->enabled);
-        book.menu_action(panel.mask_menu(), QStringLiteral("マスクを消す"))->trigger();
+        book.menu_action(panel.mask_menu(), QStringLiteral("削除"))->trigger();
         QVERIFY(!book.layer(ink)->mask);
         QVERIFY(!off->isChecked());
 
@@ -621,6 +627,123 @@ private slots:
         const core::ColorRasterView after(*book.layer("paint")->color_raster);
         QCOMPARE(after.metadata("")["precision"], Json("u16"));
         QVERIFY(std::abs(after.pixel(3)[0] - (1 - 3000 / 65535.0)) < 1e-9);
+    }
+
+    // PC3 B2 (the user's decision 5): レイヤー → レイヤーマスク by Photoshop's names — すべての領域を隠す (a new mask linked),
+    // 選択範囲をマスク (the selection let go), 透明部分から, 適用, リンク (the row says it, and it can be taken off) — the
+    // 属性 panel's 濃度 and ぼかし, and ファイル → スクリプト → すべてのマスクを統合 (one Undo).
+    void photoshopMaskCommands() {
+        Book book;
+        const std::string ink = book.ink;
+        auto& panel = book.panel();
+        QVERIFY(book.choose(ink));
+        QMenu* menu = nullptr;
+        for (QMenu* m : book.window->findChildren<QMenu*>())
+            if (m->title() == QStringLiteral("レイヤーマスク")) menu = m;
+        QVERIFY(menu != nullptr);
+        QStringList items;
+        for (QAction* a : menu->actions()) if (!a->isSeparator()) items << a->text();
+        for (const char* name : {"すべての領域を表示", "すべての領域を隠す", "選択範囲外をマスク", "選択範囲をマスク", "透明部分から", "削除", "適用", "使用しない", "リンク"})
+            QVERIFY2(items.contains(QString::fromUtf8(name)), name);
+        // (the renamed ones: each a command under its new name, none under its old; a key chosen under an old name kept)
+        QSet<QString> now;
+        for (const auto& [action, name] : app::command_names(book.window.get())) now.insert(name);
+        for (const auto& [name, before] : std::initializer_list<std::pair<const char*, const char*>>{
+                 {"すべての領域を表示", "全部見せるマスクを作る"}, {"選択範囲外をマスク", "選択範囲からマスクを作る"}, {"削除", "マスクを消す"}, {"使用しない", "マスクを使わない"}}) {
+            bool kept = false;
+            for (auto [it, end] = app::preferences::renamed().equal_range(QString::fromUtf8(name)); it != end; ++it) kept = kept || it->second == QString::fromUtf8(before);
+            QVERIFY2(kept && now.contains(QString::fromUtf8(name)) && !now.contains(QString::fromUtf8(before)), name);
+        }
+        app::settings()->setValue(QStringLiteral("shortcuts/マスクを消す"), QStringLiteral("Ctrl+Alt+K"));
+        app::preferences::apply_shortcuts(book.window.get());
+        app::settings()->remove(QStringLiteral("shortcuts/マスクを消す"));
+        QCOMPARE(book.menu_action(panel.mask_menu(), QStringLiteral("削除"))->shortcut(), QKeySequence(QStringLiteral("Ctrl+Alt+K")));
+        book.menu_action(panel.mask_menu(), QStringLiteral("すべての領域を隠す"))->trigger();
+        QVERIFY(book.layer(ink)->mask && book.layer(ink)->mask->linked);  // (a new mask moves with its layer)
+        QVERIFY(panel.mask_link_action()->isChecked());
+        QVERIFY(panel.list()->item(panel.list()->currentRow())->text().contains(QStringLiteral("マスク（リンク）")));
+        panel.mask_link_action()->setChecked(false);
+        QVERIFY(!book.layer(ink)->mask->linked);
+        // 選択範囲をマスク: the selection hidden, then let go
+        book.window->canvas()->set_selection(
+            Json{{"poly", Json::array({Json::array({0, 0}), Json::array({20, 0}), Json::array({20, 40}), Json::array({0, 40})})}});
+        book.menu_action(panel.mask_menu(), QStringLiteral("選択範囲をマスク"))->trigger();
+        QVERIFY(!book.window->canvas()->selection());
+        const render::Image hidden = render::open_image(*book.layer(ink)->mask->png).convert("L");  // (150 dpi: 236 px)
+        QCOMPARE(int(hidden.getpixel(10, 50)[0]), 0);    // (inside: hidden)
+        QCOMPARE(int(hidden.getpixel(200, 50)[0]), 255);  // (outside: shown)
+        // 適用: the mask gone, the line's pixels where it showed
+        book.menu_action(panel.mask_menu(), QStringLiteral("適用"))->trigger();
+        QVERIFY(!book.layer(ink)->mask);
+        QCOMPARE(book.layer(ink)->kind, core::LayerKind::Raster);
+        book.undo();
+        QVERIFY(book.layer(ink)->mask && book.layer(ink)->stroke_count() == 1);
+        // 透明部分から
+        book.menu_action(panel.mask_menu(), QStringLiteral("削除"))->trigger();
+        book.menu_action(panel.mask_menu(), QStringLiteral("透明部分から"))->trigger();
+        QVERIFY(book.layer(ink)->mask && book.layer(ink)->mask->linked);
+        // 属性: 濃度 and ぼかし
+        auto* density = book.window->findChild<QSpinBox*>(QStringLiteral("properties_mask_density"));
+        if (density == nullptr) {
+            for (QDockWidget* dock : book.window->findChildren<QDockWidget*>())
+                if (dock->objectName() == QStringLiteral("属性")) dock->show();
+            QCoreApplication::processEvents();
+            QTest::qWait(400);
+            density = book.window->findChild<QSpinBox*>(QStringLiteral("properties_mask_density"));
+        }
+        QVERIFY(density != nullptr);
+        density->setValue(40);
+        emit density->editingFinished();
+        QVERIFY(std::abs(book.layer(ink)->mask->density - 0.4) < 1e-9);
+        QTest::qWait(400);  // (the panel shown again from the book)
+        auto* feather = book.window->findChild<QDoubleSpinBox*>(QStringLiteral("properties_mask_feather"));
+        QVERIFY(feather != nullptr);
+        feather->setValue(1.5);
+        emit feather->editingFinished();
+        QVERIFY(std::abs(book.layer(ink)->mask->feather_mm - 1.5) < 1e-9);
+        // すべてのマスクを統合: every pen and paint layer with a mask, one Undo
+        panel.add("paint", QStringLiteral("ペイント2"));
+        const std::string paint = book.window->target_layer()->id;
+        book.menu_action(panel.mask_menu(), QStringLiteral("すべての領域を表示"))->trigger();
+        QVERIFY(book.layer(paint)->mask);
+        const auto steps = book.window->session().history().done.size();
+        book.window->action(QStringLiteral("act_flatten_masks"))->trigger();
+        QVERIFY(!book.layer(ink)->mask && !book.layer(paint)->mask);
+        QCOMPARE(book.window->session().history().done.size(), steps + 1);
+        book.undo();
+        QVERIFY(book.layer(ink)->mask && book.layer(paint)->mask);
+    }
+
+    // PC3 B2: 選択範囲 → すべてのレイヤー, レイヤーの選択を解除 (the layer drawn on stays chosen), レイヤーを検索 (Enter
+    // chooses what it finds), レイヤーを分離 (only the chosen listed, until it is turned off).
+    void layersChosen() {
+        Book book;
+        auto& panel = book.panel();
+        panel.add("pen", QStringLiteral("空のペン"));
+        panel.add("paint", QStringLiteral("空のペイント"));
+        const std::string drawn_on = book.window->target_layer()->id;
+        const auto chosen = [&] { return panel.selected_ids().size(); };
+        book.window->action(QStringLiteral("act_select_all_layers"))->trigger();
+        QCOMPARE(chosen(), panel.ids().size());
+        book.window->action(QStringLiteral("act_deselect_layers"))->trigger();
+        QCOMPARE(panel.selected_ids(), std::vector<std::string>{drawn_on});
+        QCOMPARE(book.window->target_layer()->id, drawn_on);
+        book.window->action(QStringLiteral("act_find_layers"))->trigger();
+        QVERIFY(panel.search_box()->isVisible());
+        panel.search_box()->setText(QStringLiteral("空の"));
+        emit panel.search_box()->returnPressed();
+        QCOMPARE(chosen(), std::size_t{2});
+        panel.search_box()->clear();
+        QAction* isolate = book.window->action(QStringLiteral("act_isolate_layers"));
+        isolate->setChecked(true);
+        int shown = 0;
+        for (int row = 0; row < panel.list()->count(); ++row) shown += panel.list()->item(row)->isHidden() ? 0 : 1;
+        QCOMPARE(shown, 2);
+        QVERIFY(panel.isolated());
+        isolate->setChecked(false);
+        shown = 0;
+        for (int row = 0; row < panel.list()->count(); ++row) shown += panel.list()->item(row)->isHidden() ? 0 : 1;
+        QCOMPARE(shown, panel.list()->count());
     }
 };
 

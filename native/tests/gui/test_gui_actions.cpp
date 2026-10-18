@@ -291,7 +291,13 @@ private slots:
         // act_smart_filter_mask_off, act_smart_filters_clear), レイヤー → ラスタライズ (act_rasterize_type, act_rasterize_fill,
         // act_rasterize_smart, act_rasterize_layer, act_rasterize_all) and レイヤーの内容オプション… (act_layer_content_options)
         // — theirs (test_gui_smart; act_import stays test_gui_carried's).
-        QCOMPARE(w->actions_by_name().size(), std::size_t{322});
+        // and the 13 of PC3 B2 (SPEC COLOR-06) — 編集 の 結合部分をコピー・特殊ペースト ▸ 3 つ・塗りつぶし…・境界線を描く…
+        // (act_copy_merged, act_paste_in_place, act_paste_into, act_paste_outside, act_fill_dialog, act_stroke_dialog),
+        // レイヤー → 新規 の 選択範囲をコピー／カットしたレイヤー (act_layer_via_copy, act_layer_via_cut), 選択範囲 の
+        // すべてのレイヤー・レイヤーの選択を解除・レイヤーを検索・レイヤーを分離 (act_select_all_layers, act_deselect_layers,
+        // act_find_layers, act_isolate_layers) and ファイル → スクリプト → すべてのマスクを統合 (act_flatten_masks) — theirs
+        // (test_gui_clipboard).
+        QCOMPARE(w->actions_by_name().size(), std::size_t{335});
         QVERIFY(w->action("act_chat_approval"));
         QVERIFY(w->action("act_style"));
         QVERIFY(w->action("act_exposure"));
