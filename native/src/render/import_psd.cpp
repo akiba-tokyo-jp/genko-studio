@@ -25,6 +25,7 @@
 #include "core/ids.hpp"
 #include "core/ink.hpp"
 #include "core/lut3d.hpp"
+#include "core/masks.hpp"
 #include "core/ops_util.hpp"
 #include "core/paths.hpp"
 #include "core/pyconv.hpp"
@@ -593,6 +594,18 @@ void import_psd(core::OpContext& c) {
             core::Mask kept;
             kept.png = fills::png_bytes(full.resize(mask_size));
             kept.enabled = true;
+            // (PC3 B2, the user's decision 3: a mask whose record carries its parameters — Photoshop's 濃度 and ぼかし, as
+            // this build writes a mask of masks@1 — keeps them and whether it moves with the layer; one without stays
+            // fixed to the page, as every mask read before)
+            if (item.mask_parameters) {
+                kept.linked = !item.mask_unlinked;
+                if (item.mask_density) kept.density = core::py_round(std::clamp(*item.mask_density / 255.0, 0.0, 1.0), 4);
+                if (item.mask_feather && file.width() > 0) {
+                    const double mm_per_px = page.spec.width_mm.value() / static_cast<double>(where.page_w) *
+                                             static_cast<double>(where.shown_w) / static_cast<double>(file.width());
+                    kept.feather_mm = core::py_round(std::clamp(*item.mask_feather * mm_per_px, 0.0, core::kMaskFeatherMax), 4);
+                }
+            }
             return kept;
         };
         if (item.folder) {

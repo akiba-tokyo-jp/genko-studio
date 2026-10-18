@@ -295,7 +295,7 @@ private slots:
     void theNewOpsAreFramesForNow() {
         const core::Document doc = core::new_episode("枠", core::Num(1), 1, core::PageSpec::custom(60, 60, 50, 50, 1, 2, 2, 2, 2, 72, "color"));
         const std::vector<std::pair<const char*, const char*>> frames{
-            {"quick_mask", "B1"}, {"magic_erase", "B1"}, {"outline_area", "B2"}, {"apply_layer_mask", "B2"}, {"mask_from_transparency", "B2"},
+            {"quick_mask", "B1"}, {"magic_erase", "B1"},  // (B2's written: test_masks)
             {"matting", "B3"}, {"clone_stamp", "B4"}, {"healing_brush", "B4"}, {"spot_healing", "B4"}, {"history_brush", "B4"},
             {"content_aware_fill", "B4"}, {"set_path", "C-a"}, {"delete_path", "C-a"}, {"rename_path", "C-a"}, {"make_work_path", "C-a"},
             {"text_to_path", "C-a"}, {"stroke_path", "C-a"}, {"set_vector_mask", "C-a"}, {"add_shape_part", "C-b"}, {"edit_shape_part", "C-b"},

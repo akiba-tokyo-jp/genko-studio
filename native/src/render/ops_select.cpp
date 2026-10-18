@@ -4,6 +4,7 @@
 #include <string>
 
 #include "core/pyops.hpp"
+#include "render/ops_masks.hpp"
 #include "render/ops_pc3.hpp"
 
 namespace genko::render {
@@ -20,9 +21,10 @@ void register_select_ops(core::OpRegistry& registry) {
     registry.add("magic_erase", not_yet("magic_erase", "B1"));
     // B2: Edit › Stroke ({page, layer_id, area?, width_mm, rgb, opacity, location, preserve_transparency?}); Layer › Layer
     // Mask › Apply ({page, id}) and From Transparency ({page, id})
-    registry.add("outline_area", not_yet("outline_area", "B2"));
-    registry.add("apply_layer_mask", not_yet("apply_layer_mask", "B2"));
-    registry.add("mask_from_transparency", not_yet("mask_from_transparency", "B2"));
+    // (render/ops_masks.cpp)
+    registry.add("outline_area", outline_area);
+    registry.add("apply_layer_mask", apply_layer_mask);
+    registry.add("mask_from_transparency", mask_from_transparency);
     // B3: Layer › Matting ({page, id, kind: defringe | remove_black | remove_white | decontaminate, width_mm?, amount?,
     // radius_mm?, area?})
     registry.add("matting", not_yet("matting", "B3"));

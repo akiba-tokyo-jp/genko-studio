@@ -391,8 +391,8 @@ std::pair<std::optional<core::Patch>, std::optional<core::Patch>> split_patch(co
 Items lift(core::Layer& layer, const Json& area, const core::Page& page) {
     // (color-model@1: an RGB page of a profile's paint pixels are its values: the picture lifted says so)
     const bool page_values = core::holds_page_values(page, layer);
-    if (layer.color_raster)
-        core::not_yet_ported("selection edits on high-precision raster pixels are not supported yet");
+    // (PC3 B2: a precise layer's own pixels are lifted as a piece that keeps their samples, color_edit::lift_piece; its
+    // lines and pictures here)
     AreaTest test(area);
     Items in;
     std::vector<core::StrokePtr> strokes_out;

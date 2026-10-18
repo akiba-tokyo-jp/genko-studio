@@ -15,6 +15,7 @@
 #include "core/color_raster.hpp"
 #include "core/covers.hpp"
 #include "core/error.hpp"
+#include "core/masks.hpp"
 #include "core/paths.hpp"
 #include "core/pyconv.hpp"
 #include "core/pynum.hpp"
@@ -27,6 +28,7 @@
 #include "render/colour.hpp"
 #include "render/covers.hpp"
 #include "render/ink_canvas.hpp"
+#include "render/layer_masks.hpp"
 #include "render/page.hpp"
 #include "render/tones.hpp"
 #include "render/zip.hpp"
@@ -515,7 +517,15 @@ std::vector<fs::path> export_layers(const core::Document& episode, const fs::pat
             if (layer.page_values) image = render::srgb_from(image.convert("RGBA"), render::RgbSpace::of(page));
             if (layer.mask) {  // (the layer's mask applies: a PNG has no mask of its own)
                 image = image.convert("RGBA");
-                image.putalpha(render::chops::multiply(image.getchannel("A"), layer.mask->convert("L").resize(image.size())));
+                Image shown = layer.mask->convert("L").resize(image.size());
+                // (PC3 B2, masks@1: its density and feather as the page draws them)
+                for (const core::Layer& own : page.layers) {
+                    if (own.id == layer.id && own.mask && core::mask_has_settings(*own.mask)) {
+                        shown = render::layer_masks::shown(page, *own.mask, *layer.mask, image.size(),
+                                                           render::Box{0, 0, image.width(), image.height()}, render::Resample::Bilinear);
+                    }
+                }
+                image.putalpha(render::chops::multiply(image.getchannel("A"), shown));
             }
             const fs::path path = detail::join(folder, detail::padded(core::Num(n), 2) + "_" + safe_name(layer.name, "layer") + ".png");
             output.put(path, png_bytes(crop_to(image, page, area, dpi), PngSave{dpi_pair(dpi), {}, false}));

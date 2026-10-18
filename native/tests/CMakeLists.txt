@@ -105,6 +105,10 @@ genko_test(test_channels SOURCES unit/test_channels.cpp DEPS genko_test_support 
 # transform@1 and page-spec@1; pixels drawn again through a map (algo/src/transform.rs, warp.rs, resample.rs); everything
 # on a page moved by one map and the warps (geom/src/warp.rs)
 genko_test(test_selection_ext SOURCES unit/test_selection_ext.cpp DEPS genko_test_support genko_render_ops LABELS unit TIMEOUT 600)
+# PC3 B2 (SPEC.md COLOR-06): a layer's mask applied and made from the transparency, a linked mask moved with its layer,
+# outline_area's bands, fill_area's preserve_transparency, paste's center_mm, the masks of a precise or ink page at its
+# finest grid — on 8-bit, precise (16, 32 bits) and CMYK pages, without Python.
+genko_test(test_masks SOURCES unit/test_masks.cpp DEPS genko_test_support genko_render_ops LABELS unit TIMEOUT 600)
 genko_test(test_path_raster SOURCES unit/test_path_raster.cpp DEPS genko_test_support genko_render_ops LABELS unit)
 genko_test(test_resample SOURCES unit/test_resample.cpp DEPS genko_test_support genko_render_ops LABELS unit)
 genko_test(test_page_geometry SOURCES unit/test_page_geometry.cpp DEPS genko_test_support LABELS unit)
@@ -335,6 +339,11 @@ genko_test(test_contract_psd_smart SOURCES contract/test_contract_psd_smart.cpp 
 # PC3 A1 through the command line: a linked file placed, `genko smart --links` (ok, modified, missing), updated, relinked,
 # embedded, drawn from its copy when the file is gone; contents written out (a page's PSD read by psd-tools); `genko package`.
 genko_test(test_contract_smart_links SOURCES contract/test_contract_smart_links.cpp DEPS genko_test_support genko_render_ops genko_formats
+           LABELS contract TIMEOUT 900)
+# PC3 B2 (masks@1) through the command line: a mask's link, density and feather saved, drawn, undone and redone;
+# apply_layer_mask, mask_from_transparency, outline_area, a copy pasted at a point; a PSD's masks written with Photoshop's
+# flags and parameters that psd-tools (GENKO_PYREF) and this build read, imported back with them.
+genko_test(test_contract_masks SOURCES contract/test_contract_masks.cpp DEPS genko_test_support genko_render_ops genko_formats
            LABELS contract TIMEOUT 900)
 genko_test(test_contract_image_ops SOURCES contract/test_contract_image_ops.cpp DEPS genko_test_support genko_render
            LABELS contract TIMEOUT 900)

@@ -64,6 +64,7 @@
 #include "render/proof.hpp"
 #include "render/op_limits.hpp"
 #include "render/ops_adjust.hpp"
+#include "render/ops_masks.hpp"
 #include "render/ops_registry.hpp"
 #include "render/page.hpp"
 #include "render/color_canvas.hpp"
@@ -297,6 +298,21 @@ void fill_area(OpContext& c) {
     Page& page = doc.edit_page(at);
     const std::size_t ti = raster_paint_target(page, op);
     const Json area = core::op_area(op);
+    if (core::truthy_at(op, "preserve_transparency")) {
+        // (PC3 B2, 透明部分の保持: the colour laid into the layer's pixels, their alpha kept — render/ops_masks)
+        const selection::AreaMask m = selection::area_mask(area, fills::kFillDpi);
+        limits::check_coordinate(static_cast<double>(m.x0), "area");
+        limits::check_coordinate(static_cast<double>(m.y0), "area");
+        if (!m.mask.getbbox()) throw OpError("the area is empty");
+        std::vector<std::int64_t> rgb = rgb_of(op, doc);
+        if (rgb.size() < 3 || std::any_of(rgb.begin(), rgb.begin() + 3, [](std::int64_t v) { return v < 0 || v > 255; })) {
+            throw OpError("rgb is [r, g, b], each 0..255");
+        }
+        rgb.resize(3);
+        const std::string id = page.layers[ti].id;
+        fill_keeping_alpha(c, at, id, m.mask, Point{static_cast<int>(m.x0), static_cast<int>(m.y0)}, fills::kFillDpi, rgb, float_at(op, "opacity", 1.0));
+        return;
+    }
     std::optional<core::Patch> patch;
     if (core::truthy_at(area, "poly")) {
         const std::vector<std::int64_t> rgb = rgb_of(op, doc);
@@ -619,12 +635,10 @@ void gradient_fill(OpContext& c) {
 
 // --- masks --------------------------------------------------------------------------------------------------------
 
-// ops._mask_image: the layer's mask over the page at MASK_DPI ("L"; all white — everything shows — when it has none)
+// ops._mask_image: the layer's mask over the page at MASK_DPI ("L"; all white — everything shows — when it has none).
+// (PC3 B2: a precise or ink page's at the finest grid of its pixel layers, layer_masks::grid_dpi)
 Image mask_image(const Page& page, const Layer& layer) {
-    const double w = std::max(1.0, core::py_round_whole(page.spec.width_mm.value() / 25.4 * kMaskDpi));
-    const double h = std::max(1.0, core::py_round_whole(page.spec.height_mm.value() / 25.4 * kMaskDpi));
-    limits::check_sides(w, h, "the page");
-    const Size size{static_cast<int>(w), static_cast<int>(h)};
+    const Size size = layer_masks::grid_size(page);
     if (layer.mask && layer.mask->png && !layer.mask->png->empty()) {
         return selection::open_picture(*layer.mask->png).convert("L").resize(size);
     }
@@ -678,9 +692,19 @@ void set_layer_mask(OpContext& c) {
         layer.mask.reset();
         return;
     }
+    const int mask_dpi = layer_masks::grid_dpi(page);  // (PC3 B2: a precise or ink page's finest grid)
+    const bool repaint = core::truthy_at(op, "area") || core::truthy_at(op, "fill") || core::truthy_at(op, "invert");
+    const bool enabled = core::has(op, "enabled") ? core::py_truthy(op["enabled"]) : (layer.mask ? layer.mask->enabled : true);
+    const std::optional<core::Mask> before = layer.mask;
+    if (!repaint && before && mask_dpi != kMaskDpi) {
+        // (its settings alone changed, on a precise or ink page: its picture kept as it is, whatever its grid)
+        layer.mask->enabled = enabled;
+        mask_settings(before, *layer.mask, op);
+        return;
+    }
     Image image = mask_image(page, layer);
     if (core::truthy_at(op, "area")) {
-        const selection::AreaMask shown = selection::area_mask(op["area"], kMaskDpi);
+        const selection::AreaMask shown = selection::area_mask(op["area"], mask_dpi);
         image = Image::create("L", image.size(), Ink(0));
         image.paste(shown.mask, Point{static_cast<int>(shown.x0), static_cast<int>(shown.y0)});
     } else if (core::truthy_at(op, "fill")) {
@@ -689,8 +713,6 @@ void set_layer_mask(OpContext& c) {
         image = Image::create("L", image.size(), Ink(fill == Json("show") ? 255 : 0));
     }
     if (core::truthy_at(op, "invert")) image = ops::invert(image);
-    const bool enabled = core::has(op, "enabled") ? core::py_truthy(op["enabled"]) : (layer.mask ? layer.mask->enabled : true);
-    const std::optional<core::Mask> before = layer.mask;
     layer.mask = mask_of(image, enabled);
     mask_settings(before, *layer.mask, op);  // (masks@1, PC3)
 }
@@ -707,10 +729,11 @@ void paint_mask(OpContext& c) {
     core::PenPoints points = core::parse_points(raw != nullptr && core::py_truthy(*raw) ? *raw : Json::array());
     if (points.empty()) throw OpError("points needs at least one [x_mm, y_mm] pair");
     limits::check_count(static_cast<double>(points.size()), static_cast<double>(limits::kPoints), "points");
+    const int mask_dpi = layer_masks::grid_dpi(page);  // (PC3 B2: a precise or ink page's finest grid)
     for (const core::PenPoint& p : points) {
         if (!std::isfinite(p.x) || !std::isfinite(p.y)) throw OpError("points must be a finite number");
-        limits::check_coordinate(p.x / 25.4 * kMaskDpi, "points");
-        limits::check_coordinate(p.y / 25.4 * kMaskDpi, "points");
+        limits::check_coordinate(p.x / 25.4 * mask_dpi, "points");
+        limits::check_coordinate(p.y / 25.4 * mask_dpi, "points");
     }
     Image image = mask_image(page, layer);
     if (points.size() == 1) points = {points[0], core::PenPoint{points[0].x + 0.01, points[0].y + 0.01, std::nullopt}};
@@ -718,11 +741,11 @@ void paint_mask(OpContext& c) {
     for (const core::PenPoint& p : points) flat.push_back(core::PenPoint{p.x, p.y, std::nullopt});
     const Json* width_value = core::get(op, "width_mm");
     const double width = width_value != nullptr && core::py_truthy(*width_value) ? core::finite_float(*width_value, "width_mm") : 3.0;
-    limits::check_count(std::fabs(width) / 25.4 * kMaskDpi / 2, limits::kReach, "width_mm");
+    limits::check_count(std::fabs(width) / 25.4 * mask_dpi / 2, limits::kReach, "width_mm");
     const int value = core::py_truthy(core::get_or(op, "show", Json(true))) ? 255 : 0;
     {
         Draw draw(image);
-        draw_stroke_mm(draw, flat, kMaskDpi, width, Ink(value), false);
+        draw_stroke_mm(draw, flat, mask_dpi, width, Ink(value), false);
     }
     const std::optional<core::Mask> before = layer.mask;
     layer.mask = mask_of(image, layer.mask ? layer.mask->enabled : true);
@@ -1515,7 +1538,27 @@ void delete_or_transform_area(OpContext& c, bool transform) {
 }
 
 void delete_area(OpContext& c) { delete_or_transform_area(c, false); }
-void transform_area(OpContext& c) { delete_or_transform_area(c, true); }
+
+// (PC3 B2, masks@1: "mask": "follow" moves the layer's mask with its pixels — the window sends it for a linked mask as
+// the layer moves —; "stay", the default, leaves the mask where it is on the page)
+void transform_area(OpContext& c) {
+    const Json* how = core::get(c.op, "mask");
+    const bool given = how != nullptr && !how->is_null();
+    if (given && *how != Json("follow") && *how != Json("stay")) throw OpError("mask must be follow or stay");
+    delete_or_transform_area(c, true);
+    if (!given || *how != Json("follow")) return;
+    const std::size_t at = core::require_page(c.doc, c.op);
+    Page& page = c.doc.edit_page(at);
+    Layer& target = page.layers[raster_paint_target(page, c.op)];
+    if (!target.mask || !target.mask->png || target.mask->png->empty()) return;
+    const Json area = core::op_area(c.op);
+    if (core::truthy_at(c.op, "warp")) {
+        target.mask = layer_masks::warp_mask(page, *target.mask, area, warp::mapping(selection::area_bbox(area), c.op["warp"]));
+        return;
+    }
+    const std::vector<double> m = matrix_of(c.op);
+    target.mask = layer_masks::move_mask(page, *target.mask, area, std::array<double, 6>{m[0], m[1], m[2], m[3], m[4], m[5]});
+}
 
 void validate_patch_items(const selection::Items& items,bool bounded=false){
     for (const core::Patch& patch : items.patches) {
@@ -1553,10 +1596,77 @@ void paste(OpContext& c) {
     selection::Items items = selection::items_from_json(core::truthy_at(op, "items") ? op["items"] : Json::object());
     if (items.strokes.empty() && items.patches.empty()) throw OpError("nothing to paste");
     validate_patch_items(items);
-    const std::vector<double> m = matrix_of(op);
+    std::vector<double> m = matrix_of(op);
     if (m.size() != 6) {
         throw core::PyValueError(m.size() < 6 ? "not enough values to unpack (expected 6, got " + std::to_string(m.size()) + ")"
                                               : "too many values to unpack (expected 6)");
+    }
+    // (PC3 B2) "center_mm": [x, y] — the items' box, through the matrix, centred there (ペースト at the view's centre)
+    if (const Json* centre = core::get(op, "center_mm"); centre != nullptr && !centre->is_null()) {
+        if (!centre->is_array() || centre->size() != 2) throw OpError("center_mm is [x_mm, y_mm]");
+        const double cx = core::finite_float((*centre)[0], "center_mm"), cy = core::finite_float((*centre)[1], "center_mm");
+        double x0 = INFINITY, y0 = INFINITY, x1 = -INFINITY, y1 = -INFINITY;
+        const auto take = [&](double x, double y) { x0 = std::min(x0, x); y0 = std::min(y0, y); x1 = std::max(x1, x); y1 = std::max(y1, y); };
+        for (const core::StrokePtr& stroke : items.strokes)
+            for (const auto& p : stroke->points) take(p.x, p.y);
+        for (const core::Patch& patch : items.patches) {
+            const Json* box = patch.attrs.contains("box") ? &patch.attrs["box"] : core::get(patch.after_asset, "box");
+            const double x = core::to_float((*box)[0]), y = core::to_float((*box)[1]);
+            take(x, y);
+            take(x + core::to_float((*box)[2]), y + core::to_float((*box)[3]));
+        }
+        if (std::isfinite(x0) && std::isfinite(x1)) {
+            const double mx = (x0 + x1) / 2, my = (y0 + y1) / 2;
+            m[4] += cx - (m[0] * mx + m[2] * my + m[4]);
+            m[5] += cy - (m[1] * mx + m[3] * my + m[5]);
+            if (!std::isfinite(m[4]) || !std::isfinite(m[5])) throw OpError("center_mm is too far off the page");
+        }
+    }
+    // (PC3 B2) pieces of precise pixels ("gkcr", color_edit::piece_patch) laid as their samples into a paint layer of a
+    // precise page — one with no pixels yet gets precise pixels of the page's precision —; anywhere else their picture,
+    // the keys dropped (never saved)
+    {
+        Layer& target = page.layers[ti];
+        const bool precise_page = !page.color && page.rgb && page.rgb->depth > 8;
+        const bool bare = target.kind == LayerKind::Raster && !target.raster_png && !target.ink_raster && target.stroke_count() == 0 && target.patches.empty();
+        std::vector<core::Patch> rest;
+        for (core::Patch& patch : items.patches) {
+            if (!patch.attrs.is_object() || !patch.attrs.contains(std::string(color_edit::kPieceKey))) {
+                if (patch.attrs.is_object()) patch.attrs.erase(std::string(color_edit::kPieceSpaceKey));
+                rest.push_back(std::move(patch));
+                continue;
+            }
+            std::optional<std::string> samples;
+            if (precise_page && (target.color_raster || bare)) samples = color_edit::patch_samples(patch, page, &doc);
+            if (samples) {
+                const Json box = core::subscript(patch.attrs, "box");
+                const std::array<double, 4> b{core::to_float(box[0]), core::to_float(box[1]), core::to_float(box[2]), core::to_float(box[3])};
+                const selection::Matrix through{m[0], m[1], m[2], m[3], m[4], m[5]};
+                const Resample resample = interp(op);
+                if (target.color_raster) {
+                    precise_edit(target, [&] { return color_edit::lay_piece(page, target, *samples, b, through, resample); });
+                } else {
+                    std::string pixels;
+                    try {
+                        pixels = color_edit::lay_piece(page, target, *samples, b, through, resample);
+                    } catch (const core::PyUncaught&) {
+                        throw;
+                    } catch (const core::Error& error) {
+                        if (error.code() != "value" && error.code() != "format") throw;
+                        throw OpError(error.what());
+                    }
+                    target.color_raster = std::make_shared<const std::string>(std::move(pixels));
+                    if (std::find(doc.features.begin(), doc.features.end(), core::kColorRasterFeature) == doc.features.end())
+                        doc.features.emplace_back(core::kColorRasterFeature);
+                }
+                continue;
+            }
+            patch.attrs.erase(std::string(color_edit::kPieceKey));
+            patch.attrs.erase(std::string(color_edit::kPieceSpaceKey));
+            rest.push_back(std::move(patch));
+        }
+        items.patches = std::move(rest);
+        if (items.strokes.empty() && items.patches.empty()) return;
     }
     if (page.layers[ti].color_raster) {  // drawn into the precise pixels (render/color_edit)
         for (core::Patch& patch : items.patches) color_edit::patch_to_srgb(patch, doc);  // (color-model@1: its sRGB, brought in)
@@ -1572,8 +1682,8 @@ void paste(OpContext& c) {
         return;
     }
     // color-mode@1: pieces of inks copied from a CMYK or Lab page ("gkir", ink_edit::piece_patch) laid into a paint
-    // layer's inks on a page of the same mode and profile, when the paste moves and scales without turning; anywhere
-    // else their picture, the keys dropped (never saved)
+    // layer's inks on a page of the same mode and profile (moved and scaled: each pixel whole where it can be; PC3 B2:
+    // turned, sheared or flipped, resampled as inks); anywhere else their picture, the keys dropped (never saved)
     std::vector<core::Patch> pictures;
     const bool upright = m[1] == 0 && m[2] == 0 && m[0] > 0 && m[3] > 0;
     Layer& target = page.layers[ti];
@@ -1584,12 +1694,18 @@ void paste(OpContext& c) {
             continue;
         }
         std::optional<core::InkPixels> inks;
-        if (page.color && target.kind == LayerKind::Raster && upright) inks = ink_edit::patch_inks(patch, *page.color);
+        if (page.color && target.kind == LayerKind::Raster) inks = ink_edit::patch_inks(patch, *page.color);
         if (inks) {
             const Json box = core::subscript(patch.attrs, "box");
             const double x = core::to_float(box[0]), y = core::to_float(box[1]), w = core::to_float(box[2]), h = core::to_float(box[3]);
-            const std::array<double, 4> placed{m[0] * x + m[4], m[3] * y + m[5], m[0] * w, m[3] * h};
-            ink_pixels_edit(target, [&] { return ink_edit::lay_piece(page, target, *inks, placed); });
+            if (upright) {
+                const std::array<double, 4> placed{m[0] * x + m[4], m[3] * y + m[5], m[0] * w, m[3] * h};
+                ink_pixels_edit(target, [&] { return ink_edit::lay_piece(page, target, *inks, placed); });
+            } else {
+                const selection::Matrix through{m[0], m[1], m[2], m[3], m[4], m[5]};
+                const Resample resample = interp(op);
+                ink_pixels_edit(target, [&] { return ink_edit::lay_piece(page, target, *inks, std::array<double, 4>{x, y, w, h}, through, resample); });
+            }
             continue;
         }
         patch.attrs.erase("gkir");

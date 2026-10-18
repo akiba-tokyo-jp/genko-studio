@@ -696,6 +696,39 @@ std::string lay_piece(const core::Page& page, const core::Layer& layer, const co
     return out.take();
 }
 
+std::string lay_piece(const core::Page& page, const core::Layer& layer, const core::InkPixels& piece, const std::array<double, 4>& box_mm,
+                      const selection::Matrix& m, Resample resample) {
+    if (!page.color) throw core::OpError("an RGB page holds no ink pixels");
+    Inks out = layer.ink_raster ? layer_inks(layer)
+                                : Inks(core::blank_ink_pixels(page.color->space, page.color->depth,
+                                                              static_cast<std::uint32_t>(mm_to_px(page.spec.width_mm.value(), raster::kWorkingDpi)),
+                                                              static_cast<std::uint32_t>(mm_to_px(page.spec.height_mm.value(), raster::kWorkingDpi)),
+                                                              page.color->planes()));
+    if (piece.space != out.p.space || piece.depth != out.p.depth || piece.planes != out.p.planes) {
+        throw core::OpError("the piece of inks is not in the page's colour mode");
+    }
+    if (piece.width == 0 || piece.height == 0 || !(box_mm[2] > 0) || !(box_mm[3] > 0)) return out.take();
+    const Grid g = grid_of(page, out.p.width, out.p.height);
+    const selection::Matrix inverse = selection::invert(m);
+    const Inks source(piece);
+    const Lifted lifted(source, std::string(piece.pixel_count(), '\xff'), Box{0, 0, static_cast<int>(piece.width), static_cast<int>(piece.height)});
+    const double kx = piece.width / box_mm[2], ky = piece.height / box_mm[3];  // (the piece's pixels per mm)
+    std::vector<std::pair<double, double>> corners;
+    for (const auto& [x, y] : {std::pair{box_mm[0], box_mm[1]}, std::pair{box_mm[0] + box_mm[2], box_mm[1]},
+                               std::pair{box_mm[0] + box_mm[2], box_mm[1] + box_mm[3]}, std::pair{box_mm[0], box_mm[1] + box_mm[3]}}) {
+        corners.emplace_back((m[0] * x + m[2] * y + m[4]) * g.sx, (m[1] * x + m[3] * y + m[5]) * g.sy);
+    }
+    const Box to = covering(corners, 3, g.width, g.height);
+    for (int y = to.y0; y < to.y1; ++y) {
+        for (int x = to.x0; x < to.x1; ++x) {
+            const double xm = (x + .5) / g.sx, ym = (y + .5) / g.sy;
+            const double sx = inverse[0] * xm + inverse[2] * ym + inverse[4], sy = inverse[1] * xm + inverse[3] * ym + inverse[5];
+            lifted.lay_at(out, std::size_t(y) * g.width + x, (sx - box_mm[0]) * kx, (sy - box_mm[1]) * ky, resample);
+        }
+    }
+    return out.take();
+}
+
 std::string relayout_inks(const std::string& gkir, const core::PageSpec& spec, const core::Rect& old_frame, const core::Rect& new_frame) {
     const Inks source(core::decode_ink_raster(gkir));
     const double k = raster::kWorkingDpi / 25.4;

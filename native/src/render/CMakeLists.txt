@@ -91,6 +91,8 @@ genko_library(genko_render
     resample.cpp
     ops_select.cpp
     ops_retouch.cpp
+    # PC3 B2: レイヤーマスクの適用・透明部分から、境界線を描く
+    ops_masks.cpp
     ops_vector2.cpp
     ops_transform.cpp
     ops_pagesize.cpp
