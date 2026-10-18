@@ -202,6 +202,22 @@ public:
     bool cancel_ruler();
     // Delete with the vector tool: the chosen point, else the chosen lines.
     bool vector_delete();
+    // --- paths (canvas_pen.cpp, PC3 C-a: ペンツール, 曲線ペンツール, パス選択ツール) -------------------------------------
+    // The path the path tools draw on and show: "work" (the work path), "saved:<name>" (a saved path), "mask:<layer id>"
+    // (a layer's vector mask) — the Paths panel's choice.
+    QString target_path = QStringLiteral("work");
+    // 表示 → ターゲットパス: the target path drawn over the page (always while a path tool is in hand).
+    bool show_target_path = true;
+    // The target path as the page holds it now (none: there is none).
+    std::optional<core::vector::Path> target_path_now() const;
+    // The pen's subpath being drawn ended (closed or open; one anchor alone: forgotten): pathDrawn.
+    bool finish_pen(bool closed = false);
+    bool pen_drawing() const { return !pen_knots_.empty(); }
+    // The pen's last anchor taken back (Backspace while drawing).
+    bool pen_back();
+    // The path selection tool's chosen subpath (its place in the target path); Delete takes it out (pathEdited).
+    std::optional<std::size_t> path_subpath;
+    bool path_delete();
     // The moving layer's picture (QImage and where it sits, mm), given by the window when a layer move starts.
     void set_move_image(const QImage& image, const QRectF& where_mm);
     // --- the lines (台詞, canvas_lines.cpp) ------------------------------------------------------------------
@@ -370,6 +386,10 @@ signals:
     void lineEditRequested(const QString& line_id);
     void lineContextMenu(const QString& line_id, const QPoint& global);
     void textMoved(const QString& line_id, double x_mm, double y_mm);
+    // the paths: a subpath drawn with a pen ({"closed", "knots"} in mm: a set_path's subpath); the target path changed by
+    // the path selection tool (its whole path)
+    void pathDrawn(const genko::core::Json& subpath);
+    void pathEdited(const genko::core::Json& path);
 
 protected:
     void paintEvent(QPaintEvent* event) override;
@@ -476,6 +496,12 @@ private:
     std::vector<QPointF> shape_preview(bool& closed) const;
     void pick_colour(const QPointF& pos);
     void draw_tools(QPainter& painter) const;
+    // the path tools (canvas_pen.cpp): true when the press, move or release was theirs
+    bool path_press(const QPointF& pos, const QPointF& mm, Qt::KeyboardModifiers modifiers);
+    bool path_move(const QPointF& mm, Qt::KeyboardModifiers modifiers);
+    bool path_release();
+    std::optional<core::vector::Path> path_dragged() const;
+    void draw_paths(QPainter& painter) const;
     // 定規, the grid and 3D (canvas_guides.cpp)
     core::Json page_rulers() const;
     // snapped_preview: what the line will become on the rulers (and its symmetry copies), for showing while the pen is
@@ -590,6 +616,21 @@ private:
     std::optional<GuideDrag> guide_drag_;
     bool zoom_out_ = false;
     std::optional<std::pair<QPointF, QPointF>> tool_drag_;  // the layer-move tool (mm)
+    // the path tools (canvas_pen.cpp): the pen's anchors so far (the curvature pen's: its anchors, a corner not smooth),
+    // the anchor whose handles a drag pulls; a subpath or one of its points dragged with the path selection tool
+    std::vector<core::vector::Knot> pen_knots_;
+    bool pen_curve_ = false;
+    std::optional<std::size_t> pen_handle_;
+    struct PathDrag {
+        core::vector::Path path;  // (as it was)
+        std::size_t subpath = 0;
+        int knot = -1;  // (-1: the whole subpath)
+        int part = 0;   // (0 the anchor, 1 its handle in, 2 its handle out)
+        QPointF start;
+        QPointF now;
+        bool copy = false;
+    };
+    std::optional<PathDrag> path_drag_;
     QImage move_image_;
     QRectF move_where_;
     std::optional<FrameDrag> frame_drag_;

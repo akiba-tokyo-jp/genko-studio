@@ -75,6 +75,10 @@ const std::map<std::string, const char*>& names() {
         {"smart_filter_add", "スマートフィルターをかけた"}, {"smart_filter_set", "スマートフィルターを直した"},
         {"smart_filter_move", "スマートフィルターを並べ替えた"}, {"smart_filter_delete", "スマートフィルターを削除した"},
         {"smart_filter_state", "スマートフィルターを切り替えた"},
+        // (vector@1, PC3 C-a: render/ops_paths)
+        {"set_path", "パスを描いた"}, {"delete_path", "パスを削除した"}, {"rename_path", "パスを保存した"},
+        {"make_work_path", "作業用パスを作成した"}, {"text_to_path", "文字から作業用パスを作成した"},
+        {"stroke_path", "パスの境界線を描いた"}, {"set_vector_mask", "ベクトルマスクを変えた"},
     };
     return table;
 }

@@ -457,6 +457,9 @@ if(GENKO_BUILD_APP)
   # picture made a page first, the linked files (placed, marked, updated after asking where an agent wrote it), replaced,
   # written out, embedded and linked, packed; a candidate adopted over a picture's smart object said.
   genko_test(test_gui_smart_contents SOURCES gui/test_gui_smart_contents.cpp DEPS genko_app genko_test_support GUI TIMEOUT 600)
+  # PC3 C-a (vector@1): ペンツール・曲線ペンツール・パス選択ツール on the canvas, the パス panel's buttons, レイヤー →
+  # ベクトルマスク and ラスタライズ, 選択範囲 → 作業用パスを作成…, the target path shown, パスを Illustrator へ….
+  genko_test(test_gui_paths SOURCES gui/test_gui_paths.cpp DEPS genko_app genko_test_support GUI TIMEOUT 600)
   # M7 (the ledger counted against the C++ tree): the checks of Python's window tests no C++ test made before
   genko_test(test_gui_ledger_a SOURCES gui/test_gui_ledger_a.cpp DEPS genko_app genko_test_support GUI TIMEOUT 900)
   genko_test(test_gui_ledger_c SOURCES gui/test_gui_ledger_c.cpp DEPS genko_app genko_test_support GUI TIMEOUT 900)

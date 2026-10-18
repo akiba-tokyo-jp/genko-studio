@@ -34,6 +34,7 @@ bool PageCanvas::is_stroke_tool(const QString& tool) {
 }
 
 bool PageCanvas::tool_press(const QPointF& pos, const QPointF& mm, Qt::KeyboardModifiers modifiers) {
+    if (path_press(pos, mm, modifiers)) return true;  // (ペンツール・曲線ペンツール・パス選択ツール: canvas_pen.cpp)
     if (tool_ == QLatin1String("text")) return text_press(mm);  // (テキスト: canvas_lines.cpp)
     if (tool_ == QLatin1String("vector")) {
         vector_press(mm.x(), mm.y(), modifiers);
@@ -92,6 +93,7 @@ bool PageCanvas::tool_press(const QPointF& pos, const QPointF& mm, Qt::KeyboardM
 }
 
 bool PageCanvas::tool_move(const QPointF& mm, Qt::KeyboardModifiers modifiers, bool pressed) {
+    if (pressed && path_move(mm, modifiers)) return true;  // (the path tools: canvas_pen.cpp)
     if (line_move(mm, modifiers)) return true;  // (a balloon or one of its handles dragged: canvas_lines.cpp)
     if (text_move(mm, pressed)) return true;
     if (effect_move(mm)) return true;
@@ -115,6 +117,7 @@ bool PageCanvas::tool_move(const QPointF& mm, Qt::KeyboardModifiers modifiers, b
 }
 
 bool PageCanvas::tool_release() {
+    if (path_release()) return true;  // (the path tools: canvas_pen.cpp)
     if (text_release()) return true;
     if (line_release()) return true;
     if (effect_release()) return true;
@@ -240,6 +243,7 @@ std::vector<QPointF> PageCanvas::shape_preview(bool& closed) const {
 
 void PageCanvas::draw_tools(QPainter& painter) const {
     draw_vector(painter);  // (線の編集 and 線の修正: canvas_vector.cpp)
+    draw_paths(painter);   // (the target path and the pen's subpath: canvas_pen.cpp)
     // the area being drawn around to fill (囲って塗る)
     if (!lasso_fill_.empty()) {
         painter.setPen(QPen(theme::accent(), 1.5, Qt::DashLine));

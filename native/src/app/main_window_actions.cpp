@@ -462,6 +462,7 @@ void MainWindow::build_actions() {
     build_output_actions();     // (書き出し, 印刷, 履歴, 入稿前の点検, スマホの画面, 目盛り: main_window_output.cpp)
     build_studio_actions();     // (チャットでの承認: main_window_studio.cpp)
     build_smart_actions();      // (smart-objects@1: スマートオブジェクト, 埋め込みを配置…, ラスタライズ: main_window_smart.cpp)
+    build_path_actions();       // (vector@1, PC3 C-a: ペンツール, パス選択ツール, ベクトルマスク: main_window_paths.cpp)
     make("act_point_wider", QStringLiteral("選んだ点を太く"), [this] { point_width(1.25); }, keys({QKeySequence(QStringLiteral("Ctrl+Alt+]"))}),
          QStringLiteral("線の編集で選んだ制御点のところだけ、線を太くします"));
     make("act_color", QStringLiteral("ペンの色…"), [this] { pick_colour(); }, keys({QKeySequence(QStringLiteral("C"))}));
@@ -747,6 +748,7 @@ void MainWindow::build_menus() {
     frames->addSeparator();
     frames->addAction(action("act_frame_numbers"));
     build_line_menus(pages);  // (台詞, ストーリーエディター, 台詞の検索・置換: main_window_lines.cpp)
+    build_path_menus(file, view, tools, layers);  // (PC3 C-a: the paths' commands — ページ → 台詞's too —, app/main_window_paths.cpp)
     pages->addAction(action("act_book_preview"));
     pages->addAction(action("act_checks"));
     pages->addSeparator();
@@ -893,6 +895,7 @@ void MainWindow::build_docks() {
     view_menu_->addAction(layers->toggleViewAction());
     layers_dock_ = layers;
     build_channel_dock();  // (チャンネル, a tab beside the layers: main_window_channels.cpp)
+    build_path_dock();     // (パス, a tab beside the layers: main_window_paths.cpp)
     build_adjust_docks();  // (PC2a: 色調補正 and 属性, app/adjust_panels.cpp)
     build_info_docks();    // (ヒストグラム, 情報: info_panels.cpp)
     build_line_dock();  // (台詞, a tab beside the pages and the layers: main_window_lines.cpp)

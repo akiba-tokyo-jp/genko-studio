@@ -50,6 +50,7 @@
 #include "app/memory.hpp"
 #include "app/navigator.hpp"
 #include "app/pages_panel.hpp"
+#include "app/paths_panel.hpp"
 #include "app/perf.hpp"
 #include "app/reply_box.hpp"
 #include "app/save_status.hpp"
@@ -735,6 +736,7 @@ void MainWindow::show_page() {
     if (navigator_ != nullptr) navigator_->update();
     if (layer_panel_ != nullptr) layer_panel_->refresh();
     channel_view_changed();  // (channels@1: this page's view on screen, its panel)
+    if (paths_panel_ != nullptr && paths_dock_ != nullptr && paths_dock_->isVisible()) paths_panel_->refresh();  // (vector@1, PC3 C-a)
     if (lines_later_) {
         lines_timer_.start();
     } else {
