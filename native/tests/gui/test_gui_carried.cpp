@@ -314,7 +314,7 @@ private slots:
         QVERIFY(guide.contains(QStringLiteral("「ページ → 台詞 → フキダシを手で描く」")));
         const QString faq = app::help::faq(w);
         QVERIFY(faq.contains(QStringLiteral("「ウィンドウ → ワークスペース → はじめの配置に戻す」")));  // (a menu filled as it opens)
-        QVERIFY(faq.contains(QStringLiteral("「マスク ▾」、または「レイヤー → マスク → マスクを編集する（ペンで見せる・消しゴムで隠す）」")));
+        QVERIFY(faq.contains(QStringLiteral("「マスク ▾」、または「レイヤー → レイヤーマスク → マスクを編集する（ペンで見せる・消しゴムで隠す）」")));
         QVERIFY(app::help::shortcut_html(w).contains(QStringLiteral("キーは「ファイル → 環境設定…」で変えられます")));
         // a key changed: the guide and the list say the new one
         book.act("act_pen")->setShortcut(QKeySequence(QStringLiteral("P")));

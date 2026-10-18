@@ -656,8 +656,23 @@ File File::read(std::string data, const Limits& limits, bool lab) {
                     rec.mask_bottom = r.i32();
                     rec.mask_right = r.i32();
                     rec.mask_default = static_cast<int>(r.u8());
-                    rec.mask_disabled = (r.u8() & 2) != 0;
+                    const unsigned flags = r.u8();
+                    rec.mask_disabled = (flags & 2) != 0;
                     rec.mask = true;
+                    // (PC3 B2, masks@1: the mask parameters after the flags — its user density and feather — and its
+                    // position relative to the layer, as PhotoCraft's io reads them)
+                    if ((flags & 16) != 0 && r.pos < mend) {
+                        const unsigned held = r.u8();
+                        rec.mask_parameters = true;
+                        rec.mask_unlinked = (flags & 1) != 0;
+                        if ((held & 1) != 0 && r.pos + 1 <= mend) rec.mask_density = static_cast<int>(r.u8());
+                        if ((held & 2) != 0 && r.pos + 8 <= mend) {
+                            const std::uint64_t bits = r.u64();
+                            double feather = 0;
+                            std::memcpy(&feather, &bits, sizeof feather);
+                            if (std::isfinite(feather) && feather >= 0) rec.mask_feather = feather;
+                        }
+                    }
                     r.pos = mend;
                 }
                 const std::uint32_t ranges = r.u32();  // blending ranges
@@ -813,6 +828,10 @@ File File::read(std::string data, const Limits& limits, bool lab) {
                 layer.luts = std::move(tables);
                 const ChannelRef* mask = rec.channel(-2);
                 layer.has_mask = rec.mask && mask != nullptr && !rec.mask_disabled;
+                layer.mask_parameters = rec.mask_parameters;  // (PC3 B2: masks@1)
+                layer.mask_unlinked = rec.mask_unlinked;
+                layer.mask_density = rec.mask_density;
+                layer.mask_feather = rec.mask_feather;
                 f.layers_.push_back(std::move(layer));
                 if (!pending.empty()) pending.back().push_back(f.layers_.size() - 1);
                 f.python_skipped_.push_back(rec.name);  // (psd.py leaves every adjustment layer out)
@@ -854,6 +873,10 @@ File File::read(std::string data, const Limits& limits, bool lab) {
         const ChannelRef* mask = rec.channel(-2);
         if (rec.mask && mask != nullptr && !rec.mask_disabled) {
             layer.has_mask = true;
+            layer.mask_parameters = rec.mask_parameters;  // (PC3 B2: masks@1)
+            layer.mask_unlinked = rec.mask_unlinked;
+            layer.mask_density = rec.mask_density;
+            layer.mask_feather = rec.mask_feather;
             if (mask->width > 0 && mask->height > 0 && mask->length > 0) {
                 const std::uint64_t pixels = static_cast<std::uint64_t>(mask->width) * static_cast<std::uint64_t>(mask->height);
                 if (pixels > static_cast<std::uint64_t>(limits.max_layer_pixels)) too_large("a layer is too large to read");

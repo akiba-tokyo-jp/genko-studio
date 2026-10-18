@@ -875,7 +875,7 @@ private slots:
         QVERIFY(file.contains(QStringLiteral("最近使った原稿")) && file.contains(QStringLiteral("閉じる")) && file.contains(QStringLiteral("Genko を終わる")));
         const QStringList edit = texts(b.menu(QStringLiteral("編集")));
         QVERIFY(edit.contains(QStringLiteral("すべてを選択")) && edit.contains(QStringLiteral("消去")));
-        QVERIFY(texts(b.menu(QStringLiteral("レイヤー"))).contains(QStringLiteral("マスク")));
+        QVERIFY(texts(b.menu(QStringLiteral("レイヤー"))).contains(QStringLiteral("レイヤーマスク")));
         QVERIFY(texts(submenu(b.menu(QStringLiteral("ページ")), QStringLiteral("台詞"))).contains(QStringLiteral("フキダシの形")));
         QMenu* tools = b.menu(QStringLiteral("ツール"));
         QVERIFY(texts(submenu(tools, QStringLiteral("定規"))).contains(QStringLiteral("直線定規")));

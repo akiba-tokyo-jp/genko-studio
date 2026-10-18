@@ -124,6 +124,11 @@ genko_library(genko_app
     canvas_pen.cpp
     paths_panel.cpp
     main_window_paths.cpp
+    # PC3 B2: 塗りつぶし…・境界線を描く…, レイヤーマスク and the layers chosen, すべてのマスクを統合, 属性's mask
+    fill_dialogs.cpp
+    main_window_masks.cpp
+    layer_panel_masks.cpp
+    mask_panel.cpp
     ${GENKO_APP_RESOURCES}
     ${GENKO_APP_FONTS}
   PUBLIC_DEPS genko_core genko_storage genko_render genko_render_ops genko_formats genko_service Qt6::Core Qt6::Gui Qt6::Widgets Qt6::Svg Qt6::Concurrent

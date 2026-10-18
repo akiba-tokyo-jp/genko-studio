@@ -77,6 +77,10 @@ std::optional<core::InkPixels> patch_inks(const core::Patch& patch, const core::
 // The piece laid over the layer's inks at the box (mm), resampled to the raster (a whole pixel each when the box spans
 // exactly the piece's pixels). A layer with no inks yet gets a clear raster at the working 200 dpi.
 std::string lay_piece(const core::Page& page, const core::Layer& layer, const core::InkPixels& piece, const std::array<double, 4>& box_mm);
+// (PC3 B2) the same through any matrix (mm → mm: a piece turned, sheared or flipped as it is pasted): its inks
+// resampled, premultiplied by the alpha, as move_area moves them; a pixel landing on a pixel's centre laid whole.
+std::string lay_piece(const core::Page& page, const core::Layer& layer, const core::InkPixels& piece, const std::array<double, 4>& box_mm,
+                      const selection::Matrix& m, Resample resample = Resample::Bilinear);
 
 // set_page_spec: the inks of a paint layer on the new paper (render/bookpages' relayout_raster for inks): the old
 // frame onto the new, at the working 200 dpi, bilinear.

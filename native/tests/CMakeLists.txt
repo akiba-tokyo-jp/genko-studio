@@ -110,6 +110,10 @@ genko_test(test_selection_ext SOURCES unit/test_selection_ext.cpp DEPS genko_tes
 # quick_mask; the op magic_erase (PhotoCraft's eraser_cmds/tests.rs and algo/src/erase.rs) on 8-bit, 16-bit and CMYK layers.
 genko_test(test_select_color SOURCES unit/test_select_color.cpp DEPS genko_test_support genko_render_ops LABELS unit TIMEOUT 600)
 genko_test(test_magic_erase SOURCES unit/test_magic_erase.cpp DEPS genko_test_support genko_render_ops LABELS unit TIMEOUT 600)
+# PC3 B2 (SPEC.md COLOR-06): a layer's mask applied and made from the transparency, a linked mask moved with its layer,
+# outline_area's bands, fill_area's preserve_transparency, paste's center_mm, the masks of a precise or ink page at its
+# finest grid — on 8-bit, precise (16, 32 bits) and CMYK pages, without Python.
+genko_test(test_masks SOURCES unit/test_masks.cpp DEPS genko_test_support genko_render_ops LABELS unit TIMEOUT 600)
 genko_test(test_path_raster SOURCES unit/test_path_raster.cpp DEPS genko_test_support genko_render_ops LABELS unit)
 genko_test(test_resample SOURCES unit/test_resample.cpp DEPS genko_test_support genko_render_ops LABELS unit)
 genko_test(test_page_geometry SOURCES unit/test_page_geometry.cpp DEPS genko_test_support LABELS unit)
@@ -353,6 +357,11 @@ genko_test(test_contract_select SOURCES contract/test_contract_select.cpp DEPS g
 # through the command line saved, undone, inspect --paths, export --format ai; a PSD's paths and vmsk (psd-tools, import_psd).
 genko_test(test_contract_paths SOURCES contract/test_contract_paths.cpp DEPS genko_test_support genko_render_ops genko_formats
            LABELS contract TIMEOUT 900)
+# PC3 B2 (masks@1) through the command line: a mask's link, density and feather saved, drawn, undone and redone;
+# apply_layer_mask, mask_from_transparency, outline_area, a copy pasted at a point; a PSD's masks written with Photoshop's
+# flags and parameters that psd-tools (GENKO_PYREF) and this build read, imported back with them.
+genko_test(test_contract_masks SOURCES contract/test_contract_masks.cpp DEPS genko_test_support genko_render_ops genko_formats
+           LABELS contract TIMEOUT 900)
 genko_test(test_contract_image_ops SOURCES contract/test_contract_image_ops.cpp DEPS genko_test_support genko_render
            LABELS contract TIMEOUT 900)
 # PC3 C-e through the command line: every kind of page turned (inspect --pixel), undone and redone; a page of its own paper
@@ -458,6 +467,9 @@ if(GENKO_BUILD_APP)
   genko_test(test_gui_adjust_color SOURCES gui/test_gui_adjust_color.cpp DEPS genko_app GUI TIMEOUT 600)
   # 範囲選択: the marquee's ways with Shift / Alt, the selection's commands, the chosen part moved, copied, pasted
   genko_test(test_gui_select SOURCES gui/test_gui_select.cpp DEPS genko_app GUI TIMEOUT 600)
+  # PC3 B2: 編集's clipboard with the system's, 結合部分をコピー, 特殊ペースト, 選択範囲をコピー／カットしたレイヤー,
+  # 塗りつぶし… and 境界線を描く…, a precise page's copy as precise pixels
+  genko_test(test_gui_clipboard SOURCES gui/test_gui_clipboard.cpp DEPS genko_app GUI TIMEOUT 600)
   # チャンネル (channels@1, COLOR-03): the panel, the target keys, a fill on a channel, the view, options, split.
   genko_test(test_gui_channels SOURCES gui/test_gui_channels.cpp DEPS genko_app GUI TIMEOUT 600)
   # PC2c (COLOR-04): レイヤー → 色調補正's local corrections and image calculations, 編集 → フェード (only right after).

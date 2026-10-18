@@ -441,6 +441,38 @@ private slots:
         QVERIFY(!layer_of(rgb, "p").patches[0].attrs.contains("gkir_profile"));
     }
 
+    // PC3 B2: a piece of inks turned, flipped or sheared as it is pasted stays inks — resampled as inks (premultiplied by
+    // the alpha), as transform_area moves them —, never its picture: a colour all over the same inks.
+    void turnedPiecesStayInks() {
+        const core::Document doc = ink_book();
+        // (the piece: S, from the top right — 35..45 × 5..15 mm)
+        const auto piece = render::ink_edit::lift_piece(doc.page(0), layer_of(doc, "pic"),
+                                                        Json{{"poly", Json::array({Json::array({35, 5}), Json::array({45, 5}), Json::array({45, 15}), Json::array({35, 15})})}});
+        QVERIFY(piece);
+        const core::Patch patch = render::ink_edit::piece_patch(*piece, *doc.page(0).color);
+        Json one = patch.attrs;
+        one["png"] = core::b64encode(*patch.png);
+        const Json items{{"strokes", Json::array()}, {"patches", Json::array({one})}};
+        // turned a quarter about (40, 10) and moved down by 50 mm; flipped; sheared
+        for (const Json& matrix : {Json::array({0, 1, -1, 0, 50, 10}), Json::array({-1, 0, 0, 1, 80, 50}), Json::array({1, 0, 0.3, 1, -30, 50})}) {
+            const core::Document pasted =
+                run_ops(doc, Json::array({Json{{"op", "add_layer"}, {"page", 1}, {"kind", "paint"}, {"id", "pasted"}},
+                                          Json{{"op", "paste"}, {"page", 1}, {"layer_id", "pasted"}, {"items", items}, {"matrix", matrix}}}))
+                    .doc;
+            QVERIFY(layer_of(pasted, "pasted").patches.empty());
+            QVERIFY(layer_of(pasted, "pasted").ink_raster);
+            const core::InkPixels laid = pixels_of(pasted, "pasted");
+            // (where the middle of the piece, (40, 10) mm, went)
+            const auto m = matrix;
+            const double x = m[0].get<double>() * 40 + m[2].get<double>() * 10 + m[4].get<double>(),
+                         y = m[1].get<double>() * 40 + m[3].get<double>() * 10 + m[5].get<double>();
+            const std::uint16_t* middle = at(laid, px(x), px(y));
+            for (unsigned c = 0; c < 4; ++c) QVERIFY2(std::abs(int(middle[c]) - int(kS[c])) <= 1, qPrintable(QString::number(c)));
+            QCOMPARE(middle[4], std::uint16_t{65535});
+            QCOMPARE(at(laid, px(5), px(5))[4], std::uint16_t{0});  // (nothing laid far from it)
+        }
+    }
+
     // New paper (set_page_spec): the inks moved onto it, a colour all over the same inks.
     void newPaperKeepsTheInks() {
         const core::Document doc = ink_book();

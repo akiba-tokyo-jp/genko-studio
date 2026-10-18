@@ -78,6 +78,20 @@ public:
     void move(int delta);
     void set(const std::string& key, const core::Json& value);
     void mask(const core::Json& change);
+    // PC3 B2 (app/layer_panel_masks.cpp): レイヤーマスク's own — 選択範囲をマスク (a mask hiding the selection), 透明部分から,
+    // 適用, リンク (checked: the mask moves with the layer) — and the layers' selection: すべてのレイヤー, レイヤーの選択を解除
+    // (the layer drawn on stays chosen), レイヤーを検索 (the search shown and the layers its words find chosen), レイヤーを分離
+    // (only the chosen layers listed, until it is turned off).
+    void hide_selection();
+    void mask_from_transparency();
+    void apply_mask();
+    QAction* mask_link_action() const { return mask_link_; }
+    void select_all_layers();
+    void deselect_layers();
+    void find_layers();
+    void choose_found();
+    void isolate_layers(bool on);
+    bool isolated() const { return !isolated_.empty(); }
     // smart-objects@1, PC3 A2 (app/layer_panel_smart_filters.cpp): a smart object's smart filters under its row — a row
     // スマートフィルター (its eye: all of them on or off; its marks: the filter mask) and a row for each filter, the top
     // one first (its eye: shown; a double-click: スマートフィルターを編集…; the right button: 描画オプション…, moving it,
@@ -138,6 +152,9 @@ private:
     QComboBox* tint_ = nullptr;
     QPushButton* mask_button_ = nullptr;
     QPushButton* effect_button_ = nullptr;
+    QAction* mask_link_ = nullptr;          // (PC3 B2: レイヤーマスク → リンク)
+    std::vector<std::string> isolated_;     // (PC3 B2: レイヤーを分離 — the layers listed alone; empty: all)
+    std::string isolated_page_;             // (the page they are on: another page lists all)
     std::map<QString, QIcon> marks_;  // (the kinds' marks, per colour)
     QIcon kind_mark(core::LayerKind kind);
     QMenu* special_ = nullptr;

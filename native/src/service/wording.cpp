@@ -649,6 +649,15 @@ const std::vector<Rule>& rules() {
         r.push_back(rule("placed images and tones cannot be merged", "配置した画像とトーンのレイヤーは結合できません"));
         r.push_back(rule("a folder cannot take a mask.*", "フォルダにはマスクを付けられません（中のレイヤーに付けます）"));
         r.push_back(rule("fill must be show or hide", "マスクは「全部見せる」か「全部隠す」で作ります"));
+        // (PC3 B2: render/ops_masks — レイヤーマスクの適用・透明部分から、境界線を描く)
+        r.push_back(rule("the layer \\S+ has no layer mask", "このレイヤーにはマスクがありません"));
+        r.push_back(rule("(apply_layer_mask|mask_from_transparency): the layer \\S+ is not a pen or paint layer.*",
+                         "ペン・ペイントのレイヤーではないため、できません（先にラスタライズします）"));
+        r.push_back(rule("width_mm must be more than 0", "幅は 0 より大きくします"));
+        r.push_back(rule("location must be inside, center or outside", "境界線の位置は、内側・中央・外側から選びます"));
+        r.push_back(rule("the layer has nothing drawn to stroke", "このレイヤーには、まだ何も描いてありません（境界線を描く縁がありません）"));
+        r.push_back(rule("the stroke has nothing to draw", "境界線を描く所がありません"));
+        r.push_back(rule("the area is off the page", "範囲がページの外です"));
         r.push_back(rule(R"(points needs at least one \[x_mm, y_mm\] pair)", "点が 1 つもありません"));
         // undo, pages, layers
         r.push_back(rule("nothing to undo", "これ以上戻せません"));

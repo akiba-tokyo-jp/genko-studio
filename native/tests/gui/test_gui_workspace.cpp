@@ -323,7 +323,7 @@ private slots:
         QVERIFY(texts(help).contains(QStringLiteral("コマンドを探す…")));
         QMenu* layers = b.menu(QStringLiteral("レイヤー"));
         for (const QString& title : {QStringLiteral("塗り・グラデーション・色調補正のレイヤー"), QStringLiteral("まとめて（複数のレイヤー・表示レイヤー・変換）"),
-                                     QStringLiteral("境界効果・表示色の印刷"), QStringLiteral("マスク")}) {
+                                     QStringLiteral("境界効果・表示色の印刷"), QStringLiteral("レイヤーマスク")}) {
             QMenu* sub = submenu(layers, title);
             QVERIFY2(sub != nullptr && !sub->actions().isEmpty(), qPrintable(title));
         }

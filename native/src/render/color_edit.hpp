@@ -1,5 +1,7 @@
 #pragma once
 
+#include <array>
+#include <optional>
 #include <string>
 #include <string_view>
 
@@ -53,6 +55,34 @@ std::string paste(const core::Page& page, const core::Layer& layer, const core::
 // point —, at the resolution it had (its pixels a mm across and down), bilinear and premultiplied (outside: clear).
 std::string relayout(const std::string& gkcr, const core::PageSpec& old_paper, const core::PageSpec& paper, const core::Rect& old_frame,
                      const core::Rect& new_frame);
+
+// --- pieces of precise pixels (PC3 B2: カット・コピー・ペースト on a precise page) ---------------------------------------
+
+// A piece copied from a precise paint layer: its samples (GKCR, the layer's precision: alpha × the area's coverage, cut
+// to what shows), the box it covers (mm) and the space of its values ("srgb", or the page's RGB profile's ref).
+struct Piece {
+    std::array<double, 4> box_mm{};  // x, y, w, h
+    std::string samples;             // (GKCR bytes)
+    std::string space = "srgb";
+};
+// The precise pixels of the layer an area covers ({poly} or {mask}); none when nothing shows there or the layer holds no
+// precise pixels.
+std::optional<Piece> lift_piece(const core::Page& page, const core::Layer& layer, const core::Json& area);
+// The piece as a picture to copy (selection::Items' patch): its picture as the screen shows it (8-bit sRGB), its box, and
+// its samples ("gkcr": GKCR in base64, "gkcr_space": its space — the C++ build's own keys, never saved: paste lays them
+// or drops the keys).
+inline constexpr std::string_view kPieceKey = "gkcr";
+inline constexpr std::string_view kPieceSpaceKey = "gkcr_space";
+core::Patch piece_patch(const Piece& piece);
+// A patch's own samples (GKCR) in the page's space (converted from another RGB space through sRGB, HDR kept); none when it
+// carries none, or they cannot be read.
+std::optional<std::string> patch_samples(const core::Patch& patch, const core::Page& page, const core::Document* episode);
+// The samples laid over the layer's precise pixels at `box_mm` through `m` (mm → mm): moved and scaled, each pixel
+// whole where it lands on a pixel's centre (its samples as they were), else mixed in linear light as move_area does.
+// A layer with no precise pixels yet gets a clear raster at the piece's resolution (the working 200 dpi at least, 600
+// dpi at most) in the page's precision.
+std::string lay_piece(const core::Page& page, const core::Layer& layer, const std::string& samples, const std::array<double, 4>& box_mm,
+                      const selection::Matrix& m, Resample resample = Resample::Bilinear);
 
 // The lines and pictures an op left on precise paint layers (the pen, a fill, a material) drawn into their pixels, as
 // a paint program does: a precise layer keeps no lines or fills of its own. Pages not read yet are not looked at.

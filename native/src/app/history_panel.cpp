@@ -86,6 +86,9 @@ const std::map<std::string, const char*>& names() {
         // (PC3 C-e: render/ops_pagesize)
         {"resize_pages", "画像解像度を変えた"}, {"set_canvas_size", "カンバスサイズを変えた"}, {"crop_page", "切り抜いた"},
         {"trim_page", "トリミングした"}, {"reveal_all", "すべての領域を表示した"}, {"rotate_pages", "カンバスを回転した"},
+        // (PC3 B2: render/ops_masks)
+        {"outline_area", "境界線を描いた"}, {"apply_layer_mask", "レイヤーマスクを適用した"},
+        {"mask_from_transparency", "透明部分からマスクを作った"},
     };
     return table;
 }

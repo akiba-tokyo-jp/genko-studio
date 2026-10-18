@@ -73,6 +73,13 @@ struct Layer {
     std::optional<std::size_t> parent;  // the index (in layers()) of the folder it is in
     std::string kind = "pixels";        // pixels | folder | text | adjust | smart
     bool has_mask = false;
+    // (PC3 B2, the user's decision 3: masks@1) its mask's record past its picture: whether it carries parameters (flags
+    // bit 4) — then whether it is placed relative to the layer (bit 0: not linked), its user density (0..255) and feather
+    // (pixels of the canvas), each when the parameters hold it.
+    bool mask_parameters = false;
+    bool mask_unlinked = false;
+    std::optional<int> mask_density;
+    std::optional<double> mask_feather;
     std::size_t record = 0;  // (pixel layers) the layer record it was read from
     // (PC2, the user's decision 5) an adjustment layer a codec read (render/psd_adjust.hpp): the correction's adjust.
     // One no codec reads is left out (skipped), as psd.py leaves every one out.
@@ -203,6 +210,11 @@ public:
         std::int64_t mask_left = 0, mask_top = 0, mask_right = 0, mask_bottom = 0;
         int mask_default = 0;
         bool mask_disabled = false;
+        // (PC3 B2) its mask's flags past disabled and its parameters (Layer's mask_*)
+        bool mask_parameters = false;
+        bool mask_unlinked = false;
+        std::optional<int> mask_density;
+        std::optional<double> mask_feather;
         // (PSD-01) where its TySh and lfx2 blocks' payloads are in the file (size 0: none)
         std::uint64_t tysh_at = 0, tysh_size = 0;
         std::uint64_t lfx2_at = 0, lfx2_size = 0;

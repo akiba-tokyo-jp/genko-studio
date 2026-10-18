@@ -1,7 +1,11 @@
 #pragma once
 
+#include <array>
+
+#include "core/json.hpp"
 #include "core/model.hpp"
 #include "render/image.hpp"
+#include "render/warp.hpp"
 
 // masks@1 (PC3 節 B, SPEC.md COLOR-06): a layer mask as the drawing lays it on its layer — the one function the three
 // ways (8 bits, precise, inks) and the merges take it through — and a mask lent to a pixel op as a layer to paint
@@ -14,6 +18,24 @@ namespace genko::render::layer_masks {
 // right) and its density laid on (1 − density·(1 − m)). A mask of no density or feather: decoded.resize_region(size,
 // area, resample), as before them.
 Image shown(const core::Page& page, const core::Mask& mask, const Image& decoded, Size size, const Box& area, Resample resample);
+
+// --- the grid and the moves (B2) ----------------------------------------------------------------------------------------
+
+// The grid a page's layer masks are made at (set_layer_mask, paint_mask, mask_from_transparency): 150 dpi on an 8-bit RGB
+// page, as every mask before; on a precise (16, 32 bits) or ink page the finest grid of its pixel layers — the working
+// 200 dpi at least, 600 dpi at most (the coordinator's 8-2 (b)). A mask made before keeps its own picture: it is stretched
+// over the page whatever its size.
+int grid_dpi(const core::Page& page);
+// The page in pixels at that grid.
+Size grid_size(const core::Page& page);
+
+// A linked mask moved with what its layer's pixels in `area` do (transform_area's "mask": "follow"; 節 C's moves of a
+// layer): its part the area covers (by the area's coverage) lifted and laid again through `m` (mm, bilinear) over what
+// stays; the part it left takes the mask's background — the value most of the mask's edge pixels hold (white for a mask
+// that reveals all around, black for one that hides). Its picture's size and its settings are kept.
+core::Mask move_mask(const core::Page& page, const core::Mask& mask, const core::Json& area, const std::array<double, 6>& m);
+// The same through a free transform (warp.mapping of the area's box), as transform_area's "warp" moves the pixels.
+core::Mask warp_mask(const core::Page& page, const core::Mask& mask, const core::Json& area, const warp::Go& go);
 
 // --- "layer_mask": true on a pixel op (B-0) -----------------------------------------------------------------------------
 

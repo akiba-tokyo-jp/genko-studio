@@ -14,6 +14,7 @@
 
 #include "core/channels.hpp"
 #include "core/error.hpp"
+#include "core/masks.hpp"
 #include "core/pyconv.hpp"
 #include "core/pynum.hpp"
 #include "core/pyops.hpp"
@@ -30,6 +31,7 @@
 #include "render/ink_canvas.hpp"
 #include "render/not_yet_ported.hpp"
 #include "render/page.hpp"
+#include "render/png.hpp"
 #include "render/psd_smart.hpp"
 #include "render/psd_paths.hpp"
 #include "render/psd_text.hpp"
@@ -215,7 +217,27 @@ public:
         return out + payload;
     }
 
+    // (PC3 B2, masks@1) the page its layers are of: a layer's mask of masks@1 is written with its flags and parameters
+    void masks_of(const core::Page& page) { page_ = &page; }
+    // The next record's mask settings: the page layer's mask, when it has masks@1's (one not used is written too, as
+    // Photoshop keeps it, disabled); none for a mask without them (written as before).
+    void note_mask(render::PageLayer& layer) {
+        settings_.reset();
+        if (page_ == nullptr || layer.id.empty()) return;
+        for (const core::Layer& own : page_->layers) {
+            if (own.id != layer.id || !own.mask || !own.mask->png || own.mask->png->empty() || !core::mask_has_settings(*own.mask)) continue;
+            settings_ = *own.mask;
+            if (!layer.mask) layer.mask = render::read_png(*own.mask->png).convert("L").resize(size_);
+            return;
+        }
+    }
+    void note_mask(const core::Layer& own) {
+        settings_.reset();
+        if (own.mask && own.mask->enabled && core::mask_has_settings(*own.mask)) settings_ = *own.mask;
+    }
+
     void add(render::PageLayer&& layer) {
+        note_mask(layer);
         const std::string blocks = vector_block(layer.vector_mask) + placed_blocks(layer);
         const Image rgba = layer.image.mode() == "RGBA" ? std::move(layer.image) : layer.image.convert("RGBA");
         if (ink_) {  // (its colours by the page's rules)
@@ -417,7 +439,34 @@ private:
         put_i32(records_, box.y1);
         put_i32(records_, box.x1);
         std::string mask_data;
-        if (mask_plane) {  // (an L picture over the whole canvas: white shows)
+        const std::optional<core::Mask> settings = std::exchange(settings_, std::nullopt);
+        if (mask_plane && settings && core::mask_has_settings(*settings)) {
+            // (PC3 B2, the user's decision 3: a mask of masks@1 with Photoshop's flags — bit 0 not linked, bit 1 disabled,
+            // bit 4 its parameters — and its user density (0..255) and feather (pixels) after them, as PhotoCraft's io
+            // writes them; padded to 4 bytes)
+            channels.emplace_back(-2, std::move(*mask_plane));
+            std::string body;
+            put_i32(body, 0);
+            put_i32(body, 0);
+            put_i32(body, size_.height);
+            put_i32(body, size_.width);
+            put_u8(body, 255);
+            put_u8(body, (settings->linked ? 0u : 1u) | (settings->enabled ? 0u : 2u) | 16u);
+            const bool density = settings->density < 1.0, feather = settings->feather_mm > 0.0;
+            put_u8(body, (density ? 1u : 0u) | (feather ? 2u : 0u));
+            if (density) put_u8(body, static_cast<unsigned>(std::clamp<long>(std::lround(settings->density * 255.0), 0, 255)));
+            if (feather) {
+                const double width_mm = page_ != nullptr ? page_->spec.width_mm.value() : 0.0;
+                const double px = width_mm > 0 ? settings->feather_mm * size_.width / width_mm : 0.0;
+                std::uint64_t bits = 0;
+                std::memcpy(&bits, &px, sizeof bits);
+                put_u32(body, static_cast<std::uint32_t>(bits >> 32));
+                put_u32(body, static_cast<std::uint32_t>(bits & 0xffffffffu));
+            }
+            body.append((4 - body.size() % 4) % 4, '\0');
+            put_u32(mask_data, u32_of(body.size()));
+            mask_data += body;
+        } else if (mask_plane) {  // (an L picture over the whole canvas: white shows)
             channels.emplace_back(-2, std::move(*mask_plane));
             put_u32(mask_data, 20);
             put_i32(mask_data, 0);
@@ -491,6 +540,8 @@ private:
     std::string records_;
     std::string data_;
     int count_ = 0;
+    const core::Page* page_ = nullptr;     // (PC3 B2: masks_of)
+    std::optional<core::Mask> settings_;  // (the next record's mask settings: note_mask)
 };
 
 // A tagged block of a layer record: its key, its length and its payload, padded to 4 bytes.
@@ -681,6 +732,7 @@ std::function<void(const core::Layer&)> adjustments(Records& records, const core
         std::vector<std::string> notes;
         if (auto made = psd_adjust_layer(layer, page, size, notes, &doc)) {
             made->blocks += records.vector_block(layer.vector_mask);  // (vector@1, PC3 C-a)
+            if (made->mask) records.note_mask(layer);                  // (PC3 B2: its mask's masks@1 settings)
             records.add_adjustment(*made);
         }
     };
@@ -1203,10 +1255,12 @@ std::string page_psd_inks(const core::Document& episode, const core::Page& page,
     const core::InkPixels& merged = halved ? *halved : *made.inks;
     const render::Size size{static_cast<int>(merged.width), static_cast<int>(merged.height)};
     Records records(size, color);
+    records.masks_of(page);                    // (PC3 B2)
     PlacedLayers placed(episode, dpi, depth);  // (PC3 A3)
     records.placed([&placed](const core::Layer& layer) { return placed.blocks(layer); });
     records.paper(page.spec.width_mm.value(), page.spec.height_mm.value());
     const auto each = [&](render::PageLayer&& layer) {
+        records.note_mask(layer);  // (PC3 B2: its mask's masks@1 settings)
         const std::vector<double> values = layer.inks ? *layer.inks : render::ink_picture(layer.image, color).values;
         records.add_inks(layer.name, values, color.space, color.depth, layer.settings ? layer.opacity : 1.0,
                          layer.settings ? layer.blend : std::string("normal"), layer.settings && layer.clip, layer.mask ? &*layer.mask : nullptr,
@@ -1277,6 +1331,7 @@ std::string page_psd_rgb(const core::Document& episode, const core::Page& page, 
     const core::ColorRasterView merged(made.values);
     const render::Size size{static_cast<int>(merged.width()), static_cast<int>(merged.height())};
     Records records(size, std::nullopt, RgbOut{depth, render::RgbSpace::of(page)});
+    records.masks_of(page);                                 // (PC3 B2)
     PlacedLayers placed(episode, dpi, depth_of_contents);  // (PC3 A3)
     records.placed([&placed](const core::Layer& layer) { return placed.blocks(layer); });
     records.paper(page.spec.width_mm.value(), page.spec.height_mm.value());
@@ -1456,6 +1511,7 @@ std::string page_psd_bytes(const core::Document& episode, const core::Page& page
     const Image merged = render::render_page(page, static_cast<int>(dpi), options, &episode).image;
     const Image rgb = merged.mode() == "RGB" ? merged : merged.convert("RGB");
     Records records(rgb.size());
+    records.masks_of(page);                    // (PC3 B2)
     PlacedLayers placed(episode, dpi, depth);  // (PC3 A3)
     records.placed([&placed](const core::Layer& layer) { return placed.blocks(layer); });
     records.paper(page.spec.width_mm.value(), page.spec.height_mm.value());
@@ -1511,6 +1567,7 @@ std::string contents_psd_bytes(const core::Document& episode, const core::Page& 
     const Image drawn = render::render_contents(page, static_cast<int>(dpi), options, &episode).image;
     const Image rgb = render::alpha_composite(Image::create("RGBA", drawn.size(), render::Ink{255, 255, 255, 255}), drawn.convert("RGBA")).convert("RGB");
     Records records(rgb.size());
+    records.masks_of(page);  // (PC3 B2)
     PlacedLayers placed(episode, dpi, depth);
     records.placed([&placed](const core::Layer& layer) { return placed.blocks(layer); });
     records.paper(page.spec.width_mm.value(), page.spec.height_mm.value());
