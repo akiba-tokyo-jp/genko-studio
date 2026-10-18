@@ -530,9 +530,13 @@ File File::read(std::string data, const Limits& limits, bool lab) {
         if (r.take(4) != "8BIM") break;
         const unsigned rid = r.u16();
         const unsigned nlen = r.u8();
-        r.take(nlen + (1 - nlen % 2));  // (the Pascal name, padded to even with its length byte)
+        const std::string_view resource_name = r.take(nlen + (1 - nlen % 2)).substr(0, nlen);  // (a Pascal name, padded to even)
         const std::uint32_t size = r.u32();
         const std::string_view block = r.take(std::uint64_t{size} + size % 2);
+        // (vector@1, PC3 C-a: the saved paths, the work path, the clipping path — render/psd_paths reads them)
+        if ((rid >= 2000 && rid <= 2997) || rid == 1025 || rid == 2999) {
+            f.path_resources_.push_back(PathResource{rid, std::string(resource_name), std::string(block.substr(0, size))});
+        }
         if (rid == 1005 && size >= 4) {
             const std::uint32_t fixed = be32(block);
             f.dpi_ = fixed == 0 ? 72.0 : fixed / 65536.0;
@@ -622,6 +626,9 @@ File File::read(std::string data, const Limits& limits, bool lab) {
                     } else if (tag == "lfx2") {
                         rec.lfx2_at = static_cast<std::uint64_t>(body.data() - d.data());
                         rec.lfx2_size = body.size();
+                    } else if (tag == "vmsk" || (tag == "vsms" && rec.vmsk_size == 0)) {  // (vector@1, PC3 C-a: its vector mask)
+                        rec.vmsk_at = static_cast<std::uint64_t>(body.data() - d.data());
+                        rec.vmsk_size = body.size();
                     } else if (tag == "CgEd") {  // (PC2a: read with its brit)
                         rec.cged_at = static_cast<std::uint64_t>(body.data() - d.data());
                         rec.cged_size = body.size();
@@ -794,6 +801,13 @@ std::optional<TextLayer> File::text(const Layer& layer) const {
     const Record& rec = records_[layer.record];
     if (rec.tysh_size == 0) return std::nullopt;
     return read_tysh(std::string_view(data_).substr(static_cast<std::size_t>(rec.tysh_at), static_cast<std::size_t>(rec.tysh_size)));
+}
+
+std::optional<std::string_view> File::vector_mask(const Layer& layer) const {
+    if (layer.folder || layer.record >= records_.size()) return std::nullopt;
+    const Record& rec = records_[layer.record];
+    if (rec.vmsk_size == 0) return std::nullopt;
+    return std::string_view(data_).substr(static_cast<std::size_t>(rec.vmsk_at), static_cast<std::size_t>(rec.vmsk_size));
 }
 
 std::optional<Stroke> File::stroke(const Layer& layer) const {

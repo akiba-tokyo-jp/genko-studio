@@ -46,6 +46,7 @@
 #include "render/brushes.hpp"
 #include "render/draw.hpp"
 #include "render/inspect.hpp"
+#include "render/path_info.hpp"
 #include "render/proof.hpp"
 #include "render/movie.hpp"
 #include "render/ops_registry.hpp"
@@ -277,6 +278,8 @@ int inspect(const QStringList& args, bool ascii) {
     // (color-model@1, the C++ build's own: --pixel <page>:<x_mm>,<y_mm> [--layer ID] [--dpi N]; PC2d: --profile <id|page|sha256>)
     QString pixel, layer, dpi_text, profile;
     bool looks = false;  // (PC2a, the C++ build's own: --looks, image.adjustments.colorLookup.list)
+    bool paths = false;  // (vector@1, PC3 C-a, the C++ build's own: --paths [--page N], path.list / path.info / layer.vectorMask.info)
+    QString paths_page;
     const auto value_of = [&](qsizetype& i, const char* name, QString& into) -> bool {
         const QString& arg = args[i];
         const QString flag = QString::fromLatin1(name);
@@ -294,6 +297,10 @@ int inspect(const QStringList& args, bool ascii) {
             full = true;
         } else if (arg == QLatin1String("--looks")) {
             looks = true;
+        } else if (arg == QLatin1String("--paths")) {
+            paths = true;
+        } else if (arg == QLatin1String("--page") || arg.startsWith(QLatin1String("--page="))) {
+            if (!value_of(i, "--page", paths_page)) return usage("argument --page: expected one argument");
         } else if (arg == QLatin1String("--stroke")) {
             if (i + 1 >= args.size()) return usage("argument --stroke: expected one argument");
             stroke = args[++i];
@@ -339,7 +346,18 @@ int inspect(const QStringList& args, bool ascii) {
         }
     }
     if (!profile.isEmpty() && !pixel.isEmpty()) return usage("argument --profile: not with --pixel");
+    if (!paths_page.isEmpty() && !paths) return usage("argument --page: only with --paths");
+    std::optional<std::int64_t> paths_page_number;
+    if (!paths_page.isEmpty()) {
+        bool ok = false;
+        paths_page_number = paths_page.toLongLong(&ok);
+        if (!ok) return usage("argument --page: invalid int value: " + core::py_repr_str(paths_page.toStdString()));
+    }
     const auto loaded = storage::load_document(path_arg(src));
+    if (paths) {  // (vector@1: the pages' paths, work paths, clipping paths and the layers' vector masks and shapes)
+        print_json(render::path_info::book_paths(loaded.document, paths_page_number), ascii);
+        return 0;
+    }
     if (looks) {  // the built-in looks and the book's lookup tables (PC2a: カラールックアップの一覧)
         print_json(looks_listing(loaded.document), ascii);
         return 0;
@@ -666,6 +684,41 @@ int export_cube(const Arguments& a, bool ascii) {
     return 0;
 }
 
+// vector@1 (PC3 C-a, file.export.pathsToIllustrator): `genko export <book> <out> --format ai [--page N] [--paths all|work|<name>]`
+// — the page's paths as an Adobe Illustrator file (a folder: p<page>.ai in it); the file's path, or with --json {"ok",
+// "count", "files", "paths"}.
+int export_ai(const Arguments& a, bool ascii) {
+    std::int64_t wanted = 1;
+    if (const auto value = a.value("--page")) {
+        const auto n = int_option(*value);
+        if (!n) return usage("genko export: argument --page: invalid int value: " + core::py_repr_str(value->toStdString()));
+        wanted = *n;
+    }
+    const std::string which = a.value("--paths") ? a.value("--paths")->toStdString() : std::string("all");
+    const fs::path src = path_arg(a.positional[0]);
+    const fs::path out = path_arg(a.positional[1]);
+    const auto loaded = storage::load_document(src);
+    const core::Document& doc = loaded.document;
+    const core::Page* page = nullptr;
+    for (std::size_t i = 0; i < doc.pages.size(); ++i) {
+        if (doc.pages[i]->index == core::Num(wanted) && !doc.is_deferred(i)) page = &doc.page(i);
+    }
+    if (page == nullptr) return usage("no page " + std::to_string(wanted), 1);
+    int count = 0;
+    const std::string text = render::path_info::illustrator(doc, *page, which, &count);
+    if (count == 0) return fail("no paths match " + core::py_repr_str(which) + " on page " + std::to_string(wanted), "apply", ascii, 1);
+    const bool file_given = !formats::detail::suffix(out).empty();
+    const fs::path dest = file_given ? out : formats::detail::join(out, "p" + formats::detail::padded(page->index, 3) + ".ai");
+    if (!file_given) fs::create_directories(out);
+    storage::write_atomic(dest, text);
+    if (a.flag("--json")) {
+        print_json(core::Json{{"ok", true}, {"count", 1}, {"files", core::Json::array({core::path_to_utf8(dest)})}, {"paths", count}}, ascii);
+    } else {
+        write_text(core::path_to_utf8(dest) + "\n", stdout);
+    }
+    return 0;
+}
+
 // `genko export <book> <out> [--format F] [options]` (Python's export command, genko/__main__.py): the book written
 // out in one format; the paths of the files one a line, or with --json {"ok": true, "count", "files"}.
 int export_command(const QStringList& args, bool ascii) {
@@ -674,12 +727,15 @@ int export_command(const QStringList& args, bool ascii) {
                                           {"--color", true},      {"--icc", true},       {"--screen-lpi", true}, {"--screen-shape", true},
                                           {"--area", true},       {"--fps", true},       {"--seconds", true},    {"--page", true},
                                           {"--psd-text", true},   {"--rasterize-unsupported", false}, {"--lut-size", true},
-                                          {"--title", true}};
+                                          {"--title", true},      {"--paths", true}};
     Arguments a;
     if (auto error = parse_arguments(args, kOptions, 2, "src, out", a)) return usage("genko export: " + *error);
     // PC2a (file.export.colorLookupTables, the C++ build's own: not among Python's formats, whose choices it leaves as they
     // are): a page's correction layers as a .cube file
     if (a.value("--format") == std::optional<QString>(QStringLiteral("cube"))) return export_cube(a, ascii);
+    // vector@1 (PC3 C-a, file.export.pathsToIllustrator, the C++ build's own): a page's paths as an Illustrator file
+    if (a.value("--format") == std::optional<QString>(QStringLiteral("ai"))) return export_ai(a, ascii);
+    if (a.value("--paths")) return usage("genko export: argument --paths: only with --format ai");
     if (a.value("--lut-size") || a.value("--title")) return usage("genko export: argument --lut-size, --title: only with --format cube");
     // argparse's choices
     const auto choice = [&](const char* name, const char* fallback, std::initializer_list<const char*> choices) -> std::optional<std::string> {

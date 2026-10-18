@@ -9,6 +9,7 @@
 
 #include <QTemporaryDir>
 
+#include <algorithm>
 #include <cmath>
 #include <filesystem>
 #include <numbers>
@@ -21,6 +22,9 @@
 #include "core/paths.hpp"
 #include "core/vector.hpp"
 #include "render/path_raster.hpp"
+#include "render/path_trace.hpp"
+#include "render/psd_paths.hpp"
+#include "render/vector_masks.hpp"
 #include "storage/lock.hpp"
 #include "storage/reader.hpp"
 #include "storage/transaction.hpp"
@@ -432,6 +436,155 @@ private slots:
         core::Document wrong = small_book();
         wrong.edit_page(0).layers.at(0).shapes = vec::make_shapes({part});  // (the background fill layer)
         QVERIFY_THROWS_EXCEPTION(core::Error, vec::validate_vector(wrong));
+    }
+
+    // PC3 C-a — trace.rs: square_contour_orientation_and_count (the contour through the pixels' outer half, its corners cut
+    // at 45°: 12 − 4·0.125, the inside on its left), traced_rect_has_corners; a circle traced within its tolerance, a ring
+    // (the hole excluded), the box's offset kept.
+    void trace() {
+        const int w = 6, h = 5;
+        std::vector<float> v(std::size_t(w) * h, 0.0f);
+        for (int y = 1; y < 4; ++y)
+            for (int x = 1; x < 5; ++x) v[std::size_t(y) * w + x] = 1.0f;
+        const auto loops = render::path_trace::contours(v, pr::PixelBox{0, 0, w, h});
+        QCOMPARE(loops.size(), std::size_t(1));
+        double shoelace = 0;
+        for (std::size_t i = 0; i < loops[0].size(); ++i) {
+            const auto& p = loops[0][i];
+            const auto& q = loops[0][(i + 1) % loops[0].size()];
+            shoelace += p.first * q.second - q.first * p.second;
+        }
+        shoelace *= 0.5;
+        QVERIFY2(shoelace < 0, std::to_string(shoelace).c_str());
+        QVERIFY(std::fabs(-shoelace - 11.5) < 1e-9);
+        const int rw = 40, rh = 30;
+        std::vector<float> rect(std::size_t(rw) * rh, 0.0f);
+        for (int y = 5; y < 25; ++y)
+            for (int x = 5; x < 35; ++x) rect[std::size_t(y) * rw + x] = 1.0f;
+        const vec::Path traced = render::path_trace::trace_mask(rect, pr::PixelBox{0, 0, rw, rh}, 0.0f, 1.0);
+        QCOMPARE(traced.subpaths.size(), std::size_t(1));
+        const auto& knots = traced.subpaths[0].knots;
+        QVERIFY2(knots.size() >= 4 && knots.size() <= 12, std::to_string(knots.size()).c_str());
+        QVERIFY(std::count_if(knots.begin(), knots.end(), [](const vec::Knot& k) { return !k.smooth; }) >= 4);
+        // (a disc of radius 20 traced within 0.5 px: its area within 1 % of the disc's coverage; a ring: two subpaths, the
+        // hole excluded, the same area as the coverage)
+        const int dw = 60;
+        std::vector<float> disc(std::size_t(dw) * dw, 0.0f), ring(std::size_t(dw) * dw, 0.0f);
+        for (int y = 0; y < dw; ++y) {
+            for (int x = 0; x < dw; ++x) {
+                const double r = std::hypot(x + 0.5 - 30, y + 0.5 - 30);
+                disc[std::size_t(y) * dw + x] = r <= 20 ? 1.0f : 0.0f;
+                ring[std::size_t(y) * dw + x] = r <= 20 && r >= 10 ? 1.0f : 0.0f;
+            }
+        }
+        const auto traced_area = [&](const vec::Path& p) { return area(cov(p, pr::PixelBox{0, 0, dw, dw})); };
+        const vec::Path round = render::path_trace::trace_mask(disc, pr::PixelBox{0, 0, dw, dw}, 0.0f, 0.5);
+        QVERIFY(std::fabs(traced_area(round) - area(disc)) / area(disc) < 0.01);
+        QVERIFY(std::all_of(round.subpaths[0].knots.begin(), round.subpaths[0].knots.end(), [](const vec::Knot& k) { return k.smooth; }));
+        const vec::Path holed = render::path_trace::trace_mask(ring, pr::PixelBox{0, 0, dw, dw}, 0.0f, 0.5);
+        QCOMPARE(holed.subpaths.size(), std::size_t(2));
+        QCOMPARE(holed.subpaths[1].op, vec::PathOp::Exclude);
+        QVERIFY(std::fabs(traced_area(holed) - area(ring)) / area(ring) < 0.02);
+        // (a box elsewhere on the grid: the same path, moved to where its pixels are; its anchors on the pixels' edges)
+        const vec::Path moved = render::path_trace::trace_mask(rect, pr::PixelBox{100, 50, 100 + rw, 50 + rh}, 0.0f, 1.0);
+        const vec::Path expected = traced.transformed({1.0, 0.0, 0.0, 1.0, 100.0, 50.0});
+        QCOMPARE(moved.subpaths.size(), expected.subpaths.size());
+        QCOMPARE(moved.subpaths[0].knots.size(), expected.subpaths[0].knots.size());
+        for (std::size_t i = 0; i < expected.subpaths[0].knots.size(); ++i) {
+            const vec::Knot& a = moved.subpaths[0].knots[i];
+            const vec::Knot& b = expected.subpaths[0].knots[i];
+            QCOMPARE(a.smooth, b.smooth);
+            for (const auto& [p, q] : {std::pair{a.anchor, b.anchor}, std::pair{a.in, b.in}, std::pair{a.out, b.out}}) {
+                QVERIFY(std::fabs(p.x - q.x) < 1e-6 && std::fabs(p.y - q.y) < 1e-6);
+            }
+            QVERIFY(a.anchor.x >= 105 - 1e-9 && a.anchor.x <= 135 + 1e-9 && a.anchor.y >= 55 - 1e-9 && a.anchor.y <= 75 + 1e-9);
+        }
+    }
+
+    // PC3 C-a — psd/src/path.rs: subpaths_roundtrip_and_bytes_are_stable, vector_mask_block_roundtrip, fixed_point (a
+    // path's records and the vmsk block read back the same, in mm of the paper; the operations as psd-tools has them);
+    // the resources of a page's paths; a name of other letters kept as UTF-8.
+    void psdPaths() {
+        namespace pp = render::psd_paths;
+        vec::Path p;
+        p.subpaths.push_back(polygon({{25, 25}, {75, 25}, {50, 75}}));
+        p.subpaths.back().knots[1] = vec::Knot{{75, 25}, {62.5, 12.5}, {87.5, 37.5}, true};
+        p.subpaths.push_back(polygon({{0, 100}, {6.25, 93.75}}, vec::PathOp::Subtract, false));
+        p.inverted = true;
+        const std::string bytes = pp::records(p, 100, 100);
+        QCOMPARE(bytes.size(), std::size_t((2 + 2 + 5) * 26));
+        QCOMPARE(static_cast<int>(static_cast<unsigned char>(bytes[26 * 2 + 5])), 1);    // (the first subpath: combine, 1)
+        QCOMPARE(static_cast<int>(static_cast<unsigned char>(bytes[26 * 6 + 5])), 2);    // (subtract: 2)
+        const auto back = pp::path_of(bytes, 100, 100);
+        QVERIFY(back.has_value());
+        QCOMPARE(back->subpaths.size(), std::size_t(2));
+        QVERIFY(back->inverted);
+        QCOMPARE(back->subpaths[1].op, vec::PathOp::Subtract);
+        QVERIFY(!back->subpaths[1].closed);
+        for (std::size_t s = 0; s < 2; ++s) {
+            for (std::size_t k = 0; k < p.subpaths[s].knots.size(); ++k) {
+                const vec::Knot& a = p.subpaths[s].knots[k];
+                const vec::Knot& b = back->subpaths[s].knots[k];
+                QVERIFY(std::fabs(a.anchor.x - b.anchor.x) < 1e-5 && std::fabs(a.in.y - b.in.y) < 1e-5 && std::fabs(a.out.x - b.out.x) < 1e-5);
+                QCOMPARE(a.smooth, b.smooth);
+            }
+        }
+        QCOMPARE(pp::records(*back, 100, 100), bytes);
+        vec::VectorMask m;
+        m.path = p;
+        m.linked = false;
+        m.enabled = false;
+        const std::string block = pp::vmsk(m, 100, 100);
+        QCOMPARE(static_cast<int>(static_cast<unsigned char>(block[7])), 1 | 2 | 4);  // (inverted, not linked, disabled)
+        const auto mask = pp::vector_mask_of(block, 100, 100);
+        QVERIFY(mask && mask->path.inverted && !mask->linked && !mask->enabled);
+        QVERIFY(!pp::vector_mask_of(std::string(4, '\0'), 100, 100));
+        core::Page page;
+        page.spec.width_mm = core::Num(100);
+        page.spec.height_mm = core::Num(100);
+        page.paths.push_back(vec::NamedPath{"輪郭", p});
+        page.work_path = p;
+        page.clipping_path = vec::ClippingPath{"輪郭", 0.5};
+        const std::string resources = pp::resources(page);
+        QCOMPARE(resources.substr(0, 4), std::string("8BIM"));
+        QCOMPARE(pp::name_of(pp::resource_name("輪郭")), std::string("輪郭"));
+        QCOMPARE(pp::name_of(std::string("\xe9t\xe9")), std::string("\xc3\xa9t\xc3\xa9"));  // (Latin-1 bytes, not UTF-8)
+        const auto clip = pp::clipping_of(pp::clipping(*page.clipping_path));
+        QVERIFY(clip && clip->name == "輪郭" && std::fabs(clip->flatness - 0.5) < 1e-4);
+    }
+
+    // PC3 C-a: a vector mask as the drawing lays it (render/vector_masks): its coverage over a part the same as over the
+    // whole there, its density, its feather softening the edge, nothing when it is off.
+    void vectorMaskShown() {
+        core::Page page;
+        page.spec.width_mm = core::Num(100);
+        page.spec.height_mm = core::Num(100);
+        vec::VectorMask m;
+        m.path = pr::rect_path(0, 0, 50, 100);
+        const render::Size size{100, 100};
+        const render::Box all{0, 0, 100, 100};
+        const render::Image sharp = render::vector_masks::shown(page, m, size, all);
+        QCOMPARE(static_cast<int>(sharp.getpixel(10, 50)[0]), 255);
+        QCOMPARE(static_cast<int>(sharp.getpixel(60, 50)[0]), 0);
+        const render::Box part{40, 40, 70, 60};
+        QCOMPARE(render::vector_masks::shown(page, m, size, part).tobytes(), sharp.crop(part).tobytes());
+        m.density = 0.4;
+        QCOMPARE(static_cast<int>(render::vector_masks::shown(page, m, size, all).getpixel(60, 50)[0]), 153);  // (255 − 0.4 × 255)
+        m.density = 1.0;
+        m.feather_mm = 6.0;  // (σ = 3 mm: 3 px)
+        const render::Image soft = render::vector_masks::shown(page, m, size, all);
+        QVERIFY(soft.getpixel(50, 50)[0] > 100 && soft.getpixel(50, 50)[0] < 155);
+        QVERIFY(soft.getpixel(45, 50)[0] > soft.getpixel(50, 50)[0] && soft.getpixel(55, 50)[0] < soft.getpixel(50, 50)[0]);
+        QCOMPARE(render::vector_masks::shown(page, m, size, part).tobytes(), soft.crop(part).tobytes());
+        m.enabled = false;
+        QCOMPARE(static_cast<int>(render::vector_masks::shown(page, m, size, all).getpixel(90, 50)[0]), 255);
+        core::Layer layer;
+        QVERIFY(!render::vector_masks::with_vector_mask(page, layer, size, all, std::nullopt));
+        layer.vector_mask = m;
+        layer.vector_mask->enabled = true;
+        layer.vector_mask->feather_mm = 0;
+        const auto both = render::vector_masks::with_vector_mask(page, layer, size, all, render::Image::create("L", size, render::Ink(128)));
+        QVERIFY(both && both->getpixel(10, 50)[0] == 128 && both->getpixel(90, 50)[0] == 0);
     }
 };
 

@@ -905,6 +905,22 @@ const std::vector<Rule>& rules() {
         r.push_back(rule("this page does not composite the blend mode \\S+", "このページの色では、その描画モードは使えません"));
         r.push_back(rule("(?:index|to) is the filter's place .*", "スマートフィルターの位置の指定が正しくありません"));
         r.push_back(rule("mask from_area takes the area", "フィルターマスクにする選択範囲がありません"));
+        // (vector@1, PC3 C-a: paths and vector masks, render/ops_paths, render/path_areas)
+        r.push_back(rule("the page has no work path", "このページには作業用パスがありません（ペンツールで描くか、選択範囲から作ります）"));
+        r.push_back(rule("no path named '(.*)'", "パス「\\1」はありません"));
+        r.push_back(rule("a path named '(.*)' is already on the page", "パス「\\1」はもうあります。ほかの名前にします"));
+        r.push_back(rule(R"(to cannot be the work path.*)", "「work」は作業用パスの名前です。ほかの名前にします"));
+        r.push_back(rule(R"((?:name|to): .*(?:empty|longer|characters).*)", "パスの名前は 1〜64 文字にします"));
+        r.push_back(rule("the path has nothing to stroke", "パスに、線を引ける所がありません"));
+        r.push_back(rule("the layer has no vector mask.*", "このレイヤーにはベクトルマスクがありません"));
+        r.push_back(rule("layer \\S+ has no vector mask", "このレイヤーにはベクトルマスクがありません"));
+        r.push_back(rule("vector_mask: the layer \\S+ has no vector mask", "そのレイヤーにはベクトルマスクがありません"));
+        r.push_back(rule("a folder cannot take a vector mask.*", "フォルダにはベクトルマスクを付けられません（中のレイヤーに付けます）"));
+        r.push_back(rule("give one of path, path_name, reveal_all and hide_all", "ベクトルマスクの形は、パス・すべての領域を表示・すべての領域を隠すのどれか 1 つで指定します"));
+        r.push_back(rule("the line \\S+ has no letters to trace", "この台詞には、パスにする文字がありません"));
+        r.push_back(rule("the line \\S+ is not placed on a page", "この台詞はページに置かれていません"));
+        r.push_back(rule("blend paints a paint layer's pixels.*", "描画モードを付けた塗りつぶしは、ペイントレイヤーにだけできます"));
+        r.push_back(rule("shape_part: the layer \\S+ has no shape part.*", "そのレイヤーに、その形はありません"));
         // (the C++ build's own: what it does not do yet, and saving)
         r.push_back(rule("official export is not in the C\\+\\+ build yet",
                          "この版の Genko では、まだ正式な書き出し（確認と承認の記録つき）はできません（ふつうの書き出しはできます）"));

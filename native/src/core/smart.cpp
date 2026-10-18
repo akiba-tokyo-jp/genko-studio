@@ -637,7 +637,7 @@ std::optional<Layer> plain_layer(const Document* doc, const Page& page, const La
     const Layer& inner = inner_page.layers.front();
     if (inner.kind == LayerKind::Folder || inner.kind == LayerKind::Adjust) return std::nullopt;
     if (!(inner.blend.empty() || inner.blend == "normal") || inner.clip) return std::nullopt;
-    if (layer.mask || (layer.effect && py_truthy(*layer.effect)) || (layer.screen && py_truthy(*layer.screen)) ||
+    if (layer.mask || layer.vector_mask || (layer.effect && py_truthy(*layer.effect)) || (layer.screen && py_truthy(*layer.screen)) ||
         (layer.color && !layer.color->empty()))
         return std::nullopt;
     if (!(inner_page.spec.width_mm == page.spec.width_mm) || !(inner_page.spec.height_mm == page.spec.height_mm) ||

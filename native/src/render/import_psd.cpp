@@ -5,6 +5,7 @@
 #include <cerrno>
 #include <climits>
 #include <cstring>
+#include <map>
 #include <optional>
 #include <string>
 #include <vector>
@@ -33,6 +34,7 @@
 #include "render/ink_canvas.hpp"
 #include "render/psd.hpp"
 #include "render/psd_adjust.hpp"
+#include "render/psd_paths.hpp"
 #include "render/raster.hpp"
 #include "render/selection.hpp"
 
@@ -400,6 +402,18 @@ void import_psd(core::OpContext& c) {
     const Size page_px{static_cast<int>(where.page_w), static_cast<int>(where.page_h)};
     const Size shown{static_cast<int>(where.shown_w), static_cast<int>(where.shown_h)};
     const bool same_size = where.shown_w == file.width() && where.shown_h == file.height();
+    // (vector@1, PC3 C-a: a path of the file — fractions of its canvas — on the page as its picture is placed, mm)
+    const double mm_x = page.spec.width_mm.value() / static_cast<double>(where.page_w);
+    const double mm_y = page.spec.height_mm.value() / static_cast<double>(where.page_h);
+    const core::vector::Affine onto{static_cast<double>(where.shown_w) * mm_x, 0.0, 0.0, static_cast<double>(where.shown_h) * mm_y,
+                                    static_cast<double>(where.at_x) * mm_x, static_cast<double>(where.at_y) * mm_y};
+    const auto vector_mask_of = [&](const psd::Layer& item) -> std::optional<core::vector::VectorMask> {
+        const std::optional<std::string_view> block = file.vector_mask(item);
+        if (!block) return std::nullopt;
+        std::optional<core::vector::VectorMask> mask = psd_paths::vector_mask_of(*block, 1.0, 1.0);
+        if (mask) mask->path = mask->path.transformed(onto);
+        return mask;
+    };
     std::vector<core::Layer> made;
     for (std::size_t i = 0; i < layers.size(); ++i) {
         const psd::Layer& item = layers[i];
@@ -436,6 +450,7 @@ void import_psd(core::OpContext& c) {
             core::lut3d::keep_luts(doc.luts, item.luts, *layer.adjust);  // (PC2a: a color lookup's table into the book)
             layer.blend = "normal";
             if (auto mask = mask_of()) layer.mask = std::move(*mask);
+            layer.vector_mask = vector_mask_of(item);
         } else {
             layer.kind = core::LayerKind::Raster;
             // (a painting app's picture: on a monochrome page it prints in grey and tones)
@@ -461,6 +476,7 @@ void import_psd(core::OpContext& c) {
             }
             if (!merged && !merged_inks) {
                 if (auto mask = mask_of()) layer.mask = std::move(*mask);
+                layer.vector_mask = vector_mask_of(item);
             }
         }
         made.push_back(std::move(layer));
@@ -488,6 +504,40 @@ void import_psd(core::OpContext& c) {
     target.layers.insert(target.layers.begin() + static_cast<std::ptrdiff_t>(at), std::make_move_iterator(made.begin()),
                          std::make_move_iterator(made.end()));
     c.report = Json::object({{"layers", std::move(listed)}, {"skipped", std::move(skipped)}});
+    // (vector@1, PC3 C-a: the file's saved paths onto the page — a name the page has already takes a number —, its work
+    // path and clipping path where the page has none)
+    Json paths = Json::array();
+    std::map<std::string, std::string> renamed;
+    for (const psd::File::PathResource& resource : file.path_resources()) {
+        if (resource.id == psd_paths::kClippingPath) continue;
+        std::optional<core::vector::Path> path = psd_paths::path_of(resource.data, 1.0, 1.0);
+        if (!path) continue;
+        *path = path->transformed(onto);
+        if (resource.id == psd_paths::kWorkPath) {
+            if (!target.work_path) {
+                target.work_path = std::move(*path);
+                paths.push_back("work");
+            }
+            continue;
+        }
+        if (target.paths.size() >= core::vector::kPathsMax) continue;
+        std::string given = core::py_strip(first_chars(psd_paths::name_of(resource.name), 56));
+        if (given.empty()) given = "パス";
+        std::string name = given;
+        for (int n = 2; std::any_of(target.paths.begin(), target.paths.end(), [&](const core::vector::NamedPath& p) { return p.name == name; }); ++n)
+            name = given + " " + std::to_string(n);
+        renamed[given] = name;
+        target.paths.push_back(core::vector::NamedPath{name, std::move(*path)});
+        paths.push_back(name);
+    }
+    for (const psd::File::PathResource& resource : file.path_resources()) {
+        if (resource.id != psd_paths::kClippingPath || target.clipping_path) continue;
+        if (auto clip = psd_paths::clipping_of(resource.data); clip && renamed.contains(clip->name)) {
+            clip->name = renamed[clip->name];
+            target.clipping_path = std::move(*clip);
+        }
+    }
+    if (!paths.empty()) (*c.report)["paths"] = std::move(paths);
     if (op.contains("embedded_profile")) (*c.report)["embedded_profile"] = import_profile::report(way);
 }
 

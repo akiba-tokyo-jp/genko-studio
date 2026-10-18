@@ -92,6 +92,13 @@ genko_library(genko_render
     ops_vector2.cpp
     ops_transform.cpp
     ops_pagesize.cpp
+    # PC3 C-a (パスとベクトルマスク)
+    path_trace.cpp
+    path_areas.cpp
+    vector_masks.cpp
+    psd_paths.cpp
+    path_info.cpp
+    ops_paths.cpp
     ${GENKO_MATERIAL_RESOURCES}
     ${GENKO_TEXT_RESOURCES}
   PUBLIC_DEPS genko_core Qt6::Core

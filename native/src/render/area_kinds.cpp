@@ -9,6 +9,7 @@
 #include "core/pyops.hpp"
 #include "render/op_limits.hpp"
 #include "render/page.hpp"
+#include "render/path_areas.hpp"
 #include "render/png.hpp"
 #include "render/selection.hpp"
 #include "render/selection_ext.hpp"
@@ -73,11 +74,11 @@ const std::vector<Kind>& table() {
         {"quick", "B3", nullptr},
         {"focus", "B3", nullptr},
         {"refine", "B3", nullptr},
-        // C-a (パス): a path's coverage (render/path_raster)
-        {"path", "C-a", nullptr},
-        {"path_name", "C-a", nullptr},
-        {"shape_part", "C-a", nullptr},
-        {"vector_mask", "C-a", nullptr},
+        // C-a (パス): a path's coverage (render/path_areas)
+        {"path", "C-a", &path_areas::path},
+        {"path_name", "C-a", &path_areas::path_name},
+        {"shape_part", "C-a", &path_areas::shape_part},
+        {"vector_mask", "C-a", &path_areas::vector_mask},
     };
     return all;
 }

@@ -297,8 +297,8 @@ private slots:
         const std::vector<std::pair<const char*, const char*>> frames{
             {"quick_mask", "B1"}, {"magic_erase", "B1"}, {"outline_area", "B2"}, {"apply_layer_mask", "B2"}, {"mask_from_transparency", "B2"},
             {"matting", "B3"}, {"clone_stamp", "B4"}, {"healing_brush", "B4"}, {"spot_healing", "B4"}, {"history_brush", "B4"},
-            {"content_aware_fill", "B4"}, {"set_path", "C-a"}, {"delete_path", "C-a"}, {"rename_path", "C-a"}, {"make_work_path", "C-a"},
-            {"text_to_path", "C-a"}, {"stroke_path", "C-a"}, {"set_vector_mask", "C-a"}, {"add_shape_part", "C-b"}, {"edit_shape_part", "C-b"},
+            {"content_aware_fill", "B4"},  // (C-a's set_path … set_vector_mask: written, test_contract_paths)
+            {"add_shape_part", "C-b"}, {"edit_shape_part", "C-b"},
             {"combine_shape_parts", "C-b"}, {"move_shape_parts", "C-b"}, {"transform_layers", "C-c"}, {"content_aware_scale", "C-c"},
             {"align_layers", "C-d"}, {"distribute_layers", "C-d"}, {"arrange_layers", "C-d"}, {"link_layers", "C-d"}, {"resize_pages", "C-e"},
             {"set_canvas_size", "C-e"}, {"crop_page", "C-e"}, {"trim_page", "C-e"}, {"reveal_all", "C-e"}, {"rotate_pages", "C-e"}};

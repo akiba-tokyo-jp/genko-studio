@@ -1198,7 +1198,10 @@ private slots:
                                            "smart_convert", "smart_place", "smart_profile", "smart_copy", "smart_transform", "rasterize_layer",
                                            "smart_replace", "smart_relink", "smart_update", "smart_embed", "smart_link", "smart_to_page",
                                            "smart_filter_add", "smart_filter_set", "smart_filter_move", "smart_filter_delete", "smart_filter_state",
-                                           "smart_stack", "rasterize_lines"};
+                                           "smart_stack", "rasterize_lines",
+                                           // (PC3 C-a, vector@1: this build's own, SPEC.md COLOR-07)
+                                           "set_path", "delete_path", "rename_path", "make_work_path", "text_to_path", "stroke_path",
+                                           "set_vector_mask"};
         for (const std::string& name : genko::render::ops_registry().names()) {
             if (listed.count(name) == 0 && own.count(name) == 0) missing += (missing.empty() ? "" : ", ") + name;
         }

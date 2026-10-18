@@ -52,6 +52,7 @@
 #include "render/text/fonts.hpp"
 #include "render/text/lettering.hpp"
 #include "render/tones.hpp"
+#include "render/vector_masks.hpp"
 
 namespace genko::render {
 
@@ -601,12 +602,21 @@ std::optional<Image> layer_strokes(const Ctx& ctx, const Layer& layer, const Box
 
 // --- masks and colours of a layer --------------------------------------------------------------------------------------
 
+// A layer's masks as it is drawn over `area`: its layer mask shown (masks@1, render/layer_masks; when it has one and it is
+// on) times its vector mask (vector@1, PC3 C-a: render/vector_masks; when it has one and it is on); none when neither.
+std::optional<Image> mask_shown(const Ctx& ctx, const Layer& layer, const Box& area, Resample resample) {
+    std::optional<Image> shown;
+    if (layer.mask && layer.mask->png && !layer.mask->png->empty() && layer.mask->enabled)
+        shown = layer_masks::shown(*ctx.page, *layer.mask, decoded(layer.mask->png, "L"), ctx.size, area, resample);
+    return vector_masks::with_vector_mask(*ctx.page, layer, ctx.size, area, std::move(shown));
+}
+
 // render._masked
 Image masked(const Ctx& ctx, const Layer& layer, Image image, const Box& area) {
-    if (!layer.mask || !layer.mask->png || layer.mask->png->empty() || !layer.mask->enabled) return image;
-    const Image shown = layer_masks::shown(*ctx.page, *layer.mask, decoded(layer.mask->png, "L"), ctx.size, area, Resample::Bilinear);
+    const std::optional<Image> shown = mask_shown(ctx, layer, area, Resample::Bilinear);
+    if (!shown) return image;
     if (image.mode() != "RGBA") image = image.convert("RGBA");
-    image.putalpha(chops::multiply(alpha_of(image), shown));
+    image.putalpha(chops::multiply(alpha_of(image), *shown));
     return image;
 }
 
@@ -926,7 +936,7 @@ Box area_of(const RenderOptions& options, Size size) {
 }
 
 void precise_strokes(ColorCanvas& target, const Ctx& ctx, const Layer& layer, const Box& area, const Image* panel) {
-    if (layer.mask || layer.effect || layer.screen || layer.color || layer.panel_each || !layer.patches.empty() || layer.raster_png)
+    if (layer.mask || layer.vector_mask || layer.effect || layer.screen || layer.color || layer.panel_each || !layer.patches.empty() || layer.raster_png)
         throw NotYetPorted("precise stroke layer style");
     ColorCanvas own(transparent(area), target.space());
     if (ctx.episode != nullptr) paper::keep_all(ctx.episode->papers);  // (BRUSH-01: its brushes' papers)
@@ -971,7 +981,7 @@ ColorPicture crop_color_picture(const ColorPicture& p, const Box& box) {
 // opacity and blend), or its precise lines alone (precise_strokes)? Else it is drawn as one picture (precise_layer).
 bool plain_precise(const Layer& layer) {
     if (core::has_color_strokes(layer)) {
-        return layer.kind == LayerKind::Strokes && !layer.color_raster && !layer.mask && !layer.effect && !layer.screen && !layer.color &&
+        return layer.kind == LayerKind::Strokes && !layer.color_raster && !layer.mask && !layer.vector_mask && !layer.effect && !layer.screen && !layer.color &&
                !layer.panel_each && layer.patches.empty() && !layer.raster_png;
     }
     return !layer.effect && !layer.screen && !layer.color && layer.patches.empty() && layer.stroke_count() == 0;
@@ -1103,6 +1113,7 @@ void precise_layer(ColorCanvas& canvas, const Ctx& ctx, const Layer& layer, cons
         std::optional<Image> shown;  // (its mask, as masked() takes it)
         if (layer.mask && layer.mask->png && !layer.mask->png->empty() && layer.mask->enabled)
             shown = layer_masks::shown(*ctx.page, *layer.mask, decoded(layer.mask->png, "L"), ctx.size, area, Resample::Bilinear);
+        shown = vector_masks::with_vector_mask(*ctx.page, layer, ctx.size, area, std::move(shown));  // (vector@1, PC3 C-a)
         canvas.blend(core::ColorRasterView(*layer.color_raster), ctx.size, area, layer.opacity, layer.clip, layer.blend, shown ? &*shown : nullptr);
         return;
     }
@@ -1140,6 +1151,7 @@ void precise_layer(ColorCanvas& canvas, const Ctx& ctx, const Layer& layer, cons
     std::optional<Image> shown;
     if (layer.mask && layer.mask->png && !layer.mask->png->empty() && layer.mask->enabled)
         shown = layer_masks::shown(*ctx.page, *layer.mask, decoded(layer.mask->png, "L"), ctx.size, area, Resample::Bilinear);
+    shown = vector_masks::with_vector_mask(*ctx.page, layer, ctx.size, area, std::move(shown));  // (vector@1, PC3 C-a)
     canvas.blend(picture, layer.opacity, layer.clip, layer.blend, shown ? &*shown : nullptr);
 }
 
@@ -1166,6 +1178,7 @@ bool smart_precise_layer(ColorCanvas& canvas, const Ctx& ctx, const Layer& layer
     std::optional<Image> shown;
     if (layer.mask && layer.mask->png && !layer.mask->png->empty() && layer.mask->enabled)
         shown = decoded(layer.mask->png, "L").resize_region(ctx.size, area, Resample::Bilinear);
+    shown = vector_masks::with_vector_mask(*ctx.page, layer, ctx.size, area, std::move(shown));  // (vector@1, PC3 C-a)
     canvas.blend(*picture, layer.opacity, layer.clip, layer.blend, shown ? &*shown : nullptr);
     return true;
 }
@@ -1198,6 +1211,7 @@ bool smart_ink_layer(InkCanvas& canvas, const Ctx& ctx, const Layer& layer, cons
     std::optional<Image> shown;
     if (layer.mask && layer.mask->png && !layer.mask->png->empty() && layer.mask->enabled)
         shown = decoded(layer.mask->png, "L").resize_region(ctx.size, area, Resample::Bilinear);
+    shown = vector_masks::with_vector_mask(*ctx.page, layer, ctx.size, area, std::move(shown));  // (vector@1, PC3 C-a)
     canvas.blend(*picture, layer.opacity, layer.clip, layer.blend, shown ? &*shown : nullptr);
     return true;
 }
@@ -1263,6 +1277,7 @@ void precise_shape_correction(ColorCanvas& canvas, const Ctx& ctx, const Layer& 
     std::optional<Image> mask;  // (its mask as render._adjusted resizes it)
     if (layer.mask && layer.mask->enabled && layer.mask->png && !layer.mask->png->empty())
         mask = layer_masks::shown(*ctx.page, *layer.mask, decoded(layer.mask->png, "L"), ctx.size, area, Resample::Bicubic);
+    mask = vector_masks::with_vector_mask(*ctx.page, layer, ctx.size, area, std::move(mask));  // (vector@1, PC3 C-a)
     canvas.correct(core::ColorRasterView(changed), layer.opacity, layer.clip, mask ? &*mask : nullptr, blend);
 }
 
@@ -1288,6 +1303,7 @@ void ink_shape_correction(InkCanvas& canvas, const Ctx& ctx, const Layer& layer,
     std::optional<Image> mask;
     if (layer.mask && layer.mask->enabled && layer.mask->png && !layer.mask->png->empty())
         mask = layer_masks::shown(*ctx.page, *layer.mask, decoded(layer.mask->png, "L"), ctx.size, area, Resample::Bicubic);
+    mask = vector_masks::with_vector_mask(*ctx.page, layer, ctx.size, area, std::move(mask));  // (vector@1, PC3 C-a)
     const InkPicture picture = sample_ink_raster(core::decode_ink_raster(changed), canvas.size(), Box{0, 0, canvas.size().width, canvas.size().height});
     canvas.correct(picture, layer.opacity, layer.clip, mask ? &*mask : nullptr, blend);
 }
@@ -1345,6 +1361,7 @@ void ink_correction(InkCanvas& canvas, const Ctx& ctx, const Layer& layer, const
     std::optional<Image> mask;  // (its mask as the precise page resizes it)
     if (layer.mask && layer.mask->enabled && layer.mask->png && !layer.mask->png->empty())
         mask = layer_masks::shown(*ctx.page, *layer.mask, decoded(layer.mask->png, "L"), ctx.size, area, exposure ? Resample::Bilinear : Resample::Bicubic);
+    mask = vector_masks::with_vector_mask(*ctx.page, layer, ctx.size, area, std::move(mask));  // (vector@1, PC3 C-a)
     if (exposure) (void)core::Exposure::parse(*layer.adjust);  // (settings it refuses: refused, as they were)
     core::AdjustPtr correction;
     try {
@@ -1441,6 +1458,7 @@ void ink_layer(InkCanvas& canvas, const Ctx& ctx, const Layer& layer, const Box&
         if (layer.mask && layer.mask->png && !layer.mask->png->empty() && layer.mask->enabled) {
             shown = layer_masks::shown(*ctx.page, *layer.mask, decoded(layer.mask->png, "L"), ctx.size, area, Resample::Bilinear);
         }
+        shown = vector_masks::with_vector_mask(*ctx.page, layer, ctx.size, area, std::move(shown));  // (vector@1, PC3 C-a)
         canvas.blend(picture, layer.opacity, layer.clip, layer.blend, shown ? &*shown : nullptr);
         return;
     }
@@ -1713,6 +1731,7 @@ RenderResult render(const Page& page_in, int dpi, const RenderOptions& options, 
                     std::optional<Image> mask;
                     if (layer.mask && layer.mask->enabled && layer.mask->png)
                         mask = layer_masks::shown(*ctx.page, *layer.mask, decoded(layer.mask->png, "L"), ctx.size, area, Resample::Bilinear);
+                    mask = vector_masks::with_vector_mask(*ctx.page, layer, ctx.size, area, std::move(mask));  // (vector@1, PC3 C-a)
                     precision->expose(core::Exposure::parse(*layer.adjust), layer.opacity, layer.clip, mask ? &*mask : nullptr, blend);
                     continue;
                 }
@@ -1739,6 +1758,7 @@ RenderResult render(const Page& page_in, int dpi, const RenderOptions& options, 
                     std::optional<Image> mask;
                     if (layer.mask && layer.mask->enabled && layer.mask->png && !layer.mask->png->empty())
                         mask = layer_masks::shown(*ctx.page, *layer.mask, decoded(layer.mask->png, "L"), ctx.size, area, Resample::Bicubic);
+                    mask = vector_masks::with_vector_mask(*ctx.page, layer, ctx.size, area, std::move(mask));  // (vector@1, PC3 C-a)
                     precision->adjust(*correction, layer.opacity, layer.clip, mask ? &*mask : nullptr, blend, Point{area.x0, area.y0});
                 }
                 continue;
@@ -1921,6 +1941,7 @@ void page_layers(const core::Page& page, const core::Document& episode, int dpi,
         if (layer.mask && layer.mask->png && !layer.mask->png->empty() && layer.mask->enabled) {
             out.mask = decoded(layer.mask->png, "L").resize(size);
         }
+        out.vector_mask = layer.vector_mask;  // (vector@1, PC3 C-a)
         each(std::move(out));
     }
     // the pen lines of the ink layer (page.ink_strokes: its first), each as render._stroke draws it, 3 px wide
@@ -2289,7 +2310,7 @@ void blend_color_strokes(ColorCanvas& canvas, const core::Page& page, const core
     Ctx ctx;ctx.page=&page;ctx.episode=episode;ctx.dpi=dpi;ctx.mode="proof";ctx.omitted=&omitted;
     ctx.size=Size{mm_to_px(page.spec.width_mm.value(),dpi),mm_to_px(page.spec.height_mm.value(),dpi)};
     const auto panels=clip_mask(page,ctx.size,dpi,area);
-    if (layer.panel_each && !layer.mask && !layer.effect && !layer.screen && !layer.color && layer.patches.empty() && !layer.raster_png) {
+    if (layer.panel_each && !layer.mask && !layer.vector_mask && !layer.effect && !layer.screen && !layer.color && layer.patches.empty() && !layer.raster_png) {
         // (each line in the panel it begins in, as precise_lines lays them for the page)
         canvas.blend(precise_lines(ctx, layer, area, panels ? &*panels : nullptr, nullptr, canvas.space()), layer.opacity, layer.clip, layer.blend);
         return;

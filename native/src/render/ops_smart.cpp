@@ -34,6 +34,7 @@
 #include "render/smart_decode.hpp"
 #include "render/smart_filters.hpp"
 #include "render/tones.hpp"
+#include "render/vector_masks.hpp"
 #include "storage/asset_store.hpp"
 
 namespace genko::render {
@@ -610,6 +611,7 @@ void rasterize(Document& doc, std::size_t at, std::size_t i) {
     const std::optional<Json> finished = picture_art && !page.color && !(page.rgb && page.rgb->depth > 8) ? finish_screen(doc, page, seen) : std::nullopt;
     Layer look = seen;  // (drawn alone, as it shows: without what stays the layer's)
     look.mask.reset();
+    look.vector_mask.reset();  // (vector@1, PC3 C-a: the layer's, as its mask)
     look.opacity = 1.0;
     look.blend = "normal";
     look.clip = false;
@@ -692,6 +694,16 @@ void rasterize(Document& doc, std::size_t at, std::size_t i) {
 void rasterize_layer(OpContext& c) {
     Document& doc = c.doc;
     const std::size_t at = core::require_page(doc, c.op);
+    if (core::truthy_at(c.op, "vector_mask")) {  // (vector@1, PC3 C-a: Layer › Rasterize › Vector Mask, render/vector_masks)
+        const std::size_t i = core::layer_by_id(doc.page(at), core::truthy_at(c.op, "id") ? core::py_str(c.op["id"]) : std::string());
+        const Layer& layer = doc.page(at).layers[i];
+        if (layer.locked) throw OpError("the layer is locked");
+        if (!layer.vector_mask) throw OpError("layer " + layer.id + " has no vector mask");
+        Page& page = doc.edit_page(at);
+        vector_masks::rasterize(page, page.layers[i]);
+        c.report = Json{{"ids", Json::array({page.layers[i].id})}};
+        return;
+    }
     std::set<std::string> kinds{"smart", "fill", "tone", "placed"};
     if (const Json* given = core::get(c.op, "kinds"); given != nullptr && !given->is_null()) {
         if (!given->is_array()) throw OpError("kinds is a list of smart, fill, tone, placed, pen");

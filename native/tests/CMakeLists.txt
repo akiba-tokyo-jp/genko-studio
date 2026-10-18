@@ -323,6 +323,11 @@ genko_test(test_contract_smart SOURCES contract/test_contract_smart.cpp DEPS gen
 # embedded, drawn from its copy when the file is gone; contents written out (a page's PSD read by psd-tools); `genko package`.
 genko_test(test_contract_smart_links SOURCES contract/test_contract_smart_links.cpp DEPS genko_test_support genko_render_ops genko_formats
            LABELS contract TIMEOUT 900)
+# PC3 C-a (vector@1): a page's paths and a layer's vector mask — set, saved, the path kinds of an area, fill (its blend),
+# stroke, work paths from an area and from letters, the vector mask drawn on every kind of page, rasterized, merged;
+# through the command line saved, undone, inspect --paths, export --format ai; a PSD's paths and vmsk (psd-tools, import_psd).
+genko_test(test_contract_paths SOURCES contract/test_contract_paths.cpp DEPS genko_test_support genko_render_ops genko_formats
+           LABELS contract TIMEOUT 900)
 genko_test(test_contract_image_ops SOURCES contract/test_contract_image_ops.cpp DEPS genko_test_support genko_render
            LABELS contract TIMEOUT 900)
 
