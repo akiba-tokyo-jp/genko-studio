@@ -1,11 +1,13 @@
 // smart-objects@1 (PC3 A0, docs/cpp-migration/SPEC.md「スマートオブジェクト」): the ops that make and change smart objects
 // (this build's own: `genko schema` and the MCP tools' list stay as they are). PhotoCraft v0.2.0's
-// engine/src/smart_cmds.rs:476-539 (what converting a layer moves onto the smart object) and file_cmds.rs:288-331
-// (where a placed file lands), MIT (third_party/photocraft/NOTICE.md). The ops of PC3's later steps are registered
-// here and refused (not_yet_ported) until those steps write them.
+// engine/src/smart_cmds.rs:476-539 (what converting a layer moves onto the smart object), file_cmds.rs:288-331 (where a
+// placed file lands), layer_menu_cmds.rs:312-326 (a stack mode, PC3 A4) and type_cmds.rs:584 (a type layer rasterized:
+// here a line, PC3 A4), MIT (third_party/photocraft/NOTICE.md). The ops of PC3's other steps are registered by their
+// files (A1 render/ops_smart_contents.cpp, A2 render/ops_smart_filters.cpp).
 
 #include <algorithm>
 #include <cmath>
+#include <functional>
 #include <set>
 
 #include "core/base64.hpp"
@@ -20,7 +22,9 @@
 #include "core/smart.hpp"
 #include "core/strokes.hpp"
 #include "render/color_canvas.hpp"
+#include "render/imaging.hpp"
 #include "render/ink.hpp"
+#include "render/ink_canvas.hpp"
 #include "render/not_yet_ported.hpp"
 #include "render/ops_registry.hpp"
 #include "render/ops_smart_parts.hpp"
@@ -33,6 +37,9 @@
 #include "render/screentone.hpp"
 #include "render/smart_decode.hpp"
 #include "render/smart_filters.hpp"
+#include "render/text/balloons.hpp"
+#include "render/text/fonts.hpp"
+#include "render/text/lettering.hpp"
 #include "render/tones.hpp"
 #include "storage/asset_store.hpp"
 
@@ -606,20 +613,28 @@ std::optional<Json> finish_screen(const Document& doc, const Page& page, const L
                                   {"angle", finish.number("angle")}, {"black", 0.0}, {"white", 1.0}});
 }
 
+// A tone's picture (layer_image's: its ink's share as the alpha) as its ink as it prints: black, its share the alpha.
+Image tone_black(const Image& picture) {
+    Image black = Image::create("RGBA", picture.size(), Ink{0, 0, 0, 255});
+    black.putalpha(picture.getchannel(3));
+    return black;
+}
+
 // The layer's look as a paint layer's pixels at the paint layers' 200 dpi (raster::kWorkingDpi): an 8-bit page's PNG, a
 // page in precise colour's precise raster, a CMYK or Lab page's inks. Its mask, opacity, blend, clipping, screen and
-// colour stay as they were (they are the layer's, not drawn in); its effects are drawn in. A tone layer (on an 8-bit
-// page) becomes its tone's ink as the screen shows it — black, its share the alpha — screened as it printed (tone_screen);
-// a picture on an 8-bit monochrome page, the page's finish of it (finish_screen).
+// colour stay as they were (they are the layer's, not drawn in); its effects are drawn in. A tone layer becomes its tone's
+// ink as the screen shows it — black, its share the alpha (PC3 A4: on a page in precise colour that black in its values,
+// on a page of inks black by the page's rules, as the page draws a tone) — screened as it printed where its page prints
+// tones in dots (tone_screen); a picture on an 8-bit monochrome page, the page's finish of it (finish_screen).
 void rasterize(Document& doc, std::size_t at, std::size_t i) {
     const Page& page = doc.page(at);
     const Layer& seen = page.layers[i];
     if (seen.locked) throw OpError("the layer is locked");
     const bool tone = seen.kind == LayerKind::Tone || seen.role == LayerRole::Tone || (seen.tone && core::py_truthy(*seen.tone));
-    if (tone && (page.color || (page.rgb && page.rgb->depth > 8))) {
-        core::not_yet_ported("rasterize_layer of a tone layer on a page of inks or precise colour (PC3 A4)");
-    }
-    const std::optional<Json> screen = tone ? tone_screen(seen) : std::nullopt;
+    // (screened where the page prints its tones in dots — an RGB page of a monochrome book; a colour book's page and a page
+    // of inks print them flat, as the rasterized grey prints)
+    const bool dotted = !page.color && page.spec.expression != "color";
+    const std::optional<Json> screen = tone && dotted ? tone_screen(seen) : std::nullopt;
     const core::SmartContents* contents = seen.kind == LayerKind::Smart ? core::smart::contents_of(doc, seen) : nullptr;
     const bool picture_art = seen.kind == LayerKind::Placed || (contents != nullptr && contents->kind == "file");
     const std::optional<Json> finished = picture_art && !page.color && !(page.rgb && page.rgb->depth > 8) ? finish_screen(doc, page, seen) : std::nullopt;
@@ -636,7 +651,14 @@ void rasterize(Document& doc, std::size_t at, std::size_t i) {
     core::Bytes ink_raster, color_raster;
     std::optional<Image> picture;
     if (page.color) {
-        const core::InkPixels inks = composite_ink_layers(page, {look}, dpi, &doc, false);
+        core::InkPixels inks;
+        if (tone) {  // (its black by the page's rules, as the page lays a tone's 8-bit picture over its inks)
+            InkCanvas canvas(*page.color, size);
+            canvas.blend_rgba(tone_black(layer_image(page, look, dpi, &doc)), 1.0, false, "normal");
+            inks = canvas.ink_pixels(page.color->depth, true);
+        } else {
+            inks = composite_ink_layers(page, {look}, dpi, &doc, false);
+        }
         ink_raster = std::make_shared<const std::string>(core::encode_ink_raster(inks));
     } else if (page.rgb && page.rgb->depth > 8) {
         ColorCanvas canvas(Image::create("RGBA", size, Ink{0, 0, 0, 0}), RgbSpace::of(page));
@@ -652,7 +674,9 @@ void rasterize(Document& doc, std::size_t at, std::size_t i) {
             ctx.omitted = &omitted;
             deep = smart::picture_precise(ctx, look, Box{0, 0, size.width, size.height}, canvas.space());
         }
-        if (deep && !(look.effect && core::py_truthy(*look.effect))) {
+        if (tone) {
+            canvas.blend(tone_black(layer_image(page, look, dpi, &doc)), 1.0, false);
+        } else if (deep && !(look.effect && core::py_truthy(*look.effect))) {
             canvas.blend(*deep, 1.0, false);
         } else {
             canvas.blend(layer_image(page, look, dpi, &doc), 1.0, false);
@@ -661,11 +685,7 @@ void rasterize(Document& doc, std::size_t at, std::size_t i) {
     } else {
         picture = layer_image(page, look, dpi, &doc);
         if (finished) picture = finish_placed(*picture, look, page, &doc, dpi, "proof", true, Point{0, 0});  // (as the proof shows it)
-        if (tone) {  // (the tone's ink black, as it prints: its share is the alpha)
-            Image black = Image::create("RGBA", picture->size(), Ink{0, 0, 0, 255});
-            black.putalpha(picture->getchannel(3));
-            picture = std::move(black);
-        }
+        if (tone) picture = tone_black(*picture);  // (the tone's ink black, as it prints: its share is the alpha)
     }
     Layer& layer = doc.edit_page(at).layers[i];
     if (tone) {
@@ -743,10 +763,195 @@ void rasterize_layer(OpContext& c) {
     c.report = Json{{"ids", ids}};
 }
 
-// --- PC3's later steps: registered, refused until they are written -------------------------------------------------------
+// --- smart_stack (PC3 A4) ----------------------------------------------------------------------------------------------
 
-core::OpFunction later(std::string op, std::string step) {
-    return [op = std::move(op), step = std::move(step)](OpContext&) { core::not_yet_ported(op + " is not in the C++ build yet (PC3 " + step + ")"); };
+// レイヤー → スマートオブジェクト → スタックモード: the smart object's contents' layers combined pixel by pixel by a statistic
+// (render/stack), or ("none", null) composited as they are. Any smart object, as PhotoCraft's stack_mode
+// (layer_menu_cmds.rs:312-326); a file is one layer.
+void smart_stack(OpContext& c) {
+    Document& doc = c.doc;
+    const std::size_t at = core::require_page(doc, c.op);
+    const std::size_t i = smart_layer(doc.page(at), c.op);
+    if (doc.page(at).layers[i].locked) throw OpError("the layer is locked");
+    const Json* given = core::get(c.op, "mode");
+    std::string mode;  // (none given, or not a name: refused below)
+    if (given != nullptr && given->is_null()) mode = "none";
+    else if (given != nullptr && given->is_string()) mode = given->get<std::string>();
+    if (mode != "none" && std::find(core::smart::kStackModes.begin(), core::smart::kStackModes.end(), mode) == core::smart::kStackModes.end()) {
+        throw OpError("mode is a stack mode (entropy, kurtosis, maximum, mean, median, minimum, range, skewness, standard_deviation, summation, "
+                      "variance) or none");
+    }
+    Layer& layer = doc.edit_page(at).layers[i];
+    core::smart::put_setting(layer, "stack", mode == "none" ? Json(nullptr) : Json(mode));
+    // (a PSD's smart object shows Photoshop's picture until what it draws changes: from now on drawn from its contents)
+    if (Json* psd = layer.smart->contains("psd") ? &(*layer.smart)["psd"] : nullptr; psd != nullptr && psd->is_object()) psd->erase("shown");
+    c.report = Json{{"id", layer.id}, {"stack", mode}};
+}
+
+// --- rasterize_lines (PC3 A4) -------------------------------------------------------------------------------------------
+
+// A line drawn in its balloon on the page (render_page's placed lines; the others are drawn as labels).
+bool placed_line(const core::StoryLine& line) { return line.x_mm.truthy() || line.y_mm.truthy() || !line.balloon.empty(); }
+
+std::string group_of(const core::StoryLine& line) {
+    const Json* group = line.style.is_object() ? core::get(line.style, "group") : nullptr;
+    return group != nullptr && core::py_truthy(*group) ? core::dump_python(*group) : std::string();
+}
+
+// What `draw` paints as a layer's picture ("RGBA", `size`): drawn on black and on white, each pixel's cover its alpha and
+// its colour what it holds over black (as a page of inks takes in what is drawn in 8 bits) — laid over any page, the same
+// as drawn on it.
+Image drawn_alone(Size size, const std::function<void(Image&)>& draw) {
+    Image black = Image::create("RGBA", size, Ink{0, 0, 0, 255});  // (opaque: as the page's picture the lines are drawn on)
+    Image white = Image::create("RGBA", size, Ink{255, 255, 255, 255});
+    draw(black);
+    draw(white);
+    const Image b = black.mode() == "RGB" ? black : black.convert("RGB");
+    const Image w = white.mode() == "RGB" ? white : white.convert("RGB");
+    std::string bytes(std::size_t(size.width) * size.height * 4, '\0');
+    for (int y = 0; y < size.height; ++y) {
+        const auto* rb = reinterpret_cast<const unsigned char*>(b.raw()->image[y]);
+        const auto* rw = reinterpret_cast<const unsigned char*>(w.raw()->image[y]);
+        for (int x = 0; x < size.width; ++x) {
+            const unsigned char* pb = rb + x * 4;
+            const unsigned char* pw = rw + x * 4;
+            double alpha = 0;
+            for (unsigned c = 0; c < 3; ++c) alpha += 1.0 - (static_cast<double>(pw[c]) - pb[c]) / 255.0;
+            alpha = std::clamp(alpha / 3.0, 0.0, 1.0);
+            if (alpha <= 0) continue;
+            char* to = bytes.data() + (std::size_t(y) * size.width + x) * 4;
+            for (unsigned c = 0; c < 3; ++c) to[c] = static_cast<char>(static_cast<unsigned char>(std::clamp<long>(std::lround(pb[c] / alpha), 0, 255)));
+            to[3] = static_cast<char>(static_cast<unsigned char>(std::lround(alpha * 255.0)));
+        }
+    }
+    return Image::frombytes("RGBA", size, bytes);
+}
+
+// {frame id: (x, y, w, h) mm} of the page's panels, as render_page gives draw_lines.
+text::Panels panels_of(const Page& page) {
+    text::Panels out;
+    for (const core::Frame* f : page.leaf_frames())
+        out.emplace_back(f->id, std::array<double, 4>{f->rect.x.value(), f->rect.y.value(), f->rect.width.value(), f->rect.height.value()});
+    return out;
+}
+
+// レイヤー → ラスタライズ → テキスト (PhotoCraft's type.rasterize, layer.rasterize.type): lines of the page — their balloons
+// and letters as the page prints them ("balloon": false: their letters, rubies and halo alone) — drawn as a new paint layer
+// (200 dpi; a page in precise colour its values, a page of inks its inks), where they were drawn: over every layer, or
+// under the layer they are set under (below_layer); the lines then gone (or their balloons kept, without words, set under
+// the new layer: the letters over them as before). Lines joined into one balloon (style.group) come together. The layer is
+// not cut by the panels (as the lines were not).
+void rasterize_lines(OpContext& c) {
+    Document& doc = c.doc;
+    const std::size_t at = core::require_page(doc, c.op);
+    const Page& page = doc.page(at);
+    std::vector<std::string> named;
+    if (const Json* given = core::get(c.op, "ids"); given != nullptr && !given->is_null()) {
+        if (!given->is_array() || given->empty()) throw OpError("ids is a list of the lines' ids");
+        for (const Json& id : *given) named.push_back(core::py_str(id));
+    } else if (core::truthy_at(c.op, "id")) {
+        named.push_back(core::py_str(c.op["id"]));
+    } else {
+        throw OpError("ids (or id) names the lines");
+    }
+    const Json* balloon_flag = core::get(c.op, "balloon");
+    if (balloon_flag != nullptr && !balloon_flag->is_null() && !balloon_flag->is_boolean()) throw OpError("balloon is true or false");
+    const bool balloon = balloon_flag == nullptr || balloon_flag->is_null() || balloon_flag->get<bool>();
+    std::set<std::string> chosen, groups;
+    for (const std::string& id : named) {
+        const auto line = std::find_if(doc.story.begin(), doc.story.end(), [&](const core::StoryLine& l) { return l.id == id; });
+        if (line == doc.story.end()) throw OpError("no line " + id);
+        if (!(line->page_index == page.index)) throw OpError("line " + id + " is not on page " + page.index.repr());
+        if (!placed_line(*line)) throw OpError("line " + id + " has no balloon on the page");
+        chosen.insert(id);
+        if (const std::string group = group_of(*line); !group.empty()) groups.insert(group);
+    }
+    // (joined into one balloon: drawn as one, so they come together)
+    for (const core::StoryLine& line : doc.story) {
+        if (line.page_index == page.index && placed_line(line) && groups.contains(group_of(line))) chosen.insert(line.id);
+    }
+    // where they are drawn among the layers: one place for all of them
+    std::vector<const core::StoryLine*> lines;
+    std::optional<std::string> place;
+    for (const core::StoryLine& line : doc.story) {
+        if (!chosen.contains(line.id)) continue;
+        const Json* under = line.style.is_object() ? core::get(line.style, "below_layer") : nullptr;
+        std::string here;
+        if (under != nullptr && under->is_string() &&
+            std::any_of(page.layers.begin(), page.layers.end(), [&](const Layer& l) { return l.id == under->get_ref<const std::string&>(); }))
+            here = under->get<std::string>();
+        if (place && *place != here) throw OpError("the lines are drawn at different places among the layers (below_layer): rasterize them a place at a time");
+        place = here;
+        lines.push_back(&line);
+    }
+    // their picture, as the page prints them (no speakers' names)
+    const int dpi = raster::kWorkingDpi;
+    const Size size{mm_to_px(page.spec.width_mm.value(), dpi), mm_to_px(page.spec.height_mm.value(), dpi)};
+    const text::Panels panels = panels_of(page);
+    const text::LetterParts letters{false, true, true, true};
+    const std::optional<std::string> font_path(doc.font_path);
+    const auto draw = [&](Image& on) {  // (on an opaque "RGBA", as the page's picture is)
+        Image rgba = on.mode() == "RGBA" ? std::move(on) : on.convert("RGBA");
+        text::draw_lines(text::whole_page(rgba), lines, dpi, font_path, false, &panels, {}, nullptr, balloon ? nullptr : &letters);
+        on = std::move(rgba);
+    };
+    Image picture;
+    core::Bytes inks;
+    {
+        const text::TextGamma gamma(doc.text_gamma);
+        if (page.color) {  // (a page of inks: taken in as it takes in the lines it draws, by its rules)
+            InkCanvas canvas(*page.color, size);
+            canvas.draw_8bit(draw);
+            inks = std::make_shared<const std::string>(core::encode_ink_raster(canvas.ink_pixels(page.color->depth, true)));
+        } else {
+            picture = drawn_alone(size, draw);
+        }
+    }
+    Layer layer;
+    layer.id = fresh_layer_id(page, c.op);
+    layer.role = LayerRole::User;
+    layer.kind = LayerKind::Raster;
+    std::u32string words = text::u32(lines.front()->text).substr(0, 24);  // (its first words, as the layered PSD names a line)
+    std::replace(words.begin(), words.end(), U'\n', U' ');
+    layer.title = "台詞 " + text::utf8(words);
+    layer.exportable = true;
+    layer.panel_clip = false;
+    layer.panel_each = false;
+    if (page.color) {
+        layer.ink_raster = inks;
+    } else if (page.rgb && page.rgb->depth > 8) {
+        ColorCanvas canvas(Image::create("RGBA", size, Ink{0, 0, 0, 0}), RgbSpace::of(page));
+        canvas.blend(picture, 1.0, false);
+        layer.color_raster = std::make_shared<const std::string>(canvas.color_raster(page.rgb->depth == 16 ? "u16" : "f32"));
+        if (std::find(doc.features.begin(), doc.features.end(), core::kColorRasterFeature) == doc.features.end()) {
+            doc.features.emplace_back(core::kColorRasterFeature);
+        }
+    } else {
+        raster::save_raster(page, layer, picture);
+    }
+    const std::string id = layer.id;
+    Page& edited = doc.edit_page(at);
+    std::size_t index = edited.layers.size();
+    if (!place->empty()) index = core::layer_by_id(edited, *place);
+    edited.layers.insert(edited.layers.begin() + static_cast<std::ptrdiff_t>(index), std::move(layer));
+    Json ids = Json::array();
+    for (const core::StoryLine* line : lines) ids.push_back(line->id);
+    if (balloon) {
+        std::erase_if(doc.story, [&](const core::StoryLine& line) { return chosen.contains(line.id); });
+    } else {  // (their balloons stay, without words, drawn just under the letters: set under the new layer)
+        for (core::StoryLine& line : doc.story) {
+            if (!chosen.contains(line.id)) continue;
+            if (!line.style.is_object()) line.style = Json::object();
+            line.style["below_layer"] = id;
+            line.text.clear();
+            line.ruby.clear();
+            line.ruby_runs.clear();
+            line.ruby_spans.reset();
+            line.emphasis_runs.clear();
+            line.style_runs.clear();
+        }
+    }
+    c.report = Json{{"id", id}, {"lines", ids}};
 }
 
 }  // namespace
@@ -760,8 +965,8 @@ void register_smart_ops(core::OpRegistry& registry) {
     registry.add("rasterize_layer", rasterize_layer);
     register_smart_contents_ops(registry);  // (A1: contents and links, render/ops_smart_contents.cpp)
     smart_filters::register_ops(registry);  // (A2: render/ops_smart_filters.cpp)
-    // A4 (stack modes, a line's balloon and letters as pixels)
-    for (const char* op : {"smart_stack", "rasterize_lines"}) registry.add(op, later(op, "A4"));
+    registry.add("smart_stack", smart_stack);  // (A4: stack modes, render/stack)
+    registry.add("rasterize_lines", rasterize_lines);  // (A4: a line's balloon and letters as pixels)
 }
 
 }  // namespace genko::render

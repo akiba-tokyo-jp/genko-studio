@@ -33,6 +33,7 @@
 #include <algorithm>
 #include <map>
 #include <cmath>
+#include <set>
 #include <stdexcept>
 
 #include "app/ask.hpp"
@@ -241,11 +242,15 @@ void apply_shortcuts(MainWindow* window) {
 
 void retip(MainWindow* window) {
     const auto names = command_names(window);
+    std::set<const QAction*> tools;
+    for (const auto& [name, action] : window->tool_actions()) tools.insert(action);
     for (QAction* action : preferences::commands(window)) {
         const QString keys = action->shortcut().toString(QKeySequence::NativeText);
         const QString what = action->statusTip();
-        // (its name: its place too when another command has the same words — the command bar's button tells it so)
-        action->setToolTip(QString(command_name(names, action)).remove(QLatin1Char('&')) + (keys.isEmpty() ? QString() : QStringLiteral("（%1）").arg(keys)) +
+        // (its name: its place too when another command has the same words — the command bar's button tells it so; a
+        // tool's is its name alone, the tool palette showing which it is)
+        const QString name = tools.contains(action) ? action->text() : command_name(names, action);
+        action->setToolTip(QString(name).remove(QLatin1Char('&')) + (keys.isEmpty() ? QString() : QStringLiteral("（%1）").arg(keys)) +
                            (what.isEmpty() ? QString() : QStringLiteral("\n") + what));
     }
 }

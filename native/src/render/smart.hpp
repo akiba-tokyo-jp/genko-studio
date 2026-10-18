@@ -20,8 +20,14 @@
 // its own (core::smart::plain_layer) is drawn as that layer before any of this (render/page.cpp).
 //
 // A smart object read from a PSD (PC3 A3) shows Photoshop's picture of it (its psd.shown, a paint layer's picture over the
-// page or a page of inks') until it changes, then is drawn from its contents. What later steps of PC3 add — perspective
-// and warp (A5), stack modes (A4) — is not drawn yet: NotYetPorted("smart:<what>"); smart filters and their mask (A2) are.
+// page or a page of inks') until it changes, then is drawn from its contents.
+//
+// A stack mode (PC3 A4, render/stack): the contents' layers each drawn alone, combined pixel by pixel into the contents'
+// picture, which is laid as above — 8 bits as sRGB values, a page in precise colour as its encoded values and a page of
+// inks plate by plate where the contents are the page's own colours moved by whole pixels (else the 8-bit stack); a file
+// is one layer. Smart filters (A2, render/smart_filters) work the laid picture.
+//
+// What later steps of PC3 add — perspective and warp (A5) — is not drawn yet: NotYetPorted("smart:<what>").
 
 namespace genko::render {
 struct ColorPicture;

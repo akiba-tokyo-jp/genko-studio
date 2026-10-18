@@ -1,5 +1,6 @@
 // A smart object drawn on its page (render/smart.hpp, PC3 A0). Upstream PhotoCraft v0.2.0's smart objects
-// (engine/src/smart_cmds.rs:214-235: whole pixels moved as they are, anything else resampled in one pass; MIT, see
+// (engine/src/smart_cmds.rs:214-235: whole pixels moved as they are, anything else resampled in one pass; 167-207: a
+// stack mode's layers each drawn alone, normal and not clipped, then combined — PC3 A4; MIT, see
 // third_party/photocraft/NOTICE.md), drawn in Genko's three ways: the 8-bit page, a page in precise colour, a page of
 // inks.
 
@@ -10,6 +11,7 @@
 #include <cmath>
 #include <list>
 #include <mutex>
+#include <set>
 #include <unordered_map>
 
 #include "core/base64.hpp"
@@ -30,6 +32,7 @@
 #include "render/proof.hpp"
 #include "render/smart_decode.hpp"
 #include "render/smart_filters.hpp"
+#include "render/stack.hpp"
 #include "storage/asset_store.hpp"
 
 namespace genko::render::smart {
@@ -110,7 +113,8 @@ Recent<core::InkPixels>& ink_pictures() {  // (the files and contents as a page'
     static Recent<core::InkPixels> recent(16, kBudget);
     return recent;
 }
-Recent<ColorPicture>& precise_filtered() {  // (PC3 A2: a smart object's filtered picture of the whole page in precise colour)
+// (PC3 A2: a smart object's filtered picture of the whole page in precise colour; A4: contents stacked in it)
+Recent<ColorPicture>& precise_filtered() {
     static Recent<ColorPicture> recent(16, kBudget);
     return recent;
 }
@@ -145,8 +149,8 @@ std::string identity(const core::Document& doc, const core::SmartContents& conte
 
 // --- the smart object's settings ---------------------------------------------------------------------------------------
 
-// What PC3's later steps add, which this build keeps and does not draw yet (smart filters and their mask: PC3 A2, drawn;
-// a PSD's record: PC3 A3, its picture drawn while it has one, shown_8bit).
+// What PC3's later steps add, which this build keeps and does not draw yet (smart filters and their mask: PC3 A2, and
+// stack modes: A4, drawn; a PSD's record: PC3 A3, its picture drawn while it has one, shown_8bit).
 void refuse_later(const core::Layer& layer) {
     if (!layer.smart || !layer.smart->is_object()) return;
     const Json& s = *layer.smart;
@@ -156,7 +160,6 @@ void refuse_later(const core::Layer& layer) {
     };
     if (set("perspective")) throw NotYetPorted("smart:perspective");
     if (set("warp")) throw NotYetPorted("smart:warp");
-    if (set("stack")) throw NotYetPorted("smart:stack");
 }
 
 // --- a PSD's picture of it (PC3 A3) -------------------------------------------------------------------------------------
@@ -218,6 +221,17 @@ std::optional<InkPicture> shown_inks(const Ctx& ctx, const core::Layer& layer, c
     if (inks->space != ctx.page->color->space) return std::nullopt;
     return sample_ink_raster(*inks, ctx.size, area);
 }
+
+// The statistic the smart object's stack mode combines its contents' layers by (PC3 A4); none when it has no stack
+// mode. A name this build does not know (a book changed by hand): the smart object left out and said.
+std::optional<stack::Stat> stack_of(const core::Layer& layer) {
+    const Json* v = layer.smart ? core::get(*layer.smart, "stack") : nullptr;
+    if (v == nullptr || v->is_null()) return std::nullopt;
+    const std::optional<stack::Stat> stat = v->is_string() ? stack::stat_of(v->get<std::string>()) : std::nullopt;
+    if (!stat) throw NotYetPorted("smart:stack");
+    return stat;
+}
+std::string stack_name(const core::Layer& layer) { return core::py_str((*layer.smart)["stack"]); }
 
 std::string interp_of(const core::Layer& layer, const core::SmartContents& contents) {
     const Json* v = layer.smart ? core::get(*layer.smart, "interp") : nullptr;
@@ -549,12 +563,27 @@ bool bpc_of(const core::SmartContents& contents) {
     return bpc == nullptr || !bpc->is_boolean() || bpc->get<bool>();
 }
 
-std::optional<Image> file_8bit(const Ctx& ctx, const core::Layer& layer, const core::SmartContents& contents, const Matrix& m, const Box& area) {
+// `one` (PC3 A4): what a stack mode makes of the file's one sample (stack::of_one, `mode` its name) — its colours that
+// value where it shows, its alpha kept.
+std::optional<Image> file_8bit(const Ctx& ctx, const core::Layer& layer, const core::SmartContents& contents, const Matrix& m, const Box& area,
+                               std::optional<double> one = std::nullopt, const std::string& mode = {}) {
     const core::Document& doc = *ctx.episode;
-    const auto picture = [&] { return file_picture(doc, contents); };
+    const std::string key = file_key(doc, contents) + (one ? "\nstack " + mode : std::string());
+    const auto picture = [&]() -> std::shared_ptr<const Image> {
+        if (!one) return file_picture(doc, contents);
+        if (auto kept = pictures().get(key)) return kept;
+        const std::shared_ptr<const Image> shown = file_picture(doc, contents);
+        if (shown == nullptr) return nullptr;
+        const int v = static_cast<int>(std::lround(std::clamp(*one, 0.0, 1.0) * 255.0));
+        Image flat = Image::create("RGBA", shown->size(), Ink{v, v, v, 255});
+        flat.putalpha(shown->getchannel(3));
+        auto out = std::make_shared<const Image>(std::move(flat));
+        pictures().put(key, out, image_bytes(*out));
+        return out;
+    };
     const double dpi = contents.dpi > 0 ? contents.dpi : 72.0;
-    return lay_picture(ctx, layer, picture, contents.width_px, contents.height_px, dpi / 25.4, file_key(doc, contents), m,
-                       resample_of(interp_of(layer, contents)), true, area);
+    return lay_picture(ctx, layer, picture, contents.width_px, contents.height_px, dpi / 25.4, key, m, resample_of(interp_of(layer, contents)), true,
+                       area);
 }
 
 // --- a file with every bit, on a page in precise colour ------------------------------------------------------------------
@@ -645,9 +674,17 @@ bool ink_file(const core::SmartContents& contents) {
     return contents.kind == "file" && (contents.mode.starts_with("cmyk") || contents.mode.starts_with("gray") || contents.mode.starts_with("lab"));
 }
 
+// Channel c of pixel `at` of ink pixels as the canvas holds it (c = colours(): its alpha).
+double canvas_value(const core::InkPixels& inks, std::size_t at, unsigned c) {
+    if (c == inks.colours()) return inks.has_alpha() ? inks.value(at, c) : 1.0;
+    const unsigned in_all = inks.channels();
+    const double ink = inks.is_float() ? inks.floats[at * in_all + c] : ink::decode_sample(inks.space, c, inks.samples[at * in_all + c], inks.depth);
+    return to_canvas(inks.space, c, ink);
+}
+
 // Ink pixels laid into a picture of the canvas's values over `area`, at (x, y) on the page; what falls outside left.
 void into_picture(InkPicture& out, const Box& area, const core::InkPixels& inks, int x, int y, const Box& limit) {
-    const unsigned n = inks.colours(), all = n + 1, in_all = inks.channels();
+    const unsigned n = inks.colours(), all = n + 1;
     for (std::uint32_t j = 0; j < inks.height; ++j) {
         const int py = y + static_cast<int>(j);
         if (py < area.y0 || py >= area.y1 || py < limit.y0 || py >= limit.y1) continue;
@@ -656,11 +693,7 @@ void into_picture(InkPicture& out, const Box& area, const core::InkPixels& inks,
             if (px < area.x0 || px >= area.x1 || px < limit.x0 || px >= limit.x1) continue;
             const std::size_t at = std::size_t(j) * inks.width + i;
             double* to = out.values.data() + (std::size_t(py - area.y0) * area.width() + (px - area.x0)) * all;
-            for (unsigned c = 0; c < n; ++c) {
-                const double ink = inks.is_float() ? inks.floats[at * in_all + c] : ink::decode_sample(inks.space, c, inks.samples[at * in_all + c], inks.depth);
-                to[c] = to_canvas(inks.space, c, ink);
-            }
-            to[n] = inks.has_alpha() ? inks.value(at, n) : 1.0;
+            for (unsigned c = 0; c <= n; ++c) to[c] = canvas_value(inks, at, c);
         }
     }
 }
@@ -709,6 +742,272 @@ std::optional<InkPicture> file_inks_on_page(const Ctx& ctx, const core::Layer& l
     return out;
 }
 
+// The part of `area` inside the smart object's panel's box (clip_px).
+Box shown_part(const Ctx& ctx, const core::Layer& layer, const Box& area) {
+    const Box limit = clip_px(ctx, layer);
+    return Box{std::max(area.x0, limit.x0), std::max(area.y0, limit.y0), std::min(area.x1, limit.x1), std::min(area.y1, limit.y1)};
+}
+
+// --- stack modes (PC3 A4, render/stack) --------------------------------------------------------------------------------
+
+// The layers a stack mode combines, each as a page of the contents holding it alone: the contents' layers at the top that
+// show — or, when the top is one folder, the layers in it —, each with the layers inside it, normal and not clipped
+// (PhotoCraft's stack_image: a layer drawn alone).
+std::vector<core::Page> stack_pages(const core::Page& contents) {
+    std::set<std::string> ids;
+    for (const core::Layer& l : contents.layers) ids.insert(l.id);
+    const auto parent_of = [&ids](const core::Layer& l) {
+        return l.parent_id.is_string() && ids.contains(l.parent_id.get<std::string>()) ? l.parent_id.get<std::string>() : std::string();
+    };
+    std::vector<const core::Layer*> tops;
+    for (const core::Layer& l : contents.layers) {
+        if (parent_of(l).empty()) tops.push_back(&l);
+    }
+    if (tops.size() == 1 && tops.front()->kind == core::LayerKind::Folder) {
+        const std::string folder = tops.front()->id;
+        tops.clear();
+        for (const core::Layer& l : contents.layers) {
+            if (parent_of(l) == folder) tops.push_back(&l);
+        }
+    }
+    core::Page shell = contents;
+    shell.layers.clear();
+    std::vector<core::Page> out;
+    for (const core::Layer* top : tops) {
+        if (!top->visible) continue;
+        std::set<std::string> with{top->id};
+        for (bool grew = true; grew;) {
+            grew = false;
+            for (const core::Layer& l : contents.layers) {
+                if (with.contains(l.id) || !with.contains(parent_of(l))) continue;
+                with.insert(l.id);
+                grew = true;
+            }
+        }
+        core::Page page = shell;
+        for (const core::Layer& l : contents.layers) {
+            if (!with.contains(l.id)) continue;
+            page.layers.push_back(l);
+            if (&l != top) continue;
+            core::Layer& alone = page.layers.back();
+            alone.blend = "normal";
+            alone.clip = false;
+            alone.parent_id = nullptr;
+        }
+        out.push_back(std::move(page));
+    }
+    return out;
+}
+
+// The rows of a band drawn at once: the layers' pictures of it (`bytes` a pixel) within 256 MiB, at least 16 rows.
+int band_rows(std::size_t layers, int width, std::size_t bytes, int height) {
+    const std::size_t row = std::max<std::size_t>(1, layers * static_cast<std::size_t>(std::max(1, width)) * bytes);
+    return std::clamp(static_cast<int>(std::min<std::size_t>((std::size_t(256) << 20) / row, 1u << 30)), std::min(16, std::max(1, height)),
+                      std::max(1, height));
+}
+
+// The contents' layers stacked at `dpi` ("RGBA", the contents page's size, sRGB), remembered: drawn a band of rows at a
+// time, so the layers' pictures held at once stay small (a page of inks: each whole, as the screen shows it).
+std::shared_ptr<const Image> stacked_8bit(const Ctx& ctx, const core::SmartContents& contents, int dpi, stack::Stat stat, const std::string& key) {
+    if (auto kept = pictures().get(key)) return kept;
+    ++g_contents_drawn;
+    const core::Page& inner = *contents.page;
+    const Size size{to_px(inner.spec.width_mm.value(), dpi), to_px(inner.spec.height_mm.value(), dpi)};
+    std::string bytes(std::size_t(size.width) * size.height * 4, '\0');
+    const std::vector<core::Page> layers = stack_pages(inner);
+    const std::size_t n = layers.size();
+    if (n > 0) {
+        const int rows = inner.color ? size.height : band_rows(n, size.width, 4, size.height);
+        std::vector<double> values(n * 4), pixel(4), scratch;
+        for (int y0 = 0; y0 < size.height; y0 += rows) {
+            detail::check_cancel(ctx);
+            const Box band{0, y0, size.width, std::min(size.height, y0 + rows)};
+            std::vector<Image> parts;
+            for (const core::Page& page : layers) {
+                Image part;
+                if (inner.color) {  // (a page of inks: as the screen shows them)
+                    part = ink::to_rgba8(composite_ink_layers(page, page.layers, dpi, ctx.episode, false), *inner.color);
+                } else {
+                    RenderOptions o = contents_options(ctx);
+                    o.region = RenderRegion{band.x0, band.y0, band.width(), band.height()};
+                    RenderResult drawn = render_contents(page, dpi, o, ctx.episode);
+                    left_out(ctx, drawn.omitted);
+                    part = std::move(drawn.image);
+                }
+                parts.push_back(part.mode() == "RGBA" ? std::move(part) : part.convert("RGBA"));
+            }
+            for (int y = band.y0; y < band.y1; ++y) {
+                std::vector<const unsigned char*> from;
+                for (const Image& part : parts) from.push_back(reinterpret_cast<const unsigned char*>(part.raw()->image[y - band.y0]));
+                for (int x = 0; x < size.width; ++x) {
+                    for (std::size_t k = 0; k < n; ++k)
+                        for (unsigned c = 0; c < 4; ++c) values[k * 4 + c] = from[k][x * 4 + c] / 255.0;
+                    stack::combine_pixel(values.data(), n, 3, stat, pixel.data(), scratch);
+                    char* to = bytes.data() + (std::size_t(y) * size.width + x) * 4;
+                    for (unsigned c = 0; c < 4; ++c) to[c] = static_cast<char>(static_cast<unsigned char>(std::lround(pixel[c] * 255.0)));
+                }
+            }
+        }
+    }
+    auto out = std::make_shared<const Image>(Image::frombytes("RGBA", size, bytes));
+    pictures().put(key, out, image_bytes(*out));
+    return out;
+}
+
+// A stacked contents page laid on the 8-bit page, as page_8bit lays one.
+std::optional<Image> stacked_page_8bit(const Ctx& ctx, const core::Layer& layer, const core::SmartContents& contents, const Matrix& m, stack::Stat stat,
+                                       const Box& area) {
+    const int dpi = contents_dpi(m, ctx.dpi);
+    const std::string key = contents_key(ctx, contents, dpi) + "\nstack " + stack_name(layer);
+    const auto whole = [&] { return stacked_8bit(ctx, contents, dpi, stat, key); };
+    if (const auto shift = whole_shift(pixel_matrix(m, dpi / 25.4, ctx.dpi))) {  // (whole pixels moved: its own pixels)
+        const Box part = shown_part(ctx, layer, area);
+        if (part.width() <= 0 || part.height() <= 0) return std::nullopt;
+        const std::shared_ptr<const Image> picture = whole();
+        const Box from{std::max(0, part.x0 - shift->first), std::max(0, part.y0 - shift->second), std::min(picture->width(), part.x1 - shift->first),
+                       std::min(picture->height(), part.y1 - shift->second)};
+        Image out = Image::create("RGBA", Size{area.width(), area.height()}, Ink{0, 0, 0, 0});
+        if (from.width() > 0 && from.height() > 0) out.paste(picture->crop(from), Point{from.x0 + shift->first - area.x0, from.y0 + shift->second - area.y0});
+        return out;
+    }
+    const std::int64_t w = to_px(contents.page->spec.width_mm.value(), dpi), h = to_px(contents.page->spec.height_mm.value(), dpi);
+    return lay_picture(ctx, layer, whole, w, h, dpi / 25.4, key, m, resample_of(interp_of(layer, contents)), false, area);
+}
+
+// A stacked contents page on a page in precise colour: contents of the page's RGB that composite in precise colour,
+// moved by whole pixels — each layer's values (one of 8 bits: its sRGB colours in the space), combined on their encoded
+// samples as the 8-bit page combines its own —; nothing otherwise (the 8-bit stack is drawn).
+std::optional<ColorPicture> stacked_precise(const Ctx& ctx, const core::Layer& layer, const core::SmartContents& contents, const Matrix& m, stack::Stat stat,
+                                            const Box& area, const RgbSpace& space) {
+    const core::Page& inner = *contents.page;
+    const bool print = ctx.mode == "print";
+    if (inner.color || !(inner.rgb == ctx.page->rgb) || !(uses_color_precision(inner, print) || needs_precision(inner, ctx.episode, print)))
+        return std::nullopt;
+    const auto shift = whole_shift(pixel_matrix(m, ctx.dpi / 25.4, ctx.dpi));
+    if (!shift) return std::nullopt;
+    const std::string key = "stack " + stack_name(layer) + "\n" + contents_key(ctx, contents, ctx.dpi) + "\n" +
+                            (ctx.page->rgb ? core::dump_canonical(core::to_json(*ctx.page->rgb)) : std::string("srgb"));
+    std::shared_ptr<const ColorPicture> whole = precise_filtered().get(key);
+    if (whole == nullptr) {
+        ++g_contents_drawn;
+        const Size size{to_px(inner.spec.width_mm.value(), ctx.dpi), to_px(inner.spec.height_mm.value(), ctx.dpi)};
+        ColorPicture made{size, std::vector<std::array<double, 4>>(std::size_t(size.width) * size.height, {0, 0, 0, 0})};
+        const std::vector<core::Page> layers = stack_pages(inner);
+        const std::size_t n = layers.size();
+        if (n > 0) {
+            const int rows = band_rows(n, size.width, sizeof(std::array<double, 4>), size.height);
+            std::vector<double> values(n * 4), pixel(4), scratch;
+            for (int y0 = 0; y0 < size.height; y0 += rows) {
+                detail::check_cancel(ctx);
+                const Box band{0, y0, size.width, std::min(size.height, y0 + rows)};
+                std::vector<ColorPicture> parts;
+                for (const core::Page& page : layers) {
+                    RenderOptions o = contents_options(ctx);
+                    o.precise = true;
+                    o.region = RenderRegion{band.x0, band.y0, band.width(), band.height()};
+                    RenderResult drawn = render_contents(page, ctx.dpi, o, ctx.episode);
+                    left_out(ctx, drawn.omitted);
+                    if (drawn.precise) {
+                        const core::ColorRasterView view(*drawn.precise);
+                        parts.push_back(color_picture(view, Size{band.width(), band.height()}, Box{0, 0, band.width(), band.height()}, space));
+                    } else {
+                        parts.push_back(color_picture(drawn.image.mode() == "RGBA" ? drawn.image : drawn.image.convert("RGBA"), space));
+                    }
+                }
+                for (int y = band.y0; y < band.y1; ++y) {
+                    for (int x = 0; x < size.width; ++x) {
+                        const std::size_t at = std::size_t(y - band.y0) * band.width() + x;
+                        for (std::size_t k = 0; k < n; ++k) {
+                            const std::array<double, 4>& p = parts[k].pixels[at];
+                            for (unsigned c = 0; c < 3; ++c) values[k * 4 + c] = space.encode(c, p[c]);
+                            values[k * 4 + 3] = p[3];
+                        }
+                        stack::combine_pixel(values.data(), n, 3, stat, pixel.data(), scratch);
+                        made.pixels[std::size_t(y) * size.width + x] = {space.decode(0, pixel[0]), space.decode(1, pixel[1]), space.decode(2, pixel[2]),
+                                                                        pixel[3]};
+                    }
+                }
+            }
+        }
+        whole = std::make_shared<const ColorPicture>(std::move(made));
+        precise_filtered().put(key, whole, whole->pixels.size() * sizeof(whole->pixels[0]));
+    }
+    ColorPicture out{Size{area.width(), area.height()}, std::vector<std::array<double, 4>>(std::size_t(area.width()) * area.height(), {0, 0, 0, 0})};
+    const Box part = shown_part(ctx, layer, area);
+    for (int y = part.y0; y < part.y1; ++y) {
+        const int sy = y - shift->second;
+        if (sy < 0 || sy >= whole->size.height) continue;
+        for (int x = part.x0; x < part.x1; ++x) {
+            const int sx = x - shift->first;
+            if (sx < 0 || sx >= whole->size.width) continue;
+            out.pixels[std::size_t(y - area.y0) * area.width() + (x - area.x0)] = whole->pixels[std::size_t(sy) * whole->size.width + sx];
+        }
+    }
+    return out;
+}
+
+// A stacked contents page on a page of inks: contents of the page's colour mode moved by whole pixels — each layer's
+// inks, combined plate by plate on the canvas's values —; nothing otherwise (the 8-bit stack is drawn by the page's rules).
+std::optional<InkPicture> stacked_inks(const Ctx& ctx, const core::Layer& layer, const core::SmartContents& contents, const Matrix& m, stack::Stat stat,
+                                       const Box& area) {
+    const core::Page& inner = *contents.page;
+    if (!inner.color || !(*inner.color == *ctx.page->color)) return std::nullopt;
+    const auto shift = whole_shift(pixel_matrix(m, ctx.dpi / 25.4, ctx.dpi));
+    if (!shift) return std::nullopt;
+    const unsigned n = ctx.page->color->planes();
+    const std::string key = "stack " + stack_name(layer) + "\ninks " + contents_key(ctx, contents, ctx.dpi);
+    std::shared_ptr<const InkPicture> whole = inks_filtered().get(key);
+    if (whole == nullptr) {
+        ++g_contents_drawn;
+        const Size size{to_px(inner.spec.width_mm.value(), ctx.dpi), to_px(inner.spec.height_mm.value(), ctx.dpi)};
+        InkPicture made{size, n, std::vector<double>(std::size_t(size.width) * size.height * (n + 1), 0.0)};
+        std::vector<core::InkPixels> parts;
+        for (const core::Page& page : stack_pages(inner)) {
+            detail::check_cancel(ctx);
+            parts.push_back(composite_ink_layers(page, page.layers, ctx.dpi, ctx.episode, false));
+            if (parts.back().width != static_cast<std::uint32_t>(size.width) || parts.back().height != static_cast<std::uint32_t>(size.height) ||
+                parts.back().colours() != n)
+                throw core::Error("value", "a stack's layer does not match its contents");
+        }
+        // (a page of ink plates — CMYK, multichannel — on its inverted plates, as its blend modes: the maximum the lightest,
+        // as on an RGB page; Lab and grey on their values, lightness the larger)
+        const core::InkSpace space = ctx.page->color->space;
+        const bool inverted = space == core::InkSpace::Cmyk || space == core::InkSpace::Multi;
+        const std::size_t k_n = parts.size();
+        if (k_n > 0) {
+            std::vector<double> values(k_n * (n + 1)), scratch;
+            for (std::size_t at = 0; at < std::size_t(size.width) * size.height; ++at) {
+                for (std::size_t k = 0; k < k_n; ++k) {
+                    for (unsigned c = 0; c <= n; ++c) {
+                        const double v = canvas_value(parts[k], at, c);
+                        values[k * (n + 1) + c] = inverted && c < n ? 1.0 - v : v;
+                    }
+                }
+                double* out = made.values.data() + at * (n + 1);
+                stack::combine_pixel(values.data(), k_n, n, stat, out, scratch);
+                if (inverted && out[n] > 0) {
+                    for (unsigned c = 0; c < n; ++c) out[c] = 1.0 - out[c];
+                }
+            }
+        }
+        whole = std::make_shared<const InkPicture>(std::move(made));
+        inks_filtered().put(key, whole, whole->values.size() * sizeof(double));
+    }
+    InkPicture out{Size{area.width(), area.height()}, n, std::vector<double>(std::size_t(area.width()) * area.height() * (n + 1), 0.0)};
+    const Box part = shown_part(ctx, layer, area);
+    for (int y = part.y0; y < part.y1; ++y) {
+        const int sy = y - shift->second;
+        if (sy < 0 || sy >= whole->size.height) continue;
+        for (int x = part.x0; x < part.x1; ++x) {
+            const int sx = x - shift->first;
+            if (sx < 0 || sx >= whole->size.width) continue;
+            std::copy_n(whole->values.data() + (std::size_t(sy) * whole->size.width + sx) * (n + 1), n + 1,
+                        out.values.data() + (std::size_t(y - area.y0) * area.width() + (x - area.x0)) * (n + 1));
+        }
+    }
+    return out;
+}
+
 // --- smart filters (PC3 A2, render/smart_filters) ---------------------------------------------------------------------
 
 // The smart object as its filters take it: without them and their mask, and not cut to its panel (they work its picture
@@ -752,12 +1051,6 @@ auto filtering(const Work& work) {
 }
 
 Box whole_page(const Ctx& ctx) { return Box{0, 0, ctx.size.width, ctx.size.height}; }
-
-// The part of `area` inside the smart object's panel's box (clip_px).
-Box shown_part(const Ctx& ctx, const core::Layer& layer, const Box& area) {
-    const Box limit = clip_px(ctx, layer);
-    return Box{std::max(area.x0, limit.x0), std::max(area.y0, limit.y0), std::min(area.x1, limit.x1), std::min(area.y1, limit.y1)};
-}
 
 std::optional<Image> filtered_8bit(const Ctx& ctx, const core::Layer& layer, const core::SmartContents& contents, const Box& area) {
     const std::string key = filtered_key(ctx, layer, contents, "8");
@@ -877,8 +1170,14 @@ std::optional<Image> picture_8bit(const Ctx& ctx, const core::Layer& layer, cons
     refuse_later(layer);
     if (core::smart::filters_drawn(layer)) return filtered_8bit(ctx, layer, *contents, area);  // (PC3 A2)
     const Matrix m = core::smart::matrix_of(layer);
-    if (contents->kind == "file") return file_8bit(ctx, layer, *contents, m, area);
+    const std::optional<stack::Stat> stat = stack_of(layer);  // (PC3 A4)
+    if (contents->kind == "file") {
+        // (stacked, a file is one layer: its one sample as it is, or what the statistic makes of any one sample)
+        const std::optional<double> one = stat ? stack::of_one(*stat) : std::nullopt;
+        return one ? file_8bit(ctx, layer, *contents, m, area, one, stack_name(layer)) : file_8bit(ctx, layer, *contents, m, area);
+    }
     if (!contents->page) return std::nullopt;
+    if (stat) return stacked_page_8bit(ctx, layer, *contents, m, *stat, area);
     return page_8bit(ctx, layer, *contents, m, area);
 }
 
@@ -890,6 +1189,10 @@ std::optional<ColorPicture> picture_precise(const Ctx& ctx, const core::Layer& l
     refuse_later(layer);
     if (core::smart::filters_drawn(layer)) return filtered_precise(ctx, layer, *contents, area, space);  // (PC3 A2)
     const Matrix m = core::smart::matrix_of(layer);
+    if (const std::optional<stack::Stat> stat = stack_of(layer)) {  // (PC3 A4)
+        if (contents->kind == "page" && contents->page) return stacked_precise(ctx, layer, *contents, m, *stat, area, space);
+        if (stack::of_one(*stat)) return std::nullopt;  // (a file stacked to one value: its 8-bit picture)
+    }
     if (deep_file(*contents)) {
         // (a mono page's finish is laid on an 8-bit picture: as a placed picture's)
         if (ctx.finish && (ctx.mode == "print" || ctx.mode == "proof") && ctx.page->spec.expression != "color" && layer.role != core::LayerRole::Draft &&
@@ -935,6 +1238,10 @@ std::optional<InkPicture> picture_inks(const Ctx& ctx, const core::Layer& layer,
     refuse_later(layer);
     if (core::smart::filters_drawn(layer)) return filtered_inks(ctx, layer, *contents, area);  // (PC3 A2)
     const Matrix m = core::smart::matrix_of(layer);
+    if (const std::optional<stack::Stat> stat = stack_of(layer)) {  // (PC3 A4)
+        if (contents->kind == "page" && contents->page) return stacked_inks(ctx, layer, *contents, m, *stat, area);
+        if (stack::of_one(*stat)) return std::nullopt;  // (a file stacked to one value: its 8-bit picture, by the page's rules)
+    }
     if (ink_file(*contents)) return file_inks_on_page(ctx, layer, *contents, m, area);
     if (contents->kind != "page" || !contents->page || !contents->page->color || !(*contents->page->color == *ctx.page->color)) return std::nullopt;
     const auto shift = whole_shift(pixel_matrix(m, ctx.dpi / 25.4, ctx.dpi));

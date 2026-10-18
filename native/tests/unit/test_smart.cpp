@@ -326,14 +326,16 @@ private slots:
     void laterStepsAreRefusedByName() {
         const Document doc = run(painted(), Json::array({Json{{"op", "smart_convert"}, {"page", 1}, {"id", "p1"}, {"new_id", "so1"}}}));
         // (A1's — smart_replace, smart_relink, smart_update, smart_embed, smart_link, smart_to_page — are written:
-        // test_smart_contents; A2's smart_filter_*: test_smart_filters)
-        for (const char* op : {"smart_stack", "rasterize_lines"}) {
+        // test_smart_contents; A2's smart_filter_*: test_smart_filters; A4's smart_stack and rasterize_lines:
+        // test_smart_stack. A5's perspective and warp of smart_transform are left.)
+        for (const char* later : {"perspective", "warp"}) {
             try {
-                (void)applied(doc, Json::array({Json{{"op", op}, {"page", 1}, {"id", "so1"}}}));
-                QFAIL(op);
+                (void)applied(doc, Json::array({Json{{"op", "smart_transform"}, {"page", 1}, {"id", "so1"}, {later, Json::object({{"x", 1}})}}}));
+                QFAIL(later);
             } catch (const ApplyError& error) {
                 QCOMPARE(error.code(), std::string("not_yet_ported"));
-                QVERIFY2(QString::fromUtf8(error.what()).contains(QString::fromLatin1(op)), error.what());
+                QVERIFY2(QString::fromUtf8(error.what()).contains(QString::fromLatin1(later)) && QString::fromUtf8(error.what()).contains(QStringLiteral("PC3 A5")),
+                         error.what());
             }
         }
     }

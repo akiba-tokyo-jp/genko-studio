@@ -421,6 +421,10 @@ public:
     void smart_copy();
     void rasterize(const std::string& what);
     void content_options();
+    // PC3 A4: スタックモード ▸ (`mode` an op's name, "none": なし) of the smart object drawn on, and ラスタライズ → テキスト
+    // (the line chosen with the select tool, and the lines joined to its balloon, as a new paint layer).
+    void smart_stack(const std::string& mode);
+    void rasterize_type();
     // smart-objects@1, PC3 A1 (app/main_window_smart.cpp): コンテンツを編集 — a page's contents in a tab of this book
     // (decision 1), a picture's made a page first (asked), a linked file opened in its own app —, コンテンツを書き出し…,
     // コンテンツを置換…, ファイルに再リンク…, 埋め込みに変換, リンクに変換…, 変更されたコンテンツを更新 (`all`: すべての),

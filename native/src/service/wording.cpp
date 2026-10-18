@@ -905,6 +905,13 @@ const std::vector<Rule>& rules() {
         r.push_back(rule("this page does not composite the blend mode \\S+", "このページの色では、その描画モードは使えません"));
         r.push_back(rule("(?:index|to) is the filter's place .*", "スマートフィルターの位置の指定が正しくありません"));
         r.push_back(rule("mask from_area takes the area", "フィルターマスクにする選択範囲がありません"));
+        // (PC3 A4: stack modes and lines rasterized, render/ops_smart)
+        r.push_back(rule("mode is a stack mode .*", "スタックモードの名前が正しくありません"));
+        r.push_back(rule("ids \\(or id\\) names the lines|ids is a list of the lines' ids", "ラスタライズする台詞を選んでください"));
+        r.push_back(rule("line \\S+ is not on page \\S+", "その台詞は、このページにありません"));
+        r.push_back(rule("line \\S+ has no balloon on the page", "その台詞はフキダシに入っていないため、ラスタライズできません"));
+        r.push_back(rule("the lines are drawn at different places among the layers.*",
+                         "選んだ台詞はレイヤーの重ね順の中の置き場所が違うため、まとめてラスタライズできません（1 つずつラスタライズします）"));
         // (the C++ build's own: what it does not do yet, and saving)
         r.push_back(rule("official export is not in the C\\+\\+ build yet",
                          "この版の Genko では、まだ正式な書き出し（確認と承認の記録つき）はできません（ふつうの書き出しはできます）"));

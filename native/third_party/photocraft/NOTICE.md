@@ -96,6 +96,11 @@ PhotoCraft v0.2.0（`ad863217386440ca968fccc9bfff65ba24e61142`、MIT、同梱 `L
   - `crates/io/src/psd_import.rs`（195-243 行）: `SoLd`・`PlLd`・`SoLE` のある層を SO にし、Photoshop の絵を描き直すまでの絵として持ち、ブロックを書き戻すために持つこと → `native/src/render/import_psd.cpp`（`smart_contents_of`・`smart_settings`）、`native/src/render/smart.cpp`（`shown_8bit`・`shown_inks`）。
   - `crates/io/src/psd_export.rs`（269-274 行）: 読んだ配置レイヤーのブロックを変えずに書き戻すこと → `native/src/formats/psd_export.cpp`（`PlacedLayers`。Genko で作った SO の `SoLd`・`PlLd`・`lnk2` を書くこと、場所が同じ間だけ書き戻すことは Genko のもの）。
   - `crates/engine/src/smart_cmds/tests.rs`（359-397 行、`psd_placed_layer_renders_from_lnk2_data`）: PSD の配置レイヤーが `lnk2` の中身から描き直されるまで Photoshop の絵を見せる試験 → `native/tests/contract/test_contract_psd_smart.cpp`（`placedLayerImported`）、`native/tests/unit/test_psd_smart.cpp`（`importedAndWrittenBack`）。
+- A4（スタックモードとラスタライズの残り）:
+  - `crates/algo/src/stack.rs`（1-145 行、`Stat`・`stat`・`combine` と試験）: 揃えた何枚もの絵を画素ごと・色ごとの統計で 1 枚にする（アルファが 0 より大きい標本だけ数え、アルファは一番大きいもの。母集団の積率、歪度・尖度を 0..1 に、エントロピーは 8 bit の値で）→ `native/src/render/stack.cpp`（double で。名前は Genko の `standard_deviation`）、試験 → `native/tests/unit/test_smart_stack.cpp`。
+  - `crates/engine/src/smart_cmds.rs`（167-207 行、`stack_image`）: 中身の層（一番上がグループ 1 つならその中）のうち見えているものを 1 枚ずつ通常・クリップなしで描いて統計で重ねる → `native/src/render/smart.cpp`（`stack_pages`・`stacked_8bit`・`stacked_precise`・`stacked_inks`。帯に分けて描く所と 3 つの道は Genko のもの）。
+  - `crates/engine/src/layer_menu_cmds.rs`（312-340 行、`stack_mode`）と試験 `layer_menu_cmds/tests.rs`（276-330 行）: どの SO にもスタックモードを決め・外す op、中央値で写り込んだものが消え・最大で残り・範囲が揃った所で無くなり・なしで元に戻ることの試験 → `native/src/render/ops_smart.cpp`（`smart_stack`）、`native/tests/unit/test_smart_stack.cpp`。
+  - `crates/engine/src/type_cmds.rs`（584-610 行、`type.rasterize`）と `extra_cmds.rs`（445-532 行）: 文字のレイヤーを、見えているとおりの画素のレイヤーにする → `native/src/render/ops_smart.cpp`（`rasterize_lines`。Genko の台詞はレイヤーではないので、新しいペイントのレイヤーを台詞を描いていた重ね順に置いて台詞を消す所は Genko のもの）。
 
 ## 選択・マスク（masks@1、PC3 節 B）
 

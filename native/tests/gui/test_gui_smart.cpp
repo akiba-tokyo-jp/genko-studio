@@ -2,7 +2,8 @@
 // from the menu (the later steps' commands in their places, not usable yet), the layer panel's row of a smart object (its
 // kind and its mark 埋め込み), 新規スマートオブジェクト（コピー）and ラスタライズ; ファイル → 埋め込みを配置… (the file itself
 // in the middle of the page); a file of 16 bits too large to keep them on a 16-bit page asked about; the 属性 panel's part
-// of a smart object (its colours' use, its size); (PC3 A2) its smart filters in the layer panel and レイヤー → スマートフィルター.
+// of a smart object (its colours' use, its size); (PC3 A2) its smart filters in the layer panel and レイヤー → スマートフィルター;
+// (PC3 A4) スタックモード ▸ and ラスタライズ → テキスト, the text tool's tooltip and コマンドを探す telling the two テキスト apart.
 
 #include <QtTest>
 
@@ -12,6 +13,7 @@
 #include <QDoubleSpinBox>
 #include <QFile>
 #include <QLabel>
+#include <QLineEdit>
 #include <QListWidget>
 #include <QMenu>
 #include <QPushButton>
@@ -26,8 +28,10 @@
 #include <zlib.h>
 
 #include "app/adjust_panels.hpp"
+#include "app/canvas.hpp"
 #include "app/layer_panel.hpp"
 #include "app/main_window.hpp"
+#include "app/workspace.hpp"
 #include "core/base64.hpp"
 #include "core/color_model.hpp"
 #include "core/color_raster.hpp"
@@ -156,8 +160,8 @@ private slots:
         QCOMPARE(book.act("act_place_embedded")->text(), QStringLiteral("埋め込みを配置…"));
         // (the later steps' commands: in their places, not usable yet, and said so)
         // (PC3 A1's — コンテンツを編集 and the links, リンクを配置…, パッケージ… — are usable: test_gui_smart_contents;
-        // A2's smart filters: test_smart_filters)
-        for (const char* later : {"act_smart_stack_median", "act_smart_warp", "act_rasterize_type"}) {
+        // A2's smart filters: test_smart_filters; A4's stack modes and ラスタライズ → テキスト: stackModesAndTheTextRasterized)
+        for (const char* later : {"act_smart_warp", "act_smart_perspective_warp", "act_smart_puppet_warp"}) {
             QVERIFY2(!book.act(later)->isEnabled(), later);
             QVERIFY2(book.act(later)->toolTip().contains(QStringLiteral("この版ではまだ使えません")), later);
         }
@@ -391,6 +395,99 @@ private slots:
         QCOMPARE(book.layer("so")->smart->at("filter_mask")["enabled"], Json(false));
         book.act("act_smart_filter_mask_delete")->trigger();
         QVERIFY(!book.layer("so")->smart->contains("filter_mask"));
+    }
+
+    // PC3 A4: レイヤー → スマートオブジェクト → スタックモード ▸ on the smart object drawn on (the 属性 panel's スタックモード
+    // showing and setting it too); ラスタライズ → テキスト on the line chosen with the select tool (undone: the line again);
+    // the text tool's tooltip its name and key alone while コマンドを探す tells テキスト of ツール and of レイヤー → ラスタライズ
+    // apart (the user's decision 8 of PC2).
+    void stackModesAndTheTextRasterized() {
+        Book book;
+        app::MainWindow* w = book.window.get();
+        Json ops = Json::array();
+        for (const char* id : {"f0", "f1", "f2"}) {
+            ops.push_back(Json{{"op", "add_layer"}, {"page", 1}, {"kind", "paint"}, {"id", id}});
+            ops.push_back(Json{{"op", "put_raster"}, {"page", 1}, {"id", id}, {"png_base64", core::b64encode(two_colours())}});
+        }
+        ops.push_back(Json{{"op", "smart_convert"}, {"page", 1}, {"ids", Json::array({"f0", "f1", "f2"})}, {"new_id", "so"}});
+        QVERIFY(w->apply_ops(ops));
+        w->set_target_layer("so");
+        const auto stack = [&] { return book.layer("so")->smart->value("stack", std::string("none")); };
+        const QStringList modes{QStringLiteral("entropy"), QStringLiteral("kurtosis"),          QStringLiteral("maximum"),   QStringLiteral("mean"),
+                                QStringLiteral("median"),  QStringLiteral("minimum"),           QStringLiteral("range"),     QStringLiteral("skewness"),
+                                QStringLiteral("standard_deviation"), QStringLiteral("summation"), QStringLiteral("variance"), QStringLiteral("none")};
+        auto* menu = w->findChild<QMenu*>(QStringLiteral("menu_smart"));
+        QMenu* stack_menu = nullptr;
+        for (QAction* a : menu->actions())
+            if (a->menu() != nullptr && a->text() == QStringLiteral("スタックモード")) stack_menu = a->menu();
+        QVERIFY(stack_menu != nullptr);
+        QCOMPARE(stack_menu->actions().size(), modes.size());
+        for (const QString& mode : modes) {
+            QAction* a = w->action(QStringLiteral("act_smart_stack_%1").arg(mode));
+            QVERIFY2(a != nullptr && a->isEnabled() && stack_menu->actions().contains(a), qPrintable(mode));
+            a->trigger();
+            QCOMPARE(QString::fromStdString(stack()), mode);
+        }
+        QCOMPARE(w->action(QStringLiteral("act_smart_stack_median"))->text(), QStringLiteral("中央値"));
+        book.act("act_smart_stack_median")->trigger();
+        QCOMPARE(stack(), std::string("median"));
+        book.act("act_undo")->trigger();
+        QCOMPARE(stack(), std::string("none"));
+        // (the 属性 panel: the mode shown, and set there)
+        auto* panel = qobject_cast<app::adjust_forms::PropertiesPanel*>(w->findChild<QDockWidget*>(QStringLiteral("属性"))->widget());
+        QVERIFY(panel != nullptr);
+        panel->refresh();
+        auto* box = panel->findChild<QComboBox*>(QStringLiteral("properties_smart_stack"));
+        QVERIFY(box != nullptr && box->isEnabled());
+        QCOMPARE(box->count(), 12);
+        QCOMPARE(box->currentText(), QStringLiteral("なし"));
+        box->setCurrentIndex(box->findData(QStringLiteral("mean")));
+        QCOMPARE(stack(), std::string("mean"));
+        panel->refresh();
+        QCOMPARE(panel->findChild<QComboBox*>(QStringLiteral("properties_smart_stack"))->currentText(), QStringLiteral("平均"));
+        // (a layer that is not a smart object: said, nothing done)
+        QVERIFY(w->apply_ops(Json::array({Json{{"op", "add_layer"}, {"page", 1}, {"kind", "paint"}, {"id", "plain"}}})));
+        w->set_target_layer("plain");
+        book.act("act_smart_stack_median")->trigger();
+        QVERIFY2(w->status_label()->text().contains(QStringLiteral("スマートオブジェクトを選んでください")), qPrintable(w->status_label()->text()));
+
+        // ラスタライズ → テキスト: the line chosen, a paint layer at the top; undone, the line again
+        QVERIFY(w->apply_ops(Json::array({Json{{"op", "add_line"}, {"page", 1}, {"id", "l1"}, {"text", "台詞です"}, {"x_mm", 40}, {"y_mm", 60}}})));
+        w->canvas()->selected_line_id.reset();
+        book.act("act_rasterize_type")->trigger();
+        QVERIFY2(w->status_label()->text().contains(QStringLiteral("台詞")), qPrintable(w->status_label()->text()));
+        QCOMPARE(book.doc().story.size(), std::size_t(1));
+        w->canvas()->selected_line_id = std::string("l1");
+        book.act("act_rasterize_type")->trigger();
+        QVERIFY(book.doc().story.empty());
+        const core::Layer& made = book.page().layers.back();
+        QCOMPARE(made.kind, core::LayerKind::Raster);
+        QCOMPARE(w->target_layer()->id, made.id);
+        QVERIFY(!w->canvas()->selected_line_id);
+        book.act("act_undo")->trigger();
+        QCOMPARE(book.doc().story.size(), std::size_t(1));
+        QCOMPARE(book.doc().story[0].id, std::string("l1"));
+
+        // the text tool's tooltip: its name and key alone; ラスタライズ → テキスト's: its words and its place
+        QCOMPARE(book.act("act_text")->toolTip(), QStringLiteral("テキスト（T）\nクリックした所に台詞を入力します（縦書き）"));
+        QVERIFY2(book.act("act_rasterize_type")->toolTip().startsWith(QStringLiteral("テキスト（レイヤー → ラスタライズ）\n")),
+                 qPrintable(book.act("act_rasterize_type")->toolTip()));
+        // コマンドを探す: both found, each with its place; the names kept for the quick access and the command bar their own
+        app::CommandSearch* search = w->find_command();
+        search->query->setText(QStringLiteral("テキスト"));
+        const auto& found = search->found();
+        QVERIFY(std::find(found.begin(), found.end(), book.act("act_text")) != found.end());
+        QVERIFY(std::find(found.begin(), found.end(), book.act("act_rasterize_type")) != found.end());
+        QStringList rows;
+        for (int i = 0; i < search->results->count(); ++i) rows << search->results->item(i)->text();
+        for (const QString& row : {QStringLiteral("テキスト　（ツール）"), QStringLiteral("テキスト　（レイヤー → ラスタライズ）")}) {
+            QVERIFY2(std::any_of(rows.begin(), rows.end(), [&row](const QString& r) { return r.startsWith(row); }), qPrintable(rows.join(QStringLiteral(" | "))));
+        }
+        search->close();
+        const auto names = app::by_text(w);
+        QCOMPARE(names.at(QStringLiteral("テキスト（ツール）")), book.act("act_text"));
+        QCOMPARE(names.at(QStringLiteral("テキスト（レイヤー → ラスタライズ）")), book.act("act_rasterize_type"));
+        QCOMPARE(names.at(QStringLiteral("テキスト")), book.act("act_text"));  // (the words alone: the tool's, as before)
     }
 };
 

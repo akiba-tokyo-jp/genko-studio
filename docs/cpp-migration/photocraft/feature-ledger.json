@@ -20972,9 +20972,14 @@
         "alternate_menus": []
       },
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "未着手",
+      "implementation_status": "実装済み（PC3 A4、未統合）",
       "acceptance_status": "未実施",
-      "evidence": [],
+      "evidence": [
+        "native/src/render/ops_smart.cpp",
+        "native/src/app/main_window_smart.cpp",
+        "native/tests/unit/test_smart_stack.cpp",
+        "native/tests/gui/test_gui_smart.cpp"
+      ],
       "pc0": {
         "date": "2026-10-16",
         "cpp_base": "962faa4",
@@ -20985,7 +20990,8 @@
         "tests": [],
         "gap": "台詞（文字）はレイヤーではなく、文書の中で台詞をペイントのレイヤーにする命令がない",
         "note": "PSD 書き出しでは表せない装飾の台詞だけ画像にする選択がある（formats/psd_export.cpp:402）"
-      }
+      },
+      "remaining": "ラスタライズした台詞のレイヤーは、ほかのレイヤーと同じくコマの枠線・効果線の下に描く。高精度のページでは、ふちの半透明の画素をほかのレイヤーと同じく光の強さで混ぜる"
     },
     {
       "id": "layer.rasterize.vectorMask",
@@ -22456,9 +22462,17 @@
         "alternate_menus": []
       },
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "未着手",
+      "implementation_status": "実装済み（PC3 A4、未統合）",
       "acceptance_status": "未実施",
-      "evidence": [],
+      "evidence": [
+        "native/src/render/stack.cpp",
+        "native/src/render/smart.cpp",
+        "native/src/render/ops_smart.cpp",
+        "native/src/core/smart.cpp",
+        "native/src/app/main_window_smart.cpp",
+        "native/tests/unit/test_smart_stack.cpp",
+        "native/tests/gui/test_gui_smart.cpp"
+      ],
       "pc0": {
         "date": "2026-10-16",
         "cpp_base": "962faa4",
@@ -22469,7 +22483,8 @@
         "tests": [],
         "gap": "スマートオブジェクトの重ね合わせモード（エントロピー）がない",
         "note": "スマートオブジェクトの土台（XL、layer.smartObjects.editContents に計上）に依存。統計の計算は上流 crates/algo/src/stack.rs（外部ライブラリ不要）"
-      }
+      },
+      "remaining": "高精度・インキのページで値のまま重ねるのは、中身がそのページと同じ色で整数の画素だけ動かした SO だけ（ほかは 8 bit で重ねた絵）。PSD・PSB のファイルの中身は合成の絵 1 枚として数える"
     },
     {
       "id": "layer.smartObjects.stackMode.kurtosis",
@@ -22501,9 +22516,17 @@
         "alternate_menus": []
       },
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "未着手",
+      "implementation_status": "実装済み（PC3 A4、未統合）",
       "acceptance_status": "未実施",
-      "evidence": [],
+      "evidence": [
+        "native/src/render/stack.cpp",
+        "native/src/render/smart.cpp",
+        "native/src/render/ops_smart.cpp",
+        "native/src/core/smart.cpp",
+        "native/src/app/main_window_smart.cpp",
+        "native/tests/unit/test_smart_stack.cpp",
+        "native/tests/gui/test_gui_smart.cpp"
+      ],
       "pc0": {
         "date": "2026-10-16",
         "cpp_base": "962faa4",
@@ -22514,7 +22537,8 @@
         "tests": [],
         "gap": "SO の中の複数の層を画素ごとに尖度で重ねるスタック（積み重ね）モードが無い",
         "note": "スマートオブジェクトの土台（layer.smartObjects.convertToSmartObject 行）が要る。Genko の配置画像レイヤー（Placed: place_asset・set_placement）は素材を非破壊で置く近い仕組みだが、既存の層を包む・中身を編集する形ではない。統計の計算自体は小さい（スタックモード 6 行で共通の処理）"
-      }
+      },
+      "remaining": "高精度・インキのページで値のまま重ねるのは、中身がそのページと同じ色で整数の画素だけ動かした SO だけ（ほかは 8 bit で重ねた絵）。PSD・PSB のファイルの中身は合成の絵 1 枚として数える"
     },
     {
       "id": "layer.smartObjects.stackMode.maximum",
@@ -22546,9 +22570,17 @@
         "alternate_menus": []
       },
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "未着手",
+      "implementation_status": "実装済み（PC3 A4、未統合）",
       "acceptance_status": "未実施",
-      "evidence": [],
+      "evidence": [
+        "native/src/render/stack.cpp",
+        "native/src/render/smart.cpp",
+        "native/src/render/ops_smart.cpp",
+        "native/src/core/smart.cpp",
+        "native/src/app/main_window_smart.cpp",
+        "native/tests/unit/test_smart_stack.cpp",
+        "native/tests/gui/test_gui_smart.cpp"
+      ],
       "pc0": {
         "date": "2026-10-16",
         "cpp_base": "962faa4",
@@ -22559,7 +22591,8 @@
         "tests": [],
         "gap": "スマートオブジェクトの重ね合わせモード（最大）がない",
         "note": "スマートオブジェクトの土台（XL、layer.smartObjects.editContents に計上）に依存。統計の計算は上流 crates/algo/src/stack.rs（外部ライブラリ不要）"
-      }
+      },
+      "remaining": "高精度・インキのページで値のまま重ねるのは、中身がそのページと同じ色で整数の画素だけ動かした SO だけ（ほかは 8 bit で重ねた絵）。PSD・PSB のファイルの中身は合成の絵 1 枚として数える"
     },
     {
       "id": "layer.smartObjects.stackMode.mean",
@@ -22591,9 +22624,17 @@
         "alternate_menus": []
       },
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "未着手",
+      "implementation_status": "実装済み（PC3 A4、未統合）",
       "acceptance_status": "未実施",
-      "evidence": [],
+      "evidence": [
+        "native/src/render/stack.cpp",
+        "native/src/render/smart.cpp",
+        "native/src/render/ops_smart.cpp",
+        "native/src/core/smart.cpp",
+        "native/src/app/main_window_smart.cpp",
+        "native/tests/unit/test_smart_stack.cpp",
+        "native/tests/gui/test_gui_smart.cpp"
+      ],
       "pc0": {
         "date": "2026-10-16",
         "cpp_base": "962faa4",
@@ -22604,7 +22645,8 @@
         "tests": [],
         "gap": "SO の中の複数の層を画素ごとに平均で重ねるスタック（積み重ね）モードが無い",
         "note": "スマートオブジェクトの土台（layer.smartObjects.convertToSmartObject 行）が要る。Genko の配置画像レイヤー（Placed: place_asset・set_placement）は素材を非破壊で置く近い仕組みだが、既存の層を包む・中身を編集する形ではない。統計の計算自体は小さい（スタックモード 6 行で共通の処理）"
-      }
+      },
+      "remaining": "高精度・インキのページで値のまま重ねるのは、中身がそのページと同じ色で整数の画素だけ動かした SO だけ（ほかは 8 bit で重ねた絵）。PSD・PSB のファイルの中身は合成の絵 1 枚として数える"
     },
     {
       "id": "layer.smartObjects.stackMode.median",
@@ -22636,9 +22678,17 @@
         "alternate_menus": []
       },
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "未着手",
+      "implementation_status": "実装済み（PC3 A4、未統合）",
       "acceptance_status": "未実施",
-      "evidence": [],
+      "evidence": [
+        "native/src/render/stack.cpp",
+        "native/src/render/smart.cpp",
+        "native/src/render/ops_smart.cpp",
+        "native/src/core/smart.cpp",
+        "native/src/app/main_window_smart.cpp",
+        "native/tests/unit/test_smart_stack.cpp",
+        "native/tests/gui/test_gui_smart.cpp"
+      ],
       "pc0": {
         "date": "2026-10-16",
         "cpp_base": "962faa4",
@@ -22649,7 +22699,8 @@
         "tests": [],
         "gap": "スマートオブジェクトの重ね合わせモード（中央値）がない",
         "note": "スマートオブジェクトの土台（XL、layer.smartObjects.editContents に計上）に依存。統計の計算は上流 crates/algo/src/stack.rs（外部ライブラリ不要）"
-      }
+      },
+      "remaining": "高精度・インキのページで値のまま重ねるのは、中身がそのページと同じ色で整数の画素だけ動かした SO だけ（ほかは 8 bit で重ねた絵）。PSD・PSB のファイルの中身は合成の絵 1 枚として数える"
     },
     {
       "id": "layer.smartObjects.stackMode.minimum",
@@ -22681,9 +22732,17 @@
         "alternate_menus": []
       },
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "未着手",
+      "implementation_status": "実装済み（PC3 A4、未統合）",
       "acceptance_status": "未実施",
-      "evidence": [],
+      "evidence": [
+        "native/src/render/stack.cpp",
+        "native/src/render/smart.cpp",
+        "native/src/render/ops_smart.cpp",
+        "native/src/core/smart.cpp",
+        "native/src/app/main_window_smart.cpp",
+        "native/tests/unit/test_smart_stack.cpp",
+        "native/tests/gui/test_gui_smart.cpp"
+      ],
       "pc0": {
         "date": "2026-10-16",
         "cpp_base": "962faa4",
@@ -22694,7 +22753,8 @@
         "tests": [],
         "gap": "SO の中の複数の層を画素ごとに最小で重ねるスタック（積み重ね）モードが無い",
         "note": "スマートオブジェクトの土台（layer.smartObjects.convertToSmartObject 行）が要る。Genko の配置画像レイヤー（Placed: place_asset・set_placement）は素材を非破壊で置く近い仕組みだが、既存の層を包む・中身を編集する形ではない。統計の計算自体は小さい（スタックモード 6 行で共通の処理）"
-      }
+      },
+      "remaining": "高精度・インキのページで値のまま重ねるのは、中身がそのページと同じ色で整数の画素だけ動かした SO だけ（ほかは 8 bit で重ねた絵）。PSD・PSB のファイルの中身は合成の絵 1 枚として数える"
     },
     {
       "id": "layer.smartObjects.stackMode.none",
@@ -22713,9 +22773,17 @@
       },
       "upstream_menu": null,
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "未着手",
+      "implementation_status": "実装済み（PC3 A4、未統合）",
       "acceptance_status": "未実施",
-      "evidence": [],
+      "evidence": [
+        "native/src/render/stack.cpp",
+        "native/src/render/smart.cpp",
+        "native/src/render/ops_smart.cpp",
+        "native/src/core/smart.cpp",
+        "native/src/app/main_window_smart.cpp",
+        "native/tests/unit/test_smart_stack.cpp",
+        "native/tests/gui/test_gui_smart.cpp"
+      ],
       "pc0": {
         "date": "2026-10-16",
         "cpp_base": "962faa4",
@@ -22726,7 +22794,8 @@
         "tests": [],
         "gap": "スマートオブジェクトの重ね合わせモード（なし（解除））がない",
         "note": "スマートオブジェクトの土台（XL、layer.smartObjects.editContents に計上）に依存。統計の計算は上流 crates/algo/src/stack.rs（外部ライブラリ不要）"
-      }
+      },
+      "remaining": "高精度・インキのページで値のまま重ねるのは、中身がそのページと同じ色で整数の画素だけ動かした SO だけ（ほかは 8 bit で重ねた絵）。PSD・PSB のファイルの中身は合成の絵 1 枚として数える"
     },
     {
       "id": "layer.smartObjects.stackMode.range",
@@ -22758,9 +22827,17 @@
         "alternate_menus": []
       },
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "未着手",
+      "implementation_status": "実装済み（PC3 A4、未統合）",
       "acceptance_status": "未実施",
-      "evidence": [],
+      "evidence": [
+        "native/src/render/stack.cpp",
+        "native/src/render/smart.cpp",
+        "native/src/render/ops_smart.cpp",
+        "native/src/core/smart.cpp",
+        "native/src/app/main_window_smart.cpp",
+        "native/tests/unit/test_smart_stack.cpp",
+        "native/tests/gui/test_gui_smart.cpp"
+      ],
       "pc0": {
         "date": "2026-10-16",
         "cpp_base": "962faa4",
@@ -22771,7 +22848,8 @@
         "tests": [],
         "gap": "SO の中の複数の層を画素ごとに範囲（最大−最小）で重ねるスタック（積み重ね）モードが無い",
         "note": "スマートオブジェクトの土台（layer.smartObjects.convertToSmartObject 行）が要る。Genko の配置画像レイヤー（Placed: place_asset・set_placement）は素材を非破壊で置く近い仕組みだが、既存の層を包む・中身を編集する形ではない。統計の計算自体は小さい（スタックモード 6 行で共通の処理）"
-      }
+      },
+      "remaining": "高精度・インキのページで値のまま重ねるのは、中身がそのページと同じ色で整数の画素だけ動かした SO だけ（ほかは 8 bit で重ねた絵）。PSD・PSB のファイルの中身は合成の絵 1 枚として数える"
     },
     {
       "id": "layer.smartObjects.stackMode.skewness",
@@ -22803,9 +22881,17 @@
         "alternate_menus": []
       },
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "未着手",
+      "implementation_status": "実装済み（PC3 A4、未統合）",
       "acceptance_status": "未実施",
-      "evidence": [],
+      "evidence": [
+        "native/src/render/stack.cpp",
+        "native/src/render/smart.cpp",
+        "native/src/render/ops_smart.cpp",
+        "native/src/core/smart.cpp",
+        "native/src/app/main_window_smart.cpp",
+        "native/tests/unit/test_smart_stack.cpp",
+        "native/tests/gui/test_gui_smart.cpp"
+      ],
       "pc0": {
         "date": "2026-10-16",
         "cpp_base": "962faa4",
@@ -22816,7 +22902,8 @@
         "tests": [],
         "gap": "スマートオブジェクトの重ね合わせモード（歪度）がない",
         "note": "スマートオブジェクトの土台（XL、layer.smartObjects.editContents に計上）に依存。統計の計算は上流 crates/algo/src/stack.rs（外部ライブラリ不要）"
-      }
+      },
+      "remaining": "高精度・インキのページで値のまま重ねるのは、中身がそのページと同じ色で整数の画素だけ動かした SO だけ（ほかは 8 bit で重ねた絵）。PSD・PSB のファイルの中身は合成の絵 1 枚として数える"
     },
     {
       "id": "layer.smartObjects.stackMode.standardDeviation",
@@ -22848,9 +22935,17 @@
         "alternate_menus": []
       },
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "未着手",
+      "implementation_status": "実装済み（PC3 A4、未統合）",
       "acceptance_status": "未実施",
-      "evidence": [],
+      "evidence": [
+        "native/src/render/stack.cpp",
+        "native/src/render/smart.cpp",
+        "native/src/render/ops_smart.cpp",
+        "native/src/core/smart.cpp",
+        "native/src/app/main_window_smart.cpp",
+        "native/tests/unit/test_smart_stack.cpp",
+        "native/tests/gui/test_gui_smart.cpp"
+      ],
       "pc0": {
         "date": "2026-10-16",
         "cpp_base": "962faa4",
@@ -22861,7 +22956,8 @@
         "tests": [],
         "gap": "SO の中の複数の層を画素ごとに標準偏差で重ねるスタック（積み重ね）モードが無い",
         "note": "スマートオブジェクトの土台（layer.smartObjects.convertToSmartObject 行）が要る。Genko の配置画像レイヤー（Placed: place_asset・set_placement）は素材を非破壊で置く近い仕組みだが、既存の層を包む・中身を編集する形ではない。統計の計算自体は小さい（スタックモード 6 行で共通の処理）"
-      }
+      },
+      "remaining": "高精度・インキのページで値のまま重ねるのは、中身がそのページと同じ色で整数の画素だけ動かした SO だけ（ほかは 8 bit で重ねた絵）。PSD・PSB のファイルの中身は合成の絵 1 枚として数える"
     },
     {
       "id": "layer.smartObjects.stackMode.summation",
@@ -22893,9 +22989,17 @@
         "alternate_menus": []
       },
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "未着手",
+      "implementation_status": "実装済み（PC3 A4、未統合）",
       "acceptance_status": "未実施",
-      "evidence": [],
+      "evidence": [
+        "native/src/render/stack.cpp",
+        "native/src/render/smart.cpp",
+        "native/src/render/ops_smart.cpp",
+        "native/src/core/smart.cpp",
+        "native/src/app/main_window_smart.cpp",
+        "native/tests/unit/test_smart_stack.cpp",
+        "native/tests/gui/test_gui_smart.cpp"
+      ],
       "pc0": {
         "date": "2026-10-16",
         "cpp_base": "962faa4",
@@ -22906,7 +23010,8 @@
         "tests": [],
         "gap": "スマートオブジェクトの重ね合わせモード（合計）がない",
         "note": "スマートオブジェクトの土台（XL、layer.smartObjects.editContents に計上）に依存。統計の計算は上流 crates/algo/src/stack.rs（外部ライブラリ不要）"
-      }
+      },
+      "remaining": "高精度・インキのページで値のまま重ねるのは、中身がそのページと同じ色で整数の画素だけ動かした SO だけ（ほかは 8 bit で重ねた絵）。PSD・PSB のファイルの中身は合成の絵 1 枚として数える"
     },
     {
       "id": "layer.smartObjects.stackMode.variance",
@@ -22938,9 +23043,17 @@
         "alternate_menus": []
       },
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "未着手",
+      "implementation_status": "実装済み（PC3 A4、未統合）",
       "acceptance_status": "未実施",
-      "evidence": [],
+      "evidence": [
+        "native/src/render/stack.cpp",
+        "native/src/render/smart.cpp",
+        "native/src/render/ops_smart.cpp",
+        "native/src/core/smart.cpp",
+        "native/src/app/main_window_smart.cpp",
+        "native/tests/unit/test_smart_stack.cpp",
+        "native/tests/gui/test_gui_smart.cpp"
+      ],
       "pc0": {
         "date": "2026-10-16",
         "cpp_base": "962faa4",
@@ -22951,7 +23064,8 @@
         "tests": [],
         "gap": "SO の中の複数の層を画素ごとに分散で重ねるスタック（積み重ね）モードが無い",
         "note": "スマートオブジェクトの土台（layer.smartObjects.convertToSmartObject 行）が要る。Genko の配置画像レイヤー（Placed: place_asset・set_placement）は素材を非破壊で置く近い仕組みだが、既存の層を包む・中身を編集する形ではない。統計の計算自体は小さい（スタックモード 6 行で共通の処理）"
-      }
+      },
+      "remaining": "高精度・インキのページで値のまま重ねるのは、中身がそのページと同じ色で整数の画素だけ動かした SO だけ（ほかは 8 bit で重ねた絵）。PSD・PSB のファイルの中身は合成の絵 1 枚として数える"
     },
     {
       "id": "layer.smartObjects.updateAllModifiedContent",
@@ -30827,9 +30941,14 @@
       },
       "upstream_menu": null,
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "未着手",
+      "implementation_status": "実装済み（PC3 A4、未統合）",
       "acceptance_status": "未実施",
-      "evidence": [],
+      "evidence": [
+        "native/src/render/ops_smart.cpp",
+        "native/src/app/main_window_smart.cpp",
+        "native/tests/unit/test_smart_stack.cpp",
+        "native/tests/gui/test_gui_smart.cpp"
+      ],
       "pc0": {
         "date": "2026-10-16",
         "cpp_base": "962faa4",
@@ -30840,7 +30959,8 @@
         "tests": [],
         "gap": "台詞を画素のレイヤーに焼く op がない。PSD 書き出しで表せない台詞だけ画像にする選択（native/src/app/export_dialog.cpp:223）はある。",
         "note": "台詞の描画（native/src/render/text/balloons.cpp の letters）を put_raster で書けば作れる。フキダシを含めるかの決めが要る。"
-      }
+      },
+      "remaining": "ラスタライズした台詞のレイヤーは、ほかのレイヤーと同じくコマの枠線・効果線の下に描く。高精度のページでは、ふちの半透明の画素をほかのレイヤーと同じく光の強さで混ぜる"
     },
     {
       "id": "type.rasterizeTypeLayer",
@@ -30868,9 +30988,14 @@
         "alternate_menus": []
       },
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "未着手",
+      "implementation_status": "実装済み（PC3 A4、未統合）",
       "acceptance_status": "未実施",
-      "evidence": [],
+      "evidence": [
+        "native/src/render/ops_smart.cpp",
+        "native/src/app/main_window_smart.cpp",
+        "native/tests/unit/test_smart_stack.cpp",
+        "native/tests/gui/test_gui_smart.cpp"
+      ],
       "pc0": {
         "date": "2026-10-16",
         "cpp_base": "962faa4",
@@ -30881,7 +31006,8 @@
         "tests": [],
         "gap": "type.rasterize と同じ（メニューの入口）。",
         "note": "手間は type.rasterize に計上。"
-      }
+      },
+      "remaining": "ラスタライズした台詞のレイヤーは、ほかのレイヤーと同じくコマの枠線・効果線の下に描く。高精度のページでは、ふちの半透明の画素をほかのレイヤーと同じく光の強さで混ぜる。Genko に 書式（Type）メニューは無いので、入口は レイヤー → ラスタライズ → テキスト と同じ op（rasterize_lines）"
     },
     {
       "id": "type.replaceAllMissingFonts",
