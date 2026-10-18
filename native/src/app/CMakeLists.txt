@@ -112,6 +112,8 @@ genko_library(genko_app
     main_window_studio.cpp
     test_script.cpp
     app_main.cpp
+    # PC3-0: 編集's clipboard items (split from main_window_select.cpp)
+    main_window_clipboard.cpp
     ${GENKO_APP_RESOURCES}
     ${GENKO_APP_FONTS}
   PUBLIC_DEPS genko_core genko_storage genko_render genko_render_ops genko_formats genko_service Qt6::Core Qt6::Gui Qt6::Widgets Qt6::Svg Qt6::Concurrent

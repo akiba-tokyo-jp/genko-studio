@@ -100,7 +100,7 @@ const std::vector<Expected>& expected() {
         {"act_frame", "コマ割り", k({s("F")}),
          "コマの中をドラッグして割る（斜めも。水平・垂直に吸い付く、Alt で自由）・間の白をドラッグで間隔を動かす・選んだコマの角をドラッグで形を変える", true,
          "ツール"},
-        {"act_move", "レイヤー移動", k({s("Q")}), "描く先のレイヤーを丸ごとドラッグで動かす（Shift で縦・横・45°）", true, "ツール"},
+        {"act_move", "移動ツール", k({s("Q")}), "描く先のレイヤーを丸ごとドラッグで動かす（Shift で縦・横・45°）", true, "ツール"},
         {"act_point_wider", "選んだ点を太く", k({s("Ctrl+Alt+]")}), "線の編集で選んだ制御点のところだけ、線を太くします", false, "ツール"},
         {"act_color", "ペンの色…", k({s("C")}), "", false, "ツール"},
         {"act_split_h", "コマを横に割る（上下に分ける）", k({s("Ctrl+Shift+H")}), "", false, "ページ/コマ"},
@@ -257,7 +257,7 @@ private slots:
         // 9 of color-model@1 — ページ → 色モード (act_mode_rgb, act_mode_gray, act_mode_cmyk, act_mode_lab, act_depth_8,
         // act_depth_16, act_depth_32) and 編集 → プロファイルの指定… / プロファイルに変換… (act_assign_profile,
         // act_convert_profile) — theirs (test_gui_book), the 9 of channels@1 — the targets Ctrl+Alt+2…9 (act_channel_composite,
-        // act_channel_3 … act_channel_9) and 選択 → 選択範囲をチャンネルに保存… (act_sel_to_channel) — theirs (test_gui_channels,
+        // act_channel_3 … act_channel_9) and 選択範囲 → 選択範囲を保存… (act_sel_to_channel) — theirs (test_gui_channels,
         // test_gui_select), the
         // 17 of M6 — 環境設定 and the work (act_prefs, act_canvas_only, act_hints, act_tool_names, act_edit_commandbar,
         // act_edit_quick, act_save_workspace, act_next_steps, act_find_command, act_ai) theirs (test_gui_look,
@@ -341,7 +341,7 @@ private slots:
         QCOMPARE(owner.at(QStringLiteral("Ctrl+Shift+Y")), QStringLiteral("act_gamut_warning"));
         QCOMPARE(owner.at(QStringLiteral("Ctrl+Shift+K")), QStringLiteral("act_color_settings"));
         QCOMPARE(owner.at(QStringLiteral("Ctrl+Y")), QStringLiteral("act_redo"));
-        // (選択を解除 keeps Ctrl+D on X11 too, whose keys for Delete hold it: 選択範囲を消す takes Delete's first and Backspace,
+        // (選択を解除 keeps Ctrl+D on X11 too, whose keys for Delete hold it: 消去 takes Delete's first and Backspace,
         // as Python's)
         QCOMPARE(owner.at(QStringLiteral("Ctrl+D")), QStringLiteral("act_deselect"));
     }

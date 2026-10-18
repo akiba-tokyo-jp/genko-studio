@@ -84,9 +84,9 @@ void MainWindow::build_material_actions() {
         effect_actions_.push_back(act);
     }
     make("act_effect_within", QStringLiteral("選択範囲の中にだけ描く"), [this] { effect_clearing(std::string("within")); }, {},
-         QStringLiteral("選んだ効果線を、投げ縄・長方形の選択範囲の中にだけ描きます"));
+         QStringLiteral("選んだ効果線を、なげなわ・長方形選択の選択範囲の中にだけ描きます"));
     make("act_effect_avoid", QStringLiteral("選択範囲を避ける"), [this] { effect_clearing(std::string("avoid")); }, {},
-         QStringLiteral("選んだ効果線を、選択範囲（顔や人物を投げ縄で囲む）の手前で止めます。線は止まる所で細くなります"));
+         QStringLiteral("選んだ効果線を、選択範囲（顔や人物をなげなわで囲む）の手前で止めます。線は止まる所で細くなります"));
     make("act_effect_clear", QStringLiteral("避ける範囲を外す"), [this] { effect_clearing(std::nullopt); }, {},
          QStringLiteral("選んだ効果線の「中にだけ描く」「避ける」を外して、コマ全体に描きます"));
     make("act_materials", QStringLiteral("素材パネルを開く"), [this] { show_dock(QStringLiteral("素材")); });
@@ -122,8 +122,8 @@ void MainWindow::build_material_actions() {
     make("act_layer_dup", QStringLiteral("レイヤーを複製"), layers([](LayerPanel& p) { p.duplicate(); }), key("Ctrl+J"));
     make("act_layer_merge", QStringLiteral("下のレイヤーと結合"), layers([](LayerPanel& p) { p.merge_down(); }), key("Ctrl+Shift+E"));
     make("act_layer_delete", QStringLiteral("レイヤーを消す"), layers([](LayerPanel& p) { p.remove(); }));
-    make("act_layer_up", QStringLiteral("レイヤーを前へ"), layers([](LayerPanel& p) { p.move(1); }), key("Ctrl+]"));
-    make("act_layer_down", QStringLiteral("レイヤーを後ろへ"), layers([](LayerPanel& p) { p.move(-1); }), key("Ctrl+["));
+    make("act_layer_up", QStringLiteral("前面へ"), layers([](LayerPanel& p) { p.move(1); }), key("Ctrl+]"));
+    make("act_layer_down", QStringLiteral("背面へ"), layers([](LayerPanel& p) { p.move(-1); }), key("Ctrl+["));
     make("act_layer_draft", QStringLiteral("下描きにする（書き出さない）／戻す"), layers([](LayerPanel& p) {
         if (auto* draft = p.findChild<QCheckBox*>(QStringLiteral("layer_draft")); draft != nullptr && draft->isEnabled()) draft->click();
     }));
@@ -395,7 +395,7 @@ void MainWindow::effect_clearing(const std::optional<std::string>& how) {
     }
     const auto shape = selection_shape();
     if (!shape) {
-        flash(QStringLiteral("投げ縄か長方形で選択範囲を作ってから選びます（色で選んだ範囲や反転した範囲は使えません）"), 5000);
+        flash(QStringLiteral("なげなわか長方形選択で選択範囲を作ってから選びます（色で選んだ範囲や反転した範囲は使えません）"), 5000);
         return;
     }
     Json change;

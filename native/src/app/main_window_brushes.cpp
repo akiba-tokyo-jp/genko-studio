@@ -132,8 +132,8 @@ void MainWindow::build_tool_settings() {
     // the selection
     marquee_mode_ = new QComboBox;
     marquee_mode_->setObjectName(QStringLiteral("marquee_mode"));
-    for (const auto& [label, key] : {std::pair{QStringLiteral("長方形"), QStringLiteral("rect")}, {QStringLiteral("楕円"), QStringLiteral("ellipse")},
-                                     {QStringLiteral("投げ縄"), QStringLiteral("lasso")}, {QStringLiteral("折れ線"), QStringLiteral("polyline")},
+    for (const auto& [label, key] : {std::pair{QStringLiteral("長方形選択"), QStringLiteral("rect")}, {QStringLiteral("楕円形選択"), QStringLiteral("ellipse")},
+                                     {QStringLiteral("なげなわ"), QStringLiteral("lasso")}, {QStringLiteral("多角形選択"), QStringLiteral("polyline")},
                                      {QStringLiteral("自動選択"), QStringLiteral("wand")}, {QStringLiteral("色域選択"), QStringLiteral("colour")},
                                      {QStringLiteral("選択ペン"), QStringLiteral("selpen")}, {QStringLiteral("選択消し"), QStringLiteral("selerase")}})
         marquee_mode_->addItem(label, key);
@@ -150,7 +150,7 @@ void MainWindow::build_tool_settings() {
     colour_tolerance_box_->setValue(static_cast<int>(colour_tolerance));
     colour_tolerance_box_->setToolTip(QStringLiteral("色域選択: どれだけ違う色まで同じとみなすか"));
     connect(colour_tolerance_box_, &QSpinBox::valueChanged, this, [this](int v) { colour_tolerance = v; });
-    colour_contiguous_box_ = new QCheckBox(QStringLiteral("隣り合う所だけ"));
+    colour_contiguous_box_ = new QCheckBox(QStringLiteral("隣接"));
     colour_contiguous_box_->setObjectName(QStringLiteral("colour_contiguous"));
     connect(colour_contiguous_box_, &QCheckBox::toggled, this, [this](bool on) { colour_contiguous = on; });
     auto* sel_form = new QWidget;
@@ -159,7 +159,7 @@ void MainWindow::build_tool_settings() {
     sfl->setRowWrapPolicy(QFormLayout::WrapLongRows);
     sfl->addRow(QStringLiteral("選び方"), marquee_mode_);
     sfl->addRow(QStringLiteral("選択ペンの太さ"), selection_pen_);
-    sfl->addRow(QStringLiteral("色域の幅"), colour_tolerance_box_);
+    sfl->addRow(QStringLiteral("許容値"), colour_tolerance_box_);
     sfl->addRow(QString(), colour_contiguous_box_);
     ts->add({QStringLiteral("marquee")},
             action_page({sel_form, static_cast<QWidget*>(note(QStringLiteral("Shift で足す・Alt で引く・両方で重なりだけ"))), QStringLiteral("選択範囲と中身"),

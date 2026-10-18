@@ -1,5 +1,5 @@
-// 範囲選択 (M3①-5b, Python's marquee tool and selection commands in genko/app/canvas.py, canvas_shapes.py and main.py)
-// on the offscreen platform: the commands with Python's words, keys and tips; a rectangle, a lasso, an ellipse, a
+// 選択範囲 (M3①-5b: the marquee tool and the selection's commands; PC3-0: the user's decision 5, Photoshop's names)
+// on the offscreen platform: the commands with their words, keys, tips and places; a rectangle, a lasso, an ellipse, a
 // polyline, auto-select, colour, the selection pen and eraser, with Shift to add, Alt to take away, both for the
 // overlap; select all, invert, grow, shrink, soften, from the layer, kept and used again, the quick mask; the chosen
 // part moved, scaled, turned, flipped, pulled freely and changed by numbers; copied, cut, pasted, deleted, filled.
@@ -31,48 +31,65 @@ struct Expected {
     QList<QKeySequence> keys;
     const char* tip;
     bool checkable;
+    const char* place;  // (the menu that holds it, by its path)
 };
 
 QKeySequence s(const char* text) { return QKeySequence(QString::fromLatin1(text)); }
 
-// Python's words, keys and tips (main.py _build_actions)
+// The words, keys, tips and places (the user's decision 5: Photoshop's names — the tools in ツール, the selection's
+// commands in 選択範囲, the clipboard's and the transform's in 編集; Genko's own keep their words)
 const std::vector<Expected>& expected() {
     static const std::vector<Expected> list = {
-        {"act_marquee", "範囲選択（長方形）", {s("M")}, "ドラッグで選ぶ。中をドラッグで移動、□で拡大縮小、○で回転（Shift で 15° 刻み・縦横比を保つ）", true},
-        {"act_lasso", "範囲選択（投げ縄）", {s("L")}, "ドラッグで囲んで選びます", true},
-        {"act_wand", "自動選択", {s("W")}, "クリックした所の、線で囲まれた範囲を選びます", true},
-        {"act_sel_ellipse", "範囲選択（楕円）", {}, "ドラッグで楕円に選ぶ（Shift で足す、Alt で引く）", true},
-        {"act_sel_polyline", "範囲選択（折れ線）", {}, "クリックで角を置き、ダブルクリックか Enter で閉じる", true},
-        {"act_sel_colour", "色域選択", {}, "クリックした所と同じ色の所をページ中から選ぶ", true},
-        {"act_sel_pen", "選択ペン", {}, "なぞった所を選択範囲に足す", true},
-        {"act_sel_erase", "選択消し", {}, "なぞった所を選択範囲から外す", true},
-        {"act_select_all", "すべて選択", {QKeySequence(Std::SelectAll)}, "", false},
-        {"act_deselect", "選択を解除", {s("Ctrl+D")}, "", false},
-        {"act_sel_invert", "選択範囲を反転", {s("Ctrl+Alt+I")}, "", false},
-        {"act_sel_grow", "選択範囲を広げる…", {}, "選択範囲の縁を外へ広げる", false},
-        {"act_sel_shrink", "選択範囲を狭める…", {}, "選択範囲の縁を内へ狭める", false},
-        {"act_sel_feather", "境界をぼかす…", {}, "選択範囲の縁をなめらかにぼかす", false},
-        {"act_sel_layer", "描画部分から選択", {}, "描く先のレイヤーで描いてある所を選ぶ", false},
-        {"act_sel_keep", "選択範囲をストック…", {}, "名前を付けてページに残す（後で「ストックから選ぶ」）", false},
-        {"act_quick_mask", "クイックマスク", {}, "選択範囲を赤で見せ、選択ペン・選択消しで直す", true},
-        {"act_copy", "コピー", {QKeySequence(Std::Copy)}, "", false},
-        {"act_cut", "切り取り", {QKeySequence(Std::Cut)}, "", false},
-        {"act_paste", "貼り付け", {QKeySequence(Std::Paste)}, "新しいレイヤーに貼り付けます（そのまま動かせます）", false},
-        {"act_delete_area", "選択範囲を消す", {}, "", false},
-        {"act_flip_h", "左右反転", {}, "", false},
-        {"act_flip_v", "上下反転", {}, "", false},
-        {"act_fill_selection", "選択範囲を塗る", {s("Alt+Backspace")}, "", false},
-        {"act_line_width", "選択範囲の線の太さ…", {}, "", false},
-        {"act_warp_perspective", "自由変形（遠近・4 隅）", {s("Ctrl+Shift+P")}, "選択範囲の 4 隅を好きな所へ引っぱる。Enter で確定、Esc でやめる", false},
-        {"act_warp_mesh", "自由変形（メッシュ・3×3）", {s("Ctrl+Shift+W")}, "選択範囲の 3×3 の点を引っぱって曲げる。Enter で確定、Esc でやめる", false},
-        {"act_warp_mesh_grid", "自由変形（メッシュ・格子の数を決める）…", {}, "横と縦の格子の数（1〜8）を決めてから、点を引っぱって曲げる", false},
+        {"act_marquee", "長方形選択ツール", {s("M")}, "ドラッグで選ぶ。中をドラッグで移動、□で拡大縮小、○で回転（Shift で 15° 刻み・縦横比を保つ）", true, "ツール"},
+        {"act_lasso", "なげなわツール", {s("L")}, "ドラッグで囲んで選びます", true, "ツール"},
+        {"act_wand", "自動選択ツール", {s("W")}, "クリックした所の、線で囲まれた範囲を選びます", true, "ツール"},
+        {"act_sel_ellipse", "楕円形選択ツール", {}, "ドラッグで楕円に選ぶ（Shift で足す、Alt で引く）", true, "ツール"},
+        {"act_sel_polyline", "多角形選択ツール", {}, "クリックで角を置き、ダブルクリックか Enter で閉じる", true, "ツール"},
+        {"act_sel_colour", "色域選択", {}, "クリックした所と同じ色の所をページ中から選ぶ", true, "ツール"},
+        {"act_sel_pen", "選択ペン", {}, "なぞった所を選択範囲に足す", true, "ツール"},
+        {"act_sel_erase", "選択消し", {}, "なぞった所を選択範囲から外す", true, "ツール"},
+        {"act_select_all", "すべてを選択", {QKeySequence(Std::SelectAll)}, "", false, "選択範囲"},
+        {"act_deselect", "選択を解除", {s("Ctrl+D")}, "", false, "選択範囲"},
+        {"act_sel_invert", "選択範囲を反転", {s("Ctrl+Alt+I")}, "", false, "選択範囲"},
+        {"act_sel_grow", "拡張…", {}, "選択範囲の縁を外へ広げる", false, "選択範囲/選択範囲を変更"},
+        {"act_sel_shrink", "縮小…", {}, "選択範囲の縁を内へ狭める", false, "選択範囲/選択範囲を変更"},
+        {"act_sel_feather", "境界をぼかす…", {s("Shift+F6")}, "選択範囲の縁をなめらかにぼかす", false, "選択範囲/選択範囲を変更"},
+        {"act_sel_layer", "ピクセルを選択", {}, "描く先のレイヤーで描いてある所を選ぶ", false, "選択範囲"},
+        {"act_sel_keep", "選択範囲をストック…", {}, "名前を付けてページに残す（後で「ストックから選ぶ」）", false, "選択範囲"},
+        {"act_quick_mask", "クイックマスクモードで編集", {}, "選択範囲を赤で見せ、選択ペン・選択消しで直す", true, "選択範囲"},
+        {"act_copy", "コピー", {QKeySequence(Std::Copy)}, "", false, "編集"},
+        {"act_cut", "カット", {QKeySequence(Std::Cut)}, "", false, "編集"},
+        {"act_paste", "ペースト", {QKeySequence(Std::Paste)}, "新しいレイヤーにペーストします（そのまま動かせます）", false, "編集"},
+        {"act_delete_area", "消去", {}, "", false, "編集"},
+        {"act_flip_h", "水平方向に反転", {}, "", false, "編集/変形"},
+        {"act_flip_v", "垂直方向に反転", {}, "", false, "編集/変形"},
+        {"act_fill_selection", "描画色で塗りつぶし", {s("Alt+Backspace")}, "", false, "編集"},
+        {"act_line_width", "選択範囲の線の太さ…", {}, "", false, "選択範囲"},
+        {"act_warp_perspective", "自由な形に", {s("Ctrl+Shift+P")}, "選択範囲の 4 隅を好きな所へ引っぱる。Enter で確定、Esc でやめる", false, "編集/変形"},
+        {"act_warp_mesh", "ワープ", {s("Ctrl+Shift+W")}, "選択範囲の 3×3 の点を引っぱって曲げる。Enter で確定、Esc でやめる", false, "編集/変形"},
+        {"act_warp_mesh_grid", "ワープ（格子の数を決める）…", {}, "横と縦の格子の数（1〜8）を決めてから、点を引っぱって曲げる", false, "編集/変形"},
         {"act_move_pivot", "基準位置を動かす", {},
-         "次にクリックした所を、選択範囲を回す・数で変形するときの中心にします（置いた＋はドラッグで動かせる）", false},
+         "次にクリックした所を、選択範囲を回す・数で変形するときの中心にします（置いた＋はドラッグで動かせる）", false, "編集/変形"},
         {"act_transform_numbers", "変形を数で決める…", {},
-         "選択範囲を、移動（mm）・拡大率（%）・回転（°）の数で変形します。基準位置（選択範囲の中の＋）を中心に", false},
-        {"act_warp_apply", "自由変形を確定", {}, "", false},
+         "選択範囲を、移動（mm）・拡大率（%）・回転（°）の数で変形します。基準位置（選択範囲の中の＋）を中心に", false, "編集/変形"},
+        {"act_warp_apply", "変形を確定", {}, "", false, "編集/変形"},
     };
     return list;
+}
+
+// A menu of the menu bar by its path ("編集/変形").
+QMenu* menu_at(const app::MainWindow* window, const QString& path) {
+    QMenu* menu = nullptr;
+    QList<QAction*> actions = window->menuBar()->actions();
+    for (const QString& part : path.split(QLatin1Char('/'))) {
+        QMenu* found = nullptr;
+        for (QAction* a : actions)
+            if (a->menu() != nullptr && a->menu()->title() == part) found = a->menu();
+        if (found == nullptr) return nullptr;
+        menu = found;
+        actions = menu->actions();
+    }
+    return menu;
 }
 
 // A book with one colour page (60 × 60 mm, one panel), a line on the ink layer from (10, 10) to (30, 30).
@@ -133,10 +150,7 @@ private slots:
 
     void theSelectionCommands() {
         Studio studio;
-        QMenu* menu = nullptr;
-        for (QAction* top : studio.window->menuBar()->actions())
-            if (top->menu() != nullptr && top->menu()->title() == QStringLiteral("選択")) menu = top->menu();
-        QVERIFY(menu != nullptr);
+        QVERIFY(menu_at(studio.window.get(), QStringLiteral("選択範囲")) != nullptr);
         for (const Expected& e : expected()) {
             QAction* a = studio.window->action(QString::fromLatin1(e.attribute));
             QVERIFY2(a != nullptr, e.attribute);
@@ -144,8 +158,12 @@ private slots:
             if (!e.keys.isEmpty()) QCOMPARE(a->shortcuts().first(), e.keys.first());
             QCOMPARE(a->statusTip(), QString::fromUtf8(e.tip));
             QCOMPARE(a->isCheckable(), e.checkable);
-            QVERIFY2(menu->actions().contains(a), e.attribute);
+            QMenu* menu = menu_at(studio.window.get(), QString::fromUtf8(e.place));
+            QVERIFY2(menu != nullptr && menu->actions().contains(a), e.attribute);
         }
+        // (すべてを選択 and 選択を解除 in 編集 too)
+        for (const char* name : {"act_select_all", "act_deselect"})
+            QVERIFY2(menu_at(studio.window.get(), QStringLiteral("編集"))->actions().contains(studio.window->action(QString::fromLatin1(name))), name);
         QVERIFY(studio.window->action("act_delete_area")->shortcuts().contains(s("Backspace")));
         // the tools: the marquee in its ways
         for (const auto& [name, way] : {std::pair{"act_marquee", "rect"}, {"act_lasso", "lasso"}, {"act_wand", "wand"}, {"act_sel_ellipse", "ellipse"},
@@ -239,7 +257,7 @@ private slots:
         QVERIFY2(std::abs(studio.size() - 3600) < 40, qPrintable(QString::number(studio.size())));
         studio.trigger("act_deselect");
         studio.trigger("act_sel_grow");  // (nothing chosen: a word)
-        QCOMPARE(studio.window->last_notice(), QStringLiteral("先に範囲を選びます（範囲選択 M・投げ縄 L・自動選択 W）"));
+        QCOMPARE(studio.window->last_notice(), QStringLiteral("先に選択範囲を作ります（長方形選択ツール M・なげなわツール L・自動選択ツール W）"));
         studio.window->set_target_layer(studio.ink);
         studio.trigger("act_sel_layer");
         QVERIFY(studio.area() && studio.size() > 5 && studio.size() < 60);
@@ -335,7 +353,7 @@ private slots:
         auto* canvas = studio.canvas();
         studio.window->set_target_layer(studio.ink);
         studio.trigger("act_paste");
-        QCOMPARE(studio.window->last_notice(), QStringLiteral("貼り付けるものがありません（先にコピー）"));
+        QCOMPARE(studio.window->last_notice(), QStringLiteral("ペーストするものがありません（先にコピー）"));
         studio.trigger("act_marquee");
         inject::mouse_stroke(canvas, {QPointF(5, 5), QPointF(35, 35)});
         studio.trigger("act_copy");
@@ -404,20 +422,20 @@ private slots:
         QVERIFY(!canvas->quick_mask);
     }
 
-    // channels@1 (SPEC.md COLOR-03): 選択範囲をチャンネルに保存… (its name asked; none: Alpha n) and チャンネルから読み込む
+    // channels@1 (SPEC.md COLOR-03): 選択範囲を保存… (its name asked; none: Alpha n) and 選択範囲を読み込む
     // (the page's channels, remade each time): the same area back; with nothing chosen, said.
     void savedToAndLoadedFromAChannel() {
         Studio studio;
         auto* canvas = studio.canvas();
         QMenu* menu = nullptr;
         for (QAction* top : studio.window->menuBar()->actions())
-            if (top->menu() != nullptr && top->menu()->title() == QStringLiteral("選択")) menu = top->menu();
+            if (top->menu() != nullptr && top->menu()->title() == QStringLiteral("選択範囲")) menu = top->menu();
         QVERIFY(menu != nullptr);
         QAction* save = studio.window->action("act_sel_to_channel");
         QVERIFY(save != nullptr && menu->actions().contains(save));
-        QCOMPARE(save->text(), QStringLiteral("選択範囲をチャンネルに保存…"));
+        QCOMPARE(save->text(), QStringLiteral("選択範囲を保存…"));
         QMenu* load = nullptr;
-        for (QMenu* m : studio.window->findChildren<QMenu*>()) if (m->title() == QStringLiteral("チャンネルから読み込む")) load = m;
+        for (QMenu* m : studio.window->findChildren<QMenu*>()) if (m->title() == QStringLiteral("選択範囲を読み込む")) load = m;
         QVERIFY(load != nullptr && menu->actions().contains(load->menuAction()));
         emit load->aboutToShow();
         QCOMPARE(load->actions().size(), 1);

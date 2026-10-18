@@ -151,10 +151,36 @@ void name_commands(MainWindow* window) {
     }
 }
 
-const std::map<QString, QString>& renamed() {
-    static const std::map<QString, QString> all{{QStringLiteral("レイヤーを消す"), QStringLiteral("レイヤーを削除")},
-                                                {QStringLiteral("このページを消す…"), QStringLiteral("このページを削除…")},
-                                                {QStringLiteral("色の校正"), QStringLiteral("CMYK で見る（色校正）")}};  // (PC1b)
+const std::multimap<QString, QString>& renamed() {
+    static const std::multimap<QString, QString> all{{QStringLiteral("レイヤーを消す"), QStringLiteral("レイヤーを削除")},
+                                                     {QStringLiteral("このページを消す…"), QStringLiteral("このページを削除…")},
+                                                     {QStringLiteral("色の校正"), QStringLiteral("CMYK で見る（色校正）")},  // (PC1b)
+                                                     // (PC3, the user's decision 5: the selection's, 編集's, 変形's and the moving's
+                                                     // commands by Photoshop's names)
+                                                     {QStringLiteral("長方形選択ツール"), QStringLiteral("範囲選択（長方形）")},
+                                                     {QStringLiteral("楕円形選択ツール"), QStringLiteral("範囲選択（楕円）")},
+                                                     {QStringLiteral("なげなわツール"), QStringLiteral("範囲選択（投げ縄）")},
+                                                     {QStringLiteral("多角形選択ツール"), QStringLiteral("範囲選択（折れ線）")},
+                                                     {QStringLiteral("自動選択ツール"), QStringLiteral("自動選択")},
+                                                     {QStringLiteral("すべてを選択"), QStringLiteral("すべて選択")},
+                                                     {QStringLiteral("拡張…"), QStringLiteral("選択範囲を広げる…")},
+                                                     {QStringLiteral("縮小…"), QStringLiteral("選択範囲を狭める…")},
+                                                     {QStringLiteral("ピクセルを選択"), QStringLiteral("描画部分から選択")},
+                                                     {QStringLiteral("選択範囲を保存…"), QStringLiteral("選択範囲をチャンネルに保存…")},
+                                                     {QStringLiteral("クイックマスクモードで編集"), QStringLiteral("クイックマスク")},
+                                                     {QStringLiteral("カット"), QStringLiteral("切り取り")},
+                                                     {QStringLiteral("ペースト"), QStringLiteral("貼り付け")},
+                                                     {QStringLiteral("消去"), QStringLiteral("選択範囲を消す")},
+                                                     {QStringLiteral("描画色で塗りつぶし"), QStringLiteral("選択範囲を塗る")},
+                                                     {QStringLiteral("水平方向に反転"), QStringLiteral("左右反転")},
+                                                     {QStringLiteral("垂直方向に反転"), QStringLiteral("上下反転")},
+                                                     {QStringLiteral("自由な形に"), QStringLiteral("自由変形（遠近・4 隅）")},
+                                                     {QStringLiteral("ワープ"), QStringLiteral("自由変形（メッシュ・3×3）")},
+                                                     {QStringLiteral("ワープ（格子の数を決める）…"), QStringLiteral("自由変形（メッシュ・格子の数を決める）…")},
+                                                     {QStringLiteral("変形を確定"), QStringLiteral("自由変形を確定")},
+                                                     {QStringLiteral("移動ツール"), QStringLiteral("レイヤー移動")},
+                                                     {QStringLiteral("前面へ"), QStringLiteral("レイヤーを前へ")},
+                                                     {QStringLiteral("背面へ"), QStringLiteral("レイヤーを後ろへ")}};
     return all;
 }
 
@@ -167,9 +193,10 @@ void apply_shortcuts(MainWindow* window) {
     for (QAction* action : preferences::commands(window)) {
         const QString name = command_name(names, action);
         QString key = QStringLiteral("shortcuts/%1").arg(name);
-        const auto old = renamed().find(name);
-        if (!store->contains(key) && old != renamed().end() && store->contains(QStringLiteral("shortcuts/%1").arg(old->second))) {
-            key = QStringLiteral("shortcuts/%1").arg(old->second);  // (keys chosen under the old name)
+        for (auto [old, end] = renamed().equal_range(name); !store->contains(key) && old != end; ++old) {
+            if (store->contains(QStringLiteral("shortcuts/%1").arg(old->second))) {
+                key = QStringLiteral("shortcuts/%1").arg(old->second);  // (keys chosen under an old name)
+            }
         }
         // (keys chosen under its words alone, before another command had the same words — the user's decision 8: the
         // first of them in the menus had them then)

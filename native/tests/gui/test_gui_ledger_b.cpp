@@ -796,7 +796,7 @@ private slots:
     }
 
     // test_skew_handles_and_the_resampling_choice: the selection's diamond on its top side slants it (the top slides, the
-    // bottom stays), and the transform goes through with the resampling chosen in 選択 → 変形の補間.
+    // bottom stays), and the transform goes through with the resampling chosen in 編集 → 変形 → 補間方法.
     void skewHandlesAndTheResamplingChoice() {
         Desk desk(layers_book());
         app::MainWindow* w = desk.window.get();
@@ -806,7 +806,7 @@ private slots:
         canvas->center_on(70, 70);
         const std::vector<QPointF> square{QPointF(50, 50), QPointF(90, 50), QPointF(90, 90), QPointF(50, 90)};
         canvas->set_selection(Json{{"poly", Json::array({Json::array({50, 50}), Json::array({90, 50}), Json::array({90, 90}), Json::array({50, 90})})}}, square);
-        QAction* nearest = titled(menu_at(w, QStringLiteral("選択/変形の補間")), QStringLiteral("ハード（ニアレストネイバー・ドット絵やトーンに）"));
+        QAction* nearest = titled(menu_at(w, QStringLiteral("編集/変形/補間方法")), QStringLiteral("ハード（ニアレストネイバー・ドット絵やトーンに）"));
         QVERIFY(nearest != nullptr);
         nearest->trigger();
         w->set_target_layer("red");

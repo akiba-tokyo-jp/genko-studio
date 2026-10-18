@@ -159,7 +159,7 @@ void ChannelPanel::refresh() {
     if (page->extra.is_object() && page->extra.contains("saved_areas") && page->extra["saved_areas"].is_object()) {
         for (const auto& [name, area] : page->extra["saved_areas"].items()) {
             add_row("stock:" + name, QStringLiteral("ストック: ") + QString::fromStdString(name), std::nullopt, QIcon(),
-                    QStringLiteral("クリックで選択範囲に（選択 → ストックから選ぶ と同じ）"));
+                    QStringLiteral("クリックで選択範囲に（選択範囲 → ストックから選ぶ と同じ）"));
         }
     }
     list_->setCurrentItem(chosen);
