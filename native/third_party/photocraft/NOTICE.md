@@ -107,6 +107,14 @@ PhotoCraft v0.2.0（`ad863217386440ca968fccc9bfff65ba24e61142`、MIT、同梱 `L
 PhotoCraft v0.2.0（`ad863217386440ca968fccc9bfff65ba24e61142`、MIT、同梱 `LICENSE-MIT`）の次の部分を参照して C++ へ移した。各群（B1〜B4）が算法を移すときは、この節にその部分を足す。
 
 - `crates/algo/src/selection.rs`（80-655 行）: 選択の共通の算法（範囲の箱と覆い `Region`、魔法の杖と隣接・色の近さ、色域の量、正確なユークリッド距離変換、拡張・縮小・境界線・滑らかに・ぼかし、AA の多角形の覆い、明るさ・色相の範囲）→ `native/src/render/selection_ext.cpp`（PC3-0）。区域の修飾の順（拡張・縮小・境界線・滑らかに・反転・ぼかし）→ `native/src/render/area_kinds.cpp`。
+- B2（編集・マスク・レイヤーの選択）:
+  - `crates/engine/src/layer_menu_cmds.rs`（120-167 行、`apply_mask`・`mask_from_transparency`）: 画素のアルファにマスクを掛けてマスクを外す、アルファをマスクにして描いてあった箱の画素を不透明にする → `native/src/render/ops_masks.cpp`（`apply_layer_mask`・`mask_from_transparency`。濃度・ぼかしを掛けた描き方のマスクを掛けること、3 つの道、ペンの層の線を先に画素にすることは Genko のもの）。試験の考え（`layer_menu_cmds/tests.rs`）→ `native/tests/unit/test_masks.cpp`。
+  - `crates/engine/src/extra_cmds.rs`（115-155 行、`stroke`）: 選択範囲（無ければ層の不透明な所）の縁の帯を、内側は縮小との差、外側は拡張との差、中央は半分ずつの拡張と縮小の差で作る → `native/src/render/ops_masks.cpp`（`outline_area`。幅は mm、塗りは `fill_area` と同じ塗りの絵）。
+  - `crates/engine/src/pixels.rs`（35-62 行、`fill_surface` の `lock_transparency`）: 色を普通に重ねた色にして、アルファは元のまま → `native/src/render/ops_masks.cpp`（`fill_keeping_alpha`。8 bit は値で、高精度はリニアの光で、インキは意味する色で）。
+  - `crates/engine/src/commands.rs`（1068-1080 行、`translate_layer`）: リンクしたマスクを層の画素と一緒に動かす → `native/src/render/layer_masks.cpp`（`move_mask`・`warp_mask`。区域の分だけを持ち上げ、抜けた所はマスクの縁の値にすること、行列・ワープは Genko のもの）。
+  - `crates/engine/src/extra_cmds.rs`（297-330 行、`paste_into`）: 選択範囲の中央にペーストし、選択範囲（外は反転）をリンクしないマスクにする → `native/src/app/main_window_clipboard.cpp`（`paste_special`）。`crates/engine/src/edit_cmds.rs`（41-165 行、`lift`・`copy`・`paste`・`layer_via`）: 選択なしで層全体をコピーする、結合部分のコピー、中央へのペースト、選択範囲をコピー／カットしたレイヤー → 同じファイル（`copy`・`copy_merged`・`layer_via`）と `native/src/render/raster_ops.cpp`（`paste` の `center_mm`）。
+  - `crates/engine/src/file_cmds.rs`（767-794 行、`flatten_all_masks`）: 使っているマスクのある画素レイヤーのマスクを適用し、ほかの種類の層は残す → `native/src/app/main_window_masks.cpp`（`flatten_all_masks`。`apply_layer_mask` を並べて 1 回で送る）。
+  - `crates/io/src/psd_export.rs`（104-135 行、`mask`）と `crates/io/src/psd_import.rs`（120-140 行）、`crates/psd/src/layer.rs`（186-240 行、`LayerMask` の読み書き）: マスクの印（bit 0 が層に相対＝リンクしない、bit 1 が使わない、bit 4 がパラメータ）とパラメータ（ユーザーの濃度 1 バイト・ぼかし double）の書き方と読み方 → `native/src/formats/psd_export.cpp`（`Records::record`・`note_mask`。設定を持つマスクだけ、4 バイトにそろえること）、`native/src/render/psd.cpp`、`native/src/render/import_psd.cpp`（パラメータの印のあるマスクだけ読むことは Genko のもの）。
 
 ## パス・ベクトル・変形・判型（vector@1・pen-shapes@1・transform@1・page-spec@1、PC3 節 C）
 

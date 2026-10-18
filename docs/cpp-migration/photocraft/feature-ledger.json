@@ -1731,9 +1731,13 @@
         "alternate_menus": []
       },
       "genko_status": "同等（C++ のソースと試験あり。2026-10-16 照合）",
-      "implementation_status": "未着手",
+      "implementation_status": "実装済み（PC3 B2、未統合）",
       "acceptance_status": "未実施",
-      "evidence": [],
+      "evidence": [
+        "native/src/app/main_window_select.cpp",
+        "native/src/render/raster_ops.cpp",
+        "native/tests/gui/test_gui_select.cpp"
+      ],
       "pc0": {
         "date": "2026-10-16",
         "cpp_base": "962faa4",
@@ -1753,7 +1757,8 @@
         ],
         "gap": "",
         "note": "delete_area は範囲の画素（8 bit・高精度・CMYK/Lab のインキ）とペンの線を消す。選択範囲が要る（上流は選択なしで層全体）"
-      }
+      },
+      "limitations": "選択範囲が要る（Genko の消去。選択なしで層全体を消すのは選択範囲をカットしたレイヤー・カットで）。"
     },
     {
       "id": "edit.colorSettings",
@@ -1981,9 +1986,17 @@
         "alternate_menus": []
       },
       "genko_status": "一部（2026-10-16 照合）",
-      "implementation_status": "未着手",
+      "implementation_status": "実装済み（PC3 B2、未統合）",
       "acceptance_status": "未実施",
-      "evidence": [],
+      "evidence": [
+        "native/src/app/main_window_clipboard.cpp",
+        "native/src/render/color_edit.cpp",
+        "native/src/render/ink_edit.cpp",
+        "native/src/render/selection.cpp",
+        "native/tests/gui/test_gui_clipboard.cpp",
+        "native/tests/gui/test_gui_select.cpp",
+        "native/tests/unit/test_color_raster_edit.cpp"
+      ],
       "pc0": {
         "date": "2026-10-16",
         "cpp_base": "962faa4",
@@ -2000,7 +2013,8 @@
         ],
         "gap": "選択範囲の中の線・塗り・画素（CMYK/Lab のインキも）を内部のクリップボードに写す。高精度（16/32 bit）の画素レイヤーでは not_yet_ported で断る（selection::lift）。選択なしで層全体・OS のクリップボードへの書き出し・API の入口が無い",
         "note": "PC1 の 16/32 ビットの土台（selection::lift の高精度対応）が要る"
-      }
+      },
+      "limitations": "選択範囲が無ければレイヤー全体。システムのクリップボードには Genko の形と、表示のとおりの 8 bit の絵（200 dpi）を置く。高精度の画素は標本のまま（断片の鍵 gkcr）、インキは版のまま。"
     },
     {
       "id": "edit.copyMerged",
@@ -2028,9 +2042,13 @@
         "alternate_menus": []
       },
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "未着手",
+      "implementation_status": "実装済み（PC3 B2、未統合）",
       "acceptance_status": "未実施",
-      "evidence": [],
+      "evidence": [
+        "native/src/app/main_window_clipboard.cpp",
+        "native/src/render/image_ops.cpp",
+        "native/tests/gui/test_gui_clipboard.cpp"
+      ],
       "pc0": {
         "date": "2026-10-16",
         "cpp_base": "962faa4",
@@ -2043,7 +2061,8 @@
         "tests": [],
         "gap": "表示している全レイヤーの合成をクリップボードに写す操作が無い",
         "note": "「表示レイヤーの結合コピーを作る」（merge_visible）はレイヤーを作る別もの"
-      }
+      },
+      "limitations": "見えているページ（印刷の見え、仕上げ・ノンブルなし）をそのページの持ち方（8 bit・高精度の値・インキ）で切る。"
     },
     {
       "id": "edit.cut",
@@ -2071,9 +2090,14 @@
         "alternate_menus": []
       },
       "genko_status": "一部（2026-10-16 照合）",
-      "implementation_status": "未着手",
+      "implementation_status": "実装済み（PC3 B2、未統合）",
       "acceptance_status": "未実施",
-      "evidence": [],
+      "evidence": [
+        "native/src/app/main_window_clipboard.cpp",
+        "native/src/render/color_edit.cpp",
+        "native/tests/gui/test_gui_clipboard.cpp",
+        "native/tests/gui/test_gui_select.cpp"
+      ],
       "pc0": {
         "date": "2026-10-16",
         "cpp_base": "962faa4",
@@ -2090,7 +2114,8 @@
         ],
         "gap": "コピーして delete_area で消す。高精度（16/32 bit）の画素レイヤーではコピーが not_yet_ported で断る。選択なしで層全体・OS のクリップボード・API の入口が無い",
         "note": "edit.copy と同じ（PC1 の 16/32 ビットの土台）"
-      }
+      },
+      "limitations": "コピーしてから消去（選択範囲が無ければレイヤー全体を消す）。"
     },
     {
       "id": "edit.defineBrushPreset",
@@ -2308,7 +2333,13 @@
       "genko_status": "一部（2026-10-16 照合）",
       "implementation_status": "未着手",
       "acceptance_status": "未実施",
-      "evidence": [],
+      "evidence": [
+        "native/src/app/fill_dialogs.cpp",
+        "native/src/render/ops_masks.cpp",
+        "native/src/render/raster_ops.cpp",
+        "native/tests/gui/test_gui_clipboard.cpp",
+        "native/tests/unit/test_masks.cpp"
+      ],
       "pc0": {
         "date": "2026-10-16",
         "cpp_base": "962faa4",
@@ -2327,7 +2358,8 @@
         ],
         "gap": "選択範囲を色と不透明度で塗る（fill_area）はある。パターンで塗る（拡大率・角度）・アルファチャンネル/クイックマスクを対象にする・選択なしで層全体を塗るが無い。塗りは 8 bit の塗り（patch）で置き、高精度の層での扱いは未確認",
         "note": "パターンは edit.definePattern の土台が要る"
-      }
+      },
+      "note": "PC3 B2: 塗りつぶし…の窓（描画色・背景色・カラー…・ブラック・50% グレー・ホワイト、不透明度、透明部分の保持、選択範囲が無ければレイヤー全体）と fill_area の preserve_transparency を作った。パターン（contents: pattern）は PC4 のパターンのライブラリ（edit.definePattern）の後に足し、そのときにこの行を閉じる。"
     },
     {
       "id": "edit.findAndReplaceText",
@@ -2541,9 +2573,17 @@
         "alternate_menus": []
       },
       "genko_status": "一部（2026-10-16 照合）",
-      "implementation_status": "未着手",
+      "implementation_status": "実装済み（PC3 B2、未統合）",
       "acceptance_status": "未実施",
-      "evidence": [],
+      "evidence": [
+        "native/src/app/main_window_clipboard.cpp",
+        "native/src/render/raster_ops.cpp",
+        "native/src/render/color_edit.cpp",
+        "native/tests/gui/test_gui_clipboard.cpp",
+        "native/tests/gui/test_gui_select.cpp",
+        "native/tests/unit/test_masks.cpp",
+        "native/tests/unit/test_color_raster_edit.cpp"
+      ],
       "pc0": {
         "date": "2026-10-16",
         "cpp_base": "962faa4",
@@ -2563,7 +2603,8 @@
         ],
         "gap": "内部のクリップボードを新しいレイヤー「貼り付け」の元の位置に置く。表示の中央に置く（center）・ほかのアプリの画像（OS のクリップボード）を貼る入口が無い",
         "note": ""
-      }
+      },
+      "limitations": "この窓のコピーは元の位置に置き、元の選択範囲も戻す。ほかのアプリの絵は表示の中央に 200 dpi の絵で（ページより大きければ収める）、高精度のページでは 16 bit の絵の標本も残す。op は center_mm を足した。"
     },
     {
       "id": "edit.pasteSpecial.pasteInPlace",
@@ -2593,9 +2634,12 @@
         "alternate_menus": []
       },
       "genko_status": "同等（C++ のソースと試験あり。2026-10-16 照合）",
-      "implementation_status": "未着手",
+      "implementation_status": "実装済み（PC3 B2、未統合）",
       "acceptance_status": "未実施",
-      "evidence": [],
+      "evidence": [
+        "native/src/app/main_window_clipboard.cpp",
+        "native/tests/gui/test_gui_clipboard.cpp"
+      ],
       "pc0": {
         "date": "2026-10-16",
         "cpp_base": "962faa4",
@@ -2612,7 +2656,8 @@
         ],
         "gap": "",
         "note": "Genko の「貼り付け」が元の位置に置くので同じ動き（別のメニュー項目は無い）"
-      }
+      },
+      "limitations": "Genko のペーストはもともと元の位置に置く。Photoshop の Ctrl+Shift+V は「コマを縦に割る」のキーなので付けない。"
     },
     {
       "id": "edit.pasteSpecial.pasteInto",
@@ -2642,9 +2687,12 @@
         "alternate_menus": []
       },
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "未着手",
+      "implementation_status": "実装済み（PC3 B2、未統合）",
       "acceptance_status": "未実施",
-      "evidence": [],
+      "evidence": [
+        "native/src/app/main_window_clipboard.cpp",
+        "native/tests/gui/test_gui_clipboard.cpp"
+      ],
       "pc0": {
         "date": "2026-10-16",
         "cpp_base": "962faa4",
@@ -2658,7 +2706,8 @@
         "tests": [],
         "gap": "選択範囲をレイヤーマスクにして貼る操作が無い",
         "note": "「貼り付け」＋レイヤーの「選択範囲からマスクを作る」の 2 手で代わりになる"
-      }
+      },
+      "limitations": "選択範囲の中央に置き、選択範囲をページに固定のマスクにして選択を解除する。"
     },
     {
       "id": "edit.pasteSpecial.pasteOutside",
@@ -2688,9 +2737,12 @@
         "alternate_menus": []
       },
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "未着手",
+      "implementation_status": "実装済み（PC3 B2、未統合）",
       "acceptance_status": "未実施",
-      "evidence": [],
+      "evidence": [
+        "native/src/app/main_window_clipboard.cpp",
+        "native/tests/gui/test_gui_clipboard.cpp"
+      ],
       "pc0": {
         "date": "2026-10-16",
         "cpp_base": "962faa4",
@@ -2704,7 +2756,8 @@
         "tests": [],
         "gap": "選択範囲の外をレイヤーマスクにして貼る操作が無い",
         "note": "「貼り付け」＋「選択範囲からマスクを作る」＋「マスクを反転」の 3 手で代わりになる"
-      }
+      },
+      "limitations": "選択範囲外（反転）をページに固定のマスクにする。"
     },
     {
       "id": "edit.perspectiveWarp",
@@ -4152,9 +4205,15 @@
         "alternate_menus": []
       },
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "未着手",
+      "implementation_status": "実装済み（PC3 B2、未統合）",
       "acceptance_status": "未実施",
-      "evidence": [],
+      "evidence": [
+        "native/src/render/ops_masks.cpp",
+        "native/src/app/fill_dialogs.cpp",
+        "native/tests/unit/test_masks.cpp",
+        "native/tests/gui/test_gui_clipboard.cpp",
+        "native/tests/contract/test_contract_masks.cpp"
+      ],
       "pc0": {
         "date": "2026-10-16",
         "cpp_base": "962faa4",
@@ -4165,7 +4224,8 @@
         "tests": [],
         "gap": "選択範囲（または層の不透明部分）の縁に、幅・色・内側/中央/外側・不透明度で線を描く操作が無い",
         "note": "「選択範囲の線の太さ…」（act_line_width）はペンの線の太さを変える別もの。selection の grow（広げる・狭める）で帯を作れる"
-      }
+      },
+      "limitations": "幅は mm（上流は画素）。帯は 300 dpi の塗りの絵（高精度・インキの層は画素に入る）。"
     },
     {
       "id": "edit.toggleLastState",
@@ -7170,9 +7230,13 @@
         "alternate_menus": []
       },
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "未着手",
+      "implementation_status": "実装済み（PC3 B2、未統合）",
       "acceptance_status": "未実施",
-      "evidence": [],
+      "evidence": [
+        "native/src/app/main_window_masks.cpp",
+        "native/src/render/ops_masks.cpp",
+        "native/tests/gui/test_gui_layers.cpp"
+      ],
       "pc0": {
         "date": "2026-10-16",
         "cpp_base": "962faa4",
@@ -7183,7 +7247,8 @@
         "tests": [],
         "gap": "ピクセルレイヤーのマスク（とベクトルマスク）を画素に適用して外す一括操作がない",
         "note": "set_layer_mask（native/src/render/raster_ops.cpp:2546）は削除・反転・無効化のみで「適用」がない"
-      }
+      },
+      "limitations": "ページの、使っているマスクのあるペン・ペイントの層に apply_layer_mask を 1 回で送る（ベクトルマスクは節 C）。"
     },
     {
       "id": "file.scripts.imageProcessor",
@@ -17238,9 +17303,15 @@
         "alternate_menus": []
       },
       "genko_status": "一部（2026-10-16 照合）",
-      "implementation_status": "未着手",
+      "implementation_status": "実装済み（PC3 B2、未統合）",
       "acceptance_status": "未実施",
-      "evidence": [],
+      "evidence": [
+        "native/src/render/ops_masks.cpp",
+        "native/src/app/layer_panel_masks.cpp",
+        "native/tests/unit/test_masks.cpp",
+        "native/tests/gui/test_gui_layers.cpp",
+        "native/tests/contract/test_contract_masks.cpp"
+      ],
       "pc0": {
         "date": "2026-10-16",
         "cpp_base": "962faa4",
@@ -17256,7 +17327,8 @@
         ],
         "gap": "マスクを適用する専用の命令・画面の入口がない。8bit は convert_layer(to=paint) でマスクが画素に焼き込まれるが、u16/f32（color_raster）のレイヤーはそのまま返り適用されない",
         "note": ""
-      }
+      },
+      "limitations": "ペン・ペイントの層だけ（ペンの層は線を画素にしてから）。ほかの種類はラスタライズを求めて断る。"
     },
     {
       "id": "layer.layerMask.delete",
@@ -17286,9 +17358,13 @@
         "alternate_menus": []
       },
       "genko_status": "同等（C++ のソースと試験あり。2026-10-16 照合）",
-      "implementation_status": "未着手",
+      "implementation_status": "実装済み（PC3 B2、未統合）",
       "acceptance_status": "未実施",
-      "evidence": [],
+      "evidence": [
+        "native/src/app/layer_panel.cpp",
+        "native/src/render/raster_ops.cpp",
+        "native/tests/gui/test_gui_layers.cpp"
+      ],
       "pc0": {
         "date": "2026-10-16",
         "cpp_base": "962faa4",
@@ -17305,7 +17381,8 @@
         ],
         "gap": "",
         "note": "set_layer_mask の delete。画面は「マスク ▾ → マスクを消す」"
-      }
+      },
+      "limitations": "名前を Photoshop の「削除」に（前の名前の設定は読み替える）。"
     },
     {
       "id": "layer.layerMask.enabled",
@@ -17335,9 +17412,13 @@
         "alternate_menus": []
       },
       "genko_status": "同等（C++ のソースと試験あり。2026-10-16 照合）",
-      "implementation_status": "未着手",
+      "implementation_status": "実装済み（PC3 B2、未統合）",
       "acceptance_status": "未実施",
-      "evidence": [],
+      "evidence": [
+        "native/src/app/layer_panel.cpp",
+        "native/src/render/raster_ops.cpp",
+        "native/tests/gui/test_gui_layers.cpp"
+      ],
       "pc0": {
         "date": "2026-10-16",
         "cpp_base": "962faa4",
@@ -17354,7 +17435,8 @@
         ],
         "gap": "",
         "note": "set_layer_mask の enabled（明示。上流の省略時トグルはない）と「マスクを使わない」"
-      }
+      },
+      "limitations": "「使用しない」（チェック）。"
     },
     {
       "id": "layer.layerMask.fromTransparency",
@@ -17384,9 +17466,15 @@
         "alternate_menus": []
       },
       "genko_status": "一部（2026-10-16 照合）",
-      "implementation_status": "未着手",
+      "implementation_status": "実装済み（PC3 B2、未統合）",
       "acceptance_status": "未実施",
-      "evidence": [],
+      "evidence": [
+        "native/src/render/ops_masks.cpp",
+        "native/src/app/layer_panel_masks.cpp",
+        "native/tests/unit/test_masks.cpp",
+        "native/tests/gui/test_gui_layers.cpp",
+        "native/tests/contract/test_contract_masks.cpp"
+      ],
       "pc0": {
         "date": "2026-10-16",
         "cpp_base": "962faa4",
@@ -17402,7 +17490,8 @@
         ],
         "gap": "set_layer_mask の area {layer: 自分} で近いことはできるが、α>8 で 2 値にした 150 dpi・8 bit のマスクになり（上流は α の階調を文書の解像度のまま）、層の画素を不透明にしない。専用の op・メニューが無い",
         "note": ""
-      }
+      },
+      "limitations": "アルファを灰色のままマスクに（ページのマスクの格子で）、描いてあった箱の画素を不透明にする。"
     },
     {
       "id": "layer.layerMask.hideAll",
@@ -17432,9 +17521,13 @@
         "alternate_menus": []
       },
       "genko_status": "一部（2026-10-16 照合）",
-      "implementation_status": "未着手",
+      "implementation_status": "実装済み（PC3 B2、未統合）",
       "acceptance_status": "未実施",
-      "evidence": [],
+      "evidence": [
+        "native/src/app/layer_panel.cpp",
+        "native/src/render/raster_ops.cpp",
+        "native/tests/gui/test_gui_layers.cpp"
+      ],
       "pc0": {
         "date": "2026-10-16",
         "cpp_base": "962faa4",
@@ -17450,7 +17543,8 @@
         ],
         "gap": "命令（set_layer_mask fill=hide）と試験はあるが、画面は「全部見せるマスクを作る」→「マスクを反転」の 2 手で、全部隠すマスクの 1 手の入口がない",
         "note": ""
-      }
+      },
+      "limitations": "「すべての領域を隠す」の 1 手。"
     },
     {
       "id": "layer.layerMask.hideSelection",
@@ -17480,9 +17574,13 @@
         "alternate_menus": []
       },
       "genko_status": "一部（2026-10-16 照合）",
-      "implementation_status": "未着手",
+      "implementation_status": "実装済み（PC3 B2、未統合）",
       "acceptance_status": "未実施",
-      "evidence": [],
+      "evidence": [
+        "native/src/app/layer_panel_masks.cpp",
+        "native/src/render/raster_ops.cpp",
+        "native/tests/gui/test_gui_layers.cpp"
+      ],
       "pc0": {
         "date": "2026-10-16",
         "cpp_base": "962faa4",
@@ -17500,7 +17598,8 @@
         ],
         "gap": "op は area＋invert で同じ形にできるが、画面は「選択範囲からマスクを作る」→「マスクを反転」の 2 手で専用の項目が無い。マスクは 150 dpi・8 bit（上流は文書の解像度）。作った後に選択を解除しない",
         "note": ""
-      }
+      },
+      "limitations": "「選択範囲をマスク」の 1 手。作った後に選択を解除する。"
     },
     {
       "id": "layer.layerMask.linked",
@@ -17530,9 +17629,20 @@
         "alternate_menus": []
       },
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "未着手",
+      "implementation_status": "実装済み（PC3 B2、未統合）",
       "acceptance_status": "未実施",
-      "evidence": [],
+      "evidence": [
+        "native/src/render/layer_masks.cpp",
+        "native/src/render/raster_ops.cpp",
+        "native/src/app/layer_panel.cpp",
+        "native/src/app/main_window_actions.cpp",
+        "native/src/app/mask_panel.cpp",
+        "native/src/formats/psd_export.cpp",
+        "native/src/render/import_psd.cpp",
+        "native/tests/unit/test_masks.cpp",
+        "native/tests/gui/test_gui_layers.cpp",
+        "native/tests/contract/test_contract_masks.cpp"
+      ],
       "pc0": {
         "date": "2026-10-16",
         "cpp_base": "962faa4",
@@ -17545,7 +17655,8 @@
         "tests": [],
         "gap": "マスクとレイヤーの連結の概念がない。マスクはページに固定で、transform_area などで画素を動かしてもマスクは動かない（常に連結解除の状態）",
         "note": "連結（既定オン）にするなら移動・変形でマスクも同じ写像で動かす処理と切り替えが要る"
-      }
+      },
+      "limitations": "リンクの無い今の原稿のマスクはページに固定のまま。transform_area の mask: follow（窓のレイヤー移動はリンクのとき付ける）で動く。PSD はパラメータの印のあるマスクだけリンクを読む。"
     },
     {
       "id": "layer.layerMask.revealAll",
@@ -17575,9 +17686,13 @@
         "alternate_menus": []
       },
       "genko_status": "同等（C++ のソースと試験あり。2026-10-16 照合）",
-      "implementation_status": "未着手",
+      "implementation_status": "実装済み（PC3 B2、未統合）",
       "acceptance_status": "未実施",
-      "evidence": [],
+      "evidence": [
+        "native/src/app/layer_panel.cpp",
+        "native/src/render/raster_ops.cpp",
+        "native/tests/gui/test_gui_layers.cpp"
+      ],
       "pc0": {
         "date": "2026-10-16",
         "cpp_base": "962faa4",
@@ -17595,7 +17710,8 @@
         ],
         "gap": "",
         "note": "set_layer_mask の fill: show。画面は「マスク ▾ → 全部見せるマスクを作る」。マスクは 150 dpi・8 bit（全部見せるでは差は出ない）"
-      }
+      },
+      "limitations": "「すべての領域を表示」。新しく作るマスクはリンク。"
     },
     {
       "id": "layer.layerMask.revealSelection",
@@ -17625,9 +17741,13 @@
         "alternate_menus": []
       },
       "genko_status": "同等（C++ のソースと試験あり。2026-10-16 照合）",
-      "implementation_status": "未着手",
+      "implementation_status": "実装済み（PC3 B2、未統合）",
       "acceptance_status": "未実施",
-      "evidence": [],
+      "evidence": [
+        "native/src/app/layer_panel.cpp",
+        "native/src/render/raster_ops.cpp",
+        "native/tests/gui/test_gui_layers.cpp"
+      ],
       "pc0": {
         "date": "2026-10-16",
         "cpp_base": "962faa4",
@@ -17644,7 +17764,8 @@
         ],
         "gap": "",
         "note": "set_layer_mask area（ぼかし feather_mm も効く）と「選択範囲からマスクを作る」。マスクは 8bit・150dpi（作画は 200dpi）"
-      }
+      },
+      "limitations": "「選択範囲外をマスク」。作った後に選択を解除する。高精度・インキのページではページの一番細かい格子（200〜600 dpi）、8 bit のページは 150 dpi。"
     },
     {
       "id": "layer.layerStyle.bevelEmboss",
@@ -19366,9 +19487,12 @@
         "alternate_menus": []
       },
       "genko_status": "一部（2026-10-16 照合）",
-      "implementation_status": "未着手",
+      "implementation_status": "実装済み（PC3 B2、未統合）",
       "acceptance_status": "未実施",
-      "evidence": [],
+      "evidence": [
+        "native/src/app/main_window_clipboard.cpp",
+        "native/tests/gui/test_gui_clipboard.cpp"
+      ],
       "pc0": {
         "date": "2026-10-16",
         "cpp_base": "962faa4",
@@ -19385,7 +19509,8 @@
         ],
         "gap": "選択が無いときの複製（Ctrl+J の「レイヤーを複製」）はある。選択範囲の画素だけを新しい層に写す動き（対の「切り取りで新規」も）が無い",
         "note": ""
-      }
+      },
+      "limitations": "Ctrl+J。選択範囲が無ければレイヤーを複製（「レイヤーを複製」のキーは外した）。"
     },
     {
       "id": "layer.new.layerViaCut",
@@ -19415,9 +19540,12 @@
         "alternate_menus": []
       },
       "genko_status": "一部（2026-10-16 照合）",
-      "implementation_status": "未着手",
+      "implementation_status": "実装済み（PC3 B2、未統合）",
       "acceptance_status": "未実施",
-      "evidence": [],
+      "evidence": [
+        "native/src/app/main_window_clipboard.cpp",
+        "native/tests/gui/test_gui_clipboard.cpp"
+      ],
       "pc0": {
         "date": "2026-10-16",
         "cpp_base": "962faa4",
@@ -19434,7 +19562,8 @@
         ],
         "gap": "1 手の命令・ショートカット（Cmd+Shift+J）がない。切り取り→貼り付け（新しいレイヤーに同じ位置で貼る）の 2 手でできる",
         "note": ""
-      }
+      },
+      "limitations": "Ctrl+Shift+J。選択範囲が要る。"
     },
     {
       "id": "layer.newAdjustmentLayer.blackWhite",
@@ -26269,9 +26398,14 @@
         "alternate_menus": []
       },
       "genko_status": "一部（2026-10-16 照合）",
-      "implementation_status": "未着手",
+      "implementation_status": "実装済み（PC3 B2、未統合）",
       "acceptance_status": "未実施",
-      "evidence": [],
+      "evidence": [
+        "native/src/app/main_window_masks.cpp",
+        "native/src/app/layer_panel_masks.cpp",
+        "native/tests/gui/test_gui_layers.cpp",
+        "native/tests/gui/test_gui_clipboard.cpp"
+      ],
       "pc0": {
         "date": "2026-10-16",
         "cpp_base": "962faa4",
@@ -26287,7 +26421,8 @@
         ],
         "gap": "レイヤーパネルで Ctrl/Shift+クリックの複数選択はある。すべてのレイヤーを選ぶコマンド（Ctrl+Alt+A）が無い",
         "note": ""
-      }
+      },
+      "limitations": "Ctrl+Alt+A。"
     },
     {
       "id": "select.colorRange",
@@ -26449,9 +26584,13 @@
         "alternate_menus": []
       },
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "未着手",
+      "implementation_status": "実装済み（PC3 B2、未統合）",
       "acceptance_status": "未実施",
-      "evidence": [],
+      "evidence": [
+        "native/src/app/main_window_masks.cpp",
+        "native/src/app/layer_panel_masks.cpp",
+        "native/tests/gui/test_gui_layers.cpp"
+      ],
       "pc0": {
         "date": "2026-10-16",
         "cpp_base": "962faa4",
@@ -26464,7 +26603,8 @@
         "tests": [],
         "gap": "レイヤーの選択をすべて外すコマンドが無い（Genko は描く先のレイヤーを常に 1 つ持つ）",
         "note": ""
-      }
+      },
+      "limitations": "Genko は描く先の層をいつも 1 つ持つので、複数選択を外して描く先を残す。"
     },
     {
       "id": "select.editInQuickMaskMode",
@@ -26539,9 +26679,13 @@
         "alternate_menus": []
       },
       "genko_status": "一部（2026-10-16 照合）",
-      "implementation_status": "未着手",
+      "implementation_status": "実装済み（PC3 B2、未統合）",
       "acceptance_status": "未実施",
-      "evidence": [],
+      "evidence": [
+        "native/src/app/main_window_masks.cpp",
+        "native/src/app/layer_panel_masks.cpp",
+        "native/tests/gui/test_gui_layers.cpp"
+      ],
       "pc0": {
         "date": "2026-10-16",
         "cpp_base": "962faa4",
@@ -26557,7 +26701,8 @@
         ],
         "gap": "レイヤーパネルの「レイヤーを探す（名前）」は名前で行を絞り込む（隠す）だけで、合うレイヤーを選ばない。ショートカットの入口が無い。欄は 9 枚以上のページだけに出る",
         "note": ""
-      }
+      },
+      "limitations": "Ctrl+Alt+Shift+F。名前の欄を出し、Enter で見つかった層を選ぶ。"
     },
     {
       "id": "select.focusArea",
@@ -26716,9 +26861,13 @@
         "alternate_menus": []
       },
       "genko_status": "一部（2026-10-16 照合）",
-      "implementation_status": "未着手",
+      "implementation_status": "実装済み（PC3 B2、未統合）",
       "acceptance_status": "未実施",
-      "evidence": [],
+      "evidence": [
+        "native/src/app/main_window_masks.cpp",
+        "native/src/app/layer_panel_masks.cpp",
+        "native/tests/gui/test_gui_layers.cpp"
+      ],
       "pc0": {
         "date": "2026-10-16",
         "cpp_base": "962faa4",
@@ -26733,7 +26882,8 @@
         ],
         "gap": "名前の絞り込みで行を隠すことはできるが、選んだレイヤーだけをパネルに出す切り替えが無い",
         "note": ""
-      }
+      },
+      "limitations": "窓の状態（保存しない）。"
     },
     {
       "id": "select.lasso",
