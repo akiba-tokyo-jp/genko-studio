@@ -8,6 +8,7 @@
 #include <QtTest>
 
 #include <QDir>
+#include <QFile>
 #include <QTemporaryDir>
 
 #include <array>
@@ -272,9 +273,19 @@ private slots:
             QCOMPARE(l["sha256"], Json(genko::core::bytes_ref(png).substr(7)));
         }
         QVERIFY2(seen, view.dump().c_str());
-        // undone and redone
+        // undone, gc (Redo still needs the block, the picture and the item: kept), redone
+        const std::string raw = (*so)["smart"]["psd"]["raw"].get<std::string>(), shown = (*so)["smart"]["psd"]["shown"]["asset"].get<std::string>();
+        const std::string item = contents["psd"]["item"].get<std::string>();
         QVERIFY(restore(book, "undo"));
         QVERIFY(layer_of(project(book)["pages"][0], "ps-1") == nullptr);
+        int exit = -1;
+        (void)genko({QStringLiteral("gc"), book}, &exit);
+        QCOMPARE(exit, 0);
+        const auto kept = [&](const std::string& ref, const char* suffix) {
+            return QFile::exists(book + QStringLiteral("/assets/") + QString::fromStdString(ref.substr(7, 2)) + QStringLiteral("/") +
+                                 QString::fromStdString(ref.substr(7)) + QString::fromLatin1(suffix));
+        };
+        QVERIFY(kept(raw, ".bin") && kept(shown, ".png") && kept(item, ".bin"));
         QVERIFY(restore(book, "redo"));
         QCOMPARE(drawn(book, dpi).getpixel(30, 40), (std::vector<double>{0, 0, 255}));
         // changed (a smart filter: Photoshop's picture no longer is what it draws): drawn from the file the PSD held —

@@ -5,7 +5,7 @@
 // PSB as a smart object's file (render/smart_decode through render/psd): 16 and 32 bits kept, a PSB read, a CMYK file's
 // inks, a Lab file shown in sRGB, a file without a real merged picture drawn from its layers; and import_psd making smart
 // objects of placed layers (Photoshop's picture shown until the smart object changes, then its file drawn), written back
-// by the PSD writer with the block and item it was read with, byte for byte.
+// by the PSD writer with the block and item it was read with, byte for byte; the records a book keeps of them checked.
 
 #include <QtTest>
 
@@ -15,6 +15,7 @@
 #include <cmath>
 #include <cstring>
 #include <filesystem>
+#include <functional>
 #include <string>
 
 #include "core/base64.hpp"
@@ -488,6 +489,42 @@ private slots:
         const std::array<double, 8> expected{110, 150, 150, 150, 150, 182, 110, 182};
         for (std::size_t i = 0; i < 8; ++i) QVERIFY(std::abs(moved->placed->corners[i] - expected[i]) < 1e-9);
         QCOMPARE(std::string(again.linked("uuid-1")->item), made.item);  // (its contents unchanged: the item as read)
+    }
+
+    // the PSD records a book keeps checked (validate_smart): the layer's {block, raw, shown?}, the contents' {uuid, item, at}
+    void psdRecordsChecked() {
+        const PlacedPsd made = placed_psd();
+        const core::Document doc =
+            run(small_book(), Json::array({Json{{"op", "import_psd"}, {"page", 1}, {"psd", core::b64encode(made.bytes)}, {"fit", "paper"}, {"id", "ps"}}}));
+        core::smart::validate_smart(doc);
+        const auto refused = [](const core::Document& bad, const char* words) {
+            try {
+                core::smart::validate_smart(bad);
+            } catch (const core::Error& error) {
+                return QString::fromUtf8(error.what()).contains(QString::fromUtf8(words));
+            }
+            return false;
+        };
+        const auto with_layer = [&](const std::function<void(Json&)>& change) {
+            core::Document bad = doc;
+            for (core::Layer& l : bad.edit_page(0).layers)
+                if (l.id == "ps-2") change(*l.smart);
+            return bad;
+        };
+        QVERIFY(refused(with_layer([](Json& s) { s["psd"]["block"] = "XXXX"; }), "SoLd, SoLE or PlLd"));
+        QVERIFY(refused(with_layer([](Json& s) { s["psd"]["raw"] = "x"; }), "raw is an asset"));
+        QVERIFY(refused(with_layer([](Json& s) { s["psd"]["shown"] = Json{{"png", "x"}}; }), "{asset} or {ink_raster}"));
+        QVERIFY(refused(with_layer([](Json& s) { s["psd"]["extra"] = 1; }), "is not known"));
+        core::Document no_item = doc;
+        const std::string id = no_item.smart_contents.begin()->first;
+        no_item.edit_contents(id).psd->erase("item");
+        QVERIFY(refused(no_item, "its psd's item"));
+        // (smart_profile lets Photoshop's picture go, keeping the block)
+        const core::Document kept = run(doc, Json::array({Json{{"op", "smart_profile"}, {"page", 1}, {"id", "ps-2"}, {"embedded_profile", "keep"}}}));
+        for (const core::Layer& l : kept.page(0).layers) {
+            if (l.id != "ps-2") continue;
+            QVERIFY((*l.smart)["psd"].contains("raw") && !(*l.smart)["psd"].contains("shown"));
+        }
     }
 
     // a PSD placed as a smart object's file, made a page to edit (smart_to_page): its layers each a layer of the page, its
