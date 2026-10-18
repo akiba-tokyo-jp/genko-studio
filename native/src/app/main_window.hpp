@@ -104,6 +104,10 @@ struct Document {
     std::optional<ViewState> view;
     std::optional<std::string> target_layer;
     ProofView proof;
+    // smart-objects@1 (PC3 A1, the user's decision 1: コンテンツを編集 in a tab of the same book): the smart object
+    // contents this tab shows (its page; every op it sends goes there), and the name of the layer it was opened from.
+    std::optional<std::string> contents;
+    QString contents_title;
     QString title() const;
 };
 
@@ -410,12 +414,34 @@ public:
     // size, made smaller to fit), and a file placed as a smart object (画像を読み込む… with the panel chosen, else over the
     // page out to the bleed; 埋め込みを配置… as above). False when nothing was placed (said why).
     bool place_embedded(std::optional<QString> path = std::nullopt);
-    bool place_smart(const QString& file, bool as_placed);
+    // (`linked`, PC3 A1: リンクを配置… — the file's place kept with its copy)
+    bool place_smart(const QString& file, bool as_placed, bool linked = false);
     // レイヤー → スマートオブジェクト・スマートフィルター・ラスタライズ, レイヤーの内容オプション…
     void smart_convert();
     void smart_copy();
     void rasterize(const std::string& what);
     void content_options();
+    // smart-objects@1, PC3 A1 (app/main_window_smart.cpp): コンテンツを編集 — a page's contents in a tab of this book
+    // (decision 1), a picture's made a page first (asked), a linked file opened in its own app —, コンテンツを書き出し…,
+    // コンテンツを置換…, ファイルに再リンク…, 埋め込みに変換, リンクに変換…, 変更されたコンテンツを更新 (`all`: すべての),
+    // ファイルマネージャーで表示, ファイル → リンクを配置… and パッケージ…. False when nothing was done (said why).
+    bool edit_contents();
+    bool open_contents_tab(const std::string& contents_id, const QString& title);
+    bool export_contents(std::optional<QString> path = std::nullopt);
+    bool replace_contents(std::optional<QString> path = std::nullopt);
+    bool relink_contents(std::optional<QString> path = std::nullopt);
+    bool embed_contents();
+    bool link_contents(std::optional<QString> path = std::nullopt);
+    bool update_contents(bool all);
+    bool reveal_contents();
+    bool place_linked(std::optional<QString> path = std::nullopt);
+    bool package_book(std::optional<QString> folder = std::nullopt);
+    // The contents the tab in front shows (コンテンツを編集's tab), none for the book's pages.
+    const std::optional<std::string>& contents_tab() const { return contents_; }
+    // The linked files looked at again (the book opened, the window come back to, a file changed): each linked
+    // contents' "ok", "modified" or "missing", marked in the layer panel; a file changed said in the status line.
+    void check_links();
+    std::string link_status(const std::string& contents_id) const;
     // A notice in the status line that never stops the work (problems in red, a little longer).
     void flash(const QString& message, int ms = 3000, bool error = false);
     QString last_notice() const { return last_notice_; }
@@ -428,6 +454,7 @@ public:
 
 protected:
     void closeEvent(QCloseEvent* event) override;
+    void changeEvent(QEvent* event) override;  // (smart-objects@1: the window come back to looks at its linked files)
     void showEvent(QShowEvent* event) override;
     void resizeEvent(QResizeEvent* event) override;
     void keyPressEvent(QKeyEvent* event) override;
@@ -878,6 +905,25 @@ private:
     QString last_error_;
     std::vector<QMetaObject::Connection> session_links_;
     std::uint64_t move_ticket_ = 0;
+    // smart-objects@1, PC3 A1 (app/main_window_smart.cpp): the contents shown by the tab in front (none: the book's
+    // page) and the book as the canvas draws it then (its contents' page as its only page, made once a snapshot); the
+    // commands a contents' tab cannot use, greyed while it is in front; the linked files' states and their watcher.
+    std::optional<std::string> contents_;
+    QString contents_title_;
+    mutable std::shared_ptr<const core::Document> contents_view_;
+    mutable std::shared_ptr<const core::Document> contents_view_of_;
+    std::set<QAction*> greyed_in_contents_;
+    std::map<std::string, std::string> link_status_;
+    QFileSystemWatcher link_watcher_;
+    // The book the canvas draws: the session's, or (a contents' tab) the contents' page alone in it; null when the
+    // contents are gone (undone).
+    std::shared_ptr<const core::Document> shown_book() const;
+    // The ops as sent from the tab in front: each given its contents ("contents") in a contents' tab.
+    core::Json with_contents_target(const core::Json& ops) const;
+    void contents_tab_follow();
+    // The linked file of the smart object chosen, read for an op (asked first when the book named it, not the person:
+    // a path an agent wrote is shown before anything is read). Its bytes put in the book's assets, and their ref.
+    std::optional<std::pair<std::string, std::string>> read_linked(const QString& file, bool chosen_here);
 };
 
 // The app-wide watcher of key releases for キーを押している間だけ持ち替え: on from a tool's key until the next key let go

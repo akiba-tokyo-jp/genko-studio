@@ -16,5 +16,6 @@ genko_library(genko_formats
     psd_text.cpp
     exporting.cpp
     checks.cpp
+    smart_files.cpp
   PUBLIC_DEPS genko_render genko_core Qt6::Core
   PRIVATE_DEPS genko_storage ZLIB::ZLIB JPEG::JPEG TIFF::TIFF ${GENKO_LCMS2})

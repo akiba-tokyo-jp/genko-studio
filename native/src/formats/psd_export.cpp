@@ -1288,4 +1288,46 @@ fs::path export_psd(const core::Document& episode, const fs::path& dest, std::in
     throw core::Error("key", "no page " + std::to_string(page));  // (Python: StopIteration)
 }
 
+// smart-objects@1 (PC3 A1): a smart object's contents page as a PSD (コンテンツを書き出し…, リンクに変換…) — its layers
+// alone, without the paper and the panels' borders (its panels only cut its layers), the merged picture its layers over
+// white. A page in precise colour or inks is written as a page's PSD is (export_page_psd: with its paper).
+fs::path export_contents_psd(const core::Document& episode, const core::Page& page, const fs::path& dest, std::optional<std::int64_t> dpi_given) {
+    if (page.color || page.rgb) return export_page_psd(episode, page, dest, dpi_given);
+    const std::int64_t dpi = psd_dpi(episode, dpi_given);
+    check_dpi(dpi);
+    render::RenderOptions options = merged_options(page);
+    options.contents = true;
+    const Image drawn = render::render_contents(page, static_cast<int>(dpi), options, &episode).image;
+    const Image rgb = render::alpha_composite(Image::create("RGBA", drawn.size(), render::Ink{255, 255, 255, 255}), drawn.convert("RGBA")).convert("RGB");
+    Records records(rgb.size());
+    const auto each = [&](render::PageLayer&& layer) {
+        if (layer.name == "紙" || layer.name == "コマ枠") return;  // (the contents' own: no paper, no borders)
+        records.add(std::move(layer));
+    };
+    const std::function<void(const core::Layer&)> adjust_layers = adjustments(records, page, rgb.size(), episode);
+    render::page_layers(page, episode, static_cast<int>(dpi), each, nullptr, &adjust_layers);
+    std::string body = "8BPS";
+    put_u16(body, 1);
+    body.append(6, '\0');
+    put_u16(body, 3 + static_cast<std::uint32_t>(page.channels.size()));
+    put_u32(body, static_cast<std::uint32_t>(rgb.height()));
+    put_u32(body, static_cast<std::uint32_t>(rgb.width()));
+    put_u16(body, 8);
+    put_u16(body, 3);
+    put_u32(body, 0);
+    body += with_channels(resources(dpi), page);
+    body += records.finish();
+    std::string counts, packed;
+    for (const Image& channel : rgb.split()) packbits_rows(channel, counts, packed);
+    put_channels_rle(page, rgb.size(), counts, packed);
+    put_u16(body, 1);
+    body += counts;
+    body += packed;
+    detail::Output output;
+    if (dest.has_parent_path()) detail::make_dirs(dest.parent_path());
+    output.put(dest, body);
+    output.commit();
+    return dest;
+}
+
 }  // namespace genko::formats

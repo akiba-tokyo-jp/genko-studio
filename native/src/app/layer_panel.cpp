@@ -437,6 +437,11 @@ void LayerPanel::refresh() {
             if (layer.kind == core::LayerKind::Smart) {  // (smart-objects@1: its contents in the book, or a file linked)
                 const core::SmartContents* contents = core::smart::contents_of(window_->book(), layer);
                 marks << (contents != nullptr && contents->link ? QStringLiteral("リンク") : QStringLiteral("埋め込み"));
+                if (contents != nullptr && contents->link) {  // (PC3 A1: the linked file gone, or changed)
+                    const std::string status = window_->link_status(*core::smart::contents_id(layer));
+                    if (status == "missing") marks << QStringLiteral("リンク切れ");
+                    if (status == "modified") marks << QStringLiteral("更新あり");
+                }
             }
             QString blend;
             const bool correction = layer.kind == core::LayerKind::Adjust && layer.adjust && layer.adjust->is_object();

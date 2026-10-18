@@ -80,3 +80,7 @@ PhotoCraft v0.2.0（`ad863217386440ca968fccc9bfff65ba24e61142`、MIT、同梱 `L
   - `crates/engine/src/smart_cmds.rs`（476-539 行、`layer_to_smart`）: 1 枚の層を包むとき、表示・不透明度・描画モード・クリップを SO が引き継ぎ、中の層は普通に戻す → `native/src/render/ops_smart.cpp`（`smart_convert`）。
   - `crates/engine/src/file_cmds.rs`（291-331 行、`place_bytes`・`place`）: 埋め込みを配置の置き方（ファイルの解像度でページの中央、大きければ収める、倍率と中心の指定）→ `native/src/render/ops_smart.cpp`（`smart_place`）。
   - `crates/engine/src/smart_cmds/tests.rs`（61-93 行、220-251 行）: 変換してもページの画素が変わらないこと、縮めて戻すと元と同じ（2 度標本化しない）ことの試験 → `native/tests/unit/test_smart_render.cpp`（Genko の 3 つの道・白黒の仕上げ・部分描画に広げた）。
+- A1（中身とリンク）:
+  - `crates/engine/src/smart_cmds.rs`（582-601 行、`set_source`・`replace_contents`）と 840-880 行（`relinkToFile`・`updateModifiedContent`・`convertToEmbedded`・`convertToLinked` の振る舞い）: 中身を差し替えても変形とフィルターはそのまま、PSD の記録は外す、埋め込みに変えるときは記録を残す、リンクに変えるときは中身をファイルに書いてからリンクする → `native/src/render/ops_smart_contents.cpp`（Genko ではリンクした中身もいつも原稿に写しを持ち、op はパスを読み書きしない）。
+  - `crates/engine/src/print_cmds.rs`（401-449 行、`package`）: 原稿をフォルダーに写し、リンクしたファイルを `Links/` に集めて写しのリンクをそこへ向ける、同じ名前は番号を付ける → `native/src/formats/smart_files.cpp`（`package`。Genko は原稿の中の写しを書くので欠けたリンクは無い）。
+  - `crates/engine/src/layer_menu_cmds.rs`（343-372 行、`reveal_in_finder`）: リンクしたファイルのあるフォルダーを開く（埋め込みにはファイルが無い）→ `native/src/app/main_window_smart.cpp`（`reveal_contents`）。

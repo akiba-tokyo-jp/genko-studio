@@ -69,6 +69,8 @@ const std::map<std::string, const char*>& names() {
         {"smart_convert", "スマートオブジェクトに変換した"}, {"smart_place", "画像をスマートオブジェクトとして置いた"},
         {"smart_profile", "スマートオブジェクトの色の扱いを変えた"}, {"smart_copy", "スマートオブジェクトをコピーした"},
         {"smart_transform", "スマートオブジェクトを変形した"}, {"rasterize_layer", "ラスタライズした"},
+        {"smart_replace", "コンテンツを置換した"}, {"smart_relink", "ファイルに再リンクした"}, {"smart_update", "変更されたコンテンツを更新した"},
+        {"smart_embed", "埋め込みに変換した"}, {"smart_link", "リンクに変換した"}, {"smart_to_page", "コンテンツを編集できる形にした"},
     };
     return table;
 }
@@ -87,11 +89,14 @@ QString describe(const Json& ops) {
         }
     }
     if (named.isEmpty()) return QStringLiteral("原稿を変えた");
+    // (smart-objects@1, PC3 A1: a step made in a smart object's contents — コンテンツを編集's tab — says where)
+    const bool inside = ops.is_array() && std::any_of(ops.begin(), ops.end(), [](const Json& op) { return op.is_object() && op.contains("contents"); });
+    const QString where = inside ? QStringLiteral("中身: ") : QString();
     const QString first = named.front();
     const bool same = std::all_of(named.begin(), named.end(), [&](const QString& n) { return n == first; });
-    if (named.size() > 1 && same) return QStringLiteral("%1（%2 回）").arg(first).arg(named.size());
-    if (named.size() > 1) return QStringLiteral("%1 ほか %2 件").arg(first).arg(named.size() - 1);
-    return first;
+    if (named.size() > 1 && same) return where + QStringLiteral("%1（%2 回）").arg(first).arg(named.size());
+    if (named.size() > 1) return where + QStringLiteral("%1 ほか %2 件").arg(first).arg(named.size() - 1);
+    return where + first;
 }
 
 QString when(std::optional<double> at) {

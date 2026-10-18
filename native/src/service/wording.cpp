@@ -879,6 +879,20 @@ const std::vector<Rule>& rules() {
         r.push_back(rule("no asset \\S+ of a picture.*", "画像の素材が見つかりません"));
         r.push_back(rule("the smart object's contents are a page, not a file.*", "スマートオブジェクトの中身はページのため、色の扱いは中のレイヤーのものです"));
         r.push_back(rule("embedded_profile is keep, convert or assign", "プロファイルの扱いは「値のまま」「埋め込みから変換」「作業用とみなす」のどれかです"));
+        // (PC3 A1: contents and links, render/ops_smart_contents)
+        r.push_back(rule("the smart object has no contents", "スマートオブジェクトの中身が見つかりません"));
+        r.push_back(rule("the smart object is not linked to a file", "このスマートオブジェクトはファイルにリンクしていません"));
+        r.push_back(rule("the smart object's contents are a page already", "このスマートオブジェクトの中身は、すでに編集できるページです"));
+        r.push_back(rule("contents of a page are linked as the file they were written to.*", "ページの中身は、書き出したファイルとしてリンクします"));
+        r.push_back(rule("a file's contents are linked as they are.*", "ファイルの中身は、そのままのファイルとしてリンクします"));
+        r.push_back(rule("asset \\(sha256:…\\) or data gives the file|the file is an asset ref .*", "読み込むファイルが指定されていません"));
+        r.push_back(rule("(?:link is \\{path, relative\\?\\}|link names the file's path|link's bytes is the file's size|its link.*)",
+                         "リンクの記録（ファイルの場所）が正しくありません"));
+        r.push_back(rule("the smart object's file is not in the book.*", "スマートオブジェクトのファイルが原稿にありません"));
+        r.push_back(rule("the package's place holds a book already: .*", "そのフォルダーには、もう同じ名前の原稿があります（別のフォルダーを選びます）"));
+        r.push_back(rule("the book is not whole, so it is not packed: .*", "原稿に欠けたものがあるため、パッケージにできません"));
+        r.push_back(rule("(?:a file's contents are written as they are|a page's contents are written as psd or png).*",
+                         "この中身は、その形式では書き出せません"));
         // (the C++ build's own: what it does not do yet, and saving)
         r.push_back(rule("official export is not in the C\\+\\+ build yet",
                          "この版の Genko では、まだ正式な書き出し（確認と承認の記録つき）はできません（ふつうの書き出しはできます）"));
