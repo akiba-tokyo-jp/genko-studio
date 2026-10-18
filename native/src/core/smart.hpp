@@ -18,10 +18,10 @@
 // contents' JSON, the layer's settings, their checks, the matrix, which contents a book uses and the stand-in a smart
 // object draws exactly as. The drawing is render/smart.hpp; the ops are render/ops_smart.cpp.
 //
-// A layer's "smart" (in this order): {"contents": "sc_…", "matrix": [a, b, c, d, e, f], "interp": …} and what later
-// steps of PC3 add to it — "perspective" (the contents' four corners on the page), "warp", "stack", "filters",
-// "filters_on", "filter_mask", "psd" — which this build keeps as they are and does not draw yet (NotYetPorted names
-// them: render/smart.cpp).
+// A layer's "smart" (in this order): {"contents": "sc_…", "matrix": [a, b, c, d, e, f], "interp": …}, its smart filters
+// (PC3 A2: "filters", "filters_on", "filter_mask") and what later steps of PC3 add to it — "perspective" (the contents' four
+// corners on the page), "warp", "stack", "psd" — which this build keeps as they are and does not draw yet (NotYetPorted
+// names them: render/smart.cpp).
 
 namespace genko::core {
 
@@ -87,6 +87,19 @@ Matrix matrix_from(const Json& value);
 std::string new_contents_id();
 bool is_contents_id(std::string_view text);
 
+// Smart filters (PC3 A2, PhotoCraft's smart filters): a smart object's "filters" — [{"kind", "params", "blend", "opacity",
+// "visible"}, …], the bottom one first: a filter_raster kind and its settings, laid over what is below it in one of the 20
+// blend modes at an opacity of 0..1 —, "filters_on" (none: on) and "filter_mask" ({"asset": "sha256:…", "enabled"}: a
+// PNG "L" of the page at 150 dpi, as a layer's mask, through which the filtered picture shows over the unfiltered one).
+inline constexpr std::size_t kFiltersMax = 64;
+inline constexpr std::array<std::string_view, 5> kFilterKeys{"kind", "params", "blend", "opacity", "visible"};
+// Can a filter_raster kind be a smart filter (SO に掛けられる)? Python's filters (core::kAdjustments, kShapeFilters: what
+// they make is their settings' and the layer's pixels' — noise and rain by their seed) and the C++ build's own kinds
+// registered so (AdjustKind::smart). Never a plugin (a person's program: what it makes is the machine's).
+bool filter_kind(std::string_view kind);
+// Are the smart object's filters drawn: on, and one of them shown?
+bool filters_drawn(const Layer& layer);
+
 // A layer of kind smart, its contents' id (nothing when its settings name none), its matrix (the identity when none).
 bool is_smart(const Layer& layer);
 std::optional<std::string> contents_id(const Layer& layer);
@@ -116,14 +129,15 @@ std::set<std::string> shown_on(const Page& page);
 
 // The book's smart objects as they must be (core::Error("value") says what is not): a smart layer's settings (known
 // keys, its contents held, a finite matrix that does not squash them flat, convex corners, a known interpolation and
-// stack mode, its filters a list), no pixels, lines or fill of its own on it (an op that drew on a smart object is
+// stack mode, its smart filters — at most kFiltersMax, each of a kind filter_kind takes, its settings read as that kind
+// reads them where this build's core reads them, a known blend, an opacity of 0..1 — and their mask), no pixels, lines or fill of its own on it (an op that drew on a smart object is
 // refused so: rasterize it first), the contents (a page of index 1; a file of a known format, its size, depth, mode and
 // colour use), and contents inside contents a tree no deeper than kDepthMax. Pages not read yet are not looked at.
 void validate_smart(const Document& doc);
 
 // The layer a smart object draws exactly as, when there is one — contents of one layer (not a folder or correction),
-// normal and not clipped, on a page of the same paper, panels and colour model, shown untouched (the identity, nothing
-// of PC3's later steps on it), and nothing of the smart object's own drawn on it (mask, effect, screen, colour): its
+// normal and not clipped, on a page of the same paper, panels and colour model, shown untouched (the identity, no smart
+// filter drawn, nothing of PC3's later steps on it), and nothing of the smart object's own drawn on it (mask, effect, screen, colour): its
 // contents' layer with the smart object's id, title, folder, visibility, opacity, blend and clipping on it (the layer it
 // was made of, as it was, until either changes). Nothing otherwise.
 std::optional<Layer> plain_layer(const Document* doc, const Page& page, const Layer& layer);

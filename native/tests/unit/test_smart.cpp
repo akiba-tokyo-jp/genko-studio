@@ -325,8 +325,8 @@ private slots:
 
     void laterStepsAreRefusedByName() {
         const Document doc = run(painted(), Json::array({Json{{"op", "smart_convert"}, {"page", 1}, {"id", "p1"}, {"new_id", "so1"}}}));
-        for (const char* op : {"smart_replace", "smart_relink", "smart_update", "smart_embed", "smart_link", "smart_to_page", "smart_filter_add",
-                               "smart_filter_set", "smart_filter_move", "smart_filter_delete", "smart_filter_state", "smart_stack", "rasterize_lines"}) {
+        // (A2's smart_filter_* are written: test_smart_filters)
+        for (const char* op : {"smart_replace", "smart_relink", "smart_update", "smart_embed", "smart_link", "smart_to_page", "smart_stack", "rasterize_lines"}) {
             try {
                 (void)applied(doc, Json::array({Json{{"op", op}, {"page", 1}, {"id", "so1"}}}));
                 QFAIL(op);

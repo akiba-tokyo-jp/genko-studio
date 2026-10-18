@@ -28,6 +28,7 @@
 #include "render/png.hpp"
 #include "render/proof.hpp"
 #include "render/smart_decode.hpp"
+#include "render/smart_filters.hpp"
 #include "storage/asset_store.hpp"
 
 namespace genko::render::smart {
@@ -108,6 +109,14 @@ Recent<core::InkPixels>& ink_pictures() {  // (the files and contents as a page'
     static Recent<core::InkPixels> recent(16, kBudget);
     return recent;
 }
+Recent<ColorPicture>& precise_filtered() {  // (PC3 A2: a smart object's filtered picture of the whole page in precise colour)
+    static Recent<ColorPicture> recent(16, kBudget);
+    return recent;
+}
+Recent<InkPicture>& inks_filtered() {  // (and in a page's inks)
+    static Recent<InkPicture> recent(16, kBudget);
+    return recent;
+}
 
 std::atomic<std::uint64_t> g_contents_drawn{0};
 std::atomic<std::uint64_t> g_files_decoded{0};
@@ -135,7 +144,7 @@ std::string identity(const core::Document& doc, const core::SmartContents& conte
 
 // --- the smart object's settings ---------------------------------------------------------------------------------------
 
-// What PC3's later steps add, which this build keeps and does not draw yet.
+// What PC3's later steps add, which this build keeps and does not draw yet (smart filters and their mask: PC3 A2, drawn).
 void refuse_later(const core::Layer& layer) {
     if (!layer.smart || !layer.smart->is_object()) return;
     const Json& s = *layer.smart;
@@ -146,10 +155,6 @@ void refuse_later(const core::Layer& layer) {
     if (set("perspective")) throw NotYetPorted("smart:perspective");
     if (set("warp")) throw NotYetPorted("smart:warp");
     if (set("stack")) throw NotYetPorted("smart:stack");
-    const Json* filters = core::get(s, "filters");
-    const Json* on = core::get(s, "filters_on");
-    if (filters != nullptr && filters->is_array() && !filters->empty() && !(on != nullptr && *on == Json(false))) throw NotYetPorted("smart:filters");
-    if (set("filter_mask")) throw NotYetPorted("smart:filter_mask");
     if (set("psd")) throw NotYetPorted("smart:psd");
 }
 
@@ -329,6 +334,8 @@ Box covered(int w, int h, const Matrix& pm, const Box& limit) {
 // The box of the page the smart object is cut to (its panel's, clip_to) within the page, in pixels.
 Box clip_px(const Ctx& ctx, const core::Layer& layer) {
     const core::Frame* frame = layer.frame_id && !layer.frame_id->empty() ? ctx.page->find_frame(*layer.frame_id) : nullptr;
+    // (no panel: the whole page, its first row and column too — rect_px's sides are at least a pixel from 0)
+    if (frame == nullptr || layer.clip_to == "none") return Box{0, 0, ctx.size.width, ctx.size.height};
     const Box clip = rect_px(core::clip_box(*ctx.page, frame, layer.clip_to), ctx.dpi);
     return Box{std::max(0, clip.x0), std::max(0, clip.y0), std::min(ctx.size.width, clip.x1), std::min(ctx.size.height, clip.y1)};
 }
@@ -641,6 +648,133 @@ std::optional<InkPicture> file_inks_on_page(const Ctx& ctx, const core::Layer& l
     return out;
 }
 
+// --- smart filters (PC3 A2, render/smart_filters) ---------------------------------------------------------------------
+
+// The smart object as its filters take it: without them and their mask, and not cut to its panel (they work its picture
+// of the whole page; the panel cuts what they make, as it cuts a layer).
+core::Layer unfiltered(const core::Layer& layer) {
+    core::Layer out = layer;
+    for (const char* key : {"filters", "filters_on", "filter_mask"}) out.smart->erase(key);
+    out.clip_to = "none";
+    return out;
+}
+
+// What a smart object's filtered picture is made of: its contents as they are, its settings (its filters and their mask
+// among them), what draws a picture's finish (its panel, the studio's style), the page's paper and colours, the
+// resolution and the drawing's way.
+std::string filtered_key(const Ctx& ctx, const core::Layer& layer, const core::SmartContents& contents, std::string_view way) {
+    const core::Frame* frame = layer.frame_id && !layer.frame_id->empty() ? ctx.page->find_frame(*layer.frame_id) : nullptr;
+    const core::Page& page = *ctx.page;
+    const Json bits = Json::array(
+        {std::string(way), identity(*ctx.episode, contents), core::dump_canonical(*layer.smart), ctx.dpi, ctx.size.width, ctx.size.height, ctx.mode,
+         ctx.finish, ctx.rough, ctx.dots, ctx.screen_dots, layer.frame_id ? *layer.frame_id : std::string(), std::string(core::to_string(layer.role)),
+         layer.source ? *layer.source : Json(), layer.finish ? *layer.finish : Json(), core::py_get(ctx.episode->studio, "style"),
+         frame != nullptr && frame->panel ? *frame->panel : Json(), ctx.episode->bible.characters, page.spec.width_mm.json(), page.spec.height_mm.json(),
+         page.spec.expression, page.rgb ? core::to_json(*page.rgb) : Json(), page.color ? core::to_json(*page.color) : Json(),
+         ctx.episode->asset_dir ? core::path_to_utf8(*ctx.episode->asset_dir) : std::string()});
+    return "filtered " + core::dump_canonical(bits);
+}
+
+// Settings a filter cannot use (a book changed by hand): the smart object left out and said, as what is not drawn yet.
+template <class Work>
+auto filtering(const Work& work) {
+    try {
+        return work();
+    } catch (const NotYetPorted&) {
+        throw;
+    } catch (const core::OpError&) {
+        throw NotYetPorted("smart:filters");
+    } catch (const core::Error& error) {
+        if (error.code() == "value" || error.code() == "type" || error.code() == "not_yet_ported") throw NotYetPorted("smart:filters");
+        throw;
+    }
+}
+
+Box whole_page(const Ctx& ctx) { return Box{0, 0, ctx.size.width, ctx.size.height}; }
+
+// The part of `area` inside the smart object's panel's box (clip_px).
+Box shown_part(const Ctx& ctx, const core::Layer& layer, const Box& area) {
+    const Box limit = clip_px(ctx, layer);
+    return Box{std::max(area.x0, limit.x0), std::max(area.y0, limit.y0), std::min(area.x1, limit.x1), std::min(area.y1, limit.y1)};
+}
+
+std::optional<Image> filtered_8bit(const Ctx& ctx, const core::Layer& layer, const core::SmartContents& contents, const Box& area) {
+    const std::string key = filtered_key(ctx, layer, contents, "8");
+    std::shared_ptr<const Image> whole = pictures().get(key);
+    if (whole == nullptr) {
+        std::optional<Image> base = picture_8bit(ctx, unfiltered(layer), whole_page(ctx));
+        if (!base) base = Image::create("RGBA", ctx.size, Ink{0, 0, 0, 0});
+        whole = std::make_shared<const Image>(filtering([&] { return smart_filters::on_8bit(*ctx.episode, *ctx.page, layer, *base, ctx.dpi); }));
+        pictures().put(key, whole, image_bytes(*whole));
+    }
+    Image out = Image::create("RGBA", Size{area.width(), area.height()}, Ink{0, 0, 0, 0});
+    const Box part = shown_part(ctx, layer, area);
+    if (part.width() > 0 && part.height() > 0) out.paste(whole->crop(part), Point{part.x0 - area.x0, part.y0 - area.y0});
+    if (const auto shape = panel_shape(ctx, layer, area)) out.putalpha(chops::multiply(out.getchannel(3), *shape));
+    return out;
+}
+
+std::optional<ColorPicture> filtered_precise(const Ctx& ctx, const core::Layer& layer, const core::SmartContents& contents, const Box& area,
+                                             const RgbSpace& space) {
+    const std::string key = filtered_key(ctx, layer, contents, "precise");
+    std::shared_ptr<const ColorPicture> whole = precise_filtered().get(key);
+    if (whole == nullptr) {
+        const core::Layer bare = unfiltered(layer);
+        std::optional<ColorPicture> base = picture_precise(ctx, bare, whole_page(ctx), space);
+        if (!base) {  // (a picture of 8 bits: its sRGB colours in the space)
+            const std::optional<Image> eight = picture_8bit(ctx, bare, whole_page(ctx));
+            base = color_picture(eight ? *eight : Image::create("RGBA", ctx.size, Ink{0, 0, 0, 0}), space);
+        }
+        whole = std::make_shared<const ColorPicture>(
+            filtering([&] { return smart_filters::on_precise(*ctx.episode, *ctx.page, layer, *base, space, ctx.dpi); }));
+        precise_filtered().put(key, whole, whole->pixels.size() * sizeof(whole->pixels[0]));
+    }
+    ColorPicture out{Size{area.width(), area.height()}, std::vector<std::array<double, 4>>(std::size_t(area.width()) * area.height(), {0, 0, 0, 0})};
+    const Box part = shown_part(ctx, layer, area);
+    for (int y = part.y0; y < part.y1; ++y) {
+        for (int x = part.x0; x < part.x1; ++x)
+            out.pixels[std::size_t(y - area.y0) * area.width() + (x - area.x0)] = whole->pixels[std::size_t(y) * ctx.size.width + x];
+    }
+    if (const auto shape = panel_shape(ctx, layer, area)) {
+        for (int y = 0; y < area.height(); ++y) {
+            const auto* row = reinterpret_cast<const unsigned char*>(shape->raw()->image[y]);
+            for (int x = 0; x < area.width(); ++x) out.pixels[std::size_t(y) * area.width() + x][3] *= row[x] / 255.0;
+        }
+    }
+    return out;
+}
+
+std::optional<InkPicture> filtered_inks(const Ctx& ctx, const core::Layer& layer, const core::SmartContents& contents, const Box& area) {
+    const core::PageColor& color = *ctx.page->color;
+    const std::string key = filtered_key(ctx, layer, contents, "inks");
+    std::shared_ptr<const InkPicture> whole = inks_filtered().get(key);
+    if (whole == nullptr) {
+        const core::Layer bare = unfiltered(layer);
+        std::optional<InkPicture> base = picture_inks(ctx, bare, whole_page(ctx));
+        if (!base) {  // (a picture of 8 bits: its colours as the page's inks, by its rules)
+            const std::optional<Image> eight = picture_8bit(ctx, bare, whole_page(ctx));
+            base = ink_picture(eight ? *eight : Image::create("RGBA", ctx.size, Ink{0, 0, 0, 0}), color);
+        }
+        whole = std::make_shared<const InkPicture>(filtering([&] { return smart_filters::on_inks(*ctx.episode, *ctx.page, layer, *base, ctx.dpi); }));
+        inks_filtered().put(key, whole, whole->values.size() * sizeof(double));
+    }
+    const unsigned n = whole->channels;
+    InkPicture out{Size{area.width(), area.height()}, n, std::vector<double>(std::size_t(area.width()) * area.height() * (n + 1), 0.0)};
+    const Box part = shown_part(ctx, layer, area);
+    for (int y = part.y0; y < part.y1; ++y) {
+        for (int x = part.x0; x < part.x1; ++x)
+            std::copy_n(whole->values.data() + (std::size_t(y) * ctx.size.width + x) * (n + 1), n + 1,
+                        out.values.data() + (std::size_t(y - area.y0) * area.width() + (x - area.x0)) * (n + 1));
+    }
+    if (const auto shape = panel_shape(ctx, layer, area)) {
+        for (int y = 0; y < area.height(); ++y) {
+            const auto* row = reinterpret_cast<const unsigned char*>(shape->raw()->image[y]);
+            for (int x = 0; x < area.width(); ++x) out.values[(std::size_t(y) * area.width() + x) * (n + 1) + n] *= row[x] / 255.0;
+        }
+    }
+    return out;
+}
+
 }  // namespace
 
 core::Bytes file_bytes(const core::Document& doc, const core::SmartContents& contents) {
@@ -679,6 +813,7 @@ std::optional<Image> picture_8bit(const Ctx& ctx, const core::Layer& layer, cons
     const core::SmartContents* contents = core::smart::contents_of(*ctx.episode, layer);
     if (contents == nullptr) return std::nullopt;
     refuse_later(layer);
+    if (core::smart::filters_drawn(layer)) return filtered_8bit(ctx, layer, *contents, area);  // (PC3 A2)
     const Matrix m = core::smart::matrix_of(layer);
     if (contents->kind == "file") return file_8bit(ctx, layer, *contents, m, area);
     if (!contents->page) return std::nullopt;
@@ -690,6 +825,7 @@ std::optional<ColorPicture> picture_precise(const Ctx& ctx, const core::Layer& l
     const core::SmartContents* contents = core::smart::contents_of(*ctx.episode, layer);
     if (contents == nullptr) return std::nullopt;
     refuse_later(layer);
+    if (core::smart::filters_drawn(layer)) return filtered_precise(ctx, layer, *contents, area, space);  // (PC3 A2)
     const Matrix m = core::smart::matrix_of(layer);
     if (deep_file(*contents)) {
         // (a mono page's finish is laid on an 8-bit picture: as a placed picture's)
@@ -732,6 +868,7 @@ std::optional<InkPicture> picture_inks(const Ctx& ctx, const core::Layer& layer,
     const core::SmartContents* contents = core::smart::contents_of(*ctx.episode, layer);
     if (contents == nullptr) return std::nullopt;
     refuse_later(layer);
+    if (core::smart::filters_drawn(layer)) return filtered_inks(ctx, layer, *contents, area);  // (PC3 A2)
     const Matrix m = core::smart::matrix_of(layer);
     if (ink_file(*contents)) return file_inks_on_page(ctx, layer, *contents, m, area);
     if (contents->kind != "page" || !contents->page || !contents->page->color || !(*contents->page->color == *ctx.page->color)) return std::nullopt;
@@ -770,10 +907,13 @@ void clear_caches() {
     pictures().clear();
     deep_pictures().clear();
     ink_pictures().clear();
+    precise_filtered().clear();
+    inks_filtered().clear();
 }
 
 std::int64_t cache_pixels() {
-    return static_cast<std::int64_t>(pictures().bytes() / 4 + deep_pictures().bytes() / 16 + ink_pictures().bytes() / 10);
+    return static_cast<std::int64_t>(pictures().bytes() / 4 + deep_pictures().bytes() / 16 + ink_pictures().bytes() / 10 + precise_filtered().bytes() / 32 +
+                                     inks_filtered().bytes() / 40);
 }
 
 Counts counts() { return Counts{g_contents_drawn.load(), g_files_decoded.load()}; }

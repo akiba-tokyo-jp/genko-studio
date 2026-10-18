@@ -128,6 +128,10 @@ genko_test(test_smart_decode SOURCES unit/test_smart_decode.cpp DEPS genko_test_
 # converted and a file placed as place_asset places it draw as it did (the monochrome finish too), smaller and back the same,
 # a part the same as the whole.
 genko_test(test_smart_render SOURCES unit/test_smart_render.cpp DEPS genko_test_support genko_render_ops genko_formats LABELS unit TIMEOUT 900)
+# PC3 A2 (SPEC.md COLOR-05「スマートフィルター」): a smart object's smart filters — set again from the contents, their order,
+# blend modes, opacities, all off and on, cleared, the selection their mask, following the transforms; at 200 dpi as
+# rasterize_layer and filter_raster (8, 16 bits, CMYK, Lab); a part the whole cut there; refused kinds; read back.
+genko_test(test_smart_filters SOURCES unit/test_smart_filters.cpp DEPS genko_test_support genko_render_ops genko_formats LABELS unit TIMEOUT 900)
 
 # core/pyre's own bounds (Python 3.12's re, ported; SPEC COMP-01a): a search that backtracks without end stopped when its
 # steps are spent, groups more than 200 deep refused, replace_text refused without a change; without Python.

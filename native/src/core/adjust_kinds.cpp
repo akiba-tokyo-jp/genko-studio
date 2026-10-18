@@ -125,6 +125,7 @@ AdjustKind python(std::string_view name, std::vector<AdjustParam> more_native = 
     if (!more_native.empty()) k.native_group = "PC2a";  // (the upstream formulas, the channel records, reverse and dither)
     k.layer = true;
     k.filter = true;
+    k.smart = true;
     k.native = native_keys(std::move(more_native));
     return k;
 }
@@ -135,6 +136,7 @@ AdjustKind own(std::string_view name, std::string_view group_name, bool layer, s
     k.group = group_name;
     k.layer = layer;
     k.filter = true;
+    k.smart = true;
     k.params = std::move(params);
     k.native = native_keys();
     return k;
@@ -209,6 +211,7 @@ std::vector<AdjustKind> make_table() {
     all.push_back(own("match_color", "PC2c", false,
                       {custom("source"), custom("source_stats"), number("luminance", 100, 1, 200), number("intensity", 100, 1, 200),
                        number("fade", 0, 0, 100), boolean("neutralize", false), boolean("stats_in_area", false)}));
+    all.back().smart = false;  // (it reads another layer's colours, or the selection's: never a smart filter)
     for (AdjustKind& kind : all) {
         if (kind.group == "PC2c") kind.local = true;
     }

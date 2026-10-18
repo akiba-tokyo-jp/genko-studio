@@ -389,6 +389,21 @@ Json project_payload_v4(const core::Document& doc, AssetStore& store) {
         }
         smart_contents[id] = core::smart::file_json(contents);
     }
+    // (PC3 A2: the filter masks ops made for the smart objects, as the book's files)
+    const auto filter_masks = [&](const core::Page& page) {
+        for (const core::Layer& layer : page.layers) {
+            if (layer.kind != core::LayerKind::Smart || !layer.smart || !layer.smart->is_object()) continue;
+            const auto mask = layer.smart->find("filter_mask");
+            if (mask == layer.smart->end() || !mask->is_object() || !mask->contains("asset") || !mask->at("asset").is_string()) continue;
+            const std::string ref = mask->at("asset").get<std::string>();
+            if (const auto file = doc.smart_files.find(ref); file != doc.smart_files.end() && file->second) store.put_known(ref, *file->second, ".png");
+        }
+    };
+    for (const auto& page : doc.pages) filter_masks(*page);
+    for (const std::string& id : core::smart::used_contents(doc)) {
+        if (const auto found = doc.smart_contents.find(id); found != doc.smart_contents.end() && found->second && found->second->page)
+            filter_masks(*found->second->page);
+    }
     std::erase(features, std::string(core::kSmartObjectsFeature));  // (named while a smart object is shown)
     if (!smart_contents.empty()) features.emplace_back(core::kSmartObjectsFeature);
     core::validate_ink_document(doc);

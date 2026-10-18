@@ -68,6 +68,9 @@ struct AdjustKind {
     bool layer = false;      // a correction layer's kind (add_layer kind=adjust, set_layer adjust)
     bool filter = false;     // a kind of filter_raster
     bool local = false;      // it looks beyond each pixel (no AdjustFunction: the op does it, render/ops_adjust)
+    // A filter kind a smart object can hold as a smart filter (smart-objects@1, PC3 A2: core::smart::filter_kind): what it
+    // makes depends on its settings and the layer's own pixels alone (not another layer's, nor a selection's statistics).
+    bool smart = false;
     std::vector<AdjustParam> params;  // a kind of the C++ build's own: its settings, in their stored order
     std::vector<AdjustParam> native;  // the keys its `native` may hold, in their stored order (blend: every kind's)
     // A Python kind: its native settings that change its formula (design 2.2), or a kind of the C++ build's own: the

@@ -72,6 +72,8 @@ genko_library(genko_render
     smart.cpp
     smart_decode.cpp
     ops_smart.cpp
+    smart_filters.cpp
+    ops_smart_filters.cpp
     screentone.cpp
     text/fonts.cpp
     text/tategaki.cpp
@@ -99,4 +101,8 @@ if(GENKO_LIBRARY_KIND STREQUAL "SHARED")
   target_link_libraries(genko_render_ops INTERFACE genko_render genko_core Qt6::Core)
 else()
   genko_library(genko_render_ops SOURCES ${GENKO_RENDER_OPS_SOURCES} PUBLIC_DEPS genko_render genko_core Qt6::Core)
+  # (PC3 A2: a smart object's smart filters are drawn with filter_raster's own ways, render/ops_adjust, whose local
+  # corrections apply ops through ops_registry(): a page drawn needs genko_render_ops too. Two static libraries that
+  # need each other: CMake links them as such, once more after each other)
+  target_link_libraries(genko_render INTERFACE genko_render_ops)
 endif()

@@ -80,3 +80,9 @@ PhotoCraft v0.2.0（`ad863217386440ca968fccc9bfff65ba24e61142`、MIT、同梱 `L
   - `crates/engine/src/smart_cmds.rs`（476-539 行、`layer_to_smart`）: 1 枚の層を包むとき、表示・不透明度・描画モード・クリップを SO が引き継ぎ、中の層は普通に戻す → `native/src/render/ops_smart.cpp`（`smart_convert`）。
   - `crates/engine/src/file_cmds.rs`（291-331 行、`place_bytes`・`place`）: 埋め込みを配置の置き方（ファイルの解像度でページの中央、大きければ収める、倍率と中心の指定）→ `native/src/render/ops_smart.cpp`（`smart_place`）。
   - `crates/engine/src/smart_cmds/tests.rs`（61-93 行、220-251 行）: 変換してもページの画素が変わらないこと、縮めて戻すと元と同じ（2 度標本化しない）ことの試験 → `native/tests/unit/test_smart_render.cpp`（Genko の 3 つの道・白黒の仕上げ・部分描画に広げた）。
+- A2（スマートフィルター）:
+  - `crates/engine/src/smart_cmds.rs`（236-308 行、`blend_surfaces`・`mask_mix`・`apply_smart_filters`）: 見えているフィルターを下から順に前の結果にかけ、描画モードと不透明度で前の結果に重ねる（通常・100% は置き換え）、フィルターマスクでフィルターの前と後の絵をアルファを掛けた値で混ぜる → `native/src/render/smart_filters.cpp`（`on_8bit`・`on_precise`・`on_inks`・`mix_through`。描く解像度・3 つの道・作業用のページと層で Genko のフィルターを使う所は Genko のもの）。
+  - `crates/engine/src/smart_cmds.rs`（367-388 行、`add_smart_filter`）: フィルターを一番上に足し、選択範囲があってフィルターマスクが無ければ選択範囲をフィルターマスクにする → `native/src/render/ops_smart_filters.cpp`（`smart_filter_add`）。
+  - `crates/engine/src/smart_cmds.rs`（692-779 行、880-953 行）: スマートフィルターの番号（0 が一番下、既定は一番上）、設定を重ねる・描画オプション（1 を超える不透明度は %）・表示の反転・並べ替え・削除・クリア（フィルターとマスク）・スマートフィルターとフィルターマスクの無効化の振る舞いと断り → `native/src/render/ops_smart_filters.cpp`（`smart_filter_set`・`smart_filter_move`・`smart_filter_delete`・`smart_filter_state`）。
+  - `crates/engine/src/filters.rs`（199-207 行）: SO にフィルターをかけると、画素を変えずにスマートフィルターとして記録する → `native/src/app/layer_panel.cpp`（`apply_filter`）、`native/src/app/image_dialogs.cpp`（シャドウ・ハイライト）。
+  - `crates/engine/src/smart_cmds/tests.rs`（125-211 行、253-264 行）: 設定を変えても中身から描き直す・同じ設定なら同じ画素・隠せば元の画素、並び・描画モード・不透明度・無効化・削除・クリア、選択範囲がフィルターマスクになる、変形に付いて来ることの試験 → `native/tests/unit/test_smart_filters.cpp`（Genko の 3 つの道・200 dpi の `rasterize_layer`＋`filter_raster` との比べ・部分描画に広げた）。

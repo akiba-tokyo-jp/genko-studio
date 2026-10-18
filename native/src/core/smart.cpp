@@ -5,12 +5,16 @@
 #include <functional>
 #include <map>
 
+#include "core/adjust.hpp"
+#include "core/adjust_kinds.hpp"
 #include "core/channels.hpp"
 #include "core/color_model.hpp"
 #include "core/color_raster.hpp"
 #include "core/error.hpp"
+#include "core/filters.hpp"
 #include "core/ids.hpp"
 #include "core/ink.hpp"
+#include "core/ops_util.hpp"
 #include "core/pyconv.hpp"
 #include "core/pyops.hpp"
 
@@ -93,6 +97,48 @@ void each_page(const Document& doc, Each each) {
     }
 }
 
+// One smart filter as stored (PC3 A2): its keys, a kind a smart object can hold, its settings read as that kind reads them
+// where core reads them (the C++ build's own kinds and natives, Python's colour adjustments; the filters that move
+// shapes read theirs as they are drawn), its blend, opacity and visibility.
+void check_filter(const std::string& who, const Json& f) {
+    if (!f.is_object()) refuse(who + ": a smart filter is an object {kind, params, blend, opacity, visible}");
+    for (const auto& [key, value] : f.items()) {
+        if (!in(kFilterKeys, key)) refuse(who + ": the smart filter key " + py_repr_str(key) + " is not known to this build");
+    }
+    const Json* kind = get(f, "kind");
+    if (kind == nullptr || !kind->is_string()) refuse(who + ": a smart filter names its kind");
+    const std::string name = kind->get<std::string>();
+    if (!filter_kind(name)) refuse(who + ": the filter " + py_repr_str(name) + " cannot be a smart filter");
+    const Json* params = get(f, "params");
+    if (params != nullptr && !params->is_object()) refuse(who + ": a smart filter's params are an object");
+    const Json settings = params != nullptr ? *params : Json::object();
+    if (const Json* blend = get(f, "blend"); blend != nullptr) {
+        if (!blend->is_string()) refuse(who + ": a smart filter's blend is a blend mode");
+        try {
+            (void)blend_mode(*blend);
+        } catch (const std::exception&) {
+            refuse(who + ": a smart filter's blend " + py_repr_str(blend->get<std::string>()) + " is not a blend mode");
+        }
+    }
+    if (const Json* opacity = get(f, "opacity"); opacity != nullptr) {
+        const double v = finite(*opacity, who + "'s smart filter opacity");
+        if (v < 0 || v > 1) refuse(who + ": a smart filter's opacity is 0 to 1");
+    }
+    if (const Json* visible = get(f, "visible"); visible != nullptr && !visible->is_boolean()) refuse(who + ": a smart filter's visible is true or false");
+    try {
+        if (native_filter(name, settings)) {
+            (void)normalize_filter(name, settings, nullptr);
+        } else if (name != "exposure" && std::find(kAdjustments.begin(), kAdjustments.end(), name) != kAdjustments.end()) {
+            (void)adjustment(name, settings);
+        }
+    } catch (const std::exception& error) {
+        refuse(who + ": the smart filter " + name + "'s settings cannot be read (" + error.what() + ")");
+    }
+    // (a lookup table of a file is a correction layer's: a smart filter's colour lookup is one of the looks)
+    if (name == "color_lookup" && (settings.contains("lut") || settings.contains("data")))
+        refuse(who + ": a smart filter's colour lookup is one of the looks (look), not a table");
+}
+
 void check_settings(const Layer& layer) {
     const std::string who = "layer " + layer.id;
     if (!layer.smart || !layer.smart->is_object()) refuse(who + " is a smart object without its settings");
@@ -133,9 +179,22 @@ void check_settings(const Layer& layer) {
     if (const Json* stack = get(s, "stack"); stack != nullptr && !stack->is_null()) {
         if (!stack->is_string() || !in(kStackModes, stack->get_ref<const std::string&>())) refuse(who + ": an unknown stack mode");
     }
-    if (const Json* filters = get(s, "filters"); filters != nullptr && !filters->is_array()) refuse(who + ": a smart object's filters are a list");
+    if (const Json* filters = get(s, "filters"); filters != nullptr && !filters->is_null()) {
+        if (!filters->is_array()) refuse(who + ": a smart object's filters are a list");
+        if (filters->size() > kFiltersMax) refuse(who + ": a smart object holds at most " + std::to_string(kFiltersMax) + " smart filters");
+        for (const Json& f : *filters) check_filter(who, f);
+    }
     if (const Json* on = get(s, "filters_on"); on != nullptr && !on->is_boolean()) refuse(who + ": filters_on is true or false");
-    for (const char* key : {"warp", "filter_mask", "psd"}) {
+    if (const Json* mask = get(s, "filter_mask"); mask != nullptr && !mask->is_null()) {
+        if (!mask->is_object()) refuse(who + ": a smart object's filter_mask is {asset, enabled}");
+        for (const auto& [key, value] : mask->items()) {
+            if (key != "asset" && key != "enabled") refuse(who + ": the filter mask key " + py_repr_str(key) + " is not known to this build");
+        }
+        const Json* asset = get(*mask, "asset");
+        if (asset == nullptr || !asset->is_string() || !is_ref(asset->get_ref<const std::string&>())) refuse(who + ": a filter mask is an asset (sha256:…)");
+        if (const Json* enabled = get(*mask, "enabled"); enabled != nullptr && !enabled->is_boolean()) refuse(who + ": a filter mask's enabled is true or false");
+    }
+    for (const char* key : {"warp", "psd"}) {
         if (const Json* value = get(s, key); value != nullptr && !value->is_null() && !value->is_object())
             refuse(who + ": a smart object's " + key + " is an object");
     }
@@ -179,6 +238,24 @@ void check_contents(const std::string& id, const SmartContents& c) {
 }
 
 }  // namespace
+
+bool filter_kind(std::string_view kind) {
+    if (std::find(kShapeFilters.begin(), kShapeFilters.end(), kind) != kShapeFilters.end()) return true;
+    const AdjustKind* found = adjust_kind(kind);
+    return found != nullptr && found->filter && found->smart;
+}
+
+bool filters_drawn(const Layer& layer) {
+    if (!layer.smart || !layer.smart->is_object()) return false;
+    const Json* on = get(*layer.smart, "filters_on");
+    if (on != nullptr && on->is_boolean() && !on->get<bool>()) return false;
+    const Json* filters = get(*layer.smart, "filters");
+    if (filters == nullptr || !filters->is_array()) return false;
+    return std::any_of(filters->begin(), filters->end(), [](const Json& f) {
+        const Json* visible = f.is_object() ? get(f, "visible") : nullptr;
+        return f.is_object() && !(visible != nullptr && visible->is_boolean() && !visible->get<bool>());
+    });
+}
 
 std::optional<std::string> suffix_of_name(std::string_view name) {
     const auto dot = name.rfind('.');
@@ -474,11 +551,11 @@ std::optional<Layer> plain_layer(const Document* doc, const Page& page, const La
     const SmartContents* contents = contents_of(*doc, layer);
     if (contents == nullptr || contents->kind != "page" || !contents->page) return std::nullopt;
     const Json& s = *layer.smart;
+    const bool filtered = filters_drawn(layer);  // (smart filters hidden or off: as none)
     for (const auto& [key, value] : s.items()) {
         if (key == "contents" || key == "matrix" || key == "interp") continue;
-        if (key == "filters" && value.is_array() && value.empty()) continue;
-        if (key == "filters_on" || ((key == "perspective" || key == "warp" || key == "stack" || key == "filter_mask" || key == "psd") && value.is_null()))
-            continue;
+        if ((key == "filters" || key == "filter_mask") && !filtered) continue;
+        if (key == "filters_on" || ((key == "perspective" || key == "warp" || key == "stack" || key == "psd") && value.is_null())) continue;
         return std::nullopt;
     }
     if (!is_identity(matrix_of(layer))) return std::nullopt;
