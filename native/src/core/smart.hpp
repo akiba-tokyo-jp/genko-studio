@@ -105,6 +105,22 @@ std::pair<double, double> size_mm(const SmartContents& contents);
 Json file_json(const SmartContents& contents);
 SmartContents contents_from_json(const Json& value);
 
+// PC3 A1: a linked file's record (SmartContents::link; the contents are its last copy): {"path": where it is (absolute,
+// as the machine names it), "relative"?: from the book's folder ("/" between names), "sha256": its bytes' when last read
+// (64 lowercase hex digits), "bytes": its size}, in this order. Paths of at most kPathMax bytes. core::Error("value").
+inline constexpr std::size_t kPathMax = 4096;
+void check_link(const Json& link);
+Json link_json(const std::string& path, const std::optional<std::string>& relative, const std::string& sha256, std::int64_t bytes);
+
+// Where a book shows contents: the first smart object layer showing them, on a page of the book (`inside` none) or on the
+// page of other contents (`inside` their id: an op reaches that layer with "contents"); none when nothing shows them.
+struct Showing {
+    std::optional<std::string> inside;
+    Num page;
+    std::string layer;
+};
+std::optional<Showing> showing(const Document& doc, const std::string& id);
+
 // The contents the book's pages show (directly or inside other contents), in id order: what the writer writes.
 std::vector<std::string> used_contents(const Document& doc);
 // Does the book hold a smart object (a layer of kind smart, or contents)? It then names smart-objects@1.
@@ -113,6 +129,9 @@ bool uses_smart(const Document& doc);
 std::vector<std::size_t> pages_using(const Document& doc, const std::string& id);
 // The ids of the contents a page shows directly (its smart object layers').
 std::set<std::string> shown_on(const Page& page);
+// Contents changed (PC3 A1): every other contents showing them — directly or further in — made a new value too
+// (Document::edit_contents), so that what is drawn of those, remembered by their identity, is drawn again.
+void renew_containers(Document& doc, const std::string& id);
 
 // The book's smart objects as they must be (core::Error("value") says what is not): a smart layer's settings (known
 // keys, its contents held, a finite matrix that does not squash them flat, convex corners, a known interpolation and

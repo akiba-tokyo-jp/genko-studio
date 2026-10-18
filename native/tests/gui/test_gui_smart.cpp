@@ -153,8 +153,8 @@ private slots:
         QCOMPARE(book.act("act_smart_convert")->text(), QStringLiteral("スマートオブジェクトに変換"));
         QCOMPARE(book.act("act_place_embedded")->text(), QStringLiteral("埋め込みを配置…"));
         // (the later steps' commands: in their places, not usable yet, and said so)
-        for (const char* later : {"act_smart_edit", "act_smart_replace", "act_place_linked", "act_package", "act_smart_stack_median", "act_smart_warp",
-                                  "act_smart_filters_off", "act_rasterize_type"}) {
+        // (PC3 A1's — コンテンツを編集 and the links, リンクを配置…, パッケージ… — are usable: test_gui_smart_contents)
+        for (const char* later : {"act_smart_stack_median", "act_smart_warp", "act_smart_filters_off", "act_rasterize_type"}) {
             QVERIFY2(!book.act(later)->isEnabled(), later);
             QVERIFY2(book.act(later)->toolTip().contains(QStringLiteral("この版ではまだ使えません")), later);
         }
@@ -190,10 +190,10 @@ private slots:
         // undone: the copy back as a smart object
         book.act("act_undo")->trigger();
         QCOMPARE(book.layer(copy)->kind, core::LayerKind::Smart);
-        // レイヤーの内容オプション… on a smart object: コンテンツを編集 is a later step's, said
+        // レイヤーの内容オプション… on a smart object: コンテンツを編集 (PC3 A1: its contents in a tab of the book)
         w->set_target_layer(id);
         book.act("act_layer_content_options")->trigger();
-        QVERIFY(w->status_label()->text().contains(QStringLiteral("この版ではまだ使えません")));
+        QCOMPARE(w->contents_tab(), core::smart::contents_id(*book.layer(id)));
     }
 
     void placeEmbeddedInTheMiddle() {
@@ -274,7 +274,7 @@ private slots:
         panel->refresh();
         auto* about = panel->findChild<QLabel*>(QStringLiteral("properties_smart_contents"));
         QVERIFY(about != nullptr && about->text().contains(QStringLiteral("p3.png")) && about->text().contains(QStringLiteral("PNG 8 bit")));
-        QVERIFY(!panel->findChild<QPushButton*>(QStringLiteral("properties_smart_edit"))->isEnabled());
+        QVERIFY(panel->findChild<QPushButton*>(QStringLiteral("properties_smart_edit"))->isEnabled());  // (PC3 A1: コンテンツを編集)
         auto* colours = panel->findChild<QComboBox*>(QStringLiteral("properties_smart_profile"));
         QVERIFY(colours != nullptr);
         colours->setCurrentIndex(1);  // 埋め込みから変換

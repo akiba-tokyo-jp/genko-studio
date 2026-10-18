@@ -41,6 +41,7 @@
 #include "formats/export.hpp"
 #include "formats/exporting.hpp"
 #include "formats/pillow_save.hpp"
+#include "formats/smart_files.hpp"
 #include "render/anim.hpp"
 #include "render/brushes.hpp"
 #include "render/draw.hpp"
@@ -1087,6 +1088,83 @@ int migrate(const QStringList& args, bool ascii) {
     return 0;
 }
 
+// smart-objects@1 (PC3 A1, SPEC COLOR-05「中身とリンク」, the C++ build's own): `genko smart <dir> --links` — the book's
+// linked files, each ok, modified or missing (the files are read here, never by an op) —, and `genko smart <dir> --export
+// <page> <id> <path> [--format psd|png]` (コンテンツを書き出し…: a file's own bytes, a page's as a PSD or a PNG).
+int smart_command(const QStringList& args, bool ascii) {
+    QString src, format;
+    bool links = false;
+    std::optional<std::array<QString, 3>> exported;
+    for (qsizetype i = 0; i < args.size(); ++i) {
+        const QString& arg = args[i];
+        if (arg == QLatin1String("--links")) {
+            links = true;
+        } else if (arg == QLatin1String("--export")) {
+            if (i + 3 >= args.size()) return usage("genko smart: argument --export: expected three arguments (page, id, path)");
+            exported = std::array<QString, 3>{args[i + 1], args[i + 2], args[i + 3]};
+            i += 3;
+        } else if (arg == QLatin1String("--format") || arg.startsWith(QLatin1String("--format="))) {
+            if (arg.contains(QLatin1Char('='))) {
+                format = arg.mid(9);
+            } else {
+                if (i + 1 >= args.size()) return usage("genko smart: argument --format: expected one argument");
+                format = args[++i];
+            }
+        } else if (arg.startsWith(QLatin1Char('-')) && arg.size() > 1) {
+            return usage("genko smart: unrecognized arguments: " + arg.toStdString());
+        } else if (src.isEmpty()) {
+            src = arg;
+        } else {
+            return usage("genko smart: unrecognized arguments: " + arg.toStdString());
+        }
+    }
+    if (src.isEmpty()) return usage("genko smart <dir> --links | --export <page> <id> <path> [--format psd|png]: the following arguments are required: src");
+    if (links == exported.has_value()) return usage("genko smart: one of --links or --export");
+    if (!format.isEmpty() && !exported) return usage("genko smart: argument --format: only with --export");
+    const fs::path dir = path_arg(src);
+    refuse_legacy(dir);
+    const storage::LoadResult loaded = storage::load_document(dir);
+    const core::Document& doc = loaded.document;
+    if (links) {
+        Json listed = Json::array();
+        for (const auto& state : formats::smart_files::link_states(doc)) listed.push_back(formats::smart_files::to_json(state));
+        print_json(Json{{"ok", true}, {"links", listed}}, ascii);
+        return 0;
+    }
+    const auto page_number = py_int_arg((*exported)[0]);
+    if (!page_number) return usage("genko smart: argument --export: the page is a number");
+    const std::string layer_id = (*exported)[1].toStdString();
+    for (std::size_t i = 0; i < doc.pages.size(); ++i) {
+        if (doc.pages[i]->index != core::Num(*page_number)) continue;
+        for (const core::Layer& layer : doc.page(i).layers) {
+            if (layer.id != layer_id) continue;
+            const auto contents = core::smart::contents_id(layer);
+            if (layer.kind != core::LayerKind::Smart || !contents) throw core::Error("value", "layer " + layer_id + " is not a smart object");
+            Json out = formats::smart_files::export_contents(doc, *contents, path_arg((*exported)[2]), format.toStdString());
+            out["ok"] = true;
+            out["contents"] = *contents;
+            print_json(out, ascii);
+            return 0;
+        }
+        throw core::Error("key", "no layer " + layer_id + " on page " + std::to_string(*page_number));
+    }
+    throw core::Error("key", "no page " + std::to_string(*page_number));
+}
+
+// smart-objects@1 (PC3 A1, the C++ build's own): `genko package <dir> --out <folder>` (パッケージ…) — the book copied as a
+// new book into <folder>/<its folder's name>, with its linked files' copies in Links/ and linked there.
+int package_command(const QStringList& args, bool ascii) {
+    static constexpr Option kOptions[] = {{"--out", true}, {"--as", true}};
+    Arguments a;
+    if (auto error = parse_arguments(args, kOptions, 1, "src", a)) return usage("genko package: " + *error);
+    const auto out = a.value("--out");
+    if (!out || out->isEmpty()) return usage("genko package: the following arguments are required: --out");
+    const fs::path dir = path_arg(a.positional[0]);
+    refuse_legacy(dir);
+    print_json(formats::smart_files::package(dir, path_arg(*out), a.value("--as").value_or(QStringLiteral("genko")).toStdString()), ascii);
+    return 0;
+}
+
 }  // namespace
 
 int run_cli(int argc, char** argv) {
@@ -1123,6 +1201,8 @@ int run_cli(int argc, char** argv) {
         if (command == QLatin1String("migrate")) return migrate(args, ascii);
         if (command == QLatin1String("render")) return render_command(args, ascii);
         if (command == QLatin1String("export")) return export_command(args, ascii);
+        if (command == QLatin1String("smart")) return smart_command(args, ascii);      // (smart-objects@1, PC3 A1)
+        if (command == QLatin1String("package")) return package_command(args, ascii);  // (smart-objects@1, PC3 A1)
         if (command == QLatin1String("studio")) return studio_command(args, ascii);
         if (command == QLatin1String("mcp")) return mcp_command(args);
         if (command == QLatin1String("serve")) return serve_command(args);

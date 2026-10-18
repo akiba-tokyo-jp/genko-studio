@@ -136,6 +136,7 @@ bool open_elsewhere(const Session* session, const MainWindow* but) {
 }  // namespace documents
 
 QString Document::title() const {
+    if (contents) return QStringLiteral("%1の中身").arg(contents_title.isEmpty() ? QStringLiteral("スマートオブジェクト") : contents_title);  // (PC3 A1)
     const core::Document& book = session->document();
     return QStringLiteral("%1 第%2話").arg(book.title.empty() ? QStringLiteral("無題") : QString::fromStdString(book.title),
                                          QString::fromStdString(book.episode.repr()));
@@ -356,6 +357,7 @@ MainWindow::MainWindow(std::shared_ptr<Session> session) {
     flash_timer_.setSingleShot(true);
     connect(&flash_timer_, &QTimer::timeout, this, &MainWindow::refresh_status);
     connect(&watcher_, &QFileSystemWatcher::fileChanged, this, [this](const QString&) { on_disk_change(); });
+    connect(&link_watcher_, &QFileSystemWatcher::fileChanged, this, [this](const QString&) { check_links(); });  // (smart-objects@1)
     connect_session();
     watch();
     reload_pages();
@@ -476,6 +478,11 @@ void MainWindow::resizeEvent(QResizeEvent* event) {
     QTimer::singleShot(0, this, &MainWindow::fit_tools);  // (after the palette has its new height)
 }
 
+void MainWindow::changeEvent(QEvent* event) {
+    QMainWindow::changeEvent(event);
+    if (event->type() == QEvent::ActivationChange && isActiveWindow() && !closed_) check_links();  // (smart-objects@1, PC3 A1)
+}
+
 void MainWindow::settle_docks() {
     fit_box();
     if (tool_settings_dock_ != nullptr && navigator_dock_ != nullptr) {
@@ -508,6 +515,10 @@ void MainWindow::fit_tools() {
 
 const core::Page* MainWindow::current_page() const {
     const core::Document& b = book();
+    if (contents_) {  // (smart-objects@1, PC3 A1: コンテンツを編集's tab — the contents' page)
+        const auto found = b.smart_contents.find(*contents_);
+        return found != b.smart_contents.end() && found->second && found->second->page ? found->second->page.get() : nullptr;
+    }
     if (b.pages.empty()) return nullptr;
     return b.pages[static_cast<std::size_t>(std::min<int>(page_index_, static_cast<int>(b.pages.size()) - 1))].get();
 }
@@ -560,7 +571,17 @@ void MainWindow::preview_ops(const std::optional<core::Json>& ops) {
     try {
         const core::CommandBus bus(render::ops_registry());
         // (channels@1: what is previewed is what is applied: the pixel ops on the channel targeted)
-        auto result = bus.apply(*session_->snapshot(), with_channel_target(*ops), core::Actor(session_->actor()));
+        auto result = bus.apply(*session_->snapshot(), with_contents_target(with_channel_target(*ops)), core::Actor(session_->actor()));
+        if (contents_) {  // (smart-objects@1: the contents' page as it would be)
+            const auto found = result.doc.smart_contents.find(*contents_);
+            if (found == result.doc.smart_contents.end() || !found->second || !found->second->page) throw core::Error("key", "no contents");
+            const core::PagePtr page = found->second->page;
+            result.doc.pages = {page};
+            result.doc.deferred.clear();
+            result.doc.story.clear();
+            canvas_->set_page(std::make_shared<const core::Document>(std::move(result.doc)), 0);
+            return;
+        }
         canvas_->set_page(std::make_shared<const core::Document>(std::move(result.doc)), static_cast<std::size_t>(page_index_));
     } catch (const core::Error&) {
         show_page();  // (a preview that cannot be made: the page as it is)
@@ -627,7 +648,8 @@ bool MainWindow::apply_ops(const Json& ops, const std::vector<std::string>& ids)
     QElapsedTimer clock;
     clock.start();
     try {
-        session_->apply(with_channel_target(ops), ids);  // (channels@1: the pixel ops on the channel targeted)
+        // (channels@1: the pixel ops on the channel targeted; smart-objects@1: in a contents' tab, on its contents)
+        session_->apply(with_contents_target(with_channel_target(ops)), ids);
     } catch (const core::Error& error) {
         flash(wording::error(QString::fromUtf8(error.what())), 6000, true);
         return false;
@@ -673,6 +695,7 @@ void MainWindow::on_book_changed(const BookChange& change) {
         notice_requests(before);
         refresh_ai();
     }
+    check_links();  // (smart-objects@1: a link made, changed or gone)
 }
 
 void MainWindow::reload_pages() {
@@ -687,6 +710,8 @@ void MainWindow::show_page() {
     if (page == nullptr) {
         canvas_->clear_page();
         refresh_status();
+        if (contents_) flash(QStringLiteral("このタブのスマートオブジェクトの中身は、原稿にもうありません（取り消しで戻せます）"), 6000);
+        if (layer_panel_ != nullptr) layer_panel_->refresh();
         return;
     }
     if (target_layer_id_ && std::none_of(page->layers.begin(), page->layers.end(), [&](const core::Layer& l) { return l.id == *target_layer_id_; })) {
@@ -697,8 +722,12 @@ void MainWindow::show_page() {
     canvas_->set_render_mode(!page->name_ok && agent_book() ? "name" : "proof");
     // (an animation page: the frame shown, with the frames around it faint when the timeline asks for it)
     canvas_->renderer().set_anim(current_frame(page), timeline_ == nullptr || timeline_->onion->isChecked());
-    canvas_->set_page(session_->snapshot(), static_cast<std::size_t>(page_index_));
-    if (book().is_deferred(static_cast<std::size_t>(page_index_))) {
+    if (contents_) {  // (smart-objects@1: the contents' page, alone in the book)
+        canvas_->set_page(shown_book(), 0);
+    } else {
+        canvas_->set_page(session_->snapshot(), static_cast<std::size_t>(page_index_));
+    }
+    if (!contents_ && book().is_deferred(static_cast<std::size_t>(page_index_))) {
         flash(QStringLiteral("このページを読み込んでいます。読み込みが終わると表示します。"), 3000);
     }
     pen_changed();
@@ -725,6 +754,10 @@ void MainWindow::show_page() {
 
 void MainWindow::select_page(int row) {
     if (row < 0) return;
+    if (contents_) {  // (smart-objects@1: a contents' tab shows its contents; the book's page kept for its own tab)
+        page_index_ = row;
+        return;
+    }
     if (row != page_index_) {
         perf::event("page_switch", {{"row", row}});
         session_->save_now();  // a page switch writes what was done on the last page (on the worker)
@@ -867,6 +900,7 @@ void MainWindow::refresh_actions() {
     show_color_mode();
     if (auto* exposure = action("act_exposure")) exposure->setEnabled(current_page() && session_->read_only_reason().empty());
     if (QAction* name_ok = action(QStringLiteral("act_name_ok"))) name_ok->setVisible(agent_book());  // (stages are for books made with agents)
+    contents_tab_follow();  // (smart-objects@1: what a contents' tab cannot use, greyed)
 }
 
 void MainWindow::show_omitted(const QStringList& elements) {
@@ -947,6 +981,11 @@ void MainWindow::show_document(int index) {
     session_ = doc.session;
     page_index_ = doc.page_index;
     target_layer_id_ = doc.target_layer;
+    contents_ = doc.contents;  // (smart-objects@1, PC3 A1: コンテンツを編集's tab)
+    contents_title_ = doc.contents_title;
+    contents_view_.reset();
+    contents_view_of_.reset();
+    if (pages_ != nullptr) pages_->setEnabled(!contents_);
     connect_session();
     if (panel_view_ != nullptr) panel_view_->frame_id.reset();
     canvas_->set_selection(std::nullopt);
@@ -971,11 +1010,15 @@ void MainWindow::show_document(int index) {
         const QStringList links = std::exchange(pending_links_, {});
         for (const QString& link : links) QTimer::singleShot(0, this, [this, link] { open_link(link); });
     }
+    contents_tab_follow();
+    check_links();  // (smart-objects@1: its linked files looked at)
 }
 
 void MainWindow::switch_document(int index) {
     if (index < 0 || index >= static_cast<int>(documents_.size()) || index == doc_) return;
-    if (session_->unsaved()) {
+    if (documents_[static_cast<std::size_t>(index)].session == session_) {
+        session_->save_now();  // (smart-objects@1: another tab of the same book — its contents —: nothing to settle)
+    } else if (session_->unsaved()) {
         // Every entrance observes the same unsaved/saving/failed boundary.
         if (!settle(doc_, QStringLiteral("切り替える"))) {
             doc_tabs_->blockSignals(true);
@@ -1134,7 +1177,10 @@ bool MainWindow::close_document(int index) {
     if (index < 0) index = doc_;
     if (index < 0 || index >= static_cast<int>(documents_.size())) return false;
     if (documents_.size() == 1) return close();
-    if (!documents::open_elsewhere(documents_[static_cast<std::size_t>(index)].session.get(), this) && !settle(index)) return false;
+    // (smart-objects@1: a book also in another tab here — its contents' tab, or the book's beside it — stays open there)
+    const auto& closing = documents_[static_cast<std::size_t>(index)].session;
+    const bool shared_here = std::count_if(documents_.begin(), documents_.end(), [&](const Document& d) { return d.session == closing; }) > 1;
+    if (!shared_here && !documents::open_elsewhere(closing.get(), this) && !settle(index)) return false;
     if (index != doc_) store_document();
     documents_.erase(documents_.begin() + index);
     doc_tabs_->blockSignals(true);
@@ -1171,6 +1217,8 @@ void MainWindow::closeEvent(QCloseEvent* event) {
     for (int i = 0; i < static_cast<int>(documents_.size()); ++i) {
         if (documents::open_elsewhere(documents_[static_cast<std::size_t>(i)].session.get(), this)) continue;
         const auto chosen = documents_[static_cast<std::size_t>(i)].session;
+        // (smart-objects@1: a book in two tabs here — its contents' tab — is settled once)
+        if (std::any_of(documents_.begin(), documents_.begin() + i, [&](const Document& d) { return d.session == chosen; })) continue;
         if (i != doc_) {
             store_document();
             show_document(i);

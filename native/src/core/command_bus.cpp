@@ -406,6 +406,21 @@ void check_page_lock(Document& doc, const Json& op, const Actor& actor) {
         }
         return;
     }
+    if (named && one_of(name, {"smart_profile", "smart_replace", "smart_relink", "smart_update", "smart_embed", "smart_link", "smart_to_page"})) {
+        // (smart-objects@1, PC3 A1: the contents change on every page showing them — each is asked, then the op's own)
+        const auto index = op_page_index(doc, op);
+        const Page* page = index ? first_page(doc, *index) : nullptr;
+        const Json* id = get(op, "id");
+        if (page != nullptr && id != nullptr && id->is_string()) {
+            for (const Layer& layer : page->layers) {
+                if (layer.id != id->get_ref<const std::string&>()) continue;
+                if (const auto contents = smart::contents_id(layer)) {
+                    for (const std::size_t at : smart::pages_using(doc, *contents)) check_held(doc, doc.page(at), doc.page(at).index, actor);
+                }
+                break;
+            }
+        }
+    }
     // (Python takes a lock on a page the book does not have, and lets it go, without a word: refused here)
     const bool lock_op = named && (name == "lock_page" || name == "unlock_page");
     if (const Json* page_value = get(op, "page"); lock_op && page_value != nullptr) {
@@ -918,6 +933,7 @@ std::optional<Json> apply_in_contents(const CommandBus& bus, Document& work, con
     work.features = after.features;
     work.studio = after.studio;
     work.edit_contents(id).page = after.pages[0];
+    smart::renew_containers(work, id);  // (PC3 A1: contents showing them — a nested smart object's — are drawn again too)
     for (const std::size_t at : smart::pages_using(work, id)) {  // (the pages showing them look different now)
         if (!work.is_deferred(at)) (void)work.edit_page(at);
     }

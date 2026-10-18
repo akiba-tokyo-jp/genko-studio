@@ -6,17 +6,26 @@
 
 #include <QAction>
 #include <QComboBox>
+#include <QDateTime>
+#include <QDir>
 #include <QDoubleSpinBox>
 #include <QFileInfo>
+#include <QGuiApplication>
+#include <QTabBar>
+#include <QUrl>
 #include <QFormLayout>
 #include <QLabel>
 #include <QMenu>
 #include <QPushButton>
 #include <QVBoxLayout>
 
+#include <algorithm>
 #include <array>
 #include <cmath>
+#include <filesystem>
 #include <fstream>
+#include <map>
+#include <set>
 
 #include "app/ask.hpp"
 #include "app/color_settings_dialog.hpp"
@@ -30,15 +39,18 @@
 #include "core/pyconv.hpp"
 #include "core/pyops.hpp"
 #include "core/smart.hpp"
+#include "formats/smart_files.hpp"
 #include "render/png.hpp"
 #include "render/proof.hpp"
 #include "render/smart.hpp"
 #include "render/smart_decode.hpp"
 #include "service/wording.hpp"
 #include "storage/asset_store.hpp"
+#include "storage/fsutil.hpp"
 
 namespace genko::app {
 
+namespace fs = std::filesystem;
 using core::Json;
 
 namespace {
@@ -54,6 +66,73 @@ const std::vector<std::pair<const char*, const char*>>& stack_modes() {
     return modes;
 }
 
+// --- PC3 A1: linked files ------------------------------------------------------------------------------------------------
+
+QString qpath(const fs::path& path) { return QString::fromStdString(core::path_to_utf8(path)); }
+fs::path fpath(const QString& file) { return core::path_from_utf8(file.toStdString()); }
+
+QString canonical(const QString& file) {
+    const QFileInfo info(file);
+    const QString real = info.canonicalFilePath();
+    return real.isEmpty() ? info.absoluteFilePath() : real;
+}
+
+// The linked files the person chose here or said yes to (in this run of Genko): a place the book recorded — an agent's,
+// perhaps — is shown and asked about before Genko reads it, opens it or takes it in (the design's safety rule).
+std::set<QString>& trusted_links() {
+    static std::set<QString> paths;
+    return paths;
+}
+void trust_link(const QString& file) { trusted_links().insert(canonical(file)); }
+bool trusted_link(const QString& file) { return trusted_links().contains(canonical(file)); }
+
+// A linked file's record for an op: its absolute place, its place from the book's folder ("/" between names; none when
+// it is on another drive), its sha256 and size.
+Json link_record(const QString& file, std::string_view bytes, const std::optional<fs::path>& book) {
+    Json link{{"path", QFileInfo(file).absoluteFilePath().toStdString()}};
+    if (book) {
+        const QString relative = QDir(qpath(*book)).relativeFilePath(QFileInfo(file).absoluteFilePath());
+        if (!relative.isEmpty() && !QDir::isAbsolutePath(relative)) link["relative"] = QDir::fromNativeSeparators(relative).toStdString();
+    }
+    link["sha256"] = storage::sha256_hex(bytes);
+    link["bytes"] = static_cast<std::int64_t>(bytes.size());
+    return link;
+}
+
+// The sha256 of a linked file, remembered by its place, size and time (looked at again only when it changed).
+std::string linked_sha(const QString& file) {
+    struct Seen {
+        qint64 size = -1;
+        QDateTime time;
+        std::string sha;
+    };
+    static std::map<QString, Seen> seen;
+    const QFileInfo info(file);
+    Seen& was = seen[file];
+    if (was.size == info.size() && was.time == info.lastModified() && !was.sha.empty()) return was.sha;
+    try {
+        was.sha = storage::sha256_file(fpath(file));
+    } catch (const std::exception&) {
+        was.sha.clear();
+    }
+    was.size = info.size();
+    was.time = info.lastModified();
+    return was.sha;
+}
+
+// The file's bytes when it is a picture of at most 256 MiB (core::Error otherwise, said by the caller).
+std::string read_picture(const QString& file, render::smart::FileInfo* info) {
+    std::ifstream in(fpath(file), std::ios::binary | std::ios::ate);
+    if (!in) throw core::Error("io", "cannot read " + file.toStdString());
+    if (static_cast<std::uint64_t>(in.tellg()) > render::smart::kFileMaxBytes) throw core::Error("too_large", "the file is larger than 256 MiB");
+    in.seekg(0);
+    std::string bytes((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
+    *info = render::smart::look_at(bytes, {});
+    return bytes;
+}
+
+constexpr const char* kPictures = "画像 (*.png *.jpg *.jpeg *.tif *.tiff *.bmp *.webp *.gif *.psd)";
+
 }  // namespace
 
 void MainWindow::build_smart_actions() {
@@ -65,25 +144,38 @@ void MainWindow::build_smart_actions() {
     // ファイル
     make("act_place_embedded", QStringLiteral("埋め込みを配置…"), [this] { place_embedded(); }, {},
          QStringLiteral("画像をスマートオブジェクトとしてページの中央に置きます（元のファイルのまま。大きければページに収めます）"));
-    later("act_place_linked", QStringLiteral("リンクを配置…"));
-    later("act_package", QStringLiteral("パッケージ…"));
+    make("act_place_linked", QStringLiteral("リンクを配置…"), [this] { place_linked(); }, {},
+         QStringLiteral("画像をファイルにリンクしたスマートオブジェクトとして置きます（ファイルを直すと「変更されたコンテンツを更新」で取り込めます）"));
+    make("act_package", QStringLiteral("パッケージ…"), [this] { package_book(); }, {},
+         QStringLiteral("原稿を、リンクしたファイルの写し（Links フォルダー）と一緒に別のフォルダーへまとめます"));
     // レイヤー → スマートオブジェクト
     make("act_smart_convert", QStringLiteral("スマートオブジェクトに変換"), [this] { smart_convert(); }, {},
          QStringLiteral("選んだレイヤーをスマートオブジェクトにまとめます（中身はそのまま。拡大・縮小しても劣化しません）"));
     make("act_smart_copy", QStringLiteral("新規スマートオブジェクト（コピー）"), [this] { smart_copy(); }, {},
          QStringLiteral("選んだスマートオブジェクトを、中身ごと別のものとして複製します"));
-    later("act_smart_edit", QStringLiteral("コンテンツを編集"));
-    later("act_smart_export", QStringLiteral("コンテンツを書き出し…"));
-    later("act_smart_replace", QStringLiteral("コンテンツを置換…"));
-    later("act_smart_relink", QStringLiteral("ファイルに再リンク…"));
-    later("act_smart_embed", QStringLiteral("埋め込みに変換"));
-    later("act_smart_link", QStringLiteral("リンクに変換…"));
-    later("act_smart_update", QStringLiteral("変更されたコンテンツを更新"));
-    later("act_smart_update_all", QStringLiteral("変更されたすべてのコンテンツを更新"));
+    // (PC3 A1: contents and links)
+    make("act_smart_edit", QStringLiteral("コンテンツを編集"), [this] { edit_contents(); }, {},
+         QStringLiteral("スマートオブジェクトの中身を別のタブで開きます（変更はすぐ原稿に出ます。リンクしたファイルは既定のアプリで開きます）"));
+    make("act_smart_export", QStringLiteral("コンテンツを書き出し…"), [this] { export_contents(); }, {},
+         QStringLiteral("スマートオブジェクトの中身をファイルに書き出します（画像は元のファイルのまま、ページは PSD か PNG）"));
+    make("act_smart_replace", QStringLiteral("コンテンツを置換…"), [this] { replace_contents(); }, {},
+         QStringLiteral("スマートオブジェクトの中身を別の画像に入れ替えます（変形はそのまま。同じ中身のものはすべて変わります）"));
+    make("act_smart_relink", QStringLiteral("ファイルに再リンク…"), [this] { relink_contents(); }, {},
+         QStringLiteral("スマートオブジェクトのリンク先を別のファイルにします"));
+    make("act_smart_embed", QStringLiteral("埋め込みに変換"), [this] { embed_contents(); }, {},
+         QStringLiteral("リンクしたスマートオブジェクトを、原稿の中の写しだけを持つものにします"));
+    make("act_smart_link", QStringLiteral("リンクに変換…"), [this] { link_contents(); }, {},
+         QStringLiteral("スマートオブジェクトの中身をファイルに書き出し、そのファイルにリンクします"));
+    make("act_smart_update", QStringLiteral("変更されたコンテンツを更新"), [this] { update_contents(false); }, {},
+         QStringLiteral("リンクしたファイルが変わっていれば、選んだスマートオブジェクトの中身を新しいファイルにします"));
+    make("act_smart_update_all", QStringLiteral("変更されたすべてのコンテンツを更新"), [this] { update_contents(true); }, {},
+         QStringLiteral("この原稿のリンクしたファイルのうち、変わったものをすべて取り込みます"));
 #ifdef Q_OS_WIN
-    later("act_smart_reveal", QStringLiteral("エクスプローラーで表示"));
+    make("act_smart_reveal", QStringLiteral("エクスプローラーで表示"), [this] { reveal_contents(); }, {},
+         QStringLiteral("リンクしたファイルのあるフォルダーを開きます"));
 #else
-    later("act_smart_reveal", QStringLiteral("ファイルマネージャーで表示"));
+    make("act_smart_reveal", QStringLiteral("ファイルマネージャーで表示"), [this] { reveal_contents(); }, {},
+         QStringLiteral("リンクしたファイルのあるフォルダーを開きます"));
 #endif
     for (const auto& [mode, label] : stack_modes()) later(("act_smart_stack_" + std::string(mode)).c_str(), QString::fromUtf8(label));
     later("act_smart_warp", QStringLiteral("ワープ"));
@@ -161,11 +253,12 @@ bool MainWindow::place_embedded(std::optional<QString> chosen) {
     return place_smart(file, false);
 }
 
-bool MainWindow::place_smart(const QString& file, bool as_placed) {
+bool MainWindow::place_smart(const QString& file, bool as_placed, bool linked) {
     const Asked asked = asking();
     std::string bytes;
     render::smart::FileInfo info;
     Json use;
+    std::optional<Json> link;  // (PC3 A1: the file as it is — its sha256 and size —, whatever copy the book keeps)
     try {
         std::ifstream in(core::path_from_utf8(file.toStdString()), std::ios::binary | std::ios::ate);
         if (!in) throw core::Error("io", "cannot read " + file.toStdString());
@@ -177,6 +270,7 @@ bool MainWindow::place_smart(const QString& file, bool as_placed) {
         in.seekg(0);
         bytes.assign(std::istreambuf_iterator<char>(in), std::istreambuf_iterator<char>());
         info = render::smart::look_at(bytes, {});  // (the whole picture read first: a file that cannot be drawn is never placed)
+        if (linked) link = link_record(file, bytes, session_->path());
         const render::Image picture = render::open_image(bytes, render::kPillowOpenLimits);
         // (カラー設定's policy for its own profile: the answer kept, its pixels as they are)
         use = picture_use(bytes, picture.mode());
@@ -216,6 +310,7 @@ bool MainWindow::place_smart(const QString& file, bool as_placed) {
     Json place{{"op", "smart_place"}, {"page", page->index.json()}, {"asset", ref}, {"name", named.fileName().toStdString()}, {"to", "art"},
                {"title", named.completeBaseName().toStdString()}};
     place.update(use);
+    if (link) place["link"] = *link;
     const core::Frame* frame = as_placed ? selected_frame() : nullptr;
     if (as_placed) {
         if (frame != nullptr) {
@@ -231,6 +326,9 @@ bool MainWindow::place_smart(const QString& file, bool as_placed) {
     if (!apply_ops(ops)) return false;
     if (as_placed) {
         flash(QStringLiteral("%1に「%2」を置きました").arg(frame != nullptr ? QStringLiteral("選んだコマ") : QStringLiteral("ページ全体"), named.fileName()), 4000);
+    } else if (link) {
+        trust_link(file);  // (the person chose it)
+        flash(QStringLiteral("「%1」をリンクしたスマートオブジェクトとして置きました").arg(named.fileName()), 4000);
     } else {
         flash(QStringLiteral("「%1」をスマートオブジェクトとして置きました").arg(named.fileName()), 4000);
     }
@@ -301,8 +399,8 @@ void MainWindow::rasterize(const std::string& what) {
 void MainWindow::content_options() {
     const core::Layer* layer = target_layer();
     if (layer == nullptr || layer_panel_ == nullptr) return;
-    if (layer->kind == core::LayerKind::Smart) {  // (コンテンツを編集: a later step of PC3)
-        flash(QStringLiteral("スマートオブジェクトのコンテンツを編集は、%1").arg(QString::fromUtf8(kLater)), 4000);
+    if (layer->kind == core::LayerKind::Smart) {  // (コンテンツを編集, PC3 A1)
+        edit_contents();
         return;
     }
     layer_panel_->edit_special();
@@ -340,11 +438,25 @@ QWidget* smart_properties(MainWindow* window, const core::Page& page, const core
     } else {
         about->setText(QStringLiteral("中身: ページ（レイヤー %1 枚）").arg(contents->page ? static_cast<int>(contents->page->layers.size()) : 0));
     }
+    if (contents != nullptr && contents->link) {  // (PC3 A1: where it is linked, and how the file is now)
+        const auto id = core::smart::contents_id(layer);
+        const std::string status = id ? window->link_status(*id) : std::string();
+        const QString state = status == "missing" ? QStringLiteral("（リンク切れ: 原稿の中の写しで描いています）")
+                              : status == "modified" ? QStringLiteral("（ファイルが変更されています）")
+                                                     : QString();
+        about->setText(about->text() + QStringLiteral("\nリンク: %1%2")
+                                           .arg(QString::fromStdString(core::py_str(core::py_get(*contents->link, "path", Json("")))), state));
+    }
     column->addWidget(about);
     auto* edit = new QPushButton(QStringLiteral("コンテンツを編集"));
     edit->setObjectName(QStringLiteral("properties_smart_edit"));
-    edit->setEnabled(false);
-    edit->setToolTip(QString::fromUtf8(kLater));
+    {
+        const std::string chosen = layer.id;
+        QObject::connect(edit, &QPushButton::clicked, box, [window, chosen] {
+            window->set_target_layer(chosen);
+            window->edit_contents();
+        });
+    }
     column->addWidget(edit);
     // its size, turn and place (the contents' top left on the page)
     auto* rows = new QWidget;
@@ -427,6 +539,539 @@ QWidget* smart_properties(MainWindow* window, const core::Page& page, const core
         column->addLayout(colours);
     }
     return box;
+}
+
+// --- PC3 A1: contents and links -------------------------------------------------------------------------------------------
+
+namespace {
+
+// The smart object chosen (the layer drawn on), its contents' id and its contents; nothing (said) when it is not one.
+struct Chosen {
+    const core::Page* page = nullptr;
+    const core::Layer* layer = nullptr;
+    std::string id;
+    const core::SmartContents* contents = nullptr;
+};
+
+std::optional<Chosen> chosen_smart(MainWindow& window) {
+    Chosen c;
+    c.page = window.current_page();
+    c.layer = window.target_layer();
+    if (c.page == nullptr || c.layer == nullptr || c.layer->kind != core::LayerKind::Smart) {
+        window.flash(QStringLiteral("スマートオブジェクトを選んでください"), 4000);
+        return std::nullopt;
+    }
+    const auto id = core::smart::contents_id(*c.layer);
+    c.contents = core::smart::contents_of(window.book(), *c.layer);
+    if (!id || c.contents == nullptr) {
+        window.flash(QStringLiteral("スマートオブジェクトの中身が見つかりません"), 5000, true);
+        return std::nullopt;
+    }
+    c.id = *id;
+    return c;
+}
+
+QString layer_title(const core::Layer& layer) {
+    return layer.title.empty() ? QStringLiteral("スマートオブジェクト") : QString::fromStdString(layer.title);
+}
+
+// The commands a contents' tab cannot use (their ops are the book's, its pages', panels' or lines', or the studio's):
+// greyed while such a tab is in front. The bus refuses their ops there anyway (core/command_bus.cpp apply_in_contents).
+constexpr const char* kNotInContents[] = {
+    // pages
+    "act_overview", "act_prev", "act_next", "act_add_page", "act_del_page", "act_dup_page", "act_page_up", "act_page_down", "act_spread",
+    "act_nombre", "act_paper", "act_page_nombre", "act_add_cover", "act_assignee", "act_merge_book", "act_name_ok", "act_color_mode",
+    "act_assign_profile", "act_convert_profile", "act_color_table", "act_mode_bitmap", "act_mode_indexed", "act_mode_duotone",
+    "act_mode_multichannel",
+    // panels
+    "act_frame", "act_split_h", "act_split_v", "act_merge", "act_delete_frame", "act_frame_selection", "act_gutters", "act_border", "act_corner",
+    "act_no_border", "act_bleed", "act_border_colour", "act_border_detail", "act_template", "act_save_template", "act_reset_shape",
+    "act_ruler_frame",
+    // lines
+    "act_text", "act_story_editor", "act_replace", "act_line_type", "act_balloon_pen", "act_line_edit", "act_line_delete", "act_line_wrap",
+    // the studio
+    "act_ai", "act_style", "act_chat_approval",
+    // the book's own files
+    "act_package"};
+
+}  // namespace
+
+std::shared_ptr<const core::Document> MainWindow::shown_book() const {
+    const std::shared_ptr<const core::Document> snapshot = session_->snapshot();
+    if (!contents_) return snapshot;
+    if (contents_view_ && contents_view_of_ == snapshot) return contents_view_;
+    const auto found = snapshot->smart_contents.find(*contents_);
+    if (found == snapshot->smart_contents.end() || !found->second || !found->second->page) return nullptr;
+    auto view = std::make_shared<core::Document>(*snapshot);
+    view->pages = {found->second->page};
+    view->deferred.clear();
+    view->story.clear();
+    contents_view_ = std::move(view);
+    contents_view_of_ = snapshot;
+    return contents_view_;
+}
+
+Json MainWindow::with_contents_target(const Json& ops) const {
+    if (!contents_ || !ops.is_array()) return ops;
+    Json out = ops;
+    for (Json& op : out) {
+        if (op.is_object() && !op.contains("contents")) op["contents"] = *contents_;
+    }
+    return out;
+}
+
+void MainWindow::contents_tab_follow() {
+    for (const char* name : kNotInContents) {
+        QAction* act = action(QString::fromLatin1(name));
+        if (act == nullptr) continue;
+        if (contents_) {
+            if (act->isEnabled()) {
+                act->setEnabled(false);
+                greyed_in_contents_.insert(act);
+            }
+        } else if (greyed_in_contents_.erase(act) > 0) {
+            act->setEnabled(true);
+        }
+    }
+}
+
+bool MainWindow::open_contents_tab(const std::string& contents_id, const QString& title) {
+    for (int i = 0; i < static_cast<int>(documents_.size()); ++i) {
+        const Document& tab = documents_[static_cast<std::size_t>(i)];
+        if (tab.session == session_ && tab.contents == contents_id) {  // (open already: in front)
+            switch_document(i);
+            return true;
+        }
+    }
+    session_->save_now();
+    store_document();
+    Document tab{session_};
+    tab.contents = contents_id;
+    tab.contents_title = title;
+    tab.page_index = page_index_;
+    documents_.push_back(std::move(tab));
+    doc_tabs_->blockSignals(true);
+    doc_tabs_->addTab(documents_.back().title());
+    doc_tabs_->blockSignals(false);
+    show_document(static_cast<int>(documents_.size()) - 1);
+    canvas_->fit_page();
+    flash(QStringLiteral("「%1」の中身をこのタブで開きました（ここでの変更はすぐ原稿に出ます。保存は原稿と一緒です）").arg(title), 6000);
+    return true;
+}
+
+bool MainWindow::edit_contents() {
+    const auto chosen = chosen_smart(*this);
+    if (!chosen) return false;
+    const QString title = layer_title(*chosen->layer);
+    if (chosen->contents->kind == "page") return open_contents_tab(chosen->id, title);
+    if (chosen->contents->link) {  // (a linked file: opened in its own app, watched; 変更されたコンテンツを更新 takes it)
+        const auto found = formats::smart_files::linked_file(*chosen->contents->link, session_->path());
+        if (!found) {
+            flash(QStringLiteral("リンクしたファイルが見つかりません（ファイルに再リンク… で場所を直せます）"), 6000, true);
+            return false;
+        }
+        const QString file = qpath(*found);
+        if (!core::smart::suffix_of_name(file.toStdString())) {
+            flash(QStringLiteral("リンク先が画像のファイルではないため、開きません"), 6000, true);
+            return false;
+        }
+        if (!trusted_link(file) &&
+            !ask::question(this, QStringLiteral("コンテンツを編集"), QStringLiteral("原稿に記録されたリンク先のファイルを、既定のアプリで開きます:\n%1\n\n開いてよいですか").arg(file)))
+            return false;
+        trust_link(file);
+        if (!ask::open_url(QUrl::fromLocalFile(file))) {
+            flash(QStringLiteral("ファイルを開けませんでした: %1").arg(file), 6000, true);
+            return false;
+        }
+        if (!link_watcher_.files().contains(file)) link_watcher_.addPath(file);
+        flash(QStringLiteral("「%1」を既定のアプリで開きました。保存したら「変更されたコンテンツを更新」で取り込めます").arg(QFileInfo(file).fileName()), 6000);
+        return true;
+    }
+    // (a picture placed in the book: made a page of its own to edit first — asked, as it changes what every smart object
+    // showing it is made of)
+    const Asked asked = asking();
+    if (!ask::question(this, QStringLiteral("コンテンツを編集"),
+                       QStringLiteral("画像のスマートオブジェクトを、編集できるページ（ペイントのレイヤー 1 枚）にしてから開きます。\n"
+                                      "同じ中身のスマートオブジェクトはすべて同じに変わり、白黒の仕上げは掛からなくなります。よろしいですか")))
+        return false;
+    if (!still(asked)) return false;
+    const core::Page* page = current_page();
+    if (page == nullptr) return false;
+    if (!apply_ops(Json::array({Json{{"op", "smart_to_page"}, {"page", page->index.json()}, {"id", chosen->layer->id}}}))) return false;
+    return open_contents_tab(chosen->id, title);
+}
+
+bool MainWindow::export_contents(std::optional<QString> path) {
+    const auto chosen = chosen_smart(*this);
+    if (!chosen) return false;
+    const core::SmartContents& contents = *chosen->contents;
+    QString file;
+    if (path) {
+        file = *path;
+    } else {
+        const QString suggested = contents.kind == "file" ? QString::fromStdString(contents.name) : layer_title(*chosen->layer) + QStringLiteral(".psd");
+        const QString filter = contents.kind == "file" ? QStringLiteral("元のファイル (*%1)").arg(QString::fromStdString(contents.suffix))
+                                                       : QStringLiteral("PSD (*.psd);;PNG (*.png)");
+        file = ask::save_path(this, QStringLiteral("コンテンツを書き出し"), suggested, filter);
+    }
+    if (file.isEmpty()) return false;
+    std::string format;
+    if (contents.kind == "page") format = file.endsWith(QStringLiteral(".png"), Qt::CaseInsensitive) ? "png" : "psd";
+    QGuiApplication::setOverrideCursor(Qt::WaitCursor);  // (a page's PSD at its dpi takes a moment)
+    try {
+        (void)formats::smart_files::export_contents(book(), chosen->id, fpath(file), format);
+    } catch (const std::exception& error) {
+        QGuiApplication::restoreOverrideCursor();
+        flash(QStringLiteral("書き出せませんでした: %1").arg(wording::error(QString::fromUtf8(error.what()))), 6000, true);
+        return false;
+    }
+    QGuiApplication::restoreOverrideCursor();
+    flash(QStringLiteral("コンテンツを書き出しました: %1").arg(QDir::toNativeSeparators(file)), 5000);
+    return true;
+}
+
+namespace {
+
+// A picture the person chose, read and put in the book's assets (the book saved first): its ref, its bytes' record for a
+// link and its colours' use (カラー設定's policy, as 画像を読み込む… asks); nothing when it cannot be (said).
+struct Taken {
+    std::string ref;
+    Json link;
+    Json use;
+    QString name;
+};
+
+std::optional<Taken> take_picture(MainWindow& window, Session& session, const QString& file, bool ask_colours) {
+    render::smart::FileInfo info;
+    std::string bytes;
+    try {
+        bytes = read_picture(file, &info);
+    } catch (const std::exception& error) {
+        window.flash(QStringLiteral("読み込めない画像です:\n%1").arg(wording::error(QString::fromUtf8(error.what()))), 6000, true);
+        return std::nullopt;
+    }
+    Taken out;
+    out.name = QFileInfo(file).fileName();
+    out.link = link_record(file, bytes, session.path());
+    if (ask_colours) {
+        try {
+            const render::Image picture = render::open_image(bytes, render::kPillowOpenLimits);
+            out.use = window.picture_use(bytes, picture.mode());
+        } catch (const std::exception&) {
+            out.use = Json::object();  // (read as 16 or 32 bits only: its numbers)
+        }
+    }
+    session.save_now();
+    try {
+        out.ref = storage::AssetStore(*session.path()).put_bytes(bytes, info.suffix);
+    } catch (const std::exception& error) {
+        window.flash(wording::error(QString::fromUtf8(error.what())), 6000, true);
+        return std::nullopt;
+    }
+    return out;
+}
+
+}  // namespace
+
+bool MainWindow::replace_contents(std::optional<QString> path) {
+    const auto chosen = chosen_smart(*this);
+    if (!chosen) return false;
+    if (!session_->path()) {
+        flash(QStringLiteral("画像を置く前に、原稿を保存します（ファイル → 別の場所に保存）"), 6000);
+        return false;
+    }
+    const Asked asked = asking();
+    const QString file = path ? *path : ask::open_path(this, QStringLiteral("コンテンツを置換"), QString::fromLatin1(kPictures));
+    if (file.isEmpty() || !still(asked)) return false;
+    const std::string layer = chosen->layer->id;
+    const std::optional<Taken> taken = take_picture(*this, *session_, file, true);
+    if (!taken) return false;
+    const core::Page* page = current_page();
+    if (page == nullptr) return false;
+    Json op{{"op", "smart_replace"}, {"page", page->index.json()}, {"id", layer}, {"asset", taken->ref}, {"name", taken->name.toStdString()}};
+    op.update(taken->use);
+    if (!apply_ops(Json::array({op}))) return false;
+    flash(QStringLiteral("スマートオブジェクトの中身を「%1」にしました").arg(taken->name), 4000);
+    return true;
+}
+
+bool MainWindow::relink_contents(std::optional<QString> path) {
+    const auto chosen = chosen_smart(*this);
+    if (!chosen) return false;
+    if (!session_->path()) {
+        flash(QStringLiteral("画像を置く前に、原稿を保存します（ファイル → 別の場所に保存）"), 6000);
+        return false;
+    }
+    const Asked asked = asking();
+    const QString file = path ? *path : ask::open_path(this, QStringLiteral("ファイルに再リンク"), QString::fromLatin1(kPictures));
+    if (file.isEmpty() || !still(asked)) return false;
+    const std::string layer = chosen->layer->id;
+    const std::optional<Taken> taken = take_picture(*this, *session_, file, true);
+    if (!taken) return false;
+    const core::Page* page = current_page();
+    if (page == nullptr) return false;
+    Json op{{"op", "smart_relink"}, {"page", page->index.json()}, {"id", layer}, {"asset", taken->ref}, {"name", taken->name.toStdString()}, {"link", taken->link}};
+    op.update(taken->use);
+    if (!apply_ops(Json::array({op}))) return false;
+    trust_link(file);
+    check_links();
+    flash(QStringLiteral("リンク先を「%1」にしました").arg(QDir::toNativeSeparators(file)), 4000);
+    return true;
+}
+
+bool MainWindow::embed_contents() {
+    const auto chosen = chosen_smart(*this);
+    if (!chosen) return false;
+    if (!chosen->contents->link) {
+        flash(QStringLiteral("このスマートオブジェクトは、もう原稿に埋め込まれています"), 4000);
+        return false;
+    }
+    if (!apply_ops(Json::array({Json{{"op", "smart_embed"}, {"page", chosen->page->index.json()}, {"id", chosen->layer->id}}}))) return false;
+    flash(QStringLiteral("埋め込みに変換しました（原稿の中の写しが中身です）"), 4000);
+    return true;
+}
+
+bool MainWindow::link_contents(std::optional<QString> path) {
+    const auto chosen = chosen_smart(*this);
+    if (!chosen) return false;
+    if (chosen->contents->link) {
+        flash(QStringLiteral("このスマートオブジェクトは、もうファイルにリンクしています"), 4000);
+        return false;
+    }
+    if (!session_->path()) {
+        flash(QStringLiteral("リンクにする前に、原稿を保存します（ファイル → 別の場所に保存）"), 6000);
+        return false;
+    }
+    const bool page_contents = chosen->contents->kind == "page";
+    const Asked asked = asking();
+    QString file;
+    if (path) {
+        file = *path;
+    } else {
+        const QString suggested = page_contents ? layer_title(*chosen->layer) + QStringLiteral(".psd") : QString::fromStdString(chosen->contents->name);
+        const QString filter = page_contents ? QStringLiteral("PSD (*.psd)") : QStringLiteral("元のファイル (*%1)").arg(QString::fromStdString(chosen->contents->suffix));
+        file = ask::save_path(this, QStringLiteral("リンクに変換"), suggested, filter);
+    }
+    if (file.isEmpty() || !still(asked)) return false;
+    const std::string layer = chosen->layer->id;
+    const std::string id = chosen->id;
+    // the contents written to the file first (a page's as a PSD), then linked to it
+    try {
+        formats::smart_files::export_contents(book(), id, fpath(file), page_contents ? "psd" : "");
+    } catch (const std::exception& error) {
+        flash(QStringLiteral("ファイルに書き出せませんでした: %1").arg(wording::error(QString::fromUtf8(error.what()))), 6000, true);
+        return false;
+    }
+    trust_link(file);
+    const core::Page* page = current_page();
+    if (page == nullptr) return false;
+    Json op{{"op", "smart_link"}, {"page", page->index.json()}, {"id", layer}};
+    if (page_contents) {  // (the PSD written is the contents now: put in the book)
+        const std::optional<Taken> taken = take_picture(*this, *session_, file, false);
+        if (!taken) return false;
+        page = current_page();
+        if (page == nullptr) return false;
+        op["page"] = page->index.json();
+        op["asset"] = taken->ref;
+        op["link"] = taken->link;
+    } else {
+        const auto held = book().smart_contents.find(id);
+        const core::Bytes bytes = held != book().smart_contents.end() && held->second ? render::smart::file_bytes(book(), *held->second) : nullptr;
+        if (!bytes) return false;
+        op["link"] = link_record(file, *bytes, session_->path());
+    }
+    if (!apply_ops(Json::array({op}))) return false;
+    check_links();
+    flash(QStringLiteral("「%1」に書き出して、リンクに変換しました").arg(QDir::toNativeSeparators(file)), 5000);
+    return true;
+}
+
+std::optional<std::pair<std::string, std::string>> MainWindow::read_linked(const QString& file, bool chosen_here) {
+    if (!chosen_here && !trusted_link(file)) {
+        if (!ask::question(this, QStringLiteral("リンクしたファイルを読み込む"),
+                           QStringLiteral("原稿に記録されたリンク先のファイルを読み込みます:\n%1\n\nこの場所のファイルを原稿に取り込んでよいですか").arg(file)))
+            return std::nullopt;
+    }
+    const std::optional<Taken> taken = take_picture(*this, *session_, file, false);
+    if (!taken) return std::nullopt;
+    trust_link(file);
+    return std::make_pair(taken->ref, taken->name.toStdString());
+}
+
+bool MainWindow::update_contents(bool all) {
+    if (!session_->path()) {
+        flash(QStringLiteral("原稿を保存してから更新します（ファイル → 別の場所に保存）"), 6000);
+        return false;
+    }
+    check_links();
+    // (each linked contents changed: one op on a smart object showing them — on a page, or inside other contents)
+    struct Wanted {
+        std::string contents;
+        QString file;
+        Json target;  // {"page", "id", "contents"?}
+    };
+    std::vector<Wanted> wanted;
+    const core::Document& b = book();
+    if (all) {
+        for (const auto& [id, status] : link_status_) {
+            if (status != "modified") continue;
+            const core::SmartContents* contents = b.smart_contents.contains(id) ? b.smart_contents.at(id).get() : nullptr;
+            const auto found = contents != nullptr && contents->link ? formats::smart_files::linked_file(*contents->link, session_->path()) : std::nullopt;
+            const auto shown = core::smart::showing(b, id);
+            if (!found || !shown) continue;
+            Json target{{"page", shown->page.json()}, {"id", shown->layer}};
+            if (shown->inside) target["contents"] = *shown->inside;
+            wanted.push_back(Wanted{id, qpath(*found), target});
+        }
+        if (wanted.empty()) {
+            flash(QStringLiteral("変更されたリンクのファイルはありません"), 4000);
+            return false;
+        }
+    } else {
+        const auto chosen = chosen_smart(*this);
+        if (!chosen) return false;
+        if (!chosen->contents->link) {
+            flash(QStringLiteral("このスマートオブジェクトはファイルにリンクしていません"), 4000);
+            return false;
+        }
+        const std::string status = link_status(chosen->id);
+        if (status == "missing") {
+            flash(QStringLiteral("リンクしたファイルが見つかりません（ファイルに再リンク… で場所を直せます）"), 6000, true);
+            return false;
+        }
+        if (status != "modified") {
+            flash(QStringLiteral("リンクしたファイルは変わっていません"), 4000);
+            return false;
+        }
+        const auto found = formats::smart_files::linked_file(*chosen->contents->link, session_->path());
+        if (!found) return false;
+        Json target{{"page", chosen->page->index.json()}, {"id", chosen->layer->id}};
+        if (contents_) target["contents"] = *contents_;
+        wanted.push_back(Wanted{chosen->id, qpath(*found), target});
+    }
+    Json ops = Json::array();
+    for (const Wanted& w : wanted) {
+        const auto read = read_linked(w.file, false);
+        if (!read) continue;
+        Json op{{"op", "smart_update"}, {"asset", read->first}};
+        op.update(w.target);
+        ops.push_back(op);
+    }
+    if (ops.empty()) return false;
+    // (the ops name where each smart object is: sent as they are, not into the contents of the tab in front)
+    const std::optional<std::string> tab = std::exchange(contents_, std::nullopt);
+    const bool ok = apply_ops(ops);
+    contents_ = tab;
+    show_page();
+    if (!ok) return false;
+    check_links();
+    flash(ops.size() == 1 ? QStringLiteral("リンクしたファイルの変更を取り込みました") : QStringLiteral("リンクしたファイル %1 件の変更を取り込みました").arg(ops.size()), 5000);
+    return true;
+}
+
+bool MainWindow::reveal_contents() {
+    const auto chosen = chosen_smart(*this);
+    if (!chosen) return false;
+    if (!chosen->contents->link) {
+        flash(QStringLiteral("埋め込みのスマートオブジェクトには、表示するファイルがありません"), 4000);
+        return false;
+    }
+    const auto found = formats::smart_files::linked_file(*chosen->contents->link, session_->path());
+    if (!found) {
+        flash(QStringLiteral("リンクしたファイルが見つかりません（ファイルに再リンク… で場所を直せます）"), 6000, true);
+        return false;
+    }
+    if (!ask::open_url(QUrl::fromLocalFile(QFileInfo(qpath(*found)).absolutePath()))) {
+        flash(QStringLiteral("フォルダーを開けませんでした"), 5000, true);
+        return false;
+    }
+    return true;
+}
+
+bool MainWindow::place_linked(std::optional<QString> chosen) {
+    if (current_page() == nullptr) return false;
+    const Asked asked = asking();
+    if (!session_->path()) {
+        flash(QStringLiteral("画像を置く前に、原稿を保存します（ファイル → 別の場所に保存）"), 6000);
+        return false;
+    }
+    const QString file = chosen ? *chosen : ask::open_path(this, QStringLiteral("リンクを配置"), QString::fromLatin1(kPictures));
+    if (file.isEmpty() || !still(asked)) return false;
+    if (!place_smart(file, false, true)) return false;
+    check_links();
+    return true;
+}
+
+bool MainWindow::package_book(std::optional<QString> folder) {
+    if (!session_->path()) {
+        flash(QStringLiteral("パッケージの前に、原稿を保存します（ファイル → 別の場所に保存）"), 6000);
+        return false;
+    }
+    const QString out = folder ? *folder : ask::existing_dir(this, QStringLiteral("パッケージを作るフォルダー"));
+    if (out.isEmpty()) return false;
+    session_->save_now();
+    if (!session_->wait_saved(std::chrono::milliseconds(30000)) || session_->unsaved()) {
+        flash(QStringLiteral("保存が終わらないため、パッケージを作れませんでした"), 6000, true);
+        return false;
+    }
+    Json made;
+    QGuiApplication::setOverrideCursor(Qt::WaitCursor);
+    try {
+        made = formats::smart_files::package(*session_->path(), fpath(out), session_->actor());
+    } catch (const std::exception& error) {
+        QGuiApplication::restoreOverrideCursor();
+        flash(QStringLiteral("パッケージを作れませんでした: %1").arg(wording::error(QString::fromUtf8(error.what()))), 6000, true);
+        return false;
+    }
+    QGuiApplication::restoreOverrideCursor();
+    flash(QStringLiteral("パッケージを作りました: %1（リンクしたファイル %2 件を Links に）")
+              .arg(QDir::toNativeSeparators(QString::fromStdString(made["book"].get<std::string>())))
+              .arg(made["relinked"].get<int>()),
+          6000);
+    return true;
+}
+
+std::string MainWindow::link_status(const std::string& contents_id) const {
+    const auto found = link_status_.find(contents_id);
+    return found == link_status_.end() ? std::string() : found->second;
+}
+
+void MainWindow::check_links() {
+    if (closed_ || !session_) return;
+    const core::Document& b = book();
+    std::map<std::string, std::string> now;
+    QStringList watched;
+    for (const std::string& id : core::smart::used_contents(b)) {
+        const auto found = b.smart_contents.find(id);
+        if (found == b.smart_contents.end() || !found->second || !found->second->link) continue;
+        const Json& link = *found->second->link;
+        const auto file = formats::smart_files::linked_file(link, session_->path());
+        if (!file) {
+            now[id] = "missing";
+            continue;
+        }
+        const QString at = qpath(*file);
+        watched << at;
+        now[id] = linked_sha(at) == core::py_str(core::py_get(link, "sha256", Json(""))) ? "ok" : "modified";
+    }
+    bool newly_modified = false;
+    for (const auto& [id, status] : now) {
+        if (status == "modified" && link_status(id) != "modified") newly_modified = true;
+    }
+    const bool differs = now != link_status_;
+    link_status_ = std::move(now);
+    // (a file replaced as it is saved leaves the watcher: each one looked for again)
+    const QStringList had = link_watcher_.files();
+    for (const QString& file : had) {
+        if (!watched.contains(file)) link_watcher_.removePath(file);
+    }
+    for (const QString& file : watched) {
+        if (!had.contains(file)) link_watcher_.addPath(file);
+    }
+    if (differs && layer_panel_ != nullptr) layer_panel_->refresh();
+    if (newly_modified) {
+        flash(QStringLiteral("リンクしたファイルが変更されました（レイヤー → スマートオブジェクト → 変更されたコンテンツを更新 で取り込めます）"), 6000);
+    }
 }
 
 }  // namespace genko::app

@@ -24,6 +24,9 @@ void register_ink_ops(core::OpRegistry& registry);
 // smart-objects@1 (PC3): smart_convert, smart_place, smart_profile, smart_copy, smart_transform, rasterize_layer, and the
 // later steps' ops refused until they are written (render/ops_smart.cpp)
 void register_smart_ops(core::OpRegistry& registry);
+// smart-objects@1 (PC3 A1): smart_replace, smart_relink, smart_update, smart_embed, smart_link, smart_to_page — a smart
+// object's contents and links (render/ops_smart_contents.cpp; register_smart_ops adds them)
+void register_smart_contents_ops(core::OpRegistry& registry);
 
 // channels@1, color-model@1 (the user's decision 2026-10-16: as PhotoCraft flattens): the layer merge_visible's flatten
 // keeps the page's pixels in (the first shown), and the page's pixel layers flattened into it (Genko's 画像をフラット化:

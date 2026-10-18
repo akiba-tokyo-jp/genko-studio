@@ -72,6 +72,7 @@ genko_library(genko_render
     smart.cpp
     smart_decode.cpp
     ops_smart.cpp
+    ops_smart_contents.cpp
     screentone.cpp
     text/fonts.cpp
     text/tategaki.cpp

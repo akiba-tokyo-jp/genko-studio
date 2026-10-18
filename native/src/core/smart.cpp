@@ -174,7 +174,13 @@ void check_contents(const std::string& id, const SmartContents& c) {
     if (const Json* intent = get(c.profile, "intent"); intent != nullptr && (!intent->is_string() || !in(kIntents, intent->get_ref<const std::string&>())))
         refuse(who + ": an unknown rendering intent");
     if (const Json* bpc = get(c.profile, "bpc"); bpc != nullptr && !bpc->is_boolean()) refuse(who + ": bpc is true or false");
-    if (c.link && !c.link->is_object()) refuse(who + ": its link is an object");
+    if (c.link) {
+        try {
+            check_link(*c.link);
+        } catch (const Error& error) {
+            refuse(who + ": " + error.what());
+        }
+    }
     if (c.psd && !c.psd->is_object()) refuse(who + ": its psd is an object");
 }
 
@@ -347,6 +353,51 @@ SmartContents contents_from_json(const Json& value) {
     return c;
 }
 
+void check_link(const Json& link) {
+    if (!link.is_object()) refuse("its link is {path, relative, sha256, bytes}");
+    for (const auto& [key, value] : link.items()) {
+        if (key != "path" && key != "relative" && key != "sha256" && key != "bytes") refuse("its link's " + py_repr_str(key) + " is not known to this build");
+    }
+    const Json* path = get(link, "path");
+    if (path == nullptr || !path->is_string() || path->get_ref<const std::string&>().empty()) refuse("its link names the file's path");
+    if (path->get_ref<const std::string&>().size() > kPathMax) refuse("its link's path is longer than 4096 bytes");
+    if (const Json* relative = get(link, "relative"); relative != nullptr && !relative->is_null()) {
+        if (!relative->is_string() || relative->get_ref<const std::string&>().size() > kPathMax) refuse("its link's relative path is text of at most 4096 bytes");
+    }
+    const Json* sha = get(link, "sha256");
+    if (sha == nullptr || !sha->is_string() || sha->get_ref<const std::string&>().size() != 64 || !is_hex(sha->get_ref<const std::string&>()))
+        refuse("its link's sha256 is 64 hex digits");
+    const Json* bytes = get(link, "bytes");
+    if (bytes == nullptr || !bytes->is_number_integer() || bytes->get<std::int64_t>() < 0) refuse("its link's bytes is the file's size");
+}
+
+Json link_json(const std::string& path, const std::optional<std::string>& relative, const std::string& sha256, std::int64_t bytes) {
+    Json out = Json::object();
+    out["path"] = path;
+    if (relative && !relative->empty()) out["relative"] = *relative;
+    out["sha256"] = sha256;
+    out["bytes"] = bytes;
+    return out;
+}
+
+std::optional<Showing> showing(const Document& doc, const std::string& id) {
+    const auto on = [&id](const Page& page) -> const Layer* {
+        for (const Layer& layer : page.layers) {
+            if (is_smart(layer) && contents_id(layer) == id) return &layer;
+        }
+        return nullptr;
+    };
+    for (std::size_t i = 0; i < doc.pages.size(); ++i) {
+        if (doc.is_deferred(i)) continue;
+        if (const Layer* layer = on(*doc.pages[i])) return Showing{std::nullopt, doc.pages[i]->index, layer->id};
+    }
+    for (const auto& [inside, contents] : doc.smart_contents) {
+        if (inside == id || !contents || !contents->page) continue;
+        if (const Layer* layer = on(*contents->page)) return Showing{inside, contents->page->index, layer->id};
+    }
+    return std::nullopt;
+}
+
 std::set<std::string> shown_on(const Page& page) {
     std::set<std::string> out;
     for (const Layer& layer : page.layers) {
@@ -354,6 +405,28 @@ std::set<std::string> shown_on(const Page& page) {
         if (const auto id = contents_id(layer)) out.insert(*id);
     }
     return out;
+}
+
+void renew_containers(Document& doc, const std::string& id) {
+    std::vector<std::string> containers;
+    for (const auto& [other, contents] : doc.smart_contents) {
+        if (other == id || !contents || !contents->page) continue;
+        std::set<std::string> seen;
+        const std::set<std::string> direct = shown_on(*contents->page);
+        std::vector<std::string> todo(direct.begin(), direct.end());
+        bool found = false;
+        while (!todo.empty() && !found) {
+            const std::string next = std::move(todo.back());
+            todo.pop_back();
+            found = next == id;
+            if (found || !seen.insert(next).second) continue;
+            const auto it = doc.smart_contents.find(next);
+            if (it == doc.smart_contents.end() || !it->second || !it->second->page) continue;
+            for (const std::string& inner : shown_on(*it->second->page)) todo.push_back(inner);
+        }
+        if (found) containers.push_back(other);
+    }
+    for (const std::string& other : containers) (void)doc.edit_contents(other);
 }
 
 std::vector<std::string> used_contents(const Document& doc) {

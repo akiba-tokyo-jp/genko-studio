@@ -23,6 +23,7 @@
 #include "render/ink.hpp"
 #include "render/not_yet_ported.hpp"
 #include "render/ops_registry.hpp"
+#include "render/ops_smart_parts.hpp"
 #include "render/page.hpp"
 #include "render/page_internal.hpp"
 #include "render/placed.hpp"
@@ -197,6 +198,20 @@ Json colour_use(Document& doc, const Json& op, const smart::FileInfo& info) {
     }
     return out;
 }
+
+void rasterize(Document& doc, std::size_t at, std::size_t i);
+
+}  // namespace
+
+// (PC3 A1's ops share these: render/ops_smart_parts.hpp)
+namespace smart_ops {
+std::pair<std::string, std::string> asset_file(const Document& doc, const std::string& ref) { return render::asset_file(doc, ref); }
+Json colour_use(Document& doc, const Json& op, const smart::FileInfo& info) { return render::colour_use(doc, op, info); }
+std::string fresh_contents_id(const Document& doc) { return render::fresh_contents_id(doc); }
+void rasterize(Document& doc, std::size_t at, std::size_t i) { render::rasterize(doc, at, i); }
+}  // namespace smart_ops
+
+namespace {
 
 // Where placed art goes (place_asset's rule): under the page's ink layer.
 std::size_t insert_under_ink(Page& page, Layer layer) {
@@ -386,10 +401,7 @@ void smart_place(OpContext& c) {
     contents->depth = info.depth;
     contents->mode = info.mode;
     contents->profile = colour_use(doc, c.op, info);
-    if (const Json* link = core::get(c.op, "link"); link != nullptr && !link->is_null()) {
-        if (!link->is_object()) throw OpError("link is {path, relative}");
-        contents->link = *link;
-    }
+    if (const Json* link = core::get(c.op, "link"); link != nullptr && !link->is_null()) contents->link = smart_ops::link_of(c.op, bytes);  // (PC3 A1)
     if (core::truthy_at(c.op, "data")) doc.smart_files[ref] = std::make_shared<const std::string>(std::move(bytes));
     const auto [cw, ch] = core::smart::size_mm(*contents);
 
@@ -730,8 +742,8 @@ void register_smart_ops(core::OpRegistry& registry) {
     registry.add("smart_copy", smart_copy);
     registry.add("smart_transform", smart_transform);
     registry.add("rasterize_layer", rasterize_layer);
-    // A1 (contents and links), A2 (smart filters), A4 (stack modes, a line's balloon and letters as pixels)
-    for (const char* op : {"smart_replace", "smart_relink", "smart_update", "smart_embed", "smart_link", "smart_to_page"}) registry.add(op, later(op, "A1"));
+    register_smart_contents_ops(registry);  // (A1: contents and links, render/ops_smart_contents.cpp)
+    // A2 (smart filters), A4 (stack modes, a line's balloon and letters as pixels)
     for (const char* op : {"smart_filter_add", "smart_filter_set", "smart_filter_move", "smart_filter_delete", "smart_filter_state"})
         registry.add(op, later(op, "A2"));
     for (const char* op : {"smart_stack", "rasterize_lines"}) registry.add(op, later(op, "A4"));

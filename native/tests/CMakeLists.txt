@@ -128,6 +128,9 @@ genko_test(test_smart_decode SOURCES unit/test_smart_decode.cpp DEPS genko_test_
 # converted and a file placed as place_asset places it draw as it did (the monochrome finish too), smaller and back the same,
 # a part the same as the whole.
 genko_test(test_smart_render SOURCES unit/test_smart_render.cpp DEPS genko_test_support genko_render_ops genko_formats LABELS unit TIMEOUT 900)
+# PC3 A1 (SPEC.md COLOR-05「中身とリンク」): smart_replace, smart_relink, smart_update, smart_embed, smart_link and
+# smart_to_page (the same pixels), a link's record, every page showing the contents asked its lock, nested contents drawn again.
+genko_test(test_smart_contents SOURCES unit/test_smart_contents.cpp DEPS genko_test_support genko_render_ops LABELS unit TIMEOUT 600)
 
 # core/pyre's own bounds (Python 3.12's re, ported; SPEC COMP-01a): a search that backtracks without end stopped when its
 # steps are spent, groups more than 200 deep refused, replace_text refused without a change; without Python.
@@ -303,6 +306,10 @@ genko_test(test_contract_channels SOURCES contract/test_contract_channels.cpp DE
 # contents' files, the journal; a 16-bit file drawn with its bits; import_pages bringing contents; panels and checks.
 genko_test(test_contract_smart SOURCES contract/test_contract_smart.cpp DEPS genko_test_support genko_render_ops genko_formats
            LABELS contract TIMEOUT 900)
+# PC3 A1 through the command line: a linked file placed, `genko smart --links` (ok, modified, missing), updated, relinked,
+# embedded, drawn from its copy when the file is gone; contents written out (a page's PSD read by psd-tools); `genko package`.
+genko_test(test_contract_smart_links SOURCES contract/test_contract_smart_links.cpp DEPS genko_test_support genko_render_ops genko_formats
+           LABELS contract TIMEOUT 900)
 genko_test(test_contract_image_ops SOURCES contract/test_contract_image_ops.cpp DEPS genko_test_support genko_render
            LABELS contract TIMEOUT 900)
 
@@ -428,6 +435,10 @@ if(GENKO_BUILD_APP)
   # PC3 A0 (smart-objects@1): レイヤー → スマートオブジェクト・ラスタライズ, the layer panel, 埋め込みを配置…, a large file on a
   # 16-bit page, the 属性 panel's part (its size, its colours).
   genko_test(test_gui_smart SOURCES gui/test_gui_smart.cpp DEPS genko_app genko_test_support ZLIB::ZLIB GUI TIMEOUT 600)
+  # PC3 A1: コンテンツを編集 in a tab of the book (the parent page follows, undone, what the tab cannot use greyed), a
+  # picture made a page first, the linked files (placed, marked, updated after asking where an agent wrote it), replaced,
+  # written out, embedded and linked, packed; a candidate adopted over a picture's smart object said.
+  genko_test(test_gui_smart_contents SOURCES gui/test_gui_smart_contents.cpp DEPS genko_app genko_test_support GUI TIMEOUT 600)
   # M7 (the ledger counted against the C++ tree): the checks of Python's window tests no C++ test made before
   genko_test(test_gui_ledger_a SOURCES gui/test_gui_ledger_a.cpp DEPS genko_app genko_test_support GUI TIMEOUT 900)
   genko_test(test_gui_ledger_c SOURCES gui/test_gui_ledger_c.cpp DEPS genko_app genko_test_support GUI TIMEOUT 900)
