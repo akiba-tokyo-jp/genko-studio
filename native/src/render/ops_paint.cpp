@@ -426,6 +426,7 @@ void liquify(OpContext& c) {
         Layer pixels_only = layer;
         pixels_only.strokes = core::empty_strokes();
         pixels_only.mask.reset();
+        pixels_only.vector_mask.reset();  // (vector@1, PC3 C-a)
         Image picture = layer_image(page, pixels_only, dpi, &c.doc);
         if (picture.getbbox()) {
             const double scale = dpi / 25.4;

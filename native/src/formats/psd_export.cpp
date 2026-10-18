@@ -5,6 +5,7 @@
 // are Photoshop's placed layers of the files they show (PC3 A3, the user's decision 3: PlacedLayers).
 
 #include <algorithm>
+#include <array>
 #include <bit>
 #include <cmath>
 #include <functional>
@@ -30,6 +31,7 @@
 #include "render/not_yet_ported.hpp"
 #include "render/page.hpp"
 #include "render/psd_smart.hpp"
+#include "render/psd_paths.hpp"
 #include "render/psd_text.hpp"
 #include "render/smart.hpp"
 #include "render/text/balloons.hpp"
@@ -201,8 +203,20 @@ public:
         return placed_ && layer.smart != nullptr ? placed_(*layer.smart) : std::string();
     }
 
+    // vector@1 (PC3 C-a): the page's paper (mm), a vector mask's vmsk block being in fractions of it, and a layer's vector
+    // mask as that block ("" for none: render/psd_paths)
+    void paper(double width_mm, double height_mm) { paper_ = {width_mm, height_mm}; }
+    std::string vector_block(const std::optional<core::vector::VectorMask>& mask) const {
+        if (!mask) return {};
+        std::string payload = render::psd_paths::vmsk(*mask, paper_[0], paper_[1]);
+        payload.append((4 - payload.size() % 4) % 4, '\0');
+        std::string out = "8BIMvmsk";
+        put_u32(out, u32_of(payload.size()));
+        return out + payload;
+    }
+
     void add(render::PageLayer&& layer) {
-        const std::string blocks = placed_blocks(layer);
+        const std::string blocks = vector_block(layer.vector_mask) + placed_blocks(layer);
         const Image rgba = layer.image.mode() == "RGBA" ? std::move(layer.image) : layer.image.convert("RGBA");
         if (ink_) {  // (its colours by the page's rules)
             add_inks(layer.name, render::ink_picture(rgba, *ink_).values, ink_->space, ink_->depth, layer.settings ? layer.opacity : 1.0,
@@ -470,6 +484,7 @@ private:
     }
 
     render::Size size_;
+    std::array<double, 2> paper_{0.0, 0.0};
     std::optional<core::PageColor> ink_;
     std::optional<RgbOut> rgb_;
     std::function<std::string(const core::Layer&)> placed_;
@@ -664,7 +679,10 @@ private:
 std::function<void(const core::Layer&)> adjustments(Records& records, const core::Page& page, render::Size size, const core::Document& doc) {
     return [&records, &page, size, &doc](const core::Layer& layer) {
         std::vector<std::string> notes;
-        if (const auto made = psd_adjust_layer(layer, page, size, notes, &doc)) records.add_adjustment(*made);
+        if (auto made = psd_adjust_layer(layer, page, size, notes, &doc)) {
+            made->blocks += records.vector_block(layer.vector_mask);  // (vector@1, PC3 C-a)
+            records.add_adjustment(*made);
+        }
     };
 }
 
@@ -1085,10 +1103,21 @@ std::vector<core::Channel> psd_order(const std::vector<core::Channel>& channels)
     return out;
 }
 
+// vector@1 (PC3 C-a): the page's path resources (its saved paths, work path, clipping path: render/psd_paths) after the
+// resources, the resources' length again.
+std::string with_paths(const std::string& sized_resources, const core::Page& page) {
+    const std::string paths = render::psd_paths::resources(page);
+    if (paths.empty()) return sized_resources;
+    const std::string blocks = sized_resources.substr(4) + paths;
+    std::string out;
+    put_u32(out, u32_of(blocks.size()));
+    return out + blocks;
+}
+
 // `first`: the file's channels before the page's (its colour planes; 0 when `page`'s list holds them, a multichannel
 // page's plates).
 std::string with_channels(const std::string& sized_resources, const core::Page& page, unsigned first) {
-    if (page.channels.empty()) return sized_resources;
+    if (page.channels.empty()) return with_paths(sized_resources, page);
     const std::vector<core::Channel> ordered = psd_order(page.channels);
     std::string names, unicode, display;
     put_u32(display, 1);
@@ -1119,6 +1148,7 @@ std::string with_channels(const std::string& sized_resources, const core::Page& 
         put_u8(info, 0);
         blocks += image_resource(1022, info);
     }
+    blocks += render::psd_paths::resources(page);  // (vector@1, PC3 C-a)
     std::string out;
     put_u32(out, u32_of(blocks.size()));
     return out + blocks;
@@ -1175,11 +1205,12 @@ std::string page_psd_inks(const core::Document& episode, const core::Page& page,
     Records records(size, color);
     PlacedLayers placed(episode, dpi, depth);  // (PC3 A3)
     records.placed([&placed](const core::Layer& layer) { return placed.blocks(layer); });
+    records.paper(page.spec.width_mm.value(), page.spec.height_mm.value());
     const auto each = [&](render::PageLayer&& layer) {
         const std::vector<double> values = layer.inks ? *layer.inks : render::ink_picture(layer.image, color).values;
         records.add_inks(layer.name, values, color.space, color.depth, layer.settings ? layer.opacity : 1.0,
                          layer.settings ? layer.blend : std::string("normal"), layer.settings && layer.clip, layer.mask ? &*layer.mask : nullptr,
-                         records.placed_blocks(layer));
+                         records.vector_block(layer.vector_mask) + records.placed_blocks(layer));
     };
     const std::function<void(const core::Layer&)> adjust_layers = adjustments(records, page, size, episode);
     if (text.editable) {  // (PSD-01: each placed line's layers made here)
@@ -1248,6 +1279,7 @@ std::string page_psd_rgb(const core::Document& episode, const core::Page& page, 
     Records records(size, std::nullopt, RgbOut{depth, render::RgbSpace::of(page)});
     PlacedLayers placed(episode, dpi, depth_of_contents);  // (PC3 A3)
     records.placed([&placed](const core::Layer& layer) { return placed.blocks(layer); });
+    records.paper(page.spec.width_mm.value(), page.spec.height_mm.value());
     const auto each = [&](render::PageLayer&& layer) { records.add(std::move(layer)); };
     const std::function<void(const core::Layer&)> adjust_layers = adjustments(records, page, size, episode);
     if (text.editable) {  // (PSD-01: each placed line's layers made here)
@@ -1316,7 +1348,7 @@ std::string page_psd_flat(const core::Document& episode, const core::Page& page,
         put_u16(body, 1);
         put_u16(body, 0);
         put_u32(body, 0);  // (no colour mode data)
-        body += resources(dpi);
+        body += with_paths(resources(dpi), page);
         put_u32(body, 0);  // (no layers)
         put_u16(body, 0);  // (raw)
         const std::size_t row = (std::size_t(merged.width) + 7) / 8;
@@ -1342,7 +1374,7 @@ std::string page_psd_flat(const core::Document& episode, const core::Page& page,
         body += data;
         std::string count, transparent;
         put_u16(count, static_cast<std::uint32_t>(table.colors.size()));
-        std::string blocks = resources(dpi).substr(4) + image_resource(1046, count);
+        std::string blocks = resources(dpi).substr(4) + image_resource(1046, count) + render::psd_paths::resources(page);
         if (table.transparent) {
             put_u16(transparent, static_cast<std::uint32_t>(*table.transparent));
             blocks += image_resource(1047, transparent);
@@ -1426,6 +1458,7 @@ std::string page_psd_bytes(const core::Document& episode, const core::Page& page
     Records records(rgb.size());
     PlacedLayers placed(episode, dpi, depth);  // (PC3 A3)
     records.placed([&placed](const core::Layer& layer) { return placed.blocks(layer); });
+    records.paper(page.spec.width_mm.value(), page.spec.height_mm.value());
     const auto each = [&](render::PageLayer&& layer) { records.add(std::move(layer)); };
     const std::function<void(const core::Layer&)> adjust_layers = adjustments(records, page, rgb.size(), episode);
     if (text.editable) {  // (PSD-01: each placed line's layers made here)
@@ -1480,6 +1513,7 @@ std::string contents_psd_bytes(const core::Document& episode, const core::Page& 
     Records records(rgb.size());
     PlacedLayers placed(episode, dpi, depth);
     records.placed([&placed](const core::Layer& layer) { return placed.blocks(layer); });
+    records.paper(page.spec.width_mm.value(), page.spec.height_mm.value());
     const auto each = [&](render::PageLayer&& layer) {
         if (layer.name == "紙" || layer.name == "コマ枠" || layer.name == "ノンブル") return;  // (the contents' own: no paper, borders or nombre)
         records.add(std::move(layer));

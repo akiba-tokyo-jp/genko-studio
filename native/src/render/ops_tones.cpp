@@ -188,6 +188,7 @@ Image fill_reference(const core::Document& doc, const core::Page& page, const co
             core::Layer lines = *layer;
             lines.raster_png.reset();
             lines.mask.reset();
+            lines.vector_mask.reset();  // (vector@1, PC3 C-a)
             lines.effect.reset();
             lines.lock_alpha = false;
             lines.kind = core::LayerKind::Strokes;

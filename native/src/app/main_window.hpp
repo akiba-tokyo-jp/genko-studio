@@ -49,6 +49,7 @@ namespace genko::app {
 
 class BrushPanel;
 class ChannelPanel;
+class PathsPanel;
 class HistogramPanel;
 class InfoPanel;
 class CheckPanel;
@@ -188,6 +189,21 @@ public:
         std::set<std::string> hidden_spots;
     };
     ChannelPanel* channel_panel() const { return channel_panel_; }
+    // vector@1 (PC3 C-a, app/main_window_paths.cpp): the Paths panel (ウィンドウ → パス) and the paths' commands — the target
+    // path (the panel's row: PageCanvas::target_path) filled, stroked, made the selection, a work path made from the
+    // selection, the vector mask of the layer drawn on made from it; each an op through apply_ops.
+    PathsPanel* paths_panel() const { return paths_panel_; }
+    QDockWidget* paths_dock() const { return paths_dock_; }
+    void path_fill();
+    void path_stroke();
+    void path_to_selection();
+    bool work_path_from_selection(std::optional<double> tolerance_mm = std::nullopt);
+    void line_work_path();
+    // ("reveal_all", "hide_all", "current_path", "delete", "enabled", "linked", "rasterize": レイヤー → ベクトルマスク's)
+    void vector_mask_command(const std::string& what);
+    bool export_paths_ai(std::optional<QString> file = std::nullopt);
+    // The target path as an op names it: {"name": "work" | a saved path's name} or {"layer": the layer whose vector mask it is}.
+    core::Json target_path_terms() const;
     // What a conversion that flattens a page says it does to its hidden layers (画像をフラット化's words: the hidden
     // drawing layers discarded — their count when there are any —, the name, draft and frame layers kept).
     static QString flatten_discards(int discarded);
@@ -497,6 +513,14 @@ private:
     // (PC3's later steps' commands in their places, not usable yet).
     void build_smart_actions();
     void build_smart_menus(QMenu* layers, QMenu* file);
+    // vector@1 (PC3 C-a, app/main_window_paths.cpp): the path tools and the paths' commands, their menus (ツール, 選択範囲 →
+    // 作業用パスを作成…, レイヤー → ベクトルマスク and ラスタライズ → ベクトルマスク, ページ → 台詞 → 作業用パスを作成, 表示 →
+    // ターゲットパス, ファイル → パスを Illustrator へ…) and the Paths panel.
+    void build_path_actions();
+    void build_path_menus(QMenu* file, QMenu* view, QMenu* tools, QMenu* layers);
+    void build_path_dock();
+    void path_drawn(const core::Json& subpath);
+    void path_edited(const core::Json& path);
     // PC2a: the 色調補正 and 属性 panels (app/adjust_panels.cpp), listed in ウィンドウ.
     void build_adjust_docks();
     void connect_session();
@@ -776,6 +800,8 @@ private:
     std::shared_ptr<Session> session_;
     std::map<std::string, ChannelView> channel_views_;  // (by page id)
     ChannelPanel* channel_panel_ = nullptr;
+    PathsPanel* paths_panel_ = nullptr;  // (vector@1, PC3 C-a)
+    QDockWidget* paths_dock_ = nullptr;
     QDockWidget* channels_dock_ = nullptr;
     std::vector<Document> documents_;
     int doc_ = 0;

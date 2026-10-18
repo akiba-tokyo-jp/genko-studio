@@ -98,6 +98,13 @@ genko_library(genko_render
     select_color.cpp
     ops_quick_mask.cpp
     erase_magic.cpp
+    # PC3 C-a (パスとベクトルマスク)
+    path_trace.cpp
+    path_areas.cpp
+    vector_masks.cpp
+    psd_paths.cpp
+    path_info.cpp
+    ops_paths.cpp
     ${GENKO_MATERIAL_RESOURCES}
     ${GENKO_TEXT_RESOURCES}
   PUBLIC_DEPS genko_core Qt6::Core

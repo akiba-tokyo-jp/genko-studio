@@ -79,6 +79,10 @@ const std::map<std::string, const char*>& names() {
         {"smart_stack", "スタックモードを変えた"}, {"rasterize_lines", "台詞をラスタライズした"},
         // (PC3 B1: render/ops_quick_mask, render/erase_magic)
         {"quick_mask", "クイックマスクを切り替えた"}, {"magic_erase", "マジック消しゴムで消した"},
+        // (vector@1, PC3 C-a: render/ops_paths)
+        {"set_path", "パスを描いた"}, {"delete_path", "パスを削除した"}, {"rename_path", "パスを保存した"},
+        {"make_work_path", "作業用パスを作成した"}, {"text_to_path", "文字から作業用パスを作成した"},
+        {"stroke_path", "パスの境界線を描いた"}, {"set_vector_mask", "ベクトルマスクを変えた"},
     };
     return table;
 }

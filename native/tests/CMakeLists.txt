@@ -345,6 +345,11 @@ genko_test(test_contract_smart_links SOURCES contract/test_contract_smart_links.
 # done again), the Quick Mask in a PSD (resource 1022, read back by psd-tools and this build's reader), magic_erase.
 genko_test(test_contract_select SOURCES contract/test_contract_select.cpp DEPS genko_test_support genko_render
            LABELS contract TIMEOUT 900)
+# PC3 C-a (vector@1): a page's paths and a layer's vector mask — set, saved, the path kinds of an area, fill (its blend),
+# stroke, work paths from an area and from letters, the vector mask drawn on every kind of page, rasterized, merged;
+# through the command line saved, undone, inspect --paths, export --format ai; a PSD's paths and vmsk (psd-tools, import_psd).
+genko_test(test_contract_paths SOURCES contract/test_contract_paths.cpp DEPS genko_test_support genko_render_ops genko_formats
+           LABELS contract TIMEOUT 900)
 genko_test(test_contract_image_ops SOURCES contract/test_contract_image_ops.cpp DEPS genko_test_support genko_render
            LABELS contract TIMEOUT 900)
 
@@ -474,6 +479,9 @@ if(GENKO_BUILD_APP)
   # picture made a page first, the linked files (placed, marked, updated after asking where an agent wrote it), replaced,
   # written out, embedded and linked, packed; a candidate adopted over a picture's smart object said.
   genko_test(test_gui_smart_contents SOURCES gui/test_gui_smart_contents.cpp DEPS genko_app genko_test_support GUI TIMEOUT 600)
+  # PC3 C-a (vector@1): ペンツール・曲線ペンツール・パス選択ツール on the canvas, the パス panel's buttons, レイヤー →
+  # ベクトルマスク and ラスタライズ, 選択範囲 → 作業用パスを作成…, the target path shown, パスを Illustrator へ….
+  genko_test(test_gui_paths SOURCES gui/test_gui_paths.cpp DEPS genko_app genko_test_support GUI TIMEOUT 600)
   # M7 (the ledger counted against the C++ tree): the checks of Python's window tests no C++ test made before
   genko_test(test_gui_ledger_a SOURCES gui/test_gui_ledger_a.cpp DEPS genko_app genko_test_support GUI TIMEOUT 900)
   genko_test(test_gui_ledger_c SOURCES gui/test_gui_ledger_c.cpp DEPS genko_app genko_test_support GUI TIMEOUT 900)

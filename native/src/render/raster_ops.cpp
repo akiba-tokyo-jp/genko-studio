@@ -64,6 +64,7 @@
 #include "render/proof.hpp"
 #include "render/op_limits.hpp"
 #include "render/ops_adjust.hpp"
+#include "render/ops_paths.hpp"
 #include "render/ops_registry.hpp"
 #include "render/page.hpp"
 #include "render/color_canvas.hpp"
@@ -73,6 +74,7 @@
 #include "render/raster.hpp"
 #include "render/selection.hpp"
 #include "render/stroke.hpp"
+#include "render/vector_masks.hpp"
 #include "render/vectorize.hpp"
 #include "render/warp.hpp"
 
@@ -297,6 +299,12 @@ void fill_area(OpContext& c) {
     Page& page = doc.edit_page(at);
     const std::size_t ti = raster_paint_target(page, op);
     const Json area = core::op_area(op);
+    // (vector@1, PC3 C-a: a blend — Fill Path's mode — paints the paint layer's own pixels; normal, as before, a picture)
+    if (const Json* blend = core::get(op, "blend"); blend != nullptr && !blend->is_null() && *blend != Json("normal")) {
+        if (!blend->is_string()) throw OpError("blend is one of the blends (normal, multiply, screen, …)");
+        fill_area_blended(c, at, page.layers[ti].id, area, blend->get<std::string>(), rgb_of(op, doc), float_at(op, "opacity", 1.0));
+        return;
+    }
     std::optional<core::Patch> patch;
     if (core::truthy_at(area, "poly")) {
         const std::vector<std::int64_t> rgb = rgb_of(op, doc);
@@ -752,6 +760,7 @@ void into_pixels(const Page& page, Layer& target, const Image& picture) {
     target.strokes = core::empty_strokes();
     target.patches.clear();
     target.mask.reset();
+    target.vector_mask.reset();  // (vector@1, PC3 C-a: drawn in, as the mask)
     target.kind = LayerKind::Raster;
     target.fill.reset();
     target.adjust.reset();
@@ -828,6 +837,7 @@ bool merge_tail_clipped(const Page& page, const std::vector<std::size_t>& layers
 }
 void into_color_pixels(Layer& target, std::pair<std::string, bool> pixels) {
     target.strokes = core::empty_strokes(); target.patches.clear(); target.mask.reset();
+    target.vector_mask.reset();  // (vector@1, PC3 C-a: drawn in, as the mask)
     target.kind = pixels.first.empty() ? LayerKind::Strokes : LayerKind::Raster;
     target.raster_png.reset(); target.asset.reset();
     target.fill.reset(); target.adjust.reset(); target.effect.reset(); target.fill_rgb.reset();
@@ -895,12 +905,14 @@ std::pair<std::string, bool> composite_color_layers(const Document& doc, const P
                 std::optional<Image> mask;
                 if (layer.mask && layer.mask->enabled && layer.mask->png && !layer.mask->png->empty())
                     mask = merge_mask(page, *layer.mask, size, Resample::Bicubic);
+                mask = vector_masks::with_vector_mask(page, layer, size, all, std::move(mask));  // (vector@1, PC3 C-a)
                 out.adjust(*correction, layer.opacity, layer.clip, mask ? &*mask : nullptr, blend);
                 continue;
             }
             std::optional<Image> mask;
             if (layer.mask && layer.mask->enabled && layer.mask->png)
                 mask = merge_mask(page, *layer.mask, size, Resample::Bilinear);
+            mask = vector_masks::with_vector_mask(page, layer, size, all, std::move(mask));  // (vector@1, PC3 C-a)
             const auto exposure = core::Exposure::parse(*layer.adjust);
             if (layer.opacity > 0 && (exposure.stops != 0 || exposure.offset != 0 || exposure.gamma != 1) && !out.is_opaque())
                 throw NotYetPorted("high-precision merge adjustment depends on external background");
@@ -923,6 +935,7 @@ std::pair<std::string, bool> composite_color_layers(const Document& doc, const P
             std::optional<Image> shown;  // (its mask, as the page shows it)
             if (layer.mask && layer.mask->enabled && layer.mask->png && !layer.mask->png->empty())
                 shown = merge_mask(page, *layer.mask, size, Resample::Bilinear);
+            shown = vector_masks::with_vector_mask(page, layer, size, all, std::move(shown));  // (vector@1, PC3 C-a)
             out.blend(pixels, size, all, layer.opacity, layer.clip, layer.blend, shown ? &*shown : nullptr);
         } else {
             auto picture = drawable_layer_image(page, layer, kWorkingDpi, &doc, false, true);
@@ -1277,7 +1290,7 @@ void merge_down(OpContext& c) {
                             [](const Layer& l) { return l.raster_png && !l.raster_png->empty(); }(lower);
     const std::string blend = upper.blend.empty() ? "normal" : upper.blend;
     const bool plain = upper.kind == LayerKind::Strokes && lower.kind == LayerKind::Strokes && !has_raster && !upper.mask &&
-                       !lower.mask && blend == "normal" && !upper.clip && upper.opacity >= 1 && upper.panel_clip == lower.panel_clip &&
+                       !lower.mask && !upper.vector_mask && !lower.vector_mask && blend == "normal" && !upper.clip && upper.opacity >= 1 && upper.panel_clip == lower.panel_clip &&
                        upper.panel_each == lower.panel_each && upper.color == lower.color;
     if (plain) {
         Layer& into = page.layers[li];
@@ -1302,6 +1315,7 @@ void merge_down(OpContext& c) {
         into.strokes = core::empty_strokes();
         into.patches.clear();
         into.mask.reset();
+        into.vector_mask.reset();  // (vector@1, PC3 C-a: drawn in, as the mask)
         into.kind = LayerKind::Raster;
         raster::save_raster(page, into, merged);
     }
@@ -1339,7 +1353,7 @@ void convert_layer(OpContext& c) {
             const auto* preserve=core::get(op,"preserve_precision");
             if(!preserve || !preserve->is_boolean() || !preserve->get<bool>())
                 throw OpError("high-precision vector conversion requires preserve_precision: true");
-            if(layer.mask || layer.effect || layer.screen || layer.color || !layer.patches.empty() || layer.stroke_count() || layer.panel_each)
+            if(layer.mask || layer.vector_mask || layer.effect || layer.screen || layer.color || !layer.patches.empty() || layer.stroke_count() || layer.panel_each)
                 throw OpError("high-precision vector source style is not supported yet");
             const auto min_mm = core::finite_float(core::get_or(op,"min_mm",Json(.8)),"min_mm");
             const Image picture = layer_image(page,layer,kWorkingDpi,&doc);

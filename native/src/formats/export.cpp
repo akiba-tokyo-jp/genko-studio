@@ -29,6 +29,7 @@
 #include "render/ink_canvas.hpp"
 #include "render/page.hpp"
 #include "render/tones.hpp"
+#include "render/vector_masks.hpp"
 #include "render/zip.hpp"
 #include "storage/fsutil.hpp"
 
@@ -516,6 +517,11 @@ std::vector<fs::path> export_layers(const core::Document& episode, const fs::pat
             if (layer.mask) {  // (the layer's mask applies: a PNG has no mask of its own)
                 image = image.convert("RGBA");
                 image.putalpha(render::chops::multiply(image.getchannel("A"), layer.mask->convert("L").resize(image.size())));
+            }
+            if (layer.vector_mask && layer.vector_mask->enabled) {  // (vector@1, PC3 C-a: its vector mask too)
+                image = image.convert("RGBA");
+                const render::Box whole{0, 0, image.width(), image.height()};
+                image.putalpha(render::chops::multiply(image.getchannel("A"), render::vector_masks::shown(page, *layer.vector_mask, image.size(), whole)));
             }
             const fs::path path = detail::join(folder, detail::padded(core::Num(n), 2) + "_" + safe_name(layer.name, "layer") + ".png");
             output.put(path, png_bytes(crop_to(image, page, area, dpi), PngSave{dpi_pair(dpi), {}, false}));

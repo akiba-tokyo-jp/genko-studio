@@ -370,8 +370,9 @@ private slots:
         }
         // (the layer's own alpha: its mask, hiding at a density of 0.25 now, not applied)
         QCOMPARE(static_cast<int>(render::selection::to_mask(Json{{"transparency", "paint0000001"}}, doc.page(0), &doc).getpixel(300, 300)[0]), 255);
+        // (PC3 C-a wrote the path kinds: a page without a work path refuses one by its words)
         QVERIFY(refusal(doc, Json{{"op", "fill_area"}, {"page", 1}, {"layer_id", "paint0000001"}, {"area", Json{{"path_name", "work"}}}, {"rgb", Json::array({1, 2, 3})}})
-                    .starts_with("not_yet_ported"));
+                    .find("the page has no work path") != std::string::npos);
         // (a transparency area through the bus: the fill's patch covers grey where the alpha is)
         const core::Document filled = run_ops(doc, Json::array({Json{{"op", "fill_area"}, {"page", 1}, {"layer_id", "paint0000001"},
                                                                      {"area", Json{{"transparency", "paint0000001"}}}, {"rgb", Json::array({255, 0, 0})}}}))

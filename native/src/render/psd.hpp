@@ -170,6 +170,16 @@ public:
     // core::Error("format") for a block that cannot be read.
     std::optional<TextLayer> text(const Layer& layer) const;
     std::optional<Stroke> stroke(const Layer& layer) const;
+    // vector@1 (PC3 C-a, render/psd_paths): a layer's vmsk (or vsms) block's payload — its vector mask —, nothing for a layer
+    // without one; and the file's path resources (its saved paths 2000–2997 with their names, its work path 1025, its
+    // clipping path 2999), in the file's order.
+    std::optional<std::string_view> vector_mask(const Layer& layer) const;
+    struct PathResource {
+        unsigned id = 0;
+        std::string name;  // (the resource's Pascal name, as its bytes)
+        std::string data;
+    };
+    const std::vector<PathResource>& path_resources() const { return path_resources_; }
 
     struct ChannelRef {
         int id = 0;
@@ -202,6 +212,7 @@ public:
         std::uint64_t cged_at = 0, cged_size = 0;  // (its CgEd block: brightness_contrast's modern settings)
         // (PC3 A3) its placed layer blocks' payloads: SoLd, SoLE, PlLd (size 0: none)
         std::uint64_t sold_at = 0, sold_size = 0, sole_at = 0, sole_size = 0, plld_at = 0, plld_size = 0;
+        std::uint64_t vmsk_at = 0, vmsk_size = 0;  // (vector@1, PC3 C-a: its vmsk or vsms block — its vector mask)
         const ChannelRef* channel(int id) const;
     };
 
@@ -222,6 +233,7 @@ private:
     bool real_merged_ = true;      // (1057)
     std::vector<std::pair<std::uint64_t, std::uint64_t>> linked_blocks_;  // (PC3 A3: the global lnk2, lnk3, lnkD: where, how long)
     std::optional<unsigned> quick_mask_;  // (1022: the Quick Mask's channel)
+    std::vector<PathResource> path_resources_;  // (vector@1: 2000–2997, 1025, 2999)
     std::uint64_t merged_at_ = 0;
     Limits limits_{};
     std::vector<Record> records_;

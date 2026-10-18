@@ -386,6 +386,10 @@ void PageCanvas::mouseDoubleClickEvent(QMouseEvent* event) {
         finish_shape();
         return;
     }
+    if ((tool_ == QLatin1String("pathpen") || tool_ == QLatin1String("curvepen")) && pen_drawing()) {
+        finish_pen(false);  // (the pen's subpath ends open: canvas_pen.cpp)
+        return;
+    }
     if (tool_ == QLatin1String("ruler")) {
         finish_curve();
         return;
@@ -470,6 +474,10 @@ void PageCanvas::hold_modifier(const QString& key, bool down) {
     if ((base == QLatin1String("zoom") || base == QLatin1String("marquee")) && key == QLatin1String("alt")) {
         tool.clear();  // (Alt takes away from the selection there, and zooms out with the magnifier)
     }
+    if ((base == QLatin1String("pathpen") || base == QLatin1String("curvepen") || base == QLatin1String("pathselect")) &&
+        (key == QLatin1String("alt") || key == QLatin1String("ctrl"))) {
+        tool.clear();  // (the path tools' own: Alt breaks a handle, puts a corner, copies)
+    }
     if (const auto own_tool = tool_modifiers.find(base); own_tool != tool_modifiers.end()) {
         // (this tool's own setting wins; Shift switches only when a tool says so)
         if (const auto own = own_tool->second.find(key); own != own_tool->second.end() && !own->second.isEmpty()) {
@@ -527,6 +535,12 @@ void PageCanvas::keyPressEvent(QKeyEvent* event) {
         return;
     }
     if (event->key() == Qt::Key_Escape && cancel_shape()) return;
+    if (pen_drawing() && (event->key() == Qt::Key_Return || event->key() == Qt::Key_Enter || event->key() == Qt::Key_Escape)) {
+        finish_pen(false);  // (the pen's subpath ends open)
+        return;
+    }
+    if (pen_drawing() && (event->key() == Qt::Key_Backspace || event->key() == Qt::Key_Delete) && pen_back()) return;
+    if (tool_ == QLatin1String("pathselect") && (event->key() == Qt::Key_Delete || event->key() == Qt::Key_Backspace) && path_delete()) return;
     if (tool_ == QLatin1String("vector") && (event->key() == Qt::Key_Delete || event->key() == Qt::Key_Backspace) && vector_delete()) return;
     if (tool_ == QLatin1String("ruler") && (event->key() == Qt::Key_Return || event->key() == Qt::Key_Enter)) {
         finish_curve();

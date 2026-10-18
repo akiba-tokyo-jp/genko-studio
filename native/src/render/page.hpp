@@ -179,6 +179,9 @@ struct PageLayer {
     // layer of its contents.
     std::string id;
     const core::Layer* smart = nullptr;
+    // vector@1 (PC3 C-a): the layer's vector mask (a PSD writes it as its vmsk block; a picture of the layer lays it on its
+    // alpha when it is on, as the mask)
+    std::optional<core::vector::VectorMask> vector_mask;
 };
 
 // psd.page_layers(page, episode, dpi), bottom to top: the paper, the page's fills, each visible exported pixel layer

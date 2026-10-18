@@ -6025,9 +6025,15 @@
         "alternate_menus": []
       },
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "未着手",
+      "implementation_status": "実装済み（PC3 C-a、未統合）",
       "acceptance_status": "未実施",
-      "evidence": [],
+      "evidence": [
+        "native/src/render/path_info.cpp",
+        "native/src/api/cli.cpp",
+        "native/src/app/main_window_paths.cpp",
+        "native/tests/contract/test_contract_paths.cpp",
+        "native/tests/gui/test_gui_paths.cpp"
+      ],
       "pc0": {
         "date": "2026-10-16",
         "cpp_base": "962faa4",
@@ -21018,9 +21024,15 @@
         "alternate_menus": []
       },
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "未着手",
+      "implementation_status": "実装済み（PC3 C-a、未統合）",
       "acceptance_status": "未実施",
-      "evidence": [],
+      "evidence": [
+        "native/src/render/vector_masks.cpp",
+        "native/src/render/ops_smart.cpp",
+        "native/src/app/main_window_paths.cpp",
+        "native/tests/contract/test_contract_paths.cpp",
+        "native/tests/gui/test_gui_paths.cpp"
+      ],
       "pc0": {
         "date": "2026-10-16",
         "cpp_base": "962faa4",
@@ -23311,9 +23323,19 @@
       },
       "upstream_menu": null,
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "未着手",
+      "implementation_status": "実装済み（PC3 C-a、未統合）",
       "acceptance_status": "未実施",
-      "evidence": [],
+      "evidence": [
+        "native/src/render/ops_paths.cpp",
+        "native/src/render/vector_masks.cpp",
+        "native/src/render/page.cpp",
+        "native/src/app/main_window_paths.cpp",
+        "native/tests/contract/test_contract_paths.cpp",
+        "native/tests/gui/test_gui_paths.cpp",
+        "native/src/render/psd_paths.cpp",
+        "native/src/formats/psd_export.cpp",
+        "native/src/render/import_psd.cpp"
+      ],
       "pc0": {
         "date": "2026-10-16",
         "cpp_base": "962faa4",
@@ -23351,9 +23373,14 @@
         "alternate_menus": []
       },
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "未着手",
+      "implementation_status": "実装済み（PC3 C-a、未統合）",
       "acceptance_status": "未実施",
-      "evidence": [],
+      "evidence": [
+        "native/src/render/ops_paths.cpp",
+        "native/src/app/main_window_paths.cpp",
+        "native/tests/contract/test_contract_paths.cpp",
+        "native/tests/gui/test_gui_paths.cpp"
+      ],
       "pc0": {
         "date": "2026-10-16",
         "cpp_base": "962faa4",
@@ -23394,9 +23421,14 @@
         "alternate_menus": []
       },
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "未着手",
+      "implementation_status": "実装済み（PC3 C-a、未統合）",
       "acceptance_status": "未実施",
-      "evidence": [],
+      "evidence": [
+        "native/src/render/ops_paths.cpp",
+        "native/src/app/main_window_paths.cpp",
+        "native/tests/contract/test_contract_paths.cpp",
+        "native/tests/gui/test_gui_paths.cpp"
+      ],
       "pc0": {
         "date": "2026-10-16",
         "cpp_base": "962faa4",
@@ -23422,9 +23454,20 @@
       },
       "upstream_menu": null,
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "未着手",
+      "implementation_status": "実装済み（PC3 C-a、未統合）",
       "acceptance_status": "未実施",
-      "evidence": [],
+      "evidence": [
+        "native/src/render/ops_paths.cpp",
+        "native/src/render/vector_masks.cpp",
+        "native/src/render/page.cpp",
+        "native/src/app/canvas_pen.cpp",
+        "native/tests/unit/test_path_raster.cpp",
+        "native/tests/contract/test_contract_paths.cpp",
+        "native/tests/gui/test_gui_paths.cpp",
+        "native/src/render/psd_paths.cpp",
+        "native/src/formats/psd_export.cpp",
+        "native/src/render/import_psd.cpp"
+      ],
       "pc0": {
         "date": "2026-10-16",
         "cpp_base": "962faa4",
@@ -23464,9 +23507,16 @@
         "alternate_menus": []
       },
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "未着手",
+      "implementation_status": "実装済み（PC3 C-a、未統合）",
       "acceptance_status": "未実施",
-      "evidence": [],
+      "evidence": [
+        "native/src/render/ops_paths.cpp",
+        "native/src/render/vector_masks.cpp",
+        "native/src/render/page.cpp",
+        "native/src/app/main_window_paths.cpp",
+        "native/tests/contract/test_contract_paths.cpp",
+        "native/tests/gui/test_gui_paths.cpp"
+      ],
       "pc0": {
         "date": "2026-10-16",
         "cpp_base": "962faa4",
@@ -23495,9 +23545,14 @@
       },
       "upstream_menu": null,
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "未着手",
+      "implementation_status": "実装済み（PC3 C-a、未統合）",
       "acceptance_status": "未実施",
-      "evidence": [],
+      "evidence": [
+        "native/src/render/ops_paths.cpp",
+        "native/src/app/paths_panel.cpp",
+        "native/tests/contract/test_contract_paths.cpp",
+        "native/tests/gui/test_gui_paths.cpp"
+      ],
       "pc0": {
         "date": "2026-10-16",
         "cpp_base": "962faa4",
@@ -23535,9 +23590,15 @@
         "alternate_menus": []
       },
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "未着手",
+      "implementation_status": "実装済み（PC3 C-a、未統合）",
       "acceptance_status": "未実施",
-      "evidence": [],
+      "evidence": [
+        "native/src/render/ops_paths.cpp",
+        "native/src/render/vector_masks.cpp",
+        "native/src/app/main_window_paths.cpp",
+        "native/tests/contract/test_contract_paths.cpp",
+        "native/tests/gui/test_gui_paths.cpp"
+      ],
       "pc0": {
         "date": "2026-10-16",
         "cpp_base": "962faa4",
@@ -23563,9 +23624,14 @@
       },
       "upstream_menu": null,
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "未着手",
+      "implementation_status": "実装済み（PC3 C-a、未統合）",
       "acceptance_status": "未実施",
-      "evidence": [],
+      "evidence": [
+        "native/src/render/ops_paths.cpp",
+        "native/src/render/path_info.cpp",
+        "native/src/api/cli.cpp",
+        "native/tests/contract/test_contract_paths.cpp"
+      ],
       "pc0": {
         "date": "2026-10-16",
         "cpp_base": "962faa4",
@@ -23603,9 +23669,15 @@
         "alternate_menus": []
       },
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "未着手",
+      "implementation_status": "実装済み（PC3 C-a、未統合）",
       "acceptance_status": "未実施",
-      "evidence": [],
+      "evidence": [
+        "native/src/render/ops_paths.cpp",
+        "native/src/render/psd_paths.cpp",
+        "native/src/app/main_window_paths.cpp",
+        "native/tests/contract/test_contract_paths.cpp",
+        "native/tests/gui/test_gui_paths.cpp"
+      ],
       "pc0": {
         "date": "2026-10-16",
         "cpp_base": "962faa4",
@@ -23643,9 +23715,15 @@
         "alternate_menus": []
       },
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "未着手",
+      "implementation_status": "実装済み（PC3 C-a、未統合）",
       "acceptance_status": "未実施",
-      "evidence": [],
+      "evidence": [
+        "native/src/render/ops_paths.cpp",
+        "native/src/render/vector_masks.cpp",
+        "native/src/app/main_window_paths.cpp",
+        "native/tests/contract/test_contract_paths.cpp",
+        "native/tests/gui/test_gui_paths.cpp"
+      ],
       "pc0": {
         "date": "2026-10-16",
         "cpp_base": "962faa4",
@@ -25363,9 +25441,16 @@
       },
       "upstream_menu": null,
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "未着手",
+      "implementation_status": "実装済み（PC3 C-a、未統合）",
       "acceptance_status": "未実施",
-      "evidence": [],
+      "evidence": [
+        "native/src/render/ops_paths.cpp",
+        "native/src/render/path_areas.cpp",
+        "native/src/app/paths_panel.cpp",
+        "native/src/app/main_window_paths.cpp",
+        "native/tests/contract/test_contract_paths.cpp",
+        "native/tests/gui/test_gui_paths.cpp"
+      ],
       "pc0": {
         "date": "2026-10-16",
         "cpp_base": "962faa4",
@@ -25391,9 +25476,16 @@
       },
       "upstream_menu": null,
       "genko_status": "一部（2026-10-16 照合）",
-      "implementation_status": "未着手",
+      "implementation_status": "実装済み（PC3 C-a、未統合）",
       "acceptance_status": "未実施",
-      "evidence": [],
+      "evidence": [
+        "native/src/render/raster_ops.cpp",
+        "native/src/render/ops_paths.cpp",
+        "native/src/render/path_areas.cpp",
+        "native/src/app/main_window_paths.cpp",
+        "native/tests/contract/test_contract_paths.cpp",
+        "native/tests/gui/test_gui_paths.cpp"
+      ],
       "pc0": {
         "date": "2026-10-16",
         "cpp_base": "962faa4",
@@ -25426,9 +25518,13 @@
       },
       "upstream_menu": null,
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "未着手",
+      "implementation_status": "実装済み（PC3 C-a、未統合）",
       "acceptance_status": "未実施",
-      "evidence": [],
+      "evidence": [
+        "native/src/render/path_info.cpp",
+        "native/src/api/cli.cpp",
+        "native/tests/contract/test_contract_paths.cpp"
+      ],
       "pc0": {
         "date": "2026-10-16",
         "cpp_base": "962faa4",
@@ -25454,9 +25550,15 @@
       },
       "upstream_menu": null,
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "未着手",
+      "implementation_status": "実装済み（PC3 C-a、未統合）",
       "acceptance_status": "未実施",
-      "evidence": [],
+      "evidence": [
+        "native/src/render/path_info.cpp",
+        "native/src/api/cli.cpp",
+        "native/src/app/paths_panel.cpp",
+        "native/tests/contract/test_contract_paths.cpp",
+        "native/tests/gui/test_gui_paths.cpp"
+      ],
       "pc0": {
         "date": "2026-10-16",
         "cpp_base": "962faa4",
@@ -25482,9 +25584,16 @@
       },
       "upstream_menu": null,
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "未着手",
+      "implementation_status": "実装済み（PC3 C-a、未統合）",
       "acceptance_status": "未実施",
-      "evidence": [],
+      "evidence": [
+        "native/src/render/ops_paths.cpp",
+        "native/src/render/path_areas.cpp",
+        "native/src/app/paths_panel.cpp",
+        "native/src/app/main_window_paths.cpp",
+        "native/tests/contract/test_contract_paths.cpp",
+        "native/tests/gui/test_gui_paths.cpp"
+      ],
       "pc0": {
         "date": "2026-10-16",
         "cpp_base": "962faa4",
@@ -25510,9 +25619,18 @@
       },
       "upstream_menu": null,
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "未着手",
+      "implementation_status": "実装済み（PC3 C-a、未統合）",
       "acceptance_status": "未実施",
-      "evidence": [],
+      "evidence": [
+        "native/src/render/ops_paths.cpp",
+        "native/src/render/path_areas.cpp",
+        "native/src/app/canvas_pen.cpp",
+        "native/tests/contract/test_contract_paths.cpp",
+        "native/tests/gui/test_gui_paths.cpp",
+        "native/src/render/psd_paths.cpp",
+        "native/src/formats/psd_export.cpp",
+        "native/src/render/import_psd.cpp"
+      ],
       "pc0": {
         "date": "2026-10-16",
         "cpp_base": "962faa4",
@@ -25538,9 +25656,14 @@
       },
       "upstream_menu": null,
       "genko_status": "一部（2026-10-16 照合）",
-      "implementation_status": "未着手",
+      "implementation_status": "実装済み（PC3 C-a、未統合）",
       "acceptance_status": "未実施",
-      "evidence": [],
+      "evidence": [
+        "native/src/render/ops_paths.cpp",
+        "native/src/app/main_window_paths.cpp",
+        "native/tests/contract/test_contract_paths.cpp",
+        "native/tests/gui/test_gui_paths.cpp"
+      ],
       "pc0": {
         "date": "2026-10-16",
         "cpp_base": "962faa4",
@@ -25574,9 +25697,16 @@
       },
       "upstream_menu": null,
       "genko_status": "一部（2026-10-16 照合）",
-      "implementation_status": "未着手",
+      "implementation_status": "実装済み（PC3 C-a、未統合）",
       "acceptance_status": "未実施",
-      "evidence": [],
+      "evidence": [
+        "native/src/render/path_areas.cpp",
+        "native/src/render/area_kinds.cpp",
+        "native/src/app/main_window_paths.cpp",
+        "native/tests/unit/test_selection_ext.cpp",
+        "native/tests/contract/test_contract_paths.cpp",
+        "native/tests/gui/test_gui_paths.cpp"
+      ],
       "pc0": {
         "date": "2026-10-16",
         "cpp_base": "962faa4",
@@ -27604,9 +27734,16 @@
       },
       "upstream_menu": null,
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "未着手",
+      "implementation_status": "実装済み（PC3 C-a、未統合）",
       "acceptance_status": "未実施",
-      "evidence": [],
+      "evidence": [
+        "native/src/render/ops_paths.cpp",
+        "native/src/render/path_trace.cpp",
+        "native/src/app/main_window_paths.cpp",
+        "native/tests/unit/test_path_raster.cpp",
+        "native/tests/contract/test_contract_paths.cpp",
+        "native/tests/gui/test_gui_paths.cpp"
+      ],
       "pc0": {
         "date": "2026-10-16",
         "cpp_base": "962faa4",
@@ -29540,9 +29677,15 @@
         "alternate_menus": []
       },
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "未着手",
+      "implementation_status": "実装済み（PC3 C-a、未統合）",
       "acceptance_status": "未実施",
-      "evidence": [],
+      "evidence": [
+        "native/src/render/ops_paths.cpp",
+        "native/src/render/path_trace.cpp",
+        "native/src/app/main_window_paths.cpp",
+        "native/tests/contract/test_contract_paths.cpp",
+        "native/tests/gui/test_gui_paths.cpp"
+      ],
       "pc0": {
         "date": "2026-10-16",
         "cpp_base": "962faa4",
@@ -33994,9 +34137,13 @@
         "alternate_menus": []
       },
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "未着手",
+      "implementation_status": "実装済み（PC3 C-a、未統合）",
       "acceptance_status": "未実施",
-      "evidence": [],
+      "evidence": [
+        "native/src/app/canvas_pen.cpp",
+        "native/src/app/main_window_paths.cpp",
+        "native/tests/gui/test_gui_paths.cpp"
+      ],
       "pc0": {
         "date": "2026-10-16",
         "cpp_base": "962faa4",
@@ -35909,9 +36056,13 @@
         "alternate_menus": []
       },
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "未着手",
+      "implementation_status": "実装済み（PC3 C-a、未統合）",
       "acceptance_status": "未実施",
-      "evidence": [],
+      "evidence": [
+        "native/src/app/paths_panel.cpp",
+        "native/src/app/main_window_paths.cpp",
+        "native/tests/gui/test_gui_paths.cpp"
+      ],
       "pc0": {
         "date": "2026-10-16",
         "cpp_base": "962faa4",
@@ -37375,9 +37526,14 @@
       "kind": "tool",
       "upstream_source": "crates/ui-egui/src/state.rs",
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "未着手",
+      "implementation_status": "実装済み（PC3 C-a、未統合）",
       "acceptance_status": "未実施",
-      "evidence": [],
+      "evidence": [
+        "native/src/app/canvas_pen.cpp",
+        "native/src/app/main_window_paths.cpp",
+        "native/tests/gui/test_gui_paths.cpp",
+        "native/tests/gui/test_gui_actions.cpp"
+      ],
       "pc0": {
         "date": "2026-10-16",
         "cpp_base": "962faa4",
@@ -37395,9 +37551,14 @@
       "kind": "tool",
       "upstream_source": "crates/ui-egui/src/state.rs",
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "未着手",
+      "implementation_status": "実装済み（PC3 C-a、未統合）",
       "acceptance_status": "未実施",
-      "evidence": [],
+      "evidence": [
+        "native/src/app/canvas_pen.cpp",
+        "native/src/app/main_window_paths.cpp",
+        "native/tests/gui/test_gui_paths.cpp",
+        "native/tests/gui/test_gui_actions.cpp"
+      ],
       "pc0": {
         "date": "2026-10-16",
         "cpp_base": "962faa4",

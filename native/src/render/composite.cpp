@@ -30,6 +30,7 @@
 #include "render/ink_canvas.hpp"
 #include "render/page_internal.hpp"
 #include "render/png.hpp"
+#include "render/vector_masks.hpp"
 
 namespace genko::render::detail {
 
@@ -736,6 +737,9 @@ Image adjusted(const Ctx& ctx, Image rgba, const core::Layer& layer, const Image
         const Image shown = core::mask_has_settings(*layer.mask) ? layer_masks::shown(*ctx.page, *layer.mask, picture, ctx.size, area, Resample::Bicubic)
                                                                  : resized_part(picture, ctx.size, area, Resample::Bicubic);
         strength = chops::multiply(strength, shown);
+    }
+    if (vector_masks::shows(layer)) {  // (vector@1, PC3 C-a: its vector mask too)
+        strength = chops::multiply(strength, vector_masks::shown(*ctx.page, *layer.vector_mask, ctx.size, area));
     }
     if (clip != nullptr) strength = chops::multiply(strength, clip->convert("L"));
     return composite(changed.convert("RGBA"), rgba, strength);
