@@ -1161,8 +1161,8 @@
       },
       "upstream_menu": null,
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "実装済み（PC2d、未統合）",
-      "acceptance_status": "未実施",
+      "implementation_status": "実装済み（PC2d、PC2 として統合 5ebcbe6）",
+      "acceptance_status": "Linux V3 合格（PC2 の出口、凍結 5ebcbe6、2026-10-18）。Windows は配布前に実機で（deferred）",
       "evidence": [
         "native/src/render/import_profile.cpp",
         "native/src/render/raster_ops.cpp",
@@ -2256,8 +2256,8 @@
         "alternate_menus": []
       },
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "実装済み（PC2c、未統合）",
-      "acceptance_status": "未実施",
+      "implementation_status": "実装済み（PC2c、PC2 として統合 5ebcbe6）",
+      "acceptance_status": "Linux V3 合格（PC2 の出口、凍結 5ebcbe6、2026-10-18）。Windows は配布前に実機で（deferred）",
       "evidence": [
         "native/src/render/ops_fade.cpp",
         "native/src/render/image_ops.cpp",
@@ -3755,8 +3755,8 @@
       },
       "upstream_menu": null,
       "genko_status": "一部（2026-10-16 照合）",
-      "implementation_status": "実装済み（PC2d、未統合）",
-      "acceptance_status": "未実施",
+      "implementation_status": "実装済み（PC2d、PC2 として統合 5ebcbe6）",
+      "acceptance_status": "Linux V3 合格（PC2 の出口、凍結 5ebcbe6、2026-10-18）。Windows は配布前に実機で（deferred）",
       "evidence": [
         "native/src/render/proof.cpp",
         "native/src/api/cli.cpp",
@@ -5757,8 +5757,8 @@
         "alternate_menus": []
       },
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "実装済み（PC2a、未統合）",
-      "acceptance_status": "未実施",
+      "implementation_status": "実装済み（PC2a、PC2 として統合 5ebcbe6）",
+      "acceptance_status": "Linux V3 合格（PC2 の出口、凍結 5ebcbe6、2026-10-18）。Windows は配布前に実機で（deferred）",
       "evidence": [
         "native/src/formats/exporting.cpp",
         "native/src/api/cli.cpp",
@@ -12317,8 +12317,8 @@
         "alternate_menus": []
       },
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "実装済み（PC2b、未統合）",
-      "acceptance_status": "未実施",
+      "implementation_status": "実装済み（PC2b、PC2 として統合 5ebcbe6）",
+      "acceptance_status": "Linux V3 合格（PC2 の出口、凍結 5ebcbe6、2026-10-18）。Windows は配布前に実機で（deferred）",
       "evidence": [
         "native/src/core/adjust_color.cpp",
         "native/src/core/adjust_color.hpp",
@@ -12371,8 +12371,8 @@
         "alternate_menus": []
       },
       "genko_status": "一部（2026-10-16 照合）",
-      "implementation_status": "実装済み（PC2a、未統合）",
-      "acceptance_status": "未実施",
+      "implementation_status": "実装済み（PC2a、PC2 として統合 5ebcbe6）",
+      "acceptance_status": "Linux V3 合格（PC2 の出口、凍結 5ebcbe6、2026-10-18）。Windows は配布前に実機で（deferred）",
       "evidence": [
         "native/src/render/ops_adjust.cpp",
         "native/src/core/adjust_tone.cpp",
@@ -12439,8 +12439,8 @@
         "alternate_menus": []
       },
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "実装済み（PC2b、未統合）",
-      "acceptance_status": "未実施",
+      "implementation_status": "実装済み（PC2b、PC2 として統合 5ebcbe6）",
+      "acceptance_status": "Linux V3 合格（PC2 の出口、凍結 5ebcbe6、2026-10-18）。Windows は配布前に実機で（deferred）",
       "evidence": [
         "native/src/core/adjust_color.cpp",
         "native/src/core/adjust_color.hpp",
@@ -12494,8 +12494,8 @@
         "alternate_menus": []
       },
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "実装済み（PC2b、未統合）",
-      "acceptance_status": "未実施",
+      "implementation_status": "実装済み（PC2b、PC2 として統合 5ebcbe6）",
+      "acceptance_status": "Linux V3 合格（PC2 の出口、凍結 5ebcbe6、2026-10-18）。Windows は配布前に実機で（deferred）",
       "evidence": [
         "native/src/core/adjust_color.cpp",
         "native/src/core/adjust_color.hpp",
@@ -12548,8 +12548,8 @@
         "alternate_menus": []
       },
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "実装済み（PC2a、未統合）",
-      "acceptance_status": "未実施",
+      "implementation_status": "実装済み（PC2a、PC2 として統合 5ebcbe6）",
+      "acceptance_status": "Linux V3 合格（PC2 の出口、凍結 5ebcbe6、2026-10-18）。Windows は配布前に実機で（deferred）",
       "evidence": [
         "native/src/render/ops_adjust.cpp",
         "native/src/core/lut3d.cpp",
@@ -12588,8 +12588,8 @@
       },
       "upstream_menu": null,
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "実装済み（PC2a、未統合）",
-      "acceptance_status": "未実施",
+      "implementation_status": "実装済み（PC2a、PC2 として統合 5ebcbe6）",
+      "acceptance_status": "Linux V3 合格（PC2 の出口、凍結 5ebcbe6、2026-10-18）。Windows は配布前に実機で（deferred）",
       "evidence": [
         "native/src/api/cli.cpp",
         "native/src/core/lut3d.cpp",
@@ -12637,8 +12637,8 @@
         "alternate_menus": []
       },
       "genko_status": "一部（2026-10-16 照合）",
-      "implementation_status": "実装済み（PC2a、未統合）",
-      "acceptance_status": "未実施",
+      "implementation_status": "実装済み（PC2a、PC2 として統合 5ebcbe6）",
+      "acceptance_status": "Linux V3 合格（PC2 の出口、凍結 5ebcbe6、2026-10-18）。Windows は配布前に実機で（deferred）",
       "evidence": [
         "native/src/render/ops_adjust.cpp",
         "native/src/core/adjust_tone.cpp",
@@ -12706,8 +12706,8 @@
         "alternate_menus": []
       },
       "genko_status": "一部（2026-10-16 照合）",
-      "implementation_status": "実装済み（PC2b、未統合）",
-      "acceptance_status": "未実施",
+      "implementation_status": "実装済み（PC2b、PC2 として統合 5ebcbe6）",
+      "acceptance_status": "Linux V3 合格（PC2 の出口、凍結 5ebcbe6、2026-10-18）。Windows は配布前に実機で（deferred）",
       "evidence": [
         "native/src/core/adjust_color.cpp",
         "native/src/core/adjust_color.hpp",
@@ -12766,8 +12766,8 @@
         "alternate_menus": []
       },
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "実装済み（PC2a、未統合）",
-      "acceptance_status": "未実施",
+      "implementation_status": "実装済み（PC2a、PC2 として統合 5ebcbe6）",
+      "acceptance_status": "Linux V3 合格（PC2 の出口、凍結 5ebcbe6、2026-10-18）。Windows は配布前に実機で（deferred）",
       "evidence": [
         "native/src/render/ops_adjust.cpp",
         "native/src/core/adjust_tone.cpp",
@@ -12815,8 +12815,8 @@
         "alternate_menus": []
       },
       "genko_status": "一部（2026-10-16 照合）",
-      "implementation_status": "実装済み（PC2a、未統合）",
-      "acceptance_status": "未実施",
+      "implementation_status": "実装済み（PC2a、PC2 として統合 5ebcbe6）",
+      "acceptance_status": "Linux V3 合格（PC2 の出口、凍結 5ebcbe6、2026-10-18）。Windows は配布前に実機で（deferred）",
       "evidence": [
         "native/src/render/ops_adjust.cpp",
         "native/src/core/adjust_tone.cpp",
@@ -12873,8 +12873,8 @@
         "alternate_menus": []
       },
       "genko_status": "一部（2026-10-16 照合）",
-      "implementation_status": "実装済み（PC2a、未統合）",
-      "acceptance_status": "未実施",
+      "implementation_status": "実装済み（PC2a、PC2 として統合 5ebcbe6）",
+      "acceptance_status": "Linux V3 合格（PC2 の出口、凍結 5ebcbe6、2026-10-18）。Windows は配布前に実機で（deferred）",
       "evidence": [
         "native/src/render/ops_adjust.cpp",
         "native/src/core/adjust_tone.cpp",
@@ -12940,8 +12940,8 @@
         "alternate_menus": []
       },
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "実装済み（PC2c、未統合）",
-      "acceptance_status": "未実施",
+      "implementation_status": "実装済み（PC2c、PC2 として統合 5ebcbe6）",
+      "acceptance_status": "Linux V3 合格（PC2 の出口、凍結 5ebcbe6、2026-10-18）。Windows は配布前に実機で（deferred）",
       "evidence": [
         "native/src/render/tone_ops.cpp",
         "native/src/render/image_ops.cpp",
@@ -12992,8 +12992,8 @@
         "alternate_menus": []
       },
       "genko_status": "一部（2026-10-16 照合）",
-      "implementation_status": "実装済み（PC2b、未統合）",
-      "acceptance_status": "未実施",
+      "implementation_status": "実装済み（PC2b、PC2 として統合 5ebcbe6）",
+      "acceptance_status": "Linux V3 合格（PC2 の出口、凍結 5ebcbe6、2026-10-18）。Windows は配布前に実機で（deferred）",
       "evidence": [
         "native/src/core/adjust_color.cpp",
         "native/src/core/adjust_color.hpp",
@@ -13065,8 +13065,8 @@
         "alternate_menus": []
       },
       "genko_status": "同等（C++ のソースと試験あり。2026-10-16 照合）",
-      "implementation_status": "実装済み（PC2a、未統合）",
-      "acceptance_status": "未実施",
+      "implementation_status": "実装済み（PC2a、PC2 として統合 5ebcbe6）",
+      "acceptance_status": "Linux V3 合格（PC2 の出口、凍結 5ebcbe6、2026-10-18）。Windows は配布前に実機で（deferred）",
       "evidence": [
         "native/src/render/ops_adjust.cpp",
         "native/src/core/adjust_tone.cpp",
@@ -13132,8 +13132,8 @@
         "alternate_menus": []
       },
       "genko_status": "一部（2026-10-16 照合）",
-      "implementation_status": "実装済み（PC2a、未統合）",
-      "acceptance_status": "未実施",
+      "implementation_status": "実装済み（PC2a、PC2 として統合 5ebcbe6）",
+      "acceptance_status": "Linux V3 合格（PC2 の出口、凍結 5ebcbe6、2026-10-18）。Windows は配布前に実機で（deferred）",
       "evidence": [
         "native/src/render/ops_adjust.cpp",
         "native/src/core/adjust_tone.cpp",
@@ -13201,8 +13201,8 @@
         "alternate_menus": []
       },
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "実装済み（PC2c、未統合）",
-      "acceptance_status": "未実施",
+      "implementation_status": "実装済み（PC2c、PC2 として統合 5ebcbe6）",
+      "acceptance_status": "Linux V3 合格（PC2 の出口、凍結 5ebcbe6、2026-10-18）。Windows は配布前に実機で（deferred）",
       "evidence": [
         "native/src/render/tone_ops.cpp",
         "native/src/render/image_ops.cpp",
@@ -13251,8 +13251,8 @@
         "alternate_menus": []
       },
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "実装済み（PC2b、未統合）",
-      "acceptance_status": "未実施",
+      "implementation_status": "実装済み（PC2b、PC2 として統合 5ebcbe6）",
+      "acceptance_status": "Linux V3 合格（PC2 の出口、凍結 5ebcbe6、2026-10-18）。Windows は配布前に実機で（deferred）",
       "evidence": [
         "native/src/core/adjust_color.cpp",
         "native/src/core/adjust_color.hpp",
@@ -13306,8 +13306,8 @@
         "alternate_menus": []
       },
       "genko_status": "一部（2026-10-16 照合）",
-      "implementation_status": "実装済み（PC2a、未統合）",
-      "acceptance_status": "未実施",
+      "implementation_status": "実装済み（PC2a、PC2 として統合 5ebcbe6）",
+      "acceptance_status": "Linux V3 合格（PC2 の出口、凍結 5ebcbe6、2026-10-18）。Windows は配布前に実機で（deferred）",
       "evidence": [
         "native/src/render/ops_adjust.cpp",
         "native/src/core/adjust_tone.cpp",
@@ -13374,8 +13374,8 @@
         "alternate_menus": []
       },
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "実装済み（PC2c、未統合）",
-      "acceptance_status": "未実施",
+      "implementation_status": "実装済み（PC2c、PC2 として統合 5ebcbe6）",
+      "acceptance_status": "Linux V3 合格（PC2 の出口、凍結 5ebcbe6、2026-10-18）。Windows は配布前に実機で（deferred）",
       "evidence": [
         "native/src/render/tone_ops.cpp",
         "native/src/render/image_ops.cpp",
@@ -13424,8 +13424,8 @@
         "alternate_menus": []
       },
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "実装済み（PC2b、未統合）",
-      "acceptance_status": "未実施",
+      "implementation_status": "実装済み（PC2b、PC2 として統合 5ebcbe6）",
+      "acceptance_status": "Linux V3 合格（PC2 の出口、凍結 5ebcbe6、2026-10-18）。Windows は配布前に実機で（deferred）",
       "evidence": [
         "native/src/core/adjust_color.cpp",
         "native/src/core/adjust_color.hpp",
@@ -13478,8 +13478,8 @@
         "alternate_menus": []
       },
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "実装済み（PC2c、未統合）",
-      "acceptance_status": "未実施",
+      "implementation_status": "実装済み（PC2c、PC2 として統合 5ebcbe6）",
+      "acceptance_status": "Linux V3 合格（PC2 の出口、凍結 5ebcbe6、2026-10-18）。Windows は配布前に実機で（deferred）",
       "evidence": [
         "native/src/render/tone_ops.cpp",
         "native/src/render/image_ops.cpp",
@@ -13530,8 +13530,8 @@
         "alternate_menus": []
       },
       "genko_status": "同等（C++ のソースと試験あり。2026-10-16 照合）",
-      "implementation_status": "実装済み（PC2a、未統合）",
-      "acceptance_status": "未実施",
+      "implementation_status": "実装済み（PC2a、PC2 として統合 5ebcbe6）",
+      "acceptance_status": "Linux V3 合格（PC2 の出口、凍結 5ebcbe6、2026-10-18）。Windows は配布前に実機で（deferred）",
       "evidence": [
         "native/src/render/ops_adjust.cpp",
         "native/src/core/adjust_tone.cpp",
@@ -13597,8 +13597,8 @@
         "alternate_menus": []
       },
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "実装済み（PC2b、未統合）",
-      "acceptance_status": "未実施",
+      "implementation_status": "実装済み（PC2b、PC2 として統合 5ebcbe6）",
+      "acceptance_status": "Linux V3 合格（PC2 の出口、凍結 5ebcbe6、2026-10-18）。Windows は配布前に実機で（deferred）",
       "evidence": [
         "native/src/core/adjust_color.cpp",
         "native/src/core/adjust_color.hpp",
@@ -14005,8 +14005,8 @@
         "alternate_menus": []
       },
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "実装済み（PC2c、未統合）",
-      "acceptance_status": "未実施",
+      "implementation_status": "実装済み（PC2c、PC2 として統合 5ebcbe6）",
+      "acceptance_status": "Linux V3 合格（PC2 の出口、凍結 5ebcbe6、2026-10-18）。Windows は配布前に実機で（deferred）",
       "evidence": [
         "native/src/render/ops_calc.cpp",
         "native/src/render/image_ops.cpp",
@@ -14054,8 +14054,8 @@
         "alternate_menus": []
       },
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "実装済み（PC2a、未統合）",
-      "acceptance_status": "未実施",
+      "implementation_status": "実装済み（PC2a、PC2 として統合 5ebcbe6）",
+      "acceptance_status": "Linux V3 合格（PC2 の出口、凍結 5ebcbe6、2026-10-18）。Windows は配布前に実機で（deferred）",
       "evidence": [
         "native/src/render/ops_adjust.cpp",
         "native/src/core/adjust_tone.cpp",
@@ -14101,8 +14101,8 @@
         "alternate_menus": []
       },
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "実装済み（PC2a、未統合）",
-      "acceptance_status": "未実施",
+      "implementation_status": "実装済み（PC2a、PC2 として統合 5ebcbe6）",
+      "acceptance_status": "Linux V3 合格（PC2 の出口、凍結 5ebcbe6、2026-10-18）。Windows は配布前に実機で（deferred）",
       "evidence": [
         "native/src/render/ops_adjust.cpp",
         "native/src/core/adjust_tone.cpp",
@@ -14149,8 +14149,8 @@
         "alternate_menus": []
       },
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "実装済み（PC2a、未統合）",
-      "acceptance_status": "未実施",
+      "implementation_status": "実装済み（PC2a、PC2 として統合 5ebcbe6）",
+      "acceptance_status": "Linux V3 合格（PC2 の出口、凍結 5ebcbe6、2026-10-18）。Windows は配布前に実機で（deferred）",
       "evidence": [
         "native/src/render/ops_adjust.cpp",
         "native/src/core/adjust_tone.cpp",
@@ -14196,8 +14196,8 @@
         "alternate_menus": []
       },
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "実装済み（PC2c、未統合）",
-      "acceptance_status": "未実施",
+      "implementation_status": "実装済み（PC2c、PC2 として統合 5ebcbe6）",
+      "acceptance_status": "Linux V3 合格（PC2 の出口、凍結 5ebcbe6、2026-10-18）。Windows は配布前に実機で（deferred）",
       "evidence": [
         "native/src/render/ops_calc.cpp",
         "native/src/render/image_ops.cpp",
@@ -15502,8 +15502,8 @@
         "alternate_menus": []
       },
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "実装済み（PC2c、未統合）",
-      "acceptance_status": "未実施",
+      "implementation_status": "実装済み（PC2c、PC2 として統合 5ebcbe6）",
+      "acceptance_status": "Linux V3 合格（PC2 の出口、凍結 5ebcbe6、2026-10-18）。Windows は配布前に実機で（deferred）",
       "evidence": [
         "native/src/render/trap.cpp",
         "native/src/render/image_ops.cpp",
@@ -19416,8 +19416,8 @@
         "alternate_menus": []
       },
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "実装済み（PC2b、未統合）",
-      "acceptance_status": "未実施",
+      "implementation_status": "実装済み（PC2b、PC2 として統合 5ebcbe6）",
+      "acceptance_status": "Linux V3 合格（PC2 の出口、凍結 5ebcbe6、2026-10-18）。Windows は配布前に実機で（deferred）",
       "evidence": [
         "native/src/core/adjust_color.cpp",
         "native/src/core/adjust_color.hpp",
@@ -19471,8 +19471,8 @@
         "alternate_menus": []
       },
       "genko_status": "一部（2026-10-16 照合）",
-      "implementation_status": "実装済み（PC2a、未統合）",
-      "acceptance_status": "未実施",
+      "implementation_status": "実装済み（PC2a、PC2 として統合 5ebcbe6）",
+      "acceptance_status": "Linux V3 合格（PC2 の出口、凍結 5ebcbe6、2026-10-18）。Windows は配布前に実機で（deferred）",
       "evidence": [
         "native/src/core/adjust_tone.cpp",
         "native/src/render/psd_adjust.cpp",
@@ -19539,8 +19539,8 @@
         "alternate_menus": []
       },
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "実装済み（PC2b、未統合）",
-      "acceptance_status": "未実施",
+      "implementation_status": "実装済み（PC2b、PC2 として統合 5ebcbe6）",
+      "acceptance_status": "Linux V3 合格（PC2 の出口、凍結 5ebcbe6、2026-10-18）。Windows は配布前に実機で（deferred）",
       "evidence": [
         "native/src/core/adjust_color.cpp",
         "native/src/core/adjust_color.hpp",
@@ -19595,8 +19595,8 @@
         "alternate_menus": []
       },
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "実装済み（PC2b、未統合）",
-      "acceptance_status": "未実施",
+      "implementation_status": "実装済み（PC2b、PC2 として統合 5ebcbe6）",
+      "acceptance_status": "Linux V3 合格（PC2 の出口、凍結 5ebcbe6、2026-10-18）。Windows は配布前に実機で（deferred）",
       "evidence": [
         "native/src/core/adjust_color.cpp",
         "native/src/core/adjust_color.hpp",
@@ -19650,8 +19650,8 @@
         "alternate_menus": []
       },
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "実装済み（PC2a、未統合）",
-      "acceptance_status": "未実施",
+      "implementation_status": "実装済み（PC2a、PC2 として統合 5ebcbe6）",
+      "acceptance_status": "Linux V3 合格（PC2 の出口、凍結 5ebcbe6、2026-10-18）。Windows は配布前に実機で（deferred）",
       "evidence": [
         "native/src/core/lut3d.cpp",
         "native/src/core/adjust_tone.cpp",
@@ -19709,8 +19709,8 @@
         "alternate_menus": []
       },
       "genko_status": "一部（2026-10-16 照合）",
-      "implementation_status": "実装済み（PC2a、未統合）",
-      "acceptance_status": "未実施",
+      "implementation_status": "実装済み（PC2a、PC2 として統合 5ebcbe6）",
+      "acceptance_status": "Linux V3 合格（PC2 の出口、凍結 5ebcbe6、2026-10-18）。Windows は配布前に実機で（deferred）",
       "evidence": [
         "native/src/core/adjust_tone.cpp",
         "native/src/render/adjust_space.cpp",
@@ -19779,8 +19779,8 @@
         "alternate_menus": []
       },
       "genko_status": "同等（C++ のソースと試験あり。2026-10-16 照合）",
-      "implementation_status": "実装済み（PC2a、未統合）",
-      "acceptance_status": "Linux Debug V1限定合格。全機能/全構成未完",
+      "implementation_status": "実装済み（PC2a、PC2 として統合 5ebcbe6）",
+      "acceptance_status": "Linux V3 合格（PC2 の出口、凍結 5ebcbe6、2026-10-18）。Windows は配布前に実機で（deferred）",
       "evidence": [
         "native/src/core/adjust_tone.cpp",
         "native/src/render/psd_adjust.cpp",
@@ -19843,8 +19843,8 @@
         "alternate_menus": []
       },
       "genko_status": "一部（2026-10-16 照合）",
-      "implementation_status": "実装済み（PC2a、未統合）",
-      "acceptance_status": "未実施",
+      "implementation_status": "実装済み（PC2a、PC2 として統合 5ebcbe6）",
+      "acceptance_status": "Linux V3 合格（PC2 の出口、凍結 5ebcbe6、2026-10-18）。Windows は配布前に実機で（deferred）",
       "evidence": [
         "native/src/core/adjust_tone.cpp",
         "native/src/render/psd_adjust.cpp",
@@ -19909,8 +19909,8 @@
         "alternate_menus": []
       },
       "genko_status": "一部（2026-10-16 照合）",
-      "implementation_status": "実装済み（PC2b、未統合）",
-      "acceptance_status": "未実施",
+      "implementation_status": "実装済み（PC2b、PC2 として統合 5ebcbe6）",
+      "acceptance_status": "Linux V3 合格（PC2 の出口、凍結 5ebcbe6、2026-10-18）。Windows は配布前に実機で（deferred）",
       "evidence": [
         "native/src/core/adjust_color.cpp",
         "native/src/core/adjust_color.hpp",
@@ -19980,8 +19980,8 @@
         "alternate_menus": []
       },
       "genko_status": "一部（2026-10-16 照合）",
-      "implementation_status": "実装済み（PC2a、未統合）",
-      "acceptance_status": "未実施",
+      "implementation_status": "実装済み（PC2a、PC2 として統合 5ebcbe6）",
+      "acceptance_status": "Linux V3 合格（PC2 の出口、凍結 5ebcbe6、2026-10-18）。Windows は配布前に実機で（deferred）",
       "evidence": [
         "native/src/core/adjust_tone.cpp",
         "native/src/render/psd_adjust.cpp",
@@ -20046,8 +20046,8 @@
         "alternate_menus": []
       },
       "genko_status": "一部（2026-10-16 照合）",
-      "implementation_status": "実装済み（PC2a、未統合）",
-      "acceptance_status": "未実施",
+      "implementation_status": "実装済み（PC2a、PC2 として統合 5ebcbe6）",
+      "acceptance_status": "Linux V3 合格（PC2 の出口、凍結 5ebcbe6、2026-10-18）。Windows は配布前に実機で（deferred）",
       "evidence": [
         "native/src/core/adjust_tone.cpp",
         "native/src/render/adjust_space.cpp",
@@ -20115,8 +20115,8 @@
         "alternate_menus": []
       },
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "実装済み（PC2b、未統合）",
-      "acceptance_status": "未実施",
+      "implementation_status": "実装済み（PC2b、PC2 として統合 5ebcbe6）",
+      "acceptance_status": "Linux V3 合格（PC2 の出口、凍結 5ebcbe6、2026-10-18）。Windows は配布前に実機で（deferred）",
       "evidence": [
         "native/src/core/adjust_color.cpp",
         "native/src/core/adjust_color.hpp",
@@ -20171,8 +20171,8 @@
         "alternate_menus": []
       },
       "genko_status": "一部（2026-10-16 照合）",
-      "implementation_status": "実装済み（PC2a、未統合）",
-      "acceptance_status": "未実施",
+      "implementation_status": "実装済み（PC2a、PC2 として統合 5ebcbe6）",
+      "acceptance_status": "Linux V3 合格（PC2 の出口、凍結 5ebcbe6、2026-10-18）。Windows は配布前に実機で（deferred）",
       "evidence": [
         "native/src/core/adjust_tone.cpp",
         "native/src/render/psd_adjust.cpp",
@@ -20236,8 +20236,8 @@
         "alternate_menus": []
       },
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "実装済み（PC2b、未統合）",
-      "acceptance_status": "未実施",
+      "implementation_status": "実装済み（PC2b、PC2 として統合 5ebcbe6）",
+      "acceptance_status": "Linux V3 合格（PC2 の出口、凍結 5ebcbe6、2026-10-18）。Windows は配布前に実機で（deferred）",
       "evidence": [
         "native/src/core/adjust_color.cpp",
         "native/src/core/adjust_color.hpp",
@@ -20291,8 +20291,8 @@
         "alternate_menus": []
       },
       "genko_status": "同等（C++ のソースと試験あり。2026-10-16 照合）",
-      "implementation_status": "実装済み（PC2a、未統合）",
-      "acceptance_status": "未実施",
+      "implementation_status": "実装済み（PC2a、PC2 として統合 5ebcbe6）",
+      "acceptance_status": "Linux V3 合格（PC2 の出口、凍結 5ebcbe6、2026-10-18）。Windows は配布前に実機で（deferred）",
       "evidence": [
         "native/src/core/adjust_tone.cpp",
         "native/src/render/psd_adjust.cpp",
@@ -20355,8 +20355,8 @@
         "alternate_menus": []
       },
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "実装済み（PC2b、未統合）",
-      "acceptance_status": "未実施",
+      "implementation_status": "実装済み（PC2b、PC2 として統合 5ebcbe6）",
+      "acceptance_status": "Linux V3 合格（PC2 の出口、凍結 5ebcbe6、2026-10-18）。Windows は配布前に実機で（deferred）",
       "evidence": [
         "native/src/core/adjust_color.cpp",
         "native/src/core/adjust_color.hpp",
@@ -21174,8 +21174,8 @@
       },
       "upstream_menu": null,
       "genko_status": "一部（2026-10-16 照合）",
-      "implementation_status": "実装済み（PC2a、未統合）",
-      "acceptance_status": "未実施",
+      "implementation_status": "実装済み（PC2a、PC2 として統合 5ebcbe6）",
+      "acceptance_status": "Linux V3 合格（PC2 の出口、凍結 5ebcbe6、2026-10-18）。Windows は配布前に実機で（deferred）",
       "evidence": [
         "native/src/render/ops_adjust.cpp",
         "native/src/app/adjust_panels.cpp",
@@ -34568,8 +34568,8 @@
         "alternate_menus": []
       },
       "genko_status": "一部（2026-10-16 照合）",
-      "implementation_status": "実装済み（PC2a、未統合）",
-      "acceptance_status": "未実施",
+      "implementation_status": "実装済み（PC2a、PC2 として統合 5ebcbe6）",
+      "acceptance_status": "Linux V3 合格（PC2 の出口、凍結 5ebcbe6、2026-10-18）。Windows は配布前に実機で（deferred）",
       "evidence": [
         "native/src/app/adjust_panels.cpp",
         "native/src/app/main_window_adjust.cpp",
@@ -34685,8 +34685,8 @@
         "alternate_menus": []
       },
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "実装済み（PC2d、未統合）",
-      "acceptance_status": "未実施",
+      "implementation_status": "実装済み（PC2d、PC2 として統合 5ebcbe6）",
+      "acceptance_status": "Linux V3 合格（PC2 の出口、凍結 5ebcbe6、2026-10-18）。Windows は配布前に実機で（deferred）",
       "evidence": [
         "native/src/app/channel_panel.cpp",
         "native/src/app/main_window_channels.cpp",
@@ -34930,8 +34930,8 @@
         "alternate_menus": []
       },
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "実装済み（PC2d、未統合）",
-      "acceptance_status": "未実施",
+      "implementation_status": "実装済み（PC2d、PC2 として統合 5ebcbe6）",
+      "acceptance_status": "Linux V3 合格（PC2 の出口、凍結 5ebcbe6、2026-10-18）。Windows は配布前に実機で（deferred）",
       "evidence": [
         "native/src/app/info_panels.cpp",
         "native/src/app/main_window_actions.cpp",
@@ -35006,8 +35006,8 @@
         "alternate_menus": []
       },
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "実装済み（PC2d、未統合）",
-      "acceptance_status": "未実施",
+      "implementation_status": "実装済み（PC2d、PC2 として統合 5ebcbe6）",
+      "acceptance_status": "Linux V3 合格（PC2 の出口、凍結 5ebcbe6、2026-10-18）。Windows は配布前に実機で（deferred）",
       "evidence": [
         "native/src/app/info_panels.cpp",
         "native/src/app/main_window_actions.cpp",
@@ -35425,8 +35425,8 @@
         "alternate_menus": []
       },
       "genko_status": "一部（2026-10-16 照合）",
-      "implementation_status": "実装済み（PC2a、未統合）",
-      "acceptance_status": "未実施",
+      "implementation_status": "実装済み（PC2a、PC2 として統合 5ebcbe6）",
+      "acceptance_status": "Linux V3 合格（PC2 の出口、凍結 5ebcbe6、2026-10-18）。Windows は配布前に実機で（deferred）",
       "evidence": [
         "native/src/app/adjust_panels.cpp",
         "native/src/app/main_window_adjust.cpp",
@@ -37345,8 +37345,8 @@
       "label_ja": "高精度・色モデル基盤",
       "kind": "cross_cutting",
       "genko_status": "一部（2026-10-16 照合）",
-      "implementation_status": "実装済み（PC2d、未統合）",
-      "acceptance_status": "Linux Debug V1限定合格。全機能/全構成未完",
+      "implementation_status": "実装済み（PC2d、PC2 として統合 5ebcbe6）",
+      "acceptance_status": "Linux V3 合格（PC2 の出口、凍結 5ebcbe6、2026-10-18）。Windows は配布前に実機で（deferred）",
       "evidence": [
         "build/photocraft-v1/regression-v6/execution.json",
         "build/photocraft-v1/gui-settled-probe/visual-observations.json",
@@ -37500,8 +37500,8 @@
       "label_ja": "ICC付き表示・ソフトプルーフ・色域警告",
       "kind": "cross_cutting",
       "genko_status": "一部（2026-10-16 照合）",
-      "implementation_status": "実装済み（PC2d、未統合）",
-      "acceptance_status": "未実施",
+      "implementation_status": "実装済み（PC2d、PC2 として統合 5ebcbe6）",
+      "acceptance_status": "Linux V3 合格（PC2 の出口、凍結 5ebcbe6、2026-10-18）。Windows は配布前に実機で（deferred）",
       "evidence": [
         "native/src/app/display_color.cpp",
         "native/src/app/tiles.cpp",
