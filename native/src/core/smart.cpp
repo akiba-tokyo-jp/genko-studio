@@ -4,6 +4,7 @@
 #include <cmath>
 #include <functional>
 #include <map>
+#include <utility>
 
 #include "core/adjust.hpp"
 #include "core/adjust_kinds.hpp"
@@ -350,6 +351,25 @@ Matrix matrix_of(const Layer& layer) {
 void set_matrix(Layer& layer, const Matrix& m) {
     if (!layer.smart || !layer.smart->is_object()) layer.smart = Json::object();
     (*layer.smart)["matrix"] = to_json(snapped(m));
+}
+
+void put_setting(Layer& layer, std::string_view key, Json value) {
+    if (!layer.smart || !layer.smart->is_object()) layer.smart = Json::object();
+    Json& s = *layer.smart;
+    const std::string name(key);
+    if (value.is_null() || s.contains(name)) {
+        if (value.is_null()) s.erase(name);
+        else s[name] = std::move(value);
+        return;
+    }
+    const auto rank = [](std::string_view k) { return std::find(kSettingKeys.begin(), kSettingKeys.end(), k) - kSettingKeys.begin(); };
+    Json out = Json::object();
+    for (auto& [k, v] : s.items()) {
+        if (!value.is_null() && rank(k) > rank(key)) out[name] = std::exchange(value, Json());
+        out[k] = std::move(v);
+    }
+    if (!value.is_null()) out[name] = std::move(value);
+    s = std::move(out);
 }
 
 Json settings(const std::string& contents, const Matrix& m, std::string_view interp) {

@@ -135,6 +135,10 @@ genko_test(test_smart_contents SOURCES unit/test_smart_contents.cpp DEPS genko_t
 # blend modes, opacities, all off and on, cleared, the selection their mask, following the transforms; at 200 dpi as
 # rasterize_layer and filter_raster (8, 16 bits, CMYK, Lab); a part the whole cut there; refused kinds; read back.
 genko_test(test_smart_filters SOURCES unit/test_smart_filters.cpp DEPS genko_test_support genko_render_ops genko_formats LABELS unit TIMEOUT 900)
+# PC3 A4 (SPEC.md COLOR-05「スタックモード」): a smart object's stack mode — PhotoCraft's statistics, the shots combined in
+# the three ways (the median taking the passer-by out), a folder, hidden layers, a part the whole cut there, a file one
+# layer, rasterized; rasterize_lines drawing the lines as the page drew them; a tone rasterized on precise and ink pages.
+genko_test(test_smart_stack SOURCES unit/test_smart_stack.cpp DEPS genko_test_support genko_render_ops genko_formats LABELS unit TIMEOUT 900)
 
 # core/pyre's own bounds (Python 3.12's re, ported; SPEC COMP-01a): a search that backtracks without end stopped when its
 # steps are spent, groups more than 200 deep refused, replace_text refused without a change; without Python.

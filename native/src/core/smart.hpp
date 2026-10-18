@@ -18,10 +18,10 @@
 // contents' JSON, the layer's settings, their checks, the matrix, which contents a book uses and the stand-in a smart
 // object draws exactly as. The drawing is render/smart.hpp; the ops are render/ops_smart.cpp.
 //
-// A layer's "smart" (in this order): {"contents": "sc_…", "matrix": [a, b, c, d, e, f], "interp": …}, its smart filters
-// (PC3 A2: "filters", "filters_on", "filter_mask") and what later steps of PC3 add to it — "perspective" (the contents' four
-// corners on the page), "warp", "stack", "psd" — which this build keeps as they are and does not draw yet (NotYetPorted
-// names them: render/smart.cpp).
+// A layer's "smart" (in this order): {"contents": "sc_…", "matrix": [a, b, c, d, e, f], "interp": …}, its stack mode (PC3
+// A4: "stack", one of kStackModes), its smart filters (PC3 A2: "filters", "filters_on", "filter_mask") and what later steps
+// of PC3 add to it — "perspective" (the contents' four corners on the page), "warp", "psd" — which this build keeps as they
+// are and does not draw yet (NotYetPorted names them: render/smart.cpp).
 
 namespace genko::core {
 
@@ -105,6 +105,9 @@ bool is_smart(const Layer& layer);
 std::optional<std::string> contents_id(const Layer& layer);
 Matrix matrix_of(const Layer& layer);
 void set_matrix(Layer& layer, const Matrix& m);
+// A smart object's setting put in its place among the others (the order the book keeps them in: contents, matrix,
+// perspective, warp, interp, stack, the smart filters, psd), or (null) taken out (PC3 A4: its stack mode).
+void put_setting(Layer& layer, std::string_view key, Json value);
 // A new smart object's settings: {"contents", "matrix", "interp"}.
 Json settings(const std::string& contents, const Matrix& m, std::string_view interp);
 // The contents a smart object layer shows (null when none).
