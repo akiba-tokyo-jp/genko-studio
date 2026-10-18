@@ -1,21 +1,34 @@
 // 選択範囲 (M3①-5b: the marquee tool and the selection's commands; PC3-0: the user's decision 5, Photoshop's names)
 // on the offscreen platform: the commands with their words, keys, tips and places; a rectangle, a lasso, an ellipse, a
-// polyline, auto-select, colour, the selection pen and eraser, with Shift to add, Alt to take away, both for the
-// overlap; select all, invert, grow, shrink, soften, from the layer, kept and used again, the quick mask; the chosen
-// part moved, scaled, turned, flipped, pulled freely and changed by numbers; copied, cut, pasted, deleted, filled.
+// polyline, auto-select by its two criteria, the selection pen and eraser, with Shift to add, Alt to take away, both for
+// the overlap; select all, invert, expand, contract, soften, from the layer, kept and used again; the chosen part moved,
+// scaled, turned, flipped, pulled freely and changed by numbers; copied, cut, pasted, deleted, filled. PC3 B1: the tools'
+// settings (選択方法, アンチエイリアス on by default, ぼかし, スタイル), 境界線・滑らかに, 選択範囲を拡大・近似色を選択, 再選択,
+// 選択範囲を変形, 選択範囲の境界線, 色域指定…, 選択範囲を保存…・読み込む…, the Quick Mask as a channel the tools paint,
+// マジック消しゴムツール and the selection's right-click menu.
 #include <QtTest>
 #include <QAction>
 #include <QDialog>
 #include <QDoubleSpinBox>
 #include <QMenu>
+#include <QCheckBox>
+#include <QComboBox>
+#include <QLabel>
+#include <QLineEdit>
 #include <QMenuBar>
+#include <QMouseEvent>
 #include <QSpinBox>
+#include <QToolButton>
 #include "gui_support.hpp"
 #include "app/canvas.hpp"
 #include "app/inject.hpp"
 #include "app/main_window.hpp"
+#include "app/tool_settings.hpp"
+#include "core/base64.hpp"
 #include "core/command_bus.hpp"
+#include "core/masks.hpp"
 #include "core/pyconv.hpp"
+#include "render/png.hpp"
 #include "render/selection.hpp"
 using namespace genko;
 using core::Json;
@@ -42,21 +55,31 @@ const std::vector<Expected>& expected() {
     static const std::vector<Expected> list = {
         {"act_marquee", "長方形選択ツール", {s("M")}, "ドラッグで選ぶ。中をドラッグで移動、□で拡大縮小、○で回転（Shift で 15° 刻み・縦横比を保つ）", true, "ツール"},
         {"act_lasso", "なげなわツール", {s("L")}, "ドラッグで囲んで選びます", true, "ツール"},
-        {"act_wand", "自動選択ツール", {s("W")}, "クリックした所の、線で囲まれた範囲を選びます", true, "ツール"},
+        {"act_wand", "自動選択ツール", {s("W")}, "クリックした所を選びます（基準はツールの設定: 線で囲まれた所・色の近さ）", true, "ツール"},
         {"act_sel_ellipse", "楕円形選択ツール", {}, "ドラッグで楕円に選ぶ（Shift で足す、Alt で引く）", true, "ツール"},
         {"act_sel_polyline", "多角形選択ツール", {}, "クリックで角を置き、ダブルクリックか Enter で閉じる", true, "ツール"},
-        {"act_sel_colour", "色域選択", {}, "クリックした所と同じ色の所をページ中から選ぶ", true, "ツール"},
         {"act_sel_pen", "選択ペン", {}, "なぞった所を選択範囲に足す", true, "ツール"},
         {"act_sel_erase", "選択消し", {}, "なぞった所を選択範囲から外す", true, "ツール"},
+        {"act_magic_eraser", "マジック消しゴムツール", {}, "クリックした所に近い色の所を透明にします（描く先のペイントのレイヤー）", true, "ツール"},
         {"act_select_all", "すべてを選択", {QKeySequence(Std::SelectAll)}, "", false, "選択範囲"},
         {"act_deselect", "選択を解除", {s("Ctrl+D")}, "", false, "選択範囲"},
         {"act_sel_invert", "選択範囲を反転", {s("Ctrl+Alt+I")}, "", false, "選択範囲"},
+        {"act_sel_reselect", "再選択", {s("Ctrl+Shift+D")}, "最後に解除した選択範囲を戻す", false, "選択範囲"},
+        {"act_color_range", "色域指定…", {}, "色（スポイトで拾う）・色の系統・明るさ・色域外で選ぶ", false, "選択範囲"},
+        {"act_sel_border", "境界線…", {}, "選択範囲の縁を、その幅の帯にする", false, "選択範囲/選択範囲を変更"},
+        {"act_sel_smooth", "滑らかに…", {}, "選択範囲の縁のでこぼこをならす", false, "選択範囲/選択範囲を変更"},
+        {"act_sel_grow_colour", "選択範囲を拡大", {}, "選択範囲の色に近い、つながった所まで広げる（許容値は自動選択ツールの設定）", false, "選択範囲"},
+        {"act_sel_similar", "近似色を選択", {}, "選択範囲の色に近い所を、ページ中から選ぶ（許容値は自動選択ツールの設定）", false, "選択範囲"},
+        {"act_sel_transform", "選択範囲を変形", {}, "枠のつまみで選択範囲の形だけを動かす・拡大縮小・回転する（中身は動かない）。Enter で終わる", false,
+         "選択範囲"},
+        {"act_sel_load", "選択範囲を読み込む…", {}, "チャンネル・色の版・透明部分・マスクから選択範囲を作る（反転・追加・削除・共通範囲も）", false, "選択範囲"},
+        {"act_sel_edges", "選択範囲の境界線", {}, "選択範囲の点線を表示する・隠す", true, "表示"},
         {"act_sel_grow", "拡張…", {}, "選択範囲の縁を外へ広げる", false, "選択範囲/選択範囲を変更"},
         {"act_sel_shrink", "縮小…", {}, "選択範囲の縁を内へ狭める", false, "選択範囲/選択範囲を変更"},
         {"act_sel_feather", "境界をぼかす…", {s("Shift+F6")}, "選択範囲の縁をなめらかにぼかす", false, "選択範囲/選択範囲を変更"},
         {"act_sel_layer", "ピクセルを選択", {}, "描く先のレイヤーで描いてある所を選ぶ", false, "選択範囲"},
         {"act_sel_keep", "選択範囲をストック…", {}, "名前を付けてページに残す（後で「ストックから選ぶ」）", false, "選択範囲"},
-        {"act_quick_mask", "クイックマスクモードで編集", {}, "選択範囲を赤で見せ、選択ペン・選択消しで直す", true, "選択範囲"},
+        {"act_quick_mask", "クイックマスクモードで編集", {}, "選択範囲を赤で見せ、ブラシなどの道具で直す", true, "選択範囲"},
         {"act_copy", "コピー", {QKeySequence(Std::Copy)}, "", false, "編集"},
         {"act_cut", "カット", {QKeySequence(Std::Cut)}, "", false, "編集"},
         {"act_paste", "ペースト", {QKeySequence(Std::Paste)}, "新しいレイヤーにペーストします（そのまま動かせます）", false, "編集"},
@@ -167,12 +190,16 @@ private slots:
         QVERIFY(studio.window->action("act_delete_area")->shortcuts().contains(s("Backspace")));
         // the tools: the marquee in its ways
         for (const auto& [name, way] : {std::pair{"act_marquee", "rect"}, {"act_lasso", "lasso"}, {"act_wand", "wand"}, {"act_sel_ellipse", "ellipse"},
-                                        {"act_sel_polyline", "polyline"}, {"act_sel_colour", "color"}, {"act_sel_pen", "pen"}, {"act_sel_erase", "erase"}}) {
+                                        {"act_sel_polyline", "polyline"}, {"act_sel_pen", "pen"}, {"act_sel_erase", "erase"}}) {
             studio.trigger(name);
             QCOMPARE(studio.canvas()->tool(), QStringLiteral("marquee"));
             QCOMPARE(studio.canvas()->marquee, QString::fromLatin1(way));
             QVERIFY(studio.window->action(QString::fromLatin1(name))->isChecked());
         }
+        studio.trigger("act_magic_eraser");  // (its own tool, beside the selection's)
+        QCOMPARE(studio.canvas()->tool(), QStringLiteral("magiceraser"));
+        QCOMPARE(studio.window->tool_settings()->current_page(), studio.window->tool_settings()->page_for(QStringLiteral("magiceraser")));
+        QVERIFY(studio.window->action("act_sel_edges")->isChecked());
     }
 
     // A rectangle, a lasso, an ellipse, a polyline (Enter closes it); Esc lets it go.
@@ -184,24 +211,28 @@ private slots:
         QVERIFY(studio.area());
         const Json poly = (*studio.area())["poly"];
         QCOMPARE(poly.size(), std::size_t(4));
+        QVERIFY(!studio.area()->contains("antialias"));  // (a rectangle is never anti-aliased)
         QVERIFY(std::abs(poly[0][0].get<double>() - 10) < 0.5 && std::abs(poly[2][1].get<double>() - 32) < 0.5);
         QVERIFY2(std::abs(studio.size() - 20 * 20) < 25, qPrintable(QString::number(studio.size())));
 
         studio.trigger("act_lasso");
         inject::mouse_stroke(canvas, {QPointF(5, 5), QPointF(25, 5), QPointF(25, 25), QPointF(5, 25)});
         QCOMPARE((*studio.area())["poly"].size(), std::size_t(4));
+        QCOMPARE((*studio.area())["antialias"], Json(true));  // (なげなわ: anti-aliased by default, the user's decision 5)
         QVERIFY2(std::abs(studio.size() - 400) < 25, qPrintable(QString::number(studio.size())));
 
         studio.trigger("act_deselect");  // (a press inside the selection moves it, with any of the marquee's ways)
         studio.trigger("act_sel_ellipse");
         inject::mouse_stroke(canvas, {QPointF(10, 10), QPointF(20, 20), QPointF(30, 30)});
         QCOMPARE((*studio.area())["poly"].size(), std::size_t(72));
+        QCOMPARE((*studio.area())["antialias"], Json(true));
         QVERIFY2(std::abs(studio.size() - 3.14159 * 100) < 20, qPrintable(QString::number(studio.size())));
 
         studio.trigger("act_sel_polyline");
         for (const QPointF& p : {QPointF(10, 10), QPointF(40, 10), QPointF(10, 40)}) inject::click_mm(canvas, p);
         QTest::keyClick(canvas, Qt::Key_Return);
         QCOMPARE((*studio.area())["poly"].size(), std::size_t(3));
+        QCOMPARE((*studio.area())["antialias"], Json(true));
         QVERIFY2(std::abs(studio.size() - 450) < 25, qPrintable(QString::number(studio.size())));
 
         QTest::keyClick(canvas, Qt::Key_Escape);
@@ -231,7 +262,7 @@ private slots:
         QVERIFY(!studio.area());
     }
 
-    // すべて選択, 反転, 広げる・狭める・ぼかす (the width asked), 描画部分から選択.
+    // すべてを選択, 反転, 拡張・縮小 (rounded by the distance transform)・境界をぼかす (the width asked), ピクセルを選択.
     void changed() {
         Studio studio;
         auto* canvas = studio.canvas();
@@ -263,7 +294,8 @@ private slots:
         QVERIFY(studio.area() && studio.size() > 5 && studio.size() < 60);
     }
 
-    // 自動選択 inside the panel's border; 色域選択 of the paper; the selection pen adds, the eraser takes away.
+    // 自動選択ツール inside the panel's border (線で囲まれた所), of the paper's colour (色の近さ); the selection pen adds, the
+    // eraser takes away.
     void wandColourAndPen() {
         Studio studio;
         auto* canvas = studio.canvas();
@@ -273,9 +305,13 @@ private slots:
         const double panel = studio.size();
         QVERIFY2(panel > 1500 && panel < 2600, qPrintable(QString::number(panel)));  // (the panel, less the line across it)
         studio.trigger("act_deselect");
-        studio.trigger("act_sel_colour");
+        auto* criterion = studio.window->findChild<QComboBox*>(QStringLiteral("wand_criterion"));
+        criterion->setCurrentIndex(criterion->findData(QStringLiteral("colour")));
+        QCOMPARE(studio.window->wand_criterion, QStringLiteral("colour"));
+        studio.trigger("act_wand");
         inject::click_mm(canvas, QPointF(40, 15));
         QVERIFY2(studio.size() > panel, qPrintable(QStringLiteral("%1 %2").arg(studio.size()).arg(panel)));  // (white paper all over the page)
+        criterion->setCurrentIndex(criterion->findData(QStringLiteral("lines")));
         studio.trigger("act_deselect");
         studio.trigger("act_sel_pen");
         inject::mouse_stroke(canvas, {QPointF(10, 30), QPointF(30, 30)});
@@ -413,13 +449,34 @@ private slots:
         forget->actions().first()->trigger();
         QVERIFY(!studio.page().extra.contains("saved_areas") || !studio.page().extra["saved_areas"].contains("空"));
 
+        // クイックマスクモードで編集 (masks@1): the selection becomes the page's Quick Mask channel, which the tools paint (white
+        // selects); out of it, the selection it says; each a step 取り消し takes back
+        studio.trigger("act_marquee");
+        studio.trigger("act_deselect");
+        inject::mouse_stroke(canvas, {QPointF(10, 10), QPointF(30, 30)});
         studio.window->action("act_quick_mask")->setChecked(true);
         QVERIFY(canvas->quick_mask);
-        QCOMPARE(canvas->marquee, QStringLiteral("pen"));
-        QVERIFY(studio.window->action("act_sel_pen")->isChecked());
-        canvas->repaint();  // (the red over what is not chosen is drawn)
+        const core::Channel* quick = core::quick_mask_of(studio.page());
+        QVERIFY(quick != nullptr);
+        const std::string quick_id = quick->id;
+        QVERIFY(!studio.area());
+        QCOMPARE(canvas->tool(), QStringLiteral("pen"));  // (a brush in hand)
+        QCOMPARE(studio.window->channel_view().target, quick_id);
+        QVERIFY(studio.window->channel_view().shown.contains(quick_id));
+        canvas->repaint();  // (the mask laid over the page in red)
+        QVERIFY(studio.window->apply_ops(Json::array({Json{{"op", "fill_area"}, {"page", 1}, {"layer_id", studio.ink},
+                                                           {"area", Json{{"rect", Json::array({40, 40, 10, 10})}}}, {"rgb", Json::array({255, 255, 255})}}})));
+        QVERIFY(studio.layer(studio.ink)->patches.empty());  // (painted on the channel, not the layer)
         studio.window->action("act_quick_mask")->setChecked(false);
         QVERIFY(!canvas->quick_mask);
+        QVERIFY(core::quick_mask_of(studio.page()) == nullptr);
+        QVERIFY(studio.window->channel_view().target.empty());
+        QVERIFY2(std::abs(studio.size() - 500) < 40, qPrintable(QString::number(studio.size())));
+        studio.trigger("act_undo");  // (back in Quick Mask)
+        QVERIFY(core::quick_mask_of(studio.page()) != nullptr);
+        QVERIFY(studio.window->action("act_quick_mask")->isChecked());
+        QVERIFY(canvas->quick_mask);
+        QCOMPARE(studio.window->channel_view().target, quick_id);
     }
 
     // channels@1 (SPEC.md COLOR-03): 選択範囲を保存… (its name asked; none: Alpha n) and 選択範囲を読み込む
@@ -434,36 +491,252 @@ private slots:
         QAction* save = studio.window->action("act_sel_to_channel");
         QVERIFY(save != nullptr && menu->actions().contains(save));
         QCOMPARE(save->text(), QStringLiteral("選択範囲を保存…"));
-        QMenu* load = nullptr;
-        for (QMenu* m : studio.window->findChildren<QMenu*>()) if (m->title() == QStringLiteral("選択範囲を読み込む")) load = m;
-        QVERIFY(load != nullptr && menu->actions().contains(load->menuAction()));
-        emit load->aboutToShow();
-        QCOMPARE(load->actions().size(), 1);
-        QVERIFY(!load->actions().first()->isEnabled());  // (none yet)
+        QAction* load = studio.window->action("act_sel_load");
+        QVERIFY(load != nullptr && menu->actions().contains(load));
         studio.trigger("act_marquee");
         inject::mouse_stroke(canvas, {QPointF(10, 10), QPointF(30, 30)});
         const double chosen = studio.size();
         QVERIFY2(std::abs(chosen - 400) < 30, qPrintable(QString::number(chosen)));
-        studio.answers.responder->get_text = [](const QString&, const QString&, const QString&) { return std::optional<QString>(QStringLiteral(" 空 ")); };
+        // a new channel, named; (none: Alpha n)
+        QString name = QStringLiteral(" 空 ");
+        QString operation_seen;
+        studio.answers.responder->exec = [&name, &operation_seen](QDialog* dialog) {
+            if (dialog->objectName() != QStringLiteral("save_selection_dialog")) return int(QDialog::Rejected);
+            operation_seen = dialog->findChild<QComboBox*>(QStringLiteral("save_operation"))->currentData().toString();
+            dialog->findChild<QLineEdit*>(QStringLiteral("save_name"))->setText(name);
+            return int(QDialog::Accepted);
+        };
         studio.trigger("act_sel_to_channel");
+        QCOMPARE(operation_seen, QStringLiteral("new"));
         QCOMPARE(studio.page().channels.size(), std::size_t{1});
         QCOMPARE(studio.page().channels[0].name, std::string("空"));
         QVERIFY(studio.page().channels[0].kind == core::ChannelKind::Alpha);
-        studio.answers.responder->get_text = [](const QString&, const QString&, const QString&) { return std::optional<QString>(QString()); };
+        name.clear();
         studio.trigger("act_sel_to_channel");
         QCOMPARE(studio.page().channels.back().name, std::string("Alpha 1"));
+        // into the channel the page has: added to (another square)
+        studio.trigger("act_deselect");
+        inject::mouse_stroke(canvas, {QPointF(40, 40), QPointF(50, 50)});
+        bool named = true;
+        studio.answers.responder->exec = [&named](QDialog* dialog) {
+            if (dialog->objectName() != QStringLiteral("save_selection_dialog")) return int(QDialog::Rejected);
+            auto* channel = dialog->findChild<QComboBox*>(QStringLiteral("save_channel"));
+            channel->setCurrentIndex(channel->findText(QStringLiteral("空")));
+            named = dialog->findChild<QLineEdit*>(QStringLiteral("save_name"))->isEnabled();
+            auto* operation = dialog->findChild<QComboBox*>(QStringLiteral("save_operation"));
+            operation->setCurrentIndex(operation->findData(QStringLiteral("add")));
+            return int(QDialog::Accepted);
+        };
+        studio.trigger("act_sel_to_channel");
+        QVERIFY(!named);  // (a channel the page has keeps its name)
+        QCOMPARE(studio.page().channels.size(), std::size_t{2});
+        // read back, inverted, joined
         studio.trigger("act_deselect");
         QVERIFY(!studio.area());
-        emit load->aboutToShow();
-        QAction* use = nullptr;
-        for (QAction* a : load->actions()) if (a->text() == QStringLiteral("空")) use = a;
-        QVERIFY(use != nullptr);
-        use->trigger();
-        QVERIFY2(std::abs(studio.size() - chosen) < 20, qPrintable(QString::number(studio.size())));
+        bool inverted = false;
+        QString how = QStringLiteral("replace");
+        studio.answers.responder->exec = [&](QDialog* dialog) {
+            if (dialog->objectName() != QStringLiteral("load_selection_dialog")) return int(QDialog::Rejected);
+            auto* source = dialog->findChild<QComboBox*>(QStringLiteral("load_source"));
+            source->setCurrentIndex(source->findText(QStringLiteral("空")));
+            dialog->findChild<QCheckBox*>(QStringLiteral("load_invert"))->setChecked(inverted);
+            auto* operation = dialog->findChild<QComboBox*>(QStringLiteral("load_operation"));
+            operation->setCurrentIndex(operation->findData(how));
+            return int(QDialog::Accepted);
+        };
+        studio.trigger("act_sel_load");
+        QVERIFY2(std::abs(studio.size() - (chosen + 100)) < 30, qPrintable(QString::number(studio.size())));
+        inverted = true;
+        studio.trigger("act_sel_load");
+        QVERIFY2(std::abs(studio.size() - (3600 - chosen - 100)) < 40, qPrintable(QString::number(studio.size())));
+        inverted = false;
+        how = QStringLiteral("add");  // (the inverse and the channel: all of the page)
+        studio.trigger("act_sel_load");
+        QVERIFY2(std::abs(studio.size() - 3600) < 40, qPrintable(QString::number(studio.size())));
+        // a colour plate (the page's red: the paper and more) and the drawing layer's transparency are there too
+        studio.window->set_target_layer(studio.ink);
+        QStringList offered;
+        studio.answers.responder->exec = [&offered](QDialog* dialog) {
+            if (dialog->objectName() != QStringLiteral("load_selection_dialog")) return int(QDialog::Rejected);
+            auto* source = dialog->findChild<QComboBox*>(QStringLiteral("load_source"));
+            for (int i = 0; i < source->count(); ++i) offered << source->itemText(i);
+            source->setCurrentIndex(source->count() - 1);  // (the drawing layer's transparency: its line)
+            return int(QDialog::Accepted);
+        };
+        studio.trigger("act_deselect");
+        studio.trigger("act_sel_load");
+        QVERIFY2(offered.contains(QStringLiteral("レッド")) && offered.contains(QStringLiteral("合成（明るさ）")), qPrintable(offered.join(QLatin1Char(','))));
+        QVERIFY(offered.last().endsWith(QStringLiteral("の透明部分")));
+        QVERIFY(studio.area() && studio.size() > 5 && studio.size() < 60);
         // nothing chosen: nothing kept
         studio.trigger("act_deselect");
+        studio.answers.responder->exec = [](QDialog*) { return int(QDialog::Accepted); };
         studio.trigger("act_sel_to_channel");
         QCOMPARE(studio.page().channels.size(), std::size_t{2});
+    }
+
+    // ツールの設定: 選択方法 (a new area added without Shift), アンチエイリアス (off: none), ぼかし (the area feathered), スタイル
+    // (縦横比を固定, 固定).
+    void theToolsSettings() {
+        Studio studio;
+        auto* canvas = studio.canvas();
+        studio.trigger("act_marquee");
+        auto* add = studio.window->findChild<QToolButton*>(QStringLiteral("select_method_add"));
+        QVERIFY(add != nullptr);
+        inject::mouse_stroke(canvas, {QPointF(10, 10), QPointF(30, 30)});
+        add->click();
+        QCOMPARE(canvas->select_method, QStringLiteral("add"));
+        inject::mouse_stroke(canvas, {QPointF(20, 20), QPointF(40, 40)});
+        QVERIFY2(std::abs(studio.size() - 700) < 30, qPrintable(QString::number(studio.size())));
+        studio.window->findChild<QToolButton*>(QStringLiteral("select_method_replace"))->click();
+        studio.trigger("act_deselect");
+        // anti-aliasing off, a feather
+        auto* antialias = studio.window->findChild<QCheckBox*>(QStringLiteral("select_antialias"));
+        QVERIFY(antialias->isChecked());
+        antialias->setChecked(false);
+        studio.window->findChild<QDoubleSpinBox*>(QStringLiteral("select_feather"))->setValue(1.5);
+        studio.trigger("act_lasso");
+        inject::mouse_stroke(canvas, {QPointF(5, 5), QPointF(25, 5), QPointF(25, 25), QPointF(5, 25)});
+        QVERIFY(!studio.area()->contains("antialias"));
+        QCOMPARE((*studio.area())["feather_mm"], Json(1.5));
+        QVERIFY2(std::abs(studio.size() - 400) < 30, qPrintable(QString::number(studio.size())));
+        antialias->setChecked(true);
+        studio.window->findChild<QDoubleSpinBox*>(QStringLiteral("select_feather"))->setValue(0);
+        studio.trigger("act_deselect");
+        // the style: a ratio of 2 : 1, a fixed size (a click is enough)
+        studio.trigger("act_marquee");
+        auto* style = studio.window->findChild<QComboBox*>(QStringLiteral("marquee_style"));
+        style->setCurrentIndex(style->findData(QStringLiteral("ratio")));
+        studio.window->findChild<QDoubleSpinBox*>(QStringLiteral("marquee_width"))->setValue(2);
+        studio.window->findChild<QDoubleSpinBox*>(QStringLiteral("marquee_height"))->setValue(1);
+        inject::mouse_stroke(canvas, {QPointF(10, 10), QPointF(20, 15), QPointF(30, 12)});
+        auto box = canvas->selection_box();
+        QVERIFY(std::abs((box[2] - box[0]) - 2 * (box[3] - box[1])) < 0.05);
+        studio.trigger("act_deselect");
+        style->setCurrentIndex(style->findData(QStringLiteral("fixed")));
+        studio.window->findChild<QDoubleSpinBox*>(QStringLiteral("marquee_width"))->setValue(12);
+        studio.window->findChild<QDoubleSpinBox*>(QStringLiteral("marquee_height"))->setValue(6);
+        inject::click_mm(canvas, QPointF(10, 40));
+        box = canvas->selection_box();
+        QVERIFY(std::abs((box[2] - box[0]) - 12) < 0.05 && std::abs((box[3] - box[1]) - 6) < 0.05);
+        style->setCurrentIndex(style->findData(QStringLiteral("normal")));
+    }
+
+    // 境界線・滑らかに, 選択範囲を拡大・近似色を選択 (the wand's tolerance), 再選択 (the selection let go, on its page),
+    // 選択範囲を変形 (the outline alone, the book as it is; Enter ends it), 選択範囲の境界線 (hidden, shown).
+    void modifyGrowReselectTransform() {
+        Studio studio;
+        auto* canvas = studio.canvas();
+        studio.trigger("act_marquee");
+        inject::mouse_stroke(canvas, {QPointF(10, 10), QPointF(30, 30)});
+        studio.answers.responder->get_double = [](const QString&, const QString&, double, double, double, int) { return std::optional<double>(2.0); };
+        studio.trigger("act_sel_border");
+        QVERIFY2(std::abs(studio.size() - 160) < 30, qPrintable(QString::number(studio.size())));  // (a band 2 mm wide along the edge)
+        studio.trigger("act_deselect");
+        studio.trigger("act_sel_reselect");  // (the band back)
+        QVERIFY2(std::abs(studio.size() - 160) < 30, qPrintable(QString::number(studio.size())));
+        studio.trigger("act_sel_smooth");
+        QVERIFY(studio.area());
+        // grow: the white joined to a small square inside the panel; similar: the white anywhere
+        studio.trigger("act_deselect");
+        inject::mouse_stroke(canvas, {QPointF(40, 12), QPointF(42, 14)});
+        const double small = studio.size();
+        studio.trigger("act_sel_grow_colour");
+        const double grown = studio.size();
+        QVERIFY2(grown > small * 20, qPrintable(QStringLiteral("%1 %2").arg(small).arg(grown)));
+        studio.trigger("act_sel_similar");
+        QVERIFY2(studio.size() >= grown - 1, qPrintable(QStringLiteral("%1 %2").arg(grown).arg(studio.size())));
+        // 選択範囲を変形: a drag inside moves the outline, not the line
+        studio.trigger("act_deselect");
+        studio.window->set_target_layer(studio.ink);
+        inject::mouse_stroke(canvas, {QPointF(5, 5), QPointF(35, 35)});
+        const auto before = studio.line(studio.ink);
+        studio.trigger("act_sel_transform");
+        QVERIFY(canvas->transform_outline);
+        inject::mouse_stroke(canvas, {QPointF(20, 20), QPointF(25, 22), QPointF(30, 25)});
+        QCOMPARE(studio.line(studio.ink), before);
+        QVERIFY(std::abs(canvas->selection_box()[0] - 15) < 0.05);
+        QTest::keyClick(canvas, Qt::Key_Return);
+        QVERIFY(!canvas->transform_outline);
+        QVERIFY(studio.area());
+        // the edges hidden and shown
+        studio.window->action("act_sel_edges")->setChecked(false);
+        QVERIFY(!canvas->show_selection_edges);
+        canvas->repaint();
+        studio.window->action("act_sel_edges")->setChecked(true);
+        QVERIFY(canvas->show_selection_edges);
+        // another page: nothing to reselect there
+        studio.trigger("act_deselect");
+        QVERIFY(canvas->previous_selection().has_value());
+    }
+
+    // 色域指定…: the highlights (the paper), the shadows (the line), the colour picked on its picture with the eyedropper.
+    void colorRangeWindow() {
+        Studio studio;
+        QString select = QStringLiteral("highlights");
+        bool pick = false;
+        studio.answers.responder->exec = [&](QDialog* dialog) {
+            if (dialog->objectName() != QStringLiteral("color_range_dialog")) return int(QDialog::Rejected);
+            auto* which = dialog->findChild<QComboBox*>(QStringLiteral("range_select"));
+            which->setCurrentIndex(which->findData(select));
+            if (pick) {  // (a click on the picture at the paper's (40, 15) mm)
+                auto* picture = dialog->findChild<QLabel*>(QStringLiteral("range_preview"));
+                const QPixmap shown = picture->pixmap();
+                const QPointF at(40.0 / 60 * shown.width(), 15.0 / 60 * shown.height());
+                QMouseEvent press(QEvent::MouseButtonPress, at, picture->mapToGlobal(at), Qt::LeftButton, Qt::LeftButton, Qt::NoModifier);
+                QCoreApplication::sendEvent(picture, &press);
+            }
+            return int(QDialog::Accepted);
+        };
+        studio.trigger("act_color_range");
+        QVERIFY(studio.area());
+        QVERIFY2(studio.size() > 3000, qPrintable(QString::number(studio.size())));
+        QCOMPARE(studio.canvas()->tool(), QStringLiteral("marquee"));
+        select = QStringLiteral("shadows");
+        studio.trigger("act_color_range");
+        QVERIFY2(studio.size() > 3 && studio.size() < 600, qPrintable(QString::number(studio.size())));
+        select = QStringLiteral("sampled");
+        pick = true;
+        studio.trigger("act_color_range");
+        QVERIFY2(studio.size() > 3000, qPrintable(QString::number(studio.size())));
+    }
+
+    // マジック消しゴムツール: the paint layer's colour around the click made clear (one step), the settings sent with it.
+    void magicEraser() {
+        Studio studio;
+        const std::string white(std::size_t(40) * 40 * 4, '\xff');
+        const render::Image picture = render::Image::frombytes("RGBA", render::Size{40, 40}, white);
+        QVERIFY(studio.window->apply_ops(Json::array({Json{{"op", "add_layer"}, {"page", 1}, {"kind", "paint"}, {"id", "paint"}},
+                                                      Json{{"op", "put_raster"}, {"page", 1}, {"id", "paint"}, {"png_base64", core::b64encode(render::write_png(picture))}}})));
+        studio.window->set_target_layer("paint");
+        studio.trigger("act_magic_eraser");
+        studio.window->findChild<QSpinBox*>(QStringLiteral("magic_opacity"))->setValue(50);
+        QCOMPARE(studio.window->magic_eraser_settings.opacity, 50.0);
+        inject::click_mm(studio.canvas(), QPointF(30, 30));
+        const render::Image after = render::open_image(*studio.layer("paint")->raster_png).convert("RGBA");
+        const auto px = after.getpixel(after.width() / 2, after.height() / 2);
+        QVERIFY2(std::abs(px[3] - 128) <= 1, qPrintable(QString::number(px[3])));
+        studio.trigger("act_undo");
+        QCOMPARE(render::open_image(*studio.layer("paint")->raster_png).convert("RGBA").getpixel(after.width() / 2, after.height() / 2)[3], 255.0);
+    }
+
+    // The selection's right-click menu (Photoshop's): over the selection with a selection tool; not elsewhere.
+    void rightClickOnTheSelection() {
+        Studio studio;
+        studio.trigger("act_marquee");
+        inject::mouse_stroke(studio.canvas(), {QPointF(10, 10), QPointF(30, 30)});
+        QMenu menu;
+        QVERIFY(studio.window->fill_selection_menu(menu, QPointF(20, 20)));
+        QStringList words;
+        for (QAction* a : menu.actions())
+            if (!a->isSeparator()) words << a->text();
+        for (const char* word : {"選択を解除", "再選択", "選択範囲を反転", "境界をぼかす…", "選択範囲を保存…", "選択範囲を変形", "描画色で塗りつぶし"})
+            QVERIFY2(words.contains(QString::fromUtf8(word)), word);
+        QMenu outside;
+        QVERIFY(!studio.window->fill_selection_menu(outside, QPointF(50, 50)));
+        QVERIFY(outside.actions().isEmpty());
+        studio.trigger("act_pen");
+        QVERIFY(!studio.window->fill_selection_menu(outside, QPointF(20, 20)));
     }
 
     // Keys while a drag goes on: Esc (or Enter refused, on a locked layer) while a free transform's point is held

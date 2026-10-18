@@ -25104,9 +25104,14 @@
       },
       "upstream_menu": null,
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "未着手",
+      "implementation_status": "実装済み（PC3 B1、未統合）",
       "acceptance_status": "未実施",
-      "evidence": [],
+      "evidence": [
+        "native/src/render/erase_magic.cpp",
+        "native/src/render/selection_ext.cpp",
+        "native/tests/unit/test_magic_erase.cpp",
+        "native/tests/contract/test_contract_select.cpp"
+      ],
       "pc0": {
         "date": "2026-10-16",
         "cpp_base": "962faa4",
@@ -26222,9 +26227,12 @@
         "alternate_menus": []
       },
       "genko_status": "同等（C++ のソースと試験あり。2026-10-16 照合）",
-      "implementation_status": "未着手",
+      "implementation_status": "実装済み（PC3 B1、未統合）",
       "acceptance_status": "未実施",
-      "evidence": [],
+      "evidence": [
+        "native/src/app/main_window_select.cpp",
+        "native/tests/gui/test_gui_select.cpp"
+      ],
       "pc0": {
         "date": "2026-10-16",
         "cpp_base": "962faa4",
@@ -26315,9 +26323,18 @@
         "alternate_menus": []
       },
       "genko_status": "一部（2026-10-16 照合）",
-      "implementation_status": "未着手",
+      "implementation_status": "実装済み（PC3 B1、未統合）",
       "acceptance_status": "未実施",
-      "evidence": [],
+      "evidence": [
+        "native/src/render/select_color.cpp",
+        "native/src/render/selection_ext.cpp",
+        "native/src/app/select_dialogs.cpp",
+        "native/src/api/cli.cpp",
+        "native/src/render/inspect.cpp",
+        "native/tests/unit/test_select_color.cpp",
+        "native/tests/contract/test_contract_select.cpp",
+        "native/tests/gui/test_gui_select.cpp"
+      ],
       "pc0": {
         "date": "2026-10-16",
         "cpp_base": "962faa4",
@@ -26335,7 +26352,8 @@
         ],
         "gap": "色域選択はクリックした 1 点の色と許容値・つながり（contiguous）で選ぶ（ページの見えている色、8 bit）。色の系統（赤・黄…）・ハイライト/中間調/シャドウ・色域外の既定、なめらかな境（fuzziness）、複数の見本・引く見本、範囲を限る（localized）、反転の選択肢が無い",
         "note": ""
-      }
+      },
+      "remaining": "色域指定のスポイトは窓の中のページの絵（30 dpi）で拾い、キャンバスの上では拾わない。op の out_of_gamut の profile は組み込みと原稿のプロファイルだけ（窓は校正の設定のプロファイルそのもの）"
     },
     {
       "id": "select.convertToShape",
@@ -26404,9 +26422,13 @@
         "alternate_menus": []
       },
       "genko_status": "同等（C++ のソースと試験あり。2026-10-16 照合）",
-      "implementation_status": "未着手",
+      "implementation_status": "実装済み（PC3 B1、未統合）",
       "acceptance_status": "未実施",
-      "evidence": [],
+      "evidence": [
+        "native/src/app/main_window_select.cpp",
+        "native/src/app/canvas_select.cpp",
+        "native/tests/gui/test_gui_select.cpp"
+      ],
       "pc0": {
         "date": "2026-10-16",
         "cpp_base": "962faa4",
@@ -26492,9 +26514,19 @@
         "alternate_menus": []
       },
       "genko_status": "一部（2026-10-16 照合）",
-      "implementation_status": "未着手",
+      "implementation_status": "実装済み（PC3 B1、未統合）",
       "acceptance_status": "未実施",
-      "evidence": [],
+      "evidence": [
+        "native/src/render/ops_quick_mask.cpp",
+        "native/src/core/masks.cpp",
+        "native/src/formats/psd_export.cpp",
+        "native/src/render/psd.cpp",
+        "native/src/app/main_window_select.cpp",
+        "native/src/app/channel_panel.cpp",
+        "native/tests/unit/test_select_color.cpp",
+        "native/tests/contract/test_contract_select.cpp",
+        "native/tests/gui/test_gui_select.cpp"
+      ],
       "pc0": {
         "date": "2026-10-16",
         "cpp_base": "962faa4",
@@ -26511,7 +26543,8 @@
         ],
         "gap": "選択範囲を赤で見せ、選択ペン・選択消しで直すクイックマスクはある。ブラシ・グラデーション・フィルターなど普通の描く道具でマスクを描けない。色・不透明度・どちらを色で示すかの設定と Q のキーが無い",
         "note": ""
-      }
+      },
+      "remaining": "Photoshop の Q のキーは移動ツールが使うので付けない。クイックマスクの色・不透明度・色を付ける所はチャンネル パネルのチャンネルのオプション… で直す（専用のオプションの窓は無い）"
     },
     {
       "id": "select.findLayers",
@@ -26626,9 +26659,15 @@
         "alternate_menus": []
       },
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "未着手",
+      "implementation_status": "実装済み（PC3 B1、未統合）",
       "acceptance_status": "未実施",
-      "evidence": [],
+      "evidence": [
+        "native/src/render/select_color.cpp",
+        "native/src/app/main_window_select.cpp",
+        "native/tests/unit/test_select_color.cpp",
+        "native/tests/contract/test_contract_select.cpp",
+        "native/tests/gui/test_gui_select.cpp"
+      ],
       "pc0": {
         "date": "2026-10-16",
         "cpp_base": "962faa4",
@@ -26669,9 +26708,13 @@
         "alternate_menus": []
       },
       "genko_status": "同等（C++ のソースと試験あり。2026-10-16 照合）",
-      "implementation_status": "未着手",
+      "implementation_status": "実装済み（PC3 B1、未統合）",
       "acceptance_status": "未実施",
-      "evidence": [],
+      "evidence": [
+        "native/src/app/main_window_select.cpp",
+        "native/src/render/selection.cpp",
+        "native/tests/gui/test_gui_select.cpp"
+      ],
       "pc0": {
         "date": "2026-10-16",
         "cpp_base": "962faa4",
@@ -26748,9 +26791,17 @@
       },
       "upstream_menu": null,
       "genko_status": "一部（2026-10-16 照合）",
-      "implementation_status": "未着手",
+      "implementation_status": "実装済み（PC3 B1、未統合）",
       "acceptance_status": "未実施",
-      "evidence": [],
+      "evidence": [
+        "native/src/app/main_window_select.cpp",
+        "native/src/app/canvas_select.cpp",
+        "native/tests/gui/test_gui_select.cpp",
+        "native/src/app/canvas.hpp",
+        "native/src/render/selection.cpp",
+        "native/src/render/area_kinds.cpp",
+        "native/src/render/selection_ext.cpp"
+      ],
       "pc0": {
         "date": "2026-10-16",
         "cpp_base": "962faa4",
@@ -26796,9 +26847,18 @@
         "alternate_menus": []
       },
       "genko_status": "一部（2026-10-16 照合）",
-      "implementation_status": "未着手",
+      "implementation_status": "実装済み（PC3 B1、未統合）",
       "acceptance_status": "未実施",
-      "evidence": [],
+      "evidence": [
+        "native/src/render/selection.cpp",
+        "native/src/render/area_kinds.cpp",
+        "native/src/app/select_dialogs.cpp",
+        "native/src/app/main_window_channels.cpp",
+        "native/src/app/channel_panel.cpp",
+        "native/tests/unit/test_channels.cpp",
+        "native/tests/unit/test_selection_ext.cpp",
+        "native/tests/gui/test_gui_select.cpp"
+      ],
       "pc0": {
         "date": "2026-10-16",
         "cpp_base": "962faa4",
@@ -26818,7 +26878,8 @@
         ],
         "gap": "ページに残した選択範囲（ストック）と、描く先のレイヤーの描画部分（不透明部分）から選べる。アルファチャンネル・カラーチャンネル・レイヤーマスク・クイックマスクから読む、反転、足す・引く・重なりの選択肢（画面）、別の原稿から読むが無い",
         "note": "Genko にアルファチャンネルの仕組みが無い。op の area では saved と union/intersect/subtract を組める"
-      }
+      },
+      "remaining": "上流の別の文書（Genko では別のページ）から読む所は無い"
     },
     {
       "id": "select.magicWand",
@@ -26833,9 +26894,18 @@
       },
       "upstream_menu": null,
       "genko_status": "一部（2026-10-16 照合）",
-      "implementation_status": "未着手",
+      "implementation_status": "実装済み（PC3 B1、未統合）",
       "acceptance_status": "未実施",
-      "evidence": [],
+      "evidence": [
+        "native/src/app/main_window_select.cpp",
+        "native/src/app/canvas_select.cpp",
+        "native/tests/gui/test_gui_select.cpp",
+        "native/src/render/select_color.cpp",
+        "native/src/render/selection.cpp",
+        "native/src/render/area_kinds.cpp",
+        "native/tests/unit/test_select_color.cpp",
+        "native/tests/contract/test_contract_select.cpp"
+      ],
       "pc0": {
         "date": "2026-10-16",
         "cpp_base": "962faa4",
@@ -26852,7 +26922,8 @@
         ],
         "gap": "自動選択は線で囲まれた所（隙間閉じ・参照するレイヤー）を選び、色の許容値とつながりは色域選択にある。色の許容値で描く先のレイヤーだけを見る選び方・アンチエイリアスの切り替えが無い",
         "note": ""
-      }
+      },
+      "remaining": "高精度・インキのページでも、解いた選択範囲の格子は 200 dpi のまま（ページの一番細かい格子にはまだしていない）"
     },
     {
       "id": "select.modify.border",
@@ -26882,9 +26953,15 @@
         "alternate_menus": []
       },
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "未着手",
+      "implementation_status": "実装済み（PC3 B1、未統合）",
       "acceptance_status": "未実施",
-      "evidence": [],
+      "evidence": [
+        "native/src/render/area_kinds.cpp",
+        "native/src/render/selection_ext.cpp",
+        "native/src/app/main_window_select.cpp",
+        "native/tests/unit/test_select_color.cpp",
+        "native/tests/gui/test_gui_select.cpp"
+      ],
       "pc0": {
         "date": "2026-10-16",
         "cpp_base": "962faa4",
@@ -26927,9 +27004,18 @@
         "alternate_menus": []
       },
       "genko_status": "同等（C++ のソースと試験あり。2026-10-16 照合）",
-      "implementation_status": "未着手",
+      "implementation_status": "実装済み（PC3 B1、未統合）",
       "acceptance_status": "未実施",
-      "evidence": [],
+      "evidence": [
+        "native/src/app/main_window_select.cpp",
+        "native/src/app/canvas_select.cpp",
+        "native/tests/gui/test_gui_select.cpp",
+        "native/src/render/area_kinds.cpp",
+        "native/src/render/selection_ext.cpp",
+        "native/src/render/selection.cpp",
+        "native/tests/unit/test_selection_ext.cpp",
+        "native/tests/unit/test_select_color.cpp"
+      ],
       "pc0": {
         "date": "2026-10-16",
         "cpp_base": "962faa4",
@@ -26976,9 +27062,18 @@
         "alternate_menus": []
       },
       "genko_status": "同等（C++ のソースと試験あり。2026-10-16 照合）",
-      "implementation_status": "未着手",
+      "implementation_status": "実装済み（PC3 B1、未統合）",
       "acceptance_status": "未実施",
-      "evidence": [],
+      "evidence": [
+        "native/src/app/main_window_select.cpp",
+        "native/src/app/canvas_select.cpp",
+        "native/tests/gui/test_gui_select.cpp",
+        "native/src/render/area_kinds.cpp",
+        "native/src/render/selection_ext.cpp",
+        "native/src/render/selection.cpp",
+        "native/tests/unit/test_selection_ext.cpp",
+        "native/tests/unit/test_select_color.cpp"
+      ],
       "pc0": {
         "date": "2026-10-16",
         "cpp_base": "962faa4",
@@ -27025,9 +27120,14 @@
         "alternate_menus": []
       },
       "genko_status": "同等（C++ のソースと試験あり。2026-10-16 照合）",
-      "implementation_status": "未着手",
+      "implementation_status": "実装済み（PC3 B1、未統合）",
       "acceptance_status": "未実施",
-      "evidence": [],
+      "evidence": [
+        "native/src/app/main_window_select.cpp",
+        "native/src/app/canvas_select.cpp",
+        "native/tests/gui/test_gui_select.cpp",
+        "native/src/render/selection.cpp"
+      ],
       "pc0": {
         "date": "2026-10-16",
         "cpp_base": "962faa4",
@@ -27074,9 +27174,15 @@
         "alternate_menus": []
       },
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "未着手",
+      "implementation_status": "実装済み（PC3 B1、未統合）",
       "acceptance_status": "未実施",
-      "evidence": [],
+      "evidence": [
+        "native/src/render/area_kinds.cpp",
+        "native/src/render/selection_ext.cpp",
+        "native/src/app/main_window_select.cpp",
+        "native/tests/unit/test_select_color.cpp",
+        "native/tests/gui/test_gui_select.cpp"
+      ],
       "pc0": {
         "date": "2026-10-16",
         "cpp_base": "962faa4",
@@ -27162,9 +27268,16 @@
       },
       "upstream_menu": null,
       "genko_status": "一部（2026-10-16 照合）",
-      "implementation_status": "未着手",
+      "implementation_status": "実装済み（PC3 B1、未統合）",
       "acceptance_status": "未実施",
-      "evidence": [],
+      "evidence": [
+        "native/src/app/main_window_select.cpp",
+        "native/src/app/canvas_select.cpp",
+        "native/tests/gui/test_gui_select.cpp",
+        "native/src/app/canvas.hpp",
+        "native/src/render/selection.cpp",
+        "native/src/render/area_kinds.cpp"
+      ],
       "pc0": {
         "date": "2026-10-16",
         "cpp_base": "962faa4",
@@ -27238,9 +27351,13 @@
         "alternate_menus": []
       },
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "未着手",
+      "implementation_status": "実装済み（PC3 B1、未統合）",
       "acceptance_status": "未実施",
-      "evidence": [],
+      "evidence": [
+        "native/src/app/main_window_select.cpp",
+        "native/src/app/canvas_select.cpp",
+        "native/tests/gui/test_gui_select.cpp"
+      ],
       "pc0": {
         "date": "2026-10-16",
         "cpp_base": "962faa4",
@@ -27251,7 +27368,8 @@
         "tests": [],
         "gap": "直前の選択範囲を戻す操作が無い（選択範囲は履歴に残らない）",
         "note": ""
-      }
+      },
+      "remaining": "再選択は窓の中だけ（原稿・履歴に残らない。利用者の決定 4）"
     },
     {
       "id": "select.saveSelection",
@@ -27279,9 +27397,17 @@
         "alternate_menus": []
       },
       "genko_status": "一部（2026-10-16 照合）",
-      "implementation_status": "未着手",
+      "implementation_status": "実装済み（PC3 B1、未統合）",
       "acceptance_status": "未実施",
-      "evidence": [],
+      "evidence": [
+        "native/src/render/ops_channels.cpp",
+        "native/src/app/select_dialogs.cpp",
+        "native/src/app/main_window_channels.cpp",
+        "native/src/app/channel_panel.cpp",
+        "native/tests/unit/test_channels.cpp",
+        "native/tests/contract/test_contract_channels.cpp",
+        "native/tests/gui/test_gui_select.cpp"
+      ],
       "pc0": {
         "date": "2026-10-16",
         "cpp_base": "962faa4",
@@ -27299,7 +27425,8 @@
         ],
         "gap": "名前を付けてページに残す（store_area）はある。アルファチャンネルとして保存・既にあるものへの足す/引く/重なり・別の原稿への保存が無い",
         "note": "Genko にアルファチャンネルの仕組みが無い"
-      }
+      },
+      "remaining": "上流の別の文書（Genko では別のページ）への保存は無い"
     },
     {
       "id": "select.selectAndMask",
@@ -27359,9 +27486,15 @@
         "alternate_menus": []
       },
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "未着手",
+      "implementation_status": "実装済み（PC3 B1、未統合）",
       "acceptance_status": "未実施",
-      "evidence": [],
+      "evidence": [
+        "native/src/render/select_color.cpp",
+        "native/src/app/main_window_select.cpp",
+        "native/tests/unit/test_select_color.cpp",
+        "native/tests/contract/test_contract_select.cpp",
+        "native/tests/gui/test_gui_select.cpp"
+      ],
       "pc0": {
         "date": "2026-10-16",
         "cpp_base": "962faa4",
@@ -27512,9 +27645,14 @@
         "alternate_menus": []
       },
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "未着手",
+      "implementation_status": "実装済み（PC3 B1、未統合）",
       "acceptance_status": "未実施",
-      "evidence": [],
+      "evidence": [
+        "native/src/app/main_window_select.cpp",
+        "native/src/app/canvas_select.cpp",
+        "native/tests/gui/test_gui_select.cpp",
+        "native/src/render/area_kinds.cpp"
+      ],
       "pc0": {
         "date": "2026-10-16",
         "cpp_base": "962faa4",
@@ -33717,9 +33855,14 @@
         "alternate_menus": []
       },
       "genko_status": "一部（2026-10-16 照合）",
-      "implementation_status": "未着手",
+      "implementation_status": "実装済み（PC3 B1、未統合）",
       "acceptance_status": "未実施",
-      "evidence": [],
+      "evidence": [
+        "native/src/app/main_window_select.cpp",
+        "native/src/app/canvas_select.cpp",
+        "native/src/app/main_window_actions.cpp",
+        "native/tests/gui/test_gui_select.cpp"
+      ],
       "pc0": {
         "date": "2026-10-16",
         "cpp_base": "962faa4",
@@ -36484,9 +36627,14 @@
       "kind": "tool",
       "upstream_source": "crates/ui-egui/src/state.rs",
       "genko_status": "一部（2026-10-16 照合）",
-      "implementation_status": "未着手",
+      "implementation_status": "実装済み（PC3 B1、未統合）",
       "acceptance_status": "未実施",
-      "evidence": [],
+      "evidence": [
+        "native/src/app/main_window_select.cpp",
+        "native/src/app/canvas_select.cpp",
+        "native/tests/gui/test_gui_select.cpp",
+        "native/src/app/canvas.hpp"
+      ],
       "pc0": {
         "date": "2026-10-16",
         "cpp_base": "962faa4",
@@ -36510,9 +36658,16 @@
       "kind": "tool",
       "upstream_source": "crates/ui-egui/src/state.rs",
       "genko_status": "一部（2026-10-16 照合）",
-      "implementation_status": "未着手",
+      "implementation_status": "実装済み（PC3 B1、未統合）",
       "acceptance_status": "未実施",
-      "evidence": [],
+      "evidence": [
+        "native/src/app/main_window_select.cpp",
+        "native/src/app/canvas_select.cpp",
+        "native/tests/gui/test_gui_select.cpp",
+        "native/src/app/canvas.hpp",
+        "native/src/render/selection.cpp",
+        "native/src/render/area_kinds.cpp"
+      ],
       "pc0": {
         "date": "2026-10-16",
         "cpp_base": "962faa4",
@@ -36536,9 +36691,15 @@
       "kind": "tool",
       "upstream_source": "crates/ui-egui/src/state.rs",
       "genko_status": "一部（2026-10-16 照合）",
-      "implementation_status": "未着手",
+      "implementation_status": "実装済み（PC3 B1、未統合）",
       "acceptance_status": "未実施",
-      "evidence": [],
+      "evidence": [
+        "native/src/app/main_window_select.cpp",
+        "native/src/app/canvas_select.cpp",
+        "native/tests/gui/test_gui_select.cpp",
+        "native/src/app/canvas.hpp",
+        "native/src/render/area_kinds.cpp"
+      ],
       "pc0": {
         "date": "2026-10-16",
         "cpp_base": "962faa4",
@@ -36562,9 +36723,15 @@
       "kind": "tool",
       "upstream_source": "crates/ui-egui/src/state.rs",
       "genko_status": "一部（2026-10-16 照合）",
-      "implementation_status": "未着手",
+      "implementation_status": "実装済み（PC3 B1、未統合）",
       "acceptance_status": "未実施",
-      "evidence": [],
+      "evidence": [
+        "native/src/app/main_window_select.cpp",
+        "native/src/app/canvas_select.cpp",
+        "native/tests/gui/test_gui_select.cpp",
+        "native/src/app/canvas.hpp",
+        "native/src/render/area_kinds.cpp"
+      ],
       "pc0": {
         "date": "2026-10-16",
         "cpp_base": "962faa4",
@@ -36586,9 +36753,16 @@
       "kind": "tool",
       "upstream_source": "crates/ui-egui/src/state.rs",
       "genko_status": "一部（2026-10-16 照合）",
-      "implementation_status": "未着手",
+      "implementation_status": "実装済み（PC3 B1、未統合）",
       "acceptance_status": "未実施",
-      "evidence": [],
+      "evidence": [
+        "native/src/app/main_window_select.cpp",
+        "native/src/app/canvas_select.cpp",
+        "native/tests/gui/test_gui_select.cpp",
+        "native/src/render/select_color.cpp",
+        "native/tests/unit/test_select_color.cpp",
+        "native/tests/gui/test_gui_actions.cpp"
+      ],
       "pc0": {
         "date": "2026-10-16",
         "cpp_base": "962faa4",
@@ -36796,9 +36970,15 @@
       "kind": "tool",
       "upstream_source": "crates/ui-egui/src/state.rs",
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "未着手",
+      "implementation_status": "実装済み（PC3 B1、未統合）",
       "acceptance_status": "未実施",
-      "evidence": [],
+      "evidence": [
+        "native/src/app/main_window_select.cpp",
+        "native/src/app/canvas_tools.cpp",
+        "native/src/app/tool_settings.cpp",
+        "native/tests/gui/test_gui_select.cpp",
+        "native/tests/gui/test_gui_actions.cpp"
+      ],
       "pc0": {
         "date": "2026-10-16",
         "cpp_base": "962faa4",

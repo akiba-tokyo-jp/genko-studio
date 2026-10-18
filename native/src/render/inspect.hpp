@@ -1,5 +1,6 @@
 #pragma once
 
+#include <cstdint>
 #include <optional>
 #include <string>
 
@@ -18,5 +19,12 @@ namespace genko::render {
 // core::Error("key") for a point off the page or an unknown layer.
 core::Json pixel_at(const core::Page& page, const core::Document* episode, double x_mm, double y_mm, const std::optional<std::string>& layer,
                     int dpi);
+
+// PC3 B1 (SPEC.md COLOR-06, `genko inspect --page N --area`): an area as an op given it works on it — {"area": the area
+// resolved as the bus resolves it before the op (as it is when it needs no resolving), "coverage": how much of the page it
+// covers (0..1, grey counted by its share), "box_mm": [x, y, w, h] of what it covers, "selected": whether it covers
+// anything}; nothing covered: {"area": null, "coverage": 0, "box_mm": null, "selected": false}. core::Error("key") for no
+// such page, core::Error("value") for an area that cannot be read (the op's words).
+core::Json inspect_area(const core::Document& doc, std::int64_t page, const core::Json& area);
 
 }  // namespace genko::render

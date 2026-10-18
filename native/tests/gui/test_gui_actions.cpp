@@ -291,7 +291,12 @@ private slots:
         // act_smart_filter_mask_off, act_smart_filters_clear), レイヤー → ラスタライズ (act_rasterize_type, act_rasterize_fill,
         // act_rasterize_smart, act_rasterize_layer, act_rasterize_all) and レイヤーの内容オプション… (act_layer_content_options)
         // — theirs (test_gui_smart; act_import stays test_gui_carried's).
-        QCOMPARE(w->actions_by_name().size(), std::size_t{322});
+        // and the 10 of PC3 B1 (SPEC COLOR-06) — 選択範囲 の 再選択・色域指定…・境界線…・滑らかに…・選択範囲を拡大・近似色を選択・
+        // 選択範囲を変形・選択範囲を読み込む…, 表示 → 選択範囲の境界線 and ツール → マジック消しゴムツール (act_sel_reselect,
+        // act_color_range, act_sel_border, act_sel_smooth, act_sel_grow_colour, act_sel_similar, act_sel_transform, act_sel_load,
+        // act_sel_edges, act_magic_eraser), less 色域選択 (act_sel_colour: 自動選択ツール's 色の近さ now, the user's decision 5)
+        // — theirs (test_gui_select).
+        QCOMPARE(w->actions_by_name().size(), std::size_t{331});
         QVERIFY(w->action("act_chat_approval"));
         QVERIFY(w->action("act_style"));
         QVERIFY(w->action("act_exposure"));
@@ -414,7 +419,7 @@ private slots:
                                                   {"frame", "act_frame"},      {"move", "act_move"},     {"zoom", "act_zoom_tool"},
                                                   {"rect", "act_marquee"},     {"lasso", "act_lasso"},   {"wand", "act_wand"},
                                                   {"ellipse", "act_sel_ellipse"}, {"polyline", "act_sel_polyline"},
-                                                  {"colour", "act_sel_colour"}, {"selpen", "act_sel_pen"}, {"selerase", "act_sel_erase"},
+                                                  {"selpen", "act_sel_pen"}, {"selerase", "act_sel_erase"}, {"magiceraser", "act_magic_eraser"},
                                                   {"picker", "act_picker"},   {"fill", "act_fill"},     {"lassofill", "act_lassofill"},
                                                   {"gradient", "act_gradient"}, {"shape", "act_shape"}, {"blend", "act_blend"},
                                                   {"liquify", "act_liquify"}, {"reshape", "act_reshape"}, {"vector", "act_vector"},

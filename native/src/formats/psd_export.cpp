@@ -1073,11 +1073,26 @@ std::string utf16_of(const std::string& name) {
     return luni.substr(16, std::size_t(units) * 2);
 }
 
-std::string with_channels(const std::string& sized_resources, const core::Page& page) {
+// masks@1 (PC3 B1, SPEC.md COLOR-06「クイックマスク」): the channels in the order they are written — a page's Quick Mask
+// last, as Photoshop writes a document saved in Quick Mask mode — and that channel named by image resource 1022 (its
+// number among the file's channels, u16, then 0: not "initially empty"), PhotoCraft's io/src/psd_export.rs:619-662. A page
+// without a Quick Mask: its channels in their order, no 1022 (the same bytes as before).
+std::vector<core::Channel> psd_order(const std::vector<core::Channel>& channels) {
+    std::vector<core::Channel> out;
+    for (const bool quick : {false, true})
+        for (const core::Channel& channel : channels)
+            if (channel.quick_mask == quick) out.push_back(channel);
+    return out;
+}
+
+// `first`: the file's channels before the page's (its colour planes; 0 when `page`'s list holds them, a multichannel
+// page's plates).
+std::string with_channels(const std::string& sized_resources, const core::Page& page, unsigned first) {
     if (page.channels.empty()) return sized_resources;
+    const std::vector<core::Channel> ordered = psd_order(page.channels);
     std::string names, unicode, display;
     put_u32(display, 1);
-    for (const core::Channel& channel : page.channels) {
+    for (const core::Channel& channel : ordered) {
         std::string ascii;
         for (const char c : channel.name) ascii += static_cast<unsigned char>(c) < 0x80 && static_cast<unsigned char>(c) >= 0x20 ? c : '?';
         if (ascii.size() > 255) ascii.resize(255);
@@ -1098,6 +1113,12 @@ std::string with_channels(const std::string& sized_resources, const core::Page& 
     blocks += image_resource(1006, names);
     blocks += image_resource(1045, unicode);
     blocks += image_resource(1077, display);
+    if (ordered.back().quick_mask) {
+        std::string info;
+        put_u16(info, first + static_cast<unsigned>(ordered.size()) - 1);
+        put_u8(info, 0);
+        blocks += image_resource(1022, info);
+    }
     std::string out;
     put_u32(out, u32_of(blocks.size()));
     return out + blocks;
@@ -1122,7 +1143,8 @@ std::string channel_samples(const core::Page&, const core::Channel& channel, ren
 // The merged picture's extra channels after its colour planes: 8 bits RLE (their rows' counts after the colours', their
 // packed rows after theirs), 16 and 32 raw.
 void put_channels_rle(const core::Page& page, render::Size size, std::string& counts, std::string& packed) {
-    for (const core::Channel& channel : page.channels) packbits_rows(Image::frombytes("L", size, channel_samples(page, channel, size, 8)), counts, packed);
+    for (const core::Channel& channel : psd_order(page.channels))
+        packbits_rows(Image::frombytes("L", size, channel_samples(page, channel, size, 8)), counts, packed);
 }
 
 // The render's options for the merged picture: its spots left out (they are channels of their own).
@@ -1179,7 +1201,7 @@ std::string page_psd_inks(const core::Document& episode, const core::Page& page,
     put_u16(body, color.space == core::InkSpace::Cmyk ? 4 : grey ? 1 : 9);
     put_u32(body, 0);  // (no colour mode data)
     body += with_channels(resources_with_icc(dpi, color.space != core::InkSpace::Lab && color.icc ? std::string_view(*color.icc) : std::string_view()),
-                          page);
+                          page, n);
     body += records.finish(placed.global());
     // the merged picture: each colour plane (CMYK inverted); 8 bits RLE (every row's count first), 16 and 32 raw
     const unsigned all = merged.channels();
@@ -1207,7 +1229,7 @@ std::string page_psd_inks(const core::Document& episode, const core::Page& page,
     } else {
         put_u16(body, 0);
         for (unsigned c = 0; c < n; ++c) body += plane(c);
-        for (const core::Channel& channel : page.channels) body += channel_samples(page, channel, size, color.depth);
+        for (const core::Channel& channel : psd_order(page.channels)) body += channel_samples(page, channel, size, color.depth);
     }
     return body;
 }
@@ -1245,7 +1267,7 @@ std::string page_psd_rgb(const core::Document& episode, const core::Page& page, 
     put_u16(body, static_cast<std::uint32_t>(depth));
     put_u16(body, 3);
     put_u32(body, 0);  // (no colour mode data)
-    body += with_channels(resources_with_icc(dpi, detail::rgb_icc(mode)), page);
+    body += with_channels(resources_with_icc(dpi, detail::rgb_icc(mode)), page, 3);
     body += records.finish(placed.global());
     // the merged picture: 8 bits RLE (every row's count first), 16 and 32 raw
     const std::size_t pixels = std::size_t(merged.width()) * merged.height();
@@ -1264,7 +1286,7 @@ std::string page_psd_rgb(const core::Document& episode, const core::Page& page, 
     } else {
         put_u16(body, 0);
         for (unsigned c = 0; c < 3; ++c) body += plane(c);
-        for (const core::Channel& channel : page.channels) body += channel_samples(page, channel, size, depth);
+        for (const core::Channel& channel : psd_order(page.channels)) body += channel_samples(page, channel, size, depth);
     }
     return body;
 }
@@ -1366,7 +1388,7 @@ std::string page_psd_flat(const core::Document& episode, const core::Page& page,
             plates.push_back(std::move(ink));
         }
         named.channels.insert(named.channels.begin(), plates.begin(), plates.end());
-        body += with_channels(resources(dpi), named);
+        body += with_channels(resources(dpi), named, 0);
         put_u32(body, 0);  // (no layers)
         const auto plane = [&](unsigned c) {
             std::string bytes;
@@ -1383,7 +1405,7 @@ std::string page_psd_flat(const core::Document& episode, const core::Page& page,
         } else {
             put_u16(body, 0);
             for (unsigned c = 0; c < n; ++c) body += plane(c);
-            for (const core::Channel& channel : page.channels) body += channel_samples(page, channel, size, depth);
+            for (const core::Channel& channel : psd_order(page.channels)) body += channel_samples(page, channel, size, depth);
         }
     }
     return body;
@@ -1423,7 +1445,7 @@ std::string page_psd_bytes(const core::Document& episode, const core::Page& page
     put_u16(body, 8);
     put_u16(body, 3);
     put_u32(body, 0);  // (no colour mode data)
-    body += with_channels(resources(dpi), page);
+    body += with_channels(resources(dpi), page, 3);
     body += records.finish(placed.global());
     // the merged picture: RLE, every row's count of every channel first
     std::string counts, packed;
@@ -1473,7 +1495,7 @@ std::string contents_psd_bytes(const core::Document& episode, const core::Page& 
     put_u16(body, 8);
     put_u16(body, 3);
     put_u32(body, 0);
-    body += with_channels(resources(dpi), page);
+    body += with_channels(resources(dpi), page, 3);
     body += records.finish(placed.global());
     std::string counts, packed;
     for (const Image& channel : rgb.split()) packbits_rows(channel, counts, packed);

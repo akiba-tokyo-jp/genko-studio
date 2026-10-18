@@ -51,6 +51,7 @@ genko_library(genko_app
     main_window.cpp
     main_window_actions.cpp
     main_window_select.cpp
+    select_dialogs.cpp
     main_window_channels.cpp
     main_window_brushes.cpp
     main_window_anim.cpp

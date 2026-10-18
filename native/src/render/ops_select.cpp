@@ -16,8 +16,8 @@ core::OpFunction not_yet(const char* op, const char* group) {
 void register_select_ops(core::OpRegistry& registry) {
     // B1: the Quick Mask ({page, on, area?, color?, opacity?, indicates?}: an alpha channel marked quick_mask, masks@1),
     // the Magic Eraser ({page, layer_id, x_mm, y_mm, tolerance, contiguous, antialias, sample, opacity, area?})
-    registry.add("quick_mask", not_yet("quick_mask", "B1"));
-    registry.add("magic_erase", not_yet("magic_erase", "B1"));
+    registry.add("quick_mask", quick_mask);    // (render/ops_quick_mask.cpp)
+    registry.add("magic_erase", magic_erase);  // (render/erase_magic.cpp)
     // B2: Edit › Stroke ({page, layer_id, area?, width_mm, rgb, opacity, location, preserve_transparency?}); Layer › Layer
     // Mask › Apply ({page, id}) and From Transparency ({page, id})
     registry.add("outline_area", not_yet("outline_area", "B2"));

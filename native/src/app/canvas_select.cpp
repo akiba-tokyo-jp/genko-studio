@@ -1,7 +1,9 @@
 // The canvas's selection (Python's genko/app/canvas.py "selections" and canvas_shapes.py): the marquee tool's ways
-// of choosing — a rectangle, an ellipse, a lasso, a polyline, auto-select, colour, the selection pen and eraser — with
-// Shift to add, Alt to take away, both for the overlap; the chosen area moved, scaled, turned and slanted by its
-// handles, or pulled freely (perspective, mesh); a mask selection and the quick mask shown as a tint.
+// of choosing — a rectangle, an ellipse, a lasso, a polyline, auto-select, the selection pen and eraser — with Shift to
+// add, Alt to take away, both for the overlap (PC3 B1: else as the 選択方法 buttons say); an ellipse, a lasso and a polygon
+// anti-aliased and feathered as the tool says, a rectangle or an ellipse of a fixed ratio or size; the chosen area moved,
+// scaled, turned and slanted by its handles (選択範囲を変形: its outline only), or pulled freely (perspective, mesh); a mask
+// selection shown as a tint; the selection let go kept for 再選択.
 
 #include <QKeyEvent>
 #include <QPainter>
@@ -47,6 +49,8 @@ QString PageCanvas::how_from(Qt::KeyboardModifiers modifiers) {
 }
 
 void PageCanvas::set_selection(std::optional<Json> area, std::optional<std::vector<QPointF>> outline) {
+    if (!area && selection_ && page() != nullptr) previous_ = std::make_pair(page()->id, *selection_);  // (再選択)
+    if (!area) transform_outline = false;
     warp_.reset();
     sel_pivot_.reset();
     sel_drag_.reset();
@@ -67,6 +71,11 @@ void PageCanvas::set_selection(std::optional<Json> area, std::optional<std::vect
         selection_ = Selection{std::move(*area), std::move(*outline)};
     }
     update();
+}
+
+std::optional<PageCanvas::Selection> PageCanvas::previous_selection() const {
+    if (!previous_ || page() == nullptr || previous_->first != page()->id) return std::nullopt;
+    return previous_->second;
 }
 
 std::array<double, 4> PageCanvas::selection_box() const {
@@ -188,11 +197,31 @@ std::array<double, 6> PageCanvas::sel_matrix(const QPointF& mm) const {
 }
 
 std::vector<QPointF> PageCanvas::marquee_points() const {
-    if (marquee == QLatin1String("rect") && marquee_stroke_.size() >= 2) {
-        const QPointF a = marquee_stroke_.front(), b = marquee_stroke_.back();
+    // (a rectangle of a fixed size is there at a click)
+    if (marquee == QLatin1String("rect") && (marquee_stroke_.size() >= 2 || (!marquee_stroke_.empty() && marquee_style == QLatin1String("fixed")))) {
+        const QPointF a = marquee_stroke_.front(), b = styled_corner(a, marquee_stroke_.back());
         return {a, QPointF(b.x(), a.y()), b, QPointF(a.x(), b.y())};
     }
     return marquee_stroke_;
+}
+
+QPointF PageCanvas::styled_corner(const QPointF& a, const QPointF& b) const {
+    const double dx = b.x() - a.x(), dy = b.y() - a.y();
+    if (marquee_style == QLatin1String("fixed")) {
+        return QPointF(a.x() + std::copysign(std::max(0.1, style_width), dx), a.y() + std::copysign(std::max(0.1, style_height), dy));
+    }
+    if (marquee_style == QLatin1String("ratio") && style_width > 0 && style_height > 0) {
+        const double k = std::max(std::abs(dx) / style_width, std::abs(dy) / style_height);
+        return QPointF(a.x() + std::copysign(k * style_width, dx), a.y() + std::copysign(k * style_height, dy));
+    }
+    return b;
+}
+
+Json PageCanvas::drawn_area(const Json& poly, bool smooth) const {
+    Json area{{"poly", poly}};
+    if (smooth && select_antialias) area["antialias"] = true;
+    if (select_feather_mm > 0) area["feather_mm"] = r3(select_feather_mm);
+    return area;
 }
 
 void PageCanvas::selection_done(const Json& area) {
@@ -208,7 +237,7 @@ bool PageCanvas::finish_points() {
     if (points.size() < 3) return false;
     Json poly = Json::array();
     for (const QPointF& p : points) poly.push_back(Json::array({r3(p.x()), r3(p.y())}));
-    selection_done(Json{{"poly", poly}});
+    selection_done(drawn_area(poly, true));
     return true;
 }
 
@@ -225,7 +254,8 @@ bool PageCanvas::cancel_points() {
 bool PageCanvas::marquee_press(const QPointF& pos, const QPointF& mm, Qt::KeyboardModifiers modifiers) {
     modifiers_ = modifiers;
     sel_how_ = how_from(modifiers);
-    if (sel_how_ == QLatin1String("replace") && marquee != QLatin1String("polyline") && selection_) {
+    if ((modifiers & (Qt::ShiftModifier | Qt::AltModifier)) == 0) sel_how_ = select_method;  // (選択方法: the tool's buttons)
+    if ((sel_how_ == QLatin1String("replace") || transform_outline) && marquee != QLatin1String("polyline") && selection_) {
         // moving, scaling, turning the selection; a press elsewhere starts a new one
         if (pivot_mode) {  // (基準位置を動かす: this press puts it)
             pivot_mode = false;
@@ -252,10 +282,6 @@ bool PageCanvas::marquee_press(const QPointF& pos, const QPointF& mm, Qt::Keyboa
     }
     if (marquee == QLatin1String("wand")) {
         emit wandRequested(mm.x(), mm.y());
-        return true;
-    }
-    if (marquee == QLatin1String("color")) {
-        emit colourAreaRequested(mm.x(), mm.y());
         return true;
     }
     if (marquee == QLatin1String("polyline")) {
@@ -303,7 +329,7 @@ bool PageCanvas::marquee_move(const QPointF& mm, Qt::KeyboardModifiers modifiers
             const double side = std::max(std::abs(dx), std::abs(dy));
             b = QPointF(a.x() + std::copysign(side, dx != 0 ? dx : 1), a.y() + std::copysign(side, dy != 0 ? dy : 1));
         }
-        ellipse_drag_->second = b;
+        ellipse_drag_->second = styled_corner(a, b);
         update();
         return true;
     }
@@ -334,11 +360,12 @@ bool PageCanvas::marquee_release() {
         return true;
     }
     if (ellipse_drag_) {
-        const auto [a, b] = *ellipse_drag_;
+        const QPointF a = ellipse_drag_->first, b = styled_corner(a, ellipse_drag_->second);
         ellipse_drag_.reset();
         if (std::abs(b.x() - a.x()) > 0.5 && std::abs(b.y() - a.y()) > 0.5) {
-            selection_done(Json{{"poly", render::selection::ellipse_poly(Json::array({std::min(a.x(), b.x()), std::min(a.y(), b.y()),
-                                                                                      std::abs(b.x() - a.x()), std::abs(b.y() - a.y())}))}});
+            selection_done(drawn_area(render::selection::ellipse_poly(Json::array({std::min(a.x(), b.x()), std::min(a.y(), b.y()),
+                                                                                   std::abs(b.x() - a.x()), std::abs(b.y() - a.y())})),
+                                      true));
         }
         update();
         return true;
@@ -359,7 +386,7 @@ bool PageCanvas::marquee_release() {
     if (points.size() >= 3 && reach > 1.0) {
         Json poly = Json::array();
         for (const QPointF& p : points) poly.push_back(Json::array({p.x(), p.y()}));
-        selection_done(Json{{"poly", poly}});
+        selection_done(drawn_area(poly, marquee != QLatin1String("rect")));
     }
     update();
     return true;
@@ -380,30 +407,34 @@ bool PageCanvas::marquee_key(QKeyEvent* event) {
         cancel_warp();
         return true;
     }
+    if (transform_outline && (enter || event->key() == Qt::Key_Escape)) {  // (選択範囲を変形: done; the selection stays)
+        transform_outline = false;
+        update();
+        return true;
+    }
     return false;
 }
 
 // --- drawing ---------------------------------------------------------------------------------------------------------
 
 void PageCanvas::draw_selection_mask(QPainter& painter) const {
-    // a selection that is not a simple outline (auto-select, colour, pen, joined) shows as a tint of its own shape;
-    // the quick mask shows what is NOT selected in red
+    // a selection that is not a simple outline (auto-select, colour, pen, joined) shows as a tint of its own shape (the
+    // Quick Mask is its channel, laid over by the page's view)
     const core::Page* p = page();
     if (!selection_ || p == nullptr) return;
     const Json& area = selection_->area;
-    if (!area.contains("mask") && !quick_mask) return;
-    const std::string key = area.dump() + (quick_mask ? "/quick" : "");
+    if (!area.contains("mask")) return;
+    const std::string key = area.dump();
     if (!mask_picture_ || mask_picture_->first != key) {
         try {
             render::Image mask = render::selection::to_mask(area, *p, nullptr, 60);
             const std::string bytes = mask.tobytes();
-            const QColor colour = quick_mask ? QColor(220, 40, 40, 110) : QColor(28, 126, 214, 70);
+            const QColor colour(28, 126, 214, 70);
             QImage picture(mask.width(), mask.height(), QImage::Format_RGBA8888);
             for (int y = 0; y < mask.height(); ++y) {
                 auto* row = picture.scanLine(y);
                 for (int x = 0; x < mask.width(); ++x) {
-                    int v = static_cast<unsigned char>(bytes[static_cast<std::size_t>(y) * mask.width() + x]);
-                    if (quick_mask) v = 255 - v;
+                    const int v = static_cast<unsigned char>(bytes[static_cast<std::size_t>(y) * mask.width() + x]);
                     row[x * 4] = static_cast<uchar>(colour.red());
                     row[x * 4 + 1] = static_cast<uchar>(colour.green());
                     row[x * 4 + 2] = static_cast<uchar>(colour.blue());
@@ -420,7 +451,7 @@ void PageCanvas::draw_selection_mask(QPainter& painter) const {
 
 void PageCanvas::draw_marquee(QPainter& painter) const {
     if (selection_) {
-        draw_selection_mask(painter);
+        if (show_selection_edges) draw_selection_mask(painter);
         std::vector<QPointF> outline = selection_->outline;
         if (sel_drag_ && sel_drag_->matrix) outline = through(*sel_drag_->matrix, outline);
         QPolygonF shown;
@@ -451,10 +482,12 @@ void PageCanvas::draw_marquee(QPainter& painter) const {
                 // (points that fold the area: no grid until they are pulled apart)
             }
         }
-        painter.setPen(QPen(Qt::white, 1.5));
-        painter.drawPolygon(shown);
-        painter.setPen(QPen(kSelection, 1.5, Qt::DashLine));
-        painter.drawPolygon(shown);
+        if (show_selection_edges) {  // (表示 → 選択範囲の境界線)
+            painter.setPen(QPen(Qt::white, 1.5));
+            painter.drawPolygon(shown);
+            painter.setPen(QPen(transform_outline ? theme::accent() : kSelection, 1.5, Qt::DashLine));
+            painter.drawPolygon(shown);
+        }
         for (const SelHandle& handle : sel_handles()) {
             const QPointF h = pt(handle.at.x(), handle.at.y());
             painter.setPen(QPen(kSelection, 1.5));
@@ -496,7 +529,7 @@ void PageCanvas::draw_marquee(QPainter& painter) const {
         painter.setPen(QPen(kSelection, 1.5, Qt::DashLine));
         painter.setBrush(Qt::NoBrush);
         if (ellipse_drag_) {
-            const auto [a, b] = *ellipse_drag_;
+            const QPointF a = ellipse_drag_->first, b = ellipse_drag_->second;
             const Json poly = render::selection::ellipse_poly(Json::array({std::min(a.x(), b.x()), std::min(a.y(), b.y()), std::abs(b.x() - a.x()),
                                                                           std::abs(b.y() - a.y())}));
             QPolygonF shown;

@@ -637,6 +637,7 @@ void MainWindow::build_menus() {
     view->addAction(action("act_guides"));
     view->addAction(action("act_phone"));
     view->addAction(action("act_scale"));
+    view->addAction(action("act_sel_edges"));  // (PC3 B1: 選択範囲の境界線)
     view->addAction(action("act_onion"));
     view->addAction(action("act_cmyk_proof"));
     // 校正の設定 (view.proofSetup.*): what 色の校正 shows; 色域外警告 (view.gamutWarning)
@@ -1071,6 +1072,7 @@ void MainWindow::on_frame_selected(const QString& frame_id) {
 }
 
 void MainWindow::context_menu(const QString& frame_id, const QPoint& global) {
+    if (selection_context_menu(global)) return;  // (PC3 B1: over the selection with a selection tool, Photoshop's menu)
     // a drawing tool's right click: the round menu at the pen (Shift: the usual menu)
     const bool shift = (QApplication::keyboardModifiers() & Qt::ShiftModifier) != 0;
     if (radial_on() && radial_tool(canvas_->tool()) && !shift) {

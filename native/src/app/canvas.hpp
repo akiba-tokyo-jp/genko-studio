@@ -128,10 +128,26 @@ public:
     };
     void set_selection(std::optional<core::Json> area, std::optional<std::vector<QPointF>> outline = std::nullopt);
     const std::optional<Selection>& selection() const { return selection_; }
-    // How the marquee tool chooses: rect | ellipse | lasso | polyline | wand | color | pen | erase (選択ペン・選択消し).
+    // How the marquee tool chooses: rect | ellipse | lasso | polyline | wand | pen | erase (選択ペン・選択消し).
     QString marquee = QStringLiteral("rect");
     double selection_pen_mm = 4.0;
-    bool quick_mask = false;  // the selection shown in red where it is not, to be painted with the selection pen
+    bool quick_mask = false;  // the page is in Quick Mask (its channel, laid over in its colour, is what the tools paint)
+    // PC3 B1 (ツールの設定 選択範囲ツール): how a new area joins when no key is held (選択方法: replace | add | subtract |
+    // intersect; Shift, Alt and both still choose for one drag), whether an ellipse, a lasso and a polygon are drawn
+    // anti-aliased (a rectangle never is), the feather they are made with (mm), and the rectangle's and ellipse's style
+    // (normal | ratio: 縦横比を固定 | fixed: 固定, its width and height — the ratio's two numbers, or the size in mm).
+    QString select_method = QStringLiteral("replace");
+    bool select_antialias = true;
+    double select_feather_mm = 0;
+    QString marquee_style = QStringLiteral("normal");
+    double style_width = 1;
+    double style_height = 1;
+    // 表示 → 選択範囲の境界線: the outline (and a mask selection's tint) shown or not; the handles stay.
+    bool show_selection_edges = true;
+    // 選択範囲を変形: the handles move, scale, turn and slant the selection's outline only, not what is in it.
+    bool transform_outline = false;
+    // 再選択: the selection let go last on the page shown (none: none).
+    std::optional<Selection> previous_selection() const;
     // 選択範囲ランチャー (M6, Python's launcher): what is usually done next with a selection, kept just under it (hidden
     // while there is none, while it is dragged or warped). Made by the window; null: none.
     QWidget* launcher = nullptr;
@@ -331,7 +347,8 @@ signals:
     void selectionDrawn(const genko::core::Json& area, const QString& how);
     void selectionPainted(const QVector<QPointF>& points, bool add);
     void wandRequested(double x_mm, double y_mm);
-    void colourAreaRequested(double x_mm, double y_mm);
+    // マジック消しゴムツール (PC3 B1): a click on the page (mm).
+    void magicEraseRequested(double x_mm, double y_mm);
     void selectionTransformed(const QVector<double>& matrix);
     void selectionWarped(const genko::core::Json& warp);
     // the drawing tools: the colour under the eyedropper; the fill tool's click; the area drawn around to fill; the
@@ -448,6 +465,10 @@ private:
     std::vector<SelHandle> sel_handles() const;
     std::array<double, 6> sel_matrix(const QPointF& mm) const;
     std::vector<QPointF> marquee_points() const;
+    // The rectangle's or ellipse's other corner from where it started, by the style (縦横比を固定, 固定).
+    QPointF styled_corner(const QPointF& from, const QPointF& to) const;
+    // A drawn polygon as the selection's area: anti-aliased (an ellipse, a lasso, a polygon) and feathered as the tool says.
+    core::Json drawn_area(const core::Json& poly, bool smooth) const;
     void selection_done(const core::Json& area);
     bool marquee_press(const QPointF& pos, const QPointF& mm, Qt::KeyboardModifiers modifiers);
     bool marquee_move(const QPointF& mm, Qt::KeyboardModifiers modifiers, bool pressed);
@@ -596,6 +617,7 @@ private:
     std::vector<QPointF> frame_poly_;
     Qt::KeyboardModifiers modifiers_;
     std::optional<Selection> selection_;
+    std::optional<std::pair<std::string, Selection>> previous_;  // (再選択: the page's id and the selection let go)
     QString sel_how_ = QStringLiteral("replace");
     struct SelDrag {
         QString kind;  // move | scale | rotate | skew | pivot | warp

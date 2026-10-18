@@ -198,20 +198,6 @@ void MainWindow::load_selection_from_channel(const std::string& id) {
     join_selection(area, QStringLiteral("replace"));
 }
 
-void MainWindow::fill_channel_menu() {
-    QMenu* menu = channel_load_menu_;
-    menu->clear();
-    const core::Page* page = current_page();
-    if (page == nullptr || page->channels.empty()) {
-        menu->addAction(QStringLiteral("（このページにチャンネルはありません）"))->setEnabled(false);
-        return;
-    }
-    for (const core::Channel& channel : page->channels) {
-        const std::string id = channel.id;
-        menu->addAction(QString::fromStdString(channel.name), this, [this, id] { load_selection_from_channel(id); });
-    }
-}
-
 void MainWindow::build_channel_actions() {
     const QString tip = QStringLiteral("ペン・消しゴム・塗り・フィルターの描く先を、ページのすべての色（合成）に戻す");
     make("act_channel_composite", QStringLiteral("合成チャンネルを対象にする"), [this] { target_slot(2); }, {QKeySequence(QStringLiteral("Ctrl+Alt+2"))}, tip);
@@ -220,8 +206,8 @@ void MainWindow::build_channel_actions() {
              {QKeySequence(QStringLiteral("Ctrl+Alt+%1").arg(slot))},
              QStringLiteral("チャンネル パネルの %1 番目（合成の次から: 色の版、アルファ・特色の順）を描く先にする").arg(slot - 1));
     }
-    make("act_sel_to_channel", QStringLiteral("選択範囲を保存…"), [this] { save_selection_to_channel(); }, {},
-         QStringLiteral("選択範囲をアルファチャンネルとしてページに残す（白が選ばれた所。チャンネル パネルで直せる）"));
+    make("act_sel_to_channel", QStringLiteral("選択範囲を保存…"), [this] { save_selection_dialog(); }, {},
+         QStringLiteral("選択範囲をアルファチャンネルとしてページに残す（新規か、あるチャンネルに置き換え・追加・削除・交差。白が選ばれた所）"));
 }
 
 void MainWindow::build_channel_dock() {

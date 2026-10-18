@@ -83,6 +83,10 @@ bool PageCanvas::tool_press(const QPointF& pos, const QPointF& mm, Qt::KeyboardM
         emit fillRequested(mm.x(), mm.y());
         return true;
     }
+    if (tool_ == QLatin1String("magiceraser")) {  // (PC3 B1: マジック消しゴムツール)
+        emit magicEraseRequested(mm.x(), mm.y());
+        return true;
+    }
     if (tool_ == QLatin1String("lassofill")) {
         lasso_fill_ = {mm};
         update();

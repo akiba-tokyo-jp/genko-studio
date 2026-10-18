@@ -163,6 +163,7 @@ const std::multimap<QString, QString>& renamed() {
                                                      {QStringLiteral("なげなわツール"), QStringLiteral("範囲選択（投げ縄）")},
                                                      {QStringLiteral("多角形選択ツール"), QStringLiteral("範囲選択（折れ線）")},
                                                      {QStringLiteral("自動選択ツール"), QStringLiteral("自動選択")},
+                                                     {QStringLiteral("自動選択ツール"), QStringLiteral("色域選択")},  // (PC3 B1: its 色の近さ)
                                                      {QStringLiteral("すべてを選択"), QStringLiteral("すべて選択")},
                                                      {QStringLiteral("拡張…"), QStringLiteral("選択範囲を広げる…")},
                                                      {QStringLiteral("縮小…"), QStringLiteral("選択範囲を狭める…")},

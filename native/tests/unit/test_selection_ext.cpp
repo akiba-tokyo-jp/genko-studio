@@ -361,12 +361,12 @@ private slots:
         doc = run_ops(doc, Json::array({Json{{"op", "set_layer_mask"}, {"page", 1}, {"id", "paint0000001"}, {"fill", "hide"}, {"density", 0.25}}})).doc;
         const render::Image masked = render::selection::to_mask(Json{{"layer_mask", "paint0000001"}}, doc.page(0), &doc);
         QCOMPARE(static_cast<int>(masked.getpixel(200, 200)[0]), 191);  // (255 − 0.25 × 255)
-        try {
-            render::selection::to_mask(Json{{"range", Json{{"select", "reds"}}}}, page, &doc);
+        try {  // (PC3 B1 wrote range, grow and similar: B3's sky is one not written yet)
+            render::selection::to_mask(Json{{"sky", Json::object()}}, page, &doc);
             QFAIL("a kind not written yet was solved");
         } catch (const core::Error& error) {
             QCOMPARE(error.code(), std::string("not_yet_ported"));
-            QVERIFY(std::string(error.what()).find("range") != std::string::npos && std::string(error.what()).find("B1") != std::string::npos);
+            QVERIFY(std::string(error.what()).find("sky") != std::string::npos && std::string(error.what()).find("B3") != std::string::npos);
         }
         // (the layer's own alpha: its mask, hiding at a density of 0.25 now, not applied)
         QCOMPARE(static_cast<int>(render::selection::to_mask(Json{{"transparency", "paint0000001"}}, doc.page(0), &doc).getpixel(300, 300)[0]), 255);
