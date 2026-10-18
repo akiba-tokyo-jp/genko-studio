@@ -46,8 +46,18 @@ void gauss_blur(std::vector<float>& v, std::size_t w, std::size_t h, double sigm
     };
     for (const std::size_t r : radii)
         for (std::size_t y = 0; y < h; ++y) pass(v.data() + y * w, w, 1, r, line);
-    for (const std::size_t r : radii)
-        for (std::size_t x = 0; x < w; ++x) pass(v.data() + x, h, w, r, line);
+    // (the columns a strip at a time, copied side by side: the same sums, read along the rows the plane is kept in)
+    constexpr std::size_t kStrip = 64;
+    std::vector<float> strip(std::min(kStrip, w) * h);
+    for (std::size_t x0 = 0; x0 < w; x0 += kStrip) {
+        const std::size_t cols = std::min(kStrip, w - x0);
+        for (std::size_t y = 0; y < h; ++y)
+            for (std::size_t c = 0; c < cols; ++c) strip[c * h + y] = v[y * w + x0 + c];
+        for (std::size_t c = 0; c < cols; ++c)
+            for (const std::size_t r : radii) pass(strip.data() + c * h, h, 1, r, line);
+        for (std::size_t y = 0; y < h; ++y)
+            for (std::size_t c = 0; c < cols; ++c) v[y * w + x0 + c] = strip[c * h + y];
+    }
 }
 
 // The path's coverage over `box` of the page drawn at `size` (density not laid on).
