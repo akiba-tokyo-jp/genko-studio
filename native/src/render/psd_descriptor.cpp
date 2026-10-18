@@ -76,6 +76,29 @@ void Writer::raw(std::string_view key, std::string_view bytes) {
     put_u32(body_, static_cast<std::uint32_t>(bytes.size()));
     body_ += bytes;
 }
+void Writer::numbers(std::string_view key, const std::vector<double>& values) {
+    head(key, "VlLs");
+    put_u32(body_, static_cast<std::uint32_t>(values.size()));
+    for (const double v : values) {
+        body_ += "doub";
+        put_f64(body_, v);
+    }
+}
+void Writer::object_array(std::string_view key, std::uint32_t count, std::string_view class_id,
+                          const std::vector<std::pair<std::string, std::vector<double>>>& lists, std::string_view unit) {
+    head(key, "ObAr");
+    put_u32(body_, count);
+    put_unicode(body_, u"");
+    put_id(body_, class_id);
+    put_u32(body_, static_cast<std::uint32_t>(lists.size()));
+    for (const auto& [name, values] : lists) {
+        put_id(body_, name);
+        body_ += "UnFl";
+        body_ += unit;
+        put_u32(body_, static_cast<std::uint32_t>(values.size()));
+        for (const double v : values) put_f64(body_, v);
+    }
+}
 std::string Writer::structure(std::string_view class_id) const {
     std::string out;
     put_unicode(out, u"");
@@ -167,12 +190,15 @@ Value read_value(Bytes& b, const std::string& type, int depth) {
     } else if (type == "UntF") {
         v.unit = std::string(b.take(4));
         v.number = b.f64();
-    } else if (type == "UnFl") {
+    } else if (type == "UnFl") {  // (a unit and a list of doubles, as Photoshop writes them in an ObAr)
         v.unit = std::string(b.take(4));
-        const std::uint32_t bits = b.u32();
-        float f = 0.0F;
-        std::memcpy(&f, &bits, sizeof f);
-        v.number = f;
+        const std::uint32_t n = b.u32();
+        if (n > b.left() / 8) throw Broken("a list is longer than the block");
+        for (std::uint32_t i = 0; i < n; ++i) v.numbers.push_back(b.f64());
+        if (!v.numbers.empty()) v.number = v.numbers.front();
+    } else if (type == "ObAr") {  // (an object array: the count of each list's items, then a structure of the lists)
+        v.integer = b.u32();
+        v.object = std::make_shared<Object>(read_structure(b, depth + 1));
     } else if (type == "bool") {
         v.boolean = b.u8() != 0;
     } else if (type == "Objc" || type == "GlbO") {
@@ -183,7 +209,7 @@ Value read_value(Bytes& b, const std::string& type, int depth) {
             const std::string item_type(b.take(4));
             v.list.push_back(read_value(b, item_type, depth + 1));
         }
-    } else if (type == "tdta" || type == "alis") {
+    } else if (type == "tdta" || type == "alis" || type == "Pth ") {
         v.raw = std::string(b.take(b.u32()));
     } else if (type == "type" || type == "GlbC") {
         (void)read_unicode(b);

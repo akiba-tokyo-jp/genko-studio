@@ -409,6 +409,45 @@ void smart_to_page(OpContext& c) {
     inner.binding = seen.binding;
     inner.color = seen.color;
     inner.rgb = seen.rgb;
+    if (was.format == "psd") {
+        // (PC3 A3: a PSD's or PSB's layers each a layer of the page, as import_psd brings them onto a page of the file's
+        // pixels — its folders, masks, adjustment layers and placed layers, smart objects again)
+        const core::Bytes bytes = smart::file_bytes(doc, was);
+        if (!bytes) throw OpError("the smart object's file is not in the book");
+        Document work = doc;
+        work.pages = {std::make_shared<Page>(inner)};
+        work.deferred.clear();
+        work.story.clear();
+        const std::string prefix = core::truthy_at(c.op, "new_id") ? core::py_str(c.op["new_id"]) : core::new_id();
+        const Json import{{"op", "import_psd"}, {"page", 1}, {"psd", core::b64encode(*bytes)}, {"fit", "paper"}, {"id", prefix}};
+        core::OpContext brought{work, import, c.actor};
+        (*ops_registry().find("import_psd"))(brought);
+        for (const auto& [id, contents] : work.smart_contents) doc.smart_contents.emplace(id, contents);
+        for (const auto& [ref, file] : work.smart_files) doc.smart_files.emplace(ref, file);
+        for (const auto& [ref, table] : work.luts) doc.luts.emplace(ref, table);
+        for (const std::string& feature : work.features) {
+            if (std::find(doc.features.begin(), doc.features.end(), feature) == doc.features.end()) doc.features.push_back(feature);
+        }
+        inner.layers = work.page(0).layers;
+        for (Layer& layer : inner.layers) {
+            layer.panel_clip = false;
+            layer.panel_each = false;
+        }
+        SmartContents next;
+        next.kind = "page";
+        next.name = was.name;
+        next.page = std::make_shared<Page>(std::move(inner));
+        doc.edit_contents(t.id) = std::move(next);
+        const Matrix scale{old_w / new_w, 0, 0, old_h / new_h, 0, 0};
+        each_showing(doc, t.id, [&](Layer& layer) {
+            core::smart::set_matrix(layer, core::smart::multiply(core::smart::matrix_of(layer), scale));
+            if (layer.smart->contains("psd")) layer.smart->erase("psd");
+        });
+        changed(doc, t.id, true);
+        c.report = report(doc, t);
+        (*c.report)["layer"] = doc.smart_contents.at(t.id)->page->layers.empty() ? Json(nullptr) : Json(doc.smart_contents.at(t.id)->page->layers.back().id);
+        return;
+    }
     // the picture drawn as rasterize_layer draws a smart object (no finish: a page's contents take none), a pixel of the
     // file a pixel of the paint layer — on a page a pixel wider on every side (a placed picture's edge on the page's edge
     // is not drawn whole), then cut to it

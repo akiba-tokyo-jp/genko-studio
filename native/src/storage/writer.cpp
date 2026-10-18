@@ -11,6 +11,7 @@
 #include "core/exposure.hpp"
 #include "core/ids.hpp"
 #include "core/lut3d.hpp"
+#include "core/ink.hpp"
 #include "core/pyconv.hpp"
 #include "core/ruby.hpp"
 #include "core/smart.hpp"
@@ -387,6 +388,11 @@ Json project_payload_v4(const core::Document& doc, AssetStore& store) {
                 store.put_known(icc->get<std::string>(), *file->second, ".icc");
             }
         }
+        // (PC3 A3: a PSD's linked-layer item, without the file's bytes)
+        if (contents.psd && contents.psd->is_object() && contents.psd->contains("item") && (*contents.psd)["item"].is_string()) {
+            const std::string ref = (*contents.psd)["item"].get<std::string>();
+            if (const auto file = doc.smart_files.find(ref); file != doc.smart_files.end() && file->second) store.put_known(ref, *file->second, ".bin");
+        }
         smart_contents[id] = core::smart::file_json(contents);
     }
     // (PC3 A2: the filter masks ops made for the smart objects, as the book's files)
@@ -397,6 +403,23 @@ Json project_payload_v4(const core::Document& doc, AssetStore& store) {
             if (mask == layer.smart->end() || !mask->is_object() || !mask->contains("asset") || !mask->at("asset").is_string()) continue;
             const std::string ref = mask->at("asset").get<std::string>();
             if (const auto file = doc.smart_files.find(ref); file != doc.smart_files.end() && file->second) store.put_known(ref, *file->second, ".png");
+        }
+        // (PC3 A3: a PSD's placed layer block and Photoshop's picture of it)
+        for (const core::Layer& layer : page.layers) {
+            if (layer.kind != core::LayerKind::Smart || !layer.smart || !layer.smart->is_object()) continue;
+            const auto psd = layer.smart->find("psd");
+            if (psd == layer.smart->end() || !psd->is_object()) continue;
+            const auto put = [&](const core::Json& in, const char* key, std::string_view suffix) {
+                const auto ref = in.find(key);
+                if (ref == in.end() || !ref->is_string()) return;
+                if (const auto file = doc.smart_files.find(ref->get<std::string>()); file != doc.smart_files.end() && file->second)
+                    store.put_known(ref->get<std::string>(), *file->second, suffix);
+            };
+            put(*psd, "raw", ".bin");
+            if (const auto shown = psd->find("shown"); shown != psd->end() && shown->is_object()) {
+                put(*shown, "asset", ".png");
+                put(*shown, "ink_raster", core::kInkRasterSuffix);
+            }
         }
     };
     for (const auto& page : doc.pages) filter_masks(*page);

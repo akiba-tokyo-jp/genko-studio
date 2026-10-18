@@ -38,6 +38,7 @@ genko_library(genko_render
     abr.cpp
     psd.cpp
     psd_descriptor.cpp
+    psd_smart.cpp
     psd_text.cpp
     movie.cpp
     anim.cpp

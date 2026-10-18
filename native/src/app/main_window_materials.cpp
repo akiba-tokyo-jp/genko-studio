@@ -444,7 +444,7 @@ bool MainWindow::import_image(std::optional<QString> chosen) {
         return false;
     }
     const QString file =
-        chosen ? *chosen : ask::open_path(this, QStringLiteral("画像を読み込む"), QStringLiteral("画像 (*.png *.jpg *.jpeg *.tif *.tiff *.bmp *.webp *.gif *.psd)"));
+        chosen ? *chosen : ask::open_path(this, QStringLiteral("画像を読み込む"), QStringLiteral("画像 (*.png *.jpg *.jpeg *.tif *.tiff *.bmp *.webp *.gif *.psd *.psb)"));
     if (file.isEmpty() || !still(asked)) return false;
     // (smart-objects@1, PC3 decision 2: a smart object of the file itself — its 16 bits, CMYK and profile kept —, laid as
     // the placed picture was: over the panel chosen, else over the page out to the bleed; app/main_window_smart.cpp)

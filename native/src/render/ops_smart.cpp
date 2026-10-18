@@ -482,6 +482,20 @@ void smart_profile(OpContext& c) {
     smart::FileInfo info;
     info.icc = proof::embedded_profile(*bytes);
     doc.edit_contents(*id).profile = colour_use(doc, c.op, info);
+    // (PC3 A3: a PSD's picture of the smart objects showing them is no longer theirs — drawn from the file again; their
+    // blocks, of the same file at the same place, kept)
+    const auto drop_shown = [&](Page& on) {
+        for (Layer& l : on.layers) {
+            if (core::smart::contents_id(l) != id || !l.smart->contains("psd") || !(*l.smart)["psd"].is_object()) continue;
+            (*l.smart)["psd"].erase("shown");
+        }
+    };
+    for (const std::size_t i : core::smart::pages_using(doc, *id)) drop_shown(doc.edit_page(i));
+    std::vector<std::string> inside;
+    for (const auto& [other, held] : doc.smart_contents) {
+        if (held && held->page && core::smart::shown_on(*held->page).contains(*id)) inside.push_back(other);
+    }
+    for (const std::string& other : inside) drop_shown(doc.edit_contents_page(other));
 }
 
 void smart_copy(OpContext& c) {
@@ -536,6 +550,7 @@ void smart_transform(OpContext& c) {
     m = core::smart::snapped(m);
     if (std::abs(m.det()) <= core::smart::kDetMin) throw OpError("the transform squashes the smart object flat");
     core::smart::set_matrix(layer, m);
+    layer.smart->erase("psd");  // (PC3 A3: a PSD's picture and block no longer say where it is; drawn from its contents)
     if (const Json* interp = core::get(c.op, "interp"); interp != nullptr && !interp->is_null()) {
         const std::string name = core::py_str(*interp);
         if (std::find(core::smart::kInterps.begin(), core::smart::kInterps.end(), name) == core::smart::kInterps.end())

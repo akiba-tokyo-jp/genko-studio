@@ -43,7 +43,9 @@ struct FileInfo {
 FileInfo look_at(std::string_view bytes, std::string_view suffix);
 
 // The file as the 8-bit page reads it: open_image's picture (a placed picture's), or — a PNG or TIFF of 16 or 32 bits that
-// open_image does not read — its samples rounded to 8 bits. core::Error as look_at's.
+// open_image does not read — its samples rounded to 8 bits; a PSD or PSB (PC3 A3) read by render/psd: its merged picture
+// in its own colours (Lab as sRGB; an indexed file's through its palette), or its visible layers laid over each other
+// where it has none or a blank one. core::Error as look_at's.
 Image eight_bit_picture(std::string_view bytes);
 
 // A picture with every bit kept: per pixel `channels` floats (0..1 for 8 and 16 bits, as stored for 32: HDR kept), the last
@@ -59,7 +61,9 @@ struct DeepPicture {
 };
 
 // The file's pixels with all their bits: a PNG of 16 bits, a TIFF of 16 or 32 bits (grey, RGB, CMYK, with an alpha or
-// not, samples together) as they are stored; any other file as open_image reads it (its 8-bit values / 255).
+// not, samples together) as they are stored, a grey or RGB PSD or PSB of 16 or 32 bits (PC3 A3: its merged picture, a
+// 32-bit file's linear light encoded by 1/2.2, its values past 1 kept); any other file as the 8-bit page reads it (its
+// 8-bit values / 255).
 DeepPicture deep_picture(std::string_view bytes);
 
 // The deep picture as straight sRGB RGBA floats (0..1, HDR kept), through the colour use: keep (its numbers as sRGB's; a

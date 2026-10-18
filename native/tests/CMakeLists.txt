@@ -135,6 +135,10 @@ genko_test(test_smart_contents SOURCES unit/test_smart_contents.cpp DEPS genko_t
 # blend modes, opacities, all off and on, cleared, the selection their mask, following the transforms; at 200 dpi as
 # rasterize_layer and filter_raster (8, 16 bits, CMYK, Lab); a part the whole cut there; refused kinds; read back.
 genko_test(test_smart_filters SOURCES unit/test_smart_filters.cpp DEPS genko_test_support genko_render_ops genko_formats LABELS unit TIMEOUT 900)
+# PC3 A3 (SPEC.md COLOR-05「PSD のスマートオブジェクト」): a PSD's placed layer blocks and linked files (upstream's
+# linked.rs and blocks.rs tests, this build's SoLd and PlLd read back), a PSD or PSB as a smart object's file (16 and 32 bits
+# kept, CMYK inks, Lab, a blank merged picture), import_psd's smart objects drawn and written back byte for byte.
+genko_test(test_psd_smart SOURCES unit/test_psd_smart.cpp DEPS genko_test_support genko_render_ops genko_formats LABELS unit TIMEOUT 600)
 
 # core/pyre's own bounds (Python 3.12's re, ported; SPEC COMP-01a): a search that backtracks without end stopped when its
 # steps are spent, groups more than 200 deep refused, replace_text refused without a change; without Python.
@@ -309,6 +313,11 @@ genko_test(test_contract_channels SOURCES contract/test_contract_channels.cpp DE
 # PC3 A0 (smart-objects@1) through the command line: converted, saved, opened again, undone and redone, gc keeping the
 # contents' files, the journal; a 16-bit file drawn with its bits; import_pages bringing contents; panels and checks.
 genko_test(test_contract_smart SOURCES contract/test_contract_smart.cpp DEPS genko_test_support genko_render_ops genko_formats
+           LABELS contract TIMEOUT 900)
+# PC3 A3 through the command line: Genko's smart objects written as placed layers that psd-tools (GENKO_PYREF) and this build
+# read (ids, embedded files, boxes; a page's contents a PSD), a PSD's placed layer imported as a smart object, drawn,
+# undone and redone, drawn from its file once changed, written back with the block and item it was read with.
+genko_test(test_contract_psd_smart SOURCES contract/test_contract_psd_smart.cpp DEPS genko_test_support genko_render_ops genko_formats
            LABELS contract TIMEOUT 900)
 # PC3 A1 through the command line: a linked file placed, `genko smart --links` (ok, modified, missing), updated, relinked,
 # embedded, drawn from its copy when the file is gone; contents written out (a page's PSD read by psd-tools); `genko package`.

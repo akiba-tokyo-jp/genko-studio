@@ -23,6 +23,7 @@
 #include "render/not_yet_ported.hpp"
 #include "render/png.hpp"
 #include "render/proof.hpp"
+#include "render/psd.hpp"
 
 namespace genko::render::smart {
 
@@ -314,6 +315,59 @@ DeepPicture tiff_deep(std::string_view bytes) {
     return out;
 }
 
+// --- PSD and PSB (render/psd, PC3 A3) ---------------------------------------------------------------------------------
+
+// The file read as render/psd reads it (PSD and PSB, every colour mode — Lab too —, 1 to 32 bits), its errors as a picture's.
+psd::File psd_file(std::string_view bytes) {
+    try {
+        psd::File f = psd::File::read(std::string(bytes), psd::default_limits(), true);
+        if (f.width() <= 0 || f.height() <= 0) throw core::Error("format", "the PSD has no picture");
+        if (static_cast<std::uint64_t>(f.width()) * static_cast<std::uint64_t>(f.height()) > static_cast<std::uint64_t>(kPillowOpenLimits.max_pixels))
+            throw core::Error("image_too_large", "the picture has too many pixels");
+        return f;
+    } catch (const psd::ReadError& error) {
+        if (error.too_large()) throw core::Error("image_too_large", error.what());
+        throw core::Error("format", std::string("the PSD cannot be read (") + error.what() + ")");
+    }
+}
+
+// Lab bytes (L 0..255 for 0..100, a and b with 128 for 0: a PSD's, Pillow's "LAB") as sRGB, through Little CMS's Lab (D50).
+Image lab_to_rgb(const Image& lab) {
+    std::string in = lab.tobytes();
+    const std::size_t count = std::size_t(lab.width()) * lab.height();
+    for (std::size_t i = 0; i < count; ++i) {  // (Pillow's LAB bytes give a and b signed: back to 128 for 0)
+        in[i * 3 + 1] = static_cast<char>(in[i * 3 + 1] ^ 0x80);
+        in[i * 3 + 2] = static_cast<char>(in[i * 3 + 2] ^ 0x80);
+    }
+    std::string out(count * 3, '\0');
+    cmsHPROFILE from = cmsCreateLab4Profile(nullptr);
+    cmsHPROFILE to = cmsCreate_sRGBProfile();
+    cmsHTRANSFORM transform = from != nullptr && to != nullptr
+                                  ? cmsCreateTransform(from, TYPE_Lab_8, to, TYPE_RGB_8, INTENT_RELATIVE_COLORIMETRIC, cmsFLAGS_NOCACHE)
+                                  : nullptr;
+    if (from != nullptr) cmsCloseProfile(from);
+    if (to != nullptr) cmsCloseProfile(to);
+    if (transform == nullptr) throw core::Error("value", "the Lab picture cannot be taken to sRGB");
+    cmsDoTransform(transform, in.data(), out.data(), static_cast<cmsUInt32Number>(count));
+    cmsDeleteTransform(transform);
+    return Image::frombytes("RGB", lab.size(), out);
+}
+
+// The PSD as the 8-bit page reads it: its merged picture in its own colours (grey, RGB, CMYK; Lab as sRGB; an indexed
+// file's colours as Pillow reads them), or — a file without one, or with a blank one (saved without maximised
+// compatibility) — its visible layers laid over each other.
+Image psd_eight(const psd::File& f, std::string_view bytes) {
+    if (f.mode() == 2 && !f.psb() && f.depth() == 8) return open_image(bytes, kPillowOpenLimits);  // (its palette)
+    std::optional<Image> picture = f.real_merged() ? f.merged_picture() : std::nullopt;
+    if (!picture) {
+        if (std::none_of(f.layers().begin(), f.layers().end(), [](const psd::Layer& l) { return !l.folder && l.kind != "adjust"; }))
+            throw core::Error("format", "the PSD has no picture");
+        return f.composited();
+    }
+    if (picture->mode() == "LAB") return lab_to_rgb(*picture);
+    return std::move(*picture);
+}
+
 // --- a picture's resolution, as its file says it --------------------------------------------------------------------
 
 double jpeg_dpi(std::string_view b) {
@@ -389,7 +443,24 @@ FileInfo look_at(std::string_view bytes, std::string_view suffix) {
         if (!said || *said != info.format) throw core::Error("unidentified_image", "the file is not the " + std::string(suffix) + " its name says");
         info.suffix = std::string(suffix);
     }
-    if (info.format == "psd" && info.suffix == ".psb") throw NotYetPorted("smart:psb");
+    if (info.format == "psd") {  // (PC3 A3: PSD and PSB, every colour mode and depth, read by render/psd)
+        const psd::File f = psd_file(bytes);
+        const Image picture = psd_eight(f, bytes);  // (decoded whole, as the drawing decodes it)
+        info.width = f.width();
+        info.height = f.height();
+        info.depth = f.depth();
+        const bool alpha = picture.mode() == "RGBA" || picture.mode() == "LA";
+        const int mode = f.mode();
+        info.mode = mode == 4 ? "cmyk" : mode == 9 ? "lab" : (mode == 0 || mode == 1 || mode == 8) ? "gray" : "rgb";
+        if (mode == 2 && picture.mode() != "L" && picture.mode() != "LA") info.mode = "rgb";  // (indexed: its palette's colours)
+        if (alpha && (info.mode == "gray" || info.mode == "rgb")) info.mode += "a";
+        if (picture.mode() == "RGBA" && info.mode == "graya") info.mode = "rgba";  // (its layers laid: RGB)
+        info.dpi = f.dpi();
+        if (!std::isfinite(info.dpi) || info.dpi < 1 || info.dpi > 100000) info.dpi = 0;
+        info.dpi = std::round(info.dpi * 1000) / 1000;
+        info.icc = proof::embedded_profile(bytes);
+        return info;
+    }
     // (the whole picture decoded as the drawing decodes it: a picture cut short, broken or too large is refused here)
     const Image picture = eight_bit_picture(bytes);
     info.width = picture.width();
@@ -419,6 +490,7 @@ FileInfo look_at(std::string_view bytes, std::string_view suffix) {
 }
 
 Image eight_bit_picture(std::string_view bytes) {
+    if (const auto kind = sniff(bytes); kind && kind->first == "psd") return psd_eight(psd_file(bytes), bytes);  // (PC3 A3)
     try {
         return open_image(bytes, kPillowOpenLimits);
     } catch (const NotYetPorted&) {
@@ -461,6 +533,32 @@ Image eight_bit_picture(std::string_view bytes) {
 
 DeepPicture deep_picture(std::string_view bytes) {
     const auto kind = sniff(bytes);
+    if (kind && kind->first == "psd") {  // (PC3 A3: a grey or RGB PSD of 16 or 32 bits, its merged picture's samples)
+        const psd::File f = psd_file(bytes);
+        const int mode = f.mode();
+        const bool colours_kept = mode == 0 || mode == 1 || mode == 3 || mode == 8;
+        if ((f.depth() == 16 || f.depth() == 32) && colours_kept && f.real_merged()) {
+            if (auto merged = f.merged_deep()) {
+                DeepPicture out;
+                out.width = merged->width;
+                out.height = merged->height;
+                out.channels = merged->colours + (merged->alpha ? 1 : 0);
+                out.alpha = merged->alpha;
+                out.depth = f.depth();
+                out.mode = std::string(merged->colours == 1 ? "gray" : "rgb") + (out.alpha ? "a" : "");
+                out.samples = std::move(merged->samples);
+                if (f.depth() == 32) {
+                    // (a 32-bit file's colours are linear light: encoded as the 8-bit picture encodes them, 1/2.2, its
+                    // values past 1 kept)
+                    for (std::size_t i = 0; i < out.samples.size(); ++i) {
+                        if (out.alpha && i % out.channels == out.channels - 1) continue;
+                        out.samples[i] = static_cast<float>(std::pow(std::max(0.0f, out.samples[i]), 1.0 / 2.2));
+                    }
+                }
+                return out;
+            }
+        }
+    }
     if (kind && kind->first == "png" && png_shape(bytes).bit_depth == 16) return png_deep(bytes);
     if (kind && kind->first == "tiff") {
         Tiff t(bytes);
@@ -556,6 +654,15 @@ std::vector<float> srgb_floats(const DeepPicture& p, const std::optional<std::st
 core::InkPixels file_inks(std::string_view bytes, const core::PageColor& color, std::string_view use) {
     const auto kind = sniff(bytes);
     const bool keep = use == "keep";
+    if (kind && kind->first == "psd") {  // (PC3 A3: a CMYK or Lab PSD's merged picture as the page's inks, render/psd's)
+        const psd::File f = psd_file(bytes);
+        if ((f.mode() == 4 || f.mode() == 9) && f.real_merged()) {
+            if (auto inks = f.merged_inks(color, !keep)) return std::move(*inks);
+        }
+        const Image picture = psd_eight(f, bytes);
+        if (picture.mode() == "CMYK") return ink::from_cmyk_image(picture, nullptr, keep ? std::string() : f.icc(), color);
+        return ink::from_rgb(picture.convert("RGBA"), color);
+    }
     if (kind && kind->first == "tiff") {
         Tiff t(bytes);
         const TiffShape s = tiff_shape(t.tif);

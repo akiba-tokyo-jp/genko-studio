@@ -1,7 +1,8 @@
 // PSD export (Python's genko/psd.py, its writer): one file a page with real layers (render::page_layers), each stored
 // cut to what it holds and PackBits-compressed, the printed page as the merged picture. Layer names in Unicode (the
 // luni block) with an ASCII one beside it. The editable PSD (PSD-01, not Python's; formats/psd_text.hpp) writes each
-// placed line as a group of its balloon, its text and its rubies, the text as Photoshop text layers.
+// placed line as a group of its balloon, its text and its rubies, the text as Photoshop text layers. A page's smart objects
+// are Photoshop's placed layers of the files they show (PC3 A3, the user's decision 3: PlacedLayers).
 
 #include <algorithm>
 #include <bit>
@@ -16,6 +17,7 @@
 #include "core/pynum.hpp"
 #include "core/pyops.hpp"
 #include "core/ruby.hpp"
+#include "core/smart.hpp"
 #include "formats/export.hpp"
 #include "formats/output.hpp"
 #include "formats/pillow_save.hpp"
@@ -27,10 +29,13 @@
 #include "render/ink_canvas.hpp"
 #include "render/not_yet_ported.hpp"
 #include "render/page.hpp"
+#include "render/psd_smart.hpp"
 #include "render/psd_text.hpp"
+#include "render/smart.hpp"
 #include "render/text/balloons.hpp"
 #include "render/text/fonts.hpp"
 #include "render/text/lettering.hpp"
+#include "storage/asset_store.hpp"
 
 namespace genko::formats {
 
@@ -190,11 +195,18 @@ public:
     explicit Records(render::Size size, std::optional<core::PageColor> ink = std::nullopt, std::optional<RgbOut> rgb = std::nullopt)
         : size_(size), ink_(std::move(ink)), rgb_(std::move(rgb)) {}
 
+    // (PC3 A3) a smart object's picture written with the blocks of a placed layer (PlacedLayers::blocks)
+    void placed(std::function<std::string(const core::Layer&)> blocks) { placed_ = std::move(blocks); }
+    std::string placed_blocks(const render::PageLayer& layer) const {
+        return placed_ && layer.smart != nullptr ? placed_(*layer.smart) : std::string();
+    }
+
     void add(render::PageLayer&& layer) {
+        const std::string blocks = placed_blocks(layer);
         const Image rgba = layer.image.mode() == "RGBA" ? std::move(layer.image) : layer.image.convert("RGBA");
         if (ink_) {  // (its colours by the page's rules)
             add_inks(layer.name, render::ink_picture(rgba, *ink_).values, ink_->space, ink_->depth, layer.settings ? layer.opacity : 1.0,
-                     layer.settings ? layer.blend : std::string("normal"), layer.settings && layer.clip, layer.mask ? &*layer.mask : nullptr);
+                     layer.settings ? layer.blend : std::string("normal"), layer.settings && layer.clip, layer.mask ? &*layer.mask : nullptr, blocks);
             return;
         }
         const std::optional<render::Box> found = rgba.getbbox();
@@ -202,11 +214,11 @@ public:
         const double opacity_given = layer.settings ? layer.opacity : 1.0;
         if (rgb_) {
             write_rgb(layer.name, rgba.crop(box), box, opacity_given, blend_key(layer.settings ? layer.blend : std::string("normal")),
-                      layer.settings && layer.clip, layer.mask ? &*layer.mask : nullptr, {}, layer.page_values);
+                      layer.settings && layer.clip, layer.mask ? &*layer.mask : nullptr, blocks, layer.page_values);
             return;
         }
         write(layer.name, rgba.crop(box), box, opacity_given, blend_key(layer.settings ? layer.blend : std::string("normal")),
-              layer.settings && layer.clip, layer.mask ? &*layer.mask : nullptr, {});
+              layer.settings && layer.clip, layer.mask ? &*layer.mask : nullptr, blocks);
     }
 
     // (PSD-01) a layer of a picture that is a part of the page (its top left at `origin`), cut to what it holds, with
@@ -255,7 +267,8 @@ public:
                layer.blocks);
     }
 
-    std::string finish() {
+    // (`global`: the global tagged blocks after the global layer mask — PC3 A3: the linked files of placed layers)
+    std::string finish(const std::string& global = {}) {
         std::string info;
         put_u16(info, static_cast<std::uint32_t>(static_cast<std::int16_t>(count_)) & 0xffff);
         info += records_;
@@ -265,6 +278,7 @@ public:
         put_u32(payload, u32_of(info.size()));
         payload += info;
         put_u32(payload, 0);  // no global layer mask
+        payload += global;
         std::string out;
         put_u32(out, u32_of(payload.size()));
         return out + payload;
@@ -314,8 +328,8 @@ public:
     // channels then the alpha), cut to what it holds: CMYK stored inverted (0 is full ink), Lab as its bytes; 8 bits
     // RLE, 16 bits raw.
     void add_inks(const std::string& name, const std::vector<double>& values, core::InkSpace space, int depth, double opacity,
-                  const std::string& blend, bool clip, const Image* mask) {
-        write_inks(name, values, size_, render::Point{0, 0}, space, depth, opacity, blend, clip, mask, {});
+                  const std::string& blend, bool clip, const Image* mask, const std::string& blocks = {}) {
+        write_inks(name, values, size_, render::Point{0, 0}, space, depth, opacity, blend, clip, mask, blocks);
     }
 
 private:
@@ -458,9 +472,190 @@ private:
     render::Size size_;
     std::optional<core::PageColor> ink_;
     std::optional<RgbOut> rgb_;
+    std::function<std::string(const core::Layer&)> placed_;
     std::string records_;
     std::string data_;
     int count_ = 0;
+};
+
+// A tagged block of a layer record: its key, its length and its payload, padded to 4 bytes.
+std::string tagged(std::string_view key, std::string payload);
+
+// --- smart objects as placed layers (PC3 A3) ---------------------------------------------------------------------------
+
+std::string contents_psd_bytes(const core::Document& episode, const core::Page& page, std::int64_t dpi, int depth);
+
+// A file the book keeps for a smart object (a PSD's block, a linked file's record): from the files ops kept, else its
+// assets; null when it has none.
+core::Bytes kept_bytes(const core::Document& doc, const std::string& ref, std::string_view suffix) {
+    if (const auto held = doc.smart_files.find(ref); held != doc.smart_files.end() && held->second) return held->second;
+    if (!doc.asset_dir || !storage::AssetStore::is_ref(ref)) return nullptr;
+    auto bytes = storage::AssetStore(*doc.asset_dir).get_bytes(ref, suffix, storage::kAssetMaxBytes);
+    if (!bytes) return nullptr;
+    return std::make_shared<const std::string>(std::move(*bytes));
+}
+
+// PC3 A3 (the user's decision 3: a PSD's smart objects are always written; SPEC.md COLOR-05「PSD のスマートオブジェクト」):
+// a page's smart objects as Photoshop's placed layers. Each smart object's layer record (its picture, as before) gets a
+// SoLd and a PlLd after its name — the id of its contents, where its contents' box lands on the canvas, its warp, its
+// contents' size and resolution —, and the file each contents is is written once in the PSD's global lnk2 block (a liFD
+// item): a file's own bytes; a page's, a PSD of that page made by this writer (its own smart objects placed layers again,
+// at the page's resolution; contents within contents at most core::smart::kDepthMax deep). A smart object read from a PSD
+// writes back the block it was read with while that block says where it is (the same place on this canvas), and its
+// contents' item as it was read while the contents are unchanged: a PSD read and written again keeps them byte for byte.
+class PlacedLayers {
+public:
+    PlacedLayers(const core::Document& episode, std::int64_t dpi, int depth) : episode_(episode), dpi_(dpi), depth_(depth) {}
+
+    // The layer record's blocks of the smart object `layer` (none for one that cannot be written so: its contents' file
+    // not held, or contents too deep).
+    std::string blocks(const core::Layer& layer) {
+        if (depth_ >= core::smart::kDepthMax) return {};
+        const auto id = core::smart::contents_id(layer);
+        const core::SmartContents* contents = core::smart::contents_of(episode_, layer);
+        if (!id || contents == nullptr || (contents->kind == "page" && !contents->page)) return {};
+        render::psd::PlacedOut out;
+        if (contents->kind == "page") {
+            const std::int64_t res = page_dpi(*contents->page);
+            out.resolution = static_cast<double>(res);
+            out.width = render::mm_to_px(contents->page->spec.width_mm.value(), static_cast<int>(res));
+            out.height = render::mm_to_px(contents->page->spec.height_mm.value(), static_cast<int>(res));
+        } else {
+            out.resolution = contents->dpi > 0 ? contents->dpi : 72.0;
+            out.width = static_cast<double>(contents->width_px);
+            out.height = static_cast<double>(contents->height_px);
+        }
+        // (its contents' id: the one it was read with, unless other contents of this PSD have it)
+        std::string uuid = render::psd::uuid_of("genko contents " + *id);
+        bool as_read = false;
+        if (contents->psd && contents->psd->is_object() && contents->psd->contains("uuid") && (*contents->psd)["uuid"].is_string()) {
+            const std::string kept = (*contents->psd)["uuid"].get<std::string>();
+            const auto owner = owners_.find(kept);
+            if (owner == owners_.end() || owner->second == *id) {
+                uuid = kept;
+                as_read = true;
+            }
+        }
+        if (!item(*id, *contents, uuid, as_read, out.resolution)) return {};
+        out.uuid = uuid;
+        out.placed = render::psd::uuid_of("genko placed " + layer.id);
+        out.corners = corners(layer, out.width, out.height, out.resolution);
+        if (const core::Json* warp = layer.smart ? core::get(*layer.smart, "warp") : nullptr; warp != nullptr && warp->is_object()) {
+            out.warp = in_pixels(*warp, out.resolution / 25.4);
+        }
+        // (the block it was read with, while it says where it is on this canvas)
+        if (as_read) {
+            const core::Json* psd = core::get(*layer.smart, "psd");
+            const core::Json* key = psd != nullptr && psd->is_object() ? core::get(*psd, "block") : nullptr;
+            const core::Json* raw = psd != nullptr && psd->is_object() ? core::get(*psd, "raw") : nullptr;
+            if (key != nullptr && key->is_string() && raw != nullptr && raw->is_string()) {
+                const std::string block = key->get<std::string>();
+                if (const core::Bytes bytes = kept_bytes(episode_, raw->get<std::string>(), ".bin")) {
+                    const auto read = render::psd::read_placed(block, *bytes);
+                    if (read && read->has_corners && read->uuid == uuid && same(read->corners, out.corners)) {
+                        return tagged(block, *bytes) + (block == "PlLd" ? tagged("SoLd", render::psd::sold_block(out)) : tagged("PlLd", render::psd::plld_block(out)));
+                    }
+                }
+            }
+        }
+        return tagged("SoLd", render::psd::sold_block(out)) + tagged("PlLd", render::psd::plld_block(out));
+    }
+
+    // The global lnk2 block of the files written (none when there are none).
+    std::string global() const {
+        if (items_.empty()) return {};
+        std::string out = "8BIMlnk2";
+        put_u32(out, u32_of(items_.size()));
+        return out + items_;
+    }
+
+    // The resolution a contents page is written at: its own (none: 600, as a book's).
+    static std::int64_t page_dpi(const core::Page& page) { return page.spec.dpi.truthy() ? core::py_int(page.spec.dpi) : 600; }
+
+private:
+    // The contents' file in the lnk2 block, once for each id.
+    bool item(const std::string& id, const core::SmartContents& contents, const std::string& uuid, bool as_read, double resolution) {
+        if (const auto owner = owners_.find(uuid); owner != owners_.end()) return owner->second == id;
+        std::string bytes, name = contents.name, type;
+        if (contents.kind == "page") {
+            bytes = contents_psd_bytes(episode_, *contents.page, static_cast<std::int64_t>(resolution), depth_ + 1);
+            if (name.empty()) name = "contents";
+            if (!name.ends_with(".psd")) name += ".psd";
+            type = "8BPS";
+        } else {
+            const core::Bytes file = render::smart::file_bytes(episode_, contents);
+            if (!file) return false;
+            bytes = *file;
+            type = render::psd::file_type(contents.suffix == ".psb" ? std::string_view("psb") : std::string_view(contents.format));
+            // (the item it was read with, its file's bytes where they were)
+            const core::Json* rest = as_read ? core::get(*contents.psd, "item") : nullptr;
+            const core::Json* at = as_read ? core::get(*contents.psd, "at") : nullptr;
+            if (rest != nullptr && rest->is_string() && at != nullptr && at->is_number_integer()) {
+                const core::Bytes kept = kept_bytes(episode_, rest->get<std::string>(), ".bin");
+                const auto where = static_cast<std::size_t>(std::max<std::int64_t>(0, at->get<std::int64_t>()));
+                if (kept && where <= kept->size()) {
+                    items_ += render::psd::framed_item(kept->substr(0, where) + bytes + kept->substr(where));
+                    owners_[uuid] = id;
+                    return true;
+                }
+            }
+        }
+        items_ += render::psd::linked_item(uuid, name, type, bytes);
+        owners_[uuid] = id;
+        return true;
+    }
+
+    // Where the contents' box (w × h pixels at `resolution`) lands on the canvas: through its matrix, or its corners.
+    std::array<double, 8> corners(const core::Layer& layer, double w, double h, double resolution) const {
+        const double px = static_cast<double>(dpi_) / 25.4;
+        std::array<double, 8> out{};
+        const core::Json* quad = layer.smart ? core::get(*layer.smart, "perspective") : nullptr;
+        if (quad != nullptr && quad->is_array() && quad->size() == 4) {
+            for (std::size_t i = 0; i < 4; ++i) {
+                out[2 * i] = (*quad)[i][0].get<double>() * px;
+                out[2 * i + 1] = (*quad)[i][1].get<double>() * px;
+            }
+            return out;
+        }
+        const core::smart::Matrix m = core::smart::matrix_of(layer);
+        const double mm = 25.4 / resolution;
+        const std::array<std::pair<double, double>, 4> box{{{0, 0}, {w, 0}, {w, h}, {0, h}}};
+        for (std::size_t i = 0; i < 4; ++i) {
+            const auto [x, y] = m.apply(box[i].first * mm, box[i].second * mm);
+            out[2 * i] = x * px;
+            out[2 * i + 1] = y * px;
+        }
+        return out;
+    }
+
+    static bool same(const std::array<double, 8>& a, const std::array<double, 8>& b) {
+        for (std::size_t i = 0; i < 8; ++i) {
+            if (!(std::abs(a[i] - b[i]) <= 0.01)) return false;
+        }
+        return true;
+    }
+
+    // A warp (the contents' mm) in the contents' pixels.
+    static core::Json in_pixels(core::Json warp, double k) {
+        if (warp.contains("bounds") && warp["bounds"].is_array()) {
+            for (core::Json& v : warp["bounds"]) {
+                if (v.is_number()) v = v.get<double>() * k;
+            }
+        }
+        if (warp.contains("mesh") && warp["mesh"].is_object() && warp["mesh"].contains("points")) {
+            for (core::Json& point : warp["mesh"]["points"]) {
+                if (point.is_array() && point.size() == 2 && point[0].is_number() && point[1].is_number())
+                    point = core::Json::array({point[0].get<double>() * k, point[1].get<double>() * k});
+            }
+        }
+        return warp;
+    }
+
+    const core::Document& episode_;
+    std::int64_t dpi_;
+    int depth_;
+    std::map<std::string, std::string> owners_;  // (a uuid written → the contents' id)
+    std::string items_;
 };
 
 // PC2 (the user's decision 5): each correction layer of a page, in its place among the layers, as the PSD's adjustment
@@ -943,8 +1138,8 @@ render::RenderOptions merged_options(const core::Page& page) {
 // embedded. The editable text of PSD-01 too: its layers' pixels in inks, a CMYK page's text colours as inks.
 // color-model@1 (COLOR-03): a grey page's in Grayscale (mode 1), its lightness, its profile embedded; 32 bits as floats
 // for grey — a CMYK or Lab page of 32 bits at 16 (Photoshop has no 32-bit CMYK or Lab: said in the export's notes).
-void put_page_psd_inks(detail::Output& output, const core::Document& episode, const core::Page& page, const fs::path& dest, std::int64_t dpi,
-                       const PsdText& text, PsdTextReport* report) {
+std::string page_psd_inks(const core::Document& episode, const core::Page& page, std::int64_t dpi, const PsdText& text, PsdTextReport* report,
+                          int depth) {
     core::PageColor color = *page.color;
     if (color.depth == 32 && color.space != core::InkSpace::Gray) color.depth = 16;  // (the depth written)
     const bool grey = color.space == core::InkSpace::Gray;
@@ -956,10 +1151,13 @@ void put_page_psd_inks(detail::Output& output, const core::Document& episode, co
     const core::InkPixels& merged = halved ? *halved : *made.inks;
     const render::Size size{static_cast<int>(merged.width), static_cast<int>(merged.height)};
     Records records(size, color);
+    PlacedLayers placed(episode, dpi, depth);  // (PC3 A3)
+    records.placed([&placed](const core::Layer& layer) { return placed.blocks(layer); });
     const auto each = [&](render::PageLayer&& layer) {
         const std::vector<double> values = layer.inks ? *layer.inks : render::ink_picture(layer.image, color).values;
         records.add_inks(layer.name, values, color.space, color.depth, layer.settings ? layer.opacity : 1.0,
-                         layer.settings ? layer.blend : std::string("normal"), layer.settings && layer.clip, layer.mask ? &*layer.mask : nullptr);
+                         layer.settings ? layer.blend : std::string("normal"), layer.settings && layer.clip, layer.mask ? &*layer.mask : nullptr,
+                         records.placed_blocks(layer));
     };
     const std::function<void(const core::Layer&)> adjust_layers = adjustments(records, page, size, episode);
     if (text.editable) {  // (PSD-01: each placed line's layers made here)
@@ -982,7 +1180,7 @@ void put_page_psd_inks(detail::Output& output, const core::Document& episode, co
     put_u32(body, 0);  // (no colour mode data)
     body += with_channels(resources_with_icc(dpi, color.space != core::InkSpace::Lab && color.icc ? std::string_view(*color.icc) : std::string_view()),
                           page);
-    body += records.finish();
+    body += records.finish(placed.global());
     // the merged picture: each colour plane (CMYK inverted); 8 bits RLE (every row's count first), 16 and 32 raw
     const unsigned all = merged.channels();
     const auto plane = [&](unsigned c) {
@@ -1011,15 +1209,14 @@ void put_page_psd_inks(detail::Output& output, const core::Document& episode, co
         for (unsigned c = 0; c < n; ++c) body += plane(c);
         for (const core::Channel& channel : page.channels) body += channel_samples(page, channel, size, color.depth);
     }
-    if (dest.has_parent_path()) detail::make_dirs(dest.parent_path());
-    output.put(dest, body);
+    return body;
 }
 
 // color-model@1 (COLOR-03): an RGB page of a colour model's PSD in RGB (mode 3) at its depth (8, 16, 32 as floats), its
 // profile (or sRGB's) embedded: its layers in its values (what is drawn in sRGB converted into its space), the merged
 // picture its values (render_page's precise: what is drawn over the layers in 8 bits taken into them).
-void put_page_psd_rgb(detail::Output& output, const core::Document& episode, const core::Page& page, const fs::path& dest, std::int64_t dpi,
-                      const PsdText& text, PsdTextReport* report) {
+std::string page_psd_rgb(const core::Document& episode, const core::Page& page, std::int64_t dpi, const PsdText& text, PsdTextReport* report,
+                         int depth_of_contents) {
     const core::RgbMode& mode = *page.rgb;
     const int depth = mode.depth;
     const render::RenderOptions options = merged_options(page);
@@ -1027,6 +1224,8 @@ void put_page_psd_rgb(detail::Output& output, const core::Document& episode, con
     const core::ColorRasterView merged(made.values);
     const render::Size size{static_cast<int>(merged.width()), static_cast<int>(merged.height())};
     Records records(size, std::nullopt, RgbOut{depth, render::RgbSpace::of(page)});
+    PlacedLayers placed(episode, dpi, depth_of_contents);  // (PC3 A3)
+    records.placed([&placed](const core::Layer& layer) { return placed.blocks(layer); });
     const auto each = [&](render::PageLayer&& layer) { records.add(std::move(layer)); };
     const std::function<void(const core::Layer&)> adjust_layers = adjustments(records, page, size, episode);
     if (text.editable) {  // (PSD-01: each placed line's layers made here)
@@ -1047,7 +1246,7 @@ void put_page_psd_rgb(detail::Output& output, const core::Document& episode, con
     put_u16(body, 3);
     put_u32(body, 0);  // (no colour mode data)
     body += with_channels(resources_with_icc(dpi, detail::rgb_icc(mode)), page);
-    body += records.finish();
+    body += records.finish(placed.global());
     // the merged picture: 8 bits RLE (every row's count first), 16 and 32 raw
     const std::size_t pixels = std::size_t(merged.width()) * merged.height();
     const auto plane = [&](unsigned c) {
@@ -1067,8 +1266,7 @@ void put_page_psd_rgb(detail::Output& output, const core::Document& episode, con
         for (unsigned c = 0; c < 3; ++c) body += plane(c);
         for (const core::Channel& channel : page.channels) body += channel_samples(page, channel, size, depth);
     }
-    if (dest.has_parent_path()) detail::make_dirs(dest.parent_path());
-    output.put(dest, body);
+    return body;
 }
 
 // color-model@1 (PC1d, SPEC.md COLOR-03): a page of Image › Mode's own as Photoshop holds that mode — the merged picture
@@ -1078,7 +1276,7 @@ void put_page_psd_rgb(detail::Output& output, const core::Document& episode, con
 // each plate a channel dark where its ink is, as a spot channel: max − density; names in 1006 and 1045, colours and
 // solidity in 1077 as spots), its alpha and spot channels after them. A bitmap or indexed page's channels are not
 // written (Photoshop has none in those modes: said in the notes); a multichannel page of 32 bits at 16.
-void put_page_psd_flat(detail::Output& output, const core::Document& episode, const core::Page& page, const fs::path& dest, std::int64_t dpi) {
+std::string page_psd_flat(const core::Document& episode, const core::Page& page, std::int64_t dpi) {
     render::RenderOptions options = merged_options(page);
     const bool indexed = !page.color;
     const bool bitmap = page.color && page.color->bitmap;
@@ -1188,31 +1386,24 @@ void put_page_psd_flat(detail::Output& output, const core::Document& episode, co
             for (const core::Channel& channel : page.channels) body += channel_samples(page, channel, size, depth);
         }
     }
-    if (dest.has_parent_path()) detail::make_dirs(dest.parent_path());
-    output.put(dest, body);
+    return body;
 }
 
-// The page's PSD (export_page_psd), put into `output` at `dest`.
-void put_page_psd(detail::Output& output, const core::Document& episode, const core::Page& page, const fs::path& dest,
-                  std::optional<std::int64_t> dpi_given, const PsdText& text = {}, PsdTextReport* report = nullptr) {
-    const std::int64_t dpi = psd_dpi(episode, dpi_given);
-    check_dpi(dpi);
+// The page's PSD (export_page_psd) at `dpi`: its bytes. (`depth`: how deep in other contents it is, a smart object's
+// contents written as the file of a placed layer — PC3 A3)
+std::string page_psd_bytes(const core::Document& episode, const core::Page& page, std::int64_t dpi, const PsdText& text, PsdTextReport* report,
+                           int depth) {
     if ((page.color && (page.color->bitmap || page.color->space == core::InkSpace::Multi)) || (!page.color && page.rgb && page.rgb->table)) {
-        put_page_psd_flat(output, episode, page, dest, dpi);  // (color-model@1, PC1d: the merged picture only)
-        return;
+        return page_psd_flat(episode, page, dpi);  // (color-model@1, PC1d: the merged picture only)
     }
-    if (page.color) {
-        put_page_psd_inks(output, episode, page, dest, dpi, text, report);
-        return;
-    }
-    if (page.rgb) {
-        put_page_psd_rgb(output, episode, page, dest, dpi, text, report);
-        return;
-    }
+    if (page.color) return page_psd_inks(episode, page, dpi, text, report, depth);
+    if (page.rgb) return page_psd_rgb(episode, page, dpi, text, report, depth);
     const render::RenderOptions options = merged_options(page);
     const Image merged = render::render_page(page, static_cast<int>(dpi), options, &episode).image;
     const Image rgb = merged.mode() == "RGB" ? merged : merged.convert("RGB");
     Records records(rgb.size());
+    PlacedLayers placed(episode, dpi, depth);  // (PC3 A3)
+    records.placed([&placed](const core::Layer& layer) { return placed.blocks(layer); });
     const auto each = [&](render::PageLayer&& layer) { records.add(std::move(layer)); };
     const std::function<void(const core::Layer&)> adjust_layers = adjustments(records, page, rgb.size(), episode);
     if (text.editable) {  // (PSD-01: each placed line's layers made here)
@@ -1233,7 +1424,7 @@ void put_page_psd(detail::Output& output, const core::Document& episode, const c
     put_u16(body, 3);
     put_u32(body, 0);  // (no colour mode data)
     body += with_channels(resources(dpi), page);
-    body += records.finish();
+    body += records.finish(placed.global());
     // the merged picture: RLE, every row's count of every channel first
     std::string counts, packed;
     for (const Image& channel : rgb.split()) packbits_rows(channel, counts, packed);
@@ -1241,8 +1432,56 @@ void put_page_psd(detail::Output& output, const core::Document& episode, const c
     put_u16(body, 1);
     body += counts;
     body += packed;
+    return body;
+}
+
+// The page's PSD (export_page_psd), put into `output` at `dest`.
+void put_page_psd(detail::Output& output, const core::Document& episode, const core::Page& page, const fs::path& dest,
+                  std::optional<std::int64_t> dpi_given, const PsdText& text = {}, PsdTextReport* report = nullptr) {
+    const std::int64_t dpi = psd_dpi(episode, dpi_given);
+    check_dpi(dpi);
+    std::string body = page_psd_bytes(episode, page, dpi, text, report, 0);
     if (dest.has_parent_path()) detail::make_dirs(dest.parent_path());
     output.put(dest, body);
+}
+
+// A smart object's contents page as a PSD's bytes (export_contents_psd; the file of a placed layer, PC3 A3): its layers
+// alone, without the paper and the panels' borders, the merged picture its layers over white; its own smart objects
+// placed layers. A page in precise colour or inks as a page's PSD (with its paper).
+std::string contents_psd_bytes(const core::Document& episode, const core::Page& page, std::int64_t dpi, int depth) {
+    check_dpi(dpi);
+    if (page.color || page.rgb) return page_psd_bytes(episode, page, dpi, PsdText{}, nullptr, depth);
+    render::RenderOptions options = merged_options(page);
+    options.contents = true;
+    const Image drawn = render::render_contents(page, static_cast<int>(dpi), options, &episode).image;
+    const Image rgb = render::alpha_composite(Image::create("RGBA", drawn.size(), render::Ink{255, 255, 255, 255}), drawn.convert("RGBA")).convert("RGB");
+    Records records(rgb.size());
+    PlacedLayers placed(episode, dpi, depth);
+    records.placed([&placed](const core::Layer& layer) { return placed.blocks(layer); });
+    const auto each = [&](render::PageLayer&& layer) {
+        if (layer.name == "紙" || layer.name == "コマ枠" || layer.name == "ノンブル") return;  // (the contents' own: no paper, borders or nombre)
+        records.add(std::move(layer));
+    };
+    const std::function<void(const core::Layer&)> adjust_layers = adjustments(records, page, rgb.size(), episode);
+    render::page_layers(page, episode, static_cast<int>(dpi), each, nullptr, &adjust_layers);
+    std::string body = "8BPS";
+    put_u16(body, 1);
+    body.append(6, '\0');
+    put_u16(body, 3 + static_cast<std::uint32_t>(page.channels.size()));
+    put_u32(body, static_cast<std::uint32_t>(rgb.height()));
+    put_u32(body, static_cast<std::uint32_t>(rgb.width()));
+    put_u16(body, 8);
+    put_u16(body, 3);
+    put_u32(body, 0);
+    body += with_channels(resources(dpi), page);
+    body += records.finish(placed.global());
+    std::string counts, packed;
+    for (const Image& channel : rgb.split()) packbits_rows(channel, counts, packed);
+    put_channels_rle(page, rgb.size(), counts, packed);
+    put_u16(body, 1);
+    body += counts;
+    body += packed;
+    return body;
 }
 
 }  // namespace
@@ -1292,42 +1531,31 @@ fs::path export_psd(const core::Document& episode, const fs::path& dest, std::in
 // alone, without the paper and the panels' borders (its panels only cut its layers), the merged picture its layers over
 // white. A page in precise colour or inks is written as a page's PSD is (export_page_psd: with its paper).
 fs::path export_contents_psd(const core::Document& episode, const core::Page& page, const fs::path& dest, std::optional<std::int64_t> dpi_given) {
-    if (page.color || page.rgb) return export_page_psd(episode, page, dest, dpi_given);
-    const std::int64_t dpi = psd_dpi(episode, dpi_given);
-    check_dpi(dpi);
-    render::RenderOptions options = merged_options(page);
-    options.contents = true;
-    const Image drawn = render::render_contents(page, static_cast<int>(dpi), options, &episode).image;
-    const Image rgb = render::alpha_composite(Image::create("RGBA", drawn.size(), render::Ink{255, 255, 255, 255}), drawn.convert("RGBA")).convert("RGB");
-    Records records(rgb.size());
-    const auto each = [&](render::PageLayer&& layer) {
-        if (layer.name == "紙" || layer.name == "コマ枠") return;  // (the contents' own: no paper, no borders)
-        records.add(std::move(layer));
-    };
-    const std::function<void(const core::Layer&)> adjust_layers = adjustments(records, page, rgb.size(), episode);
-    render::page_layers(page, episode, static_cast<int>(dpi), each, nullptr, &adjust_layers);
-    std::string body = "8BPS";
-    put_u16(body, 1);
-    body.append(6, '\0');
-    put_u16(body, 3 + static_cast<std::uint32_t>(page.channels.size()));
-    put_u32(body, static_cast<std::uint32_t>(rgb.height()));
-    put_u32(body, static_cast<std::uint32_t>(rgb.width()));
-    put_u16(body, 8);
-    put_u16(body, 3);
-    put_u32(body, 0);
-    body += with_channels(resources(dpi), page);
-    body += records.finish();
-    std::string counts, packed;
-    for (const Image& channel : rgb.split()) packbits_rows(channel, counts, packed);
-    put_channels_rle(page, rgb.size(), counts, packed);
-    put_u16(body, 1);
-    body += counts;
-    body += packed;
+    std::string body = contents_psd_bytes(episode, page, psd_dpi(episode, dpi_given), 0);
     detail::Output output;
     if (dest.has_parent_path()) detail::make_dirs(dest.parent_path());
     output.put(dest, body);
     output.commit();
     return dest;
+}
+
+std::vector<std::string> psd_smart_notes(const core::Document& episode) {
+    bool filtered = false, linked = false;
+    for (std::size_t i = 0; i < episode.pages.size(); ++i) {
+        if (episode.is_deferred(i)) continue;
+        for (const core::Layer& layer : episode.pages[i]->layers) {
+            if (!core::smart::is_smart(layer) || !layer.visible || !layer.exportable) continue;
+            filtered = filtered || core::smart::filters_drawn(layer);
+            const core::SmartContents* contents = core::smart::contents_of(episode, layer);
+            linked = linked || (contents != nullptr && contents->link.has_value());
+        }
+    }
+    std::vector<std::string> notes;
+    if (filtered) {
+        notes.push_back("スマートフィルターは配置レイヤーの画素に焼き込んで書き出しました（Photoshop でコンテンツを編集すると、スマートフィルターは外れます）");
+    }
+    if (linked) notes.push_back("リンクしたスマートオブジェクトは、その写しを埋め込んだ配置レイヤーとして書き出しました");
+    return notes;
 }
 
 }  // namespace genko::formats
