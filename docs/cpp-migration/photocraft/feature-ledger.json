@@ -6659,9 +6659,23 @@
         "alternate_menus": []
       },
       "genko_status": "一部（2026-10-16 照合）",
-      "implementation_status": "未着手",
+      "implementation_status": "実装済み（PC3 A0、未統合）",
       "acceptance_status": "未実施",
-      "evidence": [],
+      "evidence": [
+        "native/src/render/ops_smart.cpp",
+        "native/src/render/smart_decode.cpp",
+        "native/src/render/smart.cpp",
+        "native/src/render/placed.cpp",
+        "native/src/app/main_window_smart.cpp",
+        "native/src/app/main_window_materials.cpp",
+        "native/src/app/main_window_color.cpp",
+        "native/tests/unit/test_smart_decode.cpp",
+        "native/tests/unit/test_smart_render.cpp",
+        "native/tests/contract/test_contract_smart.cpp",
+        "native/tests/gui/test_gui_smart.cpp",
+        "native/tests/gui/test_gui_carried.cpp",
+        "native/tests/gui/test_gui_color.cpp"
+      ],
       "pc0": {
         "date": "2026-10-16",
         "cpp_base": "962faa4",
@@ -17142,9 +17156,14 @@
         "alternate_menus": []
       },
       "genko_status": "同等（C++ のソースと試験あり。2026-10-16 照合）",
-      "implementation_status": "未着手",
+      "implementation_status": "実装済み（PC3 A0、未統合）",
       "acceptance_status": "未実施",
-      "evidence": [],
+      "evidence": [
+        "native/src/app/main_window_smart.cpp",
+        "native/src/app/layer_panel.cpp",
+        "native/tests/gui/test_gui_smart.cpp",
+        "native/tests/gui/test_gui_layers.cpp"
+      ],
       "pc0": {
         "date": "2026-10-16",
         "cpp_base": "962faa4",
@@ -17160,7 +17179,8 @@
         ],
         "gap": "",
         "note": "画面だけの項目。Genko の相当: レイヤーパネルの「＋塗り・補正 ▾ → 塗り・補正を直す…」と層のダブルクリック（塗り・グラデーション・補正の設定を開き直す）。文字・スマートオブジェクト・形のレイヤーは Genko の層に無い（各行で扱う）"
-      }
+      },
+      "remaining": "SO のコンテンツを編集（中身のタブ）は PC3 A1"
     },
     {
       "id": "layer.layerMask.apply",
@@ -20672,9 +20692,13 @@
         "alternate_menus": []
       },
       "genko_status": "一部（2026-10-16 照合）",
-      "implementation_status": "未着手",
+      "implementation_status": "実装済み（PC3 A0、未統合）",
       "acceptance_status": "未実施",
-      "evidence": [],
+      "evidence": [
+        "native/src/render/ops_smart.cpp",
+        "native/src/app/main_window_smart.cpp",
+        "native/tests/contract/test_contract_smart.cpp"
+      ],
       "pc0": {
         "date": "2026-10-16",
         "cpp_base": "962faa4",
@@ -20720,9 +20744,13 @@
         "alternate_menus": []
       },
       "genko_status": "一部（2026-10-16 照合）",
-      "implementation_status": "未着手",
+      "implementation_status": "実装済み（PC3 A0、未統合）",
       "acceptance_status": "未実施",
-      "evidence": [],
+      "evidence": [
+        "native/src/render/ops_smart.cpp",
+        "native/src/app/main_window_smart.cpp",
+        "native/tests/contract/test_contract_smart.cpp"
+      ],
       "pc0": {
         "date": "2026-10-16",
         "cpp_base": "962faa4",
@@ -20770,9 +20798,14 @@
         "alternate_menus": []
       },
       "genko_status": "一部（2026-10-16 照合）",
-      "implementation_status": "未着手",
+      "implementation_status": "実装済み（PC3 A0、未統合）",
       "acceptance_status": "未実施",
-      "evidence": [],
+      "evidence": [
+        "native/src/render/ops_smart.cpp",
+        "native/src/app/main_window_smart.cpp",
+        "native/tests/unit/test_smart.cpp",
+        "native/tests/contract/test_contract_smart.cpp"
+      ],
       "pc0": {
         "date": "2026-10-16",
         "cpp_base": "962faa4",
@@ -20791,7 +20824,8 @@
         ],
         "gap": "ペン・塗り・グラデーション・貼った絵はペイントの層にできるが、トーン層は断る。マスクは画素に焼き込んで外す（上流はマスクを残す）。配置画像の変換は未確認",
         "note": ""
-      }
+      },
+      "remaining": "高精度・インキのページのトーンの層のラスタライズは PC3 A4"
     },
     {
       "id": "layer.rasterize.shape",
@@ -20861,9 +20895,15 @@
         "alternate_menus": []
       },
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "未着手",
+      "implementation_status": "実装済み（PC3 A0、未統合）",
       "acceptance_status": "未実施",
-      "evidence": [],
+      "evidence": [
+        "native/src/render/ops_smart.cpp",
+        "native/src/app/main_window_smart.cpp",
+        "native/tests/unit/test_smart.cpp",
+        "native/tests/contract/test_contract_smart.cpp",
+        "native/tests/gui/test_gui_smart.cpp"
+      ],
       "pc0": {
         "date": "2026-10-16",
         "cpp_base": "962faa4",
@@ -21717,9 +21757,25 @@
         "alternate_menus": []
       },
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "未着手",
+      "implementation_status": "実装済み（PC3 A0、未統合）",
       "acceptance_status": "未実施",
-      "evidence": [],
+      "evidence": [
+        "native/src/core/smart.cpp",
+        "native/src/core/model.hpp",
+        "native/src/storage/reader.cpp",
+        "native/src/storage/writer.cpp",
+        "native/src/core/command_bus.cpp",
+        "native/src/render/smart.cpp",
+        "native/src/render/ops_smart.cpp",
+        "native/src/core/ops_frames.cpp",
+        "native/src/formats/checks.cpp",
+        "native/src/app/main_window_smart.cpp",
+        "native/src/app/layer_panel.cpp",
+        "native/tests/unit/test_smart.cpp",
+        "native/tests/unit/test_smart_render.cpp",
+        "native/tests/contract/test_contract_smart.cpp",
+        "native/tests/gui/test_gui_smart.cpp"
+      ],
       "pc0": {
         "date": "2026-10-16",
         "cpp_base": "962faa4",
@@ -21849,9 +21905,14 @@
         "alternate_menus": []
       },
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "未着手",
+      "implementation_status": "実装済み（PC3 A0、未統合）",
       "acceptance_status": "未実施",
-      "evidence": [],
+      "evidence": [
+        "native/src/render/ops_smart.cpp",
+        "native/src/app/main_window_smart.cpp",
+        "native/tests/unit/test_smart.cpp",
+        "native/tests/gui/test_gui_smart.cpp"
+      ],
       "pc0": {
         "date": "2026-10-16",
         "cpp_base": "962faa4",
@@ -21984,9 +22045,15 @@
         "alternate_menus": []
       },
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "未着手",
+      "implementation_status": "実装済み（PC3 A0、未統合）",
       "acceptance_status": "未実施",
-      "evidence": [],
+      "evidence": [
+        "native/src/render/ops_smart.cpp",
+        "native/src/app/main_window_smart.cpp",
+        "native/tests/unit/test_smart.cpp",
+        "native/tests/contract/test_contract_smart.cpp",
+        "native/tests/gui/test_gui_smart.cpp"
+      ],
       "pc0": {
         "date": "2026-10-16",
         "cpp_base": "962faa4",

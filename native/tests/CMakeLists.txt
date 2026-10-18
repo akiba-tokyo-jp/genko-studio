@@ -425,6 +425,9 @@ if(GENKO_BUILD_APP)
   genko_test(test_gui_workspace SOURCES gui/test_gui_workspace.cpp DEPS genko_app genko_test_support GUI TIMEOUT 600)
   genko_test(test_gui_look SOURCES gui/test_gui_look.cpp DEPS genko_app genko_test_support GUI TIMEOUT 600)
   genko_test(test_gui_carried SOURCES gui/test_gui_carried.cpp DEPS genko_app genko_test_support GUI TIMEOUT 600)
+  # PC3 A0 (smart-objects@1): レイヤー → スマートオブジェクト・ラスタライズ, the layer panel, 埋め込みを配置…, a large file on a
+  # 16-bit page, the 属性 panel's part (its size, its colours).
+  genko_test(test_gui_smart SOURCES gui/test_gui_smart.cpp DEPS genko_app genko_test_support ZLIB::ZLIB GUI TIMEOUT 600)
   # M7 (the ledger counted against the C++ tree): the checks of Python's window tests no C++ test made before
   genko_test(test_gui_ledger_a SOURCES gui/test_gui_ledger_a.cpp DEPS genko_app genko_test_support GUI TIMEOUT 900)
   genko_test(test_gui_ledger_c SOURCES gui/test_gui_ledger_c.cpp DEPS genko_app genko_test_support GUI TIMEOUT 900)

@@ -22,6 +22,7 @@
 #include "app/layer_dialogs.hpp"
 #include "app/layer_panel.hpp"
 #include "app/main_window.hpp"
+#include "app/smart_panel.hpp"
 #include "app/session.hpp"
 #include "core/adjust.hpp"
 #include "core/adjust_kinds.hpp"
@@ -187,6 +188,7 @@ void PropertiesPanel::build() {
             window_->apply_ops(Json::array({Json{{"op", "set_layer"}, {"page", index}, {"id", id}, {"locked", on}}}));
         });
         body_->addWidget(lock);
+        if (layer->kind == core::LayerKind::Smart) body_->addWidget(smart_properties(window_, *page, *layer));  // (smart-objects@1)
         if (layer->kind == core::LayerKind::Fill) {
             auto* edit = new QPushButton(QStringLiteral("塗りを直す…"));
             connect(edit, &QPushButton::clicked, this, [this] {

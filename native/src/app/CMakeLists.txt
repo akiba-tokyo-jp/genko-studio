@@ -98,6 +98,7 @@ genko_library(genko_app
     adjust_forms_color.cpp
     image_dialogs.cpp
     main_window_adjust.cpp
+    main_window_smart.cpp
     inject.cpp
     review_model.cpp
     ai_link.cpp

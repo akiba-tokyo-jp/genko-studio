@@ -401,6 +401,21 @@ public:
     // ... and for a picture taken in (its embedded profile, or none and a working space not the default): kept as its
     // numbers (Python's) or taken to sRGB, as chosen (asked first when chosen; closed without an answer: the policy's).
     bool picture_policy(const std::string& bytes, render::Image& picture);
+    // smart-objects@1 (PC3 A0, decision 2): the same policies for a file placed as a smart object, as the op's
+    // embedded_profile (keep, convert: from its own profile; assign: the working space's, its bytes as "icc"), with the
+    // intent and black point compensation — the file's pixels are never converted (the attributes panel changes it later).
+    // `mode`: open_image's mode of the file.
+    core::Json picture_use(const std::string& bytes, std::string_view mode);
+    // smart-objects@1 (app/main_window_smart.cpp): ファイル → 埋め込みを配置… (a file in the middle of the page at its own
+    // size, made smaller to fit), and a file placed as a smart object (画像を読み込む… with the panel chosen, else over the
+    // page out to the bleed; 埋め込みを配置… as above). False when nothing was placed (said why).
+    bool place_embedded(std::optional<QString> path = std::nullopt);
+    bool place_smart(const QString& file, bool as_placed);
+    // レイヤー → スマートオブジェクト・スマートフィルター・ラスタライズ, レイヤーの内容オプション…
+    void smart_convert();
+    void smart_copy();
+    void rasterize(const std::string& what);
+    void content_options();
     // A notice in the status line that never stops the work (problems in red, a little longer).
     void flash(const QString& message, int ms = 3000, bool error = false);
     QString last_notice() const { return last_notice_; }
@@ -427,6 +442,11 @@ private:
     // PC2 (補正・色管理, app/main_window_adjust.cpp): レイヤー → 色調補正 and the corrections' commands of 編集, each
     // group's added by its own file (app/adjust_forms.hpp); the submenu shown only when it holds a command.
     void build_adjust_menus(QMenu* layers, QMenu* edit);
+    // smart-objects@1 (PC3 A0, app/main_window_smart.cpp): the commands of smart objects, and their menus — ファイル's
+    // placing ones after 画像を読み込む…, レイヤー → スマートオブジェクト, スマートフィルター, ラスタライズ, レイヤーの内容オプション…
+    // (PC3's later steps' commands in their places, not usable yet).
+    void build_smart_actions();
+    void build_smart_menus(QMenu* layers, QMenu* file);
     // PC2a: the 色調補正 and 属性 panels (app/adjust_panels.cpp), listed in ウィンドウ.
     void build_adjust_docks();
     void connect_session();

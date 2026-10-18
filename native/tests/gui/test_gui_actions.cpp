@@ -282,7 +282,16 @@ private slots:
         // act_adjust_invert, act_adjust_posterize, act_adjust_threshold, act_adjust_gradient_map, act_adjust_equalize,
         // act_auto_tone, act_auto_contrast, act_auto_color, act_export_lookup) — theirs (test_gui_adjust).
         // and the 1 of PC2d (SPEC COLOR-04) — 編集 → プロファイルの情報… (act_profile_info) — its own (test_gui_info).
-        QCOMPARE(w->actions_by_name().size(), std::size_t{281});
+        // and the 41 of PC3 A0 (SPEC「スマートオブジェクト」) — ファイル → 埋め込みを配置…・リンクを配置…・パッケージ…
+        // (act_place_embedded, act_place_linked, act_package), レイヤー → スマートオブジェクト (act_smart_convert,
+        // act_smart_copy, act_smart_edit, act_smart_export, act_smart_replace, act_smart_relink, act_smart_embed,
+        // act_smart_link, act_smart_update, act_smart_update_all, act_smart_reveal, the 12 of スタックモード
+        // act_smart_stack_<mode>, act_smart_warp, act_smart_perspective_warp, act_smart_puppet_warp, act_smart_rasterize),
+        // レイヤー → スマートフィルター (act_smart_filters_convert, act_smart_filters_off, act_smart_filter_mask_delete,
+        // act_smart_filter_mask_off, act_smart_filters_clear), レイヤー → ラスタライズ (act_rasterize_type, act_rasterize_fill,
+        // act_rasterize_smart, act_rasterize_layer, act_rasterize_all) and レイヤーの内容オプション… (act_layer_content_options)
+        // — theirs (test_gui_smart; act_import stays test_gui_carried's).
+        QCOMPARE(w->actions_by_name().size(), std::size_t{322});
         QVERIFY(w->action("act_chat_approval"));
         QVERIFY(w->action("act_style"));
         QVERIFY(w->action("act_exposure"));
