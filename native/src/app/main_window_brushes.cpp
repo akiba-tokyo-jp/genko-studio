@@ -130,6 +130,7 @@ void MainWindow::build_tool_settings() {
                          QStringLiteral("原稿"), action("act_paper"),
                          static_cast<QWidget*>(note(QStringLiteral("コマを選ぶと、辺の中ほどの ◇ をドラッグで辺を曲げられます（外へふくらむ・内へへこむ）。")))}));
     build_selection_pages(ts);  // (the selection tools and マジック消しゴムツール: main_window_select.cpp)
+    build_retouch_pages(ts);    // (PC3 B4: the retouching tools: retouch_tools.cpp)
     ts->add({QStringLiteral("text")}, text_settings_);  // (the text tool: main_window_lines.cpp)
     ts->add({QStringLiteral("select")}, line_select_page());  // (the chosen line's lettering, then the view)
     ts->add({QStringLiteral("move")}, action_page({QStringLiteral("レイヤー"), action("act_layer_dup"), action("act_select_all")}));

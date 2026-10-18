@@ -199,7 +199,7 @@ const std::vector<const char*>& MainWindow::selection_tools() {
 }
 
 const std::vector<const char*>& MainWindow::retouch_tools() {
-    static const std::vector<const char*> names;  // (B4: スポット修復ブラシツール 修復ブラシツール コピースタンプツール ヒストリーブラシツール)
+    static const std::vector<const char*> names{"act_spot_healing", "act_healing", "act_clone_stamp", "act_history_brush"};  // (B4: retouch_tools.cpp)
     return names;
 }
 

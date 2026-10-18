@@ -182,8 +182,32 @@ public:
     // The polyline or curve being drawn with 図形 ended (Enter or a double click; closed: Shift+Enter), or forgotten (Esc).
     bool finish_shape(bool closed = false);
     bool cancel_shape();
-    // A tool that draws a line as the pen does: pen, eraser, 色混ぜ (blend), ゆがみ (liquify).
+    // A tool that draws a line as the pen does: pen, eraser, 色混ぜ (blend), ゆがみ (liquify), the retouching brushes.
     static bool is_stroke_tool(const QString& tool);
+    // 修復の道具 (PC3 B4, retouch_tools.cpp): スポット修復ブラシツール (spotheal), 修復ブラシツール (heal), コピースタンプツール
+    // (clone), ヒストリーブラシツール (historybrush); the two that sample a source (heal, clone: Alt+click sets it).
+    static bool is_retouch_tool(const QString& tool);
+    static bool is_clone_tool(const QString& tool);
+    // Their brush's diameter (mm), and the clone source as the window keeps it (コピーソース): where it was set (mm), the
+    // destination paired with it by the first stroke after (調整あり; none: the stroke's own start), how the destination's
+    // offsets map to the source's (W/H, rotation, flips: clone_matrix's), and the overlay — a picture of what is sampled
+    // (its place on the page, mm) shown at the brush as the source lies there, at an opacity, clipped to the brush, hidden
+    // while painting, inverted, by a blend (normal, darken, lighten, difference).
+    double retouch_mm = 5.0;
+    struct CloneShown {
+        std::optional<QPointF> source;
+        std::optional<QPointF> anchor;
+        std::array<double, 4> m{1.0, 0.0, 0.0, 1.0};
+        bool overlay = true;
+        double opacity = 1.0;
+        bool clipped = true;
+        bool auto_hide = true;
+        bool invert = false;
+        QString blend = QStringLiteral("normal");
+        QImage picture;
+        QRectF picture_mm;
+    };
+    CloneShown clone_shown;
     // 線の編集 (the vector tool, canvas_vector.cpp): the lines chosen and the point chosen of the first; cut where clicked
     // (クリックした所で線を切る); edit | widen | narrow | redraw | redraw_width | join | simplify (なぞって直す) and how far
     // from a trace the lines are mended. 線の修正（つまむ）: how far the pinch reaches, the line's ends kept.
@@ -365,6 +389,8 @@ signals:
     void wandRequested(double x_mm, double y_mm);
     // マジック消しゴムツール (PC3 B1): a click on the page (mm).
     void magicEraseRequested(double x_mm, double y_mm);
+    // コピースタンプツール・修復ブラシツール (PC3 B4): Alt+click — the clone source set there (mm).
+    void cloneSourcePicked(double x_mm, double y_mm);
     void selectionTransformed(const QVector<double>& matrix);
     void selectionWarped(const genko::core::Json& warp);
     // the drawing tools: the colour under the eyedropper; the fill tool's click; the area drawn around to fill; the
@@ -517,6 +543,10 @@ private:
     std::vector<QPointF> shape_preview(bool& closed) const;
     void pick_colour(const QPointF& pos);
     void draw_tools(QPainter& painter) const;
+    // the retouching brushes (retouch_tools.cpp): Alt+click sets the clone source (true: taken); the source's cross and
+    // the overlay at the brush
+    bool retouch_press(const QPointF& mm, Qt::KeyboardModifiers modifiers);
+    void draw_retouch(QPainter& painter) const;
     // the path tools (canvas_pen.cpp): true when the press, move or release was theirs
     bool path_press(const QPointF& pos, const QPointF& mm, Qt::KeyboardModifiers modifiers);
     bool path_move(const QPointF& mm, Qt::KeyboardModifiers modifiers);

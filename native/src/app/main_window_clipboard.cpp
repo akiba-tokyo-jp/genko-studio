@@ -19,6 +19,7 @@ using core::Json;
 
 void MainWindow::build_clipboard_menu(QMenu* edit) {
     for (const char* name : {"act_cut", "act_copy", "act_paste", "act_delete_area", "act_fill_selection"}) edit->addAction(action(QString::fromLatin1(name)));
+    edit->addAction(action(QStringLiteral("act_content_aware_fill")));  // (PC3 B4: retouch_tools.cpp)
     edit->addSeparator();
     build_transform_menu(edit->addMenu(QStringLiteral("変形")));  // (main_window_select.cpp)
 }

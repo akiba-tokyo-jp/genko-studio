@@ -301,7 +301,10 @@ private slots:
         // (act_line_work_path), 表示 → ターゲットパス (act_show_target_path), ファイル → パスを Illustrator へ… (act_export_paths_ai),
         // レイヤー → ベクトルマスク (act_vmask_reveal_all, act_vmask_hide_all, act_vmask_current_path, act_vmask_delete,
         // act_vmask_disable, act_vmask_link) and ラスタライズ → ベクトルマスク (act_rasterize_vmask) — theirs (test_gui_paths).
-        QCOMPARE(w->actions_by_name().size(), std::size_t{345});
+        // and the 5 of PC3 B4 (SPEC COLOR-06「修復」) — ツール の スポット修復ブラシツール・修復ブラシツール・コピースタンプツール・
+        // ヒストリーブラシツール (act_spot_healing, act_healing, act_clone_stamp, act_history_brush) and 編集 → コンテンツに応じた
+        // 塗りつぶし… (act_content_aware_fill) — theirs (test_gui_retouch).
+        QCOMPARE(w->actions_by_name().size(), std::size_t{350});
         QVERIFY(w->action("act_chat_approval"));
         QVERIFY(w->action("act_style"));
         QVERIFY(w->action("act_exposure"));
@@ -336,8 +339,9 @@ private slots:
         }
         // the palette and the command bar (Python's order); with M3's eight ways of the marquee (test_gui_select) and its
         // drawing tools and line editing (test_gui_paint), the effect lines and the material tool (test_gui_effects), the
-        // text tool (test_gui_lines); PC3 C-a's three path tools (test_gui_paths)
-        QCOMPARE(w->tools_group()->actions().size(), 31);
+        // text tool (test_gui_lines); PC3 C-a's three path tools (test_gui_paths); PC3 B4's four retouching tools
+        // (test_gui_retouch)
+        QCOMPARE(w->tools_group()->actions().size(), 35);
     }
 
     // No two commands share a key (Qt would take the key as ambiguous and do neither): PC1b's 色の校正 (Ctrl+Alt+Y — Ctrl+Y
@@ -431,7 +435,10 @@ private slots:
                                                   {"ruler", "act_ruler"},     {"3d", "act_3d"},         {"effect", "act_effect"},
                                                   {"stamp", "act_stamp"},     {"text", "act_text"},
                                                   // (PC3 C-a: ペンツール, 曲線ペンツール, パス選択ツール)
-                                                  {"pathpen", "act_path_pen"}, {"curvepen", "act_curvature_pen"}, {"pathselect", "act_path_select"}};
+                                                  {"pathpen", "act_path_pen"}, {"curvepen", "act_curvature_pen"}, {"pathselect", "act_path_select"},
+                                                  // (PC3 B4: the retouching tools)
+                                                  {"spotheal", "act_spot_healing"}, {"heal", "act_healing"}, {"clone", "act_clone_stamp"},
+                                                  {"historybrush", "act_history_brush"}};
         QCOMPARE(w->tool_actions().size(), tools.size());
         QVERIFY(w->tools_group()->isExclusive());
         QVERIFY(w->action(QStringLiteral("act_select"))->isChecked());

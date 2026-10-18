@@ -296,8 +296,8 @@ private slots:
         const core::Document doc = core::new_episode("枠", core::Num(1), 1, core::PageSpec::custom(60, 60, 50, 50, 1, 2, 2, 2, 2, 72, "color"));
         const std::vector<std::pair<const char*, const char*>> frames{
             {"outline_area", "B2"}, {"apply_layer_mask", "B2"}, {"mask_from_transparency", "B2"},
-            {"matting", "B3"}, {"clone_stamp", "B4"}, {"healing_brush", "B4"}, {"spot_healing", "B4"}, {"history_brush", "B4"},
-            {"content_aware_fill", "B4"},  // (C-a's set_path … set_vector_mask: written, test_contract_paths)
+            {"matting", "B3"},  // (B4's clone_stamp … content_aware_fill: written, test_retouch; C-a's set_path … set_vector_mask:
+                                // written, test_contract_paths)
             {"add_shape_part", "C-b"}, {"edit_shape_part", "C-b"},
             {"combine_shape_parts", "C-b"}, {"move_shape_parts", "C-b"}, {"transform_layers", "C-c"}, {"content_aware_scale", "C-c"},
             {"align_layers", "C-d"}, {"distribute_layers", "C-d"}, {"arrange_layers", "C-d"}, {"link_layers", "C-d"}, {"resize_pages", "C-e"},

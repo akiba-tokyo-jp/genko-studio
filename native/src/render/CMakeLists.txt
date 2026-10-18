@@ -98,6 +98,11 @@ genko_library(genko_render
     select_color.cpp
     ops_quick_mask.cpp
     erase_magic.cpp
+    # PC3 B4 (修復)
+    retouch_dabs.cpp
+    poisson.cpp
+    inpaint.cpp
+    content_aware.cpp
     # PC3 C-a (パスとベクトルマスク)
     path_trace.cpp
     path_areas.cpp

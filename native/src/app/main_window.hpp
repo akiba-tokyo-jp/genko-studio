@@ -9,6 +9,8 @@
 #include <QPointer>
 #include <QTimer>
 
+#include <algorithm>
+#include <array>
 #include <filesystem>
 #include <functional>
 #include <map>
@@ -49,6 +51,7 @@ namespace genko::app {
 
 class BrushPanel;
 class ChannelPanel;
+class CloneSourcePanel;
 class PathsPanel;
 class HistogramPanel;
 class InfoPanel;
@@ -161,6 +164,50 @@ public:
         double opacity = 100;
     };
     MagicEraserSettings magic_eraser_settings;
+    // 修復の道具 (PC3 B4, retouch_tools.cpp): the brush (直径 mm; 硬さ・不透明度・流量・間隔 %; 描画モード), the Clone Stamp's
+    // and the Healing Brush's 調整あり and サンプル (current | current_and_below | all), the Spot Healing Brush's 種類
+    // (content_aware | create_texture | proximity_match).
+    struct RetouchSettings {
+        double size_mm = 5;
+        double hardness = 100;
+        double opacity = 100;
+        double flow = 100;
+        double spacing = 25;
+        std::string blend = "normal";
+        bool aligned = true;
+        std::string sample = "current";
+        std::string spot_type = "content_aware";
+    };
+    RetouchSettings retouch_settings;
+    // コピーソース (window.panel.cloneSource): five sources — a point set by Alt+click (mm) on a page, the destination the
+    // first stroke after it paired with it (調整あり), the layer it was set on, 幅・高さ (%), 回転 (°) and flips — the one
+    // in use and the overlay (表示・不透明度 %・クリップ・自動的に隠す・反転・描画モード). The window's, not the book's (as
+    // Photoshop keeps them).
+    struct CloneSource {
+        std::optional<QPointF> source;
+        std::optional<QPointF> anchor;
+        std::string page_id;
+        std::string layer_id;
+        double width = 100, height = 100, rotation = 0;
+        bool flip_h = false, flip_v = false;
+    };
+    struct CloneSources {
+        std::array<CloneSource, 5> items;
+        int active = 0;
+        bool overlay = true;
+        double opacity = 100;
+        bool clipped = true, auto_hide = true, invert = false;
+        std::string blend = "normal";
+        CloneSource& now() { return items[static_cast<std::size_t>(std::clamp(active, 0, 4))]; }
+    };
+    CloneSources clone_sources;
+    // The clone source set and shown again (the panel and the canvas's cross and overlay) after it changed.
+    void clone_sources_follow();
+    CloneSourcePanel* clone_source_panel() const { return clone_source_panel_; }
+    // ヒストリーブラシのソース: 履歴's row painted back from (none: （はじめ）, the first row).
+    std::optional<int> history_brush_row;
+    // コンテンツに応じた塗りつぶし… (編集; retouch_tools.cpp).
+    void content_aware_fill_dialog();
     // The tools of the marquee (rect, lasso, wand, ellipse, polyline, selpen, selerase), and the one of a way.
     static bool is_marquee_tool(const QString& tool);
     static QString marquee_tool_of(const QString& way);
@@ -759,6 +806,16 @@ private:
     void quick_mask_follow();
     void target_quick_mask(const std::string& id);
     void magic_erase(double x_mm, double y_mm);
+    // PC3 B4 (retouch_tools.cpp): the retouching tools and コンテンツに応じた塗りつぶし…, their settings, a stroke made their
+    // op, the clone source set by Alt+click and its overlay drawn, コピーソース panel, the History Brush's source state
+    // put in the book's assets as the op's `from`.
+    void build_retouch_actions();
+    void build_retouch_pages(ToolSettings* ts);
+    void build_clone_source_dock();
+    bool retouch_stroke(const StrokeInput& stroke, const core::Page& page, const core::Layer& layer);
+    void clone_source_picked(double x_mm, double y_mm);
+    void clone_overlay_picture();
+    std::optional<core::Json> history_brush_from(const core::Page& page, const core::Layer& layer);
     bool selection_context_menu(const QPoint& global);
     void build_selection_pages(ToolSettings* ts);
     void color_range_dialog();
@@ -800,6 +857,9 @@ private:
     std::shared_ptr<Session> session_;
     std::map<std::string, ChannelView> channel_views_;  // (by page id)
     ChannelPanel* channel_panel_ = nullptr;
+    CloneSourcePanel* clone_source_panel_ = nullptr;  // (PC3 B4: コピーソース)
+    QDockWidget* clone_source_dock_ = nullptr;
+    std::uint64_t clone_ticket_ = 0;  // (the overlay's picture drawn on a worker: the latest asked)
     PathsPanel* paths_panel_ = nullptr;  // (vector@1, PC3 C-a)
     QDockWidget* paths_dock_ = nullptr;
     QDockWidget* channels_dock_ = nullptr;

@@ -12,6 +12,7 @@
 #include <deque>
 #include <filesystem>
 #include <functional>
+#include <map>
 #include <memory>
 #include <optional>
 #include <set>
@@ -182,6 +183,11 @@ public:
         std::vector<HistoryEntry> later;
     };
     History history() const;
+    // (PC3 B4, ヒストリーブラシ) A row of 履歴 as a book: the book after the first `done` changes of history().done (0:
+    // before them all — （はじめ）). This session's from memory; a saved change's state from the journal (its .state.json
+    // asset, read as the book reads its project.json); none when that state is not held (an older Genko's genko gc took
+    // it, the journal cannot be read) or past the changes done.
+    std::optional<DocPtr> state_at(std::size_t done) const;
 
     // --- the disk -------------------------------------------------------------------------------------------
     SaveStatus status() const;
@@ -332,6 +338,7 @@ private:
     bool trimmed_ = false;        // trim_history let changes of this session go to the journal
     std::uint64_t redo_floor_ = 0;  // apply(): what was undone before it (an action's seq below this) is not redone
     mutable std::shared_ptr<const JournalRead> journal_read_;  // history(): the journal as last read
+    mutable std::map<std::string, DocPtr> states_read_;        // state_at(): the journal's states read, by their refs
 
     bool job_running_ = false;
     bool save_wanted_ = false;
