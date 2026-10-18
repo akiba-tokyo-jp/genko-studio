@@ -478,6 +478,35 @@ COLOR-01 の色管理と高精度。COLOR-02 の色モードを広げ、ペー�
   - **既知の制限**（PC2a）: 属性パネルにマスクの濃度・境界の欄は無い（レイヤーパネルのまま）。`hue` の層の新しい作り方（上流の `hue_saturation`）は PC2b。`--format cube` は書き出しの形式の表（`genko export --help` の選択肢・MCP の `export` の形式）に載せない（公開の表を変えないため。`--page` は 1 ページ）。.cube の書き出しは 256 まで書けるが、読み込みは上流と同じく 129 まで。PSD の `levl`・`curv` の上流の式は Photoshop の式と同じでないため、Photoshop で開くと少し違うことがある（書き出しの知らせで言う）。
   - **Python とのバイト一致をやめた所**（利用者の決定 5）: 補正レイヤーを持つ原稿の PSD の書き出し（調整レイヤーのレコードが増える）と、調整レイヤーを持つ PSD の読み込み（補正レイヤーになる。Python 版は省く）。契約の試験は、Python と比べる所を Python の読み書きの見方（`render::psd::PythonView`: 調整レイヤーを読まず書かない。補正レイヤーの無い原稿・PSD ではこの版と同じ）で今までどおり比べ、そのうえでこの版の読み書きとの違いが調整レイヤー（補正レイヤー）だけであることを確かめるように期待を変えた: `test_contract_psd`（読み: 補正レイヤーにした調整レイヤーを除けば Python と同じで、Python が省いたのはそれらの名前だけ。`import_psd`: Python の見方で同じ、この版では補正レイヤーが増えるだけ）、`test_contract_export`（PSD の書き出し: Python の見方で同じバイト、この版ではほかの層・省いた層・統合画像・大きさ・解像度は同じで調整レイヤーが増えるだけ、返事は知らせ（`notes`）が増えるだけ。補正レイヤーを 1 つも書かなかったファイルは、この版のふだんの書き方でも Python と同じバイトであることも確かめる）。
 
+### COLOR-05 選択・マスク・修復（C++ 版。PhotoCraft の取り込み PC3 節 B。利用者の決定 2026-10-17）
+
+上流 PhotoCraft の選択（`select.*`）・レイヤーマスク（`layer.layerMask.*`）・修復を取り込む。形式は schema-v4.md の「マスク（masks@1）」。工程は PC3-0（土台。この節の骨組み）と B1〜B4（各群がこの節に書き足す）。
+
+- **区域の言葉**（op の `area`）: 今の種類（`poly`・`mask`・`rect`・`ellipse`・`layer`・`color`・`all`・`saved`・`channel`・`union`・`intersect`・`subtract`）に、種類の表（`render/area_kinds.cpp`: 名前 → 解く関数と群）で足す。`{"transparency": 層の id}` は層の不透明度をそのまま灰色の区域に、`{"layer_mask": 層の id}` は層のマスクに濃度を掛けたもの（PC3-0）。表に名前だけある種類（`range`・`grow`・`similar` は B1、`subject`・`sky`・`object`・`quick`・`focus`・`refine` は B3、`path`・`path_name`・`shape_part`・`vector_mask` は C-a）は、使う所で断る（`not_yet_ported`。種類の名前と群を言う）。
+- **修飾の順**: 種類の区域 → `matrix`（mm のアフィン 6 つの数。双一次で写す）→ `grow_mm` → `expand_mm`・`contract_mm`（距離変換で丸く広げる・狭める）→ `border_mm`（縁の帯）→ `smooth_mm`（滑らかに）→ `invert` → `feather_mm`。`antialias: true` は `poly`・`rect`・`ellipse` の縁を灰色にする（1 画素を 4 本の副走査で数える）。修飾を持たない区域は今と同じ。
+- **区域の絵の引き伸ばし**: `{"mask": {"box", "png"}}` の絵をページの格子に合わせるときは双一次（縁が段にならない）。
+- **マスク**（`masks@1`）: 層のマスクの `linked`（層と一緒に動く）・`density`（濃度 0..1）・`feather_mm`（ぼかし 0..100 mm）。描くときはマスクの値をぼかし（箱 3 回で近づけたガウス）、濃度で `255 − d·(255 − v)` にする。8 bit・高精度・インキの 3 つの道で同じ関数（`render/layer_masks`）。`set_layer_mask` は `linked`・`density`・`feather_mm` を受け、今あるキーと設定はそのまま。画面で新しく作るマスクはリンクが既定。リンクの印を持たないマスクはページに固定のまま。チャンネルの `quick_mask: true`（アルファチャンネル。1 ページに 1 つ）はクイックマスクの枠（中身は B1）。
+- **マスクを描く先にする**（画素の op に `layer_mask: true`）: 層のマスクを 200 dpi の隠れた灰色の層として op に貸し、op が変えた画素だけを 150 dpi のマスクへ戻す。マスクが無ければ全部見せるマスクを作る（リンク）。`channel` と一緒には断る。
+- **画素の窓ごとの読み書き**: `image_ops` の `layer_pixels`・`put_layer_pixels` に箱（mm）を渡すと、その範囲だけを読み書きする（修復・境界の調整の土台）。
+- **新しい op の枠**（中身は各群。それまでは `not_yet_ported`、op の名前と群を言う）: `quick_mask`・`magic_erase`（B1）、`outline_area`・`apply_layer_mask`・`mask_from_transparency`（B2）、`matting`（B3）、`clone_stamp`・`healing_brush`・`spot_healing`・`history_brush`・`content_aware_fill`（B4）。
+- **画面**（利用者の決定 5: 選択・編集の項目は Photoshop の名前。項目の id は変えない）: 選択範囲 メニュー（すべてを選択（Ctrl+A）・選択を解除・選択範囲を反転・選択範囲を変更 ▸ 拡張…・縮小…・境界をぼかす…（Shift+F6）・クイックマスクモードで編集・選択範囲を読み込む・選択範囲を保存…、Genko だけの ピクセルを選択・選択範囲をストック…・ストックから選ぶ・選択範囲の線の太さ…）。編集 メニュー（カット・コピー・ペースト・消去・描画色で塗りつぶし（Alt+Backspace）・変形 ▸、すべてを選択・選択を解除）。ツール メニューの選択のまとまり（長方形選択ツール（M）・楕円形選択ツール・なげなわツール（L）・多角形選択ツール・自動選択ツール（W）・色域選択・選択ペン・選択消し）。ツールの設定 選択範囲ツール（M・L・W）（選び方・許容値・隣接）。選択範囲ランチャー（塗りつぶし・消去・トーン・反転・拡張・変形・コピー・選択を解除）。履歴の言葉（消去した・ペーストした）。ピクセルを選択は層の不透明度を灰色の区域にする（`transparency`）。
+- **名前を変えた項目の設定**: ショートカット・クイックアクセス・コマンドバーに前の名前で残っている設定は、新しい名前の項目に読み替える（`preferences::renamed()`。1 つの新しい名前に前の名前をいくつでも）。
+
+### COLOR-06 パス・ベクトル・変形・判型（C++ 版。PhotoCraft の取り込み PC3 節 C。利用者の決定 2026-10-17）
+
+上流 PhotoCraft のパス・シェイプ・ベクトルマスク・変形・移動と整列・判型を取り込む。形式は schema-v4.md の「パスとベクトル（vector@1・pen-shapes@1・transform@1・page-spec@1）」。工程は PC3-0（土台。この節の骨組み）と C-a〜C-e（各群が書き足す）。
+
+- **パス**（`vector@1`）: 単位 mm、y は下向き、ページの座標。サブパス（閉じる・合わせ方 `combine`|`subtract`|`intersect`|`exclude`・点）、塗りの決まり（`nonzero`|`evenodd`）、反転。点は角なら `[x, y]`、ハンドルを持てば `{"anchor", "in", "out", "smooth"}`。ページの保存したパス（名前付き）・作業用パス・クリッピングパス、層のベクトルマスク（使う・リンク・濃度・ぼかし）。
+- **パスの覆い**（`render/path_raster`）: 3 次ベジエを 0.01 画素以内の折れ線にし、画素ごとの正確な面積で灰色の覆いを作る（巻き数・偶奇、サブパスの 4 つの合わせ方、反転）。線の輪郭（位置 内側・中央・外側、端 butt・round・square、角 miter・round・bevel、マイターの限り、破線）。生きた形（長方形と角丸・楕円・多角形と星・ライン）。
+- **ペンの層の形の部品**（`pen-shapes@1`。利用者の決定 7: 新しい層の種類を作らずペンの層を広げる）: 部品は ID・名前・パス・塗り（無し・単色・グラデーション。パターンはまだ断る）・線・生きた形・不透明度・線の上に置くか。
+- **変形の画素の引き直し**（`render/resample`）: 射影（前乗算で標本化して縁を黒くしない。0.5 倍より小さくする所は先に縮める。整数の移動はそのままの値）、メッシュ（三角形に分けて写す）、1 次元のフィルター（ニアレスト・バイリニア・バイキュービック（Keys）・Lanczos・ディテールを保持）、90°・180° の回転と反転は画素の並べ替え（同じ値）。8・16・32 bit（1 を超える値も残す）と灰色で同じ。
+- **要素を写す関数**（`core/page_geometry`）: 判型の変更・回転・反転で、線・コマ（枠・分割・角丸）・台詞・フキダシとしっぽ・定規とガイド・効果線・3D・区域・パス・形の部品がどう動くか（ARCHITECTURE.md）。ワープの写像（形の一覧・ベジエのメッシュ）。
+- **リンク・位置のロック**（`transform@1`）: 層の `link`（同じ文字の層が一緒に動く）・`lock_position`。
+- **ページだけの用紙**（`page-spec@1`）: 本と違う用紙を持つページ（`native_spec`。仕上がりの位置 `trim_origin_mm` も）。
+- **新しい op の枠**（中身は各群。それまでは `not_yet_ported`）: `set_path`・`delete_path`・`rename_path`・`make_work_path`・`text_to_path`・`stroke_path`・`set_vector_mask`（C-a）、`add_shape_part`・`edit_shape_part`・`combine_shape_parts`・`move_shape_parts`（C-b）、`transform_layers`・`content_aware_scale`（C-c）、`align_layers`・`distribute_layers`・`arrange_layers`・`link_layers`（C-d）、`resize_pages`・`set_canvas_size`・`crop_page`・`trim_page`・`reveal_all`・`rotate_pages`（C-e）。
+- **画面**（利用者の決定 5）: 編集 → 変形 ▸（自由な形に（Ctrl+Shift+P）・ワープ（Ctrl+Shift+W）・ワープ（格子の数を決める）…・水平方向に反転・垂直方向に反転・変形を数で決める…・基準位置を動かす・変形を確定・補間方法 ▸）。移動ツール（Q）。レイヤー → 重ね順 ▸ 前面へ（Ctrl+]）・背面へ（Ctrl+[）。
+- 拡張を使わない原稿は、`features` も保存のバイトも今のまま。
+
 ### COMP-03 入出力・API
 
 現行CLIのPNG/TIFF/PDF/strip/PSD/EPUB/pack/webtoon/SNS/CMYK/layers/Kindle/timelapse/animationを維持する。PSBは現行の読込範囲を維持し、PSB出力の新規追加は本仕様の必須にしない。各形式の実寸、DPI、色、透過、頁順、レイヤー、フォント、改行、下描き除外を形式別に検証する。
