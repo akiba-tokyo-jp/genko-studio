@@ -267,7 +267,8 @@ private slots:
         QVERIFY(palette != nullptr);
         const auto tools = palette->actions();
         QVERIFY(tools.indexOf(text) >= 0 && tools.indexOf(text) + 1 == tools.indexOf(s.window->action(QStringLiteral("act_frame"))));
-        // ツール: … 図形, テキスト, コマ割り; ページ → 台詞 (with フキダシの形: Python's kinds), then the book's lines
+        // ツール: … 図形, テキスト, コマ割り; ページ → 台詞 (with フキダシの形: Python's kinds; PC3 C-a: 作業用パスを作成 after
+        // them, Photoshop's 書式 → 作業用パスを作成), then the book's lines
         QMenu* tool_menu = s.menu_at(QStringLiteral("ツール"));
         const auto in_tools = tool_menu->actions();
         QCOMPARE(in_tools.indexOf(text), in_tools.indexOf(s.window->action(QStringLiteral("act_shape"))) + 1);
@@ -277,7 +278,7 @@ private slots:
         for (QAction* a : lines->actions()) order << (a->isSeparator() ? QStringLiteral("|") : a->text());
         QCOMPARE(order, QStringList({QStringLiteral("台詞を入れる（テキストの道具）"), QStringLiteral("フキダシを手で描く"), QStringLiteral("|"),
                                      QStringLiteral("選んだ台詞をその場で直す"), QStringLiteral("縦書き・横書きを切り替える"), QStringLiteral("フキダシの形"),
-                                     QStringLiteral("選んだ台詞を消す")}));
+                                     QStringLiteral("選んだ台詞を消す"), QStringLiteral("|"), QStringLiteral("作業用パスを作成")}));
         QMenu* shapes = s.menu_at(QStringLiteral("ページ/台詞/フキダシの形"));
         QVERIFY(shapes != nullptr);
         QCOMPARE(shapes->actions().size(), 15);
