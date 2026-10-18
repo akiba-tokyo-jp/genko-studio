@@ -1,8 +1,9 @@
 // smart-objects@1 (PC3 A0, design section A 5; Photoshop's names, the user's decision 8 of PC2): the window's smart
 // objects — ファイル → 画像を読み込む… (main_window_materials.cpp: the file placed as a smart object, decision 2) and
 // 埋め込みを配置…; レイヤー → スマートオブジェクト, スマートフィルター, ラスタライズ, レイヤーの内容オプション…. Every change
-// is an op (render/ops_smart.cpp); the contents and links (PC3 A1) and the smart filters (A2) too. The commands of PC3's
-// later steps (stack modes, a line as pixels, warps) are in their places and not usable yet: those steps write them here.
+// is an op (render/ops_smart.cpp); the contents and links (PC3 A1), the smart filters (A2), the stack modes and a line
+// rasterized (A4) too. The commands of PC3's later steps (warps) are in their places and not usable yet: that step writes
+// them here.
 
 #include <QAction>
 #include <QComboBox>
@@ -218,7 +219,13 @@ void MainWindow::build_smart_actions() {
     make("act_smart_reveal", QStringLiteral("ファイルマネージャーで表示"), [this] { reveal_contents(); }, {},
          QStringLiteral("リンクしたファイルのあるフォルダーを開きます"));
 #endif
-    for (const auto& [mode, label] : stack_modes()) later(("act_smart_stack_" + std::string(mode)).c_str(), QString::fromUtf8(label));
+    // (PC3 A4: the contents' layers combined pixel by pixel; なし: composited as they are)
+    for (const auto& [mode, label] : stack_modes()) {
+        const std::string name = mode;
+        make(QString::fromLatin1("act_smart_stack_%1").arg(QString::fromLatin1(mode)), QString::fromUtf8(label), [this, name] { smart_stack(name); }, {},
+             name == "none" ? QStringLiteral("スマートオブジェクトの中のレイヤーを、ふつうに重ねて見せます（スタックモードを外します）")
+                            : QStringLiteral("スマートオブジェクトの中のレイヤーを、画素ごとの%1で 1 枚にします（中身はそのまま）").arg(QString::fromUtf8(label)));
+    }
     later("act_smart_warp", QStringLiteral("ワープ"));
     later("act_smart_perspective_warp", QStringLiteral("遠近法ワープ"));
     later("act_smart_puppet_warp", QStringLiteral("パペットワープ"));
@@ -237,7 +244,8 @@ void MainWindow::build_smart_actions() {
     make("act_smart_filters_clear", QStringLiteral("スマートフィルターをクリア"), [this] { smart_filters_command(this, "clear"); }, {},
          QStringLiteral("選んだスマートオブジェクトのスマートフィルターとフィルターマスクを、すべて消します"));
     // レイヤー → ラスタライズ
-    later("act_rasterize_type", QStringLiteral("テキスト"));
+    make("act_rasterize_type", QStringLiteral("テキスト"), [this] { rasterize_type(); }, {},
+         QStringLiteral("選んだ台詞（フキダシと文字）を、見えているとおりの画素のレイヤーにします（台詞としては直せなくなります）"));
     make("act_rasterize_fill", QStringLiteral("塗りつぶし内容"), [this] { rasterize("fill"); }, {},
          QStringLiteral("選んだ塗りつぶし・グラデーションのレイヤーを、画素のレイヤーにします"));
     make("act_rasterize_smart", QStringLiteral("スマートオブジェクト"), [this] { rasterize("smart"); }, {},
@@ -452,6 +460,34 @@ void MainWindow::content_options() {
     layer_panel_->edit_special();
 }
 
+void MainWindow::smart_stack(const std::string& mode) {
+    const core::Page* page = current_page();
+    const core::Layer* layer = target_layer();
+    if (page == nullptr || layer == nullptr) return;
+    if (layer->kind != core::LayerKind::Smart) {
+        flash(QStringLiteral("スマートオブジェクトを選んでください"), 4000);
+        return;
+    }
+    if (!apply_ops(Json::array({Json{{"op", "smart_stack"}, {"page", page->index.json()}, {"id", layer->id}, {"mode", mode}}}))) return;
+    for (const auto& [name, label] : stack_modes()) {
+        if (name != mode) continue;
+        flash(mode == "none" ? QStringLiteral("スタックモードを外しました") : QStringLiteral("スタックモードを「%1」にしました").arg(QString::fromUtf8(label)), 4000);
+    }
+}
+
+void MainWindow::rasterize_type() {
+    const core::StoryLine* line = selected_line_or_say();
+    if (line == nullptr) return;
+    const std::string id = core::new_id();
+    const std::string chosen = line->id;
+    if (!apply_ops(Json::array({Json{{"op", "rasterize_lines"}, {"page", line->page_index.json()}, {"ids", Json::array({chosen})}, {"new_id", id}}})))
+        return;
+    canvas_->selected_line_id.reset();
+    set_target_layer(id);
+    if (layer_panel_ != nullptr) layer_panel_->refresh();
+    flash(QStringLiteral("台詞を画素のレイヤーにしました（元に戻すで台詞に戻ります）"), 5000);
+}
+
 QWidget* smart_properties(MainWindow* window, const core::Page& page, const core::Layer& layer) {
     auto* box = new QWidget;
     box->setObjectName(QStringLiteral("properties_smart"));
@@ -529,11 +565,22 @@ QWidget* smart_properties(MainWindow* window, const core::Page& page, const core
     form->addRow(QStringLiteral("角度"), angle);
     form->addRow(QStringLiteral("X"), x);
     form->addRow(QStringLiteral("Y"), y);
+    // (PC3 A4: its stack mode, なし first)
     auto* stack = new QComboBox;
     stack->setObjectName(QStringLiteral("properties_smart_stack"));
-    stack->addItem(QStringLiteral("なし"));
-    stack->setEnabled(false);
-    stack->setToolTip(QString::fromUtf8(kLater));
+    stack->addItem(QStringLiteral("なし"), QStringLiteral("none"));
+    for (const auto& [mode, label] : stack_modes()) {
+        if (std::string_view(mode) != "none") stack->addItem(QString::fromUtf8(label), QString::fromLatin1(mode));
+    }
+    {
+        const Json* now = layer.smart ? core::get(*layer.smart, "stack") : nullptr;
+        const int at = now != nullptr && now->is_string() ? stack->findData(QString::fromStdString(now->get<std::string>())) : 0;
+        stack->setCurrentIndex(std::max(0, at));
+    }
+    stack->setToolTip(QStringLiteral("中のレイヤーを画素ごとの統計で 1 枚にします（中央値で写り込んだ人を消す・平均でノイズを減らすなど）"));
+    QObject::connect(stack, &QComboBox::currentIndexChanged, box, [window, stack, at = page.index.json(), chosen = layer.id] {
+        window->apply_ops(Json::array({Json{{"op", "smart_stack"}, {"page", at}, {"id", chosen}, {"mode", stack->currentData().toString().toStdString()}}}));
+    });
     form->addRow(QStringLiteral("スタックモード"), stack);
     column->addWidget(rows);
     auto* apply = new QPushButton(QStringLiteral("変形を適用"));
@@ -635,6 +682,7 @@ constexpr const char* kNotInContents[] = {
     "act_ruler_frame",
     // lines
     "act_text", "act_story_editor", "act_replace", "act_line_type", "act_balloon_pen", "act_line_edit", "act_line_delete", "act_line_wrap",
+    "act_rasterize_type",
     // the studio
     "act_ai", "act_style", "act_chat_approval",
     // the book's own files

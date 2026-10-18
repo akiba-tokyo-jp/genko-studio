@@ -75,6 +75,8 @@ const std::map<std::string, const char*>& names() {
         {"smart_filter_add", "スマートフィルターをかけた"}, {"smart_filter_set", "スマートフィルターを直した"},
         {"smart_filter_move", "スマートフィルターを並べ替えた"}, {"smart_filter_delete", "スマートフィルターを削除した"},
         {"smart_filter_state", "スマートフィルターを切り替えた"},
+        // (PC3 A4: render/ops_smart)
+        {"smart_stack", "スタックモードを変えた"}, {"rasterize_lines", "台詞をラスタライズした"},
     };
     return table;
 }
