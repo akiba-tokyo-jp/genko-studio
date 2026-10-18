@@ -195,9 +195,15 @@ void apply_shortcuts(MainWindow* window) {
     for (QAction* action : preferences::commands(window)) {
         const QString name = command_name(names, action);
         QString key = QStringLiteral("shortcuts/%1").arg(name);
-        for (auto [old, end] = renamed().equal_range(name); !store->contains(key) && old != end; ++old) {
-            if (store->contains(QStringLiteral("shortcuts/%1").arg(old->second))) {
-                key = QStringLiteral("shortcuts/%1").arg(old->second);  // (keys chosen under an old name)
+        // (keys chosen under an old name: renamed() knows the new words, which another command may also have come to
+        // have — the user's decision 8 —: then the first of them in the menus had the old name, as below)
+        const auto words = first.find(action->text());
+        const bool first_of_words = name != action->text() && words != first.end() && words->second == action;
+        for (const QString& now : first_of_words ? QStringList{name, action->text()} : QStringList{name}) {
+            for (auto [old, end] = renamed().equal_range(now); !store->contains(key) && old != end; ++old) {
+                if (store->contains(QStringLiteral("shortcuts/%1").arg(old->second))) {
+                    key = QStringLiteral("shortcuts/%1").arg(old->second);  // (keys chosen under an old name)
+                }
             }
         }
         // (keys chosen under its words alone, before another command had the same words — the user's decision 8: the

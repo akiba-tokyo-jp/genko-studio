@@ -476,7 +476,10 @@ private slots:
     void theRenamedCommandsAreAllFound() {
         Book b;
         QSet<QString> now;
-        for (const auto& [action, name] : app::command_names(b.window.get())) now.insert(name);
+        for (const auto& [action, name] : app::command_names(b.window.get())) {
+            now.insert(name);
+            now.insert(action->text());  // (words two commands share are told apart by their places there: decision 8)
+        }
         int pc3 = 0;
         for (const auto& [name, before] : app::preferences::renamed()) {
             QVERIFY2(now.contains(name), qPrintable(name));
@@ -516,6 +519,13 @@ private slots:
         app::preferences::apply_shortcuts(b.window.get());
         app::settings()->remove(QStringLiteral("shortcuts/切り取り"));
         QCOMPARE(b.window->action("act_cut")->shortcut(), QKeySequence(QStringLiteral("Ctrl+Alt+K")));
+        // a key chosen under an old name whose new words another command also has (ワープ: 編集 → 変形, and レイヤー →
+        // スマートオブジェクト): the first of them in the menus, the renamed one, has it — not the other
+        app::settings()->setValue(QStringLiteral("shortcuts/自由変形（メッシュ・3×3）"), QStringLiteral("Ctrl+Alt+J"));
+        app::preferences::apply_shortcuts(b.window.get());
+        app::settings()->remove(QStringLiteral("shortcuts/自由変形（メッシュ・3×3）"));
+        QCOMPARE(b.window->action("act_warp_mesh")->shortcut(), QKeySequence(QStringLiteral("Ctrl+Alt+J")));
+        QVERIFY(b.window->action("act_smart_warp")->shortcut() != QKeySequence(QStringLiteral("Ctrl+Alt+J")));
     }
 
     // A short window: the palette's pictures shrink (down to 16 px) so the last tool stays within reach; the layers'
