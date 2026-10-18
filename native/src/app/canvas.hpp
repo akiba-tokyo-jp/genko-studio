@@ -137,6 +137,18 @@ public:
     QWidget* launcher = nullptr;
     void place_launcher();
     bool pivot_mode = false;  // 基準位置を動かす: the next press with the marquee tool puts the pivot there
+    // 切り抜きツール (PC3 C-e, canvas_crop.cpp): the box drawn (its middle and size in mm, its turn clockwise in degrees) and
+    // the shape a box drawn or resized keeps (its width over its height; 0: free). Enter: cropRequested, Esc: let go.
+    struct CropBox {
+        QPointF centre;
+        QSizeF size;
+        double angle = 0.0;
+        // The box upright (before its turn), mm.
+        QRectF rect() const { return QRectF(centre.x() - size.width() / 2, centre.y() - size.height() / 2, size.width(), size.height()); }
+    };
+    const std::optional<CropBox>& crop() const { return crop_; }
+    void set_crop(std::optional<CropBox> box);
+    double crop_ratio = 0.0;
     // How a new area joins the selection: Shift adds, Alt takes away, both keep the overlap.
     static QString how_from(Qt::KeyboardModifiers modifiers);
     const QString& selection_how() const { return sel_how_; }
@@ -334,6 +346,9 @@ signals:
     void colourAreaRequested(double x_mm, double y_mm);
     void selectionTransformed(const QVector<double>& matrix);
     void selectionWarped(const genko::core::Json& warp);
+    // the crop tool: its box changed; Enter on it (the box upright, mm, and its turn clockwise in degrees)
+    void cropChanged();
+    void cropRequested(const QRectF& box, double angle);
     // the drawing tools: the colour under the eyedropper; the fill tool's click; the area drawn around to fill; the
     // gradient's drag (mm); a figure drawn ({shape, points | box, sides?, closed?}: an add_shape op)
     void colourPicked(const std::array<int, 3>& rgb);
@@ -453,6 +468,20 @@ private:
     bool marquee_move(const QPointF& mm, Qt::KeyboardModifiers modifiers, bool pressed);
     bool marquee_release();
     bool marquee_key(QKeyEvent* event);
+    // the crop tool (canvas_crop.cpp)
+    struct CropDrag {
+        QString kind;  // new | move | corner | turn
+        QPointF start;
+        CropBox was;
+        int corner = 0;
+    };
+    std::optional<CropBox> crop_;
+    std::optional<CropDrag> crop_drag_;
+    bool crop_press(const QPointF& pos, const QPointF& mm, Qt::KeyboardModifiers modifiers);
+    bool crop_move(const QPointF& mm, Qt::KeyboardModifiers modifiers, bool pressed);
+    bool crop_release();
+    bool crop_key(QKeyEvent* event);
+    void draw_crop(QPainter& painter) const;
     void draw_frame_numbers(QPainter& painter) const;
     void draw_frame_tool(QPainter& painter) const;
     void draw_polygon_mm(QPainter& painter, const std::vector<QPointF>& points) const;

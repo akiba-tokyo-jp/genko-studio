@@ -75,6 +75,9 @@ const std::map<std::string, const char*>& names() {
         {"smart_filter_add", "スマートフィルターをかけた"}, {"smart_filter_set", "スマートフィルターを直した"},
         {"smart_filter_move", "スマートフィルターを並べ替えた"}, {"smart_filter_delete", "スマートフィルターを削除した"},
         {"smart_filter_state", "スマートフィルターを切り替えた"},
+        // (PC3 C-e: render/ops_pagesize)
+        {"resize_pages", "画像解像度を変えた"}, {"set_canvas_size", "カンバスサイズを変えた"}, {"crop_page", "切り抜いた"},
+        {"trim_page", "トリミングした"}, {"reveal_all", "すべての領域を表示した"}, {"rotate_pages", "カンバスを回転した"},
     };
     return table;
 }

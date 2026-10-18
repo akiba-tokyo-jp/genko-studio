@@ -462,6 +462,7 @@ void MainWindow::build_actions() {
     build_output_actions();     // (書き出し, 印刷, 履歴, 入稿前の点検, スマホの画面, 目盛り: main_window_output.cpp)
     build_studio_actions();     // (チャットでの承認: main_window_studio.cpp)
     build_smart_actions();      // (smart-objects@1: スマートオブジェクト, 埋め込みを配置…, ラスタライズ: main_window_smart.cpp)
+    build_page_size_actions();  // (PC3 C-e: 画像解像度…, カンバスサイズ…, 画像の回転, 切り抜き(ツール): main_window_page_size.cpp)
     make("act_point_wider", QStringLiteral("選んだ点を太く"), [this] { point_width(1.25); }, keys({QKeySequence(QStringLiteral("Ctrl+Alt+]"))}),
          QStringLiteral("線の編集で選んだ制御点のところだけ、線を太くします"));
     make("act_color", QStringLiteral("ペンの色…"), [this] { pick_colour(); }, keys({QKeySequence(QStringLiteral("C"))}));
@@ -663,6 +664,7 @@ void MainWindow::build_menus() {
         tools->addAction(action(name));
     tools->addSeparator();
     build_tool_groups(tools);  // (the selection's tools, the retouching's: main_window_select.cpp)
+    tools->addAction(action("act_crop_tool"));  // (PC3 C-e)
     for (const char* name : {"act_ruler", "act_3d", "act_effect", "act_stamp"}) tools->addAction(action(name));
     tools->addSeparator();
     for (const char* name : {"act_thicker", "act_thinner"}) tools->addAction(action(name));
@@ -746,6 +748,8 @@ void MainWindow::build_menus() {
     frames->addAction(action("act_reset_shape"));
     frames->addSeparator();
     frames->addAction(action("act_frame_numbers"));
+    pages->addSeparator();
+    build_page_size_menu(pages);  // (PC3 C-e: Photoshop's イメージ's paper commands, main_window_page_size.cpp)
     build_line_menus(pages);  // (台詞, ストーリーエディター, 台詞の検索・置換: main_window_lines.cpp)
     pages->addAction(action("act_book_preview"));
     pages->addAction(action("act_checks"));

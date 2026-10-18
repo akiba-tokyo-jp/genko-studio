@@ -177,6 +177,7 @@ void MainWindow::build_tool_settings() {
     ts->add({QStringLiteral("move")}, action_page({QStringLiteral("レイヤー"), action("act_layer_dup"), action("act_select_all")}));
     build_paint_pages(ts);  // (図形・色混ぜ・ゆがみ・グラデーション: main_window_paint.cpp)
     build_vector_pages(ts);  // (線の編集・線の修正: main_window_vector.cpp)
+    build_crop_page(ts);     // (PC3 C-e, 切り抜きツール: main_window_page_size.cpp)
     build_guide_pages(ts);   // (定規・3D: main_window_guides.cpp)
     build_material_pages(ts);  // (効果線・素材を置く: main_window_materials.cpp)
 

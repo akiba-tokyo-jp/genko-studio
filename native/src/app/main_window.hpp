@@ -725,6 +725,21 @@ private:
     void paste();
     void fill_selection();
     void line_width();
+    // 判型 (PC3 C-e, main_window_page_size.cpp): ページ → 画像解像度…, カンバスサイズ…, 画像の回転 ▸, 切り抜き, トリミング…,
+    // すべての領域を表示; ツール → 切り抜きツール and its settings. page_size_op applies one op of them (asked whether to fit
+    // the finished size to the new paper when it would not fit), the selection and the crop box let go, the page fitted.
+    void build_page_size_actions();
+    void build_page_size_menu(QMenu* pages);
+    void build_crop_page(ToolSettings* ts);
+    bool page_size_op(core::Json op, const QString& done);
+    void image_size_dialog();
+    void canvas_size_dialog();
+    void rotate_pages_by(const QString& turn);
+    void rotate_angle_dialog();
+    void crop_to_selection();
+    void crop_drawn(const QRectF& box, double angle);
+    void trim_dialog();
+    void reveal_all_pages();
     // channels@1 (main_window_channels.cpp)
     void build_channel_actions();
     void build_channel_dock();
