@@ -27,6 +27,7 @@
 #include "app/color_settings_dialog.hpp"
 #include "app/preferences.hpp"
 #include "core/color_model.hpp"
+#include "core/smart.hpp"
 #include "storage/asset_store.hpp"
 #include <QComboBox>
 #include <QCheckBox>
@@ -1149,25 +1150,48 @@ private slots:
             questions<<title;
             return std::optional<QString>(items.at(choice));
         };
-        const auto placed=[&]() -> std::vector<double> {
+        // (PC3, the user's decision 2: the picture is a smart object of the file itself — its bytes as they are —, the
+        // answer kept as its contents' colour use and laid on as it is drawn: "keep" its numbers, "embedded" its profile)
+        const auto last_smart=[&]() -> const core::Layer* {
             const core::Layer* last=nullptr;
-            for (const core::Layer& l : window.book().page(0).layers) if (l.kind==core::LayerKind::Placed) last=&l;
-            if (last==nullptr || !last->asset) return {};
-            const auto bytes=storage::AssetStore(path).get_bytes(*last->asset,".png");
-            if (!bytes) return {};
-            return render::read_png(*bytes).getpixel(0,0);
+            for (const core::Layer& l : window.book().page(0).layers) if (l.kind==core::LayerKind::Smart) last=&l;
+            return last;
+        };
+        const auto use_of=[&]() -> std::string {
+            const core::SmartContents* contents=last_smart()==nullptr ? nullptr : core::smart::contents_of(window.book(),*last_smart());
+            return contents==nullptr ? std::string() : contents->profile.value("use",std::string());
+        };
+        const auto file_kept=[&](const QString& name) {
+            const core::SmartContents* contents=last_smart()==nullptr ? nullptr : core::smart::contents_of(window.book(),*last_smart());
+            QFile in(name);
+            if (contents==nullptr || !in.open(QIODevice::ReadOnly)) return false;
+            const auto bytes=storage::AssetStore(path).get_bytes(contents->asset,contents->suffix);
+            return bytes.has_value() && *bytes==in.readAll().toStdString();
+        };
+        const auto drawn=[&]() -> std::vector<double> {
+            const core::Layer* layer=last_smart();
+            if (layer==nullptr) return {};
+            const render::Image alone=render::layer_image(window.book().page(0),*layer,20,&window.book());
+            std::vector<double> p=alone.getpixel(alone.width()/2,alone.height()/2);
+            p.resize(3);
+            return p;
         };
         QVERIFY(window.import_image(p3));
         QCOMPARE(questions,QStringList{QStringLiteral("埋め込まれたプロファイル")});
-        QCOMPARE(placed(),(std::vector<double>{128,64,32}));
+        QCOMPARE(use_of(),std::string("keep"));
+        QVERIFY(file_kept(p3));
+        QCOMPARE(drawn(),(std::vector<double>{128,64,32}));
         choice=1;
         QVERIFY(window.import_image(p3));
         QCOMPARE(questions.size(),2);
-        const auto converted=placed();
-        QVERIFY(converted.size()>=3 && converted!=(std::vector<double>{128,64,32}));
+        QCOMPARE(use_of(),std::string("embedded"));
+        QVERIFY(file_kept(p3));
+        const auto converted=drawn();
+        QVERIFY(converted.size()==3 && converted!=(std::vector<double>{128,64,32}));
         QVERIFY(window.import_image(srgb));
         QCOMPARE(questions.size(),2);  // (an sRGB one: as it is, not asked)
-        QCOMPARE(placed(),(std::vector<double>{128,64,32}));
+        QVERIFY(file_kept(srgb));
+        QCOMPARE(drawn(),(std::vector<double>{128,64,32}));
         window.hide();
     }
 };

@@ -1193,7 +1193,12 @@ private slots:
                                            "add_channel", "duplicate_channel", "delete_channel", "rename_channel", "move_channel",
                                            "set_channel", "merge_spot_channel", "split_channels", "merge_channels",
                                            "to_indexed", "set_color_table", "to_bitmap", "set_duotone",
-                                           "set_adjustment", "auto_adjust", "hdr_toning", "apply_image", "calculations", "trap", "fade_layer"};
+                                           "set_adjustment", "auto_adjust", "hdr_toning", "apply_image", "calculations", "trap", "fade_layer",
+                                           // (PC3 A0, smart-objects@1: this build's own, and the later steps' registered)
+                                           "smart_convert", "smart_place", "smart_profile", "smart_copy", "smart_transform", "rasterize_layer",
+                                           "smart_replace", "smart_relink", "smart_update", "smart_embed", "smart_link", "smart_to_page",
+                                           "smart_filter_add", "smart_filter_set", "smart_filter_move", "smart_filter_delete", "smart_filter_state",
+                                           "smart_stack", "rasterize_lines"};
         for (const std::string& name : genko::render::ops_registry().names()) {
             if (listed.count(name) == 0 && own.count(name) == 0) missing += (missing.empty() ? "" : ", ") + name;
         }

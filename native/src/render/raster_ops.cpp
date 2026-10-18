@@ -705,6 +705,7 @@ bool core_role(LayerRole role) {
 void check_mergeable(const Page& page, const std::vector<std::size_t>& layers) {
     for (const std::size_t i : layers) {
         const Layer& layer = page.layers[i];
+        if (layer.kind == LayerKind::Smart) throw OpError("a smart object cannot be merged (rasterize it first)");  // (smart-objects@1)
         if (layer.kind == LayerKind::Placed || (layer.tone && core::py_truthy(*layer.tone)) || layer.kind == LayerKind::Tone) {
             throw OpError("placed images and tones cannot be merged");
         }
@@ -772,7 +773,7 @@ bool merge_draws(const Layer& l) {
     return l.color_raster || l.raster_png || l.stroke_count() || !l.patches.empty() ||
            (l.kind == LayerKind::Fill && l.fill && core::py_truthy(*l.fill)) ||
            (l.kind == LayerKind::Adjust && l.adjust && core::py_truthy(*l.adjust)) ||
-           l.kind == LayerKind::Tone || l.kind == LayerKind::Placed;
+           l.kind == LayerKind::Tone || l.kind == LayerKind::Placed || l.kind == LayerKind::Smart;
 }
 bool merge_tail_clipped(const Page& page, const std::vector<std::size_t>& layers) {
     bool proof = true, print = merge_printed(page.layers[layers.front()]);
@@ -1224,6 +1225,7 @@ void merge_down(OpContext& c) {
     const std::size_t li = *(found - 1);
     for (const std::size_t i : {ui, li}) {
         const Layer& item = page.layers[i];
+        if (item.kind == LayerKind::Smart) throw OpError("a smart object cannot be merged (rasterize it first)");  // (smart-objects@1)
         if (item.kind == LayerKind::Placed || item.kind == LayerKind::Tone || (item.tone && core::py_truthy(*item.tone))) {
             throw OpError("placed images and tones cannot be merged");
         }
@@ -2498,6 +2500,7 @@ void lt_convert(OpContext& c) {
     Layer& dest = page.layers[core::layer_for_role(page, dest_role)];
     if (dest.locked) throw OpError("the layer is locked");  // (Python draws on it)
     if (dest.kind == LayerKind::Placed) throw OpError("a placed layer cannot receive strokes");
+    if (dest.kind == LayerKind::Smart) throw OpError("a smart object cannot receive strokes (rasterize it first)");  // (smart-objects@1)
     // lt.runs_to_strokes (points that are not finite, or more of them than an op may make, refused before a line is added)
     const double width_mm = page.spec.width_mm.value();
     const double height_mm = page.spec.height_mm.value();

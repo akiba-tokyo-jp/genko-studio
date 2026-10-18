@@ -7,6 +7,9 @@
 #include "core/color_raster.hpp"
 #include "core/error.hpp"
 #include "core/pyconv.hpp"
+#include "core/pyops.hpp"
+#include "core/pynum.hpp"
+#include "core/smart.hpp"
 #include "core/strokes.hpp"
 #include "storage/writer.hpp"
 
@@ -80,6 +83,40 @@ Json layer_brief(const core::Layer& layer, bool colour_model) {
             out.erase("precision");
         }
     }
+    return out;
+}
+
+// smart-objects@1: what genko inspect says of a smart object — its contents (id, kind, name, size; a file's format,
+// pixels, depth, colours, colour use and whether it is linked; a page's layers), its matrix and interpolation, how many
+// smart filters it has and its stack mode.
+Json smart_brief(const core::Document& doc, const core::Layer& layer) {
+    Json out = Json::object();
+    const auto id = core::smart::contents_id(layer);
+    out["contents"] = id ? Json(*id) : Json(nullptr);
+    const core::SmartContents* contents = core::smart::contents_of(doc, layer);
+    if (contents != nullptr) {
+        out["kind"] = contents->kind;
+        out["name"] = contents->name;
+        const auto [w, h] = core::smart::size_mm(*contents);
+        out["size_mm"] = Json::array({core::py_round(w, 3), core::py_round(h, 3)});
+        if (contents->kind == "file") {
+            out["format"] = contents->format;
+            out["size_px"] = Json::array({contents->width_px, contents->height_px});
+            out["depth"] = contents->depth;
+            out["mode"] = contents->mode;
+            out["use"] = core::py_get(contents->profile, "use", Json("keep"));
+            out["linked"] = contents->link.has_value();
+        } else {
+            out["layers"] = static_cast<std::int64_t>(contents->page ? contents->page->layers.size() : 0);
+        }
+    }
+    const Json settings = layer.smart && layer.smart->is_object() ? *layer.smart : Json::object();
+    out["matrix"] = get_or_null(settings, "matrix");
+    out["interp"] = get_or_null(settings, "interp");
+    const Json filters = get_or_null(settings, "filters");
+    out["filters"] = static_cast<std::int64_t>(filters.is_array() ? filters.size() : 0);
+    const Json stack = get_or_null(settings, "stack");
+    out["stack"] = stack.is_null() ? Json("none") : stack;
     return out;
 }
 
@@ -173,6 +210,10 @@ Json snapshot(const core::Document& doc, bool full) {
         if (!page.channels.empty()) item["channels"] = channels_brief(page);  // (channels@1: on a page with one only)
         Json layers = Json::array();
         for (const auto& layer : page.layers) layers.push_back(layer_brief(layer, colour_model));
+        // (smart-objects@1: a smart object's contents and settings, as genko inspect shows them)
+        for (std::size_t i = 0; i < page.layers.size(); ++i) {
+            if (page.layers[i].kind == core::LayerKind::Smart) layers[i]["smart"] = smart_brief(doc, page.layers[i]);
+        }
         item["layers"] = std::move(layers);
         Json prims = Json::array();
         for (const Json& prim : page.prims) {

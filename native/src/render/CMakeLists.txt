@@ -69,6 +69,9 @@ genko_library(genko_render
     covers.cpp
     bookpages.cpp
     placed.cpp
+    smart.cpp
+    smart_decode.cpp
+    ops_smart.cpp
     screentone.cpp
     text/fonts.cpp
     text/tategaki.cpp

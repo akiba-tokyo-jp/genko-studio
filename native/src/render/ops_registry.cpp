@@ -358,6 +358,8 @@ void register_render_ops(core::OpRegistry& registry) {
     register_channel_ops(registry);
     // the corrections' own ops (PC2, adjustments@1: render/ops_adjust)
     register_adjust_ops(registry);
+    // smart objects (PC3, smart-objects@1: render/ops_smart)
+    register_smart_ops(registry);
     // the studio ops again, place_asset and set_placement able to read an asset's picture size, and those placing a
     // picture able to see it can be drawn (render/placed)
     core::register_studio_ops(registry, core::StudioHooks{asset_picture_size, check_asset_picture});

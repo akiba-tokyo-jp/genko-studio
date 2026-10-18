@@ -461,6 +461,7 @@ void MainWindow::build_actions() {
     build_line_actions();       // (テキスト, 台詞 and the book's lines, the 台詞 panel: main_window_lines.cpp)
     build_output_actions();     // (書き出し, 印刷, 履歴, 入稿前の点検, スマホの画面, 目盛り: main_window_output.cpp)
     build_studio_actions();     // (チャットでの承認: main_window_studio.cpp)
+    build_smart_actions();      // (smart-objects@1: スマートオブジェクト, 埋め込みを配置…, ラスタライズ: main_window_smart.cpp)
     make("act_point_wider", QStringLiteral("選んだ点を太く"), [this] { point_width(1.25); }, keys({QKeySequence(QStringLiteral("Ctrl+Alt+]"))}),
          QStringLiteral("線の編集で選んだ制御点のところだけ、線を太くします"));
     make("act_color", QStringLiteral("ペンの色…"), [this] { pick_colour(); }, keys({QKeySequence(QStringLiteral("C"))}));
@@ -706,6 +707,7 @@ void MainWindow::build_menus() {
     layers->addAction(action("act_plugins"));
     layers->addAction(action("act_plugin_settings"));
     build_adjust_menus(layers, edit);  // (PC2: レイヤー → 色調補正, app/main_window_adjust.cpp)
+    build_smart_menus(layers, file);   // (PC3: スマートオブジェクト and the placing commands, app/main_window_smart.cpp)
     QMenu* pages = bar->addMenu(QStringLiteral("ページ"));
     for (const char* name : {"act_add_page", "act_dup_page", "act_del_page"}) pages->addAction(action(name));
     pages->addSeparator();

@@ -7,6 +7,7 @@
 #include <algorithm>
 #include <array>
 #include <charconv>
+#include <cmath>
 #include <cstdint>
 #include <fstream>
 #include <string>
@@ -23,6 +24,7 @@
 #include "core/pynum.hpp"
 #include "core/pyops.hpp"
 #include "core/ruby.hpp"
+#include "core/smart.hpp"
 #include "render/image.hpp"
 #include "render/not_yet_ported.hpp"
 #include "render/page.hpp"
@@ -624,7 +626,7 @@ Json page_issues(const core::Document& episode, const core::Page& page) {
     std::vector<const core::Layer*> hidden;
     for (const core::Layer& layer : page.layers) {
         const bool drawn = layer.stroke_count() > 0 || !layer.patches.empty() || has_pixels(layer);
-        if (prints(layer) && (drawn || layer.kind == LayerKind::Placed)) art = true;
+        if (prints(layer) && (drawn || layer.kind == LayerKind::Placed || layer.kind == LayerKind::Smart)) art = true;
         if (drawn && !prints(layer)) hidden.push_back(&layer);
     }
     if (!art && !hidden.empty()) {
@@ -702,6 +704,34 @@ Json studio_check(const core::Document& episode, const fs::path& project, const 
             }
         }
         for (const core::Layer& layer : page.layers) {
+            // (smart-objects@1: a picture's smart object as placed art — its file there, its resolution where it lands)
+            if (layer.kind == LayerKind::Smart && layer.exportable && layer.visible) {
+                const core::SmartContents* contents = core::smart::contents_of(episode, layer);
+                if (contents == nullptr || contents->kind != "file") continue;
+                const std::string lwhere = where + "/layers/" + layer.id;
+                std::error_code ec;
+                if (!episode.smart_files.contains(contents->asset) &&
+                    (!storage::AssetStore::is_ref(contents->asset) || !storage::AssetStore::is_suffix(contents->suffix) ||
+                     !fs::is_regular_file(store.path(contents->asset, contents->suffix), ec))) {
+                    errors.push_back(pf_issue("asset_missing", "error", lwhere,
+                                              num(page.index) + " ページの画像 " + head(contents->asset, 19) + "… が assets/ に無い"));
+                    continue;
+                }
+                const core::smart::Matrix m = core::smart::matrix_of(layer);
+                const double across = std::hypot(m.a, m.b);
+                if (across <= 0 || contents->dpi <= 0) continue;
+                const double dpi = core::py_round(contents->dpi / across, 1);
+                const std::string frame_id = layer.frame_id ? *layer.frame_id : std::string("None");
+                dpi_table.push_back(Json{{"page", page.index.json()}, {"frame_id", layer.frame_id ? Json(*layer.frame_id) : Json(nullptr)}, {"dpi", dpi}});
+                if (dpi < options.min_dpi) {
+                    (options.force ? warnings : errors)
+                        .push_back(pf_issue("low_dpi", options.force ? "warning" : "error", lwhere,
+                                            num(page.index) + " ページのコマ " + frame_id + " の実効解像度が " + fixed(dpi, 0) + " dpi（" +
+                                                std::to_string(options.min_dpi) + " 未満）",
+                                            "高解像度の画像に置き換えるか、--force で通す"));
+                }
+                continue;
+            }
             if (layer.kind != LayerKind::Placed || !layer.exportable || !layer.visible) continue;  // (preflight.art_layers)
             const std::string lwhere = where + "/layers/" + layer.id;
             const std::string frame_id = layer.frame_id ? *layer.frame_id : std::string("None");

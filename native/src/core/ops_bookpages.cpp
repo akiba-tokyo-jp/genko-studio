@@ -25,6 +25,7 @@
 #include "core/ops_util.hpp"
 #include "core/pyconv.hpp"
 #include "core/pyops.hpp"
+#include "core/smart.hpp"
 
 namespace genko::core {
 
@@ -149,6 +150,10 @@ public:
     const Rect& old_frame() const { return old_; }
     const Rect& new_frame() const { return new_; }
     double s() const { return s_; }
+    // (smart-objects@1) the map as a matrix: x' = new.x + (x - old.x) sx, y' = new.y + (y - old.y) sy, not rounded
+    smart::Matrix matrix() const {
+        return smart::Matrix{sx_, 0, 0, sy_, new_.x.value() - old_.x.value() * sx_, new_.y.value() - old_.y.value() * sy_};
+    }
 
     // round(v, digits), remembering a value that is not finite
     double rounded(double v, int digits) const {
@@ -289,6 +294,7 @@ void move_layer(Layer& layer, const Map& m, const PageSpec& paper, const PageSpe
         const Rect& r = *layer.placement_mm;
         layer.placement_mm = rect_of(m.box(r.x.value(), r.y.value(), r.width.value(), r.height.value()));
     }
+    if (layer.kind == LayerKind::Smart) smart::transform_layer(layer, m.matrix());  // (smart-objects@1: its contents as they are)
     if (layer.raster_png && !layer.raster_png->empty()) {
         if (!hooks.relayout_raster) {
             not_yet_ported("set_page_spec moving a paint layer's pixels: they are moved by the drawing build (render::ops_registry)");
@@ -644,6 +650,7 @@ void import_pages(OpContext& c, const BookPageHooks& hooks) {
         for (const std::string& ref : lut3d::refs_of(clone)) {
             if (const auto table = other.luts.find(ref); table != other.luts.end() && table->second) doc.luts.emplace(ref, table->second);
         }
+        smart::bring_contents(doc, other, clone);  // (smart-objects@1: its smart objects' contents, under ids of this book)
         for (StoryLine& line : lines) doc.story.push_back(std::move(line));
         doc.pages.push_back(std::make_shared<Page>(std::move(clone)));
     }

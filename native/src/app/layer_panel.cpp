@@ -38,6 +38,7 @@
 #include "core/adjust.hpp"
 #include "core/ids.hpp"
 #include "core/pyconv.hpp"
+#include "core/smart.hpp"
 #include "render/ink.hpp"
 #include "render/plugins.hpp"
 #include "render/page.hpp"
@@ -57,6 +58,7 @@ QString kind_name(core::LayerKind kind) {
     case core::LayerKind::Tone: return QStringLiteral("トーン");
     case core::LayerKind::Fill: return QStringLiteral("塗り");
     case core::LayerKind::Adjust: return QStringLiteral("色調補正");
+    case core::LayerKind::Smart: return QStringLiteral("スマートオブジェクト");
     default: return {};
     }
 }
@@ -76,6 +78,7 @@ std::string thumb_state(const core::Layer& layer) {
                       "|" + dump(layer.effect) + "|" + dump(layer.adjust) + "|" + layer.asset.value_or("") + "|" + layer.material_id.value_or("") +
                       "|" + (layer.mask && layer.mask->enabled ? "mask" : "") + "|" + std::to_string(layer.opacity);
     for (const core::Patch& patch : layer.patches) out += "|" + patch.attrs.dump();
+    out += "|" + dump(layer.smart);  // (smart-objects@1: its settings)
     return out;
 }
 
@@ -431,6 +434,10 @@ void LayerPanel::refresh() {
             if (layer.reference) marks << QStringLiteral("参照");
             if (layer.mask) marks << QStringLiteral("マスク");
             if (layer.locked) marks << QStringLiteral("ロック");
+            if (layer.kind == core::LayerKind::Smart) {  // (smart-objects@1: its contents in the book, or a file linked)
+                const core::SmartContents* contents = core::smart::contents_of(window_->book(), layer);
+                marks << (contents != nullptr && contents->link ? QStringLiteral("リンク") : QStringLiteral("埋め込み"));
+            }
             QString blend;
             const bool correction = layer.kind == core::LayerKind::Adjust && layer.adjust && layer.adjust->is_object();
             const std::string drawn = correction ? core::native_of(*layer.adjust).blend : layer.blend;  // (a correction's: its native's)
@@ -483,11 +490,15 @@ QIcon LayerPanel::thumbnail(const core::Page& page, const core::Layer& layer) {
     if (layer.kind == core::LayerKind::Folder) return {};
     const bool drawn = layer.stroke_count() > 0 || !layer.patches.empty() || (layer.raster_png && !layer.raster_png->empty()) || layer.color_raster ||
                        layer.ink_raster ||
-                       layer.kind == core::LayerKind::Placed || layer.kind == core::LayerKind::Tone || (layer.fill && core::py_truthy(*layer.fill));
+                       layer.kind == core::LayerKind::Placed || layer.kind == core::LayerKind::Tone || (layer.fill && core::py_truthy(*layer.fill)) ||
+                       layer.kind == core::LayerKind::Smart;
     if (!drawn) return {};
     const std::string key = page.id + "/" + layer.id;
     Thumb made{layer.strokes, layer.raster_png, layer.color_raster, layer.ink_raster, layer.mask ? layer.mask->png : nullptr, {}, thumb_state(layer), {}, {}};
     for (const core::Patch& patch : layer.patches) made.patches.push_back(patch.png);
+    if (const core::SmartContents* contents = core::smart::contents_of(window_->book(), layer)) {  // (its contents as they are now)
+        made.state += "|" + std::to_string(reinterpret_cast<std::uintptr_t>(contents));
+    }
     if (const auto found = thumbs_.find(key); found != thumbs_.end()) {
         const Thumb& was = found->second;
         if (was.strokes == made.strokes && was.raster == made.raster && was.color == made.color && was.ink == made.ink && was.mask == made.mask &&
@@ -881,6 +892,10 @@ void LayerPanel::add_adjust(const std::string& kind) {
 void LayerPanel::edit_special() {
     const auto [page, layer] = this->layer();
     if (layer == nullptr) return;
+    if (layer->kind == core::LayerKind::Smart) {  // (smart-objects@1: レイヤーの内容オプション… — its contents)
+        window_->content_options();
+        return;
+    }
     const auto asked = window_->asking();  // (each dialog's answer applied only to the book it was asked about)
     if (layer->kind == core::LayerKind::Adjust && layer->adjust && layer->adjust->is_object()) {
         const std::string kind = layer->adjust->value("kind", std::string("levels"));
@@ -1039,7 +1054,7 @@ QIcon LayerPanel::kind_mark(core::LayerKind kind) {
     static const std::map<core::LayerKind, const char*> names{
         {core::LayerKind::Strokes, "kind_strokes"}, {core::LayerKind::Raster, "kind_raster"}, {core::LayerKind::Folder, "kind_folder"},
         {core::LayerKind::Placed, "kind_placed"},   {core::LayerKind::Tone, "kind_tone"},     {core::LayerKind::Fill, "kind_fill"},
-        {core::LayerKind::Adjust, "kind_adjust"}};
+        {core::LayerKind::Adjust, "kind_adjust"},   {core::LayerKind::Smart, "kind_smart"}};
     const theme::Tokens t = theme::tokens();
     const auto found = names.find(kind);
     const QString key = QString::fromLatin1(found != names.end() ? found->second : "kind_other") + t.muted;

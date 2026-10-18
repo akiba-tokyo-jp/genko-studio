@@ -13,6 +13,7 @@
 #include "core/lut3d.hpp"
 #include "core/pyconv.hpp"
 #include "core/ruby.hpp"
+#include "core/smart.hpp"
 #include "core/strokes.hpp"
 #include "core/version.hpp"
 #include "storage/fsutil.hpp"
@@ -186,6 +187,13 @@ Json layer_json(const core::Layer& layer, AssetStore& store, const std::string& 
         out["finish"] = opt_json(layer.finish);
         return out;
     }
+    if (layer.kind == core::LayerKind::Smart) {  // (smart-objects@1: its panel as a placed picture's, and its settings)
+        if (layer.frame_id) out["frame_id"] = *layer.frame_id;
+        out["clip_to"] = layer.clip_to;
+        if (truthy(layer.finish)) out["finish"] = *layer.finish;
+        out["smart"] = layer.smart ? *layer.smart : Json::object();
+        return out;
+    }
     if (layer.raster_png && !layer.raster_png->empty()) {
         out["asset"] = put_png(store, layer.raster_png, layer.raster_memo);
     }
@@ -352,6 +360,37 @@ Json project_payload_v4(const core::Document& doc, AssetStore& store) {
         }
         store.put_known(ref, *table->second, core::lut3d::kSuffix);
     }
+    // smart-objects@1: the contents the book's smart objects show (only those), and the files ops were given for them
+    core::smart::validate_smart(doc);
+    Json smart_contents = Json::object();
+    for (const std::string& id : core::smart::used_contents(doc)) {
+        const auto found = doc.smart_contents.find(id);
+        if (found == doc.smart_contents.end() || !found->second) {
+            throw core::Error("value", "the smart object contents " + id + " are not held: the book is not written");
+        }
+        const core::SmartContents& contents = *found->second;
+        if (contents.kind == "page") {
+            Json item = Json::object();
+            item["kind"] = "page";
+            item["name"] = contents.name;
+            item["spec"] = spec_to_json(contents.page->spec);
+            item["page"] = page_json(*contents.page, store);
+            smart_contents[id] = std::move(item);
+            continue;
+        }
+        if (const auto file = doc.smart_files.find(contents.asset); file != doc.smart_files.end() && file->second) {
+            store.put_known(contents.asset, *file->second, contents.suffix);
+        }
+        if (const auto icc = contents.profile.is_object() ? contents.profile.find("icc") : contents.profile.end();
+            icc != contents.profile.end() && icc->is_string()) {
+            if (const auto file = doc.smart_files.find(icc->get<std::string>()); file != doc.smart_files.end() && file->second) {
+                store.put_known(icc->get<std::string>(), *file->second, ".icc");
+            }
+        }
+        smart_contents[id] = core::smart::file_json(contents);
+    }
+    std::erase(features, std::string(core::kSmartObjectsFeature));  // (named while a smart object is shown)
+    if (!smart_contents.empty()) features.emplace_back(core::kSmartObjectsFeature);
     core::validate_ink_document(doc);
     core::validate_color_model(doc);
     bool modes = doc.color.has_value() || doc.rgb.has_value() || doc.text_gamma.has_value();
@@ -405,6 +444,7 @@ Json project_payload_v4(const core::Document& doc, AssetStore& store) {
     out["bible"] = std::move(bible);
     out["tickets"] = doc.tickets;
     out["studio"] = doc.studio;
+    if (!smart_contents.empty()) out["smart_contents"] = std::move(smart_contents);  // (smart-objects@1)
     Json pages = Json::array();
     for (const auto& page : doc.pages) pages.push_back(page_json(*page, store));
     out["pages"] = std::move(pages);

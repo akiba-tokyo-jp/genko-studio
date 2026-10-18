@@ -859,6 +859,26 @@ const std::vector<Rule>& rules() {
             name.replace(QStringLiteral(" (int)"), QString());
             return QStringLiteral("%1の指定が要ります").arg(field(name));
         }));
+        // (smart-objects@1, PC3 — the C++ build's own: smart objects, render/ops_smart, core/smart)
+        r.push_back(rule("(?:layer \\S+ is a smart object: .*|a smart object cannot receive strokes.*)",
+                         "スマートオブジェクトには直接描けません（レイヤー → ラスタライズ で画素にしてから描きます）"));
+        r.push_back(rule("a smart object cannot be merged.*", "スマートオブジェクトは結合できません（先にラスタライズします）"));
+        r.push_back(rule("this op cannot be used inside smart object contents", "この操作はスマートオブジェクトの中では使えません"));
+        r.push_back(rule("no smart object contents .*", "スマートオブジェクトの中身が見つかりません"));
+        r.push_back(rule("the smart object contents \\S+ are a file, not a page", "このスマートオブジェクトの中身はファイルのため、この操作はできません"));
+        r.push_back(rule("the smart object contents \\S+ show themselves.*", "スマートオブジェクトの中に、それ自身は置けません"));
+        r.push_back(rule("smart objects inside smart objects go deeper than .*", "スマートオブジェクトの入れ子は 8 段までです"));
+        r.push_back(rule("layer \\S+ is not a smart object", "スマートオブジェクトを選んでください"));
+        r.push_back(rule("the layers have nothing to draw", "選んだレイヤーには、描かれたものがありません"));
+        r.push_back(rule("layer \\S+ has nothing to rasterize", "このレイヤーには、ラスタライズするものがありません（すでに画素のレイヤーです）"));
+        r.push_back(rule("the transform squashes the smart object flat|the picture would be laid too small", "スマートオブジェクトが潰れてしまう変形はできません"));
+        r.push_back(rule("the picture is too large to keep its 16 or 32 bits on this page.*", "画像が大きすぎて、このページでは 16・32 bit のまま置けません"));
+        r.push_back(rule("(?:the asset's picture cannot be read \\()?the file is larger than 256 MiB\\)?", "ファイルが大きすぎます（256 MiB まで）"));
+        r.push_back(rule("(?:the asset's picture cannot be read \\()?the file is not .* its name says\\)?", "ファイルの中身が、名前の形式と違います"));
+        r.push_back(rule("(?:the asset's picture cannot be read \\()?the file is not a picture this build reads\\)?", "読み込めない画像です"));
+        r.push_back(rule("no asset \\S+ of a picture.*", "画像の素材が見つかりません"));
+        r.push_back(rule("the smart object's contents are a page, not a file.*", "スマートオブジェクトの中身はページのため、色の扱いは中のレイヤーのものです"));
+        r.push_back(rule("embedded_profile is keep, convert or assign", "プロファイルの扱いは「値のまま」「埋め込みから変換」「作業用とみなす」のどれかです"));
         // (the C++ build's own: what it does not do yet, and saving)
         r.push_back(rule("official export is not in the C\\+\\+ build yet",
                          "この版の Genko では、まだ正式な書き出し（確認と承認の記録つき）はできません（ふつうの書き出しはできます）"));
@@ -938,6 +958,7 @@ QString layer_label(const core::Layer& layer) {
     const QString role = qs(core::to_string(layer.role));
     QString base = layer_role(core::to_string(layer.role));
     if (layer.kind == core::LayerKind::Placed) base = QStringLiteral("絵（配置）");
+    if (layer.kind == core::LayerKind::Smart) base = QStringLiteral("スマートオブジェクト");  // (smart-objects@1)
     // titles made of ids (placed art) are not names people gave
     static const QRegularExpression made(
         QRegularExpression::anchoredPattern(QStringLiteral(R"((art|ink|placed)?\s*[0-9a-f]{8,}|placed (art|bg|draft|name)|layer)")));
@@ -954,6 +975,13 @@ QString unported_element(const QString& element) {
         {"image_format", "この版では読めない形式の画像（PPM・ICO・JPEG 2000 など）"}};
     if (const auto it = words.find(element); it != words.end()) return it->second;
     if (element.startsWith(QStringLiteral("adjust:"))) return QStringLiteral("色調補正（%1）").arg(element.mid(7));
+    if (element.startsWith(QStringLiteral("smart:"))) {  // (smart-objects@1: what PC3's later steps draw)
+        static const std::map<QString, QString> later = {{"perspective", "遠近の変形"}, {"warp", "ワープ"}, {"stack", "スタックモード"},
+                                                         {"filters", "スマートフィルター"}, {"filter_mask", "フィルターマスク"},
+                                                         {"psd", "PSD のスマートオブジェクトの絵"}, {"psb", "PSB の画像"}};
+        const auto it = later.find(element.mid(6));
+        return QStringLiteral("スマートオブジェクトの%1").arg(it != later.end() ? it->second : element.mid(6));
+    }
     return element;
 }
 

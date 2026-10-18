@@ -1672,7 +1672,8 @@ void set_finish(OpContext& c) {
     const std::string frame_id = leaf(page, op_get(c.op, "frame_id")).id;
     const Json finish = op_get(c.op, "finish");
     for (Layer& layer : page.layers) {
-        if (layer.kind == LayerKind::Placed && layer.frame_id == frame_id) {
+        // (smart-objects@1: a picture's smart object in the panel is finished as its placed art)
+        if ((layer.kind == LayerKind::Placed || layer.kind == LayerKind::Smart) && layer.frame_id == frame_id) {
             layer.finish = finish.is_null() ? std::nullopt : std::optional<Json>(finish);
         }
     }

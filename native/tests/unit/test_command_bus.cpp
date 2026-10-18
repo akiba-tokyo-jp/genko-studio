@@ -425,7 +425,11 @@ private slots:
             "merge_spot_channel", "split_channels", "merge_channels",  // (channels@1: the C++ build's own, SPEC.md COLOR-03)
             "to_indexed", "set_color_table", "to_bitmap", "set_duotone",  // (color-model@1's own modes, PC1d: the C++ build's own, SPEC.md COLOR-03)
             "set_adjustment", "auto_adjust", "hdr_toning", "apply_image", "calculations", "trap",
-            "fade_layer"};  // (PC2's corrections, adjustments@1: the C++ build's own, SPEC.md COLOR-04)
+            "fade_layer",  // (PC2's corrections, adjustments@1: the C++ build's own, SPEC.md COLOR-04)
+            "smart_convert", "smart_place", "smart_profile", "smart_copy", "smart_transform", "rasterize_layer",
+            "smart_replace", "smart_relink", "smart_update", "smart_embed", "smart_link", "smart_to_page",
+            "smart_filter_add", "smart_filter_set", "smart_filter_move", "smart_filter_delete", "smart_filter_state",
+            "smart_stack", "rasterize_lines"};  // (PC3 A0, smart-objects@1: the C++ build's own and the later steps', SPEC.md COLOR-05)
         expected.insert(drawing_names.begin(), drawing_names.end());
         const std::set<std::string> actual(all_names.begin(), all_names.end());
         QCOMPARE(actual, expected);

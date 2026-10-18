@@ -40,6 +40,7 @@ const QHash<QString, QString>& lucide() {
         {"close", "x"}, {"caret_up", "chevron-up"}, {"caret_down", "chevron-down"}, {"kind_strokes", "pen-line"},
         {"kind_raster", "paintbrush"}, {"kind_folder", "folder"}, {"kind_placed", "image"}, {"kind_tone", "grid-3x3"},
         {"kind_fill", "square"}, {"kind_adjust", "contrast"}, {"kind_other", "layers"},
+        {"kind_smart", "box"},  // (smart-objects@1)
     };
     return table;
 }

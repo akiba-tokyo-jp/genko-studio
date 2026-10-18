@@ -117,6 +117,17 @@ genko_test(test_adjust_color SOURCES unit/test_adjust_color.cpp DEPS genko_test_
 # PC2a (SPEC.md COLOR-04): color_lookup's 3D tables without Python — the LUT files read as PhotoCraft reads them, the
 # generated looks, the lookup and its dither, the table as a book holds it.
 genko_test(test_lut3d SOURCES unit/test_lut3d.cpp DEPS genko_core LABELS unit)
+# PC3 A0 (SPEC.md「スマートオブジェクト」, smart-objects@1): the model's rules — the matrix, the book written and read back,
+# validate_smart's refusals, an op sent into contents, the ops of A0 and the later steps refused by name.
+genko_test(test_smart SOURCES unit/test_smart.cpp DEPS genko_test_support genko_render_ops LABELS unit TIMEOUT 600)
+# PC3 A0: a smart object's file read with every bit (PNG 16, TIFF 16 and 32), a CMYK file's inks kept, what is refused
+# (too large, a decompression bomb, broken), its colours by the use kept (keep, embedded, assign).
+genko_test(test_smart_decode SOURCES unit/test_smart_decode.cpp DEPS genko_test_support genko_render PNG::PNG TIFF::TIFF JPEG::JPEG ZLIB::ZLIB
+           LABELS unit TIMEOUT 600)
+# PC3 A0: a smart object drawn — one layer converted draws as it did (8, 16, 32 bits, CMYK, Lab, grey), a placed picture
+# converted and a file placed as place_asset places it draw as it did (the monochrome finish too), smaller and back the same,
+# a part the same as the whole.
+genko_test(test_smart_render SOURCES unit/test_smart_render.cpp DEPS genko_test_support genko_render_ops genko_formats LABELS unit TIMEOUT 900)
 
 # core/pyre's own bounds (Python 3.12's re, ported; SPEC COMP-01a): a search that backtracks without end stopped when its
 # steps are spent, groups more than 200 deep refused, replace_text refused without a change; without Python.
@@ -288,6 +299,10 @@ genko_test(test_contract_channels SOURCES contract/test_contract_channels.cpp DE
            LABELS contract TIMEOUT 900)
 # PC2c (COLOR-04) through the command line: a local correction saved, undone and done again; fade_layer from the
 # pixels before (an asset gc keeps); apply_image and calculations; hdr_toning's flatten; trap on a CMYK page only.
+# PC3 A0 (smart-objects@1) through the command line: converted, saved, opened again, undone and redone, gc keeping the
+# contents' files, the journal; a 16-bit file drawn with its bits; import_pages bringing contents; panels and checks.
+genko_test(test_contract_smart SOURCES contract/test_contract_smart.cpp DEPS genko_test_support genko_render_ops genko_formats
+           LABELS contract TIMEOUT 900)
 genko_test(test_contract_image_ops SOURCES contract/test_contract_image_ops.cpp DEPS genko_test_support genko_render
            LABELS contract TIMEOUT 900)
 
@@ -410,6 +425,9 @@ if(GENKO_BUILD_APP)
   genko_test(test_gui_workspace SOURCES gui/test_gui_workspace.cpp DEPS genko_app genko_test_support GUI TIMEOUT 600)
   genko_test(test_gui_look SOURCES gui/test_gui_look.cpp DEPS genko_app genko_test_support GUI TIMEOUT 600)
   genko_test(test_gui_carried SOURCES gui/test_gui_carried.cpp DEPS genko_app genko_test_support GUI TIMEOUT 600)
+  # PC3 A0 (smart-objects@1): レイヤー → スマートオブジェクト・ラスタライズ, the layer panel, 埋め込みを配置…, a large file on a
+  # 16-bit page, the 属性 panel's part (its size, its colours).
+  genko_test(test_gui_smart SOURCES gui/test_gui_smart.cpp DEPS genko_app genko_test_support ZLIB::ZLIB GUI TIMEOUT 600)
   # M7 (the ledger counted against the C++ tree): the checks of Python's window tests no C++ test made before
   genko_test(test_gui_ledger_a SOURCES gui/test_gui_ledger_a.cpp DEPS genko_app genko_test_support GUI TIMEOUT 900)
   genko_test(test_gui_ledger_c SOURCES gui/test_gui_ledger_c.cpp DEPS genko_app genko_test_support GUI TIMEOUT 900)

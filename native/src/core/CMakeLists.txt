@@ -105,6 +105,7 @@ genko_library(genko_core
     clock.cpp
     stylecat.cpp
     ops_studio.cpp
+    smart.cpp
     "${CMAKE_CURRENT_BINARY_DIR}/ops_schema_data.cpp"
     "${CMAKE_CURRENT_BINARY_DIR}/pyre_names_data.cpp"
     "${CMAKE_CURRENT_BINARY_DIR}/builtin_profiles_data.cpp"
