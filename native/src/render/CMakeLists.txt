@@ -93,6 +93,7 @@ genko_library(genko_render
     ops_vector2.cpp
     ops_transform.cpp
     ops_pagesize.cpp
+    page_pixels.cpp
     ${GENKO_MATERIAL_RESOURCES}
     ${GENKO_TEXT_RESOURCES}
   PUBLIC_DEPS genko_core Qt6::Core

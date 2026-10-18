@@ -764,4 +764,9 @@ void register_smart_ops(core::OpRegistry& registry) {
     for (const char* op : {"smart_stack", "rasterize_lines"}) registry.add(op, later(op, "A4"));
 }
 
+// (PC3 C-e: a placed picture turned with its page, render/ops_pagesize.cpp)
+namespace smart_ops {
+core::Layer placed_to_smart(core::Document& doc, core::Layer placed, const std::string& id) { return render::placed_to_smart(doc, std::move(placed), id); }
+}  // namespace smart_ops
+
 }  // namespace genko::render

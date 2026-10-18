@@ -72,7 +72,8 @@ std::array<double, 4> map_box(const std::array<double, 4>& box, const Mapping& m
 // makes it a panel of free corners (its split tree cannot be kept: its children become free).
 void map_frame(Frame& frame, const Mapping& m);
 // A line of dialogue: its balloon's middle moved and its size × scale (w and h swapped by a quarter turn), its tails,
-// its drawn outline; its text kept upright (never turned, never mirrored).
+// its drawn outline; its text kept upright (never turned, never mirrored), its letters and its balloon's lines × scale
+// (style's size_mm, outline_mm, border_mm, text_dx_mm, text_dy_mm).
 void map_line(StoryLine& line, const Mapping& m);
 // A ruler (Page::rulers' JSON): its points, points2 and centre; a guide moved along (a quarter turn makes a horizontal
 // guide vertical); a map that is no turn by a right angle makes a guide a line ruler through the same place.
@@ -95,14 +96,15 @@ void map_fill(Json& fill, const Mapping& m);
 // The pixels the drawing build moves (null: the op is refused with not_yet_ported naming them).
 struct PixelHooks {
     // A layer's own pixels (raster_png, color_raster, ink_raster), its mask (a linked one, or every one when `all`), its
-    // patches' pictures when the map turns or mirrors them.
+    // patches' pictures when the map turns or mirrors them, a smart object's filter mask (PC3 C-e).
     std::function<void(Layer& layer, const Mapping& m, const Page& before, const Page& after)> layer;
     std::function<void(Channel& channel, const Mapping& m, const Page& before, const Page& after)> channel;
     // A saved mask area's pixels when the map is more than a move and an even scale.
     std::function<void(Json& area, const Mapping& m, const Page& before, const Page& after)> area;
 };
 // Everything on the page through the map (the lines of dialogue of the book on it too), `after` its paper when the map is
-// done (the same page with its new spec). The pixels through the hooks.
+// done (the same page with its new spec). The pixels through the hooks. A smart object's matrix after the map
+// (smart::transform_layer); a placed picture only moved and scaled (a turn or a mirror: made a smart object first).
 void map_page(Document& doc, std::size_t page, const Mapping& m, const PixelHooks& hooks);
 
 // --- warps (geom/src/warp.rs) ----------------------------------------------------------------------------------------

@@ -163,6 +163,10 @@ struct BookPageHooks {
         relayout_mask;
     // color-mode@1: a paint layer's inks (GKIR) on a CMYK or Lab page moved as relayout_raster moves a PNG.
     std::function<std::string(const std::string& gkir, const PageSpec& spec, const Rect& old_frame, const Rect& new_frame)> relayout_inks;
+    // PC3 C-e: a precise paint layer's raster (GKCR over the page's old paper `old_paper`) moved as relayout_raster moves a
+    // PNG, over the new paper `paper` at the resolution it had (bilinear).
+    std::function<std::string(const std::string& gkcr, const PageSpec& old_paper, const PageSpec& paper, const Rect& old_frame, const Rect& new_frame)>
+        relayout_color;
     // channels@1: a page's channel (its GKIR mask over the page's old paper `old_paper`) moved as its layers are, over the
     // new paper `paper` at the resolution it had.
     std::function<Bytes(const Bytes& gkir, const PageSpec& old_paper, const PageSpec& paper, const Rect& old_frame, const Rect& new_frame)>

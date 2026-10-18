@@ -372,7 +372,7 @@ Plane mesh(const Plane& src, const Forward& f, int width, int height, Interp int
     return out;
 }
 
-Plane resize(const Plane& src, int width, int height, Filter filter) {
+Plane resize(const Plane& src, int width, int height, Filter filter, bool edges) {
     Plane out = empty_like(src, width, height);
     if (src.width <= 0 || src.height <= 0 || width <= 0 || height <= 0) return out;
     const int n = src.channels;
@@ -381,8 +381,8 @@ Plane resize(const Plane& src, int width, int height, Filter filter) {
     const auto vy = taps(height, static_cast<double>(height) / src.height, filter);
     const auto read = [&](int x, int y, int c) -> double {
         if (x < 0 || y < 0 || x >= src.width || y >= src.height) {
-            if (alpha) return 0.0;
-            x = std::clamp(x, 0, src.width - 1);
+            if (alpha && !edges) return 0.0;
+            x = std::clamp(x, 0, src.width - 1);  // (grey, or a picture as big as its page: its edge carried on)
             y = std::clamp(y, 0, src.height - 1);
         }
         const float* p = src.at(x, y);

@@ -310,8 +310,11 @@ void move_layer(Layer& layer, const Map& m, const PageSpec& paper, const PageSpe
             layer.mask->png = std::make_shared<const std::string>(std::move(*moved));
         }
     }
-    // (Python has no precise colour pixels: this build cannot move them onto the new frame yet)
-    if (layer.color_raster) not_yet_ported("set_page_spec moving high-precision colour pixels is not in the C++ build yet");
+    // (a precise layer's pixels moved as the paint layer's are, at their own resolution, render/color_edit — PC3 C-e)
+    if (layer.color_raster) {
+        if (!hooks.relayout_color) not_yet_ported("set_page_spec moving high-precision colour pixels: they are moved by the drawing build");
+        layer.color_raster = std::make_shared<const std::string>(hooks.relayout_color(*layer.color_raster, old_paper, paper, m.old_frame(), m.new_frame()));
+    }
     // (color-mode@1: a CMYK or Lab page's inks moved by the drawing build, render/ink_edit)
     if (layer.ink_raster) {
         if (!hooks.relayout_inks) not_yet_ported("set_page_spec moving the pixels of a CMYK or Lab page: they are moved by the drawing build");
@@ -347,6 +350,7 @@ bool relayout(Document& doc, const PageSpec& spec, bool move, const BookPageHook
         Page& page = doc.edit_page(i);
         const Json* cover = cover_of(page);
         page.spec = cover != nullptr ? spec_for(spec, *cover) : spec;
+        page.own_spec = false;  // (page-spec@1: every page on the book's paper again)
     }
     if (!move) return false;
     bool overflow = false;

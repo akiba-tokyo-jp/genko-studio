@@ -49,6 +49,11 @@ std::string warp_area(const core::Page& page, const core::Layer& layer, const co
 // layer's alpha kept, 透明保護, when it is locked: as render clips a paint layer's lines to its pixels).
 std::string paste(const core::Page& page, const core::Layer& layer, const core::Layer& pasted, const core::Document* episode);
 
+// set_page_spec (PC3 C-e): the raster on the new paper — the old basic frame onto the new one as set_page_spec moves a
+// point —, at the resolution it had (its pixels a mm across and down), bilinear and premultiplied (outside: clear).
+std::string relayout(const std::string& gkcr, const core::PageSpec& old_paper, const core::PageSpec& paper, const core::Rect& old_frame,
+                     const core::Rect& new_frame);
+
 // The lines and pictures an op left on precise paint layers (the pen, a fill, a material) drawn into their pixels, as
 // a paint program does: a precise layer keeps no lines or fills of its own. Pages not read yet are not looked at.
 void bake_marks(core::Document& doc);
