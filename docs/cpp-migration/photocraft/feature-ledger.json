@@ -8231,9 +8231,23 @@
         "alternate_menus": []
       },
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "未着手",
+      "implementation_status": "実装済み（PC3 A2、未統合）",
       "acceptance_status": "未実施",
-      "evidence": [],
+      "evidence": [
+        "native/src/core/smart.cpp",
+        "native/src/core/adjust_kinds.cpp",
+        "native/src/render/smart_filters.cpp",
+        "native/src/render/ops_smart_filters.cpp",
+        "native/src/render/smart.cpp",
+        "native/src/storage/reader.cpp",
+        "native/src/storage/writer.cpp",
+        "native/src/app/layer_panel.cpp",
+        "native/src/app/layer_panel_smart_filters.cpp",
+        "native/src/app/main_window_smart.cpp",
+        "native/tests/unit/test_smart_filters.cpp",
+        "native/tests/contract/test_contract_smart.cpp",
+        "native/tests/gui/test_gui_smart.cpp"
+      ],
       "pc0": {
         "date": "2026-10-16",
         "cpp_base": "962faa4",
@@ -8247,7 +8261,8 @@
         "tests": [],
         "gap": "スマートオブジェクトもスマートフィルター（あとから設定を変えられるフィルター）もない。補正レイヤーは色の補正 9 種だけで、形を動かすフィルターは古い原稿のものを読むだけ（新しくは作れない、高精度では描かない）",
         "note": "新しいレイヤーの種類（元の画素＋フィルターの重ね）・再描画・PSD のスマートオブジェクトの読み書きが要る。「画像」レイヤー（Placed）は配置だけでフィルターを持てない"
-      }
+      },
+      "remaining": "フィルターマスクをペン・消しゴムで描く所は無い（選択範囲から作る・作り直すだけ）。レイヤー → 色調補正 のシャドウ・ハイライト… 以外のコマンドは SO で灰色にならない（かけると断る）"
     },
     {
       "id": "filter.distort.displace",
@@ -21357,9 +21372,23 @@
         "alternate_menus": []
       },
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "未着手",
+      "implementation_status": "実装済み（PC3 A2、未統合）",
       "acceptance_status": "未実施",
-      "evidence": [],
+      "evidence": [
+        "native/src/core/smart.cpp",
+        "native/src/core/adjust_kinds.cpp",
+        "native/src/render/smart_filters.cpp",
+        "native/src/render/ops_smart_filters.cpp",
+        "native/src/render/smart.cpp",
+        "native/src/storage/reader.cpp",
+        "native/src/storage/writer.cpp",
+        "native/src/app/layer_panel.cpp",
+        "native/src/app/layer_panel_smart_filters.cpp",
+        "native/src/app/main_window_smart.cpp",
+        "native/tests/unit/test_smart_filters.cpp",
+        "native/tests/contract/test_contract_smart.cpp",
+        "native/tests/gui/test_gui_smart.cpp"
+      ],
       "pc0": {
         "date": "2026-10-16",
         "cpp_base": "962faa4",
@@ -21400,9 +21429,23 @@
         "alternate_menus": []
       },
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "未着手",
+      "implementation_status": "実装済み（PC3 A2、未統合）",
       "acceptance_status": "未実施",
-      "evidence": [],
+      "evidence": [
+        "native/src/core/smart.cpp",
+        "native/src/core/adjust_kinds.cpp",
+        "native/src/render/smart_filters.cpp",
+        "native/src/render/ops_smart_filters.cpp",
+        "native/src/render/smart.cpp",
+        "native/src/storage/reader.cpp",
+        "native/src/storage/writer.cpp",
+        "native/src/app/layer_panel.cpp",
+        "native/src/app/layer_panel_smart_filters.cpp",
+        "native/src/app/main_window_smart.cpp",
+        "native/tests/unit/test_smart_filters.cpp",
+        "native/tests/contract/test_contract_smart.cpp",
+        "native/tests/gui/test_gui_smart.cpp"
+      ],
       "pc0": {
         "date": "2026-10-16",
         "cpp_base": "962faa4",
@@ -21428,9 +21471,23 @@
       },
       "upstream_menu": null,
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "未着手",
+      "implementation_status": "実装済み（PC3 A2、未統合）",
       "acceptance_status": "未実施",
-      "evidence": [],
+      "evidence": [
+        "native/src/core/smart.cpp",
+        "native/src/core/adjust_kinds.cpp",
+        "native/src/render/smart_filters.cpp",
+        "native/src/render/ops_smart_filters.cpp",
+        "native/src/render/smart.cpp",
+        "native/src/storage/reader.cpp",
+        "native/src/storage/writer.cpp",
+        "native/src/app/layer_panel.cpp",
+        "native/src/app/layer_panel_smart_filters.cpp",
+        "native/src/app/main_window_smart.cpp",
+        "native/tests/unit/test_smart_filters.cpp",
+        "native/tests/contract/test_contract_smart.cpp",
+        "native/tests/gui/test_gui_smart.cpp"
+      ],
       "pc0": {
         "date": "2026-10-16",
         "cpp_base": "962faa4",
@@ -21471,9 +21528,23 @@
         "alternate_menus": []
       },
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "未着手",
+      "implementation_status": "実装済み（PC3 A2、未統合）",
       "acceptance_status": "未実施",
-      "evidence": [],
+      "evidence": [
+        "native/src/core/smart.cpp",
+        "native/src/core/adjust_kinds.cpp",
+        "native/src/render/smart_filters.cpp",
+        "native/src/render/ops_smart_filters.cpp",
+        "native/src/render/smart.cpp",
+        "native/src/storage/reader.cpp",
+        "native/src/storage/writer.cpp",
+        "native/src/app/layer_panel.cpp",
+        "native/src/app/layer_panel_smart_filters.cpp",
+        "native/src/app/main_window_smart.cpp",
+        "native/tests/unit/test_smart_filters.cpp",
+        "native/tests/contract/test_contract_smart.cpp",
+        "native/tests/gui/test_gui_smart.cpp"
+      ],
       "pc0": {
         "date": "2026-10-16",
         "cpp_base": "962faa4",
@@ -21514,9 +21585,23 @@
         "alternate_menus": []
       },
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "未着手",
+      "implementation_status": "実装済み（PC3 A2、未統合）",
       "acceptance_status": "未実施",
-      "evidence": [],
+      "evidence": [
+        "native/src/core/smart.cpp",
+        "native/src/core/adjust_kinds.cpp",
+        "native/src/render/smart_filters.cpp",
+        "native/src/render/ops_smart_filters.cpp",
+        "native/src/render/smart.cpp",
+        "native/src/storage/reader.cpp",
+        "native/src/storage/writer.cpp",
+        "native/src/app/layer_panel.cpp",
+        "native/src/app/layer_panel_smart_filters.cpp",
+        "native/src/app/main_window_smart.cpp",
+        "native/tests/unit/test_smart_filters.cpp",
+        "native/tests/contract/test_contract_smart.cpp",
+        "native/tests/gui/test_gui_smart.cpp"
+      ],
       "pc0": {
         "date": "2026-10-16",
         "cpp_base": "962faa4",
@@ -21557,9 +21642,23 @@
         "alternate_menus": []
       },
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "未着手",
+      "implementation_status": "実装済み（PC3 A2、未統合）",
       "acceptance_status": "未実施",
-      "evidence": [],
+      "evidence": [
+        "native/src/core/smart.cpp",
+        "native/src/core/adjust_kinds.cpp",
+        "native/src/render/smart_filters.cpp",
+        "native/src/render/ops_smart_filters.cpp",
+        "native/src/render/smart.cpp",
+        "native/src/storage/reader.cpp",
+        "native/src/storage/writer.cpp",
+        "native/src/app/layer_panel.cpp",
+        "native/src/app/layer_panel_smart_filters.cpp",
+        "native/src/app/main_window_smart.cpp",
+        "native/tests/unit/test_smart_filters.cpp",
+        "native/tests/contract/test_contract_smart.cpp",
+        "native/tests/gui/test_gui_smart.cpp"
+      ],
       "pc0": {
         "date": "2026-10-16",
         "cpp_base": "962faa4",
@@ -21585,9 +21684,23 @@
       },
       "upstream_menu": null,
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "未着手",
+      "implementation_status": "実装済み（PC3 A2、未統合）",
       "acceptance_status": "未実施",
-      "evidence": [],
+      "evidence": [
+        "native/src/core/smart.cpp",
+        "native/src/core/adjust_kinds.cpp",
+        "native/src/render/smart_filters.cpp",
+        "native/src/render/ops_smart_filters.cpp",
+        "native/src/render/smart.cpp",
+        "native/src/storage/reader.cpp",
+        "native/src/storage/writer.cpp",
+        "native/src/app/layer_panel.cpp",
+        "native/src/app/layer_panel_smart_filters.cpp",
+        "native/src/app/main_window_smart.cpp",
+        "native/tests/unit/test_smart_filters.cpp",
+        "native/tests/contract/test_contract_smart.cpp",
+        "native/tests/gui/test_gui_smart.cpp"
+      ],
       "pc0": {
         "date": "2026-10-16",
         "cpp_base": "962faa4",
@@ -21598,7 +21711,8 @@
         "tests": [],
         "gap": "スマートフィルターがなく、スマートフィルターの並べ替えがない",
         "note": "スマートフィルターの土台（スマートオブジェクトに付くフィルターの積み重ね・フィルターマスク・再描画、XL の一部）に依存。Genko の補正レイヤーは古い本のぼかし等（core/filters.hpp kShapeFilters）を持てるが、下の全部にかかる別物"
-      }
+      },
+      "remaining": "レイヤーパネルのドラッグでの並べ替えは無い（右クリックの 上へ・下へ）"
     },
     {
       "id": "layer.smartFilter.setParams",
@@ -21613,9 +21727,23 @@
       },
       "upstream_menu": null,
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "未着手",
+      "implementation_status": "実装済み（PC3 A2、未統合）",
       "acceptance_status": "未実施",
-      "evidence": [],
+      "evidence": [
+        "native/src/core/smart.cpp",
+        "native/src/core/adjust_kinds.cpp",
+        "native/src/render/smart_filters.cpp",
+        "native/src/render/ops_smart_filters.cpp",
+        "native/src/render/smart.cpp",
+        "native/src/storage/reader.cpp",
+        "native/src/storage/writer.cpp",
+        "native/src/app/layer_panel.cpp",
+        "native/src/app/layer_panel_smart_filters.cpp",
+        "native/src/app/main_window_smart.cpp",
+        "native/tests/unit/test_smart_filters.cpp",
+        "native/tests/contract/test_contract_smart.cpp",
+        "native/tests/gui/test_gui_smart.cpp"
+      ],
       "pc0": {
         "date": "2026-10-16",
         "cpp_base": "962faa4",
@@ -21641,9 +21769,23 @@
       },
       "upstream_menu": null,
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "未着手",
+      "implementation_status": "実装済み（PC3 A2、未統合）",
       "acceptance_status": "未実施",
-      "evidence": [],
+      "evidence": [
+        "native/src/core/smart.cpp",
+        "native/src/core/adjust_kinds.cpp",
+        "native/src/render/smart_filters.cpp",
+        "native/src/render/ops_smart_filters.cpp",
+        "native/src/render/smart.cpp",
+        "native/src/storage/reader.cpp",
+        "native/src/storage/writer.cpp",
+        "native/src/app/layer_panel.cpp",
+        "native/src/app/layer_panel_smart_filters.cpp",
+        "native/src/app/main_window_smart.cpp",
+        "native/tests/unit/test_smart_filters.cpp",
+        "native/tests/contract/test_contract_smart.cpp",
+        "native/tests/gui/test_gui_smart.cpp"
+      ],
       "pc0": {
         "date": "2026-10-16",
         "cpp_base": "962faa4",

@@ -1058,6 +1058,15 @@ core::Layer Reader::read_layer(const Json& data, const std::string& at) {
         layer.finish = asis_json(data, "finish");
     }
     if (const Json* settings = find(data, "smart")) layer.smart = *settings;  // (on another kind: refused by validate_smart)
+    if (smart && layer.smart && layer.smart->is_object()) {  // (PC3 A2: its filter mask, a PNG of the book's assets)
+        const Json* mask = find(*layer.smart, "filter_mask");
+        const Json* asset = mask != nullptr && mask->is_object() ? find(*mask, "asset") : nullptr;
+        if (asset != nullptr && asset->is_string() && AssetStore::is_ref(asset->get<std::string>()) && !dir_.empty() &&
+            !store_.has(asset->get<std::string>(), ".png")) {
+            issue("missing_asset", at_key(at_key(at_key(at, "smart"), "filter_mask"), "asset"), asset->get<std::string>(),
+                  "the smart object's filter mask " + AssetStore::relpath(asset->get<std::string>(), ".png") + " is missing");
+        }
+    }
     if (const Json* mask = find(data, "mask"); mask && core::py_truthy(*mask)) {
         const std::string here = at_key(at, "mask");
         if (!mask->is_object()) format_error(here, "a mask must be an object, not " + core::py_repr(*mask));

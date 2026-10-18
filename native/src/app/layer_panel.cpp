@@ -147,7 +147,13 @@ LayerPanel::LayerPanel(MainWindow* window) : window_(window) {
     list_->setIconSize(QSize(30, 38));
     list_->setItemDelegate(new LayerRow(list_));
     connect(list_, &QListWidget::itemChanged, this, [this](QListWidgetItem* item) { visibility(item); });
-    connect(list_, &QListWidget::itemDoubleClicked, this, [this](QListWidgetItem*) { edit_special(); });
+    connect(list_, &QListWidget::itemDoubleClicked, this, [this](QListWidgetItem* item) {
+        const int kind = row_kind(list_->row(item));  // (PC3 A2: a smart filter's row — its window; the header: nothing)
+        if (kind >= 0) edit_smart_filter(kind);
+        else if (kind == kLayerRow) edit_special();
+    });
+    list_->setContextMenuPolicy(Qt::CustomContextMenu);
+    connect(list_, &QListWidget::customContextMenuRequested, this, [this](const QPoint& at) { smart_filter_menu(at); });
     connect(list_, &QListWidget::currentRowChanged, this, [this](int) { selected(); });
     search_ = new QLineEdit;
     search_->setPlaceholderText(QStringLiteral("レイヤーを探す（名前）"));
@@ -425,6 +431,7 @@ void LayerPanel::refresh() {
     loading_ = true;
     list_->clear();
     ids_.clear();
+    rows_.clear();
     if (page != nullptr) {
         for (auto it = page->layers.rbegin(); it != page->layers.rend(); ++it) {  // front first
             const core::Layer& layer = *it;
@@ -462,6 +469,8 @@ void LayerPanel::refresh() {
             item->setCheckState(layer.visible ? Qt::Checked : Qt::Unchecked);
             list_->addItem(item);
             ids_.push_back(layer.id);
+            rows_.push_back(kLayerRow);
+            if (layer.kind == core::LayerKind::Smart) add_smart_filter_rows(layer, indent);  // (PC3 A2)
         }
     }
     if (const core::Layer* target = window_->target_layer()) {
@@ -610,6 +619,7 @@ void LayerPanel::visibility(QListWidgetItem* item) {
     const auto it = std::find_if(page->layers.begin(), page->layers.end(), [&](const core::Layer& l) { return l.id == id; });
     if (it == page->layers.end()) return;
     const bool visible = item->checkState() == Qt::Checked;
+    if (smart_filter_visibility(row, visible)) return;  // (PC3 A2: a smart filter's eye, or all of them)
     if (QApplication::keyboardModifiers() & Qt::AltModifier) {
         solo(id);  // (Alt+クリック: only this one shown; again: all back)
         return;
@@ -729,8 +739,9 @@ std::vector<std::string> LayerPanel::selected_ids() const {
     std::sort(rows.begin(), rows.end());
     rows.erase(std::unique(rows.begin(), rows.end()), rows.end());
     std::vector<std::string> out;
-    for (const int row : rows)
-        if (row >= 0 && row < static_cast<int>(ids_.size())) out.push_back(ids_[static_cast<std::size_t>(row)]);
+    for (const int row : rows)  // (a smart filter's row is its smart object's: once)
+        if (row >= 0 && row < static_cast<int>(ids_.size()) && std::find(out.begin(), out.end(), ids_[static_cast<std::size_t>(row)]) == out.end())
+            out.push_back(ids_[static_cast<std::size_t>(row)]);
     return out;
 }
 
@@ -1016,22 +1027,31 @@ void LayerPanel::apply_filter() {
     std::string kind = filter_->currentData().toString().toStdString();
     if (kind == "hue" && adjust_forms::form_kind("hue_saturation") != nullptr) kind = "hue_saturation";
     const auto area = window_->selection_area();
+    // (PC3 A2: on a smart object, a smart filter — kept with its settings, the selection its filter mask)
+    const bool smart = layer->kind == core::LayerKind::Smart;
+    const std::string op_name = smart ? "smart_filter_add" : "filter_raster";
+    if (smart && kind.starts_with(render::plugins::kPrefix)) {
+        window_->flash(QStringLiteral("プラグインのフィルターは、スマートフィルターにできません（ラスタライズしてからかけます）"), 5000, true);
+        return;
+    }
     const QString extra = layer->stroke_count() > 0 ? QStringLiteral("\nペンの線は画像になり、あとから線として消せなくなります。") : QString();
     const QString where = area ? QStringLiteral("の選択範囲の中") : QStringLiteral("全体");
     const auto asked = window_->asking();
-    if (!ask::question(this, QStringLiteral("Genko"),
-                       QStringLiteral("レイヤー「%1」%2に「%3」をかけます。%4\n（元に戻す で取り消せます）").arg(wording::layer_label(*layer), where, label, extra)))
-        return;
+    const QString text = smart ? QStringLiteral("スマートオブジェクト「%1」に「%2」をスマートフィルターとして足します（あとから直せます）。%3\n（元に戻す で取り消せます）")
+                                     .arg(wording::layer_label(*layer), label,
+                                          area ? QStringLiteral("\n選択範囲がフィルターマスクになります。") : QString())
+                               : QStringLiteral("レイヤー「%1」%2に「%3」をかけます。%4\n（元に戻す で取り消せます）").arg(wording::layer_label(*layer), where, label, extra);
+    if (!ask::question(this, QStringLiteral("Genko"), text)) return;
     if (!window_->still(asked)) return;
     const std::string layer_id = layer->id;
     const Json index = page->index.json();
     std::optional<Json> params;
-    const FilterPreview preview = [this, index, layer_id, kind, area](const std::optional<Json>& values) {
+    const FilterPreview preview = [this, index, layer_id, kind, area, op_name](const std::optional<Json>& values) {
         if (!values) {
             window_->preview_ops(std::nullopt);
             return;
         }
-        Json op{{"op", "filter_raster"}, {"page", index}, {"id", layer_id}, {"kind", kind}};
+        Json op{{"op", op_name}, {"page", index}, {"id", layer_id}, {"kind", kind}};
         op.update(*values);
         if (area) op["area"] = *area;
         window_->preview_ops(Json::array({op}));
@@ -1048,7 +1068,7 @@ void LayerPanel::apply_filter() {
         params = filter_params(this, kind, Json::object(), preview, kind == "levels" || kind == "curve" ? histogram(*page, *layer) : std::nullopt);
     }
     if (!params || !window_->still(asked)) return;
-    Json op{{"op", "filter_raster"}, {"page", index}, {"id", layer_id}, {"kind", kind}};
+    Json op{{"op", op_name}, {"page", index}, {"id", layer_id}, {"kind", kind}};
     op.update(*params);
     if (area) op["area"] = *area;
     window_->apply_ops(Json::array({op}));

@@ -32,6 +32,7 @@
 #include "render/smart.hpp"
 #include "render/screentone.hpp"
 #include "render/smart_decode.hpp"
+#include "render/smart_filters.hpp"
 #include "render/tones.hpp"
 #include "storage/asset_store.hpp"
 
@@ -743,9 +744,8 @@ void register_smart_ops(core::OpRegistry& registry) {
     registry.add("smart_transform", smart_transform);
     registry.add("rasterize_layer", rasterize_layer);
     register_smart_contents_ops(registry);  // (A1: contents and links, render/ops_smart_contents.cpp)
-    // A2 (smart filters), A4 (stack modes, a line's balloon and letters as pixels)
-    for (const char* op : {"smart_filter_add", "smart_filter_set", "smart_filter_move", "smart_filter_delete", "smart_filter_state"})
-        registry.add(op, later(op, "A2"));
+    smart_filters::register_ops(registry);  // (A2: render/ops_smart_filters.cpp)
+    // A4 (stack modes, a line's balloon and letters as pixels)
     for (const char* op : {"smart_stack", "rasterize_lines"}) registry.add(op, later(op, "A4"));
 }
 

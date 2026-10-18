@@ -4,7 +4,8 @@
 // feature named only while a smart object is there, and a reader that does not know it opening the book read-only; a
 // 16-bit PNG placed on a 16-bit page drawn with its 16 bits; import_pages bringing the contents; a picture's smart object
 // moved, cut and orphaned with its panel as place_asset's picture is; the checks counting it as a picture; rasterize_layer
-// keeping the mask, and a tone layer's tone kept as grey screened as it printed. (This build's own contract.)
+// keeping the mask, and a tone layer's tone kept as grey screened as it printed; (PC3 A2) smart filters added with their
+// filter mask, set again, undone and redone, a plugin and a kind reading another layer refused. (This build's own contract.)
 
 #include <QtTest>
 
@@ -521,6 +522,74 @@ private slots:
         };
         for (const render::Box& part : {box(125, 35, 175, 70), box(20, 250, 150, 280)})
             QVERIFY2(most_apart(all_after.crop(part), all_before.crop(part)) <= 2, "rasterized as they looked");
+    }
+
+    // PC3 A2: smart filters through the command line — added (the selection its filter mask, kept as the book's file),
+    // set again, undone and redone, gc keeping the mask that Redo needs, opened again; a plugin and a kind that reads
+    // another layer refused, the book left as it was.
+    void smartFiltersSavedUndoneAndRedone() {
+        const QString book = make_book(QStringLiteral("filters.genko"), {QStringLiteral("--webtoon")});
+        QVERIFY(apply(book, QStringLiteral("f-paint.json"),
+                      Json::array({Json{{"op", "add_layer"}, {"page", 1}, {"kind", "paint"}, {"id", "pic"}},
+                                   Json{{"op", "set_layer"}, {"page", 1}, {"id", "pic"}, {"panel_each", false}, {"panel_clip", false}},
+                                   Json{{"op", "put_raster"}, {"page", 1}, {"id", "pic"}, {"png_base64", genko::core::b64encode(two_colours(60, 40))}},
+                                   Json{{"op", "smart_convert"}, {"page", 1}, {"ids", Json::array({"pic"})}, {"new_id", "so"}}}))
+                    .value("ok", false));
+        const render::Image before = drawn(book, 1, 40);
+        const Json area{{"poly", Json::array({Json::array({0, 0}), Json::array({200, 0}), Json::array({200, 400}), Json::array({0, 400})})}};
+        const Json added = apply(book, QStringLiteral("f-add.json"),
+                                 Json::array({Json{{"op", "smart_filter_add"}, {"page", 1}, {"id", "so"}, {"kind", "blur"}, {"radius", 4}, {"area", area}}}));
+        QVERIFY2(added.value("ok", false), added.dump().c_str());
+        Json saved = project(book);
+        const Json smart = (*layer_of(saved["pages"][0], "so"))["smart"];
+        QCOMPARE(smart["filters"], Json::array({Json{{"kind", "blur"}, {"params", Json{{"radius", 4}}}, {"blend", "normal"}, {"opacity", 1.0}, {"visible", true}}}));
+        const std::string mask = smart["filter_mask"]["asset"].get<std::string>();
+        QVERIFY2(QFile::exists(asset(book, mask, ".png")), "the filter mask is the book's file");
+        const render::Image blurred = drawn(book, 1, 40);
+        QVERIFY(most_apart(blurred, before) > 8);
+        Json brief;
+        const Json inspected = genko({QStringLiteral("inspect"), book});
+        for (const Json& layer : inspected["pages"][0]["layers"])
+            if (layer.value("id", std::string()) == "so") brief = layer["smart"];
+        QVERIFY2(brief["filters"] == Json(1), brief.dump().c_str());
+
+        // set again (its opacity at 50 %), undone, redone
+        QVERIFY(apply(book, QStringLiteral("f-set.json"), Json::array({Json{{"op", "smart_filter_set"}, {"page", 1}, {"id", "so"}, {"opacity", 50}}}))
+                    .value("ok", false));
+        QCOMPARE((*layer_of(project(book)["pages"][0], "so"))["smart"]["filters"][0]["opacity"], Json(0.5));
+        QVERIFY(restore(book, "undo"));
+        QCOMPARE((*layer_of(project(book)["pages"][0], "so"))["smart"]["filters"][0]["opacity"], Json(1.0));
+        QCOMPARE(drawn(book, 1, 40).tobytes(), blurred.tobytes());
+        // (both undone: no filters, drawn as before; gc keeps the mask Redo needs; both redone)
+        QVERIFY(restore(book, "undo"));
+        saved = project(book);
+        QVERIFY(!(*layer_of(saved["pages"][0], "so"))["smart"].contains("filters"));
+        QVERIFY(!(*layer_of(saved["pages"][0], "so"))["smart"].contains("filter_mask"));
+        QCOMPARE(drawn(book, 1, 40).tobytes(), before.tobytes());
+        int exit = -1;
+        (void)genko({QStringLiteral("gc"), book}, &exit);
+        QCOMPARE(exit, 0);
+        QVERIFY2(QFile::exists(asset(book, mask, ".png")), "the mask kept: Redo still needs it");
+        QVERIFY(restore(book, "redo"));
+        QVERIFY(restore(book, "redo"));
+        QCOMPARE((*layer_of(project(book)["pages"][0], "so"))["smart"]["filters"][0]["opacity"], Json(0.5));
+        QCOMPARE((*layer_of(project(book)["pages"][0], "so"))["smart"]["filter_mask"]["asset"], Json(mask));
+        // (opened again: read whole, writable; doctor finds nothing wrong)
+        const storage::LoadResult loaded = storage::load_document(path_of(book));
+        QVERIFY2(loaded.document.read_only_reason.empty(), loaded.document.read_only_reason.c_str());
+        QCOMPARE(genko::test::book_problems(book), std::string());
+
+        // refused, the book as it was: a plugin (its result the machine's), a kind that reads another layer
+        const std::string kept = genko::test::read_bytes(book + QStringLiteral("/project.json"));
+        for (const Json& refused : {Json{{"op", "smart_filter_add"}, {"page", 1}, {"id", "so"}, {"kind", "plugin:sepia"}},
+                                    Json{{"op", "smart_filter_add"}, {"page", 1}, {"id", "so"}, {"kind", "match_color"}, {"source", Json{{"layer", "so"}}}}}) {
+            genko::test::write_bytes(path(QStringLiteral("f-refused.json")), Json::array({refused}).dump());
+            const Json reply = genko({QStringLiteral("apply"), book, path(QStringLiteral("f-refused.json")), QStringLiteral("--agent"), QStringLiteral("human:test")},
+                                     &exit);
+            QVERIFY2(exit != 0 && !reply.value("ok", true), reply.dump().c_str());
+            QVERIFY2(reply.dump().find("smart filter") != std::string::npos, reply.dump().c_str());
+            QCOMPARE(genko::test::read_bytes(book + QStringLiteral("/project.json")), kept);
+        }
     }
 };
 

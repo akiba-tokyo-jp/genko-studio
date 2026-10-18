@@ -78,8 +78,24 @@ public:
     void move(int delta);
     void set(const std::string& key, const core::Json& value);
     void mask(const core::Json& change);
+    // smart-objects@1, PC3 A2 (app/layer_panel_smart_filters.cpp): a smart object's smart filters under its row — a row
+    // スマートフィルター (its eye: all of them on or off; its marks: the filter mask) and a row for each filter, the top
+    // one first (its eye: shown; a double-click: スマートフィルターを編集…; the right button: 描画オプション…, moving it,
+    // deleting it). Each row's place in the list: its smart object's id in ids(), and what it is here (kLayerRow, kFiltersRow,
+    // or the filter's index from the bottom).
+    static constexpr int kLayerRow = -2;
+    static constexpr int kFiltersRow = -1;
+    int row_kind(int row) const;
+    // スマートフィルターを編集… (the filter's window with its settings now), 描画オプション… (its blend and opacity), and
+    // the rest of a filter's or the header's right-button menu.
+    void edit_smart_filter(int index);
+    void smart_filter_blending(int index);
+    void smart_filter_op(const core::Json& fields, const std::string& op = "smart_filter_set", const std::string& id = {});
 
 private:
+    void add_smart_filter_rows(const core::Layer& layer, const QString& indent);
+    void smart_filter_menu(const QPoint& at);
+    bool smart_filter_visibility(int row, bool shown);
     std::pair<const core::Page*, const core::Layer*> layer() const;
     void selected(bool from_list = true);
     void visibility(QListWidgetItem* item);
@@ -104,6 +120,7 @@ private:
 
     MainWindow* window_;
     std::vector<std::string> ids_;
+    std::vector<int> rows_;  // (each row's row_kind, alongside ids_)
     bool loading_ = false;
     QLabel* target_ = nullptr;
     QLineEdit* search_ = nullptr;

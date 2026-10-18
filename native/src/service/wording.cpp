@@ -893,6 +893,18 @@ const std::vector<Rule>& rules() {
         r.push_back(rule("the book is not whole, so it is not packed: .*", "原稿に欠けたものがあるため、パッケージにできません"));
         r.push_back(rule("(?:a file's contents are written as they are|a page's contents are written as psd or png).*",
                          "この中身は、その形式では書き出せません"));
+        // (PC3 A2: smart filters, render/ops_smart_filters)
+        r.push_back(rule("the smart object has no smart filters", "このスマートオブジェクトには、スマートフィルターがありません"));
+        r.push_back(rule("the smart object has no filter mask", "このスマートオブジェクトには、フィルターマスクがありません"));
+        r.push_back(rule("a filter plugin cannot be a smart filter.*", "プラグインのフィルターは、スマートフィルターにできません（ラスタライズしてからかけます）"));
+        r.push_back(rule("the filter \\S+ cannot be a smart filter", "このフィルターは、スマートフィルターにできません（ラスタライズしてからかけます）"));
+        r.push_back(rule("a smart filter works on the whole picture, not on one channel", "スマートフィルターは、1 つのチャンネルだけにはかけられません"));
+        r.push_back(rule("a smart filter's colour lookup is one of the looks.*",
+                         "スマートフィルターのカラールックアップは、用意された見た目だけを使えます（ファイルの表は色調補正のレイヤーで使います）"));
+        r.push_back(rule("a smart object holds at most \\d+ smart filters", "スマートフィルターは 1 つのスマートオブジェクトに 64 個までです"));
+        r.push_back(rule("this page does not composite the blend mode \\S+", "このページの色では、その描画モードは使えません"));
+        r.push_back(rule("(?:index|to) is the filter's place .*", "スマートフィルターの位置の指定が正しくありません"));
+        r.push_back(rule("mask from_area takes the area", "フィルターマスクにする選択範囲がありません"));
         // (the C++ build's own: what it does not do yet, and saving)
         r.push_back(rule("official export is not in the C\\+\\+ build yet",
                          "この版の Genko では、まだ正式な書き出し（確認と承認の記録つき）はできません（ふつうの書き出しはできます）"));
