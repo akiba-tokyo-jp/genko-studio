@@ -55,6 +55,11 @@ const std::map<QString, std::pair<QString, QString>>& titles() {
         {QStringLiteral("move"), {QStringLiteral("移動ツール（Q）"), QStringLiteral("描く先のレイヤーの線・塗り・絵を、ドラッグで丸ごと動かす。Shift で縦・横・45° に")}},
         {QStringLiteral("gradient"), {QStringLiteral("グラデーション（U）"), QStringLiteral("ドラッグの向きに塗る。始めの点がはじめの色、終わりの点が終わりの色。選択範囲があればその中だけ")}},
         {QStringLiteral("magiceraser"), {QStringLiteral("マジック消しゴムツール"), QStringLiteral("クリックした所に近い色の所を透明にする（描く先のペイントのレイヤー）")}},
+        // (PC3 B4: the retouching tools, app/retouch_tools.cpp)
+        {QStringLiteral("spotheal"), {QStringLiteral("スポット修復ブラシツール"), QStringLiteral("なぞった所のしみやごみを、まわりの絵から作って埋める")}},
+        {QStringLiteral("heal"), {QStringLiteral("修復ブラシツール"), QStringLiteral("Alt+クリックで決めたコピー元の模様を、なぞった所の色になじませて写す")}},
+        {QStringLiteral("clone"), {QStringLiteral("コピースタンプツール（S）"), QStringLiteral("Alt+クリックで決めたコピー元を、なぞった所にそのまま写す")}},
+        {QStringLiteral("historybrush"), {QStringLiteral("ヒストリーブラシツール"), QStringLiteral("なぞった所を、履歴で選んだ状態（◆）の絵に塗り戻す")}},
     };
     return all;
 }

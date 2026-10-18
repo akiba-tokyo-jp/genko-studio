@@ -114,6 +114,11 @@ genko_test(test_magic_erase SOURCES unit/test_magic_erase.cpp DEPS genko_test_su
 # outline_area's bands, fill_area's preserve_transparency, paste's center_mm, the masks of a precise or ink page at its
 # finest grid — on 8-bit, precise (16, 32 bits) and CMYK pages, without Python.
 genko_test(test_masks SOURCES unit/test_masks.cpp DEPS genko_test_support genko_render_ops LABELS unit TIMEOUT 600)
+# PC3 B4 (SPEC.md COLOR-06「修復」): the fills (PhotoCraft's poisson.rs, inpaint.rs and content_aware.rs tests) and the
+# retouching ops (retouch_cmds/tests.rs: Clone Stamp, Healing Brush, Spot Healing, History Brush, Content-Aware Fill) on
+# 8-bit, 16-bit, 32-bit, CMYK, Lab and grey layers.
+genko_test(test_inpaint SOURCES unit/test_inpaint.cpp DEPS genko_test_support genko_render_ops LABELS unit TIMEOUT 600)
+genko_test(test_retouch SOURCES unit/test_retouch.cpp DEPS genko_test_support genko_render_ops LABELS unit TIMEOUT 900)
 genko_test(test_path_raster SOURCES unit/test_path_raster.cpp DEPS genko_test_support genko_render_ops LABELS unit)
 genko_test(test_resample SOURCES unit/test_resample.cpp DEPS genko_test_support genko_render_ops LABELS unit)
 genko_test(test_page_geometry SOURCES unit/test_page_geometry.cpp DEPS genko_test_support LABELS unit)
@@ -362,6 +367,10 @@ genko_test(test_contract_paths SOURCES contract/test_contract_paths.cpp DEPS gen
 # flags and parameters that psd-tools (GENKO_PYREF) and this build read, imported back with them.
 genko_test(test_contract_masks SOURCES contract/test_contract_masks.cpp DEPS genko_test_support genko_render_ops genko_formats
            LABELS contract TIMEOUT 900)
+# PC3 B4 through the command line: the retouching ops saved, undone and done again, history_brush's `from` (an asset the
+# collection keeps while the journal names it), content_aware_fill on the layer, a new layer and a copy.
+genko_test(test_contract_retouch SOURCES contract/test_contract_retouch.cpp DEPS genko_test_support genko_render
+           LABELS contract TIMEOUT 900)
 genko_test(test_contract_image_ops SOURCES contract/test_contract_image_ops.cpp DEPS genko_test_support genko_render
            LABELS contract TIMEOUT 900)
 # PC3 C-e through the command line: every kind of page turned (inspect --pixel), undone and redone; a page of its own paper
@@ -502,6 +511,9 @@ if(GENKO_BUILD_APP)
   # PC3 C-a (vector@1): ペンツール・曲線ペンツール・パス選択ツール on the canvas, the パス panel's buttons, レイヤー →
   # ベクトルマスク and ラスタライズ, 選択範囲 → 作業用パスを作成…, the target path shown, パスを Illustrator へ….
   genko_test(test_gui_paths SOURCES gui/test_gui_paths.cpp DEPS genko_app genko_test_support GUI TIMEOUT 600)
+  # PC3 B4: スポット修復ブラシツール・修復ブラシツール・コピースタンプツール・ヒストリーブラシツール (the tools, their settings, Alt+click
+  # and strokes), コピーソース panel, 履歴's ◆ row, コンテンツに応じた塗りつぶし…'s window.
+  genko_test(test_gui_retouch SOURCES gui/test_gui_retouch.cpp DEPS genko_app genko_test_support GUI TIMEOUT 600)
   # M7 (the ledger counted against the C++ tree): the checks of Python's window tests no C++ test made before
   genko_test(test_gui_ledger_a SOURCES gui/test_gui_ledger_a.cpp DEPS genko_app genko_test_support GUI TIMEOUT 900)
   genko_test(test_gui_ledger_c SOURCES gui/test_gui_ledger_c.cpp DEPS genko_app genko_test_support GUI TIMEOUT 900)

@@ -1021,9 +1021,13 @@
       },
       "upstream_menu": null,
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "未着手",
+      "implementation_status": "実装済み（PC3 B4、未統合）",
       "acceptance_status": "未実施",
-      "evidence": [],
+      "evidence": [
+        "native/src/app/clone_source_panel.cpp",
+        "native/src/app/retouch_tools.cpp",
+        "native/tests/gui/test_gui_retouch.cpp"
+      ],
       "pc0": {
         "date": "2026-10-16",
         "cpp_base": "962faa4",
@@ -1034,7 +1038,8 @@
         "tests": [],
         "gap": "コピースタンプのソース（最大 5 個、位置・オフセット・大きさ・回転・反転・レイヤー）の仕組みがない",
         "note": "paint.cloneStamp が前提"
-      }
+      },
+      "remaining": "一覧は コピーソース パネル（op・CLI の一覧は無い。窓の状態）"
     },
     {
       "id": "cloneSource.overlay",
@@ -1049,9 +1054,13 @@
       },
       "upstream_menu": null,
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "未着手",
+      "implementation_status": "実装済み（PC3 B4、未統合）",
       "acceptance_status": "未実施",
-      "evidence": [],
+      "evidence": [
+        "native/src/app/clone_source_panel.cpp",
+        "native/src/app/retouch_tools.cpp",
+        "native/tests/gui/test_gui_retouch.cpp"
+      ],
       "pc0": {
         "date": "2026-10-16",
         "cpp_base": "962faa4",
@@ -1062,7 +1071,8 @@
         "tests": [],
         "gap": "ソースのオーバーレイ表示（表示・不透明度・クリップ・自動で隠す・反転・描画モード）がない",
         "note": "paint.cloneStamp・cloneSource.set が前提"
-      }
+      },
+      "remaining": "オーバーレイの変形（拡大・回転・反転）の重ねはソースの絵を行列で置く。作業スレッドで描く絵は層かページの 150 dpi まで"
     },
     {
       "id": "cloneSource.resetTransform",
@@ -1077,9 +1087,13 @@
       },
       "upstream_menu": null,
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "未着手",
+      "implementation_status": "実装済み（PC3 B4、未統合）",
       "acceptance_status": "未実施",
-      "evidence": [],
+      "evidence": [
+        "native/src/app/clone_source_panel.cpp",
+        "native/src/app/retouch_tools.cpp",
+        "native/tests/gui/test_gui_retouch.cpp"
+      ],
       "pc0": {
         "date": "2026-10-16",
         "cpp_base": "962faa4",
@@ -1105,9 +1119,13 @@
       },
       "upstream_menu": null,
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "未着手",
+      "implementation_status": "実装済み（PC3 B4、未統合）",
       "acceptance_status": "未実施",
-      "evidence": [],
+      "evidence": [
+        "native/src/app/clone_source_panel.cpp",
+        "native/src/app/retouch_tools.cpp",
+        "native/tests/gui/test_gui_retouch.cpp"
+      ],
       "pc0": {
         "date": "2026-10-16",
         "cpp_base": "962faa4",
@@ -1133,9 +1151,15 @@
       },
       "upstream_menu": null,
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "未着手",
+      "implementation_status": "実装済み（PC3 B4、未統合）",
       "acceptance_status": "未実施",
-      "evidence": [],
+      "evidence": [
+        "native/src/app/clone_source_panel.cpp",
+        "native/src/app/retouch_tools.cpp",
+        "native/src/render/retouch_dabs.cpp",
+        "native/tests/unit/test_retouch.cpp",
+        "native/tests/gui/test_gui_retouch.cpp"
+      ],
       "pc0": {
         "date": "2026-10-16",
         "cpp_base": "962faa4",
@@ -1146,7 +1170,8 @@
         "tests": [],
         "gap": "ソース点（Alt クリック）・オフセット・幅/高さ（%）・回転・左右/上下反転・参照レイヤーの設定がない",
         "note": "paint.cloneStamp と共通の土台"
-      }
+      },
+      "remaining": "コピーソースは窓の状態（op・CLI は毎回 `source_mm`・`offset_mm`・`anchor_mm`・`transform` を渡す。上流のコマンドの記録は無い）"
     },
     {
       "id": "color.profileMismatch",
@@ -1846,9 +1871,19 @@
         "alternate_menus": []
       },
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "未着手",
+      "implementation_status": "実装済み（PC3 B4、未統合）",
       "acceptance_status": "未実施",
-      "evidence": [],
+      "evidence": [
+        "native/src/render/ops_retouch.cpp",
+        "native/src/render/retouch_dabs.cpp",
+        "native/src/render/content_aware.cpp",
+        "native/src/render/inpaint.cpp",
+        "native/src/app/content_aware_window.cpp",
+        "native/tests/unit/test_inpaint.cpp",
+        "native/tests/unit/test_retouch.cpp",
+        "native/tests/contract/test_contract_retouch.cpp",
+        "native/tests/gui/test_gui_retouch.cpp"
+      ],
       "pc0": {
         "date": "2026-10-16",
         "cpp_base": "962faa4",
@@ -1859,7 +1894,8 @@
         "tests": [],
         "gap": "選択範囲を周りの画素から埋める（標本の範囲・色/回転/拡大の適応・鏡像・出力先）操作が無い",
         "note": "上流は algo/content_aware.rs・inpaint.rs（約 1000 行、外部ライブラリなし）。AI 生成の inpaint（generation_request）は外部の生成で、手元の画素処理ではない"
-      }
+      },
+      "remaining": "カスタムのサンプリング領域は緑の筆で描く代わりにアルファチャンネル（op は区域 `source_area`）。窓のプレビューは窓の中で作る（作業スレッド・中止は無い）"
     },
     {
       "id": "edit.contentAwareScale",
@@ -25237,9 +25273,16 @@
       },
       "upstream_menu": null,
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "未着手",
+      "implementation_status": "実装済み（PC3 B4、未統合）",
       "acceptance_status": "未実施",
-      "evidence": [],
+      "evidence": [
+        "native/src/render/ops_retouch.cpp",
+        "native/src/render/retouch_dabs.cpp",
+        "native/src/app/retouch_tools.cpp",
+        "native/tests/unit/test_retouch.cpp",
+        "native/tests/contract/test_contract_retouch.cpp",
+        "native/tests/gui/test_gui_retouch.cpp"
+      ],
       "pc0": {
         "date": "2026-10-16",
         "cpp_base": "962faa4",
@@ -25357,9 +25400,18 @@
       },
       "upstream_menu": null,
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "未着手",
+      "implementation_status": "実装済み（PC3 B4、未統合）",
       "acceptance_status": "未実施",
-      "evidence": [],
+      "evidence": [
+        "native/src/render/ops_retouch.cpp",
+        "native/src/render/retouch_dabs.cpp",
+        "native/src/render/poisson.cpp",
+        "native/src/app/retouch_tools.cpp",
+        "native/tests/unit/test_inpaint.cpp",
+        "native/tests/unit/test_retouch.cpp",
+        "native/tests/contract/test_contract_retouch.cpp",
+        "native/tests/gui/test_gui_retouch.cpp"
+      ],
       "pc0": {
         "date": "2026-10-16",
         "cpp_base": "962faa4",
@@ -25385,9 +25437,20 @@
       },
       "upstream_menu": null,
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "未着手",
+      "implementation_status": "実装済み（PC3 B4、未統合）",
       "acceptance_status": "未実施",
-      "evidence": [],
+      "evidence": [
+        "native/src/render/ops_retouch.cpp",
+        "native/src/render/retouch_dabs.cpp",
+        "native/src/render/ops_fade.cpp",
+        "native/src/storage/gc.cpp",
+        "native/src/app/session.cpp",
+        "native/src/app/history_panel.cpp",
+        "native/src/app/retouch_tools.cpp",
+        "native/tests/unit/test_retouch.cpp",
+        "native/tests/contract/test_contract_retouch.cpp",
+        "native/tests/gui/test_gui_retouch.cpp"
+      ],
       "pc0": {
         "date": "2026-10-16",
         "cpp_base": "962faa4",
@@ -25400,7 +25463,8 @@
         "tests": [],
         "gap": "ヒストリーブラシ（履歴の状態の画素で塗り戻す、state の指定）がない。履歴パネルはあるが過去の状態の画素を塗りに使う仕組みがない",
         "note": "履歴（ジャーナル）から過去の状態の画素を取り出す仕組みが要る"
-      }
+      },
+      "remaining": "履歴の状態は履歴 パネルの行で選ぶ（上流の state の番号ではなく、op には状態のその層の画素を原稿の素材 `from` で渡す）"
     },
     {
       "id": "paint.magicEraser",
@@ -25608,9 +25672,19 @@
       },
       "upstream_menu": null,
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "未着手",
+      "implementation_status": "実装済み（PC3 B4、未統合）",
       "acceptance_status": "未実施",
-      "evidence": [],
+      "evidence": [
+        "native/src/render/ops_retouch.cpp",
+        "native/src/render/retouch_dabs.cpp",
+        "native/src/render/inpaint.cpp",
+        "native/src/render/poisson.cpp",
+        "native/src/app/retouch_tools.cpp",
+        "native/tests/unit/test_inpaint.cpp",
+        "native/tests/unit/test_retouch.cpp",
+        "native/tests/contract/test_contract_retouch.cpp",
+        "native/tests/gui/test_gui_retouch.cpp"
+      ],
       "pc0": {
         "date": "2026-10-16",
         "cpp_base": "962faa4",
@@ -35747,9 +35821,13 @@
         "alternate_menus": []
       },
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "未着手",
+      "implementation_status": "実装済み（PC3 B4、未統合）",
       "acceptance_status": "未実施",
-      "evidence": [],
+      "evidence": [
+        "native/src/app/clone_source_panel.cpp",
+        "native/src/app/retouch_tools.cpp",
+        "native/tests/gui/test_gui_retouch.cpp"
+      ],
       "pc0": {
         "date": "2026-10-16",
         "cpp_base": "962faa4",
@@ -37536,9 +37614,15 @@
       "kind": "tool",
       "upstream_source": "crates/ui-egui/src/state.rs",
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "未着手",
+      "implementation_status": "実装済み（PC3 B4、未統合）",
       "acceptance_status": "未実施",
-      "evidence": [],
+      "evidence": [
+        "native/src/app/retouch_tools.cpp",
+        "native/src/app/canvas_tools.cpp",
+        "native/src/app/tool_settings.cpp",
+        "native/tests/gui/test_gui_retouch.cpp",
+        "native/tests/gui/test_gui_actions.cpp"
+      ],
       "pc0": {
         "date": "2026-10-16",
         "cpp_base": "962faa4",
@@ -37556,9 +37640,15 @@
       "kind": "tool",
       "upstream_source": "crates/ui-egui/src/state.rs",
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "未着手",
+      "implementation_status": "実装済み（PC3 B4、未統合）",
       "acceptance_status": "未実施",
-      "evidence": [],
+      "evidence": [
+        "native/src/app/retouch_tools.cpp",
+        "native/src/app/canvas_tools.cpp",
+        "native/src/app/tool_settings.cpp",
+        "native/tests/gui/test_gui_retouch.cpp",
+        "native/tests/gui/test_gui_actions.cpp"
+      ],
       "pc0": {
         "date": "2026-10-16",
         "cpp_base": "962faa4",
@@ -37576,9 +37666,15 @@
       "kind": "tool",
       "upstream_source": "crates/ui-egui/src/state.rs",
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "未着手",
+      "implementation_status": "実装済み（PC3 B4、未統合）",
       "acceptance_status": "未実施",
-      "evidence": [],
+      "evidence": [
+        "native/src/app/retouch_tools.cpp",
+        "native/src/app/canvas_tools.cpp",
+        "native/src/app/tool_settings.cpp",
+        "native/tests/gui/test_gui_retouch.cpp",
+        "native/tests/gui/test_gui_actions.cpp"
+      ],
       "pc0": {
         "date": "2026-10-16",
         "cpp_base": "962faa4",
@@ -37596,9 +37692,15 @@
       "kind": "tool",
       "upstream_source": "crates/ui-egui/src/state.rs",
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "未着手",
+      "implementation_status": "実装済み（PC3 B4、未統合）",
       "acceptance_status": "未実施",
-      "evidence": [],
+      "evidence": [
+        "native/src/app/retouch_tools.cpp",
+        "native/src/app/history_panel.cpp",
+        "native/src/app/tool_settings.cpp",
+        "native/tests/gui/test_gui_retouch.cpp",
+        "native/tests/gui/test_gui_actions.cpp"
+      ],
       "pc0": {
         "date": "2026-10-16",
         "cpp_base": "962faa4",

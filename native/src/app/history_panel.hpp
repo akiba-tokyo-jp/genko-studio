@@ -41,6 +41,11 @@ public:
     // How many changes are done now (the present's row).
     int done() const { return done_; }
     QListWidget* list() const { return list_; }
+    // (PC3 B4) ヒストリーブラシのソース: the row the History Brush paints back from (MainWindow::history_brush_row; the
+    // first, （はじめ）, unless chosen), marked; a row's right-click menu chooses it (a row undone cannot be: its state is
+    // not the book's any more).
+    void set_brush_source(int row);
+    int brush_source() const;
 
 private:
     MainWindow* window_;

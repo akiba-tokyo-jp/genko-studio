@@ -8,6 +8,7 @@
 #include <cmath>
 #include <functional>
 #include <optional>
+#include <string_view>
 
 #include "core/color_model.hpp"
 #include "core/color_raster.hpp"
@@ -17,6 +18,7 @@
 #include "core/pyops.hpp"
 #include "render/image_ops.hpp"
 #include "render/ops_adjust.hpp"
+#include "render/pixels_before.hpp"
 #include "render/png.hpp"
 #include "storage/asset_store.hpp"
 
@@ -68,6 +70,28 @@ std::string joined_tiles(const storage::AssetStore& store, const Json& m, const 
 
 }  // namespace
 
+std::string pixels_before(const core::Document& doc, const core::Page& page, const core::Layer& layer, const Json& from, std::string_view op,
+                          const std::function<OpError()>& refused) {
+    const bool eight = layer.raster_png && !layer.raster_png->empty();
+    if (!doc.asset_dir) throw OpError(std::string(op) + " reads the pixels before from the book's folder: save the book first");
+    const storage::AssetStore store(*doc.asset_dir);
+    if (from.is_object()) {
+        if (!layer.color_raster) throw OpError("from as tiles is a precise layer's (its color_raster as project.json holds it): give the layer's asset");
+        return joined_tiles(store, from, page, refused);
+    }
+    const std::string_view suffix = layer.color_raster ? core::kColorRasterSuffix : eight ? std::string_view(".png") : core::kInkRasterSuffix;
+    std::optional<std::string> bytes;
+    try {
+        bytes = store.get_bytes(from.get<std::string>(), suffix, storage::kAssetMaxBytes);
+    } catch (const core::Error& error) {  // (past what the store reads of one asset: said so, nothing of it read)
+        if (error.code() != "memory") throw;
+        throw OpError(std::string("the pixels before are too large to read whole (at most 256 MiB") +
+                      (layer.color_raster ? "; give a precise layer's tiles as project.json holds them)" : ")"));
+    }
+    if (!bytes) throw OpError("the book has no asset " + from.get<std::string>() + " (the pixels before)");
+    return std::move(*bytes);
+}
+
 void fade_layer(core::OpContext& c) {
     core::Document& doc = c.doc;
     const Json& op = c.op;
@@ -102,25 +126,9 @@ void fade_layer(core::OpContext& c) {
     const bool eight = layer.raster_png && !layer.raster_png->empty();
     if (!eight && !layer.color_raster && !layer.ink_raster) throw OpError("the layer " + id + " holds no pixels to fade");
     if (layer.stroke_count() > 0 || !layer.patches.empty()) throw OpError("the layer " + id + " holds lines or fills besides its pixels");
-    if (!doc.asset_dir) throw OpError("fade_layer reads the pixels before from the book's folder: save the book first");
     // (the pixels before and after, of the same kind and size)
     const auto refused = [&]() -> OpError { return OpError("from is not the pixels of this layer before (another kind or size)"); };
-    const storage::AssetStore store(*doc.asset_dir);
-    std::optional<std::string> bytes;
-    if (tiled) {
-        if (!layer.color_raster) throw OpError("from as tiles is a precise layer's (its color_raster as project.json holds it): give the layer's asset");
-        bytes = joined_tiles(store, *from, page, refused);
-    } else {
-        const std::string_view suffix = layer.color_raster ? core::kColorRasterSuffix : eight ? std::string_view(".png") : core::kInkRasterSuffix;
-        try {
-            bytes = store.get_bytes(from->get<std::string>(), suffix, storage::kAssetMaxBytes);
-        } catch (const core::Error& error) {  // (past what the store reads of one asset: said so, nothing of it read)
-            if (error.code() != "memory") throw;
-            throw OpError(std::string("the pixels before are too large to read whole (at most 256 MiB") +
-                          (layer.color_raster ? "; give a precise layer's tiles as project.json holds them)" : ")"));
-        }
-        if (!bytes) throw OpError("the book has no asset " + from->get<std::string>() + " (the pixels before)");
-    }
+    const std::optional<std::string> bytes = pixels_before(doc, page, layer, *from, "fade_layer", refused);
     const ImageAllocationBudget budget{2ULL * 1024 * 1024 * 1024};
     std::optional<Pixels> before;
     std::optional<Pixels> after;

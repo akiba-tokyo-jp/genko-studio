@@ -488,6 +488,7 @@ void PageCanvas::hold_modifier(const QString& key, bool down) {
         (key == QLatin1String("alt") || key == QLatin1String("ctrl"))) {
         tool.clear();  // (the path tools' own: Alt breaks a handle, puts a corner, copies)
     }
+    if (is_clone_tool(base) && key == QLatin1String("alt")) tool.clear();  // (PC3 B4: Alt+click sets the clone source)
     if (const auto own_tool = tool_modifiers.find(base); own_tool != tool_modifiers.end()) {
         // (this tool's own setting wins; Shift switches only when a tool says so)
         if (const auto own = own_tool->second.find(key); own != own_tool->second.end() && !own->second.isEmpty()) {
@@ -651,6 +652,10 @@ void PageCanvas::tabletEvent(QTabletEvent* event) {
     }
     const QPointF mm = to_mm(event->position());
     const PenSample sample = tablet_sample(mm.x(), mm.y(), *event);
+    if (type == QEvent::TabletPress && retouch_press(mm, event->modifiers())) {  // (PC3 B4: Alt+tap sets the clone source)
+        event->accept();
+        return;
+    }
     if (type == QEvent::TabletPress) {
         perf::input(event, "tablet_press");
         begin_stroke(QPointF(sample.x_mm, sample.y_mm), sample.pressure, sample.rotation, true);

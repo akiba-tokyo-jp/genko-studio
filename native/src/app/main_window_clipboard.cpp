@@ -162,6 +162,7 @@ void MainWindow::build_clipboard_menu(QMenu* edit) {
     QMenu* special = edit->addMenu(QStringLiteral("特殊ペースト"));
     for (const char* name : {"act_paste_in_place", "act_paste_into", "act_paste_outside"}) special->addAction(action(QString::fromLatin1(name)));
     for (const char* name : {"act_delete_area", "act_fill_dialog", "act_stroke_dialog", "act_fill_selection"}) edit->addAction(action(QString::fromLatin1(name)));
+    edit->addAction(action(QStringLiteral("act_content_aware_fill")));  // (PC3 B4: retouch_tools.cpp)
     edit->addSeparator();
     build_transform_menu(edit->addMenu(QStringLiteral("変形")));  // (main_window_select.cpp)
 }

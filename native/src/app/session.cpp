@@ -1048,6 +1048,58 @@ Session::History Session::history() const {
     return out;
 }
 
+std::optional<DocPtr> Session::state_at(std::size_t done) const {
+    // (the timeline as history() lays it: the saved changes before this session that are done, then this session's)
+    std::set<std::string> mine;
+    for (const auto* list : {&done_, &undone_}) {
+        for (const auto& change : *list) {
+            if (!change->txn.empty()) mine.insert(change->txn);
+        }
+    }
+    std::vector<std::string> journal;
+    if (path_) {
+        try {
+            const std::shared_ptr<const JournalRead> read = read_journal();
+            for (const auto* stack : {&read->undo, &read->redo}) {
+                for (const auto& [id, entry] : *stack) {
+                    if (mine.count(id) == 0) journal.push_back(id);
+                }
+            }
+        } catch (const std::exception&) {
+            journal.clear();
+        }
+    }
+    const std::size_t before = std::min(journal.size(), static_cast<std::size_t>(std::max<std::int64_t>(journal_after().undo, 0)));
+    if (done > before + done_.size()) return std::nullopt;
+    if (done > before) return DocPtr(done_[done - before - 1]->after);
+    if (done == before) return done_.empty() ? doc_ : done_.front()->before;
+    // a saved change's state: the one after it (（はじめ）: the one before the first)
+    try {
+        const std::string& txn = journal[done == 0 ? 0 : done - 1];
+        const storage::journal::Stacks stacks = storage::journal::stacks(*path_);
+        std::optional<std::string> ref;
+        for (const auto* stack : {&stacks.undo, &stacks.redo}) {
+            for (const storage::journal::HistoryItem& item : *stack) {
+                if (item.id == txn) ref = done == 0 ? item.before : item.after;
+            }
+        }
+        if (!ref) return std::nullopt;
+        if (const auto known = states_read_.find(*ref); known != states_read_.end()) return known->second;
+        const storage::AssetStore store(*path_);
+        const auto data = store.get_bytes(*ref, storage::kStateSuffix);
+        if (!data) return std::nullopt;
+        const core::Json state = core::parse_python_json(*data);
+        if (!state.is_object()) return std::nullopt;
+        storage::LoadResult loaded = storage::load_document_payload(state, *path_);
+        if (!loaded.report.clean()) return std::nullopt;
+        auto made = std::make_shared<const core::Document>(std::move(loaded.document));
+        states_read_[*ref] = made;
+        return DocPtr(made);
+    } catch (const std::exception&) {
+        return std::nullopt;
+    }
+}
+
 bool Session::can_undo() const {
     const std::int64_t undo = journal_after().undo;
     return !saving_as_ && read_only_.empty() &&

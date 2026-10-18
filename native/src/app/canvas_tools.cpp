@@ -30,11 +30,13 @@ core::Json point_json(const QPointF& p) { return core::Json::array({r3(p.x()), r
 }  // namespace
 
 bool PageCanvas::is_stroke_tool(const QString& tool) {
-    return tool == QLatin1String("pen") || tool == QLatin1String("eraser") || tool == QLatin1String("blend") || tool == QLatin1String("liquify");
+    return tool == QLatin1String("pen") || tool == QLatin1String("eraser") || tool == QLatin1String("blend") || tool == QLatin1String("liquify") ||
+           is_retouch_tool(tool);  // (PC3 B4: the retouching brushes, retouch_tools.cpp)
 }
 
 bool PageCanvas::tool_press(const QPointF& pos, const QPointF& mm, Qt::KeyboardModifiers modifiers) {
     if (path_press(pos, mm, modifiers)) return true;  // (ペンツール・曲線ペンツール・パス選択ツール: canvas_pen.cpp)
+    if (retouch_press(mm, modifiers)) return true;    // (PC3 B4: Alt+click sets the clone source, retouch_tools.cpp)
     if (tool_ == QLatin1String("text")) return text_press(mm);  // (テキスト: canvas_lines.cpp)
     if (tool_ == QLatin1String("vector")) {
         vector_press(mm.x(), mm.y(), modifiers);

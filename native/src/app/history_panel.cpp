@@ -6,7 +6,12 @@
 #include <QDateTime>
 #include <QFont>
 #include <QLabel>
+#include <QIcon>
 #include <QListWidget>
+#include <QMenu>
+#include <QPainter>
+#include <QPixmap>
+#include <QPolygonF>
 #include <QVBoxLayout>
 
 #include <algorithm>
@@ -79,6 +84,9 @@ const std::map<std::string, const char*>& names() {
         {"smart_stack", "スタックモードを変えた"}, {"rasterize_lines", "台詞をラスタライズした"},
         // (PC3 B1: render/ops_quick_mask, render/erase_magic)
         {"quick_mask", "クイックマスクを切り替えた"}, {"magic_erase", "マジック消しゴムで消した"},
+        // (PC3 B4: render/ops_retouch)
+        {"clone_stamp", "コピースタンプで描いた"}, {"healing_brush", "修復ブラシで直した"}, {"spot_healing", "スポット修復ブラシで直した"},
+        {"history_brush", "ヒストリーブラシで塗り戻した"}, {"content_aware_fill", "コンテンツに応じて塗りつぶした"},
         // (vector@1, PC3 C-a: render/ops_paths)
         {"set_path", "パスを描いた"}, {"delete_path", "パスを削除した"}, {"rename_path", "パスを保存した"},
         {"make_work_path", "作業用パスを作成した"}, {"text_to_path", "文字から作業用パスを作成した"},
@@ -132,7 +140,19 @@ HistoryPanel::HistoryPanel(MainWindow* window) : window_(window) {
     list_ = new QListWidget;
     list_->setObjectName(QStringLiteral("history_list"));
     connect(list_, &QListWidget::itemClicked, this, [this](QListWidgetItem* item) { go_to(item->data(Qt::UserRole).toInt()); });
-    auto* note = new QLabel(QStringLiteral("クリックで、その変更をした直後まで戻る（進む）。灰色は取り消した変更（やり直せる）。"));
+    // (PC3 B4: a row's right-click chooses it as ヒストリーブラシのソース)
+    list_->setContextMenuPolicy(Qt::CustomContextMenu);
+    connect(list_, &QListWidget::customContextMenuRequested, this, [this](const QPoint& at) {
+        QListWidgetItem* item = list_->itemAt(at);
+        if (item == nullptr) return;
+        const int row = item->data(Qt::UserRole).toInt();
+        QMenu menu(this);
+        QAction* source = menu.addAction(QStringLiteral("ヒストリーブラシのソースに設定"), this, [this, row] { set_brush_source(row); });
+        source->setEnabled(row <= done_);
+        menu.exec(list_->viewport()->mapToGlobal(at));
+    });
+    auto* note = new QLabel(QStringLiteral("クリックで、その変更をした直後まで戻る（進む）。灰色は取り消した変更（やり直せる）。"
+                                           "右クリックで、ヒストリーブラシで塗り戻す状態（◆の行）を選ぶ。"));
     note->setWordWrap(true);
     theme::hint(note);
     auto* layout = new QVBoxLayout(this);
@@ -168,6 +188,21 @@ void HistoryPanel::refresh() {
         item->setData(Qt::UserRole, n);
         list_->addItem(item);
     }
+    // (PC3 B4: the History Brush's source marked — a row past the present cannot be one: back to （はじめ）)
+    if (brush_source() > done_) window_->history_brush_row.reset();
+    if (QListWidgetItem* source = list_->item(brush_source())) {
+        QPixmap mark(12, 12);  // (a diamond, as the panel's words stay as they are)
+        mark.fill(Qt::transparent);
+        QPainter painter(&mark);
+        painter.setRenderHint(QPainter::Antialiasing);
+        painter.setPen(Qt::NoPen);
+        painter.setBrush(theme::accent());
+        painter.drawPolygon(QPolygonF({QPointF(6, 0.5), QPointF(11.5, 6), QPointF(6, 11.5), QPointF(0.5, 6)}));
+        painter.end();
+        source->setIcon(QIcon(mark));
+        source->setData(Qt::UserRole + 1, true);
+        source->setToolTip(QStringLiteral("ヒストリーブラシは、この状態に塗り戻します"));
+    }
     QListWidgetItem* now = list_->item(done_);
     now->setText(QStringLiteral("▶ ") + now->text());
     QFont font = now->font();
@@ -176,6 +211,18 @@ void HistoryPanel::refresh() {
     list_->setCurrentRow(done_);
     list_->scrollToItem(now);
 }
+
+void HistoryPanel::set_brush_source(int row) {
+    if (row < 0 || row > done_) return;
+    if (row == 0) {
+        window_->history_brush_row.reset();
+    } else {
+        window_->history_brush_row = row;
+    }
+    refresh();
+}
+
+int HistoryPanel::brush_source() const { return window_->history_brush_row.value_or(0); }
 
 void HistoryPanel::go_to(int target) {
     Session& session = window_->session();

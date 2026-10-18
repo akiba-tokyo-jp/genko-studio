@@ -104,19 +104,24 @@ std::set<std::string> referenced_assets(const fs::path& dir) {
     const journal::Lines lines = journal::read_lines(journal::journal_file(dir));
     const auto txns = journal::transactions(lines);
     std::vector<const journal::Transaction*> committed;
+    std::set<std::string> ops_assets;  // (PC3 B4: the ops' own assets — a history_brush's or fade_layer's `from` — kept too)
+    const auto ops_of = [&](const Json& prepare) {
+        if (const Json* ops = get(prepare, "ops")) refs_in(*ops, refs);
+        add_ref(get(prepare, "ops_asset"), refs, &ops_assets);
+    };
     for (const auto& t : txns) {
         if (t.status == journal::Transaction::Status::committed) committed.push_back(&t);
         if (t.status == journal::Transaction::Status::pending) {
             add_ref(get(t.prepare, "before"), refs, &states);
             add_ref(get(t.prepare, "after"), refs, &states);
-            add_ref(get(t.prepare, "ops_asset"), refs);
+            ops_of(t.prepare);
         }
     }
     const std::size_t first = committed.size() > kKeepCommits ? committed.size() - kKeepCommits : 0;
     for (std::size_t i = first; i < committed.size(); ++i) {
         add_ref(get(committed[i]->prepare, "before"), refs, &states);
         add_ref(get(committed[i]->prepare, "after"), refs, &states);
-        add_ref(get(committed[i]->prepare, "ops_asset"), refs);
+        ops_of(committed[i]->prepare);
     }
     const journal::Stacks stacks = journal::stacks(dir);
     for (const auto* stack : {&stacks.undo, &stacks.redo}) {
@@ -179,6 +184,7 @@ std::set<std::string> referenced_assets(const fs::path& dir) {
 
     add_contents(store, states, kStateSuffix, refs);
     add_contents(store, snapshots, kSnapshotSuffix, refs);
+    add_contents(store, ops_assets, kOpsSuffix, refs);
     return refs;
 }
 

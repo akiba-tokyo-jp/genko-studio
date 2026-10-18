@@ -466,6 +466,7 @@ void MainWindow::build_actions() {
     build_smart_actions();      // (smart-objects@1: スマートオブジェクト, 埋め込みを配置…, ラスタライズ: main_window_smart.cpp)
     build_path_actions();       // (vector@1, PC3 C-a: ペンツール, パス選択ツール, ベクトルマスク: main_window_paths.cpp)
     build_page_size_actions();  // (PC3 C-e: 画像解像度…, カンバスサイズ…, 画像の回転, 切り抜き(ツール): main_window_page_size.cpp)
+    build_retouch_actions();    // (PC3 B4: the retouching tools, コンテンツに応じた塗りつぶし…: retouch_tools.cpp)
     make("act_point_wider", QStringLiteral("選んだ点を太く"), [this] { point_width(1.25); }, keys({QKeySequence(QStringLiteral("Ctrl+Alt+]"))}),
          QStringLiteral("線の編集で選んだ制御点のところだけ、線を太くします"));
     make("act_color", QStringLiteral("ペンの色…"), [this] { pick_colour(); }, keys({QKeySequence(QStringLiteral("C"))}));
@@ -906,6 +907,7 @@ void MainWindow::build_docks() {
     layers_dock_ = layers;
     build_channel_dock();  // (チャンネル, a tab beside the layers: main_window_channels.cpp)
     build_path_dock();     // (パス, a tab beside the layers: main_window_paths.cpp)
+    build_clone_source_dock();  // (PC3 B4: コピーソース, when it is opened: retouch_tools.cpp)
     build_adjust_docks();  // (PC2a: 色調補正 and 属性, app/adjust_panels.cpp)
     build_info_docks();    // (ヒストグラム, 情報: info_panels.cpp)
     build_line_dock();  // (台詞, a tab beside the pages and the layers: main_window_lines.cpp)
@@ -1006,6 +1008,7 @@ void MainWindow::on_stroke(const StrokeInput& stroke) {
                                     {"width_mm", erase ? eraser_mm_ : std::max(0.5, brush_->size->value())}, {"show", !erase}}}));
         return;
     }
+    if (retouch_stroke(stroke, *page, *layer)) return;  // (PC3 B4: the retouching brushes, retouch_tools.cpp)
     if (paint_stroke(stroke, *page, *layer)) return;  // (透明色, ゆがみ, 色混ぜ: main_window_paint.cpp)
     const bool rulers = canvas_->snap_rulers && page->rulers.is_array() && !page->rulers.empty();
     if (stroke.tool == QLatin1String("eraser")) {

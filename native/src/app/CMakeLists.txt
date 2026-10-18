@@ -129,6 +129,10 @@ genko_library(genko_app
     main_window_masks.cpp
     layer_panel_masks.cpp
     mask_panel.cpp
+    # PC3 B4: the retouching tools, コピーソース, コンテンツに応じた塗りつぶし…
+    retouch_tools.cpp
+    clone_source_panel.cpp
+    content_aware_window.cpp
     ${GENKO_APP_RESOURCES}
     ${GENKO_APP_FONTS}
   PUBLIC_DEPS genko_core genko_storage genko_render genko_render_ops genko_formats genko_service Qt6::Core Qt6::Gui Qt6::Widgets Qt6::Svg Qt6::Concurrent

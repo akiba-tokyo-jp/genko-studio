@@ -928,6 +928,15 @@ const std::vector<Rule>& rules() {
         r.push_back(rule("range: localized clusters need points_mm", "ローカライズされたカラークラスタには、スポイトで拾った点が要ります"));
         r.push_back(rule("range(?:\\.\\w+)?[: ].*", "色域指定の設定が正しくありません"));
         r.push_back(rule("a selection is saved into an alpha channel", "選択範囲は、アルファチャンネルに保存します（特色チャンネルには保存できません）"));
+        // (PC3 B4: the retouching ops — render/ops_retouch)
+        r.push_back(rule("source_mm \\(where to sample from\\) or offset_mm is required", "先にコピー元を決めます（Alt キーを押しながらクリック）"));
+        r.push_back(rule("from is not the pixels of this layer .*cannot be painted back",
+                         "その状態からは、このレイヤーに塗り戻せません（レイヤーの種類か大きさが違います）"));
+        r.push_back(rule("history_brush reads the pixels before from the book's folder.*", "ヒストリーブラシの前に、原稿を保存します"));
+        r.push_back(rule("content_aware_fill: the area covers nothing of the layer", "埋める所（選択範囲）が、このレイヤーにありません"));
+        r.push_back(rule("content_aware_fill: source_area covers nothing of the layer", "カスタムのサンプリング領域が、このレイヤーにありません"));
+        r.push_back(rule("custom sampling needs source_area.*", "カスタムのサンプリング領域を選びます"));
+        r.push_back(rule("the layer \\S+ has no pixels to work on", "このレイヤーには、直す画素がありません"));
         // (vector@1, PC3 C-a: paths and vector masks, render/ops_paths, render/path_areas)
         r.push_back(rule("the page has no work path", "このページには作業用パスがありません（ペンツールで描くか、選択範囲から作ります）"));
         r.push_back(rule("no path named '(.*)'", "パス「\\1」はありません"));
