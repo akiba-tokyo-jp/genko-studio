@@ -676,6 +676,9 @@ constexpr const char* kNotInContents[] = {
     "act_nombre", "act_paper", "act_page_nombre", "act_add_cover", "act_assignee", "act_merge_book", "act_name_ok", "act_color_mode",
     "act_assign_profile", "act_convert_profile", "act_color_table", "act_mode_bitmap", "act_mode_indexed", "act_mode_duotone",
     "act_mode_multichannel",
+    // (PC3 C-e: the page's paper)
+    "act_image_size", "act_canvas_size", "act_rotate_180", "act_rotate_90cw", "act_rotate_90ccw", "act_rotate_angle", "act_flip_canvas_h",
+    "act_flip_canvas_v", "act_crop", "act_trim", "act_reveal_all", "act_crop_tool",
     // panels
     "act_frame", "act_split_h", "act_split_v", "act_merge", "act_delete_frame", "act_frame_selection", "act_gutters", "act_border", "act_corner",
     "act_no_border", "act_bleed", "act_border_colour", "act_border_detail", "act_template", "act_save_template", "act_reset_shape",

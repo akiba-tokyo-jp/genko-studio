@@ -100,6 +100,9 @@ genko_library(genko_app
     image_dialogs.cpp
     main_window_adjust.cpp
     main_window_smart.cpp
+    main_window_page_size.cpp
+    page_size_dialogs.cpp
+    canvas_crop.cpp
     layer_panel_smart_filters.cpp
     inject.cpp
     review_model.cpp

@@ -135,6 +135,7 @@ void PageCanvas::paint_page(QPainter& painter) {
         painter.drawRect(where);
     }
     draw_marquee(painter);  // (the selection, its handles, what the marquee tool is drawing: canvas_select.cpp)
+    draw_crop(painter);     // (the crop tool's box: canvas_crop.cpp)
     draw_tools(painter);    // (the area being filled, the gradient's drag, the figure being drawn: canvas_tools.cpp)
     draw_prims(painter);    // (the 3D tool's handles: canvas_guides.cpp)
     draw_effect_handles(painter);  // (the effect tool's centres: canvas_effects.cpp)

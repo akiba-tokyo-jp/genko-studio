@@ -68,26 +68,45 @@ std::vector<std::vector<int>> book_spreads(const core::Document& doc, const std:
 
 BookView::BookView(BookPreview* dialog) : dialog_(dialog) { setMinimumSize(640, 440); }
 
+std::pair<QRectF, QRectF> BookView::page_rects() {
+    BookPreview* d = dialog_;
+    const auto [left, right] = d->sides(d->spread());
+    // (each page as big as its own paper, the pictures all at one scale: drawn at the same dpi, cut to their finished
+    // sizes; one alone as big as one of a pair)
+    const auto size_of = [&](const std::optional<int>& index) {
+        if (!index) return QSizeF();
+        const QPixmap& pix = d->pixmap(*index);
+        return QSizeF(std::max(1, pix.width()), std::max(1, pix.height()));
+    };
+    const QSizeF l = size_of(left), r = size_of(right);
+    const QSizeF one = l.isEmpty() ? r : l;
+    const double across = std::max(l.width(), r.width()) * 2, down = std::max(l.height(), r.height());
+    if (one.isEmpty() || across <= 0 || down <= 0) return {};
+    const double scale = std::min((width() - 40) / across, (height() - 40) / down);
+    const double middle = height() / 2.0;
+    const auto at = [&](const QSizeF& size, bool on_left) {
+        if (size.isEmpty()) return QRectF();
+        const double w = size.width() * scale, h = size.height() * scale;
+        return QRectF(on_left ? width() / 2.0 - w : width() / 2.0, middle - h / 2, w, h);
+    };
+    return {at(l, true), at(r, false)};
+}
+
 void BookView::paintEvent(QPaintEvent*) {
     QPainter painter(this);
     painter.setRenderHint(QPainter::SmoothPixmapTransform);
     painter.fillRect(rect(), QColor(theme::tokens().surround));
     BookPreview* d = dialog_;
     const auto [left, right] = d->sides(d->spread());
-    double page_h = height() - 40;
-    double aspect = 0.7;
-    if (left || right) {
-        const QPixmap& sample = d->pixmap(left ? *left : *right);
-        aspect = sample.width() / static_cast<double>(std::max(1, sample.height()));
-    }
-    const double page_w = std::min((width() - 40) / 2.0, page_h * aspect);
-    page_h = page_w / aspect;
-    const QPointF spine(width() / 2.0, (height() - page_h) / 2);
-    for (const auto& [index, x] : {std::pair{left, spine.x() - page_w}, {right, spine.x()}}) {
-        if (!index) continue;
+    const auto [left_rect, right_rect] = page_rects();
+    for (const auto& [index, where] : {std::pair{left, left_rect}, {right, right_rect}}) {
+        if (!index || where.isEmpty()) continue;
         const QPixmap& pix = d->pixmap(*index);
-        painter.drawPixmap(QRectF(x, spine.y(), page_w, page_h), pix, QRectF(pix.rect()));
+        painter.drawPixmap(where, pix, QRectF(pix.rect()));
     }
+    const QRectF both = left_rect.united(right_rect);
+    const double page_w = std::max(left_rect.width(), right_rect.width()), page_h = both.height();
+    const QPointF spine(width() / 2.0, both.top());
     // the fold's shadow
     QLinearGradient shade(spine.x() - 18, 0, spine.x() + 18, 0);
     shade.setColorAt(0, QColor(0, 0, 0, 0));

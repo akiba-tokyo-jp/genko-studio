@@ -809,8 +809,6 @@ const std::vector<Rule>& rules() {
                 .arg(m.captured(1), QString::number(m.captured(2).toULongLong() / (1024 * 1024)));
         }));
         r.push_back(rule("the basic frame must be a finite size", "基本枠の大きさは、ふつうの数で指定します（無限大や NaN は使えません）"));
-        r.push_back(rule("set_page_spec moving high-precision colour pixels is not in the C\\+\\+ build yet",
-                         "この版の Genko では、高精度の色のレイヤーがある原稿の用紙を、中身ごと変えることはまだできません（中身を動かさない変更はできます）"));
         r.push_back(rule(R"(a (\w+) ruler needs (\d+) point\(s\))", "この定規には点が \\2 つ要ります"));
         r.push_back(rule("a perspective ruler has 1 to 3 vanishing points", "パース定規の消失点は 1〜3 つです"));
         r.push_back(rule("ratio must be above 0", "縦横の比は 0 より大きくします"));
@@ -937,6 +935,44 @@ const std::vector<Rule>& rules() {
         r.push_back(rule("the line \\S+ is not placed on a page", "この台詞はページに置かれていません"));
         r.push_back(rule("blend paints a paint layer's pixels.*", "描画モードを付けた塗りつぶしは、ペイントレイヤーにだけできます"));
         r.push_back(rule("shape_part: the layer \\S+ has no shape part.*", "そのレイヤーに、その形はありません"));
+        // (PC3 C-e: the page size ops, render/ops_pagesize; core/page_geometry)
+        r.push_back(rule("the finished size and its bleed would not fit the new paper.*",
+                         "仕上がりと裁ち落としが新しい用紙に入りません（仕上がり・裁ち落とし・余白を決め直すか、仕上がりを新しい用紙に合わせます）"));
+        r.push_back(rule("the basic frame would not fit the finished size.*", "基本枠が仕上がりに入りません（余白を決め直すか、仕上がりを新しい用紙に合わせます）"));
+        r.push_back(rule("the new (?:paper|canvas) must have a size", "新しい用紙の大きさが 0 以下になります"));
+        r.push_back(rule(R"(the page on its new paper is too large \(.*\))", "新しい用紙が大きすぎます"));
+        r.push_back(rule(R"(the saved area on the new paper is too large \(.*\))", "用紙が大きすぎて、ストックした範囲を新しい用紙に移せません"));
+        r.push_back(rule("the precise layer on the new paper is too large", "用紙が大きすぎて、高精度のレイヤーを新しい用紙に移せません"));
+        r.push_back(rule("the inks on the new paper are too large", "用紙が大きすぎて、インキのレイヤーやチャンネルを新しい用紙に移せません"));
+        r.push_back(rule(R"(page (\S+) is a cover: its paper is set by its cover settings)",
+                         "\\1 ページは表紙・カバー・帯です。用紙は表紙の設定で決まるため、大きさは変えられません"));
+        r.push_back(rule(R"(page (\S+) is in a spread with page (\S+): change both pages)", "\\1 ページは \\2 ページと見開きです。両方のページに掛けてください"));
+        r.push_back(rule(R"(page (\S+) is in a spread with page (\S+): both must keep the same size)", "見開きの \\1・\\2 ページは同じ大きさにします"));
+        r.push_back(rule("the resolution is the whole book's: give pages \"all\"", "解像度は本全体で変えます（すべてのページに掛けてください）"));
+        r.push_back(rule("resample none keeps the pixels: give dpi alone", "再サンプルしないときは、解像度だけを変えます（大きさは解像度に合わせて変わります）"));
+        r.push_back(rule("give the size in mm or in pixels, not both", "大きさは mm か pixel のどちらかで指定します"));
+        r.push_back(rule("dpi is a whole number of 1 to 10000", "解像度は 1〜10000 の整数です"));
+        r.push_back(rule("resample is bicubic, .*", "再サンプルの方法は バイキュービック・バイリニア・ニアレストネイバー・Lanczos・ディテールを保持・しない のどれかです"));
+        r.push_back(rule("anchor is top_left, .*", "基準位置の指定が正しくありません"));
+        r.push_back(rule("extension is \"transparent\" or \\[r, g, b\\]", "カンバス拡張カラーは 透明 か [r, g, b] です"));
+        r.push_back(rule("the canvas extension colour needs a paint layer at the bottom of the page.*",
+                         "カンバス拡張カラーで塗るペイントレイヤーが、ページのいちばん下にありません（透明で広げるか、ペイントレイヤーを作ってから）"));
+        r.push_back(rule("delete_pixels must be true.*", "切り抜いた画素は残せません（線・絵・台詞は用紙の外に残り、すべての領域を表示 で戻せます）"));
+        r.push_back(rule("give rect \\[x, y, w, h\\] or an area to crop to", "切り抜く枠か範囲を指定します"));
+        r.push_back(rule("rect must (?:be finite numbers|have a size)", "切り抜く枠の指定が正しくありません"));
+        r.push_back(rule("angle is -359.99 to 359.99 degrees", "角度は -359.99〜359.99° です"));
+        r.push_back(rule("interp is bicubic, bilinear or nearest", "補間方法は バイキュービック・バイリニア・ニアレストネイバー のどれかです"));
+        r.push_back(rule("based_on is transparent, top_left or bottom_right", "トリミングの基準は 透明ピクセル・左上のピクセルの色・右下のピクセルの色 のどれかです"));
+        r.push_back(rule(R"(page (\S+) has nothing to trim to)", "\\1 ページには、トリミングの基準になる描いたものがありません"));
+        r.push_back(rule("text is upright: .*", "台詞の文字は立てたまま回します（文字だけを回す・鏡にすることはできません）"));
+        r.push_back(rule("turn is 90cw, 90ccw, 180, flip_h or flip_v", "回し方は 90°（時計回り・反時計回り）・180°・左右反転・上下反転 のどれかです"));
+        r.push_back(rule("give turn or angle, not both", "回し方か角度の、どちらかを指定します"));
+        r.push_back(rule("pages is a list of page numbers or \"all\"", "ページは番号のリストか、すべて（\"all\"）で指定します"));
+        r.push_back(rule("trim is \\[width, height\\] or \"fit\"|trim must be positive numbers", "仕上がりは [幅, 高さ] か、用紙に合わせる（\"fit\"）で指定します"));
+        r.push_back(rule("bleed_mm must not be negative", "裁ち落としは 0 以上にします"));
+        r.push_back(rule("margins (?:is \\[top, bottom, inner, outer\\]|must be finite numbers|takes top, bottom, inner and outer)",
+                         "余白は [天, 地, のど, 小口] で指定します"));
+        r.push_back(rule("a 3D prop cannot be turned or mirrored with the page.*", "3D は、ページと一緒に回す・反転することはできません（3D を線と面にしてから）"));
         // (the C++ build's own: what it does not do yet, and saving)
         r.push_back(rule("official export is not in the C\\+\\+ build yet",
                          "この版の Genko では、まだ正式な書き出し（確認と承認の記録つき）はできません（ふつうの書き出しはできます）"));

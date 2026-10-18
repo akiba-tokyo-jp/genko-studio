@@ -14293,9 +14293,18 @@
         "alternate_menus": []
       },
       "genko_status": "一部（2026-10-16 照合）",
-      "implementation_status": "未着手",
+      "implementation_status": "実装済み（PC3 C-e、未統合）",
       "acceptance_status": "未実施",
-      "evidence": [],
+      "evidence": [
+        "native/src/render/ops_pagesize.cpp",
+        "native/src/render/page_pixels.cpp",
+        "native/src/core/page_geometry.cpp",
+        "native/src/app/main_window_page_size.cpp",
+        "native/src/app/page_size_dialogs.cpp",
+        "native/tests/unit/test_page_size.cpp",
+        "native/tests/contract/test_contract_page_size.cpp",
+        "native/tests/gui/test_gui_page_size.cpp"
+      ],
       "pc0": {
         "date": "2026-10-16",
         "cpp_base": "962faa4",
@@ -14340,9 +14349,19 @@
         "alternate_menus": []
       },
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "未着手",
+      "implementation_status": "実装済み（PC3 C-e、未統合）",
       "acceptance_status": "未実施",
-      "evidence": [],
+      "evidence": [
+        "native/src/render/ops_pagesize.cpp",
+        "native/src/render/page_pixels.cpp",
+        "native/src/core/page_geometry.cpp",
+        "native/src/app/main_window_page_size.cpp",
+        "native/src/app/page_size_dialogs.cpp",
+        "native/src/app/canvas_crop.cpp",
+        "native/tests/unit/test_page_size.cpp",
+        "native/tests/contract/test_contract_page_size.cpp",
+        "native/tests/gui/test_gui_page_size.cpp"
+      ],
       "pc0": {
         "date": "2026-10-16",
         "cpp_base": "962faa4",
@@ -14430,9 +14449,18 @@
         "alternate_menus": []
       },
       "genko_status": "一部（2026-10-16 照合）",
-      "implementation_status": "未着手",
+      "implementation_status": "実装済み（PC3 C-e、未統合）",
       "acceptance_status": "未実施",
-      "evidence": [],
+      "evidence": [
+        "native/src/render/ops_pagesize.cpp",
+        "native/src/render/page_pixels.cpp",
+        "native/src/core/page_geometry.cpp",
+        "native/src/app/main_window_page_size.cpp",
+        "native/src/app/page_size_dialogs.cpp",
+        "native/tests/unit/test_page_size.cpp",
+        "native/tests/contract/test_contract_page_size.cpp",
+        "native/tests/gui/test_gui_page_size.cpp"
+      ],
       "pc0": {
         "date": "2026-10-16",
         "cpp_base": "962faa4",
@@ -14479,9 +14507,18 @@
         "alternate_menus": []
       },
       "genko_status": "一部（2026-10-16 照合）",
-      "implementation_status": "未着手",
+      "implementation_status": "実装済み（PC3 C-e、未統合）",
       "acceptance_status": "未実施",
-      "evidence": [],
+      "evidence": [
+        "native/src/render/ops_pagesize.cpp",
+        "native/src/render/page_pixels.cpp",
+        "native/src/core/page_geometry.cpp",
+        "native/src/app/main_window_page_size.cpp",
+        "native/src/app/page_size_dialogs.cpp",
+        "native/tests/unit/test_page_size.cpp",
+        "native/tests/contract/test_contract_page_size.cpp",
+        "native/tests/gui/test_gui_page_size.cpp"
+      ],
       "pc0": {
         "date": "2026-10-16",
         "cpp_base": "962faa4",
@@ -14528,9 +14565,18 @@
         "alternate_menus": []
       },
       "genko_status": "一部（2026-10-16 照合）",
-      "implementation_status": "未着手",
+      "implementation_status": "実装済み（PC3 C-e、未統合）",
       "acceptance_status": "未実施",
-      "evidence": [],
+      "evidence": [
+        "native/src/render/ops_pagesize.cpp",
+        "native/src/render/page_pixels.cpp",
+        "native/src/core/page_geometry.cpp",
+        "native/src/app/main_window_page_size.cpp",
+        "native/src/app/page_size_dialogs.cpp",
+        "native/tests/unit/test_page_size.cpp",
+        "native/tests/contract/test_contract_page_size.cpp",
+        "native/tests/gui/test_gui_page_size.cpp"
+      ],
       "pc0": {
         "date": "2026-10-16",
         "cpp_base": "962faa4",
@@ -14577,9 +14623,18 @@
         "alternate_menus": []
       },
       "genko_status": "一部（2026-10-16 照合）",
-      "implementation_status": "未着手",
+      "implementation_status": "実装済み（PC3 C-e、未統合）",
       "acceptance_status": "未実施",
-      "evidence": [],
+      "evidence": [
+        "native/src/render/ops_pagesize.cpp",
+        "native/src/render/page_pixels.cpp",
+        "native/src/core/page_geometry.cpp",
+        "native/src/app/main_window_page_size.cpp",
+        "native/src/app/page_size_dialogs.cpp",
+        "native/tests/unit/test_page_size.cpp",
+        "native/tests/contract/test_contract_page_size.cpp",
+        "native/tests/gui/test_gui_page_size.cpp"
+      ],
       "pc0": {
         "date": "2026-10-16",
         "cpp_base": "962faa4",
@@ -14627,9 +14682,18 @@
         "alternate_menus": []
       },
       "genko_status": "一部（2026-10-16 照合）",
-      "implementation_status": "未着手",
+      "implementation_status": "実装済み（PC3 C-e、未統合）",
       "acceptance_status": "未実施",
-      "evidence": [],
+      "evidence": [
+        "native/src/render/ops_pagesize.cpp",
+        "native/src/render/page_pixels.cpp",
+        "native/src/core/page_geometry.cpp",
+        "native/src/app/main_window_page_size.cpp",
+        "native/src/app/page_size_dialogs.cpp",
+        "native/tests/unit/test_page_size.cpp",
+        "native/tests/contract/test_contract_page_size.cpp",
+        "native/tests/gui/test_gui_page_size.cpp"
+      ],
       "pc0": {
         "date": "2026-10-16",
         "cpp_base": "962faa4",
@@ -14675,9 +14739,21 @@
         "alternate_menus": []
       },
       "genko_status": "一部（2026-10-16 照合）",
-      "implementation_status": "未着手",
+      "implementation_status": "実装済み（PC3 C-e、未統合）",
       "acceptance_status": "未実施",
-      "evidence": [],
+      "evidence": [
+        "native/src/render/ops_pagesize.cpp",
+        "native/src/render/page_pixels.cpp",
+        "native/src/core/page_geometry.cpp",
+        "native/src/render/resample.cpp",
+        "native/src/core/ops_bookpages.cpp",
+        "native/src/render/color_edit.cpp",
+        "native/src/app/main_window_page_size.cpp",
+        "native/src/app/page_size_dialogs.cpp",
+        "native/tests/unit/test_page_size.cpp",
+        "native/tests/contract/test_contract_page_size.cpp",
+        "native/tests/gui/test_gui_page_size.cpp"
+      ],
       "pc0": {
         "date": "2026-10-16",
         "cpp_base": "962faa4",
@@ -15460,9 +15536,18 @@
         "alternate_menus": []
       },
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "未着手",
+      "implementation_status": "実装済み（PC3 C-e、未統合）",
       "acceptance_status": "未実施",
-      "evidence": [],
+      "evidence": [
+        "native/src/render/ops_pagesize.cpp",
+        "native/src/render/page_pixels.cpp",
+        "native/src/core/page_geometry.cpp",
+        "native/src/app/main_window_page_size.cpp",
+        "native/src/app/page_size_dialogs.cpp",
+        "native/tests/unit/test_page_size.cpp",
+        "native/tests/contract/test_contract_page_size.cpp",
+        "native/tests/gui/test_gui_page_size.cpp"
+      ],
       "pc0": {
         "date": "2026-10-16",
         "cpp_base": "962faa4",
@@ -15503,9 +15588,19 @@
         "alternate_menus": []
       },
       "genko_status": "一部（2026-10-16 照合）",
-      "implementation_status": "未着手",
+      "implementation_status": "実装済み（PC3 C-e、未統合）",
       "acceptance_status": "未実施",
-      "evidence": [],
+      "evidence": [
+        "native/src/render/ops_pagesize.cpp",
+        "native/src/render/page_pixels.cpp",
+        "native/src/core/page_geometry.cpp",
+        "native/src/render/resample.cpp",
+        "native/src/app/main_window_page_size.cpp",
+        "native/src/app/page_size_dialogs.cpp",
+        "native/tests/unit/test_page_size.cpp",
+        "native/tests/contract/test_contract_page_size.cpp",
+        "native/tests/gui/test_gui_page_size.cpp"
+      ],
       "pc0": {
         "date": "2026-10-16",
         "cpp_base": "962faa4",
@@ -15599,9 +15694,18 @@
         "alternate_menus": []
       },
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "未着手",
+      "implementation_status": "実装済み（PC3 C-e、未統合）",
       "acceptance_status": "未実施",
-      "evidence": [],
+      "evidence": [
+        "native/src/render/ops_pagesize.cpp",
+        "native/src/render/page_pixels.cpp",
+        "native/src/core/page_geometry.cpp",
+        "native/src/app/main_window_page_size.cpp",
+        "native/src/app/page_size_dialogs.cpp",
+        "native/tests/unit/test_page_size.cpp",
+        "native/tests/contract/test_contract_page_size.cpp",
+        "native/tests/gui/test_gui_page_size.cpp"
+      ],
       "pc0": {
         "date": "2026-10-16",
         "cpp_base": "962faa4",
@@ -36939,9 +37043,15 @@
       "kind": "tool",
       "upstream_source": "crates/ui-egui/src/state.rs",
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "未着手",
+      "implementation_status": "実装済み（PC3 C-e、未統合）",
       "acceptance_status": "未実施",
-      "evidence": [],
+      "evidence": [
+        "native/src/app/canvas_crop.cpp",
+        "native/src/app/main_window_page_size.cpp",
+        "native/src/render/ops_pagesize.cpp",
+        "native/tests/gui/test_gui_page_size.cpp",
+        "native/tests/unit/test_page_size.cpp"
+      ],
       "pc0": {
         "date": "2026-10-16",
         "cpp_base": "962faa4",

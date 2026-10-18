@@ -301,7 +301,11 @@ private slots:
         // (act_line_work_path), 表示 → ターゲットパス (act_show_target_path), ファイル → パスを Illustrator へ… (act_export_paths_ai),
         // レイヤー → ベクトルマスク (act_vmask_reveal_all, act_vmask_hide_all, act_vmask_current_path, act_vmask_delete,
         // act_vmask_disable, act_vmask_link) and ラスタライズ → ベクトルマスク (act_rasterize_vmask) — theirs (test_gui_paths).
-        QCOMPARE(w->actions_by_name().size(), std::size_t{345});
+        // and the 12 of PC3 C-e (SPEC COLOR-07「判型」) — ページ → 画像解像度…・カンバスサイズ…・画像の回転 ▸・切り抜き・トリミング…・
+        // すべての領域を表示 (act_image_size, act_canvas_size, act_rotate_180, act_rotate_90cw, act_rotate_90ccw, act_rotate_angle,
+        // act_flip_canvas_h, act_flip_canvas_v, act_crop, act_trim, act_reveal_all) and ツール → 切り抜きツール (act_crop_tool) —
+        // theirs (test_gui_page_size).
+        QCOMPARE(w->actions_by_name().size(), std::size_t{357});
         QVERIFY(w->action("act_chat_approval"));
         QVERIFY(w->action("act_style"));
         QVERIFY(w->action("act_exposure"));
@@ -336,8 +340,8 @@ private slots:
         }
         // the palette and the command bar (Python's order); with M3's eight ways of the marquee (test_gui_select) and its
         // drawing tools and line editing (test_gui_paint), the effect lines and the material tool (test_gui_effects), the
-        // text tool (test_gui_lines); PC3 C-a's three path tools (test_gui_paths)
-        QCOMPARE(w->tools_group()->actions().size(), 31);
+        // text tool (test_gui_lines); PC3 C-a's three path tools (test_gui_paths); the crop tool (PC3 C-e, test_gui_page_size)
+        QCOMPARE(w->tools_group()->actions().size(), 32);
     }
 
     // No two commands share a key (Qt would take the key as ambiguous and do neither): PC1b's 色の校正 (Ctrl+Alt+Y — Ctrl+Y
@@ -431,7 +435,9 @@ private slots:
                                                   {"ruler", "act_ruler"},     {"3d", "act_3d"},         {"effect", "act_effect"},
                                                   {"stamp", "act_stamp"},     {"text", "act_text"},
                                                   // (PC3 C-a: ペンツール, 曲線ペンツール, パス選択ツール)
-                                                  {"pathpen", "act_path_pen"}, {"curvepen", "act_curvature_pen"}, {"pathselect", "act_path_select"}};
+                                                  {"pathpen", "act_path_pen"}, {"curvepen", "act_curvature_pen"}, {"pathselect", "act_path_select"},
+                                                  // (PC3 C-e: 切り抜きツール)
+                                                  {"crop", "act_crop_tool"}};
         QCOMPARE(w->tool_actions().size(), tools.size());
         QVERIFY(w->tools_group()->isExclusive());
         QVERIFY(w->action(QStringLiteral("act_select"))->isChecked());

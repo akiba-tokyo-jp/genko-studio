@@ -307,8 +307,8 @@ private slots:
 
     // The book and page ops of M4 that need more than core: core's own bus refuses a paint layer's pixels moved by
     // set_page_spec and the other book import_pages reads (not_yet_ported), and does the rest; this build's precise
-    // colour pixels, which Python does not have, are not moved yet (not_yet_ported): the paper alone changes with
-    // move false.
+    // colour pixels, which Python does not have, are moved by the drawing build (PC3 C-e: at their own resolution;
+    // core's own bus refuses them), and the paper alone changes with move false.
     void bookPageOpsNeedTheDrawingBuild() {
         const Json move = ops(R"([{"op": "set_page_spec", "preset": "b5"}])");
         const Json paper = ops(R"([{"op": "set_page_spec", "preset": "b5", "move": false}])");
@@ -346,8 +346,14 @@ private slots:
         colour.color_raster = std::make_shared<const std::string>(genko::core::encode_color_raster(
             Json{{"width", 1}, {"height", 1}, {"precision", "u16"}, {"pixels", Json::array({65535, 0, 0, 65535})}}));
         precise.edit_page(0).layers.push_back(colour);
-        const std::string kept = code_of(bus(), precise, move);
+        const std::string kept = code_of(CommandBus(), precise, move);
         QVERIFY2(kept.starts_with("not_yet_ported: ops[0] set_page_spec: set_page_spec moving high-precision colour pixels"), kept.c_str());
+        const Document moved_precise = bus().apply(precise, move, Actor("genko")).doc;
+        const auto& precise_layer = moved_precise.page(0).layers.back();
+        QVERIFY(precise_layer.color_raster && precise_layer.color_raster != colour.color_raster);
+        const genko::core::ColorRasterView view(*precise_layer.color_raster);
+        QCOMPARE(view.width(), 1u);  // (its resolution kept: a pixel over the page's 208 mm)
+        QCOMPARE(view.pixel(0)[0], 1.0);
         const Document repapered = bus().apply(precise, paper, Actor("genko")).doc;
         QVERIFY(repapered.page(0).layers.back().color_raster == colour.color_raster);
         QCOMPARE(repapered.spec.preset.value(), std::string("doujin-b5"));

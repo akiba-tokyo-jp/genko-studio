@@ -300,8 +300,8 @@ private slots:
             {"content_aware_fill", "B4"},  // (C-a's set_path … set_vector_mask: written, test_contract_paths)
             {"add_shape_part", "C-b"}, {"edit_shape_part", "C-b"},
             {"combine_shape_parts", "C-b"}, {"move_shape_parts", "C-b"}, {"transform_layers", "C-c"}, {"content_aware_scale", "C-c"},
-            {"align_layers", "C-d"}, {"distribute_layers", "C-d"}, {"arrange_layers", "C-d"}, {"link_layers", "C-d"}, {"resize_pages", "C-e"},
-            {"set_canvas_size", "C-e"}, {"crop_page", "C-e"}, {"trim_page", "C-e"}, {"reveal_all", "C-e"}, {"rotate_pages", "C-e"}};
+            {"align_layers", "C-d"}, {"distribute_layers", "C-d"}, {"arrange_layers", "C-d"}, {"link_layers", "C-d"}};
+        // (C-e's resize_pages, set_canvas_size, crop_page, trim_page, reveal_all and rotate_pages are written: test_page_size)
         for (const auto& [op, group] : frames) {
             try {
                 core::CommandBus(render::ops_registry()).apply(doc, Json::array({Json{{"op", op}, {"page", 1}}}), core::Actor("human:test"));

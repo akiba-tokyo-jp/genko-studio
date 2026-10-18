@@ -28,5 +28,8 @@ core::Json link_of(const core::Json& op, std::string_view bytes);
 // rasterize_layer's work on one layer (the `i`th of the `at`th page): its look as a paint layer's pixels at 200 dpi —
 // an 8-bit page's PNG, a precise page's raster, an ink page's inks —, its mask and settings kept.
 void rasterize(core::Document& doc, std::size_t at, std::size_t i);
+// smart_convert's work on a placed picture (PC3 C-e: one turned with its page): a smart object of its file, `id` its
+// layer's id, its matrix the place it is laid at; its panel, finish and where it came from kept.
+core::Layer placed_to_smart(core::Document& doc, core::Layer placed, const std::string& id);
 
 }  // namespace genko::render::smart_ops

@@ -10,6 +10,7 @@
 #include "core/pyops.hpp"
 #include "core/pyconv.hpp"
 #include "core/pynum.hpp"
+#include "core/smart.hpp"
 
 // The warps: PhotoCraft v0.2.0 crates/geom/src/warp.rs (1-620), MIT: native/third_party/photocraft/NOTICE.md.
 // The turns' maps: crates/engine/src/canvas_geom.rs (200-235).
@@ -235,6 +236,12 @@ void map_line(StoryLine& line, const Mapping& m) {
         move_points_at(tail, "vias", m);
     }
     if (line.path && !line.path->empty()) map_points(*line.path, m);
+    // (a scale: its letters and its balloon's lines with it — Image Size)
+    if (std::fabs(k - 1.0) > 1e-12 && line.style.is_object()) {
+        for (const char* key : {"size_mm", "outline_mm", "border_mm", "text_dx_mm", "text_dy_mm"}) {
+            if (const auto it = line.style.find(key); it != line.style.end() && it->is_number()) *it = round3(it->get<double>() * k);
+        }
+    }
 }
 
 void map_ruler(Json& ruler, const Mapping& m) {
@@ -391,15 +398,20 @@ void map_page(Document& doc, std::size_t at, const Mapping& m, const PixelHooks&
             }
         }
         if (layer.placement_mm) {
-            if (!m.keeps_axes() && !m.swaps_axes()) {
+            // (a placed picture is laid upright in its box: a turn or a mirror is a smart object's — the page size ops make
+            // it one first)
+            if (!(m.keeps_axes() && m.m[0] > 0 && m.m[3] > 0)) {
                 not_yet_ported("a placed picture turned with the page: it is turned as a smart object (PC3 節 A)");
             }
             const Rect& r = *layer.placement_mm;
             layer.placement_mm = rect_of(map_box({r.x.value(), r.y.value(), r.width.value(), r.height.value()}, m));
         }
+        // (smart-objects@1: its matrix after the map; its contents as they are)
+        if (layer.kind == LayerKind::Smart) smart::transform_layer(layer, smart::Matrix{m.m[0], m.m[1], m.m[2], m.m[3], m.m[4], m.m[5]});
         if (layer.vector_mask) layer.vector_mask->path = map_path(layer.vector_mask->path, m);
+        const bool filter_mask = layer.kind == LayerKind::Smart && layer.smart && layer.smart->is_object() && layer.smart->contains("filter_mask");
         const bool pixels = (layer.raster_png && !layer.raster_png->empty()) || layer.color_raster || layer.ink_raster ||
-                            (layer.mask && layer.mask->png) || (!layer.patches.empty() && !m.is_similarity_upright());
+                            (layer.mask && layer.mask->png) || (!layer.patches.empty() && !m.is_similarity_upright()) || filter_mask;
         if (pixels) {
             if (!hooks.layer) not_yet_ported("moving a layer's pixels with the page: they are moved by the drawing build");
             hooks.layer(layer, m, before, after);

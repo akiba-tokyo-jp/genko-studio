@@ -113,6 +113,9 @@ genko_test(test_magic_erase SOURCES unit/test_magic_erase.cpp DEPS genko_test_su
 genko_test(test_path_raster SOURCES unit/test_path_raster.cpp DEPS genko_test_support genko_render_ops LABELS unit)
 genko_test(test_resample SOURCES unit/test_resample.cpp DEPS genko_test_support genko_render_ops LABELS unit)
 genko_test(test_page_geometry SOURCES unit/test_page_geometry.cpp DEPS genko_test_support LABELS unit)
+# PC3 C-e (SPEC.md COLOR-07「判型」): the page size ops on a book in memory — each thing on a page where the map takes it,
+# turns and flips coming back, the finished size and basic frame kept with what the page holds, a page's own paper.
+genko_test(test_page_size SOURCES unit/test_page_size.cpp DEPS genko_test_support genko_render_ops LABELS unit TIMEOUT 600)
 # PC2-0 (SPEC.md COLOR-04, adjustments@1): the corrections' common ground without Python — Python's form kept, a
 # correction's native read and stored, native.method, the kinds' table and what is not in this build yet, one
 # AdjustFunction to the three ways, native.blend on 8 and 16 bits and on CMYK, the PSD's frame; and PC2a's tone kinds
@@ -352,6 +355,11 @@ genko_test(test_contract_paths SOURCES contract/test_contract_paths.cpp DEPS gen
            LABELS contract TIMEOUT 900)
 genko_test(test_contract_image_ops SOURCES contract/test_contract_image_ops.cpp DEPS genko_test_support genko_render
            LABELS contract TIMEOUT 900)
+# PC3 C-e through the command line: every kind of page turned (inspect --pixel), undone and redone; a page of its own paper
+# (page-spec@1) written, read again, exported as PDF and PSD at its size; Image Size, Canvas Size's colour; set_page_spec
+# moving a precise layer's pixels.
+genko_test(test_contract_page_size SOURCES contract/test_contract_page_size.cpp DEPS genko_test_support genko_render
+           LABELS contract TIMEOUT 1800)
 
 genko_test(test_contract_psd_text SOURCES contract/test_contract_psd_text.cpp DEPS genko_test_support genko_formats genko_render_ops
            LABELS contract TIMEOUT 1800)
@@ -507,6 +515,8 @@ if(GENKO_BUILD_APP)
   # the book and its pages (M4②c): spreads, the nombre, the paper, covers, who draws a page, another book's pages taken
   # in (its assets copied first), a PSD as layers, the page list's menu; each command's ops against Python's window
   genko_test(test_gui_book SOURCES gui/test_gui_book.cpp DEPS genko_app genko_test_support GUI TIMEOUT 900)
+  # PC3 C-e: ページ's paper commands and the crop tool, their ops, the finished size fitted when asked, the book preview
+  genko_test(test_gui_page_size SOURCES gui/test_gui_page_size.cpp DEPS genko_app genko_test_support GUI TIMEOUT 900)
   # the book going out (M4③b): 書き出し… (the dialog's exports as `genko export` writes them), 印刷… (to a PDF: the
   # pages as render_page draws them at the printer's resolution), 履歴 (undo and redo by a click), 入稿前の点検 and its
   # panel (the issues listed, each shown on its page), the phone screens and the scales (a guide pulled out)

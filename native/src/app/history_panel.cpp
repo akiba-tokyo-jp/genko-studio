@@ -83,6 +83,9 @@ const std::map<std::string, const char*>& names() {
         {"set_path", "パスを描いた"}, {"delete_path", "パスを削除した"}, {"rename_path", "パスを保存した"},
         {"make_work_path", "作業用パスを作成した"}, {"text_to_path", "文字から作業用パスを作成した"},
         {"stroke_path", "パスの境界線を描いた"}, {"set_vector_mask", "ベクトルマスクを変えた"},
+        // (PC3 C-e: render/ops_pagesize)
+        {"resize_pages", "画像解像度を変えた"}, {"set_canvas_size", "カンバスサイズを変えた"}, {"crop_page", "切り抜いた"},
+        {"trim_page", "トリミングした"}, {"reveal_all", "すべての領域を表示した"}, {"rotate_pages", "カンバスを回転した"},
     };
     return table;
 }

@@ -212,6 +212,10 @@ void PageCanvas::mousePressEvent(QMouseEvent* event) {
         marquee_press(pos, mm, event->modifiers());
         return;
     }
+    if (tool_ == QLatin1String("crop")) {  // (切り抜きツール: canvas_crop.cpp)
+        crop_press(pos, mm, event->modifiers());
+        return;
+    }
     if (is_drawing_tool(tool_)) {
         perf::input(event, "mouse_press");
         // (a straight line (Shift) starts on the grid)
@@ -275,6 +279,7 @@ void PageCanvas::mouseMoveEvent(QMouseEvent* event) {
     if (prim_move(pos)) return;
     if (tool_move(mm_of(pos), event->modifiers(), pressed)) return;
     if (tool_ == QLatin1String("marquee") && marquee_move(mm_of(pos), event->modifiers(), pressed)) return;
+    if (tool_ == QLatin1String("crop") && crop_move(mm_of(pos), event->modifiers(), pressed)) return;
     if (tool_ == QLatin1String("select") && pressed && press_pos_) {
         if ((pos - *press_pos_).manhattanLength() > 6) {
             start_pan(last_pos_);
@@ -360,6 +365,11 @@ void PageCanvas::mouseReleaseEvent(QMouseEvent* event) {
     if (tool_ == QLatin1String("marquee")) {
         press_pos_.reset();
         marquee_release();
+        return;
+    }
+    if (tool_ == QLatin1String("crop")) {
+        press_pos_.reset();
+        crop_release();
         return;
     }
     if (tool_ == QLatin1String("select")) {
@@ -557,6 +567,7 @@ void PageCanvas::keyPressEvent(QKeyEvent* event) {
         return;
     }
     if (marquee_key(event)) return;
+    if (crop_key(event)) return;
     if (event->key() == Qt::Key_Escape && selection_) {
         set_selection(std::nullopt);
         return;

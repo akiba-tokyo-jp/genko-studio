@@ -75,8 +75,9 @@ Plane project(const Plane& src, const Homography& h, int width, int height, Inte
 using Forward = std::function<std::pair<double, double>(double, double)>;
 Plane mesh(const Plane& src, const Forward& f, int width, int height, Interp interp, int x0 = 0, int y0 = 0);
 // Image Size: the plane resized to `width` × `height` by a separable filter (a reduction's support widened by its
-// factor), premultiplied.
-Plane resize(const Plane& src, int width, int height, Filter filter);
+// factor), premultiplied. `edges` (a picture as big as its page, PC3 C-e): its edge pixels carried on past it, so the
+// resized one has no clear rim (a grey plane's always are).
+Plane resize(const Plane& src, int width, int height, Filter filter, bool edges = false);
 
 // A turn or flip of the whole plane: its pixels moved, their values exact (PhotoCraft's Turn::pixel_map).
 enum class Turn { FlipH, FlipV, Rotate180, Cw90, Ccw90 };
