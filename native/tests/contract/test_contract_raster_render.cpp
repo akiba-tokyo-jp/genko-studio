@@ -36,6 +36,7 @@
 #include "render/brushes.hpp"
 #include "render/ops_registry.hpp"
 #include "render/page.hpp"
+#include "render/selection.hpp"
 #include "rendertest.hpp"
 #include "storage/fsutil.hpp"
 #include "storage/reader.hpp"
@@ -44,6 +45,14 @@ using genko::core::Json;
 namespace render = genko::render;
 
 namespace {
+
+// (PC3 B-0) While it lives, a grey area's picture is stretched as Python stretches it (nearest; this build's own is bilinear).
+struct PythonStretch {
+    PythonStretch() { genko::render::selection::set_grey_area_stretch(genko::render::Resample::Nearest); }
+    ~PythonStretch() { genko::render::selection::set_grey_area_stretch(genko::render::Resample::Bilinear); }
+    PythonStretch(const PythonStretch&) = delete;
+    PythonStretch& operator=(const PythonStretch&) = delete;
+};
 
 const std::vector<std::string> kModes{"print", "proof", "name"};
 const std::vector<int> kDpis{72, 150, 350};
@@ -303,7 +312,9 @@ private slots:
             QVERIFY2(loaded.report.clean(), genko::core::dump_python(loaded.report.to_json()).c_str());
             *doc = loaded.document;
         }
-        // this build does the same to the same book
+        // this build does the same to the same book (PC3 B-0: page 2's feathered area stretched as Python stretches it —
+        // this build's own, bilinear, is test_contract_raster_ops's deviating cases' — and every pixel compared)
+        const PythonStretch python_stretch;
         {
             const genko::core::ScopedIdSource ids(genko::core::counting_ids());
             const genko::core::Document doc = genko::storage::load_document(genko::storage::path_from_utf8(original.toStdString())).document;

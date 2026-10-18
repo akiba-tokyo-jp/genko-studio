@@ -36,9 +36,15 @@ struct AreaMask {
     std::int64_t y0 = 0;
 };
 
-// selection.area_mask(area, dpi): {"poly"} drawn, or {"mask": {"box", "png"}} read and resized (NEAREST). `what` names
-// the op's key in the errors of this build ("<what> must be a finite number", "<what> is too large").
+// selection.area_mask(area, dpi): {"poly"} drawn, or {"mask": {"box", "png"}} read and resized (NEAREST; a grey one as
+// grey_area_stretch says, below). `what` names the op's key in the errors of this build ("<what> must be a finite
+// number", "<what> is too large").
 AreaMask area_mask(const core::Json& area, int dpi = fills::kFillDpi, std::string_view what = "area");
+// PC3 B-0: how area_mask stretches a grey picture (an anti-aliased or feathered area's) onto its grid — bilinear; a
+// two-valued one is stretched nearest. The contract tests that replay Python's books set nearest (Python's) while they
+// compare everything else with Python's; nothing else changes it.
+Resample grey_area_stretch();
+void set_grey_area_stretch(Resample resample);
 
 // base64.b64decode(value) of a str (Python's errors for other values and for text that is not ASCII).
 std::string b64decode(const core::Json& value);

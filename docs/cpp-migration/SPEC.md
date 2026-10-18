@@ -484,7 +484,7 @@ COLOR-01 の色管理と高精度。COLOR-02 の色モードを広げ、ペー�
 
 - **区域の言葉**（op の `area`）: 今の種類（`poly`・`mask`・`rect`・`ellipse`・`layer`・`color`・`all`・`saved`・`channel`・`union`・`intersect`・`subtract`）に、種類の表（`render/area_kinds.cpp`: 名前 → 解く関数と群）で足す。`{"transparency": 層の id}` は層の不透明度をそのまま灰色の区域に、`{"layer_mask": 層の id}` は層のマスクに濃度を掛けたもの（PC3-0）。表に名前だけある種類（`range`・`grow`・`similar` は B1、`subject`・`sky`・`object`・`quick`・`focus`・`refine` は B3、`path`・`path_name`・`shape_part`・`vector_mask` は C-a）は、使う所で断る（`not_yet_ported`。種類の名前と群を言う）。
 - **修飾の順**: 種類の区域 → `matrix`（mm のアフィン 6 つの数。双一次で写す）→ `grow_mm` → `expand_mm`・`contract_mm`（距離変換で丸く広げる・狭める）→ `border_mm`（縁の帯）→ `smooth_mm`（滑らかに）→ `invert` → `feather_mm`。`antialias: true` は `poly`・`rect`・`ellipse` の縁を灰色にする（1 画素を 4 本の副走査で数える）。修飾を持たない区域は今と同じ。
-- **区域の絵の引き伸ばし**: `{"mask": {"box", "png"}}` の絵をページの格子に合わせるときは双一次（縁が段にならない）。
+- **区域の絵の引き伸ばし**: `{"mask": {"box", "png"}}` の絵をページの格子に合わせるとき、灰色を持つ絵（アンチエイリアス・ぼかしの縁）は双一次（灰色の縁が段にならない）、0 と 255 だけの絵は最近傍（アンチエイリアスの無い選択範囲の硬い縁のまま。今と同じ画素）。
 - **マスク**（`masks@1`）: 層のマスクの `linked`（層と一緒に動く）・`density`（濃度 0..1）・`feather_mm`（ぼかし 0..100 mm）。描くときはマスクの値をぼかし（箱 3 回で近づけたガウス）、濃度で `255 − d·(255 − v)` にする。8 bit・高精度・インキの 3 つの道で同じ関数（`render/layer_masks`）。`set_layer_mask` は `linked`・`density`・`feather_mm` を受け、今あるキーと設定はそのまま。画面で新しく作るマスクはリンクが既定。リンクの印を持たないマスクはページに固定のまま。チャンネルの `quick_mask: true`（アルファチャンネル。1 ページに 1 つ）はクイックマスクの枠（中身は B1）。
 - **マスクを描く先にする**（画素の op に `layer_mask: true`）: 層のマスクを 200 dpi の隠れた灰色の層として op に貸し、op が変えた画素だけを 150 dpi のマスクへ戻す。マスクが無ければ全部見せるマスクを作る（リンク）。`channel` と一緒には断る。
 - **画素の窓ごとの読み書き**: `image_ops` の `layer_pixels`・`put_layer_pixels` に箱（mm）を渡すと、その範囲だけを読み書きする（修復・境界の調整の土台）。

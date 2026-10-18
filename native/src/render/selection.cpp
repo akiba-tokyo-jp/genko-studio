@@ -1,6 +1,7 @@
 #include "render/selection.hpp"
 
 #include <algorithm>
+#include <atomic>
 #include <cmath>
 #include <set>
 #include <string>
@@ -118,6 +119,16 @@ Image open_picture(const std::string& bytes) {
     }
 }
 
+namespace {
+
+std::atomic<int> g_grey_area_stretch{static_cast<int>(Resample::Bilinear)};
+
+}  // namespace
+
+Resample grey_area_stretch() { return static_cast<Resample>(g_grey_area_stretch.load()); }
+
+void set_grey_area_stretch(Resample resample) { g_grey_area_stretch.store(static_cast<int>(resample)); }
+
 AreaMask area_mask(const Json& area, int dpi, std::string_view what) {
     if (!area.is_object()) no_get(area);
     if (core::truthy_at(area, "poly")) {
@@ -158,9 +169,18 @@ AreaMask area_mask(const Json& area, int dpi, std::string_view what) {
     const double w = std::max(1.0, core::py_round_whole(mm2px(box[2], dpi)));
     const double h = std::max(1.0, core::py_round_whole(mm2px(box[3], dpi)));
     limits::check_sides(w, h, what);
-    // (bilinear, PC3 B-0: a grey edge — an anti-aliased or feathered selection's — stays smooth at the patches' 300 dpi
-    // and a precise page's finer grid, and a two-valued one's edge is drawn soft, as Photoshop draws a selection's)
-    Image sized = image.resize(Size{static_cast<int>(w), static_cast<int>(h)}, Resample::Bilinear);
+    // (PC3 B-0: a grey picture — an anti-aliased or feathered selection's — stretched bilinear, its grey edge staying
+    // smooth at the patches' 300 dpi and a precise page's finer grid; a two-valued one stays hard, as Photoshop keeps a
+    // selection made without anti-aliasing, pixel for pixel what it was)
+    bool grey = false;
+    for (const char v : image.tobytes()) {
+        const auto u = static_cast<unsigned char>(v);
+        if (u != 0 && u != 255) {
+            grey = true;
+            break;
+        }
+    }
+    Image sized = image.resize(Size{static_cast<int>(w), static_cast<int>(h)}, grey ? grey_area_stretch() : Resample::Nearest);
     const double x0 = rounded_corner(mm2px(box[0], dpi), what);
     const double y0 = rounded_corner(mm2px(box[1], dpi), what);
     return AreaMask{std::move(sized), static_cast<std::int64_t>(x0), static_cast<std::int64_t>(y0)};

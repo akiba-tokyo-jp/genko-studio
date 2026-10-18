@@ -1564,7 +1564,7 @@ private slots:
             QTest::newRow(name) << QByteArray(batch) << page << QByteArray(expected);
         };
         row("fill_area poly", R"([{"op": "fill_area", "page": 1, "layer_id": "paint-1", "area": {"poly": [[10, 10], [30, 12], [20, 30]]}}])", 1, "557709699/241");
-        row("fill_area mask", R"([{"op": "fill_area", "page": 1, "layer_id": "paint-1", "area": {"mask": {"box": [20, 20, 10, 6.667], "png": "GREY"}}}])", 1, "3622971996/241");  // (PC3 B-0: the area's picture stretched bilinear)
+        row("fill_area mask", R"([{"op": "fill_area", "page": 1, "layer_id": "paint-1", "area": {"mask": {"box": [20, 20, 10, 6.667], "png": "GREY"}}}])", 1, "2971949079/241");
         row("gradient linear", R"([{"op": "gradient_fill", "page": 2, "from": [10, 10], "to": [60, 80]}])", 2, "1015609120/59");
         row("gradient radial repeat", R"([{"op": "gradient_fill", "page": 2, "from": [35, 47], "to": [45, 47], "shape": "radial", "repeat": "repeat",
             "rgb_from": [200, 0, 0], "rgb_to": [0, 0, 200]}])", 2, "3172552318/60");
@@ -1597,14 +1597,14 @@ private slots:
         row("wave 2^63", R"([{"op": "filter_raster", "page": 1, "id": "paint-1", "kind": "wave", "amplitude": 9223372036854775808, "wavelength": 4}])", 1, "3724908635/155");
         row("wave -2^63", R"([{"op": "filter_raster", "page": 1, "id": "paint-1", "kind": "wave", "amplitude": -9223372036854775808, "wavelength": 4}])", 1, "3724908635/155");
         row("twirl 1e30", R"([{"op": "filter_raster", "page": 1, "id": "paint-1", "kind": "twirl", "angle": 1e30, "radius": "1e30"}])", 1, "3273359843/157");
-        row("union", R"([{"op": "fill_area", "page": 1, "layer_id": "paint-1", "area": {"union": [{"rect": [10, 10, 20, 20]}, {"ellipse": [25, 25, 20, 15]}]}}])", 1, "614599861/242");  // (PC3 B-0: bilinear)
-        row("intersect", R"([{"op": "fill_area", "page": 1, "layer_id": "paint-1", "area": {"intersect": [{"rect": [10, 10, 30, 30]}, {"ellipse": [20, 20, 30, 30]}]}}])", 1, "1310392719/244");  // (PC3 B-0: bilinear)
+        row("union", R"([{"op": "fill_area", "page": 1, "layer_id": "paint-1", "area": {"union": [{"rect": [10, 10, 20, 20]}, {"ellipse": [25, 25, 20, 15]}]}}])", 1, "1176746437/242");
+        row("intersect", R"([{"op": "fill_area", "page": 1, "layer_id": "paint-1", "area": {"intersect": [{"rect": [10, 10, 30, 30]}, {"ellipse": [20, 20, 30, 30]}]}}])", 1, "1897818824/243");
         row("subtract", R"([{"op": "fill_area", "page": 1, "layer_id": "paint-1", "area": {"subtract": [{"rect": [10, 10, 30, 30]}, {"ellipse": [20, 20, 10, 10]},
-            {"rect": [12, 12, 3, 3]}]}}])", 1, "3959848860/242");  // (PC3 B-0: bilinear)
+            {"rect": [12, 12, 3, 3]}]}}])", 1, "3062809130/242");
         row("saved grown feathered", R"([{"op": "fill_area", "page": 1, "layer_id": "paint-1", "area": {"union": [{"saved": "s"}, {"rect": [40, 40, 10, 10], "grow_mm": 1}],
-            "feather_mm": 0.5}}])", 1, "1224081067/240");  // (PC3 B-0: bilinear)
+            "feather_mm": 0.5}}])", 1, "1224081067/240");  // (PC3 B-0: a feathered area's grey picture stretched bilinear)
         row("nested", R"([{"op": "fill_area", "page": 1, "layer_id": "paint-1", "area": {"union": [{"intersect": [{"all": true}, {"saved": "s", "invert": true}]},
-            {"subtract": [{"union": [{"rect": [5, 5, 10, 10]}, {"rect": [12, 12, 10, 10]}]}, {"ellipse": [8, 8, 6, 6]}]}], "grow_mm": -0.5}}])", 1, "651162950/238");  // (PC3 B-0: bilinear)
+            {"subtract": [{"union": [{"rect": [5, 5, 10, 10]}, {"rect": [12, 12, 10, 10]}]}, {"ellipse": [8, 8, 6, 6]}]}], "grow_mm": -0.5}}])", 1, "2828267568/239");
         row("one part", R"([{"op": "fill_area", "page": 1, "layer_id": "paint-1", "area": {"subtract": [{"rect": [10, 10, 30, 30]}]}}])", 1, "3473190623/242");
     }
 

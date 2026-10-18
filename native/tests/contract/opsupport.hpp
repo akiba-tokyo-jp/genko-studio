@@ -156,4 +156,21 @@ std::string compare_step_near(const StepOutcome& cpp, const core::Json& python, 
 void affect_perspective(NearSides& sides, const core::Json& ops, const core::Json& payload);
 bool warps_in_perspective(const core::Json& ops);
 
+// PC3 B-0 (the coordinator's decision, design ch. 9; SPEC.md COLOR-05): an area whose picture is grey — a feathered one,
+// feather_mm anywhere in it — is stretched onto the patches' 300 dpi and a mask's grid bilinear, where Python stretched
+// it nearest (a two-valued picture is stretched nearest on both sides). A fixed case that fills, masks or deletes with
+// one (stretches_grey_area) is marked "cpp": "deviates": Python's but at its pictures (its cpp_differs), where it holds
+// this build's values kept in "cpp_pictures" (paths into the last step's record → its values; pinned_difference says
+// where this build's record does not hold them). Where Python's books are replayed to compare everything else with
+// Python's (the random sequences, the pages drawn), a PythonStretch, while it lives, has a grey area's picture stretched
+// as Python stretched it (render::selection::set_grey_area_stretch).
+bool stretches_grey_area(const core::Json& ops);
+std::string pinned_difference(const StepOutcome& outcome, const core::Json& pinned);
+struct PythonStretch {
+    PythonStretch();
+    ~PythonStretch();
+    PythonStretch(const PythonStretch&) = delete;
+    PythonStretch& operator=(const PythonStretch&) = delete;
+};
+
 }  // namespace genko::test

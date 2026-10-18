@@ -263,6 +263,33 @@ private slots:
         QCOMPARE(count_selected(sx::polygon({{0, 0}, {1, 1}}, a, true)), std::size_t(0));
     }
 
+    // An area's picture ({"mask": {box, png}}) stretched onto another grid: a two-valued one nearest (the same pixels as
+    // before PC3), a grey one bilinear (its grey edge smooth); nearest — Python's — while a contract test asks for it.
+    void areaPicturesStretched() {
+        std::string hard(16, '\0'), soft(16, '\0');
+        for (int i = 0; i < 16; ++i) {
+            hard[static_cast<std::size_t>(i)] = static_cast<char>(i % 4 < 2 ? 255 : 0);
+            soft[static_cast<std::size_t>(i)] = static_cast<char>(i % 4 == 0 ? 255 : i % 4 == 1 ? 128 : 0);
+        }
+        const auto area_of = [](const std::string& bytes) {
+            const std::string png = render::write_png(render::Image::frombytes("L", render::Size{4, 4}, bytes));
+            const double side = 4 * 25.4 / 100;  // (4 pixels at 100 dpi: 12 at the patches' 300)
+            return Json{{"mask", Json{{"box", Json::array({0, 0, side, side})}, {"png", core::b64encode(png)}}}};
+        };
+        const auto stretched = [](const std::string& bytes, render::Resample how) {
+            return render::Image::frombytes("L", render::Size{4, 4}, bytes).resize(render::Size{12, 12}, how).tobytes();
+        };
+        QCOMPARE(render::selection::area_mask(area_of(hard)).mask.tobytes(), stretched(hard, render::Resample::Nearest));
+        const std::string grey = render::selection::area_mask(area_of(soft)).mask.tobytes();
+        QCOMPARE(grey, stretched(soft, render::Resample::Bilinear));
+        QVERIFY(grey != stretched(soft, render::Resample::Nearest));
+        render::selection::set_grey_area_stretch(render::Resample::Nearest);
+        const std::string python = render::selection::area_mask(area_of(soft)).mask.tobytes();
+        render::selection::set_grey_area_stretch(render::Resample::Bilinear);
+        QCOMPARE(python, stretched(soft, render::Resample::Nearest));
+        QCOMPARE(render::selection::grey_area_stretch(), render::Resample::Bilinear);
+    }
+
     // The area kinds and modifiers: an area without the new ones resolved to the same bytes as before (the modifiers
     // pass the mask through untouched); "antialias" draws a grey edge; expand_mm, contract_mm, border_mm and smooth_mm
     // are the distance transform's, in their order after grow_mm; matrix moves the mask; the kinds made known to the bus.
