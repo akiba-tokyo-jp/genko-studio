@@ -54,6 +54,46 @@ const std::vector<std::pair<const char*, const char*>>& stack_modes() {
     return modes;
 }
 
+// レイヤー → スマートフィルター's commands on the smart object drawn on (PC3 A2, render/ops_smart_filters.cpp): "off"
+// (スマートフィルターを無効にする: off, or on again), "mask_off" (フィルターマスクを無効にする: the same), "mask_delete",
+// "clear" (every filter and the mask).
+void smart_filters_command(MainWindow* window, const std::string& what) {
+    const core::Page* page = window->current_page();
+    const core::Layer* layer = window->target_layer();
+    if (page == nullptr || layer == nullptr) return;
+    if (layer->kind != core::LayerKind::Smart || !layer->smart || !layer->smart->is_object()) {
+        window->flash(QStringLiteral("スマートオブジェクトを選んでください"), 4000);
+        return;
+    }
+    const Json& s = *layer->smart;
+    const bool filters = s.contains("filters") && s.at("filters").is_array() && !s.at("filters").empty();
+    const Json* mask = s.contains("filter_mask") && s.at("filter_mask").is_object() ? &s.at("filter_mask") : nullptr;
+    if (what == "off" ? !filters : what == "clear" ? !filters && mask == nullptr : mask == nullptr) {
+        window->flash(what == "off" || what == "clear" ? QStringLiteral("このスマートオブジェクトには、スマートフィルターがありません")
+                                                       : QStringLiteral("このスマートオブジェクトには、フィルターマスクがありません"),
+                      4000);
+        return;
+    }
+    Json op{{"op", "smart_filter_state"}, {"page", page->index.json()}, {"id", layer->id}};
+    QString done;
+    if (what == "off") {
+        const bool on = !(s.contains("filters_on") && s.at("filters_on") == Json(false));
+        op["filters_on"] = !on;
+        done = on ? QStringLiteral("スマートフィルターを無効にしました（もう一度で有効に戻ります）") : QStringLiteral("スマートフィルターを有効にしました");
+    } else if (what == "mask_off") {
+        const bool on = !(mask->contains("enabled") && mask->at("enabled") == Json(false));
+        op["mask_on"] = !on;
+        done = on ? QStringLiteral("フィルターマスクを無効にしました（もう一度で有効に戻ります）") : QStringLiteral("フィルターマスクを有効にしました");
+    } else if (what == "mask_delete") {
+        op["mask"] = "delete";
+        done = QStringLiteral("フィルターマスクを削除しました");
+    } else {
+        op = Json{{"op", "smart_filter_delete"}, {"page", page->index.json()}, {"id", layer->id}, {"all", true}};
+        done = QStringLiteral("スマートフィルターをクリアしました");
+    }
+    if (window->apply_ops(Json::array({op}))) window->flash(done, 4000);
+}
+
 }  // namespace
 
 void MainWindow::build_smart_actions() {
@@ -94,10 +134,15 @@ void MainWindow::build_smart_actions() {
     // レイヤー → スマートフィルター
     make("act_smart_filters_convert", QStringLiteral("スマートフィルター用に変換"), [this] { smart_convert(); }, {},
          QStringLiteral("選んだレイヤーをスマートオブジェクトにします（フィルターをあとから直せる形）"));
-    later("act_smart_filters_off", QStringLiteral("スマートフィルターを無効にする"));
-    later("act_smart_filter_mask_delete", QStringLiteral("フィルターマスクを削除"));
-    later("act_smart_filter_mask_off", QStringLiteral("フィルターマスクを無効にする"));
-    later("act_smart_filters_clear", QStringLiteral("スマートフィルターをクリア"));
+    // (PC3 A2: on the smart object drawn on; each again to undo it — 無効にする turns them back on)
+    make("act_smart_filters_off", QStringLiteral("スマートフィルターを無効にする"), [this] { smart_filters_command(this, "off"); }, {},
+         QStringLiteral("選んだスマートオブジェクトのスマートフィルターを、すべて一時的に外して見ます（もう一度で戻ります）"));
+    make("act_smart_filter_mask_delete", QStringLiteral("フィルターマスクを削除"), [this] { smart_filters_command(this, "mask_delete"); }, {},
+         QStringLiteral("スマートフィルターのフィルターマスクを消します（フィルターは全体にかかります）"));
+    make("act_smart_filter_mask_off", QStringLiteral("フィルターマスクを無効にする"), [this] { smart_filters_command(this, "mask_off"); }, {},
+         QStringLiteral("フィルターマスクを一時的に使わずに見ます（もう一度で戻ります）"));
+    make("act_smart_filters_clear", QStringLiteral("スマートフィルターをクリア"), [this] { smart_filters_command(this, "clear"); }, {},
+         QStringLiteral("選んだスマートオブジェクトのスマートフィルターとフィルターマスクを、すべて消します"));
     // レイヤー → ラスタライズ
     later("act_rasterize_type", QStringLiteral("テキスト"));
     make("act_rasterize_fill", QStringLiteral("塗りつぶし内容"), [this] { rasterize("fill"); }, {},

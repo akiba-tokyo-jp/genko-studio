@@ -216,7 +216,9 @@ void local_filter(MainWindow* window, const std::string& kind, const QString& ti
     const auto asked = window->asking();
     const Drawn d = drawn(window, false);
     if (d.page == nullptr) return;
-    Json op{{"op", "filter_raster"}, {"page", d.page->index.json()}, {"id", d.layer->id}, {"kind", kind}};
+    // (PC3 A2: シャドウ・ハイライト on a smart object is a smart filter, as Photoshop makes it; the selection its filter mask)
+    const bool smart = d.layer->kind == core::LayerKind::Smart && kind == "shadows_highlights";
+    Json op{{"op", smart ? "smart_filter_add" : "filter_raster"}, {"page", d.page->index.json()}, {"id", d.layer->id}, {"kind", kind}};
     if (const auto area = window->selection_area()) op["area"] = *area;
     const bool lines = d.layer->stroke_count() > 0;
     const core::Page page = *d.page;

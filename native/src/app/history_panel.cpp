@@ -69,6 +69,10 @@ const std::map<std::string, const char*>& names() {
         {"smart_convert", "スマートオブジェクトに変換した"}, {"smart_place", "画像をスマートオブジェクトとして置いた"},
         {"smart_profile", "スマートオブジェクトの色の扱いを変えた"}, {"smart_copy", "スマートオブジェクトをコピーした"},
         {"smart_transform", "スマートオブジェクトを変形した"}, {"rasterize_layer", "ラスタライズした"},
+        // (PC3 A2: render/ops_smart_filters)
+        {"smart_filter_add", "スマートフィルターをかけた"}, {"smart_filter_set", "スマートフィルターを直した"},
+        {"smart_filter_move", "スマートフィルターを並べ替えた"}, {"smart_filter_delete", "スマートフィルターを削除した"},
+        {"smart_filter_state", "スマートフィルターを切り替えた"},
     };
     return table;
 }

@@ -99,6 +99,7 @@ genko_library(genko_app
     image_dialogs.cpp
     main_window_adjust.cpp
     main_window_smart.cpp
+    layer_panel_smart_filters.cpp
     inject.cpp
     review_model.cpp
     ai_link.cpp

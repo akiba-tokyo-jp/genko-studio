@@ -2,18 +2,20 @@
 // from the menu (the later steps' commands in their places, not usable yet), the layer panel's row of a smart object (its
 // kind and its mark 埋め込み), 新規スマートオブジェクト（コピー）and ラスタライズ; ファイル → 埋め込みを配置… (the file itself
 // in the middle of the page); a file of 16 bits too large to keep them on a 16-bit page asked about; the 属性 panel's part
-// of a smart object (its colours' use, its size).
+// of a smart object (its colours' use, its size); (PC3 A2) its smart filters in the layer panel and レイヤー → スマートフィルター.
 
 #include <QtTest>
 
 #include <QComboBox>
 #include <QDockWidget>
+#include <QDialog>
 #include <QDoubleSpinBox>
 #include <QFile>
 #include <QLabel>
 #include <QListWidget>
 #include <QMenu>
 #include <QPushButton>
+#include <QSpinBox>
 #include <QTemporaryDir>
 
 #include <cmath>
@@ -154,7 +156,7 @@ private slots:
         QCOMPARE(book.act("act_place_embedded")->text(), QStringLiteral("埋め込みを配置…"));
         // (the later steps' commands: in their places, not usable yet, and said so)
         for (const char* later : {"act_smart_edit", "act_smart_replace", "act_place_linked", "act_package", "act_smart_stack_median", "act_smart_warp",
-                                  "act_smart_filters_off", "act_rasterize_type"}) {
+                                  "act_rasterize_type"}) {
             QVERIFY2(!book.act(later)->isEnabled(), later);
             QVERIFY2(book.act(later)->toolTip().contains(QStringLiteral("この版ではまだ使えません")), later);
         }
@@ -293,6 +295,101 @@ private slots:
         // (what was left as it was shown: as it was, not its rounded number)
         QVERIFY(std::abs(after.d - before.d) < 1e-9 && std::abs(after.e - before.e) < 1e-9 && std::abs(after.f - before.f) < 1e-9);
         QCOMPARE(use(), std::string("keep"));
+    }
+
+    // PC3 A2: the layer panel's かける… on a smart object adds a smart filter (asked so); its rows under the smart object —
+    // スマートフィルター and each filter, the top one first — with their eyes; スマートフィルターを編集… in the filter's own
+    // window, 描画オプション…, moving one; レイヤー → スマートフィルター's commands; undone.
+    void smartFiltersInTheLayerPanel() {
+        Book book;
+        app::MainWindow* w = book.window.get();
+        QVERIFY(w->apply_ops(Json::array({Json{{"op", "add_layer"}, {"page", 1}, {"kind", "paint"}, {"id", "pic"}, {"name", "絵"}},
+                                          Json{{"op", "put_raster"}, {"page", 1}, {"id", "pic"}, {"png_base64", core::b64encode(two_colours())}},
+                                          Json{{"op", "smart_convert"}, {"page", 1}, {"id", "pic"}, {"new_id", "so"}}})));
+        w->set_target_layer("so");
+        const auto filters = [&] { return book.layer("so")->smart->value("filters", Json::array()); };
+        app::LayerPanel* panel = w->layer_panel();
+        panel->refresh();
+        QStringList asked;
+        book.answers.responder->question = [&asked](const QString&, const QString& text) {
+            asked << text;
+            return true;
+        };
+        panel->filter_box()->setCurrentIndex(panel->filter_box()->findData(QStringLiteral("invert")));
+        panel->apply_filter();
+        QCOMPARE(asked.size(), 1);
+        QVERIFY2(asked[0].contains(QStringLiteral("スマートフィルターとして足します")), qPrintable(asked[0]));
+        QCOMPARE(filters().size(), std::size_t(1));
+        QCOMPARE(filters()[0]["kind"], Json("invert"));
+        // (a second one, from an op: the rows list the top one first)
+        QVERIFY(w->apply_ops(Json::array({Json{{"op", "smart_filter_add"}, {"page", 1}, {"id", "so"}, {"kind", "blur"}, {"radius", 2}}})));
+        panel->refresh();
+        const auto rows = [&] {
+            std::vector<std::pair<QString, QListWidgetItem*>> out;
+            for (int i = 0; i < panel->list()->count(); ++i) {
+                QListWidgetItem* item = panel->list()->item(i);
+                const QString what = item->data(Qt::UserRole + 4).toString();
+                if (!what.isEmpty()) out.emplace_back(what, item);
+            }
+            return out;
+        };
+        auto shown = rows();
+        QCOMPARE(shown.size(), std::size_t(3));
+        QCOMPARE(shown[0].first, QStringLiteral("smart_filters"));
+        QCOMPARE(shown[1].first, QStringLiteral("smart_filter:1"));
+        QCOMPARE(shown[2].first, QStringLiteral("smart_filter:0"));
+        QVERIFY2(shown[0].second->text().contains(QStringLiteral("スマートフィルター")), qPrintable(shown[0].second->text()));
+        QCOMPARE(panel->row_kind(panel->list()->row(shown[1].second)), 1);
+        // (a filter's eye: hidden; the header's: all of them off)
+        shown[2].second->setCheckState(Qt::Unchecked);
+        QCOMPARE(filters()[0]["visible"], Json(false));
+        shown = rows();
+        shown[0].second->setCheckState(Qt::Unchecked);
+        QCOMPARE(book.layer("so")->smart->value("filters_on", true), false);
+        book.act("act_smart_filters_off")->trigger();  // (on again)
+        QVERIFY(!book.layer("so")->smart->contains("filters_on"));
+        // スマートフィルターを編集…: the filter's own window, its settings now; what the person set there kept
+        w->set_target_layer("so");
+        panel->show_target();
+        book.answers.responder->exec = [](QDialog* dialog) {
+            for (auto* box : dialog->findChildren<QDoubleSpinBox*>()) box->setValue(5);
+            for (auto* box : dialog->findChildren<QSpinBox*>()) box->setValue(5);
+            return int(QDialog::Accepted);
+        };
+        panel->edit_smart_filter(1);
+        QCOMPARE(filters()[1]["kind"], Json("blur"));
+        QCOMPARE(filters()[1]["params"]["radius"].get<double>(), 5.0);
+        // 描画オプション…: its blend mode and opacity
+        book.answers.responder->exec = [](QDialog* dialog) {
+            auto* mode = dialog->findChild<QComboBox*>(QStringLiteral("smart_filter_blend"));
+            auto* opacity = dialog->findChild<QSpinBox*>(QStringLiteral("smart_filter_opacity"));
+            if (mode == nullptr || opacity == nullptr) return int(QDialog::Rejected);
+            mode->setCurrentIndex(mode->findData(QStringLiteral("multiply")));
+            opacity->setValue(40);
+            return int(QDialog::Accepted);
+        };
+        panel->smart_filter_blending(1);
+        QCOMPARE(filters()[1]["blend"], Json("multiply"));
+        QCOMPARE(filters()[1]["opacity"], Json(0.4));
+        // moved down (as the right button's 下へ)
+        panel->smart_filter_op(Json{{"index", 1}, {"to", 0}}, "smart_filter_move");
+        QCOMPARE(filters()[0]["kind"], Json("blur"));
+        // レイヤー → スマートフィルター: the mask's commands say there is none; クリア takes every filter; undone
+        book.act("act_smart_filter_mask_delete")->trigger();
+        QVERIFY2(w->status_label()->text().contains(QStringLiteral("フィルターマスクがありません")), qPrintable(w->status_label()->text()));
+        book.act("act_smart_filters_clear")->trigger();
+        QVERIFY(!book.layer("so")->smart->contains("filters"));
+        panel->refresh();
+        QVERIFY(rows().empty());
+        book.act("act_undo")->trigger();
+        QCOMPARE(filters().size(), std::size_t(2));
+        // (a selection: its filter mask, and the mask's commands)
+        QVERIFY(w->apply_ops(Json::array({Json{{"op", "smart_filter_state"}, {"page", 1}, {"id", "so"}, {"mask", "from_area"},
+                                               {"area", Json{{"poly", Json::array({Json::array({0, 0}), Json::array({50, 0}), Json::array({50, 50})})}}}}})));
+        book.act("act_smart_filter_mask_off")->trigger();
+        QCOMPARE(book.layer("so")->smart->at("filter_mask")["enabled"], Json(false));
+        book.act("act_smart_filter_mask_delete")->trigger();
+        QVERIFY(!book.layer("so")->smart->contains("filter_mask"));
     }
 };
 
