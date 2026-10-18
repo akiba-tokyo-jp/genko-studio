@@ -92,6 +92,10 @@ genko_library(genko_render
     ops_vector2.cpp
     ops_transform.cpp
     ops_pagesize.cpp
+    # PC3 B1 (選択の基本と選択範囲の編集)
+    select_color.cpp
+    ops_quick_mask.cpp
+    erase_magic.cpp
     ${GENKO_MATERIAL_RESOURCES}
     ${GENKO_TEXT_RESOURCES}
   PUBLIC_DEPS genko_core Qt6::Core

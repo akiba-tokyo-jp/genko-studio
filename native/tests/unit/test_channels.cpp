@@ -380,6 +380,50 @@ private slots:
                 std::string::npos);
     }
 
+    // PC3 B1 (選択範囲を保存… into a channel the page has, 選択範囲を読み込む… from a colour plate): set_channel's area and
+    // operation — replace (without one), add (the larger), subtract (what is left), intersect (the smaller) —, refused
+    // without an area, of another operation, on a spot channel; the Quick Mask stays an alpha channel; {"channel": a plate's
+    // name or "composite"}: the page's values as the panel shows the plate alone, its lightness.
+    void saveIntoAndLoadFromPlates() {
+        core::Document doc = painted(solid(255, 0, 0));
+        doc = applied(doc, Json{{"op", "add_channel"}, {"page", 1}, {"name", "A"}, {"fill", "area"}, {"area", left_half()}});
+        const Json top{{"poly", Json::array({Json::array({0, 0}), Json::array({60, 0}), Json::array({60, 20}), Json::array({0, 20})})}};
+        const auto with = [&](const char* operation) {
+            Json op{{"op", "set_channel"}, {"page", 1}, {"channel", "A"}, {"area", top}};
+            if (operation != nullptr) op["operation"] = operation;
+            return plane(applied(doc, op).page(0), 0);
+        };
+        render::channels::Plane p = with("add");
+        QCOMPARE(at(p, 10, 300), 1.0f);
+        QCOMPARE(at(p, 400, 50), 1.0f);
+        QCOMPARE(at(p, 400, 300), 0.0f);
+        p = with("subtract");
+        QCOMPARE(at(p, 10, 50), 0.0f);
+        QCOMPARE(at(p, 10, 300), 1.0f);
+        QCOMPARE(at(p, 400, 50), 0.0f);
+        p = with("intersect");
+        QCOMPARE(at(p, 10, 50), 1.0f);
+        QCOMPARE(at(p, 10, 300), 0.0f);
+        QCOMPARE(at(p, 400, 50), 0.0f);
+        p = with(nullptr);  // (replace)
+        QCOMPARE(at(p, 400, 50), 1.0f);
+        QCOMPARE(at(p, 10, 300), 0.0f);
+        QVERIFY(refusal(doc, Json{{"op", "set_channel"}, {"page", 1}, {"channel", "A"}, {"operation", "add"}}).find("needs the area") != std::string::npos);
+        QVERIFY(refusal(doc, Json{{"op", "set_channel"}, {"page", 1}, {"channel", "A"}, {"area", top}, {"operation", "xor"}}).find("operation is") !=
+                std::string::npos);
+        const core::Document spot = applied(doc, Json{{"op", "add_channel"}, {"page", 1}, {"kind", "spot"}, {"name", "S"}});
+        QVERIFY(refusal(spot, Json{{"op", "set_channel"}, {"page", 1}, {"channel", "S"}, {"area", top}}).find("alpha channel") != std::string::npos);
+        const core::Document quick = applied(doc, Json{{"op", "quick_mask"}, {"page", 1}, {"on", true}});
+        QVERIFY(refusal(quick, Json{{"op", "set_channel"}, {"page", 1}, {"channel", "クイックマスク"}, {"kind", "spot"}}).find("Quick Mask") !=
+                std::string::npos);
+        // the colour plates and the composite as areas (a channel's id or name first)
+        const core::Page& page = doc.page(0);
+        QCOMPARE(render::selection::to_mask(Json{{"channel", "red"}}, page, &doc, 100).getpixel(100, 100)[0], 255.0);
+        QCOMPARE(render::selection::to_mask(Json{{"channel", "green"}}, page, &doc, 100).getpixel(100, 100)[0], 0.0);
+        QCOMPARE(render::selection::to_mask(Json{{"channel", "composite"}}, page, &doc, 100).getpixel(100, 100)[0], 76.0);  // (0.299 R)
+        QCOMPARE(render::selection::to_mask(Json{{"channel", "A"}}, page, &doc, 100).getpixel(10, 100)[0], 255.0);
+    }
+
     // A pixel op's "channel": a channel worked as a grey picture (the fill, the eraser, a filter), the layers left as they
     // were; a colour plate alone (the other plates and the alpha as they were); "composite" and nothing as usual; a
     // channel the page has not refused.

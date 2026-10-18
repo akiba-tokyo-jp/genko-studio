@@ -23,6 +23,7 @@
 #include "render/op_limits.hpp"
 #include "render/page.hpp"
 #include "render/png.hpp"
+#include "render/select_color.hpp"
 #include "render/warp.hpp"
 
 namespace genko::render::selection {
@@ -637,6 +638,8 @@ void floodfill_l(Image& image, int x, int y, int value) {
 
 // selops._colour_area: the colour found at a point of the page as seen
 Image colour_area(const Json& spec, const core::Page& page, const core::Document* episode, int dpi, Size size) {
+    // (PC3 B1: a layer's own colours, an anti-aliased edge, a precise or ink page's values — render/select_color)
+    if (spec.is_object() && select_color::own_colour(spec, page)) return select_color::colour(spec, page, episode, size);
     RenderOptions options;
     options.mode = "proof";
     Image image = render_page(page, dpi, options, episode).image.resize(size);
@@ -701,8 +704,19 @@ Image base_mask(const Json& area, const core::Page& page, const core::Document* 
     if (core::truthy_at(area, "color")) return colour_area(area["color"], page, episode, dpi, size);
     if (core::truthy_at(area, "channel")) {  // (channels@1: a page's alpha or spot channel, its density; this build's own)
         const core::Channel* channel = area["channel"].is_string() ? core::find_channel(page, area["channel"].get<std::string>()) : nullptr;
-        if (channel == nullptr) area_error("no channel " + core::py_str(area["channel"]));
-        return channels::mask_of(*channel, size);
+        if (channel != nullptr) return channels::mask_of(*channel, size);
+        // (PC3 B1, 選択範囲を読み込む: a colour plate of the page — its value as the panel shows the plate alone — or the
+        // composite, the page's lightness; a channel's id or name comes first)
+        if (area["channel"].is_string()) {
+            const std::string name = area["channel"].get<std::string>();
+            const auto plate = core::plate_index(page, name);
+            if (plate || name == "composite") {
+                const bool alone = core::plate_names(page).size() == 1;
+                const channels::Plane plane = channels::page_plane(page, episode, plate && !alone ? plate : std::nullopt);
+                return channels::mask_image(plane, size);
+            }
+        }
+        area_error("no channel " + core::py_str(area["channel"]));
     }
     if (core::truthy_at(area, "saved")) {
         const Json* kept = core::get(page.extra, "saved_areas");

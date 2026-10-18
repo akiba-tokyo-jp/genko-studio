@@ -545,6 +545,7 @@ File File::read(std::string data, const Limits& limits, bool lab) {
         }
         if (rid == 1006 && !f.unicode_names_) f.channel_names_ = std::string(block.substr(0, size));
         if (rid == 1077) f.display_info_ = std::string(block.substr(0, size));
+        if (rid == 1022 && size >= 2) f.quick_mask_ = (byte_at(block, 0) << 8) | byte_at(block, 1);  // (masks@1: the Quick Mask)
     }
     r.pos = res_end;
     static const std::map<int, std::string> kModeNames{{0, "bitmap"}, {1, "gray"},         {2, "indexed"}, {3, "rgb"},
@@ -1035,6 +1036,7 @@ std::vector<File::ExtraChannel> File::extra_channels() const {
             }
         }
         channel.samples = depth8(&raw, raw.size(), width_, height_, depth_).bytes;
+        channel.quick_mask = quick_mask_ && *quick_mask_ == static_cast<unsigned>(c);
         out.push_back(std::move(channel));
     }
     return out;

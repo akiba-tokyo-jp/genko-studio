@@ -277,6 +277,7 @@ int inspect(const QStringList& args, bool ascii) {
     // (color-model@1, the C++ build's own: --pixel <page>:<x_mm>,<y_mm> [--layer ID] [--dpi N]; PC2d: --profile <id|page|sha256>)
     QString pixel, layer, dpi_text, profile;
     bool looks = false;  // (PC2a, the C++ build's own: --looks, image.adjustments.colorLookup.list)
+    QString area_text, page_text;  // (PC3 B1, the C++ build's own: --page N --area '<area>')
     const auto value_of = [&](qsizetype& i, const char* name, QString& into) -> bool {
         const QString& arg = args[i];
         const QString flag = QString::fromLatin1(name);
@@ -307,6 +308,10 @@ int inspect(const QStringList& args, bool ascii) {
             if (!value_of(i, "--dpi", dpi_text)) return usage("argument --dpi: expected one argument");
         } else if (arg == QLatin1String("--profile") || arg.startsWith(QLatin1String("--profile="))) {
             if (!value_of(i, "--profile", profile) || profile.isEmpty()) return usage("argument --profile: expected one argument");
+        } else if (arg == QLatin1String("--area") || arg.startsWith(QLatin1String("--area="))) {
+            if (!value_of(i, "--area", area_text) || area_text.isEmpty()) return usage("argument --area: expected one argument");
+        } else if (arg == QLatin1String("--page") || arg.startsWith(QLatin1String("--page="))) {
+            if (!value_of(i, "--page", page_text) || page_text.isEmpty()) return usage("argument --page: expected one argument");
         } else if (arg.startsWith(QLatin1Char('-')) && arg.size() > 1) {
             return usage("unrecognized arguments: " + arg.toStdString());
         } else if (!have_src) {
@@ -339,6 +344,20 @@ int inspect(const QStringList& args, bool ascii) {
         }
     }
     if (!profile.isEmpty() && !pixel.isEmpty()) return usage("argument --profile: not with --pixel");
+    if (area_text.isEmpty() != page_text.isEmpty()) return usage("argument --area, --page: --area <area> with --page <N>");
+    std::optional<core::Json> area;
+    std::int64_t area_page = 0;
+    if (!area_text.isEmpty()) {
+        if (!pixel.isEmpty() || !profile.isEmpty()) return usage("argument --area: not with --pixel or --profile");
+        bool ok = false;
+        area_page = page_text.toLongLong(&ok);
+        if (!ok) return usage("argument --page: a page number");
+        try {
+            area = core::Json::parse(area_text.toStdString());
+        } catch (const std::exception&) {
+            return usage("argument --area: an area as JSON, e.g. '{\"range\": {\"select\": \"reds\"}}'");
+        }
+    }
     const auto loaded = storage::load_document(path_arg(src));
     if (looks) {  // the built-in looks and the book's lookup tables (PC2a: カラールックアップの一覧)
         print_json(looks_listing(loaded.document), ascii);
@@ -346,6 +365,10 @@ int inspect(const QStringList& args, bool ascii) {
     }
     if (!profile.isEmpty()) {  // (edit.profileInfo: what the profile says of itself, and the built-in ones)
         print_json(render::proof::profile_info_of(loaded.document, profile.toStdString()), ascii);
+        return 0;
+    }
+    if (area) {  // (PC3 B1: the area as the ops are given it — resolved —, how much of the page it covers, its box)
+        print_json(render::inspect_area(loaded.document, area_page, *area), ascii);
         return 0;
     }
     if (pixel_page) {

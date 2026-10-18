@@ -117,13 +117,14 @@ public:
     // it shows (1077: 0 selected areas, 1 masked areas, 2 spot; its RGB colour; its opacity, a spot's solidity, in
     // percent) and its 8-bit samples over the canvas as stored (the grey Photoshop shows: a spot's and a selected-areas
     // channel's 0 is its colour, a masked-areas channel's 255 is selected). None when the file has no merged picture this
-    // reads.
+    // reads. masks@1 (PC3 B1): the one image resource 1022 names is the Quick Mask the file was saved in.
     struct ExtraChannel {
         std::string name;
         int kind = 1;
         std::array<int, 3> color{255, 0, 0};
         int opacity = 50;
         std::string samples;
+        bool quick_mask = false;
     };
     std::vector<ExtraChannel> extra_channels() const;
     // PSD-01 (not psd.py's: the structure checks of the editable PSD): a layer's text, read from its TySh block
@@ -178,6 +179,7 @@ private:
     std::string channel_names_;    // (1045, else 1006)
     bool unicode_names_ = false;
     std::string display_info_;     // (1077)
+    std::optional<unsigned> quick_mask_;  // (1022: the Quick Mask's channel)
     std::uint64_t merged_at_ = 0;
     Limits limits_{};
     std::vector<Record> records_;

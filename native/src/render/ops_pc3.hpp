@@ -1,5 +1,7 @@
 #pragma once
 
+#include <optional>
+
 #include "core/command_bus.hpp"
 
 // PC3 (選択・マスク・修復・パス・変形・判型; SPEC.md COLOR-06, COLOR-07): the new ops, this build's own (the public list,
@@ -22,6 +24,13 @@ void register_vector2_ops(core::OpRegistry& registry);
 void register_transform_ops(core::OpRegistry& registry);
 // render/ops_pagesize.cpp (節 C: C-e resize_pages, set_canvas_size, crop_page, trim_page, reveal_all, rotate_pages)
 void register_pagesize_ops(core::OpRegistry& registry);
+
+// B1: Select › Edit in Quick Mask Mode (render/ops_quick_mask.cpp) and the Magic Eraser (render/erase_magic.cpp).
+void quick_mask(core::OpContext& c);
+void magic_erase(core::OpContext& c);
+// The selection a page's Quick Mask says (as quick_mask's way out gives it: none when the page has none, when it is all
+// white — untouched, nothing masked — or when it selects nothing); {"mask"} at the selection's 200 dpi.
+std::optional<core::Json> quick_mask_selection(const core::Page& page);
 
 // A frame for an op whose work is not written yet: refused with not_yet_ported ("<op> is not in the C++ build yet (PC3
 // <group>)"), nothing changed.

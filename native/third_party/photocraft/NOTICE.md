@@ -96,6 +96,11 @@ PhotoCraft v0.2.0（`ad863217386440ca968fccc9bfff65ba24e61142`、MIT、同梱 `L
 PhotoCraft v0.2.0（`ad863217386440ca968fccc9bfff65ba24e61142`、MIT、同梱 `LICENSE-MIT`）の次の部分を参照して C++ へ移した。各群（B1〜B4）が算法を移すときは、この節にその部分を足す。
 
 - `crates/algo/src/selection.rs`（80-655 行）: 選択の共通の算法（範囲の箱と覆い `Region`、魔法の杖と隣接・色の近さ、色域の量、正確なユークリッド距離変換、拡張・縮小・境界線・滑らかに・ぼかし、AA の多角形の覆い、明るさ・色相の範囲）→ `native/src/render/selection_ext.cpp`（PC3-0）。区域の修飾の順（拡張・縮小・境界線・滑らかに・反転・ぼかし）→ `native/src/render/area_kinds.cpp`。
+- B1（選択の基本と選択範囲の編集）:
+  - `crates/engine/src/selection_cmds.rs`（30-288 行、`sample_pixels`・`sample_rgba8`・`magic_wand`・`eyedropper_samples`・`color_range`・`grow_similar`）と試験（353-541 行）: 自動選択の色の近さ（層か合成を読む）、色域指定（指定色域・スポイトと引くスポイト・ローカライズ・系統・ハイライト／中間調／シャドウの範囲と許容量・色域外・反転）、選択範囲を拡大・近似色を選択（選択範囲の色の範囲を許容値で広げる）→ `native/src/render/select_color.cpp`、`native/tests/unit/test_select_color.cpp`（mm と区域の言葉にし、3 つの持ち方を RGB で読む所は Genko のもの）。
+  - `crates/algo/src/erase.rs`（1-164 行）と `crates/engine/src/eraser_cmds.rs`（85-121 行）・`eraser_cmds/tests.rs`（35-161 行）: マジック消しゴム（範囲の覆い × 不透明度 × 選択範囲でアルファを減らす、すべて消えた画素は空、透明部分の保護は背景色へ寄せる、ページの外は何もしない）→ `native/src/render/erase_magic.cpp`、`native/tests/unit/test_magic_erase.cpp`。
+  - `crates/engine/src/channel_cmds.rs`（619-760 行、`save_selection`・`load_selection`・`quick_mask_from`・`selection_from`・`quick_mask`）と `QuickMaskOptions`（90-100 行）: 既にあるチャンネルへの置き換え・追加・削除・交差、クイックマスク（選択範囲を白に、無ければ全部白。出るときは全部白なら選択なし。赤・50%・マスク範囲）→ `native/src/render/ops_channels.cpp`（`set_channel` の `area`・`operation`）、`native/src/render/ops_quick_mask.cpp`。
+  - `crates/io/src/psd_export.rs`（619-662 行）・`crates/io/src/psd_import.rs`（594-601 行）・`crates/io/src/channel_map.rs`（15 行）: クイックマスクを追加チャンネルの最後に書き、画像リソース 1022（チャンネルの番号と「初めは空」の印）で示す → `native/src/formats/psd_export.cpp`（`psd_order`・`with_channels`）、`native/src/render/psd.cpp`（`ExtraChannel::quick_mask`）。
 
 ## パス・ベクトル・変形・判型（vector@1・pen-shapes@1・transform@1・page-spec@1、PC3 節 C）
 

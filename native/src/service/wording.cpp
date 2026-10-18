@@ -905,6 +905,15 @@ const std::vector<Rule>& rules() {
         r.push_back(rule("this page does not composite the blend mode \\S+", "このページの色では、その描画モードは使えません"));
         r.push_back(rule("(?:index|to) is the filter's place .*", "スマートフィルターの位置の指定が正しくありません"));
         r.push_back(rule("mask from_area takes the area", "フィルターマスクにする選択範囲がありません"));
+        // (PC3 B1: choosing by colour, the Quick Mask, the Magic Eraser — render/select_color, ops_quick_mask, erase_magic)
+        r.push_back(rule("page \\S+ is in Quick Mask already", "このページは、すでにクイックマスクモードです"));
+        r.push_back(rule("page \\S+ is not in Quick Mask", "このページは、クイックマスクモードではありません"));
+        r.push_back(rule("the Quick Mask stays an alpha channel", "クイックマスクのチャンネルは、特色チャンネルにできません"));
+        r.push_back(rule("(?:grow|similar): the area is empty", "先に選択範囲を作ります"));
+        r.push_back(rule("range: Sampled Colors needs colors or points_mm", "指定色域には、色かスポイトで拾った点が要ります"));
+        r.push_back(rule("range: localized clusters need points_mm", "ローカライズされたカラークラスタには、スポイトで拾った点が要ります"));
+        r.push_back(rule("range(?:\\.\\w+)?[: ].*", "色域指定の設定が正しくありません"));
+        r.push_back(rule("a selection is saved into an alpha channel", "選択範囲は、アルファチャンネルに保存します（特色チャンネルには保存できません）"));
         // (the C++ build's own: what it does not do yet, and saving)
         r.push_back(rule("official export is not in the C\\+\\+ build yet",
                          "この版の Genko では、まだ正式な書き出し（確認と承認の記録つき）はできません（ふつうの書き出しはできます）"));

@@ -10,6 +10,7 @@
 #include "render/op_limits.hpp"
 #include "render/page.hpp"
 #include "render/png.hpp"
+#include "render/select_color.hpp"
 #include "render/selection.hpp"
 #include "render/selection_ext.hpp"
 
@@ -63,9 +64,9 @@ const std::vector<Kind>& table() {
         {"transparency", "B-0", &transparency},
         {"layer_mask", "B-0", &layer_mask},
         // B1 (選択の基本): Color Range, Grow, Similar (render/select_color.cpp)
-        {"range", "B1", nullptr},
-        {"grow", "B1", nullptr},
-        {"similar", "B1", nullptr},
+        {"range", "B1", &select_color::range},
+        {"grow", "B1", &select_color::grow},
+        {"similar", "B1", &select_color::similar},
         // B3 (賢い選択・境界の調整): render/segment, render/matting
         {"subject", "B3", nullptr},
         {"sky", "B3", nullptr},
