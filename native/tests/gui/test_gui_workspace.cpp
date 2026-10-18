@@ -98,12 +98,17 @@ private slots:
 
     // コマンドを探す: every command in the menus once (the menus inside menus too, not the empty "（…）" rows), by its
     // words, its menu or its explanation, every word in any order; Enter does the one chosen; the disabled are not offered.
+    // (Two with the same words — the user's decision 8: レイヤー → 色調補正 and the layer panel's 色調補正のレイヤー both
+    // have レベル補正… — are each there, told apart by their place.)
     void commandSearchFindsAndRuns() {
         Book b;
         const std::vector<QAction*> all = app::commands(b.window.get());
         QSet<QString> seen;
+        QSet<QString> rows;
         for (QAction* a : all) {
-            QVERIFY2(!seen.contains(a->text()), qPrintable(a->text()));
+            const QString row = a->text() + QStringLiteral("　（") + app::where(b.window.get(), a) + QStringLiteral("）");
+            QVERIFY2(!rows.contains(row), qPrintable(row));
+            rows.insert(row);
             seen.insert(a->text());
             QVERIFY(!a->text().startsWith(QStringLiteral("（")));
         }

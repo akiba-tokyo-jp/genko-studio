@@ -3,6 +3,7 @@
 #include <functional>
 #include <memory>
 #include <optional>
+#include <vector>
 #include "core/color_adjust.hpp"
 #include "core/color_model.hpp"
 #include "core/color_raster.hpp"
@@ -32,6 +33,13 @@ private:
     struct Impl;
     std::shared_ptr<const Impl> impl_;
 };
+// PC2d (document:color-depth-model): a layer's own picture over a part of the page in a canvas's space, before it is
+// composited — a precise layer's pixels with what is drawn on it (its lines, the pictures laid on it, its effects): per
+// pixel straight linear-light RGB (the space's primaries) and its alpha.
+struct ColorPicture {
+    Size size;
+    std::vector<std::array<double, 4>> pixels;
+};
 // Linear-light high precision compositor; RGBA8 is produced only at the output edge.
 // Its working memory participates in the same budget as libImaging allocations.
 class ColorCanvas {
@@ -49,12 +57,27 @@ public:
     void blend(const core::ColorRasterView& source, Size full, Box area, double opacity, bool clip, std::string_view mode = "normal",
                const Image* mask = nullptr);
     void blend(const ColorCanvas& source, double opacity, bool clip, std::string_view mode = "normal");
+    // PC2d: a layer's picture (the canvas's size; `mask` ("L"): its mask, which multiplies its alpha).
+    void blend(const ColorPicture& picture, double opacity, bool clip, std::string_view mode = "normal", const Image* mask = nullptr);
     void blend_stroke(const Image& mask, const core::Json& color, double opacity);
-    void expose(const core::Exposure& exposure, double opacity, bool clip, const Image* mask = nullptr);
-    // A correction layer of filters.ADJUSTMENTS: its change laid over the pixels below in their encoded samples (sRGB, or
-    // the page's values on a page of a profile), as the 8-bit page composites a correction: by opacity × mask × the
-    // clipped-to layer's alpha.
-    void adjust(const core::PreciseAdjustment& adjustment, double opacity, bool clip, const Image* mask = nullptr);
+    // PC2d: what sets nothing for the next layer to clip to (a tone layer: the 8-bit page forgets the alpha before).
+    void forget_clip();
+    // PC2d: a correction that moves shapes, worked on the canvas's own values (color_raster's): `changed` (the space's
+    // encoded samples and the alpha, the canvas's size) laid over the pixels below as the 8-bit page composites its
+    // result (render._adjusted): every sample, the alpha too, mixed by opacity × mask × the clipped-to layer's alpha;
+    // `mode` (its native.blend) laid on the colour first as adjust does.
+    void correct(const core::ColorRasterView& changed, double opacity, bool clip, const Image* mask = nullptr, std::string_view mode = "normal");
+    // An exposure in linear light. `mode` (PC2: its native.blend; normal: mixed in linear light as before): the exposed
+    // colour laid over the one below by the blend's formula in their encoded samples, as adjust does.
+    void expose(const core::Exposure& exposure, double opacity, bool clip, const Image* mask = nullptr, std::string_view mode = "normal");
+    // A correction layer (core/adjust.hpp's AdjustFunction: Python's form is PreciseAdjustment): its change laid over the
+    // pixels below in their encoded samples (sRGB, or the page's values on a page of a profile), as the 8-bit page
+    // composites a correction: by opacity × mask × the clipped-to layer's alpha. `mode` (PC2: its native.blend): the
+    // changed colour b' laid over the colour b below by the blend's formula (this canvas's, on the encoded samples),
+    // mix(b, blend(b, b'), amount); the alpha stays. `at`: the canvas's top left on the page (where a pixel is, for a
+    // dither). core::Error("not_yet_ported") for a mode it does not composite.
+    void adjust(const core::AdjustFunction& adjustment, double opacity, bool clip, const Image* mask = nullptr, std::string_view mode = "normal",
+                Point at = Point{0, 0});
     // Drawing in 8 bits on the canvas's own picture (image(), RGBA), as the 8-bit page draws on its picture so far
     // (the balloons set under a layer): each pixel `draw` paints takes the value it is given there, brought in as an
     // 8-bit picture is (its sRGB samples in linear light, as the paper comes in); the others keep their precise values.
@@ -72,18 +95,35 @@ public:
     bool keeps_preceding_alpha() const;
     // The pixels as a precise raster of the space's encoded values (GKCR).
     std::string color_raster(std::string_view precision) const;
+    // PC2d: the pixels as a layer's picture (what is drawn on a canvas of a layer's own).
+    ColorPicture picture() const;
 private:
     struct Impl;
     std::unique_ptr<Impl> impl_;
 };
 Image color_raster_preview(const core::ColorRasterView& source, Size full, Box area, const RgbSpace& space = {});
+// PC2d: a precise raster stretched over the page (`full`, pixels), the part `area`, as ColorCanvas::blend samples it.
+ColorPicture color_picture(const core::ColorRasterView& source, Size full, Box area, const RgbSpace& space);
+// PC2d: an 8-bit RGBA picture in the space: its sRGB colours brought in as an 8-bit layer's are, or (`page_values`) its
+// samples the space's own values.
+ColorPicture color_picture(const Image& rgba, const RgbSpace& space, bool page_values = false);
+// PC2d: `above` laid over `below` (the same size), normal, straight alpha, as one layer's parts are.
+void picture_over(ColorPicture& below, const ColorPicture& above);
+// PC2d: the picture as the screen shows it ("RGBA", sRGB, its alpha kept), and its alpha alone as an 8-bit picture
+// holds it ("L").
+Image picture_rgba(const ColorPicture& picture, const RgbSpace& space);
+Image picture_alpha(const ColorPicture& picture);
+// PC2d: an sRGB colour (0..255) as the space's linear light.
+std::array<double, 3> linear_colour(const RgbSpace& space, const std::array<int, 3>& rgb);
 // An 8-bit RGBA picture's sRGB colours as the space's values (its alpha kept; sRGB: the picture itself).
 Image srgb_into(const Image& rgba, const RgbSpace& space);
 // And back: an 8-bit RGBA picture of the space's values as the sRGB the screen shows (relative colorimetric, black point
 // compensation; its alpha kept; sRGB: the picture itself).
 Image srgb_from(const Image& rgba, const RgbSpace& space);
-// A correction layer's adjustment (its "adjust": a kind of filters.ADJUSTMENTS but exposure, and its settings), or
-// none when it does nothing: no kind, or settings the 8-bit page refuses with a ValueError (render._adjusted).
-// NotYetPorted for a kind of filter that is not a colour adjustment.
-std::optional<core::PreciseAdjustment> correction_of(const core::Layer& layer);
+// A correction layer's function (its "adjust", core::adjust_function: Python's form — a kind of filters.ADJUSTMENTS or
+// exposure, and its settings — as PreciseAdjustment, the C++ build's own by its kind; `page` and `doc` the layer's), or
+// none when it does nothing: no kind, a kind apply_filter does not know (a plugin, one that moves shapes: the callers'),
+// or settings the 8-bit page refuses with a ValueError (render._adjusted). NotYetPorted("adjust:<kind>") for one whose
+// formula is not in this build yet.
+core::AdjustPtr correction_of(const core::Layer& layer, const core::Page& page, const core::Document* doc = nullptr);
 } // namespace genko::render

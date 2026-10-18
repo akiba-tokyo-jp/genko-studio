@@ -37,6 +37,7 @@ genko_library(genko_render
     color_filters.cpp
     abr.cpp
     psd.cpp
+    psd_descriptor.cpp
     psd_text.cpp
     movie.cpp
     anim.cpp
@@ -44,6 +45,7 @@ genko_library(genko_render
     plugins.cpp
     colour.cpp
     proof.cpp
+    import_profile.cpp
     ink.cpp
     ink_canvas.cpp
     ink_edit.cpp
@@ -52,6 +54,16 @@ genko_library(genko_render
     ops_channels.cpp
     raster_ops.cpp
     ops_paint.cpp
+    adjust.cpp
+    adjust_space.cpp
+    ops_adjust.cpp
+    tone_ops.cpp
+    image_ops.cpp
+    ops_calc.cpp
+    trap.cpp
+    ops_fade.cpp
+    psd_adjust.cpp
+    psd_adjust_color.cpp
     zip.cpp
     materials.cpp
     covers.cpp

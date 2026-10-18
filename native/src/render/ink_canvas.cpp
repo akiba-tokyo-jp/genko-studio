@@ -358,18 +358,23 @@ void InkCanvas::draw_8bit(const std::function<void(Image&)>& draw) {
     }
 }
 
-void InkCanvas::recolour(const ink::Correction& change, double opacity, bool clip, const Image* mask) {
+void InkCanvas::recolour(const core::AdjustFunction& change, double opacity, bool clip, const Image* mask, std::string_view mode, Point at) {
     if (mask && (mask->mode() != "L" || mask->size() != impl_->size)) throw core::Error("value", "the correction's mask does not match the canvas");
+    if (!supports_blend(mode)) throw core::Error("not_yet_ported", "the blend " + std::string(mode) + " on a " + std::string(core::to_string(impl_->color.space)) + " page");
+    const bool normal = mode.empty() || mode == "normal";
     const unsigned n = impl_->n;
     const core::InkSpace space = impl_->color.space;
     const ink::Rules rules(impl_->color);  // (the table looked up once for the whole canvas)
     std::vector<double> inks, fixed;
     std::vector<std::size_t> where;
+    std::vector<int> xs;
     std::vector<double> amounts;
+    std::array<double, core::kPlatesMax> now{}, mixed{};
     for (int y = 0; y < impl_->size.height; ++y) {
         const auto* shown = mask ? reinterpret_cast<const unsigned char*>(mask->raw()->image[y]) : nullptr;
         inks.clear();
         where.clear();
+        xs.clear();
         amounts.clear();
         for (int x = 0; x < impl_->size.width; ++x) {
             const std::size_t i = std::size_t(y) * impl_->size.width + x;
@@ -379,18 +384,83 @@ void InkCanvas::recolour(const ink::Correction& change, double opacity, bool cli
             if (!(amount > 0)) continue;
             for (unsigned c = 0; c < n; ++c) inks.push_back(from_canvas(space, c, p[c]));
             where.push_back(i);
+            xs.push_back(x);
             amounts.push_back(amount);
         }
         if (where.empty()) continue;
         fixed.resize(inks.size());
-        rules.correct(inks.data(), fixed.data(), where.size(), change);
+        std::size_t k = 0;  // (ink::Rules::correct asks for each pixel once, in their order)
+        rules.correct(inks.data(), fixed.data(), where.size(), [&](const std::array<double, 3>& rgb) {
+            const int x = xs[std::min(k++, xs.size() - 1)];
+            return change.apply(rgb, at.x + x, at.y + y);
+        });
         for (std::size_t j = 0; j < where.size(); ++j) {
             double* p = impl_->px.data() + where[j] * impl_->stride;
+            for (unsigned c = 0; c < n; ++c) now[c] = to_canvas(space, c, fixed[j * n + c]);
+            // (PC2: its native.blend — the changed inks over those below by the page's formula)
+            if (!normal) mix(space, n, mode, p, now.data(), mixed.data());
             for (unsigned c = 0; c < n; ++c) {
-                const double now = to_canvas(space, c, fixed[j * n + c]);
-                const double next = p[c] + (now - p[c]) * amounts[j];
+                const double next = p[c] + ((normal ? now[c] : mixed[c]) - p[c]) * amounts[j];
                 p[c] = impl_->hdr ? next : std::clamp(next, 0.0, 1.0);
             }
+        }
+    }
+}
+
+void InkCanvas::adjust_planes(const core::InkRecords& records, double opacity, bool clip, const Image* mask, std::string_view mode) {
+    if (mask && (mask->mode() != "L" || mask->size() != impl_->size)) throw core::Error("value", "the correction's mask does not match the canvas");
+    if (!supports_blend(mode)) throw core::Error("not_yet_ported", "the blend " + std::string(mode) + " on a " + std::string(core::to_string(impl_->color.space)) + " page");
+    const core::InkSpace space = impl_->color.space;
+    if (records.space != space || space == core::InkSpace::Multi) throw core::Error("value", "the correction's records are not the page's plates");
+    const bool normal = mode.empty() || mode == "normal";
+    const unsigned n = impl_->n;
+    // (each plate's tone: CMYK its brightness 1 − ink; Lab its normalized value; grey its lightness — the canvas's values)
+    const auto tone = [space](double value) { return space == core::InkSpace::Cmyk ? 1.0 - value : value; };
+    std::array<double, core::kPlatesMax> now{}, mixed{};
+    for (int y = 0; y < impl_->size.height; ++y) {
+        const auto* shown = mask ? reinterpret_cast<const unsigned char*>(mask->raw()->image[y]) : nullptr;
+        for (int x = 0; x < impl_->size.width; ++x) {
+            double* p = impl_->px.data() + (std::size_t(y) * impl_->size.width + x) * impl_->stride;
+            double amount = std::clamp(opacity, 0.0, 1.0) * (clip && impl_->previous ? p[n + 1] : 1.0);
+            if (shown) amount *= shown[x] / 255.0;
+            if (!(amount > 0)) continue;
+            for (unsigned c = 0; c < n; ++c) {
+                const bool kept = c >= records.plates.size() || !records.plates[c];
+                now[c] = kept ? p[c] : tone(records.plates[c](tone(p[c])));
+            }
+            if (!normal) mix(space, n, mode, p, now.data(), mixed.data());
+            for (unsigned c = 0; c < n; ++c) {
+                const double next = p[c] + ((normal ? now[c] : mixed[c]) - p[c]) * amount;
+                p[c] = impl_->hdr ? next : std::clamp(next, 0.0, 1.0);
+                if (!std::isfinite(p[c])) throw core::Error("value", "the ink composite exceeds the finite working range");
+            }
+        }
+    }
+}
+
+void InkCanvas::correct(const InkPicture& changed, double opacity, bool clip, const Image* mask, std::string_view mode) {
+    if (mask && (mask->mode() != "L" || mask->size() != impl_->size)) throw core::Error("value", "the correction's mask does not match the canvas");
+    if (!supports_blend(mode)) throw core::Error("not_yet_ported", "the blend " + std::string(mode) + " on a " + std::string(core::to_string(impl_->color.space)) + " page");
+    if (changed.size != impl_->size || changed.channels != impl_->n) throw core::Error("value", "the corrected inks do not match the canvas");
+    const bool normal = mode.empty() || mode == "normal";
+    const unsigned n = impl_->n;
+    std::array<double, core::kPlatesMax> mixed{};
+    for (int y = 0; y < impl_->size.height; ++y) {
+        const auto* shown = mask ? reinterpret_cast<const unsigned char*>(mask->raw()->image[y]) : nullptr;
+        for (int x = 0; x < impl_->size.width; ++x) {
+            const std::size_t i = std::size_t(y) * impl_->size.width + x;
+            double* p = impl_->px.data() + i * impl_->stride;
+            double amount = std::clamp(opacity, 0.0, 1.0) * (clip && impl_->previous ? p[n + 1] : 1.0);
+            if (shown) amount *= shown[x] / 255.0;
+            if (!(amount > 0)) continue;
+            const double* now = changed.values.data() + i * (n + 1);
+            if (!normal) mix(impl_->color.space, n, mode, p, now, mixed.data());
+            for (unsigned c = 0; c < n; ++c) {
+                const double next = p[c] + ((normal ? now[c] : mixed[c]) - p[c]) * amount;
+                p[c] = impl_->hdr ? next : std::clamp(next, 0.0, 1.0);
+                if (!std::isfinite(p[c])) throw core::Error("value", "the ink composite exceeds the finite working range");
+            }
+            p[n] = std::clamp(p[n] + (now[n] - p[n]) * amount, 0.0, 1.0);  // (the 8-bit page's composite mixes the alpha too)
         }
     }
 }

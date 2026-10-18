@@ -21,15 +21,18 @@
 #endif
 
 #include "core/ids.hpp"
+#include "core/lut3d.hpp"
 #include "core/ops_util.hpp"
 #include "core/paths.hpp"
 #include "core/pyconv.hpp"
 #include "core/pyops.hpp"
 #include "render/fill.hpp"
+#include "render/import_profile.hpp"
 #include "render/op_limits.hpp"
 #include "render/ops_registry.hpp"
 #include "render/ink_canvas.hpp"
 #include "render/psd.hpp"
+#include "render/psd_adjust.hpp"
 #include "render/raster.hpp"
 #include "render/selection.hpp"
 
@@ -325,14 +328,36 @@ void import_psd(core::OpContext& c) {
         throw core::PyUncaught(error.type(), error.what());
     }
     const psd::File& file = *read;
+    // (PC2d, the C++ build's own embedded_profile: an RGB or grey file's colours taken from its own profile (image
+    // resource 1039) or the op's into the page's space. A CMYK or Lab file comes in as before — onto a page of inks
+    // through its own profile —: one cannot be assigned another.)
+    import_profile::Taking way;
+    std::string numbers;  // (the mode of the file's numbers as the pictures hold them: "L" grey, "RGBA")
+    if (op.contains("embedded_profile")) {
+        const std::string& m = file.mode_name();
+        numbers = m == "gray" || m == "bitmap" || m == "duotone" ? "L" : m == "rgb" || m == "indexed" ? "RGBA" : "";
+        if (!numbers.empty()) {
+            way = import_profile::taking(doc, doc.page(index), op, file.icc().empty() ? std::nullopt : std::optional<std::string>(file.icc()), numbers);
+        } else if (op["embedded_profile"] == "assign") {
+            throw OpError("embedded_profile assign takes an RGB or grey PSD (a " + m + " file comes in through its own profile)");
+        } else {
+            way = import_profile::taking(doc, doc.page(index), op, std::nullopt, "LAB");  // (its arguments checked; kept)
+        }
+    }
+    // (a picture of the file as the way takes it: its numbers, a grey file's as grey)
+    const auto numbers_of = [&](const Image& picture) { return numbers == "L" ? picture.convert("LA") : picture; };
     if (static_cast<std::uint64_t>(file.width()) * static_cast<std::uint64_t>(file.height()) > static_cast<std::uint64_t>(kMaxImagePixels)) {
         throw OpError("image too large: " + std::to_string(file.width()) + "x" + std::to_string(file.height()));
     }
-    // the file's layers, or (none with a picture) its merged picture as one
+    // the file's layers, or (none with a picture: folders and adjustment layers only) its merged picture as one, as
+    // Python reads it — its adjustment layers then left out (skipped), as psd.py leaves them: the merged picture shows
+    // them already, laid over it again they would be laid twice (PC2, the user's decision 5)
     std::vector<psd::Layer> layers = file.layers();
     std::optional<Image> merged;
     std::optional<core::InkPixels> merged_inks;
-    if (std::all_of(layers.begin(), layers.end(), [](const psd::Layer& l) { return l.folder; })) {
+    bool merged_only = false;
+    if (std::all_of(layers.begin(), layers.end(), [](const psd::Layer& l) { return l.folder || l.kind == "adjust"; })) {
+        merged_only = true;
         if (mode) {
             merged_inks = file.merged_inks(*mode);
             if (!merged_inks) throw OpError("the PSD has no pictures to read");
@@ -388,14 +413,37 @@ void import_psd(core::OpContext& c) {
         layer.clip = item.clip;
         layer.exportable = true;
         layer.parent_id = item.parent ? Json(ids[*item.parent]) : parent;
+        // its mask over the page, as the page holds a layer's (none when it has none)
+        const auto mask_of = [&]() -> std::optional<core::Mask> {
+            const std::optional<Image> mask = file.mask(item);
+            if (!mask) return std::nullopt;
+            limits::check_picture(mask_w, mask_h, "the layer mask");
+            const Size mask_size{static_cast<int>(mask_w), static_cast<int>(mask_h)};
+            Image full = Image::create("L", page_px, Ink(255));
+            full.paste(mask->resize(shown), paste_corner(where));
+            core::Mask kept;
+            kept.png = fills::png_bytes(full.resize(mask_size));
+            kept.enabled = true;
+            return kept;
+        };
         if (item.folder) {
             layer.kind = core::LayerKind::Folder;
+        } else if (item.kind == "adjust" && item.adjust) {
+            // (PC2, the user's decision 5: an adjustment layer a codec read, render/psd_adjust — a correction layer, its
+            // blend its native.blend: a correction layer's own blend is not looked at)
+            layer.kind = core::LayerKind::Adjust;
+            layer.adjust = psd::imported_adjust(*item.adjust, item.blend, page);
+            core::lut3d::keep_luts(doc.luts, item.luts, *layer.adjust);  // (PC2a: a color lookup's table into the book)
+            layer.blend = "normal";
+            if (auto mask = mask_of()) layer.mask = std::move(*mask);
         } else {
             layer.kind = core::LayerKind::Raster;
             // (a painting app's picture: on a monochrome page it prints in grey and tones)
             layer.source = Json::object({{"kind", "psd"}});
             if (mode) {  // (color-mode@1: onto a clear layer of the page's inks)
-                core::InkPixels picture = merged_inks ? *merged_inks : file.image_inks(item, *mode);
+                core::InkPixels picture = way.converting ? import_profile::taken_inks(numbers_of(merged_inks ? *file.merged() : file.image(item)), way, *mode)
+                                          : merged_inks ? *merged_inks
+                                                        : file.image_inks(item, *mode);
                 if (!same_size) picture = resize_inks(picture, shown, Resample::Lanczos);
                 core::InkPixels canvas = core::blank_ink_pixels(mode->space, mode->depth, static_cast<std::uint32_t>(page_px.width),
                                                                 static_cast<std::uint32_t>(page_px.height));
@@ -404,22 +452,15 @@ void import_psd(core::OpContext& c) {
             } else {
                 // (onto a clear layer: the pixels as they are)
                 Image canvas = Image::create("RGBA", page_px, Ink{0, 0, 0, 0});
-                const Image picture = merged ? *merged : file.image(item);
+                const Image picture = way.converting ? import_profile::taken(numbers_of(merged ? *merged : file.image(item)), way, page)
+                                                     : merged ? *merged
+                                                              : file.image(item);
                 canvas.paste(same_size ? picture : picture.resize(shown, Resample::Lanczos), paste_corner(where));
                 layer.raster_png = fills::png_bytes(canvas);
                 layer.raster_relpath = raster::page_folder(page) + "/user-" + layer.id + ".png";
             }
             if (!merged && !merged_inks) {
-                if (const std::optional<Image> mask = file.mask(item)) {
-                    limits::check_picture(mask_w, mask_h, "the layer mask");
-                    const Size mask_size{static_cast<int>(mask_w), static_cast<int>(mask_h)};
-                    Image full = Image::create("L", page_px, Ink(255));
-                    full.paste(mask->resize(shown), paste_corner(where));
-                    core::Mask kept;
-                    kept.png = fills::png_bytes(full.resize(mask_size));
-                    kept.enabled = true;
-                    layer.mask = std::move(kept);
-                }
+                if (auto mask = mask_of()) layer.mask = std::move(*mask);
             }
         }
         made.push_back(std::move(layer));
@@ -443,10 +484,11 @@ void import_psd(core::OpContext& c) {
     Json listed = Json::array();
     for (const core::Layer& layer : made) listed.push_back(Json::object({{"id", layer.id}, {"title", layer.title}}));
     Json skipped = Json::array();
-    for (const std::string& name : file.skipped()) skipped.push_back(name);
+    for (const std::string& name : merged_only ? file.python_skipped() : file.skipped()) skipped.push_back(name);
     target.layers.insert(target.layers.begin() + static_cast<std::ptrdiff_t>(at), std::make_move_iterator(made.begin()),
                          std::make_move_iterator(made.end()));
     c.report = Json::object({{"layers", std::move(listed)}, {"skipped", std::move(skipped)}});
+    if (op.contains("embedded_profile")) (*c.report)["embedded_profile"] = import_profile::report(way);
 }
 
 }  // namespace

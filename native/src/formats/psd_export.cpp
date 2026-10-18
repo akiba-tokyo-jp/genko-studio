@@ -6,6 +6,7 @@
 #include <algorithm>
 #include <bit>
 #include <cmath>
+#include <functional>
 #include <map>
 #include <unordered_map>
 
@@ -18,6 +19,7 @@
 #include "formats/export.hpp"
 #include "formats/output.hpp"
 #include "formats/pillow_save.hpp"
+#include "formats/psd_adjust.hpp"
 #include "formats/psd_text_detail.hpp"
 #include "render/channels.hpp"
 #include "render/color_canvas.hpp"
@@ -230,6 +232,29 @@ public:
     void group_end() { section("</Layer group>", 3, "norm"); }
     void group(const std::string& name) { section(name, 1, "pass"); }
 
+    // PC2 (the user's decision 5): a correction layer as an adjustment layer (formats/psd_adjust): no pixels — a channel of
+    // nothing for each of the document's and the alpha, as a group's —, its mask at the document's depth (8 bits RLE, 16
+    // and 32 raw), its adjustment block after its name.
+    void add_adjustment(const PsdAdjustLayer& layer) {
+        const int colours = ink_ ? static_cast<int>(core::colour_channels(ink_->space)) : 3;
+        const int depth = ink_ ? ink_->depth : rgb_ ? rgb_->depth : 8;
+        std::vector<std::pair<int, std::string>> channels;
+        for (int id = -1; id < colours; ++id) channels.emplace_back(id, std::string(2, '\0'));
+        std::optional<std::string> mask_plane;
+        if (layer.mask) {
+            const std::string grey = layer.mask->convert("L").resize(size_).tobytes();
+            if (depth == 8) {
+                mask_plane = packed_plane(grey, size_.width, size_.height, 8);
+            } else {
+                std::string samples;
+                for (const char g : grey) put_sample(samples, static_cast<unsigned char>(g) / 255.0, depth);
+                mask_plane = packed_plane(samples, size_.width, size_.height, depth);
+            }
+        }
+        record(layer.name, std::move(channels), render::Box{0, 0, 0, 0}, layer.opacity, blend_key(layer.blend), layer.clip, std::move(mask_plane),
+               layer.blocks);
+    }
+
     std::string finish() {
         std::string info;
         put_u16(info, static_cast<std::uint32_t>(static_cast<std::int16_t>(count_)) & 0xffff);
@@ -437,6 +462,16 @@ private:
     std::string data_;
     int count_ = 0;
 };
+
+// PC2 (the user's decision 5): each correction layer of a page, in its place among the layers, as the PSD's adjustment
+// layer its kind's codec writes (formats/psd_adjust; one none writes yet: not written, its change in the merged picture as
+// in Python's PSD). (What a codec says of a layer: the export's notes, formats::psd_adjust_notes.)
+std::function<void(const core::Layer&)> adjustments(Records& records, const core::Page& page, render::Size size, const core::Document& doc) {
+    return [&records, &page, size, &doc](const core::Layer& layer) {
+        std::vector<std::string> notes;
+        if (const auto made = psd_adjust_layer(layer, page, size, notes, &doc)) records.add_adjustment(*made);
+    };
+}
 
 // A tagged block of a layer record: its key, its length and its payload, padded to 4 bytes.
 std::string tagged(std::string_view key, std::string payload) {
@@ -926,13 +961,14 @@ void put_page_psd_inks(detail::Output& output, const core::Document& episode, co
         records.add_inks(layer.name, values, color.space, color.depth, layer.settings ? layer.opacity : 1.0,
                          layer.settings ? layer.blend : std::string("normal"), layer.settings && layer.clip, layer.mask ? &*layer.mask : nullptr);
     };
+    const std::function<void(const core::Layer&)> adjust_layers = adjustments(records, page, size, episode);
     if (text.editable) {  // (PSD-01: each placed line's layers made here)
         PsdTextReport own;
         EditableLines lines(records, episode, static_cast<int>(dpi), size, core::py_int(page.index.json()), report != nullptr ? *report : own, &color);
         const std::function<void(const core::StoryLine&)> line_layers = [&](const core::StoryLine& line) { lines.add(line); };
-        render::page_layers(page, episode, static_cast<int>(dpi), each, &line_layers);
+        render::page_layers(page, episode, static_cast<int>(dpi), each, &line_layers, &adjust_layers);
     } else {
-        render::page_layers(page, episode, static_cast<int>(dpi), each);
+        render::page_layers(page, episode, static_cast<int>(dpi), each, nullptr, &adjust_layers);
     }
     const unsigned n = core::colour_channels(color.space);
     std::string body = "8BPS";
@@ -992,13 +1028,14 @@ void put_page_psd_rgb(detail::Output& output, const core::Document& episode, con
     const render::Size size{static_cast<int>(merged.width()), static_cast<int>(merged.height())};
     Records records(size, std::nullopt, RgbOut{depth, render::RgbSpace::of(page)});
     const auto each = [&](render::PageLayer&& layer) { records.add(std::move(layer)); };
+    const std::function<void(const core::Layer&)> adjust_layers = adjustments(records, page, size, episode);
     if (text.editable) {  // (PSD-01: each placed line's layers made here)
         PsdTextReport own;
         EditableLines lines(records, episode, static_cast<int>(dpi), size, core::py_int(page.index.json()), report != nullptr ? *report : own);
         const std::function<void(const core::StoryLine&)> line_layers = [&](const core::StoryLine& line) { lines.add(line); };
-        render::page_layers(page, episode, static_cast<int>(dpi), each, &line_layers);
+        render::page_layers(page, episode, static_cast<int>(dpi), each, &line_layers, &adjust_layers);
     } else {
-        render::page_layers(page, episode, static_cast<int>(dpi), each);
+        render::page_layers(page, episode, static_cast<int>(dpi), each, nullptr, &adjust_layers);
     }
     std::string body = "8BPS";
     put_u16(body, 1);
@@ -1177,13 +1214,14 @@ void put_page_psd(detail::Output& output, const core::Document& episode, const c
     const Image rgb = merged.mode() == "RGB" ? merged : merged.convert("RGB");
     Records records(rgb.size());
     const auto each = [&](render::PageLayer&& layer) { records.add(std::move(layer)); };
+    const std::function<void(const core::Layer&)> adjust_layers = adjustments(records, page, rgb.size(), episode);
     if (text.editable) {  // (PSD-01: each placed line's layers made here)
         PsdTextReport own;
         EditableLines lines(records, episode, static_cast<int>(dpi), rgb.size(), core::py_int(page.index.json()), report != nullptr ? *report : own);
         const std::function<void(const core::StoryLine&)> line_layers = [&](const core::StoryLine& line) { lines.add(line); };
-        render::page_layers(page, episode, static_cast<int>(dpi), each, &line_layers);
+        render::page_layers(page, episode, static_cast<int>(dpi), each, &line_layers, &adjust_layers);
     } else {
-        render::page_layers(page, episode, static_cast<int>(dpi), each);
+        render::page_layers(page, episode, static_cast<int>(dpi), each, nullptr, &adjust_layers);
     }
     std::string body = "8BPS";
     put_u16(body, 1);

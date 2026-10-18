@@ -108,6 +108,12 @@ bool uses_color_precision(const core::Page& page, bool print);
 class ColorCanvas;
 // Blend an editable precise-colour stroke layer without an RGBA8 intermediate.
 void blend_color_strokes(ColorCanvas& canvas, const core::Page& page, const core::Layer& layer, int dpi, Box area, const core::Document* episode = nullptr);
+// PC2d (document:color-depth-model): whether a layer with precise colour of its own (precise pixels, precise lines) is
+// drawn as more than those alone — with lines on its precise pixels, pictures laid on it, effects, its colour, a
+// screen, or as a tone —, and the layer so drawn as the page draws it in proof (a precise merge composites it so; a
+// tone as the 8-bit merge takes it).
+bool precise_layer_styled(const core::Layer& layer);
+void blend_precise_layer(ColorCanvas& canvas, const core::Page& page, const core::Layer& layer, int dpi, Box area, const core::Document* episode = nullptr);
 // Same paper/legacy-page-fill background used by regular drawing and destructive flatten.
 Image page_background(const core::Page& page, Size size, bool name_or_proof);
 
@@ -168,9 +174,12 @@ struct PageLayer {
 // `each` as it is made (they are never all held). NotYetPorted("placed") for a placed picture (its art before the
 // monochrome finish is not drawn by this build yet). (A layer in precise colour, which Python does not have: its
 // 8-bit picture.) `line_layers` (PSD-01, the editable PSD): each placed line is handed to it, in its place among the
-// layers, instead of being given as a layer of its own.
+// layers, instead of being given as a layer of its own. `adjust_layers` (PC2, the user's decision 5: the PSD's adjustment
+// layers): each correction layer shown is handed to it in its place among the layers (Python's leaves them out: their
+// change is in the merged picture only).
 void page_layers(const core::Page& page, const core::Document& episode, int dpi, const std::function<void(PageLayer&&)>& each,
-                 const std::function<void(const core::StoryLine&)>* line_layers = nullptr);
+                 const std::function<void(const core::StoryLine&)>* line_layers = nullptr,
+                 const std::function<void(const core::Layer&)>* adjust_layers = nullptr);
 
 // Pure black and white: grey above `threshold` is white; with `screen` the greys become a pattern (dot, line, cross or
 // noise; 書き出しでのトーン化).

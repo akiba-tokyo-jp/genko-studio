@@ -14,6 +14,7 @@
 #include "core/pyconv.hpp"
 #include "core/pyops.hpp"
 #include "render/imaging.hpp"
+#include "render/not_yet_ported.hpp"
 
 namespace genko::render {
 
@@ -390,6 +391,45 @@ void ColorCanvas::blend(const ColorCanvas& source, double opacity, bool clip, st
     }
     impl_->previous=true;
 }
+void ColorCanvas::blend(const ColorPicture& picture, double opacity, bool clip, std::string_view mode, const Image* mask) {
+    if (!supports_blend(mode)) throw core::Error("not_yet_ported", "high-precision blend:" + std::string(mode));
+    if (picture.size != impl_->size || picture.pixels.size() != impl_->pixels.size()) throw core::Error("value", "color canvas picture does not match");
+    if (mask && (mask->mode() != "L" || mask->size() != impl_->size)) throw core::Error("value", "layer mask does not match");
+    for (int y = 0; y < impl_->size.height; ++y) {
+        const auto* shown = mask ? reinterpret_cast<const unsigned char*>(mask->raw()->image[y]) : nullptr;
+        for (int x = 0; x < impl_->size.width; ++x) {
+            const std::size_t i = std::size_t(y) * impl_->size.width + x;
+            auto p = picture.pixels[i];
+            if (shown) p[3] *= shown[x] / 255.0;
+            impl_->over(i, p, opacity, clip, mode);
+        }
+    }
+    impl_->previous = true;
+}
+void ColorCanvas::forget_clip() { impl_->previous = false; }
+void ColorCanvas::correct(const core::ColorRasterView& changed, double opacity, bool clip, const Image* mask, std::string_view mode) {
+    if (mask && (mask->mode() != "L" || mask->size() != impl_->size)) throw core::Error("value", "correction mask does not match");
+    if (!supports_blend(mode)) throw core::Error("not_yet_ported", "high-precision blend:" + std::string(mode));
+    if (changed.width() != static_cast<std::uint32_t>(impl_->size.width) || changed.height() != static_cast<std::uint32_t>(impl_->size.height))
+        throw core::Error("value", "corrected pixels do not match the color canvas");
+    const bool normal = mode.empty() || mode == "normal";
+    const RgbSpace& space = impl_->space;
+    for (int y = 0; y < impl_->size.height; ++y) for (int x = 0; x < impl_->size.width; ++x) {
+        const std::size_t i = std::size_t(y) * impl_->size.width + x;
+        auto& p = impl_->pixels[i];
+        double amount = std::clamp(opacity, 0.0, 1.0) * (clip && impl_->previous ? p[4] : 1);
+        if (mask) amount *= reinterpret_cast<const unsigned char*>(mask->raw()->image[y])[x] / 255.0;
+        if (amount == 0) continue;
+        const auto now = changed.pixel(i);
+        const RGB was{space.encode(0, p[0]), space.encode(1, p[1]), space.encode(2, p[2])};
+        const RGB laid = normal ? RGB{now[0], now[1], now[2]} : blend_rgb(mode, was, {now[0], now[1], now[2]});
+        for (unsigned c = 0; c < 3; ++c) {
+            p[c] = space.decode(c, std::lerp(was[c], laid[c], amount));
+            if (!std::isfinite(p[c])) throw core::Error("value", "high-precision adjustment exceeds finite working range");
+        }
+        p[3] = std::clamp(std::lerp(p[3], now[3], amount), 0.0, 1.0);  // (the 8-bit page's composite mixes the alpha too)
+    }
+}
 void ColorCanvas::blend_stroke(const Image& mask, const core::Json& color, double opacity) {
     core::validate_stroke_color(color);
     if (mask.mode() != "L" || mask.size() != impl_->size) throw core::Error("value","stroke coverage does not match");
@@ -400,17 +440,34 @@ void ColorCanvas::blend_stroke(const Image& mask, const core::Json& color, doubl
     }
     impl_->previous=true;
 }
-void ColorCanvas::expose(const core::Exposure& e, double opacity, bool clip, const Image* mask) {
+void ColorCanvas::expose(const core::Exposure& e, double opacity, bool clip, const Image* mask, std::string_view mode) {
     if (mask && (mask->mode() != "L" || mask->size() != impl_->size)) throw core::Error("value", "exposure mask does not match");
+    if (!supports_blend(mode)) throw core::Error("not_yet_ported", "high-precision blend:" + std::string(mode));
+    const bool normal = mode.empty() || mode == "normal";
+    const RgbSpace& space = impl_->space;
     for (int y = 0; y < impl_->size.height; ++y) for (int x = 0; x < impl_->size.width; ++x) {
         auto& p = impl_->pixels[std::size_t(y)*impl_->size.width+x];
         double amount = std::clamp(opacity, 0.0, 1.0)*(clip && impl_->previous ? p[4] : 1);
         if (mask) amount *= reinterpret_cast<const unsigned char*>(mask->raw()->image[y])[x]/255.0;
-        for (unsigned c = 0; c < 3; ++c) p[c] = std::lerp(p[c], e.apply(p[c]), amount);
+        if (normal) {
+            for (unsigned c = 0; c < 3; ++c) p[c] = std::lerp(p[c], e.apply(p[c]), amount);
+            continue;
+        }
+        if (amount == 0) continue;
+        // (PC2: in a blend, the exposed colour laid over the one below in their encoded samples, as adjust)
+        const RGB was{space.encode(0, p[0]), space.encode(1, p[1]), space.encode(2, p[2])};
+        const RGB exposed{space.encode(0, e.apply(p[0])), space.encode(1, e.apply(p[1])), space.encode(2, e.apply(p[2]))};
+        const RGB mixed = blend_rgb(mode, was, exposed);
+        for (unsigned c = 0; c < 3; ++c) {
+            p[c] = space.decode(c, std::lerp(was[c], mixed[c], amount));
+            if (!std::isfinite(p[c])) throw core::Error("value", "high-precision adjustment exceeds finite working range");
+        }
     }
 }
-void ColorCanvas::adjust(const core::PreciseAdjustment& adjustment, double opacity, bool clip, const Image* mask) {
+void ColorCanvas::adjust(const core::AdjustFunction& adjustment, double opacity, bool clip, const Image* mask, std::string_view mode, Point at) {
     if (mask && (mask->mode() != "L" || mask->size() != impl_->size)) throw core::Error("value", "adjustment mask does not match");
+    if (!supports_blend(mode)) throw core::Error("not_yet_ported", "high-precision blend:" + std::string(mode));
+    const bool normal = mode.empty() || mode == "normal";
     for (int y = 0; y < impl_->size.height; ++y) for (int x = 0; x < impl_->size.width; ++x) {
         auto& p = impl_->pixels[std::size_t(y)*impl_->size.width+x];
         double amount = std::clamp(opacity, 0.0, 1.0)*(clip && impl_->previous ? p[4] : 1);
@@ -418,9 +475,11 @@ void ColorCanvas::adjust(const core::PreciseAdjustment& adjustment, double opaci
         if (amount == 0) continue;
         const RgbSpace& space = impl_->space;
         const std::array<double, 3> was{space.encode(0, p[0]), space.encode(1, p[1]), space.encode(2, p[2])};
-        const auto changed = adjustment(was);
+        const auto changed = adjustment.apply(was, at.x + x, at.y + y);
+        // (PC2, the user's decision 2: its native.blend — the changed colour over the one below by this canvas's formula)
+        const auto laid = normal ? changed : blend_rgb(mode, was, changed);
         for (unsigned c = 0; c < 3; ++c) {
-            p[c] = space.decode(c, std::lerp(was[c], changed[c], amount));
+            p[c] = space.decode(c, std::lerp(was[c], laid[c], amount));
             if (!std::isfinite(p[c])) throw core::Error("value", "high-precision adjustment exceeds finite working range");
         }
     }
@@ -523,22 +582,22 @@ std::string ColorCanvas::color_raster(std::string_view precision) const {
             return out;
         });
 }
-std::optional<core::PreciseAdjustment> correction_of(const core::Layer& layer) {
-    core::Json spec = layer.adjust && layer.adjust->is_object() ? *layer.adjust : core::Json::object();
-    std::string kind;
-    if (const auto it = spec.find("kind"); it != spec.end()) {
-        if (core::py_truthy(*it)) kind = it->is_string() ? it->get<std::string>() : core::py_str(*it);
-        spec.erase(it);
-    }
-    // (another kind: as apply_filter's "unknown filter", the layer does nothing; a plugin, an exposure and the filters
-    // that move shapes are the callers' and validate_color_document's)
-    if (kind.empty() || kind == "exposure" ||
-        std::find(core::kAdjustments.begin(), core::kAdjustments.end(), kind) == core::kAdjustments.end())
-        return std::nullopt;
+ColorPicture ColorCanvas::picture() const {
+    ColorPicture out{impl_->size, {}};
+    out.pixels.reserve(impl_->pixels.size());
+    for (const Pixel& p : impl_->pixels) out.pixels.push_back({p[0], p[1], p[2], p[3]});
+    return out;
+}
+core::AdjustPtr correction_of(const core::Layer& layer, const core::Page& page, const core::Document* doc) {
+    if (!layer.adjust || !layer.adjust->is_object()) return nullptr;
+    // (another kind: as apply_filter's "unknown filter", the layer does nothing; a plugin and the filters that move shapes
+    // are the callers' and validate_color_document's)
     try {
-        return core::PreciseAdjustment(kind, spec);
-    } catch (const core::PyValueError&) {
-        return std::nullopt;  // (a ValueError: the layer does nothing)
+        return core::adjust_function(*layer.adjust, page, doc);
+    } catch (const core::Error& error) {
+        if (error.code() != "not_yet_ported") throw;
+        const core::Json kind = layer.adjust->value("kind", core::Json());
+        throw NotYetPorted("adjust:" + (kind.is_string() ? kind.get<std::string>() : core::py_str(kind)));
     }
 }
 Image srgb_into(const Image& rgba, const RgbSpace& space) {
@@ -568,5 +627,62 @@ Image color_raster_preview(const core::ColorRasterView& src, Size full, Box area
     ColorCanvas out(transparent, space);
     out.blend(src, full, area, 1, false);
     return out.image();
+}
+ColorPicture color_picture(const core::ColorRasterView& source, Size full, Box area, const RgbSpace& space) {
+    if (full.width <= 0 || full.height <= 0 || area.width() <= 0 || area.height() <= 0) throw core::Error("value", "color picture region is empty");
+    ColorPicture out{Size{area.width(), area.height()}, {}};
+    out.pixels.reserve(std::size_t(area.width()) * area.height());
+    for (int y = 0; y < area.height(); ++y)
+        for (int x = 0; x < area.width(); ++x)
+            out.pixels.push_back(sampled(source, (area.x0+x+.5)*source.width()/full.width-.5, (area.y0+y+.5)*source.height()/full.height-.5, space));
+    return out;
+}
+ColorPicture color_picture(const Image& input, const RgbSpace& space, bool page_values) {
+    const Image rgba = input.mode() == "RGBA" ? input : input.convert("RGBA");
+    ColorPicture out{rgba.size(), {}};
+    out.pixels.reserve(std::size_t(rgba.width()) * rgba.height());
+    SrgbRows in(space);
+    std::vector<std::array<double, 4>> line;
+    for (int y = 0; y < rgba.height(); ++y) {
+        const auto* row = reinterpret_cast<const unsigned char*>(rgba.raw()->image[y]);
+        if (page_values) {
+            for (int x = 0; x < rgba.width(); ++x)
+                out.pixels.push_back(linear(space, {row[x*4]/255.0, row[x*4+1]/255.0, row[x*4+2]/255.0, row[x*4+3]/255.0}));
+            continue;
+        }
+        in.row(row, static_cast<std::size_t>(rgba.width()), line);
+        out.pixels.insert(out.pixels.end(), line.begin(), line.end());
+    }
+    return out;
+}
+void picture_over(ColorPicture& below, const ColorPicture& above) {
+    if (below.size != above.size || below.pixels.size() != above.pixels.size()) throw core::Error("value", "color pictures do not match");
+    for (std::size_t i = 0; i < below.pixels.size(); ++i) {
+        auto& d = below.pixels[i];
+        const auto& s = above.pixels[i];
+        const double a = s[3];
+        if (a <= 0) continue;
+        if (a >= 1 || d[3] <= 0) {
+            d = s;
+            continue;
+        }
+        const double alpha = a + d[3] * (1 - a);
+        for (unsigned c = 0; c < 3; ++c) d[c] = (s[c] * a + d[c] * d[3] * (1 - a)) / alpha;
+        d[3] = alpha;
+    }
+}
+Image picture_rgba(const ColorPicture& picture, const RgbSpace& space) {
+    ColorCanvas canvas(Image::create("RGBA", picture.size, Ink{0, 0, 0, 0}), space);
+    canvas.blend(picture, 1, false);
+    return canvas.image();
+}
+Image picture_alpha(const ColorPicture& picture) {
+    std::string bytes(picture.pixels.size(), '\0');
+    for (std::size_t i = 0; i < bytes.size(); ++i) bytes[i] = static_cast<char>(byte(picture.pixels[i][3]));
+    return Image::frombytes("L", picture.size, bytes);
+}
+std::array<double, 3> linear_colour(const RgbSpace& space, const std::array<int, 3>& rgb) {
+    const auto p = linear_srgb(space, {std::clamp(rgb[0], 0, 255) / 255.0, std::clamp(rgb[1], 0, 255) / 255.0, std::clamp(rgb[2], 0, 255) / 255.0, 1});
+    return {p[0], p[1], p[2]};
 }
 } // namespace genko::render

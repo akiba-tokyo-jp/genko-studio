@@ -10,6 +10,8 @@
 #include <vector>
 
 #include "core/ink.hpp"
+#include "core/json.hpp"
+#include "core/model.hpp"
 #include "render/image.hpp"
 
 // 色の校正・校正の設定・色域外警告 (SPEC COLOR-03, PC1b; PhotoCraft v0.2.0's engine/src/proof_sim.rs and
@@ -138,5 +140,26 @@ bool same_as_srgb(std::string_view icc);
 // The picture ("RGB", "RGBA", "P", "L", "LA", "1", "CMYK"…) taken from the profile (of its colours' space) to sRGB:
 // "RGB", or "RGBA" keeping its alpha. core::Error("value") when the profile is not of its colours.
 Image convert_picture(const Image& picture, std::string_view icc, std::string_view intent, bool bpc);
+
+// プロファイルの情報 (PC2d, edit.profileInfo: SPEC COLOR-04; upstream engine/src/color_cmds.rs:496-506 and 746-762,
+// MIT): what an ICC profile says of itself — {"description", "space" (rgb, gray, cmyk, lab), "class" (display, output,
+// input, colorspace, abstract, link, named), "version" ("4.3"), "white" ([X, Y, Z]: its media white point), "trc" (an
+// RGB or grey profile's tone curve: "gamma 2.2", "parametric (type 4)", "table (N points)", "linear"; none for others),
+// "lut" (whether it carries tables), "intents" (the rendering intents it holds), "bytes" (its size)}. No bytes: Little
+// CMS's own sRGB, or (`lab`) its D50 Lab. core::Error("value") when Little CMS cannot read it.
+core::Json profile_info(const core::Bytes& icc, bool lab = false);
+// The built-in profiles: [{"id", "description", "space"}], PhotoCraft's order.
+core::Json builtin_profile_list();
+// The profile `spec` names in the book — a built-in's id (or alias, or its sha256:…), a page's number (its mode's
+// profile: an RGB page's, sRGB for none; a CMYK or grey page's; a Lab page's D50 Lab; a multichannel page's plates
+// none: {"description": null, "space": "multichannel"}), "sha256:…" of one the book holds — as profile_info says it,
+// with "builtins" (builtin_profile_list) and, for a page, "page": its number.
+// core::Error("key") when it names none.
+core::Json profile_info_of(const core::Document& doc, std::string_view spec);
+// The colour (sRGB, 0..255) in the proof's own values (情報パネル, PC2d): {"space": "cmyk"|"rgb"|"gray", "values": 0..1
+// each (CMYK: ink)} — through the setup's proof profile (its intent and black point compensation), or with none
+// through Genko's own CMYK for print (render/colour::to_cmyk with the export profile). core::Error("value") when the
+// profile cannot be used.
+core::Json proof_values(const Setup& setup, int r, int g, int b);
 
 }  // namespace genko::render::proof

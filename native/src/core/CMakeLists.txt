@@ -52,6 +52,7 @@ genko_library(genko_core
     color_raster.cpp
     ink.cpp
     color_model.cpp
+    lut3d.cpp
     channels.cpp
     exposure.cpp
     ops_color.cpp
@@ -69,6 +70,10 @@ genko_library(genko_core
     brushes.cpp
     filters.cpp
     color_adjust.cpp
+    adjust.cpp
+    adjust_kinds.cpp
+    adjust_tone.cpp
+    adjust_color.cpp
     rulers.cpp
     command_bus.cpp
     ops_util.cpp

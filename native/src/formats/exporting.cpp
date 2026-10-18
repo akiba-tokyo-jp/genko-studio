@@ -4,6 +4,7 @@
 
 #include <algorithm>
 #include <array>
+#include <cstdio>
 #include <limits>
 
 #include "core/color_raster.hpp"
@@ -15,6 +16,11 @@
 #include "core/ruby.hpp"
 #include "formats/export.hpp"
 #include "formats/pdf.hpp"
+#include "formats/psd_adjust.hpp"
+#include "core/adjust.hpp"
+#include "core/exposure.hpp"
+#include "core/lut3d.hpp"
+#include "render/color_canvas.hpp"
 #include "formats/psd_text.hpp"
 #include "render/not_yet_ported.hpp"
 
@@ -358,6 +364,9 @@ std::vector<std::string> export_notes(const core::Document& episode, std::string
             notes.push_back("特色チャンネルの名前 " + from + " は PDF では決まった版（プロセスカラー・All・None）の名前のため、" + to + " として書き出しました");
         }
     }
+    if (key == "psd") {  // (PC2, the user's decision 5: what the PSD's adjustment layers hold of the correction layers)
+        for (std::string& note : psd_adjust_notes(episode)) notes.push_back(std::move(note));
+    }
     return notes;
 }
 
@@ -373,6 +382,86 @@ std::optional<std::string> ink_note(const core::Page& page) {
     }
     if (!page.color && !page.rgb) return std::nullopt;
     return "色モード・プロファイルを持つページは、動画にはその値のまま書けないため、画面の色（sRGB）から変換して書き出しました";
+}
+
+std::string bake_cube(const core::Document& doc, const core::Page& page, int size_in, const std::string& title, std::vector<std::string>* skipped) {
+    const std::uint32_t n = static_cast<std::uint32_t>(std::clamp(size_in, 2, 256));
+    const double step = 1.0 / (n - 1);
+    const render::RgbSpace space = render::RgbSpace::of(page);
+    // the correction layers, each drawn as the page draws it (made once: one this build does not draw is left out)
+    struct Step {
+        const core::Layer* layer;
+        std::optional<core::Exposure> exposure;
+        core::AdjustPtr function;
+        std::string blend;
+    };
+    std::vector<Step> steps;
+    const auto skip = [skipped](const core::Layer& layer) {
+        if (skipped != nullptr && std::find(skipped->begin(), skipped->end(), layer.id) == skipped->end()) skipped->push_back(layer.id);
+    };
+    for (const core::Layer& layer : page.layers) {
+        if (layer.kind != core::LayerKind::Adjust || !layer.visible || !layer.adjust || !layer.adjust->is_object()) continue;
+        Step one{&layer, std::nullopt, nullptr, core::native_of(*layer.adjust).blend};
+        try {
+            if (layer.adjust->value("kind", core::Json()) == core::Json("exposure")) {
+                one.exposure = core::Exposure::parse(*layer.adjust);
+            } else {
+                one.function = render::correction_of(layer, page, &doc);
+                if (!one.function) continue;
+            }
+        } catch (const render::NotYetPorted&) {
+            skip(layer);
+            continue;
+        } catch (const core::Error& error) {
+            if (error.code() != "not_yet_ported" && error.code() != "value") throw;
+            skip(layer);
+            continue;
+        }
+        steps.push_back(std::move(one));
+    }
+    std::string text = "TITLE \"" + replace_all(title, "\"", "'") + "\"\n# Created by Genko\nLUT_3D_SIZE " + std::to_string(n) +
+                       "\nDOMAIN_MIN 0.0 0.0 0.0\nDOMAIN_MAX 1.0 1.0 1.0\n";
+    text.reserve(text.size() + std::size_t(n) * n * n * 27);
+    // The lattice (x = b·n + r, y = g) in slabs of blue planes, each its own colour canvas (one holds 512 MiB at most:
+    // 256³ is past it); each slab's place on the lattice given to the corrections (a dither's).
+    const std::uint32_t planes = std::max<std::uint32_t>(1, std::min<std::uint32_t>(n, (std::uint32_t{1} << 22) / (n * n)));
+    for (std::uint32_t b0 = 0; b0 < n; b0 += planes) {
+        const std::uint32_t count = std::min(planes, n - b0);
+        const std::uint32_t w = count * n;
+        const std::string lattice = core::encode_color_pixels(w, n, "f32", [n, w, b0, step](std::size_t i) {
+            const std::size_t x = i % w, y = i / w;
+            return std::array<double, 4>{static_cast<double>(x % n) * step, static_cast<double>(y) * step, static_cast<double>(b0 + x / n) * step, 1.0};
+        });
+        const render::Size size{static_cast<int>(w), static_cast<int>(n)};
+        render::ColorCanvas canvas(render::Image::create("RGBA", size, render::Ink{0, 0, 0, 255}), space);
+        canvas.blend(core::ColorRasterView(lattice), size, render::Box{0, 0, size.width, size.height}, 1.0, false);
+        for (const Step& one : steps) {
+            if (skipped != nullptr && std::find(skipped->begin(), skipped->end(), one.layer->id) != skipped->end()) continue;
+            try {
+                if (one.exposure) {
+                    canvas.expose(*one.exposure, one.layer->opacity, false, nullptr, one.blend);
+                } else {
+                    canvas.adjust(*one.function, one.layer->opacity, false, nullptr, one.blend, render::Point{static_cast<int>(b0 * n), 0});
+                }
+            } catch (const core::Error& error) {
+                if (error.code() != "not_yet_ported" && error.code() != "value") throw;
+                skip(*one.layer);
+            }
+        }
+        const std::string baked = canvas.color_raster("f32");  // (held: the view reads these bytes)
+        const core::ColorRasterView out(baked);
+        for (std::uint32_t b = 0; b < count; ++b)  // (.cube: red fastest, then green, then blue)
+            for (std::uint32_t g = 0; g < n; ++g)
+                for (std::uint32_t r = 0; r < n; ++r) {
+                    const auto p = out.pixel(std::size_t(g) * w + b * n + r);
+                    for (std::size_t c = 0; c < 3; ++c) {
+                        if (c > 0) text += ' ';
+                        core::lut3d::append_fixed6(text, std::clamp(p[c], 0.0, 1.0));
+                    }
+                    text += '\n';
+                }
+    }
+    return text;
 }
 
 core::Json run(const core::Document& episode_in, const std::optional<std::filesystem::path>& project, std::string_view key,

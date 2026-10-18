@@ -21,6 +21,7 @@ class QGridLayout;
 class QLineEdit;
 class QSpinBox;
 class QTabWidget;
+class QTimer;
 class QVBoxLayout;
 
 // カラー: the colour panel (Python's genko/app/colours.py, J4) — a square of saturation and brightness with a hue bar,
@@ -115,6 +116,7 @@ class ColourPanel : public QWidget {
     Q_OBJECT
 public:
     ColourPanel(BrushPanel* brush, QWidget* parent = nullptr);
+    ~ColourPanel() override;
 
     Rgb rgb() const;
     const Rgb& sub_rgb() const { return sub_rgb_; }
@@ -192,6 +194,7 @@ private:
     bool loading_ = false;
     Rgb sub_rgb_{255, 255, 255};
     std::vector<Rgb> history_;
+    QTimer* history_write_ = nullptr;  // (履歴 written to the settings a moment after a run of lines)
     std::array<Rgb, 4> corners_{};
     std::vector<colours::ColourSet> sets_;
     QGridLayout* set_grid_ = nullptr;

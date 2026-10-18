@@ -58,7 +58,10 @@
 #include "render/draw.hpp"
 #include "render/fill.hpp"
 #include "render/filters.hpp"
+#include "render/import_profile.hpp"
+#include "render/proof.hpp"
 #include "render/op_limits.hpp"
+#include "render/ops_adjust.hpp"
 #include "render/ops_registry.hpp"
 #include "render/page.hpp"
 #include "render/color_canvas.hpp"
@@ -833,12 +836,15 @@ std::pair<std::string, bool> composite_color_layers(const Document& doc, const P
     for (const auto i : layers) {
         const Layer& layer = page.layers[i];
         if (layer.kind == LayerKind::Folder) continue;
-        if (!ColorCanvas::supports_blend(layer.blend))
-            throw NotYetPorted("high-precision merge blend:" + layer.blend);
-        if (!layer.blend.empty() && layer.blend!="normal" && !out.is_opaque())
+        // (a correction layer's own blend is not looked at, as Python does not: its native.blend — the user's decision 2
+        // of PC2 — below)
+        const std::string blend = layer.kind == LayerKind::Adjust ? (layer.adjust ? core::native_of(*layer.adjust).blend : std::string("normal"))
+                                                                  : layer.blend;
+        if (!ColorCanvas::supports_blend(blend))
+            throw NotYetPorted("high-precision merge blend:" + blend);
+        if (!blend.empty() && blend != "normal" && !out.is_opaque())
             throw NotYetPorted("high-precision merge blend depends on external background");
         if (layer.kind == LayerKind::Adjust) {
-            if (!layer.blend.empty() && layer.blend!="normal")throw NotYetPorted("high-precision merge adjustment blend");
             adjustment = true;
             if (!layer.adjust || !layer.adjust->is_object() || layer.adjust->value("kind", Json()) != "exposure") {
                 if (layer.adjust && layer.adjust->is_object() && layer.adjust->value("kind", Json()).is_string() &&
@@ -848,13 +854,13 @@ std::pair<std::string, bool> composite_color_layers(const Document& doc, const P
                     std::find(core::kShapeFilters.begin(), core::kShapeFilters.end(),
                               layer.adjust->value("kind", Json()).get<std::string>()) != core::kShapeFilters.end())
                     throw NotYetPorted("high-precision merge of a correction that moves shapes");
-                const auto correction = correction_of(layer);
+                const auto correction = correction_of(layer, page, &doc);
                 if (!correction || layer.opacity <= 0) continue;
                 if (!out.is_opaque()) throw NotYetPorted("high-precision merge adjustment depends on external background");
                 std::optional<Image> mask;
                 if (layer.mask && layer.mask->enabled && layer.mask->png && !layer.mask->png->empty())
                     mask = read_png(*layer.mask->png).convert("L").resize(size, Resample::Bicubic);
-                out.adjust(*correction, layer.opacity, layer.clip, mask ? &*mask : nullptr);
+                out.adjust(*correction, layer.opacity, layer.clip, mask ? &*mask : nullptr, blend);
                 continue;
             }
             std::optional<Image> mask;
@@ -863,8 +869,14 @@ std::pair<std::string, bool> composite_color_layers(const Document& doc, const P
             const auto exposure = core::Exposure::parse(*layer.adjust);
             if (layer.opacity > 0 && (exposure.stops != 0 || exposure.offset != 0 || exposure.gamma != 1) && !out.is_opaque())
                 throw NotYetPorted("high-precision merge adjustment depends on external background");
-            out.expose(exposure, layer.opacity, layer.clip, mask ? &*mask : nullptr);
+            out.expose(exposure, layer.opacity, layer.clip, mask ? &*mask : nullptr, blend);
             floating = true; // An adjustment can produce HDR even from a u16 input.
+        } else if (precise_layer_styled(layer)) {
+            // (PC2d: with what is drawn on it — lines on its pixels, pictures, effects, its colour — as the page draws it)
+            participate(layer);
+            if (layer.color_raster) floating = floating || core::ColorRasterView(*layer.color_raster).metadata("")["precision"] == "f32";
+            if (layer.strokes) for (const auto& stroke : layer.strokes->items) if (stroke->color_rgb && (*stroke->color_rgb)["precision"]=="f32") floating=true;
+            blend_precise_layer(out, page, layer, kWorkingDpi, all, &doc);
         } else if (core::has_color_strokes(layer)) {
             participate(layer);
             for (const auto& stroke : layer.strokes->items) if (stroke->color_rgb && (*stroke->color_rgb)["precision"]=="f32") floating=true;
@@ -1512,11 +1524,12 @@ void paste(OpContext& c) {
     }
     if (page.layers[ti].color_raster) {  // drawn into the precise pixels (render/color_edit)
         for (core::Patch& patch : items.patches) color_edit::patch_to_srgb(patch, doc);  // (color-model@1: its sRGB, brought in)
-        Layer pasted;
+        Layer pasted;  // (cut at the panels as the layer's own lines and pictures are)
         pasted.id = page.layers[ti].id;
         pasted.role = LayerRole::User;
         pasted.kind = LayerKind::Raster;
-        pasted.panel_clip = false;
+        pasted.panel_clip = page.layers[ti].panel_clip;
+        pasted.panel_each = page.layers[ti].panel_each;
         selection::drop(pasted, std::move(items), selection::Matrix{m[0], m[1], m[2], m[3], m[4], m[5]}, true);
         Layer& target = page.layers[ti];
         precise_edit(target, [&] { return color_edit::paste(page, target, pasted, &doc); });
@@ -1864,9 +1877,19 @@ void put_raster(OpContext& c) {
     }
     Layer& layer = page.layers[li];
     if (layer.locked) throw OpError("the layer is locked");  // (Python replaces its pixels)
+    // (PC2d, the C++ build's own embedded_profile: the picture's colours taken from its profile or the op's into the
+    // page's space; none, or keep: its numbers as they are, Python's)
+    std::optional<Image> picture;
+    import_profile::Taking way;
+    if (op.contains("embedded_profile")) {
+        picture = open_image(blob, kPillowOpenLimits);
+        way = import_profile::taking(doc, page, op, proof::embedded_profile(blob), picture->mode());
+        c.report = Json::object({{"embedded_profile", import_profile::report(way)}});
+    }
     layer.kind = LayerKind::Raster;
     if (page.color) {  // (color-mode@1: a CMYK or Lab page's paint layer holds the picture as the page's inks)
-        layer.ink_raster = std::make_shared<const std::string>(core::encode_ink_raster(ink::picture_inks(blob, *page.color)));
+        const core::InkPixels inks = way.converting ? import_profile::taken_inks(*picture, way, *page.color) : ink::picture_inks(blob, *page.color);
+        layer.ink_raster = std::make_shared<const std::string>(core::encode_ink_raster(inks));
         layer.ink_memo = {};
         layer.raster_png = nullptr;
         layer.raster_memo = {};
@@ -1875,6 +1898,7 @@ void put_raster(OpContext& c) {
         if (layer.role == LayerRole::Name || layer.role == LayerRole::Draft) layer.exportable = false;
         return;
     }
+    if (way.converting) blob = write_png(import_profile::taken(*picture, way, page));
     layer.raster_png = std::make_shared<const std::string>(std::move(blob));
     const std::string name = layer.role == LayerRole::User ? "user-" + layer.id : std::string(core::to_string(layer.role));
     layer.raster_relpath = raster::page_folder(page) + "/" + name + ".png";
@@ -2174,13 +2198,18 @@ void filter_raster(OpContext& c) {
                 throw OpError(error.what());
             }
         };
+        std::optional<adjust_ops::FilterWork> own;  // (PC2: a kind of the C++ build's own, or a native: render/ops_adjust)
         refused([&] {
             if (kind.starts_with("plugin:")) plugin_on_precise(kind);
-            color_filters::check(kind, params);
+            if (adjust_ops::handles(op)) own = adjust_ops::filter_work(doc, page, kind, params);
+            if (!own || own->python) color_filters::check(kind, own ? own->params : params);
         });
         // (its area read after the settings, as the 8-bit op reads it)
         const std::optional<Json> area = core::truthy_at(op, "area") ? std::optional<Json>(core::op_area(op)) : std::nullopt;
-        std::string pixels = refused([&] { return color_filters::apply(page, layer, kind, params, area ? &*area : nullptr); });
+        std::string pixels = refused([&] {
+            if (own && !own->python) return adjust_ops::filter_precise(*own, doc, page, layer, kind, area ? &*area : nullptr);
+            return color_filters::apply(page, layer, kind, own ? own->params : params, area ? &*area : nullptr);
+        });
         layer.color_raster = std::make_shared<const std::string>(std::move(pixels));
         return;
     }
@@ -2202,11 +2231,18 @@ void filter_raster(OpContext& c) {
                 throw OpError(error.what());
             }
         };
-        refused([&] { color_filters::check(kind, params); });
+        std::optional<adjust_ops::FilterWork> own;  // (PC2: a kind of the C++ build's own, or a native: render/ops_adjust)
+        refused([&] {
+            if (adjust_ops::handles(op)) own = adjust_ops::filter_work(doc, page, kind, params);
+            if (!own || own->python) color_filters::check(kind, own ? own->params : params);
+        });
         const std::optional<Json> area = core::truthy_at(op, "area") ? std::optional<Json>(core::op_area(op)) : std::nullopt;
         const bool marks = layer.stroke_count() > 0 || !layer.patches.empty();
         const core::InkPixels inks = ink_edit::with_marks(page, layer, &doc);
-        std::string pixels = refused([&] { return ink_filters::apply(page, inks, kind, params, area ? &*area : nullptr); });
+        std::string pixels = refused([&] {
+            if (own && !own->python) return adjust_ops::filter_inks(*own, doc, page, inks, kind, area ? &*area : nullptr);
+            return ink_filters::apply(page, inks, kind, own ? own->params : params, area ? &*area : nullptr);
+        });
         layer.ink_raster = std::make_shared<const std::string>(std::move(pixels));
         layer.ink_memo = {};
         if (marks) {  // (as raster.bake_vectors leaves the layer: its marks in its pixels)
@@ -2228,8 +2264,16 @@ void filter_raster(OpContext& c) {
     }
     Image filtered;
     try {
-        filtered = kind.starts_with("plugin:") ? plugin_work([&] { return plugins::run(kind, image, params); })
-                                               : filters::apply_filter(image, kind, params);
+        // (PC2: a kind of the C++ build's own, or a native: render/ops_adjust)
+        std::optional<adjust_ops::FilterWork> own;
+        if (!kind.starts_with("plugin:") && adjust_ops::handles(op)) own = adjust_ops::filter_work(doc, page, kind, params);
+        if (own && !own->python) {
+            const std::optional<Json> area = core::truthy_at(op, "area") ? std::optional<Json>(core::op_area(op)) : std::nullopt;
+            filtered = adjust_ops::filter_eight(*own, doc, page, image, kind, area ? &*area : nullptr);
+        } else {
+            filtered = kind.starts_with("plugin:") ? plugin_work([&] { return plugins::run(kind, image, params); })
+                                                   : filters::apply_filter(image, kind, own ? own->params : params);
+        }
     } catch (const core::PyUncaught&) {
         throw;
     } catch (const core::Error& error) {

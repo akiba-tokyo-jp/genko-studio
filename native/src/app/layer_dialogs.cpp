@@ -24,6 +24,7 @@
 #include <variant>
 
 #include "app/ask.hpp"
+#include "core/adjust_tone.hpp"
 #include "core/filters.hpp"
 #include "render/plugins.hpp"
 
@@ -197,6 +198,19 @@ CurveEditor::CurveEditor(std::vector<std::array<double, 2>> points, QWidget* par
 
 QPointF CurveEditor::to_view(double x, double y) const { return QPointF(1 + x / 255 * kSide, 1 + (255 - y) / 255 * kSide); }
 
+void CurveEditor::set_points(std::vector<std::array<double, 2>> points) {
+    if (points.size() < 2) points = {{0, 0}, {255, 255}};
+    std::sort(points.begin(), points.end());
+    points_ = std::move(points);
+    drag_.reset();
+    update();
+}
+
+void CurveEditor::set_upstream(bool upstream) {
+    upstream_ = upstream;
+    update();
+}
+
 std::array<double, 2> CurveEditor::to_value(QPointF pos) const {
     const double x = std::clamp((pos.x() - 1) / kSide * 255, 0.0, 255.0);
     const double y = std::clamp(255 - (pos.y() - 1) / kSide * 255, 0.0, 255.0);
@@ -264,7 +278,12 @@ void CurveEditor::paintEvent(QPaintEvent*) {
     for (const auto& pt : points_) pts.push_back(Json::array({pt[0], pt[1]}));
     std::vector<int> table;
     try {
-        table = core::adjustment("curve", Json{{"points", pts}}).tables[0];
+        if (upstream_) {  // (PC2a: PhotoCraft's natural spline)
+            const std::vector<double> lut = core::upstream_curve(points_);
+            for (int x = 0; x < 256; ++x) table.push_back(static_cast<int>(std::lround(core::upstream_lut(lut, x / 255.0) * 255.0)));
+        } else {
+            table = core::adjustment("curve", Json{{"points", pts}}).tables[0];
+        }
     } catch (const std::exception&) {
         return;
     }

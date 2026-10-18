@@ -429,7 +429,12 @@ const std::vector<Rule>& rules() {
         r.push_back(rule(R"(the ICC profile cannot be used: .*)", "そのカラープロファイルは使えません"));
         r.push_back(rule(R"(the precise pixels cannot be kept: .*)", "高精度の画素が原稿の上限（1 GiB）を超えるため、変換できません"));
         r.push_back(rule(R"(page (\d+): the layer (.*?) (?:is|holds|keeps|has) .*: a page in precise colour \(16 or 32 bits, or of a profile\) cannot draw it yet)",
-                         "\\1 ページのレイヤー \\2 は、16・32 ビットやプロファイル付きのページではまだ描けません（トーン・描画モード・はみ出し・線・フォルダーなどを確かめてください）"));
+                         "\\1 ページのレイヤー \\2 は、16・32 ビットやプロファイル付きのページではまだ描けません（描画モードとレイヤーの種類を確かめてください）"));
+        // (PC2d: 取り込む画像のプロファイル, render/import_profile)
+        r.push_back(rule("embedded_profile is keep, convert or assign", "画像のプロファイルの扱いは keep・convert・assign のどれかです"));
+        r.push_back(rule(R"(embedded_profile assign needs the profile \(profile or icc\))", "割り当てるプロファイル（profile か icc）を指定してください"));
+        r.push_back(rule(R"(the profile is not one for the picture's colours.*)", "そのプロファイルは画像の色の空間のものではありません"));
+        r.push_back(rule(R"(embedded_profile assign takes an RGB or grey PSD.*)", "プロファイルを割り当てられるのは RGB かグレーの PSD だけです（CMYK・Lab の PSD は自分のプロファイルで取り込みます）"));
         r.push_back(rule("Lab PSD files are not supported: save it as RGB or CMYK", "Lab カラーの PSD は読めません。RGB か CMYK で保存し直してください"));
         r.push_back(rule("MP4 needs ffmpeg on this computer; WebP, GIF and PNG need nothing",
                          "MP4 にはこのパソコンに ffmpeg が要ります（WebP・GIF・PNG なら何も要りません）"));
@@ -533,6 +538,63 @@ const std::vector<Rule>& rules() {
         r.push_back(rule("kind must be one of tone, effect, image, lines, lettering, brush, prim", "素材の種類が違います"));
         r.push_back(rule("adjust is set on a correction layer", "補正の設定は、色調補正のレイヤーにだけできます"));
         r.push_back(rule("adjust kind must be one of .*", "色調補正は、レベル補正・トーンカーブ・色相・反転・階調化・2 値化・グラデーションマップ・白黒から選びます"));
+        // (PC2, adjustments@1 — the C++ build's own: a correction's native settings and kinds, core/adjust)
+        r.push_back(rule(R"(adjust kind '(.*)' is not a correction layer's kind)", "「\\1」は色調補正のレイヤーの種類ではありません"));
+        // (PC2a — the tone corrections' own: set_adjustment, auto_adjust and a colour lookup's table, render/ops_adjust, core/lut3d)
+        r.push_back(rule("set_adjustment needs the id of a correction layer", "設定を変える色調補正のレイヤーを選びます"));
+        r.push_back(rule(R"(layer \S+ is not a correction layer)", "そのレイヤーは色調補正のレイヤーではありません"));
+        r.push_back(rule(R"(set_adjustment keeps the correction's kind.*)", "色調補正の種類は変えられません（補正のレイヤーを作り直します）"));
+        r.push_back(rule("auto_adjust mode must be one of tone, contrast, color", "自動補正は、自動トーン補正・自動コントラスト・自動カラー補正から選びます"));
+        r.push_back(rule("auto_adjust needs the id of a layer", "自動補正をかけるレイヤーを選びます"));
+        r.push_back(rule(R"(adjust color_lookup\.data must be the text of .*)", "カラールックアップの表は、.cube・.3dl・.look のファイルから読みます"));
+        r.push_back(rule(R"(adjust color_lookup\.data is larger than 64 MiB)", "カラールックアップの表のファイルが大きすぎます（64 MiB まで）"));
+        r.push_back(rule(R"(adjust color_lookup\.data: .*)", "カラールックアップの表のファイルが読めません（.cube・.3dl・.look の中身を確かめます）"));
+        r.push_back(rule(R"((?:the correction layer \S+: )?adjust color_lookup\.lut: the book holds no lookup table .*)",
+                         "この原稿にはそのカラールックアップの表がありません（表のファイルを読み込み直します）"));
+        r.push_back(rule(R"(the lookup table \S+ is not held: the book is not written)",
+                         "カラールックアップの表が見つからないので、原稿を保存しませんでした"));
+        r.push_back(rule(R"(adjust (\S+?)(?: native)?(?:\.\S+)? has no setting '(.*)')", "色調補正（\\1）に「\\2」という設定はありません"));
+        r.push_back(rule(R"(adjust (\S+?)(?: native)?\.(\S+) (?:must|needs|has no channel) .*)", "色調補正（\\1）の「\\2」の値が使えません"));
+        r.push_back(rule(R"(adjust (\S+?) native: a (Lab|multichannel) page cannot composite the blend '(.*)')", [](const QRegularExpressionMatch& m) {
+            return QStringLiteral("%1 のページでは、描画モード「%2」の色調補正を合成できません")
+                .arg(m.captured(2) == QStringLiteral("Lab") ? QStringLiteral("Lab") : QStringLiteral("マルチチャンネル"), m.captured(3));
+        }));
+        r.push_back(rule(R"(filter \S+: native\.blend is a correction layer's.*)",
+                         "描画モードは色調補正のレイヤーのものです（フィルターの結果を描画モードで重ねるには、フェードを使います）"));
+        // (PC2c — the C++ build's own: the local corrections, HDR toning, Apply Image, Calculations, trapping, the fade)
+        r.push_back(rule(R"(adjust replace_color\.color is required)", "置き換える色を選びます"));
+        r.push_back(rule(R"(adjust match_color: give source or source_stats, not both)", "色の一致の元は、原稿の中の画像か、色の統計のどちらか 1 つです"));
+        r.push_back(rule(R"(adjust match_color\.source has no opaque pixels)", "色の一致の元に、色のある画素がありません"));
+        r.push_back(rule(R"(adjust match_color\.source(?:_stats)?(?:\.\S+)?[: ].*)", "色の一致の元の指定が使えません"));
+        r.push_back(rule(R"(trap works on a CMYK page.*)", "トラッピングは CMYK のページでだけ使えます"));
+        r.push_back(rule(R"(the layer \S+ holds no inks to trap)", "このレイヤーには、トラッピングするインキがありません"));
+        r.push_back(rule(R"(give width_px or width_mm, not both)", "トラッピングの幅は、px か mm のどちらかで指定します"));
+        r.push_back(rule(R"(the layer \S+ is not a paint layer \(pen or paint\))", "描画のレイヤー（ペン・ペイント）を選びます"));
+        r.push_back(rule(R"(id \(the (?:paint layer to trap|layer to fade)\) is required)", "対象のレイヤーが要ります"));
+        r.push_back(rule(R"(from \(the layer's pixels before.*\) is required)", "フェードする前の画素（from）が要ります"));
+        r.push_back(rule(R"(fade_layer reads the pixels before from the book's folder.*)", "フェードの前に、原稿を保存します（ファイル → 別の場所に保存）"));
+        r.push_back(rule(R"(the book has no asset \S+ \((?:a tile of )?the pixels before\))", "フェードする前の画素が、原稿の素材にありません"));
+        r.push_back(rule(R"(from as tiles is a precise layer's.*)", "タイルの形の前の画素（from）は、高精度のレイヤーのものです（ほかのレイヤーは素材の sha256 を渡します）"));
+        r.push_back(rule(R"(the pixels before are too large to read whole.*)",
+                         "フェードする前の画素が大きすぎて、丸ごとは読めません（素材 1 つ 256 MiB まで。高精度のレイヤーは project.json のタイルの形で渡せます）"));
+        // (independent review B (C): a local correction, a fade or an image calculation past the imaging budget)
+        r.push_back(rule(R"(the pixels are too large to work on at once.*)", "絵が大きすぎて、一度に処理できません（作業に使える記憶の上限を超えます）"));
+        r.push_back(rule(R"(from is not the pixels of this layer before.*)", "フェードする前の画素が、このレイヤーのものと合いません"));
+        r.push_back(rule(R"(the layer \S+ holds no pixels to fade)", "このレイヤーには、フェードする画素がありません"));
+        r.push_back(rule(R"(the layer \S+ holds lines or fills besides its pixels)", "線や塗りの残るレイヤーはフェードできません"));
+        r.push_back(rule(R"(give the layer \(id\) or the alpha or spot channel \(channel\) to apply the image to)",
+                         "画像操作の先は、レイヤーか、アルファ・特色チャンネルのどちらか 1 つです"));
+        r.push_back(rule(R"(no alpha or spot channel '(.*)' on page (\S+) .*)", "ページ \\2 にアルファ・特色チャンネル「\\1」はありません"));
+        r.push_back(rule(R"((?:source|source1|source2|mask): page (\S+) is not the same size as page (\S+))", "元のページ \\1 は、ページ \\2 と大きさが違います"));
+        r.push_back(rule(R"((?:source|source1|source2|mask): no channel '(.*)' on page (\S+))", "ページ \\2 にチャンネル「\\1」はありません"));
+        r.push_back(rule(R"((?:source|source1|source2|mask): no layer \S+ on page (\S+))", "ページ \\1 に元のレイヤーはありません"));
+        r.push_back(rule(R"((?:source|source1|source2|mask): the transparency is a layer's.*)", "透明部分はレイヤーのものです（元のレイヤーを選びます）"));
+        r.push_back(rule(R"((?:source|source1|source2|mask): the layer has no mask)", "元のレイヤーにマスクがありません"));
+        r.push_back(rule(R"(blending '(.*)' is not separable.*)", "描画モード「\\1」は、画像操作・演算では使えません"));
+        r.push_back(rule(R"(blending must be .*)", "描画モードの指定が違います"));
+        r.push_back(rule(R"(result must be channel, page or selection)", "演算の結果は、チャンネル・ページ・選択範囲のどれかです"));
+        r.push_back(rule(R"(curve must be a list of 2 to 19 points.*)", "トーンカーブの点は 2〜19 個です（入力・出力 0〜255）"));
+        r.push_back(rule(R"(no layer is showing)", "表示しているレイヤーがありません"));
         r.push_back(rule("choose two or more layers to merge", "結合するレイヤーを 2 枚以上選びます"));
         r.push_back(rule("effect is .* and/or .*", "境界効果は、フチか水彩境界です"));
         r.push_back(rule("fill is .* or .*", "塗りの設定は、色かグラデーションです"));

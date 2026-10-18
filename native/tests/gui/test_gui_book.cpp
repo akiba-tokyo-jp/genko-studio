@@ -1292,7 +1292,7 @@ private slots:
                                                "(clip_hdr: true cuts them and converts)")),
                  QStringLiteral("レイヤー ab12 (絵) に HDR の値（0〜1 の外）があるので、このままでは変換できません（clip_hdr: true で切って変換します）"));
         QCOMPARE(wording::error(QStringLiteral("page 2: the layer tn is a tone layer: a page in precise colour (16 or 32 bits, or of a profile) cannot draw it yet")),
-                 QStringLiteral("2 ページのレイヤー tn は、16・32 ビットやプロファイル付きのページではまだ描けません（トーン・描画モード・はみ出し・線・フォルダーなどを確かめてください）"));
+                 QStringLiteral("2 ページのレイヤー tn は、16・32 ビットやプロファイル付きのページではまだ描けません（描画モードとレイヤーの種類を確かめてください）"));
     }
 
     // ページの色モード…, color-model@1: grey and 32 bits among the modes and depths; each mode's profiles — the built-in

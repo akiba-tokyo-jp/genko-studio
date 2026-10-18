@@ -61,6 +61,10 @@ const std::map<std::string, const char*>& names() {
         {"set_exposures", "タイムラインを直した"}, {"set_camera_key", "カメラワークを直した"}, {"set_light_table", "ライトテーブルを直した"},
         {"replace_text", "台詞を置き換えた"}, {"set_assignee", "担当を決めた"}, {"define_brush", "ブラシを作った"}, {"approve", "承認した"},
         {"allow_chat_approval", "チャットでの承認を切り替えた"}, {"reject", "差し戻した"}, {"advance", "工程を進めた"},
+        // (PC2c, the C++ build's own: render/tone_ops, ops_calc, trap, ops_fade)
+        {"hdr_toning", "HDR トーンをかけた"}, {"apply_image", "画像操作をした"}, {"calculations", "演算をした"}, {"trap", "トラッピングした"},
+        {"fade_layer", "フェードした"},
+        {"set_adjustment", "色調補正の設定を変えた"}, {"auto_adjust", "自動で色調補正した"},  // (PC2a, SPEC COLOR-04)
     };
     return table;
 }

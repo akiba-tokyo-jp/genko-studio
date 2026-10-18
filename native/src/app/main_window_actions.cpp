@@ -625,7 +625,7 @@ void MainWindow::build_menus() {
     edit->addSeparator();
     for (const char* name : {"act_select_all", "act_deselect"}) edit->addAction(action(name));
     edit->addSeparator();
-    for (const char* name : {"act_assign_profile", "act_convert_profile", "act_color_settings"}) edit->addAction(action(name));  // (color-model@1)
+    for (const char* name : {"act_assign_profile", "act_convert_profile", "act_color_settings", "act_profile_info"}) edit->addAction(action(name));  // (color-model@1; PC2d)
     QMenu* view = bar->addMenu(QStringLiteral("表示"));
     for (const char* name : {"act_fit", "act_zoom_in", "act_zoom_out", "act_actual", "act_zoom_value", "act_zoom_tool"}) view->addAction(action(name));
     view->addSeparator();
@@ -705,6 +705,7 @@ void MainWindow::build_menus() {
     layers->addSeparator();
     layers->addAction(action("act_plugins"));
     layers->addAction(action("act_plugin_settings"));
+    build_adjust_menus(layers, edit);  // (PC2: レイヤー → 色調補正, app/main_window_adjust.cpp)
     QMenu* pages = bar->addMenu(QStringLiteral("ページ"));
     for (const char* name : {"act_add_page", "act_dup_page", "act_del_page"}) pages->addAction(action(name));
     pages->addSeparator();
@@ -890,6 +891,8 @@ void MainWindow::build_docks() {
     view_menu_->addAction(layers->toggleViewAction());
     layers_dock_ = layers;
     build_channel_dock();  // (チャンネル, a tab beside the layers: main_window_channels.cpp)
+    build_adjust_docks();  // (PC2a: 色調補正 and 属性, app/adjust_panels.cpp)
+    build_info_docks();    // (ヒストグラム, 情報: info_panels.cpp)
     build_line_dock();  // (台詞, a tab beside the pages and the layers: main_window_lines.cpp)
     pages_dock_->raise();
     build_colour_dock();  // (カラー, a tab beside the pages and the layers: main_window_paint.cpp)

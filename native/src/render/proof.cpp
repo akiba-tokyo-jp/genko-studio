@@ -12,6 +12,7 @@
 #include <map>
 #include <mutex>
 #include <utility>
+#include <cstdio>
 
 #include "core/color_raster.hpp"
 #include "core/error.hpp"
@@ -864,6 +865,165 @@ Image convert_picture(const Image& picture, std::string_view icc, std::string_vi
         cmsDoTransform(t.handle, bytes.data() + at * step, out.data() + at * (alpha ? 4 : 3), static_cast<cmsUInt32Number>(n));
     }
     return Image::frombytes(alpha ? "RGBA" : "RGB", in.size(), out);
+}
+
+namespace {
+
+std::string space_id(cmsColorSpaceSignature space) {
+    switch (space) {
+        case cmsSigRgbData: return "rgb";
+        case cmsSigGrayData: return "gray";
+        case cmsSigCmykData: return "cmyk";
+        case cmsSigLabData: return "lab";
+        case cmsSigXYZData: return "xyz";
+        default: return "other";
+    }
+}
+
+std::string class_id(cmsProfileClassSignature kind) {
+    switch (kind) {
+        case cmsSigDisplayClass: return "display";
+        case cmsSigOutputClass: return "output";
+        case cmsSigInputClass: return "input";
+        case cmsSigColorSpaceClass: return "colorspace";
+        case cmsSigAbstractClass: return "abstract";
+        case cmsSigLinkClass: return "link";
+        case cmsSigNamedColorClass: return "named";
+        default: return "other";
+    }
+}
+
+// A number as the JSON says it: four decimals.
+double four(double v) { return std::round(v * 10000.0) / 10000.0; }
+
+// How a tone curve is held.
+std::string curve_kind(const cmsToneCurve* curve) {
+    if (curve == nullptr) return "";
+    const int type = cmsGetToneCurveParametricType(curve);
+    if (type == 1) {
+        const cmsFloat64Number* p = cmsGetToneCurveParams(curve);
+        char text[32];
+        std::snprintf(text, sizeof text, "gamma %.4g", p != nullptr ? p[0] : 1.0);
+        return text;
+    }
+    if (type != 0) return "parametric (type " + std::to_string(type) + ")";
+    if (cmsIsToneCurveLinear(curve)) return "linear";
+    return "table (" + std::to_string(cmsGetToneCurveEstimatedTableEntries(curve)) + " points)";
+}
+
+}  // namespace
+
+core::Json profile_info(const core::Bytes& icc, bool lab) {
+    const bool own = !icc || icc->empty();
+    cmsHPROFILE handle = own ? (lab ? cmsCreateLab4Profile(nullptr) : cmsCreate_sRGBProfile())
+                             : cmsOpenProfileFromMem(icc->data(), static_cast<cmsUInt32Number>(icc->size()));
+    if (handle == nullptr) refuse("the ICC profile cannot be read");
+    const Profile held(handle);
+    const cmsColorSpaceSignature space = cmsGetColorSpace(handle);
+    const cmsUInt32Number version = cmsGetEncodedICCversion(handle);
+    core::Json out = core::Json::object();
+    out["description"] = own ? std::string(core::builtin_profile(lab ? "lab-d50" : "srgb")->description) : core::icc_description(*icc);
+    out["space"] = space_id(space);
+    out["class"] = class_id(cmsGetDeviceClass(handle));
+    out["version"] = std::to_string(version >> 24) + "." + std::to_string((version >> 20) & 0xF);
+    const auto* white = static_cast<const cmsCIEXYZ*>(cmsReadTag(handle, cmsSigMediaWhitePointTag));
+    out["white"] = white != nullptr ? core::Json::array({four(white->X), four(white->Y), four(white->Z)}) : core::Json(nullptr);
+    std::string trc;
+    if (space == cmsSigGrayData) {
+        trc = curve_kind(static_cast<const cmsToneCurve*>(cmsReadTag(handle, cmsSigGrayTRCTag)));
+    } else if (space == cmsSigRgbData) {
+        trc = curve_kind(static_cast<const cmsToneCurve*>(cmsReadTag(handle, cmsSigRedTRCTag)));
+    }
+    out["trc"] = trc.empty() ? core::Json(nullptr) : core::Json(trc);
+    out["lut"] = cmsIsTag(handle, cmsSigAToB0Tag) || cmsIsTag(handle, cmsSigAToB1Tag) || cmsIsTag(handle, cmsSigAToB2Tag) ||
+                 cmsIsTag(handle, cmsSigBToA0Tag);
+    core::Json intents = core::Json::array();
+    for (std::size_t i = 0; i < core::kIntents.size(); ++i) {
+        if (cmsIsIntentSupported(handle, static_cast<cmsUInt32Number>(i), LCMS_USED_AS_INPUT)) intents.push_back(std::string(core::kIntents[i]));
+    }
+    out["intents"] = std::move(intents);
+    out["bytes"] = own ? 0 : static_cast<std::int64_t>(icc->size());
+    return out;
+}
+
+core::Json builtin_profile_list() {
+    core::Json out = core::Json::array();
+    for (const core::BuiltinProfile& p : core::builtin_profiles()) {
+        out.push_back(core::Json{{"id", std::string(p.id)}, {"description", std::string(p.description)}, {"space", std::string(core::to_string(p.space))}});
+    }
+    return out;
+}
+
+core::Json profile_info_of(const core::Document& doc, std::string_view spec) {
+    const std::string name(spec);
+    core::Json out;
+    std::optional<std::int64_t> page_number;
+    if (!name.empty() && std::all_of(name.begin(), name.end(), [](char c) { return c >= '0' && c <= '9'; }) && name.size() < 10) {
+        page_number = std::stoll(name);
+        const core::Page* page = nullptr;
+        for (std::size_t i = 0; i < doc.pages.size(); ++i) {
+            if (doc.pages[i]->index == core::Num(*page_number) && !doc.is_deferred(i)) page = &doc.page(i);
+        }
+        if (page == nullptr) throw core::Error("key", "no page " + name);
+        if (page->color && page->color->space == core::InkSpace::Multi) {
+            // (its plates have no profile — assign_profile refuses one —: none said, not Little CMS's sRGB)
+            out = core::Json{{"description", nullptr}, {"space", "multichannel"}};
+        } else if (page->color) {
+            out = profile_info(page->color->space == core::InkSpace::Lab ? nullptr : page->color->icc, page->color->space == core::InkSpace::Lab);
+        } else {
+            out = profile_info(page->rgb ? page->rgb->icc : nullptr);
+        }
+        out["page"] = *page_number;
+    } else if (name.starts_with("sha256:")) {
+        core::Bytes icc;
+        bool lab = false;
+        if (const core::BuiltinProfile* builtin = core::builtin_profile_by_ref(name)) {
+            icc = builtin->bytes;
+        } else {
+            const auto held = [&](const std::optional<core::PageColor>& inks, const std::optional<core::RgbMode>& rgb) {
+                if (inks && inks->profile == name && inks->icc) icc = inks->icc;
+                if (rgb && rgb->profile == name && rgb->icc) icc = rgb->icc;
+            };
+            held(doc.color, doc.rgb);
+            for (std::size_t i = 0; i < doc.pages.size() && !icc; ++i) {
+                if (!doc.is_deferred(i)) held(doc.page(i).color, doc.page(i).rgb);
+            }
+            if (!icc) throw core::Error("key", "the book has no ICC profile " + name);
+        }
+        out = profile_info(icc, lab);
+    } else {
+        const core::BuiltinProfile* builtin = core::builtin_profile(name);
+        if (builtin == nullptr) throw core::Error("key", "no profile " + name + " (a built-in id, a page's number or sha256:…)");
+        out = profile_info(builtin->bytes, builtin->space == core::ProfileSpace::Lab);
+        out["id"] = std::string(builtin->id);
+    }
+    out["builtins"] = builtin_profile_list();
+    return out;
+}
+
+core::Json proof_values(const Setup& setup, int r, int g, int b) {
+    const unsigned char rgb[3] = {static_cast<unsigned char>(std::clamp(r, 0, 255)), static_cast<unsigned char>(std::clamp(g, 0, 255)),
+                                  static_cast<unsigned char>(std::clamp(b, 0, 255))};
+    core::Json values = core::Json::array();
+    if (!setup.icc || setup.icc->empty()) {  // (Genko's own CMYK for print, as 「CMYK で見る」)
+        const Image one = Image::frombytes("RGB", Size{1, 1}, std::string(reinterpret_cast<const char*>(rgb), 3));
+        const std::string cmyk = colour::to_cmyk(one, setup.export_icc, colour::kInkLimit, setup.intent).tobytes();
+        for (int c = 0; c < 4; ++c) values.push_back(four(static_cast<unsigned char>(cmyk[static_cast<std::size_t>(c)]) / 255.0));
+        return core::Json{{"space", "cmyk"}, {"values", std::move(values)}};
+    }
+    const Profile proof = open(setup.icc);
+    const cmsColorSpaceSignature space = cmsGetColorSpace(proof.handle);
+    const Profile srgb(cmsCreate_sRGBProfile());
+    const cmsUInt32Number format = space == cmsSigCmykData ? TYPE_CMYK_DBL : space == cmsSigGrayData ? TYPE_GRAY_DBL : TYPE_RGB_DBL;
+    const Transform t(cmsCreateTransform(srgb.handle, TYPE_RGB_8, proof.handle, format, intent_number(setup.intent),
+                                         (setup.bpc ? cmsFLAGS_BLACKPOINTCOMPENSATION : 0) | kNoCache));
+    if (t.handle == nullptr) refuse("the colour cannot be converted to the proof profile");
+    double out[4] = {0, 0, 0, 0};
+    cmsDoTransform(t.handle, rgb, out, 1);
+    const int n = space == cmsSigCmykData ? 4 : space == cmsSigGrayData ? 1 : 3;
+    // (Little CMS's doubles: CMYK in percent, grey and RGB 0..1)
+    for (int c = 0; c < n; ++c) values.push_back(four(space == cmsSigCmykData ? out[c] / 100.0 : out[c]));
+    return core::Json{{"space", space_id(space)}, {"values", std::move(values)}};
 }
 
 }  // namespace genko::render::proof

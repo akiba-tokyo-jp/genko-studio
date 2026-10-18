@@ -3,12 +3,14 @@
 #include <algorithm>
 #include <vector>
 
+#include "core/adjust.hpp"
 #include "core/brushes.hpp"
 #include "core/channels.hpp"
 #include "core/error.hpp"
 #include "core/color_raster.hpp"
 #include "core/exposure.hpp"
 #include "core/ids.hpp"
+#include "core/lut3d.hpp"
 #include "core/pyconv.hpp"
 #include "core/ruby.hpp"
 #include "core/strokes.hpp"
@@ -342,6 +344,14 @@ Json project_payload_v4(const core::Document& doc, AssetStore& store) {
     for (const auto& line : doc.story) {
         if (core::ruby::uses_feature(line)) features.emplace_back(core::kRubyLayoutFeature);
     }
+    // PC2a (adjustments@1): the 3D lookup tables the book's color_lookup corrections use (only those)
+    for (const std::string& ref : core::lut3d::refs_of(doc)) {
+        const auto table = doc.luts.find(ref);
+        if (table == doc.luts.end() || !table->second) {
+            throw core::Error("value", "the lookup table " + ref + " of a color_lookup correction is not held: the book is not written");
+        }
+        store.put_known(ref, *table->second, core::lut3d::kSuffix);
+    }
     core::validate_ink_document(doc);
     core::validate_color_model(doc);
     bool modes = doc.color.has_value() || doc.rgb.has_value() || doc.text_gamma.has_value();
@@ -351,6 +361,9 @@ Json project_payload_v4(const core::Document& doc, AssetStore& store) {
     core::validate_channels(doc);
     std::erase(features, std::string(core::kChannelsFeature));  // (named while a page has a channel)
     if (core::uses_channels(doc)) features.emplace_back(core::kChannelsFeature);
+    core::validate_adjustments(doc);
+    std::erase(features, std::string(core::kAdjustmentsFeature));  // (named while a correction uses it)
+    if (core::uses_adjustments(doc)) features.emplace_back(core::kAdjustmentsFeature);
     std::sort(features.begin(), features.end());
     features.erase(std::unique(features.begin(), features.end()), features.end());
 

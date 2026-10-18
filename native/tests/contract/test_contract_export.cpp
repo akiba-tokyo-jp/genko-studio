@@ -4,11 +4,17 @@
 // (render_harness.py export-cases) and by this build into the same folders, what it returned or raised the same, and
 // every file it wrote the same bytes (export_files.hpp: only the times Python's files carry are left out). The
 // encoders on their own first (render_harness.py save-cases): PNG, JPEG and TIFF as Pillow writes them, byte for byte.
+// The user's decision 5 (PC2a, SPEC.md COLOR-04): this build writes a book's correction layers into its PSDs as
+// adjustment layers, where psd.py puts them into the merged picture only; the calls are compared with Python's as
+// psd.py writes PSDs (render::psd::PythonView), and each PSD call is made again as this build writes them: the same
+// files but adjustment layers among the layers (psdAdjustmentLayers) — a PSD of no correction layer Python's very bytes.
 // Skipped without the Python reference.
 
 #include <QtTest>
 
+#include <QCryptographicHash>
 #include <QDir>
+#include <QDirIterator>
 #include <QFile>
 #include <QTemporaryDir>
 #include <QThread>
@@ -38,6 +44,8 @@
 #include "render/image.hpp"
 #include "render/not_yet_ported.hpp"
 #include "render/page.hpp"
+#include "render/psd.hpp"
+#include "render/psd_adjust.hpp"
 #include "rendertest.hpp"
 #include "storage/asset_store.hpp"
 #include "storage/reader.hpp"
@@ -97,6 +105,38 @@ Json paths(const std::vector<fs::path>& files) {
     return out;
 }
 
+// A PSD's layers as render::psd reads them (each layer's settings and its picture's and mask's sha256), its size, mode,
+// dpi and merged picture — its adjustment layers (correction layers, the user's decision 5) left out and counted in
+// `adjustments`, a folder's index counted without them.
+Json psd_layers(const std::string& data, int* adjustments) {
+    const auto digest = [](const std::optional<genko::render::Image>& image) {
+        if (!image) return Json(nullptr);
+        const std::string bytes = std::string(image->mode()) + "|" + std::to_string(image->width()) + "x" + std::to_string(image->height()) + "|" +
+                                  image->tobytes();
+        return Json(QCryptographicHash::hash(QByteArrayView(bytes.data(), static_cast<qsizetype>(bytes.size())), QCryptographicHash::Sha256).toHex().toStdString());
+    };
+    const genko::render::psd::File file = genko::render::psd::File::read(data);
+    std::vector<std::int64_t> index(file.layers().size(), -1);
+    std::int64_t kept = 0;
+    for (std::size_t i = 0; i < file.layers().size(); ++i)
+        if (!file.layers()[i].adjust) index[i] = kept++;
+    Json layers = Json::array();
+    for (const genko::render::psd::Layer& layer : file.layers()) {
+        if (layer.adjust) {
+            ++*adjustments;
+            continue;
+        }
+        layers.push_back(Json{{"name", layer.name}, {"folder", layer.folder}, {"parent", layer.parent ? Json(index[*layer.parent]) : Json(nullptr)},
+                              {"opacity", layer.opacity}, {"visible", layer.visible}, {"blend", layer.blend}, {"clip", layer.clip}, {"kind", layer.kind},
+                              {"image", layer.folder ? Json(nullptr) : digest(file.image(layer))},
+                              {"mask", layer.folder ? Json(nullptr) : digest(file.mask(layer))}});
+    }
+    Json skipped = Json::array();
+    for (const std::string& name : file.skipped()) skipped.push_back(name);
+    return Json{{"size", Json::array({file.width(), file.height()})}, {"dpi", file.dpi()}, {"mode", file.mode_name()}, {"skipped", skipped},
+                {"merged", digest(file.merged())}, {"layers", layers}};
+}
+
 }  // namespace
 
 class TestContractExport : public QObject {
@@ -108,6 +148,7 @@ class TestContractExport : public QObject {
     QString out_py_;
     Json jobs_ = Json::array();
     Json results_;
+    Json view_results_ = Json::object();  // (each call's reply in exports(): PSDs as psd.py writes them)
 
     void add(const std::string& id, const std::string& book, const std::string& call, const std::string& dest, Json kwargs = Json::object()) {
         jobs_.push_back(Json{{"id", id}, {"book", u8(books_) + "/" + book}, {"call", call}, {"dest", u8(out_) + "/" + dest}, {"kwargs", kwargs}});
@@ -573,9 +614,11 @@ private slots:
     void exports() {
         int compared = 0;
         int files = 0;
+        const genko::render::psd::PythonView python_view;  // (PSDs as psd.py writes them: the user's decision 5)
         for (const Json& job : jobs_) {
             const std::string id = job["id"].get<std::string>();
             const Json got = call(job);
+            view_results_[id] = got;
             const Json& want = results_[id];
             if (want.contains("error")) {
                 QVERIFY2(got.contains("error") && same_error(got["error"], want["error"]),
@@ -596,6 +639,77 @@ private slots:
         qInfo("exports: %d calls, %d files the same (%d byte for byte; the others only their times differ)", compared, files, identical);
         QVERIFY(compared >= 150);
         QVERIFY(files >= 400);
+    }
+
+    // The user's decision 5 (PC2a, SPEC.md COLOR-04): each PSD call made again as this build writes PSDs — the same
+    // reply but the notes on what Photoshop shows otherwise, and each file the one Python's view wrote (exports()) with
+    // adjustment layers among its layers: the same size, mode, dpi and merged picture, the other layers and the skipped
+    // ones the same. The books' correction layers make some.
+    void psdAdjustmentLayers() {
+        if (view_results_.empty()) QSKIP("exports() did not run");
+        const std::string out_root = u8(out_);
+        const std::string own_root = u8(scratch_.path() + "/out_own");
+        int calls = 0, files = 0, adjustments = 0, same = 0;
+        for (const Json& job : jobs_) {
+            const std::string id = job["id"].get<std::string>();
+            const std::string fn = job["call"].get<std::string>();
+            const bool psd = fn == "export_psd_pages" || fn == "export_psd" || (fn == "run" && job["kwargs"].value("key", std::string()) == "psd");
+            if (!psd || !view_results_.contains(id) || view_results_[id].contains("error")) continue;
+            const std::string dest = job["dest"].get<std::string>();
+            QVERIFY2(dest.starts_with(out_root), dest.c_str());
+            Json own_job = job;
+            own_job["dest"] = own_root + dest.substr(out_root.size());
+            const Json got = call(own_job);
+            QVERIFY2(!got.contains("error"), (id + ": " + got.dump()).c_str());
+            // the reply: the view's, at the other place, and the notes
+            std::string text = got["result"].dump();
+            for (std::size_t at = text.find(own_root); at != std::string::npos; at = text.find(own_root, at + out_root.size()))
+                text.replace(at, own_root.size(), out_root);
+            Json result = Json::parse(text);
+            if (result.is_object() && result.contains("notes")) {
+                for (const Json& note : result["notes"]) QVERIFY2(note.is_string() && !note.get<std::string>().empty(), (id + ": " + note.dump()).c_str());
+                result.erase("notes");
+            }
+            std::string where;
+            QVERIFY2(genko::test::strict_equal(result, view_results_[id]["result"], &where), (id + ": " + where + " " + text.substr(0, 1000)).c_str());
+            // the files
+            const QString own_dest = QString::fromStdString(own_job["dest"].get<std::string>());
+            QStringList own_files;
+            if (QFileInfo(own_dest).isDir()) {
+                for (QDirIterator it(own_dest, QDir::Files, QDirIterator::Subdirectories); it.hasNext();) own_files << it.next();
+            } else {
+                own_files << own_dest;
+            }
+            for (const QString& own_file : own_files) {
+                const std::string own_path = u8(own_file);
+                const QString view_file = QString::fromStdString(out_root + own_path.substr(own_root.size()));
+                const std::string mine = genko::test::read_bytes(own_file);
+                const std::string theirs = genko::test::read_bytes(view_file);
+                if (!own_file.endsWith(QStringLiteral(".psd"))) {
+                    QVERIFY2(mine == theirs, qPrintable(own_file));
+                    continue;
+                }
+                int own_adjustments = 0, view_adjustments = 0;
+                const Json own_layers = psd_layers(mine, &own_adjustments);
+                const Json view_layers = psd_layers(theirs, &view_adjustments);
+                QCOMPARE(view_adjustments, 0);
+                QVERIFY2(genko::test::strict_equal(own_layers, view_layers, &where), qPrintable(own_file + QStringLiteral(": ") + QString::fromStdString(where)));
+                if (own_adjustments == 0) {  // (no correction layer written: Python's very bytes, as this build writes PSDs)
+                    const QString python_file = QString::fromStdString(u8(out_py_) + own_path.substr(own_root.size()));
+                    QVERIFY2(mine == genko::test::read_bytes(python_file), qPrintable(own_file + QStringLiteral(" differs from Python's ") + python_file));
+                    QVERIFY2(mine == theirs, qPrintable(own_file));
+                    ++same;
+                }
+                adjustments += own_adjustments;
+                ++files;
+            }
+            ++calls;
+        }
+        qInfo("decision 5: %d PSD calls, %d PSD files: %d adjustment layers among their layers; %d files of no correction layer Python's bytes",
+              calls, files, adjustments, same);
+        QVERIFY(calls >= 8 && files >= 10);
+        QVERIFY(adjustments > 0);
+        QVERIFY(same > 0);
     }
 };
 

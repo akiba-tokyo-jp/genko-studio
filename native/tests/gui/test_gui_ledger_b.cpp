@@ -761,9 +761,11 @@ private slots:
         panel->add_fill();
         QCOMPARE(w->target_layer()->kind, core::LayerKind::Fill);
         QCOMPARE(*w->target_layer()->fill, (Json{{"rgb", Json::array({1, 2, 3})}}));
-        // a gradient map: its colours as they first are (the dialog accepted as it opens)
+        // a gradient map: its colours as they first are (the dialog accepted as it opens). (PC2a, the user's decision 3: the
+        // gradient map has the tone corrections' window, app/adjust_forms_tone — "adjust_dialog": the same colours, its
+        // reverse and dither besides)
         desk.answers->responder->exec = [](QDialog* dialog) {
-            return dialog->objectName() == QStringLiteral("gradient_map_dialog") ? static_cast<int>(QDialog::Accepted) : static_cast<int>(QDialog::Rejected);
+            return dialog->objectName() == QStringLiteral("adjust_dialog") ? static_cast<int>(QDialog::Accepted) : static_cast<int>(QDialog::Rejected);
         };
         QAction* map = titled(panel->special_menu(), QStringLiteral("グラデーションマップ…"));
         QVERIFY(map != nullptr);
@@ -772,8 +774,8 @@ private slots:
         const Json stops = (*w->target_layer()->adjust)["stops"];
         QCOMPARE(stops.size(), std::size_t{2});
         QCOMPARE(stops[0][1], Json(w->pen().rgb));
-        // 反転 (its own layer: no numbers to ask)
-        QAction* invert = titled(panel->special_menu(), QStringLiteral("色調反転…"));
+        // 反転 (its own layer: no numbers to ask; named as レイヤー → 色調補正 names it, Photoshop's name: the user's decision 8)
+        QAction* invert = titled(panel->special_menu(), QStringLiteral("階調の反転"));
         QVERIFY(invert != nullptr);
         invert->trigger();
         QCOMPARE(w->target_layer()->kind, core::LayerKind::Adjust);

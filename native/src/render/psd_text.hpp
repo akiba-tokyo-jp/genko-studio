@@ -8,6 +8,8 @@
 #include <string_view>
 #include <vector>
 
+#include "render/psd_descriptor.hpp"
+
 // PSD-01: Photoshop's text layer structures, written by the editable PSD (formats/psd_export.cpp) and read back by
 // render::psd::File (the structure checks): a text layer's TySh block — its transform, its TxLr descriptor (the text,
 // its orientation) and the text engine's EngineData (the characters' style runs, the paragraphs, the fonts) — and the
@@ -105,8 +107,6 @@ std::string lfx2(const Stroke& stroke);
 // Its stroke read back (none when it has none): core::Error("format") when it is not an lfx2 block.
 std::optional<Stroke> read_lfx2(std::string_view payload);
 
-// UTF-8 ↔ UTF-16 (the PSD's text).
-std::u16string utf16(std::string_view utf8);
-std::string utf8_of(std::u16string_view text);
+// (UTF-8 ↔ UTF-16, the PSD's text: utf16 and utf8_of, render/psd_descriptor.hpp)
 
 }  // namespace genko::render::psd

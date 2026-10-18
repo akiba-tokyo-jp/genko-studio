@@ -93,7 +93,7 @@ private:
     void drafts(const core::Json& fields);
     void paper();
     void add_special(const std::string& kind, const QString& title, const core::Json& fields);
-    std::optional<core::Json> adjust_fields(const std::string& kind, const core::Json& now = core::Json::object());
+    std::optional<core::Json> adjust_fields(const std::string& kind, const core::Json& now = core::Json::object(), core::Json* opened = nullptr);
     void border();
     void water_edge();
     void screen();
@@ -145,6 +145,7 @@ private:
         std::vector<core::Bytes> patches;
         std::string state;
         QIcon icon;
+        std::string checker;  // (what it is drawn over: the checker's size and colours)
     };
     std::map<std::string, Thumb> thumbs_;
 };

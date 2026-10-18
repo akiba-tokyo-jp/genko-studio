@@ -365,7 +365,10 @@ private slots:
 
     // A correction layer of another kind (an old book's, or a newer one's): one apply_filter does not know does nothing,
     // as on the 8-bit page; a plugin is left out of a preview and refused elsewhere (it runs in the external runner);
-    // one that moves shapes is refused on a precise page (not ported for precise pixels yet).
+    // one that moves shapes (PC2d, document:color-depth-model: refused before) is drawn on the page's values so far in
+    // their precision (render/color_filters, its sizes in the page's pixels as the 8-bit page takes them): the 8-bit
+    // page's picture within two levels but in a few samples (test corrections' measure), a part of the page the whole
+    // page's cut.
     void otherCorrections() {
         const auto doc = precise_of("u16", 200, [](std::uint32_t x, std::uint32_t y) { return eight_bit(x, y, false); });
         const auto with = [&doc](const Json& adjust) {
@@ -395,20 +398,32 @@ private slots:
 
         for (const char* kind : {"blur", "glow", "rain"}) {
             const auto shapes = with(Json{{"kind", kind}});
-            try {
-                core::validate_color_document(shapes);
-                QFAIL(kind);
-            } catch (const core::Error& error) {
-                QCOMPARE(QString::fromStdString(error.code()), QString("not_yet_ported"));
+            core::validate_color_document(shapes);
+            const auto drawn = render::render_page(shapes.page(0), 200, render::proof_options(), &shapes);
+            QVERIFY(drawn.omitted.empty());
+            const auto shown = drawn.image.tobytes();
+            QVERIFY(shown != plain);
+            auto eight = eight_bit_page_of(200, [](std::uint32_t x, std::uint32_t y) { return eight_bit(x, y, false); });
+            {
+                core::Layer layer; layer.id = "other"; layer.kind = core::LayerKind::Adjust; layer.adjust = Json{{"kind", kind}};
+                eight.edit_page(0).layers.push_back(layer);
             }
-            // a book read without that check (opened to look at): left out of a preview, refused elsewhere — never
-            // drawn as if it were not there
-            QVERIFY_EXCEPTION_THROWN(render::render_page(shapes.page(0), 200, render::proof_options(), &shapes), render::NotYetPorted);
-            const auto preview_shapes = render::render_page(shapes.page(0), 200, preview, &shapes);
-            QCOMPARE(preview_shapes.omitted, std::vector<std::string>{std::string("adjust:") + kind});
+            const auto expected = render::render_page(eight.page(0), 200, render::proof_options(), &eight).image.tobytes();
+            QCOMPARE(shown.size(), expected.size());
+            std::size_t off = 0; int worst = 0;
+            for (std::size_t i = 0; i < shown.size(); ++i) {
+                const int diff = std::abs(int(static_cast<unsigned char>(shown[i])) - int(static_cast<unsigned char>(expected[i])));
+                worst = std::max(worst, diff);
+                if (diff > 2) ++off;
+            }
+            QVERIFY2(off <= shown.size() / 500, qPrintable(QString("%1: %2 samples off by more than 2 (worst %3)").arg(kind).arg(off).arg(worst)));
+            auto part = render::proof_options();
+            part.region = render::RenderRegion{37, 41, 60, 50};
+            QCOMPARE(render::render_page(shapes.page(0), 200, part, &shapes).image.tobytes(), drawn.image.crop(render::Box{37, 41, 97, 91}).tobytes());
             auto hidden = shapes;
             hidden.edit_page(0).layers.back().visible = false;
             core::validate_color_document(hidden);  // (hidden: the page shows nothing of it)
+            QCOMPARE(render::render_page(hidden.page(0), 200, render::proof_options(), &hidden).image.tobytes(), plain);
         }
     }
 

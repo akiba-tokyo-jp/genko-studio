@@ -8,6 +8,8 @@
 #include <utility>
 #include <vector>
 
+#include "core/adjust.hpp"
+#include "core/adjust_kinds.hpp"
 #include "core/channels.hpp"
 #include "core/covers.hpp"
 #include "core/ops_schema.hpp"
@@ -51,15 +53,19 @@ std::string join(const std::vector<std::string>& items, std::string_view separat
 // define_brush's paper (BRUSH-01): this build's own key, never named an unknown key.
 bool paper_key(const Json& op, std::string_view key) { return key == "paper" && is_op(op, "define_brush"); }
 
+bool own_setting(const Json& op, std::string_view name, std::string_view key);
+
 // Python's _usage: the keys given that the op does not take, and how the op is written. (`channel`: the op's "channel"
-// is this build's own there — it names a channel or plate of its page: core::channel_target —, so not one of them.)
+// is this build's own there — it names a channel or plate of its page: core::channel_target —, so not one of them; nor
+// PC2's own settings, own_setting.)
 std::string usage(const Json& op, bool channel = false) {
     const Json* schema = schema_of(op);
     if (schema == nullptr) return {};
+    const std::string name = py_str(*get(op, "op"));
     std::vector<std::string> strange;
     for (const auto& [key, value] : op.items()) {
         if (!schema->contains(key) && key != "op" && key != "area" && !key.starts_with("_") && !paper_key(op, key) &&
-            !(key == "channel" && channel)) {
+            !(key == "channel" && channel) && !own_setting(op, name, key)) {
             strange.push_back(key);
         }
     }
@@ -82,6 +88,32 @@ bool native_key(std::string_view op, std::string_view key) {
            (op == "define_brush" && key == "paper") || ((op == "add_line" || op == "edit_line") && key == "ruby_spans");
 }
 
+// PC2 (SPEC COLOR-04): the settings of this build's own an op of Python's reads by what else it was given —
+// filter_raster's kind of this build's own (its settings in the kinds' table, core/adjust_kinds: the local corrections'
+// too) and a correction kind's native; put_raster's and import_psd's embedded_profile, with intent and bpc when it
+// converts or assigns and profile or icc when it assigns (PC2d). Used, so not reported as ignored; a Python kind's own
+// settings are reported as Python reports them (they are not in the public list either).
+bool own_setting(const Json& op, std::string_view name, std::string_view key) {
+    if (name == "filter_raster") {
+        const Json* kind = get(op, "kind");
+        if (kind == nullptr || !kind->is_string()) return false;
+        const AdjustKind* found = adjust_kind(kind->get_ref<const std::string&>());
+        if (found == nullptr || !found->filter) return false;
+        if (key == "native") return true;
+        if (found->group == "Python") return false;
+        return std::any_of(found->params.begin(), found->params.end(), [key](const AdjustParam& p) { return p.key == key; });
+    }
+    if (name == "put_raster" || name == "import_psd") {
+        if (key == "embedded_profile") return true;
+        const Json* way = get(op, "embedded_profile");
+        if (way == nullptr || !way->is_string()) return false;
+        const std::string& said = way->get_ref<const std::string&>();
+        if (key == "intent" || key == "bpc") return said == "convert" || said == "assign";
+        if (key == "profile" || key == "icc") return said == "assign";
+    }
+    return false;
+}
+
 // Python's _unknown_keys: keys an op was given that it does not take (ignored, so said). `channels`: the ops whose
 // "channel" was this build's own (it named a channel or plate of the op's page when the op ran: core::channel_target);
 // another op's "channel" is ignored as Python ignores it, and said as Python says it.
@@ -93,9 +125,10 @@ std::vector<std::string> unknown_key_warnings(const Json& ops, const std::vector
         const Json* schema = schema_of(op);
         if (schema == nullptr) continue;
         std::vector<std::string> strange;
+        const std::string name = py_str(*get(op, "op"));
         for (const auto& [key, value] : op.items()) {
             const bool known = schema->contains(key) || key == "op" || key == "area" || key == "page" || key == "id" ||
-                               key == "note" || native_key(py_str(*get(op, "op")), key) ||
+                               key == "note" || native_key(name, key) || own_setting(op, name, key) ||
                                (key == "channel" && i < channels.size() && channels[i]);
             if (!known && !key.starts_with("_")) strange.push_back(key);
         }
@@ -666,6 +699,20 @@ Json journal_op(const Json& op) {
                 }
             }
         }
+        // (PC2a: a 3D LUT file's text a color_lookup gives — add_layer's and set_layer's adjust, set_adjustment's and
+        // filter_raster's own —: its table is the book's asset, and an op is not done again from the journal)
+        const auto file_text = [](Json& holder) {
+            if (const auto data = holder.find("data"); data != holder.end() && data->is_string()) {
+                *data = "<" + std::to_string(code_points(data->get_ref<const std::string&>())) + " chars>";
+            }
+        };
+        if (is_op(out, "add_layer") || is_op(out, "set_layer")) {
+            if (const auto adjust = out.find("adjust"); adjust != out.end() && adjust->is_object() && adjust->value("kind", Json()) == Json("color_lookup")) {
+                file_text(*adjust);
+            }
+        } else if (is_op(out, "set_adjustment") || (is_op(out, "filter_raster") && out.value("kind", Json()) == Json("color_lookup"))) {
+            file_text(out);
+        }
     }
     return out;
 }
@@ -901,6 +948,7 @@ ApplyResult CommandBus::apply(const Document& doc, const Json& ops_in, const Act
                     validate_ink_document(work);  // (color-mode@1: what an op leaves on a CMYK or Lab page)
                     validate_color_model(work);   // (color-model@1: an RGB page's mode)
                     validate_channels(work);      // (channels@1: a page's alpha and spot channels)
+                    validate_adjustments(work);   // (adjustments@1: a correction's native and own kinds)
                 } catch (const Error& error) {
                     if (error.code() == "not_yet_ported") throw;
                     throw OpError(error.what());

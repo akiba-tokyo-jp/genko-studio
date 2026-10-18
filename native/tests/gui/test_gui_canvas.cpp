@@ -9,7 +9,13 @@
 
 #include <memory>
 
+#include <QListWidget>
+
+#include "app/brush_panel.hpp"
 #include "app/canvas.hpp"
+#include "app/colours.hpp"
+#include "app/config.hpp"
+#include "app/layer_panel.hpp"
 #include "app/tiles.hpp"
 #include "core/strokes.hpp"
 #include "render/brushes.hpp"
@@ -506,6 +512,83 @@ private slots:
         QVERIFY(op.contains("rect"));
         QVERIFY(std::abs(op["rect"][2].get<double>() - 80) < 0.05 && std::abs(op["rect"][3].get<double>() - 90) < 0.05);
         QVERIFY(desk.window->last_notice().startsWith(QStringLiteral("コマを描きました。")));
+    }
+
+    // PC2d (a stall while drawing, found at PC1's exit): a part of the canvas painted again — as a line being drawn asks
+    // for its piece — is the same pixels as the whole canvas painted there: inside the page (where the shadow under the
+    // sheet and the shaded bleed bands are left out, none of them showing there), across its edge and the trim line,
+    // with the view turned and mirrored too.
+    void aPartPaintedIsTheWholePaintedThere() {
+        Desk desk;
+        PageCanvas* c = desk.canvas();
+        QVERIFY(c->wait_rendered(10000));
+        const double w = desk.page().spec.width_mm.value(), h = desk.page().spec.height_mm.value();
+        for (const bool turned : {false, true}) {
+            if (turned) {
+                c->rotate_view(15);
+                c->flip_view(true);
+                QVERIFY(c->wait_rendered(10000));
+            }
+            QImage whole(c->size(), QImage::Format_ARGB32_Premultiplied);
+            whole.fill(Qt::transparent);
+            c->render(&whole);
+            const auto around = [&](double x_mm, double y_mm, int half) {
+                const QPointF at = c->to_widget(QPointF(x_mm, y_mm));
+                return QRect(QPoint(int(at.x()) - half, int(at.y()) - half), QSize(2 * half, 2 * half)).intersected(c->rect());
+            };
+            const auto trim = desk.page().trim_rect_mm();
+            for (const QRect& part : {around(w / 2, h / 2, 12), around(w / 3, h / 4, 3), around(0, 0, 14), around(w, h / 2, 10),
+                                      around(trim.x.value(), trim.y.value(), 6), around(w / 2, trim.y.value() + trim.height.value(), 5)}) {
+                QVERIFY(!part.isEmpty());
+                QImage painted(c->size(), QImage::Format_ARGB32_Premultiplied);
+                painted.fill(Qt::transparent);
+                c->render(&painted, part.topLeft(), QRegion(part));  // (the part painted where it is)
+                for (int y = part.top(); y <= part.bottom(); ++y)
+                    for (int x = part.left(); x <= part.right(); ++x)
+                        if (painted.pixel(x, y) != whole.pixel(x, y)) QFAIL(qPrintable(QStringLiteral("%1,%2 (turned %3)").arg(x).arg(y).arg(turned)));
+            }
+        }
+    }
+
+    // PC2d (stalls while drawing, older than PC1, found at its exit): 履歴 is written to the settings a moment after a
+    // run of lines, not at each line (each write of settings.ini locks it and syncs it to the disk) — the same value,
+    // and a panel made meanwhile reads it —; the layers' small pictures are drawn again only when the checker under them
+    // changes (the look is refreshed for other reasons too: the computer's light or dark).
+    void drawingDoesNotWaitForTheDisk() {
+        Desk s;
+        genko::app::ColourPanel* colours = s.window->colours();
+        QVERIFY(colours != nullptr);
+        genko::app::settings()->remove(QStringLiteral("colour/history"));
+        colours->remember({1, 2, 3});
+        colours->remember({4, 5, 6});
+        QVERIFY(!genko::app::settings()->contains(QStringLiteral("colour/history")));  // (not yet: a moment later)
+        QTRY_VERIFY_WITH_TIMEOUT(genko::app::settings()->contains(QStringLiteral("colour/history")), 8000);
+        QVERIFY(genko::app::settings()->value(QStringLiteral("colour/history")).toString().startsWith(QStringLiteral("4,5,6;1,2,3")));
+        colours->remember({7, 8, 9});
+        {
+            genko::app::BrushPanel brush;
+            genko::app::ColourPanel again(&brush);  // (made meanwhile: it reads the colour just used)
+            QCOMPARE(again.history().front(), (genko::app::Rgb{7, 8, 9}));
+        }
+        // the small pictures: kept when the look is refreshed with the same checker, drawn again over another
+        QVERIFY(s.window->apply_ops(Json::array({Json{{"op", "add_stroke"}, {"page", 1}, {"layer", "ink"},
+                                                      {"points", Json::array({Json::array({20, 20}), Json::array({80, 90})})}, {"width_mm", 1.0}}})));
+        genko::app::settings()->setValue(QStringLiteral("view/checker_size"), QStringLiteral("medium"));
+        const auto picture = [&] {
+            QListWidget* list = s.window->layer_panel()->list();
+            for (int i = 0; i < list->count(); ++i)
+                if (list->item(i)->data(Qt::UserRole + 1).toString() == QStringLiteral("picture")) return list->item(i)->icon().cacheKey();
+            return qint64(-1);
+        };
+        QMetaObject::invokeMethod(s.window.get(), "refresh_icons", Qt::DirectConnection);
+        const qint64 before = picture();
+        QVERIFY(before != -1);
+        QMetaObject::invokeMethod(s.window.get(), "refresh_icons", Qt::DirectConnection);
+        QCOMPARE(picture(), before);
+        genko::app::settings()->setValue(QStringLiteral("view/checker_size"), QStringLiteral("large"));
+        QMetaObject::invokeMethod(s.window.get(), "refresh_icons", Qt::DirectConnection);
+        QVERIFY(picture() != before);
+        genko::app::settings()->remove(QStringLiteral("view/checker_size"));
     }
 
     void theViewZoomsMovesTurnsAndMirrors() {

@@ -19,7 +19,9 @@
 #include "render/page.hpp"
 
 namespace genko::render {
-struct InkPicture;  // (render/ink_canvas)
+struct InkPicture;    // (render/ink_canvas)
+struct ColorPicture;  // (render/color_canvas)
+class RgbSpace;
 }  // namespace genko::render
 
 namespace genko::render::detail {
@@ -86,6 +88,9 @@ void draw_crop_marks(Draw& draw, const core::Page& page, int dpi);
 
 // render._blend_over: `over` onto `base` in a blend mode, with an opacity and a clipping alpha.
 Image blend_over(const Image& base, const Image& over, std::string_view mode, double opacity, const Image* clip);
+// The colours of two "RGB" pictures mixed in a blend mode as render._blend_over mixes them (normal or a mode it does not
+// know: `over`'s). (PC2: a correction's native.blend on the 8-bit page, render/adjust.)
+Image blend_colours(const Image& base_rgb, const Image& over_rgb, std::string_view mode);
 // render.fill_layer_image over `area`.
 Image fill_layer_image(const core::Layer& layer, Size size, int dpi, bool mono, const Box& area);
 // render.layer_effects (the whole of `raster`: the caller gives it a margin).
@@ -96,7 +101,14 @@ int effect_margin(const core::Layer& layer, int dpi);
 // the water edge darkens its rim towards Genko's black, the border lays the inks of its colour (the page's rules) under
 // it — their shapes from its alpha as the 8-bit picture holds it.
 void ink_layer_effects(const core::Layer& layer, InkPicture& picture, int dpi, const core::PageColor& color);
-// render._adjusted over `area`: a correction layer at work on what is under it.
+// PC2d (the user's decision 6): layer_effects on the picture of a precise layer (its whole picture: the caller gives it
+// a margin) — the water edge darkens its rim towards black, the border lays its colour (sRGB brought into the page's
+// space) under it — their shapes from its alpha as the 8-bit picture holds it, their colours mixed in the page's
+// precision (linear light, as the precise canvas composites).
+void color_layer_effects(const core::Layer& layer, ColorPicture& picture, int dpi, const RgbSpace& space);
+// render._adjusted over `area`: a correction layer at work on what is under it. PC2 (adjustments@1, render/adjust): its
+// native.blend laid by the 8-bit blend formulas, a correction that is not Python's form through its AdjustFunction
+// (one not in this build yet: skip_unported "adjust:<kind>").
 Image adjusted(const Ctx& ctx, Image rgba, const core::Layer& layer, const Image* clip, const Box& area);
 // Whether the page has a correction layer whose filter looks beyond each pixel or at where it is on the page (blur,
 // mosaic, wave, noise, …: render/filters.cpp): a part of such a page is cut from the whole page drawn.

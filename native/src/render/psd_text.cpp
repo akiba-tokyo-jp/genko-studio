@@ -1,5 +1,6 @@
-// PSD-01: Photoshop's text layer structures (render/psd_text.hpp): ActionDescriptors and the text engine's EngineData,
-// written and read; the TySh and lfx2 blocks made of them.
+// PSD-01: Photoshop's text layer structures (render/psd_text.hpp): ActionDescriptors (render/psd_descriptor, the PSD's
+// one reader and writer of them) and the text engine's EngineData, written and read; the TySh and lfx2 blocks made of
+// them.
 
 #include "render/psd_text.hpp"
 
@@ -21,235 +22,25 @@ namespace {
 
 [[noreturn]] void broken(const std::string& what) { throw core::Error("format", "the text layer cannot be read (" + what + ")"); }
 
-void put_u8(std::string& out, unsigned v) { out += static_cast<char>(v & 0xffU); }
-void put_u16(std::string& out, std::uint32_t v) {
-    put_u8(out, v >> 8);
-    put_u8(out, v);
-}
-void put_u32(std::string& out, std::uint32_t v) {
-    put_u16(out, v >> 16);
-    put_u16(out, v & 0xffffU);
-}
-void put_i32(std::string& out, std::int32_t v) { put_u32(out, static_cast<std::uint32_t>(v)); }
-void put_f64(std::string& out, double v) {
-    std::uint64_t bits = 0;
-    std::memcpy(&bits, &v, sizeof bits);
-    put_u32(out, static_cast<std::uint32_t>(bits >> 32));
-    put_u32(out, static_cast<std::uint32_t>(bits & 0xffffffffULL));
-}
+// ---- ActionDescriptor (render/psd_descriptor: the PSD's one reader and writer) ----------------------------------
 
-// What is read: bytes with a place, every read checked against their end.
-class Bytes {
-public:
-    explicit Bytes(std::string_view data) : data_(data) {}
-    std::size_t left() const { return data_.size() - at_; }
-    std::size_t at() const { return at_; }
-    std::string_view take(std::size_t n) {
-        if (n > left()) broken("it ends early");
-        const std::string_view out = data_.substr(at_, n);
-        at_ += n;
-        return out;
-    }
-    std::uint32_t u8() { return static_cast<unsigned char>(take(1)[0]); }
-    std::uint32_t u16() {
-        const std::string_view b = take(2);
-        return (static_cast<std::uint32_t>(static_cast<unsigned char>(b[0])) << 8) | static_cast<unsigned char>(b[1]);
-    }
-    std::uint32_t u32() {
-        const std::uint32_t high = u16();
-        return (high << 16) | u16();
-    }
-    std::int32_t i32() { return static_cast<std::int32_t>(u32()); }
-    double f64() {
-        const std::uint64_t high = u32();
-        const std::uint64_t bits = (high << 32) | u32();
-        double v = 0.0;
-        std::memcpy(&v, &bits, sizeof v);
-        return v;
-    }
+using descriptor::Bytes;
+using descriptor::put_f64;
+using descriptor::put_i32;
+using descriptor::put_u16;
+using descriptor::put_u32;
+using Descriptor = descriptor::Writer;
+using DObject = descriptor::Object;
+using DValue = descriptor::Value;
 
-private:
-    std::string_view data_;
-    std::size_t at_ = 0;
-};
-
-// ---- ActionDescriptor -------------------------------------------------------------------------------------------
-
-// A key or a class or enum id: 4 characters as an id (length 0), longer ones as a length and the characters — and
-// "warp", which Photoshop writes as a string.
-void put_id(std::string& out, std::string_view id) {
-    if (id.size() == 4 && id != "warp") {
-        put_u32(out, 0);
-    } else {
-        put_u32(out, static_cast<std::uint32_t>(id.size()));
+// A reading of a block made of descriptors: what the descriptor reader cannot read is the text layer's format error.
+template <typename Read>
+auto reading(Read&& read) {
+    try {
+        return read();
+    } catch (const descriptor::Broken& error) {
+        broken(error.what());
     }
-    out += id;
-}
-
-// A descriptor's unicode string: its length (with the closing 0) and its UTF-16 characters.
-void put_unicode(std::string& out, std::u16string_view text) {
-    put_u32(out, static_cast<std::uint32_t>(text.size() + 1));
-    for (const char16_t c : text) put_u16(out, c);
-    put_u16(out, 0);
-}
-
-class Descriptor {
-public:
-    void text(std::string_view key, std::u16string_view value) {
-        head(key, "TEXT");
-        put_unicode(body_, value);
-    }
-    void enumerated(std::string_view key, std::string_view type, std::string_view value) {
-        head(key, "enum");
-        put_id(body_, type);
-        put_id(body_, value);
-    }
-    void integer(std::string_view key, std::int32_t value) {
-        head(key, "long");
-        put_i32(body_, value);
-    }
-    void number(std::string_view key, double value) {
-        head(key, "doub");
-        put_f64(body_, value);
-    }
-    void unit(std::string_view key, std::string_view unit, double value) {
-        head(key, "UntF");
-        body_ += unit;
-        put_f64(body_, value);
-    }
-    void boolean(std::string_view key, bool value) {
-        head(key, "bool");
-        put_u8(body_, value ? 1 : 0);
-    }
-    void object(std::string_view key, const Descriptor& value, std::string_view class_id) {
-        head(key, "Objc");
-        body_ += value.structure(class_id);
-    }
-    void raw(std::string_view key, std::string_view bytes) {
-        head(key, "tdta");
-        put_u32(body_, static_cast<std::uint32_t>(bytes.size()));
-        body_ += bytes;
-    }
-    // The class structure (an empty name, the class id), its count and items.
-    std::string structure(std::string_view class_id) const {
-        std::string out;
-        put_unicode(out, u"");
-        put_id(out, class_id);
-        put_u32(out, count_);
-        return out + body_;
-    }
-
-private:
-    void head(std::string_view key, std::string_view type) {
-        put_id(body_, key);
-        body_ += type;
-        ++count_;
-    }
-    std::string body_;
-    std::uint32_t count_ = 0;
-};
-
-// A descriptor read back.
-struct DObject;
-struct DValue {
-    std::string type;
-    std::u16string text;
-    std::int64_t integer = 0;
-    double number = 0.0;
-    std::string unit;
-    bool boolean = false;
-    std::string enum_type;
-    std::string enum_value;
-    std::shared_ptr<DObject> object;
-    std::string raw;
-    std::vector<DValue> list;
-};
-struct DObject {
-    std::string class_id;
-    std::vector<std::pair<std::string, DValue>> items;
-    const DValue* get(std::string_view key) const {
-        for (const auto& [k, v] : items) {
-            if (k == key) return &v;
-        }
-        return nullptr;
-    }
-};
-
-std::string read_id(Bytes& b) {
-    const std::uint32_t n = b.u32();
-    return std::string(b.take(n == 0 ? 4 : n));
-}
-
-std::u16string read_unicode(Bytes& b) {
-    const std::uint32_t n = b.u32();
-    if (n > b.left() / 2) broken("a text is longer than the block");
-    std::u16string out;
-    out.reserve(n);
-    for (std::uint32_t i = 0; i < n; ++i) out.push_back(static_cast<char16_t>(b.u16()));
-    while (!out.empty() && out.back() == u'\0') out.pop_back();
-    return out;
-}
-
-DObject read_structure(Bytes& b, int depth);
-
-DValue read_value(Bytes& b, const std::string& type, int depth) {
-    if (depth > 32) broken("descriptors nested too deep");  // (lists in lists as well as objects)
-    DValue v;
-    v.type = type;
-    if (type == "TEXT") {
-        v.text = read_unicode(b);
-    } else if (type == "enum") {
-        v.enum_type = read_id(b);
-        v.enum_value = read_id(b);
-    } else if (type == "long") {
-        v.integer = b.i32();
-    } else if (type == "comp") {
-        const std::uint64_t high = b.u32();
-        v.integer = static_cast<std::int64_t>((high << 32) | b.u32());
-    } else if (type == "doub") {
-        v.number = b.f64();
-    } else if (type == "UntF") {
-        v.unit = std::string(b.take(4));
-        v.number = b.f64();
-    } else if (type == "UnFl") {
-        v.unit = std::string(b.take(4));
-        const std::uint32_t bits = b.u32();
-        float f = 0.0F;
-        std::memcpy(&f, &bits, sizeof f);
-        v.number = f;
-    } else if (type == "bool") {
-        v.boolean = b.u8() != 0;
-    } else if (type == "Objc" || type == "GlbO") {
-        v.object = std::make_shared<DObject>(read_structure(b, depth + 1));
-    } else if (type == "VlLs") {
-        const std::uint32_t n = b.u32();
-        for (std::uint32_t i = 0; i < n; ++i) {
-            const std::string item_type(b.take(4));
-            v.list.push_back(read_value(b, item_type, depth + 1));
-        }
-    } else if (type == "tdta" || type == "alis") {
-        v.raw = std::string(b.take(b.u32()));
-    } else if (type == "type" || type == "GlbC") {
-        (void)read_unicode(b);
-        v.enum_value = read_id(b);
-    } else {
-        broken("a descriptor value of type '" + type + "'");
-    }
-    return v;
-}
-
-DObject read_structure(Bytes& b, int depth) {
-    if (depth > 32) broken("descriptors nested too deep");
-    DObject out;
-    (void)read_unicode(b);
-    out.class_id = read_id(b);
-    const std::uint32_t n = b.u32();
-    for (std::uint32_t i = 0; i < n; ++i) {
-        std::string key = read_id(b);
-        const std::string type(b.take(4));
-        out.items.emplace_back(std::move(key), read_value(b, type, depth));
-    }
-    return out;
 }
 
 // ---- EngineData -------------------------------------------------------------------------------------------------
@@ -791,62 +582,6 @@ std::size_t length_of(const Engine& e) {
 
 }  // namespace
 
-std::u16string utf16(std::string_view s) {
-    std::u16string out;
-    for (std::size_t at = 0; at < s.size();) {
-        const auto lead = static_cast<unsigned char>(s[at]);
-        std::uint32_t cp = lead;
-        std::size_t n = 1;
-        if (lead >= 0xf0) {
-            cp = lead & 0x07U;
-            n = 4;
-        } else if (lead >= 0xe0) {
-            cp = lead & 0x0fU;
-            n = 3;
-        } else if (lead >= 0xc0) {
-            cp = lead & 0x1fU;
-            n = 2;
-        }
-        for (std::size_t k = 1; k < n && at + k < s.size(); ++k) cp = (cp << 6) | (static_cast<unsigned char>(s[at + k]) & 0x3fU);
-        at += n;
-        if (cp >= 0x10000) {
-            cp -= 0x10000;
-            out.push_back(static_cast<char16_t>(0xd800 + (cp >> 10)));
-            out.push_back(static_cast<char16_t>(0xdc00 + (cp & 0x3ff)));
-        } else {
-            out.push_back(static_cast<char16_t>(cp));
-        }
-    }
-    return out;
-}
-
-std::string utf8_of(std::u16string_view text) {
-    std::string out;
-    for (std::size_t i = 0; i < text.size(); ++i) {
-        std::uint32_t cp = text[i];
-        if (cp >= 0xd800 && cp < 0xdc00 && i + 1 < text.size() && text[i + 1] >= 0xdc00 && text[i + 1] < 0xe000) {
-            cp = 0x10000 + ((cp - 0xd800) << 10) + (text[i + 1] - 0xdc00);
-            ++i;
-        }
-        if (cp < 0x80) {
-            out += static_cast<char>(cp);
-        } else if (cp < 0x800) {
-            out += static_cast<char>(0xc0 | (cp >> 6));
-            out += static_cast<char>(0x80 | (cp & 0x3f));
-        } else if (cp < 0x10000) {
-            out += static_cast<char>(0xe0 | (cp >> 12));
-            out += static_cast<char>(0x80 | ((cp >> 6) & 0x3f));
-            out += static_cast<char>(0x80 | (cp & 0x3f));
-        } else {
-            out += static_cast<char>(0xf0 | (cp >> 18));
-            out += static_cast<char>(0x80 | ((cp >> 12) & 0x3f));
-            out += static_cast<char>(0x80 | ((cp >> 6) & 0x3f));
-            out += static_cast<char>(0x80 | (cp & 0x3f));
-        }
-    }
-    return out;
-}
-
 const TextStyle* TextLayer::style_at(std::size_t at) const {
     std::size_t start = 0;
     for (const StyleRun& run : runs) {
@@ -885,17 +620,19 @@ std::string tysh(const TextLayer& layer) {
     return out;
 }
 
-TextLayer read_tysh(std::string_view payload) {
+namespace {
+
+TextLayer tysh_of(std::string_view payload) {
     Bytes b(payload);
     TextLayer out;
     if (b.left() < 2 || b.u16() != 1) broken("not a TySh block of version 1");
     for (double& v : out.transform) v = b.f64();
     if (b.u16() != 50) broken("a text version other than 50");
     if (b.u32() != 16) broken("a descriptor version other than 16");
-    const DObject text = read_structure(b, 0);
+    const DObject text = descriptor::read_structure(b, 0);
     if (b.u16() != 1) broken("a warp version other than 1");
     if (b.u32() != 16) broken("a descriptor version other than 16");
-    const DObject warp = read_structure(b, 0);
+    const DObject warp = descriptor::read_structure(b, 0);
     if (const DValue* t = text.get("Txt "); t != nullptr) out.text = t->text;
     if (const DValue* o = text.get("Ornt"); o != nullptr) out.vertical = o->enum_value == "Vrtc";
     if (const DValue* bounds = text.get("bounds"); bounds != nullptr && bounds->object) {
@@ -942,6 +679,12 @@ TextLayer read_tysh(std::string_view payload) {
     return out;
 }
 
+}  // namespace
+
+TextLayer read_tysh(std::string_view payload) {
+    return reading([payload] { return tysh_of(payload); });
+}
+
 std::string lfx2(const Stroke& stroke) {
     Descriptor rgb;  // (its colour in the document's mode: RGBC, CMYC in %, LbCl)
     std::string_view colour_class = "RGBC";
@@ -984,10 +727,12 @@ std::string lfx2(const Stroke& stroke) {
 }
 
 std::optional<Stroke> read_lfx2(std::string_view payload) {
-    Bytes b(payload);
-    if (b.u32() != 0) broken("an lfx2 block of another version");
-    if (b.u32() != 16) broken("a descriptor version other than 16");
-    const DObject effects = read_structure(b, 0);
+    const DObject effects = reading([payload] {
+        Bytes b(payload);
+        if (b.u32() != 0) broken("an lfx2 block of another version");
+        if (b.u32() != 16) broken("a descriptor version other than 16");
+        return descriptor::read_structure(b, 0);
+    });
     const DValue* frame = effects.get("FrFX");
     if (frame == nullptr || !frame->object) {
         const DValue* many = effects.get("frameFXMulti");

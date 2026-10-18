@@ -4,6 +4,7 @@
 #include <QImage>
 #include <QPointF>
 #include <QPointer>
+#include <QRegion>
 #include <QTimer>
 #include <QVector>
 #include <QWidget>
@@ -428,6 +429,7 @@ private:
     void back_from_eraser_end();
 
     // painting
+    QRegion painting_;  // (the part of the canvas a paint event paints again; none: all of it)
     void paint_page(QPainter& painter);
     void draw_shadow(QPainter& painter, const QRectF& page_rect) const;
     void draw_guides(QPainter& painter, const QRectF& page_rect) const;

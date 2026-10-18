@@ -221,14 +221,6 @@ std::string encode_color_pixels(std::uint32_t width, std::uint32_t height, std::
     return out;
 }
 namespace {
-bool is_shape_filter(const Layer& layer) {
-    if (!layer.adjust || !layer.adjust->is_object()) return false;
-    const auto it = layer.adjust->find("kind");
-    return it != layer.adjust->end() && it->is_string() &&
-           std::find(kShapeFilters.begin(), kShapeFilters.end(), it->get<std::string>()) != kShapeFilters.end();
-}
-}  // namespace
-namespace {
 std::atomic<std::uint64_t> raster_checks{0};
 // A precise raster's samples checked (finite, its alpha 0..1): once for its bytes, which never change while they are
 // held — each op keeps the rasters it did not change, so the book's check after it looks at the new ones alone.
@@ -254,11 +246,13 @@ void validate_color_document(const Document& doc) {
     for (const auto& page : doc.pages) {
         const bool color = std::any_of(page->layers.begin(), page->layers.end(), [](const Layer& l) { return bool(l.color_raster) || has_color_strokes(l); });
         for (const auto& layer : page->layers) {
+            // (PC2d, document:color-depth-model: a layer with precise colour of its own is drawn with what else it holds —
+            // its pixels and lines, the pictures laid on it, effects, its colour, a screen, a mask —, a tone as a tone:
+            // render/page precise_layer. A layer of another kind cannot hold them.)
+            const bool holds_drawing = layer.kind == LayerKind::Raster || layer.kind == LayerKind::Strokes || layer.kind == LayerKind::Tone;
             if (has_color_strokes(layer)) {
                 for (const auto& stroke : layer.strokes->items) if (stroke->color_rgb) validate_stroke_color(*stroke->color_rgb);
-                if (layer.kind != LayerKind::Strokes || layer.raster_png || !layer.patches.empty() || layer.mask ||
-                    layer.effect || layer.screen || layer.color || layer.panel_each)
-                    throw Error("not_yet_ported", "precise stroke layer style is not supported yet");
+                if (!holds_drawing) throw Error("not_yet_ported", "precise stroke layer style is not supported yet");
             }
             if (layer.color_raster) {
                 // Charge each live immutable allocation once, not each layer reference.
@@ -268,19 +262,16 @@ void validate_color_document(const Document& doc) {
                     bytes += layer.color_raster->size();
                     check_once(layer.color_raster);
                 }
-                if (layer.kind != LayerKind::Raster || layer.role == LayerRole::Tone || layer.raster_png || layer.stroke_count() || !layer.patches.empty() ||
-                    layer.panel_clip || layer.effect || layer.screen || layer.color)
-                    throw Error("not_yet_ported", "high-precision color layer style is not supported yet");
+                if (!holds_drawing) throw Error("not_yet_ported", "high-precision color layer style is not supported yet");
             }
             if (layer.kind == LayerKind::Adjust && layer.adjust &&
                 layer.adjust->value("kind", Json()) == "exposure") (void)Exposure::parse(*layer.adjust);
             if (!color || !layer.visible) continue;
             (void)blend_mode(Json(layer.blend));
-            if ((layer.kind == LayerKind::Adjust && layer.blend != "normal") || py_truthy(layer.parent_id) || layer.kind == LayerKind::Tone || layer.role == LayerRole::Tone)
-                throw Error("not_yet_ported", "high-precision color composition style is not supported yet");
-            if (layer.kind == LayerKind::Adjust && is_shape_filter(layer))
-                throw Error("not_yet_ported", "high-precision correction that moves shapes is not supported yet");
-            // (any other correction is read as the 8-bit page reads it: one it cannot read does nothing)
+            // (a correction layer's own blend is not looked at, as Python does not: the user's decision 2 of PC2 —
+            // its native.blend is drawn on precise pixels too, render/page. PC2d: a layer in a folder, a tone layer and a
+            // correction that moves shapes are drawn too; any other correction is read as the 8-bit page reads it: one it
+            // cannot read does nothing)
         }
     }
 }

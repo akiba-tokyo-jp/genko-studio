@@ -8,7 +8,8 @@ namespace genko::core {
 Exposure Exposure::parse(const Json& spec) {
     if (!spec.is_object()) throw PyValueError("exposure must be an object");
     for (const auto& [key, value] : spec.items()) {
-        if (key != "kind" && key != "exposure" && key != "offset" && key != "gamma")
+        // (native: adjustments@1's, core/adjust.hpp — how the layer is laid, not the exposure's)
+        if (key != "kind" && key != "exposure" && key != "offset" && key != "gamma" && key != "native")
             throw PyValueError("unknown exposure parameter " + key);
     }
     const auto number = [&](const char* key, double fallback, double lo, double hi) {

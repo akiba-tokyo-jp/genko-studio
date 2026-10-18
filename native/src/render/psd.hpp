@@ -10,6 +10,7 @@
 
 #include "core/error.hpp"
 #include "core/ink.hpp"
+#include "core/json.hpp"
 #include "render/image.hpp"
 #include "render/psd_text.hpp"
 
@@ -72,6 +73,12 @@ struct Layer {
     std::string kind = "pixels";        // pixels | folder | text | adjust
     bool has_mask = false;
     std::size_t record = 0;  // (pixel layers) the layer record it was read from
+    // (PC2, the user's decision 5) an adjustment layer a codec read (render/psd_adjust.hpp): the correction's adjust.
+    // One no codec reads is left out (skipped), as psd.py leaves every one out.
+    std::optional<core::Json> adjust;
+    // (PC2a) the lookup tables its adjust uses (a color lookup's: the table its block holds, as GKLU bytes by their
+    // asset ref), which import_psd takes into the book with the correction.
+    std::map<std::string, core::Bytes> luts;
 };
 
 class File {
@@ -89,6 +96,9 @@ public:
     // Bottom to top, folders after the layers in them, as read_psd lists them.
     const std::vector<Layer>& layers() const { return layers_; }
     const std::vector<std::string>& skipped() const { return skipped_; }
+    // (PC2) the names psd.py skips: skipped() and, in their places, the adjustment layers a codec read (their names as
+    // the records have them).
+    const std::vector<std::string>& python_skipped() const { return python_skipped_; }
 
     // A pixel layer's picture over the whole canvas (PSDLayer.image: RGBA).
     Image image(const Layer& layer) const;
@@ -147,6 +157,10 @@ public:
         // (PSD-01) where its TySh and lfx2 blocks' payloads are in the file (size 0: none)
         std::uint64_t tysh_at = 0, tysh_size = 0;
         std::uint64_t lfx2_at = 0, lfx2_size = 0;
+        // (PC2) its adjustment block's key and payload (render/psd_adjust.hpp; the key empty: none, or a fill layer's)
+        std::string adjust_key;
+        std::uint64_t adjust_at = 0, adjust_size = 0;
+        std::uint64_t cged_at = 0, cged_size = 0;  // (its CgEd block: brightness_contrast's modern settings)
         const ChannelRef* channel(int id) const;
     };
 
@@ -169,6 +183,7 @@ private:
     std::vector<Record> records_;
     std::vector<Layer> layers_;
     std::vector<std::string> skipped_;
+    std::vector<std::string> python_skipped_;
 
     // What read_psd makes of the merged picture, worked out without its pixels: whether it has one (`exists`) and
     // whether it gets as far as making a picture (`reaches`: a 1-bit plane is made a picture as it is read).

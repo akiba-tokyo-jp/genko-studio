@@ -12,6 +12,7 @@
 #include <set>
 #include <string>
 
+#include "core/base64.hpp"
 #include "core/color_raster.hpp"
 #include "core/command_bus.hpp"
 #include "core/error.hpp"
@@ -422,7 +423,9 @@ private slots:
             "set_text_gamma",  // (color-model@1's book text_gamma, PC1b: the C++ build's own, SPEC.md COLOR-03)
             "add_channel", "duplicate_channel", "delete_channel", "rename_channel", "move_channel", "set_channel",
             "merge_spot_channel", "split_channels", "merge_channels",  // (channels@1: the C++ build's own, SPEC.md COLOR-03)
-            "to_indexed", "set_color_table", "to_bitmap", "set_duotone"};  // (color-model@1's own modes, PC1d: the C++ build's own, SPEC.md COLOR-03)
+            "to_indexed", "set_color_table", "to_bitmap", "set_duotone",  // (color-model@1's own modes, PC1d: the C++ build's own, SPEC.md COLOR-03)
+            "set_adjustment", "auto_adjust", "hdr_toning", "apply_image", "calculations", "trap",
+            "fade_layer"};  // (PC2's corrections, adjustments@1: the C++ build's own, SPEC.md COLOR-04)
         expected.insert(drawing_names.begin(), drawing_names.end());
         const std::set<std::string> actual(all_names.begin(), all_names.end());
         QCOMPARE(actual, expected);
@@ -785,6 +788,42 @@ private slots:
                                       "spread 1-2: pages 1 and 2 are two sides of one leaf, not a spread",
                                       "spread 2-9: spread partner 9 missing", "ops[0] set_autosave: unknown keys ignored: speed"};
         QCOMPARE(strings(result.warnings), want);
+    }
+
+    // The C++ build's own settings an op of Python's is given are used, so not said to be ignored (PC2, SPEC COLOR-04):
+    // filter_raster's kind of the C++ build's own and its settings (the kinds' table, core/adjust_kinds — a local
+    // correction's too), a correction kind's native; put_raster's embedded_profile and what it reads (intent and bpc when
+    // it converts or assigns, profile when it assigns). What Python says stays as Python says it: a Python kind's own
+    // settings (not in the public list) and a key nothing reads.
+    void ownSettingsAreNotSaidIgnored() {
+        Document doc = apply(book(1), R"([{"op": "add_layer", "page": 1, "kind": "paint", "id": "pic"}])").doc;
+        const auto warned = [&doc](const Json& op) { return strings(bus().apply(doc, Json::array({op}), Actor("genko")).warnings); };
+        const auto with = [](Json op, const Json& more) {
+            for (const auto& [key, value] : more.items()) op[key] = value;
+            return op;
+        };
+        using Said = std::vector<std::string>;
+        const Json filter{{"op", "filter_raster"}, {"page", 1}, {"id", "pic"}};
+        QCOMPARE(warned(with(filter, Json{{"kind", "shadows_highlights"}, {"shadow_amount", 40}, {"highlight_amount", 10}})), Said{});
+        QCOMPARE(warned(with(filter, Json{{"kind", "vibrance"}, {"vibrance", 30}, {"saturation", -10}})), Said{});
+        QCOMPARE(warned(with(filter, Json{{"kind", "desaturate"}, {"native", Json::object()}})), Said{});
+        QCOMPARE(warned(with(filter, Json{{"kind", "levels"}, {"black", 10}, {"native", Json{{"method", "upstream"}}}})),
+                 Said{"ops[0] filter_raster: unknown keys ignored: black"});
+        QCOMPARE(warned(with(filter, Json{{"kind", "invert"}, {"strength", 2}})), Said{"ops[0] filter_raster: unknown keys ignored: strength"});
+        QCOMPARE(warned(with(filter, Json{{"kind", "blur"}, {"radius", 2}, {"shadow_amount", 40}})),
+                 Said{"ops[0] filter_raster: unknown keys ignored: radius, shadow_amount"});
+        // (nor in the words of a refusal: the setting is the kind's, its value wrong)
+        const std::string refused = error_of(doc, Json::array({with(filter, Json{{"kind", "vibrance"}, {"vibrance", "x"}, {"saturation", 5}})}));
+        QVERIFY2(refused.find("unknown keys") == std::string::npos && refused.find("filter_raster takes") != std::string::npos, refused.c_str());
+        const std::string png = genko::core::b64encode(
+            genko::render::write_png(genko::render::Image::create("RGBA", genko::render::Size{4, 4}, genko::render::Ink{200, 100, 50, 255})));
+        const Json put{{"op", "put_raster"}, {"page", 1}, {"layer", "bg"}, {"png_base64", png}};
+        QCOMPARE(warned(with(put, Json{{"embedded_profile", "keep"}})), Said{});
+        QCOMPARE(warned(with(put, Json{{"embedded_profile", "convert"}, {"intent", "perceptual"}, {"bpc", false}})), Said{});
+        QCOMPARE(warned(with(put, Json{{"embedded_profile", "assign"}, {"profile", "adobe-rgb-compat"}, {"intent", "relative"}})), Said{});
+        QCOMPARE(warned(with(put, Json{{"embedded_profile", "keep"}, {"intent", "perceptual"}})), Said{"ops[0] put_raster: unknown keys ignored: intent"});
+        QCOMPARE(warned(with(put, Json{{"embedded_profile", "convert"}, {"profile", "adobe-rgb-compat"}})),
+                 Said{"ops[0] put_raster: unknown keys ignored: profile"});
     }
 
     void journalRecord() {

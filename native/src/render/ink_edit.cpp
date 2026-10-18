@@ -760,11 +760,12 @@ void bake_marks(core::Document& doc) {
         for (std::size_t l = 0; l < seen.layers.size(); ++l) {
             const core::Layer& layer = seen.layers[l];
             if (layer.kind != core::LayerKind::Raster || layer.patches.empty()) continue;
-            core::Layer marks;  // (the pictures alone, as the layer draws them before its own settings)
+            core::Layer marks;  // (the pictures alone, as the layer draws them before its own settings: cut at the panels)
             marks.id = layer.id;
             marks.role = core::LayerRole::User;
             marks.kind = core::LayerKind::Raster;
-            marks.panel_clip = marks.panel_each = false;
+            marks.panel_clip = layer.panel_clip;
+            marks.panel_each = layer.panel_each;
             marks.patches = layer.patches;
             core::InkPixels drawn = composite_ink_layers(seen, {marks}, raster::kWorkingDpi, &doc);
             inside_own_pixels(drawn, layer);
