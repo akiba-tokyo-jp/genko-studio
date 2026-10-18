@@ -142,10 +142,25 @@ public:
     static bool drawable(const core::Layer& layer);
     // The selection as an op's area ({"poly": …} or {"mask": …}), or none.
     std::optional<core::Json> selection_area() const;
-    // 色域選択: how different a colour may be and still be the same (0..255); only the touching ones.
+    // 自動選択ツール's 色の近さ: how different a colour may be and still be the same (許容値, 0..255); only the touching
+    // ones (隣接).
     double colour_tolerance = 24;
     bool colour_contiguous = false;
-    // The tools of the marquee (rect, lasso, wand, ellipse, polyline, colour, selpen, selerase), and the one of a way.
+    // 自動選択ツール (PC3 B1, the user's decision 5): what it looks at — 線で囲まれた所 ("lines": the closed region, as the
+    // fill tool finds it) or 色の近さ ("colour": the colours within 許容値 of the one clicked, as Photoshop's magic wand) —
+    // and, for the colour, whether it sees the page as it shows (全レイヤーを対象) or the drawing layer alone.
+    QString wand_criterion = QStringLiteral("lines");
+    bool wand_all_layers = true;
+    // マジック消しゴムツール (PC3 B1): its 許容値 (0..255), 隣接, アンチエイリアス, 全レイヤーを対象 and 不透明度 (%).
+    struct MagicEraserSettings {
+        double tolerance = 32;
+        bool contiguous = true;
+        bool antialias = true;
+        bool all_layers = false;
+        double opacity = 100;
+    };
+    MagicEraserSettings magic_eraser_settings;
+    // The tools of the marquee (rect, lasso, wand, ellipse, polyline, selpen, selerase), and the one of a way.
     static bool is_marquee_tool(const QString& tool);
     static QString marquee_tool_of(const QString& way);
     // What a question or a dialog is about to be asked about (the book in front as it is now, and its page), and
@@ -193,6 +208,10 @@ public:
     // 選択 → 選択範囲をチャンネルに保存… / チャンネルから読み込む.
     bool save_selection_to_channel(std::optional<QString> name = std::nullopt);
     void load_selection_from_channel(const std::string& id);
+    // PC3 B1: the selection's right-click menu at a point of the page (mm) — Photoshop's items (選択を解除, 再選択, 選択範囲を
+    // 反転, 境界をぼかす…, 選択範囲を保存…, 選択範囲を変形, … and the later groups' as they come) — when a selection tool is in
+    // hand and the point is in the selection; false (nothing added) otherwise.
+    bool fill_selection_menu(QMenu& menu, const QPointF& mm);
     // A kept area (ストック) made the selection (選択 → ストックから選ぶ; the channel panel's rows).
     void select_stock(const std::string& name) { use_stock(name); }
     BrushPanel* brush_panel() const { return brush_; }
@@ -703,6 +722,20 @@ private:
     void selection_painted(const QVector<QPointF>& points, bool add);
     void wand(double x_mm, double y_mm);
     void select_colour(double x_mm, double y_mm);
+    // PC3 B1 (main_window_select.cpp): 選択範囲を拡大・近似色を選択, 再選択, 選択範囲を変形, the Quick Mask followed on the
+    // page shown and painted (its channel the target), the Magic Eraser's click, the selection's right-click menu and the
+    // tools' settings; (select_dialogs.cpp) 色域指定…, 選択範囲を保存…, 選択範囲を読み込む….
+    void grow_selection(bool contiguous);
+    void reselect();
+    void transform_selection_outline();
+    void quick_mask_follow();
+    void target_quick_mask(const std::string& id);
+    void magic_erase(double x_mm, double y_mm);
+    bool selection_context_menu(const QPoint& global);
+    void build_selection_pages(ToolSettings* ts);
+    void color_range_dialog();
+    bool save_selection_dialog();
+    void load_selection_dialog();
     void change_selection(const core::Json& change);
     void change_selection_by(const char* key, int sign);
     void select_all();
@@ -728,7 +761,6 @@ private:
     // channels@1 (main_window_channels.cpp)
     void build_channel_actions();
     void build_channel_dock();
-    void fill_channel_menu();
     void channel_view_changed();
     core::Json with_channel_target(const core::Json& ops) const;
     void build_info_docks();  // (PC2d: app/info_panels.cpp)
@@ -741,7 +773,6 @@ private:
     std::map<std::string, ChannelView> channel_views_;  // (by page id)
     ChannelPanel* channel_panel_ = nullptr;
     QDockWidget* channels_dock_ = nullptr;
-    QMenu* channel_load_menu_ = nullptr;
     std::vector<Document> documents_;
     int doc_ = 0;
     int page_index_ = 0;

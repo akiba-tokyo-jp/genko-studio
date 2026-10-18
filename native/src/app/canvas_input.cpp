@@ -120,7 +120,7 @@ void PageCanvas::update_cursor(std::optional<QPointF> pos) {
         setCursor(blank ? Qt::BlankCursor : Qt::CrossCursor);
     } else if (tool_ == QLatin1String("move")) {
         setCursor(Qt::SizeAllCursor);
-    } else if (tool_ == QLatin1String("picker") || tool_ == QLatin1String("fill")) {
+    } else if (tool_ == QLatin1String("picker") || tool_ == QLatin1String("fill") || tool_ == QLatin1String("magiceraser")) {
         setCursor(Qt::PointingHandCursor);
     } else if (tool_ == QLatin1String("lassofill") || tool_ == QLatin1String("gradient") ||
                tool_ == QLatin1String("reshape") || tool_ == QLatin1String("ruler") || tool_ == QLatin1String("3d") ||

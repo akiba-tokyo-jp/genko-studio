@@ -129,49 +129,7 @@ void MainWindow::build_tool_settings() {
                          QStringLiteral("形"), action("act_bleed"), action("act_reset_shape"), action("act_frame_numbers"),
                          QStringLiteral("原稿"), action("act_paper"),
                          static_cast<QWidget*>(note(QStringLiteral("コマを選ぶと、辺の中ほどの ◇ をドラッグで辺を曲げられます（外へふくらむ・内へへこむ）。")))}));
-    // the selection
-    marquee_mode_ = new QComboBox;
-    marquee_mode_->setObjectName(QStringLiteral("marquee_mode"));
-    for (const auto& [label, key] : {std::pair{QStringLiteral("長方形選択"), QStringLiteral("rect")}, {QStringLiteral("楕円形選択"), QStringLiteral("ellipse")},
-                                     {QStringLiteral("なげなわ"), QStringLiteral("lasso")}, {QStringLiteral("多角形選択"), QStringLiteral("polyline")},
-                                     {QStringLiteral("自動選択"), QStringLiteral("wand")}, {QStringLiteral("色域選択"), QStringLiteral("colour")},
-                                     {QStringLiteral("選択ペン"), QStringLiteral("selpen")}, {QStringLiteral("選択消し"), QStringLiteral("selerase")}})
-        marquee_mode_->addItem(label, key);
-    connect(marquee_mode_, &QComboBox::activated, this, [this](int) { choose_tool(marquee_mode_->currentData().toString()); });
-    selection_pen_ = new QDoubleSpinBox;
-    selection_pen_->setObjectName(QStringLiteral("selection_pen"));
-    selection_pen_->setRange(0.2, 60);
-    selection_pen_->setSuffix(QStringLiteral(" mm"));
-    selection_pen_->setValue(canvas_->selection_pen_mm);
-    connect(selection_pen_, &QDoubleSpinBox::valueChanged, this, [this](double v) { canvas_->selection_pen_mm = v; });
-    colour_tolerance_box_ = new QSpinBox;
-    colour_tolerance_box_->setObjectName(QStringLiteral("colour_tolerance"));
-    colour_tolerance_box_->setRange(0, 255);
-    colour_tolerance_box_->setValue(static_cast<int>(colour_tolerance));
-    colour_tolerance_box_->setToolTip(QStringLiteral("色域選択: どれだけ違う色まで同じとみなすか"));
-    connect(colour_tolerance_box_, &QSpinBox::valueChanged, this, [this](int v) { colour_tolerance = v; });
-    colour_contiguous_box_ = new QCheckBox(QStringLiteral("隣接"));
-    colour_contiguous_box_->setObjectName(QStringLiteral("colour_contiguous"));
-    connect(colour_contiguous_box_, &QCheckBox::toggled, this, [this](bool on) { colour_contiguous = on; });
-    auto* sel_form = new QWidget;
-    auto* sfl = new QFormLayout(sel_form);
-    sfl->setContentsMargins(0, 0, 0, 0);
-    sfl->setRowWrapPolicy(QFormLayout::WrapLongRows);
-    sfl->addRow(QStringLiteral("選び方"), marquee_mode_);
-    sfl->addRow(QStringLiteral("選択ペンの太さ"), selection_pen_);
-    sfl->addRow(QStringLiteral("許容値"), colour_tolerance_box_);
-    sfl->addRow(QString(), colour_contiguous_box_);
-    ts->add({QStringLiteral("marquee")},
-            action_page({sel_form, static_cast<QWidget*>(note(QStringLiteral("Shift で足す・Alt で引く・両方で重なりだけ"))), QStringLiteral("選択範囲と中身"),
-                         static_cast<QWidget*>(menu_button(QStringLiteral("選択範囲"),
-                                                           {{action("act_select_all"), action("act_deselect"), action("act_sel_invert")},
-                                                            {action("act_sel_grow"), action("act_sel_shrink"), action("act_sel_feather"), action("act_sel_layer")},
-                                                            {action("act_sel_keep"), action("act_quick_mask")}})),
-                         static_cast<QWidget*>(menu_button(QStringLiteral("中身"),
-                                                           {{action("act_copy"), action("act_cut"), action("act_paste"), action("act_delete_area")},
-                                                            {action("act_flip_h"), action("act_flip_v"), action("act_warp_perspective"), action("act_warp_mesh"),
-                                                             action("act_warp_apply")},
-                                                            {action("act_fill_selection"), action("act_line_width"), action("act_tone_here")}}))}));
+    build_selection_pages(ts);  // (the selection tools and マジック消しゴムツール: main_window_select.cpp)
     ts->add({QStringLiteral("text")}, text_settings_);  // (the text tool: main_window_lines.cpp)
     ts->add({QStringLiteral("select")}, line_select_page());  // (the chosen line's lettering, then the view)
     ts->add({QStringLiteral("move")}, action_page({QStringLiteral("レイヤー"), action("act_layer_dup"), action("act_select_all")}));

@@ -236,7 +236,7 @@ MainWindow::MainWindow(std::shared_ptr<Session> session) {
     connect(canvas_, &PageCanvas::selectionDrawn, this, &MainWindow::selection_drawn);
     connect(canvas_, &PageCanvas::selectionPainted, this, &MainWindow::selection_painted);
     connect(canvas_, &PageCanvas::wandRequested, this, &MainWindow::wand);
-    connect(canvas_, &PageCanvas::colourAreaRequested, this, &MainWindow::select_colour);
+    connect(canvas_, &PageCanvas::magicEraseRequested, this, &MainWindow::magic_erase);  // (PC3 B1: マジック消しゴムツール)
     connect(canvas_, &PageCanvas::selectionTransformed, this, &MainWindow::transform_selection);
     connect(canvas_, &PageCanvas::selectionWarped, this, &MainWindow::warp_selection);
     // the drawing tools (main_window_paint.cpp)
@@ -735,6 +735,7 @@ void MainWindow::show_page() {
     if (navigator_ != nullptr) navigator_->update();
     if (layer_panel_ != nullptr) layer_panel_->refresh();
     channel_view_changed();  // (channels@1: this page's view on screen, its panel)
+    quick_mask_follow();     // (masks@1: the page's Quick Mask, its menu item and the tools painting it)
     if (lines_later_) {
         lines_timer_.start();
     } else {

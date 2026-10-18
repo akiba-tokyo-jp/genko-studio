@@ -146,11 +146,16 @@ void ChannelPanel::refresh() {
     for (const core::Channel& channel : page->channels) {
         const bool spot = channel.kind == core::ChannelKind::Spot;
         const bool shown = spot ? !view.hidden_spots.contains(channel.id) : view.shown.contains(channel.id);
-        QString tip = spot ? QStringLiteral("特色チャンネル") : QStringLiteral("アルファチャンネル");
+        QString tip = spot ? QStringLiteral("特色チャンネル") : channel.quick_mask ? QStringLiteral("クイックマスク") : QStringLiteral("アルファチャンネル");
         if (slot <= 9) tip += QStringLiteral("（Ctrl+Alt+%1）").arg(slot);
         ++slot;
         QListWidgetItem* item = add_row(channel.id, QString::fromStdString(channel.name) + (spot ? QStringLiteral("（特色）") : QString()), shown,
                                         thumbnail(*page, channel), tip);
+        if (channel.quick_mask) {  // (masks@1: the Quick Mask's row in italics, as Photoshop's)
+            QFont font = item->font();
+            font.setItalic(true);
+            item->setFont(font);
+        }
         if (view.target == channel.id) chosen = item;
         if (const auto it = thumbs_.find(channel.id); it != thumbs_.end()) kept.emplace(channel.id, it->second);
     }

@@ -54,6 +54,7 @@ const std::map<QString, std::pair<QString, QString>>& titles() {
         {QStringLiteral("stamp"), {QStringLiteral("素材を置く"), QStringLiteral("素材パネルで選んだ素材を、クリックした所に置く")}},
         {QStringLiteral("move"), {QStringLiteral("移動ツール（Q）"), QStringLiteral("描く先のレイヤーの線・塗り・絵を、ドラッグで丸ごと動かす。Shift で縦・横・45° に")}},
         {QStringLiteral("gradient"), {QStringLiteral("グラデーション（U）"), QStringLiteral("ドラッグの向きに塗る。始めの点がはじめの色、終わりの点が終わりの色。選択範囲があればその中だけ")}},
+        {QStringLiteral("magiceraser"), {QStringLiteral("マジック消しゴムツール"), QStringLiteral("クリックした所に近い色の所を透明にする（描く先のペイントのレイヤー）")}},
     };
     return all;
 }
