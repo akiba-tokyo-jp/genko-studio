@@ -1,9 +1,11 @@
 // import_psd (Python's fileops.import_psd and fileops.placed): every layer of a PSD or PSB as a Genko layer on the page,
-// read by render/psd (psd.read_psd).
+// read by render/psd (psd.read_psd). (PC3 A3, the user's decision 3: a placed layer whose file the PSD holds is a smart
+// object of that file, Photoshop's picture of it shown until it changes.)
 
 #include <algorithm>
 #include <cerrno>
 #include <climits>
+#include <cmath>
 #include <cstring>
 #include <optional>
 #include <string>
@@ -21,11 +23,13 @@
 #endif
 
 #include "core/ids.hpp"
+#include "core/ink.hpp"
 #include "core/lut3d.hpp"
 #include "core/ops_util.hpp"
 #include "core/paths.hpp"
 #include "core/pyconv.hpp"
 #include "core/pyops.hpp"
+#include "core/smart.hpp"
 #include "render/fill.hpp"
 #include "render/import_profile.hpp"
 #include "render/op_limits.hpp"
@@ -34,7 +38,10 @@
 #include "render/psd.hpp"
 #include "render/psd_adjust.hpp"
 #include "render/raster.hpp"
+#include "render/not_yet_ported.hpp"
+#include "render/ops_smart_parts.hpp"
 #include "render/selection.hpp"
+#include "render/smart_decode.hpp"
 
 namespace genko::render {
 
@@ -296,6 +303,166 @@ std::string first_chars(const std::string& text, std::size_t count) {
     return text.substr(0, at);
 }
 
+// --- placed layers as smart objects (PC3 A3) ---------------------------------------------------------------------
+
+// What a placed layer becomes: a smart object of the file the PSD holds for it, or (why not) its pixels as before.
+struct SmartMade {
+    std::string contents;  // its contents' id
+    Json settings;         // the layer's "smart" (without its psd: the import adds it)
+    std::string why;       // (none made: no_file, external, too_large, unreadable, flat)
+};
+
+// The page's mm of a point of the PSD's canvas laid on the page (`where`).
+std::pair<double, double> on_page(const core::Page& page, const Placement& where, std::int64_t width, std::int64_t height, double x, double y) {
+    const double fx = page.spec.width_mm.value() / static_cast<double>(where.page_w);
+    const double fy = page.spec.height_mm.value() / static_cast<double>(where.page_h);
+    const double sx = static_cast<double>(where.shown_w) / static_cast<double>(std::max<std::int64_t>(1, width));
+    const double sy = static_cast<double>(where.shown_h) / static_cast<double>(std::max<std::int64_t>(1, height));
+    return {fx * (static_cast<double>(where.at_x) + sx * x), fy * (static_cast<double>(where.at_y) + sy * y)};
+}
+
+// The file a placed layer shows, as smart object contents (the same contents for every layer of the same uuid: Photoshop's
+// instances): its bytes kept as they are (Document::smart_files), its linked-layer item without them kept to be written
+// back (contents' psd: {"uuid", "item", "at"}), and its colour use the op's.
+std::optional<SmartMade> smart_contents_of(core::Document& doc, const psd::File& file, const psd::Layer& item, const Json& op,
+                                           const import_profile::Taking& way, std::map<std::string, std::string>& made) {
+    SmartMade out;
+    const psd::Placed& placed = *item.placed;
+    if (const auto known = made.find(placed.uuid); known != made.end()) {
+        out.contents = known->second;
+        return out;
+    }
+    const std::optional<psd::LinkedItem> linked = file.linked(placed.uuid);
+    if (!linked) {
+        out.why = "no_file";
+        return out;
+    }
+    if (linked->kind != "liFD") {
+        out.why = "external";
+        return out;
+    }
+    if (linked->data.size() > smart::kFileMaxBytes) {
+        out.why = "too_large";
+        return out;
+    }
+    smart::FileInfo info;
+    try {
+        info = smart::look_at(linked->data, "");
+    } catch (const NotYetPorted&) {
+        out.why = "unreadable";
+        return out;
+    } catch (const core::Error&) {
+        out.why = "unreadable";
+        return out;
+    }
+    if (info.width > core::smart::kSideMax || info.height > core::smart::kSideMax) {
+        out.why = "too_large";
+        return out;
+    }
+    auto contents = std::make_shared<core::SmartContents>();
+    contents->kind = "file";
+    std::string name = linked->name;
+    const auto named = core::smart::suffix_of_name(name);
+    contents->suffix = named && core::smart::format_of_suffix(*named) == info.format ? *named : info.suffix;
+    if (name.empty()) name = (item.name.empty() ? std::string("スマートオブジェクト") : item.name) + contents->suffix;
+    contents->name = first_chars(name, core::smart::kNameMax);
+    const std::string bytes(linked->data);
+    contents->asset = core::bytes_ref(bytes);
+    doc.smart_files[contents->asset] = std::make_shared<const std::string>(bytes);
+    contents->format = info.format;
+    contents->width_px = info.width;
+    contents->height_px = info.height;
+    const auto usable = [](double dpi) { return std::isfinite(dpi) && dpi >= 1 && dpi <= 100000; };
+    contents->dpi = usable(info.dpi) ? info.dpi : usable(placed.resolution) ? placed.resolution : usable(file.dpi()) ? file.dpi() : 72.0;
+    contents->depth = info.depth;
+    contents->mode = info.mode;
+    // (its colours as the op takes the file's: kept, from the profile it carries, or the op's)
+    contents->profile = Json::object({{"use", "keep"}});
+    if (op.contains("embedded_profile") && way.way != "keep" && way.converting) {
+        Json use = Json::object();
+        if (way.way == "convert" && info.icc) {
+            use["use"] = "embedded";
+        } else if (way.way == "assign" && way.from) {
+            const std::string ref = core::bytes_ref(*way.from);
+            doc.smart_files[ref] = way.from;
+            use["use"] = "assign";
+            use["icc"] = ref;
+        }
+        if (!use.empty()) {
+            use["intent"] = way.intent;
+            use["bpc"] = way.bpc;
+            contents->profile = std::move(use);
+        }
+    }
+    // (the item without the file's bytes, and where they go: written back as it was while the contents stay)
+    const std::size_t at = static_cast<std::size_t>(linked->data.data() - linked->item.data());
+    std::string rest(linked->item.substr(0, at));
+    rest += linked->item.substr(at + linked->data.size());
+    const std::string rest_ref = core::bytes_ref(rest);
+    doc.smart_files[rest_ref] = std::make_shared<const std::string>(std::move(rest));
+    contents->psd = Json{{"uuid", placed.uuid}, {"item", rest_ref}, {"at", static_cast<std::int64_t>(at)}};
+    out.contents = smart_ops::fresh_contents_id(doc);
+    doc.smart_contents[out.contents] = std::move(contents);
+    made[placed.uuid] = out.contents;
+    return out;
+}
+
+// A placed layer's smart object settings: its matrix (the contents' mm onto the page's, through its corners on the
+// canvas and the canvas's place on the page), its corners on the page when they are not a parallelogram, its warp (in the
+// contents' mm). None (`why` flat) when its corners squash it or are not convex.
+SmartMade smart_settings(const core::Document& doc, const core::Page& page, const Placement& where, const psd::File& file, const psd::Placed& placed,
+                         SmartMade made) {
+    const core::SmartContents& contents = *doc.smart_contents.at(made.contents);
+    const double w = static_cast<double>(contents.width_px), h = static_cast<double>(contents.height_px);
+    const std::array<double, 8>& p = placed.corners;
+    const double k = contents.dpi / 25.4;  // (the contents' px a mm)
+    const auto [x0, y0] = on_page(page, where, file.width(), file.height(), p[0], p[1]);
+    const auto [x1, y1] = on_page(page, where, file.width(), file.height(), p[2], p[3]);
+    const auto [x3, y3] = on_page(page, where, file.width(), file.height(), p[6], p[7]);
+    core::smart::Matrix m{(x1 - x0) / w * k, (y1 - y0) / w * k, (x3 - x0) / h * k, (y3 - y0) / h * k, x0, y0};
+    m = core::smart::snapped(m);
+    if (!(std::abs(m.det()) > core::smart::kDetMin)) {
+        made.why = "flat";
+        return made;
+    }
+    Json settings = core::smart::settings(made.contents, m, "lanczos");
+    const double size = std::max({1.0, std::abs(p[0]), std::abs(p[1]), std::abs(p[4]), std::abs(p[5])});
+    if (!psd::parallelogram(p, 1e-9 * size)) {
+        Json corners = Json::array();
+        std::array<std::pair<double, double>, 4> q;
+        for (std::size_t i = 0; i < 4; ++i) {
+            q[i] = on_page(page, where, file.width(), file.height(), p[2 * i], p[2 * i + 1]);
+            corners.push_back(Json::array({q[i].first, q[i].second}));
+        }
+        int sign = 0;
+        for (std::size_t i = 0; i < 4; ++i) {
+            const auto& [ax, ay] = q[i];
+            const auto& [bx, by] = q[(i + 1) % 4];
+            const auto& [cx, cy] = q[(i + 2) % 4];
+            const double cross = (bx - ax) * (cy - by) - (by - ay) * (cx - bx);
+            const int here = cross > 1e-9 ? 1 : cross < -1e-9 ? -1 : 0;
+            if (here == 0 || (sign != 0 && here != sign)) {
+                made.why = "flat";
+                return made;
+            }
+            sign = here;
+        }
+        settings["perspective"] = std::move(corners);
+    }
+    if (placed.warp) {  // (its box and mesh from the contents' units — Sz, else their pixels — to their mm)
+        const double ux = placed.width > 0 ? w / placed.width : 1.0, uy = placed.height > 0 ? h / placed.height : 1.0;
+        Json warp = *placed.warp;
+        Json& box = warp["bounds"];
+        for (std::size_t i = 0; i < 4; ++i) box[i] = box[i].get<double>() * (i % 2 == 0 ? ux : uy) / k;
+        if (warp.contains("mesh")) {
+            for (Json& point : warp["mesh"]["points"]) point = Json::array({point[0].get<double>() * ux / k, point[1].get<double>() * uy / k});
+        }
+        settings["warp"] = std::move(warp);
+    }
+    made.settings = std::move(settings);
+    return made;
+}
+
 // --- the op -------------------------------------------------------------------------------------------------------
 
 void import_psd(core::OpContext& c) {
@@ -401,6 +568,8 @@ void import_psd(core::OpContext& c) {
     const Size shown{static_cast<int>(where.shown_w), static_cast<int>(where.shown_h)};
     const bool same_size = where.shown_w == file.width() && where.shown_h == file.height();
     std::vector<core::Layer> made;
+    std::map<std::string, std::string> contents_made;  // (PC3 A3: a placed layer's uuid → its contents' id)
+    Json smart_objects = Json::array(), placed_pixels = Json::array();
     for (std::size_t i = 0; i < layers.size(); ++i) {
         const psd::Layer& item = layers[i];
         core::Layer layer;
@@ -462,6 +631,36 @@ void import_psd(core::OpContext& c) {
             if (!merged && !merged_inks) {
                 if (auto mask = mask_of()) layer.mask = std::move(*mask);
             }
+            // (PC3 A3, the user's decision 3: a placed layer whose file the PSD holds is a smart object of it; the
+            // picture just made — Photoshop's — is what it shows until it changes, its block kept to be written back)
+            if (item.kind == "smart" && item.placed) {
+                std::optional<SmartMade> smart = item.placed->has_corners ? smart_contents_of(doc, file, item, op, way, contents_made)
+                                                                          : std::optional<SmartMade>(SmartMade{{}, {}, "unreadable"});
+                if (smart && smart->why.empty()) *smart = smart_settings(doc, page, where, file, *item.placed, std::move(*smart));
+                if (smart && smart->why.empty()) {
+                    Json picture = Json::object();
+                    const auto keep = [&doc](core::Bytes bytes) {
+                        const std::string ref = core::bytes_ref(*bytes);
+                        doc.smart_files[ref] = std::move(bytes);
+                        return ref;
+                    };
+                    if (layer.ink_raster) picture["ink_raster"] = keep(layer.ink_raster);
+                    else picture["asset"] = keep(layer.raster_png);
+                    const std::string block(file.placed_block(item));
+                    Json record = Json{{"block", item.placed->key}, {"raw", keep(std::make_shared<const std::string>(block))}, {"shown", std::move(picture)}};
+                    layer.kind = core::LayerKind::Smart;
+                    layer.raster_png.reset();
+                    layer.raster_relpath.reset();
+                    layer.ink_raster.reset();
+                    layer.source.reset();
+                    layer.clip_to = "none";
+                    smart->settings["psd"] = std::move(record);
+                    layer.smart = std::move(smart->settings);
+                    smart_objects.push_back(Json{{"id", layer.id}, {"contents", smart->contents}});
+                } else {
+                    placed_pixels.push_back(Json{{"id", layer.id}, {"why", smart ? smart->why : std::string("no_file")}});
+                }
+            }
         }
         made.push_back(std::move(layer));
     }
@@ -488,6 +687,9 @@ void import_psd(core::OpContext& c) {
     target.layers.insert(target.layers.begin() + static_cast<std::ptrdiff_t>(at), std::make_move_iterator(made.begin()),
                          std::make_move_iterator(made.end()));
     c.report = Json::object({{"layers", std::move(listed)}, {"skipped", std::move(skipped)}});
+    // (PC3 A3: the placed layers made smart objects, and those read as their pixels and why — said only when there are)
+    if (!smart_objects.empty()) (*c.report)["smart_objects"] = std::move(smart_objects);
+    if (!placed_pixels.empty()) (*c.report)["placed_as_pixels"] = std::move(placed_pixels);
     if (op.contains("embedded_profile")) (*c.report)["embedded_profile"] = import_profile::report(way);
 }
 

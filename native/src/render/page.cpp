@@ -1839,8 +1839,19 @@ std::string first_chars(const std::string& text, std::size_t count) {
 
 void page_layers(const core::Page& page, const core::Document& episode, int dpi, const std::function<void(PageLayer&&)>& each,
                  const std::function<void(const core::StoryLine&)>* line_layers, const std::function<void(const core::Layer&)>* adjust_layers) {
-    // (smart-objects@1: a smart object that draws exactly as a layer of its own is that layer)
-    if (auto plain = core::smart::with_plain_layers(page, &episode)) return page_layers(*plain, episode, dpi, each, line_layers, adjust_layers);
+    // (smart-objects@1: a smart object that draws exactly as a layer of its own is that layer — given as the smart object's
+    // picture all the same, PC3 A3)
+    if (auto plain = core::smart::with_plain_layers(page, &episode)) {
+        const std::function<void(PageLayer&&)> named = [&](PageLayer&& layer) {
+            if (layer.smart == nullptr && !layer.id.empty()) {
+                for (const Layer& l : page.layers) {
+                    if (l.id == layer.id && l.kind == LayerKind::Smart) layer.smart = &l;
+                }
+            }
+            each(std::move(layer));
+        };
+        return page_layers(*plain, episode, dpi, named, line_layers, adjust_layers);
+    }
     // (color-model@1: the book's text_gamma, for the letters of the lines' layers — as render_page draws them)
     const text::TextGamma gamma(episode.text_gamma);
     Ctx ctx;
@@ -1909,6 +1920,8 @@ void page_layers(const core::Page& page, const core::Document& episode, int dpi,
         }
         if (!raster) continue;
         PageLayer out;
+        out.id = layer.id;
+        if (layer.kind == LayerKind::Smart) out.smart = &layer;
         out.inks = std::move(own_inks);
         // (color-model@1: on an RGB page of a profile a paint layer's pixels are the page's values)
         out.page_values = (core::profiled_rgb(page) && layer.color_raster) || core::holds_page_values(page, layer);

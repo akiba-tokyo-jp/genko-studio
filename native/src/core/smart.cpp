@@ -139,6 +139,26 @@ void check_filter(const std::string& who, const Json& f) {
         refuse(who + ": a smart filter's colour lookup is one of the looks (look), not a table");
 }
 
+// A PSD's placed layer as a smart object keeps (PC3 A3): {"block": its key, "raw": its payload (an asset), "shown"?:
+// Photoshop's picture of it ({"asset": a PNG} or {"ink_raster": a page of inks' GKIR})}.
+void check_layer_psd(const std::string& who, const Json& psd) {
+    if (!psd.is_object()) refuse(who + ": a smart object's psd is {block, raw, shown}");
+    for (const auto& [key, value] : psd.items()) {
+        if (key != "block" && key != "raw" && key != "shown") refuse(who + ": the psd key " + py_repr_str(key) + " is not known to this build");
+    }
+    const Json* block = get(psd, "block");
+    if (block == nullptr || !block->is_string() || (*block != "SoLd" && *block != "SoLE" && *block != "PlLd"))
+        refuse(who + ": a smart object's psd block is SoLd, SoLE or PlLd");
+    const Json* raw = get(psd, "raw");
+    if (raw == nullptr || !raw->is_string() || !is_ref(raw->get_ref<const std::string&>())) refuse(who + ": a smart object's psd raw is an asset (sha256:…)");
+    if (const Json* shown = get(psd, "shown"); shown != nullptr && !shown->is_null()) {
+        if (!shown->is_object() || shown->size() != 1) refuse(who + ": a smart object's psd shown is {asset} or {ink_raster}");
+        const auto only = shown->begin();
+        if ((only.key() != "asset" && only.key() != "ink_raster") || !only->is_string() || !is_ref(only->get_ref<const std::string&>()))
+            refuse(who + ": a smart object's psd shown is {asset} or {ink_raster} (sha256:…)");
+    }
+}
+
 void check_settings(const Layer& layer) {
     const std::string who = "layer " + layer.id;
     if (!layer.smart || !layer.smart->is_object()) refuse(who + " is a smart object without its settings");
@@ -194,10 +214,8 @@ void check_settings(const Layer& layer) {
         if (asset == nullptr || !asset->is_string() || !is_ref(asset->get_ref<const std::string&>())) refuse(who + ": a filter mask is an asset (sha256:…)");
         if (const Json* enabled = get(*mask, "enabled"); enabled != nullptr && !enabled->is_boolean()) refuse(who + ": a filter mask's enabled is true or false");
     }
-    for (const char* key : {"warp", "psd"}) {
-        if (const Json* value = get(s, key); value != nullptr && !value->is_null() && !value->is_object())
-            refuse(who + ": a smart object's " + key + " is an object");
-    }
+    if (const Json* warp = get(s, "warp"); warp != nullptr && !warp->is_null() && !warp->is_object()) refuse(who + ": a smart object's warp is an object");
+    if (const Json* psd = get(s, "psd"); psd != nullptr && !psd->is_null()) check_layer_psd(who, *psd);
     const bool drawn = layer.raster_png || layer.color_raster || layer.ink_raster || layer.stroke_count() > 0 || !layer.patches.empty() ||
                        (layer.fill && py_truthy(*layer.fill)) || (layer.adjust && py_truthy(*layer.adjust)) || (layer.tone && py_truthy(*layer.tone)) ||
                        layer.asset || layer.placement_mm;
@@ -240,7 +258,19 @@ void check_contents(const std::string& id, const SmartContents& c) {
             refuse(who + ": " + error.what());
         }
     }
-    if (c.psd && !c.psd->is_object()) refuse(who + ": its psd is an object");
+    if (c.psd) {  // (PC3 A3: a PSD's linked file, {"uuid", "item": its item without the file's bytes, "at": where they go})
+        if (!c.psd->is_object()) refuse(who + ": its psd is {uuid, item, at}");
+        for (const auto& [key, value] : c.psd->items()) {
+            if (key != "uuid" && key != "item" && key != "at") refuse(who + ": its psd's " + py_repr_str(key) + " is not known to this build");
+        }
+        const Json* uuid = get(*c.psd, "uuid");
+        if (uuid == nullptr || !uuid->is_string() || uuid->get_ref<const std::string&>().empty() || uuid->get_ref<const std::string&>().size() > 255)
+            refuse(who + ": its psd's uuid is text of 1 to 255 bytes");
+        const Json* item = get(*c.psd, "item");
+        if (item == nullptr || !item->is_string() || !is_ref(item->get_ref<const std::string&>())) refuse(who + ": its psd's item is an asset (sha256:…)");
+        const Json* at = get(*c.psd, "at");
+        if (at == nullptr || !at->is_number_integer() || at->get<std::int64_t>() < 0) refuse(who + ": its psd's at is where the file's bytes go");
+    }
 }
 
 }  // namespace
@@ -717,6 +747,7 @@ void bring_contents(Document& doc, const Document& from, Page& page) {
 void transform_layer(Layer& layer, const Matrix& m) {
     if (!is_smart(layer) || !layer.smart || !layer.smart->is_object()) return;
     set_matrix(layer, multiply(m, matrix_of(layer)));
+    layer.smart->erase("psd");  // (PC3 A3: a PSD's picture and corners are no longer where it is)
     if (Json* corners = layer.smart->contains("perspective") ? &(*layer.smart)["perspective"] : nullptr; corners != nullptr && corners->is_array()) {
         for (Json& point : *corners) {
             if (!point.is_array() || point.size() != 2 || !point[0].is_number() || !point[1].is_number()) continue;

@@ -174,6 +174,11 @@ struct PageLayer {
     std::string blend = "normal";
     bool clip = false;
     std::optional<Image> mask;
+    // (PC3 A3) the page layer it is the picture of (empty: none, the paper, fills, lines, panels…), and — a smart object's
+    // picture (one that draws as a layer of its own too) — that smart object, the page's: a PSD writes it as a placed
+    // layer of its contents.
+    std::string id;
+    const core::Layer* smart = nullptr;
 };
 
 // psd.page_layers(page, episode, dpi), bottom to top: the paper, the page's fills, each visible exported pixel layer

@@ -1077,6 +1077,20 @@ core::Layer Reader::read_layer(const Json& data, const std::string& at) {
             issue("missing_asset", at_key(at_key(at_key(at, "smart"), "filter_mask"), "asset"), asset->get<std::string>(),
                   "the smart object's filter mask " + AssetStore::relpath(asset->get<std::string>(), ".png") + " is missing");
         }
+        // (PC3 A3: a PSD's placed layer block and Photoshop's picture of it)
+        const Json* psd = find(*layer.smart, "psd");
+        if (psd != nullptr && psd->is_object() && !dir_.empty()) {
+            const std::string here = at_key(at_key(at, "smart"), "psd");
+            const auto check = [&](const Json* ref, std::string_view suffix, const std::string& where, const std::string& noun) {
+                if (ref == nullptr || !ref->is_string() || !AssetStore::is_ref(ref->get<std::string>()) || store_.has(ref->get<std::string>(), suffix)) return;
+                issue("missing_asset", where, ref->get<std::string>(), noun + " " + AssetStore::relpath(ref->get<std::string>(), suffix) + " is missing");
+            };
+            check(find(*psd, "raw"), ".bin", at_key(here, "raw"), "the smart object's PSD block");
+            if (const Json* shown = find(*psd, "shown"); shown != nullptr && shown->is_object()) {
+                check(find(*shown, "asset"), ".png", at_key(at_key(here, "shown"), "asset"), "the smart object's PSD picture");
+                check(find(*shown, "ink_raster"), core::kInkRasterSuffix, at_key(at_key(here, "shown"), "ink_raster"), "the smart object's PSD picture");
+            }
+        }
     }
     if (const Json* mask = find(data, "mask"); mask && core::py_truthy(*mask)) {
         const std::string here = at_key(at, "mask");
@@ -1547,6 +1561,13 @@ std::map<std::string, std::shared_ptr<const core::SmartContents>> Reader::read_s
                 !store_.has(icc->get<std::string>(), core::kProfileSuffix)) {
                 issue("missing_asset", at_key(at_key(at, "profile"), "icc"), icc->get<std::string>(),
                       "the ICC profile " + AssetStore::relpath(icc->get<std::string>(), core::kProfileSuffix) + " is missing");
+            }
+            // (PC3 A3: a PSD's linked-layer item, written back with the file)
+            const Json* record = contents->psd && contents->psd->is_object() ? find(*contents->psd, "item") : nullptr;
+            if (record != nullptr && record->is_string() && AssetStore::is_ref(record->get<std::string>()) && !dir_.empty() &&
+                !store_.has(record->get<std::string>(), ".bin")) {
+                issue("missing_asset", at_key(at_key(at, "psd"), "item"), record->get<std::string>(),
+                      "the PSD's linked file record " + AssetStore::relpath(record->get<std::string>(), ".bin") + " is missing");
             }
         }
         out.emplace(id, std::move(contents));

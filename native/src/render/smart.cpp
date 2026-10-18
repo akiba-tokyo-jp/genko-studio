@@ -14,6 +14,7 @@
 
 #include "core/base64.hpp"
 #include "core/error.hpp"
+#include "core/ink.hpp"
 #include "core/paths.hpp"
 #include "core/placement.hpp"
 #include "core/pyconv.hpp"
@@ -144,7 +145,8 @@ std::string identity(const core::Document& doc, const core::SmartContents& conte
 
 // --- the smart object's settings ---------------------------------------------------------------------------------------
 
-// What PC3's later steps add, which this build keeps and does not draw yet (smart filters and their mask: PC3 A2, drawn).
+// What PC3's later steps add, which this build keeps and does not draw yet (smart filters and their mask: PC3 A2, drawn;
+// a PSD's record: PC3 A3, its picture drawn while it has one, shown_8bit).
 void refuse_later(const core::Layer& layer) {
     if (!layer.smart || !layer.smart->is_object()) return;
     const Json& s = *layer.smart;
@@ -155,7 +157,66 @@ void refuse_later(const core::Layer& layer) {
     if (set("perspective")) throw NotYetPorted("smart:perspective");
     if (set("warp")) throw NotYetPorted("smart:warp");
     if (set("stack")) throw NotYetPorted("smart:stack");
-    if (set("psd")) throw NotYetPorted("smart:psd");
+}
+
+// --- a PSD's picture of it (PC3 A3) -------------------------------------------------------------------------------------
+
+// The asset of the picture Photoshop drew of a smart object read from a PSD (its psd.shown: "asset", a PNG over the page
+// as a paint layer's, or "ink_raster", a page of inks' GKIR), none when it has none.
+std::optional<std::string> shown_ref(const core::Layer& layer, std::string_view key) {
+    if (!layer.smart || !layer.smart->is_object()) return std::nullopt;
+    const Json* psd = core::get(*layer.smart, "psd");
+    const Json* shown = psd != nullptr && psd->is_object() ? core::get(*psd, "shown") : nullptr;
+    const Json* ref = shown != nullptr && shown->is_object() ? core::get(*shown, key) : nullptr;
+    if (ref == nullptr || !ref->is_string()) return std::nullopt;
+    return ref->get<std::string>();
+}
+
+// Its bytes: from the files ops kept, else the book's assets; null when the book does not hold them (the reader says so).
+core::Bytes shown_bytes(const core::Document& doc, const std::string& ref, std::string_view suffix) {
+    if (const auto held = doc.smart_files.find(ref); held != doc.smart_files.end() && held->second) return held->second;
+    if (!doc.asset_dir || !storage::AssetStore::is_ref(ref)) return nullptr;
+    auto bytes = storage::AssetStore(*doc.asset_dir).get_bytes(ref, suffix, storage::kAssetMaxBytes);
+    if (!bytes) return nullptr;
+    return std::make_shared<const std::string>(std::move(*bytes));
+}
+
+// Its PNG laid over the page as a placed picture of the whole page is (what the PSD's layer was, stretched over the page
+// as a paint layer's picture; the monochrome finish in print as the smart object's file gets it). None when it has none.
+std::optional<std::optional<Image>> shown_8bit(const Ctx& ctx, const core::Layer& layer, const Box& area) {
+    const auto ref = shown_ref(layer, "asset");
+    if (!ref) return std::nullopt;
+    const core::Document& doc = *ctx.episode;
+    const std::string key = "shown " + (doc.asset_dir ? core::path_to_utf8(*doc.asset_dir) : std::string()) + "\n" + *ref;
+    const auto picture = [&]() -> std::shared_ptr<const Image> {
+        if (auto kept = pictures().get(key)) return kept;
+        const core::Bytes bytes = shown_bytes(doc, *ref, ".png");
+        if (!bytes) return nullptr;
+        auto made = std::make_shared<const Image>(open_image(*bytes, kPillowOpenLimits).convert("RGBA"));
+        pictures().put(key, made, image_bytes(*made));
+        return made;
+    };
+    const core::Page& page = *ctx.page;
+    const core::Rect whole{core::Num(0.0), core::Num(0.0), page.spec.width_mm, page.spec.height_mm};
+    return placed_picture(layer, whole, picture, key, Resample::Bicubic, page, ctx.episode, ctx.size, ctx.dpi, ctx.mode, ctx.finish, ctx.dots, area);
+}
+
+// Its inks (a page of inks' smart object read from a PSD onto it), over `area`; none when it has none of the page's inks.
+std::optional<InkPicture> shown_inks(const Ctx& ctx, const core::Layer& layer, const Box& area) {
+    const auto ref = shown_ref(layer, "ink_raster");
+    if (!ref) return std::nullopt;
+    const core::Document& doc = *ctx.episode;
+    const std::string key = "shown inks " + (doc.asset_dir ? core::path_to_utf8(*doc.asset_dir) : std::string()) + "\n" + *ref;
+    std::shared_ptr<const core::InkPixels> inks = ink_pictures().get(key);
+    if (inks == nullptr) {
+        const core::Bytes bytes = shown_bytes(doc, *ref, core::kInkRasterSuffix);
+        if (!bytes) return std::nullopt;
+        inks = decoded_ink(bytes);
+        if (inks == nullptr) return std::nullopt;
+        ink_pictures().put(key, inks, inks->samples.size() * 2 + inks->floats.size() * 4);
+    }
+    if (inks->space != ctx.page->color->space) return std::nullopt;
+    return sample_ink_raster(*inks, ctx.size, area);
 }
 
 std::string interp_of(const core::Layer& layer, const core::SmartContents& contents) {
@@ -812,6 +873,7 @@ std::optional<Image> picture_8bit(const Ctx& ctx, const core::Layer& layer, cons
     if (ctx.episode == nullptr) return std::nullopt;
     const core::SmartContents* contents = core::smart::contents_of(*ctx.episode, layer);
     if (contents == nullptr) return std::nullopt;
+    if (auto shown = shown_8bit(ctx, layer, area)) return std::move(*shown);  // (PC3 A3: a PSD's picture, until it changes)
     refuse_later(layer);
     if (core::smart::filters_drawn(layer)) return filtered_8bit(ctx, layer, *contents, area);  // (PC3 A2)
     const Matrix m = core::smart::matrix_of(layer);
@@ -824,6 +886,7 @@ std::optional<ColorPicture> picture_precise(const Ctx& ctx, const core::Layer& l
     if (ctx.episode == nullptr) return std::nullopt;
     const core::SmartContents* contents = core::smart::contents_of(*ctx.episode, layer);
     if (contents == nullptr) return std::nullopt;
+    if (shown_ref(layer, "asset")) return std::nullopt;  // (PC3 A3: a PSD's picture, of 8 bits)
     refuse_later(layer);
     if (core::smart::filters_drawn(layer)) return filtered_precise(ctx, layer, *contents, area, space);  // (PC3 A2)
     const Matrix m = core::smart::matrix_of(layer);
@@ -867,6 +930,8 @@ std::optional<InkPicture> picture_inks(const Ctx& ctx, const core::Layer& layer,
     if (ctx.episode == nullptr || !ctx.page->color) return std::nullopt;
     const core::SmartContents* contents = core::smart::contents_of(*ctx.episode, layer);
     if (contents == nullptr) return std::nullopt;
+    if (auto shown = shown_inks(ctx, layer, area)) return shown;  // (PC3 A3: a PSD's picture, until it changes)
+    if (shown_ref(layer, "asset")) return std::nullopt;  // (its PNG: as an 8-bit picture, by the page's rules)
     refuse_later(layer);
     if (core::smart::filters_drawn(layer)) return filtered_inks(ctx, layer, *contents, area);  // (PC3 A2)
     const Matrix m = core::smart::matrix_of(layer);

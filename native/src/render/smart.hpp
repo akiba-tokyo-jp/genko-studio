@@ -19,8 +19,9 @@
 // A part of the page gets the same pixels as the whole page cut there. A smart object that draws exactly as a layer of
 // its own (core::smart::plain_layer) is drawn as that layer before any of this (render/page.cpp).
 //
-// What later steps of PC3 add — perspective and warp (A5), stack modes (A4), smart filters and their mask (A2), a PSD's
-// picture (A3) — is not drawn yet: NotYetPorted("smart:<what>").
+// A smart object read from a PSD (PC3 A3) shows Photoshop's picture of it (its psd.shown, a paint layer's picture over the
+// page or a page of inks') until it changes, then is drawn from its contents. What later steps of PC3 add — perspective
+// and warp (A5), stack modes (A4) — is not drawn yet: NotYetPorted("smart:<what>"); smart filters and their mask (A2) are.
 
 namespace genko::render {
 struct ColorPicture;

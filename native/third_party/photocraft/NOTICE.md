@@ -90,6 +90,12 @@ PhotoCraft v0.2.0（`ad863217386440ca968fccc9bfff65ba24e61142`、MIT、同梱 `L
   - `crates/engine/src/smart_cmds.rs`（692-779 行、880-953 行）: スマートフィルターの番号（0 が一番下、既定は一番上）、設定を重ねる・描画オプション（1 を超える不透明度は %）・表示の反転・並べ替え・削除・クリア（フィルターとマスク）・スマートフィルターとフィルターマスクの無効化の振る舞いと断り → `native/src/render/ops_smart_filters.cpp`（`smart_filter_set`・`smart_filter_move`・`smart_filter_delete`・`smart_filter_state`）。
   - `crates/engine/src/filters.rs`（199-207 行）: SO にフィルターをかけると、画素を変えずにスマートフィルターとして記録する → `native/src/app/layer_panel.cpp`（`apply_filter`）、`native/src/app/image_dialogs.cpp`（シャドウ・ハイライト）。
   - `crates/engine/src/smart_cmds/tests.rs`（125-211 行、253-264 行）: 設定を変えても中身から描き直す・同じ設定なら同じ画素・隠せば元の画素、並び・描画モード・不透明度・無効化・削除・クリア、選択範囲がフィルターマスクになる、変形に付いて来ることの試験 → `native/tests/unit/test_smart_filters.cpp`（Genko の 3 つの道・200 dpi の `rasterize_layer`＋`filter_raster` との比べ・部分描画に広げた）。
+- A3（PSD のスマートオブジェクト）:
+  - `crates/io/src/linked.rs`（1-128 行）: 全体のブロック `lnk2`・`lnk3`・`lnkD` の項目（8 バイトの長さ・4 バイトにそろえる・種類 `liFD`/`liFE`/`liFA`・版・uuid・ファイル名・開く記述子）の読み方と uuid で引くこと、`liFD`（版 2、開く記述子なし）の書き方 → `native/src/render/psd_smart.cpp`（`read_linked`・`linked_item`）、`native/src/render/psd.cpp`（`File::linked`）。試験 114-148 行 → `native/tests/unit/test_psd_smart.cpp`（`linkedFilesRoundTrip`）。
+  - `crates/io/src/blocks.rs`（344-421 行、`parse_placed_warp`・`parse_smart`）: `SoLd`・`SoLE` の記述子の `Idnt`・`Trnf`・`Sz` から中身の id と置き方、`warp` の形の既定・曲げ・歪み・向き・範囲とカスタムの 4×4 のメッシュ、何も変えないワープは無いとすること → `native/src/render/psd_smart.cpp`（`read_placed`。`nonAffineTransform`・`PlLd` の読み方と Genko の形への写しは Genko のもの）。試験 472-512 行・546-562 行 → `native/tests/unit/test_psd_smart.cpp`（`placedBlocksRead`）。
+  - `crates/io/src/psd_import.rs`（195-243 行）: `SoLd`・`PlLd`・`SoLE` のある層を SO にし、Photoshop の絵を描き直すまでの絵として持ち、ブロックを書き戻すために持つこと → `native/src/render/import_psd.cpp`（`smart_contents_of`・`smart_settings`）、`native/src/render/smart.cpp`（`shown_8bit`・`shown_inks`）。
+  - `crates/io/src/psd_export.rs`（269-274 行）: 読んだ配置レイヤーのブロックを変えずに書き戻すこと → `native/src/formats/psd_export.cpp`（`PlacedLayers`。Genko で作った SO の `SoLd`・`PlLd`・`lnk2` を書くこと、場所が同じ間だけ書き戻すことは Genko のもの）。
+  - `crates/engine/src/smart_cmds/tests.rs`（359-397 行、`psd_placed_layer_renders_from_lnk2_data`）: PSD の配置レイヤーが `lnk2` の中身から描き直されるまで Photoshop の絵を見せる試験 → `native/tests/contract/test_contract_psd_smart.cpp`（`placedLayerImported`）、`native/tests/unit/test_psd_smart.cpp`（`importedAndWrittenBack`）。
 
 ## 選択・マスク（masks@1、PC3 節 B）
 

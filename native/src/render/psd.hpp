@@ -12,6 +12,7 @@
 #include "core/ink.hpp"
 #include "core/json.hpp"
 #include "render/image.hpp"
+#include "render/psd_smart.hpp"
 #include "render/psd_text.hpp"
 
 // Photoshop files read as layers (Python's genko/psd.py: read_psd and its helpers), for import_psd. (ARCHITECTURE.md §1
@@ -70,7 +71,7 @@ struct Layer {
     std::string blend = "normal";
     bool clip = false;
     std::optional<std::size_t> parent;  // the index (in layers()) of the folder it is in
-    std::string kind = "pixels";        // pixels | folder | text | adjust
+    std::string kind = "pixels";        // pixels | folder | text | adjust | smart
     bool has_mask = false;
     std::size_t record = 0;  // (pixel layers) the layer record it was read from
     // (PC2, the user's decision 5) an adjustment layer a codec read (render/psd_adjust.hpp): the correction's adjust.
@@ -79,6 +80,9 @@ struct Layer {
     // (PC2a) the lookup tables its adjust uses (a color lookup's: the table its block holds, as GKLU bytes by their
     // asset ref), which import_psd takes into the book with the correction.
     std::map<std::string, core::Bytes> luts;
+    // (PC3 A3, the user's decision 3) a placed layer (kind smart): its block read (render/psd_smart.hpp) — SoLd, else SoLE,
+    // else PlLd, with PlLd's corners where SoLd has none. Its pixels are Photoshop's picture of it (image()).
+    std::optional<Placed> placed;
 };
 
 class File {
@@ -109,9 +113,43 @@ public:
     // color-mode@1: a pixel layer's picture over the whole canvas, and the merged picture, as a CMYK or Lab page's inks
     // (CMYK from the file's own profile or the page's, Lab from Lab, the rest from RGB; 8-bit samples as read).
     core::InkPixels image_inks(const Layer& layer, const core::PageColor& color) const;
-    std::optional<core::InkPixels> merged_inks(const core::PageColor& color) const;
+    // (`own_profile` false: a CMYK file's inks taken as the page's, its profile left aside — PC3 A3, a smart object's
+    // file kept as its numbers)
+    std::optional<core::InkPixels> merged_inks(const core::PageColor& color, bool own_profile = true) const;
     // The ICC profile the file carries (image resource 1039), or "".
     const std::string& icc() const { return icc_; }
+
+    // PC3 A3 (smart-objects@1: a PSD or PSB as a smart object's file, and its placed layers). The header's depth (1, 8,
+    // 16, 32), colour mode number and channels; whether it is a PSB.
+    int depth() const { return depth_; }
+    int mode() const { return mode_; }
+    int channel_count() const { return nchan_; }
+    bool psb() const { return psb_; }
+    // Whether its merged picture is Photoshop's picture of the layers (image resource 1057's hasRealMergedData; true when
+    // the file does not say): a file saved without maximised compatibility holds a blank one.
+    bool real_merged() const { return real_merged_; }
+    // The merged picture in the file's own colours, 8 bits a sample: "L" (grey, bitmap, duotone, multichannel, indexed as
+    // psd.py reads them), "LA", "RGB", "RGBA", "CMYK" (its inks), "LAB" (its L, a+128, b+128 bytes); the alpha a flat
+    // file's transparency. Nothing where it has none (merged()).
+    std::optional<Image> merged_picture() const;
+    // The merged picture with every bit: per pixel its colour channels and (a flat file's) its alpha as floats — 0..1 for
+    // 1, 8 and 16 bits (a CMYK file's as ink, 1 full), as stored for 32 (linear light, HDR kept); rows from the top.
+    struct Deep {
+        std::int64_t width = 0, height = 0;
+        unsigned colours = 3;
+        bool alpha = false;
+        std::vector<float> samples;
+    };
+    std::optional<Deep> merged_deep() const;
+    // Its visible pixel layers (in visible folders) laid over each other in normal at their opacity, through their masks
+    // ("RGBA" over the canvas): the picture of a file with no merged picture, or a blank one (real_merged()).
+    Image composited() const;
+    // The file its linked-layer blocks (the global lnk2, lnk3, lnkD) hold for a placed layer's uuid; none when none
+    // does.
+    std::optional<LinkedItem> linked(std::string_view uuid) const;
+    // A placed layer's block as the layer record holds it (its payload: what import_psd keeps to write it back); empty
+    // for another layer.
+    std::string_view placed_block(const Layer& layer) const;
     // channels@1 (this build's own, not psd.py's): the merged picture's extra channels — the alpha and spot channels past
     // its colours (and past a flat file's transparency) —, each with its name (image resource 1045, else 1006) and how
     // it shows (1077: 0 selected areas, 1 masked areas, 2 spot; its RGB colour; its opacity, a spot's solidity, in
@@ -161,6 +199,8 @@ public:
         std::string adjust_key;
         std::uint64_t adjust_at = 0, adjust_size = 0;
         std::uint64_t cged_at = 0, cged_size = 0;  // (its CgEd block: brightness_contrast's modern settings)
+        // (PC3 A3) its placed layer blocks' payloads: SoLd, SoLE, PlLd (size 0: none)
+        std::uint64_t sold_at = 0, sold_size = 0, sole_at = 0, sole_size = 0, plld_at = 0, plld_size = 0;
         const ChannelRef* channel(int id) const;
     };
 
@@ -178,6 +218,8 @@ private:
     std::string channel_names_;    // (1045, else 1006)
     bool unicode_names_ = false;
     std::string display_info_;     // (1077)
+    bool real_merged_ = true;      // (1057)
+    std::vector<std::pair<std::uint64_t, std::uint64_t>> linked_blocks_;  // (PC3 A3: the global lnk2, lnk3, lnkD: where, how long)
     std::uint64_t merged_at_ = 0;
     Limits limits_{};
     std::vector<Record> records_;
@@ -199,6 +241,8 @@ private:
     Image part(const Record& record) const;
     std::map<int, std::string> part_channels(const Record& record) const;
     std::optional<std::map<int, std::string>> merged_channels() const;
+    // (each merged plane's raw bytes at the file's depth: the colours', and a flat file's transparency)
+    std::optional<std::map<int, std::string>> merged_raw() const;
 };
 
 // psd.BLEND_KEYS: the blend mode of a layer record's key ("normal" for one not there).

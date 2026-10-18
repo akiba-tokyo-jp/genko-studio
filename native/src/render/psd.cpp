@@ -498,6 +498,63 @@ void pillow_size(std::int64_t width, std::int64_t height) {
     if (width > INT_MAX / 4 - 1) throw ReadError("MemoryError", "", false);
 }
 
+std::uint64_t be64(std::string_view d, std::uint64_t at) {
+    return (std::uint64_t{be32(d.substr(static_cast<std::size_t>(at), 4))} << 32) | be32(d.substr(static_cast<std::size_t>(at + 4), 4));
+}
+
+// (PC3 A3) the global tagged blocks after the layers (from `from` to `end`: the global layer mask, then the blocks), the
+// places of the linked-layer ones (lnk2, lnk3, lnkD) kept. Nothing past what can be read is looked at, and nothing read
+// here is refused: psd.py does not read these.
+void linked_blocks(std::string_view d, bool psb, std::uint64_t from, std::uint64_t end, std::vector<std::pair<std::uint64_t, std::uint64_t>>& out) {
+    end = std::min<std::uint64_t>(end, d.size());
+    if (from > end || end - from < 4) return;
+    std::uint64_t pos = from;
+    const std::uint64_t mask = be32(d.substr(static_cast<std::size_t>(pos), 4));
+    pos += 4;
+    if (mask > end - pos) return;
+    pos += mask;
+    const auto signature = [&](std::uint64_t at) {
+        if (at > end || end - at < 4) return false;
+        const std::string_view sig = d.substr(static_cast<std::size_t>(at), 4);
+        return sig == "8BIM" || sig == "8B64";
+    };
+    while (end - pos >= 12 && signature(pos)) {
+        const std::string_view key = d.substr(static_cast<std::size_t>(pos + 4), 4);
+        pos += 8;
+        // (a PSB's long blocks have 8-byte lengths: the layers' keys and, as psd-tools reads them, the linked layers')
+        const bool big = psb && (long_key(key) || key == "lnk3" || key == "lnkE");
+        std::uint64_t length = 0;
+        if (big) {
+            if (end - pos < 8) return;
+            length = be64(d, pos);
+            pos += 8;
+        } else {
+            length = be32(d.substr(static_cast<std::size_t>(pos), 4));
+            pos += 4;
+        }
+        if (length > end - pos) return;
+        if (key == "lnk2" || key == "lnk3" || key == "lnkD") out.emplace_back(pos, length);
+        pos += length;
+        // (padded to 4 bytes when its length did not count the padding)
+        if (length % 4 != 0 && !signature(pos) && signature(pos + (4 - length % 4))) pos += 4 - length % 4;
+    }
+}
+
+// (PC3 A3) a pixel layer's placed layer block read: SoLd, else SoLE, else PlLd — PlLd's corners where SoLd has none.
+std::optional<Placed> placed_of(std::string_view d, const File::Record& rec) {
+    const auto block = [&](std::uint64_t at, std::uint64_t size) { return d.substr(static_cast<std::size_t>(at), static_cast<std::size_t>(size)); };
+    std::optional<Placed> legacy = rec.plld_size > 0 ? read_placed("PlLd", block(rec.plld_at, rec.plld_size)) : std::nullopt;
+    std::optional<Placed> out;
+    if (rec.sold_size > 0) out = read_placed("SoLd", block(rec.sold_at, rec.sold_size));
+    if (!out && rec.sole_size > 0) out = read_placed("SoLE", block(rec.sole_at, rec.sole_size));
+    if (!out) return legacy;
+    if (!out->has_corners && legacy && legacy->has_corners) {
+        out->corners = legacy->corners;
+        out->has_corners = true;
+    }
+    return out;
+}
+
 }  // namespace
 
 std::string blend_of(std::string_view key) {
@@ -545,6 +602,7 @@ File File::read(std::string data, const Limits& limits, bool lab) {
         }
         if (rid == 1006 && !f.unicode_names_) f.channel_names_ = std::string(block.substr(0, size));
         if (rid == 1077) f.display_info_ = std::string(block.substr(0, size));
+        if (rid == 1057 && size >= 5) f.real_merged_ = byte_at(block, 4) != 0;  // (PC3 A3: version info, hasRealMergedData)
     }
     r.pos = res_end;
     static const std::map<int, std::string> kModeNames{{0, "bitmap"}, {1, "gray"},         {2, "indexed"}, {3, "rgb"},
@@ -625,6 +683,10 @@ File File::read(std::string data, const Limits& limits, bool lab) {
                     } else if (tag == "CgEd") {  // (PC2a: read with its brit)
                         rec.cged_at = static_cast<std::uint64_t>(body.data() - d.data());
                         rec.cged_size = body.size();
+                    } else if (tag == "SoLd" || tag == "SoLE" || tag == "PlLd") {  // (PC3 A3: a placed layer, read with its layer)
+                        const auto at = static_cast<std::uint64_t>(body.data() - d.data());
+                        (tag == "SoLd" ? rec.sold_at : tag == "SoLE" ? rec.sole_at : rec.plld_at) = at;
+                        (tag == "SoLd" ? rec.sold_size : tag == "SoLE" ? rec.sole_size : rec.plld_size) = body.size();
                     } else if (adjust_tag(tag)) {
                         rec.kind = "adjust";
                         if (tag != "SoCo" && tag != "GdFl" && tag != "PtFl") {  // (PC2: an adjustment, not a fill layer)
@@ -679,6 +741,7 @@ File File::read(std::string data, const Limits& limits, bool lab) {
             }
         }
         r.pos = li_end;
+        linked_blocks(d, f.psb_, li_end, lm_end, f.linked_blocks_);  // (PC3 A3: the files of its placed layers)
     }
     r.pos = lm_end;
     f.merged_at_ = r.pos;
@@ -774,6 +837,12 @@ File File::read(std::string data, const Limits& limits, bool lab) {
         layer.clip = rec.clip;
         layer.kind = rec.kind;
         layer.record = n;
+        if (rec.kind == "pixels") {  // (PC3 A3, the user's decision 3: a placed layer is a smart object)
+            if (auto placed = placed_of(f.data_, rec)) {
+                layer.kind = "smart";
+                layer.placed = std::move(placed);
+            }
+        }
         const ChannelRef* mask = rec.channel(-2);
         if (rec.mask && mask != nullptr && !rec.mask_disabled) {
             layer.has_mask = true;
@@ -918,6 +987,13 @@ File::MergedPlan File::plan_merged() const {
 }
 
 std::optional<std::map<int, std::string>> File::merged_channels() const {
+    auto raw = merged_raw();
+    if (!raw) return std::nullopt;
+    for (auto& [id, plane] : *raw) plane = depth8(&plane, plane.size(), width_, height_, depth_).bytes;
+    return raw;
+}
+
+std::optional<std::map<int, std::string>> File::merged_raw() const {
     const MergedPlan plan = plan_merged();
     if (!plan.exists) return std::nullopt;
     canvas_fits(width_, height_);
@@ -939,7 +1015,7 @@ std::optional<std::map<int, std::string>> File::merged_channels() const {
                 at += n;
             }
         }
-        return depth8(&raw, raw.size(), width_, height_, depth_).bytes;
+        return raw;
     };
     std::map<int, std::string> channels;
     const int colour = colour_bands(mode_);
@@ -956,10 +1032,126 @@ std::optional<Image> File::merged() const {
     return to_rgba(mode_, *channels, Size{as_int(width_), as_int(height_)});
 }
 
-std::optional<core::InkPixels> File::merged_inks(const core::PageColor& color) const {
+std::optional<core::InkPixels> File::merged_inks(const core::PageColor& color, bool own_profile) const {
     const auto channels = merged_channels();
     if (!channels) return std::nullopt;
-    return to_inks(mode_, *channels, Size{as_int(width_), as_int(height_)}, color, icc_);
+    return to_inks(mode_, *channels, Size{as_int(width_), as_int(height_)}, color, own_profile ? icc_ : std::string());
+}
+
+std::optional<Image> File::merged_picture() const {
+    const auto channels = merged_channels();
+    if (!channels) return std::nullopt;
+    const Size size{as_int(width_), as_int(height_)};
+    const auto band = [&](int id, int fallback) {
+        const auto found = channels->find(id);
+        if (found != channels->end() && !found->second.empty()) return Image::frombytes("L", size, found->second);
+        return Image::create("L", size, Ink(fallback));
+    };
+    Image out;
+    if (mode_ == 4) {  // (its inks: stored inverted)
+        std::vector<Image> inks;
+        for (int i = 0; i < 4; ++i) inks.push_back(ops::invert(band(i, 255)));
+        return Image::merge("CMYK", inks);
+    }
+    if (mode_ == 9) return Image::merge("LAB", {band(0, 255), band(1, 128), band(2, 128)});
+    const bool alpha = channels->contains(-1);
+    if (mode_ == 1 || mode_ == 0 || mode_ == 2 || mode_ == 8) {
+        out = band(0, 255);
+        if (!alpha) return out;
+        out = out.convert("LA");
+    } else {
+        out = Image::merge("RGB", {band(0, 0), band(1, 0), band(2, 0)});
+        if (!alpha) return out;
+        out = out.convert("RGBA");
+    }
+    out.putalpha(band(-1, 255));
+    return out;
+}
+
+std::optional<File::Deep> File::merged_deep() const {
+    const auto raw = merged_raw();
+    if (!raw) return std::nullopt;
+    Deep out;
+    out.width = width_;
+    out.height = height_;
+    out.colours = static_cast<unsigned>(colour_bands(mode_));
+    out.alpha = raw->contains(-1);
+    const unsigned all = out.colours + (out.alpha ? 1 : 0);
+    const std::size_t count = static_cast<std::size_t>(width_) * static_cast<std::size_t>(height_);
+    out.samples.assign(count * all, 0.0f);
+    const std::uint64_t rowbytes = row_bytes(width_, depth_);
+    for (unsigned c = 0; c < all; ++c) {
+        const int id = c < out.colours ? static_cast<int>(c) : -1;
+        const auto found = raw->find(id);
+        const bool inverted = mode_ == 4 && id >= 0;  // (CMYK stored as 255 for no ink)
+        for (std::size_t i = 0; i < count; ++i) {
+            float v = id < 0 ? 1.0f : 0.0f;
+            if (found != raw->end()) {
+                const std::string& plane = found->second;
+                const std::size_t y = i / static_cast<std::size_t>(width_), x = i % static_cast<std::size_t>(width_);
+                if (depth_ == 1) {
+                    const std::size_t at = y * rowbytes + x / 8;
+                    if (at < plane.size()) v = ((byte_at(plane, at) >> (7 - x % 8)) & 1) != 0 ? 0.0f : 1.0f;
+                } else if (depth_ == 8) {
+                    if (i < plane.size()) v = byte_at(plane, i) / 255.0f;
+                } else if (depth_ == 16) {
+                    if (2 * i + 1 < plane.size()) v = static_cast<float>((byte_at(plane, 2 * i) << 8) | byte_at(plane, 2 * i + 1)) / 65535.0f;
+                } else if (depth_ == 32) {
+                    if (4 * i + 3 < plane.size()) {
+                        const std::uint32_t bits = be32(std::string_view(plane).substr(4 * i, 4));
+                        std::memcpy(&v, &bits, 4);
+                        if (!std::isfinite(v)) v = 0.0f;
+                    }
+                }
+            }
+            out.samples[i * all + c] = inverted ? 1.0f - v : v;
+        }
+    }
+    return out;
+}
+
+Image File::composited() const {
+    canvas_fits(width_, height_);
+    Image out = Image::create("RGBA", Size{as_int(width_), as_int(height_)}, Ink{0, 0, 0, 0});
+    for (const Layer& layer : layers_) {
+        if (layer.folder || layer.kind == "adjust") continue;
+        bool shown = layer.visible;
+        double opacity = layer.opacity;
+        for (auto in = layer.parent; in && *in < layers_.size(); in = layers_[*in].parent) {
+            shown = shown && layers_[*in].visible;
+            opacity *= layers_[*in].opacity;
+        }
+        if (!shown || opacity <= 0) continue;
+        Image picture = image(layer);
+        Image alpha = picture.getchannel("A");
+        if (const auto mask = this->mask(layer)) alpha = chops::multiply(alpha, *mask);
+        if (opacity < 1) alpha = alpha.point([opacity](int v) { return static_cast<int>(std::lround(v * opacity)); });
+        picture.putalpha(alpha);
+        out = alpha_composite(out, picture);
+    }
+    return out;
+}
+
+std::optional<LinkedItem> File::linked(std::string_view uuid) const {
+    if (uuid.empty()) return std::nullopt;
+    std::optional<LinkedItem> found;
+    for (const auto& [at, size] : linked_blocks_) {
+        for (const LinkedItem& item : read_linked(std::string_view(data_).substr(static_cast<std::size_t>(at), static_cast<std::size_t>(size)))) {
+            if (item.uuid != uuid) continue;
+            if (item.kind == "liFD") return item;  // (the file's own bytes before an external one's name)
+            if (!found) found = item;
+        }
+    }
+    return found;
+}
+
+std::string_view File::placed_block(const Layer& layer) const {
+    if (!layer.placed || layer.folder || layer.record >= records_.size()) return {};
+    const Record& rec = records_[layer.record];
+    const std::string_view d = data_;
+    if (layer.placed->key == "SoLd") return d.substr(static_cast<std::size_t>(rec.sold_at), static_cast<std::size_t>(rec.sold_size));
+    if (layer.placed->key == "SoLE") return d.substr(static_cast<std::size_t>(rec.sole_at), static_cast<std::size_t>(rec.sole_size));
+    return d.substr(static_cast<std::size_t>(rec.plld_at), static_cast<std::size_t>(rec.plld_size));
 }
 
 std::vector<File::ExtraChannel> File::extra_channels() const {

@@ -19,9 +19,10 @@
 // object draws exactly as. The drawing is render/smart.hpp; the ops are render/ops_smart.cpp.
 //
 // A layer's "smart" (in this order): {"contents": "sc_…", "matrix": [a, b, c, d, e, f], "interp": …}, its smart filters
-// (PC3 A2: "filters", "filters_on", "filter_mask") and what later steps of PC3 add to it — "perspective" (the contents' four
-// corners on the page), "warp", "stack", "psd" — which this build keeps as they are and does not draw yet (NotYetPorted
-// names them: render/smart.cpp).
+// (PC3 A2: "filters", "filters_on", "filter_mask"), what a PSD's placed layer keeps (PC3 A3: "psd" — {"block", "raw",
+// "shown"?}: its block written back, Photoshop's picture shown until the smart object changes) and what later steps of PC3
+// add to it — "perspective" (the contents' four corners on the page), "warp", "stack" — which this build keeps as they
+// are and does not draw yet (NotYetPorted names them: render/smart.cpp).
 
 namespace genko::core {
 
@@ -173,7 +174,7 @@ void bring_contents(Document& doc, const Document& from, Page& page);
 bool same_panels(const std::vector<Frame>& a, const std::vector<Frame>& b);
 
 // A smart object moved with its page (a page-wide transform: the paper's size, a turn): its matrix after `m` (page mm →
-// page mm), and its corners when it has them.
+// page mm), and its corners when it has them; a PSD's record let go (PC3 A3: its picture and corners are elsewhere now).
 void transform_layer(Layer& layer, const Matrix& m);
 
 }  // namespace smart
