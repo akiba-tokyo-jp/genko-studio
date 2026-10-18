@@ -16,7 +16,7 @@ namespace {
 constexpr std::array<std::string_view, 2> kBindings{"right", "left"};
 constexpr std::array<std::string_view, 10> kRoles{"name", "draft", "ink", "bg", "finish",
                                                   "tone", "effect", "frames", "text", "user"};
-constexpr std::array<std::string_view, 7> kKinds{"raster", "strokes", "fill", "tone", "folder", "placed", "adjust"};
+constexpr std::array<std::string_view, 8> kKinds{"raster", "strokes", "fill", "tone", "folder", "placed", "adjust", "smart"};
 
 template <class Enum, std::size_t N>
 std::optional<Enum> enum_from(const std::array<std::string_view, N>& names, std::string_view text) {
@@ -426,6 +426,21 @@ Page& Document::edit_page(std::size_t i) {
     PagePtr& page = pages.at(i);
     if (page.use_count() > 1) page = std::make_shared<Page>(*page);
     return *page;
+}
+
+SmartContents& Document::edit_contents(const std::string& id) {
+    const auto it = smart_contents.find(id);
+    if (it == smart_contents.end() || !it->second) throw Error("key", "no smart object contents " + id);
+    // (every SmartContents is made with make_shared<SmartContents>: one no other Document holds is changed in place)
+    if (it->second.use_count() > 1) it->second = std::make_shared<SmartContents>(*it->second);
+    return const_cast<SmartContents&>(*it->second);
+}
+
+Page& Document::edit_contents_page(const std::string& id) {
+    SmartContents& contents = edit_contents(id);
+    if (!contents.page) throw Error("key", "the smart object contents " + id + " are not a page");
+    if (contents.page.use_count() > 1) contents.page = std::make_shared<Page>(*contents.page);
+    return *contents.page;
 }
 
 std::vector<const StoryLine*> Document::story_for_page(const Num& page_index) const {

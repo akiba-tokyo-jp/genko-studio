@@ -79,6 +79,9 @@ struct RenderOptions {
     // channels laid over the picture in their colours (their ids).
     std::optional<std::vector<bool>> planes;
     std::vector<std::string> overlays;
+    // smart-objects@1 (render/smart.hpp): a smart object's contents page — its layers alone over nothing ("RGBA"): no paper,
+    // panels' borders, lines, nombres, effect lines, guides or marks (render_contents).
+    bool contents = false;
 };
 
 struct RenderResult {
@@ -125,6 +128,11 @@ core::InkPixels composite_ink_layers(const core::Page& page, const std::vector<c
 
 RenderResult render_page(const core::Page& page, int dpi, const RenderOptions& options = {},
                          const core::Document* episode = nullptr);
+
+// smart-objects@1 (render/smart.hpp): a smart object's contents page drawn as its layers alone (RenderOptions::contents):
+// "RGBA" over nothing, with (precise) the values of a page in precise colour, its alpha the layers'. A part of it as the
+// whole cut there; never in tiles, never its channels.
+RenderResult render_contents(const core::Page& page, int dpi, const RenderOptions& options, const core::Document* episode = nullptr);
 
 // One panel, cut from the page (bleed panels with their bleed). core::Error("key") for a frame that is not there.
 Image render_frame(const core::Page& page, std::string_view frame_id, int dpi, const RenderOptions& options = proof_options(),

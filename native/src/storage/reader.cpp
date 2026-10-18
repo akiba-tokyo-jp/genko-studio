@@ -22,6 +22,7 @@
 #include "core/ids.hpp"
 #include "core/pyconv.hpp"
 #include "core/ruby.hpp"
+#include "core/smart.hpp"
 #include "core/strokes.hpp"
 #include "storage/asset_store.hpp"
 #include "storage/fsutil.hpp"
@@ -36,11 +37,13 @@ using core::Point;
 
 namespace {
 
-constexpr std::array<std::string_view, 22> kTopKeys{
+constexpr std::array<std::string_view, 23> kTopKeys{
     "version", "revision", "title", "episode", "binding", "start_side", "strict_gates", "autosave",
     "font_path", "page_locks", "brush", "nombre", "spec", "bible", "tickets", "studio", "pages", "story",
     // v4
-    "min_reader", "writer", "book_id", "features"};
+    "min_reader", "writer", "book_id", "features",
+    // smart-objects@1
+    "smart_contents"};
 
 constexpr std::array<std::string_view, 21> kPageKeys{
     "id", "art_ok", "plan", "index", "note", "name_ok", "stage", "spread_with", "numero", "onion_from", "lt_threshold",
@@ -60,13 +63,15 @@ constexpr std::array<std::string_view, 20> kLineKeys{"id", "page_index", "text",
                                                      "x_mm", "y_mm", "w_mm", "h_mm", "balloon", "tail", "wrap",
                                                      "ruby_runs", "ruby_spans", "path", "emphasis_runs", "style_runs",
                                                      "style", "tails"};
-constexpr std::array<std::string_view, 43> kLayerKeys{
+constexpr std::array<std::string_view, 44> kLayerKeys{
     "id", "role", "kind", "visible", "exportable", "strokes", "raster_relpath", "fill_rgb", "lpi", "density",
     "region", "opacity", "material_id", "angle", "title", "blend", "clip", "lock_alpha", "locked", "panel_clip",
     "panel_each", "patches", "tone", "parent_id", "asset", "mask", "color", "reference", "fill", "adjust", "effect",
     "color_prints", "screen", "source", "strokes_blob", "stroke_count",
     // placed layers only
-    "frame_id", "placement_mm", "fit", "clip_to", "finish", "color_raster", "ink_raster"};
+    "frame_id", "placement_mm", "fit", "clip_to", "finish", "color_raster", "ink_raster",
+    // smart-objects@1
+    "smart"};
 constexpr std::array<std::string_view, 5> kPlacedOnlyKeys{"frame_id", "placement_mm", "fit", "clip_to", "finish"};
 constexpr std::array<std::string_view, 2> kMaskKeys{"enabled", "asset"};
 constexpr std::array<std::string_view, 10> kPackedStrokeKeys{"id", "kind", "width_mm", "xy", "p", "rgb", "opacity", "r", "po", "color_rgb"};
@@ -364,6 +369,9 @@ private:
     core::Bytes read_profile(const std::string& ref, core::ProfileSpace space, const std::string& at_profile);
     void check_ink_rasters(core::Page& page, const Json& raw, const std::string& at);
     void read_channels(core::Page& page, const std::string& at);
+    // smart-objects@1: the book's smart object contents, and a page of them
+    std::map<std::string, std::shared_ptr<const core::SmartContents>> read_smart_contents(const Json& payload, core::Binding binding);
+    core::Page read_contents_page(const Json& raw, const std::string& at, const core::PageSpec& spec, core::Binding binding);
 };
 
 core::PageSpec Reader::read_spec(const Json& raw) {
@@ -1043,6 +1051,13 @@ core::Layer Reader::read_layer(const Json& data, const std::string& at) {
         layer.source = asis_json(data, "source");
         layer.finish = asis_json(data, "finish");
     }
+    const bool smart = layer.kind == core::LayerKind::Smart;
+    if (smart) {  // smart-objects@1: its panel and finish as a placed picture's, its settings (core::smart::validate_smart)
+        layer.frame_id = asis_opt_str(data, "frame_id", at);
+        layer.clip_to = truthy_at(data, "clip_to") ? asis_str(data, "clip_to", "frame", at) : "frame";
+        layer.finish = asis_json(data, "finish");
+    }
+    if (const Json* settings = find(data, "smart")) layer.smart = *settings;  // (on another kind: refused by validate_smart)
     if (const Json* mask = find(data, "mask"); mask && core::py_truthy(*mask)) {
         const std::string here = at_key(at, "mask");
         if (!mask->is_object()) format_error(here, "a mask must be an object, not " + core::py_repr(*mask));
@@ -1058,7 +1073,7 @@ core::Layer Reader::read_layer(const Json& data, const std::string& at) {
         check_keys(*mask, kMaskKeys, here, "mask");
     }
     check_keys(data, kLayerKeys, at, "layer");
-    if (!placed) {
+    if (!placed && !smart) {
         for (const auto& key : kPlacedOnlyKeys) {
             if (find(data, key) != nullptr) {
                 issue("unknown_key", at_key(at, key), {},
@@ -1074,6 +1089,14 @@ core::Layer Reader::read_layer(const Json& data, const std::string& at) {
             if (truthy_at(data, key)) {
                 issue("unknown_key", at_key(at, key), {},
                       "a placed layer's " + std::string(key) + " is not written back (Python drops it too)");
+            }
+        }
+        return layer;
+    }
+    if (smart) {  // (smart-objects@1: a smart object holds no pixels or lines of its own)
+        for (const auto* key : {"strokes", "patches", "strokes_blob", "raster_relpath", "asset", "ink_raster", "placement_mm", "fit"}) {
+            if (truthy_at(data, key)) {
+                issue("unknown_key", at_key(at, key), {}, "a smart object's " + std::string(key) + " is not written back");
             }
         }
         return layer;
@@ -1242,6 +1265,7 @@ core::Document Reader::migrate(const Json& payload) {
     }
     skip_assets_ = false;
     if (!had_story) story = std::move(page_texts);
+    auto smart_contents = read_smart_contents(payload, *binding);  // (smart-objects@1)
 
     core::Document doc;
     const Json* title = find(payload, "title");
@@ -1252,6 +1276,7 @@ core::Document Reader::migrate(const Json& payload) {
     doc.binding = *binding;
     doc.pages = std::move(page_list);
     doc.deferred = std::move(deferred);
+    doc.smart_contents = std::move(smart_contents);
     doc.luts = std::move(luts_);
     doc.story = std::move(story);
     doc.tickets = list_or_empty(payload, "tickets");
@@ -1357,7 +1382,104 @@ core::Document Reader::migrate(const Json& payload) {
     // (adjustments@1: a correction's native or own kind that is not well formed)
     try { core::validate_adjustments(doc); }
     catch (const core::Error& error) { issue("broken_value", "/pages", {}, error.what()); }
+    // (smart-objects@1: a smart object's settings, its contents and contents inside contents)
+    try { core::smart::validate_smart(doc); }
+    catch (const core::Error& error) { issue("broken_value", "/smart_contents", {}, error.what()); }
     return doc;
+}
+
+std::map<std::string, std::shared_ptr<const core::SmartContents>> Reader::read_smart_contents(const Json& payload, core::Binding binding) {
+    std::map<std::string, std::shared_ptr<const core::SmartContents>> out;
+    const Json* raw = find(payload, "smart_contents");
+    if (raw == nullptr || raw->is_null()) return out;
+    if (!raw->is_object()) {
+        issue("broken_value", "/smart_contents", {}, "the smart object contents must be an object, not " + core::py_repr(*raw));
+        return out;
+    }
+    for (const auto& [id, item] : raw->items()) {
+        const std::string at = at_key("/smart_contents", id);
+        auto contents = std::make_shared<core::SmartContents>();
+        try {
+            *contents = core::smart::contents_from_json(item);
+        } catch (const core::Error& error) {
+            issue("broken_value", at, {}, error.what());
+            continue;
+        }
+        if (contents->kind == "page") {
+            const Json* spec = find(item, "spec");
+            const Json* page = find(item, "page");
+            if (spec == nullptr || page == nullptr) {
+                issue("broken_value", at, {}, "the contents of kind page hold their spec and page");
+                continue;
+            }
+            contents->page = std::make_shared<core::Page>(read_contents_page(*page, at_key(at, "page"), read_spec(*spec), binding));
+        } else if (AssetStore::is_ref(contents->asset) && AssetStore::is_suffix(contents->suffix)) {
+            // (the file's bytes are read as it is drawn: here only that it is there)
+            if (!dir_.empty() && !store_.has(contents->asset, contents->suffix)) {
+                issue("missing_asset", at_key(at, "asset"), contents->asset,
+                      "the smart object's file " + AssetStore::relpath(contents->asset, contents->suffix) + " is missing");
+            }
+            const Json* icc = find(contents->profile, "icc");
+            if (icc != nullptr && icc->is_string() && AssetStore::is_ref(icc->get<std::string>()) && !dir_.empty() &&
+                !store_.has(icc->get<std::string>(), core::kProfileSuffix)) {
+                issue("missing_asset", at_key(at_key(at, "profile"), "icc"), icc->get<std::string>(),
+                      "the ICC profile " + AssetStore::relpath(icc->get<std::string>(), core::kProfileSuffix) + " is missing");
+            }
+        }
+        out.emplace(id, std::move(contents));
+    }
+    return out;
+}
+
+// A smart object's page (its contents of kind page): read as a page of the book is, with its own spec; it has no lines,
+// and (none given) no layers.
+core::Page Reader::read_contents_page(const Json& raw, const std::string& at, const core::PageSpec& spec, core::Binding binding) {
+    if (!raw.is_object()) format_error(at, "a page must be an object, not " + core::py_repr(raw));
+    core::Page page;
+    page.id = truthy_at(raw, "id") ? asis_str(raw, "id", {}, at) : core::new_page_id();
+    page.art_ok = to_bool(raw, "art_ok", false);
+    page.plan = asis_json(raw, "plan");
+    page.index = find(raw, "index") != nullptr ? required_num(raw, "index", at) : Num(1);
+    page.spec = spec;
+    if (const Json* frames = find(raw, "frames")) {
+        const Json items = iterable(*frames, at_key(at, "frames"));
+        for (std::size_t i = 0; i < items.size(); ++i) page.frames.push_back(read_frame(items[i], at_index(at_key(at, "frames"), i)));
+    }
+    page.binding = binding;
+    page.note = asis_str(raw, "note", "", at);
+    page.name_ok = asis_bool(raw, "name_ok", false, at);
+    page.stage = asis_str(raw, "stage", "name", at);
+    page.spread_with = asis_opt_num(raw, "spread_with", at);
+    page.numero = asis_bool(raw, "numero", true, at);
+    page.effects = list_or_empty(raw, "effects");
+    page.ruler = asis_json(raw, "ruler");
+    page.rulers = list_or_empty(raw, "rulers");
+    page.prims = list_or_empty(raw, "prims");
+    page.onion_from = asis_opt_num(raw, "onion_from", at);
+    page.lt_threshold = asis_opt_num(raw, "lt_threshold", at);
+    const Json* fills_raw = find(raw, "fills");
+    const Json fills = fills_raw ? *fills_raw : Json::object();
+    if (!fills.is_object()) format_error(at_key(at, "fills"), "fills must be an object, not " + core::py_repr(fills));
+    for (const auto& [role_name, rgb] : fills.items()) {
+        const auto role = core::layer_role_from(role_name);
+        if (!role) format_error(at_key(at, "fills"), core::py_repr_str(role_name) + " is not a valid LayerRole");
+        page.fills.emplace_back(*role, numbers_of(rgb, at_key(at_key(at, "fills"), role_name)));
+    }
+    if (const Json* layers = find(raw, "layers")) {
+        const Json items = iterable(*layers, at_key(at, "layers"));
+        for (std::size_t i = 0; i < items.size(); ++i) page.layers.push_back(read_layer(items[i], at_index(at_key(at, "layers"), i)));
+    }
+    for (const auto& [key, value] : raw.items()) {
+        if (!in(kPageKeys, key)) page.extra[key] = value;
+    }
+    {
+        core::ColorModel model = read_color(page.extra, at);
+        page.color = std::move(model.inks);
+        page.rgb = std::move(model.rgb);
+    }
+    check_ink_rasters(page, raw, at);
+    read_channels(page, at);
+    return page;
 }
 
 std::string read_only_reason(const LoadReport& report) {
@@ -1418,7 +1540,7 @@ bool is_known_feature(std::string_view feature) {
     return feature == core::kColorRasterFeature || feature == core::kColorTilesFeature || feature == core::kExposureFeature ||
            feature == core::kColorStrokeFeature || feature == core::kPaperFeature || feature == core::kRubyLayoutFeature ||
            feature == core::kColorModeFeature || feature == core::kColorModelFeature || feature == core::kChannelsFeature ||
-           feature == core::kAdjustmentsFeature;
+           feature == core::kAdjustmentsFeature || feature == core::kSmartObjectsFeature;
 }
 
 int project_version(const Json& payload) {

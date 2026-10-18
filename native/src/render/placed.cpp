@@ -386,7 +386,25 @@ std::optional<Image> placed_raster(const core::Layer& layer, const core::Page& p
     if (!storage::AssetStore::is_ref(ref)) return std::nullopt;  // (no such file: Python would look outside assets/ for some)
     const storage::AssetStore store(*episode->asset_dir);
     if (!store.has(ref, ".png")) return std::nullopt;
-    const core::Rect& r = *layer.placement_mm;  // may start left of / above the paper, so no clamping here
+    const std::string source_key = core::path_to_utf8(*episode->asset_dir) + "\n" + ref;
+    const auto picture = [&]() -> std::shared_ptr<const Image> {
+        std::shared_ptr<const Image> source = sources().get(source_key);
+        if (source == nullptr) {
+            const auto bytes = store.get_bytes(ref, ".png", storage::kAssetMaxBytes);
+            if (!bytes) return nullptr;
+            ++g_drawn_decoded;
+            source = std::make_shared<const Image>(open_image(*bytes, kPillowOpenLimits).convert("RGBA"));
+            sources().put(source_key, source);
+        }
+        return source;
+    };
+    return placed_picture(layer, *layer.placement_mm, picture, source_key, Resample::Lanczos, page, episode, size, dpi, mode, finish, dots, area);
+}
+
+std::optional<Image> placed_picture(const core::Layer& layer, const core::Rect& placement, const std::function<std::shared_ptr<const Image>()>& picture,
+                                    const std::string& source_key, Resample resample, const core::Page& page, const core::Document* episode,
+                                    Size size, int dpi, std::string_view mode, bool finish, bool dots, const Box& area) {
+    const core::Rect& r = placement;  // may start left of / above the paper, so no clamping here
     // (Python's ints, unbounded, held as whole floats: a placement far off the page — any finite size — is nothing
     // drawn, as in Python; round()'s OverflowError only for an infinity, as Python's)
     const double x0 = core::py_round_whole(r.x.value() / 25.4 * dpi);
@@ -404,15 +422,8 @@ std::optional<Image> placed_raster(const core::Layer& layer, const core::Page& p
     if (vx1 <= vx0 || vy1 <= vy0) return std::nullopt;
     const Box visible{static_cast<int>(vx0), static_cast<int>(vy0), static_cast<int>(vx1), static_cast<int>(vy1)};
 
-    const std::string source_key = core::path_to_utf8(*episode->asset_dir) + "\n" + ref;
-    std::shared_ptr<const Image> source = sources().get(source_key);
-    if (source == nullptr) {
-        const auto bytes = store.get_bytes(ref, ".png", storage::kAssetMaxBytes);
-        if (!bytes) return std::nullopt;
-        ++g_drawn_decoded;
-        source = std::make_shared<const Image>(open_image(*bytes, kPillowOpenLimits).convert("RGBA"));
-        sources().put(source_key, source);
-    }
+    const std::shared_ptr<const Image> source = picture();
+    if (source == nullptr) return std::nullopt;
     // (Python's int differences, exact, as floats: the same while they are below 2**53 pixels; past that, a difference
     // is rounded before the division here, where Python divides the exact ints)
     const double sx = static_cast<double>(source->width()) / (x1 - x0);
@@ -430,18 +441,19 @@ std::optional<Image> placed_raster(const core::Layer& layer, const core::Page& p
             const Json bits = Json::array({x0, y0, x1, y1, visible.x0, visible.y0, visible.x1, visible.y1, dpi, std::string(mode), dots,
                                            page.spec.expression, std::string(core::to_string(layer.role)),
                                            layer.source ? *layer.source : Json(), layer.finish ? *layer.finish : Json(),
-                                           core::py_get(episode->studio, "style"),
-                                           frame != nullptr && frame->panel ? *frame->panel : Json(), episode->bible.characters});
+                                           episode != nullptr ? core::py_get(episode->studio, "style") : Json(),
+                                           frame != nullptr && frame->panel ? *frame->panel : Json(),
+                                           episode != nullptr ? episode->bible.characters : Json()});
             const std::string key = source_key + "\n" + core::dump_python(bits);
             std::shared_ptr<const Image> art = finished().get(key);
             if (art == nullptr) {
-                const Image fitted = source->resize_in_bands(fitted_size, Resample::Lanczos, box);  // (in bands: the same pixels)
+                const Image fitted = source->resize_in_bands(fitted_size, resample, box);  // (in bands: the same pixels)
                 art = std::make_shared<const Image>(finish_placed(fitted, layer, page, episode, dpi, mode, dots, Point{visible.x0, visible.y0}));
                 if (static_cast<std::int64_t>(fitted_size.width) * fitted_size.height <= kKeptFinishPixels) finished().put(key, art);
             }
             piece = art->crop(in_fitted);
         } else {
-            piece = source->resize_region_in_bands(fitted_size, in_fitted, Resample::Lanczos, box);  // (in bands: the same pixels)
+            piece = source->resize_region_in_bands(fitted_size, in_fitted, resample, box);  // (in bands: the same pixels)
         }
         out.paste(piece, Point{part.x0 - area.x0, part.y0 - area.y0});
     }

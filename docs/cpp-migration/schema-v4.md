@@ -53,6 +53,7 @@ v3 から外すもの: なし（未知キーも `extra` として書き戻す）
 | `color-model@1` | PC1a・PC1b・PC1d | 色モデル: RGB のプロファイル・精度（8/16/32 bit）・黒点補正、グレースケール、32 bit の CMYK・Lab・グレー（GKIR 版 2）、高精度の画素の `space`、本の文字のガンマ（`text_gamma`、PC1b）、インデックスカラー・2 階調・ダブルトーン・マルチチャンネル（GKIR の Multichannel、PC1d）。COLOR-03（末尾の「色モデル」） |
 | `channels@1` | PC1c | ページの `channels`（アルファ・特色チャンネル。GKIR 版 2 の Mask の画素）。COLOR-03（末尾の「チャンネル」） |
 | `adjustments@1` | PC2-0〜PC2b | 補正レイヤーの `adjust` の C++ 版だけの種類と、Python の種類に足す `native` の設定（描画モード・式の選び方・チャンネルの組など）。COLOR-04（末尾の「補正」） |
+| `smart-objects@1` | PC3（節 A） | 本の `smart_contents`（スマートオブジェクトの中身: 層を包んだページ 1 枚、または置いたファイルそのもの）と、層の `kind: "smart"` の `smart`（中身・行列・補間ほか）。COLOR-05（末尾の「スマートオブジェクト」） |
 
 拡張を使う op が初めて適用されたときに `features` へ加える。拡張を使わない原稿は `features: []`。
 
@@ -315,3 +316,18 @@ v3 の行（`rev`・`actor`・`at`・`changes`・`via`）をそのまま残し�
 - **`color_lookup` の正規形**（PC2a）: `{"kind": "color_lookup", "look"?: 作った見た目の名前, "lut"?: "sha256:<64>", "size"?: 2..129, "name": 文字, "interpolation": "trilinear"|"tetrahedral", "dither": bool, "native"?: {"blend"}}`（この順。`look` と `lut` は片方だけ、`size` は `lut` のあるときだけ）。op が受け取る `data`（ファイルの中身）と `file_name` は保存しない。履歴から戻した状態（Undo・Redo の状態は正規の JSON でキーが辞書順）では、Python の形の補正と同じくキーが辞書順になる（読み手はキーの順を問わない）。
 - **3D LUT の素材**（PC2a。`assets/<ab>/<64>.gklut`、`lut` の参照先）: `"GKLU"`・版 1（u8）・大きさ n（u8、2..129）・zlib で縮めた float32（リトルエンディアン）の n³ × 3（R・G・B。R が一番速く回る .cube の順）。参照は縮める前ではなく、この形のファイル全体の sha256。書き手は原稿の `color_lookup` の層が参照する表をすべて書き（無い表があれば保存を断る）、読み手は読めない・形の違う表を `broken_asset` として読み取り専用で開く。どの op の後でも、参照する表を原稿が持つことを確かめる（`validate_adjustments`。持たなければ op を断る: ほかの原稿のページを取り込む `import_pages` は表も写す）。
 - `features` に `adjustments@1` を加える（`native` を持つか C++ 版だけの種類の補正レイヤーがあるとき。無くなれば外す）。露光量はこれまでどおり `native.exposure_v1` も書く。adjustments@1 を知らない読み手（PC1 までの C++ 版）は、未知の拡張として読み取り専用で開く。
+
+## スマートオブジェクト（smart-objects@1。COLOR-05、PC3 節 A）
+
+スマートオブジェクト（SO）は、中身（層を包んだページ 1 枚、または置いたファイルそのもの）を本に 1 つ持ち、層がそれを行列で置いて描く。SO の無い原稿は今までどおりで、形式も画素も変わらない（`features` に足さない）。
+
+- **本の `smart_contents`**（`studio` の後、`pages` の前。SO の層かほかの中身が使う中身だけを書く。鍵は中身の id `sc_<12 桁の 16 進>`、辞書順）:
+  - 層を包んだ中身: `{"kind": "page", "name": もとの層の名前, "spec": 判型（本の `spec` と同じ形）, "page": ページ 1 枚（`pages[]` の要素と同じ形）}`。ページの `index` は 1、台詞は持たない（`story` は本のページのものだけ）。コマ（`frames`）は包んだときのページの写しで、層の `panel_clip`・`panel_each` と絵の SO の `clip_to` の切り抜きにだけ使う（枠線・紙・ノンブルは描かない）。色モデル（ページの `color`）はもとのページと同じ。中身のページの層は普通の層と同じ形（画素・線・マスクは素材の参照）。
+  - 元のファイル: `{"kind": "file", "name": ファイル名, "asset": "sha256:<64>", "suffix": ".png"|".jpg"|".tif"|".webp"|".bmp"|".gif"|".psd"|".psb", "format": "png"|"jpeg"|"tiff"|"webp"|"bmp"|"gif"|"psd", "size_px": [w, h], "dpi": 数, "depth": 1|8|16|32, "mode": "gray"|"rgb"|"cmyk"|"lab"（アルファがあれば末尾に "a"）, "profile": {"use": "keep"|"embedded"|"assign", "icc"?: "sha256:<64>", "intent"?: "perceptual"|"relative"|"saturation"|"absolute", "bpc"?: bool}, "link"?: {…}, "psd"?: {…}}`（この順）。ファイルのバイトは変えずに `assets/<ab>/<64><suffix>`（参照はファイル全体の sha256）。`size_px`・`dpi`・`depth`・`mode` は置いたときに見出しから（`dpi` はファイルに無ければページの dpi）。中身の大きさ（mm）は `size_px × 25.4 / dpi`。`profile` は色の扱い: `keep`（値のまま、ページの空間の値とみなす）、`embedded`（ファイルに埋め込まれたプロファイルからページの空間へ）、`assign`（`icc` の ICC プロファイル、`assets/<ab>/<64>.icc`、とみなして変換）。`intent`・`bpc` は `keep` でないときに書く。`link`（リンクの記録、PC3 A1）と `psd`（PSD の配置レイヤーの記録、PC3 A3）は後の群が書く（この版は形だけ確かめて書き戻す）。
+  - op が `data`（base64）で受けたファイルと `assign` のプロファイルは、書き手が素材として書く（`Document::smart_files`）。
+- **層** `{"kind": "smart", …今の層の鍵（visible・opacity・blend・clip・mask・effect・screen・color など）, "frame_id"?: コマ, "clip_to": "frame"|"bleed"|"none", "finish"?: {…}, "source"?: {…}, "smart": {…}}`。SO の層は自分の画素・線・塗り（`asset`・`strokes`・`patches`・`ink_raster`・`color_raster`・`fill`・`adjust`・`tone`・`placement_mm`・`fit`）を持たない（あれば読み取り専用）。`frame_id`・`clip_to`・`finish`・`source` は配置画像（`kind: "placed"`）と同じ意味（コマで切る・白黒の仕上げ・出どころ）。
+- **`smart`**（書くのはこの鍵だけ）: `"contents": "sc_…"`（必須）、`"matrix": [a, b, c, d, e, f]`（中身の mm → ページの mm。x' = a x + c y + e、y' = b x + d y + f。`transform_area` の `matrix` と同じ並び。無ければ恒等）、`"interp": "lanczos"|"bicubic"|"bilinear"|"nearest"`（絵の SO は lanczos、層を包んだ SO は bicubic で作る）。後の群の鍵: `"perspective"`（4 隅の [x, y]、凸）、`"warp"`、`"stack"`（スタックモード: entropy・kurtosis・maximum・mean・median・minimum・range・skewness・standard_deviation・summation・variance）、`"filters"`（リスト）、`"filters_on"`（bool）、`"filter_mask"`、`"psd"`（いずれも物）。この版はそれらを形だけ確かめ、描くときは `not_yet_ported`（`smart:perspective`・`smart:warp`・`smart:stack`・`smart:filters` など）で省いて記録する（書き出しは断る）。
+- **読み手の検査**（書き手・各 op の後も同じ）: 層の `contents` が本にある、中身の id の形、中身どうしに輪が無い（中身が自分を見せない）、中身の入れ子は深さ 8 まで、行列が有限で潰れない（|ad − bc| > 1e-9 mm²）、名前は 255 字まで、知らない鍵・種類・形式・精度・色・色の扱い・意図が無い、ファイルの素材と `assign` の ICC が `assets/` にある。中身のページは本のページと同じ検査（色モード・色モデル・チャンネル）を受け、その高精度の画素は本の予算（1 GiB）に本のページの画素と一緒に数える。外れた原稿は理由を付けて読み取り専用で開く（素材の欠けは `missing_asset`）。
+- 複製（`duplicate_layer`・ページの複製）は同じ中身を指す（中身を変えると全部変わる）。`smart_copy` は中身を写して新しい id にする。作品の結合（`import_pages`）は中身も持ってくる（id が重なれば新しい id）。ほかの原稿の素材は今と同じく先に写す。
+- 中身は project.json の中にあるので、履歴の状態・GC・Undo・Redo・復旧（§4）は普通の op と同じに中身と素材を守る（GC は状態の中の `sha256:` を全部拾う）。コマが消えて外れた絵の SO は配置画像と同じく `studio.orphans` に記録し、ファイルの中身を記録の `smart_contents`（id → 元のファイルの形）に持つ。
+- `features` に `smart-objects@1` を加える（書く中身があるとき。無くなれば外す）。smart-objects@1 を知らない読み手は、未知の拡張として読み取り専用で開く（PC2 までの C++ 版は層の種類 `smart` を知らないので、原稿を開かずに形の誤りを言う。どちらも原稿を書き換えない）。

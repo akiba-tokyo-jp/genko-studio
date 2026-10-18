@@ -12,6 +12,7 @@
 #include "core/ids.hpp"
 #include "core/ops_util.hpp"
 #include "core/pyconv.hpp"
+#include "core/smart.hpp"
 
 namespace genko::core {
 
@@ -66,12 +67,13 @@ void add_orphan(Document& doc, Json record) {
 
 }  // namespace
 
-// ops._placed_on: the placed layers of these panels (their positions in page.layers).
+// ops._placed_on: the placed layers of these panels (their positions in page.layers). (smart-objects@1: a smart object of
+// a panel — a picture placed in it — too, as placed art.)
 std::vector<std::size_t> placed_on(const Page& page, const std::set<std::string>& frame_ids) {
     std::vector<std::size_t> out;
     for (std::size_t i = 0; i < page.layers.size(); ++i) {
         const Layer& layer = page.layers[i];
-        if (layer.kind == LayerKind::Placed && layer.frame_id && frame_ids.contains(*layer.frame_id)) out.push_back(i);
+        if ((layer.kind == LayerKind::Placed || layer.kind == LayerKind::Smart) && layer.frame_id && frame_ids.contains(*layer.frame_id)) out.push_back(i);
     }
     return out;
 }
@@ -81,13 +83,19 @@ std::vector<std::size_t> placed_on(const Page& page, const std::set<std::string>
 void orphan_art(Document& doc, Page& page, const std::vector<std::size_t>& art, const std::string& reason) {
     if (art.empty()) return;
     Json layers = Json::array();
-    for (const std::size_t i : art) layers.push_back(layer_to_dict(page.layers[i]));
+    Json files = Json::object();  // (smart-objects@1: a picture's smart object keeps its file in the record)
+    for (const std::size_t i : art) {
+        layers.push_back(layer_to_dict(page.layers[i]));
+        const SmartContents* contents = page.layers[i].kind == LayerKind::Smart ? smart::contents_of(doc, page.layers[i]) : nullptr;
+        if (contents != nullptr && contents->kind == "file") files[*smart::contents_id(page.layers[i])] = smart::file_json(*contents);
+    }
     Json record = Json::object();
     record["kind"] = "layers";
     record["page_id"] = page.id;
     record["reason"] = reason;
     record["rev"] = doc.revision;
     record["layers"] = std::move(layers);
+    if (!files.empty()) record["smart_contents"] = std::move(files);
     add_orphan(doc, std::move(record));
     std::vector<Layer> kept;
     for (std::size_t i = 0; i < page.layers.size(); ++i) {

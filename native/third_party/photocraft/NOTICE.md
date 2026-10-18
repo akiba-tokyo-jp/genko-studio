@@ -69,3 +69,14 @@ PhotoCraft v0.2.0（`ad863217386440ca968fccc9bfff65ba24e61142`、MIT、同梱 `L
 - `crates/engine/src/color_cmds.rs`（880-911 行）: 埋め込みプロファイルの不一致の答え（そのまま・変換・破棄・作業用を割り当て）の考え → `native/src/render/import_profile.cpp`（`put_raster`・`import_psd` の `embedded_profile`: keep・convert・assign。PC2d）。
 - `crates/ui-egui/src/tone.rs`（20-120 行、157-180 行、213-275 行）: ヒストグラムの数え方（透明でない画素、RGB は 3 つの平均、大きな山で潰れないよう高い段で目盛る）と数値（平均・標準偏差・中央値・画素数）→ `native/src/app/info_panels.cpp`（`histogram_of`・`stats_of`・`HistogramPanel`。輝度とカラーは Genko が足した。PC2d）。
 - `crates/ui-egui/src/panels.rs`（831-889 行）: 情報パネルの項目（ポインターの下の色・位置・選択範囲の大きさ）→ `native/src/app/info_panels.cpp`（`InfoPanel`。値は Genko の `render::pixel_at`、校正の値はそのプロファイルへの変換。PC2d）。
+
+## 非破壊（PC3 節 A: スマートオブジェクト、smart-objects@1）
+
+PhotoCraft v0.2.0（`ad863217386440ca968fccc9bfff65ba24e61142`、MIT、同梱 `LICENSE-MIT`）の次の部分を参照して C++ へ移した。各群（A0〜A5）が移すときは、この節にその部分を足す。
+
+- A0（土台と絵の取り込み）:
+  - `crates/engine/src/smart_cmds.rs`（214-223 行、`place`）: 中身を変形で置くとき、整数画素の移動だけなら画素をそのまま写し（変換・描き直しが劣化しない）、ほかは 1 回の再標本化で置く考え → `native/src/render/smart.cpp`（`whole_shift`・`lay`・`lay_picture`。核の正規化と縁の被覆は Genko のもの）。
+  - `crates/engine/src/smart_cmds.rs`（395-399 行、`snap_affine`）: 合成した変形の行列の浮動小数の誤差を丸めて、変形を戻すと元の置き方にちょうど戻る考え → `native/src/core/smart.cpp`（`snapped`。1e-9 の格子に寄せる）。
+  - `crates/engine/src/smart_cmds.rs`（476-539 行、`layer_to_smart`）: 1 枚の層を包むとき、表示・不透明度・描画モード・クリップを SO が引き継ぎ、中の層は普通に戻す → `native/src/render/ops_smart.cpp`（`smart_convert`）。
+  - `crates/engine/src/file_cmds.rs`（291-331 行、`place_bytes`・`place`）: 埋め込みを配置の置き方（ファイルの解像度でページの中央、大きければ収める、倍率と中心の指定）→ `native/src/render/ops_smart.cpp`（`smart_place`）。
+  - `crates/engine/src/smart_cmds/tests.rs`（61-93 行、220-251 行）: 変換してもページの画素が変わらないこと、縮めて戻すと元と同じ（2 度標本化しない）ことの試験 → `native/tests/unit/test_smart_render.cpp`（Genko の 3 つの道・白黒の仕上げ・部分描画に広げた）。

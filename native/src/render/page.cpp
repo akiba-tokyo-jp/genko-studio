@@ -27,6 +27,7 @@
 #include "core/placement.hpp"
 #include "core/pynum.hpp"
 #include "core/pyops.hpp"
+#include "core/smart.hpp"
 #include "core/strokes.hpp"
 #include "render/brushes.hpp"
 #include "render/channels.hpp"
@@ -45,6 +46,7 @@
 #include "render/png.hpp"
 #include "render/prims.hpp"
 #include "render/raster.hpp"
+#include "render/smart.hpp"
 #include "render/text/balloons.hpp"
 #include "render/text/fonts.hpp"
 #include "render/text/lettering.hpp"
@@ -663,6 +665,12 @@ std::optional<Image> layer_pixels(const Ctx& ctx, const Layer& layer, const Box&
         } catch (const NotYetPorted& e) {  // (a picture this build cannot open yet: left out as if it had none, and said)
             skip_unported(ctx, e.element());
         }
+    } else if (layer.kind == LayerKind::Smart) {  // (smart-objects@1: its contents through its matrix, render/smart)
+        try {
+            raster = smart::picture_8bit(ctx, layer, area);
+        } catch (const NotYetPorted& e) {
+            skip_unported(ctx, e.element());
+        }
     } else if (layer.color_raster) {
         if (is_tone(layer)) throw NotYetPorted("high_precision_tone");
         raster = color_raster_preview(core::ColorRasterView(*layer.color_raster), ctx.size, area);
@@ -1134,6 +1142,76 @@ void precise_layer(ColorCanvas& canvas, const Ctx& ctx, const Layer& layer, cons
     canvas.blend(picture, layer.opacity, layer.clip, layer.blend, shown ? &*shown : nullptr);
 }
 
+// smart-objects@1: a smart object on a page in precise colour, where its picture holds more than 8 bits
+// (render::smart::picture_precise) and nothing is drawn on it in 8 bits (an effect, a screen): that picture with its colour
+// and mask, laid as a precise layer's is. False: it is drawn as an 8-bit picture.
+bool smart_precise_layer(ColorCanvas& canvas, const Ctx& ctx, const Layer& layer, const Box& area) {
+    if ((layer.effect && core::py_truthy(*layer.effect)) || screened_here(ctx, layer) || !ColorCanvas::supports_blend(layer.blend)) return false;
+    std::optional<ColorPicture> picture;
+    try {
+        picture = smart::picture_precise(ctx, layer, area, canvas.space());
+    } catch (const NotYetPorted& e) {
+        skip_unported(ctx, e.element());
+        return true;
+    }
+    if (!picture) return false;
+    const bool tint = layer.color && !layer.color->empty() && (ctx.mode != "print" || layer.color_prints);
+    if (tint) {  // (shown in its colour, each pixel's alpha kept)
+        const auto rgb = first3(*layer.color);
+        const auto at = [&](std::size_t k) { return static_cast<int>(std::clamp<std::int64_t>(rgb.size() > k ? rgb[k] : 0, 0, 255)); };
+        const auto colour = linear_colour(canvas.space(), {at(0), at(1), at(2)});
+        for (auto& p : picture->pixels) p = {colour[0], colour[1], colour[2], p[3]};
+    }
+    std::optional<Image> shown;
+    if (layer.mask && layer.mask->png && !layer.mask->png->empty() && layer.mask->enabled)
+        shown = decoded(layer.mask->png, "L").resize_region(ctx.size, area, Resample::Bilinear);
+    canvas.blend(*picture, layer.opacity, layer.clip, layer.blend, shown ? &*shown : nullptr);
+    return true;
+}
+
+// smart-objects@1: a smart object on a CMYK, Lab, grey or multichannel page, where its picture holds inks of its own
+// (render::smart::picture_inks) and nothing is drawn on it in 8 bits (an effect, a screen): those inks with its colour and
+// mask, laid as an ink layer's are. False: it is drawn as an 8-bit picture, by the page's rules.
+bool smart_ink_layer(InkCanvas& canvas, const Ctx& ctx, const Layer& layer, const Box& area) {
+    if ((layer.effect && core::py_truthy(*layer.effect)) || screened_here(ctx, layer)) return false;
+    std::optional<InkPicture> picture;
+    try {
+        picture = smart::picture_inks(ctx, layer, area);
+    } catch (const NotYetPorted& e) {
+        skip_unported(ctx, e.element());
+        return true;
+    }
+    if (!picture) return false;
+    const core::PageColor& color = *ctx.page->color;
+    if (layer.color && !layer.color->empty() && (ctx.mode != "print" || layer.color_prints)) {  // (its colour's inks by the rules)
+        const std::vector<std::int64_t> rgb = *layer.color;
+        const unsigned char c[3] = {static_cast<unsigned char>(std::clamp<std::int64_t>(rgb.size() > 0 ? rgb[0] : 0, 0, 255)),
+                                    static_cast<unsigned char>(std::clamp<std::int64_t>(rgb.size() > 1 ? rgb[1] : 0, 0, 255)),
+                                    static_cast<unsigned char>(std::clamp<std::int64_t>(rgb.size() > 2 ? rgb[2] : 0, 0, 255))};
+        std::array<double, core::kPlatesMax> ink{};
+        ink::inks_of(color, c, nullptr, ink.data(), 1);
+        const unsigned n = picture->channels;
+        for (std::size_t i = 0; i < picture->values.size() / (n + 1); ++i)
+            for (unsigned k = 0; k < n; ++k) picture->values[i * (n + 1) + k] = to_canvas(color.space, k, ink[k]);
+    }
+    std::optional<Image> shown;
+    if (layer.mask && layer.mask->png && !layer.mask->png->empty() && layer.mask->enabled)
+        shown = decoded(layer.mask->png, "L").resize_region(ctx.size, area, Resample::Bilinear);
+    canvas.blend(*picture, layer.opacity, layer.clip, layer.blend, shown ? &*shown : nullptr);
+    return true;
+}
+
+// smart-objects@1: a layer laid on a smart object's contents page so far (over nothing, render_contents): as blend_over
+// lays it — and in a blend mode, its colour over what is not there yet as it is (the contents are composited alone, as a
+// group of their own: a mode mixes with what is below it inside, never with the paper).
+Image blend_in_contents(const Image& base, const Image& over, std::string_view mode, double opacity, const Image* clip) {
+    if (mode.empty() || mode == "normal") return blend_over(base, over, mode, opacity, clip);
+    const Image mixed = blend_over(base, over, mode, opacity, clip);
+    const Image plain = blend_over(base, over, "normal", opacity, clip);
+    // (where nothing is below, the plain colour; where something is, the mode's; between, by how much is below)
+    return composite(mixed, plain, alpha_of(base.mode() == "RGBA" ? base : base.convert("RGBA")));
+}
+
 // A correction layer whose filter moves shapes too (core::kShapeFilters: an old book's may hold one).
 bool shape_correction(const Layer& layer) {
     if (layer.kind != LayerKind::Adjust || !layer.adjust || !layer.adjust->is_object()) return false;
@@ -1303,6 +1381,7 @@ void ink_layer(InkCanvas& canvas, const Ctx& ctx, const Layer& layer, const Box&
         skip_unported(ctx, "ink_blend:" + layer.blend);
         return;
     }
+    if (layer.kind == LayerKind::Smart && smart_ink_layer(canvas, ctx, layer, area)) return;  // (smart-objects@1)
     if (layer.ink_raster) {
         const core::PageColor& color = *ctx.page->color;
         // its picture over a box (its pixels, its lines over them inside the box's panels), as layer_with_effects takes
@@ -1413,6 +1492,8 @@ std::string crop_values(const std::string& values, const Box& box) {
 
 RenderResult render(const Page& page_in, int dpi, const RenderOptions& options, const core::Document* episode,
                     std::vector<std::string>& omitted) {
+    // (smart-objects@1: a smart object that draws exactly as a layer of its own is drawn as that layer)
+    if (auto plain = core::smart::with_plain_layers(page_in, episode)) return render(*plain, dpi, options, episode, omitted);
     if (!options.at_frame) {  // (an animation page prints as its first frame, not every cel at once)
         const Json* anim = get(page_in.extra, "anim");
         if (anim != nullptr && core::py_truthy(*anim)) {
@@ -1452,7 +1533,7 @@ RenderResult render(const Page& page_in, int dpi, const RenderOptions& options, 
     const Box area = area_of(options, ctx.size);
     // Background inspection for white text edges must see the same neighbouring pixels in a region render.
     // Widen only intersecting labels' small sampling boxes, never force a whole-page high-precision canvas.
-    if (options.region && (ctx.mode == "print" || ctx.mode == "proof")) {
+    if (options.region && (ctx.mode == "print" || ctx.mode == "proof") && !options.contents) {
         const Box expanded = nombre_required_area(area, ctx);
         if (expanded != area) {
             RenderOptions widened = options;
@@ -1471,16 +1552,16 @@ RenderResult render(const Page& page_in, int dpi, const RenderOptions& options, 
     const bool print = mode == "print";
     const bool name_or_proof = mode == "name" || mode == "proof";
 
-    Image rgba = page_background(page,size_of(area),name_or_proof);
+    Image rgba = options.contents ? transparent(area) : page_background(page,size_of(area),name_or_proof);  // (contents: over nothing)
 
     std::optional<ColorCanvas> precision;
-    if (uses_color_precision(page, print))
+    if (uses_color_precision(page, print) || smart::needs_precision(page, episode, print))  // (smart-objects@1: a deep picture)
         precision.emplace(rgba, RgbSpace::of(page));  // (color-model@1: an RGB page of a profile, in its space)
     std::optional<Image> prev_alpha;
     const std::optional<Image> panel_mask = clip_mask(page, ctx.size, dpi, area);
     const Image* panel = panel_mask ? &*panel_mask : nullptr;
     // lines set under a layer (テキストの重ね順): drawn just before that layer, not over everything
-    const std::vector<const core::StoryLine*> lines = lines_of(page, episode);
+    const std::vector<const core::StoryLine*> lines = options.contents ? std::vector<const core::StoryLine*>{} : lines_of(page, episode);
     std::vector<std::pair<std::string, std::vector<const core::StoryLine*>>> below;  // (layer id, its lines), as met
     std::vector<const core::StoryLine*> drawn_below;
     for (const core::StoryLine* line : lines) {
@@ -1601,6 +1682,7 @@ RenderResult render(const Page& page_in, int dpi, const RenderOptions& options, 
         if (!layer.visible) continue;
         if (print && !layer.exportable) continue;
         if (guide_role(layer.role) && print) continue;
+        if (precision && layer.kind == LayerKind::Smart && smart_precise_layer(*precision, ctx, layer, area)) continue;  // (smart-objects@1)
         if (precision && (core::has_color_strokes(layer) || layer.color_raster)) {
             precise_layer(*precision, ctx, layer, area, panel);  // (PC2d: with its lines, effects, colour; a tone as tones)
             continue;
@@ -1669,6 +1751,7 @@ RenderResult render(const Page& page_in, int dpi, const RenderOptions& options, 
             raster = masked(ctx, layer, std::move(raster), area);
             const Image* clip = layer.clip && prev_alpha ? &*prev_alpha : nullptr;
             if (precision) precision->blend(raster, layer.opacity, layer.clip, layer.blend);
+            else if (options.contents) rgba = blend_in_contents(rgba, raster, layer.blend.empty() ? "normal" : layer.blend, layer.opacity, clip);
             else rgba = blend_over(rgba, raster, layer.blend.empty() ? "normal" : layer.blend, layer.opacity, clip);
             prev_alpha = alpha_of(raster);
             continue;
@@ -1703,18 +1786,21 @@ RenderResult render(const Page& page_in, int dpi, const RenderOptions& options, 
             // tint, an effect, a screen or the monochrome finish makes the picture in sRGB)
             const bool page_values = drawn_in_values(ctx, layer) && !tint && !finished;
             precision->blend(picture, layer.opacity, layer.clip, layer.blend, page_values);
+        } else if (options.contents) {
+            rgba = blend_in_contents(rgba, picture, layer.blend.empty() ? "normal" : layer.blend, layer.opacity, clip);
         } else {
             rgba = blend_over(rgba, picture, layer.blend.empty() ? "normal" : layer.blend, layer.opacity, clip);
         }
         prev_alpha = alpha_of(picture);
     }
-    Image image = (precision ? precision->image() : rgba).convert("RGB");
+    Image image = (precision ? precision->image() : rgba).convert(options.contents ? "RGBA" : "RGB");
     std::optional<std::string> precise;  // (color-model@1: the page's values, asked for)
     std::optional<Image> layers_shown;   // (and how its layers alone are shown: what is drawn over them is told by it)
     if (options.precise && precision) {
         precise = precision->color_raster("f32");
         layers_shown = image.copy();
     }
+    if (options.contents) return RenderResult{std::move(image), {}, std::nullopt, std::move(precise)};  // (smart-objects@1: its layers alone)
 
     if (core::py_truthy(page.effects)) image = draw_effects(ctx, image, area);  // effect lines (M3-B)
     if (!print && core::py_truthy(page.prims)) draw_prims(image, area, ctx);  // 3D guides, never printed (M3-C)
@@ -1752,6 +1838,8 @@ std::string first_chars(const std::string& text, std::size_t count) {
 
 void page_layers(const core::Page& page, const core::Document& episode, int dpi, const std::function<void(PageLayer&&)>& each,
                  const std::function<void(const core::StoryLine&)>* line_layers, const std::function<void(const core::Layer&)>* adjust_layers) {
+    // (smart-objects@1: a smart object that draws exactly as a layer of its own is that layer)
+    if (auto plain = core::smart::with_plain_layers(page, &episode)) return page_layers(*plain, episode, dpi, each, line_layers, adjust_layers);
     // (color-model@1: the book's text_gamma, for the letters of the lines' layers — as render_page draws them)
     const text::TextGamma gamma(episode.text_gamma);
     Ctx ctx;
@@ -1804,7 +1892,12 @@ void page_layers(const core::Page& page, const core::Document& episode, int dpi,
         }
         std::optional<Image> raster;
         std::shared_ptr<const std::vector<double>> own_inks;
-        if (layer.color_raster) {  // (a layer in precise colour, which Python does not have: its 8-bit picture)
+        if (layer.kind == LayerKind::Smart) {  // (smart-objects@1: its picture as a pixel layer's, a picture's before the finish)
+            Ctx art = ctx;
+            const core::SmartContents* contents = core::smart::contents_of(episode, layer);
+            if (contents != nullptr && contents->kind == "file") art.mode = "name";
+            raster = smart::picture_8bit(art, layer, whole);
+        } else if (layer.color_raster) {  // (a layer in precise colour, which Python does not have: its 8-bit picture)
             raster = color_raster_preview(core::ColorRasterView(*layer.color_raster), size, whole);
         } else if (layer.raster_png && !layer.raster_png->empty()) {
             raster = raster_part(layer.raster_png, size, whole);
@@ -2118,6 +2211,22 @@ RenderResult render_page(const core::Page& page, int dpi, const RenderOptions& o
     return out;
 }
 
+RenderResult render_contents(const core::Page& page, int dpi, const RenderOptions& options, const core::Document* episode) {
+    const text::TextGamma gamma(episode != nullptr ? episode->text_gamma : std::nullopt);
+    RenderOptions asked = options;
+    asked.contents = true;
+    asked.onion = false;
+    asked.crop_marks = false;
+    asked.inks = false;
+    asked.spots.reset();
+    asked.planes.reset();
+    asked.overlays.clear();
+    std::vector<std::string> omitted;
+    RenderResult out = render(page, dpi, asked, episode, omitted);
+    out.omitted = std::move(omitted);
+    return out;
+}
+
 Image render_frame(const core::Page& page, std::string_view frame_id, int dpi, const RenderOptions& options,
                    const core::Document* episode) {
     const core::Frame* frame = page.find_frame(frame_id);
@@ -2387,6 +2496,7 @@ bool rough_needed(const core::Page& page, int dpi) {
 void clear_render_caches() {
     text::clear_balloon_cache();
     clear_placed_caches();
+    smart::clear_caches();  // (smart-objects@1)
     {
         std::lock_guard lock(g_cache_mutex);
         g_stroke_cache.clear();
