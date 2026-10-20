@@ -114,13 +114,23 @@ bool has_layer(const core::Document& doc, const std::string& id) {
     return std::any_of(doc.page(0).layers.begin(), doc.page(0).layers.end(), [&](const core::Layer& l) { return l.id == id; });
 }
 
-// The layer's pixel (x, y of the 200 grid) as straight RGBA (any kind: its colours as RGB).
-Rgba pixel(const core::Document& doc, const std::string& id, int x, int y) {
+// The layer's pixels as straight RGBA (any kind: its colours as RGB), read once for as many pixels as are wanted.
+struct Shown {
+    int width = 0, height = 0;
+    std::vector<Rgba> rgba;
+    // the pixel at x, y of the 200 grid
+    Rgba at(int x, int y) const {
+        const int px = static_cast<int>(std::floor((x + 0.5) * width / kSide)), py = static_cast<int>(std::floor((y + 0.5) * height / kSide));
+        return rgba[static_cast<std::size_t>(py) * width + static_cast<std::size_t>(px)];
+    }
+};
+
+Shown shown(const core::Document& doc, const std::string& id) {
     const render::image_ops::Pixels p = render::image_ops::shown_layer_pixels(doc, doc.page(0), layer_of(doc, id));
-    const auto rgba = render::image_ops::rgba_of(p);
-    const int px = static_cast<int>(std::floor((x + 0.5) * p.width() / kSide)), py = static_cast<int>(std::floor((y + 0.5) * p.height() / kSide));
-    return rgba[static_cast<std::size_t>(py) * p.width() + static_cast<std::size_t>(px)];
+    return Shown{static_cast<int>(p.width()), static_cast<int>(p.height()), render::image_ops::rgba_of(p)};
 }
+
+Rgba pixel(const core::Document& doc, const std::string& id, int x, int y) { return shown(doc, id).at(x, y); }
 
 bool near(const Rgba& a, const Rgba& b, float tol) {
     for (std::size_t c = 0; c < 4; ++c)
@@ -146,11 +156,12 @@ Colour texture(int x, int y) {
 
 // The rms difference of two books' layer over a box (RGB).
 double rmse(const core::Document& a, const core::Document& b, int x0, int y0, int x1, int y1) {
+    const Shown sa = shown(a, "paint"), sb = shown(b, "paint");  // (each layer read once: ASan's time limit)
     double e = 0;
     int n = 0;
     for (int y = y0; y <= y1; ++y)
         for (int x = x0; x <= x1; ++x) {
-            const Rgba p = pixel(a, "paint", x, y), q = pixel(b, "paint", x, y);
+            const Rgba p = sa.at(x, y), q = sb.at(x, y);
             for (int c = 0; c < 3; ++c) e += std::pow(p[c] - q[c], 2.0), ++n;
         }
     return std::sqrt(e / n);
@@ -277,8 +288,9 @@ private slots:
             const core::Document done = run(doc, op);
             std::array<double, 3> mean{};
             std::vector<Rgba> seen;
+            const Shown healed = shown(done, "paint");
             for (int dy = -8; dy <= 8; ++dy)
-                for (int dx = -8; dx <= 8; ++dx) seen.push_back(pixel(done, "paint", 150 + dx, 100 + dy));
+                for (int dx = -8; dx <= 8; ++dx) seen.push_back(healed.at(150 + dx, 100 + dy));
             const Rgba dest = pixel(doc, "paint", 150, 100);
             for (const Rgba& p : seen)
                 for (int c = 0; c < 3; ++c) mean[c] += p[c] / seen.size();
