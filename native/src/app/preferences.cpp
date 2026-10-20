@@ -182,7 +182,8 @@ const std::multimap<QString, QString>& renamed() {
                                                      {QStringLiteral("変形を確定"), QStringLiteral("自由変形を確定")},
                                                      {QStringLiteral("移動ツール"), QStringLiteral("レイヤー移動")},
                                                      {QStringLiteral("前面へ"), QStringLiteral("レイヤーを前へ")},
-                                                     {QStringLiteral("背面へ"), QStringLiteral("レイヤーを後ろへ")}};
+                                                     {QStringLiteral("背面へ"), QStringLiteral("レイヤーを後ろへ")},
+                                                     {QStringLiteral("前方ワープツール"), QStringLiteral("ゆがみ（指で押す）")}};  // (PC3 C-c)
     return all;
 }
 

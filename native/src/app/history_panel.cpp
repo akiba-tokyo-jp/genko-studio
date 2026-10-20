@@ -79,6 +79,8 @@ const std::map<std::string, const char*>& names() {
         {"smart_stack", "スタックモードを変えた"}, {"rasterize_lines", "台詞をラスタライズした"},
         // (PC3 B1: render/ops_quick_mask, render/erase_magic)
         {"quick_mask", "クイックマスクを切り替えた"}, {"magic_erase", "マジック消しゴムで消した"},
+        // (PC3 C-c: render/layer_transform, render/distort_ops)
+        {"transform_layers", "変形した"}, {"content_aware_scale", "コンテンツに応じて拡大・縮小した"},
     };
     return table;
 }

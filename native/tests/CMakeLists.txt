@@ -454,6 +454,9 @@ if(GENKO_BUILD_APP)
   genko_test(test_gui_adjust_color SOURCES gui/test_gui_adjust_color.cpp DEPS genko_app GUI TIMEOUT 600)
   # 範囲選択: the marquee's ways with Shift / Alt, the selection's commands, the chosen part moved, copied, pasted
   genko_test(test_gui_select SOURCES gui/test_gui_select.cpp DEPS genko_app GUI TIMEOUT 600)
+  # PC3 C-c: 自由変形 (the box previewed, Enter one op, Esc, 再実行), the turns, the warp's splits, puppet pins, ゆがみ…,
+  # コンテンツに応じて拡大・縮小…, ワープテキスト… and the commands' names
+  genko_test(test_gui_transform SOURCES gui/test_gui_transform.cpp DEPS genko_app GUI TIMEOUT 600)
   # チャンネル (channels@1, COLOR-03): the panel, the target keys, a fill on a channel, the view, options, split.
   genko_test(test_gui_channels SOURCES gui/test_gui_channels.cpp DEPS genko_app GUI TIMEOUT 600)
   # PC2c (COLOR-04): レイヤー → 色調補正's local corrections and image calculations, 編集 → フェード (only right after).

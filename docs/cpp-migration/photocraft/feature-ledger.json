@@ -1882,9 +1882,16 @@
         "alternate_menus": []
       },
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "未着手",
+      "implementation_status": "実装済み（PC3 C-c、未統合）",
       "acceptance_status": "未実施",
-      "evidence": [],
+      "evidence": [
+        "native/src/render/seam.cpp",
+        "native/src/render/distort_ops.cpp",
+        "native/src/app/main_window_transform.cpp",
+        "native/tests/unit/test_transform.cpp",
+        "native/tests/contract/test_contract_transform.cpp",
+        "native/tests/gui/test_gui_transform.cpp"
+      ],
       "pc0": {
         "date": "2026-10-16",
         "cpp_base": "962faa4",
@@ -1895,7 +1902,8 @@
         "tests": [],
         "gap": "シーム・カービングで内容を保って拡大縮小する（保護するチャンネル・肌色の保護・量）操作が無い",
         "note": "上流は algo/seam.rs（約 320 行）"
-      }
+      },
+      "remaining": "ペイントの層だけ（ペンの層・スマートオブジェクトは断る）。画面の枠でなく窓で数を入れる"
     },
     {
       "id": "edit.convertToProfile",
@@ -2394,9 +2402,14 @@
         "alternate_menus": []
       },
       "genko_status": "一部（2026-10-16 照合）",
-      "implementation_status": "未着手",
+      "implementation_status": "実装済み（PC3 C-c、未統合）",
       "acceptance_status": "未実施",
-      "evidence": [],
+      "evidence": [
+        "native/src/app/canvas_transform.cpp",
+        "native/src/app/main_window_transform.cpp",
+        "native/src/render/layer_transform.cpp",
+        "native/tests/gui/test_gui_transform.cpp"
+      ],
       "pc0": {
         "date": "2026-10-16",
         "cpp_base": "962faa4",
@@ -2416,7 +2429,8 @@
         ],
         "gap": "選択範囲の枠の □・○・◇ で移動・拡大縮小・回転・傾き（Shift で 15°・縦横比）はある。ドラッグごとに確定・再標本化し、一度の確定にまとめる変形の箱（プレビュー・Enter/Esc）と Ctrl+T の入口が無い。選択範囲が要り、フォルダー・台詞・マスクは一緒に動かない",
         "note": ""
-      }
+      },
+      "remaining": "上の欄に X・Y・W・H・角度・傾きの数の欄と基準点は無い（変形を数で決める… で）。吸着（C-d）はまだ使わない"
     },
     {
       "id": "edit.keyboardShortcuts",
@@ -2732,9 +2746,16 @@
         "alternate_menus": []
       },
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "未着手",
+      "implementation_status": "実装済み（PC3 C-c、未統合）",
       "acceptance_status": "未実施",
-      "evidence": [],
+      "evidence": [
+        "native/src/render/perspective_warp.cpp",
+        "native/src/render/layer_transform.cpp",
+        "native/src/app/canvas_transform.cpp",
+        "native/src/app/main_window_transform.cpp",
+        "native/tests/unit/test_transform.cpp",
+        "native/tests/contract/test_contract_transform.cpp"
+      ],
       "pc0": {
         "date": "2026-10-16",
         "cpp_base": "962faa4",
@@ -2745,7 +2766,8 @@
         "tests": [],
         "gap": "面（4 隅）を置いてから遠近を直す（複数の面・つながる角・水平/垂直の自動補正）操作が無い",
         "note": "選択範囲の「自由変形（遠近・4 隅）」は 1 面だけの射影で別もの。上流は algo/perspective.rs"
-      }
+      },
+      "remaining": "スマートオブジェクトの上では断る（PC3 A5。写像の形は smart.warp・smart.perspective に持てる正規形で用意した）"
     },
     {
       "id": "edit.preferences.cursors",
@@ -3811,9 +3833,17 @@
         "alternate_menus": []
       },
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "未着手",
+      "implementation_status": "実装済み（PC3 C-c、未統合）",
       "acceptance_status": "未実施",
-      "evidence": [],
+      "evidence": [
+        "native/src/render/puppet.cpp",
+        "native/src/render/layer_transform.cpp",
+        "native/src/app/canvas_transform.cpp",
+        "native/src/app/main_window_transform.cpp",
+        "native/tests/unit/test_transform.cpp",
+        "native/tests/contract/test_contract_transform.cpp",
+        "native/tests/gui/test_gui_transform.cpp"
+      ],
       "pc0": {
         "date": "2026-10-16",
         "cpp_base": "962faa4",
@@ -3826,7 +3856,8 @@
         "tests": [],
         "gap": "ピンを置いて形を曲げる（剛体・通常・歪み、メッシュの密度・広がり、ピンの回転・前後）操作が無い",
         "note": "近いもの: ゆがみ（liquify）は押して動かすだけ。上流は algo/puppet.rs（約 900 行、外部ライブラリなし）"
-      }
+      },
+      "remaining": "ピンの回転・深さの画面の操作は無い（op の rotate・depth で）。スマートオブジェクトの上では断る（PC3 A5。写像の形は smart.warp・smart.perspective に持てる正規形で用意した）"
     },
     {
       "id": "edit.purge.all",
@@ -4266,9 +4297,16 @@
       },
       "upstream_menu": null,
       "genko_status": "一部（2026-10-16 照合）",
-      "implementation_status": "未着手",
+      "implementation_status": "実装済み（PC3 C-c、未統合）",
       "acceptance_status": "未実施",
-      "evidence": [],
+      "evidence": [
+        "native/src/render/layer_transform.cpp",
+        "native/src/render/ops_transform.cpp",
+        "native/src/render/resample.cpp",
+        "native/src/render/own_pixels.cpp",
+        "native/tests/contract/test_contract_transform.cpp",
+        "native/tests/unit/test_transform.cpp"
+      ],
       "pc0": {
         "date": "2026-10-16",
         "cpp_base": "962faa4",
@@ -4287,7 +4325,8 @@
         ],
         "gap": "transform_area で範囲の中の線・塗り・画素を行列（matrix）か 4 隅（warp.perspective）で変形し、補間（nearest/bilinear/bicubic）も選べる。8 bit・高精度・CMYK/Lab のインキの層に効く。範囲（area）が必須で、フォルダー（グループ）・台詞・マスク・ほかの層をまとめて変形しない。4 隅は射影でなく区分的なアフィン（14×14 のます）",
         "note": ""
-      }
+      },
+      "remaining": "スマートオブジェクトのアフィンでない変形は PC3 A5。スマートフィルターのフィルターマスクは層の変形で動かない"
     },
     {
       "id": "edit.transform.again",
@@ -4317,9 +4356,12 @@
         "alternate_menus": []
       },
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "未着手",
+      "implementation_status": "実装済み（PC3 C-c、未統合）",
       "acceptance_status": "未実施",
-      "evidence": [],
+      "evidence": [
+        "native/src/app/main_window_transform.cpp",
+        "native/tests/gui/test_gui_transform.cpp"
+      ],
       "pc0": {
         "date": "2026-10-16",
         "cpp_base": "962faa4",
@@ -4350,9 +4392,16 @@
         "alternate_menus": []
       },
       "genko_status": "同等（C++ のソースと試験あり。2026-10-16 照合）",
-      "implementation_status": "未着手",
+      "implementation_status": "実装済み（PC3 C-c、未統合）",
       "acceptance_status": "未実施",
-      "evidence": [],
+      "evidence": [
+        "native/src/app/canvas_transform.cpp",
+        "native/src/app/main_window_transform.cpp",
+        "native/src/app/main_window_select.cpp",
+        "native/src/render/layer_transform.cpp",
+        "native/tests/gui/test_gui_transform.cpp",
+        "native/tests/gui/test_gui_select.cpp"
+      ],
       "pc0": {
         "date": "2026-10-16",
         "cpp_base": "962faa4",
@@ -4400,9 +4449,15 @@
         "alternate_menus": []
       },
       "genko_status": "同等（C++ のソースと試験あり。2026-10-16 照合）",
-      "implementation_status": "未着手",
+      "implementation_status": "実装済み（PC3 C-c、未統合）",
       "acceptance_status": "未実施",
-      "evidence": [],
+      "evidence": [
+        "native/src/app/main_window_select.cpp",
+        "native/src/app/main_window_transform.cpp",
+        "native/src/render/layer_transform.cpp",
+        "native/tests/contract/test_contract_transform.cpp",
+        "native/tests/gui/test_gui_select.cpp"
+      ],
       "pc0": {
         "date": "2026-10-16",
         "cpp_base": "962faa4",
@@ -4417,7 +4472,7 @@
           "native/tests/gui/test_gui_select.cpp:298"
         ],
         "gap": "",
-        "note": "選択範囲が要る（すべて選択で層全体）。補間は「変形の補間」に従い、上流のように nearest で画素が正確に写るかは未確認"
+        "note": "選択範囲が要る（すべて選択で層全体）。補間は「変形の補間」に従い、上流のように nearest で画素が正確に写るかは未確認 → C-c で確かめた: transform_layers の turn は画素を並べ替えて同じ値で写す（8・16・32 bit・CMYK・Lab。test_contract_transform の exactMovesOnEveryKindOfPixels）。選択範囲が無ければ選んだレイヤー全体"
       }
     },
     {
@@ -4448,9 +4503,15 @@
         "alternate_menus": []
       },
       "genko_status": "同等（C++ のソースと試験あり。2026-10-16 照合）",
-      "implementation_status": "未着手",
+      "implementation_status": "実装済み（PC3 C-c、未統合）",
       "acceptance_status": "未実施",
-      "evidence": [],
+      "evidence": [
+        "native/src/app/main_window_select.cpp",
+        "native/src/app/main_window_transform.cpp",
+        "native/src/render/layer_transform.cpp",
+        "native/tests/contract/test_contract_transform.cpp",
+        "native/tests/gui/test_gui_select.cpp"
+      ],
       "pc0": {
         "date": "2026-10-16",
         "cpp_base": "962faa4",
@@ -4465,7 +4526,7 @@
           "native/tests/gui/test_gui_select.cpp:298"
         ],
         "gap": "",
-        "note": "選択範囲が要る（すべて選択で層全体）。補間は「変形の補間」に従い、上流のように nearest で画素が正確に写るかは未確認"
+        "note": "選択範囲が要る（すべて選択で層全体）。補間は「変形の補間」に従い、上流のように nearest で画素が正確に写るかは未確認 → C-c で確かめた: transform_layers の turn は画素を並べ替えて同じ値で写す（8・16・32 bit・CMYK・Lab。test_contract_transform の exactMovesOnEveryKindOfPixels）。選択範囲が無ければ選んだレイヤー全体"
       }
     },
     {
@@ -4486,9 +4547,15 @@
         "alternate_menus": []
       },
       "genko_status": "同等（C++ のソースと試験あり。2026-10-16 照合）",
-      "implementation_status": "未着手",
+      "implementation_status": "実装済み（PC3 C-c、未統合）",
       "acceptance_status": "未実施",
-      "evidence": [],
+      "evidence": [
+        "native/src/app/canvas_transform.cpp",
+        "native/src/app/main_window_transform.cpp",
+        "native/src/render/layer_transform.cpp",
+        "native/tests/gui/test_gui_transform.cpp",
+        "native/tests/contract/test_contract_transform.cpp"
+      ],
       "pc0": {
         "date": "2026-10-16",
         "cpp_base": "962faa4",
@@ -4536,9 +4603,15 @@
         "alternate_menus": []
       },
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "未着手",
+      "implementation_status": "実装済み（PC3 C-c、未統合）",
       "acceptance_status": "未実施",
-      "evidence": [],
+      "evidence": [
+        "native/src/app/main_window_transform.cpp",
+        "native/src/render/layer_transform.cpp",
+        "native/src/core/page_geometry.cpp",
+        "native/tests/unit/test_transform.cpp",
+        "native/tests/gui/test_gui_transform.cpp"
+      ],
       "pc0": {
         "date": "2026-10-16",
         "cpp_base": "962faa4",
@@ -4569,9 +4642,14 @@
         "alternate_menus": []
       },
       "genko_status": "同等（C++ のソースと試験あり。2026-10-16 照合）",
-      "implementation_status": "未着手",
+      "implementation_status": "実装済み（PC3 C-c、未統合）",
       "acceptance_status": "未実施",
-      "evidence": [],
+      "evidence": [
+        "native/src/app/canvas_transform.cpp",
+        "native/src/app/main_window_transform.cpp",
+        "native/src/render/layer_transform.cpp",
+        "native/tests/gui/test_gui_transform.cpp"
+      ],
       "pc0": {
         "date": "2026-10-16",
         "cpp_base": "962faa4",
@@ -4618,9 +4696,14 @@
         "alternate_menus": []
       },
       "genko_status": "一部（2026-10-16 照合）",
-      "implementation_status": "未着手",
+      "implementation_status": "実装済み（PC3 C-c、未統合）",
       "acceptance_status": "未実施",
-      "evidence": [],
+      "evidence": [
+        "native/src/app/main_window_transform.cpp",
+        "native/src/render/layer_transform.cpp",
+        "native/tests/contract/test_contract_transform.cpp",
+        "native/tests/gui/test_gui_transform.cpp"
+      ],
       "pc0": {
         "date": "2026-10-16",
         "cpp_base": "962faa4",
@@ -4666,9 +4749,14 @@
         "alternate_menus": []
       },
       "genko_status": "一部（2026-10-16 照合）",
-      "implementation_status": "未着手",
+      "implementation_status": "実装済み（PC3 C-c、未統合）",
       "acceptance_status": "未実施",
-      "evidence": [],
+      "evidence": [
+        "native/src/app/main_window_transform.cpp",
+        "native/src/render/layer_transform.cpp",
+        "native/tests/contract/test_contract_transform.cpp",
+        "native/tests/gui/test_gui_transform.cpp"
+      ],
       "pc0": {
         "date": "2026-10-16",
         "cpp_base": "962faa4",
@@ -4714,9 +4802,14 @@
         "alternate_menus": []
       },
       "genko_status": "一部（2026-10-16 照合）",
-      "implementation_status": "未着手",
+      "implementation_status": "実装済み（PC3 C-c、未統合）",
       "acceptance_status": "未実施",
-      "evidence": [],
+      "evidence": [
+        "native/src/app/main_window_transform.cpp",
+        "native/src/render/layer_transform.cpp",
+        "native/tests/contract/test_contract_transform.cpp",
+        "native/tests/gui/test_gui_transform.cpp"
+      ],
       "pc0": {
         "date": "2026-10-16",
         "cpp_base": "962faa4",
@@ -4752,9 +4845,14 @@
         "alternate_menus": []
       },
       "genko_status": "同等（C++ のソースと試験あり。2026-10-16 照合）",
-      "implementation_status": "未着手",
+      "implementation_status": "実装済み（PC3 C-c、未統合）",
       "acceptance_status": "未実施",
-      "evidence": [],
+      "evidence": [
+        "native/src/app/canvas_transform.cpp",
+        "native/src/app/main_window_transform.cpp",
+        "native/src/render/layer_transform.cpp",
+        "native/tests/gui/test_gui_transform.cpp"
+      ],
       "pc0": {
         "date": "2026-10-16",
         "cpp_base": "962faa4",
@@ -4790,9 +4888,14 @@
         "alternate_menus": []
       },
       "genko_status": "同等（C++ のソースと試験あり。2026-10-16 照合）",
-      "implementation_status": "未着手",
+      "implementation_status": "実装済み（PC3 C-c、未統合）",
       "acceptance_status": "未実施",
-      "evidence": [],
+      "evidence": [
+        "native/src/app/canvas_transform.cpp",
+        "native/src/app/main_window_transform.cpp",
+        "native/src/render/layer_transform.cpp",
+        "native/tests/gui/test_gui_transform.cpp"
+      ],
       "pc0": {
         "date": "2026-10-16",
         "cpp_base": "962faa4",
@@ -4838,9 +4941,15 @@
         "alternate_menus": []
       },
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "未着手",
+      "implementation_status": "実装済み（PC3 C-c、未統合）",
       "acceptance_status": "未実施",
-      "evidence": [],
+      "evidence": [
+        "native/src/app/main_window_transform.cpp",
+        "native/src/render/layer_transform.cpp",
+        "native/src/core/page_geometry.cpp",
+        "native/tests/unit/test_transform.cpp",
+        "native/tests/gui/test_gui_transform.cpp"
+      ],
       "pc0": {
         "date": "2026-10-16",
         "cpp_base": "962faa4",
@@ -4881,9 +4990,15 @@
         "alternate_menus": []
       },
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "未着手",
+      "implementation_status": "実装済み（PC3 C-c、未統合）",
       "acceptance_status": "未実施",
-      "evidence": [],
+      "evidence": [
+        "native/src/app/main_window_transform.cpp",
+        "native/src/render/layer_transform.cpp",
+        "native/src/core/page_geometry.cpp",
+        "native/tests/unit/test_transform.cpp",
+        "native/tests/gui/test_gui_transform.cpp"
+      ],
       "pc0": {
         "date": "2026-10-16",
         "cpp_base": "962faa4",
@@ -4924,9 +5039,15 @@
         "alternate_menus": []
       },
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "未着手",
+      "implementation_status": "実装済み（PC3 C-c、未統合）",
       "acceptance_status": "未実施",
-      "evidence": [],
+      "evidence": [
+        "native/src/app/main_window_transform.cpp",
+        "native/src/render/layer_transform.cpp",
+        "native/src/core/page_geometry.cpp",
+        "native/tests/unit/test_transform.cpp",
+        "native/tests/gui/test_gui_transform.cpp"
+      ],
       "pc0": {
         "date": "2026-10-16",
         "cpp_base": "962faa4",
@@ -4967,9 +5088,17 @@
         "alternate_menus": []
       },
       "genko_status": "一部（2026-10-16 照合）",
-      "implementation_status": "未着手",
+      "implementation_status": "実装済み（PC3 C-c、未統合）",
       "acceptance_status": "未実施",
-      "evidence": [],
+      "evidence": [
+        "native/src/render/layer_transform.cpp",
+        "native/src/app/canvas_transform.cpp",
+        "native/src/app/main_window_transform.cpp",
+        "native/src/app/main_window_select.cpp",
+        "native/src/core/page_geometry.cpp",
+        "native/tests/contract/test_contract_transform.cpp",
+        "native/tests/gui/test_gui_transform.cpp"
+      ],
       "pc0": {
         "date": "2026-10-16",
         "cpp_base": "962faa4",
@@ -4989,7 +5118,8 @@
         ],
         "gap": "格子の点（2〜9 × 2〜9）を引っぱる区分的なメッシュ変形はある。ベジェの曲線メッシュ（制御点・ハンドル）・形の既定（円弧・アーチ・膨張・旗・波・魚眼など 15 種）・ベンド/水平/垂直の歪み・分割が無い",
         "note": ""
-      }
+      },
+      "remaining": "格子の数は「ワープ（格子の数を決める）…」のまま（ワープの上の欄にしていない）。スマートオブジェクトの上では断る（PC3 A5。写像の形は smart.warp・smart.perspective に持てる正規形で用意した）"
     },
     {
       "id": "edit.undo",
@@ -10156,9 +10286,17 @@
         "alternate_menus": []
       },
       "genko_status": "一部（2026-10-16 照合）",
-      "implementation_status": "未着手",
+      "implementation_status": "実装済み（PC3 C-c、未統合）",
       "acceptance_status": "未実施",
-      "evidence": [],
+      "evidence": [
+        "native/src/render/liquify_field.cpp",
+        "native/src/render/distort_ops.cpp",
+        "native/src/render/ops_paint.cpp",
+        "native/src/app/main_window_transform.cpp",
+        "native/tests/unit/test_transform.cpp",
+        "native/tests/contract/test_contract_transform.cpp",
+        "native/tests/gui/test_gui_transform.cpp"
+      ],
       "pc0": {
         "date": "2026-10-16",
         "cpp_base": "962faa4",
@@ -10177,7 +10315,8 @@
         ],
         "gap": "ゆがみの道具（押す・縮める・ふくらませる・右/左回りの渦、幅・強さ）はあり、ペンの線の点も動かす（試験あり）。復元・滑らかに・左に押す・固定/解除・全体を復元・密度/筆圧/速さ・点ごとの筆圧・メッシュ・複数のなぞりを一度に流す入口がない。CMYK/Lab のページでは 8 ビットの絵を借りて処理、16/32 ビットのレイヤーは未確認",
         "note": ""
-      }
+      },
+      "remaining": "Genko にフィルター メニューが無いので 編集 → ゆがみ…（Ctrl+Shift+X）に置いた。顔立ちを調整・ブラシの再構築の不透明度などの欄は無い。スマートオブジェクトの上では断る（PC3 A5。写像の形は smart.warp・smart.perspective に持てる正規形で用意した）"
     },
     {
       "id": "filter.noise.addNoise",
@@ -31395,9 +31534,19 @@
         "alternate_menus": []
       },
       "genko_status": "一部（2026-10-16 照合）",
-      "implementation_status": "未着手",
+      "implementation_status": "実装済み（PC3 C-c、未統合）",
       "acceptance_status": "未実施",
-      "evidence": [],
+      "evidence": [
+        "native/src/render/text/lettering.cpp",
+        "native/src/core/vector.cpp",
+        "native/src/core/ops_lines.cpp",
+        "native/src/formats/psd_export.cpp",
+        "native/src/render/psd_text.cpp",
+        "native/src/app/main_window_transform.cpp",
+        "native/tests/contract/test_contract_transform.cpp",
+        "native/tests/gui/test_gui_transform.cpp",
+        "native/tests/unit/test_psd_text.cpp"
+      ],
       "pc0": {
         "date": "2026-10-16",
         "cpp_base": "962faa4",
@@ -31417,7 +31566,8 @@
         ],
         "gap": "style の arc（弧）・warp（四隅の変形）・text_path（線に沿わせる）で文字をゆがめられる。上流の 15 の形（arcLower・flag・wave・fish など）、bend と水平／垂直の歪み、向き（horizontal/vertical）がない。PSD 書き出しは常に warpNone（native/src/render/psd_text.cpp:870）。ゆがみは画像の変形（ベクトルではない）。",
         "note": ""
-      }
+      },
+      "remaining": "ルビのある台詞のワープは編集できる PSD では文字にできない（warp_ruby。画像にする）"
     },
     {
       "id": "variables.list",

@@ -715,6 +715,30 @@ private:
     void build_selection_menu(QMenu* menu);
     // (decision 5: 編集 → 変形, the tools menu's groups; 編集's clipboard items: main_window_clipboard.cpp)
     void build_transform_menu(QMenu* menu);
+    // PC3 C-c (main_window_transform.cpp): 自由変形 and 変形's commands, パペットワープ, 遠近法ワープ, コンテンツに応じて拡大・
+    // 縮小…, ゆがみ…, ワープテキスト… — on the layers chosen in the layer panel (else the layer drawn on), within the
+    // selection when there is one; the box's options bar (補間方法, the warp's 形 and splits, the puppet's モード・密度・拡張,
+    // Perspective Warp's レイアウト・ワープ and 揃える), its preview, its op (transform_layers) and 再実行.
+    void build_transform_actions();
+    void build_transform_items(QMenu* edit);
+    std::vector<std::string> transform_targets() const;
+    core::Json transform_op(const core::Json& spec) const;
+    void start_layer_transform(const QString& mode);
+    void transform_previewed(const core::Json& spec);
+    void transform_committed(const core::Json& spec);
+    void transform_cancelled();
+    void transform_again();
+    void turn_layers(const char* turn);
+    void split_warp_box(int how);
+    void show_transform_bar(const QString& mode);
+    void hide_transform_bar();
+    // The selection's own (変形を数で決める…, its 自由な形に and ワープ, 水平方向に反転…): transform_layers within it (the
+    // spec's way; {"grid_warp": {mesh, grid?}} a grid of points pulled), the selection following a matrix; false when
+    // there was nothing to do.
+    bool transform_within_selection(const core::Json& spec);
+    void content_aware_scale_dialog();
+    void liquify_dialog();
+    void warp_text_dialog();
     void build_tool_groups(QMenu* tools);
     void build_clipboard_menu(QMenu* edit);
     static const std::vector<const char*>& selection_tools();
@@ -837,6 +861,16 @@ private:
     QSpinBox* colour_tolerance_box_ = nullptr;
     QCheckBox* colour_contiguous_box_ = nullptr;
     std::string transform_interp_ = "bilinear";  // how pixels are resampled when the selection is transformed
+    // PC3 C-c: what the transform box moves (the layers, its box mm, the selection then), the last transform (再実行),
+    // the puppet's options and the options bar
+    std::vector<std::string> transform_ids_;
+    std::array<double, 4> transform_box_{0, 0, 0, 0};
+    std::optional<core::Json> transform_area_;
+    std::optional<core::Json> last_transform_;
+    std::string puppet_mode_ = "normal";
+    std::string puppet_density_ = "normal";
+    double puppet_expansion_ = 0.25;
+    QToolBar* transform_bar_ = nullptr;
     std::optional<core::Json> clipboard_;        // copied items (paste's "items"), where they were, its outline
     std::optional<core::Json> clipboard_area_;
     std::vector<QPointF> clipboard_outline_;

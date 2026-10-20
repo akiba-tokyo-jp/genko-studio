@@ -135,7 +135,8 @@ void PageCanvas::paint_page(QPainter& painter) {
         painter.drawRect(where);
     }
     draw_marquee(painter);  // (the selection, its handles, what the marquee tool is drawing: canvas_select.cpp)
-    draw_tools(painter);    // (the area being filled, the gradient's drag, the figure being drawn: canvas_tools.cpp)
+    draw_transform(painter);  // (自由変形 and the warps' box: canvas_transform.cpp)
+    draw_tools(painter);   // (the area being filled, the gradient's drag, the figure being drawn: canvas_tools.cpp)
     draw_prims(painter);    // (the 3D tool's handles: canvas_guides.cpp)
     draw_effect_handles(painter);  // (the effect tool's centres: canvas_effects.cpp)
     draw_highlight(painter);       // (a problem the checks found: canvas_scale.cpp)

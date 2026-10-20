@@ -296,7 +296,14 @@ private slots:
         // act_color_range, act_sel_border, act_sel_smooth, act_sel_grow_colour, act_sel_similar, act_sel_transform, act_sel_load,
         // act_sel_edges, act_magic_eraser), less 色域選択 (act_sel_colour: 自動選択ツール's 色の近さ now, the user's decision 5)
         // — theirs (test_gui_select).
-        QCOMPARE(w->actions_by_name().size(), std::size_t{331});
+        // and the 18 of PC3 C-c (SPEC COLOR-07「変形」) — 編集 の 自由変形・パペットワープ・遠近法ワープ・コンテンツに応じて拡大・縮小…・
+        // ゆがみ…, 編集 → 変形 の 再実行・拡大・縮小・回転・ゆがみ・遠近法・水平方向に／垂直方向に／交差方向に分割ワープ・ワープ分割を削除・
+        // 180° 回転・90° 回転（時計回り）・90° 回転（反時計回り）, ページ → 台詞 → ワープテキスト… (act_free_transform,
+        // act_puppet_warp, act_perspective_warp, act_content_aware_scale, act_liquify_filter, act_transform_again,
+        // act_transform_scale, act_transform_rotate, act_transform_skew, act_transform_perspective, act_split_warp_h,
+        // act_split_warp_v, act_split_warp_cross, act_remove_warp_split, act_rotate_180, act_rotate_90cw, act_rotate_90ccw,
+        // act_warp_text) — theirs (test_gui_transform).
+        QCOMPARE(w->actions_by_name().size(), std::size_t{349});
         QVERIFY(w->action("act_chat_approval"));
         QVERIFY(w->action("act_style"));
         QVERIFY(w->action("act_exposure"));

@@ -452,7 +452,8 @@ void MainWindow::build_actions() {
     }
     actions_.at("act_select")->setChecked(true);
     build_selection_actions();  // (the selection's tools and commands: main_window_select.cpp)
-    build_anim_actions();       // (アニメーション, タイムラプス: main_window_anim.cpp)
+    build_transform_actions();  // (自由変形, 変形 ▸, パペットワープ, 遠近法ワープ, ゆがみ…, ワープテキスト…: main_window_transform.cpp)
+    build_anim_actions();      // (アニメーション, タイムラプス: main_window_anim.cpp)
     build_channel_actions();    // (channels@1: the channel targets, the selection to a channel: main_window_channels.cpp)
     build_paint_actions();      // (スポイト … ゆがみ, 色の入れ替え, 透明色, 太く・細く: main_window_paint.cpp)
     build_vector_actions();     // (線の修正, 線の編集 and its commands: main_window_vector.cpp)

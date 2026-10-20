@@ -45,7 +45,7 @@ const std::map<QString, std::pair<QString, QString>>& titles() {
         {QStringLiteral("marquee"), {QStringLiteral("選択範囲ツール（M・L・W）"), QStringLiteral("ドラッグで選ぶ。中をドラッグで移動、□で拡大縮小、○で回転（Shift で 15° 刻み）")}},
         {QStringLiteral("vector"), {QStringLiteral("線の編集（Shift+Y）"), QStringLiteral("ペンの線の制御点を動かす・足す・消す。線をつなぐ・切る・色を変える")}},
         {QStringLiteral("blend"), {QStringLiteral("色混ぜ（Shift+B）"), QStringLiteral("なぞった所の色をぼかす・のばす・なじませる")}},
-        {QStringLiteral("liquify"), {QStringLiteral("ゆがみ（Shift+L）"), QStringLiteral("なぞった所の絵と線を押し流す・縮める・ふくらませる・渦を巻く")}},
+        {QStringLiteral("liquify"), {QStringLiteral("前方ワープツール（Shift+L）"), QStringLiteral("なぞった所の絵と線を押し流す・縮める・ふくらませる・渦を巻く")}},
         {QStringLiteral("shape"), {QStringLiteral("図形（O）"), QStringLiteral("ドラッグで直線・長方形・楕円・多角形。折れ線と曲線はクリックで点を置く")}},
         {QStringLiteral("reshape"), {QStringLiteral("線の修正（Y）"), QStringLiteral("線をつまんでドラッグすると、その辺りが滑らかに曲がる")}},
         {QStringLiteral("ruler"), {QStringLiteral("定規（R）"), QStringLiteral("下で定規の種類を選び、ドラッグやクリックで置く。□をドラッグで動かす、Delete で消す")}},

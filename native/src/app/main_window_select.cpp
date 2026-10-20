@@ -176,9 +176,10 @@ void MainWindow::build_selection_actions() {
     make("act_fill_selection", QStringLiteral("描画色で塗りつぶし"), [this] { fill_selection(); }, {QKeySequence(QStringLiteral("Alt+Backspace"))});
     make("act_line_width", QStringLiteral("選択範囲の線の太さ…"), [this] { line_width(); });
     make("act_warp_perspective", QStringLiteral("自由な形に"), [this] { start_warp(QStringLiteral("perspective")); },
-         {QKeySequence(QStringLiteral("Ctrl+Shift+P"))}, QStringLiteral("選択範囲の 4 隅を好きな所へ引っぱる。Enter で確定、Esc でやめる"));
-    make("act_warp_mesh", QStringLiteral("ワープ"), [this] { start_warp(QStringLiteral("mesh")); },
-         {QKeySequence(QStringLiteral("Ctrl+Shift+W"))}, QStringLiteral("選択範囲の 3×3 の点を引っぱって曲げる。Enter で確定、Esc でやめる"));
+         {QKeySequence(QStringLiteral("Ctrl+Shift+P"))},
+         QStringLiteral("選択範囲（無ければ選んだレイヤーの枠）の 4 隅を好きな所へ引っぱる。Enter で確定、Esc でやめる"));
+    make("act_warp_mesh", QStringLiteral("ワープ"), [this] { start_warp(QStringLiteral("mesh")); }, {QKeySequence(QStringLiteral("Ctrl+Shift+W"))},
+         QStringLiteral("選択範囲の 3×3 の点（無ければ選んだレイヤーのワープの枠）を引っぱって曲げる。Enter で確定、Esc でやめる"));
     make("act_warp_mesh_grid", QStringLiteral("ワープ（格子の数を決める）…"), [this] { start_mesh_grid(); }, {},
          QStringLiteral("横と縦の格子の数（1〜8）を決めてから、点を引っぱって曲げる"));
     make("act_move_pivot", QStringLiteral("基準位置を動かす"), [this] { move_pivot(); }, {},
@@ -238,7 +239,14 @@ void MainWindow::build_selection_menu(QMenu* menu) {
 }
 
 void MainWindow::build_transform_menu(QMenu* menu) {
-    for (const char* name : {"act_warp_perspective", "act_warp_mesh", "act_warp_mesh_grid"}) menu->addAction(action(QString::fromLatin1(name)));
+    // (C-c: Photoshop's order — 再実行; 拡大・縮小 … ワープ; the warp's splits; the turns and flips)
+    menu->addAction(action(QStringLiteral("act_transform_again")));
+    menu->addSeparator();
+    for (const char* name : {"act_transform_scale", "act_transform_rotate", "act_transform_skew", "act_warp_perspective", "act_transform_perspective",
+                             "act_warp_mesh", "act_warp_mesh_grid", "act_split_warp_h", "act_split_warp_v", "act_split_warp_cross", "act_remove_warp_split"})
+        menu->addAction(action(QString::fromLatin1(name)));
+    menu->addSeparator();
+    for (const char* name : {"act_rotate_180", "act_rotate_90cw", "act_rotate_90ccw"}) menu->addAction(action(QString::fromLatin1(name)));
     menu->addSeparator();
     for (const char* name : {"act_flip_h", "act_flip_v"}) menu->addAction(action(QString::fromLatin1(name)));
     menu->addSeparator();
@@ -554,27 +562,26 @@ void MainWindow::transform_selection(const QVector<double>& values) {
         canvas_->transform_outline = true;  // (still transforming until Enter)
         return;
     }
-    const core::Layer* layer = area ? paint_layer() : nullptr;
-    if (!area || layer == nullptr) return;
-    const Json matrix = Json::array({m[0], m[1], m[2], m[3], m[4], m[5]});
-    const std::vector<QPointF> outline = canvas_->selection()->outline;
-    if (apply_ops(Json::array({Json{{"op", "transform_area"}, {"page", current_page()->index.json()}, {"layer_id", layer->id}, {"area", *area},
-                                    {"matrix", matrix}, {"interp", transform_interp_}}}))) {
-        std::vector<QPointF> moved;
-        for (const QPointF& p : outline) moved.emplace_back(m[0] * p.x() + m[2] * p.y() + m[4], m[1] * p.x() + m[3] * p.y() + m[5]);
-        canvas_->set_selection(moved_area(*area, m), moved);
-    }
+    if (!area) return;
+    // (C-c: the chosen layers within the selection, by transform_layers; the selection goes with them)
+    transform_within_selection(Json{{"matrix", Json::array({m[0], m[1], m[2], m[3], m[4], m[5]})}});
 }
 
 void MainWindow::start_warp(const QString& kind, int columns, int rows) {
-    if (!need_area()) return;
+    if (!selection_area()) {  // (no selection: the chosen layers' box, 自由変形's way)
+        start_layer_transform(kind == QLatin1String("perspective") ? QStringLiteral("distort") : QStringLiteral("warp"));
+        return;
+    }
     if (canvas_->tool() != QLatin1String("marquee")) canvas_->set_tool(QStringLiteral("marquee"));
     canvas_->start_warp(kind, columns, rows);
     flash(QStringLiteral("点を引っぱって形を決め、Enter（または「変形を確定」）で確定します。Esc でやめます"), 6000);
 }
 
 void MainWindow::start_mesh_grid() {
-    if (!need_area()) return;
+    if (!selection_area()) {  // (no selection: the warp's box; its splits make the grid)
+        start_layer_transform(QStringLiteral("warp"));
+        return;
+    }
     QDialog dialog(this);
     dialog.setObjectName(QStringLiteral("mesh_grid_dialog"));
     dialog.setWindowTitle(QStringLiteral("メッシュの格子"));
@@ -601,12 +608,13 @@ void MainWindow::start_mesh_grid() {
 }
 
 void MainWindow::warp_selection(const Json& warp) {
-    const auto area = selection_area();
-    const core::Layer* layer = area ? paint_layer() : nullptr;
-    if (!area || layer == nullptr) return;
-    if (apply_ops(Json::array({Json{{"op", "transform_area"}, {"page", current_page()->index.json()}, {"layer_id", layer->id}, {"area", *area},
-                                    {"warp", warp}, {"interp", transform_interp_}}})))
-        canvas_->set_selection(std::nullopt);
+    // (C-c: the selection's corners as a true projection, its grid of points as a mesh: transform_layers within it)
+    if (!selection_area()) return;
+    if (warp.contains("perspective")) {
+        transform_within_selection(Json{{"quad", warp["perspective"]}});
+    } else if (warp.contains("mesh")) {
+        transform_within_selection(Json{{"grid_warp", warp}});
+    }
 }
 
 void MainWindow::move_pivot() {
@@ -651,10 +659,8 @@ void MainWindow::transform_numbers() {
 }
 
 void MainWindow::flip(int sx, int sy) {
-    if (!need_area()) return;
-    const auto [x0, y0, x1, y1] = canvas_->selection_box();
-    const double cx = (x0 + x1) / 2, cy = (y0 + y1) / 2;
-    transform_selection(QVector<double>{double(sx), 0, 0, double(sy), cx - sx * cx, cy - sy * cy});
+    (void)sy;
+    turn_layers(sx < 0 ? "flip_h" : "flip_v");  // (C-c: the chosen layers, within the selection when there is one)
 }
 
 void MainWindow::delete_area() {

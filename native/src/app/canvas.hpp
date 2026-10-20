@@ -168,6 +168,34 @@ public:
     // The polyline selection's corners: Enter or a double click closes it; Esc forgets them.
     bool finish_points();
     bool cancel_points();
+    // 自由変形 and the warps (canvas_transform.cpp, PC3 C-c): a box over what the window transforms (its box, mm: x0, y0,
+    // x1, y1) taking the mouse and the keys until Enter or Esc. "free": inside moves, a □ scales from the other side
+    // (Shift: the ratio kept), outside turns (Shift: by 15°), Ctrl+□ a corner alone (自由な形に) or a side slid along
+    // itself (ゆがみ), Ctrl+Alt+Shift+corner a corner and its mirror (遠近法); "scale", "rotate", "skew", "distort" and
+    // "perspective" make a drag do only that. "warp": a Bézier mesh's anchors (their handles with them) and handles
+    // dragged, a click marks where a split goes. "puppet": a click puts a pin, a drag moves one, Alt+click takes one out.
+    // "perspective_warp": Layout — the planes' corners dragged (corners that meet move together), a drag on nothing a new
+    // plane; Warp — where the corners go. A drag let go: transformPreview(the spec); Enter: transformCommitted(spec); Esc:
+    // transformCancelled(). The spec is transform_layers' way: {"matrix"} | {"quad"} | {"warp"} | {"puppet": {pins}} |
+    // {"perspective": {planes}}.
+    bool start_transform(const QString& mode, const std::array<double, 4>& box);
+    void finish_transform();
+    void cancel_transform();
+    bool transforming() const;
+    QString transform_mode() const;
+    std::array<double, 4> transform_box() const;
+    core::Json transform_spec() const;
+    // The warp being edited (its normal form, render/layer_transform), set again (a style chosen, a split made); the last
+    // place clicked in the box (where a split goes).
+    core::Json transform_warp() const;
+    void set_transform_warp(const core::Json& warp);
+    std::optional<QPointF> transform_point() const;
+    // Puppet Warp's pins (where each was put, where it is); Perspective Warp's phase (Warp, else Layout) and planes.
+    std::vector<std::pair<QPointF, QPointF>> puppet_pins() const;
+    void set_perspective_warping(bool on);
+    bool perspective_warping() const;
+    std::vector<std::array<QPointF, 4>> perspective_planes(bool destination) const;
+    void set_perspective_planes(const std::vector<std::array<QPointF, 4>>& src, const std::vector<std::array<QPointF, 4>>& dst);
     // 図形 (canvas_tools.cpp): line | polyline | curve | rect | ellipse | polygon, and a polygon's corners.
     QString shape_kind = QStringLiteral("line");
     int shape_sides = 5;
@@ -351,6 +379,10 @@ signals:
     void magicEraseRequested(double x_mm, double y_mm);
     void selectionTransformed(const QVector<double>& matrix);
     void selectionWarped(const genko::core::Json& warp);
+    // 自由変形 and the warps (PC3 C-c): a drag of the box let go (preview it), Enter (apply it), Esc.
+    void transformPreview(const genko::core::Json& spec);
+    void transformCommitted(const genko::core::Json& spec);
+    void transformCancelled();
     // the drawing tools: the colour under the eyedropper; the fill tool's click; the area drawn around to fill; the
     // gradient's drag (mm); a figure drawn ({shape, points | box, sides?, closed?}: an add_shape op)
     void colourPicked(const std::array<int, 3>& rgb);
@@ -474,6 +506,14 @@ private:
     bool marquee_move(const QPointF& mm, Qt::KeyboardModifiers modifiers, bool pressed);
     bool marquee_release();
     bool marquee_key(QKeyEvent* event);
+    // 自由変形 and the warps (canvas_transform.cpp): the box's state (null: none) and its handling of the mouse and keys.
+    struct Transforming;
+    std::shared_ptr<Transforming> xform_;
+    bool transform_press(const QPointF& pos, const QPointF& mm, Qt::KeyboardModifiers modifiers);
+    bool transform_move(const QPointF& mm, Qt::KeyboardModifiers modifiers);
+    bool transform_release(const QPointF& mm);
+    bool transform_key(QKeyEvent* event);
+    void draw_transform(QPainter& painter) const;
     void draw_frame_numbers(QPainter& painter) const;
     void draw_frame_tool(QPainter& painter) const;
     void draw_polygon_mm(QPainter& painter, const std::vector<QPointF>& points) const;

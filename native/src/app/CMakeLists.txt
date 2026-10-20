@@ -117,6 +117,9 @@ genko_library(genko_app
     app_main.cpp
     # PC3-0: 編集's clipboard items (split from main_window_select.cpp)
     main_window_clipboard.cpp
+    # PC3 C-c: 自由変形 and the warps (the box on the canvas; the window's commands, options bar and dialogs)
+    canvas_transform.cpp
+    main_window_transform.cpp
     ${GENKO_APP_RESOURCES}
     ${GENKO_APP_FONTS}
   PUBLIC_DEPS genko_core genko_storage genko_render genko_render_ops genko_formats genko_service Qt6::Core Qt6::Gui Qt6::Widgets Qt6::Svg Qt6::Concurrent

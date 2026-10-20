@@ -20,7 +20,9 @@ using core::Json;
 void MainWindow::build_clipboard_menu(QMenu* edit) {
     for (const char* name : {"act_cut", "act_copy", "act_paste", "act_delete_area", "act_fill_selection"}) edit->addAction(action(QString::fromLatin1(name)));
     edit->addSeparator();
+    build_transform_items(edit);  // (コンテンツに応じて拡大・縮小… パペットワープ 遠近法ワープ 自由変形: main_window_transform.cpp)
     build_transform_menu(edit->addMenu(QStringLiteral("変形")));  // (main_window_select.cpp)
+    edit->addAction(action(QStringLiteral("act_liquify_filter")));  // (ゆがみ…: Filter's in Photoshop)
 }
 
 bool MainWindow::copy() {
