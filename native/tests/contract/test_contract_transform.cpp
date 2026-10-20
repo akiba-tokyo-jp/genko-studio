@@ -3,7 +3,8 @@
 // past 1 kept), CMYK and Lab layers; a scale moves a pen line's points and widens it and moves a patch's box; a quad is a
 // true homography (a parallelogram exactly the matrix); a warp bends what is in its box and gives its normal form back;
 // a perspective warp of one plane is its quad's homography; a puppet pin moved alone moves the layer; folders, links and a
-// linked mask move along, an unlinked mask stays; an area lifts only what is in it; shape parts alone; a smart object's
+// linked mask move along, an unlinked mask stays; a linked vector mask moved and warped with its layer (not within an
+// area); an area lifts only what is in it; shape parts alone; a smart object's
 // matrix and its warp (kept with it: PC3 A5), a placed picture's box (turned: as a smart object), the locks refused; lines of dialogue moved
 // with them, their text upright. content_aware_scale keeps a salient bar, scales plainly at amount 0, protects an alpha
 // channel. liquify's strokes move the pixels and the pen lines, Reconstruct All undoes them, on precise and ink layers too.
@@ -28,6 +29,7 @@
 #include "core/smart.hpp"
 #include "core/vector.hpp"
 #include "render/image.hpp"
+#include "render/layer_transform.hpp"
 #include "render/own_pixels.hpp"
 #include "render/ops_registry.hpp"
 #include "render/page.hpp"
@@ -380,6 +382,56 @@ private slots:
             QCOMPARE(after.at(b[0] + 5, b[1] + 13)[k], before.at(b[0] + 5, b[1] + 3)[k]);  // (the left moved 10 down)
         }
         QVERIFY(std::fabs(layer_of(part, "friend").strokes->items[0]->points[0].y - (20 + 10 * kPx)) < 1e-6);
+    }
+
+    // A linked vector mask goes with its layer through every map the layer moves whole by — a move (the move tool's), a
+    // warp (its box lifting the layer's pixels, yet no area of the op's: the mask bent through the same map) —; within the
+    // op's area, or unlinked, it stays.
+    void linkedVectorMasks() {
+        namespace vec = core::vector;
+        namespace lt = render::layer_transform;
+        vec::Path outline;
+        vec::Subpath sub;
+        sub.closed = true;
+        sub.knots = {vec::Knot::corner(4, 5), vec::Knot::corner(12, 5), vec::Knot::corner(12, 15), vec::Knot::corner(4, 15)};
+        outline.subpaths = {sub};
+        const core::Document doc = run(book(), Json{{"op", "set_vector_mask"}, {"page", 1}, {"id", "paint"}, {"path", vec::to_json(outline)}});
+        QVERIFY(layer_of(doc, "paint").vector_mask && layer_of(doc, "paint").vector_mask->linked);
+        // moved: by the same offset
+        Json move = transform({"paint"});
+        move["move"] = Json::array({1, 2});
+        const vec::Path moved = layer_of(run(doc, move), "paint").vector_mask->path;
+        QCOMPARE(moved.subpaths.at(0).knots.at(0).anchor.x, 5.0);
+        QCOMPARE(moved.subpaths.at(0).knots.at(2).anchor.y, 17.0);
+        // warped (編集 → 変形 → ワープ, no selection): bent through the warp's map, as its lines and pixels are
+        Json warp = transform({"paint"});
+        warp["warp"] = Json{{"style", "arc"}, {"bend", 50}};
+        const core::ApplyResult warped = run_ops(doc, Json::array({warp}));
+        const vec::Path bent = layer_of(warped.doc, "paint").vector_mask->path;
+        QVERIFY(bent != outline);
+        const auto w = std::make_shared<const core::page_geometry::Warp>(lt::warp_from_json(warped.results.at(0)["warp"], {0, 0, 1, 1}));
+        lt::Map m;
+        m.kind = lt::Map::Kind::Mesh;
+        m.box = w->box;
+        m.forward = [w](double x, double y) { return w->map(x, y); };
+        const vec::Path expected = lt::bend_path(outline, m);  // (its form's numbers to 4 decimals: within 0.001 mm)
+        QCOMPARE(bent.subpaths.size(), expected.subpaths.size());
+        QCOMPARE(bent.subpaths[0].knots.size(), expected.subpaths[0].knots.size());
+        QVERIFY(bent.subpaths[0].knots.size() > 4);
+        for (std::size_t i = 0; i < bent.subpaths[0].knots.size(); ++i) {
+            const vec::Knot &a = bent.subpaths[0].knots[i], &e = expected.subpaths[0].knots[i];
+            for (const auto& [p, q] : {std::pair{a.anchor, e.anchor}, std::pair{a.in, e.in}, std::pair{a.out, e.out}})
+                QVERIFY2(std::fabs(p.x - q.x) < 1e-3 && std::fabs(p.y - q.y) < 1e-3, std::to_string(i).c_str());
+        }
+        // within the op's area: what is in it lifted and moved, the vector mask left
+        Json lifted = warp;
+        lifted["area"] = Json{{"rect", Json::array({0, 0, 8, 25.4})}};
+        QVERIFY(layer_of(run(doc, lifted), "paint").vector_mask->path == outline);
+        // unlinked: it stays
+        core::Document unlinked = doc;
+        unlinked.edit_page(0).layers[0].vector_mask->linked = false;
+        QVERIFY(layer_of(run(unlinked, warp), "paint").vector_mask->path == outline);
+        QVERIFY(layer_of(run(unlinked, move), "paint").vector_mask->path == outline);
     }
 
     // Shape parts alone; a smart object's matrix (its warp later); a placed picture's box; the locks; lines of dialogue.

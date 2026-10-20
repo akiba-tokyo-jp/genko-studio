@@ -102,7 +102,9 @@ std::pair<double, double> shares(const Path& path, const Path& area, double dpi 
 // Rasterize › Shape; a part laid on a layer that is not a pen layer). An inverted part as far as the page (none without
 // one).
 std::optional<core::Patch> as_patch(const core::Page* page, const ShapePart& part);
-// Every part of the layer as patches, in their order, after its own (the lines kept as they are).
+// Every part of the layer as patches, in the order they are drawn (those under the lines, then those over them), after
+// its own (the lines kept as they are: a part over a line would go under it — Layer › Rasterize › Shape draws such a layer
+// in whole, render/ops_smart).
 void rasterize_parts(const core::Page& page, core::Layer& layer);
 
 }  // namespace genko::render::shape_parts

@@ -80,6 +80,10 @@ struct Layer {
     bool mask_unlinked = false;
     std::optional<int> mask_density;
     std::optional<double> mask_feather;
+    // (vector@1, PC3 C-a, the same decision) its vector mask's density (0..255) and feather (pixels of the canvas): the mask
+    // parameters' bits 2 and 3, whether or not it has a mask of its own.
+    std::optional<int> vector_density;
+    std::optional<double> vector_feather;
     std::size_t record = 0;  // (pixel layers) the layer record it was read from
     // (PC2, the user's decision 5) an adjustment layer a codec read (render/psd_adjust.hpp): the correction's adjust.
     // One no codec reads is left out (skipped), as psd.py leaves every one out.
@@ -222,6 +226,8 @@ public:
         bool mask_unlinked = false;
         std::optional<int> mask_density;
         std::optional<double> mask_feather;
+        std::optional<int> vector_density;  // (vector@1: Layer's vector_*)
+        std::optional<double> vector_feather;
         // (PSD-01) where its TySh and lfx2 blocks' payloads are in the file (size 0: none)
         std::uint64_t tysh_at = 0, tysh_size = 0;
         std::uint64_t lfx2_at = 0, lfx2_size = 0;

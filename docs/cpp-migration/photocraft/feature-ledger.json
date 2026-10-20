@@ -2480,7 +2480,9 @@
         "native/src/app/canvas_transform.cpp",
         "native/src/app/main_window_transform.cpp",
         "native/src/render/layer_transform.cpp",
-        "native/tests/gui/test_gui_transform.cpp"
+        "native/tests/gui/test_gui_transform.cpp",
+        "native/src/app/canvas.cpp",
+        "native/tests/gui/test_gui_paths.cpp"
       ],
       "pc0": {
         "date": "2026-10-16",
@@ -24169,7 +24171,9 @@
         "native/tests/gui/test_gui_paths.cpp",
         "native/src/render/psd_paths.cpp",
         "native/src/formats/psd_export.cpp",
-        "native/src/render/import_psd.cpp"
+        "native/src/render/import_psd.cpp",
+        "native/src/render/psd.cpp",
+        "native/tests/contract/test_contract_shapes.cpp"
       ],
       "pc0": {
         "date": "2026-10-16",
@@ -24379,7 +24383,10 @@
         "native/src/render/psd_paths.cpp",
         "native/src/app/main_window_paths.cpp",
         "native/tests/contract/test_contract_paths.cpp",
-        "native/tests/gui/test_gui_paths.cpp"
+        "native/tests/gui/test_gui_paths.cpp",
+        "native/src/render/layer_transform.cpp",
+        "native/tests/contract/test_contract_transform.cpp",
+        "native/tests/gui/test_gui_align.cpp"
       ],
       "pc0": {
         "date": "2026-10-16",
@@ -28988,7 +28995,8 @@
         "native/src/render/ops_shapes.cpp",
         "native/src/render/shape_parts.cpp",
         "native/src/render/ops_smart.cpp",
-        "native/tests/contract/test_contract_shapes.cpp"
+        "native/tests/contract/test_contract_shapes.cpp",
+        "native/src/app/main_window_shapes.cpp"
       ],
       "pc0": {
         "date": "2026-10-16",
@@ -37936,7 +37944,8 @@
         "native/src/app/main_window_page_size.cpp",
         "native/src/render/ops_pagesize.cpp",
         "native/tests/gui/test_gui_page_size.cpp",
-        "native/tests/unit/test_page_size.cpp"
+        "native/tests/unit/test_page_size.cpp",
+        "native/src/app/canvas.cpp"
       ],
       "pc0": {
         "date": "2026-10-16",
@@ -38562,7 +38571,8 @@
         "native/src/app/canvas_pen.cpp",
         "native/src/app/main_window_paths.cpp",
         "native/tests/gui/test_gui_paths.cpp",
-        "native/tests/gui/test_gui_actions.cpp"
+        "native/tests/gui/test_gui_actions.cpp",
+        "native/src/app/canvas.cpp"
       ],
       "pc0": {
         "date": "2026-10-16",

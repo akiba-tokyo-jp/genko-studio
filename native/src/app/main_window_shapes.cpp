@@ -692,7 +692,11 @@ bool MainWindow::rasterize_shapes() {
         flash(QStringLiteral("このレイヤーにはシェイプがありません"), 3000);
         return false;
     }
+    // (a part over the lines: the op draws the layer in whole, so the part stays over them)
+    const bool whole = layer->stroke_count() > 0 && std::any_of(layer->shapes->items.begin(), layer->shapes->items.end(),
+                                                                [](const core::vector::ShapePart& p) { return p.over; });
     if (!apply_ops(Json::array({Json{{"op", "rasterize_layer"}, {"page", page->index.json()}, {"id", layer->id}, {"shape", true}}}))) return false;
+    if (whole) flash(QStringLiteral("線の上のシェイプがあるので、見えが変わらないようにレイヤー全体をラスタライズしました"), 5000);
     if (target_part(canvas_->target_path)) canvas_->target_path = QStringLiteral("work");
     if (paths_panel_ != nullptr && paths_dock_->isVisible()) paths_panel_->refresh();
     return true;

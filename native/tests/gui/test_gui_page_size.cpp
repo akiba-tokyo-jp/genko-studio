@@ -2,7 +2,8 @@
 // 切り抜き, トリミング…, すべての領域を表示 and ツール → 切り抜きツール (Shift+C) — where they are and their keys; each dialog's op
 // as the window sends it; a page's own paper shown on the canvas as the book draws it, undone; the finished size that would
 // not fit the new paper fitted to it once the person agrees; the crop tool's box drawn, turned, cropped to with Enter and
-// let go with Esc; the book preview drawing each page of a spread as big as its own paper.
+// let go with Esc, asked about when another tool is taken and let go on another page; the book preview drawing each page
+// of a spread as big as its own paper.
 
 #include <QAction>
 #include <QCheckBox>
@@ -293,6 +294,49 @@ private slots:
         QCOMPARE(w.ops.back()["op"], Json("crop_page"));
         QVERIFY(near(w.book().page(2).spec.width_mm.value(), 100, 0.2));
         QVERIFY(!canvas->selection().has_value());
+    }
+
+    // The crop tool's box when another tool is taken: asked about, as Photoshop asks (画像を切り抜きますか？: yes crops to it,
+    // no lets it go); when another page is shown: let go (it was the page's before), nothing asked or cropped.
+    void theCropBoxEndsWithTheToolOrPage() {
+        Window w;
+        QStringList asked;
+        bool yes = false;
+        w.answers.responder->question = [&](const QString&, const QString& text) {
+            asked << text;
+            return yes;
+        };
+        app::PageCanvas* canvas = w.window->canvas();
+        QVERIFY(w.trigger("act_crop_tool"));
+        w.drag(QPointF(20, 30), QPointF(120, 200));
+        QVERIFY(canvas->crop().has_value());
+        std::size_t n = w.ops.size();
+        QVERIFY(w.trigger("act_move"));
+        QCOMPARE(asked, QStringList{QStringLiteral("画像を切り抜きますか？")});
+        QVERIFY(!canvas->crop().has_value());
+        QCOMPARE(w.ops.size(), n);
+        QVERIFY(w.trigger("act_crop_tool"));
+        QVERIFY(!canvas->crop().has_value());  // (let go: not back with the tool)
+        // yes: cropped to it
+        w.drag(QPointF(20, 30), QPointF(120, 200));
+        yes = true;
+        asked.clear();
+        QVERIFY(w.trigger("act_move"));
+        QVERIFY2(!asked.isEmpty() && asked.front() == QStringLiteral("画像を切り抜きますか？"), qPrintable(asked.join(QLatin1Char('|'))));
+        QCOMPARE(w.ops.size(), n + 1);
+        QCOMPARE(w.ops.back()["op"], Json("crop_page"));
+        QVERIFY(near(w.book().page(0).spec.width_mm.value(), 100, 1));
+        // another page: let go
+        QVERIFY(w.trigger("act_crop_tool"));
+        w.drag(QPointF(20, 30), QPointF(120, 200));
+        QVERIFY(canvas->crop().has_value());
+        asked.clear();
+        n = w.ops.size();
+        w.window->go_to_page(2);
+        QVERIFY(!canvas->crop().has_value());
+        QVERIFY(asked.isEmpty());
+        QTest::keyClick(canvas, Qt::Key_Return);
+        QCOMPARE(w.ops.size(), n);
     }
 
     // 本の形でプレビュー: the pages of a spread, each drawn as big as its own paper (one cut smaller is smaller).

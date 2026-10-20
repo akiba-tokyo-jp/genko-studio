@@ -444,8 +444,12 @@ std::vector<std::string> layers_moved(const Page& page, const std::vector<std::s
     return out;
 }
 
-void move_layer(Document& doc, std::size_t at, const std::string& id, const Map& m, const std::optional<Json>& area, resample::Interp interp,
-                const std::vector<std::string>* parts) {
+namespace {
+
+// move_layer's work. `whole`: the op names no area — the layer moves whole (a warp lifting only what is in its box all
+// the same) and its linked vector mask goes through the map with it.
+void move_layer_in(Document& doc, std::size_t at, const std::string& id, const Map& m, const std::optional<Json>& area, bool whole,
+                   resample::Interp interp, const std::vector<std::string>* parts) {
     Page& page = doc.edit_page(at);
     Layer& layer = page.layers[layer_index(page, id)];
     if (parts != nullptr) {  // (only some shape parts: the Path Selection tool's)
@@ -574,9 +578,16 @@ void move_layer(Document& doc, std::size_t at, const std::string& id, const Map&
     }
     // its mask and vector mask when they are linked (masks@1, vector@1)
     move_linked_mask(page, layer, m, area);
-    if (!area && layer.vector_mask && layer.vector_mask->linked) {
+    if (whole && layer.vector_mask && layer.vector_mask->linked) {
         layer.vector_mask->path = m.is_affine() ? pg::map_path(layer.vector_mask->path, pg::mapping(m.affine)) : bend_path(layer.vector_mask->path, m);
     }
+}
+
+}  // namespace
+
+void move_layer(Document& doc, std::size_t at, const std::string& id, const Map& m, const std::optional<Json>& area, resample::Interp interp,
+                const std::vector<std::string>* parts) {
+    move_layer_in(doc, at, id, m, area, !area, interp, parts);
 }
 
 void move_line(core::StoryLine& line, const Map& m) {
@@ -1330,7 +1341,8 @@ void transform_layers(core::OpContext& c) {
         if (!parts.empty() && named == parts.end()) continue;  // (parts given: only their layers)
         // (a smart object is given the op's own area only: a warp's box is no selection of it)
         const bool smart = doc.page(at).layers[layer_index(doc.page(at), id)].kind == LayerKind::Smart;
-        move_layer(doc, at, id, m, smart ? area : lift, interp, named != parts.end() ? &named->second : nullptr);
+        // (a warp's box lifts only what is in it, yet without the op's own area the layer moves whole: its vector mask bent)
+        move_layer_in(doc, at, id, m, smart ? area : lift, !area, interp, named != parts.end() ? &named->second : nullptr);
         report["moved"].push_back(id);
     }
     if (const Json* with = core::get(op, "with"); with != nullptr && !with->is_null()) {

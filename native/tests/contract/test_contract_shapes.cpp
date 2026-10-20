@@ -304,6 +304,40 @@ private slots:
         QVERIFY(!refusal(small_book(), Json{{"op", "add_layer"}, {"page", 1}, {"kind", "gradient"}, {"gradient", Json{{"shape", "spiral"}}}}).empty());
     }
 
+    // レイヤー → ラスタライズ → シェイプ keeps the look: the parts become patches in the order they are drawn (a part over
+    // the lines after one under them, whatever their order in the list); with a part over the layer's lines — which only
+    // pixels keep over them — the layer is drawn in whole as it shows (a paint layer: the op says so).
+    void rasterizedAsTheyShow() {
+        core::Document book = small_book();
+        const std::string ink = ink_of(book.page(0));
+        const core::Document lined = run(book, Json{{"op", "add_stroke"}, {"page", 1}, {"layer_id", ink},
+                                                    {"points", Json::array({Json::array({5, 30}), Json::array({55, 30})})}, {"width_mm", 3},
+                                                    {"rgb", Json::array({0, 0, 0})}});
+        const core::Document over = run(lined, Json{{"op", "add_shape_part"}, {"page", 1}, {"layer_id", ink}, {"id", "w"}, {"over", true},
+                                                    {"shape", rect_shape(20, 20, 20, 20)}, {"fill", Json{{"rgb", Json::array({255, 255, 255})}}}});
+        QVERIFY(grey_at(drawn(over), 30, 30) > 240);  // (the white part over the line)
+        const core::ApplyResult whole = run_ops(over, Json::array({Json{{"op", "rasterize_layer"}, {"page", 1}, {"id", ink}, {"shape", true}}}));
+        QCOMPARE(whole.results.at(0)["whole"], Json(true));
+        const core::Layer& flat = layer_of(whole.doc.page(0), ink);
+        QVERIFY(flat.kind == core::LayerKind::Raster && flat.shapes->items.empty() && flat.stroke_count() == 0);
+        const render::Image seen = drawn(whole.doc);
+        QVERIFY2(grey_at(seen, 30, 30) > 240, std::to_string(grey_at(seen, 30, 30)).c_str());  // (still over the line)
+        QVERIFY(grey_at(seen, 10, 30) < 60 && grey_at(seen, 30, 50) > 240);
+        // no lines: the parts as patches in the order they are drawn (the one over the other first in the list)
+        core::Document parts = run(book, Json{{"op", "add_shape_part"}, {"page", 1}, {"layer_id", ink}, {"id", "top"}, {"over", true},
+                                              {"shape", rect_shape(20, 20, 20, 20)}, {"fill", Json{{"rgb", Json::array({255, 255, 255})}}}});
+        parts = run(parts, Json{{"op", "add_shape_part"}, {"page", 1}, {"layer_id", ink}, {"id", "under"}, {"shape", rect_shape(10, 10, 40, 40)}, {"fill", black()}});
+        QVERIFY(grey_at(drawn(parts), 30, 30) > 240 && grey_at(drawn(parts), 15, 15) < 60);
+        const core::ApplyResult patched = run_ops(parts, Json::array({Json{{"op", "rasterize_layer"}, {"page", 1}, {"id", ink}, {"shape", true}}}));
+        QVERIFY(!patched.results.at(0).contains("whole"));
+        const core::Layer& pen = layer_of(patched.doc.page(0), ink);
+        QVERIFY(pen.kind != core::LayerKind::Raster && pen.shapes->items.empty());
+        QCOMPARE(pen.patches.size(), std::size_t{2});
+        const render::Image after = drawn(patched.doc);
+        QVERIFY2(grey_at(after, 30, 30) > 240, std::to_string(grey_at(after, 30, 30)).c_str());
+        QVERIFY(grey_at(after, 15, 15) < 60);
+    }
+
     // The selection with parts (render/selection): one inside moved whole by transform_area (its live shape kept), one
     // its edge crosses cut in two (the halves' areas the whole's); delete_area takes the part's share; copied and pasted.
     void theSelection() {
@@ -609,6 +643,75 @@ json.dump({"layers": [info(l) for l in psd]}, open(sys.argv[1], "w"), ensure_asc
             QCOMPARE(layer.value("kind", std::string()), std::string("strokes"));
         }
         QCOMPARE(pens, 3);  // (四角, and the group's two shape layers)
+    }
+
+    // PSD: a pen layer written as a group (its parts and lines) carries on the group's record its mask with masks@1's
+    // settings — not used (disabled), its density and feather — and its vector mask's density (the user's decision 3), as
+    // a layer's record does; on an 8-bit RGB page and on a CMYK page alike (each a group of its parts and lines).
+    void psdGroupMaskSettings() {
+        QVERIFY2(!genko::test::python_ref().isEmpty(), "the reference Python (GENKO_PYREF) reads the PSD with psd-tools");
+        for (const bool cmyk : {false, true}) {
+            const QString name = cmyk ? QStringLiteral("group-cmyk") : QStringLiteral("group-rgb");
+            const QString book = make_book(name + QStringLiteral(".genko"));
+            Json ops = Json::array();
+            if (cmyk) ops.push_back(Json{{"op", "set_color_mode"}, {"page", 1}, {"mode", "cmyk"}, {"profile", "coated-cmyk"}});
+            for (const Json& op :
+                 {Json{{"op", "add_layer"}, {"page", 1}, {"kind", "pen"}, {"id", "mixed"}, {"name", "混ぜ"}},
+                  Json{{"op", "set_layer"}, {"page", 1}, {"id", "mixed"}, {"panel_clip", false}, {"panel_each", false}},
+                  Json{{"op", "add_stroke"}, {"page", 1}, {"layer_id", "mixed"}, {"points", Json::array({Json::array({20, 100}), Json::array({150, 120})})}, {"width_mm", 1}},
+                  Json{{"op", "add_shape_part"}, {"page", 1}, {"layer_id", "mixed"}, {"shape", Json{{"kind", "ellipse"}, {"rect", Json::array({30, 90, 40, 30})}}},
+                       {"fill", black()}},
+                  Json{{"op", "add_shape_part"}, {"page", 1}, {"layer_id", "mixed"}, {"over", true}, {"shape", rect_shape(80, 90, 30, 30)},
+                       {"fill", Json{{"rgb", Json::array({200, 30, 30})}}}},
+                  Json{{"op", "set_layer_mask"}, {"page", 1}, {"id", "mixed"}, {"area", Json{{"rect", Json::array({0, 0, 100, 297})}}}, {"density", 0.5},
+                       {"feather_mm", 2}},
+                  Json{{"op", "set_layer_mask"}, {"page", 1}, {"id", "mixed"}, {"enabled", false}},
+                  Json{{"op", "set_vector_mask"}, {"page", 1}, {"id", "mixed"}, {"path", square_path(10, 80, 150)}, {"density", 50}}})
+                ops.push_back(op);
+            const Json reply = apply(book, name + QStringLiteral(".json"), ops);
+            QVERIFY2(reply.value("ok", false), reply.dump().c_str());
+            int exit = -1;
+            const QString file = path(name + QStringLiteral(".psd"));
+            const Json out = genko({QStringLiteral("export"), book, file, QStringLiteral("--format"), QStringLiteral("psd"), QStringLiteral("--dpi"),
+                                    QStringLiteral("100"), QStringLiteral("--json")},
+                                   &exit);
+            QVERIFY2(exit == 0, out.dump().c_str());
+            constexpr const char* kRead = R"PY(
+import json, sys
+from psd_tools import PSDImage
+psd = PSDImage.open(sys.argv[2])
+out = {"width": psd.width}
+for l in psd.descendants():
+    d = {"kind": l.kind, "vector": bool(l.has_vector_mask())}
+    data = l._record.mask_data
+    if data is not None:
+        d["disabled"] = bool(data.flags.mask_disabled)
+        d["relative"] = bool(data.flags.pos_relative_to_layer)
+        if data.parameters is not None:
+            p = data.parameters
+            d.update({"user_density": p.user_mask_density, "user_feather": p.user_mask_feather, "vector_density": p.vector_mask_density})
+    if l.kind == "group":
+        d["children"] = [c.kind for c in l]
+    out[l.name] = d
+json.dump(out, open(sys.argv[1], "w"), ensure_ascii=False)
+)PY";
+            const QString json = file + QStringLiteral(".json");
+            const auto ran = genko::test::run(genko::test::python_ref(), {QStringLiteral("-c"), QString::fromUtf8(kRead), json, file},
+                                              genko::test::python_env(path(QStringLiteral("pyenv"))));
+            QVERIFY2(ran.exit_code == 0, ran.err.constData());
+            const Json view = genko::test::read_json(json);
+            QVERIFY2(view.contains("混ぜ"), view.dump().c_str());
+            const Json& group = view["混ぜ"];
+            QCOMPARE(group["kind"], Json("group"));
+            QVERIFY2(group["children"].size() == 3 && group["children"][0] == Json("shape") && group["children"][2] == Json("shape"), view.dump().c_str());
+            QVERIFY(group["vector"].get<bool>());
+            // (not used; set_layer_mask's mask fixed to the page: not linked)
+            QVERIFY2(group.value("disabled", false) && group.value("relative", false), group.dump().c_str());
+            QCOMPARE(group["user_density"], Json(128));
+            const double px_per_mm = view["width"].get<double>() / project(book)["spec"]["width_mm"].get<double>();
+            QVERIFY2(std::fabs(group["user_feather"].get<double>() - 2 * px_per_mm) < 1e-6, group.dump().c_str());
+            QCOMPARE(group["vector_density"], Json(128));
+        }
     }
 };
 

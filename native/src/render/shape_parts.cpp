@@ -259,8 +259,12 @@ std::optional<core::Patch> as_patch(const core::Page* page, const ShapePart& par
 }
 
 void rasterize_parts(const core::Page& page, core::Layer& layer) {
-    for (const ShapePart& part : layer.shapes->items) {
-        if (auto patch = as_patch(&page, part)) layer.patches.push_back(std::move(*patch));
+    // (as they are drawn: the parts under the lines, then those over them)
+    for (const bool over : {false, true}) {
+        for (const ShapePart& part : layer.shapes->items) {
+            if (part.over != over) continue;
+            if (auto patch = as_patch(&page, part)) layer.patches.push_back(std::move(*patch));
+        }
     }
     layer.shapes = vec::empty_shapes();
 }

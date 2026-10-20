@@ -818,6 +818,15 @@ void rasterize_layer(OpContext& c) {
         const Layer& layer = doc.page(at).layers[i];
         if (layer.locked) throw OpError("the layer is locked");
         if (!shape_parts::any(layer)) throw OpError("layer " + layer.id + " has no shape parts");
+        const bool over = std::any_of(layer.shapes->items.begin(), layer.shapes->items.end(), [](const core::vector::ShapePart& p) { return p.over; });
+        if (over && layer.stroke_count() > 0) {
+            // (a part over the lines stays over them only in pixels: the layer drawn in whole as it shows, as Layer ›
+            // Rasterize › Layer — its look kept)
+            const std::string id = layer.id;
+            rasterize(doc, at, i);
+            c.report = Json{{"ids", Json::array({id})}, {"whole", true}};
+            return;
+        }
         Page& page = doc.edit_page(at);
         shape_parts::rasterize_parts(page, page.layers[i]);
         c.report = Json{{"ids", Json::array({page.layers[i].id})}};
