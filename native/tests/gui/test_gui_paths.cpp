@@ -3,7 +3,8 @@
 // moving a subpath (Alt: a copy) and taking it out (Delete); the パス panel's rows and buttons (新規パス, 名前, 塗りつぶす,
 // 境界線を描く, 選択範囲に, 作業用パスを作成, マスクを追加, 削除); 選択範囲 → 作業用パスを作成…; ページ → 台詞 → 作業用パスを
 // 作成; レイヤー → ベクトルマスク (すべての領域を表示・すべての領域を隠す・現在のパス・使用しない・リンク・削除) and ラスタライズ →
-// ベクトルマスク; 表示 → ターゲットパス; ファイル → パスを Illustrator へ…; the tools' keys.
+// ベクトルマスク; 表示 → ターゲットパス; ファイル → パスを Illustrator へ…; the tools' keys; the pen's subpath and the free
+// transform's box ended when another tool or another page is taken.
 
 #include <QtTest>
 
@@ -166,6 +167,81 @@ private slots:
         QCOMPARE(b.page().work_path->subpaths.size(), std::size_t(1));
         b.act("act_undo")->trigger();
         QVERIFY(!b.page().work_path.has_value());
+    }
+
+    // What a tool leaves half done ends with it, as Photoshop ends it: the pen's subpath kept (open) when another tool is
+    // taken, so Enter and Delete are the new tool's; the free transform's box applied or let go as the person answers
+    // (変形を適用しますか？). On another page they are let go: they were the page's before (nothing made on either).
+    void halfDoneWorkEndsWithTheToolOrThePage() {
+        Book b;
+        QStringList asked;
+        bool yes = false;
+        b.answers.responder->question = [&](const QString&, const QString& text) {
+            asked << text;
+            return yes;
+        };
+        const auto page = [&b](std::size_t i) -> const core::Page& { return *b.doc().pages.at(i); };
+        b.canvas()->snap_on = false;  // (the box's moves as dragged)
+        // the pen: kept as drawn when the marquee is taken
+        b.act("act_path_pen")->trigger();
+        b.click(20, 20);
+        b.click(80, 30);
+        QVERIFY(b.canvas()->pen_drawing());
+        b.act("act_marquee")->trigger();
+        QVERIFY(!b.canvas()->pen_drawing());
+        QVERIFY(page(0).work_path.has_value());
+        QCOMPARE(page(0).work_path->subpaths.size(), std::size_t(1));
+        QCOMPARE(page(0).work_path->subpaths[0].knots.size(), std::size_t(2));
+        QVERIFY(!page(0).work_path->subpaths[0].closed);
+        QVERIFY(asked.isEmpty());
+        // the pen's anchors on another page: let go
+        b.act("act_path_pen")->trigger();
+        b.click(30, 60);
+        b.click(90, 70);
+        QVERIFY(b.canvas()->pen_drawing());
+        b.window->go_to_page(2);
+        QVERIFY(!b.canvas()->pen_drawing());
+        b.key(Qt::Key_Return);
+        QCOMPARE(page(0).work_path->subpaths.size(), std::size_t(1));
+        QVERIFY(!page(1).work_path.has_value());
+        b.window->go_to_page(1);
+        // the free transform's box: asked when another tool is taken — no: let go, yes: applied
+        QVERIFY(b.apply(Json{{"op", "add_stroke"}, {"page", 1}, {"layer", "ink"}, {"points", Json::array({Json::array({40, 40}), Json::array({60, 60})})},
+                             {"width_mm", 1}}));
+        const auto first_x = [&] {
+            for (const core::Layer& l : page(0).layers)
+                if (l.role == core::LayerRole::Ink && l.stroke_count() > 0) return l.strokes->items[0]->points[0].x;
+            return -1.0;
+        };
+        for (const bool answer : {false, true}) {
+            b.window->set_target_layer(gui_test::ink_of(page(0))->id);
+            b.act("act_free_transform")->trigger();
+            QVERIFY(b.canvas()->transforming());
+            const double before = first_x();
+            const auto box = b.canvas()->transform_box();
+            const double cx = (box[0] + box[2]) / 2, cy = (box[1] + box[3]) / 2;
+            b.drag(cx, cy, cx + 5, cy);  // (inside the box: moved 5 mm — a preview, the book as it was)
+            QCOMPARE(first_x(), before);
+            yes = answer;
+            asked.clear();
+            b.act(answer ? "act_path_select" : "act_marquee")->trigger();
+            QCOMPARE(asked, QStringList{QStringLiteral("変形を適用しますか？")});
+            QVERIFY(!b.canvas()->transforming());
+            if (answer) QVERIFY2(std::fabs(first_x() - (before + 5)) < 0.2, qPrintable(QString::number(first_x())));
+            else QCOMPARE(first_x(), before);
+        }
+        // on another page: let go, Enter making nothing there
+        b.window->set_target_layer(gui_test::ink_of(page(0))->id);
+        b.act("act_free_transform")->trigger();
+        const auto box = b.canvas()->transform_box();
+        b.drag((box[0] + box[2]) / 2, (box[1] + box[3]) / 2, (box[0] + box[2]) / 2 + 5, (box[1] + box[3]) / 2);
+        const double kept = first_x();
+        asked.clear();
+        b.window->go_to_page(2);
+        QVERIFY(!b.canvas()->transforming());
+        QVERIFY(asked.isEmpty());
+        b.key(Qt::Key_Return);
+        QCOMPARE(first_x(), kept);
     }
 
     // 曲線ペンツール: the curve through the points clicked, smooth; Alt+click a corner; Enter ends it open.

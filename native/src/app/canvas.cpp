@@ -9,6 +9,7 @@
 #include <algorithm>
 #include <cmath>
 
+#include "app/ask.hpp"
 #include "app/comfort.hpp"
 #include "app/config.hpp"
 #include "app/perf.hpp"
@@ -105,6 +106,14 @@ void PageCanvas::set_page(DocPtr doc, std::size_t index) {
     renderer_->show(doc_, index_);
     request_tiles();
     update();
+    if (other_page) {
+        // (what a tool left half done was on the page before, never on this one: let go — the pen's anchors, the crop
+        // tool's box, the free transform's box)
+        pen_knots_.clear();
+        pen_handle_.reset();
+        if (crop_) set_crop(std::nullopt);
+        cancel_transform();
+    }
 }
 
 void PageCanvas::clear_page() {
@@ -115,6 +124,10 @@ void PageCanvas::clear_page() {
     stroke_.clear();
     renderer_->clear();
     update();
+    pen_knots_.clear();  // (as on another page: set_page)
+    pen_handle_.reset();
+    if (crop_) set_crop(std::nullopt);
+    cancel_transform();
 }
 
 void PageCanvas::set_render_mode(const std::string& mode) { renderer_->set_mode(mode); }
@@ -144,6 +157,20 @@ bool PageCanvas::wait_rendered(int ms) {
 // --- tools -------------------------------------------------------------------------------------------------------
 
 void PageCanvas::set_tool(const QString& tool) {
+    if (tool != held_tool_.value_or(tool_)) {
+        // (what the tool in hand left half done ends as Photoshop ends it when another tool is taken: the pen's subpath
+        // kept as drawn; the free transform's box and the crop tool's box applied or let go as the person answers)
+        finish_pen(false);
+        if (xform_) {
+            if (ask::question(this, QStringLiteral("変形"), QStringLiteral("変形を適用しますか？"))) finish_transform();
+            else cancel_transform();
+        }
+        if (crop_) {
+            const CropBox box = *crop_;
+            set_crop(std::nullopt);
+            if (ask::question(this, QStringLiteral("切り抜き"), QStringLiteral("画像を切り抜きますか？"))) emit cropRequested(box.rect(), box.angle);
+        }
+    }
     tool_ = tool;
     held_tool_.reset();  // (a tool chosen while a key holds another is the tool now: letting go keeps it)
     stroke_.clear();
