@@ -295,10 +295,9 @@ private slots:
     void theNewOpsAreFramesForNow() {
         const core::Document doc = core::new_episode("枠", core::Num(1), 1, core::PageSpec::custom(60, 60, 50, 50, 1, 2, 2, 2, 2, 72, "color"));
         const std::vector<std::pair<const char*, const char*>> frames{
-            // (B1's quick_mask and magic_erase, B2's outline_area, apply_layer_mask and mask_from_transparency: written)
-            {"matting", "B3"},  // (B4's clone_stamp … content_aware_fill: written, test_retouch; C-a's set_path … set_vector_mask:
-                                // written, test_contract_paths; C-b's add_shape_part … move_shape_parts: test_contract_shapes;
-                                // C-c's transform_layers and content_aware_scale: test_contract_transform)
+            // (B1's quick_mask and magic_erase, B2's outline_area, apply_layer_mask and mask_from_transparency, B3's matting,
+            // B4's clone_stamp … content_aware_fill, C-a's set_path … set_vector_mask, C-b's add_shape_part … move_shape_parts
+            // and C-c's transform_layers and content_aware_scale: written)
             {"align_layers", "C-d"}, {"distribute_layers", "C-d"}, {"arrange_layers", "C-d"}, {"link_layers", "C-d"}};
         // (C-e's resize_pages, set_canvas_size, crop_page, trim_page, reveal_all and rotate_pages are written: test_page_size)
         for (const auto& [op, group] : frames) {

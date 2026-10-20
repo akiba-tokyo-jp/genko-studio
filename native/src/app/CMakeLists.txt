@@ -120,6 +120,9 @@ genko_library(genko_app
     app_main.cpp
     # PC3-0: 編集's clipboard items (split from main_window_select.cpp)
     main_window_clipboard.cpp
+    # PC3 B3: 賢い選択 (クイック選択・オブジェクト選択・被写体・空・フォーカス領域), 選択とマスク…, マッティング
+    main_window_smart_select.cpp
+    select_mask_window.cpp
     # PC3 C-a: the path tools, the Paths panel, the paths' and vector masks' commands
     canvas_pen.cpp
     paths_panel.cpp

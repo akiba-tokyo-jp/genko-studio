@@ -119,6 +119,12 @@ genko_test(test_masks SOURCES unit/test_masks.cpp DEPS genko_test_support genko_
 # 8-bit, 16-bit, 32-bit, CMYK, Lab and grey layers.
 genko_test(test_inpaint SOURCES unit/test_inpaint.cpp DEPS genko_test_support genko_render_ops LABELS unit TIMEOUT 600)
 genko_test(test_retouch SOURCES unit/test_retouch.cpp DEPS genko_test_support genko_render_ops LABELS unit TIMEOUT 900)
+# PC3 B3 (SPEC.md COLOR-06「賢い選択」「選択とマスク」「マッティング」): PhotoCraft's algo/segment tests (the max-flow against a
+# reference, GrabCut, Quick Selection, Select Subject, Focus Area, Select Sky; the same bytes again, a stop asked for) and
+# algo/matting.rs's (the guided filter, feather, contrast, shift, the tiles, decontaminate, defringe), the op matting on
+# 8-bit, 16-bit and CMYK layers, and the smart area kinds on a page (the same area on an 8-bit, a 16-bit and a CMYK page).
+genko_test(test_segment SOURCES unit/test_segment.cpp DEPS genko_test_support genko_render_ops LABELS unit TIMEOUT 600)
+genko_test(test_matting SOURCES unit/test_matting.cpp DEPS genko_test_support genko_render_ops LABELS unit TIMEOUT 900)
 genko_test(test_path_raster SOURCES unit/test_path_raster.cpp DEPS genko_test_support genko_render_ops LABELS unit)
 # PC3 C-b (pen-shapes@1): the live shapes, the path operations' coverage, a stroke's alignments and dashes, the gradient
 # forms, a part baked, cut, erased, bent and transformed; the shape presets' language and settings file.
@@ -500,6 +506,9 @@ if(GENKO_BUILD_APP)
   # PC3 C-c: 自由変形 (the box previewed, Enter one op, Esc, 再実行), the turns, the warp's splits, puppet pins, ゆがみ…,
   # コンテンツに応じて拡大・縮小…, ワープテキスト… and the commands' names
   genko_test(test_gui_transform SOURCES gui/test_gui_transform.cpp DEPS genko_app GUI TIMEOUT 600)
+  # PC3 B3: クイック選択ツール・オブジェクト選択ツール, 被写体を選択・空を選択・フォーカス領域…, 選択とマスク… (its preview, its 4
+  # outputs, each one Undo), すべてのオブジェクトをマスク, マッティング, the worker thread stopped
+  genko_test(test_gui_select_mask SOURCES gui/test_gui_select_mask.cpp DEPS genko_app GUI TIMEOUT 900)
   # チャンネル (channels@1, COLOR-03): the panel, the target keys, a fill on a channel, the view, options, split.
   genko_test(test_gui_channels SOURCES gui/test_gui_channels.cpp DEPS genko_app GUI TIMEOUT 600)
   # PC2c (COLOR-04): レイヤー → 色調補正's local corrections and image calculations, 編集 → フェード (only right after).

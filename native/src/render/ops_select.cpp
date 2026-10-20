@@ -27,7 +27,7 @@ void register_select_ops(core::OpRegistry& registry) {
     registry.add("mask_from_transparency", mask_from_transparency);
     // B3: Layer › Matting ({page, id, kind: defringe | remove_black | remove_white | decontaminate, width_mm?, amount?,
     // radius_mm?, area?})
-    registry.add("matting", not_yet("matting", "B3"));
+    registry.add("matting", matting_op);  // (render/ops_matting.cpp)
 }
 
 }  // namespace genko::render

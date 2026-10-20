@@ -102,6 +102,8 @@ const std::map<std::string, const char*>& names() {
         {"move_shape_parts", "シェイプを別のレイヤーへ移した"},
         // (PC3 C-c: render/layer_transform, render/distort_ops)
         {"transform_layers", "変形した"}, {"content_aware_scale", "コンテンツに応じて拡大・縮小した"},
+        // (PC3 B3: render/ops_matting)
+        {"matting", "マッティングした"},
     };
     return table;
 }

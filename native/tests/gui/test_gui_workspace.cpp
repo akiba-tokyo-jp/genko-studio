@@ -438,8 +438,9 @@ private slots:
             QVERIFY(act != nullptr);
             words << word;
         }
+        // (PC3 B3: 選択とマスク… joins it, as the PC3 design's launcher has it)
         QCOMPARE(words, (QStringList{QStringLiteral("塗りつぶし"), QStringLiteral("消去"), QStringLiteral("トーン"), QStringLiteral("反転"), QStringLiteral("拡張"),
-                                     QStringLiteral("変形"), QStringLiteral("コピー"), QStringLiteral("選択を解除")}));
+                                     QStringLiteral("変形"), QStringLiteral("コピー"), QStringLiteral("選択とマスク"), QStringLiteral("選択を解除")}));
         // (an area as the selection tools give it: its outline in mm)
         b.window->canvas()->set_selection(
             Json{{"poly", Json::array({Json::array({30, 40}), Json::array({90, 40}), Json::array({90, 90}), Json::array({30, 90})})}});

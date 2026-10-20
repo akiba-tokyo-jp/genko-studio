@@ -60,7 +60,9 @@ const std::map<QString, QString>& marquee_ways() {
     static const std::map<QString, QString> ways{{QStringLiteral("rect"), QStringLiteral("rect")},         {QStringLiteral("lasso"), QStringLiteral("lasso")},
                                                  {QStringLiteral("wand"), QStringLiteral("wand")},         {QStringLiteral("ellipse"), QStringLiteral("ellipse")},
                                                  {QStringLiteral("polyline"), QStringLiteral("polyline")}, {QStringLiteral("selpen"), QStringLiteral("pen")},
-                                                 {QStringLiteral("selerase"), QStringLiteral("erase")}};
+                                                 {QStringLiteral("selerase"), QStringLiteral("erase")},
+                                                 // (PC3 B3: クイック選択ツール, オブジェクト選択ツール — main_window_smart_select.cpp)
+                                                 {QStringLiteral("quick"), QStringLiteral("quick")},       {QStringLiteral("object"), QStringLiteral("object")}};
     return ways;
 }
 
@@ -194,8 +196,8 @@ void MainWindow::build_selection_actions() {
 // オブジェクト選択ツール, B4 the retouching tools) and 編集 → 変形 (C-c).
 
 const std::vector<const char*>& MainWindow::selection_tools() {
-    static const std::vector<const char*> names{"act_marquee", "act_sel_ellipse", "act_lasso", "act_sel_polyline", "act_wand",
-                                                "act_sel_pen", "act_sel_erase"};
+    static const std::vector<const char*> names{"act_marquee", "act_sel_ellipse", "act_lasso", "act_sel_polyline", "act_object_select",
+                                                "act_quick_select", "act_wand", "act_sel_pen", "act_sel_erase"};
     return names;
 }
 
@@ -220,6 +222,10 @@ void MainWindow::build_selection_menu(QMenu* menu) {
         menu->addAction(action(QString::fromLatin1(name)));
     menu->addSeparator();
     menu->addAction(action(QStringLiteral("act_color_range")));
+    // (PC3 B3: フォーカス領域…, 被写体を選択, 空を選択; 選択とマスク… — main_window_smart_select.cpp, select_mask_window.cpp)
+    for (const char* name : {"act_focus_area", "act_select_subject", "act_select_sky"}) menu->addAction(action(QString::fromLatin1(name)));
+    menu->addSeparator();
+    menu->addAction(action(QStringLiteral("act_select_mask")));
     menu->addSeparator();
     QMenu* modify = menu->addMenu(QStringLiteral("選択範囲を変更"));
     for (const char* name : {"act_sel_border", "act_sel_smooth", "act_sel_grow", "act_sel_shrink", "act_sel_feather"})
@@ -805,6 +811,7 @@ void MainWindow::build_selection_pages(ToolSettings* ts) {
     marquee_mode_->setObjectName(QStringLiteral("marquee_mode"));
     for (const auto& [label, key] : {std::pair{QStringLiteral("長方形選択"), QStringLiteral("rect")}, {QStringLiteral("楕円形選択"), QStringLiteral("ellipse")},
                                      {QStringLiteral("なげなわ"), QStringLiteral("lasso")}, {QStringLiteral("多角形選択"), QStringLiteral("polyline")},
+                                     {QStringLiteral("オブジェクト選択"), QStringLiteral("object")}, {QStringLiteral("クイック選択"), QStringLiteral("quick")},
                                      {QStringLiteral("自動選択"), QStringLiteral("wand")}, {QStringLiteral("選択ペン"), QStringLiteral("selpen")},
                                      {QStringLiteral("選択消し"), QStringLiteral("selerase")}})
         marquee_mode_->addItem(label, key);
@@ -913,12 +920,14 @@ void MainWindow::build_selection_pages(ToolSettings* ts) {
     sfl->addRow(QString(), colour_contiguous_box_);
     sfl->addRow(QString(), all_layers);
     sfl->addRow(QStringLiteral("選択ペンの太さ"), selection_pen_);
+    sfl->addRow(smart_select_settings_widget());  // (PC3 B3: クイック選択・オブジェクト選択)
     ts->add({QStringLiteral("marquee")},
             action_page({sel_form, static_cast<QWidget*>(hint(QStringLiteral("Shift で選択範囲に追加・Alt で一部削除・両方で共通範囲（その時だけ、選択方法より先に）"))),
                          QStringLiteral("選択範囲と中身"),
                          static_cast<QWidget*>(menu_button(QStringLiteral("選択範囲"),
                                                            {{action("act_select_all"), action("act_deselect"), action("act_sel_reselect"), action("act_sel_invert")},
                                                             {action("act_color_range"), action("act_sel_grow_colour"), action("act_sel_similar"), action("act_sel_layer")},
+                                                            {action("act_select_subject"), action("act_select_sky"), action("act_focus_area"), action("act_select_mask")},
                                                             {action("act_sel_border"), action("act_sel_smooth"), action("act_sel_grow"), action("act_sel_shrink"),
                                                              action("act_sel_feather"), action("act_sel_transform")},
                                                             {action("act_sel_keep"), action("act_quick_mask"), action("act_sel_load"), action("act_sel_to_channel")}})),

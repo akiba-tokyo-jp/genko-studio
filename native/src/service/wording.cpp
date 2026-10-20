@@ -937,6 +937,15 @@ const std::vector<Rule>& rules() {
         r.push_back(rule("content_aware_fill: source_area covers nothing of the layer", "カスタムのサンプリング領域が、このレイヤーにありません"));
         r.push_back(rule("custom sampling needs source_area.*", "カスタムのサンプリング領域を選びます"));
         r.push_back(rule("the layer \\S+ has no pixels to work on", "このレイヤーには、直す画素がありません"));
+        // (PC3 B3: the smart selection and the matting — render/select_smart, render/ops_matting)
+        r.push_back(rule("kind is defringe, remove_black, remove_white or decontaminate",
+                         "マッティングの種類は、カラーの除去・フリンジ削除・黒マット削除・白マット削除から選びます"));
+        r.push_back(rule("id \\(the layer\\) is required", "レイヤーを選んでから行います"));
+        r.push_back(rule("radius_mm must be more than 0", "半径は 0 より大きくします"));
+        r.push_back(rule("(?:subject|sky|object|quick|focus|refine): no layer .*", "そのレイヤーはありません"));
+        r.push_back(rule("refine\\.area \\(the selection to refine\\) is required", "先に選択範囲を作ります"));
+        r.push_back(rule("(?:subject|sky|object|quick|focus|refine)(?:\\.\\w+)?[: ].*",
+                         "賢い選択（被写体・空・オブジェクト選択・クイック選択・フォーカス領域・選択とマスク）の設定が正しくありません"));
         // (vector@1, PC3 C-a: paths and vector masks, render/ops_paths, render/path_areas)
         r.push_back(rule("the page has no work path", "このページには作業用パスがありません（ペンツールで描くか、選択範囲から作ります）"));
         r.push_back(rule("no path named '(.*)'", "パス「\\1」はありません"));

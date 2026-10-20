@@ -3,7 +3,8 @@
 // add, Alt to take away, both for the overlap (PC3 B1: else as the 選択方法 buttons say); an ellipse, a lasso and a polygon
 // anti-aliased and feathered as the tool says, a rectangle or an ellipse of a fixed ratio or size; the chosen area moved,
 // scaled, turned and slanted by its handles (選択範囲を変形: its outline only), or pulled freely (perspective, mesh); a mask
-// selection shown as a tint; the selection let go kept for 再選択.
+// selection shown as a tint; the selection let go kept for 再選択. PC3 B3: クイック選択ツール's stroke and オブジェクト選択ツール's
+// rectangle (the window finds the area they say on a worker thread).
 
 #include <QKeyEvent>
 #include <QPainter>
@@ -253,6 +254,7 @@ bool PageCanvas::cancel_points() {
 
 bool PageCanvas::marquee_press(const QPointF& pos, const QPointF& mm, Qt::KeyboardModifiers modifiers) {
     modifiers_ = modifiers;
+    if (marquee == QLatin1String("quick") || marquee == QLatin1String("object")) return smart_press(mm, modifiers);  // (PC3 B3)
     sel_how_ = how_from(modifiers);
     if ((modifiers & (Qt::ShiftModifier | Qt::AltModifier)) == 0) sel_how_ = select_method;  // (選択方法: the tool's buttons)
     if ((sel_how_ == QLatin1String("replace") || transform_outline) && marquee != QLatin1String("polyline") && selection_) {
@@ -301,6 +303,7 @@ bool PageCanvas::marquee_press(const QPointF& pos, const QPointF& mm, Qt::Keyboa
 }
 
 bool PageCanvas::marquee_move(const QPointF& mm, Qt::KeyboardModifiers modifiers, bool pressed) {
+    if (!smart_drag_.empty()) return smart_move(mm, pressed);  // (PC3 B3)
     if (sel_drag_ && sel_drag_->kind == QLatin1String("warp")) {
         if (!warp_ || static_cast<std::size_t>(sel_drag_->index) >= warp_->points.size()) {
             sel_drag_.reset();
@@ -342,6 +345,7 @@ bool PageCanvas::marquee_move(const QPointF& mm, Qt::KeyboardModifiers modifiers
 }
 
 bool PageCanvas::marquee_release() {
+    if (!smart_drag_.empty()) return smart_release();  // (PC3 B3)
     if (sel_drag_ && (sel_drag_->kind == QLatin1String("warp") || sel_drag_->kind == QLatin1String("pivot"))) {
         sel_drag_.reset();
         update();
@@ -525,6 +529,7 @@ void PageCanvas::draw_marquee(QPainter& painter) const {
         painter.drawPolygon(area);
         painter.setBrush(Qt::NoBrush);
     }
+    draw_smart_drag(painter);  // (PC3 B3)
     if (ellipse_drag_ || !poly_points_.empty()) {
         painter.setPen(QPen(kSelection, 1.5, Qt::DashLine));
         painter.setBrush(Qt::NoBrush);
@@ -543,6 +548,73 @@ void PageCanvas::draw_marquee(QPainter& painter) const {
             for (const QPointF& p : poly_points_) painter.drawEllipse(pt(p.x(), p.y()), 3, 3);
         }
     }
+}
+
+// --- PC3 B3: クイック選択ツール and オブジェクト選択ツール ------------------------------------------------------------------
+
+bool PageCanvas::smart_press(const QPointF& mm, Qt::KeyboardModifiers modifiers) {
+    // クイック選択ツール adds to the selection there is (Photoshop's: its brush is 選択範囲に追加 after the first stroke), Alt takes
+    // away; オブジェクト選択ツール joins as the other tools (Shift, Alt, both; else 選択方法)
+    const bool alt = (modifiers & Qt::AltModifier) != 0;
+    if (marquee == QLatin1String("quick")) {
+        if (alt) smart_how_ = QStringLiteral("subtract");
+        else if (select_method == QLatin1String("subtract") || select_method == QLatin1String("intersect")) smart_how_ = select_method;
+        else if (selection_ || (modifiers & Qt::ShiftModifier) != 0) smart_how_ = QStringLiteral("add");
+        else smart_how_ = QStringLiteral("replace");
+    } else {
+        smart_how_ = (modifiers & (Qt::ShiftModifier | Qt::AltModifier)) != 0 ? how_from(modifiers) : select_method;
+    }
+    smart_drag_ = {mm};
+    update();
+    return true;
+}
+
+bool PageCanvas::smart_move(const QPointF& mm, bool pressed) {
+    if (!pressed) return true;
+    if (marquee == QLatin1String("object")) {
+        if (smart_drag_.size() < 2) smart_drag_.push_back(mm);
+        else smart_drag_[1] = mm;
+    } else if (distance(smart_drag_.back(), mm) >= std::max(0.05, quick_size_mm / 8)) {  // (the stroke's points a little apart)
+        smart_drag_.push_back(mm);
+    }
+    update();
+    return true;
+}
+
+bool PageCanvas::smart_release() {
+    std::vector<QPointF> drag;
+    std::swap(drag, smart_drag_);
+    update();
+    if (marquee == QLatin1String("object")) {
+        if (drag.size() < 2) return true;
+        const QRectF box = QRectF(drag.front(), drag.back()).normalized();
+        if (box.width() < 0.5 || box.height() < 0.5) return true;
+        emit objectSelected(QRectF(r3(box.x()), r3(box.y()), r3(box.width()), r3(box.height())), smart_how_);
+        return true;
+    }
+    QVector<QPointF> points;
+    for (const QPointF& p : drag) points.append(QPointF(r3(p.x()), r3(p.y())));
+    emit quickSelected(points, smart_how_);
+    return true;
+}
+
+void PageCanvas::draw_smart_drag(QPainter& painter) const {
+    if (smart_drag_.empty()) return;
+    if (marquee == QLatin1String("object")) {
+        if (smart_drag_.size() < 2) return;
+        painter.setPen(QPen(kSelection, 1.5, Qt::DashLine));
+        painter.setBrush(QColor(28, 126, 214, 30));
+        const QPointF a = smart_drag_.front(), b = smart_drag_.back();
+        painter.drawRect(QRectF(pt(a.x(), a.y()), pt(b.x(), b.y())).normalized());
+        painter.setBrush(Qt::NoBrush);
+        return;
+    }
+    const QColor colour = smart_how_ == QLatin1String("subtract") ? QColor(220, 60, 60, 90) : QColor(28, 126, 214, 90);
+    painter.setPen(QPen(colour, std::max(2.0, quick_size_mm * view_.scale), Qt::SolidLine, Qt::RoundCap, Qt::RoundJoin));
+    QPolygonF line;
+    for (const QPointF& p : smart_drag_) line << pt(p.x(), p.y());
+    if (line.size() == 1) line << line.front();
+    painter.drawPolyline(line);
 }
 
 void PageCanvas::place_launcher() {

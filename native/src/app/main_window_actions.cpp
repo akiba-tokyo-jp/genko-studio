@@ -453,6 +453,7 @@ void MainWindow::build_actions() {
     }
     actions_.at("act_select")->setChecked(true);
     build_selection_actions();  // (the selection's tools and commands: main_window_select.cpp)
+    build_smart_select_actions();  // (PC3 B3: クイック選択・オブジェクト選択, 被写体・空・フォーカス領域, 選択とマスク…, マッティング)
     build_clipboard_actions();  // (PC3 B2: 結合部分をコピー, 特殊ペースト, 塗りつぶし…, 境界線を描く…: main_window_clipboard.cpp)
     build_mask_actions();       // (PC3 B2: すべてのマスクを統合, the layers chosen: main_window_masks.cpp)
     build_transform_actions();  // (PC3 C-c: 自由変形, 変形 ▸, パペットワープ, 遠近法ワープ, ゆがみ…, ワープテキスト…: main_window_transform.cpp)
@@ -713,9 +714,12 @@ void MainWindow::build_menus() {
     layers->addAction(action("act_layer_draft"));
     layer_effect_menu_ = layers->addMenu(QStringLiteral("境界効果・表示色の印刷"));
     layer_mask_menu_ = layers->addMenu(QStringLiteral("レイヤーマスク"));  // (PC3 B2, decision 5: Photoshop's name)
+    layers->addAction(action("act_mask_all_objects"));  // (PC3 B3)
     layers->addSeparator();
     for (const char* name : {"act_layer_merge_down", "act_layer_merge_layers", "act_layer_merge_visible", "act_layer_flatten", "act_layer_convert_paint", "act_layer_convert_pen"})
         layers->addAction(action(name));
+    layers->addSeparator();
+    build_matting_menu(layers);  // (PC3 B3: マッティング ▸, main_window_smart_select.cpp)
     layers->addSeparator();
     layers->addAction(action("act_plugins"));
     layers->addAction(action("act_plugin_settings"));
@@ -1810,7 +1814,9 @@ void MainWindow::make_launcher() {
     launcher_actions_ = {{QStringLiteral("塗りつぶし"), action("act_fill_selection")}, {QStringLiteral("消去"), action("act_delete_area")},
                          {QStringLiteral("トーン"), action("act_tone_here")},    {QStringLiteral("反転"), action("act_sel_invert")},
                          {QStringLiteral("拡張"), action("act_sel_grow")},     {QStringLiteral("変形"), action("act_warp_perspective")},
-                         {QStringLiteral("コピー"), action("act_copy")},         {QStringLiteral("選択を解除"), action("act_deselect")}};
+                         {QStringLiteral("コピー"), action("act_copy")},
+                         {QStringLiteral("選択とマスク"), action("act_select_mask")},  // (PC3 B3)
+                         {QStringLiteral("選択を解除"), action("act_deselect")}};
     for (const auto& [label, act] : launcher_actions_) {
         auto* button = new QToolButton;
         button->setText(label);

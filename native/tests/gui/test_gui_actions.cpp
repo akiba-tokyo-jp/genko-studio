@@ -327,7 +327,12 @@ private slots:
         // act_transform_scale, act_transform_rotate, act_transform_skew, act_transform_perspective, act_split_warp_h,
         // act_split_warp_v, act_split_warp_cross, act_remove_warp_split, act_transform_rotate_180, act_transform_rotate_90cw,
         // act_transform_rotate_90ccw, act_warp_text) — theirs (test_gui_transform).
-        QCOMPARE(w->actions_by_name().size(), std::size_t{409});
+        // and the 11 of PC3 B3 (SPEC COLOR-06) — ツール の オブジェクト選択ツール・クイック選択ツール (act_object_select,
+        // act_quick_select), 選択範囲 の フォーカス領域…・被写体を選択・空を選択・選択とマスク… (act_focus_area,
+        // act_select_subject, act_select_sky, act_select_mask), レイヤー → すべてのオブジェクトをマスク (act_mask_all_objects)
+        // and マッティング ▸ カラーの除去…・フリンジ削除…・黒マット削除・白マット削除 (act_matting_decontaminate,
+        // act_matting_defringe, act_matting_black, act_matting_white) — theirs (test_gui_select_mask).
+        QCOMPARE(w->actions_by_name().size(), std::size_t{420});
         QVERIFY(w->action("act_chat_approval"));
         QVERIFY(w->action("act_style"));
         QVERIFY(w->action("act_exposure"));
@@ -364,7 +369,8 @@ private slots:
         // drawing tools and line editing (test_gui_paint), the effect lines and the material tool (test_gui_effects), the
         // text tool (test_gui_lines); PC3 C-a's three path tools (test_gui_paths); the crop tool (PC3 C-e, test_gui_page_size);
         // PC3 B4's four retouching tools (test_gui_retouch); PC3 C-b's five shape tools besides 長方形ツール (test_gui_shapes)
-        QCOMPARE(w->tools_group()->actions().size(), 41);
+        // PC3 B3's オブジェクト選択ツール and クイック選択ツール (test_gui_select_mask)
+        QCOMPARE(w->tools_group()->actions().size(), 43);
     }
 
     // No two commands share a key (Qt would take the key as ambiguous and do neither): PC1b's 色の校正 (Ctrl+Alt+Y — Ctrl+Y
@@ -467,7 +473,9 @@ private slots:
                                                   // (PC3 C-b: the shape tools besides 長方形ツール, the 図形 of before)
                                                   {"shape_ellipse", "act_shape_ellipse"}, {"shape_triangle", "act_shape_triangle"},
                                                   {"shape_polygon", "act_shape_polygon"}, {"shape_line", "act_shape_line"},
-                                                  {"shape_custom", "act_shape_custom"}};
+                                                  {"shape_custom", "act_shape_custom"},
+                                                  // (PC3 B3: クイック選択ツール, オブジェクト選択ツール)
+                                                  {"quick", "act_quick_select"}, {"object", "act_object_select"}};
         QCOMPARE(w->tool_actions().size(), tools.size());
         QVERIFY(w->tools_group()->isExclusive());
         QVERIFY(w->action(QStringLiteral("act_select"))->isChecked());
