@@ -133,9 +133,10 @@ void set(OpContext& c) {
     bool changed = false;
     if (const Json* params = core::get(c.op, "params"); params != nullptr && !params->is_null()) {
         if (!params->is_object()) throw OpError("params is an object of the filter's settings (laid over its settings now)");
-        Json merged = f.contains("params") && f["params"].is_object() ? f["params"] : Json::object();
+        // (laid over its settings as the page has them; kept in the smart object's own mm when they name places)
+        Json merged = params_on_page(doc, doc.page(at), doc.page(at).layers[i], f);
         lay_over(merged, *params);
-        f["params"] = settled(doc, doc.page(at), core::py_str(f["kind"]), merged);
+        keep_params(doc, doc.page(at), doc.page(at).layers[i], f, settled(doc, doc.page(at), core::py_str(f["kind"]), merged));
         changed = true;
     }
     if (const Json* blend = core::get(c.op, "blend"); blend != nullptr && !blend->is_null()) {

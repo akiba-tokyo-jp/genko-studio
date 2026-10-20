@@ -469,6 +469,9 @@ void move_layer_in(Document& doc, std::size_t at, const std::string& id, const M
             (void)smart_filters::push_filter(doc, page, layer, core::py_str((*m.filter)["kind"]), (*m.filter)["params"], std::nullopt);
             return;
         }
+        // (its filters that name places still in the page's mm — a book of before — kept in its own first, so that they go
+        // with it: independent review A P2-1)
+        smart_filters::settle_places(doc, page, layer);
         if (m.warp) {  // (its one warp replaced, in its contents' mm)
             const auto kept = warp_in_contents(*m.warp, smart_placing(layer, *contents));
             core::smart::put_setting(layer, "warp", kept ? warp_to_json(*kept) : Json());

@@ -211,6 +211,8 @@ void check_filter(const std::string& who, const Json& f) {
         if (v < 0 || v > 1) refuse(who + ": a smart filter's opacity is 0 to 1");
     }
     if (const Json* visible = get(f, "visible"); visible != nullptr && !visible->is_boolean()) refuse(who + ": a smart filter's visible is true or false");
+    if (const Json* space = get(f, "space"); space != nullptr && !(in_contents(f) && placed_filter(name)))
+        refuse(who + ": a smart filter's space is contents (a filter that names places)");
     if (bend_filter(name)) {
         check_bend(who, name, settings);
         return;
@@ -370,6 +372,102 @@ bool filter_kind(std::string_view kind) {
 }
 
 bool bend_filter(std::string_view kind) { return std::find(kBendFilters.begin(), kBendFilters.end(), kind) != kBendFilters.end(); }
+
+bool placed_filter(std::string_view kind) { return bend_filter(kind) || kind == "radial_blur" || kind == "zoom_blur"; }
+
+bool in_contents(const Json& filter) {
+    const Json* space = filter.is_object() ? get(filter, "space") : nullptr;
+    return space != nullptr && space->is_string() && space->get<std::string>() == kContentsSpace;
+}
+
+Json map_filter_places(std::string_view kind, const Json& params, const PlaceMap& map) {
+    if (!params.is_object()) return params;
+    Json out = params;
+    // (how much the map scales a length near a place, and whether it mirrors there)
+    const auto scale_at = [&](double x, double y) {
+        const auto j = map.slope(x, y);
+        return std::sqrt(std::abs(j[0] * j[3] - j[1] * j[2]));
+    };
+    const auto mirrors_at = [&](double x, double y) {
+        const auto j = map.slope(x, y);
+        return j[0] * j[3] - j[1] * j[2] < 0;
+    };
+    const auto moved = [&](Json& point) {
+        if (!point.is_array() || point.size() < 2 || !point[0].is_number() || !point[1].is_number()) return;
+        const auto [x, y] = map.point(point[0].get<double>(), point[1].get<double>());
+        point[0] = x;
+        point[1] = y;
+    };
+    const auto scaled = [](Json& object, const char* key, double by, std::optional<double> otherwise = std::nullopt) {
+        Json* v = object.contains(key) ? &object[key] : nullptr;
+        if (v != nullptr && v->is_number()) {
+            if (by != 1.0) *v = v->get<double>() * by;
+        } else if ((v == nullptr || v->is_null()) && otherwise && by != 1.0) {
+            object[key] = *otherwise * by;
+        }
+    };
+    const auto first_point = [](const Json& list, const char* key) -> std::optional<std::pair<double, double>> {
+        if (!list.is_array()) return std::nullopt;
+        for (const Json& item : list) {
+            const Json* p = key != nullptr ? (item.is_object() ? get(item, key) : nullptr) : &item;
+            if (p != nullptr && p->is_array() && p->size() >= 2 && (*p)[0].is_number() && (*p)[1].is_number())
+                return std::make_pair((*p)[0].get<double>(), (*p)[1].get<double>());
+        }
+        return std::nullopt;
+    };
+    if (kind == "liquify") {
+        Json* strokes = out.contains("strokes") ? &out["strokes"] : nullptr;
+        if (strokes == nullptr || !strokes->is_array()) return out;
+        std::optional<std::pair<double, double>> anchor;
+        for (Json& stroke : *strokes) {
+            if (!stroke.is_object()) continue;
+            Json* points = stroke.contains("points") ? &stroke["points"] : nullptr;
+            const auto at = points != nullptr ? first_point(*points, nullptr) : std::nullopt;
+            if (at) {
+                if (!anchor) anchor = at;
+                scaled(stroke, "size_mm", scale_at(at->first, at->second), 12.7);  // (none: 100 working pixels)
+                if (mirrors_at(at->first, at->second)) {
+                    if (Json* tool = stroke.contains("tool") ? &stroke["tool"] : nullptr; tool != nullptr && tool->is_string()) {
+                        if (*tool == "twirl_cw") *tool = "twirl_ccw";
+                        else if (*tool == "twirl_ccw") *tool = "twirl_cw";
+                    }
+                }
+            }
+            if (points != nullptr && points->is_array())
+                for (Json& p : *points) moved(p);
+        }
+        if (anchor) scaled(out, "mesh_mm", scale_at(anchor->first, anchor->second));
+        return out;
+    }
+    if (kind == "perspective_warp") {
+        Json* planes = out.contains("planes") ? &out["planes"] : nullptr;
+        if (planes == nullptr || !planes->is_array()) return out;
+        for (Json& plane : *planes) {
+            if (!plane.is_object()) continue;
+            for (const char* key : {"src", "dst"}) {
+                if (!plane.contains(key) || !plane[key].is_array()) continue;
+                for (Json& corner : plane[key]) moved(corner);
+            }
+        }
+        return out;
+    }
+    if (kind == "puppet_warp") {
+        Json* pins = out.contains("pins") ? &out["pins"] : nullptr;
+        if (pins == nullptr || !pins->is_array()) return out;
+        if (const auto at = first_point(*pins, "src")) scaled(out, "expansion_mm", scale_at(at->first, at->second));
+        for (Json& pin : *pins) {
+            if (!pin.is_object()) continue;
+            const auto at = first_point(Json::array({pin}), "src");
+            if (at && mirrors_at(at->first, at->second)) {
+                if (Json* turn = pin.contains("rotate") ? &pin["rotate"] : nullptr; turn != nullptr && turn->is_number()) *turn = -turn->get<double>();
+            }
+            for (const char* key : {"src", "dst"})
+                if (pin.contains(key)) moved(pin[key]);
+        }
+        return out;
+    }
+    return out;
+}
 
 bool bent(const Layer& layer) {
     if (!layer.smart || !layer.smart->is_object()) return false;
@@ -962,6 +1060,16 @@ void transform_layer(Layer& layer, const Matrix& m) {
     if (!is_smart(layer) || !layer.smart || !layer.smart->is_object()) return;
     set_matrix(layer, multiply(m, matrix_of(layer)));
     layer.smart->erase("psd");  // (PC3 A3: a PSD's picture and corners are no longer where it is)
+    // (its bending filters kept in the page's mm — a book of before — moved with it: independent review A P2-1; a radial or
+    // zoom blur's centre, a share of the page, stays)
+    if (Json* filters = layer.smart->contains("filters") ? &(*layer.smart)["filters"] : nullptr; filters != nullptr && filters->is_array()) {
+        const PlaceMap map{[&m](double x, double y) { return m.apply(x, y); }, [&m](double, double) { return std::array<double, 4>{m.a, m.c, m.b, m.d}; }};
+        for (Json& f : *filters) {
+            if (!f.is_object() || in_contents(f) || !f.contains("params") || !f.contains("kind") || !f["kind"].is_string()) continue;
+            const std::string kind = f["kind"].get<std::string>();
+            if (bend_filter(kind)) f["params"] = map_filter_places(kind, f["params"], map);
+        }
+    }
     if (Json* corners = layer.smart->contains("perspective") ? &(*layer.smart)["perspective"] : nullptr; corners != nullptr && corners->is_array()) {
         for (Json& point : *corners) {
             if (!point.is_array() || point.size() != 2 || !point[0].is_number() || !point[1].is_number()) continue;

@@ -576,6 +576,9 @@ void smart_transform(OpContext& c) {
     if (contents == nullptr) throw OpError("the smart object has no contents");
     Page& page = doc.edit_page(at);
     Layer& layer = page.layers[i];
+    // (its filters that name places still in the page's mm — a book of before — kept in its own first, so that they go with
+    // it: independent review A P2-1)
+    if (moves) smart_filters::settle_places(doc, page, layer);
     const core::smart::Corners was = core::smart::corners_on_page(layer, *contents);
     Matrix m = core::smart::matrix_of(layer);
     if (const Json* set = core::get(c.op, "set_matrix"); set != nullptr && !set->is_null()) {

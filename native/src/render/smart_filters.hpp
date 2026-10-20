@@ -34,10 +34,24 @@ struct Filter {
     core::Json params = core::Json::object();
     std::string blend = "normal";
     double opacity = 1.0;
+    bool in_contents = false;  // (its places in the smart object's own mm: core::smart::in_contents)
 };
 
-// The filters the smart object draws, the bottom one first: its visible ones while they are on (none otherwise).
+// The filters the smart object draws, the bottom one first: its visible ones while they are on (none otherwise), their
+// settings as kept.
 std::vector<Filter> shown(const core::Layer& layer);
+
+// (independent review A P2-1) A smart filter's settings as the page has them: those that name places kept in the smart
+// object's own mm ("space": "contents": a bending filter's points and lengths, a radial or zoom blur's centre as a share of
+// its contents' box) brought through its placing (its corners or matrix) onto the page's mm and shares; the others as kept.
+// What the filter is drawn with, what the window shows to edit it again and what an op's settings are laid over.
+core::Json params_on_page(const core::Document& doc, const core::Page& page, const core::Layer& layer, const core::Json& filter);
+// A filter's settings on the page (`params`, settled) kept on `filter` as the smart object keeps them: one that names
+// places in its own mm ("space": "contents"), so that they go with it wherever it moves; another as it is.
+void keep_params(const core::Document& doc, const core::Page& page, const core::Layer& layer, core::Json& filter, const core::Json& params);
+// The smart object's filters that name places still kept in the page's (a book of before) kept in its own mm as they are
+// on the page now: what its moves do first, so that they go with it.
+void settle_places(const core::Document& doc, const core::Page& page, core::Layer& layer);
 
 // Its filter mask while it is on: the PNG's ref (none otherwise).
 std::optional<std::string> mask_ref(const core::Layer& layer);

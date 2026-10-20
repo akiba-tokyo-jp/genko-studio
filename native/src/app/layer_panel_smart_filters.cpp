@@ -26,6 +26,7 @@
 #include "core/pyconv.hpp"
 #include "core/pyops.hpp"
 #include "core/smart.hpp"
+#include "render/smart_filters.hpp"
 #include "service/wording.hpp"
 
 namespace genko::app {
@@ -142,7 +143,8 @@ void LayerPanel::edit_smart_filter(int index) {
         window_->edit_bend_filter(layer->id, index);
         return;
     }
-    const Json now = core::py_get(f, "params", Json::object()).is_object() ? core::py_get(f, "params", Json::object()) : Json::object();
+    // (its settings as the page has them: a blur's centre on the page — independent review A P2-1)
+    const Json now = render::smart_filters::params_on_page(window_->book(), *page, *layer, f);
     const auto asked = window_->asking();
     const std::string layer_id = layer->id;
     const Json page_index = page->index.json();

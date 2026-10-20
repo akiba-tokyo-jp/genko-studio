@@ -2,6 +2,7 @@
 
 #include <array>
 #include <cstddef>
+#include <functional>
 #include <optional>
 #include <set>
 #include <string>
@@ -93,7 +94,7 @@ bool is_contents_id(std::string_view text);
 // blend modes at an opacity of 0..1 —, "filters_on" (none: on) and "filter_mask" ({"asset": "sha256:…", "enabled"}: a
 // PNG "L" of the page at 150 dpi, as a layer's mask, through which the filtered picture shows over the unfiltered one).
 inline constexpr std::size_t kFiltersMax = 64;
-inline constexpr std::array<std::string_view, 5> kFilterKeys{"kind", "params", "blend", "opacity", "visible"};
+inline constexpr std::array<std::string_view, 6> kFilterKeys{"kind", "params", "blend", "opacity", "visible", "space"};
 // Can a filter_raster kind be a smart filter (SO に掛けられる)? Python's filters (core::kAdjustments, kShapeFilters: what
 // they make is their settings' and the layer's pixels' — noise and rain by their seed) and the C++ build's own kinds
 // registered so (AdjustKind::smart). Never a plugin (a person's program: what it makes is the machine's).
@@ -106,6 +107,25 @@ bool filters_drawn(const Layer& layer);
 // "mesh_mm"?}, {"planes", "interp"?}, {"pins", "mode", "density", "expansion_mm", "interp"?}.
 inline constexpr std::array<std::string_view, 3> kBendFilters{"liquify", "perspective_warp", "puppet_warp"};
 bool bend_filter(std::string_view kind);
+
+// (independent review A P2-1) Where a smart filter's settings that name places on the picture are — a bending filter's
+// points, lengths and pins, a radial or zoom blur's centre ("cx", "cy") —: with "space": "contents" in the smart object's
+// own mm (after its warp, before its matrix or corners; a blur's centre a share of its contents' box), so that they go with
+// it wherever it is moved; without it (a book of before), the page's, as the op gave them (a page's mm, a share of the
+// page). The ops are given them in the page's (render/smart_filters keeps and draws them).
+inline constexpr std::string_view kContentsSpace = "contents";
+bool placed_filter(std::string_view kind);
+bool in_contents(const Json& filter);
+// A map of places (the page's mm and a smart object's, either way): a place's place, and how it bends there (∂x'/∂x,
+// ∂x'/∂y, ∂y'/∂x, ∂y'/∂y).
+struct PlaceMap {
+    std::function<std::pair<double, double>(double, double)> point;
+    std::function<std::array<double, 4>(double, double)> slope;
+};
+// A bending filter's settings through the map: its points and corners moved, its lengths (a stroke's size, the mesh, a
+// puppet's expansion) scaled as it scales them there; mirrored, a twirl and a pin's turn the other way. Its other settings
+// as they are.
+Json map_filter_places(std::string_view kind, const Json& params, const PlaceMap& map);
 
 // A layer of kind smart, its contents' id (nothing when its settings name none), its matrix (the identity when none).
 bool is_smart(const Layer& layer);
@@ -200,6 +220,7 @@ bool same_panels(const std::vector<Frame>& a, const std::vector<Frame>& b);
 
 // A smart object moved with its page (a page-wide transform: the paper's size, a turn): its matrix after `m` (page mm →
 // page mm), and its corners when it has them; a PSD's record let go (PC3 A3: its picture and corners are elsewhere now).
+// Its bending filters kept in the page's mm (a book of before "space": "contents") moved with it too.
 void transform_layer(Layer& layer, const Matrix& m);
 
 }  // namespace smart

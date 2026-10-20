@@ -41,6 +41,7 @@
 #include "render/page.hpp"
 #include "render/perspective_warp.hpp"
 #include "render/resample.hpp"
+#include "render/smart_filters.hpp"
 #include "service/wording.hpp"
 
 namespace genko::app {
@@ -392,7 +393,8 @@ void MainWindow::edit_bend_filter(const std::string& id, int index) {
     if (filters == nullptr || !filters->is_array() || index < 0 || index >= static_cast<int>(filters->size())) return;
     const Json f = (*filters)[static_cast<std::size_t>(index)];
     const std::string kind = core::py_str(core::py_get(f, "kind", Json("")));
-    const Json params = core::py_get(f, "params", Json::object()).is_object() ? core::py_get(f, "params", Json::object()) : Json::object();
+    // (its settings as the page has them: its places brought from the smart object's own mm — independent review A P2-1)
+    const Json params = render::smart_filters::params_on_page(book(), *page, *layer, f);
     if (kind == "liquify") {
         liquify_dialog(std::make_pair(id, index));
         return;
@@ -835,7 +837,8 @@ void MainWindow::liquify_dialog(const std::optional<std::pair<std::string, int>>
         if (refilter && shown.smart && shown.smart->contains("filters") && (*shown.smart)["filters"].is_array()) {
             Json& filters = (*shown.smart)["filters"];
             if (refilter->second < 0 || refilter->second >= static_cast<int>(filters.size())) return;
-            kept = core::py_get(core::py_get(filters[static_cast<std::size_t>(refilter->second)], "params", Json::object()), "strokes", Json::array());
+            kept = core::py_get(render::smart_filters::params_on_page(book(), *page, *layer, filters[static_cast<std::size_t>(refilter->second)]), "strokes",
+                                Json::array());
             filters.erase(filters.begin() + refilter->second, filters.end());
         }
         picture = render::layer_image(*page, shown, dpi, &book(), true);

@@ -22,6 +22,7 @@
 #include "render/fill.hpp"
 #include "render/ink.hpp"
 #include "render/ink_filters.hpp"
+#include "render/layer_transform.hpp"
 #include "render/ops_adjust.hpp"
 #include "render/page_internal.hpp"
 #include "render/png.hpp"
@@ -265,7 +266,108 @@ InkPicture picture_of(const core::InkPixels& inks, unsigned channels) {
     return out;
 }
 
+// --- where a filter's places are (independent review A P2-1) --------------------------------------------------------
+
+// A homography as a map of places (its slope exact: the identity's is the identity).
+core::smart::PlaceMap map_of(const resample::Homography& h) {
+    return core::smart::PlaceMap{[h](double x, double y) { return h.apply(x, y); },
+                                 [h](double x, double y) {
+                                     const auto& m = h.m;
+                                     const double w = m[6] * x + m[7] * y + m[8];
+                                     const auto [px, py] = h.apply(x, y);
+                                     return std::array<double, 4>{(m[0] - px * m[6]) / w, (m[1] - px * m[7]) / w, (m[3] - py * m[6]) / w,
+                                                                  (m[4] - py * m[7]) / w};
+                                 }};
+}
+
+bool identity(const resample::Homography& h) { return h.m == resample::Homography().m; }
+
+// A radial or zoom blur's centre (shares of a box of w × h mm) through the map onto shares of a box of to_w × to_h mm.
+Json centre_through(const Json& params, const resample::Homography& h, double w, double hh, double to_w, double to_h) {
+    Json out = params.is_object() ? params : Json::object();
+    const auto share = [&](const char* key) {
+        const Json* v = core::get(out, key);
+        return v != nullptr && v->is_number() && !v->is_boolean() ? v->get<double>() : 0.5;
+    };
+    if (!(w > 0) || !(hh > 0) || !(to_w > 0) || !(to_h > 0)) return out;
+    const auto [x, y] = h.apply(share("cx") * w, share("cy") * hh);
+    if (!std::isfinite(x) || !std::isfinite(y)) return out;
+    out["cx"] = x / to_w;
+    out["cy"] = y / to_h;
+    return out;
+}
+
+// A bending filter's lengths within what its op takes (brought onto the page, a few millionths past its edge: its own).
+Json within_bounds(std::string_view kind, Json params) {
+    constexpr double kUnit = 25.4 / 200;  // (a working pixel)
+    const auto clamp_at = [](Json& object, const char* key, double lo, double hi) {
+        if (Json* v = object.contains(key) ? &object[key] : nullptr; v != nullptr && v->is_number() && !v->is_boolean())
+            *v = std::clamp(v->get<double>(), lo, hi);
+    };
+    if (kind == "liquify") {
+        clamp_at(params, "mesh_mm", kUnit, 64.0 * kUnit);
+        if (params.contains("strokes") && params["strokes"].is_array())
+            for (Json& stroke : params["strokes"])
+                if (stroke.is_object()) clamp_at(stroke, "size_mm", kUnit, 15000.0 * kUnit);
+    } else if (kind == "puppet_warp") {
+        clamp_at(params, "expansion_mm", -200.0 * kUnit, 200.0 * kUnit);
+    }
+    return params;
+}
+
+// The smart object's placing (its contents' mm onto the page's) and its contents' box; none without contents.
+std::optional<std::pair<resample::Homography, std::pair<double, double>>> placing(const core::Document& doc, const core::Layer& layer) {
+    const core::SmartContents* contents = core::smart::contents_of(doc, layer);
+    if (contents == nullptr) return std::nullopt;
+    return std::make_pair(layer_transform::smart_placing(layer, *contents), core::smart::size_mm(*contents));
+}
+
+// Settings as the page has them through the placing `h` (the contents' places onto the page's), or back with its inverse.
+Json through(std::string_view kind, const Json& params, const resample::Homography& h, bool onto_page, std::pair<double, double> box,
+             const core::Page& page) {
+    const double pw = page.spec.width_mm.value(), ph = page.spec.height_mm.value();
+    if (kind == "radial_blur" || kind == "zoom_blur") {
+        return onto_page ? centre_through(params, h, box.first, box.second, pw, ph) : centre_through(params, h, pw, ph, box.first, box.second);
+    }
+    if (identity(h)) return params;  // (placed as it is: the same numbers)
+    const Json out = core::smart::map_filter_places(kind, params, map_of(h));
+    return onto_page ? within_bounds(kind, out) : out;
+}
+
 }  // namespace
+
+core::Json params_on_page(const core::Document& doc, const core::Page& page, const core::Layer& layer, const core::Json& filter) {
+    const Json* params = core::get(filter, "params");
+    const Json kept = params != nullptr && params->is_object() ? *params : Json::object();
+    const std::string kind = core::py_str(core::py_get(filter, "kind", Json("")));
+    if (!core::smart::in_contents(filter) || !core::smart::placed_filter(kind)) return kept;
+    const auto placed = placing(doc, layer);
+    if (!placed) return kept;
+    return through(kind, kept, placed->first, true, placed->second, page);
+}
+
+void keep_params(const core::Document& doc, const core::Page& page, const core::Layer& layer, core::Json& filter, const core::Json& params) {
+    const std::string kind = core::py_str(core::py_get(filter, "kind", Json("")));
+    filter["params"] = params;
+    filter.erase("space");
+    if (!core::smart::placed_filter(kind)) return;
+    const auto placed = placing(doc, layer);
+    const auto back = placed ? placed->first.inverse() : std::nullopt;
+    if (!back) return;  // (no contents, a placing squashed flat: kept on the page's, as before)
+    filter["params"] = through(kind, params, *back, false, placed->second, page);
+    filter["space"] = std::string(core::smart::kContentsSpace);
+}
+
+void settle_places(const core::Document& doc, const core::Page& page, core::Layer& layer) {
+    if (layer.kind != core::LayerKind::Smart || !layer.smart || !layer.smart->is_object()) return;
+    Json* filters = layer.smart->contains("filters") ? &(*layer.smart)["filters"] : nullptr;
+    if (filters == nullptr || !filters->is_array()) return;
+    for (Json& f : *filters) {
+        if (!f.is_object() || core::smart::in_contents(f) || !core::smart::placed_filter(core::py_str(core::py_get(f, "kind", Json(""))))) continue;
+        const Json* params = core::get(f, "params");
+        keep_params(doc, page, layer, f, params != nullptr && params->is_object() ? *params : Json::object());
+    }
+}
 
 std::vector<Filter> shown(const core::Layer& layer) {
     std::vector<Filter> out;
@@ -278,6 +380,7 @@ std::vector<Filter> shown(const core::Layer& layer) {
         if (const Json* params = core::get(f, "params"); params != nullptr && params->is_object()) one.params = *params;
         if (const Json* blend = core::get(f, "blend"); blend != nullptr && blend->is_string()) one.blend = blend->get<std::string>();
         if (const Json* opacity = core::get(f, "opacity"); opacity != nullptr && opacity->is_number()) one.opacity = std::clamp(opacity->get<double>(), 0.0, 1.0);
+        one.in_contents = core::smart::in_contents(f);
         out.push_back(std::move(one));
     }
     return out;
@@ -308,12 +411,28 @@ Image mask_picture(const core::Document& doc, const std::string& ref, Size size)
     return mask.resize_region(size, Box{0, 0, size.width, size.height}, Resample::Bilinear);
 }
 
+namespace {
+
+// The filters the smart object draws, their settings as the page has them.
+std::vector<Filter> drawn_filters(const core::Document& doc, const core::Page& page, const core::Layer& layer) {
+    std::vector<Filter> out = shown(layer);
+    if (std::none_of(out.begin(), out.end(), [](const Filter& f) { return f.in_contents; })) return out;
+    const auto placed = placing(doc, layer);
+    for (Filter& f : out) {
+        if (!f.in_contents || !core::smart::placed_filter(f.kind) || !placed) continue;
+        f.params = through(f.kind, f.params, placed->first, true, placed->second, page);
+    }
+    return out;
+}
+
+}  // namespace
+
 Image on_8bit(const core::Document& doc, const core::Page& page, const core::Layer& layer, const Image& rgba_in, int dpi) {
     (void)dpi;
     const Image rgba = rgba_in.mode() == "RGBA" ? rgba_in : rgba_in.convert("RGBA");
     const core::Page work = stand_in(page, false, false);
     Image now = rgba;
-    for (const Filter& f : shown(layer)) {
+    for (const Filter& f : drawn_filters(doc, page, layer)) {
         Image out = core::smart::bend_filter(f.kind) ? bend_8bit(page, f, now) : step_8bit(doc, work, f, now);
         now = replaces(f) ? std::move(out) : detail::blend_over(now, out, f.blend, f.opacity, nullptr);
     }
@@ -341,7 +460,7 @@ ColorPicture on_precise(const core::Document& doc, const core::Page& page, const
     const int w = picture.size.width, h = picture.size.height;
     const Box whole{0, 0, w, h};
     ColorPicture now = picture;
-    for (const Filter& f : shown(layer)) {
+    for (const Filter& f : drawn_filters(doc, page, layer)) {
         ColorPicture out;
         if (core::smart::bend_filter(f.kind)) {  // (PC3 A5: the picture bent, in linear light)
             out = bend_precise(page, f, now);
@@ -392,7 +511,7 @@ InkPicture on_inks(const core::Document& doc, const core::Page& page, const core
     const unsigned n = picture.channels;
     const int w = picture.size.width, h = picture.size.height;
     InkPicture now = picture;
-    for (const Filter& f : shown(layer)) {
+    for (const Filter& f : drawn_filters(doc, page, layer)) {
         InkPicture out;
         if (core::smart::bend_filter(f.kind)) {  // (PC3 A5: the picture bent, on the canvas's values)
             out = bend_inks(page, f, now);
@@ -472,7 +591,9 @@ std::size_t push_filter(core::Document& doc, const core::Page& page, core::Layer
     Json filters = now != nullptr && now->is_array() ? *now : Json::array();
     if (filters.size() >= core::smart::kFiltersMax)
         throw core::OpError("a smart object holds at most " + std::to_string(core::smart::kFiltersMax) + " smart filters");
-    filters.push_back(Json{{"kind", kind}, {"params", stored}, {"blend", "normal"}, {"opacity", 1.0}, {"visible", true}});
+    Json entry{{"kind", kind}, {"params", stored}, {"blend", "normal"}, {"opacity", 1.0}, {"visible", true}};
+    keep_params(doc, page, layer, entry, stored);  // (its places in the smart object's own mm: independent review A P2-1)
+    filters.push_back(std::move(entry));
     // (a selection becomes the filter mask, when it has none: PhotoCraft's add_smart_filter)
     const Json* mask = core::get(*layer.smart, "filter_mask");
     std::optional<Json> made;

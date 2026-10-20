@@ -27,6 +27,7 @@
 #include "render/page.hpp"
 #include "render/png.hpp"
 #include "render/psd.hpp"
+#include "render/smart_filters.hpp"
 #include "testsupport.hpp"
 
 namespace core = genko::core;
@@ -332,6 +333,98 @@ private slots:
             }
             QVERIFY2(differ == 0, qPrintable(QStringLiteral("%1 pixels differ").arg(differ)));
         }
+    }
+
+    // (independent review A P2-1) The filters that bend its picture — Liquify's strokes, a perspective warp's planes, a
+    // puppet warp's pins — and the centre of a radial or zoom blur are the smart object's own: kept in its contents' mm
+    // ("space": "contents"), they go with it when it moves (the Move tool's transform_layers, smart_transform) and turn
+    // with its page (rotate_pages): the picture they make the same, moved (the smart object made smaller, inside the page
+    // either way); turned, their places on the page turned with it, and what they change of the picture nearly so
+    // (Liquify's field and a puppet warp's mesh are made again on the turned page's grid).
+    void theFiltersGoWithIt_data() {
+        QTest::addColumn<QString>("filter");
+        QTest::newRow("liquify") << QStringLiteral(
+            R"({"op": "liquify", "page": 1, "layer_id": "so", "strokes": [{"tool": "forward_warp", "size_mm": 12, "points": [[40, 70], [52, 72]]}]})");
+        QTest::newRow("perspective") << QStringLiteral(
+            R"({"op": "transform_layers", "page": 1, "ids": ["so"], "interp": "bicubic", "perspective": {"planes": [{"src": [[15, 25], [90, 25], [90, 130], [15, 130]], "dst": [[15, 25], [80, 35], [88, 120], [15, 130]]}]}})");
+        QTest::newRow("puppet") << QStringLiteral(
+            R"({"op": "transform_layers", "page": 1, "ids": ["so"], "interp": "bicubic", "puppet": {"pins": [{"src": [40, 70], "dst": [46, 74]}, {"src": [70, 110], "dst": [70, 110]}, {"src": [75, 35], "dst": [75, 35]}]}})");
+        QTest::newRow("radial blur") << QStringLiteral(R"({"op": "smart_filter_add", "page": 1, "id": "so", "kind": "radial_blur", "amount": 0.1, "cx": 0.4, "cy": 0.45})");
+        QTest::newRow("zoom blur") << QStringLiteral(R"({"op": "smart_filter_add", "page": 1, "id": "so", "kind": "zoom_blur", "amount": 0.1, "cx": 0.6, "cy": 0.3})");
+    }
+    void theFiltersGoWithIt() {
+        QFETCH(QString, filter);
+        const Document original = run(book(), op("smart_transform", Json{{"set_matrix", Json::array({0.5, 0, 0, 0.5, 10, 20})}}));
+        const Document filtered = run(original, core::parse_python_json(filter.toStdString()));
+        const Json& kept = smart_of(filtered)["filters"][0];
+        QCOMPARE(kept["space"], Json("contents"));
+        core::smart::validate_smart(filtered);
+        const auto alone = [](const Document& doc) {
+            render::clear_render_caches();
+            return render::layer_image(doc.page(0), so_of(doc), 127, &doc, true).convert("RGBA");
+        };
+        const auto apart = [](const std::vector<double>& a, const std::vector<double>& b) {
+            double most = 0;
+            for (std::size_t c = 0; c < std::min(a.size(), b.size()); ++c) most = std::max(most, std::abs(a[c] - b[c]));
+            return most;
+        };
+        const render::Image plain = alone(original), before = alone(filtered);
+        // (where the filter changes the picture)
+        int changed = 0;
+        for (int y = 0; y < before.height(); y += 2)
+            for (int x = 0; x < before.width(); x += 2) changed += apart(plain.getpixel(x, y), before.getpixel(x, y)) > 8 ? 1 : 0;
+        QVERIFY(changed > 200);
+        // moved 25.4 mm to the right (127 pixels at 127 dpi; whole cells of Liquify's field and of the working grid): each
+        // pixel the one 127 to its left, away from the page's right edge that the moved picture runs off
+        constexpr int kShift = 127;
+        for (const Json& move : {transform(Json{{"move", Json::array({25.4, 0})}}), op("smart_transform", Json{{"matrix", Json::array({1, 0, 0, 1, 25.4, 0})}})}) {
+            const Document moved = run(filtered, move);
+            QCOMPARE(smart_of(moved)["filters"][0]["params"], kept["params"]);  // (its own: as they were)
+            const render::Image after = alone(moved);
+            int differ = 0;
+            for (int y = 0; y < before.height(); y += 2)
+                for (int x = kShift + 10; x < before.width() - 2 * kShift; x += 2) differ += apart(before.getpixel(x - kShift, y), after.getpixel(x, y)) > 8 ? 1 : 0;
+            QVERIFY2(differ * 50 < changed, qPrintable(QStringLiteral("%1: %2 pixels differ, %3 changed by the filter").arg(QString::fromStdString(move.dump())).arg(differ).arg(changed)));
+        }
+        // turned with its page (90° clockwise: (x, y) → (the paper's height − y, x)): its places on the page turned
+        const Document turned = run(filtered, Json{{"op", "rotate_pages"}, {"page", 1}, {"turn", "90cw"}});
+        const double h = filtered.page(0).spec.height_mm.value();
+        const std::string kind = kept["kind"].get<std::string>();
+        const Json was = render::smart_filters::params_on_page(filtered, filtered.page(0), so_of(filtered), kept);
+        const Json now = render::smart_filters::params_on_page(turned, turned.page(0), so_of(turned), smart_of(turned)["filters"][0]);
+        Json expected;
+        if (kind == "radial_blur" || kind == "zoom_blur") {
+            expected = was;
+            expected["cx"] = 1 - was["cy"].get<double>();
+            expected["cy"] = was["cx"].get<double>();
+        } else {
+            expected = core::smart::map_filter_places(kind, was, core::smart::PlaceMap{[h](double x, double y) { return std::make_pair(h - y, x); },
+                                                                                      [](double, double) { return std::array<double, 4>{0, -1, 1, 0}; }});
+        }
+        const auto numbers = [](const Json& v, std::vector<double>& out, const auto& self) -> void {
+            if (v.is_number()) out.push_back(v.get<double>());
+            if (v.is_array() || v.is_object())
+                for (const auto& item : v) self(item, out, self);
+        };
+        std::vector<double> a, b;
+        numbers(now, a, numbers);
+        numbers(expected, b, numbers);
+        QCOMPARE(a.size(), b.size());
+        for (std::size_t i = 0; i < a.size(); ++i) QVERIFY2(std::abs(a[i] - b[i]) < 1e-6, qPrintable(QString::fromStdString(now.dump() + " / " + expected.dump())));
+        // (and where the filter changes the turned picture — over the smart object turned without it, laid the same way —
+        // is where it changed it, turned)
+        const render::Image after = alone(turned), bare = alone(run(original, Json{{"op", "rotate_pages"}, {"page", 1}, {"turn", "90cw"}}));
+        const render::Image was_bare = plain.transpose(render::Transpose::Rotate270), was_done = before.transpose(render::Transpose::Rotate270);
+        QCOMPARE(after.size(), was_done.size());
+        int differ = 0;
+        for (int y = 2; y < after.height() - 2; y += 2) {
+            for (int x = 2; x < after.width() - 2; x += 2) {
+                const bool now_changed = apart(bare.getpixel(x, y), after.getpixel(x, y)) > 8;
+                const bool then_changed = apart(was_bare.getpixel(x, y), was_done.getpixel(x, y)) > 8;
+                differ += now_changed != then_changed ? 1 : 0;
+            }
+        }
+        QVERIFY2(differ * 5 < changed, qPrintable(QStringLiteral("turned: %1 pixels changed elsewhere, %2 changed by the filter").arg(differ).arg(changed)));
     }
 
     // Each way of drawing bends it (8 bits, 16 bits, CMYK), and a part of the page is the whole cut there.
