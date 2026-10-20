@@ -159,6 +159,12 @@ void PageCanvas::set_perspective_planes(const std::vector<std::array<QPointF, 4>
 
 std::vector<std::pair<QPointF, QPointF>> PageCanvas::puppet_pins() const { return xform_ ? xform_->pins : std::vector<std::pair<QPointF, QPointF>>{}; }
 
+void PageCanvas::set_puppet_pins(const std::vector<std::pair<QPointF, QPointF>>& pins) {
+    if (!xform_) return;
+    xform_->pins = pins;
+    update();
+}
+
 Json PageCanvas::transform_spec() const {
     if (!xform_) return Json();
     const Transforming& t = *xform_;

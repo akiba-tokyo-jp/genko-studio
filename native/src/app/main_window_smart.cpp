@@ -2,8 +2,8 @@
 // objects — ファイル → 画像を読み込む… (main_window_materials.cpp: the file placed as a smart object, decision 2) and
 // 埋め込みを配置…; レイヤー → スマートオブジェクト, スマートフィルター, ラスタライズ, レイヤーの内容オプション…. Every change
 // is an op (render/ops_smart.cpp); the contents and links (PC3 A1), the smart filters (A2), the stack modes and a line
-// rasterized (A4) too. The commands of PC3's later steps (warps) are in their places and not usable yet: that step writes
-// them here.
+// rasterized (A4) too. ワープ・遠近法ワープ・パペットワープ (A5) open 節 C's transform box on the smart object
+// (main_window_transform.cpp).
 
 #include <QAction>
 #include <QComboBox>
@@ -55,8 +55,6 @@ namespace fs = std::filesystem;
 using core::Json;
 
 namespace {
-
-constexpr const char* kLater = "この版ではまだ使えません";
 
 // Photoshop's stack modes (レイヤー → スマートオブジェクト → スタックモード), the op's names.
 const std::vector<std::pair<const char*, const char*>>& stack_modes() {
@@ -178,11 +176,6 @@ void smart_filters_command(MainWindow* window, const std::string& what) {
 }  // namespace
 
 void MainWindow::build_smart_actions() {
-    const auto later = [this](const char* attribute, const QString& title) {
-        QAction* act = make(QString::fromLatin1(attribute), title, [] {}, {}, QString::fromUtf8(kLater));
-        act->setEnabled(false);
-        return act;
-    };
     // ファイル
     make("act_place_embedded", QStringLiteral("埋め込みを配置…"), [this] { place_embedded(); }, {},
          QStringLiteral("画像をスマートオブジェクトとしてページの中央に置きます（元のファイルのまま。大きければページに収めます）"));
@@ -226,9 +219,13 @@ void MainWindow::build_smart_actions() {
              name == "none" ? QStringLiteral("スマートオブジェクトの中のレイヤーを、ふつうに重ねて見せます（スタックモードを外します）")
                             : QStringLiteral("スマートオブジェクトの中のレイヤーを、画素ごとの%1で 1 枚にします（中身はそのまま）").arg(QString::fromUtf8(label)));
     }
-    later("act_smart_warp", QStringLiteral("ワープ"));
-    later("act_smart_perspective_warp", QStringLiteral("遠近法ワープ"));
-    later("act_smart_puppet_warp", QStringLiteral("パペットワープ"));
+    // (PC3 A5: its contents as they are — its warp kept with it, the other two as its smart filters)
+    make("act_smart_warp", QStringLiteral("ワープ"), [this] { smart_bend(QStringLiteral("warp")); }, {},
+         QStringLiteral("選んだスマートオブジェクトをワープで曲げます（中身はそのまま。もう一度で今のワープから曲げ直せます）"));
+    make("act_smart_perspective_warp", QStringLiteral("遠近法ワープ"), [this] { smart_bend(QStringLiteral("perspective_warp")); }, {},
+         QStringLiteral("選んだスマートオブジェクトに遠近法ワープをスマートフィルターとしてかけます（あとから直せます）"));
+    make("act_smart_puppet_warp", QStringLiteral("パペットワープ"), [this] { smart_bend(QStringLiteral("puppet")); }, {},
+         QStringLiteral("選んだスマートオブジェクトにパペットワープをスマートフィルターとしてかけます（あとから直せます）"));
     make("act_smart_rasterize", QStringLiteral("ラスタライズ"), [this] { rasterize("smart"); }, {},
          QStringLiteral("選んだスマートオブジェクトを、見えているとおりの画素のレイヤーにします"));
     // レイヤー → スマートフィルター

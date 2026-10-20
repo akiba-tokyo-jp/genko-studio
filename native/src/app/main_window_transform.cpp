@@ -33,7 +33,9 @@
 #include "app/layer_panel.hpp"
 #include "app/main_window.hpp"
 #include "core/channels.hpp"
+#include "core/pyconv.hpp"
 #include "core/pynum.hpp"
+#include "core/pyops.hpp"
 #include "render/layer_transform.hpp"
 #include "render/liquify_field.hpp"
 #include "render/page.hpp"
@@ -87,6 +89,11 @@ public:
 
     std::function<render::liquify::Stroke()> brush;  // (the tool and brush chosen now, without points)
     const Json& strokes() const { return strokes_; }
+    // (PC3 A5: a smart object's Liquify filter edited again: the strokes it has, shown, more added after them)
+    void set_strokes(const Json& strokes) {
+        strokes_ = strokes.is_array() ? strokes : Json::array();
+        redraw();
+    }
     // A stroke of the whole field (すべてを復元, the mask's buttons).
     void add_global(const char* tool, std::optional<double> amount = std::nullopt) {
         Json s{{"tool", tool}};
@@ -242,6 +249,17 @@ std::vector<std::string> MainWindow::transform_targets() const {
 
 Json MainWindow::transform_op(const Json& spec) const {
     const core::Page* page = current_page();
+    if (refilter_) {  // (PC3 A5: a smart object's perspective or puppet warp filter set again)
+        Json params = spec.contains("puppet") ? spec["puppet"] : spec.contains("perspective") ? spec["perspective"] : Json::object();
+        if (spec.contains("puppet")) {
+            params["mode"] = puppet_mode_;
+            params["density"] = puppet_density_;
+            params["expansion_mm"] = puppet_expansion_;
+        }
+        params["interp"] = transform_interp_;
+        return Json{{"op", "smart_filter_set"}, {"page", page != nullptr ? page->index.json() : Json(1)}, {"id", refilter_->first},
+                    {"index", refilter_->second}, {"params", params}};
+    }
     Json ids = Json::array();
     for (const std::string& id : transform_ids_) ids.push_back(id);
     Json op{{"op", "transform_layers"}, {"page", page != nullptr ? page->index.json() : Json(1)}, {"ids", ids}, {"interp", transform_interp_}};
@@ -257,11 +275,12 @@ Json MainWindow::transform_op(const Json& spec) const {
     return op;
 }
 
-void MainWindow::start_layer_transform(const QString& mode) {
+void MainWindow::start_layer_transform(const QString& mode, const std::vector<std::string>& only) {
     const core::Page* page = current_page();
     if (page == nullptr) return;
     if (canvas_->transforming()) canvas_->cancel_transform();
-    const std::vector<std::string> ids = transform_targets();
+    refilter_.reset();
+    const std::vector<std::string> ids = only.empty() ? transform_targets() : only;
     if (ids.empty()) {
         flash(QStringLiteral("先に変形するレイヤーを選びます"), 3000);
         return;
@@ -285,9 +304,18 @@ void MainWindow::start_layer_transform(const QString& mode) {
         flash(QStringLiteral("変形するものがありません"), 3000);
         return;
     }
+    // (PC3 A5: a smart object's warp edited from the one it holds, over its box on the page)
+    std::optional<core::page_geometry::Warp> held;
+    if (mode == QLatin1String("warp") && !transform_area_ && ids.size() == 1) {
+        for (const core::Layer& layer : page->layers) {
+            if (layer.id == ids.front() && layer.kind == core::LayerKind::Smart) held = lt::smart_warp_on_page(book(), layer);
+        }
+        if (held) box = held->box;
+    }
     transform_ids_ = ids;
     transform_box_ = *box;
     canvas_->start_transform(mode, *box);
+    if (held) canvas_->set_transform_warp(lt::warp_to_json(*held));
     show_transform_bar(mode);
     canvas_->setFocus();
     static const std::map<QString, QString> hints{
@@ -310,6 +338,11 @@ void MainWindow::transform_committed(const Json& spec) {
     preview_ops(std::nullopt);
     const Json op = transform_op(spec);
     const std::optional<Json> area = transform_area_;
+    if (refilter_) {  // (PC3 A5: a smart filter set again — not one for 再実行)
+        refilter_.reset();
+        apply_ops(Json::array({op}));
+        return;
+    }
     if (apply_ops(Json::array({op}))) {
         last_transform_ = spec;
         if (area) {
@@ -330,6 +363,75 @@ void MainWindow::transform_committed(const Json& spec) {
 void MainWindow::transform_cancelled() {
     hide_transform_bar();
     preview_ops(std::nullopt);
+    refilter_.reset();
+}
+
+// --- a smart object's (PC3 A5) -------------------------------------------------------------------------------------------
+
+void MainWindow::smart_bend(const QString& mode) {
+    const core::Layer* layer = target_layer();
+    if (current_page() == nullptr || layer == nullptr || layer->kind != core::LayerKind::Smart) {
+        flash(QStringLiteral("先にスマートオブジェクトを選びます"), 3000);
+        return;
+    }
+    start_layer_transform(mode, {layer->id});
+}
+
+void MainWindow::edit_bend_filter(const std::string& id, int index) {
+    const core::Page* page = current_page();
+    if (page == nullptr) return;
+    const core::Layer* layer = nullptr;
+    for (const core::Layer& l : page->layers) {
+        if (l.id == id && l.kind == core::LayerKind::Smart) layer = &l;
+    }
+    const Json* filters = layer != nullptr && layer->smart ? core::get(*layer->smart, "filters") : nullptr;
+    if (filters == nullptr || !filters->is_array() || index < 0 || index >= static_cast<int>(filters->size())) return;
+    const Json f = (*filters)[static_cast<std::size_t>(index)];
+    const std::string kind = core::py_str(core::py_get(f, "kind", Json("")));
+    const Json params = core::py_get(f, "params", Json::object()).is_object() ? core::py_get(f, "params", Json::object()) : Json::object();
+    if (kind == "liquify") {
+        liquify_dialog(std::make_pair(id, index));
+        return;
+    }
+    if (kind != "puppet_warp" && kind != "perspective_warp") return;
+    const auto point = [](const Json& p) { return QPointF(p[0].get<double>(), p[1].get<double>()); };
+    if (params.contains("interp") && params["interp"].is_string()) transform_interp_ = params["interp"].get<std::string>();
+    if (kind == "puppet_warp") {
+        puppet_mode_ = params.value("mode", std::string("normal"));
+        puppet_density_ = params.value("density", std::string("normal"));
+        if (params.contains("expansion_mm") && params["expansion_mm"].is_number()) puppet_expansion_ = params["expansion_mm"].get<double>();
+        start_layer_transform(QStringLiteral("puppet"), {id});
+        if (!canvas_->transforming()) return;
+        refilter_ = std::make_pair(id, index);
+        std::vector<std::pair<QPointF, QPointF>> pins;
+        if (params.contains("pins") && params["pins"].is_array())
+            for (const Json& pin : params["pins"]) pins.emplace_back(point(pin["src"]), point(pin["dst"]));
+        canvas_->set_puppet_pins(pins);
+    } else {
+        start_layer_transform(QStringLiteral("perspective_warp"), {id});
+        if (!canvas_->transforming()) return;
+        refilter_ = std::make_pair(id, index);
+        std::vector<std::array<QPointF, 4>> src, dst;
+        if (params.contains("planes") && params["planes"].is_array()) {
+            for (const Json& plane : params["planes"]) {
+                std::array<QPointF, 4> a, b;
+                for (std::size_t k = 0; k < 4; ++k) {
+                    a[k] = point(plane["src"][k]);
+                    b[k] = point(plane["dst"][k]);
+                }
+                src.push_back(a);
+                dst.push_back(b);
+            }
+        }
+        if (!src.empty()) canvas_->set_perspective_planes(src, dst);
+        if (transform_bar_ != nullptr) {  // (its corners where they went: the ワープ phase)
+            if (auto* warp = transform_bar_->findChild<QToolButton*>(QStringLiteral("perspective_warp_phase"))) warp->setChecked(true);
+        }
+    }
+    flash(QStringLiteral("スマートフィルター「%1」を直しています。Enter で確定、Esc でやめます")
+              .arg(kind == "puppet_warp" ? QStringLiteral("パペットワープ") : QStringLiteral("遠近法ワープ")),
+          5000);
+    transform_previewed(canvas_->transform_spec());
 }
 
 void MainWindow::transform_again() {
@@ -513,6 +615,17 @@ void MainWindow::show_transform_bar(const QString& mode) {
         auto* v = percent_box(QStringLiteral("warp_v"), -100, 100, 0);
         auto* vertical = new QCheckBox(QStringLiteral("垂直方向"));
         vertical->setObjectName(QStringLiteral("warp_vertical"));
+        // (PC3 A5: the warp it starts from — a smart object's own — shown in the fields, before they say a change)
+        if (const Json now = canvas_->transform_warp(); now.is_object() && now.contains("style") && now["style"].is_string()) {
+            const std::string name = now["style"].get<std::string>();
+            if (const int at = style->findData(QString::fromStdString(name)); at >= 0) style->setCurrentIndex(at);
+            if (name != "custom") {
+                bend->setValue(now.value("bend", 50.0));
+                h->setValue(now.value("h_distort", 0.0));
+                v->setValue(now.value("v_distort", 0.0));
+                vertical->setChecked(now.value("vertical", false));
+            }
+        }
         const auto changed = [this, style, bend, h, v, vertical] {
             const QString key = style->currentData().toString();
             const auto box = canvas_->transform_box();
@@ -688,16 +801,39 @@ void MainWindow::content_aware_scale_dialog() {
 
 // --- フィルター → ゆがみ… --------------------------------------------------------------------------------------------------
 
-void MainWindow::liquify_dialog() {
+void MainWindow::liquify_dialog(const std::optional<std::pair<std::string, int>>& refilter) {
     const core::Page* page = current_page();
-    const core::Layer* layer = paint_layer();
-    if (page == nullptr || layer == nullptr) return;
+    if (page == nullptr) return;
+    // (PC3 A5: a smart object's — its strokes kept as its smart filter, the picture shown with its filters below them)
+    const core::Layer* layer = nullptr;
+    const core::Layer* target = target_layer();
+    if (refilter) {
+        for (const core::Layer& l : page->layers) {
+            if (l.id == refilter->first && l.kind == core::LayerKind::Smart) layer = &l;
+        }
+    } else if (target != nullptr && target->kind == core::LayerKind::Smart) {
+        if (target->locked) {
+            flash(QStringLiteral("ロックされているレイヤーは変形できません（レイヤー パネルでロックを外します）"), 3000);
+            return;
+        }
+        layer = target;
+    } else {
+        layer = paint_layer();
+    }
+    if (layer == nullptr) return;
     const double pw = page->spec.width_mm.value(), ph = page->spec.height_mm.value();
     const int dpi = std::clamp(static_cast<int>(640.0 / std::max(pw, ph) * 25.4), 10, 200);
     render::Image picture;
+    Json kept;  // (the strokes of the filter edited again)
     try {
         core::Layer shown = *layer;
         shown.visible = true;
+        if (refilter && shown.smart && shown.smart->contains("filters") && (*shown.smart)["filters"].is_array()) {
+            Json& filters = (*shown.smart)["filters"];
+            if (refilter->second < 0 || refilter->second >= static_cast<int>(filters.size())) return;
+            kept = core::py_get(core::py_get(filters[static_cast<std::size_t>(refilter->second)], "params", Json::object()), "strokes", Json::array());
+            filters.erase(filters.begin() + refilter->second, filters.end());
+        }
         picture = render::layer_image(*page, shown, dpi, &book(), true);
     } catch (const std::exception& error) {
         flash(wording::error(QString::fromUtf8(error.what())), 3000, true);
@@ -778,12 +914,18 @@ void MainWindow::liquify_dialog() {
     tools->addWidget(buttons);
     outer->addLayout(tools);
     outer->addWidget(view);
+    if (kept.is_array() && !kept.empty()) view->set_strokes(kept);
     const std::string id = layer->id;
     const Json index = page->index.json();
     const std::optional<Json> area = selection_area();
     const Asked asked = asking();
     if (ask::exec(&dialog) != QDialog::Accepted || !still(asked)) return;
     if (view->strokes().empty()) return;
+    if (refilter) {  // (PC3 A5: the smart filter's strokes set again)
+        apply_ops(Json::array({Json{{"op", "smart_filter_set"}, {"page", index}, {"id", id}, {"index", refilter->second},
+                                    {"params", Json{{"strokes", view->strokes()}}}}}));
+        return;
+    }
     Json op{{"op", "liquify"}, {"page", index}, {"layer_id", id}, {"strokes", view->strokes()}};
     if (area) op["area"] = *area;
     apply_ops(Json::array({op}));

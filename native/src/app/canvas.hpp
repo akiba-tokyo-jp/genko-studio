@@ -204,6 +204,8 @@ public:
     std::optional<QPointF> transform_point() const;
     // Puppet Warp's pins (where each was put, where it is); Perspective Warp's phase (Warp, else Layout) and planes.
     std::vector<std::pair<QPointF, QPointF>> puppet_pins() const;
+    // (PC3 A5: the pins a smart object's puppet warp filter has, edited again: each where it was put and where it is)
+    void set_puppet_pins(const std::vector<std::pair<QPointF, QPointF>>& pins);
     void set_perspective_warping(bool on);
     bool perspective_warping() const;
     std::vector<std::array<QPointF, 4>> perspective_planes(bool destination) const;
