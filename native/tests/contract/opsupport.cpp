@@ -15,6 +15,8 @@
 #include <limits>
 #include <optional>
 #include <set>
+#include <string_view>
+#include <utility>
 #include <vector>
 
 #include "core/actor.hpp"
@@ -162,6 +164,20 @@ std::string without_addresses(std::string text) {
             text.erase(at, end - at);
         } else {
             at = end;
+        }
+    }
+    return text;
+}
+
+std::string with_decided_words(std::string text) {
+    // PC3 C-b (vector@1): a gradient fill layer takes Photoshop's angle, reflected and diamond shapes too, so add_layer
+    // names them when it refuses another (gradient_fill's own shapes are as they were)
+    static const std::pair<std::string_view, std::string_view> decided[] = {
+        {"add_layer: shape must be linear, radial or ellipse", "add_layer: shape must be linear, radial, ellipse, angle, reflected or diamond"},
+    };
+    for (const auto& [python, cpp] : decided) {
+        for (std::size_t at = text.find(python); at != std::string::npos; at = text.find(python, at + cpp.size())) {
+            text.replace(at, python.size(), cpp);
         }
     }
     return text;
@@ -670,7 +686,9 @@ std::string compare_step_near(const StepOutcome& cpp, const Json& python, const 
     if (py_reply.contains("uncaught") || cpp.reply.value("ok", false) != py_reply.value("ok", false)) {
         return compare_step(cpp, python);  // (the words of a failure are compared as they are)
     }
-    if (py_reply.contains("error") && py_reply["error"].is_string()) py_reply["error"] = without_addresses(py_reply["error"].get<std::string>());
+    if (py_reply.contains("error") && py_reply["error"].is_string()) {
+        py_reply["error"] = with_decided_words(without_addresses(py_reply["error"].get<std::string>()));
+    }
     Near near(sides, tolerated);
     if (std::string d = near.walk(cpp.reply, py_reply, ""); !d.empty()) return "reply: " + d;
     if (std::string d = near.walk(cpp.full, python["full"], ""); !d.empty()) return "full snapshot: " + d;
@@ -681,7 +699,9 @@ std::string compare_step_near(const StepOutcome& cpp, const Json& python, const 
 std::string compare_step(const StepOutcome& cpp, const Json& python) {
     std::string where;
     Json py_reply = python["reply"];
-    if (py_reply.contains("error") && py_reply["error"].is_string()) py_reply["error"] = without_addresses(py_reply["error"].get<std::string>());
+    if (py_reply.contains("error") && py_reply["error"].is_string()) {
+        py_reply["error"] = with_decided_words(without_addresses(py_reply["error"].get<std::string>()));
+    }
     if (py_reply.contains("uncaught")) {
         // (Python's command line prints a ValueError's message as its error, and stops with a traceback on the others:
         // its last line is the type alone when the exception has no message)

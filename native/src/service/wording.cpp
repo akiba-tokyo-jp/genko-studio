@@ -612,6 +612,7 @@ const std::vector<Rule>& rules() {
         r.push_back(rule("set_layers needs something to set.*", "まとめて変える設定がありません"));
         r.push_back(rule("shape must be linear or radial", "グラデーションの形は、直線か円です"));
         r.push_back(rule("shape must be linear, radial or ellipse", "グラデーションの形は、直線・円・楕円から選びます"));
+        r.push_back(rule("shape must be linear, radial, ellipse, angle, reflected or diamond", "グラデーションの形は、直線・円・楕円・角度・反射・菱形から選びます"));
         r.push_back(rule(R"(stops are \[\[position.*)", "グラデーションの色は 2〜16 色で、それぞれ位置（0〜100 %）・色・濃さ（0〜100 %）を指定します"));
         r.push_back(rule("repeat is none, repeat or mirror", "繰り返しは、なし・繰り返す・折り返すから選びます"));
         r.push_back(rule(R"(the other book cannot be read \(this book (?:needs repairs|uses features).*\))",

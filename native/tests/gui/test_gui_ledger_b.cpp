@@ -451,6 +451,8 @@ private slots:
                     .contains(QStringLiteral("承認済み")));
         QCOMPARE(wording::error(QStringLiteral("page 2 locked by ai:hermes")), QStringLiteral("2 ページは ai:hermes が作業中です"));
         QCOMPARE(wording::error(QStringLiteral("no page 9")), QStringLiteral("9 ページはありません"));
+        QCOMPARE(wording::error(QStringLiteral("ops[0] add_layer: shape must be linear, radial, ellipse, angle, reflected or diamond")),
+                 QStringLiteral("グラデーションの形は、直線・円・楕円・角度・反射・菱形から選びます"));
         QVERIFY(wording::error(QStringLiteral("something new")).startsWith(QStringLiteral("この操作はできませんでした")));
         QCOMPARE(wording::actor("ai:hermes"), QStringLiteral("AI（hermes）"));
         QCOMPARE(wording::actor("human:leaf"), QStringLiteral("leaf"));

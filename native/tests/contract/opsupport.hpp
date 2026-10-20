@@ -137,6 +137,9 @@ private:
 };
 // Python's words without the addresses of its objects ("<_io.BytesIO object at 0x7f…>" → "<_io.BytesIO object>").
 std::string without_addresses(std::string text);
+// Python's words as this build says them where a decision changed them (the expectation is this build's; the reason by
+// each): compared so, the rest of the reply still is Python's.
+std::string with_decided_words(std::string text);
 
 // The layers' PNGs of `doc` (its pixels, masks and patches) written into `dir` as
 // "<prefix>p<page>-l<layer>-<asset|mask|patchN>.png", as the harness's "dump" writes Python's.
