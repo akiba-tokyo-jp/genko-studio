@@ -114,6 +114,12 @@ genko_test(test_magic_erase SOURCES unit/test_magic_erase.cpp DEPS genko_test_su
 # outline_area's bands, fill_area's preserve_transparency, paste's center_mm, the masks of a precise or ink page at its
 # finest grid — on 8-bit, precise (16, 32 bits) and CMYK pages, without Python.
 genko_test(test_masks SOURCES unit/test_masks.cpp DEPS genko_test_support genko_render_ops LABELS unit TIMEOUT 600)
+# PC3 B3 (SPEC.md COLOR-06「賢い選択」「選択とマスク」「マッティング」): PhotoCraft's algo/segment tests (the max-flow against a
+# reference, GrabCut, Quick Selection, Select Subject, Focus Area, Select Sky; the same bytes again, a stop asked for) and
+# algo/matting.rs's (the guided filter, feather, contrast, shift, the tiles, decontaminate, defringe), the op matting on
+# 8-bit, 16-bit and CMYK layers, and the smart area kinds on a page (the same area on an 8-bit, a 16-bit and a CMYK page).
+genko_test(test_segment SOURCES unit/test_segment.cpp DEPS genko_test_support genko_render_ops LABELS unit TIMEOUT 600)
+genko_test(test_matting SOURCES unit/test_matting.cpp DEPS genko_test_support genko_render_ops LABELS unit TIMEOUT 900)
 genko_test(test_path_raster SOURCES unit/test_path_raster.cpp DEPS genko_test_support genko_render_ops LABELS unit)
 genko_test(test_resample SOURCES unit/test_resample.cpp DEPS genko_test_support genko_render_ops LABELS unit)
 genko_test(test_page_geometry SOURCES unit/test_page_geometry.cpp DEPS genko_test_support LABELS unit)

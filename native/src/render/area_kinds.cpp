@@ -12,6 +12,7 @@
 #include "render/path_areas.hpp"
 #include "render/png.hpp"
 #include "render/select_color.hpp"
+#include "render/select_smart.hpp"
 #include "render/selection.hpp"
 #include "render/selection_ext.hpp"
 
@@ -68,13 +69,13 @@ const std::vector<Kind>& table() {
         {"range", "B1", &select_color::range},
         {"grow", "B1", &select_color::grow},
         {"similar", "B1", &select_color::similar},
-        // B3 (賢い選択・境界の調整): render/segment, render/matting
-        {"subject", "B3", nullptr},
-        {"sky", "B3", nullptr},
-        {"object", "B3", nullptr},
-        {"quick", "B3", nullptr},
-        {"focus", "B3", nullptr},
-        {"refine", "B3", nullptr},
+        // B3 (賢い選択・境界の調整): render/select_smart over render/segment and render/matting
+        {"subject", "B3", &select_smart::subject},
+        {"sky", "B3", &select_smart::sky},
+        {"object", "B3", &select_smart::object},
+        {"quick", "B3", &select_smart::quick},
+        {"focus", "B3", &select_smart::focus},
+        {"refine", "B3", &select_smart::refine},
         // C-a (パス): a path's coverage (render/path_areas)
         {"path", "C-a", &path_areas::path},
         {"path_name", "C-a", &path_areas::path_name},

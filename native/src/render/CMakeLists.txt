@@ -100,6 +100,19 @@ genko_library(genko_render
     select_color.cpp
     ops_quick_mask.cpp
     erase_magic.cpp
+    # PC3 B3 (賢い選択・選択とマスク・マット)
+    segment/mod.cpp
+    segment/maxflow.cpp
+    segment/gmm.cpp
+    segment/slic.cpp
+    segment/grabcut.cpp
+    segment/quick.cpp
+    segment/subject.cpp
+    segment/sky.cpp
+    segment/focus.cpp
+    matting.cpp
+    select_smart.cpp
+    ops_matting.cpp
     # PC3 C-a (パスとベクトルマスク)
     path_trace.cpp
     path_areas.cpp
