@@ -7,6 +7,7 @@
 
 #include "core/error.hpp"
 #include "core/model.hpp"
+#include "core/ops_util.hpp"
 #include "core/pyconv.hpp"
 #include "core/pynum.hpp"
 #include "core/pyops.hpp"
@@ -252,6 +253,11 @@ void check_fill(const Json& fill, std::string_view what) {
     if (const Json* gradient = field(fill, "gradient")) {
         only_keys(fill, {"gradient"}, what);
         object_of(*gradient, std::string(what) + "'s gradient");
+        try {  // (a fill layer's gradient: its keys and values as add_layer takes them)
+            (void)fill_spec(fill);
+        } catch (const std::exception& error) {
+            bad(std::string(what) + "'s gradient: " + error.what());
+        }
         return;
     }
     only_keys(fill, {"rgb", "color_rgb"}, what);
@@ -521,13 +527,38 @@ std::string path_name(std::string_view name) {
     return out;
 }
 
+namespace {
+
+// A gradient of the new forms (PC3 C-b: angle, reflected, diamond, reverse), which a build before them draws as a
+// linear one.
+bool new_gradient(const Json& fill) {
+    if (!fill.is_object()) return false;
+    const auto g = fill.find("gradient");
+    if (g == fill.end() || !g->is_object()) return false;
+    const auto shape = g->find("shape");
+    if (shape != g->end() && shape->is_string()) {
+        const std::string& s = shape->get_ref<const std::string&>();
+        if (s == "angle" || s == "reflected" || s == "diamond") return true;
+    }
+    const auto reverse = g->find("reverse");
+    return reverse != g->end() && reverse->is_boolean() && reverse->get<bool>();
+}
+
+}  // namespace
+
 bool uses_vector(const Document& doc) {
     for (std::size_t i = 0; i < doc.pages.size(); ++i) {
         if (doc.is_deferred(i)) continue;
         const Page& page = doc.page(i);
         if (!page.paths.empty() || page.work_path || page.clipping_path) return true;
-        for (const Layer& layer : page.layers)
+        for (const Layer& layer : page.layers) {
             if (layer.vector_mask) return true;
+            if (layer.kind == LayerKind::Fill && layer.fill && new_gradient(*layer.fill)) return true;
+            if (!layer.shapes) continue;
+            for (const ShapePart& part : layer.shapes->items) {
+                if (new_gradient(part.fill) || (part.stroke && new_gradient(part.stroke->fill))) return true;
+            }
+        }
     }
     return false;
 }

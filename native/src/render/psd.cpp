@@ -695,12 +695,20 @@ File File::read(std::string data, const Limits& limits, bool lab) {
                         const auto at = static_cast<std::uint64_t>(body.data() - d.data());
                         (tag == "SoLd" ? rec.sold_at : tag == "SoLE" ? rec.sole_at : rec.plld_at) = at;
                         (tag == "SoLd" ? rec.sold_size : tag == "SoLE" ? rec.sole_size : rec.plld_size) = body.size();
+                    } else if (tag == "vscg" || tag == "vstk" || tag == "vogk") {  // (pen-shapes@1, PC3 C-b: a shape layer's)
+                        const auto at = static_cast<std::uint64_t>(body.data() - d.data());
+                        (tag == "vscg" ? rec.vscg_at : tag == "vstk" ? rec.vstk_at : rec.vogk_at) = at;
+                        (tag == "vscg" ? rec.vscg_size : tag == "vstk" ? rec.vstk_size : rec.vogk_size) = body.size();
                     } else if (adjust_tag(tag)) {
                         rec.kind = "adjust";
                         if (tag != "SoCo" && tag != "GdFl" && tag != "PtFl") {  // (PC2: an adjustment, not a fill layer)
                             rec.adjust_key = std::string(tag);
                             rec.adjust_at = static_cast<std::uint64_t>(body.data() - d.data());
                             rec.adjust_size = body.size();
+                        } else {  // (a fill layer's, or a shape layer's fill: pen-shapes@1)
+                            rec.fill_key = std::string(tag);
+                            rec.fill_at = static_cast<std::uint64_t>(body.data() - d.data());
+                            rec.fill_size = body.size();
                         }
                     }
                     if (size % 2 != 0 && r.pos < extra_end) {
@@ -709,6 +717,11 @@ File File::read(std::string data, const Limits& limits, bool lab) {
                     }
                 }
                 r.pos = extra_end;
+                // (pen-shapes@1, PC3 C-b: a fill with a vector mask is a shape layer — a pen layer's shape part, import_psd)
+                if (rec.vmsk_size > 0 && rec.adjust_key.empty() && (rec.fill_size > 0 || rec.vscg_size > 0) &&
+                    (rec.kind == "adjust" || rec.kind == "pixels")) {
+                    rec.kind = "shape";
+                }
                 f.records_.push_back(std::move(rec));
                 entries.push_back(std::move(chans));
             }
@@ -787,6 +800,24 @@ File File::read(std::string data, const Limits& limits, bool lab) {
         const std::int64_t w = rec.right - rec.left;
         const std::int64_t h = rec.bottom - rec.top;
         const bool colour = std::any_of(rec.data.begin(), rec.data.end(), [](const ChannelRef& c) { return c.id >= 0; });
+        if (rec.kind == "shape") {
+            // (pen-shapes@1, PC3 C-b: a shape layer — a pen layer's shape part for import_psd, render/psd_shapes; psd.py
+            // leaves it out with the fill layers)
+            Layer layer;
+            layer.name = rec.name.empty() ? std::string("シェイプ") : rec.name;
+            layer.opacity = rec.opacity / 255.0;
+            layer.visible = rec.visible;
+            layer.blend = rec.blend;
+            layer.clip = rec.clip;
+            layer.kind = "shape";
+            layer.record = n;
+            const ChannelRef* mask = rec.channel(-2);
+            layer.has_mask = rec.mask && mask != nullptr && !rec.mask_disabled && mask->width > 0 && mask->height > 0 && mask->length > 0;
+            f.layers_.push_back(std::move(layer));
+            if (!pending.empty()) pending.back().push_back(f.layers_.size() - 1);
+            f.python_skipped_.push_back(rec.name);
+            continue;
+        }
         if (rec.kind == "adjust" && !rec.adjust_key.empty()) {
             // (PC2, the user's decision 5: an adjustment layer a codec reads is a correction layer — render/psd_adjust;
             // one none reads is left out, as psd.py leaves every one out)
@@ -878,6 +909,23 @@ std::optional<std::string_view> File::vector_mask(const Layer& layer) const {
     const Record& rec = records_[layer.record];
     if (rec.vmsk_size == 0) return std::nullopt;
     return std::string_view(data_).substr(static_cast<std::size_t>(rec.vmsk_at), static_cast<std::size_t>(rec.vmsk_size));
+}
+
+std::optional<File::ShapeBlocks> File::shape_blocks(const Layer& layer) const {
+    if (layer.kind != "shape" || layer.record >= records_.size()) return std::nullopt;
+    const Record& rec = records_[layer.record];
+    const std::string_view all(data_);
+    const auto at = [&](std::uint64_t pos, std::uint64_t size) {
+        return size == 0 ? std::string_view() : all.substr(static_cast<std::size_t>(pos), static_cast<std::size_t>(size));
+    };
+    ShapeBlocks out;
+    out.fill_key = rec.fill_key;
+    out.fill = at(rec.fill_at, rec.fill_size);
+    out.vscg = at(rec.vscg_at, rec.vscg_size);
+    out.vstk = at(rec.vstk_at, rec.vstk_size);
+    out.vogk = at(rec.vogk_at, rec.vogk_size);
+    out.path = at(rec.vmsk_at, rec.vmsk_size);
+    return out;
 }
 
 std::optional<Stroke> File::stroke(const Layer& layer) const {

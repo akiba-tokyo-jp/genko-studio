@@ -22,8 +22,10 @@
 #include "render/draw.hpp"
 #include "render/op_limits.hpp"
 #include "render/page.hpp"
+#include "render/path_trace.hpp"
 #include "render/png.hpp"
 #include "render/select_color.hpp"
+#include "render/shape_parts.hpp"
 #include "render/warp.hpp"
 
 namespace genko::render::selection {
@@ -387,6 +389,78 @@ std::pair<std::optional<core::Patch>, std::optional<core::Patch>> split_patch(co
     return {std::move(outside), std::move(inside)};
 }
 
+// pen-shapes@1 (PC3 C-b): an area's outline as a path in mm — its polygon, or its mask's outline traced at the
+// selection's 200 dpi within half a pixel.
+core::vector::Path area_outline(const Json& area) {
+    namespace vec = core::vector;
+    if (area.is_object() && core::truthy_at(area, "poly")) {
+        vec::Subpath s;
+        for (const auto& [x, y] : poly_points(area["poly"], "area")) s.knots.push_back(vec::Knot::corner(x, y));
+        vec::Path out;
+        if (s.knots.size() >= 3) out.subpaths.push_back(std::move(s));
+        return out;
+    }
+    const AreaMask m = area_mask(area, kSelDpi);
+    const std::string bytes = m.mask.tobytes();
+    std::vector<float> values(bytes.size());
+    for (std::size_t i = 0; i < bytes.size(); ++i) values[i] = static_cast<unsigned char>(bytes[i]) / 255.0f;
+    const int x0 = static_cast<int>(m.x0), y0 = static_cast<int>(m.y0);
+    const double k = 25.4 / kSelDpi;
+    return path_trace::trace_mask(values, path_raster::PixelBox{x0, y0, x0 + m.mask.width(), y0 + m.mask.height()}, 0.0f, 0.5)
+        .transformed({k, 0.0, 0.0, k, 0.0, 0.0});
+}
+
+// The layer's shape parts that stay, those lifted added to `in`: a part wholly inside the area goes whole, one wholly
+// outside stays, one the area's edge crosses is cut in two along it (render/shape_parts cut, baked: the lifted half a new
+// id); an open or inverted part, which has no inside to cut, goes whole when most of its anchors are inside.
+std::vector<core::vector::ShapePart> lift_parts(const core::Layer& layer, const Json& area, AreaTest& test, Items& in) {
+    namespace vec = core::vector;
+    constexpr double kSliver = 0.002;  // (mm²: about a twelfth of a pixel at 200 dpi — nothing of it on that side)
+    std::vector<vec::ShapePart> kept;
+    std::optional<vec::Path> outline;
+    std::set<std::string> ids;
+    for (const vec::ShapePart& part : layer.shapes->items) ids.insert(part.id);
+    for (const vec::ShapePart& part : layer.shapes->items) {
+        if (part.path.empty()) {
+            kept.push_back(part);
+            continue;
+        }
+        if (!shape_parts::closed(part.path) || part.path.inverted) {
+            std::size_t inside = 0, all = 0;
+            for (const vec::Subpath& s : part.path.subpaths) {
+                for (const vec::Knot& k : s.knots) {
+                    ++all;
+                    if (test.contains(k.anchor.x, k.anchor.y)) ++inside;
+                }
+            }
+            (all > 0 && inside * 2 >= all ? in.shapes : kept).push_back(part);
+            continue;
+        }
+        if (!outline) outline = area_outline(area);
+        const auto [inner, outer] = shape_parts::shares(part.path, *outline);
+        if (outer <= kSliver) {
+            in.shapes.push_back(part);
+            continue;
+        }
+        if (inner <= kSliver) {
+            kept.push_back(part);
+            continue;
+        }
+        vec::ShapePart lifted = part, left = part;
+        lifted.path = shape_parts::cut(part.path, *outline, true);
+        left.path = shape_parts::cut(part.path, *outline, false);
+        lifted.live.reset();
+        left.live.reset();
+        do {
+            lifted.id = core::new_id();
+        } while (ids.contains(lifted.id));
+        ids.insert(lifted.id);
+        if (!lifted.path.empty()) in.shapes.push_back(vec::part_from_json(vec::to_json(lifted)));
+        if (!left.path.empty()) kept.push_back(vec::part_from_json(vec::to_json(left)));
+    }
+    return kept;
+}
+
 }  // namespace
 
 Items lift(core::Layer& layer, const Json& area, const core::Page& page) {
@@ -432,11 +506,51 @@ Items lift(core::Layer& layer, const Json& area, const core::Page& page) {
     }
     layer.strokes = core::make_strokes(std::move(strokes_out));
     layer.patches = std::move(patches_out);
+    if (shape_parts::any(layer)) layer.shapes = core::vector::make_shapes(lift_parts(layer, area, test, in));
     return in;
 }
 
-void drop(core::Layer& layer, Items items, const Matrix& m, bool fresh_ids, Resample resample) {
+namespace {
+
+// pen-shapes@1 (PC3 C-b): the parts put on the layer (each through `move`): a pen layer's parts, an id it has already
+// given a new one; on a layer that is not a pen layer, their pictures as patches.
+void drop_parts(core::Layer& layer, std::vector<core::vector::ShapePart> parts, bool fresh_ids, const core::Page* page,
+                const std::function<core::vector::ShapePart(const core::vector::ShapePart&)>& move) {
+    namespace vec = core::vector;
+    if (parts.empty()) return;
+    std::vector<vec::ShapePart> out = layer.shapes->items;
+    std::set<std::string> ids;
+    for (const vec::ShapePart& p : out) ids.insert(p.id);
+    for (const vec::ShapePart& part : parts) {
+        vec::ShapePart moved = vec::part_from_json(vec::to_json(move(part)));
+        if (layer.kind != core::LayerKind::Strokes) {
+            if (auto patch = shape_parts::as_patch(page, moved)) {
+                if (fresh_ids) patch_set(*patch, "id", core::new_id());
+                layer.patches.push_back(std::move(*patch));
+            }
+            continue;
+        }
+        if (fresh_ids || ids.contains(moved.id)) {
+            do {
+                moved.id = core::new_id();
+            } while (ids.contains(moved.id));
+        }
+        ids.insert(moved.id);
+        out.push_back(std::move(moved));
+    }
+    if (layer.kind == core::LayerKind::Strokes) {
+        if (out.size() > vec::kShapePartsMax) throw core::OpError("a pen layer holds at most " + std::to_string(vec::kShapePartsMax) + " shape parts");
+        layer.shapes = vec::make_shapes(std::move(out));
+    }
+}
+
+}  // namespace
+
+void drop(core::Layer& layer, Items items, const Matrix& m, bool fresh_ids, Resample resample, const core::Page* page) {
     const bool identity = m == kIdentity;  // (-0.0 is 0.0 here, as in Python's tuple comparison)
+    drop_parts(layer, std::move(items.shapes), fresh_ids, page, [&](const core::vector::ShapePart& part) {
+        return identity ? part : shape_parts::transformed(part, {m[0], m[1], m[2], m[3], m[4], m[5]}, true);
+    });
     std::vector<core::StrokePtr> strokes = layer.strokes->items;
     for (const core::StrokePtr& stroke : items.strokes) {
         if (!identity) {
@@ -460,7 +574,13 @@ void drop(core::Layer& layer, Items items, const Matrix& m, bool fresh_ids, Resa
     }
 }
 
-void drop_warped(core::Layer& layer, Items items, const WarpFunction& go, Resample resample) {
+void drop_warped(core::Layer& layer, Items items, const WarpFunction& go, Resample resample, const core::Page* page) {
+    drop_parts(layer, std::move(items.shapes), false, page, [&](const core::vector::ShapePart& part) {
+        core::vector::ShapePart bent = part;
+        bent.path = shape_parts::bent(part.path, go);
+        bent.live.reset();
+        return bent;
+    });
     std::vector<core::StrokePtr> strokes = layer.strokes->items;
     for (const core::StrokePtr& stroke : items.strokes) {
         strokes.push_back(std::make_shared<const core::Stroke>(warp::warp_stroke(*stroke, go)));
@@ -511,6 +631,17 @@ Items items_from_json(const Json& data) {
             (after ? patch.after_asset : patch.attrs)[key] = value;
         }
         items.patches.push_back(std::move(patch));
+    }
+    // (pen-shapes@1, PC3 C-b: a pen layer's shape parts, as a layer keeps them)
+    if (const Json* shapes = core::get(data, "shapes"); shapes != nullptr && !shapes->is_null()) {
+        if (!shapes->is_array()) throw core::OpError("items' shapes is a list of shape parts");
+        for (const Json& item : *shapes) {
+            try {
+                items.shapes.push_back(core::vector::part_from_json(item));
+            } catch (const core::Error& error) {
+                throw core::OpError(std::string("items' shapes: ") + error.what());
+            }
+        }
     }
     return items;
 }
@@ -893,7 +1024,13 @@ Json items_to_json(const Items& items) {
         out["png"] = core::b64encode(*patch.png);
         patches.push_back(std::move(out));
     }
-    return Json{{"strokes", std::move(strokes)}, {"patches", std::move(patches)}};
+    Json out{{"strokes", std::move(strokes)}, {"patches", std::move(patches)}};
+    if (!items.shapes.empty()) {  // (pen-shapes@1, PC3 C-b)
+        Json shapes = Json::array();
+        for (const core::vector::ShapePart& part : items.shapes) shapes.push_back(core::vector::to_json(part));
+        out["shapes"] = std::move(shapes);
+    }
+    return out;
 }
 
 Json resolve(const Json& area, const core::Page& page, const core::Document* episode) {

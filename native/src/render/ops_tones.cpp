@@ -182,7 +182,7 @@ Image fill_reference(const core::Document& doc, const core::Page& page, const co
         }
         // render._layer_strokes(layer, size, dpi, None, None): the layer's fills and lines alone, no panel cut — as
         // layer_image draws a plain pen layer on a page without panels
-        if (layer->stroke_count() > 0 || !layer->patches.empty()) {
+        if (layer->stroke_count() > 0 || !layer->patches.empty() || (layer->shapes && !layer->shapes->items.empty())) {  // (and pen-shapes@1)
             core::Page bare = page;
             bare.frames.clear();
             core::Layer lines = *layer;

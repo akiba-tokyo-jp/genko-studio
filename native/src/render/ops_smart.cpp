@@ -27,7 +27,9 @@
 #include "render/ink_canvas.hpp"
 #include "render/not_yet_ported.hpp"
 #include "render/ops_registry.hpp"
+#include "render/ops_shapes.hpp"
 #include "render/ops_smart_parts.hpp"
+#include "render/shape_parts.hpp"
 #include "render/page.hpp"
 #include "render/page_internal.hpp"
 #include "render/placed.hpp"
@@ -128,7 +130,7 @@ std::vector<std::size_t> chosen_layers(const Page& page, const Json& op) {
 bool draws(const Layer& l) {
     return l.raster_png || l.color_raster || l.ink_raster || l.stroke_count() > 0 || !l.patches.empty() || (l.fill && core::py_truthy(*l.fill)) ||
            (l.fill_rgb && !l.fill_rgb->empty()) || l.kind == LayerKind::Tone || (l.tone && core::py_truthy(*l.tone)) || l.kind == LayerKind::Placed ||
-           l.kind == LayerKind::Smart;
+           l.kind == LayerKind::Smart || shape_parts::any(l);
 }
 
 // A smart object's page made of the page it is on: its paper, panels and colour mode (the layers come next).
@@ -575,7 +577,8 @@ bool rasterizable(const Layer& layer, const std::set<std::string>& kinds) {
     if (layer.kind == LayerKind::Fill && ((layer.fill && core::py_truthy(*layer.fill)) || (layer.fill_rgb && !layer.fill_rgb->empty())))
         return kinds.contains("fill");
     if (layer.kind == LayerKind::Tone || (layer.tone && core::py_truthy(*layer.tone))) return kinds.contains("tone");
-    if (layer.kind == LayerKind::Strokes && layer.stroke_count() > 0 && !core::has_color_strokes(layer)) return kinds.contains("pen");
+    if (layer.kind == LayerKind::Strokes && (layer.stroke_count() > 0 || shape_parts::any(layer)) && !core::has_color_strokes(layer))
+        return kinds.contains("pen");  // (pen-shapes@1: its shape parts with its lines)
     return false;
 }
 
@@ -702,6 +705,7 @@ void rasterize(Document& doc, std::size_t at, std::size_t i) {
     layer.kind = LayerKind::Raster;
     layer.strokes = core::empty_strokes();
     layer.patches.clear();
+    layer.shapes = core::vector::empty_shapes();  // (pen-shapes@1: drawn in)
     layer.fill.reset();
     layer.fill_rgb.reset();
     layer.adjust.reset();
@@ -736,6 +740,16 @@ void rasterize_layer(OpContext& c) {
         if (!layer.vector_mask) throw OpError("layer " + layer.id + " has no vector mask");
         Page& page = doc.edit_page(at);
         vector_masks::rasterize(page, page.layers[i]);
+        c.report = Json{{"ids", Json::array({page.layers[i].id})}};
+        return;
+    }
+    if (core::truthy_at(c.op, "shape")) {  // (pen-shapes@1, PC3 C-b: Layer › Rasterize › Shape — the parts as patches, render/ops_shapes)
+        const std::size_t i = core::layer_by_id(doc.page(at), core::truthy_at(c.op, "id") ? core::py_str(c.op["id"]) : std::string());
+        const Layer& layer = doc.page(at).layers[i];
+        if (layer.locked) throw OpError("the layer is locked");
+        if (!shape_parts::any(layer)) throw OpError("layer " + layer.id + " has no shape parts");
+        Page& page = doc.edit_page(at);
+        shape_parts::rasterize_parts(page, page.layers[i]);
         c.report = Json{{"ids", Json::array({page.layers[i].id})}};
         return;
     }

@@ -91,7 +91,8 @@ bool same_layer_look(const core::Layer& a, const core::Layer& b) {
            a.lock_alpha == b.lock_alpha && a.panel_clip == b.panel_clip && a.panel_each == b.panel_each && a.tone == b.tone &&
            a.color == b.color && a.fill == b.fill && a.adjust == b.adjust && a.effect == b.effect && a.color_prints == b.color_prints &&
            a.screen == b.screen && a.asset == b.asset && a.region.has_value() == b.region.has_value() && a.angle == b.angle &&
-           a.smart == b.smart;  // (smart-objects@1: its matrix and settings)
+           a.smart == b.smart &&  // (smart-objects@1: its matrix and settings)
+           a.shapes == b.shapes && a.vector_mask == b.vector_mask;  // (pen-shapes@1: its shape parts, a list made anew when changed; vector@1)
 }
 
 // smart-objects@1 (PC3 A1): the contents the page's smart objects show — and those inside them — are the same in both

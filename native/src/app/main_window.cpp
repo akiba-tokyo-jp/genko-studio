@@ -1328,7 +1328,9 @@ bool MainWindow::save_as_and_wait(const QString&, std::shared_ptr<Session> origi
 
 namespace {
 
-bool drawn_on(const core::Layer& layer) { return layer.stroke_count() > 0 || layer.raster_png || layer.color_raster || layer.ink_raster; }
+bool drawn_on(const core::Layer& layer) {
+    return layer.stroke_count() > 0 || layer.raster_png || layer.color_raster || layer.ink_raster || (layer.shapes && !layer.shapes->items.empty());
+}
 
 // A row of hints over the page, one line high: on a window narrower than the row (a small screen, a large display
 // scaling) it scrolls sideways instead of making the window wider than the screen (SPEC UX-02).

@@ -111,6 +111,9 @@ genko_test(test_selection_ext SOURCES unit/test_selection_ext.cpp DEPS genko_tes
 genko_test(test_select_color SOURCES unit/test_select_color.cpp DEPS genko_test_support genko_render_ops LABELS unit TIMEOUT 600)
 genko_test(test_magic_erase SOURCES unit/test_magic_erase.cpp DEPS genko_test_support genko_render_ops LABELS unit TIMEOUT 600)
 genko_test(test_path_raster SOURCES unit/test_path_raster.cpp DEPS genko_test_support genko_render_ops LABELS unit)
+# PC3 C-b (pen-shapes@1): the live shapes, the path operations' coverage, a stroke's alignments and dashes, the gradient
+# forms, a part baked, cut, erased, bent and transformed; the shape presets' language and settings file.
+genko_test(test_shapes SOURCES unit/test_shapes.cpp DEPS genko_test_support genko_render_ops LABELS unit)
 genko_test(test_resample SOURCES unit/test_resample.cpp DEPS genko_test_support genko_render_ops LABELS unit)
 genko_test(test_page_geometry SOURCES unit/test_page_geometry.cpp DEPS genko_test_support LABELS unit)
 # PC2-0 (SPEC.md COLOR-04, adjustments@1): the corrections' common ground without Python — Python's form kept, a
@@ -349,6 +352,12 @@ genko_test(test_contract_select SOURCES contract/test_contract_select.cpp DEPS g
 # stroke, work paths from an area and from letters, the vector mask drawn on every kind of page, rasterized, merged;
 # through the command line saved, undone, inspect --paths, export --format ai; a PSD's paths and vmsk (psd-tools, import_psd).
 genko_test(test_contract_paths SOURCES contract/test_contract_paths.cpp DEPS genko_test_support genko_render_ops genko_formats
+           LABELS contract TIMEOUT 900)
+# PC3 C-b (pen-shapes@1): a pen layer's shape parts — added, edited, combined, moved, made patches and lines; drawn in their
+# place on every kind of page; the selection, the eraser, ゆがみ, merges and the bucket with them; a fill layer's new
+# gradients; through the command line saved and undone (a pen layer without parts as before), `genko shapes`; the PSD's
+# shape layers and groups (psd-tools, import_psd).
+genko_test(test_contract_shapes SOURCES contract/test_contract_shapes.cpp DEPS genko_test_support genko_render_ops genko_formats
            LABELS contract TIMEOUT 900)
 genko_test(test_contract_image_ops SOURCES contract/test_contract_image_ops.cpp DEPS genko_test_support genko_render
            LABELS contract TIMEOUT 900)

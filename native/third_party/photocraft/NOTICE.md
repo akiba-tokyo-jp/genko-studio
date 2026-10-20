@@ -126,3 +126,9 @@ PhotoCraft v0.2.0（同上、MIT）の次の部分を参照して C++ へ移し�
 - `crates/engine/src/vector_cmds.rs`（600-1010 行: パスの設定・削除・名前の変更・選択範囲から・塗りつぶし・境界線・ベクトルマスクの追加・変更・削除・ラスタライズ）→ `native/src/render/ops_paths.cpp`・`path_areas.cpp`・`vector_masks.cpp`（単位は mm、ページの座標。PC3 C-a）。
 - `crates/psd/src/path.rs`（1-298 行と試験）・`crates/io/src/vector_map.rs`（1-130 行）・`psd_export.rs`（663-698 行）・`psd_import.rs`（414-430 行）: PSD のパスの記録（26 バイト、8.24 の固定小数、サブパスの合わせ方）、`vmsk` のフラグ、パスのリソース（2000〜2997・1025・2999）→ `native/src/render/psd_paths.cpp`（PC3 C-a）。
 - `crates/engine/src/print_cmds.rs`（461-521 行、`paths_to_ai`）と `vector_cmds.rs`（635-651 行、`paths_list`）: パスを Illustrator へ、パスの一覧 → `native/src/render/path_info.cpp`（PC3 C-a）。
+- `crates/vector/src/lib.rs`（186-380 行、`Paint::from_fill`・`CompiledShape`）: シェイプの塗りの覆いと色・グラデーション、線の位置（内側・外側は 2 倍の幅を塗りで切る）、不透明度の描き方 → `native/src/render/shape_parts.cpp`（ペンの層の形の部品、mm。PC3 C-b）。
+- `crates/algo/src/paint.rs`（10-35 行、`tool_gradient_t`）と `crates/vector/src/lib.rs`（227-245 行、`gradient_t`）: グラデーションの角度・反射・菱形と逆方向の式 → `native/src/render/composite.cpp`（`GradientT`。PC3 C-b）。
+- `crates/engine/src/vector_cmds.rs`（434-600 行・1012-1074 行・1200-1260 行: シェイプの作成・編集・ラスタライズ、シェイプコンポーネントを結合、シェイプを結合・前面シェイプを削除・交差・中マド）→ `native/src/render/ops_shapes.cpp`（単位は mm、ページの座標、ペンの層の部品。PC3 C-b）。
+- `crates/engine/src/presets/shapes.rs`（1-482 行と試験）: シェイプのプリセットのパスの言葉、既定の組の自作の形、定義・名前の変更・削除・初期化 → `native/src/render/shape_presets.cpp`（名前は日本語。PC3 C-b）。
+- `crates/io/src/vector_map.rs`（130-603 行）・`psd_export.rs`（245-300 行）・`psd_import.rs`（240-290 行）: シェイプレイヤーの `vscg`（`SoCo`・`GdFl`）・`vstk`・`vogk` の記述子の読み書き → `native/src/render/psd_shapes.cpp`・`psd_descriptor.cpp`（PC3 C-b）。
+- `crates/ui-egui/src/vector_ui.rs`（20-130 行）: シェイプの道具（Shift で縦横比、Alt で中心から、ペンツールのシェイプのモード）→ `native/src/app/main_window_shapes.cpp`・`canvas_tools.cpp`（PC3 C-b）。

@@ -38,7 +38,7 @@ bool MainWindow::copy() {
                 lifted.patches.push_back(render::ink_edit::piece_patch(*piece, *page->color));
             }
         }
-        if (lifted.strokes.empty() && lifted.patches.empty()) {
+        if (lifted.empty()) {  // (pen-shapes@1: shape parts too)
             flash(QStringLiteral("選んだ範囲に、このレイヤーの絵がありません"), 3000);
             return false;
         }

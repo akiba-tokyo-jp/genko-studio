@@ -182,6 +182,11 @@ struct PageLayer {
     // vector@1 (PC3 C-a): the layer's vector mask (a PSD writes it as its vmsk block; a picture of the layer lays it on its
     // alpha when it is on, as the mask)
     std::optional<core::vector::VectorMask> vector_mask;
+    // pen-shapes@1 (PC3 C-b): a pen layer's shape part — a PSD writes it as a shape layer (render/psd_shapes), `image`
+    // its look —; and the group a pen layer of parts and lines is written as: "end" (below its layers: the group's end) and
+    // "group" (above them: the group with the layer's name and settings), no picture of their own.
+    const core::vector::ShapePart* shape = nullptr;
+    std::string section;
 };
 
 // psd.page_layers(page, episode, dpi), bottom to top: the paper, the page's fills, each visible exported pixel layer
@@ -192,10 +197,12 @@ struct PageLayer {
 // 8-bit picture.) `line_layers` (PSD-01, the editable PSD): each placed line is handed to it, in its place among the
 // layers, instead of being given as a layer of its own. `adjust_layers` (PC2, the user's decision 5: the PSD's adjustment
 // layers): each correction layer shown is handed to it in its place among the layers (Python's leaves them out: their
-// change is in the merged picture only).
+// change is in the merged picture only). A pen layer with shape parts (pen-shapes@1, PC3 C-b) is given in its place:
+// with `shapes` (a PSD) as a shape layer of its one part or as a group of its pictures, parts and lines
+// (render/psd_shapes' plan), else (and where a group would not show it the same) as one layer of its look.
 void page_layers(const core::Page& page, const core::Document& episode, int dpi, const std::function<void(PageLayer&&)>& each,
                  const std::function<void(const core::StoryLine&)>* line_layers = nullptr,
-                 const std::function<void(const core::Layer&)>* adjust_layers = nullptr);
+                 const std::function<void(const core::Layer&)>* adjust_layers = nullptr, bool shapes = false);
 
 // Pure black and white: grey above `threshold` is white; with `screen` the greys become a pattern (dot, line, cross or
 // noise; 書き出しでのトーン化).

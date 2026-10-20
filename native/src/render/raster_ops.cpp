@@ -73,6 +73,7 @@
 #include "render/psd_image.hpp"
 #include "render/raster.hpp"
 #include "render/selection.hpp"
+#include "render/shape_parts.hpp"
 #include "render/stroke.hpp"
 #include "render/vector_masks.hpp"
 #include "render/vectorize.hpp"
@@ -759,6 +760,7 @@ void check_mergeable(const Page& page, const std::vector<std::size_t>& layers) {
 void into_pixels(const Page& page, Layer& target, const Image& picture) {
     target.strokes = core::empty_strokes();
     target.patches.clear();
+    target.shapes = core::vector::empty_shapes();  // (pen-shapes@1, PC3 C-b: drawn in)
     target.mask.reset();
     target.vector_mask.reset();  // (vector@1, PC3 C-a: drawn in, as the mask)
     target.kind = LayerKind::Raster;
@@ -813,7 +815,7 @@ bool merge_printed(const Layer& layer) {
     return layer.exportable && layer.role != LayerRole::Name && layer.role != LayerRole::Draft;
 }
 bool merge_draws(const Layer& l) {
-    return l.color_raster || l.raster_png || l.stroke_count() || !l.patches.empty() ||
+    return l.color_raster || l.raster_png || l.stroke_count() || !l.patches.empty() || shape_parts::any(l) ||
            (l.kind == LayerKind::Fill && l.fill && core::py_truthy(*l.fill)) ||
            (l.kind == LayerKind::Adjust && l.adjust && core::py_truthy(*l.adjust)) ||
            l.kind == LayerKind::Tone || l.kind == LayerKind::Placed || l.kind == LayerKind::Smart;
@@ -837,6 +839,7 @@ bool merge_tail_clipped(const Page& page, const std::vector<std::size_t>& layers
 }
 void into_color_pixels(Layer& target, std::pair<std::string, bool> pixels) {
     target.strokes = core::empty_strokes(); target.patches.clear(); target.mask.reset();
+    target.shapes = core::vector::empty_shapes();  // (pen-shapes@1, PC3 C-b: drawn in)
     target.vector_mask.reset();  // (vector@1, PC3 C-a: drawn in, as the mask)
     target.kind = pixels.first.empty() ? LayerKind::Strokes : LayerKind::Raster;
     target.raster_png.reset(); target.asset.reset();
@@ -986,6 +989,7 @@ void after_merge(Page& page, const std::vector<std::size_t>& merged) {
         if (core_role(layer.role)) {  // layerops._empty
             layer.strokes = core::empty_strokes();
             layer.patches.clear();
+            layer.shapes = core::vector::empty_shapes();  // (pen-shapes@1)
             layer.raster_png.reset();
             layer.color_raster.reset();
             if (!merged.empty() && page.layers[merged.front()].color_raster) {
@@ -1298,6 +1302,18 @@ void merge_down(OpContext& c) {
         strokes.insert(strokes.end(), upper.strokes->items.begin(), upper.strokes->items.end());
         into.strokes = core::make_strokes(std::move(strokes));
         into.patches.insert(into.patches.end(), upper.patches.begin(), upper.patches.end());
+        if (shape_parts::any(upper)) {  // (pen-shapes@1, PC3 C-b: the lower layer's parts, then the upper's; an id it has, a new one)
+            std::vector<core::vector::ShapePart> parts = into.shapes->items;
+            std::set<std::string> ids;
+            for (const core::vector::ShapePart& p : parts) ids.insert(p.id);
+            for (core::vector::ShapePart p : upper.shapes->items) {
+                while (ids.contains(p.id)) p.id = core::new_id();
+                ids.insert(p.id);
+                parts.push_back(std::move(p));
+            }
+            if (parts.size() > core::vector::kShapePartsMax) throw OpError("the merged layer would hold too many shape parts");
+            into.shapes = core::vector::make_shapes(std::move(parts));
+        }
     } else {
         const int dpi = kWorkingDpi;
         const Image below = layer_image(page, lower, dpi, &doc);
@@ -1314,6 +1330,7 @@ void merge_down(OpContext& c) {
         Layer& into = page.layers[li];
         into.strokes = core::empty_strokes();
         into.patches.clear();
+        into.shapes = core::vector::empty_shapes();  // (pen-shapes@1, PC3 C-b: drawn in)
         into.mask.reset();
         into.vector_mask.reset();  // (vector@1, PC3 C-a: drawn in, as the mask)
         into.kind = LayerKind::Raster;
@@ -1407,6 +1424,7 @@ void convert_layer(OpContext& c) {
         for (core::Stroke& s : traced) strokes.push_back(std::make_shared<const core::Stroke>(std::move(s)));
         layer.strokes = core::make_strokes(std::move(strokes));
         layer.patches.clear();
+        layer.shapes = core::vector::empty_shapes();  // (pen-shapes@1, PC3 C-b: traced with the rest)
         layer.raster_png.reset();
         layer.kind = LayerKind::Strokes;
         return;
@@ -1565,7 +1583,7 @@ void paste(OpContext& c) {
     Page& page = doc.edit_page(at);
     const std::size_t ti = raster_paint_target(page, op);
     selection::Items items = selection::items_from_json(core::truthy_at(op, "items") ? op["items"] : Json::object());
-    if (items.strokes.empty() && items.patches.empty()) throw OpError("nothing to paste");
+    if (items.empty()) throw OpError("nothing to paste");
     validate_patch_items(items);
     const std::vector<double> m = matrix_of(op);
     if (m.size() != 6) {
@@ -1580,7 +1598,7 @@ void paste(OpContext& c) {
         pasted.kind = LayerKind::Raster;
         pasted.panel_clip = page.layers[ti].panel_clip;
         pasted.panel_each = page.layers[ti].panel_each;
-        selection::drop(pasted, std::move(items), selection::Matrix{m[0], m[1], m[2], m[3], m[4], m[5]}, true);
+        selection::drop(pasted, std::move(items), selection::Matrix{m[0], m[1], m[2], m[3], m[4], m[5]}, true, Resample::Bilinear, &page);
         Layer& target = page.layers[ti];
         precise_edit(target, [&] { return color_edit::paste(page, target, pasted, &doc); });
         return;
@@ -1611,8 +1629,8 @@ void paste(OpContext& c) {
         pictures.push_back(std::move(patch));
     }
     items.patches = std::move(pictures);
-    if (items.strokes.empty() && items.patches.empty()) return;
-    selection::drop(target, std::move(items), selection::Matrix{m[0], m[1], m[2], m[3], m[4], m[5]}, true);
+    if (items.empty()) return;
+    selection::drop(target, std::move(items), selection::Matrix{m[0], m[1], m[2], m[3], m[4], m[5]}, true, Resample::Bilinear, &page);
 }
 
 // --- pixels in --------------------------------------------------------------------------------------------------------
@@ -2194,7 +2212,7 @@ void stamp_material(OpContext& c) {
             for(const auto& patch:items.patches){const auto& b=patch.attrs.at("box");const double x=core::py_float(b[0]),y=core::py_float(b[1]);point(x,y);point(x+core::py_float(b[2]),y+core::py_float(b[3]));}
             if(std::isfinite(loX)){matrix[4]=core::py_float(c.op["x_mm"])-(loX+hiX)/2;matrix[5]=core::py_float(c.op["y_mm"])-(loY+hiY)/2;}
         }
-        selection::drop(target,std::move(items),matrix,true);return;
+        selection::drop(target,std::move(items),matrix,true,Resample::Bilinear,&c.doc.page(at));return;
     }
     throw OpError("unknown material kind " + core::py_str(kind_value));
 }
@@ -2287,7 +2305,7 @@ void filter_raster(OpContext& c) {
             if (!own || own->python) color_filters::check(kind, own ? own->params : params);
         });
         const std::optional<Json> area = core::truthy_at(op, "area") ? std::optional<Json>(core::op_area(op)) : std::nullopt;
-        const bool marks = layer.stroke_count() > 0 || !layer.patches.empty();
+        const bool marks = layer.stroke_count() > 0 || !layer.patches.empty() || shape_parts::any(layer);
         const core::InkPixels inks = ink_edit::with_marks(page, layer, &doc);
         std::string pixels = refused([&] {
             if (own && !own->python) return adjust_ops::filter_inks(*own, doc, page, inks, kind, area ? &*area : nullptr);
@@ -2298,13 +2316,14 @@ void filter_raster(OpContext& c) {
         if (marks) {  // (as raster.bake_vectors leaves the layer: its marks in its pixels)
             layer.strokes = core::empty_strokes();
             layer.patches.clear();
+            layer.shapes = core::vector::empty_shapes();
         }
         layer.kind = LayerKind::Raster;  // (as the 8-bit filter leaves it: a paint layer)
         return;
     }
     // (pen lines and shape fills become pixels, so the filter reaches them)
     // (color-model@1: on an RGB page of a profile, into its values — not while a plugin works the page lent as sRGB)
-    if (layer.stroke_count() > 0 || !layer.patches.empty()) raster::bake_vectors(page, layer, core::profiled_rgb(page));
+    if (layer.stroke_count() > 0 || !layer.patches.empty() || shape_parts::any(layer)) raster::bake_vectors(page, layer, core::profiled_rgb(page));
     const std::string kind = core::truthy_at(op, "kind") ? core::py_str(op["kind"]) : std::string();
     // ops.filtered_raster
     const Image image = raster::layer_pixels(page, layer);

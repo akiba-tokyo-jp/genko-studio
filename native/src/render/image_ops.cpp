@@ -20,6 +20,7 @@
 #include "render/ops_registry.hpp"
 #include "render/page.hpp"
 #include "render/raster.hpp"
+#include "render/shape_parts.hpp"
 #include "render/selection.hpp"
 
 namespace genko::render::image_ops {
@@ -391,7 +392,7 @@ Pixels layer_pixels(core::OpContext& c, std::size_t at, const std::string& id) {
     }
     if (page.color && !layer.raster_png) return from_inks(ink_edit::with_marks(page, layer, &doc), *page.color);
     // (pen lines and fills become pixels, as filter_raster bakes them; an RGB page of a profile's: its values)
-    if (layer.stroke_count() > 0 || !layer.patches.empty()) raster::bake_vectors(page, layer, core::profiled_rgb(page));
+    if (layer.stroke_count() > 0 || !layer.patches.empty() || shape_parts::any(layer)) raster::bake_vectors(page, layer, core::profiled_rgb(page));
     return from_image(raster::layer_pixels(page, layer));
 }
 
@@ -409,6 +410,7 @@ void put_layer_pixels(core::Document& doc, std::size_t at, const std::string& id
             layer.ink_raster = std::make_shared<const std::string>(to_inks(p));
             layer.ink_memo = {};
             layer.strokes = core::empty_strokes();  // (its marks are in its inks: as filter_raster leaves it)
+            layer.shapes = core::vector::empty_shapes();
             layer.patches.clear();
             break;
     }
@@ -496,7 +498,7 @@ Pixels layer_pixels(core::OpContext& c, std::size_t at, const std::string& id, c
         }
         return p;
     }
-    if (layer.stroke_count() > 0 || !layer.patches.empty()) raster::bake_vectors(page, layer, core::profiled_rgb(page));
+    if (layer.stroke_count() > 0 || !layer.patches.empty() || shape_parts::any(layer)) raster::bake_vectors(page, layer, core::profiled_rgb(page));
     const Image picture = raster::layer_pixels(page, layer);
     const Box box = clamped(wanted, picture.size());
     if (window != nullptr) *window = Window{box, picture.size()};
@@ -544,6 +546,7 @@ void put_layer_pixels(core::Document& doc, std::size_t at, const std::string& id
             layer.ink_raster = std::make_shared<const std::string>(core::encode_ink_raster(whole));
             layer.ink_memo = {};
             layer.strokes = core::empty_strokes();  // (its marks are in its inks: as filter_raster leaves it)
+            layer.shapes = core::vector::empty_shapes();
             layer.patches.clear();
             break;
         }
@@ -602,7 +605,7 @@ Pixels page_pixels(const core::Document& doc, const core::Page& page) {
 }
 
 Pixels shown_layer_pixels(const core::Document& doc, const core::Page& page, const core::Layer& layer) {
-    const bool lines = layer.stroke_count() > 0 || !layer.patches.empty();
+    const bool lines = layer.stroke_count() > 0 || !layer.patches.empty() || shape_parts::any(layer);
     if (layer.color_raster && !lines) return from_precise(*layer.color_raster);
     if (page.color && !layer.raster_png && (layer.ink_raster || layer.kind == core::LayerKind::Raster || layer.kind == core::LayerKind::Strokes))
         return from_inks(ink_edit::with_marks(page, layer, &doc), *page.color);

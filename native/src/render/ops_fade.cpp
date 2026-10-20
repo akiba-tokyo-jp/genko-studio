@@ -101,7 +101,8 @@ void fade_layer(core::OpContext& c) {
     if (layer.locked) throw OpError("the layer is locked");
     const bool eight = layer.raster_png && !layer.raster_png->empty();
     if (!eight && !layer.color_raster && !layer.ink_raster) throw OpError("the layer " + id + " holds no pixels to fade");
-    if (layer.stroke_count() > 0 || !layer.patches.empty()) throw OpError("the layer " + id + " holds lines or fills besides its pixels");
+    if (layer.stroke_count() > 0 || !layer.patches.empty() || (layer.shapes && !layer.shapes->items.empty()))
+        throw OpError("the layer " + id + " holds lines or fills besides its pixels");
     if (!doc.asset_dir) throw OpError("fade_layer reads the pixels before from the book's folder: save the book first");
     // (the pixels before and after, of the same kind and size)
     const auto refused = [&]() -> OpError { return OpError("from is not the pixels of this layer before (another kind or size)"); };

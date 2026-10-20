@@ -323,7 +323,7 @@ std::optional<Json> MainWindow::copy_selection_items() {
         flash(wording::error(QString::fromUtf8(error.what())), 4000, true);
         return std::nullopt;
     }
-    if (items.strokes.empty() && items.patches.empty()) {
+    if (items.empty()) {  // (pen-shapes@1: shape parts too)
         flash(QStringLiteral("選んだ範囲に、描く先のレイヤーの絵がありません"), 3000);
         return std::nullopt;
     }

@@ -17,6 +17,7 @@
 #include "render/image_ops.hpp"
 #include "render/op_limits.hpp"
 #include "render/ops_registry.hpp"
+#include "render/ops_shapes.hpp"
 #include "render/path_areas.hpp"
 #include "render/path_raster.hpp"
 #include "render/path_trace.hpp"
@@ -205,17 +206,19 @@ void make_work_path(OpContext& c) {
     c.report = Json{{"subpaths", static_cast<std::int64_t>(path.subpaths.size())}, {"knots", static_cast<std::int64_t>(knots_of(path))}};
 }
 
-// {id, to?: "work" (default) | "shape", page?} → {page, subpaths, knots, notes}: a placed line's letters (its text and
-// rubies, drawn as the page draws them: turned, leaning, bent, warped, along its path) as the work path of its page —
-// their outline traced at 600 dpi within 1/1200 inch (作業用パスを作成). What is not a letter is left out and named in
-// the notes: the balloon, the halo (白フチ), a picture or gradient on the letters (only their shapes are traced).
+// {id, to?: "work" (default) | "shape", page?, layer_id?, fill?, stroke?, name?} → {page, subpaths, knots, notes}: a placed
+// line's letters (its text and rubies, drawn as the page draws them: turned, leaning, bent, warped, along its path) as the
+// work path of its page — their outline traced at 600 dpi within 1/1200 inch (作業用パスを作成). What is not a letter is
+// left out and named in the notes: the balloon, the halo (白フチ), a picture or gradient on the letters (only their shapes
+// are traced). to "shape" (シェイプに変換, PC3 C-b): a shape part of that outline instead (filled in the letters' colour
+// unless fill says otherwise) on the pen layer layer_id names, or on a new pen layer on top of the page; the line stays
+// as it is (a line of dialogue is not a layer) — its report add_shape_part's with the notes.
 void text_to_path(OpContext& c) {
     Document& doc = c.doc;
     const Json* id = given(c.op, "id");
     if (id == nullptr || !id->is_string()) throw OpError("id is required (the line's id)");
     const std::string to = given(c.op, "to") != nullptr ? core::py_str(*given(c.op, "to")) : std::string("work");
-    if (to == "shape") core::not_yet_ported("text_to_path to a shape (type.convertToShape) is not in the C++ build yet (PC3 C-b)");
-    if (to != "work") throw OpError("to is work or shape");
+    if (to != "work" && to != "shape") throw OpError("to is work or shape");
     const std::string line_id = id->get<std::string>();
     const core::StoryLine& line = core::find_line(doc, line_id);
     std::optional<std::size_t> at;
@@ -270,6 +273,26 @@ void text_to_path(OpContext& c) {
             notes.push_back("the letters' fill is left out (only their shapes)");
             break;
         }
+    }
+    if (to == "shape") {  // (pen-shapes@1, PC3 C-b: the outline as a shape part, render/ops_shapes)
+        const Json* rgb = core::get(st, "rgb");
+        const Json colour = rgb != nullptr && core::py_truthy(*rgb) ? Json{{"rgb", *rgb}} : Json{{"rgb", Json::array({10, 10, 10})}};
+        const Json index = page.index.json();
+        Json terms = c.op;
+        terms["page"] = index;
+        if (given(terms, "layer_id") == nullptr) {
+            terms["new_layer"] = Json{{"name", "シェイプ"}};
+            if (!page.layers.empty()) terms["new_layer"]["after"] = page.layers.back().id;
+        }
+        terms.erase("id");
+        OpContext sub{doc, terms, c.actor};
+        Json report = place_shape(sub, *at, path, std::nullopt, "path", colour);
+        report["page"] = index;
+        report["subpaths"] = static_cast<std::int64_t>(path.subpaths.size());
+        report["knots"] = static_cast<std::int64_t>(knots_of(path));
+        report["notes"] = notes;
+        c.report = std::move(report);
+        return;
     }
     Page& edited = doc.edit_page(*at);
     edited.work_path = path;

@@ -553,7 +553,7 @@ void check_strict(const Document& doc, const Json& op_in, const Actor& actor) {
                 break;
             }
         }
-        const bool drawn = target != nullptr && (target->stroke_count() > 0 || !target->patches.empty() ||
+        const bool drawn = target != nullptr && (target->stroke_count() > 0 || !target->patches.empty() || (target->shapes && !target->shapes->items.empty()) ||
                                                  (target->raster_png && !target->raster_png->empty()));
         if (drawn && printed(*target) && !target->exportable && !page.name_ok) {
             throw OpError("set_layer exportable on a drawn layer needs name_ok on page " + page.index.repr() +

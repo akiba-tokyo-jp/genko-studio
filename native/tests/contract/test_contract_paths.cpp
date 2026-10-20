@@ -363,7 +363,10 @@ private slots:
         const vec::Path& glyphs = *letters.doc.page(0).work_path;
         const auto box = glyphs.control_bounds();
         QVERIFY(box && (*box)[0] > 10 && (*box)[2] < 60);  // (where the letters are on the page)
-        QCOMPARE(refusal(lettered, Json{{"op", "text_to_path"}, {"id", "t1"}, {"to", "shape"}}).substr(0, 14), std::string("not_yet_ported"));
+        // (to "shape", シェイプに変換: written by PC3 C-b — a shape part of the letters on a new pen layer)
+        const core::ApplyResult shaped = run_ops(lettered, Json::array({Json{{"op", "text_to_path"}, {"id", "t1"}, {"to", "shape"}}}));
+        QVERIFY(shaped.results[0].contains("part"));
+        QVERIFY(shaped.doc.page(0).work_path == lettered.page(0).work_path);  // (the work path as it was)
         QVERIFY(!refusal(lettered, Json{{"op", "text_to_path"}, {"id", "ない"}}).empty());
     }
 

@@ -625,7 +625,7 @@ Json page_issues(const core::Document& episode, const core::Page& page) {
     bool art = false;
     std::vector<const core::Layer*> hidden;
     for (const core::Layer& layer : page.layers) {
-        const bool drawn = layer.stroke_count() > 0 || !layer.patches.empty() || has_pixels(layer);
+        const bool drawn = layer.stroke_count() > 0 || !layer.patches.empty() || (layer.shapes && !layer.shapes->items.empty()) || has_pixels(layer);
         if (prints(layer) && (drawn || layer.kind == LayerKind::Placed || layer.kind == LayerKind::Smart)) art = true;
         if (drawn && !prints(layer)) hidden.push_back(&layer);
     }

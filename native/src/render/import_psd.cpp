@@ -39,6 +39,7 @@
 #include "render/psd.hpp"
 #include "render/psd_adjust.hpp"
 #include "render/psd_paths.hpp"
+#include "render/psd_shapes.hpp"
 #include "render/raster.hpp"
 #include "render/not_yet_ported.hpp"
 #include "render/ops_smart_parts.hpp"
@@ -582,6 +583,7 @@ void import_psd(core::OpContext& c) {
         return mask;
     };
     std::vector<core::Layer> made;
+    std::vector<std::string> shapes_skipped, shapes_read;  // (pen-shapes@1: shape layers this build cannot read, and those read)
     std::map<std::string, std::string> contents_made;  // (PC3 A3: a placed layer's uuid → its contents' id)
     Json smart_objects = Json::array(), placed_pixels = Json::array();
     for (std::size_t i = 0; i < layers.size(); ++i) {
@@ -611,6 +613,38 @@ void import_psd(core::OpContext& c) {
         };
         if (item.folder) {
             layer.kind = core::LayerKind::Folder;
+        } else if (item.kind == "shape") {
+            // (pen-shapes@1, PC3 C-b: a shape layer as a new pen layer of one shape part — render/psd_shapes —, as the PSD
+            // shows it: not cut by the panels; one whose fill this build cannot read, left out as before)
+            std::optional<core::vector::ShapePart> part;
+            if (const auto blocks = file.shape_blocks(item)) {
+                psd_shapes::Placement placement;
+                placement.mm_x = static_cast<double>(where.shown_w) / std::max<double>(1.0, static_cast<double>(file.width())) * mm_x;
+                placement.mm_y = static_cast<double>(where.shown_h) / std::max<double>(1.0, static_cast<double>(file.height())) * mm_y;
+                placement.x0_mm = static_cast<double>(where.at_x) * mm_x;
+                placement.y0_mm = static_cast<double>(where.at_y) * mm_y;
+                placement.width_px = static_cast<double>(file.width());
+                placement.height_px = static_cast<double>(file.height());
+                placement.dpi = file.dpi();
+                part = psd_shapes::part_of(psd_shapes::Blocks{blocks->fill_key, blocks->fill, blocks->vscg, blocks->vstk, blocks->vogk, blocks->path},
+                                           placement);
+            }
+            if (!part) {
+                shapes_skipped.push_back(item.name);
+                continue;
+            }
+            part->id = "s1";
+            try {
+                part = core::vector::part_from_json(core::vector::to_json(*part));  // (its normal form, checked)
+            } catch (const core::Error&) {
+                shapes_skipped.push_back(item.name);
+                continue;
+            }
+            layer.kind = core::LayerKind::Strokes;
+            layer.panel_clip = false;
+            layer.shapes = core::vector::make_shapes({std::move(*part)});
+            if (auto mask = mask_of()) layer.mask = std::move(*mask);
+            shapes_read.push_back(layer.id);
         } else if (item.kind == "adjust" && item.adjust) {
             // (PC2, the user's decision 5: an adjustment layer a codec read, render/psd_adjust — a correction layer, its
             // blend its native.blend: a correction layer's own blend is not looked at)
@@ -700,12 +734,18 @@ void import_psd(core::OpContext& c) {
     for (const core::Layer& layer : made) listed.push_back(Json::object({{"id", layer.id}, {"title", layer.title}}));
     Json skipped = Json::array();
     for (const std::string& name : merged_only ? file.python_skipped() : file.skipped()) skipped.push_back(name);
+    for (const std::string& name : shapes_skipped) skipped.push_back(name);
     target.layers.insert(target.layers.begin() + static_cast<std::ptrdiff_t>(at), std::make_move_iterator(made.begin()),
                          std::make_move_iterator(made.end()));
     c.report = Json::object({{"layers", std::move(listed)}, {"skipped", std::move(skipped)}});
     // (PC3 A3: the placed layers made smart objects, and those read as their pixels and why — said only when there are)
     if (!smart_objects.empty()) (*c.report)["smart_objects"] = std::move(smart_objects);
     if (!placed_pixels.empty()) (*c.report)["placed_as_pixels"] = std::move(placed_pixels);
+    if (!shapes_read.empty()) {  // (pen-shapes@1, PC3 C-b: the shape layers read as pen layers of a shape part)
+        Json shapes = Json::array();
+        for (const std::string& id : shapes_read) shapes.push_back(id);
+        (*c.report)["shapes"] = std::move(shapes);
+    }
     // (vector@1, PC3 C-a: the file's saved paths onto the page — a name the page has already takes a number —, its work
     // path and clipping path where the page has none)
     Json paths = Json::array();

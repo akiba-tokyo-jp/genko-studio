@@ -315,7 +315,8 @@ void add_stroke_mixing(OpContext& c, const MixPieces& mix_pieces) {
     const Json mix = op.contains("mix") ? op["mix"] : Json(brush.mix);
     const Json stretch = op.contains("stretch") ? op["stretch"] : Json(brush.stretch);
     const bool mixing = py_truthy(mix) && to_float(mix) > 0 &&
-                        (target.stroke_count() > 0 || !target.patches.empty() || (target.raster_png && !target.raster_png->empty()));
+                        (target.stroke_count() > 0 || !target.patches.empty() || (target.raster_png && !target.raster_png->empty()) ||
+                         (target.shapes && !target.shapes->items.empty()));
     if (mixing && !mix_pieces) {
         not_yet_ported("add_stroke with mix (下地混色) on a layer that has something on it: the colour under the line is "
                        "read by the drawing build (render::ops_registry)");

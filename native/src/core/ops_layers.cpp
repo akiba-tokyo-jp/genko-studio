@@ -107,9 +107,7 @@ Json gradient_extras(const Json& g) {
     return out;
 }
 
-namespace {
-
-// ops._fill_spec: a fill layer's colour, or its gradient.
+// ops._fill_spec: a fill layer's colour, or its gradient (also a shape part's fill's, pen-shapes@1: render/ops_shapes).
 Json fill_spec(const Json& raw) {
     if (!raw.is_object()) throw OpError("fill is {rgb} or {gradient}");
     const Json* gradient = get(raw, "gradient");
@@ -137,13 +135,22 @@ Json fill_spec(const Json& raw) {
         const Json extras = gradient_extras(g);
         for (const auto& [key, value] : extras.items()) out[key] = value;
         const std::string& s = out["shape"].get_ref<const std::string&>();
-        if (s != "linear" && s != "radial" && s != "ellipse") throw OpError("shape must be linear, radial or ellipse");
+        // (vector@1, PC3 C-b: Photoshop's angle, reflected and diamond gradients, and reverse)
+        if (s != "linear" && s != "radial" && s != "ellipse" && s != "angle" && s != "reflected" && s != "diamond") {
+            throw OpError("shape must be linear, radial, ellipse, angle, reflected or diamond");
+        }
+        if (const Json* reverse = get(g, "reverse"); reverse != nullptr && !reverse->is_null()) {
+            if (!reverse->is_boolean()) throw OpError("reverse must be true or false");
+            if (reverse->get<bool>()) out["reverse"] = true;
+        }
         if (out["from"].size() != 2 || out["to"].size() != 2) throw OpError("from and to are [x_mm, y_mm]");
         return Json::object({{"gradient", std::move(out)}});
     }
     const Json* rgb = get(raw, "rgb");
     return Json::object({{"rgb", ints_json(rgb3(rgb != nullptr && py_truthy(*rgb) ? *rgb : Json::array({255, 255, 255}), "rgb"))}});
 }
+
+namespace {
 
 // ops._effect_spec: 境界効果 (a border round the layer's picture, a watercolour edge).
 Json effect_spec(const Json& raw) {
@@ -375,6 +382,11 @@ void duplicate_layer(OpContext& c) {
         strokes.push_back(std::make_shared<const Stroke>(std::move(fresh)));
     }
     twin.strokes = make_strokes(std::move(strokes));
+    if (twin.shapes && !twin.shapes->items.empty()) {  // (pen-shapes@1, PC3 C-b: its shape parts with new ids too)
+        std::vector<vector::ShapePart> parts = twin.shapes->items;
+        for (vector::ShapePart& part : parts) part.id = new_id();
+        twin.shapes = vector::make_shapes(std::move(parts));
+    }
     for (Patch& patch : twin.patches) {
         const std::string id = new_id();
         if (patch.attrs.contains("id")) {
