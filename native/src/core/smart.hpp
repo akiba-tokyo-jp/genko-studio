@@ -141,6 +141,14 @@ std::optional<Showing> showing(const Document& doc, const std::string& id);
 
 // The contents the book's pages show (directly or inside other contents), in id order: what the writer writes.
 std::vector<std::string> used_contents(const Document& doc);
+// A page the book writes: one of its pages read so far (`contents` empty), or the page of contents its pages show
+// (used_contents; `contents` their id). What PC3's extensions are named for and checked on (masks@1, vector@1,
+// pen-shapes@1, transform@1, page-spec@1: a contents page holds what a page of the book does).
+struct WrittenPage {
+    const Page* page = nullptr;
+    std::string contents;
+};
+std::vector<WrittenPage> written_pages(const Document& doc);
 // Does the book hold a smart object (a layer of kind smart, or contents)? It then names smart-objects@1.
 bool uses_smart(const Document& doc);
 // The positions of the book's pages that show these contents (directly or inside other contents).

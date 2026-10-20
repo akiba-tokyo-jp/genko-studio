@@ -22673,7 +22673,9 @@
         "native/src/core/command_bus.cpp",
         "native/src/core/smart.cpp",
         "native/tests/unit/test_smart_contents.cpp",
-        "native/tests/gui/test_gui_smart_contents.cpp"
+        "native/tests/gui/test_gui_smart_contents.cpp",
+        "native/src/storage/reader.cpp",
+        "native/tests/unit/test_smart.cpp"
       ],
       "pc0": {
         "date": "2026-10-16",
