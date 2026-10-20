@@ -660,18 +660,27 @@ File File::read(std::string data, const Limits& limits, bool lab) {
                     rec.mask_disabled = (flags & 2) != 0;
                     rec.mask = true;
                     // (PC3 B2, masks@1: the mask parameters after the flags — its user density and feather — and its
-                    // position relative to the layer, as PhotoCraft's io reads them)
+                    // position relative to the layer, as PhotoCraft's io reads them; vector@1, PC3 C-a: its vector
+                    // mask's density and feather after those, bits 2 and 3)
                     if ((flags & 16) != 0 && r.pos < mend) {
                         const unsigned held = r.u8();
                         rec.mask_parameters = true;
                         rec.mask_unlinked = (flags & 1) != 0;
-                        if ((held & 1) != 0 && r.pos + 1 <= mend) rec.mask_density = static_cast<int>(r.u8());
-                        if ((held & 2) != 0 && r.pos + 8 <= mend) {
+                        const auto density = [&r, mend]() -> std::optional<int> {
+                            if (r.pos + 1 > mend) return std::nullopt;
+                            return static_cast<int>(r.u8());
+                        };
+                        const auto feather = [&r, mend]() -> std::optional<double> {
+                            if (r.pos + 8 > mend) return std::nullopt;
                             const std::uint64_t bits = r.u64();
-                            double feather = 0;
-                            std::memcpy(&feather, &bits, sizeof feather);
-                            if (std::isfinite(feather) && feather >= 0) rec.mask_feather = feather;
-                        }
+                            double px = 0;
+                            std::memcpy(&px, &bits, sizeof px);
+                            return std::isfinite(px) && px >= 0 ? std::optional<double>(px) : std::nullopt;
+                        };
+                        if ((held & 1) != 0) rec.mask_density = density();
+                        if ((held & 2) != 0) rec.mask_feather = feather();
+                        if ((held & 4) != 0) rec.vector_density = density();
+                        if ((held & 8) != 0) rec.vector_feather = feather();
                     }
                     r.pos = mend;
                 }
@@ -863,6 +872,8 @@ File File::read(std::string data, const Limits& limits, bool lab) {
                 layer.mask_unlinked = rec.mask_unlinked;
                 layer.mask_density = rec.mask_density;
                 layer.mask_feather = rec.mask_feather;
+                layer.vector_density = rec.vector_density;  // (vector@1)
+                layer.vector_feather = rec.vector_feather;
                 f.layers_.push_back(std::move(layer));
                 if (!pending.empty()) pending.back().push_back(f.layers_.size() - 1);
                 f.python_skipped_.push_back(rec.name);  // (psd.py leaves every adjustment layer out)
@@ -914,6 +925,8 @@ File File::read(std::string data, const Limits& limits, bool lab) {
                 if (mask->length < pixels) value_error("not enough image data");
             }
         }
+        layer.vector_density = rec.vector_density;  // (vector@1: with a mask of its own or without)
+        layer.vector_feather = rec.vector_feather;
         f.layers_.push_back(std::move(layer));
         if (!pending.empty()) pending.back().push_back(f.layers_.size() - 1);
     }

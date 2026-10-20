@@ -24169,7 +24169,9 @@
         "native/tests/gui/test_gui_paths.cpp",
         "native/src/render/psd_paths.cpp",
         "native/src/formats/psd_export.cpp",
-        "native/src/render/import_psd.cpp"
+        "native/src/render/import_psd.cpp",
+        "native/src/render/psd.cpp",
+        "native/tests/contract/test_contract_shapes.cpp"
       ],
       "pc0": {
         "date": "2026-10-16",

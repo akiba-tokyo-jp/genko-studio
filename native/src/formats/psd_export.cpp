@@ -225,9 +225,11 @@ public:
     }
 
     // vector@1 (PC3 C-a): the page's paper (mm), a vector mask's vmsk block being in fractions of it, and a layer's vector
-    // mask as that block ("" for none: render/psd_paths)
+    // mask as that block ("" for none: render/psd_paths) — its density and feather noted for the next record's mask data
+    // (the user's decision 3: mask_data)
     void paper(double width_mm, double height_mm) { paper_ = {width_mm, height_mm}; }
-    std::string vector_block(const std::optional<core::vector::VectorMask>& mask) const {
+    std::string vector_block(const std::optional<core::vector::VectorMask>& mask) {
+        vector_ = mask;
         if (!mask) return {};
         std::string payload = render::psd_paths::vmsk(*mask, paper_[0], paper_[1]);
         payload.append((4 - payload.size() % 4) % 4, '\0');
@@ -474,51 +476,71 @@ public:
     }
 
 private:
+    // A feather (mm) in pixels of the canvas, as the mask parameters hold it (a double, big-endian).
+    void put_feather(std::string& out, double feather_mm) const {
+        const double width_mm = page_ != nullptr ? page_->spec.width_mm.value() : 0.0;
+        const double px = width_mm > 0 ? feather_mm * size_.width / width_mm : 0.0;
+        std::uint64_t bits = 0;
+        std::memcpy(&bits, &px, sizeof bits);
+        put_u32(out, static_cast<std::uint32_t>(bits >> 32));
+        put_u32(out, static_cast<std::uint32_t>(bits & 0xffffffffu));
+    }
+
+    // The next record's mask data (its length first), the settings noted for it used up. With its mask (`picture`: an L
+    // picture over the whole canvas, white shows) of masks@1 (PC3 B2, the user's decision 3): Photoshop's flags — bit 0
+    // not linked, bit 1 disabled, bit 4 its parameters — and its user density (0..255) and feather (pixels) after them,
+    // as PhotoCraft's io writes them; a vector mask's density and feather (vector@1, PC3 C-a, the same decision: the
+    // parameters' bits 2 and 3) after those — written alone, with no mask of the layer's, when it has none. Without any of
+    // them a mask as before (20 bytes), or none.
+    std::string mask_data_of(bool picture) {
+        const std::optional<core::Mask> settings = std::exchange(settings_, std::nullopt);
+        const std::optional<core::vector::VectorMask> vector = std::exchange(vector_, std::nullopt);
+        const bool user = picture && settings && core::mask_has_settings(*settings);
+        const bool density = user && settings->density < 1.0, feather = user && settings->feather_mm > 0.0;
+        const bool vector_density = vector && vector->density < 1.0, vector_feather = vector && vector->feather_mm > 0.0;
+        std::string out;
+        if (!user && !vector_density && !vector_feather) {
+            if (!picture) {
+                put_u32(out, 0);
+                return out;
+            }
+            put_u32(out, 20);
+            put_i32(out, 0);
+            put_i32(out, 0);
+            put_i32(out, size_.height);
+            put_i32(out, size_.width);
+            out += std::string("\xff\x00\x00\x00", 4);
+            return out;
+        }
+        std::string body;
+        put_i32(body, 0);
+        put_i32(body, 0);
+        put_i32(body, picture ? size_.height : 0);
+        put_i32(body, picture ? size_.width : 0);
+        put_u8(body, 255);
+        unsigned flags = 16u;
+        // (a mask without masks@1's settings, written with a vector mask's: fixed to the page, as it is)
+        if (picture) flags |= (user && settings->linked ? 0u : 1u) | (user && !settings->enabled ? 2u : 0u);
+        put_u8(body, flags);
+        put_u8(body, (density ? 1u : 0u) | (feather ? 2u : 0u) | (vector_density ? 4u : 0u) | (vector_feather ? 8u : 0u));
+        const auto put_density = [&body](double d) { put_u8(body, static_cast<unsigned>(std::clamp<long>(std::lround(d * 255.0), 0, 255))); };
+        if (density) put_density(settings->density);
+        if (feather) put_feather(body, settings->feather_mm);
+        if (vector_density) put_density(vector->density);
+        if (vector_feather) put_feather(body, vector->feather_mm);
+        body.append((4 - body.size() % 4) % 4, '\0');
+        put_u32(out, u32_of(body.size()));
+        return out + body;
+    }
+
     void record(const std::string& name, std::vector<std::pair<int, std::string>> channels, const render::Box& box, double opacity_given,
                 const std::string& blend, bool clip, std::optional<std::string> mask_plane, const std::string& blocks) {
         put_i32(records_, box.y0);
         put_i32(records_, box.x0);
         put_i32(records_, box.y1);
         put_i32(records_, box.x1);
-        std::string mask_data;
-        const std::optional<core::Mask> settings = std::exchange(settings_, std::nullopt);
-        if (mask_plane && settings && core::mask_has_settings(*settings)) {
-            // (PC3 B2, the user's decision 3: a mask of masks@1 with Photoshop's flags — bit 0 not linked, bit 1 disabled,
-            // bit 4 its parameters — and its user density (0..255) and feather (pixels) after them, as PhotoCraft's io
-            // writes them; padded to 4 bytes)
-            channels.emplace_back(-2, std::move(*mask_plane));
-            std::string body;
-            put_i32(body, 0);
-            put_i32(body, 0);
-            put_i32(body, size_.height);
-            put_i32(body, size_.width);
-            put_u8(body, 255);
-            put_u8(body, (settings->linked ? 0u : 1u) | (settings->enabled ? 0u : 2u) | 16u);
-            const bool density = settings->density < 1.0, feather = settings->feather_mm > 0.0;
-            put_u8(body, (density ? 1u : 0u) | (feather ? 2u : 0u));
-            if (density) put_u8(body, static_cast<unsigned>(std::clamp<long>(std::lround(settings->density * 255.0), 0, 255)));
-            if (feather) {
-                const double width_mm = page_ != nullptr ? page_->spec.width_mm.value() : 0.0;
-                const double px = width_mm > 0 ? settings->feather_mm * size_.width / width_mm : 0.0;
-                std::uint64_t bits = 0;
-                std::memcpy(&bits, &px, sizeof bits);
-                put_u32(body, static_cast<std::uint32_t>(bits >> 32));
-                put_u32(body, static_cast<std::uint32_t>(bits & 0xffffffffu));
-            }
-            body.append((4 - body.size() % 4) % 4, '\0');
-            put_u32(mask_data, u32_of(body.size()));
-            mask_data += body;
-        } else if (mask_plane) {  // (an L picture over the whole canvas: white shows)
-            channels.emplace_back(-2, std::move(*mask_plane));
-            put_u32(mask_data, 20);
-            put_i32(mask_data, 0);
-            put_i32(mask_data, 0);
-            put_i32(mask_data, size_.height);
-            put_i32(mask_data, size_.width);
-            mask_data += std::string("\xff\x00\x00\x00", 4);
-        } else {
-            put_u32(mask_data, 0);
-        }
+        const std::string mask_data = mask_data_of(mask_plane.has_value());
+        if (mask_plane) channels.emplace_back(-2, std::move(*mask_plane));
         put_u16(records_, static_cast<std::uint32_t>(channels.size()));
         for (const auto& [id, packed] : channels) {
             put_u16(records_, static_cast<std::uint32_t>(static_cast<std::int16_t>(id)) & 0xffff);
@@ -543,7 +565,7 @@ private:
     // A group's record: no pixels (a channel of nothing for each of the document's and the alpha), its section
     // divider (lsct): 1 an open group (with its blend, pass through), 3 the end of one.
     // (pen-shapes@1, PC3 C-b: a pen layer's group with its settings — its opacity, its blend instead of pass through, its
-    // mask at the document's depth and its vector mask's block)
+    // mask at the document's depth with its settings, and its vector mask's block)
     void section(const std::string& name, std::uint32_t type, std::string_view blend, double opacity_given = 1.0, const Image* mask = nullptr,
                  const std::string& blocks = {}) {
         for (int i = 0; i < 4; ++i) put_i32(records_, 0);
@@ -575,17 +597,7 @@ private:
         put_u8(records_, 0);
         put_u8(records_, 0x18);  // (flags: visible; Photoshop's bits 3 and 4 — its pixels do not show)
         put_u8(records_, 0);
-        std::string extra;
-        if (mask_plane) {  // (an L picture over the whole canvas: white shows)
-            put_u32(extra, 20);
-            put_i32(extra, 0);
-            put_i32(extra, 0);
-            put_i32(extra, size_.height);
-            put_i32(extra, size_.width);
-            extra += std::string("\xff\x00\x00\x00", 4);
-        } else {
-            put_u32(extra, 0);
-        }
+        std::string extra = mask_data_of(mask_plane.has_value());  // (a pen layer's mask settings and vector mask's too)
         put_u32(extra, 0);
         extra += pascal(name) + unicode_name(name) + blocks;
         std::string divider;
@@ -614,6 +626,7 @@ private:
     int count_ = 0;
     const core::Page* page_ = nullptr;     // (PC3 B2: masks_of)
     std::optional<core::Mask> settings_;  // (the next record's mask settings: note_mask)
+    std::optional<core::vector::VectorMask> vector_;  // (the next record's vector mask: vector_block)
     unsigned flags_ = 0;  // (the next record's flags: a shape layer's, pen-shapes@1)
 };
 
@@ -1334,6 +1347,10 @@ std::string page_psd_inks(const core::Document& episode, const core::Page& page,
     records.placed([&placed](const core::Layer& layer) { return placed.blocks(layer); });
     records.paper(page.spec.width_mm.value(), page.spec.height_mm.value());
     const auto each = [&](render::PageLayer&& layer) {
+        if (!layer.section.empty() || layer.shape != nullptr) {  // (pen-shapes@1: a pen layer's group and its shape layers)
+            records.add(std::move(layer));
+            return;
+        }
         records.note_mask(layer);  // (PC3 B2: its mask's masks@1 settings)
         const std::vector<double> values = layer.inks ? *layer.inks : render::ink_picture(layer.image, color).values;
         records.add_inks(layer.name, values, color.space, color.depth, layer.settings ? layer.opacity : 1.0,

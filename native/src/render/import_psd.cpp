@@ -589,7 +589,14 @@ void import_psd(core::OpContext& c) {
         const std::optional<std::string_view> block = file.vector_mask(item);
         if (!block) return std::nullopt;
         std::optional<core::vector::VectorMask> mask = psd_paths::vector_mask_of(*block, 1.0, 1.0);
-        if (mask) mask->path = mask->path.transformed(onto);
+        if (!mask) return mask;
+        mask->path = mask->path.transformed(onto);
+        // (the user's decision 3: its density and feather, Photoshop's mask parameters' bits 2 and 3)
+        if (item.vector_density) mask->density = core::py_round(std::clamp(*item.vector_density / 255.0, 0.0, 1.0), 4);
+        if (item.vector_feather && file.width() > 0) {
+            const double mm_per_px = mm_x * static_cast<double>(where.shown_w) / static_cast<double>(file.width());
+            mask->feather_mm = core::py_round(std::clamp(*item.vector_feather * mm_per_px, 0.0, core::vector::kFeatherMax), 4);
+        }
         return mask;
     };
     std::vector<core::Layer> made;

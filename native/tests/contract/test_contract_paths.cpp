@@ -28,6 +28,7 @@
 #include "render/page.hpp"
 #include "render/path_raster.hpp"
 #include "render/png.hpp"
+#include "render/psd.hpp"
 #include "render/selection.hpp"
 #include "testsupport.hpp"
 
@@ -574,6 +575,104 @@ json.dump({"paths": paths, "work": 1025 in res, "masks": masks, "size": [psd.wid
         QVERIFY(found);
         QCOMPARE(again["pages"][0]["paths"][0]["name"], Json("輪郭"));
         QVERIFY(again["pages"][0].contains("work_path"));
+    }
+
+    // PSD (the user's decision 3): a vector mask's density and feather as Photoshop's mask parameters (bits 2 and 3) — on a
+    // layer without a mask of its own (mask data and no mask channel), and after a mask of masks@1's settings —, read by
+    // psd-tools and by this build, kept by import_psd; a vector mask without them written as before (no mask data).
+    void psdVectorMaskDensityAndFeather() {
+        const QString book = make_book(QStringLiteral("psd-vmask.genko"));
+        Json ops = Json::array();
+        for (const auto& [id, name] : {std::pair{"vmsoft", "柔らか"}, {"vmplain", "そのまま"}, {"vmboth", "両方"}}) {
+            ops.push_back(Json{{"op", "add_layer"}, {"page", 1}, {"id", id}, {"kind", "paint"}, {"name", name}, {"panel_each", false}});
+            ops.push_back(Json{{"op", "fill_area"}, {"page", 1}, {"layer_id", id}, {"area", Json{{"rect", Json::array({5, 5, 150, 200})}}},
+                               {"rgb", Json::array({0, 0, 0})}, {"blend", "multiply"}});  // (its pixels: a PSD's layer)
+        }
+        ops.push_back(Json{{"op", "set_vector_mask"}, {"page", 1}, {"id", "vmsoft"}, {"path", rect(10, 10, 100, 120)}, {"density", 50}, {"feather_mm", 2}});
+        ops.push_back(Json{{"op", "set_vector_mask"}, {"page", 1}, {"id", "vmplain"}, {"path", rect(10, 10, 100, 120)}});
+        ops.push_back(Json{{"op", "set_layer_mask"}, {"page", 1}, {"id", "vmboth"}, {"area", Json{{"rect", Json::array({0, 0, 100, 297})}}}, {"density", 0.5}});
+        ops.push_back(Json{{"op", "set_vector_mask"}, {"page", 1}, {"id", "vmboth"}, {"path", rect(10, 10, 100, 120)}, {"feather_mm", 1.5}});
+        Json reply = apply(book, QStringLiteral("v.json"), ops);
+        QVERIFY2(reply.value("ok", false), reply.dump().c_str());
+        int exit = -1;
+        const Json out = genko({QStringLiteral("export"), book, path(QStringLiteral("vmask.psd")), QStringLiteral("--format"), QStringLiteral("psd"),
+                                QStringLiteral("--dpi"), QStringLiteral("100"), QStringLiteral("--json")},
+                               &exit);
+        QVERIFY2(exit == 0, out.dump().c_str());
+        const double width_mm = project(book)["spec"]["width_mm"].get<double>();
+        // this build's reader
+        const render::psd::File file = render::psd::File::read(genko::test::read_bytes(path(QStringLiteral("vmask.psd"))));
+        const double px_per_mm = static_cast<double>(file.width()) / width_mm;
+        int seen = 0;
+        for (const render::psd::Layer& l : file.layers()) {
+            if (l.name == "柔らか") {
+                ++seen;
+                QVERIFY(!l.has_mask);  // (mask data for the vector mask's parameters, no mask of its own)
+                QCOMPARE(l.vector_density, std::optional<int>(128));
+                QVERIFY(l.vector_feather && std::fabs(*l.vector_feather - 2 * px_per_mm) < 1e-6);
+            } else if (l.name == "そのまま") {
+                ++seen;
+                QVERIFY(!l.has_mask && !l.mask_parameters && !l.vector_density && !l.vector_feather);
+            } else if (l.name == "両方") {
+                ++seen;
+                QVERIFY(l.has_mask && l.mask_parameters && l.mask_density == 128 && !l.mask_feather);
+                QVERIFY(!l.vector_density && l.vector_feather && std::fabs(*l.vector_feather - 1.5 * px_per_mm) < 1e-6);
+            }
+        }
+        QCOMPARE(seen, 3);
+        if (!genko::test::python_ref().isEmpty()) {
+            constexpr const char* kRead = R"PY(
+import json, sys
+from psd_tools import PSDImage
+psd = PSDImage.open(sys.argv[2])
+out = {}
+for layer in psd.descendants():
+    data = layer._record.mask_data
+    item = {"vector": layer.has_vector_mask(), "data": data is not None}
+    if data is not None and data.parameters is not None:
+        p = data.parameters
+        item.update({"user_density": p.user_mask_density, "user_feather": p.user_mask_feather,
+                     "vector_density": p.vector_mask_density, "vector_feather": p.vector_mask_feather})
+    out[layer.name] = item
+json.dump(out, open(sys.argv[1], "w"), ensure_ascii=False)
+)PY";
+            const auto ran = genko::test::run(genko::test::python_ref(),
+                                              {QStringLiteral("-c"), QString::fromUtf8(kRead), path(QStringLiteral("vmask.json")), path(QStringLiteral("vmask.psd"))},
+                                              genko::test::python_env(path(QStringLiteral("pyenv"))));
+            QVERIFY2(ran.exit_code == 0, ran.err.constData());
+            const Json view = genko::test::read_json(path(QStringLiteral("vmask.json")));
+            QVERIFY2(view.contains("柔らか") && view.contains("そのまま") && view.contains("両方"), view.dump().c_str());
+            QCOMPARE(view["柔らか"]["vector_density"], Json(128));
+            QVERIFY2(std::fabs(view["柔らか"]["vector_feather"].get<double>() - 2 * px_per_mm) < 1e-6, view.dump().c_str());
+            QVERIFY(view["柔らか"]["user_density"].is_null() && view["柔らか"]["user_feather"].is_null());
+            QCOMPARE(view["そのまま"], (Json{{"vector", true}, {"data", false}}));
+            QCOMPARE(view["両方"]["user_density"], Json(128));
+            QVERIFY2(std::fabs(view["両方"]["vector_feather"].get<double>() - 1.5 * px_per_mm) < 1e-6, view.dump().c_str());
+        }
+        // import_psd: the vector masks' density and feather back (mm)
+        const QString other = make_book(QStringLiteral("psd-vmask-again.genko"));
+        reply = apply(other, QStringLiteral("vi.json"),
+                      Json::array({Json{{"op", "import_psd"}, {"page", 1}, {"path", path(QStringLiteral("vmask.psd")).toStdString()}, {"fit", "paper"}}}));
+        QVERIFY2(reply.value("ok", false), reply.dump().c_str());
+        int found = 0;
+        const Json again = project(other);
+        for (const Json& layer : again["pages"][0]["layers"]) {
+            const std::string title = layer.value("title", std::string());
+            if (!layer.contains("vector_mask")) continue;
+            const Json& vm = layer["vector_mask"];
+            if (title == "柔らか") {
+                ++found;
+                QVERIFY2(std::fabs(vm["density"].get<double>() - 128 / 255.0) < 1e-3 && std::fabs(vm["feather_mm"].get<double>() - 2) < 0.01, vm.dump().c_str());
+            } else if (title == "そのまま") {
+                ++found;
+                QVERIFY2(!vm.contains("density") && !vm.contains("feather_mm"), vm.dump().c_str());
+            } else if (title == "両方") {
+                ++found;
+                QVERIFY2(!vm.contains("density") && std::fabs(vm["feather_mm"].get<double>() - 1.5) < 0.01, vm.dump().c_str());
+                QVERIFY2(std::fabs(layer["mask"]["density"].get<double>() - 128 / 255.0) < 1e-3, layer.dump().c_str());
+            }
+        }
+        QVERIFY2(found == 3, again["pages"][0]["layers"].dump().c_str());
     }
 };
 
