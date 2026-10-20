@@ -105,7 +105,8 @@ struct PixelHooks {
 };
 // Everything on the page through the map (the lines of dialogue of the book on it too), `after` its paper when the map is
 // done (the same page with its new spec). The pixels through the hooks. A smart object's matrix after the map
-// (smart::transform_layer); a placed picture only moved and scaled (a turn or a mirror: made a smart object first).
+// (smart::transform_layer); a placed picture only moved and scaled (a turn or a mirror: made a smart object first); a
+// tone's screen and its linear gradient's way, and a layer's トーン化 screen, turned and mirrored with the page.
 void map_page(Document& doc, std::size_t page, const Mapping& m, const PixelHooks& hooks);
 
 // --- warps (geom/src/warp.rs) ----------------------------------------------------------------------------------------

@@ -30,6 +30,7 @@
 #include "render/bookpages.hpp"
 #include "render/image.hpp"
 #include "render/ops_registry.hpp"
+#include "render/page.hpp"
 #include "render/png.hpp"
 #include "storage/asset_store.hpp"
 
@@ -641,6 +642,37 @@ private slots:
         }
         doc.page_locks = Json{{doc.page(0).id, "human:other"}};
         QVERIFY(refusal(doc, one(Json{{"op", "rotate_pages"}, {"pages", "all"}, {"turn", "180"}})).find("locked by human:other") != std::string::npos);
+    }
+
+    // A tone's screen turned with its page, its look kept (the coordinator's decision after the PC3 review): lines across
+    // the page run down it after a quarter turn, as the turned page shows them (they stayed across before).
+    void aTonesScreenTurnsWithItsPage() {
+        Document doc = core::new_episode("判型", Num(1), 1, paper(), core::Binding::Right);
+        doc = after(doc, one(Json{{"op", "add_tone"}, {"page", 1}, {"id", "t"}, {"area", Json{{"rect", Json::array({0, 0, 101.6, 152.4})}}},
+                                  {"pattern", "line"}, {"angle", 0}, {"lpi", 10}, {"density", 0.5}}));
+        // (how much the middle of the page changes along its rows and down its columns)
+        const auto changes = [](const Document& d) {
+            render::RenderOptions print;
+            print.finish = true;  // (its dots: the print finish of a colour page)
+            const render::Image grey = render::render_page(d.page(0), 100, print, &d).image.convert("L");
+            const std::string px = grey.tobytes();
+            const int w = grey.width(), h = grey.height();
+            double along = 0, down = 0;
+            for (int y = h * 3 / 10; y < h * 7 / 10; ++y) {
+                for (int x = w * 3 / 10; x < w * 7 / 10; ++x) {
+                    const auto at = [&](int i, int j) { return static_cast<double>(static_cast<unsigned char>(px[std::size_t(j) * std::size_t(w) + std::size_t(i)])); };
+                    along += std::fabs(at(x + 1, y) - at(x, y));
+                    down += std::fabs(at(x, y + 1) - at(x, y));
+                }
+            }
+            return std::pair{along, down};
+        };
+        const auto [along0, down0] = changes(doc);
+        QVERIFY2(down0 > 10 * along0 && down0 > 0, qPrintable(QString("%1 %2").arg(along0).arg(down0)));  // (lines across)
+        const Document turned = after(doc, one(Json{{"op", "rotate_pages"}, {"page", 1}, {"turn", "90cw"}}));
+        QCOMPARE(layer_of(turned.page(0), "t").angle, 90.0);
+        const auto [along1, down1] = changes(turned);
+        QVERIFY2(along1 > 10 * down1 && along1 > 0, qPrintable(QString("%1 %2").arg(along1).arg(down1)));  // (lines down it)
     }
 
     // A placed picture turned with its page: it becomes a smart object of its file (the same id), its matrix turned.

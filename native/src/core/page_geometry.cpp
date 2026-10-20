@@ -313,6 +313,52 @@ namespace {
 // its pixels (PixelHooks::area).
 bool upright(const Mapping& m) { return m.keeps_axes() && m.m[0] > 0 && m.m[3] > 0; }
 
+// Whether the map turns or mirrors the page (not a move and a scale alone).
+bool turns_or_mirrors(const Mapping& m) { return m.reflects() || std::fabs(std::remainder(m.angle_deg(), 360.0)) > 1e-9; }
+
+// An angle on the page (degrees, x towards y: as the map's own, Mapping::angle_deg) turned and mirrored as the map turns
+// and mirrors the page — a mirror flips about the x axis first, then turns —: a screen's lines or dots, which have no way
+// along them, mirrored to −a; a gradient's way to 180 − a.
+double turned_angle(double a, const Mapping& m, bool has_way) {
+    if (!m.reflects()) return a + m.angle_deg();
+    return (has_way ? 180.0 - a : -a) + m.angle_deg();
+}
+
+double in_turn(double a, double turn) { return round3(std::fmod(std::fmod(a, turn) + turn, turn)); }
+
+// (the coordinator's decision after the PC3 review) A tone's screen, its linear gradient's way and a layer's トーン化
+// screen turned and mirrored with the page, its look kept: a tone layer's angle (0..360, as transform_layers turns it),
+// a screen's (0..180, as screen_spec keeps it), the gradient's (0..360; 90 when it had none). A move or a scale leaves
+// them as they are.
+void turn_screens(Layer& layer, const Mapping& m) {
+    if (!turns_or_mirrors(m)) return;
+    if (layer.kind == LayerKind::Tone) layer.angle = in_turn(turned_angle(layer.angle, m, false), 360.0);
+    if (layer.tone && layer.tone->is_object()) {
+        if (const auto g = layer.tone->find("gradient"); g != layer.tone->end() && g->is_object()) {
+            const auto shape = g->find("shape");
+            const bool radial = shape != g->end() && shape->is_string() && shape->get<std::string>() == "radial";
+            const auto angle = g->find("angle");
+            std::optional<double> a;  // (as the drawing reads it: a number, or a number's text, as the op kept it)
+            if (angle == g->end()) {
+                a = 90.0;
+            } else if (angle->is_number() || angle->is_string()) {
+                try {
+                    a = to_float(*angle);
+                } catch (const Error&) {
+                }
+            }
+            if (!radial && a && std::isfinite(*a)) (*g)["angle"] = in_turn(turned_angle(*a, m, true), 360.0);
+        }
+    }
+    if (layer.screen && layer.screen->is_object()) {
+        const auto angle = layer.screen->find("angle");
+        if (angle == layer.screen->end() || angle->is_number()) {
+            const double a = angle == layer.screen->end() ? 45.0 : angle->get<double>();
+            (*layer.screen)["angle"] = in_turn(turned_angle(a, m, false), 180.0);
+        }
+    }
+}
+
 }  // namespace
 
 void map_area(Json& area, const Mapping& m) {
@@ -406,6 +452,7 @@ void map_page(Document& doc, std::size_t at, const Mapping& m, const PixelHooks&
                 move_point_at(*g, "to", m);
             }
         }
+        turn_screens(layer, m);
         if (layer.placement_mm) {
             // (a placed picture is laid upright in its box: a turn or a mirror is a smart object's — the page size ops make
             // it one first)

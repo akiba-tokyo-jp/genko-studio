@@ -1,6 +1,7 @@
 // PC3 C-0 (SPEC.md COLOR-07, ARCHITECTURE.md「要素を写す」): everything on a page moved by one map — a quarter turn
 // swaps a guide's axis and a panel split's, a flip mirrors a split's children and its cut, two quarter turns are a half
-// turn, four bring the page back; a line of dialogue's box turned with its text upright; a 3D prop refused a turn — and
+// turn, four bring the page back; a line of dialogue's box turned with its text upright; a tone's screen turned and
+// mirrored with the page; a 3D prop refused a turn — and
 // the warps of PhotoCraft's geom/src/warp.rs tests (the styles' names, a preset at bend 0 the identity, the identity
 // mesh exact and an affine map fitted exactly, splits exact and removable, the arc's known points, a preset fitted
 // closely as a mesh).
@@ -9,6 +10,7 @@
 
 #include <cmath>
 #include <numbers>
+#include <stdexcept>
 #include <string>
 #include <vector>
 
@@ -175,6 +177,83 @@ private slots:
         const core::StoryLine& l = once.story.at(0);
         QVERIFY(near(l.w_mm.value(), 10) && near(l.h_mm.value(), 30));
         QVERIFY(near(l.x_mm.value() + l.w_mm.value() / 2, 80 - 25) && near(l.y_mm.value() + l.h_mm.value() / 2, 25));
+    }
+
+    // A tone's screen, its linear gradient's way and a layer's トーン化 screen turned and mirrored with the page (the
+    // coordinator's decision after the PC3 review: they stayed as they were, the look changed): a quarter turn adds 90°, a
+    // mirror mirrors the angle (a screen's to −a, a gradient's way to 180 − a), each kept in its range; four quarter
+    // turns bring them back; a move and a scale leave them as they were, written as they were.
+    void screensTurn() {
+        const auto with_screens = [](double tone_angle, const Json& gradient_angle, double screen_angle) {
+            core::Document doc = small_book();
+            core::Page& page = doc.edit_page(0);
+            core::Layer tone;
+            tone.id = "t";
+            tone.kind = core::LayerKind::Tone;
+            tone.angle = tone_angle;
+            tone.tone = Json{{"pattern", "line"}, {"gradient", Json{{"start", 0}, {"end", 1}}}};
+            if (!gradient_angle.is_null()) (*tone.tone)["gradient"]["angle"] = gradient_angle;
+            core::Layer round = tone;
+            round.id = "r";
+            round.tone = Json{{"pattern", "dot"}, {"gradient", Json{{"shape", "radial"}, {"start", 0}, {"end", 1}}}};
+            core::Layer screened;
+            screened.id = "s";
+            screened.kind = core::LayerKind::Strokes;
+            screened.screen = Json{{"pattern", "line"}, {"lpi", 60.0}, {"angle", screen_angle}, {"black", 0.1}, {"white", 0.95}};
+            page.layers.push_back(tone);
+            page.layers.push_back(round);
+            page.layers.push_back(screened);
+            return doc;
+        };
+        const auto layer = [](const core::Document& doc, const char* id) -> const core::Layer& {
+            for (const core::Layer& l : doc.page(0).layers)
+                if (l.id == id) return l;
+            throw std::runtime_error(id);
+        };
+        struct Case {
+            pg::Turn turn;
+            double tone, gradient, screen;
+        };
+        // (a tone at 30°, its gradient's way 0°, a screen at 30°)
+        for (const Case& c : {Case{pg::Turn::Cw90, 120, 90, 120}, Case{pg::Turn::Ccw90, 300, 270, 120}, Case{pg::Turn::Rotate180, 210, 180, 30},
+                              Case{pg::Turn::FlipH, 330, 180, 150}, Case{pg::Turn::FlipV, 150, 0, 150}}) {
+            core::Document doc = with_screens(30, Json(0), 30);
+            pg::map_page(doc, 0, pg::turn_mapping(c.turn, 60, 80), {});
+            QVERIFY2(near(layer(doc, "t").angle, c.tone), qPrintable(QString::number(layer(doc, "t").angle)));
+            QVERIFY2(near(layer(doc, "t").tone->at("gradient").at("angle").get<double>(), c.gradient), layer(doc, "t").tone->dump().c_str());
+            QVERIFY2(near(layer(doc, "s").screen->at("angle").get<double>(), c.screen), layer(doc, "s").screen->dump().c_str());
+            QVERIFY(!layer(doc, "r").tone->at("gradient").contains("angle"));  // (a radial gradient has no way)
+        }
+        // (a gradient with no angle — 90° — and one given as a number's text, as the op keeps it)
+        {
+            core::Document doc = with_screens(45, Json(), 45);
+            pg::map_page(doc, 0, pg::turn_mapping(pg::Turn::Cw90, 60, 80), {});
+            QVERIFY(near(layer(doc, "t").tone->at("gradient").at("angle").get<double>(), 180));
+            core::Document text = with_screens(45, Json("30"), 45);
+            pg::map_page(text, 0, pg::turn_mapping(pg::Turn::FlipH, 60, 80), {});
+            QVERIFY(near(text.page(0).layers.back().screen->at("angle").get<double>(), 135));
+            QVERIFY(near(layer(text, "t").tone->at("gradient").at("angle").get<double>(), 150));
+        }
+        // four quarter turns: as they were
+        {
+            core::Document doc = with_screens(30, Json(15), 30);
+            double w = 60, h = 80;
+            for (int i = 0; i < 4; ++i) {
+                pg::map_page(doc, 0, pg::turn_mapping(pg::Turn::Cw90, w, h), {});
+                std::swap(w, h);
+            }
+            QVERIFY(near(layer(doc, "t").angle, 30) && near(layer(doc, "s").screen->at("angle").get<double>(), 30));
+            QVERIFY(near(layer(doc, "t").tone->at("gradient").at("angle").get<double>(), 15));
+        }
+        // a move and a scale: written as they were (an angle out of the range too)
+        {
+            const core::Document before = with_screens(-30, Json(400), 30);
+            core::Document doc = before;
+            pg::map_page(doc, 0, pg::mapping({2, 0, 0, 1.5, 3, 4}), {});
+            QCOMPARE(layer(doc, "t").angle, -30.0);
+            QCOMPARE(*layer(doc, "t").tone, *layer(before, "t").tone);
+            QCOMPARE(*layer(doc, "s").screen, *layer(before, "s").screen);
+        }
     }
 
     // A 3D prop moves and scales evenly with the page; a turn or a mirror is refused (render it to pixels first). A page
