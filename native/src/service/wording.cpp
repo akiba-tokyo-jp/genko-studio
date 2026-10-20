@@ -956,6 +956,10 @@ const std::vector<Rule>& rules() {
         r.push_back(rule("the layer has no vector mask.*", "このレイヤーにはベクトルマスクがありません"));
         r.push_back(rule("layer \\S+ has no vector mask", "このレイヤーにはベクトルマスクがありません"));
         r.push_back(rule("vector_mask: the layer \\S+ has no vector mask", "そのレイヤーにはベクトルマスクがありません"));
+        r.push_back(rule("the layer mask of layer \\S+ is off: enable or delete it before rasterizing the vector mask",
+                         "このレイヤーのレイヤーマスクは「使用しない」になっています。ベクトルマスクをラスタライズする前に、レイヤーマスクを使用するか削除します"));
+        r.push_back(rule("the vector mask of layer \\S+ is off over a layer mask: enable or delete it before rasterizing it",
+                         "このレイヤーのベクトルマスクは「使用しない」になっています（レイヤーマスクもあります）。ラスタライズする前に、ベクトルマスクを使用するか削除します"));
         r.push_back(rule("a folder cannot take a vector mask.*", "フォルダにはベクトルマスクを付けられません（中のレイヤーに付けます）"));
         r.push_back(rule("give one of path, path_name, reveal_all and hide_all", "ベクトルマスクの形は、パス・すべての領域を表示・すべての領域を隠すのどれか 1 つで指定します"));
         r.push_back(rule("the line \\S+ has no letters to trace", "この台詞には、パスにする文字がありません"));

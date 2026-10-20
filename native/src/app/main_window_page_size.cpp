@@ -3,6 +3,7 @@
 // カンバスを上下反転), 切り抜き (to the selection's box), トリミング…, すべての領域を表示; ツール → 切り抜きツール (Shift+C)
 // and its settings. Each sends one op (resize_pages, set_canvas_size, rotate_pages, crop_page, trim_page, reveal_all),
 // undone at once. When the finished size would not fit the new paper, the person is asked whether to fit it to the paper.
+// A change of the whole book that left covers as they were (their paper set by their cover settings) says which.
 // (Photoshop's Ctrl+Alt+I is 選択範囲を反転 here: 画像解像度… has no key.)
 
 #include <QAction>
@@ -13,10 +14,12 @@
 #include <QMenu>
 #include <QPushButton>
 #include <QSignalBlocker>
+#include <QStringList>
 #include <QVBoxLayout>
 #include <QWidget>
 
 #include <cmath>
+#include <vector>
 
 #include "app/ask.hpp"
 #include "app/canvas.hpp"
@@ -24,6 +27,7 @@
 #include "app/page_size_dialogs.hpp"
 #include "app/theme.hpp"
 #include "app/tool_settings.hpp"
+#include "core/covers.hpp"
 #include "service/wording.hpp"
 
 namespace genko::app {
@@ -35,6 +39,36 @@ namespace {
 // The refusals a fitted finished size answers (render/ops_pagesize's, in the person's words: service/wording).
 bool trim_refused(const QString& error) {
     return error.contains(QStringLiteral("仕上がりと裁ち落としが新しい用紙に入りません")) || error.contains(QStringLiteral("基本枠が仕上がりに入りません"));
+}
+
+// Each page's paper (its number, whether it is a cover, its width and height): to tell which covers a change of the whole
+// book left as they were (Image Size and Canvas Size leave out a cover their size would change — its paper is set by its
+// cover settings —: render/ops_pagesize).
+struct Paper {
+    QString number;
+    bool cover = false;
+    double width = 0, height = 0;
+};
+
+std::vector<Paper> papers_of(const core::Document& doc) {
+    std::vector<Paper> out;
+    for (const auto& page : doc.pages) {
+        out.push_back(Paper{QString::fromStdString(page->index.repr()), core::is_cover(*page), page->spec.width_mm.value(), page->spec.height_mm.value()});
+    }
+    return out;
+}
+
+// The covers whose paper stayed while a page that is not one changed its (their numbers, "・" between); "" when none.
+QString covers_left(const std::vector<Paper>& before, const std::vector<Paper>& after) {
+    if (before.size() != after.size()) return {};
+    const auto same = [](const Paper& a, const Paper& b) { return std::abs(a.width - b.width) < 1e-6 && std::abs(a.height - b.height) < 1e-6; };
+    bool changed = false;
+    QStringList kept;
+    for (std::size_t i = 0; i < before.size(); ++i) {
+        if (!before[i].cover && !same(before[i], after[i])) changed = true;
+        if (before[i].cover && same(before[i], after[i])) kept << before[i].number;
+    }
+    return changed ? kept.join(QStringLiteral("・")) : QString();
 }
 
 }  // namespace
@@ -140,6 +174,7 @@ void MainWindow::build_crop_page(ToolSettings* ts) {
 
 bool MainWindow::page_size_op(Json op, const QString& done) {
     const Asked asked = asking();
+    const std::vector<Paper> before = papers_of(book());
     bool applied = apply_ops(Json::array({op}));
     if (!applied && !op.contains("trim") && trim_refused(last_error()) && still(asked)) {
         if (!ask::question(this, QStringLiteral("仕上がり"),
@@ -157,7 +192,13 @@ bool MainWindow::page_size_op(Json op, const QString& done) {
     canvas_->set_crop(std::nullopt);
     reload_pages();
     canvas_->fit_page();
-    if (const core::Page* page = current_page()) flash(QStringLiteral("%1: %2").arg(done, QString::fromStdString(page->spec.describe())), 5000);
+    if (const core::Page* page = current_page()) {
+        QString said = QStringLiteral("%1: %2").arg(done, QString::fromStdString(page->spec.describe()));
+        if (const QString covers = covers_left(before, papers_of(book())); !covers.isEmpty()) {
+            said += QStringLiteral("。表紙・カバー・帯（%1 ページ）は、用紙が表紙の設定で決まるため、そのままです").arg(covers);
+        }
+        flash(said, 8000);
+    }
     return true;
 }
 

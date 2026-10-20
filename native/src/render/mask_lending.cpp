@@ -25,8 +25,6 @@ using core::Json;
 
 namespace {
 
-constexpr int kMaskDpi = 150;  // (a mask's resolution: ops.MASK_DPI)
-
 unsigned char byte_of(double v) { return static_cast<unsigned char>(std::lround(std::clamp(v, 0.0, 1.0) * 255.0)); }
 
 // The key a pixel op reads the id of the layer it works on from ("" for flood_fill, which takes a role only): as a channel
@@ -108,8 +106,9 @@ MaskLending::MaskLending(core::Document& doc, std::size_t at, Json& op, std::str
     Image mask;
     if (owner.mask && owner.mask->png && !owner.mask->png->empty()) {
         mask = open_image(*owner.mask->png, kPillowOpenLimits).convert("L");
-    } else {  // (a layer without a mask: one that reveals all, as Photoshop makes it)
-        mask = Image::create("L", page_size(seen, kMaskDpi), Ink(255));
+    } else {  // (a layer without a mask: one that reveals all, as Photoshop makes it — at the page's mask grid, as
+              // set_layer_mask makes one: 150 dpi on an 8-bit page, a precise or ink page's finest)
+        mask = Image::create("L", grid_size(seen), Ink(255));
         made_ = true;
     }
     own_size_ = mask.size();

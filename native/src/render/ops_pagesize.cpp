@@ -396,15 +396,41 @@ Json report_of(const Document& doc, const std::vector<Plan>& plans) {
 // A stand-in page of the book's paper (to work out what the op makes of the book's paper itself).
 Page book_page(const Document& doc) { return core::make_page(Num(1), doc.spec, doc.binding); }
 
-// The plans carried out: the sizes checked, each page moved, the papers settled, the report.
-void carry_out(core::OpContext& c, std::vector<Plan>& plans, std::optional<PageSpec> book) {
+std::string cover_refusal(const Num& index) { return "page " + index.repr() + " is a cover: its paper is set by its cover settings"; }
+
+// The plans carried out: the sizes checked, each page moved, the papers settled, the report (with the covers left out:
+// "skipped_covers", their numbers). Every page asked a cover left out is refused, as a cover named is.
+void carry_out(core::OpContext& c, std::vector<Plan>& plans, std::optional<PageSpec> book, const std::vector<Num>& skipped = {}) {
+    if (plans.empty() && !skipped.empty()) throw OpError(cover_refusal(skipped.front()));
     check_sizes(c.doc, plans);
     for (const Plan& plan : plans) move_page(c.doc, plan);
     settle(c.doc, plans, std::move(book));
     c.report = report_of(c.doc, plans);
+    if (!skipped.empty()) {
+        Json covers = Json::array();
+        for (const Num& index : skipped) covers.push_back(index.json());
+        (*c.report)["skipped_covers"] = std::move(covers);
+    }
 }
 
 bool every_page(const Document& doc, const std::vector<std::size_t>& pages) { return pages.size() == doc.pages.size(); }
+
+// The whole book: "pages": "all", or no page named (Image Size's and Canvas Size's default).
+bool whole_book(const Json& op) {
+    const Json* pages = core::get(op, "pages");
+    if (pages != nullptr && !pages->is_null()) return pages->is_string() && pages->get<std::string>() == "all";
+    const Json* page = core::get(op, "page");
+    return page == nullptr || page->is_null();
+}
+
+// (the coordinator's decision after the PC3 review) On the whole book a cover — a front or back cover, a jacket or an
+// obi, its paper set by its cover settings — is left out where the op would give it another size (`w` × `h`): the other
+// pages change (each then on a paper of its own, page-spec@1, the book's paper and the covers' as they were). A cover
+// named is refused (respec).
+bool left_out(const Page& page, bool whole, double w, double h) {
+    return whole && core::is_cover(page) &&
+           (std::fabs(w - page.spec.width_mm.value()) >= kEps || std::fabs(h - page.spec.height_mm.value()) >= kEps);
+}
 
 geo::Mapping translation(double dx, double dy) { return geo::mapping({1, 0, 0, 1, dx, dy}); }
 
@@ -451,15 +477,24 @@ void resize_pages(core::OpContext& c) {
         plan.after = respec(doc, page, w, h, plan.m, TrimRule::Mapped, std::min(sx, sy), c.op, dpi);
         return plan;
     };
+    const bool whole = whole_book(c.op);
     std::vector<Plan> plans;
+    std::vector<Num> skipped;  // (the covers left out)
     for (const std::size_t at : pages) {
-        Plan plan = plan_for(doc.page(at));
+        const Page& page = doc.page(at);
+        if (const auto [w, h] = size_of(page.spec); left_out(page, whole, w, h)) {
+            skipped.push_back(page.index);
+            continue;
+        }
+        Plan plan = plan_for(page);
         plan.at = at;
         plans.push_back(std::move(plan));
     }
+    // (the resolution is the whole book's, the covers' with it: a cover left out keeps it, so a new one is refused)
+    if (!skipped.empty() && (none || (dpi && std::fabs(*dpi - doc.spec.dpi.value()) >= kEps))) throw OpError(cover_refusal(skipped.front()));
     std::optional<PageSpec> book;
-    if (every_page(doc, pages)) book = plan_for(book_page(doc)).after;
-    carry_out(c, plans, std::move(book));
+    if (plans.size() == doc.pages.size()) book = plan_for(book_page(doc)).after;
+    carry_out(c, plans, std::move(book), skipped);
 }
 
 // --- set_canvas_size: Canvas Size ---------------------------------------------------------------------------------------
@@ -529,13 +564,17 @@ void set_canvas_size(core::OpContext& c) {
         if (given->is_string()) throw OpError("extension is \"transparent\" or [r, g, b]");
         extension = core::rgb3(*given, "extension");
     }
-    const auto plan_for = [&](const Page& page) {
-        const double w = page.spec.width_mm.value(), h = page.spec.height_mm.value(), dpi = page.spec.dpi.value();
+    // (a page's new canvas: as given — mm, or pixels at its resolution —, or added to its paper)
+    const auto size_of = [&](const PageSpec& spec) -> std::pair<double, double> {
+        const double w = spec.width_mm.value(), h = spec.height_mm.value(), dpi = spec.dpi.value();
         std::optional<double> gw = wmm, gh = hmm;
         if (wpx) gw = *wpx / dpi * 25.4;
         if (hpx) gh = *hpx / dpi * 25.4;
-        const double nw = relative ? w + gw.value_or(0) : gw.value_or(w);
-        const double nh = relative ? h + gh.value_or(0) : gh.value_or(h);
+        return {relative ? w + gw.value_or(0) : gw.value_or(w), relative ? h + gh.value_or(0) : gh.value_or(h)};
+    };
+    const auto plan_for = [&](const Page& page) {
+        const double w = page.spec.width_mm.value(), h = page.spec.height_mm.value();
+        const auto [nw, nh] = size_of(page.spec);
         if (!(nw > kEps) || !(nh > kEps)) throw OpError("the new canvas must have a size");
         Plan plan;
         plan.m = translation(to_step((nw - w) * ax), to_step((nh - h) * ay));
@@ -544,20 +583,27 @@ void set_canvas_size(core::OpContext& c) {
         plan.after = respec(doc, page, nw, nh, plan.m, TrimRule::Mapped, 1.0, c.op);
         return plan;
     };
+    const bool whole = whole_book(c.op);
     std::vector<Plan> plans;
+    std::vector<Num> skipped;  // (the covers left out)
     for (const std::size_t at : pages) {
-        Plan plan = plan_for(doc.page(at));
+        const Page& page = doc.page(at);
+        if (const auto [w, h] = size_of(page.spec); left_out(page, whole, w, h)) {
+            skipped.push_back(page.index);
+            continue;
+        }
+        Plan plan = plan_for(page);
         plan.at = at;
         plans.push_back(std::move(plan));
     }
     std::optional<PageSpec> book;
-    if (every_page(doc, pages)) book = plan_for(book_page(doc)).after;
+    if (plans.size() == doc.pages.size()) book = plan_for(book_page(doc)).after;
     std::vector<std::array<double, 4>> old;
     for (const Plan& plan : plans) {
         const PageSpec& was = doc.page(plan.at).spec;
         old.push_back({plan.m.m[4], plan.m.m[5], was.width_mm.value(), was.height_mm.value()});
     }
-    carry_out(c, plans, std::move(book));
+    carry_out(c, plans, std::move(book), skipped);
     if (extension) {
         for (std::size_t k = 0; k < plans.size(); ++k) extend_with(c, plans[k].at, old[k], *extension);
     }

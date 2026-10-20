@@ -1,6 +1,7 @@
 // 判型 in the window (PC3 C-e, SPEC.md COLOR-07「判型」): ページ → 画像解像度…, カンバスサイズ… (Ctrl+Alt+C), 画像の回転 ▸,
 // 切り抜き, トリミング…, すべての領域を表示 and ツール → 切り抜きツール (Shift+C) — where they are and their keys; each dialog's op
-// as the window sends it; a page's own paper shown on the canvas as the book draws it, undone; the finished size that would
+// as the window sends it; a book's covers left out of 画像解像度… and the person told; a page's own paper shown on the
+// canvas as the book draws it, undone; the finished size that would
 // not fit the new paper fitted to it once the person agrees; the crop tool's box drawn, turned, cropped to with Enter and
 // let go with Esc, asked about when another tool is taken and let go on another page; the book preview drawing each page
 // of a spread as big as its own paper.
@@ -22,6 +23,7 @@
 #include "app/canvas.hpp"
 #include "app/main_window.hpp"
 #include "app/page_size_dialogs.hpp"
+#include "core/covers.hpp"
 #include "core/pyconv.hpp"
 #include "core/vector.hpp"
 #include "gui_support.hpp"
@@ -201,6 +203,28 @@ private slots:
         QVERIFY(w.trigger("act_undo"));
         QVERIFY(near(w.book().page(0).spec.width_mm.value(), 210) && !w.book().page(0).own_spec);
         QVERIFY(w.drawn_as_book());
+    }
+
+    // 画像解像度… on a book with a cover (its default, the whole book): done on the other pages, the cover as it was, and
+    // the person told which (the coordinator's decision after the PC3 review: it was refused every time).
+    void imageSizeLeavesTheCoversOut() {
+        Window w(2);
+        QVERIFY(w.window->apply_ops(Json::array({Json{{"op", "add_cover"}, {"kind", "front"}}})));
+        const std::size_t at_cover = w.book().pages.size() - 1;
+        QVERIFY(core::is_cover(w.book().page(at_cover)));
+        const QString cover = QString::fromStdString(w.book().page(at_cover).index.repr());
+        w.answers.responder->exec = [](QDialog* d) {
+            if (auto* size = qobject_cast<app::ImageSizeDialog*>(d)) {
+                size->width->setValue(105);
+                return int(QDialog::Accepted);
+            }
+            return int(QDialog::Rejected);
+        };
+        const std::size_t n = w.ops.size();
+        QVERIFY(w.trigger("act_image_size"));
+        QCOMPARE(w.since(n), std::string(R"([{"op": "resize_pages", "pages": "all", "resample": "bicubic", "width_mm": 105.0}])"));
+        QVERIFY(near(w.book().page(0).spec.width_mm.value(), 105) && near(w.book().page(at_cover).spec.width_mm.value(), 210));
+        QVERIFY2(w.window->last_notice().contains(QStringLiteral("表紙・カバー・帯（%1 ページ）").arg(cover)), qPrintable(w.window->last_notice()));
     }
 
     // 画像の回転: the page in front turned (its paper on its side), flipped, turned by an angle; a canvas that would cut the

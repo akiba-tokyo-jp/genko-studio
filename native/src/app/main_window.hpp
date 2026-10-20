@@ -991,9 +991,9 @@ private:
     // Genko's own; a picture another program put there is pasted as a new layer), 結合部分をコピー, 特殊ペースト (同じ位置・
     // 選択範囲内へ・選択範囲外へ), 選択範囲をコピー／カットしたレイヤー, 塗りつぶし… and 境界線を描く… (app/fill_dialogs.cpp).
     void build_clipboard_actions();
-    // What the layer drawn on holds in the area (none: all of it), as paste's "items" (precise pixels and inks as
-    // pieces that keep them); a message said and none when there is nothing.
-    std::optional<core::Json> copied_items(const std::optional<core::Json>& area);
+    // What the layer drawn on (or `of`, a layer of the page in front) holds in the area (none: all of it), as paste's
+    // "items" (precise pixels and inks as pieces that keep them); a message said and none when there is nothing.
+    std::optional<core::Json> copied_items(const std::optional<core::Json>& area, const core::Layer* of = nullptr);
     void copy_merged();
     void paste_special(const QString& how);
     void layer_via(bool cut);

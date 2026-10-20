@@ -3,7 +3,9 @@
 #include <algorithm>
 #include <array>
 #include <cmath>
+#include <string>
 
+#include "core/command_bus.hpp"
 #include "core/pyconv.hpp"
 #include "render/fill.hpp"
 #include "render/layer_masks.hpp"
@@ -121,17 +123,22 @@ void rasterize(const core::Page& page, core::Layer& layer) {
     if (!layer.vector_mask) return;
     const core::vector::VectorMask vector = *layer.vector_mask;
     const bool own = layer.mask && layer.mask->png && !layer.mask->png->empty();
-    if (!vector.enabled && own) {  // (nothing of it shows: the layer mask as it is)
-        layer.vector_mask.reset();
-        return;
+    // (a mask that is off is not lost unseen — the coordinator's decision after the PC3 review: a layer mask that is off
+    // would give way to the vector mask's picture, a vector mask that is off over a layer mask would be taken off without
+    // being drawn in; the person uses or deletes it first)
+    if (own && !layer.mask->enabled) {
+        throw core::OpError("the layer mask of layer " + layer.id + " is off: enable or delete it before rasterizing the vector mask");
+    }
+    if (own && !vector.enabled) {
+        throw core::OpError("the vector mask of layer " + layer.id + " is off over a layer mask: enable or delete it before rasterizing it");
     }
     const Size size = layer_masks::grid_size(page);
     const Box whole{0, 0, size.width, size.height};
-    core::vector::VectorMask drawn = vector;  // (as it shows — or would, when it is off)
+    core::vector::VectorMask drawn = vector;  // (as it shows — or would, when it is off: then a mask that is off)
     drawn.enabled = true;
     Image picture = shown(page, drawn, size, whole);
     core::Mask out;
-    if (own && layer.mask->enabled) {
+    if (own) {
         const Image mine = open_image(*layer.mask->png, kPillowOpenLimits).convert("L");
         picture = chops::multiply(layer_masks::shown(page, *layer.mask, mine, size, whole, Resample::Bicubic), picture);
         out.linked = layer.mask->linked;

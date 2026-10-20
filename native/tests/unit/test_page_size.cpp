@@ -30,6 +30,7 @@
 #include "render/bookpages.hpp"
 #include "render/image.hpp"
 #include "render/ops_registry.hpp"
+#include "render/page.hpp"
 #include "render/png.hpp"
 #include "storage/asset_store.hpp"
 
@@ -608,10 +609,70 @@ private slots:
         QVERIFY(refusal(doc, one(Json{{"op", "rotate_pages"}, {"page", 2}, {"turn", "90cw"}})).find("spread") != std::string::npos);
         QCOMPARE(refusal(doc, one(Json{{"op", "rotate_pages"}, {"page", 2}, {"turn", "flip_h"}})), std::string("(applied)"));
         QCOMPARE(refusal(doc, one(Json{{"op", "rotate_pages"}, {"pages", Json::array({2, 3})}, {"turn", "90cw"}})), std::string("(applied)"));
-        // the whole book: a cover in it is refused a size
-        QVERIFY(refusal(doc, one(Json{{"op", "resize_pages"}, {"width_mm", 50.8}})).find("cover") != std::string::npos);
+        // the whole book (the coordinator's decision after the PC3 review): a cover left out where the op would change its
+        // size, the other pages changed (each on a paper of its own), the book's paper and the cover's as they were; named,
+        // a cover is refused a size; a new resolution, the whole book's, refused while a cover keeps its size
+        const std::size_t at_cover = doc.pages.size() - 1;
+        for (const Json& op : {Json{{"op", "resize_pages"}, {"width_mm", 50.8}}, Json{{"op", "resize_pages"}, {"pages", "all"}, {"width_mm", 50.8}},
+                               Json{{"op", "set_canvas_size"}, {"width_mm", 25.4}, {"relative", true}}}) {
+            const core::ApplyResult done = run(doc, one(op));
+            QCOMPARE(done.results.size(), std::size_t(1));
+            QCOMPARE(done.results[0]["skipped_covers"], Json::array({cover.json()}));
+            QCOMPARE(done.results[0]["pages"].size(), doc.pages.size() - 1);
+            QVERIFY(done.doc.page(at_cover).spec.width_mm == doc.page(at_cover).spec.width_mm && !done.doc.page(at_cover).own_spec);
+            QVERIFY(done.doc.spec.width_mm == doc.spec.width_mm);
+            for (std::size_t i = 0; i < at_cover; ++i) {
+                QVERIFY(done.doc.page(i).own_spec);
+                QVERIFY(!(done.doc.page(i).spec.width_mm == doc.page(i).spec.width_mm));
+            }
+        }
+        QVERIFY(refusal(doc, one(Json{{"op", "resize_pages"}, {"page", cover.json()}, {"width_mm", 50.8}})).find("cover") != std::string::npos);
+        QVERIFY(refusal(doc, one(Json{{"op", "resize_pages"}, {"pages", Json::array({1, cover.json()})}, {"width_mm", 50.8}})).find("cover") != std::string::npos);
+        QVERIFY(refusal(doc, one(Json{{"op", "resize_pages"}, {"dpi", 300}, {"resample", "none"}})).find("cover") != std::string::npos);
+        QVERIFY(refusal(doc, one(Json{{"op", "resize_pages"}, {"dpi", 300}, {"width_mm", 50.8}})).find("cover") != std::string::npos);
+        {  // (a new resolution alone keeps every size: the cover with the rest, the book's paper too, nothing left out)
+            const core::ApplyResult finer = run(doc, one(Json{{"op", "resize_pages"}, {"dpi", 300}}));
+            QVERIFY(!finer.results[0].contains("skipped_covers"));
+            QVERIFY(finer.doc.spec.dpi == Num(300) && finer.doc.page(at_cover).spec.dpi == Num(300));
+        }
+        {  // (a book of covers alone: refused)
+            Document covers_only = doc;
+            covers_only.pages.erase(covers_only.pages.begin(), covers_only.pages.begin() + static_cast<std::ptrdiff_t>(at_cover));
+            QVERIFY(refusal(covers_only, one(Json{{"op", "resize_pages"}, {"width_mm", 50.8}})).find("cover") != std::string::npos);
+        }
         doc.page_locks = Json{{doc.page(0).id, "human:other"}};
         QVERIFY(refusal(doc, one(Json{{"op", "rotate_pages"}, {"pages", "all"}, {"turn", "180"}})).find("locked by human:other") != std::string::npos);
+    }
+
+    // A tone's screen turned with its page, its look kept (the coordinator's decision after the PC3 review): lines across
+    // the page run down it after a quarter turn, as the turned page shows them (they stayed across before).
+    void aTonesScreenTurnsWithItsPage() {
+        Document doc = core::new_episode("判型", Num(1), 1, paper(), core::Binding::Right);
+        doc = after(doc, one(Json{{"op", "add_tone"}, {"page", 1}, {"id", "t"}, {"area", Json{{"rect", Json::array({0, 0, 101.6, 152.4})}}},
+                                  {"pattern", "line"}, {"angle", 0}, {"lpi", 10}, {"density", 0.5}}));
+        // (how much the middle of the page changes along its rows and down its columns)
+        const auto changes = [](const Document& d) {
+            render::RenderOptions print;
+            print.finish = true;  // (its dots: the print finish of a colour page)
+            const render::Image grey = render::render_page(d.page(0), 100, print, &d).image.convert("L");
+            const std::string px = grey.tobytes();
+            const int w = grey.width(), h = grey.height();
+            double along = 0, down = 0;
+            for (int y = h * 3 / 10; y < h * 7 / 10; ++y) {
+                for (int x = w * 3 / 10; x < w * 7 / 10; ++x) {
+                    const auto at = [&](int i, int j) { return static_cast<double>(static_cast<unsigned char>(px[std::size_t(j) * std::size_t(w) + std::size_t(i)])); };
+                    along += std::fabs(at(x + 1, y) - at(x, y));
+                    down += std::fabs(at(x, y + 1) - at(x, y));
+                }
+            }
+            return std::pair{along, down};
+        };
+        const auto [along0, down0] = changes(doc);
+        QVERIFY2(down0 > 10 * along0 && down0 > 0, qPrintable(QString("%1 %2").arg(along0).arg(down0)));  // (lines across)
+        const Document turned = after(doc, one(Json{{"op", "rotate_pages"}, {"page", 1}, {"turn", "90cw"}}));
+        QCOMPARE(layer_of(turned.page(0), "t").angle, 90.0);
+        const auto [along1, down1] = changes(turned);
+        QVERIFY2(along1 > 10 * down1 && along1 > 0, qPrintable(QString("%1 %2").arg(along1).arg(down1)));  // (lines down it)
     }
 
     // A placed picture turned with its page: it becomes a smart object of its file (the same id), its matrix turned.
