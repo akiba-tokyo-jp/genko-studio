@@ -305,6 +305,64 @@ private slots:
         QCOMPARE(use(), std::string("keep"));
     }
 
+    // (independent review A P2-2) The 属性 panel's 変形を適用 moves the smart object as the Move tool does (transform_layers):
+    // its corners and its shear kept, the layers linked to it along; nothing where its position is locked.
+    void thePropertiesPanelTransformsAsTheMoveToolDoes() {
+        Book book;
+        app::MainWindow* w = book.window.get();
+        QVERIFY(w->apply_ops(Json::array({Json{{"op", "add_layer"}, {"page", 1}, {"kind", "paint"}, {"id", "pic"}, {"name", "絵"}},
+                                          Json{{"op", "put_raster"}, {"page", 1}, {"id", "pic"}, {"png_base64", core::b64encode(two_colours())}},
+                                          Json{{"op", "smart_convert"}, {"page", 1}, {"id", "pic"}, {"new_id", "so"}},
+                                          Json{{"op", "add_layer"}, {"page", 1}, {"kind", "pen"}, {"id", "other"}, {"name", "線"}, {"panel_each", false}},
+                                          Json{{"op", "add_stroke"}, {"page", 1}, {"layer_id", "other"}, {"points", Json::array({Json::array({20, 30}), Json::array({80, 60})})},
+                                               {"width_mm", 1.0}},
+                                          Json{{"op", "link_layers"}, {"page", 1}, {"ids", Json::array({"so", "other"})}}})));
+        const auto corners = Json::array({Json::array({10, 20}), Json::array({200, 30}), Json::array({190, 300}), Json::array({20, 280})});
+        QVERIFY(w->apply_ops(Json::array({Json{{"op", "smart_transform"}, {"page", 1}, {"id", "so"}, {"perspective", corners}}})));
+        w->set_target_layer("so");
+        auto* properties = w->findChild<QDockWidget*>(QStringLiteral("属性"));
+        QVERIFY(properties != nullptr);
+        auto* panel = qobject_cast<app::adjust_forms::PropertiesPanel*>(properties->widget());
+        QVERIFY(panel != nullptr);
+        // (the panel shown again for the book as it is now: what it showed before let go)
+        const auto again = [panel] {
+            panel->refresh();
+            QCoreApplication::sendPostedEvents(nullptr, QEvent::DeferredDelete);
+        };
+        again();
+        const auto line_x = [&] { return book.layer("other")->strokes->items.at(0)->points.at(0).x; };
+        const double line_before = line_x();
+        auto* x = panel->findChild<QDoubleSpinBox*>(QStringLiteral("properties_smart_x"));
+        QVERIFY(x != nullptr);
+        x->setValue(x->value() + 5);
+        panel->findChild<QPushButton*>(QStringLiteral("properties_smart_apply"))->click();
+        // (its corners moved 5 mm, still its own; the linked line along)
+        const Json& moved = (*book.layer("so")->smart)["perspective"];
+        QVERIFY2(moved.is_array() && moved.size() == 4, moved.dump().c_str());
+        for (std::size_t i = 0; i < 4; ++i) {
+            QVERIFY(std::abs(moved[i][0].get<double>() - (corners[i][0].get<double>() + 5)) < 1e-6);
+            QVERIFY(std::abs(moved[i][1].get<double>() - corners[i][1].get<double>()) < 1e-6);
+        }
+        QVERIFY(std::abs(line_x() - (line_before + 5)) < 1e-6);
+        // a shear kept when its width is halved
+        QVERIFY(w->apply_ops(Json::array({Json{{"op", "smart_transform"}, {"page", 1}, {"id", "so"}, {"set_matrix", Json::array({1, 0, 0.3, 1, 10, 10})}}})));
+        again();
+        auto* width = panel->findChild<QDoubleSpinBox*>(QStringLiteral("properties_smart_w"));
+        width->setValue(width->value() / 2);
+        panel->findChild<QPushButton*>(QStringLiteral("properties_smart_apply"))->click();
+        const core::smart::Matrix sheared = core::smart::matrix_of(*book.layer("so"));
+        QVERIFY2(std::abs(sheared.a - 0.5) < 1e-6 && std::abs(sheared.b) < 1e-6 && std::abs(sheared.c - 0.3) < 1e-6 && std::abs(sheared.d - 1) < 1e-6 &&
+                     std::abs(sheared.e - 10) < 1e-6 && std::abs(sheared.f - 10) < 1e-6,
+                 core::smart::to_json(sheared).dump().c_str());
+        // its position locked: it stays
+        QVERIFY(w->apply_ops(Json::array({Json{{"op", "set_layer"}, {"page", 1}, {"id", "so"}, {"lock_position", true}}})));
+        again();
+        x = panel->findChild<QDoubleSpinBox*>(QStringLiteral("properties_smart_x"));
+        x->setValue(x->value() + 5);
+        panel->findChild<QPushButton*>(QStringLiteral("properties_smart_apply"))->click();
+        QCOMPARE(core::smart::matrix_of(*book.layer("so")), sheared);
+    }
+
     // PC3 A2: the layer panel's かける… on a smart object adds a smart filter (asked so); its rows under the smart object —
     // スマートフィルター and each filter, the top one first — with their eyes; スマートフィルターを編集… in the filter's own
     // window, 描画オプション…, moving one; レイヤー → スマートフィルター's commands; undone.

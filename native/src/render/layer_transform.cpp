@@ -585,6 +585,13 @@ void move_layer_in(Document& doc, std::size_t at, const std::string& id, const M
 
 }  // namespace
 
+void move_linked_masks(Page& page, Layer& layer, const Map& m) {
+    move_linked_mask(page, layer, m, std::nullopt);
+    if (layer.vector_mask && layer.vector_mask->linked) {
+        layer.vector_mask->path = m.is_affine() ? pg::map_path(layer.vector_mask->path, pg::mapping(m.affine)) : bend_path(layer.vector_mask->path, m);
+    }
+}
+
 void move_layer(Document& doc, std::size_t at, const std::string& id, const Map& m, const std::optional<Json>& area, resample::Interp interp,
                 const std::vector<std::string>* parts) {
     move_layer_in(doc, at, id, m, area, !area, interp, parts);

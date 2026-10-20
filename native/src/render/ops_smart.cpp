@@ -558,11 +558,20 @@ std::optional<resample::Homography> corners_moved(const core::smart::Corners& wa
     return h;
 }
 
+// The keys of smart_transform that place it (its matrix, corners and warp).
+constexpr const char* kPlacing[] = {"set_matrix", "matrix", "perspective", "warp"};
+
 void smart_transform(OpContext& c) {
     Document& doc = c.doc;
     const std::size_t at = core::require_page(doc, c.op);
     const std::size_t i = smart_layer(doc.page(at), c.op);
     if (doc.page(at).layers[i].locked) throw OpError("the layer is locked");
+    // (its position locked: not moved, as transform_layers refuses it — independent review A P2-2)
+    const bool moves = std::any_of(std::begin(kPlacing), std::end(kPlacing), [&](std::string_view key) {
+        const Json* v = core::get(c.op, std::string(key));
+        return v != nullptr && (!v->is_null() || key == "perspective" || key == "warp");
+    });
+    if (moves && doc.page(at).layers[i].lock_position) throw OpError("the position of the layer " + doc.page(at).layers[i].id + " is locked");
     const core::SmartContents* contents = core::smart::contents_of(doc, doc.page(at).layers[i]);
     if (contents == nullptr) throw OpError("the smart object has no contents");
     Page& page = doc.edit_page(at);
@@ -623,13 +632,15 @@ void smart_transform(OpContext& c) {
         if (!warp->is_null()) kept = layer_transform::warp_from_json(*warp, {0, 0, w, h});
         core::smart::put_setting(layer, "warp", kept && !kept->is_identity() ? layer_transform::warp_to_json(*kept) : Json());
     }
-    // (its filter mask moved as its corners moved: PC3 A5)
+    // (its filter mask moved as its corners moved: PC3 A5; its mask and vector mask too when they are linked, as
+    // transform_layers moves them: independent review A P2-2)
     if (const auto moved = corners_moved(was, core::smart::corners_on_page(layer, *contents))) {
         layer_transform::Map map;
         map.kind = layer_transform::Map::Kind::Projective;
         map.projective = *moved;
         if (moved->is_affine()) map = layer_transform::affine_map({moved->m[0], moved->m[3], moved->m[1], moved->m[4], moved->m[2], moved->m[5]}, {});
         layer_transform::move_filter_mask(doc, page, layer, map);
+        layer_transform::move_linked_masks(page, layer, map);
     }
     if (const Json* interp = core::get(c.op, "interp"); interp != nullptr && !interp->is_null()) {
         const std::string name = core::py_str(*interp);
