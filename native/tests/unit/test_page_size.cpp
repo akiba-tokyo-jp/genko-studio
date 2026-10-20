@@ -608,8 +608,37 @@ private slots:
         QVERIFY(refusal(doc, one(Json{{"op", "rotate_pages"}, {"page", 2}, {"turn", "90cw"}})).find("spread") != std::string::npos);
         QCOMPARE(refusal(doc, one(Json{{"op", "rotate_pages"}, {"page", 2}, {"turn", "flip_h"}})), std::string("(applied)"));
         QCOMPARE(refusal(doc, one(Json{{"op", "rotate_pages"}, {"pages", Json::array({2, 3})}, {"turn", "90cw"}})), std::string("(applied)"));
-        // the whole book: a cover in it is refused a size
-        QVERIFY(refusal(doc, one(Json{{"op", "resize_pages"}, {"width_mm", 50.8}})).find("cover") != std::string::npos);
+        // the whole book (the coordinator's decision after the PC3 review): a cover left out where the op would change its
+        // size, the other pages changed (each on a paper of its own), the book's paper and the cover's as they were; named,
+        // a cover is refused a size; a new resolution, the whole book's, refused while a cover keeps its size
+        const std::size_t at_cover = doc.pages.size() - 1;
+        for (const Json& op : {Json{{"op", "resize_pages"}, {"width_mm", 50.8}}, Json{{"op", "resize_pages"}, {"pages", "all"}, {"width_mm", 50.8}},
+                               Json{{"op", "set_canvas_size"}, {"width_mm", 25.4}, {"relative", true}}}) {
+            const core::ApplyResult done = run(doc, one(op));
+            QCOMPARE(done.results.size(), std::size_t(1));
+            QCOMPARE(done.results[0]["skipped_covers"], Json::array({cover.json()}));
+            QCOMPARE(done.results[0]["pages"].size(), doc.pages.size() - 1);
+            QVERIFY(done.doc.page(at_cover).spec.width_mm == doc.page(at_cover).spec.width_mm && !done.doc.page(at_cover).own_spec);
+            QVERIFY(done.doc.spec.width_mm == doc.spec.width_mm);
+            for (std::size_t i = 0; i < at_cover; ++i) {
+                QVERIFY(done.doc.page(i).own_spec);
+                QVERIFY(!(done.doc.page(i).spec.width_mm == doc.page(i).spec.width_mm));
+            }
+        }
+        QVERIFY(refusal(doc, one(Json{{"op", "resize_pages"}, {"page", cover.json()}, {"width_mm", 50.8}})).find("cover") != std::string::npos);
+        QVERIFY(refusal(doc, one(Json{{"op", "resize_pages"}, {"pages", Json::array({1, cover.json()})}, {"width_mm", 50.8}})).find("cover") != std::string::npos);
+        QVERIFY(refusal(doc, one(Json{{"op", "resize_pages"}, {"dpi", 300}, {"resample", "none"}})).find("cover") != std::string::npos);
+        QVERIFY(refusal(doc, one(Json{{"op", "resize_pages"}, {"dpi", 300}, {"width_mm", 50.8}})).find("cover") != std::string::npos);
+        {  // (a new resolution alone keeps every size: the cover with the rest, the book's paper too, nothing left out)
+            const core::ApplyResult finer = run(doc, one(Json{{"op", "resize_pages"}, {"dpi", 300}}));
+            QVERIFY(!finer.results[0].contains("skipped_covers"));
+            QVERIFY(finer.doc.spec.dpi == Num(300) && finer.doc.page(at_cover).spec.dpi == Num(300));
+        }
+        {  // (a book of covers alone: refused)
+            Document covers_only = doc;
+            covers_only.pages.erase(covers_only.pages.begin(), covers_only.pages.begin() + static_cast<std::ptrdiff_t>(at_cover));
+            QVERIFY(refusal(covers_only, one(Json{{"op", "resize_pages"}, {"width_mm", 50.8}})).find("cover") != std::string::npos);
+        }
         doc.page_locks = Json{{doc.page(0).id, "human:other"}};
         QVERIFY(refusal(doc, one(Json{{"op", "rotate_pages"}, {"pages", "all"}, {"turn", "180"}})).find("locked by human:other") != std::string::npos);
     }

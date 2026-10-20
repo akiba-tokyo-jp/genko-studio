@@ -3,8 +3,9 @@
 // each page's pixels where the turn takes them (inspect --pixel), undone and done again; the whole book turned alike changing
 // the book's paper (no extension named), one page cut to its own paper (page-spec@1, written and read again, the book not
 // read-only), the PDF's and the PSD's pages as big as each page's paper, Image Size's pixels drawn again at the new size,
-// Canvas Size's extension colour, and set_page_spec moving a precise layer's pixels with the page (it was refused before C-e:
-// this build moves them now). (This build's own contract.)
+// Canvas Size's extension colour, Image Size and Canvas Size on a book with covers (the covers left out and named), and
+// set_page_spec moving a precise layer's pixels with the page (it was refused before C-e: this build moves them now). (This
+// build's own contract.)
 
 #include <QtTest>
 
@@ -236,6 +237,56 @@ private slots:
         for (const Json& page : saved["pages"]) QVERIFY(!page.contains("native_spec"));
         for (const int p : {2, 3, 4}) QVERIFY2(pixel(book, p, 30, 60).contains("values"), kModes[std::size_t(p - 1)].c_str());
         QVERIFY(opens(book, QStringLiteral("own-b5.json")));
+    }
+
+    // A book with covers (the coordinator's decision after the PC3 review): Image Size and Canvas Size on the whole book
+    // leave out the covers (their paper set by their cover settings) and say so; the book's paper and the covers' saved
+    // as they were, the other pages each on a paper of its own, the book read again; undone, as it was. A cover named is
+    // refused.
+    void aBookWithCovers() {
+        const QString book = path(QStringLiteral("covers.genko"));
+        const auto made = genko::test::run_genko({QStringLiteral("new"), book, QStringLiteral("--pages"), QStringLiteral("2")});
+        QVERIFY2(made.exit_code == 0, qPrintable(made.described()));
+        const Json covered = apply(book, QStringLiteral("covers-add.json"),
+                                   Json::array({Json{{"op", "add_cover"}, {"kind", "front"}}, Json{{"op", "add_cover"}, {"kind", "jacket"}, {"spine_mm", 12}}}));
+        QVERIFY2(covered.value("ok", false), covered.dump().c_str());
+        const Json before = project(book);
+        std::vector<Json> covers;
+        for (const Json& page : before["pages"])
+            if (page.contains("cover")) covers.push_back(page["index"]);
+        QCOMPARE(covers.size(), std::size_t(2));
+        const Json half = apply(book, QStringLiteral("covers-half.json"), Json::array({Json{{"op", "resize_pages"}, {"width_mm", 128.5}}}));
+        QVERIFY2(half.value("ok", false), half.dump().c_str());
+        QCOMPARE(half["results"][0]["skipped_covers"], Json(covers));
+        Json saved = project(book);
+        QCOMPARE(saved["spec"], before["spec"]);
+        QVERIFY2(has_feature(saved, "page-spec@1"), saved["features"].dump().c_str());
+        for (const Json& page : saved["pages"]) {
+            if (page.contains("cover")) {
+                QVERIFY(!page.contains("native_spec"));
+            } else {
+                QCOMPARE(page["native_spec"]["width_mm"], Json(128.5));
+            }
+        }
+        QVERIFY(opens(book, QStringLiteral("covers-again.json")));
+        const Json wider = apply(book, QStringLiteral("covers-wider.json"),
+                                 Json::array({Json{{"op", "set_canvas_size"}, {"width_mm", 10}, {"relative", true}}}));
+        QVERIFY2(wider.value("ok", false), wider.dump().c_str());
+        QCOMPARE(wider["results"][0]["skipped_covers"], Json(covers));
+        // a cover named: refused
+        int exit = -1;
+        const Json named = genko({QStringLiteral("apply"), book,
+                                  write_ops(QStringLiteral("covers-named.json"),
+                                            Json::array({Json{{"op", "resize_pages"}, {"page", covers[0]}, {"width_mm", 100}}})),
+                                  QStringLiteral("--agent"), QStringLiteral("human:test")},
+                                 &exit);
+        QVERIFY2(exit != 0 && !named.value("ok", true) && named.dump().find("is a cover") != std::string::npos, named.dump().c_str());
+        QVERIFY(restore(book, "undo"));
+        QVERIFY(restore(book, "undo"));
+        QVERIFY(restore(book, "undo"));
+        saved = project(book);
+        QCOMPARE(saved["spec"], before["spec"]);
+        for (const Json& page : saved["pages"]) QVERIFY(!page.contains("native_spec"));
     }
 
     // set_page_spec moving a precise layer's pixels (refused before C-e): the 16-bit page's raster as big as the new paper
