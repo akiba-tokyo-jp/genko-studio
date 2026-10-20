@@ -179,8 +179,8 @@ void MainWindow::build_clipboard_menu(QMenu* edit) {
     edit->addAction(action(QStringLiteral("act_liquify_filter")));  // (ゆがみ…: Filter's in Photoshop)
 }
 
-std::optional<Json> MainWindow::copied_items(const std::optional<Json>& area) {
-    const core::Layer* layer = target_layer();
+std::optional<Json> MainWindow::copied_items(const std::optional<Json>& area, const core::Layer* of) {
+    const core::Layer* layer = of != nullptr ? of : target_layer();
     const core::Page* page = current_page();
     if (layer == nullptr || page == nullptr) return std::nullopt;
     Json items;

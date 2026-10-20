@@ -28423,7 +28423,8 @@
         "native/src/render/ops_matting.cpp",
         "native/src/render/select_smart.cpp",
         "native/tests/gui/test_gui_select_mask.cpp",
-        "native/tests/unit/test_matting.cpp"
+        "native/tests/unit/test_matting.cpp",
+        "native/src/app/main_window_clipboard.cpp"
       ],
       "pc0": {
         "date": "2026-10-16",

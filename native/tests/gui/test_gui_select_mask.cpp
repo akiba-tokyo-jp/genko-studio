@@ -260,8 +260,10 @@ private slots:
         QString output = QStringLiteral("selection");
         bool decontaminate = false;
         bool previewed = false;
+        std::string switch_to;  // (another layer drawn on while the window is open)
         studio.answers.responder->exec = [&](QDialog* dialog) {
             if (dialog->objectName() != QStringLiteral("select_mask_dialog")) return int(QDialog::Rejected);
+            if (!switch_to.empty()) studio.window->set_target_layer(switch_to);
             dialog->findChild<QDoubleSpinBox*>(QStringLiteral("sm_radius"))->setValue(1.5);
             dialog->findChild<QDoubleSpinBox*>(QStringLiteral("sm_feather"))->setValue(0.3);
             auto* out = dialog->findChild<QComboBox*>(QStringLiteral("sm_output"));
@@ -314,6 +316,21 @@ private slots:
         QCOMPARE(studio.page().layers.size(), layers);
         QVERIFY(studio.layer("photo")->visible);
         QCOMPARE(studio.steps(), steps);
+        // (another layer drawn on while the window is open: the layer it was opened on copied, as the source hidden — the
+        // coordinator's decision after the PC3 review)
+        for (const core::Layer& l : studio.page().layers)
+            if (l.id != "photo" && l.kind == core::LayerKind::Strokes && switch_to.empty()) switch_to = l.id;
+        QVERIFY(!switch_to.empty());
+        hard();
+        studio.trigger("act_select_mask");
+        QTRY_VERIFY_WITH_TIMEOUT(studio.settled(), 60000);
+        QCOMPARE(studio.page().layers.size(), layers + 1);
+        QVERIFY(!studio.layer("photo")->visible && studio.layer(switch_to)->visible);
+        QVERIFY(studio.window->target_layer()->raster_png || !studio.window->target_layer()->patches.empty());
+        studio.trigger("act_undo");
+        QCOMPARE(studio.page().layers.size(), layers);
+        QCOMPARE(studio.steps(), steps);
+        switch_to.clear();
         // 新規レイヤー（レイヤーマスクあり）: a duplicate with the refined mask; one Undo
         output = QStringLiteral("new_layer_mask");
         hard();

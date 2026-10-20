@@ -298,7 +298,9 @@ void MainWindow::select_mask_output(const Json& area, const Json& settings) {
     if (out == "layer_mask") {
         ops.push_back(Json{{"op", "set_layer_mask"}, {"page", index}, {"id", source}, {"area", area}, {"linked", true}});
     } else if (out == "new_layer") {
-        const auto items = copied_items(area);  // (the source layer's pixels there, each by the area's coverage)
+        // (the source layer's pixels there, each by the area's coverage: the layer the window was opened on, whichever is
+        // drawn on now)
+        const auto items = copied_items(area, layer);
         if (!items) return;
         made = core::new_id();
         const bool pixels = !(*items).value("patches", Json::array()).empty();

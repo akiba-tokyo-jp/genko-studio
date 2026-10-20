@@ -43,10 +43,11 @@ core::Mask warp_mask(const core::Page& page, const core::Mask& mask, const core:
 bool lends_to(std::string_view op);
 
 // The op's layer's mask lent to it as a hidden paint layer of its own — an opaque grey picture of the mask at the paint
-// layers' 200 dpi (a layer without a mask: one that reveals all first, as Photoshop makes it) —, the op's layer pointing at
-// it. Taken back after the op: the pixels it changed (their grey, over black where it made them clear) put back into the
-// mask at its own 150 dpi, each of its pixels by the share of it they cover; a pixel no changed pixel reaches keeps its
-// value, and a mask the op left as it was its very bytes. The mask's settings (linked, density, feather) are kept.
+// layers' 200 dpi (a layer without a mask: one that reveals all first, as Photoshop makes it, at the page's grid_size) —,
+// the op's layer pointing at it. Taken back after the op: the pixels it changed (their grey, over black where it made them
+// clear) put back into the mask at its own grid, each of its pixels by the share of it they cover; a pixel no changed
+// pixel reaches keeps its value, and a mask the op left as it was its very bytes. The mask's settings (linked, density,
+// feather) are kept.
 class MaskLending {
 public:
     MaskLending(core::Document& doc, std::size_t page, core::Json& op, std::string_view name);

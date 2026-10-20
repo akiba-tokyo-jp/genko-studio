@@ -418,6 +418,17 @@ private slots:
             QCOMPARE(side(masked), render::mm_to_px(60, 200));
             const core::Document linked = run(masked, Json{{"op", "set_layer_mask"}, {"page", 1}, {"id", kPaint}, {"linked", true}});
             QCOMPARE(*layer_of(linked, kPaint).mask->png, *layer_of(masked, kPaint).mask->png);
+            // (a pixel op's "layer_mask": true on a layer without one: the mask it makes at the grid too — the
+            // coordinator's decision after the PC3 review: it was made at 150 dpi)
+            const core::Document lent = run(deep, Json{{"op", "fill_area"}, {"page", 1}, {"layer_id", kPaint}, {"layer_mask", true},
+                                                       {"area", square(10, 10, 30, 30)}, {"rgb", Json::array({0, 0, 0})}});
+            QVERIFY(layer_of(lent, kPaint).mask.has_value());
+            QCOMPARE(mask_pixels(layer_of(lent, kPaint)).size(), render::layer_masks::grid_size(lent.page(0)));
+        }
+        {  // (an 8-bit page's: 150 dpi, as before)
+            const core::Document lent = run(eight(), Json{{"op", "fill_area"}, {"page", 1}, {"layer_id", kPaint}, {"layer_mask", true},
+                                                          {"area", square(10, 10, 30, 30)}, {"rgb", Json::array({0, 0, 0})}});
+            QCOMPARE(side(lent), render::mm_to_px(60, 150));
         }
         // (a 600 dpi raster on the page: its grid, 600 at most)
         core::Document fine = precise("u16");
