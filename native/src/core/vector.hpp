@@ -213,7 +213,8 @@ std::string path_name(std::string_view name);
 // --- the book --------------------------------------------------------------------------------------------------------
 
 // Does the book need vector@1 (a page's paths, work path or clipping path; a layer's vector mask), pen-shapes@1 (a pen
-// layer with shape parts), transform@1 (a layer's link or position lock), page-spec@1 (a page of its own paper)?
+// layer with shape parts), transform@1 (a layer's link or position lock, a line's native_warp), page-spec@1 (a page of
+// its own paper)?
 bool uses_vector(const Document& doc);
 bool uses_pen_shapes(const Document& doc);
 bool uses_transform(const Document& doc);
@@ -222,5 +223,8 @@ bool uses_page_spec(const Document& doc);
 // at most kPathsMax, a clipping path naming a saved path, shape parts only on pen layers with ids one each, a page's own
 // paper well formed. Pages not read yet are not looked at.
 void validate_vector(const Document& doc);
+// PC3 C-c (transform@1): a line of dialogue's warp of PhotoCraft's styles (Warp Text, the style's native_warp: {"style":
+// one of the fifteen, "bend", "h_distort", "v_distort": −100..100 %, "vertical": bool}) as it must be (core::Error("value")).
+void check_native_warp(const Json& value);
 
 }  // namespace genko::core::vector

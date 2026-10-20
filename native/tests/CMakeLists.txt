@@ -128,6 +128,10 @@ genko_test(test_page_geometry SOURCES unit/test_page_geometry.cpp DEPS genko_tes
 # PC3 C-e (SPEC.md COLOR-07「判型」): the page size ops on a book in memory — each thing on a page where the map takes it,
 # turns and flips coming back, the finished size and basic frame kept with what the page holds, a page's own paper.
 genko_test(test_page_size SOURCES unit/test_page_size.cpp DEPS genko_test_support genko_render_ops LABELS unit TIMEOUT 600)
+# PC3 C-c (SPEC.md COLOR-07): the transforms' algorithms (PhotoCraft's puppet.rs, perspective.rs, liquify.rs, seam.rs and
+# geom/src/warp.rs tests: the identity, rigid moves, the energy, the shared edges, each Liquify tool's sense, the seams),
+# the warps' forms and splits, render/resample's triangles and inverse map.
+genko_test(test_transform SOURCES unit/test_transform.cpp DEPS genko_test_support genko_render_ops LABELS unit TIMEOUT 600)
 # PC2-0 (SPEC.md COLOR-04, adjustments@1): the corrections' common ground without Python — Python's form kept, a
 # correction's native read and stored, native.method, the kinds' table and what is not in this build yet, one
 # AdjustFunction to the three ways, native.blend on 8 and 16 bits and on CMYK, the PSD's frame; and PC2a's tone kinds
@@ -380,6 +384,11 @@ genko_test(test_contract_retouch SOURCES contract/test_contract_retouch.cpp DEPS
 # shape layers and groups (psd-tools, import_psd).
 genko_test(test_contract_shapes SOURCES contract/test_contract_shapes.cpp DEPS genko_test_support genko_render_ops genko_formats
            LABELS contract TIMEOUT 900)
+# PC3 C-c: transform_layers on each kind of layer and pixels (exact moves and turns on 8, 16, 32 bits, CMYK, Lab; lines,
+# patches, quads, warps, perspective, puppet; folders, links, masks, areas, parts; smart objects, placed pictures, locks,
+# lines of dialogue), content_aware_scale, liquify's strokes, Warp Text; through the command line saved and undone.
+genko_test(test_contract_transform SOURCES contract/test_contract_transform.cpp DEPS genko_test_support genko_render_ops
+           LABELS contract TIMEOUT 900)
 genko_test(test_contract_image_ops SOURCES contract/test_contract_image_ops.cpp DEPS genko_test_support genko_render
            LABELS contract TIMEOUT 900)
 # PC3 C-e through the command line: every kind of page turned (inspect --pixel), undone and redone; a page of its own paper
@@ -488,6 +497,9 @@ if(GENKO_BUILD_APP)
   # PC3 B2: 編集's clipboard with the system's, 結合部分をコピー, 特殊ペースト, 選択範囲をコピー／カットしたレイヤー,
   # 塗りつぶし… and 境界線を描く…, a precise page's copy as precise pixels
   genko_test(test_gui_clipboard SOURCES gui/test_gui_clipboard.cpp DEPS genko_app GUI TIMEOUT 600)
+  # PC3 C-c: 自由変形 (the box previewed, Enter one op, Esc, 再実行), the turns, the warp's splits, puppet pins, ゆがみ…,
+  # コンテンツに応じて拡大・縮小…, ワープテキスト… and the commands' names
+  genko_test(test_gui_transform SOURCES gui/test_gui_transform.cpp DEPS genko_app GUI TIMEOUT 600)
   # チャンネル (channels@1, COLOR-03): the panel, the target keys, a fill on a channel, the view, options, split.
   genko_test(test_gui_channels SOURCES gui/test_gui_channels.cpp DEPS genko_app GUI TIMEOUT 600)
   # PC2c (COLOR-04): レイヤー → 色調補正's local corrections and image calculations, 編集 → フェード (only right after).

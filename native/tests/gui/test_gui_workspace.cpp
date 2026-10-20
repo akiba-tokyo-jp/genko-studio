@@ -499,7 +499,7 @@ private slots:
             {"act_flip_h", "左右反転"}, {"act_flip_v", "上下反転"}, {"act_warp_perspective", "自由変形（遠近・4 隅）"},
             {"act_warp_mesh", "自由変形（メッシュ・3×3）"}, {"act_warp_mesh_grid", "自由変形（メッシュ・格子の数を決める）…"},
             {"act_warp_apply", "自由変形を確定"}, {"act_move", "レイヤー移動"}, {"act_layer_up", "レイヤーを前へ"},
-            {"act_layer_down", "レイヤーを後ろへ"}};
+            {"act_layer_down", "レイヤーを後ろへ"}, {"act_liquify", "ゆがみ（指で押す）"}};
         QStringList bar;
         for (const auto& [attribute, before] : renamed) {
             const QString old = QString::fromUtf8(before);

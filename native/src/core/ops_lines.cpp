@@ -35,6 +35,7 @@
 #include "core/pyops.hpp"
 #include "core/pyre.hpp"
 #include "core/ruby.hpp"
+#include "core/vector.hpp"
 
 namespace genko::core {
 
@@ -377,6 +378,19 @@ Json merge_style(const Json& current, const Json& change, const PictureCheck& ch
     if (!change.is_object()) throw OpError("style must be an object");
     Json out = current.is_object() ? current : Json::object();
     for (const auto& [key, value] : change.items()) {
+        if (key == "native_warp") {  // (PC3 C-c, transform@1: Warp Text's styles, this build's own — not one of Python's keys)
+            if (value.is_null() || value == Json("")) {
+                out.erase(key);
+                continue;
+            }
+            try {
+                vector::check_native_warp(value);
+            } catch (const Error& error) {
+                throw OpError(std::string("style ") + error.what());
+            }
+            out[key] = value;
+            continue;
+        }
         const auto* spec = std::find_if(std::begin(kStyleKeys), std::end(kStyleKeys), [&](const StyleKey& k) { return k.name == key; });
         if (spec == std::end(kStyleKeys)) unknown_style_key(key);
         if (value.is_null() || value == Json("")) {

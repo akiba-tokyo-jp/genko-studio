@@ -136,6 +136,9 @@ genko_library(genko_app
     # PC3 C-b: the shape tools, the Shapes panel, the shape parts' commands
     shapes_panel.cpp
     main_window_shapes.cpp
+    # PC3 C-c: 自由変形 and the warps (the box on the canvas; the window's commands, options bar and dialogs)
+    canvas_transform.cpp
+    main_window_transform.cpp
     ${GENKO_APP_RESOURCES}
     ${GENKO_APP_FONTS}
   PUBLIC_DEPS genko_core genko_storage genko_render genko_render_ops genko_formats genko_service Qt6::Core Qt6::Gui Qt6::Widgets Qt6::Svg Qt6::Concurrent

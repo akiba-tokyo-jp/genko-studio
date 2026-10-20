@@ -100,6 +100,8 @@ const std::map<std::string, const char*>& names() {
         // (pen-shapes@1, PC3 C-b: render/ops_shapes)
         {"add_shape_part", "シェイプを描いた"}, {"edit_shape_part", "シェイプを直した"}, {"combine_shape_parts", "シェイプを結合した"},
         {"move_shape_parts", "シェイプを別のレイヤーへ移した"},
+        // (PC3 C-c: render/layer_transform, render/distort_ops)
+        {"transform_layers", "変形した"}, {"content_aware_scale", "コンテンツに応じて拡大・縮小した"},
     };
     return table;
 }

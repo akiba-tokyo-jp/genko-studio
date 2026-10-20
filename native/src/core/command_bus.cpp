@@ -97,7 +97,9 @@ bool native_key(std::string_view op, std::string_view key) {
            // PC3 B2: transform_area's mask (follow: the layer's mask moved with its pixels), paste's center_mm, fill_area's
            // preserve_transparency
            (op == "transform_area" && key == "mask") || (op == "paste" && key == "center_mm") ||
-           (op == "fill_area" && key == "preserve_transparency");
+           (op == "fill_area" && key == "preserve_transparency") ||
+           // PC3 C-c (SPEC COLOR-07): Filter › Liquify's strokes and its field's spacing
+           (op == "liquify" && (key == "strokes" || key == "mesh_mm"));
 }
 
 // PC2 (SPEC COLOR-04): the settings of this build's own an op of Python's reads by what else it was given —

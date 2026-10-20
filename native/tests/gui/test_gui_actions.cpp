@@ -320,7 +320,14 @@ private slots:
         // (act_combine_unite, act_combine_subtract, act_combine_intersect, act_combine_exclude, act_merge_components), ラスタライズ →
         // シェイプ (act_rasterize_shape), 選択範囲 → シェイプに変換 (act_sel_to_shape), ページ → 台詞 → シェイプに変換
         // (act_line_to_shape) and 表示 → シェイプから新規ガイドを作成 (act_guides_from_shape) — theirs (test_gui_shapes).
-        QCOMPARE(w->actions_by_name().size(), std::size_t{391});
+        // and the 18 of PC3 C-c (SPEC COLOR-07「変形」) — 編集 の 自由変形・パペットワープ・遠近法ワープ・コンテンツに応じて拡大・縮小…・
+        // ゆがみ…, 編集 → 変形 の 再実行・拡大・縮小・回転・ゆがみ・遠近法・水平方向に／垂直方向に／交差方向に分割ワープ・ワープ分割を削除・
+        // 180° 回転・90° 回転（時計回り）・90° 回転（反時計回り）, ページ → 台詞 → ワープテキスト… (act_free_transform,
+        // act_puppet_warp, act_perspective_warp, act_content_aware_scale, act_liquify_filter, act_transform_again,
+        // act_transform_scale, act_transform_rotate, act_transform_skew, act_transform_perspective, act_split_warp_h,
+        // act_split_warp_v, act_split_warp_cross, act_remove_warp_split, act_transform_rotate_180, act_transform_rotate_90cw,
+        // act_transform_rotate_90ccw, act_warp_text) — theirs (test_gui_transform).
+        QCOMPARE(w->actions_by_name().size(), std::size_t{409});
         QVERIFY(w->action("act_chat_approval"));
         QVERIFY(w->action("act_style"));
         QVERIFY(w->action("act_exposure"));

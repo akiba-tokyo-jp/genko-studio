@@ -192,7 +192,8 @@ const std::multimap<QString, QString>& renamed() {
                                                      {QStringLiteral("使用しない（レイヤー → レイヤーマスク）"), QStringLiteral("マスクを使わない")},
                                                      // (PC3 C-b: the shape tools' and the direct selection's)
                                                      {QStringLiteral("長方形ツール"), QStringLiteral("図形")},
-                                                     {QStringLiteral("部分選択ツール"), QStringLiteral("線の編集（制御点）")}};
+                                                     {QStringLiteral("部分選択ツール"), QStringLiteral("線の編集（制御点）")},
+                                                     {QStringLiteral("前方ワープツール"), QStringLiteral("ゆがみ（指で押す）")}};  // (PC3 C-c)
     return all;
 }
 

@@ -71,7 +71,7 @@ void MainWindow::build_paint_actions() {
     tool("act_shape", QStringLiteral("長方形ツール"), "shape", key("O"),
          QStringLiteral("ドラッグで長方形のシェイプを描きます（Shift で正方形、Alt で中心から。モードがピクセルなら直線・折れ線・曲線なども）"));
     tool("act_blend", QStringLiteral("色混ぜ"), "blend", key("Shift+B"), QStringLiteral("ペイントのレイヤーの色をぼかす・指先でのばす・なじませる"));
-    tool("act_liquify", QStringLiteral("ゆがみ（指で押す）"), "liquify", key("Shift+L"), QStringLiteral("なぞった所の絵と線を押し流す・縮める・ふくらませる・渦を巻く"));
+    tool("act_liquify", QStringLiteral("前方ワープツール"), "liquify", key("Shift+L"), QStringLiteral("なぞった所の絵と線を押し流す・縮める・ふくらませる・渦を巻く"));
     make("act_point_thinner", QStringLiteral("選んだ点を細く"), [this] { point_width(0.8); }, key("Ctrl+Alt+["),
          QStringLiteral("部分選択ツールで選んだ制御点のところだけ、線を細くします"));
     make("act_fill_gaps", QStringLiteral("塗り残しを塗る"), [this] { fill_gaps(); }, {},

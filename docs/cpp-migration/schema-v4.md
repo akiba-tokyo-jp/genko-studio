@@ -57,7 +57,7 @@ v3 から外すもの: なし（未知キーも `extra` として書き戻す）
 | `masks@1` | PC3-0（B1・B2 が使う） | 層のマスクの `linked`・`density`・`feather_mm`、アルファチャンネルの `quick_mask`。COLOR-06（末尾の「マスク」） |
 | `vector@1` | PC3-0（C-a が使う） | ページの `paths`・`work_path`・`clipping_path`、層の `vector_mask`。COLOR-07（末尾の「パスとベクトル」） |
 | `pen-shapes@1` | PC3-0・C-b | ペンの層の形の部品（`shapes_blob`・`shape_count`）。COLOR-07（末尾の「パスとベクトル」） |
-| `transform@1` | PC3-0（C-d が使う） | 層の `link`・`lock_position`。COLOR-07（末尾の「パスとベクトル」） |
+| `transform@1` | PC3-0（C-d が使う）・C-c | 層の `link`・`lock_position`、台詞の書式の `native_warp`（ワープテキスト）。COLOR-07（末尾の「パスとベクトル」） |
 | `page-spec@1` | PC3-0（C-e が使う） | ページだけの用紙 `native_spec`（`trim_origin_mm` も）。COLOR-07（末尾の「パスとベクトル」） |
 
 拡張を使う op が初めて適用されたときに `features` へ加える。拡張を使わない原稿は `features: []`。
@@ -361,6 +361,7 @@ v3 の行（`rev`・`actor`・`at`・`changes`・`via`）をそのまま残し�
 - **ペンの層の形の部品**（`pen-shapes@1`。ペンの層だけ）: 層の `"shapes_blob": "sha256:<64>"`（`assets/<ab>/<64>.shapes.json`、部品の配列を正規形の JSON で）と `"shape_count"`。部品は `{"id": 1〜64 バイト（層の中で一つ）, "name"?: 1〜64 字, "path": パス, "fill": null|{"rgb": [r, g, b]|null}|{"gradient": {…}}, "stroke": null|線, "live"?: 生きた形, "opacity"?: 0..1, "over"?: true}`。線は `{"width_mm": 0..200, "fill", "opacity"?, "align"?: "inside"|"center"|"outside", "cap"?: "butt"|"round"|"square", "join"?: "miter"|"round"|"bevel", "miter_limit"?: 1..1000, "dashes"?: [長さ…（64 まで）], "dash_offset"?}`（既定 中央・butt・miter・100 は書かない）。生きた形は `{"kind": "rect", "rect": [x, y, w, h], "radii": [4 つ]}`・`{"kind": "ellipse", "rect"}`・`{"kind": "polygon", "rect", "sides": 3..100, "star_ratio": 0..1, "angle"?}`・`{"kind": "line", "from", "to", "weight_mm"}`。1 つの層の部品は 10000 まで。パターンの塗りはまだ読み取り専用で開く。素材が無い・壊れているときは素材の欠けとして読み取り専用で開く。部品は配列の順に、`over` でないものは層のパッチの後・線の前に、`over` のものは線の後に描く（C-b）。素材は線の素材（`strokes_blob`）と同じに、本の中の参照があるうちは残り、参照が無くなれば片付けで消える。部品の無い層は `shapes_blob`・`shape_count` を書かない（保存のバイトは今までと同じ）。
 - **グラデーション**（塗りの層の `fill.gradient` と形の部品の塗りの `gradient`）: `"shape"` は `"linear"`・`"radial"`・`"ellipse"` に加えて `"angle"`・`"reflected"`・`"diamond"`（C-b）、`"reverse": true` で色の並びを逆にする（false は書かない）。新しい形か `reverse` を使う塗りの層があるときは `vector@1` を加える。
 - **層のリンク・位置のロック**（`transform@1`）: 層の `"link": 1〜64 バイトの文字`（同じ文字の層が一緒に動く）・`"lock_position": true`。
-- **ページだけの用紙**（`page-spec@1`）: ページの `"native_spec"`（本の `spec` と同じ形の用紙。本と違う用紙を持つページだけ）。`"trim_origin_mm": [x, y]` は仕上がりの左上の位置（無ければ用紙の真ん中に置いた位置）。判型の op（SPEC.md COLOR-07「判型」）が書く: 一部のページの用紙を変えたとき、または全ページに掛けて本の用紙と違うまま残ったページ（仕上がりが真ん中にないページなど）。本の用紙と同じになったページには書かない。表紙・カバー・帯は持たない（カバーの設定が用紙を決める）。解像度（`dpi`）は本と同じ。本の `spec` は `trim_origin_mm` を持たない。`set_page_spec` は全ページの `native_spec` を外す。
+- **ワープテキスト**（`transform@1`。C-c）: 台詞の書式の `"native_warp": {"style": "arc"|"arcLower"|"arcUpper"|"arch"|"bulge"|"shellLower"|"shellUpper"|"flag"|"wave"|"fish"|"rise"|"fisheye"|"inflate"|"squeeze"|"twist", "bend"?: −100..100, "h_distort"?: −100..100, "v_distort"?: −100..100, "vertical"?: bool}`（% 。既定は bend 50・ゆがみ 0・横）。文字の絵の箱をその形で曲げる。無い・`null` は曲げない。
+- **ページだけの用紙**（`page-spec@1`）: ページの `"native_spec"`（本の `spec` と同じ形の用紙。本と違う用紙を持つページだけ）。`"trim_origin_mm": [x, y]` は仕上がりの左上の位置（無ければ用紙の真ん中に置いた位置）。
 - 知らないキー・型の違い・範囲外・非有限・名前の重なり・無い名前を指すクリッピングパス・ペンの層でない層の形の部品は、読み取り専用で開く（そのまま書き戻す）。
-- `features` に、使う物があるときだけそれぞれを加える（`vector@1`: パス・作業用パス・クリッピングパス・ベクトルマスク、`pen-shapes@1`: 形の部品を持つ層、`transform@1`: リンクか位置のロックを持つ層、`page-spec@1`: ページだけの用紙）。無くなれば外す。知らない読み手は未知の拡張として読み取り専用で開く。
+- `features` に、使う物があるときだけそれぞれを加える（`vector@1`: パス・作業用パス・クリッピングパス・ベクトルマスク、`pen-shapes@1`: 形の部品を持つ層、`transform@1`: リンクか位置のロックを持つ層・`native_warp` を持つ台詞、`page-spec@1`: ページだけの用紙）。無くなれば外す。知らない読み手は未知の拡張として読み取り専用で開く。

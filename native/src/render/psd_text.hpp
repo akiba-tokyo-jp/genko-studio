@@ -69,16 +69,22 @@ struct TextLayer {
     std::vector<ParagraphRun> paragraphs;
     std::optional<std::array<double, 4>> box;
     std::array<double, 4> bounds{0.0, 0.0, 0.0, 0.0};
-    // (read back only) the EngineData's own copy of the text (with its trailing "\r") and the warp's style ("warpNone")
+    // (read back only) the EngineData's own copy of the text (with its trailing "\r")
     std::u16string engine_text;
+    // The text's warp (Warp Text, PC3 C-c), written and read back: Photoshop's style ("warpNone", "warpArc", "warpFlag"…),
+    // its bend and its horizontal and vertical distortions (per cent), along or across (warpRotate Vrtc)
     std::string warp = "warpNone";
+    double warp_value = 0.0;
+    double warp_perspective = 0.0;
+    double warp_perspective_other = 0.0;
+    bool warp_vertical = false;
 
     // The style of the character at `at` (UTF-16 code units); nothing past the runs.
     const TextStyle* style_at(std::size_t at) const;
 };
 
-// The TySh block's payload for a text layer (version 1, text version 50, the TxLr descriptor with its EngineData, no
-// warp). Fonts are named in the order the runs first use them, after Photoshop's AdobeInvisFont.
+// The TySh block's payload for a text layer (version 1, text version 50, the TxLr descriptor with its EngineData, the
+// warp descriptor: warpNone unless the layer has one). Fonts are named in the order the runs first use them, after Photoshop's AdobeInvisFont.
 std::string tysh(const TextLayer& layer);
 // A TySh block's payload read back: core::Error("format") when it is not one this reader takes.
 TextLayer read_tysh(std::string_view payload);

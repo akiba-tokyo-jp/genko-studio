@@ -184,6 +184,7 @@ void PageCanvas::mousePressEvent(QMouseEvent* event) {
     if (page() == nullptr || event->button() != Qt::LeftButton) return;
     if (guide_press(event->position())) return;  // (a guide line pulled from a scale: canvas_scale.cpp)
     const QPointF mm = mm_of(pos);
+    if (transform_press(pos, mm, event->modifiers())) return;  // (自由変形 and the warps' box: canvas_transform.cpp)
     press_pos_ = pos;
     if (tool_ == QLatin1String("move")) {
         tool_drag_ = std::make_pair(mm, mm);
@@ -254,6 +255,7 @@ void PageCanvas::mouseMoveEvent(QMouseEvent* event) {
         update();
         return;
     }
+    if (transform_move(mm_of(pos), event->modifiers())) return;
     if (tool_drag_) {
         QPointF mm = mm_of(pos);
         if (event->modifiers() & Qt::ShiftModifier) {  // Shift: straight across, down or at 45°
@@ -348,6 +350,7 @@ void PageCanvas::mouseReleaseEvent(QMouseEvent* event) {
         request_tiles();
         return;
     }
+    if (event->button() == Qt::LeftButton && transform_release(mm_of(unturned(event->position())))) return;
     if (frame_drag_) {
         press_pos_.reset();
         frame_release();
@@ -536,6 +539,7 @@ void PageCanvas::keyPressEvent(QKeyEvent* event) {
         update_cursor();
         return;
     }
+    if (transform_key(event)) return;  // (Enter: the box's change made; Esc: let go)
     if ((event->key() == Qt::Key_Alt || event->key() == Qt::Key_Control || event->key() == Qt::Key_Shift) && !event->isAutoRepeat()) {
         hold_modifier(event->key() == Qt::Key_Alt ? QStringLiteral("alt") : event->key() == Qt::Key_Control ? QStringLiteral("ctrl")
                                                                                                                : QStringLiteral("shift"),

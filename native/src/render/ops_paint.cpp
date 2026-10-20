@@ -18,6 +18,7 @@
 #include "core/pyops.hpp"
 #include "core/stroke_tools.hpp"
 #include "core/strokes.hpp"
+#include "render/distort_ops.hpp"
 #include "render/draw.hpp"
 #include "render/fill_patches.hpp"
 #include "render/filters.hpp"
@@ -368,6 +369,10 @@ void densify(core::Stroke& stroke, const std::array<double, 4>& box, double step
 }
 
 void liquify(OpContext& c) {
+    if (core::truthy_at(c.op, "strokes")) {  // (PC3 C-c: Filter › Liquify's strokes replayed on a field, render/distort_ops)
+        liquify_strokes(c);
+        return;
+    }
     use_brushes_of(c.doc);
     const Json& op = c.op;
     const std::size_t at = core::require_page(c.doc, op);

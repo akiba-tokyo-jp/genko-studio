@@ -455,6 +455,7 @@ void MainWindow::build_actions() {
     build_selection_actions();  // (the selection's tools and commands: main_window_select.cpp)
     build_clipboard_actions();  // (PC3 B2: 結合部分をコピー, 特殊ペースト, 塗りつぶし…, 境界線を描く…: main_window_clipboard.cpp)
     build_mask_actions();       // (PC3 B2: すべてのマスクを統合, the layers chosen: main_window_masks.cpp)
+    build_transform_actions();  // (PC3 C-c: 自由変形, 変形 ▸, パペットワープ, 遠近法ワープ, ゆがみ…, ワープテキスト…: main_window_transform.cpp)
     build_anim_actions();       // (アニメーション, タイムラプス: main_window_anim.cpp)
     build_channel_actions();    // (channels@1: the channel targets, the selection to a channel: main_window_channels.cpp)
     build_paint_actions();      // (スポイト … ゆがみ, 色の入れ替え, 透明色, 太く・細く: main_window_paint.cpp)

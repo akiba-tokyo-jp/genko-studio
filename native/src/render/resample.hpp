@@ -74,6 +74,19 @@ Plane project(const Plane& src, const Homography& h, int width, int height, Inte
 // weights; where the map folds over itself, the later cell wins. An affine f (the identity too) is drawn exactly.
 using Forward = std::function<std::pair<double, double>(double, double)>;
 Plane mesh(const Plane& src, const Forward& f, int width, int height, Interp interp, int x0 = 0, int y0 = 0);
+// PC3 C-c: the plane drawn through triangles (a puppet warp's mesh): each corner where it lands (dx, dy: destination
+// pixels) and where it was (sx, sy: source pixels); each triangle, in the order given (a later one wins where they
+// overlap), takes the source at the same barycentric place. mesh() is this over its cells.
+struct Corner {
+    double dx = 0, dy = 0, sx = 0, sy = 0;
+};
+Plane triangles(const Plane& src, const std::vector<Corner>& corners, const std::vector<std::array<std::size_t, 3>>& tris, int width, int height,
+                Interp interp, int x0 = 0, int y0 = 0);
+// PC3 C-c: the plane drawn through an inverse map g (Liquify's field): each destination pixel's centre (x0 + x + 0.5,
+// y0 + y + 0.5) takes the source at g of it (source pixels, their centres at + 0.5). A place g leaves where it was takes
+// its pixel as it is.
+using Backward = std::function<std::pair<double, double>(double, double)>;
+Plane remap(const Plane& src, const Backward& g, int width, int height, Interp interp, int x0 = 0, int y0 = 0);
 // Image Size: the plane resized to `width` × `height` by a separable filter (a reduction's support widened by its
 // factor), premultiplied. `edges` (a picture as big as its page, PC3 C-e): its edge pixels carried on past it, so the
 // resized one has no clear rim (a grey plane's always are).
