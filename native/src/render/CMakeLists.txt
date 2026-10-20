@@ -127,6 +127,9 @@ genko_library(genko_render
     own_pixels.cpp
     layer_transform.cpp
     distort_ops.cpp
+    # PC3 C-d (移動・整列・分布・重ね順・リンク)
+    layer_bounds.cpp
+    layer_align.cpp
     ${GENKO_MATERIAL_RESOURCES}
     ${GENKO_TEXT_RESOURCES}
   PUBLIC_DEPS genko_core Qt6::Core

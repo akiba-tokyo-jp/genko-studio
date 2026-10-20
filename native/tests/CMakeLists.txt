@@ -132,6 +132,9 @@ genko_test(test_page_size SOURCES unit/test_page_size.cpp DEPS genko_test_suppor
 # geom/src/warp.rs tests: the identity, rigid moves, the energy, the shared edges, each Liquify tool's sense, the seams),
 # the warps' forms and splits, render/resample's triangles and inverse map.
 genko_test(test_transform SOURCES unit/test_transform.cpp DEPS genko_test_support genko_render_ops LABELS unit TIMEOUT 600)
+# PC3 C-d (SPEC.md COLOR-07「移動・整列」): align and distribute by whole working pixels (PhotoCraft's layer_multi_cmds.rs
+# tests), the stacking order among siblings with folders, links, snapping's targets (snap.rs' tests).
+genko_test(test_align SOURCES unit/test_align.cpp DEPS genko_test_support genko_render_ops LABELS unit)
 # PC2-0 (SPEC.md COLOR-04, adjustments@1): the corrections' common ground without Python — Python's form kept, a
 # correction's native read and stored, native.method, the kinds' table and what is not in this build yet, one
 # AdjustFunction to the three ways, native.blend on 8 and 16 bits and on CMYK, the PSD's frame; and PC2a's tone kinds
@@ -388,6 +391,12 @@ genko_test(test_contract_shapes SOURCES contract/test_contract_shapes.cpp DEPS g
 # patches, quads, warps, perspective, puppet; folders, links, masks, areas, parts; smart objects, placed pictures, locks,
 # lines of dialogue), content_aware_scale, liquify's strokes, Warp Text; through the command line saved and undone.
 genko_test(test_contract_transform SOURCES contract/test_contract_transform.cpp DEPS genko_test_support genko_render_ops
+           LABELS contract TIMEOUT 900)
+# PC3 C-d: align_layers and distribute_layers by each kind of layer's box (pen lines and shape parts, paint, placed,
+# tone, folders) and the lines of dialogue, the Genko bases (trim, basic frame, panel), the locks refused; arrange_layers
+# in a folder; link_layers and the moves of linked layers; set_layer's lock_position; through the command line saved and
+# undone, `genko inspect --at`.
+genko_test(test_contract_align SOURCES contract/test_contract_align.cpp DEPS genko_test_support genko_render_ops
            LABELS contract TIMEOUT 900)
 genko_test(test_contract_image_ops SOURCES contract/test_contract_image_ops.cpp DEPS genko_test_support genko_render
            LABELS contract TIMEOUT 900)

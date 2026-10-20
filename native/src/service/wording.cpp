@@ -1027,6 +1027,20 @@ const std::vector<Rule>& rules() {
         r.push_back(rule("Liquify works on a pen or paint layer", "ゆがみは、ペンかペイントのレイヤーにかけます"));
         r.push_back(rule("(?:strokes is|liquify takes|a liquify stroke) .*", "ゆがみの設定が正しくありません"));
         r.push_back(rule("style a line's native_warp .*", "ワープテキストの設定が正しくありません"));
+        // (PC3 C-d: align, distribute, arrange, link — render/layer_align)
+        r.push_back(rule("edge is top, vcenter, bottom, left, hcenter or right", "そろえる辺の指定が正しくありません"));
+        r.push_back(rule("to is auto, layers, selection, page, trim, frame or panel", "そろえる基準の指定が正しくありません"));
+        r.push_back(rule("the layers show nothing to align", "整列するものがありません（描いてあるレイヤーか台詞を選びます）"));
+        r.push_back(rule("there is no selection to align to", "先に選択範囲を作ります"));
+        r.push_back(rule("frame_id names the panel to align to", "先にそろえるコマを選びます"));
+        r.push_back(rule("by is top, vcenter, bottom, left, hcenter, right, horizontal or vertical", "分布のしかたの指定が正しくありません"));
+        r.push_back(rule("distributing needs three or more layers or lines that show something", "分布するには、描いてあるレイヤーか台詞を 3 つ以上選びます"));
+        r.push_back(rule("to is front, forward, backward, back or reverse", "重ね順の指定が正しくありません"));
+        r.push_back(rule("choose two or more layers to reverse", "逆順にするには、レイヤーを 2 つ以上選びます"));
+        r.push_back(rule("the layers cannot move further", "これ以上は動かせません"));
+        r.push_back(rule("link is true or false", "リンクの指定が正しくありません"));
+        r.push_back(rule("choose two or more layers to link", "リンクするには、レイヤーを 2 つ以上選びます"));
+        r.push_back(rule("lines is \\[line id, …\\]", "台詞の指定が正しくありません"));
         // (the C++ build's own: what it does not do yet, and saving)
         r.push_back(rule("official export is not in the C\\+\\+ build yet",
                          "この版の Genko では、まだ正式な書き出し（確認と承認の記録つき）はできません（ふつうの書き出しはできます）"));
