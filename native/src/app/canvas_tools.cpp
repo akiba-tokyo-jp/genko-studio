@@ -2,7 +2,8 @@
 // pointer — as seen, or the drawing layer's own), 塗りつぶし (a click), 囲って塗る (a drag around the area),
 // グラデーション (a drag from where to where; Shift keeps it straight or at 45°: the drag shared with レイヤー移動),
 // 図形 (a line, rectangle, ellipse or polygon dragged — Shift: 45° steps and squares —, a polyline or curve clicked
-// point by point and ended by a double click or Enter, Shift+Enter closing it) and 色混ぜ / ゆがみ (lines drawn as with
+// point by point and ended by a double click or Enter, Shift+Enter closing it; the shape tools of PC3 C-b add the
+// triangle, the star and the custom shape, and Alt drawing from the centre) and 色混ぜ / ゆがみ (lines drawn as with
 // the pen; the window makes them smudge and liquify ops).
 
 #include <QPainter>
@@ -15,7 +16,9 @@
 #include "app/theme.hpp"
 #include "core/error.hpp"
 #include "core/pynum.hpp"
+#include "render/path_raster.hpp"
 #include "render/raster_ops.hpp"
+#include "render/shape_presets.hpp"
 
 namespace genko::app {
 
@@ -26,6 +29,22 @@ constexpr double kPi = 3.14159265358979323846;
 double r3(double v) { return core::py_round(v, 3); }
 
 core::Json point_json(const QPointF& p) { return core::Json::array({r3(p.x()), r3(p.y())}); }
+
+// The figure's corners as dragged: Alt draws from the centre (the press its middle; PC3 C-b, Photoshop's shape tools).
+std::pair<QPointF, QPointF> corners(const std::pair<QPointF, QPointF>& drag, const QString& kind, Qt::KeyboardModifiers modifiers) {
+    const auto [a, b] = drag;
+    if (kind == QLatin1String("line") || !(modifiers & Qt::AltModifier)) return drag;
+    return {QPointF(2 * a.x() - b.x(), 2 * a.y() - b.y()), b};
+}
+
+// The shape tools' own figures (PC3 C-b): a triangle, a star, the custom shape — as the path they make.
+std::optional<core::vector::Path> tool_figure(const QString& kind, const std::array<double, 4>& box, int sides, double star,
+                                              const std::optional<core::vector::Path>& custom, bool keep_aspect) {
+    if (kind == QLatin1String("triangle")) return render::path_raster::polygon_path(box[0], box[1], box[2], box[3], 3, 1.0);
+    if (kind == QLatin1String("polygon") && star < 1.0) return render::path_raster::polygon_path(box[0], box[1], box[2], box[3], sides, star);
+    if (kind == QLatin1String("custom") && custom) return render::shape_presets::fit(*custom, box, keep_aspect);
+    return std::nullopt;
+}
 
 }  // namespace
 
@@ -128,7 +147,7 @@ bool PageCanvas::tool_release() {
     if (vector_release()) return true;
     if (reshape_release()) return true;
     if (shape_drag_) {
-        const auto [a, b] = *shape_drag_;
+        const auto [a, b] = corners(*shape_drag_, shape_kind, modifiers_);
         shape_drag_.reset();
         if (std::hypot(b.x() - a.x(), b.y() - a.y()) < 0.5) {
             update();
@@ -142,6 +161,7 @@ bool PageCanvas::tool_release() {
                                                       r3(std::abs(b.y() - a.y()))});
             shape = core::Json{{"shape", shape_kind.toStdString()}, {"box", box}};
             if (shape_kind == QLatin1String("polygon")) shape["sides"] = shape_sides;
+            if (shape_kind == QLatin1String("custom")) shape["keep_aspect"] = (modifiers_ & Qt::ShiftModifier) != 0;  // (PC3 C-b)
         }
         emit shapeDrawn(shape);
         update();
@@ -209,8 +229,21 @@ std::vector<QPointF> PageCanvas::shape_preview(bool& closed) const {
     // the figure being drawn, as the points of its outline (mm)
     closed = false;
     if (shape_drag_) {
-        const auto [a, b] = *shape_drag_;
+        const auto [a, b] = corners(*shape_drag_, shape_kind, modifiers_);
         if (shape_kind == QLatin1String("line")) return {a, b};
+        const std::array<double, 4> box{std::min(a.x(), b.x()), std::min(a.y(), b.y()), std::max(0.01, std::abs(b.x() - a.x())),
+                                        std::max(0.01, std::abs(b.y() - a.y()))};
+        if (const auto figure = tool_figure(shape_kind, box, shape_sides, shape_star, shape_custom, (modifiers_ & Qt::ShiftModifier) != 0)) {
+            std::vector<QPointF> out;  // (every subpath, one after another: a NaN point between them)
+            for (const auto& line : render::path_raster::flatten_path(*figure, 0.05)) {
+                if (!out.empty()) out.emplace_back(std::nan(""), std::nan(""));
+                for (const auto& [x, y] : line.pts) out.emplace_back(x, y);
+                if (!line.pts.empty()) out.emplace_back(line.pts.front().first, line.pts.front().second);
+            }
+            return out;
+        }
+        if (shape_kind == QLatin1String("custom")) return {QPointF(box[0], box[1]), QPointF(box[0] + box[2], box[1]), QPointF(box[0] + box[2], box[1] + box[3]),
+                                                           QPointF(box[0], box[1] + box[3]), QPointF(box[0], box[1])};
         try {
             const auto outline = render::shape_points(
                 shape_kind.toStdString(),
@@ -274,7 +307,14 @@ void PageCanvas::draw_tools(QPainter& painter) const {
         painter.setPen(QPen(theme::accent(), 1.5));
         painter.setBrush(Qt::NoBrush);
         QPolygonF line;
-        for (const QPointF& p : outline) line << pt(p.x(), p.y());
+        for (const QPointF& p : outline) {
+            if (std::isnan(p.x())) {  // (the next subpath of a shape tool's figure)
+                painter.drawPolyline(line);
+                line.clear();
+                continue;
+            }
+            line << pt(p.x(), p.y());
+        }
         painter.drawPolyline(line);
         for (const QPointF& p : shape_pts_) painter.drawEllipse(pt(p.x(), p.y()), 3, 3);
     }

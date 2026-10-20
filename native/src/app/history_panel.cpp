@@ -83,6 +83,9 @@ const std::map<std::string, const char*>& names() {
         {"set_path", "パスを描いた"}, {"delete_path", "パスを削除した"}, {"rename_path", "パスを保存した"},
         {"make_work_path", "作業用パスを作成した"}, {"text_to_path", "文字から作業用パスを作成した"},
         {"stroke_path", "パスの境界線を描いた"}, {"set_vector_mask", "ベクトルマスクを変えた"},
+        // (pen-shapes@1, PC3 C-b: render/ops_shapes)
+        {"add_shape_part", "シェイプを描いた"}, {"edit_shape_part", "シェイプを直した"}, {"combine_shape_parts", "シェイプを結合した"},
+        {"move_shape_parts", "シェイプを別のレイヤーへ移した"},
     };
     return table;
 }

@@ -2166,9 +2166,13 @@
         "alternate_menus": []
       },
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "未着手",
+      "implementation_status": "実装済み（PC3 C-b、未統合）",
       "acceptance_status": "未実施",
-      "evidence": [],
+      "evidence": [
+        "native/src/app/main_window_shapes.cpp",
+        "native/src/render/shape_presets.cpp",
+        "native/tests/gui/test_gui_shapes.cpp"
+      ],
       "pc0": {
         "date": "2026-10-16",
         "cpp_base": "962faa4",
@@ -16257,9 +16261,14 @@
         "alternate_menus": []
       },
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "未着手",
+      "implementation_status": "実装済み（PC3 C-b、未統合）",
       "acceptance_status": "未実施",
-      "evidence": [],
+      "evidence": [
+        "native/src/render/ops_shapes.cpp",
+        "native/src/app/main_window_shapes.cpp",
+        "native/tests/contract/test_contract_shapes.cpp",
+        "native/tests/unit/test_shapes.cpp"
+      ],
       "pc0": {
         "date": "2026-10-16",
         "cpp_base": "962faa4",
@@ -16297,9 +16306,14 @@
         "alternate_menus": []
       },
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "未着手",
+      "implementation_status": "実装済み（PC3 C-b、未統合）",
       "acceptance_status": "未実施",
-      "evidence": [],
+      "evidence": [
+        "native/src/render/ops_shapes.cpp",
+        "native/src/app/main_window_shapes.cpp",
+        "native/tests/contract/test_contract_shapes.cpp",
+        "native/tests/unit/test_shapes.cpp"
+      ],
       "pc0": {
         "date": "2026-10-16",
         "cpp_base": "962faa4",
@@ -16337,9 +16351,16 @@
         "alternate_menus": []
       },
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "未着手",
+      "implementation_status": "実装済み（PC3 C-b、未統合）",
       "acceptance_status": "未実施",
-      "evidence": [],
+      "evidence": [
+        "native/src/render/ops_shapes.cpp",
+        "native/src/render/shape_parts.cpp",
+        "native/src/app/main_window_shapes.cpp",
+        "native/tests/contract/test_contract_shapes.cpp",
+        "native/tests/gui/test_gui_shapes.cpp",
+        "native/tests/unit/test_shapes.cpp"
+      ],
       "pc0": {
         "date": "2026-10-16",
         "cpp_base": "962faa4",
@@ -16377,9 +16398,15 @@
         "alternate_menus": []
       },
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "未着手",
+      "implementation_status": "実装済み（PC3 C-b、未統合）",
       "acceptance_status": "未実施",
-      "evidence": [],
+      "evidence": [
+        "native/src/render/ops_shapes.cpp",
+        "native/src/app/main_window_shapes.cpp",
+        "native/tests/contract/test_contract_shapes.cpp",
+        "native/tests/gui/test_gui_shapes.cpp",
+        "native/tests/unit/test_shapes.cpp"
+      ],
       "pc0": {
         "date": "2026-10-16",
         "cpp_base": "962faa4",
@@ -16417,9 +16444,15 @@
         "alternate_menus": []
       },
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "未着手",
+      "implementation_status": "実装済み（PC3 C-b、未統合）",
       "acceptance_status": "未実施",
-      "evidence": [],
+      "evidence": [
+        "native/src/render/ops_shapes.cpp",
+        "native/src/app/main_window_shapes.cpp",
+        "native/tests/contract/test_contract_shapes.cpp",
+        "native/tests/gui/test_gui_shapes.cpp",
+        "native/tests/unit/test_shapes.cpp"
+      ],
       "pc0": {
         "date": "2026-10-16",
         "cpp_base": "962faa4",
@@ -20465,9 +20498,15 @@
         "alternate_menus": []
       },
       "genko_status": "一部（2026-10-16 照合）",
-      "implementation_status": "未着手",
+      "implementation_status": "実装済み（PC3 C-b、未統合）",
       "acceptance_status": "未実施",
-      "evidence": [],
+      "evidence": [
+        "native/src/render/composite.cpp",
+        "native/src/core/ops_layers.cpp",
+        "native/src/app/layer_dialogs.cpp",
+        "native/tests/contract/test_contract_shapes.cpp",
+        "native/tests/unit/test_shapes.cpp"
+      ],
       "pc0": {
         "date": "2026-10-16",
         "cpp_base": "962faa4",
@@ -20563,9 +20602,13 @@
         "alternate_menus": []
       },
       "genko_status": "同等（C++ のソースと試験あり。2026-10-16 照合）",
-      "implementation_status": "未着手",
+      "implementation_status": "実装済み（PC3 C-b、未統合）",
       "acceptance_status": "未実施",
-      "evidence": [],
+      "evidence": [
+        "native/src/core/ops_layers.cpp",
+        "native/src/render/shape_parts.cpp",
+        "native/tests/contract/test_contract_shapes.cpp"
+      ],
       "pc0": {
         "date": "2026-10-16",
         "cpp_base": "962faa4",
@@ -20886,9 +20929,15 @@
         "alternate_menus": []
       },
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "未着手",
+      "implementation_status": "実装済み（PC3 C-b、未統合）",
       "acceptance_status": "未実施",
-      "evidence": [],
+      "evidence": [
+        "native/src/render/ops_smart.cpp",
+        "native/src/render/shape_parts.cpp",
+        "native/src/app/main_window_shapes.cpp",
+        "native/tests/contract/test_contract_shapes.cpp",
+        "native/tests/gui/test_gui_shapes.cpp"
+      ],
       "pc0": {
         "date": "2026-10-16",
         "cpp_base": "962faa4",
@@ -26509,9 +26558,14 @@
         "alternate_menus": []
       },
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "未着手",
+      "implementation_status": "実装済み（PC3 C-b、未統合）",
       "acceptance_status": "未実施",
-      "evidence": [],
+      "evidence": [
+        "native/src/render/ops_shapes.cpp",
+        "native/src/app/main_window_shapes.cpp",
+        "native/tests/contract/test_contract_shapes.cpp",
+        "native/tests/gui/test_gui_shapes.cpp"
+      ],
       "pc0": {
         "date": "2026-10-16",
         "cpp_base": "962faa4",
@@ -27854,9 +27908,18 @@
       },
       "upstream_menu": null,
       "genko_status": "一部（2026-10-16 照合）",
-      "implementation_status": "未着手",
+      "implementation_status": "実装済み（PC3 C-b、未統合）",
       "acceptance_status": "未実施",
-      "evidence": [],
+      "evidence": [
+        "native/src/render/ops_shapes.cpp",
+        "native/src/render/shape_parts.cpp",
+        "native/src/render/page.cpp",
+        "native/src/app/main_window_shapes.cpp",
+        "native/src/app/canvas_tools.cpp",
+        "native/tests/contract/test_contract_shapes.cpp",
+        "native/tests/gui/test_gui_shapes.cpp",
+        "native/tests/unit/test_shapes.cpp"
+      ],
       "pc0": {
         "date": "2026-10-16",
         "cpp_base": "962faa4",
@@ -27889,9 +27952,16 @@
       },
       "upstream_menu": null,
       "genko_status": "一部（2026-10-16 照合）",
-      "implementation_status": "未着手",
+      "implementation_status": "実装済み（PC3 C-b、未統合）",
       "acceptance_status": "未実施",
-      "evidence": [],
+      "evidence": [
+        "native/src/render/ops_shapes.cpp",
+        "native/src/render/shape_parts.cpp",
+        "native/src/app/canvas_pen.cpp",
+        "native/src/app/main_window_paths.cpp",
+        "native/tests/contract/test_contract_shapes.cpp",
+        "native/tests/gui/test_gui_shapes.cpp"
+      ],
       "pc0": {
         "date": "2026-10-16",
         "cpp_base": "962faa4",
@@ -27924,9 +27994,13 @@
       },
       "upstream_menu": null,
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "未着手",
+      "implementation_status": "実装済み（PC3 C-b、未統合）",
       "acceptance_status": "未実施",
-      "evidence": [],
+      "evidence": [
+        "native/src/render/path_info.cpp",
+        "native/src/render/ops_shapes.cpp",
+        "native/tests/contract/test_contract_shapes.cpp"
+      ],
       "pc0": {
         "date": "2026-10-16",
         "cpp_base": "962faa4",
@@ -27952,9 +28026,15 @@
       },
       "upstream_menu": null,
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "未着手",
+      "implementation_status": "実装済み（PC3 C-b、未統合）",
       "acceptance_status": "未実施",
-      "evidence": [],
+      "evidence": [
+        "native/src/render/shape_presets.cpp",
+        "native/src/api/cli.cpp",
+        "native/src/app/shapes_panel.cpp",
+        "native/tests/unit/test_shapes.cpp",
+        "native/tests/contract/test_contract_shapes.cpp"
+      ],
       "pc0": {
         "date": "2026-10-16",
         "cpp_base": "962faa4",
@@ -27980,9 +28060,16 @@
       },
       "upstream_menu": null,
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "未着手",
+      "implementation_status": "実装済み（PC3 C-b、未統合）",
       "acceptance_status": "未実施",
-      "evidence": [],
+      "evidence": [
+        "native/src/render/shape_presets.cpp",
+        "native/src/api/cli.cpp",
+        "native/src/app/shapes_panel.cpp",
+        "native/tests/unit/test_shapes.cpp",
+        "native/tests/contract/test_contract_shapes.cpp",
+        "native/tests/gui/test_gui_shapes.cpp"
+      ],
       "pc0": {
         "date": "2026-10-16",
         "cpp_base": "962faa4",
@@ -28008,9 +28095,16 @@
       },
       "upstream_menu": null,
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "未着手",
+      "implementation_status": "実装済み（PC3 C-b、未統合）",
       "acceptance_status": "未実施",
-      "evidence": [],
+      "evidence": [
+        "native/src/render/shape_presets.cpp",
+        "native/src/api/cli.cpp",
+        "native/src/app/main_window_shapes.cpp",
+        "native/tests/unit/test_shapes.cpp",
+        "native/tests/contract/test_contract_shapes.cpp",
+        "native/tests/gui/test_gui_shapes.cpp"
+      ],
       "pc0": {
         "date": "2026-10-16",
         "cpp_base": "962faa4",
@@ -28036,9 +28130,15 @@
       },
       "upstream_menu": null,
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "未着手",
+      "implementation_status": "実装済み（PC3 C-b、未統合）",
       "acceptance_status": "未実施",
-      "evidence": [],
+      "evidence": [
+        "native/src/render/shape_presets.cpp",
+        "native/src/app/main_window_shapes.cpp",
+        "native/src/app/shapes_panel.cpp",
+        "native/tests/contract/test_contract_shapes.cpp",
+        "native/tests/gui/test_gui_shapes.cpp"
+      ],
       "pc0": {
         "date": "2026-10-16",
         "cpp_base": "962faa4",
@@ -28064,9 +28164,15 @@
       },
       "upstream_menu": null,
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "未着手",
+      "implementation_status": "実装済み（PC3 C-b、未統合）",
       "acceptance_status": "未実施",
-      "evidence": [],
+      "evidence": [
+        "native/src/render/shape_presets.cpp",
+        "native/src/api/cli.cpp",
+        "native/src/app/shapes_panel.cpp",
+        "native/tests/unit/test_shapes.cpp",
+        "native/tests/contract/test_contract_shapes.cpp"
+      ],
       "pc0": {
         "date": "2026-10-16",
         "cpp_base": "962faa4",
@@ -28095,9 +28201,14 @@
       },
       "upstream_menu": null,
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "未着手",
+      "implementation_status": "実装済み（PC3 C-b、未統合）",
       "acceptance_status": "未実施",
-      "evidence": [],
+      "evidence": [
+        "native/src/render/ops_shapes.cpp",
+        "native/src/render/shape_parts.cpp",
+        "native/src/render/ops_smart.cpp",
+        "native/tests/contract/test_contract_shapes.cpp"
+      ],
       "pc0": {
         "date": "2026-10-16",
         "cpp_base": "962faa4",
@@ -29595,9 +29706,14 @@
         "alternate_menus": []
       },
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "未着手",
+      "implementation_status": "実装済み（PC3 C-b、未統合）",
       "acceptance_status": "未実施",
-      "evidence": [],
+      "evidence": [
+        "native/src/render/ops_paths.cpp",
+        "native/src/render/ops_shapes.cpp",
+        "native/src/app/main_window_shapes.cpp",
+        "native/tests/gui/test_gui_shapes.cpp"
+      ],
       "pc0": {
         "date": "2026-10-16",
         "cpp_base": "962faa4",
@@ -32300,9 +32416,12 @@
         "alternate_menus": []
       },
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "未着手",
+      "implementation_status": "実装済み（PC3 C-b、未統合）",
       "acceptance_status": "未実施",
-      "evidence": [],
+      "evidence": [
+        "native/src/app/main_window_shapes.cpp",
+        "native/tests/gui/test_gui_shapes.cpp"
+      ],
       "pc0": {
         "date": "2026-10-16",
         "cpp_base": "962faa4",
@@ -36172,9 +36291,13 @@
         "alternate_menus": []
       },
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "未着手",
+      "implementation_status": "実装済み（PC3 C-b、未統合）",
       "acceptance_status": "未実施",
-      "evidence": [],
+      "evidence": [
+        "native/src/app/shapes_panel.cpp",
+        "native/src/app/main_window_shapes.cpp",
+        "native/tests/gui/test_gui_shapes.cpp"
+      ],
       "pc0": {
         "date": "2026-10-16",
         "cpp_base": "962faa4",
@@ -37576,9 +37699,14 @@
       "kind": "tool",
       "upstream_source": "crates/ui-egui/src/state.rs",
       "genko_status": "一部（2026-10-16 照合）",
-      "implementation_status": "未着手",
+      "implementation_status": "実装済み（PC3 C-b、未統合）",
       "acceptance_status": "未実施",
-      "evidence": [],
+      "evidence": [
+        "native/src/app/main_window_shapes.cpp",
+        "native/src/app/canvas_tools.cpp",
+        "native/src/app/main_window_paint.cpp",
+        "native/tests/gui/test_gui_shapes.cpp"
+      ],
       "pc0": {
         "date": "2026-10-16",
         "cpp_base": "962faa4",
@@ -37603,9 +37731,13 @@
       "kind": "tool",
       "upstream_source": "crates/ui-egui/src/state.rs",
       "genko_status": "一部（2026-10-16 照合）",
-      "implementation_status": "未着手",
+      "implementation_status": "実装済み（PC3 C-b、未統合）",
       "acceptance_status": "未実施",
-      "evidence": [],
+      "evidence": [
+        "native/src/app/main_window_shapes.cpp",
+        "native/src/app/canvas_tools.cpp",
+        "native/tests/gui/test_gui_shapes.cpp"
+      ],
       "pc0": {
         "date": "2026-10-16",
         "cpp_base": "962faa4",
@@ -37630,9 +37762,13 @@
       "kind": "tool",
       "upstream_source": "crates/ui-egui/src/state.rs",
       "genko_status": "一部（2026-10-16 照合）",
-      "implementation_status": "未着手",
+      "implementation_status": "実装済み（PC3 C-b、未統合）",
       "acceptance_status": "未実施",
-      "evidence": [],
+      "evidence": [
+        "native/src/app/main_window_shapes.cpp",
+        "native/src/app/canvas_tools.cpp",
+        "native/tests/gui/test_gui_shapes.cpp"
+      ],
       "pc0": {
         "date": "2026-10-16",
         "cpp_base": "962faa4",
@@ -37657,9 +37793,13 @@
       "kind": "tool",
       "upstream_source": "crates/ui-egui/src/state.rs",
       "genko_status": "一部（2026-10-16 照合）",
-      "implementation_status": "未着手",
+      "implementation_status": "実装済み（PC3 C-b、未統合）",
       "acceptance_status": "未実施",
-      "evidence": [],
+      "evidence": [
+        "native/src/app/main_window_shapes.cpp",
+        "native/src/app/canvas_tools.cpp",
+        "native/tests/gui/test_gui_shapes.cpp"
+      ],
       "pc0": {
         "date": "2026-10-16",
         "cpp_base": "962faa4",
@@ -37684,9 +37824,13 @@
       "kind": "tool",
       "upstream_source": "crates/ui-egui/src/state.rs",
       "genko_status": "一部（2026-10-16 照合）",
-      "implementation_status": "未着手",
+      "implementation_status": "実装済み（PC3 C-b、未統合）",
       "acceptance_status": "未実施",
-      "evidence": [],
+      "evidence": [
+        "native/src/app/main_window_shapes.cpp",
+        "native/src/app/canvas_tools.cpp",
+        "native/tests/gui/test_gui_shapes.cpp"
+      ],
       "pc0": {
         "date": "2026-10-16",
         "cpp_base": "962faa4",
@@ -37711,9 +37855,14 @@
       "kind": "tool",
       "upstream_source": "crates/ui-egui/src/state.rs",
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "未着手",
+      "implementation_status": "実装済み（PC3 C-b、未統合）",
       "acceptance_status": "未実施",
-      "evidence": [],
+      "evidence": [
+        "native/src/app/main_window_shapes.cpp",
+        "native/src/app/canvas_tools.cpp",
+        "native/src/render/shape_presets.cpp",
+        "native/tests/gui/test_gui_shapes.cpp"
+      ],
       "pc0": {
         "date": "2026-10-16",
         "cpp_base": "962faa4",

@@ -182,7 +182,10 @@ const std::multimap<QString, QString>& renamed() {
                                                      {QStringLiteral("変形を確定"), QStringLiteral("自由変形を確定")},
                                                      {QStringLiteral("移動ツール"), QStringLiteral("レイヤー移動")},
                                                      {QStringLiteral("前面へ"), QStringLiteral("レイヤーを前へ")},
-                                                     {QStringLiteral("背面へ"), QStringLiteral("レイヤーを後ろへ")}};
+                                                     {QStringLiteral("背面へ"), QStringLiteral("レイヤーを後ろへ")},
+                                                     // (PC3 C-b: the shape tools' and the direct selection's)
+                                                     {QStringLiteral("長方形ツール"), QStringLiteral("図形")},
+                                                     {QStringLiteral("部分選択ツール"), QStringLiteral("線の編集（制御点）")}};
     return all;
 }
 

@@ -4,7 +4,8 @@
 // the last anchor back —; 曲線ペンツール — each click an anchor the curve passes through smoothly (Alt+click: a corner),
 // the same ends —; パス選択ツール — a click on a subpath of the target path chooses it, a drag moves it (Alt: a copy),
 // an anchor or handle of the chosen subpath dragged moves alone (as the direct selection tool), Delete takes the chosen
-// subpath out. The target path (the Paths panel's choice) is drawn over the page with its anchors while a path tool is
+// subpath out; a click on a pen layer's shape part (PC3 C-b) makes its path the target. The target path (the Paths
+// panel's choice) is drawn over the page with its anchors while a path tool is
 // in hand or 表示 → ターゲットパス is on. What a tool makes goes to the window as a subpath drawn (pathDrawn: a set_path)
 // or the target path changed (pathEdited); the points being drawn are the screen's only, until the subpath ends.
 
@@ -114,6 +115,40 @@ std::optional<vec::Path> PageCanvas::target_path_now() const {
         for (const core::Layer& layer : p->layers)
             if (layer.id == id && layer.vector_mask) return layer.vector_mask->path;
     }
+    if (target_path.startsWith(QLatin1String("shape:"))) {  // (PC3 C-b: a pen layer's shape part, "shape:<layer>/<part>")
+        const QString rest = target_path.mid(6);
+        const qsizetype slash = rest.indexOf(QLatin1Char('/'));
+        const std::string layer_id = rest.left(slash).toStdString(), part_id = rest.mid(slash + 1).toStdString();
+        for (const core::Layer& layer : p->layers) {
+            if (layer.id != layer_id || !layer.shapes) continue;
+            for (const vec::ShapePart& part : layer.shapes->items)
+                if (part.id == part_id) return part.path;
+        }
+    }
+    return std::nullopt;
+}
+
+std::optional<std::pair<QString, std::size_t>> PageCanvas::shape_part_at(const QPointF& mm) const {
+    const core::Page* p = page();
+    if (p == nullptr) return std::nullopt;
+    const double reach = kPickPx / std::max(0.01, view_.scale);
+    for (std::size_t l = p->layers.size(); l-- > 0;) {  // (the top layer first)
+        const core::Layer& layer = p->layers[l];
+        if (!layer.visible || layer.kind != core::LayerKind::Strokes || !layer.shapes || layer.shapes->items.empty()) continue;
+        // (the parts over the lines are drawn last, then the others, each list's last on top)
+        std::vector<const vec::ShapePart*> order;
+        for (const bool over : {true, false}) {
+            for (std::size_t i = layer.shapes->items.size(); i-- > 0;)
+                if (layer.shapes->items[i].over == over) order.push_back(&layer.shapes->items[i]);
+        }
+        for (const vec::ShapePart* part : order) {
+            for (std::size_t s = part->path.subpaths.size(); s-- > 0;) {
+                const std::vector<QPointF> line = outline(part->path.subpaths[s]);
+                if (distance_to(line, mm) <= reach || (part->path.subpaths[s].closed && inside(line, mm)))
+                    return std::make_pair(QStringLiteral("shape:%1/%2").arg(QString::fromStdString(layer.id), QString::fromStdString(part->id)), s);
+            }
+        }
+    }
     return std::nullopt;
 }
 
@@ -171,10 +206,26 @@ bool PageCanvas::path_press(const QPointF& pos, const QPointF& mm, Qt::KeyboardM
         update();
         return true;
     }
-    // パス選択ツール: the chosen subpath's anchors and handles first, then any subpath
+    // パス選択ツール: the chosen subpath's anchors and handles first, then any subpath, then a shape part on the page
     (void)pos;
-    const std::optional<vec::Path> path = target_path_now();
+    std::optional<vec::Path> path = target_path_now();
+    const auto pick_part = [&]() -> bool {  // (PC3 C-b: the shape part clicked becomes the target path)
+        const auto part = shape_part_at(mm);
+        if (!part) return false;
+        if (target_path != part->first) {
+            target_path = part->first;
+            emit targetPathChosen();
+        }
+        path = target_path_now();
+        return path.has_value() && part->second < path->subpaths.size();
+    };
     if (!path) {
+        if (pick_part()) {
+            path_subpath = shape_part_at(mm)->second;
+            path_drag_ = PathDrag{*path, *path_subpath, -1, 0, mm, mm, (modifiers & Qt::AltModifier) != 0};
+            update();
+            return true;
+        }
         path_subpath.reset();
         update();
         return true;
@@ -200,6 +251,7 @@ bool PageCanvas::path_press(const QPointF& pos, const QPointF& mm, Qt::KeyboardM
             break;
         }
     }
+    if (!hit && pick_part()) hit = shape_part_at(mm)->second;
     path_subpath = hit;
     if (hit) path_drag_ = PathDrag{*path, *hit, -1, 0, mm, mm, (modifiers & Qt::AltModifier) != 0};
     update();

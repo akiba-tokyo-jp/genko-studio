@@ -937,6 +937,20 @@ const std::vector<Rule>& rules() {
         r.push_back(rule("the line \\S+ is not placed on a page", "この台詞はページに置かれていません"));
         r.push_back(rule("blend paints a paint layer's pixels.*", "描画モードを付けた塗りつぶしは、ペイントレイヤーにだけできます"));
         r.push_back(rule("shape_part: the layer \\S+ has no shape part.*", "そのレイヤーに、その形はありません"));
+        // (pen-shapes@1, PC3 C-b: the shape parts of pen layers, render/ops_shapes)
+        r.push_back(rule("a shape part goes on a pen layer.*", "シェイプはペンのレイヤーに置けます（「新しいレイヤー」を入れると、ペンのレイヤーを作って置きます）"));
+        r.push_back(rule("the layer \\S+ has no shape part .*", "そのレイヤーに、そのシェイプはありません"));
+        r.push_back(rule("the layer \\S+ has a shape part \\S+ already", "そのレイヤーには、同じ id のシェイプがもうあります"));
+        r.push_back(rule("choose two or more shape parts to combine", "結合するシェイプを 2 つ以上選びます"));
+        r.push_back(rule("the shape (?:is|would be) empty", "シェイプの形が空になります"));
+        r.push_back(rule("the area is empty", "先に選択範囲を作ります"));
+        r.push_back(rule("a pen layer holds at most (\\d+) shape parts", "1 つのペンのレイヤーに置けるシェイプは \\1 個までです"));
+        r.push_back(rule("the shape would have more than (\\d+) knots", "シェイプの点が多すぎます（\\1 個まで）"));
+        r.push_back(rule("the matrix squashes the shape flat", "その変形では、シェイプがつぶれてしまいます"));
+        r.push_back(rule("\\S+ is a shape part: its anchors and handles are its path.*", "シェイプの点とハンドルは、パス選択ツールで動かします"));
+        r.push_back(rule("\\S+ is a shape part, not a line", "シェイプは線ではありません（パス選択ツールで直します）"));
+        r.push_back(rule(".*a pattern fill is not in this build yet", "パターンの塗りは、この版の Genko ではまだ使えません"));
+        r.push_back(rule("shape's kind is .*|a shape of kind \\S+ needs .*|shape has no key .*", "シェイプの形の指定が正しくありません"));
         // (the C++ build's own: what it does not do yet, and saving)
         r.push_back(rule("official export is not in the C\\+\\+ build yet",
                          "この版の Genko では、まだ正式な書き出し（確認と承認の記録つき）はできません（ふつうの書き出しはできます）"));

@@ -569,7 +569,11 @@ std::optional<Json> gradient_dialog(QWidget* parent, const core::Page* page, con
     const std::vector<Way> ways{{QStringLiteral("上から下へ"), {w / 2, 0}, {w / 2, h}, "linear"}, {QStringLiteral("下から上へ"), {w / 2, h}, {w / 2, 0}, "linear"},
                                 {QStringLiteral("左から右へ"), {0, h / 2}, {w, h / 2}, "linear"}, {QStringLiteral("右から左へ"), {w, h / 2}, {0, h / 2}, "linear"},
                                 {QStringLiteral("中心から外へ（円）"), {w / 2, h / 2}, {w / 2, 0}, "radial"},
-                                {QStringLiteral("中心から外へ（楕円）"), {w / 2, h / 2}, {w / 2, 0}, "ellipse"}};
+                                {QStringLiteral("中心から外へ（楕円）"), {w / 2, h / 2}, {w / 2, 0}, "ellipse"},
+                                // (PC3 C-b, vector@1: Photoshop's 角度・反射・菱形)
+                                {QStringLiteral("中心から回る（角度）"), {w / 2, h / 2}, {w / 2, 0}, "angle"},
+                                {QStringLiteral("中心から両側へ（反射）"), {w / 2, h / 2}, {w / 2, 0}, "reflected"},
+                                {QStringLiteral("中心から外へ（菱形）"), {w / 2, h / 2}, {w / 2, 0}, "diamond"}};
     QDialog dialog(parent);
     dialog.setObjectName(QStringLiteral("gradient_dialog"));
     dialog.setWindowTitle(QStringLiteral("グラデーション"));
@@ -590,9 +594,14 @@ std::optional<Json> gradient_dialog(QWidget* parent, const core::Page* page, con
     for (const auto& [label, key] : repeats) repeat->addItem(label, QString::fromStdString(key));
     repeat->setCurrentIndex(std::max(0, repeat->findData(QString::fromStdString(now.is_object() ? now.value("repeat", std::string("none")) : std::string("none")))));
     auto* colours = new StopsEditor(stops_from(now));
+    auto* reverse = new QCheckBox(QStringLiteral("逆方向"));
+    reverse->setObjectName(QStringLiteral("gradient_reverse"));
+    reverse->setToolTip(QStringLiteral("色の並びを逆にします"));
+    reverse->setChecked(now.is_object() && now.value("reverse", false));
     form->addRow(QStringLiteral("向き"), way);
     form->addRow(QStringLiteral("楕円の横幅"), ratio);
     form->addRow(QStringLiteral("端から先"), repeat);
+    form->addRow(QString(), reverse);
     form->addRow(QStringLiteral("色"), colours);
     form->addRow(ok_cancel(&dialog));
     if (ask::exec(&dialog) != QDialog::Accepted) return std::nullopt;
@@ -610,6 +619,7 @@ std::optional<Json> gradient_dialog(QWidget* parent, const core::Page* page, con
     }
     if (std::string(chosen.shape) == "ellipse") out["ratio"] = rounded(ratio->value(), 2);
     if (repeat->currentData().toString() != QStringLiteral("none")) out["repeat"] = repeat->currentData().toString().toStdString();
+    if (reverse->isChecked()) out["reverse"] = true;
     return out;
 }
 

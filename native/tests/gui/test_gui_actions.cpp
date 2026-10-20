@@ -101,7 +101,7 @@ const std::vector<Expected>& expected() {
          "コマの中をドラッグして割る（斜めも。水平・垂直に吸い付く、Alt で自由）・間の白をドラッグで間隔を動かす・選んだコマの角をドラッグで形を変える", true,
          "ツール"},
         {"act_move", "移動ツール", k({s("Q")}), "描く先のレイヤーを丸ごとドラッグで動かす（Shift で縦・横・45°）", true, "ツール"},
-        {"act_point_wider", "選んだ点を太く", k({s("Ctrl+Alt+]")}), "線の編集で選んだ制御点のところだけ、線を太くします", false, "ツール"},
+        {"act_point_wider", "選んだ点を太く", k({s("Ctrl+Alt+]")}), "部分選択ツールで選んだ制御点のところだけ、線を太くします", false, "ツール"},  // (PC3 C-b)
         {"act_color", "ペンの色…", k({s("C")}), "", false, "ツール"},
         {"act_split_h", "コマを横に割る（上下に分ける）", k({s("Ctrl+Shift+H")}), "", false, "ページ/コマ"},
         {"act_split_v", "コマを縦に割る（左右に分ける）", k({s("Ctrl+Shift+V")}), "", false, "ページ/コマ"},
@@ -301,7 +301,13 @@ private slots:
         // (act_line_work_path), 表示 → ターゲットパス (act_show_target_path), ファイル → パスを Illustrator へ… (act_export_paths_ai),
         // レイヤー → ベクトルマスク (act_vmask_reveal_all, act_vmask_hide_all, act_vmask_current_path, act_vmask_delete,
         // act_vmask_disable, act_vmask_link) and ラスタライズ → ベクトルマスク (act_rasterize_vmask) — theirs (test_gui_paths).
-        QCOMPARE(w->actions_by_name().size(), std::size_t{345});
+        // and the 16 of PC3 C-b (SPEC COLOR-07, pen-shapes@1) — ツール の 楕円形ツール・三角形ツール・多角形ツール・ラインツール・
+        // カスタムシェイプツール・次のシェイプツール (act_shape_ellipse, act_shape_triangle, act_shape_polygon, act_shape_line,
+        // act_shape_custom, act_next_shape_tool), 編集 → カスタムシェイプを定義… (act_define_custom_shape), レイヤー → シェイプを結合
+        // (act_combine_unite, act_combine_subtract, act_combine_intersect, act_combine_exclude, act_merge_components), ラスタライズ →
+        // シェイプ (act_rasterize_shape), 選択範囲 → シェイプに変換 (act_sel_to_shape), ページ → 台詞 → シェイプに変換
+        // (act_line_to_shape) and 表示 → シェイプから新規ガイドを作成 (act_guides_from_shape) — theirs (test_gui_shapes).
+        QCOMPARE(w->actions_by_name().size(), std::size_t{361});
         QVERIFY(w->action("act_chat_approval"));
         QVERIFY(w->action("act_style"));
         QVERIFY(w->action("act_exposure"));
@@ -336,8 +342,9 @@ private slots:
         }
         // the palette and the command bar (Python's order); with M3's eight ways of the marquee (test_gui_select) and its
         // drawing tools and line editing (test_gui_paint), the effect lines and the material tool (test_gui_effects), the
-        // text tool (test_gui_lines); PC3 C-a's three path tools (test_gui_paths)
-        QCOMPARE(w->tools_group()->actions().size(), 31);
+        // text tool (test_gui_lines); PC3 C-a's three path tools (test_gui_paths); PC3 C-b's five shape tools besides 長方形ツール
+        // (test_gui_shapes)
+        QCOMPARE(w->tools_group()->actions().size(), 36);
     }
 
     // No two commands share a key (Qt would take the key as ambiguous and do neither): PC1b's 色の校正 (Ctrl+Alt+Y — Ctrl+Y
@@ -431,7 +438,11 @@ private slots:
                                                   {"ruler", "act_ruler"},     {"3d", "act_3d"},         {"effect", "act_effect"},
                                                   {"stamp", "act_stamp"},     {"text", "act_text"},
                                                   // (PC3 C-a: ペンツール, 曲線ペンツール, パス選択ツール)
-                                                  {"pathpen", "act_path_pen"}, {"curvepen", "act_curvature_pen"}, {"pathselect", "act_path_select"}};
+                                                  {"pathpen", "act_path_pen"}, {"curvepen", "act_curvature_pen"}, {"pathselect", "act_path_select"},
+                                                  // (PC3 C-b: the shape tools besides 長方形ツール, the 図形 of before)
+                                                  {"shape_ellipse", "act_shape_ellipse"}, {"shape_triangle", "act_shape_triangle"},
+                                                  {"shape_polygon", "act_shape_polygon"}, {"shape_line", "act_shape_line"},
+                                                  {"shape_custom", "act_shape_custom"}};
         QCOMPARE(w->tool_actions().size(), tools.size());
         QVERIFY(w->tools_group()->isExclusive());
         QVERIFY(w->action(QStringLiteral("act_select"))->isChecked());
@@ -441,7 +452,9 @@ private slots:
             QCOMPARE(a->actionGroup(), w->tools_group());
             QVERIFY(!a->autoRepeat());  // (a held key chooses the tool once)
             studio.trigger(attribute.toLatin1().constData());
-            QCOMPARE(studio.canvas()->tool(), MainWindow::is_marquee_tool(tool) ? QStringLiteral("marquee") : tool);
+            QCOMPARE(studio.canvas()->tool(), MainWindow::is_marquee_tool(tool) ? QStringLiteral("marquee")
+                                              : MainWindow::is_shape_tool(tool) ? QStringLiteral("shape")  // (PC3 C-b)
+                                                                                 : tool);
             QVERIFY(a->isChecked());
             for (const auto& [other, other_attribute] : tools) {
                 if (other != tool) QVERIFY(!w->action(other_attribute)->isChecked());
@@ -597,7 +610,7 @@ private slots:
         inject::mouse_stroke(studio.canvas(), {c, c + QPointF(10, 3), c + QPointF(20, 5)});
         const std::string id = ink_of(studio.page())->strokes->items.at(0)->id;
         studio.trigger("act_point_wider");
-        QCOMPARE(w->last_notice(), QStringLiteral("先に「線の編集」で線を選び、□（制御点）をクリックします"));
+        QCOMPARE(w->last_notice(), QStringLiteral("先に「部分選択ツール」で線を選び、□（制御点）をクリックします"));
         studio.canvas()->vector_ids = {id};
         studio.canvas()->vector_point = 1;
         const auto before = studio.doc().pages[0];

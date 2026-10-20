@@ -30,8 +30,9 @@ void MainWindow::build_vector_actions() {
     };
     tool("act_reshape", QStringLiteral("線の修正（つまむ）"), "reshape", QStringLiteral("Y"),
          QStringLiteral("描いた線をつまんでドラッグすると、その辺りが滑らかに動きます"));
-    tool("act_vector", QStringLiteral("線の編集（制御点）"), "vector", QStringLiteral("Shift+Y"),
-         QStringLiteral("線を選んで制御点を動かす（Alt+クリックで点を足す、Delete で消す、Shift+クリックで 2 本目）"));
+    // (PC3 C-b, the user's decision 5: 線の編集（制御点） by Photoshop's name — its id kept, preferences::renamed())
+    tool("act_vector", QStringLiteral("部分選択ツール"), "vector", QStringLiteral("Shift+Y"),
+         QStringLiteral("ペンの線を選んで制御点を動かす（Alt+クリックで点を足す、Delete で消す、Shift+クリックで 2 本目）"));
     make("act_vector_join", QStringLiteral("選んだ 2 本の線をつなぐ"), [this] { vector_selected("connect"); });
     QAction* cut = make("act_vector_cut", QStringLiteral("クリックした所で線を切る"), [] {}, {},
                         QStringLiteral("オンの間、線をクリックするとそこで 2 本に分かれます"), true);
@@ -139,7 +140,7 @@ void MainWindow::vector_traced(const Json& points, const QString& mode) {
 void MainWindow::vector_simplify() {
     const std::vector<std::string> ids = canvas_->vector_ids;
     if (ids.empty()) {
-        flash(QStringLiteral("先に「線の編集」（Shift+Y）で線を選びます"), 3000);
+        flash(QStringLiteral("先に「部分選択ツール」（Shift+Y）で線を選びます"), 3000);
         return;
     }
     for (const std::string& id : ids) vector_edit(Json{{"action", "simplify"}, {"stroke_id", id}});
@@ -148,7 +149,7 @@ void MainWindow::vector_simplify() {
 void MainWindow::vector_selected(const std::string& what) {
     const std::vector<std::string> ids = canvas_->vector_ids;
     if (ids.empty()) {
-        flash(QStringLiteral("先に「線の編集」（Shift+Y）で線を選びます"), 3000);
+        flash(QStringLiteral("先に「部分選択ツール」（Shift+Y）で線を選びます"), 3000);
         return;
     }
     if (what == "connect" && ids.size() != 2) {

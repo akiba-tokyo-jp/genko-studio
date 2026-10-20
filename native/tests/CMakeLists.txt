@@ -491,6 +491,9 @@ if(GENKO_BUILD_APP)
   # PC3 C-a (vector@1): ペンツール・曲線ペンツール・パス選択ツール on the canvas, the パス panel's buttons, レイヤー →
   # ベクトルマスク and ラスタライズ, 選択範囲 → 作業用パスを作成…, the target path shown, パスを Illustrator へ….
   genko_test(test_gui_paths SOURCES gui/test_gui_paths.cpp DEPS genko_app genko_test_support GUI TIMEOUT 600)
+  # PC3 C-b (pen-shapes@1): the shape tools in their モード (シェイプ・パス・ピクセル, Alt from the centre, a new layer), the
+  # pen tools' モード, パス選択ツール on a part, the シェイプ panel, カスタムシェイプを定義…, シェイプを結合 and the other commands.
+  genko_test(test_gui_shapes SOURCES gui/test_gui_shapes.cpp DEPS genko_app genko_test_support GUI TIMEOUT 600)
   # M7 (the ledger counted against the C++ tree): the checks of Python's window tests no C++ test made before
   genko_test(test_gui_ledger_a SOURCES gui/test_gui_ledger_a.cpp DEPS genko_app genko_test_support GUI TIMEOUT 900)
   genko_test(test_gui_ledger_c SOURCES gui/test_gui_ledger_c.cpp DEPS genko_app genko_test_support GUI TIMEOUT 900)

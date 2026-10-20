@@ -30,6 +30,7 @@ class QComboBox;
 class QDoubleSpinBox;
 class QLabel;
 class QSpinBox;
+class QFormLayout;
 class QTabBar;
 class QToolBar;
 class QMenu;
@@ -50,6 +51,7 @@ namespace genko::app {
 class BrushPanel;
 class ChannelPanel;
 class PathsPanel;
+class ShapesPanel;
 class HistogramPanel;
 class InfoPanel;
 class CheckPanel;
@@ -164,6 +166,10 @@ public:
     // The tools of the marquee (rect, lasso, wand, ellipse, polyline, selpen, selerase), and the one of a way.
     static bool is_marquee_tool(const QString& tool);
     static QString marquee_tool_of(const QString& way);
+    // The shape tools (PC3 C-b: shape — 長方形ツール —, shape_ellipse, shape_triangle, shape_polygon, shape_line,
+    // shape_custom: the canvas's one tool "shape" in one of its figures), and the one of a figure.
+    static bool is_shape_tool(const QString& tool);
+    static QString shape_tool_of(const QString& kind);
     // What a question or a dialog is about to be asked about (the book in front as it is now, and its page), and
     // whether it is still so when the answer comes (otherwise a notice, and nothing is done): the book may be read
     // further or changed from outside while it waits, and the pages and layers asked about are gone then.
@@ -202,8 +208,27 @@ public:
     // ("reveal_all", "hide_all", "current_path", "delete", "enabled", "linked", "rasterize": レイヤー → ベクトルマスク's)
     void vector_mask_command(const std::string& what);
     bool export_paths_ai(std::optional<QString> file = std::nullopt);
-    // The target path as an op names it: {"name": "work" | a saved path's name} or {"layer": the layer whose vector mask it is}.
+    // The target path as an op names it: {"name": "work" | a saved path's name} or {"layer": the layer whose vector mask it is}
+    // or {"shape": {"layer", "id"}} (a pen layer's shape part, PC3 C-b).
     core::Json target_path_terms() const;
+    // pen-shapes@1 (PC3 C-b, app/main_window_shapes.cpp): the shape tools' choices as add_shape_part's fill and stroke
+    // (the tool settings: 塗り, 線), the Shapes panel (ウィンドウ → シェイプ) and the shape parts' commands — a preset
+    // placed (its rect on the page, mm; none: a quarter of the page in its middle), 編集 → カスタムシェイプを定義… (the
+    // target path kept under a name), レイヤー → シェイプを結合 ("combine", "subtract", "intersect", "exclude", "merge":
+    // the parts of the layer drawn on), ラスタライズ → シェイプ, 選択範囲 → シェイプに変換, ページ → 台詞 → シェイプに変換 and
+    // 表示 → シェイプから新規ガイドを作成.
+    core::Json shape_fill_now() const;
+    core::Json shape_stroke_now() const;
+    ShapesPanel* shapes_panel() const { return shapes_panel_; }
+    QDockWidget* shapes_dock() const { return shapes_dock_; }
+    bool place_shape_preset(const QString& group, const QString& name, std::optional<std::array<double, 4>> rect = std::nullopt);
+    void choose_custom_shape(const QString& group, const QString& name);
+    bool define_custom_shape(std::optional<QString> name = std::nullopt);
+    bool combine_shapes(const std::string& how);
+    bool rasterize_shapes();
+    bool selection_to_shape();
+    bool line_to_shape();
+    bool guides_from_shape();
     // What a conversion that flattens a page says it does to its hidden layers (画像をフラット化's words: the hidden
     // drawing layers discarded — their count when there are any —, the name, draft and frame layers kept).
     static QString flatten_discards(int discarded);
@@ -521,6 +546,23 @@ private:
     void build_path_dock();
     void path_drawn(const core::Json& subpath);
     void path_edited(const core::Json& path);
+    // pen-shapes@1 (PC3 C-b, app/main_window_shapes.cpp): the shape tools and the shape parts' commands, their menus
+    // (ツール, 編集, レイヤー → シェイプを結合 and ラスタライズ → シェイプ, 選択範囲, ページ → 台詞, 表示), the tool settings
+    // (the shape tools' and the pen tools' モード) and the Shapes panel. A figure drawn becomes a shape part (シェイプ), a
+    // subpath of the target path (パス) or the 図形 of before (ピクセル); a pen's subpath the same by the pen's モード
+    // (pen_path_drawn: false in パス, the path's own way then).
+    void build_shape_actions();
+    void build_shape_menus(QMenu* edit, QMenu* view, QMenu* tools, QMenu* layers);
+    void build_shape_dock();
+    void build_shape_pages(ToolSettings* ts, QFormLayout* shape_form);
+    void choose_shape_tool(const QString& tool);
+    void shape_part_drawn(const core::Json& shape, const QString& mode);
+    bool pen_path_drawn(const core::Json& subpath);
+    // A shape part made of `what` (add_shape_part's "shape" or "area", "name"?) on the pen layer drawn on or a new one
+    // (新しいレイヤー), in the tool settings' fill and stroke (`closed`: false, an open path's — no fill, a stroke —), or
+    // the path given added to the target part by the tool's 合成 (`more`); and the path a figure of the canvas makes.
+    bool add_shape_part_op(core::Json what, bool closed, const std::optional<core::vector::Path>& more = std::nullopt);
+    std::optional<core::vector::Path> figure_path(const core::Json& shape) const;
     // PC2a: the 色調補正 and 属性 panels (app/adjust_panels.cpp), listed in ウィンドウ.
     void build_adjust_docks();
     void connect_session();
@@ -802,6 +844,25 @@ private:
     ChannelPanel* channel_panel_ = nullptr;
     PathsPanel* paths_panel_ = nullptr;  // (vector@1, PC3 C-a)
     QDockWidget* paths_dock_ = nullptr;
+    // pen-shapes@1 (PC3 C-b): the Shapes panel and the shape tools' settings (their objectName the same words)
+    ShapesPanel* shapes_panel_ = nullptr;
+    QDockWidget* shapes_dock_ = nullptr;
+    QComboBox* shape_mode_ = nullptr;
+    QComboBox* pen_mode_ = nullptr;
+    QCheckBox* shape_new_layer_ = nullptr;
+    QComboBox* shape_fill_ = nullptr;
+    QDoubleSpinBox* shape_stroke_width_ = nullptr;
+    QComboBox* shape_stroke_colour_ = nullptr;
+    QComboBox* shape_stroke_align_ = nullptr;
+    QComboBox* shape_stroke_cap_ = nullptr;
+    QComboBox* shape_stroke_join_ = nullptr;
+    QComboBox* shape_stroke_dash_ = nullptr;
+    QSpinBox* shape_opacity_ = nullptr;
+    QCheckBox* shape_over_ = nullptr;
+    QComboBox* shape_combine_ = nullptr;
+    QSpinBox* shape_star_ = nullptr;
+    QDoubleSpinBox* shape_weight_ = nullptr;
+    QComboBox* shape_custom_ = nullptr;
     QDockWidget* channels_dock_ = nullptr;
     std::vector<Document> documents_;
     int doc_ = 0;

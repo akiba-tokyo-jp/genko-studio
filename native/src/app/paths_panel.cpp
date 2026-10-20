@@ -114,6 +114,25 @@ void PathsPanel::refresh() {
         const QString title = QString::fromStdString(layer->title.empty() ? layer->id : layer->title);
         add_row(QStringLiteral("%1 のベクトルマスク").arg(title), QStringLiteral("mask:") + QString::fromStdString(layer->id), layer->vector_mask->path);
     }
+    // (PC3 C-b: the shape parts of the pen layer drawn on — and of the layer of the part chosen on the page)
+    std::vector<const core::Layer*> holders;
+    if (const core::Layer* layer = window_->target_layer(); layer != nullptr) holders.push_back(layer);
+    if (target.startsWith(QLatin1String("shape:"))) {
+        const std::string id = target.mid(6).section(QLatin1Char('/'), 0, 0).toStdString();
+        for (const core::Layer& layer : page->layers)
+            if (layer.id == id && std::find(holders.begin(), holders.end(), &layer) == holders.end()) holders.push_back(&layer);
+    }
+    for (const core::Layer* layer : holders) {
+        if (!layer->shapes) continue;
+        const QString title = QString::fromStdString(layer->title.empty() ? layer->id : layer->title);
+        int n = 0;
+        for (const vec::ShapePart& part : layer->shapes->items) {
+            ++n;
+            const QString name = part.name ? QString::fromStdString(*part.name) : QStringLiteral("形 %1").arg(n);
+            add_row(QStringLiteral("%1 の %2").arg(title, name),
+                    QStringLiteral("shape:%1/%2").arg(QString::fromStdString(layer->id), QString::fromStdString(part.id)), part.path);
+        }
+    }
     loading_ = false;
 }
 
@@ -153,6 +172,12 @@ void PathsPanel::remove() {
     const QString key = window_->canvas()->target_path;
     if (key.startsWith(QLatin1String("mask:"))) {
         window_->vector_mask_command("delete");
+    } else if (key.startsWith(QLatin1String("shape:"))) {  // (PC3 C-b: the shape part goes, as Photoshop deletes the shape layer's path)
+        const QString rest = key.mid(6);
+        if (!window_->apply_ops(Json::array({Json{{"op", "vector_edit"}, {"page", page->index.json()}, {"layer_id", rest.section(QLatin1Char('/'), 0, 0).toStdString()},
+                                                  {"action", "delete"}, {"stroke_id", rest.section(QLatin1Char('/'), 1).toStdString()}}})))
+            return;
+        window_->canvas()->target_path = QStringLiteral("work");
     } else {
         Json op{{"op", "delete_path"}, {"page", page->index.json()}};
         if (key.startsWith(QLatin1String("saved:"))) op["name"] = key.mid(6).toStdString();
@@ -167,6 +192,20 @@ void PathsPanel::rename(std::optional<QString> name) {
     if (page == nullptr) return;
     const QString key = window_->canvas()->target_path;
     if (key.startsWith(QLatin1String("mask:"))) return;
+    if (key.startsWith(QLatin1String("shape:"))) {  // (PC3 C-b: the shape part's name)
+        const QString rest = key.mid(6);
+        QString chosen = name.value_or(QString());
+        if (!name) {
+            const auto asked = ask::get_text(this, QStringLiteral("シェイプの名前を変更"), QStringLiteral("シェイプの名前"));
+            if (!asked) return;
+            chosen = *asked;
+        }
+        if (chosen.trimmed().isEmpty()) return;
+        window_->apply_ops(Json::array({Json{{"op", "edit_shape_part"}, {"page", page->index.json()}, {"layer_id", rest.section(QLatin1Char('/'), 0, 0).toStdString()},
+                                             {"id", rest.section(QLatin1Char('/'), 1).toStdString()}, {"name", chosen.trimmed().toStdString()}}}));
+        refresh();
+        return;
+    }
     const bool work = key == QLatin1String("work");
     if (work && !page->work_path) return;
     QString chosen;
