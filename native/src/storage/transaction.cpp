@@ -1,6 +1,7 @@
 #include "storage/transaction.hpp"
 
 #include <algorithm>
+#include <set>
 #include <system_error>
 
 #include "core/gates.hpp"
@@ -9,6 +10,7 @@
 #include "storage/asset_store.hpp"
 #include "storage/fault.hpp"
 #include "storage/fsutil.hpp"
+#include "storage/gc.hpp"
 #include "storage/journal.hpp"
 #include "storage/reader.hpp"
 #include "storage/state.hpp"
@@ -110,6 +112,17 @@ Json ordered_like(const Json& value, const Json& model) {
     return order(order, value, model, true);
 }
 
+namespace {
+
+// The same folder (its own path, or another way to it).
+bool same_folder(const fs::path& a, const fs::path& b) {
+    std::error_code ec;
+    const bool same = fs::equivalent(a, b, ec);
+    return ec ? a.lexically_normal() == b.lexically_normal() : same;
+}
+
+}  // namespace
+
 Saver::Saver(const ProjectLock& lock) : lock_(lock) {}
 
 SaveResult Saver::save(const core::Document& doc, const SaveRequest& request) {
@@ -161,6 +174,11 @@ SaveResult Saver::run(const SaveRequest& request, const std::function<Json(Asset
     {
         fault::StageScope stage(fault::Stage::assets);
         payload = make_payload(store);
+        if (request.assets_from && !same_folder(*request.assets_from, dir)) {
+            std::set<std::string> named;
+            refs_in(payload, named);
+            copy_named_assets(*request.assets_from, dir, named);
+        }
         payload["revision"] = revision;  // (in their places)
         payload["writer"] = writer_info();
         text = core::dump_python_indent2(payload);

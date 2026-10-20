@@ -22,10 +22,15 @@
 #include <vector>
 
 #include "app/session.hpp"
+#include "core/base64.hpp"
 #include "core/command_bus.hpp"
 #include "core/ids.hpp"
 #include "core/model.hpp"
 #include "core/paths.hpp"
+#include "render/colour.hpp"
+#include "render/image.hpp"
+#include "render/page.hpp"
+#include "render/png.hpp"
 #include "service/wording.hpp"
 #include "storage/asset_store.hpp"
 #include "storage/fault.hpp"
@@ -1541,6 +1546,57 @@ private slots:
         QVERIFY(session->wait_saved(10000ms));
         QCOMPARE(ink_strokes_on_disk(copy), std::size_t{2});
         QCOMPARE(ink_strokes_on_disk(book), std::size_t{0});  // (the first place keeps what it had)
+    }
+
+    // (independent review A P1-2) A book opened again — its smart object's file, filter mask and assigned profile, and a
+    // placed picture, then only in its folder's assets — saved somewhere else takes them along: the new book opens whole,
+    // draws the same and goes on there (what is put in it later drawn from its own folder).
+    void saveAsTakesTheFilesOnlyTheOldFolderHolds() {
+        QTemporaryDir tmp;
+        const fs::path book = path_of(tmp.filePath("book.genko"));
+        const fs::path copy = path_of(tmp.filePath("別の場所/写し.genko"));
+        make_book(book);
+        Session::Options options = quick(path_of(tmp.filePath("recovery")));
+        options.autosave = false;
+        const auto png = [](int w, int h, genko::render::Ink ink) {
+            return genko::render::write_png(genko::render::Image::create("RGB", genko::render::Size{w, h}, ink));
+        };
+        const std::string placed = genko::storage::AssetStore(book).put_bytes(png(30, 20, genko::render::Ink{20, 90, 200}), ".png");
+        {
+            auto first = Session::open(book, options);
+            const double w = first->document().page(0).spec.width_mm.value(), h = first->document().page(0).spec.height_mm.value();
+            const Json area{{"poly", Json::array({Json::array({0, 0}), Json::array({w / 2, 0}), Json::array({w / 2, h}), Json::array({0, h})})}};
+            first->apply(Json::array(
+                {Json{{"op", "smart_place"}, {"page", 1}, {"new_id", "so"}, {"data", genko::core::b64encode(png(40, 30, genko::render::Ink{200, 40, 10}))},
+                      {"name", "赤.png"}},
+                 Json{{"op", "smart_profile"}, {"page", 1}, {"id", "so"}, {"embedded_profile", "assign"},
+                      {"icc", genko::core::b64encode(genko::render::colour::srgb_icc())}},
+                 Json{{"op", "smart_filter_add"}, {"page", 1}, {"id", "so"}, {"kind", "invert"}, {"area", area}},
+                 Json{{"op", "place_asset"}, {"page", 1}, {"asset", placed}, {"placement_mm", Json::array({20, 150, 60, 40})}}}));
+            first->save_now();
+            QVERIFY(first->wait_saved(10000ms));
+        }
+        auto session = Session::open(book, options);  // (the files the ops were given are in the folder's assets now)
+        QVERIFY(session->document().smart_files.empty());
+        QVERIFY(session->document().read_only_reason.empty());
+        QSignalSpy saved(session.get(), &Session::savedAs);
+        session->save_as(copy);
+        QVERIFY(wait_for([&] { return saved.count() == 1; }));
+        QCOMPARE(saved.at(0).at(0).toBool(), true);
+        const auto loaded = genko::storage::load_document(copy);
+        QVERIFY2(loaded.document.read_only_reason.empty(), loaded.document.read_only_reason.c_str());
+        const auto drawn = [](const genko::core::Document& doc) {
+            return genko::render::render_page(doc.page(0), 40, genko::render::RenderOptions{}, &doc).image.tobytes();
+        };
+        const auto before = genko::storage::load_document(book);
+        QVERIFY(drawn(loaded.document) == drawn(before.document));
+        // (the book goes on in its new folder: a picture put there is drawn from it)
+        QVERIFY(session->document().asset_dir && *session->document().asset_dir == copy);
+        const std::string later = genko::storage::AssetStore(copy).put_bytes(png(10, 10, genko::render::Ink{0, 160, 0}), ".png");
+        session->apply(Json::array({Json{{"op", "place_asset"}, {"page", 1}, {"asset", later}, {"placement_mm", Json::array({100, 20, 30, 30})}}}));
+        session->save_now();
+        QVERIFY(session->wait_saved(10000ms));
+        QVERIFY(genko::storage::load_document(copy).document.read_only_reason.empty());
     }
 
     // --- the pages read when needed (SPEC PERF-01; ACCEPTANCE PERF-A: the first page does not wait for the others) ---
