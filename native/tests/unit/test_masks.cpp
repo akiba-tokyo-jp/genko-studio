@@ -428,8 +428,10 @@ private slots:
     }
 
     // Layer › Rasterize › Vector Mask (rasterize_layer vector_mask, C-a) with the layer mask's settings (B2): the layer drawn
-    // as it was — a layer mask that is off left out, its density and feather drawn in (not laid again on the product) —,
-    // a new mask linked as the vector mask was, a vector mask that is off not drawn in; at the page's mask grid.
+    // as it was — the layer mask's density and feather drawn in (not laid again on the product) —, a new mask linked as
+    // the vector mask was, a vector mask that is off alone made a mask that is off; at the page's mask grid. Where a mask
+    // that is off would be lost (a layer mask that is off, or a vector mask that is off over a layer mask: the
+    // coordinator's decision after the PC3 review), refused, the book as it was.
     void rasterizeVectorMask_data() { applyLayerMask_data(); }
     void rasterizeVectorMask() {
         QFETCH(QString, way);
@@ -447,12 +449,19 @@ private slots:
         QVERIFY(!layer_of(made, kPaint).vector_mask && layer_of(made, kPaint).mask && layer_of(made, kPaint).mask->linked);
         QCOMPARE(mask_pixels(layer_of(made, kPaint)).size(), render::layer_masks::grid_size(made.page(0)));
         QVERIFY2(same_look(vectored, made), qPrintable(QString::number(share_apart(drawn(vectored), drawn(made)))));
-        // a layer mask that is off (it hides x ≥ 45 mm): the vector mask still shows after
+        // a layer mask that is off (it hides x ≥ 45 mm): refused (the vector mask's picture would take its place), the
+        // vector mask off too as well; used again, drawn in
         core::Document off = run(vectored, Json{{"op", "set_layer_mask"}, {"page", 1}, {"id", kPaint}, {"area", square(-5, -5, 45, 85)}});
         off = run(off, Json{{"op", "set_layer_mask"}, {"page", 1}, {"id", kPaint}, {"enabled", false}});
-        const core::Document off_done = rasterized(off);
-        QVERIFY2(same_look(off, off_done), qPrintable(QString::number(share_apart(drawn(off), drawn(off_done)))));
-        QVERIFY(layer_of(off_done, kPaint).mask->enabled);
+        const Json rasterize_op{{"op", "rasterize_layer"}, {"page", 1}, {"id", kPaint}, {"vector_mask", true}};
+        QVERIFY2(refusal(off, rasterize_op).find("the layer mask of layer " + std::string(kPaint) + " is off") != std::string::npos,
+                 refusal(off, rasterize_op).c_str());
+        const core::Document both_off = run(off, Json{{"op", "set_vector_mask"}, {"page", 1}, {"id", kPaint}, {"enabled", false}});
+        QVERIFY(refusal(both_off, rasterize_op).find("is off") != std::string::npos);
+        const core::Document on_again = run(off, Json{{"op", "set_layer_mask"}, {"page", 1}, {"id", kPaint}, {"enabled", true}});
+        const core::Document on_done = rasterized(on_again);
+        QVERIFY2(same_look(on_again, on_done), qPrintable(QString::number(share_apart(drawn(on_again), drawn(on_done)))));
+        QVERIFY(!layer_of(on_done, kPaint).vector_mask && layer_of(on_done, kPaint).mask->enabled);
         // a layer mask at density 0.5 (and feathered): drawn in once
         core::Document dense = run(vectored, Json{{"op", "set_layer_mask"}, {"page", 1}, {"id", kPaint}, {"area", square(-5, -5, 45, 85)},
                                                   {"density", 0.5}, {"feather_mm", 1.0}, {"linked", true}});
@@ -460,11 +469,11 @@ private slots:
         QVERIFY2(same_look(dense, dense_done), qPrintable(QString::number(share_apart(drawn(dense), drawn(dense_done)))));
         const core::Mask& baked = *layer_of(dense_done, kPaint).mask;
         QVERIFY(baked.density == 1.0 && baked.feather_mm == 0.0 && baked.linked && baked.enabled);
-        // a vector mask that is off: not drawn in (the layer mask's bytes as they were); without a layer mask, one that is off
+        // a vector mask that is off over a layer mask: refused (it would be taken off unseen); without a layer mask, made a
+        // mask that is off
         const core::Document vector_off = run(dense, Json{{"op", "set_vector_mask"}, {"page", 1}, {"id", kPaint}, {"enabled", false}});
-        const core::Document vector_off_done = rasterized(vector_off);
-        QCOMPARE(*layer_of(vector_off_done, kPaint).mask->png, *layer_of(dense, kPaint).mask->png);
-        QVERIFY(same_look(vector_off, vector_off_done));
+        QVERIFY2(refusal(vector_off, rasterize_op).find("the vector mask of layer " + std::string(kPaint) + " is off") != std::string::npos,
+                 refusal(vector_off, rasterize_op).c_str());
         const core::Document alone_off = run(vectored, Json{{"op", "set_vector_mask"}, {"page", 1}, {"id", kPaint}, {"enabled", false}});
         const core::Document alone_off_done = rasterized(alone_off);
         QVERIFY(layer_of(alone_off_done, kPaint).mask && !layer_of(alone_off_done, kPaint).mask->enabled);

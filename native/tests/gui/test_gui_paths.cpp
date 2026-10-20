@@ -360,6 +360,14 @@ private slots:
         b.click(90, 90);
         b.click(60, 60);
         QCOMPARE(b.target().vector_mask->path.subpaths.size(), std::size_t(2));
+        // (a layer mask that is off would be lost: refused in the person's words, the layer as it was)
+        const std::string id = b.target().id;
+        const Json area{{"poly", Json::array({Json::array({10, 10}), Json::array({50, 10}), Json::array({50, 50}), Json::array({10, 50})})}};
+        QVERIFY(b.apply(Json{{"op", "set_layer_mask"}, {"page", 1}, {"id", id}, {"area", area}, {"enabled", false}}));
+        b.act("act_rasterize_vmask")->trigger();
+        QVERIFY2(b.window->last_error().contains(QStringLiteral("レイヤーマスクを使用するか削除")), qPrintable(b.window->last_error()));
+        QVERIFY(b.target().vector_mask.has_value() && !b.target().mask->enabled);
+        QVERIFY(b.apply(Json{{"op", "set_layer_mask"}, {"page", 1}, {"id", id}, {"delete", true}}));
         b.act("act_rasterize_vmask")->trigger();
         QVERIFY(!b.target().vector_mask.has_value() && b.target().mask.has_value());
         b.act("act_vmask_reveal_all")->trigger();
