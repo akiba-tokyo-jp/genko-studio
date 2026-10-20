@@ -1882,7 +1882,8 @@
         "native/tests/unit/test_inpaint.cpp",
         "native/tests/unit/test_retouch.cpp",
         "native/tests/contract/test_contract_retouch.cpp",
-        "native/tests/gui/test_gui_retouch.cpp"
+        "native/tests/gui/test_gui_retouch.cpp",
+        "native/src/app/session.cpp"
       ],
       "pc0": {
         "date": "2026-10-16",
@@ -1895,7 +1896,7 @@
         "gap": "選択範囲を周りの画素から埋める（標本の範囲・色/回転/拡大の適応・鏡像・出力先）操作が無い",
         "note": "上流は algo/content_aware.rs・inpaint.rs（約 1000 行、外部ライブラリなし）。AI 生成の inpaint（generation_request）は外部の生成で、手元の画素処理ではない"
       },
-      "remaining": "カスタムのサンプリング領域は緑の筆で描く代わりにアルファチャンネル（op は区域 `source_area`）。窓のプレビューは窓の中で作る（作業スレッド・中止は無い）"
+      "remaining": "カスタムのサンプリング領域は緑の筆で描く代わりにアルファチャンネル（op は区域 `source_area`）。"
     },
     {
       "id": "edit.contentAwareScale",
@@ -25852,7 +25853,8 @@
         "native/src/app/retouch_tools.cpp",
         "native/tests/unit/test_retouch.cpp",
         "native/tests/contract/test_contract_retouch.cpp",
-        "native/tests/gui/test_gui_retouch.cpp"
+        "native/tests/gui/test_gui_retouch.cpp",
+        "native/tests/unit/test_session.cpp"
       ],
       "pc0": {
         "date": "2026-10-16",

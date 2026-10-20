@@ -15,6 +15,7 @@
 #include <cmath>
 #include <filesystem>
 #include <functional>
+#include <stop_token>
 #include <string>
 #include <vector>
 
@@ -23,8 +24,10 @@
 #include "core/ink.hpp"
 #include "render/image_ops.hpp"
 #include "render/ops_registry.hpp"
+#include "render/page.hpp"
 #include "render/png.hpp"
 #include "render/raster.hpp"
+#include "render/segment/segment.hpp"
 #include "storage/asset_store.hpp"
 #include "testsupport.hpp"
 
@@ -432,6 +435,58 @@ private slots:
         Json custom_bare = base;
         custom_bare["sampling"] = "custom";
         QVERIFY(refusal(dirty8, custom_bare).starts_with("apply: "));
+    }
+
+    // Content-Aware Fill on a worker whose work is no longer wanted (the window's preview, its settings changed): it stops
+    // (render::Cancelled) instead of working the fill out; without a stop asked, the same op fills.
+    void contentAwareFillStops() {
+        const core::Document doc = book([](int x, int y) {
+            if (std::hypot(x - 100.0, y - 100.0) < 8) return Colour{0, 0, 0, 1};
+            return (x / 6) % 2 == 0 ? Colour{0.2, 0.3, 0.4, 1} : Colour{0.8, 0.7, 0.6, 1};
+        });
+        const Json op{{"op", "content_aware_fill"}, {"page", 1}, {"layer_id", "paint"}, {"area", Json{{"rect", Json::array({len(90), len(90), len(20), len(20)})}}}};
+        std::stop_source stop;
+        stop.request_stop();
+        bool stopped = false;
+        {
+            const render::segment::StopScope scope(stop.get_token());
+            try {
+                run(doc, op);
+            } catch (const render::Cancelled&) {
+                stopped = true;
+            }
+        }
+        QVERIFY(stopped);
+        std::stop_source going;
+        const render::segment::StopScope scope(going.get_token());
+        QVERIFY(run_ops(doc, Json::array({op})).results.at(0)["filled"].get<std::int64_t>() > 0);
+    }
+
+    // Content-Aware Fill out to a new layer or a copy, from a pen layer: the pen layer keeps its lines (not drawn into
+    // pixels: it stays a pen layer); a copy is the paint layer filled, its lines drawn in.
+    void contentAwareFillLeavesAPenLayer() {
+        for (const std::string& kind : {std::string("8"), std::string("16"), std::string("cmyk")}) {
+            core::Document doc = as_kind(book([](int, int) { return Colour{0, 0, 0, 0}; }), kind);
+            doc = run_ops(doc, Json::array({Json{{"op", "add_layer"}, {"page", 1}, {"kind", "pen"}, {"id", "pen"}, {"name", "ペン"}},
+                                            Json{{"op", "add_stroke"}, {"page", 1}, {"layer_id", "pen"}, {"width_mm", 1.0}, {"stabilize", 0},
+                                                 {"points", Json::array({Json::array({len(20), len(100)}), Json::array({len(180), len(100)})})}}}))
+                      .doc;
+            const core::Layer before = layer_of(doc, "pen");
+            QCOMPARE(before.kind, core::LayerKind::Strokes);
+            const Json area{{"rect", Json::array({len(90), len(80), len(20), len(40)})}};
+            for (const char* output : {"new", "duplicate"}) {
+                const Json op{{"op", "content_aware_fill"}, {"page", 1}, {"layer_id", "pen"}, {"area", area}, {"output", output}, {"new_id", "made"}};
+                const core::Document done = run(doc, op);
+                const core::Layer pen = layer_of(done, "pen");
+                const QString what = QString::fromStdString(kind) + QLatin1Char(' ') + QString::fromLatin1(output);
+                QVERIFY2(pen.kind == core::LayerKind::Strokes && pen.stroke_count() == 1, qPrintable(what));
+                QVERIFY2(!pen.raster_png && !pen.color_raster && !pen.ink_raster && pen.patches.empty(), qPrintable(what));
+                const core::Layer made = layer_of(done, "made");
+                QVERIFY2(made.kind == core::LayerKind::Raster && made.stroke_count() == 0, qPrintable(what));
+                // (the copy holds the line, drawn in, outside the hole)
+                if (std::string(output) == "duplicate") QVERIFY2(pixel(done, "made", 40, 100)[3] > 0.5f, qPrintable(what));
+            }
+        }
     }
 
     // A protected transparency: a clear pixel stays clear under the brush, a coloured one takes the clone.
