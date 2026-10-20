@@ -1647,6 +1647,12 @@ void paste(OpContext& c) {
             take(x, y);
             take(x + core::to_float((*box)[2]), y + core::to_float((*box)[3]));
         }
+        for (const core::vector::ShapePart& part : items.shapes) {  // (pen-shapes@1: the parts' paths too)
+            if (const auto b = part.path.control_bounds()) {
+                take((*b)[0], (*b)[1]);
+                take((*b)[2], (*b)[3]);
+            }
+        }
         if (std::isfinite(x0) && std::isfinite(x1)) {
             const double mx = (x0 + x1) / 2, my = (y0 + y1) / 2;
             m[4] += cx - (m[0] * mx + m[2] * my + m[4]);
@@ -1698,7 +1704,7 @@ void paste(OpContext& c) {
             rest.push_back(std::move(patch));
         }
         items.patches = std::move(rest);
-        if (items.strokes.empty() && items.patches.empty()) return;
+        if (items.empty()) return;  // (pen-shapes@1: shape parts too)
     }
     if (page.layers[ti].color_raster) {  // drawn into the precise pixels (render/color_edit)
         for (core::Patch& patch : items.patches) color_edit::patch_to_srgb(patch, doc);  // (color-model@1: its sRGB, brought in)
