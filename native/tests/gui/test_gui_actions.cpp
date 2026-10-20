@@ -311,7 +311,12 @@ private slots:
         // すべてのレイヤー・レイヤーの選択を解除・レイヤーを検索・レイヤーを分離 (act_select_all_layers, act_deselect_layers,
         // act_find_layers, act_isolate_layers) and ファイル → スクリプト → すべてのマスクを統合 (act_flatten_masks) — theirs
         // (test_gui_clipboard).
-        QCOMPARE(w->actions_by_name().size(), std::size_t{370});
+        // and the 11 of PC3 B3 (SPEC COLOR-06) — ツール の オブジェクト選択ツール・クイック選択ツール (act_object_select,
+        // act_quick_select), 選択範囲 の フォーカス領域…・被写体を選択・空を選択・選択とマスク… (act_focus_area,
+        // act_select_subject, act_select_sky, act_select_mask), レイヤー → すべてのオブジェクトをマスク (act_mask_all_objects)
+        // and マッティング ▸ カラーの除去…・フリンジ削除…・黒マット削除・白マット削除 (act_matting_decontaminate,
+        // act_matting_defringe, act_matting_black, act_matting_white) — theirs (test_gui_select_mask).
+        QCOMPARE(w->actions_by_name().size(), std::size_t{381});
         QVERIFY(w->action("act_chat_approval"));
         QVERIFY(w->action("act_style"));
         QVERIFY(w->action("act_exposure"));
@@ -346,8 +351,9 @@ private slots:
         }
         // the palette and the command bar (Python's order); with M3's eight ways of the marquee (test_gui_select) and its
         // drawing tools and line editing (test_gui_paint), the effect lines and the material tool (test_gui_effects), the
-        // text tool (test_gui_lines); PC3 C-a's three path tools (test_gui_paths); the crop tool (PC3 C-e, test_gui_page_size)
-        QCOMPARE(w->tools_group()->actions().size(), 32);
+        // text tool (test_gui_lines); PC3 C-a's three path tools (test_gui_paths); the crop tool (PC3 C-e, test_gui_page_size);
+        // PC3 B3's オブジェクト選択ツール and クイック選択ツール (test_gui_select_mask)
+        QCOMPARE(w->tools_group()->actions().size(), 34);
     }
 
     // No two commands share a key (Qt would take the key as ambiguous and do neither): PC1b's 色の校正 (Ctrl+Alt+Y — Ctrl+Y
@@ -443,7 +449,9 @@ private slots:
                                                   // (PC3 C-a: ペンツール, 曲線ペンツール, パス選択ツール)
                                                   {"pathpen", "act_path_pen"}, {"curvepen", "act_curvature_pen"}, {"pathselect", "act_path_select"},
                                                   // (PC3 C-e: 切り抜きツール)
-                                                  {"crop", "act_crop_tool"}};
+                                                  {"crop", "act_crop_tool"},
+                                                  // (PC3 B3: クイック選択ツール, オブジェクト選択ツール)
+                                                  {"quick", "act_quick_select"}, {"object", "act_object_select"}};
         QCOMPARE(w->tool_actions().size(), tools.size());
         QVERIFY(w->tools_group()->isExclusive());
         QVERIFY(w->action(QStringLiteral("act_select"))->isChecked());

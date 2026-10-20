@@ -161,6 +161,19 @@ public:
         double opacity = 100;
     };
     MagicEraserSettings magic_eraser_settings;
+    // PC3 B3 (main_window_smart_select.cpp): クイック選択ツール's エッジを強調, and whether the smart selection (クイック選択・
+    // オブジェクト選択・被写体を選択・空を選択・フォーカス領域・選択とマスク) sees the page as it shows (全レイヤーを対象) or the
+    // drawing layer alone — by default the layer, as Photoshop's: the page as it shows has the panels' borders and the
+    // nombre, which the heuristics take for things. (The brush's 直径 is the canvas's quick_size_mm.)
+    struct SmartSelectSettings {
+        bool enhance_edge = false;
+        bool all_layers = false;
+    };
+    SmartSelectSettings smart_select_settings;
+    // The smart selection's work on its worker thread (a progress with やめる; Esc stops it): whether one is running, and
+    // stopping it (nothing changes then).
+    bool smart_select_busy() const;
+    void cancel_smart_select();
     // The tools of the marquee (rect, lasso, wand, ellipse, polyline, selpen, selerase), and the one of a way.
     static bool is_marquee_tool(const QString& tool);
     static QString marquee_tool_of(const QString& way);
@@ -816,6 +829,27 @@ private:
     // PC3 B2 (main_window_masks.cpp): すべてのマスクを統合 and the layers' selection (選択範囲 → すべてのレイヤー …).
     void build_mask_actions();
     void flatten_all_masks();
+    // PC3 B3 (main_window_smart_select.cpp, select_mask_window.cpp): クイック選択ツール・オブジェクト選択ツール, 選択範囲 →
+    // フォーカス領域…・被写体を選択・空を選択・選択とマスク…, レイヤー → すべてのオブジェクトをマスク・マッティング ▸. solve_smart
+    // finds an area (the area language's smart kinds) on a worker thread from the book as it is, then gives it to `done`
+    // on this one (none: nothing found) unless the page changed or it was stopped.
+    void build_smart_select_actions();
+    void build_matting_menu(QMenu* layers);
+    QWidget* smart_select_settings_widget();
+    void solve_smart(const core::Json& area, const QString& title, std::function<void(const std::optional<core::Json>&)> done);
+    // A smart kind's settings with the drawing layer to read, unless 全レイヤーを対象.
+    core::Json seen_spec(core::Json spec) const;
+    void quick_selected(const QVector<QPointF>& points, const QString& how);
+    void object_selected(const QRectF& box, const QString& how);
+    void select_subject();
+    void select_sky();
+    void focus_area_dialog();
+    void select_and_mask();
+    void select_mask_output(const core::Json& area, const core::Json& settings);
+    void mask_all_objects();
+    void matting(const QString& kind);
+    struct SmartJob;
+    std::shared_ptr<SmartJob> smart_job_;
     // channels@1 (main_window_channels.cpp)
     void build_channel_actions();
     void build_channel_dock();

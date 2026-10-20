@@ -89,6 +89,8 @@ const std::map<std::string, const char*>& names() {
         // (PC3 B2: render/ops_masks)
         {"outline_area", "境界線を描いた"}, {"apply_layer_mask", "レイヤーマスクを適用した"},
         {"mask_from_transparency", "透明部分からマスクを作った"},
+        // (PC3 B3: render/ops_matting)
+        {"matting", "マッティングした"},
     };
     return table;
 }

@@ -476,6 +476,9 @@ if(GENKO_BUILD_APP)
   # PC3 B2: 編集's clipboard with the system's, 結合部分をコピー, 特殊ペースト, 選択範囲をコピー／カットしたレイヤー,
   # 塗りつぶし… and 境界線を描く…, a precise page's copy as precise pixels
   genko_test(test_gui_clipboard SOURCES gui/test_gui_clipboard.cpp DEPS genko_app GUI TIMEOUT 600)
+  # PC3 B3: クイック選択ツール・オブジェクト選択ツール, 被写体を選択・空を選択・フォーカス領域…, 選択とマスク… (its preview, its 4
+  # outputs, each one Undo), すべてのオブジェクトをマスク, マッティング, the worker thread stopped
+  genko_test(test_gui_select_mask SOURCES gui/test_gui_select_mask.cpp DEPS genko_app GUI TIMEOUT 900)
   # チャンネル (channels@1, COLOR-03): the panel, the target keys, a fill on a channel, the view, options, split.
   genko_test(test_gui_channels SOURCES gui/test_gui_channels.cpp DEPS genko_app GUI TIMEOUT 600)
   # PC2c (COLOR-04): レイヤー → 色調補正's local corrections and image calculations, 編集 → フェード (only right after).

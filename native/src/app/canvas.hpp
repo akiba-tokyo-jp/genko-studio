@@ -142,6 +142,8 @@ public:
     QString marquee_style = QStringLiteral("normal");
     double style_width = 1;
     double style_height = 1;
+    // PC3 B3: クイック選択ツール's brush (its diameter, mm) — the marquee's way "quick" —; オブジェクト選択ツール is "object".
+    double quick_size_mm = 4.0;
     // 表示 → 選択範囲の境界線: the outline (and a mask selection's tint) shown or not; the handles stay.
     bool show_selection_edges = true;
     // 選択範囲を変形: the handles move, scale, turn and slant the selection's outline only, not what is in it.
@@ -379,6 +381,9 @@ signals:
     void magicEraseRequested(double x_mm, double y_mm);
     void selectionTransformed(const QVector<double>& matrix);
     void selectionWarped(const genko::core::Json& warp);
+    // PC3 B3: クイック選択ツール's stroke (mm) and オブジェクト選択ツール's rectangle (mm), and how the area they find joins.
+    void quickSelected(const QVector<QPointF>& points, const QString& how);
+    void objectSelected(const QRectF& box, const QString& how);
     // the crop tool: its box changed; Enter on it (the box upright, mm, and its turn clockwise in degrees)
     void cropChanged();
     void cropRequested(const QRectF& box, double angle);
@@ -509,6 +514,11 @@ private:
     bool marquee_move(const QPointF& mm, Qt::KeyboardModifiers modifiers, bool pressed);
     bool marquee_release();
     bool marquee_key(QKeyEvent* event);
+    // PC3 B3: クイック選択ツール's stroke and オブジェクト選択ツール's rectangle (canvas_select.cpp)
+    bool smart_press(const QPointF& mm, Qt::KeyboardModifiers modifiers);
+    bool smart_move(const QPointF& mm, bool pressed);
+    bool smart_release();
+    void draw_smart_drag(QPainter& painter) const;
     // the crop tool (canvas_crop.cpp)
     struct CropDrag {
         QString kind;  // new | move | corner | turn
@@ -702,6 +712,8 @@ private:
     std::vector<QPointF> marquee_stroke_;  // the rectangle's, lasso's or selection pen's drag (mm)
     std::optional<std::pair<QPointF, QPointF>> ellipse_drag_;
     std::vector<QPointF> poly_points_;  // the polyline selection's corners
+    std::vector<QPointF> smart_drag_;   // (PC3 B3: the quick selection's stroke, the object selection's two corners; mm)
+    QString smart_how_;
     std::optional<std::pair<QPointF, QPointF>> shape_drag_;  // 図形 dragged (mm)
     std::vector<QPointF> shape_pts_;                         // 図形's polyline or curve clicked (mm)
     std::vector<QPointF> lasso_fill_;                        // 囲って塗る's drag (mm)
