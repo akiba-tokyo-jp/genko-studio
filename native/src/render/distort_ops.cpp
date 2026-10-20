@@ -16,12 +16,14 @@
 #include "render/image_ops.hpp"
 #include "render/layer_transform.hpp"
 #include "render/liquify_field.hpp"
+#include "render/liquify_strokes.hpp"
 #include "render/own_pixels.hpp"
 #include "render/seam.hpp"
 #include "render/selection.hpp"
+#include "render/smart_filters.hpp"
 
 // Edit › Content-Aware Scale: PhotoCraft v0.2.0 crates/engine/src/edit_menu_cmds.rs (429-491); Filter › Liquify:
-// distort_cmds.rs (40-60, 120-240). MIT: native/third_party/photocraft/NOTICE.md.
+// distort_cmds.rs (40-60, 120-240; a smart object's: 233-272). MIT: native/third_party/photocraft/NOTICE.md.
 
 namespace genko::render {
 
@@ -261,23 +263,49 @@ resample::Plane through_field(const resample::Plane& src, int sx0, int sy0, cons
 
 }  // namespace
 
+std::vector<liquify::Stroke> read_liquify_strokes(const Json& strokes) { return strokes_of(strokes); }
+
+liquify::Field liquify_field(double w, double h, const std::optional<double>& mesh_mm, const std::vector<liquify::Stroke>& strokes) {
+    double cell = liquify::auto_cell(w, h, kUnit);
+    if (mesh_mm) {
+        if (!std::isfinite(*mesh_mm) || *mesh_mm < kUnit || *mesh_mm > 64.0 * kUnit)
+            throw OpError("mesh_mm must be between " + core::py_repr(Json(kUnit)) + " and " + core::py_repr(Json(64.0 * kUnit)));
+        cell = *mesh_mm;
+    }
+    liquify::Field field(0.0, 0.0, w, h, cell, kUnit);
+    for (const liquify::Stroke& s : strokes) field.apply(s);
+    return field;
+}
+
 void liquify_strokes(core::OpContext& c) {
     core::Document& doc = c.doc;
     const Json& op = c.op;
     const std::size_t at = core::require_page(doc, op);
     const std::vector<liquify::Stroke> strokes = strokes_of(op["strokes"]);
+    std::optional<double> mesh_mm;
+    if (const Json* m = core::get(op, "mesh_mm"); m != nullptr && !m->is_null()) mesh_mm = number_in(op, "mesh_mm", 0.0, kUnit, 64.0 * kUnit);
+    if (core::truthy_at(op, "layer_id")) {  // (PC3 A5: a smart object keeps them as its smart filter)
+        const std::size_t i = layer_at(doc.page(at), core::py_str(op["layer_id"]));
+        if (doc.page(at).layers[i].kind == LayerKind::Smart) {
+            if (doc.page(at).layers[i].locked) throw OpError("the layer is locked");
+            Json params{{"strokes", op["strokes"]}};
+            if (mesh_mm) params["mesh_mm"] = *mesh_mm;
+            std::optional<Json> area;
+            if (const Json* a = core::get(op, "area"); a != nullptr && !a->is_null()) area = core::op_area(op);
+            Page& page = doc.edit_page(at);
+            const std::size_t index = smart_filters::push_filter(doc, page, page.layers[i], "liquify", std::move(params), area);
+            c.report = Json{{"changed", true}, {"smart_filter", index}};
+            return;
+        }
+    }
     Page& page = doc.edit_page(at);
     Layer& layer = core::paint_target(page, op);
-    if (layer.kind == LayerKind::Smart) core::not_yet_ported("liquifying a smart object is not in the C++ build yet (PC3 A5)");
     if (layer.kind != LayerKind::Raster && layer.kind != LayerKind::Strokes) throw OpError("Liquify works on a pen or paint layer");
     if (layer.locked) throw OpError("the layer is locked");
     const double pw = page.spec.width_mm.value(), ph = page.spec.height_mm.value();
-    double cell = liquify::auto_cell(pw, ph, kUnit);
-    if (const Json* m = core::get(op, "mesh_mm"); m != nullptr && !m->is_null()) cell = number_in(op, "mesh_mm", cell, kUnit, 64.0 * kUnit);
     std::optional<Json> area;
     if (const Json* a = core::get(op, "area"); a != nullptr && !a->is_null()) area = core::op_area(op);
-    liquify::Field field(0.0, 0.0, pw, ph, cell, kUnit);
-    for (const liquify::Stroke& s : strokes) field.apply(s);
+    const liquify::Field field = liquify_field(pw, ph, mesh_mm, strokes);
     const double most = field.max_displacement();
     Json report{{"changed", false}, {"max_displacement_mm", core::py_round(most, 4)}};
     const auto moved = field.moved_box();

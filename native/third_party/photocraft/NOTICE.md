@@ -101,6 +101,11 @@ PhotoCraft v0.2.0（`ad863217386440ca968fccc9bfff65ba24e61142`、MIT、同梱 `L
   - `crates/engine/src/smart_cmds.rs`（167-207 行、`stack_image`）: 中身の層（一番上がグループ 1 つならその中）のうち見えているものを 1 枚ずつ通常・クリップなしで描いて統計で重ねる → `native/src/render/smart.cpp`（`stack_pages`・`stacked_8bit`・`stacked_precise`・`stacked_inks`。帯に分けて描く所と 3 つの道は Genko のもの）。
   - `crates/engine/src/layer_menu_cmds.rs`（312-340 行、`stack_mode`）と試験 `layer_menu_cmds/tests.rs`（276-330 行）: どの SO にもスタックモードを決め・外す op、中央値で写り込んだものが消え・最大で残り・範囲が揃った所で無くなり・なしで元に戻ることの試験 → `native/src/render/ops_smart.cpp`（`smart_stack`）、`native/tests/unit/test_smart_stack.cpp`。
   - `crates/engine/src/type_cmds.rs`（584-610 行、`type.rasterize`）と `extra_cmds.rs`（445-532 行）: 文字のレイヤーを、見えているとおりの画素のレイヤーにする → `native/src/render/ops_smart.cpp`（`rasterize_lines`。Genko の台詞はレイヤーではないので、新しいペイントのレイヤーを台詞を描いていた重ね順に置いて台詞を消す所は Genko のもの）。
+- A5（スマートオブジェクトの上の変形）:
+  - `crates/engine/src/warp_cmds.rs`（48-72 行、`warp_bounds`・`smart_warp_doc_space`。128-150 行、`warp_layer` の SO の枝）: SO のワープを変形の前の中身の座標に持ち（文書のワープの枠の 4 隅を変形の逆で戻した箱に、形の既定はそのまま、カスタムはメッシュの点を戻して）、何も曲げないワープは外し、フィルターマスクも同じワープで動かす。編集するときは中身のワープを文書の座標にして見せる → `native/src/render/layer_transform.cpp`（`warp_in_contents`・`smart_warp_on_page`・`move_filter_mask`。4 隅の射影と、形の既定を置き方が移動と縦横同じ拡大だけのときそのまま見せる所は Genko のもの）。
+  - `crates/engine/src/smart_cmds.rs`（214-235 行、`place_warped`）: ワープを変形の前に掛けて中身から 1 回で置く → `native/src/render/smart.cpp`（`Placing`・`lay_bent`・`bent_plane`。描く解像度を一番拡大される所に合わせる所と 3 つの道は Genko のもの）。
+  - `crates/engine/src/distort_cmds.rs`（233-272 行、`run_on_layer`。150-232 行、`liquify_surface`・`puppet_surface`・`perspective_surface`・`apply_to_surface`）: SO にゆがみ・パペットワープ・遠近法ワープを掛けると、画素を変えずに設定ごとスマートフィルターとして記録し（選択範囲はフィルターマスクに）、描くたびに SO の絵に掛け直す（パペットワープは絵の見えている所にメッシュを作る）→ `native/src/render/smart_bends.cpp`、`native/src/render/layer_transform.cpp`（`move_layer` の SO の枝）、`native/src/render/distort_ops.cpp`（`liquify_strokes`）、`native/src/render/smart_filters.cpp`（`push_filter`。設定をページの mm に持ち、パペットのメッシュを作業の 200 dpi で作る所は Genko のもの）。
+  - `crates/engine/src/warp_cmds.rs`（476-500 行、`smart_object_warp_is_lossless`）: SO を曲げて戻すと元の画素、ワープを 2 度掛けても重ならない（前のワープと置き換わる）ことの試験 → `native/tests/unit/test_smart_warp.cpp`（`aWarpIsKeptAndUndoneWithoutLoss`。4 隅・曲げるスマートフィルター・フィルターマスク・3 つの道・PSD に広げた）。
 
 ## 選択・マスク（masks@1、PC3 節 B）
 

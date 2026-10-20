@@ -544,6 +544,12 @@ public:
     // PC3 A4: スタックモード ▸ (`mode` an op's name, "none": なし) of the smart object drawn on, and ラスタライズ → テキスト
     // (the line chosen with the select tool, and the lines joined to its balloon, as a new paint layer).
     void smart_stack(const std::string& mode);
+    // PC3 A5 (main_window_transform.cpp): レイヤー → スマートオブジェクト → ワープ・遠近法ワープ・パペットワープ on the smart
+    // object drawn on (its warp edited from the one it holds; the other two kept as its smart filters), and a smart object's
+    // perspective warp, puppet warp or Liquify filter edited again (the layer panel's スマートフィルターを編集…: the box starts
+    // from its settings and sends smart_filter_set).
+    void smart_bend(const QString& mode);
+    void edit_bend_filter(const std::string& id, int index);
     void rasterize_type();
     // smart-objects@1, PC3 A1 (app/main_window_smart.cpp): コンテンツを編集 — a page's contents in a tab of this book
     // (decision 1), a picture's made a page first (asked), a linked file opened in its own app —, コンテンツを書き出し…,
@@ -867,7 +873,8 @@ private:
     void build_transform_items(QMenu* edit);
     std::vector<std::string> transform_targets() const;
     core::Json transform_op(const core::Json& spec) const;
-    void start_layer_transform(const QString& mode);
+    // (`only`: these layers, not the ones chosen — PC3 A5's smart object commands)
+    void start_layer_transform(const QString& mode, const std::vector<std::string>& only = {});
     void transform_previewed(const core::Json& spec);
     void transform_committed(const core::Json& spec);
     void transform_cancelled();
@@ -881,7 +888,8 @@ private:
     // there was nothing to do.
     bool transform_within_selection(const core::Json& spec);
     void content_aware_scale_dialog();
-    void liquify_dialog();
+    // (PC3 A5: on a smart object, kept as its smart filter; `refilter`: its Liquify filter of that index edited again)
+    void liquify_dialog(const std::optional<std::pair<std::string, int>>& refilter = std::nullopt);
     void warp_text_dialog();
     // PC3 C-d (main_window_align.cpp): the commands and menus of レイヤー → 重ね順・整列・分布・リンク・ロック and 表示 →
     // スナップ・スナップ先, the move tool's page (自動選択, バウンディングボックスを表示), the snapping set on the canvas,
@@ -1115,6 +1123,7 @@ private:
     std::string puppet_mode_ = "normal";
     std::string puppet_density_ = "normal";
     double puppet_expansion_ = 0.25;
+    std::optional<std::pair<std::string, int>> refilter_;  // (PC3 A5: the smart filter the box edits again: its layer and index)
     QToolBar* transform_bar_ = nullptr;
     std::optional<core::Json> clipboard_;        // copied items (paste's "items"), where they were, its outline
     std::optional<core::Json> clipboard_area_;

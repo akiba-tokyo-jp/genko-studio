@@ -1019,8 +1019,12 @@ const std::vector<Rule>& rules() {
         r.push_back(rule("the position of the layer \\S+ is locked", "位置をロックしたレイヤーは動かせません（レイヤー パネルでロックを外します）"));
         r.push_back(rule("a (?:smart object|placed picture) moves whole: .*", "選択範囲の中だけを変形することはできません（選択を解除してから変形します）"));
         r.push_back(rule("a placed picture is turned and bent as a smart object: .*", "配置画像を回す・曲げるときは、先にスマートオブジェクトに変換します"));
-        r.push_back(rule("(?:warping|liquifying) a smart object is not in the C\\+\\+ build yet.*",
-                         "スマートオブジェクトのワープ・遠近法ワープ・パペットワープ・ゆがみは、この版の Genko ではまだできません（ラスタライズしてからかけます）"));
+        // (PC3 A5: a smart object's warp and corners, its perspective warp, puppet warp and Liquify kept as smart filters)
+        r.push_back(rule("a smart object's corners must make a convex shape", "スマートオブジェクトの 4 隅が、へこみの無い四角形になりません"));
+        r.push_back(rule("perspective is the contents' four corners on the page.*", "スマートオブジェクトの 4 隅の指定が正しくありません"));
+        r.push_back(rule("a smart object is puppet-warped alone.*", "スマートオブジェクトのパペットワープは、そのスマートオブジェクトだけを選んでかけます"));
+        r.push_back(rule("a smart object is bent by a warp, a perspective warp or a puppet warp", "スマートオブジェクトは、ワープ・遠近法ワープ・パペットワープで曲げます"));
+        r.push_back(rule("(?:liquify has no key|liquify's settings|mesh_mm must be) .*", "ゆがみの設定が正しくありません"));
         r.push_back(rule("the transform squashes the layers flat", "つぶれてしまう変形はできません"));
         r.push_back(rule("give one of move, matrix, quad, turn, warp, perspective or puppet", "変形のしかたを 1 つだけ指定します"));
         r.push_back(rule("the layers show nothing to (?:transform|pin)", "変形するものがありません"));

@@ -4,7 +4,7 @@
 // true homography (a parallelogram exactly the matrix); a warp bends what is in its box and gives its normal form back;
 // a perspective warp of one plane is its quad's homography; a puppet pin moved alone moves the layer; folders, links and a
 // linked mask move along, an unlinked mask stays; an area lifts only what is in it; shape parts alone; a smart object's
-// matrix (its warp: PC3 A5), a placed picture's box (turned: as a smart object), the locks refused; lines of dialogue moved
+// matrix and its warp (kept with it: PC3 A5), a placed picture's box (turned: as a smart object), the locks refused; lines of dialogue moved
 // with them, their text upright. content_aware_scale keeps a salient bar, scales plainly at amount 0, protects an alpha
 // channel. liquify's strokes move the pixels and the pen lines, Reconstruct All undoes them, on precise and ink layers too.
 // The dialogue's native_warp (Warp Text) bends the letters and names transform@1. And through the command line: saved,
@@ -407,7 +407,7 @@ private slots:
         const core::Document moved = run(doc, parts);
         QCOMPARE(layer_of(moved, "shapes").shapes->items[0].path.subpaths[0].knots[0].anchor.x, 2.0);
         QCOMPARE(layer_of(moved, "shapes").shapes->items[1].path.subpaths[0].knots[0].anchor.x, 5.0);
-        // a smart object: its matrix; a warp of it is A5's
+        // a smart object: its matrix; a warp of it kept with it (PC3 A5)
         const core::Document so = run(book(), Json{{"op", "smart_convert"}, {"page", 1}, {"id", "paint"}, {"new_id", "so"}});
         Json scale = transform({"so"});
         scale["matrix"] = Json::array({2, 0, 0, 2, 1, 1});
@@ -417,8 +417,9 @@ private slots:
         QCOMPARE(m.e, 1.0);
         Json warp = transform({"so"});
         warp["warp"] = Json{{"style", "arc"}};
-        const std::string later = refusal(so, warp);
-        QVERIFY2(later.find("not_yet_ported") == 0 && later.find("PC3 A5") != std::string::npos, later.c_str());
+        const core::Document warped = run(so, warp);
+        QCOMPARE((*layer_of(warped, "so").smart)["warp"]["style"], Json("arc"));
+        QVERIFY(core::smart::is_identity(core::smart::matrix_of(layer_of(warped, "so"))));
         // the locks
         core::Document locked = book();
         locked.edit_page(0).layers[0].lock_position = true;

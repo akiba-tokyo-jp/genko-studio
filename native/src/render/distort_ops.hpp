@@ -13,7 +13,8 @@ namespace genko::render {
 void content_aware_scale(core::OpContext& c);
 // liquify's strokes ({page, layer_id | layer, strokes: [{tool, size_mm, density, pressure, rate, points, amount?}…],
 // mesh_mm?, area?}): the strokes replayed on a fresh field; the layer's pixels and patches drawn through it once, its
-// pen lines' and shape parts' points moved by it.
+// pen lines' and shape parts' points moved by it. A smart object (PC3 A5) keeps them as its smart filter (its contents
+// as they are; the area its filter mask when it has none: PhotoCraft's run_on_layer).
 void liquify_strokes(core::OpContext& c);
 
 }  // namespace genko::render

@@ -25,6 +25,7 @@
 #include "app/main_window.hpp"
 #include "core/pyconv.hpp"
 #include "core/pyops.hpp"
+#include "core/smart.hpp"
 #include "service/wording.hpp"
 
 namespace genko::app {
@@ -56,6 +57,10 @@ bool flag(const Json& object, const char* key) {
 
 // The filter's name in the panel: the layer panel's filter list's (filters.KINDS), or its window's (PC2's kinds).
 QString smart_filter_title(const std::string& kind) {
+    // (PC3 A5: the filters that bend the picture, by the commands' names)
+    if (kind == "liquify") return QStringLiteral("ゆがみ");
+    if (kind == "perspective_warp") return QStringLiteral("遠近法ワープ");
+    if (kind == "puppet_warp") return QStringLiteral("パペットワープ");
     for (const auto& [key, label] : filter_kinds())
         if (key == kind) return label;
     QString title = adjust_forms::command_title(kind);
@@ -133,6 +138,10 @@ void LayerPanel::edit_smart_filter(int index) {
     if (filters == nullptr || index < 0 || index >= static_cast<int>(filters->size())) return;
     const Json f = (*filters)[static_cast<std::size_t>(index)];
     const std::string kind = core::py_str(core::py_get(f, "kind", Json("")));
+    if (core::smart::bend_filter(kind)) {  // (PC3 A5: the transform box or Liquify's window, from its settings)
+        window_->edit_bend_filter(layer->id, index);
+        return;
+    }
     const Json now = core::py_get(f, "params", Json::object()).is_object() ? core::py_get(f, "params", Json::object()) : Json::object();
     const auto asked = window_->asking();
     const std::string layer_id = layer->id;

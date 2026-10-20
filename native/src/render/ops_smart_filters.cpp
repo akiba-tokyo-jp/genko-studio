@@ -114,18 +114,11 @@ void add(OpContext& c) {
     const std::size_t i = smart_at(doc.page(at), c.op);
     const Json* kind = core::get(c.op, "kind");
     if (kind == nullptr || !kind->is_string() || kind->get<std::string>().empty()) throw OpError("kind names the filter");
-    const Json stored = settled(doc, doc.page(at), kind->get<std::string>(), params_in(c.op));
-    Json filters = filters_of(doc.page(at).layers[i]);
-    if (filters.size() >= core::smart::kFiltersMax)
-        throw OpError("a smart object holds at most " + std::to_string(core::smart::kFiltersMax) + " smart filters");
-    filters.push_back(Json{{"kind", kind->get<std::string>()}, {"params", stored}, {"blend", "normal"}, {"opacity", 1.0}, {"visible", true}});
-    // (a selection becomes the filter mask, when it has none: PhotoCraft's add_smart_filter)
-    std::optional<Json> mask;
-    if (core::truthy_at(c.op, "area") && !has_mask(doc.page(at).layers[i])) mask = mask_from(doc, doc.page(at), c.op);
-    Layer& layer = doc.edit_page(at).layers[i];
-    const std::size_t index = filters.size() - 1;
-    put_filters(layer, std::move(filters));
-    if (mask) (*layer.smart)["filter_mask"] = std::move(*mask);
+    std::optional<Json> area;
+    if (core::truthy_at(c.op, "area") && !has_mask(doc.page(at).layers[i])) area = core::op_area(c.op);
+    Page& page = doc.edit_page(at);
+    // (on top, the selection its mask when it has none: push_filter, which the ops putting their own on a smart object share)
+    const std::size_t index = push_filter(doc, page, page.layers[i], kind->get<std::string>(), params_in(c.op), area);
     c.report = Json{{"index", index}};
 }
 

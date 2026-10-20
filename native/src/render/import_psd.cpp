@@ -461,7 +461,16 @@ SmartMade smart_settings(const core::Document& doc, const core::Page& page, cons
         if (warp.contains("mesh")) {
             for (Json& point : warp["mesh"]["points"]) point = Json::array({point[0].get<double>() * ux / k, point[1].get<double>() * uy / k});
         }
-        settings["warp"] = std::move(warp);
+        // (PC3 A5: its bend and distortions within Photoshop's −100..100 %; a warp this build cannot keep — bounds without a
+        // size — left out: Photoshop's picture of it shows until it changes)
+        for (const char* key : {"bend", "h_distort", "v_distort"}) {
+            if (warp.contains(key) && warp[key].is_number()) warp[key] = std::clamp(warp[key].get<double>(), -100.0, 100.0);
+        }
+        try {
+            core::smart::check_warp(warp);
+            settings["warp"] = std::move(warp);
+        } catch (const core::Error&) {
+        }
     }
     made.settings = std::move(settings);
     return made;

@@ -1,8 +1,8 @@
 // A smart object drawn on its page (render/smart.hpp, PC3 A0). Upstream PhotoCraft v0.2.0's smart objects
-// (engine/src/smart_cmds.rs:214-235: whole pixels moved as they are, anything else resampled in one pass; 167-207: a
-// stack mode's layers each drawn alone, normal and not clipped, then combined — PC3 A4; MIT, see
-// third_party/photocraft/NOTICE.md), drawn in Genko's three ways: the 8-bit page, a page in precise colour, a page of
-// inks.
+// (engine/src/smart_cmds.rs:214-235: whole pixels moved as they are, anything else resampled in one pass — a warp before
+// the transform, place_warped: PC3 A5 —; 167-207: a stack mode's layers each drawn alone, normal and not clipped, then
+// combined — PC3 A4; MIT, see third_party/photocraft/NOTICE.md), drawn in Genko's three ways: the 8-bit page, a page in
+// precise colour, a page of inks.
 
 #include "render/smart.hpp"
 
@@ -25,6 +25,7 @@
 #include "render/imaging.hpp"
 #include "render/ink.hpp"
 #include "render/ink_canvas.hpp"
+#include "render/layer_transform.hpp"
 #include "render/not_yet_ported.hpp"
 #include "render/page_internal.hpp"
 #include "render/placed.hpp"
@@ -149,17 +150,69 @@ std::string identity(const core::Document& doc, const core::SmartContents& conte
 
 // --- the smart object's settings ---------------------------------------------------------------------------------------
 
-// What PC3's later steps add, which this build keeps and does not draw yet (smart filters and their mask: PC3 A2, and
-// stack modes: A4, drawn; a PSD's record: PC3 A3, its picture drawn while it has one, shown_8bit).
-void refuse_later(const core::Layer& layer) {
-    if (!layer.smart || !layer.smart->is_object()) return;
-    const Json& s = *layer.smart;
-    const auto set = [&](const char* key) {
-        const Json* v = core::get(s, key);
-        return v != nullptr && !v->is_null();
-    };
-    if (set("perspective")) throw NotYetPorted("smart:perspective");
-    if (set("warp")) throw NotYetPorted("smart:warp");
+// A bent smart object's placing (PC3 A5): its warp (in its contents' mm, render/layer_transform's form) and then its
+// corners' homography or its matrix — its contents' mm onto the page's —, and what it is made of (its settings that
+// place it, for the pictures remembered).
+struct Placing {
+    std::shared_ptr<const core::page_geometry::Warp> warp;
+    resample::Homography place;
+    std::string key;
+    std::pair<double, double> apply(double x, double y) const {
+        if (warp) {
+            const auto p = warp->map(x, y);
+            return place.apply(p.x, p.y);
+        }
+        return place.apply(x, y);
+    }
+};
+
+// Its placing when it is bent (a warp, or corners of its own); none when its matrix alone places it. Settings this build
+// cannot read (a book changed by hand): the smart object left out and said.
+std::optional<Placing> placing_of(const core::Layer& layer, const core::SmartContents& contents) {
+    if (!core::smart::bent(layer)) return std::nullopt;
+    Placing out;
+    const auto [w, h] = core::smart::size_mm(contents);
+    if (const Json* warp = core::get(*layer.smart, "warp"); warp != nullptr && !warp->is_null()) {
+        try {
+            const core::page_geometry::Warp read = layer_transform::warp_from_json(*warp, {0, 0, w, h});
+            if (!read.is_identity()) out.warp = std::make_shared<const core::page_geometry::Warp>(read);
+        } catch (const std::exception&) {
+            throw NotYetPorted("smart:warp");
+        }
+    }
+    const Json* quad = core::get(*layer.smart, "perspective");
+    if (quad != nullptr && !quad->is_null() && !core::smart::convex(core::smart::corners_on_page(layer, contents))) throw NotYetPorted("smart:perspective");
+    out.place = layer_transform::smart_placing(layer, contents);
+    Json made = Json::array({core::smart::to_json(core::smart::matrix_of(layer)), quad != nullptr ? *quad : Json(), out.warp ? *core::get(*layer.smart, "warp") : Json()});
+    out.key = core::dump_canonical(made);
+    return out;
+}
+
+// How much it enlarges at most over its contents' box (w × h mm): its placing's Jacobian's larger singular value at a
+// grid of places.
+double largest_scale(const Placing& p, double w, double h) {
+    double most = 0;
+    constexpr int kSamples = 8;
+    const double dx = std::max(w, 1e-6) * 1e-3, dy = std::max(h, 1e-6) * 1e-3;
+    for (int j = 0; j <= kSamples; ++j) {
+        for (int i = 0; i <= kSamples; ++i) {
+            const double x = w * i / kSamples, y = h * j / kSamples;
+            const auto [ax, ay] = p.apply(x - dx, y);
+            const auto [bx, by] = p.apply(x + dx, y);
+            const auto [cx, cy] = p.apply(x, y - dy);
+            const auto [ex, ey] = p.apply(x, y + dy);
+            const Matrix jac{(bx - ax) / (2 * dx), (by - ay) / (2 * dx), (ex - cx) / (2 * dy), (ey - cy) / (2 * dy), 0, 0};
+            const double s = core::smart::largest_scale(jac);
+            if (std::isfinite(s)) most = std::max(most, s);
+        }
+    }
+    return most > 0 ? most : 1.0;
+}
+
+resample::Interp bend_interp(Resample how) {
+    if (how == Resample::Nearest) return resample::Interp::Nearest;
+    if (how == Resample::Bilinear) return resample::Interp::Bilinear;
+    return resample::Interp::Bicubic;  // (bicubic, and lanczos: the resampler's finest)
 }
 
 // --- a PSD's picture of it (PC3 A3) -------------------------------------------------------------------------------------
@@ -437,12 +490,93 @@ std::optional<Image> lay_turned(const Ctx& ctx, const core::Layer& layer, const 
                           finish && ctx.finish, ctx.dots, area);
 }
 
+// --- a picture laid through a bent smart object's placing (PC3 A5) -----------------------------------------------------
+
+// Where a picture's pixels land on the page's (its pixels — `px_per_mm` of them to the contents' mm — through the
+// placing onto the page's at `dpi`).
+resample::Forward page_pixels(const Placing& p, double px_per_mm, int dpi) {
+    const double k = dpi / 25.4;
+    return [&p, px_per_mm, k](double u, double v) {
+        const auto [x, y] = p.apply(u / px_per_mm, v / px_per_mm);
+        return std::pair<double, double>{x * k, y * k};
+    };
+}
+
+// The box of the page a picture of w × h pixels reaches through a forward map: its edges and a grid inside it sampled,
+// padded by the kernel's reach and a grid cell, within `limit`.
+Box reached(const resample::Forward& f, int w, int h, const Box& limit) {
+    double x0 = 1e300, y0 = 1e300, x1 = -1e300, y1 = -1e300;
+    constexpr int kSamples = 32;
+    for (int j = 0; j <= kSamples; ++j) {
+        for (int i = 0; i <= kSamples; ++i) {
+            const auto [x, y] = f(static_cast<double>(w) * i / kSamples, static_cast<double>(h) * j / kSamples);
+            if (!std::isfinite(x) || !std::isfinite(y)) continue;
+            x0 = std::min(x0, x);
+            y0 = std::min(y0, y);
+            x1 = std::max(x1, x);
+            y1 = std::max(y1, y);
+        }
+    }
+    if (x0 > x1) return Box{limit.x0, limit.y0, limit.x0, limit.y0};
+    const double pad = 3 + std::ceil(std::max(x1 - x0, y1 - y0) / kSamples);
+    return Box{static_cast<int>(std::max<double>(limit.x0, std::floor(x0 - pad))), static_cast<int>(std::max<double>(limit.y0, std::floor(y0 - pad))),
+               static_cast<int>(std::min<double>(limit.x1, std::ceil(x1 + pad))), static_cast<int>(std::min<double>(limit.y1, std::ceil(y1 + pad)))};
+}
+
+// A plane laid through the placing over `reach` of the page (render/resample: its corners alone a homography drawn exactly
+// so; a warp through its cells' triangles).
+resample::Plane bent_plane(const resample::Plane& src, const Placing& p, double px_per_mm, int dpi, const Box& reach, Resample how) {
+    const resample::Interp interp = bend_interp(how);
+    if (!p.warp) {
+        const double k = dpi / 25.4;
+        const resample::Homography to_page{{k, 0, 0, 0, k, 0, 0, 0, 1}};
+        const resample::Homography from_px{{1.0 / px_per_mm, 0, 0, 0, 1.0 / px_per_mm, 0, 0, 0, 1}};
+        return resample::project(src, to_page.mul(p.place).mul(from_px), reach.width(), reach.height(), interp, reach.x0, reach.y0);
+    }
+    return resample::mesh(src, page_pixels(p, px_per_mm, dpi), reach.width(), reach.height(), interp, reach.x0, reach.y0);
+}
+
+// A picture (RGBA) laid on the page through a bent smart object's placing: made over the part of the page it reaches
+// (within its clip box) once and remembered, then laid as a placed picture of that box (its panel's shape, a picture's
+// monochrome finish), as lay_turned lays one.
+std::optional<Image> lay_bent(const Ctx& ctx, const core::Layer& layer, const std::shared_ptr<const Image>& source, const std::string& key, const Placing& p,
+                              double px_per_mm, Resample how, bool finish, const Box& area) {
+    const Box reach = reached(page_pixels(p, px_per_mm, ctx.dpi), source->width(), source->height(), clip_px(ctx, layer));
+    if (reach.width() <= 0 || reach.height() <= 0) return std::nullopt;
+    const std::string laid_key = key + "\nbent " + p.key + " " + core::dump_python(Json::array({px_per_mm, ctx.dpi, reach.x0, reach.y0, reach.x1, reach.y1,
+                                                                                               static_cast<int>(how)}));
+    std::shared_ptr<const Image> laid = pictures().get(laid_key);
+    if (laid == nullptr) {
+        detail::check_cancel(ctx);
+        laid = std::make_shared<const Image>(resample::to_rgba8(bent_plane(resample::from_rgba8(*source), p, px_per_mm, ctx.dpi, reach, how)));
+        pictures().put(laid_key, laid, image_bytes(*laid));
+    }
+    const double mm = 25.4 / ctx.dpi;
+    const core::Rect placement{core::Num(reach.x0 * mm), core::Num(reach.y0 * mm), core::Num(reach.width() * mm), core::Num(reach.height() * mm)};
+    return placed_picture(layer, placement, [&] { return laid; }, laid_key, Resample::Lanczos, *ctx.page, ctx.episode, ctx.size, ctx.dpi, ctx.mode,
+                          finish && ctx.finish, ctx.dots, area);
+}
+
+// The resolution contents are drawn at to be laid through a bent placing: as fine as the page's pixels where they land
+// most enlarged.
+int bent_dpi(const Placing& p, const core::SmartContents& contents, int dpi) {
+    const auto [w, h] = core::smart::size_mm(contents);
+    const double scale = largest_scale(p, w, h);
+    if (std::abs(scale - 1) < 1e-9) return dpi;
+    return static_cast<int>(std::clamp(std::ceil(dpi * scale - 1e-6), 8.0, 2400.0));
+}
+
 // A picture of w × h pixels (`px_per_mm` of them to the contents' mm) laid on the page through the smart object's matrix
 // `m`: as a placed picture of the box it lands on when the matrix only scales and moves it (the same pixels as
-// place_asset's), else turned (lay_turned).
+// place_asset's), else turned (lay_turned); through its placing when it is bent (PC3 A5, lay_bent).
 std::optional<Image> lay_picture(const Ctx& ctx, const core::Layer& layer, const std::function<std::shared_ptr<const Image>()>& picture,
                                  std::int64_t w, std::int64_t h, double px_per_mm, const std::string& key, const Matrix& m, Resample how,
-                                 bool finish, const Box& area) {
+                                 bool finish, const Box& area, const std::optional<Placing>& bend = std::nullopt) {
+    if (bend) {
+        const std::shared_ptr<const Image> source = picture();
+        if (source == nullptr) return std::nullopt;
+        return lay_bent(ctx, layer, source, key, *bend, px_per_mm, how, finish, area);
+    }
     if (core::smart::axis_aligned(m)) {
         const auto snap = [](double v) { return std::round(v * 1e9) / 1e9; };
         const core::Rect placement{core::Num(m.e), core::Num(m.f), core::Num(snap(m.a * static_cast<double>(w) / px_per_mm)),
@@ -515,9 +649,10 @@ Image contents_part(const Ctx& ctx, const core::SmartContents& contents, int dpi
 }
 
 std::optional<Image> page_8bit(const Ctx& ctx, const core::Layer& layer, const core::SmartContents& contents, const Matrix& m, const Box& area) {
-    const int dpi = contents_dpi(m, ctx.dpi);
+    const std::optional<Placing> bend = placing_of(layer, contents);  // (PC3 A5)
+    const int dpi = bend ? bent_dpi(*bend, contents, ctx.dpi) : contents_dpi(m, ctx.dpi);
     const Matrix pm = pixel_matrix(m, dpi / 25.4, ctx.dpi);
-    if (const auto shift = whole_shift(pm)) {  // (whole pixels moved: its own pixels, part by part)
+    if (const auto shift = bend ? std::nullopt : whole_shift(pm)) {  // (whole pixels moved: its own pixels, part by part)
         const Box limit = clip_px(ctx, layer);
         const Box part{std::max(area.x0, limit.x0), std::max(area.y0, limit.y0), std::min(area.x1, limit.x1), std::min(area.y1, limit.y1)};
         if (part.width() <= 0 || part.height() <= 0) return std::nullopt;
@@ -530,7 +665,7 @@ std::optional<Image> page_8bit(const Ctx& ctx, const core::Layer& layer, const c
     const auto whole = [&] { return contents_whole(ctx, contents, dpi); };
     const std::int64_t w = to_px(contents.page->spec.width_mm.value(), dpi), h = to_px(contents.page->spec.height_mm.value(), dpi);
     return lay_picture(ctx, layer, whole, w, h, dpi / 25.4, contents_key(ctx, contents, dpi), m, resample_of(interp_of(layer, contents)), false,
-                       area);
+                       area, bend);
 }
 
 // --- a file's picture ---------------------------------------------------------------------------------------------------
@@ -583,7 +718,7 @@ std::optional<Image> file_8bit(const Ctx& ctx, const core::Layer& layer, const c
     };
     const double dpi = contents.dpi > 0 ? contents.dpi : 72.0;
     return lay_picture(ctx, layer, picture, contents.width_px, contents.height_px, dpi / 25.4, key, m, resample_of(interp_of(layer, contents)), true,
-                       area);
+                       area, placing_of(layer, contents));
 }
 
 // --- a file with every bit, on a page in precise colour ------------------------------------------------------------------
@@ -652,11 +787,31 @@ std::optional<ColorPicture> file_precise(const Ctx& ctx, const core::Layer& laye
         deep_pictures().put(key, linear, linear->size() * sizeof(float));
     }
     const Resample how = resample_of(interp_of(layer, contents));
-    const std::vector<double> laid = lay(*linear, w, h, 4, pm, part, how, &ctx);
-    for (int y = part.y0; y < part.y1; ++y) {
-        for (int x = part.x0; x < part.x1; ++x) {
-            const double* v = laid.data() + (std::size_t(y - part.y0) * part.width() + (x - part.x0)) * 4;
-            out.pixels[std::size_t(y - area.y0) * area.width() + (x - area.x0)] = {v[0], v[1], v[2], v[3]};
+    if (const std::optional<Placing> bend = placing_of(layer, contents)) {  // (PC3 A5: through its placing, its reach once, remembered)
+        const Box reach = reached(page_pixels(*bend, dpi / 25.4, ctx.dpi), w, h, limit);
+        const std::string laid_key = key + "\nbent " + bend->key + " " + core::dump_python(Json::array({ctx.dpi, reach.x0, reach.y0, reach.x1, reach.y1, static_cast<int>(how)}));
+        std::shared_ptr<const std::vector<float>> laid = deep_pictures().get(laid_key);
+        if (laid == nullptr) {
+            detail::check_cancel(ctx);
+            resample::Plane src(w, h, 4, true);
+            src.hdr = true;
+            src.v = *linear;
+            laid = std::make_shared<const std::vector<float>>(bent_plane(src, *bend, dpi / 25.4, ctx.dpi, reach, how).v);
+            deep_pictures().put(laid_key, laid, laid->size() * sizeof(float));
+        }
+        for (int y = std::max(part.y0, reach.y0); y < std::min(part.y1, reach.y1); ++y) {
+            for (int x = std::max(part.x0, reach.x0); x < std::min(part.x1, reach.x1); ++x) {
+                const float* v = laid->data() + (std::size_t(y - reach.y0) * reach.width() + (x - reach.x0)) * 4;
+                out.pixels[std::size_t(y - area.y0) * area.width() + (x - area.x0)] = {v[0], v[1], v[2], v[3]};
+            }
+        }
+    } else {
+        const std::vector<double> laid = lay(*linear, w, h, 4, pm, part, how, &ctx);
+        for (int y = part.y0; y < part.y1; ++y) {
+            for (int x = part.x0; x < part.x1; ++x) {
+                const double* v = laid.data() + (std::size_t(y - part.y0) * part.width() + (x - part.x0)) * 4;
+                out.pixels[std::size_t(y - area.y0) * area.width() + (x - area.x0)] = {v[0], v[1], v[2], v[3]};
+            }
         }
     }
     if (const auto shape = panel_shape(ctx, layer, area)) {
@@ -700,7 +855,8 @@ void into_picture(InkPicture& out, const Box& area, const core::InkPixels& inks,
 
 std::optional<InkPicture> file_inks_on_page(const Ctx& ctx, const core::Layer& layer, const core::SmartContents& contents, const Matrix& m,
                                             const Box& area) {
-    if (!core::smart::axis_aligned(m)) return std::nullopt;  // (turned: by the page's rules, as an 8-bit picture)
+    // (turned or bent: by the page's rules, as an 8-bit picture)
+    if (!core::smart::axis_aligned(m) || core::smart::bent(layer)) return std::nullopt;
     const core::Document& doc = *ctx.episode;
     const core::PageColor& color = *ctx.page->color;
     const double dpi = contents.dpi > 0 ? contents.dpi : 72.0;
@@ -857,10 +1013,11 @@ std::shared_ptr<const Image> stacked_8bit(const Ctx& ctx, const core::SmartConte
 // A stacked contents page laid on the 8-bit page, as page_8bit lays one.
 std::optional<Image> stacked_page_8bit(const Ctx& ctx, const core::Layer& layer, const core::SmartContents& contents, const Matrix& m, stack::Stat stat,
                                        const Box& area) {
-    const int dpi = contents_dpi(m, ctx.dpi);
+    const std::optional<Placing> bend = placing_of(layer, contents);  // (PC3 A5)
+    const int dpi = bend ? bent_dpi(*bend, contents, ctx.dpi) : contents_dpi(m, ctx.dpi);
     const std::string key = contents_key(ctx, contents, dpi) + "\nstack " + stack_name(layer);
     const auto whole = [&] { return stacked_8bit(ctx, contents, dpi, stat, key); };
-    if (const auto shift = whole_shift(pixel_matrix(m, dpi / 25.4, ctx.dpi))) {  // (whole pixels moved: its own pixels)
+    if (const auto shift = bend ? std::nullopt : whole_shift(pixel_matrix(m, dpi / 25.4, ctx.dpi))) {  // (whole pixels moved: its own pixels)
         const Box part = shown_part(ctx, layer, area);
         if (part.width() <= 0 || part.height() <= 0) return std::nullopt;
         const std::shared_ptr<const Image> picture = whole();
@@ -871,7 +1028,7 @@ std::optional<Image> stacked_page_8bit(const Ctx& ctx, const core::Layer& layer,
         return out;
     }
     const std::int64_t w = to_px(contents.page->spec.width_mm.value(), dpi), h = to_px(contents.page->spec.height_mm.value(), dpi);
-    return lay_picture(ctx, layer, whole, w, h, dpi / 25.4, key, m, resample_of(interp_of(layer, contents)), false, area);
+    return lay_picture(ctx, layer, whole, w, h, dpi / 25.4, key, m, resample_of(interp_of(layer, contents)), false, area, bend);
 }
 
 // A stacked contents page on a page in precise colour: contents of the page's RGB that composite in precise colour,
@@ -883,6 +1040,7 @@ std::optional<ColorPicture> stacked_precise(const Ctx& ctx, const core::Layer& l
     const bool print = ctx.mode == "print";
     if (inner.color || !(inner.rgb == ctx.page->rgb) || !(uses_color_precision(inner, print) || needs_precision(inner, ctx.episode, print)))
         return std::nullopt;
+    if (core::smart::bent(layer)) return std::nullopt;  // (PC3 A5: bent, its 8-bit stack laid)
     const auto shift = whole_shift(pixel_matrix(m, ctx.dpi / 25.4, ctx.dpi));
     if (!shift) return std::nullopt;
     const std::string key = "stack " + stack_name(layer) + "\n" + contents_key(ctx, contents, ctx.dpi) + "\n" +
@@ -951,7 +1109,7 @@ std::optional<ColorPicture> stacked_precise(const Ctx& ctx, const core::Layer& l
 std::optional<InkPicture> stacked_inks(const Ctx& ctx, const core::Layer& layer, const core::SmartContents& contents, const Matrix& m, stack::Stat stat,
                                        const Box& area) {
     const core::Page& inner = *contents.page;
-    if (!inner.color || !(*inner.color == *ctx.page->color)) return std::nullopt;
+    if (!inner.color || !(*inner.color == *ctx.page->color) || core::smart::bent(layer)) return std::nullopt;
     const auto shift = whole_shift(pixel_matrix(m, ctx.dpi / 25.4, ctx.dpi));
     if (!shift) return std::nullopt;
     const unsigned n = ctx.page->color->planes();
@@ -1167,7 +1325,6 @@ std::optional<Image> picture_8bit(const Ctx& ctx, const core::Layer& layer, cons
     const core::SmartContents* contents = core::smart::contents_of(*ctx.episode, layer);
     if (contents == nullptr) return std::nullopt;
     if (auto shown = shown_8bit(ctx, layer, area)) return std::move(*shown);  // (PC3 A3: a PSD's picture, until it changes)
-    refuse_later(layer);
     if (core::smart::filters_drawn(layer)) return filtered_8bit(ctx, layer, *contents, area);  // (PC3 A2)
     const Matrix m = core::smart::matrix_of(layer);
     const std::optional<stack::Stat> stat = stack_of(layer);  // (PC3 A4)
@@ -1186,7 +1343,6 @@ std::optional<ColorPicture> picture_precise(const Ctx& ctx, const core::Layer& l
     const core::SmartContents* contents = core::smart::contents_of(*ctx.episode, layer);
     if (contents == nullptr) return std::nullopt;
     if (shown_ref(layer, "asset")) return std::nullopt;  // (PC3 A3: a PSD's picture, of 8 bits)
-    refuse_later(layer);
     if (core::smart::filters_drawn(layer)) return filtered_precise(ctx, layer, *contents, area, space);  // (PC3 A2)
     const Matrix m = core::smart::matrix_of(layer);
     if (const std::optional<stack::Stat> stat = stack_of(layer)) {  // (PC3 A4)
@@ -1201,6 +1357,7 @@ std::optional<ColorPicture> picture_precise(const Ctx& ctx, const core::Layer& l
         return file_precise(ctx, layer, *contents, m, area, space);
     }
     if (contents->kind != "page" || !contents->page || contents->page->color || !(contents->page->rgb == ctx.page->rgb)) return std::nullopt;
+    if (core::smart::bent(layer)) return std::nullopt;  // (PC3 A5: bent contents, laid in 8 bits)
     const Matrix pm = pixel_matrix(m, ctx.dpi / 25.4, ctx.dpi);
     const auto shift = whole_shift(pm);
     if (!shift) return std::nullopt;
@@ -1235,7 +1392,6 @@ std::optional<InkPicture> picture_inks(const Ctx& ctx, const core::Layer& layer,
     if (contents == nullptr) return std::nullopt;
     if (auto shown = shown_inks(ctx, layer, area)) return shown;  // (PC3 A3: a PSD's picture, until it changes)
     if (shown_ref(layer, "asset")) return std::nullopt;  // (its PNG: as an 8-bit picture, by the page's rules)
-    refuse_later(layer);
     if (core::smart::filters_drawn(layer)) return filtered_inks(ctx, layer, *contents, area);  // (PC3 A2)
     const Matrix m = core::smart::matrix_of(layer);
     if (const std::optional<stack::Stat> stat = stack_of(layer)) {  // (PC3 A4)
@@ -1244,6 +1400,7 @@ std::optional<InkPicture> picture_inks(const Ctx& ctx, const core::Layer& layer,
     }
     if (ink_file(*contents)) return file_inks_on_page(ctx, layer, *contents, m, area);
     if (contents->kind != "page" || !contents->page || !contents->page->color || !(*contents->page->color == *ctx.page->color)) return std::nullopt;
+    if (core::smart::bent(layer)) return std::nullopt;  // (PC3 A5: bent contents, laid in 8 bits by the page's rules)
     const auto shift = whole_shift(pixel_matrix(m, ctx.dpi / 25.4, ctx.dpi));
     if (!shift) return std::nullopt;
     // (contents of the page's inks moved by whole pixels: their inks, composited whole once)

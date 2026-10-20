@@ -1,9 +1,10 @@
 // smart-objects@1 (PC3 A0, design section A 5) in the window: レイヤー → スマートオブジェクト → スマートオブジェクトに変換
-// from the menu (the later steps' commands in their places, not usable yet), the layer panel's row of a smart object (its
+// from the menu (the later steps' commands in their places), the layer panel's row of a smart object (its
 // kind and its mark 埋め込み), 新規スマートオブジェクト（コピー）and ラスタライズ; ファイル → 埋め込みを配置… (the file itself
 // in the middle of the page); a file of 16 bits too large to keep them on a 16-bit page asked about; the 属性 panel's part
 // of a smart object (its colours' use, its size); (PC3 A2) its smart filters in the layer panel and レイヤー → スマートフィルター;
-// (PC3 A4) スタックモード ▸ and ラスタライズ → テキスト, the text tool's tooltip and コマンドを探す telling the two テキスト apart.
+// (PC3 A4) スタックモード ▸ and ラスタライズ → テキスト, the text tool's tooltip and コマンドを探す telling the two テキスト apart;
+// (PC3 A5) ワープ・パペットワープ and ゆがみ… on a smart object, its bending filters edited again.
 
 #include <QtTest>
 
@@ -16,6 +17,7 @@
 #include <QLineEdit>
 #include <QListWidget>
 #include <QMenu>
+#include <QMouseEvent>
 #include <QPushButton>
 #include <QSpinBox>
 #include <QTemporaryDir>
@@ -29,6 +31,7 @@
 
 #include "app/adjust_panels.hpp"
 #include "app/canvas.hpp"
+#include "app/inject.hpp"
 #include "app/layer_panel.hpp"
 #include "app/main_window.hpp"
 #include "app/workspace.hpp"
@@ -158,12 +161,12 @@ private slots:
         QVERIFY(rasterize->actions().contains(book.act("act_rasterize_all")));
         QCOMPARE(book.act("act_smart_convert")->text(), QStringLiteral("スマートオブジェクトに変換"));
         QCOMPARE(book.act("act_place_embedded")->text(), QStringLiteral("埋め込みを配置…"));
-        // (the later steps' commands: in their places, not usable yet, and said so)
-        // (PC3 A1's — コンテンツを編集 and the links, リンクを配置…, パッケージ… — are usable: test_gui_smart_contents;
-        // A2's smart filters: test_smart_filters; A4's stack modes and ラスタライズ → テキスト: stackModesAndTheTextRasterized)
+        // (the later steps' commands, in their places and usable: PC3 A1's — コンテンツを編集 and the links, リンクを配置…,
+        // パッケージ… — test_gui_smart_contents; A2's smart filters: test_smart_filters; A4's stack modes and ラスタライズ →
+        // テキスト: stackModesAndTheTextRasterized; A5's ワープ・遠近法ワープ・パペットワープ: warpsOfASmartObject)
         for (const char* later : {"act_smart_warp", "act_smart_perspective_warp", "act_smart_puppet_warp"}) {
-            QVERIFY2(!book.act(later)->isEnabled(), later);
-            QVERIFY2(book.act(later)->toolTip().contains(QStringLiteral("この版ではまだ使えません")), later);
+            QVERIFY2(smart->actions().contains(book.act(later)), later);
+            QVERIFY2(book.act(later)->isEnabled(), later);
         }
         QVERIFY(book.act("act_smart_convert")->isEnabled());
 
@@ -395,6 +398,101 @@ private slots:
         QCOMPARE(book.layer("so")->smart->at("filter_mask")["enabled"], Json(false));
         book.act("act_smart_filter_mask_delete")->trigger();
         QVERIFY(!book.layer("so")->smart->contains("filter_mask"));
+    }
+
+    // PC3 A5: レイヤー → スマートオブジェクト → ワープ on the smart object drawn on (a style chosen, Enter: its warp, its
+    // contents as they were; again: the box starts from its warp), パペットワープ (its smart filter; スマートフィルターを編集…
+    // from the layer panel: the box with its pins, Enter sets them again) and ゆがみ… on it (its smart filter; edited again
+    // with its strokes); without a smart object, a word.
+    void warpsOfASmartObject() {
+        Book book;
+        app::MainWindow* w = book.window.get();
+        QVERIFY(w->apply_ops(Json::array({Json{{"op", "add_layer"}, {"page", 1}, {"kind", "paint"}, {"id", "pic"}, {"name", "絵"}},
+                                          Json{{"op", "put_raster"}, {"page", 1}, {"id", "pic"}, {"png_base64", core::b64encode(two_colours())}},
+                                          Json{{"op", "smart_convert"}, {"page", 1}, {"id", "pic"}, {"new_id", "so"}}})));
+        const auto contents = core::smart::contents_id(*book.layer("so"));
+        const auto* held = book.doc().smart_contents.at(*contents).get();
+        w->set_target_layer("so");
+        app::PageCanvas* canvas = w->canvas();
+        // ワープ: the arc chosen
+        book.act("act_smart_warp")->trigger();
+        QVERIFY(canvas->transforming());
+        QCOMPARE(canvas->transform_mode(), QStringLiteral("warp"));
+        auto* style = w->findChild<QComboBox*>(QStringLiteral("warp_style"));
+        QVERIFY(style != nullptr);
+        style->setCurrentIndex(style->findData(QStringLiteral("arc")));
+        QTest::keyClick(canvas, Qt::Key_Return);
+        QVERIFY(!canvas->transforming());
+        QCOMPARE((*book.layer("so")->smart)["warp"]["style"], Json("arc"));
+        QVERIFY(book.doc().smart_contents.at(*contents).get() == held);  // (its contents untouched)
+        // (again: from its arc)
+        book.act("act_smart_warp")->trigger();
+        QCOMPARE(canvas->transform_warp()["style"], Json("arc"));
+        style = w->findChild<QComboBox*>(QStringLiteral("warp_style"));
+        QCOMPARE(style->currentData().toString(), QStringLiteral("arc"));
+        QTest::keyClick(canvas, Qt::Key_Escape);
+        QVERIFY(!canvas->transforming());
+        // 遠近法ワープ: the same box as 編集's, on it
+        book.act("act_smart_perspective_warp")->trigger();
+        QCOMPARE(canvas->transform_mode(), QStringLiteral("perspective_warp"));
+        QTest::keyClick(canvas, Qt::Key_Escape);
+        // パペットワープ: three pins, one pulled — its smart filter
+        const auto filters = [&] { return book.layer("so")->smart->value("filters", Json::array()); };
+        book.act("act_smart_puppet_warp")->trigger();
+        QCOMPARE(canvas->transform_mode(), QStringLiteral("puppet"));
+        app::inject::click_mm(canvas, QPointF(80, 120));
+        app::inject::click_mm(canvas, QPointF(180, 120));
+        app::inject::click_mm(canvas, QPointF(130, 280));
+        app::inject::mouse_stroke(canvas, {QPointF(180, 120), QPointF(186, 122), QPointF(192, 124)});
+        QTest::keyClick(canvas, Qt::Key_Return);
+        QCOMPARE(filters().size(), std::size_t(1));
+        QCOMPARE(filters()[0]["kind"], Json("puppet_warp"));
+        QCOMPARE(filters()[0]["params"]["pins"].size(), std::size_t(3));
+        QVERIFY(std::fabs(filters()[0]["params"]["pins"][1]["dst"][0].get<double>() - 192) < 0.3);
+        QVERIFY(core::smart::is_identity(core::smart::matrix_of(*book.layer("so"))));
+        // (スマートフィルターを編集…: the box with its pins; one pulled further, Enter: the filter set again)
+        app::LayerPanel* panel = w->layer_panel();
+        panel->refresh();
+        panel->edit_smart_filter(0);
+        QVERIFY(canvas->transforming());
+        QCOMPARE(canvas->transform_mode(), QStringLiteral("puppet"));
+        QCOMPARE(canvas->puppet_pins().size(), std::size_t(3));
+        app::inject::mouse_stroke(canvas, {QPointF(192, 124), QPointF(196, 126), QPointF(200, 128)});
+        QTest::keyClick(canvas, Qt::Key_Return);
+        QCOMPARE(filters().size(), std::size_t(1));
+        QVERIFY(std::fabs(filters()[0]["params"]["pins"][1]["dst"][0].get<double>() - 200) < 0.3);
+        // ゆがみ… on it: its smart filter; edited again with the strokes it has
+        const auto pushed = [](QDialog* dialog) {
+            if (dialog->objectName() != QStringLiteral("liquify_dialog")) return int(QDialog::Rejected);
+            QWidget* view = dialog->findChild<QWidget*>(QStringLiteral("liquify_view"));
+            if (view == nullptr) return int(QDialog::Rejected);
+            const double scale = view->width() / 257.0;  // (the B4 page's mm on the window)
+            const auto send = [view](QEvent::Type type, QPointF at) {
+                const Qt::MouseButton button = type == QEvent::MouseMove ? Qt::NoButton : Qt::LeftButton;
+                const Qt::MouseButtons down = type == QEvent::MouseButtonRelease ? Qt::NoButton : Qt::LeftButton;
+                QMouseEvent event(type, at, view->mapToGlobal(at), button, down, Qt::NoModifier);
+                QCoreApplication::sendEvent(view, &event);
+            };
+            send(QEvent::MouseButtonPress, QPointF(100 * scale, 150 * scale));
+            for (int i = 1; i <= 6; ++i) send(QEvent::MouseMove, QPointF((100 + 2 * i) * scale, 150 * scale));
+            send(QEvent::MouseButtonRelease, QPointF(112 * scale, 150 * scale));
+            return int(QDialog::Accepted);
+        };
+        book.answers.responder->exec = pushed;
+        book.act("act_liquify_filter")->trigger();
+        QCOMPARE(filters().size(), std::size_t(2));
+        QCOMPARE(filters()[1]["kind"], Json("liquify"));
+        QCOMPARE(filters()[1]["params"]["strokes"].size(), std::size_t(1));
+        panel->refresh();
+        panel->edit_smart_filter(1);
+        QCOMPARE(filters().size(), std::size_t(2));
+        QCOMPARE(filters()[1]["params"]["strokes"].size(), std::size_t(2));
+        // (without a smart object: a word)
+        QVERIFY(w->apply_ops(Json::array({Json{{"op", "add_layer"}, {"page", 1}, {"kind", "paint"}, {"id", "plain"}}})));
+        w->set_target_layer("plain");
+        book.act("act_smart_warp")->trigger();
+        QVERIFY(!canvas->transforming());
+        QCOMPARE(w->last_notice(), QStringLiteral("先にスマートオブジェクトを選びます"));
     }
 
     // PC3 A4: レイヤー → スマートオブジェクト → スタックモード ▸ on the smart object drawn on (the 属性 panel's スタックモード

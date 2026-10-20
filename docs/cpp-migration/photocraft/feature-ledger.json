@@ -2859,8 +2859,7 @@
         "tests": [],
         "gap": "面（4 隅）を置いてから遠近を直す（複数の面・つながる角・水平/垂直の自動補正）操作が無い",
         "note": "選択範囲の「自由変形（遠近・4 隅）」は 1 面だけの射影で別もの。上流は algo/perspective.rs"
-      },
-      "remaining": "スマートオブジェクトの上では断る（PC3 A5。写像の形は smart.warp・smart.perspective に持てる正規形で用意した）"
+      }
     },
     {
       "id": "edit.preferences.cursors",
@@ -3950,7 +3949,7 @@
         "gap": "ピンを置いて形を曲げる（剛体・通常・歪み、メッシュの密度・広がり、ピンの回転・前後）操作が無い",
         "note": "近いもの: ゆがみ（liquify）は押して動かすだけ。上流は algo/puppet.rs（約 900 行、外部ライブラリなし）"
       },
-      "remaining": "ピンの回転・深さの画面の操作は無い（op の rotate・depth で）。スマートオブジェクトの上では断る（PC3 A5。写像の形は smart.warp・smart.perspective に持てる正規形で用意した）"
+      "remaining": "ピンの回転・深さの画面の操作は無い（op の rotate・depth で）"
     },
     {
       "id": "edit.purge.all",
@@ -4425,8 +4424,7 @@
         ],
         "gap": "transform_area で範囲の中の線・塗り・画素を行列（matrix）か 4 隅（warp.perspective）で変形し、補間（nearest/bilinear/bicubic）も選べる。8 bit・高精度・CMYK/Lab のインキの層に効く。範囲（area）が必須で、フォルダー（グループ）・台詞・マスク・ほかの層をまとめて変形しない。4 隅は射影でなく区分的なアフィン（14×14 のます）",
         "note": ""
-      },
-      "remaining": "スマートオブジェクトのアフィンでない変形は PC3 A5。スマートフィルターのフィルターマスクは層の変形で動かない"
+      }
     },
     {
       "id": "edit.transform.again",
@@ -5219,7 +5217,7 @@
         "gap": "格子の点（2〜9 × 2〜9）を引っぱる区分的なメッシュ変形はある。ベジェの曲線メッシュ（制御点・ハンドル）・形の既定（円弧・アーチ・膨張・旗・波・魚眼など 15 種）・ベンド/水平/垂直の歪み・分割が無い",
         "note": ""
       },
-      "remaining": "格子の数は「ワープ（格子の数を決める）…」のまま（ワープの上の欄にしていない）。スマートオブジェクトの上では断る（PC3 A5。写像の形は smart.warp・smart.perspective に持てる正規形で用意した）"
+      "remaining": "格子の数は「ワープ（格子の数を決める）…」のまま（ワープの上の欄にしていない）"
     },
     {
       "id": "edit.undo",
@@ -10427,7 +10425,7 @@
         "gap": "ゆがみの道具（押す・縮める・ふくらませる・右/左回りの渦、幅・強さ）はあり、ペンの線の点も動かす（試験あり）。復元・滑らかに・左に押す・固定/解除・全体を復元・密度/筆圧/速さ・点ごとの筆圧・メッシュ・複数のなぞりを一度に流す入口がない。CMYK/Lab のページでは 8 ビットの絵を借りて処理、16/32 ビットのレイヤーは未確認",
         "note": ""
       },
-      "remaining": "Genko にフィルター メニューが無いので 編集 → ゆがみ…（Ctrl+Shift+X）に置いた。顔立ちを調整・ブラシの再構築の不透明度などの欄は無い。スマートオブジェクトの上では断る（PC3 A5。写像の形は smart.warp・smart.perspective に持てる正規形で用意した）"
+      "remaining": "Genko にフィルター メニューが無いので 編集 → ゆがみ…（Ctrl+Shift+X）に置いた。顔立ちを調整・ブラシの再構築の不透明度などの欄は無い"
     },
     {
       "id": "filter.noise.addNoise",
@@ -22816,9 +22814,18 @@
         "alternate_menus": []
       },
       "genko_status": "一部（2026-10-16 照合）",
-      "implementation_status": "未着手",
+      "implementation_status": "実装済み（PC3 A5、未統合）",
       "acceptance_status": "未実施",
-      "evidence": [],
+      "evidence": [
+        "native/src/render/smart_bends.cpp",
+        "native/src/render/smart_filters.cpp",
+        "native/src/render/layer_transform.cpp",
+        "native/src/core/smart.cpp",
+        "native/src/app/main_window_transform.cpp",
+        "native/src/app/layer_panel_smart_filters.cpp",
+        "native/tests/unit/test_smart_warp.cpp",
+        "native/tests/gui/test_gui_smart.cpp"
+      ],
       "pc0": {
         "date": "2026-10-16",
         "cpp_base": "962faa4",
@@ -22835,7 +22842,8 @@
         ],
         "gap": "自由変形（遠近・4 隅）で 1 枚の四角を画素・線に破壊的に掛けることはできる。複数の面（planes・重なった角のつながり）、straighten、補間の選択の一部、SO に非破壊で掛けて後から直す形が無い",
         "note": "edit.perspectiveWarp 行と共有。非破壊の部分は SO の土台（layer.smartObjects.convertToSmartObject 行）が要る"
-      }
+      },
+      "remaining": "スマートフィルターの遠近法ワープは、ページ全体の絵を描く解像度で作って覚えるので、印刷の解像度では時間と記憶を使う"
     },
     {
       "id": "layer.smartObjects.puppetWarp",
@@ -22865,9 +22873,19 @@
         "alternate_menus": []
       },
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "未着手",
+      "implementation_status": "実装済み（PC3 A5、未統合）",
       "acceptance_status": "未実施",
-      "evidence": [],
+      "evidence": [
+        "native/src/render/smart_bends.cpp",
+        "native/src/render/smart_filters.cpp",
+        "native/src/render/layer_transform.cpp",
+        "native/src/core/smart.cpp",
+        "native/src/app/main_window_transform.cpp",
+        "native/src/app/canvas_transform.cpp",
+        "native/src/app/layer_panel_smart_filters.cpp",
+        "native/tests/unit/test_smart_warp.cpp",
+        "native/tests/gui/test_gui_smart.cpp"
+      ],
       "pc0": {
         "date": "2026-10-16",
         "cpp_base": "962faa4",
@@ -22878,7 +22896,8 @@
         "tests": [],
         "gap": "パペットワープ（ピンで不透明部分のメッシュを ARAP で曲げる）がない",
         "note": "上流は crates/algo/src/puppet.rs（外部ライブラリ不要）。スマートオブジェクト上ではスマートフィルターになる（その土台に依存）。Genko の liquify（render/ops_paint.cpp:464）は別物"
-      }
+      },
+      "remaining": "SO のパペットワープはその SO だけで掛ける（ほかの層と一緒には断る）。ピンの回転・深さの画面の操作は無い（op の rotate・depth で）"
     },
     {
       "id": "layer.smartObjects.rasterize",
@@ -23868,9 +23887,22 @@
         "alternate_menus": []
       },
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "未着手",
+      "implementation_status": "実装済み（PC3 A5、未統合）",
       "acceptance_status": "未実施",
-      "evidence": [],
+      "evidence": [
+        "native/src/render/layer_transform.cpp",
+        "native/src/render/smart.cpp",
+        "native/src/render/ops_smart.cpp",
+        "native/src/core/smart.cpp",
+        "native/src/render/psd_smart.cpp",
+        "native/src/render/import_psd.cpp",
+        "native/src/app/main_window_smart.cpp",
+        "native/src/app/main_window_transform.cpp",
+        "native/tests/unit/test_smart_warp.cpp",
+        "native/tests/unit/test_smart.cpp",
+        "native/tests/contract/test_contract_transform.cpp",
+        "native/tests/gui/test_gui_smart.cpp"
+      ],
       "pc0": {
         "date": "2026-10-16",
         "cpp_base": "962faa4",
@@ -23884,7 +23916,8 @@
         "tests": [],
         "gap": "スマートオブジェクトがなく、元から描き直せる（劣化しない）ワープがない。transform_area の warp（メッシュ 2..9 点・遠近）は画素を一度で書き換える。上流のスタイル（arc・bulge・flag など 15 種）・ベジェメッシュ（(3c+1)×(3r+1) 点）もない",
         "note": "スマートオブジェクトの土台（XL、layer.smartObjects.editContents に計上）に依存"
-      }
+      },
+      "remaining": "回転・せん断・縦横で違う拡大をした SO に形の既定のワープを掛けると、その形は中身の向きのまま（ワープは中身に掛かる）。分割したワープは PSD に 1 枚のパッチ（4 × 4 の点）に近づけて書く。曲げた SO は、高精度・インキのページでは 16・32 bit のファイル以外 8 bit の精度で描く"
     },
     {
       "id": "layer.translate",
