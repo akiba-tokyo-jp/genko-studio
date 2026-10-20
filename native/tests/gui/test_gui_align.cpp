@@ -2,7 +2,7 @@
 // 重ね順 ▸ (最前面へ Ctrl+Shift+], 最背面へ Ctrl+Shift+[, 逆順; 前面へ・背面へ among siblings now), 整列 ▸ and 分布 ▸ with
 // Genko's bases, レイヤーをリンク, リンクしたレイヤーを選択, レイヤーをロック…, 表示 → スナップ (Ctrl+Shift+;) and スナップ先 ▸ with
 // their words, keys and places; each command's one op on the layers chosen (and the line chosen); the move tool's drag
-// (transform_layers' move by whole working pixels, the linked layer along), its Ctrl+click (自動選択: the layer showing
+// (transform_layers' move by whole working pixels, the linked layer and a linked vector mask along), its Ctrl+click (自動選択: the layer showing
 // there drawn on) and バウンディングボックス (its □ starts 自由変形); snapping to a guide while dragging (the line drawn,
 // Ctrl lets it go), スナップ先 ▸ すべて・なし and the grid's one switch.
 
@@ -373,6 +373,39 @@ private slots:
         studio.trigger("act_move_show_box");
         studio.trigger("act_snap_on");
         QVERIFY(studio.canvas()->snap_on && !studio.canvas()->show_move_box && !studio.canvas()->auto_select);
+    }
+
+    // The move tool takes a layer's linked vector mask with it (its pixels and the mask's outline moved alike); an unlinked
+    // one stays.
+    void theMoveToolMovesTheVectorMask() {
+        Studio studio;
+        studio.trigger("act_snap_on");  // (off: the moves as dragged)
+        const auto square = [](double x0, double y0, double x1, double y1) {
+            return Json{{"subpaths", Json::array({Json{{"closed", true},
+                                                       {"knots", Json::array({Json::array({x0, y0}), Json::array({x1, y0}), Json::array({x1, y1}),
+                                                                              Json::array({x0, y1})})}}})}};
+        };
+        studio.session->apply(Json::array({Json{{"op", "set_vector_mask"}, {"page", 1}, {"id", "a"}, {"path", square(18, 18, 32, 32)}},
+                                           Json{{"op", "set_vector_mask"}, {"page", 1}, {"id", "b"}, {"path", square(38, 8, 48, 18)}, {"linked", false}}}));
+        const auto mask_x = [&studio](const char* id) {
+            for (const core::Layer& l : studio.page().layers)
+                if (l.id == id && l.vector_mask) return l.vector_mask->path.subpaths.at(0).knots.at(0).anchor.x;
+            return -1.0;
+        };
+        QCOMPARE(mask_x("a"), 18.0);
+        for (const char* id : {"a", "b"}) {
+            studio.choose({id});
+            studio.trigger("act_move");
+            const double before = mask_x(id);
+            const QPointF at = std::string(id) == "a" ? QPointF(25, 25) : QPointF(43, 13);
+            inject::mouse_stroke(studio.canvas(), {at, at + QPointF(2, 0), at + QPointF(5.3, 0)});
+            QCOMPARE(studio.ops.back()["op"], Json("transform_layers"));
+            const double dx = studio.ops.back()["move"][0].get<double>();
+            QVERIFY(dx > 5);
+            if (std::string(id) == "a") QVERIFY2(std::fabs(mask_x(id) - (before + dx)) < 1e-3, qPrintable(QString::number(mask_x(id))));  // (linked: along)
+            else QCOMPARE(mask_x(id), before);  // (unlinked: stays)
+        }
+        studio.trigger("act_snap_on");
     }
 
     // Snapping: a drag near a guide snaps to it (its line drawn while dragging); Ctrl held: not; スナップ先's switches.

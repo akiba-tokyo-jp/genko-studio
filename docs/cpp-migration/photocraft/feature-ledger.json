@@ -24379,7 +24379,10 @@
         "native/src/render/psd_paths.cpp",
         "native/src/app/main_window_paths.cpp",
         "native/tests/contract/test_contract_paths.cpp",
-        "native/tests/gui/test_gui_paths.cpp"
+        "native/tests/gui/test_gui_paths.cpp",
+        "native/src/render/layer_transform.cpp",
+        "native/tests/contract/test_contract_transform.cpp",
+        "native/tests/gui/test_gui_align.cpp"
       ],
       "pc0": {
         "date": "2026-10-16",
