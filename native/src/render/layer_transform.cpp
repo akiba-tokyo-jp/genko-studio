@@ -24,10 +24,13 @@
 #include "render/png.hpp"
 #include "render/raster.hpp"
 #include "render/selection.hpp"
+#include "render/smart_filters.hpp"
 #include "render/warp.hpp"
 
 // The warps' params and splits: PhotoCraft v0.2.0 crates/engine/src/warp_cmds.rs (75-260), the layers' transforms:
-// transform_cmds.rs (22-175) and distort_cmds.rs (40-160), MIT: native/third_party/photocraft/NOTICE.md.
+// transform_cmds.rs (22-175) and distort_cmds.rs (40-160); a smart object's warp in its contents' mm and its distortions
+// kept as smart filters (PC3 A5): warp_cmds.rs (48-72, 128-150) and distort_cmds.rs (233-272). MIT:
+// native/third_party/photocraft/NOTICE.md.
 
 namespace genko::render::layer_transform {
 
@@ -453,14 +456,41 @@ void move_layer(Document& doc, std::size_t at, const std::string& id, const Map&
         return;
     }
     if (layer.kind == LayerKind::Smart) {
-        // (a warp's own box is no selection: the warp itself is A5's)
-        if (!m.is_affine()) core::not_yet_ported("warping a smart object is not in the C++ build yet (PC3 A5)");
+        // (PC3 A5: its placing, never its contents — a warp's own box is no selection: transform_layers gives a smart
+        // object only the op's area)
         if (area) throw OpError("a smart object moves whole: transform it without a selection");
-        const auto& a = m.affine;
-        core::smart::transform_layer(layer, core::smart::Matrix{a[0], a[1], a[2], a[3], a[4], a[5]});
-        const core::smart::Matrix now = core::smart::snapped(core::smart::matrix_of(layer));
-        if (std::abs(now.det()) <= core::smart::kDetMin) throw OpError("the transform squashes the smart object flat");
-        core::smart::set_matrix(layer, now);
+        const core::SmartContents* contents = core::smart::contents_of(doc, layer);
+        if (contents == nullptr) throw OpError("the smart object has no contents");
+        if (m.filter) {  // (a perspective warp, a puppet warp: its smart filter; the smart object, its masks stay)
+            (void)smart_filters::push_filter(doc, page, layer, core::py_str((*m.filter)["kind"]), (*m.filter)["params"], std::nullopt);
+            return;
+        }
+        if (m.warp) {  // (its one warp replaced, in its contents' mm)
+            const auto kept = warp_in_contents(*m.warp, smart_placing(layer, *contents));
+            core::smart::put_setting(layer, "warp", kept ? warp_to_json(*kept) : Json());
+            core::smart::put_setting(layer, "psd", Json());
+        } else if (m.kind == Map::Kind::Affine) {
+            const auto& a = m.affine;
+            core::smart::transform_layer(layer, core::smart::Matrix{a[0], a[1], a[2], a[3], a[4], a[5]});
+            const core::smart::Matrix now = core::smart::snapped(core::smart::matrix_of(layer));
+            if (std::abs(now.det()) <= core::smart::kDetMin) throw OpError("the transform squashes the smart object flat");
+            core::smart::set_matrix(layer, now);
+        } else if (m.kind == Map::Kind::Projective) {  // (its corners through the quad's homography)
+            core::smart::Corners corners = core::smart::corners_on_page(layer, *contents);
+            for (auto& [x, y] : corners) {
+                const auto [px, py] = m.projective.apply(x, y);
+                x = px;
+                y = py;
+            }
+            try {
+                core::smart::set_corners(layer, *contents, corners);
+            } catch (const core::Error& error) {
+                throw OpError(error.what());
+            }
+        } else {
+            throw OpError("a smart object is bent by a warp, a perspective warp or a puppet warp");
+        }
+        move_filter_mask(doc, page, layer, m);
     } else if (layer.kind == LayerKind::Placed && layer.placement_mm) {
         const auto& a = m.affine;
         if (!m.is_affine() || std::fabs(a[1]) > 1e-12 || std::fabs(a[2]) > 1e-12 || a[0] <= 0 || a[3] <= 0) {
@@ -938,6 +968,102 @@ Json puppet_to_json(const puppet::Warp& w) {
                 {"expansion_mm", r4(w.expansion)}};
 }
 
+// --- smart objects (PC3 A5) --------------------------------------------------------------------------------------------
+
+resample::Homography smart_placing(const Layer& layer, const core::SmartContents& contents) {
+    if (const Json* quad = layer.smart ? core::get(*layer.smart, "perspective") : nullptr; quad != nullptr && !quad->is_null()) {
+        const core::smart::Corners c = core::smart::corners_on_page(layer, contents);
+        const auto [w, h] = core::smart::size_mm(contents);
+        if (const auto made = resample::Homography::rect_to_quad(
+                {0, 0, w, h}, {{{c[0].first, c[0].second}, {c[1].first, c[1].second}, {c[2].first, c[2].second}, {c[3].first, c[3].second}}}))
+            return *made;
+    }
+    const core::smart::Matrix m = core::smart::matrix_of(layer);
+    return resample::Homography::affine({m.a, m.b, m.c, m.d, m.e, m.f});
+}
+
+std::optional<pg::Warp> warp_in_contents(const pg::Warp& on_page, const resample::Homography& place) {
+    const auto back = place.inverse();
+    if (!back || on_page.is_identity()) return std::nullopt;
+    // (the box its bounds' corners come back to)
+    const auto& b = on_page.box;
+    double x0 = std::numeric_limits<double>::max(), y0 = x0, x1 = -x0, y1 = -x0;
+    for (const auto& [x, y] : {std::pair{b[0], b[1]}, std::pair{b[2], b[1]}, std::pair{b[2], b[3]}, std::pair{b[0], b[3]}}) {
+        const auto [u, v] = back->apply(x, y);
+        x0 = std::min(x0, u);
+        y0 = std::min(y0, v);
+        x1 = std::max(x1, u);
+        y1 = std::max(y1, v);
+    }
+    if (!(x1 > x0 && y1 > y0) || !std::isfinite(x0) || !std::isfinite(y1)) return std::nullopt;
+    pg::Warp out = on_page;
+    out.box = {x0, y0, x1, y1};
+    if (on_page.style == pg::WarpStyle::Custom) {
+        pg::BezierMesh mesh = on_page.to_mesh(1, 1);
+        for (XY& p : mesh.points) {
+            const auto [u, v] = back->apply(p.x, p.y);
+            p = XY{u, v};
+        }
+        out.mesh = std::move(mesh);
+    }
+    if (out.is_identity()) return std::nullopt;
+    return out;
+}
+
+std::optional<pg::Warp> smart_warp_on_page(const Document& doc, const Layer& layer) {
+    const Json* stored = layer.smart ? core::get(*layer.smart, "warp") : nullptr;
+    const core::SmartContents* contents = core::smart::contents_of(doc, layer);
+    if (stored == nullptr || stored->is_null() || contents == nullptr) return std::nullopt;
+    pg::Warp w;
+    try {
+        w = warp_from_json(*stored, {0, 0, 1, 1});
+    } catch (const std::exception&) {
+        return std::nullopt;
+    }
+    if (w.is_identity()) return std::nullopt;
+    const resample::Homography place = smart_placing(layer, *contents);
+    double x0 = std::numeric_limits<double>::max(), y0 = x0, x1 = -x0, y1 = -x0;
+    for (const auto& [x, y] : {std::pair{w.box[0], w.box[1]}, std::pair{w.box[2], w.box[1]}, std::pair{w.box[2], w.box[3]}, std::pair{w.box[0], w.box[3]}}) {
+        const auto [u, v] = place.apply(x, y);
+        x0 = std::min(x0, u);
+        y0 = std::min(y0, v);
+        x1 = std::max(x1, u);
+        y1 = std::max(y1, v);
+    }
+    const auto& h = place.m;
+    const bool even = place.is_affine() && std::fabs(h[1]) < 1e-12 && std::fabs(h[3]) < 1e-12 && h[0] > 0 && std::fabs(h[0] - h[4]) < 1e-12;
+    pg::Warp out;
+    out.box = {x0, y0, x1, y1};
+    if (pg::is_preset(w.style) && even) {  // (moved and scaled evenly: the same style over the box it lands on)
+        out = w;
+        out.box = {x0, y0, x1, y1};
+        return out;
+    }
+    pg::BezierMesh mesh = w.to_mesh(1, 1);
+    for (XY& p : mesh.points) {
+        const auto [u, v] = place.apply(p.x, p.y);
+        p = XY{u, v};
+    }
+    out.style = pg::WarpStyle::Custom;
+    out.mesh = std::move(mesh);
+    return out;
+}
+
+void move_filter_mask(Document& doc, const Page& page, Layer& layer, const Map& m) {
+    if (!layer.smart || !layer.smart->is_object()) return;
+    const auto at = layer.smart->find("filter_mask");
+    if (at == layer.smart->end() || !at->is_object() || !at->contains("asset") || !(*at)["asset"].is_string()) return;
+    if (m.is_affine() && m.affine == core::vector::Affine{1, 0, 0, 1, 0, 0}) return;
+    core::Mask mask;
+    mask.png = smart_filters::mask_bytes(doc, (*at)["asset"].get<std::string>());
+    if (!mask.png) return;  // (not in the book: the reader says so where it is read)
+    move_mask(page, mask, m);
+    if (!mask.png) return;
+    const std::string ref = core::bytes_ref(*mask.png);
+    doc.smart_files[ref] = mask.png;
+    (*at)["asset"] = ref;
+}
+
 // --- the op ----------------------------------------------------------------------------------------------------------
 
 namespace {
@@ -1111,15 +1237,16 @@ void transform_layers(core::OpContext& c) {
     } else if (way == "warp") {
         const pg::Warp w = warp_from_json(spec, box);
         report["warp"] = warp_to_json(w);
+        auto shared = std::make_shared<const pg::Warp>(w);
         if (w.is_identity()) {  // (a warp that bends nothing: everything as it was, exactly)
             m = affine_map({1, 0, 0, 1, 0, 0}, w.box);
         } else {
             m.box = w.box;
             m.kind = Map::Kind::Mesh;
-            auto shared = std::make_shared<const pg::Warp>(w);
             m.forward = [shared](double x, double y) { return shared->map(x, y); };
             if (!lift) lift = area_of_box(w.box);  // (what is in the warp's box moves; the rest stays)
         }
+        m.warp = shared;  // (PC3 A5: a smart object's warp, even one that bends nothing — it takes the warp it holds away)
     } else if (way == "perspective") {
         PerspectiveSpec ps = perspective_from_json(spec);
         std::vector<perspective::Plane> planes;
@@ -1147,10 +1274,30 @@ void transform_layers(core::OpContext& c) {
                 const auto p = shared->map(x, y);
                 return XY{p[0], p[1]};
             };
+            // (PC3 A5: a smart object's smart filter — its planes straightened already, and the interpolation)
+            PerspectiveSpec kept = ps;
+            kept.straighten.reset();
+            Json params = perspective_to_json(kept);
+            params["interp"] = std::string(interp == resample::Interp::Nearest ? "nearest" : interp == resample::Interp::Bilinear ? "bilinear" : "bicubic");
+            m.filter = Json{{"kind", "perspective_warp"}, {"params", std::move(params)}};
         }
     } else {  // puppet
         puppet::Warp w = puppet_from_json(spec);
         report["puppet"] = puppet_to_json(w);
+        if (!w.is_identity()) {
+            // (PC3 A5: a smart object's puppet warp is its smart filter, meshed over its own picture: alone)
+            const bool smart = std::any_of(ids.begin(), ids.end(), [&](const std::string& id) {
+                return doc.page(at).layers[layer_index(doc.page(at), id)].kind == LayerKind::Smart;
+            });
+            const bool others = std::any_of(ids.begin(), ids.end(), [&](const std::string& id) {
+                const Layer& l = doc.page(at).layers[layer_index(doc.page(at), id)];
+                return l.kind != LayerKind::Smart && l.kind != LayerKind::Folder;
+            });
+            if (smart && (others || ids.size() > 1)) throw OpError("a smart object is puppet-warped alone (its puppet warp is its smart filter)");
+            Json params = puppet_to_json(w);
+            params["interp"] = std::string(interp == resample::Interp::Nearest ? "nearest" : interp == resample::Interp::Bilinear ? "bilinear" : "bicubic");
+            m.filter = Json{{"kind", "puppet_warp"}, {"params", std::move(params)}};
+        }
         if (!w.is_identity()) {  // (no pin moved: everything as it was, exactly)
             puppet::Warp px = w;  // (solved in the working 200 dpi pixels)
             px.expansion = w.expansion * kPx;
@@ -1181,7 +1328,9 @@ void transform_layers(core::OpContext& c) {
     for (const std::string& id : ids) {
         const auto named = parts.find(id);
         if (!parts.empty() && named == parts.end()) continue;  // (parts given: only their layers)
-        move_layer(doc, at, id, m, lift, interp, named != parts.end() ? &named->second : nullptr);
+        // (a smart object is given the op's own area only: a warp's box is no selection of it)
+        const bool smart = doc.page(at).layers[layer_index(doc.page(at), id)].kind == LayerKind::Smart;
+        move_layer(doc, at, id, m, smart ? area : lift, interp, named != parts.end() ? &named->second : nullptr);
         report["moved"].push_back(id);
     }
     if (const Json* with = core::get(op, "with"); with != nullptr && !with->is_null()) {

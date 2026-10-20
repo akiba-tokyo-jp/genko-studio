@@ -63,6 +63,13 @@ core::Json settled(const core::Document& doc, const core::Page& page, std::strin
 // A filter mask made of an area (the op's selection: {poly} or {mask: {box, png}}), the page at 150 dpi: its PNG.
 std::string mask_of_area(const core::Page& page, const core::Json& area);
 
+// A smart filter laid on top of the smart object's (`params` settled here; normal, 100 %, shown), the area (the op's
+// selection) its filter mask when it has none; its index. OpError past kFiltersMax or for what `settled` refuses. The
+// ops that put one on a smart object of their own (PC3 A5: transform_layers' perspective and puppet warps, Liquify's
+// strokes) and smart_filter_add go through it.
+std::size_t push_filter(core::Document& doc, const core::Page& page, core::Layer& layer, const std::string& kind, const core::Json& params,
+                        const std::optional<core::Json>& area);
+
 // The ops (render/ops_smart_filters.cpp): smart_filter_add, smart_filter_set, smart_filter_move, smart_filter_delete and
 // smart_filter_state (this build's own: `genko schema` and the MCP tools' list stay as they are).
 void register_ops(core::OpRegistry& registry);

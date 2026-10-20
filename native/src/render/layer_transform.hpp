@@ -25,8 +25,12 @@
 //   (render/resample: premultiplied; a map that takes the grid onto itself moves them exactly, their values the same;
 //   a patch only moved or scaled keeps its picture, its box moved);
 // * a fill's gradient, a tone's region (its screen turned with an affine map), a placed picture's box (moved and
-//   scaled: turned or bent it is turned as a smart object), a smart object's matrix (render/smart draws it again from
-//   its contents; a warp, perspective warp or puppet warp of a smart object is PC3 A5's);
+//   scaled: turned or bent it is turned as a smart object);
+// * a smart object's placing, never its contents (PC3 A5; render/smart draws it again from them): an affine map its
+//   matrix, a quad's its corners (smart.perspective), a warp its warp (smart.warp, in its contents' mm: PhotoCraft's
+//   warp_layer — the warp it holds replaced, as Photoshop edits a smart object's one warp); a perspective warp's planes and
+//   a puppet warp's pins are kept as its smart filters (PhotoCraft's distort_cmds.rs:233-272), its masks left as they are
+//   then; its filter mask moved with it otherwise;
 // * its mask when it is linked (masks@1), its vector mask when it is linked (vector@1).
 //
 // The maps are the page's, in mm (y down).
@@ -44,6 +48,10 @@ struct Map {
     resample::Homography projective;
     std::function<XY(double, double)> forward;      // (Mesh)
     std::shared_ptr<const puppet::Deformed> puppet;  // (Mesh: a puppet warp's triangles, in the page's 200 dpi pixels)
+    // (PC3 A5: what made it, for a smart object it moves — a warp, kept as its warp even when it bends nothing; a perspective
+    // warp's or a puppet warp's settings, kept as its smart filter: {"kind", "params"})
+    std::shared_ptr<const core::page_geometry::Warp> warp;
+    std::optional<core::Json> filter;
     std::array<double, 4> box{0, 0, 0, 0};
     XY apply(double x, double y) const;
     bool is_affine() const { return kind == Kind::Affine; }
@@ -98,6 +106,21 @@ PerspectiveSpec perspective_from_json(const core::Json& value);
 core::Json perspective_to_json(const PerspectiveSpec& spec);
 puppet::Warp puppet_from_json(const core::Json& value);
 core::Json puppet_to_json(const puppet::Warp& warp);
+
+// --- smart objects (PC3 A5) --------------------------------------------------------------------------------------------
+
+// Where a smart object lays its contents' mm on the page's mm: its corners' homography, else its matrix (its warp before
+// it is not in it).
+resample::Homography smart_placing(const core::Layer& layer, const core::SmartContents& contents);
+// A warp of the page as a smart object placed by `place` keeps it, in its contents' mm (PhotoCraft's warp_layer): a style
+// over the box its bounds' corners come back to, a mesh's points brought back; none for one that bends nothing.
+std::optional<core::page_geometry::Warp> warp_in_contents(const core::page_geometry::Warp& on_page, const resample::Homography& place);
+// A smart object's warp as it shows on the page (what Warp starts from on it: a style kept where its placing only moves
+// and scales it evenly, else its mesh through the placing); none when it has none or it cannot be read.
+std::optional<core::page_geometry::Warp> smart_warp_on_page(const core::Document& doc, const core::Layer& layer);
+// A smart object's filter mask (a page's 150 dpi grey PNG) moved through the map: its new PNG kept with the book's files
+// (Document::smart_files); one not in the book is left as it is.
+void move_filter_mask(core::Document& doc, const core::Page& page, core::Layer& layer, const Map& m);
 
 // The op transform_layers ({page, ids, parts?, area?, box?, move | matrix | quad | turn | warp | perspective | puppet,
 // interp?, with?}).

@@ -25,8 +25,10 @@
 #include "render/imaging.hpp"
 #include "render/ink.hpp"
 #include "render/ink_canvas.hpp"
+#include "render/layer_transform.hpp"
 #include "render/not_yet_ported.hpp"
 #include "render/ops_registry.hpp"
+#include "render/resample.hpp"
 #include "render/ops_shapes.hpp"
 #include "render/ops_smart_parts.hpp"
 #include "render/shape_parts.hpp"
@@ -533,15 +535,39 @@ void smart_copy(OpContext& c) {
     c.report = Json{{"id", page.layers[i + 1].id}, {"contents", contents_id}};
 }
 
+// The homography taking a smart object's corners where they were onto where they are (none: they did not move, or one
+// of them is no quad).
+std::optional<resample::Homography> corners_moved(const core::smart::Corners& was, const core::smart::Corners& now) {
+    if (was == now) return std::nullopt;
+    const auto quad = [](const core::smart::Corners& c) {
+        return std::array<std::array<double, 2>, 4>{{{c[0].first, c[0].second}, {c[1].first, c[1].second}, {c[2].first, c[2].second}, {c[3].first, c[3].second}}};
+    };
+    const auto unit = resample::Homography::rect_to_quad({0, 0, 1, 1}, quad(was));
+    const auto to = resample::Homography::rect_to_quad({0, 0, 1, 1}, quad(now));
+    if (!unit || !to) return std::nullopt;
+    const auto back = unit->inverse();
+    if (!back) return std::nullopt;
+    resample::Homography h = to->mul(*back);
+    if (std::abs(h.m[6]) < 1e-12 && std::abs(h.m[7]) < 1e-12 && std::abs(h.m[8]) > 1e-12) {  // (an affine map, exactly)
+        const double k = h.m[8];
+        for (double& v : h.m) v /= k;
+        h.m[6] = 0;
+        h.m[7] = 0;
+        h.m[8] = 1;
+    }
+    return h;
+}
+
 void smart_transform(OpContext& c) {
     Document& doc = c.doc;
     const std::size_t at = core::require_page(doc, c.op);
     const std::size_t i = smart_layer(doc.page(at), c.op);
     if (doc.page(at).layers[i].locked) throw OpError("the layer is locked");
-    for (const char* later : {"perspective", "warp"}) {
-        if (core::truthy_at(c.op, later)) core::not_yet_ported(std::string("smart_transform's ") + later + " (PC3 A5)");
-    }
-    Layer& layer = doc.edit_page(at).layers[i];
+    const core::SmartContents* contents = core::smart::contents_of(doc, doc.page(at).layers[i]);
+    if (contents == nullptr) throw OpError("the smart object has no contents");
+    Page& page = doc.edit_page(at);
+    Layer& layer = page.layers[i];
+    const core::smart::Corners was = core::smart::corners_on_page(layer, *contents);
     Matrix m = core::smart::matrix_of(layer);
     if (const Json* set = core::get(c.op, "set_matrix"); set != nullptr && !set->is_null()) {
         try {
@@ -549,18 +575,62 @@ void smart_transform(OpContext& c) {
         } catch (const core::Error& error) {
             throw OpError(error.what());
         }
+        core::smart::put_setting(layer, "perspective", Json());  // (its matrix places it now)
     }
     if (const Json* by = core::get(c.op, "matrix"); by != nullptr && !by->is_null()) {
+        Matrix more;
         try {
-            m = core::smart::multiply(core::smart::matrix_from(*by), m);
+            more = core::smart::matrix_from(*by);
         } catch (const core::Error& error) {
             throw OpError(error.what());
+        }
+        m = core::smart::multiply(more, m);
+        if (Json* corners = layer.smart->contains("perspective") ? &(*layer.smart)["perspective"] : nullptr; corners != nullptr && corners->is_array()) {
+            for (Json& point : *corners) {  // (its corners go the same way)
+                if (!point.is_array() || point.size() != 2 || !point[0].is_number() || !point[1].is_number()) continue;
+                const auto [x, y] = more.apply(point[0].get<double>(), point[1].get<double>());
+                point = Json::array({x, y});
+            }
         }
     }
     m = core::smart::snapped(m);
     if (std::abs(m.det()) <= core::smart::kDetMin) throw OpError("the transform squashes the smart object flat");
     core::smart::set_matrix(layer, m);
     layer.smart->erase("psd");  // (PC3 A3: a PSD's picture and block no longer say where it is; drawn from its contents)
+    // (PC3 A5: its corners on the page — null: its matrix places it —, its warp in its contents' mm — null: none)
+    if (const Json* quad = core::get(c.op, "perspective"); quad != nullptr) {
+        if (quad->is_null()) {
+            core::smart::put_setting(layer, "perspective", Json());
+        } else {
+            if (!quad->is_array() || quad->size() != 4) throw OpError("perspective is the contents' four corners on the page [[x, y] × 4]");
+            core::smart::Corners corners;
+            for (std::size_t k = 0; k < 4; ++k) {
+                const Json& p = (*quad)[k];
+                if (!p.is_array() || p.size() != 2 || !p[0].is_number() || !p[1].is_number())
+                    throw OpError("perspective is the contents' four corners on the page [[x, y] × 4]");
+                corners[k] = {p[0].get<double>(), p[1].get<double>()};
+            }
+            try {
+                core::smart::set_corners(layer, *contents, corners);
+            } catch (const core::Error& error) {
+                throw OpError(error.what());
+            }
+        }
+    }
+    if (const Json* warp = core::get(c.op, "warp"); warp != nullptr) {
+        const auto [w, h] = core::smart::size_mm(*contents);
+        std::optional<core::page_geometry::Warp> kept;
+        if (!warp->is_null()) kept = layer_transform::warp_from_json(*warp, {0, 0, w, h});
+        core::smart::put_setting(layer, "warp", kept && !kept->is_identity() ? layer_transform::warp_to_json(*kept) : Json());
+    }
+    // (its filter mask moved as its corners moved: PC3 A5)
+    if (const auto moved = corners_moved(was, core::smart::corners_on_page(layer, *contents))) {
+        layer_transform::Map map;
+        map.kind = layer_transform::Map::Kind::Projective;
+        map.projective = *moved;
+        if (moved->is_affine()) map = layer_transform::affine_map({moved->m[0], moved->m[3], moved->m[1], moved->m[4], moved->m[2], moved->m[5]}, {});
+        layer_transform::move_filter_mask(doc, page, layer, map);
+    }
     if (const Json* interp = core::get(c.op, "interp"); interp != nullptr && !interp->is_null()) {
         const std::string name = core::py_str(*interp);
         if (std::find(core::smart::kInterps.begin(), core::smart::kInterps.end(), name) == core::smart::kInterps.end())

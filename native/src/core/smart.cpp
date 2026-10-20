@@ -16,8 +16,10 @@
 #include "core/ids.hpp"
 #include "core/ink.hpp"
 #include "core/ops_util.hpp"
+#include "core/page_geometry.hpp"
 #include "core/pyconv.hpp"
 #include "core/pyops.hpp"
+#include "core/vector.hpp"
 
 namespace genko::core::smart {
 
@@ -98,9 +100,92 @@ void each_page(const Document& doc, Each each) {
     }
 }
 
+// A point [x, y] of finite numbers.
+std::pair<double, double> point_at(const Json& point, const std::string& what) {
+    if (!point.is_array() || point.size() != 2) refuse(what + " is [x, y]");
+    return {finite(point[0], what), finite(point[1], what)};
+}
+
+// Only these keys.
+void known_keys(const std::string& who, const Json& object, std::initializer_list<std::string_view> keys) {
+    for (const auto& [key, value] : object.items()) {
+        if (std::find(keys.begin(), keys.end(), key) == keys.end()) refuse(who + ": the key " + py_repr_str(key) + " is not known to this build");
+    }
+}
+
+// The settings of a smart filter that bends the picture (PC3 A5), as far as core reads them: their keys and the shape of
+// their lists (render/smart_filters reads them through 節 C's own readers when it draws them).
+void check_bend(const std::string& who, std::string_view kind, const Json& params) {
+    const std::string what = who + "'s smart filter " + std::string(kind);
+    if (kind == "liquify") {
+        known_keys(what, params, {"strokes", "mesh_mm"});
+        const Json* strokes = get(params, "strokes");
+        if (strokes == nullptr || !strokes->is_array() || strokes->size() > 10000) refuse(what + ": strokes is a list of at most 10000");
+        std::size_t points = 0;
+        for (const Json& s : *strokes) {
+            if (!s.is_object()) refuse(what + ": a stroke is {tool, size_mm, density, pressure, rate, points, amount?}");
+            known_keys(what, s, {"tool", "size_mm", "density", "pressure", "rate", "points", "amount"});
+            if (const Json* tool = get(s, "tool"); tool != nullptr && !tool->is_string()) refuse(what + ": a stroke's tool is its name");
+            for (const char* key : {"size_mm", "density", "pressure", "rate", "amount"}) {
+                if (const Json* v = get(s, key); v != nullptr && !v->is_null()) (void)finite(*v, what + "'s " + key);
+            }
+            if (const Json* p = get(s, "points"); p != nullptr && !p->is_null()) {
+                if (!p->is_array()) refuse(what + ": a stroke's points are [[x, y, pressure?]…]");
+                for (const Json& q : *p) {
+                    if (!q.is_array() || q.size() < 2 || q.size() > 3) refuse(what + ": a stroke's points are [[x, y, pressure?]…]");
+                    for (const Json& v : q) (void)finite(v, what + "'s point");
+                }
+                points += p->size();
+            }
+        }
+        if (points > 1'000'000) refuse(what + ": at most a million points");
+        if (const Json* cell = get(params, "mesh_mm"); cell != nullptr && !cell->is_null() && !(finite(*cell, what + "'s mesh_mm") > 0))
+            refuse(what + ": mesh_mm is above 0");
+        return;
+    }
+    const auto interp = [&] {
+        const Json* v = get(params, "interp");
+        if (v != nullptr && !v->is_null() && (!v->is_string() || (*v != "nearest" && *v != "bilinear" && *v != "bicubic")))
+            refuse(what + ": interp is nearest, bilinear or bicubic");
+    };
+    if (kind == "perspective_warp") {
+        known_keys(what, params, {"planes", "interp"});
+        interp();
+        const Json* planes = get(params, "planes");
+        if (planes == nullptr || !planes->is_array() || planes->empty() || planes->size() > 64) refuse(what + ": planes is a list of 1 to 64");
+        for (const Json& plane : *planes) {
+            if (!plane.is_object()) refuse(what + ": a plane is {src, dst}");
+            known_keys(what, plane, {"src", "dst"});
+            for (const char* key : {"src", "dst"}) {
+                const Json* quad = get(plane, key);
+                if (quad == nullptr || !quad->is_array() || quad->size() != 4) refuse(what + ": a plane's " + key + " is four corners");
+                for (const Json& p : *quad) (void)point_at(p, what + "'s corner");
+            }
+        }
+        return;
+    }
+    known_keys(what, params, {"pins", "mode", "density", "expansion_mm", "interp"});
+    interp();
+    if (const Json* pins = get(params, "pins"); pins != nullptr && !pins->is_null()) {
+        if (!pins->is_array() || pins->size() > 1000) refuse(what + ": pins is a list of at most 1000");
+        for (const Json& pin : *pins) {
+            if (!pin.is_object() || get(pin, "src") == nullptr || get(pin, "dst") == nullptr) refuse(what + ": a pin is {src, dst, rotate?, depth?}");
+            known_keys(what, pin, {"src", "dst", "rotate", "depth"});
+            (void)point_at(pin["src"], what + "'s pin");
+            (void)point_at(pin["dst"], what + "'s pin");
+            if (const Json* r = get(pin, "rotate"); r != nullptr && !r->is_null()) (void)finite(*r, what + "'s pin rotate");
+            if (const Json* d = get(pin, "depth"); d != nullptr && !d->is_null() && !d->is_number_integer()) refuse(what + ": a pin's depth is a whole number");
+        }
+    }
+    for (const char* key : {"mode", "density"}) {
+        if (const Json* v = get(params, key); v != nullptr && !v->is_null() && !v->is_string()) refuse(what + ": " + key + " is its name");
+    }
+    if (const Json* e = get(params, "expansion_mm"); e != nullptr && !e->is_null()) (void)finite(*e, what + "'s expansion_mm");
+}
+
 // One smart filter as stored (PC3 A2): its keys, a kind a smart object can hold, its settings read as that kind reads them
 // where core reads them (the C++ build's own kinds and natives, Python's colour adjustments; the filters that move
-// shapes read theirs as they are drawn), its blend, opacity and visibility.
+// shapes read theirs as they are drawn; PC3 A5's that bend the picture, their shape), its blend, opacity and visibility.
 void check_filter(const std::string& who, const Json& f) {
     if (!f.is_object()) refuse(who + ": a smart filter is an object {kind, params, blend, opacity, visible}");
     for (const auto& [key, value] : f.items()) {
@@ -126,6 +211,10 @@ void check_filter(const std::string& who, const Json& f) {
         if (v < 0 || v > 1) refuse(who + ": a smart filter's opacity is 0 to 1");
     }
     if (const Json* visible = get(f, "visible"); visible != nullptr && !visible->is_boolean()) refuse(who + ": a smart filter's visible is true or false");
+    if (bend_filter(name)) {
+        check_bend(who, name, settings);
+        return;
+    }
     try {
         if (native_filter(name, settings)) {
             (void)normalize_filter(name, settings, nullptr);
@@ -176,22 +265,13 @@ void check_settings(const Layer& layer) {
     }
     if (const Json* corners = get(s, "perspective"); corners != nullptr && !corners->is_null()) {
         if (!corners->is_array() || corners->size() != 4) refuse(who + ": a smart object's perspective is its four corners [x, y]");
-        std::array<std::pair<double, double>, 4> p;
+        Corners p;
         for (std::size_t i = 0; i < 4; ++i) {
             const Json& point = (*corners)[i];
             if (!point.is_array() || point.size() != 2) refuse(who + ": a smart object's perspective is its four corners [x, y]");
             p[i] = {finite(point[0], who + "'s corner"), finite(point[1], who + "'s corner")};
         }
-        int sign = 0;
-        for (std::size_t i = 0; i < 4; ++i) {
-            const auto& [x0, y0] = p[i];
-            const auto& [x1, y1] = p[(i + 1) % 4];
-            const auto& [x2, y2] = p[(i + 2) % 4];
-            const double cross = (x1 - x0) * (y2 - y1) - (y1 - y0) * (x2 - x1);
-            const int s_here = cross > 1e-9 ? 1 : cross < -1e-9 ? -1 : 0;
-            if (s_here == 0 || (sign != 0 && s_here != sign)) refuse(who + ": a smart object's corners must make a convex shape");
-            sign = s_here;
-        }
+        if (!convex(p)) refuse(who + ": a smart object's corners must make a convex shape");
     }
     if (const Json* interp = get(s, "interp"); interp != nullptr) {
         if (!interp->is_string() || !in(kInterps, interp->get_ref<const std::string&>()))
@@ -215,7 +295,13 @@ void check_settings(const Layer& layer) {
         if (asset == nullptr || !asset->is_string() || !is_ref(asset->get_ref<const std::string&>())) refuse(who + ": a filter mask is an asset (sha256:…)");
         if (const Json* enabled = get(*mask, "enabled"); enabled != nullptr && !enabled->is_boolean()) refuse(who + ": a filter mask's enabled is true or false");
     }
-    if (const Json* warp = get(s, "warp"); warp != nullptr && !warp->is_null() && !warp->is_object()) refuse(who + ": a smart object's warp is an object");
+    if (const Json* warp = get(s, "warp"); warp != nullptr && !warp->is_null()) {
+        try {
+            check_warp(*warp);
+        } catch (const Error& error) {
+            refuse(who + ": " + error.what());
+        }
+    }
     if (const Json* psd = get(s, "psd"); psd != nullptr && !psd->is_null()) check_layer_psd(who, *psd);
     const bool drawn = layer.raster_png || layer.color_raster || layer.ink_raster || layer.stroke_count() > 0 || !layer.patches.empty() ||
                        (layer.fill && py_truthy(*layer.fill)) || (layer.adjust && py_truthy(*layer.adjust)) || (layer.tone && py_truthy(*layer.tone)) ||
@@ -278,8 +364,116 @@ void check_contents(const std::string& id, const SmartContents& c) {
 
 bool filter_kind(std::string_view kind) {
     if (std::find(kShapeFilters.begin(), kShapeFilters.end(), kind) != kShapeFilters.end()) return true;
+    if (bend_filter(kind)) return true;  // (PC3 A5)
     const AdjustKind* found = adjust_kind(kind);
     return found != nullptr && found->filter && found->smart;
+}
+
+bool bend_filter(std::string_view kind) { return std::find(kBendFilters.begin(), kBendFilters.end(), kind) != kBendFilters.end(); }
+
+bool bent(const Layer& layer) {
+    if (!layer.smart || !layer.smart->is_object()) return false;
+    for (const char* key : {"perspective", "warp"}) {
+        const Json* v = get(*layer.smart, key);
+        if (v != nullptr && !v->is_null()) return true;
+    }
+    return false;
+}
+
+Corners corners_on_page(const Layer& layer, const SmartContents& contents) {
+    const Json* quad = layer.smart && layer.smart->is_object() ? get(*layer.smart, "perspective") : nullptr;
+    Corners out;
+    if (quad != nullptr && quad->is_array() && quad->size() == 4) {
+        bool read = true;
+        for (std::size_t i = 0; i < 4 && read; ++i) {
+            const Json& p = (*quad)[i];
+            read = p.is_array() && p.size() == 2 && p[0].is_number() && p[1].is_number();
+            if (read) out[i] = {p[0].get<double>(), p[1].get<double>()};
+        }
+        if (read) return out;
+    }
+    const Matrix m = matrix_of(layer);
+    const auto [w, h] = size_mm(contents);
+    const std::array<std::pair<double, double>, 4> box{{{0, 0}, {w, 0}, {w, h}, {0, h}}};
+    for (std::size_t i = 0; i < 4; ++i) out[i] = m.apply(box[i].first, box[i].second);
+    return out;
+}
+
+bool convex(const Corners& p) {
+    int sign = 0;
+    for (std::size_t i = 0; i < 4; ++i) {
+        const auto& [x0, y0] = p[i];
+        const auto& [x1, y1] = p[(i + 1) % 4];
+        const auto& [x2, y2] = p[(i + 2) % 4];
+        const double cross = (x1 - x0) * (y2 - y1) - (y1 - y0) * (x2 - x1);
+        const int here = cross > 1e-9 ? 1 : cross < -1e-9 ? -1 : 0;
+        if (here == 0 || (sign != 0 && here != sign)) return false;
+        sign = here;
+    }
+    return true;
+}
+
+void set_corners(Layer& layer, const SmartContents& contents, const Corners& p) {
+    for (const auto& [x, y] : p) {
+        if (!std::isfinite(x) || !std::isfinite(y)) refuse("a smart object's corners must be finite numbers");
+    }
+    if (!convex(p)) refuse("a smart object's corners must make a convex shape");
+    const auto [w, h] = size_mm(contents);
+    // (the matrix through the top left, top right and bottom left corners)
+    const Matrix m = snapped(Matrix{(p[1].first - p[0].first) / w, (p[1].second - p[0].second) / w, (p[3].first - p[0].first) / h,
+                                    (p[3].second - p[0].second) / h, p[0].first, p[0].second});
+    if (!(std::abs(m.det()) > kDetMin)) refuse("the transform squashes the smart object flat");
+    double size = 1;
+    for (const auto& [x, y] : p) size = std::max({size, std::abs(x), std::abs(y)});
+    const double gap = std::max(std::abs(p[0].first + p[2].first - p[1].first - p[3].first), std::abs(p[0].second + p[2].second - p[1].second - p[3].second));
+    set_matrix(layer, m);
+    if (gap <= 1e-9 * size) {
+        put_setting(layer, "perspective", Json());
+    } else {
+        Json corners = Json::array();
+        for (const auto& [x, y] : p) corners.push_back(Json::array({x, y}));
+        put_setting(layer, "perspective", std::move(corners));
+    }
+    put_setting(layer, "psd", Json());  // (PC3 A3: a PSD's picture and corners are no longer where it is)
+}
+
+void check_warp(const Json& warp) {
+    if (!warp.is_object()) refuse("a smart object's warp is {style, bend, h_distort, v_distort, vertical, bounds, mesh?}");
+    known_keys("its warp", warp, {"style", "bend", "h_distort", "v_distort", "vertical", "bounds", "mesh"});
+    const Json* style = get(warp, "style");
+    const auto found = style != nullptr && style->is_string() ? page_geometry::warp_style_from(style->get<std::string>()) : std::nullopt;
+    if (!found) refuse("a smart object's warp has a style (none, custom, arc, arcLower, …)");
+    for (const char* key : {"bend", "h_distort", "v_distort"}) {
+        const Json* v = get(warp, key);
+        if (v == nullptr || v->is_null()) continue;
+        const double x = finite(*v, std::string("its warp's ") + key);
+        if (x < -100 || x > 100) refuse(std::string("its warp's ") + key + " is −100 to 100");
+    }
+    if (const Json* v = get(warp, "vertical"); v != nullptr && !v->is_null() && !v->is_boolean()) refuse("its warp's vertical is true or false");
+    const Json* b = get(warp, "bounds");
+    if (b == nullptr || !b->is_array() || b->size() != 4) refuse("its warp's bounds are [x0, y0, x1, y1]");
+    std::array<double, 4> box{};
+    for (std::size_t i = 0; i < 4; ++i) box[i] = finite((*b)[i], "its warp's bounds");
+    if (!(box[2] > box[0] && box[3] > box[1])) refuse("its warp's bounds have no size");
+    const Json* mesh = get(warp, "mesh");
+    if (mesh == nullptr || mesh->is_null()) return;
+    if (*found != page_geometry::WarpStyle::Custom) refuse("only a custom warp has a mesh");
+    if (!mesh->is_object()) refuse("its warp's mesh is {us, vs, points}");
+    known_keys("its warp's mesh", *mesh, {"us", "vs", "points"});
+    page_geometry::BezierMesh bm;
+    for (const auto& [key, list] : {std::pair{"us", &bm.us}, std::pair{"vs", &bm.vs}}) {
+        const Json* k = get(*mesh, key);
+        if (k == nullptr || !k->is_array() || k->size() > 65) refuse("its warp's mesh's us and vs are 2 to 65 numbers from 0 to 1");
+        for (const Json& x : *k) list->push_back(finite(x, "its warp's mesh"));
+    }
+    const Json* points = get(*mesh, "points");
+    if (points == nullptr || !points->is_array()) refuse("its warp's mesh has its points");
+    for (const Json& p : *points) {
+        const auto [x, y] = point_at(p, "its warp's mesh's point");
+        if (std::abs(x) > vector::kCoordinateMax || std::abs(y) > vector::kCoordinateMax) refuse("its warp's mesh's points are too far");
+        bm.points.push_back(vector::XY{x, y});
+    }
+    if (!bm.valid()) refuse("its warp's mesh needs (3·columns + 1) × (3·rows + 1) points and its us and vs from 0 to 1, rising");
 }
 
 bool filters_drawn(const Layer& layer) {

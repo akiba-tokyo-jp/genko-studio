@@ -9,6 +9,7 @@
 #include <cmath>
 
 #include "core/ink.hpp"
+#include "core/page_geometry.hpp"
 #include "render/psd_descriptor.hpp"
 
 namespace genko::render::psd {
@@ -176,10 +177,29 @@ descriptor::Writer warp_writer(const std::optional<Json>& warp, double width, do
     w.integer("vOrder", 4);
     if (style == "custom" && warp && warp->contains("mesh") && (*warp)["mesh"].contains("points")) {
         std::vector<double> xs, ys;
-        for (const Json& point : (*warp)["mesh"]["points"]) {
+        const Json& mesh = (*warp)["mesh"];
+        core::page_geometry::BezierMesh patches;
+        for (const auto& [key, list] : {std::pair{"us", &patches.us}, std::pair{"vs", &patches.vs}}) {
+            if (!mesh.contains(key) || !mesh[key].is_array()) continue;
+            for (const Json& v : mesh[key])
+                if (v.is_number()) list->push_back(v.get<double>());
+        }
+        for (const Json& point : mesh["points"]) {
             if (!point.is_array() || point.size() != 2) continue;
             xs.push_back(point[0].get<double>());
             ys.push_back(point[1].get<double>());
+            patches.points.push_back(core::vector::XY{point[0].get<double>(), point[1].get<double>()});
+        }
+        if (patches.valid() && (patches.us.size() > 2 || patches.vs.size() > 2)) {
+            // (PC3 A5: a warp split into patches as Photoshop's one patch of 4 × 4 points fitted to it — its split form,
+            // quiltWarp, is not one this build can check against Photoshop)
+            const auto one = core::page_geometry::BezierMesh::fit([&patches](double s, double t) { return patches.eval(s, t); }, {0, 1}, {0, 1});
+            xs.clear();
+            ys.clear();
+            for (const core::vector::XY& p : one.points) {
+                xs.push_back(p.x);
+                ys.push_back(p.y);
+            }
         }
         descriptor::Writer envelope;
         envelope.object_array("meshPoints", static_cast<std::uint32_t>(xs.size()), "rationalPoint", {{"Hrzn", xs}, {"Vrtc", ys}}, "#Pxl");

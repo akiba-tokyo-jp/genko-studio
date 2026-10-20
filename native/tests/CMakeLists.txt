@@ -176,6 +176,11 @@ genko_test(test_psd_smart SOURCES unit/test_psd_smart.cpp DEPS genko_test_suppor
 # the three ways (the median taking the passer-by out), a folder, hidden layers, a part the whole cut there, a file one
 # layer, rasterized; rasterize_lines drawing the lines as the page drew them; a tone rasterized on precise and ink pages.
 genko_test(test_smart_stack SOURCES unit/test_smart_stack.cpp DEPS genko_test_support genko_render_ops genko_formats LABELS unit TIMEOUT 900)
+# PC3 A5 (SPEC.md COLOR-05「スマートオブジェクトの上の変形」): a smart object's warp kept in its contents' mm and undone
+# without loss (PhotoCraft's smart_object_warp_is_lossless), a new warp in place of the old, a quad its corners, perspective
+# and puppet warps and Liquify its smart filters (as the ops bend a paint layer; set again), its filter mask moved with it,
+# the three ways and a part the whole cut there, its warp to a PSD and back, what a reader refuses.
+genko_test(test_smart_warp SOURCES unit/test_smart_warp.cpp DEPS genko_test_support genko_render_ops genko_formats LABELS unit TIMEOUT 900)
 
 # core/pyre's own bounds (Python 3.12's re, ported; SPEC COMP-01a): a search that backtracks without end stopped when its
 # steps are spent, groups more than 200 deep refused, replace_text refused without a change; without Python.

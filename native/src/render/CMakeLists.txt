@@ -127,6 +127,8 @@ genko_library(genko_render
     own_pixels.cpp
     layer_transform.cpp
     distort_ops.cpp
+    # PC3 A5 (スマートオブジェクトの上の変形: ゆがみ・遠近法ワープ・パペットワープのスマートフィルター)
+    smart_bends.cpp
     ${GENKO_MATERIAL_RESOURCES}
     ${GENKO_TEXT_RESOURCES}
   PUBLIC_DEPS genko_core Qt6::Core

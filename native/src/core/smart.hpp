@@ -21,9 +21,8 @@
 // A layer's "smart" (in this order, kSettingKeys): {"contents": "sc_…", "matrix": [a, b, c, d, e, f], "interp": …}, its
 // stack mode (PC3 A4: "stack", one of kStackModes), its smart filters (PC3 A2: "filters", "filters_on", "filter_mask"),
 // what a PSD's placed layer keeps (PC3 A3: "psd" — {"block", "raw", "shown"?}: its block written back, Photoshop's picture
-// shown until the smart object changes) and what later steps of PC3 add to it — "perspective" (the contents' four corners
-// on the page), "warp" — which this build keeps as they
-// are and does not draw yet (NotYetPorted names them: render/smart.cpp).
+// shown until the smart object changes) and its own bend (PC3 A5) — "perspective" (the contents' box's four corners on the
+// page, in place of the matrix) and "warp" (節 C's warp in the contents' mm, before the matrix or the corners).
 
 namespace genko::core {
 
@@ -101,6 +100,12 @@ inline constexpr std::array<std::string_view, 5> kFilterKeys{"kind", "params", "
 bool filter_kind(std::string_view kind);
 // Are the smart object's filters drawn: on, and one of them shown?
 bool filters_drawn(const Layer& layer);
+// PC3 A5: the smart filters that bend the picture — 節 C's Liquify (its strokes), Perspective Warp (its planes) and Puppet
+// Warp (its pins), kept with their settings in the page's mm and drawn again on the picture below them each time
+// (render/smart_filters; PhotoCraft keeps them so, engine/src/distort_cmds.rs:233-272). Their settings: {"strokes",
+// "mesh_mm"?}, {"planes", "interp"?}, {"pins", "mode", "density", "expansion_mm", "interp"?}.
+inline constexpr std::array<std::string_view, 3> kBendFilters{"liquify", "perspective_warp", "puppet_warp"};
+bool bend_filter(std::string_view kind);
 
 // A layer of kind smart, its contents' id (nothing when its settings name none), its matrix (the identity when none).
 bool is_smart(const Layer& layer);
@@ -116,6 +121,22 @@ Json settings(const std::string& contents, const Matrix& m, std::string_view int
 const SmartContents* contents_of(const Document& doc, const Layer& layer);
 // The contents' own size in mm: a page's paper, a file's pixels at its dpi.
 std::pair<double, double> size_mm(const SmartContents& contents);
+
+// PC3 A5: is the smart object drawn through more than its matrix — a warp, or corners of its own?
+bool bent(const Layer& layer);
+// The contents' box's four corners on the page (top left, top right, bottom right, bottom left): its perspective, else
+// its matrix's. Corners make a convex shape when each turns the same way.
+using Corners = std::array<std::pair<double, double>, 4>;
+Corners corners_on_page(const Layer& layer, const SmartContents& contents);
+bool convex(const Corners& corners);
+// Corners given to a smart object: a parallelogram (within 1e-9 of their size) is its matrix exactly and no corners;
+// any other its perspective, its matrix the one through three of them (top left, top right, bottom left). A PSD's record
+// let go. core::Error("value") for corners that cross or squash it.
+void set_corners(Layer& layer, const SmartContents& contents, const Corners& corners);
+// A smart object's warp as it is kept ({"style", "bend", "h_distort", "v_distort", "vertical", "bounds": [x0, y0, x1,
+// y1], "mesh"?: {"us", "vs", "points"}}, the contents' mm), checked: a known style, its numbers −100..100, its bounds a
+// box, a custom one's mesh of bicubic patches well formed (at most 64 a side). core::Error("value").
+void check_warp(const Json& warp);
 
 // The JSON of a file's contents ({"kind": "file", "name", "asset", "suffix", "format", "size_px", "dpi", "depth", "mode",
 // "profile", "link"?, "psd"?}) and back, checked (core::Error("value")); a page's contents ({"kind": "page", "name",

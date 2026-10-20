@@ -27,7 +27,11 @@
 // inks plate by plate where the contents are the page's own colours moved by whole pixels (else the 8-bit stack); a file
 // is one layer. Smart filters (A2, render/smart_filters) work the laid picture.
 //
-// What later steps of PC3 add — perspective and warp (A5) — is not drawn yet: NotYetPorted("smart:<what>").
+// A bent smart object (PC3 A5: its warp in its contents' mm, its corners on the page in place of its matrix) is drawn
+// from its contents through that placing in one resampling (render/resample: corners alone a homography, a warp its
+// mesh), at the resolution where it lands most enlarged; on a page in precise colour a file of more than 8 bits keeps its
+// bits through it, anything else bent is laid as an 8-bit picture (on a page of inks, by the page's rules). Settings this
+// build cannot read (a book changed by hand) leave it out, said (NotYetPorted("smart:warp"), "smart:perspective").
 
 namespace genko::render {
 struct ColorPicture;

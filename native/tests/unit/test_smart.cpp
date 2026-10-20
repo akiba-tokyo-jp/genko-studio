@@ -3,7 +3,7 @@
 // a book without them the bytes it had), what validate_smart refuses (contents that show themselves, too deep, a matrix
 // that squashes them flat, a key not known, pixels drawn on a smart object), an op sent into contents ("contents": the
 // contents' page changes, the page showing it is asked its lock, what cannot be done there refused), and the ops of A0:
-// smart_convert, smart_place, smart_copy, smart_transform, smart_profile, rasterize_layer, the later steps refused by name,
+// smart_convert, smart_place, smart_copy, smart_transform (its corners and warp set as kept: PC3 A5), smart_profile, rasterize_layer,
 // a picture's smart object going with its panel as placed art does.
 
 #include <QtTest>
@@ -323,21 +323,24 @@ private slots:
         QVERIFY(refused(doc, Json::array({Json{{"op", "smart_profile"}, {"page", 1}, {"id", "so1"}, {"embedded_profile", "keep"}}}), "a page, not a file"));
     }
 
-    void laterStepsAreRefusedByName() {
+    // (the later steps' ops are written: A1's — smart_replace, smart_relink, smart_update, smart_embed, smart_link,
+    // smart_to_page — test_smart_contents; A2's smart_filter_*: test_smart_filters; A4's smart_stack and rasterize_lines:
+    // test_smart_stack; A5's perspective and warp of smart_transform, drawn: test_smart_warp) — here smart_transform sets
+    // them as they are kept, and refuses them malformed.
+    void cornersAndWarpAreSet() {
         const Document doc = run(painted(), Json::array({Json{{"op", "smart_convert"}, {"page", 1}, {"id", "p1"}, {"new_id", "so1"}}}));
-        // (A1's — smart_replace, smart_relink, smart_update, smart_embed, smart_link, smart_to_page — are written:
-        // test_smart_contents; A2's smart_filter_*: test_smart_filters; A4's smart_stack and rasterize_lines:
-        // test_smart_stack. A5's perspective and warp of smart_transform are left.)
-        for (const char* later : {"perspective", "warp"}) {
-            try {
-                (void)applied(doc, Json::array({Json{{"op", "smart_transform"}, {"page", 1}, {"id", "so1"}, {later, Json::object({{"x", 1}})}}}));
-                QFAIL(later);
-            } catch (const ApplyError& error) {
-                QCOMPARE(error.code(), std::string("not_yet_ported"));
-                QVERIFY2(QString::fromUtf8(error.what()).contains(QString::fromLatin1(later)) && QString::fromUtf8(error.what()).contains(QStringLiteral("PC3 A5")),
-                         error.what());
-            }
-        }
+        const Json corners = Json::array({Json::array({1, 2}), Json::array({90, 0}), Json::array({100, 120}), Json::array({0, 100})});
+        const Document cornered = run(doc, Json::array({Json{{"op", "smart_transform"}, {"page", 1}, {"id", "so1"}, {"perspective", corners}}}));
+        QCOMPARE((*layer_of(cornered.page(0), "so1")->smart)["perspective"], corners);
+        core::smart::validate_smart(cornered);
+        const Json warp{{"style", "arc"}, {"bend", 30}, {"bounds", Json::array({0, 0, 50, 50})}};
+        const Document warped = run(doc, Json::array({Json{{"op", "smart_transform"}, {"page", 1}, {"id", "so1"}, {"warp", warp}}}));
+        QCOMPARE((*layer_of(warped.page(0), "so1")->smart)["warp"]["style"], Json("arc"));
+        QCOMPARE((*layer_of(warped.page(0), "so1")->smart)["warp"]["bend"], Json(30.0));
+        core::smart::validate_smart(warped);
+        QVERIFY(refused(doc, Json::array({Json{{"op", "smart_transform"}, {"page", 1}, {"id", "so1"}, {"warp", Json::object({{"x", 1}})}}}), "warp"));
+        QVERIFY(refused(doc, Json::array({Json{{"op", "smart_transform"}, {"page", 1}, {"id", "so1"}, {"perspective", Json::object({{"x", 1}})}}}),
+                        "perspective"));
     }
 
     void aPicturesSmartObjectGoesWithItsPanel() {
