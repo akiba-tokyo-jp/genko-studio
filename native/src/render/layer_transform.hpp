@@ -59,8 +59,8 @@ struct Map {
 
 Map affine_map(const core::vector::Affine& m, const std::array<double, 4>& box);
 
-// The box (x0, y0, x1, y1 mm, on the working 200 dpi grid) of what the layers show, each drawn alone at 200 dpi (its
-// panel clip and mask as drawn); none when they show nothing.
+// The box (x0, y0, x1, y1 mm, on the page's working grid: layer_bounds::grid, the Move tool's) of what the layers show,
+// each drawn alone at 200 dpi (its panel clip and mask as drawn); none when they show nothing.
 std::optional<std::array<double, 4>> content_box(const core::Document& doc, const core::Page& page, const std::vector<std::string>& ids);
 
 // The layers an op names (`ids`, page order), with the folders' layers inside them and the layers linked to any of them

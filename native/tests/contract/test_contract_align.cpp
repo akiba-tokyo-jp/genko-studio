@@ -22,7 +22,9 @@
 #include "core/json.hpp"
 #include "render/image.hpp"
 #include "render/layer_bounds.hpp"
+#include "render/layer_transform.hpp"
 #include "render/ops_registry.hpp"
+#include "render/page.hpp"
 #include "render/png.hpp"
 #include "render/raster.hpp"
 #include "storage/asset_store.hpp"
@@ -361,6 +363,64 @@ private slots:
         QVERIFY(layer_of(locked, "paint").lock_position);
         QVERIFY(refusal(locked, Json{{"op", "transform_layers"}, {"page", 1}, {"ids", ids({"paint"})}, {"move", Json::array({1, 0})}}).find("position") != std::string::npos);
         QVERIFY(!layer_of(run(locked, Json{{"op", "set_layers"}, {"page", 1}, {"ids", ids({"paint", "pen"})}, {"lock_position", false}}), "paint").lock_position);
+    }
+
+    // (independent review A P2-3) Auto-Select draws each layer only around the point — a few working pixels, and as far
+    // as its effects reach — and answers as the whole layer drawn says: a mask, a panel's clip, an outline drawn round a
+    // picture, a pen line, a shape part, a tone, a fill.
+    void autoSelectDrawsOnlyAroundThePoint() {
+        core::Document doc = run(book(true), Json{{"op", "set_layer"}, {"page", 1}, {"id", "paint"}, {"effect", Json{{"border", Json{{"width_mm", 1.0}}}}}});
+        doc = run(doc, Json{{"op", "set_layer_mask"}, {"page", 1}, {"id", "paint"}, {"area", Json{{"rect", Json::array({0, 0, 9, 25.4})}}}});
+        doc = run(doc, Json{{"op", "add_layer"}, {"page", 1}, {"kind", "pen"}, {"id", "shapes"}, {"panel_each", false}});
+        doc = run(doc, Json{{"op", "add_shape_part"}, {"page", 1}, {"layer_id", "shapes"}, {"id", "r1"},
+                            {"shape", Json{{"kind", "rect"}, {"rect", Json::array({2, 12, 4, 4})}}}, {"fill", Json{{"rgb", Json::array({0, 0, 0})}}}});
+        doc = run(doc, Json{{"op", "add_tone"}, {"page", 1}, {"id", "tn"}, {"density", 0.5}, {"area", Json{{"rect", Json::array({12, 14, 6, 4})}}}});
+        const auto whole = [&](double x, double y) {  // (each layer drawn whole, as Auto-Select drew it before)
+            std::vector<std::string> out;
+            const auto& layers = doc.page(0).layers;
+            for (auto it = layers.rbegin(); it != layers.rend(); ++it) {
+                if (!it->visible || it->kind == core::LayerKind::Folder || it->kind == core::LayerKind::Adjust) continue;
+                core::Layer shown = *it;
+                shown.opacity = 1.0;
+                const render::Image picture = render::layer_image(doc.page(0), shown, lb::kDpi, &doc, true);
+                const auto g = lb::grid(doc.page(0));
+                const int px = static_cast<int>(std::floor(x * g[0])), py = static_cast<int>(std::floor(y * g[1]));
+                if (px < 0 || py < 0 || px >= picture.width() || py >= picture.height()) continue;
+                if (picture.mode() != "RGBA" || picture.getpixel(px, py).back() > 0) out.push_back(it->id);
+            }
+            return out;
+        };
+        int checked = 0;
+        for (double y = 0.3; y < kInch; y += 1.1) {
+            for (double x = 0.2; x < kInch; x += 0.9) {
+                QCOMPARE(lb::layers_at(doc, doc.page(0), x, y), whole(x, y));
+                ++checked;
+            }
+        }
+        QVERIFY(checked > 500);
+        // (each layer a few pixels round the point, never the page: the outline's reach at most)
+        const std::uint64_t before = lb::pixels_drawn();
+        (void)lb::layers_at(doc, doc.page(0), 6, 9);
+        const std::uint64_t drawn = lb::pixels_drawn() - before;
+        QVERIFY2(drawn <= std::uint64_t(doc.page(0).layers.size()) * 80 * 80, qPrintable(QString::number(drawn)));
+    }
+
+    // (independent review A P3-1) The box Free Transform starts from is the box the Move tool aligns and snaps by: the
+    // page's working grid, on a paper that is no whole number of 0.127 mm too.
+    void theTransformBoxIsOnThePagesGrid() {
+        auto doc = core::new_episode("整列", core::Num(1), 1, core::PageSpec::custom(182, 257, 160, 230, 3, 10, 10, 10, 10, 200, "color"));
+        auto& p = doc.edit_page(0);
+        p.frames.clear();
+        p.layers.clear();
+        const int w = render::mm_to_px(182, lb::kDpi), h = render::mm_to_px(257, lb::kDpi);
+        std::string bytes(std::size_t(w) * h * 4, '\0');
+        for (int y = h - 300; y < h - 20; ++y)
+            for (int x = w - 400; x < w; ++x) bytes[(std::size_t(y) * w + x) * 4 + 3] = static_cast<char>(255);
+        add_paint(doc, "edge", render::Image::frombytes("RGBA", render::Size{w, h}, bytes));
+        const lb::Box moved = *lb::of_layer(doc, doc.page(0), "edge");
+        const auto transformed = render::layer_transform::content_box(doc, doc.page(0), {"edge"});
+        QVERIFY(transformed.has_value());
+        for (std::size_t i = 0; i < 4; ++i) QVERIFY2(std::fabs((*transformed)[i] - moved[i]) < 1e-9, qPrintable(QStringLiteral("%1: %2 / %3").arg(i).arg((*transformed)[i], 0, 'g', 12).arg(moved[i], 0, 'g', 12)));
     }
 
     // Through the command line: saved (transform@1 named), undone; inspect --at.

@@ -2614,6 +2614,41 @@ Image layer_image(const core::Page& page, const core::Layer& layer, int dpi, con
     return colored(masked(ctx, layer, layer_effects(layer, std::move(*raster), dpi), area));
 }
 
+Image layer_image_over(const core::Page& page, const core::Layer& layer, int dpi, const Box& asked, const core::Document* episode,
+                       bool skip_unported_flag) {
+    std::vector<std::string> omitted;
+    Ctx ctx;
+    ctx.page = &page;
+    ctx.episode = episode;
+    ctx.dpi = dpi;
+    ctx.mode = "proof";
+    ctx.skip_unported = skip_unported_flag;
+    ctx.omitted = &omitted;
+    ctx.size = Size{mm_to_px(page.spec.width_mm.value(), dpi), mm_to_px(page.spec.height_mm.value(), dpi)};
+    const Box area = intersection(asked, Box{0, 0, ctx.size.width, ctx.size.height});
+    if (area.width() <= 0 || area.height() <= 0) return transparent(Box{0, 0, 0, 0});
+    Image empty = transparent(area);
+    if (layer.kind == LayerKind::Folder || layer.kind == LayerKind::Adjust) return empty;
+    if (is_tone(layer)) {  // (as layer_image: the tone's ink as alpha, drawn on white)
+        const Image white = Image::create("RGBA", size_of(area), Ink{255, 255, 255, 255});
+        const std::optional<Image> panels = clip_mask(page, ctx.size, dpi, area);
+        const Image drawn = tones::draw_layer(white, layer, tone_page(ctx), area, panels ? &*panels : nullptr, false);
+        Image out = Image::create("RGBA", size_of(area), Ink{20, 20, 20, 0});
+        out.putalpha(chops::difference(white.convert("L"), drawn.convert("L")));
+        return masked(ctx, layer, std::move(out), area);
+    }
+    const std::optional<Image> panel_mask = clip_mask(page, ctx.size, dpi, area);
+    if (layer.kind == LayerKind::Fill && truthy_json(layer.fill)) {
+        Image raster = fill_layer_image(layer, ctx.size, dpi, page.spec.expression != "color", area);
+        if (panel_mask && layer.panel_clip) raster.putalpha(chops::multiply(alpha_of(raster), *panel_mask));
+        return masked(ctx, layer, std::move(raster), area);
+    }
+    // (its effects over what they reach into the part from: layer_with_effects, as a part of the page draws them)
+    std::optional<Image> raster = layer_with_effects(ctx, layer, area, panel_mask ? &*panel_mask : nullptr, false);
+    if (!raster) return empty;
+    return masked(ctx, layer, std::move(*raster), area);
+}
+
 Image tone_mask(const core::Page& page, const core::Layer& layer, Size size, int dpi) {
     const tones::Page p{&page, dpi, size, [dpi](Image& out, const Box& box, const core::Patch& patch) { paint_patch(out, box, patch, dpi, nullptr); }};
     return tones::mask(layer, p);

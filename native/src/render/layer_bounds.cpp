@@ -1,6 +1,7 @@
 #include "render/layer_bounds.hpp"
 
 #include <algorithm>
+#include <atomic>
 #include <cmath>
 #include <set>
 
@@ -28,7 +29,11 @@ const Layer* find(const Page& page, const std::string& id) {
 
 bool in_folder(const Layer& layer, const std::string& folder) { return layer.parent_id.is_string() && layer.parent_id.get<std::string>() == folder; }
 
+std::atomic<std::uint64_t> g_drawn{0};
+
 }  // namespace
+
+std::uint64_t pixels_drawn() { return g_drawn.load(); }
 
 std::vector<std::string> inside(const Page& page, const std::string& folder) {
     std::set<std::string> held{folder};
@@ -89,9 +94,13 @@ bool shows_at(const core::Document& doc, const Page& page, const Layer& layer, d
     if (x < 0 || y < 0) return false;
     Layer shown = layer;
     shown.opacity = 1.0;
-    const Image picture = layer_image(page, shown, kDpi, &doc, true);
-    if (x >= picture.width() || y >= picture.height()) return false;
-    const std::vector<double> px = picture.getpixel(x, y);
+    // (the layer drawn round the point only — the same pixel as the whole layer drawn there: independent review A P2-3)
+    const render::Box around{std::max(0, x - 1), std::max(0, y - 1), x + 2, y + 2};
+    const Image picture = layer_image_over(page, shown, kDpi, around, &doc, true);
+    g_drawn += std::uint64_t(picture.width()) * std::uint64_t(picture.height());
+    const int ix = x - around.x0, iy = y - around.y0;
+    if (ix >= picture.width() || iy >= picture.height()) return false;
+    const std::vector<double> px = picture.getpixel(ix, iy);
     const std::string_view mode = picture.mode();
     if (mode == "RGBA" || mode == "LA" || mode == "La" || mode == "RGBa") return !px.empty() && px.back() > 0;
     return true;  // (a picture without alpha covers the page)

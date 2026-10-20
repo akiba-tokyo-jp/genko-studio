@@ -1,6 +1,7 @@
 #pragma once
 
 #include <array>
+#include <cstdint>
 #include <optional>
 #include <string>
 #include <vector>
@@ -37,6 +38,8 @@ Box of_line(const core::StoryLine& line);
 std::vector<std::string> layers_at(const core::Document& doc, const core::Page& page, double x_mm, double y_mm);
 // Does the layer show something at the point (as layers_at asks it)?
 bool shows_at(const core::Document& doc, const core::Page& page, const core::Layer& layer, double x_mm, double y_mm);
+// How many pixels shows_at has drawn (tests).
+std::uint64_t pixels_drawn();
 // Auto-Select's グループ: the outermost folder the layer is in (the layer itself when it is in none).
 std::string outermost(const core::Page& page, const std::string& id);
 // The layers inside a folder, every depth (page order).
