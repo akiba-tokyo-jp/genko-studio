@@ -2637,7 +2637,9 @@
         "native/tests/gui/test_gui_clipboard.cpp",
         "native/tests/gui/test_gui_select.cpp",
         "native/tests/unit/test_masks.cpp",
-        "native/tests/unit/test_color_raster_edit.cpp"
+        "native/tests/unit/test_color_raster_edit.cpp",
+        "native/src/render/ink_edit.cpp",
+        "native/tests/unit/test_ink_edit.cpp"
       ],
       "pc0": {
         "date": "2026-10-16",
@@ -27383,7 +27385,8 @@
         "native/src/app/channel_panel.cpp",
         "native/tests/unit/test_select_color.cpp",
         "native/tests/contract/test_contract_select.cpp",
-        "native/tests/gui/test_gui_select.cpp"
+        "native/tests/gui/test_gui_select.cpp",
+        "native/src/app/main_window_channels.cpp"
       ],
       "pc0": {
         "date": "2026-10-16",
