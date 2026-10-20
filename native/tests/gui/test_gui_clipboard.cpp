@@ -17,13 +17,16 @@
 #include <QMenuBar>
 #include <QMimeData>
 #include <QSpinBox>
+#include <cmath>
 #include "gui_support.hpp"
 #include "app/canvas.hpp"
 #include "app/inject.hpp"
 #include "app/main_window.hpp"
+#include "core/base64.hpp"
 #include "core/color_raster.hpp"
 #include "core/command_bus.hpp"
 #include "render/image.hpp"
+#include "render/page.hpp"
 #include "render/png.hpp"
 using namespace genko;
 using core::Json;
@@ -285,6 +288,63 @@ private slots:
         QCOMPARE(view.metadata("")["precision"], Json("u16"));
         const auto p = view.pixel(std::size_t(view.height() / 3) * view.width() + view.width() / 3);  // (20, 20 mm: inside)
         QVERIFY2(std::abs(p[1] - 40000 / 65535.0) < 1e-6 && p[3] == 1, qPrintable(QString::number(p[1])));
+    }
+
+    // A selection's anti-aliased edge and feather in a cut (and Ctrl+Shift+J): what is lifted is what is cleared — over
+    // the grey band, the part left on the layer and the part pasted back in place add up to what was there (8 bits and
+    // 16 bits).
+    void cutKeepsTheSelectionsGrey_data() {
+        QTest::addColumn<bool>("deep");
+        QTest::addColumn<bool>("via");
+        QTest::newRow("8 bits, cut") << false << false;
+        QTest::newRow("8 bits, Ctrl+Shift+J") << false << true;
+        QTest::newRow("16 bits, cut") << true << false;
+    }
+    void cutKeepsTheSelectionsGrey() {
+        QFETCH(bool, deep);
+        QFETCH(bool, via);
+        Studio studio;
+        const int side = static_cast<int>(std::lround(60 * 200 / 25.4));
+        if (deep) {
+            Json pixels = Json::array();
+            for (int i = 0; i < side * side; ++i)
+                for (const std::int64_t v : {std::int64_t{1000}, std::int64_t{40000}, std::int64_t{65535}, std::int64_t{65535}}) pixels.push_back(v);
+            QVERIFY(studio.window->apply_ops(Json::array({Json{{"op", "set_color_mode"}, {"page", 1}, {"mode", "rgb"}, {"depth", 16}},
+                                                          Json{{"op", "put_color_raster"}, {"page", 1}, {"width", side}, {"height", side}, {"precision", "u16"},
+                                                               {"pixels", pixels}}})));
+        } else {
+            const render::Image grey = render::Image::create("RGBA", render::Size{side, side}, render::Ink({90, 120, 150, 255}));
+            QVERIFY(studio.window->apply_ops(Json::array({Json{{"op", "add_layer"}, {"page", 1}, {"kind", "paint"}, {"id", "pic"}, {"name", "絵"}},
+                                                          Json{{"op", "put_raster"}, {"page", 1}, {"id", "pic"}, {"png_base64", core::b64encode(render::write_png(grey))}}})));
+        }
+        const std::string source = studio.page().layers.back().id;
+        studio.window->set_target_layer(source);
+        const Json square = Json::array({Json::array({10.0, 10.0}), Json::array({40.0, 10.0}), Json::array({40.0, 40.0}), Json::array({10.0, 40.0})});
+        studio.canvas()->set_selection(Json{{"poly", square}, {"antialias", true}, {"feather_mm", 3.0}});
+        const auto count = studio.page().layers.size();
+        if (via) {
+            studio.trigger("act_layer_via_cut");
+        } else {
+            studio.trigger("act_cut");
+            studio.trigger("act_paste_in_place");
+        }
+        QCOMPARE(studio.page().layers.size(), count + 1);
+        const core::Layer* pasted = studio.window->target_layer();
+        QVERIFY(pasted != nullptr && pasted->id != source);
+        const core::Document& doc = studio.session->document();
+        const render::Image left = render::layer_image(studio.page(), *studio.layer(source), 200, &doc).getchannel(3);
+        const render::Image moved = render::layer_image(studio.page(), *pasted, 200, &doc).getchannel(3);
+        const auto at = [](const render::Image& alpha, double x_mm, double y_mm) {
+            return alpha.getpixel(static_cast<int>(x_mm * 200 / 25.4), static_cast<int>(y_mm * 200 / 25.4))[0] / 255.0;
+        };
+        // (inside and outside the edge, within the feather; well inside; well outside)
+        for (const auto& [x, y] : {std::pair{39.0, 25.0}, std::pair{41.0, 25.0}, std::pair{42.5, 25.0}, std::pair{25.0, 38.5}, std::pair{25.0, 41.5},
+                                   std::pair{25.0, 25.0}, std::pair{50.0, 25.0}}) {
+            const double kept = at(left, x, y), lifted = at(moved, x, y);
+            QVERIFY2(std::abs(kept + lifted - 1.0) < 0.05, qPrintable(QStringLiteral("(%1, %2): %3 + %4").arg(x).arg(y).arg(kept).arg(lifted)));
+        }
+        QVERIFY(at(moved, 41.0, 25.0) > 0.1);  // (the feather outside the polygon: lifted too)
+        QVERIFY(at(left, 39.0, 25.0) > 0.1);   // (the feather inside it: partly left)
     }
 };
 

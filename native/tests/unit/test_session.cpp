@@ -453,6 +453,31 @@ private slots:
         QCOMPARE(ink_strokes_on_disk(book), std::size_t{6});
     }
 
+    // The journal's states read for the History Brush (state_at): the latest two kept — one read again is the same —, an
+    // older one let go and read again when it is wanted (PC3 B4: not held without end as its source changes).
+    void fewJournalStatesAreKept() {
+        QTemporaryDir tmp;
+        const fs::path book = path_of(tmp.filePath("book.genko"));
+        make_book(book);
+        Session::Options options = quick(path_of(tmp.filePath("recovery")));
+        options.autosave = false;
+        {
+            auto first = Session::open(book, options);
+            for (int i = 0; i < 4; ++i) first->apply(stroke_op(20 + i * 10));
+            first->save_now();
+            QVERIFY(first->wait_saved(10000ms));
+        }
+        auto session = Session::open(book, options);
+        const auto one = session->state_at(1);
+        QVERIFY(one && *one);
+        QCOMPARE(ink_strokes(**one), std::size_t{1});
+        QCOMPARE(session->state_at(1)->get(), one->get());  // (kept)
+        QVERIFY(session->state_at(2) && session->state_at(3));
+        const auto again = session->state_at(1);  // (let go by then: read again, the same state)
+        QVERIFY(again && again->get() != one->get());
+        QCOMPARE(ink_strokes(**again), std::size_t{1});
+    }
+
     // A backup zipped between the saves (beside_saves, on the save worker) does not hold up a recovery point (SAVE-03:
     // one within the checkpoint's time; M7 review): the recovery points have their own thread.
     void aRecoveryPointIsNotHeldUpByABackup() {

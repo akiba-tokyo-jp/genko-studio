@@ -243,6 +243,9 @@ public:
     bool modal_target_unchanged(const std::shared_ptr<Session>& origin, const DocPtr& snapshot, int page_index);
     // The page shown as these ops would leave it, without changing the book (フィルターのプレビュー); none: as it is.
     void preview_ops(const std::optional<core::Json>& ops);
+    // A preview worked out on a worker: the book as the ops would leave it shown (preview_ops' showing of it); none: the
+    // page as it is.
+    void show_preview(std::optional<core::Document> doc);
     LayerPanel* layer_panel() const { return layer_panel_; }
     // channels@1 (main_window_channels.cpp): the channel panel, and what the pixel tools work on and what is shown of a
     // page's channels — the window's, never saved; each page its own —: the target ("" the composite, a colour plate's
@@ -499,6 +502,11 @@ public:
     // --- doing things ------------------------------------------------------------------------------------------
     // Apply in memory as the person, show it at once (saved after a pause). A refusal shows in the status line.
     bool apply_ops(const core::Json& ops, const std::vector<std::string>& ids = {});
+    // apply_ops of ops a worker applied already (a window's preview, PC3 B4): `targeted` (the ops with the channel and
+    // contents targets laid in, as apply_ops applies them) applied to `base` gave `result`, new_id() giving `taken` —
+    // taken as it is when the book is still `base`, else applied again.
+    bool apply_worked(const core::Json& ops, const core::Json& targeted, const DocPtr& base, core::ApplyResult result,
+                      const std::vector<std::string>& taken);
     // For approvals (Python's apply_and_commit): applied as the person and written at once, so the agent sees the
     // decision immediately.
     bool apply_and_commit(const core::Json& ops);

@@ -469,6 +469,11 @@ private slots:
         QVERIFY(studio.window->apply_ops(Json::array({Json{{"op", "fill_area"}, {"page", 1}, {"layer_id", studio.ink},
                                                            {"area", Json{{"rect", Json::array({40, 40, 10, 10})}}}, {"rgb", Json::array({255, 255, 255})}}})));
         QVERIFY(studio.layer(studio.ink)->patches.empty());  // (painted on the channel, not the layer)
+        // (an op that only changes a layer's pixels — 境界線を描く, the retouching brushes, …: refused, the layer as it was)
+        QVERIFY(!studio.window->apply_ops(Json::array({Json{{"op", "outline_area"}, {"page", 1}, {"layer_id", studio.ink},
+                                                            {"area", Json{{"rect", Json::array({40, 40, 10, 10})}}}, {"width_mm", 1.0}}})));
+        QVERIFY(studio.layer(studio.ink)->patches.empty());
+        QVERIFY2(studio.window->last_notice().contains(QStringLiteral("クイックマスク")), qPrintable(studio.window->last_notice()));
         studio.window->action("act_quick_mask")->setChecked(false);
         QVERIFY(!canvas->quick_mask);
         QVERIFY(core::quick_mask_of(studio.page()) == nullptr);

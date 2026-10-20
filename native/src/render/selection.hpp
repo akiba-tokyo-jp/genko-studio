@@ -26,6 +26,11 @@ namespace genko::render::selection {
 inline constexpr int kWorkingDpi = 200;  // raster.WORKING_DPI
 inline constexpr int kSelDpi = 200;      // selops.SEL_DPI
 
+// The grid a page's selection is made at (resolve, combine, and the window's areas it makes with to_mask and from_mask):
+// kSelDpi on an 8-bit page, as before; on a precise (16, 32 bits) or ink page the finest grid of its pixel layers, as its
+// layer masks are made (render/layer_masks grid_dpi: 200 dpi at least, 600 at most — the coordinator's 8-2 (b)).
+int grid_dpi(const core::Page& page);
+
 using Matrix = std::array<double, 6>;
 inline constexpr Matrix kIdentity{1.0, 0.0, 0.0, 1.0, 0.0, 0.0};
 
@@ -136,14 +141,16 @@ std::vector<double> area_bbox(const core::Json& area);
 // words.
 Image to_mask(const core::Json& area, const core::Page& page, const core::Document* episode, int dpi = kSelDpi);
 
-// selops.resolve: any area to a plain one ({"poly"} or {"mask"}) the drawing ops take. OpError "the area is empty".
+// selops.resolve: any area to a plain one ({"poly"} or {"mask"} at the page's grid_dpi) the drawing ops take. OpError
+// "the area is empty".
 core::Json resolve(const core::Json& area, const core::Page& page, const core::Document* episode);
 
 // selops.from_mask: a page-sized mask back to {"mask": {"box", "png"}} (cropped to what it covers); nothing when empty.
 std::optional<core::Json> from_mask(const Image& mask, int dpi = kSelDpi);
 
 // selops.combine: a selection drawn with Shift (add), Alt (subtract) or both (intersect) joined to the one there
-// (none, or replace: the new one, resolved when it is not plain); nothing when nothing is left.
+// (none, or replace: the new one, resolved when it is not plain; joined: a mask at the page's grid_dpi); nothing when
+// nothing is left.
 std::optional<core::Json> combine(const std::optional<core::Json>& current, const core::Json& area, std::string_view how,
                                   const core::Page& page, const core::Document* episode);
 

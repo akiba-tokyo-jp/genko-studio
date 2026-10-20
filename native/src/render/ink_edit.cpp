@@ -654,13 +654,23 @@ std::optional<core::InkPixels> patch_inks(const core::Patch& patch, const core::
     }
 }
 
+namespace {
+
+// The inks of a layer that has none yet, a piece is laid on: clear ones at the piece's resolution (its pixels over its
+// box's width, 200 to 600 dpi), as a precise piece makes its layer's (render/color_edit).
+core::InkPixels blank_for(const core::Page& page, const core::InkPixels& piece, const std::array<double, 4>& box_mm) {
+    const double own = piece.width > 0 && box_mm[2] > 0 ? std::round(piece.width * 25.4 / box_mm[2]) : raster::kWorkingDpi;
+    const int dpi = static_cast<int>(std::clamp(std::isfinite(own) ? own : raster::kWorkingDpi, static_cast<double>(raster::kWorkingDpi), 600.0));
+    const int w = mm_to_px(page.spec.width_mm.value(), dpi), h = mm_to_px(page.spec.height_mm.value(), dpi);
+    limits::check_picture(w, h, "the layer's inks");
+    return core::blank_ink_pixels(page.color->space, page.color->depth, static_cast<std::uint32_t>(w), static_cast<std::uint32_t>(h), page.color->planes());
+}
+
+}  // namespace
+
 std::string lay_piece(const core::Page& page, const core::Layer& layer, const core::InkPixels& piece, const std::array<double, 4>& box_mm) {
     if (!page.color) throw core::OpError("an RGB page holds no ink pixels");
-    Inks out = layer.ink_raster ? layer_inks(layer)
-                                : Inks(core::blank_ink_pixels(page.color->space, page.color->depth,
-                                                              static_cast<std::uint32_t>(mm_to_px(page.spec.width_mm.value(), raster::kWorkingDpi)),
-                                                              static_cast<std::uint32_t>(mm_to_px(page.spec.height_mm.value(), raster::kWorkingDpi)),
-                                                              page.color->planes()));
+    Inks out = layer.ink_raster ? layer_inks(layer) : Inks(blank_for(page, piece, box_mm));
     if (piece.space != out.p.space || piece.depth != out.p.depth || piece.planes != out.p.planes) {
         throw core::OpError("the piece of inks is not in the page's colour mode");
     }
@@ -699,11 +709,7 @@ std::string lay_piece(const core::Page& page, const core::Layer& layer, const co
 std::string lay_piece(const core::Page& page, const core::Layer& layer, const core::InkPixels& piece, const std::array<double, 4>& box_mm,
                       const selection::Matrix& m, Resample resample) {
     if (!page.color) throw core::OpError("an RGB page holds no ink pixels");
-    Inks out = layer.ink_raster ? layer_inks(layer)
-                                : Inks(core::blank_ink_pixels(page.color->space, page.color->depth,
-                                                              static_cast<std::uint32_t>(mm_to_px(page.spec.width_mm.value(), raster::kWorkingDpi)),
-                                                              static_cast<std::uint32_t>(mm_to_px(page.spec.height_mm.value(), raster::kWorkingDpi)),
-                                                              page.color->planes()));
+    Inks out = layer.ink_raster ? layer_inks(layer) : Inks(blank_for(page, piece, box_mm));
     if (piece.space != out.p.space || piece.depth != out.p.depth || piece.planes != out.p.planes) {
         throw core::OpError("the piece of inks is not in the page's colour mode");
     }

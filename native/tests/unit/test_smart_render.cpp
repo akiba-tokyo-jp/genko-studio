@@ -232,6 +232,48 @@ private slots:
         QVERIFY(std::abs(p[0] * 255 - std::round(p[0] * 255)) > 1e-3);  // (not an 8-bit step)
     }
 
+    // A smart object's layer mask with its density (masks@1) on a page where its picture is drawn in more than 8 bits or in
+    // inks: the part it hides shown at half, as on an 8-bit page (not hidden whole).
+    void maskDensityOnDeepPages_data() {
+        QTest::addColumn<QString>("way");
+        for (const char* way : {"eight", "u16", "cmyk"}) QTest::newRow(way) << QString::fromLatin1(way);
+    }
+    void maskDensityOnDeepPages() {
+        QFETCH(QString, way);
+        Document doc;
+        double x = 60, y = 60;  // (a point the mask hides, where the picture shows)
+        if (way == "u16") {
+            core::PageSpec colour = small_page();
+            colour.expression = "color";
+            doc = run(core::new_episode("深い", Num(1), 1, colour), Json::array({Json{{"op", "set_color_mode"}, {"page", 1}, {"mode", "rgb"}, {"depth", 16}}}));
+            const std::string png = render::write_png(render::Image::create("I;16", render::Size{4, 4}, render::Ink(1000)));
+            const core::Rect b = doc.page(0).bleed_rect_mm();
+            doc = run(doc, Json::array({Json{{"op", "smart_place"}, {"page", 1}, {"data", core::b64encode(png)}, {"name", "g.png"},
+                                               {"placement_mm", Json::array({b.x.json(), b.y.json(), b.width.json(), b.height.json()})}}}));
+        } else {
+            const Json mode = way == "cmyk" ? Json{{"op", "set_color_mode"}, {"page", 1}, {"mode", "cmyk"}, {"profile", "coated-cmyk"}} : Json();
+            doc = run(book(mode), Json::array({Json{{"op", "smart_convert"}, {"page", 1}, {"id", "p1"}, {"new_id", "so"}}}));
+        }
+        const std::string id = smart_layer(doc.page(0))->id;
+        const double w = doc.page(0).spec.width_mm.value(), h = doc.page(0).spec.height_mm.value();
+        const Json shown_part{{"poly", Json::array({Json::array({70.0, -10.0}), Json::array({w + 10, -10.0}), Json::array({w + 10, h + 10}), Json::array({70.0, h + 10})})}};
+        const Document masked = run(doc, Json::array({Json{{"op", "set_layer_mask"}, {"page", 1}, {"id", id}, {"area", shown_part}}}));
+        const Document dense = run(masked, Json::array({Json{{"op", "set_layer_mask"}, {"page", 1}, {"id", id}, {"density", 0.5}}}));
+        const auto at = [&](const Document& d) {
+            const render::Image image = drawn(d, "proof", 50).image.convert("RGB");
+            return image.getpixel(render::mm_to_px(x, 50), render::mm_to_px(y, 50));
+        };
+        const auto hidden = at(masked), open = at(doc), half = at(dense);
+        int apart = 0, from_hidden = 0, from_open = 0;
+        for (std::size_t c = 0; c < 3; ++c) {
+            apart = std::max(apart, std::abs(static_cast<int>(hidden[c] - open[c])));
+            from_hidden = std::max(from_hidden, std::abs(static_cast<int>(half[c] - hidden[c])));
+            from_open = std::max(from_open, std::abs(static_cast<int>(half[c] - open[c])));
+        }
+        QVERIFY2(apart > 30, qPrintable(QString::number(apart)));  // (the mask hides something there)
+        QVERIFY2(from_hidden > apart / 4 && from_open > apart / 4, qPrintable(QStringLiteral("%1 %2 of %3").arg(from_hidden).arg(from_open).arg(apart)));
+    }
+
     void layersConvertedTogetherAreDrawn() {
         const Document before = book();
         const Document after = run(before, Json::array({Json{{"op", "smart_convert"}, {"page", 1}, {"ids", Json::array({"p1", "p2"})}, {"new_id", "so"}}}));

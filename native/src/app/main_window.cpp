@@ -451,6 +451,7 @@ void MainWindow::back_up(const std::shared_ptr<Session>& session) {
 }
 
 MainWindow::~MainWindow() {
+    cancel_smart_select();  // (PC3 B3: a smart selection still worked out on its worker stops — not waited for to its end)
     disconnect_session();
     documents::remove(this);
     render::clear_placed_caches();  // (a window closed: its books' placed pictures are let go)
@@ -573,20 +574,31 @@ void MainWindow::preview_ops(const std::optional<core::Json>& ops) {
         const core::CommandBus bus(render::ops_registry());
         // (channels@1: what is previewed is what is applied: the pixel ops on the channel targeted)
         auto result = bus.apply(*session_->snapshot(), with_contents_target(with_channel_target(*ops)), core::Actor(session_->actor()));
-        if (contents_) {  // (smart-objects@1: the contents' page as it would be)
-            const auto found = result.doc.smart_contents.find(*contents_);
-            if (found == result.doc.smart_contents.end() || !found->second || !found->second->page) throw core::Error("key", "no contents");
-            const core::PagePtr page = found->second->page;
-            result.doc.pages = {page};
-            result.doc.deferred.clear();
-            result.doc.story.clear();
-            canvas_->set_page(std::make_shared<const core::Document>(std::move(result.doc)), 0);
-            return;
-        }
-        canvas_->set_page(std::make_shared<const core::Document>(std::move(result.doc)), static_cast<std::size_t>(page_index_));
+        show_preview(std::move(result.doc));
     } catch (const core::Error&) {
         show_page();  // (a preview that cannot be made: the page as it is)
     }
+}
+
+void MainWindow::show_preview(std::optional<core::Document> doc) {
+    if (!doc) {
+        show_page();
+        return;
+    }
+    if (contents_) {  // (smart-objects@1: the contents' page as it would be)
+        const auto found = doc->smart_contents.find(*contents_);
+        if (found == doc->smart_contents.end() || !found->second || !found->second->page) {
+            show_page();
+            return;
+        }
+        const core::PagePtr page = found->second->page;
+        doc->pages = {page};
+        doc->deferred.clear();
+        doc->story.clear();
+        canvas_->set_page(std::make_shared<const core::Document>(std::move(*doc)), 0);
+        return;
+    }
+    canvas_->set_page(std::make_shared<const core::Document>(std::move(*doc)), static_cast<std::size_t>(page_index_));
 }
 
 void MainWindow::pen_changed() {
@@ -651,6 +663,26 @@ bool MainWindow::apply_ops(const Json& ops, const std::vector<std::string>& ids)
     try {
         // (channels@1: the pixel ops on the channel targeted; smart-objects@1: in a contents' tab, on its contents)
         session_->apply(with_contents_target(with_channel_target(ops)), ids);
+    } catch (const core::Error& error) {
+        flash(wording::error(QString::fromUtf8(error.what())), 6000, true);
+        return false;
+    } catch (const std::exception& error) {
+        flash(wording::error(QString::fromUtf8(error.what())), 6000, true);  // (the window and the book stay as they were)
+        return false;
+    }
+    perf::event("applied", {{"ms", clock.nsecsElapsed() / 1e6}, {"op", ops.size() > 0 && ops[0].contains("op") ? ops[0]["op"] : Json()}});
+    if (recording_) {  // (オートアクション: what was done goes into the recording)
+        for (Json& op : actions::recordable(ops)) recording_->push_back(std::move(op));
+    }
+    return true;
+}
+
+bool MainWindow::apply_worked(const Json& ops, const Json& targeted, const DocPtr& base, core::ApplyResult result,
+                              const std::vector<std::string>& taken) {
+    QElapsedTimer clock;
+    clock.start();
+    try {
+        session_->apply_worked(targeted, base, std::move(result), taken);
     } catch (const core::Error& error) {
         flash(wording::error(QString::fromUtf8(error.what())), 6000, true);
         return false;

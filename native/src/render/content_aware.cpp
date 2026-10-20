@@ -8,6 +8,7 @@
 
 #include "render/inpaint.hpp"
 #include "render/poisson.hpp"
+#include "render/segment/segment.hpp"
 
 // PhotoCraft v0.2.0 crates/algo/src/content_aware.rs (lines 1-255), MIT: native/third_party/photocraft/NOTICE.md.
 
@@ -166,6 +167,7 @@ std::vector<float> fill(std::size_t w, std::size_t h, std::size_t ch, const std:
         }
         oy += v.h + gap;
     }
+    segment::check_stop();  // (a window's preview no longer wanted: render::Cancelled)
     const std::optional<std::vector<float>> filled = inpaint::complete(mw, mh, ch, mimg, unknown, params);
     std::vector<float> out = img;
     if (filled) {

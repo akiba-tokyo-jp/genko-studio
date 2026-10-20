@@ -707,11 +707,23 @@ core::ApplyResult Session::apply(const Json& ops, const std::vector<std::string>
     const core::CommandBus bus(*registry_);
     core::ScopedIdScript script(ids);
     core::ApplyResult result = bus.apply(*doc_, ops, core::Actor(actor_));
+    return keep_applied(ops, std::move(result), script.taken());
+}
+
+core::ApplyResult Session::apply_worked(const Json& ops, const DocPtr& base, core::ApplyResult result, const std::vector<std::string>& taken) {
+    if (base != doc_) return apply(ops, taken);  // (the book changed meanwhile: worked out again on it, the same ids first)
+    if (saving_as_) throw core::ApplyError("別名保存中です。完了してから編集してください。", "save_as_busy");
+    if (!read_only_.empty()) throw core::ApplyError("this book is open read-only: " + read_only_, "read_only");
+    if (discarded_) throw core::ApplyError("the book was closed", "closed");
+    return keep_applied(ops, std::move(result), taken);
+}
+
+core::ApplyResult Session::keep_applied(const Json& ops, core::ApplyResult result, std::vector<std::string> ids) {
     auto change = std::make_shared<Change>();
     change->id = new_change_id();
     change->ops = ops;
     change->journal_ops = result.journal_ops;
-    change->ids = script.taken();
+    change->ids = std::move(ids);
     change->before = doc_;
     change->after = std::make_shared<const core::Document>(std::move(result.doc));
     change->held = replaced_precise_bytes(*change->before, *change->after);
@@ -1084,7 +1096,9 @@ std::optional<DocPtr> Session::state_at(std::size_t done) const {
             }
         }
         if (!ref) return std::nullopt;
-        if (const auto known = states_read_.find(*ref); known != states_read_.end()) return known->second;
+        for (const auto& [seen, state] : states_read_) {
+            if (seen == *ref) return state;
+        }
         const storage::AssetStore store(*path_);
         const auto data = store.get_bytes(*ref, storage::kStateSuffix);
         if (!data) return std::nullopt;
@@ -1093,7 +1107,8 @@ std::optional<DocPtr> Session::state_at(std::size_t done) const {
         storage::LoadResult loaded = storage::load_document_payload(state, *path_);
         if (!loaded.report.clean()) return std::nullopt;
         auto made = std::make_shared<const core::Document>(std::move(loaded.document));
-        states_read_[*ref] = made;
+        states_read_.emplace_back(*ref, made);
+        if (states_read_.size() > kStatesKept) states_read_.erase(states_read_.begin());
         return DocPtr(made);
     } catch (const std::exception&) {
         return std::nullopt;

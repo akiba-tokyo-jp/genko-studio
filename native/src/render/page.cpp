@@ -1260,7 +1260,7 @@ bool smart_precise_layer(ColorCanvas& canvas, const Ctx& ctx, const Layer& layer
     }
     std::optional<Image> shown;
     if (layer.mask && layer.mask->png && !layer.mask->png->empty() && layer.mask->enabled)
-        shown = decoded(layer.mask->png, "L").resize_region(ctx.size, area, Resample::Bilinear);
+        shown = layer_masks::shown(*ctx.page, *layer.mask, decoded(layer.mask->png, "L"), ctx.size, area, Resample::Bilinear);
     shown = vector_masks::with_vector_mask(*ctx.page, layer, ctx.size, area, std::move(shown));  // (vector@1, PC3 C-a)
     canvas.blend(*picture, layer.opacity, layer.clip, layer.blend, shown ? &*shown : nullptr);
     return true;
@@ -1293,7 +1293,7 @@ bool smart_ink_layer(InkCanvas& canvas, const Ctx& ctx, const Layer& layer, cons
     }
     std::optional<Image> shown;
     if (layer.mask && layer.mask->png && !layer.mask->png->empty() && layer.mask->enabled)
-        shown = decoded(layer.mask->png, "L").resize_region(ctx.size, area, Resample::Bilinear);
+        shown = layer_masks::shown(*ctx.page, *layer.mask, decoded(layer.mask->png, "L"), ctx.size, area, Resample::Bilinear);
     shown = vector_masks::with_vector_mask(*ctx.page, layer, ctx.size, area, std::move(shown));  // (vector@1, PC3 C-a)
     canvas.blend(*picture, layer.opacity, layer.clip, layer.blend, shown ? &*shown : nullptr);
     return true;

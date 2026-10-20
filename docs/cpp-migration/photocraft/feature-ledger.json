@@ -1882,7 +1882,8 @@
         "native/tests/unit/test_inpaint.cpp",
         "native/tests/unit/test_retouch.cpp",
         "native/tests/contract/test_contract_retouch.cpp",
-        "native/tests/gui/test_gui_retouch.cpp"
+        "native/tests/gui/test_gui_retouch.cpp",
+        "native/src/app/session.cpp"
       ],
       "pc0": {
         "date": "2026-10-16",
@@ -1895,7 +1896,7 @@
         "gap": "選択範囲を周りの画素から埋める（標本の範囲・色/回転/拡大の適応・鏡像・出力先）操作が無い",
         "note": "上流は algo/content_aware.rs・inpaint.rs（約 1000 行、外部ライブラリなし）。AI 生成の inpaint（generation_request）は外部の生成で、手元の画素処理ではない"
       },
-      "remaining": "カスタムのサンプリング領域は緑の筆で描く代わりにアルファチャンネル（op は区域 `source_area`）。窓のプレビューは窓の中で作る（作業スレッド・中止は無い）"
+      "remaining": "カスタムのサンプリング領域は緑の筆で描く代わりにアルファチャンネル（op は区域 `source_area`）。"
     },
     {
       "id": "edit.contentAwareScale",
@@ -2638,7 +2639,9 @@
         "native/tests/gui/test_gui_clipboard.cpp",
         "native/tests/gui/test_gui_select.cpp",
         "native/tests/unit/test_masks.cpp",
-        "native/tests/unit/test_color_raster_edit.cpp"
+        "native/tests/unit/test_color_raster_edit.cpp",
+        "native/src/render/ink_edit.cpp",
+        "native/tests/unit/test_ink_edit.cpp"
       ],
       "pc0": {
         "date": "2026-10-16",
@@ -21684,7 +21687,9 @@
         "native/src/render/ops_smart.cpp",
         "native/src/app/main_window_paths.cpp",
         "native/tests/contract/test_contract_paths.cpp",
-        "native/tests/gui/test_gui_paths.cpp"
+        "native/tests/gui/test_gui_paths.cpp",
+        "native/src/render/layer_masks.cpp",
+        "native/tests/unit/test_masks.cpp"
       ],
       "pc0": {
         "date": "2026-10-16",
@@ -25890,7 +25895,8 @@
         "native/src/app/retouch_tools.cpp",
         "native/tests/unit/test_retouch.cpp",
         "native/tests/contract/test_contract_retouch.cpp",
-        "native/tests/gui/test_gui_retouch.cpp"
+        "native/tests/gui/test_gui_retouch.cpp",
+        "native/tests/unit/test_session.cpp"
       ],
       "pc0": {
         "date": "2026-10-16",
@@ -27419,7 +27425,8 @@
         "native/src/app/channel_panel.cpp",
         "native/tests/unit/test_select_color.cpp",
         "native/tests/contract/test_contract_select.cpp",
-        "native/tests/gui/test_gui_select.cpp"
+        "native/tests/gui/test_gui_select.cpp",
+        "native/src/app/main_window_channels.cpp"
       ],
       "pc0": {
         "date": "2026-10-16",
@@ -27817,7 +27824,8 @@
         "native/src/render/selection.cpp",
         "native/src/render/area_kinds.cpp",
         "native/tests/unit/test_select_color.cpp",
-        "native/tests/contract/test_contract_select.cpp"
+        "native/tests/contract/test_contract_select.cpp",
+        "native/tests/unit/test_masks.cpp"
       ],
       "pc0": {
         "date": "2026-10-16",
@@ -27835,8 +27843,7 @@
         ],
         "gap": "自動選択は線で囲まれた所（隙間閉じ・参照するレイヤー）を選び、色の許容値とつながりは色域選択にある。色の許容値で描く先のレイヤーだけを見る選び方・アンチエイリアスの切り替えが無い",
         "note": ""
-      },
-      "remaining": "高精度・インキのページでも、解いた選択範囲の格子は 200 dpi のまま（ページの一番細かい格子にはまだしていない）"
+      }
     },
     {
       "id": "select.modify.border",
@@ -28133,7 +28140,9 @@
         "native/src/render/select_smart.cpp",
         "native/tests/gui/test_gui_select_mask.cpp",
         "native/tests/unit/test_matting.cpp",
-        "native/tests/unit/test_segment.cpp"
+        "native/tests/unit/test_segment.cpp",
+        "native/src/render/selection.cpp",
+        "native/tests/unit/test_masks.cpp"
       ],
       "pc0": {
         "date": "2026-10-16",
@@ -28145,8 +28154,7 @@
         "tests": [],
         "gap": "長方形で囲んだ物を選ぶ（GrabCut）操作が無い",
         "note": "上流は algo/segment（grabcut・gmm・maxflow、外部ライブラリなし）。select.quick・select.subject と共通の土台"
-      },
-      "limitations": "選択範囲はまだ 200 dpi の格子で解く（区域の種類は格子の大きさを受ける）。"
+      }
     },
     {
       "id": "select.quick",
@@ -28174,7 +28182,9 @@
         "native/src/render/select_smart.cpp",
         "native/tests/gui/test_gui_select_mask.cpp",
         "native/tests/unit/test_matting.cpp",
-        "native/tests/unit/test_segment.cpp"
+        "native/tests/unit/test_segment.cpp",
+        "native/src/render/selection.cpp",
+        "native/tests/unit/test_masks.cpp"
       ],
       "pc0": {
         "date": "2026-10-16",
@@ -28188,8 +28198,7 @@
         "tests": [],
         "gap": "なぞった所から境界を推して選ぶ（クイック選択、境界の強調）操作が無い",
         "note": "選択ペンはなぞった帯をそのまま選ぶだけ。上流は algo/segment/quick.rs と maxflow"
-      },
-      "limitations": "選択範囲はまだ 200 dpi の格子で解く（区域の種類は格子の大きさを受ける）。"
+      }
     },
     {
       "id": "select.rect",
@@ -28253,7 +28262,9 @@
         "native/src/render/matting.cpp",
         "native/src/render/select_smart.cpp",
         "native/tests/gui/test_gui_select_mask.cpp",
-        "native/tests/unit/test_matting.cpp"
+        "native/tests/unit/test_matting.cpp",
+        "native/src/render/selection.cpp",
+        "native/tests/unit/test_masks.cpp"
       ],
       "pc0": {
         "date": "2026-10-16",
@@ -28265,8 +28276,7 @@
         "tests": [],
         "gap": "境界の調整（半径・スマート半径・滑らかさ・ぼかし・コントラスト・シフト・色の除去、マスク/新しいレイヤーへの出力）が無い",
         "note": "上流は algo/matting.rs（約 750 行）"
-      },
-      "limitations": "選択範囲はまだ 200 dpi の格子で解く（区域の種類は格子の大きさを受ける）。"
+      }
     },
     {
       "id": "select.reselect",
@@ -28496,7 +28506,9 @@
         "native/tests/contract/test_contract_select.cpp",
         "native/tests/gui/test_gui_select_mask.cpp",
         "native/tests/unit/test_matting.cpp",
-        "native/tests/unit/test_segment.cpp"
+        "native/tests/unit/test_segment.cpp",
+        "native/src/render/selection.cpp",
+        "native/tests/unit/test_masks.cpp"
       ],
       "pc0": {
         "date": "2026-10-16",
@@ -28509,7 +28521,7 @@
         "gap": "空を選ぶ（しきい値・境のやわらかさ）操作が無い",
         "note": "上流は algo/segment/sky.rs（約 280 行、外部ライブラリなし）"
       },
-      "limitations": "写真の空だけ（色と滑らかさの見込み）。選択範囲はまだ 200 dpi の格子で解く（区域の種類は格子の大きさを受ける）。"
+      "limitations": "写真の空だけ（色と滑らかさの見込み）。"
     },
     {
       "id": "select.subject",
@@ -28548,7 +28560,9 @@
         "native/tests/contract/test_contract_select.cpp",
         "native/tests/gui/test_gui_select_mask.cpp",
         "native/tests/unit/test_matting.cpp",
-        "native/tests/unit/test_segment.cpp"
+        "native/tests/unit/test_segment.cpp",
+        "native/src/render/selection.cpp",
+        "native/tests/unit/test_masks.cpp"
       ],
       "pc0": {
         "date": "2026-10-16",
@@ -28561,7 +28575,7 @@
         "gap": "主な被写体を選ぶ操作が無い",
         "note": "上流は algo/segment/subject.rs（目立ち度＋GrabCut、外部ライブラリなし）"
       },
-      "limitations": "上流どおり古典的な発見的な算法（学習モデルなし。利用者の決定 6）で、写真向け。漫画の線画・スクリーントーンでは外れることがある。選択範囲はまだ 200 dpi の格子で解く（区域の種類は格子の大きさを受ける）。"
+      "limitations": "上流どおり古典的な発見的な算法（学習モデルなし。利用者の決定 6）で、写真向け。漫画の線画・スクリーントーンでは外れることがある。"
     },
     {
       "id": "select.toWorkPath",

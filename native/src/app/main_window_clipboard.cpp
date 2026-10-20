@@ -23,6 +23,7 @@
 #include "service/wording.hpp"
 #include "core/base64.hpp"
 #include "core/color_raster.hpp"
+#include "core/command_bus.hpp"
 #include "core/ids.hpp"
 #include "core/pynum.hpp"
 #include "render/color_edit.hpp"
@@ -124,6 +125,15 @@ bool paints(const core::Page& page, const Json& items) {
     return false;
 }
 
+// What a copy lifts: the selection as the bus resolves it for delete_area — its anti-aliased edge and its feather grey (a
+// poly of the selection tools carries "antialias" and "feather_mm" unresolved) —, so that what a cut lifts is what it
+// clears; nothing chosen: the whole layer.
+Json lifted_area(const std::optional<Json>& area, const core::Page& page, const core::Document& doc) {
+    if (!area) return whole_page(page);
+    if (core::area_needs_resolving(*area)) return render::selection::resolve(*area, page, &doc);
+    return *area;
+}
+
 // The centre of an area's box (mm).
 std::optional<QPointF> centre_of(const Json& area) {
     try {
@@ -173,10 +183,10 @@ std::optional<Json> MainWindow::copied_items(const std::optional<Json>& area) {
     const core::Layer* layer = target_layer();
     const core::Page* page = current_page();
     if (layer == nullptr || page == nullptr) return std::nullopt;
-    const Json where = area ? *area : whole_page(*page);
     Json items;
     try {
         render::use_brushes_of(book());
+        const Json where = lifted_area(area, *page, book());
         core::Layer copy = *layer;  // (lifted from a copy: the layer itself keeps everything)
         auto lifted = render::selection::lift(copy, where, *page);
         if (page->color && layer->ink_raster) {  // (color-mode@1: its inks there, as a piece that keeps them)
@@ -233,10 +243,10 @@ void MainWindow::copy_merged() {
     const core::Page* page = current_page();
     if (page == nullptr) return;
     const auto area = selection_area();
-    const Json where = area ? *area : whole_page(*page);
     Json items;
     try {
         render::use_brushes_of(book());
+        const Json where = lifted_area(area, *page, book());
         // (the page as it shows, in its own way: 8 bits, precise values or inks — a layer of it lifted as a piece)
         const render::image_ops::Pixels shown = render::image_ops::page_pixels(book(), *page);
         core::Layer merged;

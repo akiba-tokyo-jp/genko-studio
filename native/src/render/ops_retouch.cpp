@@ -784,7 +784,12 @@ void content_aware_fill(core::OpContext& c) {
     }
     const Json* new_given = field(op, "new_id");
     if (new_given != nullptr && (!new_given->is_string() || new_given->get<std::string>().empty())) throw OpError("new_id must be a layer id");
-    const Ready r = ready(c, at, id);
+    // (out to a new layer or a copy, the layer itself is not changed: its pixels read from a copy of the book — a pen
+    // layer's lines and shape parts drawn in there, not into it)
+    std::optional<core::Document> apart;
+    if (output != "current") apart.emplace(doc);
+    core::OpContext read{apart ? *apart : doc, op, c.actor};
+    const Ready r = ready(read, at, id);
     const Grid& g = r.grid;
     const bool eight = r.like.kind() == Pixels::Kind::Eight;
     const AreaCover cover(doc.page(at), *area, g, eight);
@@ -811,7 +816,7 @@ void content_aware_fill(core::OpContext& c) {
     opts.mirror = flag(op, "mirror", false);
     opts.seed = seed;
     opts.unit_range = !(r.like.kind() == Pixels::Kind::Precise && r.like.floating);
-    const Pixels img = layer_window(c, at, id, window, r.like, g);
+    const Pixels img = layer_window(read, at, id, window, r.like, g);
     const auto w = std::size_t(window.width()), h = std::size_t(window.height());
     const unsigned n = img.all();
     const std::vector<float> covered = cover.over(window);
@@ -843,6 +848,7 @@ void content_aware_fill(core::OpContext& c) {
             const Json duplicate{{"op", "duplicate_layer"}, {"page", doc.page(at).index.json()}, {"id", id}, {"new_id", target}};
             core::OpContext inner{doc, duplicate, c.actor};
             (*ops_registry().find("duplicate_layer"))(inner);
+            (void)ready(c, at, target);  // (the copy's lines and shape parts drawn into its pixels: it is the paint layer filled)
         }
         for (std::size_t i = 0; i < w * h; ++i) {
             const float* was = img.at(i);

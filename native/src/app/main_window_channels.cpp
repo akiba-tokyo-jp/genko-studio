@@ -8,12 +8,15 @@
 #include <QMenu>
 
 #include <algorithm>
+#include <set>
+#include <string>
 
 #include "app/ask.hpp"
 #include "app/canvas.hpp"
 #include "app/channel_panel.hpp"
 #include "app/main_window.hpp"
 #include "core/channels.hpp"
+#include "core/error.hpp"
 #include "core/pyconv.hpp"
 #include "render/selection.hpp"
 
@@ -142,14 +145,29 @@ Json MainWindow::with_channel_target(const Json& ops) const {
     const ChannelView view = channel_view();
     if (view.target.empty()) return ops;
     const bool plate = core::find_channel(*page, view.target) == nullptr;
+    // (PC3: the pixel ops that change a layer's pixels and cannot paint a channel — the retouching brushes, コンテンツに応じた
+    // 塗りつぶし, the Magic Eraser, 境界線を描く, the matting —: refused while a channel, the Quick Mask too, is drawn on, rather
+    // than changing the layer under it)
+    static const std::set<std::string, std::less<>> kLayerOnly{"clone_stamp", "healing_brush", "spot_healing", "history_brush",
+                                                               "content_aware_fill", "magic_erase", "outline_area", "matting"};
+    const auto on_this_page = [&](const Json& op) {
+        try {
+            return core::Num(core::py_int(op.value("page", Json()))) == page->index;
+        } catch (const std::exception&) {
+            return false;
+        }
+    };
     Json out = ops;
     for (Json& op : out) {
-        if (!op.is_object() || !op.contains("op") || !op["op"].is_string() || !core::channel_target_op(op["op"].get<std::string>())) continue;
-        try {
-            if (!(core::Num(core::py_int(op.value("page", Json()))) == page->index)) continue;  // (another page's op: as it is)
-        } catch (const std::exception&) {
+        if (!op.is_object() || !op.contains("op") || !op["op"].is_string()) continue;
+        if (!core::channel_target_op(op["op"].get<std::string>())) {
+            if (!plate && kLayerOnly.contains(op["op"].get<std::string>()) && on_this_page(op)) {
+                throw core::Error("value", "チャンネル（クイックマスクも）に描いている間は、この操作はできません（レイヤーの画素だけを変える操作です）。"
+                                    "描く先をレイヤーに戻してから使います");
+            }
             continue;
         }
+        if (!on_this_page(op)) continue;  // (another page's op: as it is)
         if (core::python_channel_kind(op)) {
             // (levels, curve and brightness_contrast take Python's own channel — r, g or b, else all three —, which the
             // target fills in when the op names none (all three): an RGB page's plate as r, g or b; a CMYK or Lab page's

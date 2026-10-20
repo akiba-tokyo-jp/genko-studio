@@ -6,6 +6,7 @@
 #include <limits>
 
 #include "render/poisson.hpp"
+#include "render/segment/segment.hpp"
 
 // PhotoCraft v0.2.0 crates/algo/src/inpaint.rs (lines 1-620), MIT: native/third_party/photocraft/NOTICE.md.
 
@@ -158,6 +159,7 @@ struct Solver {
         const int step = reverse ? -1 : 1;
         const std::size_t bands = (h + kBand - 1) / kBand;
         for (std::size_t bi = 0; bi < bands; ++bi) {
+            segment::check_stop();  // (a window's preview no longer wanted: render::Cancelled)
             Rng rng(seed ^ (static_cast<std::uint64_t>(bi) * 0x2545F4914F6CDD1DULL) ^ (static_cast<std::uint64_t>(pass) << 40));
             const std::size_t y0 = bi * kBand;
             const std::size_t rows = std::min(kBand, h - y0);
@@ -227,6 +229,7 @@ struct Solver {
         std::vector<char> made(w * h, 0);
         std::vector<float> acc(ch);
         for (std::size_t y = 0; y < h; ++y) {
+            if (y % 16 == 0) segment::check_stop();
             for (std::size_t x = 0; x < w; ++x) {
                 if (!(*hole)[y * w + x]) continue;
                 std::fill(acc.begin(), acc.end(), 0.0f);
@@ -362,6 +365,7 @@ std::optional<std::vector<float>> complete(std::size_t w, std::size_t h, std::si
         const int full_search = static_cast<int>(std::max(lw, lh));
         std::vector<float> cost(lw * lh, kInf);
         for (std::size_t it = 0; it < em; ++it) {
+            segment::check_stop();
             // (the hole's pixels changed: the costs again before each PatchMatch)
             for (std::size_t i = 0; i < cost.size(); ++i) {
                 if (solver.targets[i]) cost[i] = solver.dist(Match{static_cast<int>(i % lw), static_cast<int>(i / lw)}, nnf[i], kInf);

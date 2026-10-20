@@ -285,19 +285,25 @@ private slots:
         QVERIFY(studio.canvas()->selection().has_value());
         const std::size_t layers = studio.page().layers.size();
         bool previewed = false;
+        std::string preview_id;
         studio.answers.responder->exec = [&](QDialog* dialog) {
             if (dialog->objectName() != QStringLiteral("content_aware_dialog")) return int(QDialog::Rejected);
             auto* output = dialog->findChild<QComboBox*>(QStringLiteral("field_output"));
             if (output == nullptr) return int(QDialog::Rejected);
+            // (a change while the preview is worked out on its worker: the one in hand stopped, the next one shown)
+            auto* colour = dialog->findChild<QComboBox*>(QStringLiteral("field_color_adaptation"));
+            if (colour != nullptr) colour->setCurrentIndex(colour->findText(QStringLiteral("高")));
             output->setCurrentIndex(output->findText(QStringLiteral("新規レイヤー")));
             // (the result shown on the page a moment after the change)
             previewed = gui_test::wait_for([&] { return studio.canvas()->page() != nullptr && studio.canvas()->page()->layers.size() == layers + 1; }, 20000);
+            if (previewed) preview_id = studio.canvas()->page()->layers.back().id;
             return int(QDialog::Accepted);
         };
         studio.trigger("act_content_aware_fill");
         QVERIFY(previewed);
         QCOMPARE(studio.page().layers.size(), layers + 1);
         const core::Layer& made = studio.page().layers.back();
+        QCOMPARE(made.id, preview_id);  // (the preview's new layer is the fill's: the same settings, the same op)
         QCOMPARE(made.title, std::string("コンテンツに応じた塗りつぶし"));
         QVERIFY(studio.at(45, 15, made.id)[3] > 200);  // (the fill alone, where the selection was)
         QCOMPARE(studio.at(10, 50, made.id)[3], 0.0);

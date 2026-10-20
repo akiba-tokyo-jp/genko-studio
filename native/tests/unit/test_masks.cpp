@@ -426,6 +426,105 @@ private slots:
             core::encode_color_pixels(w, h, "u16", [](std::size_t) { return std::array<double, 4>{0.5, 0.5, 0.5, 1}; }));
         QCOMPARE(render::layer_masks::grid_dpi(fine.page(0)), 600);
     }
+
+    // Layer › Rasterize › Vector Mask (rasterize_layer vector_mask, C-a) with the layer mask's settings (B2): the layer drawn
+    // as it was — a layer mask that is off left out, its density and feather drawn in (not laid again on the product) —,
+    // a new mask linked as the vector mask was, a vector mask that is off not drawn in; at the page's mask grid.
+    void rasterizeVectorMask_data() { applyLayerMask_data(); }
+    void rasterizeVectorMask() {
+        QFETCH(QString, way);
+        const core::Document doc = way == "eight" ? eight() : way == "cmyk" ? inks() : precise(way.toStdString());
+        // (the vector mask shows x ≥ 30 mm)
+        const Json path{{"subpaths", Json::array({Json{{"closed", true},
+                                                      {"knots", Json::array({Json::array({30, -5}), Json::array({65, -5}), Json::array({65, 85}), Json::array({30, 85})})}}})}};
+        const core::Document vectored = run(doc, Json{{"op", "set_vector_mask"}, {"page", 1}, {"id", kPaint}, {"path", path}});
+        const auto rasterized = [](const core::Document& d) {
+            return run(d, Json{{"op", "rasterize_layer"}, {"page", 1}, {"id", kPaint}, {"vector_mask", true}});
+        };
+        const auto same_look = [](const core::Document& a, const core::Document& b) { return share_apart(drawn(a), drawn(b)) < 0.02; };
+        // no layer mask: one made, linked as the vector mask is, at the grid
+        const core::Document made = rasterized(vectored);
+        QVERIFY(!layer_of(made, kPaint).vector_mask && layer_of(made, kPaint).mask && layer_of(made, kPaint).mask->linked);
+        QCOMPARE(mask_pixels(layer_of(made, kPaint)).size(), render::layer_masks::grid_size(made.page(0)));
+        QVERIFY2(same_look(vectored, made), qPrintable(QString::number(share_apart(drawn(vectored), drawn(made)))));
+        // a layer mask that is off (it hides x ≥ 45 mm): the vector mask still shows after
+        core::Document off = run(vectored, Json{{"op", "set_layer_mask"}, {"page", 1}, {"id", kPaint}, {"area", square(-5, -5, 45, 85)}});
+        off = run(off, Json{{"op", "set_layer_mask"}, {"page", 1}, {"id", kPaint}, {"enabled", false}});
+        const core::Document off_done = rasterized(off);
+        QVERIFY2(same_look(off, off_done), qPrintable(QString::number(share_apart(drawn(off), drawn(off_done)))));
+        QVERIFY(layer_of(off_done, kPaint).mask->enabled);
+        // a layer mask at density 0.5 (and feathered): drawn in once
+        core::Document dense = run(vectored, Json{{"op", "set_layer_mask"}, {"page", 1}, {"id", kPaint}, {"area", square(-5, -5, 45, 85)},
+                                                  {"density", 0.5}, {"feather_mm", 1.0}, {"linked", true}});
+        const core::Document dense_done = rasterized(dense);
+        QVERIFY2(same_look(dense, dense_done), qPrintable(QString::number(share_apart(drawn(dense), drawn(dense_done)))));
+        const core::Mask& baked = *layer_of(dense_done, kPaint).mask;
+        QVERIFY(baked.density == 1.0 && baked.feather_mm == 0.0 && baked.linked && baked.enabled);
+        // a vector mask that is off: not drawn in (the layer mask's bytes as they were); without a layer mask, one that is off
+        const core::Document vector_off = run(dense, Json{{"op", "set_vector_mask"}, {"page", 1}, {"id", kPaint}, {"enabled", false}});
+        const core::Document vector_off_done = rasterized(vector_off);
+        QCOMPARE(*layer_of(vector_off_done, kPaint).mask->png, *layer_of(dense, kPaint).mask->png);
+        QVERIFY(same_look(vector_off, vector_off_done));
+        const core::Document alone_off = run(vectored, Json{{"op", "set_vector_mask"}, {"page", 1}, {"id", kPaint}, {"enabled", false}});
+        const core::Document alone_off_done = rasterized(alone_off);
+        QVERIFY(layer_of(alone_off_done, kPaint).mask && !layer_of(alone_off_done, kPaint).mask->enabled);
+        QVERIFY(same_look(alone_off, alone_off_done));
+        // (a 600 dpi layer on a precise or ink page: the mask at 600 dpi)
+        if (way != "eight") {
+            core::Document fine = vectored;
+            const int w = render::mm_to_px(60, 600), h = render::mm_to_px(80, 600);
+            core::Layer& layer = fine.edit_page(0).layers.back();
+            if (way == "cmyk") layer.ink_raster = std::make_shared<const std::string>(core::encode_ink_raster(core::blank_ink_pixels(core::InkSpace::Cmyk, 16, w, h)));
+            else layer.color_raster = std::make_shared<const std::string>(core::encode_color_pixels(w, h, "u16", [](std::size_t) { return std::array<double, 4>{0.5, 0.5, 0.5, 1}; }));
+            QCOMPARE(mask_pixels(layer_of(rasterized(fine), kPaint)).width(), w);
+        }
+    }
+
+    // The selection of a precise or ink page at its finest grid too (the coordinator's 8-2 (b)): an anti-aliased area
+    // resolved there, its grey edge one pixel of a 600 dpi layer wide, not a 200 dpi pixel stretched over three; an 8-bit
+    // page's at 200 dpi, as before.
+    void selectionGrid_data() {
+        QTest::addColumn<QString>("way");
+        for (const char* way : {"u16", "cmyk"}) QTest::newRow(way) << QString::fromLatin1(way);
+    }
+    void selectionGrid() {
+        QFETCH(QString, way);
+        const Json area{{"poly", Json::array({Json::array({10.0, 10.0}), Json::array({30.05, 10.0}), Json::array({30.05, 50.0}), Json::array({10.0, 50.0})})},
+                        {"antialias", true}};
+        const auto mask_width = [](const Json& resolved) { return render::open_image(render::selection::b64decode(resolved["mask"]["png"])).width(); };
+        // (8 bits: 200 dpi, as before)
+        const core::Document plain = eight();
+        QCOMPARE(render::selection::grid_dpi(plain.page(0)), 200);
+        QVERIFY(std::abs(mask_width(render::selection::resolve(area, plain.page(0), &plain)) - 20.05 * 200 / 25.4) < 3);
+        // (a 600 dpi layer on the page: its grid)
+        core::Document fine = way == "cmyk" ? inks() : precise("u16");
+        const int w = render::mm_to_px(60, 600), h = render::mm_to_px(80, 600);
+        core::Layer& layer = fine.edit_page(0).layers.back();
+        if (way == "cmyk") {
+            core::InkPixels p = core::blank_ink_pixels(core::InkSpace::Cmyk, 16, w, h);
+            for (std::size_t i = 0; i < std::size_t(w) * h; ++i) {
+                p.set(i, 0, 0.2);
+                p.set(i, 4, 1.0);
+            }
+            layer.ink_raster = std::make_shared<const std::string>(core::encode_ink_raster(p));
+        } else {
+            layer.color_raster = std::make_shared<const std::string>(
+                core::encode_color_pixels(w, h, "u16", [](std::size_t) { return std::array<double, 4>{0.5, 0.5, 0.5, 1}; }));
+        }
+        QCOMPARE(render::selection::grid_dpi(fine.page(0)), 600);
+        QVERIFY(std::abs(mask_width(render::selection::resolve(area, fine.page(0), &fine)) - 20.05 * 600 / 25.4) < 3);
+        // (the bus resolves the op's area there: the layer's pixels partly cleared across one pixel of its own)
+        const core::Document cleared = run(fine, Json{{"op", "delete_area"}, {"page", 1}, {"layer_id", kPaint}, {"area", area}});
+        const core::Layer& done = layer_of(cleared, kPaint);
+        const int row = render::mm_to_px(30, 600);
+        int partial = 0;
+        for (int x = render::mm_to_px(27, 600); x < render::mm_to_px(33, 600); ++x) {
+            const double a = alpha_of(done, x, row);
+            if (a > 0.02 && a < 0.98) ++partial;
+        }
+        QVERIFY2(partial >= 1 && partial <= 2, qPrintable(QString::number(partial)));
+        QVERIFY(alpha_of(done, render::mm_to_px(29, 600), row) < 0.02 && alpha_of(done, render::mm_to_px(31, 600), row) > 0.98);
+    }
 };
 
 QTEST_GUILESS_MAIN(TestMasks)

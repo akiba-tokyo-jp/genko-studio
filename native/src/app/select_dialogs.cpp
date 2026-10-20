@@ -258,7 +258,7 @@ void MainWindow::color_range_dialog() {
     std::optional<Json> area;
     try {
         render::use_brushes_of(book());
-        area = area_of(*now, render::selection::kSelDpi);
+        area = area_of(*now, render::selection::grid_dpi(*now));
     } catch (const std::exception& error) {
         flash(wording::error(QString::fromUtf8(error.what())), 4000, true);
         return;

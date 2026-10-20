@@ -23,6 +23,7 @@
 
 #include <cmath>
 #include <memory>
+#include <stop_token>
 
 #include "app/ask.hpp"
 #include "app/canvas.hpp"
@@ -32,6 +33,7 @@
 #include "core/pyconv.hpp"
 #include "render/page.hpp"
 #include "render/raster_ops.hpp"
+#include "render/segment/segment.hpp"
 #include "render/selection.hpp"
 #include "service/wording.hpp"
 
@@ -211,11 +213,14 @@ void MainWindow::select_and_mask() {
         picture->setPixmap(QPixmap::fromImage(shown_picture(*seen, *mask, view->currentData().toString())));
     };
     auto ticket = std::make_shared<std::uint64_t>(0);
+    auto working = std::make_shared<std::stop_source>();  // (the preview on its way: stopped when a newer one starts or the window goes)
     auto* timer = new QTimer(&dialog);
     timer->setSingleShot(true);
     timer->setInterval(250);
     connect(timer, &QTimer::timeout, &dialog, [=, &dialog] {
         const std::uint64_t mine = ++*ticket;
+        working->request_stop();
+        *working = std::stop_source();
         auto* watcher = new QFutureWatcher<std::pair<render::Image, QString>>(&dialog);
         connect(watcher, &QFutureWatcher<std::pair<render::Image, QString>>::finished, &dialog, [=] {
             const auto [made, error] = watcher->result();
@@ -227,9 +232,12 @@ void MainWindow::select_and_mask() {
                 show();
             }
         });
-        watcher->setFuture(QtConcurrent::run([doc, index, area = refine_of()]() -> std::pair<render::Image, QString> {
+        watcher->setFuture(QtConcurrent::run([doc, index, area = refine_of(), token = working->get_token()]() -> std::pair<render::Image, QString> {
+            const render::segment::StopScope scope(token);
             try {
                 return {render::selection::to_mask(area, doc->page(index), doc.get(), kPreviewDpi), QString()};
+            } catch (const render::Cancelled&) {
+                return {render::Image(), QString()};  // (not wanted any more)
             } catch (const std::exception& error) {
                 return {render::Image(), QString::fromUtf8(error.what())};
             }
@@ -244,6 +252,7 @@ void MainWindow::select_and_mask() {
     const Asked asked = asking();
     const int answer = ask::exec(&dialog);
     ++*ticket;  // (a preview still on its way is not wanted)
+    working->request_stop();
     if (answer != QDialog::Accepted || !still(asked)) return;
     const core::Page* now = current_page();
     if (now == nullptr || now->id != page_id) return;

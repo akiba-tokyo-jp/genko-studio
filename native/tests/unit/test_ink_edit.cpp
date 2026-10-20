@@ -473,6 +473,43 @@ private slots:
         }
     }
 
+    // A piece of 600 dpi inks pasted onto a layer with no inks yet: the layer's inks made at the piece's 600 dpi (as a
+    // precise piece's are), each of its pixels laid whole — a pattern of single pixels kept.
+    void finePiecesKeepTheirResolution() {
+        core::Document doc = ink_book();
+        const std::uint32_t w = static_cast<std::uint32_t>(render::mm_to_px(60, 600)), h = static_cast<std::uint32_t>(render::mm_to_px(80, 600));
+        core::InkPixels p = core::blank_ink_pixels(core::InkSpace::Cmyk, 16, w, h);
+        for (std::uint32_t y = 0; y < h; ++y) {
+            for (std::uint32_t x = 0; x < w; ++x) {
+                std::uint16_t* s = p.samples.data() + (std::size_t(y) * w + x) * 5;
+                const auto& colour = (x + y) % 2 == 0 ? kS : kT;  // (a checkerboard of single pixels)
+                std::copy(colour.begin(), colour.end(), s);
+                s[4] = 65535;
+            }
+        }
+        for (auto& layer : doc.edit_page(0).layers)
+            if (layer.id == "pic") layer.ink_raster = std::make_shared<const std::string>(core::encode_ink_raster(p));
+        const auto piece = render::ink_edit::lift_piece(doc.page(0), layer_of(doc, "pic"),
+                                                        Json{{"poly", Json::array({Json::array({10, 10}), Json::array({20, 10}), Json::array({20, 20}), Json::array({10, 20})})}});
+        QVERIFY(piece);
+        const core::Patch patch = render::ink_edit::piece_patch(*piece, *doc.page(0).color);
+        Json one = patch.attrs;
+        one["png"] = core::b64encode(*patch.png);
+        const Json items{{"strokes", Json::array()}, {"patches", Json::array({one})}};
+        const core::Document pasted = run_ops(doc, Json::array({Json{{"op", "add_layer"}, {"page", 1}, {"kind", "paint"}, {"id", "pasted"}},
+                                                                Json{{"op", "paste"}, {"page", 1}, {"layer_id", "pasted"}, {"items", items}}}))
+                                          .doc;
+        const core::InkPixels laid = pixels_of(pasted, "pasted");
+        QCOMPARE(laid.width, w);
+        QCOMPARE(laid.height, h);
+        for (std::uint32_t y = px(14) * 3; y < px(16) * 3; ++y) {
+            for (std::uint32_t x = px(14) * 3; x < px(16) * 3; ++x) {
+                const auto& colour = (x + y) % 2 == 0 ? kS : kT;
+                for (unsigned c = 0; c < 4; ++c) QCOMPARE(at(laid, x, y)[c], colour[c]);
+            }
+        }
+    }
+
     // New paper (set_page_spec): the inks moved onto it, a colour all over the same inks.
     void newPaperKeepsTheInks() {
         const core::Document doc = ink_book();

@@ -158,8 +158,23 @@ Image antialiased_polygon(const std::vector<std::pair<double, double>>& corners,
     std::vector<std::pair<float, float>> points;
     points.reserve(corners.size());
     for (const auto& [x, y] : corners) points.emplace_back(static_cast<float>(x), static_cast<float>(y));
-    const selection_ext::Rect whole{0, 0, size.width, size.height};
-    return selection_ext::to_l(selection_ext::polygon(points, whole, true), size);
+    // (worked over the rows the polygon spans and the columns up to its right — the very sums the whole page gives, the
+    // rest of the page not held in floats: a precise or ink page's selection grid is up to 600 dpi)
+    double low = INFINITY, high = -INFINITY, right = -INFINITY;
+    for (const auto& [x, y] : points) {
+        low = std::min(low, static_cast<double>(y));
+        high = std::max(high, static_cast<double>(y));
+        right = std::max(right, static_cast<double>(x));
+    }
+    Image out = Image::create("L", size, Ink(0));
+    if (points.empty()) return out;
+    const int y0 = static_cast<int>(std::clamp(std::floor(low) - 1.0, 0.0, static_cast<double>(size.height)));
+    const int y1 = static_cast<int>(std::clamp(std::ceil(high) + 1.0, static_cast<double>(y0), static_cast<double>(size.height)));
+    const int x1 = static_cast<int>(std::clamp(std::ceil(right) + 1.0, 0.0, static_cast<double>(size.width)));
+    if (y1 <= y0 || x1 <= 0) return out;
+    const selection_ext::Rect band{0, y0, x1, y1};
+    out.paste(selection_ext::to_l(selection_ext::polygon(points, band, true), Size{x1, y1 - y0}), Point{0, y0});
+    return out;
 }
 
 void use_keys() {
