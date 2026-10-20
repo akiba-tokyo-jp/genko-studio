@@ -818,10 +818,12 @@ private slots:
         const double a = (*matrix)[0], b = (*matrix)[1], c = (*matrix)[2], d = (*matrix)[3], e = (*matrix)[4];
         QVERIFY(a == 1 && b == 0 && d == 1);
         QVERIFY(std::abs(c * 50 + e - 10) < 1e-6 && std::abs(c * 90 + e) < 1e-6);  // top slides, bottom stays
-        const Json transform = desk.last_op("transform_area");
+        // (PC3 C-c: the selection's transform goes as transform_layers over the area — the drawing layer — since 自由変形)
+        const Json transform = desk.last_op("transform_layers");
         QVERIFY(transform.is_object());
         QCOMPARE(transform["interp"], Json("nearest"));  // (the transform went through with the choice)
-        QCOMPARE(transform["layer_id"], Json("red"));
+        QCOMPARE(transform["ids"], Json::array({"red"}));
+        QVERIFY(transform.contains("area"));
     }
 
     // --- test_j6 -----------------------------------------------------------------------------------------------------

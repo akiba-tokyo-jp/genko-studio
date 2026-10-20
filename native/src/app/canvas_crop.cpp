@@ -45,8 +45,9 @@ void PageCanvas::set_crop(std::optional<CropBox> box) {
     update();
 }
 
-bool PageCanvas::crop_press(const QPointF& pos, const QPointF& mm, Qt::KeyboardModifiers modifiers) {
-    (void)modifiers;
+bool PageCanvas::crop_press(const QPointF& pos, const QPointF& pointer, Qt::KeyboardModifiers modifiers) {
+    // (PC3 C-d, 表示 → スナップ: a new box's corner snaps — canvas_snap.cpp)
+    const QPointF mm = crop_ ? pointer : snap_point(pointer, modifiers);
     if (crop_) {
         const std::array<QPointF, 4> at = corners(*crop_);
         for (int i = 0; i < 4; ++i) {
@@ -67,10 +68,24 @@ bool PageCanvas::crop_press(const QPointF& pos, const QPointF& mm, Qt::KeyboardM
     return true;
 }
 
-bool PageCanvas::crop_move(const QPointF& mm, Qt::KeyboardModifiers modifiers, bool pressed) {
+bool PageCanvas::crop_move(const QPointF& pointer, Qt::KeyboardModifiers modifiers, bool pressed) {
     if (!pressed || !crop_drag_ || !crop_) return false;
     const CropDrag& d = *crop_drag_;
     CropBox box = d.was;
+    // (PC3 C-d, 表示 → スナップ: an upright box moved snaps by its edges and middle, the corner dragged where it would be;
+    // a turned box and a turn do not — canvas_snap.cpp)
+    QPointF mm = pointer;
+    if (d.kind == QLatin1String("new")) {
+        mm = snap_point(pointer, modifiers);
+    } else if (d.kind == QLatin1String("move") && d.was.angle == 0) {
+        const QRectF r = d.was.rect().translated(pointer - d.start);
+        mm = pointer + snap_box({r.left(), r.top(), r.right(), r.bottom()}, modifiers);
+    } else if (d.kind == QLatin1String("corner") && d.was.angle == 0) {
+        const QPointF grip = corners(d.was)[std::size_t(d.corner)];
+        mm = snap_point(grip + (pointer - d.start), modifiers) - grip + d.start;
+    } else {
+        snap_lines_.clear();
+    }
     if (d.kind == QLatin1String("move")) {
         box.centre = d.was.centre + (mm - d.start);
     } else if (d.kind == QLatin1String("turn")) {

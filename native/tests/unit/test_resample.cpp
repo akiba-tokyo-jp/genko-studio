@@ -290,24 +290,22 @@ private slots:
         QVERIFY(again.floating);
     }
 
-    // PC3-0: the new ops are registered (a book or a script naming one is told it is not in this build yet, not that it
-    // is unknown) and refused with not_yet_ported naming the op and its group until the group writes it; the book stays.
-    void theNewOpsAreFramesForNow() {
+    // PC3-0 registered the later groups' ops as frames refused with not_yet_ported until each group wrote it; every group
+    // has written its own now (B1 … B4, C-a … C-e): none of them is refused as not in this build, whatever it is given.
+    void theNewOpsAreWrittenNow() {
         const core::Document doc = core::new_episode("枠", core::Num(1), 1, core::PageSpec::custom(60, 60, 50, 50, 1, 2, 2, 2, 2, 72, "color"));
-        const std::vector<std::pair<const char*, const char*>> frames{
-            // (B1's quick_mask and magic_erase, B2's outline_area, apply_layer_mask and mask_from_transparency, B3's matting,
-            // B4's clone_stamp … content_aware_fill, C-a's set_path … set_vector_mask, C-b's add_shape_part … move_shape_parts
-            // and C-c's transform_layers and content_aware_scale: written)
-            {"align_layers", "C-d"}, {"distribute_layers", "C-d"}, {"arrange_layers", "C-d"}, {"link_layers", "C-d"}};
-        // (C-e's resize_pages, set_canvas_size, crop_page, trim_page, reveal_all and rotate_pages are written: test_page_size)
-        for (const auto& [op, group] : frames) {
+        for (const char* op : {"quick_mask", "magic_erase", "outline_area", "apply_layer_mask", "mask_from_transparency", "matting", "clone_stamp",
+                               "healing_brush", "spot_healing", "history_brush", "content_aware_fill", "set_path", "delete_path", "rename_path",
+                               "make_work_path", "text_to_path", "stroke_path", "set_vector_mask", "add_shape_part", "edit_shape_part",
+                               "combine_shape_parts", "move_shape_parts", "transform_layers", "content_aware_scale", "align_layers",
+                               "distribute_layers", "arrange_layers", "link_layers", "resize_pages", "set_canvas_size", "crop_page", "trim_page",
+                               "reveal_all", "rotate_pages"}) {
+            const std::vector<std::string> names = render::ops_registry().names();
+            QVERIFY2(std::find(names.begin(), names.end(), op) != names.end(), op);
             try {
                 core::CommandBus(render::ops_registry()).apply(doc, Json::array({Json{{"op", op}, {"page", 1}}}), core::Actor("human:test"));
-                QFAIL(op);
             } catch (const core::ApplyError& error) {
-                const std::string said = error.what();
-                QVERIFY2(error.code() == "not_yet_ported", (std::string(op) + ": " + error.code() + " " + said).c_str());
-                QVERIFY2(said.find(op) != std::string::npos && said.find(std::string("(PC3 ") + group + ")") != std::string::npos, said.c_str());
+                QVERIFY2(error.code() != "not_yet_ported", (std::string(op) + ": " + error.what()).c_str());
             }
         }
     }

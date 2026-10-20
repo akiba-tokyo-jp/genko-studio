@@ -287,6 +287,10 @@ void MainWindow::start_layer_transform(const QString& mode) {
     }
     transform_ids_ = ids;
     transform_box_ = *box;
+    try {  // (PC3 C-d: what the box moves is not snapped to)
+        canvas_->snap_moving = lt::layers_moved(*page, ids);
+    } catch (const std::exception&) {
+    }
     canvas_->start_transform(mode, *box);
     show_transform_bar(mode);
     canvas_->setFocus();

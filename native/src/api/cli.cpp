@@ -47,6 +47,7 @@
 #include "render/brushes.hpp"
 #include "render/draw.hpp"
 #include "render/inspect.hpp"
+#include "render/layer_bounds.hpp"
 #include "render/path_info.hpp"
 #include "render/proof.hpp"
 #include "render/movie.hpp"
@@ -282,6 +283,7 @@ int inspect(const QStringList& args, bool ascii) {
     bool looks = false;  // (PC2a, the C++ build's own: --looks, image.adjustments.colorLookup.list)
     QString area_text, page_text;  // (PC3 B1, the C++ build's own: --page N --area '<area>'; PC3 C-a: --paths [--page N])
     bool paths = false;  // (vector@1, PC3 C-a, the C++ build's own: --paths [--page N], path.list / path.info / layer.vectorMask.info)
+    QString at_text;  // (PC3 C-d, the C++ build's own: --at <page>:<x_mm>,<y_mm>, layer.pickAt — the layers showing there)
     const auto value_of = [&](qsizetype& i, const char* name, QString& into) -> bool {
         const QString& arg = args[i];
         const QString flag = QString::fromLatin1(name);
@@ -318,6 +320,8 @@ int inspect(const QStringList& args, bool ascii) {
             if (!value_of(i, "--area", area_text) || area_text.isEmpty()) return usage("argument --area: expected one argument");
         } else if (arg == QLatin1String("--page") || arg.startsWith(QLatin1String("--page="))) {
             if (!value_of(i, "--page", page_text) || page_text.isEmpty()) return usage("argument --page: expected one argument");
+        } else if (arg == QLatin1String("--at") || arg.startsWith(QLatin1String("--at="))) {
+            if (!value_of(i, "--at", at_text) || at_text.isEmpty()) return usage("argument --at: expected one argument");
         } else if (arg.startsWith(QLatin1Char('-')) && arg.size() > 1) {
             return usage("unrecognized arguments: " + arg.toStdString());
         } else if (!have_src) {
@@ -368,7 +372,42 @@ int inspect(const QStringList& args, bool ascii) {
             return usage("argument --area: an area as JSON, e.g. '{\"range\": {\"select\": \"reds\"}}'");
         }
     }
+    std::optional<std::int64_t> at_page;
+    double at_x = 0, at_y = 0;
+    if (!at_text.isEmpty()) {  // (<page>:<x_mm>,<y_mm>, as --pixel)
+        if (!pixel.isEmpty() || !profile.isEmpty() || !area_text.isEmpty() || paths || !page_text.isEmpty())
+            return usage("argument --at: not with --pixel, --profile, --area, --paths or --page");
+        const qsizetype colon = at_text.indexOf(QLatin1Char(':'));
+        const QStringList xy = colon < 0 ? QStringList() : at_text.mid(colon + 1).split(QLatin1Char(','));
+        bool ok_page = false, ok_x = false, ok_y = false;
+        if (colon > 0 && xy.size() == 2) {
+            at_page = at_text.left(colon).toLongLong(&ok_page);
+            at_x = xy[0].toDouble(&ok_x);
+            at_y = xy[1].toDouble(&ok_y);
+        }
+        if (!ok_page || !ok_x || !ok_y) return usage("argument --at: <page>:<x_mm>,<y_mm>, e.g. 1:10.5,20");
+    }
     const auto loaded = storage::load_document(path_arg(src));
+    if (at_page) {  // (PC3 C-d, layer.pickAt: the layers showing something there, the topmost first)
+        const core::Document& doc = loaded.document;
+        for (std::size_t i = 0; i < doc.pages.size(); ++i) {
+            if (doc.pages[i]->index != core::Num(*at_page)) continue;
+            if (doc.is_deferred(i)) break;
+            const core::Page& page = doc.page(i);
+            core::Json layers = core::Json::array();
+            for (const std::string& id : render::layer_bounds::layers_at(doc, page, at_x, at_y)) {
+                for (const core::Layer& shown : page.layers) {
+                    if (shown.id != id) continue;
+                    const std::string folder = render::layer_bounds::outermost(page, id);
+                    layers.push_back(core::Json{{"id", id}, {"name", shown.title}, {"kind", std::string(core::to_string(shown.kind))},
+                                                {"folder", folder != id ? core::Json(folder) : core::Json(nullptr)}});
+                }
+            }
+            print_json(core::Json{{"page", *at_page}, {"at", core::Json::array({at_x, at_y})}, {"layers", layers}}, ascii);
+            return 0;
+        }
+        throw core::Error("key", "no page " + std::to_string(*at_page));
+    }
     if (paths) {  // (vector@1: the pages' paths, work paths, clipping paths and the layers' vector masks and shapes)
         print_json(render::path_info::book_paths(loaded.document, page_number), ascii);
         return 0;

@@ -69,6 +69,7 @@
 #include "core/pynum.hpp"
 #include "render/brushes.hpp"
 #include "render/image.hpp"
+#include "render/layer_bounds.hpp"
 #include "render/page.hpp"
 
 namespace genko::app {
@@ -442,7 +443,7 @@ void MainWindow::build_actions() {
     make("act_frame", QStringLiteral("コマ割り"), [this] { choose_tool(QStringLiteral("frame")); }, keys({QKeySequence(QStringLiteral("F"))}),
          QStringLiteral("コマの中をドラッグして割る（斜めも。水平・垂直に吸い付く、Alt で自由）・間の白をドラッグで間隔を動かす・選んだコマの角をドラッグで形を変える"), true);
     make("act_move", QStringLiteral("移動ツール"), [this] { choose_tool(QStringLiteral("move")); }, keys({QKeySequence(QStringLiteral("Q"))}),
-         QStringLiteral("描く先のレイヤーを丸ごとドラッグで動かす（Shift で縦・横・45°）"), true);
+         QStringLiteral("選んだレイヤーをリンクしたレイヤーと一緒にドラッグで動かす（Shift で縦・横・45°、Ctrl+クリックでそこのレイヤーを選ぶ）"), true);
     tools_ = new QActionGroup(this);
     for (const auto& [tool, name] : {std::pair{"select", "act_select"}, {"pen", "act_pen"}, {"eraser", "act_eraser"}, {"frame", "act_frame"},
                                      {"move", "act_move"}, {"zoom", "act_zoom_tool"}}) {
@@ -457,7 +458,7 @@ void MainWindow::build_actions() {
     build_clipboard_actions();  // (PC3 B2: 結合部分をコピー, 特殊ペースト, 塗りつぶし…, 境界線を描く…: main_window_clipboard.cpp)
     build_mask_actions();       // (PC3 B2: すべてのマスクを統合, the layers chosen: main_window_masks.cpp)
     build_transform_actions();  // (PC3 C-c: 自由変形, 変形 ▸, パペットワープ, 遠近法ワープ, ゆがみ…, ワープテキスト…: main_window_transform.cpp)
-    build_anim_actions();       // (アニメーション, タイムラプス: main_window_anim.cpp)
+    build_anim_actions();      // (アニメーション, タイムラプス: main_window_anim.cpp)
     build_channel_actions();    // (channels@1: the channel targets, the selection to a channel: main_window_channels.cpp)
     build_paint_actions();      // (スポイト … ゆがみ, 色の入れ替え, 透明色, 太く・細く: main_window_paint.cpp)
     build_vector_actions();     // (線の修正, 線の編集 and its commands: main_window_vector.cpp)
@@ -471,6 +472,7 @@ void MainWindow::build_actions() {
     build_page_size_actions();  // (PC3 C-e: 画像解像度…, カンバスサイズ…, 画像の回転, 切り抜き(ツール): main_window_page_size.cpp)
     build_retouch_actions();    // (PC3 B4: the retouching tools, コンテンツに応じた塗りつぶし…: retouch_tools.cpp)
     build_shape_actions();      // (pen-shapes@1, PC3 C-b: the shape tools, シェイプを結合…: main_window_shapes.cpp)
+    build_align_actions();      // (PC3 C-d: 重ね順・整列・分布・リンク・ロック, スナップ (with 定規's グリッドにスナップ), the move tool's: main_window_align.cpp)
     make("act_point_wider", QStringLiteral("選んだ点を太く"), [this] { point_width(1.25); }, keys({QKeySequence(QStringLiteral("Ctrl+Alt+]"))}),
          QStringLiteral("部分選択ツールで選んだ制御点のところだけ、線を太くします"));
     make("act_color", QStringLiteral("ペンの色…"), [this] { pick_colour(); }, keys({QKeySequence(QStringLiteral("C"))}));
@@ -708,8 +710,11 @@ void MainWindow::build_menus() {
     layer_special_menu_ = layers->addMenu(QStringLiteral("塗り・グラデーション・色調補正のレイヤー"));
     layer_many_menu_ = layers->addMenu(QStringLiteral("まとめて（複数のレイヤー・表示レイヤー・変換）"));
     layers->addSeparator();
-    QMenu* arrange = layers->addMenu(QStringLiteral("重ね順"));  // (decision 5; C-d adds 最前面へ・最背面へ・逆順)
-    for (const char* name : {"act_layer_up", "act_layer_down"}) arrange->addAction(action(name));
+    QMenu* arrange = layers->addMenu(QStringLiteral("重ね順"));  // (decision 5; PC3 C-d: arrange_layers, among siblings)
+    for (const char* name : {"act_layer_front", "act_layer_up", "act_layer_down", "act_layer_back"}) arrange->addAction(action(name));
+    arrange->addSeparator();
+    arrange->addAction(action("act_layer_reverse"));
+    build_align_menus(layers, view);  // (PC3 C-d: 整列 ▸, 分布 ▸, レイヤーをリンク…; 表示 → スナップ・スナップ先: main_window_align.cpp)
     layers->addSeparator();
     layers->addAction(action("act_layer_draft"));
     layer_effect_menu_ = layers->addMenu(QStringLiteral("境界効果・表示色の印刷"));
@@ -1699,14 +1704,15 @@ void MainWindow::frame_drawn(const QVector<QPointF>& points) {
 }
 
 void MainWindow::layer_move_started() {
-    // the picture of the layer being moved, for the canvas to carry under the pen (drawn on a worker thread)
+    // the picture of the layers being moved (PC3 C-d: the layers chosen, their folders' and linked layers), for the
+    // canvas to carry under the pen (drawn on a worker thread); they are not snapped to
     const core::Page* page = current_page();
-    const core::Layer* layer = target_layer();
-    if (page == nullptr || layer == nullptr) return;
+    const std::vector<std::string> moved = move_targets();
+    canvas_->snap_moving = moved;
+    if (page == nullptr || moved.empty()) return;
     const int dpi = std::max(24, std::min(150, static_cast<int>(std::nearbyint(canvas_->scale() * 25.4))));
     const auto doc = session_->snapshot();
     const std::size_t index = static_cast<std::size_t>(page_index_);
-    const std::string layer_id = layer->id;
     const std::uint64_t ticket = ++move_ticket_;
     auto* watcher = new QFutureWatcher<std::pair<QImage, QRectF>>(this);
     connect(watcher, &QFutureWatcher<std::pair<QImage, QRectF>>::finished, this, [this, watcher, ticket] {
@@ -1714,13 +1720,22 @@ void MainWindow::layer_move_started() {
         watcher->deleteLater();
         if (ticket == move_ticket_ && !image.isNull()) canvas_->set_move_image(image, where);
     });
-    watcher->setFuture(QtConcurrent::run([doc, index, layer_id, dpi]() -> std::pair<QImage, QRectF> {
+    watcher->setFuture(QtConcurrent::run([doc, index, moved, dpi]() -> std::pair<QImage, QRectF> {
         try {
             const core::Page& p = doc->page(index);
+            std::optional<render::Image> together;  // (the layers drawn one over another, in the page's order)
             for (const core::Layer& l : p.layers) {
-                if (l.id != layer_id) continue;
-                const render::Image drawn = render::layer_image(p, l, dpi, doc.get(), true);
-                const render::Image image = drawn.mode() == "RGBA" ? drawn : drawn.convert("RGBA");
+                if (std::find(moved.begin(), moved.end(), l.id) == moved.end() || l.kind == core::LayerKind::Folder) continue;
+                render::Image drawn = render::layer_image(p, l, dpi, doc.get(), true);
+                if (drawn.mode() != "RGBA") drawn = drawn.convert("RGBA");
+                if (!together) {
+                    together = std::move(drawn);
+                } else if (together->size() == drawn.size()) {
+                    together = render::alpha_composite(*together, drawn);
+                }
+            }
+            if (together) {
+                const render::Image& image = *together;
                 const auto box = image.getbbox();
                 if (!box) return {};
                 const render::Image piece = image.crop(*box);
@@ -1738,22 +1753,19 @@ void MainWindow::layer_move_started() {
 }
 
 void MainWindow::layer_moved(double dx, double dy) {
+    // (PC3 C-d, decision 5's 移動ツール: the layers chosen — else the layer drawn on —, their folders' and linked layers
+    // with them, by whole pixels of the page's working grid (200 dpi, as the paint layers hold their pixels), so their
+    // pixels move exactly: transform_layers' move; their linked masks with them)
+    canvas_->snap_moving.clear();
     const core::Page* page = current_page();
-    const core::Layer* layer = paint_layer();
-    if (page == nullptr || layer == nullptr) return;
-    // (Python's w + m: an int paper size and the float margin make a float)
-    const core::Num m = 30.0;  // everything on the layer, and a little beyond the paper
-    const core::Num w = page->spec.width_mm;
-    const core::Num h = page->spec.height_mm;
-    const Json whole = Json::object({{"poly", Json::array({Json::array({(-m).json(), (-m).json()}), Json::array({(w + m).json(), (-m).json()}),
-                                                           Json::array({(w + m).json(), (h + m).json()}), Json::array({(-m).json(), (h + m).json()})})}});
-    Json op = Json::object({{"op", "transform_area"},
-                            {"page", page->index.json()},
-                            {"layer_id", layer->id},
-                            {"area", whole},
-                            {"matrix", Json::array({1, 0, 0, 1, dx, dy})}});
-    if (layer->mask && layer->mask->linked) op["mask"] = "follow";  // (PC3 B2, masks@1: a linked mask moves with the layer)
-    apply_ops(Json::array({op}));
+    const std::vector<std::string> ids = transform_targets();
+    if (page == nullptr || ids.empty()) return;
+    const auto g = render::layer_bounds::grid(*page);
+    const double mx = core::py_round(std::nearbyint(dx * g[0]) / g[0], 6), my = core::py_round(std::nearbyint(dy * g[1]) / g[1], 6);
+    if (mx == 0 && my == 0) return;
+    Json list = Json::array();
+    for (const std::string& id : ids) list.push_back(id);
+    apply_ops(Json::array({Json{{"op", "transform_layers"}, {"page", page->index.json()}, {"ids", list}, {"move", Json::array({mx, my})}, {"interp", transform_interp_}}}));
 }
 
 CommandSearch* MainWindow::find_command() {

@@ -745,7 +745,8 @@ private slots:
         QVERIFY(dialog.clash->text().contains(QStringLiteral("「E」")));
         QCOMPARE(book.act("act_pen")->shortcut().toString(), QStringLiteral("B"));
         QCOMPARE(dialog.result(), int(QDialog::Rejected));
-        dialog.editor(QStringLiteral("ペン"))->setKeySequence(QKeySequence(QStringLiteral("P")));
+        // (a free key: F7 — P is ペンツール's since PC3 C-a, Photoshop's)
+        dialog.editor(QStringLiteral("ペン"))->setKeySequence(QKeySequence(QStringLiteral("F7")));
         // the pen tablet: a light hand gets a softer curve
         for (int i = 0; i < 60; ++i) dialog.pad->pressures.push_back(0.25 + 0.01 * (i % 10));
         dialog.measure();
@@ -757,8 +758,8 @@ private slots:
         dialog.save_after->setValue(5);
         dialog.save();
         QCOMPARE(dialog.result(), int(QDialog::Accepted));
-        QCOMPARE(book.act("act_pen")->shortcut().toString(), QStringLiteral("P"));
-        QVERIFY(book.act("act_pen")->toolTip().startsWith(QStringLiteral("ペン（P）")));  // (the tooltip says the new key)
+        QCOMPARE(book.act("act_pen")->shortcut().toString(), QStringLiteral("F7"));
+        QVERIFY(book.act("act_pen")->toolTip().startsWith(QStringLiteral("ペン（F7）")));  // (the tooltip says the new key)
         QCOMPARE(w->save_after(), 5000);
         // (never past the longest wait: a test book saves within 0.4 s, a person's within 10 s)
         QCOMPARE(w->session().idle(), std::min(std::chrono::milliseconds(5000), w->session().longest()));
@@ -771,7 +772,7 @@ private slots:
         // a new window keeps the key; the new-book dialog starts on B5
         {
             app::MainWindow other(app::Session::open(book.path, gui_test::quick(gui_test::path_of(book.tmp.path() + QStringLiteral("/recovery2")))));
-            QCOMPARE(other.action(QStringLiteral("act_pen"))->shortcut().toString(), QStringLiteral("P"));
+            QCOMPARE(other.action(QStringLiteral("act_pen"))->shortcut().toString(), QStringLiteral("F7"));
             QCOMPARE(other.save_after(), 5000);
             other.close();
         }

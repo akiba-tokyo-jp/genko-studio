@@ -225,6 +225,7 @@ void set_layer_with(Document& doc, const Json& op) {
     if (has(op, "clip")) layer.clip = py_truthy(op["clip"]);
     if (has(op, "lock_alpha")) layer.lock_alpha = py_truthy(op["lock_alpha"]);
     if (has(op, "locked")) layer.locked = py_truthy(op["locked"]);
+    if (has(op, "lock_position")) layer.lock_position = py_truthy(op["lock_position"]);  // (transform@1, PC3 C-d: 位置をロック)
     if (has(op, "panel_clip")) layer.panel_clip = py_truthy(op["panel_clip"]);
     if (has(op, "panel_each")) layer.panel_each = py_truthy(op["panel_each"]);
     if (has(op, "title")) layer.title = py_truthy(op["title"]) ? py_str(op["title"]) : "";
@@ -432,6 +433,7 @@ void set_layers(OpContext& c) {
     for (const char* key : kSettable) {
         if (has(op, key)) fields[key] = op[key];
     }
+    if (has(op, "lock_position")) fields["lock_position"] = op["lock_position"];  // (transform@1, PC3 C-d: レイヤーをロック…)
     if (fields.empty()) {
         std::string names;
         for (const char* key : kSettable) names += (names.empty() ? "" : ", ") + std::string(key);

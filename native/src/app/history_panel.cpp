@@ -104,6 +104,8 @@ const std::map<std::string, const char*>& names() {
         {"transform_layers", "変形した"}, {"content_aware_scale", "コンテンツに応じて拡大・縮小した"},
         // (PC3 B3: render/ops_matting)
         {"matting", "マッティングした"},
+        // (PC3 C-d: render/layer_align)
+        {"align_layers", "整列した"}, {"distribute_layers", "分布した"}, {"arrange_layers", "重ね順を変えた"}, {"link_layers", "レイヤーのリンクを変えた"},
     };
     return table;
 }
