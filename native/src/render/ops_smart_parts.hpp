@@ -31,5 +31,9 @@ void rasterize(core::Document& doc, std::size_t at, std::size_t i);
 // smart_convert's work on a placed picture (PC3 C-e: one turned with its page): a smart object of its file, `id` its
 // layer's id, its matrix the place it is laid at; its panel, finish and where it came from kept.
 core::Layer placed_to_smart(core::Document& doc, core::Layer placed, const std::string& id);
+// A page of more than 8 bits (RGB in precise colour) shows a smart object's file of more bits only within what such a page
+// keeps whole (core::kColorRasterMaxPixels), as smart_place takes one: OpError ("the picture is too large to keep its 16
+// or 32 bits on this page …") for a larger one on it. A page made so (set_color_mode, independent review A P1-1) asks it.
+void fits_deep_page(const core::Document& doc, const core::Page& page);
 
 }  // namespace genko::render::smart_ops

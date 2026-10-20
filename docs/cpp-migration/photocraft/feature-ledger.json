@@ -6919,7 +6919,13 @@
         "native/tests/contract/test_contract_smart.cpp",
         "native/tests/gui/test_gui_smart.cpp",
         "native/tests/gui/test_gui_carried.cpp",
-        "native/tests/gui/test_gui_color.cpp"
+        "native/tests/gui/test_gui_color.cpp",
+        "native/src/storage/asset_store.cpp",
+        "native/src/storage/transaction.cpp",
+        "native/src/app/session.cpp",
+        "native/tests/unit/test_session.cpp",
+        "native/src/render/ops_ink.cpp",
+        "native/tests/perf/test_perf_render.cpp"
       ],
       "pc0": {
         "date": "2026-10-16",
@@ -21303,7 +21309,8 @@
         "native/src/app/main_window_align.cpp",
         "native/src/app/canvas_input.cpp",
         "native/tests/contract/test_contract_align.cpp",
-        "native/tests/gui/test_gui_align.cpp"
+        "native/tests/gui/test_gui_align.cpp",
+        "native/src/render/page.cpp"
       ],
       "pc0": {
         "date": "2026-10-16",
@@ -22441,7 +22448,10 @@
         "native/src/app/main_window_smart.cpp",
         "native/tests/unit/test_smart_filters.cpp",
         "native/tests/contract/test_contract_smart.cpp",
-        "native/tests/gui/test_gui_smart.cpp"
+        "native/tests/gui/test_gui_smart.cpp",
+        "native/src/render/layer_transform.cpp",
+        "native/src/render/ops_smart.cpp",
+        "native/tests/unit/test_smart_warp.cpp"
       ],
       "pc0": {
         "date": "2026-10-16",
@@ -22641,7 +22651,15 @@
         "native/tests/unit/test_smart.cpp",
         "native/tests/unit/test_smart_render.cpp",
         "native/tests/contract/test_contract_smart.cpp",
-        "native/tests/gui/test_gui_smart.cpp"
+        "native/tests/gui/test_gui_smart.cpp",
+        "native/src/storage/asset_store.cpp",
+        "native/src/storage/transaction.cpp",
+        "native/src/app/session.cpp",
+        "native/tests/unit/test_session.cpp",
+        "native/src/render/smart_decode.cpp",
+        "native/src/render/ops_ink.cpp",
+        "native/tests/perf/test_perf_render.cpp",
+        "native/src/render/layer_transform.cpp"
       ],
       "pc0": {
         "date": "2026-10-16",
@@ -22848,7 +22866,9 @@
         "native/src/app/main_window_transform.cpp",
         "native/src/app/layer_panel_smart_filters.cpp",
         "native/tests/unit/test_smart_warp.cpp",
-        "native/tests/gui/test_gui_smart.cpp"
+        "native/tests/gui/test_gui_smart.cpp",
+        "native/src/render/ops_smart_filters.cpp",
+        "native/src/render/ops_smart.cpp"
       ],
       "pc0": {
         "date": "2026-10-16",
@@ -22867,7 +22887,7 @@
         "gap": "自由変形（遠近・4 隅）で 1 枚の四角を画素・線に破壊的に掛けることはできる。複数の面（planes・重なった角のつながり）、straighten、補間の選択の一部、SO に非破壊で掛けて後から直す形が無い",
         "note": "edit.perspectiveWarp 行と共有。非破壊の部分は SO の土台（layer.smartObjects.convertToSmartObject 行）が要る"
       },
-      "remaining": "スマートフィルターの遠近法ワープは、ページ全体の絵を描く解像度で作って覚えるので、印刷の解像度では時間と記憶を使う"
+      "remaining": "スマートフィルターの遠近法ワープは、ページ全体の絵を描く解像度で作って覚えるので、印刷の解像度では時間と記憶を使う（作る作業の記憶は 2 GiB まで。超える絵は描かずに知らせる）"
     },
     {
       "id": "layer.smartObjects.puppetWarp",
@@ -22908,7 +22928,9 @@
         "native/src/app/canvas_transform.cpp",
         "native/src/app/layer_panel_smart_filters.cpp",
         "native/tests/unit/test_smart_warp.cpp",
-        "native/tests/gui/test_gui_smart.cpp"
+        "native/tests/gui/test_gui_smart.cpp",
+        "native/src/render/ops_smart_filters.cpp",
+        "native/src/render/ops_smart.cpp"
       ],
       "pc0": {
         "date": "2026-10-16",
@@ -37783,7 +37805,10 @@
         "native/src/app/main_window_align.cpp",
         "native/src/render/layer_transform.cpp",
         "native/tests/gui/test_gui_align.cpp",
-        "native/tests/gui/test_gui_ledger_a.cpp"
+        "native/tests/gui/test_gui_ledger_a.cpp",
+        "native/src/render/layer_bounds.cpp",
+        "native/src/render/page.cpp",
+        "native/tests/contract/test_contract_align.cpp"
       ],
       "pc0": {
         "date": "2026-10-16",

@@ -8,10 +8,15 @@
 
 #include <algorithm>
 #include <atomic>
+#include <chrono>
 #include <cmath>
+#include <condition_variable>
+#include <future>
 #include <list>
+#include <map>
 #include <mutex>
 #include <set>
+#include <stdexcept>
 #include <unordered_map>
 
 #include "core/base64.hpp"
@@ -44,35 +49,139 @@ using detail::Ctx;
 
 namespace {
 
+// --- the working memory of what is made ------------------------------------------------------------------------------
+
+// What the pictures being made may take of the memory at once, all threads together (design 4.4: the imaging budget's
+// 2 GiB). One making that alone would take more is refused (TooLarge: the smart object drawn otherwise, or left out and
+// said); one that fits waits for the others to let go of theirs — unless its thread holds some already (made inside
+// another making: it goes on, so that none waits on itself).
+constexpr std::uint64_t kWorkBudget = 2ull * 1024 * 1024 * 1024;
+
+struct TooLarge : std::runtime_error {
+    TooLarge() : std::runtime_error("the smart object's picture is too large to make (past the memory the work may use)") {}
+};
+
+class WorkHold {
+public:
+    WorkHold(std::uint64_t bytes, const Ctx* ctx) : bytes_(bytes) {
+        if (bytes > kWorkBudget) throw TooLarge();
+        std::unique_lock lock(mutex());
+        if (depth() == 0) {
+            while (live() + bytes > kWorkBudget) {
+                changed().wait_for(lock, std::chrono::milliseconds(20));
+                if (ctx != nullptr && ctx->stop.stop_requested()) {
+                    lock.unlock();
+                    detail::check_cancel(*ctx);
+                    lock.lock();
+                }
+            }
+        }
+        live() += bytes;
+        ++depth();
+    }
+    ~WorkHold() {
+        {
+            std::lock_guard lock(mutex());
+            live() -= bytes_;
+            --depth();
+        }
+        changed().notify_all();
+    }
+    WorkHold(const WorkHold&) = delete;
+    WorkHold& operator=(const WorkHold&) = delete;
+
+    // Does this thread hold some (a making inside another)?
+    static bool held() { return depth() > 0; }
+
+private:
+    static std::mutex& mutex() {
+        static std::mutex m;
+        return m;
+    }
+    static std::condition_variable& changed() {
+        static std::condition_variable c;
+        return c;
+    }
+    static std::uint64_t& live() {
+        static std::uint64_t total = 0;
+        return total;
+    }
+    static int& depth() {
+        thread_local int d = 0;
+        return d;
+    }
+    std::uint64_t bytes_;
+};
+
 // --- what is remembered between tiles ---------------------------------------------------------------------------------
 
-// A few things remembered by a key, the most recent first, within a count and a budget of bytes.
+// A few things remembered by a key, the most recent first, within a count and a budget of bytes — one alone may be as large
+// as `single` (then kept alone). What one thread asks while another makes it waits for that one (made once: the tiles
+// drawn together of one smart object; independent review A P1-1).
 template <class T>
 class Recent {
 public:
-    Recent(std::size_t capacity, std::size_t budget) : capacity_(capacity), budget_(budget) {}
+    Recent(std::size_t capacity, std::size_t budget, std::size_t single = 0) : capacity_(capacity), budget_(budget), single_(single) {}
 
     std::shared_ptr<const T> get(const std::string& key) {
         std::lock_guard lock(mutex_);
-        for (auto it = items_.begin(); it != items_.end(); ++it) {
-            if (it->key == key) {
-                items_.splice(items_.begin(), items_, it);
-                return items_.front().value;
-            }
-        }
-        return nullptr;
+        return found(key);
     }
 
     void put(const std::string& key, std::shared_ptr<const T> value, std::size_t bytes) {
-        if (bytes > budget_) return;  // (too big to keep: made again when asked)
         std::lock_guard lock(mutex_);
-        items_.remove_if([&key](const Item& item) { return item.key == key; });
-        items_.push_front(Item{key, std::move(value), bytes});
-        std::size_t total = 0;
-        for (const Item& item : items_) total += item.bytes;
-        while (items_.size() > capacity_ || (items_.size() > 1 && total > budget_)) {
-            total -= items_.back().bytes;
-            items_.pop_back();
+        keep(key, std::move(value), bytes);
+    }
+
+    // What is kept under `key`, else made by `make` (a pair of the picture and its bytes) and kept; a thread asking while
+    // another makes it waits for that one's (its failure: made by the next asking). `ctx` stops the waiting.
+    template <class Make>
+    std::shared_ptr<const T> get_or_make(const std::string& key, const Make& make, const Ctx* ctx) {
+        for (;;) {
+            std::shared_future<std::shared_ptr<const T>> other;
+            std::promise<std::shared_ptr<const T>> mine;
+            {
+                std::lock_guard lock(mutex_);
+                if (auto kept = found(key)) return kept;
+                if (const auto it = making_.find(key); it != making_.end()) {
+                    other = it->second;
+                } else {
+                    making_.emplace(key, mine.get_future().share());
+                }
+            }
+            if (other.valid() && WorkHold::held()) {
+                // (made inside another making, which may hold what the one making it waits for: made here too)
+                std::pair<std::shared_ptr<const T>, std::size_t> made = make();
+                if (made.first) put(key, made.first, made.second);
+                return made.first;
+            }
+            if (other.valid()) {
+                while (other.wait_for(std::chrono::milliseconds(20)) != std::future_status::ready) {
+                    if (ctx != nullptr) detail::check_cancel(*ctx);
+                }
+                try {
+                    return other.get();
+                } catch (...) {
+                    continue;  // (its maker failed or was stopped: made here)
+                }
+            }
+            try {
+                std::pair<std::shared_ptr<const T>, std::size_t> made = make();
+                {
+                    std::lock_guard lock(mutex_);
+                    if (made.first) keep(key, made.first, made.second);
+                    making_.erase(key);
+                }
+                mine.set_value(made.first);
+                return made.first;
+            } catch (...) {
+                {
+                    std::lock_guard lock(mutex_);
+                    making_.erase(key);
+                }
+                mine.set_exception(std::current_exception());
+                throw;
+            }
         }
     }
 
@@ -88,26 +197,60 @@ public:
         return total;
     }
 
+    void set_budget(std::size_t budget) {
+        std::lock_guard lock(mutex_);
+        budget_ = budget;
+    }
+
 private:
     struct Item {
         std::string key;
         std::shared_ptr<const T> value;
         std::size_t bytes = 0;
     };
+
+    std::shared_ptr<const T> found(const std::string& key) {
+        for (auto it = items_.begin(); it != items_.end(); ++it) {
+            if (it->key == key) {
+                items_.splice(items_.begin(), items_, it);
+                return items_.front().value;
+            }
+        }
+        return nullptr;
+    }
+
+    void keep(const std::string& key, std::shared_ptr<const T> value, std::size_t bytes) {
+        if (bytes > std::max(budget_, single_)) return;  // (too big to keep: made again when asked)
+        items_.remove_if([&key](const Item& item) { return item.key == key; });
+        items_.push_front(Item{key, std::move(value), bytes});
+        std::size_t total = 0;
+        for (const Item& item : items_) total += item.bytes;
+        while (items_.size() > capacity_ || (items_.size() > 1 && total > budget_)) {
+            total -= items_.back().bytes;
+            items_.pop_back();
+        }
+    }
+
     std::mutex mutex_;
     std::list<Item> items_;
+    std::map<std::string, std::shared_future<std::shared_ptr<const T>>> making_;
     std::size_t capacity_;
     std::size_t budget_;
+    std::size_t single_;
 };
 
+
 constexpr std::size_t kBudget = 512ull * 1024 * 1024;  // (each kind: 16 of them at most, 512 MiB)
+// (one alone as large as a precise page keeps of one file — core::kColorRasterMaxPixels RGBA floats, 1 GiB —: a file of
+// 16 bits in the page's values, a smart object's filtered picture, kept alone rather than made again for every tile)
+constexpr std::size_t kSingle = std::size_t(1) << 30;
 
 Recent<Image>& pictures() {  // (the files' 8-bit pictures, the contents drawn whole, a picture laid on the page)
     static Recent<Image> recent(16, kBudget);
     return recent;
 }
-Recent<std::vector<float>>& deep_pictures() {  // (the files' pictures with every bit, as sRGB floats)
-    static Recent<std::vector<float>> recent(16, kBudget);
+Recent<std::vector<float>>& deep_pictures() {  // (pictures with every bit in a page's values, linear RGBA floats)
+    static Recent<std::vector<float>> recent(16, kBudget, kSingle);
     return recent;
 }
 Recent<core::InkPixels>& ink_pictures() {  // (the files and contents as a page's inks)
@@ -116,11 +259,11 @@ Recent<core::InkPixels>& ink_pictures() {  // (the files and contents as a page'
 }
 // (PC3 A2: a smart object's filtered picture of the whole page in precise colour; A4: contents stacked in it)
 Recent<ColorPicture>& precise_filtered() {
-    static Recent<ColorPicture> recent(16, kBudget);
+    static Recent<ColorPicture> recent(16, kBudget, kSingle);
     return recent;
 }
 Recent<InkPicture>& inks_filtered() {  // (and in a page's inks)
-    static Recent<InkPicture> recent(16, kBudget);
+    static Recent<InkPicture> recent(16, kBudget, kSingle);
     return recent;
 }
 
@@ -354,94 +497,83 @@ double support(Resample how) {
     }
 }
 
-// The picture (w × h pixels of n values, the last its straight alpha) laid on the page through `pm` (its pixels → the
-// page's), over the box `box` of the page: each pixel the picture's values at the point it comes from, weighed by the
-// interpolation's kernel (widened where the picture is made smaller) over the picture's own pixels, premultiplied by the
-// alpha; times how much of the page's pixel the picture covers (its edges soft by a pixel of the page, what lies off it
-// clear). The same pixel for the same place whatever box it is asked in.
-template <class T>
-std::vector<double> lay(const std::vector<T>& src, int w, int h, unsigned n, const Matrix& pm, const Box& box, Resample how, const Ctx* ctx) {
-    std::vector<double> out(std::size_t(std::max(0, box.width())) * std::max(0, box.height()) * n, 0.0);
+// The picture (w × h pixels of n values, the last its straight alpha; row j's values from `row(j)`, each divided by `div`)
+// laid on the page through `pm` (its pixels → the page's), over the box `box` of the page: each pixel the picture's values
+// at the point it comes from, weighed by the interpolation's kernel (widened where the picture is made smaller) over the
+// picture's own pixels, premultiplied by the alpha; times how much of the page's pixel the picture covers (its edges soft by
+// a pixel of the page, what lies off it clear) — given to `put(x, y, values)`, a pixel nothing of it reaches not given. The
+// same pixel for the same place whatever box it is asked in; nothing of the picture or the box held but a pixel's (review
+// A P2-4: the picture read where it is, as it is).
+template <class Row, class Put>
+void lay_into(const Row& row, double div, int w, int h, unsigned n, const Matrix& pm, const Box& box, Resample how, const Ctx* ctx, const Put& put) {
+    if (box.width() <= 0 || box.height() <= 0) return;
     const auto inv = core::smart::inverse(pm);
-    if (!inv || out.empty()) return out;
+    if (!inv) return;
     const double fx = std::min(1.0, std::hypot(pm.a, pm.b)), fy = std::min(1.0, std::hypot(pm.c, pm.d));
     const double rx = how == Resample::Nearest ? 0 : support(how) / fx, ry = how == Resample::Nearest ? 0 : support(how) / fy;
     // (the page's pixels to the picture's edges: one picture pixel along u or v is this many of the page's)
     const double gu = std::hypot(inv->a, inv->c), gv = std::hypot(inv->b, inv->d);
-    std::vector<double> wx, wy, acc(n);
+    std::vector<double> wx, wy, acc(n), to(n);
+    const auto at = [&](long long i, long long j, unsigned c) { return row(static_cast<int>(j))[std::size_t(i) * n + c] / div; };
+    // (one pixel's values into `to`: false when the picture gives it none)
+    const auto one = [&](double u, double v) {
+        std::fill(to.begin(), to.end(), 0.0);
+        if (how == Resample::Nearest) {
+            const auto i = static_cast<long long>(std::floor(u)), j = static_cast<long long>(std::floor(v));
+            if (i < 0 || j < 0 || i >= w || j >= h) return false;
+            for (unsigned c = 0; c < n; ++c) to[c] = at(i, j, c);
+            return true;
+        }
+        const double cover = std::clamp(0.5 + std::min(u, w - u) / (gu > 0 ? gu : 1), 0.0, 1.0) *
+                             std::clamp(0.5 + std::min(v, h - v) / (gv > 0 ? gv : 1), 0.0, 1.0);
+        if (cover <= 0) return false;
+        // (the kernel over the picture's pixels only, weighed again to one, as a picture made larger or smaller is)
+        const long long i0 = std::max(0LL, static_cast<long long>(std::floor(u - rx))), i1 = std::min<long long>(w - 1, static_cast<long long>(std::ceil(u + rx)));
+        const long long j0 = std::max(0LL, static_cast<long long>(std::floor(v - ry))), j1 = std::min<long long>(h - 1, static_cast<long long>(std::ceil(v + ry)));
+        if (i1 < i0 || j1 < j0) return false;
+        wx.assign(std::size_t(i1 - i0 + 1), 0.0);
+        wy.assign(std::size_t(j1 - j0 + 1), 0.0);
+        double sx = 0, sy = 0;
+        for (long long i = i0; i <= i1; ++i) sx += wx[std::size_t(i - i0)] = kernel(how, (i + 0.5 - u) * fx);
+        for (long long j = j0; j <= j1; ++j) sy += wy[std::size_t(j - j0)] = kernel(how, (j + 0.5 - v) * fy);
+        if (sx == 0 || sy == 0) {
+            // (a point between the picture's pixels where the kernel gives none: the nearest one)
+            const long long i = std::clamp<long long>(static_cast<long long>(std::floor(u)), 0, w - 1);
+            const long long j = std::clamp<long long>(static_cast<long long>(std::floor(v)), 0, h - 1);
+            for (unsigned c = 0; c < n; ++c) to[c] = at(i, j, c);
+            to[n - 1] = at(i, j, n - 1) * cover;
+            return true;
+        }
+        std::fill(acc.begin(), acc.end(), 0.0);
+        for (long long j = j0; j <= j1; ++j) {
+            const double wj = wy[std::size_t(j - j0)];
+            if (wj == 0) continue;
+            for (long long i = i0; i <= i1; ++i) {
+                const double wij = wj * wx[std::size_t(i - i0)];
+                if (wij == 0) continue;
+                const double alpha = at(i, j, n - 1);
+                for (unsigned c = 0; c + 1 < n; ++c) acc[c] += wij * at(i, j, c) * alpha;
+                acc[n - 1] += wij * alpha;
+            }
+        }
+        const double norm = sx * sy;
+        const double alpha = std::clamp(acc[n - 1] / norm, 0.0, 1.0);
+        to[n - 1] = alpha * cover;
+        if (alpha <= 0) return true;
+        for (unsigned c = 0; c + 1 < n; ++c) to[c] = acc[c] / norm / alpha;
+        return true;
+    };
     for (int y = box.y0; y < box.y1; ++y) {
         if (ctx != nullptr && (y - box.y0) % 64 == 0) detail::check_cancel(*ctx);
         for (int x = box.x0; x < box.x1; ++x) {
             const auto [u, v] = inv->apply(x + 0.5, y + 0.5);
-            double* to = out.data() + (std::size_t(y - box.y0) * box.width() + (x - box.x0)) * n;
-            if (how == Resample::Nearest) {
-                const auto i = static_cast<long long>(std::floor(u)), j = static_cast<long long>(std::floor(v));
-                if (i < 0 || j < 0 || i >= w || j >= h) continue;
-                const T* from = src.data() + (std::size_t(j) * w + std::size_t(i)) * n;
-                std::copy(from, from + n, to);
-                continue;
-            }
-            const double cover = std::clamp(0.5 + std::min(u, w - u) / (gu > 0 ? gu : 1), 0.0, 1.0) *
-                                 std::clamp(0.5 + std::min(v, h - v) / (gv > 0 ? gv : 1), 0.0, 1.0);
-            if (cover <= 0) continue;
-            // (the kernel over the picture's pixels only, weighed again to one, as a picture made larger or smaller is)
-            const long long i0 = std::max(0LL, static_cast<long long>(std::floor(u - rx))), i1 = std::min<long long>(w - 1, static_cast<long long>(std::ceil(u + rx)));
-            const long long j0 = std::max(0LL, static_cast<long long>(std::floor(v - ry))), j1 = std::min<long long>(h - 1, static_cast<long long>(std::ceil(v + ry)));
-            if (i1 < i0 || j1 < j0) continue;
-            wx.assign(std::size_t(i1 - i0 + 1), 0.0);
-            wy.assign(std::size_t(j1 - j0 + 1), 0.0);
-            double sx = 0, sy = 0;
-            for (long long i = i0; i <= i1; ++i) sx += wx[std::size_t(i - i0)] = kernel(how, (i + 0.5 - u) * fx);
-            for (long long j = j0; j <= j1; ++j) sy += wy[std::size_t(j - j0)] = kernel(how, (j + 0.5 - v) * fy);
-            if (sx == 0 || sy == 0) {
-                // (a point between the picture's pixels where the kernel gives none: the nearest one)
-                const long long i = std::clamp<long long>(static_cast<long long>(std::floor(u)), 0, w - 1);
-                const long long j = std::clamp<long long>(static_cast<long long>(std::floor(v)), 0, h - 1);
-                const T* from = src.data() + (std::size_t(j) * w + std::size_t(i)) * n;
-                std::copy(from, from + n, to);
-                to[n - 1] = from[n - 1] * cover;
-                continue;
-            }
-            std::fill(acc.begin(), acc.end(), 0.0);
-            for (long long j = j0; j <= j1; ++j) {
-                const double wj = wy[std::size_t(j - j0)];
-                if (wj == 0) continue;
-                for (long long i = i0; i <= i1; ++i) {
-                    const double wij = wj * wx[std::size_t(i - i0)];
-                    if (wij == 0) continue;
-                    const T* from = src.data() + (std::size_t(j) * w + std::size_t(i)) * n;
-                    const double alpha = from[n - 1];
-                    for (unsigned c = 0; c + 1 < n; ++c) acc[c] += wij * from[c] * alpha;
-                    acc[n - 1] += wij * alpha;
-                }
-            }
-            const double norm = sx * sy;
-            const double alpha = std::clamp(acc[n - 1] / norm, 0.0, 1.0);
-            to[n - 1] = alpha * cover;
-            if (alpha <= 0) continue;
-            for (unsigned c = 0; c + 1 < n; ++c) to[c] = acc[c] / norm / alpha;
+            if (one(u, v)) put(x, y, to.data());
         }
     }
-    return out;
 }
 
-std::vector<double> rgba_values(const Image& rgba) {
-    const Image in = rgba.mode() == "RGBA" ? rgba : rgba.convert("RGBA");
-    std::vector<double> out(std::size_t(in.width()) * in.height() * 4);
-    for (int y = 0; y < in.height(); ++y) {
-        const auto* row = reinterpret_cast<const unsigned char*>(in.raw()->image[y]);
-        for (int x = 0; x < in.width() * 4; ++x) out[std::size_t(y) * in.width() * 4 + x] = row[x] / 255.0;
-    }
-    return out;
-}
-
-Image rgba_image(const std::vector<double>& values, Size size) {
-    std::string bytes(values.size(), '\0');
-    for (std::size_t i = 0; i < values.size(); ++i) {
-        bytes[i] = static_cast<char>(static_cast<unsigned char>(std::lround(std::clamp(values[i], 0.0, 1.0) * 255.0)));
-    }
-    return Image::frombytes("RGBA", size, bytes);
-}
+// A picture's value 0..1 as a byte.
+char byte_of(double v) { return static_cast<char>(static_cast<unsigned char>(std::lround(std::clamp(v, 0.0, 1.0) * 255.0))); }
 
 // The box of the page a picture of w × h pixels covers through `pm`, within `limit`.
 Box covered(int w, int h, const Matrix& pm, const Box& limit) {
@@ -478,12 +610,23 @@ std::optional<Image> lay_turned(const Ctx& ctx, const core::Layer& layer, const 
     if (reach.width() <= 0 || reach.height() <= 0) return std::nullopt;
     const std::string laid_key = key + "\nlaid " + core::dump_python(Json::array({pm.a, pm.b, pm.c, pm.d, pm.e, pm.f, reach.x0, reach.y0, reach.x1,
                                                                                   reach.y1, static_cast<int>(how)}));
-    std::shared_ptr<const Image> laid = pictures().get(laid_key);
-    if (laid == nullptr) {
-        const std::vector<double> values = lay(rgba_values(*source), source->width(), source->height(), 4, pm, reach, how, &ctx);
-        laid = std::make_shared<const Image>(rgba_image(values, Size{reach.width(), reach.height()}));
-        pictures().put(laid_key, laid, image_bytes(*laid));
-    }
+    const std::shared_ptr<const Image> laid = pictures().get_or_make(
+        laid_key,
+        [&]() -> std::pair<std::shared_ptr<const Image>, std::size_t> {
+            Image converted;  // (read where it is: copied only when it is not RGBA)
+            if (source->mode() != "RGBA") converted = source->convert("RGBA");
+            const Image& in = converted.empty() ? *source : converted;
+            std::string bytes(std::size_t(reach.width()) * reach.height() * 4, '\0');
+            const WorkHold work(bytes.size(), &ctx);
+            lay_into([&in](int j) { return reinterpret_cast<const unsigned char*>(in.raw()->image[j]); }, 255.0, in.width(), in.height(), 4, pm, reach,
+                     how, &ctx, [&](int x, int y, const double* v) {
+                         char* to = bytes.data() + (std::size_t(y - reach.y0) * reach.width() + (x - reach.x0)) * 4;
+                         for (unsigned c = 0; c < 4; ++c) to[c] = byte_of(v[c]);
+                     });
+            auto made = std::make_shared<const Image>(Image::frombytes("RGBA", Size{reach.width(), reach.height()}, bytes));
+            return {made, image_bytes(*made)};
+        },
+        &ctx);
     const double mm = 25.4 / ctx.dpi;
     const core::Rect placement{core::Num(reach.x0 * mm), core::Num(reach.y0 * mm), core::Num(reach.width() * mm), core::Num(reach.height() * mm)};
     return placed_picture(layer, placement, [&] { return laid; }, laid_key, Resample::Lanczos, *ctx.page, ctx.episode, ctx.size, ctx.dpi, ctx.mode,
@@ -615,19 +758,22 @@ std::string contents_key(const Ctx& ctx, const core::SmartContents& contents, in
 // The contents' page drawn whole at `dpi` ("RGBA", over nothing), remembered.
 std::shared_ptr<const Image> contents_whole(const Ctx& ctx, const core::SmartContents& contents, int dpi) {
     const std::string key = contents_key(ctx, contents, dpi);
-    if (auto kept = pictures().get(key)) return kept;
-    ++g_contents_drawn;
-    std::shared_ptr<const Image> out;
-    if (contents.page->color) {  // (a page of inks: as the screen shows them)
-        const core::InkPixels inks = composite_ink_layers(*contents.page, contents.page->layers, dpi, ctx.episode, false);
-        out = std::make_shared<const Image>(ink::to_rgba8(inks, *contents.page->color));
-    } else {
-        RenderResult drawn = render_contents(*contents.page, dpi, contents_options(ctx), ctx.episode);
-        left_out(ctx, drawn.omitted);
-        out = std::make_shared<const Image>(std::move(drawn.image));
-    }
-    pictures().put(key, out, image_bytes(*out));
-    return out;
+    return pictures().get_or_make(  // (drawn once while the tiles wait for it)
+        key,
+        [&]() -> std::pair<std::shared_ptr<const Image>, std::size_t> {
+            ++g_contents_drawn;
+            std::shared_ptr<const Image> out;
+            if (contents.page->color) {  // (a page of inks: as the screen shows them)
+                const core::InkPixels inks = composite_ink_layers(*contents.page, contents.page->layers, dpi, ctx.episode, false);
+                out = std::make_shared<const Image>(ink::to_rgba8(inks, *contents.page->color));
+            } else {
+                RenderResult drawn = render_contents(*contents.page, dpi, contents_options(ctx), ctx.episode);
+                left_out(ctx, drawn.omitted);
+                out = std::make_shared<const Image>(std::move(drawn.image));
+            }
+            return {out, image_bytes(*out)};
+        },
+        &ctx);
 }
 
 // The contents' page drawn over a box of its own pixels at `dpi` ("RGBA"), what lies off it clear.
@@ -727,18 +873,48 @@ bool deep_file(const core::SmartContents& contents) {
     return contents.kind == "file" && contents.depth > 8 && !contents.mode.starts_with("cmyk") && !contents.mode.starts_with("lab");
 }
 
-// The file's picture with every bit as sRGB floats (straight RGBA), through its colour use, remembered.
-std::shared_ptr<const std::vector<float>> deep_srgb(const core::Document& doc, const core::SmartContents& contents) {
-    const std::string key = file_key(doc, contents) + "\ndeep";
-    if (auto kept = deep_pictures().get(key)) return kept;
-    const core::Bytes bytes = file_bytes(doc, contents);
-    if (!bytes) return nullptr;
-    ++g_files_decoded;
-    const DeepPicture deep = deep_picture(*bytes);
-    if (deep.width != contents.width_px || deep.height != contents.height_px) throw core::Error("format", "the smart object's file is not the size it was");
-    auto out = std::make_shared<const std::vector<float>>(srgb_floats(deep, use_profile(doc, contents, *bytes), intent_of(contents), bpc_of(contents)));
-    deep_pictures().put(key, out, out->size() * sizeof(float));
-    return out;
+// The space a page in precise colour mixes in, named (what a picture in its values is remembered by).
+std::string space_name(const Ctx& ctx) { return ctx.page->rgb ? core::dump_canonical(core::to_json(*ctx.page->rgb)) : std::string("srgb"); }
+
+// The file's picture with every bit in the page's values — straight RGBA floats: its colours through its colour use into
+// the space, then as linear light, as the canvas mixes —, remembered. One picture of it is kept (not its sRGB one too:
+// two that would put each other out), made once by one thread while the others wait for it, its work within the budget
+// (TooLarge past it); its colours go into the space a band at a time (independent review A P1-1).
+std::shared_ptr<const std::vector<float>> deep_linear(const Ctx& ctx, const core::SmartContents& contents, const RgbSpace& space) {
+    const core::Document& doc = *ctx.episode;
+    const std::string key = file_key(doc, contents) + "\nlinear " + space_name(ctx);
+    return deep_pictures().get_or_make(
+        key,
+        [&]() -> std::pair<std::shared_ptr<const std::vector<float>>, std::size_t> {
+            const core::Bytes bytes = file_bytes(doc, contents);
+            if (!bytes) return {nullptr, 0};
+            const std::uint64_t n = std::uint64_t(contents.width_px) * std::uint64_t(contents.height_px);
+            const std::uint64_t channels = (contents.mode.starts_with("gray") ? 1u : 3u) + (contents.mode.ends_with("a") ? 1u : 0u);
+            // (its samples as read — 16 bits a sample, then floats — and its RGBA floats)
+            const WorkHold work(n * std::max<std::uint64_t>(6 * channels, 4 * channels + 16) + bytes->size(), &ctx);
+            ++g_files_decoded;
+            std::vector<float> values;
+            {
+                const DeepPicture deep = deep_picture(*bytes);
+                if (deep.width != contents.width_px || deep.height != contents.height_px)
+                    throw core::Error("format", "the smart object's file is not the size it was");
+                values = srgb_floats(deep, use_profile(doc, contents, *bytes), intent_of(contents), bpc_of(contents));
+            }
+            constexpr std::size_t kBand = std::size_t(1) << 16;
+            std::vector<double> rgb(std::size_t(std::min<std::uint64_t>(n, kBand)) * 3);
+            for (std::size_t first = 0; first < n; first += kBand) {
+                if (first % (kBand * 16) == 0) detail::check_cancel(ctx);
+                const std::size_t count = std::size_t(std::min<std::uint64_t>(kBand, n - first));
+                for (std::size_t i = 0; i < count; ++i)
+                    for (unsigned c = 0; c < 3; ++c) rgb[i * 3 + c] = values[(first + i) * 4 + c];
+                space.from_srgb(rgb.data(), count);
+                for (std::size_t i = 0; i < count; ++i)
+                    for (unsigned c = 0; c < 3; ++c) values[(first + i) * 4 + c] = static_cast<float>(space.decode(c, rgb[i * 3 + c]));
+            }
+            auto made = std::make_shared<const std::vector<float>>(std::move(values));
+            return {made, made->size() * sizeof(float)};
+        },
+        &ctx);
 }
 
 // The shape a smart object's panel cuts it to over `area` ("L"), when its panel is not a plain box (as placed_picture cuts).
@@ -758,61 +934,42 @@ std::optional<Image> panel_shape(const Ctx& ctx, const core::Layer& layer, const
     return drawn->getchannel(3);
 }
 
-std::optional<ColorPicture> file_precise(const Ctx& ctx, const core::Layer& layer, const core::SmartContents& contents, const Matrix& m,
-                                         const Box& area, const RgbSpace& space) {
-    const core::Document& doc = *ctx.episode;
-    const auto srgb = deep_srgb(doc, contents);
-    if (srgb == nullptr) return std::nullopt;
-    const int w = static_cast<int>(contents.width_px), h = static_cast<int>(contents.height_px);
-    const double dpi = contents.dpi > 0 ? contents.dpi : 72.0;
-    const Matrix pm = pixel_matrix(m, dpi / 25.4, ctx.dpi);
+// A picture in the page's values (`linear`, w × h straight RGBA floats, `px_per_mm` of its pixels to the contents' mm,
+// remembered under `key`) laid over `area` of a page in precise colour through the smart object's matrix `m`, or through
+// its placing when it is bent (its reach made once and remembered); cut to its panel.
+std::optional<ColorPicture> lay_precise(const Ctx& ctx, const core::Layer& layer, const core::SmartContents& contents, const Matrix& m, const Box& area,
+                                        const std::shared_ptr<const std::vector<float>>& linear, int w, int h, double px_per_mm, const std::string& key) {
+    const Matrix pm = pixel_matrix(m, px_per_mm, ctx.dpi);
     const Box limit = clip_px(ctx, layer);
     const Box part{std::max(area.x0, limit.x0), std::max(area.y0, limit.y0), std::min(area.x1, limit.x1), std::min(area.y1, limit.y1)};
     ColorPicture out{Size{area.width(), area.height()}, std::vector<std::array<double, 4>>(std::size_t(area.width()) * area.height(), {0, 0, 0, 0})};
     if (part.width() <= 0 || part.height() <= 0) return out;
-    // (its sRGB values into the space's, then laid on the page in linear light as the canvas mixes; remembered)
-    const std::string key = file_key(doc, contents) + "\nlinear " + (ctx.page->rgb ? core::dump_canonical(core::to_json(*ctx.page->rgb)) : "srgb");
-    std::shared_ptr<const std::vector<float>> linear = deep_pictures().get(key);
-    if (linear == nullptr) {
-        std::vector<double> rgb(std::size_t(w) * h * 3);
-        for (std::size_t i = 0; i < std::size_t(w) * h; ++i)
-            for (unsigned c = 0; c < 3; ++c) rgb[i * 3 + c] = (*srgb)[i * 4 + c];
-        space.from_srgb(rgb.data(), std::size_t(w) * h);
-        std::vector<float> values(std::size_t(w) * h * 4);
-        for (std::size_t i = 0; i < std::size_t(w) * h; ++i) {
-            for (unsigned c = 0; c < 3; ++c) values[i * 4 + c] = static_cast<float>(space.decode(c, rgb[i * 3 + c]));
-            values[i * 4 + 3] = (*srgb)[i * 4 + 3];
-        }
-        linear = std::make_shared<const std::vector<float>>(std::move(values));
-        deep_pictures().put(key, linear, linear->size() * sizeof(float));
-    }
     const Resample how = resample_of(interp_of(layer, contents));
     if (const std::optional<Placing> bend = placing_of(layer, contents)) {  // (PC3 A5: through its placing, its reach once, remembered)
-        const Box reach = reached(page_pixels(*bend, dpi / 25.4, ctx.dpi), w, h, limit);
+        const Box reach = reached(page_pixels(*bend, px_per_mm, ctx.dpi), w, h, limit);
         const std::string laid_key = key + "\nbent " + bend->key + " " + core::dump_python(Json::array({ctx.dpi, reach.x0, reach.y0, reach.x1, reach.y1, static_cast<int>(how)}));
-        std::shared_ptr<const std::vector<float>> laid = deep_pictures().get(laid_key);
-        if (laid == nullptr) {
-            detail::check_cancel(ctx);
-            resample::Plane src(w, h, 4, true);
-            src.hdr = true;
-            src.v = *linear;
-            laid = std::make_shared<const std::vector<float>>(bent_plane(src, *bend, dpi / 25.4, ctx.dpi, reach, how).v);
-            deep_pictures().put(laid_key, laid, laid->size() * sizeof(float));
-        }
+        const std::shared_ptr<const std::vector<float>> laid = deep_pictures().get_or_make(
+            laid_key,
+            [&]() -> std::pair<std::shared_ptr<const std::vector<float>>, std::size_t> {
+                const WorkHold work((std::uint64_t(w) * h + std::uint64_t(std::max(0, reach.width())) * std::max(0, reach.height())) * 16, &ctx);
+                detail::check_cancel(ctx);
+                resample::Plane src(w, h, 4, true);
+                src.hdr = true;
+                src.v = *linear;
+                auto made = std::make_shared<const std::vector<float>>(bent_plane(src, *bend, px_per_mm, ctx.dpi, reach, how).v);
+                return {made, made->size() * sizeof(float)};
+            },
+            &ctx);
         for (int y = std::max(part.y0, reach.y0); y < std::min(part.y1, reach.y1); ++y) {
             for (int x = std::max(part.x0, reach.x0); x < std::min(part.x1, reach.x1); ++x) {
                 const float* v = laid->data() + (std::size_t(y - reach.y0) * reach.width() + (x - reach.x0)) * 4;
                 out.pixels[std::size_t(y - area.y0) * area.width() + (x - area.x0)] = {v[0], v[1], v[2], v[3]};
             }
         }
-    } else {
-        const std::vector<double> laid = lay(*linear, w, h, 4, pm, part, how, &ctx);
-        for (int y = part.y0; y < part.y1; ++y) {
-            for (int x = part.x0; x < part.x1; ++x) {
-                const double* v = laid.data() + (std::size_t(y - part.y0) * part.width() + (x - part.x0)) * 4;
-                out.pixels[std::size_t(y - area.y0) * area.width() + (x - area.x0)] = {v[0], v[1], v[2], v[3]};
-            }
-        }
+    } else {  // (the tile's part only, read from the picture where it is)
+        const float* values = linear->data();
+        lay_into([values, w](int j) { return values + std::size_t(j) * std::size_t(w) * 4; }, 1.0, w, h, 4, pm, part, how, &ctx,
+                 [&](int x, int y, const double* v) { out.pixels[std::size_t(y - area.y0) * area.width() + (x - area.x0)] = {v[0], v[1], v[2], v[3]}; });
     }
     if (const auto shape = panel_shape(ctx, layer, area)) {
         for (int y = 0; y < area.height(); ++y) {
@@ -821,6 +978,52 @@ std::optional<ColorPicture> file_precise(const Ctx& ctx, const core::Layer& laye
         }
     }
     return out;
+}
+
+std::optional<ColorPicture> file_precise(const Ctx& ctx, const core::Layer& layer, const core::SmartContents& contents, const Matrix& m,
+                                         const Box& area, const RgbSpace& space) {
+    // (more pixels than a precise page keeps of one file — one placed on a page of 8 bits made precise since by another
+    // way: drawn in 8 bits)
+    if (std::uint64_t(contents.width_px) * std::uint64_t(contents.height_px) > core::kColorRasterMaxPixels) return std::nullopt;
+    const std::shared_ptr<const std::vector<float>> linear = deep_linear(ctx, contents, space);
+    if (linear == nullptr) return std::nullopt;
+    const double dpi = contents.dpi > 0 ? contents.dpi : 72.0;
+    return lay_precise(ctx, layer, contents, m, area, linear, static_cast<int>(contents.width_px), static_cast<int>(contents.height_px), dpi / 25.4,
+                       file_key(*ctx.episode, contents) + "\nlinear " + space_name(ctx));
+}
+
+// Contents of the page's RGB in precise colour laid other than by whole pixels (made smaller or larger, turned, bent): drawn
+// whole in precise colour at the resolution they land at, in the page's values, remembered as a file's are, then laid
+// through the matrix — their bits kept (independent review A P2-5). Nothing when they do not composite in precise colour
+// (their 8-bit picture is drawn).
+std::optional<ColorPicture> contents_precise(const Ctx& ctx, const core::Layer& layer, const core::SmartContents& contents, const Matrix& m,
+                                             const Box& area, const RgbSpace& space) {
+    const std::optional<Placing> bend = placing_of(layer, contents);
+    const int dpi = bend ? bent_dpi(*bend, contents, ctx.dpi) : contents_dpi(m, ctx.dpi);
+    const Size size{to_px(contents.page->spec.width_mm.value(), dpi), to_px(contents.page->spec.height_mm.value(), dpi)};
+    if (size.width <= 0 || size.height <= 0) return std::nullopt;
+    const std::string key = contents_key(ctx, contents, dpi) + "\nprecise " + space_name(ctx);
+    const std::shared_ptr<const std::vector<float>> linear = deep_pictures().get_or_make(
+        key,
+        [&]() -> std::pair<std::shared_ptr<const std::vector<float>>, std::size_t> {
+            // (its values as drawn, as the page's values, and as RGBA floats)
+            const WorkHold work(std::uint64_t(size.width) * size.height * (16 + 32 + 16), &ctx);
+            ++g_contents_drawn;
+            RenderOptions o = contents_options(ctx);
+            o.precise = true;
+            RenderResult drawn = render_contents(*contents.page, dpi, o, ctx.episode);
+            left_out(ctx, drawn.omitted);
+            if (!drawn.precise) return {std::make_shared<const std::vector<float>>(), 0};  // (not in precise colour: its 8-bit picture)
+            const core::ColorRasterView view(*drawn.precise);
+            const ColorPicture values = color_picture(view, size, Box{0, 0, size.width, size.height}, space);
+            auto made = std::make_shared<std::vector<float>>(values.pixels.size() * 4);
+            for (std::size_t i = 0; i < values.pixels.size(); ++i)
+                for (unsigned c = 0; c < 4; ++c) (*made)[i * 4 + c] = static_cast<float>(values.pixels[i][c]);
+            return {made, made->size() * sizeof(float)};
+        },
+        &ctx);
+    if (linear == nullptr || linear->empty()) return std::nullopt;
+    return lay_precise(ctx, layer, contents, m, area, linear, size.width, size.height, dpi / 25.4, key);
 }
 
 // --- a file or contents of inks, on a page of inks ------------------------------------------------------------------------
@@ -1210,15 +1413,24 @@ auto filtering(const Work& work) {
 
 Box whole_page(const Ctx& ctx) { return Box{0, 0, ctx.size.width, ctx.size.height}; }
 
+// The work of a smart object's filtered picture of the whole page, a pixel: in precise colour the picture below, the one
+// being filtered and what a filter makes (each RGBA doubles) and a filter's own raster and work (its samples, its floats);
+// on a page of inks, a channel's (its values below, now and made, doubles, and its plates' samples and floats).
+constexpr std::uint64_t kFilteredPreciseBytes = 3 * 32 + 8 + 16;
+constexpr std::uint64_t kFilteredInkBytes = 3 * 8 + 2 + 4;
+
 std::optional<Image> filtered_8bit(const Ctx& ctx, const core::Layer& layer, const core::SmartContents& contents, const Box& area) {
     const std::string key = filtered_key(ctx, layer, contents, "8");
-    std::shared_ptr<const Image> whole = pictures().get(key);
-    if (whole == nullptr) {
-        std::optional<Image> base = picture_8bit(ctx, unfiltered(layer), whole_page(ctx));
-        if (!base) base = Image::create("RGBA", ctx.size, Ink{0, 0, 0, 0});
-        whole = std::make_shared<const Image>(filtering([&] { return smart_filters::on_8bit(*ctx.episode, *ctx.page, layer, *base, ctx.dpi); }));
-        pictures().put(key, whole, image_bytes(*whole));
-    }
+    // (made once while the tiles wait for it)
+    const std::shared_ptr<const Image> whole = pictures().get_or_make(
+        key,
+        [&]() -> std::pair<std::shared_ptr<const Image>, std::size_t> {
+            std::optional<Image> base = picture_8bit(ctx, unfiltered(layer), whole_page(ctx));
+            if (!base) base = Image::create("RGBA", ctx.size, Ink{0, 0, 0, 0});
+            auto made = std::make_shared<const Image>(filtering([&] { return smart_filters::on_8bit(*ctx.episode, *ctx.page, layer, *base, ctx.dpi); }));
+            return {made, image_bytes(*made)};
+        },
+        &ctx);
     Image out = Image::create("RGBA", Size{area.width(), area.height()}, Ink{0, 0, 0, 0});
     const Box part = shown_part(ctx, layer, area);
     if (part.width() > 0 && part.height() > 0) out.paste(whole->crop(part), Point{part.x0 - area.x0, part.y0 - area.y0});
@@ -1229,17 +1441,27 @@ std::optional<Image> filtered_8bit(const Ctx& ctx, const core::Layer& layer, con
 std::optional<ColorPicture> filtered_precise(const Ctx& ctx, const core::Layer& layer, const core::SmartContents& contents, const Box& area,
                                              const RgbSpace& space) {
     const std::string key = filtered_key(ctx, layer, contents, "precise");
-    std::shared_ptr<const ColorPicture> whole = precise_filtered().get(key);
-    if (whole == nullptr) {
-        const core::Layer bare = unfiltered(layer);
-        std::optional<ColorPicture> base = picture_precise(ctx, bare, whole_page(ctx), space);
-        if (!base) {  // (a picture of 8 bits: its sRGB colours in the space)
-            const std::optional<Image> eight = picture_8bit(ctx, bare, whole_page(ctx));
-            base = color_picture(eight ? *eight : Image::create("RGBA", ctx.size, Ink{0, 0, 0, 0}), space);
-        }
-        whole = std::make_shared<const ColorPicture>(
-            filtering([&] { return smart_filters::on_precise(*ctx.episode, *ctx.page, layer, *base, space, ctx.dpi); }));
-        precise_filtered().put(key, whole, whole->pixels.size() * sizeof(whole->pixels[0]));
+    // (made once while the tiles wait for it, its work within the budget: the picture below, the filters' own and what they
+    // make — past it, left out and said; independent review A P2-4)
+    std::shared_ptr<const ColorPicture> whole;
+    try {
+        whole = precise_filtered().get_or_make(
+            key,
+            [&]() -> std::pair<std::shared_ptr<const ColorPicture>, std::size_t> {
+                const WorkHold work(std::uint64_t(ctx.size.width) * std::uint64_t(ctx.size.height) * kFilteredPreciseBytes, &ctx);
+                const core::Layer bare = unfiltered(layer);
+                std::optional<ColorPicture> base = picture_precise(ctx, bare, whole_page(ctx), space);
+                if (!base) {  // (a picture of 8 bits: its sRGB colours in the space)
+                    const std::optional<Image> eight = picture_8bit(ctx, bare, whole_page(ctx));
+                    base = color_picture(eight ? *eight : Image::create("RGBA", ctx.size, Ink{0, 0, 0, 0}), space);
+                }
+                auto made = std::make_shared<const ColorPicture>(
+                    filtering([&] { return smart_filters::on_precise(*ctx.episode, *ctx.page, layer, *base, space, ctx.dpi); }));
+                return {made, made->pixels.size() * sizeof(made->pixels[0])};
+            },
+            &ctx);
+    } catch (const TooLarge&) {
+        throw NotYetPorted("smart:too_large");
     }
     ColorPicture out{Size{area.width(), area.height()}, std::vector<std::array<double, 4>>(std::size_t(area.width()) * area.height(), {0, 0, 0, 0})};
     const Box part = shown_part(ctx, layer, area);
@@ -1259,16 +1481,25 @@ std::optional<ColorPicture> filtered_precise(const Ctx& ctx, const core::Layer& 
 std::optional<InkPicture> filtered_inks(const Ctx& ctx, const core::Layer& layer, const core::SmartContents& contents, const Box& area) {
     const core::PageColor& color = *ctx.page->color;
     const std::string key = filtered_key(ctx, layer, contents, "inks");
-    std::shared_ptr<const InkPicture> whole = inks_filtered().get(key);
-    if (whole == nullptr) {
-        const core::Layer bare = unfiltered(layer);
-        std::optional<InkPicture> base = picture_inks(ctx, bare, whole_page(ctx));
-        if (!base) {  // (a picture of 8 bits: its colours as the page's inks, by its rules)
-            const std::optional<Image> eight = picture_8bit(ctx, bare, whole_page(ctx));
-            base = ink_picture(eight ? *eight : Image::create("RGBA", ctx.size, Ink{0, 0, 0, 0}), color);
-        }
-        whole = std::make_shared<const InkPicture>(filtering([&] { return smart_filters::on_inks(*ctx.episode, *ctx.page, layer, *base, ctx.dpi); }));
-        inks_filtered().put(key, whole, whole->values.size() * sizeof(double));
+    // (made once, within the budget: as filtered_precise)
+    std::shared_ptr<const InkPicture> whole;
+    try {
+        whole = inks_filtered().get_or_make(
+            key,
+            [&]() -> std::pair<std::shared_ptr<const InkPicture>, std::size_t> {
+                const WorkHold work(std::uint64_t(ctx.size.width) * std::uint64_t(ctx.size.height) * (color.planes() + 1) * kFilteredInkBytes, &ctx);
+                const core::Layer bare = unfiltered(layer);
+                std::optional<InkPicture> base = picture_inks(ctx, bare, whole_page(ctx));
+                if (!base) {  // (a picture of 8 bits: its colours as the page's inks, by its rules)
+                    const std::optional<Image> eight = picture_8bit(ctx, bare, whole_page(ctx));
+                    base = ink_picture(eight ? *eight : Image::create("RGBA", ctx.size, Ink{0, 0, 0, 0}), color);
+                }
+                auto made = std::make_shared<const InkPicture>(filtering([&] { return smart_filters::on_inks(*ctx.episode, *ctx.page, layer, *base, ctx.dpi); }));
+                return {made, made->values.size() * sizeof(double)};
+            },
+            &ctx);
+    } catch (const TooLarge&) {
+        throw NotYetPorted("smart:too_large");
     }
     const unsigned n = whole->channels;
     InkPicture out{Size{area.width(), area.height()}, n, std::vector<double>(std::size_t(area.width()) * area.height() * (n + 1), 0.0)};
@@ -1299,25 +1530,28 @@ core::Bytes file_bytes(const core::Document& doc, const core::SmartContents& con
 
 std::shared_ptr<const Image> file_picture(const core::Document& doc, const core::SmartContents& contents) {
     const std::string key = file_key(doc, contents);
-    if (auto kept = pictures().get(key)) return kept;
-    const core::Bytes bytes = file_bytes(doc, contents);
-    if (!bytes) return nullptr;
-    ++g_files_decoded;
-    Image picture = eight_bit_picture(*bytes);
-    if (const auto icc = use_profile(doc, contents, *bytes); icc && !icc->empty()) {
-        // (taken from that profile to sRGB, as the colour settings take a picture in: a profile of other colours is none)
-        const std::string_view mode = picture.mode();
-        const core::ProfileSpace wanted = mode == "CMYK" ? core::ProfileSpace::Cmyk
-                                          : (mode == "L" || mode == "LA" || mode == "1" || mode.starts_with("I")) ? core::ProfileSpace::Gray
-                                                                                                                   : core::ProfileSpace::Rgb;
-        if (ink::profile_space(*icc) == wanted) picture = proof::convert_picture(picture, *icc, intent_of(contents), bpc_of(contents));
-    }
-    // (as the 8-bit picture a placed picture was made of: RGB(A) as the picture held it, then as the drawing reads it)
-    const std::string_view mode = picture.mode();
-    picture = picture.convert(mode == "RGBA" || mode == "LA" || mode == "P" ? "RGBA" : "RGB").convert("RGBA");
-    auto out = std::make_shared<const Image>(std::move(picture));
-    pictures().put(key, out, image_bytes(*out));
-    return out;
+    return pictures().get_or_make(  // (decoded once while the tiles wait for it)
+        key,
+        [&]() -> std::pair<std::shared_ptr<const Image>, std::size_t> {
+            const core::Bytes bytes = file_bytes(doc, contents);
+            if (!bytes) return {nullptr, 0};
+            ++g_files_decoded;
+            Image picture = eight_bit_picture(*bytes);
+            if (const auto icc = use_profile(doc, contents, *bytes); icc && !icc->empty()) {
+                // (taken from that profile to sRGB, as the colour settings take a picture in: a profile of other colours is none)
+                const std::string_view mode = picture.mode();
+                const core::ProfileSpace wanted = mode == "CMYK" ? core::ProfileSpace::Cmyk
+                                                  : (mode == "L" || mode == "LA" || mode == "1" || mode.starts_with("I")) ? core::ProfileSpace::Gray
+                                                                                                                           : core::ProfileSpace::Rgb;
+                if (ink::profile_space(*icc) == wanted) picture = proof::convert_picture(picture, *icc, intent_of(contents), bpc_of(contents));
+            }
+            // (as the 8-bit picture a placed picture was made of: RGB(A) as the picture held it, then as the drawing reads it)
+            const std::string_view mode = picture.mode();
+            picture = picture.convert(mode == "RGBA" || mode == "LA" || mode == "P" ? "RGBA" : "RGB").convert("RGBA");
+            auto out = std::make_shared<const Image>(std::move(picture));
+            return {out, image_bytes(*out)};
+        },
+        nullptr);
 }
 
 std::optional<Image> picture_8bit(const Ctx& ctx, const core::Layer& layer, const Box& area) {
@@ -1354,13 +1588,23 @@ std::optional<ColorPicture> picture_precise(const Ctx& ctx, const core::Layer& l
         if (ctx.finish && (ctx.mode == "print" || ctx.mode == "proof") && ctx.page->spec.expression != "color" && layer.role != core::LayerRole::Draft &&
             layer.role != core::LayerRole::Name)
             return std::nullopt;
-        return file_precise(ctx, layer, *contents, m, area, space);
+        try {
+            return file_precise(ctx, layer, *contents, m, area, space);
+        } catch (const TooLarge&) {
+            return std::nullopt;  // (past the work's budget: its 8-bit picture)
+        }
     }
     if (contents->kind != "page" || !contents->page || contents->page->color || !(contents->page->rgb == ctx.page->rgb)) return std::nullopt;
     if (core::smart::bent(layer)) return std::nullopt;  // (PC3 A5: bent contents, laid in 8 bits)
     const Matrix pm = pixel_matrix(m, ctx.dpi / 25.4, ctx.dpi);
     const auto shift = whole_shift(pm);
-    if (!shift) return std::nullopt;
+    if (!shift) {  // (made smaller or larger, turned: drawn in precise colour, then laid — independent review A P2-5)
+        try {
+            return contents_precise(ctx, layer, *contents, m, area, space);
+        } catch (const TooLarge&) {
+            return std::nullopt;  // (past the work's budget: its 8-bit picture)
+        }
+    }
     // (contents in precise colour moved by whole pixels: their values, part by part)
     const Box limit = clip_px(ctx, layer);
     const Box part{std::max(area.x0, limit.x0), std::max(area.y0, limit.y0), std::min(area.x1, limit.x1), std::min(area.y1, limit.y1)};
@@ -1446,5 +1690,14 @@ std::int64_t cache_pixels() {
 }
 
 Counts counts() { return Counts{g_contents_drawn.load(), g_files_decoded.load()}; }
+
+void set_budget_for_testing(std::size_t bytes) {
+    const std::size_t budget = bytes == 0 ? kBudget : bytes;
+    pictures().set_budget(budget);
+    deep_pictures().set_budget(budget);
+    ink_pictures().set_budget(budget);
+    precise_filtered().set_budget(budget);
+    inks_filtered().set_budget(budget);
+}
 
 }  // namespace genko::render::smart

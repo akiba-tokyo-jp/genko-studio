@@ -17,6 +17,7 @@
 #include "core/smart.hpp"
 #include "render/fill_patches.hpp"
 #include "render/image_ops.hpp"
+#include "render/layer_bounds.hpp"
 #include "render/layer_masks.hpp"
 #include "render/own_pixels.hpp"
 #include "render/page.hpp"
@@ -408,8 +409,9 @@ std::optional<std::array<double, 4>> content_box(const Document& doc, const Page
         all = all ? Box{std::min(all->x0, b->x0), std::min(all->y0, b->y0), std::max(all->x1, b->x1), std::max(all->y1, b->y1)} : *b;
     }
     if (!all) return std::nullopt;
-    const double mm = 25.4 / kDpi;
-    return std::array<double, 4>{all->x0 * mm, all->y0 * mm, all->x1 * mm, all->y1 * mm};
+    // (the page's working grid, as the Move tool's boxes are: independent review A P3-1)
+    const auto g = layer_bounds::grid(page);
+    return std::array<double, 4>{all->x0 / g[0], all->y0 / g[1], all->x1 / g[0], all->y1 / g[1]};
 }
 
 std::vector<std::string> layers_moved(const Page& page, const std::vector<std::string>& ids) {
@@ -469,6 +471,9 @@ void move_layer_in(Document& doc, std::size_t at, const std::string& id, const M
             (void)smart_filters::push_filter(doc, page, layer, core::py_str((*m.filter)["kind"]), (*m.filter)["params"], std::nullopt);
             return;
         }
+        // (its filters that name places still in the page's mm — a book of before — kept in its own first, so that they go
+        // with it: independent review A P2-1)
+        smart_filters::settle_places(doc, page, layer);
         if (m.warp) {  // (its one warp replaced, in its contents' mm)
             const auto kept = warp_in_contents(*m.warp, smart_placing(layer, *contents));
             core::smart::put_setting(layer, "warp", kept ? warp_to_json(*kept) : Json());
@@ -584,6 +589,13 @@ void move_layer_in(Document& doc, std::size_t at, const std::string& id, const M
 }
 
 }  // namespace
+
+void move_linked_masks(Page& page, Layer& layer, const Map& m) {
+    move_linked_mask(page, layer, m, std::nullopt);
+    if (layer.vector_mask && layer.vector_mask->linked) {
+        layer.vector_mask->path = m.is_affine() ? pg::map_path(layer.vector_mask->path, pg::mapping(m.affine)) : bend_path(layer.vector_mask->path, m);
+    }
+}
 
 void move_layer(Document& doc, std::size_t at, const std::string& id, const Map& m, const std::optional<Json>& area, resample::Interp interp,
                 const std::vector<std::string>* parts) {

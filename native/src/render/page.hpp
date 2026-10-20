@@ -146,6 +146,10 @@ Image render_spread(const core::Document& episode, const core::Num& first, const
 // panels, its mask or its opacity (the onion skin and the light table).
 Image cel_image(const core::Page& page, const core::Layer& layer, int dpi, const core::Document* episode = nullptr);
 
+// layer_image over `area` of the page's pixels at `dpi` only: the same pixels as the whole picture cut there (its effects
+// drawn as far as they reach into it). What Auto-Select looks at round a point (independent review A P2-3).
+Image layer_image_over(const core::Page& page, const core::Layer& layer, int dpi, const Box& area, const core::Document* episode = nullptr,
+                       bool skip_unported = false);
 // One layer alone over a transparent page (its pixels, fills and lines, panel clip and mask).
 Image layer_image(const core::Page& page, const core::Layer& layer, int dpi, const core::Document* episode = nullptr,
                   bool skip_unported = false, bool bake_color = false);

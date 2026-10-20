@@ -59,8 +59,8 @@ struct Map {
 
 Map affine_map(const core::vector::Affine& m, const std::array<double, 4>& box);
 
-// The box (x0, y0, x1, y1 mm, on the working 200 dpi grid) of what the layers show, each drawn alone at 200 dpi (its
-// panel clip and mask as drawn); none when they show nothing.
+// The box (x0, y0, x1, y1 mm, on the page's working grid: layer_bounds::grid, the Move tool's) of what the layers show,
+// each drawn alone at 200 dpi (its panel clip and mask as drawn); none when they show nothing.
 std::optional<std::array<double, 4>> content_box(const core::Document& doc, const core::Page& page, const std::vector<std::string>& ids);
 
 // The layers an op names (`ids`, page order), with the folders' layers inside them and the layers linked to any of them
@@ -71,6 +71,9 @@ std::vector<std::string> layers_moved(const core::Page& page, const std::vector<
 // rest left); `parts`: only these shape parts of it (none: all it holds). OpError for what it cannot move that way.
 void move_layer(core::Document& doc, std::size_t at, const std::string& id, const Map& m, const std::optional<core::Json>& area,
                 resample::Interp interp, const std::vector<std::string>* parts = nullptr);
+// The layer's mask and vector mask through the map when they are linked (masks@1, vector@1), as move_layer moves them
+// with a layer moved whole (smart_transform's too).
+void move_linked_masks(core::Page& page, core::Layer& layer, const Map& m);
 // A pen line, a path and a shape part through the map (an affine map exactly; any other: a line given points every
 // 1.5 mm first, a path's segments cut 1.5 mm long first and their anchors and handles moved — a shape part's live shape
 // dropped then, its stroke's width scaled as the map scales near it).

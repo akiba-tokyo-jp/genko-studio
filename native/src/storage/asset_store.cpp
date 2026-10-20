@@ -5,6 +5,8 @@
 #include <QCryptographicHash>
 
 #include <algorithm>
+#include <map>
+#include <set>
 #include <system_error>
 #include <vector>
 #include <utility>
@@ -126,6 +128,44 @@ std::size_t copy_assets(const fs::path& src, const fs::path& dest) {
         // says, or is no longer a regular file)
         if (!copy_file_verified(file, target.path(ref, suffix), name.substr(0, 64), kAssetMaxBytes)) continue;
         ++copied;
+    }
+    return copied;
+}
+
+std::size_t copy_named_assets(const fs::path& src, const fs::path& dest, const std::set<std::string>& refs) {
+    const fs::path root = src / "assets";
+    std::error_code ec;
+    if (refs.empty() || fs::symlink_status(root, ec).type() != fs::file_type::directory) return 0;  // (none, or a link)
+    // (by the folder of each digest's first two digits: each folder listed once)
+    std::map<std::string, std::set<std::string>> by_folder;
+    for (const std::string& ref : refs) {
+        if (AssetStore::is_ref(ref)) by_folder[ref.substr(7, 2)].insert(ref.substr(7));
+    }
+    const AssetStore target(dest);
+    std::size_t copied = 0;
+    for (const auto& [folder, digests] : by_folder) {
+        const fs::path dir = root / folder;
+        std::error_code dir_ec;
+        if (fs::symlink_status(dir, dir_ec).type() != fs::file_type::directory) continue;
+        std::vector<fs::path> files;
+        for (fs::directory_iterator it(dir, dir_ec), end; !dir_ec && it != end; it.increment(dir_ec)) {
+            std::error_code type_ec;
+            if (it->symlink_status(type_ec).type() != fs::file_type::regular || type_ec) continue;
+            const std::string name = path_to_utf8(it->path().filename());
+            if (name.size() < 64 || !digests.contains(name.substr(0, 64))) continue;
+            files.push_back(it->path());
+        }
+        if (dir_ec) throw core::Error("io", os_error_text(dir_ec.value(), dir), path_to_utf8(dir));
+        std::sort(files.begin(), files.end());
+        for (const fs::path& file : files) {
+            const std::string name = path_to_utf8(file.filename());
+            const std::string ref = "sha256:" + name.substr(0, 64);
+            const std::string suffix = name.substr(64);
+            if (!AssetStore::is_suffix(suffix) || (name.size() >= 4 && name.compare(name.size() - 4, 4, ".tmp") == 0)) continue;
+            if (target.has(ref, suffix)) continue;
+            if (!copy_file_verified(file, target.path(ref, suffix), name.substr(0, 64), kAssetMaxBytes)) continue;
+            ++copied;
+        }
     }
     return copied;
 }

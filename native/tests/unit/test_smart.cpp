@@ -27,6 +27,7 @@
 #include "core/vector.hpp"
 #include "render/image.hpp"
 #include "render/ops_registry.hpp"
+#include "render/page.hpp"
 #include "render/png.hpp"
 #include "storage/asset_store.hpp"
 #include "storage/reader.hpp"
@@ -432,6 +433,44 @@ private slots:
         QVERIFY(refused(doc, Json::array({Json{{"op", "smart_transform"}, {"page", 1}, {"id", "so1"}, {"warp", Json::object({{"x", 1}})}}}), "warp"));
         QVERIFY(refused(doc, Json::array({Json{{"op", "smart_transform"}, {"page", 1}, {"id", "so1"}, {"perspective", Json::object({{"x", 1}})}}}),
                         "perspective"));
+    }
+
+    // (independent review A P2-2) smart_transform moves a smart object as transform_layers moves it: its mask and vector
+    // mask with it when they are linked, and not at all where its position is locked.
+    void aTransformTakesItsLinkedMasksAndKeepsItsLock() {
+        const Json square{{"subpaths", Json::array({Json{{"closed", true},
+                                                         {"knots", Json::array({Json::array({0, 0}), Json::array({200, 0}), Json::array({200, 290}), Json::array({0, 290})})}}})}};
+        const Document doc = run(painted(), Json::array({Json{{"op", "smart_convert"}, {"page", 1}, {"id", "p1"}, {"new_id", "so1"}},
+                                                         Json{{"op", "set_layer_mask"}, {"page", 1}, {"id", "so1"}, {"linked", true},
+                                                              {"area", Json{{"poly", Json::array({Json::array({10, 10}), Json::array({60, 10}), Json::array({60, 290}),
+                                                                                                   Json::array({10, 290})})}}}},
+                                                         Json{{"op", "set_vector_mask"}, {"page", 1}, {"id", "so1"}, {"path", square}}}));
+        const core::Layer& was = *layer_of(doc.page(0), "so1");
+        QVERIFY(was.mask && was.mask->linked && was.vector_mask && was.vector_mask->linked);
+        const Document moved = run(doc, Json::array({Json{{"op", "smart_transform"}, {"page", 1}, {"id", "so1"}, {"matrix", Json::array({1, 0, 0, 1, 10, 0})}}}));
+        const core::Layer& now = *layer_of(moved.page(0), "so1");
+        QCOMPARE(now.vector_mask->path.subpaths.at(0).knots.at(0).anchor.x, 10.0);
+        // (the mask 10 mm to the right too: the red block shows at 65 mm across, which the mask hid before)
+        const auto alpha_at = [](const Document& d, const core::Layer& l, double x_mm, double y_mm) {
+            const render::Image alone = render::layer_image(d.page(0), l, 50, &d, true).convert("RGBA");
+            return alone.getpixel(static_cast<int>(x_mm / 25.4 * 50), static_cast<int>(y_mm / 25.4 * 50)).back();
+        };
+        QCOMPARE(alpha_at(doc, was, 65, 90), 0.0);
+        QVERIFY(alpha_at(moved, now, 65, 90) > 0);
+        // (unlinked: they stay)
+        Document unlinked = doc;
+        for (core::Layer& l : unlinked.edit_page(0).layers) {
+            if (l.id != "so1") continue;
+            l.mask->linked = false;
+            l.vector_mask->linked = false;
+        }
+        const Document alone = run(unlinked, Json::array({Json{{"op", "smart_transform"}, {"page", 1}, {"id", "so1"}, {"matrix", Json::array({1, 0, 0, 1, 10, 0})}}}));
+        QCOMPARE(layer_of(alone.page(0), "so1")->vector_mask->path.subpaths.at(0).knots.at(0).anchor.x, 0.0);
+        QVERIFY(*layer_of(alone.page(0), "so1")->mask->png == *layer_of(unlinked.page(0), "so1")->mask->png);
+        // (its position locked: refused as transform_layers refuses it)
+        const Document locked = run(doc, Json::array({Json{{"op", "set_layer"}, {"page", 1}, {"id", "so1"}, {"lock_position", true}}}));
+        QVERIFY(refused(locked, Json::array({Json{{"op", "smart_transform"}, {"page", 1}, {"id", "so1"}, {"matrix", Json::array({1, 0, 0, 1, 10, 0})}}}),
+                        "the position of the layer so1 is locked"));
     }
 
     void aPicturesSmartObjectGoesWithItsPanel() {

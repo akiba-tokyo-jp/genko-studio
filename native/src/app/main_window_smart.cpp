@@ -550,7 +550,9 @@ QWidget* smart_properties(MainWindow* window, const core::Page& page, const core
         b->setValue(value);
         return b;
     };
+    // (its matrix as a turn of a width, a height and a shear: the shear and its corners kept through 変形を適用)
     const double sx = std::hypot(m.a, m.b), sy = m.det() / (sx > 0 ? sx : 1.0);
+    const double turned = std::atan2(m.b, m.a), shear = m.c * std::cos(turned) + m.d * std::sin(turned);
     // (a picture of few pixels laid over a page is many thousands of percent)
     auto* width = spin("properties_smart_w", -1e7, 1e7, sx * 100, QStringLiteral(" %"), 2);
     auto* height = spin("properties_smart_h", -1e7, 1e7, sy * 100, QStringLiteral(" %"), 2);
@@ -585,14 +587,36 @@ QWidget* smart_properties(MainWindow* window, const core::Page& page, const core
     const Json index = page.index.json();
     const std::string id = layer.id;
     // (a box left as it was shown keeps its exact number: the shown one is rounded)
-    const std::array<double, 5> exact{sx * 100, sy * 100, std::atan2(m.b, m.a) * 180 / 3.14159265358979323846, m.e, m.f};
+    const std::array<double, 5> exact{sx * 100, sy * 100, turned * 180 / 3.14159265358979323846, m.e, m.f};
     const std::array<double, 5> shown{width->value(), height->value(), angle->value(), x->value(), y->value()};
-    QObject::connect(apply, &QPushButton::clicked, box, [window, index, id, width, height, angle, x, y, exact, shown] {
+    // (the box it takes on the page, for transform_layers to report: its corners')
+    Json at_box = Json();
+    if (contents != nullptr) {
+        const core::smart::Corners c = core::smart::corners_on_page(layer, *contents);
+        double x0 = c[0].first, y0 = c[0].second, x1 = x0, y1 = y0;
+        for (const auto& [cx, cy] : c) {
+            x0 = std::min(x0, cx);
+            y0 = std::min(y0, cy);
+            x1 = std::max(x1, cx);
+            y1 = std::max(y1, cy);
+        }
+        if (x1 > x0 && y1 > y0) at_box = Json::array({x0, y0, x1 - x0, y1 - y0});
+    }
+    // (moved as the Move tool moves it — transform_layers by the change from its matrix now: its corners, warp and masks
+    // with it, the layers linked to it along, nothing where its position is locked; independent review A P2-2)
+    QObject::connect(apply, &QPushButton::clicked, box, [window, index, id, width, height, angle, x, y, exact, shown, m, sy, shear, at_box] {
         const auto value = [&](std::size_t i, const QDoubleSpinBox* b) { return b->value() == shown[i] ? exact[i] : b->value(); };
         const double w = value(0, width) / 100, h = value(1, height) / 100, turn = value(2, angle) * 3.14159265358979323846 / 180;
         const double c = std::cos(turn), s = std::sin(turn);
-        const Json set = Json::array({w * c, w * s, -h * s, h * c, value(3, x), value(4, y)});
-        window->apply_ops(Json::array({Json{{"op", "smart_transform"}, {"page", index}, {"id", id}, {"set_matrix", set}}}));
+        const double k = std::abs(sy) > 1e-12 ? shear / sy * h : 0.0;  // (the shear's slant kept)
+        const core::smart::Matrix wanted{w * c, w * s, k * c - h * s, k * s + h * c, value(3, x), value(4, y)};
+        const auto back = core::smart::inverse(m);
+        if (!back) return;
+        const core::smart::Matrix by = core::smart::multiply(wanted, *back);
+        if (core::smart::is_identity(core::smart::snapped(by))) return;  // (nothing changed)
+        Json op{{"op", "transform_layers"}, {"page", index}, {"ids", Json::array({id})}, {"matrix", core::smart::to_json(by)}};
+        if (!at_box.is_null()) op["box"] = at_box;
+        window->apply_ops(Json::array({op}));
     });
     column->addWidget(apply);
     // a file's colours: as its numbers, from its own profile, or taken as the working space's

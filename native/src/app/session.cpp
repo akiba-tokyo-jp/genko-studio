@@ -319,6 +319,9 @@ Session::JobResult Session::execute(const Job& job) {
             request.actor = job.actor;
             request.base_revision = 0;
             request.ops = Json::array();
+            // (what the book names that only its folder's assets hold — a smart object's file, filter mask, PSD record
+            // and assigned profile, a placed picture — goes with it: independent review A P1-2)
+            request.assets_from = job.doc->asset_dir;
             const storage::SaveResult saved = storage::Saver(lock).save(*job.doc, request);
             render::timelapse::after_save(job.dir, *job.doc, Json());  // (a new book: every page, when it is on)
             r.revision = saved.revision;
@@ -1415,9 +1418,9 @@ void Session::job_done(const JobResult& r) {
             recover_floor_.reset();
             auto copy = std::make_shared<core::Document>(*r.doc);
             copy->revision = r.revision;
-            // (the book's folder, where import_psd reads a relative path from: save_episode sets episode.asset_dir when
-            // it has none — a new book's first save; a book read has the folder it was read from)
-            if (!copy->asset_dir) copy->asset_dir = target;
+            // (the book's folder now — where its pictures and files are read from, the window puts what it imports and
+            // import_psd reads a relative path from: every asset it names was copied there)
+            copy->asset_dir = target;
             last_saved_ = QDateTime::currentDateTime();
             last_revision_ = r.revision;
             rebase_onto(copy, r.revision, 0, 0);
