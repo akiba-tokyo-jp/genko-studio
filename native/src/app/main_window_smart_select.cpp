@@ -180,7 +180,8 @@ void MainWindow::solve_smart(const Json& area, const QString& title, std::functi
         const render::segment::StopScope scope(token);
         try {
             const core::Page& p = doc->page(index);
-            return Found{render::selection::from_mask(render::selection::to_mask(area, p, doc.get())), false, {}};
+            const int dpi = render::selection::grid_dpi(p);  // (a precise or ink page's finest grid)
+            return Found{render::selection::from_mask(render::selection::to_mask(area, p, doc.get(), dpi), dpi), false, {}};
         } catch (const render::Cancelled&) {
             return Found{std::nullopt, true, {}};
         } catch (const std::exception& error) {

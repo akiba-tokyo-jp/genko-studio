@@ -179,7 +179,8 @@ core::Json inspect_area(const core::Document& doc, std::int64_t number, const co
     use_brushes_of(doc);  // (as the ops that draw see the book)
     area_kinds::use_keys();  // (the kinds and modifiers this build adds are known to the bus's resolving)
     try {
-        const Image mask = selection::to_mask(area, *page, &doc, selection::kSelDpi);
+        const int dpi = selection::grid_dpi(*page);  // (as the bus resolves it)
+        const Image mask = selection::to_mask(area, *page, &doc, dpi);
         const auto box = mask.getbbox();
         if (!box) return Json{{"area", nullptr}, {"coverage", 0.0}, {"box_mm", nullptr}, {"selected", false}};
         double covered = 0;
@@ -190,9 +191,9 @@ core::Json inspect_area(const core::Document& doc, std::int64_t number, const co
         Json resolved = area;
         if (core::area_needs_resolving(area)) {
             if (const auto plain = core::resolve_plain_area(area)) resolved = *plain;
-            else resolved = *selection::from_mask(mask, selection::kSelDpi);
+            else resolved = *selection::from_mask(mask, dpi);
         }
-        const double mm = 25.4 / selection::kSelDpi;
+        const double mm = 25.4 / dpi;
         return Json{{"area", std::move(resolved)},
                     {"coverage", core::py_round(coverage, 4)},
                     {"box_mm", Json::array({core::py_round(box->x0 * mm, 3), core::py_round(box->y0 * mm, 3), core::py_round((box->x1 - box->x0) * mm, 3),

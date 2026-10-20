@@ -20,6 +20,7 @@
 #include "render/area_kinds.hpp"
 #include "render/channels.hpp"
 #include "render/draw.hpp"
+#include "render/layer_masks.hpp"
 #include "render/op_limits.hpp"
 #include "render/page.hpp"
 #include "render/path_trace.hpp"
@@ -923,6 +924,11 @@ bool only_key(const Json& area, std::string_view key) {
 
 }  // namespace
 
+int grid_dpi(const core::Page& page) {
+    const bool precise = page.rgb && page.rgb->depth > 8;
+    return page.color || precise ? layer_masks::grid_dpi(page) : kSelDpi;
+}
+
 Image to_mask(const Json& area, const core::Page& page, const core::Document* episode, int dpi) {
     ImageAllocationBudget live(static_cast<std::uint64_t>(limits::kAreaHeld));
     Budget budget;
@@ -977,7 +983,8 @@ std::optional<Json> combine(const std::optional<Json>& current, const Json& area
     }
     const std::string key = how == "add" ? "union" : how == "subtract" ? "subtract" : how == "intersect" ? "intersect" : "";
     if (key.empty()) throw core::OpError("how must be replace, add, subtract or intersect");
-    return from_mask(to_mask(Json{{key, Json::array({*current, area})}}, page, episode));
+    const int dpi = grid_dpi(page);
+    return from_mask(to_mask(Json{{key, Json::array({*current, area})}}, page, episode, dpi), dpi);
 }
 
 std::optional<Json> stroke_area(const std::vector<std::array<double, 2>>& points, double width_mm) {
@@ -1036,7 +1043,8 @@ Json items_to_json(const Items& items) {
 Json resolve(const Json& area, const core::Page& page, const core::Document* episode) {
     if (only_key(area, "rect")) return Json::object({{"poly", rect_poly(area["rect"])}});
     if (only_key(area, "ellipse")) return Json::object({{"poly", ellipse_poly(area["ellipse"])}});
-    auto out = from_mask(to_mask(area, page, episode));
+    const int dpi = grid_dpi(page);
+    auto out = from_mask(to_mask(area, page, episode, dpi), dpi);
     if (!out) area_error("the area is empty");
     return std::move(*out);
 }

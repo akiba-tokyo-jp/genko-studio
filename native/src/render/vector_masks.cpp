@@ -6,6 +6,7 @@
 
 #include "core/pyconv.hpp"
 #include "render/fill.hpp"
+#include "render/layer_masks.hpp"
 #include "render/op_limits.hpp"
 #include "render/path_raster.hpp"
 #include "render/png.hpp"
@@ -13,8 +14,6 @@
 namespace genko::render::vector_masks {
 
 namespace {
-
-constexpr int kMaskDpi = 150;  // (a layer's mask: ops.MASK_DPI)
 
 unsigned char byte_of(float v) { return static_cast<unsigned char>(std::lround(std::clamp(v, 0.0f, 1.0f) * 255.0f)); }
 
@@ -120,23 +119,28 @@ std::optional<Image> with_vector_mask(const core::Page& page, const core::Layer&
 
 void rasterize(const core::Page& page, core::Layer& layer) {
     if (!layer.vector_mask) return;
-    const double w = std::max(1.0, core::py_round_whole(page.spec.width_mm.value() / 25.4 * kMaskDpi));
-    const double h = std::max(1.0, core::py_round_whole(page.spec.height_mm.value() / 25.4 * kMaskDpi));
-    limits::check_sides(w, h, "the page");
-    const Size size{static_cast<int>(w), static_cast<int>(h)};
-    Image picture = layer.mask && layer.mask->png && !layer.mask->png->empty()
-                        ? open_image(*layer.mask->png, kPillowOpenLimits).convert("L").resize(size)
-                        : Image::create("L", size, Ink(255));
-    const Image vector = shown(page, *layer.vector_mask, size, Box{0, 0, size.width, size.height});
-    picture = chops::multiply(picture, vector);
-    if (layer.mask) {
-        layer.mask->png = fills::png_bytes(picture);
-        layer.mask->memo = {};
-    } else {
-        core::Mask mask;
-        mask.png = fills::png_bytes(picture);
-        layer.mask = std::move(mask);
+    const core::vector::VectorMask vector = *layer.vector_mask;
+    const bool own = layer.mask && layer.mask->png && !layer.mask->png->empty();
+    if (!vector.enabled && own) {  // (nothing of it shows: the layer mask as it is)
+        layer.vector_mask.reset();
+        return;
     }
+    const Size size = layer_masks::grid_size(page);
+    const Box whole{0, 0, size.width, size.height};
+    core::vector::VectorMask drawn = vector;  // (as it shows — or would, when it is off)
+    drawn.enabled = true;
+    Image picture = shown(page, drawn, size, whole);
+    core::Mask out;
+    if (own && layer.mask->enabled) {
+        const Image mine = open_image(*layer.mask->png, kPillowOpenLimits).convert("L");
+        picture = chops::multiply(layer_masks::shown(page, *layer.mask, mine, size, whole, Resample::Bicubic), picture);
+        out.linked = layer.mask->linked;
+    } else {
+        out.linked = vector.linked;
+        out.enabled = vector.enabled;
+    }
+    out.png = fills::png_bytes(picture);
+    layer.mask = std::move(out);
     layer.vector_mask.reset();
 }
 
