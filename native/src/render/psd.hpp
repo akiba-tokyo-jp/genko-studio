@@ -71,7 +71,7 @@ struct Layer {
     std::string blend = "normal";
     bool clip = false;
     std::optional<std::size_t> parent;  // the index (in layers()) of the folder it is in
-    std::string kind = "pixels";        // pixels | folder | text | adjust | smart
+    std::string kind = "pixels";        // pixels | folder | text | adjust | smart | shape (pen-shapes@1, PC3 C-b)
     bool has_mask = false;
     // (PC3 B2, the user's decision 3: masks@1) its mask's record past its picture: whether it carries parameters (flags
     // bit 4) — then whether it is placed relative to the layer (bit 0: not linked), its user density (0..255) and feather
@@ -181,6 +181,13 @@ public:
     // without one; and the file's path resources (its saved paths 2000–2997 with their names, its work path 1025, its
     // clipping path 2999), in the file's order.
     std::optional<std::string_view> vector_mask(const Layer& layer) const;
+    // pen-shapes@1 (PC3 C-b, render/psd_shapes): a shape layer's blocks (kind "shape": a fill — its fill layer's block
+    // SoCo, GdFl or PtFl, or vscg — and a vector mask), their payloads; nothing for another layer.
+    struct ShapeBlocks {
+        std::string fill_key;
+        std::string_view fill, vscg, vstk, vogk, path;
+    };
+    std::optional<ShapeBlocks> shape_blocks(const Layer& layer) const;
     struct PathResource {
         unsigned id = 0;
         std::string name;  // (the resource's Pascal name, as its bytes)
@@ -225,6 +232,9 @@ public:
         // (PC3 A3) its placed layer blocks' payloads: SoLd, SoLE, PlLd (size 0: none)
         std::uint64_t sold_at = 0, sold_size = 0, sole_at = 0, sole_size = 0, plld_at = 0, plld_size = 0;
         std::uint64_t vmsk_at = 0, vmsk_size = 0;  // (vector@1, PC3 C-a: its vmsk or vsms block — its vector mask)
+        // (pen-shapes@1, PC3 C-b: a shape layer's fill layer block — its key — and its vscg, vstk, vogk blocks)
+        std::string fill_key;
+        std::uint64_t fill_at = 0, fill_size = 0, vscg_at = 0, vscg_size = 0, vstk_at = 0, vstk_size = 0, vogk_at = 0, vogk_size = 0;
         const ChannelRef* channel(int id) const;
     };
 

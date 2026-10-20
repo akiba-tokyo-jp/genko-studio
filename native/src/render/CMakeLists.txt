@@ -114,6 +114,11 @@ genko_library(genko_render
     ops_paths.cpp
     # PC3 C-e (判型)
     page_pixels.cpp
+    # PC3 C-b (シェイプ: ペンの層の形の部品)
+    shape_parts.cpp
+    ops_shapes.cpp
+    psd_shapes.cpp
+    shape_presets.cpp
     ${GENKO_MATERIAL_RESOURCES}
     ${GENKO_TEXT_RESOURCES}
   PUBLIC_DEPS genko_core Qt6::Core

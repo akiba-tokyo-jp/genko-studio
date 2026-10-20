@@ -505,7 +505,8 @@ bool flattened(const core::Layer& layer) {
 // roles hold nothing.
 bool holds_drawing(const core::Layer& layer) {
     return (layer.raster_png && !layer.raster_png->empty()) || layer.color_raster || layer.ink_raster || layer.stroke_count() > 0 ||
-           !layer.patches.empty() || (layer.kind == core::LayerKind::Fill && ((layer.fill && core::py_truthy(*layer.fill)) || layer.fill_rgb)) ||
+           !layer.patches.empty() || (layer.shapes && !layer.shapes->items.empty()) ||
+           (layer.kind == core::LayerKind::Fill && ((layer.fill && core::py_truthy(*layer.fill)) || layer.fill_rgb)) ||
            (layer.kind == core::LayerKind::Adjust && layer.adjust && core::py_truthy(*layer.adjust));
 }
 

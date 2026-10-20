@@ -295,6 +295,7 @@ bool MainWindow::hold_key_released(int key, std::optional<double> now) {
     if (now.value_or(monotonic_seconds()) - switched.since < kHoldSeconds) return false;  // (a tap: the tool stays)
     QString back = switched.before;
     if (!tool_actions_.contains(back) && back == QLatin1String("marquee")) back = QStringLiteral("rect");
+    if (back == QLatin1String("shape") && !shape_tool_of(canvas_->shape_kind).isEmpty()) back = shape_tool_of(canvas_->shape_kind);  // (PC3 C-b)
     if (!tool_actions_.contains(back)) return false;
     choose_tool(back);
     tool_switch_.reset();
@@ -467,8 +468,9 @@ void MainWindow::build_actions() {
     build_path_actions();       // (vector@1, PC3 C-a: ペンツール, パス選択ツール, ベクトルマスク: main_window_paths.cpp)
     build_page_size_actions();  // (PC3 C-e: 画像解像度…, カンバスサイズ…, 画像の回転, 切り抜き(ツール): main_window_page_size.cpp)
     build_retouch_actions();    // (PC3 B4: the retouching tools, コンテンツに応じた塗りつぶし…: retouch_tools.cpp)
+    build_shape_actions();      // (pen-shapes@1, PC3 C-b: the shape tools, シェイプを結合…: main_window_shapes.cpp)
     make("act_point_wider", QStringLiteral("選んだ点を太く"), [this] { point_width(1.25); }, keys({QKeySequence(QStringLiteral("Ctrl+Alt+]"))}),
-         QStringLiteral("線の編集で選んだ制御点のところだけ、線を太くします"));
+         QStringLiteral("部分選択ツールで選んだ制御点のところだけ、線を太くします"));
     make("act_color", QStringLiteral("ペンの色…"), [this] { pick_colour(); }, keys({QKeySequence(QStringLiteral("C"))}));
     // (one chosen in a list, then merged with the one under it: named apart from Python's 下のレイヤーと結合, which
     // merges the panel's chosen layer at once — a command's name says one thing)
@@ -760,6 +762,7 @@ void MainWindow::build_menus() {
     build_page_size_menu(pages);  // (PC3 C-e: Photoshop's イメージ's paper commands, main_window_page_size.cpp)
     build_line_menus(pages);  // (台詞, ストーリーエディター, 台詞の検索・置換: main_window_lines.cpp)
     build_path_menus(file, view, tools, layers);  // (PC3 C-a: the paths' commands — ページ → 台詞's too —, app/main_window_paths.cpp)
+    build_shape_menus(edit, view, tools, layers);  // (PC3 C-b: the shape tools and the shape parts' commands, app/main_window_shapes.cpp)
     pages->addAction(action("act_book_preview"));
     pages->addAction(action("act_checks"));
     pages->addSeparator();
@@ -908,6 +911,7 @@ void MainWindow::build_docks() {
     build_channel_dock();  // (チャンネル, a tab beside the layers: main_window_channels.cpp)
     build_path_dock();     // (パス, a tab beside the layers: main_window_paths.cpp)
     build_clone_source_dock();  // (PC3 B4: コピーソース, when it is opened: retouch_tools.cpp)
+    build_shape_dock();    // (シェイプ, a tab beside the layers: main_window_shapes.cpp)
     build_adjust_docks();  // (PC2a: 色調補正 and 属性, app/adjust_panels.cpp)
     build_info_docks();    // (ヒストグラム, 情報: info_panels.cpp)
     build_line_dock();  // (台詞, a tab beside the pages and the layers: main_window_lines.cpp)
@@ -938,17 +942,20 @@ void MainWindow::build_docks() {
 void MainWindow::choose_tool(const QString& tool) {
     // (what was in hand before, for キーを押している間だけ持ち替え: hold_key_released)
     const QString before = canvas_->tool();
-    if (before != (is_marquee_tool(tool) ? QStringLiteral("marquee") : tool)) tool_switch_ = ToolSwitch{tool, before, monotonic_seconds()};
+    const QString becomes = is_marquee_tool(tool) ? QStringLiteral("marquee") : is_shape_tool(tool) ? QStringLiteral("shape") : tool;
+    if (before != becomes) tool_switch_ = ToolSwitch{tool, before, monotonic_seconds()};
     if (is_marquee_tool(tool)) {  // (範囲選択: the marquee tool, in one of its ways)
         choose_marquee(tool);
         if (marquee_mode_ != nullptr) marquee_mode_->setCurrentIndex(std::max(0, marquee_mode_->findData(tool)));
+    } else if (is_shape_tool(tool)) {  // (PC3 C-b: the shape tools, the canvas's 図形 in one of its figures)
+        choose_shape_tool(tool);
     } else {
         canvas_->set_tool(tool);
     }
     if (const auto it = tool_actions_.find(tool); it != tool_actions_.end()) it->second->setChecked(true);
     if (tool == QLatin1String("effect")) set_effect_pictures(effect_actions_, {"focus", "speed", "uni_flash", "beta_flash"});  // (drawn when first needed)
     if (tool_settings_ != nullptr) tool_settings_->show_tool(canvas_->tool());
-    panel_for_tool(tool);  // (the lines for the text tool, the layers for the drawing tools: main_window_lines.cpp)
+    panel_for_tool(becomes);  // (the lines for the text tool, the layers for the drawing tools: main_window_lines.cpp)
     pen_changed();
 }
 
@@ -1579,7 +1586,7 @@ void MainWindow::point_width(double factor) {
     const std::optional<int> point = canvas_->vector_point;
     const core::Layer* layer = paint_layer();
     if (ids.empty() || !point || layer == nullptr) {
-        flash(QStringLiteral("先に「線の編集」で線を選び、□（制御点）をクリックします"), 4000);
+        flash(QStringLiteral("先に「部分選択ツール」で線を選び、□（制御点）をクリックします"), 4000);
         return;
     }
     const core::Stroke* stroke = nullptr;

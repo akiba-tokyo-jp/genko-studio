@@ -95,25 +95,36 @@ std::optional<core::Patch> to_patch(const Image& image, std::int64_t x0, std::in
 // selection.transform_patch
 std::optional<core::Patch> transform_patch(const core::Patch& patch, const Matrix& m, Resample resample = Resample::Bilinear);
 
-// What lies in an area: the lines and the patches lifted from a layer (or copied, to paste).
+// What lies in an area: the lines and the patches lifted from a layer (or copied, to paste) — and a pen layer's shape
+// parts (pen-shapes@1, PC3 C-b).
 struct Items {
     std::vector<core::StrokePtr> strokes;
     std::vector<core::Patch> patches;
+    std::vector<core::vector::ShapePart> shapes;
+    bool empty() const { return strokes.empty() && patches.empty() && shapes.empty(); }
 };
 
 // selection.lift: what lies in the area taken off the layer (the layer keeps the rest; its own pixels in the area
 // become an image patch — color-model@1: on an RGB page of a profile, one of its values that says its profile,
-// render/color_edit's kPatchProfileKey).
+// render/color_edit's kPatchProfileKey). A shape part (pen-shapes@1, PC3 C-b) wholly inside goes whole, one wholly outside
+// stays; one the area's edge crosses is cut in two along it (render/shape_parts cut: both halves vector parts, the
+// lifted one a new id) — an open one, which has no inside to cut, goes whole when most of its anchors are inside.
 Items lift(core::Layer& layer, const core::Json& area, const core::Page& page);
 
-// selection.drop: lifted (or copied) items put back on the layer through m; fresh ids for a paste.
-void drop(core::Layer& layer, Items items, const Matrix& m, bool fresh_ids = false, Resample resample = Resample::Bilinear);
+// selection.drop: lifted (or copied) items put back on the layer through m; fresh ids for a paste. Shape parts go
+// through m exactly (their stroke widths scaled as a line's); on a layer that is not a pen layer they are laid as
+// pictures (patches) instead.
+void drop(core::Layer& layer, Items items, const Matrix& m, bool fresh_ids = false, Resample resample = Resample::Bilinear,
+          const core::Page* page = nullptr);
 
-// selection.drop_warped: through a free transform (render/warp.hpp): lines point by point, pixels piece by piece.
+// selection.drop_warped: through a free transform (render/warp.hpp): lines point by point, pixels piece by piece; shape
+// parts bent (render/shape_parts bent).
 using WarpFunction = std::function<std::pair<double, double>(double, double)>;
-void drop_warped(core::Layer& layer, Items items, const WarpFunction& go, Resample resample = Resample::Bilinear);
+void drop_warped(core::Layer& layer, Items items, const WarpFunction& go, Resample resample = Resample::Bilinear,
+                 const core::Page* page = nullptr);
 
-// selection.items_from_json: copied items as an op carries them ({"strokes", "patches": [{…, "png": base64}]}).
+// selection.items_from_json: copied items as an op carries them ({"strokes", "patches": [{…, "png": base64}], "shapes"?:
+// [shape parts]}).
 Items items_from_json(const core::Json& data);
 
 // selection.area_bbox: (x, y, w, h) of a poly; the mask's box as it is (any length) of a mask area.

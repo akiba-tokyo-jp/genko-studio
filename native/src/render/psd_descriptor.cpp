@@ -99,6 +99,23 @@ void Writer::object_array(std::string_view key, std::uint32_t count, std::string
         for (const double v : values) put_f64(body_, v);
     }
 }
+void Writer::objects(std::string_view key, const std::vector<std::pair<std::string, Writer>>& items) {
+    head(key, "VlLs");
+    put_u32(body_, static_cast<std::uint32_t>(items.size()));
+    for (const auto& [class_id, item] : items) {
+        body_ += "Objc";
+        body_ += item.structure(class_id);
+    }
+}
+void Writer::units(std::string_view key, std::string_view unit, const std::vector<double>& values) {
+    head(key, "VlLs");
+    put_u32(body_, static_cast<std::uint32_t>(values.size()));
+    for (const double v : values) {
+        body_ += "UntF";
+        body_ += unit;
+        put_f64(body_, v);
+    }
+}
 std::string Writer::structure(std::string_view class_id) const {
     std::string out;
     put_unicode(out, u"");

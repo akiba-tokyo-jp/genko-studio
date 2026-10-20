@@ -120,6 +120,9 @@ genko_test(test_masks SOURCES unit/test_masks.cpp DEPS genko_test_support genko_
 genko_test(test_inpaint SOURCES unit/test_inpaint.cpp DEPS genko_test_support genko_render_ops LABELS unit TIMEOUT 600)
 genko_test(test_retouch SOURCES unit/test_retouch.cpp DEPS genko_test_support genko_render_ops LABELS unit TIMEOUT 900)
 genko_test(test_path_raster SOURCES unit/test_path_raster.cpp DEPS genko_test_support genko_render_ops LABELS unit)
+# PC3 C-b (pen-shapes@1): the live shapes, the path operations' coverage, a stroke's alignments and dashes, the gradient
+# forms, a part baked, cut, erased, bent and transformed; the shape presets' language and settings file.
+genko_test(test_shapes SOURCES unit/test_shapes.cpp DEPS genko_test_support genko_render_ops LABELS unit)
 genko_test(test_resample SOURCES unit/test_resample.cpp DEPS genko_test_support genko_render_ops LABELS unit)
 genko_test(test_page_geometry SOURCES unit/test_page_geometry.cpp DEPS genko_test_support LABELS unit)
 # PC3 C-e (SPEC.md COLOR-07「判型」): the page size ops on a book in memory — each thing on a page where the map takes it,
@@ -371,6 +374,12 @@ genko_test(test_contract_masks SOURCES contract/test_contract_masks.cpp DEPS gen
 # collection keeps while the journal names it), content_aware_fill on the layer, a new layer and a copy.
 genko_test(test_contract_retouch SOURCES contract/test_contract_retouch.cpp DEPS genko_test_support genko_render
            LABELS contract TIMEOUT 900)
+# PC3 C-b (pen-shapes@1): a pen layer's shape parts — added, edited, combined, moved, made patches and lines; drawn in their
+# place on every kind of page; the selection, the eraser, ゆがみ, merges and the bucket with them; a fill layer's new
+# gradients; through the command line saved and undone (a pen layer without parts as before), `genko shapes`; the PSD's
+# shape layers and groups (psd-tools, import_psd).
+genko_test(test_contract_shapes SOURCES contract/test_contract_shapes.cpp DEPS genko_test_support genko_render_ops genko_formats
+           LABELS contract TIMEOUT 900)
 genko_test(test_contract_image_ops SOURCES contract/test_contract_image_ops.cpp DEPS genko_test_support genko_render
            LABELS contract TIMEOUT 900)
 # PC3 C-e through the command line: every kind of page turned (inspect --pixel), undone and redone; a page of its own paper
@@ -514,6 +523,9 @@ if(GENKO_BUILD_APP)
   # PC3 B4: スポット修復ブラシツール・修復ブラシツール・コピースタンプツール・ヒストリーブラシツール (the tools, their settings, Alt+click
   # and strokes), コピーソース panel, 履歴's ◆ row, コンテンツに応じた塗りつぶし…'s window.
   genko_test(test_gui_retouch SOURCES gui/test_gui_retouch.cpp DEPS genko_app genko_test_support GUI TIMEOUT 600)
+  # PC3 C-b (pen-shapes@1): the shape tools in their モード (シェイプ・パス・ピクセル, Alt from the centre, a new layer), the
+  # pen tools' モード, パス選択ツール on a part, the シェイプ panel, カスタムシェイプを定義…, シェイプを結合 and the other commands.
+  genko_test(test_gui_shapes SOURCES gui/test_gui_shapes.cpp DEPS genko_app genko_test_support GUI TIMEOUT 600)
   # M7 (the ledger counted against the C++ tree): the checks of Python's window tests no C++ test made before
   genko_test(test_gui_ledger_a SOURCES gui/test_gui_ledger_a.cpp DEPS genko_app genko_test_support GUI TIMEOUT 900)
   genko_test(test_gui_ledger_c SOURCES gui/test_gui_ledger_c.cpp DEPS genko_app genko_test_support GUI TIMEOUT 900)

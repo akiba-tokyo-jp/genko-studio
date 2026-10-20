@@ -6,6 +6,7 @@
 #include <algorithm>
 #include <array>
 #include <cctype>
+#include <cmath>
 #include <cstdio>
 #include <exception>
 #include <initializer_list>
@@ -49,6 +50,7 @@
 #include "render/path_info.hpp"
 #include "render/proof.hpp"
 #include "render/movie.hpp"
+#include "render/shape_presets.hpp"
 #include "render/ops_registry.hpp"
 #include "render/page.hpp"
 #include "render/png.hpp"
@@ -1224,6 +1226,85 @@ int smart_command(const QStringList& args, bool ascii) {
     throw core::Error("key", "no page " + std::to_string(*page_number));
 }
 
+// pen-shapes@1 (PC3 C-b, SPEC.md COLOR-07「シェイプのプリセット」, the C++ build's own): the shape presets of this machine
+// (the settings folder's shapes.json, render/shape_presets) — `genko shapes list`, `genko shapes path <name> --rect
+// x,y,w,h [--group G] [--stretch]` (the preset fitted into the box, mm: the path add_shape_part's "shape" {"kind":
+// "path"} takes), `genko shapes new --path <path JSON | path language | "M …"> [--name N] [--group G]`, `genko shapes
+// edit <{"action", …} JSON>`, `genko shapes reset [--append]`. The ops do not read them (a machine's setting).
+int shapes_command(const QStringList& args, bool ascii) {
+    namespace presets = render::shape_presets;
+    if (args.isEmpty()) return usage("genko shapes list | path | new | edit | reset");
+    const QString what = args.front();
+    const QStringList rest = args.mid(1);
+    const fs::path dir = core::config_dir();
+    std::string problem;
+    std::vector<presets::Group> groups = presets::load(dir, &problem);
+    if (what == QLatin1String("list")) {
+        Arguments a;
+        if (auto error = parse_arguments(rest, {}, 0, "", a)) return usage("genko shapes list: " + *error);
+        Json out = presets::list(groups);
+        out["ok"] = true;
+        if (!problem.empty()) out["problem"] = problem;
+        print_json(out, ascii);
+        return 0;
+    }
+    if (what == QLatin1String("path")) {
+        static constexpr Option kOptions[] = {{"--rect", true}, {"--group", true}, {"--stretch", false}};
+        Arguments a;
+        if (auto error = parse_arguments(rest, kOptions, 1, "name", a)) return usage("genko shapes path: " + *error);
+        const auto group = a.value("--group");
+        const std::string group_text = group ? group->toStdString() : std::string();
+        const presets::Preset* found = presets::find(groups, a.positional[0].toStdString(), group ? std::optional<std::string_view>(group_text) : std::nullopt);
+        if (found == nullptr) throw core::Error("key", "no shape named " + a.positional[0].toStdString());
+        const QStringList box = a.value("--rect").value_or(QString()).split(QLatin1Char(','));
+        if (box.size() != 4) return usage("genko shapes path: --rect is x,y,w,h (mm)");
+        std::array<double, 4> rect{};
+        for (int i = 0; i < 4; ++i) {
+            bool ok = false;
+            rect[static_cast<std::size_t>(i)] = box[i].trimmed().toDouble(&ok);
+            if (!ok || !std::isfinite(rect[static_cast<std::size_t>(i)])) return usage("genko shapes path: --rect is x,y,w,h (mm)");
+        }
+        const core::vector::Path path = presets::fit(found->path, rect, !a.flag("--stretch"));
+        print_json(Json{{"ok", true}, {"name", found->name}, {"path", core::vector::to_json(core::vector::path_from_json(core::vector::to_json(path)))}}, ascii);
+        return 0;
+    }
+    if (what == QLatin1String("new")) {
+        static constexpr Option kOptions[] = {{"--path", true}, {"--name", true}, {"--group", true}};
+        Arguments a;
+        if (auto error = parse_arguments(rest, kOptions, 0, "", a)) return usage("genko shapes new: " + *error);
+        const auto given = a.value("--path");
+        if (!given) return usage("genko shapes new: the following arguments are required: --path");
+        const std::string text = given->trimmed().toStdString();
+        const core::vector::Path path = text.starts_with("{") ? core::vector::path_from_json(core::parse_python_json(text)) : presets::parse(text);
+        const auto group = a.value("--group");
+        const std::string group_text = group ? group->toStdString() : std::string();
+        Json out = presets::add(groups, a.value("--name").value_or(QString()).toStdString(), group ? std::optional<std::string_view>(group_text) : std::nullopt, path);
+        presets::save(dir, groups);
+        out["ok"] = true;
+        print_json(out, ascii);
+        return 0;
+    }
+    if (what == QLatin1String("edit")) {
+        Arguments a;
+        if (auto error = parse_arguments(rest, {}, 1, "edit", a)) return usage("genko shapes edit: " + *error);
+        Json out = presets::edit(groups, core::parse_python_json(a.positional[0].toStdString()));
+        presets::save(dir, groups);
+        out["ok"] = true;
+        print_json(out, ascii);
+        return 0;
+    }
+    if (what == QLatin1String("reset")) {
+        static constexpr Option kOptions[] = {{"--append", false}};
+        Arguments a;
+        if (auto error = parse_arguments(rest, kOptions, 0, "", a)) return usage("genko shapes reset: " + *error);
+        groups = presets::reset(groups, a.flag("--append"));
+        presets::save(dir, groups);
+        print_json(Json{{"ok", true}, {"groups", static_cast<std::int64_t>(groups.size())}}, ascii);
+        return 0;
+    }
+    return usage("genko shapes: list, path, new, edit or reset");
+}
+
 // smart-objects@1 (PC3 A1, the C++ build's own): `genko package <dir> --out <folder>` (パッケージ…) — the book copied as a
 // new book into <folder>/<its folder's name>, with its linked files' copies in Links/ and linked there.
 int package_command(const QStringList& args, bool ascii) {
@@ -1276,6 +1357,7 @@ int run_cli(int argc, char** argv) {
         if (command == QLatin1String("export")) return export_command(args, ascii);
         if (command == QLatin1String("smart")) return smart_command(args, ascii);      // (smart-objects@1, PC3 A1)
         if (command == QLatin1String("package")) return package_command(args, ascii);  // (smart-objects@1, PC3 A1)
+        if (command == QLatin1String("shapes")) return shapes_command(args, ascii);    // (pen-shapes@1, PC3 C-b)
         if (command == QLatin1String("studio")) return studio_command(args, ascii);
         if (command == QLatin1String("mcp")) return mcp_command(args);
         if (command == QLatin1String("serve")) return serve_command(args);

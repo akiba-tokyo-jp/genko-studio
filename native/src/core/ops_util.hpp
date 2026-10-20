@@ -64,6 +64,9 @@ std::string blend_mode(const Json& value);
 // ops._gradient_extras(g): 多色 (stops), 楕円 (ratio), 繰り返し (repeat) of a gradient, checked (core/ops_layers.cpp; also
 // gradient_fill's). OpError with Python's words.
 Json gradient_extras(const Json& g);
+// ops._fill_spec: a fill layer's {"rgb"} or {"gradient"} checked and in its normal form (core/ops_layers.cpp; also a
+// shape part's fill, pen-shapes@1). OpError with Python's words.
+Json fill_spec(const Json& raw);
 
 // The JSON of a list of ints.
 Json ints_json(const std::vector<std::int64_t>& values);

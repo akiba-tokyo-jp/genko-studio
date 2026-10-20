@@ -1,10 +1,13 @@
 #include "render/path_info.hpp"
 
+#include <algorithm>
 #include <cmath>
 #include <cstdio>
 
 #include "core/error.hpp"
+#include "core/pynum.hpp"
 #include "core/vector.hpp"
+#include "render/shape_parts.hpp"
 
 // PhotoCraft v0.2.0 crates/engine/src/print_cmds.rs (461-521: paths_to_ai) and vector_cmds.rs (635-651: paths_list),
 // MIT: native/third_party/photocraft/NOTICE.md.
@@ -20,6 +23,22 @@ Json counted(const vec::Path& path) {
     return Json{{"path", vec::to_json(path)},
                 {"subpaths", static_cast<std::int64_t>(path.subpaths.size())},
                 {"knots", static_cast<std::int64_t>(path.knot_count())}};
+}
+
+// A part's kind (its live shape's, else "path").
+std::string kind_of(const vec::ShapePart& part) {
+    if (!part.live) return "path";
+    switch (part.live->kind) {
+        case vec::LiveShape::Kind::Rect:
+            return std::any_of(part.live->radii.begin(), part.live->radii.end(), [](double r) { return r > 0; }) ? "rounded_rect" : "rect";
+        case vec::LiveShape::Kind::Ellipse:
+            return "ellipse";
+        case vec::LiveShape::Kind::Polygon:
+            return part.live->star_ratio < 1.0 ? "star" : part.live->sides == 3 ? "triangle" : "polygon";
+        case vec::LiveShape::Kind::Line:
+            return "line";
+    }
+    return "path";
 }
 
 std::string fixed4(double v) {
@@ -54,6 +73,20 @@ Json page_paths(const core::Page& page) {
                 one["id"] = part.id;
                 if (part.name) one["name"] = *part.name;
                 if (const auto box = part.path.control_bounds()) one["bounds"] = Json::array({(*box)[0], (*box)[1], (*box)[2], (*box)[3]});
+                // (PC3 C-b, shape.info: the part's kind, its fill and stroke, its live shape, its opacity, whether it is
+                // drawn over the lines, and the box its drawing covers [x, y, w, h])
+                one["kind"] = kind_of(part);
+                one["fill"] = part.fill;
+                one["stroke"] = part.stroke ? vec::to_json(*part.stroke) : Json(nullptr);
+                one["live"] = part.live ? vec::to_json(*part.live) : Json(nullptr);
+                one["opacity"] = part.opacity;
+                one["over"] = part.over;
+                if (const auto drawn = shape_parts::drawn_bounds(part)) {
+                    one["box"] = Json::array({core::py_round((*drawn)[0], 4), core::py_round((*drawn)[1], 4), core::py_round((*drawn)[2] - (*drawn)[0], 4),
+                                              core::py_round((*drawn)[3] - (*drawn)[1], 4)});
+                } else {
+                    one["box"] = nullptr;
+                }
                 shapes.push_back(std::move(one));
             }
             item["shapes"] = std::move(shapes);

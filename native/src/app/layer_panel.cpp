@@ -455,6 +455,7 @@ void LayerPanel::refresh() {
             if (!layer.exportable && layer.role != core::LayerRole::Name && layer.role != core::LayerRole::Draft) marks << QStringLiteral("下描き");
             if (layer.reference) marks << QStringLiteral("参照");
             if (layer.mask) marks << (layer.mask->linked ? QStringLiteral("マスク（リンク）") : QStringLiteral("マスク"));  // (PC3 B2: masks@1)
+            if (layer.shapes && !layer.shapes->items.empty()) marks << QStringLiteral("形 %1").arg(layer.shapes->items.size());  // (pen-shapes@1)
             if (layer.locked) marks << QStringLiteral("ロック");
             if (layer.kind == core::LayerKind::Smart) {  // (smart-objects@1: its contents in the book, or a file linked)
                 const core::SmartContents* contents = core::smart::contents_of(window_->book(), layer);
@@ -520,11 +521,15 @@ QIcon LayerPanel::thumbnail(const core::Page& page, const core::Layer& layer) {
     const bool drawn = layer.stroke_count() > 0 || !layer.patches.empty() || (layer.raster_png && !layer.raster_png->empty()) || layer.color_raster ||
                        layer.ink_raster ||
                        layer.kind == core::LayerKind::Placed || layer.kind == core::LayerKind::Tone || (layer.fill && core::py_truthy(*layer.fill)) ||
-                       layer.kind == core::LayerKind::Smart;
+                       layer.kind == core::LayerKind::Smart || (layer.shapes && !layer.shapes->items.empty());
     if (!drawn) return {};
     const std::string key = page.id + "/" + layer.id;
     Thumb made{layer.strokes, layer.raster_png, layer.color_raster, layer.ink_raster, layer.mask ? layer.mask->png : nullptr, {}, thumb_state(layer), {}, {}};
     for (const core::Patch& patch : layer.patches) made.patches.push_back(patch.png);
+    if (layer.shapes && !layer.shapes->items.empty()) {  // (pen-shapes@1: its parts, a list made anew when they change)
+        made.state += "|shapes " + std::to_string(reinterpret_cast<std::uintptr_t>(layer.shapes.get())) + " " +
+                      std::to_string(core::vector::shapes_blob(*layer.shapes).size());
+    }
     if (const core::SmartContents* contents = core::smart::contents_of(window_->book(), layer)) {  // (its contents as they are now)
         made.state += "|" + std::to_string(reinterpret_cast<std::uintptr_t>(contents));
     }

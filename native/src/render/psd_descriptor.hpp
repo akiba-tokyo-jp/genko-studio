@@ -45,6 +45,10 @@ public:
     void numbers(std::string_view key, const std::vector<double>& values);
     void object_array(std::string_view key, std::uint32_t count, std::string_view class_id,
                       const std::vector<std::pair<std::string, std::vector<double>>>& lists, std::string_view unit);
+    // (PC3 C-b) a list of objects (VlLs of Objc: a gradient's stops, a shape's originations), each its class id and its
+    // items; and a list of unit floats (VlLs of UntF: a shape stroke's dashes).
+    void objects(std::string_view key, const std::vector<std::pair<std::string, Writer>>& items);
+    void units(std::string_view key, std::string_view unit, const std::vector<double>& values);
     // The class structure (an empty name, the class id), its count and items.
     std::string structure(std::string_view class_id) const;
     // A versioned descriptor: version 16, then the structure.

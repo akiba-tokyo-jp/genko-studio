@@ -11,12 +11,14 @@
 #include <QMenuBar>
 
 #include <algorithm>
+#include <cmath>
 
 #include "app/ask.hpp"
 #include "app/canvas.hpp"
 #include "app/main_window.hpp"
 #include "app/paths_panel.hpp"
 #include "core/paths.hpp"
+#include "core/pynum.hpp"
 #include "core/vector.hpp"
 #include "render/path_info.hpp"
 #include "render/raster_ops.hpp"
@@ -96,8 +98,13 @@ void MainWindow::build_path_actions() {
          QStringLiteral("ベクトルマスクをレイヤーと一緒に動かすかを切り替えます"));
     make("act_rasterize_vmask", QStringLiteral("ベクトルマスク"), [this] { vector_mask_command("rasterize"); }, {},
          QStringLiteral("ベクトルマスクを画素のレイヤーマスクにします（今のマスクに掛け合わせます）"));
-    connect(canvas_, &PageCanvas::pathDrawn, this, &MainWindow::path_drawn);
+    connect(canvas_, &PageCanvas::pathDrawn, this, [this](const Json& subpath) {
+        if (!pen_path_drawn(subpath)) path_drawn(subpath);  // (PC3 C-b: the pen's シェイプ and ピクセル, main_window_shapes.cpp)
+    });
     connect(canvas_, &PageCanvas::pathEdited, this, &MainWindow::path_edited);
+    connect(canvas_, &PageCanvas::targetPathChosen, this, [this] {
+        if (paths_panel_ != nullptr && paths_dock_->isVisible()) paths_panel_->refresh();
+    });
 }
 
 void MainWindow::build_path_menus(QMenu* file, QMenu* view, QMenu* tools, QMenu* layers) {
@@ -163,6 +170,11 @@ Json MainWindow::target_path_terms() const {
     const QString target = canvas_->target_path;
     if (target.startsWith(QLatin1String("mask:"))) return Json{{"layer", target.mid(5).toStdString()}};
     if (target.startsWith(QLatin1String("saved:"))) return Json{{"name", target.mid(6).toStdString()}};
+    if (target.startsWith(QLatin1String("shape:"))) {  // (PC3 C-b: a pen layer's shape part)
+        const QString rest = target.mid(6);
+        const qsizetype slash = rest.indexOf(QLatin1Char('/'));
+        return Json{{"shape", Json{{"layer", rest.left(slash).toStdString()}, {"id", rest.mid(slash + 1).toStdString()}}}};
+    }
     return Json{{"name", "work"}};
 }
 
@@ -183,6 +195,9 @@ void MainWindow::path_drawn(const Json& subpath) {
         if (!path["subpaths"].empty()) sub["op"] = "combine";
         path["subpaths"].push_back(sub);
         apply_ops(Json::array({Json{{"op", "set_vector_mask"}, {"page", page->index.json()}, {"id", id}, {"path", path}}}));
+    } else if (terms.contains("shape")) {  // (PC3 C-b: a subpath more of the shape part)
+        apply_ops(Json::array({Json{{"op", "edit_shape_part"}, {"page", page->index.json()}, {"layer_id", terms["shape"]["layer"]},
+                                    {"id", terms["shape"]["id"]}, {"append", Json{{"path", one}, {"op", "combine"}}}}}));
     } else {
         Json op{{"op", "set_path"}, {"page", page->index.json()}, {"name", terms["name"]}, {"path", one}};
         if (canvas_->target_path_now()) op["append"] = "combine";  // (a subpath more, as Photoshop adds to the path chosen)
@@ -197,6 +212,38 @@ void MainWindow::path_edited(const Json& path) {
     const Json terms = target_path_terms();
     if (terms.contains("layer")) {
         apply_ops(Json::array({Json{{"op", "set_vector_mask"}, {"page", page->index.json()}, {"id", terms["layer"]}, {"path", path}}}));
+    } else if (terms.contains("shape")) {  // (PC3 C-b: the shape part's path — moved whole: move_mm, its live shape kept)
+        const Json& part = terms["shape"];
+        const std::optional<vec::Path> before = canvas_->target_path_now();
+        const vec::Path after = vec::path_from_json(path);
+        Json op{{"op", "edit_shape_part"}, {"page", page->index.json()}, {"layer_id", part["layer"]}, {"id", part["id"]}};
+        std::optional<vec::XY> shift;
+        if (before && before->subpaths.size() == after.subpaths.size()) {
+            bool same = true;
+            for (std::size_t s = 0; same && s < after.subpaths.size(); ++s) {
+                const auto& a = before->subpaths[s].knots;
+                const auto& b = after.subpaths[s].knots;
+                same = a.size() == b.size() && before->subpaths[s].closed == after.subpaths[s].closed && before->subpaths[s].op == after.subpaths[s].op;
+                for (std::size_t k = 0; same && k < a.size(); ++k) {
+                    const vec::XY d{b[k].anchor.x - a[k].anchor.x, b[k].anchor.y - a[k].anchor.y};
+                    if (!shift) shift = d;
+                    const auto near = [&](const vec::XY& p, const vec::XY& q) {
+                        return std::abs(q.x - p.x - shift->x) < 1e-6 && std::abs(q.y - p.y - shift->y) < 1e-6;
+                    };
+                    same = near(a[k].anchor, b[k].anchor) && near(a[k].in, b[k].in) && near(a[k].out, b[k].out);
+                }
+            }
+            if (!same) shift.reset();
+        }
+        if (after.subpaths.empty()) {  // (its last subpath taken out: the part goes)
+            op = Json{{"op", "vector_edit"}, {"page", page->index.json()}, {"layer_id", part["layer"]}, {"action", "delete"}, {"stroke_id", part["id"]}};
+            canvas_->target_path = QStringLiteral("work");
+        } else if (shift) {
+            op["move_mm"] = Json::array({core::py_round(shift->x, 4), core::py_round(shift->y, 4)});
+        } else {
+            op["path"] = path;
+        }
+        apply_ops(Json::array({op}));
     } else if (path.value("subpaths", Json::array()).empty() && terms["name"] == "work") {
         apply_ops(Json::array({Json{{"op", "delete_path"}, {"page", page->index.json()}, {"name", "work"}}}));  // (the last of the work path)
     } else {

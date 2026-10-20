@@ -125,7 +125,8 @@ void fade_layer(core::OpContext& c) {
     if (layer.locked) throw OpError("the layer is locked");
     const bool eight = layer.raster_png && !layer.raster_png->empty();
     if (!eight && !layer.color_raster && !layer.ink_raster) throw OpError("the layer " + id + " holds no pixels to fade");
-    if (layer.stroke_count() > 0 || !layer.patches.empty()) throw OpError("the layer " + id + " holds lines or fills besides its pixels");
+    if (layer.stroke_count() > 0 || !layer.patches.empty() || (layer.shapes && !layer.shapes->items.empty()))
+        throw OpError("the layer " + id + " holds lines or fills besides its pixels");
     // (the pixels before and after, of the same kind and size)
     const auto refused = [&]() -> OpError { return OpError("from is not the pixels of this layer before (another kind or size)"); };
     const std::optional<std::string> bytes = pixels_before(doc, page, layer, *from, "fade_layer", refused);

@@ -758,7 +758,7 @@ std::string relayout_inks(const std::string& gkir, const core::PageSpec& spec, c
 
 InkPixels with_marks(const core::Page& page, const core::Layer& layer, const core::Document* episode) {
     if (!page.color) throw core::OpError("an RGB page holds no ink pixels");
-    if (layer.stroke_count() == 0 && layer.patches.empty()) {
+    if (layer.stroke_count() == 0 && layer.patches.empty() && (!layer.shapes || layer.shapes->items.empty())) {
         if (layer.ink_raster) return core::decode_ink_raster(*layer.ink_raster);
         return core::blank_ink_pixels(page.color->space, page.color->depth,
                                       static_cast<std::uint32_t>(mm_to_px(page.spec.width_mm.value(), raster::kWorkingDpi)),
@@ -772,6 +772,7 @@ InkPixels with_marks(const core::Page& page, const core::Layer& layer, const cor
     marks.panel_each = layer.panel_each;
     marks.strokes = layer.strokes;
     marks.patches = layer.patches;
+    marks.shapes = layer.shapes;  // (pen-shapes@1, PC3 C-b: its shape parts, drawn with its lines)
     InkPixels drawn = composite_ink_layers(page, {marks}, raster::kWorkingDpi, episode);
     inside_own_pixels(drawn, layer);
     return core::decode_ink_raster(lay_piece(page, layer, drawn, {0.0, 0.0, page.spec.width_mm.value(), page.spec.height_mm.value()}));
@@ -1040,6 +1041,7 @@ void Lending::take_back(core::Document& doc) const {
                     // as the 8-bit tools draw them when they work its pixels, so what they did not change keeps its inks)
                     core::Layer drawn = layer;
                     drawn.strokes = core::empty_strokes();
+                    drawn.shapes = core::vector::empty_shapes();
                     drawn.patches.assign(layer.patches.begin() + std::ptrdiff_t(lent->patches), layer.patches.end());
                     raster::bake_vectors(page, drawn);
                     layer.raster_png = drawn.raster_png;

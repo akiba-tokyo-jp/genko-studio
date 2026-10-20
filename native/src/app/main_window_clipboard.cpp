@@ -185,7 +185,7 @@ std::optional<Json> MainWindow::copied_items(const std::optional<Json>& area) {
         if (layer->color_raster) {  // (PC3 B2: its precise pixels there, as a piece that keeps their samples)
             if (const auto piece = render::color_edit::lift_piece(*page, *layer, where)) lifted.patches.push_back(render::color_edit::piece_patch(*piece));
         }
-        if (lifted.strokes.empty() && lifted.patches.empty()) {
+        if (lifted.empty()) {  // (pen-shapes@1: shape parts too)
             flash(area ? QStringLiteral("選んだ範囲に、このレイヤーの絵がありません") : QStringLiteral("このレイヤーには、まだ何も描いてありません"), 3000);
             return std::nullopt;
         }

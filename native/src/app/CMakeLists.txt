@@ -133,6 +133,9 @@ genko_library(genko_app
     retouch_tools.cpp
     clone_source_panel.cpp
     content_aware_window.cpp
+    # PC3 C-b: the shape tools, the Shapes panel, the shape parts' commands
+    shapes_panel.cpp
+    main_window_shapes.cpp
     ${GENKO_APP_RESOURCES}
     ${GENKO_APP_FONTS}
   PUBLIC_DEPS genko_core genko_storage genko_render genko_render_ops genko_formats genko_service Qt6::Core Qt6::Gui Qt6::Widgets Qt6::Svg Qt6::Concurrent

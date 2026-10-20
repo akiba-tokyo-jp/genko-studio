@@ -97,6 +97,9 @@ const std::map<std::string, const char*>& names() {
         // (PC3 B2: render/ops_masks)
         {"outline_area", "境界線を描いた"}, {"apply_layer_mask", "レイヤーマスクを適用した"},
         {"mask_from_transparency", "透明部分からマスクを作った"},
+        // (pen-shapes@1, PC3 C-b: render/ops_shapes)
+        {"add_shape_part", "シェイプを描いた"}, {"edit_shape_part", "シェイプを直した"}, {"combine_shape_parts", "シェイプを結合した"},
+        {"move_shape_parts", "シェイプを別のレイヤーへ移した"},
     };
     return table;
 }

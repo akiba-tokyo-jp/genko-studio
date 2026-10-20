@@ -180,9 +180,13 @@ public:
     // The polyline selection's corners: Enter or a double click closes it; Esc forgets them.
     bool finish_points();
     bool cancel_points();
-    // 図形 (canvas_tools.cpp): line | polyline | curve | rect | ellipse | polygon, and a polygon's corners.
+    // 図形 (canvas_tools.cpp): line | polyline | curve | rect | ellipse | polygon, and a polygon's corners. The shape
+    // tools (PC3 C-b) add triangle and custom (the custom shape's path: shape_custom, shown fitted into the box dragged;
+    // Shift keeps its proportions) and a star's inner ratio (shape_star: 1 a polygon). Alt draws from the centre.
     QString shape_kind = QStringLiteral("line");
     int shape_sides = 5;
+    double shape_star = 1.0;
+    std::optional<core::vector::Path> shape_custom;
     // 色混ぜ and ゆがみ: the brush's size (mm).
     double blend_mm = 6.0;
     // スポイト: where it picked last (mm) and whether from the drawing layer (color-mode@1: the window reads the inks
@@ -256,8 +260,12 @@ public:
     bool vector_delete();
     // --- paths (canvas_pen.cpp, PC3 C-a: ペンツール, 曲線ペンツール, パス選択ツール) -------------------------------------
     // The path the path tools draw on and show: "work" (the work path), "saved:<name>" (a saved path), "mask:<layer id>"
-    // (a layer's vector mask) — the Paths panel's choice.
+    // (a layer's vector mask), "shape:<layer id>/<part id>" (a pen layer's shape part, PC3 C-b) — the Paths panel's
+    // choice, or the shape part the path selection tool clicked.
     QString target_path = QStringLiteral("work");
+    // The shape part on the page under a point (mm; the topmost of the shown pen layers'): its "shape:<layer>/<part>"
+    // target and which of its subpaths, or none.
+    std::optional<std::pair<QString, std::size_t>> shape_part_at(const QPointF& mm) const;
     // 表示 → ターゲットパス: the target path drawn over the page (always while a path tool is in hand).
     bool show_target_path = true;
     // The target path as the page holds it now (none: there is none).
@@ -448,6 +456,8 @@ signals:
     // the path selection tool (its whole path)
     void pathDrawn(const genko::core::Json& subpath);
     void pathEdited(const genko::core::Json& path);
+    // the path selection tool chose another target path (a shape part clicked on the page: PC3 C-b)
+    void targetPathChosen();
 
 protected:
     void paintEvent(QPaintEvent* event) override;
