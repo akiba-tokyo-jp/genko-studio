@@ -304,6 +304,40 @@ private slots:
         QVERIFY(!refusal(small_book(), Json{{"op", "add_layer"}, {"page", 1}, {"kind", "gradient"}, {"gradient", Json{{"shape", "spiral"}}}}).empty());
     }
 
+    // レイヤー → ラスタライズ → シェイプ keeps the look: the parts become patches in the order they are drawn (a part over
+    // the lines after one under them, whatever their order in the list); with a part over the layer's lines — which only
+    // pixels keep over them — the layer is drawn in whole as it shows (a paint layer: the op says so).
+    void rasterizedAsTheyShow() {
+        core::Document book = small_book();
+        const std::string ink = ink_of(book.page(0));
+        const core::Document lined = run(book, Json{{"op", "add_stroke"}, {"page", 1}, {"layer_id", ink},
+                                                    {"points", Json::array({Json::array({5, 30}), Json::array({55, 30})})}, {"width_mm", 3},
+                                                    {"rgb", Json::array({0, 0, 0})}});
+        const core::Document over = run(lined, Json{{"op", "add_shape_part"}, {"page", 1}, {"layer_id", ink}, {"id", "w"}, {"over", true},
+                                                    {"shape", rect_shape(20, 20, 20, 20)}, {"fill", Json{{"rgb", Json::array({255, 255, 255})}}}});
+        QVERIFY(grey_at(drawn(over), 30, 30) > 240);  // (the white part over the line)
+        const core::ApplyResult whole = run_ops(over, Json::array({Json{{"op", "rasterize_layer"}, {"page", 1}, {"id", ink}, {"shape", true}}}));
+        QCOMPARE(whole.results.at(0)["whole"], Json(true));
+        const core::Layer& flat = layer_of(whole.doc.page(0), ink);
+        QVERIFY(flat.kind == core::LayerKind::Raster && flat.shapes->items.empty() && flat.stroke_count() == 0);
+        const render::Image seen = drawn(whole.doc);
+        QVERIFY2(grey_at(seen, 30, 30) > 240, std::to_string(grey_at(seen, 30, 30)).c_str());  // (still over the line)
+        QVERIFY(grey_at(seen, 10, 30) < 60 && grey_at(seen, 30, 50) > 240);
+        // no lines: the parts as patches in the order they are drawn (the one over the other first in the list)
+        core::Document parts = run(book, Json{{"op", "add_shape_part"}, {"page", 1}, {"layer_id", ink}, {"id", "top"}, {"over", true},
+                                              {"shape", rect_shape(20, 20, 20, 20)}, {"fill", Json{{"rgb", Json::array({255, 255, 255})}}}});
+        parts = run(parts, Json{{"op", "add_shape_part"}, {"page", 1}, {"layer_id", ink}, {"id", "under"}, {"shape", rect_shape(10, 10, 40, 40)}, {"fill", black()}});
+        QVERIFY(grey_at(drawn(parts), 30, 30) > 240 && grey_at(drawn(parts), 15, 15) < 60);
+        const core::ApplyResult patched = run_ops(parts, Json::array({Json{{"op", "rasterize_layer"}, {"page", 1}, {"id", ink}, {"shape", true}}}));
+        QVERIFY(!patched.results.at(0).contains("whole"));
+        const core::Layer& pen = layer_of(patched.doc.page(0), ink);
+        QVERIFY(pen.kind != core::LayerKind::Raster && pen.shapes->items.empty());
+        QCOMPARE(pen.patches.size(), std::size_t{2});
+        const render::Image after = drawn(patched.doc);
+        QVERIFY2(grey_at(after, 30, 30) > 240, std::to_string(grey_at(after, 30, 30)).c_str());
+        QVERIFY(grey_at(after, 15, 15) < 60);
+    }
+
     // The selection with parts (render/selection): one inside moved whole by transform_area (its live shape kept), one
     // its edge crosses cut in two (the halves' areas the whole's); delete_area takes the part's share; copied and pasted.
     void theSelection() {

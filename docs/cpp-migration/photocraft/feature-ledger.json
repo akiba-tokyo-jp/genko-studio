@@ -28993,7 +28993,8 @@
         "native/src/render/ops_shapes.cpp",
         "native/src/render/shape_parts.cpp",
         "native/src/render/ops_smart.cpp",
-        "native/tests/contract/test_contract_shapes.cpp"
+        "native/tests/contract/test_contract_shapes.cpp",
+        "native/src/app/main_window_shapes.cpp"
       ],
       "pc0": {
         "date": "2026-10-16",
