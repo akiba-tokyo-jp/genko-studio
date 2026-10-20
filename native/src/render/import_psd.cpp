@@ -625,7 +625,7 @@ void import_psd(core::OpContext& c) {
             full.paste(mask->resize(shown), paste_corner(where));
             core::Mask kept;
             kept.png = fills::png_bytes(full.resize(mask_size));
-            kept.enabled = true;
+            kept.enabled = item.mask_enabled;  // (the user's decision 3: a mask that is off — flags bit 1 — stays off)
             // (PC3 B2, the user's decision 3: a mask whose record carries its parameters — Photoshop's 濃度 and ぼかし, as
             // this build writes a mask of masks@1 — keeps them and whether it moves with the layer; one without stays
             // fixed to the page, as every mask read before)

@@ -17874,7 +17874,13 @@
       "evidence": [
         "native/src/app/layer_panel.cpp",
         "native/src/render/raster_ops.cpp",
-        "native/tests/gui/test_gui_layers.cpp"
+        "native/tests/gui/test_gui_layers.cpp",
+        "native/src/render/psd.cpp",
+        "native/src/render/import_psd.cpp",
+        "native/src/render/vector_masks.cpp",
+        "native/tests/unit/test_masks.cpp",
+        "native/tests/contract/test_contract_masks.cpp",
+        "native/tests/contract/test_contract_psd.cpp"
       ],
       "pc0": {
         "date": "2026-10-16",

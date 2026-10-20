@@ -29,6 +29,10 @@
 // layers taken out — Python's skipped this build's with exactly their names among them —, and import_psd's cases as
 // Python reads the files (psd::PythonView: no codec reads), then again as this build reads them: the same but the
 // correction layers made of the adjustment layers Python leaves out.
+// The user's decision 3 (a mask's settings always read; the coordinator after the PC3 review): this build reads a
+// layer's mask that is off (flags bit 1), which psd.read_psd leaves out. The reads are compared with such a mask left
+// out; the import cases of a file with one are marked "cpp": "deviates" (Python's but at that layer's mask); and
+// aMaskThatIsOffIsRead checks it is read and imported off.
 // Skipped without the Python reference.
 
 #include <QtTest>
@@ -39,6 +43,7 @@
 #include <QFile>
 #include <QTemporaryDir>
 
+#include <algorithm>
 #include <map>
 #include <set>
 #include <optional>
@@ -112,7 +117,9 @@ Json read_record(const std::string& data) {
             item["clip"] = layer.clip;
             item["kind"] = layer.kind;
             item["image"] = layer.folder ? Json(nullptr) : digest(file.image(layer));
-            item["mask"] = layer.folder ? Json(nullptr) : digest(file.mask(layer));
+            // (a mask that is off: read too here — the user's decision 3, aMaskThatIsOffIsRead —, which psd.read_psd
+            // leaves out; compared as Python reads the file)
+            item["mask"] = layer.folder || !layer.mask_enabled ? Json(nullptr) : digest(file.mask(layer));
             layers.push_back(std::move(item));
         }
         Json out = Json::object();
@@ -575,6 +582,7 @@ private slots:
         int refusals = 0;
         int read_back = 0;
         int corrected = 0;
+        int deviating = 0;
         genko::test::ReadBackNotes notes;
         std::vector<std::string> failures;
         for (std::size_t n = 0; n < cases.size(); ++n) {
@@ -604,7 +612,17 @@ private slots:
                 continue;
             }
             bool same = true;
-            for (std::size_t s = 0; s < outcomes.size() && same; ++s) {
+            // (a case marked "cpp": "deviates" — the user's decision 3: a mask that is off read, which Python leaves
+            // out — is Python's but at its places, and differs there)
+            const bool deviates = genko::test::deviates(c);
+            if (deviates) {
+                if (const std::string diff = genko::test::compare_deviating_steps(outcomes, records, c); !diff.empty()) {
+                    failures.push_back(name + ": " + diff.substr(0, 1500));
+                    same = false;
+                }
+                ++deviating;
+            }
+            for (std::size_t s = 0; s < outcomes.size() && same && !deviates; ++s) {
                 const std::string diff = genko::test::compare_step(outcomes[s], records[s]);
                 if (!diff.empty()) {
                     failures.push_back(name + " step " + std::to_string(s) + ": " + diff.substr(0, 1500));
@@ -615,7 +633,8 @@ private slots:
             (expect_ok ? successes : refusals) += 1;
             if (!expect_ok) continue;
             const std::string difference = genko::test::read_back_difference(
-                last, genko::storage::path_from_utf8((dir + QStringLiteral("/cpp-%1.genko").arg(n)).toStdString()), store, reread, notes);
+                last, genko::storage::path_from_utf8((dir + QStringLiteral("/cpp-%1.genko").arg(n)).toStdString()), store, reread, notes,
+                genko::test::deviation_paths(c));
             if (!difference.empty()) {
                 failures.push_back(name + ": " + difference);
                 continue;
@@ -636,10 +655,44 @@ private slots:
         }
         for (const auto& f : failures) qWarning("%s", f.c_str());
         qInfo("import_psd: %d successes and %d refusals the same as Python; saved and read back as they were: %d; %d with "
-              "correction layers made of adjustment layers (the user's decision 5)", successes, refusals, read_back, corrected);
+              "correction layers made of adjustment layers (the user's decision 5); %d deviating on purpose (the user's decision "
+              "3: a mask that is off read)",
+              successes, refusals, read_back, corrected, deviating);
+        QVERIFY(deviating == 2);
         QVERIFY2(failures.empty(), (std::to_string(failures.size()) + " of " + std::to_string(cases.size()) +
                                     " cases differ from Python (see the warnings)").c_str());
         QVERIFY(successes >= 70 && refusals >= 60 && read_back == successes);
+    }
+
+    // The user's decision 3 (a mask's settings always read): a layer's mask that is off (flags bit 1), which psd.read_psd
+    // leaves out, read with its picture and kept off — not in the picture of the layers laid together —, and imported
+    // as a mask that is off.
+    void aMaskThatIsOffIsRead() {
+        const std::string data = genko::test::read_bytes(file("masks"));
+        const psd::File read = psd::File::read(data);
+        const auto off = std::find_if(read.layers().begin(), read.layers().end(), [](const psd::Layer& l) { return l.name == "disabled"; });
+        QVERIFY(off != read.layers().end());
+        QVERIFY(off->has_mask && !off->mask_enabled);
+        const std::optional<genko::render::Image> picture = read.mask(*off);
+        QVERIFY(picture.has_value());
+        QVERIFY(picture->getbbox().has_value());  // (its box [4, 4, 14, 12] white: the default black around it)
+        for (const psd::Layer& l : read.layers())
+            if (l.name != "disabled" && l.has_mask) QVERIFY(l.mask_enabled);
+        const genko::core::Document book = load_book();
+        const genko::core::Document done =
+            genko::core::CommandBus(genko::render::ops_registry())
+                .apply(book, Json::array({Json{{"op", "import_psd"}, {"page", 6}, {"path", file("masks").toStdString()}, {"id", "off"}}}),
+                       genko::core::Actor("genko"))
+                .doc;
+        int seen = 0;
+        for (const auto& page : done.pages) {
+            for (const auto& layer : page->layers) {
+                if (layer.title != "disabled") continue;
+                ++seen;
+                QVERIFY(layer.mask && !layer.mask->enabled && layer.mask->png && !layer.mask->png->empty());
+            }
+        }
+        QCOMPARE(seen, 1);
     }
 
     void hostileFilesRefused() {

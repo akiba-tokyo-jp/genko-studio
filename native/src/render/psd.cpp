@@ -793,6 +793,15 @@ File File::read(std::string data, const Limits& limits, bool lab) {
     // (read_psd makes the merged picture here, before the layers' pictures)
     if (f.plan_merged().reaches) pillow_size(f.width_, f.height_);
 
+    // (the user's decision 3: a mask's settings always read) a record's mask kept: one that is on, or one that is off —
+    // flags bit 1, read too and kept off — whose picture would not be refused were it on (else left out, as every mask
+    // that is off was before)
+    const auto mask_kept = [&limits](const Record& rec, const ChannelRef* mask) {
+        if (!rec.mask || mask == nullptr) return false;
+        if (!rec.mask_disabled || mask->width <= 0 || mask->height <= 0 || mask->length == 0) return true;
+        const std::uint64_t pixels = static_cast<std::uint64_t>(mask->width) * static_cast<std::uint64_t>(mask->height);
+        return pixels <= static_cast<std::uint64_t>(limits.max_layer_pixels) && mask->length >= pixels;
+    };
     // the layers, bottom to top, folders after the layers in them (read_psd's loop), with the errors its pictures
     // would raise as they are made
     std::vector<std::vector<std::size_t>> pending;
@@ -836,7 +845,8 @@ File File::read(std::string data, const Limits& limits, bool lab) {
             layer.kind = "shape";
             layer.record = n;
             const ChannelRef* mask = rec.channel(-2);
-            layer.has_mask = rec.mask && mask != nullptr && !rec.mask_disabled && mask->width > 0 && mask->height > 0 && mask->length > 0;
+            layer.has_mask = mask_kept(rec, mask) && mask->width > 0 && mask->height > 0 && mask->length > 0;
+            layer.mask_enabled = !rec.mask_disabled;
             f.layers_.push_back(std::move(layer));
             if (!pending.empty()) pending.back().push_back(f.layers_.size() - 1);
             f.python_skipped_.push_back(rec.name);
@@ -867,7 +877,8 @@ File File::read(std::string data, const Limits& limits, bool lab) {
                 layer.adjust = std::move(adjust);
                 layer.luts = std::move(tables);
                 const ChannelRef* mask = rec.channel(-2);
-                layer.has_mask = rec.mask && mask != nullptr && !rec.mask_disabled;
+                layer.has_mask = mask_kept(rec, mask);
+                layer.mask_enabled = !rec.mask_disabled;
                 layer.mask_parameters = rec.mask_parameters;  // (PC3 B2: masks@1)
                 layer.mask_unlinked = rec.mask_unlinked;
                 layer.mask_density = rec.mask_density;
@@ -913,8 +924,9 @@ File File::read(std::string data, const Limits& limits, bool lab) {
             }
         }
         const ChannelRef* mask = rec.channel(-2);
-        if (rec.mask && mask != nullptr && !rec.mask_disabled) {
+        if (mask_kept(rec, mask)) {
             layer.has_mask = true;
+            layer.mask_enabled = !rec.mask_disabled;
             layer.mask_parameters = rec.mask_parameters;  // (PC3 B2: masks@1)
             layer.mask_unlinked = rec.mask_unlinked;
             layer.mask_density = rec.mask_density;
@@ -1223,7 +1235,9 @@ Image File::composited() const {
         if (!shown || opacity <= 0) continue;
         Image picture = image(layer);
         Image alpha = picture.getchannel("A");
-        if (const auto mask = this->mask(layer)) alpha = chops::multiply(alpha, *mask);
+        if (layer.mask_enabled) {  // (a mask that is off has no part in the picture)
+            if (const auto mask = this->mask(layer)) alpha = chops::multiply(alpha, *mask);
+        }
         if (opacity < 1) alpha = alpha.point([opacity](int v) { return static_cast<int>(std::lround(v * opacity)); });
         picture.putalpha(alpha);
         out = alpha_composite(out, picture);

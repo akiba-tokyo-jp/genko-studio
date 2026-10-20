@@ -73,6 +73,10 @@ struct Layer {
     std::optional<std::size_t> parent;  // the index (in layers()) of the folder it is in
     std::string kind = "pixels";        // pixels | folder | text | adjust | smart | shape (pen-shapes@1, PC3 C-b)
     bool has_mask = false;
+    // (the user's decision 3: a mask's settings always read) whether its mask is used — Photoshop's flags bit 1 off. A
+    // mask that is off is read too (has_mask), unless its picture could not be read as one that is on (then none, as
+    // before); composited() leaves it out.
+    bool mask_enabled = true;
     // (PC3 B2, the user's decision 3: masks@1) its mask's record past its picture: whether it carries parameters (flags
     // bit 4) — then whether it is placed relative to the layer (bit 0: not linked), its user density (0..255) and feather
     // (pixels of the canvas), each when the parameters hold it.
@@ -117,7 +121,8 @@ public:
 
     // A pixel layer's picture over the whole canvas (PSDLayer.image: RGBA).
     Image image(const Layer& layer) const;
-    // Its mask over the whole canvas (PSDLayer.mask: "L", white shows); nothing when it has none.
+    // Its mask over the whole canvas (PSDLayer.mask: "L", white shows) — one that is off too (Layer::mask_enabled);
+    // nothing when it has none.
     std::optional<Image> mask(const Layer& layer) const;
     // The merged picture (PSDFile.merged: RGBA), nothing where read_psd has none.
     std::optional<Image> merged() const;
@@ -153,7 +158,7 @@ public:
     };
     std::optional<Deep> merged_deep() const;
     // Its visible pixel layers (in visible folders) laid over each other in normal at their opacity, through their masks
-    // ("RGBA" over the canvas): the picture of a file with no merged picture, or a blank one (real_merged()).
+    // that are on ("RGBA" over the canvas): the picture of a file with no merged picture, or a blank one (real_merged()).
     Image composited() const;
     // The file its linked-layer blocks (the global lnk2, lnk3, lnkD) hold for a placed layer's uuid; none when none
     // does.

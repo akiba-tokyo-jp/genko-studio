@@ -3,7 +3,8 @@
 // drawn, undone and redone; apply_layer_mask and mask_from_transparency saved and undone; outline_area; the window's copy
 // as ops (add_layer + paste, at center_mm). A PSD's masks: one of masks@1 written with Photoshop's flags and parameters —
 // read by psd-tools (the reference environment's, an independent reader: GENKO_PYREF) and by this build —, imported back
-// with them; a mask without them written as before (no parameters, its record of 20 bytes) and imported fixed to the page.
+// with them; a mask without them written as before (no parameters, its record of 20 bytes) and imported fixed to the page;
+// a mask of masks@1 that is off marked disabled (bit 1) and imported back off.
 // (This build's own contract.)
 
 #include <QtTest>
@@ -211,7 +212,7 @@ private slots:
     }
 
     // The user's decision 3: a PSD's masks of masks@1 written with Photoshop's flags and parameters (psd-tools reads them),
-    // imported back with them; a mask without them as before.
+    // imported back with them; a mask without them as before; one that is off written disabled and imported back off.
     void psdMasks() {
         QVERIFY2(!genko::test::python_ref().isEmpty(), "the reference Python (GENKO_PYREF) reads the PSD with psd-tools");
         const QString book = painted(QStringLiteral("psd.genko"));
@@ -223,7 +224,12 @@ private slots:
                                              Json{{"op", "set_layer_mask"}, {"page", 1}, {"id", "pic"}, {"area", Json{{"rect", Json::array({0, 0, 105, 297})}}},
                                                   {"density", 0.5}, {"feather_mm", 3.0}},
                                              Json{{"op", "set_layer_mask"}, {"page", 1}, {"id", "plain"}, {"area", Json{{"rect", Json::array({0, 0, 105, 297})}}}},
-                                             Json{{"op", "set_layer_mask"}, {"page", 1}, {"id", "linked"}, {"fill", "show"}, {"linked", true}}}));
+                                             Json{{"op", "set_layer_mask"}, {"page", 1}, {"id", "linked"}, {"fill", "show"}, {"linked", true}},
+                                             // (a mask that is off, with a density)
+                                             Json{{"op", "add_layer"}, {"page", 1}, {"kind", "paint"}, {"id", "offdense"}, {"name", "使用しない濃度"}},
+                                             Json{{"op", "put_raster"}, {"page", 1}, {"id", "offdense"}, {"png_base64", genko::core::b64encode(picture_png(40, 30))}},
+                                             Json{{"op", "set_layer_mask"}, {"page", 1}, {"id", "offdense"}, {"area", Json{{"rect", Json::array({0, 0, 105, 297})}}},
+                                                  {"enabled", false}, {"density", 0.5}}}));
         QVERIFY2(done.value("ok", false), done.dump().c_str());
         const QString file = path(QStringLiteral("masks.psd"));
         QVERIFY(exported(book, file));
@@ -243,20 +249,27 @@ private slots:
         QCOMPARE(layers["リンク"]["relative"], Json(false));
         QCOMPARE(layers["リンク"]["parameters"], Json(true));
         QVERIFY(layers["リンク"]["density"].is_null() && layers["リンク"]["feather"].is_null());
+        // (a mask that is off: marked disabled)
+        QCOMPARE(layers["使用しない濃度"]["disabled"], Json(true));
+        QCOMPARE(layers["使用しない濃度"]["density"], Json(128));
+        QCOMPARE(layers["絵"]["disabled"], Json(false));
         // this build's reader
         const psd::File read = psd::File::read(genko::test::read_bytes(file));
         int seen = 0;
         for (const psd::Layer& l : read.layers()) {
             if (l.name == "絵") {
                 ++seen;
-                QVERIFY(l.has_mask && l.mask_parameters && l.mask_unlinked && l.mask_density == 128);
+                QVERIFY(l.has_mask && l.mask_enabled && l.mask_parameters && l.mask_unlinked && l.mask_density == 128);
                 QVERIFY(l.mask_feather && std::abs(*l.mask_feather - 3.0 * px_per_mm) < 1e-6);
             } else if (l.name == "そのまま") {
                 ++seen;
-                QVERIFY(l.has_mask && !l.mask_parameters);
+                QVERIFY(l.has_mask && l.mask_enabled && !l.mask_parameters);
+            } else if (l.name == "使用しない濃度") {  // (read, off: the coordinator's decision after the PC3 review)
+                ++seen;
+                QVERIFY(l.has_mask && !l.mask_enabled && read.mask(l).has_value() && l.mask_density == 128);
             }
         }
-        QCOMPARE(seen, 2);
+        QCOMPARE(seen, 3);
         // imported back: the masks of masks@1 with their settings, the other fixed to the page
         const QString back = make_book(QStringLiteral("back.genko"));
         const Json imported = apply(back, QStringLiteral("import.json"),
@@ -280,9 +293,14 @@ private slots:
             } else if (title == "リンク") {
                 ++found;
                 QCOMPARE(mask["linked"], Json(true));
+            } else if (title == "使用しない濃度") {  // (off, as it was: the user's decision 3 — it was dropped)
+                ++found;
+                QCOMPARE(mask["enabled"], Json(false));
+                QVERIFY2(std::abs(mask["density"].get<double>() - 128 / 255.0) < 1e-3, mask.dump().c_str());
             }
+            if (title != "使用しない濃度") QVERIFY2(mask.value("enabled", true), mask.dump().c_str());
         }
-        QCOMPARE(found, 3);
+        QCOMPARE(found, 4);
     }
 };
 
