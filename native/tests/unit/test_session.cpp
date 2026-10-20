@@ -1624,6 +1624,98 @@ private slots:
         QVERIFY(genko::storage::load_document(copy).document.read_only_reason.empty());
     }
 
+    // (PC3 fix 4's finding) The recovery point of a book opened again — its smart object's file, filter mask and assigned
+    // profile, and a placed picture, then only in the book's folder — holds them too: it opens whole from its own folder,
+    // and taken, the book draws as it did with the change on it.
+    void aRecoveryPointTakesTheFilesOnlyTheBooksFolderHolds() {
+        QTemporaryDir tmp;
+        const fs::path book = path_of(tmp.filePath("book.genko"));
+        const fs::path recovery = path_of(tmp.filePath("recovery"));
+        make_book(book);
+        Session::Options options = quick(recovery);
+        options.autosave = false;
+        const auto png = [](int w, int h, genko::render::Ink ink) {
+            return genko::render::write_png(genko::render::Image::create("RGB", genko::render::Size{w, h}, ink));
+        };
+        const std::string placed = genko::storage::AssetStore(book).put_bytes(png(30, 20, genko::render::Ink{20, 90, 200}), ".png");
+        {
+            auto first = Session::open(book, options);
+            const double w = first->document().page(0).spec.width_mm.value(), h = first->document().page(0).spec.height_mm.value();
+            const Json area{{"poly", Json::array({Json::array({0, 0}), Json::array({w / 2, 0}), Json::array({w / 2, h}), Json::array({0, h})})}};
+            first->apply(Json::array(
+                {Json{{"op", "smart_place"}, {"page", 1}, {"new_id", "so"}, {"data", genko::core::b64encode(png(40, 30, genko::render::Ink{200, 40, 10}))},
+                      {"name", "赤.png"}},
+                 Json{{"op", "smart_profile"}, {"page", 1}, {"id", "so"}, {"embedded_profile", "assign"},
+                      {"icc", genko::core::b64encode(genko::render::colour::srgb_icc())}},
+                 Json{{"op", "smart_filter_add"}, {"page", 1}, {"id", "so"}, {"kind", "invert"}, {"area", area}},
+                 Json{{"op", "place_asset"}, {"page", 1}, {"asset", placed}, {"placement_mm", Json::array({20, 150, 60, 40})}}}));
+            first->save_now();
+            QVERIFY(first->wait_saved(10000ms));
+        }
+        {
+            auto second = Session::open(book, options);  // (the files the ops were given are in the book's assets now)
+            QVERIFY(second->document().smart_files.empty());
+            second->apply(stroke_op(30));
+            second->write_recovery_copy();
+            QVERIFY(second->wait_idle(10000ms));
+        }
+        auto again = Session::open(book, options);
+        QVERIFY(again->recovery_offer().has_value());
+        const fs::path point = again->recovery_offer()->folder;
+        const auto from_point = genko::storage::load_document_payload(
+            genko::core::parse_python_json(genko::storage::read_file(point / "state.json")), point);
+        QVERIFY2(from_point.document.read_only_reason.empty(), from_point.document.read_only_reason.c_str());
+        const auto drawn = [](const genko::core::Document& doc) {
+            return genko::render::render_page(doc.page(0), 40, genko::render::RenderOptions{}, &doc).image.tobytes();
+        };
+        const auto from_point_drawn = drawn(from_point.document);  // (the point is gone once taken and saved)
+        again->adopt_recovery();
+        QCOMPARE(ink_strokes(again->document()), std::size_t{1});
+        QVERIFY(again->wait_saved(10000ms));
+        const auto loaded = genko::storage::load_document(book);
+        QVERIFY2(loaded.document.read_only_reason.empty(), loaded.document.read_only_reason.c_str());
+        QCOMPARE(ink_strokes(loaded.document), std::size_t{1});
+        QVERIFY(drawn(loaded.document) == from_point_drawn);
+    }
+
+    // A smart object placed and never saved (its file then only in the recovery point's folder): taken, the book gets the
+    // file with the change, and opens and draws whole.
+    void aRecoveryPointsOwnFilesGoIntoTheBook() {
+        QTemporaryDir tmp;
+        const fs::path book = path_of(tmp.filePath("book.genko"));
+        const fs::path recovery = path_of(tmp.filePath("recovery"));
+        make_book(book);
+        Session::Options options = quick(recovery);
+        options.autosave = false;
+        const auto png = [](int w, int h, genko::render::Ink ink) {
+            return genko::render::write_png(genko::render::Image::create("RGB", genko::render::Size{w, h}, ink));
+        };
+        {
+            auto first = Session::open(book, options);
+            first->apply(Json::array(
+                {Json{{"op", "smart_place"}, {"page", 1}, {"new_id", "so"}, {"data", genko::core::b64encode(png(40, 30, genko::render::Ink{200, 40, 10}))},
+                      {"name", "赤.png"}}}));
+            first->write_recovery_copy();
+            QVERIFY(first->wait_idle(10000ms));
+        }
+        auto again = Session::open(book, options);
+        QVERIFY(again->recovery_offer().has_value());
+        const fs::path point = again->recovery_offer()->folder;
+        const auto from_point = genko::storage::load_document_payload(
+            genko::core::parse_python_json(genko::storage::read_file(point / "state.json")), point);
+        QVERIFY2(from_point.document.read_only_reason.empty(), from_point.document.read_only_reason.c_str());
+        const auto drawn = [](const genko::core::Document& doc) {
+            return genko::render::render_page(doc.page(0), 40, genko::render::RenderOptions{}, &doc).image.tobytes();
+        };
+        const auto from_point_drawn = drawn(from_point.document);
+        again->adopt_recovery();
+        QVERIFY(drawn(again->document()) == from_point_drawn);
+        QVERIFY(again->wait_saved(10000ms));
+        const auto loaded = genko::storage::load_document(book);
+        QVERIFY2(loaded.document.read_only_reason.empty(), loaded.document.read_only_reason.c_str());
+        QVERIFY(drawn(loaded.document) == from_point_drawn);
+    }
+
     // --- the pages read when needed (SPEC PERF-01; ACCEPTANCE PERF-A: the first page does not wait for the others) ---
 
     void theFirstPageIsReadFirstAndTheRestAfter() {

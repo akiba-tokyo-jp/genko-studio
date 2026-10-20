@@ -25,6 +25,7 @@
 #include "render/timelapse.hpp"
 #include "storage/asset_store.hpp"
 #include "storage/fsutil.hpp"
+#include "storage/gc.hpp"
 #include "storage/journal.hpp"
 #include "storage/lock.hpp"
 #include "storage/reader.hpp"
@@ -288,6 +289,17 @@ Session::JobResult Session::execute(const Job& job) {
             storage::make_dirs_durable(folder);
             storage::AssetStore store(folder);
             Json payload = storage::project_payload_v4(*job.doc, store);
+            // (what the book names that only its folder holds — a smart object's file, filter mask, PSD record and
+            // assigned profile, a placed picture — goes with the recovery point, which is read from its own folder; when
+            // the book's folder cannot be read, the point is written all the same: the changes it keeps come first)
+            if (job.doc->asset_dir) {
+                std::set<std::string> named;
+                storage::refs_in(payload, named);
+                try {
+                    storage::copy_named_assets(*job.doc->asset_dir, folder, named);
+                } catch (const core::Error&) {
+                }
+            }
             payload["revision"] = job.base_revision;
             const std::string state = storage::state_ref(payload);
             storage::write_atomic(folder / "state.json", core::dump_python_indent2(payload));
@@ -1750,6 +1762,14 @@ void Session::adopt_recovery() {
     const Json payload = core::parse_python_json(storage::read_file(point.folder / "state.json"));
     storage::LoadResult loaded = storage::load_document_payload(payload, point.folder);
     if (!loaded.document.read_only_reason.empty()) throw core::Error("read_only", loaded.document.read_only_reason);
+    // (what the point holds that the book does not — a smart object placed and not saved, its filter mask and PSD
+    // record — goes into the book's assets first: the book reads its pictures from its own folder, and the point is
+    // removed once saved. Nothing is taken when they cannot be written.)
+    if (doc_->asset_dir) {
+        std::set<std::string> named;
+        storage::refs_in(payload, named);
+        storage::copy_named_assets(point.folder, *doc_->asset_dir, named);
+    }
     core::Document doc = std::move(loaded.document);
     doc.revision = doc_->revision;
     doc.book_id = doc_->book_id;
