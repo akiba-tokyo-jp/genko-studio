@@ -19,6 +19,7 @@
 #include "core/model.hpp"
 #include "render/image.hpp"
 #include "render/ops_registry.hpp"
+#include "render/page.hpp"
 #include "render/png.hpp"
 #include "testsupport.hpp"
 
@@ -331,10 +332,23 @@ private slots:
         const std::string refused = code_of(CommandBus(), doc, move);
         QVERIFY2(refused.starts_with("not_yet_ported: ops[0] set_page_spec: set_page_spec moving a paint layer's pixels"), refused.c_str());
         QCOMPARE(code_of(CommandBus(), doc, paper), std::string("(applied)"));
+        // (a picture at raster.WORKING_DPI onto the new paper, 208 × 283 mm, at that 200 dpi; one of another resolution —
+        // the 8 × 6 picture over the page — keeps it, never taken for one at 200 dpi: the review of PC3, fix 1)
+        genko::core::Layer working = paint;
+        working.id = "working";
+        const genko::core::PageSpec was = doc.page(1).spec;
+        working.raster_png = std::make_shared<const std::string>(genko::render::write_png(genko::render::Image::create(
+            "RGBA", {genko::render::mm_to_px(was.width_mm.value(), 200), genko::render::mm_to_px(was.height_mm.value(), 200)},
+            genko::render::Ink{200, 20, 20, 255})));
+        doc.edit_page(1).layers.push_back(working);
         const Document moved = bus().apply(doc, move, Actor("genko")).doc;
         const genko::render::Image picture = genko::render::read_png(*moved.page(1).layers.back().raster_png);
-        QCOMPARE(picture.width(), 1638);  // (the new paper, 208 × 283 mm, at raster.WORKING_DPI)
+        QCOMPARE(picture.width(), 1638);
         QCOMPARE(picture.height(), 2228);
+        const genko::render::Image small = genko::render::read_png(*moved.page(1).layers.at(moved.page(1).layers.size() - 2).raster_png);
+        const genko::core::PageSpec& now = moved.page(1).spec;
+        QCOMPARE(small.width(), static_cast<int>(std::lround(now.width_mm.value() * 8 / was.width_mm.value())));
+        QCOMPARE(small.height(), static_cast<int>(std::lround(now.height_mm.value() * 6 / was.height_mm.value())));
         const std::string imported = code_of(CommandBus(), book(), ops(R"([{"op": "import_pages", "from": "nowhere.genko"}])"));
         QVERIFY2(imported.starts_with("not_yet_ported: ops[0] import_pages: import_pages reads the other book"), imported.c_str());
         // precise colour pixels

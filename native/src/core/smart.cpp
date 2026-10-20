@@ -767,6 +767,18 @@ std::vector<std::string> used_contents(const Document& doc) {
     return {seen.begin(), seen.end()};
 }
 
+std::vector<WrittenPage> written_pages(const Document& doc) {
+    std::vector<WrittenPage> out;
+    for (std::size_t i = 0; i < doc.pages.size(); ++i) {
+        if (!doc.is_deferred(i)) out.push_back(WrittenPage{doc.pages[i].get(), {}});
+    }
+    for (const std::string& id : used_contents(doc)) {
+        const auto it = doc.smart_contents.find(id);
+        if (it != doc.smart_contents.end() && it->second && it->second->page) out.push_back(WrittenPage{it->second->page.get(), id});
+    }
+    return out;
+}
+
 bool uses_smart(const Document& doc) {
     if (!doc.smart_contents.empty()) return true;
     for (const auto& page : doc.pages) {

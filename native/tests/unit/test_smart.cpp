@@ -10,6 +10,7 @@
 
 #include <QTemporaryDir>
 
+#include <algorithm>
 #include <cmath>
 #include <filesystem>
 #include <string>
@@ -18,10 +19,12 @@
 #include "core/command_bus.hpp"
 #include "core/error.hpp"
 #include "core/ids.hpp"
+#include "core/masks.hpp"
 #include "core/model.hpp"
 #include "core/paths.hpp"
 #include "core/placement.hpp"
 #include "core/smart.hpp"
+#include "core/vector.hpp"
 #include "render/image.hpp"
 #include "render/ops_registry.hpp"
 #include "render/png.hpp"
@@ -167,6 +170,94 @@ private slots:
         fs::remove(storage::AssetStore(path_of(tmp.path() + "/smart")).path(file->asset, ".png"));
         const auto missing = storage::load_document(path_of(tmp.path() + "/smart"));
         QVERIFY(!missing.document.read_only_reason.empty());
+    }
+
+    // PC3 inside the contents (vector@1, page-spec@1): a contents page's work path, saved paths, clipping path and own paper
+    // are written and read back as a book page's are (not kept as the keys read, which would write the old values over
+    // later ones), a path drawn after reading is there on the next save; the book names the extensions its contents use
+    // when its pages use none (vector@1, page-spec@1, pen-shapes@1, transform@1, masks@1) and checks what the contents hold
+    // as it checks its pages.
+    void theContentsKeepTheirPathsAndNameTheirExtensions() {
+        QTemporaryDir tmp;
+        const auto rect = [](double x, double y, double w, double h) {
+            return Json{{"subpaths", Json::array({Json{{"closed", true},
+                                                       {"knots", Json::array({Json::array({x, y}), Json::array({x + w, y}), Json::array({x + w, y + h}),
+                                                                              Json::array({x, y + h})})}}})}};
+        };
+        const auto named = [](const Json& payload, std::string_view feature) {
+            return std::find(payload["features"].begin(), payload["features"].end(), Json(std::string(feature))) != payload["features"].end();
+        };
+        Document doc = run(painted(), Json::array({Json{{"op", "smart_convert"}, {"page", 1}, {"id", "p1"}, {"new_id", "so1"}}}));
+        const std::string id = *core::smart::contents_id(*layer_of(doc.page(0), "so1"));
+        doc = run(doc, Json::array({Json{{"op", "set_path"}, {"page", 1}, {"path", rect(1, 2, 3, 4)}, {"contents", id}},
+                                    Json{{"op", "set_path"}, {"page", 1}, {"name", "輪郭"}, {"path", rect(5, 6, 7, 8)}, {"contents", id}}}));
+        {
+            core::Page& inner = doc.edit_contents_page(id);
+            inner.clipping_path = core::vector::ClippingPath{"輪郭", 0.5};
+            inner.own_spec = true;
+            inner.spec.trim_origin_mm = std::make_pair(1.5, 2.5);
+        }
+        QVERIFY(doc.page(0).paths.empty() && !doc.page(0).work_path && !doc.page(0).own_spec);
+        genko::test::write_project(doc, path_of(tmp.path() + "/a"));
+        const Json payload = genko::test::read_json(tmp.path() + "/a/project.json");
+        const Json& written = payload["smart_contents"][id]["page"];
+        for (const char* key : {"work_path", "paths", "clipping_path", "native_spec"}) QVERIFY2(written.contains(key), key);
+        QVERIFY2(named(payload, core::vector::kVectorFeature) && named(payload, core::vector::kPageSpecFeature), payload["features"].dump().c_str());
+        QVERIFY(!named(payload, core::vector::kPenShapesFeature) && !named(payload, core::kMasksFeature));
+        const auto loaded = storage::load_document(path_of(tmp.path() + "/a"));
+        QVERIFY2(loaded.report.clean(), loaded.report.to_json().dump().c_str());
+        const core::Page& back = *loaded.document.smart_contents.at(id)->page;
+        QVERIFY(back.work_path && back.work_path->knot_count() == 4);
+        QCOMPARE(back.work_path->subpaths.at(0).knots.at(0).anchor, (core::vector::XY{1, 2}));
+        QCOMPARE(back.paths.size(), std::size_t{1});
+        QCOMPARE(back.paths[0].name, std::string("輪郭"));
+        QVERIFY(back.clipping_path && back.clipping_path->name == "輪郭");
+        QVERIFY(back.own_spec && back.spec.trim_origin_mm == std::make_optional(std::make_pair(1.5, 2.5)));
+        for (const char* key : {"work_path", "paths", "clipping_path", "native_spec"}) QVERIFY2(!back.extra.contains(key), key);
+        // (written again: the same bytes; a work path drawn after reading: there on the next save)
+        genko::test::write_project(loaded.document, path_of(tmp.path() + "/again"));
+        QCOMPARE(genko::test::read_bytes(tmp.path() + "/again/project.json"), genko::test::read_bytes(tmp.path() + "/a/project.json"));
+        const Document drawn = run(loaded.document, Json::array({Json{{"op", "set_path"}, {"page", 1}, {"path", rect(20, 30, 2, 2)}, {"contents", id}}}));
+        QCOMPARE(drawn.smart_contents.at(id)->page->work_path->subpaths.at(0).knots.at(0).anchor, (core::vector::XY{20, 30}));
+        genko::test::write_project(drawn, path_of(tmp.path() + "/b"));
+        const auto reread = storage::load_document(path_of(tmp.path() + "/b"));
+        QVERIFY2(reread.report.clean(), reread.report.to_json().dump().c_str());
+        const core::Page& last = *reread.document.smart_contents.at(id)->page;
+        QVERIFY(last.work_path && last.work_path->knot_count() == 4);
+        QCOMPARE(last.work_path->subpaths.at(0).knots.at(0).anchor, (core::vector::XY{20, 30}));
+        QCOMPARE(last.paths.size(), std::size_t{1});
+
+        // the other extensions of PC3 named for what only the contents hold: shape parts, a link, a mask's settings
+        Document more = doc;
+        {
+            core::Page& inner = more.edit_contents_page(id);
+            core::Layer pen;
+            pen.id = "pen1";
+            pen.kind = core::LayerKind::Strokes;
+            core::vector::ShapePart part;
+            part.id = "part1";
+            part.path = core::vector::path_from_json(rect(1, 1, 5, 5));
+            part.fill = Json{{"rgb", Json::array({10, 20, 30})}};
+            pen.shapes = core::vector::make_shapes({part});
+            pen.link = "l1";
+            inner.layers.push_back(pen);
+            inner.layers.front().mask.emplace();
+            inner.layers.front().mask->png = std::make_shared<const std::string>(render::write_png(render::Image::create("L", render::Size{4, 4}, render::Ink(255))));
+            inner.layers.front().mask->density = 0.5;
+        }
+        QVERIFY(core::vector::uses_pen_shapes(more) && core::vector::uses_transform(more) && core::uses_masks(more));
+        QVERIFY(!core::vector::uses_pen_shapes(painted()));
+        genko::test::write_project(more, path_of(tmp.path() + "/more"));
+        const Json more_payload = genko::test::read_json(tmp.path() + "/more/project.json");
+        for (const std::string_view feature : {core::vector::kPenShapesFeature, core::vector::kTransformFeature, core::kMasksFeature})
+            QVERIFY2(named(more_payload, feature), more_payload["features"].dump().c_str());
+        // (what the contents must not hold refused as on a page: two saved paths of one name, a mask's density past 1)
+        Document twice = doc;
+        twice.edit_contents_page(id).paths.push_back(twice.smart_contents.at(id)->page->paths.at(0));
+        QVERIFY_THROWS_EXCEPTION(core::Error, core::vector::validate_vector(twice));
+        Document dense = more;
+        dense.edit_contents_page(id).layers.front().mask->density = 2;
+        QVERIFY_THROWS_EXCEPTION(core::Error, core::validate_masks(dense));
     }
 
     void validateRefusesWhatCannotBe() {

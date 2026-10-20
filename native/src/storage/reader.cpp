@@ -1575,8 +1575,9 @@ std::map<std::string, std::shared_ptr<const core::SmartContents>> Reader::read_s
     return out;
 }
 
-// A smart object's page (its contents of kind page): read as a page of the book is, with its own spec; it has no lines,
-// and (none given) no layers.
+// A smart object's page (its contents of kind page): read as a page of the book is, with its own spec — its channels, and
+// PC3's paths, work path, clipping path and own paper (read_page_vectors: kept as the keys read, they would be written over
+// what the page holds later) —; it has no lines, and (none given) no layers.
 core::Page Reader::read_contents_page(const Json& raw, const std::string& at, const core::PageSpec& spec, core::Binding binding) {
     if (!raw.is_object()) format_error(at, "a page must be an object, not " + core::py_repr(raw));
     core::Page page;
@@ -1623,6 +1624,7 @@ core::Page Reader::read_contents_page(const Json& raw, const std::string& at, co
     }
     check_ink_rasters(page, raw, at);
     read_channels(page, at);
+    read_page_vectors(page, at);
     return page;
 }
 

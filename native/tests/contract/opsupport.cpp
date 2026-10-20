@@ -28,6 +28,7 @@
 #include "storage/lock.hpp"
 #include "storage/reader.hpp"
 #include "core/paths.hpp"
+#include "render/bookpages.hpp"
 #include "render/page.hpp"
 #include "render/png.hpp"
 #include "render/selection.hpp"
@@ -1106,5 +1107,90 @@ std::string pinned_difference(const StepOutcome& outcome, const Json& pinned) {
 
 PythonStretch::PythonStretch() { render::selection::set_grey_area_stretch(render::Resample::Nearest); }
 PythonStretch::~PythonStretch() { render::selection::set_grey_area_stretch(render::Resample::Bilinear); }
+
+}  // namespace genko::test
+
+// --- the review of PC3, fix 1: set_page_spec keeps a picture's resolution ----------------------------------------------
+
+namespace genko::test {
+
+namespace {
+
+const core::Layer* layer_in(const core::Document& doc, const std::string& page_id, const std::string& layer_id, std::size_t* p = nullptr,
+                            std::size_t* k = nullptr) {
+    for (std::size_t i = 0; i < doc.pages.size(); ++i) {
+        if (doc.pages[i]->id != page_id) continue;
+        for (std::size_t j = 0; j < doc.pages[i]->layers.size(); ++j) {
+            if (doc.pages[i]->layers[j].id != layer_id) continue;
+            if (p != nullptr) *p = i;
+            if (k != nullptr) *k = j;
+            return &doc.pages[i]->layers[j];
+        }
+    }
+    return nullptr;
+}
+
+}  // namespace
+
+std::string KeptResolution::step(const core::Document& before, const core::Document& after, const Json& step, StepOutcome& outcome,
+                                 const Json& python) {
+    // (each op again on the book before the step, to follow the pictures through it)
+    if (outcome.reply.value("ok", false) && !step.value("dry_run", false)) {
+        static const core::CommandBus bus(render::ops_registry());
+        const core::Actor actor(step.contains("agent") ? step["agent"].get<std::string>() : std::string("genko"));
+        core::Document doc = before;
+        for (const Json& op : step["ops"]) {
+            core::Document next;
+            try {
+                next = bus.apply(doc, Json::array({op}), actor).doc;
+            } catch (const core::ApplyError& error) {
+                return std::string("the step's ops taken again one by one: ") + error.what();
+            }
+            const bool repapers = op.is_object() && op.value("op", Json()) == Json("set_page_spec");
+            const std::string side = doc.start_side.value_or("");
+            for (const auto& page : doc.pages) {
+                for (const core::Layer& layer : page->layers) {
+                    const std::string key = page->id + "/" + layer.id;
+                    const core::Layer* moved = layer_in(next, page->id, layer.id);
+                    if (moved == nullptr || !layer.raster_png || !moved->raster_png || moved->raster_png == layer.raster_png) continue;
+                    const auto followed = python_.find(key);
+                    const render::Size size = render::picture_size(*layer.raster_png);
+                    const bool working = size.width == render::mm_to_px(page->spec.width_mm.value(), 200) &&
+                                         size.height == render::mm_to_px(page->spec.height_mm.value(), 200);
+                    if (followed == python_.end() && working) continue;  // (both sides the same picture: moved alike)
+                    if (!repapers) return op.value("op", std::string()) + " changed page " + page->id + "'s layer " + layer.id + ", kept at its resolution";
+                    const core::Page* now = nullptr;
+                    for (const auto& p : next.pages) {
+                        if (p->id == page->id) now = p.get();
+                    }
+                    const core::Rect from = page->inner_rect_mm(side), to = now->inner_rect_mm(next.start_side.value_or(""));
+                    if (*moved->raster_png != render::relayout_raster(*layer.raster_png, page->spec, now->spec, from, to)) {
+                        return "set_page_spec did not keep page " + page->id + "'s layer " + layer.id + " at its resolution";
+                    }
+                    if (followed == python_.end()) ++kept;
+                    python_[key] = render::relayout_working_raster(followed != python_.end() ? followed->second : *layer.raster_png, now->spec, from, to);
+                }
+            }
+            doc = std::move(next);
+        }
+    }
+    // (Python's side where this build's picture differs: in its place in the outcome)
+    for (const auto& [key, picture] : python_) {
+        const std::size_t slash = key.find('/');
+        std::size_t p = 0, k = 0;
+        const core::Layer* layer = layer_in(after, key.substr(0, slash), key.substr(slash + 1), &p, &k);
+        if (layer == nullptr || !layer->raster_png) continue;
+        const std::string at = "/pages/" + std::to_string(p) + "/layers/" + std::to_string(k) + "/asset";
+        const Json::json_pointer place(at);
+        if (!outcome.payload.contains(place) || !python.contains("payload") || !python["payload"].contains(place)) {
+            return "payload" + at + ": not in both payloads";
+        }
+        if (outcome.payload[place] != Json(pixels_digest(*layer->raster_png))) return "payload" + at + ": not this build's picture";
+        if (python["payload"][place] != Json(pixels_digest(picture))) return "payload" + at + ": Python's picture is not the one taken for 200 dpi";
+        outcome.payload[place] = python["payload"][place];
+        if (std::find(paths.begin(), paths.end(), "payload" + at) == paths.end()) paths.push_back("payload" + at);
+    }
+    return {};
+}
 
 }  // namespace genko::test

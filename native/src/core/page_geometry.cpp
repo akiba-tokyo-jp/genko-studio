@@ -306,6 +306,15 @@ void map_prim(Json& prim, const Mapping& m) {
     }
 }
 
+namespace {
+
+// A map that keeps each axis the way it points (a move and a scale, each axis its own): what a mask area's box alone
+// follows, its picture stretched over it. Any other — a half turn too, which keeps the axes but turns them round — moves
+// its pixels (PixelHooks::area).
+bool upright(const Mapping& m) { return m.keeps_axes() && m.m[0] > 0 && m.m[3] > 0; }
+
+}  // namespace
+
 void map_area(Json& area, const Mapping& m) {
     if (!area.is_object()) return;
     move_points_at(area, "poly", m);
@@ -329,7 +338,7 @@ void map_area(Json& area, const Mapping& m) {
         const auto b = map_box({(*it)[0].get<double>(), (*it)[1].get<double>(), (*it)[2].get<double>(), (*it)[3].get<double>()}, m);
         *it = Json::array({b[0], b[1], b[2], b[3]});
     }
-    if (const auto mask = area.find("mask"); mask != area.end() && mask->is_object() && m.keeps_axes() && !m.reflects()) {
+    if (const auto mask = area.find("mask"); mask != area.end() && mask->is_object() && upright(m)) {
         if (const auto box = mask->find("box"); box != mask->end() && box->is_array() && box->size() == 4) {
             const auto b = map_box({(*box)[0].get<double>(), (*box)[1].get<double>(), (*box)[2].get<double>(), (*box)[3].get<double>()}, m);
             *box = Json::array({b[0], b[1], b[2], b[3]});
@@ -400,7 +409,7 @@ void map_page(Document& doc, std::size_t at, const Mapping& m, const PixelHooks&
         if (layer.placement_mm) {
             // (a placed picture is laid upright in its box: a turn or a mirror is a smart object's — the page size ops make
             // it one first)
-            if (!(m.keeps_axes() && m.m[0] > 0 && m.m[3] > 0)) {
+            if (!upright(m)) {
                 not_yet_ported("a placed picture turned with the page: it is turned as a smart object (PC3 節 A)");
             }
             const Rect& r = *layer.placement_mm;
@@ -434,7 +443,7 @@ void map_page(Document& doc, std::size_t at, const Mapping& m, const PixelHooks&
     if (const auto saved = page.extra.find("saved_areas"); saved != page.extra.end() && saved->is_object()) {
         for (auto& [name, area] : saved->items()) {
             const bool mask = area.is_object() && area.contains("mask");
-            if (mask && !(m.keeps_axes() && !m.reflects())) {
+            if (mask && !upright(m)) {
                 if (!hooks.area) not_yet_ported("moving a saved area's pixels with the page: they are moved by the drawing build");
                 hooks.area(area, m, before, after);
                 continue;

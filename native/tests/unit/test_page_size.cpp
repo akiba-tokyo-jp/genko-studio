@@ -27,6 +27,7 @@
 #include "core/paths.hpp"
 #include "core/smart.hpp"
 #include "core/vector.hpp"
+#include "render/bookpages.hpp"
 #include "render/image.hpp"
 #include "render/ops_registry.hpp"
 #include "render/png.hpp"
@@ -237,6 +238,164 @@ private slots:
             const core::StoryLine& line = back.story.at(0);
             QVERIFY(near(line.x_mm.value(), 20, 1e-3) && near(line.w_mm.value(), 30, 1e-3));
         }
+    }
+
+    // A saved mask area's picture turns with the page by every turn — a quarter either way, a half (once: the picture upside
+    // down, not only its box moved), a flip either way —, and by a crop tilted by 180°.
+    void aSavedAreaTurnsWithEveryTurn() {
+        const Document doc = furnished();
+        const std::string was = grey_coded(4, 8).tobytes();  // (x·16 + y)
+        struct Case {
+            const char* turn;
+            int w, h;
+            double x, y;
+            std::pair<int, int> (*from)(int, int);
+        };
+        const Case cases[] = {
+            {"90cw", 8, 4, 76.2, 25.4, [](int X, int Y) { return std::pair{Y, 7 - X}; }},
+            {"90ccw", 8, 4, 50.8, 63.5, [](int X, int Y) { return std::pair{3 - Y, X}; }},
+            {"180", 4, 8, 63.5, 76.2, [](int X, int Y) { return std::pair{3 - X, 7 - Y}; }},
+            {"flip_h", 4, 8, 63.5, 50.8, [](int X, int Y) { return std::pair{3 - X, Y}; }},
+            {"flip_v", 4, 8, 25.4, 76.2, [](int X, int Y) { return std::pair{X, 7 - Y}; }},
+        };
+        const auto check = [&](const Document& turned, const Case& c, int off) {
+            const Json& mask = turned.page(0).extra["saved_areas"]["m"]["mask"];
+            QVERIFY2(near(mask["box"][0].get<double>(), c.x, 1e-3) && near(mask["box"][1].get<double>(), c.y, 1e-3), (c.turn + mask["box"].dump()).c_str());
+            const render::Image picture = render::read_png(core::a2b_base64(mask["png"].get<std::string>())).convert("L");
+            QCOMPARE(picture.width(), c.w);
+            QCOMPARE(picture.height(), c.h);
+            const std::string got = picture.tobytes();
+            for (int Y = 0; Y < c.h; ++Y) {
+                for (int X = 0; X < c.w; ++X) {
+                    const auto [x, y] = c.from(X, Y);
+                    const int value = static_cast<unsigned char>(got[std::size_t(Y) * std::size_t(c.w) + std::size_t(X)]);
+                    QVERIFY2(std::abs(value - static_cast<unsigned char>(was[std::size_t(y) * 4 + std::size_t(x)])) <= off,
+                             qPrintable(QStringLiteral("%1 (%2, %3): %4").arg(c.turn).arg(X).arg(Y).arg(value)));
+                }
+            }
+        };
+        for (const Case& c : cases) check(after(doc, one(Json{{"op", "rotate_pages"}, {"page", 1}, {"turn", c.turn}})), c, 0);
+        // (the angle 180: the same half turn)
+        check(after(doc, one(Json{{"op", "rotate_pages"}, {"page", 1}, {"angle", 180}})), cases[2], 0);
+        // (a crop of the whole page tilted by 180°: its pixels projected — on their own centres here)
+        check(after(doc, one(Json{{"op", "crop_page"}, {"page", 1}, {"rect", Json::array({0, 0, 101.6, 152.4})}, {"angle", 180}})), cases[2], 1);
+    }
+
+    // set_page_spec (原稿用紙の設定, move): what PC3 adds to a page goes with the basic frame by the same map as the lines — a
+    // pen layer's shape parts, a vector mask, the work and saved paths, the saved areas (a mask area's box), a smart object's
+    // filter mask —; a paint layer's pixels and a mask keep the resolution they have (a picture that is not at the working
+    // 200 dpi is not taken for one), and those at 200 dpi (a mask at 150) are moved to the very pixels they were before.
+    void setPageSpecMovesWhatPC3Adds() {
+        Document doc = furnished();
+        {
+            core::Page& page = doc.edit_page(0);
+            const auto square = [](double x, double y, double w, double h) {
+                core::vector::Subpath s;
+                s.knots = {core::vector::Knot::corner(x, y), core::vector::Knot::corner(x + w, y), core::vector::Knot::corner(x + w, y + h),
+                           core::vector::Knot::corner(x, y + h)};
+                core::vector::Path p;
+                p.subpaths.push_back(s);
+                return p;
+            };
+            core::vector::ShapePart part;
+            part.id = "part1";
+            part.path = square(20, 30, 10, 10);
+            part.fill = Json{{"rgb", Json::array({10, 20, 30})}};
+            part.stroke = core::vector::ShapeStroke{};
+            part.stroke->width_mm = 1.0;
+            page.layers.at(2).shapes = core::vector::make_shapes({part});
+            for (core::Layer& layer : page.layers) {
+                if (layer.id == "paint") layer.vector_mask = core::vector::VectorMask{square(15, 25, 20, 20)};
+            }
+            page.paths.push_back(core::vector::NamedPath{"輪郭", square(40, 60, 5, 5)});
+            page.extra["saved_areas"]["r"] = Json{{"rect", Json::array({10, 20, 30, 40})}};
+            // (a paint layer at the working 200 dpi, its mask at 150 dpi: 800 × 1200 and 600 × 900 on this paper)
+            core::Layer working;
+            working.id = "p200";
+            working.kind = core::LayerKind::Raster;
+            working.panel_clip = false;
+            std::string rgba(std::size_t(800) * 1200 * 4, '\0');
+            for (std::size_t i = 0; i < rgba.size(); ++i) rgba[i] = static_cast<char>((i * 7 + i / 3200) % 251);
+            working.raster_png = std::make_shared<const std::string>(render::write_png(render::Image::frombytes("RGBA", render::Size{800, 1200}, rgba)));
+            std::string grey(std::size_t(600) * 900, '\0');
+            for (std::size_t i = 0; i < grey.size(); ++i) grey[i] = static_cast<char>((i / 600 + i % 600) % 256);
+            working.mask.emplace();
+            working.mask->png = std::make_shared<const std::string>(render::write_png(render::Image::frombytes("L", render::Size{600, 900}, grey)));
+            page.layers.push_back(working);
+        }
+        // (a smart object with a filter mask over the left half of the page)
+        doc = after(doc, Json::array({Json{{"op", "add_layer"}, {"page", 1}, {"kind", "paint"}, {"id", "src"}, {"name", "絵"}},
+                                      Json{{"op", "put_raster"}, {"page", 1}, {"id", "src"}, {"png_base64", core::b64encode(render::write_png(coded(20, 30)))}},
+                                      Json{{"op", "smart_convert"}, {"page", 1}, {"id", "src"}, {"new_id", "so"}},
+                                      Json{{"op", "smart_filter_add"}, {"page", 1}, {"id", "so"}, {"kind", "invert"},
+                                           {"area", Json{{"poly", Json::array({Json::array({0, 0}), Json::array({50.8, 0}), Json::array({50.8, 152.4}),
+                                                                               Json::array({0, 152.4})})}}}}}));
+        const std::string filter_mask = (*layer_of(doc.page(0), "so").smart)["filter_mask"]["asset"].get<std::string>();
+        const Document moved = after(doc, one(Json{{"op", "set_page_spec"}, {"margins", Json{{"top", 20}, {"bottom", 5}, {"inner", 15}, {"outer", 20}}}}));
+        const core::Page& was = doc.page(0);
+        const core::Page& page = moved.page(0);
+        // (the 200-dpi layer and its 150-dpi mask: the pixels the move gave them before)
+        const std::string working_ref = core::bytes_ref(pixels(layer_of(page, "p200").raster_png));
+        const std::string mask_ref = core::bytes_ref(pixels(layer_of(page, "p200").mask->png, "L"));
+        QCOMPARE(working_ref, std::string("sha256:cf56fc9832abd7b60eefed91fd9ff6e22aa0078ac93b6dae6c30a4f935598332"));
+        QCOMPARE(mask_ref, std::string("sha256:3af34be915e554ca18f08f3fc3f6b0178ae08cd5234f85a69f2655a00f1759ce"));
+        const std::string side = doc.start_side.value_or("");
+        const core::Rect a = was.inner_rect_mm(side), b = page.inner_rect_mm(side);
+        const double sx = (b.width / a.width).value(), sy = (b.height / a.height).value();
+        QVERIFY(!near(sx, 1) && !near(sy, 1));
+        const auto X = [&](double x) { return b.x.value() + (x - a.x.value()) * sx; };
+        const auto Y = [&](double y) { return b.y.value() + (y - a.y.value()) * sy; };
+        // the lines (as before), and by the same map: the shape part, the vector mask, the paths, the saved areas
+        const core::Stroke& s = *page.layers.at(2).strokes->items.at(0);
+        QVERIFY(near(s.points[0].x, X(20), 1e-3) && near(s.points[0].y, Y(30), 1e-3));
+        const core::vector::ShapePart& part = page.layers.at(2).shapes->items.at(0);
+        QVERIFY2(near(part.path.subpaths[0].knots[2].anchor.x, X(30)) && near(part.path.subpaths[0].knots[2].anchor.y, Y(40)),
+                 core::vector::to_json(part.path).dump().c_str());
+        QVERIFY(near(part.stroke->width_mm, std::sqrt(sx * sy), 1e-4));
+        const core::vector::Knot& corner = layer_of(page, "paint").vector_mask->path.subpaths[0].knots[0];
+        QVERIFY(near(corner.anchor.x, X(15)) && near(corner.anchor.y, Y(25)));
+        QVERIFY(near(page.work_path->subpaths[0].knots[1].anchor.x, X(30)) && near(page.work_path->subpaths[0].knots[1].anchor.y, Y(10)));
+        QVERIFY(near(page.paths.at(0).path.subpaths[0].knots[0].anchor.x, X(40)) && near(page.paths.at(0).path.subpaths[0].knots[0].anchor.y, Y(60)));
+        const Json& r = page.extra["saved_areas"]["r"]["rect"];
+        QVERIFY2(near(r[0].get<double>(), X(10), 1e-3) && near(r[1].get<double>(), Y(20), 1e-3) && near(r[2].get<double>(), 30 * sx, 1e-3) &&
+                     near(r[3].get<double>(), 40 * sy, 1e-3),
+                 r.dump().c_str());
+        const Json& m = page.extra["saved_areas"]["m"]["mask"]["box"];
+        QVERIFY2(near(m[0].get<double>(), X(25.4), 1e-3) && near(m[1].get<double>(), Y(50.8), 1e-3) && near(m[2].get<double>(), 12.7 * sx, 1e-3),
+                 m.dump().c_str());
+        // the filter mask moved as a layer's mask is
+        const std::string moved_mask = (*layer_of(page, "so").smart)["filter_mask"]["asset"].get<std::string>();
+        QVERIFY(moved_mask != filter_mask && moved.smart_files.contains(moved_mask));
+        const auto expected = render::relayout_mask(*doc.smart_files.at(filter_mask), was.spec, page.spec, a, b);
+        QVERIFY(expected.has_value());
+        QCOMPARE(pixels(moved.smart_files.at(moved_mask), "L"), pixels(std::make_shared<const std::string>(*expected), "L"));
+        // a paint layer of 16 × 24 (not 200 dpi) and its mask of 12 × 18 keep their resolution: each pixel the old one
+        // that moved there (red 10·x of the old place, bilinear)
+        const render::Image picture = render::read_png(*layer_of(page, "paint").raster_png).convert("RGBA");
+        QCOMPARE(picture.width(), 16);
+        QCOMPARE(picture.height(), 24);
+        const std::string got = picture.tobytes();
+        int seen = 0;
+        for (int v = 0; v < 24; ++v) {
+            for (int u = 0; u < 16; ++u) {
+                const double old_x = (a.x.value() + ((u + 0.5) * 6.35 - b.x.value()) / sx) / 6.35 - 0.5;
+                const double old_y = (a.y.value() + ((v + 0.5) * 6.35 - b.y.value()) / sy) / 6.35 - 0.5;
+                if (old_x < 0 || old_y < 0 || old_x > 15 || old_y > 23) continue;
+                const std::size_t i = (std::size_t(v) * 16 + std::size_t(u)) * 4;
+                QVERIFY2(std::fabs(static_cast<unsigned char>(got[i]) - old_x * 10) <= 2 && std::fabs(static_cast<unsigned char>(got[i + 1]) - old_y * 10) <= 2,
+                         qPrintable(QStringLiteral("(%1, %2): %3 %4").arg(u).arg(v).arg(static_cast<unsigned char>(got[i])).arg(old_x * 10)));
+                ++seen;
+            }
+        }
+        QVERIFY(seen > 200);
+        const render::Image mask = render::read_png(*layer_of(page, "paint").mask->png).convert("L");
+        QCOMPARE(mask.width(), 12);
+        QCOMPARE(mask.height(), 18);
+        // on a larger paper: the same resolution, so more pixels
+        const Document b5 = after(doc, one(Json{{"op", "set_page_spec"}, {"preset", "b5"}}));
+        const render::Image wide = render::read_png(*layer_of(b5.page(0), "paint").raster_png);
+        QCOMPARE(wide.width(), static_cast<int>(std::lround(b5.page(0).spec.width_mm.value() / 6.35)));
+        QCOMPARE(render::read_png(*layer_of(b5.page(0), "paint").mask->png).width(), static_cast<int>(std::lround(b5.page(0).spec.width_mm.value() / 101.6 * 12)));
     }
 
     // A flip mirrors a split's children (their order along it) and a line's place, never its letters.

@@ -34,6 +34,12 @@ struct How {
     resample::Turn turn = resample::Turn::FlipH;
 };
 
+// set_page_spec's map (the old basic frame onto the new one, x and y each by its own scale, as pagespec._Map moves a
+// point) as a map of the page. OpError for a basic frame of no finite size.
+core::page_geometry::Mapping frame_map(const core::Rect& old_frame, const core::Rect& new_frame);
+// How set_page_spec moves pixels at their own resolution (render/bookpages, color_edit, ink_edit): projected, bilinear.
+How frame_how();
+
 // The hooks map_page moves the pixels with: `before` and `after` the page's paper before and after the op (the map takes
 // the one onto the other). A smart object's filter mask is read from and written into `doc`'s files.
 core::page_geometry::PixelHooks hooks(core::Document& doc, const How& how, const core::PageSpec& before, const core::PageSpec& after);

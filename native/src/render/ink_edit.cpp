@@ -21,6 +21,7 @@
 #include "render/ink_canvas.hpp"
 #include "render/op_limits.hpp"
 #include "render/page.hpp"
+#include "render/page_pixels.hpp"
 #include "render/png.hpp"
 #include "render/raster.hpp"
 
@@ -735,7 +736,8 @@ std::string lay_piece(const core::Page& page, const core::Layer& layer, const co
     return out.take();
 }
 
-std::string relayout_inks(const std::string& gkir, const core::PageSpec& spec, const core::Rect& old_frame, const core::Rect& new_frame) {
+std::string relayout_inks(const std::string& gkir, const core::PageSpec& old_paper, const core::PageSpec& spec, const core::Rect& old_frame,
+                          const core::Rect& new_frame) {
     const Inks source(core::decode_ink_raster(gkir));
     const double k = raster::kWorkingDpi / 25.4;
     const int width = mm_to_px(spec.width_mm.value(), raster::kWorkingDpi);
@@ -750,6 +752,12 @@ std::string relayout_inks(const std::string& gkir, const core::PageSpec& spec, c
                                   (old_frame.y.value() - new_frame.y.value() / sy) * k};
     for (const double v : c) {
         if (!std::isfinite(v)) throw core::OpError("the basic frame must be a finite size");
+    }
+    // (inks not at the working 200 dpi of the old paper keep their resolution — never taken for 200 dpi —, refused as
+    // those at 200 dpi are above)
+    if (source.p.width != static_cast<std::uint32_t>(mm_to_px(old_paper.width_mm.value(), raster::kWorkingDpi)) ||
+        source.p.height != static_cast<std::uint32_t>(mm_to_px(old_paper.height_mm.value(), raster::kWorkingDpi))) {
+        return page_pixels::move_inks(gkir, page_pixels::frame_how(), page_pixels::frame_map(old_frame, new_frame), old_paper, spec);
     }
     Inks out(core::blank_ink_pixels(source.p.space, source.p.depth, static_cast<std::uint32_t>(width), static_cast<std::uint32_t>(height), source.p.planes));
     const Lifted lifted(source, std::string(source.p.pixel_count(), '\xff'),

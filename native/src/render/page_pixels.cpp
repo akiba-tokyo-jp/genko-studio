@@ -198,6 +198,23 @@ void move_mask_area(core::Json& area, const How& how, const Mapping& m) {
 
 }  // namespace
 
+Mapping frame_map(const core::Rect& old_frame, const core::Rect& new_frame) {
+    const double sx = old_frame.width.truthy() ? (new_frame.width / old_frame.width).value() : 1.0;
+    const double sy = old_frame.height.truthy() ? (new_frame.height / old_frame.height).value() : 1.0;
+    const double ex = new_frame.x.value() - old_frame.x.value() * sx, ey = new_frame.y.value() - old_frame.y.value() * sy;
+    if (!std::isfinite(sx) || !std::isfinite(sy) || !std::isfinite(ex) || !std::isfinite(ey) || sx == 0 || sy == 0) {
+        throw core::OpError("the basic frame must be a finite size");
+    }
+    return core::page_geometry::mapping({sx, 0, 0, sy, ex, ey});
+}
+
+How frame_how() {
+    How how;
+    how.kind = How::Kind::Warp;
+    how.interp = resample::Interp::Bilinear;
+    return how;
+}
+
 Grid grid_after(const How& how, int width, int height, const core::PageSpec& before, const core::PageSpec& after) {
     if (how.kind == How::Kind::Stretch) return Grid{width, height};
     if (how.kind == How::Kind::Turn) return swaps(how) ? Grid{height, width} : Grid{width, height};

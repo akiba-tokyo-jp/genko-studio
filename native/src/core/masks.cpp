@@ -6,6 +6,7 @@
 #include "core/error.hpp"
 #include "core/pyconv.hpp"
 #include "core/pynum.hpp"
+#include "core/smart.hpp"
 
 namespace genko::core {
 
@@ -41,10 +42,10 @@ void read_mask_settings(const Json& raw, Mask& mask) {
     if (const auto v = number("feather_mm", 0.0, kMaskFeatherMax)) mask.feather_mm = *v;
 }
 
+// (both look at the book's pages and the pages of the contents it writes: smart::written_pages)
 bool uses_masks(const Document& doc) {
-    for (std::size_t i = 0; i < doc.pages.size(); ++i) {
-        if (doc.is_deferred(i)) continue;
-        const Page& page = doc.page(i);
+    for (const smart::WrittenPage& written : smart::written_pages(doc)) {
+        const Page& page = *written.page;
         for (const Layer& layer : page.layers)
             if (layer.mask && mask_has_settings(*layer.mask)) return true;
         for (const Channel& channel : page.channels)
@@ -54,10 +55,10 @@ bool uses_masks(const Document& doc) {
 }
 
 void validate_masks(const Document& doc) {
-    for (std::size_t i = 0; i < doc.pages.size(); ++i) {
-        if (doc.is_deferred(i)) continue;
-        const Page& page = doc.page(i);
-        const std::string where = "page " + py_str(page.index.json()) + ": ";
+    for (const smart::WrittenPage& written : smart::written_pages(doc)) {
+        const Page& page = *written.page;
+        const std::string where =
+            written.contents.empty() ? "page " + py_str(page.index.json()) + ": " : "the smart object contents " + written.contents + ": ";
         for (const Layer& layer : page.layers) {
             if (!layer.mask) continue;
             const Mask& m = *layer.mask;

@@ -12,6 +12,7 @@
 #include "core/pyconv.hpp"
 #include "core/pynum.hpp"
 #include "core/pyops.hpp"
+#include "core/smart.hpp"
 
 namespace genko::core::vector {
 
@@ -547,10 +548,10 @@ bool new_gradient(const Json& fill) {
 
 }  // namespace
 
+// (each of them looks at the book's pages and the pages of the contents it writes: smart::written_pages)
 bool uses_vector(const Document& doc) {
-    for (std::size_t i = 0; i < doc.pages.size(); ++i) {
-        if (doc.is_deferred(i)) continue;
-        const Page& page = doc.page(i);
+    for (const smart::WrittenPage& written : smart::written_pages(doc)) {
+        const Page& page = *written.page;
         if (!page.paths.empty() || page.work_path || page.clipping_path) return true;
         for (const Layer& layer : page.layers) {
             if (layer.vector_mask) return true;
@@ -565,18 +566,16 @@ bool uses_vector(const Document& doc) {
 }
 
 bool uses_pen_shapes(const Document& doc) {
-    for (std::size_t i = 0; i < doc.pages.size(); ++i) {
-        if (doc.is_deferred(i)) continue;
-        for (const Layer& layer : doc.page(i).layers)
+    for (const smart::WrittenPage& written : smart::written_pages(doc)) {
+        for (const Layer& layer : written.page->layers)
             if (layer.shapes && !layer.shapes->items.empty()) return true;
     }
     return false;
 }
 
 bool uses_transform(const Document& doc) {
-    for (std::size_t i = 0; i < doc.pages.size(); ++i) {
-        if (doc.is_deferred(i)) continue;
-        for (const Layer& layer : doc.page(i).layers)
+    for (const smart::WrittenPage& written : smart::written_pages(doc)) {
+        for (const Layer& layer : written.page->layers)
             if (layer.link || layer.lock_position) return true;
     }
     // (PC3 C-c: a line of dialogue's warp of PhotoCraft's styles, Warp Text)
@@ -586,17 +585,17 @@ bool uses_transform(const Document& doc) {
 }
 
 bool uses_page_spec(const Document& doc) {
-    for (std::size_t i = 0; i < doc.pages.size(); ++i) {
-        if (!doc.is_deferred(i) && doc.page(i).own_spec) return true;
+    for (const smart::WrittenPage& written : smart::written_pages(doc)) {
+        if (written.page->own_spec) return true;
     }
     return false;
 }
 
 void validate_vector(const Document& doc) {
-    for (std::size_t i = 0; i < doc.pages.size(); ++i) {
-        if (doc.is_deferred(i)) continue;
-        const Page& page = doc.page(i);
-        const std::string where = "page " + py_str(page.index.json()) + ": ";
+    for (const smart::WrittenPage& written : smart::written_pages(doc)) {
+        const Page& page = *written.page;
+        const std::string where =
+            written.contents.empty() ? "page " + py_str(page.index.json()) + ": " : "the smart object contents " + written.contents + ": ";
         if (page.paths.size() > kPathsMax) bad(where + "a page has at most " + std::to_string(kPathsMax) + " saved paths");
         std::set<std::string> names;
         for (const NamedPath& p : page.paths) {

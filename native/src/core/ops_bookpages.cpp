@@ -23,6 +23,7 @@
 #include "core/ids.hpp"
 #include "core/lut3d.hpp"
 #include "core/ops_util.hpp"
+#include "core/page_geometry.hpp"
 #include "core/pyconv.hpp"
 #include "core/pyops.hpp"
 #include "core/smart.hpp"
@@ -154,6 +155,11 @@ public:
     smart::Matrix matrix() const {
         return smart::Matrix{sx_, 0, 0, sy_, new_.x.value() - old_.x.value() * sx_, new_.y.value() - old_.y.value() * sy_};
     }
+    // (PC3) the same as a map of the page, for what page_geometry moves (C-e's page size ops: one map for everything)
+    page_geometry::Mapping mapping() const {
+        const smart::Matrix m = matrix();
+        return page_geometry::mapping({m.a, m.b, m.c, m.d, m.e, m.f});
+    }
 
     // round(v, digits), remembering a value that is not finite
     double rounded(double v, int digits) const {
@@ -272,8 +278,10 @@ void move_frame(Frame& frame, const Map& m) {
 }
 
 // pagespec.relayout's work on one layer: its lines, patches, region, placement and pixels; and its mask (the user's
-// decision D1). `paper` is the page's new paper (a cover's own), `old_paper` the one it had.
-void move_layer(Layer& layer, const Map& m, const PageSpec& paper, const PageSpec& old_paper, const BookPageHooks& hooks) {
+// decision D1). `paper` is the page's new paper (a cover's own), `old_paper` the one it had. And what PC3 adds, by the same
+// map as page_geometry moves it with the page size ops (the review of PC3): a pen layer's shape parts, a vector mask, a
+// smart object's filter mask.
+void move_layer(Document& doc, Layer& layer, const Map& m, const PageSpec& paper, const PageSpec& old_paper, const BookPageHooks& hooks) {
     if (layer.stroke_count() > 0) {
         std::vector<StrokePtr> items;
         items.reserve(layer.strokes->items.size());
@@ -288,6 +296,13 @@ void move_layer(Layer& layer, const Map& m, const PageSpec& paper, const PageSpe
         }
         layer.strokes = make_strokes(std::move(items));
     }
+    if (layer.shapes && !layer.shapes->items.empty()) {  // (pen-shapes@1)
+        const page_geometry::Mapping g = m.mapping();
+        std::vector<vector::ShapePart> parts = layer.shapes->items;
+        for (vector::ShapePart& part : parts) page_geometry::map_shape_part(part, g);
+        layer.shapes = vector::make_shapes(std::move(parts));
+    }
+    if (layer.vector_mask) layer.vector_mask->path = page_geometry::map_path(layer.vector_mask->path, m.mapping());  // (vector@1)
     for (Patch& patch : layer.patches) patch.attrs["box"] = m.box_star(subscript(patch.attrs, "box"));
     if (layer.region && !layer.region->empty()) move_points(*layer.region, m);
     if (layer.placement_mm) {
@@ -295,11 +310,16 @@ void move_layer(Layer& layer, const Map& m, const PageSpec& paper, const PageSpe
         layer.placement_mm = rect_of(m.box(r.x.value(), r.y.value(), r.width.value(), r.height.value()));
     }
     if (layer.kind == LayerKind::Smart) smart::transform_layer(layer, m.matrix());  // (smart-objects@1: its contents as they are)
+    // (PC3 A2: a smart object's filter mask, a page's mask as a layer's is)
+    if (layer.kind == LayerKind::Smart && layer.smart && layer.smart->is_object() && layer.smart->contains("filter_mask")) {
+        if (!hooks.relayout_filter_mask) not_yet_ported("set_page_spec moving a smart object's filter mask: it is moved by the drawing build");
+        hooks.relayout_filter_mask(doc, layer, old_paper, paper, m.old_frame(), m.new_frame());
+    }
     if (layer.raster_png && !layer.raster_png->empty()) {
         if (!hooks.relayout_raster) {
             not_yet_ported("set_page_spec moving a paint layer's pixels: they are moved by the drawing build (render::ops_registry)");
         }
-        layer.raster_png = std::make_shared<const std::string>(hooks.relayout_raster(*layer.raster_png, paper, m.old_frame(), m.new_frame()));
+        layer.raster_png = std::make_shared<const std::string>(hooks.relayout_raster(*layer.raster_png, old_paper, paper, m.old_frame(), m.new_frame()));
     }
     // (Python leaves the mask where it was: here it moves with what it masks)
     if (layer.mask && layer.mask->png && !layer.mask->png->empty()) {
@@ -318,7 +338,7 @@ void move_layer(Layer& layer, const Map& m, const PageSpec& paper, const PageSpe
     // (color-mode@1: a CMYK or Lab page's inks moved by the drawing build, render/ink_edit)
     if (layer.ink_raster) {
         if (!hooks.relayout_inks) not_yet_ported("set_page_spec moving the pixels of a CMYK or Lab page: they are moved by the drawing build");
-        layer.ink_raster = std::make_shared<const std::string>(hooks.relayout_inks(*layer.ink_raster, paper, m.old_frame(), m.new_frame()));
+        layer.ink_raster = std::make_shared<const std::string>(hooks.relayout_inks(*layer.ink_raster, old_paper, paper, m.old_frame(), m.new_frame()));
         layer.ink_memo = {};
     }
 }
@@ -327,7 +347,8 @@ void move_layer(Layer& layer, const Map& m, const PageSpec& paper, const PageSpe
 // basic frame. Whether a value moved is not a finite number (left as Python leaves it, for the op to refuse). Two
 // deliberate deviations (the user's decision D1; SPEC §2, a known bug is not reproduced): a paint layer's pixels are
 // as big as the page's own new paper (Python's, the book's, cut off what a jacket or a band has beyond it), and a
-// layer's mask moves with what it masks (Python leaves it stretched over the new paper).
+// layer's mask moves with what it masks (Python leaves it stretched over the new paper). PC3's elements (shape parts,
+// vector masks, the paths, the saved areas, a filter mask) move by the same map as the lines, as page_geometry moves them.
 bool relayout(Document& doc, const PageSpec& spec, bool move, const BookPageHooks& hooks) {
     const std::string start_side = doc.start_side.value_or("");
     // olds = {page.index: page.inner_rect_mm(episode.start_side) for page in episode.pages}
@@ -362,7 +383,15 @@ bool relayout(Document& doc, const PageSpec& spec, bool move, const BookPageHook
         }
         const Map m(*old_frame, page.inner_rect_mm(start_side), overflow);
         for (Frame& frame : page.frames) move_frame(frame, m);
-        for (Layer& layer : page.layers) move_layer(layer, m, page.spec, old_papers[i], hooks);
+        for (Layer& layer : page.layers) move_layer(doc, layer, m, page.spec, old_papers[i], hooks);
+        {  // (vector@1: the saved and work paths; the saved areas — a mask area's box, its picture stretched over it)
+            const page_geometry::Mapping g = m.mapping();
+            for (vector::NamedPath& p : page.paths) p.path = page_geometry::map_path(p.path, g);
+            if (page.work_path) page.work_path = page_geometry::map_path(*page.work_path, g);
+            if (const auto saved = page.extra.find("saved_areas"); saved != page.extra.end() && saved->is_object()) {
+                for (auto& [name, area] : saved->items()) page_geometry::map_area(area, g);
+            }
+        }
         for (Channel& channel : page.channels) {  // (channels@1: moved with the layers, by the drawing build)
             if (!channel.raster) continue;
             if (!hooks.relayout_channel) not_yet_ported("set_page_spec moving a page's channels: they are moved by the drawing build");

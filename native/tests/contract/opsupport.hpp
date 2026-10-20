@@ -116,6 +116,25 @@ std::string compare_deviating_steps(const std::vector<StepOutcome>& outcomes, co
 //     D1).
 // "" when it holds; else where it does not.
 std::string kept_by_deviation(const core::Json& keeps, const core::Document& before, const core::Document& after);
+// The review of PC3, fix 1 (on any case): set_page_spec moves a paint layer whose picture is not at raster.WORKING_DPI of
+// its page's paper (a picture put_raster put as it was given) keeping its resolution here, where Python takes it for one at
+// 200 dpi. Followed through a case's steps (each step's ops taken again one by one on the book before it): at each
+// set_page_spec, this build's picture is checked to be render::relayout_raster's move of the one it had, and Python's side
+// is made by relayout_working_raster from Python's picture before it; after each step, while this build's and Python's
+// pictures of a layer differ so, Python's record is checked to hold Python's side there and is put in its place in the
+// step's outcome (payload), the place added to `paths` (as cpp_differs' kind, for the book read back) and each layer
+// counted once in `kept`. An op of another kind that changes such a picture cannot be followed: said so.
+class KeptResolution {
+public:
+    // "" when the step is so; else what is not.
+    std::string step(const core::Document& before, const core::Document& after, const core::Json& step, StepOutcome& outcome,
+                     const core::Json& python);
+    std::vector<std::string> paths;
+    int kept = 0;
+
+private:
+    std::map<std::string, std::string> python_;  // "<page id>/<layer id>" → Python's picture (PNG), as made here
+};
 // Python's words without the addresses of its objects ("<_io.BytesIO object at 0x7f…>" → "<_io.BytesIO object>").
 std::string without_addresses(std::string text);
 
