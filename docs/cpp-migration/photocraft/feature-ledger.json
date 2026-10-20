@@ -18836,9 +18836,17 @@
         "alternate_menus": []
       },
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "未着手",
+      "implementation_status": "実装済み（PC3 B3、未統合）",
       "acceptance_status": "未実施",
-      "evidence": [],
+      "evidence": [
+        "native/src/app/main_window_smart_select.cpp",
+        "native/src/render/raster_ops.cpp",
+        "native/src/render/segment/subject.cpp",
+        "native/src/render/select_smart.cpp",
+        "native/tests/contract/test_contract_select.cpp",
+        "native/tests/gui/test_gui_select_mask.cpp",
+        "native/tests/unit/test_matting.cpp"
+      ],
       "pc0": {
         "date": "2026-10-16",
         "cpp_base": "962faa4",
@@ -18849,7 +18857,8 @@
         "tests": [],
         "gap": "被写体を検出してマスクにする機能がない",
         "note": "上流は SLIC＋顕著性＋GrabCut の古典的な被写体検出（crates/algo/src/segment/subject.rs）。新しい外部ライブラリは不要だが移植量が多い。select.subject と共通の土台"
-      }
+      },
+      "limitations": "上流どおり古典的な発見的な算法（学習モデルなし。利用者の決定 6）で、写真向け。漫画の線画・スクリーントーンでは外れることがある。Photoshop は物ごとのグループを作るが、見つかった物を 1 つのリンクしたマスクにまとめる（上流と同じ）。"
     },
     {
       "id": "layer.matting.colorDecontaminate",
@@ -18879,9 +18888,17 @@
         "alternate_menus": []
       },
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "未着手",
+      "implementation_status": "実装済み（PC3 B3、未統合）",
       "acceptance_status": "未実施",
-      "evidence": [],
+      "evidence": [
+        "native/src/app/main_window_smart_select.cpp",
+        "native/src/app/select_mask_window.cpp",
+        "native/src/render/matting.cpp",
+        "native/src/render/ops_matting.cpp",
+        "native/tests/contract/test_contract_select.cpp",
+        "native/tests/gui/test_gui_select_mask.cpp",
+        "native/tests/unit/test_matting.cpp"
+      ],
       "pc0": {
         "date": "2026-10-16",
         "cpp_base": "962faa4",
@@ -18922,9 +18939,16 @@
         "alternate_menus": []
       },
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "未着手",
+      "implementation_status": "実装済み（PC3 B3、未統合）",
       "acceptance_status": "未実施",
-      "evidence": [],
+      "evidence": [
+        "native/src/app/main_window_smart_select.cpp",
+        "native/src/render/matting.cpp",
+        "native/src/render/ops_matting.cpp",
+        "native/tests/contract/test_contract_select.cpp",
+        "native/tests/gui/test_gui_select_mask.cpp",
+        "native/tests/unit/test_matting.cpp"
+      ],
       "pc0": {
         "date": "2026-10-16",
         "cpp_base": "962faa4",
@@ -18935,7 +18959,8 @@
         "tests": [],
         "gap": "フリンジ削除（縁の色を内側の色で置き換える）がない",
         "note": "8bit RGBA・u16/f32（color_raster）・インク（ink_raster）の 3 つの画素の持ち方に入れる"
-      }
+      },
+      "limitations": "幅は mm（層の格子の画素で 1〜200）。"
     },
     {
       "id": "layer.matting.removeBlackMatte",
@@ -18965,9 +18990,16 @@
         "alternate_menus": []
       },
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "未着手",
+      "implementation_status": "実装済み（PC3 B3、未統合）",
       "acceptance_status": "未実施",
-      "evidence": [],
+      "evidence": [
+        "native/src/app/main_window_smart_select.cpp",
+        "native/src/render/matting.cpp",
+        "native/src/render/ops_matting.cpp",
+        "native/tests/contract/test_contract_select.cpp",
+        "native/tests/gui/test_gui_select_mask.cpp",
+        "native/tests/unit/test_matting.cpp"
+      ],
       "pc0": {
         "date": "2026-10-16",
         "cpp_base": "962faa4",
@@ -19008,9 +19040,16 @@
         "alternate_menus": []
       },
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "未着手",
+      "implementation_status": "実装済み（PC3 B3、未統合）",
       "acceptance_status": "未実施",
-      "evidence": [],
+      "evidence": [
+        "native/src/app/main_window_smart_select.cpp",
+        "native/src/render/matting.cpp",
+        "native/src/render/ops_matting.cpp",
+        "native/tests/contract/test_contract_select.cpp",
+        "native/tests/gui/test_gui_select_mask.cpp",
+        "native/tests/unit/test_matting.cpp"
+      ],
       "pc0": {
         "date": "2026-10-16",
         "cpp_base": "962faa4",
@@ -26997,9 +27036,17 @@
         "alternate_menus": []
       },
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "未着手",
+      "implementation_status": "実装済み（PC3 B3、未統合）",
       "acceptance_status": "未実施",
-      "evidence": [],
+      "evidence": [
+        "native/src/app/main_window_smart_select.cpp",
+        "native/src/render/matting.cpp",
+        "native/src/render/segment/focus.cpp",
+        "native/src/render/select_smart.cpp",
+        "native/tests/gui/test_gui_select_mask.cpp",
+        "native/tests/unit/test_matting.cpp",
+        "native/tests/unit/test_segment.cpp"
+      ],
       "pc0": {
         "date": "2026-10-16",
         "cpp_base": "962faa4",
@@ -27010,7 +27057,8 @@
         "tests": [],
         "gap": "ピントの合った所（局所のラプラシアンの強さ）を選ぶ操作が無い",
         "note": "上流は algo/segment/focus.rs（約 90 行、外部ライブラリなし）"
-      }
+      },
+      "limitations": "上流どおり古典的な発見的な算法（学習モデルなし。利用者の決定 6）で、写真向け。漫画の線画・スクリーントーンでは外れることがある。出力は選択範囲だけ（窓の出力先はまだ無い）。"
     },
     {
       "id": "select.grow",
@@ -27594,9 +27642,18 @@
       },
       "upstream_menu": null,
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "未着手",
+      "implementation_status": "実装済み（PC3 B3、未統合）",
       "acceptance_status": "未実施",
-      "evidence": [],
+      "evidence": [
+        "native/src/app/canvas_select.cpp",
+        "native/src/app/main_window_smart_select.cpp",
+        "native/src/render/segment/grabcut.cpp",
+        "native/src/render/segment/mod.cpp",
+        "native/src/render/select_smart.cpp",
+        "native/tests/gui/test_gui_select_mask.cpp",
+        "native/tests/unit/test_matting.cpp",
+        "native/tests/unit/test_segment.cpp"
+      ],
       "pc0": {
         "date": "2026-10-16",
         "cpp_base": "962faa4",
@@ -27607,7 +27664,8 @@
         "tests": [],
         "gap": "長方形で囲んだ物を選ぶ（GrabCut）操作が無い",
         "note": "上流は algo/segment（grabcut・gmm・maxflow、外部ライブラリなし）。select.quick・select.subject と共通の土台"
-      }
+      },
+      "limitations": "選択範囲はまだ 200 dpi の格子で解く（区域の種類は格子の大きさを受ける）。"
     },
     {
       "id": "select.quick",
@@ -27622,9 +27680,21 @@
       },
       "upstream_menu": null,
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "未着手",
+      "implementation_status": "実装済み（PC3 B3、未統合）",
       "acceptance_status": "未実施",
-      "evidence": [],
+      "evidence": [
+        "native/src/app/canvas_select.cpp",
+        "native/src/app/main_window_smart_select.cpp",
+        "native/src/render/matting.cpp",
+        "native/src/render/segment/gmm.cpp",
+        "native/src/render/segment/maxflow.cpp",
+        "native/src/render/segment/mod.cpp",
+        "native/src/render/segment/quick.cpp",
+        "native/src/render/select_smart.cpp",
+        "native/tests/gui/test_gui_select_mask.cpp",
+        "native/tests/unit/test_matting.cpp",
+        "native/tests/unit/test_segment.cpp"
+      ],
       "pc0": {
         "date": "2026-10-16",
         "cpp_base": "962faa4",
@@ -27637,7 +27707,8 @@
         "tests": [],
         "gap": "なぞった所から境界を推して選ぶ（クイック選択、境界の強調）操作が無い",
         "note": "選択ペンはなぞった帯をそのまま選ぶだけ。上流は algo/segment/quick.rs と maxflow"
-      }
+      },
+      "limitations": "選択範囲はまだ 200 dpi の格子で解く（区域の種類は格子の大きさを受ける）。"
     },
     {
       "id": "select.rect",
@@ -27694,9 +27765,15 @@
       },
       "upstream_menu": null,
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "未着手",
+      "implementation_status": "実装済み（PC3 B3、未統合）",
       "acceptance_status": "未実施",
-      "evidence": [],
+      "evidence": [
+        "native/src/app/select_mask_window.cpp",
+        "native/src/render/matting.cpp",
+        "native/src/render/select_smart.cpp",
+        "native/tests/gui/test_gui_select_mask.cpp",
+        "native/tests/unit/test_matting.cpp"
+      ],
       "pc0": {
         "date": "2026-10-16",
         "cpp_base": "962faa4",
@@ -27707,7 +27784,8 @@
         "tests": [],
         "gap": "境界の調整（半径・スマート半径・滑らかさ・ぼかし・コントラスト・シフト・色の除去、マスク/新しいレイヤーへの出力）が無い",
         "note": "上流は algo/matting.rs（約 750 行）"
-      }
+      },
+      "limitations": "選択範囲はまだ 200 dpi の格子で解く（区域の種類は格子の大きさを受ける）。"
     },
     {
       "id": "select.reselect",
@@ -27829,9 +27907,16 @@
         "alternate_menus": []
       },
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "未着手",
+      "implementation_status": "実装済み（PC3 B3、未統合）",
       "acceptance_status": "未実施",
-      "evidence": [],
+      "evidence": [
+        "native/src/app/select_mask_window.cpp",
+        "native/src/render/matting.cpp",
+        "native/src/render/ops_matting.cpp",
+        "native/src/render/select_smart.cpp",
+        "native/tests/gui/test_gui_select_mask.cpp",
+        "native/tests/unit/test_matting.cpp"
+      ],
       "pc0": {
         "date": "2026-10-16",
         "cpp_base": "962faa4",
@@ -27842,7 +27927,8 @@
         "tests": [],
         "gap": "「選択とマスク」の作業画面が無い",
         "note": "上流の画面は select.refineEdge の窓を開くだけ。select.refineEdge と同じ土台"
-      }
+      },
+      "limitations": "表示モードは窓の中のプレビュー（50 dpi）。ブラシ（境界線調整ブラシなど）と新規ドキュメントの出力は無い。"
     },
     {
       "id": "select.similar",
@@ -27919,9 +28005,18 @@
         "alternate_menus": []
       },
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "未着手",
+      "implementation_status": "実装済み（PC3 B3、未統合）",
       "acceptance_status": "未実施",
-      "evidence": [],
+      "evidence": [
+        "native/src/app/main_window_smart_select.cpp",
+        "native/src/render/matting.cpp",
+        "native/src/render/segment/sky.cpp",
+        "native/src/render/select_smart.cpp",
+        "native/tests/contract/test_contract_select.cpp",
+        "native/tests/gui/test_gui_select_mask.cpp",
+        "native/tests/unit/test_matting.cpp",
+        "native/tests/unit/test_segment.cpp"
+      ],
       "pc0": {
         "date": "2026-10-16",
         "cpp_base": "962faa4",
@@ -27932,7 +28027,8 @@
         "tests": [],
         "gap": "空を選ぶ（しきい値・境のやわらかさ）操作が無い",
         "note": "上流は algo/segment/sky.rs（約 280 行、外部ライブラリなし）"
-      }
+      },
+      "limitations": "写真の空だけ（色と滑らかさの見込み）。選択範囲はまだ 200 dpi の格子で解く（区域の種類は格子の大きさを受ける）。"
     },
     {
       "id": "select.subject",
@@ -27960,9 +28056,19 @@
         "alternate_menus": []
       },
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "未着手",
+      "implementation_status": "実装済み（PC3 B3、未統合）",
       "acceptance_status": "未実施",
-      "evidence": [],
+      "evidence": [
+        "native/src/app/main_window_smart_select.cpp",
+        "native/src/render/segment/grabcut.cpp",
+        "native/src/render/segment/slic.cpp",
+        "native/src/render/segment/subject.cpp",
+        "native/src/render/select_smart.cpp",
+        "native/tests/contract/test_contract_select.cpp",
+        "native/tests/gui/test_gui_select_mask.cpp",
+        "native/tests/unit/test_matting.cpp",
+        "native/tests/unit/test_segment.cpp"
+      ],
       "pc0": {
         "date": "2026-10-16",
         "cpp_base": "962faa4",
@@ -27973,7 +28079,8 @@
         "tests": [],
         "gap": "主な被写体を選ぶ操作が無い",
         "note": "上流は algo/segment/subject.rs（目立ち度＋GrabCut、外部ライブラリなし）"
-      }
+      },
+      "limitations": "上流どおり古典的な発見的な算法（学習モデルなし。利用者の決定 6）で、写真向け。漫画の線画・スクリーントーンでは外れることがある。選択範囲はまだ 200 dpi の格子で解く（区域の種類は格子の大きさを受ける）。"
     },
     {
       "id": "select.toWorkPath",
@@ -37746,9 +37853,14 @@
       "kind": "tool",
       "upstream_source": "crates/ui-egui/src/state.rs",
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "未着手",
+      "implementation_status": "実装済み（PC3 B3、未統合）",
       "acceptance_status": "未実施",
-      "evidence": [],
+      "evidence": [
+        "native/src/app/canvas_select.cpp",
+        "native/src/app/main_window_select.cpp",
+        "native/src/app/main_window_smart_select.cpp",
+        "native/tests/gui/test_gui_select_mask.cpp"
+      ],
       "pc0": {
         "date": "2026-10-16",
         "cpp_base": "962faa4",
@@ -37766,9 +37878,14 @@
       "kind": "tool",
       "upstream_source": "crates/ui-egui/src/state.rs",
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "未着手",
+      "implementation_status": "実装済み（PC3 B3、未統合）",
       "acceptance_status": "未実施",
-      "evidence": [],
+      "evidence": [
+        "native/src/app/canvas_select.cpp",
+        "native/src/app/main_window_select.cpp",
+        "native/src/app/main_window_smart_select.cpp",
+        "native/tests/gui/test_gui_select_mask.cpp"
+      ],
       "pc0": {
         "date": "2026-10-16",
         "cpp_base": "962faa4",
