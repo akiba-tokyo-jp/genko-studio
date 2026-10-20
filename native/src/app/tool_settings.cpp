@@ -55,7 +55,8 @@ const std::map<QString, std::pair<QString, QString>>& titles() {
         {QStringLiteral("3d"), {QStringLiteral("3D 操作（J）"), QStringLiteral("デッサン人形の関節（○）や箱をドラッグ。箱の上の○で回す")}},
         {QStringLiteral("effect"), {QStringLiteral("効果線（K）"), QStringLiteral("下で種類を選び、コマの中をクリックで入れる。中心の＋をドラッグで動かす")}},
         {QStringLiteral("stamp"), {QStringLiteral("素材を置く"), QStringLiteral("素材パネルで選んだ素材を、クリックした所に置く")}},
-        {QStringLiteral("move"), {QStringLiteral("移動ツール（Q）"), QStringLiteral("描く先のレイヤーの線・塗り・絵を、ドラッグで丸ごと動かす。Shift で縦・横・45° に")}},
+        {QStringLiteral("move"), {QStringLiteral("移動ツール（Q）"),
+                                  QStringLiteral("選んだレイヤー（リンクしたレイヤー・フォルダーの中も）をドラッグで動かす。Shift で縦・横・45° に、Ctrl+クリックでそこのレイヤーを選ぶ")}},
         {QStringLiteral("gradient"), {QStringLiteral("グラデーション（U）"), QStringLiteral("ドラッグの向きに塗る。始めの点がはじめの色、終わりの点が終わりの色。選択範囲があればその中だけ")}},
         {QStringLiteral("magiceraser"), {QStringLiteral("マジック消しゴムツール"), QStringLiteral("クリックした所に近い色の所を透明にする（描く先のペイントのレイヤー）")}},
         // (PC3 B4: the retouching tools, app/retouch_tools.cpp)

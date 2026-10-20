@@ -443,6 +443,9 @@ void LayerPanel::refresh_look() {
 
 void LayerPanel::refresh() {
     const core::Page* page = window_->current_page();
+    // (PC3 C-d: the layers chosen together stay chosen after a change of the same page — aligned, linked or moved again)
+    const std::vector<std::string> chosen = page != nullptr && page->id == listed_page_ ? selected_ids() : std::vector<std::string>{};
+    listed_page_ = page != nullptr ? page->id : std::string();
     loading_ = true;
     list_->clear();
     ids_.clear();
@@ -457,6 +460,11 @@ void LayerPanel::refresh() {
             if (layer.mask) marks << (layer.mask->linked ? QStringLiteral("マスク（リンク）") : QStringLiteral("マスク"));  // (PC3 B2: masks@1)
             if (layer.shapes && !layer.shapes->items.empty()) marks << QStringLiteral("形 %1").arg(layer.shapes->items.size());  // (pen-shapes@1)
             if (layer.locked) marks << QStringLiteral("ロック");
+            if (layer.lock_position) marks << QStringLiteral("位置ロック");  // (transform@1, PC3 C-d)
+            if (layer.link) {  // (transform@1, PC3 C-d: its link group, by its number when it has one)
+                const QString group = QString::fromStdString(*layer.link);
+                marks << (group.startsWith(QStringLiteral("link-")) ? QStringLiteral("リンク %1").arg(group.mid(5)) : QStringLiteral("レイヤーリンク"));
+            }
             if (layer.kind == core::LayerKind::Smart) {  // (smart-objects@1: its contents in the book, or a file linked)
                 const core::SmartContents* contents = core::smart::contents_of(window_->book(), layer);
                 marks << (contents != nullptr && contents->link ? QStringLiteral("リンク") : QStringLiteral("埋め込み"));
@@ -492,6 +500,11 @@ void LayerPanel::refresh() {
     if (const core::Layer* target = window_->target_layer()) {
         const auto at = std::find(ids_.begin(), ids_.end(), target->id);
         if (at != ids_.end()) list_->setCurrentRow(static_cast<int>(at - ids_.begin()));
+    }
+    if (chosen.size() > 1) {
+        for (int row = 0; row < list_->count() && row < static_cast<int>(ids_.size()); ++row)
+            if (row_kind(row) == kLayerRow && std::find(chosen.begin(), chosen.end(), ids_[static_cast<std::size_t>(row)]) != chosen.end())
+                list_->item(row)->setSelected(true);
     }
     loading_ = false;
     search_->setVisible(ids_.size() > 8 || !search_->text().isEmpty());  // (finding a layer by name: a thick page only)
@@ -738,15 +751,18 @@ void LayerPanel::mask_from_selection() {
 }
 
 void LayerPanel::move(int delta) {
-    const auto [page, layer] = this->layer();
-    if (layer == nullptr) return;
-    std::vector<std::string> order;
-    for (const core::Layer& l : page->layers) order.push_back(l.id);
-    const auto i = static_cast<std::ptrdiff_t>(std::find(order.begin(), order.end(), layer->id) - order.begin());
-    const auto j = i + delta;
-    if (j < 0 || j >= static_cast<std::ptrdiff_t>(order.size())) return;
-    std::swap(order[static_cast<std::size_t>(i)], order[static_cast<std::size_t>(j)]);
-    window_->apply_ops(Json::array({Json{{"op", "reorder_layers"}, {"page", page->index.json()}, {"order", order}}}));
+    // (PC3 C-d, decision 5: 前面へ・背面へ among its siblings — a folder with its layers —, the layers chosen together)
+    if (delta != 0) window_->arrange_layers(delta > 0 ? "forward" : "backward");
+}
+
+void LayerPanel::select_ids(const std::vector<std::string>& ids) {
+    loading_ = true;
+    list_->clearSelection();
+    for (int row = 0; row < list_->count() && row < static_cast<int>(ids_.size()); ++row) {
+        if (row_kind(row) != kLayerRow) continue;
+        if (std::find(ids.begin(), ids.end(), ids_[static_cast<std::size_t>(row)]) != ids.end()) list_->item(row)->setSelected(true);
+    }
+    loading_ = false;
 }
 
 void LayerPanel::remove() {

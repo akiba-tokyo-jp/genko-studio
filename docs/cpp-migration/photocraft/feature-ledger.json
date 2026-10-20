@@ -16076,9 +16076,16 @@
         "alternate_menus": []
       },
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "未着手",
+      "implementation_status": "実装済み（PC3 C-d、未統合）",
       "acceptance_status": "未実施",
-      "evidence": [],
+      "evidence": [
+        "native/src/render/layer_align.cpp",
+        "native/src/render/layer_bounds.cpp",
+        "native/src/app/main_window_align.cpp",
+        "native/tests/unit/test_align.cpp",
+        "native/tests/contract/test_contract_align.cpp",
+        "native/tests/gui/test_gui_align.cpp"
+      ],
       "pc0": {
         "date": "2026-10-16",
         "cpp_base": "962faa4",
@@ -16121,9 +16128,16 @@
         "alternate_menus": []
       },
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "未着手",
+      "implementation_status": "実装済み（PC3 C-d、未統合）",
       "acceptance_status": "未実施",
-      "evidence": [],
+      "evidence": [
+        "native/src/render/layer_align.cpp",
+        "native/src/render/layer_bounds.cpp",
+        "native/src/app/main_window_align.cpp",
+        "native/tests/unit/test_align.cpp",
+        "native/tests/contract/test_contract_align.cpp",
+        "native/tests/gui/test_gui_align.cpp"
+      ],
       "pc0": {
         "date": "2026-10-16",
         "cpp_base": "962faa4",
@@ -16164,9 +16178,16 @@
         "alternate_menus": []
       },
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "未着手",
+      "implementation_status": "実装済み（PC3 C-d、未統合）",
       "acceptance_status": "未実施",
-      "evidence": [],
+      "evidence": [
+        "native/src/render/layer_align.cpp",
+        "native/src/render/layer_bounds.cpp",
+        "native/src/app/main_window_align.cpp",
+        "native/tests/unit/test_align.cpp",
+        "native/tests/contract/test_contract_align.cpp",
+        "native/tests/gui/test_gui_align.cpp"
+      ],
       "pc0": {
         "date": "2026-10-16",
         "cpp_base": "962faa4",
@@ -16207,9 +16228,16 @@
         "alternate_menus": []
       },
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "未着手",
+      "implementation_status": "実装済み（PC3 C-d、未統合）",
       "acceptance_status": "未実施",
-      "evidence": [],
+      "evidence": [
+        "native/src/render/layer_align.cpp",
+        "native/src/render/layer_bounds.cpp",
+        "native/src/app/main_window_align.cpp",
+        "native/tests/unit/test_align.cpp",
+        "native/tests/contract/test_contract_align.cpp",
+        "native/tests/gui/test_gui_align.cpp"
+      ],
       "pc0": {
         "date": "2026-10-16",
         "cpp_base": "962faa4",
@@ -16250,9 +16278,16 @@
         "alternate_menus": []
       },
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "未着手",
+      "implementation_status": "実装済み（PC3 C-d、未統合）",
       "acceptance_status": "未実施",
-      "evidence": [],
+      "evidence": [
+        "native/src/render/layer_align.cpp",
+        "native/src/render/layer_bounds.cpp",
+        "native/src/app/main_window_align.cpp",
+        "native/tests/unit/test_align.cpp",
+        "native/tests/contract/test_contract_align.cpp",
+        "native/tests/gui/test_gui_align.cpp"
+      ],
       "pc0": {
         "date": "2026-10-16",
         "cpp_base": "962faa4",
@@ -16293,9 +16328,16 @@
         "alternate_menus": []
       },
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "未着手",
+      "implementation_status": "実装済み（PC3 C-d、未統合）",
       "acceptance_status": "未実施",
-      "evidence": [],
+      "evidence": [
+        "native/src/render/layer_align.cpp",
+        "native/src/render/layer_bounds.cpp",
+        "native/src/app/main_window_align.cpp",
+        "native/tests/unit/test_align.cpp",
+        "native/tests/contract/test_contract_align.cpp",
+        "native/tests/gui/test_gui_align.cpp"
+      ],
       "pc0": {
         "date": "2026-10-16",
         "cpp_base": "962faa4",
@@ -16336,9 +16378,16 @@
         "alternate_menus": []
       },
       "genko_status": "同等（C++ のソースと試験あり。2026-10-16 照合）",
-      "implementation_status": "未着手",
+      "implementation_status": "実装済み（PC3 C-d、未統合）",
       "acceptance_status": "未実施",
-      "evidence": [],
+      "evidence": [
+        "native/src/render/layer_align.cpp",
+        "native/src/app/main_window_align.cpp",
+        "native/src/app/layer_panel.cpp",
+        "native/tests/unit/test_align.cpp",
+        "native/tests/contract/test_contract_align.cpp",
+        "native/tests/gui/test_gui_align.cpp"
+      ],
       "pc0": {
         "date": "2026-10-16",
         "cpp_base": "962faa4",
@@ -16386,9 +16435,16 @@
         "alternate_menus": []
       },
       "genko_status": "一部（2026-10-16 照合）",
-      "implementation_status": "未着手",
+      "implementation_status": "実装済み（PC3 C-d、未統合）",
       "acceptance_status": "未実施",
-      "evidence": [],
+      "evidence": [
+        "native/src/render/layer_align.cpp",
+        "native/src/app/main_window_align.cpp",
+        "native/src/app/layer_panel.cpp",
+        "native/tests/unit/test_align.cpp",
+        "native/tests/contract/test_contract_align.cpp",
+        "native/tests/gui/test_gui_align.cpp"
+      ],
       "pc0": {
         "date": "2026-10-16",
         "cpp_base": "962faa4",
@@ -16435,9 +16491,16 @@
         "alternate_menus": []
       },
       "genko_status": "一部（2026-10-16 照合）",
-      "implementation_status": "未着手",
+      "implementation_status": "実装済み（PC3 C-d、未統合）",
       "acceptance_status": "未実施",
-      "evidence": [],
+      "evidence": [
+        "native/src/render/layer_align.cpp",
+        "native/src/app/main_window_align.cpp",
+        "native/src/app/layer_panel.cpp",
+        "native/tests/unit/test_align.cpp",
+        "native/tests/contract/test_contract_align.cpp",
+        "native/tests/gui/test_gui_align.cpp"
+      ],
       "pc0": {
         "date": "2026-10-16",
         "cpp_base": "962faa4",
@@ -16482,9 +16545,16 @@
         "alternate_menus": []
       },
       "genko_status": "一部（2026-10-16 照合）",
-      "implementation_status": "未着手",
+      "implementation_status": "実装済み（PC3 C-d、未統合）",
       "acceptance_status": "未実施",
-      "evidence": [],
+      "evidence": [
+        "native/src/render/layer_align.cpp",
+        "native/src/app/main_window_align.cpp",
+        "native/src/app/layer_panel.cpp",
+        "native/tests/unit/test_align.cpp",
+        "native/tests/contract/test_contract_align.cpp",
+        "native/tests/gui/test_gui_align.cpp"
+      ],
       "pc0": {
         "date": "2026-10-16",
         "cpp_base": "962faa4",
@@ -16533,9 +16603,16 @@
         "alternate_menus": []
       },
       "genko_status": "一部（2026-10-16 照合）",
-      "implementation_status": "未着手",
+      "implementation_status": "実装済み（PC3 C-d、未統合）",
       "acceptance_status": "未実施",
-      "evidence": [],
+      "evidence": [
+        "native/src/render/layer_align.cpp",
+        "native/src/app/main_window_align.cpp",
+        "native/src/app/layer_panel.cpp",
+        "native/tests/unit/test_align.cpp",
+        "native/tests/contract/test_contract_align.cpp",
+        "native/tests/gui/test_gui_align.cpp"
+      ],
       "pc0": {
         "date": "2026-10-16",
         "cpp_base": "962faa4",
@@ -16986,9 +17063,16 @@
         "alternate_menus": []
       },
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "未着手",
+      "implementation_status": "実装済み（PC3 C-d、未統合）",
       "acceptance_status": "未実施",
-      "evidence": [],
+      "evidence": [
+        "native/src/render/layer_align.cpp",
+        "native/src/render/layer_bounds.cpp",
+        "native/src/app/main_window_align.cpp",
+        "native/tests/unit/test_align.cpp",
+        "native/tests/contract/test_contract_align.cpp",
+        "native/tests/gui/test_gui_align.cpp"
+      ],
       "pc0": {
         "date": "2026-10-16",
         "cpp_base": "962faa4",
@@ -17029,9 +17113,16 @@
         "alternate_menus": []
       },
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "未着手",
+      "implementation_status": "実装済み（PC3 C-d、未統合）",
       "acceptance_status": "未実施",
-      "evidence": [],
+      "evidence": [
+        "native/src/render/layer_align.cpp",
+        "native/src/render/layer_bounds.cpp",
+        "native/src/app/main_window_align.cpp",
+        "native/tests/unit/test_align.cpp",
+        "native/tests/contract/test_contract_align.cpp",
+        "native/tests/gui/test_gui_align.cpp"
+      ],
       "pc0": {
         "date": "2026-10-16",
         "cpp_base": "962faa4",
@@ -17072,9 +17163,16 @@
         "alternate_menus": []
       },
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "未着手",
+      "implementation_status": "実装済み（PC3 C-d、未統合）",
       "acceptance_status": "未実施",
-      "evidence": [],
+      "evidence": [
+        "native/src/render/layer_align.cpp",
+        "native/src/render/layer_bounds.cpp",
+        "native/src/app/main_window_align.cpp",
+        "native/tests/unit/test_align.cpp",
+        "native/tests/contract/test_contract_align.cpp",
+        "native/tests/gui/test_gui_align.cpp"
+      ],
       "pc0": {
         "date": "2026-10-16",
         "cpp_base": "962faa4",
@@ -17115,9 +17213,16 @@
         "alternate_menus": []
       },
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "未着手",
+      "implementation_status": "実装済み（PC3 C-d、未統合）",
       "acceptance_status": "未実施",
-      "evidence": [],
+      "evidence": [
+        "native/src/render/layer_align.cpp",
+        "native/src/render/layer_bounds.cpp",
+        "native/src/app/main_window_align.cpp",
+        "native/tests/unit/test_align.cpp",
+        "native/tests/contract/test_contract_align.cpp",
+        "native/tests/gui/test_gui_align.cpp"
+      ],
       "pc0": {
         "date": "2026-10-16",
         "cpp_base": "962faa4",
@@ -17158,9 +17263,16 @@
         "alternate_menus": []
       },
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "未着手",
+      "implementation_status": "実装済み（PC3 C-d、未統合）",
       "acceptance_status": "未実施",
-      "evidence": [],
+      "evidence": [
+        "native/src/render/layer_align.cpp",
+        "native/src/render/layer_bounds.cpp",
+        "native/src/app/main_window_align.cpp",
+        "native/tests/unit/test_align.cpp",
+        "native/tests/contract/test_contract_align.cpp",
+        "native/tests/gui/test_gui_align.cpp"
+      ],
       "pc0": {
         "date": "2026-10-16",
         "cpp_base": "962faa4",
@@ -17201,9 +17313,16 @@
         "alternate_menus": []
       },
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "未着手",
+      "implementation_status": "実装済み（PC3 C-d、未統合）",
       "acceptance_status": "未実施",
-      "evidence": [],
+      "evidence": [
+        "native/src/render/layer_align.cpp",
+        "native/src/render/layer_bounds.cpp",
+        "native/src/app/main_window_align.cpp",
+        "native/tests/unit/test_align.cpp",
+        "native/tests/contract/test_contract_align.cpp",
+        "native/tests/gui/test_gui_align.cpp"
+      ],
       "pc0": {
         "date": "2026-10-16",
         "cpp_base": "962faa4",
@@ -17244,9 +17363,16 @@
         "alternate_menus": []
       },
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "未着手",
+      "implementation_status": "実装済み（PC3 C-d、未統合）",
       "acceptance_status": "未実施",
-      "evidence": [],
+      "evidence": [
+        "native/src/render/layer_align.cpp",
+        "native/src/render/layer_bounds.cpp",
+        "native/src/app/main_window_align.cpp",
+        "native/tests/unit/test_align.cpp",
+        "native/tests/contract/test_contract_align.cpp",
+        "native/tests/gui/test_gui_align.cpp"
+      ],
       "pc0": {
         "date": "2026-10-16",
         "cpp_base": "962faa4",
@@ -17287,9 +17413,16 @@
         "alternate_menus": []
       },
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "未着手",
+      "implementation_status": "実装済み（PC3 C-d、未統合）",
       "acceptance_status": "未実施",
-      "evidence": [],
+      "evidence": [
+        "native/src/render/layer_align.cpp",
+        "native/src/render/layer_bounds.cpp",
+        "native/src/app/main_window_align.cpp",
+        "native/tests/unit/test_align.cpp",
+        "native/tests/contract/test_contract_align.cpp",
+        "native/tests/gui/test_gui_align.cpp"
+      ],
       "pc0": {
         "date": "2026-10-16",
         "cpp_base": "962faa4",
@@ -18953,9 +19086,17 @@
         "alternate_menus": []
       },
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "未着手",
+      "implementation_status": "実装済み（PC3 C-d、未統合）",
       "acceptance_status": "未実施",
-      "evidence": [],
+      "evidence": [
+        "native/src/render/layer_align.cpp",
+        "native/src/render/layer_transform.cpp",
+        "native/src/app/main_window_align.cpp",
+        "native/src/app/layer_panel.cpp",
+        "native/tests/unit/test_align.cpp",
+        "native/tests/contract/test_contract_align.cpp",
+        "native/tests/gui/test_gui_align.cpp"
+      ],
       "pc0": {
         "date": "2026-10-16",
         "cpp_base": "962faa4",
@@ -18994,9 +19135,16 @@
         "alternate_menus": []
       },
       "genko_status": "一部（2026-10-16 照合）",
-      "implementation_status": "未着手",
+      "implementation_status": "実装済み（PC3 C-d、未統合）",
       "acceptance_status": "未実施",
-      "evidence": [],
+      "evidence": [
+        "native/src/core/ops_layers.cpp",
+        "native/src/render/layer_transform.cpp",
+        "native/src/app/main_window_align.cpp",
+        "native/src/app/layer_panel.cpp",
+        "native/tests/contract/test_contract_align.cpp",
+        "native/tests/gui/test_gui_align.cpp"
+      ],
       "pc0": {
         "date": "2026-10-16",
         "cpp_base": "962faa4",
@@ -19016,7 +19164,8 @@
         ],
         "gap": "透明部分の保護（lock_alpha）と全ロック（locked）だけ。画素だけのロック・位置のロック・アートボードのロックが無い。引数なしで全ロックを切り替える形も無い",
         "note": ""
-      }
+      },
+      "remaining": "アートボードのロックは無い（アートボードは PC5）。画像（ピクセル）のロックは今の「ロック」（locked）で、Genko では移動・変形も止める"
     },
     {
       "id": "layer.maskAllObjects",
@@ -21089,9 +21238,16 @@
       },
       "upstream_menu": null,
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "未着手",
+      "implementation_status": "実装済み（PC3 C-d、未統合）",
       "acceptance_status": "未実施",
-      "evidence": [],
+      "evidence": [
+        "native/src/render/layer_bounds.cpp",
+        "native/src/api/cli.cpp",
+        "native/src/app/main_window_align.cpp",
+        "native/src/app/canvas_input.cpp",
+        "native/tests/contract/test_contract_align.cpp",
+        "native/tests/gui/test_gui_align.cpp"
+      ],
       "pc0": {
         "date": "2026-10-16",
         "cpp_base": "962faa4",
@@ -21102,7 +21258,8 @@
         "tests": [],
         "gap": "クリックした所に画素のある最上位の層（またはフォルダー）を選ぶ動き、その点の層の一覧を返す op、移動ツールの自動選択が無い",
         "note": ""
-      }
+      },
+      "remaining": "選んだ層を返す op は無い（画面の Ctrl+クリック・自動選択と `genko inspect --at` の一覧）"
     },
     {
       "id": "layer.quickExportAsPng",
@@ -21689,9 +21846,17 @@
         "alternate_menus": []
       },
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "未着手",
+      "implementation_status": "実装済み（PC3 C-d、未統合）",
       "acceptance_status": "未実施",
-      "evidence": [],
+      "evidence": [
+        "native/src/render/layer_align.cpp",
+        "native/src/render/layer_transform.cpp",
+        "native/src/app/main_window_align.cpp",
+        "native/src/app/layer_panel.cpp",
+        "native/tests/unit/test_align.cpp",
+        "native/tests/contract/test_contract_align.cpp",
+        "native/tests/gui/test_gui_align.cpp"
+      ],
       "pc0": {
         "date": "2026-10-16",
         "cpp_base": "962faa4",
@@ -23695,9 +23860,17 @@
       },
       "upstream_menu": null,
       "genko_status": "一部（2026-10-16 照合）",
-      "implementation_status": "未着手",
+      "implementation_status": "実装済み（PC3 C-d、未統合）",
       "acceptance_status": "未実施",
-      "evidence": [],
+      "evidence": [
+        "native/src/app/main_window_actions.cpp",
+        "native/src/app/canvas_input.cpp",
+        "native/src/app/canvas_snap.cpp",
+        "native/src/app/main_window_align.cpp",
+        "native/src/render/layer_transform.cpp",
+        "native/tests/gui/test_gui_align.cpp",
+        "native/tests/gui/test_gui_ledger_a.cpp"
+      ],
       "pc0": {
         "date": "2026-10-16",
         "cpp_base": "962faa4",
@@ -23715,7 +23888,8 @@
         ],
         "gap": "移動ツール（レイヤー移動、Q）は描く先の 1 枚（ペン・ペイント）だけを transform_area の matrix で mm 単位に動かす。選んだ複数の層・リンクした層・フォルダー・塗り・配置画像は動かせず、レイヤーマスクは一緒に動かない。dx・dy（px）を取る専用の op も無い",
         "note": "複数の層を動かす部分は整列・分布（layer.align.horizontalCenters 行）と共有"
-      }
+      },
+      "remaining": "上流の dx・dy（画素）の専用 op は無く、`transform_layers` の `move`（mm。画面は作業の 200 dpi の画素の倍数に丸める）で動かす"
     },
     {
       "id": "layer.ungroupLayers",
@@ -34770,9 +34944,19 @@
         "alternate_menus": []
       },
       "genko_status": "一部（2026-10-16 照合）",
-      "implementation_status": "未着手",
+      "implementation_status": "実装済み（PC3 C-d、未統合）",
       "acceptance_status": "未実施",
-      "evidence": [],
+      "evidence": [
+        "native/src/core/snap.cpp",
+        "native/src/app/canvas_snap.cpp",
+        "native/src/app/main_window_align.cpp",
+        "native/src/app/canvas_transform.cpp",
+        "native/src/app/canvas_crop.cpp",
+        "native/src/app/canvas_tools.cpp",
+        "native/src/app/canvas_pen.cpp",
+        "native/tests/unit/test_align.cpp",
+        "native/tests/gui/test_gui_align.cpp"
+      ],
       "pc0": {
         "date": "2026-10-16",
         "cpp_base": "962faa4",
@@ -34791,7 +34975,8 @@
         ],
         "gap": "「定規にスナップ」（ペンの線を定規・ガイドへ）と「グリッドにスナップ」だけ。全体の吸着の主スイッチ・Ctrl で一時解除がなく、移動・選択範囲・切り抜き・図形・変形の吸着がない",
         "note": "上流は snap_ui.rs（移動・選択・切り抜き・図形・ペンの点・変形・ガイド）"
-      }
+      },
+      "remaining": "長方形選択ツールなど選択範囲の角は吸い付かない（移動・自由変形・切り抜き・シェイプ・ペンツールの点）"
     },
     {
       "id": "view.snapTo.all",
@@ -34811,9 +34996,19 @@
         "alternate_menus": []
       },
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "未着手",
+      "implementation_status": "実装済み（PC3 C-d、未統合）",
       "acceptance_status": "未実施",
-      "evidence": [],
+      "evidence": [
+        "native/src/core/snap.cpp",
+        "native/src/app/canvas_snap.cpp",
+        "native/src/app/main_window_align.cpp",
+        "native/src/app/canvas_transform.cpp",
+        "native/src/app/canvas_crop.cpp",
+        "native/src/app/canvas_tools.cpp",
+        "native/src/app/canvas_pen.cpp",
+        "native/tests/unit/test_align.cpp",
+        "native/tests/gui/test_gui_align.cpp"
+      ],
       "pc0": {
         "date": "2026-10-16",
         "cpp_base": "962faa4",
@@ -34844,9 +35039,19 @@
         "alternate_menus": []
       },
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "未着手",
+      "implementation_status": "実装済み（PC3 C-d、未統合）",
       "acceptance_status": "未実施",
-      "evidence": [],
+      "evidence": [
+        "native/src/core/snap.cpp",
+        "native/src/app/canvas_snap.cpp",
+        "native/src/app/main_window_align.cpp",
+        "native/src/app/canvas_transform.cpp",
+        "native/src/app/canvas_crop.cpp",
+        "native/src/app/canvas_tools.cpp",
+        "native/src/app/canvas_pen.cpp",
+        "native/tests/unit/test_align.cpp",
+        "native/tests/gui/test_gui_align.cpp"
+      ],
       "pc0": {
         "date": "2026-10-16",
         "cpp_base": "962faa4",
@@ -34877,9 +35082,19 @@
         "alternate_menus": []
       },
       "genko_status": "一部（2026-10-16 照合）",
-      "implementation_status": "未着手",
+      "implementation_status": "実装済み（PC3 C-d、未統合）",
       "acceptance_status": "未実施",
-      "evidence": [],
+      "evidence": [
+        "native/src/core/snap.cpp",
+        "native/src/app/canvas_snap.cpp",
+        "native/src/app/main_window_align.cpp",
+        "native/src/app/canvas_transform.cpp",
+        "native/src/app/canvas_crop.cpp",
+        "native/src/app/canvas_tools.cpp",
+        "native/src/app/canvas_pen.cpp",
+        "native/tests/unit/test_align.cpp",
+        "native/tests/gui/test_gui_align.cpp"
+      ],
       "pc0": {
         "date": "2026-10-16",
         "cpp_base": "962faa4",
@@ -34916,9 +35131,19 @@
         "alternate_menus": []
       },
       "genko_status": "一部（2026-10-16 照合）",
-      "implementation_status": "未着手",
+      "implementation_status": "実装済み（PC3 C-d、未統合）",
       "acceptance_status": "未実施",
-      "evidence": [],
+      "evidence": [
+        "native/src/core/snap.cpp",
+        "native/src/app/canvas_snap.cpp",
+        "native/src/app/main_window_align.cpp",
+        "native/src/app/canvas_transform.cpp",
+        "native/src/app/canvas_crop.cpp",
+        "native/src/app/canvas_tools.cpp",
+        "native/src/app/canvas_pen.cpp",
+        "native/tests/unit/test_align.cpp",
+        "native/tests/gui/test_gui_align.cpp"
+      ],
       "pc0": {
         "date": "2026-10-16",
         "cpp_base": "962faa4",
@@ -34955,9 +35180,19 @@
         "alternate_menus": []
       },
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "未着手",
+      "implementation_status": "実装済み（PC3 C-d、未統合）",
       "acceptance_status": "未実施",
-      "evidence": [],
+      "evidence": [
+        "native/src/core/snap.cpp",
+        "native/src/app/canvas_snap.cpp",
+        "native/src/app/main_window_align.cpp",
+        "native/src/app/canvas_transform.cpp",
+        "native/src/app/canvas_crop.cpp",
+        "native/src/app/canvas_tools.cpp",
+        "native/src/app/canvas_pen.cpp",
+        "native/tests/unit/test_align.cpp",
+        "native/tests/gui/test_gui_align.cpp"
+      ],
       "pc0": {
         "date": "2026-10-16",
         "cpp_base": "962faa4",
@@ -34968,7 +35203,8 @@
         "tests": [],
         "gap": "他のレイヤーの端・中心への吸着がない",
         "note": ""
-      }
+      },
+      "remaining": "ほかの層の範囲は裏で描き終わるまで吸い付かない"
     },
     {
       "id": "view.snapTo.slices",
@@ -37358,9 +37594,17 @@
       "kind": "tool",
       "upstream_source": "crates/ui-egui/src/state.rs",
       "genko_status": "一部（2026-10-16 照合）",
-      "implementation_status": "未着手",
+      "implementation_status": "実装済み（PC3 C-d、未統合）",
       "acceptance_status": "未実施",
-      "evidence": [],
+      "evidence": [
+        "native/src/app/main_window_actions.cpp",
+        "native/src/app/canvas_input.cpp",
+        "native/src/app/canvas_snap.cpp",
+        "native/src/app/main_window_align.cpp",
+        "native/src/render/layer_transform.cpp",
+        "native/tests/gui/test_gui_align.cpp",
+        "native/tests/gui/test_gui_ledger_a.cpp"
+      ],
       "pc0": {
         "date": "2026-10-16",
         "cpp_base": "962faa4",
@@ -37376,7 +37620,8 @@
         ],
         "gap": "描く先のレイヤーを丸ごとドラッグで動かせる（Shift で縦・横・45°）。自動選択（クリックした所のレイヤー/グループを選ぶ、⌘クリック）、バウンディングボックス（変形ハンドル）の表示がない",
         "note": "エンジン側は layer.translate・layer.pickAt の行（rows-layerB）"
-      }
+      },
+      "remaining": "選択範囲があるときに選択範囲の中だけを移動ツールで動かす動きは無い（選択範囲の枠のつまみで動かす）。カンバスの右クリックの層の一覧は無い"
     },
     {
       "id": "tool:RectMarquee",

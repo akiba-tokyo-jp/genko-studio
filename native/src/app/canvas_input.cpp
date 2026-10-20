@@ -186,8 +186,17 @@ void PageCanvas::mousePressEvent(QMouseEvent* event) {
     const QPointF mm = mm_of(pos);
     if (transform_press(pos, mm, event->modifiers())) return;  // (自由変形 and the warps' box: canvas_transform.cpp)
     press_pos_ = pos;
+    snap_lines_.clear();
+    snap_moving.clear();  // (the move tool's are given again as its drag starts)
     if (tool_ == QLatin1String("move")) {
+        if (move_box_handle(pos)) {  // (PC3 C-d: バウンディングボックス's □ — 自由変形 from here: canvas_snap.cpp)
+            emit moveBoxGrabbed();
+            if (transform_press(pos, mm, event->modifiers())) return;
+        }
+        // (自動選択, or Ctrl+click when it is off: the layer showing there first)
+        if (auto_select != ((event->modifiers() & Qt::ControlModifier) != 0)) emit layerPicked(mm.x(), mm.y(), auto_select_group);
         tool_drag_ = std::make_pair(mm, mm);
+        move_snap_box_ = moving_box ? moving_box() : std::nullopt;
         emit layerMoveStarted();
         update();
         return;
@@ -264,6 +273,25 @@ void PageCanvas::mouseMoveEvent(QMouseEvent* event) {
             const double length = std::hypot(mm.x() - s.x(), mm.y() - s.y());
             mm = QPointF(s.x() + length * std::cos(angle), s.y() + length * std::sin(angle));
         }
+        if (tool_ == QLatin1String("move")) {  // (PC3 C-d: the layers' box snapped — with Shift, along the way it is held to)
+            std::optional<std::array<double, 4>> box = move_snap_box_;
+            if (!box && !move_image_.isNull()) box = std::array<double, 4>{move_where_.left(), move_where_.top(), move_where_.right(), move_where_.bottom()};
+            if (box) {
+                const QPointF d = mm - tool_drag_->first;
+                QPointF off = snap_box({(*box)[0] + d.x(), (*box)[1] + d.y(), (*box)[2] + d.x(), (*box)[3] + d.y()}, event->modifiers());
+                if (event->modifiers() & Qt::ShiftModifier) {
+                    if (std::abs(d.y()) < 1e-9) {
+                        off.setY(0);
+                    } else if (std::abs(d.x()) < 1e-9) {
+                        off.setX(0);
+                    } else {
+                        off = QPointF(0, 0);
+                    }
+                    std::erase_if(snap_lines_, [&](const core::snap::Line& l) { return l.vertical ? off.x() == 0 : off.y() == 0; });
+                }
+                mm += off;
+            }
+        }
         tool_drag_->second = mm;
         update();
         return;
@@ -313,6 +341,11 @@ void PageCanvas::mouseReleaseEvent(QMouseEvent* event) {
         return;
     }
     if (guide_release(event->position())) return;
+    if (!snap_lines_.empty()) {  // (PC3 C-d: what a drag snapped to shows while it lasts)
+        snap_lines_.clear();
+        update();
+    }
+    move_snap_box_.reset();
     if (zoom_drag_) {
         const auto [start, end] = *zoom_drag_;
         zoom_drag_.reset();
@@ -492,6 +525,7 @@ void PageCanvas::hold_modifier(const QString& key, bool down) {
         tool.clear();  // (the path tools' own: Alt breaks a handle, puts a corner, copies)
     }
     if (is_clone_tool(base) && key == QLatin1String("alt")) tool.clear();  // (PC3 B4: Alt+click sets the clone source)
+    if (base == QLatin1String("move") && key == QLatin1String("ctrl")) tool.clear();  // (PC3 C-d: Ctrl+click picks the layer there)
     if (const auto own_tool = tool_modifiers.find(base); own_tool != tool_modifiers.end()) {
         // (this tool's own setting wins; Shift switches only when a tool says so)
         if (const auto own = own_tool->second.find(key); own != own_tool->second.end() && !own->second.isEmpty()) {
@@ -502,7 +536,8 @@ void PageCanvas::hold_modifier(const QString& key, bool down) {
         // (not while a line, a selection or its handles are being dragged: the drag ends with the tool it began with)
         const bool dragging = !stroke_.empty() || !marquee_stroke_.empty() || sel_drag_ || ellipse_drag_ || !lasso_fill_.empty() || shape_drag_ ||
                               vector_drag_ || vector_trace_ || reshape_ || tool_drag_ || zoom_drag_ || frame_drag_ || prim_drag_ ||
-                              ruler_drag_ || effect_drag_ || line_drag_ || handle_drag_ || !balloon_stroke_.empty() || panning_;
+                              ruler_drag_ || effect_drag_ || line_drag_ || handle_drag_ || !balloon_stroke_.empty() || panning_ ||
+                              crop_drag_;  // (PC3 C-d: Ctrl held while the crop box is dragged lets it go unsnapped)
         if (!tool.isEmpty() && !held_tool_ && !dragging && tool != tool_) {
             held_tool_ = tool_;
             held_key_ = key;

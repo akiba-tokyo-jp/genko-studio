@@ -198,7 +198,8 @@ bool PageCanvas::path_press(const QPointF& pos, const QPointF& mm, Qt::KeyboardM
             finish_pen(true);  // (on the first anchor: closed)
             return true;
         }
-        vec::Knot knot = vec::Knot::corner(r4(mm.x()), r4(mm.y()));
+        const QPointF at = snap_point(mm, modifiers);  // (PC3 C-d, 表示 → スナップ: the anchor snaps; Ctrl held: not)
+        vec::Knot knot = vec::Knot::corner(r4(at.x()), r4(at.y()));
         knot.smooth = curve && !(modifiers & Qt::AltModifier);
         pen_knots_.push_back(knot);
         if (!curve) pen_handle_ = pen_knots_.size() - 1;

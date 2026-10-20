@@ -84,10 +84,11 @@ bool PageCanvas::tool_press(const QPointF& pos, const QPointF& mm, Qt::KeyboardM
     }
     if (tool_ == QLatin1String("shape")) {
         modifiers_ = modifiers;
+        const QPointF at = snap_point(mm, modifiers);  // (PC3 C-d, 表示 → スナップ: a corner or point snaps; Ctrl held: not)
         if (shape_kind == QLatin1String("polyline") || shape_kind == QLatin1String("curve")) {
-            shape_pts_.push_back(mm);
+            shape_pts_.push_back(at);
         } else {
-            shape_drag_ = std::make_pair(mm, mm);
+            shape_drag_ = std::make_pair(at, at);
         }
         update();
         return true;
@@ -129,7 +130,7 @@ bool PageCanvas::tool_move(const QPointF& mm, Qt::KeyboardModifiers modifiers, b
     }
     if (shape_drag_) {
         modifiers_ = modifiers;
-        shape_drag_->second = constrained(shape_drag_->first, mm, modifiers);
+        shape_drag_->second = constrained(shape_drag_->first, snap_point(mm, modifiers), modifiers);
         update();
         return true;
     }

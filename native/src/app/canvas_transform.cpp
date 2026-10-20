@@ -285,10 +285,36 @@ bool PageCanvas::transform_press(const QPointF& pos, const QPointF& mm, Qt::Keyb
     return true;
 }
 
-bool PageCanvas::transform_move(const QPointF& mm, Qt::KeyboardModifiers modifiers) {
+bool PageCanvas::transform_move(const QPointF& pointer, Qt::KeyboardModifiers modifiers) {
     if (!xform_ || !xform_->drag) return xform_ != nullptr;
     Transforming& t = *xform_;
     Transforming::Drag& d = *t.drag;
+    // (PC3 C-d, 表示 → スナップ: the box moved snaps by its edges and middle; a handle, a mesh point, a pin or a plane's
+    // corner where it would be; a turn does not; Ctrl held: nothing — canvas_snap.cpp)
+    QPointF mm = pointer;
+    {
+        std::optional<QPointF> grip;
+        const auto in = [&](std::size_t i) { return i < 4 ? d.quad[i] : (d.quad[i - 4] + d.quad[(i - 3) % 4]) / 2.0; };
+        if (d.kind == QLatin1String("move")) {
+            const QPointF delta = pointer - d.start;
+            double x0 = d.quad[0].x(), y0 = d.quad[0].y(), x1 = x0, y1 = y0;
+            for (const QPointF& c : d.quad) {
+                x0 = std::min(x0, c.x()), y0 = std::min(y0, c.y()), x1 = std::max(x1, c.x()), y1 = std::max(y1, c.y());
+            }
+            mm = pointer + snap_box({x0 + delta.x(), y0 + delta.y(), x1 + delta.x(), y1 + delta.y()}, modifiers);
+        } else if (d.kind == QLatin1String("mesh") && d.index >= 0 && std::size_t(d.index) < d.mesh.size()) {
+            grip = d.mesh[std::size_t(d.index)];
+        } else if ((d.kind == QLatin1String("scale") || d.kind == QLatin1String("skew") || d.kind == QLatin1String("corner") ||
+                    d.kind == QLatin1String("perspective") || d.kind == QLatin1String("edge")) &&
+                   d.index >= 0 && d.index < 8) {
+            grip = in(std::size_t(d.index));
+        } else if (d.kind == QLatin1String("pin") || d.kind == QLatin1String("plane")) {
+            mm = snap_point(pointer, modifiers);
+        } else {
+            snap_lines_.clear();
+        }
+        if (grip) mm = snap_point(*grip + (pointer - d.start), modifiers) - *grip + d.start;
+    }
     d.moved = true;
     d.at = mm;
     const QPointF delta = mm - d.start;

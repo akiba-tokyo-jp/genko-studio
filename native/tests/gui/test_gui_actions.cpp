@@ -100,7 +100,8 @@ const std::vector<Expected>& expected() {
         {"act_frame", "コマ割り", k({s("F")}),
          "コマの中をドラッグして割る（斜めも。水平・垂直に吸い付く、Alt で自由）・間の白をドラッグで間隔を動かす・選んだコマの角をドラッグで形を変える", true,
          "ツール"},
-        {"act_move", "移動ツール", k({s("Q")}), "描く先のレイヤーを丸ごとドラッグで動かす（Shift で縦・横・45°）", true, "ツール"},
+        // (PC3 C-d, decision 5's 移動ツール: the layers chosen and their linked ones, Ctrl+click picking a layer)
+        {"act_move", "移動ツール", k({s("Q")}), "選んだレイヤーをリンクしたレイヤーと一緒にドラッグで動かす（Shift で縦・横・45°、Ctrl+クリックでそこのレイヤーを選ぶ）", true, "ツール"},
         {"act_point_wider", "選んだ点を太く", k({s("Ctrl+Alt+]")}), "部分選択ツールで選んだ制御点のところだけ、線を太くします", false, "ツール"},  // (PC3 C-b)
         {"act_color", "ペンの色…", k({s("C")}), "", false, "ツール"},
         {"act_split_h", "コマを横に割る（上下に分ける）", k({s("Ctrl+Shift+H")}), "", false, "ページ/コマ"},
@@ -327,7 +328,15 @@ private slots:
         // act_transform_scale, act_transform_rotate, act_transform_skew, act_transform_perspective, act_split_warp_h,
         // act_split_warp_v, act_split_warp_cross, act_remove_warp_split, act_transform_rotate_180, act_transform_rotate_90cw,
         // act_transform_rotate_90ccw, act_warp_text) — theirs (test_gui_transform).
-        QCOMPARE(w->actions_by_name().size(), std::size_t{409});
+        // and the 33 of PC3 C-d (SPEC COLOR-07「移動・整列」) — レイヤー → 重ね順 の 最前面へ・最背面へ・逆順 (act_layer_front,
+        // act_layer_back, act_layer_reverse), 整列 ▸ 6 and its 4 bases (act_align_top, act_align_vcenter, act_align_bottom,
+        // act_align_left, act_align_hcenter, act_align_right, act_align_to_auto, act_align_to_trim, act_align_to_frame,
+        // act_align_to_panel), 分布 ▸ 8 (act_distribute_top … act_distribute_right, act_distribute_horizontal,
+        // act_distribute_vertical), レイヤーをリンク・リンクしたレイヤーを選択・レイヤーをロック… (act_link_layers, act_select_linked,
+        // act_lock_layers), 表示 → スナップ and スナップ先 ▸ (act_snap_on, act_snap_guides, act_snap_grid, act_snap_layers,
+        // act_snap_bounds, act_snap_all, act_snap_none) and the move tool's 自動選択・バウンディングボックスを表示
+        // (act_move_auto_select, act_move_show_box) — theirs (test_gui_align).
+        QCOMPARE(w->actions_by_name().size(), std::size_t{442});
         QVERIFY(w->action("act_chat_approval"));
         QVERIFY(w->action("act_style"));
         QVERIFY(w->action("act_exposure"));

@@ -133,7 +133,7 @@ void MainWindow::build_tool_settings() {
     build_retouch_pages(ts);    // (PC3 B4: the retouching tools: retouch_tools.cpp)
     ts->add({QStringLiteral("text")}, text_settings_);  // (the text tool: main_window_lines.cpp)
     ts->add({QStringLiteral("select")}, line_select_page());  // (the chosen line's lettering, then the view)
-    ts->add({QStringLiteral("move")}, action_page({QStringLiteral("レイヤー"), action("act_layer_dup"), action("act_select_all")}));
+    build_move_page(ts);  // (PC3 C-d: 自動選択, バウンディングボックスを表示, スナップ, 整列・分布: main_window_align.cpp)
     build_paint_pages(ts);  // (図形・色混ぜ・ゆがみ・グラデーション: main_window_paint.cpp)
     build_vector_pages(ts);  // (線の編集・線の修正: main_window_vector.cpp)
     build_crop_page(ts);     // (PC3 C-e, 切り抜きツール: main_window_page_size.cpp)

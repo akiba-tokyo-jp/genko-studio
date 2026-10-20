@@ -24,6 +24,7 @@
 #include "core/geometry.hpp"
 #include "core/json.hpp"
 #include "core/model.hpp"
+#include "core/snap.hpp"
 
 class QKeyEvent;
 class QVariantAnimation;
@@ -308,6 +309,28 @@ public:
     bool path_delete();
     // The moving layer's picture (QImage and where it sits, mm), given by the window when a layer move starts.
     void set_move_image(const QImage& image, const QRectF& where_mm);
+    // --- 表示 → スナップ・スナップ先 and the move tool's options (PC3 C-d, canvas_snap.cpp) ---------------------------------
+    // Snapping on (スナップ) and what to (スナップ先: the guides — the guide rulers —, the grid — grid_snap —, the layers —
+    // their boxes' edges and middles —, the document's bounds — the paper's edges and middle). The move tool's layers,
+    // the free transform box, the crop tool's box, the shape tools' corners and the pen tools' anchors snap within 8
+    // screen pixels; Ctrl held: not. What they line up with is drawn while the drag lasts (smart guides in magenta).
+    bool snap_on = true;
+    bool snap_guides = true;
+    bool snap_layers = true;
+    bool snap_bounds = true;
+    // The layers' boxes to snap to (x0, y0, x1, y1 mm: the window's, drawn on a worker; none until they are), and the
+    // layers a drag moves (not snapped to).
+    std::function<std::vector<std::pair<std::string, std::array<double, 4>>>()> snap_boxes;
+    std::vector<std::string> snap_moving;
+    // What the last snap lined up with (drawn while the drag lasts).
+    const std::vector<core::snap::Line>& snap_lines() const { return snap_lines_; }
+    // The move tool (移動ツール): 自動選択 (a click picks the layer — or its outermost folder: auto_select_group — showing
+    // there, the topmost; Ctrl+click does when it is off), バウンディングボックスを表示 (the box of what it moves, its □
+    // grabbed: 自由変形 from there). The box is the window's (moving_box); the click asks the window (layerPicked).
+    bool auto_select = false;
+    bool auto_select_group = false;
+    bool show_move_box = false;
+    std::function<std::optional<std::array<double, 4>>()> moving_box;
     // --- the lines (台詞, canvas_lines.cpp) ------------------------------------------------------------------
     // The line chosen: its box shown, and with the select tool its handles.
     std::optional<std::string> selected_line_id;
@@ -423,6 +446,10 @@ signals:
     void frameDrawn(const QVector<QPointF>& points);
     void layerMoveStarted();
     void layerMoved(double dx, double dy);
+    // the move tool (PC3 C-d): 自動選択 asked at a point (mm; group: its outermost folder); the bounding box's □ grabbed
+    // (the window starts 自由変形 for the press to go on in)
+    void layerPicked(double x_mm, double y_mm, bool group);
+    void moveBoxGrabbed();
     void contextMenuAt(const QString& frame_id, const QPoint& global);
     void toolHeld(const QString& tool);
     void omittedChanged(const QStringList& elements);
@@ -599,6 +626,18 @@ private:
     bool transform_release(const QPointF& mm);
     bool transform_key(QKeyEvent* event);
     void draw_transform(QPainter& painter) const;
+    // snapping and the move tool's box (canvas_snap.cpp): the targets now; a point snapped (Ctrl: as it is); the move
+    // that snaps a moving box (Ctrl: none); the lines drawn; the move tool's box and its □
+    std::vector<core::snap::Line> snap_lines_;
+    core::snap::Targets snap_targets() const;
+    double snap_reach() const;
+    QPointF snap_point(const QPointF& mm, Qt::KeyboardModifiers modifiers);
+    QPointF snap_box(const std::array<double, 4>& box, Qt::KeyboardModifiers modifiers);
+    void draw_snap(QPainter& painter) const;
+    std::optional<std::array<double, 4>> move_box_now() const;
+    std::optional<int> move_box_handle(const QPointF& pos) const;
+    void draw_move_box(QPainter& painter) const;
+    std::optional<std::array<double, 4>> move_snap_box_;  // (the moving layers' box as the drag began)
     void draw_frame_numbers(QPainter& painter) const;
     void draw_frame_tool(QPainter& painter) const;
     void draw_polygon_mm(QPainter& painter, const std::vector<QPointF>& points) const;

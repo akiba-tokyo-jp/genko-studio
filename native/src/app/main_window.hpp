@@ -553,6 +553,24 @@ public:
     // contents' "ok", "modified" or "missing", marked in the layer panel; a file changed said in the status line.
     void check_links();
     std::string link_status(const std::string& contents_id) const;
+    // PC3 C-d (main_window_align.cpp): レイヤー → 重ね順 ▸ (to: front | forward | backward | back | reverse — arrange_layers,
+    // among siblings), 整列 ▸ (edge: top | vcenter | bottom | left | hcenter | right — align_layers to the base chosen in the
+    // menu) and 分布 ▸ (by: those and horizontal | vertical — distribute_layers), on the layers chosen in the layer panel
+    // (else the layer drawn on) and the line chosen; レイヤーをリンク, リンクしたレイヤーを選択, レイヤーをロック…. False
+    // when nothing was done (said why).
+    bool arrange_layers(const char* to);
+    bool align_layers(const char* edge);
+    bool distribute_layers(const char* by);
+    bool link_layers();
+    bool select_linked_layers();
+    // The move tool's 自動選択 at a point (mm): the topmost layer showing there (group: its outermost folder) drawn on and
+    // chosen; false when none shows there.
+    bool pick_layer_at(double x_mm, double y_mm, bool group = false);
+    // The page's layers' boxes the canvas snaps to (x0, y0, x1, y1 mm; render/layer_bounds): drawn on a worker once for the
+    // page as it is (none until then: asked again, they are there), the shown ones only.
+    std::vector<std::pair<std::string, std::array<double, 4>>> layer_snap_boxes();
+    // What the move tool moves: the layers chosen (else the layer drawn on) with their folders' and linked layers.
+    std::vector<std::string> move_targets() const;
     // A notice in the status line that never stops the work (problems in red, a little longer).
     void flash(const QString& message, int ms = 3000, bool error = false);
     QString last_notice() const { return last_notice_; }
@@ -852,6 +870,22 @@ private:
     void content_aware_scale_dialog();
     void liquify_dialog();
     void warp_text_dialog();
+    // PC3 C-d (main_window_align.cpp): the commands and menus of レイヤー → 重ね順・整列・分布・リンク・ロック and 表示 →
+    // スナップ・スナップ先, the move tool's page (自動選択, バウンディングボックスを表示), the snapping set on the canvas,
+    // レイヤーをロック…'s window, the move tool's box (the union of the moved layers' snap boxes).
+    void build_align_actions();
+    void build_align_menus(QMenu* layers, QMenu* view);
+    void build_move_page(ToolSettings* ts);
+    void snap_toggles();
+    void lock_layers_dialog();
+    std::optional<std::array<double, 4>> move_box();
+    struct SnapBoxes {
+        std::weak_ptr<core::Page> page;
+        std::vector<std::pair<std::string, std::array<double, 4>>> boxes;
+        bool ready = false;
+    };
+    SnapBoxes snap_boxes_;
+    std::uint64_t snap_ticket_ = 0;
     void build_tool_groups(QMenu* tools);
     void build_clipboard_menu(QMenu* edit);
     static const std::vector<const char*>& selection_tools();

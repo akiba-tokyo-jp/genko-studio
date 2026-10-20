@@ -75,7 +75,10 @@ public:
     void remove();
     void duplicate();
     void merge_down();
+    // 前面へ (1) and 背面へ (-1): the window's arrange_layers (PC3 C-d).
     void move(int delta);
+    // These layers chosen in the list (the others not; the layer drawn on as it is): リンクしたレイヤーを選択, 自動選択.
+    void select_ids(const std::vector<std::string>& ids);
     void set(const std::string& key, const core::Json& value);
     void mask(const core::Json& change);
     // PC3 B2 (app/layer_panel_masks.cpp): レイヤーマスク's own — 選択範囲をマスク (a mask hiding the selection), 透明部分から,
@@ -154,6 +157,7 @@ private:
     QPushButton* effect_button_ = nullptr;
     QAction* mask_link_ = nullptr;          // (PC3 B2: レイヤーマスク → リンク)
     std::vector<std::string> isolated_;     // (PC3 B2: レイヤーを分離 — the layers listed alone; empty: all)
+    std::string listed_page_;               // (PC3 C-d: the page listed last — its layers chosen together kept)
     std::string isolated_page_;             // (the page they are on: another page lists all)
     std::map<QString, QIcon> marks_;  // (the kinds' marks, per colour)
     QIcon kind_mark(core::LayerKind kind);
