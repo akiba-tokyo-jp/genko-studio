@@ -10,9 +10,12 @@
 
 #include <QTemporaryDir>
 
+#include <atomic>
 #include <cmath>
 #include <filesystem>
 #include <string>
+#include <thread>
+#include <vector>
 
 #include "core/base64.hpp"
 #include "core/color_raster.hpp"
@@ -25,6 +28,7 @@
 #include "render/ops_registry.hpp"
 #include "render/page.hpp"
 #include "render/png.hpp"
+#include "render/smart.hpp"
 #include "storage/asset_store.hpp"
 #include "testsupport.hpp"
 
@@ -230,6 +234,106 @@ private slots:
         const auto p = values.pixel(std::size_t(values.width()) * (values.height() / 2) + values.width() / 2);
         QVERIFY2(std::abs(p[0] - 1000 / 65535.0) < 1e-4, qPrintable(QString::number(p[0] * 65535)));
         QVERIFY(std::abs(p[0] * 255 - std::round(p[0] * 255)) > 1e-3);  // (not an 8-bit step)
+    }
+
+    // (independent review A P1-1) A file of 16 bits on a page of 16 bits is decoded once for all the tiles drawn of it —
+    // one picture of it kept (its values in the page's space), not two that put each other out —, and once when the tiles
+    // are drawn together (the others wait for the one making it).
+    void aDeepFileIsDecodedOnceForItsTiles() {
+        core::PageSpec colour = small_page();
+        colour.expression = "color";
+        Document doc = run(core::new_episode("深い", Num(1), 1, colour), Json::array({Json{{"op", "set_color_mode"}, {"page", 1}, {"mode", "rgb"}, {"depth", 16}}}));
+        const std::string png = render::write_png(render::Image::create("I;16", render::Size{900, 1200}, render::Ink(1000)));
+        const core::Rect b = doc.page(0).bleed_rect_mm();
+        doc = run(doc, Json::array({Json{{"op", "smart_place"}, {"page", 1}, {"data", core::b64encode(png)}, {"name", "g.png"},
+                                           {"placement_mm", Json::array({b.x.json(), b.y.json(), b.width.json(), b.height.json()})}}}));
+        const std::vector<render::RenderRegion> tiles{{0, 0, 128, 128}, {128, 0, 128, 128}, {0, 128, 128, 128}, {128, 128, 128, 128}};
+        // (kept within 24 MiB: the file is 17 MB as RGBA floats)
+        render::smart::set_budget_for_testing(std::size_t(24) << 20);
+        render::clear_render_caches();
+        auto before = render::smart::counts().files_decoded;
+        for (const render::RenderRegion& tile : tiles) QVERIFY(drawn(doc, "proof", 100, tile).precise.has_value());
+        QCOMPARE(render::smart::counts().files_decoded - before, std::uint64_t(1));
+        render::smart::set_budget_for_testing(0);
+        // (drawn together)
+        render::clear_render_caches();
+        before = render::smart::counts().files_decoded;
+        std::vector<std::thread> threads;
+        std::atomic<int> precise{0};
+        for (const render::RenderRegion& tile : tiles) {
+            threads.emplace_back([&doc, &precise, tile] {
+                if (drawn(doc, "proof", 100, tile).precise.has_value()) ++precise;
+            });
+        }
+        for (std::thread& t : threads) t.join();
+        QCOMPARE(precise.load(), 4);
+        QCOMPARE(render::smart::counts().files_decoded - before, std::uint64_t(1));
+    }
+
+    // (independent review A P1-1) A page made 16 bits takes a file of more bits only within what such a page keeps whole:
+    // past it, refused as placing it is.
+    void aPageMadeSixteenBitsTakesLargeFilesOnlyWithinItsLimit() {
+        core::PageSpec colour = small_page();
+        colour.expression = "color";
+        Document doc = core::new_episode("深い", Num(1), 1, colour);
+        const int side = static_cast<int>(std::ceil(std::sqrt(double(core::kColorRasterMaxPixels) + 1)));
+        QTemporaryDir folder;
+        doc.asset_dir = path_of(folder.path());
+        const std::string ref =
+            storage::AssetStore(*doc.asset_dir).put_bytes(render::write_png(render::Image::create("I;16", render::Size{side, side}, render::Ink(1000))), ".png");
+        doc = run(doc, Json::array({Json{{"op", "smart_place"}, {"page", 1}, {"asset", ref}, {"name", "large.png"}}}));
+        try {
+            (void)run(doc, Json::array({Json{{"op", "set_color_mode"}, {"page", 1}, {"mode", "rgb"}, {"depth", 16}}}));
+            QFAIL("a page of 16 bits took the large file");
+        } catch (const core::ApplyError& error) {
+            QVERIFY2(std::string(error.what()).find("too large to keep its 16 or 32 bits") != std::string::npos, error.what());
+        }
+        // (8 bits: as it was)
+        (void)run(doc, Json::array({Json{{"op", "set_color_mode"}, {"page", 1}, {"mode", "rgb"}, {"depth", 8}}}));
+    }
+
+    // (independent review A P2-5) Contents in precise colour laid other than by whole pixels — made smaller, turned — keep
+    // their bits on a page of 16 bits (drawn in precise colour, then laid through the matrix).
+    void preciseContentsLaidSmallerKeepTheirBits() {
+        core::PageSpec colour = small_page();
+        colour.expression = "color";
+        Document doc = run(core::new_episode("深い", Num(1), 1, colour), Json::array({Json{{"op", "set_color_mode"}, {"page", 1}, {"mode", "rgb"}, {"depth", 16}}}));
+        constexpr int kSide = 64;
+        Json pixels = Json::array();
+        for (int y = 0; y < kSide; ++y) {
+            for (int x = 0; x < kSide; ++x) {
+                const auto v = static_cast<std::int64_t>(std::lround((0.3 + 0.0013 * x + 0.0007 * y) * 65535));
+                for (int c = 0; c < 3; ++c) pixels.push_back(v);
+                pixels.push_back(65535);
+            }
+        }
+        doc = run(doc, Json::array({Json{{"op", "put_color_raster"}, {"page", 1}, {"width", kSide}, {"height", kSide}, {"precision", "u16"}, {"pixels", pixels}}}));
+        const std::string id = doc.page(0).layers.back().id;
+        doc = run(doc, Json::array({Json{{"op", "smart_convert"}, {"page", 1}, {"id", id}, {"new_id", "so"}}}));
+        const double turn = 3 * 3.14159265358979323846 / 180;
+        for (const Json& m : {Json::array({0.9, 0, 0, 0.9, 4, 6}), Json::array({std::cos(turn), std::sin(turn), -std::sin(turn), std::cos(turn), 5, -3})}) {
+            const Document laid = run(doc, Json::array({Json{{"op", "smart_transform"}, {"page", 1}, {"id", "so"}, {"set_matrix", m}}}));
+            render::clear_render_caches();
+            const render::RenderResult out = drawn(laid, "proof", 50);
+            QVERIFY(out.precise.has_value());
+            const core::ColorRasterView values(*out.precise);
+            int between = 0, seen = 0;
+            const std::size_t row = values.height() / 2;
+            for (std::size_t x = values.width() / 4; x < values.width() * 3 / 4; ++x) {
+                const auto p = values.pixel(row * values.width() + x);
+                ++seen;
+                if (std::abs(p[0] * 255 - std::round(p[0] * 255)) > 1e-3) ++between;  // (not an 8-bit step)
+            }
+            QVERIFY2(between * 2 > seen, qPrintable(QStringLiteral("%1: %2 of %3 values between 8-bit steps").arg(QString::fromStdString(m.dump())).arg(between).arg(seen)));
+        }
+        // (a part of the page the whole cut there)
+        const Document smaller = run(doc, Json::array({Json{{"op", "smart_transform"}, {"page", 1}, {"id", "so"}, {"set_matrix", Json::array({0.9, 0, 0, 0.9, 4, 6})}}}));
+        const render::RenderResult whole = drawn(smaller, "proof", 50);
+        const render::RenderResult part = drawn(smaller, "proof", 50, render::RenderRegion{40, 50, 70, 60});
+        QVERIFY(whole.precise && part.precise);
+        const core::ColorRasterView a(*whole.precise), c(*part.precise);
+        for (std::uint32_t y = 0; y < 60; ++y)
+            for (std::uint32_t x = 0; x < 70; ++x) QCOMPARE(c.pixel(std::size_t(y) * 70 + x), a.pixel(std::size_t(y + 50) * a.width() + x + 40));
     }
 
     void layersConvertedTogetherAreDrawn() {

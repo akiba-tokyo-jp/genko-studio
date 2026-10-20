@@ -625,17 +625,22 @@ std::vector<float> srgb_floats(const DeepPicture& p, const std::optional<std::st
         cmsHTRANSFORM transform = cmsCreateTransform(from.handle, in_format, srgb.handle, TYPE_RGB_FLT, intent_of(intent),
                                                      (bpc ? cmsFLAGS_BLACKPOINTCOMPENSATION : 0) | cmsFLAGS_NOCACHE);
         if (transform == nullptr) throw core::Error("value", "the picture's colours cannot be taken from its profile");
-        std::vector<float> in(count * colours), rgb(count * 3);
-        for (std::size_t i = 0; i < count; ++i) {
-            for (unsigned c = 0; c < colours; ++c) {
-                const float v = p.samples[i * p.channels + c];
-                in[i * colours + c] = colours == 4 ? v * 100.0f : v;  // (Little CMS's CMYK floats are 0..100)
+        // (a band of pixels at a time: the picture held once more as floats only band by band — independent review A P1-1)
+        constexpr std::size_t kBand = std::size_t(1) << 16;
+        std::vector<float> in(std::min(count, kBand) * colours), rgb(std::min(count, kBand) * 3);
+        for (std::size_t first = 0; first < count; first += kBand) {
+            const std::size_t n = std::min(kBand, count - first);
+            for (std::size_t i = 0; i < n; ++i) {
+                for (unsigned c = 0; c < colours; ++c) {
+                    const float v = p.samples[(first + i) * p.channels + c];
+                    in[i * colours + c] = colours == 4 ? v * 100.0f : v;  // (Little CMS's CMYK floats are 0..100)
+                }
             }
+            cmsDoTransform(transform, in.data(), rgb.data(), static_cast<cmsUInt32Number>(n));
+            for (std::size_t i = 0; i < n; ++i)
+                for (unsigned c = 0; c < 3; ++c) out[(first + i) * 4 + c] = rgb[i * 3 + c];
         }
-        cmsDoTransform(transform, in.data(), rgb.data(), static_cast<cmsUInt32Number>(count));
         cmsDeleteTransform(transform);
-        for (std::size_t i = 0; i < count; ++i)
-            for (unsigned c = 0; c < 3; ++c) out[i * 4 + c] = rgb[i * 3 + c];
         return out;
     }
     for (std::size_t i = 0; i < count; ++i) {

@@ -1077,6 +1077,19 @@ void register_smart_ops(core::OpRegistry& registry) {
 // (PC3 C-e: a placed picture turned with its page, render/ops_pagesize.cpp)
 namespace smart_ops {
 core::Layer placed_to_smart(core::Document& doc, core::Layer placed, const std::string& id) { return render::placed_to_smart(doc, std::move(placed), id); }
+
+void fits_deep_page(const core::Document& doc, const core::Page& page) {
+    if (page.color || !page.rgb || page.rgb->depth <= 8) return;
+    for (const Layer& layer : page.layers) {
+        if (layer.kind != LayerKind::Smart) continue;
+        const core::SmartContents* contents = core::smart::contents_of(doc, layer);
+        if (contents == nullptr || contents->kind != "file" || contents->depth <= 8) continue;
+        if (static_cast<std::uint64_t>(contents->width_px) * static_cast<std::uint64_t>(contents->height_px) > core::kColorRasterMaxPixels) {
+            throw OpError("the picture is too large to keep its 16 or 32 bits on this page (at most " + std::to_string(core::kColorRasterMaxPixels) +
+                          " pixels)");
+        }
+    }
+}
 }  // namespace smart_ops
 
 }  // namespace genko::render

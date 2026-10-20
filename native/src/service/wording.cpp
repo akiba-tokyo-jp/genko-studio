@@ -1153,7 +1153,8 @@ QString unported_element(const QString& element) {
     if (element.startsWith(QStringLiteral("smart:"))) {  // (smart-objects@1: what PC3's later steps draw)
         static const std::map<QString, QString> later = {{"perspective", "遠近の変形"}, {"warp", "ワープ"}, {"stack", "スタックモード"},
                                                          {"filters", "スマートフィルター"}, {"filter_mask", "フィルターマスク"},
-                                                         {"psd", "PSD のスマートオブジェクトの絵"}, {"psb", "PSB の画像"}};
+                                                         {"psd", "PSD のスマートオブジェクトの絵"}, {"psb", "PSB の画像"},
+                                                         {"too_large", "大きすぎる絵（作業に使える記憶の上限 2 GiB を超えるため描いていません）"}};
         const auto it = later.find(element.mid(6));
         return QStringLiteral("スマートオブジェクトの%1").arg(it != later.end() ? it->second : element.mid(6));
     }
