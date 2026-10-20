@@ -93,7 +93,9 @@ bool native_key(std::string_view op, std::string_view key) {
            // PC3 (masks@1): set_layer_mask's linked, density and feather_mm; a pixel op's layer_mask (its layer's mask
            // painted instead of its pixels)
            (op == "set_layer_mask" && (key == "linked" || key == "density" || key == "feather_mm")) ||
-           (key == "layer_mask" && channel_target_op(op));
+           (key == "layer_mask" && channel_target_op(op)) ||
+           // PC3 C-c (SPEC COLOR-07): Filter › Liquify's strokes and its field's spacing
+           (op == "liquify" && (key == "strokes" || key == "mesh_mm"));
 }
 
 // PC2 (SPEC COLOR-04): the settings of this build's own an op of Python's reads by what else it was given —

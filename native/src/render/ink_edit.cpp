@@ -864,6 +864,8 @@ bool shown_in_page(const core::Page& page, const core::Layer& layer) {
 
 bool lends(std::string_view op, const core::Json& args) {
     if (op == "filter_raster") return core::truthy_at(args, "kind") && core::py_str(args["kind"]).starts_with("plugin:");
+    // (PC3 C-c: Liquify's strokes move the inks themselves, render/distort_ops)
+    if (op == "liquify" && core::truthy_at(args, "strokes")) return false;
     static constexpr std::array<std::string_view, 7> kOnTarget{"smudge", "liquify", "add_shape", "flood_fill", "gradient_fill",
                                                               "fill_gaps", "ruler_to_layer"};
     return std::find(kPageWide.begin(), kPageWide.end(), op) != kPageWide.end() ||

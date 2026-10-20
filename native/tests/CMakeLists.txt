@@ -113,6 +113,10 @@ genko_test(test_magic_erase SOURCES unit/test_magic_erase.cpp DEPS genko_test_su
 genko_test(test_path_raster SOURCES unit/test_path_raster.cpp DEPS genko_test_support genko_render_ops LABELS unit)
 genko_test(test_resample SOURCES unit/test_resample.cpp DEPS genko_test_support genko_render_ops LABELS unit)
 genko_test(test_page_geometry SOURCES unit/test_page_geometry.cpp DEPS genko_test_support LABELS unit)
+# PC3 C-c (SPEC.md COLOR-07): the transforms' algorithms (PhotoCraft's puppet.rs, perspective.rs, liquify.rs, seam.rs and
+# geom/src/warp.rs tests: the identity, rigid moves, the energy, the shared edges, each Liquify tool's sense, the seams),
+# the warps' forms and splits, render/resample's triangles and inverse map.
+genko_test(test_transform SOURCES unit/test_transform.cpp DEPS genko_test_support genko_render_ops LABELS unit TIMEOUT 600)
 # PC2-0 (SPEC.md COLOR-04, adjustments@1): the corrections' common ground without Python — Python's form kept, a
 # correction's native read and stored, native.method, the kinds' table and what is not in this build yet, one
 # AdjustFunction to the three ways, native.blend on 8 and 16 bits and on CMYK, the PSD's frame; and PC2a's tone kinds
@@ -344,6 +348,11 @@ genko_test(test_contract_smart_links SOURCES contract/test_contract_smart_links.
 # PC3 B1 through the command line: inspect --area, the colour kinds given to ops, quick_mask in and out (saved, undone,
 # done again), the Quick Mask in a PSD (resource 1022, read back by psd-tools and this build's reader), magic_erase.
 genko_test(test_contract_select SOURCES contract/test_contract_select.cpp DEPS genko_test_support genko_render
+           LABELS contract TIMEOUT 900)
+# PC3 C-c: transform_layers on each kind of layer and pixels (exact moves and turns on 8, 16, 32 bits, CMYK, Lab; lines,
+# patches, quads, warps, perspective, puppet; folders, links, masks, areas, parts; smart objects, placed pictures, locks,
+# lines of dialogue), content_aware_scale, liquify's strokes, Warp Text; through the command line saved and undone.
+genko_test(test_contract_transform SOURCES contract/test_contract_transform.cpp DEPS genko_test_support genko_render_ops
            LABELS contract TIMEOUT 900)
 genko_test(test_contract_image_ops SOURCES contract/test_contract_image_ops.cpp DEPS genko_test_support genko_render
            LABELS contract TIMEOUT 900)

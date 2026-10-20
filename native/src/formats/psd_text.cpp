@@ -126,6 +126,9 @@ std::vector<std::string> line_features(const core::StoryLine& line, std::optiona
     if (core::py_truthy(at(st, "text_path"))) out.emplace_back("text_path");
     if (core::py_truthy(at(st, "arc"))) out.emplace_back("arc");
     if (core::py_truthy(at(st, "warp"))) out.emplace_back("warp");
+    // (PC3 C-c: Warp Text is the text layer's warp, but a ruby is a layer of its own and would not bend with it)
+    const bool rubies = (line.ruby_spans && !line.ruby_spans->empty()) || !line.ruby_runs.empty();
+    if (at(st, "native_warp").is_object() && rubies) out.emplace_back("warp_ruby");
     for (const std::string& run : line.emphasis_runs) {
         if (!run.empty() && line.text.find(run) != std::string::npos) {
             out.emplace_back("emphasis");
@@ -209,6 +212,7 @@ const std::vector<PsdTextFeature>& psd_text_unsupported() {
         {"text_path", "パスに沿った文字", "パス上文字は初版では書かない"},
         {"arc", "弓なりの曲げ", "非線形の変形は文字レイヤーの行列に表せない"},
         {"warp", "四隅を引くゆがみ", "非線形の変形は文字レイヤーの行列に表せない"},
+        {"warp_ruby", "ルビのあるワープテキスト", "ルビは本文と別の文字レイヤーのため、本文と一緒に曲げられない"},
         {"emphasis", "傍点", "PSD の文字に傍点がないため、文字にできない"},
         {"ruby_runs", "組み方の変わる旧形式のルビ",
          "旧形式のルビ（ruby_runs）は位置で持つルビにして書くが、読みが本文より長いときなど画面と違う組み方になるため、文字にできない（ルビを振り直すと文字にできる）"},

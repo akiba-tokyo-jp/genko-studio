@@ -299,7 +299,7 @@ private slots:
             {"matting", "B3"}, {"clone_stamp", "B4"}, {"healing_brush", "B4"}, {"spot_healing", "B4"}, {"history_brush", "B4"},
             {"content_aware_fill", "B4"}, {"set_path", "C-a"}, {"delete_path", "C-a"}, {"rename_path", "C-a"}, {"make_work_path", "C-a"},
             {"text_to_path", "C-a"}, {"stroke_path", "C-a"}, {"set_vector_mask", "C-a"}, {"add_shape_part", "C-b"}, {"edit_shape_part", "C-b"},
-            {"combine_shape_parts", "C-b"}, {"move_shape_parts", "C-b"}, {"transform_layers", "C-c"}, {"content_aware_scale", "C-c"},
+            {"combine_shape_parts", "C-b"}, {"move_shape_parts", "C-b"},  // (C-c's transform_layers and content_aware_scale: written)
             {"align_layers", "C-d"}, {"distribute_layers", "C-d"}, {"arrange_layers", "C-d"}, {"link_layers", "C-d"}, {"resize_pages", "C-e"},
             {"set_canvas_size", "C-e"}, {"crop_page", "C-e"}, {"trim_page", "C-e"}, {"reveal_all", "C-e"}, {"rotate_pages", "C-e"}};
         for (const auto& [op, group] : frames) {

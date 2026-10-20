@@ -306,17 +306,14 @@ Plane mesh(const Plane& src, const Forward& f, int width, int height, Interp int
     const double sw = src.width, sh = src.height;
     const int nx = std::clamp(static_cast<int>(std::ceil(sw / kCell)), 1, kMaxCells);
     const int ny = std::clamp(static_cast<int>(std::ceil(sh / kCell)), 1, kMaxCells);
-    struct Vert {
-        double dx, dy, sx, sy;
-    };
-    std::vector<Vert> verts;
+    std::vector<Corner> verts;
     verts.reserve(std::size_t(nx + 1) * std::size_t(ny + 1));
     for (int j = 0; j <= ny; ++j) {
         for (int i = 0; i <= nx; ++i) {
             const double sx = sw * i / nx, sy = sh * j / ny;
             const auto [dx, dy] = f(sx, sy);
             if (!std::isfinite(dx) || !std::isfinite(dy)) return out;
-            verts.push_back(Vert{dx - x0, dy - y0, sx, sy});
+            verts.push_back(Corner{dx, dy, sx, sy});
         }
     }
     std::vector<std::array<std::size_t, 3>> tris;
@@ -328,6 +325,22 @@ Plane mesh(const Plane& src, const Forward& f, int width, int height, Interp int
             tris.push_back({a, a + w1 + 1, a + w1});
         }
     }
+    return triangles(src, verts, tris, width, height, interp, x0, y0);
+}
+
+Plane triangles(const Plane& src, const std::vector<Corner>& corners, const std::vector<std::array<std::size_t, 3>>& tris, int width, int height,
+                Interp interp, int x0, int y0) {
+    Plane out = empty_like(src, width, height);
+    if (src.width <= 0 || src.height <= 0 || width <= 0 || height <= 0) return out;
+    struct Vert {
+        double dx, dy, sx, sy;
+    };
+    std::vector<Vert> verts;
+    verts.reserve(corners.size());
+    for (const Corner& c : corners) {
+        if (!std::isfinite(c.dx) || !std::isfinite(c.dy) || !std::isfinite(c.sx) || !std::isfinite(c.sy)) return out;
+        verts.push_back(Vert{c.dx - x0, c.dy - y0, c.sx, c.sy});
+    }
     const Source s(src);
     // (worked in bands of rows: each band's source positions, then sampled)
     constexpr int kBand = 256;
@@ -337,6 +350,7 @@ Plane mesh(const Plane& src, const Forward& f, int width, int height, Interp int
         uv.assign(std::size_t(width) * std::size_t(b1 - b0), {std::numeric_limits<double>::quiet_NaN(), 0.0});
         bool any = false;
         for (const auto& tri : tris) {
+            if (tri[0] >= verts.size() || tri[1] >= verts.size() || tri[2] >= verts.size()) continue;
             const Vert& p0 = verts[tri[0]];
             const Vert& p1 = verts[tri[1]];
             const Vert& p2 = verts[tri[2]];
@@ -367,6 +381,24 @@ Plane mesh(const Plane& src, const Forward& f, int width, int height, Interp int
                 if (std::isnan(q[0])) continue;
                 sample(s, q[0] - 0.5, q[1] - 0.5, interp, out.at(x, y), true);
             }
+        }
+    }
+    return out;
+}
+
+Plane remap(const Plane& src, const Backward& g, int width, int height, Interp interp, int x0, int y0) {
+    Plane out = empty_like(src, width, height);
+    if (src.width <= 0 || src.height <= 0 || width <= 0 || height <= 0) return out;
+    const Source s(src);
+    const double sw = src.width, sh = src.height;
+    for (int y = 0; y < height; ++y) {
+        for (int x = 0; x < width; ++x) {
+            auto [u, v] = g(x0 + x + 0.5, y0 + y + 0.5);
+            if (!std::isfinite(u) || !std::isfinite(v)) continue;
+            u -= 0.5;
+            v -= 0.5;
+            if (src.alpha && (u < -1.0 || v < -1.0 || u > sw || v > sh)) continue;
+            sample(s, u, v, interp, out.at(x, y), true);
         }
     }
     return out;

@@ -921,6 +921,28 @@ const std::vector<Rule>& rules() {
         r.push_back(rule("range: localized clusters need points_mm", "ローカライズされたカラークラスタには、スポイトで拾った点が要ります"));
         r.push_back(rule("range(?:\\.\\w+)?[: ].*", "色域指定の設定が正しくありません"));
         r.push_back(rule("a selection is saved into an alpha channel", "選択範囲は、アルファチャンネルに保存します（特色チャンネルには保存できません）"));
+        // (PC3 C-c: the transforms, Content-Aware Scale, Liquify's strokes, Warp Text — render/layer_transform, distort_ops)
+        r.push_back(rule("the layer \\S+ is locked", "ロックされているレイヤーは変形できません（レイヤー パネルでロックを外します）"));
+        r.push_back(rule("the position of the layer \\S+ is locked", "位置をロックしたレイヤーは動かせません（レイヤー パネルでロックを外します）"));
+        r.push_back(rule("a (?:smart object|placed picture) moves whole: .*", "選択範囲の中だけを変形することはできません（選択を解除してから変形します）"));
+        r.push_back(rule("a placed picture is turned and bent as a smart object: .*", "配置画像を回す・曲げるときは、先にスマートオブジェクトに変換します"));
+        r.push_back(rule("(?:warping|liquifying) a smart object is not in the C\\+\\+ build yet.*",
+                         "スマートオブジェクトのワープ・遠近法ワープ・パペットワープ・ゆがみは、この版の Genko ではまだできません（ラスタライズしてからかけます）"));
+        r.push_back(rule("the transform squashes the layers flat", "つぶれてしまう変形はできません"));
+        r.push_back(rule("give one of move, matrix, quad, turn, warp, perspective or puppet", "変形のしかたを 1 つだけ指定します"));
+        r.push_back(rule("the layers show nothing to (?:transform|pin)", "変形するものがありません"));
+        r.push_back(rule("the quad's corners must make a quad|a plane is degenerate: .*", "4 隅が四角形になっていません"));
+        r.push_back(rule("ids is \\[layer id, …\\]", "変形するレイヤーを選んでください"));
+        r.push_back(rule("(?:the |a )?warp(?:'s)? .*|warp (?:is|has) .*", "ワープの設定が正しくありません"));
+        r.push_back(rule("(?:a plane's|perspective|a perspective warp|straighten) .*", "遠近法ワープの設定が正しくありません"));
+        r.push_back(rule("(?:puppet|a puppet warp|a pin's) .*", "パペットワープの設定が正しくありません"));
+        r.push_back(rule("Content-Aware Scale works on a paint layer's pixels: .*",
+                         "コンテンツに応じて拡大・縮小は、ペイントのレイヤーの画素にかけます（ペンのレイヤーやスマートオブジェクトは先にラスタライズします）"));
+        r.push_back(rule("nothing to scale: the layer is empty there", "拡大・縮小する絵がありません"));
+        r.push_back(rule("protect is an alpha channel's id or name, or none", "保護するチャンネルは、アルファチャンネルを選びます"));
+        r.push_back(rule("Liquify works on a pen or paint layer", "ゆがみは、ペンかペイントのレイヤーにかけます"));
+        r.push_back(rule("(?:strokes is|liquify takes|a liquify stroke) .*", "ゆがみの設定が正しくありません"));
+        r.push_back(rule("style a line's native_warp .*", "ワープテキストの設定が正しくありません"));
         // (the C++ build's own: what it does not do yet, and saving)
         r.push_back(rule("official export is not in the C\\+\\+ build yet",
                          "この版の Genko では、まだ正式な書き出し（確認と承認の記録つき）はできません（ふつうの書き出しはできます）"));

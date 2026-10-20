@@ -73,6 +73,24 @@ std::uint32_t u32_of(std::uint64_t n) {
     return static_cast<std::uint32_t>(n);
 }
 
+// Warp Text (PC3 C-c, the style's native_warp) as the text layer's warp: Photoshop's style by its name ("flag" →
+// "warpFlag"), the bend (the style's own 50 when none is given, as the letters are drawn) and the distortions, along or
+// across.
+void with_warp(render::psd::TextLayer& text, const core::StoryLine& line) {
+    const core::Json st = render::text::style_of(line);
+    if (!st.is_object() || !st.contains("native_warp") || !st["native_warp"].is_object()) return;
+    const core::Json& w = st["native_warp"];
+    const auto number = [&](const char* key, double fallback) { return w.contains(key) && w[key].is_number() ? w[key].get<double>() : fallback; };
+    std::string style = w.contains("style") && w["style"].is_string() ? w["style"].get<std::string>() : std::string();
+    if (style.empty()) return;
+    style[0] = static_cast<char>(style[0] - 'a' + 'A');
+    text.warp = "warp" + style;
+    text.warp_value = number("bend", 50.0);
+    text.warp_perspective = number("h_distort", 0.0);
+    text.warp_perspective_other = number("v_distort", 0.0);
+    text.warp_vertical = w.contains("vertical") && w["vertical"].is_boolean() && w["vertical"].get<bool>();
+}
+
 // psd._packbits_rows of one channel ("L"): each row's byte count (as numpy's ">u2": modulo 65536) and the packed
 // bytes. Runs of 3 or more equal bytes are repeat packets, the rest literal packets, 128 bytes at most each; a run never
 // crosses a row.
@@ -731,7 +749,8 @@ public:
             }
             effects = tagged("lfx2", render::psd::lfx2(halo));
         }
-        const render::psd::TextLayer body = in_inks(body_text(line, set, m));
+        render::psd::TextLayer body = in_inks(body_text(line, set, m));
+        with_warp(body, line);  // (Warp Text: the text layer's own warp)
         if (!body.text.empty()) {
             Image letters = drawn(twin, render::text::LetterParts{false, true, false, false});
             const auto box = letters.getbbox();

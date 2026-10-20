@@ -16,11 +16,13 @@
 #include "core/pyconv.hpp"
 #include "core/pynum.hpp"
 #include "core/pyops.hpp"
+#include "core/page_geometry.hpp"
 #include "core/ruby.hpp"
 #include "render/draw.hpp"
 #include "render/imaging.hpp"
 #include "render/not_yet_ported.hpp"
 #include "render/png.hpp"
+#include "render/resample.hpp"
 #include "render/text/fonts.hpp"
 #include "render/text/memo.hpp"
 
@@ -945,6 +947,43 @@ RubyPlaces ruby_places(const core::StoryLine& line, int dpi, const std::optional
 
 namespace {
 
+// Warp Text (PC3 C-c, the style's native_warp): the letters' picture bent by one of PhotoCraft's fifteen warp styles over
+// its box (core/page_geometry's StyleWarp: its bend and distortions in %, along or across), drawn again through the map
+// (render/resample's mesh, bicubic, premultiplied); the picture grows to hold what the bend reaches, its middle where it
+// was.
+Image style_warped(const Image& image, const Json& spec) {
+    namespace pg = core::page_geometry;
+    const auto style = spec.contains("style") && spec["style"].is_string() ? pg::warp_style_from(spec["style"].get<std::string>()) : std::nullopt;
+    if (!style || !pg::is_preset(*style) || image.width() <= 0 || image.height() <= 0) return image;
+    const auto number = [&](const char* key, double fallback) { return spec.contains(key) && spec[key].is_number() ? spec[key].get<double>() : fallback; };
+    const bool vertical = spec.contains("vertical") && spec["vertical"].is_boolean() && spec["vertical"].get<bool>();
+    const double w = image.width(), h = image.height();
+    const auto warp = pg::StyleWarp::make(*style, number("bend", 50.0), number("h_distort", 0.0), number("v_distort", 0.0), vertical, {0.0, 0.0, w, h});
+    if (!warp) return image;
+    double x0 = 0, y0 = 0, x1 = w, y1 = h;
+    constexpr int kSamples = 32;
+    for (int j = 0; j <= kSamples; ++j) {
+        for (int i = 0; i <= kSamples; ++i) {
+            const core::vector::XY p = warp->apply(w * i / kSamples, h * j / kSamples);
+            x0 = std::min(x0, p.x);
+            y0 = std::min(y0, p.y);
+            x1 = std::max(x1, p.x);
+            y1 = std::max(y1, p.y);
+        }
+    }
+    // (as much room on each side as the bend reaches past the box on either: the middle stays the middle)
+    const int pad_x = static_cast<int>(std::ceil(std::max(-x0, x1 - w))) + 2, pad_y = static_cast<int>(std::ceil(std::max(-y0, y1 - h))) + 2;
+    const resample::Plane plane = resample::from_rgba8(image.mode() == "RGBA" ? image : image.convert("RGBA"));
+    const resample::Plane out = resample::mesh(
+        plane,
+        [&](double x, double y) {
+            const core::vector::XY p = warp->apply(x, y);
+            return std::pair<double, double>{p.x, p.y};
+        },
+        image.width() + 2 * pad_x, image.height() + 2 * pad_y, resample::Interp::Bicubic, -pad_x, -pad_y);
+    return resample::to_rgba8(out);
+}
+
 // (PSD-01) a × b of maps given as {a, b, c, d, e, f}: x' = a·x + c·y + e, y' = b·x + d·y + f; `then` applies q after p
 std::array<double, 6> then(const std::array<double, 6>& p, const std::array<double, 6>& q) {
     return {q[0] * p[0] + q[2] * p[1], q[1] * p[0] + q[3] * p[1], q[0] * p[2] + q[2] * p[3], q[1] * p[2] + q[3] * p[3],
@@ -1057,7 +1096,9 @@ Layout layout_of(const core::StoryLine& line, int dpi, const std::optional<std::
     if (skew == 0.0) skew = core::py_truthy(at(st, "italic")) ? 12.0 : 0.0;  // (italic: a light lean)
     if (skew != 0.0) image = skewed(image, skew, vertical);
     if (core::py_truthy(at(st, "warp"))) image = warped_letters(image, at(st, "warp"));
-    if (rubies != nullptr && (std::fabs(scale_x - 1) > 1e-3 || core::py_truthy(at(st, "arc")) || skew != 0.0 || core::py_truthy(at(st, "warp")))) {
+    const bool bent = at(st, "native_warp").is_object();  // (PC3 C-c: Warp Text)
+    if (bent) image = style_warped(image, at(st, "native_warp"));
+    if (rubies != nullptr && (std::fabs(scale_x - 1) > 1e-3 || core::py_truthy(at(st, "arc")) || skew != 0.0 || core::py_truthy(at(st, "warp")) || bent)) {
         rubies->exact = false;  // (bent, leant, pulled or drawn narrower or wider: the boxes are where the letters were set)
     }
     // PSD-01: the letters set again at the em found (the same layout), drawing only the parts asked for and saying where
@@ -1099,6 +1140,7 @@ Layout layout_of(const core::StoryLine& line, int dpi, const std::optional<std::
             picture = skewed(picture, skew, vertical);
         }
         if (core::py_truthy(at(st, "warp"))) picture = warped_letters(picture, at(st, "warp"));
+        if (bent) picture = style_warped(picture, at(st, "native_warp"));
         if (set_out != nullptr) {
             SetLetters& set = *set_out;
             set.vertical = vertical;
@@ -1116,7 +1158,7 @@ Layout layout_of(const core::StoryLine& line, int dpi, const std::optional<std::
             if (core::py_truthy(at(st, "gradient"))) set.effects.emplace_back("gradient");
             if (core::py_truthy(at(st, "fill_png"))) set.effects.emplace_back("picture_fill");
             if (core::py_truthy(at(st, "arc"))) set.effects.emplace_back("arc");
-            if (core::py_truthy(at(st, "warp"))) set.effects.emplace_back("warp");
+            if (core::py_truthy(at(st, "warp")) || bent) set.effects.emplace_back("warp");
             for (const std::string& run : line.emphasis_runs) {
                 if (!run.empty() && line.text.find(run) != std::string::npos) {
                     set.effects.emplace_back("emphasis");

@@ -1,6 +1,7 @@
 #include "core/vector.hpp"
 
 #include <algorithm>
+#include <array>
 #include <cmath>
 #include <set>
 #include <utility>
@@ -547,6 +548,9 @@ bool uses_transform(const Document& doc) {
         for (const Layer& layer : doc.page(i).layers)
             if (layer.link || layer.lock_position) return true;
     }
+    // (PC3 C-c: a line of dialogue's warp of PhotoCraft's styles, Warp Text)
+    for (const StoryLine& line : doc.story)
+        if (line.style.is_object() && line.style.contains("native_warp")) return true;
     return false;
 }
 
@@ -608,6 +612,32 @@ void validate_vector(const Document& doc) {
             if (layer.link && (layer.link->empty() || layer.link->size() > 64)) bad(where + "a layer's link must be text (1..64 bytes)");
         }
     }
+    for (const StoryLine& line : doc.story) {
+        if (!line.style.is_object()) continue;
+        if (const auto warp = line.style.find("native_warp"); warp != line.style.end()) check_native_warp(*warp);
+    }
+}
+
+void check_native_warp(const Json& value) {
+    static constexpr std::array<std::string_view, 15> kStyles{"arc",  "arcLower", "arcUpper", "arch",    "bulge",   "shellLower", "shellUpper", "flag",
+                                                              "wave", "fish",     "rise",     "fisheye", "inflate", "squeeze",    "twist"};
+    const std::string what = "a line's native_warp";
+    if (!value.is_object()) bad(what + " is {style, bend, h_distort, v_distort, vertical}");
+    for (const auto& [key, v] : value.items()) {
+        if (key == "style") {
+            if (!v.is_string() || std::find(kStyles.begin(), kStyles.end(), v.get<std::string>()) == kStyles.end())
+                bad(what + "'s style is one of arc, arcLower, arcUpper, arch, bulge, shellLower, shellUpper, flag, wave, fish, rise, fisheye, inflate, "
+                           "squeeze, twist");
+        } else if (key == "bend" || key == "h_distort" || key == "v_distort") {
+            const double x = number(v, what + "'s " + key);
+            if (x < -100 || x > 100) bad(what + "'s " + key + " must be between -100 and 100");
+        } else if (key == "vertical") {
+            if (!v.is_boolean()) bad(what + "'s vertical is true or false");
+        } else {
+            bad(what + " has no key " + key);
+        }
+    }
+    if (!value.contains("style")) bad(what + " needs its style");
 }
 
 }  // namespace genko::core::vector

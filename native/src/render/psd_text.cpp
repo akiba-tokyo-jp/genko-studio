@@ -602,11 +602,11 @@ std::string tysh(const TextLayer& layer) {
     text.integer("TextIndex", 0);
     text.raw("EngineData", engine_data(layer));
     Descriptor warp;
-    warp.enumerated("warpStyle", "warpStyle", "warpNone");
-    warp.number("warpValue", 0.0);
-    warp.number("warpPerspective", 0.0);
-    warp.number("warpPerspectiveOther", 0.0);
-    warp.enumerated("warpRotate", "Ornt", "Hrzn");
+    warp.enumerated("warpStyle", "warpStyle", layer.warp.empty() ? std::string("warpNone") : layer.warp);
+    warp.number("warpValue", layer.warp_value);
+    warp.number("warpPerspective", layer.warp_perspective);
+    warp.number("warpPerspectiveOther", layer.warp_perspective_other);
+    warp.enumerated("warpRotate", "Ornt", layer.warp_vertical ? "Vrtc" : "Hrzn");
     std::string out;
     put_u16(out, 1);
     for (const double v : layer.transform) put_f64(out, v);
@@ -642,6 +642,10 @@ TextLayer tysh_of(std::string_view payload) {
         }
     }
     if (const DValue* w = warp.get("warpStyle"); w != nullptr) out.warp = w->enum_value;
+    if (const DValue* v = warp.get("warpValue"); v != nullptr) out.warp_value = v->number;
+    if (const DValue* v = warp.get("warpPerspective"); v != nullptr) out.warp_perspective = v->number;
+    if (const DValue* v = warp.get("warpPerspectiveOther"); v != nullptr) out.warp_perspective_other = v->number;
+    if (const DValue* r = warp.get("warpRotate"); r != nullptr) out.warp_vertical = r->enum_value == "Vrtc";
     const DValue* data = text.get("EngineData");
     if (data == nullptr) broken("no EngineData");
     const Engine root = EngineReader(data->raw).root();

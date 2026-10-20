@@ -98,6 +98,14 @@ genko_library(genko_render
     select_color.cpp
     ops_quick_mask.cpp
     erase_magic.cpp
+    # PC3 C-c (変形: 自由変形・ワープ・パペットワープ・遠近法ワープ・コンテンツに応じて拡大・縮小・ゆがみ)
+    puppet.cpp
+    perspective_warp.cpp
+    liquify_field.cpp
+    seam.cpp
+    own_pixels.cpp
+    layer_transform.cpp
+    distort_ops.cpp
     ${GENKO_MATERIAL_RESOURCES}
     ${GENKO_TEXT_RESOURCES}
   PUBLIC_DEPS genko_core Qt6::Core
