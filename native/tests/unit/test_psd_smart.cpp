@@ -167,7 +167,8 @@ private slots:
         const std::string a = psd::linked_item("abc-1", "a.png", "png ", std::string("\x01\x02\x03", 3));
         const std::string b = psd::linked_item("def-2", "b.psd", "8BPS", std::string(10, '\x09'));
         QCOMPARE(a.size() % 4, std::size_t(0));
-        const auto items = psd::read_linked(a + b);
+        const std::string both = a + b;  // (the items read are views into the block: it stays while they are used)
+        const auto items = psd::read_linked(both);
         QCOMPARE(items.size(), std::size_t(2));
         QCOMPARE(items[0].kind, std::string("liFD"));
         QCOMPARE(items[0].uuid, std::string("abc-1"));

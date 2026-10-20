@@ -138,7 +138,9 @@ Json stroke(const char* op, const std::vector<std::pair<double, double>>& points
 
 // A smooth colour gradient and a fine deterministic noise (retouch_cmds/tests.rs's texture).
 Colour texture(int x, int y) {
-    const double n = static_cast<double>(static_cast<std::uint32_t>((x * 73856093) ^ (y * 19349663)) % 1000) / 1000.0 * 0.06 - 0.03;
+    // (unsigned, so the products wrap as upstream's do rather than overflow)
+    const std::uint32_t hash = (static_cast<std::uint32_t>(x) * 73856093u) ^ (static_cast<std::uint32_t>(y) * 19349663u);
+    const double n = static_cast<double>(hash % 1000) / 1000.0 * 0.06 - 0.03;
     return {0.3 + 0.002 * x + n, 0.5 + 0.0015 * y + n, 0.45 + n, 1.0};
 }
 

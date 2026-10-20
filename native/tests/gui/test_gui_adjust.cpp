@@ -174,9 +174,10 @@ private slots:
         QMenu* file = book.menu(QStringLiteral("ファイル"));
         QStringList items;
         for (QAction* a : file->actions()) items << (a->isSeparator() ? QStringLiteral("|") : a->property("genko_attribute").toString());
-        // (its own group after 書き出し… and 印刷…, which stay together as in Python's menu: test_gui_output)
+        // (its own group after 書き出し…, PC3 C-a's パスを Illustrator へ… and 印刷…: test_gui_output)
         const qsizetype print = items.indexOf(QStringLiteral("act_print"));
-        QCOMPARE(items.indexOf(QStringLiteral("act_export")), print - 1);
+        QCOMPARE(items.indexOf(QStringLiteral("act_export")), print - 2);
+        QCOMPARE(items.indexOf(QStringLiteral("act_export_paths_ai")), print - 1);
         QCOMPARE(items.mid(print + 1, 3), (QStringList{QStringLiteral("|"), QStringLiteral("act_export_lookup"), QStringLiteral("|")}));
         // the panels in ウィンドウ
         QVERIFY(book.window->findChild<QDockWidget*>(QStringLiteral("色調補正")) != nullptr);
