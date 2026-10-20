@@ -14996,7 +14996,10 @@
         "native/src/app/page_size_dialogs.cpp",
         "native/tests/unit/test_page_size.cpp",
         "native/tests/contract/test_contract_page_size.cpp",
-        "native/tests/gui/test_gui_page_size.cpp"
+        "native/tests/gui/test_gui_page_size.cpp",
+        "native/src/render/bookpages.cpp",
+        "native/src/render/ink_edit.cpp",
+        "native/tests/unit/test_ink_edit.cpp"
       ],
       "pc0": {
         "date": "2026-10-16",

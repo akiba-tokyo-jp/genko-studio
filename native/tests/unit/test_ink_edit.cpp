@@ -13,6 +13,8 @@
 #include <functional>
 #include <random>
 #include <string>
+#include <string_view>
+#include <tuple>
 #include <vector>
 
 #include "core/base64.hpp"
@@ -487,6 +489,51 @@ private slots:
                 if (p[4] == 65535 && p[0] == kS[0] && p[1] == kS[1] && p[2] == kS[2] && p[3] == kS[3]) ++s_seen;
             }
         QVERIFY(s_seen > 1000);
+    }
+
+    // New paper (set_page_spec): inks at the working 200 dpi moved to the very inks they were before; inks of another
+    // resolution (2 pixels a mm here: a PSD's, put_raster's, resized without resampling) keep it — not taken for 200 dpi —,
+    // each pixel the inks that moved there with the basic frame.
+    void newPaperKeepsTheResolution() {
+        const core::Document doc = ink_book();
+        const core::InkPixels working = pixels_of(run_ops(doc, Json::array({Json{{"op", "set_page_spec"}, {"preset", "b5"}}})).doc, "pic");
+        const std::string working_ref =
+            core::bytes_ref(std::string_view(reinterpret_cast<const char*>(working.samples.data()), working.samples.size() * sizeof(std::uint16_t)));
+        QCOMPARE(working.width, 1638u);
+        QCOMPARE(working_ref, std::string("sha256:141f5b0142aacbdefb7977871b2dfa78caaeeb84b4c0099ec22fbd780311ae5e"));
+        // (60 × 80 mm at 2 pixels a mm: 120 × 160; S at the top right, T at the bottom left, as ink_book's)
+        core::Document coarse = doc;
+        core::InkPixels p = core::blank_ink_pixels(core::InkSpace::Cmyk, 16, 120, 160);
+        for (std::uint32_t y = 0; y < 160; ++y) {
+            for (std::uint32_t x = 0; x < 120; ++x) {
+                std::uint16_t* s = p.samples.data() + (std::size_t(y) * 120 + x) * 5;
+                if (y < 80 && x >= 60) std::copy(kS.begin(), kS.end(), s);
+                if (y >= 80 && x < 60) std::copy(kT.begin(), kT.end(), s);
+                s[4] = (y < 80 || x < 60) ? 65535 : 0;
+            }
+        }
+        for (auto& layer : coarse.edit_page(0).layers) {
+            if (layer.id == "pic") layer.ink_raster = std::make_shared<const std::string>(core::encode_ink_raster(p));
+        }
+        const core::Document moved = run_ops(coarse, Json::array({Json{{"op", "set_page_spec"}, {"preset", "b5"}}})).doc;
+        all_in_inks(moved);
+        const core::InkPixels got = pixels_of(moved, "pic");
+        const double w = moved.page(0).spec.width_mm.value(), h = moved.page(0).spec.height_mm.value();
+        QCOMPARE(got.width, static_cast<std::uint32_t>(std::lround(w * 2)));
+        QCOMPARE(got.height, static_cast<std::uint32_t>(std::lround(h * 2)));
+        const std::string side = coarse.start_side.value_or("");
+        const core::Rect a = coarse.page(0).inner_rect_mm(side), b = moved.page(0).inner_rect_mm(side);
+        const auto there = [&](double x, double y) {
+            const double nx = b.x.value() + (x - a.x.value()) * (b.width / a.width).value();
+            const double ny = b.y.value() + (y - a.y.value()) * (b.height / a.height).value();
+            return at(got, static_cast<std::uint32_t>(nx * 2), static_cast<std::uint32_t>(ny * 2));
+        };
+        for (const auto& [x, y, inks] : {std::tuple{45.0, 20.0, kS}, std::tuple{15.0, 60.0, kT}}) {
+            const std::uint16_t* q = there(x, y);
+            for (unsigned c = 0; c < 4; ++c) QVERIFY2(std::abs(int(q[c]) - int(inks[c])) <= 1, qPrintable(QStringLiteral("(%1, %2) %3: %4").arg(x).arg(y).arg(c).arg(q[c])));
+            QCOMPARE(q[4], std::uint16_t{65535});
+        }
+        QCOMPARE(there(50, 70)[4], std::uint16_t{0});  // (the clear bottom right)
     }
 
     // A picture pasted onto a paint layer (no inks of its own: an RGB picture) is drawn into its inks there and then —

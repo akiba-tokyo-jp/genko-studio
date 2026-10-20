@@ -83,8 +83,9 @@ void map_effect(Json& effect, const Mapping& m);
 // A 3D prop: its place moved and its size × scale. OpError for a map that turns or mirrors or scales unevenly (the
 // camera cannot show it: render it to pixels first).
 void map_prim(Json& prim, const Mapping& m);
-// An area as the ops take one: a poly's corners, a mask's box (only when the map keeps the axes and does not mirror —
-// otherwise the mask's pixels move: PixelHooks::area); the richer kinds' parts in turn (union, saved …).
+// An area as the ops take one: a poly's corners, a mask's box (only when the map keeps each axis the way it points: a
+// move and a scale — otherwise, a half turn too, the mask's pixels move: PixelHooks::area); the richer kinds' parts in turn
+// (union, saved …).
 void map_area(Json& area, const Mapping& m);
 // A path, a vector mask, a shape part (its stroke's width × scale; a live shape kept when the map only moves and scales
 // evenly, otherwise dropped: the path is the shape then).

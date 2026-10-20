@@ -16,9 +16,12 @@
 //      and 4) drawn as in 1 and 2: sizes where numpy's float32 sine and cosine and another way of computing them part
 //      (see dressing()).
 // The user's decision D1 (SPEC §2): set_page_spec moves a layer's mask with what it masks, where Python leaves it
-// stretched over the new paper. This build's book differs from Python's there alone — the masks page 1 has before the
-// move, each Python's mask moved from the old basic frame onto the new one (render::relayout_mask) — and is drawn for 2
-// and 4 with those masks as Python keeps them, every other pixel compared.
+// stretched over the new paper. This build's book differs from Python's there — the masks page 1 has before the move,
+// each Python's mask moved from the old basic frame onto the new one (render::relayout_mask) — and (the review of PC3,
+// fix 1: a picture is never taken for one at 200 dpi) in the paint layers whose pictures are not at the working 200 dpi
+// (put_raster's, as they were given, on pages 1 and 4, and the layer page 2's merge_down made), which keep their
+// resolution where Python takes them for pictures at 200 dpi (render::relayout_raster and relayout_working_raster); it
+// is drawn for 2 and 4 with those masks and paint layers as Python keeps them, every other pixel compared.
 // Skipped without the Python reference.
 
 #include <QtTest>
@@ -199,34 +202,63 @@ class TestContractRasterRender : public QObject {
     genko::core::Document plain_doc_;  // Python's book before the correction layers put on by hand
     genko::core::Document py_other_;   // the book on the other paper, as Python saved it, read by this build
     genko::core::Document cpp_other_;  // … the ops applied by this build
-    // (this build's books with the masks D1 moved put back as Python keeps them, for comparing every other pixel)
+    // (this build's books with the masks D1 moved and the paint layers not at 200 dpi put back as Python keeps them, for
+    // comparing every other pixel)
     genko::core::Document cpp_doc_kept_;
     genko::core::Document cpp_other_kept_;
 
     // The user's decision D1: `cpp` (this build's book after the ops) differs from `python` (Python's) in the masks the
-    // pages had before set_page_spec (`before`: this build's book just before it) alone, each Python's moved with what it
-    // masks; `cpp` with Python's masks put back in their place. How many there were in `moved`.
+    // pages had before set_page_spec (`before`: this build's book just before it), each Python's moved with what it
+    // masks, and (the review of PC3) in the paint layers whose pictures were not at the working 200 dpi then, each
+    // keeping its resolution where Python takes it for one at 200 dpi, alone; `cpp` with Python's put back in their place.
+    // How many masks there were in `moved`; the paint layers in `kept` ("page/layer …").
     static genko::core::Document masks_as_python(const genko::core::Document& cpp, const genko::core::Document& python,
-                                                 const genko::core::Document& before, int& moved) {
+                                                 const genko::core::Document& before, int& moved, std::string& kept) {
+        const auto rgba = [](const std::string& png) {
+            const render::Image image = render::read_png(png, render::kPillowOpenLimits).convert("RGBA");
+            return std::to_string(image.width()) + "x" + std::to_string(image.height()) + ":" + image.tobytes();
+        };
         const auto pixels = [](const genko::core::Bytes& png) {
             const render::Image image = render::read_png(*png, render::kPillowOpenLimits).convert("L");
             return std::to_string(image.width()) + "x" + std::to_string(image.height()) + ":" + image.tobytes();
         };
         genko::core::Document out = cpp;
         moved = 0;
+        kept.clear();
         for (std::size_t i = 0; i < cpp.pages.size(); ++i) {
             const genko::core::Page& page = *cpp.pages[i];
             const genko::core::Page* theirs = page_of(python, static_cast<int>(page.index.int_value()));
             const genko::core::Page* was = page_of(before, static_cast<int>(page.index.int_value()));
             for (std::size_t k = 0; k < page.layers.size(); ++k) {
                 const genko::core::Layer& layer = page.layers[k];
-                if (!layer.mask || !layer.mask->png) continue;
                 const auto find = [&](const genko::core::Page* on) -> const genko::core::Layer* {
                     for (const auto& l : on->layers) {
                         if (l.id == layer.id) return &l;
                     }
                     return nullptr;
                 };
+                // (a paint layer whose picture was not at 200 dpi: this build's keeps its resolution, Python's is it taken
+                // for one at 200 dpi)
+                if (const genko::core::Layer* old_layer = find(was); layer.raster_png && old_layer != nullptr && old_layer->raster_png) {
+                    const render::Image old = render::read_png(*old_layer->raster_png, render::kPillowOpenLimits);
+                    if (old.width() != render::mm_to_px(was->spec.width_mm.value(), 200) ||
+                        old.height() != render::mm_to_px(was->spec.height_mm.value(), 200)) {
+                        const genko::core::Layer* py_layer = find(theirs);
+                        const std::string start_side = cpp.start_side.value_or("");
+                        const genko::core::Rect from = was->inner_rect_mm(start_side), to = page.inner_rect_mm(start_side);
+                        if (py_layer == nullptr || !py_layer->raster_png ||
+                            rgba(*layer.raster_png) != rgba(render::relayout_raster(*old_layer->raster_png, was->spec, page.spec, from, to)) ||
+                            rgba(*py_layer->raster_png) != rgba(render::relayout_working_raster(*old_layer->raster_png, page.spec, from, to))) {
+                            qWarning("page %d layer %s: the paint layer is not Python's kept at its resolution",
+                                     static_cast<int>(page.index.int_value()), layer.id.c_str());
+                            kept += " (not as it should be)";
+                        } else {
+                            out.edit_page(i).layers[k].raster_png = py_layer->raster_png;
+                        }
+                        kept += (kept.empty() ? "" : " ") + page.index.repr() + "/" + layer.id;
+                    }
+                }
+                if (!layer.mask || !layer.mask->png) continue;
                 const genko::core::Layer* py_layer = find(theirs);
                 if (py_layer == nullptr || !py_layer->mask || !py_layer->mask->png) {
                     qWarning("page %d layer %s: a mask Python's book does not have", static_cast<int>(page.index.int_value()), layer.id.c_str());
@@ -344,8 +376,12 @@ private slots:
             const genko::core::Document before =
                 genko::core::CommandBus(render::ops_registry()).apply(doc, unmoved, genko::core::Actor("human:作者"), false).doc;
             int moved = 0;
-            *kept = masks_as_python(*cpp, *python, before, moved);
+            std::string paints;
+            *kept = masks_as_python(*cpp, *python, before, moved, paints);
             QCOMPARE(moved, 3);  // (page 1's: in-a, mask-1, adj-levels)
+            // (the pictures put_raster put as they are — mask-1's 120 × 160, the finish layer's 24 × 18 (000000000017),
+            // blank-4's 20 × 16 — and the layer page 2's merge_down made (000000000008))
+            QCOMPARE(paints, std::string("1/mask-1 2/000000000008 4/000000000017 4/blank-4"));
         }
 
         // Python draws the pages (of the book before the correction layers too, in the modes the regions are cut in)

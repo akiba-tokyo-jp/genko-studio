@@ -82,9 +82,11 @@ std::string lay_piece(const core::Page& page, const core::Layer& layer, const co
 std::string lay_piece(const core::Page& page, const core::Layer& layer, const core::InkPixels& piece, const std::array<double, 4>& box_mm,
                       const selection::Matrix& m, Resample resample = Resample::Bilinear);
 
-// set_page_spec: the inks of a paint layer on the new paper (render/bookpages' relayout_raster for inks): the old
-// frame onto the new, at the working 200 dpi, bilinear.
-std::string relayout_inks(const std::string& gkir, const core::PageSpec& spec, const core::Rect& old_frame, const core::Rect& new_frame);
+// set_page_spec: the inks of a paint layer (over the page's old paper `old_paper`) on the new paper `spec`
+// (render/bookpages' relayout_raster for inks): the old frame onto the new, bilinear — inks at the working 200 dpi onto
+// the new paper at 200 dpi as before, inks of another resolution keeping it (page_pixels::move_inks).
+std::string relayout_inks(const std::string& gkir, const core::PageSpec& old_paper, const core::PageSpec& spec, const core::Rect& old_frame,
+                          const core::Rect& new_frame);
 
 // The pictures an op left on a paint layer of a CMYK or Lab page (a pasted picture, a material, an area moved) drawn
 // into its inks there and then, as a precise layer takes them (render/color_edit::bake_marks): their colours by the

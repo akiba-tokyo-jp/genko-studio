@@ -573,16 +573,7 @@ void bake_page_values(core::Document& doc) {
 std::string relayout(const std::string& gkcr, const core::PageSpec& old_paper, const core::PageSpec& paper, const core::Rect& old_frame,
                      const core::Rect& new_frame) {
     // (as set_page_spec's map moves a point: the old basic frame onto the new one, x and y each by its own scale)
-    const double sx = old_frame.width.truthy() ? (new_frame.width / old_frame.width).value() : 1.0;
-    const double sy = old_frame.height.truthy() ? (new_frame.height / old_frame.height).value() : 1.0;
-    const double ex = new_frame.x.value() - old_frame.x.value() * sx, ey = new_frame.y.value() - old_frame.y.value() * sy;
-    if (!std::isfinite(sx) || !std::isfinite(sy) || !std::isfinite(ex) || !std::isfinite(ey) || sx == 0 || sy == 0) {
-        throw core::OpError("the basic frame must be a finite size");
-    }
-    page_pixels::How how;
-    how.kind = page_pixels::How::Kind::Warp;
-    how.interp = resample::Interp::Bilinear;
-    return page_pixels::move_precise(gkcr, how, core::page_geometry::mapping({sx, 0, 0, sy, ex, ey}), old_paper, paper);
+    return page_pixels::move_precise(gkcr, page_pixels::frame_how(), page_pixels::frame_map(old_frame, new_frame), old_paper, paper);
 }
 
 // --- pieces of precise pixels (PC3 B2) ----------------------------------------------------------------------------------

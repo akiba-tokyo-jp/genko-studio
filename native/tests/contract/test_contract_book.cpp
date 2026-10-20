@@ -14,9 +14,12 @@
 // "cpp_says" names (opsupport.hpp): D1, set_page_spec moving a cover's pixels on its own paper and a layer's mask with
 // what it masks; D2, import_pages and duplicate_page pointing what names a layer at the page's own new layers. It is
 // Python's but at its "cpp_differs", keeps its "cpp_keeps" after the case and saved and read back, and
-// Python's book does not. The command line copies none of the other book's assets with import_pages, as
-// Python's does (its app and MCP tools copy them first, merge.copy_assets): checked on both command lines. Skipped
-// without the Python reference.
+// Python's book does not. On every case (the review of PC3, fix 1), a paint layer whose picture set_page_spec moves while
+// it is not at 200 dpi (the op book's page 4 background, a 4 × 4 picture put as it was given) keeps its resolution here,
+// where Python takes it for one at 200 dpi: each such picture is followed through the case's steps and checked on each
+// side (opsupport.hpp KeptResolution), and Python's is then compared in its place. The command line copies none of the
+// other book's assets with import_pages, as Python's does (its app and MCP tools copy them first, merge.copy_assets):
+// checked on both command lines. Skipped without the Python reference.
 
 #include <QtTest>
 
@@ -24,6 +27,7 @@
 #include <QFile>
 #include <QTemporaryDir>
 
+#include <algorithm>
 #include <filesystem>
 #include <map>
 #include <string>
@@ -205,6 +209,7 @@ private slots:
         int refused_here = 0;
         int deviating = 0;
         int covers_compared = 0;
+        int kept_resolutions = 0;  // (paint layers set_page_spec moved keeping their resolution: fix 1 of PC3's review)
         genko::test::ReadBackNotes notes;
         std::vector<std::string> failures;
         for (std::size_t n = 0; n < cases.size(); ++n) {
@@ -222,13 +227,28 @@ private slots:
             genko::core::Document last;
             std::vector<Json> covers;  // what covers.py makes of the book after each step, on this side
             std::vector<genko::core::Document> books{loaded.document};  // (the book before each step, and after the last)
-            const auto outcomes = genko::test::run_steps(loaded.document, steps_of(c), first_id, store, false, &last,
-                                                         [&covers, &books](genko::core::Document& doc, std::size_t, const genko::test::StepOutcome&) {
-                                                             covers.push_back(covers_of(doc));
-                                                             books.push_back(doc);
-                                                         });
+            auto outcomes = genko::test::run_steps(loaded.document, steps_of(c), first_id, store, false, &last,
+                                                   [&covers, &books](genko::core::Document& doc, std::size_t, const genko::test::StepOutcome&) {
+                                                       covers.push_back(covers_of(doc));
+                                                       books.push_back(doc);
+                                                   });
             if (records.size() != outcomes.size()) {
                 failures.push_back(name + ": Python gave " + std::to_string(records.size()) + " steps");
+                continue;
+            }
+            // (the review of PC3, fix 1: a picture not at 200 dpi that set_page_spec moved keeps its resolution here — the op
+            // book's page 4 background, put_raster's 4 × 4 picture —, Python's taken for one at 200 dpi: each checked, then
+            // Python's in its place)
+            genko::test::KeptResolution kept;
+            std::string kept_wrong;
+            const Json steps = steps_of(c);
+            for (std::size_t s = 0; s < outcomes.size() && kept_wrong.empty(); ++s) {
+                kept_wrong = kept.step(books[s], books[s + 1], steps[s], outcomes[s], records[s]);
+            }
+            kept_resolutions += kept.kept;
+            const std::vector<std::string>& kept_paths = kept.paths;
+            if (!kept_wrong.empty()) {
+                failures.push_back(name + ": " + kept_wrong);
                 continue;
             }
             // the case does what it says: its last step succeeds or fails in Python as marked, and a failure is the op's
@@ -290,7 +310,9 @@ private slots:
                 const auto saved = genko::storage::path_from_utf8((dir + QStringLiteral("/cpp-%1.genko").arg(n)).toStdString());
                 std::string wrong = genko::test::kept_by_deviation(keeps, before, last);
                 if (wrong.empty()) {
-                    wrong = genko::test::read_back_difference(last, saved, store, reread, notes, genko::test::deviation_paths(c));
+                    std::vector<std::string> places = genko::test::deviation_paths(c);
+                    places.insert(places.end(), kept_paths.begin(), kept_paths.end());
+                    wrong = genko::test::read_back_difference(last, saved, store, reread, notes, places);
                 }
                 if (wrong.empty()) {
                     const genko::core::ScopedIdSource ids(genko::core::counting_ids());
@@ -315,7 +337,8 @@ private slots:
             (expect_ok ? same[op].first : same[op].second) += 1;
             if (!expect_ok) continue;
             const std::string difference = genko::test::read_back_difference(
-                last, genko::storage::path_from_utf8((dir + QStringLiteral("/cpp-%1.genko").arg(n)).toStdString()), store, reread, notes);
+                last, genko::storage::path_from_utf8((dir + QStringLiteral("/cpp-%1.genko").arg(n)).toStdString()), store, reread, notes,
+                kept_paths);
             if (!difference.empty()) {
                 failures.push_back(name + ": " + difference);
                 continue;
@@ -327,6 +350,7 @@ private slots:
         qInfo("saved and read back as they were: %d; refused here on purpose: %d; deviating on purpose (the user's decisions D1, "
               "D2) and kept so, saved and read back: %d; covers compared after %d steps",
               read_back, refused_here, deviating, covers_compared);
+        qInfo("paint layers set_page_spec moved keeping their resolution (Python's taken for 200 dpi): %d", kept_resolutions);
         QVERIFY2(failures.empty(), (std::to_string(failures.size()) + " of " + std::to_string(cases.size()) +
                                     " cases differ from Python (see the warnings)").c_str());
         const std::map<std::string, std::pair<int, int>> needed{
@@ -340,6 +364,7 @@ private slots:
         }
         QVERIFY(refused_here >= 8);
         QVERIFY(deviating >= 5);
+        QVERIFY(kept_resolutions > 0);
     }
 
     // `genko apply` with import_pages copies none of the other book's asset files, as Python's `genko apply` does (its
