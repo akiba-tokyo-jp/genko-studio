@@ -224,12 +224,12 @@ Run harness(const QStringList& args, const QString& scratch, int timeout_ms) {
     return run(python_ref(), full, python_env(scratch), timeout_ms);
 }
 
-Run run_genko(const QStringList& args, const QProcessEnvironment& env, const QByteArray& input, const QString& working_dir) {
+Run run_genko(const QStringList& args, const QProcessEnvironment& env, const QByteArray& input, const QString& working_dir, int timeout_ms) {
     QProcessEnvironment full = QProcessEnvironment::systemEnvironment();
     full.remove(QStringLiteral("GENKO_FAULT"));
     full.remove(QStringLiteral("GENKO_TEST_MIGRATE_HOOK"));
     for (const QString& key : env.keys()) full.insert(key, env.value(key));
-    return run(genko_cli(), args, full, 300000, input, working_dir);
+    return run(genko_cli(), args, full, timeout_ms, input, working_dir);
 }
 
 QProcessEnvironment fault_env(const QString& fault) {

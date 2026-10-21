@@ -54,7 +54,7 @@ else()
 endif()
 genko_test(test_png SOURCES unit/test_png.cpp DEPS genko_test_support genko_render genko_formats LABELS unit)
 genko_test(test_color_raster SOURCES unit/test_color_raster.cpp DEPS genko_core genko_storage genko_render genko_render_ops LABELS unit)
-genko_test(test_color_filters SOURCES unit/test_color_filters.cpp DEPS genko_core genko_storage genko_render genko_render_ops LABELS unit)
+genko_test(test_color_filters SOURCES unit/test_color_filters.cpp DEPS genko_core genko_storage genko_render genko_render_ops LABELS unit TIMEOUT 600)
 genko_test(test_color_raster_edit SOURCES unit/test_color_raster_edit.cpp DEPS genko_core genko_storage genko_render genko_render_ops LABELS unit)
 # (91 merge/flatten/convert cases at u16 and f32: about 460 s under ASan, alone)
 genko_test(test_precision_merge_controls SOURCES unit/test_precision_merge_controls.cpp DEPS genko_core genko_storage genko_render genko_render_ops LABELS unit TIMEOUT 1200)
@@ -93,7 +93,7 @@ genko_test(test_proof SOURCES unit/test_proof.cpp DEPS genko_test_support genko_
 genko_test(test_ink SOURCES unit/test_ink.cpp DEPS genko_test_support genko_render_ops genko_formats LABELS unit TIMEOUT 600)
 # color-mode@1, step two: the pixel ops of CMYK and Lab pages through their pictures, the eyedropper's inks, a colour
 # for chosen inks and the gamut mark.
-genko_test(test_ink_edit SOURCES unit/test_ink_edit.cpp DEPS genko_test_support genko_render_ops LABELS unit TIMEOUT 600)
+genko_test(test_ink_edit SOURCES unit/test_ink_edit.cpp DEPS genko_test_support genko_render_ops LABELS unit TIMEOUT 1200)
 # color-mode@1, step three: the filters and the corrections of CMYK and Lab pages in their inks.
 genko_test(test_ink_filters SOURCES unit/test_ink_filters.cpp DEPS genko_test_support genko_render_ops LABELS unit TIMEOUT 600)
 # channels@1 (SPEC.md COLOR-03): a page's alpha and spot channels without Python — their JSON, the channel ops and their
@@ -177,7 +177,9 @@ genko_test(test_smart_contents SOURCES unit/test_smart_contents.cpp DEPS genko_t
 # PC3 A2 (SPEC.md COLOR-05「スマートフィルター」): a smart object's smart filters — set again from the contents, their order,
 # blend modes, opacities, all off and on, cleared, the selection their mask, following the transforms; at 200 dpi as
 # rasterize_layer and filter_raster (8, 16 bits, CMYK, Lab); a part the whole cut there; refused kinds; read back.
-genko_test(test_smart_filters SOURCES unit/test_smart_filters.cpp DEPS genko_test_support genko_render_ops genko_formats LABELS unit TIMEOUT 900)
+genko_test(test_smart_filters SOURCES unit/test_smart_filters.cpp DEPS genko_test_support genko_render_ops genko_formats LABELS unit TIMEOUT 2400)
+# (ASan with tests run beside it: about 15 minutes, past the 900 s it had; 113 s in Release)
+set_property(TEST test_smart_filters APPEND PROPERTY ENVIRONMENT "QTEST_FUNCTION_TIMEOUT=1700000")
 # PC3 A3 (SPEC.md COLOR-05「PSD のスマートオブジェクト」): a PSD's placed layer blocks and linked files (upstream's
 # linked.rs and blocks.rs tests, this build's SoLd and PlLd read back), a PSD or PSB as a smart object's file (16 and 32 bits
 # kept, CMYK inks, Lab, a blank merged picture), import_psd's smart objects drawn and written back byte for byte.
@@ -185,12 +187,12 @@ genko_test(test_psd_smart SOURCES unit/test_psd_smart.cpp DEPS genko_test_suppor
 # PC3 A4 (SPEC.md COLOR-05「スタックモード」): a smart object's stack mode — PhotoCraft's statistics, the shots combined in
 # the three ways (the median taking the passer-by out), a folder, hidden layers, a part the whole cut there, a file one
 # layer, rasterized; rasterize_lines drawing the lines as the page drew them; a tone rasterized on precise and ink pages.
-genko_test(test_smart_stack SOURCES unit/test_smart_stack.cpp DEPS genko_test_support genko_render_ops genko_formats LABELS unit TIMEOUT 900)
+genko_test(test_smart_stack SOURCES unit/test_smart_stack.cpp DEPS genko_test_support genko_render_ops genko_formats LABELS unit TIMEOUT 1800)
 # PC3 A5 (SPEC.md COLOR-05「スマートオブジェクトの上の変形」): a smart object's warp kept in its contents' mm and undone
 # without loss (PhotoCraft's smart_object_warp_is_lossless), a new warp in place of the old, a quad its corners, perspective
 # and puppet warps and Liquify its smart filters (as the ops bend a paint layer; set again), its filter mask moved with it,
 # the three ways and a part the whole cut there, its warp to a PSD and back, what a reader refuses.
-genko_test(test_smart_warp SOURCES unit/test_smart_warp.cpp DEPS genko_test_support genko_render_ops genko_formats LABELS unit TIMEOUT 900)
+genko_test(test_smart_warp SOURCES unit/test_smart_warp.cpp DEPS genko_test_support genko_render_ops genko_formats LABELS unit TIMEOUT 1800)
 
 # core/pyre's own bounds (Python 3.12's re, ported; SPEC COMP-01a): a search that backtracks without end stopped when its
 # steps are spent, groups more than 200 deep refused, replace_text refused without a change; without Python.
@@ -507,7 +509,7 @@ if(GENKO_BUILD_APP)
   genko_test(test_material_preview_cache SOURCES unit/test_material_preview_cache.cpp DEPS genko_app LABELS unit)
   genko_test(test_migration SOURCES unit/test_migration.cpp DEPS genko_app LABELS unit)
   # (about 60 s in Release; under ASan about 270 s, close to the 300 it had: a guard against a hang, as the GUI tests near it)
-  genko_test(test_gui_color SOURCES gui/test_gui_color.cpp DEPS genko_app ZLIB::ZLIB GUI TIMEOUT 900)
+  genko_test(test_gui_color SOURCES gui/test_gui_color.cpp DEPS genko_app ZLIB::ZLIB GUI TIMEOUT 1800)
   # the layer panel: its list, buttons, settings, menus (several at once, masks, effects), fill and correction layers,
   # a filter with its result on the page while its numbers change
   genko_test(test_gui_layers SOURCES gui/test_gui_layers.cpp DEPS genko_app GUI TIMEOUT 600)
@@ -604,7 +606,7 @@ if(GENKO_BUILD_APP)
   # the 52 commands of M2 and their groups: Python's words, keys and tips, the menus, and what each does
   genko_test(test_gui_actions SOURCES gui/test_gui_actions.cpp DEPS genko_app GUI TIMEOUT 900)
   # the canvas's gestures: the panel tool (cuts, gutters, corners, drawn panels) and the view
-  genko_test(test_gui_canvas SOURCES gui/test_gui_canvas.cpp DEPS genko_app GUI TIMEOUT 600)
+  genko_test(test_gui_canvas SOURCES gui/test_gui_canvas.cpp DEPS genko_app GUI TIMEOUT 1200)
   # saving and closing (AC-SAVE 2, 3, 4, 6, 8, 10): failures shown, the question before closing, recovery, retries
   genko_test(test_gui_save SOURCES gui/test_gui_save.cpp DEPS genko_app GUI TIMEOUT 900)
   target_compile_definitions(test_gui_save PRIVATE GENKO_CLI="$<TARGET_FILE:genko>")

@@ -80,7 +80,9 @@ QProcessEnvironment python_env(const QString& scratch);
 Run harness(const QStringList& args, const QString& scratch, int timeout_ms = 600000);
 
 // The genko command line of this build (GENKO_FAULT and GENKO_TEST_MIGRATE_HOOK from `env` only).
-Run run_genko(const QStringList& args, const QProcessEnvironment& env = {}, const QByteArray& input = {}, const QString& working_dir = {});
+// (`timeout_ms`: how long it may take before it is stopped as hung — the default for most commands)
+Run run_genko(const QStringList& args, const QProcessEnvironment& env = {}, const QByteArray& input = {}, const QString& working_dir = {},
+              int timeout_ms = 300000);
 // The environment for genko with GENKO_FAULT set to `fault` (empty: without it).
 QProcessEnvironment fault_env(const QString& fault);
 // The one JSON line a command printed (a string "not one line: …" when it printed something else).

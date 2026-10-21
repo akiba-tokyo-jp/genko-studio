@@ -43,7 +43,9 @@ class TestContractAdjust : public QObject {
     QString path(const QString& rel) const { return tmp_.path() + QStringLiteral("/") + rel; }
 
     Json genko(const QStringList& args, int* exit = nullptr) {
-        const auto ran = genko::test::run_genko(args);
+        // (a command over the eleven pages at print resolution takes minutes in ASan with tests run beside it: stopped as
+        // hung only past the function's own limit, QTEST_FUNCTION_TIMEOUT 1700 s)
+        const auto ran = genko::test::run_genko(args, {}, {}, {}, 1500000);
         if (exit != nullptr) *exit = ran.exit_code;
         if (!ran.finished) return Json{{"not_run", ran.described().toStdString()}};
         return genko::test::one_line(ran.out);
