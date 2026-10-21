@@ -663,3 +663,18 @@ if(GENKO_BUILD_APP)
   genko_test(test_soak_app SOURCES perf/test_soak_app.cpp DEPS genko_app LABELS perf TIMEOUT 10800)
   set_tests_properties(test_soak_app PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen;QTEST_FUNCTION_TIMEOUT=10000000")
 endif()
+
+# (VALIDATION's V3 runs ASan three tests at a time: the slowest functions of these tests come near QtTest's own limit
+# for one function, five minutes — test_smart_stack's tone on the precise and ink pages passed it, its test taking 753 s
+# in all the time before. A function of these may take as long as its test's own limit, which still catches a hang,
+# less 100 s.)
+foreach(slow test_contract_raster_ops test_smart_stack test_contract_ops_cli test_contract_ops test_contract_raster_cli test_gui_color
+        test_smart_warp test_precision_merge_controls test_ink_edit test_gui_canvas test_contract_studio test_contract_page_size
+        test_gui_book test_gui_layout test_contract_service test_adjust test_contract_pyre test_contract_psd test_color_model
+        test_ink_filters test_gui_look test_pyre test_masks test_contract_book test_gui_pen test_gui_lines)
+  if(TEST ${slow})
+    get_test_property(${slow} TIMEOUT limit)
+    math(EXPR function_ms "(${limit} - 100) * 1000")
+    set_property(TEST ${slow} APPEND PROPERTY ENVIRONMENT "QTEST_FUNCTION_TIMEOUT=${function_ms}")
+  endif()
+endforeach()
