@@ -109,7 +109,8 @@ def run(args):
     out.mkdir(parents=True, exist_ok=True)
     state = {'preset': args.preset, 'phase': plan['phase'], 'suite': row['suite'], 'selected': row['tests'],
              'excluded_contracts': row['excluded_contracts'], 'started_at': now(), 'status': 'running',
-             'source_before': source_pins(root), 'cli23': 'not_run', 'performance': 'not_run', 'plan_hash': plan_hash(plan)}
+             'source_before': source_pins(root), 'cli23': 'not_run', 'performance': 'not_run', 'plan_hash': plan_hash(plan),
+             'ctest_parallel': args.jobs}
     result_file = out / 'result.json'
     result_file.write_text(json.dumps(state, ensure_ascii=False, indent=2), encoding='utf-8')
     failures = []
@@ -137,7 +138,8 @@ def run(args):
             file.unlink(missing_ok=True)  # 前回ログを再利用しない。
         log_file = out / 'ctest-output.log'
         with log_file.open('wb') as log:
-            completed = subprocess.run(['ctest', '--test-dir', str(build), '--parallel', '1', '-R', regex, '-V', '--no-tests=error', '--output-on-failure'], cwd=root, stdout=log, stderr=subprocess.STDOUT)
+            # (-V prefixes each line with its test's number, so the tests run side by side are still read one by one)
+            completed = subprocess.run(['ctest', '--test-dir', str(build), '--parallel', str(args.jobs), '-R', regex, '-V', '--no-tests=error', '--output-on-failure'], cwd=root, stdout=log, stderr=subprocess.STDOUT)
         state['ctest_exit'] = completed.returncode
         qt_logs = None
         if args.preset.startswith('windows'):
@@ -234,7 +236,11 @@ def main():
     parser.add_argument('--build')
     parser.add_argument('--output', required=True)
     parser.add_argument('--pair', action='store_true')
+    # 試験を同時に流す数（利用者決定: 試験の資源上限と並列度は固定しない。result.json の ctest_parallel に残す）
+    parser.add_argument('--jobs', type=int, default=1)
     args = parser.parse_args()
+    if args.jobs < 1:
+        parser.error('--jobsは1以上です')
     if args.pair:
         plan = json.loads(Path(args.plan).read_text(encoding='utf-8'))
         result = pair_results(args.output, plan)
