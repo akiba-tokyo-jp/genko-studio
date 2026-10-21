@@ -150,8 +150,10 @@ private:
 
     void dispatch_request(Inbound message, const std::string& era);
     void dispatch_notification(const Json& body);
+    // `initialized`, `version`: the handshake era's state as the request was read (the SDK's session gates a request on
+    // receipt, not when its thread starts)
     void run_request(Json id, std::string method, Json params, std::vector<std::string> odd, std::shared_ptr<InFlight> flight,
-                     std::string era);
+                     std::string era, bool initialized, std::string version);
     void finish(const std::shared_ptr<InFlight>& flight, const Json& reply);
 
     const Engine& engine_;

@@ -22,6 +22,7 @@ add_dependencies(genko_test_support genko genko_lock_helper genko_argv_helper)
 genko_test(test_buildinfo SOURCES unit/test_buildinfo.cpp DEPS genko_api LABELS unit)
 # The HTTP server of `genko serve` and `genko mcp --transport streamable-http` (M5③): errors, the head before the body.
 genko_test(test_http_server SOURCES unit/test_http_server.cpp DEPS genko_api Qt6::Network LABELS unit)
+genko_test(test_mcp_connection SOURCES unit/test_mcp_connection.cpp DEPS genko_api LABELS unit)
 genko_test(test_json SOURCES unit/test_json.cpp DEPS genko_test_support LABELS unit)
 genko_test(test_pynum SOURCES unit/test_pynum.cpp DEPS genko_test_support LABELS unit)
 genko_test(test_model SOURCES unit/test_model.cpp DEPS genko_test_support LABELS unit)
