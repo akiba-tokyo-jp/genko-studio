@@ -935,7 +935,8 @@ private slots:
     }
 
     // A whole kind's base box on a 32-bit precise layer is read in place (design 4.3: no float copy held in the imaging
-    // budget), the same bytes as a copy of it; on 16 bits it is copied, held, and refused past the budget.
+    // budget), the same bytes as a copy of it; on 16 bits it is copied, held, and refused past the budget — a CMYK page's
+    // 16-bit plates too (their floats, five a pixel).
     void aWholeKindReadsA32BitLayerInPlace() {
         const std::string f32 = precise(600, 400, pattern(600, 400), true);
         const std::string u16 = precise(600, 400, pattern(600, 400), false);
@@ -966,6 +967,20 @@ private slots:
                 for (unsigned c = 0; c < 4; ++c) QVERIFY2(std::fabs(a[c] - b[c]) < 1e-4, qPrintable(QStringLiteral("(%1, %2)").arg(x).arg(y)));
             }
         QCOMPARE(pixel(got, 10, 10), pixel(f32, 10, 10));
+        // (a CMYK page of 128 × 128 at 16 bits: its whole base box as floats — 327 680 bytes — past a budget of 250 000; a
+        // kind of a margin's tiles of 32 within it — a window and a tile, about 212 000 bytes)
+        const auto cmyk = ink_page("cmyk", [](std::uint32_t x, std::uint32_t y, unsigned c) { return ((x * 7 + y * 3 + c * 11) % 64) / 63.0; }, 128);
+        const core::InkPixels inks = inks_of(cmyk);
+        const Rect grid{0, 0, 128, 128};
+        {
+            const render::ImageAllocationBudget budget{250'000};
+            const auto whole = render::fx::ink_surface(inks, *cmyk.page(0).color);
+            QVERIFY_THROWS_EXCEPTION(core::OpError, render::fx::apply(*whole, kernel("distort_twirl"), normal("distort_twirl", twirl), core::FilterInks::Plates, grid, nullptr,
+                                                                      1, nullptr, {0, 1}));
+            const auto tiled = render::fx::ink_surface(inks, *cmyk.page(0).color);
+            render::fx::apply(*tiled, kernel("stylize_find_edges"), normal("stylize_find_edges", Json::object()), core::FilterInks::LightnessAndColour, grid, nullptr, 1,
+                              nullptr, {32, 1});
+        }
     }
 
     // How heavy (render::fx::work): 油彩 on a B4 page at 600 dpi is heavy (a thread of its own, 中止), メゾティント on an 8-bit
