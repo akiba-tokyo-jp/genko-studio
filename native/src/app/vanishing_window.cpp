@@ -397,6 +397,34 @@ private:
         }
     }
 
+    // A layer of the page alone at the window's resolution, cut to what shows of it (none: nothing shows).
+    std::optional<render::resample::Plane> small_picture(const core::Document& doc, const core::Layer& layer) const {
+        render::Image rgba;
+        try {
+            rgba = render::layer_image(*call_.page, layer, dpi_, &doc).convert("RGBA");
+        } catch (const std::exception&) {
+            return std::nullopt;
+        }
+        const std::string bytes = rgba.tobytes();
+        const int w = rgba.width();
+        int x0 = w, y0 = rgba.height(), x1 = 0, y1 = 0;
+        for (int y = 0; y < rgba.height(); ++y)
+            for (int x = 0; x < w; ++x) {
+                if (bytes[(std::size_t(y) * std::size_t(w) + std::size_t(x)) * 4 + 3] == 0) continue;
+                x0 = std::min(x0, x);
+                y0 = std::min(y0, y);
+                x1 = std::max(x1, x + 1);
+                y1 = std::max(y1, y + 1);
+            }
+        if (x1 <= x0 || y1 <= y0) return std::nullopt;
+        render::resample::Plane out(x1 - x0, y1 - y0, 4, true);
+        for (int y = y0; y < y1; ++y)
+            for (int x = x0; x < x1; ++x)
+                for (int c = 0; c < 4; ++c)
+                    out.at(x - x0, y - y0)[c] = static_cast<unsigned char>(bytes[(std::size_t(y) * std::size_t(w) + std::size_t(x)) * 4 + std::size_t(c)]) / 255.0f;
+        return out;
+    }
+
     // What the pastes and strokes make, on the page's picture (render/vanishing on it).
     void preview() {
         const std::array<double, 4> box{0, 0, width_mm_, height_mm_};
@@ -416,24 +444,11 @@ private:
                 for (const core::Layer& l : call_.page->layers)
                     if (l.id == id) layer = &l;
                 if (layer == nullptr) continue;
-                const render::image_ops::Pixels source = render::image_ops::shown_layer_pixels(doc, *call_.page, *layer);
-                const std::vector<render::image_ops::Rgba> rgba = render::image_ops::rgba_of(source);
-                int x0 = static_cast<int>(source.width()), y0 = static_cast<int>(source.height()), x1 = 0, y1 = 0;
-                for (std::uint32_t y = 0; y < source.height(); ++y)
-                    for (std::uint32_t x = 0; x < source.width(); ++x) {
-                        if (!(rgba[std::size_t(y) * source.width() + x][3] > 0.0f)) continue;
-                        x0 = std::min(x0, int(x));
-                        y0 = std::min(y0, int(y));
-                        x1 = std::max(x1, int(x) + 1);
-                        y1 = std::max(y1, int(y) + 1);
-                    }
-                if (x1 <= x0 || y1 <= y0) continue;
-                render::resample::Plane picture(x1 - x0, y1 - y0, 4, true);
-                for (int y = y0; y < y1; ++y)
-                    for (int x = x0; x < x1; ++x) {
-                        const auto& q = rgba[std::size_t(y) * source.width() + std::size_t(x)];
-                        std::copy(q.begin(), q.end(), picture.at(x - x0, y - y0));
-                    }
+                // (the layer drawn alone at the window's resolution, once: what shows of it)
+                auto cached = pictures_.find(id);
+                if (cached == pictures_.end()) cached = pictures_.emplace(id, small_picture(doc, *layer)).first;
+                if (!cached->second) continue;
+                const render::resample::Plane& picture = *cached->second;
                 const std::size_t plane = p["plane"].get<std::size_t>();
                 const render::Box out = render::vanishing::paste_box(*scene_, plane, per_mm, grid);
                 const auto made = render::vanishing::pasted(*scene_, plane, picture, {p["at"][0].get<double>(), p["at"][1].get<double>()},
@@ -483,6 +498,7 @@ private:
     Json strokes_ = Json::array();
     std::optional<double> focal_mm_;
     std::optional<render::vanishing::Scene> scene_;
+    std::map<std::string, std::optional<render::resample::Plane>> pictures_;
     int chosen_ = -1;
     std::vector<XY> clicks_;
     std::optional<std::pair<std::size_t, std::size_t>> moving_;

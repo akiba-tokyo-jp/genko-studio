@@ -21,6 +21,7 @@
 #include <functional>
 #include <sstream>
 #include <string>
+#include <string_view>
 #include <vector>
 
 #include "core/base64.hpp"
@@ -124,7 +125,7 @@ std::string refusal(const core::Document& doc, const Json& op) {
 }
 
 core::Document blank(double w_mm = kInch, double h_mm = kInch, double dpi = 200) {
-    auto doc = core::new_episode("レンズ", core::Num(1), 1, core::PageSpec::custom(w_mm, h_mm, 20, 20, 1, 2, 2, 2, 2, dpi, "color"));
+    auto doc = core::new_episode("レンズ", core::Num(1), 1, core::PageSpec::custom(w_mm, h_mm, w_mm - 2, h_mm - 2, 1, 0.5, 0.5, 0.5, 0.5, dpi, "color"));
     auto& p = doc.edit_page(0);
     p.numero = false;
     p.frames.clear();
@@ -132,10 +133,10 @@ core::Document blank(double w_mm = kInch, double h_mm = kInch, double dpi = 200)
     return doc;
 }
 
-const core::Layer& layer_of(const core::Document& doc, const std::string& id, std::size_t page = 0) {
+const core::Layer& layer_of(const core::Document& doc, std::string_view id, std::size_t page = 0) {
     for (const auto& layer : doc.page(page).layers)
         if (layer.id == id) return layer;
-    throw core::Error("value", "no layer " + id);
+    throw core::Error("value", "no layer " + std::string(id));
 }
 
 // A page of w × h pixels at 200 dpi with 8-bit paint layers (id → picture; each the page's size).
@@ -752,8 +753,8 @@ private slots:
             QCOMPARE(after.size(), (render::Size{300, 200}));
             const auto h = render::vanishing::homography(quad);
             const auto [mx, my] = h->apply(0.5, 0.2);
-            const auto red = after.getpixel(static_cast<int>(mx * 300 / 25.4), static_cast<int>(my * 300 / 25.4));
-            QVERIFY2(red[0] > 230 && red[1] < 30, "the paste on the picture's own grid");
+            const auto got = after.getpixel(static_cast<int>(mx * 300 / 25.4), static_cast<int>(my * 300 / 25.4));
+            QVERIFY2(got[0] > 230 && got[1] < 30, "the paste on the picture's own grid");
         }
         // inside a selection: the left half only
         const auto doc = eight_page(120, 120, {{"floor", render::Image::create("RGBA", render::Size{120, 120}, render::Ink{64, 64, 64, 255})},
