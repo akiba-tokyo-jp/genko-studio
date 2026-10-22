@@ -1,6 +1,7 @@
 #pragma once
 
 #include <array>
+#include <functional>
 #include <memory>
 #include <cstddef>
 #include <optional>
@@ -53,6 +54,8 @@ std::optional<std::vector<double>> layer_inks_at(const core::Page& page, const c
 // erase / erase_raster: the alpha loses what the 8-bit eraser's mask takes (a hard eraser clears the pixel).
 std::string erase(const core::Page& page, const core::Layer& layer, const core::PenPoints& points, double width_mm,
                   std::string_view texture, const std::string& seed);
+// brushes@1 (PC4 E1): erase by a brush — the alpha loses what `mask_of` (an "L" mask of the page at a resolution) takes.
+std::string erase_masked(const core::Page& page, const core::Layer& layer, const std::function<Image(Size page_size, int dpi)>& mask_of);
 // delete_area: the area's pixels cleared (its soft edge partly).
 std::string delete_area(const core::Page& page, const core::Layer& layer, const core::Json& area);
 // transform_area: the area's pixels lifted, resampled through m (mm) and laid over what stays; with a warp, the area's

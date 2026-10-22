@@ -60,6 +60,10 @@ public:
     // PC2d: a layer's picture (the canvas's size; `mask` ("L"): its mask, which multiplies its alpha).
     void blend(const ColorPicture& picture, double opacity, bool clip, std::string_view mode = "normal", const Image* mask = nullptr);
     void blend_stroke(const Image& mask, const core::Json& color, double opacity);
+    // brushes@1 (PC4 E1): a dab brush's line by its coverage in float (the canvas's size, row by row: no steps in a soft
+    // brush), in `color`, or each pixel in its own straight sRGB colour (`colours`: the colour dynamics).
+    void blend_stroke(const std::vector<float>& cover, const core::Json& color, double opacity,
+                      const std::vector<std::array<float, 3>>* colours = nullptr);
     // PC2d: what sets nothing for the next layer to clip to (a tone layer: the 8-bit page forgets the alpha before).
     void forget_clip();
     // PC2d: a correction that moves shapes, worked on the canvas's own values (color_raster's): `changed` (the space's

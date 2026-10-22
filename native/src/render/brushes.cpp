@@ -418,11 +418,13 @@ void follow_book(const Json& definitions) {
 
 void register_book(const core::Document& doc) {
     paper::keep_all(doc.papers);  // (first: a brush is never known before its paper's picture)
+    dabs::keep_pictures(doc.brush_tips);  // (brushes@1: its dab brushes' tips and textures)
     register_book(doc.brush_custom);
 }
 
 void follow_book(const core::Document& doc) {
     paper::keep_all(doc.papers);
+    dabs::keep_pictures(doc.brush_tips);
     follow_book(doc.brush_custom);
 }
 
@@ -680,11 +682,65 @@ core::Json with_paper_picture(const core::Json& definition) {
     return out;
 }
 
+namespace {
+
+// brushes@1 (PC4 E1): a dab brush's line — its dabs laid (render/dabs/lines.hpp), the coverage in 8 bits (rounded half
+// up), then as every brush: the light touch's shading, the paper.
+std::optional<Coverage> draw_dabs(const Brush& b, Size size, const core::PenPoints& points, int dpi, double width_mm, std::string_view seed,
+                                  std::span<const double> rotation, double pressure_opacity, const dabs::LineInputs* inputs,
+                                  std::optional<Box> within) {
+    if (points.empty()) return std::nullopt;
+    const dabs::LineInputs mouse;
+    const auto laid = dabs::cover(*b.dabs, width_mm, seed, points, rotation, inputs != nullptr ? *inputs : mouse, dpi, size, within);
+    if (!laid) return std::nullopt;
+    const Box box = laid->box;
+    std::vector<float> values;
+    laid->fill(box, values);
+    std::string bytes(values.size(), '\0');
+    for (std::size_t i = 0; i < values.size(); ++i) bytes[i] = static_cast<char>(static_cast<int>(values[i] * 255.0f + 0.5f));
+    Coverage out{Image::frombytes("L", Size{box.width(), box.height()}, bytes), Point{box.x0, box.y0}, laid, true};
+    if (pressure_opacity > 0) {
+        const Image light = shade(points, out.mask.size(), out.origin, dpi, width_mm, py_min(1.0, pressure_opacity));
+        out.mask = chops::multiply(out.mask, light);
+        out.fine = false;
+    }
+    if (b.paper) {
+        paper::apply(out.mask, out.origin, dpi, *b.paper, seed, points.front().x, points.front().y);
+        out.fine = false;
+    }
+    return out;
+}
+
+// A dab brush's line's box: its points, with the farthest its dabs reach (the line's width at full pressure — the
+// dynamics only make a dab smaller —, a sampled tip's corners, the scatter) and the pixels' rounding.
+std::optional<Box> dab_extent(const Brush& b, Size size, const core::PenPoints& points, int dpi, double width_mm) {
+    if (points.empty()) return std::nullopt;
+    const core::DabSettings& s = *b.dabs;
+    const double radius = std::max(width_mm / 2.0, 0.5 * dabs::kPx);
+    double reach = s.tip.empty() ? radius : radius * 1.4142135623730951;
+    if (s.scatter.enabled) reach += s.scatter.scatter.jitter * radius * (s.scatter.both_axes ? 1.4142135623730951 : 1.0);
+    double x0 = points.front().x, x1 = x0, y0 = points.front().y, y1 = y0;
+    for (const core::PenPoint& p : points) {
+        x0 = std::min(x0, p.x);
+        x1 = std::max(x1, p.x);
+        y0 = std::min(y0, p.y);
+        y1 = std::max(y1, p.y);
+    }
+    const double k = dpi / 25.4;
+    const auto at = [](double v) { return static_cast<int>(std::clamp(v, -2.0e9, 2.0e9)); };
+    const Box box{std::max(0, at(std::floor((x0 - reach) * k)) - 3), std::max(0, at(std::floor((y0 - reach) * k)) - 3),
+                  std::min(size.width, at(std::ceil((x1 + reach) * k)) + 4), std::min(size.height, at(std::ceil((y1 + reach) * k)) + 4)};
+    if (box.x1 <= box.x0 || box.y1 <= box.y0) return std::nullopt;
+    return box;
+}
+
+}  // namespace
+
 std::optional<Coverage> draw(Size size, const core::PenPoints& points, int dpi, double width_mm, std::string_view kind,
-                             std::string_view seed, std::span<const double> rotation, double pressure_opacity) {
+                             std::string_view seed, std::span<const double> rotation, double pressure_opacity, const dabs::LineInputs* inputs,
+                             std::optional<Box> within) {
     const Brush b = brush(kind);
-    // (brushes@1: a dab brush's line is laid in dabs, PC4 E1 — never drawn as another brush's in the meantime)
-    if (b.dabs) throw NotYetPorted("brushes@1: the dab brush " + b.key);
+    if (b.dabs) return draw_dabs(b, size, points, dpi, width_mm, seed, rotation, pressure_opacity, inputs, within);
     auto drawn = draw_plain(b, size, points, dpi, width_mm, seed, rotation);
     if (drawn && pressure_opacity > 0) {
         const Image light = shade(points, drawn->mask.size(), drawn->origin, dpi, width_mm, py_min(1.0, pressure_opacity));
@@ -696,9 +752,36 @@ std::optional<Coverage> draw(Size size, const core::PenPoints& points, int dpi, 
 }
 
 std::optional<Box> extent(Size size, const core::PenPoints& points, int dpi, double width_mm, std::string_view kind) {
-    const auto e = extent_of(brush(kind), size, points, dpi, width_mm);
+    const Brush b = brush(kind);
+    if (b.dabs) return dab_extent(b, size, points, dpi, width_mm);
+    const auto e = extent_of(b, size, points, dpi, width_mm);
     if (!e) return std::nullopt;
     return e->box;
 }
+
+dabs::LineInputs line_inputs(const core::Stroke& stroke, const std::vector<std::int64_t>& rgb) {
+    dabs::LineInputs in;
+    in.tilt = stroke.tilt;
+    in.time_ms = stroke.time_ms;
+    in.wheel = stroke.wheel;
+    in.flow = stroke.flow;
+    const auto byte = [&](std::size_t k) { return static_cast<float>(std::clamp<std::int64_t>(rgb.size() > k ? rgb[k] : 0, 0, 255)) / 255.0f; };
+    in.color = {byte(0), byte(1), byte(2)};
+    if (stroke.color_rgb && stroke.color_rgb->is_object() && stroke.color_rgb->contains("values")) {
+        const Json& v = (*stroke.color_rgb)["values"];
+        if (v.is_array() && v.size() == 3 && std::all_of(v.begin(), v.end(), [](const Json& x) { return x.is_number(); })) {
+            in.color = {v[0].get<float>(), v[1].get<float>(), v[2].get<float>()};
+        }
+    }
+    if (stroke.background_rgb && stroke.background_rgb->size() == 3) {
+        const auto& bg = *stroke.background_rgb;
+        in.background = std::array<float, 3>{static_cast<float>(std::clamp<std::int64_t>(bg[0], 0, 255)) / 255.0f,
+                                             static_cast<float>(std::clamp<std::int64_t>(bg[1], 0, 255)) / 255.0f,
+                                             static_cast<float>(std::clamp<std::int64_t>(bg[2], 0, 255)) / 255.0f};
+    }
+    return in;
+}
+
+bool is_dab(std::string_view kind) { return brush(kind).dabs.has_value(); }
 
 }  // namespace genko::render::brushes

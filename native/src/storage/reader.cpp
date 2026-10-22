@@ -93,13 +93,13 @@ constexpr std::array<std::string_view, 5> kPlacedOnlyKeys{"frame_id", "placement
 constexpr std::array<std::string_view, 5> kMaskKeys{"enabled", "asset",
                                                     // masks@1 (PC3)
                                                     "linked", "density", "feather_mm"};
-constexpr std::array<std::string_view, 14> kPackedStrokeKeys{"id", "kind", "width_mm", "xy", "p", "rgb", "opacity", "r", "po", "color_rgb",
+constexpr std::array<std::string_view, 15> kPackedStrokeKeys{"id", "kind", "width_mm", "xy", "p", "rgb", "opacity", "r", "po", "color_rgb",
                                                              // brushes@1 (PC4)
-                                                             "tilt", "time_ms", "wheel", "flow"};
-constexpr std::array<std::string_view, 15> kDictStrokeKeys{"id", "points", "pressure", "width_mm", "kind", "rgb",
+                                                             "tilt", "time_ms", "wheel", "flow", "background_rgb"};
+constexpr std::array<std::string_view, 16> kDictStrokeKeys{"id", "points", "pressure", "width_mm", "kind", "rgb",
                                                            "opacity", "rotation", "po", "pressure_opacity", "color_rgb",
                                                            // brushes@1 (PC4)
-                                                           "tilt", "time_ms", "wheel", "flow"};
+                                                           "tilt", "time_ms", "wheel", "flow", "background_rgb"};
 
 template <std::size_t N>
 bool in(const std::array<std::string_view, N>& keys, std::string_view key) {

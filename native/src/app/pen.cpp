@@ -2,7 +2,10 @@
 
 #include <QSettings>
 #include <QStringList>
+#include <QPointingDevice>
 #include <QTabletEvent>
+
+#include <algorithm>
 
 #include <cmath>
 
@@ -21,15 +24,23 @@ PenSample tablet_sample(double x_mm, double y_mm, const QTabletEvent& event) {
     sample.y_mm = packed.y;
     sample.pressure = packed.p.value_or(0.7);
     sample.rotation = event.rotation();
+    sample.tilt_x = std::clamp(static_cast<double>(event.xTilt()), -90.0, 90.0);
+    sample.tilt_y = std::clamp(static_cast<double>(event.yTilt()), -90.0, 90.0);
+    const QPointingDevice* device = event.pointingDevice();
+    if (device != nullptr && device->capabilities().testFlag(QInputDevice::Capability::TangentialPressure)) {
+        sample.wheel = std::clamp((event.tangentialPressure() + 1.0) / 2.0, 0.0, 1.0);
+    }
+    sample.time_ms = static_cast<double>(event.timestamp());
     return sample;
 }
 
-PenSample mouse_sample(double x_mm, double y_mm) {
+PenSample mouse_sample(double x_mm, double y_mm, double time_ms) {
     const core::PenPoint packed = core::pack_point(x_mm, y_mm, std::nullopt);
     PenSample sample;
     sample.x_mm = packed.x;
     sample.y_mm = packed.y;
     sample.pressure = packed.p.value_or(0.7);
+    sample.time_ms = time_ms;
     return sample;
 }
 
@@ -60,6 +71,11 @@ PenSettings PenSettings::load() {
     pen.speed_steady = store->value(prefix + QStringLiteral("speed_steady"), false).toString().toLower() == QLatin1String("true");
     pen.post_fit = store->value(prefix + QStringLiteral("post_fit"), 0.0).toDouble();
     pen.snap_lines = store->value(prefix + QStringLiteral("snap_lines"), 0.0).toDouble();
+    pen.flow = std::clamp(store->value(prefix + QStringLiteral("flow"), 1.0).toDouble(), 0.01, 1.0);
+    pen.blend = store->value(QStringLiteral("brush/blend"), QStringLiteral("normal")).toString().toStdString();
+    pen.smoothing = store->value(QStringLiteral("brush/smoothing"), QStringLiteral("stabilize")).toString().toStdString();
+    if (pen.smoothing != "string" && pen.smoothing != "catch_up") pen.smoothing = "stabilize";
+    pen.smoothing_amount = std::clamp(store->value(QStringLiteral("brush/smoothing_amount"), 0.5).toDouble(), 0.0, 1.0);
     const QStringList rgb = store->value(QStringLiteral("brush/rgb"), QStringLiteral("20,20,20")).toString().split(QLatin1Char(','));
     if (rgb.size() >= 3) {
         bool ok = true;
@@ -100,6 +116,12 @@ core::Json PenSettings::stroke_fields() const {
     if (speed_steady && stabilize != 0) out["stabilize_speed"] = true;
     if (post_fit > 0) out["post_fit"] = core::py_round(post_fit, 2);
     if (snap_lines > 0) out["snap_lines_mm"] = core::py_round(snap_lines, 2);
+    // brushes@1 (PC4 E1): a dab brush's flow; the window's own smoothing (its line comes smoothed: no stabilize)
+    if (b.dabs && flow < 1.0) out["flow"] = core::py_round(flow, 2);
+    if (smoothing != "stabilize") {
+        out["stabilize"] = 0;
+        out.erase("stabilize_speed");
+    }
     return out;
 }
 

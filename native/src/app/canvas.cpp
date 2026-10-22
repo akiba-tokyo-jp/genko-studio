@@ -466,7 +466,7 @@ void PageCanvas::live_sync() {
 
 void PageCanvas::live_draw() {
     const core::Page* p = page();
-    if (p == nullptr || tool_ != QLatin1String("pen") || !pen_layer_ || stroke_.empty()) return;
+    if (p == nullptr || !draws_line(tool_) || !pen_layer_ || stroke_.empty()) return;
     const core::Layer* layer = nullptr;
     for (const core::Layer& item : p->layers) {
         if (item.id == *pen_layer_) layer = &item;
@@ -480,7 +480,7 @@ void PageCanvas::live_draw() {
             live_snapped_ = false;
         }
         if (!live_) live_ = std::make_unique<LiveInk>(doc_, *p, *layer, wanted_dpi(), pen_fields_, stroke_id_);
-        live_->follow(stroke_, turns_);
+        live_->follow(stroke_, turns_, LiveInputs{tilts_, times_, wheels_});
         return;
     }
     // snapped to a ruler, with its symmetry copies: drawn whole again each time (Python's LiveInk.redraw)

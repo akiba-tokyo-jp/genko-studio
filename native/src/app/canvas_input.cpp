@@ -35,9 +35,23 @@ bool is_drawing_tool(const QString& tool) { return PageCanvas::is_stroke_tool(to
 
 // --- the line being drawn ------------------------------------------------------------------------------------------
 
-void PageCanvas::begin_stroke(const QPointF& mm, double pressure, double rotation, bool tablet) {
-    stroke_ = {core::PenPoint{mm.x(), mm.y(), pressure}};
-    turns_ = {rotation};
+void PageCanvas::begin_stroke(const QPointF& mm, double pressure, double rotation, bool tablet, const PenSample& sample) {
+    stroke_.clear();
+    turns_.clear();
+    tilts_.clear();
+    times_.clear();
+    wheels_.clear();
+    stroke_t0_ = sample.time_ms;
+    smoother_.reset();
+    if (draws_line(tool_) && smoothing != QLatin1String("stabilize") && smoothing_amount > 0) {
+        // (brushes@1, PC4 E1: the smoothing's way the window keeps — its string 100 pixels of the screen)
+        render::dabs::Smoothing how;
+        how.amount = smoothing_amount;
+        how.pulled_string = smoothing == QLatin1String("string");
+        how.catch_up = smoothing == QLatin1String("catch_up");
+        smoother_.emplace(how, 100.0 / std::max(view_.scale, 1e-6));
+    }
+    add_point(core::PenPoint{mm.x(), mm.y(), pressure}, rotation, sample);
     stroke_tablet_ = tablet;
     stroke_id_ = core::new_id();  // (the id the line will get: its grain and scatter are drawn with it now)
     live_.reset();
@@ -48,22 +62,52 @@ void PageCanvas::begin_stroke(const QPointF& mm, double pressure, double rotatio
     update();
 }
 
-void PageCanvas::extend_stroke(const QPointF& mm, double pressure, double rotation, bool straight) {
-    const bool redrawn = straight && tool_ == QLatin1String("pen");
+void PageCanvas::add_point(const core::PenPoint& p, double rotation, const PenSample& sample) {
+    const auto keep = [&](const core::PenPoint& q, double turn, double tx, double ty, double wheel, double time) {
+        stroke_.push_back(q);
+        turns_.push_back(turn);
+        tilts_.push_back(tx);
+        tilts_.push_back(ty);
+        wheels_.push_back(wheel);
+        times_.push_back(std::max(0.0, time));
+    };
+    const double time = sample.time_ms - stroke_t0_;
+    if (!smoother_) {
+        keep(p, rotation, sample.tilt_x, sample.tilt_y, sample.wheel, time);
+        return;
+    }
+    render::dabs::InputPoint in;
+    in.x = p.x;
+    in.y = p.y;
+    in.pressure = p.p.value_or(1.0);
+    in.tilt_x = sample.tilt_x;
+    in.tilt_y = sample.tilt_y;
+    in.rotation = rotation;
+    in.wheel = sample.wheel;
+    in.time = time;
+    std::vector<render::dabs::InputPoint> out;
+    smoother_->push(in, out);
+    for (const render::dabs::InputPoint& q : out) keep(core::PenPoint{q.x, q.y, p.p ? std::optional<double>(q.pressure) : std::nullopt}, q.rotation, q.tilt_x, q.tilt_y, q.wheel, q.time);
+}
+
+void PageCanvas::extend_stroke(const QPointF& mm, double pressure, double rotation, bool straight, const PenSample& sample) {
+    const bool redrawn = straight && draws_line(tool_);
     const QPointF before(stroke_.back().x, stroke_.back().y);
     if (redrawn) {
         stroke_ = {stroke_.front(), core::PenPoint{mm.x(), mm.y(), pressure}};  // Shift: a straight line
         turns_ = {turns_.front(), rotation};
+        tilts_ = {tilts_[0], tilts_[1], sample.tilt_x, sample.tilt_y};
+        wheels_ = {wheels_.front(), sample.wheel};
+        times_ = {times_.front(), std::max(0.0, sample.time_ms - stroke_t0_)};
         live_.reset();
     } else {
-        stroke_.push_back(core::PenPoint{mm.x(), mm.y(), pressure});
-        turns_.push_back(rotation);
+        add_point(core::PenPoint{mm.x(), mm.y(), pressure}, rotation, sample);
     }
     const bool had_live = live_ != nullptr;
     live_sync();
     // only the part of the screen the line changed is painted again (the rest of the page is as it was); a line
     // snapped to a ruler moves as a whole, so it is painted again everywhere
-    if (live_snapped_ || (!live_ && (tool_ == QLatin1String("pen") || tool_ == QLatin1String("eraser")) && snapped_preview_applies())) {
+    if (live_snapped_ || (!live_ && (draws_line(tool_) || tool_ == QLatin1String("eraser")) && snapped_preview_applies())) {
         update();
         return;
     }
@@ -87,15 +131,35 @@ void PageCanvas::extend_stroke(const QPointF& mm, double pressure, double rotati
 
 void PageCanvas::finish_stroke() {
     if (stroke_.empty()) return;
+    if (smoother_) {  // (the smoothing's catch-up to the pen's last point)
+        std::vector<render::dabs::InputPoint> out;
+        smoother_->finish(out);
+        for (const render::dabs::InputPoint& q : out) {
+            stroke_.push_back(core::PenPoint{q.x, q.y, stroke_.back().p ? std::optional<double>(q.pressure) : std::nullopt});
+            turns_.push_back(q.rotation);
+            tilts_.push_back(q.tilt_x);
+            tilts_.push_back(q.tilt_y);
+            wheels_.push_back(q.wheel);
+            times_.push_back(q.time);
+        }
+        smoother_.reset();
+    }
     core::PenPoints points = std::move(stroke_);
     std::vector<double> turns = std::move(turns_);
+    std::vector<double> tilts = std::move(tilts_), times = std::move(times_), wheels = std::move(wheels_);
     stroke_.clear();
     turns_.clear();
+    tilts_.clear();
+    times_.clear();
+    wheels_.clear();
     if (points.size() == 1) {
         points.push_back(core::PenPoint{points[0].x + 0.01, points[0].y + 0.01, points[0].p});  // a tap: a dot with the pen
+        if (tilts.size() == 2) tilts = {tilts[0], tilts[1], tilts[0], tilts[1]};
+        if (times.size() == 1) times.push_back(times.back());
+        if (wheels.size() == 1) wheels.push_back(wheels.back());
     }
     if (turns.size() == 1) turns.push_back(turns.back());
-    StrokeInput input{std::move(points), std::move(turns), stroke_id_, tool_};
+    StrokeInput input{std::move(points), std::move(turns), stroke_id_, tool_, std::move(tilts), std::move(times), std::move(wheels)};
     committing_ = std::move(live_);
     live_copies_.clear();  // (the copies are drawn by their own tiles once the window has added them)
     live_snapped_ = false;
@@ -115,8 +179,10 @@ void PageCanvas::update_cursor(std::optional<QPointF> pos) {
     } else if (space_) {
         setCursor(Qt::OpenHandCursor);
     } else if (is_drawing_tool(tool_)) {
-        // the brush's circle is drawn on the page (paint_page); the pointer itself as chosen in 環境設定
-        const bool blank = cursor_kind == QLatin1String("circle") || cursor_kind == QLatin1String("dot");
+        // the brush's circle is drawn on the page (paint_page); the pointer itself as chosen in 環境設定 (PC4 E1: the cross
+        // alone without the brush preview, and while drawing when so chosen)
+        const bool cross = !brush_preview || (cross_while_drawing && !stroke_.empty());
+        const bool blank = !cross && (cursor_kind == QLatin1String("circle") || cursor_kind == QLatin1String("dot") || cursor_kind == QLatin1String("tip"));
         setCursor(blank ? Qt::BlankCursor : Qt::CrossCursor);
     } else if (tool_ == QLatin1String("move")) {
         setCursor(Qt::SizeAllCursor);
@@ -229,9 +295,9 @@ void PageCanvas::mousePressEvent(QMouseEvent* event) {
     if (is_drawing_tool(tool_)) {
         perf::input(event, "mouse_press");
         // (a straight line (Shift) starts on the grid)
-        const QPointF start = tool_ == QLatin1String("pen") && (event->modifiers() & Qt::ShiftModifier) ? grid_point(mm.x(), mm.y()) : mm;
-        const PenSample sample = mouse_sample(start.x(), start.y());
-        begin_stroke(QPointF(sample.x_mm, sample.y_mm), sample.pressure, 0.0, false);
+        const QPointF start = draws_line(tool_) && (event->modifiers() & Qt::ShiftModifier) ? grid_point(mm.x(), mm.y()) : mm;
+        const PenSample sample = mouse_sample(start.x(), start.y(), static_cast<double>(event->timestamp()));
+        begin_stroke(QPointF(sample.x_mm, sample.y_mm), sample.pressure, 0.0, false, sample);
     }
 }
 
@@ -325,10 +391,10 @@ void PageCanvas::mouseMoveEvent(QMouseEvent* event) {
         return;
     }
     const std::uint64_t seq = perf::input(event, "mouse");
-    const bool straight = tool_ == QLatin1String("pen") && (event->modifiers() & Qt::ShiftModifier);
+    const bool straight = draws_line(tool_) && (event->modifiers() & Qt::ShiftModifier);
     const QPointF mm = straight ? grid_point(mm_of(pos).x(), mm_of(pos).y()) : mm_of(pos);  // (Shift: a straight line, to the grid)
-    const PenSample sample = mouse_sample(mm.x(), mm.y());
-    extend_stroke(QPointF(sample.x_mm, sample.y_mm), sample.pressure, 0.0, (event->modifiers() & Qt::ShiftModifier) != 0);
+    const PenSample sample = mouse_sample(mm.x(), mm.y(), static_cast<double>(event->timestamp()));
+    extend_stroke(QPointF(sample.x_mm, sample.y_mm), sample.pressure, 0.0, (event->modifiers() & Qt::ShiftModifier) != 0, sample);
     if (seq != 0) {
         perf::event("live_drawn", {{"seq", seq}});
         perf::event("update_requested", {{"seq", seq}});
@@ -697,13 +763,13 @@ void PageCanvas::tabletEvent(QTabletEvent* event) {
     }
     if (type == QEvent::TabletPress) {
         perf::input(event, "tablet_press");
-        begin_stroke(QPointF(sample.x_mm, sample.y_mm), sample.pressure, sample.rotation, true);
+        begin_stroke(QPointF(sample.x_mm, sample.y_mm), sample.pressure, sample.rotation, true, sample);
         event->accept();
         return;
     }
     if (type == QEvent::TabletMove && !stroke_.empty()) {
         const std::uint64_t seq = perf::input(event, "tablet");
-        extend_stroke(QPointF(sample.x_mm, sample.y_mm), sample.pressure, sample.rotation, (event->modifiers() & Qt::ShiftModifier) != 0);
+        extend_stroke(QPointF(sample.x_mm, sample.y_mm), sample.pressure, sample.rotation, (event->modifiers() & Qt::ShiftModifier) != 0, sample);
         if (seq != 0) {
             perf::event("live_drawn", {{"seq", seq}});
             perf::event("update_requested", {{"seq", seq}});

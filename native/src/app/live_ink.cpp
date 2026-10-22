@@ -44,6 +44,21 @@ render::Box to_box(const QRect& r) { return render::Box{r.x(), r.y(), r.x() + r.
 
 QRect to_rect(render::Point origin, const render::Image& image) { return QRect(origin.x, origin.y, image.width(), image.height()); }
 
+// brushes@1 (PC4 E1): a piece of a dab brush's line in its own colours (the colour dynamics: each pixel the colour its
+// dabs laid, as the page lays it), its alpha kept; `at` its corner on the page.
+render::Image coloured(const render::Image& rgba, const render::dabs::LineCover& cover, render::Point at) {
+    std::string bytes = rgba.tobytes();
+    const int w = rgba.width();
+    for (int y = 0; y < rgba.height(); ++y) {
+        for (int x = 0; x < w; ++x) {
+            const auto c = cover.colour(at.x + x, at.y + y);
+            const std::size_t i = (std::size_t(y) * std::size_t(w) + std::size_t(x)) * 4;
+            for (std::size_t k = 0; k < 3; ++k) bytes[i + k] = static_cast<char>(static_cast<int>(std::clamp(c[k], 0.0f, 1.0f) * 255.0f + 0.5f));
+        }
+    }
+    return render::Image::frombytes("RGBA", rgba.size(), bytes);
+}
+
 // The opacity's cut of a coverage (render's cover.point(lambda v: int(v * opacity))).
 render::Image faded(const render::Image& cover, double opacity) {
     if (opacity >= 1) return cover;
@@ -90,7 +105,16 @@ LiveInk::LiveInk(std::shared_ptr<const core::Document> doc_ptr, const core::Page
         pressure_opacity_ = core::py_round(core::py_clamp(core::py_float(fields["pressure_opacity"]), 0.0, 1.0), 3);
     }
     const bool by_speed = truthy(fields, "stabilize_speed") && stabilize_ != 0;
-    piecewise_ = !stamped(b) && b.texture.empty() && b.aa != "strong" && pressure_opacity_ <= 0 && !by_speed && !b.paper;
+    dab_ = b.dabs.has_value();
+    if (dab_) {  // (brushes@1, PC4 E1: what add_stroke gives the line)
+        if (const Json* flow = field(fields, "flow"); flow != nullptr && flow->is_number()) flow_ = core::py_clamp(flow->get<double>(), 0.0, 1.0);
+        if (truthy(fields, "background_rgb")) {
+            background_ = core::int_tuple(fields["background_rgb"]);
+        } else if (b.dabs->color.enabled && doc.brush_background_rgb) {
+            background_ = doc.brush_background_rgb;
+        }
+    }
+    piecewise_ = !stamped(b) && b.texture.empty() && b.aa != "strong" && pressure_opacity_ <= 0 && !by_speed && !b.paper && !dab_;
     clip_ = layer.panel_clip &&
             render::detail::clip_mask(page, size_, dpi_, render::Box{0, 0, 1, 1}).has_value();  // (a panel cuts the layers)
 }
@@ -122,7 +146,7 @@ core::PenPoints LiveInk::as_committed(const core::PenPoints& raw, std::size_t& s
     return pts;
 }
 
-void LiveInk::follow(const core::PenPoints& points, std::span<const double> rotation) {
+void LiveInk::follow(const core::PenPoints& points, std::span<const double> rotation, const LiveInputs& inputs) {
     if (points.empty()) return;
     core::PenPoints raw = points;
     if (raw.size() == 1) raw.push_back(core::PenPoint{raw[0].x + 0.01, raw[0].y + 0.01, raw[0].p});  // (a tap: a dot)
@@ -141,7 +165,26 @@ void LiveInk::follow(const core::PenPoints& points, std::span<const double> rota
         turns = core::resampled(values, static_cast<std::int64_t>(pts.size()));
     }
     if (!piecewise_) {
-        const auto drawn = render::brushes::draw(size_, pts, dpi_, width_mm_, kind_, seed_, turns, pressure_opacity_);
+        std::optional<render::brushes::Coverage> drawn;
+        if (dab_) {
+            // (brushes@1: the pen's inputs over the points add_stroke will keep, as it stretches them)
+            const auto stretched = [&](std::span<const double> values, std::size_t per, int digits) {
+                if (values.size() != points.size() * per || points.size() < 2) return std::vector<double>{};
+                return core::resample_inputs(std::vector<double>(values.begin(), values.end()), per, pts.size(), digits);
+            };
+            const std::vector<double> tilt = stretched(inputs.tilt, 2, 1), time = stretched(inputs.time_ms, 1, 1), wheel = stretched(inputs.wheel, 1, 3);
+            core::Stroke line;
+            line.tilt = tilt;
+            line.time_ms = time;
+            line.wheel = wheel;
+            line.flow = flow_;
+            line.background_rgb = background_;
+            const render::dabs::LineInputs in = render::brushes::line_inputs(line, rgb_);
+            drawn = render::brushes::draw(size_, pts, dpi_, width_mm_, kind_, seed_, turns, pressure_opacity_, &in);
+            colours_ = drawn && drawn->dabs && drawn->dabs->coloured() ? drawn->dabs : nullptr;
+        } else {
+            drawn = render::brushes::draw(size_, pts, dpi_, width_mm_, kind_, seed_, turns, pressure_opacity_);
+        }
         if (drawn) {
             add_coverage(drawn->mask, drawn->origin, true);
         }
@@ -182,7 +225,11 @@ void LiveInk::finish(const core::Stroke& stroke) {
         if (const core::Frame* frame = render::detail::panel_of(*page_, pts.front().x, pts.front().y)) panel_ = frame->id;
     }
     tail_.reset();
-    const auto drawn = render::brushes::draw(size_, pts, dpi_, width_mm_, kind_, stroke.id, stroke.rotation, stroke.pressure_opacity);
+    dab_ = b.dabs.has_value();
+    const render::dabs::LineInputs in = dab_ ? render::brushes::line_inputs(stroke, rgb_) : render::dabs::LineInputs{};
+    const auto drawn = dab_ ? render::brushes::draw(size_, pts, dpi_, width_mm_, kind_, stroke.id, stroke.rotation, stroke.pressure_opacity, &in)
+                            : render::brushes::draw(size_, pts, dpi_, width_mm_, kind_, stroke.id, stroke.rotation, stroke.pressure_opacity);
+    colours_ = drawn && drawn->dabs && drawn->dabs->coloured() ? drawn->dabs : nullptr;
     if (drawn) {
         add_coverage(drawn->mask, drawn->origin, true);
     } else {
@@ -270,6 +317,7 @@ void LiveInk::refresh(const QRect& part_in) {
     cover = faded(cover, opacity_);
     render::Image rgba = render::Image::create("RGBA", render::Size{part.width(), part.height()}, render::Ink::with_alpha(rgb_, 0));
     rgba.putalpha(cover);
+    if (colours_) rgba = coloured(rgba, *colours_, render::Point{part.x(), part.y()});  // (brushes@1: the colour dynamics)
     if (clip_) {
         const render::Image mask = clip_for(to_box(part));
         if (!mask.empty()) rgba.putalpha(render::chops::multiply(rgba.getchannel(3), mask));
@@ -298,6 +346,7 @@ render::Image LiveInk::patch() const {
     if (const auto bbox = cover.getbbox()) {
         render::Image piece = render::Image::create("RGBA", render::Size{bbox->width(), bbox->height()}, render::Ink::with_alpha(rgb_, 0));
         piece.putalpha(cover.crop(*bbox));
+        if (colours_) piece = coloured(piece, *colours_, render::Point{box_.x() + bbox->x0, box_.y() + bbox->y0});  // (brushes@1)
         out.alpha_composite(piece, render::Point{bbox->x0, bbox->y0});
     }
     if (clip_) {

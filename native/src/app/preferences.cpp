@@ -93,6 +93,12 @@ std::optional<double> tablet_gamma() {
     return gamma;
 }
 
+bool brush_preview() { return truthy(settings()->value(QStringLiteral("ui/brush_preview"), QStringLiteral("true"))); }
+
+void set_brush_preview(bool on) { settings()->setValue(QStringLiteral("ui/brush_preview"), on ? QStringLiteral("true") : QStringLiteral("false")); }
+
+bool cross_while_drawing() { return truthy(settings()->value(QStringLiteral("ui/cross_drawing"), QStringLiteral("false"))); }
+
 QString pen_button() {
     const QString value = settings()->value(QStringLiteral("tablet/button"), QStringLiteral("menu")).toString();
     const auto& all = pen_buttons();
@@ -395,6 +401,8 @@ void apply_all(MainWindow* window) {
     window->refresh_icons();
     window->refresh_first_steps();  // (the keys its buttons show)
     canvas->cursor_kind = cursor_kind();
+    canvas->cross_while_drawing = cross_while_drawing();  // (PC4 E1)
+    canvas->brush_preview = brush_preview();
     canvas->modifier_tools = {{QStringLiteral("alt"), modifier_tool(QStringLiteral("alt"))}, {QStringLiteral("ctrl"), modifier_tool(QStringLiteral("ctrl"))}};
     canvas->tool_modifiers = tool_modifiers();
     canvas->refresh_cursor();
@@ -591,6 +599,10 @@ PreferencesDialog::PreferencesDialog(MainWindow* window) : QDialog(window), wind
     motion->setToolTip(QStringLiteral("メニューの開き方・拡大の寄り方・知らせの出方などの動きを止めます（決めていなければパソコンの設定に合わせます）"));
     motion->setChecked(reduce_motion());
     cursor = choice_box(cursors(), cursor_kind());
+    cross_drawing = new QCheckBox(QStringLiteral("描いている間は十字だけにする"));
+    cross_drawing->setObjectName(QStringLiteral("cross_drawing"));
+    cross_drawing->setToolTip(QStringLiteral("線を引いている間は、ブラシの円や形を隠して十字のポインターだけを見せます（Photoshop の「ペイント時は十字のみ表示」）"));
+    cross_drawing->setChecked(cross_while_drawing());
     alt_tool = choice_box(modifier_tool_choices(), modifier_tool(QStringLiteral("alt")));
     ctrl_tool = choice_box(modifier_tool_choices(), modifier_tool(QStringLiteral("ctrl")));
     for (QComboBox* box : {alt_tool, ctrl_tool}) box->setToolTip(QStringLiteral("押している間だけ、この道具になります（離すと元の道具に戻る）"));
@@ -629,7 +641,8 @@ PreferencesDialog::PreferencesDialog(MainWindow* window) : QDialog(window), wind
           {QStringLiteral("画面の書体"), ui_font}, {QStringLiteral("画面の文字の大きさ"), font_pt}, {QString(), note}, {QString(), mono_icons},
           {QString(), hints}, {QString(), gpu}}},
         {QStringLiteral("描く・操作"),
-         {{QStringLiteral("ペンのカーソル"), cursor}, {QStringLiteral("Alt を押している間"), alt_tool}, {QStringLiteral("Ctrl を押している間"), ctrl_tool},
+         {{QStringLiteral("ペンのカーソル"), cursor}, {QString(), cross_drawing}, {QStringLiteral("Alt を押している間"), alt_tool},
+          {QStringLiteral("Ctrl を押している間"), ctrl_tool},
           {QString(), per_tool}, {QString(), hold_swap}, {QString(), radial}}},
         {QStringLiteral("長い時間の作業"), {{QStringLiteral("休憩の案内"), rest}, {QString(), motion}, {QString(), requests}}},
         {QStringLiteral("原稿と保存"),
@@ -847,6 +860,7 @@ void PreferencesDialog::save() {
         store->setValue(QStringLiteral("ui/reduce_motion"), motion->isChecked() ? QStringLiteral("true") : QStringLiteral("false"));
     }
     store->setValue(QStringLiteral("ui/cursor"), cursor->currentData());
+    store->setValue(QStringLiteral("ui/cross_drawing"), cross_drawing->isChecked() ? QStringLiteral("true") : QStringLiteral("false"));
     store->setValue(QStringLiteral("keys/alt_tool"), alt_tool->currentData());
     store->setValue(QStringLiteral("keys/ctrl_tool"), ctrl_tool->currentData());
     store->setValue(QStringLiteral("keys/hold_swap"), hold_swap->isChecked() ? QStringLiteral("true") : QStringLiteral("false"));

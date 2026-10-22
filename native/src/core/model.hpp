@@ -118,6 +118,9 @@ struct Stroke {
     std::vector<double> time_ms;
     std::vector<double> wheel;
     std::optional<double> flow;
+    // (PC4 E1) the 背景色 a dab brush's colour dynamics mix towards (its foreground/background jitter), kept with the
+    // line so it draws the same later (none: white)
+    std::optional<std::vector<std::int64_t>> background_rgb;
 };
 
 using StrokePtr = std::shared_ptr<const Stroke>;

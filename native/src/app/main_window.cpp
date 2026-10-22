@@ -604,9 +604,19 @@ void MainWindow::show_preview(std::optional<core::Document> doc) {
 
 void MainWindow::pen_changed() {
     const core::Layer* layer = target_layer();
-    canvas_->set_live_pen(pen_.stroke_fields(), layer != nullptr && drawable(*layer) ? std::optional<std::string>(layer->id) : std::nullopt);
+    Json fields = pen_.stroke_fields();
+    // (brushes@1, PC4 E1: the 鉛筆ツール's own brush; the blend only a paint layer takes; the smoothing the window keeps)
+    if (canvas_->tool() == QLatin1String("pencil")) {
+        know_pencil();
+        fields["kind"] = std::string(render::dabs::kPencilKey);
+    }
+    if (brush_ != nullptr) brush_->set_blend_allowed(layer == nullptr || layer->kind == core::LayerKind::Raster);
+    canvas_->set_live_pen(fields, layer != nullptr && drawable(*layer) ? std::optional<std::string>(layer->id) : std::nullopt);
     canvas_->brush_width_mm = pen_.width_mm;
     canvas_->eraser_mm = eraser_mm_;
+    canvas_->smoothing = QString::fromStdString(pen_.smoothing);
+    canvas_->smoothing_amount = pen_.smoothing_amount;
+    canvas_->pointer_kind = fields.value("kind", std::string());
 }
 
 // --- the session ---------------------------------------------------------------------------------------------------

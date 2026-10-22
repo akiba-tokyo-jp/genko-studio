@@ -28,6 +28,8 @@
 #include "api/buildinfo.hpp"
 #include "api/server_cli.hpp"
 #include "api/studio_cli.hpp"
+#include "core/brush_dabs.hpp"
+#include "core/brushes.hpp"
 #include "core/filter_kinds.hpp"
 #include "core/config_dir.hpp"
 #include "core/actor.hpp"
@@ -1352,6 +1354,41 @@ int shapes_command(const QStringList& args, bool ascii) {
     return usage("genko shapes: list, path, new, edit or reset");
 }
 
+// brushes@1 (PC4 E1, brush.get; the C++ build's own): `genko brushes get <key> [--book <dir>]` — a brush's whole settings
+// (Genko's, as a book keeps them, and a dab brush's every dab setting, the defaults too): a built-in brush, one of the
+// book's own, or one of the person's own (the config folder's library). core::Error("key") for one that is not there.
+int brushes_command(const QStringList& args, bool ascii) {
+    if (args.isEmpty() || args.front() != QLatin1String("get")) return usage("genko brushes get <key> [--book <dir>]");
+    static constexpr Option kOptions[] = {{"--book", true}};
+    Arguments a;
+    if (auto error = parse_arguments(args.mid(1), kOptions, 1, "key", a)) return usage("genko brushes get: " + *error);
+    const std::string key = a.positional[0].toStdString();
+    std::vector<core::Brush> known;
+    std::string from = "builtin";
+    if (const auto book = a.value("--book")) {
+        const fs::path dir = path_arg(*book);
+        refuse_legacy(dir);
+        const auto loaded = storage::load_document(dir);
+        render::brushes::register_book(loaded.document);  // (its pictures made known too)
+        core::register_brushes(loaded.document.brush_custom, known);
+        if (loaded.document.brush_custom.contains(key)) from = "book";
+    }
+    if (from != "book" && core::find_builtin(key) == nullptr) {
+        try {
+            core::register_brushes(render::brushes::load_own_brushes(core::config_dir()), known);
+        } catch (const std::exception&) {
+        }
+        from = "library";
+    }
+    const core::Brush brush = core::find_brush(Json(key), known);
+    if (brush.key != key) throw core::Error("key", "no brush " + key);
+    Json out{{"ok", true}, {"key", brush.key}, {"label", brush.label}, {"from", from}, {"settings", core::brush_to_dict(brush)},
+             {"engine", brush.dabs ? Json(std::string(core::kDabEngine)) : Json(nullptr)}};
+    if (brush.dabs) out["dabs"] = core::dabs_to_json(*brush.dabs, true);
+    print_json(out, ascii);
+    return 0;
+}
+
 // smart-objects@1 (PC3 A1, the C++ build's own): `genko package <dir> --out <folder>` (パッケージ…) — the book copied as a
 // new book into <folder>/<its folder's name>, with its linked files' copies in Links/ and linked there.
 int package_command(const QStringList& args, bool ascii) {
@@ -1405,6 +1442,7 @@ int run_cli(int argc, char** argv) {
         if (command == QLatin1String("smart")) return smart_command(args, ascii);      // (smart-objects@1, PC3 A1)
         if (command == QLatin1String("package")) return package_command(args, ascii);  // (smart-objects@1, PC3 A1)
         if (command == QLatin1String("shapes")) return shapes_command(args, ascii);    // (pen-shapes@1, PC3 C-b)
+        if (command == QLatin1String("brushes")) return brushes_command(args, ascii);  // (brushes@1, PC4 E1: brush.get)
         if (command == QLatin1String("studio")) return studio_command(args, ascii);
         if (command == QLatin1String("mcp")) return mcp_command(args);
         if (command == QLatin1String("serve")) return serve_command(args);

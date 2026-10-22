@@ -338,6 +338,52 @@ BrushPanel::BrushPanel(QWidget* parent) : QWidget(parent) {
     gap_size = number_box(0.2, 6, 0.1, 2, QStringLiteral(" mm"));
     gap_size->setToolTip(QStringLiteral("塗り残しとみなす、すき間の大きさ（これより大きい白は残す）"));
     connect(gap_size, &QDoubleSpinBox::valueChanged, this, [this] { save(); });
+    // brushes@1 (PC4 E1): Photoshop's options bar — the flow, the blend, the smoothing's way
+    flow = new QSlider(Qt::Horizontal);
+    flow->setObjectName(QStringLiteral("brush_flow"));
+    flow->setRange(1, 100);
+    flow->setValue(100);
+    flow->setToolTip(QStringLiteral("流量: ダブ（点を打つ描き方）のブラシで、一つの点が置く絵の具の量。重ねるほど濃くなる（不透明度まで）"));
+    connect(flow, &QSlider::valueChanged, this, [this] { save(); });
+    blend = new QComboBox;
+    blend->setObjectName(QStringLiteral("brush_blend"));
+    // (the retouching tools' words and order: retouch_tools.cpp)
+    for (const auto& [label, key] : std::vector<std::pair<QString, QString>>{
+             {QStringLiteral("通常"), QStringLiteral("normal")},          {QStringLiteral("乗算"), QStringLiteral("multiply")},
+             {QStringLiteral("スクリーン"), QStringLiteral("screen")},    {QStringLiteral("加算（発光）"), QStringLiteral("add")},
+             {QStringLiteral("オーバーレイ"), QStringLiteral("overlay")}, {QStringLiteral("比較（暗）"), QStringLiteral("darken")},
+             {QStringLiteral("比較（明）"), QStringLiteral("lighten")},   {QStringLiteral("焼き込みカラー"), QStringLiteral("color_burn")},
+             {QStringLiteral("焼き込み（リニア）"), QStringLiteral("linear_burn")}, {QStringLiteral("覆い焼きカラー"), QStringLiteral("color_dodge")},
+             {QStringLiteral("ソフトライト"), QStringLiteral("soft_light")}, {QStringLiteral("ハードライト"), QStringLiteral("hard_light")},
+             {QStringLiteral("差の絶対値"), QStringLiteral("difference")},  {QStringLiteral("除外"), QStringLiteral("exclusion")},
+             {QStringLiteral("減算"), QStringLiteral("subtract")},          {QStringLiteral("除算"), QStringLiteral("divide")},
+             {QStringLiteral("色相"), QStringLiteral("hue")},               {QStringLiteral("彩度"), QStringLiteral("saturation")},
+             {QStringLiteral("カラー"), QStringLiteral("color")},           {QStringLiteral("輝度"), QStringLiteral("luminosity")}})
+        blend->addItem(label, key);
+    blend->setToolTip(QStringLiteral("描画モード: 通常のほかは、ペイントのレイヤーの画素に描き込みます（線としては残りません）。ペンのレイヤーでは通常だけ"));
+    connect(blend, &QComboBox::currentIndexChanged, this, [this] { save(); });
+    smoothing = new QComboBox;
+    smoothing->setObjectName(QStringLiteral("brush_smoothing"));
+    smoothing->addItem(QStringLiteral("手ぶれ補正（今までの）"), QStringLiteral("stabilize"));
+    smoothing->addItem(QStringLiteral("紐で引く"), QStringLiteral("string"));
+    smoothing->addItem(QStringLiteral("追いつく"), QStringLiteral("catch_up"));
+    smoothing->setToolTip(QStringLiteral("滑らかさの方式。紐で引く: ペンが紐の長さ（滑らかさ × 画面の 100 ピクセル）より離れたときだけ線が付いてくる。"
+                                         "追いつく: ペンを止めると線がペンに追いつく"));
+    connect(smoothing, &QComboBox::currentIndexChanged, this, [this] {
+        if (smoothing_amount != nullptr) smoothing_amount->setEnabled(smoothing->currentData().toString() != QLatin1String("stabilize"));
+        save();
+    });
+    smoothing_amount = new QSlider(Qt::Horizontal);
+    smoothing_amount->setObjectName(QStringLiteral("brush_smoothing_amount"));
+    smoothing_amount->setRange(0, 100);
+    smoothing_amount->setValue(50);
+    smoothing_amount->setEnabled(false);
+    connect(smoothing_amount, &QSlider::valueChanged, this, [this] { save(); });
+    auto_erase = new QCheckBox(QStringLiteral("自動消去"));
+    auto_erase->setObjectName(QStringLiteral("pencil_auto_erase"));
+    auto_erase->setToolTip(QStringLiteral("描画色の所から描き始めると、背景色で描きます（鉛筆ツール）"));
+    auto_erase->setVisible(false);
+    connect(auto_erase, &QCheckBox::toggled, this, [this] { save(); });
     crossing = new QCheckBox(QStringLiteral("消しゴムで交点まで消す"));
     crossing->setToolTip(QStringLiteral("線の交わる所までを一度に消します（はみ出しの掃除）"));
     connect(crossing, &QCheckBox::toggled, this, [this] { save(); });
@@ -358,6 +404,11 @@ BrushPanel::BrushPanel(QWidget* parent) : QWidget(parent) {
     size_grid_->setContentsMargins(0, 0, 0, 0);
     form->addRow(sizes_box);
     form->addRow(QStringLiteral("不透明度"), with_value(opacity));
+    form->addRow(QStringLiteral("流量"), with_value(flow));
+    form->addRow(QStringLiteral("モード"), blend);
+    form->addRow(QStringLiteral("滑らかさ"), smoothing);
+    form->addRow(QString(), with_value(smoothing_amount));
+    form->addRow(auto_erase);
     form->addRow(QStringLiteral("手ぶれ補正"), slider_for(steady));
     form->addRow(speed_steady);
     form->addRow(QStringLiteral("線の端をくっつける"), slider_for(snap_lines));
@@ -420,6 +471,7 @@ void BrushPanel::fill_kinds() {
     const QColor text(theme::tokens().text);
     kinds->setIconSize(QSize(72, 20));
     for (const core::Brush& brush : render::brushes::everything()) {
+        if (brush.key == render::dabs::kPencilKey) continue;  // (brushes@1: the 鉛筆ツール's own, not one to pick)
         auto* item = new QListWidgetItem((brush.key.starts_with("my_") ? QStringLiteral("★ ") : QString()) + QString::fromStdString(brush.label));
         item->setIcon(QIcon(stroke_preview(brush.key, {text.red(), text.green(), text.blue()}, QSize(72, 20))));
         item->setData(Qt::UserRole, key_of(brush.key));
@@ -534,7 +586,21 @@ void BrushPanel::load() {
     skip_text->setChecked(store->value(QStringLiteral("fill/skip_text"), QStringLiteral("false")).toString().toLower() == QLatin1String("true"));
     lasso_mode->setCurrentIndex(std::max(0, lasso_mode->findData(store->value(QStringLiteral("fill/lasso"), QStringLiteral("shape")).toString())));
     gap_size->setValue(store->value(QStringLiteral("fill/gap_size"), 1.5).toDouble());
+    // (brushes@1, PC4 E1: the blend, the smoothing's way and the pencil's auto erase, the same for every brush)
+    blend->setCurrentIndex(std::max(0, blend->findData(store->value(QStringLiteral("brush/blend"), QStringLiteral("normal")).toString())));
+    smoothing->setCurrentIndex(std::max(0, smoothing->findData(store->value(QStringLiteral("brush/smoothing"), QStringLiteral("stabilize")).toString())));
+    smoothing_amount->setValue(static_cast<int>(std::lround(std::clamp(store->value(QStringLiteral("brush/smoothing_amount"), 0.5).toDouble(), 0.0, 1.0) * 100)));
+    smoothing_amount->setEnabled(smoothing->currentData().toString() != QLatin1String("stabilize"));
+    auto_erase->setChecked(store->value(QStringLiteral("pencil/auto_erase"), QStringLiteral("false")).toString().toLower() == QLatin1String("true"));
 }
+
+void BrushPanel::set_blend_allowed(bool on) {
+    blend->setEnabled(on);
+    blend->setToolTip(on ? QStringLiteral("描画モード: 通常のほかは、ペイントのレイヤーの画素に描き込みます（線としては残りません）")
+                         : QStringLiteral("描画モードはペイントのレイヤーで使えます（ペンのレイヤーの線は通常で描きます）"));
+}
+
+void BrushPanel::set_pencil(bool on) { auto_erase->setVisible(on); }
 
 void BrushPanel::apply_kind_defaults(const std::string& kind_key, bool stored) {
     const core::Brush brush = render::brushes::brush(kind_key);
@@ -555,6 +621,7 @@ void BrushPanel::apply_kind_defaults(const std::string& kind_key, bool stored) {
     speed_steady->setChecked(kept("speed_steady", false).toString().toLower() == QLatin1String("true"));
     post_fit->setValue(kept("post_fit", 0).toDouble());
     snap_lines->setValue(kept("snap_lines", 0).toDouble());
+    flow->setValue(static_cast<int>(std::lround(std::clamp(kept("flow", 1.0).toDouble(), 0.01, 1.0) * 100)));
     follow_taper();
 }
 
@@ -585,6 +652,11 @@ void BrushPanel::save() {
     store->setValue(prefix + QStringLiteral("speed_steady"), speed_steady->isChecked() ? QStringLiteral("true") : QStringLiteral("false"));
     store->setValue(prefix + QStringLiteral("post_fit"), post_fit->value());
     store->setValue(prefix + QStringLiteral("snap_lines"), snap_lines->value());
+    store->setValue(prefix + QStringLiteral("flow"), flow->value() / 100.0);
+    store->setValue(QStringLiteral("brush/blend"), blend->currentData());
+    store->setValue(QStringLiteral("brush/smoothing"), smoothing->currentData());
+    store->setValue(QStringLiteral("brush/smoothing_amount"), smoothing_amount->value() / 100.0);
+    store->setValue(QStringLiteral("pencil/auto_erase"), auto_erase->isChecked() ? QStringLiteral("true") : QStringLiteral("false"));
     follow_taper();
     store->setValue(QStringLiteral("fill/gap"), gap->value());
     store->setValue(QStringLiteral("fill/reference"), reference->currentData());
@@ -674,6 +746,10 @@ PenSettings BrushPanel::pen() const {
     p.speed_steady = speed_steady->isChecked();
     p.post_fit = post_fit->value();
     p.snap_lines = snap_lines->value();
+    p.flow = flow->value() / 100.0;
+    p.blend = blend->isEnabled() ? blend->currentData().toString().toStdString() : std::string("normal");
+    p.smoothing = smoothing->currentData().toString().toStdString();
+    p.smoothing_amount = smoothing_amount->value() / 100.0;
     return p;
 }
 

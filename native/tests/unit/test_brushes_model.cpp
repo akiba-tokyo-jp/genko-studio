@@ -1,9 +1,9 @@
 // PC4 E-0 (brushes@1, schema-v4.md §3, SPEC.md COLOR-09): the dab brush's settings as a book keeps them (only those that
 // differ from the defaults; each refused setting), a brush of one's own with them (brush_to_dict, brush_from_dict,
-// define_brush leaving "engine" and "dabs" to E1), a line's inputs (tilt, time_ms, wheel, flow) packed and read, the
+// define_brush taking "engine" and "dabs": PC4 E1), a line's inputs (tilt, time_ms, wheel, flow) packed and read, the
 // brush state's kind and background_rgb, a book that has them written with brushes@1 and its pictures and read back the
 // same (and its pictures kept by gc), a book that has none written as before (no feature, the same keys), and what makes
-// a book read-only. A dab brush's line is not drawn yet (not_yet_ported until E1).
+// a book read-only. A dab brush's line is drawn with its dabs (PC4 E1: test_dab_engine, test_dab_lines).
 
 #include <QTemporaryDir>
 #include <QtTest>
@@ -237,14 +237,15 @@ private slots:
         std::vector<core::Brush> custom;
         core::register_brushes(Json::parse(R"({"my_bad": {"label": "x", "engine": "dabs", "dabs": {"nope": 1}}})"), custom);
         QVERIFY(custom.empty());
-        // define_brush: "engine" and "dabs" not read yet (E1)
+        // define_brush: "engine" and "dabs" read (PC4 E1: the dab brush made; E-0 left them unread until then)
         const core::Document defined =
             core::CommandBus(render::ops_registry())
                 .apply(book(), Json::parse(R"([{"op": "define_brush", "key": "my_d", "label": "d", "engine": "dabs", "dabs": {"hardness": 0.1}}])"),
                        core::Actor("human:test"))
                 .doc;
-        QVERIFY(!defined.brush_custom["my_d"].contains("engine"));
-        QVERIFY(!core::uses_brushes(defined));
+        QCOMPARE(defined.brush_custom["my_d"]["engine"], Json("dabs"));
+        QCOMPARE(defined.brush_custom["my_d"]["dabs"], Json({{"hardness", 0.1}}));
+        QVERIFY(core::uses_brushes(defined));
     }
 
     // A line's inputs: packed as "r" is (tilt two values a point), read back from the packed form and from the dict
@@ -401,12 +402,14 @@ private slots:
         QVERIFY2(genko::test::strict_equal(first["brush"], second["brush"], &where), where.c_str());
         QVERIFY2(genko::test::strict_equal(first["features"], second["features"], &where), where.c_str());
         QCOMPARE(first["pages"][0]["layers"], second["pages"][0]["layers"]);  // (the strokes' blob: the same asset)
-        // the dab brush's line is not drawn yet (E1), never as another brush's
+        // the dab brush's line is drawn with its dabs (PC4 E1; E-0 refused it until then), never as another brush's
         render::brushes::register_book(read);
-        QVERIFY(error_of([] {
-                    (void)render::brushes::draw(render::Size{100, 100}, core::PenPoints{{1, 1, std::nullopt}, {5, 5, std::nullopt}}, 200, 0.5, "my_dab",
-                                                "seed", {}, 0.0);
-                }).find("not yet ported: brushes@1") != std::string::npos);
+        const auto drawn = render::brushes::draw(render::Size{100, 100}, core::PenPoints{{1, 1, std::nullopt}, {5, 5, std::nullopt}}, 200, 0.5,
+                                                 "my_dab", "seed", {}, 0.0);
+        QVERIFY(drawn && drawn->dabs);
+        const auto gpen = render::brushes::draw(render::Size{100, 100}, core::PenPoints{{1, 1, std::nullopt}, {5, 5, std::nullopt}}, 200, 0.5,
+                                                "gpen", "seed", {}, 0.0);
+        QVERIFY(gpen && !gpen->dabs);
     }
 
     // A book without a dab brush, without a line's inputs and without the brush state's new keys: no brushes@1, the

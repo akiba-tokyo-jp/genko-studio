@@ -135,7 +135,7 @@ void edit_commandbar(QMainWindow* window, QToolBar* bar);
 // --- the cursor and the keys held (環境設定) -------------------------------------------------------------------------
 
 using Choices = std::vector<std::pair<QString, QString>>;  // (the words shown, the value kept)
-// The pen's pointer: circle | circle_cross | cross | dot (default circle).
+// The pen's pointer: circle | circle_cross | cross | dot | tip (PC4 E1: a dab brush's tip) (default circle).
 const Choices& cursors();
 QString cursor_kind();
 // What a held Alt or Ctrl switches to ("": nothing): Alt スポイト and Ctrl 選択 unless chosen otherwise.

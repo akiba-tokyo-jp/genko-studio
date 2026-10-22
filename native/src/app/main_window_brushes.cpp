@@ -15,7 +15,11 @@
 #include <QMenu>
 #include <QPushButton>
 #include <QScrollArea>
+#include <QSlider>
 #include <QSpinBox>
+
+#include <algorithm>
+#include <cmath>
 
 #include <filesystem>
 #include <fstream>
@@ -82,7 +86,7 @@ void MainWindow::build_tool_settings() {
     scroll->setWidget(ts);
     scroll->setMinimumHeight(24);  // (on a short screen it scrolls, and the window stays on the screen)
     dock->setWidget(scroll);
-    ts->add({QStringLiteral("pen"), QStringLiteral("fill"), QStringLiteral("lassofill"), QStringLiteral("picker")}, brush_);
+    ts->add({QStringLiteral("pen"), QStringLiteral("pencil"), QStringLiteral("fill"), QStringLiteral("lassofill"), QStringLiteral("picker")}, brush_);
     // the eraser
     eraser_size_ = new QDoubleSpinBox;
     eraser_size_->setObjectName(QStringLiteral("eraser_size"));
@@ -99,7 +103,38 @@ void MainWindow::build_tool_settings() {
     auto* eraser_form = new QFormLayout(eraser_page);
     eraser_form->setRowWrapPolicy(QFormLayout::WrapAllRows);
     eraser_form->setContentsMargins(0, 0, 0, 0);
+    // brushes@1 (PC4 E1, Photoshop's 消しゴムツール): モード — ブラシ (the brush panel's brush when it is a dab brush, else the
+    // eraser's own 質 below), 鉛筆 (hard, no anti-aliasing), ブロック (squares) — with its 不透明度 and 流量
+    eraser_kind_ = new QComboBox;
+    eraser_kind_->setObjectName(QStringLiteral("eraser_kind"));
+    eraser_kind_->addItem(QStringLiteral("ブラシ"), QStringLiteral("brush"));
+    eraser_kind_->addItem(QStringLiteral("鉛筆"), QStringLiteral("pencil"));
+    eraser_kind_->addItem(QStringLiteral("ブロック"), QStringLiteral("block"));
+    eraser_kind_->setToolTip(QStringLiteral("ブラシ: ブラシ パネルで選んだダブのブラシで消す（ほかのブラシでは下の「消しゴムの質」で）。"
+                                            "鉛筆: 縁のくっきりした円で。ブロック: 四角で"));
+    eraser_opacity_ = new QSlider(Qt::Horizontal);
+    eraser_opacity_->setObjectName(QStringLiteral("eraser_opacity"));
+    eraser_flow_ = new QSlider(Qt::Horizontal);
+    eraser_flow_->setObjectName(QStringLiteral("eraser_flow"));
+    for (QSlider* slider : {eraser_opacity_, eraser_flow_}) {
+        slider->setRange(1, 100);
+        slider->setValue(100);
+    }
+    eraser_opacity_->setToolTip(QStringLiteral("一度に消す濃さ（ペイントのレイヤー）。鉛筆・ブロックとダブのブラシで"));
+    eraser_flow_->setToolTip(QStringLiteral("一つの点が消す量。重ねるほど消える（不透明度まで）。鉛筆・ブロックとダブのブラシで"));
+    {
+        const auto store = settings();
+        eraser_kind_->setCurrentIndex(std::max(0, eraser_kind_->findData(store->value(QStringLiteral("eraser/kind"), QStringLiteral("brush")).toString())));
+        eraser_opacity_->setValue(static_cast<int>(std::lround(std::clamp(store->value(QStringLiteral("eraser/opacity"), 1.0).toDouble(), 0.01, 1.0) * 100)));
+        eraser_flow_->setValue(static_cast<int>(std::lround(std::clamp(store->value(QStringLiteral("eraser/flow"), 1.0).toDouble(), 0.01, 1.0) * 100)));
+    }
+    connect(eraser_kind_, &QComboBox::currentIndexChanged, this, [this] { settings()->setValue(QStringLiteral("eraser/kind"), eraser_kind_->currentData()); });
+    connect(eraser_opacity_, &QSlider::valueChanged, this, [this](int v) { settings()->setValue(QStringLiteral("eraser/opacity"), v / 100.0); });
+    connect(eraser_flow_, &QSlider::valueChanged, this, [this](int v) { settings()->setValue(QStringLiteral("eraser/flow"), v / 100.0); });
+    eraser_form->addRow(QStringLiteral("モード"), eraser_kind_);
     eraser_form->addRow(QStringLiteral("ブラシサイズ（[ ] でも変わる）"), slider_for(eraser_size_, true));
+    eraser_form->addRow(QStringLiteral("不透明度"), with_value(eraser_opacity_));
+    eraser_form->addRow(QStringLiteral("流量"), with_value(eraser_flow_));
     eraser_form->addRow(brush_->crossing);
     eraser_mode_ = new QComboBox;
     eraser_mode_->setObjectName(QStringLiteral("eraser_mode"));
@@ -319,7 +354,64 @@ Json MainWindow::eraser_fields(const core::Layer& layer) const {
     }
     if (eraser_texture_ != nullptr && eraser_texture_->currentData().toString() != QLatin1String("hard"))
         out["texture"] = eraser_texture_->currentData().toString().toStdString();
+    // brushes@1 (PC4 E1): the モード's dabs — the pencil's brush, the block, or the brush panel's when it is a dab brush
+    if (eraser_kind_ != nullptr && layer.kind != core::LayerKind::Tone) {
+        const QString kind = eraser_kind_->currentData().toString();
+        bool dabs = true;
+        if (kind == QLatin1String("pencil")) {
+            out["brush"] = std::string(render::dabs::kPencilKey);
+        } else if (kind == QLatin1String("block")) {
+            out["block"] = true;
+        } else if (brush_ != nullptr && render::brushes::is_dab(brush_->kind())) {
+            out["brush"] = brush_->kind();
+        } else {
+            dabs = false;
+        }
+        if (dabs) {
+            out.erase("texture");
+            if (eraser_opacity_->value() < 100) out["opacity"] = eraser_opacity_->value() / 100.0;
+            if (eraser_flow_->value() < 100) out["flow"] = eraser_flow_->value() / 100.0;
+        }
+    }
     return out;
+}
+
+void MainWindow::know_pencil() {
+    if (render::brushes::brush(render::dabs::kPencilKey).key == render::dabs::kPencilKey) return;
+    try {
+        render::brushes::define_brush(render::dabs::kPencilKey, render::dabs::pencil_brush());
+    } catch (const std::exception&) {
+    }
+}
+
+bool MainWindow::own_brush_op(const std::string& kind, Json& ops) {
+    if (!kind.starts_with("my_") || book().brush_custom.contains(kind)) return true;
+    if (kind == render::dabs::kPencilKey) know_pencil();
+    render::brushes::Brush own = render::brushes::brush(kind);
+    if (own.key != kind) {  // (not known: from the library again, never the G pen's settings under its name)
+        try {
+            render::brushes::register_brushes(render::brushes::load_own_brushes(config_dir()));
+        } catch (const std::exception&) {
+        }
+        own = render::brushes::brush(kind);
+    }
+    if (own.key != kind) {
+        flash(QStringLiteral("このブラシ（%1）が見つからないため使えませんでした。一覧から選び直してください").arg(QString::fromStdString(kind)), 5000, true);
+        return false;
+    }
+    Json define{{"op", "define_brush"}, {"key", kind}};
+    Json settings_of = core::brush_to_dict(own);
+    if (own.paper && !book().papers.contains(own.paper->asset)) {
+        try {
+            settings_of = render::brushes::with_paper_picture(settings_of);
+        } catch (const std::exception&) {
+            flash(QStringLiteral("このブラシ（%1）の紙質の画像が見つからないため使えませんでした").arg(QString::fromStdString(own.label)), 5000, true);
+            return false;
+        }
+    }
+    for (const auto& [key, value] : settings_of.items()) define[key] = value;
+    ops.push_back(define);
+    return true;
 }
 
 }  // namespace genko::app

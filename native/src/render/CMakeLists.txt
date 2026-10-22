@@ -161,6 +161,14 @@ genko_library(genko_render
     preset_store.cpp
     ops_paint_tools.cpp
     ops_patterns.cpp
+    # PC4 E1 (ブラシエンジンと線: 上流の点を打つ描き方を線の描き方の 1 つとして、mm で)
+    dabs/maths.cpp
+    dabs/tile.cpp
+    dabs/procedural.cpp
+    dabs/dynamics.cpp
+    dabs/coverage.cpp
+    dabs/lines.cpp
+    dab_ops.cpp
     ${GENKO_MATERIAL_RESOURCES}
     ${GENKO_TEXT_RESOURCES}
   PUBLIC_DEPS genko_core Qt6::Core

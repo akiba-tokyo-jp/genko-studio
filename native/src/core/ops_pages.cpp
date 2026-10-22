@@ -6,9 +6,11 @@
 #include <string>
 #include <utility>
 
+#include "core/brushes.hpp"
 #include "core/ids.hpp"
 #include "core/ops_util.hpp"
 #include "core/pyconv.hpp"
+#include "core/ruby.hpp"
 
 namespace genko::core {
 
@@ -204,6 +206,41 @@ void set_lt(OpContext& c) {
 void set_brush(OpContext& c) {
     Document& doc = c.doc;
     const Json& op = c.op;
+    // brushes@1 (PC4 E1): reset — the book's brush back to the built-in G pen as a new book has it (first: the other keys
+    // then set what they say) —, the kind add_stroke draws with when it names none, the 背景色
+    if (truthy_at(op, "reset")) {
+        const Document fresh;
+        doc.brush_rgb = fresh.brush_rgb;
+        doc.brush_width_mm = fresh.brush_width_mm;
+        doc.brush_stabilize = fresh.brush_stabilize;
+        doc.brush_taper = fresh.brush_taper;
+        doc.brush_curve = fresh.brush_curve;
+        doc.brush_kind.reset();
+        doc.brush_background_rgb.reset();
+    }
+    if (const Json* kind = get(op, "kind"); kind != nullptr) {
+        if (kind->is_null()) {
+            doc.brush_kind.reset();
+        } else {
+            const std::string name = brush_kind(*kind, doc);
+            if (ruby::code_points(name).size() > 40) throw OpError("kind is at most 40 characters");
+            doc.brush_kind = name;
+        }
+    }
+    if (const Json* bg = get(op, "background_rgb"); bg != nullptr) {
+        if (bg->is_null()) {
+            doc.brush_background_rgb.reset();
+        } else {
+            const auto bad = [] { throw OpError("background_rgb is [r, g, b], whole numbers 0..255"); };
+            if (!bg->is_array() || bg->size() != 3) bad();
+            std::vector<std::int64_t> rgb;
+            for (const Json& v : *bg) {
+                if (!v.is_number_integer() || (v.is_number_unsigned() ? v.get<std::uint64_t>() > 255 : (v.get<std::int64_t>() < 0 || v.get<std::int64_t>() > 255))) bad();
+                rgb.push_back(v.get<std::int64_t>());
+            }
+            doc.brush_background_rgb = std::move(rgb);
+        }
+    }
     if (truthy_at(op, "rgb")) doc.brush_rgb = int_tuple(op["rgb"]);
     if (const Json* width = get(op, "width_mm"); width != nullptr && !width->is_null()) doc.brush_width_mm = to_float(*width);
     if (has(op, "stabilize")) doc.brush_stabilize = py_truthy(op["stabilize"]) ? to_int(op["stabilize"]) : 0;

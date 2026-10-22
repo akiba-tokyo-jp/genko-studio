@@ -612,6 +612,7 @@ void MainWindow::build_menus() {
     view->addAction(action("act_phone"));
     view->addAction(action("act_scale"));
     view->addAction(action("act_sel_edges"));  // (PC3 B1: 選択範囲の境界線)
+    view->addAction(action("act_brush_preview"));  // (PC4 E1: ブラシプレビュー)
     view->addAction(action("act_onion"));
     view->addAction(action("act_cmyk_proof"));
     // 校正の設定 (view.proofSetup.*): what 色の校正 shows; 色域外警告 (view.gamutWarning)
@@ -931,6 +932,8 @@ void MainWindow::choose_tool(const QString& tool) {
     if (const auto it = tool_actions_.find(tool); it != tool_actions_.end()) it->second->setChecked(true);
     if (tool == QLatin1String("effect")) set_effect_pictures(effect_actions_, {"focus", "speed", "uni_flash", "beta_flash"});  // (drawn when first needed)
     if (tool_settings_ != nullptr) tool_settings_->show_tool(canvas_->tool());
+    if (brush_ != nullptr) brush_->set_pencil(tool == QLatin1String("pencil"));  // (PC4 E1: 自動消去)
+    if (tool == QLatin1String("pencil")) know_pencil();
     panel_for_tool(becomes);  // (the lines for the text tool, the layers for the drawing tools: main_window_lines.cpp)
     pen_changed();
 }
@@ -1002,7 +1005,11 @@ void MainWindow::on_stroke(const StrokeInput& stroke) {
         for (const auto& [key, value] : eraser.items()) op[key] = value;
         if (rulers) op["snap_ruler"] = true;
         canvas_->stroke_dropped();
-        apply_ops(Json::array({op}));
+        Json ops = Json::array();
+        // (brushes@1, PC4 E1: an eraser of a brush of one's own or the pencil's: the book keeps it first)
+        if (op.contains("brush") && !own_brush_op(op["brush"].get<std::string>(), ops)) return;
+        ops.push_back(op);
+        apply_ops(ops);
         return;
     }
     Json points = Json::array();
@@ -1010,6 +1017,42 @@ void MainWindow::on_stroke(const StrokeInput& stroke) {
     Json op = Json::object({{"op", "add_stroke"}, {"page", page->index.json()}, {"layer_id", layer->id}, {"points", points}});
     const Json fields = pen_.stroke_fields();
     for (const auto& [key, value] : fields.items()) op[key] = value;
+    // brushes@1 (PC4 E1): the 鉛筆ツール draws with its own brush (自動消去: from the 描画色, in the 背景色); a blend paints a
+    // paint layer's pixels; a dab brush's line keeps the pen's tilt, times and wheel
+    if (stroke.tool == QLatin1String("pencil")) {
+        know_pencil();
+        op["kind"] = std::string(render::dabs::kPencilKey);
+        if (brush_ != nullptr && brush_->auto_erase->isChecked() && colours_ != nullptr && !stroke.points.empty()) {
+            const auto under = layer_colour_at(stroke.points.front().x, stroke.points.front().y);
+            const auto fore = brush_->rgb();
+            if (under && std::abs((*under)[0] - fore[0]) <= 1 && std::abs((*under)[1] - fore[1]) <= 1 && std::abs((*under)[2] - fore[2]) <= 1) {
+                const auto back = colours_->background();
+                op["rgb"] = Json::array({static_cast<int>(std::lround(std::clamp(back[0], 0.0, 1.0) * 255)),
+                                         static_cast<int>(std::lround(std::clamp(back[1], 0.0, 1.0) * 255)),
+                                         static_cast<int>(std::lround(std::clamp(back[2], 0.0, 1.0) * 255))});
+                op.erase("color_rgb");
+            }
+        }
+    }
+    if (pen_.blend != "normal" && layer->kind == core::LayerKind::Raster) op["blend"] = pen_.blend;
+    if (render::brushes::is_dab(op.value("kind", std::string()))) {
+        const std::size_t n = stroke.points.size();
+        if (stroke.tilt.size() == 2 * n && std::any_of(stroke.tilt.begin(), stroke.tilt.end(), [](double v) { return std::abs(v) > 0.05; })) {
+            Json tilt = Json::array();
+            for (std::size_t i = 0; i < n; ++i) tilt.push_back(Json::array({core::py_round(stroke.tilt[2 * i], 1), core::py_round(stroke.tilt[2 * i + 1], 1)}));
+            op["tilt"] = tilt;
+        }
+        if (stroke.time_ms.size() == n && n > 0 && stroke.time_ms.back() > 0) {
+            Json times = Json::array();
+            for (const double v : stroke.time_ms) times.push_back(core::py_round(v, 1));
+            op["time_ms"] = times;
+        }
+        if (stroke.wheel.size() == n && std::any_of(stroke.wheel.begin(), stroke.wheel.end(), [](double v) { return v < 0.999; })) {
+            Json wheel = Json::array();
+            for (const double v : stroke.wheel) wheel.push_back(core::py_round(v, 3));
+            op["wheel"] = wheel;
+        }
+    }
     // (PC4 E-0: a 描画色 holding more than its 8 bits, on a page of 16 or 32 bits: its precise values as the line's colour —
     // native.color_stroke_v1's color_rgb —, the 8-bit rgb its picture)
     if (colours_ != nullptr && op.contains("rgb") && colours_->is_precise() && !page->color && page->rgb && page->rgb->depth != 8) {

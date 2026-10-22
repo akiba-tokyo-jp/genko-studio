@@ -15,6 +15,7 @@
 #include "render/color_canvas.hpp"
 #include "render/channels.hpp"
 #include "render/color_edit.hpp"
+#include "render/dab_ops.hpp"
 #include "render/ink_edit.hpp"
 #include "render/ops_3d.hpp"
 #include "render/ops_adjust.hpp"
@@ -369,16 +370,21 @@ void register_render_ops(core::OpRegistry& registry) {
     // the studio ops again, place_asset and set_placement able to read an asset's picture size, and those placing a
     // picture able to see it can be drawn (render/placed)
     core::register_studio_ops(registry, core::StudioHooks{asset_picture_size, check_asset_picture});
-    // add_stroke again, able to mix the colour under the line in (下地混色・色延び, render/raster)
-    core::register_add_stroke(registry, raster::mixed_pieces);
-    // define_brush again, able to take a paper's picture in (BRUSH-01, render/paper)
-    core::register_define_brush(registry, [](std::string_view file) {
-        try {
-            return paper::take_in(file);
-        } catch (const core::Error& error) {
-            throw core::OpError(error.what());
-        }
-    });
+    // add_stroke again, able to mix the colour under the line in (下地混色・色延び, render/raster), to check a dab brush's
+    // line and to paint a line with a blend into a paint layer's pixels (brushes@1, PC4 E1: render/dab_ops)
+    core::register_add_stroke(registry, dab_ops::stroke_hooks());
+    // define_brush again, able to take a paper's picture in (BRUSH-01, render/paper) and a dab brush's pictures and
+    // upstream's settings (brushes@1, PC4 E1: render/dab_ops)
+    core::register_define_brush(
+        registry,
+        [](std::string_view file) {
+            try {
+                return paper::take_in(file);
+            } catch (const core::Error& error) {
+                throw core::OpError(error.what());
+            }
+        },
+        dab_ops::take_in());
     // PC3 (選択・マスク・修復・パス・変形・判型): the new ops (each group writes its own in its file) and the kinds and
     // modifiers of an area this build adds, made known to the bus (render/area_kinds)
     register_select_ops(registry);
