@@ -227,6 +227,90 @@ private slots:
         QVERIFY(gaussian && box);
         QCOMPARE(catalogue["presets"][0]["upstream"], Json("filter.blur.blur"));
     }
+
+    // フィルターギャラリー (D3) through the command line: filter_raster's filter_gallery on the 8-bit page and the 16-bit one
+    // (the reply: the stack in its normal form), saved and opened again, undone and done again; an effect not known refused;
+    // as a smart filter — the book names filters@1, drawn at the page's 200 dpi —; genko inspect --filters with the 47.
+    void theGalleryThroughTheCommandLine() {
+        const QString book = two_pages(QStringLiteral("gallery.genko"));
+        const Json before = project(book);
+        std::string precise_layer;
+        for (const Json& layer : before["pages"][1]["layers"])
+            if (layer.contains("color_raster")) precise_layer = layer["id"].get<std::string>();
+        QVERIFY(!precise_layer.empty());
+        const Json effects = Json::array({Json{{"filter", "cutout"}, {"params", Json{{"number_of_levels", 3}}}},
+                                          Json{{"filter", "texturizer"}, {"params", Json{{"relief", 20}}}}});
+        const Json done = apply(book, QStringLiteral("gallery.json"),
+                                Json::array({Json{{"op", "filter_raster"}, {"page", 1}, {"id", "pic1"}, {"kind", "filter_gallery"}, {"effects", effects}},
+                                             Json{{"op", "filter_raster"}, {"page", 2}, {"id", precise_layer}, {"kind", "filter_gallery"}, {"effects", effects},
+                                                  {"foreground", Json::array({200, 0, 0})}}}));
+        QVERIFY2(done.value("ok", false), done.dump().c_str());
+        QCOMPARE(done["results"][0]["filter"]["kind"], Json("filter_gallery"));
+        QCOMPARE(done["results"][0]["filter"]["effects"][0]["params"], (Json{{"number_of_levels", 3}, {"edge_simplicity", 4}, {"edge_fidelity", 2}}));
+        QCOMPARE(done["results"][0]["filter"]["effects"][1]["visible"], Json(true));
+        QCOMPARE(done["results"][1]["filter"]["foreground"], (Json::array({200, 0, 0})));
+        QCOMPARE(done["results"][1]["filter"]["background"], (Json::array({255, 255, 255})));
+        const Json after = project(book);
+        QVERIFY(layer_in(after, 1, "pic1")["asset"] != layer_in(before, 1, "pic1")["asset"]);
+        QVERIFY(layer_in(after, 2, precise_layer)["color_raster"] != layer_in(before, 2, precise_layer)["color_raster"]);
+        QVERIFY(!has(after["features"], "filters@1"));
+        QVERIFY(storage::load_document(path_of(book)).document.read_only_reason.empty());
+        int exit = -1;
+        (void)genko({QStringLiteral("undo"), book, QStringLiteral("--as"), QStringLiteral("human:test")}, &exit);
+        QCOMPARE(exit, 0);
+        QCOMPARE(layer_in(project(book), 1, "pic1")["asset"], layer_in(before, 1, "pic1")["asset"]);
+        (void)genko({QStringLiteral("redo"), book, QStringLiteral("--as"), QStringLiteral("human:test")}, &exit);
+        QCOMPARE(exit, 0);
+        QCOMPARE(layer_in(project(book), 1, "pic1")["asset"], layer_in(after, 1, "pic1")["asset"]);
+        // refused: an effect the gallery has not (the book as it was)
+        const Json unknown = apply(book, QStringLiteral("nope.json"),
+                                   Json::array({Json{{"op", "filter_raster"}, {"page", 1}, {"id", "pic1"}, {"kind", "filter_gallery"},
+                                                     {"effects", Json::array({Json{{"filter", "nope"}}})}}}), &exit);
+        QVERIFY2(exit != 0 && unknown.dump().find("the gallery has no effect") != std::string::npos, unknown.dump().c_str());
+        // a smart filter: filters@1, its stack in its normal form, drawn at 200 dpi
+        const Json smart = apply(book, QStringLiteral("smart.json"),
+                                 Json::array({Json{{"op", "smart_convert"}, {"page", 1}, {"ids", Json::array({"pic1"})}, {"new_id", "so"}},
+                                              Json{{"op", "smart_filter_add"}, {"page", 1}, {"id", "so"}, {"kind", "filter_gallery"},
+                                                   {"effects", Json::array({Json{{"filter", "stamp"}}, Json{{"filter", "grain"}, {"visible", false}}})}}}));
+        QVERIFY2(smart.value("ok", false), smart.dump().c_str());
+        const Json saved = project(book);
+        QVERIFY2(has(saved["features"], "filters@1"), saved["features"].dump().c_str());
+        const Json filter = layer_in(saved, 1, "so")["smart"]["filters"][0];
+        QCOMPARE(filter["kind"], Json("filter_gallery"));
+        QCOMPARE(filter["params"]["effects"][0]["params"], (Json{{"light_dark_balance", 25}, {"smoothness", 5}}));
+        QCOMPARE(filter["params"]["effects"][1]["visible"], Json(false));
+        const auto drawn = genko::test::run_genko({QStringLiteral("render"), book, QStringLiteral("--page"), QStringLiteral("1"), QStringLiteral("--dpi"),
+                                                   QStringLiteral("200"), QStringLiteral("--out"), path(QStringLiteral("gallery200.png"))});
+        QVERIFY2(drawn.exit_code == 0, qPrintable(drawn.described()));
+        QVERIFY(storage::load_document(path_of(book)).document.read_only_reason.empty());
+        // a gallery smart filter that cannot be read (an effect the gallery has not, none, 33, visible not true or false, a key
+        // an effect has not, a setting it has not): the book opens read-only; written back as it was, writable again
+        const std::string written = genko::test::read_bytes(book + QStringLiteral("/project.json"));
+        const auto broken = [&](const std::function<void(Json& stack)>& change) {
+            Json saved_again = Json::parse(written);
+            for (Json& layer : saved_again["pages"][0]["layers"])
+                if (layer.value("id", std::string()) == "so") change(layer["smart"]["filters"][0]["params"]["effects"]);
+            genko::test::write_bytes(book + QStringLiteral("/project.json"), saved_again.dump());
+            const std::string why = storage::load_document(path_of(book)).document.read_only_reason;
+            genko::test::write_bytes(book + QStringLiteral("/project.json"), written);
+            return why;
+        };
+        QVERIFY(!broken([](Json& stack) { stack[0]["filter"] = "nope"; }).empty());
+        QVERIFY(!broken([](Json& stack) { stack = Json::array(); }).empty());
+        QVERIFY(!broken([](Json& stack) {
+                    while (stack.size() < 33) stack.push_back(Json{{"filter", "cutout"}});
+                }).empty());
+        QVERIFY(!broken([](Json& stack) { stack[0]["visible"] = "yes"; }).empty());
+        QVERIFY(!broken([](Json& stack) { stack[0]["opacity"] = 1; }).empty());
+        QVERIFY(!broken([](Json& stack) { stack[0]["params"]["pencil_width"] = 3; }).empty());
+        QVERIFY(storage::load_document(path_of(book)).document.read_only_reason.empty());
+        // the catalogue: the 47 effects with PhotoCraft's commands
+        const Json catalogue = genko({QStringLiteral("inspect"), book, QStringLiteral("--filters")}, &exit);
+        QCOMPARE(exit, 0);
+        QCOMPARE(catalogue["gallery"].size(), std::size_t(47));
+        QCOMPARE(catalogue["gallery"][11]["command"], Json("filter.gallery.smudgeStick"));
+        QCOMPARE(genko::test::book_problems(book), std::string());
+    }
 };
 
 QTEST_GUILESS_MAIN(TestContractFiltersPc4)

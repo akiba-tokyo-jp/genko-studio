@@ -114,6 +114,10 @@ struct Ctx {
     float coverage(int x, int y) const {
         return cover == nullptr ? 1.0f : static_cast<unsigned char>((*cover)[std::size_t(y) * grid_width + std::size_t(x)]) / 255.0f;
     }
+    // (D3) Where the surface's (0, 0) is on the layer's grid (0, 0 but for a part of it worked alone — フィルターギャラリー's
+    // preview, PlaceScope —; `bounds` is then that part's own coordinates, past its edges): a kernel that draws marks by the
+    // grid's coordinates adds it.
+    int x0 = 0, y0 = 0;
 };
 
 // How far outside an output tile a kernel reads (upstream's Halo): a margin of pixels, or the whole base box.
@@ -245,6 +249,27 @@ public:
 
 private:
     std::atomic<double>* before_;
+};
+
+// (D3) While it lives, the runs on this thread work a part of a layer's grid (フィルターギャラリー's preview): the surface's
+// (0, 0) at `x`, `y` of the grid (Ctx::x0, y0) and the base box `bounds` on the grid (the selection's box, else the
+// grid) — what the op's run on the whole grid has there.
+class PlaceScope {
+public:
+    PlaceScope(int x, int y, const Rect& bounds);
+    ~PlaceScope();
+    PlaceScope(const PlaceScope&) = delete;
+    PlaceScope& operator=(const PlaceScope&) = delete;
+    // The one living on this thread (none: the surface is the grid).
+    static const PlaceScope* current();
+    int x() const { return x_; }
+    int y() const { return y_; }
+    const Rect& bounds() const { return bounds_; }
+
+private:
+    const PlaceScope* before_;
+    int x_, y_;
+    Rect bounds_;
 };
 
 // How much work a kind is on a grid of `pixels` at scale `s` (its cost a pixel — on samples of `levels`, Ctx::levels: a

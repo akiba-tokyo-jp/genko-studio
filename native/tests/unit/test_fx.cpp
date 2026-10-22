@@ -183,6 +183,8 @@ Json kind_params(const std::string& kind) {
         {"other_minimum", Json{{"radius", 1}}},
         {"other_maximum", Json{{"radius", 3}, {"preserve", "roundness"}}},
         {"other_offset", Json{{"horizontal", 7}, {"vertical", -3}, {"undefined_areas", "wrap"}}},
+        // D3
+        {"filter_gallery", Json{{"effects", Json::array({Json{{"filter", "cutout"}}})}}},
     };
     return kTestParams.contains(kind) ? kTestParams.at(kind) : core::normalize_filter(kind, Json::object(), nullptr);
 }

@@ -33,6 +33,7 @@
 #include "app/ask.hpp"
 #include "app/colours.hpp"
 #include "app/filter_forms.hpp"
+#include "app/filter_gallery_window.hpp"
 #include "app/layer_dialogs.hpp"
 #include "app/main_window.hpp"
 #include "core/adjust_kinds.hpp"
@@ -200,7 +201,9 @@ const FilterItem* filter_item(const QString& name) {
 const std::vector<std::pair<std::string, FilterWindow>>& filter_windows() {
     // (D3 filter_gallery, D4 blur_field … blur_spin, render_lighting_effects, flame, picture_frame, tree, D5 camera_raw, D6
     // lens_correction, adaptive_wide_angle, vanishing_point: each its group's)
-    static const std::vector<std::pair<std::string, FilterWindow>> all;
+    static const std::vector<std::pair<std::string, FilterWindow>> all{
+        {"filter_gallery", [](const FilterWindowCall& call) { filter_gallery::open(call); }},  // (D3: app/filter_gallery_window.cpp)
+    };
     return all;
 }
 
@@ -424,6 +427,8 @@ void MainWindow::filter_command(const FilterItem& item) {
         call.window = this;
         call.item = &item;
         call.send = send;
+        call.page = page;
+        call.layer = layer;
         (*own)(call);
         return;
     }

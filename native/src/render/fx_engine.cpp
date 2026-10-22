@@ -181,7 +181,6 @@ std::vector<float> conv_sep(const Window& src, const Rect& out, const std::vecto
 Kernels distort_kernels() { return {}; }       // (D2)
 Kernels pixelate_kernels() { return {}; }      // (D2)
 Kernels stylize_kernels() { return {}; }       // (D2)
-Kernels gallery_kernels() { return {}; }       // (D3)
 Kernels render_kernels() { return {}; }        // (D4)
 Kernels blur_gallery_kernels() { return {}; }  // (D4)
 Kernels camera_raw_kernels() { return {}; }    // (D5)
@@ -464,6 +463,7 @@ std::string take_bytes(Surface& surface) {
 namespace {
 
 thread_local std::atomic<double>* g_progress = nullptr;
+thread_local const PlaceScope* g_place = nullptr;
 
 // Upstream's auto_tile: results do not depend on the tiling, so wide halos take bigger tiles (the margin read again
 // kept below about twice the tile).
@@ -583,6 +583,10 @@ ProgressScope::ProgressScope(std::atomic<double>& done) : before_(g_progress) {
 }
 ProgressScope::~ProgressScope() { g_progress = before_; }
 
+PlaceScope::PlaceScope(int x, int y, const Rect& bounds) : before_(g_place), x_(x), y_(y), bounds_(bounds) { g_place = this; }
+PlaceScope::~PlaceScope() { g_place = before_; }
+const PlaceScope* PlaceScope::current() { return g_place; }
+
 void apply(Surface& surface, const Kernel& kernel, const Json& params, core::FilterInks inks, const Rect& bounds_in, const std::string* cover,
            double s, const Rect* limit, const Tiling& tiling, const Reads& reads) {
     const std::uint32_t w = surface.width(), h = surface.height();
@@ -602,6 +606,12 @@ void apply(Surface& surface, const Kernel& kernel, const Json& params, core::Fil
     Ctx ctx;
     ctx.bounds = bounds_in.intersect(grid);
     if (ctx.bounds.empty()) ctx.bounds = grid;
+    if (const PlaceScope* place = PlaceScope::current()) {  // (D3: a part of the grid — its origin, the grid's base box there)
+        ctx.x0 = place->x();
+        ctx.y0 = place->y();
+        const Rect& b = place->bounds();
+        ctx.bounds = Rect{b.x0 - ctx.x0, b.y0 - ctx.y0, b.x1 - ctx.x0, b.y1 - ctx.y0};
+    }
     ctx.space = way.meaning ? Space::Rgb : way.lab_lightness ? Space::Gray : surface.space();
     ctx.colours = way.kernel_colours;
     ctx.alpha = true;
@@ -621,7 +631,7 @@ void apply(Surface& surface, const Kernel& kernel, const Json& params, core::Fil
     if (limit != nullptr) {
         area = limit->intersect(grid);
     } else if (halo.bounds || kernel.fills) {
-        area = ctx.bounds;
+        area = ctx.bounds.intersect(grid);
     } else {
         area = content.empty() ? Rect{} : content.inflate(halo.radius).intersect(grid);
     }
@@ -634,7 +644,7 @@ void apply(Surface& surface, const Kernel& kernel, const Json& params, core::Fil
     // tile's result and the selection's mix. When not even one thread's fits, smaller tiles (their windows smaller; the
     // result the same whatever the tiling) before it is refused as too large.
     const std::size_t sch = way.colours + 1, kch = way.kernel_colours + 1;
-    const Rect whole = halo.bounds ? ctx.bounds.unite(area) : Rect{};
+    const Rect whole = halo.bounds ? ctx.bounds.intersect(grid).unite(area) : Rect{};
     const image_ops::Held shared_held(std::uint64_t(whole.area()) * kch * sizeof(float));
     const auto per_thread_of = [&](int tile_side) {
         const std::uint64_t tile_px = std::uint64_t(tile_side) * tile_side;

@@ -21,6 +21,7 @@
 #include "app/adjust_forms.hpp"
 #include "app/ask.hpp"
 #include "app/filter_forms.hpp"
+#include "app/filter_menu.hpp"
 #include "app/layer_dialogs.hpp"
 #include "app/layer_panel.hpp"
 #include "app/main_window.hpp"
@@ -152,6 +153,27 @@ void LayerPanel::edit_smart_filter(int index) {
     const auto asked = window_->asking();
     const std::string layer_id = layer->id;
     const Json page_index = page->index.json();
+    if (const FilterWindow* own = filter_window(kind)) {  // (PC4 節 D: a group's own window — フィルターギャラリー… —, from its settings)
+        const render::fx::Grid grid = render::fx::layer_grid(*page, *layer);
+        FilterWindowCall call;
+        call.window = window_;
+        call.now = now;
+        call.page = page;
+        call.layer = layer;
+        call.filter = index;
+        call.send = [this, asked, page_index, layer_id, index, kind, grid, now](const Json& values) {
+            if (!window_->still(asked)) return;
+            try {  // (nothing changed: nothing sent — as the table's windows)
+                if (core::normalize_filter(kind, now, nullptr) == values) return;
+            } catch (const std::exception&) {
+            }
+            const bool heavy = render::fx::work(kind, values, std::uint64_t(grid.width) * grid.height, grid.s, grid.levels) >= render::fx::kHeavyWork;
+            window_->send_filter(Json::array({Json{{"op", "smart_filter_set"}, {"page", page_index}, {"id", layer_id}, {"index", index}, {"params", values}}}),
+                                 filter_forms::title(kind), heavy);
+        };
+        (*own)(call);
+        return;
+    }
     // (shown on the page while the numbers change: the filter set again on a copy of the book)
     const FilterPreview preview = [this, page_index, layer_id, index](const std::optional<Json>& values) {
         if (!values) {

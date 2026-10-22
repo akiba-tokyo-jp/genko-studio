@@ -101,6 +101,7 @@ genko_library(genko_app
     filter_forms.cpp
     filter_forms_basic.cpp
     filter_menu.cpp
+    filter_gallery_window.cpp
     main_window_adjust.cpp
     main_window_smart.cpp
     main_window_page_size.cpp

@@ -122,6 +122,7 @@ genko_library(genko_render
     fx_engine.cpp
     fx_blur.cpp
     fx_blur2.cpp
+    fx_gallery.cpp
     fx_noise.cpp
     fx_other.cpp
     fx_rank.cpp
