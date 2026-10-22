@@ -342,14 +342,17 @@ void erase_raster(const core::Page& page, core::Layer& layer, const core::PenPoi
     save_raster(page, layer, image);
 }
 
-void erase_raster_masked(const core::Page& page, core::Layer& layer, int dpi, const Image& mask) {
+void erase_raster_masked(const core::Page& page, core::Layer& layer, const std::function<Image(Size, int)>& mask_of) {
     if (!layer.raster_png || layer.raster_png->empty()) {
         const std::vector<core::StrokePtr> strokes = layer.strokes->items;
-        for (const core::StrokePtr& stroke : strokes) bake_stroke(page, layer, core::stroke_points(*stroke), dpi);
+        for (const core::StrokePtr& stroke : strokes) bake_stroke(page, layer, core::stroke_points(*stroke), kWorkingDpi);
     }
-    Image image = ensure_raster(page, layer, dpi);
+    Image image = ensure_raster(page, layer, kWorkingDpi);
+    // (the picture's own grid: its pixels an inch across the page — PC4 F-b's image grids are not of 200 dpi)
+    const double width_mm = page.spec.width_mm.value();
+    const int dpi = width_mm > 0 ? std::max(1, static_cast<int>(std::lround(image.width() * 25.4 / width_mm))) : kWorkingDpi;
     const Image alpha = image.getchannel(3);
-    image.putalpha(chops::subtract(alpha, mask));
+    image.putalpha(chops::subtract(alpha, mask_of(image.size(), dpi)));
     save_raster(page, layer, image);
 }
 

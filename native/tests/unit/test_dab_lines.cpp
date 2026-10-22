@@ -72,8 +72,9 @@ core::Document pen_book() {
     return doc;
 }
 
-// A page of one 8-bit paint layer "paint", opaque light grey but a clear corner.
-core::Document paint_book() {
+// A page of one 8-bit paint layer "paint", opaque light grey but a clear corner; its pixels `side` across the page (400:
+// the working 200 dpi; 600: a layer of 300 dpi, as a picture opened on its own grid is).
+core::Document paint_book(int side = kSide) {
     core::Document doc = pen_book();
     auto& p = doc.edit_page(0);
     p.layers.clear();
@@ -83,13 +84,13 @@ core::Document paint_book() {
     layer.kind = core::LayerKind::Raster;
     layer.panel_clip = false;
     std::string bytes;
-    for (int y = 0; y < kSide; ++y) {
-        for (int x = 0; x < kSide; ++x) {
+    for (int y = 0; y < side; ++y) {
+        for (int x = 0; x < side; ++x) {
             for (int c = 0; c < 3; ++c) bytes.push_back(static_cast<char>(200));
             bytes.push_back(static_cast<char>(x < 20 && y < 20 ? 0 : 255));
         }
     }
-    render::raster::save_raster(p, layer, render::Image::frombytes("RGBA", Size{kSide, kSide}, bytes));
+    render::raster::save_raster(p, layer, render::Image::frombytes("RGBA", Size{side, side}, bytes));
     p.layers.push_back(layer);
     return doc;
 }
@@ -375,25 +376,46 @@ private slots:
     }
 
     // erase's brush (a dab brush of the book) and block on a paint layer of each kind: the alpha taken where it went
-    // (partly at opacity 0.5), nothing elsewhere; a brush that is not a dab brush refused.
+    // (partly at opacity 0.5), nothing elsewhere — on a layer of the working 200 dpi and on one of 300 dpi (a picture's own
+    // grid: kept its size, the right and the bottom too) —; a brush that is not a dab brush refused.
     void eraseByBrushAndBlock() {
-        for (const std::string& kind : kinds()) {
-            core::Document doc = run(as_kind(paint_book(), kind), define_dab("my_hard", Json::parse(R"({"hardness": 1, "spacing": 0.1})")));
-            const Pixels before = whole(doc);
-            const std::size_t w = before.width();
-            const double k = w / (2 * kInch);
-            const auto at = [&](double x_mm, double y_mm) { return std::size_t(std::lround(y_mm * k)) * w + std::size_t(std::lround(x_mm * k)); };
-            const auto alpha = [&](const Pixels& p, std::size_t i) { return p.at(i)[p.colours()]; };
-            for (const Json& how : {Json{{"brush", "my_hard"}}, Json{{"block", true}}}) {
-                Json op{{"op", "erase"}, {"page", 1}, {"layer_id", "paint"}, {"width_mm", 4.0}, {"points", Json::parse("[[10, 25], [40, 25]]")}};
-                for (const auto& [key, value] : how.items()) op[key] = value;
-                const Pixels after = whole(*std::make_unique<core::Document>(run(doc, op)));
-                QVERIFY2(alpha(after, at(25, 25)) < 0.01f, kind.c_str());
-                QVERIFY2(alpha(after, at(25, 40)) > 0.99f, kind.c_str());
-                op["opacity"] = 0.5;
-                const Pixels half = whole(*std::make_unique<core::Document>(run(doc, op)));
-                QVERIFY2(std::abs(alpha(half, at(25, 25)) - 0.5f) < 0.02f, qPrintable(QString::fromStdString(kind) + " " + QString::number(alpha(half, at(25, 25)))));
+        for (const int side : {kSide, 600}) {  // (the working 200 dpi, and a layer of 300 dpi: a picture's own grid)
+            for (const std::string& kind : kinds()) {
+                core::Document doc = run(as_kind(paint_book(side), kind), define_dab("my_hard", Json::parse(R"({"hardness": 1, "spacing": 0.1})")));
+                const Pixels before = whole(doc);
+                const std::size_t w = before.width();
+                const double k = w / (2 * kInch);
+                const auto at = [&](double x_mm, double y_mm) { return std::size_t(std::lround(y_mm * k)) * w + std::size_t(std::lround(x_mm * k)); };
+                const auto alpha = [&](const Pixels& p, std::size_t i) { return p.at(i)[p.colours()]; };
+                for (const Json& how : {Json{{"brush", "my_hard"}}, Json{{"block", true}}}) {
+                    Json op{{"op", "erase"}, {"page", 1}, {"layer_id", "paint"}, {"width_mm", 4.0}, {"points", Json::parse("[[10, 25], [40, 25]]")}};
+                    for (const auto& [key, value] : how.items()) op[key] = value;
+                    const Pixels after = whole(*std::make_unique<core::Document>(run(doc, op)));
+                    QCOMPARE(after.width(), before.width());  // (its grid kept: the right and the bottom too)
+                    QCOMPARE(after.height(), before.height());
+                    QVERIFY2(alpha(after, at(25, 25)) < 0.01f, kind.c_str());
+                    QVERIFY2(alpha(after, at(25, 40)) > 0.99f, kind.c_str());
+                    QVERIFY2(alpha(after, after.width() * after.height() - 1) > 0.99f, kind.c_str());
+                    op["opacity"] = 0.5;
+                    const Pixels half = whole(*std::make_unique<core::Document>(run(doc, op)));
+                    QVERIFY2(std::abs(alpha(half, at(25, 25)) - 0.5f) < 0.02f, qPrintable(QString::fromStdString(kind) + " " + QString::number(alpha(half, at(25, 25)))));
+                }
             }
+        }
+        // a layer of 300 dpi (not the working 200: a picture's own grid) keeps its size, erased where the eraser went
+        for (const Json& how : {Json{{"brush", "my_hard"}}, Json{{"block", true}}}) {
+            const core::Document fine = run(paint_book(600), define_dab("my_hard", Json::parse(R"({"hardness": 1, "spacing": 0.1})")));
+            Json op{{"op", "erase"}, {"page", 1}, {"layer_id", "paint"}, {"width_mm", 4.0}, {"points", Json::parse("[[10, 25], [40, 25]]")}};
+            for (const auto& [key, value] : how.items()) op[key] = value;
+            const core::Document erased = run(fine, op);
+            const render::Image picture = render::raster::layer_pixels(erased.page(0), erased.page(0).layers[0]);
+            QCOMPARE(picture.width(), 600);
+            QCOMPARE(picture.height(), 600);
+            const double k = 600 / (2 * kInch);
+            QCOMPARE(alpha_at(picture, static_cast<int>(25 * k), static_cast<int>(25 * k)), 0);  // (where it went)
+            QCOMPARE(alpha_at(picture, static_cast<int>(25 * k), static_cast<int>(40 * k)), 255);
+            QCOMPARE(alpha_at(picture, 599, 599), 255);  // (the right and the bottom kept)
+            QCOMPARE(alpha_at(picture, 599, static_cast<int>(25 * k)), 255);
         }
         core::Document doc = paint_book();
         Json op{{"op", "erase"}, {"page", 1}, {"layer_id", "paint"}, {"width_mm", 4.0}, {"points", Json::parse("[[10, 25], [40, 25]]")}, {"brush", "gpen"}};

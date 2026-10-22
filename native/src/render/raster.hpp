@@ -1,5 +1,6 @@
 #pragma once
 
+#include <functional>
 #include <string>
 #include <string_view>
 
@@ -47,8 +48,10 @@ void erase_raster(const core::Page& page, core::Layer& layer, const core::PenPoi
                   std::string_view texture, const std::string& seed);
 
 // brushes@1 (PC4 E1): erase by a brush (render/dab_ops.hpp eraser_mask) on the layer's 8-bit pixels: the alpha loses
-// what the mask of the page at `dpi` takes (the layer's lines baked in first, as erase_raster does).
-void erase_raster_masked(const core::Page& page, core::Layer& layer, int dpi, const Image& mask);
+// what `mask_of(size, dpi)` takes — an "L" mask the size of the layer's picture, `dpi` its pixels an inch across the page
+// (the layer's own grid: a picture not of 200 dpi keeps its size). A layer of lines only is drawn into pixels at 200 dpi
+// first, as erase_raster does.
+void erase_raster_masked(const core::Page& page, core::Layer& layer, const std::function<Image(Size, int)>& mask_of);
 
 // What erase_raster takes away, as an "L" mask of `size` (pixels at dpi): 255 where the eraser clears all, less at a
 // soft edge or between the grains of a rough one ("" or "hard": a clean edge).

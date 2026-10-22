@@ -2565,10 +2565,7 @@ void erase(OpContext& c) {
         if (target.kind == LayerKind::Raster && !target.patches.empty() && !(target.raster_png && !target.raster_png->empty())) {
             raster::bake_vectors(page, target, core::profiled_rgb(page));
         }
-        if (target.raster_png && !target.raster_png->empty()) {
-            const Size size{mm_to_px(page.spec.width_mm.value(), kWorkingDpi), mm_to_px(page.spec.height_mm.value(), kWorkingDpi)};
-            raster::erase_raster_masked(page, target, kWorkingDpi, mask_of(size, kWorkingDpi));
-        }
+        if (target.raster_png && !target.raster_png->empty()) raster::erase_raster_masked(page, target, mask_of);  // (at its own grid)
         return;
     }
     if (target.color_raster) {
