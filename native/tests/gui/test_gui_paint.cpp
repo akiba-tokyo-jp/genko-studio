@@ -27,6 +27,7 @@
 #include "app/main_window.hpp"
 #include "app/tool_settings.hpp"
 #include "core/json.hpp"
+#include "core/ops_util.hpp"
 #include "core/poses.hpp"
 #include "core/pynum.hpp"
 #include "render/gradient_presets.hpp"
@@ -381,7 +382,9 @@ private slots:
         QCOMPARE(s.session->document().page(0).layers.back().patches.size(), patches + 1);
         basis->setCurrentIndex(basis->findData(QStringLiteral("lines")));
         emit basis->activated(basis->currentIndex());
-        // a precise 描画色 on a page of 16 bits: its floats
+        // a precise 描画色 on a page of 16 bits: its floats (the two fills undone: the green there would be a wall)
+        s.trigger("act_undo");
+        s.trigger("act_undo");
         QVERIFY(s.window->apply_ops(Json::array({Json{{"op", "set_color_mode"}, {"page", 1}, {"mode", "rgb"}, {"depth", 16}}})));
         s.colours().choose_precise({0.3, 0.6, 0.15});
         inject::click_mm(s.canvas(), QPointF(40, 50));
@@ -438,10 +441,15 @@ private slots:
         emit s.colours().pick_source->activated(0);
         inject::click_mm(s.canvas(), QPointF(90, 120));
         QCOMPARE(s.brush().rgb(), (app::Rgb{0, 255, 0}));
-        // a page of 16 bits: the floats there
+        // a page of 16 bits: the floats there (a precise layer on top, a precise colour laid in it by gradient_fill)
+        const Json exact{{"precision", "u16"}, {"values", Json::array({0.3, 0.6, 0.15})}};
         QVERIFY(s.window->apply_ops(Json::array({Json{{"op", "set_color_mode"}, {"page", 1}, {"mode", "rgb"}, {"depth", 16}},
-                                                  Json{{"op", "fill"}, {"page", 1}, {"layer_id", "q"}, {"x_mm", 90}, {"y_mm", 120}, {"rgb", Json::array({77, 153, 38})},
-                                                       {"color_rgb", Json{{"precision", "u16"}, {"values", Json::array({0.3, 0.6, 0.15})}}}}})));
+                                                  Json{{"op", "add_layer"}, {"page", 1}, {"kind", "paint"}, {"id", "r"}},
+                                                  Json{{"op", "set_layer"}, {"page", 1}, {"id", "r"}, {"panel_clip", false}},
+                                                  Json{{"op", "gradient_fill"}, {"page", 1}, {"layer_id", "r"}, {"from", Json::array({60, 130})}, {"to", Json::array({120, 130})},
+                                                       {"stops", Json::array({Json::array({0, exact}), Json::array({1, exact})})},
+                                                       {"area", Json{{"poly", Json::parse("[[60, 100], [120, 100], [120, 160], [60, 160]]")}}}}})));
+        QVERIFY(s.session->document().page(0).layers[core::layer_by_id(s.session->document().page(0), "r")].color_raster != nullptr);
         QVERIFY(s.canvas()->wait_rendered(20000));
         inject::click_mm(s.canvas(), QPointF(90, 120));
         QVERIFY(s.colours().is_precise());
@@ -513,7 +521,9 @@ private slots:
         QCOMPARE(op["gradient"]["stops"], Json::parse("[[0.0, [0, 0, 0], 1.0], [1.0, [255, 255, 255], 1.0]]"));
         const auto fill_layer = [&s]() -> const core::Layer& {
             const core::Page& page = s.session->document().page(0);
-            return *std::find_if(page.layers.begin(), page.layers.end(), [](const core::Layer& l) { return l.kind == core::LayerKind::Fill; });
+            // (the gradient's: the page's paper is a fill layer too)
+            return *std::find_if(page.layers.begin(), page.layers.end(),
+                                 [](const core::Layer& l) { return l.kind == core::LayerKind::Fill && l.fill && l.fill->contains("gradient"); });
         };
         const std::string made = fill_layer().id;
         s.window->set_target_layer(made);

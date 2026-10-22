@@ -314,18 +314,23 @@ private slots:
         QVERIFY(refusal(precise, Json::array({exact})).find("a stop's colour") != std::string::npos);
     }
 
-    // a new (empty) paint layer of a page of 16 or 32 bits: a gradient and a fill make it precise (its pixels finer than 8
-    // bits, no picture laid on it); an alpha channel of such a page takes a gradient as before (lent as an 8-bit picture)
+    // a new (empty) paint layer of a page of 16 or 32 bits that may hold precise pixels (not cut at the panels: the rule of
+    // keep_page_modes and set_color_mode): a gradient and a fill make it precise (its pixels finer than 8 bits, no picture
+    // laid on it); one cut at the panels keeps the picture as before; an alpha channel of such a page takes a gradient as
+    // before (lent as an 8-bit picture)
     void emptyLayersOfPrecisePagesBecomePrecise() {
         for (const std::string& kind : {std::string("16"), std::string("32")}) {
-            const core::Document doc = run(as_kind(paint_book(), kind), Json{{"op", "add_layer"}, {"page", 1}, {"kind", "paint"}, {"id", "fresh"}});
-            const core::Layer* made = nullptr;
-            for (const core::Layer& l : doc.page(0).layers)
-                if (l.id == "fresh") made = &l;
-            QVERIFY(made != nullptr && made->color_raster == nullptr);
+            const core::Document clipped = run(as_kind(paint_book(), kind), Json{{"op", "add_layer"}, {"page", 1}, {"kind", "paint"}, {"id", "fresh"}});
             Json op = black_white();
             op["layer_id"] = "fresh";
             op.erase("dither");
+            {
+                const core::Document laid = run(clipped, op);
+                const core::Layer& fresh = laid.page(0).layers[core::layer_by_id(laid.page(0), "fresh")];
+                QVERIFY2(fresh.color_raster == nullptr && fresh.patches.size() == 1, kind.c_str());
+            }
+            const core::Document doc = run(clipped, Json{{"op", "set_layer"}, {"page", 1}, {"id", "fresh"}, {"panel_clip", false}});
+            QVERIFY(doc.page(0).layers[core::layer_by_id(doc.page(0), "fresh")].color_raster == nullptr);
             core::Document painted = run(doc, op);
             const core::Layer& fresh = painted.page(0).layers[core::layer_by_id(painted.page(0), "fresh")];
             QVERIFY2(fresh.color_raster != nullptr && fresh.patches.empty(), kind.c_str());

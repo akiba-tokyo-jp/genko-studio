@@ -88,8 +88,9 @@ const std::multimap<QString, QString>& renamed();
 // it writes them: names_current) mean the new command by such a name; kept before, the renamed one.
 const std::vector<QString>& reused_names();
 bool reused_name(const QString& name);
-// Whether the settings' `key` ("ui/quick", "ui/commandbar", "shortcuts") was written by a build that knows reused_names(),
-// and that it is now.
+// Whether the settings' `key` ("ui/quick", "ui/commandbar", or "shortcuts/<a reused name>") holds what a build that knows
+// reused_names() wrote there — marked as it wrote it: the value then kept beside it (names_current/<key>), so a value a
+// build before them wrote since reads as theirs —, and that it is now.
 bool names_current(const QString& key);
 void mark_names_current(const QString& key);
 void apply_shortcuts(MainWindow* window);
