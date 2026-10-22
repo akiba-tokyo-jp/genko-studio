@@ -34,6 +34,7 @@
 #include "core/clock.hpp"
 #include "core/command_bus.hpp"
 #include "core/error.hpp"
+#include "core/file_info.hpp"
 #include "core/ids.hpp"
 #include "core/json.hpp"
 #include "core/lut3d.hpp"
@@ -42,6 +43,7 @@
 #include "core/pyconv.hpp"
 #include "formats/export.hpp"
 #include "formats/exporting.hpp"
+#include "formats/open_file.hpp"
 #include "formats/pillow_save.hpp"
 #include "formats/smart_files.hpp"
 #include "render/anim.hpp"
@@ -283,6 +285,7 @@ int inspect(const QStringList& args, bool ascii) {
     QString pixel, layer, dpi_text, profile;
     bool looks = false;  // (PC2a, the C++ build's own: --looks, image.adjustments.colorLookup.list)
     bool filters = false;  // (PC4 節 D, the C++ build's own: --filters, フィルター's kinds and their settings)
+    bool file_info = false;  // (PC4 F-b, the C++ build's own: --file-info, file.fileInfo's reading)
     QString area_text, page_text;  // (PC3 B1, the C++ build's own: --page N --area '<area>'; PC3 C-a: --paths [--page N])
     bool paths = false;  // (vector@1, PC3 C-a, the C++ build's own: --paths [--page N], path.list / path.info / layer.vectorMask.info)
     QString at_text;  // (PC3 C-d, the C++ build's own: --at <page>:<x_mm>,<y_mm>, layer.pickAt — the layers showing there)
@@ -305,6 +308,8 @@ int inspect(const QStringList& args, bool ascii) {
             looks = true;
         } else if (arg == QLatin1String("--filters")) {
             filters = true;
+        } else if (arg == QLatin1String("--file-info")) {
+            file_info = true;
         } else if (arg == QLatin1String("--paths")) {
             paths = true;
         } else if (arg == QLatin1String("--stroke")) {
@@ -414,6 +419,20 @@ int inspect(const QStringList& args, bool ascii) {
     }
     if (paths) {  // (vector@1: the pages' paths, work paths, clipping paths and the layers' vector masks and shapes)
         print_json(render::path_info::book_paths(loaded.document, page_number), ascii);
+        return 0;
+    }
+    if (file_info) {  // (PC4 F-b, file.fileInfo: the book's File Info and title, and what each page was opened from)
+        const core::Document& doc = loaded.document;
+        core::Json out = core::Json::object();
+        out["title"] = doc.title;
+        out["file_info"] = doc.file_info ? core::to_json(*doc.file_info) : core::Json::object();
+        core::Json pages = core::Json::array();
+        for (std::size_t i = 0; i < doc.pages.size(); ++i) {
+            const core::Page& page = *doc.pages[i];
+            pages.push_back(core::Json{{"page", page.index.json()}, {"native_source", page.native_source ? core::to_json(*page.native_source) : core::Json(nullptr)}});
+        }
+        out["pages"] = std::move(pages);
+        print_json(out, ascii);
         return 0;
     }
     if (filters) {  // (PC4 節 D: each kind's upstream id, Photoshop's name, settings, smart filter, inks; the presets)
@@ -981,12 +1000,105 @@ int schema(const QStringList& args, bool ascii) {
     return 0;
 }
 
+// genko new <dest> --from <file> [--as <ext>] and genko new <dest> --image … (PC4 F-b, SPEC.md FILE-01: 開く…・指定形式で開く…
+// and 新規… → 画像 as a book written at once): the book of one page formats::open_file or formats::new_image makes, written
+// to `dest` (never over a book), {"ok", "path", "notes", "snapshot"}.
+int new_book_of(const Arguments& a, bool ascii) {
+    const std::string dest_text = pathlib_text(a.positional[0].toStdString());
+    const fs::path dest = storage::path_from_utf8(dest_text);
+    std::error_code ec;
+    if (fs::exists(dest / "project.json", ec)) {
+        return fail("a book is there already: " + storage::path_to_utf8(dest / "project.json") + " (genko new never writes over a book)", "exists", ascii, 1);
+    }
+    formats::Opened made;
+    if (const auto from = a.value("--from")) {
+        for (const char* other : {"--width", "--height", "--unit", "--dpi", "--mode", "--depth", "--background", "--profile"}) {
+            if (a.value(other)) return usage(std::string("genko new: argument ") + other + ": only with --image");
+        }
+        formats::OpenOptions options;
+        if (const auto as = a.value("--as")) {
+            options.as = render::codecs::from_extension(as->toStdString());
+            if (!options.as) return usage("genko new: argument --as: not a format this build knows: " + core::py_repr_str(as->toStdString()));
+        }
+        const std::string file = pathlib_text(from->toStdString());
+        made = formats::open_file(storage::read_file(storage::path_from_utf8(file)), file, options);
+        if (const auto title = a.value("--title")) made.doc.title = title->toStdString();
+    } else {
+        if (a.value("--as")) return usage("genko new: argument --as: only with --from");
+        formats::NewImage image;
+        image.title = a.value("--title").value_or(QStringLiteral("無題")).toStdString();
+        const auto number = [&](const char* name, double fallback) -> std::optional<double> {
+            const auto text = a.value(name);
+            if (!text) return fallback;
+            bool ok = false;
+            const double v = text->trimmed().toDouble(&ok);
+            if (!ok || !std::isfinite(v)) return std::nullopt;
+            return v;
+        };
+        const auto dpi = number("--dpi", 72);
+        if (!dpi) return usage("genko new: argument --dpi: a number of pixels an inch");
+        image.dpi = *dpi;
+        const QString unit = a.value("--unit").value_or(QStringLiteral("px"));
+        const double per = unit == QLatin1String("px") ? 1.0 : unit == QLatin1String("mm") ? image.dpi / 25.4 : unit == QLatin1String("cm") ? image.dpi / 2.54
+                         : unit == QLatin1String("in") ? image.dpi : 0.0;
+        if (per == 0.0) return usage("genko new: argument --unit: px, mm, cm or in");
+        const auto width = number("--width", 0), height = number("--height", 0);
+        if (!a.value("--width") || !a.value("--height") || !width || !height) return usage("genko new --image: --width and --height are required (numbers)");
+        image.width = std::llround(*width * per);
+        image.height = std::llround(*height * per);
+        image.mode = a.value("--mode").value_or(QStringLiteral("rgb")).toStdString();
+        const auto depth = int_option(a.value("--depth").value_or(QStringLiteral("8")));
+        if (!depth) return usage("genko new: argument --depth: 8, 16 or 32");
+        image.depth = static_cast<int>(*depth);
+        image.background = a.value("--background").value_or(QStringLiteral("white")).toLower().toStdString();
+        image.profile = a.value("--profile").value_or(QString()).toStdString();
+        made = formats::new_image(image);
+    }
+    storage::ProjectLock lock(dest, std::string(core::kLegacyActor));
+    lock.try_acquire();
+    if (fs::exists(dest / "project.json", ec)) return fail("a book is there already: " + storage::path_to_utf8(dest / "project.json"), "exists", ascii, 1);
+    storage::SaveRequest request;
+    request.actor = std::string(core::kLegacyActor);
+    request.base_revision = 0;
+    request.ops = Json::array();
+    storage::Saver(lock).save(made.doc, request);
+    lock.release();
+    if (a.flag("--plain")) {
+        write_text(dest_text + "\n", stdout);
+        return 0;
+    }
+    Json notes = Json::array();
+    for (const std::string& note : made.notes) notes.push_back(note);
+    Json out = Json::object();
+    out["ok"] = true;
+    out["path"] = dest_text;
+    out["notes"] = std::move(notes);
+    out["snapshot"] = storage::snapshot(made.doc);
+    print_json(out, ascii);
+    return 0;
+}
+
 int new_book(const QStringList& args, bool ascii) {
     static constexpr Option kOptions[] = {{"--title", true},  {"--episode", true}, {"--pages", true}, {"--webtoon", false},
                                           {"--b4", false},    {"--preset", true},  {"--paper", true}, {"--json", false},
-                                          {"--plain", false}};
+                                          {"--plain", false},
+                                          // (PC4 F-b: a book of a file, or of a new image)
+                                          {"--from", true},   {"--as", true},      {"--image", false}, {"--width", true},
+                                          {"--height", true}, {"--unit", true},    {"--dpi", true},    {"--mode", true},
+                                          {"--depth", true},  {"--background", true}, {"--profile", true}};
     Arguments a;
     if (auto error = parse_arguments(args, kOptions, 1, "dest", a)) return usage("genko new: " + *error);
+    if (a.value("--from") || a.flag("--image")) {
+        if (a.value("--from") && a.flag("--image")) return usage("genko new: argument --from: not with --image");
+        for (const char* comic : {"--episode", "--pages", "--preset", "--paper"}) {
+            if (a.value(comic)) return usage(std::string("genko new: argument ") + comic + ": not with --from or --image");
+        }
+        if (a.flag("--webtoon") || a.flag("--b4")) return usage("genko new: argument --webtoon, --b4: not with --from or --image");
+        return new_book_of(a, ascii);
+    }
+    for (const char* image : {"--as", "--width", "--height", "--unit", "--dpi", "--mode", "--depth", "--background", "--profile"}) {
+        if (a.value(image)) return usage(std::string("genko new: argument ") + image + ": only with --from or --image");
+    }
     const auto episode = int_option(a.value("--episode").value_or(QStringLiteral("1")));
     if (!episode) return usage("genko new: argument --episode: invalid int value: " + core::py_repr_str(a.value("--episode")->toStdString()));
     const auto pages = int_option(a.value("--pages").value_or(QStringLiteral("8")));

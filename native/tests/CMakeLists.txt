@@ -458,6 +458,12 @@ genko_test(test_contract_tiff_webp SOURCES contract/test_contract_tiff_webp.cpp 
 # none of 節 F's extensions written as before; the five extensions' frames; the files' ops as frames.
 genko_test(test_contract_open SOURCES contract/test_contract_open.cpp DEPS genko_test_support genko_formats genko_render_ops
            LABELS contract TIMEOUT 900)
+# PC4 F-b (SPEC.md FILE-01, file.fileInfo): ファイル情報… — set_file_info and file-info@1, the eight XMP items written into the
+# packet a picture was opened with (its other properties kept), the packet in the files the exports and コピーを保存… write
+# (read back here and by the reference's Pillow and psd-tools), a picture's EXIF and XMP kept and its orientation applied
+# when it is opened, `genko inspect --file-info`.
+genko_test(test_contract_file_info SOURCES contract/test_contract_file_info.cpp DEPS genko_test_support genko_formats genko_render_ops
+           LABELS contract TIMEOUT 900)
 # The text of a line (M4): tategaki and the text side of balloons (cells, kinsoku, glyphs, ruby, 傍点, the letters set
 # across and down, their effects, text on a path) against Python's (render_harness.py text-cases), byte for byte (a
 # warped line's pictures within ARCHITECTURE.md §9: Python's homography comes from numpy's SVD).
@@ -646,6 +652,10 @@ if(GENKO_BUILD_APP)
   genko_test(test_gui_save SOURCES gui/test_gui_save.cpp DEPS genko_app GUI TIMEOUT 900)
   target_compile_definitions(test_gui_save PRIVATE GENKO_CLI="$<TARGET_FILE:genko>")
   add_dependencies(test_gui_save genko)
+  # PC4 F-b (SPEC.md FILE-01, the user's decision 4): ファイル's entrances — 開く… (a .genko and a picture: a book in memory, the
+  # file never written), 指定形式で開く…, the drop, 最近使用したファイルを開く, a picture's book closed, すべてを閉じる・その他を閉じる,
+  # 復帰 undone, 別名で保存… of another format and コピーを保存…, ファイル情報…, 複製…, 新規… → 画像, 環境設定 → ファイル管理
+  genko_test(test_gui_file SOURCES gui/test_gui_file.cpp DEPS genko_app genko_test_support GUI TIMEOUT 900)
   # the windows on 1024×640 … 1920×1080 at 100–200 %, the long path, the preview, typed Japanese, the picture cache
   genko_test(test_gui_layout SOURCES gui/test_gui_layout.cpp DEPS genko_app genko_test_support GUI TIMEOUT 1200)
   # `genko app` in processes of its own: draw, undo, save, quit, open again; the autosave and the recovery copy across

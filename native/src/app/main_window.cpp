@@ -139,6 +139,8 @@ bool open_elsewhere(const Session* session, const MainWindow* but) {
 QString Document::title() const {
     if (contents) return QStringLiteral("%1の中身").arg(contents_title.isEmpty() ? QStringLiteral("スマートオブジェクト") : contents_title);  // (PC3 A1)
     const core::Document& book = session->document();
+    // (PC4 F-b: a picture's book in memory, by its title alone — its file's name, or the name it was made with)
+    if (picture && !session->path()) return book.title.empty() ? QStringLiteral("無題") : QString::fromStdString(book.title);
     return QStringLiteral("%1 第%2話").arg(book.title.empty() ? QStringLiteral("無題") : QString::fromStdString(book.title),
                                          QString::fromStdString(book.episode.repr()));
 }
@@ -1077,7 +1079,8 @@ void MainWindow::next_document(int step) {
 void MainWindow::add_document(std::shared_ptr<Session> session) {
     if (session) session->set_idle(std::chrono::milliseconds(save_after_ms_));  // (環境設定's 変更を保存するまで)
     if (session) connect(session.get(), &Session::statusChanged, this, &MainWindow::maybe_backup, Qt::UniqueConnection);
-    const bool untouched = documents_.size() == 1 && !session_->path() && session_->generation() == 0 &&
+    // (PC4 F-b: a book opened from a picture, a new image or a duplicate is a book of its own, never given away so)
+    const bool untouched = documents_.size() == 1 && !documents_.front().picture && !session_->path() && session_->generation() == 0 &&
                            session_->waiting() == 0 && session_->status().kind != SaveKind::Saving;
     if (!untouched && session_->unsaved() && !settle(doc_, QStringLiteral("切り替える"))) return;
     store_document();
@@ -1161,8 +1164,16 @@ void MainWindow::open_project(const fs::path& path) {
 bool MainWindow::settle(int index, const QString& verb, bool* defer_discard) {
     if (index < 0 || index >= static_cast<int>(documents_.size())) return true;
     const std::shared_ptr<Session> s = documents_[static_cast<std::size_t>(index)].session;
+    const bool picture = documents_[static_cast<std::size_t>(index)].picture;
+    const bool from_file = documents_[static_cast<std::size_t>(index)].source.has_value();
     try {
         if (!s->unsaved()) return true;
+        // (PC4 F-b: a picture's book in memory loses nothing by another book coming to the front — it stays in its tab —,
+        // nor, opened from a file and not changed since, by being closed: the file holds all of it)
+        if (picture && !s->path()) {
+            if (verb != QStringLiteral("閉じる")) return true;
+            if (from_file && s->generation() == 0 && s->waiting() == 0 && s->status().kind != SaveKind::Saving) return true;
+        }
         // a save that is simply due: written now (the window keeps answering), then nothing is left to ask about
         const SaveKind kind = s->status().kind;
         if ((kind == SaveKind::Dirty || kind == SaveKind::Saving) && s->path()) {
@@ -1297,18 +1308,19 @@ void MainWindow::closeEvent(QCloseEvent* event) {
 
 void MainWindow::new_book() {
     NewProjectDialog dialog(this);
-    if (ask::exec(&dialog) == QDialog::Accepted && dialog.created) open_project(*dialog.created);
+    if (colours() != nullptr) {  // (PC4 F-b: 画像's カンバスカラー 背景色 is the window's)
+        const auto rgb = colours()->sub_rgb();
+        dialog.set_background(QColor(rgb[0], rgb[1], rgb[2]));
+    }
+    if (ask::exec(&dialog) != QDialog::Accepted) return;
+    if (dialog.created) {
+        open_project(*dialog.created);
+    } else if (dialog.image) {  // (PC4 F-b: 画像 — a book of one page in memory, its .genko asked for when it is saved)
+        add_picture_book(std::move(dialog.image->doc), dialog.image->notes);
+    }
 }
 
-void MainWindow::open_book() {
-    const QString path = ask::existing_dir(this, QStringLiteral("原稿（.genko のフォルダ）を開く"));
-    if (path.isEmpty()) return;
-    if (!QFileInfo::exists(path + QStringLiteral("/project.json"))) {
-        ask::warning(this, QStringLiteral("Genko"), QStringLiteral("Genko の原稿ではありません（.genko のフォルダを選びます）"));
-        return;
-    }
-    open_project(core::path_from_utf8(path.toStdString()));
-}
+void MainWindow::open_book() { open_dialog(false); }  // (PC4 F-b: a .genko folder or a file — app/open_dialog.hpp)
 
 void MainWindow::save() {
     if (!session_->path()) {
@@ -1317,20 +1329,40 @@ void MainWindow::save() {
     }
     session_->save_now();
     if (session_->wait_saved(std::chrono::milliseconds(30000)) && !session_->unsaved()) {
+        session_->mark_saved();  // (PC4 F-b: 復帰 comes back here)
         flash(QStringLiteral("保存しました: %1").arg(QDir::toNativeSeparators(qpath(*session_->path()))), 3000);
     } else {
         flash(QStringLiteral("保存できませんでした: %1").arg(failure_reason(session_->status())), 6000, true);
     }
 }
 
-void MainWindow::save_as() { save_as_and_wait(QString()); }
+void MainWindow::save_as() {
+    // PC4 F-b (別名で保存…, 節 F 1.2): a .genko — the book goes on there —, or another format chosen: a copy of the page
+    // in front (コピーを保存…), the book as it is (Photoshop's 別名で保存 of a format that cannot hold it)
+    const QPointer<MainWindow> alive(this);
+    const std::shared_ptr<Session> origin = session_;
+    const QString suggested = QString::fromStdString(origin->document().title.empty() ? std::string("無題") : origin->document().title) + QStringLiteral(".genko");
+    if (doc_ >= 0 && documents_[static_cast<std::size_t>(doc_)].picture && !origin->path()) {
+        flash(QStringLiteral("元の画像は変えず、Genko の原稿（.genko）として保存します。画像に書くときは、ファイル → コピーを保存…"), 8000);
+    }
+    const QString path = ask::save_path(this, QStringLiteral("原稿を保存する場所"), suggested,
+                                        QStringLiteral("Genko の原稿 (*.genko);;Photoshop (*.psd);;TIFF (*.tif *.tiff);;PNG (*.png);;JPEG (*.jpg *.jpeg)"));
+    if (!alive || path.isEmpty() || session_ != origin) return;
+    const QString suffix = QFileInfo(path).suffix().toLower();
+    if (suffix == QLatin1String("psd") || suffix == QLatin1String("tif") || suffix == QLatin1String("tiff") || suffix == QLatin1String("png") ||
+        suffix == QLatin1String("jpg") || suffix == QLatin1String("jpeg")) {
+        save_copy_to(path);
+        return;
+    }
+    save_as_and_wait(QString(), origin, path);
+}
 
-bool MainWindow::save_as_and_wait(const QString&, std::shared_ptr<Session> origin) {
+bool MainWindow::save_as_and_wait(const QString&, std::shared_ptr<Session> origin, const QString& chosen) {
     if (!origin) origin = session_;
     if (session_ != origin) return false;
     const QPointer<MainWindow> alive(this);
     const QString suggested = QString::fromStdString(origin->document().title.empty() ? std::string("無題") : origin->document().title) + QStringLiteral(".genko");
-    const QString path = ask::save_path(this, QStringLiteral("原稿を保存する場所"), suggested);
+    const QString path = !chosen.isEmpty() ? chosen : ask::save_path(this, QStringLiteral("原稿を保存する場所"), suggested);
     if (!alive || path.isEmpty()) return false;
     if (alive->session_ != origin) {
         alive->flash(QStringLiteral("確認中に原稿が切り替わったため、別名保存を中止しました。"), 6000, true);
@@ -1360,6 +1392,8 @@ bool MainWindow::save_as_and_wait(const QString&, std::shared_ptr<Session> origi
     }
     const bool saved = origin->wait_saved(std::chrono::milliseconds(30000));
     if (!alive || alive->session_ != origin || !saved || origin->unsaved()) return false;
+    origin->mark_saved();  // (PC4 F-b: 復帰 comes back here)
+    if (doc_ >= 0 && doc_ < doc_tabs_->count()) doc_tabs_->setTabText(doc_, documents_[static_cast<std::size_t>(doc_)].title());  // (a picture's book: a book's name now)
     remember_project(core::path_from_utf8(target.toStdString()));
     watch();
     refresh_status();

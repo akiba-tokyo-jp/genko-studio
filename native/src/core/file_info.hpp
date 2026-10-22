@@ -63,6 +63,24 @@ Json to_json(const FileInfo& info);
 FileInfo file_info_from_json(const Json& value);
 void check_file_info(const FileInfo& info);
 
+// --- XMP (PC4 F-b; PhotoCraft v0.2.0 crates/engine/src/file_cmds.rs:330-497 read_file_info / write_file_info, MIT) ---
+// The File Info an XMP packet says: dc:creator (its names joined by "; "), photoshop:AuthorsPosition, dc:description,
+// dc:subject, dc:rights, xmpRights:Marked (True: copyrighted, False: public_domain, else not said; the older xapRights:
+// prefix too) and xmpRights:WebStatement, as elements or as attributes of an rdf:Description (after a space, a tab or a
+// new line, in double or single quotes); `xmp` left empty. XML's entities and character references are read as their
+// characters, and bytes that are not UTF-8 as U+FFFD (the packet kept as it is): the items are always UTF-8 text a book
+// can hold. Never throws: what is not there is empty.
+FileInfo file_info_from_xmp(std::string_view packet);
+// Its dc:title (the first rdf:li), "" for none.
+std::string xmp_title(std::string_view packet);
+// The packet with those items rewritten from `info` and the title from `title` (none: the packet's dc:title kept as it
+// is) — the empty ones removed, the others in an rdf:Description of their own at the end (several in a packet are XMP) —
+// and every other property kept as it was; a new packet when there is none (or it holds no rdf:RDF). The author is split
+// at ";" into dc:creator's names ("Smith, John" is one), each keyword is one rdf:li of dc:subject. Linear in the packet.
+std::string write_xmp(std::optional<std::string_view> packet, const FileInfo& info, std::optional<std::string_view> title);
+// The bytes as UTF-8 text, each sequence that is not well formed one U+FFFD (Python's bytes.decode("utf-8", "replace")).
+std::string utf8_replaced(std::string_view bytes);
+
 // The formats a page can be opened from (native_source's format) and the colours it says the file held.
 inline constexpr std::array<std::string_view, 17> kSourceFormats{"png", "jpeg", "tiff", "webp", "gif", "bmp", "tga", "ico", "pnm",
                                                                   "qoi", "exr", "hdr", "avif", "psd", "psb", "raw", "pcraft"};

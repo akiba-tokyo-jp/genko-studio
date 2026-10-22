@@ -13,6 +13,7 @@
 #include "render/color_canvas.hpp"
 #include "render/draw.hpp"
 #include "render/fill.hpp"
+#include "render/layer_masks.hpp"
 #include "render/op_limits.hpp"
 #include "render/page.hpp"
 #include "render/page_internal.hpp"
@@ -77,6 +78,7 @@ void clip_to_panels(const core::Page& page, Image& image, int dpi) {
 // raster.bake_stroke (its defaults: the ink colour, a G pen, 0.35 mm)
 void bake_stroke(const core::Page& page, core::Layer& layer, const core::PenPoints& points, int dpi) {
     Image image = ensure_raster(page, layer, dpi);
+    dpi = dpi_across(page, image.width(), dpi);  // (PC4 F-b: on a page of grid "finest", at the pixels' own resolution)
     const Image old_alpha = image.getchannel(3);
     Image overlay = Image::create("RGBA", image.size(), Ink{0, 0, 0, 0});
     check_stamps(points, dpi, 0.35);
@@ -104,6 +106,8 @@ Image baked(const core::Page& page, const core::Layer& layer, bool page_values =
         const double d = core::py_round_whole(size.width / width_in);
         limits::check_count(d, limits::kResolution, "the layer's resolution");
         dpi = static_cast<int>(std::max(1.0, d));
+    } else if (page.spec.grid) {
+        dpi = working_dpi(page);  // (PC4 F-b: a layer of no pixels yet is made at the page's grid — ensure_raster's)
     }
     detail::Ctx ctx;
     std::vector<std::string> omitted;
@@ -122,8 +126,21 @@ Image baked(const core::Page& page, const core::Layer& layer, bool page_values =
 
 }  // namespace
 
+int working_dpi(const core::Page& page) {
+    if (!page.spec.grid || *page.spec.grid != "finest" || page.color || (page.rgb && page.rgb->depth > 8)) return kWorkingDpi;
+    return layer_masks::grid_dpi(page);
+}
+
+int dpi_across(const core::Page& page, int width, int fallback) {
+    if (!page.spec.grid || *page.spec.grid != "finest") return fallback;
+    const double width_mm = page.spec.width_mm.value();
+    if (!(width_mm > 0) || width <= 0) return fallback;
+    return std::max(1, static_cast<int>(std::lround(width * 25.4 / width_mm)));
+}
+
 Image ensure_raster(const core::Page& page, const core::Layer& layer, int dpi) {
     if (layer.raster_png && !layer.raster_png->empty()) return selection::open_picture(*layer.raster_png).convert("RGBA");
+    if (page.spec.grid) dpi = working_dpi(page);  // (PC4 F-b: a new pixel layer at the page's grid)
     const int w = mm_to_px(page.spec.width_mm.value(), dpi);
     const int h = mm_to_px(page.spec.height_mm.value(), dpi);
     limits::check_picture(w, h, "the page");
@@ -264,6 +281,7 @@ void erase_raster(const core::Page& page, core::Layer& layer, const core::PenPoi
         for (const core::StrokePtr& stroke : strokes) bake_stroke(page, layer, core::stroke_points(*stroke), dpi);
     }
     Image image = ensure_raster(page, layer, dpi);
+    dpi = dpi_across(page, image.width(), dpi);  // (PC4 F-b: on a page of grid "finest", at the pixels' own resolution)
     if (texture != "soft" && texture != "rough") {
         check_stamps(points, dpi, width_mm);
         {

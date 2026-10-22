@@ -20,6 +20,7 @@
 #include "core/pyconv.hpp"
 #include "core/pynum.hpp"
 #include "core/pyops.hpp"
+#include "formats/file_xmp.hpp"
 #include "formats/output.hpp"
 #include "formats/pdf.hpp"
 #include "formats/pillow_save.hpp"
@@ -450,20 +451,27 @@ std::vector<fs::path> detail::print_into(detail::Output& output, const core::Doc
         return {path};
     }
     std::vector<fs::path> written;
+    // (PC4 F-b, file-info@1: the book's File Info in each PNG and TIFF — none for a book with none: the files as before)
+    const std::optional<std::string> xmp = book_xmp(episode);
+    const auto tiff = [&xmp](TiffSave save) {
+        if (xmp) save.xmp = *xmp;
+        return save;
+    };
+    const auto png = [&xmp](std::string bytes) { return xmp ? png_with_xmp(std::move(bytes), *xmp) : bytes; };
     for (const auto& page_ptr : episode.pages) {
         const core::Page& page = *page_ptr;
         if (const std::string own = detail::native_mode(page, fmt, color); !own.empty()) {  // (color-model@1: 1 bit, a palette)
             const fs::path path = detail::join(dest, stem(episode) + "_" + core::file_stem(page) + ".tiff");
             const Image image = image_of(page);
-            output.put(path, own == "bitmap" ? tiff_bytes(coloured(image, own), TiffSave{"group4", dpi_pair(dpi), {}})
-                                             : tiff_bytes(detail::indexed_picture(image, *page.rgb->table), TiffSave{"tiff_lzw", dpi_pair(dpi), {}}));
+            output.put(path, own == "bitmap" ? tiff_bytes(coloured(image, own), tiff(TiffSave{"group4", dpi_pair(dpi), {}}))
+                                             : tiff_bytes(detail::indexed_picture(image, *page.rgb->table), tiff(TiffSave{"tiff_lzw", dpi_pair(dpi), {}})));
             written.push_back(path);
             continue;
         }
         if (as_inks(page, fmt, color)) {  // (color-mode@1: a TIFF of its inks, with its own profile)
             const fs::path path = detail::join(dest, stem(episode) + "_" + core::file_stem(page) + ".tiff");
             const bool floats = page.color->space == core::InkSpace::Gray;  // (color-model@1: grey's 32 bits as floats)
-            output.put(path, ink_tiff_bytes(inks_of(page, floats), TiffSave{"tiff_lzw", dpi_pair(dpi), std::string(page_profile(page))}));
+            output.put(path, ink_tiff_bytes(inks_of(page, floats), tiff(TiffSave{"tiff_lzw", dpi_pair(dpi), std::string(page_profile(page))})));
             written.push_back(path);
             continue;
         }
@@ -471,7 +479,7 @@ std::vector<fs::path> detail::print_into(detail::Output& output, const core::Doc
             const fs::path path = detail::join(dest, stem(episode) + "_" + core::file_stem(page) + ".tiff");
             const std::string values = values_of(page);
             output.put(path, values_tiff_bytes(core::ColorRasterView(values), page.rgb->depth,
-                                               TiffSave{"tiff_lzw", dpi_pair(dpi), std::string(page_profile(page))}));
+                                               tiff(TiffSave{"tiff_lzw", dpi_pair(dpi), std::string(page_profile(page))})));
             written.push_back(path);
             continue;
         }
@@ -483,19 +491,19 @@ std::vector<fs::path> detail::print_into(detail::Output& output, const core::Doc
         std::string bytes;
         if (fmt == "cmyk" || (fmt == "tiff" && how != "rgb" && how != "bitonal" && color != "auto")) {  // (colour and grey TIFF)
             path = detail::join(dest, name + ".tiff");
-            bytes = tiff_bytes(coloured(image, how), TiffSave{"tiff_lzw", dpi_pair(dpi), profile});
+            bytes = tiff_bytes(coloured(image, how), tiff(TiffSave{"tiff_lzw", dpi_pair(dpi), profile}));
         } else if (fmt == "tiff" && how == "rgb" && color == "auto") {  // (a colour page, as a colour TIFF)
             path = detail::join(dest, name + ".tiff");
-            bytes = tiff_bytes(coloured(image, how), TiffSave{"tiff_lzw", dpi_pair(dpi), profile});
+            bytes = tiff_bytes(coloured(image, how), tiff(TiffSave{"tiff_lzw", dpi_pair(dpi), profile}));
         } else if (fmt == "tiff") {
             path = detail::join(dest, name + ".tiff");
-            bytes = tiff_bytes(render::to_bitonal(image, threshold, screen_ptr), TiffSave{"group4", dpi_pair(dpi), {}});
+            bytes = tiff_bytes(render::to_bitonal(image, threshold, screen_ptr), tiff(TiffSave{"group4", dpi_pair(dpi), {}}));
         } else if (fmt == "png1") {
             path = detail::join(dest, name + ".png");
-            bytes = png_bytes(render::to_bitonal(image, threshold, screen_ptr), PngSave{dpi_pair(dpi), {}, false});
+            bytes = png(png_bytes(render::to_bitonal(image, threshold, screen_ptr), PngSave{dpi_pair(dpi), {}, false}));
         } else {
             path = detail::join(dest, name + ".png");
-            bytes = png_bytes(coloured(image, how), PngSave{dpi_pair(dpi), profile, false});
+            bytes = png(png_bytes(coloured(image, how), PngSave{dpi_pair(dpi), profile, false}));
         }
         output.put(path, bytes);
         written.push_back(path);

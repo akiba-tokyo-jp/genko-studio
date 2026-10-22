@@ -7,7 +7,13 @@ namespace genko::api {
 // "code": …} on stdout); 2 a book written by a newer Genko (the same JSON), or bad usage; 3 a v1–v3 book that must
 // be converted (`genko migrate`) before it can be written.
 //   genko new <dir> [--title T] [--episode N] [--pages N] [--webtoon] [--b4] [--preset P] [--paper P] [--json] [--plain]
+//   genko new <dir> --from <file> [--as EXT] [--title T]
+//   genko new <dir> --image --width W --height H [--unit px|mm|cm|in] [--dpi R] [--mode rgb|gray|cmyk|lab|bitmap]
+//             [--depth 8|16|32] [--background white|black|transparent|#rrggbb] [--profile ID] [--title T]
+//                                                (PC4 F-b) a book of one page of a picture, or of a new image;
+//                                                {"ok", "path", "notes", "snapshot"}
 //   genko inspect <dir> [--full] [--stroke ID]   the snapshot of a book (genko.headless.snapshot)
+//   genko inspect <dir> --file-info              (PC4 F-b) {"title", "file_info", "pages": [{"page", "native_source"}]}
 //   genko apply <dir> <ops.json|-> [--dry-run] [--expect-revision N] [--agent A] [--txn T]
 //   genko undo|redo <dir> [--as A] [--force]
 //   genko gc <dir> [--dry-run] [--legacy]

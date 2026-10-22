@@ -55,6 +55,15 @@ constexpr int kSaveAfterDefault = 2000;
 int ui_font_pt();  // 0: the system's size
 QString default_paper();
 int save_after_ms();
+// ファイル管理 (PC4 F-b, edit.preferences.fileHandling; PhotoCraft v0.2.0's prefs.rs FileHandling, MIT): how many files
+// 最近使用したファイルを開く lists (0..100; Photoshop's 20 by default), whether a file written takes its extension in lower
+// case (コピーを保存…), whether an RGB picture's EXIF saying sRGB is ignored when it carries no profile (開く…). Genko's
+// PSD always holds its merged picture (Photoshop's 「PSD と PSB の互換性を優先」 always on: said, not chosen).
+constexpr int kRecentDefault = 20;
+constexpr int kRecentMax = 100;
+int recent_count();
+bool lowercase_extension();
+bool ignore_exif_profile();
 std::optional<double> tablet_gamma();
 QString pen_button();
 // The pressure curve that turns the person's usual pressing (the median) into the middle width. Throws
@@ -160,6 +169,10 @@ public:
     QSpinBox* backup_keep = nullptr;
     QCheckBox* hold_swap = nullptr;
     QPushButton* per_tool = nullptr;
+    // ファイル管理 (PC4 F-b: 原稿と保存 moved here, and the files' own)
+    QSpinBox* recent_count = nullptr;
+    QCheckBox* lowercase_extension = nullptr;
+    QCheckBox* ignore_exif_profile = nullptr;
     // 透明部分・色域
     QComboBox* checker_size = nullptr;
     QComboBox* checker_colours = nullptr;

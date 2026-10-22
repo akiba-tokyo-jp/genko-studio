@@ -163,6 +163,8 @@ genko_library(genko_render
     codecs/limits.cpp
     codecs/codecs.cpp
     ops_formats.cpp
+    # PC4 F-b (ファイルの入口: 開いたファイルの EXIF・XMP・向き・コマの数)
+    codecs/metadata.cpp
     # PC4 E-0 (描く道具の土台: 層のタイル、プリセットの置き場、描く道具とパターンの op の枠)
     tiled_pixels.cpp
     preset_store.cpp

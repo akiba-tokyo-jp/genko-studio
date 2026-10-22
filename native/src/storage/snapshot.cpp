@@ -6,6 +6,7 @@
 #include "core/color_model.hpp"
 #include "core/color_raster.hpp"
 #include "core/error.hpp"
+#include "core/file_info.hpp"
 #include "core/pyconv.hpp"
 #include "core/pyops.hpp"
 #include "core/pynum.hpp"
@@ -269,6 +270,7 @@ Json snapshot(const core::Document& doc, bool full) {
     out["tickets"] = doc.tickets;
     out["autosave"] = doc.autosave;
     if (doc.text_gamma) out["text_gamma"] = *doc.text_gamma;  // (color-model@1, PC1b: only a book that has one)
+    if (doc.file_info && !doc.file_info->empty()) out["file_info"] = core::to_json(*doc.file_info);  // (file-info@1, PC4 F-b: likewise)
     return out;
 }
 

@@ -704,8 +704,9 @@ std::vector<Rgba> rgba_of(const Pixels& p) {
 
 std::vector<float> coverage(const core::Page& page, const Json& area, std::uint32_t width, std::uint32_t height, bool eight) {
     std::vector<float> out(std::size_t(width) * height, 0.0f);
-    if (eight) {  // (as filter_raster's 8-bit way: the area at the working dpi over a picture of the layer's size)
-        const selection::AreaMask inside = selection::area_mask(area, raster::kWorkingDpi);
+    if (eight) {  // (as filter_raster's 8-bit way: the area at the working dpi over a picture of the layer's size — PC4 F-b: at
+                  // its own resolution on a page of grid "finest")
+        const selection::AreaMask inside = selection::area_mask(area, raster::dpi_across(page, static_cast<int>(width)));
         Image mask = Image::create("L", Size{static_cast<int>(width), static_cast<int>(height)}, Ink(0));
         mask.paste(inside.mask, Point{static_cast<int>(inside.x0), static_cast<int>(inside.y0)});
         const std::string bytes = mask.tobytes();

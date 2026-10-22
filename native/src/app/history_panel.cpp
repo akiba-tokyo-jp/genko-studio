@@ -108,6 +108,8 @@ const std::map<std::string, const char*>& names() {
         {"align_layers", "整列した"}, {"distribute_layers", "分布した"}, {"arrange_layers", "重ね順を変えた"}, {"link_layers", "レイヤーのリンクを変えた"},
         // (PC4 節 D: render/ops_filters)
         {"render_picture", "描画した"}, {"vanishing_point", "消点で描いた"},
+        // (PC4 F-b: render/ops_formats; 復帰 is the session's, app/session.cpp Session::revert)
+        {"set_file_info", "ファイル情報を変えた"}, {"revert", "復帰"},
     };
     return table;
 }

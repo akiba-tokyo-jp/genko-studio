@@ -28,11 +28,15 @@
 #include "formats/page_picture.hpp"
 #include "formats/pillow_save.hpp"
 #include "render/codecs/codecs.hpp"
+#include "render/codecs/metadata.hpp"
 #include "render/image.hpp"
+#include "render/layer_masks.hpp"
 #include "render/not_yet_ported.hpp"
 #include "render/ops_registry.hpp"
 #include "render/page.hpp"
 #include "render/png.hpp"
+#include "render/raster.hpp"
+#include "render/selection.hpp"
 #include "storage/asset_store.hpp"
 #include "storage/lock.hpp"
 #include "storage/reader.hpp"
@@ -491,10 +495,10 @@ private slots:
 
     void whatIsNotOpenedYet() {
         const std::string png = data_file("pyref/png/rgb8.png");
-        QCOMPARE(code_of([] { (void)formats::open_file(std::string("8BPS\0\1", 6) + std::string(40, '\0'), "layers.psd"); }), std::string("not_yet_ported:image_format"));
+        QCOMPARE(code_of([] { (void)formats::open_file(std::string("8BPS\0\1", 6) + std::string(40, '\0'), "layers.psd"); }), std::string("not_yet_ported:psd_file"));
         const auto [tiff, values] = tiff16(4, 4);
-        QCOMPARE(code_of([&] { (void)formats::open_file(tiff, "photo.DNG"); }), std::string("not_yet_ported:image_format"));
-        QCOMPARE(code_of([&] { (void)formats::open_file(png, "doc.pcraft"); }), std::string("not_yet_ported:image_format"));
+        QCOMPARE(code_of([&] { (void)formats::open_file(tiff, "photo.DNG"); }), std::string("not_yet_ported:raw_file"));
+        QCOMPARE(code_of([&] { (void)formats::open_file(png, "doc.pcraft"); }), std::string("not_yet_ported:pcraft_file"));
         QCOMPARE(code_of([] { (void)formats::open_file("not a picture at all", "x.png"); }), std::string("unidentified_image"));
         formats::OpenOptions as_jpeg;
         as_jpeg.as = codecs::Format::Jpeg;
@@ -504,8 +508,370 @@ private slots:
         QCOMPARE(code_of([&] { (void)formats::open_file(png, "x.png", small); }), std::string("image_too_large"));
     }
 
+    // PC4 F-b: 新規… → 画像 (formats::new_image): each mode at each of its depths with each background — the page's colour
+    // model, its one layer's name and pixels, the paper of its pixels at its resolution, the grid mark only on an 8-bit RGB
+    // page —, saved and read back.
+    void aNewImageIsItsModeDepthAndBackground() {
+        struct Mode {
+            const char* mode;
+            std::vector<int> depths;
+        };
+        const std::vector<Mode> modes{{"rgb", {8, 16, 32}}, {"gray", {8, 16, 32}}, {"cmyk", {8, 16}}, {"lab", {8, 16}}, {"bitmap", {8}}};
+        int n = 0;
+        for (const Mode& m : modes) {
+            for (const int depth : m.depths) {
+                for (const char* background : {"white", "black", "transparent", "#336699"}) {
+                    if (std::string_view(m.mode) == "bitmap" && std::string_view(background) == "transparent") continue;
+                    formats::NewImage image;
+                    image.title = "新しい画像";
+                    image.width = 30;
+                    image.height = 20;
+                    image.dpi = 150;
+                    image.mode = m.mode;
+                    image.depth = depth;
+                    image.background = background;
+                    const std::string what = std::string(m.mode) + " " + std::to_string(depth) + " " + background;
+                    const formats::Opened made = formats::new_image(image);
+                    const core::Document& doc = made.doc;
+                    QCOMPARE(doc.title, std::string("新しい画像"));
+                    QCOMPARE(doc.pages.size(), std::size_t(1));
+                    const core::Page& page = doc.page(0);
+                    QCOMPARE(page.spec.dpi.value(), 150.0);
+                    QCOMPARE(render::mm_to_px(page.spec.width_mm.value(), 150), 30);
+                    QCOMPARE(render::mm_to_px(page.spec.height_mm.value(), 150), 20);
+                    QCOMPARE(page.layers.size(), std::size_t(1));
+                    const bool clear = std::string_view(background) == "transparent";
+                    QCOMPARE(page.layers[0].title, std::string(clear ? "レイヤー 1" : "背景"));
+                    QVERIFY2(!page.native_source, what.c_str());  // (made, not opened)
+                    const std::string_view mode = m.mode;
+                    if (mode == "rgb" && depth == 8) {
+                        QVERIFY2(!page.color && !page.rgb, what.c_str());
+                        QCOMPARE(page.spec.grid, std::optional<std::string>("finest"));
+                        const render::Image pixels = render::open_image(*page.layers[0].raster_png).convert("RGBA");
+                        const auto p = pixels.getpixel(3, 4);
+                        const std::vector<double> want = clear ? std::vector<double>{0, 0, 0, 0}
+                                                         : std::string_view(background) == "white" ? std::vector<double>{255, 255, 255, 255}
+                                                         : std::string_view(background) == "black" ? std::vector<double>{0, 0, 0, 255}
+                                                                                                    : std::vector<double>{0x33, 0x66, 0x99, 255};
+                        if (clear) QCOMPARE(p[3], 0.0);
+                        else QVERIFY2(p == want, what.c_str());
+                    } else {
+                        QVERIFY2(!page.spec.grid && !doc.spec.grid, what.c_str());  // (a page of another model works at its finest grid already)
+                        if (mode == "rgb") {
+                            QVERIFY2(page.rgb && page.rgb->depth == depth && !page.color, what.c_str());
+                        } else {
+                            QVERIFY2(page.color, what.c_str());
+                            QCOMPARE(core::mode_name(*page.color), std::string_view(mode == "bitmap" ? "bitmap" : m.mode));
+                            QCOMPARE(page.color->depth, depth);
+                        }
+                        QVERIFY2(page.layers[0].color_raster || page.layers[0].ink_raster, what.c_str());
+                    }
+                    if (mode == "gray" && !clear) {  // (white: the full light; black: none)
+                        const core::InkPixels inks = core::decode_ink_raster(*page.layers[0].ink_raster);
+                        const double v = inks.value(0, 0);
+                        if (std::string_view(background) == "white") QVERIFY2(v > 0.99, what.c_str());
+                        if (std::string_view(background) == "black") QVERIFY2(v < 0.01, what.c_str());
+                    }
+                    if (mode == "cmyk" && std::string_view(background) == "white") {  // (white paper: no ink)
+                        const core::InkPixels inks = core::decode_ink_raster(*page.layers[0].ink_raster);
+                        for (unsigned c = 0; c < 4; ++c) QVERIFY2(inks.value(0, c) < 0.01, what.c_str());
+                    }
+                    const fs::path dir = at(("new-image-" + std::to_string(n++) + ".genko").c_str());
+                    write_book(doc, dir);
+                    const storage::LoadResult read = storage::load_document(dir);
+                    QVERIFY2(read.document.read_only_reason.empty(), (what + ": " + read.document.read_only_reason).c_str());
+                    QCOMPARE(read.document.page(0).spec.grid, page.spec.grid);
+                }
+            }
+        }
+        // (what it does not make)
+        formats::NewImage bad;
+        bad.width = 10;
+        bad.height = 10;
+        bad.mode = "cmyk";
+        bad.depth = 32;
+        QCOMPARE(code_of([&] { (void)formats::new_image(bad); }), std::string("value"));
+        bad.mode = "rgb";
+        bad.depth = 8;
+        bad.background = "plaid";
+        QCOMPARE(code_of([&] { (void)formats::new_image(bad); }), std::string("value"));
+        bad.background = "white";
+        bad.width = 0;
+        QCOMPARE(code_of([&] { (void)formats::new_image(bad); }), std::string("value"));
+    }
+
+    // PC4 F-b: a picture of a colour table opens as an indexed page of its colours, one of one bit of grey as a bitmap
+    // page; an animation or a TIFF of pages says it opened its first frame or page.
+    void aPictureOpensInItsColourModel() {
+        // (a palette PNG: Pillow's mode P, written by this build's PNG writer)
+        std::string data;
+        for (int i = 0; i < 6 * 4; ++i) data += static_cast<char>(i % 3);
+        render::Image paletted = render::Image::frombytes("P", {6, 4}, data);
+        paletted.putpalette("RGB", std::string("\xC8\x0A\x0A\x0A\xC8\x0A\x0A\x0A\xC8", 9));
+        const std::string png = formats::png_bytes(paletted);
+        const formats::Opened indexed = formats::open_file(png, "palette.png");
+        const core::Page& page = indexed.doc.page(0);
+        QVERIFY2(page.rgb && page.rgb->table, "an indexed page");
+        QCOMPARE(page.rgb->table->colors.size(), std::size_t(3));
+        QCOMPARE(page.native_source->mode, std::string("indexed"));
+        QVERIFY(render::open_image(*page.layers[0].raster_png).convert("RGB").tobytes() == paletted.convert("RGB").tobytes());
+        QCOMPARE(page.spec.grid, std::optional<std::string>("finest"));
+        // (one bit of grey)
+        const render::Image bits = render::Image::create("1", {8, 3}, render::Ink(0));
+        const formats::Opened bitmap = formats::open_file(formats::png_bytes(bits), "bits.png");
+        QVERIFY(bitmap.doc.page(0).color && bitmap.doc.page(0).color->bitmap);
+        QCOMPARE(bitmap.doc.page(0).native_source->depth, 1);
+        QCOMPARE(bitmap.doc.page(0).native_source->mode, std::string("bitmap"));
+        // (their pixels as they are, in the layer the file is: not flattened into another)
+        QCOMPARE(page.layers.size(), std::size_t(1));
+        QCOMPARE(page.layers[0].title, std::string("背景"));
+        QCOMPARE(bitmap.doc.page(0).layers.size(), std::size_t(1));
+        QCOMPARE(bitmap.doc.page(0).layers[0].title, std::string("背景"));
+        const core::InkPixels ones = core::decode_ink_raster(*bitmap.doc.page(0).layers[0].ink_raster);
+        QCOMPARE(ones.width, 8u);
+        QCOMPARE(ones.value(0, 0), 0.0);
+        for (const auto& opened : {std::cref(indexed), std::cref(bitmap)}) {
+            const fs::path dir = at(opened.get().doc.page(0).native_source->mode == "indexed" ? "indexed.genko" : "bitmap.genko");
+            write_book(opened.get().doc, dir);
+            QVERIFY(storage::load_document(dir).document.read_only_reason.empty());
+        }
+        // (a GIF of two frames: the first, said)
+        const std::string gif = data_file("pyref/gif/animated-first-frame.gif");
+        QVERIFY(codecs::read_metadata(codecs::Format::Gif, gif).frames > 1);
+        const formats::Opened first = formats::open_file(gif, "anim.gif");
+        QVERIFY(std::any_of(first.notes.begin(), first.notes.end(), [](const std::string& note) { return note.find("最初のコマ") != std::string::npos; }));
+        const codecs::FileMetadata single = codecs::read_metadata(codecs::Format::Png, png);
+        QCOMPARE(single.frames, 1);
+    }
+
+    // PC4 F-b: `genko new <dest> --from <file> [--as <ext>]` and `genko new <dest> --image …`: the book written at once,
+    // {"ok", "path", "notes", "snapshot"}; what they do not take refused as usage.
+    void genkoNewFromAFileAndAsAnImage() {
+        const QString picture = QString::fromStdString(core::path_to_utf8(at("cli.png")));
+        genko::test::write_bytes(picture, data_file("pyref/png/rgba8.png"));
+        const QString book = QString::fromStdString(core::path_to_utf8(at("cli-from.genko")));
+        const auto made = genko::test::run_genko({QStringLiteral("new"), book, QStringLiteral("--from"), picture});
+        QVERIFY2(made.exit_code == 0, qPrintable(made.described()));
+        const Json out = genko::test::one_line(made.out);
+        QCOMPARE(out["ok"], Json(true));
+        QVERIFY(out["notes"].is_array());
+        QCOMPARE(out["snapshot"]["title"].get<std::string>(), std::string("cli"));
+        const core::Document doc = read_book(fs::path(book.toStdString()));
+        QVERIFY(doc.read_only_reason.empty());
+        QCOMPARE(doc.page(0).native_source->format, std::string("png"));
+        // (never over a book)
+        QCOMPARE(genko::test::run_genko({QStringLiteral("new"), book, QStringLiteral("--from"), picture}).exit_code, 1);
+        // (--as: the bytes read as that format — a PNG read as a JPEG is refused)
+        const auto as_jpeg = genko::test::run_genko({QStringLiteral("new"), QString::fromStdString(core::path_to_utf8(at("cli-as.genko"))), QStringLiteral("--from"),
+                                                     picture, QStringLiteral("--as"), QStringLiteral("jpg")});
+        QCOMPARE(as_jpeg.exit_code, 1);
+        QCOMPARE(genko::test::one_line(as_jpeg.out)["code"].get<std::string>(), std::string("format"));
+        QVERIFY(genko::test::run_genko({QStringLiteral("new"), QString::fromStdString(core::path_to_utf8(at("cli-as2.genko"))), QStringLiteral("--from"),
+                                        picture, QStringLiteral("--as"), QStringLiteral("png")})
+                    .exit_code == 0);
+        // (a new image: 50 × 30 mm at 200 ppi, grey 16 bits, black)
+        const QString image_book = QString::fromStdString(core::path_to_utf8(at("cli-image.genko")));
+        const auto image = genko::test::run_genko({QStringLiteral("new"), image_book, QStringLiteral("--image"), QStringLiteral("--width"), QStringLiteral("50"),
+                                                   QStringLiteral("--height"), QStringLiteral("30"), QStringLiteral("--unit"), QStringLiteral("mm"),
+                                                   QStringLiteral("--dpi"), QStringLiteral("200"), QStringLiteral("--mode"), QStringLiteral("gray"),
+                                                   QStringLiteral("--depth"), QStringLiteral("16"), QStringLiteral("--background"), QStringLiteral("black"),
+                                                   QStringLiteral("--title"), QStringLiteral("灰色")});
+        QVERIFY2(image.exit_code == 0, qPrintable(image.described()));
+        const core::Document gray = read_book(fs::path(image_book.toStdString()));
+        QCOMPARE(gray.title, std::string("灰色"));
+        QVERIFY(gray.page(0).color && gray.page(0).color->space == core::InkSpace::Gray && gray.page(0).color->depth == 16);
+        QCOMPARE(render::mm_to_px(gray.page(0).spec.width_mm.value(), 200), static_cast<int>(std::lround(50 / 25.4 * 200)));
+        // (usage)
+        for (const QStringList& wrong : {QStringList{QStringLiteral("--image")}, QStringList{QStringLiteral("--from"), picture, QStringLiteral("--pages"), QStringLiteral("2")},
+                                         QStringList{QStringLiteral("--width"), QStringLiteral("10")},
+                                         QStringList{QStringLiteral("--image"), QStringLiteral("--width"), QStringLiteral("10"), QStringLiteral("--height"),
+                                                     QStringLiteral("10"), QStringLiteral("--unit"), QStringLiteral("ft")}}) {
+            const auto refused = genko::test::run_genko(QStringList{QStringLiteral("new"), QString::fromStdString(core::path_to_utf8(at("cli-wrong.genko")))} + wrong);
+            QVERIFY2(refused.exit_code == 2, qPrintable(wrong.join(QLatin1Char(' ')) + QStringLiteral(": ") + refused.described()));
+        }
+    }
+
+    // PC4 F-b: 画像 → 複製… (formats::duplicate_page): the page as a book of its own — its layers as they are, the book's
+    // pictures read from where they were —, or its merged picture alone; saved and read back.
+    void aPageIsDuplicatedAsABook() {
+        core::Document doc = run(small_book(), Json::array({Json{{"op", "add_layer"}, {"page", 1}, {"kind", "paint"}, {"id", "p1"}},
+                                                            Json{{"op", "put_raster"}, {"page", 1}, {"id", "p1"},
+                                                                 {"png_base64", core::b64encode(render::write_png(render::Image::create("RGBA", {8, 8}, render::Ink{10, 200, 30, 255})))}},
+                                                            Json{{"op", "add_page"}}}));
+        const fs::path source = at("dup-source.genko");
+        write_book(doc, source);
+        const core::Document saved = read_book(source);
+        const formats::Opened copy = formats::duplicate_page(saved, 0, "複製", false);
+        QCOMPARE(copy.doc.title, std::string("複製"));
+        QCOMPARE(copy.doc.pages.size(), std::size_t(1));
+        QCOMPARE(copy.doc.page(0).index.value(), 1.0);
+        QCOMPARE(copy.doc.page(0).layers.size(), saved.page(0).layers.size());
+        QVERIFY(copy.doc.book_id != saved.book_id);
+        QVERIFY(copy.doc.asset_dir && *copy.doc.asset_dir == *saved.asset_dir);
+        const fs::path dir = at("dup.genko");
+        write_book(copy.doc, dir);
+        const core::Document back = read_book(dir);
+        QVERIFY2(back.read_only_reason.empty(), back.read_only_reason.c_str());
+        const int dpi = static_cast<int>(saved.page(0).spec.dpi.value());
+        QVERIFY(formats::page_picture(back.page(0), back, dpi).image.data() == formats::page_picture(saved.page(0), saved, dpi).image.data());
+        // (its merged picture alone: one layer, the same picture)
+        const formats::Opened merged = formats::duplicate_page(saved, 0, "統合", true);
+        QCOMPARE(merged.doc.page(0).layers.size(), std::size_t(1));
+        QCOMPARE(merged.doc.page(0).spec.grid, std::optional<std::string>("finest"));
+        QVERIFY(formats::page_picture(merged.doc.page(0), merged.doc, dpi).image.data() == formats::page_picture(saved.page(0), saved, dpi).image.data());
+    }
+
+    // PC4 F-b: the paper made again (set_page_spec, set_meta's preset) keeps image-grid@1's grid.
+    void thePaperMadeAgainKeepsTheGrid() {
+        const formats::Opened opened = formats::open_file(data_file("pyref/png/rgb8.png"), "grid.png");
+        QCOMPARE(opened.doc.spec.grid, std::optional<std::string>("finest"));
+        const core::Document respec = run(opened.doc, Json::array({Json{{"op", "set_page_spec"}, {"paper", Json::array({100, 80})}, {"trim", Json::array({90, 70})}}}));
+        QCOMPARE(respec.spec.grid, std::optional<std::string>("finest"));
+        QCOMPARE(respec.page(0).spec.grid, std::optional<std::string>("finest"));
+        const core::Document preset = run(opened.doc, Json::array({Json{{"op", "set_meta"}, {"preset", "shueisha"}}}));
+        QCOMPARE(preset.page(0).spec.grid, std::optional<std::string>("finest"));
+        // (a book without it: none, as before)
+        QVERIFY(!run(small_book(), Json::array({Json{{"op", "set_page_spec"}, {"paper", Json::array({100, 80})}, {"trim", Json::array({90, 70})}}})).spec.grid);
+    }
+
+    // PC4 F-b review P3-3: a 16-bit TIFF of an orientation (tag 274) opened turned as it says (its reader does not turn
+    // it; the 8-bit one does), and said.
+    void aDeepTiffIsTurnedByItsOrientation() {
+        // (grey, 16 bits, 3 × 2, uncompressed, one strip; orientation 6: turned 90° clockwise to be upright)
+        const auto le16 = [](std::string& out, unsigned v) {
+            out += static_cast<char>(v & 0xFF);
+            out += static_cast<char>((v >> 8) & 0xFF);
+        };
+        const auto le32 = [](std::string& out, std::uint32_t v) {
+            for (int i = 0; i < 4; ++i) out += static_cast<char>((v >> (8 * i)) & 0xFF);
+        };
+        std::string pixels;
+        for (const unsigned v : {0u, 10000u, 20000u, 30000u, 40000u, 50000u}) le16(pixels, v);
+        struct Entry {
+            unsigned tag, type;
+            std::uint32_t value;
+        };
+        const std::vector<Entry> entries{{256, 3, 3}, {257, 3, 2}, {258, 3, 16}, {259, 3, 1}, {262, 3, 1}, {273, 4, 8},
+                                         {274, 3, 6}, {277, 3, 1}, {278, 3, 2},  {279, 4, static_cast<std::uint32_t>(pixels.size())}};
+        std::string tiff = "II";
+        le16(tiff, 42);
+        le32(tiff, static_cast<std::uint32_t>(8 + pixels.size()));
+        tiff += pixels;
+        le16(tiff, static_cast<unsigned>(entries.size()));
+        for (const Entry& e : entries) {
+            le16(tiff, e.tag);
+            le16(tiff, e.type);
+            le32(tiff, 1);
+            if (e.type == 3) {
+                le16(tiff, e.value);
+                le16(tiff, 0);
+            } else {
+                le32(tiff, e.value);
+            }
+        }
+        le32(tiff, 0);
+        const formats::Opened opened = formats::open_file(tiff, "turned.tif");
+        const core::Page& page = opened.doc.page(0);
+        QVERIFY(page.color && page.color->depth == 16);
+        const core::InkPixels inks = core::decode_ink_raster(*page.layers[0].ink_raster);
+        QCOMPARE(inks.width, 2u);
+        QCOMPARE(inks.height, 3u);
+        // (turned clockwise: the first row is the first column read from the bottom up)
+        QVERIFY(std::abs(inks.value(0, 0) - 30000.0 / 65535.0) < 1e-4);
+        QVERIFY(std::abs(inks.value(1, 0) - 0.0) < 1e-4);
+        QVERIFY(std::any_of(opened.notes.begin(), opened.notes.end(), [](const std::string& n) { return n.find("TIFF の向き") != std::string::npos; }));
+    }
+
+    // PC4 F-b (image-grid@1, design 8-2 (b); review P2-1・P2-2・P2-3): on the page of a picture opened at 300 ppi the work is
+    // done at its pixels' grid — a new paint layer, a pen layer's lines baked by a filter, an area deleted or moved on the
+    // picture's layer, the layers merged, the masks' and selections' grid — and at a 72-ppi picture's the area is its own;
+    // a book without the mark as before.
+    void theGridOfAnOpenedPicture() {
+        // (300 × 200 px at 300 ppi: 25.4 × 16.93 mm; white with a black square at its top left, 60 × 60 px)
+        std::string rgb(300 * 200 * 3, static_cast<char>(255));
+        for (int y = 0; y < 60; ++y)
+            for (int x = 0; x < 60; ++x)
+                for (int c = 0; c < 3; ++c) rgb[static_cast<std::size_t>((y * 300 + x) * 3 + c)] = 0;
+        const render::Image picture = render::Image::frombytes("RGB", {300, 200}, rgb);
+        const std::string png = formats::png_bytes(picture, formats::PngSave{std::array<double, 2>{300, 300}, {}, false});
+        const core::Document doc = formats::open_file(png, "grid.png").doc;
+        const core::Page& page = doc.page(0);
+        const std::string back = page.layers[0].id;
+        QCOMPARE(render::layer_masks::grid_dpi(page), 300);
+        QCOMPARE(render::selection::grid_dpi(page), 300);
+        QCOMPARE(render::raster::working_dpi(page), 300);
+        const auto layer = [](const core::Document& d, const std::string& id) -> const core::Layer& {
+            for (const core::Layer& l : d.page(0).layers) {
+                if (l.id == id) return l;
+            }
+            throw std::runtime_error("no layer " + id);
+        };
+        const auto alpha = [](const render::Image& image, int x, int y) { return image.convert("RGBA").getpixel(x, y)[3]; };
+        const auto grey = [](const render::Image& image, int x, int y) { return image.convert("RGBA").getpixel(x, y)[0]; };
+        // (a new paint layer: the page's grid)
+        core::Layer fresh;
+        QCOMPARE(render::raster::ensure_raster(page, fresh).size(), (render::Size{300, 200}));
+        // (a pen layer's line, 5 to 20 mm across at 8 mm down, baked by a filter: where it was drawn, at 300 dpi)
+        const core::Document lined = run(doc, Json::array({Json{{"op", "add_layer"}, {"page", 1}, {"kind", "pen"}, {"id", "ink"}, {"title", "線"}},
+                                                           Json{{"op", "set_layer"}, {"page", 1}, {"id", "ink"}, {"panel_each", false}, {"panel_clip", false}},
+                                                           Json{{"op", "add_stroke"}, {"page", 1}, {"layer_id", "ink"},
+                                                                {"points", Json::array({Json::array({5, 8}), Json::array({20, 8})})}, {"width_mm", 1},
+                                                                {"rgb", Json::array({0, 0, 0})}}}));
+        const core::Document filtered =
+            run(lined, Json::array({Json{{"op", "filter_raster"}, {"page", 1}, {"id", "ink"}, {"kind", "blur_gaussian"}, {"radius", 0.5}}}));
+        const core::Layer& baked = layer(filtered, "ink");
+        QVERIFY(baked.raster_png && !baked.raster_png->empty());
+        const render::Image line = render::open_image(*baked.raster_png);
+        QCOMPARE(line.size(), (render::Size{300, 200}));
+        QVERIFY2(alpha(line, 150, 94) > 128, "the line where it was drawn");
+        QCOMPARE(alpha(line, 100, 63), 0.0);  // (not drawn at 200 dpi into the 300-dpi picture: 2/3 of the way)
+        // (an area deleted on the picture's layer: its left half, at the picture's pixels)
+        const core::Document deleted =
+            run(doc, Json::array({Json{{"op", "delete_area"}, {"page", 1}, {"layer_id", back}, {"area", Json{{"rect", Json::array({0, 0, 12.7, 16.9333})}}}}}));
+        const render::Image left = render::raster::layer_pixels(deleted.page(0), layer(deleted, back));
+        QCOMPARE(left.size(), (render::Size{300, 200}));
+        QCOMPARE(alpha(left, 140, 100), 0.0);
+        QCOMPARE(alpha(left, 160, 100), 255.0);
+        // (the square moved 10 mm right: the same size, where it was moved)
+        const core::Document moved = run(doc, Json::array({Json{{"op", "transform_area"}, {"page", 1}, {"layer_id", back},
+                                                                 {"area", Json{{"rect", Json::array({0, 0, 5.08, 5.08})}}},
+                                                                 {"matrix", Json::array({1, 0, 0, 1, 10, 0})}}}));
+        const render::Image shifted = render::raster::layer_pixels(moved.page(0), layer(moved, back));
+        QCOMPARE(shifted.size(), (render::Size{300, 200}));
+        QVERIFY2(grey(shifted, 150, 30) < 60 && alpha(shifted, 150, 30) > 200, "the square where it was moved");
+        QVERIFY2(grey(shifted, 190, 30) > 200, "the square not grown");
+        QCOMPARE(alpha(shifted, 30, 30), 0.0);
+        // (merged: the picture's grid kept)
+        const core::Document painted = run(lined, Json::array({Json{{"op", "merge_visible"}, {"page", 1}}}));
+        for (const core::Layer& l : painted.page(0).layers) {
+            if (l.raster_png && !l.raster_png->empty()) QCOMPARE(render::open_image(*l.raster_png).size(), (render::Size{300, 200}));
+        }
+        const core::Document down = run(lined, Json::array({Json{{"op", "merge_down"}, {"page", 1}, {"id", "ink"}}}));
+        QCOMPARE(render::open_image(*layer(down, back).raster_png).size(), (render::Size{300, 200}));
+        QVERIFY2(alpha(render::open_image(*layer(down, back).raster_png), 150, 94) > 128 &&
+                     grey(render::open_image(*layer(down, back).raster_png), 150, 94) < 128,
+                 "the line merged where it was drawn");
+        // (a 72-ppi picture: its new layers at 200 dpi — never coarser —, its own layer's area at its 72 ppi)
+        const render::Image small = render::Image::create("RGB", {72, 72}, render::Ink{255, 255, 255});
+        const core::Document coarse = formats::open_file(formats::png_bytes(small, formats::PngSave{std::array<double, 2>{72, 72}, {}, false}), "coarse.png").doc;
+        QCOMPARE(render::raster::working_dpi(coarse.page(0)), 200);
+        QCOMPARE(render::raster::ensure_raster(coarse.page(0), fresh).size(), (render::Size{200, 200}));
+        const std::string coarse_back = coarse.page(0).layers[0].id;
+        const core::Document half = run(coarse, Json::array({Json{{"op", "delete_area"}, {"page", 1}, {"layer_id", coarse_back},
+                                                                  {"area", Json{{"rect", Json::array({0, 0, 12.7, 25.4})}}}}}));
+        const render::Image kept = render::raster::layer_pixels(half.page(0), layer(half, coarse_back));
+        QCOMPARE(kept.size(), (render::Size{72, 72}));
+        QCOMPARE(alpha(kept, 30, 36), 0.0);
+        QCOMPARE(alpha(kept, 42, 36), 255.0);
+        // (a book without the mark: 200 dpi, as before)
+        const core::Document plain = small_book();
+        QCOMPARE(render::raster::working_dpi(plain.page(0)), 200);
+        QCOMPARE(render::raster::ensure_raster(plain.page(0), fresh).width(), render::mm_to_px(plain.page(0).spec.width_mm.value(), 200));
+    }
+
     void theFilesOpsAreFrames() {
-        for (const auto& [op, group] : {std::pair{"set_file_info", "PC4 F-b"}, std::pair{"set_camera_raw", "PC4 F-e"}}) {
+        // (PC4 F-b wrote set_file_info: test_contract_file_info)
+        for (const auto& [op, group] : {std::pair{"set_camera_raw", "PC4 F-e"}}) {
             QVERIFY(render::ops_registry().find(op) != nullptr);
             try {
                 (void)run(small_book(), Json::array({Json{{"op", op}}}));

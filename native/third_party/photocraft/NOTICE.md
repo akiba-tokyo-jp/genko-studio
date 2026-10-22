@@ -177,6 +177,9 @@ PhotoCraft v0.2.0（`ad863217386440ca968fccc9bfff65ba24e61142`、MIT、同梱 `L
 - `crates/codecs/src/fidelity.rs`（1-230 行）: 書く計画（標本と並びの選び方）と失うものの一覧 → `native/src/render/codecs/fidelity.cpp`（PC4 F-0。言葉は日本語）。
 - `crates/codecs/src/options.rs`（1-138 行）: 読む上限（ヘッダーで確かめてから確保する）と書く設定 → `native/src/render/codecs/limits.cpp`・`options.hpp`（PC4 F-0。上限の値は Genko の op の上限と作業の記憶の予算にした）。
 - `crates/codecs/tests/detect_caps.rs`・`fidelity.rs`・`limits.rs` の試験の考え（判定の例、拡張子の往復と重なり、対称の保証、失うものの例、ヘッダーの爆弾）→ `native/tests/unit/test_codecs.cpp`（PC4 F-0）。
+- `crates/engine/src/file_cmds.rs`（151-170 行: JPEG の画質 0〜12 の換算、207-290 行: すべてを閉じる・その他を閉じる・復帰・コピーを保存・指定形式で開く、330-497 行: ファイル情報の XMP の読み書き `read_file_info`・`write_file_info`・`find_element`・`li_values`・`find_attr`）→ `native/src/core/file_info.cpp`（`file_info_from_xmp`・`xmp_title`・`write_xmp`）・`native/src/render/ops_formats.cpp`（`set_file_info`）・`native/src/formats/copy.cpp`（`jpeg_quality_of`）・`native/src/app/main_window_file.cpp`・`native/src/app/session.cpp`（`Session::revert`: 復帰は Genko の本の journal の 1 手にした）（PC4 F-b）。
+- `crates/engine/src/commands.rs`（213 行、`file.new` の引数: 幅・高さ・モード・深さ・背景・解像度・名前）→ `native/src/formats/open_file.cpp`（`new_image`）、`crates/engine/src/image_cmds.rs`（425 行、`image.duplicate` の名前と統合だけ）→ `duplicate_page`（PC4 F-b）。
+- `crates/engine/src/prefs.rs`（FileHandling: 最近使用したファイルの数の既定 20）→ `native/src/app/preferences.cpp`（PC4 F-b）。
 
 ## ブラシ・塗り・パターン・プリセット（brushes@1・patterns@1、PC4 節 E）
 

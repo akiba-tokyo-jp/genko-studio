@@ -24,9 +24,13 @@
 #include "app/session.hpp"
 #include "core/base64.hpp"
 #include "core/command_bus.hpp"
+#include "core/file_info.hpp"
 #include "core/ids.hpp"
+#include "core/ink.hpp"
 #include "core/model.hpp"
 #include "core/paths.hpp"
+#include "formats/file_xmp.hpp"
+#include "formats/open_file.hpp"
 #include "render/colour.hpp"
 #include "render/image.hpp"
 #include "render/page.hpp"
@@ -83,6 +87,27 @@ Json stroke_op(double y = 30.0, int page = 1) {
                                       {"layer", "ink"},
                                       {"points", Json::array({Json::array({20.0, y, 0.7}), Json::array({60.0, y + 5, 0.7})})},
                                       {"stabilize", 0}})});
+}
+
+Json note_op(const std::string& note, int page = 1) {
+    return Json::array({Json::object({{"op", "set_note"}, {"page", page}, {"note", note}})});
+}
+
+// The code 復帰 is refused with ("" when it is made).
+std::string revert_code(Session& session) {
+    try {
+        session.revert();
+    } catch (const genko::core::ApplyError& error) {
+        return error.code();
+    }
+    return {};
+}
+
+genko::core::FileInfo picture_info() {
+    genko::core::FileInfo info;
+    info.author = "撮った人";
+    info.copyright = "© 2026";
+    return info;
 }
 
 Session::Options quick(const fs::path& recovery) {
@@ -3105,6 +3130,188 @@ private slots:
         const std::map<std::string, Json> want = {{first_id, Json(frame)}};
         QVERIFY(chosen(session->document()) == want);
         QCOMPARE(genko::storage::load_document(book).document.page(1).id, first_id);
+    }
+
+    // --- 復帰 and コピーを保存 (PC4 F-b; review P2-5, P2-6, P3-1) ----------------------------------------------------------
+
+    // 復帰: the book as it was when 保存 was last chosen (mark_saved), one change saved as any other — 取り消し and やり直し
+    // in memory, and the journal's undo of it (`genko undo`) after the book is closed.
+    void revertIsOneChangeOfTheJournal() {
+        QTemporaryDir tmp;
+        const fs::path book = path_of(tmp.filePath("book.genko"));
+        make_book(book);
+        Session::Options options = quick(path_of(tmp.filePath("recovery")));
+        options.autosave = false;
+        {
+            auto session = Session::open(book, options);
+            QVERIFY(!session->can_revert());
+            session->apply(note_op("一"));
+            session->save_now();
+            QVERIFY(session->wait_saved(10000ms));
+            session->mark_saved();
+            session->apply(note_op("二"));
+            session->save_now();
+            QVERIFY(session->wait_saved(10000ms));
+            QVERIFY(session->can_revert());
+            session->revert();
+            QCOMPARE(session->document().page(0).note, std::string("一"));
+            QVERIFY(!session->can_revert());
+            session->undo();
+            QCOMPARE(session->document().page(0).note, std::string("二"));
+            session->redo();
+            QCOMPARE(session->document().page(0).note, std::string("一"));
+            session->save_now();
+            QVERIFY(session->wait_saved(10000ms));
+            QCOMPARE(genko::storage::load_document(book).document.page(0).note, std::string("一"));
+        }
+        // (the journal: its undo takes the revert back)
+        const auto undone = genko::storage::restore(book, "human:tester", false, false);
+        Q_UNUSED(undone);
+        QCOMPARE(genko::storage::load_document(book).document.page(0).note, std::string("二"));
+    }
+
+    // 復帰 waiting to be saved while another writer saved the book: not written over that change, said as a conflict.
+    void aRevertWaitingWhileAnotherWriterSavedIsNotMade() {
+        QTemporaryDir tmp;
+        const fs::path book = path_of(tmp.filePath("book.genko"));
+        make_book(book, 2);
+        Session::Options options = quick(path_of(tmp.filePath("recovery")));
+        options.autosave = false;
+        auto session = Session::open(book, options);
+        session->apply(note_op("一"));
+        session->save_now();
+        QVERIFY(session->wait_saved(10000ms));
+        session->mark_saved();
+        session->apply(note_op("二"));
+        session->save_now();
+        QVERIFY(session->wait_saved(10000ms));
+        session->revert();  // (not saved yet)
+        {
+            genko::storage::ProjectLock lock(book, "ai:other");
+            lock.try_acquire();
+            const auto loaded = genko::storage::load_document(book);
+            const genko::core::CommandBus bus;
+            const auto result = bus.apply(loaded.document, note_op("外の変更", 2), genko::core::Actor("ai:other"));
+            genko::storage::SaveRequest request;
+            request.actor = "ai:other";
+            request.base_revision = loaded.document.revision;
+            request.ops = result.journal_ops;
+            genko::storage::Saver(lock).save(result.doc, request);
+        }
+        QSignalSpy conflicts(session.get(), &Session::conflicts);
+        session->save_now();
+        QVERIFY(wait_for([&] { return conflicts.count() == 1; }));
+        QVERIFY(conflicts.at(0).at(0).toStringList().join(QString()).contains(QStringLiteral("復帰")));
+        QVERIFY(session->wait_idle(5s));
+        const auto disk = genko::storage::load_document(book).document;
+        QCOMPARE(disk.page(0).note, std::string("二"));
+        QCOMPARE(disk.page(1).note, std::string("外の変更"));
+    }
+
+    // 復帰 refused while the pages are read, while the book is saved somewhere else, on a read-only book, and when nothing
+    // changed; once the rest is read, its book is the whole book as it was read (the change made meanwhile not in it).
+    void aRevertIsRefusedWhenItCannotBeMade() {
+        QTemporaryDir tmp;
+        const fs::path book = path_of(tmp.filePath("book.genko"));
+        const fs::path recovery = path_of(tmp.filePath("recovery"));
+        make_drawn_book(book, recovery, 3, 2);
+        const Session::Options options = first_page_first(recovery);
+        auto session = Session::from(Session::read(book, options), book, options);
+        QVERIFY(session->loading());
+        session->apply(stroke_op(90, 1));
+        QCOMPARE(revert_code(*session), std::string("page_not_loaded"));
+        session->read_rest();
+        QVERIFY(wait_for([&] { return !session->loading(); }));
+        QVERIFY(session->can_revert());
+        session->revert();
+        QVERIFY(session->document().deferred.empty());
+        QCOMPARE(ink_strokes(session->document(), 0), std::size_t{2});  // (the book as it was read: the line made meanwhile not in it)
+        for (std::size_t page = 1; page < 3; ++page) QCOMPARE(ink_strokes(session->document(), page), std::size_t{2});
+        QCOMPARE(revert_code(*session), std::string("nothing_to_revert"));
+        // (while it is saved somewhere else)
+        session->apply(stroke_op(95, 1));
+        session->save_as(path_of(tmp.filePath("other.genko")));
+        QCOMPARE(revert_code(*session), std::string("save_as_busy"));
+        QSignalSpy saved(session.get(), &Session::savedAs);
+        QVERIFY(wait_for([&] { return saved.count() == 1; }));
+        // (a read-only book)
+        genko::core::Document doc = genko::core::new_episode("読むだけ", genko::core::Num(1), 1, genko::core::PageSpec::a4_mono());
+        doc.read_only_reason = "missing assets";
+        Session read_only(std::move(doc), std::nullopt);
+        QCOMPARE(revert_code(read_only), std::string("read_only"));
+    }
+
+    // 別名で保存 is a 保存: 復帰 then goes back to the book as it was saved there — its files in the new folder —, whoever
+    // asks (the window's mark_saved or not).
+    void saveAsIsWhereTheRevertGoesBackTo() {
+        QTemporaryDir tmp;
+        const fs::path book = path_of(tmp.filePath("book.genko"));
+        const fs::path copy = path_of(tmp.filePath("別の場所/写し.genko"));
+        make_book(book);
+        Session::Options options = quick(path_of(tmp.filePath("recovery")));
+        options.autosave = false;
+        auto session = Session::open(book, options);
+        session->apply(note_op("保存した"));
+        QSignalSpy saved(session.get(), &Session::savedAs);
+        session->save_as(copy);
+        QVERIFY(wait_for([&] { return saved.count() == 1; }));
+        QCOMPARE(saved.at(0).at(0).toBool(), true);
+        session->apply(note_op("その後"));
+        session->revert();
+        QCOMPARE(session->document().page(0).note, std::string("保存した"));
+        QCOMPARE(*session->document().asset_dir, copy);
+    }
+
+    // 復帰's book left in the journal when the history leaves memory (its limit holds that book too), read back from the
+    // journal's state when 復帰 is chosen.
+    void aRevertBeyondTheHistoryInMemoryIsReadFromTheJournal() {
+        QTemporaryDir tmp;
+        const fs::path book = path_of(tmp.filePath("book.genko"));
+        make_book(book);
+        Session::Options options = quick(path_of(tmp.filePath("recovery")));
+        options.autosave = false;
+        options.history_changes = 2;
+        auto session = Session::open(book, options);
+        for (const char* note : {"一", "二", "三", "四", "五"}) {
+            session->apply(note_op(note));
+            session->save_now();
+            QVERIFY(session->wait_saved(10000ms));
+        }
+        QVERIFY(session->can_revert());
+        session->revert();
+        QCOMPARE(session->document().page(0).note, std::string());  // (as it was opened)
+        session->save_now();
+        QVERIFY(session->wait_saved(10000ms));
+        QCOMPARE(genko::storage::load_document(book).document.page(0).note, std::string());
+    }
+
+    // コピーを保存… of a book opened from a picture (no folder; its EXIF and XMP in memory) as a .genko: the copy holds them
+    // and reads back whole; the session goes on as it was (no folder).
+    void aPicturesBookCopiedAsAGenkoKeepsItsFiles() {
+        QTemporaryDir tmp;
+        const std::string packet = genko::core::write_xmp(std::nullopt, picture_info(), "写真");
+        const std::string png = genko::formats::png_with_xmp(
+            genko::render::write_png(genko::render::Image::create("RGB", genko::render::Size{40, 30}, genko::render::Ink{30, 120, 220})), packet);
+        genko::formats::Opened opened = genko::formats::open_file(png, "photo.png");
+        const std::string exif("Exif-like bytes kept as they are", 32);
+        const std::string exif_ref = genko::core::bytes_ref(exif);
+        opened.doc.native_files.emplace(exif_ref, std::make_shared<const std::string>(exif));
+        opened.doc.edit_page(0).native_source->exif = exif_ref;
+        Session session(std::move(opened.doc), std::nullopt, quick(path_of(tmp.filePath("recovery"))));
+        const fs::path copy = path_of(tmp.filePath("写し.genko"));
+        QSignalSpy copied(&session, &Session::savedCopy);
+        session.save_copy(copy);
+        QVERIFY(wait_for([&] { return copied.count() == 1; }));
+        QVERIFY2(copied.at(0).at(0).toBool(), qPrintable(copied.at(0).at(1).toString()));
+        const genko::storage::LoadResult read = genko::storage::load_document(copy);
+        QVERIFY2(read.document.read_only_reason.empty(), read.document.read_only_reason.c_str());
+        const genko::core::NativeSource& source = *read.document.page(0).native_source;
+        const genko::storage::AssetStore store(copy);
+        QCOMPARE(store.get_bytes(source.exif, genko::core::kExifSuffix).value_or(std::string()), exif);
+        QCOMPARE(store.get_bytes(source.xmp, genko::core::kXmpSuffix).value_or(std::string()), packet);
+        QVERIFY(read.document.file_info && read.document.file_info->author == picture_info().author);
+        QVERIFY(read.document.book_id != session.document().book_id);
+        QVERIFY(!session.path());
     }
 };
 

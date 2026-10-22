@@ -874,7 +874,10 @@ void into_color_pixels(Layer& target, std::pair<std::string, bool> pixels) {
 }
 std::pair<std::string, bool> composite_color_layers(const Document& doc, const Page& page,
                                    const std::vector<std::size_t>& layers, bool flatten = false) {
-    const Size size = page_px(page, kWorkingDpi);
+    // (at the finest grid of the page's pixel layers, 200 to 600 dpi — its masks' and selections' —: a picture opened at
+    // 300 ppi merges at 300, never down to 200; PC4 F-b)
+    const int dpi = layer_masks::grid_dpi(page);
+    const Size size = page_px(page, dpi);
     if (size.width <= 0 || size.height <= 0 ||
         std::uint64_t(size.width) * std::uint64_t(size.height) > core::kColorRasterMaxPixels)
         throw OpError("high-precision merge pixel budget exceeded");
@@ -950,11 +953,11 @@ std::pair<std::string, bool> composite_color_layers(const Document& doc, const P
             participate(layer);
             if (layer.color_raster) floating = floating || core::ColorRasterView(*layer.color_raster).metadata("")["precision"] == "f32";
             if (layer.strokes) for (const auto& stroke : layer.strokes->items) if (stroke->color_rgb && (*stroke->color_rgb)["precision"]=="f32") floating=true;
-            blend_precise_layer(out, page, layer, kWorkingDpi, all, &doc);
+            blend_precise_layer(out, page, layer, dpi, all, &doc);
         } else if (core::has_color_strokes(layer)) {
             participate(layer);
             for (const auto& stroke : layer.strokes->items) if (stroke->color_rgb && (*stroke->color_rgb)["precision"]=="f32") floating=true;
-            blend_color_strokes(out,page,layer,kWorkingDpi,all,&doc);
+            blend_color_strokes(out,page,layer,dpi,all,&doc);
         } else if (layer.color_raster) {
             participate(layer);
             const core::ColorRasterView pixels(*layer.color_raster);
@@ -965,7 +968,7 @@ std::pair<std::string, bool> composite_color_layers(const Document& doc, const P
             shown = vector_masks::with_vector_mask(page, layer, size, all, std::move(shown));  // (vector@1, PC3 C-a)
             out.blend(pixels, size, all, layer.opacity, layer.clip, layer.blend, shown ? &*shown : nullptr);
         } else {
-            auto picture = drawable_layer_image(page, layer, kWorkingDpi, &doc, false, true);
+            auto picture = drawable_layer_image(page, layer, dpi, &doc, false, true);
             if (!picture) continue;
             participate(layer);
             out.blend(*picture, layer.opacity, layer.clip, layer.blend,
@@ -1047,7 +1050,7 @@ void merge_layers(OpContext& c) {
         auto bytes = composite_color_layers(doc, page, layers);
         into_color_pixels(page.layers[layers.front()], std::move(bytes));
     } else {
-        const Image picture = composite_layers(doc, page, layers, kWorkingDpi);
+        const Image picture = composite_layers(doc, page, layers, raster::working_dpi(page));  // (PC4 F-b: a page of grid "finest" at it)
         into_pixels(page, page.layers[layers.front()], picture);
     }
     Layer& target = page.layers[layers.front()];
@@ -1139,11 +1142,12 @@ void merge_visible(OpContext& c) {
                 (printed && layer.color && !layer.color->empty() && !layer.color_prints))
                 throw NotYetPorted("flatten with different proof/print participation");
         }
-        const Image background=page_background(page,page_px(page,kWorkingDpi),false);
-        picture=composite_layers(doc,page,shown,kWorkingDpi,&background);
+        // (PC4 F-b: a page of grid "finest" at its grid, raster::working_dpi; any other at the working dpi as before)
+        const Image background=page_background(page,page_px(page,raster::working_dpi(page)),false);
+        picture=composite_layers(doc,page,shown,raster::working_dpi(page),&background);
         into_pixels(page,page.layers[shown.front()],picture);finish();return;
     }
-    picture=composite_layers(doc,page,shown,kWorkingDpi);
+    picture=composite_layers(doc,page,shown,raster::working_dpi(page));
     if (copy) {
         Layer layer;
         layer.id = core::truthy_at(op, "id") ? core::py_str(op["id"]) : core::new_id();
@@ -1339,7 +1343,7 @@ void merge_down(OpContext& c) {
             into.shapes = core::vector::make_shapes(std::move(parts));
         }
     } else {
-        const int dpi = kWorkingDpi;
+        const int dpi = raster::working_dpi(page);  // (PC4 F-b: a page of grid "finest" at its grid)
         const Image below = layer_image(page, lower, dpi, &doc);
         const Image above = layer_image(page, upper, dpi, &doc);
         const std::optional<Image> clip = upper.clip ? std::optional<Image>(below.getchannel(3)) : std::nullopt;
@@ -2475,7 +2479,7 @@ void filter_raster_pixels(OpContext& c) {
         throw OpError(error.what());
     }
     if (core::truthy_at(op, "area")) {  // (選択範囲の中だけ)
-        const selection::AreaMask inside = selection::area_mask(core::op_area(op), kWorkingDpi);
+        const selection::AreaMask inside = selection::area_mask(core::op_area(op), raster::dpi_across(page, image.width()));  // (PC4 F-b)
         Image mask = Image::create("L", image.size(), Ink(0));
         mask.paste(inside.mask, Point{static_cast<int>(inside.x0), static_cast<int>(inside.y0)});
         filtered = filters::within(image, filtered, mask);

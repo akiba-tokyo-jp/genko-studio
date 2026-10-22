@@ -28,7 +28,8 @@ inline constexpr int kSelDpi = 200;      // selops.SEL_DPI
 
 // The grid a page's selection is made at (resolve, combine, and the window's areas it makes with to_mask and from_mask):
 // kSelDpi on an 8-bit page, as before; on a precise (16, 32 bits) or ink page the finest grid of its pixel layers, as its
-// layer masks are made (render/layer_masks grid_dpi: 200 dpi at least, 600 at most — the coordinator's 8-2 (b)).
+// layer masks are made (render/layer_masks grid_dpi: 200 dpi at least, 600 at most — the coordinator's 8-2 (b)); and on
+// an 8-bit page whose paper says grid "finest" (image-grid@1, PC4 F-b) the same.
 int grid_dpi(const core::Page& page);
 
 using Matrix = std::array<double, 6>;

@@ -54,7 +54,8 @@ std::optional<std::vector<float>> plane_of(const core::Page& page, const Json& p
 std::string cover_of(const core::Page& page, const Json& area, std::uint32_t w, std::uint32_t h, bool eight) {
     const image_ops::Held held(std::uint64_t(w) * h);
     if (!eight) return ink_edit::area_coverage(page, w, h, area);
-    const selection::AreaMask inside = selection::area_mask(area, raster::kWorkingDpi);
+    // (PC4 F-b: on a page of grid "finest", the area at the layer's own resolution)
+    const selection::AreaMask inside = selection::area_mask(area, raster::dpi_across(page, static_cast<int>(w)));
     Image mask = Image::create("L", Size{static_cast<int>(w), static_cast<int>(h)}, Ink(0));
     mask.paste(inside.mask, Point{static_cast<int>(inside.x0), static_cast<int>(inside.y0)});
     return mask.tobytes();
