@@ -415,6 +415,37 @@ private slots:
         QVERIFY(run_ops(doc, Json::array({Json{{"op", "set_brush"}, {"reset", true}}})).warnings.dump().find("unknown") == std::string::npos);
     }
 
+    // 下地混色 (design 0.4, the leftover of PC2) on the paint layer of each kind: the grey under the blue line picked up
+    // (each piece's colour moves toward it), its pen inputs carried by the pieces; a precise line's pieces keep their
+    // precise colour, of the line's precision.
+    void mixingOnEveryKindOfLayer() {
+        for (const std::string& kind : kinds()) {
+            const core::Document doc = as_kind(paint_book(), kind);
+            Json op = stroke("gpen", "");
+            op.erase("layer");
+            op["layer_id"] = "paint";
+            op["rgb"] = Json::array({0, 0, 255});
+            op["mix"] = 0.8;
+            op["stretch"] = 0.0;
+            op["tilt"] = Json::parse("[[10, 20], [30, 40], [50, 60]]");
+            const bool precise = kind == "16" || kind == "32";
+            if (precise) op["color_rgb"] = Json{{"precision", kind == "16" ? "u16" : "f32"}, {"values", Json::array({0.0, 0.0, 1.0})}};
+            const auto result = run_ops(doc, Json::array({op}));
+            const core::Layer& layer = result.doc.page(0).layers[0];
+            QVERIFY2(layer.stroke_count() > 1, kind.c_str());
+            for (const core::StrokePtr& piece : layer.strokes->items) {
+                QVERIFY2((*piece->rgb)[0] > 100 && (*piece->rgb)[2] < 250, qPrintable(QString::fromStdString(kind + " " + Json(*piece->rgb).dump())));
+                QCOMPARE(piece->tilt.size(), 2 * piece->points.size());
+                QCOMPARE(piece->color_rgb.has_value(), precise);
+                if (precise) {
+                    QCOMPARE((*piece->color_rgb)["precision"].get<std::string>(), std::string(kind == "16" ? "u16" : "f32"));
+                    QVERIFY((*piece->color_rgb)["values"][0].get<double>() > 0.4);
+                }
+            }
+            QVERIFY2(result.warnings.dump().find("color_rgb") == std::string::npos || !precise, kind.c_str());
+        }
+    }
+
     // Saved, opened (brushes@1, the pictures), drawn the same; Undo gives back the book without the line (and without
     // the feature once the brush goes too); Redo the same pixels again.
     void savedOpenedUndoneRedone() {

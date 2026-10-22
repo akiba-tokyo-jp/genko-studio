@@ -170,16 +170,16 @@ std::vector<core::Stroke> mixed_pieces(const core::Page& page, const core::Layer
     int w = 0, h = 0;
     std::string px;
     std::vector<std::array<float, 4>> fine;  // (straight sRGB 0..255 and the alpha 0..1)
-    if (layer.color_raster && page.rgb && !page.color) {
+    if (layer.color_raster && !page.color) {
         const core::ColorRasterView view(*layer.color_raster);
         w = static_cast<int>(view.width());
         h = static_cast<int>(view.height());
-        const RgbSpace space(*page.rgb);
+        const RgbSpace space = RgbSpace::of(page);
         fine.resize(std::size_t(w) * std::size_t(h));
         for (std::size_t i = 0; i < fine.size(); ++i) {
             const auto v = view.pixel(i);
             double rgb[3] = {v[0], v[1], v[2]};
-            space.to_srgb(rgb, 1);
+            if (!space.is_srgb()) space.to_srgb(rgb, 1);
             fine[i] = {static_cast<float>(rgb[0] * 255.0), static_cast<float>(rgb[1] * 255.0), static_cast<float>(rgb[2] * 255.0), static_cast<float>(v[3])};
         }
     } else if (page.color && layer.ink_raster) {
