@@ -482,9 +482,14 @@ private slots:
             now.insert(name);
             now.insert(action->text());  // (words two commands share are told apart by their places there: decision 8)
         }
+        // (a new name may also be a command that holds keys though no menu has it — a tool's settings' button, as PC4
+        // E-0's 選んだ線を描画色にする —: renamed() reads the keys chosen under its old name)
+        QSet<QString> alive = now;
+        const auto names = app::command_names(b.window.get());
+        for (QAction* action : app::preferences::commands(b.window.get())) alive.insert(app::command_name(names, action));
         int pc3 = 0;
         for (const auto& [name, before] : app::preferences::renamed()) {
-            QVERIFY2(now.contains(name), qPrintable(name));
+            QVERIFY2(alive.contains(name), qPrintable(name));
             QVERIFY2(!now.contains(before), qPrintable(before));
             if (name == QStringLiteral("長方形選択ツール") || name == QStringLiteral("カット") || name == QStringLiteral("移動ツール") ||
                 name == QStringLiteral("自由な形に") || name == QStringLiteral("前面へ"))
