@@ -15,10 +15,12 @@
 #include "core/ink.hpp"
 #include "core/ops_util.hpp"
 #include "core/patterns.hpp"
+#include "core/pyconv.hpp"
 #include "core/pyops.hpp"
 #include "core/ruby.hpp"
 #include "core/color_model.hpp"
 #include "core/strokes.hpp"
+#include "render/color_canvas.hpp"
 #include "render/fill.hpp"
 #include "render/image_ops.hpp"
 #include "render/op_limits.hpp"
@@ -26,7 +28,9 @@
 #include "render/page.hpp"
 #include "render/patterns.hpp"
 #include "render/png.hpp"
+#include "render/raster.hpp"
 #include "render/selection.hpp"
+#include "render/shape_parts.hpp"
 
 namespace genko::render {
 
@@ -329,6 +333,21 @@ Json fill_with_pattern(core::OpContext& c, std::size_t at, std::size_t ti, const
     }
     // (into the layer's pixels on its own grid: the coverage placed over the page and laid on the grid)
     const std::string id = layer.id;
+    {  // (a paint layer of a precise RGB page with no pixels yet: clear precise pixels of the page's precision first, as
+       // fill_area's precise pieces start one)
+        const core::Page& was = doc.page(at);
+        const core::Layer& bare = was.layers[ti];
+        if (!was.color && was.rgb && was.rgb->depth > 8 && bare.kind == core::LayerKind::Raster && !bare.color_raster && !bare.ink_raster &&
+            (!bare.raster_png || bare.raster_png->empty()) && bare.stroke_count() == 0 && bare.patches.empty() && !shape_parts::any(bare)) {
+            const Size size{mm_to_px(was.spec.width_mm.value(), raster::kWorkingDpi), mm_to_px(was.spec.height_mm.value(), raster::kWorkingDpi)};
+            ColorCanvas clear(Image::create("RGBA", size, Ink{0, 0, 0, 0}), RgbSpace::of(was));
+            std::string pixels = clear.color_raster(was.rgb->depth == 16 ? "u16" : "f32");
+            doc.edit_page(at).layers[ti].color_raster = std::make_shared<const std::string>(std::move(pixels));
+            if (std::find(doc.features.begin(), doc.features.end(), core::kColorRasterFeature) == doc.features.end()) {
+                doc.features.emplace_back(core::kColorRasterFeature);
+            }
+        }
+    }
     image_ops::Window found;
     (void)image_ops::layer_pixels(c, at, id, Box{0, 0, 0, 0}, &found);
     const core::Page& now = doc.page(at);

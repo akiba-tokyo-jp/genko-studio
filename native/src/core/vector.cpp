@@ -254,13 +254,13 @@ void check_fill(const Json& fill, std::string_view what) {
     object_of(fill, what);
     if (const Json* pattern = field(fill, "pattern")) {  // (patterns@1, PC4 E3: in its normal form; the book keeps it)
         only_keys(fill, {"pattern"}, what);
-        Json normal;
+        bool normal = false;
         try {
-            normal = pattern_fill_spec(*pattern);
+            normal = pattern_fill_normal(*pattern);
         } catch (const std::exception& error) {
             bad(std::string(what) + "'s " + error.what());
         }
-        if (normal != *pattern) bad(std::string(what) + "'s pattern fill must be in its normal form {id, scale, angle, phase_mm, link}");
+        if (!normal) bad(std::string(what) + "'s pattern fill must be in its normal form {id, scale, angle, phase_mm, link}");
         return;
     }
     if (const Json* gradient = field(fill, "gradient")) {

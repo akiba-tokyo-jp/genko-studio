@@ -7,11 +7,13 @@
 
 #include <QtTest>
 #include <QAction>
+#include <QCheckBox>
 #include <QComboBox>
 #include <QDialog>
 #include <QDockWidget>
 #include <QDoubleSpinBox>
 #include <QImage>
+#include <QLabel>
 #include <QMenu>
 #include <QMenuBar>
 #include <QPushButton>
@@ -121,7 +123,10 @@ private slots:
         dock->toggleViewAction()->trigger();
         QVERIFY(dock->isVisible());
         app::PatternsPanel* panel = s.window->patterns_panel();
+        QVERIFY(panel != nullptr);
+        panel->refresh();  // (as shown: offscreen, a dock among tabs may not say it is shown)
         QTreeWidget* tree = panel->tree();
+        QVERIFY(tree->topLevelItemCount() >= 2);
         QCOMPARE(tree->topLevelItem(0)->text(0), QStringLiteral("幾何学"));
         QCOMPARE(tree->topLevelItem(1)->text(0), QStringLiteral("テクスチャ"));
         QTreeWidgetItem* dots = item_named(tree, QStringLiteral("水玉"));
@@ -179,7 +184,9 @@ private slots:
         QVERIFY(s.book().patterns.empty());
         // a double click in the panel: a pattern fill layer of that pattern
         s.window->patterns_dock()->toggleViewAction()->trigger();
+        s.window->patterns_panel()->refresh();
         QTreeWidget* tree = s.window->patterns_panel()->tree();
+        QVERIFY(item_named(tree, QStringLiteral("グリッド")) != nullptr);
         s.answers.responder->exec = [](QDialog* dialog) { return int(dialog->objectName() == QStringLiteral("pattern_fill_dialog") ? QDialog::Accepted : QDialog::Rejected); };
         emit tree->itemDoubleClicked(item_named(tree, QStringLiteral("グリッド")), 0);
         QCOMPARE(s.book().patterns.size(), std::size_t(1));
@@ -226,6 +233,7 @@ private slots:
         QVERIFY(chosen->first.width > 300);  // (the 60 mm page at its working grid)
         s.window->patterns_dock()->toggleViewAction()->trigger();
         app::PatternsPanel* panel = s.window->patterns_panel();
+        panel->refresh();
         QVERIFY(item_named(panel->tree(), QStringLiteral("ページ")) != nullptr);
         panel->rename();
         QCOMPARE(s.window->current_pattern(), QStringLiteral("library:頁"));

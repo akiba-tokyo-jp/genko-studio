@@ -182,17 +182,24 @@ void validate_patterns(const Document& doc) {
     }
     // (E3: each pattern fill as the ops make it, naming a pattern the book keeps)
     each_pattern_fill(doc, [&](const Json& fill, const std::string& where) {
-        Json normal;
         try {
-            normal = pattern_fill_spec(fill);
+            if (!pattern_fill_normal(fill)) throw Error("value", "its pattern fill is not in its normal form");
         } catch (const Error& error) {
             throw Error("value", where + ": " + error.what());
         }
-        if (normal != fill) throw Error("value", where + ": its pattern fill is not in its normal form");
-        if (!ids.contains(normal["id"].get<std::string>())) {
-            throw Error("value", where + " names the pattern " + normal["id"].get<std::string>() + ", which the book does not keep");
-        }
+        const std::string id = fill["id"].get<std::string>();
+        if (!ids.contains(id)) throw Error("value", where + " names the pattern " + id + ", which the book does not keep");
     });
+}
+
+bool pattern_fill_normal(const Json& fill) {
+    const Json normal = pattern_fill_spec(fill);
+    if (normal.size() != fill.size()) return false;
+    for (const auto& [key, value] : normal.items()) {
+        const Json* given = get(fill, key);
+        if (given == nullptr || *given != value) return false;
+    }
+    return true;
 }
 
 Json pattern_fill_spec(const Json& raw) {

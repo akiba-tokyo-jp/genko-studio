@@ -357,7 +357,10 @@ private slots:
         // and the 1 of PC4 F-b (SPEC FILE-01) — ページ → 複製… (act_duplicate_image, image.duplicate) — theirs (test_gui_file),
         // which connects F-0's six frames of ファイル too; and the 2 of PC4 E1 (SPEC COLOR-09「ブラシエンジンと線」) — ツール →
         // 鉛筆ツール (act_pencil) and 表示 → ブラシプレビュー (act_brush_preview) — theirs (test_gui_brushes).
-        QCOMPARE(w->actions_by_name().size(), std::size_t{546});
+        // and the 3 of PC4 E3 (SPEC COLOR-09「パターン」) — 編集 → パターンを定義… (act_define_pattern), レイヤー パネルの
+        // パターンのレイヤー… (act_layer_pattern, layer.newFillLayer.pattern) and 表示 → パターンプレビュー (act_pattern_preview)
+        // — theirs (test_gui_patterns).
+        QCOMPARE(w->actions_by_name().size(), std::size_t{549});
         QVERIFY(w->action("act_chat_approval"));
         QVERIFY(w->action("act_style"));
         QVERIFY(w->action("act_exposure"));

@@ -125,7 +125,7 @@ void MainWindow::build_pattern_actions() {
 }
 
 void MainWindow::build_pattern_menus(QMenu* edit, QMenu* view) {
-    // 編集: after カスタムシェイプを定義… (Photoshop's ブラシを定義… · パターンを定義… · カスタムシェイプを定義…)
+    // 編集: before カスタムシェイプを定義… (Photoshop's ブラシを定義… · パターンを定義… · カスタムシェイプを定義…)
     QAction* shape = action("act_define_custom_shape");
     const QList<QAction*> in_edit = edit->actions();
     const int at = shape != nullptr ? static_cast<int>(in_edit.indexOf(shape)) : -1;

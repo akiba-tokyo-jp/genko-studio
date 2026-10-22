@@ -186,6 +186,12 @@ private slots:
                                 Json{{"id", "p"}, {"link", 1}}, Json{{"id", "p"}, {"offset", 1}}, Json("pat-1")}) {
             QVERIFY2(!error_of([&] { (void)core::pattern_fill_spec(bad); }).empty(), bad.dump().c_str());
         }
+        // in its normal form whatever its keys' order (a shapes blob is written with its keys sorted); not with a key
+        // left out; one not well formed refused as pattern_fill_spec refuses it
+        QVERIFY(core::pattern_fill_normal(Json{{"angle", 0}, {"id", "p"}, {"link", true}, {"phase_mm", Json::array({0, 0})}, {"scale", 100}}));
+        QVERIFY(!core::pattern_fill_normal(Json{{"id", "p"}}));
+        QVERIFY(!core::pattern_fill_normal(Json{{"id", "p"}, {"scale", 100}, {"angle", 0}, {"phase_mm", Json::array({0, 0})}}));
+        QVERIFY(!error_of([&] { (void)core::pattern_fill_normal(Json{{"id", "p"}, {"scale", 0}}); }).empty());
     }
 
     // patterns.rs block_and_pat_file_round_trip_at_every_depth and pattern_map.rs

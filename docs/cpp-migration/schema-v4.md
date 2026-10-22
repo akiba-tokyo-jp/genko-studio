@@ -411,7 +411,7 @@ v3 の行（`rev`・`actor`・`at`・`changes`・`via`）をそのまま残し�
 - 絵は原稿の素材: 8 bit の RGB は RGBA の PNG、8 bit のグレーは LA の PNG（`.png`）、16・32 bit の RGB は GKCR（`.colorrgba`）、16・32 bit のグレーと CMYK・Lab は GKIR 版 2（`.gkir`）。絵の種類・大きさ・深さはパターンの欄と同じでなければならない（違えば読み取り専用）。素材の片付けは `project.json` が名指す絵として残す。
 - 書き手は本に `patterns` があれば `features` に `patterns@1` を加え、無くなれば外す。読み手は id の重なり・欄の範囲外・欠けた絵・合わない絵を読み取り専用にする。
 - op（E3）: `add_pattern`・`rename_pattern`・`delete_pattern`（どこからも使われていないものだけ消せる）。書き手が黙って落とすことはしない。塗りの層・形の部品・パターンオーバーレイの `pattern`（id で名指す）は E3・E6 が足す。
-- E3 のパターンの塗り（`patterns@1`）: 塗りの層の `"fill": {"pattern": {"id", "scale", "angle", "phase_mm", "link"}}`、形の部品の `"fill"`・線の `"fill"` の `{"pattern": {…}}`（`pen-shapes@1` の「パターンの塗りは読み取り専用」はこれで外れる）。どのキーもこの順で書く: `id`（本のパターンの id）、`scale`（1..1000 %）、`angle`（−360..360°、反時計回り）、`phase_mm`（[x, y] mm、±100000）、`link`（true・false）。書き手は正規形のまま書き、読み手は正規形でない・本が持たないパターンを名指す塗りを読み取り専用にする。画素に塗る op（`fill_area`・`fill`）の結果は画素（パッチ・層の画素）で、パターンの写しは本の `patterns` に残る（どこからも使われなければ `delete_pattern` で消せる）。
+- E3 のパターンの塗り（`patterns@1`）: 塗りの層の `"fill": {"pattern": {"id", "scale", "angle", "phase_mm", "link"}}`、形の部品の `"fill"`・線の `"fill"` の `{"pattern": {…}}`（`pen-shapes@1` の「パターンの塗りは読み取り専用」はこれで外れる）。どのキーもこの順で書く: `id`（本のパターンの id）、`scale`（1..1000 %）、`angle`（−360..360°、反時計回り）、`phase_mm`（[x, y] mm、±100000）、`link`（true・false）（形の部品は `shapes_blob` の正規形の JSON なのでキーの名前の順）。書き手は正規形のまま書き、読み手はキーの順を問わず、正規形でない・本が持たないパターンを名指す塗りを読み取り専用にする。画素に塗る op（`fill_area`・`fill`）の結果は画素（パッチ・層の画素）で、パターンの写しは本の `patterns` に残る（どこからも使われなければ `delete_pattern` で消せる）。
 
 ## フィルター（filters@1。COLOR-08、PC4 節 D）
 

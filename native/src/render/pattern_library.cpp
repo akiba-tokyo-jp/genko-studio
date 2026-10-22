@@ -1,11 +1,13 @@
 #include "render/pattern_library.hpp"
 
 #include <algorithm>
+#include <array>
 #include <cmath>
 #include <functional>
 #include <set>
 
 #include "core/base64.hpp"
+#include "core/color_raster.hpp"
 #include "core/error.hpp"
 #include "core/ink.hpp"
 #include "core/patterns.hpp"

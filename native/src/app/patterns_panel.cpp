@@ -24,6 +24,7 @@
 #include <QTreeWidget>
 #include <QVBoxLayout>
 
+#include <functional>
 #include <map>
 #include <mutex>
 

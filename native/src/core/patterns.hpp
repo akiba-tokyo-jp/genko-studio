@@ -53,6 +53,9 @@ inline constexpr double kPatternPhaseMax = 100000.0;                         // 
 // counter-clockwise (0), where it starts on the page [x, y] mm (±100000, [0, 0]), whether it moves with its layer
 // (true). core::Error("value") says what is wrong.
 Json pattern_fill_spec(const Json& raw);
+// Is a pattern fill in its normal form (pattern_fill_spec gives it back), its keys in any order — a shapes blob is
+// written with its keys sorted? core::Error("value") as pattern_fill_spec for one not well formed.
+bool pattern_fill_normal(const Json& fill);
 // Is a fill ({"rgb"}, {"gradient"}, {"pattern"} …) a pattern's? Its pattern fill, or null.
 const Json* pattern_of_fill(const Json& fill);
 // The ids of the patterns the book's fills name — its fill layers', its shape parts' fills and strokes' — on its pages

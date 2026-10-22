@@ -55,21 +55,16 @@ std::string refusal(const core::Document& doc, const Json& op) {
     return {};
 }
 
-std::string ink_of(const core::Page& page) {
-    for (const core::Layer& layer : page.layers)
-        if (layer.role == core::LayerRole::Ink) return layer.id;
-    throw std::runtime_error("no ink layer");
-}
-
 const core::Layer& layer_of(const core::Page& page, std::string_view id) {
     for (const core::Layer& layer : page.layers)
         if (layer.id == id) return layer;
     throw std::runtime_error("no layer " + std::string(id));
 }
 
-// A page of 60 × 80 mm without panels.
+// A colour page of 60 × 80 mm without panels.
 core::Document small_book() {
     core::PageSpec spec;
+    spec.expression = "color";  // (a mono page shows its fill layers grey)
     spec.width_mm = core::Num(60);
     spec.height_mm = core::Num(80);
     spec.dpi = core::Num(150);
@@ -101,6 +96,7 @@ Json add_checker(const char* id = nullptr) {
 render::Image drawn(const core::Document& doc, int dpi = 100) {
     render::RenderOptions options;
     options.mode = "print";
+    options.finish = false;  // (the colours as they are: a mono page's print finish would make them grey)
     return render::render_page(doc.page(0), dpi, options, &doc).image.convert("RGB");
 }
 
@@ -171,7 +167,7 @@ private slots:
     void theBooksPatterns() {
         core::Document book = small_book();
         core::ApplyResult made = run_ops(book, Json::array({add_checker()}));
-        QCOMPARE(made.results[0], (Json{{"pattern", "pat-1"}, {"added", true}}));
+        QCOMPARE(made.results[0], (Json{{"index", 0}, {"op", "add_pattern"}, {"pattern", "pat-1"}, {"added", true}}));
         book = made.doc;
         const core::Pattern& p = book.patterns.at(0);
         QCOMPARE(p.mode, std::string("rgb"));
@@ -180,7 +176,7 @@ private slots:
         QCOMPARE(p.dpi, 100.0);
         QVERIFY(book.pattern_files.contains(p.asset));
         made = run_ops(book, Json::array({add_checker()}));  // (the same again: the one it keeps)
-        QCOMPARE(made.results[0], (Json{{"pattern", "pat-1"}, {"added", false}}));
+        QCOMPARE(made.results[0], (Json{{"index", 0}, {"op", "add_pattern"}, {"pattern", "pat-1"}, {"added", false}}));
         QCOMPARE(made.doc.patterns.size(), std::size_t(1));
         Json other_dpi = add_checker();
         other_dpi["dpi"] = 300;
@@ -296,7 +292,7 @@ private slots:
             }
             const render::Image seen = drawn(filled);
             QVERIFY2(reddish(rgb_at(seen, 1, 1)) && bluish(rgb_at(seen, 5, 1)), (m + " inside").c_str());
-            const auto outside = rgb_at(seen, 60, 60);
+            const auto outside = rgb_at(seen, 150, 150);  // (38 mm: beyond the area's 20.32 mm)
             QVERIFY2(outside[0] > 240 && outside[2] > 240, (m + " outside").c_str());
         }
         // its transparency kept: only where the layer had pixels
@@ -333,7 +329,7 @@ private slots:
         const render::Image b = drawn(bucket);
         const int x20 = static_cast<int>(20 / 25.4 * 100);
         QVERIFY(reddish(rgb_at(b, x20, x20)) || bluish(rgb_at(b, x20, x20)));
-        const auto beyond = rgb_at(b, 60, 60 * 2);
+        const auto beyond = rgb_at(b, 200, 250);  // (50.8 mm, 63.5 mm: outside the ring of 5..40 mm)
         QVERIFY(beyond[0] > 240 && beyond[2] > 240);
         // a shape part's pattern fill
         core::Document shaped = run_ops(small_book(), Json::array({add_checker(), Json{{"op", "add_shape_part"}, {"page", 1}, {"layer", "ink"},
@@ -383,16 +379,16 @@ private slots:
         reply = apply(book, QStringLiteral("b.json"), Json::array({Json{{"op", "rename_pattern"}, {"id", "pat-1"}, {"name", "チェック"}}}));
         QVERIFY2(reply.value("ok", false), reply.dump().c_str());
         QCOMPARE(project(book)["patterns"][0]["name"], Json("チェック"));
-        reply = genko({QStringLiteral("undo"), book}, &exit);
+        reply = genko({QStringLiteral("undo"), book, QStringLiteral("--as"), QStringLiteral("human:test")}, &exit);
         QVERIFY2(exit == 0, reply.dump().c_str());
         // undone: the layer and the pattern gone, the feature too
-        reply = genko({QStringLiteral("undo"), book}, &exit);
+        reply = genko({QStringLiteral("undo"), book, QStringLiteral("--as"), QStringLiteral("human:test")}, &exit);
         QVERIFY2(exit == 0, reply.dump().c_str());
         saved = project(book);
         QVERIFY(!has_feature(saved, "patterns@1"));
         QVERIFY(!saved.contains("patterns"));
         // a fill naming a pattern the book does not keep: read-only (opened, not written)
-        reply = genko({QStringLiteral("redo"), book}, &exit);
+        reply = genko({QStringLiteral("redo"), book, QStringLiteral("--as"), QStringLiteral("human:test")}, &exit);
         QVERIFY2(exit == 0, reply.dump().c_str());
         saved = project(book);
         QVERIFY(has_feature(saved, "patterns@1"));
@@ -465,7 +461,7 @@ json.dump(out, open(sys.argv[1], "w"), ensure_ascii=False)
         QCOMPARE(read["patterns"][0]["asset"], project(book)["patterns"][0]["asset"]);
         bool fill = false;
         for (const Json& layer : read["pages"][0]["layers"]) {
-            if (layer.value("kind", std::string()) != "fill") continue;
+            if (layer.value("kind", std::string()) != "fill" || !layer.contains("fill") || !layer["fill"].is_object() || !layer["fill"].contains("pattern")) continue;
             fill = true;
             const Json& p = layer["fill"]["pattern"];
             QCOMPARE(p["id"], read["patterns"][0]["id"]);
