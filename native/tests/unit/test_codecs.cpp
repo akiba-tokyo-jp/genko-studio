@@ -472,6 +472,12 @@ private slots:
         const std::string bomb = std::string("\x89PNG\r\n\x1a\n", 8) + png_chunk("IHDR", ihdr) +
                                  png_chunk("IDAT", std::string("\x78\x9C\x03\x00\x00\x00\x00\x01", 8)) + png_chunk("IEND", {});
         QCOMPARE(code_of([&] { (void)codecs::decode(bomb); }), std::string("image_too_large"));
+        // (10000 × 10000 16-bit RGBA: within the pixels, but its floats with the 16-bit picture made from them — 24 bytes a
+        // pixel — are past the 2 GiB: refused on its header too, before any row is allocated)
+        ihdr = be32(10000) + be32(10000) + std::string("\x10\x06\0\0\0", 5);
+        const std::string deep = std::string("\x89PNG\r\n\x1a\n", 8) + png_chunk("IHDR", ihdr) +
+                                 png_chunk("IDAT", std::string("\x78\x9C\x03\x00\x00\x00\x00\x01", 8)) + png_chunk("IEND", {});
+        QCOMPARE(code_of([&] { (void)codecs::decode(deep); }), std::string("image_too_large"));
         // (a TIFF saying 1000000 × 1000000 grey)
         std::string tiff("II*\0\x08\0\0\0", 8);
         const std::array<std::array<std::uint32_t, 4>, 6> entries{{{256, 4, 1, 1000000}, {257, 4, 1, 1000000}, {258, 3, 1, 8}, {262, 3, 1, 1}, {273, 4, 1, 0}, {279, 4, 1, 0}}};

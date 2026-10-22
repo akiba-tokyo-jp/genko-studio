@@ -503,6 +503,19 @@ int stored_depth(std::string_view bytes) {
     return 8;
 }
 
+int stored_samples(std::string_view bytes) {
+    const auto kind = sniff(bytes);
+    try {
+        if (kind && kind->first == "png") return std::max(png_shape(bytes).channels, 1);
+        if (kind && kind->first == "tiff") {
+            Tiff t(bytes);
+            return std::max<int>(tiff_shape(t.tif).samples, 1);
+        }
+    } catch (const core::Error&) {
+    }
+    return 4;
+}
+
 double stored_dpi(std::string_view bytes) {
     const auto kind = sniff(bytes);
     double dpi = 0;

@@ -269,6 +269,46 @@ private slots:
         QVERIFY(picture.image.data() == cmyk);
     }
 
+    // The page's profile: the file's own (an sRGB one is the page's without a profile, whatever the working RGB); a file that
+    // carries none takes the working RGB given (an sRGB one: none). The numbers stay the file's (keep / assign, not converted).
+    void anRgbPictureTakesItsOwnProfileOrTheWorkingOne() {
+        const std::string srgb = formats::srgb_icc_once();
+        const std::string adobe = *core::builtin_profile("adobe-rgb-compat")->bytes;
+        QVERIFY(core::icc_description(srgb).starts_with("sRGB"));
+        QVERIFY(!core::icc_description(adobe).starts_with("sRGB"));
+        const render::Image picture = render::Image::create("RGB", {6, 4}, render::Ink{30, 140, 220});
+        const auto png = [&](const std::string& icc) { return formats::png_bytes(picture, formats::PngSave{std::nullopt, icc, false}); };
+        const auto open = [](const std::string& bytes, const char* name, const std::string& working) {
+            formats::OpenOptions options;
+            options.working_rgb = working;
+            return formats::open_file(bytes, name, options);
+        };
+        // (an sRGB file, the working RGB Adobe RGB: sRGB, the 8-bit page of before)
+        const formats::Opened tagged_srgb = open(png(srgb), "srgb.png", adobe);
+        QVERIFY(!tagged_srgb.doc.page(0).rgb && !tagged_srgb.doc.rgb);
+        QVERIFY(render::open_image(*tagged_srgb.doc.page(0).layers[0].raster_png).convert("RGB").tobytes() == picture.tobytes());
+        // (an Adobe RGB file: its own profile, its numbers)
+        const formats::Opened tagged_adobe = open(png(adobe), "adobe.png", {});
+        QVERIFY(tagged_adobe.doc.page(0).rgb);
+        QCOMPARE(tagged_adobe.doc.page(0).rgb->profile, core::builtin_profile("adobe-rgb-compat")->ref());
+        QCOMPARE(tagged_adobe.doc.page(0).rgb->depth, 8);
+        QVERIFY(render::open_image(*tagged_adobe.doc.page(0).layers[0].raster_png).convert("RGB").tobytes() == picture.tobytes());
+        // (no profile, the working RGB Adobe RGB: that one assigned; the working RGB sRGB: none)
+        const formats::Opened untagged = open(png({}), "plain.png", adobe);
+        QVERIFY(untagged.doc.page(0).rgb);
+        QCOMPARE(untagged.doc.page(0).rgb->profile, core::builtin_profile("adobe-rgb-compat")->ref());
+        QVERIFY(!open(png({}), "plain.png", srgb).doc.page(0).rgb);
+        // (a 16-bit sRGB TIFF, the working RGB Adobe RGB: 16 bits of sRGB, no profile)
+        const std::string gkcr = core::encode_color_pixels(5, 3, "u16", [](std::size_t i) {
+            return std::array<double, 4>{static_cast<double>(i) / 15.0, 0.25, 0.75, 1.0};
+        });
+        const formats::Opened deep =
+            open(formats::values_tiff_bytes(core::ColorRasterView(gkcr), 16, formats::TiffSave{"tiff_lzw", std::nullopt, srgb}), "deep.tif", adobe);
+        QVERIFY(deep.doc.page(0).rgb);
+        QCOMPARE(deep.doc.page(0).rgb->depth, 16);
+        QVERIFY(deep.doc.page(0).rgb->profile.empty());
+    }
+
     void anOpenedBookIsSavedAndReadBack() {
         const auto [deep_bytes, deep_values] = tiff16(10, 6);
         struct Case {

@@ -132,8 +132,11 @@ Opened picture_book(CodecImage picture, std::string_view title, const OpenOption
     } else {
         std::optional<core::RgbMode> mode;
         const int depth = picture.sample() == Sample::U8 ? 8 : picture.sample() == Sample::U16 ? 16 : 32;
-        const bool srgb = own && core::icc_description(*own).starts_with("sRGB");  // (an sRGB profile: the 8-bit page's own)
-        const std::string icc = own && !srgb ? *own : options.working_rgb;
+        // (the file's own profile — an sRGB one is the page's without a profile —; a file that carries none takes the working
+        // RGB, an sRGB one being none either)
+        const auto srgb = [](const std::string& profile) { return core::icc_description(profile).starts_with("sRGB"); };
+        const std::string chosen = own ? *own : options.working_rgb;
+        const std::string icc = chosen.empty() || srgb(chosen) ? std::string() : chosen;
         if (depth != 8 || !icc.empty()) {
             mode = core::RgbMode{};
             mode->depth = depth;

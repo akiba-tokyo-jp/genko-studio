@@ -61,8 +61,11 @@ struct DeepPicture {
 };
 
 // PC4 F-0 (render/codecs): what look_at reads of a file's header without its pixels — the bits a sample of a PNG or a
-// TIFF holds (8 for any other file, and for one whose header cannot be read) and the resolution the file says (0: none).
+// TIFF holds (8 for any other file, and for one whose header cannot be read), the samples a pixel of it holds as
+// deep_picture reads it (a PNG's after its palette and tRNS are expanded, a TIFF's own; 4 for any other file and for one
+// whose header cannot be read) and the resolution the file says (0: none).
 int stored_depth(std::string_view bytes);
+int stored_samples(std::string_view bytes);
 double stored_dpi(std::string_view bytes);
 
 // The file's pixels with all their bits: a PNG of 16 bits, a TIFF of 16 or 32 bits (grey, RGB, CMYK, with an alpha or

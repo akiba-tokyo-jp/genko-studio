@@ -112,9 +112,14 @@ CodecImage decode_as(Format format, std::string_view bytes, const Limits& limits
     // (its size from its header first: no pixel is allocated for a picture past the limits)
     const Size size = picture_size(bytes);
     const int depth = smart::stored_depth(bytes);
-    limits.check_bytes(size.width, size.height, depth > 8 ? 16 : 4);  // (the readers' work: 4 bytes a pixel, floats for the deep ones)
+    const bool deep = depth > 8 && (format == Format::Png || format == Format::Tiff);
+    // (the readers' work at its height: 4 bytes a pixel for an 8-bit picture; a deep one's floats — 4 bytes a sample —
+    // held with the picture made from them, 2 bytes a 16-bit sample and 4 a float (a 16-bit PNG's rows as libpng gives
+    // them, 2 bytes a sample, are held with the floats the same way))
+    const auto samples = static_cast<std::uint64_t>(std::clamp(smart::stored_samples(bytes), 1, 5));
+    limits.check_bytes(size.width, size.height, deep ? samples * (4 + (depth > 16 ? 4 : 2)) : 4);
     CodecImage out;
-    if (depth > 8 && (format == Format::Png || format == Format::Tiff)) {
+    if (deep) {
         out = from_deep(smart::deep_picture(bytes));
     } else {
         PngLimits reading;
