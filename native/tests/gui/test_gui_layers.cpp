@@ -622,12 +622,18 @@ private slots:
         gui_test::Answers answers;
         QVERIFY(book.choose("paint"));
         const auto before = book.layer("paint")->color_raster;
-        book.window->action(QStringLiteral("act_filter_blur_more"))->trigger();
+        // ぼかし（ガウス）… of 40 working pixels: σ two of this layer's (8 pixels over 20 mm)
+        answers.responder->exec = [](QDialog* dialog) {
+            if (dialog->objectName() != QStringLiteral("filter_dialog")) return int(QDialog::Rejected);
+            dialog->findChild<QDoubleSpinBox*>(QStringLiteral("field_radius"))->setValue(40);
+            return int(QDialog::Accepted);
+        };
+        book.window->action(QStringLiteral("act_filter_blur_gaussian"))->trigger();
         QVERIFY(book.layer("paint")->color_raster && book.layer("paint")->color_raster != before);
         const core::ColorRasterView after(*book.layer("paint")->color_raster);
         QCOMPARE(after.metadata("")["precision"], Json("u16"));
-        QVERIFY(std::abs(after.pixel(3)[1] - 30000 / 65535.0) < 1e-9);  // (a flat plate stays flat, to the 16 bits)
-        QVERIFY(after.pixel(3)[0] != 3000 / 65535.0);
+        QVERIFY(std::abs(after.pixel(3)[1] - 30000 / 65535.0) < 1e-9);  // (a flat plate stays flat to the 16 bits: 8 would round it)
+        QVERIFY(after.pixel(3)[0] > 3000 / 65535.0 + 1e-3);              // (blurred: the rows below it are lighter)
     }
 
     // PC3 B2 (the user's decision 5): レイヤー → レイヤーマスク by Photoshop's names — すべての領域を隠す (a new mask linked),

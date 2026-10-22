@@ -661,7 +661,7 @@ private slots:
         QVERIFY(!box->geometry().intersects(quick->geometry()));  // (nothing lies over the approval box)
     }
 
-    // test_nine_menus_and_the_tabs_whole_on_a_1366_screen: nine menus; the panels' row of tabs with レイヤー shows every
+    // test_nine_menus_and_the_tabs_whole_on_a_1366_screen: nine menus (ten since PC4's フィルター); the panels' row of tabs with レイヤー shows every
     // tab whole (none behind the scroll arrows) on a 1366 × 768 screen.
     void nineMenusAndTheTabsWholeOnA1366Screen() {
         core::Document doc = b4(2);
@@ -674,7 +674,7 @@ private slots:
         int menus = 0;
         for (QAction* a : w->menuBar()->actions())
             if (a->menu() != nullptr) ++menus;
-        QCOMPARE(menus, 9);
+        QCOMPARE(menus, 10);  // (PC4 節 D, the user's decision 1: フィルター after レイヤー — the menu bar still whole at 1366)
         QTabBar* bar = nullptr;
         for (QTabBar* b : w->findChildren<QTabBar*>()) {
             if (!b->isVisible()) continue;
