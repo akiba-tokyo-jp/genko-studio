@@ -58,11 +58,12 @@ AdjustParam colour(std::string_view key, std::array<int, 3> fallback, bool optio
     return p;
 }
 
-AdjustParam custom(std::string_view key) {
+// A setting read by the kind's own normalize, required (absent: null, which the normalize refuses).
+AdjustParam required_custom(std::string_view key) {
     AdjustParam p;
     p.key = key;
     p.type = Type::Custom;
-    p.optional = true;
+    p.optional = false;
     return p;
 }
 
@@ -270,7 +271,7 @@ std::vector<FilterKind> gallery_kinds() {
     out.kind.filter = true;
     out.kind.local = true;
     out.kind.smart = true;
-    out.kind.params = {custom("effects"), colour("foreground", {0, 0, 0}), colour("background", {255, 255, 255})};
+    out.kind.params = {required_custom("effects"), colour("foreground", {0, 0, 0}), colour("background", {255, 255, 255})};
     out.kind.hooks.normalize = [](Json read, const Page*, LookupTables*) { return read_gallery(std::move(read)); };
     out.info.kind = "filter_gallery";
     out.info.upstream = "filter.filterGallery";
