@@ -93,7 +93,8 @@ Opened picture_book(CodecImage picture, std::string_view title, const OpenOption
     spec.inner_margin_mm = core::Num(std::int64_t{0});
     spec.trim_w_mm = spec.width_mm;
     spec.trim_h_mm = spec.height_mm;
-    spec.margins_mm = core::NumList{core::Num(std::int64_t{0}), core::Num(std::int64_t{0}), core::Num(std::int64_t{0}), core::Num(std::int64_t{0})};
+    // (the margins as the reader reads them back: floats)
+    spec.margins_mm = core::NumList{core::Num(0.0), core::Num(0.0), core::Num(0.0), core::Num(0.0)};
     spec.expression = gray ? "mono" : "color";
     if (eight && !gray && !cmyk) spec.grid = "finest";  // (image-grid@1: design 3, 8-2 (b))
 

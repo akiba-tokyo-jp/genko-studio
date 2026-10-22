@@ -1,7 +1,7 @@
 // PC4 節 F (SPEC.md FILE-01): the ops of the files' group — registered here; each group writes its op's work in this file
 // (F-b File Info, F-e a RAW smart object's development).
 
-#include "render/ops_file.hpp"
+#include "render/ops_formats.hpp"
 
 #include <string>
 
@@ -20,7 +20,7 @@ core::OpFunction later(const char* op, const char* group) {
 
 }  // namespace
 
-void register_file_ops(core::OpRegistry& registry) {
+void register_format_ops(core::OpRegistry& registry) {
     // F-b: ファイル情報… ({"title"?, "author"?, "author_title"?, "description"?, "keywords"?: [str] | "a; b", "copyright"?,
     // "copyright_status"?: "unknown" | "copyrighted" | "public_domain", "copyright_url"?} → {"file_info"}: the book's
     // file_info, file-info@1; the title is set_meta's)

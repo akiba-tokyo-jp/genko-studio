@@ -487,8 +487,10 @@ private slots:
         }
         le(0, 4);
         QCOMPARE(code_of([&] { (void)codecs::decode(tiff); }), std::string("image_too_large"));
-        // (a JPEG whose frame says 65535 × 65535, no scan)
-        const std::string jpeg("\xFF\xD8\xFF\xC0\x00\x11\x08\xFF\xFF\xFF\xFF\x03\x01\x11\x00\x02\x11\x00\x03\x11\x00\xFF\xD9", 23);
+        // (a JPEG whose frame says 60000 × 60000, its scan's header and no scan data — this build's reader takes the size from
+        // a header that reaches its scan, and libjpeg's sides stop at 65500)
+        const std::string jpeg("\xFF\xD8\xFF\xC0\x00\x11\x08\xEA\x60\xEA\x60\x03\x01\x11\x00\x02\x11\x00\x03\x11\x00"
+                               "\xFF\xDA\x00\x0C\x03\x01\x00\x02\x11\x03\x11\x00\x3F\x00\xFF\xD9", 37);
         codecs::Limits l;
         l.max_pixels = 1 << 24;
         QCOMPARE(code_of([&] { (void)codecs::decode(jpeg, l); }), std::string("image_too_large"));

@@ -151,7 +151,7 @@ genko_library(genko_render
     codecs/fidelity.cpp
     codecs/limits.cpp
     codecs/codecs.cpp
-    ops_file.cpp
+    ops_formats.cpp
     ${GENKO_MATERIAL_RESOURCES}
     ${GENKO_TEXT_RESOURCES}
   PUBLIC_DEPS genko_core Qt6::Core
