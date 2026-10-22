@@ -25,6 +25,7 @@
 #include "render/ops_registry.hpp"
 #include "render/png.hpp"
 #include "render/proof.hpp"
+#include "render/smart_decode.hpp"
 
 namespace genko::formats {
 
@@ -261,7 +262,7 @@ Opened picture_book(CodecImage picture, std::string_view title, const OpenOption
 }
 
 Opened open_file(std::string_view bytes, std::string_view name, const OpenOptions& options) {
-    const std::string file = base_name(name);
+    const std::string file = core::utf8_replaced(base_name(name));  // (a name not UTF-8: its bytes as U+FFFD — the book's title and source)
     const std::string suffix = suffix_of(file);
     // (F-d: a PSD or PSB as a book of its layers; F-e: a camera RAW file through Camera Raw — a TIFF-shaped RAW is not read
     // as its TIFF —; F-f: a .pcraft)
@@ -284,11 +285,22 @@ Opened open_file(std::string_view bytes, std::string_view name, const OpenOption
             notes.push_back("EXIF の向きのとおりに回転して開きました");
         }
     }
+    // (a TIFF's own orientation, tag 274: its 8-bit reader turns the pixels; a 16- or 32-bit TIFF's reader does not —
+    // turned here, as Photoshop opens it)
+    if (*format == render::codecs::Format::Tiff && render::smart::stored_depth(bytes) > 8) {
+        if (const int orientation = render::codecs::exif_orientation(bytes); orientation != 1) {
+            picture = render::codecs::oriented(picture, orientation);
+            if (xmp) xmp = render::codecs::xmp_upright(*xmp);
+            notes.push_back("TIFF の向きのとおりに回転して開きました");
+        }
+    }
     // (no profile and an EXIF that says sRGB: sRGB, not the working RGB — unless the EXIF's profile tag is ignored)
     OpenOptions as_said = options;
-    if ((!picture.icc || picture.icc->empty()) && exif && !options.ignore_exif_profile && render::codecs::is_rgb(picture.layout()) &&
-        render::codecs::exif_colour_space(*exif) == 1) {
+    const bool profiled = picture.icc && !picture.icc->empty();
+    bool exif_srgb = false;
+    if (!profiled && exif && !options.ignore_exif_profile && render::codecs::is_rgb(picture.layout()) && render::codecs::exif_colour_space(*exif) == 1) {
         as_said.working_rgb.clear();
+        exif_srgb = true;
     }
     if (meta.frames > 1) {
         notes.push_back(*format == render::codecs::Format::Tiff ? "複数ページの TIFF の最初のページだけを開きました（" + std::to_string(meta.frames) + " ページ）"
@@ -307,6 +319,7 @@ Opened open_file(std::string_view bytes, std::string_view name, const OpenOption
     source.mode = meta.palette ? "indexed" : meta.one_bit ? "bitmap" : mode;
     Opened out = picture_book(std::move(picture), stem_of(file), as_said);
     for (std::string& note : notes) out.notes.push_back(std::move(note));
+    out.profile_missing = !profiled && !exif_srgb && !meta.palette;  // (a colour table's page is sRGB's: nothing to ask)
     core::Document& doc = out.doc;
     // (the colour model of its pixels: a colour table's exact colours, one bit's black and white — its pixels as they are)
     if (meta.palette && eight_bit_rgb(doc.page(0))) {

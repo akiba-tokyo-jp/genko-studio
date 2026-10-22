@@ -385,6 +385,13 @@ private:
     std::int64_t last_revision_ = 0;
     std::optional<RecoveryPoint> recovery_offer_;
     DocPtr revert_to_;  // 復帰's book (mark_saved, or as opened)
+    // 復帰's book once it left memory with the history (trim_history): the journal's transaction whose state it is, and
+    // whether the state after it (else before it)
+    std::optional<std::pair<std::string, bool>> revert_state_;
+    void set_revert_to(DocPtr doc);
+    // A saved transaction's state from the journal (its .state.json asset; the last ones read kept), none when it is not
+    // held or cannot be read.
+    std::optional<DocPtr> journal_state(const std::string& txn, bool after) const;
     std::optional<std::filesystem::path> saving_as_;
     std::uint64_t next_change_ = 0;
 

@@ -25,6 +25,7 @@
 #include "render/page.hpp"
 #include "render/path_trace.hpp"
 #include "render/png.hpp"
+#include "render/raster.hpp"
 #include "render/select_color.hpp"
 #include "render/shape_parts.hpp"
 #include "render/warp.hpp"
@@ -487,7 +488,9 @@ Items lift(core::Layer& layer, const Json& area, const core::Page& page) {
     }
     if (layer.raster_png && !layer.raster_png->empty()) {
         const Image raster = open_picture(*layer.raster_png).convert("RGBA");
-        const AreaMask m = area_mask(area, kWorkingDpi);
+        // (PC4 F-b: at the layer's pixels' own resolution on a page of grid "finest" — an opened picture's —, as coverage)
+        const int dpi = raster::dpi_across(page, raster.width());
+        const AreaMask m = area_mask(area, dpi);
         Image local = Image::create("L", raster.size(), Ink(0));
         local.paste(m.mask, Point{static_cast<int>(m.x0), static_cast<int>(m.y0)});
         const Image raster_alpha = raster.getchannel(3);
@@ -502,7 +505,7 @@ Items lift(core::Layer& layer, const Json& area, const core::Page& page) {
             templ.attrs["mode"] = "image";
             templ.attrs["opacity"] = 1.0;
             if (page_values) templ.attrs["rgb_profile"] = page.rgb->profile;  // (color_edit::kPatchProfileKey)
-            if (auto patch = to_patch(piece, 0, 0, templ, kWorkingDpi)) in.patches.push_back(std::move(*patch));
+            if (auto patch = to_patch(piece, 0, 0, templ, dpi)) in.patches.push_back(std::move(*patch));
         }
     }
     layer.strokes = core::make_strokes(std::move(strokes_out));

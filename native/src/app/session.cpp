@@ -474,7 +474,7 @@ void Session::finish_reading(const JobResult& r) {
     read_so_far_.reset();
     loading_ = false;
     const DocPtr before = doc_;
-    if (!revert_to_ || !revert_to_->deferred.empty()) revert_to_ = r.doc;  // (復帰: the whole book as it was read)
+    if (!revert_to_ || !revert_to_->deferred.empty()) set_revert_to(r.doc);  // (復帰: the whole book as it was read)
     base_revision_ = r.revision;
     last_revision_ = r.revision;
     journal_undo_ = r.undo_depth;
@@ -668,7 +668,7 @@ Session::Session(core::Document doc, std::optional<fs::path> dir, Options option
     loading_ = !doc.deferred.empty();
     read_in_parts_ = loading_;
     doc_ = std::make_shared<const core::Document>(std::move(doc));
-    revert_to_ = doc_;  // (復帰: as it was opened, until 保存 is chosen)
+    set_revert_to(doc_);  // (復帰: as it was opened, until 保存 is chosen)
     idle_timer_.setSingleShot(true);
     longest_timer_.setSingleShot(true);
     retry_timer_.setSingleShot(true);
@@ -775,6 +775,12 @@ void Session::trim_history() {
         // (an adopted recovery point, saved, goes too — or the history would stay in memory from then on — and Undo
         // still stops at it: recover_floor_)
         if (oldest->recover) recover_floor_ = journal_undo_;
+        // (復帰's book, held by this change alone once it leaves — the history's limit holds it too —: let go, read back
+        // from the journal's state of the change when 復帰 is chosen; PC4 F-b)
+        if (revert_to_ && revert_to_ != doc_ && !oldest->txn.empty() && (revert_to_ == oldest->before || revert_to_ == oldest->after)) {
+            revert_state_ = std::make_pair(oldest->txn, revert_to_ == oldest->after);
+            revert_to_.reset();
+        }
         held -= oldest->held;
         done_.erase(done_.begin());
         forget(*oldest);  // (in the journal, under the changes still in memory)
@@ -1108,13 +1114,18 @@ std::optional<DocPtr> Session::state_at(std::size_t done) const {
     if (done > before) return DocPtr(done_[done - before - 1]->after);
     if (done == before) return done_.empty() ? doc_ : done_.front()->before;
     // a saved change's state: the one after it (（はじめ）: the one before the first)
+    if (journal.empty()) return std::nullopt;
+    return journal_state(journal[done == 0 ? 0 : done - 1], done != 0);
+}
+
+std::optional<DocPtr> Session::journal_state(const std::string& txn, bool after) const {
+    if (!path_) return std::nullopt;
     try {
-        const std::string& txn = journal[done == 0 ? 0 : done - 1];
         const storage::journal::Stacks stacks = storage::journal::stacks(*path_);
         std::optional<std::string> ref;
         for (const auto* stack : {&stacks.undo, &stacks.redo}) {
             for (const storage::journal::HistoryItem& item : *stack) {
-                if (item.id == txn) ref = done == 0 ? item.before : item.after;
+                if (item.id == txn) ref = after ? item.after : item.before;
             }
         }
         if (!ref) return std::nullopt;
@@ -1443,6 +1454,8 @@ void Session::job_done(const JobResult& r) {
             last_saved_ = QDateTime::currentDateTime();
             last_revision_ = r.revision;
             rebase_onto(copy, r.revision, 0, 0);
+            // (復帰 goes back to the book as it was saved here — the new place's, its files there —, whoever asks; PC4 F-b)
+            if (!loading_) set_revert_to(copy);
             recovery_requested_ = false;  // the latest snapshot is durable in the confirmed copy
             if ((recovery_written_ || recovery_job_) && !old_book.empty()) {
                 Job remove;
@@ -1801,7 +1814,7 @@ void Session::adopt_recovery() {
     change->after = std::make_shared<const core::Document>(std::move(doc));
     recovery_offer_.reset();
     doc_ = change->after;
-    revert_to_ = doc_;  // (復帰: to the recovery point taken, saved now as a new generation)
+    set_revert_to(doc_);  // (復帰: to the recovery point taken, saved now as a new generation)
     // (a recovery is not an undoable edit in the journal: the history starts again from it — the changes of this session
     // already in the journal stay there, counted with the saved changes before them now, or once written)
     for (const auto* list : {&done_, &undone_}) {
@@ -1823,11 +1836,16 @@ void Session::decline_recovery() { recovery_offer_.reset(); }
 // --- 復帰 and コピーを保存 (PC4 F-b) ------------------------------------------------------------------------------------
 
 bool Session::can_revert() const {
-    return read_only_.empty() && !loading_ && !saving_as_ && !discarded_ && revert_to_ && revert_to_ != doc_;
+    return read_only_.empty() && !loading_ && !saving_as_ && !discarded_ && ((revert_to_ && revert_to_ != doc_) || (!revert_to_ && revert_state_));
+}
+
+void Session::set_revert_to(DocPtr doc) {
+    revert_to_ = std::move(doc);
+    revert_state_.reset();
 }
 
 void Session::mark_saved() {
-    if (!loading_) revert_to_ = doc_;
+    if (!loading_) set_revert_to(doc_);
 }
 
 void Session::revert() {
@@ -1835,9 +1853,15 @@ void Session::revert() {
     if (!read_only_.empty()) throw core::ApplyError("this book is open read-only: " + read_only_, "read_only");
     if (discarded_) throw core::ApplyError("the book was closed", "closed");
     if (loading_) throw core::ApplyError("ページを読み込んでいる間は、復帰できません", "page_not_loaded");
-    if (!revert_to_ || revert_to_ == doc_) throw core::ApplyError("最後に保存したときから変わっていません", "nothing_to_revert");
+    DocPtr then = revert_to_;
+    if (!then && revert_state_) {  // (left memory with the history: the journal's state of it)
+        const std::optional<DocPtr> read = journal_state(revert_state_->first, revert_state_->second);
+        if (!read || !*read) throw core::ApplyError("最後に保存したときの状態を原稿の履歴から読めないため、復帰できません", "revert_lost");
+        then = *read;
+    }
+    if (!then || then == doc_) throw core::ApplyError("最後に保存したときから変わっていません", "nothing_to_revert");
     // (the book as it was then, as this book: its id, revision and folder its own now)
-    core::Document back = *revert_to_;
+    core::Document back = *then;
     back.book_id = doc_->book_id;
     back.revision = doc_->revision;
     back.asset_dir = doc_->asset_dir;
@@ -1848,7 +1872,7 @@ void Session::revert() {
     result.journal_ops = ops;
     keep_applied(ops, std::move(result), {});
     done_.back()->whole = true;
-    revert_to_ = doc_;  // (the book as it was then: 復帰 again has nothing to do — after 取り消し, it comes back here)
+    set_revert_to(doc_);  // (the book as it was then: 復帰 again has nothing to do — after 取り消し, it comes back here)
 }
 
 void Session::save_copy(const fs::path& dir) {

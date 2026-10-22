@@ -50,6 +50,10 @@ class QVBoxLayout;
 // Every change goes through the book's Session (and so the CommandBus and the Saver): nothing here writes the book or
 // its files. A book with changes not saved (or a save that failed, or one running) is never closed without asking.
 
+namespace genko::formats {
+struct Opened;
+}
+
 namespace genko::app {
 
 class BrushPanel;
@@ -684,6 +688,9 @@ public:
     // A book in memory (an opened file, a new image, a page duplicated) in a tab of its own, its notes said; カラー設定's
     // policies applied to it as to a book opened.
     void add_picture_book(core::Document doc, const std::vector<std::string>& notes, std::optional<std::filesystem::path> source = std::nullopt);
+    // カラー設定's "ask when a picture has no profile", for a file opened with none (formats::Opened::profile_missing): the
+    // working space's profile kept, or none chosen — as part of opening it.
+    void ask_missing_profile(formats::Opened& opened);
     // すべてを閉じる (file.closeAll): every book of this window closed (each asked first as 閉じる asks), the window left
     // with an untitled book; その他を閉じる (file.closeOthers): the others, the one in front kept. False: one was kept.
     bool close_all();

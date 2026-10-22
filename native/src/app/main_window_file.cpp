@@ -25,18 +25,23 @@
 #include <fstream>
 
 #include "app/ask.hpp"
+#include "app/color_settings_dialog.hpp"
 #include "app/dialogs.hpp"
 #include "app/documents.hpp"
 #include "app/file_info_dialog.hpp"
 #include "app/look.hpp"
 #include "app/main_window.hpp"
+#include "app/off_ui.hpp"
 #include "app/open_dialog.hpp"
 #include "app/preferences.hpp"
 #include "app/save_status.hpp"
+#include "core/actor.hpp"
+#include "core/command_bus.hpp"
 #include "core/paths.hpp"
 #include "formats/copy.hpp"
 #include "formats/open_file.hpp"
 #include "render/codecs/fidelity.hpp"
+#include "render/ops_registry.hpp"
 #include "service/wording.hpp"
 #include "storage/fsutil.hpp"
 
@@ -211,6 +216,7 @@ void MainWindow::open_path(const fs::path& path, std::optional<render::codecs::F
             refresh_status();
             return;
         }
+        if (read.first->profile_missing) ask_missing_profile(*read.first);
         add_picture_book(std::move(read.first->doc), read.first->notes, path);
     });
     watcher->setFuture(QtConcurrent::run([path, options]() -> Read {
@@ -221,6 +227,38 @@ void MainWindow::open_path(const fs::path& path, std::optional<render::codecs::F
             return {std::nullopt, QString::fromUtf8(error.what())};
         }
     }));
+}
+
+// カラー設定's "ask when a picture has no profile" (Photoshop's Missing Profiles: Ask When Opening, PC4 F-b): a file that
+// carried none opens with the working space's profile; asked, the person may have it opened without one instead — sRGB's
+// colours (an RGB page), the default grey's (a grey page) —, as part of opening it (no change to undo). Only when the
+// working space is not the default one: otherwise both are the same.
+void MainWindow::ask_missing_profile(formats::Opened& opened) {
+    namespace cs = color_settings;
+    const cs::Settings s = cs::load();
+    if (!s.ask_missing || opened.doc.pages.empty() || opened.doc.is_deferred(0)) return;
+    const core::Page& page = opened.doc.page(0);
+    if (page.rgb && page.rgb->table) return;  // (a colour table's page is sRGB's)
+    std::optional<cs::Space> space;
+    if (!page.color) space = cs::Space::Rgb;
+    else if (page.color->space == core::InkSpace::Gray && !page.color->bitmap && page.color->duotone.empty()) space = cs::Space::Gray;
+    if (!space) return;  // (CMYK: only a CMYK profile can be its; Lab: none)
+    const cs::Working w = cs::working(*space, s);
+    if (w.is_default || !w.usable || !w.icc) return;
+    const QString without = *space == cs::Space::Rgb ? QStringLiteral("プロファイルなしで開く（sRGB の色として扱う）")
+                                                     : QStringLiteral("プロファイルなしで開く（既定のグレーとして扱う）");
+    const QStringList choices{QStringLiteral("作業用の空間（%1）を割り当てる").arg(w.name), without};
+    const auto chosen = ask::get_item(this, QStringLiteral("プロファイルのない画像"),
+                                      QStringLiteral("「%1」にはプロファイルがありません。どうしますか？（あとから 編集 → プロファイルの指定… で変えられます）")
+                                          .arg(QString::fromStdString(opened.doc.title)),
+                                      choices, 0);
+    if (!chosen || *chosen != without) return;  // (closed without a choice: the working space's, as before)
+    try {
+        const Json ops = Json::array({Json{{"op", "assign_profile"}, {"page", 1}, {"profile", "none"}, {"default", true}}});
+        opened.doc = core::CommandBus(render::ops_registry()).apply(opened.doc, ops, core::Actor("human:genko")).doc;
+    } catch (const std::exception& error) {
+        opened.notes.push_back(std::string("プロファイルを外せませんでした: ") + error.what());
+    }
 }
 
 void MainWindow::add_picture_book(core::Document doc, const std::vector<std::string>& notes, std::optional<fs::path> source) {
@@ -298,6 +336,12 @@ bool MainWindow::save_copy_to(const QString& chosen) {
     const QString extension = picture_extension(chosen);
     QString path = chosen;
     if (preferences::lowercase_extension() && !extension.isEmpty()) path = QFileInfo(chosen).path() + QLatin1Char('/') + QFileInfo(chosen).completeBaseName() + QLatin1Char('.') + QFileInfo(chosen).suffix().toLower();
+    if (extension.isEmpty() && render::codecs::from_extension(QFileInfo(chosen).suffix().toStdString())) {
+        // (a picture's extension this build does not write yet — .webp, .bmp …: said, not made a book's folder of that name)
+        ask::warning(this, QStringLiteral("コピーを保存"),
+                     QStringLiteral("この形式（.%1）には、まだ書けません。PSD・TIFF・PNG・JPEG か、Genko の原稿（.genko）を選んでください。").arg(QFileInfo(chosen).suffix()));
+        return false;
+    }
     if (extension.isEmpty()) {
         // (a .genko: the book as it is now, written to a new folder; this window goes on where it was)
         const QString target = path.endsWith(QStringLiteral(".genko")) ? path : path + QStringLiteral(".genko");
@@ -322,17 +366,29 @@ bool MainWindow::save_copy_to(const QString& chosen) {
         flash(QStringLiteral("コピーを保存しました（原稿はそのままです）: %1").arg(QDir::toNativeSeparators(target)), 4000);
         return true;
     }
-    // (the user's decision 4: a picture a book here was opened from is never written — its copy goes to another file)
-    for (const Document& d : documents_) {
-        std::error_code ec;
-        if (d.source && fs::exists(fpath(path), ec) && fs::equivalent(*d.source, fpath(path), ec)) {
-            ask::warning(this, QStringLiteral("コピーを保存"),
-                         QStringLiteral("開いた元の画像には書きません。別の名前か場所を選んでください:\n%1").arg(QDir::toNativeSeparators(path)));
-            return false;
+    // (the user's decision 4: a picture a book was opened from — in any window here — is never written; its copy goes to
+    // another file)
+    for (MainWindow* window : documents::windows()) {
+        for (const Document& d : window->documents()) {
+            std::error_code ec;
+            if (d.source && fs::exists(fpath(path), ec) && fs::equivalent(*d.source, fpath(path), ec)) {
+                ask::warning(this, QStringLiteral("コピーを保存"),
+                             QStringLiteral("開いた元の画像には書きません。別の名前か場所を選んでください:\n%1").arg(QDir::toNativeSeparators(path)));
+                return false;
+            }
         }
     }
+    // (the page shown: コンテンツを編集's tab, its contents' page — never another page of the book in its place)
+    const std::shared_ptr<const core::Document> shown = shown_book();
     const core::Page* page = current_page();
-    if (page == nullptr) return false;
+    std::optional<std::size_t> index;
+    for (std::size_t i = 0; shown && page != nullptr && i < shown->pages.size(); ++i) {
+        if (!shown->is_deferred(i) && shown->pages[i] && shown->pages[i]->id == page->id) index = i;
+    }
+    if (!index) {
+        flash(QStringLiteral("コピーを保存できませんでした: 書くページが見つかりません"), 6000, true);
+        return false;
+    }
     formats::CopyOptions options;
     if (extension == QLatin1String("jpg") || extension == QLatin1String("jpeg")) {
         const auto quality = ask::get_int(this, QStringLiteral("JPEG のオプション"), QStringLiteral("画質（0〜12。12 が最高）"), 10, 0, 12);
@@ -341,20 +397,21 @@ bool MainWindow::save_copy_to(const QString& chosen) {
     } else if (extension == QLatin1String("psd")) {
         options.layers = ask::question(this, QStringLiteral("コピーを保存"), QStringLiteral("レイヤーを残して書きますか？（いいえ: 統合した 1 枚の画像）"));
     }
-    std::size_t index = 0;
-    const core::Document& book_now = book();
-    for (std::size_t i = 0; i < book_now.pages.size(); ++i) {
-        if (book_now.pages[i].get() == page) index = i;
-    }
-    // (what the file cannot keep of the page, asked about first: the codecs' plan)
     try {
-        const formats::CopyResult written = formats::write_copy(book_now, index, fpath(path), options);
-        QString words = QStringLiteral("コピーを保存しました（原稿はそのままです）: %1").arg(QDir::toNativeSeparators(path));
-        if (!written.notes.empty()) {
+        // (the picture and its bytes made on a worker — the window goes on drawing —; what the file will not keep asked
+        // about before it is written; then written)
+        const fs::path dest = fpath(path);
+        const formats::PlannedCopy plan = off_ui([shown, at = *index, dest, options] { return formats::plan_copy(*shown, at, dest, options); });
+        if (!plan.notes.empty()) {
             QStringList notes;
-            for (const std::string& note : written.notes) notes << QString::fromStdString(note);
-            words += QStringLiteral("（%1）").arg(notes.join(QStringLiteral("・")));
+            for (const std::string& note : plan.notes) notes << QStringLiteral("・") + QString::fromStdString(note);
+            if (!ask::question(this, QStringLiteral("コピーを保存（残せないもの）"),
+                               QStringLiteral("このファイルには、次のものを残せません:\n%1\n\nこのまま書きますか？").arg(notes.join(QLatin1Char('\n'))))) {
+                return false;
+            }
         }
+        off_ui([&plan] { return formats::write_planned(plan); });
+        QString words = QStringLiteral("コピーを保存しました（原稿はそのままです）: %1").arg(QDir::toNativeSeparators(path));
         flash(words, 6000);
         remember_file(fpath(path));
         return true;
@@ -405,13 +462,22 @@ void MainWindow::duplicate_dialog() {
     QObject::connect(buttons, &QDialogButtonBox::rejected, &dialog, &QDialog::reject);
     look::frame(&dialog, look::header(QStringLiteral("複製"), QStringLiteral("このページを、名前の無い 1 ページの原稿にします")), rows, nullptr, look::footer(buttons));
     if (ask::exec(&dialog) != QDialog::Accepted) return;
-    const DocPtr now = session_->snapshot();
-    std::size_t index = 0;
-    for (std::size_t i = 0; i < now->pages.size(); ++i) {
-        if (now->pages[i]->id == page->id) index = i;
+    // (the page shown: コンテンツを編集's tab, its contents' page — never another page of the book in its place)
+    const std::shared_ptr<const core::Document> now = shown_book();
+    std::optional<std::size_t> index;
+    for (std::size_t i = 0; now && i < now->pages.size(); ++i) {
+        if (!now->is_deferred(i) && now->pages[i] && now->pages[i]->id == page->id) index = i;
+    }
+    if (!index) {
+        flash(QStringLiteral("複製できませんでした: 複製するページが見つかりません"), 6000, true);
+        return;
     }
     try {
-        formats::Opened copy = formats::duplicate_page(*now, index, name->text().trimmed().toStdString(), merged->isChecked(), file_open_options());
+        // (the merged picture made on a worker: the window goes on drawing)
+        const std::string title = name->text().trimmed().toStdString();
+        const bool merged_only = merged->isChecked();
+        const formats::OpenOptions options = file_open_options();
+        formats::Opened copy = off_ui([now, at = *index, title, merged_only, options] { return formats::duplicate_page(*now, at, title, merged_only, options); });
         add_picture_book(std::move(copy.doc), copy.notes);
     } catch (const std::exception& error) {
         flash(wording::error(QString::fromUtf8(error.what())), 6000, true);

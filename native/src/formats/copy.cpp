@@ -72,7 +72,7 @@ std::span<const std::string_view> copy_extensions() { return kExtensions; }
 
 int jpeg_quality_of(int photoshop) { return static_cast<int>(std::lround(std::clamp(photoshop, 0, 12) / 12.0 * 99.0 + 1.0)); }
 
-CopyResult write_copy(const core::Document& doc, std::size_t at, const fs::path& dest, const CopyOptions& options) {
+PlannedCopy plan_copy(const core::Document& doc, std::size_t at, const fs::path& dest, const CopyOptions& options) {
     if (at >= doc.pages.size()) throw core::Error("value", "no such page");
     if (doc.is_deferred(at)) throw core::Error("page_not_loaded", "the page is not read yet");
     const std::string suffix = lower_suffix(dest);
@@ -80,15 +80,14 @@ CopyResult write_copy(const core::Document& doc, std::size_t at, const fs::path&
     const core::Page& page = doc.page(at);
     const int dpi = std::max(1, static_cast<int>(std::lround(page.spec.dpi.value())));
     check_dpi(dpi);
-    const std::optional<std::string> xmp = book_xmp(doc);
-    CopyResult result;
-    result.file = dest;
-    detail::Output output;
-    if (dest.has_parent_path()) detail::make_dirs(dest.parent_path());
+    PlannedCopy plan;
+    plan.file = dest;
+    plan.dpi = dpi;
     if (suffix == "psd") {
         if (options.layers) {
-            export_page_psd(doc, page, dest, dpi);  // (the book's XMP in it: put_page_psd)
-            return result;
+            plan.psd_book = doc;  // (the book's XMP in it: put_page_psd)
+            plan.psd_page = at;
+            return plan;
         }
         // (its merged picture alone: a book of it, the File Info carried over)
         Opened merged = duplicate_page(doc, at, doc.title, true);
@@ -96,28 +95,46 @@ CopyResult write_copy(const core::Document& doc, std::size_t at, const fs::path&
         merged.doc.native_files = doc.native_files;
         merged.doc.asset_dir = doc.asset_dir;
         merged.doc.title = doc.title;
-        result.notes = std::move(merged.notes);
-        export_page_psd(merged.doc, merged.doc.page(0), dest, dpi);
-        return result;
+        plan.notes = std::move(merged.notes);
+        plan.psd_book = std::move(merged.doc);
+        plan.psd_page = 0;
+        return plan;
     }
+    const std::optional<std::string> xmp = book_xmp(doc);
     PagePicture picture = page_picture(page, doc, dpi);
-    result.notes = picture.notes;
-    std::string bytes;
+    plan.notes = picture.notes;
     if (suffix == "tif") {
-        bytes = tiff_of(picture, dpi, xmp);
+        plan.bytes = tiff_of(picture, dpi, xmp);
     } else {
         const render::codecs::Format format = suffix == "png" ? render::codecs::Format::Png : render::codecs::Format::Jpeg;
         render::codecs::EncodeOptions encode;
         encode.jpeg_quality = jpeg_quality_of(options.quality.value_or(10));
         for (const render::codecs::Loss& loss : render::codecs::losses(picture.image, format, encode)) {
-            if (!loss.fatal()) result.notes.push_back(loss.text());
+            if (!loss.fatal()) plan.notes.push_back(loss.text());
         }
-        bytes = render::codecs::encode(picture.image, format, encode);
-        if (xmp) bytes = format == render::codecs::Format::Png ? png_with_xmp(std::move(bytes), *xmp) : jpeg_with_xmp(std::move(bytes), *xmp);
+        plan.bytes = render::codecs::encode(picture.image, format, encode);
+        if (xmp) plan.bytes = format == render::codecs::Format::Png ? png_with_xmp(std::move(plan.bytes), *xmp) : jpeg_with_xmp(std::move(plan.bytes), *xmp);
     }
-    output.put(dest, bytes);
+    return plan;
+}
+
+CopyResult write_planned(const PlannedCopy& plan) {
+    CopyResult result;
+    result.file = plan.file;
+    result.notes = plan.notes;
+    if (plan.file.has_parent_path()) detail::make_dirs(plan.file.parent_path());
+    if (plan.psd_book) {
+        export_page_psd(*plan.psd_book, plan.psd_book->page(plan.psd_page), plan.file, plan.dpi);
+        return result;
+    }
+    detail::Output output;
+    output.put(plan.file, plan.bytes);
     output.commit();
     return result;
+}
+
+CopyResult write_copy(const core::Document& doc, std::size_t at, const fs::path& dest, const CopyOptions& options) {
+    return write_planned(plan_copy(doc, at, dest, options));
 }
 
 }  // namespace genko::formats

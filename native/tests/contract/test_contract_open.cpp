@@ -30,10 +30,13 @@
 #include "render/codecs/codecs.hpp"
 #include "render/codecs/metadata.hpp"
 #include "render/image.hpp"
+#include "render/layer_masks.hpp"
 #include "render/not_yet_ported.hpp"
 #include "render/ops_registry.hpp"
 #include "render/page.hpp"
 #include "render/png.hpp"
+#include "render/raster.hpp"
+#include "render/selection.hpp"
 #include "storage/asset_store.hpp"
 #include "storage/lock.hpp"
 #include "storage/reader.hpp"
@@ -729,6 +732,141 @@ private slots:
         QCOMPARE(preset.page(0).spec.grid, std::optional<std::string>("finest"));
         // (a book without it: none, as before)
         QVERIFY(!run(small_book(), Json::array({Json{{"op", "set_page_spec"}, {"paper", Json::array({100, 80})}, {"trim", Json::array({90, 70})}}})).spec.grid);
+    }
+
+    // PC4 F-b review P3-3: a 16-bit TIFF of an orientation (tag 274) opened turned as it says (its reader does not turn
+    // it; the 8-bit one does), and said.
+    void aDeepTiffIsTurnedByItsOrientation() {
+        // (grey, 16 bits, 3 × 2, uncompressed, one strip; orientation 6: turned 90° clockwise to be upright)
+        const auto le16 = [](std::string& out, unsigned v) {
+            out += static_cast<char>(v & 0xFF);
+            out += static_cast<char>((v >> 8) & 0xFF);
+        };
+        const auto le32 = [](std::string& out, std::uint32_t v) {
+            for (int i = 0; i < 4; ++i) out += static_cast<char>((v >> (8 * i)) & 0xFF);
+        };
+        std::string pixels;
+        for (const unsigned v : {0u, 10000u, 20000u, 30000u, 40000u, 50000u}) le16(pixels, v);
+        struct Entry {
+            unsigned tag, type;
+            std::uint32_t value;
+        };
+        const std::vector<Entry> entries{{256, 3, 3}, {257, 3, 2}, {258, 3, 16}, {259, 3, 1}, {262, 3, 1}, {273, 4, 8},
+                                         {274, 3, 6}, {277, 3, 1}, {278, 3, 2},  {279, 4, static_cast<std::uint32_t>(pixels.size())}};
+        std::string tiff = "II";
+        le16(tiff, 42);
+        le32(tiff, static_cast<std::uint32_t>(8 + pixels.size()));
+        tiff += pixels;
+        le16(tiff, static_cast<unsigned>(entries.size()));
+        for (const Entry& e : entries) {
+            le16(tiff, e.tag);
+            le16(tiff, e.type);
+            le32(tiff, 1);
+            if (e.type == 3) {
+                le16(tiff, e.value);
+                le16(tiff, 0);
+            } else {
+                le32(tiff, e.value);
+            }
+        }
+        le32(tiff, 0);
+        const formats::Opened opened = formats::open_file(tiff, "turned.tif");
+        const core::Page& page = opened.doc.page(0);
+        QVERIFY(page.color && page.color->depth == 16);
+        const core::InkPixels inks = core::decode_ink_raster(*page.layers[0].ink_raster);
+        QCOMPARE(inks.width, 2u);
+        QCOMPARE(inks.height, 3u);
+        // (turned clockwise: the first row is the first column read from the bottom up)
+        QVERIFY(std::abs(inks.value(0, 0) - 30000.0 / 65535.0) < 1e-4);
+        QVERIFY(std::abs(inks.value(1, 0) - 0.0) < 1e-4);
+        QVERIFY(std::any_of(opened.notes.begin(), opened.notes.end(), [](const std::string& n) { return n.find("TIFF の向き") != std::string::npos; }));
+    }
+
+    // PC4 F-b (image-grid@1, design 8-2 (b); review P2-1・P2-2・P2-3): on the page of a picture opened at 300 ppi the work is
+    // done at its pixels' grid — a new paint layer, a pen layer's lines baked by a filter, an area deleted or moved on the
+    // picture's layer, the layers merged, the masks' and selections' grid — and at a 72-ppi picture's the area is its own;
+    // a book without the mark as before.
+    void theGridOfAnOpenedPicture() {
+        // (300 × 200 px at 300 ppi: 25.4 × 16.93 mm; white with a black square at its top left, 60 × 60 px)
+        std::string rgb(300 * 200 * 3, static_cast<char>(255));
+        for (int y = 0; y < 60; ++y)
+            for (int x = 0; x < 60; ++x)
+                for (int c = 0; c < 3; ++c) rgb[static_cast<std::size_t>((y * 300 + x) * 3 + c)] = 0;
+        const render::Image picture = render::Image::frombytes("RGB", {300, 200}, rgb);
+        const std::string png = formats::png_bytes(picture, formats::PngSave{std::array<double, 2>{300, 300}, {}, false});
+        const core::Document doc = formats::open_file(png, "grid.png").doc;
+        const core::Page& page = doc.page(0);
+        const std::string back = page.layers[0].id;
+        QCOMPARE(render::layer_masks::grid_dpi(page), 300);
+        QCOMPARE(render::selection::grid_dpi(page), 300);
+        QCOMPARE(render::raster::working_dpi(page), 300);
+        const auto layer = [](const core::Document& d, const std::string& id) -> const core::Layer& {
+            for (const core::Layer& l : d.page(0).layers) {
+                if (l.id == id) return l;
+            }
+            throw std::runtime_error("no layer " + id);
+        };
+        const auto alpha = [](const render::Image& image, int x, int y) { return image.convert("RGBA").getpixel(x, y)[3]; };
+        const auto grey = [](const render::Image& image, int x, int y) { return image.convert("RGBA").getpixel(x, y)[0]; };
+        // (a new paint layer: the page's grid)
+        core::Layer fresh;
+        QCOMPARE(render::raster::ensure_raster(page, fresh).size(), (render::Size{300, 200}));
+        // (a pen layer's line, 5 to 20 mm across at 8 mm down, baked by a filter: where it was drawn, at 300 dpi)
+        const core::Document lined = run(doc, Json::array({Json{{"op", "add_layer"}, {"page", 1}, {"kind", "pen"}, {"id", "ink"}, {"title", "線"}},
+                                                           Json{{"op", "set_layer"}, {"page", 1}, {"id", "ink"}, {"panel_each", false}, {"panel_clip", false}},
+                                                           Json{{"op", "add_stroke"}, {"page", 1}, {"layer_id", "ink"},
+                                                                {"points", Json::array({Json::array({5, 8}), Json::array({20, 8})})}, {"width_mm", 1},
+                                                                {"rgb", Json::array({0, 0, 0})}}}));
+        const core::Document filtered =
+            run(lined, Json::array({Json{{"op", "filter_raster"}, {"page", 1}, {"id", "ink"}, {"kind", "blur_gaussian"}, {"radius", 0.5}}}));
+        const core::Layer& baked = layer(filtered, "ink");
+        QVERIFY(baked.raster_png && !baked.raster_png->empty());
+        const render::Image line = render::open_image(*baked.raster_png);
+        QCOMPARE(line.size(), (render::Size{300, 200}));
+        QVERIFY2(alpha(line, 150, 94) > 128, "the line where it was drawn");
+        QCOMPARE(alpha(line, 100, 63), 0.0);  // (not drawn at 200 dpi into the 300-dpi picture: 2/3 of the way)
+        // (an area deleted on the picture's layer: its left half, at the picture's pixels)
+        const core::Document deleted =
+            run(doc, Json::array({Json{{"op", "delete_area"}, {"page", 1}, {"layer_id", back}, {"area", Json{{"rect", Json::array({0, 0, 12.7, 16.9333})}}}}}));
+        const render::Image left = render::raster::layer_pixels(deleted.page(0), layer(deleted, back));
+        QCOMPARE(left.size(), (render::Size{300, 200}));
+        QCOMPARE(alpha(left, 140, 100), 0.0);
+        QCOMPARE(alpha(left, 160, 100), 255.0);
+        // (the square moved 10 mm right: the same size, where it was moved)
+        const core::Document moved = run(doc, Json::array({Json{{"op", "transform_area"}, {"page", 1}, {"layer_id", back},
+                                                                 {"area", Json{{"rect", Json::array({0, 0, 5.08, 5.08})}}},
+                                                                 {"matrix", Json::array({1, 0, 0, 1, 10, 0})}}}));
+        const render::Image shifted = render::raster::layer_pixels(moved.page(0), layer(moved, back));
+        QCOMPARE(shifted.size(), (render::Size{300, 200}));
+        QVERIFY2(grey(shifted, 150, 30) < 60 && alpha(shifted, 150, 30) > 200, "the square where it was moved");
+        QVERIFY2(grey(shifted, 190, 30) > 200, "the square not grown");
+        QCOMPARE(alpha(shifted, 30, 30), 0.0);
+        // (merged: the picture's grid kept)
+        const core::Document painted = run(lined, Json::array({Json{{"op", "merge_visible"}, {"page", 1}}}));
+        for (const core::Layer& l : painted.page(0).layers) {
+            if (l.raster_png && !l.raster_png->empty()) QCOMPARE(render::open_image(*l.raster_png).size(), (render::Size{300, 200}));
+        }
+        const core::Document down = run(lined, Json::array({Json{{"op", "merge_down"}, {"page", 1}, {"id", "ink"}}}));
+        QCOMPARE(render::open_image(*layer(down, back).raster_png).size(), (render::Size{300, 200}));
+        QVERIFY2(alpha(render::open_image(*layer(down, back).raster_png), 150, 94) > 128 &&
+                     grey(render::open_image(*layer(down, back).raster_png), 150, 94) < 128,
+                 "the line merged where it was drawn");
+        // (a 72-ppi picture: its new layers at 200 dpi — never coarser —, its own layer's area at its 72 ppi)
+        const render::Image small = render::Image::create("RGB", {72, 72}, render::Ink{255, 255, 255});
+        const core::Document coarse = formats::open_file(formats::png_bytes(small, formats::PngSave{std::array<double, 2>{72, 72}, {}, false}), "coarse.png").doc;
+        QCOMPARE(render::raster::working_dpi(coarse.page(0)), 200);
+        QCOMPARE(render::raster::ensure_raster(coarse.page(0), fresh).size(), (render::Size{200, 200}));
+        const std::string coarse_back = coarse.page(0).layers[0].id;
+        const core::Document half = run(coarse, Json::array({Json{{"op", "delete_area"}, {"page", 1}, {"layer_id", coarse_back},
+                                                                  {"area", Json{{"rect", Json::array({0, 0, 12.7, 25.4})}}}}}));
+        const render::Image kept = render::raster::layer_pixels(half.page(0), layer(half, coarse_back));
+        QCOMPARE(kept.size(), (render::Size{72, 72}));
+        QCOMPARE(alpha(kept, 30, 36), 0.0);
+        QCOMPARE(alpha(kept, 42, 36), 255.0);
+        // (a book without the mark: 200 dpi, as before)
+        const core::Document plain = small_book();
+        QCOMPARE(render::raster::working_dpi(plain.page(0)), 200);
+        QCOMPARE(render::raster::ensure_raster(plain.page(0), fresh).width(), render::mm_to_px(plain.page(0).spec.width_mm.value(), 200));
     }
 
     void theFilesOpsAreFrames() {

@@ -23,6 +23,7 @@
 #include "render/page.hpp"
 #include "render/page_pixels.hpp"
 #include "render/png.hpp"
+#include "render/layer_masks.hpp"
 #include "render/raster.hpp"
 
 namespace genko::render::ink_edit {
@@ -1033,7 +1034,8 @@ void Lending::take_back(core::Document& doc) const {
                                 : std::find(ids_before_.begin(), ids_before_.end(), layer.id) == ids_before_.end())) {
                 // (the merge's layer — 8-bit or precise, as the op composited it —: what it composited, made again in
                 // inks; precise lines by the rules, as the page draws them)
-                InkPixels merged = composite_ink_layers(*before_, merge_->layers, raster::kWorkingDpi, &doc, merge_->paper);
+                // (at the finest grid of its pixel layers, 200 to 600 dpi: a picture opened finer than 200 keeps it; PC4 F-b)
+                InkPixels merged = composite_ink_layers(*before_, merge_->layers, layer_masks::grid_dpi(*before_), &doc, merge_->paper);
                 layer.ink_raster = nullptr;
                 made = std::move(merged);
                 layer.color_raster = nullptr;

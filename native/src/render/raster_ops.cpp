@@ -874,7 +874,10 @@ void into_color_pixels(Layer& target, std::pair<std::string, bool> pixels) {
 }
 std::pair<std::string, bool> composite_color_layers(const Document& doc, const Page& page,
                                    const std::vector<std::size_t>& layers, bool flatten = false) {
-    const Size size = page_px(page, kWorkingDpi);
+    // (at the finest grid of the page's pixel layers, 200 to 600 dpi — its masks' and selections' —: a picture opened at
+    // 300 ppi merges at 300, never down to 200; PC4 F-b)
+    const int dpi = layer_masks::grid_dpi(page);
+    const Size size = page_px(page, dpi);
     if (size.width <= 0 || size.height <= 0 ||
         std::uint64_t(size.width) * std::uint64_t(size.height) > core::kColorRasterMaxPixels)
         throw OpError("high-precision merge pixel budget exceeded");
@@ -950,11 +953,11 @@ std::pair<std::string, bool> composite_color_layers(const Document& doc, const P
             participate(layer);
             if (layer.color_raster) floating = floating || core::ColorRasterView(*layer.color_raster).metadata("")["precision"] == "f32";
             if (layer.strokes) for (const auto& stroke : layer.strokes->items) if (stroke->color_rgb && (*stroke->color_rgb)["precision"]=="f32") floating=true;
-            blend_precise_layer(out, page, layer, kWorkingDpi, all, &doc);
+            blend_precise_layer(out, page, layer, dpi, all, &doc);
         } else if (core::has_color_strokes(layer)) {
             participate(layer);
             for (const auto& stroke : layer.strokes->items) if (stroke->color_rgb && (*stroke->color_rgb)["precision"]=="f32") floating=true;
-            blend_color_strokes(out,page,layer,kWorkingDpi,all,&doc);
+            blend_color_strokes(out,page,layer,dpi,all,&doc);
         } else if (layer.color_raster) {
             participate(layer);
             const core::ColorRasterView pixels(*layer.color_raster);
@@ -965,7 +968,7 @@ std::pair<std::string, bool> composite_color_layers(const Document& doc, const P
             shown = vector_masks::with_vector_mask(page, layer, size, all, std::move(shown));  // (vector@1, PC3 C-a)
             out.blend(pixels, size, all, layer.opacity, layer.clip, layer.blend, shown ? &*shown : nullptr);
         } else {
-            auto picture = drawable_layer_image(page, layer, kWorkingDpi, &doc, false, true);
+            auto picture = drawable_layer_image(page, layer, dpi, &doc, false, true);
             if (!picture) continue;
             participate(layer);
             out.blend(*picture, layer.opacity, layer.clip, layer.blend,

@@ -36,8 +36,22 @@ struct CopyResult {
 // The extensions write_copy writes (lower case, no dot), the default first.
 std::span<const std::string_view> copy_extensions();
 
-// render::NotYetPorted("image_write") for an extension it does not write yet; core::Error("page_not_loaded") for a page
-// not read yet; the exports' errors.
+// The copy made in memory before anything is written (plan_copy: the page's picture and the file's bytes — the heavy
+// work, on any thread —, and what the file will not keep of the page, said before it is written), then written
+// (write_planned: the bytes put in place, or the PSD written; the file as it was until then).
+struct PlannedCopy {
+    std::filesystem::path file;
+    std::vector<std::string> notes;         // what the file will not keep of the page, in Japanese
+    std::string bytes;                      // (PNG, JPEG, TIFF) the file's bytes
+    std::optional<core::Document> psd_book; // (PSD) the book whose page is written as the PSD — the merged one's own book
+    std::size_t psd_page = 0;
+    int dpi = 0;
+};
+PlannedCopy plan_copy(const core::Document& doc, std::size_t page, const std::filesystem::path& dest, const CopyOptions& options = {});
+CopyResult write_planned(const PlannedCopy& plan);
+
+// plan_copy, then write_planned. render::NotYetPorted("image_write") for an extension it does not write yet;
+// core::Error("page_not_loaded") for a page not read yet; the exports' errors.
 CopyResult write_copy(const core::Document& doc, std::size_t page, const std::filesystem::path& dest, const CopyOptions& options = {});
 
 // Photoshop's JPEG quality (0..12) as libjpeg's (1..100).

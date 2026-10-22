@@ -54,6 +54,9 @@ struct OpenOptions {
 struct Opened {
     core::Document doc;
     std::vector<std::string> notes;
+    // (open_file) the file carried no profile of its colours (nor an EXIF that says sRGB): its page took the working one —
+    // the window asks, when カラー設定 says to ask about a missing profile (Photoshop's "Missing Profiles: Ask When Opening")
+    bool profile_missing = false;
 };
 
 // The file of `name` (its name, no folder: the book's title is its stem) with these bytes as a book. core::Error as

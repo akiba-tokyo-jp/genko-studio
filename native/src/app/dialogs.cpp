@@ -36,6 +36,7 @@
 #include "app/ask.hpp"
 #include "app/config.hpp"
 #include "app/icons.hpp"
+#include "app/off_ui.hpp"
 #include "app/look.hpp"
 #include "app/open_dialog.hpp"
 #include "app/path_label.hpp"
@@ -680,7 +681,10 @@ void NewProjectDialog::image_changed() {
 
 bool NewProjectDialog::create_image() {
     try {
-        image = formats::new_image(chosen_image(), file_open_options());
+        // (its pixels made on a worker — a large image takes a moment —, the window drawing itself meanwhile)
+        const formats::NewImage made = chosen_image();
+        const formats::OpenOptions options = file_open_options();
+        image = off_ui([made, options] { return formats::new_image(made, options); });
     } catch (const std::exception& error) {
         ask::warning(this, QStringLiteral("Genko"), QStringLiteral("画像を作れませんでした:\n%1").arg(wording::error(QString::fromUtf8(error.what()))));
         return false;

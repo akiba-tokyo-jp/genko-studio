@@ -29,6 +29,7 @@
 #include "app/preferences.hpp"
 #include "app/save_status.hpp"
 #include "app/theme.hpp"
+#include "core/base64.hpp"
 #include "core/file_info.hpp"
 #include "formats/pillow_save.hpp"
 #include "gui_support.hpp"
@@ -57,6 +58,8 @@ struct Desk {
     std::unique_ptr<MainWindow> window;
     QString close_answer = QStringLiteral("cancel");
     bool discard_sure = true;
+    bool write_with_losses = true;  // (コピーを保存…: written though the file cannot keep all of the page)
+    QStringList questions;          // (the questions' titles, as asked)
     QString save_as_target;
     QStringList guards;  // (the books CloseGuard asked about)
     std::function<int(QDialog*)> dialog;  // (any other dialog)
@@ -80,7 +83,11 @@ struct Desk {
             answers->asked << QString::fromLatin1(d->metaObject()->className());
             return dialog ? dialog(d) : 0;
         };
-        answers->responder->question = [this](const QString& title, const QString&) { return title == QStringLiteral("変更を捨てる") ? discard_sure : false; };
+        answers->responder->question = [this](const QString& title, const QString&) {
+            questions << title;
+            if (title == QStringLiteral("コピーを保存（残せないもの）")) return write_with_losses;
+            return title == QStringLiteral("変更を捨てる") ? discard_sure : false;
+        };
         answers->responder->save_path = [this](const QString&, const QString&) { return save_as_target; };
     }
     ~Desk() {
@@ -365,6 +372,63 @@ private slots:
         QCOMPARE(bytes_of(photo), before);
         QCOMPARE(d.answers->asked.filter(QStringLiteral("開いた元の画像には書きません")).size(), 2);
         QVERIFY(!d.window->session().path());
+        // (a JPEG of a 16-bit page: what it cannot keep asked before anything is written — いいえ: nothing; はい: written)
+        QVERIFY(d.window->apply_ops(Json::array({Json{{"op", "set_color_mode"}, {"page", 1}, {"mode", "rgb"}, {"depth", 16}}})));
+        d.answers->responder->get_int = [](const QString&, const QString&, int value, int, int) { return std::optional<int>(value); };
+        const fs::path jpeg = path_of(d.dir.filePath("deep.jpg"));
+        d.save_as_target = qpath(jpeg);
+        d.write_with_losses = false;
+        d.questions.clear();
+        d.trigger("act_save_copy");
+        QCOMPARE(d.questions.filter(QStringLiteral("残せないもの")).size(), 1);
+        QVERIFY(!fs::exists(jpeg));
+        d.write_with_losses = true;
+        d.trigger("act_save_copy");
+        QVERIFY(fs::exists(jpeg));
+        QVERIFY(render::open_image(bytes_of(jpeg)).width() > 0);
+        // (an extension of a picture this build does not write yet: said, no folder of that name made)
+        const fs::path webp = path_of(d.dir.filePath("later.webp"));
+        d.save_as_target = qpath(webp);
+        d.answers->asked.clear();
+        d.trigger("act_save_copy");
+        QVERIFY(!fs::exists(webp) && !fs::exists(path_of(d.dir.filePath("later.webp.genko"))));
+        QCOMPARE(d.answers->asked.filter(QStringLiteral("まだ書けません")).size(), 1);
+    }
+
+    // コンテンツを編集's tab (review P2-4): コピーを保存… and 複製… take the contents' page shown there, never the book's first
+    // page in its place.
+    void aContentsTabCopiesItsOwnPage() {
+        Desk d;
+        const std::string red = genko::formats::png_bytes(render::Image::create("RGB", {50, 30}, render::Ink{220, 30, 30}));
+        QVERIFY(d.window->apply_ops(Json::array({Json{{"op", "add_layer"}, {"page", 1}, {"kind", "paint"}, {"id", "pic"}, {"name", "絵"}},
+                                                 Json{{"op", "set_layer"}, {"page", 1}, {"id", "pic"}, {"panel_each", false}, {"panel_clip", false}},
+                                                 Json{{"op", "put_raster"}, {"page", 1}, {"id", "pic"}, {"png_base64", core::b64encode(red)}}})));
+        d.window->set_target_layer("pic");
+        d.trigger("act_smart_convert");
+        d.trigger("act_smart_edit");
+        QVERIFY(d.window->contents_tab().has_value());
+        const core::Page* contents = d.window->current_page();
+        QVERIFY(contents != nullptr);
+        const int dpi = static_cast<int>(std::lround(contents->spec.dpi.value()));
+        const render::Size want{render::mm_to_px(contents->spec.width_mm.value(), dpi), render::mm_to_px(contents->spec.height_mm.value(), dpi)};
+        const core::Page& first = d.doc().page(0);
+        QVERIFY(contents->id != first.id);
+        // (コピーを保存…: the contents' page)
+        const fs::path png = path_of(d.dir.filePath("contents.png"));
+        d.save_as_target = qpath(png);
+        d.trigger("act_save_copy");
+        QVERIFY(fs::exists(png));
+        const render::Image written = render::open_image(bytes_of(png));
+        QCOMPARE(written.size(), want);
+        // (複製…: a book of the contents' page)
+        d.dialog = [](QDialog* dialog) { return dialog->objectName() == QStringLiteral("duplicateDialog") ? static_cast<int>(QDialog::Accepted) : 0; };
+        const int tabs = d.tabs();
+        d.trigger("act_duplicate_image");
+        d.dialog = nullptr;
+        QCOMPARE(d.tabs(), tabs + 1);
+        const core::Page& copied = d.window->session().document().page(0);
+        QCOMPARE(copied.spec.width_mm.value(), contents->spec.width_mm.value());
+        QCOMPARE(copied.spec.height_mm.value(), contents->spec.height_mm.value());
     }
 
     // ファイル情報…: the items set (one change, 取り消し takes it back).

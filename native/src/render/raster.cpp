@@ -106,6 +106,8 @@ Image baked(const core::Page& page, const core::Layer& layer, bool page_values =
         const double d = core::py_round_whole(size.width / width_in);
         limits::check_count(d, limits::kResolution, "the layer's resolution");
         dpi = static_cast<int>(std::max(1.0, d));
+    } else if (page.spec.grid) {
+        dpi = working_dpi(page);  // (PC4 F-b: a layer of no pixels yet is made at the page's grid — ensure_raster's)
     }
     detail::Ctx ctx;
     std::vector<std::string> omitted;
