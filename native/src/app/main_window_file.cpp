@@ -322,6 +322,15 @@ bool MainWindow::save_copy_to(const QString& chosen) {
         flash(QStringLiteral("コピーを保存しました（原稿はそのままです）: %1").arg(QDir::toNativeSeparators(target)), 4000);
         return true;
     }
+    // (the user's decision 4: a picture a book here was opened from is never written — its copy goes to another file)
+    for (const Document& d : documents_) {
+        std::error_code ec;
+        if (d.source && fs::exists(fpath(path), ec) && fs::equivalent(*d.source, fpath(path), ec)) {
+            ask::warning(this, QStringLiteral("コピーを保存"),
+                         QStringLiteral("開いた元の画像には書きません。別の名前か場所を選んでください:\n%1").arg(QDir::toNativeSeparators(path)));
+            return false;
+        }
+    }
     const core::Page* page = current_page();
     if (page == nullptr) return false;
     formats::CopyOptions options;

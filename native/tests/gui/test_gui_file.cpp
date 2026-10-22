@@ -251,6 +251,31 @@ private slots:
         QCOMPARE(bytes_of(photo), before);
     }
 
+    // 終了 (the window closed) with pictures' books: the untouched one not asked about, the changed one asked — キャンセル keeps
+    // the window and both books, 保存せずに閉じる… closes it —; the pictures never written.
+    void quittingWithPicturesBooks() {
+        Desk d;
+        const fs::path kept = d.picture("quit-kept.png"), changed = d.picture("quit-changed.png");
+        const std::string kept_bytes = bytes_of(kept), changed_bytes = bytes_of(changed);
+        d.window->open_path(kept);
+        QVERIFY(wait_for([&] { return d.tabs() == 2; }));
+        d.window->open_path(changed);
+        QVERIFY(wait_for([&] { return d.tabs() == 3; }));
+        d.window->switch_document(2);
+        QCOMPARE(d.doc().title, std::string("quit-changed"));
+        QVERIFY(d.window->apply_ops(Json::array({Json{{"op", "set_file_info"}, {"author", "終える人"}}})));
+        d.close_answer = QStringLiteral("cancel");
+        QVERIFY(!d.window->close());
+        QCOMPARE(d.guards.size(), 1);  // (only the changed one)
+        QVERIFY(d.window->isVisible());
+        QCOMPARE(d.tabs(), 3);
+        d.close_answer = QStringLiteral("discard");
+        QVERIFY(d.window->close());
+        QCOMPARE(d.guards.size(), 2);
+        QCOMPARE(bytes_of(kept), kept_bytes);
+        QCOMPARE(bytes_of(changed), changed_bytes);
+    }
+
     // すべてを閉じる: every book closed, an untitled one left in the window; その他を閉じる: the one in front kept.
     void closeAllAndCloseOthers() {
         Desk d;
@@ -325,6 +350,20 @@ private slots:
         QVERIFY(copied.book_id != d.doc().book_id);
         QCOMPARE(*d.window->session().path(), d.book);
         QCOMPARE(d.tabs(), 1);
+        // (the user's decision 4: the picture a book was opened from is never written — not by コピーを保存… over it, not by
+        // 別名で保存… of its format)
+        const fs::path photo = d.picture("source.png");
+        const std::string before = bytes_of(photo);
+        d.window->open_path(photo);
+        QVERIFY(wait_for([&] { return d.tabs() == 2; }));
+        QVERIFY(d.window->apply_ops(Json::array({Json{{"op", "set_file_info"}, {"author", "上書きしない人"}}})));
+        d.save_as_target = qpath(photo);
+        d.answers->asked.clear();
+        d.trigger("act_save_copy");
+        d.trigger("act_save_as");
+        QCOMPARE(bytes_of(photo), before);
+        QCOMPARE(d.answers->asked.filter(QStringLiteral("開いた元の画像には書きません")).size(), 2);
+        QVERIFY(!d.window->session().path());
     }
 
     // ファイル情報…: the items set (one change, 取り消し takes it back).
