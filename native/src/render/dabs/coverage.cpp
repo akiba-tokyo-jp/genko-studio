@@ -112,8 +112,10 @@ Box BrushContext::dab_rect(const Dab& d, bool dual) const {
     const bool sampled = dual ? dual_tip_ != nullptr : tip_ != nullptr;
     const double r = d.radius * px_per_mm_;
     const double reach = sampled ? r * kSqrt2 : r;
-    const int rr = static_cast<int>(std::ceil(reach)) + 1;
-    const int cx = static_cast<int>(std::floor(d.x * px_per_mm_)), cy = static_cast<int>(std::floor(d.y * px_per_mm_));
+    // (review P3-10: kept within ±1e9 before they become whole numbers — a point far off the page is far off still)
+    const auto whole = [](double v) { return static_cast<int>(std::clamp(v, -1.0e9, 1.0e9)); };
+    const int rr = whole(std::ceil(reach)) + 1;
+    const int cx = whole(std::floor(d.x * px_per_mm_)), cy = whole(std::floor(d.y * px_per_mm_));
     return Box{cx - rr, cy - rr, cx + rr + 1, cy + rr + 1};
 }
 

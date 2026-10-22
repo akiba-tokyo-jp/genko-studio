@@ -26,8 +26,12 @@
 #include "app/inject.hpp"
 #include "app/main_window.hpp"
 #include "app/tool_settings.hpp"
+#include "core/base64.hpp"
+#include "core/brush_dabs.hpp"
 #include "core/brushes.hpp"
 #include "render/brushes.hpp"
+#include "render/dabs/lines.hpp"
+#include "render/png.hpp"
 using namespace genko;
 using core::Json;
 namespace inject = genko::app::inject;
@@ -343,12 +347,13 @@ private slots:
         inject::mouse_stroke(studio.window->canvas(), {QPointF(10, 20), QPointF(40, 20)});
         QVERIFY(!ops.empty());
         QCOMPARE(ops.back()[0]["op"], Json("define_brush"));
-        QCOMPARE(ops.back()[0]["key"], Json("my_pencil"));
-        QCOMPARE(ops.back().back()["kind"], Json("my_pencil"));
-        QCOMPARE(studio.session->document().brush_custom["my_pencil"]["engine"], Json("dabs"));
-        QCOMPARE(studio.ink().strokes->items.back()->kind, std::string("my_pencil"));
+        const std::string pencil(render::dabs::kPencilKey);
+        QCOMPARE(ops.back()[0]["key"], Json(pencil));
+        QCOMPARE(ops.back().back()["kind"], Json(pencil));
+        QCOMPARE(studio.session->document().brush_custom[pencil]["engine"], Json("dabs"));
+        QCOMPARE(studio.ink().strokes->items.back()->kind, pencil);
         for (int i = 0; i < studio.brush().kinds->count(); ++i) {
-            QVERIFY(studio.brush().kinds->item(i)->data(Qt::UserRole).toString() != QStringLiteral("my_pencil"));
+            QVERIFY(studio.brush().kinds->item(i)->data(Qt::UserRole).toString().toStdString() != pencil);
         }
         // 自動消去: begun on the 描画色, the line is in the 背景色; begun elsewhere, in the 描画色
         studio.brush().auto_erase->setChecked(true);
@@ -381,6 +386,11 @@ private slots:
         render::brushes::save_to_library(app::config_dir(), "my_dab", Json{{"label", "ダブ"}, {"engine", "dabs"}, {"dabs", Json{{"hardness", 0.5}}}});
         Studio studio;
         studio.draw({QPointF(10, 20), QPointF(40, 20)});
+        // a paint layer of pixels (opaque grey)
+        const render::Image grey = render::Image::create("RGBA", render::Size{170, 170}, render::Ink{200, 200, 200, 255});
+        QVERIFY(studio.window->apply_ops(Json::array({Json{{"op", "add_layer"}, {"page", 1}, {"kind", "paint"}, {"id", "paint"}},
+                                                      Json{{"op", "set_layer"}, {"page", 1}, {"id", "paint"}, {"panel_each", false}, {"panel_clip", false}},
+                                                      Json{{"op", "put_raster"}, {"page", 1}, {"id", "paint"}, {"png_base64", core::b64encode(render::write_png(grey))}}})));
         std::vector<Json> ops;
         QObject::connect(studio.session.get(), &app::Session::changed, studio.window.get(), [&](const app::BookChange& c) {
             if (c.why == app::BookChange::Why::Edit) ops.push_back(c.ops);
@@ -391,8 +401,10 @@ private slots:
         QVERIFY(kind != nullptr && opacity != nullptr && flow != nullptr);
         QCOMPARE(kind->currentData().toString(), QStringLiteral("brush"));
         studio.window->choose_tool(QStringLiteral("eraser"));
+        studio.window->set_target_layer("paint");
         inject::mouse_stroke(studio.window->canvas(), {QPointF(14, 16), QPointF(14, 24)});
         QCOMPARE(ops.back().back()["op"], Json("erase"));
+        QCOMPARE(ops.back().back()["layer_id"], Json("paint"));
         QVERIFY(!ops.back().back().contains("brush") && !ops.back().back().contains("block"));
         // ブロック, half its 不透明度, its 流量 0.8
         kind->setCurrentIndex(kind->findData(QStringLiteral("block")));
@@ -406,18 +418,39 @@ private slots:
         kind->setCurrentIndex(kind->findData(QStringLiteral("pencil")));
         inject::mouse_stroke(studio.window->canvas(), {QPointF(22, 16), QPointF(22, 24)});
         QCOMPARE(ops.back()[0]["op"], Json("define_brush"));
-        QCOMPARE(ops.back().back()["brush"], Json("my_pencil"));
+        QCOMPARE(ops.back().back()["brush"], Json(std::string(render::dabs::kPencilKey)));
         // ブラシ with a dab brush chosen in the brush panel
         kind->setCurrentIndex(kind->findData(QStringLiteral("brush")));
         studio.choose("my_dab");
         QCOMPARE(studio.brush().kind(), std::string("my_dab"));
         studio.window->choose_tool(QStringLiteral("eraser"));
+        studio.window->set_target_layer("paint");
         inject::mouse_stroke(studio.window->canvas(), {QPointF(26, 16), QPointF(26, 24)});
         QCOMPARE(ops.back()[0]["op"], Json("define_brush"));
         QCOMPARE(ops.back().back()["brush"], Json("my_dab"));
         QVERIFY(!ops.back().back().contains("texture"));
         QCOMPARE(app::settings()->value(QStringLiteral("eraser/kind")).toString(), QStringLiteral("brush"));
         QCOMPARE(app::settings()->value(QStringLiteral("eraser/opacity")).toDouble(), 0.5);
+        // a pen layer: its lines cut as before, in every モード — the book given no brush (review P2-4)
+        Studio pen;
+        pen.draw({QPointF(10, 20), QPointF(40, 20)});
+        std::vector<Json> pen_ops;
+        QObject::connect(pen.session.get(), &app::Session::changed, pen.window.get(), [&](const app::BookChange& c) {
+            if (c.why == app::BookChange::Why::Edit) pen_ops.push_back(c.ops);
+        });
+        auto* pen_kind = pen.window->findChild<QComboBox*>(QStringLiteral("eraser_kind"));
+        pen.window->choose_tool(QStringLiteral("eraser"));
+        for (const char* way : {"pencil", "block", "brush"}) {
+            pen_kind->setCurrentIndex(pen_kind->findData(QString::fromLatin1(way)));
+            if (std::string(way) == "brush") pen.choose("my_dab");
+            pen.window->choose_tool(QStringLiteral("eraser"));
+            inject::mouse_stroke(pen.window->canvas(), {QPointF(20, 16), QPointF(20, 24)});
+            QCOMPARE(pen_ops.back().size(), std::size_t(1));
+            QCOMPARE(pen_ops.back()[0]["op"], Json("erase"));
+            QVERIFY2(!pen_ops.back()[0].contains("brush") && !pen_ops.back()[0].contains("block") && !pen_ops.back()[0].contains("opacity"), way);
+        }
+        QVERIFY(pen.session->document().brush_custom.empty() || !pen.session->document().brush_custom.contains(std::string(render::dabs::kPencilKey)));
+        QVERIFY(!core::uses_brushes(pen.session->document()));
     }
 
     // ツールの設定: each tool's name, hint and page; the panel tool's ways and the selection's settings go to the canvas.

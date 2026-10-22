@@ -471,7 +471,7 @@ void BrushPanel::fill_kinds() {
     const QColor text(theme::tokens().text);
     kinds->setIconSize(QSize(72, 20));
     for (const core::Brush& brush : render::brushes::everything()) {
-        if (brush.key == render::dabs::kPencilKey) continue;  // (brushes@1: the 鉛筆ツール's own, not one to pick)
+        if (render::dabs::is_pencil(core::brush_to_dict(brush))) continue;  // (brushes@1: the 鉛筆ツール's own, not one to pick)
         auto* item = new QListWidgetItem((brush.key.starts_with("my_") ? QStringLiteral("★ ") : QString()) + QString::fromStdString(brush.label));
         item->setIcon(QIcon(stroke_preview(brush.key, {text.red(), text.green(), text.blue()}, QSize(72, 20))));
         item->setData(Qt::UserRole, key_of(brush.key));

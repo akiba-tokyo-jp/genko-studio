@@ -5,6 +5,8 @@
 
 #include <QCheckBox>
 #include <QComboBox>
+#include <QDialog>
+#include <QDialogButtonBox>
 #include <QDockWidget>
 #include <QDoubleSpinBox>
 #include <QFileInfo>
@@ -17,6 +19,7 @@
 #include <QScrollArea>
 #include <QSlider>
 #include <QSpinBox>
+#include <QVBoxLayout>
 
 #include <algorithm>
 #include <cmath>
@@ -354,12 +357,17 @@ Json MainWindow::eraser_fields(const core::Layer& layer) const {
     }
     if (eraser_texture_ != nullptr && eraser_texture_->currentData().toString() != QLatin1String("hard"))
         out["texture"] = eraser_texture_->currentData().toString().toStdString();
-    // brushes@1 (PC4 E1): the モード's dabs — the pencil's brush, the block, or the brush panel's when it is a dab brush
-    if (eraser_kind_ != nullptr && layer.kind != core::LayerKind::Tone) {
+    // brushes@1 (PC4 E1): the モード's dabs — the pencil's brush, the block, or the brush panel's when it is a dab brush —
+    // on a paint layer's pixels only (8 bits, precise or inks): a pen layer's lines are cut as before, the book given no
+    // brush (review P2-4)
+    const bool pixels = layer.kind == core::LayerKind::Raster &&
+                        ((layer.raster_png && !layer.raster_png->empty()) || (layer.color_raster && !layer.color_raster->empty()) ||
+                         (layer.ink_raster && !layer.ink_raster->empty()));
+    if (eraser_kind_ != nullptr && pixels) {
         const QString kind = eraser_kind_->currentData().toString();
         bool dabs = true;
         if (kind == QLatin1String("pencil")) {
-            out["brush"] = std::string(render::dabs::kPencilKey);
+            out["brush"] = pencil_key();
         } else if (kind == QLatin1String("block")) {
             out["block"] = true;
         } else if (brush_ != nullptr && render::brushes::is_dab(brush_->kind())) {
@@ -376,17 +384,55 @@ Json MainWindow::eraser_fields(const core::Layer& layer) const {
     return out;
 }
 
-void MainWindow::know_pencil() {
-    if (render::brushes::brush(render::dabs::kPencilKey).key == render::dabs::kPencilKey) return;
-    try {
-        render::brushes::define_brush(render::dabs::kPencilKey, render::dabs::pencil_brush());
-    } catch (const std::exception&) {
+bool MainWindow::blend_bakes_ok(const core::Page& page, const core::Layer& layer) {
+    const std::size_t lines = layer.stroke_count();
+    const std::size_t pictures = layer.patches.size();
+    if (lines == 0 && pictures == 0) return true;
+    const std::string key = page.id + "/" + layer.id;
+    if (blend_baked_.contains(key)) return true;
+    QDialog dialog(this);
+    dialog.setObjectName(QStringLiteral("blend_bakes"));
+    dialog.setWindowTitle(QStringLiteral("描画モードで描く"));
+    auto* layout = new QVBoxLayout(&dialog);
+    QString what;
+    if (lines > 0) what += QStringLiteral("線 %1 本").arg(lines);
+    if (pictures > 0) what += (what.isEmpty() ? QString() : QStringLiteral("と")) + QStringLiteral("絵 %1 枚").arg(pictures);
+    auto* text = new QLabel(QStringLiteral("このレイヤーの%1は 200 dpi の画素になり、線としては直せなくなります（取り消しで戻せます）。\n"
+                                           "「%2」で描きますか？")
+                                .arg(what, brush_ != nullptr ? brush_->blend->currentText() : QString::fromStdString(pen_.blend)));
+    text->setWordWrap(true);
+    layout->addWidget(text);
+    auto* buttons = new QDialogButtonBox;
+    buttons->addButton(QStringLiteral("描く"), QDialogButtonBox::AcceptRole);
+    buttons->addButton(QStringLiteral("やめる"), QDialogButtonBox::RejectRole);
+    connect(buttons, &QDialogButtonBox::accepted, &dialog, &QDialog::accept);
+    connect(buttons, &QDialogButtonBox::rejected, &dialog, &QDialog::reject);
+    layout->addWidget(buttons);
+    if (ask::exec(&dialog) != QDialog::Accepted) return false;
+    blend_baked_.insert(key);
+    return true;
+}
+
+std::string MainWindow::pencil_key() const {
+    for (int n = 1; n < 1000; ++n) {
+        const std::string key = std::string(render::dabs::kPencilKey) + (n == 1 ? std::string() : "_" + std::to_string(n));
+        const auto held = book().brush_custom.find(key);
+        if (held != book().brush_custom.end() && !render::dabs::is_pencil(*held)) continue;  // (one's own brush of the key)
+        const render::brushes::Brush known = render::brushes::brush(key);
+        if (known.key == key && !render::dabs::is_pencil(core::brush_to_dict(known))) continue;
+        if (known.key != key) {
+            try {
+                render::brushes::define_brush(key, render::dabs::pencil_brush());
+            } catch (const std::exception&) {
+            }
+        }
+        return key;
     }
+    return std::string(render::dabs::kPencilKey);
 }
 
 bool MainWindow::own_brush_op(const std::string& kind, Json& ops) {
     if (!kind.starts_with("my_") || book().brush_custom.contains(kind)) return true;
-    if (kind == render::dabs::kPencilKey) know_pencil();
     render::brushes::Brush own = render::brushes::brush(kind);
     if (own.key != kind) {  // (not known: from the library again, never the G pen's settings under its name)
         try {

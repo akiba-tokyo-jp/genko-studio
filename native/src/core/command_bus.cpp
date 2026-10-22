@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <cstdint>
+#include <functional>
 #include <map>
 #include <mutex>
 #include <set>
@@ -764,6 +765,23 @@ Json journal_op(const Json& op) {
                     *png = "<" + std::to_string(code_points(png->get_ref<const std::string&>())) + " base64 chars>";
                 }
             }
+            // (brushes@1, PC4 E1 — review P3-1: a dab brush's pictures — tips and textures as "png", upstream's tiles'
+            // "data" under "sampled" and "tile" — kept by the book as assets)
+            const std::function<void(Json&)> pictures = [&pictures](Json& v) {
+                if (!v.is_object()) return;
+                for (auto& [key, child] : v.items()) {
+                    if (key == "png" && child.is_string()) {
+                        child = "<" + std::to_string(code_points(child.get_ref<const std::string&>())) + " base64 chars>";
+                    } else if ((key == "sampled" || key == "tile") && child.is_object() && child.contains("data")) {
+                        Json& data = child["data"];
+                        if (data.is_string()) data = "<" + std::to_string(code_points(data.get_ref<const std::string&>())) + " base64 chars>";
+                        if (data.is_array()) data = "<" + std::to_string(data.size()) + " values>";
+                    } else {
+                        pictures(child);
+                    }
+                }
+            };
+            if (const auto dabs = out.find("dabs"); dabs != out.end()) pictures(*dabs);
         }
         // (PC2a: a 3D LUT file's text a color_lookup gives — add_layer's and set_layer's adjust, set_adjustment's and
         // filter_raster's own —: its table is the book's asset, and an op is not done again from the journal)

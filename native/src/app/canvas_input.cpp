@@ -59,6 +59,7 @@ void PageCanvas::begin_stroke(const QPointF& mm, double pressure, double rotatio
     live_snapped_ = false;
     live_failed_ = false;
     live_sync();
+    update_cursor();  // (PC4 E1, review P2-8: the cross alone while drawing, when so chosen)
     update();
 }
 
@@ -167,6 +168,7 @@ void PageCanvas::finish_stroke() {
     committing_.reset();
     perf::event("stroke_committed", {{"points", static_cast<std::int64_t>(input.points.size())}});
     back_from_eraser_end();
+    update_cursor();  // (PC4 E1: the pointer as it is when not drawing)
     emit changed();
     update();
 }

@@ -21,6 +21,7 @@
 #include "core/pynum.hpp"
 #include "core/pyrandom.hpp"
 #include "render/draw.hpp"
+#include "render/image_ops.hpp"
 #include "render/not_yet_ported.hpp"
 #include "render/paper.hpp"
 #include "render/png.hpp"
@@ -686,10 +687,22 @@ namespace {
 
 // brushes@1 (PC4 E1): a dab brush's line — its dabs laid (render/dabs/lines.hpp), the coverage in 8 bits (rounded half
 // up), then as every brush: the light touch's shading, the paper.
+std::optional<Box> dab_extent(const Brush& b, Size size, const core::PenPoints& points, int dpi, double width_mm);
+
 std::optional<Coverage> draw_dabs(const Brush& b, Size size, const core::PenPoints& points, int dpi, double width_mm, std::string_view seed,
                                   std::span<const double> rotation, double pressure_opacity, const dabs::LineInputs* inputs,
                                   std::optional<Box> within) {
     if (points.empty()) return std::nullopt;
+    // (the memory, held in the imaging budget before it is had: over the most the line reaches in what is drawn, its
+    // coverage's tiles — with the colour dynamics' colours, the dual brush's —, their floats laid out and the 8-bit mask)
+    std::optional<Box> reach = dab_extent(b, size, points, dpi, width_mm);
+    if (reach && within) {
+        reach = Box{std::max(reach->x0, within->x0), std::max(reach->y0, within->y0), std::min(reach->x1, within->x1), std::min(reach->y1, within->y1)};
+    }
+    if (!reach || reach->x1 <= reach->x0 || reach->y1 <= reach->y0) return std::nullopt;
+    const std::uint64_t area = std::uint64_t(reach->width()) * std::uint64_t(reach->height());
+    const std::uint64_t per_pixel = 4 * (b.dabs->color.enabled ? 4 : 1) + (b.dabs->dual.enabled ? 4 : 0) + 4 + 1;
+    const image_ops::Held held(area * per_pixel);
     const dabs::LineInputs mouse;
     const auto laid = dabs::cover(*b.dabs, width_mm, seed, points, rotation, inputs != nullptr ? *inputs : mouse, dpi, size, within);
     if (!laid) return std::nullopt;

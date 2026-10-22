@@ -2,6 +2,7 @@
 
 #include <optional>
 #include <string>
+#include <vector>
 
 #include "core/command_bus.hpp"
 #include "core/geometry.hpp"
@@ -38,7 +39,8 @@ struct Eraser {
 };
 Image eraser_mask(Size size, const core::PenPoints& points, double width_mm, int dpi, const Eraser& eraser, const std::string& seed);
 // erase's eraser from its keys (none when it has neither "brush" nor "block"): the brush checked against the book
-// (OpError for a kind that is not one of its dab brushes), opacity and flow 0..1.
-std::optional<Eraser> eraser_of(const core::Json& op, const core::Document& doc);
+// (OpError for a kind that is not one of its dab brushes), opacity and flow 0..1. Without brush or block, an opacity or
+// flow is not used and `notes` says so (the op goes through, as before E1 when they were keys it did not know).
+std::optional<Eraser> eraser_of(const core::Json& op, const core::Document& doc, std::vector<std::string>& notes);
 
 }  // namespace genko::render::dab_ops

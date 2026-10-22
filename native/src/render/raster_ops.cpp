@@ -2517,7 +2517,7 @@ void erase(OpContext& c) {
     // does them and then stops at a paint layer's pixels with not_yet_ported. Those are erased here, after it.
     // (color-mode@1: a paint layer's inks it does not see — they are no PNG — and are erased here too, render/ink_edit)
     static const core::OpFunction* const lines = core::OpRegistry::builtin().find("erase");
-    const std::optional<dab_ops::Eraser> eraser = dab_ops::eraser_of(c.op, c.doc);  // (brushes@1, PC4 E1: checked first)
+    const std::optional<dab_ops::Eraser> eraser = dab_ops::eraser_of(c.op, c.doc, c.notes);  // (brushes@1, PC4 E1: checked first)
     try {
         (*lines)(c);
         if (!erases_inks(c.doc, c.op)) return;

@@ -45,6 +45,9 @@ struct LineInputs {
     std::optional<double> flow;
     std::array<float, 3> color{20.0f / 255.0f, 20.0f / 255.0f, 20.0f / 255.0f};
     std::optional<std::array<float, 3>> background;
+    // (PC4 E1) Whether its dabs are remembered for the next time it is drawn: not a line being drawn (its points change
+    // with every move of the pen, each set of them asked once).
+    bool remember = true;
 };
 
 // The input points of a line: its points (mm) and pressure (none: full), its barrel's turn, tilt, time and wheel.
@@ -58,9 +61,14 @@ LineBrush line_brush(const core::DabSettings& settings, double width_mm, std::st
 struct LineDabs {
     std::vector<Dab> dabs, dual;
 };
-// The dabs of a line, remembered for the last lines asked (by the line's content and the brush's settings).
-// core::Error("too_large") past kMaxDabs dabs, or a diameter past 500 mm.
-std::shared_ptr<const LineDabs> line_dabs(const LineBrush& brush, const std::vector<InputPoint>& points);
+// The dabs of a line, remembered for the last lines asked (by the line's content and the brush's settings; at most
+// kDabsKept dabs all told; `remember` false: not kept). core::Error("too_large") past kMaxDabs dabs or kMaxDabWork, or a
+// diameter past 500 mm.
+std::shared_ptr<const LineDabs> line_dabs(const LineBrush& brush, const std::vector<InputPoint>& points, bool remember = true);
+// The most dabs remembered (a dab is 88 bytes: about 90 MB).
+inline constexpr std::size_t kDabsKept = 1000000;
+// The dabs remembered now (tests).
+std::size_t remembered_dabs();
 
 // The brush ready to lay its dabs at `dpi` (its tips' mips and texture prepared; remembered). core::Error("missing_asset")
 // for a picture this process does not know.
@@ -85,8 +93,12 @@ core::Json dabs_from_photocraft(const core::Json& upstream, std::map<std::string
 // core::Error("value") for a picture that cannot be read, or past `edge` pixels a side.
 std::pair<std::string, core::Bytes> take_in_picture(std::string_view file, bool ink, std::uint32_t edge);
 
-// The pencil tool's brush (鉛筆（ハード）: hard, aliased, 10 % spacing) as define_brush takes it.
+// The pencil tool's brush (鉛筆（ハード）: hard, aliased, 10 % spacing) as define_brush takes it, kept by a book under
+// kPencilKey — or kPencilKey_2, _3 … when a brush of one's own of other settings has the key there (review P3-2: the
+// window picks the key, MainWindow::pencil_key; one's own brush is never written over).
 core::Json pencil_brush();
-inline constexpr std::string_view kPencilKey = "my_pencil";
+inline constexpr std::string_view kPencilKey = "my_genko_pencil";
+// Whether a brush's settings (brush_to_dict) are the pencil's (its key aside).
+bool is_pencil(const core::Json& settings);
 
 }  // namespace genko::render::dabs

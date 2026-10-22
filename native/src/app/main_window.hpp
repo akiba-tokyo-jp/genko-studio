@@ -763,8 +763,14 @@ private:
     // brushes@1 (PC4 E1): the define_brush that puts a brush of one's own (or the 鉛筆ツール's) into the book before a
     // line or an eraser uses it (none: the book has it, or it is a built-in one); false when it cannot be found (said).
     bool own_brush_op(const std::string& kind, core::Json& ops);
-    // The 鉛筆ツール's brush made known to this process (render/dabs/lines.hpp pencil_brush).
-    void know_pencil();
+    // The 鉛筆ツール's brush (render/dabs/lines.hpp pencil_brush): its key for this book — kPencilKey, or the first of
+    // kPencilKey_2 … that neither the book nor this process holds as a brush of other settings —, made known to this
+    // process under it.
+    std::string pencil_key() const;
+    // (PC4 E1, review P2-6) Whether a line with a blend may be painted into this paint layer: when it has lines or pictures
+    // of its own (they become its 200-dpi pixels, no longer lines), asked once a layer while the window is open (描く or
+    // やめる); a layer of pixels only, always.
+    bool blend_bakes_ok(const core::Page& page, const core::Layer& layer);
     // the drawing tools and the colour (main_window_paint.cpp)
     void build_paint_actions();
     void build_paint_pages(ToolSettings* ts);
@@ -1169,6 +1175,7 @@ private:
     QComboBox* eraser_kind_ = nullptr;
     QSlider* eraser_opacity_ = nullptr;
     QSlider* eraser_flow_ = nullptr;
+    std::set<std::string> blend_baked_;  // (PC4 E1: the paint layers whose lines became pixels by a blend, asked: page/layer)
     QCheckBox* eraser_balloons_ = nullptr;  // フキダシを削る (the eraser cuts the balloons it goes over)
     QComboBox* frame_mode_ = nullptr;
     QComboBox* marquee_mode_ = nullptr;

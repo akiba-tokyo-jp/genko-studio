@@ -486,7 +486,9 @@ void PageCanvas::live_draw() {
     // snapped to a ruler, with its symmetry copies: drawn whole again each time (Python's LiveInk.redraw)
     const core::PenPoints& main = shown->front();
     live_ = std::make_unique<LiveInk>(doc_, *p, *layer, wanted_dpi(), pen_fields_, stroke_id_);
-    live_->follow(main, main.size() == turns_.size() ? std::span<const double>(turns_) : std::span<const double>());
+    // (brushes@1, PC4 E1: the pen's inputs with the points snapped, one a point as before)
+    live_->follow(main, main.size() == turns_.size() ? std::span<const double>(turns_) : std::span<const double>(),
+                  main.size() == stroke_.size() ? LiveInputs{tilts_, times_, wheels_} : LiveInputs{});
     live_copies_.clear();
     for (std::size_t i = 1; i < shown->size(); ++i) {
         auto copy = std::make_unique<LiveInk>(doc_, *p, *layer, wanted_dpi(), pen_fields_, stroke_id_);

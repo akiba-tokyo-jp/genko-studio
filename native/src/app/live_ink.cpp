@@ -175,9 +175,14 @@ void LiveInk::follow(const core::PenPoints& points, std::span<const double> rota
         std::optional<render::brushes::Coverage> drawn;
         if (dab_) {
             // (brushes@1: the pen's inputs over the points add_stroke will keep, as it stretches them)
+            // (rounded first as the window sends them — a tenth of a degree and of a ms, a thousandth of the wheel — then
+            // stretched and rounded as add_stroke does)
             const auto stretched = [&](std::span<const double> values, std::size_t per, int digits) {
                 if (values.size() != points.size() * per || points.size() < 2) return std::vector<double>{};
-                return core::resample_inputs(std::vector<double>(values.begin(), values.end()), per, pts.size(), digits);
+                std::vector<double> sent;
+                sent.reserve(values.size());
+                for (const double v : values) sent.push_back(core::py_round(v, digits));
+                return core::resample_inputs(sent, per, pts.size(), digits);
             };
             const std::vector<double> tilt = stretched(inputs.tilt, 2, 1), time = stretched(inputs.time_ms, 1, 1), wheel = stretched(inputs.wheel, 1, 3);
             core::Stroke line;
@@ -186,7 +191,8 @@ void LiveInk::follow(const core::PenPoints& points, std::span<const double> rota
             line.wheel = wheel;
             line.flow = flow_;
             line.background_rgb = background_;
-            const render::dabs::LineInputs in = render::brushes::line_inputs(line, rgb_);
+            render::dabs::LineInputs in = render::brushes::line_inputs(line, rgb_);
+            in.remember = false;  // (its points change with every move: its dabs are not kept)
             drawn = render::brushes::draw(size_, pts, dpi_, width_mm_, kind_, seed_, turns, pressure_opacity_, &in);
             colours_ = drawn && drawn->dabs && drawn->dabs->coloured() ? drawn->dabs : nullptr;
         } else {

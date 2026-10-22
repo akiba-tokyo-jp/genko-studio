@@ -148,6 +148,15 @@ private:
 // The most dabs a line has (the op refuses more: too_large). The generator stops as soon as a line would have more, so a
 // long line of a fine spacing is refused before its dabs are all made.
 inline constexpr std::size_t kMaxDabs = 200000;
+// The most work a line's dabs are: their squares' pixels at 200 dpi, all told (the dual brush's too). A line past it is
+// refused (too_large) by the op and wherever it is drawn: at 600 dpi it would be nine times as many pixels to lay. Two
+// thousand million: ordinary lines stay far below — a 100 mm brush at 10 % spacing across a B4 page (45 dabs of 787
+// pixels a side) is about 3×10^7, an airbrush of 50 mm at the finest spacing (1 %, 900 dabs of 394) about 1.4×10^8,
+// a 500 mm brush across the page about 1.5×10^8 —, while a line whose every dab covers the page (the widest brush
+// gone back and forth at a fine spacing) is refused before it is laid.
+inline constexpr double kMaxDabWork = 2.0e9;
+// The work of dabs (kMaxDabWork's measure: each dab's square, its diameter at 200 dpi and a pixel more, squared).
+double dab_work(const std::vector<Dab>& dabs);
 
 // The primary dabs of a whole line (lib.rs dabs).
 std::vector<Dab> all_dabs(const LineBrush& brush, const std::vector<InputPoint>& points);

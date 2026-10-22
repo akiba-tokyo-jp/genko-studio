@@ -395,12 +395,12 @@ void DabGenerator::build_dual(const StepInput& s, std::vector<Dab>& out) {
 
 namespace {
 
-// A step kept, unless the line would have more than kMaxDabs dabs (each step lays one or more): core::Error("too_large").
-void keep_step(std::vector<StepInput>& steps, std::size_t laid, const StepInput& s) {
-    if (laid + steps.size() >= kMaxDabs) {
+// The line would have more than kMaxDabs dabs: core::Error("too_large") (the dabs are counted as each step lays them —
+// a step lays up to 16, the scatter's count —, so a line of a fine spacing is refused before they are all made).
+void count_dabs(const std::vector<Dab>& laid) {
+    if (laid.size() > kMaxDabs) {
         throw core::Error("too_large", "the line has more than " + std::to_string(kMaxDabs) + " dabs (a longer line than the brush's spacing takes)");
     }
-    steps.push_back(s);
 }
 
 }  // namespace
@@ -410,13 +410,16 @@ void DabGenerator::walk(const std::vector<InputPoint>& points, std::vector<Dab>&
     const auto dual_len = [this](const InputPoint&) { return dual_step_len(); };
     for (const InputPoint& raw : points) {
         const InputPoint p = apply_pose(brush_.settings, raw);
-        std::vector<StepInput> steps;
-        walker_.push(p, len, [&](const StepInput& s) { keep_step(steps, dabs.size(), s); });
-        for (const StepInput& s : steps) build(s, dabs);
+        // (each step's dabs laid as the walk gives it, in its order: the same dabs as laying them after the walk)
+        walker_.push(p, len, [&](const StepInput& s) {
+            build(s, dabs);
+            count_dabs(dabs);
+        });
         if (dual_walker_) {
-            std::vector<StepInput> dual_steps;
-            dual_walker_->push(p, dual_len, [&](const StepInput& s) { keep_step(dual_steps, dual.size(), s); });
-            for (const StepInput& s : dual_steps) build_dual(s, dual);
+            dual_walker_->push(p, dual_len, [&](const StepInput& s) {
+                build_dual(s, dual);
+                count_dabs(dual);
+            });
         }
     }
 }
@@ -424,14 +427,26 @@ void DabGenerator::walk(const std::vector<InputPoint>& points, std::vector<Dab>&
 void DabGenerator::push(const std::vector<InputPoint>& points, std::vector<Dab>& dabs, std::vector<Dab>& dual) { walk(points, dabs, dual); }
 
 void DabGenerator::finish(std::vector<Dab>& dabs, std::vector<Dab>& dual) {
-    std::vector<StepInput> steps;
-    walker_.finish([&](const StepInput& s) { keep_step(steps, dabs.size(), s); });
-    for (const StepInput& s : steps) build(s, dabs);
+    walker_.finish([&](const StepInput& s) {
+        build(s, dabs);
+        count_dabs(dabs);
+    });
     if (dual_walker_) {
-        std::vector<StepInput> dual_steps;
-        dual_walker_->finish([&](const StepInput& s) { keep_step(dual_steps, dual.size(), s); });
-        for (const StepInput& s : dual_steps) build_dual(s, dual);
+        dual_walker_->finish([&](const StepInput& s) {
+            build_dual(s, dual);
+            count_dabs(dual);
+        });
     }
+}
+
+double dab_work(const std::vector<Dab>& dabs) {
+    constexpr double k = 200.0 / 25.4;  // (pixels a mm at 200 dpi)
+    double work = 0.0;
+    for (const Dab& d : dabs) {
+        const double side = 2.0 * d.radius * k + 1.0;
+        work += side * side;
+    }
+    return work;
 }
 
 std::vector<Dab> all_dabs(const LineBrush& brush, const std::vector<InputPoint>& points) {

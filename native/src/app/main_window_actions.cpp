@@ -933,7 +933,7 @@ void MainWindow::choose_tool(const QString& tool) {
     if (tool == QLatin1String("effect")) set_effect_pictures(effect_actions_, {"focus", "speed", "uni_flash", "beta_flash"});  // (drawn when first needed)
     if (tool_settings_ != nullptr) tool_settings_->show_tool(canvas_->tool());
     if (brush_ != nullptr) brush_->set_pencil(tool == QLatin1String("pencil"));  // (PC4 E1: 自動消去)
-    if (tool == QLatin1String("pencil")) know_pencil();
+    if (tool == QLatin1String("pencil")) (void)pencil_key();
     panel_for_tool(becomes);  // (the lines for the text tool, the layers for the drawing tools: main_window_lines.cpp)
     pen_changed();
 }
@@ -984,7 +984,7 @@ void MainWindow::on_stroke(const StrokeInput& stroke) {
         canvas_->stroke_dropped();
         return;
     }
-    if (mask_edit && (stroke.tool == QLatin1String("pen") || stroke.tool == QLatin1String("eraser"))) {
+    if (mask_edit && (PageCanvas::draws_line(stroke.tool) || stroke.tool == QLatin1String("eraser"))) {  // (PC4 E1: the pencil too)
         // マスクを編集する: the pen shows the layer where it passes, the eraser hides it
         const bool erase = stroke.tool == QLatin1String("eraser");
         Json points = Json::array();
@@ -1021,8 +1021,7 @@ void MainWindow::on_stroke(const StrokeInput& stroke) {
     // paint layer's pixels; a dab brush's line keeps the pen's tilt, times and wheel
     bool in_background = false;  // (自動消去: the 背景色's 8 bits, not the 描画色's precise values below)
     if (stroke.tool == QLatin1String("pencil")) {
-        know_pencil();
-        op["kind"] = std::string(render::dabs::kPencilKey);
+        op["kind"] = pencil_key();
         if (brush_ != nullptr && brush_->auto_erase->isChecked() && colours_ != nullptr && !stroke.points.empty()) {
             const auto under = layer_colour_at(stroke.points.front().x, stroke.points.front().y);
             const auto fore = brush_->rgb();
@@ -1036,7 +1035,13 @@ void MainWindow::on_stroke(const StrokeInput& stroke) {
             }
         }
     }
-    if (pen_.blend != "normal" && layer->kind == core::LayerKind::Raster) op["blend"] = pen_.blend;
+    if (pen_.blend != "normal" && layer->kind == core::LayerKind::Raster) {
+        if (!blend_bakes_ok(*page, *layer)) {
+            canvas_->stroke_dropped();
+            return;
+        }
+        op["blend"] = pen_.blend;
+    }
     if (render::brushes::is_dab(op.value("kind", std::string()))) {
         const std::size_t n = stroke.points.size();
         if (stroke.tilt.size() == 2 * n && std::any_of(stroke.tilt.begin(), stroke.tilt.end(), [](double v) { return std::abs(v) > 0.05; })) {

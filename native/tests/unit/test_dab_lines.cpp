@@ -7,6 +7,7 @@
 // of page, brush.get (`genko brushes get`); and every brush that is not a dab brush drawn as before (its pixels the same
 // with the new keys of draw given or not).
 
+#include <QElapsedTimer>
 #include <QProcessEnvironment>
 #include <QTemporaryDir>
 #include <QtTest>
@@ -22,7 +23,9 @@
 #include "core/brushes.hpp"
 #include "core/command_bus.hpp"
 #include "core/error.hpp"
+#include "core/ops_util.hpp"
 #include "core/paths.hpp"
+#include "core/strokes.hpp"
 #include "render/brushes.hpp"
 #include "render/dabs/lines.hpp"
 #include "render/image.hpp"
@@ -31,6 +34,8 @@
 #include "render/page.hpp"
 #include "render/png.hpp"
 #include "render/raster.hpp"
+#include "render/selection.hpp"
+#include "render/warp.hpp"
 #include "storage/lock.hpp"
 #include "storage/reader.hpp"
 #include "storage/transaction.hpp"
@@ -74,7 +79,7 @@ core::Document pen_book() {
 
 // A page of one 8-bit paint layer "paint", opaque light grey but a clear corner; its pixels `side` across the page (400:
 // the working 200 dpi; 600: a layer of 300 dpi, as a picture opened on its own grid is).
-core::Document paint_book(int side = kSide) {
+core::Document paint_book(int side = kSide, bool gradient = false) {
     core::Document doc = pen_book();
     auto& p = doc.edit_page(0);
     p.layers.clear();
@@ -86,7 +91,9 @@ core::Document paint_book(int side = kSide) {
     std::string bytes;
     for (int y = 0; y < side; ++y) {
         for (int x = 0; x < side; ++x) {
-            for (int c = 0; c < 3; ++c) bytes.push_back(static_cast<char>(200));
+            // (gradient: red across, green down, half blue — a colour of its own at each place)
+            const int rgb[3] = {gradient ? x * 255 / side : 200, gradient ? y * 255 / side : 200, gradient ? 128 : 200};
+            for (const int c : rgb) bytes.push_back(static_cast<char>(c));
             bytes.push_back(static_cast<char>(x < 20 && y < 20 ? 0 : 255));
         }
     }
@@ -159,6 +166,17 @@ void save_next(const core::Document& doc, const fs::path& dir, const Json& ops) 
 std::string grey_png(int w, int h, int value) {
     return render::write_png(render::Image::frombytes("L", Size{w, h}, std::string(std::size_t(w) * h, static_cast<char>(value))));
 }
+
+// What mixed_pieces gave for mixingReadsUnderTheLineOnly's line before it read the layer's colours at the line's points
+// only (the whole layer copied in float then): the same pieces now.
+constexpr const char* kMixedPieces = R"json({
+    "8": [{"rgb":[10,28,226],"color_rgb":null},{"rgb":[25,65,190],"color_rgb":null},{"rgb":[36,85,172],"color_rgb":null},{"rgb":[46,96,163],"color_rgb":null},{"rgb":[54,102,158],"color_rgb":null},{"rgb":[62,107,156],"color_rgb":null},{"rgb":[70,110,155],"color_rgb":null},{"rgb":[78,113,154],"color_rgb":null},{"rgb":[86,115,154],"color_rgb":null},{"rgb":[93,117,154],"color_rgb":null},{"rgb":[101,116,153],"color_rgb":null},{"rgb":[108,114,153],"color_rgb":null},{"rgb":[115,112,153],"color_rgb":null},{"rgb":[122,109,153],"color_rgb":null},{"rgb":[130,106,153],"color_rgb":null},{"rgb":[137,102,153],"color_rgb":null},{"rgb":[144,99,153],"color_rgb":null},{"rgb":[151,96,153],"color_rgb":null},{"rgb":[157,93,153],"color_rgb":null}],
+    "16": [{"rgb":[10,28,226],"color_rgb":{"precision":"u16","values":[0.03897779128130745,0.11097984313964844,0.8881285424325981]}},{"rgb":[25,65,190],"color_rgb":{"precision":"u16","values":[0.0982816359576057,0.2548651003370098,0.7464002422257966]}},{"rgb":[36,85,172],"color_rgb":{"precision":"u16","values":[0.14275657803404565,0.33149797028186273,0.6747693230124081]}},{"rgb":[46,96,163],"color_rgb":{"precision":"u16","values":[0.18000304278205423,0.37479625028722424,0.6385645249310662]}},{"rgb":[54,102,158],"color_rgb":{"precision":"u16","values":[0.21354015574735755,0.4011123058842678,0.6202673220166973]}},{"rgb":[62,107,156],"color_rgb":{"precision":"u16","values":[0.24500549914790135,0.4184162513882506,0.6110196581073836]}},{"rgb":[70,110,155],"color_rgb":{"precision":"u16","values":[0.2754362517712163,0.4319705140356924,0.6063453823912377]}},{"rgb":[78,113,154],"color_rgb":{"precision":"u16","values":[0.30571142458448225,0.4427326576382506,0.6039828431372549]}},{"rgb":[86,115,154],"color_rgb":{"precision":"u16","values":[0.33568184048521754,0.4524276135014553,0.6027888279335172]}},{"rgb":[93,117,154],"color_rgb":{"precision":"u16","values":[0.3653143789253983,0.45879594391467526,0.6021845200482536]}},{"rgb":[101,116,153],"color_rgb":{"precision":"u16","values":[0.39424495323031555,0.45627839331533393,0.6018790450750613]}},{"rgb":[108,114,153],"color_rgb":{"precision":"u16","values":[0.4231390261182598,0.4483905268650429,0.6017250809015012]}},{"rgb":[115,112,153],"color_rgb":{"precision":"u16","values":[0.45170880485983456,0.4380601770737592,0.6016475303500306]}},{"rgb":[122,109,153],"color_rgb":{"precision":"u16","values":[0.48011121562882964,0.42662966859106927,0.601608336205576]}},{"rgb":[130,106,153],"color_rgb":{"precision":"u16","values":[0.5084323060278799,0.41429260852290134,0.601588649375766]}},{"rgb":[137,102,153],"color_rgb":{"precision":"u16","values":[0.5367113300398284,0.4011687334846048,0.6015786563648897]}},{"rgb":[144,99,153],"color_rgb":{"precision":"u16","values":[0.5650495342179841,0.3879365509631587,0.6015736897786458]}},{"rgb":[151,96,153],"color_rgb":{"precision":"u16","values":[0.5932393990310968,0.3749129052255668,0.6015712364047181]}},{"rgb":[157,93,153],"color_rgb":{"precision":"u16","values":[0.6143403894761029,0.36499882118374694,0.6015701593137255]}}],
+    "32": [{"rgb":[10,28,226],"color_rgb":{"precision":"f32","values":[0.03897779128130745,0.11097984313964844,0.8881285424325981]}},{"rgb":[25,65,190],"color_rgb":{"precision":"f32","values":[0.0982816359576057,0.2548651003370098,0.7464002422257966]}},{"rgb":[36,85,172],"color_rgb":{"precision":"f32","values":[0.14275657803404565,0.33149797028186273,0.6747693230124081]}},{"rgb":[46,96,163],"color_rgb":{"precision":"f32","values":[0.18000304278205423,0.37479625028722424,0.6385645249310662]}},{"rgb":[54,102,158],"color_rgb":{"precision":"f32","values":[0.21354015574735755,0.4011123058842678,0.6202673220166973]}},{"rgb":[62,107,156],"color_rgb":{"precision":"f32","values":[0.24500549914790135,0.4184162513882506,0.6110196581073836]}},{"rgb":[70,110,155],"color_rgb":{"precision":"f32","values":[0.2754362517712163,0.4319705140356924,0.6063453823912377]}},{"rgb":[78,113,154],"color_rgb":{"precision":"f32","values":[0.30571142458448225,0.4427326576382506,0.6039828431372549]}},{"rgb":[86,115,154],"color_rgb":{"precision":"f32","values":[0.33568184048521754,0.4524276135014553,0.6027888279335172]}},{"rgb":[93,117,154],"color_rgb":{"precision":"f32","values":[0.3653143789253983,0.45879594391467526,0.6021845200482536]}},{"rgb":[101,116,153],"color_rgb":{"precision":"f32","values":[0.39424495323031555,0.45627839331533393,0.6018790450750613]}},{"rgb":[108,114,153],"color_rgb":{"precision":"f32","values":[0.4231390261182598,0.4483905268650429,0.6017250809015012]}},{"rgb":[115,112,153],"color_rgb":{"precision":"f32","values":[0.45170880485983456,0.4380601770737592,0.6016475303500306]}},{"rgb":[122,109,153],"color_rgb":{"precision":"f32","values":[0.48011121562882964,0.42662966859106927,0.601608336205576]}},{"rgb":[130,106,153],"color_rgb":{"precision":"f32","values":[0.5084323060278799,0.41429260852290134,0.601588649375766]}},{"rgb":[137,102,153],"color_rgb":{"precision":"f32","values":[0.5367113300398284,0.4011687334846048,0.6015786563648897]}},{"rgb":[144,99,153],"color_rgb":{"precision":"f32","values":[0.5650495342179841,0.3879365509631587,0.6015736897786458]}},{"rgb":[151,96,153],"color_rgb":{"precision":"f32","values":[0.5932393990310968,0.3749129052255668,0.6015712364047181]}},{"rgb":[157,93,153],"color_rgb":{"precision":"f32","values":[0.6143403894761029,0.36499882118374694,0.6015701593137255]}}],
+    "cmyk": [{"rgb":[10,28,227],"color_rgb":null},{"rgb":[25,65,191],"color_rgb":null},{"rgb":[37,85,172],"color_rgb":null},{"rgb":[46,96,163],"color_rgb":null},{"rgb":[55,102,158],"color_rgb":null},{"rgb":[63,107,156],"color_rgb":null},{"rgb":[71,110,155],"color_rgb":null},{"rgb":[78,113,154],"color_rgb":null},{"rgb":[86,115,154],"color_rgb":null},{"rgb":[93,117,154],"color_rgb":null},{"rgb":[101,116,154],"color_rgb":null},{"rgb":[108,114,154],"color_rgb":null},{"rgb":[115,112,153],"color_rgb":null},{"rgb":[123,109,154],"color_rgb":null},{"rgb":[130,106,154],"color_rgb":null},{"rgb":[137,103,154],"color_rgb":null},{"rgb":[144,99,154],"color_rgb":null},{"rgb":[151,96,154],"color_rgb":null},{"rgb":[157,93,154],"color_rgb":null}],
+    "lab": [{"rgb":[10,28,226],"color_rgb":null},{"rgb":[25,65,190],"color_rgb":null},{"rgb":[36,85,172],"color_rgb":null},{"rgb":[46,96,163],"color_rgb":null},{"rgb":[55,102,158],"color_rgb":null},{"rgb":[63,107,156],"color_rgb":null},{"rgb":[70,110,155],"color_rgb":null},{"rgb":[78,113,154],"color_rgb":null},{"rgb":[86,115,154],"color_rgb":null},{"rgb":[93,117,154],"color_rgb":null},{"rgb":[101,116,153],"color_rgb":null},{"rgb":[108,114,153],"color_rgb":null},{"rgb":[115,112,153],"color_rgb":null},{"rgb":[122,109,153],"color_rgb":null},{"rgb":[130,106,153],"color_rgb":null},{"rgb":[137,102,153],"color_rgb":null},{"rgb":[144,99,153],"color_rgb":null},{"rgb":[151,96,153],"color_rgb":null},{"rgb":[157,93,153],"color_rgb":null}],
+    "gray": [{"rgb":[26,26,223],"color_rgb":null},{"rgb":[59,59,184],"color_rgb":null},{"rgb":[77,77,165],"color_rgb":null},{"rgb":[87,87,157],"color_rgb":null},{"rgb":[94,94,154],"color_rgb":null},{"rgb":[99,99,154],"color_rgb":null},{"rgb":[102,102,156],"color_rgb":null},{"rgb":[106,106,158],"color_rgb":null},{"rgb":[109,109,161],"color_rgb":null},{"rgb":[111,111,163],"color_rgb":null},{"rgb":[112,112,164],"color_rgb":null},{"rgb":[112,112,163],"color_rgb":null},{"rgb":[112,112,163],"color_rgb":null},{"rgb":[112,112,163],"color_rgb":null},{"rgb":[112,112,163],"color_rgb":null},{"rgb":[111,111,162],"color_rgb":null},{"rgb":[111,111,162],"color_rgb":null},{"rgb":[112,112,163],"color_rgb":null},{"rgb":[112,112,163],"color_rgb":null}]
+})json";
 
 }  // namespace
 
@@ -420,9 +438,20 @@ private slots:
         core::Document doc = paint_book();
         Json op{{"op", "erase"}, {"page", 1}, {"layer_id", "paint"}, {"width_mm", 4.0}, {"points", Json::parse("[[10, 25], [40, 25]]")}, {"brush", "gpen"}};
         QVERIFY(refusal(doc, Json::array({op})).find("brush must be a dab brush") != std::string::npos);
+        // opacity and flow without a brush or block: not used, said (the op goes through as the eraser of before)
         op.erase("brush");
         op["opacity"] = 0.5;
-        QVERIFY(refusal(doc, Json::array({op})).find("opacity is the eraser's brush's") != std::string::npos);
+        op["flow"] = 0.3;
+        const auto plain = run_ops(doc, Json::array({op}));
+        QVERIFY2(plain.warnings.dump().find("opacity is the eraser's brush's") != std::string::npos, plain.warnings.dump().c_str());
+        QVERIFY(plain.warnings.dump().find("flow is the eraser's brush's") != std::string::npos);
+        Json before_e1 = op;
+        before_e1.erase("opacity");
+        before_e1.erase("flow");
+        const Pixels used = whole(*std::make_unique<core::Document>(plain.doc));
+        const Pixels as_before = whole(*std::make_unique<core::Document>(run(doc, before_e1)));
+        QCOMPARE(used.width(), as_before.width());
+        QVERIFY(std::equal(used.at(0), used.at(0) + std::size_t(used.width()) * used.height() * used.all(), as_before.at(0)));
     }
 
     // set_brush: the kind add_stroke draws with when it names none, the 背景色, reset back to the G pen.
@@ -440,6 +469,13 @@ private slots:
         QCOMPARE(reset.brush_width_mm, core::Document{}.brush_width_mm);
         QCOMPARE(ink(run(reset, op)).strokes->items.back()->kind, std::string("gpen"));
         QVERIFY(run_ops(doc, Json::array({Json{{"op", "set_brush"}, {"reset", true}}})).warnings.dump().find("unknown") == std::string::npos);
+        // the state's brush deleted: the kind goes with it, a line without a kind is the G pen's (review P3-9)
+        const core::Document deleted = run(doc, Json{{"op", "define_brush"}, {"key", "my_dab"}, {"delete", true}});
+        QVERIFY(!deleted.brush_kind);
+        QCOMPARE(ink(run(deleted, op)).strokes->items.back()->kind, std::string("gpen"));
+        core::Document stale = doc;  // (a book whose state names a brush it no longer has)
+        stale.brush_custom.erase("my_dab");
+        QCOMPARE(ink(run(stale, op)).strokes->items.back()->kind, std::string("gpen"));
     }
 
     // 下地混色 (design 0.4, the leftover of PC2) on the paint layer of each kind: the grey under the blue line picked up
@@ -499,6 +535,166 @@ private slots:
         }
     }
 
+    // A line's flow, 背景色 and pen inputs go with it when an op makes it again (review P2-1): moved and transformed
+    // (point for point: drawn the same, moved), warped and liquified (denser: the inputs where its points are), copied
+    // (the dict form) and pasted, cut by the eraser (each piece), cut to its crossing, simplified.
+    void aLinesFlowAndInputsGoWithIt() {
+        core::Document doc = run(pen_book(), define_dab("my_flow", Json::parse(R"({"spacing": 0.2, "shape": {"enabled": true, "angle": {"control": "tilt"}}})")));
+        Json op = stroke("my_flow");
+        op["flow"] = 0.3;
+        op["background_rgb"] = Json::array({10, 20, 30});
+        op["tilt"] = Json::parse("[[10, 20], [30, 40], [50, 60]]");
+        op["time_ms"] = Json::parse("[0, 100, 200]");
+        op["wheel"] = Json::parse("[0.2, 0.5, 0.9]");
+        doc = run(doc, op);
+        const core::Stroke line = *ink(doc).strokes->items.back();
+        QCOMPARE(line.flow, std::optional<double>(0.3));
+        const auto whole_kept = [&](const core::Stroke& s, const char* how) {
+            QVERIFY2(s.flow == std::optional<double>(0.3), how);
+            QVERIFY2(s.background_rgb == line.background_rgb, how);
+            QVERIFY2(core::inputs_fit(s.tilt, s.points.size(), 2), how);
+            QVERIFY2(core::inputs_fit(s.time_ms, s.points.size(), 1), how);
+            QVERIFY2(core::inputs_fit(s.wheel, s.points.size(), 1), how);
+        };
+        // moved: point for point, the same inputs; drawn as the line was, 8 pixels (1.016 mm) to the right
+        const core::Stroke moved = render::selection::transform_stroke(line, render::selection::Matrix{1.0, 0.0, 0.0, 1.0, 1.016, 0.0});
+        whole_kept(moved, "moved");
+        QCOMPARE(moved.tilt, line.tilt);
+        QCOMPARE(moved.time_ms, line.time_ms);
+        QCOMPARE(moved.wheel, line.wheel);
+        brushes::register_book(doc);
+        const auto cover_of = [&](const core::Stroke& s) {
+            const auto in = brushes::line_inputs(s, {20, 20, 20});
+            return brushes::draw(Size{kSide, kSide}, core::stroke_points(s), 200, s.width_mm, s.kind, line.id, s.rotation, s.pressure_opacity, &in);
+        };
+        const auto a = cover_of(line), b = cover_of(moved);
+        QVERIFY(a && b);
+        long sum_a = 0, sum_b = 0;
+        for (const char c : a->mask.tobytes()) sum_a += static_cast<unsigned char>(c);
+        for (const char c : b->mask.tobytes()) sum_b += static_cast<unsigned char>(c);
+        QVERIFY2(std::abs(sum_a - sum_b) * 200 < sum_a, qPrintable(QString::number(sum_a) + " " + QString::number(sum_b)));
+        QCOMPARE(b->origin.x - a->origin.x, 8);
+        // its flow is what it is drawn with: without it the line is darker
+        core::Stroke full = moved;
+        full.flow.reset();
+        long sum_full = 0;
+        for (const char c : cover_of(full)->mask.tobytes()) sum_full += static_cast<unsigned char>(c);
+        QVERIFY(sum_full > sum_b);
+        // warped (denser): the inputs at its points along the line, the first and the last as they were
+        const core::Stroke warped = render::warp::warp_stroke(line, [](double x, double y) { return std::pair<double, double>{x, y}; });
+        whole_kept(warped, "warped");
+        QVERIFY(warped.points.size() > line.points.size());
+        QCOMPARE(warped.tilt.front(), line.tilt.front());
+        QCOMPARE(warped.tilt.back(), line.tilt.back());
+        QCOMPARE(warped.wheel.back(), line.wheel.back());
+        // copied and pasted (the dict form)
+        const core::Stroke copied = core::coerce_stroke(core::stroke_to_dict(line));
+        whole_kept(copied, "copied");
+        QCOMPARE(copied.tilt, line.tilt);
+        // cut by the eraser: each piece
+        const core::Document cut = run(doc, Json{{"op", "erase"}, {"page", 1}, {"layer", "ink"}, {"width_mm", 1.0}, {"points", Json::parse("[[25, 20], [25, 40]]")}});
+        QVERIFY(ink(cut).stroke_count() >= 2);
+        for (const core::StrokePtr& piece : ink(cut).strokes->items) whole_kept(*piece, "cut");
+        // cut to its crossing: a line across it, erased between
+        Json across = stroke("gpen");
+        across["points"] = Json::parse("[[20, 10], [20, 45]]");
+        const core::Document crossed = run(run(doc, across), Json{{"op", "erase"}, {"page", 1}, {"layer", "ink"}, {"width_mm", 1.0}, {"mode", "to_crossing"},
+                                                                  {"points", Json::parse("[[12, 26], [13, 26]]")}});
+        bool found = false;
+        for (const core::StrokePtr& piece : ink(crossed).strokes->items) {
+            if (piece->kind != "my_flow") continue;
+            whole_kept(*piece, "to_crossing");
+            found = true;
+        }
+        QVERIFY(found);
+        // simplified: still its brush's line, with what it was drawn with
+        const core::Document simple = run(doc, Json{{"op", "simplify_stroke"}, {"page", 1}, {"layer", "ink"}, {"index", 0}, {"epsilon_mm", 0.1}});
+        const core::Stroke& s = *ink(simple).strokes->items[0];
+        QCOMPARE(s.kind, std::string("my_flow"));
+        whole_kept(s, "simplified");
+    }
+
+    // The work of a line (review P2-2): the widest brush at a fine spacing gone back and forth over the page 1,000 times
+    // — 10,000 dabs each covering the page — is refused at once, by the op and when it is drawn; a live line's dabs are
+    // not remembered, a committed line's are (up to kDabsKept dabs).
+    void aLineOfTooMuchWorkIsRefusedAtOnce() {
+        core::Document doc = run(pen_book(), define_dab("my_big", Json::parse(R"({"spacing": 0.01})")));
+        Json op = stroke("my_big");
+        op["width_mm"] = 500.0;
+        Json zigzag = Json::array();
+        for (int i = 0; i < 1000; ++i) zigzag.push_back(Json::array({i % 2 == 0 ? 2 : 48, 2 + (i % 46)}));
+        op["points"] = zigzag;
+        QElapsedTimer clock;
+        clock.start();
+        const std::string why = refusal(doc, Json::array({op}));
+        QVERIFY2(why.find("too much to lay") != std::string::npos, why.c_str());
+        QVERIFY2(clock.elapsed() < 5000, qPrintable(QString::number(clock.elapsed())));
+        // drawn (a book read with such a line): refused there too, at once
+        core::Stroke line;
+        line.id = "big";
+        line.kind = "my_big";
+        line.width_mm = 500.0;
+        for (const Json& p : zigzag) line.points.push_back(core::PointF{p[0].get<double>(), p[1].get<double>()});
+        brushes::register_book(doc);
+        clock.restart();
+        bool refused = false;
+        try {
+            (void)brushes::draw(Size{kSide, kSide}, core::stroke_points(line), 200, 500.0, "my_big", line.id, {}, 0.0, nullptr);
+        } catch (const core::Error& error) {
+            refused = error.code() == "too_large";
+        }
+        QVERIFY(refused);
+        QVERIFY(clock.elapsed() < 5000);
+        // remembered: a committed line's dabs, not a live one's
+        doc = run(doc, define_dab());
+        brushes::register_book(doc);
+        const core::PenPoints pts{{5, 5, std::nullopt}, {40, 40, std::nullopt}};
+        render::dabs::LineInputs live;
+        live.remember = false;
+        const std::size_t before = render::dabs::remembered_dabs();
+        (void)brushes::draw(Size{kSide, kSide}, pts, 200, 3.0, "my_dab", "live-line", {}, 0.0, &live);
+        QCOMPARE(render::dabs::remembered_dabs(), before);
+        const render::dabs::LineInputs kept;
+        (void)brushes::draw(Size{kSide, kSide}, pts, 200, 3.0, "my_dab", "kept-line", {}, 0.0, &kept);
+        QVERIFY(render::dabs::remembered_dabs() > before);
+        QVERIFY(render::dabs::remembered_dabs() <= render::dabs::kDabsKept);
+    }
+
+    // 下地混色 reads the colours under the line's points only (review P2-3: the layer is not copied whole in float): the
+    // pieces of a line over a gradient are the colours they were when the whole layer was read (kMixedPieces: what
+    // mixed_pieces gave before the change, on each kind of page), and an ink layer larger than a small imaging budget
+    // still mixes (only its few pixels are held).
+    void mixingReadsUnderTheLineOnly() {
+        Json got = Json::object();
+        for (const std::string& kind : kinds()) {
+            const core::Document doc = as_kind(paint_book(kSide, true), kind);
+            core::Stroke line;
+            line.id = "line";
+            line.points = {core::PointF{8, 25}, core::PointF{25, 30}, core::PointF{42, 22}};
+            line.width_mm = 3.0;
+            line.rgb = std::vector<std::int64_t>{0, 0, 255};
+            if (kind == "16" || kind == "32") {
+                line.color_rgb = Json{{"precision", kind == "16" ? "u16" : "f32"}, {"values", Json::array({0.0, 0.0, 1.0})}};
+            }
+            Json pieces = Json::array();
+            for (const core::Stroke& piece : render::raster::mixed_pieces(doc.page(0), doc.page(0).layers[0], line, 0.8, 0.5)) {
+                pieces.push_back(Json{{"rgb", *piece.rgb}, {"color_rgb", piece.color_rgb ? *piece.color_rgb : Json(nullptr)}});
+            }
+            got[kind] = pieces;
+        }
+        if (qEnvironmentVariableIsSet("GENKO_DAB_GOLDEN_DUMP")) qWarning("GOLDEN %s", got.dump().c_str());
+        QCOMPARE(got.dump(), Json::parse(kMixedPieces).dump());
+        // an ink layer of 16 bits, 600 pixels a side (its pixels in float: 7 MB), mixed in a budget of 2 MB
+        const core::Document big = as_kind(paint_book(600, true), "cmyk");
+        core::Stroke line;
+        line.id = "line";
+        line.points = {core::PointF{8, 25}, core::PointF{42, 22}};
+        line.width_mm = 3.0;
+        line.rgb = std::vector<std::int64_t>{0, 0, 255};
+        const render::ImageAllocationBudget budget(2 * 1024 * 1024);
+        QVERIFY(render::raster::mixed_pieces(big.page(0), big.page(0).layers[0], line, 0.8, 0.5).size() > 1);
+    }
+
     // brush.get (`genko brushes get <key> [--book <dir>]`): a dab brush of the book with every setting (the defaults too,
     // a round tip as "round"); a built-in brush without dabs; a brush that is not there refused.
     void brushGetSaysEverySetting() {
@@ -533,6 +729,42 @@ private slots:
         QCOMPARE(genko::test::one_line(ran.out)["code"], Json("key"));
     }
 
+    // A line's 背景色 (review P3-14): a line that has only it is brushes@1; written in the packed and the dict form and read
+    // back; broken (a value past 255, two of them, a fraction) the line is not read (core::Error("format"): the reader
+    // opens the book read-only).
+    void aLinesBackgroundIsKeptAndChecked() {
+        core::Document doc = run(pen_book(), stroke("gpen"));
+        QVERIFY(!core::uses_brushes(doc));
+        core::Stroke line = *ink(doc).strokes->items.back();
+        line.background_rgb = std::vector<std::int64_t>{4, 5, 6};
+        {
+            core::Layer& layer = doc.edit_page(0).layers[static_cast<std::size_t>(&ink(doc) - doc.page(0).layers.data())];
+            layer.strokes = core::make_strokes({std::make_shared<const core::Stroke>(line)});
+        }
+        QVERIFY(core::uses_brushes(doc));
+        // (add_stroke keeps it only for a dab brush's line: a G pen's is not drawn with it — said, not kept)
+        Json plain = stroke("gpen");
+        plain["background_rgb"] = Json::array({4, 5, 6});
+        plain["flow"] = 0.5;
+        const auto unused = run_ops(pen_book(), Json::array({plain}));
+        QVERIFY(!ink(unused.doc).strokes->items.back()->background_rgb && !ink(unused.doc).strokes->items.back()->flow);
+        QVERIFY2(unused.warnings.dump().find("a dab brush's line's") != std::string::npos, unused.warnings.dump().c_str());
+        QVERIFY(!core::uses_brushes(unused.doc));
+        QCOMPARE(core::coerce_stroke(core::stroke_to_packed(line)).background_rgb, line.background_rgb);
+        QCOMPARE(core::coerce_stroke(core::stroke_to_dict(line)).background_rgb, line.background_rgb);
+        for (const Json& broken : {Json::array({0, 256, 0}), Json::array({1, 2}), Json::array({1.5, 2, 3}), Json::array({-1, 2, 3})}) {
+            Json packed = core::stroke_to_packed(line);
+            packed["background_rgb"] = broken;
+            bool refused = false;
+            try {
+                (void)core::coerce_stroke(packed);
+            } catch (const core::Error& error) {
+                refused = error.code() == "format";
+            }
+            QVERIFY2(refused, broken.dump().c_str());
+        }
+    }
+
     // Saved, opened (brushes@1, the pictures), drawn the same; Undo gives back the book without the line (and without
     // the feature once the brush goes too); Redo the same pixels again.
     void savedOpenedUndoneRedone() {
@@ -543,15 +775,34 @@ private slots:
         Json dabs = Json::parse(R"({"hardness": 0.3, "texture": {"enabled": true, "depth": 0.5}})");
         dabs["texture"]["pattern"] = Json{{"png", core::b64encode(grey_png(16, 16, 128))}};
         const auto defined = run_ops(doc, Json::array({define_dab("my_saved", dabs)}));
+        // (the journal keeps the op with its picture told, not held: the book keeps it as an asset — review P3-1)
+        QVERIFY2(defined.journal_ops[0]["dabs"]["texture"]["pattern"]["png"].get<std::string>().starts_with("<"), defined.journal_ops.dump().substr(0, 300).c_str());
         save_next(defined.doc, dir, defined.journal_ops);
-        const auto drawn = run_ops(defined.doc, Json::array({stroke("my_saved")}));
+        // (a line with every input: tilt, time, wheel, flow and 背景色 — review P3-14)
+        Json line = stroke("my_saved");
+        line["tilt"] = Json::parse("[[10, 20], [-30, 40], [50, -60]]");
+        line["time_ms"] = Json::parse("[0, 120.5, 300]");
+        line["wheel"] = Json::parse("[0.25, 0.5, 1]");
+        line["flow"] = 0.4;
+        line["background_rgb"] = Json::array({1, 2, 250});
+        const auto drawn = run_ops(defined.doc, Json::array({line}));
         save_next(drawn.doc, dir, drawn.journal_ops);
         const render::Image here = ink_picture(drawn.doc);
+        const core::Stroke was = *ink(drawn.doc).strokes->items.back();
+        const auto same_line = [&](const core::Document& d) {
+            const core::Stroke& now = *ink(d).strokes->items.back();
+            QCOMPARE(now.tilt, was.tilt);
+            QCOMPARE(now.time_ms, was.time_ms);
+            QCOMPARE(now.wheel, was.wheel);
+            QCOMPARE(now.flow, was.flow);
+            QCOMPARE(now.background_rgb, was.background_rgb);
+        };
         brushes::clear_custom();
         render::dabs::clear_pictures();
         const auto loaded = storage::load_document(dir);
         QVERIFY2(loaded.document.read_only_reason.empty(), loaded.document.read_only_reason.c_str());
         QVERIFY(std::find(loaded.document.features.begin(), loaded.document.features.end(), "brushes@1") != loaded.document.features.end());
+        same_line(loaded.document);
         QCOMPARE(ink_picture(loaded.document).tobytes(), here.tobytes());
         storage::restore(dir, "human:test", false, false);  // undo the line
         brushes::clear_custom();
@@ -559,7 +810,9 @@ private slots:
         storage::restore(dir, "human:test", true, false);  // redo
         brushes::clear_custom();
         render::dabs::clear_pictures();
-        QCOMPARE(ink_picture(storage::load_document(dir).document).tobytes(), here.tobytes());
+        const auto redone = storage::load_document(dir);
+        same_line(redone.document);
+        QCOMPARE(ink_picture(redone.document).tobytes(), here.tobytes());
         storage::restore(dir, "human:test", false, false);
         storage::restore(dir, "human:test", false, false);  // the brush undone too: no feature
         const auto bare = storage::load_document(dir);

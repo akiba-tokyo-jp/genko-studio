@@ -212,6 +212,40 @@ bool in_a_panel(const Page& page, const std::vector<PointF>& points_in, double p
     return false;
 }
 
+// brushes@1 (PC4 E1): a line of this build's own brushes (a dab brush's, or one with the pen's inputs, a flow or a 背景色):
+// edit_stroke and simplify_stroke keep what it was drawn with, as they keep a precise line's (Python's lines are made
+// plain again, as there).
+bool own_line(const Stroke& line, const Document& doc) {
+    return has_stroke_inputs(line) || brush_for(Json(line.kind), doc).dabs.has_value();
+}
+
+// Each point of `to` placed along `from` (its length along it): on the nearest of `from`'s segments, looked for onward
+// from the last one — a simplified line's points are the line's own, in order (found at once).
+std::vector<double> places_on(const Stroke& from, const Stroke& to) {
+    const std::vector<double> along = lengths_along(from.points);
+    std::vector<double> out;
+    out.reserve(to.points.size());
+    std::size_t k = 0;
+    for (const PointF& q : to.points) {
+        double best = -1.0, at = along.empty() ? 0.0 : along[k];
+        for (std::size_t i = k; i + 1 < from.points.size(); ++i) {
+            const PointF& a = from.points[i];
+            const PointF& b = from.points[i + 1];
+            const double dx = b.x - a.x, dy = b.y - a.y, seg = dx * dx + dy * dy;
+            const double t = seg == 0 ? 0.0 : std::clamp(((q.x - a.x) * dx + (q.y - a.y) * dy) / seg, 0.0, 1.0);
+            const double d = std::hypot(q.x - (a.x + t * dx), q.y - (a.y + t * dy));
+            if (best < 0 || d < best) {
+                best = d;
+                at = along[i] + (along[i + 1] - along[i]) * t;
+                k = i;
+            }
+            if (d == 0.0) break;
+        }
+        out.push_back(at);
+    }
+    return out;
+}
+
 // brushes@1 (PC4 E1): one of a line's inputs as add_stroke is given it — one for each point given (`per`: tilt is [x°, y°]),
 // finite, within lo..hi — or none when the key is not given.
 std::vector<double> line_input(const Json& op, const char* key, std::size_t points, std::size_t per, double lo, double hi, const char* says) {
@@ -272,7 +306,16 @@ void add_stroke_mixing(OpContext& c, const StrokeHooks& hooks) {
     if (py_truthy(stabilize)) points = stabilize_points(points, to_int(stabilize), truthy_at(op, "stabilize_speed"));
     // (the brush's own after-smoothing: its kind is checked here, even when post_smooth is given)
     // (brushes@1: the brush state's kind when the op names none, else the G pen)
-    const Json kind_value = truthy_at(op, "kind") ? op["kind"] : Json(doc.brush_kind ? *doc.brush_kind : std::string("gpen"));
+    // (a kind the book no longer has — a book of another build — is the G pen, as with none)
+    const auto state_kind = [&doc]() -> std::string {
+        if (!doc.brush_kind) return "gpen";
+        try {
+            return brush_kind(Json(*doc.brush_kind), doc);
+        } catch (const OpError&) {
+            return "gpen";
+        }
+    };
+    const Json kind_value = truthy_at(op, "kind") ? op["kind"] : Json(state_kind());
     const std::string kind = brush_kind(kind_value, doc);
     const Json post_smooth = op.contains("post_smooth") ? op["post_smooth"] : Json(brush_for(Json(kind), doc).post_smooth);
     if (py_truthy(post_smooth)) points = smoothed(points, to_int(post_smooth));
@@ -388,6 +431,15 @@ void add_stroke_mixing(OpContext& c, const StrokeHooks& hooks) {
                (brush.dabs->color.fg_bg.jitter > 0.0 || brush.dabs->color.fg_bg.control != DabControl::Off) && doc.brush_background_rgb) {
         stroke.background_rgb = *doc.brush_background_rgb;  // (the book's 背景色, kept with the line)
     }
+    if (!brush.dabs && has_stroke_inputs(stroke)) {
+        // (review P3-8: only a dab brush's line is drawn with them — another's keeps its bytes as before, the op says so)
+        stroke.tilt.clear();
+        stroke.time_ms.clear();
+        stroke.wheel.clear();
+        stroke.flow.reset();
+        stroke.background_rgb.reset();
+        c.notes.push_back("tilt, time_ms, wheel, flow and background_rgb are a dab brush's line's (a brush of engine dabs): not used for " + stroke.kind);
+    }
     if (brush.dabs && brush.dabs->erase) {
         throw OpError("this brush erases (its dabs' erase): erase with it by erase's brush, not add_stroke");
     }
@@ -493,7 +545,14 @@ void edit_stroke(OpContext& c) {
     std::vector<StrokePtr> items = layer.strokes->items;
     Stroke edited=coerce_stroke(points);
     const auto& old=*items[static_cast<std::size_t>(index)];
-    if(old.color_rgb) {edited.id=old.id;edited.color_rgb=old.color_rgb;edited.rgb=old.rgb;edited.width_mm=old.width_mm;edited.kind=old.kind;edited.opacity=old.opacity;edited.pressure_opacity=old.pressure_opacity;}
+    if(old.color_rgb || own_line(old, doc)) {edited.id=old.id;edited.color_rgb=old.color_rgb;edited.rgb=old.rgb;edited.width_mm=old.width_mm;edited.kind=old.kind;edited.opacity=old.opacity;edited.pressure_opacity=old.pressure_opacity;}
+    if (own_line(old, doc)) {  // (brushes@1, PC4 E1: the pen's inputs spread over the new points along the old line)
+        const std::vector<double> along = lengths_along(old.points);
+        std::vector<double> places;
+        const std::size_t m = edited.points.size();
+        for (std::size_t i = 0; i < m; ++i) places.push_back(m < 2 || along.empty() ? 0.0 : along.back() * static_cast<double>(i) / static_cast<double>(m - 1));
+        carry_inputs(old, edited, &places);
+    }
     items[static_cast<std::size_t>(index)] = std::make_shared<const Stroke>(std::move(edited));
     layer.strokes = make_strokes(std::move(items));
 }
@@ -511,7 +570,11 @@ void simplify_stroke(OpContext& c) {
     std::vector<StrokePtr> items = layer.strokes->items;
     Stroke edited=coerce_stroke(simplified);
     const auto& old=*items[static_cast<std::size_t>(index)];
-    if(old.color_rgb) {edited.id=old.id;edited.color_rgb=old.color_rgb;edited.rgb=old.rgb;edited.width_mm=old.width_mm;edited.kind=old.kind;edited.opacity=old.opacity;edited.pressure_opacity=old.pressure_opacity;}
+    if(old.color_rgb || own_line(old, doc)) {edited.id=old.id;edited.color_rgb=old.color_rgb;edited.rgb=old.rgb;edited.width_mm=old.width_mm;edited.kind=old.kind;edited.opacity=old.opacity;edited.pressure_opacity=old.pressure_opacity;}
+    if (own_line(old, doc)) {  // (brushes@1, PC4 E1: the kept points' inputs, where they were)
+        const std::vector<double> places = places_on(old, edited);
+        carry_inputs(old, edited, &places);
+    }
     items[static_cast<std::size_t>(index)] = std::make_shared<const Stroke>(std::move(edited));
     layer.strokes = make_strokes(std::move(items));
 }
@@ -581,20 +644,21 @@ void erase(OpContext& c) {
     if (target.stroke_count() > 0) {
         std::vector<StrokePtr> kept;
         for (const StrokePtr& stroke : target.strokes->items) {
-            const auto pieces = split_by_eraser(stroke_points(*stroke), points, width / 2);
+            std::vector<std::vector<double>> places;
+            const auto pieces = split_by_eraser(stroke_points(*stroke), points, width / 2, places);
             if (pieces.size() == 1 && pieces[0].size() >= stroke->points.size() && untouched(*stroke, points, width / 2)) {
                 kept.push_back(stroke);
                 continue;
             }
-            for (const PenPoints& piece : pieces) {
-                Stroke part = coerce_stroke(piece);
+            for (std::size_t k = 0; k < pieces.size(); ++k) {
+                Stroke part = coerce_stroke(pieces[k]);
                 part.width_mm = stroke->width_mm;
                 part.kind = stroke->kind;
                 part.rgb = stroke->rgb;
                 part.color_rgb = stroke->color_rgb;
                 part.opacity = stroke->opacity;
-                part.flow = stroke->flow;  // (brushes@1, PC4 E1: what is the whole line's goes with each piece)
-                part.background_rgb = stroke->background_rgb;
+                // (brushes@1, PC4 E1: the whole line's flow and 背景色 with each piece, the pen's inputs where it was)
+                carry_inputs(*stroke, part, &places[k]);
                 kept.push_back(std::make_shared<const Stroke>(std::move(part)));
             }
         }
@@ -721,7 +785,11 @@ void register_define_brush(OpRegistry& registry, PaperTakeIn take_in, DabTakeIn 
     registry.add("define_brush",[take_in, dab_hooks](OpContext& c) {
         const std::string key=truthy_at(c.op,"key")?py_str(c.op["key"]):std::string();
         if(!key.starts_with("my_") || key.size()>40)throw OpError("a brush of one's own has a key starting with my_");
-        if(truthy_at(c.op,"delete")){c.doc.brush_custom.erase(key);return;}
+        if(truthy_at(c.op,"delete")){
+            c.doc.brush_custom.erase(key);
+            if (c.doc.brush_kind == key) c.doc.brush_kind.reset();  // (brushes@1, review P3-9: the brush state's kind goes with it)
+            return;
+        }
         Json data=c.op;for(const char* k:{"op","key","delete"})data.erase(k);
         // brushes@1 (PC4 E1): a dab brush's "engine" and "dabs" (and upstream's "format"), with its pictures; a brush made
         // on a dab brush of the book without them keeps its dabs

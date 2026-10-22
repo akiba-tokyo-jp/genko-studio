@@ -163,7 +163,7 @@ Image eraser_mask(Size size, const core::PenPoints& points, double width_mm, int
     return out;
 }
 
-std::optional<Eraser> eraser_of(const Json& op, const core::Document& doc) {
+std::optional<Eraser> eraser_of(const Json& op, const core::Document& doc, std::vector<std::string>& notes) {
     const Json* brush = core::get(op, "brush");
     const Json* block = core::get(op, "block");
     const bool has_brush = brush != nullptr && !brush->is_null();
@@ -171,7 +171,7 @@ std::optional<Eraser> eraser_of(const Json& op, const core::Document& doc) {
     if (!has_brush && !has_block) {
         for (const char* key : {"opacity", "flow"}) {
             if (const Json* v = core::get(op, key); v != nullptr && !v->is_null()) {
-                throw OpError(std::string(key) + " is the eraser's brush's: give brush (a dab brush of the book) or block");
+                notes.push_back(std::string(key) + " is the eraser's brush's (brush, a dab brush of the book, or block): not used");
             }
         }
         return std::nullopt;

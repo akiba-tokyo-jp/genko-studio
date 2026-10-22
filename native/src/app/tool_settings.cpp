@@ -243,8 +243,13 @@ ToolSettings::ToolSettings(QWidget* parent) : QWidget(parent) {
     fold_->setCheckable(true);
     fold_->setToolTip(QStringLiteral("ツールの設定をたたむ・開く"));
     connect(fold_, &QPushButton::toggled, this, [this](bool on) { set_folded(on); });
+    badge_ = new QLabel;
+    badge_->setObjectName(QStringLiteral("tool_badge"));
+    theme::hint(badge_);
+    badge_->setVisible(false);
     auto* head = new QHBoxLayout;
     head->addWidget(title_, 1);
+    head->addWidget(badge_);
     head->addWidget(fold_);
     stack_widget_ = new QWidget;  // (the pages, one shown at a time, as tall as the one shown)
     stack_ = new QVBoxLayout(stack_widget_);
@@ -284,6 +289,12 @@ void ToolSettings::set_folded(bool on) {
     while (dock != nullptr && !dock->inherits("QDockWidget")) dock = dock->parentWidget();
     const int title_height = title_->width() > 0 ? title_->heightForWidth(title_->width()) : -1;  // (its lines at its width)
     if (dock != nullptr) dock->setMaximumHeight(on ? (title_height > 0 ? title_height : title_->sizeHint().height()) + 18 : QWIDGETSIZE_MAX);
+}
+
+void ToolSettings::set_badge(const QString& text) {
+    badge_->setText(text);
+    badge_->setToolTip(text.isEmpty() ? QString() : QStringLiteral("ブラシ パネルの「モード」が通常ではありません。この描画モードで、ペイントのレイヤーの画素に描き込みます"));
+    badge_->setVisible(!text.isEmpty());
 }
 
 void ToolSettings::show_tool(const QString& tool) {

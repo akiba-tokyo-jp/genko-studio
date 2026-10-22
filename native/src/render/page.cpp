@@ -35,6 +35,7 @@
 #include "render/color_filters.hpp"
 #include "render/covers.hpp"
 #include "render/effects.hpp"
+#include "render/image_ops.hpp"
 #include "render/imaging.hpp"
 #include "render/ink.hpp"
 #include "render/ink_canvas.hpp"
@@ -1015,6 +1016,8 @@ bool lay_dab_line(ColorCanvas& own, const brushes::Coverage& drawn, const Box& b
                   double opacity, bool guide) {
     if (!drawn.dabs) return false;
     const auto w = static_cast<std::size_t>(box.width()), h = static_cast<std::size_t>(box.height());
+    const bool with_colours = !guide && drawn.dabs->coloured();
+    const image_ops::Held held(std::uint64_t(w) * h * (4 + (with_colours ? 12 : 0)));  // (in the imaging budget first)
     std::vector<float> cover;
     if (drawn.fine) {
         drawn.dabs->fill(box, cover);

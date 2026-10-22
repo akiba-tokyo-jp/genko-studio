@@ -10,6 +10,7 @@
 #include <QCryptographicHash>
 
 #include "core/base64.hpp"
+#include "core/brushes.hpp"
 #include "core/error.hpp"
 #include "render/dabs/procedural.hpp"
 #include "render/dabs/rng.hpp"
@@ -58,6 +59,7 @@ struct Remembered {
     std::mutex mutex;
     std::unordered_map<std::string, std::shared_ptr<const LineDabs>> lines;
     std::deque<std::string> order;
+    std::size_t dabs = 0;  // (all the lines' dabs and dual dabs)
     std::unordered_map<std::string, std::shared_ptr<const BrushContext>> contexts;
     std::deque<std::string> context_order;
 };
@@ -189,7 +191,7 @@ LineBrush line_brush(const core::DabSettings& settings, double width_mm, std::st
     return b;
 }
 
-std::shared_ptr<const LineDabs> line_dabs(const LineBrush& brush, const std::vector<InputPoint>& points) {
+std::shared_ptr<const LineDabs> line_dabs(const LineBrush& brush, const std::vector<InputPoint>& points, bool remember) {
     if (!(brush.size_mm <= 500.0)) throw core::Error("too_large", "a dab brush's line is at most 500 mm wide");
     const std::string key = line_key(brush, points);
     Remembered& r = remembered();
@@ -204,10 +206,33 @@ std::shared_ptr<const LineDabs> line_dabs(const LineBrush& brush, const std::vec
     if (made->dabs.size() > kMaxDabs || made->dual.size() > kMaxDabs) {
         throw core::Error("too_large", "the line has more than " + std::to_string(kMaxDabs) + " dabs (a longer line than the brush's spacing takes)");
     }
+    if (dab_work(made->dabs) + dab_work(made->dual) > kMaxDabWork) {
+        throw core::Error("too_large", "the line's dabs are too much to lay (their pixels past 2,000 million at 200 dpi: a wide brush at a fine spacing "
+                                       "along a long line)");
+    }
     std::shared_ptr<const LineDabs> out = made;
+    if (!remember) return out;
+    const std::size_t size = made->dabs.size() + made->dual.size();
+    if (size > kDabsKept) return out;
     std::lock_guard lock(r.mutex);
-    keep_recent(r.lines, r.order, key, out, kLinesKept);
+    if (r.lines.emplace(key, out).second) {
+        r.order.push_back(key);
+        r.dabs += size;
+    }
+    while (!r.order.empty() && (r.order.size() > kLinesKept || r.dabs > kDabsKept)) {
+        if (const auto it = r.lines.find(r.order.front()); it != r.lines.end()) {
+            r.dabs -= it->second->dabs.size() + it->second->dual.size();
+            r.lines.erase(it);
+        }
+        r.order.pop_front();
+    }
     return out;
+}
+
+std::size_t remembered_dabs() {
+    Remembered& r = remembered();
+    std::lock_guard lock(r.mutex);
+    return r.dabs;
 }
 
 std::shared_ptr<const BrushContext> context(const core::DabSettings& settings, int dpi) {
@@ -243,7 +268,7 @@ std::optional<Box> reach(const BrushContext& ctx, const LineDabs& dabs, Size siz
 std::shared_ptr<const LineCover> cover(const core::DabSettings& settings, double width_mm, std::string_view line_seed, const core::PenPoints& points,
                                        std::span<const double> rotation, const LineInputs& inputs, int dpi, Size size, std::optional<Box> within) {
     const LineBrush brush = line_brush(settings, width_mm, line_seed, inputs);
-    const auto set = line_dabs(brush, input_points(points, rotation, inputs));
+    const auto set = line_dabs(brush, input_points(points, rotation, inputs), inputs.remember);
     Box target{0, 0, size.width, size.height};
     if (within) target = Box{std::max(target.x0, within->x0), std::max(target.y0, within->y0), std::min(target.x1, within->x1), std::min(target.y1, within->y1)};
     if (target.x1 <= target.x0 || target.y1 <= target.y0) return nullptr;
@@ -289,8 +314,14 @@ core::Json dabs_from_photocraft(const core::Json& up, std::map<std::string, core
         if (!t.is_object() || !t.contains("width") || !t.contains("height") || !t.contains("data")) {
             throw core::Error("value", "photocraft " + at + " must be a tile {width, height, data}");
         }
-        const auto w = static_cast<std::uint32_t>(read_number(t["width"], at + ".width"));
-        const auto h = static_cast<std::uint32_t>(read_number(t["height"], at + ".height"));
+        // (whole numbers 1..2500 — a tip's largest side — checked before they become ones: review P3-10)
+        const auto side = [&](const char* key) {
+            const double v = read_number(t[key], at + "." + key);
+            if (!(v >= 1.0 && v <= 2500.0) || v != std::floor(v)) throw core::Error("value", "photocraft " + at + "." + key + " must be a whole number 1..2500");
+            return static_cast<std::uint32_t>(v);
+        };
+        const std::uint32_t w = side("width");
+        const std::uint32_t h = side("height");
         GrayTile g;
         if (t["data"].is_string()) {
             const std::string text = t["data"].get<std::string>();
@@ -502,6 +533,11 @@ core::Json pencil_brush() {
     return Json{{"label", "鉛筆（ハード）"},
                 {"engine", std::string(core::kDabEngine)},
                 {"dabs", Json{{"hardness", 1.0}, {"aliased", true}, {"pressure_size", false}}}};
+}
+
+bool is_pencil(const core::Json& settings) {
+    static const Json pencil = core::brush_to_dict(core::brush_from_dict(kPencilKey, pencil_brush(), std::nullopt, {}));
+    return settings == pencil;
 }
 
 }  // namespace genko::render::dabs

@@ -467,6 +467,66 @@ std::vector<double> resample_inputs(const std::vector<double>& values, std::size
     return out;
 }
 
+std::vector<double> lengths_along(const std::vector<PointF>& points) {
+    std::vector<double> out;
+    out.reserve(points.size());
+    double total = 0.0;
+    for (std::size_t i = 0; i < points.size(); ++i) {
+        if (i > 0) total += std::hypot(points[i].x - points[i - 1].x, points[i].y - points[i - 1].y);
+        out.push_back(total);
+    }
+    return out;
+}
+
+std::vector<double> lengths_along(const PenPoints& points) {
+    std::vector<PointF> xy;
+    xy.reserve(points.size());
+    for (const PenPoint& p : points) xy.push_back(PointF{p.x, p.y});
+    return lengths_along(xy);
+}
+
+void carry_inputs(const Stroke& from, Stroke& to, const std::vector<double>* positions) {
+    to.flow = from.flow;
+    to.background_rgb = from.background_rgb;
+    to.tilt.clear();
+    to.time_ms.clear();
+    to.wheel.clear();
+    const std::size_t n = from.points.size(), m = to.points.size();
+    if (n == 0 || m == 0) return;
+    struct Input {
+        const std::vector<double>& values;
+        std::vector<double>& into;
+        std::size_t per;
+        int digits;
+    };
+    const Input inputs[] = {{from.tilt, to.tilt, 2, 1}, {from.time_ms, to.time_ms, 1, 1}, {from.wheel, to.wheel, 1, 3}};
+    if (positions == nullptr) {  // (the same points, from the first)
+        if (m > n) return;
+        for (const Input& in : inputs) {
+            if (inputs_fit(in.values, n, in.per)) in.into.assign(in.values.begin(), in.values.begin() + static_cast<std::ptrdiff_t>(m * in.per));
+        }
+        return;
+    }
+    if (positions->size() != m) return;
+    const std::vector<double> along = lengths_along(from.points);
+    for (const Input& in : inputs) {
+        if (!inputs_fit(in.values, n, in.per)) continue;
+        in.into.reserve(m * in.per);
+        std::size_t k = 0;  // (the segment the last place was on: the places mostly go on along the line)
+        for (const double s : *positions) {
+            if (k > 0 && s < along[k]) k = 0;
+            while (k + 2 < n && along[k + 1] < s) ++k;
+            const std::size_t j = n == 1 ? 0 : k + 1;
+            const double span = along[j] - along[k];
+            const double t = span > 0 ? std::clamp((s - along[k]) / span, 0.0, 1.0) : 0.0;
+            for (std::size_t c = 0; c < in.per; ++c) {
+                const double a = in.values[k * in.per + c], b = in.values[j * in.per + c];
+                in.into.push_back(py_round(a + (b - a) * t, in.digits));
+            }
+        }
+    }
+}
+
 bool has_stroke_inputs(const Stroke& stroke) {
     const std::size_t n = stroke.points.size();
     return inputs_fit(stroke.tilt, n, 2) || inputs_fit(stroke.time_ms, n, 1) || inputs_fit(stroke.wheel, n, 1) || stroke.flow.has_value() ||

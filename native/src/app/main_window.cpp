@@ -609,10 +609,18 @@ void MainWindow::pen_changed() {
     Json fields = pen_.stroke_fields();
     // (brushes@1, PC4 E1: the 鉛筆ツール's own brush; the blend only a paint layer takes; the smoothing the window keeps)
     if (canvas_->tool() == QLatin1String("pencil")) {
-        know_pencil();
-        fields["kind"] = std::string(render::dabs::kPencilKey);
+        fields["kind"] = pencil_key();
     }
-    if (brush_ != nullptr) brush_->set_blend_allowed(layer == nullptr || layer->kind == core::LayerKind::Raster);
+    if (brush_ != nullptr) {
+        brush_->set_blend_allowed(layer == nullptr || layer->kind == core::LayerKind::Raster);
+        pen_.blend = brush_->pen().blend;  // (the モード as it shows now: a paint layer's, or 通常 — review P3-6)
+    }
+    if (tool_settings_ != nullptr) {  // (review P2-6: a blend other than 通常 seen beside the tool's name)
+        const bool drawing = PageCanvas::draws_line(canvas_->tool());
+        tool_settings_->set_badge(drawing && pen_.blend != "normal" && brush_ != nullptr
+                                      ? QStringLiteral("モード: ") + brush_->blend->currentText()
+                                      : QString());
+    }
     canvas_->set_live_pen(fields, layer != nullptr && drawable(*layer) ? std::optional<std::string>(layer->id) : std::nullopt);
     canvas_->brush_width_mm = pen_.width_mm;
     canvas_->eraser_mm = eraser_mm_;

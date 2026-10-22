@@ -480,7 +480,7 @@ bool MainWindow::paint_stroke(const StrokeInput& stroke, const core::Page& page,
     // 透明色 (the pen takes away where it passes), ゆがみ and 色混ぜ: not lines of their own
     Json flat = Json::array();
     for (const core::PenPoint& p : stroke.points) flat.push_back(Json::array({p.x, p.y}));
-    if (stroke.tool == QLatin1String("pen") && colours_ != nullptr && colours_->transparent->isChecked()) {
+    if (PageCanvas::draws_line(stroke.tool) && colours_ != nullptr && colours_->transparent->isChecked()) {  // (PC4 E1: the pencil too)
         canvas_->stroke_dropped();
         apply_ops(Json::array({Json{{"op", "erase"}, {"page", page.index.json()}, {"layer_id", layer.id}, {"points", flat},
                                     {"width_mm", std::max(0.3, brush_->size->value())}}}));

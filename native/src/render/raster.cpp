@@ -4,6 +4,8 @@
 #include <array>
 #include <cmath>
 #include <cstdio>
+#include <map>
+#include <unordered_map>
 
 #include "core/command_bus.hpp"
 #include "core/ids.hpp"
@@ -161,34 +163,67 @@ Image layer_pixels(const core::Page& page, const core::Layer& layer) {
     return ensure_raster(page, layer);
 }
 
+namespace {
+
+// (PC4 E1) A precise or an ink layer's colours at some of its pixels (`wanted`: indices on its grid), straight sRGB 0..255
+// and the alpha 0..1 — read at those pixels only: a precise layer's values (a page of a profile's turned to sRGB, pixel
+// by pixel), an ink layer's rows read one at a time and the inks of the pixels wanted given the colours they mean (as
+// rgba_of means a whole layer's, each pixel on its own).
+std::unordered_map<std::size_t, std::array<float, 4>> colours_at(const core::Page& page, const core::Layer& layer, const std::vector<std::size_t>& wanted) {
+    std::unordered_map<std::size_t, std::array<float, 4>> out;
+    if (wanted.empty()) return out;
+    if (layer.color_raster && !page.color) {
+        const core::ColorRasterView view(*layer.color_raster);
+        const RgbSpace space = RgbSpace::of(page);
+        for (const std::size_t i : wanted) {
+            if (out.contains(i)) continue;
+            const auto v = view.pixel(i);
+            double rgb[3] = {v[0], v[1], v[2]};
+            if (!space.is_srgb()) space.to_srgb(rgb, 1);
+            out[i] = {static_cast<float>(rgb[0] * 255.0), static_cast<float>(rgb[1] * 255.0), static_cast<float>(rgb[2] * 255.0), static_cast<float>(v[3])};
+        }
+        return out;
+    }
+    const core::InkRasterHeader head = core::ink_raster_header(*layer.ink_raster);
+    std::map<std::size_t, std::size_t> slot;  // (pixel → its place among the ones read)
+    for (const std::size_t i : wanted) slot.emplace(i, slot.size());
+    core::InkPixels some = core::blank_ink_pixels(head.space, head.depth, static_cast<std::uint32_t>(slot.size()), 1, head.planes);
+    const unsigned channels = some.channels();
+    auto next = slot.begin();
+    core::read_ink_raster_rows(*layer.ink_raster, [&](std::uint32_t y, const float* values) {
+        for (; next != slot.end() && next->first / head.width == y; ++next) {
+            const std::size_t x = next->first % head.width;
+            for (unsigned c = 0; c < channels; ++c) some.set(next->second, c, values[x * channels + c]);
+        }
+    });
+    const std::vector<image_ops::Rgba> meant = image_ops::rgba_of(image_ops::from_inks(some, *page.color));
+    for (const auto& [i, k] : slot) out[i] = {meant[k][0] * 255.0f, meant[k][1] * 255.0f, meant[k][2] * 255.0f, meant[k][3]};
+    return out;
+}
+
+}  // namespace
+
 std::vector<core::Stroke> mixed_pieces(const core::Page& page, const core::Layer& layer, const core::Stroke& stroke, double mix,
                                        double stretch) {
     constexpr double kStepMm = 1.5;
     // The colour under the line, on the layer's grid: its colours (0..255) and alpha (0..1). An 8-bit layer's picture
     // (color-model@1: on an RGB page of a profile its values picked up as the sRGB they show); PC4 E1 (the user's leftover
     // of PC2, design 0.4): a precise layer's own values and an ink layer's colours, in float, the same way.
+    // (review P2-3: the precise and ink layers' colours are read at the line's points only, below — the layer is never
+    // copied whole)
     int w = 0, h = 0;
     std::string px;
-    std::vector<std::array<float, 4>> fine;  // (straight sRGB 0..255 and the alpha 0..1)
-    if (layer.color_raster && !page.color) {
+    const bool precise_layer = layer.color_raster && !page.color;
+    const bool ink_layer = !precise_layer && page.color && layer.ink_raster;
+    std::unordered_map<std::size_t, std::array<float, 4>> fine;  // (straight sRGB 0..255 and the alpha 0..1, by pixel)
+    if (precise_layer) {
         const core::ColorRasterView view(*layer.color_raster);
         w = static_cast<int>(view.width());
         h = static_cast<int>(view.height());
-        const RgbSpace space = RgbSpace::of(page);
-        fine.resize(std::size_t(w) * std::size_t(h));
-        for (std::size_t i = 0; i < fine.size(); ++i) {
-            const auto v = view.pixel(i);
-            double rgb[3] = {v[0], v[1], v[2]};
-            if (!space.is_srgb()) space.to_srgb(rgb, 1);
-            fine[i] = {static_cast<float>(rgb[0] * 255.0), static_cast<float>(rgb[1] * 255.0), static_cast<float>(rgb[2] * 255.0), static_cast<float>(v[3])};
-        }
-    } else if (page.color && layer.ink_raster) {
-        const image_ops::Pixels inks = image_ops::from_inks(core::decode_ink_raster(*layer.ink_raster), *page.color);
-        w = static_cast<int>(inks.width());
-        h = static_cast<int>(inks.height());
-        const std::vector<image_ops::Rgba> meant = image_ops::rgba_of(inks);
-        fine.resize(meant.size());
-        for (std::size_t i = 0; i < meant.size(); ++i) fine[i] = {meant[i][0] * 255.0f, meant[i][1] * 255.0f, meant[i][2] * 255.0f, meant[i][3]};
+    } else if (ink_layer) {
+        const core::InkRasterHeader head = core::ink_raster_header(*layer.ink_raster);
+        w = static_cast<int>(head.width);
+        h = static_cast<int>(head.height);
     } else {
         const Image under = core::holds_page_values(page, layer) ? srgb_from(layer_pixels(page, layer).convert("RGBA"), RgbSpace(*page.rgb))
                                                                   : layer_pixels(page, layer).convert("RGBA");
@@ -238,6 +273,15 @@ std::vector<core::Stroke> mixed_pieces(const core::Page& page, const core::Layer
             if (wheeled) wheel.push_back(core::py_round(between(stroke.wheel[i - 1], stroke.wheel[i]), 3));
         }
     }
+    if (precise_layer || ink_layer) {  // (the pixels under the points, read there)
+        std::vector<std::size_t> wanted;
+        for (const core::PointF& p : points) {
+            const auto x = static_cast<std::int64_t>(p.x * scale);
+            const auto y = static_cast<std::int64_t>(p.y * scale);
+            if (0 <= x && x < w && 0 <= y && y < h) wanted.push_back(static_cast<std::size_t>(y) * std::size_t(w) + static_cast<std::size_t>(x));
+        }
+        fine = colours_at(page, layer, wanted);
+    }
     // numpy's float32 with Python floats as weak scalars (NEP 50): each Python float cast to float32 first
     const float mix_f = static_cast<float>(mix), unmix_f = static_cast<float>(1 - mix);
     std::vector<std::array<float, 3>> colours;
@@ -247,8 +291,8 @@ std::vector<core::Stroke> mixed_pieces(const core::Page& page, const core::Layer
         std::array<float, 3> target = base;
         const auto x = static_cast<std::int64_t>(p.x * scale);  // (int(): toward zero)
         const auto y = static_cast<std::int64_t>(p.y * scale);
-        if (0 <= x && x < w && 0 <= y && y < h && !fine.empty()) {
-            const auto& at = fine[static_cast<std::size_t>(y) * std::size_t(w) + static_cast<std::size_t>(x)];
+        if (0 <= x && x < w && 0 <= y && y < h && (precise_layer || ink_layer)) {
+            const auto& at = fine.at(static_cast<std::size_t>(y) * std::size_t(w) + static_cast<std::size_t>(x));
             for (int c = 0; c < 3; ++c) target[c] = base[c] + (at[static_cast<std::size_t>(c)] - base[c]) * at[3];
         } else if (0 <= x && x < w && 0 <= y && y < h) {
             const auto* at = reinterpret_cast<const unsigned char*>(px.data()) + (static_cast<std::size_t>(y) * w + static_cast<std::size_t>(x)) * 4;

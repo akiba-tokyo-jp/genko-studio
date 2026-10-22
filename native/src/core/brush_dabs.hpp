@@ -176,6 +176,14 @@ bool inputs_fit(const std::vector<double>& values, std::size_t points, std::size
 // points it keeps, and the live line draws them so.
 std::vector<double> resample_inputs(const std::vector<double>& values, std::size_t per, std::size_t count, int digits);
 bool has_stroke_inputs(const Stroke& stroke);
+// (PC4 E1) The lengths along a line's points: mm from its first point, one a point.
+std::vector<double> lengths_along(const std::vector<PointF>& points);
+std::vector<double> lengths_along(const PenPoints& points);
+// (PC4 E1) What a line keeps when an op makes it again from its points (moved, transformed, warped, cut, copied): its
+// flow and 背景色 whole, and its pen inputs (tilt, time, wheel) at the new line's points — `positions`: each new point's
+// length along the old line (lengths_along), the inputs there between its points; none: the new points are the old
+// ones from the first, as many or fewer. Inputs that do not fit the old line's points are not carried.
+void carry_inputs(const Stroke& from, Stroke& to, const std::vector<double>* positions = nullptr);
 
 // Whether the book uses brushes@1 (a dab brush, a line with inputs, the brush state's kind or background_rgb).
 bool uses_brushes(const Document& doc);
