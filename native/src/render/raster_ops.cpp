@@ -3086,6 +3086,19 @@ void verify_style_picture(const std::string& blob) {
 }
 
 bool paints_layer_values(std::string_view name, const core::Json& op, const core::Document& doc) {
+    if (name == "smudge") {  // (PC4 E5: 色混ぜ on a precise or ink paint layer works its own values, render/ops_paint.cpp)
+        try {
+            const std::size_t at = core::require_page(doc, op);
+            const Page& page = doc.page(at);
+            if (core::truthy_at(op, "layer_id")) return smudges_values(page, page.layers[core::layer_by_id(page, core::py_str(op["layer_id"]))]);
+            const Json* layer = core::get(op, "layer");
+            const core::LayerRole role = core::role_from(Json(layer != nullptr && core::py_truthy(*layer) ? core::py_str(*layer) : "ink"));
+            const auto found = std::find_if(page.layers.begin(), page.layers.end(), [&](const Layer& l) { return l.role == role; });
+            return found != page.layers.end() && smudges_values(page, *found);
+        } catch (const std::exception&) {
+            return false;  // (the op says what is wrong)
+        }
+    }
     if (name != "gradient_fill") return false;
     try {
         const std::size_t at = core::require_page(doc, op);

@@ -11,7 +11,9 @@
 #include <vector>
 
 #include "core/brushes.hpp"
+#include "core/color_raster.hpp"
 #include "core/command_bus.hpp"
+#include "core/ink.hpp"
 #include "core/ops_util.hpp"
 #include "core/pyconv.hpp"
 #include "core/pynum.hpp"
@@ -22,6 +24,7 @@
 #include "render/draw.hpp"
 #include "render/fill_patches.hpp"
 #include "render/filters.hpp"
+#include "render/image_ops.hpp"
 #include "render/page.hpp"
 #include "render/raster.hpp"
 #include "render/raster_ops.hpp"
@@ -215,6 +218,138 @@ void add_shape(OpContext& c) {
 
 constexpr int kSmudgeDpi = 200;
 
+// 色混ぜ on a precise or ink paint layer (PC4 E5, design section E 0.4: the PC2 task): the same work as the 8-bit one's
+// below — the stroke drawn, blurred and × its strength the cover through which the blurred (ぼかし, なじませ) or carried
+// (指先) values are laid over the layer's — in the layer's own values on its own grid: a precise layer's samples in float
+// (HDR kept), an ink layer's plates (its lines stay lines over them, as before). Only the pixels it changes are written
+// (the others keep their bytes); its work in the imaging budget (past it: too_large).
+void smudge_values(OpContext& c, std::size_t at, const std::string& id, const std::string& mode, const core::PenPoints& points, double width,
+                   double strength) {
+    const ImageAllocationBudget budget{2ULL * 1024 * 1024 * 1024};
+    const Page& seen = c.doc.page(at);
+    const Layer& layer = seen.layers[core::layer_by_id(seen, id)];
+    const bool inks = layer.color_raster == nullptr;
+    std::optional<core::InkPixels> raster;  // (an ink layer's inks, its lines left as lines)
+    Size grid;
+    if (inks) {
+        raster = core::decode_ink_raster(*layer.ink_raster);
+        grid = Size{static_cast<int>(raster->width), static_cast<int>(raster->height)};
+    } else {
+        const core::ColorRasterView view(*layer.color_raster);
+        grid = Size{static_cast<int>(view.width()), static_cast<int>(view.height())};
+    }
+    const double w_mm = seen.spec.width_mm.value(), h_mm = seen.spec.height_mm.value();
+    const double sx = grid.width / w_mm, sy = grid.height / h_mm, scale = std::sqrt(sx * sy);
+    const int dpi = std::max(1, static_cast<int>(std::lround(scale * 25.4)));
+    double min_x = points.front().x, max_x = points.front().x, min_y = points.front().y, max_y = points.front().y;
+    for (const auto& p : points) {
+        min_x = core::py_min(min_x, p.x);
+        max_x = core::py_max(max_x, p.x);
+        min_y = core::py_min(min_y, p.y);
+        max_y = core::py_max(max_y, p.y);
+    }
+    const double pad = width * 1.5;
+    const double x0 = core::py_max(0.0, min_x - pad), y0 = core::py_max(0.0, min_y - pad);
+    const double x1 = core::py_min(w_mm, max_x + pad), y1 = core::py_min(h_mm, max_y + pad);
+    const double bx0 = core::py_round_whole(x0 * sx), by0 = core::py_round_whole(y0 * sy);
+    const double bx1 = std::min<double>(core::py_round_whole(x1 * sx), grid.width), by1 = std::min<double>(core::py_round_whole(y1 * sy), grid.height);
+    if (bx1 - bx0 < 2 || by1 - by0 < 2) throw OpError("the brush is off the page");
+    const Box box{static_cast<int>(bx0), static_cast<int>(by0), static_cast<int>(bx1), static_cast<int>(by1)};
+    image_ops::Pixels p = inks ? image_ops::inks_part(*raster, *seen.color, box) : image_ops::layer_pixels(c, at, id, box);
+    const unsigned n = p.all();
+    const auto w = static_cast<std::size_t>(box.width()), h = static_cast<std::size_t>(box.height());
+    bool any = false;
+    for (std::size_t i = 0; i < p.size() && !any; ++i) any = p.at(i)[n - 1] > 0.0f;
+    if (!any) throw OpError("there is nothing on this layer to blend there");
+    // the cover: the stroke drawn at the grid's resolution (from the box's corner), blurred, × the strength
+    core::PenPoints shifted;
+    const double ox = box.x0 / sx, oy = box.y0 / sy;
+    for (const auto& q : points) shifted.push_back(core::PenPoint{q.x - ox, q.y - oy, q.p.value_or(0.7)});
+    Image cover = Image::create("L", Size{box.width(), box.height()}, Ink(0));
+    {
+        Draw draw(cover);
+        draw_stroke_mm(draw, shifted, dpi, width, Ink(255));
+    }
+    cover = cover.filter(Filter::gaussian_blur(core::py_max(1.0, width * scale / 6)));
+    cover = cover.point([strength](int v) { return static_cast<int>(v * strength); });
+    const std::string share = cover.tobytes();
+    // the worked values: blurred, or carried forward along the line (each step's spot blended with the colour carried)
+    const image_ops::Held held(std::uint64_t(w) * h * n * sizeof(float));
+    std::vector<float> worked(w * h * n);
+    for (std::size_t i = 0; i < p.size(); ++i) std::copy_n(p.at(i), n, worked.begin() + static_cast<std::ptrdiff_t>(i * n));
+    if (mode == "blur" || mode == "blend") {
+        image_ops::gauss_blur(worked, w, h, n, static_cast<float>(core::py_max(1.0, width * scale / (mode == "blur" ? 3 : 1.5))));
+    } else {
+        const auto r = static_cast<long>(std::max<std::int64_t>(2, core::py_round_int(width * scale / 2)));
+        const auto side = std::size_t(2 * r);
+        std::vector<float> carried, here(side * side * n), laid(side * side * n);
+        const auto in_box = [&](long x, long y) { return x >= 0 && y >= 0 && x < long(w) && y < long(h); };
+        for (std::size_t i = 0; i + 1 < shifted.size(); ++i) {
+            const double ax = shifted[i].x, ay = shifted[i].y, bx = shifted[i + 1].x, by = shifted[i + 1].y;
+            const auto steps = std::max<std::int64_t>(1, core::loop_count(core::py_dist(ax, ay, bx, by) * scale / core::py_max(1.0, static_cast<double>(r) / 3.0)));
+            for (std::int64_t k = 0; k < steps; ++k) {
+                const double t = static_cast<double>(k) / static_cast<double>(steps);
+                const long cx = held_px(core::py_round_whole((ax + (bx - ax) * t) * sx));
+                const long cy = held_px(core::py_round_whole((ay + (by - ay) * t) * sy));
+                // (the spot as a crop: nothing past the box)
+                for (std::size_t qy = 0; qy < side; ++qy) {
+                    for (std::size_t qx = 0; qx < side; ++qx) {
+                        const long x = cx - r + long(qx), y = cy - r + long(qy);
+                        float* to = here.data() + (qy * side + qx) * n;
+                        if (!in_box(x, y)) {
+                            std::fill_n(to, n, 0.0f);
+                        } else {
+                            std::copy_n(worked.begin() + static_cast<std::ptrdiff_t>((std::size_t(y) * w + std::size_t(x)) * n), n, to);
+                        }
+                    }
+                }
+                if (carried.empty()) {
+                    carried = here;
+                } else {
+                    for (std::size_t v = 0; v < carried.size(); ++v) carried[v] += (here[v] - carried[v]) * static_cast<float>(1 - strength);
+                }
+                for (std::size_t v = 0; v < laid.size(); ++v) laid[v] = here[v] + (carried[v] - here[v]) * static_cast<float>(strength);
+                for (std::size_t qy = 0; qy < side; ++qy) {  // (pasted where it lies on the box)
+                    for (std::size_t qx = 0; qx < side; ++qx) {
+                        const long x = cx - r + long(qx), y = cy - r + long(qy);
+                        if (!in_box(x, y)) continue;
+                        std::copy_n(laid.data() + (qy * side + qx) * n, n, worked.begin() + static_cast<std::ptrdiff_t>((std::size_t(y) * w + std::size_t(x)) * n));
+                    }
+                }
+            }
+        }
+    }
+    // the worked values laid through the cover over the layer's (only the pixels they change)
+    std::vector<std::uint8_t> marks(p.size(), 0);
+    bool changed = false;
+    for (std::size_t i = 0; i < p.size(); ++i) {
+        const float k = static_cast<unsigned char>(share[i]) / 255.0f;
+        if (!(k > 0.0f)) continue;
+        float* v = p.at(i);
+        const float* o = worked.data() + i * n;
+        bool differs = false;
+        for (unsigned ch = 0; ch < n; ++ch) {
+            const float r = o[ch] * k + v[ch] * (1.0f - k);
+            differs = differs || r != v[ch];
+            v[ch] = ch + 1 == n ? std::clamp(r, 0.0f, 1.0f) : r;
+        }
+        if (differs) {
+            marks[i] = 1;
+            changed = true;
+        }
+    }
+    if (!changed) return;
+    if (inks) {
+        image_ops::put_inks_part(*raster, p, box, &marks);
+        core::Page& edited = c.doc.edit_page(at);
+        core::Layer& out = edited.layers[core::layer_by_id(edited, id)];
+        out.ink_raster = std::make_shared<const std::string>(core::encode_ink_raster(*raster));
+        out.ink_memo = {};
+    } else {
+        image_ops::put_layer_pixels(c.doc, at, id, std::vector<image_ops::PixelsPart>{image_ops::PixelsPart{box, &p, &marks}});
+    }
+}
+
 void smudge(OpContext& c) {
     use_brushes_of(c.doc);
     const Json& op = c.op;
@@ -228,6 +363,10 @@ void smudge(OpContext& c) {
     const Json width_given = op_get(op, "width_mm");
     const double width = core::py_max(0.3, core::py_truthy(width_given) ? core::to_float(width_given) : 6.0);
     const double strength = core::py_max(0.05, core::py_min(1.0, float_at(op, "strength", 0.6)));
+    if (smudges_values(page, target)) {  // (PC4 E5: a precise or ink paint layer's own values)
+        smudge_values(c, at, target.id, mode, points, width, strength);
+        return;
+    }
     constexpr int dpi = kSmudgeDpi;
     const double scale = dpi / 25.4;
     double min_x = points.front().x, max_x = points.front().x, min_y = points.front().y, max_y = points.front().y;
@@ -485,6 +624,10 @@ void liquify(OpContext& c) {
 }
 
 }  // namespace
+
+bool smudges_values(const core::Page& page, const core::Layer& layer) {
+    return layer.kind == core::LayerKind::Raster && (layer.color_raster != nullptr || (page.color && layer.raster_png == nullptr && layer.ink_raster != nullptr));
+}
 
 void register_paint_ops(core::OpRegistry& registry) {
     registry.add("add_shape", add_shape);

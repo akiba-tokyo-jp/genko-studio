@@ -122,6 +122,20 @@ std::vector<Box> dab_boxes(const Brush& brush, const std::vector<StrokePoint>& p
 Box apply_dab_stroke(tiled::TiledPixels& target, const Brush& brush, const std::vector<StrokePoint>& points, const SelectionAt& selection,
                      bool lock_alpha, int halo, const DabEffect& effect);
 
+// PC4 E5: a stroke's dabs as their boxes on the grid and the way each one's footprint is made — a round dab's
+// (round_dabs), or a dab brush's tip and dynamics laid at the grid's resolution (render/dabs, render/ops_paint_tools) —,
+// in their order.
+struct DabSequence {
+    std::vector<Box> rects;
+    std::function<Footprint(std::size_t)> footprint;
+};
+// The round brush's dabs as such a sequence (dabs' and footprint's: the same dabs as apply_dab_stroke above lays).
+DabSequence round_dabs(const Brush& brush, const std::vector<StrokePoint>& points);
+// apply_dab_stroke over a sequence, mixed back at `opacity` × the selection's: the same work, each footprint made when
+// its dab is laid and held in the imaging budget while it is (past it: too_large).
+Box apply_dab_stroke(tiled::TiledPixels& target, const DabSequence& dabs, float opacity, const SelectionAt& selection, bool lock_alpha, int halo,
+                     const DabEffect& effect);
+
 // The Smudge Tool's paint (upstream's Smudge): a patch of colour carried from dab to dab (centred on the dab), laid down
 // at `strength` (0..1) and then picking up what is under the dab; finger painting starts with `finger` (the layer's own
 // values: colours then the alpha) instead of what is under the first dab. Use with apply_dab_stroke and a halo of at

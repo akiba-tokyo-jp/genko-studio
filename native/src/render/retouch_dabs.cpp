@@ -4,6 +4,7 @@
 #include <cmath>
 #include <cstdint>
 #include <numbers>
+#include <memory>
 #include <optional>
 #include <string>
 
@@ -212,23 +213,39 @@ std::vector<Box> dab_boxes(const Brush& brush, const std::vector<StrokePoint>& p
     return out;
 }
 
+DabSequence round_dabs(const Brush& brush, const std::vector<StrokePoint>& points) {
+    auto all = std::make_shared<const std::vector<Dab>>(dabs(brush, points));
+    DabSequence out;
+    out.rects.reserve(all->size());
+    for (const Dab& d : *all) out.rects.push_back(dab_rect(d));
+    const float hardness = brush.hardness;
+    out.footprint = [all, hardness](std::size_t i) { return footprint((*all)[i], hardness); };
+    return out;
+}
+
 Box apply_dab_stroke(tiled::TiledPixels& target, const Brush& brush, const std::vector<StrokePoint>& points, const SelectionAt& selection,
                      bool lock_alpha, int halo, const DabEffect& effect) {
-    const std::vector<Dab> all = dabs(brush, points);
-    if (all.empty()) return {};
-    std::vector<Box> rects;
-    rects.reserve(all.size());
-    for (const Dab& d : all) rects.push_back(dab_rect(d));
+    return apply_dab_stroke(target, round_dabs(brush, points), brush.opacity, selection, lock_alpha, halo, effect);
+}
+
+Box apply_dab_stroke(tiled::TiledPixels& target, const DabSequence& dabs, float stroke_opacity, const SelectionAt& selection, bool lock_alpha,
+                     int halo, const DabEffect& effect) {
+    const std::vector<Box>& rects = dabs.rects;
+    if (rects.empty()) return {};
     std::vector<Box> around;
     around.reserve(rects.size());
     for (const Box& r : rects) around.push_back(Box{r.x0 - halo, r.y0 - halo, r.x1 + halo, r.y1 + halo});
     target.reach(around);
     tiled::TiledPixels work(target);  // (the working copy: each dab sees what those before it left)
-    for (const Dab& d : all) effect(work, footprint(d, brush.hardness));
+    for (std::size_t i = 0; i < rects.size(); ++i) {
+        // (a footprint is the dab's box in floats: held in the imaging budget while it is laid — PC4 E5)
+        const image_ops::Held held(std::uint64_t(std::max(rects[i].width(), 0)) * std::uint64_t(std::max(rects[i].height(), 0)) * sizeof(float));
+        effect(work, dabs.footprint(i));
+    }
     // (mixed back over the tiles the dabs' boxes reach: a pixel the effect did not change has work == target)
     const Size grid = target.grid();
     const unsigned n = target.all(), alpha = target.colours();
-    const float opacity = std::clamp(brush.opacity, 0.0f, 1.0f);
+    const float opacity = std::clamp(stroke_opacity, 0.0f, 1.0f);
     Box changed;
     for (const Box& tile : tiled::tiles_reached(grid, rects)) {
         for (int y = tile.y0; y < tile.y1; ++y) {

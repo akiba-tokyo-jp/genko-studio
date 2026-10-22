@@ -39,6 +39,8 @@ public:
     ~TiledPixels();
 
     Size grid() const { return grid_; }
+    // (PC4 E5) A pixel of the layer's kind: its colours, precision (floating) and inks (the page's colour mode).
+    const image_ops::Pixels& like() const { return *like_; }
     image_ops::Pixels::Kind kind() const;
     unsigned colours() const;
     unsigned all() const { return colours() + 1; }

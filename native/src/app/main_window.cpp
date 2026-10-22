@@ -701,7 +701,8 @@ bool MainWindow::apply_ops(const Json& ops, const std::vector<std::string>& ids)
     clock.start();
     try {
         // (channels@1: the pixel ops on the channel targeted; smart-objects@1: in a contents' tab, on its contents)
-        session_->apply(with_contents_target(with_channel_target(ops)), ids);
+        last_results_ = core::Json::array();
+        last_results_ = session_->apply(with_contents_target(with_channel_target(ops)), ids).results;  // (PC4 E5: what the ops reported)
     } catch (const core::Error& error) {
         flash(wording::error(QString::fromUtf8(error.what())), 6000, true);
         return false;

@@ -66,6 +66,16 @@ const std::map<QString, std::pair<QString, QString>>& titles() {
         {QStringLiteral("heal"), {QStringLiteral("修復ブラシツール"), QStringLiteral("Alt+クリックで決めたコピー元の模様を、なぞった所の色になじませて写す")}},
         {QStringLiteral("clone"), {QStringLiteral("コピースタンプツール（S）"), QStringLiteral("Alt+クリックで決めたコピー元を、なぞった所にそのまま写す")}},
         {QStringLiteral("historybrush"), {QStringLiteral("ヒストリーブラシツール"), QStringLiteral("なぞった所を、履歴で選んだ状態（◆）の絵に塗り戻す")}},
+        // (PC4 E5: the brushes that change pixels, app/paint_tools.cpp)
+        {QStringLiteral("blurtool"), {QStringLiteral("ぼかしツール"), QStringLiteral("なぞった所の画素をぼかす")}},
+        {QStringLiteral("sharpentool"), {QStringLiteral("シャープツール"), QStringLiteral("なぞった所の画素をくっきりさせる")}},
+        {QStringLiteral("smudgetool"), {QStringLiteral("指先ツール"), QStringLiteral("なぞった向きに色をのばす")}},
+        {QStringLiteral("dodge"), {QStringLiteral("覆い焼きツール"), QStringLiteral("なぞった所を明るくする")}},
+        {QStringLiteral("burn"), {QStringLiteral("焼き込みツール"), QStringLiteral("なぞった所を暗くする")}},
+        {QStringLiteral("sponge"), {QStringLiteral("スポンジツール"), QStringLiteral("なぞった所の彩度を下げる・上げる")}},
+        {QStringLiteral("mixer"), {QStringLiteral("混合ブラシツール"), QStringLiteral("描画色の絵の具とカンバスの色を混ぜながら描く")}},
+        {QStringLiteral("bgeraser"), {QStringLiteral("背景消しゴムツール"), QStringLiteral("ブラシの中心の色に近い所を透明にする")}},
+        {QStringLiteral("colorreplace"), {QStringLiteral("色の置き換えツール"), QStringLiteral("ブラシの中心の色に近い所の色を描画色に置き換える")}},
     };
     return all;
 }

@@ -937,7 +937,8 @@ private slots:
         auto* eraser = qobject_cast<QToolButton*>(palette->widgetForAction(s.window->action(QStringLiteral("act_eraser"))));
         QVERIFY(eraser != nullptr && eraser->menu() != nullptr);
         QCOMPARE(eraser->popupMode(), QToolButton::DelayedPopup);
-        QCOMPARE(eraser->menu()->actions(), (QList<QAction*>{s.window->action(QStringLiteral("act_eraser")), s.window->action(QStringLiteral("act_magic_eraser"))}));
+        QCOMPARE(eraser->menu()->actions(), (QList<QAction*>{s.window->action(QStringLiteral("act_eraser")), s.window->action(QStringLiteral("act_background_eraser")),
+                                                              s.window->action(QStringLiteral("act_magic_eraser"))}));  // (PC4 E5: 背景消しゴムツール)
         QCOMPARE(eraser->contextMenuPolicy(), Qt::CustomContextMenu);
         auto* picker = qobject_cast<QToolButton*>(palette->widgetForAction(s.window->action(QStringLiteral("act_picker"))));
         QVERIFY(picker != nullptr && picker->menu() == nullptr);
@@ -945,7 +946,8 @@ private slots:
         QVERIFY(fill != nullptr && fill->menu() != nullptr);
         QCOMPARE(fill->menu()->actions().size(), 3);  // (塗りつぶしツール, 囲って塗る, グラデーションツール)
         QCOMPARE(s.window->tool_group_of(s.window->action(QStringLiteral("act_blend"))),
-                 (std::vector<QAction*>{s.window->action(QStringLiteral("act_blend"))}));  // (ぼかし: 色混ぜ until E5's)
+                 (std::vector<QAction*>{s.window->action(QStringLiteral("act_blur_tool")), s.window->action(QStringLiteral("act_sharpen_tool")),
+                                        s.window->action(QStringLiteral("act_smudge_tool")), s.window->action(QStringLiteral("act_blend"))}));  // (ぼかし, PC4 E5)
         // each tool once in the ツール menu
         QMenu* tools = nullptr;
         for (QAction* top : s.window->menuBar()->actions())

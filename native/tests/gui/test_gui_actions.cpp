@@ -360,7 +360,11 @@ private slots:
         // and the 3 of PC4 E3 (SPEC COLOR-09「パターン」) — 編集 → パターンを定義… (act_define_pattern), レイヤー パネルの
         // パターンのレイヤー… (act_layer_pattern, layer.newFillLayer.pattern) and 表示 → パターンプレビュー (act_pattern_preview)
         // — theirs (test_gui_patterns).
-        QCOMPARE(w->actions_by_name().size(), std::size_t{549});
+        // and the 9 of PC4 E5 (SPEC COLOR-09「画素を変える筆」) — ツール → ぼかしツール・シャープツール・指先ツール・覆い焼きツール・
+        // 焼き込みツール・スポンジツール・混合ブラシツール・背景消しゴムツール・色の置き換えツール (act_blur_tool, act_sharpen_tool,
+        // act_smudge_tool, act_dodge_tool, act_burn_tool, act_sponge_tool, act_mixer_brush, act_background_eraser,
+        // act_color_replacement) — theirs (test_gui_paint_tools).
+        QCOMPARE(w->actions_by_name().size(), std::size_t{558});
         QVERIFY(w->action("act_chat_approval"));
         QVERIFY(w->action("act_style"));
         QVERIFY(w->action("act_exposure"));
@@ -397,8 +401,9 @@ private slots:
         // drawing tools and line editing (test_gui_paint), the effect lines and the material tool (test_gui_effects), the
         // text tool (test_gui_lines); PC3 C-a's three path tools (test_gui_paths); the crop tool (PC3 C-e, test_gui_page_size);
         // PC3 B4's four retouching tools (test_gui_retouch); PC3 C-b's five shape tools besides 長方形ツール (test_gui_shapes)
-        // PC3 B3's オブジェクト選択ツール and クイック選択ツール (test_gui_select_mask); PC4 E1's 鉛筆ツール (test_gui_brushes)
-        QCOMPARE(w->tools_group()->actions().size(), 44);
+        // PC3 B3's オブジェクト選択ツール and クイック選択ツール (test_gui_select_mask); PC4 E1's 鉛筆ツール (test_gui_brushes); PC4 E5's
+        // nine brushes that change pixels (test_gui_paint_tools)
+        QCOMPARE(w->tools_group()->actions().size(), 53);
     }
 
     // PC4 F-0 (SPEC FILE-01; 節 F 5.1・5.2): ファイル in Photoshop's order and names — the book's export is 書き出し ▸
@@ -569,7 +574,12 @@ private slots:
                                                   // (PC3 B3: クイック選択ツール, オブジェクト選択ツール)
                                                   {"quick", "act_quick_select"}, {"object", "act_object_select"},
                                                   // (PC4 E1: 鉛筆ツール)
-                                                  {"pencil", "act_pencil"}};
+                                                  {"pencil", "act_pencil"},
+                                                  // (PC4 E5: the brushes that change pixels)
+                                                  {"blurtool", "act_blur_tool"}, {"sharpentool", "act_sharpen_tool"}, {"smudgetool", "act_smudge_tool"},
+                                                  {"dodge", "act_dodge_tool"}, {"burn", "act_burn_tool"}, {"sponge", "act_sponge_tool"},
+                                                  {"mixer", "act_mixer_brush"}, {"bgeraser", "act_background_eraser"},
+                                                  {"colorreplace", "act_color_replacement"}};
         QCOMPARE(w->tool_actions().size(), tools.size());
         QVERIFY(w->tools_group()->isExclusive());
         QVERIFY(w->action(QStringLiteral("act_select"))->isChecked());

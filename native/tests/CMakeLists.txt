@@ -139,6 +139,10 @@ genko_test(test_patterns_model SOURCES unit/test_patterns_model.cpp DEPS genko_t
 genko_test(test_patterns SOURCES unit/test_patterns.cpp DEPS genko_test_support genko_render_ops LABELS unit)  # (PC4 E3)
 genko_test(test_preset_store SOURCES unit/test_preset_store.cpp DEPS genko_test_support genko_render_ops LABELS unit)
 genko_test(test_tiled_pixels SOURCES unit/test_tiled_pixels.cpp DEPS genko_test_support genko_render_ops LABELS unit TIMEOUT 600)
+# PC4 E5 (SPEC.md COLOR-09「画素を変える筆」): Dodge, Burn, Sponge, Blur, Sharpen, Smudge, the Mixer Brush, the Background Eraser
+# and Color Replacement as PhotoCraft's tests check them, on 8-bit, 16-bit, 32-bit, CMYK, Lab and grey layers; 色混ぜ's
+# precise and ink values.
+genko_test(test_paint_tools SOURCES unit/test_paint_tools.cpp DEPS genko_test_support genko_render_ops LABELS unit TIMEOUT 900)
 # PC4 E1 (SPEC.md COLOR-09「ブラシのダブの描き方」): the dab engine (render/dabs) against PhotoCraft's own brush tests in mm
 # (spacing, tips, dynamics, scatter, colour, transfer, build-up, the textures' modes, dual, wet edges, noise, smoothing,
 # pose), the same dabs at every resolution and in parts; and the line ops with a dab brush (define_brush's dabs and
@@ -460,6 +464,10 @@ genko_test(test_contract_shapes SOURCES contract/test_contract_shapes.cpp DEPS g
 # `genko patterns`.
 genko_test(test_contract_patterns SOURCES contract/test_contract_patterns.cpp DEPS genko_test_support genko_render_ops genko_formats
            LABELS contract TIMEOUT 900)
+# PC4 E5: the brushes that change pixels through the command line — applied, saved, undone and done again, the same input the
+# same bytes, the Mixer Brush's reservoir handed from stroke to stroke, the page drawn after.
+genko_test(test_contract_paint_tools SOURCES contract/test_contract_paint_tools.cpp DEPS genko_test_support genko_render
+           LABELS contract TIMEOUT 900)
 # PC3 C-c: transform_layers on each kind of layer and pixels (exact moves and turns on 8, 16, 32 bits, CMYK, Lab; lines,
 # patches, quads, warps, perspective, puppet; folders, links, masks, areas, parts; smart objects, placed pictures, locks,
 # lines of dialogue), content_aware_scale, liquify's strokes, Warp Text; through the command line saved and undone.
@@ -626,6 +634,7 @@ if(GENKO_BUILD_APP)
   genko_test(test_gui_anim SOURCES gui/test_gui_anim.cpp DEPS genko_app genko_test_support GUI TIMEOUT 900)
   genko_test(test_gui_paint SOURCES gui/test_gui_paint.cpp DEPS genko_app GUI TIMEOUT 600)
   genko_test(test_gui_patterns SOURCES gui/test_gui_patterns.cpp DEPS genko_app GUI TIMEOUT 600)  # (PC4 E3)
+  genko_test(test_gui_paint_tools SOURCES gui/test_gui_paint_tools.cpp DEPS genko_app genko_test_support GUI TIMEOUT 600)  # (PC4 E5)
   genko_test(test_gui_guides SOURCES gui/test_gui_guides.cpp DEPS genko_app GUI TIMEOUT 900)
   genko_test(test_gui_colours SOURCES gui/test_gui_colours.cpp DEPS genko_app genko_test_support GUI TIMEOUT 600)
   genko_test(test_gui_workspace SOURCES gui/test_gui_workspace.cpp DEPS genko_app genko_test_support GUI TIMEOUT 600)

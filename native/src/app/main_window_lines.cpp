@@ -163,7 +163,9 @@ void MainWindow::panel_for_tool(const QString& tool) {
                                         QStringLiteral("lassofill"), QStringLiteral("vector"), QStringLiteral("blend"),
                                         QStringLiteral("liquify"), QStringLiteral("gradient"), QStringLiteral("shape"),
                                         QStringLiteral("pencil")};  // (PC4 E1)
-    QDockWidget* want = tool == QLatin1String("text") ? lines_dock_ : drawing.contains(tool) ? layers : nullptr;
+    QDockWidget* want = tool == QLatin1String("text")                              ? lines_dock_
+                        : drawing.contains(tool) || PageCanvas::is_pixel_tool(tool) ? layers  // (PC4 E5: the brushes that change pixels)
+                                                                                    : nullptr;
     QDockWidget* other = want == lines_dock_ ? layers : lines_dock_;
     const auto seen = [this](QDockWidget* dock) { return dock->isVisible() && (dock->isFloating() || rect().intersects(dock->geometry())); };
     if (want != nullptr && !seen(want) && seen(other)) want->raise();

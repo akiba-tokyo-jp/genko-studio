@@ -196,7 +196,9 @@ void PageCanvas::paint_page(QPainter& painter) {
         draw_in_page_px(painter, live_->image(), live_->box(), live_->dpi());
     } else if (!stroke_.empty()) {
         const QColor colour = draws_line(tool_) ? theme::accent() : QColor(200, 60, 60, 160);
-        const double width_mm = is_retouch_tool(tool_) ? retouch_mm : brush_width_mm;  // (PC3 B4: the retouching brush's own)
+        const double width_mm = is_retouch_tool(tool_)  ? retouch_mm      // (PC3 B4: the retouching brush's own)
+                                : is_pixel_tool(tool_) ? pixel_tool_mm  // (PC4 E5)
+                                                       : brush_width_mm;
         QPen line(colour, std::max(1.5, width_mm * view_.scale), Qt::SolidLine, Qt::RoundCap, Qt::RoundJoin);
         painter.setPen(line);
         painter.setBrush(Qt::NoBrush);
@@ -223,6 +225,7 @@ void PageCanvas::paint_page(QPainter& painter) {
         const double size = draws_line(tool_)                  ? brush_width_mm
                             : tool_ == QLatin1String("eraser") ? eraser_mm
                             : is_retouch_tool(tool_)           ? retouch_mm  // (PC3 B4)
+                            : is_pixel_tool(tool_)             ? pixel_tool_mm  // (PC4 E5)
                                                                : blend_mm;
         const double radius = std::max(2.0, size / 2 * view_.scale);
         painter.setPen(QPen(theme::accent(), 1));
