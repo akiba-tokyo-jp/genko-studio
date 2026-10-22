@@ -611,7 +611,7 @@ private:
         put_u32(extra, u32_of(ranges.size()));
         extra += ranges;
         extra += pascal(name) + unicode_name(name) + blocks;
-        if (keep != nullptr) extra += kept_blocks(*keep);
+        if (keep != nullptr) extra += kept_blocks(*keep, blocks);
         put_u32(records_, u32_of(extra.size()));
         records_ += extra;
         for (const auto& [id, packed] : channels) data_ += packed;
@@ -668,7 +668,7 @@ private:
         extra += "8BIMlsct";
         put_u32(extra, static_cast<std::uint32_t>(divider.size()));
         extra += divider;
-        if (keep != nullptr) extra += kept_blocks(*keep);
+        if (keep != nullptr) extra += kept_blocks(*keep, blocks + "8BIMlsct");
         put_u32(records_, u32_of(extra.size()));
         records_ += extra;
         for (int i = 0; i <= colours; ++i) put_u16(data_, 0);  // (each channel raw, with nothing)
@@ -689,35 +689,92 @@ private:
     // psd-keep@1 (PC4 F-d): a block the book keeps (kept_psd_file)
     core::Bytes kept_file(const std::string& ref) const { return book_ != nullptr ? kept_psd_file(*book_, ref) : nullptr; }
 
-    // Its blending ranges as kept, when they are ranges of this file's channels: the composite's and each colour's at
-    // least (a file of another mode's are not written: their channels are other ones).
+    // The kind of colour mode a file of Photoshop's mode number is (grey: bitmap, grey, duotone) and the one written.
+    static int mode_kind(int mode) { return mode == 0 || mode == 8 ? 1 : mode; }
+    int written_mode() const {
+        if (!ink_) return 3;
+        return ink_->space == core::InkSpace::Cmyk ? 4 : ink_->space == core::InkSpace::Gray ? 1 : 9;
+    }
+    // (the page's PSD: its version, mode and depth, when it keeps them)
+    const core::PsdFrom* page_from() const { return page_ != nullptr && page_->native_psd && page_->native_psd->from ? &*page_->native_psd->from : nullptr; }
+
+    // Its blending ranges as kept, when they are ranges of this file's channels: read from a file of the mode written (its
+    // page says so: its native_psd's `from`), the composite's and each colour's at least (a file of another mode's are not
+    // written: their channels are other ones).
     std::string kept_ranges(const core::Layer& own) const {
         if (own.native_psd->ranges.empty()) return {};
+        const core::PsdFrom* from = page_from();
+        if (from == nullptr || mode_kind(from->mode) != written_mode()) return {};
         const core::Bytes bytes = kept_file(own.native_psd->ranges);
         const std::size_t colours = ink_ ? core::colour_channels(ink_->space) : 3;
         if (!bytes || bytes->size() % 8 != 0 || bytes->size() / 8 < colours + 1) return {};
         return *bytes;
     }
 
+    // The keys of the tagged blocks this writer wrote in a record (`blocks`, as it wrote them).
+    std::set<std::string> keys_of(std::string_view blocks) const {
+        std::set<std::string> out;
+        std::size_t at = 0;
+        while (blocks.size() - at >= 12) {
+            const std::string_view sig = blocks.substr(at, 4);
+            if (sig != "8BIM" && sig != "8B64") break;
+            const std::string key(blocks.substr(at + 4, 4));
+            out.insert(key);
+            std::uint64_t length = 0;
+            std::size_t head = 12;
+            const auto byte = [&](std::size_t k) { return static_cast<std::uint64_t>(static_cast<unsigned char>(blocks[k])); };
+            if (psb_ && core::psb_long_key(key)) {
+                if (blocks.size() - at < 16) break;
+                for (std::size_t k = 0; k < 8; ++k) length = (length << 8) | byte(at + 8 + k);
+                head = 16;
+            } else {
+                for (std::size_t k = 0; k < 4; ++k) length = (length << 8) | byte(at + 8 + k);
+            }
+            if (length > blocks.size() - at - head) break;
+            at += head + static_cast<std::size_t>(length);
+            if (at < blocks.size() && length % 2 != 0 && blocks.substr(at, 4) != "8BIM" && blocks.substr(at, 4) != "8B64") ++at;
+        }
+        return out;
+    }
+
     // Its layer id (lyid: the first layer of the id only), its locks (lspf: bit 0 transparency, 1 the pixels, 2 the
-    // position; all three as Photoshop's "lock all", bit 31) and the blocks it keeps, as they were read.
-    std::string kept_blocks(const core::Layer& own) {
+    // position; all three as Photoshop's "lock all", bit 31 — the value read, its other bits too, while the three are as
+    // read) and the blocks it keeps, as they were read: none of a key this writer wrote in the record (`written`: its own
+    // is the one now), and none of the blocks whose insides a PSB holds otherwise (its long keys') into a file of the other
+    // version than the page's PSD was.
+    std::string kept_blocks(const core::Layer& own, std::string_view written) {
         const core::PsdLayerKeep& keep = *own.native_psd;
+        const std::set<std::string> theirs = keys_of(written);
+        const core::PsdFrom* from = page_from();
+        const bool same_version = from != nullptr && (from->version == 2) == psb_;
         std::string out;
-        if (keep.id && used_ids_.insert(*keep.id).second) {
+        if (keep.id && !theirs.contains("lyid") && used_ids_.insert(*keep.id).second) {
             std::string id;
             put_u32(id, static_cast<std::uint32_t>(*keep.id));
             out += render::psd_keep::tagged_block("8BIM", "lyid", id, psb_, false);
         }
-        const std::uint32_t locks = own.lock_alpha && own.locked && own.lock_position
-                                        ? 0x80000000u
-                                        : (own.lock_alpha ? 1u : 0u) | (own.locked ? 2u : 0u) | (own.lock_position ? 4u : 0u);
-        if (locks != 0) {
+        std::uint32_t locks = own.lock_alpha && own.locked && own.lock_position
+                                  ? 0x80000000u
+                                  : (own.lock_alpha ? 1u : 0u) | (own.locked ? 2u : 0u) | (own.lock_position ? 4u : 0u);
+        for (const auto& [key, ref] : keep.blocks) {
+            if (key != "lspf") continue;
+            const core::Bytes bytes = kept_file(ref);
+            if (!bytes || bytes->size() < 4) continue;
+            std::uint32_t read = 0;
+            for (std::size_t k = 0; k < 4; ++k) read = (read << 8) | static_cast<unsigned char>((*bytes)[k]);
+            const bool all = (read & 0x80000000u) != 0;
+            const bool same = (all || (read & 1u) != 0) == own.lock_alpha && (all || (read & 2u) != 0) == own.locked &&
+                              (all || (read & 4u) != 0) == own.lock_position;
+            locks = same ? read : (read & ~0x80000007u) | locks;
+        }
+        if (locks != 0 && !theirs.contains("lspf")) {
             std::string value;
             put_u32(value, locks);
             out += render::psd_keep::tagged_block("8BIM", "lspf", value, psb_, false);
         }
         for (const auto& [key, ref] : keep.blocks) {
+            if (key == "lspf" || key == "lyid" || theirs.contains(key)) continue;
+            if (core::psb_long_key(key) && !same_version) continue;
             if (const core::Bytes bytes = kept_file(ref)) out += render::psd_keep::tagged_block("8BIM", key, *bytes, psb_, false);
         }
         return out;
@@ -1509,8 +1566,11 @@ std::string with_kept(const std::string& sized_resources, const core::Page& page
 // ones it does not have.
 std::string with_kept_globals(const std::string& linked, std::string patterns, const core::Page& page, const core::Document& doc, bool psb) {
     if (!page.native_psd || page.native_psd->globals.empty()) return linked + patterns;
+    // (a PSB's long keys' blocks hold other insides in a PSD: written only into a file of the version they were read from)
+    const bool same_version = page.native_psd->from && (page.native_psd->from->version == 2) == psb;
     std::string kept;
     for (const core::PsdGlobal& g : page.native_psd->globals) {
+        if (core::psb_long_key(g.key) && !same_version) continue;
         const core::Bytes data = kept_psd_file(doc, g.ref);
         if (!data) continue;
         if (core::psd_pattern_key(g.key) && patterns.size() >= 12 && patterns.compare(4, 4, g.key) == 0) {

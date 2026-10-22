@@ -44,6 +44,8 @@
 #include <QTemporaryDir>
 
 #include <algorithm>
+#include <filesystem>
+#include <cmath>
 #include <map>
 #include <set>
 #include <optional>
@@ -51,6 +53,7 @@
 #include <string>
 
 #include "core/base64.hpp"
+#include "core/color_model.hpp"
 #include "core/color_raster.hpp"
 #include "core/command_bus.hpp"
 #include "core/error.hpp"
@@ -58,6 +61,7 @@
 #include "core/ink.hpp"
 #include "core/paths.hpp"
 #include "core/psd_keep.hpp"
+#include "core/smart.hpp"
 #include "formats/copy.hpp"
 #include "formats/export.hpp"
 #include "formats/open_file.hpp"
@@ -68,6 +72,7 @@
 #include "render/psd.hpp"
 #include "render/psd_adjust.hpp"
 #include "render/psd_image.hpp"
+#include "render/smart_decode.hpp"
 #include "storage/asset_store.hpp"
 #include "storage/fsutil.hpp"
 #include "storage/lock.hpp"
@@ -388,6 +393,112 @@ std::string flat_with_global(const std::string& global, std::uint32_t width, std
     out += global;
     be16(out, 0);
     out += std::string(std::size_t(width) * height * 3, '\x40');
+    return out;
+}
+
+// (the PC4 F-d review) A 16-bit RGB PSD of width × height holding `count` layers of one pixel each (raw samples; a layer
+// of no pixels is no layer to read) and no merged picture.
+std::string tiny_layers16(std::uint32_t width, std::uint32_t height, int count) {
+    std::string info;
+    be16(info, static_cast<unsigned>(count));
+    for (int n = 0; n < count; ++n) {
+        for (const std::uint32_t edge : {0U, 0U, 1U, 1U}) be32(info, edge);
+        be16(info, 4);
+        for (const int channel : {-1, 0, 1, 2}) {
+            be16(info, static_cast<unsigned>(static_cast<std::int16_t>(channel)) & 0xFFFF);
+            be32(info, 4);
+        }
+        info += "8BIMnorm";
+        info += {static_cast<char>(255), '\0', '\0', '\0'};
+        be32(info, 12);
+        be32(info, 0);
+        be32(info, 0);
+        info += std::string("\x01e\0\0", 4);
+    }
+    for (int n = 0; n < 4 * count; ++n) info += std::string("\0\0\x80\x01", 4);
+    if (info.size() % 2) info += '\0';
+    std::string out = "8BPS";
+    be16(out, 1);
+    out.append(6, '\0');
+    be16(out, 3);
+    be32(out, height);
+    be32(out, width);
+    be16(out, 16);
+    be16(out, 3);
+    be32(out, 0);
+    be32(out, 0);
+    be32(out, static_cast<std::uint32_t>(4 + info.size() + 4));
+    be32(out, static_cast<std::uint32_t>(info.size()));
+    out += info;
+    be32(out, 0);
+    return out;
+}
+
+// (the PC4 F-d review) A 16-bit RGB PSD of one 4 × 2 layer whose channels are RLE: each row's count `count` (honest: 9,
+// a literal packet of its 8 bytes) and its packed bytes `row`; no merged picture.
+std::string rle_rows16(unsigned count, const std::string& row) {
+    std::string channel;
+    be16(channel, 1);
+    for (int y = 0; y < 2; ++y) be16(channel, count);
+    for (int y = 0; y < 2; ++y) channel += row;
+    std::string info;
+    be16(info, 1);
+    for (const std::uint32_t edge : {0U, 0U, 2U, 4U}) be32(info, edge);
+    be16(info, 4);
+    for (const int id : {-1, 0, 1, 2}) {
+        be16(info, static_cast<unsigned>(static_cast<std::int16_t>(id)) & 0xFFFF);
+        be32(info, static_cast<std::uint32_t>(channel.size()));
+    }
+    info += "8BIMnorm";
+    info += {static_cast<char>(255), '\0', '\0', '\0'};
+    be32(info, 12);
+    be32(info, 0);
+    be32(info, 0);
+    info += std::string("\x01r\0\0", 4);
+    for (int c = 0; c < 4; ++c) info += channel;
+    if (info.size() % 2) info += '\0';
+    std::string out = "8BPS";
+    be16(out, 1);
+    out.append(6, '\0');
+    be16(out, 3);
+    be32(out, 2);
+    be32(out, 4);
+    be16(out, 16);
+    be16(out, 3);
+    be32(out, 0);
+    be32(out, 0);
+    be32(out, static_cast<std::uint32_t>(4 + info.size() + 4));
+    be32(out, static_cast<std::uint32_t>(info.size()));
+    out += info;
+    be32(out, 0);
+    return out;
+}
+
+// (the PC4 F-d review) An 8-bit RGB PSD of 2 × 2 of no layers holding `count` image resources (id 4000, 4 bytes each) and a
+// raw merged picture.
+std::string many_resources(int count) {
+    std::string resources;
+    for (int n = 0; n < count; ++n) {
+        resources += "8BIM";
+        be16(resources, 4000);
+        resources += std::string(2, '\0');  // (an empty name, padded)
+        be32(resources, 4);
+        be32(resources, static_cast<std::uint32_t>(n));
+    }
+    std::string out = "8BPS";
+    be16(out, 1);
+    out.append(6, '\0');
+    be16(out, 3);
+    be32(out, 2);
+    be32(out, 2);
+    be16(out, 8);
+    be16(out, 3);
+    be32(out, 0);
+    be32(out, static_cast<std::uint32_t>(resources.size()));
+    out += resources;
+    be32(out, 0);  // (no layer and mask information)
+    be16(out, 0);
+    out += std::string(12, '\x40');
     return out;
 }
 
@@ -930,7 +1041,8 @@ private slots:
         QVERIFY(effects != nullptr && blend_if != nullptr && plain != nullptr);
         std::set<std::string> kept;
         for (const auto& [key, ref] : effects->native_psd->blocks) kept.insert(key);
-        QCOMPARE(kept, (std::set<std::string>{"lfx2", "lclr", "iOpa", "fxrp", "lnsr"}));  // (not luni, lyid, lspf: this build's own)
+        // (not luni, lyid: this build's own; lspf kept as it locks something — its other bits so —, written from the locks)
+        QCOMPARE(kept, (std::set<std::string>{"lfx2", "lclr", "iOpa", "fxrp", "lnsr", "lspf"}));
         QCOMPARE(effects->native_psd->id, (std::optional<std::int64_t>(7)));
         QVERIFY(effects->native_psd->ranges.empty());
         QVERIFY(!blend_if->native_psd->ranges.empty());
@@ -1098,7 +1210,8 @@ private slots:
             int depth;
         };
         const std::vector<Case> cases{{"deep-rgb16.psd", 3, 16}, {"deep-rgb32.psd", 3, 32}, {"deep-cmyk16.psd", 4, 16},
-                                      {"deep-lab16.psd", 3, 16}, {"deep-gray16.psd", 1, 16}, {"deep-rgb16-lr16.psd", 3, 16}};
+                                      {"deep-lab16.psd", 3, 16}, {"deep-gray16.psd", 1, 16}, {"deep-rgb16-lr16.psd", 3, 16},
+                                      {"deep-rgb32-lr32.psd", 3, 32}};
         QStringList files;
         for (const Case& c : cases) files << QString::fromStdString(keep_path(c.file));
         const Json view = tools_view(files, true);
@@ -1108,6 +1221,12 @@ private slots:
             const genko::formats::Opened opened = genko::formats::open_file(keep_file(name), name);
             const core::Page& page = opened.doc.page(0);
             QCOMPARE(page.layers.size(), std::size_t{2});
+            // (the PC4 F-d review: a 32-bit file's values are linear light — its page the built-in linear-srgb's, the
+            // values as they are)
+            if (c.depth == 32) {
+                const core::BuiltinProfile* linear = core::builtin_profile("linear-srgb");
+                QVERIFY2(page.rgb && page.rgb->icc && linear != nullptr && *page.rgb->icc == *linear->bytes, name.c_str());
+            }
             const Json& tools = view[keep_path(name)];
             for (const core::Layer& layer : page.layers) {
                 Json theirs;
@@ -1284,7 +1403,9 @@ private slots:
     }
 
     // A PSD without what this build does not read (a file of psd-tools' layers alone, this build's own PSD) keeps nothing:
-    // no native_psd, no psd-keep@1 — its PSD is written as before.
+    // no native_psd, no psd-keep@1, no layer id or lock written — and the PSD of the book is the same bytes when the book
+    // is saved and read back (Python's bytes of a book of no psd-keep@1 are compared in test_contract_export and
+    // test_contract_studio).
     void aPsdOfNothingUnknownKeepsNothing() {
         namespace core = genko::core;
         const genko::formats::Opened opened = genko::formats::open_file(keep_file("deep-rgb16.psd"), "deep-rgb16.psd");
@@ -1298,7 +1419,25 @@ private slots:
         QVERIFY(!again.doc.page(0).native_psd);
         for (const core::Layer& l : again.doc.page(0).layers) QVERIFY(!l.native_psd);
         (void)genko::formats::export_page_psd(again.doc, again.doc.page(0), genko::storage::path_from_utf8(second.toStdString()));
-        QVERIFY(genko::test::read_bytes(first).size() > 0);
+        for (const QString& written : {first, second}) {
+            const std::string bytes = genko::test::read_bytes(written);
+            QVERIFY(!bytes.empty());
+            QVERIFY2(bytes.find("8BIMlyid") == std::string::npos && bytes.find("8BIMlspf") == std::string::npos, qPrintable(written));
+        }
+        const std::filesystem::path dir = genko::storage::path_from_utf8(path(QStringLiteral("own.genko")).toStdString());
+        {
+            genko::storage::ProjectLock lock(dir, "human:test");
+            lock.try_acquire();
+            genko::storage::SaveRequest request;
+            request.actor = "human:test";
+            request.ops = Json::array();
+            genko::storage::Saver(lock).save(again.doc, request);
+        }
+        const genko::storage::LoadResult read = genko::storage::load_document(dir);
+        QVERIFY2(read.document.read_only_reason.empty(), read.document.read_only_reason.c_str());
+        const QString third = path(QStringLiteral("own3.psd"));
+        (void)genko::formats::export_page_psd(read.document, read.document.page(0), genko::storage::path_from_utf8(third.toStdString()));
+        QVERIFY(genko::test::read_bytes(third) == genko::test::read_bytes(second));
     }
 
     // What a hostile PSD says of its blocks is not believed: a layer of more blocks than one keeps keeps 4096 (and says
@@ -1316,13 +1455,58 @@ private slots:
         QVERIFY2(made.results[0].value("psd_blocks_cut", false), made.results[0].dump().c_str());
         for (const core::Layer& l : made.doc.page(0).layers)
             if (l.native_psd) QVERIFY(l.native_psd->blocks.size() <= core::kPsdKeptMax);
-        // a block whose length runs past the file: the reader stops there (no block past the file is kept)
+        // a block whose length runs past the file: not read — the file is refused, as one cut short (nothing kept of it)
         std::string past = std::string("8BIMabcd") + std::string("\x7f\xff\xff\xff", 4) + "abcd";
         const std::string cut = psd_with_blocks(past, 4, 4);
+        bool refused = false;
         try {
             (void)psd::File::read(cut);
         } catch (const psd::ReadError&) {
+            refused = true;
         }
+        QVERIFY(refused);
+        try {
+            (void)genko::formats::open_file(cut, "cut.psd");
+            QFAIL("a PSD of a block past its end opened");
+        } catch (const core::Error& error) {
+            QCOMPARE(error.code(), std::string("format"));
+        }
+        // the rows' counts of a deep layer's RLE that lie: past what the file holds (refused as cut short, the op too), or
+        // rows that unpack to fewer bytes than a row holds (read as psd.py reads them: zeros after — never past the row)
+        const std::string honest = std::string("\x07", 1) + std::string("\x12\x35\x12\x35\x12\x35\x12\x35", 8);
+        const genko::formats::Opened fine = genko::formats::open_file(rle_rows16(9, honest), "rle.psd");
+        QCOMPARE(fine.doc.page(0).layers.size(), std::size_t{1});
+        QVERIFY(fine.doc.page(0).layers[0].color_raster);
+        const std::string lie = rle_rows16(0x7fff, honest);
+        try {
+            (void)genko::formats::open_file(lie, "lie.psd");
+            QFAIL("a PSD of rows past its end opened");
+        } catch (const core::Error& error) {
+            QCOMPARE(error.code(), std::string("format"));
+        }
+        bool op_refused = false;
+        try {
+            (void)bus.apply(core::new_episode("t", core::Num(std::int64_t{1}), 1, core::PageSpec::a4_mono()),
+                            Json::array({Json{{"op", "import_psd"}, {"page", 1}, {"psd", core::b64encode(lie)}}}), core::Actor("human:test"));
+        } catch (const core::ApplyError&) {
+            op_refused = true;
+        }
+        QVERIFY(op_refused);
+        const genko::formats::Opened short_rows = genko::formats::open_file(rle_rows16(5, std::string("\x03\x12\x35\x12\x35", 5)), "short.psd");
+        QVERIFY(short_rows.doc.page(0).layers.size() == 1 && short_rows.doc.page(0).layers[0].color_raster);
+        const core::ColorRasterView rows(*short_rows.doc.page(0).layers[0].color_raster);
+        QVERIFY(std::fabs(rows.pixel(0)[0] - 0x1235 / 65535.0) < 1e-4 && std::fabs(rows.pixel(1)[0] - 0x1235 / 65535.0) < 1e-4);
+        QCOMPARE(static_cast<double>(rows.pixel(2)[0]), 0.0);
+        QCOMPARE(static_cast<double>(rows.pixel(3)[3]), 0.0);
+        // more image resources than a page keeps: 4096 kept, said (the report; the notes of the book opened)
+        const std::string resources = many_resources(5000);
+        const genko::formats::Opened plenty = genko::formats::open_file(resources, "many.psd");
+        QVERIFY(plenty.doc.page(0).native_psd);
+        QCOMPARE(plenty.doc.page(0).native_psd->resources.size(), core::kPsdKeptMax);
+        QVERIFY(std::any_of(plenty.notes.begin(), plenty.notes.end(), [](const std::string& n) { return n.find("保てませんでした") != std::string::npos; }));
+        const auto kept_some = bus.apply(core::new_episode("t", core::Num(std::int64_t{1}), 1, core::PageSpec::a4_mono()),
+                                         Json::array({Json{{"op", "import_psd"}, {"page", 1}, {"psd", core::b64encode(resources)}}}), core::Actor("human:test"));
+        QVERIFY2(kept_some.results[0].value("psd_blocks_cut", false), kept_some.results[0].dump().c_str());
         // an Lr16 of a length past the file, and one of a layer count past what it holds: read as a flat file
         const std::string lr16 = flat_with_global(std::string("8BIMLr16") + std::string("\0\0\x10\0", 4) + std::string("\x7f\xff", 2), 4, 4);
         const psd::File flat = psd::File::read(lr16);
@@ -1336,7 +1520,7 @@ private slots:
         } catch (const psd::ReadError& error) {
             QVERIFY(error.too_large());
         }
-        // a PSB whose header says 300000 × 300000: not opened
+        // a PSB whose header says 60000 × 60000: not opened
         std::string psb = huge;
         psb[5] = 2;
         try {
@@ -1344,6 +1528,241 @@ private slots:
             QFAIL("opened");
         } catch (const core::Error& error) {
             QVERIFY2(error.code() == "image_too_large" || error.code() == "format", error.code().c_str());
+        }
+    }
+
+    // --- the PC4 F-d review -------------------------------------------------------------------------------------------
+
+    // P1-1: a 16-bit file of layers in Lr16 and a transparency in its merged picture (deep-rgba16-lr16.psd, as Photoshop
+    // writes one): the merged picture a smart object shows keeps its transparency, as before F-d (the 8-bit picture, the
+    // deep picture, a CMYK page's inks: clear on the left, opaque on the right); opened, its layers are read; the Python
+    // reference's view reads no Lr16 (one layer of the merged picture).
+    void aDeepFilesTransparencyStays() {
+        namespace core = genko::core;
+        const std::string bytes = keep_file("deep-rgba16-lr16.psd");
+        const genko::render::Image eight = genko::render::smart::eight_bit_picture(bytes);
+        QCOMPARE(std::string(eight.mode()), std::string("RGBA"));
+        QCOMPARE(static_cast<int>(eight.getpixel(0, 0)[3]), 0);
+        QCOMPARE(static_cast<int>(eight.getpixel(7, 5)[3]), 255);
+        const genko::render::smart::DeepPicture deep = genko::render::smart::deep_picture(bytes);
+        QVERIFY(deep.alpha && deep.channels == 4);
+        QCOMPARE(deep.samples[3], 0.0f);
+        QCOMPARE(deep.samples[(5 * 8 + 7) * 4 + 3], 1.0f);
+        core::PageColor cmyk;
+        cmyk.space = core::InkSpace::Cmyk;
+        cmyk.depth = 16;
+        const core::BuiltinProfile* coated = core::builtin_profile("coated-cmyk");
+        QVERIFY(coated != nullptr);
+        cmyk.profile = coated->ref();
+        cmyk.icc = coated->bytes;
+        const core::InkPixels inks = genko::render::smart::file_inks(bytes, cmyk, "keep");
+        QCOMPARE(inks.value(0, 4), 0.0f);
+        QCOMPARE(inks.value(5 * 8 + 7, 4), 1.0f);
+        const genko::formats::Opened opened = genko::formats::open_file(bytes, "deep-rgba16-lr16.psd");
+        QCOMPARE(opened.doc.page(0).layers.size(), std::size_t{2});
+        const genko::core::CommandBus bus(genko::render::ops_registry());
+        const psd::PythonView python_view;
+        const auto viewed = bus.apply(core::new_episode("t", core::Num(std::int64_t{1}), 1, core::PageSpec::a4_mono()),
+                                      Json::array({Json{{"op", "import_psd"}, {"page", 1}, {"psd", core::b64encode(bytes)}, {"id", "py"}}}), core::Actor("human:test"));
+        int made = 0;
+        for (const core::Layer& l : viewed.doc.page(0).layers) made += l.id.starts_with("py-") ? 1 : 0;
+        QCOMPARE(made, 1);
+        QVERIFY(psd::File::read(bytes).layers().empty());
+    }
+
+    // P1-2: the layers at their depth stay within the book's high-precision budget: a small 16-bit PSD of 40 tiny layers
+    // on 2000 × 2000 px (each a precise raster of 32 MB) opens — its layers at 8 bits, said — and comes in through
+    // import_psd onto a 16-bit page so (the report's in_8_bits), the book within its budget, before any is made.
+    void deepLayersStayWithinTheBooksBudget() {
+        namespace core = genko::core;
+        const std::string bytes = tiny_layers16(2000, 2000, 40);
+        QVERIFY(bytes.size() < 10000);
+        QElapsedTimer clock;
+        clock.start();
+        const genko::formats::Opened opened = genko::formats::open_file(bytes, "empty.psd");
+        QCOMPARE(opened.doc.page(0).layers.size(), std::size_t{40});
+        for (const core::Layer& l : opened.doc.page(0).layers) QVERIFY(!l.color_raster);
+        QVERIFY(std::any_of(opened.notes.begin(), opened.notes.end(), [](const std::string& n) { return n.find("8 bit で読みました") != std::string::npos; }));
+        core::validate_color_document(opened.doc);
+        const genko::core::CommandBus bus(genko::render::ops_registry());
+        const auto done = bus.apply(opened.doc, Json::array({Json{{"op", "import_psd"}, {"page", 1}, {"psd", core::b64encode(bytes)}, {"fit", "paper"}, {"id", "again"}}}),
+                                    core::Actor("human:test"));
+        QCOMPARE(done.results[0]["in_8_bits"], Json("budget"));
+        core::validate_color_document(done.doc);
+        QVERIFY2(clock.elapsed() < 120000, std::to_string(clock.elapsed()).c_str());
+        // (a file within it: at its depth as before)
+        const genko::formats::Opened small = genko::formats::open_file(tiny_layers16(200, 200, 3), "small.psd");
+        for (const core::Layer& l : small.doc.page(0).layers) QVERIFY(l.color_raster);
+    }
+
+    // P1-3: a PSD placed as a smart object made a page (smart_to_page) — keep.psd, and a book's PSD of a pattern fill
+    // layer —: what it keeps and the patterns its fills take are the book's, saved and read back not read-only; the
+    // contents page written as a PSD gives the effects back.
+    void aSmartObjectsPsdMadeAPageKeepsItsBlocks() {
+        namespace core = genko::core;
+        const genko::core::CommandBus bus(genko::render::ops_registry());
+        const auto saved_and_read = [&](const core::Document& doc, const QString& name) {
+            const std::filesystem::path dir = genko::storage::path_from_utf8(path(name).toStdString());
+            {
+                genko::storage::ProjectLock lock(dir, "human:test");
+                lock.try_acquire();
+                genko::storage::SaveRequest request;
+                request.actor = "human:test";
+                request.ops = Json::array();
+                genko::storage::Saver(lock).save(doc, request);
+            }
+            return genko::storage::load_document(dir).document;
+        };
+        const double w = 24 * 25.4 / 150, h = 16 * 25.4 / 150;
+        const core::Document book = core::new_episode("t", core::Num(std::int64_t{1}), 1, core::PageSpec::custom(w, h, w, h, 0, 0, 0, 0, 0, 150, "color"));
+        const auto placed = bus.apply(book, Json::array({Json{{"op", "smart_place"}, {"page", 1}, {"data", core::b64encode(keep_file("keep.psd"))}, {"name", "keep.psd"},
+                                                              {"new_id", "so"}}}),
+                                      core::Actor("human:test"));
+        const auto paged = bus.apply(placed.doc, Json::array({Json{{"op", "smart_to_page"}, {"page", 1}, {"id", "so"}, {"new_id", "in"}}}), core::Actor("human:test"));
+        const core::Document read = saved_and_read(paged.doc, QStringLiteral("so-keep.genko"));
+        QVERIFY2(read.read_only_reason.empty(), read.read_only_reason.c_str());
+        const core::Layer* so = nullptr;
+        for (const core::Layer& l : read.page(0).layers)
+            if (l.id == "so") so = &l;
+        QVERIFY(so != nullptr);
+        const core::SmartContents* contents = core::smart::contents_of(read, *so);
+        QVERIFY(contents != nullptr && contents->page);
+        QVERIFY(contents->page->native_psd);
+        const QString inner = path(QStringLiteral("so-inner.psd"));
+        (void)genko::formats::export_page_psd(read, *contents->page, genko::storage::path_from_utf8(inner.toStdString()), 150);
+        const std::string inner_bytes = genko::test::read_bytes(inner);
+        QVERIFY(inner_bytes.find("lfx2") != std::string::npos && inner_bytes.find("8BIMAnno") != std::string::npos);
+        // a PSD of a pattern fill layer: its pattern the book's
+        std::string checker;
+        for (int y = 0; y < 8; ++y)
+            for (int x = 0; x < 8; ++x) checker += (x < 4) == (y < 4) ? std::string("\xff\x00\x00\xff", 4) : std::string("\x00\x00\xff\xff", 4);
+        const std::string png = genko::render::write_png(genko::render::Image::frombytes("RGBA", genko::render::Size{8, 8}, checker));
+        const auto patterned = bus.apply(book, Json::array({Json{{"op", "add_pattern"}, {"name", "市松"}, {"png", core::b64encode(png)}, {"dpi", 100}, {"id", "pat-1"}},
+                                                            Json{{"op", "add_layer"}, {"page", 1}, {"kind", "fill"}, {"id", "pl"}, {"name", "模様"},
+                                                                 {"pattern", Json{{"id", "pat-1"}}}},
+                                                            Json{{"op", "set_layer"}, {"page", 1}, {"id", "pl"}, {"panel_clip", false}}}),
+                                         core::Actor("human:test"));
+        const QString pattern_psd = path(QStringLiteral("pattern.psd"));
+        (void)genko::formats::export_page_psd(patterned.doc, patterned.doc.page(0), genko::storage::path_from_utf8(pattern_psd.toStdString()), 150);
+        const std::string pattern_bytes = genko::test::read_bytes(pattern_psd);
+        QVERIFY(pattern_bytes.find("PtFl") != std::string::npos);
+        const auto placed2 = bus.apply(book, Json::array({Json{{"op", "smart_place"}, {"page", 1}, {"data", core::b64encode(pattern_bytes)}, {"name", "pattern.psd"},
+                                                               {"new_id", "so2"}}}),
+                                       core::Actor("human:test"));
+        const auto paged2 = bus.apply(placed2.doc, Json::array({Json{{"op", "smart_to_page"}, {"page", 1}, {"id", "so2"}, {"new_id", "in2"}}}), core::Actor("human:test"));
+        QVERIFY(!paged2.doc.patterns.empty());
+        const core::Document read2 = saved_and_read(paged2.doc, QStringLiteral("so-pattern.genko"));
+        QVERIFY2(read2.read_only_reason.empty(), read2.read_only_reason.c_str());
+    }
+
+    // P2-1: what open_file refuses of a PSD is said as format or image_too_large — import_psd's refusals too —, and
+    // `genko new --from` says the same code (never internal).
+    void openRefusalsAreSaid() {
+        namespace core = genko::core;
+        const std::string cut = psd_with_blocks(std::string("8BIMabcd") + std::string("\x7f\xff\xff\xff", 4) + "abcd", 4, 4);
+        const std::string wide = one_pixel_layers(10000, 10000, 80);  // (more layers than an import makes of that size)
+        for (const auto& [bytes, code] : std::vector<std::pair<std::string, std::string>>{{cut, "format"}, {wide, "image_too_large"}}) {
+            try {
+                (void)genko::formats::open_file(bytes, "x.psd");
+                QFAIL("opened");
+            } catch (const core::Error& error) {
+                QCOMPARE(error.code(), code);
+            }
+            const QString file = path(QString::fromStdString("refused-" + code + ".psd"));
+            genko::test::write_bytes(file, bytes);
+            const auto ran = genko::test::run_genko({QStringLiteral("new"), path(QString::fromStdString("refused-" + code + ".genko")), QStringLiteral("--from"), file});
+            QCOMPARE(ran.exit_code, 1);
+            QCOMPARE(genko::test::one_line(ran.out)["code"].get<std::string>(), code);
+        }
+    }
+
+    // P2-2: a 32-bit file onto a page of another depth comes in as before F-d (onto a 16-bit page at 8 bits, its values past
+    // 1 no refusal); onto a 32-bit page in sRGB its linear values encoded by 1/2.2 — the same look as the 8-bit page's
+    // (within a step of 8 bits) —; onto a page of linear light as they are.
+    void thirtyTwoBitFilesComeInAsBefore() {
+        namespace core = genko::core;
+        const genko::core::CommandBus bus(genko::render::ops_registry());
+        const std::string rgb32 = keep_file("deep-rgb32.psd");
+        const double w = 8 * 25.4 / 300, h = 6 * 25.4 / 300;
+        const core::Document book = core::new_episode("t", core::Num(std::int64_t{1}), 1, core::PageSpec::custom(w, h, w, h, 0, 0, 0, 0, 0, 300, "color"));
+        const auto onto = [&](const Json& first) {
+            Json ops = Json::array();
+            if (!first.is_null()) ops.push_back(first);
+            ops.push_back(Json{{"op", "import_psd"}, {"page", 1}, {"psd", core::b64encode(rgb32)}, {"fit", "paper"}, {"id", "f"}});
+            return bus.apply(book, ops, core::Actor("human:test")).doc;
+        };
+        const auto layer = [](const core::Document& d, const std::string& id) -> const core::Layer* {
+            for (const core::Layer& l : d.page(0).layers)
+                if (l.id == id) return &l;
+            return nullptr;
+        };
+        const core::Document sixteen = onto(Json{{"op", "set_color_mode"}, {"page", 1}, {"mode", "rgb"}, {"depth", 16}});
+        const core::Layer* in_sixteen = layer(sixteen, "f-1");
+        QVERIFY(in_sixteen != nullptr && !in_sixteen->color_raster && in_sixteen->raster_png);
+        const core::Document eight = onto(Json());
+        const core::Document precise = onto(Json{{"op", "set_color_mode"}, {"page", 1}, {"mode", "rgb"}, {"depth", 32}});
+        const core::Layer* in_eight = layer(eight, "f-1");
+        const core::Layer* in_precise = layer(precise, "f-1");
+        QVERIFY(in_eight != nullptr && in_eight->raster_png && in_precise != nullptr && in_precise->color_raster);
+        const genko::render::Image png = genko::render::read_png(*in_eight->raster_png).convert("RGBA");
+        const core::ColorRasterView raster(*in_precise->color_raster);
+        const Json view = tools_view({QString::fromStdString(keep_path("deep-rgb32.psd"))}, true);
+        QVERIFY2(!view.contains("error"), view.dump().c_str());
+        Json below;
+        for (const Json& l : view[keep_path("deep-rgb32.psd")]["layers"])
+            if (l["name"] == "下") below = l;
+        QVERIFY(!below.is_null());
+        for (int y = 0; y < 6; ++y) {
+            for (int x = 0; x < 8; ++x) {
+                const auto px = raster.pixel(static_cast<std::size_t>(y) * raster.width() + static_cast<std::size_t>(x));
+                const auto shown = png.getpixel(x, y);
+                for (int ch = 0; ch < 3; ++ch) {
+                    const double v = below["values"][std::to_string(ch)][static_cast<std::size_t>(y * 8 + x)].get<double>();
+                    const double want = std::pow(std::max(0.0, v), 1 / 2.2);
+                    QVERIFY2(std::fabs(px[static_cast<std::size_t>(ch)] - want) < 1e-5, (std::to_string(px[static_cast<std::size_t>(ch)]) + " for " + std::to_string(want)).c_str());
+                    QVERIFY(std::fabs(std::min(1.0, want) * 255 - shown[static_cast<std::size_t>(ch)]) <= 1.0);
+                }
+            }
+        }
+    }
+
+    // P3-1: a block the writer writes itself (a shape part's fill opacity, iOpa) is written once — the writer's —, not again
+    // as kept.
+    void aKeptBlockOfTheWritersKeyIsNotWrittenTwice() {
+        namespace core = genko::core;
+        const genko::core::CommandBus bus(genko::render::ops_registry());
+        genko::formats::Opened opened = genko::formats::open_file(keep_file("keep.psd"), "keep.psd");
+        const auto shaped = bus.apply(opened.doc,
+                                      Json::array({Json{{"op", "add_shape_part"}, {"page", 1}, {"new_layer", Json{{"id", "sh"}, {"name", "形"}}}, {"id", "r1"},
+                                                        {"shape", Json{{"kind", "rect"}, {"rect", Json::array({1, 1, 2, 1})}}},
+                                                        {"fill", Json{{"rgb", Json::array({0, 0, 0})}}}, {"opacity", 0.5}}}),
+                                      core::Actor("human:test"));
+        core::Document doc = shaped.doc;
+        const std::string kept_opacity("\xc0\0\0\0", 4);
+        const std::string ref = core::bytes_ref(kept_opacity);
+        doc.native_files.emplace(ref, std::make_shared<const std::string>(kept_opacity));
+        for (core::Layer& l : doc.edit_page(0).layers) {
+            if (l.id != "sh") continue;
+            core::PsdLayerKeep keep;
+            keep.blocks.emplace_back("iOpa", ref);
+            l.native_psd = keep;
+        }
+        const QString file = path(QStringLiteral("iopa.psd"));
+        (void)genko::formats::export_page_psd(doc, doc.page(0), genko::storage::path_from_utf8(file.toStdString()), 150);
+        const std::string bytes = genko::test::read_bytes(file);
+        int count = 0;
+        for (std::size_t at = bytes.find("8BIMiOpa"); at != std::string::npos; at = bytes.find("8BIMiOpa", at + 1)) ++count;
+        QCOMPARE(count, 2);  // (the 効果 layer's, kept; the shape's, its own — not the kept one again)
+        const psd::File read = psd::File::read(bytes);
+        for (const psd::Layer& l : read.layers()) {
+            if (l.name != "形") continue;
+            int own = 0;
+            for (const auto& block : read.blocks(l)) {
+                if (block.key != "iOpa") continue;
+                ++own;
+                QCOMPARE(static_cast<int>(static_cast<unsigned char>(block.data[0])), 128);
+            }
+            QCOMPARE(own, 1);
         }
     }
 };

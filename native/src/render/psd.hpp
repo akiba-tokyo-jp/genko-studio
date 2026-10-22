@@ -157,7 +157,9 @@ public:
     std::optional<std::uint32_t> protection(const Layer& layer) const;
     // The file's image resources and the global tagged blocks after its layers (its Lr16 or Lr32 among them: a 16- or 32-bit
     // file's layer info, which this reader reads its layers from when the layer info section holds none), in its order.
-    const std::vector<ImageResource>& resources() const { return resources_; }
+    // (each a view into the file's bytes made when asked: a File copied and the original gone leaves none dangling — keep
+    // the vector while its views are used)
+    std::vector<ImageResource> resources() const;
     std::vector<TaggedBlock> global_blocks() const;
 
     // PC4 F-d (the layers at their depth: a page in precise colour or of inks of the file's mode, the user's decision 3): a
@@ -324,11 +326,17 @@ private:
     std::vector<std::pair<std::uint64_t, std::uint64_t>> pattern_blocks_;  // (PC4 E3: the global Patt, Pat2, Pat3)
     std::optional<unsigned> quick_mask_;  // (1022: the Quick Mask's channel)
     std::vector<PathResource> path_resources_;  // (vector@1: 2000–2997, 1025, 2999)
-    std::vector<ImageResource> resources_;      // (psd-keep@1: every one)
+    struct ResourceAt {
+        unsigned id = 0;
+        std::string name;
+        std::uint64_t at = 0, size = 0;
+    };
+    std::vector<ResourceAt> resources_;         // (psd-keep@1: every one — one more than a page keeps at most —, by its place)
     std::vector<Record::BlockAt> globals_;      // (psd-keep@1: the global tagged blocks)
     std::uint64_t merged_at_ = 0;
     Limits limits_{};
     std::vector<Record> records_;
+    bool flat_ = true;  // (PC4 F-d: its layer info section held no layers — a flat file's merged picture has its transparency)
     std::vector<Layer> layers_;
     std::vector<std::string> skipped_;
     std::vector<std::string> python_skipped_;

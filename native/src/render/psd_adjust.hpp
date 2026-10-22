@@ -77,8 +77,8 @@ public:
     PythonView(const PythonView&) = delete;
     PythonView& operator=(const PythonView&) = delete;
 };
-// Is one alive? (PC4 F-d: then import_psd keeps nothing of psd-keep@1, reads no lock, and reads the layers in 8 bits — the
-// Python reference's view too)
+// Is one alive? (PC4 F-d: then import_psd keeps nothing of psd-keep@1, reads no lock, and reads the layers in 8 bits, and
+// the reader reads no layers from a global Lr16 or Lr32 block — the Python reference's view too)
 bool python_view();
 
 // An adjustment block read into a correction's adjust; none when no codec reads it (`notes` says why).

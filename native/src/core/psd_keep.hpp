@@ -23,7 +23,8 @@
 //
 // PC4 F-d (SPEC.md FILE-01「PSD・PSB」): what is kept and written back — after PhotoCraft v0.2.0's io/src/psd_import.rs
 // (REGENERATED, MAPPED_RESOURCES) and psd/src/tagged.rs (PSB_LONG_KEYS), MIT, with this build's own rules: a layer keeps
-// every tagged block but those this build writes or reads into the layer (its name, id, section and locks; the
+// every tagged block but those this build writes or reads into the layer (its name, id and section — its locks' lspf
+// kept when it locks something, written again from the layer's locks with its other bits —; the
 // adjustment, fill, vector, placed and text blocks PC2 and PC3 read); a page every image resource but those this build
 // writes or reads (resolution, profile, XMP, EXIF, thumbnails, version, paths, channels and their names and looks, the
 // layers' state, groups and selection, the grid and guides, an indexed page's table) and every global block but the
@@ -106,7 +107,8 @@ bool psd_global_kept(std::string_view key);
 bool psd_resource_names_layers(int id);
 // A layer effects' block (lfx2, lfxs, lmfx, lrFX): kept, and not drawn by this build.
 bool psd_effect_key(std::string_view key);
-// Does the layer keep a PSD's layer effects (drawn by Photoshop, not by this build: the layer panel's mark)?
+// Does the layer keep a PSD's layer effects (drawn by Photoshop, not by this build: the layer panel's mark)? A folder's
+// are not written back (folders are not PSD groups): not said.
 bool psd_effects_kept(const Layer& layer);
 // A pattern block (Patt, Pat2, Pat3): kept with the patterns no fill of the book took, merged with the book's own.
 bool psd_pattern_key(std::string_view key);

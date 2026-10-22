@@ -600,7 +600,9 @@ File File::read(std::string data, const Limits& limits, bool lab) {
         const std::uint32_t size = r.u32();
         const std::string_view block = r.take(std::uint64_t{size} + size % 2);
         // (psd-keep@1, PC4 F-d: one more than a page keeps at most)
-        if (f.resources_.size() <= core::kPsdKeptMax) f.resources_.push_back(ImageResource{rid, std::string(resource_name), block.substr(0, size)});
+        if (f.resources_.size() <= core::kPsdKeptMax) {
+            f.resources_.push_back(ResourceAt{rid, std::string(resource_name), static_cast<std::uint64_t>(block.data() - d.data()), std::min<std::uint64_t>(size, block.size())});
+        }
         // (vector@1, PC3 C-a: the saved paths, the work path, the clipping path — render/psd_paths reads them)
         if ((rid >= 2000 && rid <= 2997) || rid == 1025 || rid == 2999) {
             f.path_resources_.push_back(PathResource{rid, std::string(resource_name), std::string(block.substr(0, size))});
@@ -819,8 +821,11 @@ File File::read(std::string data, const Limits& limits, bool lab) {
         // (PC3 A3: the files of its placed layers; PC4 E3: its patterns; PC4 F-d: every global block)
         linked_blocks(d, f.psb_, li_end, lm_end, f.linked_blocks_, &f.pattern_blocks_, &f.globals_);
         // (PC4 F-d, not psd.py's: a 16- or 32-bit file whose section holds no layers keeps them in its global Lr16 or Lr32
-        // block, as Photoshop writes one. One this reader cannot read leaves the file as before: its merged picture)
-        if (f.records_.empty()) {
+        // block, as Photoshop writes one. One this reader cannot read leaves the file as before: its merged picture. The
+        // merged picture's transparency stays as before — the section's having no layers says it, `flat_` —, and the
+        // Python reference's view reads no Lr16 or Lr32: psd.py does not)
+        f.flat_ = f.records_.empty();
+        if (f.records_.empty() && !python_view()) {
             for (const Record::BlockAt& block : f.globals_) {
                 if (block.key != "Lr16" && block.key != "Lr32") continue;
                 std::vector<Record> records;
@@ -1119,6 +1124,13 @@ std::optional<std::uint32_t> File::protection(const Layer& layer) const {
     return layer.record < records_.size() ? records_[layer.record].lspf : std::nullopt;
 }
 
+std::vector<File::ImageResource> File::resources() const {
+    std::vector<ImageResource> out;
+    out.reserve(resources_.size());
+    for (const ResourceAt& r : resources_) out.push_back(ImageResource{r.id, r.name, at_place(data_, r.at, r.size)});
+    return out;
+}
+
 std::vector<File::TaggedBlock> File::global_blocks() const {
     std::vector<TaggedBlock> out;
     for (const Record::BlockAt& block : globals_) out.push_back(TaggedBlock{block.signature, block.key, at_place(data_, block.at, block.size)});
@@ -1266,7 +1278,7 @@ std::optional<std::map<int, std::string>> File::merged_raw() const {
     std::map<int, std::string> channels;
     const int colour = colour_bands(mode_);
     for (int c = 0; c < colour; ++c) channels[c] = plane_samples(static_cast<std::size_t>(c));
-    if (static_cast<std::uint64_t>(nchan_) > static_cast<std::uint64_t>(colour) && records_.empty()) {
+    if (static_cast<std::uint64_t>(nchan_) > static_cast<std::uint64_t>(colour) && flat_) {  // (PC4 F-d: its section's)
         channels[-1] = plane_samples(static_cast<std::size_t>(colour));  // (a flat file's transparency)
     }
     return channels;
@@ -1478,7 +1490,7 @@ std::vector<File::ExtraChannel> File::extra_channels() const {
     const MergedPlan plan = plan_merged();
     if (!plan.exists || depth_ == 1) return {};
     const int colour = colour_bands(mode_);
-    const int first = colour + (records_.empty() ? 1 : 0);  // (a flat file's transparency is not one)
+    const int first = colour + (flat_ ? 1 : 0);  // (a flat file's transparency is not one; PC4 F-d: its section's)
     if (nchan_ <= first) return {};
     canvas_fits(width_, height_);
     const std::uint64_t rowbytes = row_bytes(width_, depth_);

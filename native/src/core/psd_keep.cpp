@@ -212,8 +212,9 @@ bool one_of(std::string_view key, std::initializer_list<std::string_view> keys) 
 }  // namespace
 
 bool psd_layer_block_kept(std::string_view key) {
-    return !one_of(key, {// written by this build, or read into the layer: its name, id, section and locks
-                         "luni", "lyid", "lsct", "lsdk", "lspf",
+    return !one_of(key, {// written by this build, or read into the layer: its name, id and section (its locks' lspf is
+                         // kept when it locks something — its other bits so —, and written again from the layer's locks)
+                         "luni", "lyid", "lsct", "lsdk",
                          // the layer info (never a layer's)
                          "Lr16", "Lr32", "Layr",
                          // PC2: the adjustment layers' blocks a codec reads (and writes)
@@ -246,7 +247,7 @@ bool psd_resource_names_layers(int id) { return id == 1065 || id == 1050; }
 bool psd_effect_key(std::string_view key) { return one_of(key, {"lfx2", "lfxs", "lmfx", "lrFX"}); }
 
 bool psd_effects_kept(const Layer& layer) {
-    if (!layer.native_psd) return false;
+    if (!layer.native_psd || layer.kind == LayerKind::Folder) return false;  // (a folder's are not written back)
     return std::any_of(layer.native_psd->blocks.begin(), layer.native_psd->blocks.end(), [](const auto& block) { return psd_effect_key(block.first); });
 }
 

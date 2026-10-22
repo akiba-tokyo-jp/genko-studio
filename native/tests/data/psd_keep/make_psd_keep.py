@@ -16,6 +16,12 @@ It writes, and lists with their sha256 in MANIFEST.json:
   deep-rgb16-lr16.psd
                 deep-rgb16.psd's layers in the global block Lr16 (as Photoshop writes a 16-bit file's), the layer info
                 section empty.
+  deep-rgb32-lr32.psd
+                deep-rgb32.psd's layers in the global block Lr32 so (the PC4 F-d review).
+  deep-rgba16-lr16.psd
+                deep-rgb16-lr16.psd with a transparency in its merged picture, as Photoshop writes one (the header's
+                channels 4, the merged picture's fourth its alpha: the left half clear, the right opaque; the global block
+                Mt16 after Lr16) — the merged picture a smart object of it shows (the PC4 F-d review).
 Every file is opened again with psd-tools before it is listed (a file it cannot read is not written).
 """
 
@@ -259,9 +265,9 @@ def checked(psd, path, composite=True):
     return raw
 
 
-def lr16(raw):
-    """The file psd-tools wrote with its layer info moved into the global block Lr16 — the layer info section's length 0,
-    as Photoshop writes a 16-bit file —, read again by psd-tools (which takes the layers from Lr16)."""
+def lr16(raw, key=b"Lr16"):
+    """The file psd-tools wrote with its layer info moved into the global block Lr16 (or Lr32) — the layer info section's
+    length 0, as Photoshop writes a 16- or 32-bit file —, read again by psd-tools (which takes the layers from it)."""
     at = 26
     at += 4 + struct.unpack(">I", raw[at:at + 4])[0]  # (colour mode data)
     at += 4 + struct.unpack(">I", raw[at:at + 4])[0]  # (image resources)
@@ -271,11 +277,32 @@ def lr16(raw):
     info = raw[start + 4:start + 4 + info_length]
     rest = raw[start + 4 + info_length:end]  # (the global layer mask info, the global blocks)
     mask = 4 + struct.unpack(">I", rest[0:4])[0]
-    lr = b"8BIMLr16" + u32(len(info)) + info + b"\x00" * ((4 - len(info) % 4) % 4)
+    lr = b"8BIM" + key + u32(len(info)) + info + b"\x00" * ((4 - len(info) % 4) % 4)
     body = u32(0) + rest[:mask] + lr + rest[mask:]
     out = raw[:at] + u32(len(body)) + body + raw[end:]
     again = PSDImage.open(io.BytesIO(out))
     assert len(list(again.descendants())) == 2
+    return out
+
+
+def transparent(raw, w=8, h=6):
+    """The file with a transparency in its merged picture, as Photoshop writes a 16-bit file with one: the header's
+    channels 4, the global block Mt16 (empty) after the others, the merged picture raw — red, green and blue odd values,
+    its alpha 0 on the left half, 65535 on the right —, read again by psd-tools (its two layers, its composite clear on the
+    left)."""
+    at = 26
+    at += 4 + struct.unpack(">I", raw[at:at + 4])[0]  # (colour mode data)
+    at += 4 + struct.unpack(">I", raw[at:at + 4])[0]  # (image resources)
+    section = struct.unpack(">I", raw[at:at + 4])[0]
+    body = raw[at + 4:at + 4 + section] + b"8BIMMt16" + u32(0)
+    planes = b""
+    for c, v in enumerate([0xF001, 0x1235, 0x8001]):
+        planes += u16(v) * (w * h)
+    planes += b"".join(u16(0 if i % w < w // 2 else 65535) for i in range(w * h))
+    out = raw[:12] + u16(4) + raw[14:at] + u32(len(body)) + body + u16(0) + planes
+    again = PSDImage.open(io.BytesIO(out))
+    assert len(list(again.descendants())) == 2
+    assert again._record.header.channels == 4
     return out
 
 
@@ -290,6 +317,12 @@ def main():
     moved = lr16(files["deep-rgb16.psd"])
     (folder / "deep-rgb16-lr16.psd").write_bytes(moved)
     files["deep-rgb16-lr16.psd"] = moved
+    moved32 = lr16(files["deep-rgb32.psd"], b"Lr32")
+    (folder / "deep-rgb32-lr32.psd").write_bytes(moved32)
+    files["deep-rgb32-lr32.psd"] = moved32
+    clear = transparent(moved)
+    (folder / "deep-rgba16-lr16.psd").write_bytes(clear)
+    files["deep-rgba16-lr16.psd"] = clear
     import PIL
     import psd_tools
     manifest = {

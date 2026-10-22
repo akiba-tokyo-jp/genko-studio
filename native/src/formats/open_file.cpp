@@ -346,7 +346,7 @@ Opened open_psd(std::string_view bytes, const std::string& file, const OpenOptio
     const std::string title = stem_of(file);
     std::vector<std::string> notes;
     if (head.width == 0 || head.height == 0) throw core::Error("format", "the PSD cannot be read (it has no pixels)");
-    options.limits.check(head.width, head.height, Layout::Rgba, head.depth > 8 ? Sample::U16 : Sample::U8);
+    options.limits.check(head.width, head.height, Layout::Rgba, head.depth == 32 ? Sample::F32 : head.depth > 8 ? Sample::U16 : Sample::U8);
     Opened out;
     if (head.mode == 2 || head.mode == 7) {
         // (indexed and multichannel: the merged picture, as Pillow reads it — an indexed page of its colours)
@@ -377,7 +377,12 @@ Opened open_psd(std::string_view bytes, const std::string& file, const OpenOptio
         out.profile_missing = !lab && !own;
         if (rgb) {
             const std::string chosen = own ? head.icc : options.working_rgb;
-            const std::string icc = chosen.empty() || render::proof::same_as_srgb(chosen) ? std::string() : chosen;
+            std::string icc = chosen.empty() || render::proof::same_as_srgb(chosen) ? std::string() : chosen;
+            // (the PC4 F-d review: a 32-bit file's values are linear light, as Photoshop's 32 bits are — in sRGB's colours
+            // (its profile sRGB's, or none) the page is the built-in linear-srgb's and they come in as they are, as an
+            // OpenEXR's do; in another profile's the page is that profile's and they are encoded by 1/2.2, as this build
+            // reads 32 bits elsewhere)
+            if (depth == 32 && icc.empty()) icc = builtin_bytes("linear-srgb");
             if (depth != 8 || !icc.empty()) {
                 core::RgbMode mode;
                 mode.depth = depth;
@@ -409,9 +414,15 @@ Opened open_psd(std::string_view bytes, const std::string& file, const OpenOptio
         Json report;
         try {
             report = render::import_psd_data(doc, op, std::string(bytes), true);
-        } catch (const core::Error& error) {
+            core::validate_color_document(doc);  // (the book as an op leaves it: its precise colour within its budget)
+        } catch (const render::NotYetPorted&) {
+            throw;
+        } catch (const std::runtime_error& error) {  // (core::Error, and import_psd's OpError and OpKeyError: the PC4 F-d review)
             const std::string why = error.what();
-            if (why.find("too large") != std::string::npos || why.find("too many layers") != std::string::npos) throw core::Error("image_too_large", why);
+            if (why.find("too large") != std::string::npos || why.find("too many layers") != std::string::npos ||
+                why.find("budget exceeded") != std::string::npos) {
+                throw core::Error("image_too_large", why);
+            }
             throw core::Error("format", why);
         }
         if (head.mode == 0 && !make_bitmap(doc)) notes.push_back("2 階調のままでは開けなかったため、グレースケールで開きました");
@@ -423,7 +434,13 @@ Opened open_psd(std::string_view bytes, const std::string& file, const OpenOptio
             for (const Json& n : report["skipped"]) names += (names.empty() ? "" : "、") + (n.is_string() ? n.get<std::string>() : std::string());
             notes.push_back("この版で読めないレイヤーは開きませんでした（" + names + "）");
         }
-        if (report.contains("psd_blocks_cut")) notes.push_back("塊の多すぎるレイヤーの一部の塊は保てませんでした");
+        if (report.contains("psd_blocks_cut")) notes.push_back("PSD の塊の一部は、多すぎるか大きすぎるため保てませんでした");
+        if (report.contains("in_8_bits")) {
+            const std::string why = report["in_8_bits"].is_string() ? report["in_8_bits"].get<std::string>() : std::string();
+            notes.push_back(why == "budget" ? "高精度の画素が本の上限（1 GiB）を越えるため、レイヤーを 8 bit で読みました"
+                            : why == "mode" ? "ファイルのプロファイルがページと違うため、レイヤーを 8 bit で読みました"
+                                            : "レイヤーを 8 bit で読みました");
+        }
         out.doc = std::move(doc);
         for (std::string& note : notes) out.notes.push_back(std::move(note));
     }
