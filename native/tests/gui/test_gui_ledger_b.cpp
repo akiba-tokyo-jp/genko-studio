@@ -786,9 +786,11 @@ private slots:
         QVERIFY(prints != nullptr);
         prints->setChecked(true);
         QVERIFY(w->target_layer()->color_prints);
-        QStringList filters;
-        for (int i = 0; i < panel->filter_box()->count(); ++i) filters << panel->filter_box()->itemData(i).toString();
-        for (const char* key : {"motion_blur", "lineart", "gradient_map", "posterize"}) QVERIFY2(filters.contains(QString::fromLatin1(key)), key);
+        // (PC4 節 D, the user's decision 1: the filters are フィルター's — the panel's かける… opens it —, Genko's own in 漫画, the
+        // corrections レイヤー → 色調補正's)
+        QVERIFY(panel->filter_button() != nullptr);
+        for (const char* name : {"act_filter_blur_gaussian", "act_filter_manga_lineart", "act_adjust_gradient_map", "act_adjust_posterize"})
+            QVERIFY2(w->action(QString::fromLatin1(name)) != nullptr, name);
         auto* blend = panel->findChild<QComboBox*>(QStringLiteral("layer_blend"));
         QVERIFY(blend != nullptr);
         QStringList blends;

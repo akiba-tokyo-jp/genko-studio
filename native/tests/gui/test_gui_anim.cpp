@@ -18,6 +18,7 @@
 #include <QListWidget>
 #include <QTableWidget>
 #include <fstream>
+#include <map>
 #include "gui_support.hpp"
 #include "app/layer_panel.hpp"
 #include "app/main_window.hpp"
@@ -66,6 +67,22 @@ struct Studio {
         return gui_test::wait_for([&] { return !session->unsaved(); }, 20000);
     }
 };
+
+}  // namespace
+
+namespace {
+
+// フィルター → プラグイン's filters (PC4 節 D: the layer panel's list is the フィルター menu now), made again as it opens:
+// each plugin's kind and its words.
+std::map<QString, QString> plugin_filters(app::MainWindow* w) {
+    std::map<QString, QString> out;
+    auto* menu = w->findChild<QMenu*>(QStringLiteral("menu_filter_plugins"));
+    if (menu == nullptr) return out;
+    emit w->filter_menu()->aboutToShow();
+    for (QAction* a : menu->actions())
+        if (a->data().toString().startsWith(QStringLiteral("plugin:"))) out[a->data().toString()] = a->text();
+    return out;
+}
 
 }  // namespace
 
@@ -230,9 +247,7 @@ private slots:
         const std::filesystem::path folder = render::plugins::folder();
         std::filesystem::create_directories(folder);
         std::ofstream(folder / "sepia.py") << "NAME = 'セピア'\ndef run(image, amount=1.0):\n    return image\n";
-        auto* filters = w->layer_panel()->findChild<QComboBox*>(QStringLiteral("layer_filter"));
-        QVERIFY(filters != nullptr);
-        QCOMPARE(filters->findData(QStringLiteral("plugin:sepia")), -1);  // (off at first)
+        QVERIFY(!plugin_filters(w).contains(QStringLiteral("plugin:sepia")));  // (off at first)
         const QString python = genko::test::python_ref();
         int asked = 0;
         s.answers.responder->question = [&](const QString& title, const QString&) {
@@ -254,8 +269,8 @@ private slots:
         QVERIFY(render::plugins::settings().enabled);
         QVERIFY(render::plugins::allowed("sepia"));
         if (!python.isEmpty()) {  // (its name read by the runner: the reference Python has Pillow)
-            QVERIFY(filters->findData(QStringLiteral("plugin:sepia")) >= 0);
-            QCOMPARE(filters->itemText(filters->findData(QStringLiteral("plugin:sepia"))), QStringLiteral("セピア（プラグイン）"));
+            QVERIFY(plugin_filters(w).contains(QStringLiteral("plugin:sepia")));
+            QCOMPARE(plugin_filters(w).at(QStringLiteral("plugin:sepia")), QStringLiteral("セピア"));
         }
         render::plugins::Settings off = render::plugins::settings();
         off.enabled = false;
@@ -311,11 +326,10 @@ private slots:
         QVERIFY(render::plugins::allowed("tint"));
         QVERIFY(!render::plugins::allowed("broken"));
         // offered among the filters by plugin.json's name (its settings too), nothing started to know them
-        auto* filters = w->layer_panel()->findChild<QComboBox*>(QStringLiteral("layer_filter"));
-        QVERIFY(filters != nullptr);
-        QVERIFY(filters->findData(QStringLiteral("plugin:tint")) >= 0);
-        QCOMPARE(filters->itemText(filters->findData(QStringLiteral("plugin:tint"))), QStringLiteral("色づけ（プラグイン）"));
-        QCOMPARE(filters->findData(QStringLiteral("plugin:broken")), -1);
+        const auto filters = plugin_filters(w);
+        QVERIFY(filters.contains(QStringLiteral("plugin:tint")));
+        QCOMPARE(filters.at(QStringLiteral("plugin:tint")), QStringLiteral("色づけ"));
+        QVERIFY(!filters.contains(QStringLiteral("plugin:broken")));
         // the native plugins' words
         QCOMPARE(genko::wording::error(QStringLiteral("ops[0] filter_raster: the program of plugin tint could not be started (execve: Permission denied)")),
                  QStringLiteral("プラグイン「tint」のプログラムを起動できませんでした（このコンピューターで動くプログラムか確かめてください）"));

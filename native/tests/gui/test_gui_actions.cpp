@@ -341,7 +341,12 @@ private slots:
         // act_lock_layers), 表示 → スナップ and スナップ先 ▸ (act_snap_on, act_snap_guides, act_snap_grid, act_snap_layers,
         // act_snap_bounds, act_snap_all, act_snap_none) and the move tool's 自動選択・バウンディングボックスを表示
         // (act_move_auto_select, act_move_show_box) — theirs (test_gui_align).
-        QCOMPARE(w->actions_by_name().size(), std::size_t{453});
+        // and the 78 of PC4 節 D0 (SPEC COLOR-08「フィルター」, the user's decision 1) — the フィルター menu's commands
+        // act_filter_<kind> (77: Photoshop's, their kinds' groups D1…D6 lighting them; ぼかし・ぼかし（強）・シャープ・シャープ（強）・
+        // シャープ（輪郭のみ）・輪郭以外をぼかす as act_filter_blur, act_filter_blur_more, act_filter_sharpen, act_filter_sharpen_more,
+        // act_filter_sharpen_edges, act_filter_despeckle; 漫画's five act_filter_manga_<kind>) and 前回のフィルター (act_filter_last)
+        // — theirs (test_gui_filters).
+        QCOMPARE(w->actions_by_name().size(), std::size_t{531});
         QVERIFY(w->action("act_chat_approval"));
         QVERIFY(w->action("act_style"));
         QVERIFY(w->action("act_exposure"));
