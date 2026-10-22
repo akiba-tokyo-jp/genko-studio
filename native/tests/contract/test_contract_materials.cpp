@@ -5,11 +5,13 @@
 // folders.json text byte for byte, and pictures with the same pixels. Then what C++ does beyond Python, so a library
 // is never lost or reached outside: a library that cannot be read is never written over, a linked library folder is
 // left alone, a picture outside the library is never deleted, a pack's links are not followed, and a zip that is
-// broken, encrypted or too large is refused.
+// broken, encrypted or too large is refused. And the zip64 archives render/zip packs (a backup past 4 GiB or 65535
+// files) read whole by Python's zipfile.
 
 #include <QCryptographicHash>
 #include <QDir>
 #include <QFile>
+#include <QProcessEnvironment>
 #include <QTemporaryDir>
 #include <QtTest>
 
@@ -19,6 +21,8 @@
 #include <fstream>
 #include <iterator>
 #include <string>
+#include <utility>
+#include <vector>
 
 #include "core/error.hpp"
 #include "core/json.hpp"
@@ -582,6 +586,33 @@ private slots:
         spit(dir / "broken.zip", "PK broken");
         QVERIFY_THROWS_EXCEPTION(core::PyValueError, materials::import_pack(dir, dir / "broken.zip"));
         QCOMPARE(materials::user_materials(dir), Json::array());
+    }
+
+    // zip64 (a backup past 4 GiB or 65535 files, Python's zipfile writes it so): the archives of test_gui_look's
+    // bigBackupsAreZip64 — one with the zip64 records from its first byte, one of 65537 files — read whole by Python's
+    // zipfile (their end records are looked at there, without Python).
+    void bigZipsAreReadWholeByPython() {
+        if (genko::test::python_ref().isEmpty()) QSKIP("no reference Python: set GENKO_PYREF or install /opt/pyref/bin/python");
+        QTemporaryDir tmp;
+        const fs::path dir = core::path_from_utf8(tmp.path().toStdString());
+        const fs::path source = dir / "s.txt";
+        spit(source, "abc");
+        const fs::path forced = dir / "forced.zip";
+        render::zip::pack(forced, {{"a.genko/project.json", source}, {"x/y.txt", source}}, 1);
+        std::vector<std::pair<std::string, fs::path>> many;
+        for (int i = 0; i < 65537; ++i) many.emplace_back("n/" + std::to_string(i) + ".txt", source);
+        const fs::path crowded = dir / "crowded.zip";
+        render::zip::pack(crowded, many);
+        for (const auto& [archive, count] : {std::pair{forced, 2}, std::pair{crowded, 65537}}) {
+            const genko::test::Run check = genko::test::run(
+                genko::test::python_ref(),
+                {QStringLiteral("-I"), QStringLiteral("-c"),
+                 QStringLiteral("import sys, zipfile; z = zipfile.ZipFile(sys.argv[1]); assert z.testzip() is None; print(len(z.namelist()))"),
+                 QString::fromStdString(core::path_to_utf8(archive))},
+                QProcessEnvironment::systemEnvironment(), 120000);
+            QVERIFY2(check.finished && check.exit_code == 0, qPrintable(check.described()));
+            QCOMPARE(check.out.trimmed().toInt(), count);
+        }
     }
 };
 
