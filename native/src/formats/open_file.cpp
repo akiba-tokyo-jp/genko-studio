@@ -5,6 +5,7 @@
 #include <algorithm>
 #include <cctype>
 #include <cmath>
+#include <unordered_map>
 
 #include "core/actor.hpp"
 #include "core/base64.hpp"
@@ -95,6 +96,77 @@ std::string keep_bytes(core::Document& doc, std::string bytes) {
 
 // Is the page an 8-bit RGB page (none of the colour models that work at their pixels' grid already)?
 bool eight_bit_rgb(const core::Page& page) { return !page.color && (!page.rgb || page.rgb->depth == 8); }
+
+// The first page made an indexed page of its own colours, its pixels as they are (no flatten, no resample: the to_indexed
+// op flattens a page at its grid, the finest of an 8-bit RGB page, and quantizes what that made). The table: the colours
+// of its shown pixels, in the order met, and a slot for the clear ones (white, as to_indexed's) when there are some and
+// room for it. False when it holds more than 256 colours (it stays RGB).
+bool make_indexed(core::Document& doc) {
+    std::vector<std::array<int, 3>> colours;
+    std::unordered_map<std::uint32_t, std::size_t> seen;
+    bool clear = false;
+    for (const core::Layer& layer : doc.page(0).layers) {
+        if (!layer.raster_png || layer.raster_png->empty()) continue;
+        const std::string bytes = render::open_image(*layer.raster_png).convert("RGBA").tobytes();
+        for (std::size_t at = 0; at + 3 < bytes.size(); at += 4) {
+            const auto* q = reinterpret_cast<const unsigned char*>(bytes.data() + at);
+            if (q[3] == 0) {
+                clear = true;
+                continue;
+            }
+            const std::uint32_t key = (std::uint32_t(q[0]) << 16) | (std::uint32_t(q[1]) << 8) | q[2];
+            if (seen.count(key) != 0) continue;
+            if (colours.size() == core::kColorTableMax) return false;
+            seen.emplace(key, colours.size());
+            colours.push_back({q[0], q[1], q[2]});
+        }
+    }
+    core::ColorTable table;
+    table.colors = std::move(colours);
+    if ((clear || table.colors.empty()) && table.colors.size() < core::kColorTableMax) {
+        table.colors.push_back({255, 255, 255});
+        table.transparent = static_cast<int>(table.colors.size() - 1);
+    }
+    core::check_color_table(table);
+    core::RgbMode mode;
+    mode.table = table;
+    core::Page& page = doc.edit_page(0);
+    page.rgb = mode;
+    page.color.reset();
+    doc.rgb = std::move(mode);
+    doc.color.reset();
+    return true;
+}
+
+// The first page, a grey page of 8 bits, made a bitmap page of Threshold's look, its layers' pixels 0 or full at 50% over
+// white and opaque (to_bitmap's threshold) where they are: the to_bitmap op flattens the page into a layer of another
+// name. False when it is not such a page.
+bool make_bitmap(core::Document& doc) {
+    if (doc.page(0).color == std::nullopt || !doc.color) return false;
+    const core::PageColor& was = *doc.page(0).color;
+    if (was.space != core::InkSpace::Gray || was.depth != 8 || was.bitmap || !was.duotone.empty()) return false;
+    core::Page& page = doc.edit_page(0);
+    for (core::Layer& layer : page.layers) {
+        if (!layer.ink_raster) continue;
+        core::InkPixels pixels = core::decode_ink_raster(*layer.ink_raster);
+        for (std::size_t i = 0; i < pixels.pixel_count(); ++i) {
+            const double a = std::clamp(pixels.value(i, 1), 0.0, 1.0);
+            const double v = std::clamp(pixels.value(i, 0), 0.0, 1.0) * a + (1.0 - a);
+            pixels.set(i, 0, v >= 0.5 ? 1.0 : 0.0);
+            pixels.set(i, 1, 1.0);
+        }
+        layer.ink_raster = std::make_shared<const std::string>(core::encode_ink_raster(pixels));
+        layer.ink_memo = {};
+    }
+    core::BitmapLook look;
+    look.method = "threshold";
+    page.color->bitmap = look;
+    page.color->duotone.clear();
+    doc.color->depth = 8;
+    doc.color->bitmap = look;
+    doc.color->duotone.clear();
+    return true;
+}
 
 }  // namespace
 
@@ -236,16 +308,11 @@ Opened open_file(std::string_view bytes, std::string_view name, const OpenOption
     Opened out = picture_book(std::move(picture), stem_of(file), as_said);
     for (std::string& note : notes) out.notes.push_back(std::move(note));
     core::Document& doc = out.doc;
-    // (the colour model of its pixels: a colour table's exact colours, one bit's black and white)
-    try {
-        if (meta.palette && eight_bit_rgb(doc.page(0))) {
-            doc = applied(doc, Json::array({Json{{"op", "to_indexed"}, {"page", 1}, {"palette", "exact"}, {"forced", "none"}, {"dither", "none"},
-                                                 {"transparency", true}, {"default", true}}}));
-        } else if (meta.one_bit && doc.page(0).color && doc.page(0).color->space == core::InkSpace::Gray && doc.page(0).color->depth == 8) {
-            doc = applied(doc, Json::array({Json{{"op", "to_bitmap"}, {"page", 1}, {"method", "threshold"}, {"default", true}}}));
-        }
-    } catch (const core::Error&) {
-        out.notes.push_back(meta.palette ? "カラーテーブルの色のままでは開けなかったため、RGB で開きました" : "2 階調のままでは開けなかったため、グレースケールで開きました");
+    // (the colour model of its pixels: a colour table's exact colours, one bit's black and white — its pixels as they are)
+    if (meta.palette && eight_bit_rgb(doc.page(0))) {
+        if (!make_indexed(doc)) out.notes.push_back("カラーテーブルの色のままでは開けなかったため、RGB で開きました");
+    } else if (meta.one_bit && !make_bitmap(doc)) {
+        out.notes.push_back("2 階調のままでは開けなかったため、グレースケールで開きました");
     }
     if (exif) source.exif = keep_bytes(doc, *exif);
     if (xmp) {
@@ -322,7 +389,7 @@ Opened new_image(const NewImage& image, const OpenOptions& options) {
         }
         try {
             doc = applied(doc, Json::array({op}));
-            if (image.mode == "bitmap") doc = applied(doc, Json::array({Json{{"op", "to_bitmap"}, {"page", 1}, {"method", "threshold"}, {"default", true}}}));
+            if (image.mode == "bitmap" && !make_bitmap(doc)) throw core::Error("value", "the new image could not be made a bitmap image");
         } catch (const core::ApplyError& error) {
             throw core::Error("value", error.what());
         }

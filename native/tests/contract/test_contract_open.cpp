@@ -619,6 +619,14 @@ private slots:
         QVERIFY(bitmap.doc.page(0).color && bitmap.doc.page(0).color->bitmap);
         QCOMPARE(bitmap.doc.page(0).native_source->depth, 1);
         QCOMPARE(bitmap.doc.page(0).native_source->mode, std::string("bitmap"));
+        // (their pixels as they are, in the layer the file is: not flattened into another)
+        QCOMPARE(page.layers.size(), std::size_t(1));
+        QCOMPARE(page.layers[0].title, std::string("背景"));
+        QCOMPARE(bitmap.doc.page(0).layers.size(), std::size_t(1));
+        QCOMPARE(bitmap.doc.page(0).layers[0].title, std::string("背景"));
+        const core::InkPixels ones = core::decode_ink_raster(*bitmap.doc.page(0).layers[0].ink_raster);
+        QCOMPARE(ones.width, 8u);
+        QCOMPARE(ones.value(0, 0), 0.0);
         for (const auto& opened : {std::cref(indexed), std::cref(bitmap)}) {
             const fs::path dir = at(opened.get().doc.page(0).native_source->mode == "indexed" ? "indexed.genko" : "bitmap.genko");
             write_book(opened.get().doc, dir);
