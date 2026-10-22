@@ -286,7 +286,8 @@ private slots:
         d.trigger("act_close_others");
         QCOMPARE(d.tabs(), 1);
         QCOMPARE(d.doc().title, kept);
-        // (one of those closed opened again — the one kept is brought to the front instead, the pictures decoded in any order)
+        // (one of those closed opened again — the one kept is brought to the front instead, the pictures decoded in any order
+        // —: a tab of its own, the picture's book alone in the window not given away as an untouched untitled book is)
         const QString again = kept == "a" ? QStringLiteral("b.png") : QStringLiteral("a.png");
         d.window->open_path(path_of(d.dir.filePath(again)));
         QVERIFY(wait_for([&] { return d.tabs() == 2; }));
