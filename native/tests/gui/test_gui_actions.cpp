@@ -341,7 +341,9 @@ private slots:
         // act_lock_layers), 表示 → スナップ and スナップ先 ▸ (act_snap_on, act_snap_guides, act_snap_grid, act_snap_layers,
         // act_snap_bounds, act_snap_all, act_snap_none) and the move tool's 自動選択・バウンディングボックスを表示
         // (act_move_auto_select, act_move_show_box) — theirs (test_gui_align).
-        QCOMPARE(w->actions_by_name().size(), std::size_t{453});
+        // and the 2 of PC4 E-0 (SPEC COLOR-08) — ツール → 描画色と背景色を初期設定に戻す (act_default_colours) and ウィンドウ →
+        // スウォッチ (act_swatches) — theirs (test_gui_paint).
+        QCOMPARE(w->actions_by_name().size(), std::size_t{455});
         QVERIFY(w->action("act_chat_approval"));
         QVERIFY(w->action("act_style"));
         QVERIFY(w->action("act_exposure"));

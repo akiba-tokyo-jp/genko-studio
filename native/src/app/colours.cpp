@@ -854,7 +854,7 @@ bool ColourPanel::keep_set(const std::string& name) {
     try {
         colours::save_set(core::poses::config_dir(), name, found != sets_.end() ? std::optional(found->second) : std::nullopt);
     } catch (const std::exception& error) {
-        ask::warning(this, QStringLiteral("スウォッチ"),
+        ask::warning(this, QStringLiteral("スウォッチのグループ"),
                      QStringLiteral("スウォッチのグループを保存できませんでした。\n%1").arg(wording::error(QString::fromUtf8(error.what()))));
         return false;
     }
