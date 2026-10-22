@@ -706,19 +706,21 @@ private slots:
         const auto turned = inks_of(apply_ops(cmyk, Json::array({Json{{"op", "filter_raster"}, {"page", 1}, {"id", "pic"}, {"kind", "stylize_solarize"}}})).doc);
         QCOMPARE(turned.value(5 * 64 + 5, 3), 1.0);  // (no ink — light 1, past the middle — turned to K 100%, as RGB's white turns black)
         QCOMPARE(turned.value(32 * 64 + 32, 3), 1.0);
-        // a Lab page (L 20 and 90, a 40, b −30): a relief and the edges grey (a = b = 0), solarized its L alone
-        const auto lab = ink_page("lab", [](std::uint32_t x, std::uint32_t, unsigned c) { return c == 0 ? (x < 32 ? 20.0 : 90.0) : c == 1 ? 40.0 : -30.0; });
+        // a Lab page (its samples as stored, normalized: L 20 and 90 as 0.2 and 0.9, a 76 and b −51.5 as 0.8 and 0.3 —
+        // (a + 128) / 255 —): a relief and the edges grey (a = b = 0: 128 / 255), solarized its L alone
+        const auto lab = ink_page("lab", [](std::uint32_t x, std::uint32_t, unsigned c) { return c == 0 ? (x < 32 ? 0.2 : 0.9) : c == 1 ? 0.8 : 0.3; });
         for (const char* kind : {"stylize_emboss", "stylize_find_edges", "stylize_trace_contour"}) {
             const auto now = inks_of(apply_ops(lab, Json::array({Json{{"op", "filter_raster"}, {"page", 1}, {"id", "pic"}, {"kind", kind}}})).doc);
-            for (unsigned c = 1; c < 3; ++c) QVERIFY2(std::fabs(now.value(10 * 64 + 10, c)) < 0.6, qPrintable(QStringLiteral("%1: %2").arg(kind).arg(now.value(10 * 64 + 10, c))));
+            for (unsigned c = 1; c < 3; ++c)
+                QVERIFY2(std::fabs(now.value(10 * 64 + 10, c) - 128.0 / 255.0) < 0.002, qPrintable(QStringLiteral("%1: %2").arg(kind).arg(now.value(10 * 64 + 10, c))));
         }
         {
             const auto now = inks_of(apply_ops(lab, Json::array({Json{{"op", "filter_raster"}, {"page", 1}, {"id", "pic"}, {"kind", "stylize_solarize"}}})).doc);
             const auto said = [&](std::size_t i, unsigned c) { return QString::number(now.value(i, c)).toUtf8(); };
-            QVERIFY2(std::fabs(now.value(10 * 64 + 40, 0) - 10.0) < 0.1, said(10 * 64 + 40, 0).constData());  // (L 90 past the middle: 10)
-            QVERIFY2(std::fabs(now.value(10 * 64 + 10, 0) - 20.0) < 0.1, said(10 * 64 + 10, 0).constData());  // (L 20: as it was)
-            QVERIFY2(std::fabs(now.value(10 * 64 + 10, 1) - 40.0) < 0.6, said(10 * 64 + 10, 1).constData());  // (its a and b as they were)
-            QVERIFY2(std::fabs(now.value(10 * 64 + 10, 2) + 30.0) < 0.6, said(10 * 64 + 10, 2).constData());
+            QVERIFY2(std::fabs(now.value(10 * 64 + 40, 0) - 0.1) < 0.002, said(10 * 64 + 40, 0).constData());  // (L 90 past the middle: 10)
+            QVERIFY2(std::fabs(now.value(10 * 64 + 10, 0) - 0.2) < 0.002, said(10 * 64 + 10, 0).constData());  // (L 20: as it was)
+            QVERIFY2(std::fabs(now.value(10 * 64 + 10, 1) - 0.8) < 0.002, said(10 * 64 + 10, 1).constData());  // (its a and b as they were)
+            QVERIFY2(std::fabs(now.value(10 * 64 + 10, 2) - 0.3) < 0.002, said(10 * 64 + 10, 2).constData());
         }
         // a multichannel page and a grey one take each of them
         for (const std::string mode : {"multichannel", "gray"}) {
