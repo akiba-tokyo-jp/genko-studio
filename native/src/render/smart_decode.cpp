@@ -75,6 +75,7 @@ struct PngShape {
     png_uint_32 ppm_x = 0;
     int unit = 0;
     bool phys = false;
+    bool trns = false;
     std::size_t rowbytes = 0;
     int channels = 0, depth_after = 0;
 };
@@ -90,6 +91,7 @@ bool png_head(png_structp png, png_infop info, PngShape* s) {
         s->phys = true;
         s->ppm_x = x;
     }
+    s->trns = png_get_valid(png, info, PNG_INFO_tRNS) != 0;
     return true;
 }
 
@@ -506,7 +508,11 @@ int stored_depth(std::string_view bytes) {
 int stored_samples(std::string_view bytes) {
     const auto kind = sniff(bytes);
     try {
-        if (kind && kind->first == "png") return std::max(png_shape(bytes).channels, 1);
+        if (kind && kind->first == "png") {  // (its colour type's samples, as png_set_expand leaves them: a tRNS as an alpha)
+            const PngShape s = png_shape(bytes);
+            const bool alpha = (s.color_type & PNG_COLOR_MASK_ALPHA) != 0 || s.trns;
+            return ((s.color_type & PNG_COLOR_MASK_COLOR) != 0 ? 3 : 1) + (alpha ? 1 : 0);
+        }
         if (kind && kind->first == "tiff") {
             Tiff t(bytes);
             return std::max<int>(tiff_shape(t.tif).samples, 1);
