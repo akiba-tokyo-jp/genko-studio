@@ -132,6 +132,25 @@ double rounded(double v) { return std::round(v * 10000.0) / 10000.0; }
 
 }  // namespace
 
+std::string kept_name(std::string_view name, std::string_view fallback, bool* cut) {
+    const auto space = [](unsigned char c) { return c == ' ' || c == '\t' || c == '\n' || c == '\r' || c == '\f' || c == '\v'; };
+    std::size_t start = 0, end = name.size();
+    while (start < end && space(static_cast<unsigned char>(name[start]))) ++start;
+    while (end > start && space(static_cast<unsigned char>(name[end - 1]))) --end;
+    std::string_view kept = name.substr(start, end - start);
+    // (at most kNameChars characters: cut before the lead byte of the one past them)
+    std::size_t chars = 0, at = 0;
+    for (; at < kept.size(); ++at) {
+        if ((static_cast<unsigned char>(kept[at]) & 0xC0) == 0x80) continue;
+        if (chars == kNameChars) break;
+        ++chars;
+    }
+    if (cut != nullptr) *cut = at < kept.size();
+    kept = kept.substr(0, at);
+    while (!kept.empty() && space(static_cast<unsigned char>(kept.back()))) kept.remove_suffix(1);
+    return kept.empty() ? std::string(fallback) : std::string(kept);
+}
+
 std::vector<Gradient> read(std::string_view data) {
     if (data.size() > kMaxBytes) broken("it is larger than " + std::to_string(kMaxBytes >> 20) + " MB");
     if (data.size() < 6) broken("it ends early");
@@ -205,7 +224,9 @@ Json to_presets(const std::vector<Gradient>& gradients, std::vector<std::string>
     std::set<std::string> names;
     bool midpoints = false, models = false;
     for (const Gradient& g : gradients) {
-        const std::string label = g.name.empty() ? std::string("グラデーション") : g.name;
+        bool cut = false;
+        const std::string label = kept_name(g.name, "グラデーション", &cut);
+        if (cut) warnings.push_back("「" + label + "…」の名前は長すぎるので " + std::to_string(kNameChars) + " 字に切りました");
         if (g.noise) {
             warnings.push_back("「" + label + "」はノイズのグラデーションなので読み込みませんでした");
             continue;

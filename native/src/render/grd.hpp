@@ -20,7 +20,11 @@ namespace genko::render::grd {
 
 inline constexpr std::size_t kMaxGradients = 10'000;  // (read from one file)
 inline constexpr std::size_t kMaxStops = 1'000;       // (each gradient's)
-inline constexpr std::size_t kMaxBytes = 512u << 20;  // (a file read)
+// (a file read: Photoshop's .grd files are some kilobytes to a few megabytes — review P1-1 of E4; what its descriptor
+// unpacks to is held to psd::descriptor::kUnpackedBudget as well)
+inline constexpr std::size_t kMaxBytes = 32u << 20;
+// (a name kept: preset_store's 1..200 characters — a longer one cut, its numbers " 2"… fitting after it)
+inline constexpr std::size_t kNameChars = 190;
 
 struct Colour {
     enum class Kind { Rgb, Hsb, Cmyk, Lab, Gray, Foreground, Background };
@@ -62,6 +66,11 @@ std::string write(const std::vector<Gradient>& gradients);
 // transparency 0..1; each name made unique among them), and what was not kept as it was in `warnings`: a noise gradient
 // (left out), midpoints other than 50 % (drawn at 50 %), more than 16 stops (the first 16), a colour of another model
 // (made sRGB: HSB as it is, CMYK by the simple sums, Lab from D50, grey as its ink).
+// (review P3-3: a name over the presets' 200 characters cut, one of spaces alone named グラデーション — said too)
 core::Json to_presets(const std::vector<Gradient>& gradients, std::vector<std::string>& warnings);
+
+// A name as a preset or a group keeps it (review P3-3): the spaces at its ends taken off, at most kNameChars characters
+// (`cut` set when it was longer), `fallback` when nothing is left.
+std::string kept_name(std::string_view name, std::string_view fallback, bool* cut = nullptr);
 
 }  // namespace genko::render::grd

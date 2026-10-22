@@ -37,10 +37,13 @@ struct How {
     bool dither = false;           // (an 8-bit layer: one level of noise before its bytes are rounded)
 };
 
-// The colours composited into the paint layer `layer_id` of the page at `at` where the coverage covers (its lines and the
-// pictures laid on it become its pixels first, image_ops::layer_pixels; its lock_alpha keeps each pixel's alpha), worked in
-// bands of rows when the part is large (a precise B4 page at 600 dpi is some 820 MB of floats). False when the coverage
-// covers nothing (the layer as it was).
+// The colours composited into the paint layer `layer_id` of the page at `at` where the coverage covers (its lock_alpha
+// keeps each pixel's alpha). An 8-bit layer's lines and the pictures laid on it become its pixels first
+// (image_ops::layer_pixels); an ink layer's in the 通常 mode stay as they are — its inks alone painted, under them, as
+// before E4 (review P2-1) —, in another mode they become its inks first. The layer is read and written once (a precise
+// layer's samples through one edit, an ink layer's inks, an 8-bit layer's picture) and worked in bands of rows in floats
+// (a precise B4 page at 600 dpi is some 820 MB of floats: review P3-6); only the pixels painted are written. False when
+// the coverage covers nothing (the layer as it was).
 bool paint(core::OpContext& c, std::size_t at, const std::string& layer_id, const std::optional<Coverage>& coverage, const Colour& colour,
            const How& how);
 

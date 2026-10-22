@@ -227,6 +227,11 @@ std::unordered_map<std::size_t, std::array<float, 4>> colours_at(const core::Pag
 
 }  // namespace
 
+std::unordered_map<std::size_t, std::array<float, 4>> layer_colours_at(const core::Page& page, const core::Layer& layer,
+                                                                       const std::vector<std::size_t>& wanted) {
+    return colours_at(page, layer, wanted);
+}
+
 std::vector<core::Stroke> mixed_pieces(const core::Page& page, const core::Layer& layer, const core::Stroke& stroke, double mix,
                                        double stretch) {
     constexpr double kStepMm = 1.5;

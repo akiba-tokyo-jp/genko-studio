@@ -398,9 +398,14 @@ bool MainWindow::blend_bakes_ok(const core::Page& page, const core::Layer& layer
     QString what;
     if (lines > 0) what += QStringLiteral("線 %1 本").arg(lines);
     if (pictures > 0) what += (what.isEmpty() ? QString() : QStringLiteral("と")) + QStringLiteral("絵 %1 枚").arg(pictures);
-    auto* text = new QLabel(QStringLiteral("このレイヤーの%1は 200 dpi の画素になり、線としては直せなくなります（取り消しで戻せます）。\n"
-                                           "「%2」で描きますか？")
-                                .arg(what, !how.isEmpty() ? how : brush_ != nullptr ? brush_->blend->currentText() : QString::fromStdString(pen_.blend)));
+    // (PC4 E4 review P3-11: a tool that fills — 塗りつぶしツール, 囲って塗る, グラデーションツール — says that its paint lies
+    // over them, and the layer's own grid)
+    auto* text = new QLabel(how.isEmpty() ? QStringLiteral("このレイヤーの%1は 200 dpi の画素になり、線としては直せなくなります（取り消しで戻せます）。\n"
+                                                           "「%2」で描きますか？")
+                                                .arg(what, brush_ != nullptr ? brush_->blend->currentText() : QString::fromStdString(pen_.blend))
+                                          : QStringLiteral("このレイヤーの%1はレイヤーの画素になり、%2の塗りはその上に重なります。"
+                                                           "線としては直せなくなります（取り消しで戻せます）。\n塗りますか？")
+                                                .arg(what, how));
     text->setWordWrap(true);
     layout->addWidget(text);
     auto* buttons = new QDialogButtonBox;

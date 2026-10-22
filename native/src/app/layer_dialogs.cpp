@@ -603,6 +603,17 @@ std::optional<Json> gradient_dialog(QWidget* parent, const core::Page* page, con
     form->addRow(QStringLiteral("端から先"), repeat);
     form->addRow(QString(), reverse);
     form->addRow(QStringLiteral("色"), colours);
+    // (PC4 E4 review P2-2: a gradient's transparency stops — the グラデーション panel's — kept as they are)
+    const Json* transparency = nullptr;
+    if (now.is_object()) {
+        if (const auto it = now.find("transparency"); it != now.end() && it->is_array()) transparency = &*it;
+    }
+    if (transparency != nullptr) {
+        auto* kept = new QLabel(QStringLiteral("不透明度の分岐点（%1 個）はそのまま残ります（直すにはグラデーション パネルで）").arg(transparency->size()));
+        kept->setObjectName(QStringLiteral("gradient_transparency_kept"));
+        kept->setWordWrap(true);
+        form->addRow(QStringLiteral("透明部分"), kept);
+    }
     form->addRow(ok_cancel(&dialog));
     if (ask::exec(&dialog) != QDialog::Accepted) return std::nullopt;
     const Way& chosen = ways[static_cast<std::size_t>(std::max(0, way->currentIndex()))];
@@ -620,6 +631,7 @@ std::optional<Json> gradient_dialog(QWidget* parent, const core::Page* page, con
     if (std::string(chosen.shape) == "ellipse") out["ratio"] = rounded(ratio->value(), 2);
     if (repeat->currentData().toString() != QStringLiteral("none")) out["repeat"] = repeat->currentData().toString().toStdString();
     if (reverse->isChecked()) out["reverse"] = true;
+    if (transparency != nullptr) out["transparency"] = *transparency;
     return out;
 }
 

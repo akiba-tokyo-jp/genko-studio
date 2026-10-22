@@ -11,6 +11,7 @@
 #include <QDoubleSpinBox>
 #include <QMenu>
 #include <QMenuBar>
+#include <QSignalSpy>
 #include <QSpinBox>
 #include <QStandardItemModel>
 #include <QToolBar>
@@ -24,6 +25,7 @@
 #include "app/colours.hpp"
 #include "app/gradients_panel.hpp"
 #include "app/inject.hpp"
+#include "app/layer_dialogs.hpp"
 #include "app/main_window.hpp"
 #include "app/tool_settings.hpp"
 #include "core/json.hpp"
@@ -353,6 +355,19 @@ private slots:
         QCOMPARE(basis->currentData().toString(), QStringLiteral("lines"));
         QCOMPARE(tolerance->value(), 32);
         QVERIFY(contiguous->isChecked() && antialias->isChecked() && !all_layers->isChecked());
+        // (review P3-2) on a pen layer the モード is grey and the fill goes in 通常 (the setting kept for paint layers)
+        blend->setCurrentIndex(blend->findData(QStringLiteral("multiply")));
+        emit blend->activated(blend->currentIndex());
+        const std::string pen = s.session->document().page(0).first_layer(core::LayerRole::Ink)->id;
+        s.window->set_target_layer(pen);
+        QVERIFY(!blend->isEnabled());
+        inject::click_mm(s.canvas(), QPointF(40, 50));
+        QCOMPARE(s.last()["op"], Json("fill"));
+        QCOMPARE(s.last()["layer_id"], Json(pen));
+        QVERIFY(!s.last().contains("blend"));
+        s.trigger("act_undo");
+        s.window->set_target_layer("p");
+        QVERIFY(blend->isEnabled());
         // モード and 不透明度, 線で囲まれた所: fill with them (the paint layer's pixels; the layer holds no lines or pictures yet: not
         // asked)
         blend->setCurrentIndex(blend->findData(QStringLiteral("multiply")));
@@ -507,9 +522,34 @@ private slots:
             std::ofstream out(grd_file.toStdString(), std::ios::binary);
             out << render::grd::write({g});
         }
+        // (read in the background: the panel's menu grey until it is in — review P1-1)
+        QSignalSpy imported(panel, &app::GradientsPanel::import_done);
         panel->import_grd(grd_file);
+        QVERIFY(panel->importing() && !panel->more->isEnabled());
+        QVERIFY(imported.wait(20000));
+        QVERIFY(!panel->importing() && panel->more->isEnabled());
         QCOMPARE(panel->tree->topLevelItem(panel->tree->topLevelItemCount() - 1)->text(0), QStringLiteral("空"));
         QVERIFY(s.window->last_notice().contains(QStringLiteral("1 個")));
+        // the same file again: asked before the group is replaced — no (the test's answer): its presets added to it
+        // (review P3-3)
+        s.answers.asked.clear();
+        panel->import_grd(grd_file);
+        QVERIFY(imported.wait(20000));
+        QVERIFY(s.answers.asked.join(QLatin1Char('\n')).contains(QStringLiteral("グループ「空」はもうあります")));
+        QTreeWidgetItem* sky = panel->tree->topLevelItem(panel->tree->topLevelItemCount() - 1);
+        QCOMPARE(sky->childCount(), 2);
+        QCOMPARE(sky->child(1)->text(0), QStringLiteral("夕焼け 2"));
+        // what `genko gradients` (or another window) wrote since is kept when the panel writes (review P3-4)
+        {
+            auto library = render::preset_store::load(core::poses::config_dir(), render::gradient_presets::kind());
+            (void)render::preset_store::add(library.groups, render::gradient_presets::kind(),
+                                            render::gradient_presets::item_of(Json::parse("{\"stops\": [\"#ff0000\", \"#00ff00\"]}"), "外から"), std::string("自分の"), "x");
+            render::preset_store::save(core::poses::config_dir(), render::gradient_presets::kind(), library.groups);
+        }
+        panel->new_group(QStringLiteral("あとの"));
+        const render::preset_store::Library both = render::preset_store::load(core::poses::config_dir(), render::gradient_presets::kind());
+        QVERIFY(render::preset_store::find(both.groups, "外から") != nullptr);
+        QVERIFY(std::any_of(both.groups.begin(), both.groups.end(), [](const auto& group) { return group.name == "あとの"; }));
         // 新規グラデーション塗りつぶしレイヤー: a gradient fill layer of the preset; a preset clicked with it chosen recolours it
         const std::size_t layers = s.session->document().page(0).layers.size();
         panel->tree->setCurrentItem(black_white = panel->tree->topLevelItem(0)->child(2));
@@ -534,6 +574,14 @@ private slots:
         QCOMPARE(op["op"], Json("set_layer"));
         QCOMPARE(op["fill"]["gradient"]["transparency"], Json::parse("[[0.0, 1.0], [1.0, 0.0]]"));
         QCOMPARE(fill_layer().fill->at("gradient").at("transparency"), Json::parse("[[0.0, 1.0], [1.0, 0.0]]"));
+        // the layer panel's グラデーション… on it, OK with nothing changed: its transparency kept (review P2-2)
+        s.answers.responder->exec = [](QDialog* dialog) {
+            return int(dialog->objectName() == QStringLiteral("gradient_dialog") ? QDialog::Accepted : QDialog::Rejected);
+        };
+        const Json now = fill_layer().fill->at("gradient");
+        const std::optional<Json> again = app::gradient_dialog(nullptr, &s.session->document().page(0), now);
+        QVERIFY(again.has_value());
+        QCOMPARE(again->at("transparency"), now.at("transparency"));
         std::filesystem::remove(file);
     }
 

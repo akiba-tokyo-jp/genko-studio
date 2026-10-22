@@ -35,5 +35,9 @@ core::Json stops_for(const core::Json& item, const core::Json& foreground, const
 // The colour of a stop at a place (0..1) of a preset, the transparency at it too: for its swatch in the panel (8-bit
 // sRGB and an alpha 0..255), "foreground" and "background" given.
 std::array<int, 4> sample(const core::Json& item, double t, const std::array<int, 3>& foreground, const std::array<int, 3>& background);
+// (review P3-5) `count` columns of a strip of the preset (0 to 1 evenly), its stops read once.
+std::vector<std::array<int, 4>> samples(const core::Json& item, int count, const std::array<int, 3>& foreground, const std::array<int, 3>& background);
+// Whether a stop of the preset is the 描画色 or the 背景色 (its strip changes with them).
+bool uses_brush_colours(const core::Json& item);
 
 }  // namespace genko::render::gradient_presets

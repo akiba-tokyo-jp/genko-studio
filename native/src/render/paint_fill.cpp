@@ -5,12 +5,17 @@
 #include <cmath>
 #include <cstdint>
 #include <memory>
+#include <optional>
+#include <string>
 #include <vector>
 
 #include "core/color_raster.hpp"
+#include "core/ink.hpp"
 #include "core/ops_util.hpp"
+#include "core/vector.hpp"
 #include "render/color_canvas.hpp"
 #include "render/image_ops.hpp"
+#include "render/ink_edit.hpp"
 #include "render/op_limits.hpp"
 #include "render/page.hpp"
 #include "render/raster.hpp"
@@ -88,37 +93,94 @@ bool paint(core::OpContext& c, std::size_t at, const std::string& layer_id, cons
         layer.raster_memo = {};
         layer.raster_relpath.reset();
     }
-    image_ops::Window found;
-    (void)image_ops::layer_pixels(c, at, layer_id, Box{0, 0, 0, 0}, &found);  // (its grid; its lines and pictures in its pixels)
-    const Size grid = found.grid;
+    // the layer's kind (as image_ops::layer_pixels takes it): precise, ink (a CMYK, Lab, grey or multichannel page's paint
+    // layer that holds no 8-bit picture) or 8-bit
+    bool inks = false;
+    {
+        const core::Page& seen = doc.page(at);
+        const core::Layer& layer = seen.layers[core::layer_by_id(seen, layer_id)];
+        if (layer.locked) throw OpError("the layer is locked");
+        inks = seen.color && !layer.color_raster && !layer.raster_png;
+    }
+    // (review P2-1: an ink layer painted in the 通常 mode keeps its lines and shape parts as they are — drawn over the paint
+    // as before E4 —, its inks alone read and written; another mode makes them its pixels first, as an 8-bit layer's)
+    const bool keep_lines = inks && how.blend == "normal";
+    std::optional<core::InkPixels> whole_inks;
+    if (inks) {
+        if (keep_lines) {
+            // (its pictures — none, as ink_edit::bake_marks lays them into its inks after every op — laid in first)
+            if (!doc.page(at).layers[core::layer_by_id(doc.page(at), layer_id)].patches.empty()) ink_edit::bake_marks(doc);
+            const core::Page& seen = doc.page(at);
+            const core::Layer& layer = seen.layers[core::layer_by_id(seen, layer_id)];
+            whole_inks = layer.ink_raster ? core::decode_ink_raster(*layer.ink_raster)
+                                          : core::blank_ink_pixels(seen.color->space, seen.color->depth,
+                                                                   static_cast<std::uint32_t>(mm_to_px(seen.spec.width_mm.value(), raster::kWorkingDpi)),
+                                                                   static_cast<std::uint32_t>(mm_to_px(seen.spec.height_mm.value(), raster::kWorkingDpi)),
+                                                                   seen.color->planes());
+        } else {
+            const core::Page& seen = doc.page(at);
+            whole_inks = ink_edit::with_marks(seen, seen.layers[core::layer_by_id(seen, layer_id)], &doc);
+        }
+    } else {
+        // (an 8-bit layer's lines and pictures made its pixels, a precise pen line made precise: image_ops' way)
+        image_ops::Window ready;
+        (void)image_ops::layer_pixels(c, at, layer_id, Box{0, 0, 0, 0}, &ready);
+    }
+    const core::Page& page = doc.page(at);
+    const core::Layer& layer = page.layers[core::layer_by_id(page, layer_id)];
+    const bool precise = !inks && layer.color_raster != nullptr;
+    // (review P3-6: the layer held once — a precise layer's samples in one edit, an ink layer's inks, an 8-bit layer's
+    // picture — and its bands worked in floats one after another)
+    std::optional<core::ColorRasterEdit> edit;
+    std::optional<Image> picture;
+    Size grid;
+    if (precise) {
+        edit.emplace(std::string(*layer.color_raster));
+        grid = Size{static_cast<int>(edit->width()), static_cast<int>(edit->height())};
+    } else if (inks) {
+        grid = Size{static_cast<int>(whole_inks->width), static_cast<int>(whole_inks->height)};
+    } else {
+        picture = raster::layer_pixels(page, layer).convert("RGBA");
+        grid = picture->size();
+    }
     if (grid.width <= 0 || grid.height <= 0) return false;
     std::optional<Image> covered;
     Box box{0, 0, grid.width, grid.height};
     if (coverage) {
-        covered = on_grid(doc.page(at), *coverage, grid);
+        covered = on_grid(page, *coverage, grid);
         const auto drawn = covered->getbbox();
         if (!drawn) return false;
         box = *drawn;
     }
-    const core::Page& page = doc.page(at);
-    const bool keep_alpha = page.layers[core::layer_by_id(page, layer_id)].lock_alpha;
+    const bool keep_alpha = layer.lock_alpha;
     const RgbSpace space = RgbSpace::of(page);
     const double width_mm = page.spec.width_mm.value(), height_mm = page.spec.height_mm.value();
     const auto opacity = static_cast<float>(std::clamp(how.opacity, 0.0, 1.0));
     const std::int64_t rows = std::max<std::int64_t>(1, kBandPixels / std::max(1, box.width()));
     bool any = false;
     for (int y0 = box.y0; y0 < box.y1; y0 = static_cast<int>(std::min<std::int64_t>(box.y1, y0 + rows))) {
-        const Box part{box.x0, y0, box.x1, static_cast<int>(std::min<std::int64_t>(box.y1, y0 + rows))};
-        image_ops::Window window;
-        Pixels p = image_ops::layer_pixels(c, at, layer_id, part, &window);
-        const Box& b = window.box;
+        const Box b{box.x0, y0, box.x1, static_cast<int>(std::min<std::int64_t>(box.y1, y0 + rows))};
         const std::size_t w = static_cast<std::size_t>(b.width());
-        const bool inks = p.kind() == Pixels::Kind::Inks;
-        const bool eight = p.kind() == Pixels::Kind::Eight;
+        // the band's values
+        Pixels p = precise  ? Pixels(Pixels::Kind::Precise, static_cast<std::uint32_t>(b.width()), static_cast<std::uint32_t>(b.height()), 3)
+                   : inks   ? image_ops::inks_part(*whole_inks, *page.color, b)
+                            : image_ops::from_image(picture->crop(b));
+        if (precise) {
+            p.floating = edit->floating();
+            for (int y = 0; y < b.height(); ++y) {
+                for (int x = 0; x < b.width(); ++x) {
+                    const auto v = edit->pixel(std::size_t(b.y0 + y) * edit->width() + std::size_t(b.x0 + x));
+                    float* out = p.at(std::size_t(y) * w + std::size_t(x));
+                    for (unsigned k = 0; k < 4; ++k) out[k] = static_cast<float>(v[k]);
+                }
+            }
+        }
+        const bool eight = !precise && !inks;
         std::vector<Rgba> shown;
         if (inks) shown = image_ops::rgba_of(p);
         const std::string share = covered ? covered->crop(b).tobytes() : std::string();
         std::vector<double> row(w * 3), alpha(w);
+        std::vector<std::uint8_t> touched(p.size(), 0);
         bool changed = false;
         for (int y = 0; y < b.height(); ++y) {
             const double y_mm = (static_cast<double>(b.y0 + y) + 0.5) * height_mm / grid.height;
@@ -151,15 +213,51 @@ bool paint(core::OpContext& c, std::size_t at, const std::string& layer_id, cons
                     if (keep_alpha) out[3] = v[3];
                     for (unsigned n = 0; n < 4; ++n) v[n] = out[n];
                 }
+                touched[i] = 1;
                 changed = true;
             }
         }
         if (!changed) continue;
-        if (inks) image_ops::from_rgba(p, shown);
-        image_ops::put_layer_pixels(doc, at, layer_id, p, b);
         any = true;
+        if (inks) {
+            image_ops::from_rgba(p, shown);
+            image_ops::put_inks_part(*whole_inks, p, b, &touched);  // (the pixels painted only: the others keep their inks)
+        } else if (precise) {
+            for (int y = 0; y < b.height(); ++y) {
+                for (int x = 0; x < b.width(); ++x) {
+                    const std::size_t i = std::size_t(y) * w + std::size_t(x);
+                    if (touched[i] == 0) continue;
+                    const float* v = p.at(i);
+                    std::array<double, 4> rgba{};
+                    for (unsigned k = 0; k < 4; ++k) {
+                        if (!std::isfinite(v[k])) throw core::Error("value", "the result exceeds the finite working range");
+                        rgba[k] = p.floating && k < 3 ? static_cast<double>(v[k]) : std::clamp(static_cast<double>(v[k]), 0.0, 1.0);
+                    }
+                    edit->set(std::size_t(b.y0 + y) * edit->width() + std::size_t(b.x0 + x), rgba);
+                }
+            }
+        } else {
+            picture->paste(image_ops::to_image(p), Point{b.x0, b.y0});
+        }
     }
-    return any;
+    if (!any) return false;
+    core::Page& out_page = doc.edit_page(at);
+    core::Layer& out = out_page.layers[core::layer_by_id(out_page, layer_id)];
+    if (precise) {
+        out.color_raster = std::make_shared<const std::string>(std::move(*edit).take());
+    } else if (inks) {
+        out.ink_raster = std::make_shared<const std::string>(core::encode_ink_raster(*whole_inks));
+        out.ink_memo = {};
+        if (!keep_lines) {  // (its marks are in its inks: as put_layer_pixels leaves it)
+            out.strokes = core::empty_strokes();
+            out.shapes = core::vector::empty_shapes();
+            out.patches.clear();
+        }
+    } else {
+        raster::save_raster(out_page, out, *picture);
+    }
+    out.kind = core::LayerKind::Raster;
+    return true;
 }
 
 }  // namespace genko::render::paint_fill

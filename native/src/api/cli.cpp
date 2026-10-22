@@ -1556,12 +1556,13 @@ int gradients_command(const QStringList& args, bool ascii) {
         const fs::path file = path_arg(a.positional[0]);
         std::vector<std::string> warnings;
         const Json items = render::grd::to_presets(render::grd::read(storage::read_file_bounded(file, render::grd::kMaxBytes)), warnings);
-        const std::string group = a.value("--group").value_or(QString::fromStdString(storage::path_to_utf8(file.stem()))).toStdString();
+        // (review P3-3: the group's name as a group keeps it; the presets added at once, their names counted once)
+        const std::string group = a.value("--group") ? a.value("--group")->toStdString()
+                                                     : render::grd::kept_name(storage::path_to_utf8(file.stem()), "グラデーション");
         if (!a.flag("--keep")) {
             std::erase_if(library.groups, [&](const presets::Group& g) { return g.name == group; });
         }
-        Json added = Json::array();
-        for (const Json& item : items) added.push_back(presets::add(library.groups, kind, item, group, "グラデーション")["name"]);
+        Json added = presets::add_many(library.groups, kind, std::vector<Json>(items.begin(), items.end()), group, "グラデーション")["names"];
         presets::save(dir, kind, library.groups);
         print_json(Json{{"ok", true}, {"group", group}, {"presets", std::move(added)}, {"warnings", warnings}}, ascii);
         return 0;

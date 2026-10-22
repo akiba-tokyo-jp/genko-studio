@@ -65,10 +65,21 @@ struct Broken : std::runtime_error {
     using std::runtime_error::runtime_error;
 };
 
-// What is read: bytes with a place, every read checked against their end (Broken).
+// (PC4 E4, review P1-1: design 4.3's "ほどいた標本は合わせて 512 MiB まで") What a descriptor read may take in memory: its
+// values, items, texts and lists counted as they are made (a list's slots twice, as a vector grows) — a file of a few
+// bytes a value cannot make some fifty times more of them (a .grd, a PSD block, an ABR or PAT descriptor).
+inline constexpr std::size_t kUnpackedBudget = std::size_t(512) << 20;
+
+// What is read: bytes with a place, every read checked against their end (Broken), and what the values read take in
+// memory against `budget` (Broken "too large" past it).
 class Bytes {
 public:
-    explicit Bytes(std::string_view data) : data_(data) {}
+    explicit Bytes(std::string_view data, std::size_t budget = kUnpackedBudget) : data_(data), budget_(budget) {}
+    // `n` bytes more kept of what is read: Broken when past the budget.
+    void spend(std::size_t n) {
+        if (n > budget_ - spent_) throw Broken("its descriptors are too large to read (more than " + std::to_string(budget_ >> 20) + " MB unpacked)");
+        spent_ += n;
+    }
     std::size_t left() const { return data_.size() - at_; }
     std::size_t at() const { return at_; }
     std::string_view take(std::size_t n);
@@ -81,6 +92,8 @@ public:
 private:
     std::string_view data_;
     std::size_t at_ = 0;
+    std::size_t budget_ = kUnpackedBudget;
+    std::size_t spent_ = 0;
 };
 
 // A descriptor read back: each item's value by its type.

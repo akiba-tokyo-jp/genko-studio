@@ -849,6 +849,7 @@ private:
     void build_gradient_page(ToolSettings* ts);
     void build_picker_page(ToolSettings* ts);
     void fill_gradient_presets();
+    void refresh_gradient_strips();  // (PC4 E4 review P3-5: the strips of the 描画色 and 背景色 drawn again)
     void build_gradients_dock();
     // A preset clicked in the panel: the current gradient, and a gradient fill layer chosen takes its colours.
     void gradient_chosen(const core::Json& item);

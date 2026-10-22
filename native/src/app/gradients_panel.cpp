@@ -5,6 +5,7 @@
 #include <QDialogButtonBox>
 #include <QDoubleSpinBox>
 #include <QFileInfo>
+#include <QFutureWatcher>
 #include <QFormLayout>
 #include <QGridLayout>
 #include <QHBoxLayout>
@@ -18,9 +19,11 @@
 #include <QSettings>
 #include <QTreeWidget>
 #include <QVBoxLayout>
+#include <QtConcurrent/QtConcurrentRun>
 
 #include <algorithm>
 #include <cmath>
+#include <functional>
 #include <optional>
 
 #include "app/ask.hpp"
@@ -89,6 +92,24 @@ bool GradientLibrary::change(const std::vector<store::Group>& groups, QString* e
     return true;
 }
 
+bool GradientLibrary::update(const std::function<void(std::vector<store::Group>&)>& work, QString* error) {
+    try {
+        // (review P3-4: the library as the settings folder holds it now — what another window or `genko gradients` wrote
+        // since kept —, then changed and written; a file there that cannot be read is not written over: save refuses)
+        store::Library now = store::load(core::config_dir(), presets::kind());
+        std::vector<store::Group> groups = std::move(now.groups);
+        work(groups);
+        store::save(core::config_dir(), presets::kind(), groups);
+        groups_ = std::move(groups);
+    } catch (const std::exception& e) {
+        if (error != nullptr) *error = wording::error(QString::fromUtf8(e.what()));
+        return false;
+    }
+    problem_.clear();
+    emit changed();
+    return true;
+}
+
 const Json* GradientLibrary::find(const std::string& name) const { return store::find(groups_, name); }
 
 void GradientLibrary::set_current(const Json& item) {
@@ -104,9 +125,9 @@ QPixmap gradient_strip(const Json& item, QSize size, const std::array<int, 3>& f
     QPainter p(&out);
     for (int y = 0; y < out.height(); y += 5)
         for (int x = 0; x < out.width(); x += 5) p.fillRect(x, y, 5, 5, (x / 5 + y / 5) % 2 ? QColor(205, 205, 205) : QColor(245, 245, 245));
+    const auto columns = presets::samples(item, out.width(), foreground, background);  // (its stops read once: review P3-5)
     for (int x = 0; x < out.width(); ++x) {
-        const double t = out.width() > 1 ? static_cast<double>(x) / (out.width() - 1) : 0.0;
-        const auto c = presets::sample(item, t, foreground, background);
+        const auto& c = columns[static_cast<std::size_t>(x)];
         p.fillRect(x, 0, 1, out.height(), QColor(c[0], c[1], c[2], c[3]));
     }
     p.setPen(QColor(128, 128, 128));
@@ -355,7 +376,20 @@ void GradientsPanel::set_colours(const std::array<int, 3>& foreground, const std
     if (foreground == fg_ && background == bg_) return;
     fg_ = foreground;
     bg_ = background;
-    fill();
+    // (review P3-5: only the strips of the presets that use the 描画色 or the 背景色 drawn again — the list as it is)
+    const auto& groups = library_->groups();
+    for (int g = 0; g < tree->topLevelItemCount(); ++g) {
+        QTreeWidgetItem* group = tree->topLevelItem(g);
+        for (int i = 0; i < group->childCount(); ++i) {
+            QTreeWidgetItem* one = group->child(i);
+            const QPoint at = one->data(0, kRole).toPoint();
+            if (at.x() < 0 || static_cast<std::size_t>(at.x()) >= groups.size() || at.y() < 0 ||
+                static_cast<std::size_t>(at.y()) >= groups[static_cast<std::size_t>(at.x())].items.size())
+                continue;
+            const Json& item = groups[static_cast<std::size_t>(at.x())].items[static_cast<std::size_t>(at.y())];
+            if (presets::uses_brush_colours(item)) one->setIcon(0, QIcon(gradient_strip(item, QSize(96, 16), fg_, bg_)));
+        }
+    }
 }
 
 void GradientsPanel::fill() {
@@ -386,9 +420,9 @@ const Json* GradientsPanel::chosen() const {
     return static_cast<std::size_t>(at.y()) < items.size() ? &items[static_cast<std::size_t>(at.y())] : nullptr;
 }
 
-bool GradientsPanel::keep(const std::vector<store::Group>& groups) {
+bool GradientsPanel::keep(const std::function<void(std::vector<store::Group>&)>& work) {
     QString error;
-    if (library_->change(groups, &error)) return true;
+    if (library_->update(work, &error)) return true;
     ask::warning(this, QStringLiteral("グラデーション"), QStringLiteral("グラデーションを保存できませんでした。\n%1").arg(error));
     return false;
 }
@@ -400,21 +434,18 @@ void GradientsPanel::new_preset(const QString& asked) {
         if (!typed || typed->trimmed().isEmpty()) return;
         name = typed->trimmed();
     }
-    auto groups = library_->groups();
     std::optional<std::string> group;
     if (const QTreeWidgetItem* item = tree->currentItem()) {
         const QPoint at = item->data(0, kRole).toPoint();
+        const auto& groups = library_->groups();
         if (at.x() >= 0 && static_cast<std::size_t>(at.x()) < groups.size()) group = groups[static_cast<std::size_t>(at.x())].name;
     }
-    try {
-        Json item = library_->current();
-        item["name"] = name.toStdString();  // (made unique among the presets by add)
-        (void)store::add(groups, presets::kind(), item, group ? std::optional<std::string_view>(*group) : std::nullopt, "カスタム");
-    } catch (const std::exception& error) {
-        emit said(wording::error(QString::fromUtf8(error.what())));
-        return;
-    }
-    if (keep(groups)) emit said(QStringLiteral("グラデーション「%1」を足しました").arg(name));
+    Json item = library_->current();
+    item["name"] = name.toStdString();  // (made unique among the presets by add)
+    if (keep([&](std::vector<store::Group>& groups) {
+            (void)store::add(groups, presets::kind(), item, group ? std::optional<std::string_view>(*group) : std::nullopt, "カスタム");
+        }))
+        emit said(QStringLiteral("グラデーション「%1」を足しました").arg(name));
 }
 
 void GradientsPanel::rename_chosen(const QString& asked) {
@@ -427,27 +458,16 @@ void GradientsPanel::rename_chosen(const QString& asked) {
         if (!typed || typed->trimmed().isEmpty()) return;
         name = typed->trimmed();
     }
-    auto groups = library_->groups();
-    try {
+    keep([&](std::vector<store::Group>& groups) {
         (void)store::edit(groups, presets::kind(), Json{{"action", "rename"}, {"preset", old}, {"name", name.toStdString()}});
-    } catch (const std::exception& error) {
-        emit said(wording::error(QString::fromUtf8(error.what())));
-        return;
-    }
-    keep(groups);
+    });
 }
 
 void GradientsPanel::delete_chosen() {
     const Json* item = chosen();
     if (item == nullptr) return;
-    auto groups = library_->groups();
-    try {
-        (void)store::edit(groups, presets::kind(), Json{{"action", "delete"}, {"preset", item->value("name", std::string())}});
-    } catch (const std::exception& error) {
-        emit said(wording::error(QString::fromUtf8(error.what())));
-        return;
-    }
-    keep(groups);
+    const std::string name = item->value("name", std::string());
+    keep([&](std::vector<store::Group>& groups) { (void)store::edit(groups, presets::kind(), Json{{"action", "delete"}, {"preset", name}}); });
 }
 
 void GradientsPanel::new_group(const QString& asked) {
@@ -457,53 +477,84 @@ void GradientsPanel::new_group(const QString& asked) {
         if (!typed || typed->trimmed().isEmpty()) return;
         name = typed->trimmed();
     }
-    auto groups = library_->groups();
-    try {
-        (void)store::edit(groups, presets::kind(), Json{{"action", "new_group"}, {"name", name.toStdString()}});
-    } catch (const std::exception& error) {
-        emit said(wording::error(QString::fromUtf8(error.what())));
-        return;
-    }
-    keep(groups);
+    keep([&](std::vector<store::Group>& groups) { (void)store::edit(groups, presets::kind(), Json{{"action", "new_group"}, {"name", name.toStdString()}}); });
 }
 
+namespace {
+
+// A .grd read (in the background): its presets, what was not kept as it was, or why it cannot be read.
+struct ReadGrd {
+    Json items = Json::array();
+    std::vector<std::string> warnings;
+    std::string error;
+};
+
+ReadGrd read_grd(const QString& path) {
+    ReadGrd out;
+    try {
+        out.items = render::grd::to_presets(
+            render::grd::read(storage::read_file_bounded(storage::path_from_utf8(path.toStdString()), render::grd::kMaxBytes)), out.warnings);
+    } catch (const std::exception& error) {
+        out.error = error.what();
+    }
+    return out;
+}
+
+}  // namespace
+
 void GradientsPanel::import_grd(const QString& asked) {
+    if (importing_) return;
     QString path = asked;
     if (path.isEmpty()) path = ask::open_path(this, QStringLiteral("グラデーションを読み込み"), QStringLiteral("Photoshop のグラデーション (*.grd)"));
     if (path.isEmpty()) return;
-    std::vector<std::string> warnings;
-    Json items;
-    try {
-        items = render::grd::to_presets(render::grd::read(storage::read_file_bounded(storage::path_from_utf8(path.toStdString()), render::grd::kMaxBytes)),
-                                        warnings);
-    } catch (const std::exception& error) {
-        ask::warning(this, QStringLiteral("グラデーションを読み込み"),
-                     QStringLiteral("読み込めませんでした。\n%1").arg(wording::error(QString::fromUtf8(error.what()))));
+    // (review P1-1: read and unpacked in the background — the file 32 MB, its descriptors 512 MB at most —, the panel's
+    // menu grey meanwhile)
+    importing_ = true;
+    more->setEnabled(false);
+    emit said(QStringLiteral("「%1」を読み込んでいます…").arg(QFileInfo(path).fileName()));
+    auto* watcher = new QFutureWatcher<ReadGrd>(this);
+    connect(watcher, &QFutureWatcher<ReadGrd>::finished, this, [this, watcher, path] {
+        const ReadGrd read = watcher->result();
+        watcher->deleteLater();
+        importing_ = false;
+        more->setEnabled(true);
+        imported(path, read.items, read.warnings, read.error);
+        emit import_done();
+    });
+    watcher->setFuture(QtConcurrent::run([path] { return read_grd(path); }));
+}
+
+void GradientsPanel::imported(const QString& path, const Json& items, const std::vector<std::string>& warnings, const std::string& error) {
+    if (!error.empty()) {
+        ask::warning(this, QStringLiteral("グラデーションを読み込み"), QStringLiteral("読み込めませんでした。\n%1").arg(wording::error(QString::fromUtf8(error.c_str()))));
         return;
     }
-    auto groups = library_->groups();
-    const std::string group = QFileInfo(path).completeBaseName().toStdString();
-    std::erase_if(groups, [&](const store::Group& g) { return g.name == group; });  // (a group of the file's name: put in its place)
-    try {
-        for (const Json& item : items) (void)store::add(groups, presets::kind(), item, group, "グラデーション");
-    } catch (const std::exception& error) {
-        emit said(wording::error(QString::fromUtf8(error.what())));
+    const std::string group = render::grd::kept_name(QFileInfo(path).completeBaseName().toStdString(), "グラデーション");
+    // (review P3-3: a group of the file's name there already — the person's own changes in it, perhaps — replaced only when
+    // asked; else the presets added to it)
+    const bool there = std::any_of(library_->groups().begin(), library_->groups().end(), [&](const store::Group& g) { return g.name == group; });
+    const bool replace = there && ask::question(this, QStringLiteral("グラデーションを読み込み"),
+                                                QStringLiteral("グループ「%1」はもうあります。置き換えますか？\n（いいえ: そのグループに足します）").arg(text_of(group)));
+    const std::vector<Json> list(items.begin(), items.end());
+    if (!keep([&](std::vector<store::Group>& groups) {
+            if (replace) std::erase_if(groups, [&](const store::Group& g) { return g.name == group; });
+            (void)store::add_many(groups, presets::kind(), list, group, "グラデーション");  // (the names taken counted once)
+        }))
         return;
-    }
-    if (!keep(groups)) return;
-    QString words = QStringLiteral("グラデーションを %1 個読み込みました（グループ「%2」）").arg(items.size()).arg(text_of(group));
+    QString words = QStringLiteral("グラデーションを %1 個読み込みました（グループ「%2」）").arg(list.size()).arg(text_of(group));
     for (const std::string& w : warnings) words += QStringLiteral("\n・") + text_of(w);
     emit said(words);
 }
 
 void GradientsPanel::reset(bool append) {
     if (!append && !ask::question(this, QStringLiteral("初期設定のグラデーションに戻す"), QStringLiteral("今のグラデーションを初期設定のものに置き換えますか？"))) return;
-    keep(store::reset(library_->groups(), presets::kind(), append));
+    keep([&](std::vector<store::Group>& groups) { groups = store::reset(groups, presets::kind(), append); });
 }
 
 void GradientsPanel::edit_chosen() {
     const Json* item = chosen();
     const Json now = item != nullptr ? *item : library_->current();
+    const std::optional<std::string> old = item != nullptr ? std::optional<std::string>(item->value("name", std::string())) : std::nullopt;
     GradientEditor editor(now, fg_, bg_, this);
     if (ask::exec(&editor) != QDialog::Accepted) return;
     Json edited;
@@ -513,24 +564,26 @@ void GradientsPanel::edit_chosen() {
         emit said(wording::error(QString::fromUtf8(error.what())));
         return;
     }
-    if (item == nullptr) {  // (the current gradient, not a preset)
+    if (!old) {  // (the current gradient, not a preset)
         library_->set_current(edited);
         return;
     }
-    auto groups = library_->groups();
-    const std::string old = item->value("name", std::string());
-    for (store::Group& g : groups) {
-        for (Json& each : g.items) {
-            if (each.value("name", std::string()) != old) continue;
-            const std::string want = edited["name"].get<std::string>();
-            if (want != old && store::find(groups, want) != nullptr) edited["name"] = store::unique_name(groups, want);
-            each = edited;
-            if (keep(groups)) {
-                library_->set_current(edited);
-                emit preset_chosen(edited);
+    bool found = false;
+    const bool kept = keep([&](std::vector<store::Group>& groups) {
+        for (store::Group& g : groups) {
+            for (Json& each : g.items) {
+                if (each.value("name", std::string()) != *old) continue;
+                const std::string want = edited["name"].get<std::string>();
+                if (want != *old && store::find(groups, want) != nullptr) edited["name"] = store::unique_name(groups, want);
+                each = edited;
+                found = true;
+                return;
             }
-            return;
         }
+    });
+    if (kept && found) {
+        library_->set_current(edited);
+        emit preset_chosen(edited);
     }
 }
 

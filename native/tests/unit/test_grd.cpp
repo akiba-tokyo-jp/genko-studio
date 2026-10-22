@@ -6,9 +6,12 @@
 // transparency 0..1; what is not kept as it is said: a noise gradient left out, midpoints, more than 16 stops), and
 // `genko gradients import-grd`.
 
+#include <QElapsedTimer>
 #include <QTemporaryDir>
 #include <QtTest>
 
+#include <algorithm>
+#include <cstdint>
 #include <fstream>
 #include <string>
 
@@ -84,6 +87,101 @@ private slots:
             flipped[i] = static_cast<char>(flipped[i] ^ 0x5a);
             (void)refused(flipped);
         }
+    }
+
+    // (review P1-1) A file within its size whose descriptor would unpack to far more — a list or an object of millions of
+    // one-byte values (some fifty times their bytes as values) — refused as too large before the memory is had, in seconds;
+    // a file past 32 MB refused unread.
+    void unpackedTooLargeIsRefused() {
+        const auto u32 = [](std::string& out, std::uint32_t v) {
+            for (int s = 24; s >= 0; s -= 8) out += static_cast<char>((v >> s) & 0xFF);
+        };
+        const auto head = [&](std::string& out) {
+            out = "8BGR";
+            out += std::string("\0\x05", 2);
+            u32(out, 16);                   // (the descriptor's version)
+            u32(out, 1);                    // (the class's name: one UTF-16 0)
+            out += std::string("\0\0", 2);
+            u32(out, 0);
+            out += "null";
+        };
+        constexpr std::uint32_t kMany = 5'000'000;
+        std::string list;
+        head(list);
+        u32(list, 1);
+        u32(list, 0);
+        list += "GrdL";
+        list += "VlLs";
+        u32(list, kMany);
+        list.reserve(list.size() + std::size_t(kMany) * 5);
+        for (std::uint32_t i = 0; i < kMany; ++i) list += std::string("bool\x01", 5);
+        QVERIFY(list.size() < grd::kMaxBytes);
+        std::string object;
+        head(object);
+        constexpr std::uint32_t kItems = 2'000'000;
+        u32(object, kItems);
+        object.reserve(object.size() + std::size_t(kItems) * 13);
+        for (std::uint32_t i = 0; i < kItems; ++i) {
+            u32(object, 0);
+            object += "Item";
+            object += std::string("bool\x01", 5);
+        }
+        QVERIFY(object.size() < grd::kMaxBytes);
+        for (const std::string* data : {&list, &object}) {
+            QElapsedTimer clock;
+            clock.start();
+            std::string said;
+            try {
+                (void)grd::read(*data);
+            } catch (const core::Error& error) {
+                said = std::string(error.code()) + ": " + error.what();
+            }
+            QVERIFY2(said.find("format") == 0 && said.find("too large") != std::string::npos, said.c_str());
+            QVERIFY2(clock.elapsed() < 20000, qPrintable(QString::number(clock.elapsed())));
+        }
+        // a list whose count says more than the bytes hold: refused at once
+        std::string lying;
+        head(lying);
+        u32(lying, 1);
+        u32(lying, 0);
+        lying += "GrdL";
+        lying += "VlLs";
+        u32(lying, 0xFFFFFFF0u);
+        QVERIFY(refused(lying));
+        // past 32 MB: refused unread
+        std::string big = grd::write(sample());
+        big.resize(grd::kMaxBytes + 1, '\0');
+        try {
+            (void)grd::read(big);
+            QFAIL("a file past the size was read");
+        } catch (const core::Error& error) {
+            QVERIFY(std::string(error.what()).find("larger than 32 MB") != std::string::npos);
+        }
+    }
+
+    // (review P3-3) a name past the presets' 200 characters cut (and said), one of spaces alone named グラデーション
+    void namesAsPresetsKeepThem() {
+        grd::Gradient long_one;
+        long_one.name = std::string(250, 'a') + "  ";
+        long_one.stops = {{0.0, 0.5, rgb(0, 0, 0)}, {1.0, 0.5, rgb(1, 1, 1)}};
+        grd::Gradient blank = long_one;
+        blank.name = "   ";
+        grd::Gradient twin = long_one;  // (the same long name: its number fits)
+        std::vector<std::string> warnings;
+        const Json items = grd::to_presets(grd::read(grd::write({long_one, blank, twin})), warnings);
+        QCOMPARE(items.size(), std::size_t(3));
+        QCOMPARE(items[0]["name"].get<std::string>(), std::string(grd::kNameChars, 'a'));
+        QCOMPARE(items[1]["name"], Json("グラデーション"));
+        QCOMPARE(items[2]["name"].get<std::string>(), std::string(grd::kNameChars, 'a') + " 2");
+        QVERIFY(std::any_of(warnings.begin(), warnings.end(), [](const std::string& w) { return w.find("切りました") != std::string::npos; }));
+        for (const Json& item : items) render::gradient_presets::kind().check(item);
+        QCOMPARE(grd::kept_name("  日本語の名前 ", "x"), std::string("日本語の名前"));
+        std::string kana;
+        for (int i = 0; i < 300; ++i) kana += "あ";
+        bool cut = false;
+        const std::string kept = grd::kept_name(kana, "x", &cut);
+        QVERIFY(cut);
+        QCOMPARE(kept.size(), grd::kNameChars * 3);  // (cut at a character, never inside one)
     }
 
     // the gradients as Genko's presets: sRGB colours, the live colours by their words, the transparency 0..1, and what is

@@ -1,8 +1,12 @@
 #pragma once
 
+#include <array>
+#include <cstddef>
 #include <functional>
 #include <string>
 #include <string_view>
+#include <unordered_map>
+#include <vector>
 
 #include "core/geometry.hpp"
 #include "core/model.hpp"
@@ -46,6 +50,12 @@ void bake_vectors(const core::Page& page, core::Layer& layer, const core::Docume
 // `book` as bake_vectors' (the two-argument form: none).
 Image layer_pixels(const core::Page& page, const core::Layer& layer, const core::Document* book);
 Image layer_pixels(const core::Page& page, const core::Layer& layer);
+
+// (PC4 E4 review P2-3) A precise layer's or an ink layer's colours at some of its pixels (`wanted`: indices on its own
+// grid; its pixels alone — a precise layer holds no lines, an ink layer's lines are not drawn in): straight sRGB 0..255
+// and the alpha 0..1, read at those pixels only (the layer never copied whole: E1's way for 下地混色).
+std::unordered_map<std::size_t, std::array<float, 4>> layer_colours_at(const core::Page& page, const core::Layer& layer,
+                                                                       const std::vector<std::size_t>& wanted);
 
 // ops._mixed_pieces (下地混色・色延び): the line as short pieces (every 1.5 mm, each starting where the last ended), each
 // in the brush's colour mixed with what is on the layer under it (`mix`), the colour picked up carried along

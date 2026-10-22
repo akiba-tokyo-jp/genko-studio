@@ -615,6 +615,40 @@ void put_layer_pixels(core::Document& doc, std::size_t at, const std::string& id
     put_layer_pixels(doc, at, id, std::vector<PixelsPart>{PixelsPart{box, &p}});
 }
 
+Pixels inks_part(const core::InkPixels& r, const core::PageColor& color, const Box& wanted) {
+    const Box box = clamped(wanted, Size{static_cast<int>(r.width), static_cast<int>(r.height)});
+    const unsigned n = r.colours();
+    const double most = r.is_float() ? 1.0 : r.max();
+    Pixels p(Pixels::Kind::Inks, static_cast<std::uint32_t>(box.width()), static_cast<std::uint32_t>(box.height()), n);
+    p.ink = color;
+    for (int y = 0; y < box.height(); ++y) {
+        for (int x = 0; x < box.width(); ++x) {
+            const std::size_t i = std::size_t(box.y0 + y) * r.width + std::size_t(box.x0 + x);
+            float* v = p.at(std::size_t(y) * std::size_t(box.width()) + std::size_t(x));
+            if (r.is_float()) {
+                for (unsigned k = 0; k <= n; ++k) v[k] = static_cast<float>(r.value(i, k));
+                continue;
+            }
+            const std::uint16_t* s = r.samples.data() + i * (n + 1);
+            for (unsigned k = 0; k < n; ++k) v[k] = static_cast<float>(to_canvas(r.space, k, ink::decode_sample(r.space, k, s[k], r.depth)));
+            v[n] = static_cast<float>(s[n] / most);
+        }
+    }
+    return p;
+}
+
+void put_inks_part(core::InkPixels& whole, const Pixels& p, const Box& box, const std::vector<std::uint8_t>* only) {
+    if (static_cast<int>(p.width()) != box.width() || static_cast<int>(p.height()) != box.height()) throw core::Error("value", "the pixels are not the box's size");
+    if (only != nullptr && only->size() != p.size()) throw core::Error("value", "the marks are not the box's size");
+    const unsigned n = p.colours();
+    for (int y = 0; y < box.height(); ++y) {
+        for (int x = 0; x < box.width(); ++x) {
+            const std::size_t i = std::size_t(y) * std::size_t(box.width()) + std::size_t(x);
+            if (only == nullptr || (*only)[i] != 0) put_ink_pixel(whole, std::size_t(box.y0 + y) * whole.width + std::size_t(box.x0 + x), p.at(i), n);
+        }
+    }
+}
+
 namespace {
 
 // How many of an ink layer's pixels go between their inks and colours at a time (the bands' double arrays, and
@@ -662,6 +696,24 @@ Pixels page_pixels(const core::Document& doc, const core::Page& page, int dpi) {
     core::Page shown = page;  // (without its nombre)
     shown.numero = false;
     const RenderResult made = render_page(shown, dpi, options, &doc);
+    if (page.color && made.inks) return from_inks(*made.inks, *page.color);
+    if (deep && made.precise) return from_precise(*made.precise);
+    return from_image(made.image);
+}
+
+Pixels page_pixels(const core::Document& doc, const core::Page& page, const Box& region) {
+    RenderOptions options;
+    options.mode = "print";
+    options.finish = false;
+    options.onion = false;
+    options.spots = std::vector<std::string>{};
+    const bool deep = !page.color && page.rgb && (page.rgb->depth != 8 || !page.rgb->profile.empty());
+    options.inks = page.color.has_value();
+    options.precise = deep;
+    options.region = RenderRegion{region.x0, region.y0, region.width(), region.height()};
+    core::Page shown = page;  // (without its nombre)
+    shown.numero = false;
+    const RenderResult made = render_page(shown, raster::kWorkingDpi, options, &doc);
     if (page.color && made.inks) return from_inks(*made.inks, *page.color);
     if (deep && made.precise) return from_precise(*made.precise);
     return from_image(made.image);

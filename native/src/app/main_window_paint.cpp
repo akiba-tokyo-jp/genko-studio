@@ -33,6 +33,8 @@
 #include "app/main_window.hpp"
 #include "app/theme.hpp"
 #include "app/tool_settings.hpp"
+#include "core/color_raster.hpp"
+#include "core/ink.hpp"
 #include "core/pynum.hpp"
 #include "service/wording.hpp"
 #include "render/color_canvas.hpp"
@@ -42,6 +44,7 @@
 #include "render/ink_edit.hpp"
 #include "render/page.hpp"
 #include "render/path_raster.hpp"
+#include "render/raster.hpp"
 #include "render/selection.hpp"
 
 namespace genko::app {
@@ -297,6 +300,7 @@ void MainWindow::build_gradient_page(ToolSettings* ts) {
                                    {QStringLiteral("菱形"), QStringLiteral("diamond")}, {QStringLiteral("楕円"), QStringLiteral("ellipse")}},
                                   QStringLiteral("gradient/shape"), QStringLiteral("linear"));
     gradient_blend_ = blend_choice("gradient_blend", QStringLiteral("gradient/blend"));
+    connect(gradient_blend_, &QComboBox::activated, this, [this](int) { pen_changed(); });  // (its badge: review P3-2)
     gradient_opacity_ = percent_box("gradient_opacity", QStringLiteral("gradient/opacity"), 1, 100);
     gradient_reverse_ = kept_check("gradient_reverse", QStringLiteral("逆方向"), QStringLiteral("gradient/reverse"), false);
     gradient_dither_ = kept_check("gradient_dither", QStringLiteral("ディザ"), QStringLiteral("gradient/dither"), true);
@@ -316,7 +320,9 @@ void MainWindow::build_gradient_page(ToolSettings* ts) {
     form->addRow(gradient_reverse_);
     form->addRow(gradient_dither_);
     form->addRow(gradient_transparency_);
-    form->addRow(hint(QStringLiteral("ペイントのレイヤーには画素として塗り、ペンのレイヤーには絵として置きます。描画色・背景色の分岐点は今の色で塗ります")));
+    form->addRow(hint(QStringLiteral("ペイントのレイヤーには画素として塗り、ペンのレイヤーには絵として置きます。描画色・背景色の分岐点は今の色で塗ります。"
+                                     "16・32 bit のページでも、コマで切るレイヤー（新しいペイントのレイヤーの既定）は 8 bit の値で塗ります"
+                                     "（高精度にするには、レイヤーの「コマの外にもはみ出す」を入れる）")));
     fill_gradient_presets();
     ts->add({QStringLiteral("gradient")}, page);
 }
@@ -343,6 +349,26 @@ void MainWindow::fill_gradient_presets() {
     gradient_preset_->setCurrentIndex(0);
 }
 
+void MainWindow::refresh_gradient_strips() {
+    if (gradient_preset_ == nullptr || gradients_ == nullptr) return;
+    const auto fg = brush_ != nullptr ? brush_->rgb() : std::array<int, 3>{20, 20, 20};
+    const auto bg = colours_ != nullptr ? colours_->sub_rgb() : std::array<int, 3>{255, 255, 255};
+    const auto& groups = gradients_->groups();
+    for (int i = 0; i < gradient_preset_->count(); ++i) {
+        const QVariant data = gradient_preset_->itemData(i);
+        if (!data.isValid()) continue;  // (the separator)
+        const QPoint at = data.toPoint();
+        const core::Json* item = nullptr;
+        if (at.x() < 0) {
+            item = &gradients_->current();
+        } else if (static_cast<std::size_t>(at.x()) < groups.size() && at.y() >= 0 &&
+                   static_cast<std::size_t>(at.y()) < groups[static_cast<std::size_t>(at.x())].items.size()) {
+            item = &groups[static_cast<std::size_t>(at.x())].items[static_cast<std::size_t>(at.y())];
+        }
+        if (item != nullptr && render::gradient_presets::uses_brush_colours(*item)) gradient_preset_->setItemIcon(i, QIcon(gradient_strip(*item, QSize(64, 12), fg, bg)));
+    }
+}
+
 void MainWindow::build_fill_page(ToolSettings* ts) {
     fill_basis_ = kept_choice("fill_basis", {{QStringLiteral("線で囲まれた所"), QStringLiteral("lines")}, {QStringLiteral("色の近さ"), QStringLiteral("color")}},
                               QStringLiteral("fill/basis"), QStringLiteral("lines"));
@@ -358,6 +384,7 @@ void MainWindow::build_fill_page(ToolSettings* ts) {
     }
     if (fill_source_->currentData() != QStringLiteral("foreground")) fill_source_->setCurrentIndex(0);
     fill_blend_ = blend_choice("fill_blend", QStringLiteral("fill/blend"));
+    connect(fill_blend_, &QComboBox::activated, this, [this](int) { pen_changed(); });  // (its badge: review P3-2)
     fill_blend_->setToolTip(QStringLiteral("描画モード: 通常のほかは、ペイントのレイヤーの画素に塗ります"));
     fill_opacity_ = percent_box("fill_opacity", QStringLiteral("fill/opacity"), 1, 100);
     fill_tolerance_ = new QSpinBox;
@@ -430,7 +457,7 @@ void MainWindow::build_colour_dock() {
     if (pick_samples_ != nullptr) pick_samples_->insertWidget(3, colours_->pick_source);
     const auto colours_now = [this] {
         if (gradients_panel_ != nullptr) gradients_panel_->set_colours(brush_->rgb(), colours_->sub_rgb());
-        fill_gradient_presets();
+        refresh_gradient_strips();  // (review P3-5: those of the 描画色 and 背景色 only)
     };
     connect(brush_, &BrushPanel::colour_set, this, colours_now);
     connect(colours_, &ColourPanel::background_set, this, colours_now);
@@ -530,45 +557,87 @@ std::optional<std::array<double, 3>> MainWindow::sampled_colour(const core::Page
     namespace io = render::image_ops;
     try {
         const core::Layer* layer = target_layer();
-        std::optional<io::Pixels> pixels;
-        if (source == QLatin1String("layer")) {
-            if (layer == nullptr) return std::nullopt;
-            pixels.emplace(io::shown_layer_pixels(book(), page, *layer));
-        } else if (source == QLatin1String("below") && layer != nullptr) {
-            core::Page below = page;  // (the layers up to the one drawn on: those above it left out)
-            for (std::size_t i = 0; i < below.layers.size(); ++i) {
-                if (below.layers[i].id == layer->id) {
-                    below.layers.resize(i + 1);
-                    break;
-                }
-            }
-            pixels.emplace(io::page_pixels(book(), below));
-        } else {
-            pixels.emplace(io::page_pixels(book(), page));
-        }
-        const io::Pixels& p = *pixels;
         const double w_mm = page.spec.width_mm.value(), h_mm = page.spec.height_mm.value();
-        const int cx = static_cast<int>(std::floor(mm.x() / w_mm * p.width())), cy = static_cast<int>(std::floor(mm.y() / h_mm * p.height()));
-        if (cx < 0 || cy < 0 || cx >= static_cast<int>(p.width()) || cy >= static_cast<int>(p.height())) return std::nullopt;
         const int r = size / 2;
-        const int x0 = std::max(0, cx - r), y0 = std::max(0, cy - r);
-        const int x1 = std::min(static_cast<int>(p.width()), cx + r + 1), y1 = std::min(static_cast<int>(p.height()), cy + r + 1);
-        // (the part as straight colours with their alphas: an ink layer's as the colours its inks mean)
-        io::Pixels part(p.kind(), static_cast<std::uint32_t>(x1 - x0), static_cast<std::uint32_t>(y1 - y0), p.colours());
-        part.floating = p.floating;
-        part.ink = p.ink;
-        for (int y = y0; y < y1; ++y)
-            for (int x = x0; x < x1; ++x)
-                std::copy_n(p.at(std::size_t(y) * p.width() + std::size_t(x)), p.all(),
-                            part.at(std::size_t(y - y0) * part.width() + std::size_t(x - x0)));
-        std::vector<io::Rgba> px;
-        if (part.kind() == io::Pixels::Kind::Inks) {
-            px = io::rgba_of(part);
-        } else {
+        // (the box of `size` pixels around the place, on a grid of width × height over the page; none off it)
+        const auto box_on = [&](int width, int height) -> std::optional<render::Box> {
+            const int cx = static_cast<int>(std::floor(mm.x() / w_mm * width)), cy = static_cast<int>(std::floor(mm.y() / h_mm * height));
+            if (cx < 0 || cy < 0 || cx >= width || cy >= height) return std::nullopt;
+            return render::Box{std::max(0, cx - r), std::max(0, cy - r), std::min(width, cx + r + 1), std::min(height, cy + r + 1)};
+        };
+        std::vector<io::Rgba> px;  // (straight colours 0..1 and their alphas)
+        bool page_values = false;  // (px in the page's values: an RGB page of a profile's, turned to sRGB after)
+        // (pixels of the box as straight colours: an ink part's as the colours its inks mean)
+        const auto take = [&](const io::Pixels& part) {
+            if (part.kind() == io::Pixels::Kind::Inks) {
+                px = io::rgba_of(part);
+                return;
+            }
+            page_values = true;
             for (std::size_t i = 0; i < part.size(); ++i) {
                 const float* v = part.at(i);
                 px.push_back(io::Rgba{v[0], v[1], v[2], part.colours() == 3 ? v[3] : 1.0f});
             }
+        };
+        if (source == QLatin1String("layer")) {
+            if (layer == nullptr) return std::nullopt;
+            const bool lines = layer->stroke_count() > 0 || !layer->patches.empty() || (layer->shapes && !layer->shapes->items.empty());
+            const bool precise_layer = layer->color_raster && !page.color && !lines;
+            const bool ink_layer = page.color && !layer->raster_png && !layer->color_raster && !lines;
+            if (ink_layer && !layer->ink_raster) return std::nullopt;  // (nothing on it)
+            if (precise_layer || ink_layer) {
+                // (review P2-3: its pixels in the box read alone — a 600 dpi precise layer never copied whole)
+                int width = 0, height = 0;
+                if (precise_layer) {
+                    const core::ColorRasterView view(*layer->color_raster);
+                    width = static_cast<int>(view.width());
+                    height = static_cast<int>(view.height());
+                } else {
+                    const core::InkRasterHeader head = core::ink_raster_header(*layer->ink_raster);
+                    width = static_cast<int>(head.width);
+                    height = static_cast<int>(head.height);
+                }
+                const auto box = box_on(width, height);
+                if (!box) return std::nullopt;
+                std::vector<std::size_t> wanted;
+                for (int y = box->y0; y < box->y1; ++y)
+                    for (int x = box->x0; x < box->x1; ++x) wanted.push_back(std::size_t(y) * std::size_t(width) + std::size_t(x));
+                const auto got = render::raster::layer_colours_at(page, *layer, wanted);  // (sRGB 0..255 and the alpha)
+                for (const std::size_t i : wanted) {
+                    const auto& c = got.at(i);
+                    px.push_back(io::Rgba{c[0] / 255.0f, c[1] / 255.0f, c[2] / 255.0f, c[3]});
+                }
+            } else {
+                // (an 8-bit layer, or one with lines: its picture at the working 200 dpi, as the layer shows alone)
+                const io::Pixels p = io::shown_layer_pixels(book(), page, *layer);
+                const auto box = box_on(static_cast<int>(p.width()), static_cast<int>(p.height()));
+                if (!box) return std::nullopt;
+                io::Pixels part(p.kind(), static_cast<std::uint32_t>(box->width()), static_cast<std::uint32_t>(box->height()), p.colours());
+                part.floating = p.floating;
+                part.ink = p.ink;
+                for (int y = box->y0; y < box->y1; ++y)
+                    for (int x = box->x0; x < box->x1; ++x)
+                        std::copy_n(p.at(std::size_t(y) * p.width() + std::size_t(x)), p.all(),
+                                    part.at(std::size_t(y - box->y0) * part.width() + std::size_t(x - box->x0)));
+                take(part);
+            }
+        } else {
+            // (review P2-3: the page — or the layers up to the one drawn on — drawn in the box alone)
+            const core::Page* drawn = &page;
+            core::Page below;
+            if (source == QLatin1String("below") && layer != nullptr) {
+                below = page;  // (the layers up to the one drawn on: those above it left out)
+                for (std::size_t i = 0; i < below.layers.size(); ++i) {
+                    if (below.layers[i].id == layer->id) {
+                        below.layers.resize(i + 1);
+                        break;
+                    }
+                }
+                drawn = &below;
+            }
+            const auto box = box_on(render::mm_to_px(w_mm, render::raster::kWorkingDpi), render::mm_to_px(h_mm, render::raster::kWorkingDpi));
+            if (!box) return std::nullopt;
+            take(io::page_pixels(book(), *drawn, *box));
         }
         double sum[3] = {0, 0, 0}, weight = 0;
         for (const io::Rgba& c : px) {
@@ -578,7 +647,7 @@ std::optional<std::array<double, 3>> MainWindow::sampled_colour(const core::Page
         }
         if (!(weight > 0.08 * static_cast<double>(px.size()))) return std::nullopt;  // (all but clear there)
         std::array<double, 3> out{sum[0] / weight, sum[1] / weight, sum[2] / weight};
-        if (part.kind() != io::Pixels::Kind::Inks) {
+        if (page_values) {
             const render::RgbSpace space = render::RgbSpace::of(page);
             if (!space.is_srgb()) space.to_srgb(out.data(), 1);  // (the page's values as sRGB)
         }
@@ -660,7 +729,7 @@ void MainWindow::fill_at(double x_mm, double y_mm) {
             op["color_rgb"] = colours_->foreground_json(page->rgb->depth == 32 ? "f32" : "u16");
         }
     }
-    op.update(fill_tool_fields(true));
+    op.update(fill_tool_fields(layer->kind == core::LayerKind::Raster));  // (review P3-2: a pen layer's fill in 通常)
     if (op.contains("blend") && layer->kind == core::LayerKind::Raster && channel_view().target.empty() &&
         !blend_bakes_ok(*page, *layer, QStringLiteral("塗りつぶしツール")))
         return;
@@ -676,7 +745,7 @@ void MainWindow::lasso_filled(const QVector<QPointF>& points) {
         const core::Layer* layer = paint_layer();
         if (layer == nullptr) return;
         Json op{{"op", "fill_area"}, {"page", current_page()->index.json()}, {"layer_id", layer->id}, {"area", Json{{"poly", pts}}}};
-        op.update(fill_tool_fields(true));  // (PC4 E4: the page's モード and 不透明度)
+        op.update(fill_tool_fields(layer->kind == core::LayerKind::Raster));  // (PC4 E4: the page's モード and 不透明度)
         if (op.contains("blend") && layer->kind == core::LayerKind::Raster && channel_view().target.empty() &&
             !blend_bakes_ok(*current_page(), *layer, QStringLiteral("囲って塗る")))
             return;
@@ -764,12 +833,17 @@ void MainWindow::gradient(const QPointF& from, const QPointF& to) {
             {"dither", gradient_dither_->isChecked()}};
     if (stops.contains("transparency")) op["transparency"] = stops["transparency"];
     if (gradient_reverse_->isChecked()) op["reverse"] = true;
-    if (gradient_blend_->currentData().toString() != QLatin1String("normal")) op["blend"] = gradient_blend_->currentData().toString().toStdString();
+    if (layer->kind == core::LayerKind::Raster && gradient_blend_->currentData().toString() != QLatin1String("normal"))
+        op["blend"] = gradient_blend_->currentData().toString().toStdString();  // (review P3-2: a pen layer's picture in 通常)
     if (gradient_opacity_->value() < 100) op["opacity"] = gradient_opacity_->value() / 100.0;
     if (const auto area = selection_area()) op["area"] = *area;
     // (a paint layer's lines and pictures become its pixels: asked once)
     // (a channel, the Quick Mask or a layer mask drawn on: the layer's own lines are not touched)
-    if (layer->kind == core::LayerKind::Raster && channel_view().target.empty() && !blend_bakes_ok(*page, *layer, QStringLiteral("グラデーションツール"))) return;
+    // (review P2-1: an ink layer's lines stay lines in 通常 — the gradient under them —; an 8-bit layer's become its pixels)
+    const bool ink_layer = page->color.has_value() && !layer->raster_png && !layer->color_raster;
+    if (layer->kind == core::LayerKind::Raster && channel_view().target.empty() && (op.contains("blend") || !ink_layer) &&
+        !blend_bakes_ok(*page, *layer, QStringLiteral("グラデーションツール")))
+        return;
     apply_ops(Json::array({op}));
 }
 

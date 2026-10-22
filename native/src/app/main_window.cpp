@@ -620,11 +620,24 @@ void MainWindow::pen_changed() {
         brush_->set_blend_allowed(layer == nullptr || layer->kind == core::LayerKind::Raster);
         pen_.blend = brush_->pen().blend;  // (the モード as it shows now: a paint layer's, or 通常 — review P3-6)
     }
+    // (PC4 E4 review P3-2: the 塗りつぶしツール's and グラデーションツール's モード only a paint layer takes — grey on a pen
+    // layer, 通常 sent there)
+    const bool paint_target = layer == nullptr || layer->kind == core::LayerKind::Raster;
+    for (QComboBox* box : {fill_blend_, gradient_blend_}) {
+        if (box == nullptr) continue;
+        box->setEnabled(paint_target);
+        box->setToolTip(paint_target ? QStringLiteral("描画モード: 通常のほかは、ペイントのレイヤーの画素に塗ります")
+                                     : QStringLiteral("描画モードはペイントのレイヤーで使えます（ペンのレイヤーには通常で置きます）"));
+    }
     if (tool_settings_ != nullptr) {  // (review P2-6: a blend other than 通常 seen beside the tool's name)
         const bool drawing = PageCanvas::draws_line(canvas_->tool());
-        tool_settings_->set_badge(drawing && pen_.blend != "normal" && brush_ != nullptr
-                                      ? QStringLiteral("モード: ") + brush_->blend->currentText()
-                                      : QString());
+        QString badge = drawing && pen_.blend != "normal" && brush_ != nullptr ? QStringLiteral("モード: ") + brush_->blend->currentText() : QString();
+        const QString tool = canvas_->tool();
+        QComboBox* own = tool == QLatin1String("gradient") ? gradient_blend_
+                         : tool == QLatin1String("fill") || tool == QLatin1String("lassofill") ? fill_blend_
+                                                                                                 : nullptr;
+        if (own != nullptr && own->isEnabled() && own->currentData().toString() != QLatin1String("normal")) badge = QStringLiteral("モード: ") + own->currentText();
+        tool_settings_->set_badge(badge);
     }
     canvas_->set_live_pen(fields, layer != nullptr && drawable(*layer) ? std::optional<std::string>(layer->id) : std::nullopt);
     canvas_->brush_width_mm = pen_.width_mm;

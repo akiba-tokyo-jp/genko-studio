@@ -223,10 +223,32 @@ Json stops_for(const Json& item, const Json& foreground, const Json& background,
     return out;
 }
 
-std::array<int, 4> sample(const Json& item, double t, const std::array<int, 3>& foreground, const std::array<int, 3>& background) {
-    const Json fg = Json::array({foreground[0], foreground[1], foreground[2]});
-    const Json bg = Json::array({background[0], background[1], background[2]});
-    const auto interp = [t](const std::vector<std::pair<double, std::array<double, 4>>>& stops) {
+namespace {
+
+// (review P3-5) A preset's colour and transparency stops read once ("foreground" and "background" given), its colour at
+// a place (0..1) worked out from them.
+struct StripStops {
+    std::vector<std::pair<double, std::array<double, 4>>> colours, opacity;
+    StripStops(const Json& item, const std::array<int, 3>& foreground, const std::array<int, 3>& background) {
+        for (const Json& s : item.value("stops", Json::array())) {
+            if (!s.is_array() || s.size() < 2 || !s[0].is_number()) continue;
+            const Json& c = s[1];
+            std::array<double, 3> rgb{};
+            if (c == Json("foreground") || c == Json("background")) {
+                const auto& brush = c == Json("foreground") ? foreground : background;
+                for (std::size_t k = 0; k < 3; ++k) rgb[k] = brush[k];
+            } else {
+                rgb = levels(c);
+            }
+            colours.push_back({s[0].get<double>(), {rgb[0], rgb[1], rgb[2], 1}});
+        }
+        if (const auto t = item.find("transparency"); t != item.end() && t->is_array()) {
+            for (const Json& s : *t) {
+                if (s.is_array() && s.size() >= 2 && s[0].is_number() && s[1].is_number()) opacity.push_back({s[0].get<double>(), {0, 0, 0, s[1].get<double>()}});
+            }
+        }
+    }
+    static std::array<double, 4> along(const std::vector<std::pair<double, std::array<double, 4>>>& stops, double t) {
         if (stops.empty()) return std::array<double, 4>{0, 0, 0, 1};
         if (t <= stops.front().first) return stops.front().second;
         for (std::size_t i = 1; i < stops.size(); ++i) {
@@ -239,18 +261,34 @@ std::array<int, 4> sample(const Json& item, double t, const std::array<int, 3>& 
             }
         }
         return stops.back().second;
-    };
-    std::vector<std::pair<double, std::array<double, 4>>> colours, opacity;
-    const Json given = stops_for(item, fg, bg);  // (kept: the loop reads into it)
-    for (const Json& s : given["stops"]) {
-        const auto rgb = levels(s[1]);
-        colours.push_back({s[0].get<double>(), {rgb[0], rgb[1], rgb[2], 1}});
     }
-    for (const Json& s : item.value("transparency", Json::array())) opacity.push_back({s[0].get<double>(), {0, 0, 0, s[1].get<double>()}});
-    const auto c = interp(colours);
-    const double a = opacity.empty() ? 1.0 : interp(opacity)[3];
-    return {static_cast<int>(std::lround(std::clamp(c[0], 0.0, 255.0))), static_cast<int>(std::lround(std::clamp(c[1], 0.0, 255.0))),
-            static_cast<int>(std::lround(std::clamp(c[2], 0.0, 255.0))), static_cast<int>(std::lround(std::clamp(a, 0.0, 1.0) * 255.0))};
+    std::array<int, 4> at(double t) const {
+        const auto c = along(colours, t);
+        const double a = opacity.empty() ? 1.0 : along(opacity, t)[3];
+        return {static_cast<int>(std::lround(std::clamp(c[0], 0.0, 255.0))), static_cast<int>(std::lround(std::clamp(c[1], 0.0, 255.0))),
+                static_cast<int>(std::lround(std::clamp(c[2], 0.0, 255.0))), static_cast<int>(std::lround(std::clamp(a, 0.0, 1.0) * 255.0))};
+    }
+};
+
+}  // namespace
+
+std::array<int, 4> sample(const Json& item, double t, const std::array<int, 3>& foreground, const std::array<int, 3>& background) {
+    return StripStops(item, foreground, background).at(t);
+}
+
+std::vector<std::array<int, 4>> samples(const Json& item, int count, const std::array<int, 3>& foreground, const std::array<int, 3>& background) {
+    const StripStops stops(item, foreground, background);
+    std::vector<std::array<int, 4>> out;
+    out.reserve(static_cast<std::size_t>(std::max(0, count)));
+    for (int x = 0; x < count; ++x) out.push_back(stops.at(count > 1 ? static_cast<double>(x) / (count - 1) : 0.0));
+    return out;
+}
+
+bool uses_brush_colours(const Json& item) {
+    for (const Json& s : item.value("stops", Json::array())) {
+        if (s.is_array() && s.size() >= 2 && (s[1] == Json("foreground") || s[1] == Json("background"))) return true;
+    }
+    return false;
 }
 
 }  // namespace genko::render::gradient_presets

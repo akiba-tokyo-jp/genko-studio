@@ -30,6 +30,7 @@
 #include "storage/lock.hpp"
 #include "storage/reader.hpp"
 #include "storage/transaction.hpp"
+#include "storage/undo.hpp"
 #include "testsupport.hpp"
 
 using namespace genko;
@@ -134,6 +135,24 @@ void write_book(const core::Document& doc, const fs::path& dir) {
     request.actor = "human:test";
     request.ops = Json::array();
     storage::Saver(lock).save(doc, request);
+}
+
+// The book after ops saved over the one in `dir` as the next step of its journal (what Undo takes back).
+void save_next(const core::Document& doc, const fs::path& dir, const Json& ops) {
+    storage::ProjectLock lock(dir, "human:test");
+    lock.try_acquire();
+    storage::SaveRequest request;
+    request.actor = "human:test";
+    request.base_revision = storage::read_disk_state(dir).revision;
+    request.ops = ops;
+    storage::Saver(lock).save(doc, request);
+}
+
+// The page's colours as it shows (render/image_ops page_pixels: an ink page's as its inks mean them), straight 0..1.
+std::vector<Rgba> page_colours(const core::Document& doc) { return shown(render::image_ops::page_pixels(doc, doc.page(0))); }
+
+bool has_feature(const core::Document& doc, const std::string& name) {
+    return std::find(doc.features.begin(), doc.features.end(), name) != doc.features.end();
 }
 
 }  // namespace
@@ -461,6 +480,110 @@ private slots:
     }
 
     // saved, opened again: the same pixels (the book before the op as it was)
+    // (review P2-1) An ink page's paint layer with a line on it: fill and gradient_fill without the new keys — the 通常
+    // mode — paint its inks under the line, which stays a line (shown over the paint, as before E4); the paint shows where
+    // the line is not. A blend makes the line its pixels (the window asks first: blend_bakes_ok).
+    void inkLayersKeepTheirLines() {
+        const auto at = [](double x_mm, double y_mm) {  // (on the page at the working 200 dpi: 400 pixels across)
+            return std::size_t(std::lround(y_mm * kSide / (2 * kInch) - 0.5)) * kSide + std::size_t(std::lround(x_mm * kSide / (2 * kInch) - 0.5));
+        };
+        for (const std::string& kind : {std::string("cmyk"), std::string("gray"), std::string("lab")}) {
+            const core::Document doc = run(as_kind(paint_book(), kind), Json{{"op", "add_stroke"}, {"page", 1}, {"layer_id", "paint"},
+                                                                              {"points", Json::parse("[[5, 10], [45, 10]]")}, {"width_mm", 2.0},
+                                                                              {"rgb", Json::array({0, 0, 0})}});
+            QCOMPARE(doc.page(0).layers[0].stroke_count(), std::size_t(1));
+            const std::vector<Rgba> before = page_colours(doc);
+            const Json gradient{{"op", "gradient_fill"}, {"page", 1}, {"layer_id", "paint"}, {"from", Json::array({5, 25})}, {"to", Json::array({45, 25})},
+                                {"rgb_from", Json::array({0, 0, 200})}, {"rgb_to", Json::array({200, 0, 0})}};
+            const Json fill{{"op", "fill"}, {"page", 1}, {"layer_id", "paint"}, {"x_mm", 25}, {"y_mm", 30}, {"rgb", Json::array({0, 150, 0})}};
+            for (const Json& op : {gradient, fill}) {
+                const core::Document painted = run(doc, op);
+                const core::Layer& layer = painted.page(0).layers[0];
+                QVERIFY2(layer.stroke_count() == 1 && layer.patches.empty(), qPrintable(QString::fromStdString(kind + " " + op["op"].get<std::string>())));
+                QVERIFY(layer.ink_raster != nullptr && layer.ink_raster != doc.page(0).layers[0].ink_raster);
+                const std::vector<Rgba> after = page_colours(painted);
+                for (unsigned k = 0; k < 3; ++k) {  // (the line as it showed)
+                    QVERIFY2(std::abs(after[at(25, 10)][k] - before[at(25, 10)][k]) < 0.03f,
+                             qPrintable(QString("%1 %2: %3 %4").arg(kind.c_str()).arg(k).arg(after[at(25, 10)][k]).arg(before[at(25, 10)][k])));
+                }
+                float moved = 0;  // (the paint where the line is not)
+                for (unsigned k = 0; k < 3; ++k) moved = std::max(moved, std::abs(after[at(25, 30)][k] - before[at(25, 30)][k]));
+                QVERIFY2(moved > 0.1f, kind.c_str());
+            }
+            // a blend: the line made the layer's pixels
+            Json multiplied = gradient;
+            multiplied["blend"] = "multiply";
+            const core::Document blended = run(doc, multiplied);
+            QCOMPARE(blended.page(0).layers[0].stroke_count(), std::size_t(0));
+        }
+    }
+
+    // op Undo and Redo: a gradient on a precise layer and a fill on an ink layer saved as a step of the journal, undone
+    // (the layer's pixels as they were) and done again (as they were after)
+    void undoneAndRedone() {
+        const auto same = [](const Pixels& a, const Pixels& b) {
+            if (a.size() != b.size() || a.all() != b.all()) return false;
+            for (std::size_t i = 0; i < a.size(); ++i)
+                for (unsigned k = 0; k < a.all(); ++k)
+                    if (a.at(i)[k] != b.at(i)[k]) return false;
+            return true;
+        };
+        for (const std::string& kind : {std::string("16"), std::string("cmyk")}) {
+            QTemporaryDir scratch;
+            const fs::path dir = core::path_from_utf8(scratch.path().toStdString()) / "u.genko";
+            const core::Document doc = as_kind(paint_book(), kind);
+            write_book(doc, dir);
+            const Json op = kind == "16" ? black_white()
+                                         : Json{{"op", "fill"}, {"page", 1}, {"layer_id", "paint"}, {"x_mm", 25}, {"y_mm", 25}, {"rgb", Json::array({10, 200, 30})}};
+            const auto done = run_ops(doc, Json::array({op}));
+            save_next(done.doc, dir, done.journal_ops);
+            core::Document saved = storage::load_document(dir).document;
+            core::Document after = done.doc;
+            core::Document original = doc;
+            QVERIFY2(same(whole(saved), whole(after)), kind.c_str());
+            QVERIFY(!same(whole(saved), whole(original)));
+            storage::restore(dir, "human:test", false, false);
+            core::Document undone = storage::load_document(dir).document;
+            QVERIFY2(same(whole(undone), whole(original)), kind.c_str());
+            storage::restore(dir, "human:test", true, false);
+            core::Document redone = storage::load_document(dir).document;
+            QVERIFY2(same(whole(redone), whole(after)), kind.c_str());
+        }
+    }
+
+    // (review P3-10) A gradient fill layer's transparency stops: saved (vector@1), opened the same, undone (no layer, no
+    // vector@1), done again
+    void transparencySavedAndUndone() {
+        QTemporaryDir scratch;
+        const fs::path dir = core::path_from_utf8(scratch.path().toStdString()) / "t.genko";
+        const core::Document doc = pen_book();
+        write_book(doc, dir);
+        const Json transparency = Json::parse("[[0.0, 1.0], [1.0, 0.25]]");
+        const Json op{{"op", "add_layer"}, {"page", 1}, {"kind", "gradient"}, {"id", "g"},
+                      {"gradient", Json{{"from", Json::array({0, 0})}, {"to", Json::array({50, 0})},
+                                        {"stops", Json::parse("[[0, [0, 0, 0], 1], [1, [255, 255, 255], 1]]")}, {"transparency", transparency}}}};
+        const auto done = run_ops(doc, Json::array({op}));
+        save_next(done.doc, dir, done.journal_ops);
+        const auto layer_g = [](const core::Document& d) -> const core::Layer* {
+            for (const core::Layer& l : d.page(0).layers)
+                if (l.id == "g") return &l;
+            return nullptr;
+        };
+        const auto opened = storage::load_document(dir);
+        QVERIFY2(opened.document.read_only_reason.empty(), opened.document.read_only_reason.c_str());
+        QVERIFY(has_feature(opened.document, "vector@1"));
+        QVERIFY(layer_g(opened.document) != nullptr);
+        QCOMPARE(layer_g(opened.document)->fill->at("gradient").at("transparency"), transparency);
+        storage::restore(dir, "human:test", false, false);
+        const auto undone = storage::load_document(dir);
+        QVERIFY(layer_g(undone.document) == nullptr);
+        QVERIFY(!has_feature(undone.document, "vector@1"));
+        storage::restore(dir, "human:test", true, false);
+        const auto redone = storage::load_document(dir);
+        QVERIFY(layer_g(redone.document) != nullptr && has_feature(redone.document, "vector@1"));
+        QCOMPARE(layer_g(redone.document)->fill->at("gradient").at("transparency"), transparency);
+    }
+
     void savedAndOpened() {
         QTemporaryDir scratch;
         const core::Document doc = as_kind(paint_book(), "16");

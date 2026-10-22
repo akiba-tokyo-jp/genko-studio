@@ -6,6 +6,7 @@
 #include <QWidget>
 
 #include <array>
+#include <functional>
 #include <string>
 #include <vector>
 
@@ -41,6 +42,10 @@ public:
     const std::string& problem() const { return problem_; }
     // The groups changed and written (false: refused, `error` says why; the groups as they were).
     bool change(const std::vector<render::preset_store::Group>& groups, QString* error = nullptr);
+    // (review P3-4) `work` done on the library as the settings folder holds it now (read again first: what another window
+    // or `genko gradients` wrote since is kept) and written; false: refused (`error` says why — a core::Error `work`
+    // throws too —; the groups as they were).
+    bool update(const std::function<void(std::vector<render::preset_store::Group>&)>& work, QString* error = nullptr);
     // The library read again from the settings folder.
     void reload();
     // The preset named (the first of its name), or null.
@@ -107,7 +112,10 @@ public:
     void rename_chosen(const QString& name = {});
     void delete_chosen();
     void new_group(const QString& name = {});
+    // (review P1-1, P3-3: the file read in the background — import_done() when it is in, or refused —; a group of its
+    // name there already replaced only when the person says so, else the presets added to it)
     void import_grd(const QString& path = {});
+    bool importing() const { return importing_; }
     void reset(bool append);
     void edit_chosen();
 
@@ -121,10 +129,14 @@ signals:
     // 新規グラデーション塗りつぶしレイヤー (gradient.presets.apply).
     void apply_requested(const core::Json& item);
     void said(const QString& words);
+    void import_done();
 
 private:
     void fill();
-    bool keep(const std::vector<render::preset_store::Group>& groups);
+    // (review P3-4: on the library as the folder holds it now) a warning when it cannot be written
+    bool keep(const std::function<void(std::vector<render::preset_store::Group>&)>& work);
+    void imported(const QString& path, const core::Json& items, const std::vector<std::string>& warnings, const std::string& error);
+    bool importing_ = false;
     GradientLibrary* library_;
     std::array<int, 3> fg_{20, 20, 20}, bg_{255, 255, 255};
 };

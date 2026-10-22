@@ -168,6 +168,32 @@ private slots:
         const auto grey = presets::sample(presets::kind().builtin()[0].items[2], 0.5, {0, 0, 0}, {0, 0, 0});
         QCOMPARE(grey[0], 128);
         QCOMPARE(grey[3], 255);
+        // (review P3-5) a strip's columns at once: each the sample at its place; which presets follow the brush colours
+        const auto strip = presets::samples(item, 11, {10, 20, 30}, {200, 200, 200});
+        QCOMPARE(strip.size(), std::size_t(11));
+        for (int x = 0; x < 11; ++x) QCOMPARE(strip[static_cast<std::size_t>(x)], presets::sample(item, x / 10.0, {10, 20, 30}, {200, 200, 200}));
+        QVERIFY(presets::uses_brush_colours(item));
+        QVERIFY(!presets::uses_brush_colours(presets::kind().builtin()[0].items[2]));
+    }
+
+    // (review P3-3) several presets kept at once: their names made unique once (among themselves too), all or none
+    void manyAddedAtOnce() {
+        auto groups = presets::kind().builtin();
+        const auto& kind = presets::kind();
+        const Json one = presets::item_of(Json::parse("{\"stops\": [\"#000000\", \"#ffffff\"]}"), "黒、白");  // (a built-in's name)
+        std::vector<Json> items(300, one);
+        const Json made = store::add_many(groups, kind, items, std::string("たくさん"), "x");
+        QCOMPARE(made["names"].size(), std::size_t(300));
+        QCOMPARE(made["names"][0], Json("黒、白 2"));
+        QCOMPARE(made["names"][299], Json("黒、白 301"));
+        QCOMPARE(groups.back().name, std::string("たくさん"));
+        QCOMPARE(groups.back().items.size(), std::size_t(300));
+        // one refused: none kept
+        const auto before = groups;
+        std::vector<Json> bad = {one, Json::parse("{\"name\": \"x\", \"stops\": \"no\"}")};
+        QVERIFY(!refused([&] { (void)store::add_many(groups, kind, bad, std::string("また"), "x"); }).empty());
+        QCOMPARE(group_names(groups), group_names(before));
+        QCOMPARE(groups.back().items.size(), std::size_t(300));
     }
 
     // `genko gradients`: list, new, edit, reset, import-grd (the CLI on a settings folder of its own)
