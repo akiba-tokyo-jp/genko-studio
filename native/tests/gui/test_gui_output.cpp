@@ -897,7 +897,7 @@ private slots:
     // another's, from the journal.
     void historyPanel() {
         QCOMPARE(app::history::describe(Json::array()), QStringLiteral("原稿を変えた"));
-        QCOMPARE(app::history::describe(Json::array({Json{{"op", "add_stroke"}}, Json{{"op", "add_stroke"}}})), QStringLiteral("ペンで描いた（2 回）"));
+        QCOMPARE(app::history::describe(Json::array({Json{{"op", "add_stroke"}}, Json{{"op", "add_stroke"}}})), QStringLiteral("ブラシで描いた（2 回）"));
         QCOMPARE(app::history::describe(Json::array({Json{{"op", "split_frame"}}, Json{{"op", "erase"}}, Json{{"op", "zzz"}}})),
                  QStringLiteral("コマを割った ほか 2 件"));
         QCOMPARE(app::history::describe(Json::array({Json{{"op", "no_such_op"}}})), QStringLiteral("原稿を変えた"));
@@ -963,7 +963,7 @@ private slots:
                                               {"layer_id", gui_test::ink_of(w.book().page(0))->id}, {"points", Json::array({Json::array({10, 10}), Json::array({20, 20})})},
                                               {"width_mm", 2}}})));
         QVERIFY(gui_test::wait_for([&] { return texts().size() == 5; }));
-        QVERIFY(texts()[3] == QStringLiteral("ペンで描いた") || texts()[3].startsWith(QStringLiteral("ペンで描いた　")));  // (saved by now, or not yet)
+        QVERIFY(texts()[3] == QStringLiteral("ブラシで描いた") || texts()[3].startsWith(QStringLiteral("ブラシで描いた　")));  // (saved by now, or not yet)
         QVERIFY(texts()[4].startsWith(QStringLiteral("▶ コマを割った ほか 1 件")));
         QVERIFY(session->wait_saved(std::chrono::milliseconds(10000)));
         QVERIFY(gui_test::wait_for([&] { return texts()[4].startsWith(QStringLiteral("▶ コマを割った ほか 1 件　")); }));
@@ -974,7 +974,7 @@ private slots:
         QCOMPARE(w.book().page(0).leaf_frames().size(), std::size_t{1});
         QCOMPARE(gui_test::ink_strokes(w.book(), 0), std::size_t{1});
         shown = texts();
-        QVERIFY(shown[3].startsWith(QStringLiteral("▶ ペンで描いた")));
+        QVERIFY(shown[3].startsWith(QStringLiteral("▶ ブラシで描いた")));
         QVERIFY(shown[4].startsWith(QStringLiteral("コマを割った ほか 1 件（戻した操作）")));
         QCOMPARE(list->item(4)->foreground().color(), QColor(app::theme::tokens().faint));
         // forward again
@@ -991,7 +991,7 @@ private slots:
                  }),
                  qPrintable(texts().join(QStringLiteral(" | "))));
         QVERIFY(texts()[1].startsWith(QStringLiteral("▶ ページを足した　〔hermes〕")));
-        QVERIFY(texts()[3].startsWith(QStringLiteral("ペンで描いた（戻した操作）")));
+        QVERIFY(texts()[3].startsWith(QStringLiteral("ブラシで描いた（戻した操作）")));
         QVERIFY(texts()[4].startsWith(QStringLiteral("コマを割った ほか 1 件（戻した操作）")));
         // and forward again through the journal: the nombre back
         QTest::mouseClick(list->viewport(), Qt::LeftButton, {}, list->visualItemRect(list->item(2)).center());
@@ -1252,7 +1252,7 @@ private slots:
         QVERIFY(session->job_running());
         const QStringList waiting = texts();
         QVERIFY2(waiting.size() == 5 && waiting[2].startsWith(QStringLiteral("ノンブルを変えた（戻した操作）")) &&
-                     waiting[3].startsWith(QStringLiteral("ペンで描いた（戻した操作）")) && waiting[4].startsWith(QStringLiteral("コマを割った（戻した操作）")),
+                     waiting[3].startsWith(QStringLiteral("ブラシで描いた（戻した操作）")) && waiting[4].startsWith(QStringLiteral("コマを割った（戻した操作）")),
                  qPrintable(waiting.join(QStringLiteral(" | "))));
         click(3);
         QCOMPARE(panel->done(), 1);
@@ -1270,7 +1270,7 @@ private slots:
         QCOMPARE(w.book().page(0).leaf_frames().size(), std::size_t{1});
         QCOMPARE(session->status().kind, app::SaveKind::Saved);
         QVERIFY2(gui_test::wait_for([&] {
-                     return texts().size() == 5 && texts()[3].startsWith(QStringLiteral("▶ ペンで描いた")) &&
+                     return texts().size() == 5 && texts()[3].startsWith(QStringLiteral("▶ ブラシで描いた")) &&
                             texts()[4].startsWith(QStringLiteral("コマを割った（戻した操作）"));
                  }),
                  qPrintable(texts().join(QStringLiteral(" | "))));

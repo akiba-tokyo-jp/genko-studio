@@ -309,6 +309,17 @@ void add_stroke_mixing(OpContext& c, const MixPieces& mix_pieces) {
     } else {
         stroke.rgb.reset();
     }
+    // (PC4 E-0: the 描画色's precise values on a page of 16 or 32 bits — native.color_stroke_v1's color_rgb, the rgb its
+    // 8-bit picture; refused on any other page, whose lines are of 8 bits or inks)
+    if (const Json* color = get(op, "color_rgb"); color != nullptr && !color->is_null()) {
+        if (page.color || !page.rgb || page.rgb->depth == 8) throw OpError("color_rgb is for a page of 16 or 32 bits");
+        try {
+            validate_stroke_color(*color);
+        } catch (const Error& error) {
+            throw OpError(error.what());
+        }
+        stroke.color_rgb = *color;
+    }
     const Json* opacity = get(op, "opacity");
     if (opacity != nullptr && !opacity->is_null()) stroke.opacity = py_clamp(to_float(*opacity), 0.0, 1.0);
     const Brush brush = brush_for(Json(stroke.kind), doc);

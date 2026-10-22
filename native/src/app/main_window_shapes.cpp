@@ -254,7 +254,7 @@ void MainWindow::build_shape_pages(ToolSettings* ts, QFormLayout* form) {
     shape_new_layer_ = new QCheckBox(QStringLiteral("新しいレイヤー"));
     shape_new_layer_->setObjectName(QStringLiteral("shape_new_layer"));
     shape_new_layer_->setToolTip(QStringLiteral("シェイプを、描く先の上に作る新しいペンのレイヤーに置きます"));
-    shape_fill_ = combo("shape_fill", {{"なし", "none"}, {"メインの色", "main"}, {"サブの色", "sub"}, {"インキの色", "ink"}, {"グラデーション（メイン→サブ）", "gradient"}},
+    shape_fill_ = combo("shape_fill", {{"なし", "none"}, {"描画色", "main"}, {"背景色", "sub"}, {"インキの色", "ink"}, {"グラデーション（描画色→背景色）", "gradient"}},
                         "main");
     shape_stroke_width_ = new QDoubleSpinBox;
     shape_stroke_width_->setObjectName(QStringLiteral("shape_stroke_width"));
@@ -263,7 +263,7 @@ void MainWindow::build_shape_pages(ToolSettings* ts, QFormLayout* form) {
     shape_stroke_width_->setSingleStep(0.05);
     shape_stroke_width_->setSuffix(QStringLiteral(" mm"));
     shape_stroke_width_->setSpecialValueText(QStringLiteral("なし"));
-    shape_stroke_colour_ = combo("shape_stroke_colour", {{"メインの色", "main"}, {"サブの色", "sub"}, {"インキの色", "ink"}}, "ink");
+    shape_stroke_colour_ = combo("shape_stroke_colour", {{"描画色", "main"}, {"背景色", "sub"}, {"インキの色", "ink"}}, "ink");
     shape_stroke_align_ = combo("shape_stroke_align", {{"内側", "inside"}, {"中央", "center"}, {"外側", "outside"}}, "center");
     shape_stroke_cap_ = combo("shape_stroke_cap", {{"線端なし", "butt"}, {"丸型線端", "round"}, {"四角形線端", "square"}}, "butt");
     shape_stroke_join_ = combo("shape_stroke_join", {{"マイター結合", "miter"}, {"ラウンド結合", "round"}, {"ベベル結合", "bevel"}}, "miter");

@@ -95,15 +95,15 @@ const std::vector<Expected>& expected() {
         // (working CMYK coated-cmyk), Python's own conversion kept there as 書き出しの CMYK)
         {"act_cmyk_proof", "色の校正", k({s("Ctrl+Alt+Y")}), "印刷したときの色など、校正の設定で選んだ見え方で表示します（表示だけ。原稿は変わりません）", true, "表示"},
         {"act_select", "選択", k({s("V")}), "コマを選ぶ・フキダシを動かす・ドラッグで表示を動かす", true, "ツール"},
-        {"act_pen", "ペン", k({s("B")}), "レイヤー パネルで選んだレイヤーに描きます", true, "ツール"},
-        {"act_eraser", "消しゴム", k({s("E")}), "ペンの線は触れた所で切れます", true, "ツール"},
+        {"act_pen", "ブラシツール", k({s("B")}), "レイヤー パネルで選んだレイヤーに描きます", true, "ツール"},
+        {"act_eraser", "消しゴムツール", k({s("E")}), "ペンの線は触れた所で切れます", true, "ツール"},
         {"act_frame", "コマ割り", k({s("F")}),
          "コマの中をドラッグして割る（斜めも。水平・垂直に吸い付く、Alt で自由）・間の白をドラッグで間隔を動かす・選んだコマの角をドラッグで形を変える", true,
          "ツール"},
         // (PC3 C-d, decision 5's 移動ツール: the layers chosen and their linked ones, Ctrl+click picking a layer)
         {"act_move", "移動ツール", k({s("Q")}), "選んだレイヤーをリンクしたレイヤーと一緒にドラッグで動かす（Shift で縦・横・45°、Ctrl+クリックでそこのレイヤーを選ぶ）", true, "ツール"},
         {"act_point_wider", "選んだ点を太く", k({s("Ctrl+Alt+]")}), "部分選択ツールで選んだ制御点のところだけ、線を太くします", false, "ツール"},  // (PC3 C-b)
-        {"act_color", "ペンの色…", k({s("C")}), "", false, "ツール"},
+        {"act_color", "カラーピッカー（描画色）…", k({s("C")}), "", false, "ツール"},  // (PC4 E-0, decision 2)
         {"act_split_h", "コマを横に割る（上下に分ける）", k({s("Ctrl+Shift+H")}), "", false, "ページ/コマ"},
         {"act_split_v", "コマを縦に割る（左右に分ける）", k({s("Ctrl+Shift+V")}), "", false, "ページ/コマ"},
         {"act_merge", "コマを結合（割る前に戻す）", k({s("Ctrl+Shift+M")}), "", false, "ページ/コマ"},

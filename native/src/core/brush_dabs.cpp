@@ -492,7 +492,7 @@ std::optional<std::string> check_tip_png(std::string_view png, std::uint32_t edg
 
 void validate_brushes(const Document& doc) {
     if (doc.brush_kind) {
-        const auto chars = code_points(*doc.brush_kind).size();
+        const auto chars = ruby::code_points(*doc.brush_kind).size();
         if (chars < 1 || chars > 40) throw Error("value", "the brush state's kind is 1 to 40 characters");
     }
     if (doc.brush_background_rgb) {

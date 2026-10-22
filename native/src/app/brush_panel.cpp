@@ -398,7 +398,7 @@ BrushPanel::BrushPanel(QWidget* parent) : QWidget(parent) {
     layout->addLayout(make_row);
     layout->addWidget(section(QStringLiteral("描き味")));
     layout->addLayout(form);
-    layout->addWidget(section(QStringLiteral("色"), QStringLiteral("スポイト（I）で原稿から拾えます")));
+    layout->addWidget(section(QStringLiteral("色"), QStringLiteral("スポイトツール（I）で原稿から拾えます")));
     layout->addLayout(colour_row);
     layout->addWidget(section(QStringLiteral("塗りつぶし（G）")));
     layout->addLayout(fill_form);

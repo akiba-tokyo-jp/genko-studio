@@ -289,6 +289,37 @@ private slots:
         QVERIFY(core::coerce_stroke(written).tilt.empty());
     }
 
+    // The 描画色's precise values (PC4 E-0): add_stroke's color_rgb kept on the line on a page of 16 or 32 bits (its rgb
+    // the 8-bit picture), refused on an 8-bit page and when it is not native.color_stroke_v1's form.
+    void aLineTakesThePreciseColourOnAPrecisePage() {
+        const core::CommandBus bus(render::ops_registry());
+        const core::Actor actor("human:test");
+        const Json line_op = Json::parse(R"({"op": "add_stroke", "page": 1, "layer": "ink", "stabilize": 0, "points": [[10, 10], [20, 20]],
+                                              "rgb": [128, 0, 0], "color_rgb": {"precision": "u16", "values": [0.5, 0.25, 0.125]}})");
+        for (const int depth : {16, 32}) {
+            const core::Document deep =
+                bus.apply(book(), Json::array({Json{{"op", "set_color_mode"}, {"page", 1}, {"mode", "rgb"}, {"depth", depth}}}), actor).doc;
+            const core::Document drawn = bus.apply(deep, Json::array({line_op}), actor).doc;
+            const auto& items = drawn.page(0).first_layer(core::LayerRole::Ink)->strokes->items;
+            QVERIFY(!items.empty());
+            QCOMPARE((*items.back()->color_rgb)["values"], Json::array({0.5, 0.25, 0.125}));
+            QCOMPARE(*items.back()->rgb, (std::vector<std::int64_t>{128, 0, 0}));
+        }
+        const auto refused = [&](const core::Document& doc, const Json& op) {
+            try {
+                bus.apply(doc, Json::array({op}), actor);
+            } catch (const core::ApplyError& error) {
+                return std::string(error.what());
+            }
+            return std::string();
+        };
+        QVERIFY(refused(book(), line_op).find("color_rgb is for a page of 16 or 32 bits") != std::string::npos);
+        const core::Document deep = bus.apply(book(), Json::parse(R"([{"op": "set_color_mode", "page": 1, "mode": "rgb", "depth": 16}])"), actor).doc;
+        Json bad = line_op;
+        bad["color_rgb"] = Json::parse(R"({"precision": "u8", "values": [0, 0, 0]})");
+        QVERIFY(refused(deep, bad).find("color_rgb") != std::string::npos);
+    }
+
     // A book with a dab brush (its tip and texture pictures), a line with inputs and the brush state's kind and
     // background: written with brushes@1 and the pictures, read back the same (written again: the same bytes), gc keeps
     // the pictures; brushes@1 is a feature this build knows.

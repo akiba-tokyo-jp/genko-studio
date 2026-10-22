@@ -24,7 +24,7 @@ namespace {
 std::string clean(const Json& value, const char* what) {
     if (!value.is_string()) bad(std::string(what) + " must be text");
     const std::string name = core::py_strip(value.get<std::string>());
-    const std::size_t chars = core::code_points(name).size();
+    const std::size_t chars = core::ruby::code_points(name).size();
     if (chars < 1 || chars > 200) bad(std::string(what) + " must be 1 to 200 characters");
     return name;
 }

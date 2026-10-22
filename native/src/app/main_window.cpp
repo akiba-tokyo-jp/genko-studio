@@ -1415,7 +1415,7 @@ QWidget* MainWindow::first_steps_bar() {
     auto* words = new QLabel(QStringLiteral("まだ何もない原稿です。最初の一歩:"));
     theme::role(words, "hint");
     row->addWidget(words);
-    for (const auto& [label, tool, attribute] : {std::tuple{"コマを割る", "frame", "act_frame"}, {"ペンで描く", "pen", "act_pen"},
+    for (const auto& [label, tool, attribute] : {std::tuple{"コマを割る", "frame", "act_frame"}, {"ブラシで描く", "pen", "act_pen"},
                                                  {"台詞を入れる", "text", "act_text"}}) {
         auto* button = new QPushButton(QString::fromUtf8(label) + key_hint(attribute));
         button->setProperty("words", QString::fromUtf8(label));
@@ -1506,7 +1506,7 @@ void MainWindow::refresh_first_steps() {
     if (next_steps_ == nullptr) return;
     const bool saved = session_->path().has_value() && session_->status().kind == SaveKind::Saved;
     const auto mark = [](bool done, const QString& words) { return (done ? QStringLiteral("✓ ") : QString()) + words; };
-    next_buttons_[QStringLiteral("draw")]->setText(mark(drawn, QStringLiteral("ペンで描く") + key_hint("act_pen")));
+    next_buttons_[QStringLiteral("draw")]->setText(mark(drawn, QStringLiteral("ブラシで描く") + key_hint("act_pen")));
     next_buttons_[QStringLiteral("line")]->setText(mark(lines, QStringLiteral("台詞を入れる") + key_hint("act_text")));
     next_buttons_[QStringLiteral("save")]->setText(mark(saved, QStringLiteral("保存")));
     next_buttons_[QStringLiteral("export")]->setText(QStringLiteral("書き出し…"));

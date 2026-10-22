@@ -136,6 +136,8 @@ genko_test(test_shapes SOURCES unit/test_shapes.cpp DEPS genko_test_support genk
 # retouch_dabs' apply_dab_stroke) on 8-bit, 16-bit, 32-bit, CMYK, Lab and grey layers.
 genko_test(test_brushes_model SOURCES unit/test_brushes_model.cpp DEPS genko_test_support genko_render_ops LABELS unit)
 genko_test(test_patterns_model SOURCES unit/test_patterns_model.cpp DEPS genko_test_support genko_render_ops LABELS unit)
+genko_test(test_preset_store SOURCES unit/test_preset_store.cpp DEPS genko_test_support genko_render_ops LABELS unit)
+genko_test(test_tiled_pixels SOURCES unit/test_tiled_pixels.cpp DEPS genko_test_support genko_render_ops LABELS unit TIMEOUT 600)
 genko_test(test_resample SOURCES unit/test_resample.cpp DEPS genko_test_support genko_render_ops LABELS unit)
 genko_test(test_page_geometry SOURCES unit/test_page_geometry.cpp DEPS genko_test_support LABELS unit)
 # PC3 C-e (SPEC.md COLOR-07「判型」): the page size ops on a book in memory — each thing on a page where the map takes it,

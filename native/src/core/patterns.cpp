@@ -73,7 +73,7 @@ Pattern pattern_from_json(const Json& data) {
     p.id = text(data, "id");
     if (!is_id(p.id)) bad("id must be 1 to 64 of A-Z, a-z, 0-9, - and _");
     p.name = text(data, "name");
-    const std::size_t chars = code_points(p.name).size();
+    const std::size_t chars = ruby::code_points(p.name).size();
     if (chars < 1 || chars > 255) bad("name must be 1 to 255 characters");
     p.asset = text(data, "asset");
     if (!is_ref(p.asset)) bad("asset must be an asset ref (sha256:<64 hex>)");
@@ -119,7 +119,9 @@ std::optional<std::string> check_pattern_file(const Pattern& p, std::string_view
     try {
         if (suffix == kColorRasterSuffix) {
             const ColorRasterView view(bytes);
-            const bool floating = view.metadata("")["precision"] == "f32";
+            const Json meta = view.metadata("");
+            const Json* precision = get(meta, "precision");
+            const bool floating = precision != nullptr && precision->is_string() && precision->get_ref<const std::string&>() == "f32";
             if (floating != (p.depth == 32)) return std::string("its picture is not of ") + std::to_string(p.depth) + " bits";
             return size_of(view.width(), view.height());
         }

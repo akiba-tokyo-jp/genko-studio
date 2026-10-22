@@ -916,6 +916,19 @@ private:
     SnapBoxes snap_boxes_;
     std::uint64_t snap_ticket_ = 0;
     void build_tool_groups(QMenu* tools);
+    // PC4 E-0 (paint_panels.cpp): the drawing tools' groups (each its tools' ids, the first the palette's; the tools not
+    // made yet left out), a tool's group of tools made, the menu's and the palette's (a long press or a right click), and
+    // the frames of the drawing tools' panels (ブラシ設定 F5, ブラシ, パターン, スタイル, ツールプリセット) and スウォッチ
+    struct ToolGroup {
+        const char* name;
+        std::vector<const char*> tools;
+    };
+    static const std::vector<ToolGroup>& paint_tool_groups();
+    std::vector<QAction*> tool_group_of(const QAction* tool) const;
+    void build_paint_tool_groups(QMenu* tools);
+    void attach_tool_groups(QToolBar* palette);
+    QDockWidget* paint_dock(const QString& title, const char* name, const QString& about);
+    void build_paint_docks();
     void build_clipboard_menu(QMenu* edit);
     static const std::vector<const char*>& selection_tools();
     static const std::vector<const char*>& retouch_tools();

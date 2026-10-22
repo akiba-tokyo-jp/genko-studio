@@ -199,7 +199,7 @@ private slots:
         panel.new_set(QStringLiteral("もう一つ"));
         QCOMPARE(storage::read_file(file), std::string("{not json"));
         QCOMPARE(answers.asked.size(), 1);
-        QVERIFY(answers.asked.front().startsWith(QStringLiteral("カラーセット: ")));
+        QVERIFY(answers.asked.front().startsWith(QStringLiteral("スウォッチのグループ: ")));
         std::filesystem::remove(file);
 
         // 中間色: the corners from the current colour

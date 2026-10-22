@@ -36,7 +36,7 @@ namespace {
 // history.NAMES
 const std::map<std::string, const char*>& names() {
     static const std::map<std::string, const char*> table = {
-        {"add_stroke", "ペンで描いた"}, {"erase", "消しゴムで消した"}, {"fill", "塗りつぶした"}, {"fill_area", "囲って塗った"},
+        {"add_stroke", "ブラシで描いた"}, {"erase", "消しゴムで消した"}, {"fill", "塗りつぶした"}, {"fill_area", "囲って塗った"},
         {"fill_enclosed", "囲った中の閉じた所を塗った"}, {"delete_area", "消去した"}, {"transform_area", "範囲を動かした・変形した"},
         {"paste", "ペーストした"}, {"set_stroke_width", "線の太さを変えた"}, {"reshape_stroke", "線を修正した"}, {"split_frame", "コマを割った"},
         {"cut_frame", "コマを割った"}, {"merge_frame", "コマを結合した"}, {"add_frame", "コマを描いた"}, {"delete_frame", "コマを消した"},

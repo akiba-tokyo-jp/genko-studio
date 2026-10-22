@@ -418,7 +418,7 @@ void MainWindow::draw_effect_shape(const std::string& effect_id, const std::stri
     // the next pen line becomes a speed line's path, or a focus line's clear middle
     effect_shape_for_ = std::make_pair(effect_id, key);
     choose_tool(QStringLiteral("pen"));
-    flash(QStringLiteral("ペンで 1 本引きます（効果線の形になります。描く先のレイヤーには描かれません）"), 6000);
+    flash(QStringLiteral("ブラシツールで 1 本引きます（効果線の形になります。描く先のレイヤーには描かれません）"), 6000);
 }
 
 bool MainWindow::effect_shape_stroke(const StrokeInput& stroke, const core::Page& page) {

@@ -70,7 +70,7 @@ QComboBox* choice_box(const std::vector<std::pair<QString, QString>>& choices, c
 
 const std::vector<std::pair<QString, QString>>& pen_buttons() {
     static const std::vector<std::pair<QString, QString>> all{{QStringLiteral("右クリック（メニュー）"), QStringLiteral("menu")},
-                                                              {QStringLiteral("スポイト"), QStringLiteral("picker")},
+                                                              {QStringLiteral("スポイトツール"), QStringLiteral("picker")},
                                                               {QStringLiteral("手のひら（表示を動かす）"), QStringLiteral("hand")}};
     return all;
 }
@@ -193,7 +193,18 @@ const std::multimap<QString, QString>& renamed() {
                                                      // (PC3 C-b: the shape tools' and the direct selection's)
                                                      {QStringLiteral("長方形ツール"), QStringLiteral("図形")},
                                                      {QStringLiteral("部分選択ツール"), QStringLiteral("線の編集（制御点）")},
-                                                     {QStringLiteral("前方ワープツール"), QStringLiteral("ゆがみ（指で押す）")}};  // (PC3 C-c)
+                                                     {QStringLiteral("前方ワープツール"), QStringLiteral("ゆがみ（指で押す）")},  // (PC3 C-c)
+                                                     // (PC4 E-0, the user's decision 2: the drawing tools and the colours by
+                                                     // Photoshop's names)
+                                                     {QStringLiteral("ブラシツール"), QStringLiteral("ペン")},
+                                                     {QStringLiteral("消しゴムツール"), QStringLiteral("消しゴム")},
+                                                     {QStringLiteral("スポイトツール"), QStringLiteral("スポイト")},
+                                                     {QStringLiteral("塗りつぶしツール"), QStringLiteral("塗りつぶし")},
+                                                     {QStringLiteral("グラデーションツール"), QStringLiteral("グラデーション")},
+                                                     {QStringLiteral("描画色と背景色を入れ替え"), QStringLiteral("メインとサブの色を入れ替える")},
+                                                     {QStringLiteral("カラーピッカー（描画色）…"), QStringLiteral("ペンの色…")},
+                                                     {QStringLiteral("ブラシサイズを大きく"), QStringLiteral("太く（ペン・消しゴム）")},
+                                                     {QStringLiteral("ブラシサイズを小さく"), QStringLiteral("細く（ペン・消しゴム）")}};
     return all;
 }
 
@@ -595,7 +606,7 @@ PreferencesDialog::PreferencesDialog(MainWindow* window) : QDialog(window), wind
     hold_swap->setChecked(app::hold_swap());
     hold_swap->setToolTip(QStringLiteral("道具のキー（E の消しゴムなど）を長く押していると、離したときに前の道具に戻ります。短く押すと持ち替えたまま"));
     per_tool = new QPushButton(QStringLiteral("道具ごとの修飾キー…"));
-    per_tool->setToolTip(QStringLiteral("ペン・消しゴムなど道具ごとに、Alt・Ctrl・Shift を押している間の道具を決めます"));
+    per_tool->setToolTip(QStringLiteral("ブラシツール・消しゴムツールなど道具ごとに、Alt・Ctrl・Shift を押している間の道具を決めます"));
     connect(per_tool, &QPushButton::clicked, this, [this] { tool_keys_dialog(this, window_); });
     auto* work = new QWidget;
     QFormLayout* wl = look::form();

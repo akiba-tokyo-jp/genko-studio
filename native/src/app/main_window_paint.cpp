@@ -63,26 +63,31 @@ void MainWindow::build_paint_actions() {
         return act;
     };
     const auto key = [](const char* text) { return QList<QKeySequence>{QKeySequence(QString::fromLatin1(text))}; };
-    tool("act_picker", QStringLiteral("スポイト"), "picker", key("I"), QStringLiteral("クリックした所の色をペンの色にします"));
-    tool("act_fill", QStringLiteral("塗りつぶし"), "fill", key("G"), QStringLiteral("線で囲まれた所をクリックで塗ります（隙間閉じ・見る範囲はブラシ パネルで）"));
+    // (PC4 E-0, the user's decision 2: スポイトツール, 塗りつぶしツール, グラデーションツール, 描画色と背景色 by Photoshop's
+    // names — their ids and keys kept, preferences::renamed())
+    tool("act_picker", QStringLiteral("スポイトツール"), "picker", key("I"), QStringLiteral("クリックした所の色を描画色にします"));
+    tool("act_fill", QStringLiteral("塗りつぶしツール"), "fill", key("G"), QStringLiteral("線で囲まれた所をクリックで塗ります（隙間閉じ・見る範囲はブラシ パネルで）"));
     tool("act_lassofill", QStringLiteral("囲って塗る"), "lassofill", key("Shift+G"), QStringLiteral("ドラッグで囲んだ所を塗ります"));
-    tool("act_gradient", QStringLiteral("グラデーション"), "gradient", key("U"), QStringLiteral("ドラッグの向きに色をなめらかに変えて塗る（選択範囲があればその中だけ）"));
+    tool("act_gradient", QStringLiteral("グラデーションツール"), "gradient", key("U"), QStringLiteral("ドラッグの向きに色をなめらかに変えて塗る（選択範囲があればその中だけ）"));
     // (PC3 C-b, the user's decision 5: the 図形 of before is the shape tools' 長方形ツール — the others: main_window_shapes.cpp)
     tool("act_shape", QStringLiteral("長方形ツール"), "shape", key("O"),
          QStringLiteral("ドラッグで長方形のシェイプを描きます（Shift で正方形、Alt で中心から。モードがピクセルなら直線・折れ線・曲線なども）"));
-    tool("act_blend", QStringLiteral("色混ぜ"), "blend", key("Shift+B"), QStringLiteral("ペイントのレイヤーの色をぼかす・指先でのばす・なじませる"));
+    tool("act_blend", QStringLiteral("色混ぜ"), "blend", key("Shift+B"),
+         QStringLiteral("ペイントのレイヤーの色をぼかす・指先でのばす・なじませる（Photoshop のぼかしツール・指先ツールは別の道具）"));
     tool("act_liquify", QStringLiteral("前方ワープツール"), "liquify", key("Shift+L"), QStringLiteral("なぞった所の絵と線を押し流す・縮める・ふくらませる・渦を巻く"));
     make("act_point_thinner", QStringLiteral("選んだ点を細く"), [this] { point_width(0.8); }, key("Ctrl+Alt+["),
          QStringLiteral("部分選択ツールで選んだ制御点のところだけ、線を細くします"));
     make("act_fill_gaps", QStringLiteral("塗り残しを塗る"), [this] { fill_gaps(); }, {},
          QStringLiteral("塗った色の間に残った小さなすき間を、同じ色で塗ります。選択範囲があればその中を、無ければなぞった所を"));
-    make("act_swap_colour", QStringLiteral("メインとサブの色を入れ替える"), [this] { colours_->swap(); }, key("X"));
+    make("act_swap_colour", QStringLiteral("描画色と背景色を入れ替え"), [this] { colours_->swap(); }, key("X"));
+    make("act_default_colours", QStringLiteral("描画色と背景色を初期設定に戻す"), [this] { colours_->reset_defaults(); }, key("D"),
+         QStringLiteral("描画色を黒に、背景色を白にします"));
     QAction* transparent = make("act_transparent", QStringLiteral("透明色で描く"), [] {}, {}, QStringLiteral("ペンで描いた所が消える（もう一度で戻る）"), true);
     connect(transparent, &QAction::toggled, this, [this](bool on) {
         if (colours_ != nullptr) colours_->transparent->setChecked(on);
     });
-    make("act_thicker", QStringLiteral("太く（ペン・消しゴム）"), [this] { nudge_brush(1); }, key("]"));
-    make("act_thinner", QStringLiteral("細く（ペン・消しゴム）"), [this] { nudge_brush(-1); }, key("["));
+    make("act_thicker", QStringLiteral("ブラシサイズを大きく"), [this] { nudge_brush(1); }, key("]"));
+    make("act_thinner", QStringLiteral("ブラシサイズを小さく"), [this] { nudge_brush(-1); }, key("["));
 }
 
 void MainWindow::build_paint_pages(ToolSettings* ts) {
@@ -204,7 +209,9 @@ void MainWindow::build_colour_dock() {
     dock->setFeatures(QDockWidget::DockWidgetMovable | QDockWidget::DockWidgetFloatable);
     addDockWidget(Qt::RightDockWidgetArea, dock);
     tabifyDockWidget(pages_dock_, dock);
-    view_menu_->addAction(dock->toggleViewAction());
+    QAction* shown = dock->toggleViewAction();
+    shown->setShortcut(QKeySequence(QStringLiteral("F6")));  // (PC4 E-0: Photoshop's カラー)
+    view_menu_->addAction(shown);
 }
 
 // --- what the tools' drawings become ---------------------------------------------------------------------------------
@@ -442,14 +449,14 @@ void MainWindow::nudge_brush(int step) {
             const QSignalBlocker quiet(eraser_size_);
             eraser_size_->setValue(eraser_mm_);
         }
-        flash(QStringLiteral("消しゴムの太さ %1 mm").arg(QString::fromStdString(core::py_format_g(eraser_mm_))), 2000);
+        flash(QStringLiteral("ブラシサイズ（消しゴムツール） %1 mm").arg(QString::fromStdString(core::py_format_g(eraser_mm_))), 2000);
         canvas_->update();
         return;
     }
     const double width = brush_->nudge_size(step);
     canvas_->brush_width_mm = width;
     canvas_->update();
-    flash(QStringLiteral("ペンの太さ %1 mm").arg(QString::fromStdString(core::py_format_g(width))), 2000);
+    flash(QStringLiteral("ブラシサイズ %1 mm").arg(QString::fromStdString(core::py_format_g(width))), 2000);
 }
 
 bool MainWindow::paint_stroke(const StrokeInput& stroke, const core::Page& page, const core::Layer& layer) {

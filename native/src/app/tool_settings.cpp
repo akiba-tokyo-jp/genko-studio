@@ -33,14 +33,14 @@ namespace {
 const std::map<QString, std::pair<QString, QString>>& titles() {
     static const std::map<QString, std::pair<QString, QString>> all{
         {QStringLiteral("select"), {QStringLiteral("選択（V）"), QStringLiteral("コマをクリックで選ぶ・フキダシをドラッグで動かす・ダブルクリックで打ち直す・何もない所のドラッグで表示を動かす")}},
-        {QStringLiteral("pen"), {QStringLiteral("ペン（B）"), QStringLiteral("描く先はレイヤー パネルで選んだレイヤー。Shift で直線、[ ] で太さ")}},
-        {QStringLiteral("eraser"), {QStringLiteral("消しゴム（E）"), QStringLiteral("ペンの線は触れた所で切れる。トーンの上では削る")}},
+        {QStringLiteral("pen"), {QStringLiteral("ブラシツール（B）"), QStringLiteral("描く先はレイヤー パネルで選んだレイヤー。Shift で直線、[ ] で太さ")}},
+        {QStringLiteral("eraser"), {QStringLiteral("消しゴムツール（E）"), QStringLiteral("ペンの線は触れた所で切れる。トーンの上では削る")}},
         {QStringLiteral("text"), {QStringLiteral("テキスト（T）"), QStringLiteral("台詞を入れたい所をクリックして打つ（Ctrl+Enter で決定）")}},
         {QStringLiteral("frame"), {QStringLiteral("コマ割り（F）"), QStringLiteral("コマの中をドラッグで割る（ほぼ水平・垂直に吸い付く、Alt で自由）・間の白をドラッグで動かす・角をドラッグで形を変える。"
                                                                             "「作り方」で長方形・折れ線・フリーハンドにすると、新しいコマを描ける")}},
-        {QStringLiteral("picker"), {QStringLiteral("スポイト（I）"), QStringLiteral("クリックした所の色をペンの色にする")}},
+        {QStringLiteral("picker"), {QStringLiteral("スポイトツール（I）"), QStringLiteral("クリックした所の色を描画色にする")}},
         {QStringLiteral("zoom"), {QStringLiteral("虫めがね（Z）"), QStringLiteral("クリックで拡大、Alt＋クリックで縮小、ドラッグで囲んだ所を画面いっぱいに")}},
-        {QStringLiteral("fill"), {QStringLiteral("塗りつぶし（G）"), QStringLiteral("線で囲まれた所をクリックで塗る。隙間は「隙間を閉じる」の幅まで閉じる")}},
+        {QStringLiteral("fill"), {QStringLiteral("塗りつぶしツール（G）"), QStringLiteral("線で囲まれた所をクリックで塗る。隙間は「隙間を閉じる」の幅まで閉じる")}},
         {QStringLiteral("lassofill"), {QStringLiteral("囲って塗る（Shift+G）"), QStringLiteral("ドラッグで囲んだ所を塗る")}},
         {QStringLiteral("marquee"), {QStringLiteral("選択範囲ツール（M・L・W）"), QStringLiteral("ドラッグで選ぶ。中をドラッグで移動、□で拡大縮小、○で回転（Shift で 15° 刻み）")}},
         {QStringLiteral("vector"), {QStringLiteral("部分選択ツール（Shift+Y）"), QStringLiteral("ペンの線の制御点を動かす・足す・消す。線をつなぐ・切る・色を変える")}},
@@ -57,7 +57,7 @@ const std::map<QString, std::pair<QString, QString>>& titles() {
         {QStringLiteral("stamp"), {QStringLiteral("素材を置く"), QStringLiteral("素材パネルで選んだ素材を、クリックした所に置く")}},
         {QStringLiteral("move"), {QStringLiteral("移動ツール（Q）"),
                                   QStringLiteral("選んだレイヤー（リンクしたレイヤー・フォルダーの中も）をドラッグで動かす。Shift で縦・横・45° に、Ctrl+クリックでそこのレイヤーを選ぶ")}},
-        {QStringLiteral("gradient"), {QStringLiteral("グラデーション（U）"), QStringLiteral("ドラッグの向きに塗る。始めの点がはじめの色、終わりの点が終わりの色。選択範囲があればその中だけ")}},
+        {QStringLiteral("gradient"), {QStringLiteral("グラデーションツール（U）"), QStringLiteral("ドラッグの向きに塗る。始めの点がはじめの色、終わりの点が終わりの色。選択範囲があればその中だけ")}},
         {QStringLiteral("magiceraser"), {QStringLiteral("マジック消しゴムツール"), QStringLiteral("クリックした所に近い色の所を透明にする（描く先のペイントのレイヤー）")}},
         // (PC3 B4: the retouching tools, app/retouch_tools.cpp)
         {QStringLiteral("spotheal"), {QStringLiteral("スポット修復ブラシツール"), QStringLiteral("なぞった所のしみやごみを、まわりの絵から作って埋める")}},

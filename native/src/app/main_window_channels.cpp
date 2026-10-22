@@ -217,7 +217,7 @@ void MainWindow::load_selection_from_channel(const std::string& id) {
 }
 
 void MainWindow::build_channel_actions() {
-    const QString tip = QStringLiteral("ペン・消しゴム・塗り・フィルターの描く先を、ページのすべての色（合成）に戻す");
+    const QString tip = QStringLiteral("ブラシツール・消しゴムツール・塗り・フィルターの描く先を、ページのすべての色（合成）に戻す");
     make("act_channel_composite", QStringLiteral("合成チャンネルを対象にする"), [this] { target_slot(2); }, {QKeySequence(QStringLiteral("Ctrl+Alt+2"))}, tip);
     for (int slot = 3; slot <= 9; ++slot) {
         make(QStringLiteral("act_channel_%1").arg(slot), QStringLiteral("チャンネル %1 を対象にする").arg(slot), [this, slot] { target_slot(slot); },
