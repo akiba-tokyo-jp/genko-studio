@@ -309,7 +309,7 @@ private slots:
             d->findChild<QDoubleSpinBox*>(QStringLiteral("field_radius"))->setValue(60);
             auto* busy = d->findChild<QLabel*>(QStringLiteral("filter_preview_busy"));
             QVERIFY(busy != nullptr);
-            busy_seen = gui_test::wait_for([&] { return busy->isVisible(); }, 10000);
+            busy_seen = gui_test::wait_for([&] { return !busy->isHidden(); }, 10000);  // (the window is answered, not shown)
             previewed = gui_test::wait_for([&] { return canvas->doc() != book.session->snapshot(); }, 60000);
         });
         book.act("act_filter_blur_gaussian")->trigger();
@@ -321,14 +321,27 @@ private slots:
                                   .doc;
         QCOMPARE(*book.layer("deep")->color_raster, *expected.page(0).layers[0].color_raster);
         book.window->action(QStringLiteral("act_undo"))->trigger();
-        // 中止: as soon as its progress shows
-        QTimer::singleShot(0, [] {
-            for (QWidget* w : QApplication::topLevelWidgets())
-                if (auto* progress = qobject_cast<QProgressDialog*>(w); progress != nullptr && progress->objectName() == QStringLiteral("filter_progress"))
-                    progress->cancel();
+        // 中止: its button pressed as soon as its progress shows
+        bool pressed = false;
+        QTimer press;
+        press.setInterval(10);
+        QObject::connect(&press, &QTimer::timeout, [&] {
+            for (QWidget* w : QApplication::topLevelWidgets()) {
+                auto* progress = qobject_cast<QProgressDialog*>(w);
+                if (progress == nullptr || progress->objectName() != QStringLiteral("filter_progress") || !progress->isVisible()) continue;
+                for (QPushButton* button : progress->findChildren<QPushButton*>()) {
+                    if (button->text() != QStringLiteral("中止")) continue;
+                    button->click();
+                    pressed = true;
+                    press.stop();
+                }
+            }
         });
+        press.start();
         const auto before = book.layer("deep")->color_raster;
         book.act("act_filter_last")->trigger();
+        press.stop();
+        QVERIFY(pressed);
         QCOMPARE(book.layer("deep")->color_raster, before);
         QVERIFY2(book.window->last_notice().contains(QStringLiteral("中止")), qPrintable(book.window->last_notice()));
     }

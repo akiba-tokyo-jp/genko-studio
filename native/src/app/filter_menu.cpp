@@ -448,7 +448,10 @@ bool MainWindow::send_filter(const Json& ops, const QString& name, bool heavy) {
     QObject::connect(&watcher, &QFutureWatcher<Worked>::finished, &loop, &QEventLoop::quit);
     QTimer tick;
     tick.setInterval(100);
-    QObject::connect(&tick, &QTimer::timeout, &progress, [&progress, done] { progress.setValue(static_cast<int>(done->load() * 1000)); });
+    QObject::connect(&tick, &QTimer::timeout, &progress, [&progress, done, stop] {
+        if (progress.wasCanceled()) stop->request_stop();  // (stopped however it was: its button, Esc, cancel())
+        progress.setValue(static_cast<int>(done->load() * 1000));
+    });
     watcher.setFuture(QtConcurrent::run([base, targeted, actor = session_->actor(), token = stop->get_token(), done]() -> Worked {
         const render::segment::StopScope scope(token);
         const render::fx::ProgressScope progress_scope(*done);
