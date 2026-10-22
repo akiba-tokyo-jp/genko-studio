@@ -7,6 +7,7 @@
 // while it is made and the op sent when it ends.
 
 #include <QCheckBox>
+#include <QColor>
 #include <QComboBox>
 #include <QDialog>
 #include <QDialogButtonBox>

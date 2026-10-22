@@ -51,7 +51,7 @@ using core::OpError;
 using image_ops::Pixels;
 using retouch::Coverage;
 
-using namespace brushwork;  // (B4's brushes' arguments, grid, windows and selection: render/brushwork, shared with PC4 E5)
+using namespace brushing;  // (B4's brushes' arguments, grid, windows and selection: render/brushwork, shared with PC4 E5)
 
 // --- the values ----------------------------------------------------------------------------------------------------------
 

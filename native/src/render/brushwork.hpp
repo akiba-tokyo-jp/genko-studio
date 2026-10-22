@@ -23,7 +23,7 @@
 // retouching brushes) and render/ops_paint_tools (Dodge, Burn, Sponge, Blur, Sharpen, Smudge, the Mixer Brush, the
 // Background Eraser, Color Replacement) take them from here.
 
-namespace genko::render::brushwork {
+namespace genko::render::brushing {
 
 // --- the arguments ---------------------------------------------------------------------------------------------------
 
@@ -126,4 +126,4 @@ private:
 std::optional<std::vector<float>> selection_over(const core::Page& page, const Brushwork& b, const Grid& g, const image_ops::Pixels& like,
                                                  const Box& box);
 
-}  // namespace genko::render::brushwork
+}  // namespace genko::render::brushing

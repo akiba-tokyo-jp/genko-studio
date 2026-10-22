@@ -641,6 +641,20 @@ const std::vector<Rule>& rules() {
         r.push_back(rule(R"(the smart object \S+'s filter \S+: the book holds no file .*)",
                          "スマートフィルターが使うファイルがこの原稿にありません（原稿は読み取り専用で開きます）"));
         r.push_back(rule("the result exceeds the finite working range", "結果の値が大きすぎて、扱える範囲を超えました（原稿は変わりません）"));
+        // (PC4 E5: the brushes that change pixels — render/ops_paint_tools)
+        r.push_back(rule("range must be one of midtones, shadows, highlights", "範囲は、シャドウ・中間調・ハイライトから選びます"));
+        r.push_back(rule("mode must be one of desaturate, saturate", "スポンジのモードは、彩度を下げる・彩度を上げるから選びます"));
+        r.push_back(rule("mode must be one of color, hue, saturation, luminosity", "色の置き換えのモードは、色相・彩度・カラー・輝度から選びます"));
+        r.push_back(rule("sampling must be one of continuous, once, swatch", "サンプルは、連続・一度・背景のスウォッチから選びます"));
+        r.push_back(rule("limits must be one of contiguous, discontiguous, find_edges", "制限は、隣接されていない・隣接・輪郭検出から選びます"));
+        r.push_back(rule(R"(the stroke is too much work to lay at once.*)",
+                         "筆の仕事が多すぎます（跡の面積が上限を超えます。直径か間隔を変えるか、なぞる長さを短くします）"));
+        r.push_back(rule("points must lie within 100000 mm of the page", "筆の点は、ページから 100 m の内に置きます"));
+        r.push_back(rule(R"(the layer's transparency is locked: the Background Eraser .*)",
+                         "透明部分を保護したレイヤーには、背景消しゴムツールは使えません（保護を外してから使います）"));
+        r.push_back(rule(R"(reservoir.*)", "混合ブラシの絵の具（reservoir）の指定が違います"));
+        r.push_back(rule("seed must be a string or a whole number", "seed は文字か整数で指定します"));
+        r.push_back(rule(R"(brush must be a dab brush of the book.*)", "ブラシは、原稿のダブのブラシ（Photoshop 型のブラシ）から選びます"));
         // (PC2, adjustments@1 — the C++ build's own: a correction's native settings and kinds, core/adjust)
         r.push_back(rule(R"(adjust kind '(.*)' is not a correction layer's kind)", "「\\1」は色調補正のレイヤーの種類ではありません"));
         // (PC2a — the tone corrections' own: set_adjustment, auto_adjust and a colour lookup's table, render/ops_adjust, core/lut3d)

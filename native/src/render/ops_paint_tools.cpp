@@ -47,7 +47,7 @@ namespace {
 using core::Json;
 using core::OpError;
 using image_ops::Pixels;
-using namespace brushwork;
+using namespace brushing;
 namespace pt = paint_tools;
 
 // The most work a stroke is: its dabs' boxes (each grown by what its dab reads around it, within the layer's grid), all
@@ -61,7 +61,7 @@ constexpr double kFarthest = 100000.0;
 
 // A stroke ready to be laid: the brushwork, the layer's tiles (none held yet), its grid, the dabs and the brush's
 // diameter (pixels) and spacing (of the diameter), the selection's coverage, the layer's transparency lock.
-struct Stroke {
+struct PixelStroke {
     Brushwork b;
     std::unique_ptr<tiled::TiledPixels> target;
     Grid g;
@@ -87,7 +87,7 @@ std::string seed_of(const Json& op) {
 // each tip and wet edges (render/dabs), sized by width_mm; the op's hardness, spacing and flow, when given, over the
 // brush's.
 retouch::DabSequence dab_brush_dabs(const core::Document& doc, const Json& op, const Brushwork& b, const std::string& kind, const Grid& g,
-                                    float& diameter, float& spacing) {
+                                    bool own_flow, float& diameter, float& spacing) {
     brushes::follow_book(doc);
     const brushes::Brush brush = brushes::brush(kind);
     if (!brush.dabs) throw OpError("brush must be a dab brush of the book (its engine dabs)");
@@ -97,7 +97,7 @@ retouch::DabSequence dab_brush_dabs(const core::Document& doc, const Json& op, c
     const int dpi = static_cast<int>(std::clamp(std::lround(g.sx * 25.4), 1L, 4800L));
     const double px_mm = dpi / 25.4;
     dabs::LineInputs inputs;
-    if (field(op, "flow") != nullptr) inputs.flow = b.flow;
+    if (own_flow && field(op, "flow") != nullptr) inputs.flow = b.flow;
     inputs.remember = false;
     std::shared_ptr<const dabs::LineDabs> laid;
     std::shared_ptr<const dabs::BrushContext> ctx;
@@ -130,11 +130,13 @@ retouch::DabSequence dab_brush_dabs(const core::Document& doc, const Json& op, c
 }
 
 // The stroke an op asks for (its brushwork and brush), its work counted with `halo_of` (the pixels a dab reads around
-// it, by the brush's diameter) and refused past kMaxWork before anything is laid.
+// it, by the brush's diameter) and refused past kMaxWork before anything is laid. `own_flow` false: the op's "flow" is
+// the tool's own (the Mixer Brush's), the dabs at the brush's.
 template <class Halo>
-Stroke stroke_of(core::OpContext& c, Halo&& halo_of) {
-    Stroke s;
+PixelStroke stroke_of(core::OpContext& c, Halo&& halo_of, bool own_flow = true) {
+    PixelStroke s;
     s.b = brushwork(c.doc, c.op);
+    if (!own_flow) s.b.flow = 1.0f;
     for (const core::PenPoint& p : s.b.points) {
         if (std::fabs(p.x) > kFarthest || std::fabs(p.y) > kFarthest) throw OpError("points must lie within 100000 mm of the page");
     }
@@ -143,7 +145,7 @@ Stroke stroke_of(core::OpContext& c, Halo&& halo_of) {
     s.target = std::make_unique<tiled::TiledPixels>(c, s.b.at, s.b.id);  // (refused for a locked layer or one that is not a paint layer)
     s.g = grid_of(c.doc.page(s.b.at), s.target->grid(), s.b.id);
     if (kind) {
-        s.dabs = dab_brush_dabs(c.doc, c.op, s.b, *kind, s.g, s.diameter, s.spacing);
+        s.dabs = dab_brush_dabs(c.doc, c.op, s.b, *kind, s.g, own_flow, s.diameter, s.spacing);
     } else {
         const retouch::Brush round = brush_of(s.b, s.g);
         s.dabs = retouch::round_dabs(round, on_grid(s.b.points, s.g));
@@ -171,8 +173,22 @@ Stroke stroke_of(core::OpContext& c, Halo&& halo_of) {
 
 int no_halo(float) { return 0; }
 
+// An empty paint layer of a page of 16 or 32 bits made precise before paint is laid on it (as a fill makes it:
+// paint_fill::becomes_precise), so the paint stays finer than 8 bits.
+void precise_first(core::OpContext& c) {
+    const std::size_t at = core::require_page(c.doc, c.op);
+    const Json* id = field(c.op, "layer_id");
+    if (id == nullptr || !id->is_string()) return;
+    const std::string wanted = id->get<std::string>();
+    bool make = false;
+    for (const core::Layer& layer : c.doc.page(at).layers) {
+        if (layer.id == wanted) make = !layer.locked && paint_fill::becomes_precise(c.doc.page(at), layer);
+    }
+    if (make) paint_fill::make_precise(c.doc, at, wanted);
+}
+
 // The stroke laid with `effect`, mixed back at `opacity`, written back, reported ({"changed", "box_mm"}).
-Json lay(core::OpContext& c, Stroke& s, float opacity, bool lock, int halo, const retouch::DabEffect& effect) {
+Json lay(core::OpContext& c, PixelStroke& s, float opacity, bool lock, int halo, const retouch::DabEffect& effect) {
     Box changed;
     if (s.reaches) changed = retouch::apply_dab_stroke(*s.target, s.dabs, opacity, s.selection, lock, halo, effect);
     if (!empty(changed)) s.target->put(c.doc);
@@ -238,7 +254,7 @@ void dodge_or_burn(core::OpContext& c, bool burn) {
     const pt::ToneRange tones = range == "shadows" ? pt::ToneRange::Shadows : range == "highlights" ? pt::ToneRange::Highlights : pt::ToneRange::Midtones;
     const float exposure = percent(c.op, "exposure", 50.0);
     const bool protect = flag(c.op, "protect_tones", true);
-    Stroke s = stroke_of(c, no_halo);
+    PixelStroke s = stroke_of(c, no_halo);
     const pt::Colours colours(s.target->like());
     const float spacing = s.spacing;
     c.report = lay(c, s, s.b.opacity, s.lock, 0, [&](tiled::TiledPixels& work, const retouch::Footprint& fp) {
@@ -254,7 +270,7 @@ void sponge(core::OpContext& c) {
     const ImageAllocationBudget budget{2ULL * 1024 * 1024 * 1024};
     const bool saturate = choice(c.op, "mode", {"desaturate", "saturate"}) == "saturate";
     const bool vibrance = flag(c.op, "vibrance", true);
-    Stroke s = stroke_of(c, no_halo);
+    PixelStroke s = stroke_of(c, no_halo);
     const pt::Colours colours(s.target->like());
     const float spacing = s.spacing;
     // (the flow is in each dab's coverage: a pass at full flow moves the colours half-way, upstream's)
@@ -270,7 +286,7 @@ void focus(core::OpContext& c, bool sharpen) {
     const ImageAllocationBudget budget{2ULL * 1024 * 1024 * 1024};
     const float strength = percent(c.op, "strength", 50.0);
     const bool protect = flag(c.op, "protect_detail", true);
-    Stroke s = stroke_of(c, [](float diameter) { return pt::focus_halo(pt::focus_sigma(diameter)); });
+    PixelStroke s = stroke_of(c, [](float diameter) { return pt::focus_halo(pt::focus_sigma(diameter)); });
     const float sigma = pt::focus_sigma(s.diameter);
     const int halo = pt::focus_halo(sigma);
     const float spacing = s.spacing;
@@ -286,18 +302,8 @@ void smudge_brush(core::OpContext& c) {
     const ImageAllocationBudget budget{2ULL * 1024 * 1024 * 1024};
     const float strength = percent(c.op, "strength", 50.0);
     const bool finger = flag(c.op, "finger_painting", false);
-    {
-        // (finger painting on an empty layer of a page of 16 or 32 bits: its paint finer than 8 bits, as a fill's)
-        const std::size_t at = core::require_page(c.doc, c.op);
-        const Json* id = field(c.op, "layer_id");
-        if (finger && id != nullptr && id->is_string()) {
-            const core::Page& page = c.doc.page(at);
-            for (const core::Layer& layer : page.layers) {
-                if (layer.id == id->get<std::string>() && !layer.locked && paint_fill::becomes_precise(page, layer)) paint_fill::make_precise(c.doc, at, layer.id);
-            }
-        }
-    }
-    Stroke s = stroke_of(c, [](float diameter) { return static_cast<int>(std::ceil(diameter / 2.0f)) + 2; });
+    if (finger) precise_first(c);  // (finger painting on an empty layer of a page of 16 or 32 bits: finer than 8 bits)
+    PixelStroke s = stroke_of(c, [](float diameter) { return static_cast<int>(std::ceil(diameter / 2.0f)) + 2; });
     std::optional<std::vector<float>> start;
     if (finger) {
         const pt::Colours colours(s.target->like());
@@ -306,7 +312,10 @@ void smudge_brush(core::OpContext& c) {
         start = std::move(v);
     }
     retouch::Smudge smudge(strength, std::move(start), s.diameter);
-    c.report = lay(c, s, s.b.opacity, s.lock, smudge.halo(), [&](tiled::TiledPixels& work, const retouch::Footprint& fp) { smudge.dab(work, fp); });
+    const Box whole = s.g.whole();
+    c.report = lay(c, s, s.b.opacity, s.lock, smudge.halo(), [&](tiled::TiledPixels& work, const retouch::Footprint& fp) {
+        if (!empty(meet(fp.rect, whole))) smudge.dab(work, fp);  // (a dab off the layer picks nothing up: the first on it starts the paint)
+    });
 }
 
 // --- the Mixer Brush -------------------------------------------------------------------------------------------------------
@@ -355,19 +364,8 @@ void mixer_brush(core::OpContext& c) {
     const bool clean_after = flag(c.op, "clean_after", true);
     const bool load_after = flag(c.op, "load_after", true);
     pt::Reservoir reservoir = reservoir_of(c.op);
-    {
-        // (an empty layer of a page of 16 or 32 bits: the paint finer than 8 bits, as a fill's)
-        const std::size_t at = core::require_page(c.doc, c.op);
-        const Json* id = field(c.op, "layer_id");
-        if (id != nullptr && id->is_string()) {
-            const core::Page& page = c.doc.page(at);
-            for (const core::Layer& layer : page.layers) {
-                if (layer.id == id->get<std::string>() && !layer.locked && paint_fill::becomes_precise(page, layer)) paint_fill::make_precise(c.doc, at, layer.id);
-            }
-        }
-    }
-    Stroke s = stroke_of(c, no_halo);
-    s.b.flow = 1.0f;  // (the op's flow is the Mixer Brush's own: how much of the paint lands)
+    precise_first(c);  // (an empty layer of a page of 16 or 32 bits: the paint finer than 8 bits)
+    PixelStroke s = stroke_of(c, no_halo, false);  // (the op's flow is the Mixer Brush's own: how much of the paint lands)
     const core::Page& page = c.doc.page(s.b.at);
     const std::array<float, 3> loaded = colour_of(c, page, "rgb", "color_rgb", false);
     if (load_after || !reservoir.paint) {  // (loaded with the 描画色 before the stroke: ストローク後にブラシを補充, or the first)
@@ -423,7 +421,7 @@ void background_eraser(core::OpContext& c) {
         if (id != nullptr && id->is_string() && layer_of(c.doc.page(at), id->get<std::string>()).lock_alpha)
             throw OpError("the layer's transparency is locked: the Background Eraser takes away its alpha");
     }
-    Stroke s = stroke_of(c, no_halo);
+    PixelStroke s = stroke_of(c, no_halo);
     const core::Page& page = c.doc.page(s.b.at);
     const pt::Colours colours(s.target->like());
     std::vector<float> fore = colours.values_of(colour_of(c, page, "foreground_rgb", nullptr, false));
@@ -440,7 +438,7 @@ void color_replacement(core::OpContext& c) {
     const pt::Limits limits = limits_of(c.op);
     const float tolerance = percent(c.op, "tolerance", 30.0, 0.0);
     const bool antialias = flag(c.op, "antialias", true);
-    Stroke s = stroke_of(c, no_halo);
+    PixelStroke s = stroke_of(c, no_halo);
     const core::Page& page = c.doc.page(s.b.at);
     const pt::Colours colours(s.target->like());
     const std::array<float, 3> colour = colour_of(c, page, "rgb", "color_rgb", false);

@@ -17,7 +17,7 @@
 // PhotoCraft v0.2.0's engine/src/retouch_cmds.rs (lines 1-120: the brushes' parameters and sampling), MIT
 // (native/third_party/photocraft/NOTICE.md), with Genko's mm, layers and areas (PC3 B4; shared with PC4 E5).
 
-namespace genko::render::brushwork {
+namespace genko::render::brushing {
 
 using core::Json;
 using core::OpError;
@@ -319,4 +319,4 @@ std::optional<std::vector<float>> selection_over(const core::Page& page, const B
 
 bool lock_alpha_of(const core::Document& doc, std::size_t at, const std::string& id) { return layer_of(doc.page(at), id).lock_alpha; }
 
-}  // namespace genko::render::brushwork
+}  // namespace genko::render::brushing
