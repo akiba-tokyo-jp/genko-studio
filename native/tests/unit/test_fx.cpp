@@ -11,7 +11,9 @@
 // surface blur's threshold's very edge and pages of inks too), 平均 the mean colour inside the selection, the presets at
 // PhotoCraft's settings, a page of inks worked by the lightness, a Lab page's ハイパス・カスタム about their middle and its
 // grey grains grey, the sharpening's exact Gaussian, the work a kind is on floats, and the same look at 200 and 600 dpi.
-// The review of D1: a window past the budget worked in smaller tiles, a smart filter past it even then said.
+// The review of D1: a window past the budget worked in smaller tiles, a smart filter past it even then said. D2 (変形・
+// ピクセレート・表現手法): its kinds through the tests of every kind (their settings in kind_params, 置き換え's map); its own
+// tests are test_fx_d2's.
 
 #include <QtTest/QtTest>
 
@@ -80,12 +82,27 @@ const render::fx::Kernel& kernel(const char* kind) {
     return *k;
 }
 
+// (D2) 置き換え's map for the tests of every kind: PhotoCraft's map_image([0.8, 0.3, 0.5, 1]) of 8 × 8 (the caller's,
+// render/ops_filters, gives the kernel its map).
+const render::fx::Picture& test_map() {
+    static const render::fx::Picture map = [] {
+        render::fx::Picture out;
+        out.width = out.height = 8;
+        for (int i = 0; i < 64; ++i)
+            for (const int v : {204, 77, 128, 255}) out.rgba.push_back(static_cast<char>(v));
+        return out;
+    }();
+    return map;
+}
+
 // A kind run on a precise raster (its new bytes).
 std::string run_precise(const std::string& raster, const char* kind, const Json& params, const std::string* cover = nullptr,
                         render::fx::Tiling tiling = {}, double s = 1, const Rect* bounds = nullptr) {
     const auto surface = render::fx::precise_surface(raster);
     const Rect grid{0, 0, int(surface->width()), int(surface->height())};
-    render::fx::apply(*surface, kernel(kind), params, core::FilterInks::Plates, bounds != nullptr ? *bounds : grid, cover, s, nullptr, tiling);
+    render::fx::Reads reads;
+    if (std::string_view(kind) == "distort_displace") reads.map = &test_map();  // (D2: its map)
+    render::fx::apply(*surface, kernel(kind), params, core::FilterInks::Plates, bounds != nullptr ? *bounds : grid, cover, s, nullptr, tiling, reads);
     return render::fx::take_bytes(*surface);
 }
 
@@ -155,6 +172,15 @@ core::Document ink_page(const std::string& mode, const std::function<double(std:
     return doc;
 }
 
+// (D2) 置き換え's map as a file's data: a PNG of 8 × 8 of test_map's colour, base64.
+std::string map_data() {
+    static const std::string data = [] {
+        const render::fx::Picture& map = test_map();
+        return core::b64encode(render::write_png(render::Image::frombytes("RGBA", render::Size{map.width, map.height}, map.rgba)));
+    }();
+    return data;
+}
+
 // Each kind's settings for the tests of every kind (a kind whose defaults change nothing or take long on the test
 // picture: its settings here — each group adds its own; others: their defaults).
 Json kind_params(const std::string& kind) {
@@ -185,6 +211,28 @@ Json kind_params(const std::string& kind) {
         {"other_offset", Json{{"horizontal", 7}, {"vertical", -3}, {"undefined_areas", "wrap"}}},
         // D3
         {"filter_gallery", Json{{"effects", Json::array({Json{{"filter", "cutout"}}})}}},
+        // D2 (PhotoCraft's all_filters' and new_filters' settings: tests.rs 37-60, tests_ext.rs 44-66; 置き換え's map a PNG of
+        // test_map's colour — the op's data, the smart filter's file of the book)
+        {"distort_displace", Json{{"horizontal", 10}, {"vertical", 10}, {"fit", "stretch"}, {"undefined_areas", "wrap"}, {"map_data", map_data()}}},
+        {"distort_shear", Json{{"points", Json::array({Json::array({0, 0}), Json::array({0.5, 0.3}), Json::array({1, 0})})}, {"undefined_areas", "repeat"}}},
+        {"distort_wave", Json{{"generators", 3}, {"wavelength_min", 5}, {"wavelength_max", 20}, {"amplitude_min", 1}, {"amplitude_max", 4},
+                              {"type", "triangle"}, {"undefined_areas", "repeat"}, {"seed", 9}}},
+        {"distort_ripple", Json{{"amount", 200}, {"size", "small"}}},
+        {"distort_twirl", Json{{"angle", 90}}},
+        {"distort_spherize", Json{{"amount", -60}, {"mode", "horizontal_only"}}},
+        {"distort_zigzag", Json{{"amount", 50}, {"ridges", 4}, {"style", "pond_ripples"}}},
+        {"pixelate_color_halftone", Json{{"max_radius", 4}}},
+        {"pixelate_crystallize", Json{{"cell_size", 6}, {"seed", 1}}},
+        {"pixelate_mezzotint", Json{{"type", "medium_lines"}, {"seed", 2}}},
+        {"pixelate_mosaic", Json{{"cell_size", 6}}},
+        {"pixelate_pointillize", Json{{"cell_size", 5}, {"seed", 3}}},
+        {"stylize_diffuse", Json{{"mode", "normal"}, {"seed", 4}}},
+        {"stylize_emboss", Json{{"angle", 135}, {"height", 2}, {"amount", 100}}},
+        {"stylize_extrude", Json{{"type", "blocks"}, {"size", 6}, {"depth", 20}, {"seed", 5}}},
+        {"stylize_oil_paint", Json{{"stylization", 3}, {"cleanliness", 4}, {"scale", 1}, {"bristle_detail", 5}, {"shine", 2}}},
+        {"stylize_tiles", Json{{"count", 4}, {"max_offset", 20}, {"seed", 6}}},
+        {"stylize_trace_contour", Json{{"level", 128}, {"edge", "upper"}}},
+        {"stylize_wind", Json{{"method", "blast"}, {"direction", "from_left"}, {"seed", 7}}},
     };
     return kTestParams.contains(kind) ? kTestParams.at(kind) : core::normalize_filter(kind, Json::object(), nullptr);
 }

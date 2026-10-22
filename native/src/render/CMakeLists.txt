@@ -128,6 +128,10 @@ genko_library(genko_render
     fx_rank.cpp
     fx_sharpen.cpp
     fx_video.cpp
+    fx_distort.cpp
+    fx_pixelate.cpp
+    fx_stylize.cpp
+    fx_oil.cpp
     ops_filters.cpp
     # PC3 C-a (パスとベクトルマスク)
     path_trace.cpp

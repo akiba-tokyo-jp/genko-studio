@@ -9,16 +9,22 @@
 #include <algorithm>
 
 #include "core/adjust.hpp"
+#include "core/base64.hpp"
+#include "core/ink.hpp"
 #include "core/command_bus.hpp"
 #include "core/filter_kinds.hpp"
+#include "core/pyconv.hpp"
 #include "core/pyops.hpp"
 #include "render/fx.hpp"
 #include "render/image_ops.hpp"
 #include "render/ink_edit.hpp"
 #include "render/layer_masks.hpp"
+#include "render/page.hpp"
 #include "render/png.hpp"
 #include "render/raster.hpp"
 #include "render/selection.hpp"
+#include "render/smart_decode.hpp"
+#include "storage/asset_store.hpp"
 
 namespace genko::render {
 
@@ -46,6 +52,106 @@ std::optional<std::vector<float>> plane_of(const core::Page& page, const Json& p
         layer_masks::shown(page, *g_layer->mask, decoded, Size{static_cast<int>(w), static_cast<int>(h)}, whole, Resample::Bilinear).tobytes();
     std::vector<float> out(bytes.size());
     for (std::size_t i = 0; i < bytes.size(); ++i) out[i] = static_cast<unsigned char>(bytes[i]) / 255.0f;
+    return out;
+}
+
+// --- 置き換え's map (D2, design 2.6) ---------------------------------------------------------------------------------------
+
+// The working 200 dpi a layer map is drawn at (its pixel a working pixel: 置き換え's tiling).
+constexpr int kMapDpi = 200;
+
+[[noreturn]] void unreadable_map(const std::string& why) { throw core::OpError("the displacement map cannot be read (" + why + ")"); }
+
+// A file's bytes as a displacement map's picture: a PNG's or a PSD's (its merged picture), "RGBA".
+Image map_picture(std::string_view bytes) {
+    try {
+        return smart::eight_bit_picture(bytes).convert("RGBA");
+    } catch (const core::OpError&) {
+        throw;
+    } catch (const core::Error& error) {
+        if (error.code() == "memory") throw;
+        unreadable_map(error.what());
+    }
+}
+
+// The page a layer map names (its "page", else the filter's own).
+const core::Page& map_page(const core::Document& doc, const core::Page& page, const Json& map) {
+    const Json* index = core::get(map, "page");
+    if (index == nullptr || index->is_null()) return page;
+    std::size_t at = 0;
+    try {
+        at = core::require_page(doc, Json{{"page", *index}});
+    } catch (const core::OpError&) {
+        throw core::OpError("the displacement map's page " + index->dump() + " is not in the book");
+    }
+    // (a page whose strokes and pictures are not read yet: drawn when they are — D2's review P3-6)
+    if (doc.is_deferred(at)) throw core::OpError("the displacement map's page " + index->dump() + " is still being read: try again in a moment");
+    return doc.page(at);
+}
+
+// A layer map drawn as a picture: the page's layer alone over a clear page, or the page as it shows ("merged"), at the
+// working 200 dpi.
+Image layer_map(const core::Document& doc, const core::Page& page, const Json& map) {
+    const core::Page& on = map_page(doc, page, map);
+    const std::string id = core::py_str(map["layer"]);
+    if (id == "merged") return render_page(on, kMapDpi, proof_options(), &doc).image.convert("RGBA");
+    for (const core::Layer& layer : on.layers) {
+        if (layer.id != id) continue;
+        if (layer.kind == core::LayerKind::Folder || layer.kind == core::LayerKind::Adjust)  // (D2's review P3-5)
+            throw core::OpError("the displacement map's layer " + id + " has no picture of its own (a folder or a correction layer)");
+        return layer_image(on, layer, kMapDpi, &doc).convert("RGBA");
+    }
+    throw core::OpError("the displacement map's layer " + id + " is not on the page");
+}
+
+// Does the book hold the map `ref` as a file of `suffix` (made by an op this session — its bytes of that kind —, or in its
+// folder's assets)?
+bool holds_map(const core::Document& doc, const std::string& ref, const std::string& suffix) {
+    if (const auto held = doc.filter_files.find(ref); held != doc.filter_files.end() && held->second) {
+        const std::string& bytes = *held->second;
+        return suffix == ".psd" ? bytes.starts_with("8BPS") : bytes.starts_with(std::string_view("\x89PNG\r\n\x1a\n", 8));
+    }
+    return doc.asset_dir && storage::AssetStore::is_ref(ref) && storage::AssetStore(*doc.asset_dir).has(ref, suffix);
+}
+
+// The bytes of a map the book holds (made by an op this session, or in its folder's assets).
+std::string held_map(const core::Document& doc, const std::string& ref, const std::string& suffix) {
+    if (const auto held = doc.filter_files.find(ref); held != doc.filter_files.end() && held->second) return *held->second;
+    if (doc.asset_dir && storage::AssetStore::is_ref(ref)) {
+        if (auto bytes = storage::AssetStore(*doc.asset_dir).get_bytes(ref, suffix, storage::kAssetMaxBytes)) return std::move(*bytes);
+    }
+    throw core::OpError("the displacement map " + ref + " is not in the book");
+}
+
+// The map of the settings (their normal form) as the kernel reads it — its clear pixels laid over mid-grey (no move
+// there) —, none when they name none; held in the imaging budget while `held` lives.
+std::optional<fx::Picture> displacement_map(const core::Document& doc, const core::Page& page, const Json& params, std::optional<image_ops::Held>& held) {
+    Image picture;
+    const Json* data = core::get(params, "map_data");
+    const Json* map = core::get(params, "map");
+    if (data != nullptr && data->is_string()) {
+        picture = map_picture(core::a2b_base64(data->get_ref<const std::string&>()));
+    } else if (map != nullptr && map->is_object()) {
+        picture = layer_map(doc, page, *map);
+    } else if (map != nullptr && map->is_string()) {
+        picture = map_picture(held_map(doc, map->get<std::string>(), core::py_str(core::py_get(params, "map_suffix", Json(".png")))));
+    } else {
+        return std::nullopt;
+    }
+    fx::Picture out;
+    out.width = picture.width();
+    out.height = picture.height();
+    held.emplace(std::uint64_t(out.width) * std::uint64_t(out.height) * 4);
+    out.rgba = picture.tobytes();
+    for (std::size_t i = 0; i + 3 < out.rgba.size(); i += 4) {
+        const int a = static_cast<unsigned char>(out.rgba[i + 3]);
+        if (a == 255) continue;
+        for (std::size_t c = 0; c < 3; ++c) {
+            const int v = static_cast<unsigned char>(out.rgba[i + c]);
+            out.rgba[i + c] = static_cast<char>((v * a + 128 * (255 - a) + 127) / 255);
+        }
+        out.rgba[i + 3] = static_cast<char>(255);
+    }
     return out;
 }
 
@@ -77,8 +183,8 @@ fx::Rect covered(const std::string& cover, std::uint32_t w, std::uint32_t h) {
 
 // The kernel on a surface: the base box the selection's box (else the grid), the coverage mixing it (`mix`: the caller
 // keeps it to the area itself — an 8-bit layer — and only the area's box is worked).
-void run(fx::Surface& surface, const fx::Kernel& kernel, core::FilterInks inks, const Json& params, const core::Page& page, const Json* area,
-         bool eight, bool mix) {
+void run(fx::Surface& surface, const fx::Kernel& kernel, core::FilterInks inks, const Json& params, const core::Page& page, const core::Document& doc,
+         const Json* area, bool eight, bool mix) {
     const std::uint32_t w = surface.width(), h = surface.height();
     const fx::Rect grid{0, 0, int(w), int(h)};
     const double s = image_ops::grid_scale(page, w, h);
@@ -86,6 +192,9 @@ void run(fx::Surface& surface, const fx::Kernel& kernel, core::FilterInks inks, 
     const std::optional<std::vector<float>> plane = plane_of(page, params, w, h, plane_held);
     fx::Reads reads;
     reads.plane = plane ? &*plane : nullptr;
+    std::optional<image_ops::Held> map_held;  // (D2: 置き換え's map)
+    const std::optional<fx::Picture> map = kernel.kind == "distort_displace" ? displacement_map(doc, page, params, map_held) : std::nullopt;
+    reads.map = map ? &*map : nullptr;
     if (area == nullptr) {
         fx::apply(surface, kernel, params, inks, grid, nullptr, s, nullptr, {}, reads);
         return;
@@ -103,29 +212,29 @@ void run(fx::Surface& surface, const fx::Kernel& kernel, core::FilterInks inks, 
 
 adjust_ops::LocalFilter local_of(const fx::Kernel& kernel, core::FilterInks inks) {
     adjust_ops::LocalFilter out;
-    out.eight = [&kernel, inks](const Image& rgba, const Json& params, const core::Page& page, const core::Document&) {
+    out.eight = [&kernel, inks](const Image& rgba, const Json& params, const core::Page& page, const core::Document& doc) {
         const ImageAllocationBudget budget{kBudget};
         const auto surface = fx::eight_surface(rgba);
-        run(*surface, kernel, inks, params, page, nullptr, true, false);
+        run(*surface, kernel, inks, params, page, doc, nullptr, true, false);
         return fx::take_image(*surface);
     };
-    out.eight_in = [&kernel, inks](const Image& rgba, const Json& params, const core::Page& page, const core::Document&, const Json& area) {
+    out.eight_in = [&kernel, inks](const Image& rgba, const Json& params, const core::Page& page, const core::Document& doc, const Json& area) {
         const ImageAllocationBudget budget{kBudget};
         const auto surface = fx::eight_surface(rgba);
-        run(*surface, kernel, inks, params, page, &area, true, false);  // (the caller keeps it to the area)
+        run(*surface, kernel, inks, params, page, doc, &area, true, false);  // (the caller keeps it to the area)
         return fx::take_image(*surface);
     };
-    out.precise = [&kernel, inks](const core::Page& page, const core::Layer& layer, const Json& params, const Json* area, const core::Document&) {
+    out.precise = [&kernel, inks](const core::Page& page, const core::Layer& layer, const Json& params, const Json* area, const core::Document& doc) {
         const ImageAllocationBudget budget{kBudget};
         const auto surface = fx::precise_surface(*layer.color_raster);
-        run(*surface, kernel, inks, params, page, area, false, true);
+        run(*surface, kernel, inks, params, page, doc, area, false, true);
         return fx::take_bytes(*surface);
     };
-    out.inks = [&kernel, inks](const core::Page& page, const core::InkPixels& raster, const Json& params, const Json* area, const core::Document&) {
+    out.inks = [&kernel, inks](const core::Page& page, const core::InkPixels& raster, const Json& params, const Json* area, const core::Document& doc) {
         if (!page.color) throw core::OpError("an RGB page holds no ink pixels");
         const ImageAllocationBudget budget{kBudget};
         const auto surface = fx::ink_surface(raster, *page.color);
-        run(*surface, kernel, inks, params, page, area, false, true);
+        run(*surface, kernel, inks, params, page, doc, area, false, true);
         return fx::take_bytes(*surface);
     };
     return out;
@@ -186,7 +295,44 @@ std::optional<Json> filter_report(const core::Document& doc, const Json& op) {
     const std::size_t at = core::require_page(doc, op);
     Json drawn{{"kind", *kind}};
     drawn.update(core::normalize_filter(kind->get_ref<const std::string&>(), params, &doc.page(at)));
+    for (const std::string_view key : core::filter_info(kind->get_ref<const std::string&>())->files)
+        drawn.erase(std::string(key) + "_data");  // (D2: a file's data said by its ref and suffix, not again)
     return Json{{"filter", std::move(drawn)}};
+}
+
+Json keep_filter_files(core::Document& doc, const core::Page& page, std::string_view kind, Json params) {
+    const core::FilterInfo* info = core::filter_info(kind);
+    if (info == nullptr || info->files.empty() || !params.is_object()) return params;
+    for (const std::string_view name : info->files) {
+        const std::string key(name), data_key = key + "_data", suffix_key = key + "_suffix";
+        std::string bytes, suffix;
+        if (const Json* data = core::get(params, data_key); data != nullptr && !data->is_null()) {
+            // (its normal form says what it is — a PNG or a PSD of at most 32 MiB —, refused as the op refuses it)
+            const Json normal = core::normalize_filter(kind, params, &page);
+            bytes = core::a2b_base64(data->get_ref<const std::string&>());
+            suffix = normal[suffix_key].get<std::string>();
+            (void)map_picture(bytes);  // (a map that cannot be read is not kept)
+        } else if (const Json* map = core::get(params, key); map != nullptr && map->is_object()) {
+            (void)core::normalize_filter(kind, params, &page);
+            bytes = write_png(layer_map(doc, page, *map));
+            suffix = ".png";
+        } else if (map != nullptr && map->is_string()) {
+            // (one of the book's files: held by it, of that kind — as filter_raster reads it —, or the smart object could not
+            // be drawn and the book would open read-only: D2's review P2-2)
+            const Json normal = core::normalize_filter(kind, params, &page);
+            const std::string ref = normal[key].get<std::string>();
+            if (!holds_map(doc, ref, normal[suffix_key].get<std::string>())) throw core::OpError("the displacement map " + ref + " is not in the book");
+            continue;
+        } else {
+            continue;
+        }
+        const std::string ref = core::bytes_ref(bytes);
+        doc.filter_files[ref] = std::make_shared<const std::string>(std::move(bytes));
+        params[key] = ref;
+        params[suffix_key] = suffix;
+        params.erase(data_key);
+    }
+    return params;
 }
 
 void register_filter_ops(core::OpRegistry& registry) {

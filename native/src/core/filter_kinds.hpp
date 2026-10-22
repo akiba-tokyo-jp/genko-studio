@@ -36,11 +36,18 @@ enum class FilterInks {
                 // they were); grey as it is (maximum, emboss, edges…)
     LightnessAndColour,  // (D1) CMYK and multichannel plates as 1 − ink, back after; a Lab page's L, a and b each (the kernel
                          // told it is Lab: a and b about their 0, as RGB's colours about their grey); grey as it is — a kernel
-                         // whose result is about a middle (ハイパス, カスタム)
+                         // whose result is about a middle (ハイパス, カスタム), or (D2) that keeps or greys a Lab page's a and b
+                         // itself while it moves, shades or traces the lightness (表現手法: エンボス, 輪郭検出, 押し出し, 風…)
     Meaning,    // on the colours the inks mean, back by the page's rules (the gallery, HSB/HSL, Camera Raw…)
-    Halftone,   // its own screen on each plate (Color Halftone)
+    Halftone,   // its own screen on each plate (カラーハーフトーン, D2's メゾティント): each plate's canvas value as it is, a Lab
+                // page's — no plates — the colours it means
 };
 std::string_view to_string(FilterInks inks);
+
+// (D2) 置き換え's map given as a file's data (map_data, base64): at most 32 MiB of a PNG or PSD file.
+inline constexpr std::size_t kDisplacementMapMaxBytes = 32u * 1024 * 1024;
+// (D2) シアー's curve: at most this many points.
+inline constexpr std::size_t kShearMostPoints = 64;
 
 // A setting that names a place on the picture (design 2.2, 3.3): moved and scaled with a smart object (its "space":
 // "contents"), as PC3's bending filters' points.
@@ -122,9 +129,9 @@ std::optional<std::pair<std::string, Json>> to_upstream(std::string_view kind, c
 bool uses_filters(const Document& doc);
 // The files its smart filters hold (each its asset ref and suffix), in the order met, each once.
 std::vector<std::pair<std::string, std::string>> filter_file_refs(const Document& doc);
-// Its smart filters' files well formed (an asset ref, a known suffix) and held: by the book (Document::filter_files) or
-// its folder (`held`: does the folder hold this ref with this suffix; none: not asked). core::Error("value") says what
-// is not.
+// Its smart filters' files well formed (an asset ref, a known suffix — never a layer named nor the file's data: D2) and
+// held: by the book (Document::filter_files) or its folder (`held`: does the folder hold this ref with this suffix; none:
+// not asked). core::Error("value") says what is not.
 void validate_filters(const Document& doc, const std::function<bool(const std::string&, const std::string&)>& held = {});
 
 // The catalogue of genko inspect --filters (design 3.2): each PC4 kind — its upstream id, Photoshop's name, submenu,

@@ -180,9 +180,6 @@ std::vector<float> conv_sep(const Window& src, const Rect& out, const std::vecto
 
 // --- the kernels -----------------------------------------------------------------------------------------------------
 
-Kernels distort_kernels() { return {}; }       // (D2)
-Kernels pixelate_kernels() { return {}; }      // (D2)
-Kernels stylize_kernels() { return {}; }       // (D2)
 Kernels render_kernels() { return {}; }        // (D4)
 Kernels blur_gallery_kernels() { return {}; }  // (D4)
 Kernels camera_raw_kernels() { return {}; }    // (D5)
@@ -326,6 +323,13 @@ public:
     unsigned levels() const override { return bytes_ == 2 ? 65535 : 0; }
     double least() const override { return least_; }
     std::string taken() { return std::move(out_); }
+    // (its f32 samples, little-endian RGBA after the 16 bytes of the header, are the floats themselves on a little-endian
+    // machine)
+    const float* floats(int y) const override {
+        if constexpr (std::endian::native != std::endian::little) return nullptr;
+        if (bytes_ != 4 || reinterpret_cast<std::uintptr_t>(src_.data() + 16) % alignof(float) != 0) return nullptr;
+        return reinterpret_cast<const float*>(src_.data() + 16) + std::size_t(y) * width_ * 4;
+    }
 
 private:
     float sample(std::size_t i, unsigned c) const {
@@ -577,6 +581,35 @@ Window read_window(const Surface& surface, const Rect& r, const Way& way, const 
     return out;
 }
 
+// The rows of a band of read_window (a whole kind's one window): about kReadBandPixels pixels, one row at least.
+int band_rows(const Rect& inner) { return std::max(1, static_cast<int>(kReadBandPixels / static_cast<std::size_t>(std::max(1, inner.width())))); }
+
+// What a band's reading holds besides the window (the surface's values; the inks and colours the rules work in, on the
+// way of the colours the inks mean).
+std::uint64_t band_bytes(const Rect& inner, const Way& way) {
+    if (inner.empty()) return 0;
+    const std::uint64_t px = std::uint64_t(std::min(band_rows(inner), inner.height())) * std::uint64_t(inner.width());
+    return px * ((way.colours + 1) * sizeof(float) + (way.meaning ? (way.colours + 3) * sizeof(double) : 0));
+}
+
+// read_window for a whole kind's base box (D2's review P2-1): read in bands of rows straight into the window, so what the
+// reading holds besides the window is a band's (band_bytes), not another window of the whole.
+Window read_window_in_bands(const Surface& surface, const Rect& r, const Way& way, const ink::Rules* rules) {
+    const Rect grid{0, 0, int(surface.width()), int(surface.height())};
+    const Rect inner = r.intersect(grid);
+    const std::size_t sch = way.colours + 1, kch = way.kernel_colours + 1;
+    Window out(inner, kch);
+    if (inner.empty()) return out;
+    const int rows = band_rows(inner);
+    std::vector<float> values(std::size_t(std::min(rows, inner.height())) * std::size_t(inner.width()) * sch);
+    for (int y = inner.y0; y < inner.y1; y += rows) {
+        const Rect band{inner.x0, y, inner.x1, std::min(y + rows, inner.y1)};
+        surface.read(band, values.data());
+        to_kernel(way, values.data(), out.data.data() + std::size_t(y - inner.y0) * std::size_t(inner.width()) * kch, band.area(), rules);
+    }
+    return out;
+}
+
 }  // namespace
 
 ProgressScope::ProgressScope(std::atomic<double>& done) : before_(g_progress) {
@@ -599,7 +632,8 @@ void apply(Surface& surface, const Kernel& kernel, const Json& params, core::Fil
     if (reads.plane != nullptr && reads.plane->size() != std::size_t(w) * h) throw std::logic_error("fx::apply: the plane is not the grid's");
     Way way;
     way.colours = surface.colours();
-    way.meaning = inks == core::FilterInks::Meaning && surface.ink() != nullptr;
+    // (D2: a screen — カラーハーフトーン, メゾティント — on each plate; a Lab page's L, a and b are no plates: the colours they mean)
+    way.meaning = (inks == core::FilterInks::Meaning || (inks == core::FilterInks::Halftone && surface.space() == Space::Lab)) && surface.ink() != nullptr;
     way.lightness = (inks == core::FilterInks::Lightness || inks == core::FilterInks::LightnessAndColour) &&
                     (surface.space() == Space::Cmyk || surface.space() == Space::Multi);
     way.lab_lightness = inks == core::FilterInks::Lightness && surface.space() == Space::Lab;
@@ -621,6 +655,7 @@ void apply(Surface& surface, const Kernel& kernel, const Json& params, core::Fil
     ctx.cover = cover != nullptr ? cover : reads.within;
     ctx.grid_width = w;
     ctx.plane = reads.plane;
+    ctx.map = reads.map;
     const Halo halo = kernel.halo ? kernel.halo(params, ctx) : Halo::margin(0);
 
     // the part worked: as far as the halo reaches from what shows (upstream's output_area), the base box for a whole kind
@@ -647,7 +682,12 @@ void apply(Surface& surface, const Kernel& kernel, const Json& params, core::Fil
     // result the same whatever the tiling) before it is refused as too large.
     const std::size_t sch = way.colours + 1, kch = way.kernel_colours + 1;
     const Rect whole = halo.bounds ? ctx.bounds.intersect(grid).unite(area) : Rect{};
-    const image_ops::Held shared_held(std::uint64_t(whole.area()) * kch * sizeof(float));
+    // (D2: a 32-bit precise layer's base box of whole rows read in place — no float copy, nothing held for it)
+    const float* in_place = halo.bounds && !way.meaning && !way.lightness && !way.lab_lightness && kch == sch && whole.x0 == 0 && whole.x1 == int(w)
+                                ? surface.floats(whole.y0)
+                                : nullptr;
+    // (its reading: a band of rows at a time, held too — read_window_in_bands)
+    const image_ops::Held shared_held(in_place != nullptr ? 0 : std::uint64_t(whole.area()) * kch * sizeof(float) + band_bytes(whole.intersect(grid), way));
     const auto per_thread_of = [&](int tile_side) {
         const std::uint64_t tile_px = std::uint64_t(tile_side) * tile_side;
         const std::uint64_t reach = std::uint64_t(tile_side) + 2 * std::uint64_t(halo.radius);
@@ -690,7 +730,14 @@ void apply(Surface& surface, const Kernel& kernel, const Json& params, core::Fil
     };
     if (halo.bounds) {
         const auto rules = rules_of();
-        shared = read_window(surface, whole, way, rules.get());
+        if (in_place != nullptr) {
+            shared.emplace();
+            shared->rect = whole;
+            shared->ch = kch;
+            shared->view = in_place;
+        } else {
+            shared = read_window_in_bands(surface, whole, way, rules.get());
+        }
     }
     // (a whole kind's work done once — 平均's mean —, its tiles given what it found)
     const Json found = kernel.once && shared ? kernel.once(params, *shared, ctx) : Json();
@@ -768,6 +815,53 @@ void apply(Surface& surface, const Kernel& kernel, const Json& params, core::Fil
     if (stop != nullptr && stop->stop_requested()) throw Cancelled();
 }
 
+// --- box passes in whole numbers ----------------------------------------------------------------------------------------
+
+std::array<int, 3> gauss_box_radii(float sigma) {
+    const float n = 3.0f;
+    const float w_ideal = std::sqrt(12.0f * sigma * sigma / n + 1.0f);
+    int wl = static_cast<int>(std::floor(w_ideal));
+    if (wl % 2 == 0) wl -= 1;
+    wl = std::max(wl, 1);
+    const int wu = wl + 2;
+    const float m_ideal = (12.0f * sigma * sigma - n * static_cast<float>(wl * wl) - 4.0f * n * static_cast<float>(wl) - 3.0f * n) / (-4.0f * static_cast<float>(wl) - 4.0f);
+    const int m = static_cast<int>(std::clamp(std::round(m_ideal), 0.0f, n));
+    std::array<int, 3> out{};
+    for (int i = 0; i < 3; ++i) out[static_cast<std::size_t>(i)] = i < m ? (wl - 1) / 2 : (wu - 1) / 2;
+    return out;
+}
+
+void whole_box_line(std::int64_t* first, std::size_t len, std::size_t stride, std::size_t n, int r, std::vector<std::int64_t>& line) {
+    if (r <= 0 || len == 0) return;
+    line.resize(len * n);
+    for (std::size_t i = 0; i < len; ++i) std::copy(first + i * stride, first + i * stride + n, line.begin() + static_cast<std::ptrdiff_t>(i * n));
+    const auto at = [&line, len, n](std::ptrdiff_t k, std::size_t c) { return line[static_cast<std::size_t>(std::clamp<std::ptrdiff_t>(k, 0, std::ptrdiff_t(len) - 1)) * n + c]; };
+    const std::int64_t width = 2 * std::int64_t(r) + 1;
+    const auto div_round = [width](std::int64_t a) { return a >= 0 ? (a + width / 2) / width : -((-a + width / 2) / width); };
+    for (std::size_t c = 0; c < n; ++c) {
+        std::int64_t acc = 0;
+        for (std::ptrdiff_t k = -r; k <= r; ++k) acc += at(k, c);
+        for (std::size_t x = 0; x < len; ++x) {
+            first[x * stride + c] = div_round(acc);
+            acc += at(std::ptrdiff_t(x) + r + 1, c) - at(std::ptrdiff_t(x) - r, c);
+        }
+    }
+}
+
+void whole_box_passes(std::vector<float>& buf, std::size_t w, std::size_t h, std::size_t n, const std::vector<int>& radii, double unit, double most) {
+    if (w == 0 || h == 0 || std::all_of(radii.begin(), radii.end(), [](int r) { return r <= 0; })) return;
+    std::vector<std::int64_t> q(buf.size()), line;
+    for (std::size_t i = 0; i < buf.size(); ++i) {
+        const double v = std::isfinite(buf[i]) ? static_cast<double>(buf[i]) : 0.0;
+        q[i] = std::llround(std::clamp(v, -most, most) / unit);
+    }
+    for (const int r : radii)
+        for (std::size_t y = 0; y < h; ++y) whole_box_line(q.data() + y * w * n, w, n, n, r, line);
+    for (const int r : radii)
+        for (std::size_t x = 0; x < w; ++x) whole_box_line(q.data() + x * n, h, w * n, n, r, line);
+    for (std::size_t i = 0; i < buf.size(); ++i) buf[i] = static_cast<float>(static_cast<double>(q[i]) * unit);
+}
+
 // --- how heavy ---------------------------------------------------------------------------------------------------------
 
 double work(std::string_view kind, const Json& params, std::uint64_t pixels, double s, unsigned levels) {
@@ -777,7 +871,7 @@ double work(std::string_view kind, const Json& params, std::uint64_t pixels, dou
     ctx.s = s > 0 ? s : 1.0;
     ctx.levels = levels;
     const double each = found->cost ? found->cost(params, ctx) : kDefaultCost;
-    return (each + kPixelWork) * static_cast<double>(pixels);
+    return (each + kPixelWork) * static_cast<double>(pixels) + (found->setup ? found->setup(params) : 0.0);
 }
 
 Grid layer_grid(const core::Page& page, const core::Layer& layer) {

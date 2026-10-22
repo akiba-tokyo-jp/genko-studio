@@ -30,6 +30,12 @@ private:
 // normal form}}; none for any other kind. (D6 adds what it resolves: レンズ補正's profile, 広角補正's model.)
 std::optional<core::Json> filter_report(const core::Document& doc, const core::Json& op);
 
+// (D2, design 2.6) A smart filter's settings with its files made the book's: 置き換え's map given as a file's data
+// (map_data) or as a layer of the book ({"page"?, "layer": id | "merged"}, drawn at the working 200 dpi) becomes a file the
+// book holds (Document::filter_files: "map" its ref, "map_suffix" its kind) — what the smart object draws then never
+// changes with that layer. OpError as filter_raster refuses the map. Other kinds' settings as they are.
+core::Json keep_filter_files(core::Document& doc, const core::Page& page, std::string_view kind, core::Json params);
+
 // What filter_raster refuses of a kind of フィルター's that a smart filter keeps (OpError): D3's フィルターギャラリー with every
 // effect hidden (it would change nothing; a smart filter may hold its effects so).
 void refuse_filter(const core::Document& doc, const core::Json& op);

@@ -77,8 +77,9 @@ void build(adjust_forms::Form& form, const core::AdjustKind& kind, const core::F
             case Type::Rgb: {
                 const bool painted = info != nullptr && std::find(info->colours.begin(), info->colours.end(), p.key) != info->colours.end();
                 std::array<int, 3> fallback{0, 0, 0};
-                if (painted) {
-                    fallback = colour++ == 0 ? context.pen : context.sub;
+                if (painted) {  // (a 背景色's key the sub colour, a 描画色's the main colour; others the main, then the sub colour)
+                    fallback = p.key == "background" ? context.sub : p.key == "foreground" ? context.pen : colour == 0 ? context.pen : context.sub;
+                    ++colour;
                 } else if (p.numbers.size() == 3) {
                     fallback = {static_cast<int>(p.numbers[0]), static_cast<int>(p.numbers[1]), static_cast<int>(p.numbers[2])};
                 }
@@ -196,9 +197,6 @@ std::vector<FilterForm> blur_forms() {
     }
     return out;
 }
-std::vector<FilterForm> distort_forms() { return {}; }       // (D2)
-std::vector<FilterForm> pixelate_forms() { return {}; }      // (D2)
-std::vector<FilterForm> stylize_forms() { return {}; }       // (D2)
 std::vector<FilterForm> render_forms() { return {}; }        // (D4)
 std::vector<FilterForm> blur_gallery_forms() { return {}; }  // (D4)
 
