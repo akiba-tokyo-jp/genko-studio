@@ -281,10 +281,16 @@ std::string exif_upright(std::string exif) {
     const Tiff t(exif);
     if (!t.ok) return exif;
     const auto at = t.entry(t.first_ifd(), 0x0112);
-    if (!at || t.u16(*at + 2) != 3) return exif;
-    // (a SHORT's value in the entry's first two bytes, in the block's own order)
-    exif[*at + 8] = t.little ? '\x01' : '\0';
-    exif[*at + 9] = t.little ? '\0' : '\x01';
+    if (!at) return exif;
+    const unsigned type = t.u16(*at + 2);
+    if (type == 3) {
+        // (a SHORT's value in the entry's first two bytes, in the block's own order)
+        exif[*at + 8] = t.little ? '\x01' : '\0';
+        exif[*at + 9] = t.little ? '\0' : '\x01';
+    } else if (type == 4) {
+        // (a LONG — some writers' —: its four bytes)
+        for (int k = 0; k < 4; ++k) exif[*at + 8 + static_cast<std::size_t>(k)] = (t.little ? k == 0 : k == 3) ? '\x01' : '\0';
+    }
     return exif;
 }
 

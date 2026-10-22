@@ -30,10 +30,12 @@
 #include "app/save_status.hpp"
 #include "app/theme.hpp"
 #include "core/base64.hpp"
+#include "core/color_model.hpp"
 #include "core/file_info.hpp"
 #include "formats/pillow_save.hpp"
 #include "gui_support.hpp"
 #include "render/image.hpp"
+#include "render/page.hpp"
 #include "render/png.hpp"
 #include "storage/fsutil.hpp"
 #include "testsupport.hpp"
@@ -429,6 +431,37 @@ private slots:
         const core::Page& copied = d.window->session().document().page(0);
         QCOMPARE(copied.spec.width_mm.value(), contents->spec.width_mm.value());
         QCOMPARE(copied.spec.height_mm.value(), contents->spec.height_mm.value());
+    }
+
+    // カラー設定's "ask when a picture has no profile" (on, the working RGB Display P3): a PNG with none asked about before
+    // it opens — opened without one (sRGB's colours) as part of opening it (no change to undo), or with the working one.
+    void aPictureWithoutAProfileIsAskedAbout() {
+        Desk d;
+        genko::app::settings()->setValue(QStringLiteral("color/askOnMissing"), QStringLiteral("true"));
+        genko::app::settings()->setValue(QStringLiteral("color/workingRgb"), QStringLiteral("display-p3"));
+        QStringList titles;
+        QString answer;
+        d.answers->responder->get_item = [&](const QString& title, const QString&, const QStringList& items, int, bool) -> std::optional<QString> {
+            titles << title;
+            if (title != QStringLiteral("プロファイルのない画像")) return std::nullopt;
+            for (const QString& item : items) {
+                if (item.startsWith(answer)) return item;
+            }
+            return std::nullopt;
+        };
+        answer = QStringLiteral("プロファイルなしで開く");
+        d.window->open_path(d.picture("plain.png"));
+        QVERIFY(wait_for([&] { return d.tabs() == 2; }));
+        QCOMPARE(titles.filter(QStringLiteral("プロファイルのない画像")).size(), 1);
+        QVERIFY2(!d.doc().page(0).rgb || d.doc().page(0).rgb->profile.empty(), "sRGB's colours: no profile");
+        QCOMPARE(d.window->session().generation(), std::uint64_t(0));  // (part of opening it: nothing to undo)
+        answer = QStringLiteral("作業用の空間");
+        d.window->open_path(d.picture("working.png"));
+        QVERIFY(wait_for([&] { return d.tabs() == 3; }));
+        QCOMPARE(titles.filter(QStringLiteral("プロファイルのない画像")).size(), 2);
+        QVERIFY(d.doc().page(0).rgb && d.doc().page(0).rgb->profile == core::builtin_profile("display-p3")->ref());
+        genko::app::settings()->remove(QStringLiteral("color/askOnMissing"));
+        genko::app::settings()->remove(QStringLiteral("color/workingRgb"));
     }
 
     // ファイル情報…: the items set (one change, 取り消し takes it back).
