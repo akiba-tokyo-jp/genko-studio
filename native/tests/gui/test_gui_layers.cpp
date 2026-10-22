@@ -556,12 +556,16 @@ private slots:
     }
 
     // A filter (PC4 節 D, the user's decision 1: the panel's かける… opens the フィルター menu, whose ぼかし（ガウス）… is here):
-    // its numbers in a window while the page shows the result; かける applies it (pen lines become pixels), やめる leaves the
-    // page as it was; a filter without numbers (ぼかし) straight on.
+    // after the question (pen lines become pixels), its numbers in a window while the page shows the result; かける applies
+    // it, やめる leaves the page as it was; a filter without numbers (ぼかし) straight on, after the question.
     void filterWithItsResultShown() {
         Book book;
         const std::string ink = book.ink;
         gui_test::Answers answers;
+        answers.responder->question = [&answers](const QString& title, const QString& text) {
+            answers.asked << title + QStringLiteral(": ") + text;
+            return true;
+        };
         QVERIFY(book.choose(ink));
         bool previewed = false;
         auto* canvas = book.window->canvas();
@@ -595,9 +599,12 @@ private slots:
         book.undo();
         QVERIFY(book.layer(ink)->stroke_count() > 0);
 
-        // a filter without numbers: straight on
+        // a filter without numbers: straight on, after the question
+        answers.asked.clear();
         answers.responder->exec = [](QDialog*) { return int(QDialog::Rejected); };
         book.window->action(QStringLiteral("act_filter_blur"))->trigger();
+        QCOMPARE(answers.asked.size(), qsizetype(1));
+        QVERIFY2(answers.asked[0].contains(QStringLiteral("ペンの線は画像になり")), qPrintable(answers.asked[0]));
         QCOMPARE(book.layer(ink)->stroke_count(), std::size_t(0));
         QVERIFY(book.layer(ink)->raster_png);
     }

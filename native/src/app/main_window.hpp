@@ -250,6 +250,13 @@ public:
     LayerPanel* layer_panel() const { return layer_panel_; }
     // PC4 節 D: the フィルター menu (the layer panel's かける… opens it: the user's decision 1).
     QMenu* filter_menu() const { return filter_menu_; }
+    // PC4 節 D (app/filter_menu.cpp; the layer panel's スマートフィルターを編集… too): a filter's ops sent — on a thread with
+    // its progress and 中止 when `heavy` (render::fx::work), else at once —; the window's preview of them — on the page at
+    // once, or, `heavy`, worked out on a thread on a copy of the book at the screen's resolution (render::fx::preview_book),
+    // the one before stopped; none: taken away —; and whether such a preview is being worked out now.
+    bool send_filter(const core::Json& ops, const QString& name, bool heavy);
+    void preview_filter(const std::optional<core::Json>& ops, bool heavy);
+    bool filter_previewing() const;
     // channels@1 (main_window_channels.cpp): the channel panel, and what the pixel tools work on and what is shown of a
     // page's channels — the window's, never saved; each page its own —: the target ("" the composite, a colour plate's
     // name, an alpha or spot channel's id; the pixel ops sent are given it as their "channel"), the colour plates
@@ -917,12 +924,6 @@ private:
     void filter_command(const FilterItem& item);
     void repeat_filter();
     void follow_filter_menu();
-    // The ops sent (a filter on the layer drawn on): on a thread with its progress and 中止 when `heavy`, else at once.
-    bool send_filter(const core::Json& ops, const QString& name, bool heavy);
-    // The window's preview of a filter's ops: on the page at once, or — `heavy` — worked out on a thread on a copy of the
-    // book at the screen's resolution (render::fx::preview_book), the one before stopped; none: taken away.
-    void preview_filter(const std::optional<core::Json>& ops, bool heavy);
-    bool filter_previewing() const;
     void build_move_page(ToolSettings* ts);
     void snap_toggles();
     void lock_layers_dialog();

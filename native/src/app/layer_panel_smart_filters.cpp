@@ -28,6 +28,7 @@
 #include "core/pyconv.hpp"
 #include "core/pyops.hpp"
 #include "core/smart.hpp"
+#include "render/fx.hpp"
 #include "render/smart_filters.hpp"
 #include "service/wording.hpp"
 
@@ -166,9 +167,27 @@ void LayerPanel::edit_smart_filter(int index) {
         context.page = page;
         const auto& rgb = window_->pen().rgb;
         context.pen = {static_cast<int>(rgb[0]), static_cast<int>(rgb[1]), static_cast<int>(rgb[2])};
+        // (a heavy one — render::fx::work on the smart object's grid —: previewed and set on a thread, as フィルター's commands)
+        const render::fx::Grid grid = render::fx::layer_grid(*page, *layer);
+        const auto heavy = [grid, kind](const Json& values) {
+            return render::fx::work(kind, values, std::uint64_t(grid.width) * grid.height, grid.s) >= render::fx::kHeavyWork;
+        };
+        const FilterPreview shown = [this, page_index, layer_id, index, heavy](const std::optional<Json>& values) {
+            if (!values) {
+                window_->preview_filter(std::nullopt, false);
+                return;
+            }
+            const Json set{{"op", "smart_filter_set"}, {"page", page_index}, {"id", layer_id}, {"index", index}, {"params", adjust_forms::without_nulls(*values)}};
+            window_->preview_filter(Json::array({set}), heavy(*values));
+        };
         Json opened;
-        const auto values = filter_forms::dialog(this, kind, now, context, filter_forms::Preview{preview, {}}, &opened);
-        if (values) params = opened.is_object() ? adjust_forms::changes(opened, *values) : *values;
+        const auto values = filter_forms::dialog(this, kind, now, context, filter_forms::Preview{shown, [this] { return window_->filter_previewing(); }}, &opened);
+        if (!values || !window_->still(asked)) return;
+        params = opened.is_object() ? adjust_forms::changes(opened, *values) : *values;
+        if (params->is_object() && params->empty()) return;  // (nothing changed)
+        window_->send_filter(Json::array({Json{{"op", "smart_filter_set"}, {"page", page_index}, {"id", layer_id}, {"index", index}, {"params", *params}}}),
+                             filter_forms::title(kind), heavy(adjust_forms::without_nulls(*values)));
+        return;
     } else if (adjust_forms::form_kind(kind) != nullptr) {  // (PC2's kinds: their own window; what the person changed laid over them)
         adjust_forms::FormContext context;
         context.page = page;
