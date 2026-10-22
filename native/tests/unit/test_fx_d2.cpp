@@ -914,12 +914,12 @@ private slots:
         Json smart = *layer_of(bad, "so").smart;
         smart["filters"][0]["params"]["map_data"] = png_b64(other);
         for (core::Layer& layer : bad.edit_page(0).layers)
-            if (layer.id == "so") layer.smart = std::make_shared<const Json>(smart);
+            if (layer.id == "so") layer.smart = smart;
         QVERIFY_THROWS_EXCEPTION(core::Error, core::validate_filters(bad));
         smart["filters"][0]["params"].erase("map_data");
         smart["filters"][0]["params"]["map"] = Json{{"layer", "map"}};
         for (core::Layer& layer : bad.edit_page(0).layers)
-            if (layer.id == "so") layer.smart = std::make_shared<const Json>(smart);
+            if (layer.id == "so") layer.smart = smart;
         QVERIFY_THROWS_EXCEPTION(core::Error, core::validate_filters(bad));
         // carried to another book with its smart object: the map comes along (bring_contents)
         core::Document there = blank();
