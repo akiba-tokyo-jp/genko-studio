@@ -537,10 +537,10 @@ private slots:
     // box) has the whole's pixels there, away from its edges: the patterns and grains are of the grid's places, the cells
     // and screens anchored at the base box.
     void aPartWorkedAloneIsTheWholeThere() {
-        const std::string whole = precise(96, 80, pattern(96, 80));
+        const std::string whole = precise(128, 96, pattern(128, 96));
         for (const auto& [kind, params] : std::vector<std::pair<std::string, Json>>{
                  {"pixelate_mezzotint", Json{{"type", "medium_lines"}, {"seed", 2}}},
-                 {"pixelate_crystallize", Json{{"cell_size", 6}, {"seed", 1}}},
+                 {"pixelate_crystallize", Json{{"cell_size", 4}, {"seed", 1}}},
                  {"pixelate_mosaic", Json{{"cell_size", 6}}},
                  {"pixelate_color_halftone", Json{{"max_radius", 4}}},
                  {"pixelate_pointillize", Json{{"cell_size", 5}, {"seed", 3}}},
@@ -551,24 +551,24 @@ private slots:
                 Run all;
                 all.s = s;
                 const std::string full = run_precise(whole, kind, params, all);
-                // (the part 24..72 × 20..60 of the grid)
+                // (the part 32..96 × 24..72 of the grid)
                 std::vector<Px> part;
-                for (std::uint32_t y = 20; y < 60; ++y)
-                    for (std::uint32_t x = 24; x < 72; ++x) {
+                for (std::uint32_t y = 24; y < 72; ++y)
+                    for (std::uint32_t x = 32; x < 96; ++x) {
                         const auto p = pixel(whole, x, y);
                         part.push_back({float(p[0]), float(p[1]), float(p[2]), float(p[3])});
                     }
                 std::string alone;
                 {
-                    const render::fx::PlaceScope place(24, 20, Rect{0, 0, 96, 80});
+                    const render::fx::PlaceScope place(32, 24, Rect{0, 0, 128, 96});
                     Run here;
                     here.s = s;
-                    alone = run_precise(precise(48, 40, part), kind, params, here);
+                    alone = run_precise(precise(64, 48, part), kind, params, here);
                 }
-                const std::uint32_t margin = 16;
-                for (std::uint32_t y = margin; y < 40 - margin; ++y)
-                    for (std::uint32_t x = margin; x < 48 - margin; ++x)
-                        QVERIFY2(pixel(alone, x, y) == pixel(full, x + 24, y + 20),
+                const std::uint32_t margin = 20;  // (past what each reaches at 1.5: its pixels read inside the part)
+                for (std::uint32_t y = margin; y < 48 - margin; ++y)
+                    for (std::uint32_t x = margin; x < 64 - margin; ++x)
+                        QVERIFY2(pixel(alone, x, y) == pixel(full, x + 32, y + 24),
                                  qPrintable(QStringLiteral("%1 at %2: (%3, %4)").arg(QString::fromStdString(kind)).arg(s).arg(x).arg(y)));
             }
         }
@@ -696,11 +696,18 @@ private slots:
         const auto turned = inks_of(apply_ops(cmyk, Json::array({Json{{"op", "filter_raster"}, {"page", 1}, {"id", "pic"}, {"kind", "stylize_solarize"}}})).doc);
         QCOMPARE(turned.value(5 * 64 + 5, 3), 1.0);  // (no ink — light 1, past the middle — turned to K 100%, as RGB's white turns black)
         QCOMPARE(turned.value(32 * 64 + 32, 3), 1.0);
-        // a Lab page: a relief and the edges grey
-        const auto lab = ink_page("lab", [](std::uint32_t x, std::uint32_t, unsigned c) { return c == 0 ? (x < 32 ? 0.2 : 0.9) : c == 1 ? 0.8 : 0.3; });
+        // a Lab page (L 20 and 90, a 40, b −30): a relief and the edges grey (a = b = 0), solarized its L alone
+        const auto lab = ink_page("lab", [](std::uint32_t x, std::uint32_t, unsigned c) { return c == 0 ? (x < 32 ? 20.0 : 90.0) : c == 1 ? 40.0 : -30.0; });
         for (const char* kind : {"stylize_emboss", "stylize_find_edges", "stylize_trace_contour"}) {
             const auto now = inks_of(apply_ops(lab, Json::array({Json{{"op", "filter_raster"}, {"page", 1}, {"id", "pic"}, {"kind", kind}}})).doc);
-            for (unsigned c = 1; c < 3; ++c) QVERIFY2(std::fabs(now.value(10 * 64 + 10, c) - 128.0 / 255.0) < 0.01, kind);
+            for (unsigned c = 1; c < 3; ++c) QVERIFY2(std::fabs(now.value(10 * 64 + 10, c)) < 0.6, qPrintable(QStringLiteral("%1: %2").arg(kind).arg(now.value(10 * 64 + 10, c))));
+        }
+        {
+            const auto now = inks_of(apply_ops(lab, Json::array({Json{{"op", "filter_raster"}, {"page", 1}, {"id", "pic"}, {"kind", "stylize_solarize"}}})).doc);
+            QVERIFY(std::fabs(now.value(10 * 64 + 40, 0) - 10.0) < 0.1);  // (L 90 past the middle: 10)
+            QVERIFY(std::fabs(now.value(10 * 64 + 10, 0) - 20.0) < 0.1);  // (L 20: as it was)
+            QVERIFY(std::fabs(now.value(10 * 64 + 10, 1) - 40.0) < 0.6);  // (its a and b as they were)
+            QVERIFY(std::fabs(now.value(10 * 64 + 10, 2) + 30.0) < 0.6);
         }
         // a multichannel page and a grey one take each of them
         for (const std::string mode : {"multichannel", "gray"}) {
