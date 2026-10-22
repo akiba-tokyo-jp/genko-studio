@@ -716,7 +716,7 @@ double work(std::string_view kind, const Json& params, std::uint64_t pixels, dou
     return each * static_cast<double>(pixels);
 }
 
-double layer_work(const core::Page& page, const core::Layer& layer, std::string_view kind, const Json& params) {
+Grid layer_grid(const core::Page& page, const core::Layer& layer) {
     std::uint32_t w = 0, h = 0;
     try {
         if (layer.color_raster) {
@@ -729,7 +729,7 @@ double layer_work(const core::Page& page, const core::Layer& layer, std::string_
             h = header.height;
         }
     } catch (const std::exception&) {
-        return 0;
+        w = h = 0;
     }
     if (w == 0 || h == 0) {  // (an 8-bit layer: the page at the working 200 dpi; lines alone on a deep page: at its dpi)
         const bool deep = page.color.has_value() || (page.rgb && page.rgb->depth != 8);
@@ -737,7 +737,66 @@ double layer_work(const core::Page& page, const core::Layer& layer, std::string_
         w = static_cast<std::uint32_t>(std::max(1L, std::lround(page.spec.width_mm.value() / 25.4 * dpi)));
         h = static_cast<std::uint32_t>(std::max(1L, std::lround(page.spec.height_mm.value() / 25.4 * dpi)));
     }
-    return work(kind, params, std::uint64_t(w) * h, image_ops::grid_scale(page, w, h));
+    return Grid{w, h, image_ops::grid_scale(page, w, h)};
+}
+
+double layer_work(const core::Page& page, const core::Layer& layer, std::string_view kind, const Json& params) {
+    const Grid grid = layer_grid(page, layer);
+    return work(kind, params, std::uint64_t(grid.width) * grid.height, grid.s);
+}
+
+core::Document preview_book(const core::Document& doc, std::size_t at, const std::string& id, int most) {
+    core::Document out = doc;
+    if (at >= out.pages.size() || out.is_deferred(at) || most < 1) return out;
+    const core::Page& page = out.page(at);
+    std::size_t index = page.layers.size();
+    for (std::size_t i = 0; i < page.layers.size(); ++i) {
+        if (page.layers[i].id == id) index = i;
+    }
+    if (index == page.layers.size()) return out;
+    const core::Layer& layer = page.layers[index];
+    const auto factor = [most](std::uint32_t w, std::uint32_t h) {
+        return static_cast<std::uint32_t>((std::max(w, h) + std::uint32_t(most) - 1) / std::uint32_t(most));
+    };
+    if (layer.color_raster) {
+        const core::ColorRasterView view(*layer.color_raster);
+        const std::uint32_t w = view.width(), h = view.height(), k = factor(w, h);
+        if (k <= 1) return out;
+        const std::uint32_t nw = (w + k - 1) / k, nh = (h + k - 1) / k;
+        const bool floating = view.metadata("")["precision"] == "f32";
+        std::string bytes = core::encode_color_pixels(nw, nh, floating ? "f32" : "u16", [&](std::size_t i) {
+            const std::uint32_t x0 = std::uint32_t(i % nw) * k, y0 = std::uint32_t(i / nw) * k;
+            std::array<double, 4> sum{};
+            double n = 0;
+            for (std::uint32_t y = y0; y < std::min(h, y0 + k); ++y)
+                for (std::uint32_t x = x0; x < std::min(w, x0 + k); ++x) {
+                    const auto p = view.pixel(std::size_t(y) * w + x);
+                    for (unsigned c = 0; c < 3; ++c) sum[c] += p[c] * p[3];
+                    sum[3] += p[3];
+                    n += 1;
+                }
+            std::array<double, 4> v{0, 0, 0, n > 0 ? sum[3] / n : 0};
+            for (unsigned c = 0; c < 3; ++c) {
+                v[c] = sum[3] > 0 ? sum[c] / sum[3] : 0;
+                if (!floating) v[c] = std::clamp(v[c], 0.0, 1.0);
+            }
+            v[3] = std::clamp(v[3], 0.0, 1.0);
+            return v;
+        });
+        out.edit_page(at).layers[index].color_raster = std::make_shared<const std::string>(std::move(bytes));
+        return out;
+    }
+    if (layer.ink_raster) {
+        const core::InkRasterHeader header = core::ink_raster_header(*layer.ink_raster);
+        const std::uint32_t k = factor(header.width, header.height);
+        if (k <= 1) return out;
+        const core::InkPixels inks = core::decode_ink_raster(*layer.ink_raster);
+        const Size size{static_cast<int>((header.width + k - 1) / k), static_cast<int>((header.height + k - 1) / k)};
+        core::Layer& edited = out.edit_page(at).layers[index];
+        edited.ink_raster = std::make_shared<const std::string>(core::encode_ink_raster(resize_inks(inks, size, Resample::Bicubic)));
+        edited.ink_memo = {};
+    }
+    return out;
 }
 
 }  // namespace genko::render::fx

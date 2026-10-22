@@ -45,7 +45,7 @@ const std::vector<std::pair<std::string, QString>> kFilters{
     {"posterize", QStringLiteral("階調化（ポスタリゼーション）")}, {"threshold", QStringLiteral("2 値化（しきい値）")},
     {"bitonal", QStringLiteral("白黒にする")}, {"gradient_map", QStringLiteral("グラデーションマップ")},
     {"brightness_contrast", QStringLiteral("明るさ・コントラスト")}, {"despeckle", QStringLiteral("ゴミ取り")},
-    {"glow", QStringLiteral("光彩拡散")}, {"rain", QStringLiteral("雨")}};
+    {"glow", QStringLiteral("光彩")}, {"rain", QStringLiteral("雨")}};
 const std::vector<std::pair<std::string, QString>> kAdjustments{
     {"levels", QStringLiteral("レベル補正")}, {"curve", QStringLiteral("トーンカーブ")}, {"hue", QStringLiteral("色相・彩度・明度")},
     {"invert", QStringLiteral("色調反転")}, {"posterize", QStringLiteral("階調化")}, {"threshold", QStringLiteral("2 値化")},

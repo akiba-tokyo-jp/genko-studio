@@ -20,9 +20,11 @@
 
 #include "app/adjust_forms.hpp"
 #include "app/ask.hpp"
+#include "app/filter_forms.hpp"
 #include "app/layer_dialogs.hpp"
 #include "app/layer_panel.hpp"
 #include "app/main_window.hpp"
+#include "core/filter_kinds.hpp"
 #include "core/pyconv.hpp"
 #include "core/pyops.hpp"
 #include "core/smart.hpp"
@@ -64,6 +66,7 @@ QString smart_filter_title(const std::string& kind) {
     if (kind == "puppet_warp") return QStringLiteral("パペットワープ");
     for (const auto& [key, label] : filter_kinds())
         if (key == kind) return label;
+    if (core::pc4_filter(kind)) return filter_forms::title(kind);  // (PC4 節 D: フィルター's, by Photoshop's name)
     QString title = adjust_forms::command_title(kind);
     if (title.endsWith(QStringLiteral("…"))) title.chop(1);
     return title.isEmpty() ? QString::fromStdString(kind) : title;
@@ -158,7 +161,15 @@ void LayerPanel::edit_smart_filter(int index) {
             {Json{{"op", "smart_filter_set"}, {"page", page_index}, {"id", layer_id}, {"index", index}, {"params", adjust_forms::without_nulls(*values)}}}));
     };
     std::optional<Json> params;
-    if (adjust_forms::form_kind(kind) != nullptr) {  // (PC2's kinds: their own window; what the person changed laid over them)
+    if (core::pc4_filter(kind)) {  // (PC4 節 D: フィルター's kinds, their windows of the table; what the person changed laid over them)
+        adjust_forms::FormContext context;
+        context.page = page;
+        const auto& rgb = window_->pen().rgb;
+        context.pen = {static_cast<int>(rgb[0]), static_cast<int>(rgb[1]), static_cast<int>(rgb[2])};
+        Json opened;
+        const auto values = filter_forms::dialog(this, kind, now, context, filter_forms::Preview{preview, {}}, &opened);
+        if (values) params = opened.is_object() ? adjust_forms::changes(opened, *values) : *values;
+    } else if (adjust_forms::form_kind(kind) != nullptr) {  // (PC2's kinds: their own window; what the person changed laid over them)
         adjust_forms::FormContext context;
         context.page = page;
         const auto& rgb = window_->pen().rgb;

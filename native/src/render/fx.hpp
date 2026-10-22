@@ -211,7 +211,18 @@ private:
 // (design 4.4, the user's decision 4 — never refused for it).
 double work(std::string_view kind, const core::Json& params, std::uint64_t pixels, double s);
 inline constexpr double kHeavyWork = 4e8;
+// A layer's grid as a filter works it (a precise or ink layer's own; an 8-bit layer's, or lines alone, the page's at the
+// working 200 dpi — at its dpi on a deep page) and its scale.
+struct Grid {
+    std::uint32_t width = 0, height = 0;
+    double s = 1;
+};
+Grid layer_grid(const core::Page& page, const core::Layer& layer);
 // The work of `kind` on a layer of the page (its grid, its scale).
 double layer_work(const core::Page& page, const core::Layer& layer, std::string_view kind, const core::Json& params);
+// A heavy filter's preview at the screen's resolution (design 4.4): a copy of the book whose layer `id` on the page at
+// `at` — a precise or ink layer of more than `most` pixels on its long side — holds its pixels averaged down to fit (its
+// grid stretched over the page as before, so a filter's lengths scale with it); otherwise the book as it is.
+core::Document preview_book(const core::Document& doc, std::size_t at, const std::string& id, int most);
 
 }  // namespace genko::render::fx

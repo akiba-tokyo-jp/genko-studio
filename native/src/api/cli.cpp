@@ -28,6 +28,7 @@
 #include "api/buildinfo.hpp"
 #include "api/server_cli.hpp"
 #include "api/studio_cli.hpp"
+#include "core/filter_kinds.hpp"
 #include "core/config_dir.hpp"
 #include "core/actor.hpp"
 #include "core/clock.hpp"
@@ -281,6 +282,7 @@ int inspect(const QStringList& args, bool ascii) {
     // (color-model@1, the C++ build's own: --pixel <page>:<x_mm>,<y_mm> [--layer ID] [--dpi N]; PC2d: --profile <id|page|sha256>)
     QString pixel, layer, dpi_text, profile;
     bool looks = false;  // (PC2a, the C++ build's own: --looks, image.adjustments.colorLookup.list)
+    bool filters = false;  // (PC4 節 D, the C++ build's own: --filters, フィルター's kinds and their settings)
     QString area_text, page_text;  // (PC3 B1, the C++ build's own: --page N --area '<area>'; PC3 C-a: --paths [--page N])
     bool paths = false;  // (vector@1, PC3 C-a, the C++ build's own: --paths [--page N], path.list / path.info / layer.vectorMask.info)
     QString at_text;  // (PC3 C-d, the C++ build's own: --at <page>:<x_mm>,<y_mm>, layer.pickAt — the layers showing there)
@@ -301,6 +303,8 @@ int inspect(const QStringList& args, bool ascii) {
             full = true;
         } else if (arg == QLatin1String("--looks")) {
             looks = true;
+        } else if (arg == QLatin1String("--filters")) {
+            filters = true;
         } else if (arg == QLatin1String("--paths")) {
             paths = true;
         } else if (arg == QLatin1String("--stroke")) {
@@ -410,6 +414,10 @@ int inspect(const QStringList& args, bool ascii) {
     }
     if (paths) {  // (vector@1: the pages' paths, work paths, clipping paths and the layers' vector masks and shapes)
         print_json(render::path_info::book_paths(loaded.document, page_number), ascii);
+        return 0;
+    }
+    if (filters) {  // (PC4 節 D: each kind's upstream id, Photoshop's name, settings, smart filter, inks; the presets)
+        print_json(core::filter_catalogue(), ascii);
         return 0;
     }
     if (looks) {  // the built-in looks and the book's lookup tables (PC2a: カラールックアップの一覧)

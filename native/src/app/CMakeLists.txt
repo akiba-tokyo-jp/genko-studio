@@ -98,6 +98,8 @@ genko_library(genko_app
     adjust_panels.cpp
     adjust_forms_color.cpp
     image_dialogs.cpp
+    filter_forms.cpp
+    filter_menu.cpp
     main_window_adjust.cpp
     main_window_smart.cpp
     main_window_page_size.cpp

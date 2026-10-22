@@ -106,6 +106,8 @@ const std::map<std::string, const char*>& names() {
         {"matting", "マッティングした"},
         // (PC3 C-d: render/layer_align)
         {"align_layers", "整列した"}, {"distribute_layers", "分布した"}, {"arrange_layers", "重ね順を変えた"}, {"link_layers", "レイヤーのリンクを変えた"},
+        // (PC4 節 D: render/ops_filters)
+        {"render_picture", "描画した"}, {"vanishing_point", "消点で描いた"},
     };
     return table;
 }

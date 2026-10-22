@@ -319,10 +319,11 @@ LayerPanel::LayerPanel(MainWindow* window) : window_(window) {
         if (!loading_ && layer != nullptr && layer->mask && layer->mask->linked != on) mask(Json{{"linked", on}});
     });
     mask_button_->setMenu(mask_menu_);
-    filter_ = new QComboBox;
-    filter_->setObjectName(QStringLiteral("layer_filter"));
-    reload_filters();
-    auto* apply = button(QStringLiteral("かける…"), QStringLiteral("選んだフィルターをレイヤーにかけます（選択範囲があればその中だけ）"), QStringLiteral("layer_filter_apply"));
+    // (PC4 節 D, the user's decision 1: かける… opens the フィルター menu — Photoshop's filters; the corrections are レイヤー →
+    // 色調補正's)
+    filter_apply_ = button(QStringLiteral("かける…"), QStringLiteral("フィルター メニューを開きます（選んだフィルターをこのレイヤーにかけます。選択範囲があればその中だけ）"),
+                           QStringLiteral("layer_filter_apply"));
+    QPushButton* apply = filter_apply_;
     connect(apply, &QPushButton::clicked, this, [this] { apply_filter(); });
 
     const auto row = [](std::initializer_list<QWidget*> widgets) {
@@ -382,7 +383,7 @@ LayerPanel::LayerPanel(MainWindow* window) : window_(window) {
     dl->addWidget(tint_);
     dl->addLayout(row({mask_button_, effect_button_}));
     auto* frow = new QHBoxLayout;
-    frow->addWidget(filter_, 1);
+    frow->addWidget(new QLabel(QStringLiteral("フィルター")), 1);
     frow->addWidget(apply);
     dl->addLayout(frow);
     connect(details_toggle_, &QPushButton::toggled, this, [this](bool on) { show_details(on); });
@@ -398,22 +399,6 @@ void LayerPanel::show_details(bool on, bool save) {
     details_toggle_->setText((on ? QStringLiteral("▾ ") : QStringLiteral("▸ ")) + QStringLiteral("レイヤーの設定"));
     details_toggle_->setToolTip(QStringLiteral("不透明度・合成・ロック・下描き・マスク・フィルターなど"));
     if (save) settings()->setValue(QStringLiteral("ui/layer_details"), on ? QStringLiteral("true") : QStringLiteral("false"));
-}
-
-void LayerPanel::reload_filters() {
-    const QString was = filter_->currentData().toString();
-    filter_->blockSignals(true);
-    filter_->clear();
-    for (const auto& [key, label] : filter_kinds()) filter_->addItem(label, QString::fromStdString(key));
-    try {
-        for (const auto& plugin : render::plugins::available()) {  // (filters a person installed and chose to run)
-            filter_->addItem(QStringLiteral("%1（プラグイン）").arg(QString::fromStdString(plugin.name)),
-                             QString::fromStdString(std::string(render::plugins::kPrefix) + plugin.key));
-        }
-    } catch (const std::exception&) {
-    }
-    if (const int at = filter_->findData(was); at >= 0) filter_->setCurrentIndex(at);
-    filter_->blockSignals(false);
 }
 
 void LayerPanel::edit_mask(bool on) {
@@ -1063,59 +1048,11 @@ std::optional<std::vector<int>> LayerPanel::histogram(const core::Page& page, co
 }
 
 void LayerPanel::apply_filter() {
-    const auto [page, layer] = this->layer();
-    if (layer == nullptr) return;
-    const QString label = filter_->currentText();
-    // (the user's decision 3: 色相・彩度・明度 made new is the upstream form, hue_saturation — its window, app/adjust_forms;
-    // Python's hue stays an op of its own, drawn as before)
-    std::string kind = filter_->currentData().toString().toStdString();
-    if (kind == "hue" && adjust_forms::form_kind("hue_saturation") != nullptr) kind = "hue_saturation";
-    const auto area = window_->selection_area();
-    // (PC3 A2: on a smart object, a smart filter — kept with its settings, the selection its filter mask)
-    const bool smart = layer->kind == core::LayerKind::Smart;
-    const std::string op_name = smart ? "smart_filter_add" : "filter_raster";
-    if (smart && kind.starts_with(render::plugins::kPrefix)) {
-        window_->flash(QStringLiteral("プラグインのフィルターは、スマートフィルターにできません（ラスタライズしてからかけます）"), 5000, true);
-        return;
-    }
-    const QString extra = layer->stroke_count() > 0 ? QStringLiteral("\nペンの線は画像になり、あとから線として消せなくなります。") : QString();
-    const QString where = area ? QStringLiteral("の選択範囲の中") : QStringLiteral("全体");
-    const auto asked = window_->asking();
-    const QString text = smart ? QStringLiteral("スマートオブジェクト「%1」に「%2」をスマートフィルターとして足します（あとから直せます）。%3\n（元に戻す で取り消せます）")
-                                     .arg(wording::layer_label(*layer), label,
-                                          area ? QStringLiteral("\n選択範囲がフィルターマスクになります。") : QString())
-                               : QStringLiteral("レイヤー「%1」%2に「%3」をかけます。%4\n（元に戻す で取り消せます）").arg(wording::layer_label(*layer), where, label, extra);
-    if (!ask::question(this, QStringLiteral("Genko"), text)) return;
-    if (!window_->still(asked)) return;
-    const std::string layer_id = layer->id;
-    const Json index = page->index.json();
-    std::optional<Json> params;
-    const FilterPreview preview = [this, index, layer_id, kind, area, op_name](const std::optional<Json>& values) {
-        if (!values) {
-            window_->preview_ops(std::nullopt);
-            return;
-        }
-        Json op{{"op", op_name}, {"page", index}, {"id", layer_id}, {"kind", kind}};
-        op.update(*values);
-        if (area) op["area"] = *area;
-        window_->preview_ops(Json::array({op}));
-    };
-    if (kind == "gradient_map") {
-        params = adjust_fields(kind);
-    } else if (kind == "hue_saturation") {
-        adjust_forms::FormContext context;
-        context.page = page;
-        const auto& rgb = window_->pen().rgb;
-        context.pen = {static_cast<int>(rgb[0]), static_cast<int>(rgb[1]), static_cast<int>(rgb[2])};
-        params = adjust_forms::adjust_dialog(this, kind, Json::object(), context, preview);
-    } else {
-        params = filter_params(this, kind, Json::object(), preview, kind == "levels" || kind == "curve" ? histogram(*page, *layer) : std::nullopt);
-    }
-    if (!params || !window_->still(asked)) return;
-    Json op{{"op", op_name}, {"page", index}, {"id", layer_id}, {"kind", kind}};
-    op.update(*params);
-    if (area) op["area"] = *area;
-    window_->apply_ops(Json::array({op}));
+    // (PC4 節 D, the user's decision 1: the フィルター menu under the button — its commands work the layer drawn on)
+    QMenu* menu = window_->filter_menu();
+    if (menu == nullptr) return;
+    QWidget* from = filter_apply_ != nullptr && filter_apply_->isVisible() ? static_cast<QWidget*>(filter_apply_) : static_cast<QWidget*>(this);
+    menu->popup(from->mapToGlobal(QPoint(0, from->height())));
 }
 
 QIcon LayerPanel::kind_mark(core::LayerKind kind) {

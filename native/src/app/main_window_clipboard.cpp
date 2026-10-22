@@ -175,8 +175,7 @@ void MainWindow::build_clipboard_menu(QMenu* edit) {
     edit->addAction(action(QStringLiteral("act_content_aware_fill")));  // (PC3 B4: retouch_tools.cpp)
     edit->addSeparator();
     build_transform_items(edit);  // (コンテンツに応じて拡大・縮小… パペットワープ 遠近法ワープ 自由変形: main_window_transform.cpp)
-    build_transform_menu(edit->addMenu(QStringLiteral("変形")));  // (main_window_select.cpp)
-    edit->addAction(action(QStringLiteral("act_liquify_filter")));  // (ゆがみ…: Filter's in Photoshop)
+    build_transform_menu(edit->addMenu(QStringLiteral("変形")));  // (main_window_select.cpp; ゆがみ… is フィルター's: filter_menu.cpp)
 }
 
 std::optional<Json> MainWindow::copied_items(const std::optional<Json>& area, const core::Layer* of) {

@@ -207,7 +207,7 @@ std::vector<float> box(const Window& src, const Rect& out, bool alpha, int r, do
 }
 
 Kernels blur_kernels() {
-    Kernels out;
+    Kernels all;
     {  // ぼかし（ガウス） (filter.blur.gaussianBlur; ぼかし and ぼかし（強） at 0.6 and 1.4): sigma = the radius
         Kernel k;
         k.kind = "blur_gaussian";
@@ -221,7 +221,7 @@ Kernels blur_kernels() {
             const double margin = gaussian_halo(sigma), tile = std::max(256.0, std::ceil(2.0 * margin / 64.0) * 64.0);
             return 60.0 * std::pow((tile + 2.0 * margin) / tile, 2.0);  // (six passes over a window larger than the tile)
         };
-        out.push_back(std::move(k));
+        all.push_back(std::move(k));
     }
     {  // ぼかし（ボックス） (filter.blur.boxBlur): the mean of the (2r + 1)² square, r the radius rounded
         Kernel k;
@@ -237,9 +237,9 @@ Kernels blur_kernels() {
             const double tile = std::max(256.0, std::ceil(2.0 * (r + 1) / 64.0) * 64.0);
             return 16.0 * (tile + 2.0 * r) / tile;
         };
-        out.push_back(std::move(k));
+        all.push_back(std::move(k));
     }
-    return out;
+    return all;
 }
 
 }  // namespace genko::render::fx
