@@ -36,6 +36,7 @@
 #include <chrono>
 
 #include "app/actions.hpp"
+#include "app/brush_panel.hpp"  // (PC4 E1: the blend and the pencil)
 #include "app/adjust_forms.hpp"
 #include "app/ask.hpp"
 #include "app/backup.hpp"
@@ -65,6 +66,7 @@
 #include "core/paths.hpp"
 #include "core/pyconv.hpp"
 #include "render/brushes.hpp"
+#include "render/dabs/lines.hpp"
 #include "render/placed.hpp"
 #include "render/timelapse.hpp"
 #include "render/ops_registry.hpp"

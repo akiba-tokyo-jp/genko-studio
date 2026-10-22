@@ -20,6 +20,7 @@
 #include "app/brush_panel.hpp"
 #include "app/colours.hpp"
 #include "app/fields.hpp"
+#include "app/preferences.hpp"
 #include "app/main_window.hpp"
 #include "app/theme.hpp"
 #include "app/tool_settings.hpp"

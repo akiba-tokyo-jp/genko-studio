@@ -12,6 +12,8 @@
 #include "app/perf.hpp"
 #include "app/theme.hpp"
 #include "core/frames.hpp"
+#include "render/brushes.hpp"
+#include "render/dabs/lines.hpp"
 
 namespace genko::app {
 

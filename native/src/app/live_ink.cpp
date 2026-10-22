@@ -4,6 +4,7 @@
 
 #include <algorithm>
 
+#include "core/brush_dabs.hpp"
 #include "core/command_bus.hpp"
 #include "core/pyconv.hpp"
 #include "core/pynum.hpp"

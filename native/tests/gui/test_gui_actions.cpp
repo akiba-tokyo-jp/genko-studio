@@ -353,7 +353,9 @@ private slots:
         // シャープ（輪郭のみ）・輪郭以外をぼかす as act_filter_blur, act_filter_blur_more, act_filter_sharpen, act_filter_sharpen_more,
         // act_filter_sharpen_edges, act_filter_despeckle; 漫画's five act_filter_manga_<kind>) and 前回のフィルター (act_filter_last)
         // — theirs (test_gui_filters).
-        QCOMPARE(w->actions_by_name().size(), std::size_t{543});
+        // and the 2 of PC4 E1 (SPEC COLOR-09「ブラシエンジンと線」) — ツール → 鉛筆ツール (act_pencil) and 表示 → ブラシプレビュー
+        // (act_brush_preview) — theirs (test_gui_brushes).
+        QCOMPARE(w->actions_by_name().size(), std::size_t{545});
         QVERIFY(w->action("act_chat_approval"));
         QVERIFY(w->action("act_style"));
         QVERIFY(w->action("act_exposure"));
@@ -554,7 +556,9 @@ private slots:
                                                   {"shape_polygon", "act_shape_polygon"}, {"shape_line", "act_shape_line"},
                                                   {"shape_custom", "act_shape_custom"},
                                                   // (PC3 B3: クイック選択ツール, オブジェクト選択ツール)
-                                                  {"quick", "act_quick_select"}, {"object", "act_object_select"}};
+                                                  {"quick", "act_quick_select"}, {"object", "act_object_select"},
+                                                  // (PC4 E1: 鉛筆ツール)
+                                                  {"pencil", "act_pencil"}};
         QCOMPARE(w->tool_actions().size(), tools.size());
         QVERIFY(w->tools_group()->isExclusive());
         QVERIFY(w->action(QStringLiteral("act_select"))->isChecked());

@@ -3,9 +3,11 @@
 // refused), add_stroke's inputs (tilt, time, wheel stretched over the points kept; the flow; the 背景色 of the colour
 // dynamics) and its line drawn — the same pixels drawn whole or in parts, again after saving and opening, after Undo and
 // Redo —, its blend painted into a paint layer's pixels on 8-bit, 16-bit, 32-bit, CMYK, Lab and grey pages (refused on a pen
-// layer; normal keeps a line as before), erase's brush and block, set_brush's kind, 背景色 and reset; and every brush that
-// is not a dab brush drawn as before (its pixels the same with the new keys of draw given or not).
+// layer; normal keeps a line as before), erase's brush and block, set_brush's kind, 背景色 and reset, 下地混色 on every kind
+// of page, brush.get (`genko brushes get`); and every brush that is not a dab brush drawn as before (its pixels the same
+// with the new keys of draw given or not).
 
+#include <QProcessEnvironment>
 #include <QTemporaryDir>
 #include <QtTest>
 
@@ -444,6 +446,40 @@ private slots:
             }
             QVERIFY2(result.warnings.dump().find("color_rgb") == std::string::npos || !precise, kind.c_str());
         }
+    }
+
+    // brush.get (`genko brushes get <key> [--book <dir>]`): a dab brush of the book with every setting (the defaults too,
+    // a round tip as "round"); a built-in brush without dabs; a brush that is not there refused.
+    void brushGetSaysEverySetting() {
+        QTemporaryDir tmp;
+        const QString book = tmp.path() + QStringLiteral("/b.genko");
+        const fs::path dir = core::path_from_utf8(book.toStdString());
+        const core::Document doc = pen_book();
+        write_book(doc, dir);
+        const auto defined = run_ops(doc, Json::array({define_dab()}));
+        save_next(defined.doc, dir, defined.journal_ops);
+        QProcessEnvironment env = QProcessEnvironment::systemEnvironment();
+        env.insert(QStringLiteral("GENKO_CONFIG_DIR"), tmp.path() + QStringLiteral("/config"));
+        auto ran = genko::test::run_genko({QStringLiteral("brushes"), QStringLiteral("get"), QStringLiteral("my_dab"), QStringLiteral("--book"), book}, env);
+        QVERIFY2(ran.finished && ran.exit_code == 0, qPrintable(ran.described()));
+        Json got = genko::test::one_line(ran.out);
+        QCOMPARE(got["key"], Json("my_dab"));
+        QCOMPARE(got["from"], Json("book"));
+        QCOMPARE(got["engine"], Json("dabs"));
+        QCOMPARE(got["dabs"]["hardness"], Json(0.4));
+        QCOMPARE(got["dabs"]["size_mm"].get<double>(), core::DabSettings{}.size_mm);
+        QCOMPARE(got["dabs"]["tip"], Json("round"));
+        QVERIFY(got["dabs"].contains("dual") && got["dabs"]["dual"].contains("spacing"));
+        QCOMPARE(core::dabs_from_json(got["dabs"]), *core::brush_for(Json("my_dab"), defined.doc).dabs);  // (read back the same)
+        ran = genko::test::run_genko({QStringLiteral("brushes"), QStringLiteral("get"), QStringLiteral("gpen")}, env);
+        QVERIFY2(ran.finished && ran.exit_code == 0, qPrintable(ran.described()));
+        got = genko::test::one_line(ran.out);
+        QCOMPARE(got["from"], Json("builtin"));
+        QVERIFY(got["engine"].is_null() && !got.contains("dabs"));
+        QCOMPARE(got["settings"]["width_mm"], Json(core::find_builtin("gpen")->width_mm));
+        ran = genko::test::run_genko({QStringLiteral("brushes"), QStringLiteral("get"), QStringLiteral("my_none")}, env);
+        QCOMPARE(ran.exit_code, 1);
+        QCOMPARE(genko::test::one_line(ran.out)["code"], Json("key"));
     }
 
     // Saved, opened (brushes@1, the pictures), drawn the same; Undo gives back the book without the line (and without
