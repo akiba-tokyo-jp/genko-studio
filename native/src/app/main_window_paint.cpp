@@ -184,8 +184,9 @@ void MainWindow::build_paint_pages(ToolSettings* ts) {
     // グラデーション
     gradient_mode_ = new QComboBox;
     gradient_mode_->setObjectName(QStringLiteral("gradient_mode"));
-    for (const auto& [label, key] : {std::pair{QStringLiteral("ペンの色 → 透明"), QStringLiteral("fade")}, {QStringLiteral("ペンの色 → 白"), QStringLiteral("white")},
-                                     {QStringLiteral("黒 → 白"), QStringLiteral("bw")}, {QStringLiteral("円（中心からペンの色 → 透明）"), QStringLiteral("radial")}})
+    // (PC4 E-0, the user's decision 2: the pen's colour is the 描画色)
+    for (const auto& [label, key] : {std::pair{QStringLiteral("描画色 → 透明"), QStringLiteral("fade")}, {QStringLiteral("描画色 → 白"), QStringLiteral("white")},
+                                     {QStringLiteral("黒 → 白"), QStringLiteral("bw")}, {QStringLiteral("円（中心から描画色 → 透明）"), QStringLiteral("radial")}})
         gradient_mode_->addItem(label, key);
     ts->add({QStringLiteral("gradient")}, action_page({QStringLiteral("色の変わり方"), static_cast<QWidget*>(gradient_mode_)}));
 }

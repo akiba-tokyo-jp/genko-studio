@@ -438,7 +438,7 @@ void MainWindow::build_actions() {
          QStringLiteral("コマを選ぶ・フキダシを動かす・ドラッグで表示を動かす"), true);
     // (PC4 E-0, the user's decision 2: the drawing tools by Photoshop's names — their ids and keys kept,
     // preferences::renamed(); the pen layers, lines and the G pen keep theirs)
-    make("act_pen", QStringLiteral("ブラシツール"),[this] { choose_tool(QStringLiteral("pen")); }, keys({QKeySequence(QStringLiteral("B"))}),
+    make("act_pen", QStringLiteral("ブラシツール"), [this] { choose_tool(QStringLiteral("pen")); }, keys({QKeySequence(QStringLiteral("B"))}),
          QStringLiteral("レイヤー パネルで選んだレイヤーに描きます"), true);
     make("act_eraser", QStringLiteral("消しゴムツール"), [this] { choose_tool(QStringLiteral("eraser")); }, keys({QKeySequence(QStringLiteral("E"))}),
          QStringLiteral("ペンの線は触れた所で切れます"), true);
