@@ -112,6 +112,9 @@ genko_library(genko_core
     page_geometry.cpp
     # PC3 C-d (表示 → スナップ・スナップ先)
     snap.cpp
+    # PC4 F-0 (形式の土台: file-info@1, image-grid@1, psd-keep@1)
+    file_info.cpp
+    psd_keep.cpp
     "${CMAKE_CURRENT_BINARY_DIR}/ops_schema_data.cpp"
     "${CMAKE_CURRENT_BINARY_DIR}/pyre_names_data.cpp"
     "${CMAKE_CURRENT_BINARY_DIR}/builtin_profiles_data.cpp"

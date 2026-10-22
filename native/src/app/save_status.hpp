@@ -8,7 +8,7 @@
 #include "app/session.hpp"
 
 // The save state shown to the person (SPEC SAVE-01: 保存済み・未保存・保存中・保存失敗・復旧用コピーのみ), the notice
-// when a save fails (why, where, when the book was last saved; 再試行, 別の場所に保存, 復旧用コピーの作成), and the
+// when a save fails (why, where, when the book was last saved; 再試行, 別名で保存, 復旧用コピーの作成), and the
 // question before a book with unsaved changes is closed (キャンセル is the default: Enter never throws work away).
 
 namespace genko::app {

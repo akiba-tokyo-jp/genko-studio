@@ -3,7 +3,7 @@
 //   2  a folder that cannot be written, a full disk (fault injection: ENOSPC) and a failed replace of project.json are
 //      shown — why, where, when the book was last saved, and that the work is not in the book — and neither Ctrl+W,
 //      nor switching books, nor quitting Genko closes it on its own.
-//   3  キャンセル keeps the work; 保存して閉じる closes only after a save that succeeded; 別の場所に保存して閉じる closes
+//   3  キャンセル keeps the work; 保存して閉じる closes only after a save that succeeded; 別名で保存して閉じる closes
 //      once the copy is written, and the copy reads back.
 //   4  only the explicit 保存せずに閉じる (and its second question) throws work away: Enter on the question, and Enter on
 //      the second one, keep it.
@@ -594,7 +594,7 @@ private slots:
         QVERIFY(desk.failure_text().contains(QStringLiteral("変更は復旧用のコピーに書きました")));
         QCOMPARE(desk.window->failure_bar()->where()->path(), qpath(desk.book));
         QCOMPARE(desk.window->failure_bar()->retry_button()->text(), QStringLiteral("再試行"));
-        QCOMPARE(desk.window->failure_bar()->save_as_button()->text(), QStringLiteral("別の場所に保存…"));
+        QCOMPARE(desk.window->failure_bar()->save_as_button()->text(), QStringLiteral("別名で保存…"));  // (PC4 F-0: Photoshop's name)
         QCOMPARE(desk.window->failure_bar()->recovery_button()->text(), QStringLiteral("復旧用コピーを作る"));
         QCOMPARE(ink_strokes(desk.window->book()), strokes + 1);
         QCOMPARE(ink_strokes(read_book(desk.book)), strokes);
@@ -604,7 +604,7 @@ private slots:
         QVERIFY(desk.window->action(QStringLiteral("act_close"))->shortcuts().contains(QKeySequence(QStringLiteral("Ctrl+W"))));
         QTest::keyClick(desk.window.get(), Qt::Key_W, Qt::ControlModifier);
         QCOMPARE(desk.asked.size(), std::size_t{1});
-        QCOMPARE(desk.asked[0].buttons, (QStringList{"保存して閉じる", "別の場所に保存して閉じる", "保存せずに閉じる…", "キャンセル"}));
+        QCOMPARE(desk.asked[0].buttons, (QStringList{"保存して閉じる", "別名で保存して閉じる", "保存せずに閉じる…", "キャンセル"}));
         QVERIFY(desk.asked[0].cancel_is_default);
         QVERIFY(!desk.window->closed());
         QVERIFY(desk.window->isVisible());
@@ -673,7 +673,7 @@ private slots:
         QCOMPARE(ink_strokes(read_book(desk.book)), std::size_t{1});
     }
 
-    // AC-SAVE 3: 保存して閉じる only after a save that succeeded; 別の場所に保存して閉じる once the copy is written
+    // AC-SAVE 3: 保存して閉じる only after a save that succeeded; 別名で保存して閉じる once the copy is written
     void savingBeforeClosing() {
         Desk desk;
         make_writable(desk.book, false);

@@ -86,7 +86,7 @@ void MainWindow::show_dock(const QString& title) {
 void MainWindow::toggle_timelapse(bool on) {
     QAction* act = action("act_timelapse");
     if (on && !session_->path()) {
-        flash(QStringLiteral("タイムラプスの前に、原稿を保存します（ファイル → 別の場所に保存）"), 6000);
+        flash(QStringLiteral("タイムラプスの前に、原稿を保存します（ファイル → 別名で保存…）"), 6000);
         const QSignalBlocker quiet(act);
         act->setChecked(false);
         return;

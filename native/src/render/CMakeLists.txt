@@ -145,6 +145,13 @@ genko_library(genko_render
     layer_align.cpp
     # PC3 A5 (スマートオブジェクトの上の変形: ゆがみ・遠近法ワープ・パペットワープのスマートフィルター)
     smart_bends.cpp
+    # PC4 F-0 (形式の土台: コーデックの型・表・判定・書く計画と失うもの・上限、ファイルの op の枠)
+    codecs/image.cpp
+    codecs/format.cpp
+    codecs/fidelity.cpp
+    codecs/limits.cpp
+    codecs/codecs.cpp
+    ops_formats.cpp
     ${GENKO_MATERIAL_RESOURCES}
     ${GENKO_TEXT_RESOURCES}
   PUBLIC_DEPS genko_core Qt6::Core

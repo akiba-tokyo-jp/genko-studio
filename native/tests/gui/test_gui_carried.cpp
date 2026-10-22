@@ -307,7 +307,7 @@ private slots:
             QVERIFY(!done.html.contains(token) && !done.html.contains(QStringLiteral("act_")));
         }
         const QString guide = app::help::guide(w);
-        QVERIFY(guide.contains(QStringLiteral("「ファイル → 新しい原稿…」")));
+        QVERIFY(guide.contains(QStringLiteral("「ファイル → 新規…」")));  // (PC4 F-0: Photoshop's name)
         QVERIFY(guide.contains(QStringLiteral("「ウィンドウ → 作業の段階」の「ネームの並び」「作画の並び」")));  // (where the stages are: Python's guide said 表示)
         QVERIFY(guide.contains(QStringLiteral("ペン（B）")));
         QVERIFY(guide.contains(QStringLiteral("[ と ] で太さ")));

@@ -193,7 +193,14 @@ const std::multimap<QString, QString>& renamed() {
                                                      // (PC3 C-b: the shape tools' and the direct selection's)
                                                      {QStringLiteral("長方形ツール"), QStringLiteral("図形")},
                                                      {QStringLiteral("部分選択ツール"), QStringLiteral("線の編集（制御点）")},
-                                                     {QStringLiteral("前方ワープツール"), QStringLiteral("ゆがみ（指で押す）")}};  // (PC3 C-c)
+                                                     {QStringLiteral("前方ワープツール"), QStringLiteral("ゆがみ（指で押す）")},  // (PC3 C-c)
+                                                     // (PC4 F-0, 節 F 5.1: ファイル's commands by Photoshop's names)
+                                                     {QStringLiteral("新規…"), QStringLiteral("新しい原稿…")},
+                                                     {QStringLiteral("別名で保存…"), QStringLiteral("別の場所に保存…")},
+                                                     {QStringLiteral("原稿を書き出す…"), QStringLiteral("書き出し…")},
+                                                     {QStringLiteral("プリント…"), QStringLiteral("印刷…")},
+                                                     {QStringLiteral("終了"), QStringLiteral("Genko を終わる")},
+                                                     {QStringLiteral("カラールックアップテーブル…"), QStringLiteral("カラールックアップテーブルを書き出す…")}};
     return all;
 }
 

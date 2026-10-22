@@ -30,7 +30,7 @@ namespace genko::app {
 const QStringList kDefaultCommandBar{QStringLiteral("元に戻す"), QStringLiteral("やり直す"), QStringLiteral("|"),
                                      QStringLiteral("全体を表示"), QStringLiteral("縮小"), QStringLiteral("拡大"), QStringLiteral("|"),
                                      QStringLiteral("◀ 前のページ"), QStringLiteral("次のページ ▶"), QStringLiteral("|"),
-                                     QStringLiteral("書き出し…")};
+                                     QStringLiteral("原稿を書き出す…")};  // (PC4 F-0: 書き出し…'s new name)
 const QStringList kDefaultQuick{QStringLiteral("ペン"), QStringLiteral("消しゴム"), QStringLiteral("塗りつぶし"), QStringLiteral("テキスト"),
                                 QStringLiteral("コマ割り"), QStringLiteral("選択範囲・選んだコマにトーンを貼る"), QStringLiteral("集中線"),
                                 QStringLiteral("左右反転して見る")};

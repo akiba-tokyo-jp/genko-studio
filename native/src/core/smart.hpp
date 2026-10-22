@@ -28,6 +28,10 @@
 namespace genko::core {
 
 inline constexpr std::string_view kSmartObjectsFeature = "smart-objects@1";
+// PC4 節 F: the contents' files of the new formats (formats@1: TGA, ICO, Netpbm, QOI, OpenEXR, Radiance HDR, AVIF — F-a)
+// and camera RAW files with their development settings (camera-raw@1 — F-e).
+inline constexpr std::string_view kFormatsFeature = "formats@1";
+inline constexpr std::string_view kCameraRawFeature = "camera-raw@1";
 
 namespace smart {
 
@@ -55,6 +59,20 @@ inline constexpr std::array<FileFormat, 8> kFileFormats{{{".png", "png"},
                                                          {".gif", "gif"},
                                                          {".psd", "psd"},
                                                          {".psb", "psd"}}};
+// PC4 節 F: the files the contents of a book can be that a smart object is not placed from yet — formats@1's (F-a reads
+// them) and camera-raw@1's (format "raw": F-e reads them with LibRaw) — known to the reader and the checks, so a book that
+// holds them is read; suffix_of_name does not give them until their group reads them (then they move to kFileFormats).
+inline constexpr std::array<FileFormat, 33> kLaterFileFormats{{{".tga", "tga"},  {".ico", "ico"},  {".pnm", "pnm"},  {".pbm", "pnm"},
+                                                               {".pgm", "pnm"},  {".ppm", "pnm"},  {".pam", "pnm"},  {".pfm", "pnm"},
+                                                               {".qoi", "qoi"},  {".exr", "exr"},  {".hdr", "hdr"},  {".avif", "avif"},
+                                                               {".dng", "raw"},  {".cr2", "raw"},  {".cr3", "raw"},  {".nef", "raw"},
+                                                               {".nrw", "raw"},  {".arw", "raw"},  {".srf", "raw"},  {".sr2", "raw"},
+                                                               {".raf", "raw"},  {".orf", "raw"},  {".rw2", "raw"},  {".pef", "raw"},
+                                                               {".srw", "raw"},  {".x3f", "raw"},  {".3fr", "raw"},  {".iiq", "raw"},
+                                                               {".erf", "raw"},  {".mrw", "raw"},  {".dcr", "raw"},  {".kdc", "raw"},
+                                                               {".mos", "raw"}}};
+// The format of a suffix of kLaterFileFormats, or none.
+std::optional<std::string> later_format_of_suffix(std::string_view suffix);
 // The suffix a file's name gives it (its extension in lower case; .jpeg as .jpg, .tiff as .tif), or none for a kind of
 // file a smart object cannot hold.
 std::optional<std::string> suffix_of_name(std::string_view name);
@@ -192,6 +210,10 @@ struct WrittenPage {
 std::vector<WrittenPage> written_pages(const Document& doc);
 // Does the book hold a smart object (a layer of kind smart, or contents)? It then names smart-objects@1.
 bool uses_smart(const Document& doc);
+// PC4: do the contents the book writes hold a file of formats@1 (kLaterFileFormats but "raw"), or a RAW file
+// (camera-raw@1: format "raw", or development settings)?
+bool uses_formats(const Document& doc);
+bool uses_camera_raw(const Document& doc);
 // The positions of the book's pages that show these contents (directly or inside other contents).
 std::vector<std::size_t> pages_using(const Document& doc, const std::string& id);
 // The ids of the contents a page shows directly (its smart object layers').

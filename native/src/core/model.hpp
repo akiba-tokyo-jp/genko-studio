@@ -13,9 +13,11 @@
 #include <vector>
 
 #include "core/color_model.hpp"
+#include "core/file_info.hpp"
 #include "core/geometry.hpp"
 #include "core/ink.hpp"
 #include "core/json.hpp"
+#include "core/psd_keep.hpp"
 #include "core/pynum.hpp"
 #include "core/vector.hpp"
 
@@ -59,6 +61,9 @@ struct PageSpec {
     // PC3 (page-spec@1, core/vector.hpp): where the trim's top left is on a page of its own paper whose trim is not in the
     // paper's middle (none: in the middle)
     std::optional<std::pair<double, double>> trim_origin_mm;
+    // PC4 (image-grid@1, core/file_info.hpp): the grid its 8-bit pages work at ("finest": their pixel layers' finest, as a
+    // page in precise colour or inks; none: the 8-bit page's own, 200 dpi)
+    std::optional<std::string> grid;
 
     struct Margins {
         double top = 0, bottom = 0, inner = 0, outer = 0;
@@ -219,6 +224,8 @@ struct Layer {
     // PC3 (transform@1): its link group (the layers of one link move together) and its position lock
     std::optional<std::string> link;
     bool lock_position = false;
+    // PC4 (psd-keep@1, core/psd_keep.hpp): what a PSD's layer held that this build does not read, written back with it
+    std::optional<PsdLayerKeep> native_psd;
 
     std::size_t stroke_count() const { return strokes ? strokes->items.size() : 0; }
 };
@@ -348,6 +355,10 @@ struct Page {
     std::optional<vector::ClippingPath> clipping_path;
     // PC3 (page-spec@1): `spec` is this page's own paper (the book's is doc.spec), written as the page's native_spec.
     bool own_spec = false;
+    // PC4 (file-info@1, core/file_info.hpp): the file the page was opened from; (psd-keep@1, core/psd_keep.hpp) what the
+    // PSD it was read from held that this build does not read — its image resources and global blocks
+    std::optional<NativeSource> native_source;
+    std::optional<PsdPageKeep> native_psd;
 
     Rect paper_rect_mm() const;
     Rect trim_rect_mm() const;
@@ -407,6 +418,8 @@ struct SmartContents {
     Json profile = Json::object({{"use", "keep"}});
     std::optional<Json> link;  // a linked file's place (PC3 A1): the contents are its last copy
     std::optional<Json> psd;   // what a PSD's placed layer kept (PC3 A3)
+    // camera-raw@1 (PC4 F-e): a RAW file's development settings {"develop", "adjust"?, "camera"} (format "raw" only)
+    std::optional<Json> raw;
 };
 
 // Python's Episode (without its undo stack, pending journal and asset folder, which belong to the session).
@@ -440,6 +453,12 @@ struct Document {
     // smart-objects@1: the bytes of the files ops were given (their "data") that are not in assets/ yet, by their asset ref;
     // the writer writes those its contents use (with their suffix), as it writes luts.
     std::map<std::string, Bytes> smart_files;
+    // PC4 (file-info@1, core/file_info.hpp): its File Info (none: nothing said)
+    std::optional<FileInfo> file_info;
+    // PC4 (file-info@1, psd-keep@1): the bytes of the metadata and kept PSD blocks it names that are not in assets/ yet (a
+    // book opened from a file, in memory), by their asset ref; the writer writes those it names, with their suffix (as
+    // smart_files)
+    std::map<std::string, Bytes> native_files;
     Json nombre = Json::object();
     Json extra = Json::object();  // top-level keys this build does not know; written back unchanged
     std::int64_t revision = 0;

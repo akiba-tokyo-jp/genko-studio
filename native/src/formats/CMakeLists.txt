@@ -17,5 +17,8 @@ genko_library(genko_formats
     exporting.cpp
     checks.cpp
     smart_files.cpp
+    # PC4 F-0 (形式の土台: ページ・層をその深さの絵に、ファイルから 1 ページの本)
+    page_picture.cpp
+    open_file.cpp
   PUBLIC_DEPS genko_render genko_core Qt6::Core
   PRIVATE_DEPS genko_storage ZLIB::ZLIB JPEG::JPEG TIFF::TIFF ${GENKO_LCMS2})

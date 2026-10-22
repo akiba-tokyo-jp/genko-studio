@@ -509,7 +509,7 @@ void fade(MainWindow* window) {
         return;
     }
     if (!window->session().path()) {
-        window->flash(QStringLiteral("フェードの前に、原稿を保存します（ファイル → 別の場所に保存）"), 6000);
+        window->flash(QStringLiteral("フェードの前に、原稿を保存します（ファイル → 別名で保存…）"), 6000);
         return;
     }
     const auto asked = window->asking();

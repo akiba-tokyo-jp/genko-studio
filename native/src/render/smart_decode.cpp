@@ -75,6 +75,7 @@ struct PngShape {
     png_uint_32 ppm_x = 0;
     int unit = 0;
     bool phys = false;
+    bool trns = false;
     std::size_t rowbytes = 0;
     int channels = 0, depth_after = 0;
 };
@@ -90,6 +91,7 @@ bool png_head(png_structp png, png_infop info, PngShape* s) {
         s->phys = true;
         s->ppm_x = x;
     }
+    s->trns = png_get_valid(png, info, PNG_INFO_tRNS) != 0;
     return true;
 }
 
@@ -487,6 +489,60 @@ FileInfo look_at(std::string_view bytes, std::string_view suffix) {
     info.dpi = std::round(info.dpi * 1000) / 1000;
     info.icc = proof::embedded_profile(bytes);
     return info;
+}
+
+int stored_depth(std::string_view bytes) {
+    const auto kind = sniff(bytes);
+    try {
+        if (kind && kind->first == "png") return png_shape(bytes).bit_depth == 16 ? 16 : 8;
+        if (kind && kind->first == "tiff") {
+            Tiff t(bytes);
+            const TiffShape s = tiff_shape(t.tif);
+            return s.bits == 16 || s.bits == 32 ? s.bits : 8;
+        }
+    } catch (const core::Error&) {
+    }
+    return 8;
+}
+
+int stored_samples(std::string_view bytes) {
+    const auto kind = sniff(bytes);
+    try {
+        if (kind && kind->first == "png") {  // (its colour type's samples, as png_set_expand leaves them: a tRNS as an alpha)
+            const PngShape s = png_shape(bytes);
+            const bool alpha = (s.color_type & PNG_COLOR_MASK_ALPHA) != 0 || s.trns;
+            return ((s.color_type & PNG_COLOR_MASK_COLOR) != 0 ? 3 : 1) + (alpha ? 1 : 0);
+        }
+        if (kind && kind->first == "tiff") {
+            Tiff t(bytes);
+            return std::max<int>(tiff_shape(t.tif).samples, 1);
+        }
+    } catch (const core::Error&) {
+    }
+    return 4;
+}
+
+double stored_dpi(std::string_view bytes) {
+    const auto kind = sniff(bytes);
+    double dpi = 0;
+    try {
+        if (kind && kind->first == "png") {
+            const PngShape s = png_shape(bytes);
+            if (s.phys && s.unit == PNG_RESOLUTION_METER && s.ppm_x > 0) dpi = s.ppm_x * 0.0254;
+        } else if (kind && kind->first == "tiff") {
+            Tiff t(bytes);
+            const TiffShape s = tiff_shape(t.tif);
+            if (s.xres > 0) dpi = s.unit == RESUNIT_CENTIMETER ? s.xres * 2.54 : s.unit == RESUNIT_INCH ? s.xres : 0;
+        } else if (kind && kind->first == "jpeg") {
+            dpi = jpeg_dpi(bytes);
+        } else if (kind && kind->first == "bmp") {
+            dpi = bmp_dpi(bytes);
+        }
+    } catch (const core::Error&) {
+        return 0;
+    }
+    if (!std::isfinite(dpi) || dpi < 1 || dpi > 100000) return 0;
+    return std::round(dpi * 1000) / 1000;
 }
 
 Image eight_bit_picture(std::string_view bytes) {

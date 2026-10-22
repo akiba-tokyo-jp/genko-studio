@@ -353,7 +353,7 @@ bool MainWindow::use_style(const std::string& style_id, bool asked) {
     const Asked target = asking();  // (the book asked about: it must still be the one in front after the question)
     const std::optional<fs::path> path = session_->path();
     if (!path) {
-        flash(QStringLiteral("絵柄を選ぶ前に、原稿を保存します（ファイル → 別の場所に保存）"), 6000);
+        flash(QStringLiteral("絵柄を選ぶ前に、原稿を保存します（ファイル → 別名で保存…）"), 6000);
         return false;
     }
     const Json now = service::briefs::catalog(book());

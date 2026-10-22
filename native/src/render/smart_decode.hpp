@@ -60,6 +60,14 @@ struct DeepPicture {
     std::vector<float> samples;
 };
 
+// PC4 F-0 (render/codecs): what look_at reads of a file's header without its pixels — the bits a sample of a PNG or a
+// TIFF holds (8 for any other file, and for one whose header cannot be read), the samples a pixel of it holds as
+// deep_picture reads it (a PNG's after its palette and tRNS are expanded, a TIFF's own; 4 for any other file and for one
+// whose header cannot be read) and the resolution the file says (0: none).
+int stored_depth(std::string_view bytes);
+int stored_samples(std::string_view bytes);
+double stored_dpi(std::string_view bytes);
+
 // The file's pixels with all their bits: a PNG of 16 bits, a TIFF of 16 or 32 bits (grey, RGB, CMYK, with an alpha or
 // not, samples together) as they are stored, a grey or RGB PSD or PSB of 16 or 32 bits (PC3 A3: its merged picture, a
 // 32-bit file's linear light encoded by 1/2.2, its values past 1 kept); any other file as the 8-bit page reads it (its

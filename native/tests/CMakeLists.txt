@@ -212,6 +212,10 @@ set_tests_properties(test_ruby_render PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=of
 genko_test(test_psd_text SOURCES unit/test_psd_text.cpp DEPS genko_test_support genko_formats genko_render_ops
            LABELS unit TIMEOUT 900)
 set_tests_properties(test_psd_text PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
+# PC4 F-0 (SPEC.md FILE-01): render/codecs against PhotoCraft's crates/codecs tests (the magic numbers, the extensions, the
+# capability table and its symmetric guarantee, the losses said and their round trips, the limits before the pixels, the
+# picture's conversions) on this build's table, and the wrapped formats read through this build's readers.
+genko_test(test_codecs SOURCES unit/test_codecs.cpp DEPS genko_test_support genko_render genko_formats LABELS unit)
 
 # Against the Python baseline (skipped when there is no reference Python: $GENKO_PYREF or /opt/pyref/bin/python).
 genko_test(test_contract_storage SOURCES contract/test_contract_storage.cpp DEPS genko_test_support LABELS contract
@@ -426,6 +430,11 @@ set_tests_properties(test_contract_psd_text PROPERTIES ENVIRONMENT "QT_QPA_PLATF
 # TIFF and WebP read as the Python baseline's Pillow reads them (M6): every case made by the reference Pillow, the
 # same mode, size and bytes; a TIFF in planes said not yet read.
 genko_test(test_contract_tiff_webp SOURCES contract/test_contract_tiff_webp.cpp DEPS genko_test_support genko_render
+           LABELS contract TIMEOUT 900)
+# PC4 F-0 (SPEC.md FILE-01, the user's decision 4): a PNG, a 16-bit TIFF, a grey picture and a CMYK JPEG opened as a book
+# of one page in memory with their pixels at their depth, given back as the page's picture, saved and read back; a book of
+# none of 節 F's extensions written as before; the five extensions' frames; the files' ops as frames.
+genko_test(test_contract_open SOURCES contract/test_contract_open.cpp DEPS genko_test_support genko_formats genko_render_ops
            LABELS contract TIMEOUT 900)
 # The text of a line (M4): tategaki and the text side of balloons (cells, kinsoku, glyphs, ruby, 傍点, the letters set
 # across and down, their effects, text on a path) against Python's (render_harness.py text-cases), byte for byte (a

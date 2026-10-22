@@ -201,7 +201,7 @@ PrintDialog::PrintDialog(MainWindow* window) : QDialog(window), window_(window) 
     form->addRow(QStringLiteral("範囲"), area);
     form->addRow(QStringLiteral("大きさ"), scale);
     form->addRow(QString(), spreads);
-    auto* note = new QLabel(QStringLiteral("印刷と同じ見え方（ネームは出ません）で、用紙に合わせて縮めて印刷します。入稿用のデータは「書き出し…」で作ります。"));
+    auto* note = new QLabel(QStringLiteral("印刷と同じ見え方（ネームは出ません）で、用紙に合わせて縮めて印刷します。入稿用のデータは「原稿を書き出す…」で作ります。"));
     note->setWordWrap(true);
     theme::role(note, "hint");
     auto* buttons = new QDialogButtonBox;
