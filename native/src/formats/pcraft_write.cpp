@@ -161,6 +161,8 @@ Json surface(Objects& objects, int w, int h, const PixelFormat& format, const st
 enum class Way { Rgb8, Precise, Inks };
 
 struct Ctx {
+    Ctx(const core::Document& d, const core::Page& p, Objects& o, std::vector<std::string>& n) : doc(d), page(p), objects(o), notes(n) {}
+
     const core::Document& doc;
     const core::Page& page;
     Objects& objects;
@@ -689,21 +691,23 @@ std::optional<Json> layer_of(Ctx& ctx, const core::Layer& layer, const render::P
         if (part.live) {
             const core::vector::LiveShape& l = *part.live;
             const auto px4 = [&](const std::array<double, 4>& v) { return Json::array({r6(v[0] * ctx.px), r6(v[1] * ctx.px), r6(v[2] * ctx.px), r6(v[3] * ctx.px)}); };
+            // (upstream's LiveShape is tagged inside: {"kind": "rect" | "ellipse" | "polygon" | "line", …its fields})
             switch (l.kind) {
             case core::vector::LiveShape::Kind::Rect:
-                content["live"] = Json{{"Rect", Json{{"rect", px4(l.rect)}, {"radii", px4(l.radii)}}}};
+                content["live"] = Json{{"kind", "rect"}, {"rect", px4(l.rect)}, {"radii", px4(l.radii)}};
                 break;
             case core::vector::LiveShape::Kind::Ellipse:
-                content["live"] = Json{{"Ellipse", Json{{"rect", px4(l.rect)}}}};
+                content["live"] = Json{{"kind", "ellipse"}, {"rect", px4(l.rect)}};
                 break;
             case core::vector::LiveShape::Kind::Polygon:
-                content["live"] = Json{{"Polygon", Json{{"rect", px4(l.rect)}, {"sides", l.sides}, {"star_ratio", l.star_ratio}}}};
+                content["live"] = Json{{"kind", "polygon"}, {"rect", px4(l.rect)}, {"sides", l.sides}, {"star_ratio", l.star_ratio}};
                 if (l.angle != 0.0) ctx.note("回した多角形の生きた形は、PhotoCraft では回さない形になります");
                 break;
             case core::vector::LiveShape::Kind::Line:
-                content["live"] = Json{{"Line", Json{{"from", Json::array({r6(l.from.x * ctx.px), r6(l.from.y * ctx.px)})},
-                                                     {"to", Json::array({r6(l.to.x * ctx.px), r6(l.to.y * ctx.px)})},
-                                                     {"weight", r6(l.weight_mm * ctx.px)}}}};
+                content["live"] = Json{{"kind", "line"},
+                                       {"from", Json::array({r6(l.from.x * ctx.px), r6(l.from.y * ctx.px)})},
+                                       {"to", Json::array({r6(l.to.x * ctx.px), r6(l.to.y * ctx.px)})},
+                                       {"weight", r6(l.weight_mm * ctx.px)}};
                 break;
             }
         }
@@ -852,7 +856,10 @@ Json document_json(Ctx& ctx) {
     const auto hidden_until = [&](std::size_t index) {
         for (; next < index && next < page.layers.size(); ++next) {
             const core::Layer& l = page.layers[next];
-            if (l.visible || l.kind == core::LayerKind::Folder || !l.exportable || l.role == core::LayerRole::Name || l.role == core::LayerRole::Draft) continue;
+            // (the layers page_layers does not give: the hidden ones, and a fill layer of a colour or a gradient, which it
+            // draws into the page's picture only)
+            const bool unseen = !l.visible || (l.kind == core::LayerKind::Fill && l.fill && core::pattern_of_fill(*l.fill) == nullptr);
+            if (!unseen || l.kind == core::LayerKind::Folder || !l.exportable || l.role == core::LayerRole::Name || l.role == core::LayerRole::Draft) continue;
             if (auto made = layer_of(ctx, l, nullptr, patterns)) flat.push_back(Out{std::move(*made), folder_of(l)});
         }
     };
@@ -1078,7 +1085,7 @@ std::vector<std::string> write_page(const core::Document& doc, const core::Page&
     check_dpi(dpi);
     std::vector<std::string> notes;
     Objects objects;
-    Ctx ctx{doc, page, objects, notes};
+    Ctx ctx(doc, page, objects, notes);
     ctx.dpi = dpi;
     ctx.depth = depth;
     ctx.w = render::mm_to_px(page.spec.width_mm.value(), dpi);

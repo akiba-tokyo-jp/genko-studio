@@ -35,6 +35,7 @@
 #include "formats/pcraft_write.hpp"
 #include "render/image.hpp"
 #include "render/ops_registry.hpp"
+#include "render/page.hpp"
 #include "render/pcraft_read.hpp"
 #include "render/png.hpp"
 #include "render/raster.hpp"
@@ -42,6 +43,7 @@
 #include "storage/asset_store.hpp"
 #include "storage/lock.hpp"
 #include "storage/reader.hpp"
+#include "storage/transaction.hpp"
 #include "storage/writer.hpp"
 #include "testsupport.hpp"
 
@@ -248,7 +250,7 @@ private slots:
     // document's, its layers upstream's in Genko's order with their settings, pixels, masks and channels as upstream reads them.
     void upstreamFilesOpenAsTheirLayers() {
         for (const char* name : kFixtures) {
-            const Json& up = upstream_read(name);
+            const Json up = upstream_read(name);
             const formats::Opened opened = formats::open_file(fixture(name), name);
             const core::Document& doc = opened.doc;
             const std::string what(name);
@@ -455,7 +457,7 @@ private slots:
         QVERIFY(page.clipping_path && page.clipping_path->name == "Path 1");
         QVERIFY(page.work_path);
         // what it carried: its XMP (File Info), EXIF, the PSD's resources and blocks
-        QVERIFY(doc.file_info && doc.file_info->xmp);
+        QVERIFY(doc.file_info && !doc.file_info->xmp.empty());
         QVERIFY(!page.native_source->exif.empty());
         QVERIFY(page.native_psd);
         QCOMPARE(page.native_psd->resources.size(), std::size_t(1));

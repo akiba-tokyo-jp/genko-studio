@@ -24,6 +24,7 @@
 #include "core/ink.hpp"
 #include "core/lut3d.hpp"
 #include "core/masks.hpp"
+#include "core/ops_util.hpp"
 #include "core/patterns.hpp"
 #include "core/psd_keep.hpp"
 #include "core/smart.hpp"
@@ -290,6 +291,8 @@ private:
 enum class Way { Rgb8, Precise, Inks };
 
 struct Ctx {
+    explicit Ctx(Loader& loader) : load(loader) {}
+
     Loader& load;
     Notes notes;
     core::Document doc;
@@ -794,7 +797,9 @@ void take_patterns(Ctx& ctx, const Json& list) {
             const std::int64_t w = whole(field(p, "width", "pattern"), "pattern.width"), h = whole(field(p, "height", "pattern"), "pattern.height");
             if (w < 1 || h < 1 || w > core::kMaxPatternSide || h > core::kMaxPatternSide || w * h > core::kMaxPatternPixels) throw Unreadable("pattern: its size");
             const Surface surface = surface_from(field(p, "surface", "pattern"));
-            Ctx sub{ctx.load, {}, {}, static_cast<int>(w), static_cast<int>(h)};
+            Ctx sub(ctx.load);
+            sub.w = static_cast<int>(w);
+            sub.h = static_cast<int>(h);
             sub.way = ctx.way;
             sub.inks = ctx.inks;
             sub.sample = ctx.sample;
@@ -1004,29 +1009,30 @@ std::optional<core::vector::ShapePart> shape_part(Ctx& ctx, const Json& d) {
         part.stroke = std::move(s);
     }
     if (const Json* live = optional_field(d, "live")) {
-        const auto [kind, data] = variant(*live, "live");
-        if (data == nullptr) throw Unreadable("live: no data");
+        // (upstream's LiveShape is tagged inside: {"kind": "rect" | "ellipse" | "polygon" | "line", …its fields})
+        const std::string kind = text(field(*live, "kind", "live"), "live.kind");
+        const Json* data = live;
         core::vector::LiveShape shape;
         const auto four = [&](const char* key) {
             const Json& v = field(*data, key, "live");
             if (!v.is_array() || v.size() != 4) throw Unreadable("live: 4 numbers");
             return std::array<double, 4>{number(v[0], "live"), number(v[1], "live"), number(v[2], "live"), number(v[3], "live")};
         };
-        if (kind == "Rect" || kind == "Ellipse" || kind == "Polygon") {
+        if (kind == "rect" || kind == "ellipse" || kind == "polygon") {
             const auto r = four("rect");
             shape.rect = {r4(r[0] * ctx.mm), r4(r[1] * ctx.mm), r4(r[2] * ctx.mm), r4(r[3] * ctx.mm)};
-            if (kind == "Rect") {
+            if (kind == "rect") {
                 shape.kind = core::vector::LiveShape::Kind::Rect;
                 const auto radii = four("radii");
                 shape.radii = {r4(radii[0] * ctx.mm), r4(radii[1] * ctx.mm), r4(radii[2] * ctx.mm), r4(radii[3] * ctx.mm)};
-            } else if (kind == "Ellipse") {
+            } else if (kind == "ellipse") {
                 shape.kind = core::vector::LiveShape::Kind::Ellipse;
             } else {
                 shape.kind = core::vector::LiveShape::Kind::Polygon;
                 shape.sides = static_cast<int>(whole(field(*data, "sides", "live"), "live.sides"));
                 shape.star_ratio = number(field(*data, "star_ratio", "live"), "live.star_ratio");
             }
-        } else if (kind == "Line") {
+        } else if (kind == "line") {
             shape.kind = core::vector::LiveShape::Kind::Line;
             const Json& from = field(*data, "from", "live");
             const Json& to = field(*data, "to", "live");
@@ -1034,10 +1040,8 @@ std::optional<core::vector::ShapePart> shape_part(Ctx& ctx, const Json& d) {
             shape.from = {r4(number(from[0], "live") * ctx.mm), r4(number(from[1], "live") * ctx.mm)};
             shape.to = {r4(number(to[0], "live") * ctx.mm), r4(number(to[1], "live") * ctx.mm)};
             shape.weight_mm = r4(number(field(*data, "weight", "live"), "live.weight") * ctx.mm);
-        } else {
-            throw Unreadable("live: not a shape this build knows");
         }
-        part.live = shape;
+        if (kind == "rect" || kind == "ellipse" || kind == "polygon" || kind == "line") part.live = shape;  // (another: its path alone)
     }
     try {
         return core::vector::part_from_json(core::vector::to_json(part));  // (its normal form, checked)
@@ -1334,7 +1338,7 @@ bool empty_value(const Json& v) {
 
 Read build(Loader& load, const Json& manifest, std::string_view title, int depth) {
     const Json& d = field(manifest, "document", "manifest");
-    Ctx ctx{load};
+    Ctx ctx(load);
     ctx.depth = depth;
     ctx.title = title.empty() ? std::string("無題") : std::string(title);
     const Json& size = field(d, "size", "document");
@@ -1343,7 +1347,7 @@ Read build(Loader& load, const Json& manifest, std::string_view title, int depth
     ctx.mode = mode_from(field(d, "mode", "document"));
     ctx.sample = sample_from(field(d, "depth", "document"));
     codecs::Limits limits;
-    limits.check(w, h, ctx.mode == Mode::Cmyk ? codecs::Layout::Cmyka : codecs::Layout::Rgba, ctx.sample == Sample::U8 ? codecs::Sample::U8 : ctx.sample == Sample::U16 ? codecs::Sample::U16 : codecs::Sample::F32);
+    limits.check(w, h, ctx.mode == Mode::Cmyk ? codecs::Layout::CmykA : codecs::Layout::Rgba, ctx.sample == Sample::U8 ? codecs::Sample::U8 : ctx.sample == Sample::U16 ? codecs::Sample::U16 : codecs::Sample::F32);
     ctx.w = static_cast<int>(w);
     ctx.h = static_cast<int>(h);
     const double said = number(field(d, "resolution_dpi", "document"), "document.resolution_dpi");
