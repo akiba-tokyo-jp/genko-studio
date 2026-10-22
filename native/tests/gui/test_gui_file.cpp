@@ -3,7 +3,7 @@
 // 使用したファイルを開く with the pictures and a file gone; a picture's book closed untouched without asking, changed asked
 // (別名で保存して閉じる writes a .genko, the picture unchanged); すべてを閉じる・その他を閉じる; 復帰 one change undone by
 // 取り消し; 別名で保存… of another format and コピーを保存… (a .genko, a PNG) leaving the book where it was; ファイル情報…;
-// 画像 → 複製…; 新規… → 画像; 環境設定 → ファイル管理.
+// 画像 → 複製…; 新規… → 画像; 環境設定 → ファイル管理; the new commands' names and keys (5.1・5.2).
 
 #include <QtTest>
 
@@ -261,7 +261,9 @@ private slots:
         d.trigger("act_close_others");
         QCOMPARE(d.tabs(), 1);
         QCOMPARE(d.doc().title, kept);
-        d.window->open_path(path_of(d.dir.filePath("b.png")));
+        // (one of those closed opened again — the one kept is brought to the front instead, the pictures decoded in any order)
+        const QString again = kept == "a" ? QStringLiteral("b.png") : QStringLiteral("a.png");
+        d.window->open_path(path_of(d.dir.filePath(again)));
         QVERIFY(wait_for([&] { return d.tabs() == 2; }));
         d.trigger("act_close_all");
         QCOMPARE(d.tabs(), 1);
@@ -402,6 +404,40 @@ private slots:
         QCOMPARE(genko::app::recent_files().front().filename().string(), std::string("r3.png"));
         genko::app::settings()->remove(QStringLiteral("files/recent_count"));
         genko::app::settings()->remove(QStringLiteral("files/ignore_exif_profile"));
+    }
+
+    // 節 F 5.1・5.2: the new commands by Photoshop's names and keys, each key no other command's; the names 5.1 changed
+    // found by their old words too.
+    void theNewCommandsAreNamedAndKeyed() {
+        Desk d;
+        struct Command {
+            const char* name;
+            const char* text;
+            const char* key;
+        };
+        const std::vector<Command> commands{{"act_open_as", "指定形式で開く…", "Ctrl+Alt+Shift+O"}, {"act_close_all", "すべてを閉じる", "Ctrl+Alt+W"},
+                                            {"act_close_others", "その他を閉じる", "Ctrl+Alt+P"},      {"act_save_copy", "コピーを保存…", "Ctrl+Alt+S"},
+                                            {"act_revert", "復帰", "F12"},                            {"act_file_info", "ファイル情報…", "Ctrl+Alt+Shift+I"},
+                                            {"act_duplicate_image", "複製…", ""}};
+        const QList<QAction*> all = d.window->findChildren<QAction*>();
+        for (const Command& c : commands) {
+            QAction* a = d.window->action(QString::fromLatin1(c.name));
+            QVERIFY2(a != nullptr, c.name);
+            QCOMPARE(a->text(), QString::fromUtf8(c.text));
+            QCOMPARE(a->shortcut(), QKeySequence(QString::fromLatin1(c.key)));
+            if (a->shortcut().isEmpty()) continue;
+            for (QAction* other : all) {
+                if (other != a && !other->shortcut().isEmpty()) QVERIFY2(other->shortcut() != a->shortcut(), qPrintable(other->text() + QStringLiteral(" ") + a->text()));
+            }
+        }
+        const std::multimap<QString, QString>& renamed = genko::app::preferences::renamed();
+        const auto was = [&](const QString& now, const QString& old) {
+            const auto [from, to] = renamed.equal_range(now);
+            return std::any_of(from, to, [&](const auto& pair) { return pair.second == old; });
+        };
+        QVERIFY(was(QStringLiteral("新規…"), QStringLiteral("新しい原稿…")));
+        QVERIFY(was(QStringLiteral("別名で保存…"), QStringLiteral("別の場所に保存…")));
+        QVERIFY(was(QStringLiteral("終了"), QStringLiteral("Genko を終わる")));
     }
 };
 

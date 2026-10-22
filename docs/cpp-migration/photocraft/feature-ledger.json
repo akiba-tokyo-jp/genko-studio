@@ -3038,9 +3038,13 @@
         "alternate_menus": []
       },
       "genko_status": "一部（2026-10-16 照合）",
-      "implementation_status": "未着手",
+      "implementation_status": "実装済み（PC4 F-b、未統合）",
       "acceptance_status": "未実施",
-      "evidence": [],
+      "evidence": [
+        "native/src/app/preferences.cpp",
+        "native/src/app/dialogs.cpp",
+        "native/tests/gui/test_gui_file.cpp"
+      ],
       "pc0": {
         "date": "2026-10-16",
         "cpp_base": "962faa4",
@@ -3057,7 +3061,8 @@
         ],
         "gap": "保存までの秒数・バックアップ（置き場所・間隔・数）・復旧はある。最近使ったファイルの数・拡張子の小文字・EXIF のプロファイルを無視・PSD の互換の確認・背景で保存の設定が無い",
         "note": "画面だけの項目。Genko の入口は 環境設定 → 原稿と保存"
-      }
+      },
+      "remaining": "PSD と PSB の互換性を優先は常に（説明だけ）。背景で保存は Genko の自動保存のまま"
     },
     {
       "id": "edit.preferences.general",
@@ -5719,9 +5724,12 @@
         "alternate_menus": []
       },
       "genko_status": "同等（C++ のソースと試験あり。2026-10-16 照合）",
-      "implementation_status": "未着手",
+      "implementation_status": "実装済み（PC4 F-b、未統合）",
       "acceptance_status": "未実施",
-      "evidence": [],
+      "evidence": [
+        "native/src/app/main_window.cpp",
+        "native/tests/gui/test_gui_file.cpp"
+      ],
       "pc0": {
         "date": "2026-10-16",
         "cpp_base": "962faa4",
@@ -5739,7 +5747,8 @@
         ],
         "gap": "",
         "note": "Genko は原稿のタブを閉じる（最後の 1 冊ならウィンドウを閉じる）。番号指定の API はない"
-      }
+      },
+      "remaining": "ファイルから開いて変えていない本は聞かずに閉じる（PC4 F-b）"
     },
     {
       "id": "file.closeAll",
@@ -5767,9 +5776,12 @@
         "alternate_menus": []
       },
       "genko_status": "一部（2026-10-16 照合）",
-      "implementation_status": "未着手",
+      "implementation_status": "実装済み（PC4 F-b、未統合）",
       "acceptance_status": "未実施",
-      "evidence": [],
+      "evidence": [
+        "native/src/app/main_window_file.cpp",
+        "native/tests/gui/test_gui_file.cpp"
+      ],
       "pc0": {
         "date": "2026-10-16",
         "cpp_base": "962faa4",
@@ -5785,7 +5797,8 @@
         ],
         "gap": "アプリを終えずに開いている原稿をすべて閉じる操作がない（ウィンドウを閉じる/終了で全タブが閉じるのみ）",
         "note": ""
-      }
+      },
+      "remaining": "ウィンドウには無題の本を 1 冊残す（Genko の窓はいつも本を持つ）"
     },
     {
       "id": "file.closeOthers",
@@ -5813,9 +5826,12 @@
         "alternate_menus": []
       },
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "未着手",
+      "implementation_status": "実装済み（PC4 F-b、未統合）",
       "acceptance_status": "未実施",
-      "evidence": [],
+      "evidence": [
+        "native/src/app/main_window_file.cpp",
+        "native/tests/gui/test_gui_file.cpp"
+      ],
       "pc0": {
         "date": "2026-10-16",
         "cpp_base": "962faa4",
@@ -6460,9 +6476,17 @@
         "alternate_menus": []
       },
       "genko_status": "一部（2026-10-16 照合）",
-      "implementation_status": "未着手",
+      "implementation_status": "実装済み（PC4 F-b、未統合）",
       "acceptance_status": "未実施",
-      "evidence": [],
+      "evidence": [
+        "native/src/core/file_info.cpp",
+        "native/src/render/ops_formats.cpp",
+        "native/src/formats/file_xmp.cpp",
+        "native/src/app/file_info_dialog.cpp",
+        "native/src/api/cli.cpp",
+        "native/tests/contract/test_contract_file_info.cpp",
+        "native/tests/gui/test_gui_file.cpp"
+      ],
       "pc0": {
         "date": "2026-10-16",
         "cpp_base": "962faa4",
@@ -6478,7 +6502,8 @@
         ],
         "gap": "set_meta で題名・話数・綴じ等は持てるが、作者・肩書き・説明・キーワード・著作権（状態・URL）がなく、XMP として読み書き・埋め込みしない",
         "note": ""
-      }
+      },
+      "remaining": "WebP に XMP を書くのは F-a（WebP の XMP を読むのは済み）"
     },
     {
       "id": "file.generate.imageAssets",
@@ -6726,9 +6751,15 @@
         "alternate_menus": []
       },
       "genko_status": "一部（2026-10-16 照合）",
-      "implementation_status": "未着手",
+      "implementation_status": "実装済み（PC4 F-b、未統合）",
       "acceptance_status": "未実施",
-      "evidence": [],
+      "evidence": [
+        "native/src/formats/open_file.cpp",
+        "native/src/app/dialogs.cpp",
+        "native/src/api/cli.cpp",
+        "native/tests/contract/test_contract_open.cpp",
+        "native/tests/gui/test_gui_file.cpp"
+      ],
       "pc0": {
         "date": "2026-10-16",
         "cpp_base": "962faa4",
@@ -6766,9 +6797,19 @@
         "alternate_menus": []
       },
       "genko_status": "一部（2026-10-16 照合）",
-      "implementation_status": "未着手",
+      "implementation_status": "実装済み（PC4 F-b、未統合）",
       "acceptance_status": "未実施",
-      "evidence": [],
+      "evidence": [
+        "native/src/formats/open_file.cpp",
+        "native/src/render/codecs/metadata.cpp",
+        "native/src/app/open_dialog.cpp",
+        "native/src/app/main_window_file.cpp",
+        "native/src/app/app_main.cpp",
+        "native/src/api/cli.cpp",
+        "native/tests/contract/test_contract_open.cpp",
+        "native/tests/contract/test_contract_file_info.cpp",
+        "native/tests/gui/test_gui_file.cpp"
+      ],
       "pc0": {
         "date": "2026-10-16",
         "cpp_base": "962faa4",
@@ -6783,7 +6824,8 @@
         ],
         "gap": "開けるのは Genko の原稿（.genko）だけ。PNG/JPEG/TIFF/PSD などの画像ファイルを 1 つの文書として開けない（ページへの配置・PSD 取り込みで代替）",
         "note": "画像を開く形は「1 ページの原稿」を作る形にするか要設計"
-      }
+      },
+      "remaining": "PSD・PSB（F-d）・カメラ RAW（F-e）・.pcraft（F-f）を 1 冊として開く枝は各群（今は断りの言葉を分けて知らせる）"
     },
     {
       "id": "file.openAs",
@@ -6811,9 +6853,15 @@
         "alternate_menus": []
       },
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "未着手",
+      "implementation_status": "実装済み（PC4 F-b、未統合）",
       "acceptance_status": "未実施",
-      "evidence": [],
+      "evidence": [
+        "native/src/app/open_dialog.cpp",
+        "native/src/formats/open_file.cpp",
+        "native/src/api/cli.cpp",
+        "native/tests/contract/test_contract_open.cpp",
+        "native/tests/gui/test_gui_file.cpp"
+      ],
       "pc0": {
         "date": "2026-10-16",
         "cpp_base": "962faa4",
@@ -7108,9 +7156,14 @@
         "alternate_menus": []
       },
       "genko_status": "一部（2026-10-16 照合）",
-      "implementation_status": "未着手",
+      "implementation_status": "実装済み（PC4 F-b、未統合）",
       "acceptance_status": "未実施",
-      "evidence": [],
+      "evidence": [
+        "native/src/app/session.cpp",
+        "native/src/app/main_window_file.cpp",
+        "native/src/app/history_panel.cpp",
+        "native/tests/gui/test_gui_file.cpp"
+      ],
       "pc0": {
         "date": "2026-10-16",
         "cpp_base": "962faa4",
@@ -7125,7 +7178,8 @@
         ],
         "gap": "自動保存なので「保存した時点に戻す」コマンドはない。履歴パネルで任意の時点へ戻せるが、一手（1 つの取り消せる手順）で開いた/保存した状態に戻す操作がない",
         "note": ""
-      }
+      },
+      "remaining": "戻す先は最後に「保存」を選んだ時、無ければ開いた時（自動保存なので）。取り消せる 1 手"
     },
     {
       "id": "file.save",
@@ -7144,9 +7198,13 @@
         "alternate_menus": []
       },
       "genko_status": "同等（C++ のソースと試験あり。2026-10-16 照合）",
-      "implementation_status": "未着手",
+      "implementation_status": "実装済み（PC4 F-b、未統合）",
       "acceptance_status": "未実施",
-      "evidence": [],
+      "evidence": [
+        "native/src/app/main_window.cpp",
+        "native/src/app/session.cpp",
+        "native/tests/gui/test_gui_file.cpp"
+      ],
       "pc0": {
         "date": "2026-10-16",
         "cpp_base": "962faa4",
@@ -7164,7 +7222,8 @@
         ],
         "gap": "",
         "note": "Genko は自動保存＋今すぐ保存。保存形式は .genko（PSD 等は書き出し）"
-      }
+      },
+      "remaining": "Genko は自動保存＋今すぐ保存（.genko）。パスの無い本（開いた画像・新規の画像）は .genko の置き場所を尋ね、元の画像は書き換えない（利用者の決定 4）"
     },
     {
       "id": "file.saveACopy",
@@ -7192,9 +7251,16 @@
         "alternate_menus": []
       },
       "genko_status": "一部（2026-10-16 照合）",
-      "implementation_status": "未着手",
+      "implementation_status": "実装済み（PC4 F-b、未統合）",
       "acceptance_status": "未実施",
-      "evidence": [],
+      "evidence": [
+        "native/src/formats/copy.cpp",
+        "native/src/formats/file_xmp.cpp",
+        "native/src/app/session.cpp",
+        "native/src/app/main_window_file.cpp",
+        "native/tests/contract/test_contract_file_info.cpp",
+        "native/tests/gui/test_gui_file.cpp"
+      ],
       "pc0": {
         "date": "2026-10-16",
         "cpp_base": "962faa4",
@@ -7211,7 +7277,8 @@
         ],
         "gap": "書き出し（PSD はレイヤー付き、PNG/TIFF/JPEG は統合）で文書を変えずに複製を書けるが、パスの拡張子で形式を選ぶ 1 本の操作、レイヤー有無の切替、JPEG 品質 0..12、.genko の複製を作る操作がない",
         "note": ""
-      }
+      },
+      "remaining": "PSD・TIFF・PNG・JPEG と .genko の複製まで。書き出し形式・メタデータの選び方・`genko copy`・ほかの形式は F-c・F-a"
     },
     {
       "id": "file.saveAs",
@@ -7230,9 +7297,13 @@
         "alternate_menus": []
       },
       "genko_status": "一部（2026-10-16 照合）",
-      "implementation_status": "未着手",
+      "implementation_status": "実装済み（PC4 F-b、未統合）",
       "acceptance_status": "未実施",
-      "evidence": [],
+      "evidence": [
+        "native/src/app/main_window.cpp",
+        "native/src/app/main_window_file.cpp",
+        "native/tests/gui/test_gui_file.cpp"
+      ],
       "pc0": {
         "date": "2026-10-16",
         "cpp_base": "962faa4",
@@ -7249,7 +7320,8 @@
         ],
         "gap": "別の場所へ .genko として保存できるが、拡張子で PSD/PNG/TIFF 等の形式を選んで保存する形でない（書き出しで別操作）",
         "note": ""
-      }
+      },
+      "remaining": "PSD・TIFF・PNG・JPEG を選ぶとコピーを書く（本はそのまま）。ほかの形式は F-a・F-c"
     },
     {
       "id": "file.scripts.browse",
@@ -14699,9 +14771,14 @@
         "alternate_menus": []
       },
       "genko_status": "一部（2026-10-16 照合）",
-      "implementation_status": "未着手",
+      "implementation_status": "実装済み（PC4 F-b、未統合）",
       "acceptance_status": "未実施",
-      "evidence": [],
+      "evidence": [
+        "native/src/formats/open_file.cpp",
+        "native/src/app/main_window_file.cpp",
+        "native/tests/contract/test_contract_open.cpp",
+        "native/tests/gui/test_gui_file.cpp"
+      ],
       "pc0": {
         "date": "2026-10-16",
         "cpp_base": "962faa4",
