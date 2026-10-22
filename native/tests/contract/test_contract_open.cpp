@@ -11,6 +11,7 @@
 #include <QTemporaryDir>
 
 #include <algorithm>
+#include <cmath>
 #include <cstring>
 #include <string>
 
@@ -29,6 +30,7 @@
 #include "formats/pillow_save.hpp"
 #include "render/codecs/codecs.hpp"
 #include "render/codecs/metadata.hpp"
+#include "render/fx.hpp"
 #include "render/image.hpp"
 #include "render/layer_masks.hpp"
 #include "render/not_yet_ported.hpp"
@@ -811,12 +813,19 @@ private slots:
         // (a new paint layer: the page's grid)
         core::Layer fresh;
         QCOMPARE(render::raster::ensure_raster(page, fresh).size(), (render::Size{300, 200}));
+        // (フィルター's grid — the weight of a filter, フィルターギャラリー's window —: the picture's pixels, the op's surface)
+        const render::fx::Grid grid = render::fx::layer_grid(page, page.layers[0]);
+        QCOMPARE(grid.width, 300u);
+        QCOMPARE(grid.height, 200u);
+        QVERIFY(std::abs(grid.s - 1.5) < 1e-9);
+        QCOMPARE(grid.levels, 255u);
         // (a pen layer's line, 5 to 20 mm across at 8 mm down, baked by a filter: where it was drawn, at 300 dpi)
         const core::Document lined = run(doc, Json::array({Json{{"op", "add_layer"}, {"page", 1}, {"kind", "pen"}, {"id", "ink"}, {"title", "線"}},
                                                            Json{{"op", "set_layer"}, {"page", 1}, {"id", "ink"}, {"panel_each", false}, {"panel_clip", false}},
                                                            Json{{"op", "add_stroke"}, {"page", 1}, {"layer_id", "ink"},
                                                                 {"points", Json::array({Json::array({5, 8}), Json::array({20, 8})})}, {"width_mm", 1},
                                                                 {"rgb", Json::array({0, 0, 0})}}}));
+        QCOMPARE(render::fx::layer_grid(lined.page(0), layer(lined, "ink")).width, 300u);  // (where the filter bakes it)
         const core::Document filtered =
             run(lined, Json::array({Json{{"op", "filter_raster"}, {"page", 1}, {"id", "ink"}, {"kind", "blur_gaussian"}, {"radius", 0.5}}}));
         const core::Layer& baked = layer(filtered, "ink");
@@ -857,6 +866,7 @@ private slots:
         QCOMPARE(render::raster::working_dpi(coarse.page(0)), 200);
         QCOMPARE(render::raster::ensure_raster(coarse.page(0), fresh).size(), (render::Size{200, 200}));
         const std::string coarse_back = coarse.page(0).layers[0].id;
+        QCOMPARE(render::fx::layer_grid(coarse.page(0), coarse.page(0).layers[0]).width, 72u);
         const core::Document half = run(coarse, Json::array({Json{{"op", "delete_area"}, {"page", 1}, {"layer_id", coarse_back},
                                                                   {"area", Json{{"rect", Json::array({0, 0, 12.7, 25.4})}}}}}));
         const render::Image kept = render::raster::layer_pixels(half.page(0), layer(half, coarse_back));
@@ -866,6 +876,7 @@ private slots:
         // (a book without the mark: 200 dpi, as before)
         const core::Document plain = small_book();
         QCOMPARE(render::raster::working_dpi(plain.page(0)), 200);
+        QCOMPARE(int(render::fx::layer_grid(plain.page(0), plain.page(0).layers[0]).width), render::mm_to_px(plain.page(0).spec.width_mm.value(), 200));
         QCOMPARE(render::raster::ensure_raster(plain.page(0), fresh).width(), render::mm_to_px(plain.page(0).spec.width_mm.value(), 200));
     }
 

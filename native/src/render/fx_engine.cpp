@@ -21,6 +21,8 @@
 #include "render/ink.hpp"
 #include "render/ink_canvas.hpp"
 #include "render/page.hpp"
+#include "render/png.hpp"
+#include "render/raster.hpp"
 #include "render/segment/segment.hpp"
 
 namespace genko::render::fx {
@@ -799,8 +801,27 @@ Grid layer_grid(const core::Page& page, const core::Layer& layer) {
     } catch (const std::exception&) {
         w = h = 0;
     }
+    const bool deep = page.color.has_value() || (page.rgb && page.rgb->depth != 8);
+    if ((w == 0 || h == 0) && !deep && layer.kind != core::LayerKind::Smart && page.spec.grid && *page.spec.grid == "finest") {
+        // (PC4 F-b, image-grid@1: on an opened picture's page an 8-bit layer's pixels at their own grid, the op's surface;
+        // a layer of none yet at the page's grid, raster::working_dpi — where filter_raster bakes it)
+        try {
+            if (layer.raster_png && !layer.raster_png->empty()) {
+                const Size size = picture_size(*layer.raster_png);
+                w = static_cast<std::uint32_t>(std::max(0, size.width));
+                h = static_cast<std::uint32_t>(std::max(0, size.height));
+            }
+        } catch (const std::exception&) {
+            w = h = 0;
+        }
+        if (w == 0 || h == 0) {
+            const int dpi = raster::working_dpi(page);
+            w = static_cast<std::uint32_t>(std::max(1, mm_to_px(page.spec.width_mm.value(), dpi)));
+            h = static_cast<std::uint32_t>(std::max(1, mm_to_px(page.spec.height_mm.value(), dpi)));
+        }
+        levels = 255;
+    }
     if (w == 0 || h == 0) {  // (an 8-bit layer: the page at the working 200 dpi; lines alone on a deep page: at its dpi)
-        const bool deep = page.color.has_value() || (page.rgb && page.rgb->depth != 8);
         const double dpi = deep ? page.spec.dpi.value() : 200.0;
         w = static_cast<std::uint32_t>(std::max(1L, std::lround(page.spec.width_mm.value() / 25.4 * dpi)));
         h = static_cast<std::uint32_t>(std::max(1L, std::lround(page.spec.height_mm.value() / 25.4 * dpi)));
