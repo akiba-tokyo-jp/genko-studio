@@ -44,6 +44,8 @@ struct FormContext {
     std::optional<std::vector<int>> histogram;  // (the layer's lightness: levels and a tone curve)
     // 「自動」(design 3.3): the settings it finds for the layer; none: no such button.
     std::function<std::optional<core::Json>()> automatic;
+    // (PC4) A smart filter's window: settings that read the layer itself (ぼかし（レンズ）'s layer mask) not offered.
+    bool smart = false;
 };
 
 // The fields of one correction's settings, laid out as a form. A field's key may be a path into its native

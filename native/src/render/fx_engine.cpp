@@ -178,10 +178,6 @@ std::vector<float> conv_sep(const Window& src, const Rect& out, const std::vecto
 
 // --- the kernels -----------------------------------------------------------------------------------------------------
 
-Kernels sharpen_kernels() { return {}; }       // (D1)
-Kernels noise_kernels() { return {}; }         // (D1)
-Kernels other_kernels() { return {}; }         // (D1)
-Kernels video_kernels() { return {}; }         // (D1)
 Kernels distort_kernels() { return {}; }       // (D2)
 Kernels pixelate_kernels() { return {}; }      // (D2)
 Kernels stylize_kernels() { return {}; }       // (D2)
@@ -257,6 +253,7 @@ public:
     std::uint32_t height() const override { return height_; }
     unsigned colours() const override { return 3; }
     Space space() const override { return Space::Rgb; }
+    unsigned levels() const override { return 255; }
     void read(const Rect& r, float* out) const override {
         for (int y = r.y0; y < r.y1; ++y) {
             const auto* q = reinterpret_cast<const unsigned char*>(src_.data() + (std::size_t(y) * width_ + std::size_t(r.x0)) * 4);
@@ -308,18 +305,25 @@ public:
             }
     }
     Rect content() const override {
-        double most = 0;
+        double most = 0, low = 0;
         const Rect box = box_of(width_, height_, [&](std::uint32_t x, std::uint32_t y) {
             const std::size_t i = std::size_t(y) * width_ + x;
             if (!(sample(i, 3) > 0.0f)) return false;
             if (bytes_ == 4)
-                for (unsigned c = 0; c < 3; ++c) most = std::max(most, static_cast<double>(std::fabs(sample(i, c))));
+                for (unsigned c = 0; c < 3; ++c) {
+                    const double v = sample(i, c);
+                    most = std::max(most, std::fabs(v));
+                    low = std::min(low, v);
+                }
             return true;
         });
         largest_ = std::max(1.0, most);
+        least_ = low;
         return box;
     }
     double largest() const override { return largest_; }
+    unsigned levels() const override { return bytes_ == 2 ? 65535 : 0; }
+    double least() const override { return least_; }
     std::string taken() { return std::move(out_); }
 
 private:
@@ -346,6 +350,7 @@ private:
     std::uint32_t width_ = 0, height_ = 0;
     unsigned bytes_ = 2;
     mutable double largest_ = 1.0;
+    mutable double least_ = 0.0;
 };
 
 // An ink layer's pixels as the ink canvas's values (CMYK and a multichannel page's plates their ink 0..1, Lab L/100 and
@@ -403,18 +408,27 @@ public:
     }
     Rect content() const override {
         const unsigned n = src_.colours();
-        double most = 0;
+        double most = 0, low = 0;
         const Rect box = box_of(src_.width, src_.height, [&](std::uint32_t x, std::uint32_t y) {
             const std::size_t i = std::size_t(y) * src_.width + x;
             if (src_.has_alpha() && !(src_.value(i, n) > 0)) return false;
             if (src_.is_float())
-                for (unsigned c = 0; c < n; ++c) most = std::max(most, std::fabs(src_.value(i, c)));
+                for (unsigned c = 0; c < n; ++c) {
+                    const double v = canvas(i, c);
+                    most = std::max(most, std::fabs(v));
+                    low = std::min(low, v);
+                }
             return true;
         });
         largest_ = std::max(1.0, most);
+        least_ = low;
         return box;
     }
     double largest() const override { return largest_; }
+    // (an ink canvas's values of whole samples: n / 255 or n / 65535 — a grey's 1 − n / most, Lab's L and a, b within a
+    // rounding of it)
+    unsigned levels() const override { return src_.is_float() ? 0 : src_.depth == 8 ? 255 : 65535; }
+    double least() const override { return least_; }
     std::string taken() { return core::encode_ink_raster(out_); }
 
 private:
@@ -428,6 +442,7 @@ private:
     core::PageColor color_;
     core::InkPixels blank_;
     mutable double largest_ = 1.0;
+    mutable double least_ = 0.0;
 };
 
 std::unique_ptr<Surface> eight_surface(const Image& rgba) { return std::make_unique<EightSurface>(rgba); }
@@ -569,15 +584,18 @@ ProgressScope::ProgressScope(std::atomic<double>& done) : before_(g_progress) {
 ProgressScope::~ProgressScope() { g_progress = before_; }
 
 void apply(Surface& surface, const Kernel& kernel, const Json& params, core::FilterInks inks, const Rect& bounds_in, const std::string* cover,
-           double s, const Rect* limit, const Tiling& tiling) {
+           double s, const Rect* limit, const Tiling& tiling, const Reads& reads) {
     const std::uint32_t w = surface.width(), h = surface.height();
     const Rect grid{0, 0, int(w), int(h)};
     if (grid.empty()) return;
     if (cover != nullptr && cover->size() != std::size_t(w) * h) throw std::logic_error("fx::apply: the coverage is not the grid's");
+    if (reads.within != nullptr && reads.within->size() != std::size_t(w) * h) throw std::logic_error("fx::apply: the coverage is not the grid's");
+    if (reads.plane != nullptr && reads.plane->size() != std::size_t(w) * h) throw std::logic_error("fx::apply: the plane is not the grid's");
     Way way;
     way.colours = surface.colours();
     way.meaning = inks == core::FilterInks::Meaning && surface.ink() != nullptr;
-    way.lightness = inks == core::FilterInks::Lightness && (surface.space() == Space::Cmyk || surface.space() == Space::Multi);
+    way.lightness = (inks == core::FilterInks::Lightness || inks == core::FilterInks::LightnessAndColour) &&
+                    (surface.space() == Space::Cmyk || surface.space() == Space::Multi);
     way.lab_lightness = inks == core::FilterInks::Lightness && surface.space() == Space::Lab;
     way.kernel_colours = way.meaning ? 3 : way.lab_lightness ? 1 : way.colours;
     if (surface.ink() != nullptr) way.space = surface.ink()->space;
@@ -588,6 +606,9 @@ void apply(Surface& surface, const Kernel& kernel, const Json& params, core::Fil
     ctx.colours = way.kernel_colours;
     ctx.alpha = true;
     ctx.s = s > 0 ? s : 1.0;
+    ctx.cover = cover != nullptr ? cover : reads.within;
+    ctx.grid_width = w;
+    ctx.plane = reads.plane;
     const Halo halo = kernel.halo ? kernel.halo(params, ctx) : Halo::margin(0);
 
     // the part worked: as far as the halo reaches from what shows (upstream's output_area), the base box for a whole kind
@@ -595,6 +616,8 @@ void apply(Surface& surface, const Kernel& kernel, const Json& params, core::Fil
     Rect area;
     const Rect content = surface.content();
     ctx.largest = surface.largest();
+    ctx.least = surface.least();
+    ctx.levels = way.meaning ? 0 : surface.levels();  // (the colours the inks mean: floats)
     if (limit != nullptr) {
         area = limit->intersect(grid);
     } else if (halo.bounds || kernel.fills) {
@@ -605,35 +628,49 @@ void apply(Surface& surface, const Kernel& kernel, const Json& params, core::Fil
     if (cover != nullptr) area = area.intersect(cover_box(*cover, w, h));
     if (area.empty()) return;
 
-    const int side = tiling.tile > 0 ? tiling.tile : auto_tile(halo);
+    // the memory, held in the imaging budget before it is had: a whole kind's one window, then each thread's window (the
+    // tile grown by the halo, cut to the grid) — its floats, their reading and a kernel's own work on it (whole numbers, as
+    // the blurs' exact sums, and a float copy: three words a sample; and what the kernel says it takes a pixel) —, the
+    // tile's result and the selection's mix. When not even one thread's fits, smaller tiles (their windows smaller; the
+    // result the same whatever the tiling) before it is refused as too large.
+    const std::size_t sch = way.colours + 1, kch = way.kernel_colours + 1;
+    const Rect whole = halo.bounds ? ctx.bounds.unite(area) : Rect{};
+    const image_ops::Held shared_held(std::uint64_t(whole.area()) * kch * sizeof(float));
+    const auto per_thread_of = [&](int tile_side) {
+        const std::uint64_t tile_px = std::uint64_t(tile_side) * tile_side;
+        const std::uint64_t reach = std::uint64_t(tile_side) + 2 * std::uint64_t(halo.radius);
+        const std::uint64_t window_px = halo.bounds ? 0 : std::min<std::uint64_t>(reach, w) * std::min<std::uint64_t>(reach, h);
+        return window_px * (kch * (2 * sizeof(float) + sizeof(std::int64_t)) + sch * sizeof(float) + kernel.work_bytes) +
+               tile_px * (kch + 3 * sch) * sizeof(float) + (way.meaning ? (window_px + tile_px) * (sch + 4) * sizeof(double) : 0);
+    };
+    std::vector<int> sides{tiling.tile > 0 ? tiling.tile : auto_tile(halo)};
+    if (tiling.tile <= 0)
+        for (const int smaller : {256, 128, 64})
+            if (smaller < sides.back()) sides.push_back(smaller);
+    int side = sides.front();
+    std::optional<image_ops::Held> held;
+    int threads = 1;
+    for (std::size_t k = 0; k < sides.size() && !held; ++k) {
+        side = sides[k];
+        const std::uint64_t per_thread = per_thread_of(side);
+        const std::uint64_t count = (std::uint64_t(area.width()) + side - 1) / side * ((std::uint64_t(area.height()) + side - 1) / side);
+        int wanted = tiling.threads > 0 ? tiling.threads : band_threads();
+        wanted = static_cast<int>(std::max<std::uint64_t>(1, std::min<std::uint64_t>(std::uint64_t(wanted), count)));
+        for (threads = wanted;; threads = threads / 2) {
+            try {
+                held.emplace(per_thread * std::uint64_t(threads));
+                break;
+            } catch (const core::OpError&) {
+                if (threads <= 1) {  // (not even one window of these tiles: smaller ones, or too large)
+                    if (k + 1 == sides.size()) throw;
+                    break;
+                }
+            }
+        }
+    }
     std::vector<Rect> tiles;
     for (int y = area.y0; y < area.y1; y += side)
         for (int x = area.x0; x < area.x1; x += side) tiles.push_back(Rect{x, y, std::min(x + side, area.x1), std::min(y + side, area.y1)});
-
-    // the memory, held in the imaging budget before it is had: a whole kind's one window, then each thread's window (the
-    // tile grown by the halo, cut to the grid) — its floats, their reading and a kernel's own work on it (whole numbers, as
-    // the blurs' exact sums, and a float copy: three words a sample) —, the tile's result and the selection's mix
-    const std::size_t sch = way.colours + 1, kch = way.kernel_colours + 1;
-    const std::uint64_t tile_px = std::uint64_t(side) * side;
-    const std::uint64_t reach = std::uint64_t(side) + 2 * std::uint64_t(halo.radius);
-    const std::uint64_t window_px = halo.bounds ? 0 : std::min<std::uint64_t>(reach, w) * std::min<std::uint64_t>(reach, h);
-    const Rect whole = halo.bounds ? ctx.bounds.unite(area) : Rect{};
-    const image_ops::Held shared_held(std::uint64_t(whole.area()) * kch * sizeof(float));
-    const std::uint64_t per_thread = window_px * (kch * (2 * sizeof(float) + sizeof(std::int64_t)) + sch * sizeof(float)) +
-                                     tile_px * (kch + 3 * sch) * sizeof(float) +
-                                     (way.meaning ? (window_px + tile_px) * (sch + 4) * sizeof(double) : 0);
-    int wanted = tiling.threads > 0 ? tiling.threads : band_threads();
-    wanted = std::max(1, std::min<int>(wanted, static_cast<int>(tiles.size())));
-    std::optional<image_ops::Held> held;
-    int threads = wanted;
-    for (;; threads = threads / 2) {
-        try {
-            held.emplace(per_thread * std::uint64_t(threads));
-            break;
-        } catch (const core::OpError&) {
-            if (threads <= 1) throw;  // (not even one window: too large)
-        }
-    }
 
     std::optional<Window> shared;
     const auto rules_of = [&way, &surface]() -> std::unique_ptr<ink::Rules> {
@@ -643,6 +680,9 @@ void apply(Surface& surface, const Kernel& kernel, const Json& params, core::Fil
         const auto rules = rules_of();
         shared = read_window(surface, whole, way, rules.get());
     }
+    // (a whole kind's work done once — 平均's mean —, its tiles given what it found)
+    const Json found = kernel.once && shared ? kernel.once(params, *shared, ctx) : Json();
+    const Json& given = kernel.once && shared ? found : params;
 
     const std::stop_token* stop = segment::current_stop();
     std::atomic<double>* progress = g_progress;
@@ -654,7 +694,7 @@ void apply(Surface& surface, const Kernel& kernel, const Json& params, core::Fil
         std::optional<Window> own;
         if (!shared) own = read_window(surface, t.inflate(halo.radius), way, rules);
         const Window& src = shared ? *shared : *own;
-        const std::vector<float> data = kernel.run(params, src, t, ctx);
+        const std::vector<float> data = kernel.run(given, src, t, ctx);
         if (data.size() != t.area() * kch) throw std::logic_error("fx: the kernel of " + std::string(kernel.kind) + " gave a result of another size");
         std::vector<float> values(t.area() * sch), original;
         if (way.meaning || way.lab_lightness || cover != nullptr) {
@@ -718,26 +758,33 @@ void apply(Surface& surface, const Kernel& kernel, const Json& params, core::Fil
 
 // --- how heavy ---------------------------------------------------------------------------------------------------------
 
-double work(std::string_view kind, const Json& params, std::uint64_t pixels, double s) {
+double work(std::string_view kind, const Json& params, std::uint64_t pixels, double s, unsigned levels) {
     const Kernel* found = kernel(kind);
     if (found == nullptr) return 0;
     Ctx ctx;
     ctx.s = s > 0 ? s : 1.0;
+    ctx.levels = levels;
     const double each = found->cost ? found->cost(params, ctx) : kDefaultCost;
-    return each * static_cast<double>(pixels);
+    return (each + kPixelWork) * static_cast<double>(pixels);
 }
 
 Grid layer_grid(const core::Page& page, const core::Layer& layer) {
     std::uint32_t w = 0, h = 0;
+    // (the samples' grid: a 32-bit page's are floats — its precise and ink layers', a smart object drawn on it —, the rest
+    // whole numbers of 255ths or 65535ths)
+    const bool floats = (page.rgb && page.rgb->depth == 32) || (page.color && page.color->depth == 32);
+    unsigned levels = floats ? 0 : 65535;
     try {
         if (layer.color_raster) {
             const core::ColorRasterView view(*layer.color_raster);
             w = view.width();
             h = view.height();
+            levels = view.metadata("")["precision"] == "f32" ? 0 : 65535;
         } else if (layer.ink_raster) {
             const core::InkRasterHeader header = core::ink_raster_header(*layer.ink_raster);
             w = header.width;
             h = header.height;
+            levels = header.depth == 32 ? 0 : header.depth == 8 ? 255 : 65535;
         }
     } catch (const std::exception&) {
         w = h = 0;
@@ -747,13 +794,14 @@ Grid layer_grid(const core::Page& page, const core::Layer& layer) {
         const double dpi = deep ? page.spec.dpi.value() : 200.0;
         w = static_cast<std::uint32_t>(std::max(1L, std::lround(page.spec.width_mm.value() / 25.4 * dpi)));
         h = static_cast<std::uint32_t>(std::max(1L, std::lround(page.spec.height_mm.value() / 25.4 * dpi)));
+        if (!deep) levels = 255;
     }
-    return Grid{w, h, image_ops::grid_scale(page, w, h)};
+    return Grid{w, h, image_ops::grid_scale(page, w, h), levels};
 }
 
 double layer_work(const core::Page& page, const core::Layer& layer, std::string_view kind, const Json& params) {
     const Grid grid = layer_grid(page, layer);
-    return work(kind, params, std::uint64_t(grid.width) * grid.height, grid.s);
+    return work(kind, params, std::uint64_t(grid.width) * grid.height, grid.s, grid.levels);
 }
 
 core::Document preview_book(const core::Document& doc, std::size_t at, const std::string& id, int most) {

@@ -165,12 +165,13 @@ void LayerPanel::edit_smart_filter(int index) {
     if (core::pc4_filter(kind)) {  // (PC4 節 D: フィルター's kinds, their windows of the table; what the person changed laid over them)
         adjust_forms::FormContext context;
         context.page = page;
+        context.smart = true;
         const auto& rgb = window_->pen().rgb;
         context.pen = {static_cast<int>(rgb[0]), static_cast<int>(rgb[1]), static_cast<int>(rgb[2])};
         // (a heavy one — render::fx::work on the smart object's grid —: previewed and set on a thread, as フィルター's commands)
         const render::fx::Grid grid = render::fx::layer_grid(*page, *layer);
         const auto heavy = [grid, kind](const Json& values) {
-            return render::fx::work(kind, values, std::uint64_t(grid.width) * grid.height, grid.s) >= render::fx::kHeavyWork;
+            return render::fx::work(kind, values, std::uint64_t(grid.width) * grid.height, grid.s, grid.levels) >= render::fx::kHeavyWork;
         };
         const FilterPreview shown = [this, page_index, layer_id, index, heavy](const std::optional<Json>& values) {
             if (!values) {

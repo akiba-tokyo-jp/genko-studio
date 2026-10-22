@@ -29,6 +29,42 @@ AdjustParam number(std::string_view key, double fallback, double lo, double hi) 
     return p;
 }
 
+AdjustParam whole(std::string_view key, double fallback, double lo, double hi) {
+    AdjustParam p = number(key, fallback, lo, hi);
+    p.type = Type::Whole;
+    return p;
+}
+
+AdjustParam boolean(std::string_view key, bool fallback) {
+    AdjustParam p;
+    p.key = key;
+    p.type = Type::Bool;
+    p.fallback = fallback ? 1 : 0;
+    return p;
+}
+
+AdjustParam choice(std::string_view key, std::vector<std::string_view> choices) {
+    AdjustParam p;
+    p.key = key;
+    p.type = Type::Choice;
+    p.choices = std::move(choices);
+    p.text = p.choices.front();  // (the default: the first, PhotoCraft's)
+    return p;
+}
+
+AdjustParam numbers(std::string_view key, std::vector<double> fallback, double lo, double hi) {
+    AdjustParam p;
+    p.key = key;
+    p.type = Type::Numbers;
+    p.numbers = std::move(fallback);
+    p.lo = lo;
+    p.hi = hi;
+    return p;
+}
+
+// (a seed of PhotoCraft's: a u32)
+AdjustParam seed() { return whole("seed", 0, 0, 4294967295.0); }
+
 // A kind of PC4 (a filter_raster kind of its own that looks beyond each pixel, a smart filter: design 2.3, 3.3).
 FilterKind kind(FilterInfo info, std::vector<AdjustParam> params) {
     FilterKind out;
@@ -183,6 +219,7 @@ std::string_view to_string(FilterInks inks) {
     switch (inks) {
         case FilterInks::Plates: return "plates";
         case FilterInks::Lightness: return "lightness";
+        case FilterInks::LightnessAndColour: return "lightness_and_colour";
         case FilterInks::Meaning: return "meaning";
         case FilterInks::Halftone: return "halftone";
     }
@@ -197,12 +234,92 @@ std::vector<FilterKind> blur_kinds() {
     // radius in pixels of the working 200 dpi
     out.push_back(kind(info("blur_gaussian", "filter.blur.gaussianBlur", "ぼかし（ガウス）", "ぼかし"), {number("radius", 1, 0.1, 1000)}));
     out.push_back(kind(info("blur_box", "filter.blur.boxBlur", "ぼかし（ボックス）", "ぼかし"), {number("radius", 1, 1, 2000)}));
+    // D1 (filters.rs 41-134, filters_ext.rs 234-295, extra_cmds.rs 187-205): 平均 (the selection's — else the layer's —
+    // mean colour), ぼかし（移動） (its angle in degrees, the page's way up; its distance), ぼかし（放射状） (回転 or ズーム about
+    // a centre of shares of the base box: a place that moves with a smart object), ぼかし（表面）, ぼかし（詳細）,
+    // ぼかし（シェイプ） (PhotoCraft's built-in shapes), ぼかし（レンズ） (its iris, its depth, its highlights and noise)
+    out.push_back(kind(info("blur_average", "filter.blur.average", "平均", "ぼかし"), {}));
+    out.push_back(kind(info("blur_motion", "filter.blur.motionBlur", "ぼかし（移動）", "ぼかし"), {number("angle", 0, -360, 360), number("distance", 10, 1, 2000)}));
+    {
+        FilterInfo radial = info("blur_radial", "filter.blur.radialBlur", "ぼかし（放射状）", "ぼかし");
+        radial.places = {{FilterPlace::Kind::Centre, "center_x", "center_y", {}}};
+        out.push_back(kind(std::move(radial), {number("amount", 10, 1, 100), choice("method", {"spin", "zoom"}), number("center_x", 0.5, 0, 1),
+                                               number("center_y", 0.5, 0, 1)}));
+    }
+    out.push_back(kind(info("blur_surface", "filter.blur.surfaceBlur", "ぼかし（表面）", "ぼかし"), {number("radius", 5, 1, 100), number("threshold", 15, 2, 255)}));
+    {
+        AdjustParam quality = choice("quality", {"high", "medium", "low"});
+        out.push_back(kind(info("blur_smart", "filter.blur.smartBlur", "ぼかし（詳細）", "ぼかし"),
+                           {number("radius", 3, 0.1, 100), number("threshold", 25, 0.1, 100), quality, choice("mode", {"normal", "edge_only", "overlay_edge"})}));
+    }
+    out.push_back(kind(info("blur_shape", "filter.blur.shapeBlur", "ぼかし（シェイプ）", "ぼかし"),
+                       {number("radius", 10, 5, 1000), choice("shape", {"circle", "ring", "square", "diamond", "triangle", "hexagon", "star", "heart", "cross"})}));
+    out.push_back(kind(info("blur_lens", "filter.blur.lensBlur", "ぼかし（レンズ）", "ぼかし"),
+                       {number("radius", 15, 0, 100), choice("shape", {"hexagon", "triangle", "square", "pentagon", "heptagon", "octagon"}),
+                        number("blade_curvature", 0, 0, 100), number("rotation", 0, 0, 360), choice("depth_map", {"none", "transparency", "layer_mask"}),
+                        number("focal_distance", 0, 0, 255), boolean("invert", false), number("brightness", 0, 0, 100), number("threshold", 255, 0, 255),
+                        number("noise", 0, 0, 100), choice("distribution", {"uniform", "gaussian"}), boolean("monochromatic", false), seed()}));
     return out;
 }
-std::vector<FilterKind> sharpen_kinds() { return {}; }       // (D1)
-std::vector<FilterKind> noise_kinds() { return {}; }         // (D1)
-std::vector<FilterKind> other_kinds() { return {}; }         // (D1)
-std::vector<FilterKind> video_kinds() { return {}; }         // (D1)
+
+std::vector<FilterKind> sharpen_kinds() {
+    // D1 (filters.rs): アンシャープマスク (amount %, radius, threshold in levels) and スマートシャープ (its noise reduction %);
+    // シャープ・シャープ（強）・シャープ（輪郭のみ） are the unsharp mask at fixed settings (filter_presets)
+    std::vector<FilterKind> out;
+    out.push_back(kind(info("sharpen_unsharp_mask", "filter.sharpen.unsharpMask", "アンシャープマスク", "シャープ"),
+                       {number("amount", 50, 1, 500), number("radius", 1, 0.1, 1000), number("threshold", 0, 0, 255)}));
+    out.push_back(kind(info("sharpen_smart", "filter.sharpen.smartSharpen", "スマートシャープ", "シャープ"),
+                       {number("amount", 100, 1, 500), number("radius", 1, 0.1, 64), number("reduce_noise", 10, 0, 100)}));
+    return out;
+}
+
+std::vector<FilterKind> noise_kinds() {
+    // D1 (filters.rs, filters_ext.rs 234-240): ノイズを加える (amount 0.1..400 %, its distribution, グレースケールノイズ, its
+    // seed), ダスト＆スクラッチ, 明るさの中間値, ノイズを軽減; 輪郭以外をぼかす is ぼかし（表面） at 2 and 12 (filter_presets)
+    std::vector<FilterKind> out;
+    out.push_back(kind(info("noise_add", "filter.noise.addNoise", "ノイズを加える", "ノイズ"),
+                       {number("amount", 12.5, 0.1, 400), choice("distribution", {"uniform", "gaussian"}), boolean("monochromatic", false), seed()}));
+    out.push_back(kind(info("noise_dust_and_scratches", "filter.noise.dustAndScratches", "ダスト＆スクラッチ", "ノイズ"),
+                       {number("radius", 1, 1, 500), number("threshold", 0, 0, 255)}));
+    out.push_back(kind(info("noise_median", "filter.noise.median", "明るさの中間値", "ノイズ"), {number("radius", 1, 1, 500)}));
+    out.push_back(kind(info("noise_reduce", "filter.noise.reduceNoise", "ノイズを軽減", "ノイズ"),
+                       {number("strength", 6, 0, 10), number("preserve_details", 60, 0, 100), number("reduce_color_noise", 45, 0, 100),
+                        number("sharpen_details", 25, 0, 100), boolean("remove_jpeg_artifact", false)}));
+    return out;
+}
+
+std::vector<FilterKind> other_kinds() {
+    // D1 (filters.rs, filters_ext.rs 345-362): カスタム (a 5×5 kernel, row by row — its centre the 13th —, divided by its
+    // scale, its offset in levels added: on the lightness of a page of inks), ハイパス (the lightness's: its middle grey),
+    // HSB/HSL (the colours the inks mean), 明るさの最大値・最小値 (a square or a disc: on the lightness), スクロール (the base
+    // box moved by whole working pixels, what it leaves wrapped, repeated or clear)
+    std::vector<FilterKind> out;
+    std::vector<double> identity(25, 0.0);
+    identity[12] = 1;
+    out.push_back(kind(info("other_custom", "filter.other.custom", "カスタム", "その他", FilterInks::LightnessAndColour),
+                       {numbers("kernel", identity, -999, 999), number("scale", 1, 1, 9999), number("offset", 0, -9999, 9999)}));
+    out.push_back(kind(info("other_high_pass", "filter.other.highPass", "ハイパス", "その他", FilterInks::LightnessAndColour),
+                       {number("radius", 10, 0.1, 1000)}));
+    out.push_back(kind(info("other_hsb_hsl", "filter.other.hsbHsl", "HSB/HSL", "その他", FilterInks::Meaning),
+                       {choice("input_mode", {"rgb", "hsb", "hsl"}), choice("row_order", {"hsb", "hsl", "rgb"})}));
+    out.push_back(kind(info("other_maximum", "filter.other.maximum", "明るさの最大値", "その他", FilterInks::Lightness),
+                       {number("radius", 1, 0.2, 500), choice("preserve", {"squareness", "roundness"})}));
+    out.push_back(kind(info("other_minimum", "filter.other.minimum", "明るさの最小値", "その他", FilterInks::Lightness),
+                       {number("radius", 1, 0.2, 500), choice("preserve", {"squareness", "roundness"})}));
+    out.push_back(kind(info("other_offset", "filter.other.offset", "スクロール", "その他"),
+                       {number("horizontal", 0, -30000, 30000), number("vertical", 0, -30000, 30000), choice("undefined_areas", {"wrap", "repeat", "transparent"})}));
+    return out;
+}
+
+std::vector<FilterKind> video_kinds() {
+    // D1 (filters_ext.rs 363-367): インターレース解除 (the odd or even lines — of the working 200 dpi — made again by
+    // interpolation or duplication) and NTSC カラー (the colours the inks mean)
+    std::vector<FilterKind> out;
+    out.push_back(kind(info("video_de_interlace", "filter.video.deInterlace", "インターレース解除", "ビデオ"),
+                       {choice("eliminate", {"odd_fields", "even_fields"}), choice("create_by", {"interpolation", "duplication"})}));
+    out.push_back(kind(info("video_ntsc_colors", "filter.video.ntscColors", "NTSC カラー", "ビデオ", FilterInks::Meaning), {}));
+    return out;
+}
 std::vector<FilterKind> distort_kinds() { return {}; }       // (D2)
 std::vector<FilterKind> pixelate_kinds() { return {}; }      // (D2)
 std::vector<FilterKind> stylize_kinds() { return {}; }       // (D2)

@@ -28,7 +28,8 @@
 //
 // A page of inks is worked as its kind says (core::FilterInks): each plate's value as it is, its lightness (CMYK and
 // multichannel plates as 1 − ink, back after; a Lab page's L alone — the kernel then works one colour, as grey —, its a
-// and b as they were; grey as it is) or the colours the inks mean (back by the page's rules, render/ink).
+// and b as they were; grey as it is; or, a kernel about a middle, a Lab page's L, a and b each, Ctx::space Lab) or the
+// colours the inks mean (back by the page's rules, render/ink).
 // A selection mixes the result with the layer by its coverage (upstream's apply_tiled: straight, every channel).
 //
 // Lengths in a kind's settings are pixels of the working 200 dpi; a kernel scales them to the layer's grid by Ctx::s.
@@ -99,6 +100,20 @@ struct Ctx {
     double largest = 1;
     // A length of the working 200 dpi on the layer's grid.
     float px(double working) const { return static_cast<float>(working * s); }
+    // (D1) How the layer's samples are held: each a whole number of 1/levels (255: 8 bits, 65535: 16 bits — the rank
+    // filters' exact bins, render/fx_rank), 0 for floats (or the colours the inks mean); and the least colour sample
+    // where it shows (0 but for floats: with `largest`, whether every sample is within 0..1).
+    unsigned levels = 0;
+    double least = 0;
+    // (D1) The selection's coverage of each pixel of the layer's grid (a byte a pixel, `grid_width` a row; none:
+    // everywhere), for a kind that reads it itself (平均: the mean of what the selection covers), and a plane over the grid
+    // it reads beside the layer (ぼかし（レンズ）'s depth: the layer's mask; a value 0..1 a pixel, none: none).
+    const std::string* cover = nullptr;
+    std::uint32_t grid_width = 0;
+    const std::vector<float>* plane = nullptr;
+    float coverage(int x, int y) const {
+        return cover == nullptr ? 1.0f : static_cast<unsigned char>((*cover)[std::size_t(y) * grid_width + std::size_t(x)]) / 255.0f;
+    }
 };
 
 // How far outside an output tile a kernel reads (upstream's Halo): a margin of pixels, or the whole base box.
@@ -119,16 +134,23 @@ struct Kernel {
     std::function<std::vector<float>(const core::Json& params, const Window& src, const Rect& out, const Ctx& ctx)> run;
     std::function<double(const core::Json& params, const Ctx& ctx)> cost;  // (none: kDefaultCost)
     bool fills = false;
+    // (D1) A whole kind's work done once on the base box's window before its tiles (平均's mean), given to each tile's run
+    // as its settings; none: the settings as they are.
+    std::function<core::Json(const core::Json& params, const Window& whole, const Ctx& ctx)> once;
+    // (D1) The bytes of its own work a pixel of a tile's window takes past what the engine counts (ノイズを軽減's planes):
+    // held in the imaging budget with the window.
+    std::size_t work_bytes = 0;
 };
 using Kernels = std::vector<Kernel>;
 inline constexpr double kDefaultCost = 50;
 
 // Each group's kernels (its own file; a group fills its own).
 Kernels blur_kernels();          // render/fx_blur.cpp — D0: blur_gaussian, blur_box; D1: the rest of ぼかし
-Kernels sharpen_kernels();       // D1
-Kernels noise_kernels();         // D1
-Kernels other_kernels();         // D1
-Kernels video_kernels();         // D1
+Kernels blur_shaped_kernels();   // render/fx_blur2.cpp — D1: blur_smart, blur_shape, blur_lens (blur_kernels takes them)
+Kernels sharpen_kernels();       // render/fx_sharpen.cpp — D1
+Kernels noise_kernels();         // render/fx_noise.cpp — D1
+Kernels other_kernels();         // render/fx_other.cpp — D1
+Kernels video_kernels();         // render/fx_video.cpp — D1
 Kernels distort_kernels();       // D2
 Kernels pixelate_kernels();      // D2
 Kernels stylize_kernels();       // D2
@@ -185,6 +207,10 @@ public:
     virtual double largest() const { return 1.0; }
     // (a page of inks) its colour mode, for the colours the inks mean
     virtual const core::PageColor* ink() const { return nullptr; }
+    // (D1) Its samples each a whole number of 1/levels (Ctx::levels; 0: floats), and the least colour sample where it
+    // shows (after content(); 0 but for floats).
+    virtual unsigned levels() const { return 0; }
+    virtual double least() const { return 0.0; }
 };
 // The three ways' surfaces: an 8-bit RGBA picture's bytes, a precise raster's (GKCR), an ink raster (its pixels — kept by
 // the caller while the surface lives —, the page's mode). After a run, an 8-bit surface's new picture (take_image) and
@@ -199,9 +225,15 @@ std::string take_bytes(Surface& surface);
 // `cover` each pixel's coverage by the selection (0..255, a byte a pixel; none: everywhere), `limit` the part worked
 // (none: as the halo reaches from what shows — the base box for a whole kind or a render), `s` the scale. Its samples
 // are worked as `inks` says on a page of inks. OpError (too_large) when the imaging budget cannot hold one window;
-// render::Cancelled when the run is stopped (StopScope).
+// render::Cancelled when the run is stopped (StopScope). `reads` (D1): what its kernel may read besides the layer —
+// the selection's coverage when the caller keeps the result to it itself (an 8-bit layer, `cover` none: Ctx::cover), a
+// plane over the grid (Ctx::plane).
+struct Reads {
+    const std::string* within = nullptr;
+    const std::vector<float>* plane = nullptr;
+};
 void apply(Surface& surface, const Kernel& kernel, const core::Json& params, core::FilterInks inks, const Rect& bounds, const std::string* cover,
-           double s, const Rect* limit = nullptr, const Tiling& tiling = {});
+           double s, const Rect* limit = nullptr, const Tiling& tiling = {}, const Reads& reads = {});
 
 // While it lives, the runs on this thread say how far they are (0..1, each run from 0) in `done`.
 class ProgressScope {
@@ -215,16 +247,19 @@ private:
     std::atomic<double>* before_;
 };
 
-// How much work a kind is on a grid of `pixels` at scale `s` (its cost a pixel × the pixels), and whether that is a
-// heavy one: the window then works it on a thread of its own with 中止 and its preview at the screen's resolution
-// (design 4.4, the user's decision 4 — never refused for it).
-double work(std::string_view kind, const core::Json& params, std::uint64_t pixels, double s);
+// How much work a kind is on a grid of `pixels` at scale `s` (its cost a pixel — on samples of `levels`, Ctx::levels: a
+// rank filter of floats costs more — and the engine's reading and writing of a pixel, kPixelWork, × the pixels), and
+// whether that is a heavy one: the window then works it on a thread of its own with 中止 and its preview at the screen's
+// resolution (design 4.4, the user's decision 4 — never refused for it).
+double work(std::string_view kind, const core::Json& params, std::uint64_t pixels, double s, unsigned levels = 255);
+inline constexpr double kPixelWork = 10;
 inline constexpr double kHeavyWork = 4e8;
 // A layer's grid as a filter works it (a precise or ink layer's own; an 8-bit layer's, or lines alone, the page's at the
 // working 200 dpi — at its dpi on a deep page) and its scale.
 struct Grid {
     std::uint32_t width = 0, height = 0;
     double s = 1;
+    unsigned levels = 255;  // (D1: 0 for a layer of floats — a 32-bit page's —, Ctx::levels)
 };
 Grid layer_grid(const core::Page& page, const core::Layer& layer);
 // The work of `kind` on a layer of the page (its grid, its scale).

@@ -99,6 +99,7 @@ genko_library(genko_app
     adjust_forms_color.cpp
     image_dialogs.cpp
     filter_forms.cpp
+    filter_forms_basic.cpp
     filter_menu.cpp
     main_window_adjust.cpp
     main_window_smart.cpp
