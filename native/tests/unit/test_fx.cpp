@@ -63,12 +63,6 @@ std::vector<std::array<float, 4>> flat(std::uint32_t w, std::uint32_t h, std::ar
     return std::vector<std::array<float, 4>>(std::size_t(w) * h, px);
 }
 
-std::vector<float> read_all(const render::fx::Surface& s) {
-    std::vector<float> out(std::size_t(s.width()) * s.height() * (s.colours() + 1));
-    s.read(Rect{0, 0, int(s.width()), int(s.height())}, out.data());
-    return out;
-}
-
 const render::fx::Kernel& kernel(const char* kind) {
     const render::fx::Kernel* k = render::fx::kernel(kind);
     if (k == nullptr) throw core::Error("value", std::string("no kernel ") + kind);
@@ -129,12 +123,13 @@ const core::Layer& layer_of(const core::Document& doc, const char* id) {
     throw core::Error("value", std::string("no layer ") + id);
 }
 
-// A page of inks (`mode` cmyk, lab, gray or multichannel, 16 bits) with a paint layer "pic": `ink(x, y, c)` its values.
+// A page of inks (`mode` cmyk, lab, gray or multichannel, 16 bits) with a paint layer "pic" of side × side pixels over the page
+// (1 inch): `ink(x, y, c)` its values.
 core::Document ink_page(const std::string& mode, const std::function<double(std::uint32_t, std::uint32_t, unsigned)>& ink, std::uint32_t side = 64) {
     Json set{{"op", "set_color_mode"}, {"mode", mode}, {"depth", mode == "multichannel" ? 8 : 16}};
     if (mode == "cmyk") set["profile"] = "coated-cmyk";
     auto doc = core::CommandBus(render::ops_registry())
-                   .apply(blank(side * kInch / 200), Json::array({set, Json{{"op", "add_layer"}, {"page", 1}, {"kind", "paint"}, {"id", "pic"}}}),
+                   .apply(blank(), Json::array({set, Json{{"op", "add_layer"}, {"page", 1}, {"kind", "paint"}, {"id", "pic"}}}),
                           core::Actor("human:test"))
                    .doc;
     const core::PageColor& color = *doc.page(0).color;
@@ -481,7 +476,7 @@ private slots:
 
     void aWindowPastTheBudgetIsRefused() {
         const std::string raster = precise(512, 512, pattern(512, 512), true);
-        const render::ImageAllocationBudget budget{4ULL * 1024 * 1024};
+        const render::ImageAllocationBudget budget{16ULL * 1024 * 1024};
         try {
             (void)run_precise(raster, "blur_gaussian", Json{{"radius", 40}});
             QFAIL("a window past the budget was had");

@@ -39,8 +39,8 @@ FilterKind kind(FilterInfo info, std::vector<AdjustParam> params) {
     out.kind.local = true;
     out.kind.smart = true;
     out.kind.params = std::move(params);
-    // (a filter's native holds no blend: normalize_filter refuses one — fade_layer lays a result in a blend)
-    out.kind.native = {};
+    // (its native — a blend, as every kind's: refused on a filter by normalize_filter; fade_layer lays a result in a blend —
+    // is the table's: core/adjust_kinds.cpp)
     out.info = std::move(info);
     return out;
 }
