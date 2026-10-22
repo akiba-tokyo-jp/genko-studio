@@ -1075,7 +1075,7 @@ Json import_data(core::Document& doc, const Json& op, std::string data, bool exa
         }
         core::PsdPageKeep keep = page_keep(doc, file, taken);
         if (!keep.resources.empty() || !keep.globals.empty()) {
-            keep.ids = kept_ids;
+            if (names_layers) keep.ids = kept_ids;
             keep.from = core::PsdFrom{file.psb() ? 2 : 1, file.mode(), file.depth()};
             doc.edit_page(index).native_psd = std::move(keep);
         }

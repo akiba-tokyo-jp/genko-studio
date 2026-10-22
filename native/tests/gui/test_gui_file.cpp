@@ -246,7 +246,7 @@ private slots:
         QVERIFY(written.find("8BIMAnno") != std::string::npos && written.find("lfx2") != std::string::npos);
         QCOMPARE(bytes_of(psd), bytes);
         // a PSD past 30000 px a side: said to be written as a PSB
-        QCOMPARE(genko::service::wording::error(QStringLiteral("the page is too large for a PSD (30001×2 pixels): write it as a PSB")),
+        QCOMPARE(genko::wording::error(QStringLiteral("the page is too large for a PSD (30001×2 pixels): write it as a PSB")),
                  QStringLiteral("ページが大きすぎて PSD に書けません（30001×2 px。PSD は 1 辺 30000 px まで）。PSB で書き出してください"));
     }
 

@@ -949,6 +949,20 @@ private slots:
         const psd::File src = psd::File::read(source);
         const psd::File out = psd::File::read(bytes);
         // this build's reader: each layer's kept payloads, its ranges, its id and locks; the page's resources and blocks
+        const auto default_ranges = [](std::string_view r) {
+            static constexpr std::string_view kFull("\x00\x00\xff\xff\x00\x00\xff\xff", 8);
+            if (r.empty() || r.size() % 8 != 0) return false;
+            for (std::size_t at = 0; at < r.size(); at += 8)
+                if (r.substr(at, 8) != kFull) return false;
+            return true;
+        };
+        const auto tools_default_ranges = [](const Json& r) {  // (psd-tools' [[lo, hi], …] of 16 bits each)
+            if (!r.is_array() || r.empty()) return false;
+            for (const Json& channel : r)
+                for (const Json& pair : channel)
+                    if (pair != Json::array({0, 65535})) return false;
+            return true;
+        };
         const auto layer_of = [](const psd::File& f, const std::string& name) -> const psd::Layer* {
             for (const psd::Layer& l : f.layers())
                 if (l.name == name) return &l;
@@ -966,14 +980,18 @@ private slots:
                 QVERIFY2(ours.contains(key) && ours[key] == data, (name + " " + key).c_str());
                 QVERIFY2(bytes.find(data) != std::string::npos, (name + " " + key).c_str());
             }
-            QCOMPARE(std::string(out.ranges(*b)), std::string(src.ranges(*a)));
+            // (blending ranges at their default are not kept: none is written, which Photoshop reads as the default)
+            if (default_ranges(src.ranges(*a))) QVERIFY2(out.ranges(*b).empty() || default_ranges(out.ranges(*b)), name.c_str());
+            else QCOMPARE(std::string(out.ranges(*b)), std::string(src.ranges(*a)));
             QCOMPARE(out.layer_id(*b), src.layer_id(*a));
             QCOMPARE(out.protection(*b), src.protection(*a));
         }
         std::map<unsigned, std::string> src_resources, out_resources;
         for (const auto& r : src.resources()) src_resources[r.id] = std::string(r.data);
         for (const auto& r : out.resources()) out_resources[r.id] = std::string(r.data);
-        for (const unsigned id : {1037u, 1049u, 1050u, 1054u, 1065u, 1060u}) QVERIFY2(out_resources[id] == src_resources[id], std::to_string(id).c_str());
+        for (const unsigned id : {1037u, 1049u, 1050u, 1054u, 1065u}) QVERIFY2(out_resources[id] == src_resources[id], std::to_string(id).c_str());
+        // (its XMP is the book's File Info, written again as PC4 F-b writes it: its creator there)
+        QVERIFY(out_resources[1060].find("作者の名前") != std::string::npos);
         std::map<std::string, std::string> src_globals, out_globals;
         for (const auto& g : src.global_blocks()) src_globals[g.key] = std::string(g.data);
         for (const auto& g : out.global_blocks()) out_globals[g.key] = std::string(g.data);
@@ -995,7 +1013,8 @@ private slots:
                 if (key == "luni") continue;
                 QVERIFY2(b["blocks"].contains(key) && b["blocks"][key] == sha, (name + " " + key).c_str());
             }
-            QCOMPARE(b["ranges"], a["ranges"]);
+            if (tools_default_ranges(a["ranges"])) QVERIFY2(b["ranges"].is_null() || b["ranges"] == a["ranges"], name.c_str());
+            else QCOMPARE(b["ranges"], a["ranges"]);
         }
         for (const std::string id : {"1037", "1049", "1050", "1054", "1065"}) QCOMPARE(after["resources"][id], before["resources"][id]);
         for (const std::string key : {"Anno", "Patt"}) QCOMPARE(after["globals"][key], before["globals"][key]);
@@ -1027,7 +1046,8 @@ private slots:
             const QString file = path(QStringLiteral("keep/") + name);
             (void)genko::formats::export_page_psd(d, d.page(0), genko::storage::path_from_utf8(file.toStdString()), 150);
             std::set<unsigned> ids;
-            for (const auto& r : psd::File::read(genko::test::read_bytes(file)).resources()) ids.insert(r.id);
+            const psd::File reread = psd::File::read(genko::test::read_bytes(file));
+            for (const auto& r : reread.resources()) ids.insert(r.id);
             return ids;
         };
         QVERIFY(resource_ids(doc, QStringLiteral("all.psd")).contains(1065));
