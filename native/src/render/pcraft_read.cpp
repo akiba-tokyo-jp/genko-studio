@@ -148,6 +148,8 @@ public:
     }
 
     const ReadLimits& limits() const { return limits_; }
+    std::uint64_t unpacked() const { return unpacked_; }
+    std::uint64_t remaining() const { return limits_.max_unpacked_bytes - unpacked_; }
 
 private:
     const Source& source_;
@@ -1054,9 +1056,13 @@ std::optional<std::string> contents_of(Ctx& ctx, const std::string& file_name, c
             why = "入れ子が深すぎる";
             return std::nullopt;
         }
+        // (the .pcraft inside unpacks within what is left of this one's budget, and counts in it: nesting never
+        // multiplies what may be unpacked)
         ReadLimits inner = ctx.load.limits();
         inner.depth = ctx.depth + 1;
+        inner.max_unpacked_bytes = ctx.load.remaining();
         Read read = pcraft::read(*bytes, file_name, inner);
+        ctx.load.account(read.unpacked);
         for (std::string& note : read.notes) ctx.notes.add("埋め込まれた .pcraft「" + file_name + "」: " + note);
         core::Page page = read.doc.page(0);
         page.index = core::Num(std::int64_t{1});
@@ -1528,7 +1534,6 @@ Read build(Loader& load, const Json& manifest, std::string_view title, int depth
 
     // its guides (rulers of kind guide, the page's mm)
     if (const Json* guides = optional_field(d, "guides")) {
-        Json ops = Json::array();
         for (const auto& [key, axis] : {std::pair<const char*, const char*>{"horizontal", "h"}, {"vertical", "v"}}) {
             const Json* list = optional_field(*guides, key);
             if (list == nullptr || !list->is_array()) continue;
@@ -1678,7 +1683,9 @@ Read read_from(const Source& source, std::string_view title, const ReadLimits& l
     Loader load(source, limits);
     const Json manifest = parse_manifest(source, limits);
     try {
-        return build(load, manifest, title, limits.depth);
+        Read out = build(load, manifest, title, limits.depth);
+        out.unpacked = load.unpacked();
+        return out;
     } catch (const Unreadable& error) {
         broken(std::string("its document cannot be read: ") + error.what());
     }

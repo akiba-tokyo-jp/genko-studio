@@ -502,6 +502,12 @@ genko_test(test_contract_open SOURCES contract/test_contract_open.cpp DEPS genko
 # when it is opened, `genko inspect --file-info`.
 genko_test(test_contract_file_info SOURCES contract/test_contract_file_info.cpp DEPS genko_test_support genko_formats genko_render_ops
            LABELS contract TIMEOUT 900)
+# PC4 F-f (SPEC.md FILE-01, .pcraft): the .pcraft files PhotoCraft v0.2.0's writer made (data/pcraft) opened as books — their
+# layers, pixels, masks and channels as upstream's reader reads them (MANIFEST.json) —, a book written as a .pcraft and read
+# back, every file read, written and read again, the refusals, 埋め込みを配置 of a .pcraft (contents of kind page), `genko
+# export --format pcraft` and `genko new --from`; with $GENKO_PCRAFT_CHECK, upstream's reader reads what this build wrote.
+genko_test(test_contract_pcraft SOURCES contract/test_contract_pcraft.cpp DEPS genko_test_support genko_formats genko_render_ops
+           LABELS contract TIMEOUT 900)
 # PC4 F-a (SPEC.md FILE-01, the codecs): `genko render --out` of GIF, PPM, PGM, PBM, TGA, ICO, QOI and AVIF; smart objects of
 # the new formats (formats@1) drawn on 8-bit, 16-bit, 32-bit, grey and CMYK pages; a file of each opened as a book;
 # コピーを保存… in each format; `genko --version` naming OpenEXR, libavif and libaom.

@@ -450,10 +450,10 @@ fn make(dir: &FsPath) {
     }
 }
 
-fn kind_of(l: &Layer) -> Value {
+fn kind_of(l: &Layer, size: Size) -> Value {
     match &l.content {
         LayerContent::Raster(s) => json!({"kind": "raster", "tiles": s.tile_count()}),
-        LayerContent::Group(g) => json!({"kind": "group", "children": g.children.iter().map(layer_json).collect::<Vec<_>>()}),
+        LayerContent::Group(g) => json!({"kind": "group", "children": g.children.iter().map(|c| layer_json(c, size)).collect::<Vec<_>>()}),
         LayerContent::Adjustment(a) => json!({"kind": "adjustment", "label": a.label()}),
         LayerContent::Fill(_) => json!({"kind": "fill"}),
         LayerContent::Text(t) => json!({"kind": "text", "text": t.text, "cache": t.cache.is_some()}),
@@ -462,15 +462,35 @@ fn kind_of(l: &Layer) -> Value {
     }
 }
 
-fn layer_json(l: &Layer) -> Value {
-    let mut v = kind_of(l);
+/// The places whose samples `check` reports (those on the canvas): what Genko's tests compare its reading with.
+const PROBES: [(i32, i32); 14] = [(0, 0), (5, 5), (17, 9), (20, 30), (33, 21), (47, 40), (63, 31), (70, 45), (95, 63), (150, 30), (165, 40), (210, 160), (245, 135), (299, 199)];
+
+/// A surface's samples (normalised, as upstream reads them) at the probes on a canvas of `size`.
+fn probe(s: &Surface, size: Size) -> Value {
+    PROBES
+        .iter()
+        .filter(|(x, y)| (*x as u32) < size.width && (*y as u32) < size.height)
+        .map(|&(x, y)| json!([x, y, s.pixel(x, y)]))
+        .collect::<Vec<_>>()
+        .into()
+}
+
+fn layer_json(l: &Layer, size: Size) -> Value {
+    let mut v = kind_of(l, size);
     v["name"] = json!(l.name);
     v["visible"] = json!(l.visible);
     v["opacity"] = json!(l.opacity);
+    v["fill_opacity"] = json!(l.fill_opacity);
     v["blend"] = serde_json::to_value(l.blend).unwrap_or(Value::Null);
     v["clipped"] = json!(l.clipped);
     v["mask"] = json!(l.mask.is_some());
     v["vector_mask"] = json!(l.vector_mask.is_some());
+    if let Some(surface) = l.surface() {
+        v["pixels"] = probe(surface, size);
+    }
+    if let Some(mask) = &l.mask {
+        v["mask_pixels"] = probe(&mask.surface, size);
+    }
     v
 }
 
@@ -483,13 +503,14 @@ fn check(path: &FsPath) -> Value {
                 "file": path.display().to_string(), "ok": true, "name": d.name, "width": d.size.width, "height": d.size.height,
                 "dpi": d.resolution_dpi, "mode": serde_json::to_value(d.mode).unwrap_or(Value::Null),
                 "depth": serde_json::to_value(d.depth).unwrap_or(Value::Null), "icc": d.icc_profile.as_ref().map(|b| b.len()),
-                "layers": d.layers.iter().map(layer_json).collect::<Vec<_>>(),
-                "channels": d.channels.iter().map(|c| json!({"name": c.name, "spot": c.spot.is_some()})).collect::<Vec<_>>(),
+                "layers": d.layers.iter().map(|l| layer_json(l, d.size)).collect::<Vec<_>>(),
+                "channels": d.channels.iter().map(|c| json!({"name": c.name, "spot": c.spot.is_some(), "pixels": probe(&c.surface, d.size)})).collect::<Vec<_>>(),
                 "paths": d.paths.iter().map(|p| p.name.clone()).collect::<Vec<_>>(), "work_path": d.work_path.is_some(),
                 "clipping_path": d.clipping_path.as_ref().map(|c| c.name.clone()),
                 "guides": [d.guides.horizontal.len(), d.guides.vertical.len()], "patterns": d.patterns.len(),
                 "xmp": d.metadata.xmp.is_some(), "exif": d.metadata.exif.is_some(),
                 "first_pixels": d.layers.first().and_then(|l| l.surface()).map(|s| s.pixel(bounds.x0, bounds.y0)),
+                "color_table": d.color_table.as_ref().map(|t| t.colors.clone()),
             })
         }
         Err(e) => json!({"file": path.display().to_string(), "ok": false, "error": e.to_string()}),

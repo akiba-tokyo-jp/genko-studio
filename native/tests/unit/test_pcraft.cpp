@@ -32,7 +32,7 @@ namespace zip = genko::render::zip;
 namespace zstd = genko::render::zstd;
 namespace b3 = genko::render::blake3;
 using genko::core::Json;
-namespace gt = genko::testsupport;
+namespace gt = genko::test;
 
 namespace {
 
