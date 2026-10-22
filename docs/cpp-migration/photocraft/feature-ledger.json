@@ -5576,7 +5576,7 @@
         "cpp": [],
         "tests": [],
         "gap": "レンズ補正（プロファイル自動選択）をフォルダー一括で行う機能がない。レンズ補正フィルター自体もない",
-        "note": "Filter › Lens Correction の行と file.automate.batch が前提。プロファイルのデータ（lensfun 等, LGPL-3.0/CC-BY-SA）を使うなら要検討。PC4 の設計で PC5（file.automate.batch の群）へ。フィルター自身（filter.lensCorrection）は PC4 D6"
+        "note": "Filter › Lens Correction の行と file.automate.batch が前提。プロファイルのデータ（lensfun 等, LGPL-3.0/CC-BY-SA）を使うなら要検討"
       }
     },
     {
@@ -39413,7 +39413,7 @@
           "native/tests/gui/test_gui_look.cpp:531"
         ],
         "gap": "画面の表示だけを OpenGL で行い（拡大・回転・合成済みの絵）、実のカードが無ければ CPU で描く（どちらも試験あり）。合成・フィルターの GPU 実装と CPU 基準との一致の試験（上流は約 1/255 以内）、GPU のメモリの予算・常駐の管理がない（合成はいつも CPU）",
-        "note": "GPU で計算するならシェーダーの基盤から作るので XL。CPU だけで足りるかの判断が要る。上流の一致試験は crates/gpu/tests/parity.rs。フィルターは CPU（上流もフィルターに GPU を使わない。PC4 節 D の render/fx）"
+        "note": "GPU で計算するならシェーダーの基盤から作るので XL。CPU だけで足りるかの判断が要る。上流の一致試験は crates/gpu/tests/parity.rs"
       }
     },
     {
