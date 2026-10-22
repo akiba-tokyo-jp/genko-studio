@@ -250,6 +250,13 @@ private slots:
         app::inject::mouse_stroke(w->canvas(), {QPointF(60, 240), QPointF(62, 250), QPointF(64, 260)});
         QVERIFY(*book.layer(0, "u")->mask->png != before);  // (the mask changed, not the lines)
         QCOMPARE(book.layer(0, "u")->strokes->items.size(), strokes);
+        // (PC4 E1, review P2-7: the 鉛筆ツール edits the mask as the brush tool does — no line, no brush in the book)
+        const std::string after_pen = *book.layer(0, "u")->mask->png;
+        w->choose_tool(QStringLiteral("pencil"));
+        app::inject::mouse_stroke(w->canvas(), {QPointF(90, 240), QPointF(92, 250), QPointF(94, 260)});
+        QVERIFY(*book.layer(0, "u")->mask->png != after_pen);
+        QCOMPARE(book.layer(0, "u")->strokes->items.size(), strokes);
+        QVERIFY(book.window->book().brush_custom.empty());
         panel->mask_edit_action()->setChecked(false);
         QVERIFY(!w->mask_edit);
         // a layer without a mask: one that shows everything first

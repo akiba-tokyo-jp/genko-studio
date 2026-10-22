@@ -6,6 +6,7 @@
 #include "app/layer_panel.hpp"
 
 #include <QCheckBox>
+#include <QComboBox>
 #include <QSignalBlocker>
 #include <QApplication>
 #include <QPointer>

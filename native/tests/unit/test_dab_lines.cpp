@@ -738,7 +738,8 @@ private slots:
         core::Stroke line = *ink(doc).strokes->items.back();
         line.background_rgb = std::vector<std::int64_t>{4, 5, 6};
         {
-            core::Layer& layer = doc.edit_page(0).layers[static_cast<std::size_t>(&ink(doc) - doc.page(0).layers.data())];
+            const auto at = static_cast<std::size_t>(&ink(doc) - doc.page(0).layers.data());
+            core::Layer& layer = doc.edit_page(0).layers[at];
             layer.strokes = core::make_strokes({std::make_shared<const core::Stroke>(line)});
         }
         QVERIFY(core::uses_brushes(doc));
