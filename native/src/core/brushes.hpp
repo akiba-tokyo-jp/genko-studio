@@ -7,6 +7,7 @@
 #include <string_view>
 #include <vector>
 
+#include "core/brush_dabs.hpp"
 #include "core/json.hpp"
 #include "core/model.hpp"
 
@@ -88,6 +89,8 @@ struct Brush {
     double mix = 0.0;
     double stretch = 0.0;
     std::optional<Paper> paper;  // BRUSH-01: none for every brush Python knows
+    // brushes@1 (PC4, core/brush_dabs.hpp): a dab brush's settings ("engine": "dabs"); none for every other brush
+    std::optional<DabSettings> dabs;
 
     friend bool operator==(const Brush&, const Brush&) = default;
 };

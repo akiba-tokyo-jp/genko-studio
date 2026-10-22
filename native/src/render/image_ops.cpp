@@ -453,82 +453,117 @@ void put_ink_pixel(core::InkPixels& out, std::size_t i, const float* v, unsigned
 
 }  // namespace
 
-Pixels layer_pixels(core::OpContext& c, std::size_t at, const std::string& id, const Box& wanted, Window* window) {
+std::vector<Pixels> layer_pixels(core::OpContext& c, std::size_t at, const std::string& id, const std::vector<Box>& wanted,
+                                 std::vector<Box>* boxes, Size* grid_of) {
     core::Document& doc = c.doc;
     core::Layer& layer = ready_layer(c, at, id);
     core::Page& page = doc.edit_page(at);
+    std::vector<Pixels> out;
+    out.reserve(wanted.size());
+    const auto note = [&](const Box& box, Size grid) {
+        if (boxes != nullptr) boxes->push_back(box);
+        if (grid_of != nullptr) *grid_of = grid;
+    };
+    if (boxes != nullptr) boxes->clear();
     if (layer.color_raster) {
         if (layer.stroke_count() > 0 || !layer.patches.empty()) throw OpError("the lines of the layer " + id + " are not in its precise pixels yet");
         const core::ColorRasterView view(*layer.color_raster);
         const Size grid{static_cast<int>(view.width()), static_cast<int>(view.height())};
-        const Box box = clamped(wanted, grid);
-        if (window != nullptr) *window = Window{box, grid};
-        Pixels p(Pixels::Kind::Precise, static_cast<std::uint32_t>(box.width()), static_cast<std::uint32_t>(box.height()), 3);
-        p.floating = view.metadata("")["precision"] == "f32";
-        for (int y = 0; y < box.height(); ++y) {
-            for (int x = 0; x < box.width(); ++x) {
-                const auto px = view.pixel(std::size_t(box.y0 + y) * view.width() + std::size_t(box.x0 + x));
-                float* v = p.at(std::size_t(y) * std::size_t(box.width()) + std::size_t(x));
-                for (unsigned k = 0; k < 4; ++k) v[k] = static_cast<float>(px[k]);
+        const bool floating = view.metadata("")["precision"] == "f32";
+        if (grid_of != nullptr) *grid_of = grid;
+        for (const Box& one : wanted) {
+            const Box box = clamped(one, grid);
+            note(box, grid);
+            Pixels p(Pixels::Kind::Precise, static_cast<std::uint32_t>(box.width()), static_cast<std::uint32_t>(box.height()), 3);
+            p.floating = floating;
+            for (int y = 0; y < box.height(); ++y) {
+                for (int x = 0; x < box.width(); ++x) {
+                    const auto px = view.pixel(std::size_t(box.y0 + y) * view.width() + std::size_t(box.x0 + x));
+                    float* v = p.at(std::size_t(y) * std::size_t(box.width()) + std::size_t(x));
+                    for (unsigned k = 0; k < 4; ++k) v[k] = static_cast<float>(px[k]);
+                }
             }
+            out.push_back(std::move(p));
         }
-        return p;
+        return out;
     }
     if (page.color && !layer.raster_png) {
         const core::InkPixels r = ink_edit::with_marks(page, layer, &doc);
         const Size grid{static_cast<int>(r.width), static_cast<int>(r.height)};
-        const Box box = clamped(wanted, grid);
-        if (window != nullptr) *window = Window{box, grid};
+        if (grid_of != nullptr) *grid_of = grid;
         const unsigned n = r.colours();
-        Pixels p(Pixels::Kind::Inks, static_cast<std::uint32_t>(box.width()), static_cast<std::uint32_t>(box.height()), n);
-        p.ink = *page.color;
         const double most = r.is_float() ? 1.0 : r.max();
-        for (int y = 0; y < box.height(); ++y) {
-            for (int x = 0; x < box.width(); ++x) {
-                const std::size_t i = std::size_t(box.y0 + y) * r.width + std::size_t(box.x0 + x);
-                float* v = p.at(std::size_t(y) * std::size_t(box.width()) + std::size_t(x));
-                if (r.is_float()) {
-                    for (unsigned k = 0; k <= n; ++k) v[k] = static_cast<float>(r.value(i, k));
-                    continue;
+        for (const Box& one : wanted) {
+            const Box box = clamped(one, grid);
+            note(box, grid);
+            Pixels p(Pixels::Kind::Inks, static_cast<std::uint32_t>(box.width()), static_cast<std::uint32_t>(box.height()), n);
+            p.ink = *page.color;
+            for (int y = 0; y < box.height(); ++y) {
+                for (int x = 0; x < box.width(); ++x) {
+                    const std::size_t i = std::size_t(box.y0 + y) * r.width + std::size_t(box.x0 + x);
+                    float* v = p.at(std::size_t(y) * std::size_t(box.width()) + std::size_t(x));
+                    if (r.is_float()) {
+                        for (unsigned k = 0; k <= n; ++k) v[k] = static_cast<float>(r.value(i, k));
+                        continue;
+                    }
+                    const std::uint16_t* s = r.samples.data() + i * (n + 1);
+                    for (unsigned k = 0; k < n; ++k) v[k] = static_cast<float>(to_canvas(r.space, k, ink::decode_sample(r.space, k, s[k], r.depth)));
+                    v[n] = static_cast<float>(s[n] / most);
                 }
-                const std::uint16_t* s = r.samples.data() + i * (n + 1);
-                for (unsigned k = 0; k < n; ++k) v[k] = static_cast<float>(to_canvas(r.space, k, ink::decode_sample(r.space, k, s[k], r.depth)));
-                v[n] = static_cast<float>(s[n] / most);
             }
+            out.push_back(std::move(p));
         }
-        return p;
+        return out;
     }
     if (layer.stroke_count() > 0 || !layer.patches.empty() || shape_parts::any(layer)) raster::bake_vectors(page, layer, core::profiled_rgb(page));
     const Image picture = raster::layer_pixels(page, layer);
-    const Box box = clamped(wanted, picture.size());
-    if (window != nullptr) *window = Window{box, picture.size()};
-    return from_image(picture.crop(box));
+    if (grid_of != nullptr) *grid_of = picture.size();
+    for (const Box& one : wanted) {
+        const Box box = clamped(one, picture.size());
+        note(box, picture.size());
+        out.push_back(from_image(picture.crop(box)));
+    }
+    return out;
 }
 
-void put_layer_pixels(core::Document& doc, std::size_t at, const std::string& id, const Pixels& p, const Box& box) {
-    if (static_cast<int>(p.width()) != box.width() || static_cast<int>(p.height()) != box.height()) {
-        throw core::Error("value", "the pixels are not the box's size");
+Pixels layer_pixels(core::OpContext& c, std::size_t at, const std::string& id, const Box& wanted, Window* window) {
+    std::vector<Box> boxes;
+    Size grid;
+    std::vector<Pixels> parts = layer_pixels(c, at, id, std::vector<Box>{wanted}, &boxes, &grid);
+    if (window != nullptr) *window = Window{boxes.front(), grid};
+    return std::move(parts.front());
+}
+
+void put_layer_pixels(core::Document& doc, std::size_t at, const std::string& id, const std::vector<std::pair<Box, const Pixels*>>& parts) {
+    if (parts.empty()) return;
+    for (const auto& [box, p] : parts) {
+        if (static_cast<int>(p->width()) != box.width() || static_cast<int>(p->height()) != box.height()) {
+            throw core::Error("value", "the pixels are not the box's size");
+        }
+        if (p->kind() != parts.front().second->kind()) throw core::Error("value", "the pixels are not of one kind");
     }
     core::Page& page = doc.edit_page(at);
     core::Layer& layer = page.layers[layer_at(page, id)];
-    switch (p.kind()) {
+    switch (parts.front().second->kind()) {
         case Pixels::Kind::Eight: {
             Image picture = raster::layer_pixels(page, layer).convert("RGBA");
-            picture.paste(to_image(p), Point{box.x0, box.y0});
+            for (const auto& [box, p] : parts) picture.paste(to_image(*p), Point{box.x0, box.y0});
             raster::save_raster(page, layer, picture);
             break;
         }
         case Pixels::Kind::Precise: {
             core::ColorRasterEdit edit(std::string(*layer.color_raster));
-            for (int y = 0; y < box.height(); ++y) {
-                for (int x = 0; x < box.width(); ++x) {
-                    const float* v = p.at(std::size_t(y) * std::size_t(box.width()) + std::size_t(x));
-                    std::array<double, 4> rgba{};
-                    for (unsigned k = 0; k < 4; ++k) {
-                        if (!std::isfinite(v[k])) throw core::Error("value", "the result exceeds the finite working range");
-                        rgba[k] = p.floating && k < 3 ? static_cast<double>(v[k]) : std::clamp(static_cast<double>(v[k]), 0.0, 1.0);
+            for (const auto& [box, p] : parts) {
+                for (int y = 0; y < box.height(); ++y) {
+                    for (int x = 0; x < box.width(); ++x) {
+                        const float* v = p->at(std::size_t(y) * std::size_t(box.width()) + std::size_t(x));
+                        std::array<double, 4> rgba{};
+                        for (unsigned k = 0; k < 4; ++k) {
+                            if (!std::isfinite(v[k])) throw core::Error("value", "the result exceeds the finite working range");
+                            rgba[k] = p->floating && k < 3 ? static_cast<double>(v[k]) : std::clamp(static_cast<double>(v[k]), 0.0, 1.0);
+                        }
+                        edit.set(std::size_t(box.y0 + y) * edit.width() + std::size_t(box.x0 + x), rgba);
                     }
-                    edit.set(std::size_t(box.y0 + y) * edit.width() + std::size_t(box.x0 + x), rgba);
                 }
             }
             layer.color_raster = std::make_shared<const std::string>(std::move(edit).take());
@@ -536,11 +571,13 @@ void put_layer_pixels(core::Document& doc, std::size_t at, const std::string& id
         }
         case Pixels::Kind::Inks: {
             core::InkPixels whole = ink_edit::with_marks(page, layer, &doc);
-            const unsigned n = p.colours();
-            for (int y = 0; y < box.height(); ++y) {
-                for (int x = 0; x < box.width(); ++x) {
-                    put_ink_pixel(whole, std::size_t(box.y0 + y) * whole.width + std::size_t(box.x0 + x),
-                                  p.at(std::size_t(y) * std::size_t(box.width()) + std::size_t(x)), n);
+            for (const auto& [box, p] : parts) {
+                const unsigned n = p->colours();
+                for (int y = 0; y < box.height(); ++y) {
+                    for (int x = 0; x < box.width(); ++x) {
+                        put_ink_pixel(whole, std::size_t(box.y0 + y) * whole.width + std::size_t(box.x0 + x),
+                                      p->at(std::size_t(y) * std::size_t(box.width()) + std::size_t(x)), n);
+                    }
                 }
             }
             layer.ink_raster = std::make_shared<const std::string>(core::encode_ink_raster(whole));
@@ -552,6 +589,10 @@ void put_layer_pixels(core::Document& doc, std::size_t at, const std::string& id
         }
     }
     layer.kind = core::LayerKind::Raster;
+}
+
+void put_layer_pixels(core::Document& doc, std::size_t at, const std::string& id, const Pixels& p, const Box& box) {
+    put_layer_pixels(doc, at, id, std::vector<std::pair<Box, const Pixels*>>{{box, &p}});
 }
 
 namespace {

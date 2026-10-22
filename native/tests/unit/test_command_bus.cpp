@@ -455,7 +455,9 @@ private slots:
             "set_path", "delete_path", "rename_path", "make_work_path", "text_to_path", "stroke_path", "set_vector_mask", "add_shape_part",
             "edit_shape_part", "combine_shape_parts", "move_shape_parts", "transform_layers", "content_aware_scale", "align_layers",
             "distribute_layers", "arrange_layers", "link_layers", "resize_pages", "set_canvas_size", "crop_page", "trim_page", "reveal_all",
-            "rotate_pages"};  // (PC3 節 C's ops, frames until their groups: SPEC.md COLOR-07)
+            "rotate_pages",  // (PC3 節 C's ops, frames until their groups: SPEC.md COLOR-07)
+            "dodge", "burn", "sponge", "blur_brush", "sharpen_brush", "smudge_brush", "mixer_brush", "background_eraser",
+            "color_replacement", "add_pattern", "rename_pattern", "delete_pattern"};  // (PC4 節 E's ops, frames until their groups: SPEC.md COLOR-08)
         expected.insert(drawing_names.begin(), drawing_names.end());
         const std::set<std::string> actual(all_names.begin(), all_names.end());
         QCOMPARE(actual, expected);

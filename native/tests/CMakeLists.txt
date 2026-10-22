@@ -130,6 +130,12 @@ genko_test(test_path_raster SOURCES unit/test_path_raster.cpp DEPS genko_test_su
 # PC3 C-b (pen-shapes@1): the live shapes, the path operations' coverage, a stroke's alignments and dashes, the gradient
 # forms, a part baked, cut, erased, bent and transformed; the shape presets' language and settings file.
 genko_test(test_shapes SOURCES unit/test_shapes.cpp DEPS genko_test_support genko_render_ops LABELS unit)
+# PC4 E-0 (SPEC.md COLOR-08, brushes@1 and patterns@1): the dab brush's settings and a line's inputs, the book's patterns,
+# written and read back (a book without them as before; what cannot be opens read-only; gc keeps their pictures); the
+# presets' library in the settings folder; a layer's sparse tiles and the sequential-dab stroke (render/tiled_pixels,
+# retouch_dabs' apply_dab_stroke) on 8-bit, 16-bit, 32-bit, CMYK, Lab and grey layers.
+genko_test(test_brushes_model SOURCES unit/test_brushes_model.cpp DEPS genko_test_support genko_render_ops LABELS unit)
+genko_test(test_patterns_model SOURCES unit/test_patterns_model.cpp DEPS genko_test_support genko_render_ops LABELS unit)
 genko_test(test_resample SOURCES unit/test_resample.cpp DEPS genko_test_support genko_render_ops LABELS unit)
 genko_test(test_page_geometry SOURCES unit/test_page_geometry.cpp DEPS genko_test_support LABELS unit)
 # PC3 C-e (SPEC.md COLOR-07「判型」): the page size ops on a book in memory — each thing on a page where the map takes it,

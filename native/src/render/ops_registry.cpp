@@ -28,6 +28,7 @@
 #include "render/area_kinds.hpp"
 #include "render/layer_masks.hpp"
 #include "render/ops_pc3.hpp"
+#include "render/ops_paint_tools.hpp"
 
 namespace genko::render {
 
@@ -384,6 +385,9 @@ void register_render_ops(core::OpRegistry& registry) {
     register_transform_ops(registry);
     register_pagesize_ops(registry);
     area_kinds::use_keys();
+    // PC4 節 E (描く道具・パターン): the new ops, frames until their groups write them (render/ops_paint_tools.hpp)
+    register_paint_tool_ops(registry);
+    register_pattern_ops(registry);
 }
 
 const core::OpRegistry& ops_registry() {

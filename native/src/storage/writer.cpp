@@ -19,6 +19,8 @@
 #include "core/smart.hpp"
 #include "core/strokes.hpp"
 #include "core/version.hpp"
+#include "core/brush_dabs.hpp"
+#include "core/patterns.hpp"
 #include "storage/fsutil.hpp"
 #include "storage/reader.hpp"
 
@@ -481,6 +483,24 @@ Json project_payload_v4(const core::Document& doc, AssetStore& store) {
         std::erase(features, std::string(feature));
         if (used) features.emplace_back(feature);
     }
+    // PC4 E-0: brushes@1 (the dab brushes and their pictures — only those —, the lines' inputs, the brush state's kind and
+    // background) and patterns@1 (the book's patterns and their pictures), each named while the book uses it
+    core::validate_brushes(doc);
+    for (const std::string& ref : core::dab_asset_refs(doc.brush_custom)) {
+        const auto picture = doc.brush_tips.find(ref);
+        if (picture == doc.brush_tips.end() || !picture->second) {
+            throw core::Error("value", "the brush picture " + ref + " of the book's dab brushes is not held: the book is not written");
+        }
+        store.put_known(ref, *picture->second, ".png");
+    }
+    core::validate_patterns(doc);
+    for (const core::Pattern& pattern : doc.patterns) store.put_known(pattern.asset, *doc.pattern_files.at(pattern.asset), core::pattern_suffix(pattern));
+    const std::pair<std::string_view, bool> pc4[] = {{core::kBrushesFeature, core::uses_brushes(doc)},
+                                                     {core::kPatternsFeature, core::uses_patterns(doc)}};
+    for (const auto& [feature, used] : pc4) {
+        std::erase(features, std::string(feature));
+        if (used) features.emplace_back(feature);
+    }
     std::sort(features.begin(), features.end());
     features.erase(std::unique(features.begin(), features.end()), features.end());
 
@@ -507,7 +527,14 @@ Json project_payload_v4(const core::Document& doc, AssetStore& store) {
     brush["taper"] = doc.brush_taper;
     brush["curve"] = doc.brush_curve;
     if (core::py_truthy(doc.brush_custom)) brush["custom"] = doc.brush_custom;
+    if (doc.brush_kind) brush["kind"] = *doc.brush_kind;  // (brushes@1)
+    if (doc.brush_background_rgb) brush["background_rgb"] = ints_json(*doc.brush_background_rgb);
     out["brush"] = std::move(brush);
+    if (!doc.patterns.empty()) {  // (patterns@1)
+        Json patterns = Json::array();
+        for (const core::Pattern& pattern : doc.patterns) patterns.push_back(core::pattern_to_json(pattern));
+        out["patterns"] = std::move(patterns);
+    }
     out["spec"] = spec_to_json(doc.spec);
     if (Json color = color_json(store, doc.color, doc.rgb); !color.is_null() || doc.text_gamma) {
         // (the book's text_gamma, last, under its colour model: a default RGB one written for it)

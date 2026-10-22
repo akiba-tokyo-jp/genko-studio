@@ -26,6 +26,8 @@
 #include "core/strokes.hpp"
 #include "core/masks.hpp"
 #include "core/vector.hpp"
+#include "core/brush_dabs.hpp"
+#include "core/patterns.hpp"
 #include "storage/asset_store.hpp"
 #include "storage/fsutil.hpp"
 
@@ -39,13 +41,15 @@ using core::Point;
 
 namespace {
 
-constexpr std::array<std::string_view, 23> kTopKeys{
+constexpr std::array<std::string_view, 24> kTopKeys{
     "version", "revision", "title", "episode", "binding", "start_side", "strict_gates", "autosave",
     "font_path", "page_locks", "brush", "nombre", "spec", "bible", "tickets", "studio", "pages", "story",
     // v4
     "min_reader", "writer", "book_id", "features",
     // smart-objects@1
-    "smart_contents"};
+    "smart_contents",
+    // patterns@1 (PC4)
+    "patterns"};
 
 constexpr std::array<std::string_view, 21> kPageKeys{
     "id", "art_ok", "plan", "index", "note", "name_ok", "stage", "spread_with", "numero", "onion_from", "lt_threshold",
@@ -55,7 +59,9 @@ constexpr std::array<std::string_view, 21> kPageKeys{
 // saving, in Python as here.
 constexpr std::array<std::string_view, 10> kSpecKeys{"width_mm", "height_mm", "dpi", "bleed_mm", "inner_margin_mm",
                                                      "trim_w_mm", "trim_h_mm", "margins_mm", "expression", "preset"};
-constexpr std::array<std::string_view, 6> kBrushKeys{"rgb", "width_mm", "stabilize", "taper", "curve", "custom"};
+constexpr std::array<std::string_view, 8> kBrushKeys{"rgb", "width_mm", "stabilize", "taper", "curve", "custom",
+                                                     // brushes@1 (PC4)
+                                                     "kind", "background_rgb"};
 constexpr std::array<std::string_view, 3> kBibleKeys{"plot", "characters", "constraints"};
 constexpr std::array<std::string_view, 4> kRectKeys{"x", "y", "width", "height"};
 constexpr std::array<std::string_view, 14> kFrameKeys{"id", "rect", "split_axis", "clip", "bleed", "border_mm",
@@ -80,9 +86,13 @@ constexpr std::array<std::string_view, 5> kPlacedOnlyKeys{"frame_id", "placement
 constexpr std::array<std::string_view, 5> kMaskKeys{"enabled", "asset",
                                                     // masks@1 (PC3)
                                                     "linked", "density", "feather_mm"};
-constexpr std::array<std::string_view, 10> kPackedStrokeKeys{"id", "kind", "width_mm", "xy", "p", "rgb", "opacity", "r", "po", "color_rgb"};
-constexpr std::array<std::string_view, 11> kDictStrokeKeys{"id", "points", "pressure", "width_mm", "kind", "rgb",
-                                                           "opacity", "rotation", "po", "pressure_opacity", "color_rgb"};
+constexpr std::array<std::string_view, 14> kPackedStrokeKeys{"id", "kind", "width_mm", "xy", "p", "rgb", "opacity", "r", "po", "color_rgb",
+                                                             // brushes@1 (PC4)
+                                                             "tilt", "time_ms", "wheel", "flow"};
+constexpr std::array<std::string_view, 15> kDictStrokeKeys{"id", "points", "pressure", "width_mm", "kind", "rgb",
+                                                           "opacity", "rotation", "po", "pressure_opacity", "color_rgb",
+                                                           // brushes@1 (PC4)
+                                                           "tilt", "time_ms", "wheel", "flow"};
 
 template <std::size_t N>
 bool in(const std::array<std::string_view, N>& keys, std::string_view key) {
@@ -365,6 +375,10 @@ private:
     core::Layer read_layer(const Json& data, const std::string& at);
     core::Stroke read_stroke(const Json& raw, const std::string& at);
     void read_papers(core::Document& doc);
+    // brushes@1, patterns@1 (PC4): the dab brushes' pictures, the brush state's kind and background; the book's patterns
+    void read_brush_tips(core::Document& doc);
+    void read_brush_state(const Json& brush, core::Document& doc);
+    void read_patterns(const Json& payload, core::Document& doc);
     void read_lut(const Json& adjust, const std::string& at);
     core::StrokeListPtr read_strokes_blob(const Json& ref_value, const std::string& at);
     core::Bytes read_png(const Json& ref_value, const std::string& at, core::BlobMemo* memo);
@@ -547,6 +561,71 @@ void Reader::read_papers(core::Document& doc) {
             }
         }
         doc.papers.emplace(ref, std::move(png));
+    }
+}
+
+void Reader::read_brush_tips(core::Document& doc) {
+    // brushes@1 (PC4): the pictures the dab brushes name (a sampled tip, the dual brush's, a texture's tile). One that is
+    // missing or is not the bytes its name says makes the book read-only (read_blob reports it; validate_brushes then
+    // finds it not held): a dab brush is never drawn without its picture, nor written without it.
+    for (const std::string& ref : core::dab_asset_refs(doc.brush_custom)) {
+        if (doc.brush_tips.contains(ref)) continue;
+        core::Bytes png = read_blob(Json(ref), "/brush/custom", nullptr, ".png", "brush picture");
+        if (!png || AssetStore::ref(*png) != ref) continue;  // (missing, or another picture in its place: reported)
+        doc.brush_tips.emplace(ref, std::move(png));
+    }
+}
+
+void Reader::read_brush_state(const Json& brush, core::Document& doc) {
+    // brushes@1 (PC4): the brush state's kind (a brush's key) and background colour; one that is not is reported (the
+    // book opens read-only) and not taken
+    if (const Json* kind = find(brush, "kind"); kind != nullptr && !kind->is_null()) {
+        if (kind->is_string()) {
+            doc.brush_kind = kind->get<std::string>();
+        } else {
+            issue("broken_value", "/brush/kind", {}, "the brush state's kind must be a brush's key");
+        }
+    }
+    if (const Json* rgb = find(brush, "background_rgb"); rgb != nullptr && !rgb->is_null()) {
+        std::vector<std::int64_t> values;
+        if (rgb->is_array()) {
+            for (const Json& v : *rgb) {
+                if (!v.is_number_integer()) break;
+                values.push_back(v.get<std::int64_t>());
+            }
+        }
+        if (rgb->is_array() && values.size() == rgb->size()) {
+            doc.brush_background_rgb = std::move(values);
+        } else {
+            issue("broken_value", "/brush/background_rgb", {}, "the brush state's background_rgb must be three whole numbers 0..255");
+        }
+    }
+}
+
+void Reader::read_patterns(const Json& payload, core::Document& doc) {
+    // patterns@1 (PC4): the patterns the book keeps and their pictures. One that cannot be read is reported (the book
+    // opens read-only) and not taken: written again, the book would lose it; a picture missing, or not the bytes its
+    // name says, likewise (read_blob reports it).
+    const Json* raw = find(payload, "patterns");
+    if (raw == nullptr || raw->is_null()) return;
+    if (!raw->is_array()) {
+        issue("broken_value", "/patterns", {}, "the patterns must be a list, not " + core::py_repr(*raw));
+        return;
+    }
+    for (std::size_t i = 0; i < raw->size(); ++i) {
+        const std::string at = at_index("/patterns", i);
+        core::Pattern pattern;
+        try {
+            pattern = core::pattern_from_json((*raw)[i]);
+        } catch (const core::Error& error) {
+            issue("broken_value", at, {}, error.what());
+            continue;
+        }
+        if (!doc.pattern_files.contains(pattern.asset)) {
+            core::Bytes bytes = read_blob(Json(pattern.asset), at_key(at, "asset"), nullptr, core::pattern_suffix(pattern), "pattern picture");
+            if (bytes && AssetStore::ref(*bytes) == pattern.asset) doc.pattern_files.emplace(pattern.asset, std::move(bytes));
+        }
+        doc.patterns.push_back(std::move(pattern));
     }
 }
 
@@ -1427,7 +1506,10 @@ core::Document Reader::migrate(const Json& payload) {
         for (const auto& [name, value] : custom.items()) doc.brush_custom[name] = core::py_dict(value);
         check_keys(*brush, kBrushKeys, "/brush", "brush");
         read_papers(doc);
+        read_brush_state(*brush, doc);
+        read_brush_tips(doc);
     }
+    read_patterns(payload, doc);
     doc.nombre = dict_or_empty(payload, "nombre");
     if (const Json* bible = find(payload, "bible"); bible && core::py_truthy(*bible)) {
         if (!bible->is_object()) format_error("/bible", "the bible must be an object, not " + core::py_repr(*bible));
@@ -1522,6 +1604,11 @@ core::Document Reader::migrate(const Json& payload) {
     catch (const core::Error& error) { issue("broken_value", "/pages", {}, error.what()); }
     try { core::vector::validate_vector(doc); }
     catch (const core::Error& error) { issue("broken_value", "/pages", {}, error.what()); }
+    // (PC4: brushes@1's dab brushes, their pictures and the brush state; patterns@1's patterns)
+    try { core::validate_brushes(doc); }
+    catch (const core::Error& error) { issue("broken_value", "/brush", {}, error.what()); }
+    try { core::validate_patterns(doc); }
+    catch (const core::Error& error) { issue("broken_value", "/patterns", {}, error.what()); }
     return doc;
 }
 
@@ -1689,7 +1776,9 @@ bool is_known_feature(std::string_view feature) {
            feature == core::kAdjustmentsFeature || feature == core::kSmartObjectsFeature ||
            // PC3 (core/masks.hpp, core/vector.hpp)
            feature == core::kMasksFeature || feature == core::vector::kVectorFeature || feature == core::vector::kPenShapesFeature ||
-           feature == core::vector::kTransformFeature || feature == core::vector::kPageSpecFeature;
+           feature == core::vector::kTransformFeature || feature == core::vector::kPageSpecFeature ||
+           // PC4 E-0 (core/brush_dabs.hpp, core/patterns.hpp)
+           feature == core::kBrushesFeature || feature == core::kPatternsFeature;
 }
 
 int project_version(const Json& payload) {

@@ -960,6 +960,9 @@ std::optional<Json> apply_in_contents(const CommandBus& bus, Document& work, con
     if (!same_book) throw ApplyError(prefix + "this op cannot be used inside smart object contents");
     work.luts = after.luts;
     work.papers = after.papers;
+    work.brush_tips = after.brush_tips;  // (PC4: brushes@1's pictures, patterns@1's patterns the op kept)
+    work.patterns = after.patterns;
+    work.pattern_files = after.pattern_files;
     work.smart_files = after.smart_files;
     work.smart_contents = after.smart_contents;
     work.features = after.features;

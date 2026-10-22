@@ -382,6 +382,10 @@ Json brush_to_dict(const Brush& b) {
         if (mine != theirs) out[key] = mine;
     }
     if (b.paper) out["paper"] = paper_to_json(*b.paper);  // (BRUSH-01: only a brush with one)
+    if (b.dabs) {  // (brushes@1: only a dab brush)
+        out["engine"] = std::string(kDabEngine);
+        out["dabs"] = dabs_to_json(*b.dabs);
+    }
     return out;
 }
 
@@ -401,6 +405,9 @@ Brush brush_from_dict(std::string_view key, const Json& data, const std::optiona
     const Json start = brush_to_dict(start_brush);
     for (const auto& [k, v] : start.items()) merged[k] = v;
     if (!merged.contains("paper")) merged["paper"] = nullptr;  // (BRUSH-01: the base's paper, or none)
+    for (const char* k : {"engine", "dabs"}) {
+        if (!merged.contains(k)) merged[k] = nullptr;  // (brushes@1: the base's dabs, or none)
+    }
     if (data.is_object()) {
         for (const auto& [k, v] : data.items()) {
             if (merged.contains(k)) merged[k] = v;
@@ -469,6 +476,15 @@ Brush brush_from_dict(std::string_view key, const Json& data, const std::optiona
     out.mix = to_float(merged["mix"]);
     out.stretch = to_float(merged["stretch"]);
     if (is_paper(merged["paper"])) out.paper = paper_from_json(merged["paper"]);  // (another writer's "paper": none)
+    // brushes@1: a dab brush's settings (checked after the rest, as the paper's)
+    if (!merged["engine"].is_null()) {
+        if (!is_dab_brush(merged)) throw PyValueError("brush engine must be dabs");
+        try {
+            out.dabs = dabs_from_json(merged["dabs"].is_null() ? Json::object() : merged["dabs"]);
+        } catch (const Error& error) {
+            throw PyValueError(std::string("brush ") + error.what());
+        }
+    }
     return out;
 }
 

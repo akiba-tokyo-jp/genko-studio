@@ -553,6 +553,9 @@ void register_define_brush(OpRegistry& registry, PaperTakeIn take_in) {
         if(!key.starts_with("my_") || key.size()>40)throw OpError("a brush of one's own has a key starting with my_");
         if(truthy_at(c.op,"delete")){c.doc.brush_custom.erase(key);return;}
         Json data=c.op;for(const char* k:{"op","key","delete"})data.erase(k);
+        // (brushes@1: a dab brush's "engine" and "dabs" are taken by PC4 E1, with its pictures; until then not read, as
+        // before — a brush made on a dab brush of the book keeps its dabs)
+        for (const char* k : {"engine", "dabs"}) data.erase(k);
         // BRUSH-01 (this build): the paper's picture taken in and given by its asset, the book keeping it
         std::optional<std::pair<std::string, Bytes>> picture;
         if (const auto given = data.find("paper"); given != data.end() && !given->is_null()) {

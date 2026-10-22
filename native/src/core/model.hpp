@@ -106,6 +106,13 @@ struct Stroke {
     double opacity = 1.0;
     std::vector<double> rotation;  // the pen's barrel turn at each point (degrees; アートペン)
     double pressure_opacity = 0.0;  // 0..1: how much a light touch also lightens the line
+    // brushes@1 (PC4, core/brush_dabs.hpp): the pen's inputs at each point a dab brush reads — its tilt (x and y,
+    // degrees, ±90: two values a point), the time (ms from the first point) and the airbrush wheel (0..1) — and the
+    // flow the window drew it with (none: the brush's). Empty: none (every line before PC4).
+    std::vector<double> tilt;
+    std::vector<double> time_ms;
+    std::vector<double> wheel;
+    std::optional<double> flow;
 };
 
 using StrokePtr = std::shared_ptr<const Stroke>;
@@ -409,6 +416,22 @@ struct SmartContents {
     std::optional<Json> psd;   // what a PSD's placed layer kept (PC3 A3)
 };
 
+// patterns@1 (PC4, core/patterns.hpp, schema-v4.md「パターン」): a pattern the book keeps — the copy of one its fills and
+// overlays use (the library of patterns is the machine's: render/preset_store). Its picture is an asset of the book (an
+// 8-bit RGB or grey one a PNG, RGBA or LA; a 16- or 32-bit RGB one GKCR; a grey, CMYK or Lab one of more bits, and CMYK
+// and Lab of any, GKIR version 2), held in Document::pattern_files by its ref. At 100 % one pixel of it is 1/dpi inch.
+struct Pattern {
+    std::string id;           // "pat-1"…: 1..64 of A-Z a-z 0-9 - _
+    std::string name;         // 1..255 characters
+    std::string asset;        // "sha256:…"
+    std::string mode = "rgb";  // rgb | gray | cmyk | lab
+    int depth = 8;            // 8 | 16 | 32
+    std::int64_t width = 0;   // 1..8192, and at most 64 M pixels
+    std::int64_t height = 0;
+    double dpi = 300.0;       // 50..2400
+    friend bool operator==(const Pattern&, const Pattern&) = default;
+};
+
 // Python's Episode (without its undo stack, pending journal and asset folder, which belong to the session).
 struct Document {
     std::string title;
@@ -431,6 +454,17 @@ struct Document {
     // BRUSH-01 (paper-texture@1): the grey pictures of the papers its brushes keep (brush_custom[key]["paper"]["asset"]),
     // by their asset ref. Written as assets/<ab>/<64 hex>.png; only those a brush keeps are written and read.
     std::map<std::string, Bytes> papers;
+    // brushes@1 (PC4, core/brush_dabs.hpp): the brush state's kind (the brush add_stroke draws with when it names none;
+    // none: the G pen) and background colour (背景色: what the ops' "background" means), none when not set; and the grey
+    // pictures its dab brushes' tips, dual tips and texture tiles are, by their asset ref (assets/<ab>/<64 hex>.png;
+    // only those a brush names are written and read).
+    std::optional<std::string> brush_kind;
+    std::optional<std::vector<std::int64_t>> brush_background_rgb;
+    std::map<std::string, Bytes> brush_tips;
+    // patterns@1 (PC4, core/patterns.hpp): the patterns it keeps (at most 512, in their order) and their pictures, by
+    // their asset ref (written with the suffix their kind takes: core::pattern_suffix).
+    std::vector<Pattern> patterns;
+    std::map<std::string, Bytes> pattern_files;
     // PC2a (adjustments@1): the 3D lookup tables its color_lookup corrections use (their "lut"), by their asset ref
     // (core/lut3d: GKLU bytes). Written as assets/<ab>/<64 hex>.gklut; only those a correction uses are written and read.
     std::map<std::string, Bytes> luts;
