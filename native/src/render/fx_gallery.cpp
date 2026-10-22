@@ -208,20 +208,7 @@ std::array<float, 3> normalize3(const std::array<float, 3>& v) {
     return {v[0] / l, v[1] / l, v[2] / l};
 }
 
-// Odd box widths whose threefold convolution is a Gaussian of `sigma` (Kovesi; fxutil.rs gauss_box_radii), as radii.
-std::array<int, 3> gauss_box_radii(float sigma) {
-    const float n = 3.0f;
-    const float w_ideal = std::sqrt(12.0f * sigma * sigma / n + 1.0f);
-    int wl = static_cast<int>(std::floor(w_ideal));
-    if (wl % 2 == 0) wl -= 1;
-    wl = std::max(wl, 1);
-    const int wu = wl + 2;
-    const float m_ideal = (12.0f * sigma * sigma - n * static_cast<float>(wl * wl) - 4.0f * n * static_cast<float>(wl) - 3.0f * n) / (-4.0f * static_cast<float>(wl) - 4.0f);
-    const int m = static_cast<int>(std::clamp(std::round(m_ideal), 0.0f, n));
-    std::array<int, 3> out{};
-    for (int i = 0; i < 3; ++i) out[static_cast<std::size_t>(i)] = i < m ? (wl - 1) / 2 : (wu - 1) / 2;
-    return out;
-}
+// (the box passes in whole numbers: render/fx.hpp's gauss_box_radii, whole_box_line and whole_box_passes, D2's too)
 
 // How far a Gaussian of `sigma` (the grid's pixels) reads (artistic_fx.rs gs).
 int gauss_reach(float sigma) {
@@ -241,7 +228,6 @@ std::int64_t to_whole(float v) {
     return std::llround(static_cast<double>(std::clamp(v, -1024.0f, 1024.0f)) * kUnit);
 }
 float from_whole(std::int64_t q) { return static_cast<float>(static_cast<double>(q) / kUnit); }
-std::int64_t div_round(std::int64_t a, std::int64_t w) { return a >= 0 ? (a + w / 2) / w : -((-a + w / 2) / w); }
 
 Whole whole_of(const float* v, std::size_t count) {
     Whole out(count);
@@ -252,33 +238,10 @@ void back(const Whole& q, float* v) {
     for (std::size_t i = 0; i < q.size(); ++i) v[i] = from_whole(q[i]);
 }
 
-// A running mean of radius r along a line of `len` samples `stride` words apart (`n` channels each), its ends repeated
-// (fxutil.rs box_rows_n), in place. `line`: scratch.
-void box_line(std::int64_t* first, std::size_t len, std::size_t stride, std::size_t n, int r, Whole& line) {
-    if (r <= 0 || len == 0) return;
-    line.resize(len * n);
-    for (std::size_t i = 0; i < len; ++i) std::copy(first + i * stride, first + i * stride + n, line.begin() + static_cast<std::ptrdiff_t>(i * n));
-    const auto at = [&line, len, n](std::ptrdiff_t k, std::size_t c) { return line[static_cast<std::size_t>(std::clamp<std::ptrdiff_t>(k, 0, std::ptrdiff_t(len) - 1)) * n + c]; };
-    const std::int64_t width = 2 * std::int64_t(r) + 1;
-    for (std::size_t c = 0; c < n; ++c) {
-        std::int64_t acc = 0;
-        for (std::ptrdiff_t k = -r; k <= r; ++k) acc += at(k, c);
-        for (std::size_t x = 0; x < len; ++x) {
-            first[x * stride + c] = div_round(acc, width);
-            acc += at(std::ptrdiff_t(x) + r + 1, c) - at(std::ptrdiff_t(x) - r, c);
-        }
-    }
-}
-
-// Box passes of the radii along the rows, then along the columns, of a w × h × n buffer.
+// Box passes of the radii along the rows, then along the columns, of a w × h × n buffer (whole numbers of 2^-30, a sample
+// kept to ±1024).
 void box_passes(std::vector<float>& buf, std::size_t w, std::size_t h, std::size_t n, const std::vector<int>& radii) {
-    if (w == 0 || h == 0 || std::all_of(radii.begin(), radii.end(), [](int r) { return r <= 0; })) return;
-    Whole q = whole_of(buf.data(), buf.size()), line;
-    for (const int r : radii)
-        for (std::size_t y = 0; y < h; ++y) box_line(q.data() + y * w * n, w, n, n, r, line);
-    for (const int r : radii)
-        for (std::size_t x = 0; x < w; ++x) box_line(q.data() + x * n, h, w * n, n, r, line);
-    back(q, buf.data());
+    whole_box_passes(buf, w, h, n, radii, 1.0 / kUnit, 1024.0);
 }
 
 void box_blur_n(std::vector<float>& buf, std::size_t w, std::size_t h, std::size_t n, int r) { box_passes(buf, w, h, n, {r}); }
@@ -305,7 +268,7 @@ void line_blur(std::vector<float>& buf, std::size_t n, std::size_t w, std::size_
             for (int x = sx, y = sy; inside(x, y); x += d.first, y += d.second) idx.push_back((std::size_t(y) * w + std::size_t(x)) * n);
             gathered.resize(idx.size() * n);
             for (std::size_t k = 0; k < idx.size(); ++k) std::copy(q.begin() + std::ptrdiff_t(idx[k]), q.begin() + std::ptrdiff_t(idx[k] + n), gathered.begin() + std::ptrdiff_t(k * n));
-            box_line(gathered.data(), idx.size(), n, n, r, line);
+            whole_box_line(gathered.data(), idx.size(), n, n, r, line);
             for (std::size_t k = 0; k < idx.size(); ++k) std::copy(gathered.begin() + std::ptrdiff_t(k * n), gathered.begin() + std::ptrdiff_t((k + 1) * n), q.begin() + std::ptrdiff_t(idx[k]));
         }
     back(q, buf.data());

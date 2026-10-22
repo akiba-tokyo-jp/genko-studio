@@ -558,6 +558,10 @@ const std::vector<Rule>& rules() {
         r.push_back(rule(R"(the displacement map cannot be read \(.*\))", "置き換えマップが読めません（PNG か PSD のファイルを確かめます）"));
         r.push_back(rule(R"(the displacement map's layer (\S+) is not on the page)", "置き換えマップのレイヤー（\\1）がそのページにありません"));
         r.push_back(rule(R"(the displacement map's page (\S+) is not in the book)", "置き換えマップのページ（\\1）がこの原稿にありません"));
+        r.push_back(rule(R"(the displacement map's page (\S+) is still being read: try again in a moment)",
+                         "置き換えマップのページ（\\1）をまだ読み込んでいます。少し待ってからもう一度試します"));
+        r.push_back(rule(R"(the displacement map's layer (\S+) has no picture of its own .*)",
+                         "置き換えマップのレイヤー（\\1）はフォルダーか色調補正レイヤーで、絵がありません"));
         r.push_back(rule(R"(the displacement map \S+ is not in the book)", "置き換えマップのファイルがこの原稿にありません"));
         r.push_back(rule(R"(adjust distort_shear\.points must be .*)", "シアーの曲線は、2〜64 個の点 [上からの位置 0〜1, ずらす量 −1〜1] で指定します"));
         r.push_back(rule(R"(the smart object \S+'s filter \S+_data: .*)", "スマートフィルターのファイルは原稿の素材として持ちます（ファイルのデータのままでは持てません）"));

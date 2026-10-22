@@ -1,6 +1,7 @@
 #pragma once
 
 #include <algorithm>
+#include <array>
 #include <atomic>
 #include <cstddef>
 #include <cstdint>
@@ -163,6 +164,9 @@ struct Kernel {
     // (D1) The bytes of its own work a pixel of a tile's window takes past what the engine counts (ノイズを軽減's planes):
     // held in the imaging budget with the window.
     std::size_t work_bytes = 0;
+    // (D2) The work done once whatever the layer's pixels (置き換え's map read or drawn — a page drawn, a file decoded), in
+    // the units of work(): added to its weight. None: nothing.
+    std::function<double(const core::Json& params)> setup;
 };
 using Kernels = std::vector<Kernel>;
 inline constexpr double kDefaultCost = 50;
@@ -211,6 +215,23 @@ struct Tiling {
     int tile = 0;
     int threads = 0;
 };
+
+// --- box passes in whole numbers (D2's and D3's blurs: D2's review P3-9) ------------------------------------------------
+
+// Odd box widths whose threefold convolution is a Gaussian of `sigma` (Kovesi; PhotoCraft's fxutil.rs gauss_box_radii), as
+// radii.
+std::array<int, 3> gauss_box_radii(float sigma);
+// A running mean of radius r along a line of `len` elements `stride` words apart (`n` channels each), its ends repeated
+// (fxutil.rs box_rows_n), in place, each mean rounded half away from zero to a whole number. `line`: scratch.
+void whole_box_line(std::int64_t* first, std::size_t len, std::size_t stride, std::size_t n, int r, std::vector<std::int64_t>& line);
+// Box passes of `radii` along the rows, then along the columns, of a w × h × n buffer of floats, in whole numbers of
+// `unit` (each sample clamped to ±most first, one not finite 0): exact sums, so the same pixels give the same bytes
+// whatever buffer — tile, window — holds them. Nothing when every radius is 0.
+void whole_box_passes(std::vector<float>& buf, std::size_t w, std::size_t h, std::size_t n, const std::vector<int>& radii, double unit, double most);
+
+// The pixels of a band of rows a whole kind's base box is read in (its window filled a band at a time, the band's
+// reading held in the imaging budget with it: D2's review P2-1).
+inline constexpr std::size_t kReadBandPixels = 16384;
 
 // The layer's pixels as a run reads and writes them (one of the three ways). Reads are of the layer as it was; writes go
 // to its new bytes.

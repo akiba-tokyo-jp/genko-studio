@@ -95,61 +95,14 @@ float light(const Ctx& ctx, const float* px) {
 
 bool lightness_channel(const Ctx& ctx, std::size_t c) { return !(ctx.space == Space::Lab && c > 0); }
 
-namespace {
-
-// Odd box widths whose threefold convolution approximates a Gaussian of `sigma` (fxutil.rs gauss_box_radii, Kovesi 2010),
-// as radii.
-std::array<int, 3> gauss_box_radii(float sigma) {
-    const float n = 3.0f;
-    const float ideal = std::sqrt(12.0f * sigma * sigma / n + 1.0f);
-    int wl = static_cast<int>(std::floor(ideal));
-    if (wl % 2 == 0) --wl;
-    wl = std::max(wl, 1);
-    const int wu = wl + 2;
-    const float mm = (12.0f * sigma * sigma - n * static_cast<float>(wl * wl) - 4.0f * n * static_cast<float>(wl) - 3.0f * n) / (-4.0f * static_cast<float>(wl) - 4.0f);
-    const int m = static_cast<int>(std::clamp(std::round(mm), 0.0f, n));
-    std::array<int, 3> out{};
-    for (int i = 0; i < 3; ++i) out[static_cast<std::size_t>(i)] = i < m ? (wl - 1) / 2 : (wu - 1) / 2;
-    return out;
-}
-
-// One box pass of radius r along a line of `count` units `stride` apart (edges clamped), the mean of each rounded to a
-// whole unit: exact, whatever line holds it.
-void box_line(std::int64_t* line, std::size_t count, std::size_t stride, int r, std::vector<std::int64_t>& scratch) {
-    if (r <= 0 || count == 0) return;
-    scratch.resize(count);
-    for (std::size_t i = 0; i < count; ++i) scratch[i] = line[i * stride];
-    const auto at = [&](std::ptrdiff_t i) { return scratch[static_cast<std::size_t>(std::clamp<std::ptrdiff_t>(i, 0, static_cast<std::ptrdiff_t>(count) - 1))]; };
-    const std::int64_t width = 2 * r + 1;
-    std::int64_t sum = 0;
-    for (int k = -r; k <= r; ++k) sum += at(k);
-    for (std::size_t i = 0; i < count; ++i) {
-        // (the mean rounded half away from zero, in whole units)
-        const std::int64_t q = sum >= 0 ? (2 * sum + width) / (2 * width) : -((-2 * sum + width) / (2 * width));
-        line[i * stride] = q;
-        sum += at(static_cast<std::ptrdiff_t>(i) + r + 1) - at(static_cast<std::ptrdiff_t>(i) - r);
-    }
-}
-
-}  // namespace
-
 void gauss_blur_exact(std::vector<float>& buf, std::size_t w, std::size_t h, std::size_t n, float sigma, double largest) {
     if (sigma < 0.3f || w == 0 || h == 0) return;
     const std::array<int, 3> radii = gauss_box_radii(sigma);
     // (whole units of `largest` × 2^-bits: a line's sum of 2r + 1 of them within 2^62)
     const int widest = 2 * std::max({radii[0], radii[1], radii[2]}) + 1;
     const int bits = std::min(48, 61 - static_cast<int>(std::bit_width(static_cast<unsigned>(widest))));
-    const double unit = std::ldexp(std::max(1e-30, largest), -bits);
-    std::vector<std::int64_t> q(buf.size());
-    for (std::size_t i = 0; i < buf.size(); ++i) q[i] = std::llround(std::clamp(static_cast<double>(buf[i]) / unit, -std::ldexp(1.0, bits), std::ldexp(1.0, bits)));
-    std::vector<std::int64_t> scratch;
-    for (const int r : radii)
-        for (std::size_t y = 0; y < h; ++y)
-            for (std::size_t c = 0; c < n; ++c) box_line(q.data() + y * w * n + c, w, n, r, scratch);
-    for (const int r : radii)
-        for (std::size_t x = 0; x < w; ++x)
-            for (std::size_t c = 0; c < n; ++c) box_line(q.data() + x * n + c, h, w * n, r, scratch);
-    for (std::size_t i = 0; i < buf.size(); ++i) buf[i] = static_cast<float>(static_cast<double>(q[i]) * unit);
+    const double most = std::max(1e-30, largest);
+    whole_box_passes(buf, w, h, n, {radii[0], radii[1], radii[2]}, std::ldexp(most, -bits), most);
 }
 
 }  // namespace d2
@@ -261,6 +214,13 @@ Kernels distort_kernels() {
             });
         };
         k.cost = [](const Json&, const Ctx&) { return remap_cost(24); };
+        // (its map read — a file decoded — or drawn — a page at 200 dpi —: a heavy filter's work, whatever the layer — its
+        // window's preview and the run on a thread of their own: D2's review P3-3)
+        k.setup = [](const Json& params) {
+            const Json* map = core::get(params, "map");
+            const Json* data = core::get(params, "map_data");
+            return (map != nullptr && !map->is_null()) || (data != nullptr && !data->is_null()) ? kHeavyWork : 0.0;
+        };
         all.push_back(std::move(k));
     }
     {  // つまむ (filter.distort.pinch): the circle inside the base box pulled in (a positive amount) or pushed out

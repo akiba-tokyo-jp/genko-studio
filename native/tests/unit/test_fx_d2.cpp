@@ -852,6 +852,50 @@ private slots:
         unheld["map"] = "sha256:" + std::string(64, 'b');
         unheld["map_suffix"] = ".png";
         QVERIFY(refusal(doc, unheld).find("is not in the book") != std::string::npos);
+        // a folder or a correction layer as the map: no picture of its own (D2's review P3-5)
+        const auto foldered = apply_ops(doc, Json::array({Json{{"op", "add_layer"}, {"page", 1}, {"kind", "folder"}, {"id", "group"}}})).doc;
+        Json by_folder = base;
+        by_folder["map"] = Json{{"layer", "group"}};
+        QVERIFY2(refusal(foldered, by_folder).find("has no picture of its own") != std::string::npos, refusal(foldered, by_folder).c_str());
+        // another page's layer while that page is not read yet: waited for (D2's review P3-6)
+        core::Document two = apply_ops(doc, Json::array({Json{{"op", "add_page"}}})).doc;
+        QCOMPARE(two.pages.size(), std::size_t(2));
+        two.deferred.push_back(two.pages[1]);
+        Json by_unread = base;
+        by_unread["map"] = Json{{"layer", "merged"}, {"page", 2}};
+        QVERIFY2(refusal(two, by_unread).find("is still being read") != std::string::npos, refusal(two, by_unread).c_str());
+    }
+
+    // 置き換え's map_data at most 32 MiB, known by its letters before it is decoded (D2's review P3-2): 32 MiB taken, a byte
+    // more refused.
+    void aMapOf32MiBAtMost() {
+        std::string bytes(core::kDisplacementMapMaxBytes, '\0');
+        bytes.replace(0, 8, std::string("\x89PNG\r\n\x1a\n", 8));
+        const Json taken = core::normalize_filter("distort_displace", Json{{"map_data", core::b64encode(bytes)}}, nullptr);
+        QCOMPARE(taken["map"], Json(core::bytes_ref(bytes)));
+        QCOMPARE(taken["map_suffix"], Json(".png"));
+        bytes.push_back('\0');
+        try {
+            core::normalize_filter("distort_displace", Json{{"map_data", core::b64encode(bytes)}}, nullptr);
+            QFAIL("a map of 32 MiB and a byte taken");
+        } catch (const core::OpError& error) {
+            QVERIFY2(std::string(error.what()).find("larger than 32 MiB") != std::string::npos, error.what());
+        }
+    }
+
+    // シアー's points: two at least of different t, the op's normal form the reader's (D2's review P2-3).
+    void theShearsPointsTwoApart() {
+        const auto doc = eight_page(eight_pattern(200, 200));
+        for (const Json& points : {Json::array({Json::array({0.5, 0}), Json::array({0.5, 0.3})}), Json::array({Json::array({0, 0}), Json::array({1e-7, 0.2})})}) {
+            const Json raster{{"op", "filter_raster"}, {"page", 1}, {"id", "paint"}, {"kind", "distort_shear"}, {"points", points}};
+            QVERIFY2(refusal(doc, raster).find("distort_shear.points must be") != std::string::npos, refusal(doc, raster).c_str());
+            const Json smart{{"op", "smart_filter_add"}, {"page", 1}, {"id", "so"}, {"kind", "distort_shear"}, {"points", points}};
+            const auto converted = apply_ops(doc, Json::array({Json{{"op", "smart_convert"}, {"page", 1}, {"ids", Json::array({"paint"})}, {"new_id", "so"}}})).doc;
+            QVERIFY2(refusal(converted, smart).find("distort_shear.points must be") != std::string::npos, refusal(converted, smart).c_str());
+        }
+        const Json two{{"op", "filter_raster"}, {"page", 1}, {"id", "paint"}, {"kind", "distort_shear"},
+                       {"points", Json::array({Json::array({0.5, 0}), Json::array({0.5, 0.3}), Json::array({1, 0.1})})}};
+        QVERIFY(refusal(doc, two).empty());
     }
 
     // On a smart object 置き換え's map is the book's (design 2.6): its data or the layer made a file the book holds
@@ -894,6 +938,27 @@ private slots:
         QVERIFY(!g.contains("map_data"));
         QVERIFY(set.filter_files.contains(g["map"].get<std::string>()));
         QVERIFY(drawn(set) != once);
+        // a map the book does not hold, or holds as another kind: refused as filter_raster refuses it, the book as it was —
+        // else the smart object could not be drawn and the book would open read-only (D2's review P2-2)
+        {
+            const std::string held = g["map"].get<std::string>();
+            const Json add{{"op", "smart_filter_add"}, {"page", 1}, {"id", "so"}, {"kind", "distort_displace"}, {"horizontal", 5}};
+            Json unknown = add;
+            unknown["map"] = "sha256:" + std::string(64, 'c');
+            unknown["map_suffix"] = ".png";
+            QVERIFY2(refusal(set, unknown).find("is not in the book") != std::string::npos, refusal(set, unknown).c_str());
+            Json other_kind = add;
+            other_kind["map"] = held;
+            other_kind["map_suffix"] = ".psd";
+            QVERIFY2(refusal(set, other_kind).find("is not in the book") != std::string::npos, refusal(set, other_kind).c_str());
+            const Json reset{{"op", "smart_filter_set"}, {"page", 1}, {"id", "so"}, {"index", 0},
+                             {"params", Json{{"map", "sha256:" + std::string(64, 'c')}, {"map_suffix", ".png"}}}};
+            QVERIFY2(refusal(set, reset).find("is not in the book") != std::string::npos, refusal(set, reset).c_str());
+            Json same = add;
+            same["map"] = held;
+            same["map_suffix"] = ".png";
+            QVERIFY2(refusal(set, same).empty(), refusal(set, same).c_str());
+        }
         // saved: one of the book's assets (its ref in the smart filter: gc keeps it), read back and drawn from it the same
         {
             QTemporaryDir tmp;
@@ -980,6 +1045,39 @@ private slots:
             const auto tiled = render::fx::ink_surface(inks, *cmyk.page(0).color);
             render::fx::apply(*tiled, kernel("stylize_find_edges"), normal("stylize_find_edges", Json::object()), core::FilterInks::LightnessAndColour, grid, nullptr, 1,
                               nullptr, {32, 1});
+        }
+        // (a whole window's reading — the surface's values, on the way of the colours the inks mean their inks and colours as
+        // doubles —: a band of rows at a time, held with the window — D2's review P2-1 —: past that, refused)
+        struct Whole {
+            const char* kind;
+            core::FilterInks inks;
+            std::uint64_t window, band;
+        };
+        const std::uint64_t rows = std::min<std::uint64_t>(128, render::fx::kReadBandPixels / 128);
+        for (const Whole& w : {Whole{"distort_twirl", core::FilterInks::Plates, 128ull * 128 * 5 * 4, rows * 128 * 5 * 4},
+                               Whole{"stylize_tiles", core::FilterInks::Meaning, 128ull * 128 * 4 * 4, rows * 128 * (5 * 4 + 7 * 8)}}) {
+            const Json params = normal(w.kind, w.kind == std::string("stylize_tiles") ? Json{{"count", 4}, {"seed", 1}} : twirl);
+            std::uint64_t needed = 0;
+            std::string made;
+            {
+                const auto surface = render::fx::ink_surface(inks, *cmyk.page(0).color);
+                const render::ImageAllocationBudget budget{1ull << 30};
+                render::fx::apply(*surface, kernel(w.kind), params, w.inks, grid, nullptr, 1, nullptr, {64, 1});
+                needed = budget.peak();
+                made = render::fx::take_bytes(*surface);
+            }
+            QVERIFY2(needed >= w.window + w.band, qPrintable(QStringLiteral("%1: %2").arg(w.kind).arg(needed)));
+            {
+                const auto surface = render::fx::ink_surface(inks, *cmyk.page(0).color);
+                const render::ImageAllocationBudget budget{needed};
+                render::fx::apply(*surface, kernel(w.kind), params, w.inks, grid, nullptr, 1, nullptr, {64, 1});
+                QCOMPARE(render::fx::take_bytes(*surface), made);
+            }
+            {
+                const auto surface = render::fx::ink_surface(inks, *cmyk.page(0).color);
+                const render::ImageAllocationBudget budget{needed - 1};
+                QVERIFY_THROWS_EXCEPTION(core::OpError, render::fx::apply(*surface, kernel(w.kind), params, w.inks, grid, nullptr, 1, nullptr, {64, 1}));
+            }
         }
     }
 

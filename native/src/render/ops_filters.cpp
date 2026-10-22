@@ -78,11 +78,15 @@ Image map_picture(std::string_view bytes) {
 const core::Page& map_page(const core::Document& doc, const core::Page& page, const Json& map) {
     const Json* index = core::get(map, "page");
     if (index == nullptr || index->is_null()) return page;
+    std::size_t at = 0;
     try {
-        return doc.page(core::require_page(doc, Json{{"page", *index}}));
+        at = core::require_page(doc, Json{{"page", *index}});
     } catch (const core::OpError&) {
         throw core::OpError("the displacement map's page " + index->dump() + " is not in the book");
     }
+    // (a page whose strokes and pictures are not read yet: drawn when they are — D2's review P3-6)
+    if (doc.is_deferred(at)) throw core::OpError("the displacement map's page " + index->dump() + " is still being read: try again in a moment");
+    return doc.page(at);
 }
 
 // A layer map drawn as a picture: the page's layer alone over a clear page, or the page as it shows ("merged"), at the
@@ -91,9 +95,23 @@ Image layer_map(const core::Document& doc, const core::Page& page, const Json& m
     const core::Page& on = map_page(doc, page, map);
     const std::string id = core::py_str(map["layer"]);
     if (id == "merged") return render_page(on, kMapDpi, proof_options(), &doc).image.convert("RGBA");
-    for (const core::Layer& layer : on.layers)
-        if (layer.id == id) return layer_image(on, layer, kMapDpi, &doc).convert("RGBA");
+    for (const core::Layer& layer : on.layers) {
+        if (layer.id != id) continue;
+        if (layer.kind == core::LayerKind::Folder || layer.kind == core::LayerKind::Adjust)  // (D2's review P3-5)
+            throw core::OpError("the displacement map's layer " + id + " has no picture of its own (a folder or a correction layer)");
+        return layer_image(on, layer, kMapDpi, &doc).convert("RGBA");
+    }
     throw core::OpError("the displacement map's layer " + id + " is not on the page");
+}
+
+// Does the book hold the map `ref` as a file of `suffix` (made by an op this session — its bytes of that kind —, or in its
+// folder's assets)?
+bool holds_map(const core::Document& doc, const std::string& ref, const std::string& suffix) {
+    if (const auto held = doc.filter_files.find(ref); held != doc.filter_files.end() && held->second) {
+        const std::string& bytes = *held->second;
+        return suffix == ".psd" ? bytes.starts_with("8BPS") : bytes.starts_with(std::string_view("\x89PNG\r\n\x1a\n", 8));
+    }
+    return doc.asset_dir && storage::AssetStore::is_ref(ref) && storage::AssetStore(*doc.asset_dir).has(ref, suffix);
 }
 
 // The bytes of a map the book holds (made by an op this session, or in its folder's assets).
@@ -298,6 +316,13 @@ Json keep_filter_files(core::Document& doc, const core::Page& page, std::string_
             (void)core::normalize_filter(kind, params, &page);
             bytes = write_png(layer_map(doc, page, *map));
             suffix = ".png";
+        } else if (map != nullptr && map->is_string()) {
+            // (one of the book's files: held by it, of that kind — as filter_raster reads it —, or the smart object could not
+            // be drawn and the book would open read-only: D2's review P2-2)
+            const Json normal = core::normalize_filter(kind, params, &page);
+            const std::string ref = normal[key].get<std::string>();
+            if (!holds_map(doc, ref, normal[suffix_key].get<std::string>())) throw core::OpError("the displacement map " + ref + " is not in the book");
+            continue;
         } else {
             continue;
         }

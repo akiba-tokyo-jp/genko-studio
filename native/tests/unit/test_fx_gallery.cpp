@@ -212,6 +212,63 @@ class TestFxGallery : public QObject {
     Q_OBJECT
 
 private slots:
+    // The box passes in whole numbers D2 and D3 share (render/fx.hpp whole_box_passes: D2's review P3-9) are the gallery's
+    // own as they were — its sums in whole numbers of 2^-30, a sample kept to ±1024, each mean rounded half away from zero
+    // —: the same bytes as that code (copied here) on pixels of every sign and past 1024.
+    void theBoxPassesAreTheGallerysOwn() {
+        const auto before = [](std::vector<float> buf, std::size_t w, std::size_t h, std::size_t n, const std::vector<int>& radii) {
+            if (w == 0 || h == 0 || std::all_of(radii.begin(), radii.end(), [](int r) { return r <= 0; })) return buf;
+            constexpr double unit = 1073741824.0;
+            std::vector<std::int64_t> q(buf.size()), line;
+            for (std::size_t i = 0; i < buf.size(); ++i) {
+                float v = buf[i];
+                if (!std::isfinite(v)) v = 0.0f;
+                q[i] = std::llround(static_cast<double>(std::clamp(v, -1024.0f, 1024.0f)) * unit);
+            }
+            const auto box = [&line](std::int64_t* first, std::size_t len, std::size_t stride, std::size_t nn, int r) {
+                if (r <= 0 || len == 0) return;
+                line.resize(len * nn);
+                for (std::size_t i = 0; i < len; ++i) std::copy(first + i * stride, first + i * stride + nn, line.begin() + static_cast<std::ptrdiff_t>(i * nn));
+                const auto at = [&](std::ptrdiff_t k, std::size_t c) { return line[static_cast<std::size_t>(std::clamp<std::ptrdiff_t>(k, 0, std::ptrdiff_t(len) - 1)) * nn + c]; };
+                const std::int64_t width = 2 * std::int64_t(r) + 1;
+                for (std::size_t c = 0; c < nn; ++c) {
+                    std::int64_t acc = 0;
+                    for (std::ptrdiff_t k = -r; k <= r; ++k) acc += at(k, c);
+                    for (std::size_t x = 0; x < len; ++x) {
+                        first[x * stride + c] = acc >= 0 ? (acc + width / 2) / width : -((-acc + width / 2) / width);
+                        acc += at(std::ptrdiff_t(x) + r + 1, c) - at(std::ptrdiff_t(x) - r, c);
+                    }
+                }
+            };
+            for (const int r : radii)
+                for (std::size_t y = 0; y < h; ++y) box(q.data() + y * w * n, w, n, n, r);
+            for (const int r : radii)
+                for (std::size_t x = 0; x < w; ++x) box(q.data() + x * n, h, w * n, n, r);
+            for (std::size_t i = 0; i < q.size(); ++i) buf[i] = static_cast<float>(static_cast<double>(q[i]) / unit);
+            return buf;
+        };
+        std::uint32_t state = 12345;
+        const auto next = [&state] {
+            state = state * 1664525u + 1013904223u;
+            return static_cast<float>(state >> 8) / 16777216.0f;
+        };
+        for (const auto& [w, h, n] : std::vector<std::array<std::size_t, 3>>{{17, 9, 1}, {31, 23, 3}, {40, 7, 5}}) {
+            std::vector<float> buf(w * h * n);
+            for (float& v : buf) v = (next() - 0.3f) * 3.0f;
+            buf[3] = 2000.0f;
+            buf[5] = -1500.0f;
+            for (const std::vector<int>& radii : std::vector<std::vector<int>>{{1}, {0, 2, 2}, {3, 3, 4}, {0, 0, 0}}) {
+                std::vector<float> now = buf;
+                render::fx::whole_box_passes(now, w, h, n, radii, 1.0 / 1073741824.0, 1024.0);
+                QVERIFY(now == before(buf, w, h, n, radii));
+            }
+            for (const float sigma : {0.2f, 0.7f, 1.4f, 3.3f}) {
+                const std::array<int, 3> r = render::fx::gauss_box_radii(sigma);
+                QVERIFY(r[0] >= 0 && r[0] <= r[2]);
+            }
+        }
+    }
+
     // --- the table ---------------------------------------------------------------------------------------------------------
 
     void fortySevenEffectsInSixFolders() {

@@ -205,7 +205,8 @@ void displacement_map(adjust_forms::Form& form, const adjust_forms::FormContext&
         choose->addItem(QStringLiteral("統合した絵"), QStringLiteral("merged"));
         if (context.page != nullptr) {
             for (auto it = context.page->layers.rbegin(); it != context.page->layers.rend(); ++it)
-                choose->addItem(QStringLiteral("レイヤー「%1」").arg(wording::layer_label(*it)), QString::fromStdString("layer:" + it->id));
+                if (it->kind != core::LayerKind::Folder && it->kind != core::LayerKind::Adjust)  // (no picture of their own)
+                    choose->addItem(QStringLiteral("レイヤー「%1」").arg(wording::layer_label(*it)), QString::fromStdString("layer:" + it->id));
         }
     };
     const auto select = [choose](const QString& data) {
@@ -457,12 +458,12 @@ std::vector<FilterForm> stylize_forms() {
         f.labels = {{"count", QStringLiteral("タイルの数")}, {"max_offset", QStringLiteral("最大移動距離（%）")}, {"fill", QStringLiteral("隙間")},
                     {"foreground", QStringLiteral("描画色")}, {"background", QStringLiteral("背景色")}};
         f.choices = {{"fill", {{QStringLiteral("背景色"), Json("background")}, {QStringLiteral("描画色"), Json("foreground")},
-                               {QStringLiteral("反転"), Json("inverse")}, {QStringLiteral("そのまま"), Json("unaltered")}}}};
+                               {QStringLiteral("反転イメージ"), Json("inverse")}, {QStringLiteral("元のイメージ"), Json("unaltered")}}}};
         f.decimals = {{"max_offset", 0}};
         f.note = QStringLiteral("タイルの数は、選択範囲（無ければレイヤー）の短い辺に並ぶ数です。");
         out.push_back(std::move(f));
     }
-    {  // 等高線… (レベル 0–255, エッジ 下・上)
+    {  // 輪郭のトレース… (レベル 0–255, エッジ 下・上)
         FilterForm f;
         f.kind = "stylize_trace_contour";
         f.labels = {{"level", QStringLiteral("レベル")}, {"edge", QStringLiteral("エッジ")}};

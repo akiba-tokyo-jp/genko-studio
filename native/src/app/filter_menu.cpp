@@ -159,7 +159,7 @@ const std::vector<FilterSubmenu>& filter_menu_table() {
           kind_item("act_filter_stylize_tiles", "タイル…", "stylize_tiles"), kind_item("act_filter_stylize_extrude", "押し出し…", "stylize_extrude"),
           kind_item("act_filter_stylize_diffuse", "拡散…", "stylize_diffuse"), kind_item("act_filter_stylize_wind", "風…", "stylize_wind"),
           kind_item("act_filter_stylize_find_edges", "輪郭検出", "stylize_find_edges"),
-          kind_item("act_filter_stylize_trace_contour", "等高線…", "stylize_trace_contour"),
+          kind_item("act_filter_stylize_trace_contour", "輪郭のトレース…", "stylize_trace_contour"),
           kind_item("act_filter_stylize_oil_paint", "油彩…", "stylize_oil_paint")}},
         {QStringLiteral("render"), QStringLiteral("描画"),
          {op_item("act_filter_render_flame", "炎…", "render_picture", "flame"), op_item("act_filter_render_picture_frame", "額縁…", "render_picture", "picture_frame"),

@@ -11,6 +11,7 @@
 #include <limits>
 #include <numbers>
 
+#include "core/pyops.hpp"
 #include "render/fx_d2.hpp"
 #include "render/fx_rank.hpp"
 
@@ -47,6 +48,55 @@ void mean_of(const double* acc, double count, std::size_t n, float* out) {
     for (std::size_t c = 0; c + 1 < n; ++c) out[c] = a > 1e-7 ? static_cast<float>(acc[c] / count / a) : 0.0f;
     out[n - 1] = static_cast<float>(a);
 }
+
+// 水晶's cells and their sums: cells of `cell` pixels from the base box's corner, each pixel (a working pixel's step
+// apart) the cell's whose jittered point is nearest.
+struct Crystals {
+    Rect b;
+    float cell = 1;
+    std::uint32_t seed = 0;
+    int step = 1;
+    int grid_cell(float v, float o) const { return static_cast<int>(std::floor((v - o) / cell)); }
+    std::pair<int, int> owner(int x, int y) const {
+        const float ox = static_cast<float>(b.x0), oy = static_cast<float>(b.y0);
+        const float fx = static_cast<float>(x) + 0.5f, fy = static_cast<float>(y) + 0.5f;
+        const int cx = grid_cell(fx, ox), cy = grid_cell(fy, oy);
+        float best = std::numeric_limits<float>::max();
+        std::pair<int, int> who{cx, cy};
+        for (int dy = -1; dy <= 1; ++dy)
+            for (int dx = -1; dx <= 1; ++dx) {
+                const auto [px, py] = cell_point(cx + dx, cy + dy, cell, seed, ox, oy);
+                const float d = (px - fx) * (px - fx) + (py - fy) * (py - fy);
+                if (d < best) {
+                    best = d;
+                    who = {cx + dx, cy + dy};
+                }
+            }
+        return who;
+    }
+    // The sums (premultiplied colours, then the count: n + 1 each) of the cells c0..c1 (gw × gh of them), of their pixels
+    // in the window and the base box, in their rows' order.
+    std::vector<double> sums(const Window& src, int c0x, int c0y, int c1x, int c1y, std::size_t n) const {
+        const std::size_t gw = static_cast<std::size_t>(c1x - c0x + 1), gh = static_cast<std::size_t>(c1y - c0y + 1);
+        std::vector<double> acc(gw * gh * (n + 1), 0.0);
+        const Rect win = Rect{b.x0 + static_cast<int>(std::floor(static_cast<float>(c0x) * cell)), b.y0 + static_cast<int>(std::floor(static_cast<float>(c0y) * cell)),
+                              b.x0 + static_cast<int>(std::ceil(static_cast<float>(c1x + 1) * cell)), b.y0 + static_cast<int>(std::ceil(static_cast<float>(c1y + 1) * cell))}
+                             .intersect(src.rect)
+                             .intersect(b);
+        for (int y = win.y0; y < win.y1; ++y) {
+            if ((y - b.y0) % step != 0) continue;
+            for (int x = win.x0; x < win.x1; ++x) {
+                if ((x - b.x0) % step != 0) continue;
+                const auto [cx, cy] = owner(x, y);
+                if (cx < c0x || cy < c0y || cx > c1x || cy > c1y) continue;
+                double* a = acc.data() + (std::size_t(cy - c0y) * gw + std::size_t(cx - c0x)) * (n + 1);
+                add_premultiplied(src.px(x, y), n, a);
+                a[n] += 1.0;
+            }
+        }
+        return acc;
+    }
+};
 
 // メゾティント's threshold of a pattern at a working pixel (pixelate.rs mezzo_threshold).
 float mezzo_threshold(const std::string& type, int x, int y, std::uint32_t c, std::uint32_t seed) {
@@ -150,50 +200,51 @@ Kernels pixelate_kernels() {
         k.kind = "pixelate_crystallize";
         const auto cell_of = [](const Json& params, const Ctx& ctx) { return std::max(2.0f, ctx.px(std::max(2.0, number(params, "cell_size", 10)))); };
         k.halo = [cell_of](const Json& params, const Ctx& ctx) { return d2::halo_of(static_cast<int>(std::ceil(cell_of(params, ctx) * 3.0f)) + 1); };
-        k.run = [cell_of](const Json& params, const Window& src, const Rect& out, const Ctx& ctx) {
+        const auto crystals_of = [cell_of](const Json& params, const Ctx& ctx) {
+            Crystals c;
+            c.b = ctx.bounds;
+            c.cell = cell_of(params, ctx);
+            c.seed = d2::seed_of(params);
+            c.step = std::max(1, static_cast<int>(std::floor(ctx.s)));  // (the mean over a working pixel's grid)
+            return c;
+        };
+        // (a whole window — cells past what a tile's window holds well —: every cell's sums once, given to each tile, not
+        // summed again for each: D2's review P3-4; the same sums, in the same order, as a tile's own)
+        k.once = [crystals_of](const Json& params, const Window& whole, const Ctx& ctx) {
+            const Crystals c = crystals_of(params, ctx);
+            const float ox = static_cast<float>(c.b.x0), oy = static_cast<float>(c.b.y0);
+            const int c0x = c.grid_cell(static_cast<float>(c.b.x0), ox) - 2, c0y = c.grid_cell(static_cast<float>(c.b.y0), oy) - 2;
+            const int c1x = c.grid_cell(static_cast<float>(c.b.x1), ox) + 2, c1y = c.grid_cell(static_cast<float>(c.b.y1), oy) + 2;
+            Json given = params;
+            given["_cells"] = Json{{"x", c0x}, {"y", c0y}, {"w", c1x - c0x + 1}, {"h", c1y - c0y + 1}, {"sums", Json(c.sums(whole, c0x, c0y, c1x, c1y, whole.ch))}};
+            return given;
+        };
+        k.run = [crystals_of](const Json& params, const Window& src, const Rect& out, const Ctx& ctx) {
             const std::size_t n = src.ch;
-            const float cell = cell_of(params, ctx);
-            const std::uint32_t seed = d2::seed_of(params);
-            const Rect& b = ctx.bounds;
+            const Crystals crystals = crystals_of(params, ctx);
+            const Rect& b = crystals.b;
             const float ox = static_cast<float>(b.x0), oy = static_cast<float>(b.y0);
-            const int step = std::max(1, static_cast<int>(std::floor(ctx.s)));  // (the mean over a working pixel's grid)
-            const auto grid_cell = [&](float v, float o) { return static_cast<int>(std::floor((v - o) / cell)); };
-            const int c0x = grid_cell(static_cast<float>(out.x0), ox) - 2, c0y = grid_cell(static_cast<float>(out.y0), oy) - 2;
-            const int c1x = grid_cell(static_cast<float>(out.x1), ox) + 2, c1y = grid_cell(static_cast<float>(out.y1), oy) + 2;
-            const std::size_t gw = static_cast<std::size_t>(c1x - c0x + 1), gh = static_cast<std::size_t>(c1y - c0y + 1);
-            const auto owner = [&](int x, int y) {
-                const float fx = static_cast<float>(x) + 0.5f, fy = static_cast<float>(y) + 0.5f;
-                const int cx = grid_cell(fx, ox), cy = grid_cell(fy, oy);
-                float best = std::numeric_limits<float>::max();
-                std::pair<int, int> who{cx, cy};
-                for (int dy = -1; dy <= 1; ++dy)
-                    for (int dx = -1; dx <= 1; ++dx) {
-                        const auto [px, py] = cell_point(cx + dx, cy + dy, cell, seed, ox, oy);
-                        const float d = (px - fx) * (px - fx) + (py - fy) * (py - fy);
-                        if (d < best) {
-                            best = d;
-                            who = {cx + dx, cy + dy};
-                        }
-                    }
-                return who;
-            };
-            // (the cells whose pixels can reach `out`: their pixels summed, in their rows' order, inside the base box)
-            std::vector<double> acc(gw * gh * (n + 1), 0.0);
-            const Rect win = Rect{b.x0 + static_cast<int>(std::floor(static_cast<float>(c0x) * cell)), b.y0 + static_cast<int>(std::floor(static_cast<float>(c0y) * cell)),
-                                  b.x0 + static_cast<int>(std::ceil(static_cast<float>(c1x + 1) * cell)), b.y0 + static_cast<int>(std::ceil(static_cast<float>(c1y + 1) * cell))}
-                                 .intersect(src.rect)
-                                 .intersect(b);
-            for (int y = win.y0; y < win.y1; ++y) {
-                if ((y - b.y0) % step != 0) continue;
-                for (int x = win.x0; x < win.x1; ++x) {
-                    if ((x - b.x0) % step != 0) continue;
-                    const auto [cx, cy] = owner(x, y);
-                    if (cx < c0x || cy < c0y || cx > c1x || cy > c1y) continue;
-                    double* a = acc.data() + (std::size_t(cy - c0y) * gw + std::size_t(cx - c0x)) * (n + 1);
-                    add_premultiplied(src.px(x, y), n, a);
-                    a[n] += 1.0;
-                }
+            const auto owner = [&crystals](int x, int y) { return crystals.owner(x, y); };
+            // (the cells whose pixels can reach `out`: their pixels summed, in their rows' order, inside the base box — or every
+            // cell's, summed once on a whole window)
+            int c0x = 0, c0y = 0, c1x = 0, c1y = 0;
+            std::vector<double> acc;
+            if (const Json* cells = core::get(params, "_cells"); cells != nullptr && cells->is_object()) {
+                c0x = (*cells)["x"].get<int>();
+                c0y = (*cells)["y"].get<int>();
+                c1x = c0x + (*cells)["w"].get<int>() - 1;
+                c1y = c0y + (*cells)["h"].get<int>() - 1;
+                const Json& sums = (*cells)["sums"];
+                acc.reserve(sums.size());
+                for (const Json& v : sums) acc.push_back(v.get<double>());
+            } else {
+                c0x = crystals.grid_cell(static_cast<float>(out.x0), ox) - 2;
+                c0y = crystals.grid_cell(static_cast<float>(out.y0), oy) - 2;
+                c1x = crystals.grid_cell(static_cast<float>(out.x1), ox) + 2;
+                c1y = crystals.grid_cell(static_cast<float>(out.y1), oy) + 2;
+                acc = crystals.sums(src, c0x, c0y, c1x, c1y, n);
             }
+            const std::size_t gw = static_cast<std::size_t>(c1x - c0x + 1);
             std::vector<float> res = src.crop(out);
             std::size_t i = 0;
             for (int y = out.y0; y < out.y1; ++y)
@@ -328,7 +379,7 @@ Kernels pixelate_kernels() {
             for (int gy = gy0; gy <= gy1; ++gy)
                 for (int gx = gx0; gx <= gx1; ++gx) {
                     const Rect whole{b.x0 + gx * cs, b.y0 + gy * cs, b.x0 + (gx + 1) * cs, b.y0 + (gy + 1) * cs};
-                    const Rect cellr = whole.intersect(b);
+                    const Rect cellr = whole.intersect(b).intersect(src.rect);  // (D2's review P3-1)
                     std::fill(acc.begin(), acc.end(), 0.0);
                     double count = 0;
                     for (int yy = cellr.y0; yy < cellr.y1; ++yy)

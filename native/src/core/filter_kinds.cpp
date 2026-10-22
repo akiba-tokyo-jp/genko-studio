@@ -367,6 +367,11 @@ Json read_displacement_map(Json read) {
     if (const Json* data = get(read, "map_data"); data != nullptr && !data->is_null()) {
         const std::string wrong = where + ".map_data must be the base64 text of a PNG or PSD file";
         if (!data->is_string()) throw OpError(wrong);
+        // (past 32 MiB by its letters — 3 bytes for 4 —, refused before it is decoded: D2's review P3-2)
+        std::size_t letters = 0;
+        for (const char ch : data->get_ref<const std::string&>())
+            letters += (ch >= 'A' && ch <= 'Z') || (ch >= 'a' && ch <= 'z') || (ch >= '0' && ch <= '9') || ch == '+' || ch == '/';
+        if (letters / 4 * 3 + (letters % 4 == 0 ? 0 : letters % 4 - 1) > kDisplacementMapMaxBytes) throw OpError(where + ".map_data is larger than 32 MiB");
         std::string bytes;
         try {
             bytes = a2b_base64(data->get_ref<const std::string&>());
@@ -421,7 +426,7 @@ Json read_shear_points(Json read) {
         return read;
     }
     const std::string message = "adjust distort_shear.points must be a list of 2 to " + std::to_string(kShearMostPoints) +
-                                " points [t, offset] (t 0..1 from the top, offset −1..1 of half the width)";
+                                " points [t, offset] (t 0..1 from the top, two of them apart; offset −1..1 of half the width)";
     if (!points->is_array() || points->size() < 2 || points->size() > kShearMostPoints) throw OpError(message);
     std::vector<std::array<double, 2>> kept;
     for (const Json& point : *points) {
@@ -434,6 +439,8 @@ Json read_shear_points(Json read) {
         if (!out.empty() && std::fabs(point[0] - out.back()[0].get<double>()) < 1e-6) continue;
         out.push_back(Json::array({number_json(point[0]), number_json(point[1])}));
     }
+    // (two at least of different t: the op and the reader keep to one normal form — D2's review P2-3)
+    if (out.size() < 2) throw OpError(message);
     read["points"] = std::move(out);
     return read;
 }
@@ -523,7 +530,7 @@ std::vector<FilterKind> stylize_kinds() {
         out.push_back(kind(std::move(tiles), {whole("count", 10, 1, 99), number("max_offset", 10, 1, 99), choice("fill", {"background", "foreground", "inverse", "unaltered"}),
                                               rgb("foreground", {0, 0, 0}), rgb("background", {255, 255, 255}), seed()}));
     }
-    out.push_back(kind(info("stylize_trace_contour", "filter.stylize.traceContour", "等高線", "表現手法", light),
+    out.push_back(kind(info("stylize_trace_contour", "filter.stylize.traceContour", "輪郭のトレース", "表現手法", light),
                        {number("level", 128, 0, 255), choice("edge", {"lower", "upper"})}));
     out.push_back(kind(info("stylize_wind", "filter.stylize.wind", "風", "表現手法", light),
                        {choice("method", {"wind", "blast", "stagger"}), choice("direction", {"from_right", "from_left"}), seed()}));

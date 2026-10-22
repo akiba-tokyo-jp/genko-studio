@@ -1,5 +1,5 @@
 // PC4 節 D2 (SPEC.md COLOR-08「フィルター」): フィルター → 表現手法's kernels — 拡散, エンボス, 押し出し, 輪郭検出, ソラリゼーション,
-// タイル, 等高線, 風 (油彩: render/fx_oil.cpp). PhotoCraft v0.2.0's algo/src/stylize.rs (emboss, find_edges, solarize) and
+// タイル, 輪郭のトレース, 風 (油彩: render/fx_oil.cpp). PhotoCraft v0.2.0's algo/src/stylize.rs (emboss, find_edges, solarize) and
 // stylize2.rs (diffuse, extrude, tiles, trace_contour, wind), MIT: native/third_party/photocraft/NOTICE.md. On a page of
 // inks they work its lightness (FilterInks::LightnessAndColour: CMYK and multichannel plates as 1 − ink, so a relief, an
 // edge, a shade and a streak are as on RGB; a Lab page's L, its a and b moved with it or greyed — 128/255 — where the
@@ -377,7 +377,7 @@ Kernels stylize_kernels() {
         k.cost = [](const Json&, const Ctx&) { return 9.0 * 4.0 + 8.0; };
         all.push_back(std::move(k));
     }
-    {  // 等高線 (filter.stylize.traceContour): where each colour crosses the level (0..255), a line a working pixel wide on
+    {  // 輪郭のトレース (filter.stylize.traceContour): where each colour crosses the level (0..255), a line a working pixel wide on
        // the side above it (上) or below it (下), black on white; a Lab page's L, its a and b grey
         Kernel k;
         k.kind = "stylize_trace_contour";

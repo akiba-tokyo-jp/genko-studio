@@ -198,7 +198,7 @@ private slots:
                               QStringLiteral("水晶…"), QStringLiteral("点描…"), QStringLiteral("ファセット")}));
         QCOMPARE(words_of(book.menu("menu_filter_stylize")),
                  (QStringList{QStringLiteral("エンボス…"), QStringLiteral("ソラリゼーション"), QStringLiteral("タイル…"), QStringLiteral("押し出し…"),
-                              QStringLiteral("拡散…"), QStringLiteral("風…"), QStringLiteral("輪郭検出"), QStringLiteral("等高線…"), QStringLiteral("油彩…")}));
+                              QStringLiteral("拡散…"), QStringLiteral("風…"), QStringLiteral("輪郭検出"), QStringLiteral("輪郭のトレース…"), QStringLiteral("油彩…")}));
         QCOMPARE(words_of(book.menu("menu_filter_distort")),
                  (QStringList{QStringLiteral("シアー…"), QStringLiteral("ジグザグ…"), QStringLiteral("つまむ…"), QStringLiteral("波形…"), QStringLiteral("波紋…"),
                               QStringLiteral("球面…"), QStringLiteral("極座標…"), QStringLiteral("置き換え…"), QStringLiteral("渦巻き…")}));
