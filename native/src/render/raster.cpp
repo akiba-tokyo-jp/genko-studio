@@ -387,10 +387,7 @@ void erase_raster(const core::Page& page, core::Layer& layer, const core::PenPoi
 }
 
 void erase_raster_masked(const core::Page& page, core::Layer& layer, const std::function<Image(Size, int)>& mask_of) {
-    if (!layer.raster_png || layer.raster_png->empty()) {
-        const std::vector<core::StrokePtr> strokes = layer.strokes->items;
-        for (const core::StrokePtr& stroke : strokes) bake_stroke(page, layer, core::stroke_points(*stroke), kWorkingDpi);
-    }
+    if (!layer.raster_png || layer.raster_png->empty()) return;  // (no picture: nothing of pixels to erase)
     Image image = ensure_raster(page, layer, kWorkingDpi);
     // (the picture's own grid: its pixels an inch across the page — PC4 F-b's image grids are not of 200 dpi)
     const double width_mm = page.spec.width_mm.value();
