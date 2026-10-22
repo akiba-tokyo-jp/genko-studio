@@ -869,8 +869,10 @@ private slots:
         Book b(doc, QSize(1280, 800), QStringLiteral("b.genko"), [](const fs::path& path) { app::remember_project(path); });
         QStringList titles;
         for (QAction* top : b.w()->menuBar()->actions()) titles << top->text();
+        // (PC4 節 D, the user's decision 1: フィルター after レイヤー)
         QCOMPARE(titles, (QStringList{QStringLiteral("ファイル"), QStringLiteral("編集"), QStringLiteral("表示"), QStringLiteral("ツール"), QStringLiteral("選択範囲"),
-                                      QStringLiteral("レイヤー"), QStringLiteral("ページ"), QStringLiteral("ウィンドウ"), QStringLiteral("ヘルプ")}));
+                                      QStringLiteral("レイヤー"), QStringLiteral("フィルター"), QStringLiteral("ページ"), QStringLiteral("ウィンドウ"),
+                                      QStringLiteral("ヘルプ")}));
         const QStringList file = texts(b.menu(QStringLiteral("ファイル")));
         QVERIFY(file.contains(QStringLiteral("最近使った原稿")) && file.contains(QStringLiteral("閉じる")) && file.contains(QStringLiteral("Genko を終わる")));
         const QStringList edit = texts(b.menu(QStringLiteral("編集")));

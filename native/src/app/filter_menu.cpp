@@ -249,7 +249,19 @@ void MainWindow::build_filter_menus(QMenu* filter) {
         }
     }
     connect(filter, &QMenu::aboutToShow, this, &MainWindow::follow_filter_menu);
+    // (while the menu is not open its commands are on as far as this build has them: a key — Ctrl+F — or コマンドを探す
+    // reaches them, and the command itself says what it cannot work on)
+    connect(filter, &QMenu::aboutToHide, this, [this] {
+        for (const FilterSubmenu& table : filter_menu_table()) {
+            for (const FilterItem& item : table.items) {
+                if (item.name.isEmpty() || item.op.empty()) continue;
+                if (QAction* act = action(item.name)) act->setEnabled(filter_available(item));
+            }
+        }
+        if (QAction* last = action("act_filter_last")) last->setEnabled(last_filter_.has_value());
+    });
     follow_filter_menu();
+    emit filter->aboutToHide();
 }
 
 void MainWindow::follow_filter_menu() {
@@ -341,14 +353,16 @@ void MainWindow::filter_command(const FilterItem& item) {
     const auto heavy = [grid, kind](const Json& params) {
         return render::fx::work(kind, params, std::uint64_t(grid.width) * grid.height, grid.s) >= render::fx::kHeavyWork;
     };
-    const QString title = item.title;
     const std::string op = item.op;
     const bool python = item.python;
-    const auto send = [this, op_of, heavy, name, title, kind, op, python, asked](const Json& params) {
+    const auto send = [this, op_of, heavy, name, kind, op, python, asked](const Json& params) {
         if (!still(asked)) return;
         if (op != "vanishing_point") {  // (消点 is not 前回のフィルター: PhotoCraft's lastFilter neither)
             last_filter_ = Json{{"title", name.toStdString()}, {"kind", kind}, {"op", op}, {"python", python}, {"params", params}};
-            follow_filter_menu();
+            if (QAction* last = action("act_filter_last")) {
+                last->setText(name);
+                last->setEnabled(true);
+            }
         }
         send_filter(Json::array({op_of(params)}), name, heavy(params));
     };

@@ -12,15 +12,19 @@
 #include <algorithm>
 #include <atomic>
 #include <cmath>
+#include <functional>
+#include <map>
 #include <stop_token>
 #include <string>
 #include <vector>
 
+#include "core/adjust.hpp"
 #include "core/color_raster.hpp"
 #include "core/command_bus.hpp"
 #include "core/error.hpp"
 #include "core/filter_kinds.hpp"
 #include "core/ink.hpp"
+#include "core/smart.hpp"
 #include "render/fx.hpp"
 #include "render/image.hpp"
 #include "render/ink.hpp"
@@ -179,6 +183,55 @@ class TestFx : public QObject {
     Q_OBJECT
 
 private slots:
+    // --- every kind of the table (D1…D6's kinds come in here as their groups add them) ---------------------------------------
+
+    // Each kind with its settings for the test (its defaults where kTestParams has none): the same bytes whatever the tiling
+    // and threads, an empty selection changes nothing, it changes PhotoCraft's test picture, and filter_raster takes it on
+    // every way (8 bits, precise u16 and f32, CMYK, Lab, grey, multichannel) and as a smart filter.
+    void everyKindOfTheTable() {
+        // (a kind whose defaults change nothing or take long on the test picture: its settings here — each group adds its own)
+        const std::map<std::string, Json> kTestParams{{"blur_gaussian", Json{{"radius", 2.5}}}, {"blur_box", Json{{"radius", 2}}}};
+        QVERIFY(!core::filter_infos().empty());
+        for (const core::FilterInfo& info : core::filter_infos()) {
+            const std::string kind(info.kind);
+            QVERIFY2(render::fx::kernel(kind) != nullptr, kind.c_str());
+            const Json params = kTestParams.contains(kind) ? kTestParams.at(kind) : core::normalize_filter(kind, Json::object(), nullptr);
+            const std::string raster = precise(40, 30, pattern(40, 30), true);
+            const std::string a = run_precise(raster, kind.c_str(), params, nullptr, {256, 1});
+            QVERIFY2(a == run_precise(raster, kind.c_str(), params, nullptr, {7, 3}), (kind + ": differs between tilings").c_str());
+            QVERIFY2(a != raster, (kind + " did nothing").c_str());
+            const std::string none(40 * 30, '\0');
+            QVERIFY2(run_precise(raster, kind.c_str(), params, &none) == raster, (kind + " ignored an empty selection").c_str());
+            // every way through the op
+            Json op{{"op", "filter_raster"}, {"page", 1}, {"kind", kind}};
+            op.update(params);
+            for (const bool f32 : {false, true}) {
+                Json on = op;
+                on["id"] = "paint";
+                QVERIFY2(refusal(precise_page(16, 16, pattern(16, 16), f32), on).empty(), (kind + (f32 ? " f32" : " u16")).c_str());
+            }
+            for (const std::string mode : {"cmyk", "lab", "gray", "multichannel"}) {
+                Json on = op;
+                on["id"] = "pic";
+                const auto doc = ink_page(mode, [](std::uint32_t x, std::uint32_t y, unsigned c) { return ((x * 7 + y * 3 + c * 11) % 64) / 63.0; });
+                QVERIFY2(refusal(doc, on).empty(), (kind + " " + mode + ": " + refusal(doc, on)).c_str());
+            }
+            {
+                auto doc = blank();
+                core::Layer layer;
+                layer.id = "paint";
+                layer.kind = core::LayerKind::Raster;
+                layer.panel_clip = false;
+                render::raster::save_raster(doc.page(0), layer, render::Image::create("RGBA", render::Size{200, 200}, render::Ink{90, 120, 30, 255}));
+                doc.edit_page(0).layers.push_back(layer);
+                Json on = op;
+                on["id"] = "paint";
+                QVERIFY2(refusal(doc, on).empty(), (kind + " 8 bits").c_str());
+            }
+            QVERIFY2(core::smart::filter_kind(kind), kind.c_str());
+        }
+    }
+
     // --- PhotoCraft's tests of the filter core (algo/src/tests.rs) --------------------------------------------------------
 
     void everyKindIsTileAndThreadIndependent() {
