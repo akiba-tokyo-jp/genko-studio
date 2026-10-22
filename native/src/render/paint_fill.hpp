@@ -44,6 +44,12 @@ struct How {
 bool paint(core::OpContext& c, std::size_t at, const std::string& layer_id, const std::optional<Coverage>& coverage, const Colour& colour,
            const How& how);
 
+// Whether a fill or a gradient on this layer makes it precise first: an empty paint layer (no pixels, lines or pictures) of
+// an RGB page of 16 or 32 bits that keep_page_modes would make precise (render/ops_registry: not a tone layer, not cut at
+// the panels, no effect, screen or colour of its own). paint() gives it clear precise pixels at the page's working grid
+// before it lays the colours, so they stay finer than 8 bits.
+bool becomes_precise(const core::Page& page, const core::Layer& layer);
+
 // The dither's noise at a pixel: 0..1 from its place (PhotoCraft's dither_noise: a hash, no pattern to see).
 float dither_noise(int x, int y);
 

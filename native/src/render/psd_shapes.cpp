@@ -176,8 +176,8 @@ d::Writer gradient_descriptor(const Json& g, const vec::Path& path, const Canvas
             if (x <= points.front().first) return points.front().second;
             for (std::size_t i = 1; i < points.size(); ++i) {
                 if (x <= points[i].first) {
-                    const double span = points[i].first - points[i - 1].first;
-                    return span > 0 ? points[i - 1].second + (points[i].second - points[i - 1].second) * (x - points[i - 1].first) / span : points[i].second;
+                    const double gap = points[i].first - points[i - 1].first;
+                    return gap > 0 ? points[i - 1].second + (points[i].second - points[i - 1].second) * (x - points[i - 1].first) / gap : points[i].second;
                 }
             }
             return points.back().second;
@@ -190,7 +190,7 @@ d::Writer gradient_descriptor(const Json& g, const vec::Path& path, const Canvas
         for (const auto& [pos, value] : own) places.push_back(pos);
         for (const auto& [pos, value] : transparency) places.push_back(pos);
         std::sort(places.begin(), places.end());
-        places.erase(std::unique(places.begin(), places.end(), [](double a, double b) { return std::fabs(a - b) < 1e-4; }), places.end());
+        places.erase(std::unique(places.begin(), places.end(), [](double one, double other) { return std::fabs(one - other) < 1e-4; }), places.end());
         for (const double place : places) opacity_stop(place, along(own, place) * along(transparency, place));
     }
     grad.objects("Clrs", colours);

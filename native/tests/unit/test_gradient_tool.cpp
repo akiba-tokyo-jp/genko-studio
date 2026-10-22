@@ -314,6 +314,52 @@ private slots:
         QVERIFY(refusal(precise, Json::array({exact})).find("a stop's colour") != std::string::npos);
     }
 
+    // a new (empty) paint layer of a page of 16 or 32 bits: a gradient and a fill make it precise (its pixels finer than 8
+    // bits, no picture laid on it); an alpha channel of such a page takes a gradient as before (lent as an 8-bit picture)
+    void emptyLayersOfPrecisePagesBecomePrecise() {
+        for (const std::string& kind : {std::string("16"), std::string("32")}) {
+            const core::Document doc = run(as_kind(paint_book(), kind), Json{{"op", "add_layer"}, {"page", 1}, {"kind", "paint"}, {"id", "fresh"}});
+            const core::Layer* made = nullptr;
+            for (const core::Layer& l : doc.page(0).layers)
+                if (l.id == "fresh") made = &l;
+            QVERIFY(made != nullptr && made->color_raster == nullptr);
+            Json op = black_white();
+            op["layer_id"] = "fresh";
+            op.erase("dither");
+            core::Document painted = run(doc, op);
+            const core::Layer& fresh = painted.page(0).layers[core::layer_by_id(painted.page(0), "fresh")];
+            QVERIFY2(fresh.color_raster != nullptr && fresh.patches.empty(), kind.c_str());
+            const Pixels p = whole(painted, "fresh");
+            QVERIFY(p.kind() == Pixels::Kind::Precise);
+            const std::size_t row = at_mm(p, 0, 25) / p.width() * p.width();
+            std::set<float> levels;
+            for (std::size_t x = 0; x < p.width(); ++x) levels.insert(p.at(row + x)[0]);
+            QVERIFY2(levels.size() > 300, qPrintable(QString("%1: %2 levels").arg(kind.c_str()).arg(levels.size())));
+            Json click{{"op", "fill"}, {"page", 1}, {"layer_id", "fresh"}, {"x_mm", 25}, {"y_mm", 25}, {"rgb", Json::array({100, 100, 100})},
+                       {"color_rgb", Json{{"precision", "u16"}, {"values", Json::array({0.3333, 0.5, 0.25})}}}};
+            core::Document filled = run(doc, click);
+            const core::Layer& bucket = filled.page(0).layers[core::layer_by_id(filled.page(0), "fresh")];
+            QVERIFY2(bucket.color_raster != nullptr && bucket.patches.empty(), kind.c_str());
+            const Pixels f = whole(filled, "fresh");
+            QVERIFY2(std::abs(f.at(at_mm(f, 25, 25))[0] - 0.3333f) < 1.0f / 65535.0f + 1e-6f, kind.c_str());
+        }
+        // an alpha channel of a page of 16 bits: the gradient in the channel, the layers as they were
+        core::Document doc = run(as_kind(paint_book(), "16"), Json{{"op", "add_channel"}, {"page", 1}});
+        const std::string channel = doc.page(0).channels.at(0).id;
+        Json op = black_white();
+        op.erase("layer_id");
+        op.erase("dither");
+        op["channel"] = channel;
+        core::Document drawn = run(doc, op);
+        QVERIFY(drawn.page(0).channels.at(0).raster != nullptr);
+        QVERIFY(drawn.page(0).channels.at(0).raster != doc.page(0).channels.at(0).raster);
+        QCOMPARE(drawn.page(0).layers.size(), doc.page(0).layers.size());
+        for (std::size_t i = 0; i < doc.page(0).layers.size(); ++i) {
+            QVERIFY(drawn.page(0).layers[i].color_raster == doc.page(0).layers[i].color_raster);
+            QVERIFY(drawn.page(0).layers[i].patches.empty());
+        }
+    }
+
     // a pen layer: a picture laid on it, as before (the new shapes and keys in it), a blend refused; the calls without the
     // new keys on an 8-bit paint layer: a picture, its pixels as they were
     void penLayersAndOldCalls() {

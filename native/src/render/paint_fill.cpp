@@ -1,15 +1,21 @@
 #include "render/paint_fill.hpp"
 
 #include <algorithm>
+#include <array>
 #include <cmath>
 #include <cstdint>
+#include <memory>
 #include <vector>
 
+#include "core/color_raster.hpp"
 #include "core/ops_util.hpp"
 #include "render/color_canvas.hpp"
 #include "render/image_ops.hpp"
+#include "render/op_limits.hpp"
 #include "render/page.hpp"
+#include "render/raster.hpp"
 #include "render/selection.hpp"
+#include "render/shape_parts.hpp"
 
 // PhotoCraft v0.2.0 crates/algo/src/paint.rs (lines 60-120: composite_area, dither_noise; 125-155: paint_gradient's
 // colour and coverage), MIT: native/third_party/photocraft/NOTICE.md.
@@ -47,6 +53,14 @@ std::optional<Image> on_grid(const core::Page& page, const Coverage& coverage, S
 
 }  // namespace
 
+bool becomes_precise(const core::Page& page, const core::Layer& layer) {
+    const bool deep = !page.color && page.rgb && page.rgb->depth > 8 && !page.rgb->table;
+    const bool empty = layer.color_raster == nullptr && layer.ink_raster == nullptr && (layer.raster_png == nullptr || layer.raster_png->empty()) &&
+                       layer.stroke_count() == 0 && layer.patches.empty() && !shape_parts::any(layer);
+    return deep && empty && layer.kind == core::LayerKind::Raster && layer.role != core::LayerRole::Tone && !layer.panel_clip && !layer.effect &&
+           !layer.screen && !layer.color;
+}
+
 float dither_noise(int x, int y) {
     std::uint32_t h = static_cast<std::uint32_t>(x) * 0x9E3779B1u ^ static_cast<std::uint32_t>(y) * 0x85EBCA77u;
     h ^= h >> 15;
@@ -59,6 +73,21 @@ bool paint(core::OpContext& c, std::size_t at, const std::string& layer_id, cons
            const How& how) {
     if (!image_ops::is_blend(how.blend)) throw OpError("blend is not one of the blends (normal, multiply, screen, …)");
     core::Document& doc = c.doc;
+    if (const core::Page& seen = doc.page(at); becomes_precise(seen, seen.layers[core::layer_by_id(seen, layer_id)])) {
+        // (clear precise pixels at the page's working grid, as keep_page_modes widens the 8-bit pixels an op leaves there)
+        const int dpi = raster::working_dpi(seen);
+        const int width = std::max(1, mm_to_px(seen.spec.width_mm.value(), dpi));
+        const int height = std::max(1, mm_to_px(seen.spec.height_mm.value(), dpi));
+        limits::check_picture(width, height, "the page");
+        const char* precision = seen.rgb->depth == 16 ? "u16" : "f32";
+        core::Page& page = doc.edit_page(at);
+        core::Layer& layer = page.layers[core::layer_by_id(page, layer_id)];
+        layer.color_raster = std::make_shared<const std::string>(core::encode_color_pixels(
+            static_cast<std::uint32_t>(width), static_cast<std::uint32_t>(height), precision, [](std::size_t) { return std::array<double, 4>{0, 0, 0, 0}; }));
+        layer.raster_png = nullptr;
+        layer.raster_memo = {};
+        layer.raster_relpath.reset();
+    }
     image_ops::Window found;
     (void)image_ops::layer_pixels(c, at, layer_id, Box{0, 0, 0, 0}, &found);  // (its grid; its lines and pictures in its pixels)
     const Size grid = found.grid;

@@ -7,6 +7,7 @@
 #include <utility>
 
 #include "core/error.hpp"
+#include "core/pyops.hpp"
 
 // PhotoCraft v0.2.0 crates/engine/src/presets/gradients.rs (lines 17-175: the preset, its stops and transparency, the
 // built-in groups and their colours), MIT: native/third_party/photocraft/NOTICE.md.
@@ -240,7 +241,8 @@ std::array<int, 4> sample(const Json& item, double t, const std::array<int, 3>& 
         return stops.back().second;
     };
     std::vector<std::pair<double, std::array<double, 4>>> colours, opacity;
-    for (const Json& s : stops_for(item, fg, bg)["stops"]) {
+    const Json given = stops_for(item, fg, bg);  // (kept: the loop reads into it)
+    for (const Json& s : given["stops"]) {
         const auto rgb = levels(s[1]);
         colours.push_back({s[0].get<double>(), {rgb[0], rgb[1], rgb[2], 1}});
     }

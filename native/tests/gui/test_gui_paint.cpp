@@ -25,6 +25,7 @@
 #include "app/gradients_panel.hpp"
 #include "app/inject.hpp"
 #include "app/main_window.hpp"
+#include "app/tool_settings.hpp"
 #include "core/json.hpp"
 #include "core/poses.hpp"
 #include "core/pynum.hpp"

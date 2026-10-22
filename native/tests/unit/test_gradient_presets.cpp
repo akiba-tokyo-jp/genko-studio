@@ -23,6 +23,9 @@
 #include "storage/fsutil.hpp"
 #include "testsupport.hpp"
 
+// (a colour "#rrggbb" is written in a plain string literal, not a raw one: moc of Qt 6.11 finds no class in a file whose
+// raw string holds `"#`)
+
 using namespace genko;
 using core::Json;
 namespace fs = std::filesystem;
@@ -79,20 +82,20 @@ private slots:
     }
 
     void presetsMadeOfStops() {
-        const Json made = presets::item_of(Json::parse(R"({"stops": [[0, "#112233"], [0.5, "foreground"], [1, "#ffffff"]], "transparency": [[0, 100], [1, 50]]})"),
+        const Json made = presets::item_of(Json::parse("{\"stops\": [[0, \"#112233\"], [0.5, \"foreground\"], [1, \"#ffffff\"]], \"transparency\": [[0, 100], [1, 50]]}"),
                                            "Mine", true);
         QCOMPARE(made["stops"][0][1], Json::parse("[17, 34, 51]"));
         QCOMPARE(made["stops"][1], Json::parse(R"([0.5, "foreground"])"));
         QCOMPARE(made["transparency"][1], Json::parse("[1.0, 0.5]"));
         // a list of colours: spaced evenly; stops out of order: sorted
-        QCOMPARE(presets::item_of(Json::parse(R"({"stops": ["#000000", "background", [9, 9, 9]]})"), "x")["stops"][1][0], Json(0.5));
-        QCOMPARE(presets::item_of(Json::parse(R"({"stops": [[1, "#000000"], [0, "#ffffff"]]})"), "x")["stops"][0][1], Json::parse("[255, 255, 255]"));
+        QCOMPARE(presets::item_of(Json::parse("{\"stops\": [\"#000000\", \"background\", [9, 9, 9]]}"), "x")["stops"][1][0], Json(0.5));
+        QCOMPARE(presets::item_of(Json::parse("{\"stops\": [[1, \"#000000\"], [0, \"#ffffff\"]]}"), "x")["stops"][0][1], Json::parse("[255, 255, 255]"));
         // what cannot be
-        QVERIFY(refused([] { (void)presets::item_of(Json::parse(R"({"stops": [[0, "#zzzzzz"], [1, "#000000"]]})"), "x"); }).find("colour") != std::string::npos);
-        QVERIFY(refused([] { (void)presets::item_of(Json::parse(R"({"stops": [[0, "#000000"]]})"), "x"); }).find("2 to 16") != std::string::npos);
-        QVERIFY(refused([] { (void)presets::item_of(Json::parse(R"({"stops": [[0, "#000000"], [2, "#ffffff"]]})"), "x"); }).find("0..1") != std::string::npos);
-        QVERIFY(refused([] { (void)presets::item_of(Json::parse(R"({"stops": [[0, [0, 0, 256]], [1, "#ffffff"]]})"), "x"); }).find("0..255") != std::string::npos);
-        QVERIFY(!refused([] { (void)presets::item_of(Json::parse(R"({"stops": ["#000000", "#ffffff"], "transparency": [[0, 1.5], [1, 0]]})"), "x"); }).empty());
+        QVERIFY(refused([] { (void)presets::item_of(Json::parse("{\"stops\": [[0, \"#zzzzzz\"], [1, \"#000000\"]]}"), "x"); }).find("colour") != std::string::npos);
+        QVERIFY(refused([] { (void)presets::item_of(Json::parse("{\"stops\": [[0, \"#000000\"]]}"), "x"); }).find("2 to 16") != std::string::npos);
+        QVERIFY(refused([] { (void)presets::item_of(Json::parse("{\"stops\": [[0, \"#000000\"], [2, \"#ffffff\"]]}"), "x"); }).find("0..1") != std::string::npos);
+        QVERIFY(refused([] { (void)presets::item_of(Json::parse("{\"stops\": [[0, [0, 0, 256]], [1, \"#ffffff\"]]}"), "x"); }).find("0..255") != std::string::npos);
+        QVERIFY(!refused([] { (void)presets::item_of(Json::parse("{\"stops\": [\"#000000\", \"#ffffff\"], \"transparency\": [[0, 1.5], [1, 0]]}"), "x"); }).empty());
         // the kind's check: a key it does not know, stops out of order
         QVERIFY(!refused([] { presets::kind().check(Json::parse(R"({"name": "a", "stops": [[0, [0, 0, 0]], [1, [1, 1, 1]]], "glow": 1})")); }).empty());
         QVERIFY(!refused([] { presets::kind().check(Json::parse(R"({"name": "a", "stops": [[1, [0, 0, 0]], [0, [1, 1, 1]]]})")); }).empty());
@@ -102,7 +105,7 @@ private slots:
     void newRenameMoveDeleteGroups() {
         std::vector<store::Group> groups = presets::kind().builtin();
         const auto& kind = presets::kind();
-        const Json mine = presets::item_of(Json::parse(R"({"stops": [[0, "#112233"], [0.5, "foreground"], [1, "#ffffff"]]})"), "Mine");
+        const Json mine = presets::item_of(Json::parse("{\"stops\": [[0, \"#112233\"], [0.5, \"foreground\"], [1, \"#ffffff\"]]}"), "Mine");
         QCOMPARE(store::add(groups, kind, mine, std::string_view("My Gradients"), "カスタム")["group"], Json("My Gradients"));
         QCOMPARE(store::add(groups, kind, mine, std::nullopt, "カスタム")["name"], Json("Mine 2"));
         (void)store::edit(groups, kind, Json::parse(R"({"action": "rename", "preset": "Mine", "name": "Ours"})"));
@@ -133,7 +136,7 @@ private slots:
         const fs::path dir = core::path_from_utf8(scratch.path().toStdString());
         store::Library first = store::load(dir, presets::kind());
         QVERIFY(!first.from_file && first.problem.empty());
-        (void)store::add(first.groups, presets::kind(), presets::item_of(Json::parse(R"({"stops": ["#ff0000", "#0000ff"]})"), "Saved"), std::nullopt, "x");
+        (void)store::add(first.groups, presets::kind(), presets::item_of(Json::parse("{\"stops\": [\"#ff0000\", \"#0000ff\"]}"), "Saved"), std::nullopt, "x");
         store::save(dir, presets::kind(), first.groups);
         store::Library again = store::load(dir, presets::kind());
         QVERIFY(again.from_file);
@@ -180,7 +183,7 @@ private slots:
         Json got = genko::test::one_line(out.out);
         QCOMPARE(got["groups"][0]["name"], Json("基本"));
         QCOMPARE(got["groups"][0]["presets"][1]["name"], Json("描画色から透明に"));
-        out = genko({"gradients", "new", "--stops", R"([[0, "#ff0000"], [1, "background"]])", "--transparency", "[[0, 1], [1, 0.25]]", "--name", "赤から",
+        out = genko({"gradients", "new", "--stops", "[[0, \"#ff0000\"], [1, \"background\"]]", "--transparency", "[[0, 1], [1, 0.25]]", "--name", "赤から",
                      "--group", "自分の"});
         QVERIFY2(out.exit_code == 0, qPrintable(out.described()));
         QCOMPARE(genko::test::one_line(out.out)["group"], Json("自分の"));
@@ -189,7 +192,7 @@ private slots:
         got = genko::test::one_line(genko({"gradients", "list"}).out);
         QCOMPARE(got["groups"].back()["presets"][0]["name"], Json("赤"));
         QCOMPARE(got["groups"].back()["presets"][0]["transparency"][1], Json::parse("[1.0, 0.25]"));
-        out = genko({"gradients", "new", "--stops", R"([[0, "#zz0000"], [1, "background"]])"});
+        out = genko({"gradients", "new", "--stops", "[[0, \"#zz0000\"], [1, \"background\"]]"});
         QVERIFY(out.exit_code != 0);
         out = genko({"gradients", "reset"});
         QVERIFY2(out.exit_code == 0, qPrintable(out.described()));

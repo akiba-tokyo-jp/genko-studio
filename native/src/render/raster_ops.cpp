@@ -265,13 +265,15 @@ Image fill_reference(const Document& doc, const Page& page, std::size_t target, 
 // --- fills --------------------------------------------------------------------------------------------------------
 
 // PC4 E4 (SPEC.md COLOR-09「塗りつぶし・グラデーション」, design section E 0.4 and 3.3): a fill or gradient goes into a paint
-// layer's own values (render/paint_fill) when the layer is precise (its pixels of 16 or 32 bits) or of inks (a paint layer
-// of a CMYK, Lab, grey or multichannel page that holds no 8-bit picture — as image_ops::layer_pixels reads it), or when the
-// op asks for what only those values can do (a blend; the gradient's new keys); an 8-bit layer's fill without them keeps
-// the picture it always laid (the same bytes) — a channel's or a mask's lent to the op too (an 8-bit picture on any page) —,
-// a pen or tone layer's too.
+// layer's own values (render/paint_fill) when the layer is precise (its pixels of 16 or 32 bits, or an empty paint layer of
+// an RGB page of 16 or 32 bits: paint_fill::becomes_precise) or of inks (a paint layer of a CMYK, Lab, grey or
+// multichannel page that holds no 8-bit picture — as image_ops::layer_pixels reads it), or when the op asks for what only
+// those values can do (a blend; the gradient's new keys); an 8-bit layer's fill without them keeps the picture it always
+// laid (the same bytes) — a channel's or a mask's lent to the op too (an 8-bit picture on any page) —, a pen or tone
+// layer's too.
 bool precise_or_inks(const Page& page, const Layer& layer) {
-    return layer.color_raster != nullptr || layer.ink_raster != nullptr || (page.color.has_value() && layer.raster_png == nullptr);
+    return layer.color_raster != nullptr || layer.ink_raster != nullptr || (page.color.has_value() && layer.raster_png == nullptr) ||
+           paint_fill::becomes_precise(page, layer);
 }
 
 // The op's blend: none for normal or none given; OpError for what is not one of the blends.
@@ -690,7 +692,8 @@ void gradient_fill_new(OpContext& c, std::size_t at, std::size_t ti, const std::
     spec["shape"] = shape != nullptr && shape->is_string() ? *shape : Json("linear");
     Json plain = op;
     plain.erase("stops");
-    for (const auto& [key, value] : core::gradient_extras(plain).items()) spec[key] = value;
+    const Json extras = core::gradient_extras(plain);  // (kept: items() refers to it)
+    for (const auto& [key, value] : extras.items()) spec[key] = value;
     if (reverse) spec["reverse"] = true;
     // the colour stops (2 to 16): the op's stops, else its two ends as before
     std::vector<detail::GradientStop> stops;
