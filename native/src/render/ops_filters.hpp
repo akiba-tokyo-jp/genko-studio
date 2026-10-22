@@ -17,4 +17,8 @@ void register_filter_ops(core::OpRegistry& registry);
 // normal form}}; none for any other kind. (D6 adds what it resolves: レンズ補正's profile, 広角補正's model.)
 std::optional<core::Json> filter_report(const core::Document& doc, const core::Json& op);
 
+// What filter_raster refuses of a kind of フィルター's that a smart filter keeps (OpError): D3's フィルターギャラリー with every
+// effect hidden (it would change nothing; a smart filter may hold its effects so).
+void refuse_filter(const core::Document& doc, const core::Json& op);
+
 }  // namespace genko::render

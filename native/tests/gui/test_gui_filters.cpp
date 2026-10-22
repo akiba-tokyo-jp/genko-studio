@@ -28,12 +28,16 @@
 #include "app/history_panel.hpp"
 #include "app/layer_panel.hpp"
 #include "app/config.hpp"
+#include "app/filter_gallery_window.hpp"
 #include "app/main_window.hpp"
 #include "app/preferences.hpp"
 #include "app/workspace.hpp"
+#include "core/adjust.hpp"
 #include "core/base64.hpp"
 #include "core/command_bus.hpp"
+#include "render/fx.hpp"
 #include "render/ops_registry.hpp"
+#include "render/page.hpp"
 #include "render/png.hpp"
 
 using namespace genko;
@@ -644,6 +648,82 @@ private slots:
         QCOMPARE(set[0]["params"]["effects"].size(), std::size_t(1));
         QCOMPARE(set[0]["params"]["effects"][0]["filter"], Json("cutout"));
         QCOMPARE(set[0]["params"]["effects"][0]["params"]["number_of_levels"], Json(3));
+        // set again without a change: nothing sent (no step in the history)
+        const auto before_edit = book.session->snapshot();
+        answers.responder->exec = [](QDialog* d) { return d->objectName() == QStringLiteral("filter_gallery") ? int(QDialog::Accepted) : int(QDialog::Rejected); };
+        book.window->layer_panel()->edit_smart_filter(0);
+        QVERIFY(book.session->snapshot() == before_edit);
+    }
+
+    // フィルターギャラリー's preview (review P2-2, P3-4): what the op lays on the same part of the layer — the same pixels away
+    // from the part's edges, its marks where the op puts them —, the same page's place the same pixels whichever part is
+    // looked at (dragged); inside the selection only, what is outside it as it was, deep inside it what the op makes there.
+    void theGalleryPreviewIsTheResult() {
+        // (a paint layer whose pixels are the page's at the working 200 dpi: 315 × 315 over 40 mm)
+        auto doc = core::new_episode("ギャラリー", core::Num(1), 1, core::PageSpec::custom(40, 40, 30, 30, 1, 2, 2, 2, 2, 72, "color"));
+        std::string bytes;
+        for (int y = 0; y < 315; ++y)
+            for (int x = 0; x < 315; ++x)
+                for (const int c : {(x * 7 + y * 3) % 256, (x * x + y) % 200, y % 9 * 28, 255}) bytes.push_back(static_cast<char>(c));
+        const render::Image picture = render::Image::frombytes("RGBA", render::Size{315, 315}, bytes);
+        doc = core::CommandBus(render::ops_registry())
+                  .apply(doc, Json::array({Json{{"op", "add_layer"}, {"page", 1}, {"kind", "paint"}, {"id", "pic"}},
+                                           Json{{"op", "set_layer"}, {"page", 1}, {"id", "pic"}, {"panel_clip", false}},
+                                           Json{{"op", "put_raster"}, {"page", 1}, {"id", "pic"}, {"png_base64", core::b64encode(render::write_png(picture))}}}),
+                         core::Actor("human:tester"))
+                  .doc;
+        Book book(doc);
+        book.window->set_target_layer("pic");
+        const Json settings = core::normalize_filter(
+            "filter_gallery",
+            Json{{"effects", Json::array({Json{{"filter", "texturizer"}, {"params", Json{{"relief", 30}}}}, Json{{"filter", "stained_glass"}, {"params", Json{{"cell_size", 6}}}},
+                                          Json{{"filter", "halftone_pattern"}, {"params", Json{{"pattern_type", "circle"}}}, {"visible", false}},
+                                          Json{{"filter", "grain"}}})}},
+            nullptr);
+        const int halo = render::fx::kernel("filter_gallery")->halo(settings, render::fx::Ctx{}).radius;
+        QVERIFY2(halo > 0 && 2 * halo + 20 <= 160, qPrintable(QString::number(halo)));  // (pixels left to compare away from the edges)
+        const auto source = app::filter_gallery::source_of(*book.window, *book.window->current_page(), *book.layer("pic"), -1);
+        QCOMPARE(source.dpi, 200.0);
+        Json op{{"op", "filter_raster"}, {"page", 1}, {"id", "pic"}, {"kind", "filter_gallery"}};
+        op.update(settings);
+        const core::Document start = *book.session->snapshot();
+        const core::Document done = core::CommandBus(render::ops_registry()).apply(start, Json::array({op}), core::Actor("human:tester")).doc;
+        QCOMPARE(done.page(0).layers.back().id, std::string("pic"));
+        const std::string result = render::layer_image(done.page(0), done.page(0).layers.back(), 200, &done).convert("RGBA").tobytes();
+        const auto same_as_result = [&](const render::Box& area, const render::Image& shown) {
+            const std::string got = shown.convert("RGBA").tobytes();
+            for (int y = area.y0 + halo; y < area.y1 - halo; ++y)
+                for (int x = area.x0 + halo; x < area.x1 - halo; ++x)
+                    for (int c = 0; c < 4; ++c)
+                        if (got[(std::size_t(y - area.y0) * std::size_t(area.width()) + std::size_t(x - area.x0)) * 4 + std::size_t(c)] !=
+                            result[(std::size_t(y) * 315 + std::size_t(x)) * 4 + std::size_t(c)])
+                            return false;
+            return true;
+        };
+        const render::Box part{20, 30, 180, 190}, dragged{70, 90, 250, 260};
+        const render::Image looked = app::filter_gallery::laid_on(source, 200, part, settings);
+        QCOMPARE(looked.width(), part.width());
+        QVERIFY(same_as_result(part, looked));
+        QVERIFY(same_as_result(dragged, app::filter_gallery::laid_on(source, 200, dragged, settings)));
+        // inside a selection (5..35 mm: 39..276 px): outside it as it was, deep inside it the op's with the same selection
+        book.window->canvas()->set_selection(Json{{"poly", Json::array({Json::array({5, 5}), Json::array({35, 5}), Json::array({35, 35}), Json::array({5, 35})})}});
+        const auto selected = app::filter_gallery::source_of(*book.window, *book.window->current_page(), *book.layer("pic"), -1);
+        QVERIFY(selected.selection.has_value());
+        const render::Box wide{30, 30, 290, 290};
+        const std::string inside = app::filter_gallery::laid_on(selected, 200, wide, settings).convert("RGBA").tobytes();
+        const auto at = [&](const std::string& b, int w, int x, int y, int c) { return b[(std::size_t(y) * std::size_t(w) + std::size_t(x)) * 4 + std::size_t(c)]; };
+        for (const auto& [x, y] : std::vector<std::pair<int, int>>{{33, 100}, {100, 33}, {285, 285}, {280, 60}})
+            for (int c = 0; c < 4; ++c) QCOMPARE(at(inside, wide.width(), x - wide.x0, y - wide.y0, c), at(bytes, 315, x, y, c));
+        Json op_in = op;
+        op_in["area"] = *selected.selection;
+        const core::Document done_in = core::CommandBus(render::ops_registry()).apply(start, Json::array({op_in}), core::Actor("human:tester")).doc;
+        const std::string result_in = render::layer_image(done_in.page(0), done_in.page(0).layers.back(), 200, &done_in).convert("RGBA").tobytes();
+        int compared = 0;
+        for (int y = 39 + halo + 2; y < 276 - halo - 2; ++y)
+            for (int x = 39 + halo + 2; x < 276 - halo - 2; ++x, ++compared)
+                for (int c = 0; c < 4; ++c) QCOMPARE(at(inside, wide.width(), x - wide.x0, y - wide.y0, c), at(result_in, 315, x, y, c));
+        QVERIFY(compared >= 100 * 100);
+        book.window->canvas()->set_selection(std::nullopt);
     }
 };
 

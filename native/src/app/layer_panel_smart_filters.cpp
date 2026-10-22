@@ -161,8 +161,12 @@ void LayerPanel::edit_smart_filter(int index) {
         call.page = page;
         call.layer = layer;
         call.filter = index;
-        call.send = [this, asked, page_index, layer_id, index, kind, grid](const Json& values) {
+        call.send = [this, asked, page_index, layer_id, index, kind, grid, now](const Json& values) {
             if (!window_->still(asked)) return;
+            try {  // (nothing changed: nothing sent — as the table's windows)
+                if (core::normalize_filter(kind, now, nullptr) == values) return;
+            } catch (const std::exception&) {
+            }
             const bool heavy = render::fx::work(kind, values, std::uint64_t(grid.width) * grid.height, grid.s) >= render::fx::kHeavyWork;
             window_->send_filter(Json::array({Json{{"op", "smart_filter_set"}, {"page", page_index}, {"id", layer_id}, {"index", index}, {"params", values}}}),
                                  filter_forms::title(kind), heavy);

@@ -43,7 +43,9 @@
 #include "core/smart.hpp"
 #include "render/fx.hpp"
 #include "render/page.hpp"
+#include "render/channels.hpp"
 #include "render/raster_ops.hpp"
+#include "render/selection.hpp"
 #include "render/segment/segment.hpp"
 
 namespace genko::app::filter_gallery {
@@ -171,31 +173,24 @@ QString choice_word(std::string_view value) {
 
 // --- the pictures --------------------------------------------------------------------------------------------------------
 
-// The effects of `settings` laid on a picture of the layer at the scale s (its colours as the page shows them: on a page of
-// inks an approximation of what the inks make), over the paper (white) as a picture to show; a null picture when stopped
-// or refused.
-QImage worked(const render::Image& picture, const Json& settings, double s) {
-    try {
-        const render::ImageAllocationBudget budget{1ULL << 30};
-        const render::Image rgba = picture.mode() == "RGBA" ? picture : picture.convert("RGBA");
-        const auto surface = render::fx::eight_surface(rgba);
-        const render::fx::Kernel* kernel = render::fx::kernel("filter_gallery");
-        if (kernel == nullptr) return {};
-        render::fx::apply(*surface, *kernel, settings, core::FilterInks::Meaning, render::fx::Rect{0, 0, rgba.width(), rgba.height()}, nullptr, s);
-        const std::string bytes = render::fx::take_image(*surface).tobytes();
-        const QImage layer(reinterpret_cast<const uchar*>(bytes.data()), rgba.width(), rgba.height(), rgba.width() * 4, QImage::Format_RGBA8888);
-        QImage out(rgba.width(), rgba.height(), QImage::Format_RGB32);
-        out.fill(Qt::white);
-        QPainter painter(&out);
-        painter.drawImage(0, 0, layer);
-        painter.end();
-        return out;
-    } catch (...) {  // (stopped — render::Cancelled —, refused, or past the budget: none)
-        return {};
-    }
+// The effects of `settings` over `picture` — the source's pixels at `area` of the page's pixels at `dpi` —: their marks
+// where the op on the whole grid puts them (the origin), the base box `base` on the page's pixels, mixed by `cover` (a
+// byte a pixel of the picture; none: everywhere). "RGBA", the alpha as the picture's. Stopped (render::Cancelled), refused
+// or past the budget: it throws.
+render::Image effects_over(const render::Image& picture, int dpi, const render::Box& area, const render::Box& base, const std::string* cover,
+                           const Json& settings) {
+    const render::ImageAllocationBudget budget{1ULL << 30};
+    const render::Image rgba = picture.mode() == "RGBA" ? picture : picture.convert("RGBA");
+    const render::fx::Kernel* kernel = render::fx::kernel("filter_gallery");
+    if (kernel == nullptr || rgba.width() <= 0 || rgba.height() <= 0) return rgba;
+    const auto surface = render::fx::eight_surface(rgba);
+    const render::fx::PlaceScope place(area.x0, area.y0, render::fx::Rect{base.x0, base.y0, base.x1, base.y1});
+    render::fx::apply(*surface, *kernel, settings, core::FilterInks::Meaning, render::fx::Rect{0, 0, rgba.width(), rgba.height()}, cover, dpi / 200.0);
+    return render::fx::take_image(*surface);
 }
 
-QImage plain(const render::Image& picture) {
+// A picture over the paper (white), to show.
+QImage on_paper(const render::Image& picture) {
     const render::Image rgba = picture.mode() == "RGBA" ? picture : picture.convert("RGBA");
     const std::string bytes = rgba.tobytes();
     const QImage layer(reinterpret_cast<const uchar*>(bytes.data()), rgba.width(), rgba.height(), rgba.width() * 4, QImage::Format_RGBA8888);
@@ -206,6 +201,9 @@ QImage plain(const render::Image& picture) {
     painter.end();
     return out;
 }
+
+// The page's pixels at `dpi` (as the page is drawn there).
+render::Box page_box(const Source& source, int dpi) { return render::Box{0, 0, render::mm_to_px(source.width_mm, dpi), render::mm_to_px(source.height_mm, dpi)}; }
 
 Json rgb_json(const std::array<int, 3>& c) { return Json::array({c[0], c[1], c[2]}); }
 
@@ -261,14 +259,14 @@ public:
         }
         for (const Json& effect : given["effects"]) entries_.push_back(Entry{effect, serial_++});
         current_ = static_cast<int>(entries_.size()) - 1;
-        view_x_ = (source_.x0_mm + source_.x1_mm) / 2;
-        view_y_ = (source_.y0_mm + source_.y1_mm) / 2;
+        box_ = {0, 0, source_.width_mm, source_.height_mm};
+        view_x_ = source_.width_mm / 2;
+        view_y_ = source_.height_mm / 2;
         build();
         rebuild_list();
         show_effect();
-        make_source();
-        run_preview();
-        start_thumbnails();
+        say_too_large();
+        find_shown();
     }
 
     ~GalleryWindow() override {
@@ -312,7 +310,7 @@ private:
         zoom_->addItem(QStringLiteral("200%"), 2.0);
         zoom_->setCurrentIndex(2);
         connect(zoom_, &QComboBox::currentIndexChanged, this, [this] {
-            make_source();
+            place();
             run_preview();
         });
         under->addWidget(zoom_);
@@ -395,6 +393,12 @@ private:
         holder->setLayout(right);
         holder->setMinimumWidth(280);
         row->addWidget(holder);
+        too_large_ = new QLabel;
+        too_large_->setObjectName(QStringLiteral("gallery_too_large"));
+        too_large_->setProperty("role", "warning");
+        too_large_->setWordWrap(true);
+        too_large_->setVisible(false);
+        column->addWidget(too_large_);
         auto* note = new QLabel(QStringLiteral("見え方は Photoshop のフィルターギャラリーに近づけたもので、同じではありません。長さは 200 dpi の画素で数えます。"));
         note->setProperty("role", "hint");
         note->setWordWrap(true);
@@ -525,18 +529,38 @@ private:
 
     double zoom() const { return zoom_->currentData().toDouble(); }
 
-    // The layer's picture for the zoom and the part looked at (made here: the window's own thread), and its scale.
-    void make_source() {
+    // What the layer shows on (a small picture of it, on a thread), then the view there, the preview and the pictures.
+    void find_shown() {
+        busy_->setVisible(true);
+        setProperty("previewing", true);
+        auto* watcher = new QFutureWatcher<std::array<double, 4>>(this);
+        connect(watcher, &QFutureWatcher<std::array<double, 4>>::finished, this, [this, watcher] {
+            box_ = watcher->result();
+            watcher->deleteLater();
+            if (!panned_) {
+                view_x_ = (box_[0] + box_[2]) / 2;
+                view_y_ = (box_[1] + box_[3]) / 2;
+            }
+            found_ = true;
+            place();
+            run_preview();
+            start_thumbnails();
+        });
+        watcher->setFuture(QtConcurrent::run([source = source_]() { return shown_box(source); }));
+    }
+
+    // The part looked at for the zoom (the page's pixels at the resolution it is drawn at) and how much it is enlarged.
+    void place() {
         const double z = zoom();
         const double page_w = std::max(source_.width_mm, 1.0), page_h = std::max(source_.height_mm, 1.0);
         double dpi = source_.dpi;
         double x0 = 0, y0 = 0, x1 = 0, y1 = 0;  // (mm)
         shown_factor_ = 1;
         if (z <= 0) {  // (全体: what the layer shows on, fitted)
-            x0 = source_.x0_mm;
-            y0 = source_.y0_mm;
-            x1 = source_.x1_mm;
-            y1 = source_.y1_mm;
+            x0 = box_[0];
+            y0 = box_[1];
+            x1 = box_[2];
+            y1 = box_[3];
             if (x1 <= x0 || y1 <= y0) {
                 x0 = y0 = 0;
                 x1 = page_w;
@@ -552,24 +576,18 @@ private:
             x1 = std::min(page_w, x0 + side_mm);
             y1 = std::min(page_h, y0 + side_mm);
         }
-        dpi = std::max(1.0, dpi);
-        shown_dpi_ = dpi;
-        const render::Box area{static_cast<int>(std::floor(x0 / 25.4 * dpi)), static_cast<int>(std::floor(y0 / 25.4 * dpi)),
-                               static_cast<int>(std::ceil(x1 / 25.4 * dpi)), static_cast<int>(std::ceil(y1 / 25.4 * dpi))};
-        try {
-            shown_ = source_.picture ? source_.picture(static_cast<int>(std::lround(dpi)), area) : render::Image();
-        } catch (const std::exception&) {
-            shown_ = render::Image();
-        }
-        if (shown_.width() > 0 && shown_.height() > 0) show(plain(shown_));
+        shown_dpi_ = std::max(1, static_cast<int>(std::lround(dpi)));
+        shown_area_ = render::Box{static_cast<int>(std::floor(x0 / 25.4 * shown_dpi_)), static_cast<int>(std::floor(y0 / 25.4 * shown_dpi_)),
+                                  static_cast<int>(std::ceil(x1 / 25.4 * shown_dpi_)), static_cast<int>(std::ceil(y1 / 25.4 * shown_dpi_))};
     }
 
     void pan(QPoint moved) {
-        if (zoom() <= 0) return;
+        if (zoom() <= 0 || !found_) return;
         const double per_mm = shown_dpi_ / 25.4 * shown_factor_;
         view_x_ -= moved.x() / per_mm;
         view_y_ -= moved.y() / per_mm;
-        make_source();
+        panned_ = true;
+        place();
         run_preview();
     }
 
@@ -579,17 +597,26 @@ private:
         preview_->setPixmap(QPixmap::fromImage(scaled));
     }
 
-    void schedule() { timer_->start(); }
+    void schedule() {
+        say_too_large();
+        timer_->start();
+    }
 
-    // The effects over the picture looked at, on a thread (the last asked for wins).
+    void idle() {
+        busy_->setVisible(false);
+        setProperty("previewing", false);
+    }
+
+    // The effects over the part looked at — the pixels drawn and laid on there on a thread (the last asked for wins).
     void run_preview() {
         timer_->stop();
         if (preview_stop_) preview_stop_->request_stop();
-        if (shown_.width() <= 0 || shown_.height() <= 0) return;
+        if (!found_) return;  // (what shows is being found: the preview after it)
         Json params;
         try {
             params = settings();
         } catch (const std::exception&) {
+            idle();
             return;
         }
         auto stop = std::make_shared<std::stop_source>();
@@ -600,32 +627,55 @@ private:
         connect(watcher, &QFutureWatcher<QImage>::finished, this, [this, watcher, stop] {
             const QImage image = watcher->result();
             watcher->deleteLater();
-            if (preview_stop_ != stop || stop->stop_requested()) return;  // (not wanted any more)
-            busy_->setVisible(false);
-            setProperty("previewing", false);
+            if (preview_stop_ != stop || stop->stop_requested()) return;  // (not wanted any more: a later one says when it is done)
+            idle();
             ++previews_;
             setProperty("previews", previews_);
             show(image);
         });
-        watcher->setFuture(QtConcurrent::run([picture = shown_, params, s = shown_dpi_ / 200.0, token = stop->get_token()]() -> QImage {
-            const render::segment::StopScope scope(token);
-            return worked(picture, params, s);
-        }));
+        watcher->setFuture(
+            QtConcurrent::run([source = source_, params, dpi = shown_dpi_, area = shown_area_, token = stop->get_token()]() -> QImage {
+                const render::segment::StopScope scope(token);
+                try {
+                    return on_paper(laid_on(source, dpi, area, params));
+                } catch (...) {  // (stopped, refused, past the budget: none)
+                    return QImage();
+                }
+            }));
+    }
+
+    // Whether the stack can be worked at once at the resolution the layer is drawn at for print (the imaging budget holds
+    // one window of the smallest tiles: render/fx), else said under the window.
+    void say_too_large() {
+        if (too_large_ == nullptr) return;
+        bool fits = true;
+        try {
+            const render::fx::Kernel* kernel = render::fx::kernel("filter_gallery");
+            render::fx::Ctx ctx;
+            ctx.s = source_.print_s;
+            const int halo = kernel != nullptr && kernel->halo ? kernel->halo(settings(), ctx).radius : 0;
+            const double scale = source_.print_s / std::max(source_.dpi / 200.0, 1e-9);
+            const double w = std::max(1.0, source_.grid_width * scale), h = std::max(1.0, source_.grid_height * scale);
+            const double side = 64.0 + 2.0 * halo;
+            const double bytes_a_pixel = 4 * 16 + 4 * 4 + (kernel != nullptr ? static_cast<double>(kernel->work_bytes) : 0.0) + (source_.inks ? 9 * 8 : 0);
+            fits = std::min(side, w) * std::min(side, h) * bytes_a_pixel < 2.0 * 1024 * 1024 * 1024;
+        } catch (const std::exception&) {
+        }
+        too_large_->setText(fits ? QString()
+                                 : QStringLiteral("効果が多すぎるか大きすぎて、このレイヤーの解像度（%1 dpi）では一度に掛けられません（作業に使える記憶の上限を超えます）。"
+                                                  "エフェクトレイヤーを減らすか、設定を小さくします。")
+                                       .arg(std::lround(200.0 * source_.print_s)));
+        too_large_->setVisible(!fits);
+        setProperty("too_large", !fits);
     }
 
     // --- the thumbnails: each effect alone with its settings by default over a small copy of the layer, in turn ---
 
     void start_thumbnails() {
-        const double dpi = std::min(source_.dpi, 100.0);
-        const double cx = (source_.x0_mm + source_.x1_mm) / 2, cy = (source_.y0_mm + source_.y1_mm) / 2;
+        const int dpi = static_cast<int>(std::lround(std::min(source_.dpi, 100.0)));
+        const double cx = (box_[0] + box_[2]) / 2, cy = (box_[1] + box_[3]) / 2;
         const int px = static_cast<int>(std::lround(cx / 25.4 * dpi)), py = static_cast<int>(std::lround(cy / 25.4 * dpi));
         const render::Box area{px - kThumb.width() / 2, py - kThumb.height() / 2, px + kThumb.width() - kThumb.width() / 2, py + kThumb.height() - kThumb.height() / 2};
-        render::Image sample;
-        try {
-            sample = source_.picture ? source_.picture(static_cast<int>(dpi), area) : render::Image();
-        } catch (const std::exception&) {
-        }
-        if (sample.width() <= 0 || sample.height() <= 0) return;
         std::vector<std::string> keys;
         for (const QTreeWidgetItem* item : thumb_items_) keys.push_back(item->data(0, Qt::UserRole).toString().toStdString());
         thumbs_ = new QFutureWatcher<std::pair<int, QImage>>(this);
@@ -637,11 +687,25 @@ private:
             }
         });
         const Json fg = foreground_, bg = background_;
-        thumbs_->setFuture(QtConcurrent::run([sample, keys, fg, bg, s = dpi / 200.0](QPromise<std::pair<int, QImage>>& promise) {
+        thumbs_->setFuture(QtConcurrent::run([source = source_, keys, fg, bg, dpi, area](QPromise<std::pair<int, QImage>>& promise) {
+            render::Image sample;
+            try {
+                sample = source.picture ? source.picture(dpi, area) : render::Image();
+            } catch (const std::exception&) {
+                return;
+            }
+            if (sample.width() <= 0 || sample.height() <= 0) return;
+            const render::Box at{std::max(0, area.x0), std::max(0, area.y0), std::max(0, area.x0) + sample.width(), std::max(0, area.y0) + sample.height()};
+            const render::Box page = page_box(source, dpi);
             for (std::size_t i = 0; i < keys.size(); ++i) {
                 if (promise.isCanceled()) return;
                 const Json settings{{"effects", Json::array({Json{{"filter", keys[i]}}})}, {"foreground", fg}, {"background", bg}};
-                promise.addResult(std::make_pair(static_cast<int>(i), worked(sample, settings, s)));
+                QImage made;
+                try {
+                    made = on_paper(effects_over(sample, dpi, at, page, nullptr, settings));
+                } catch (...) {
+                }
+                promise.addResult(std::make_pair(static_cast<int>(i), made));
             }
         }));
     }
@@ -652,9 +716,12 @@ private:
     int current_ = 0;
     int serial_ = 0;
     bool quiet_ = false;
+    std::array<double, 4> box_{};  // (what the layer shows on, mm)
+    bool found_ = false, panned_ = false;
     double view_x_ = 0, view_y_ = 0;
-    render::Image shown_;
-    double shown_dpi_ = 200, shown_factor_ = 1;
+    int shown_dpi_ = 200;
+    render::Box shown_area_;
+    double shown_factor_ = 1;
     int previews_ = 0;
     std::shared_ptr<std::stop_source> preview_stop_;
     QFutureWatcher<std::pair<int, QImage>>* thumbs_ = nullptr;
@@ -670,18 +737,30 @@ private:
     QListWidget* stack_ = nullptr;
     QPushButton* add_ = nullptr;
     QPushButton* remove_ = nullptr;
+    QLabel* too_large_ = nullptr;
     QTimer* timer_ = nullptr;
 };
 
-// The layer's picture as the window lays the effects on it: the page and the layer as the book has them now (a smart
-// object's smart filter set again: the filters below it alone), drawn over a part of the page at a resolution.
+}  // namespace
+
 Source source_of(const MainWindow& window, const core::Page& page, const core::Layer& layer, int filter) {
     auto book = window.session().snapshot();
     auto shown = std::make_shared<core::Page>(page);
     const std::string id = layer.id;
-    if (filter >= 0) {
-        for (core::Layer& l : shown->layers) {
-            if (l.id != id || !l.smart || !l.smart->is_object() || !l.smart->contains("filters")) continue;
+    // (the layer alone as the op works it: no layer style, mask, vector mask, opacity, blend, clipping or tint — a paint
+    // layer's pixels not cut to the panels —; a smart object's smart filter set again: the filters below it alone)
+    for (core::Layer& l : shown->layers) {
+        if (l.id != id) continue;
+        l.visible = true;
+        l.effect.reset();
+        l.mask.reset();
+        l.vector_mask.reset();
+        l.opacity = 1.0;
+        l.blend = "normal";
+        l.clip = false;
+        l.color.reset();
+        if (l.kind == core::LayerKind::Raster && l.stroke_count() == 0 && l.patches.empty()) l.panel_clip = false;
+        if (filter >= 0 && l.smart && l.smart->is_object() && l.smart->contains("filters")) {
             Json smart = *l.smart;
             Json& filters = smart["filters"];
             if (filters.is_array() && filter < static_cast<int>(filters.size())) filters.erase(filters.begin() + filter, filters.end());
@@ -691,18 +770,54 @@ Source source_of(const MainWindow& window, const core::Page& page, const core::L
     Source source;
     source.width_mm = page.spec.width_mm.value();
     source.height_mm = page.spec.height_mm.value();
-    source.dpi = 200.0 * render::fx::layer_grid(page, layer).s;
+    const render::fx::Grid grid = render::fx::layer_grid(page, layer);
+    source.dpi = 200.0 * grid.s;
+    source.grid_width = grid.width;
+    source.grid_height = grid.height;
+    source.print_s = layer.kind == core::LayerKind::Smart ? std::max(grid.s, page.spec.dpi.value() / 200.0) : grid.s;
+    source.inks = page.color.has_value();
+    source.selection = window.selection_area();
+    // (the channel drawn on — PC1c: lent as an 8-bit grey at the working 200 dpi —: its density)
+    const std::string target = window.channel_view().target;
+    if (!target.empty()) {
+        for (const core::Channel& channel : page.channels) {
+            if (channel.name != target && channel.id != target) continue;
+            const auto lent = std::make_shared<core::Channel>(channel);
+            source.dpi = 200.0;
+            source.grid_width = static_cast<std::uint32_t>(render::mm_to_px(source.width_mm, 200));
+            source.grid_height = static_cast<std::uint32_t>(render::mm_to_px(source.height_mm, 200));
+            source.print_s = 1.0;
+            source.inks = false;
+            const double width_mm = source.width_mm, height_mm = source.height_mm;
+            source.picture = [lent, width_mm, height_mm](int dpi, const render::Box& asked) {
+                const render::channels::Density density(*lent);
+                const int w = render::mm_to_px(width_mm, dpi), h = render::mm_to_px(height_mm, dpi);
+                const render::Box area{std::max(0, asked.x0), std::max(0, asked.y0), std::min(w, asked.x1), std::min(h, asked.y1)};
+                std::string bytes;
+                for (int y = area.y0; y < area.y1; ++y)
+                    for (int x = area.x0; x < area.x1; ++x) {
+                        const auto v = static_cast<char>(std::lround(std::clamp(density.at((x + 0.5) / w, (y + 0.5) / h), 0.0f, 1.0f) * 255.0f));
+                        bytes.append({v, v, v, static_cast<char>(255)});
+                    }
+                return render::Image::frombytes("RGBA", render::Size{std::max(0, area.x1 - area.x0), std::max(0, area.y1 - area.y0)}, bytes);
+            };
+            return source;
+        }
+    }
     source.picture = [book, shown, id](int dpi, const render::Box& area) {
         for (const core::Layer& l : shown->layers) {
             if (l.id == id) return render::layer_image_over(*shown, l, dpi, area, book.get(), true);
         }
         return render::Image();
     };
-    // (what the layer shows on: its picture's box at a low resolution)
+    return source;
+}
+
+std::array<double, 4> shown_box(const Source& source) {
+    std::array<double, 4> box{0, 0, source.width_mm, source.height_mm};
     try {
         constexpr int low = 36;
-        const render::Box all{0, 0, static_cast<int>(std::ceil(source.width_mm / 25.4 * low)), static_cast<int>(std::ceil(source.height_mm / 25.4 * low))};
-        const render::Image small = source.picture(low, all).convert("RGBA");
+        const render::Image small = source.picture(low, page_box(source, low)).convert("RGBA");
         const std::string bytes = small.tobytes();
         int x0 = small.width(), y0 = small.height(), x1 = 0, y1 = 0;
         for (int y = 0; y < small.height(); ++y)
@@ -713,23 +828,41 @@ Source source_of(const MainWindow& window, const core::Page& page, const core::L
                 x1 = std::max(x1, x + 1);
                 y1 = std::max(y1, y + 1);
             }
-        if (x1 > x0 && y1 > y0) {
-            source.x0_mm = x0 * 25.4 / low;
-            source.y0_mm = y0 * 25.4 / low;
-            source.x1_mm = std::min(source.width_mm, x1 * 25.4 / low);
-            source.y1_mm = std::min(source.height_mm, y1 * 25.4 / low);
-        }
+        if (x1 > x0 && y1 > y0)
+            box = {x0 * 25.4 / low, y0 * 25.4 / low, std::min(source.width_mm, x1 * 25.4 / low), std::min(source.height_mm, y1 * 25.4 / low)};
     } catch (const std::exception&) {
     }
-    if (source.x1_mm <= source.x0_mm || source.y1_mm <= source.y0_mm) {
-        source.x0_mm = source.y0_mm = 0;
-        source.x1_mm = source.width_mm;
-        source.y1_mm = source.height_mm;
-    }
-    return source;
+    return box;
 }
 
-}  // namespace
+render::Image laid_on(const Source& source, int dpi, const render::Box& asked, const Json& settings) {
+    const render::Box page = page_box(source, dpi);
+    const render::Box area{std::max(page.x0, asked.x0), std::max(page.y0, asked.y0), std::min(page.x1, asked.x1), std::min(page.y1, asked.y1)};
+    if (area.width() <= 0 || area.height() <= 0 || !source.picture) return render::Image();
+    const render::Image picture = source.picture(dpi, area);
+    const render::Box at{area.x0, area.y0, area.x0 + picture.width(), area.y0 + picture.height()};
+    if (!source.selection) return effects_over(picture, dpi, at, page, nullptr, settings);
+    // (inside the selection: its coverage over the part, the base box its box — as the op's run)
+    const render::selection::AreaMask inside = render::selection::area_mask(*source.selection, dpi);
+    const render::Image mask = inside.mask.mode() == "L" ? inside.mask : inside.mask.convert("L");
+    const std::string mask_bytes = mask.tobytes();
+    const int mx = static_cast<int>(inside.x0), my = static_cast<int>(inside.y0);
+    std::string cover(std::size_t(std::max(0, picture.width())) * std::size_t(std::max(0, picture.height())), '\0');
+    int bx0 = page.x1, by0 = page.y1, bx1 = page.x0, by1 = page.y0;  // (the box it covers at all, on the page)
+    for (int y = 0; y < mask.height(); ++y)
+        for (int x = 0; x < mask.width(); ++x) {
+            const char v = mask_bytes[std::size_t(y) * std::size_t(mask.width()) + std::size_t(x)];
+            if (v == 0) continue;
+            const int gx = mx + x, gy = my + y;
+            bx0 = std::min(bx0, gx);
+            by0 = std::min(by0, gy);
+            bx1 = std::max(bx1, gx + 1);
+            by1 = std::max(by1, gy + 1);
+            if (gx >= at.x0 && gx < at.x1 && gy >= at.y0 && gy < at.y1) cover[std::size_t(gy - at.y0) * std::size_t(picture.width()) + std::size_t(gx - at.x0)] = v;
+        }
+    const render::Box base = bx1 > bx0 && by1 > by0 ? render::Box{bx0, by0, bx1, by1} : page;
+    return effects_over(picture, dpi, at, base, &cover, settings);
+}
 
 std::optional<Json> dialog(QWidget* parent, const Source& source, const Json& now, std::array<int, 3> foreground, std::array<int, 3> background) {
     GalleryWindow window(parent, source, now, foreground, background);
@@ -747,7 +880,7 @@ void open(const FilterWindowCall& call) {
     if (call.window == nullptr || call.page == nullptr || call.layer == nullptr) return;
     MainWindow& window = *call.window;
     render::use_brushes_of(window.book());
-    const Source source = source_of(window, *call.page, *call.layer, call.filter);
+    const Source source = source_of(window, *call.page, *call.layer, call.filter);  // (its pictures made on threads)
     const auto& rgb = window.pen().rgb;
     const std::array<int, 3> main{static_cast<int>(rgb[0]), static_cast<int>(rgb[1]), static_cast<int>(rgb[2])};
     const std::array<int, 3> sub = window.colours() != nullptr ? window.colours()->sub_rgb() : std::array<int, 3>{255, 255, 255};

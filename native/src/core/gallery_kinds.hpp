@@ -52,8 +52,9 @@ inline constexpr std::array<int, 3> kNeonGlowColour{0, 158, 255};
 // OpError for what it refuses (no effects, more than 32, an effect not known, a setting it has not).
 Json read_gallery(Json read);
 
-// The gallery's catalogue (genko inspect --filters, design 3.2; PhotoCraft's gallery_cmds catalogue): its folders and each
-// effect's key, PhotoCraft's key and command, Photoshop's name, folder and settings (type, default, range, choices).
+// The gallery's catalogue (genko inspect --filters, design 3.2; PhotoCraft's gallery_cmds catalogue): its effects in order,
+// each its key, PhotoCraft's key and command, Photoshop's name, its folder and its settings (type, default, range,
+// choices). (The folders' order: gallery_categories.)
 Json gallery_catalogue();
 
 }  // namespace genko::core

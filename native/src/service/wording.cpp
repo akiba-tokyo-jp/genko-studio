@@ -546,6 +546,8 @@ const std::vector<Rule>& rules() {
         r.push_back(rule(R"(adjust filter_gallery\.effects\[\d+\] has no setting '(.*)')", "フィルターギャラリーの効果に「\\1」という設定はありません"));
         r.push_back(rule(R"(adjust filter_gallery\.effects\[\d+\]\.(\S+) (?:must|needs|is) .*)", "フィルターギャラリーの効果の「\\1」の値が使えません"));
         r.push_back(rule(R"(adjust filter_gallery\.effects\[\d+\] must .*)", "フィルターギャラリーのエフェクトレイヤーの書き方が違います（{filter, params, visible}）"));
+        r.push_back(rule(R"(filter_gallery: every effect is hidden.*)",
+                         "フィルターギャラリーのエフェクトレイヤーが全部隠れているので、何も変わりません（スマートフィルターなら隠したまま持てます）"));
         r.push_back(rule(R"(adjust ((?:blur|sharpen|noise|other|video|distort|pixelate|stylize|render|filter|camera|lens|adaptive)_\S+?) has no setting '(.*)')",
                          "フィルター（\\1）に「\\2」という設定はありません"));
         r.push_back(rule(R"(adjust ((?:blur|sharpen|noise|other|video|distort|pixelate|stylize|render|filter|camera|lens|adaptive)_\S+?)\.(\S+) (?:must|needs|is) .*)",

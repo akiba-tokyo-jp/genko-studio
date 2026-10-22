@@ -574,6 +574,42 @@ Px highlights(const Px& p, float l, float area, float intensity) {
     return map(p, [m](float v) { return v + (1.0f - v) * m; });
 }
 
+// --- what shows, past its edges ----------------------------------------------------------------------------------------
+
+// The colours of the clear pixels (alpha 0) the effects read round what shows: each the mean of the colours that show (by
+// their alpha) in the smallest square round it of radius 1, 2, 4 … `radius` that holds any — one that holds none within
+// `radius`, black (it reaches nothing that shows). What shows is then worked as if it went on past its edges, never with
+// the colours a clear pixel keeps unseen (black, or what was erased): a ぼかし, a Kuwahara, an edge never brings them in.
+void fill_clear(Win& win, const std::vector<float>& alpha, int radius) {
+    if (radius <= 0) return;
+    std::vector<std::size_t> open;
+    for (std::size_t i = 0; i < win.c.size(); ++i)
+        if (!(alpha[i] > 0.0f)) open.push_back(i);
+    if (open.empty()) return;
+    std::vector<float> shown(win.c.size() * 4);
+    for (std::size_t i = 0; i < win.c.size(); ++i) {
+        const float a = alpha[i] > 0.0f ? std::min(alpha[i], 1.0f) : 0.0f;
+        for (std::size_t c = 0; c < 3; ++c) shown[i * 4 + c] = win.c[i][c] * a;
+        shown[i * 4 + 3] = a;
+    }
+    for (int r = std::min(1, radius);; r = std::min(radius, r * 2)) {
+        std::vector<float> mean = shown;
+        box_blur_n(mean, win.w, win.h, 4, r);
+        std::vector<std::size_t> still;
+        for (const std::size_t i : open) {
+            const float a = mean[i * 4 + 3];
+            if (a > 0.0f) {
+                win.c[i] = {mean[i * 4] / a, mean[i * 4 + 1] / a, mean[i * 4 + 2] / a};
+            } else {
+                still.push_back(i);
+            }
+        }
+        open = std::move(still);
+        if (open.empty() || r >= radius) break;
+    }
+    for (const std::size_t i : open) win.c[i] = {0.0f, 0.0f, 0.0f};
+}
+
 // --- each effect's reach and settings ---------------------------------------------------------------------------------
 
 float cutout_sigma(const Effect& e) { return 0.5f + e.get("edge_simplicity") * (1.1f - 0.3f * e.get("edge_fidelity")); }
@@ -1092,7 +1128,7 @@ void apply_effect(const Effect& e, Win& win, const Scale& sc, const Ctx& ctx) {
             const float cell = 3.0f + size * 2.0f;
             std::vector<float> l = win.lum();
             blur1(l, w, h, sc.px(0.5f + size * 0.3f));
-            const Rect b = ctx.bounds;
+            const Rect b{ctx.bounds.x0 + ctx.x0, ctx.bounds.y0 + ctx.y0, ctx.bounds.x1 + ctx.x0, ctx.bounds.y1 + ctx.y0};
             const float cx = static_cast<float>(b.x0 + b.x1) / 2.0f / sc.s, cy = static_cast<float>(b.y0 + b.y1) / 2.0f / sc.s;
             const std::string_view type = e.choice("pattern_type");
             for (std::size_t i = 0; i < n; ++i) {
@@ -1324,7 +1360,7 @@ void apply_effect(const Effect& e, Win& win, const Scale& sc, const Ctx& ctx) {
             const float cell = glass_cell(e);
             const float bt = g("border_thickness");
             const float li = g("light_intensity") / 10.0f;
-            const Rect b = ctx.bounds;
+            const Rect b{ctx.bounds.x0 + ctx.x0, ctx.bounds.y0 + ctx.y0, ctx.bounds.x1 + ctx.x0, ctx.bounds.y1 + ctx.y0};
             const float cx = static_cast<float>(b.x0 + b.x1) / 2.0f / sc.s, cy = static_cast<float>(b.y0 + b.y1) / 2.0f / sc.s;
             const float half = std::max(static_cast<float>(std::max(b.width(), b.height())) / 2.0f / sc.s, 1.0f);
             const Win src = win;
@@ -1386,30 +1422,38 @@ Kernels gallery_kernels() {
     Kernel k;  // フィルターギャラリー (filter.filterGallery; the 47 filter.gallery.* as its effects)
     k.kind = "filter_gallery";
     k.halo = [](const Json& params, const Ctx& ctx) {
+        // (what the effects read, and as far again where the clear pixels they read take what shows: fill_clear)
         const Scale sc(ctx.s);
         int reach = 0;
         for (const Effect& e : effects_of(params)) reach += effect_reach(e, sc);
-        return Halo::margin(reach);
+        return Halo::margin(2 * reach);
     };
     k.run = [](const Json& params, const Window& src, const Rect& out, const Ctx& ctx) {
         const std::vector<Effect> effects = effects_of(params);
         const std::size_t ch = src.ch;
         if (effects.empty() || src.rect.empty() || (ctx.colours != 3 && ctx.colours != 1)) return src.crop(out);
         const Scale sc(ctx.s);
+        // (the window on the layer's grid: its marks where the op on the whole grid puts them — a part of it worked alone
+        // has its origin, Ctx::x0)
         Win win;
-        win.r = src.rect;
+        win.r = Rect{src.rect.x0 + ctx.x0, src.rect.y0 + ctx.y0, src.rect.x1 + ctx.x0, src.rect.y1 + ctx.y0};
         win.w = static_cast<std::size_t>(src.rect.width());
         win.h = static_cast<std::size_t>(src.rect.height());
         win.c.resize(win.w * win.h);
+        std::vector<float> alpha(win.c.size(), 1.0f);
         for (std::size_t i = 0; i < win.c.size(); ++i) {  // (the colours 0..1: what the effects take)
             const float* p = src.data.data() + i * ch;
             win.c[i] = ctx.colours == 3 ? Px{clamp01(p[0]), clamp01(p[1]), clamp01(p[2])} : grey(clamp01(p[0]));
+            if (ctx.alpha) alpha[i] = p[ch - 1];
         }
+        int reach = 0;
+        for (const Effect& e : effects) reach += effect_reach(e, sc);
+        fill_clear(win, alpha, reach);
         for (const Effect& e : effects) apply_effect(e, win, sc, ctx);
         std::vector<float> res = src.crop(out);
         const std::size_t ow = static_cast<std::size_t>(out.width());
         for (std::size_t i = 0; i * ch < res.size(); ++i) {
-            const int x = out.x0 + static_cast<int>(i % ow), y = out.y0 + static_cast<int>(i / ow);
+            const int x = out.x0 + static_cast<int>(i % ow) + ctx.x0, y = out.y0 + static_cast<int>(i / ow) + ctx.y0;
             const Px c = win.at(x, y);
             float* px = res.data() + i * ch;
             if (ctx.colours == 3) {
@@ -1429,10 +1473,14 @@ Kernels gallery_kernels() {
             each += effect_cost(e);
             reach += effect_reach(e, sc);
         }
-        // (each tile works its window: the tile and its reach on every side — upstream's auto_tile)
-        const double tile = std::min(2048.0, std::max(256.0, std::ceil(2.0 * reach / 64.0) * 64.0));
-        return std::max(1.0, each) * std::pow((tile + 2.0 * reach) / tile, 2.0);
+        // (each tile works its window: the tile and its halo — the reach twice, fill_clear — on every side, upstream's auto_tile)
+        const double halo = 2.0 * reach;
+        const double tile = std::min(2048.0, std::max(256.0, std::ceil(2.0 * halo / 64.0) * 64.0));
+        return std::max(1.0, each) * std::pow((tile + 2.0 * halo) / tile, 2.0);
     };
+    // (its own work a pixel of the window, past the engine's count: the colours and a copy of them, Kuwahara's five planes
+    // and their whole numbers, a blur's whole numbers)
+    k.work_bytes = 112;
     all.push_back(std::move(k));
     return all;
 }

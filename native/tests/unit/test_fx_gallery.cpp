@@ -68,6 +68,19 @@ std::vector<std::array<float, 4>> pattern(std::uint32_t w, std::uint32_t h) {
     return out;
 }
 
+// A disc over a ramp, side × side: the same picture at any resolution (the 200 and 600 dpi looks compared).
+std::vector<std::array<float, 4>> disc_on_ramp(std::uint32_t side) {
+    std::vector<std::array<float, 4>> px;
+    for (std::uint32_t y = 0; y < side; ++y)
+        for (std::uint32_t x = 0; x < side; ++x) {
+            const double u = (x + 0.5) / side - 0.5, v = (y + 0.5) / side - 0.5;
+            const float ramp = static_cast<float>((x + 0.5) / side);
+            px.push_back(u * u + v * v < 0.08 ? std::array<float, 4>{0.92f, 0.75f * ramp, 0.15f, 1.0f}
+                                              : std::array<float, 4>{0.15f, 0.35f + 0.3f * ramp, 0.75f, 1.0f});
+        }
+    return px;
+}
+
 // PhotoCraft's test picture of the gallery's commands (engine gallery_cmds/tests.rs: session), light and dark squares.
 std::vector<std::array<float, 4>> squares(std::uint32_t w, std::uint32_t h) {
     std::vector<std::array<float, 4>> out;
@@ -464,19 +477,8 @@ private slots:
     // marks the same size on the paper — the 600 dpi one shrunk to a third near the 200 dpi one; an effect whose grain is
     // one of the layer's pixels, near in its mean and its spread.
     void theSameLookAt200And600Dpi() {
-        const auto picture = [](std::uint32_t side) {
-            std::vector<std::array<float, 4>> px;
-            for (std::uint32_t y = 0; y < side; ++y)
-                for (std::uint32_t x = 0; x < side; ++x) {
-                    const double u = (x + 0.5) / side - 0.5, v = (y + 0.5) / side - 0.5;
-                    const float ramp = static_cast<float>((x + 0.5) / side);
-                    px.push_back(u * u + v * v < 0.08 ? std::array<float, 4>{0.92f, 0.75f * ramp, 0.15f, 1.0f}
-                                                      : std::array<float, 4>{0.15f, 0.35f + 0.3f * ramp, 0.75f, 1.0f});
-                }
-            return px;
-        };
-        const auto low_doc = precise_page(200, 200, picture(200), false);
-        const auto high_doc = precise_page(600, 600, picture(600), false);
+        const auto low_doc = precise_page(200, 200, disc_on_ramp(200), false);
+        const auto high_doc = precise_page(600, 600, disc_on_ramp(600), false);
         QString table, far;
         for (const core::GalleryEffectKind& e : core::gallery_effects()) {
             const std::string name(e.filter);
@@ -550,6 +552,143 @@ private slots:
         // refused as an op refuses: an effect not known
         QVERIFY(!refusal(doc, Json{{"op", "smart_filter_add"}, {"page", 1}, {"id", "so"}, {"kind", "filter_gallery"},
                                    {"effects", Json::array({Json{{"filter", "nope"}}})}}).empty());
+    }
+
+    // The clear pixels bring no colour in (review P2-1): a disc on a clear layer — the effects that put no marks of their own
+    // leave it one flat colour to its edge (no dark rim from the clear pixels' black) —, and whatever colours the clear
+    // pixels keep unseen, what shows is the same bytes (every effect, at 1 and at 3 times the working pixels).
+    void theClearPixelsBringNoColour() {
+        const auto disc = [](std::uint32_t side, bool noisy) {
+            std::vector<std::array<float, 4>> px;
+            for (std::uint32_t y = 0; y < side; ++y)
+                for (std::uint32_t x = 0; x < side; ++x) {
+                    const double u = (x + 0.5) / side - 0.5, v = (y + 0.5) / side - 0.5;
+                    if (u * u + v * v < 0.09) {
+                        px.push_back({0.85f, 0.25f, 0.2f, 1.0f});
+                    } else if (noisy) {
+                        px.push_back({static_cast<float>((x * 37 + y * 11) % 17) / 16.0f, static_cast<float>((x * 5 + y * 23) % 13) / 12.0f,
+                                      static_cast<float>((x + y) % 2), 0.0f});
+                    } else {
+                        px.push_back({0.0f, 0.0f, 0.0f, 0.0f});
+                    }
+                }
+            return px;
+        };
+        const std::string clear = precise(64, 64, disc(64, false), true), unseen = precise(64, 64, disc(64, true), true);
+        for (const char* filter : {"cutout", "watercolor", "stamp", "palette_knife", "sumi_e", "ink_outlines", "bas_relief", "photocopy"}) {
+            const auto out = pixels_of(run_precise(clear, one(filter)));
+            std::array<double, 4> first{-1, -1, -1, -1};
+            double spread = 0;
+            for (const auto& p : out) {
+                if (p[3] <= 0) continue;
+                if (first[3] < 0) first = p;
+                for (unsigned c = 0; c < 3; ++c) spread = std::max(spread, std::fabs(p[c] - first[c]));
+            }
+            QVERIFY2(spread < 1e-6, qPrintable(QStringLiteral("%1: the disc's edge took another colour (%2)").arg(filter).arg(spread)));
+        }
+        const auto shown = [](const std::string& raster) {
+            std::vector<std::array<double, 4>> out;
+            for (const auto& p : pixels_of(raster))
+                if (p[3] > 0) out.push_back(p);
+            return out;
+        };
+        for (const core::GalleryEffectKind& e : core::gallery_effects()) {
+            const Json params = one(e.filter.data());
+            for (const double s : {1.0, 3.0})
+                QVERIFY2(shown(run_precise(clear, params, {}, s)) == shown(run_precise(unseen, params, {}, s)),
+                         qPrintable(QStringLiteral("%1 at %2: the clear pixels' colours showed").arg(QString::fromLatin1(e.filter.data())).arg(s)));
+        }
+    }
+
+    // A part of the layer's grid worked alone (フィルターギャラリー's preview: PlaceScope — its origin, the grid's base box): its
+    // marks where the whole grid's run puts them, the same pixels away from its edges (review P2-2).
+    void aPartWorkedAloneIsTheWholesPart() {
+        const std::uint32_t w = 120, h = 90;
+        const auto whole_px = pattern(w, h);
+        const std::string whole = precise(w, h, whole_px, true);
+        const Rect part{30, 20, 100, 76};
+        std::vector<std::array<float, 4>> part_px;
+        for (int y = part.y0; y < part.y1; ++y)
+            for (int x = part.x0; x < part.x1; ++x) part_px.push_back(whole_px[std::size_t(y) * w + std::size_t(x)]);
+        const std::string piece = precise(std::uint32_t(part.width()), std::uint32_t(part.height()), part_px, true);
+        for (const Json& params : {one("texturizer", Json{{"relief", 30}}), one("stained_glass", Json{{"cell_size", 6}}), one("craquelure"), one("graphic_pen"),
+                                   one("halftone_pattern", Json{{"pattern_type", "circle"}}), one("mosaic_tiles"), one("grain"), one("film_grain")}) {
+            const std::string name = params["effects"][0]["filter"].get<std::string>();
+            const std::string all = run_precise(whole, params);
+            std::string alone;
+            {
+                const render::fx::PlaceScope place(part.x0, part.y0, Rect{0, 0, int(w), int(h)});
+                alone = run_precise(piece, params);
+            }
+            const int halo = render::fx::kernel("filter_gallery")->halo(params, render::fx::Ctx{}).radius;
+            const auto all_px = pixels_of(all), alone_px = pixels_of(alone);
+            for (int y = part.y0 + halo; y < part.y1 - halo; ++y)
+                for (int x = part.x0 + halo; x < part.x1 - halo; ++x) {
+                    const auto& a = all_px[std::size_t(y) * w + std::size_t(x)];
+                    const auto& b = alone_px[std::size_t(y - part.y0) * std::size_t(part.width()) + std::size_t(x - part.x0)];
+                    QVERIFY2(a == b, qPrintable(QStringLiteral("%1 at %2, %3").arg(QString::fromStdString(name)).arg(x).arg(y)));
+                }
+            // (without the place: the marks elsewhere — what the preview showed before)
+            QVERIFY2(pixels_of(run_precise(piece, params)) != alone_px, name.c_str());
+        }
+    }
+
+    // Large settings (the reach widest: ステンドグラス 50, はね・スプレー 25, パッチワーク 10, ガラス 20, 塗料 50 wide, 底塗り 40)
+    // at three times the working pixels: still the same bytes whatever the tiling.
+    void largeSettingsAreTileIndependent() {
+        const std::string raster = precise(120, 90, pattern(120, 90), true);
+        for (const Json& params : {one("stained_glass", Json{{"cell_size", 50}, {"border_thickness", 20}}), one("spatter", Json{{"spray_radius", 25}}),
+                                   one("sprayed_strokes", Json{{"spray_radius", 25}, {"stroke_length", 20}}), one("patchwork", Json{{"square_size", 10}}),
+                                   one("glass", Json{{"distortion", 20}}), one("paint_daubs", Json{{"brush_size", 50}, {"brush_type", "wideSharp"}}),
+                                   one("underpainting", Json{{"brush_size", 40}}), one("ink_outlines", Json{{"stroke_length", 50}})}) {
+            const std::string name = params["effects"][0]["filter"].get<std::string>();
+            const std::string a = run_precise(raster, params, {256, 1}, 3.0);
+            QVERIFY2(a == run_precise(raster, params, {7, 3}, 3.0), name.c_str());
+            QVERIFY2(a == run_precise(raster, params, {23, 2}, 3.0), name.c_str());
+        }
+    }
+
+    // Every effect hidden: a smart filter keeps them so, the destructive op refuses (it would change nothing).
+    void everyEffectHidden() {
+        auto doc = precise_page(32, 32, pattern(32, 32), false);
+        const Json hidden = Json::array({Json{{"filter", "cutout"}, {"visible", false}}, Json{{"filter", "stamp"}, {"visible", false}}});
+        const std::string why = refusal(doc, Json{{"op", "filter_raster"}, {"page", 1}, {"id", "paint"}, {"kind", "filter_gallery"}, {"effects", hidden}});
+        QVERIFY2(why.find("every effect is hidden") != std::string::npos, why.c_str());
+        doc = run(doc, Json{{"op", "smart_convert"}, {"page", 1}, {"ids", Json::array({"paint"})}, {"new_id", "so"}}).doc;
+        doc = run(doc, Json{{"op", "smart_filter_add"}, {"page", 1}, {"id", "so"}, {"kind", "filter_gallery"}, {"effects", hidden}}).doc;
+        QCOMPARE((*layer_of(doc, "so").smart)["filters"][0]["params"]["effects"].size(), std::size_t(2));
+    }
+
+    // A smart object's gallery drawn at the screen's resolution (200 dpi) and at the print's (600): the same look, the
+    // print's shrunk to a third near the screen's, the same mean colour (design 4.2; theSameLookAt200And600Dpi's measures).
+    void aSmartObjectAtTheScreensAndThePrintsResolution() {
+        auto doc = precise_page(200, 200, disc_on_ramp(200), false);
+        doc = run(doc, Json{{"op", "smart_convert"}, {"page", 1}, {"ids", Json::array({"paint"})}, {"new_id", "so"}}).doc;
+        doc = run(doc, Json{{"op", "smart_filter_add"}, {"page", 1}, {"id", "so"}, {"kind", "filter_gallery"},
+                            {"effects", Json::array({Json{{"filter", "accented_edges"}}, Json{{"filter", "texturizer"}, {"params", Json{{"relief", 20}}}}})}}).doc;
+        const render::Image screen = render::layer_image(doc.page(0), layer_of(doc, "so"), 200, &doc).convert("RGBA");
+        const render::Image print = render::layer_image(doc.page(0), layer_of(doc, "so"), 600, &doc).convert("RGBA");
+        QCOMPARE(screen.width(), 200);
+        QCOMPARE(print.width(), 600);
+        const std::string a = screen.tobytes(), b = print.tobytes();
+        double differs = 0, count = 0;
+        std::array<double, 3> mean_screen{}, mean_print{};
+        for (int y = 0; y < 200; ++y)
+            for (int x = 0; x < 200; ++x)
+                for (int c = 0; c < 3; ++c) {
+                    double shrunk = 0;
+                    for (int dy = 0; dy < 3; ++dy)
+                        for (int dx = 0; dx < 3; ++dx) shrunk += static_cast<unsigned char>(b[(std::size_t(y * 3 + dy) * 600 + std::size_t(x * 3 + dx)) * 4 + c]);
+                    const double q = static_cast<unsigned char>(a[(std::size_t(y) * 200 + std::size_t(x)) * 4 + c]);
+                    differs += std::fabs(shrunk / 9 - q) / 255.0;
+                    count += 1;
+                    mean_screen[std::size_t(c)] += q / 255.0 / 40000;
+                    mean_print[std::size_t(c)] += shrunk / 9 / 255.0 / 40000;
+                }
+        double mean_gap = 0;
+        for (std::size_t c = 0; c < 3; ++c) mean_gap = std::max(mean_gap, std::fabs(mean_screen[c] - mean_print[c]));
+        if (qEnvironmentVariableIsSet("GENKO_GALLERY_TABLE")) qInfo("smart object 200 / 600: shrunk %f, mean %f", differs / count, mean_gap);
+        QVERIFY2(differs / count < 0.06 && mean_gap < 0.03, qPrintable(QStringLiteral("shrunk %1, mean %2").arg(differs / count).arg(mean_gap)));
     }
 
     // A heavy stack: B4 at 600 dpi (the window then works it on a thread with 中止); a small layer at 200 dpi not.

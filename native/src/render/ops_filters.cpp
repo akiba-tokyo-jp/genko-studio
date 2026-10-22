@@ -123,13 +123,34 @@ LocalFilters filter_local_filters() {
 
 }  // namespace adjust_ops
 
-std::optional<Json> filter_report(const core::Document& doc, const Json& op) {
-    const Json* kind = core::get(op, "kind");
-    if (kind == nullptr || !kind->is_string() || !core::pc4_filter(kind->get_ref<const std::string&>())) return std::nullopt;
+namespace {
+
+// A filter_raster op's settings (what is not the op's own keys).
+Json settings_of_op(const Json& op) {
     Json params = Json::object();
     for (const auto& [key, value] : op.items()) {
         if (key != "op" && key != "page" && key != "layer" && key != "id" && key != "kind" && key != "area" && key != "channel") params[key] = value;
     }
+    return params;
+}
+
+}  // namespace
+
+void refuse_filter(const core::Document& doc, const Json& op) {
+    const Json* kind = core::get(op, "kind");
+    if (kind == nullptr || !kind->is_string() || kind->get_ref<const std::string&>() != "filter_gallery") return;
+    const std::size_t at = core::require_page(doc, op);
+    const Json normal = core::normalize_filter("filter_gallery", settings_of_op(op), &doc.page(at));
+    for (const Json& effect : normal["effects"]) {
+        if (effect.value("visible", true)) return;
+    }
+    throw core::OpError("filter_gallery: every effect is hidden, so it would change nothing (a smart filter may keep them hidden)");
+}
+
+std::optional<Json> filter_report(const core::Document& doc, const Json& op) {
+    const Json* kind = core::get(op, "kind");
+    if (kind == nullptr || !kind->is_string() || !core::pc4_filter(kind->get_ref<const std::string&>())) return std::nullopt;
+    const Json params = settings_of_op(op);
     const std::size_t at = core::require_page(doc, op);
     Json drawn{{"kind", *kind}};
     drawn.update(core::normalize_filter(kind->get_ref<const std::string&>(), params, &doc.page(at)));

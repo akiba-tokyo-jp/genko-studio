@@ -2486,6 +2486,7 @@ void filter_raster_pixels(OpContext& c) {
 // filter_raster: the pixels, then — a kind of フィルター's (PC4 節 D, design 3.1) — the settings it was drawn with in the
 // reply's results (render/ops_filters).
 void filter_raster(OpContext& c) {
+    refuse_filter(c.doc, c.op);  // (PC4 D3: what a smart filter keeps and the op does not — a gallery's stack all hidden)
     filter_raster_pixels(c);
     if (auto report = filter_report(c.doc, c.op)) c.report = std::move(*report);
 }

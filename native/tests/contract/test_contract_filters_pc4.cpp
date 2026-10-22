@@ -283,6 +283,27 @@ private slots:
                                                    QStringLiteral("200"), QStringLiteral("--out"), path(QStringLiteral("gallery200.png"))});
         QVERIFY2(drawn.exit_code == 0, qPrintable(drawn.described()));
         QVERIFY(storage::load_document(path_of(book)).document.read_only_reason.empty());
+        // a gallery smart filter that cannot be read (an effect the gallery has not, none, 33, visible not true or false, a key
+        // an effect has not, a setting it has not): the book opens read-only; written back as it was, writable again
+        const std::string written = genko::test::read_bytes(book + QStringLiteral("/project.json"));
+        const auto broken = [&](const std::function<void(Json& stack)>& change) {
+            Json saved_again = Json::parse(written);
+            for (Json& layer : saved_again["pages"][0]["layers"])
+                if (layer.value("id", std::string()) == "so") change(layer["smart"]["filters"][0]["params"]["effects"]);
+            genko::test::write_bytes(book + QStringLiteral("/project.json"), saved_again.dump());
+            const std::string why = storage::load_document(path_of(book)).document.read_only_reason;
+            genko::test::write_bytes(book + QStringLiteral("/project.json"), written);
+            return why;
+        };
+        QVERIFY(!broken([](Json& stack) { stack[0]["filter"] = "nope"; }).empty());
+        QVERIFY(!broken([](Json& stack) { stack = Json::array(); }).empty());
+        QVERIFY(!broken([](Json& stack) {
+                    while (stack.size() < 33) stack.push_back(Json{{"filter", "cutout"}});
+                }).empty());
+        QVERIFY(!broken([](Json& stack) { stack[0]["visible"] = "yes"; }).empty());
+        QVERIFY(!broken([](Json& stack) { stack[0]["opacity"] = 1; }).empty());
+        QVERIFY(!broken([](Json& stack) { stack[0]["params"]["pencil_width"] = 3; }).empty());
+        QVERIFY(storage::load_document(path_of(book)).document.read_only_reason.empty());
         // the catalogue: the 47 effects with PhotoCraft's commands
         const Json catalogue = genko({QStringLiteral("inspect"), book, QStringLiteral("--filters")}, &exit);
         QCOMPARE(exit, 0);

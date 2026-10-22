@@ -542,16 +542,24 @@ private slots:
 
     // --- the budget, stopping, progress, heaviness, the preview's copy --------------------------------------------------
 
+    // A window past the imaging budget: at the kind's own tile, smaller tiles (on fewer threads if need be) — the same
+    // bytes —; a tile asked for, or a window the whole grid even in the smallest tiles, refused as too large (review P2-2).
     void aWindowPastTheBudgetIsRefused() {
         const std::string raster = precise(512, 512, pattern(512, 512), true);
+        const std::string unbounded = run_precise(raster, "blur_gaussian", Json{{"radius", 40}});
         const render::ImageAllocationBudget budget{16ULL * 1024 * 1024};
-        try {
-            (void)run_precise(raster, "blur_gaussian", Json{{"radius", 40}});
-            QFAIL("a window past the budget was had");
-        } catch (const core::OpError& error) {
-            QVERIFY2(std::string(error.what()).find("too large to work on at once") != std::string::npos, error.what());
-        }
-        // a small one fits (on fewer threads if need be)
+        const auto refusal_of = [&](const Json& params, render::fx::Tiling tiling) {
+            try {
+                (void)run_precise(raster, "blur_gaussian", params, nullptr, tiling);
+            } catch (const core::OpError& error) {
+                return std::string(error.what());
+            }
+            return std::string();
+        };
+        QVERIFY(run_precise(raster, "blur_gaussian", Json{{"radius", 40}}) == unbounded);
+        QVERIFY(refusal_of(Json{{"radius", 40}}, {512, 0}).find("too large to work on at once") != std::string::npos);
+        QVERIFY(refusal_of(Json{{"radius", 200}}, {}).find("too large to work on at once") != std::string::npos);
+        // a small one fits
         QVERIFY(run_precise(raster, "blur_gaussian", Json{{"radius", 1}}) != raster);
     }
 

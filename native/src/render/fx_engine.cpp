@@ -448,6 +448,7 @@ std::string take_bytes(Surface& surface) {
 namespace {
 
 thread_local std::atomic<double>* g_progress = nullptr;
+thread_local const PlaceScope* g_place = nullptr;
 
 // Upstream's auto_tile: results do not depend on the tiling, so wide halos take bigger tiles (the margin read again
 // kept below about twice the tile).
@@ -567,6 +568,10 @@ ProgressScope::ProgressScope(std::atomic<double>& done) : before_(g_progress) {
 }
 ProgressScope::~ProgressScope() { g_progress = before_; }
 
+PlaceScope::PlaceScope(int x, int y, const Rect& bounds) : before_(g_place), x_(x), y_(y), bounds_(bounds) { g_place = this; }
+PlaceScope::~PlaceScope() { g_place = before_; }
+const PlaceScope* PlaceScope::current() { return g_place; }
+
 void apply(Surface& surface, const Kernel& kernel, const Json& params, core::FilterInks inks, const Rect& bounds_in, const std::string* cover,
            double s, const Rect* limit, const Tiling& tiling) {
     const std::uint32_t w = surface.width(), h = surface.height();
@@ -583,6 +588,12 @@ void apply(Surface& surface, const Kernel& kernel, const Json& params, core::Fil
     Ctx ctx;
     ctx.bounds = bounds_in.intersect(grid);
     if (ctx.bounds.empty()) ctx.bounds = grid;
+    if (const PlaceScope* place = PlaceScope::current()) {  // (D3: a part of the grid — its origin, the grid's base box there)
+        ctx.x0 = place->x();
+        ctx.y0 = place->y();
+        const Rect& b = place->bounds();
+        ctx.bounds = Rect{b.x0 - ctx.x0, b.y0 - ctx.y0, b.x1 - ctx.x0, b.y1 - ctx.y0};
+    }
     ctx.space = way.meaning ? Space::Rgb : way.lab_lightness ? Space::Gray : surface.space();
     ctx.colours = way.kernel_colours;
     ctx.alpha = true;
@@ -597,42 +608,56 @@ void apply(Surface& surface, const Kernel& kernel, const Json& params, core::Fil
     if (limit != nullptr) {
         area = limit->intersect(grid);
     } else if (halo.bounds || kernel.fills) {
-        area = ctx.bounds;
+        area = ctx.bounds.intersect(grid);
     } else {
         area = content.empty() ? Rect{} : content.inflate(halo.radius).intersect(grid);
     }
     if (cover != nullptr) area = area.intersect(cover_box(*cover, w, h));
     if (area.empty()) return;
 
-    const int side = tiling.tile > 0 ? tiling.tile : auto_tile(halo);
+    // the memory, held in the imaging budget before it is had: a whole kind's one window, then each thread's window (the
+    // tile grown by the halo, cut to the grid) — its floats, their reading and a kernel's own work on it (whole numbers, as
+    // the blurs' exact sums, and a float copy: three words a sample; and what the kernel says it takes a pixel) —, the
+    // tile's result and the selection's mix. When not even one thread's fits, smaller tiles (their windows smaller; the
+    // result the same whatever the tiling) before it is refused as too large.
+    const std::size_t sch = way.colours + 1, kch = way.kernel_colours + 1;
+    const Rect whole = halo.bounds ? ctx.bounds.intersect(grid).unite(area) : Rect{};
+    const image_ops::Held shared_held(std::uint64_t(whole.area()) * kch * sizeof(float));
+    const auto per_thread_of = [&](int tile_side) {
+        const std::uint64_t tile_px = std::uint64_t(tile_side) * tile_side;
+        const std::uint64_t reach = std::uint64_t(tile_side) + 2 * std::uint64_t(halo.radius);
+        const std::uint64_t window_px = halo.bounds ? 0 : std::min<std::uint64_t>(reach, w) * std::min<std::uint64_t>(reach, h);
+        return window_px * (kch * (2 * sizeof(float) + sizeof(std::int64_t)) + sch * sizeof(float) + kernel.work_bytes) +
+               tile_px * (kch + 3 * sch) * sizeof(float) + (way.meaning ? (window_px + tile_px) * (sch + 4) * sizeof(double) : 0);
+    };
+    std::vector<int> sides{tiling.tile > 0 ? tiling.tile : auto_tile(halo)};
+    if (tiling.tile <= 0)
+        for (const int smaller : {256, 128, 64})
+            if (smaller < sides.back()) sides.push_back(smaller);
+    int side = sides.front();
+    std::optional<image_ops::Held> held;
+    int threads = 1;
+    for (std::size_t k = 0; k < sides.size() && !held; ++k) {
+        side = sides[k];
+        const std::uint64_t per_thread = per_thread_of(side);
+        const std::uint64_t count = (std::uint64_t(area.width()) + side - 1) / side * ((std::uint64_t(area.height()) + side - 1) / side);
+        int wanted = tiling.threads > 0 ? tiling.threads : band_threads();
+        wanted = static_cast<int>(std::max<std::uint64_t>(1, std::min<std::uint64_t>(std::uint64_t(wanted), count)));
+        for (threads = wanted;; threads = threads / 2) {
+            try {
+                held.emplace(per_thread * std::uint64_t(threads));
+                break;
+            } catch (const core::OpError&) {
+                if (threads <= 1) {  // (not even one window of these tiles: smaller ones, or too large)
+                    if (k + 1 == sides.size()) throw;
+                    break;
+                }
+            }
+        }
+    }
     std::vector<Rect> tiles;
     for (int y = area.y0; y < area.y1; y += side)
         for (int x = area.x0; x < area.x1; x += side) tiles.push_back(Rect{x, y, std::min(x + side, area.x1), std::min(y + side, area.y1)});
-
-    // the memory, held in the imaging budget before it is had: a whole kind's one window, then each thread's window (the
-    // tile grown by the halo, cut to the grid) — its floats, their reading and a kernel's own work on it (whole numbers, as
-    // the blurs' exact sums, and a float copy: three words a sample) —, the tile's result and the selection's mix
-    const std::size_t sch = way.colours + 1, kch = way.kernel_colours + 1;
-    const std::uint64_t tile_px = std::uint64_t(side) * side;
-    const std::uint64_t reach = std::uint64_t(side) + 2 * std::uint64_t(halo.radius);
-    const std::uint64_t window_px = halo.bounds ? 0 : std::min<std::uint64_t>(reach, w) * std::min<std::uint64_t>(reach, h);
-    const Rect whole = halo.bounds ? ctx.bounds.unite(area) : Rect{};
-    const image_ops::Held shared_held(std::uint64_t(whole.area()) * kch * sizeof(float));
-    const std::uint64_t per_thread = window_px * (kch * (2 * sizeof(float) + sizeof(std::int64_t)) + sch * sizeof(float)) +
-                                     tile_px * (kch + 3 * sch) * sizeof(float) +
-                                     (way.meaning ? (window_px + tile_px) * (sch + 4) * sizeof(double) : 0);
-    int wanted = tiling.threads > 0 ? tiling.threads : band_threads();
-    wanted = std::max(1, std::min<int>(wanted, static_cast<int>(tiles.size())));
-    std::optional<image_ops::Held> held;
-    int threads = wanted;
-    for (;; threads = threads / 2) {
-        try {
-            held.emplace(per_thread * std::uint64_t(threads));
-            break;
-        } catch (const core::OpError&) {
-            if (threads <= 1) throw;  // (not even one window: too large)
-        }
-    }
 
     std::optional<Window> shared;
     const auto rules_of = [&way, &surface]() -> std::unique_ptr<ink::Rules> {
