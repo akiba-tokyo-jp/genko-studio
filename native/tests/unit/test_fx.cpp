@@ -155,7 +155,7 @@ render::fx::Kernel maximum3() {
                 for (std::size_t c = 0; c < src.ch; ++c) {
                     float most = -1e30f;
                     for (int dy = -1; dy <= 1; ++dy)
-                        for (int dx = -1; dx <= 1; ++dx) most = std::max(most, src.get(x + dx, y + dy, c));
+                        for (int dx = -1; dx <= 1; ++dx) most = std::max(most, src.at(x + dx, y + dy, c));
                     res.push_back(c + 1 == src.ch && ctx.alpha ? src.get(x, y, c) : most);
                 }
         return res;
@@ -430,6 +430,21 @@ private slots:
         const std::string by_light = render::fx::take_bytes(*light);
         QVERIFY(std::fabs(k_at(by_light, 10 * 64 + 31) - 0.1) < 1e-3);
         QVERIFY(std::fabs(k_at(by_light, 10 * 64 + 29) - 0.9) < 1e-3);
+        // a Lab page's lightness: its L alone (the light spreads), its a and b as they were
+        {
+            const auto lab = ink_page("lab", [](std::uint32_t x, std::uint32_t y, unsigned c) {
+                if (c == 0) return x < 32 ? 0.2 : 0.9;
+                return c == 1 ? 0.3 + 0.01 * (y % 7) : 0.7 - 0.01 * (x % 5);
+            });
+            const core::InkPixels was = core::decode_ink_raster(*layer_of(lab, "pic").ink_raster);
+            auto surface = render::fx::ink_surface(was, *lab.page(0).color);
+            render::fx::apply(*surface, most, Json::object(), core::FilterInks::Lightness, Rect{0, 0, 64, 64}, nullptr, 1);
+            const core::InkPixels now = core::decode_ink_raster(render::fx::take_bytes(*surface));
+            QVERIFY(std::fabs(now.value(10 * 64 + 31, 0) - 0.9) < 1e-3);  // (L: the most of the 3 × 3)
+            QVERIFY(std::fabs(now.value(10 * 64 + 29, 0) - 0.2) < 1e-3);
+            for (std::size_t i = 0; i < now.pixel_count(); ++i)
+                for (unsigned c = 1; c < 3; ++c) QCOMPARE(now.value(i, c), was.value(i, c));
+        }
         // the colours it means: a colour left as it is keeps its inks
         auto meaning = render::fx::ink_surface(inks, color);
         render::fx::apply(*meaning, identity(), Json::object(), core::FilterInks::Meaning, Rect{0, 0, 64, 64}, nullptr, 1);
@@ -469,6 +484,58 @@ private slots:
                 }
             // (the box's side is whole pixels of each grid: 9 working pixels at 200 dpi, 25 / 3 at 600)
             QVERIFY2(worst < (std::string(kind) == "blur_box" ? 0.06 : 0.03), qPrintable(QStringLiteral("%1: %2").arg(kind).arg(worst)));
+        }
+    }
+
+    // A radius as large as the table takes on a layer far smaller than it reaches (review P2-1: the window is cut to the
+    // grid, its edge repeated past it — never more than the layer, whatever the halo): drawn, not refused — an 8-bit page
+    // at 200 dpi (ぼかし（ガウス） 1000, ぼかし（ボックス） 2000), a precise layer at 600 dpi (the same), inside the budget the op
+    // works in —, the same bytes whatever the tiling, every value between the layer's least and most.
+    void aLargeRadiusOnASmallLayerIsDrawn() {
+        const render::ImageAllocationBudget budget{2ULL * 1024 * 1024 * 1024};
+        const std::vector<Json> ops{Json{{"kind", "blur_gaussian"}, {"radius", 1000}}, Json{{"kind", "blur_box"}, {"radius", 2000}}};
+        {  // (8 bits: the page of 1 inch at 200 dpi, s = 1)
+            auto doc = blank();
+            render::Image picture = render::Image::create("RGBA", render::Size{200, 200}, render::Ink{40, 40, 40, 255});
+            picture.paste(render::Ink{220, 200, 30, 255}, render::Box{0, 0, 100, 200});
+            core::Layer layer;
+            layer.id = "paint";
+            layer.kind = core::LayerKind::Raster;
+            layer.panel_clip = false;
+            render::raster::save_raster(doc.page(0), layer, picture);
+            doc.edit_page(0).layers.push_back(layer);
+            for (const Json& given : ops) {
+                Json op{{"op", "filter_raster"}, {"page", 1}, {"id", "paint"}};
+                op.update(given);
+                const auto done = run(doc, op).doc;
+                const render::Image after = render::raster::layer_pixels(done.page(0), layer_of(done, "paint")).convert("RGBA");
+                QVERIFY2(after.tobytes() != picture.tobytes(), given.dump().c_str());
+                for (int x = 0; x < 200; x += 9) {
+                    const auto p = after.getpixel(x, 100);
+                    QVERIFY2(p[0] >= 40 && p[0] <= 220 && p[3] == 255, given.dump().c_str());
+                }
+            }
+        }
+        {  // (precise at 600 dpi: a layer of 600 × 600 over the 1-inch page, s = 3 — σ 3000 of its pixels, a box of 12001)
+            const auto doc = precise_page(600, 600, pattern(600, 600), false);
+            for (const Json& given : ops) {
+                Json op{{"op", "filter_raster"}, {"page", 1}, {"id", "paint"}};
+                op.update(given);
+                QVERIFY2(refusal(doc, op).empty(), (given.dump() + ": " + refusal(doc, op)).c_str());
+            }
+        }
+        // (the engine at s = 3 on 50 × 50: one tile, and tiles of 7 on 3 threads — the window cut on every side — the same)
+        const std::string raster = precise(50, 50, pattern(50, 50), true);
+        for (const Json& given : ops) {
+            const char* kind = given["kind"].get_ref<const std::string&>().c_str();
+            const Json params{{"radius", given["radius"]}};
+            const std::string one = run_precise(raster, kind, params, nullptr, {256, 1}, 3.0);
+            QVERIFY2(one == run_precise(raster, kind, params, nullptr, {7, 3}, 3.0), kind);
+            QVERIFY(one != raster);
+            for (std::uint32_t i = 0; i < 50; i += 7) {
+                const auto p = pixel(one, i, 49 - i);
+                QVERIFY2(p[0] >= -1e-6 && p[0] <= 1 + 1e-6 && std::fabs(p[3] - 1.0) < 1e-6, kind);
+            }
         }
     }
 

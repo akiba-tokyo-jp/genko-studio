@@ -57,19 +57,21 @@ std::int64_t div_round(std::int64_t a, std::int64_t w) { return a >= 0 ? (a + w 
 
 using Exact = std::vector<std::int64_t>;
 
-// The window `win` of `src` premultiplied, in whole numbers of 2^-bits.
-Exact exact_window(const Window& src, const Rect& win, bool alpha, int bits) {
+// The window `win` of `src` (inside it) premultiplied, in whole numbers of 2^-bits, into `q`.
+void exact_window(const Window& src, const Rect& win, bool alpha, int bits, Exact& q) {
     const std::size_t n = src.ch;
-    std::vector<float> p(win.area() * n);
+    const double scale = std::ldexp(1.0, bits);
+    q.resize(win.area() * n);
     std::size_t o = 0;
     for (int y = win.y0; y < win.y1; ++y)
-        for (int x = win.x0; x < win.x1; ++x)
-            for (std::size_t c = 0; c < n; ++c) p[o++] = src.get(x, y, c);
-    premultiply(p, n, alpha);
-    const double scale = std::ldexp(1.0, bits);
-    Exact q(p.size());
-    for (std::size_t i = 0; i < p.size(); ++i) q[i] = std::llround(static_cast<double>(p[i]) * scale);
-    return q;
+        for (int x = win.x0; x < win.x1; ++x) {
+            const float* p = src.px(x, y);
+            const float a = alpha ? p[n - 1] : 1.0f;
+            for (std::size_t c = 0; c < n; ++c) {
+                const float v = alpha && c + 1 < n ? p[c] * a : p[c];
+                q[o++] = std::llround(static_cast<double>(v) * scale);
+            }
+        }
 }
 
 // `out` of an exact window `win` back as straight floats.
@@ -86,54 +88,39 @@ std::vector<float> from_exact(const Exact& q, const Rect& win, const Rect& out, 
     return res;
 }
 
-// One box pass of radius r along every row of a w × h × n buffer (its edges clamped to the row's own edge pixel).
-void box_rows(Exact& buf, std::size_t w, std::size_t h, std::size_t n, std::size_t r, Exact& padded) {
-    if (r == 0 || w == 0) return;
-    const auto width = static_cast<std::int64_t>(2 * r + 1);
-    const std::size_t pad = r + 1;
-    padded.resize((w + 2 * pad) * n);
+// Box passes of the radii given, one after another, along a line of `len` samples (`stride` words apart, `n` channels
+// each) read as going on past both its ends with its end samples as far as the passes reach (`reach`: their radii's sum
+// at least) — so a line cut at the grid's edge is worked as the grid's edge repeated, and one cut inside the grid far
+// enough from what is kept —, each pass's mean rounded (div_round); the results back in place. `a` and `b`: scratch.
+void line_passes(std::int64_t* first, std::size_t len, std::size_t stride, std::size_t n, const std::vector<std::size_t>& radii, std::size_t reach,
+                 Exact& a, Exact& b) {
+    if (len == 0) return;
+    const std::size_t total = len + 2 * reach;
+    a.resize(total * n);
+    b.resize(total * n);
+    for (std::size_t i = 0; i < total; ++i) {
+        const std::size_t at = i < reach ? 0 : std::min(i - reach, len - 1);
+        std::copy(first + at * stride, first + at * stride + n, a.begin() + static_cast<std::ptrdiff_t>(i * n));
+    }
     std::vector<std::int64_t> acc(n);
-    for (std::size_t y = 0; y < h; ++y) {
-        std::int64_t* line = buf.data() + y * w * n;
-        for (std::size_t i = 0; i < pad; ++i) std::copy(line, line + n, padded.begin() + static_cast<std::ptrdiff_t>(i * n));
-        std::copy(line, line + w * n, padded.begin() + static_cast<std::ptrdiff_t>(pad * n));
-        for (std::size_t i = 0; i < pad; ++i)
-            std::copy(line + (w - 1) * n, line + w * n, padded.begin() + static_cast<std::ptrdiff_t>((pad + w + i) * n));
+    const auto clamped = [total](std::ptrdiff_t i) { return std::size_t(std::clamp<std::ptrdiff_t>(i, 0, std::ptrdiff_t(total) - 1)); };
+    for (const std::size_t r : radii) {
+        if (r == 0) continue;
+        const auto width = static_cast<std::int64_t>(2 * r + 1);
         std::fill(acc.begin(), acc.end(), 0);
-        for (std::size_t i = 0; i <= 2 * r; ++i)
-            for (std::size_t c = 0; c < n; ++c) acc[c] += padded[(pad - r + i) * n + c];
-        for (std::size_t x = 0; x < w; ++x) {
-            const std::size_t add = (x + pad + r + 1) * n, sub = (x + pad - r) * n;
+        for (std::ptrdiff_t k = -std::ptrdiff_t(r); k <= std::ptrdiff_t(r); ++k)
+            for (std::size_t c = 0; c < n; ++c) acc[c] += a[clamped(k) * n + c];
+        for (std::size_t x = 0; x < total; ++x) {
+            const std::size_t add = clamped(std::ptrdiff_t(x + r + 1)) * n, sub = clamped(std::ptrdiff_t(x) - std::ptrdiff_t(r)) * n;
             for (std::size_t c = 0; c < n; ++c) {
-                line[x * n + c] = div_round(acc[c], width);
-                acc[c] += padded[add + c] - padded[sub + c];
+                b[x * n + c] = div_round(acc[c], width);
+                acc[c] += a[add + c] - a[sub + c];
             }
         }
+        a.swap(b);
     }
-}
-
-// The same along the columns (each column's edges clamped), into `out` (then swapped in).
-void box_cols(Exact& buf, std::size_t w, std::size_t h, std::size_t n, std::size_t r, Exact& out) {
-    if (r == 0 || h == 0) return;
-    const auto width = static_cast<std::int64_t>(2 * r + 1);
-    const std::size_t stride = w * n;
-    const auto row = [&](std::ptrdiff_t y) { return buf.data() + std::size_t(std::clamp<std::ptrdiff_t>(y, 0, std::ptrdiff_t(h) - 1)) * stride; };
-    out.resize(buf.size());
-    std::vector<std::int64_t> acc(stride, 0);
-    for (std::ptrdiff_t i = -std::ptrdiff_t(r); i <= std::ptrdiff_t(r); ++i) {
-        const std::int64_t* line = row(i);
-        for (std::size_t k = 0; k < stride; ++k) acc[k] += line[k];
-    }
-    for (std::size_t y = 0; y < h; ++y) {
-        std::int64_t* dst = out.data() + y * stride;
-        const std::int64_t* add = row(std::ptrdiff_t(y + r + 1));
-        const std::int64_t* sub = row(std::ptrdiff_t(y) - std::ptrdiff_t(r));
-        for (std::size_t k = 0; k < stride; ++k) {
-            dst[k] = div_round(acc[k], width);
-            acc[k] += add[k] - sub[k];
-        }
-    }
-    buf.swap(out);
+    for (std::size_t i = 0; i < len; ++i)
+        std::copy(a.begin() + static_cast<std::ptrdiff_t>((reach + i) * n), a.begin() + static_cast<std::ptrdiff_t>((reach + i + 1) * n), first + i * stride);
 }
 
 }  // namespace
@@ -157,12 +144,18 @@ std::vector<float> gaussian(const Window& src, const Rect& out, bool alpha, floa
         const std::vector<float> k = gaussian_kernel(sigma);
         return conv_sep(src, out, k, k, alpha);
     }
+    // (what it reads: the output grown by the passes' reach, cut to the window — the layer's grid —; each line read on past
+    // its ends with its end samples: the grid's edge repeated, as the window would hold it)
     const std::size_t n = src.ch;
-    const Rect win = out.inflate(boxes_margin(boxes));
+    const int margin = boxes_margin(boxes);
+    const Rect win = out.inflate(margin).intersect(src.rect);
     const std::size_t ww = static_cast<std::size_t>(win.width()), wh = static_cast<std::size_t>(win.height());
-    Exact q = exact_window(src, win, alpha, bits), scratch;
-    for (const int w : boxes) box_rows(q, ww, wh, n, static_cast<std::size_t>((w - 1) / 2), scratch);
-    for (const int w : boxes) box_cols(q, ww, wh, n, static_cast<std::size_t>((w - 1) / 2), scratch);
+    std::vector<std::size_t> radii;
+    for (const int w : boxes) radii.push_back(static_cast<std::size_t>((w - 1) / 2));
+    Exact q, a, b;
+    exact_window(src, win, alpha, bits, q);
+    for (std::size_t y = 0; y < wh; ++y) line_passes(q.data() + y * ww * n, ww, n, n, radii, std::size_t(margin), a, b);
+    for (int x = out.x0; x < out.x1; ++x) line_passes(q.data() + std::size_t(x - win.x0) * n, wh, ww * n, n, radii, std::size_t(margin), a, b);
     return from_exact(q, win, out, n, alpha, bits);
 }
 
@@ -175,32 +168,42 @@ std::vector<float> box(const Window& src, const Rect& out, bool alpha, int r, do
         const std::vector<float> k(static_cast<std::size_t>(side), 1.0f / static_cast<float>(side));
         return conv_sep(src, out, k, k, alpha);
     }
-    // (the sums of each row's 2r + 1, then of the column's 2r + 1 of those: the square's sum, divided once)
-    const Rect win = out.inflate(r);
-    const std::size_t ww = static_cast<std::size_t>(win.width()), wh = static_cast<std::size_t>(win.height());
+    // (the sums of each row's 2r + 1, then of the column's 2r + 1 of those: the square's sum, divided once — what it reads
+    // cut to the window, the layer's grid, its edge pixel repeated past it)
+    const Rect win = out.inflate(r).intersect(src.rect);
+    const std::size_t wh = static_cast<std::size_t>(win.height());
     const std::size_t ow = static_cast<std::size_t>(out.width()), oh = static_cast<std::size_t>(out.height());
-    const Exact q = exact_window(src, win, alpha, bits);
-    Exact rows(ow * wh * n);
+    const auto at_x = [&win](int x) { return std::size_t(std::clamp(x, win.x0, win.x1 - 1) - win.x0); };
+    const auto at_y = [&win](int y) { return std::size_t(std::clamp(y, win.y0, win.y1 - 1) - win.y0); };
+    Exact rows(wh * ow * n), line;
+    std::vector<std::int64_t> acc(n);
     for (std::size_t y = 0; y < wh; ++y) {
-        const std::int64_t* line = q.data() + y * ww * n;
+        exact_window(src, Rect{win.x0, win.y0 + int(y), win.x1, win.y0 + int(y) + 1}, alpha, bits, line);
         std::int64_t* dst = rows.data() + y * ow * n;
-        for (std::size_t c = 0; c < n; ++c) {
-            std::int64_t acc = 0;
-            for (std::size_t i = 0; i < static_cast<std::size_t>(side); ++i) acc += line[i * n + c];
-            for (std::size_t x = 0; x < ow; ++x) {
-                dst[x * n + c] = acc;
-                if (x + 1 < ow) acc += line[(x + std::size_t(side)) * n + c] - line[x * n + c];
+        std::fill(acc.begin(), acc.end(), 0);
+        for (int k = -r; k <= r; ++k)
+            for (std::size_t c = 0; c < n; ++c) acc[c] += line[at_x(out.x0 + k) * n + c];
+        for (std::size_t x = 0; x < ow; ++x) {
+            const int ox = out.x0 + int(x);
+            for (std::size_t c = 0; c < n; ++c) {
+                dst[x * n + c] = acc[c];
+                acc[c] += line[at_x(ox + r + 1) * n + c] - line[at_x(ox - r) * n + c];
             }
         }
     }
-    Exact sums(ow * oh * n);
-    std::vector<std::int64_t> acc(ow * n, 0);
-    for (std::size_t i = 0; i < static_cast<std::size_t>(side); ++i)
-        for (std::size_t k = 0; k < ow * n; ++k) acc[k] += rows[i * ow * n + k];
+    Exact sums(oh * ow * n);
+    std::vector<std::int64_t> col(ow * n, 0);
+    for (int k = -r; k <= r; ++k) {
+        const std::int64_t* from = rows.data() + at_y(out.y0 + k) * ow * n;
+        for (std::size_t j = 0; j < ow * n; ++j) col[j] += from[j];
+    }
     for (std::size_t y = 0; y < oh; ++y) {
-        for (std::size_t k = 0; k < ow * n; ++k) {
-            sums[y * ow * n + k] = div_round(acc[k], side * side);
-            if (y + 1 < oh) acc[k] += rows[(y + std::size_t(side)) * ow * n + k] - rows[y * ow * n + k];
+        const int oy = out.y0 + int(y);
+        const std::int64_t* add = rows.data() + at_y(oy + r + 1) * ow * n;
+        const std::int64_t* sub = rows.data() + at_y(oy - r) * ow * n;
+        for (std::size_t j = 0; j < ow * n; ++j) {
+            sums[y * ow * n + j] = div_round(col[j], side * side);
+            col[j] += add[j] - sub[j];
         }
     }
     return from_exact(sums, out, out, n, alpha, bits);

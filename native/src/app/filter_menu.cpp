@@ -16,7 +16,9 @@
 #include <QEventLoop>
 #include <QFutureWatcher>
 #include <QMenu>
+#include <QPointer>
 #include <QProgressDialog>
+#include <QCloseEvent>
 #include <QTimer>
 #include <QtConcurrent>
 
@@ -34,6 +36,7 @@
 #include "core/command_bus.hpp"
 #include "core/filter_kinds.hpp"
 #include "core/ids.hpp"
+#include "core/pyops.hpp"
 #include "core/smart.hpp"
 #include "render/fx.hpp"
 #include "render/ops_registry.hpp"
@@ -41,6 +44,7 @@
 #include "render/plugins.hpp"
 #include "render/raster_ops.hpp"
 #include "render/segment/segment.hpp"
+#include "render/shape_parts.hpp"
 #include "service/wording.hpp"
 
 namespace genko::app {
@@ -91,6 +95,9 @@ FilterItem existing(const char* name) {
 }
 
 FilterItem separator() { return FilterItem{}; }
+
+// 前回のフィルター's name as a command (its words but while the フィルター menu is open, when they are the last one's).
+const QString kLastFilterWords = QStringLiteral("フィルターの再実行");
 
 FilterItem op_item(const char* name, const char* title, const char* op, const char* kind, QList<QKeySequence> keys = {}) {
     FilterItem item = kind_item(name, title, kind, std::move(keys));
@@ -221,7 +228,7 @@ void MainWindow::build_filter_actions() {
             act->setEnabled(filter_available(item));
         }
     }
-    make("act_filter_last", QStringLiteral("フィルターの再実行"), [this] { repeat_filter(); }, {QKeySequence(QStringLiteral("Ctrl+F"))},
+    make("act_filter_last", kLastFilterWords, [this] { repeat_filter(); }, {QKeySequence(QStringLiteral("Ctrl+F"))},
          QStringLiteral("最後にかけたフィルターを、同じ設定で今のレイヤーにかけます"))
         ->setEnabled(false);
 }
@@ -249,7 +256,13 @@ void MainWindow::build_filter_menus(QMenu* filter) {
             }
         }
     }
-    connect(filter, &QMenu::aboutToShow, this, &MainWindow::follow_filter_menu);
+    connect(filter, &QMenu::aboutToShow, this, [this] {
+        follow_filter_menu();
+        // (前回のフィルター's words while the menu is open: the last one's name, as Photoshop's; its name as a command — the
+        // keys, クイックアクセス, コマンドを探す — stays フィルターの再実行, back when the menu closes)
+        if (QAction* last = action("act_filter_last"); last != nullptr && last_filter_)
+            last->setText(QString::fromStdString(last_filter_->value("title", std::string())));
+    });
     // (while the menu is not open its commands are on as far as this build has them: a key — Ctrl+F — or コマンドを探す
     // reaches them, and the command itself says what it cannot work on)
     connect(filter, &QMenu::aboutToHide, this, [this] {
@@ -259,7 +272,10 @@ void MainWindow::build_filter_menus(QMenu* filter) {
                 if (QAction* act = action(item.name)) act->setEnabled(filter_available(item));
             }
         }
-        if (QAction* last = action("act_filter_last")) last->setEnabled(last_filter_.has_value());
+        if (QAction* last = action("act_filter_last")) {
+            last->setEnabled(last_filter_.has_value());
+            last->setText(kLastFilterWords);
+        }
     });
     follow_filter_menu();
     emit filter->aboutToHide();
@@ -280,10 +296,7 @@ void MainWindow::follow_filter_menu() {
             act->setEnabled(filter_available(item) && on);
         }
     }
-    if (QAction* last = action("act_filter_last")) {
-        last->setEnabled(last_filter_.has_value() && (paint || smart));
-        last->setText(last_filter_ ? QString::fromStdString(last_filter_->value("title", std::string())) : QStringLiteral("フィルターの再実行"));
-    }
+    if (QAction* last = action("act_filter_last")) last->setEnabled(last_filter_.has_value() && (paint || smart));
     // (the plugins' filters, each a person installed and chose to run, before the folder and the settings)
     if (filter_plugins_menu_ != nullptr) {
         for (QAction* act : filter_plugins_menu_->actions()) {
@@ -339,18 +352,34 @@ void MainWindow::filter_command(const FilterItem& item) {
         return;
     }
     const auto asked = asking();
-    // (a pen layer's lines become pixels: asked first, as the layer panel's かける… did — Photoshop asks to rasterize a type
-    // layer before a filter; a channel drawn on leaves the lines as they are)
-    if (paint && layer->stroke_count() > 0 && channel_view().target.empty()) {
-        if (!ask::question(this, name,
-                           QStringLiteral("レイヤー「%1」のペンの線は画像になり、あとから線として消せなくなります。「%2」をかけますか\n（元に戻す で取り消せます）")
-                               .arg(wording::layer_label(*layer), name)) ||
+    const std::optional<Json> area = selection_area();
+    // (a pen layer's lines, its fills and shapes become pixels — as filter_raster bakes them —: asked first, as the layer
+    // panel's かける… did; Photoshop asks to rasterize a type layer before a filter. A channel drawn on leaves them as they are)
+    const bool lines = layer->stroke_count() > 0;
+    if (paint && (lines || !layer->patches.empty() || render::shape_parts::any(*layer)) && channel_view().target.empty()) {
+        const QString what = lines ? QStringLiteral("ペンの線は画像になり、あとから線として消せなくなります")
+                                   : QStringLiteral("図形・塗りは画像になり、あとから図形として直せなくなります");
+        if (!ask::question(this, name, QStringLiteral("レイヤー「%1」の%2。「%3」をかけますか\n（元に戻す で取り消せます）").arg(wording::layer_label(*layer), what, name)) ||
             !still(asked))
             return;
     }
+    // (on a smart object: a smart filter, as Photoshop adds it, not asked — but when Photoshop's picture of it goes, its
+    // filters drawn again by Genko, or a selection is not used for a filter mask it has already: the layer panel's words)
+    if (smart && layer->smart && layer->smart->is_object()) {
+        const Json* psd = core::get(*layer->smart, "psd");
+        const bool photoshops = psd != nullptr && psd->is_object() && psd->contains("shown") && !(*psd)["shown"].is_null();
+        const Json* mask = core::get(*layer->smart, "filter_mask");
+        const bool masked = area && mask != nullptr && mask->is_object();
+        if (photoshops || masked) {
+            QString text = QStringLiteral("スマートオブジェクト「%1」に「%2」をスマートフィルターとして足します（あとから直せます）。").arg(wording::layer_label(*layer), name);
+            if (photoshops) text += QStringLiteral("\nPhotoshop で付けたフィルターの見た目は、Genko が描き直した絵に替わります。");
+            if (masked) text += QStringLiteral("\nフィルターマスクが既にあるので、選択範囲は使いません（フィルターマスクはそのままです）。");
+            text += QStringLiteral("\n（元に戻す で取り消せます）");
+            if (!ask::question(this, name, text) || !still(asked)) return;
+        }
+    }
     const std::string layer_id = layer->id, kind = item.kind;
     const Json index = page->index.json();
-    const std::optional<Json> area = selection_area();
     const std::string op_name = smart ? "smart_filter_add" : item.op;
     const auto op_of = [op_name, index, layer_id, kind, area](const Json& params) {
         Json op{{"op", op_name}, {"page", index}, {"id", layer_id}, {"kind", kind}};
@@ -367,14 +396,14 @@ void MainWindow::filter_command(const FilterItem& item) {
     const bool python = item.python;
     const auto send = [this, op_of, heavy, name, kind, op, python, asked](const Json& params) {
         if (!still(asked)) return;
+        if (!send_filter(Json::array({op_of(params)}), name, heavy(params))) return;  // (refused, stopped: not remembered)
         if (op != "vanishing_point") {  // (消点 is not 前回のフィルター: PhotoCraft's lastFilter neither)
             last_filter_ = Json{{"title", name.toStdString()}, {"kind", kind}, {"op", op}, {"python", python}, {"params", params}};
             if (QAction* last = action("act_filter_last")) {
-                last->setText(name);
                 last->setEnabled(true);
+                last->setStatusTip(QStringLiteral("最後にかけたフィルター（%1）を、同じ設定で今のレイヤーにかけます").arg(name));
             }
         }
-        send_filter(Json::array({op_of(params)}), name, heavy(params));
     };
     if (item.fixed) {
         send(*item.fixed);
@@ -435,67 +464,129 @@ struct Worked {
     bool cancelled = false;
 };
 
+// The window of a heavy filter at work (over every window of the app: nothing else changes the books meanwhile, and none
+// is closed under it): 中止 — its button, Esc, closing it — asks the work to stop and says so, the window staying until the
+// thread is back (QProgressDialog's own cancel would hide it at once).
+class FilterProgress : public QProgressDialog {
+public:
+    using QProgressDialog::QProgressDialog;
+    std::function<void()> stopping;
+
+protected:
+    void reject() override {
+        if (stopping) stopping();
+    }
+    void closeEvent(QCloseEvent* event) override {
+        event->ignore();
+        if (stopping) stopping();
+    }
+};
+
 }  // namespace
 
 bool MainWindow::send_filter(const Json& ops, const QString& name, bool heavy) {
     if (!heavy) return apply_ops(ops);
-    // (a heavy one on a thread, the window waiting with its progress and 中止 — nothing changed when stopped)
-    Json targeted;
-    try {
-        render::use_brushes_of(book());
-        targeted = with_contents_target(with_channel_target(ops));
-    } catch (const std::exception& error) {  // (as apply_ops says it: the book as it was)
-        flash(wording::error(QString::fromUtf8(error.what())), 6000, true);
-        return false;
-    }
-    const DocPtr base = session_->snapshot();
+    // (a heavy one on a thread on a copy of the book, the window waiting with its progress and 中止 — nothing changed when
+    // stopped —; the book changed meanwhile — another window of it, an agent's change taken in —: worked again on it, on
+    // the thread; another book here by then: nothing)
+    const QPointer<MainWindow> alive(this);
+    const std::shared_ptr<Session> origin = session_;
     auto stop = std::make_shared<std::stop_source>();
     auto done = std::make_shared<std::atomic<double>>(0.0);
-    QProgressDialog progress(QStringLiteral("「%1」をかけています…").arg(name), QStringLiteral("中止"), 0, 1000, this);
-    progress.setObjectName(QStringLiteral("filter_progress"));
-    progress.setWindowTitle(name);
-    progress.setWindowModality(Qt::WindowModal);
-    progress.setMinimumDuration(0);
-    progress.setAutoClose(false);
-    progress.setAutoReset(false);
-    QObject::connect(&progress, &QProgressDialog::canceled, &progress, [stop] { stop->request_stop(); });
-    QFutureWatcher<Worked> watcher;
-    QEventLoop loop;
-    QObject::connect(&watcher, &QFutureWatcher<Worked>::finished, &loop, &QEventLoop::quit);
+    const QPointer<FilterProgress> progress = new FilterProgress(QStringLiteral("「%1」をかけています…").arg(name), QStringLiteral("中止"), 0, 1000, this);
+    progress->setObjectName(QStringLiteral("filter_progress"));
+    progress->setWindowTitle(name);
+    progress->setWindowModality(Qt::ApplicationModal);
+    progress->setMinimumDuration(0);
+    progress->setAutoClose(false);
+    progress->setAutoReset(false);
+    QObject::disconnect(progress, SIGNAL(canceled()), progress, SLOT(cancel()));  // (kept up while it stops: `stopping`)
+    progress->stopping = [stop, p = progress.data(), words = QStringLiteral("「%1」を中止しています…").arg(name)] {
+        stop->request_stop();
+        p->setLabelText(words);
+    };
+    QObject::connect(progress, &QProgressDialog::canceled, progress, [p = progress.data()] {
+        if (p->stopping) p->stopping();
+    });
+    filter_working_ = stop;
+    progress->show();
     QTimer tick;
     tick.setInterval(100);
-    QObject::connect(&tick, &QTimer::timeout, &progress, [&progress, done, stop] {
-        if (progress.wasCanceled()) stop->request_stop();  // (stopped however it was: its button, Esc, cancel())
-        progress.setValue(static_cast<int>(done->load() * 1000));
-    });
-    watcher.setFuture(QtConcurrent::run([base, targeted, actor = session_->actor(), token = stop->get_token(), done]() -> Worked {
-        const render::segment::StopScope scope(token);
-        const render::fx::ProgressScope progress_scope(*done);
-        core::ScopedIdScript script;
-        try {
-            core::ApplyResult result = core::CommandBus(render::ops_registry()).apply(*base, targeted, core::Actor(actor));
-            return Worked{std::move(result), script.taken(), {}, false};
-        } catch (const render::Cancelled&) {
-            return Worked{std::nullopt, {}, {}, true};
-        } catch (const std::exception& error) {
-            return Worked{std::nullopt, {}, error.what(), false};
-        }
-    }));
-    progress.show();
+    QObject::connect(&tick, &QTimer::timeout, progress, [p = progress.data(), done] { p->setValue(static_cast<int>(done->load() * 1000)); });
     tick.start();
-    if (!watcher.isFinished()) loop.exec();
-    tick.stop();
-    progress.close();
-    Worked worked = watcher.result();
-    if (!worked.result) {
-        if (worked.cancelled || stop->stop_requested()) {
-            flash(QStringLiteral("「%1」を中止しました（原稿は変わっていません）").arg(name), 4000);
-        } else {
-            flash(wording::error(QString::fromStdString(worked.error)), 6000, true);
+    bool applied = false;
+    QString said;
+    bool trouble = false;
+    for (;;) {
+        Json targeted;
+        try {
+            render::use_brushes_of(book());
+            targeted = with_contents_target(with_channel_target(ops));
+        } catch (const std::exception& error) {  // (as apply_ops says it: the book as it was)
+            said = wording::error(QString::fromUtf8(error.what()));
+            trouble = true;
+            break;
         }
-        return false;
+        const DocPtr base = session_->snapshot();
+        done->store(0.0);
+        QFutureWatcher<Worked> watcher;
+        QEventLoop loop;
+        QObject::connect(&watcher, &QFutureWatcher<Worked>::finished, &loop, &QEventLoop::quit);
+        watcher.setFuture(QtConcurrent::run([base, targeted, actor = session_->actor(), token = stop->get_token(), done]() -> Worked {
+            const render::segment::StopScope scope(token);
+            const render::fx::ProgressScope progress_scope(*done);
+            core::ScopedIdScript script;
+            try {
+                core::ApplyResult result = core::CommandBus(render::ops_registry()).apply(*base, targeted, core::Actor(actor));
+                return Worked{std::move(result), script.taken(), {}, false};
+            } catch (const render::Cancelled&) {
+                return Worked{std::nullopt, {}, {}, true};
+            } catch (const std::exception& error) {
+                return Worked{std::nullopt, {}, error.what(), false};
+            }
+        }));
+        if (!watcher.isFinished()) loop.exec();
+        if (!watcher.isFinished()) stop->request_stop();  // (the loop left early — the app quitting —: stopped, waited for)
+        Worked worked = watcher.result();
+        if (!alive) return false;  // (the window gone meanwhile: nothing of it touched)
+        if (session_ != origin) {
+            said = QStringLiteral("別の原稿に替わったので、「%1」はかけませんでした").arg(name);
+            break;
+        }
+        if (worked.cancelled || stop->stop_requested()) {  // (stopped: not laid on, even when the thread had finished)
+            said = QStringLiteral("「%1」を中止しました（原稿は変わっていません）").arg(name);
+            break;
+        }
+        if (!worked.result) {
+            said = wording::error(QString::fromStdString(worked.error));
+            trouble = true;
+            break;
+        }
+        if (session_->snapshot() != base) {  // (the book changed while it was worked: again on the book as it is now)
+            if (progress) progress->setLabelText(QStringLiteral("原稿が変わったので、「%1」をもう一度かけています…").arg(name));
+            continue;
+        }
+        applied = apply_worked(ops, targeted, base, std::move(*worked.result), worked.taken);
+        break;
     }
-    return apply_worked(ops, targeted, base, std::move(*worked.result), worked.taken);
+    tick.stop();
+    filter_working_.reset();
+    if (progress) {
+        progress->stopping = nullptr;
+        progress->hide();
+        progress->deleteLater();
+    }
+    if (!said.isEmpty()) flash(said, trouble ? 6000 : 4000, trouble);
+    if (close_after_filter_) {  // (asked to close while it was worked: closed now that it is back)
+        close_after_filter_ = false;
+        QTimer::singleShot(0, this, [this] { close(); });
+    }
+    return applied;
+}
+
+void MainWindow::stop_filter_work() {
+    if (filter_job_) filter_job_->stop.request_stop();
+    if (filter_working_) filter_working_->request_stop();
 }
 
 void MainWindow::preview_filter(const std::optional<Json>& ops, bool heavy) {

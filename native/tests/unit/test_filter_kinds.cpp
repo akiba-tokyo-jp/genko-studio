@@ -17,6 +17,7 @@
 #include "core/filter_kinds.hpp"
 #include "core/smart.hpp"
 #include "render/fx.hpp"
+#include "render/ops_registry.hpp"
 #include "testsupport.hpp"
 
 using namespace genko;
@@ -168,6 +169,34 @@ private slots:
         QVERIFY(core::uses_filters(doc));
         QVERIFY(core::filter_file_refs(doc).empty());
         core::validate_filters(doc);  // (no files: nothing to hold)
+    }
+
+    // filters@1's files (D2's displacement map, Document::filter_files) given to an op inside a smart object's contents come
+    // out to the book, as its luts and smart_files do (review P2-5: else the writer would not write them).
+    void filesGivenInsideContentsComeOut() {
+        auto doc = core::new_episode("f", core::Num(1), 1, core::PageSpec::custom(50, 50, 20, 20, 1, 2, 2, 2, 2, 200, "color"));
+        const core::Actor actor("human:test");
+        doc = core::CommandBus(render::ops_registry())
+                  .apply(doc, Json::array({Json{{"op", "put_color_raster"}, {"page", 1}, {"width", 2}, {"height", 2}, {"precision", "u16"},
+                                                {"pixels", Json::array({1000, 2000, 3000, 65535, 1000, 2000, 3000, 65535, 1000, 2000, 3000, 65535, 1000,
+                                                                        2000, 3000, 65535})}}}),
+                         actor)
+                  .doc;
+        const std::string painted = doc.page(0).layers.back().id;
+        doc = core::CommandBus(render::ops_registry())
+                  .apply(doc, Json::array({Json{{"op", "smart_convert"}, {"page", 1}, {"ids", Json::array({painted})}, {"new_id", "so"}}}), actor)
+                  .doc;
+        std::string contents;
+        for (const core::Layer& layer : doc.page(0).layers)
+            if (layer.id == "so") contents = *core::smart::contents_id(layer);
+        QVERIFY(!contents.empty());
+        const std::string ref = "sha256:" + std::string(64, 'a');
+        core::OpRegistry registry = render::ops_registry();
+        registry.add("test_filter_file", [ref](core::OpContext& c) { c.doc.filter_files[ref] = std::make_shared<const std::string>("map"); });
+        const core::Document done =
+            core::CommandBus(registry).apply(doc, Json::array({Json{{"op", "test_filter_file"}, {"page", 1}, {"contents", contents}}}), actor).doc;
+        QVERIFY(done.filter_files.contains(ref));
+        QCOMPARE(*done.filter_files.at(ref), std::string("map"));
     }
 
     void theCatalogue() {

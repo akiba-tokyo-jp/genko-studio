@@ -15,6 +15,7 @@
 #include <functional>
 #include <map>
 #include <memory>
+#include <stop_token>
 #include <optional>
 #include <set>
 #include <string>
@@ -1224,6 +1225,10 @@ private:
     std::optional<core::Json> last_filter_;
     struct FilterJob;
     std::shared_ptr<FilterJob> filter_job_;
+    // a heavy filter being worked (send_filter: its stop; the window asked to close meanwhile, closed when it is back)
+    std::shared_ptr<std::stop_source> filter_working_;
+    bool close_after_filter_ = false;
+    void stop_filter_work();  // (the window going: a heavy filter's preview and work asked to stop)
     QMenu* view_menu_ = nullptr;
     QMenu* books_menu_ = nullptr;   // ウィンドウ → 開いている原稿 (document.activate)
     QLabel* gamut_label_ = nullptr;  // 色域外警告's count

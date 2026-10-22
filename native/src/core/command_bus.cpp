@@ -961,6 +961,7 @@ std::optional<Json> apply_in_contents(const CommandBus& bus, Document& work, con
     work.luts = after.luts;
     work.papers = after.papers;
     work.smart_files = after.smart_files;
+    work.filter_files = after.filter_files;  // (filters@1, PC4 節 D: the files its smart filters were given — a displacement map)
     work.smart_contents = after.smart_contents;
     work.features = after.features;
     work.studio = after.studio;

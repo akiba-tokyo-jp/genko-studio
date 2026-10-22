@@ -424,6 +424,7 @@ void smart_to_page(OpContext& c) {
         (*ops_registry().find("import_psd"))(brought);
         for (const auto& [id, contents] : work.smart_contents) doc.smart_contents.emplace(id, contents);
         for (const auto& [ref, file] : work.smart_files) doc.smart_files.emplace(ref, file);
+        for (const auto& [ref, file] : work.filter_files) doc.filter_files.emplace(ref, file);  // (filters@1, PC4 節 D)
         for (const auto& [ref, table] : work.luts) doc.luts.emplace(ref, table);
         for (const std::string& feature : work.features) {
             if (std::find(doc.features.begin(), doc.features.end(), feature) == doc.features.end()) doc.features.push_back(feature);

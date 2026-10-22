@@ -1,5 +1,6 @@
 #pragma once
 
+#include <algorithm>
 #include <atomic>
 #include <cstddef>
 #include <cstdint>
@@ -26,7 +27,8 @@
 // (the same bytes).
 //
 // A page of inks is worked as its kind says (core::FilterInks): each plate's value as it is, its lightness (CMYK and
-// multichannel plates as 1 − ink, back after) or the colours the inks mean (back by the page's rules, render/ink).
+// multichannel plates as 1 − ink, back after; a Lab page's L alone — the kernel then works one colour, as grey —, its a
+// and b as they were; grey as it is) or the colours the inks mean (back by the page's rules, render/ink).
 // A selection mixes the result with the layer by its coverage (upstream's apply_tiled: straight, every channel).
 //
 // Lengths in a kind's settings are pixels of the working 200 dpi; a kernel scales them to the layer's grid by Ctx::s.
@@ -67,6 +69,12 @@ struct Window {
     std::size_t index(int x, int y) const { return ((std::size_t(y - rect.y0) * std::size_t(rect.width())) + std::size_t(x - rect.x0)) * ch; }
     // The sample at (x, y); 0 outside.
     float get(int x, int y, std::size_t c) const { return rect.contains(x, y) ? data[index(x, y) + c] : 0.0f; }
+    // The sample at (x, y), past the window's edge its edge pixel's (a kernel's window is cut to the layer's grid: this
+    // repeats the grid's edge, upstream's read_clamped).
+    float at(int x, int y, std::size_t c) const {
+        if (rect.empty()) return 0.0f;
+        return data[index(std::clamp(x, rect.x0, rect.x1 - 1), std::clamp(y, rect.y0, rect.y1 - 1)) + c];
+    }
     // The pixel at (x, y) (inside).
     const float* px(int x, int y) const { return data.data() + index(x, y); }
     // The sample with an edge rule relative to `area`.
@@ -102,8 +110,9 @@ struct Halo {
 };
 
 // A kind's formula: its halo, its kernel (the output rectangle's samples, `ch` a pixel, from a window holding the
-// rectangle grown by the halo — the base box for a whole one), how much work a pixel is (to tell a heavy filter), and
-// whether it writes where the layer is clear (a render: its output is the base box).
+// rectangle grown by the halo cut to the layer's grid — the base box for a whole one: past the grid's edge a kernel reads
+// its edge pixel, Window::at; a window never holds more than the grid, whatever the halo), how much work a pixel is (to
+// tell a heavy filter), and whether it writes where the layer is clear (a render: its output is the base box).
 struct Kernel {
     std::string_view kind;
     std::function<Halo(const core::Json& params, const Ctx& ctx)> halo;

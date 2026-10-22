@@ -14,6 +14,7 @@
 #include <QLabel>
 #include <QMenu>
 #include <QMenuBar>
+#include <QPointer>
 #include <QProgressDialog>
 #include <QPushButton>
 #include <QTimer>
@@ -22,7 +23,10 @@
 #include "app/canvas.hpp"
 #include "app/history_panel.hpp"
 #include "app/layer_panel.hpp"
+#include "app/config.hpp"
 #include "app/main_window.hpp"
+#include "app/preferences.hpp"
+#include "app/workspace.hpp"
 #include "core/base64.hpp"
 #include "core/command_bus.hpp"
 #include "render/ops_registry.hpp"
@@ -107,6 +111,24 @@ QStringList words_of(QMenu* menu) {
         else out << a->text();
     }
     return out;
+}
+
+// `then` once a heavy filter's progress shows (over every window of the app).
+void when_working(std::function<void()> then) {
+    auto* timer = new QTimer;
+    timer->setInterval(10);
+    QObject::connect(timer, &QTimer::timeout, timer, [timer, then] {
+        for (QWidget* w : QApplication::topLevelWidgets()) {
+            auto* progress = qobject_cast<QProgressDialog*>(w);
+            if (progress == nullptr || progress->objectName() != QStringLiteral("filter_progress") || !progress->isVisible()) continue;
+            if (progress->windowModality() != Qt::ApplicationModal) qWarning("the filter's progress does not hold every window");
+            timer->stop();
+            timer->deleteLater();
+            then();
+            return;
+        }
+    });
+    timer->start();
 }
 
 // The window's answer: the filter window of `kind`, its fields set by `fill`, accepted (any other: stopped).
@@ -305,6 +327,125 @@ private slots:
         book.act("act_filter_blur")->trigger();
         QCOMPARE(book.layer(pen)->stroke_count(), std::size_t(0));
         QVERIFY(book.layer(pen)->raster_png != nullptr);
+    }
+
+    // 前回のフィルター's name as a command stays フィルターの再実行 (review P2-2): a key the person gave it is kept when filters
+    // change its words in the menu, and when the window is made again (a restart); its words are the last one's only while
+    // the menu is open; no two commands come to share a name (ぼかし).
+    void theLastFiltersKeyIsKept() {
+        app::settings()->setValue(QStringLiteral("shortcuts/フィルターの再実行"), QStringLiteral("Ctrl+Alt+Shift+L"));
+        {
+            Book book;
+            gui_test::Answers answers;
+            QCOMPARE(book.act("act_filter_last")->shortcut(), QKeySequence(QStringLiteral("Ctrl+Alt+Shift+L")));
+            book.window->set_target_layer("pic");
+            book.act("act_filter_blur")->trigger();
+            QMenu* menu = book.menu("menu_filter");
+            emit menu->aboutToShow();
+            QCOMPARE(book.act("act_filter_last")->text(), QStringLiteral("ぼかし"));
+            emit menu->aboutToHide();
+            QCOMPARE(book.act("act_filter_last")->text(), QStringLiteral("フィルターの再実行"));
+            const auto names = app::command_names(book.window.get());
+            QCOMPARE(app::command_name(names, book.act("act_filter_last")), QStringLiteral("フィルターの再実行"));
+            QCOMPARE(app::command_name(names, book.act("act_filter_blur")), QStringLiteral("ぼかし"));
+            app::preferences::apply_all(book.window.get());
+            QCOMPARE(book.act("act_filter_last")->shortcut(), QKeySequence(QStringLiteral("Ctrl+Alt+Shift+L")));
+        }
+        {
+            Book again;
+            QCOMPARE(again.act("act_filter_last")->shortcut(), QKeySequence(QStringLiteral("Ctrl+Alt+Shift+L")));
+        }
+        app::settings()->remove(QStringLiteral("shortcuts/フィルターの再実行"));
+    }
+
+    // On a smart object a filter is added as Photoshop adds it, not asked — but when a selection would not be used, the
+    // smart object holding a filter mask already (review P3-7): said and asked.
+    void aSmartObjectsMaskAlreadyThereIsSaid() {
+        Book book;
+        gui_test::Answers answers;
+        QVERIFY(book.window->apply_ops(Json::array({Json{{"op", "smart_convert"}, {"page", 1}, {"ids", Json::array({"pic"})}, {"new_id", "so"}}})));
+        book.window->set_target_layer("so");
+        book.act("act_filter_blur")->trigger();  // (no selection, no mask: not asked)
+        QVERIFY(answers.asked.isEmpty());
+        QCOMPARE((*book.layer("so")->smart)["filters"].size(), std::size_t(1));
+        QVERIFY(book.window->apply_ops(Json::array({Json{{"op", "smart_filter_add"}, {"page", 1}, {"id", "so"}, {"kind", "blur_box"}, {"radius", 2},
+                                                         {"area", Json{{"rect", Json::array({5, 5, 10, 10})}}}}})));
+        QVERIFY(book.layer("so")->smart->contains("filter_mask"));
+        book.act("act_select_all")->trigger();
+        book.act("act_filter_blur")->trigger();  // (asked; no: nothing added)
+        QCOMPARE(answers.asked.size(), qsizetype(1));
+        QVERIFY2(answers.asked[0].contains(QStringLiteral("フィルターマスクが既にある")), qPrintable(answers.asked[0]));
+        QCOMPARE((*book.layer("so")->smart)["filters"].size(), std::size_t(2));
+        answers.responder->question = [](const QString&, const QString&) { return true; };
+        book.act("act_filter_blur")->trigger();
+        QCOMPARE((*book.layer("so")->smart)["filters"].size(), std::size_t(3));
+    }
+
+    // Closing while a heavy one is worked (review P1-1): its window over every window; the window's own close and Genko を
+    // 終わる (every window, a second one of the same book among them) ask the work to stop — nothing changed, nothing
+    // falls —, and the window closes once the thread is back; a filter stopped is not 前回のフィルター.
+    void closingWhileAHeavyOneIsWorked() {
+        const auto heavy = [](QDialog* d) { d->findChild<QDoubleSpinBox*>(QStringLiteral("field_radius"))->setValue(60); };
+        {  // the window's own close
+            Book book(deep_doc(1400));
+            gui_test::Answers answers;
+            answers.responder->exec = answer(QStringLiteral("blur_gaussian"), heavy);
+            book.window->set_target_layer("deep");
+            const auto before = book.layer("deep")->color_raster;
+            bool closed = false;
+            when_working([&] {
+                closed = true;
+                book.window->close();
+            });
+            book.act("act_filter_blur_gaussian")->trigger();
+            QVERIFY(closed);
+            QCOMPARE(book.layer("deep")->color_raster, before);
+            QTRY_VERIFY(!book.window->isVisible());
+            QVERIFY(!book.act("act_filter_last")->statusTip().contains(QStringLiteral("ぼかし（ガウス）")));  // (stopped: not remembered)
+        }
+        {  // Genko を終わる with a second window of the book
+            Book book(deep_doc(1400));
+            gui_test::Answers answers;
+            answers.responder->exec = answer(QStringLiteral("blur_gaussian"), heavy);
+            book.window->set_target_layer("deep");
+            QPointer<app::MainWindow> second = book.window->new_window();
+            QVERIFY(second);
+            const auto before = book.layer("deep")->color_raster;
+            bool quit = false;
+            when_working([&] {
+                quit = true;
+                QApplication::closeAllWindows();
+            });
+            book.act("act_filter_blur_gaussian")->trigger();
+            QVERIFY(quit);
+            QCOMPARE(book.layer("deep")->color_raster, before);
+            QCoreApplication::processEvents();
+            if (second) second->close();
+            QTRY_VERIFY(!second);
+        }
+    }
+
+    // The book changed while a heavy one is worked (another window of it, an agent's change taken in — review P2-3): worked
+    // again on the book as it is now, on the thread; both the change and the filter in the book.
+    void aBookChangedMeanwhileIsWorkedAgain() {
+        Book book(deep_doc(1400));
+        gui_test::Answers answers;
+        answers.responder->exec = answer(QStringLiteral("blur_gaussian"), [](QDialog* d) { d->findChild<QDoubleSpinBox*>(QStringLiteral("field_radius"))->setValue(60); });
+        book.window->set_target_layer("deep");
+        const core::Document start = *book.session->snapshot();
+        bool changed = false;
+        when_working([&] { changed = book.window->apply_ops(Json::array({Json{{"op", "add_layer"}, {"page", 1}, {"kind", "paint"}, {"id", "other"}}})); });
+        book.act("act_filter_blur_gaussian")->trigger();
+        QVERIFY(changed);
+        QVERIFY(book.layer("other") != nullptr);
+        const auto expected = core::CommandBus(render::ops_registry())
+                                  .apply(start, Json::array({Json{{"op", "filter_raster"}, {"page", 1}, {"id", "deep"}, {"kind", "blur_gaussian"}, {"radius", 60}}}),
+                                         core::Actor("human:tester"))
+                                  .doc;
+        QCOMPARE(*book.layer("deep")->color_raster, *expected.page(0).layers[0].color_raster);
+        emit book.menu("menu_filter")->aboutToShow();
+        QCOMPARE(book.act("act_filter_last")->text(), QStringLiteral("ぼかし（ガウス）"));
+        emit book.menu("menu_filter")->aboutToHide();
     }
 
     // The layer panel's かける…: the フィルター menu (the user's decision 1).

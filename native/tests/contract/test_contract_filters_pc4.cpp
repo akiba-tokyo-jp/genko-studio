@@ -166,6 +166,14 @@ private slots:
         const auto drawn = genko::test::run_genko({QStringLiteral("render"), book, QStringLiteral("--page"), QStringLiteral("1"), QStringLiteral("--dpi"),
                                                    QStringLiteral("40"), QStringLiteral("--out"), path(QStringLiteral("smart.png"))});
         QVERIFY2(drawn.exit_code == 0, qPrintable(drawn.described()));
+        // at the page's own 200 dpi too (review P2-1: a box of 2000 working pixels over the smart object's 1654 × 2339 — its
+        // window cut to the grid — drawn, the smart object not left out)
+        const auto full = genko::test::run_genko({QStringLiteral("render"), book, QStringLiteral("--page"), QStringLiteral("1"), QStringLiteral("--dpi"),
+                                                  QStringLiteral("200"), QStringLiteral("--out"), path(QStringLiteral("smart200.png"))});
+        QVERIFY2(full.exit_code == 0, qPrintable(full.described()));
+        const genko::render::Image page = genko::render::read_png(genko::test::read_bytes(path(QStringLiteral("smart200.png"))));
+        const auto shown = page.convert("RGB").getpixel(page.width() / 3, page.height() / 3);
+        QVERIFY2(shown[0] < 200 && shown[2] < 200, qPrintable(QStringLiteral("%1 %2 %3").arg(shown[0]).arg(shown[1]).arg(shown[2])));  // (not the paper)
         QVERIFY(storage::load_document(path_of(book)).document.read_only_reason.empty());
         // undone: the feature goes with the filters
         int exit = -1;

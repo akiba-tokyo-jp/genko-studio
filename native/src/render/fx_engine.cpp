@@ -135,26 +135,27 @@ std::vector<float> conv_sep(const Window& src, const Rect& out, const std::vecto
     const std::size_t n = src.ch;
     const int rx = static_cast<int>(kx.size() / 2), ry = static_cast<int>(ky.size() / 2);
     const std::size_t ow = static_cast<std::size_t>(out.width()), oh = static_cast<std::size_t>(out.height());
-    const std::size_t th = oh + 2 * static_cast<std::size_t>(ry);
-    // (a premultiplied copy of the window it needs)
-    const Rect win{out.x0 - rx, out.y0 - ry, out.x1 + rx, out.y1 + ry};
-    const std::size_t ww = static_cast<std::size_t>(win.width());
-    std::vector<float> p(ww * static_cast<std::size_t>(win.height()) * n, 0.0f);
-    for (int y = win.y0; y < win.y1; ++y)
-        for (int x = win.x0; x < win.x1; ++x) {
-            const std::size_t o = (std::size_t(y - win.y0) * ww + std::size_t(x - win.x0)) * n;
-            for (std::size_t c = 0; c < n; ++c) p[o + c] = src.get(x, y, c);
-        }
+    // (a premultiplied copy of what it reads — the output grown by the kernels, cut to the window: past it, its edge pixel)
+    const Rect win = Rect{out.x0 - rx, out.y0 - ry, out.x1 + rx, out.y1 + ry}.intersect(src.rect);
+    if (win.empty()) return std::vector<float>(out.area() * n, 0.0f);
+    const std::size_t ww = static_cast<std::size_t>(win.width()), wh = static_cast<std::size_t>(win.height());
+    std::vector<float> p(ww * wh * n, 0.0f);
+    for (int y = win.y0; y < win.y1; ++y) {
+        const float* from = src.px(win.x0, y);
+        std::copy(from, from + ww * n, p.begin() + static_cast<std::ptrdiff_t>(std::size_t(y - win.y0) * ww * n));
+    }
     premultiply(p, n, alpha);
-    // (along the rows: ow × th)
-    std::vector<float> tmp(ow * th * n, 0.0f);
-    for (std::size_t ty = 0; ty < th; ++ty) {
+    // (along the rows: the output's columns of each of the window's rows)
+    std::vector<float> tmp(ow * wh * n, 0.0f);
+    for (std::size_t ty = 0; ty < wh; ++ty) {
         const float* row = p.data() + ty * ww * n;
         float* dst = tmp.data() + ty * ow * n;
         for (std::size_t ox = 0; ox < ow; ++ox) {
             float* d = dst + ox * n;
+            const int x = out.x0 + static_cast<int>(ox) - rx;
             for (std::size_t i = 0; i < kx.size(); ++i) {
-                const float* s = row + (ox + i) * n;
+                const std::size_t sx = static_cast<std::size_t>(std::clamp(x + static_cast<int>(i), win.x0, win.x1 - 1) - win.x0);
+                const float* s = row + sx * n;
                 for (std::size_t c = 0; c < n; ++c) d[c] += s[c] * kx[i];
             }
         }
@@ -163,8 +164,10 @@ std::vector<float> conv_sep(const Window& src, const Rect& out, const std::vecto
     std::vector<float> res(ow * oh * n, 0.0f);
     for (std::size_t oy = 0; oy < oh; ++oy) {
         float* d = res.data() + oy * ow * n;
+        const int y = out.y0 + static_cast<int>(oy) - ry;
         for (std::size_t i = 0; i < ky.size(); ++i) {
-            const float* s = tmp.data() + (oy + i) * ow * n;
+            const std::size_t sy = static_cast<std::size_t>(std::clamp(y + static_cast<int>(i), win.y0, win.y1 - 1) - win.y0);
+            const float* s = tmp.data() + sy * ow * n;
             const float kv = ky[i];
             for (std::size_t j = 0; j < ow * n; ++j) d[j] += s[j] * kv;
         }
@@ -475,6 +478,7 @@ Rect cover_box(const std::string& cover, std::uint32_t w, std::uint32_t h) {
 struct Way {
     bool meaning = false;    // the colours the inks mean (rgb), back by the page's rules
     bool lightness = false;  // CMYK and multichannel plates as 1 − ink
+    bool lab_lightness = false;  // a Lab page's lightness alone (its L, the alpha): a and b as they were
     unsigned colours = 3;    // the surface's
     unsigned kernel_colours = 3;
     core::InkSpace space = core::InkSpace::Cmyk;
@@ -491,6 +495,13 @@ void to_kernel(const Way& way, const float* in, float* out, std::size_t count, c
         for (std::size_t i = 0; i < count; ++i) {
             for (unsigned c = 0; c < 3; ++c) out[i * 4 + c] = static_cast<float>(rgb[i * 3 + c]);
             out[i * 4 + 3] = in[i * (n + 1) + n];
+        }
+        return;
+    }
+    if (way.lab_lightness) {
+        for (std::size_t i = 0; i < count; ++i) {
+            out[i * 2] = in[i * (n + 1)];
+            out[i * 2 + 1] = in[i * (n + 1) + n];
         }
         return;
     }
@@ -519,6 +530,14 @@ void from_kernel(const Way& way, const float* in, const float* original, float* 
         }
         return;
     }
+    if (way.lab_lightness) {
+        for (std::size_t i = 0; i < count; ++i) {
+            std::copy(original + i * (n + 1), original + (i + 1) * (n + 1), out + i * (n + 1));
+            out[i * (n + 1)] = in[i * 2];
+            out[i * (n + 1) + n] = in[i * 2 + 1];
+        }
+        return;
+    }
     std::memcpy(out, in, count * (n + 1) * sizeof(float));
     if (way.lightness) {
         for (std::size_t i = 0; i < count; ++i)
@@ -526,30 +545,18 @@ void from_kernel(const Way& way, const float* in, const float* original, float* 
     }
 }
 
-// The window `r` of the surface as the kernel's samples, the grid's edge pixels repeated past it (upstream's
-// read_clamped: a filter does not fade a layer that fills the page at its edge).
+// The window `r` of the surface cut to its grid, as the kernel's samples: a kernel reads past the grid's edge as its edge
+// pixel (Window::at — upstream's read_clamped: a filter does not fade a layer that fills the page at its edge), so a
+// window holds no more than the layer, whatever the halo.
 Window read_window(const Surface& surface, const Rect& r, const Way& way, const ink::Rules* rules) {
     const Rect grid{0, 0, int(surface.width()), int(surface.height())};
     const Rect inner = r.intersect(grid);
     const std::size_t sch = way.colours + 1, kch = way.kernel_colours + 1;
-    Window out(r, kch);
+    Window out(inner, kch);
     if (inner.empty()) return out;
-    std::vector<float> values(inner.area() * sch), samples(inner.area() * kch);
+    std::vector<float> values(inner.area() * sch);
     surface.read(inner, values.data());
-    to_kernel(way, values.data(), samples.data(), inner.area(), rules);
-    if (inner == r) {
-        out.data = std::move(samples);
-        return out;
-    }
-    const std::size_t iw = static_cast<std::size_t>(inner.width());
-    for (int y = r.y0; y < r.y1; ++y) {
-        const int sy = std::clamp(y, inner.y0, inner.y1 - 1);
-        for (int x = r.x0; x < r.x1; ++x) {
-            const int sx = std::clamp(x, inner.x0, inner.x1 - 1);
-            const float* from = samples.data() + (std::size_t(sy - inner.y0) * iw + std::size_t(sx - inner.x0)) * kch;
-            std::copy(from, from + kch, out.data.begin() + static_cast<std::ptrdiff_t>(out.index(x, y)));
-        }
-    }
+    to_kernel(way, values.data(), out.data.data(), inner.area(), rules);
     return out;
 }
 
@@ -571,12 +578,13 @@ void apply(Surface& surface, const Kernel& kernel, const Json& params, core::Fil
     way.colours = surface.colours();
     way.meaning = inks == core::FilterInks::Meaning && surface.ink() != nullptr;
     way.lightness = inks == core::FilterInks::Lightness && (surface.space() == Space::Cmyk || surface.space() == Space::Multi);
-    way.kernel_colours = way.meaning ? 3 : way.colours;
+    way.lab_lightness = inks == core::FilterInks::Lightness && surface.space() == Space::Lab;
+    way.kernel_colours = way.meaning ? 3 : way.lab_lightness ? 1 : way.colours;
     if (surface.ink() != nullptr) way.space = surface.ink()->space;
     Ctx ctx;
     ctx.bounds = bounds_in.intersect(grid);
     if (ctx.bounds.empty()) ctx.bounds = grid;
-    ctx.space = way.meaning ? Space::Rgb : surface.space();
+    ctx.space = way.meaning ? Space::Rgb : way.lab_lightness ? Space::Gray : surface.space();
     ctx.colours = way.kernel_colours;
     ctx.alpha = true;
     ctx.s = s > 0 ? s : 1.0;
@@ -602,14 +610,17 @@ void apply(Surface& surface, const Kernel& kernel, const Json& params, core::Fil
     for (int y = area.y0; y < area.y1; y += side)
         for (int x = area.x0; x < area.x1; x += side) tiles.push_back(Rect{x, y, std::min(x + side, area.x1), std::min(y + side, area.y1)});
 
-    // the memory, held in the imaging budget before it is had: a whole kind's one window, then each thread's window, the
-    // kernel's own (about three windows of floats), the tile's result and the selection's mix
+    // the memory, held in the imaging budget before it is had: a whole kind's one window, then each thread's window (the
+    // tile grown by the halo, cut to the grid) — its floats, their reading and a kernel's own work on it (whole numbers, as
+    // the blurs' exact sums, and a float copy: three words a sample) —, the tile's result and the selection's mix
     const std::size_t sch = way.colours + 1, kch = way.kernel_colours + 1;
     const std::uint64_t tile_px = std::uint64_t(side) * side;
-    const std::uint64_t window_px = halo.bounds ? 0 : std::uint64_t(side + 2 * halo.radius) * (side + 2 * halo.radius);
+    const std::uint64_t reach = std::uint64_t(side) + 2 * std::uint64_t(halo.radius);
+    const std::uint64_t window_px = halo.bounds ? 0 : std::min<std::uint64_t>(reach, w) * std::min<std::uint64_t>(reach, h);
     const Rect whole = halo.bounds ? ctx.bounds.unite(area) : Rect{};
     const image_ops::Held shared_held(std::uint64_t(whole.area()) * kch * sizeof(float));
-    const std::uint64_t per_thread = window_px * kch * sizeof(float) * 4 + tile_px * (kch + 3 * sch) * sizeof(float) +
+    const std::uint64_t per_thread = window_px * (kch * (2 * sizeof(float) + sizeof(std::int64_t)) + sch * sizeof(float)) +
+                                     tile_px * (kch + 3 * sch) * sizeof(float) +
                                      (way.meaning ? (window_px + tile_px) * (sch + 4) * sizeof(double) : 0);
     int wanted = tiling.threads > 0 ? tiling.threads : band_threads();
     wanted = std::max(1, std::min<int>(wanted, static_cast<int>(tiles.size())));
@@ -646,7 +657,7 @@ void apply(Surface& surface, const Kernel& kernel, const Json& params, core::Fil
         const std::vector<float> data = kernel.run(params, src, t, ctx);
         if (data.size() != t.area() * kch) throw std::logic_error("fx: the kernel of " + std::string(kernel.kind) + " gave a result of another size");
         std::vector<float> values(t.area() * sch), original;
-        if (way.meaning || cover != nullptr) {
+        if (way.meaning || way.lab_lightness || cover != nullptr) {
             original.resize(t.area() * sch);
             surface.read(t, original.data());
         }

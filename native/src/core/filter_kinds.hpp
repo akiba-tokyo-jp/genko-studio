@@ -32,7 +32,8 @@ inline constexpr std::string_view kFiltersFeature = "filters@1";
 // How a kind is laid on a page of inks (CMYK, Lab, grey, multichannel; design 4.1).
 enum class FilterInks {
     Plates,     // on each plate's canvas value as it is, alpha-weighted (blurs, sharpening, noise, distortions, cells…)
-    Lightness,  // on each plate's lightness: CMYK and multichannel plates as 1 − ink, back after (maximum, emboss, edges…)
+    Lightness,  // on the lightness: CMYK and multichannel plates as 1 − ink, back after; a Lab page's L alone (its a and b as
+                // they were); grey as it is (maximum, emboss, edges…)
     Meaning,    // on the colours the inks mean, back by the page's rules (the gallery, HSB/HSL, Camera Raw…)
     Halftone,   // its own screen on each plate (Color Halftone)
 };
