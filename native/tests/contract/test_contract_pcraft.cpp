@@ -503,10 +503,12 @@ private slots:
         render::Image child = render::Image::create("RGBA", render::Size{w, h}, render::Ink{0, 0, 0, 0});
         child.paste(render::Ink{30, 200, 60, 255}, render::Box{200, 30, 330, 120});
         doc = run(doc, Json::array({Json{{"op", "add_layer"}, {"page", 1}, {"kind", "paint"}, {"id", "pic"}, {"name", "絵"}},
+                                    Json{{"op", "set_layer"}, {"page", 1}, {"id", "pic"}, {"panel_each", false}, {"panel_clip", false}},
                                     Json{{"op", "put_raster"}, {"page", 1}, {"id", "pic"}, {"png_base64", core::b64encode(render::write_png(picture))}},
                                     Json{{"op", "set_layer_mask"}, {"page", 1}, {"id", "pic"}, {"area", Json{{"rect", Json::array({0, 0, 30, 80})}}}},
                                     Json{{"op", "add_layer"}, {"page", 1}, {"kind", "folder"}, {"id", "box"}, {"name", "まとめ"}},
                                     Json{{"op", "add_layer"}, {"page", 1}, {"kind", "paint"}, {"id", "kid"}, {"name", "子"}},
+                                    Json{{"op", "set_layer"}, {"page", 1}, {"id", "kid"}, {"panel_each", false}, {"panel_clip", false}},
                                     Json{{"op", "put_raster"}, {"page", 1}, {"id", "kid"}, {"png_base64", core::b64encode(render::write_png(child))}},
                                     Json{{"op", "set_layer"}, {"page", 1}, {"id", "kid"}, {"parent", "box"}},
                                     Json{{"op", "add_layer"}, {"page", 1}, {"kind", "adjust"}, {"id", "adj"}, {"name", "反転"}, {"adjust", Json{{"kind", "invert"}}}},

@@ -62,10 +62,10 @@ bool is_book_folder(const fs::path& path) {
 
 // 別名で保存… and コピーを保存…'s kinds of files: a .genko, or the page as one of formats::write_copy's.
 QString save_filters() {
-    // (PC4 F-a: and every format the codecs write; PC4 F-d: and a PSB, Photoshop's ラージドキュメント形式)
+    // (PC4 F-a: and every format the codecs write; PC4 F-d: and a PSB, Photoshop's ラージドキュメント形式; PC4 F-f: PhotoCraft's .pcraft)
     return QStringLiteral("Genko の原稿 (*.genko);;Photoshop (*.psd);;TIFF (*.tif *.tiff);;PNG (*.png);;JPEG (*.jpg *.jpeg);;WebP (*.webp);;"
                           "GIF (*.gif);;BMP (*.bmp);;TGA (*.tga);;ICO (*.ico);;Netpbm (*.pnm *.pbm *.pgm *.ppm *.pam *.pfm);;QOI (*.qoi);;"
-                          "OpenEXR (*.exr);;Radiance HDR (*.hdr);;AVIF (*.avif);;ラージドキュメント形式 (*.psb)");
+                          "OpenEXR (*.exr);;Radiance HDR (*.hdr);;AVIF (*.avif);;ラージドキュメント形式 (*.psb);;PhotoCraft (*.pcraft)");
 }
 
 // The extension of a path a picture is written to (lower case, no dot), "" for none (a .genko).

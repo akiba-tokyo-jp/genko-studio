@@ -912,9 +912,9 @@ int export_command(const QStringList& args, bool ascii) {
             return fail(refused.what(), refused.code(), ascii, 1, &items);
         }
     } else if (f == "pcraft") {
-        // (PC4 F-f: a page = a .pcraft — a folder gets <book>_p001.pcraft …, a .pcraft path the first page —, its notes said)
-        paths = formats::export_pcraft(doc, out, file_given, dpi ? std::optional<int>(narrow(*dpi)) : std::nullopt,
-                                       core::path_to_utf8(src.filename().empty() ? src.parent_path().filename() : src.filename()), &pcraft_notes);
+        // (PC4 F-f: a page = a .pcraft — a folder gets <title>_ep01_p001.pcraft … as the PSD's pages, a .pcraft path the first
+        // page —, its notes said)
+        paths = formats::export_pcraft(doc, out, file_given, dpi ? std::optional<int>(narrow(*dpi)) : std::nullopt, "", &pcraft_notes);
     } else if (f == "epub") {
         paths = {formats::export_epub(doc, file_given ? out : formats::detail::join(out, "out.epub"), narrow(dpi.value_or(150)))};
     } else if (f == "webtoon") {

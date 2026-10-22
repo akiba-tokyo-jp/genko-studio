@@ -15,7 +15,8 @@
 // --format pcraft, <stem>_p001.pcraft …). A ZIP of stored files — manifest.json first, then tiles/<blake3>.zst (256 × 256,
 // the layer's samples little-endian, zstd at its fastest level; a tile of nothing but the surface's untouched pixel left
 // out, a tile of the same bytes written once), blobs/<blake3>.zst (the profile, the EXIF, the PSD's kept blocks, the files
-// of the smart objects), thumb.png (256) and composite/preview.png (1024) — streamed to its sink, never held whole.
+// of the smart objects), thumb.png (256) and composite/preview.png (1024) — streamed to its sink (the tiles and blobs are
+// held compressed until the manifest, which goes first, is made; the zip itself is never held whole).
 //
 // What PhotoCraft reads as its own: the page's pixel layers at the page's depth (an 8-bit page's RGBA, a precise page's
 // GKCR values, a grey, CMYK or Lab page's inks — copied as they are when a layer is the page's pixels at that resolution,
@@ -47,7 +48,8 @@ std::vector<std::string> write_pcraft_file(const core::Document& doc, std::size_
                                            const PcraftOptions& options = {});
 
 // genko export --format pcraft: the book's pages each a .pcraft — `out` a .pcraft path: the first page there; a folder:
-// <stem>_p001.pcraft, <stem>_p002.pcraft … (`stem`: the book's folder's name) —, all written or none (formats/output). The
+// <stem>_p001.pcraft, <stem>_p002.pcraft … (`stem` empty: formats::stem's <title>_ep01, as the PSD's pages) —, all written
+// or none (formats/output). The
 // notes of every page, each said once, into `notes`. `dpi` none: each page's own.
 std::vector<std::filesystem::path> export_pcraft(const core::Document& doc, const std::filesystem::path& out, bool file_given,
                                                  std::optional<int> dpi, std::string_view stem, std::vector<std::string>* notes = nullptr);

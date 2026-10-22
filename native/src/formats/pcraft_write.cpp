@@ -4,7 +4,9 @@
 
 #include <algorithm>
 #include <array>
+#include <cctype>
 #include <cmath>
+#include <exception>
 #include <map>
 #include <set>
 #include <thread>
@@ -66,10 +68,15 @@ public:
     std::vector<std::string> tiles(std::vector<std::string> raw) {
         std::vector<std::string> hashes(raw.size()), packed(raw.size());
         const unsigned threads = std::clamp(std::thread::hardware_concurrency(), 1u, 8u);
+        std::vector<std::exception_ptr> failed(threads);  // (a thread's error, thrown here once they have all ended)
         const auto work = [&](std::size_t from) {
-            for (std::size_t i = from; i < raw.size(); i += threads) {
-                hashes[i] = render::blake3::hex(raw[i]);
-                if (!files_.contains("tiles/" + hashes[i] + ".zst")) packed[i] = render::zstd::compress(raw[i], 1);
+            try {
+                for (std::size_t i = from; i < raw.size(); i += threads) {
+                    hashes[i] = render::blake3::hex(raw[i]);
+                    if (!files_.contains("tiles/" + hashes[i] + ".zst")) packed[i] = render::zstd::compress(raw[i], 1);
+                }
+            } catch (...) {
+                failed[from] = std::current_exception();
             }
         };
         if (raw.size() < 4 || threads < 2) {
@@ -81,6 +88,9 @@ public:
             std::vector<std::thread> pool;
             for (unsigned t = 0; t < threads; ++t) pool.emplace_back(work, t);
             for (std::thread& t : pool) t.join();
+            for (const std::exception_ptr& e : failed) {
+                if (e) std::rethrow_exception(e);
+            }
         }
         for (std::size_t i = 0; i < raw.size(); ++i) {
             const std::string name = "tiles/" + hashes[i] + ".zst";
@@ -216,7 +226,7 @@ Json picture_surface(Ctx& ctx, const render::Image& image, const std::shared_ptr
 std::optional<Json> own_pixels(Ctx& ctx, const core::Layer& layer) {
     if (layer.kind != core::LayerKind::Raster || layer.stroke_count() > 0 || (layer.shapes && !layer.shapes->items.empty()) || !layer.patches.empty() ||
         (layer.effect && !layer.effect->is_null()) || (layer.screen && !layer.screen->is_null()) || (layer.color && !layer.color->empty()) ||
-        (layer.tone && !layer.tone->is_null()))
+        (layer.tone && !layer.tone->is_null()) || (layer.panel_clip && !ctx.page.frames.empty()))  // (the panels cut what it shows)
         return std::nullopt;
     const PixelFormat f = ctx.layer_format();
     const std::vector<double> background(f.channels(), 0.0);
@@ -1167,7 +1177,8 @@ std::vector<std::filesystem::path> export_pcraft(const core::Document& doc, cons
     std::vector<std::string> said;
     detail::Output output;
     for (std::size_t i = 0; i < count; ++i) {
-        const std::filesystem::path dest = file_given ? out : detail::join(out, std::string(stem.empty() ? "page" : stem) + "_p" + detail::padded(doc.page(i).index, 3) + ".pcraft");
+        const std::string named = stem.empty() ? formats::stem(doc) : std::string(stem);  // (as the PSD's pages: <title>_ep01_p001)
+        const std::filesystem::path dest = file_given ? out : detail::join(out, named + "_p" + detail::padded(doc.page(i).index, 3) + ".pcraft");
         if (dest.has_parent_path()) detail::make_dirs(dest.parent_path());
         detail::PartFile part(dest);
         PcraftOptions options;

@@ -1386,7 +1386,7 @@ void MainWindow::save_as() {
     const QString path = ask::save_path(this, QStringLiteral("原稿を保存する場所"), suggested,
                                         QStringLiteral("Genko の原稿 (*.genko);;Photoshop (*.psd);;TIFF (*.tif *.tiff);;PNG (*.png);;JPEG (*.jpg *.jpeg);;WebP (*.webp);;"
                                                        "GIF (*.gif);;BMP (*.bmp);;TGA (*.tga);;ICO (*.ico);;Netpbm (*.pnm *.pbm *.pgm *.ppm *.pam *.pfm);;QOI (*.qoi);;"
-                                                       "OpenEXR (*.exr);;Radiance HDR (*.hdr);;AVIF (*.avif)"));
+                                                       "OpenEXR (*.exr);;Radiance HDR (*.hdr);;AVIF (*.avif);;PhotoCraft (*.pcraft)"));
     if (!alive || path.isEmpty() || session_ != origin) return;
     const QString suffix = QFileInfo(path).suffix().toLower();
     // (a picture's format — PSD, TIFF, and since PC4 F-a every one the codecs write —: コピーを保存…)

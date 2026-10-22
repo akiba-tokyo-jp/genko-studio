@@ -3,7 +3,10 @@
 #include "render/zstd.hpp"
 
 #include <algorithm>
+#include <functional>
 #include <memory>
+#include <optional>
+#include <string>
 
 #include <zstd.h>
 

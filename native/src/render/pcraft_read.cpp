@@ -1648,12 +1648,18 @@ Read build(Loader& load, const Json& manifest, std::string_view title, int depth
     said_of("slices", "スライス");
     said_of("timeline", "タイムライン");
     if (const Json* variables = optional_field(d, "variables"); variables != nullptr && !empty_value(*variables)) ctx.notes.add("変数とデータセットは Genko に無いため外しました");
-    if (const Json* measurement = optional_field(d, "measurement")) {
-        const Json* counts = optional_field(*measurement, "counts");
+    if (const Json* measurement = optional_field(d, "measurement")) {  // (its scale alone, as every document has one: nothing to say)
+        const Json* counts = optional_field(*measurement, "count_groups");
         const Json* ruler = optional_field(*measurement, "ruler");
-        if ((counts != nullptr && !empty_value(*counts)) || ruler != nullptr) ctx.notes.add("計測は Genko に無いため外しました");
+        if ((counts != nullptr && !empty_value(*counts)) || ruler != nullptr) ctx.notes.add("計測（カウント・ものさし）は Genko に無いため外しました");
     }
-    if (const Json* styles = optional_field(d, "text_styles"); styles != nullptr && !empty_value(*styles)) ctx.notes.add("文字スタイルは Genko に無いため外しました");
+    if (const Json* styles = optional_field(d, "text_styles")) {  // (the basic paragraph style every document has: nothing to say)
+        const Json* character = optional_field(*styles, "character");
+        const Json* paragraph = optional_field(*styles, "paragraph");
+        if ((character != nullptr && !empty_value(*character)) || (paragraph != nullptr && !empty_value(*paragraph)) || optional_field(*styles, "psd_raw") != nullptr) {
+            ctx.notes.add("文字スタイル・段落スタイルは Genko に無いため外しました");
+        }
+    }
 
     // the book as a book must be (what an op leaves is checked so too)
     try {

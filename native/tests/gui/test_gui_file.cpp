@@ -41,6 +41,7 @@
 #include "render/image.hpp"
 #include "render/page.hpp"
 #include "render/png.hpp"
+#include "render/zip.hpp"
 #include "render/ops_registry.hpp"
 #include "service/wording.hpp"
 #include "storage/fsutil.hpp"
@@ -716,6 +717,43 @@ private slots:
         QVERIFY(was(QStringLiteral("新規…"), QStringLiteral("新しい原稿…")));
         QVERIFY(was(QStringLiteral("別名で保存…"), QStringLiteral("別の場所に保存…")));
         QVERIFY(was(QStringLiteral("終了"), QStringLiteral("Genko を終わる")));
+    }
+
+    // PC4 F-f: 開く… of PhotoCraft's .pcraft — the file, and its folder bundle chosen whole — a book of one page in memory
+    // (read on a worker thread), the file never written.
+    void aPcraftOpensAsABook() {
+        Desk d;
+        const fs::path file = path_of(d.dir.filePath(QStringLiteral("rich.pcraft")));
+        const std::string bytes = genko::test::read_bytes(genko::test::test_data(QStringLiteral("pcraft/rich_rgb8.pcraft")));
+        genko::test::write_bytes(qpath(file), bytes);
+        d.open_with({qpath(file)});
+        QVERIFY(wait_for([&] { return d.tabs() == 2; }));
+        QCOMPARE(d.doc().title, std::string("rich"));
+        QVERIFY(!d.window->session().path());
+        QVERIFY(d.doc().page(0).native_source && d.doc().page(0).native_source->format == "pcraft");
+        QVERIFY(d.doc().page(0).layers.size() > 10);
+        QCOMPARE(bytes_of(file), bytes);
+        // (its folder bundle: manifest.json, tiles/ and blobs/)
+        const fs::path folder = path_of(d.dir.filePath(QStringLiteral("grey.pcraft")));
+        const std::string grey = genko::test::read_bytes(genko::test::test_data(QStringLiteral("pcraft/gray8.pcraft")));
+        const render::zip::NamedReader zip(grey);
+        for (const std::string& name : zip.names()) {
+            const fs::path to = folder / fs::path(name);
+            fs::create_directories(to.parent_path());
+            genko::test::write_bytes(qpath(to), zip.read(name, ~0ull));
+        }
+        d.window->open_path(folder);
+        QVERIFY(wait_for([&] { return d.tabs() == 3; }));
+        QVERIFY(d.doc().page(0).color && d.doc().page(0).color->space == core::InkSpace::Gray);
+        // (a broken one: said, no tab)
+        const fs::path broken = path_of(d.dir.filePath(QStringLiteral("broken.pcraft")));
+        genko::test::write_bytes(qpath(broken), bytes.substr(0, bytes.size() / 3));
+        d.window->open_path(broken);
+        QVERIFY(wait_for([&] {
+            return std::any_of(d.answers->asked.begin(), d.answers->asked.end(),
+                               [](const QString& a) { return a.contains(QStringLiteral("broken.pcraft")) && a.contains(QStringLiteral("壊れている")); });
+        }));
+        QCOMPARE(d.tabs(), 3);
     }
 };
 
