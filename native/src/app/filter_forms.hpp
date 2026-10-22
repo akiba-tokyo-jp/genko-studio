@@ -34,10 +34,10 @@ struct FilterForm {
     QString note;  // (under the fields)
 };
 std::vector<FilterForm> blur_forms();          // D0: ぼかし（ガウス）・ぼかし（ボックス）; D1: the rest of ぼかし
-std::vector<FilterForm> sharpen_forms();       // D1
-std::vector<FilterForm> noise_forms();         // D1
-std::vector<FilterForm> other_forms();         // D1
-std::vector<FilterForm> video_forms();         // D1
+std::vector<FilterForm> sharpen_forms();       // D1: app/filter_forms_basic.cpp
+std::vector<FilterForm> noise_forms();         // D1: app/filter_forms_basic.cpp
+std::vector<FilterForm> other_forms();         // D1: app/filter_forms_basic.cpp (カスタム…'s 5 × 5 grid)
+std::vector<FilterForm> video_forms();         // D1: app/filter_forms_basic.cpp
 std::vector<FilterForm> distort_forms();       // D2
 std::vector<FilterForm> pixelate_forms();      // D2
 std::vector<FilterForm> stylize_forms();       // D2

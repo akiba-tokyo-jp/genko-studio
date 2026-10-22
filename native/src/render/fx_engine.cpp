@@ -178,10 +178,6 @@ std::vector<float> conv_sep(const Window& src, const Rect& out, const std::vecto
 
 // --- the kernels -----------------------------------------------------------------------------------------------------
 
-Kernels sharpen_kernels() { return {}; }       // (D1)
-Kernels noise_kernels() { return {}; }         // (D1)
-Kernels other_kernels() { return {}; }         // (D1)
-Kernels video_kernels() { return {}; }         // (D1)
 Kernels distort_kernels() { return {}; }       // (D2)
 Kernels pixelate_kernels() { return {}; }      // (D2)
 Kernels stylize_kernels() { return {}; }       // (D2)
@@ -257,6 +253,7 @@ public:
     std::uint32_t height() const override { return height_; }
     unsigned colours() const override { return 3; }
     Space space() const override { return Space::Rgb; }
+    unsigned levels() const override { return 255; }
     void read(const Rect& r, float* out) const override {
         for (int y = r.y0; y < r.y1; ++y) {
             const auto* q = reinterpret_cast<const unsigned char*>(src_.data() + (std::size_t(y) * width_ + std::size_t(r.x0)) * 4);
@@ -308,18 +305,25 @@ public:
             }
     }
     Rect content() const override {
-        double most = 0;
+        double most = 0, low = 0;
         const Rect box = box_of(width_, height_, [&](std::uint32_t x, std::uint32_t y) {
             const std::size_t i = std::size_t(y) * width_ + x;
             if (!(sample(i, 3) > 0.0f)) return false;
             if (bytes_ == 4)
-                for (unsigned c = 0; c < 3; ++c) most = std::max(most, static_cast<double>(std::fabs(sample(i, c))));
+                for (unsigned c = 0; c < 3; ++c) {
+                    const double v = sample(i, c);
+                    most = std::max(most, std::fabs(v));
+                    low = std::min(low, v);
+                }
             return true;
         });
         largest_ = std::max(1.0, most);
+        least_ = low;
         return box;
     }
     double largest() const override { return largest_; }
+    unsigned levels() const override { return bytes_ == 2 ? 65535 : 0; }
+    double least() const override { return least_; }
     std::string taken() { return std::move(out_); }
 
 private:
@@ -346,6 +350,7 @@ private:
     std::uint32_t width_ = 0, height_ = 0;
     unsigned bytes_ = 2;
     mutable double largest_ = 1.0;
+    mutable double least_ = 0.0;
 };
 
 // An ink layer's pixels as the ink canvas's values (CMYK and a multichannel page's plates their ink 0..1, Lab L/100 and
@@ -403,18 +408,27 @@ public:
     }
     Rect content() const override {
         const unsigned n = src_.colours();
-        double most = 0;
+        double most = 0, low = 0;
         const Rect box = box_of(src_.width, src_.height, [&](std::uint32_t x, std::uint32_t y) {
             const std::size_t i = std::size_t(y) * src_.width + x;
             if (src_.has_alpha() && !(src_.value(i, n) > 0)) return false;
             if (src_.is_float())
-                for (unsigned c = 0; c < n; ++c) most = std::max(most, std::fabs(src_.value(i, c)));
+                for (unsigned c = 0; c < n; ++c) {
+                    const double v = canvas(i, c);
+                    most = std::max(most, std::fabs(v));
+                    low = std::min(low, v);
+                }
             return true;
         });
         largest_ = std::max(1.0, most);
+        least_ = low;
         return box;
     }
     double largest() const override { return largest_; }
+    // (an ink canvas's values of whole samples: n / 255 or n / 65535 — a grey's 1 − n / most, Lab's L and a, b within a
+    // rounding of it)
+    unsigned levels() const override { return src_.is_float() ? 0 : src_.depth == 8 ? 255 : 65535; }
+    double least() const override { return least_; }
     std::string taken() { return core::encode_ink_raster(out_); }
 
 private:
@@ -428,6 +442,7 @@ private:
     core::PageColor color_;
     core::InkPixels blank_;
     mutable double largest_ = 1.0;
+    mutable double least_ = 0.0;
 };
 
 std::unique_ptr<Surface> eight_surface(const Image& rgba) { return std::make_unique<EightSurface>(rgba); }
@@ -569,11 +584,13 @@ ProgressScope::ProgressScope(std::atomic<double>& done) : before_(g_progress) {
 ProgressScope::~ProgressScope() { g_progress = before_; }
 
 void apply(Surface& surface, const Kernel& kernel, const Json& params, core::FilterInks inks, const Rect& bounds_in, const std::string* cover,
-           double s, const Rect* limit, const Tiling& tiling) {
+           double s, const Rect* limit, const Tiling& tiling, const Reads& reads) {
     const std::uint32_t w = surface.width(), h = surface.height();
     const Rect grid{0, 0, int(w), int(h)};
     if (grid.empty()) return;
     if (cover != nullptr && cover->size() != std::size_t(w) * h) throw std::logic_error("fx::apply: the coverage is not the grid's");
+    if (reads.within != nullptr && reads.within->size() != std::size_t(w) * h) throw std::logic_error("fx::apply: the coverage is not the grid's");
+    if (reads.plane != nullptr && reads.plane->size() != std::size_t(w) * h) throw std::logic_error("fx::apply: the plane is not the grid's");
     Way way;
     way.colours = surface.colours();
     way.meaning = inks == core::FilterInks::Meaning && surface.ink() != nullptr;
@@ -588,6 +605,9 @@ void apply(Surface& surface, const Kernel& kernel, const Json& params, core::Fil
     ctx.colours = way.kernel_colours;
     ctx.alpha = true;
     ctx.s = s > 0 ? s : 1.0;
+    ctx.cover = cover != nullptr ? cover : reads.within;
+    ctx.grid_width = w;
+    ctx.plane = reads.plane;
     const Halo halo = kernel.halo ? kernel.halo(params, ctx) : Halo::margin(0);
 
     // the part worked: as far as the halo reaches from what shows (upstream's output_area), the base box for a whole kind
@@ -595,6 +615,8 @@ void apply(Surface& surface, const Kernel& kernel, const Json& params, core::Fil
     Rect area;
     const Rect content = surface.content();
     ctx.largest = surface.largest();
+    ctx.least = surface.least();
+    ctx.levels = way.meaning ? 0 : surface.levels();  // (the colours the inks mean: floats)
     if (limit != nullptr) {
         area = limit->intersect(grid);
     } else if (halo.bounds || kernel.fills) {
@@ -643,6 +665,9 @@ void apply(Surface& surface, const Kernel& kernel, const Json& params, core::Fil
         const auto rules = rules_of();
         shared = read_window(surface, whole, way, rules.get());
     }
+    // (a whole kind's work done once — 平均's mean —, its tiles given what it found)
+    const Json found = kernel.once && shared ? kernel.once(params, *shared, ctx) : Json();
+    const Json& given = kernel.once && shared ? found : params;
 
     const std::stop_token* stop = segment::current_stop();
     std::atomic<double>* progress = g_progress;
@@ -654,7 +679,7 @@ void apply(Surface& surface, const Kernel& kernel, const Json& params, core::Fil
         std::optional<Window> own;
         if (!shared) own = read_window(surface, t.inflate(halo.radius), way, rules);
         const Window& src = shared ? *shared : *own;
-        const std::vector<float> data = kernel.run(params, src, t, ctx);
+        const std::vector<float> data = kernel.run(given, src, t, ctx);
         if (data.size() != t.area() * kch) throw std::logic_error("fx: the kernel of " + std::string(kernel.kind) + " gave a result of another size");
         std::vector<float> values(t.area() * sch), original;
         if (way.meaning || way.lab_lightness || cover != nullptr) {

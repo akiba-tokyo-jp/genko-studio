@@ -9,6 +9,7 @@
 
 #include <cmath>
 #include <string>
+#include <tuple>
 
 #include "core/adjust.hpp"
 #include "core/adjust_kinds.hpp"
@@ -73,6 +74,70 @@ private slots:
         QVERIFY(core::smart::placed_filter("radial_blur"));
     }
 
+    // D1's kinds (ぼかし・シャープ・ノイズ・その他・ビデオ): in the table with PhotoCraft's command ids, Photoshop's names and
+    // submenus; how a page of inks takes them (the lightness: カスタム・ハイパス・明るさの最大値・最小値; the colours it means:
+    // HSB/HSL・NTSC カラー; each plate: the rest); ぼかし（放射状）'s centre a place that moves with a smart object.
+    void theKindsOfD1() {
+        const std::vector<std::tuple<const char*, const char*, const char*, const char*, core::FilterInks>> want{
+            {"blur_average", "filter.blur.average", "平均", "ぼかし", core::FilterInks::Plates},
+            {"blur_motion", "filter.blur.motionBlur", "ぼかし（移動）", "ぼかし", core::FilterInks::Plates},
+            {"blur_radial", "filter.blur.radialBlur", "ぼかし（放射状）", "ぼかし", core::FilterInks::Plates},
+            {"blur_surface", "filter.blur.surfaceBlur", "ぼかし（表面）", "ぼかし", core::FilterInks::Plates},
+            {"blur_smart", "filter.blur.smartBlur", "ぼかし（詳細）", "ぼかし", core::FilterInks::Plates},
+            {"blur_shape", "filter.blur.shapeBlur", "ぼかし（シェイプ）", "ぼかし", core::FilterInks::Plates},
+            {"blur_lens", "filter.blur.lensBlur", "ぼかし（レンズ）", "ぼかし", core::FilterInks::Plates},
+            {"sharpen_unsharp_mask", "filter.sharpen.unsharpMask", "アンシャープマスク", "シャープ", core::FilterInks::Plates},
+            {"sharpen_smart", "filter.sharpen.smartSharpen", "スマートシャープ", "シャープ", core::FilterInks::Plates},
+            {"noise_add", "filter.noise.addNoise", "ノイズを加える", "ノイズ", core::FilterInks::Plates},
+            {"noise_dust_and_scratches", "filter.noise.dustAndScratches", "ダスト＆スクラッチ", "ノイズ", core::FilterInks::Plates},
+            {"noise_median", "filter.noise.median", "明るさの中間値", "ノイズ", core::FilterInks::Plates},
+            {"noise_reduce", "filter.noise.reduceNoise", "ノイズを軽減", "ノイズ", core::FilterInks::Plates},
+            {"other_custom", "filter.other.custom", "カスタム", "その他", core::FilterInks::Lightness},
+            {"other_high_pass", "filter.other.highPass", "ハイパス", "その他", core::FilterInks::Lightness},
+            {"other_hsb_hsl", "filter.other.hsbHsl", "HSB/HSL", "その他", core::FilterInks::Meaning},
+            {"other_maximum", "filter.other.maximum", "明るさの最大値", "その他", core::FilterInks::Lightness},
+            {"other_minimum", "filter.other.minimum", "明るさの最小値", "その他", core::FilterInks::Lightness},
+            {"other_offset", "filter.other.offset", "スクロール", "その他", core::FilterInks::Plates},
+            {"video_de_interlace", "filter.video.deInterlace", "インターレース解除", "ビデオ", core::FilterInks::Plates},
+            {"video_ntsc_colors", "filter.video.ntscColors", "NTSC カラー", "ビデオ", core::FilterInks::Meaning},
+        };
+        for (const auto& [kind, upstream, name, submenu, inks] : want) {
+            const core::FilterInfo* info = core::filter_info(kind);
+            QVERIFY2(info != nullptr, kind);
+            QCOMPARE(info->upstream, std::string_view(upstream));
+            QCOMPARE(info->name, std::string_view(name));
+            QCOMPARE(info->submenu, std::string_view(submenu));
+            QCOMPARE(info->inks, inks);
+            const core::AdjustKind* table = core::adjust_kind(kind);
+            QVERIFY(table != nullptr && table->group == std::string_view("PC4") && table->filter && table->local && table->smart);
+            QVERIFY2(render::fx::kernel(kind) != nullptr, kind);
+            QCOMPARE(core::smart::placed_filter(kind), std::string_view(kind) == "blur_radial");
+        }
+        // PhotoCraft's defaults (filters.rs params_for, filters_ext.rs) and ranges, clamped as an op's
+        QCOMPARE(core::normalize_filter("blur_motion", Json::object(), nullptr), (Json{{"angle", 0}, {"distance", 10}}));
+        QCOMPARE(core::normalize_filter("blur_motion", Json{{"distance", 5000}}, nullptr)["distance"], Json(2000));
+        QCOMPARE(core::normalize_filter("blur_radial", Json::object(), nullptr),
+                 (Json{{"amount", 10}, {"method", "spin"}, {"center_x", 0.5}, {"center_y", 0.5}}));
+        QCOMPARE(core::normalize_filter("sharpen_unsharp_mask", Json::object(), nullptr), (Json{{"amount", 50}, {"radius", 1}, {"threshold", 0}}));
+        QCOMPARE(core::normalize_filter("noise_add", Json::object(), nullptr),
+                 (Json{{"amount", 12.5}, {"distribution", "uniform"}, {"monochromatic", false}, {"seed", 0}}));
+        QCOMPARE(core::normalize_filter("noise_reduce", Json::object(), nullptr),
+                 (Json{{"strength", 6}, {"preserve_details", 60}, {"reduce_color_noise", 45}, {"sharpen_details", 25}, {"remove_jpeg_artifact", false}}));
+        QCOMPARE(core::normalize_filter("blur_smart", Json::object(), nullptr)["quality"], Json("high"));
+        QCOMPARE(core::normalize_filter("other_hsb_hsl", Json::object(), nullptr), (Json{{"input_mode", "rgb"}, {"row_order", "hsb"}}));
+        QCOMPARE(core::normalize_filter("other_maximum", Json{{"radius", 0.1}}, nullptr), (Json{{"radius", 0.2}, {"preserve", "squareness"}}));
+        QCOMPARE(core::normalize_filter("video_de_interlace", Json::object(), nullptr), (Json{{"eliminate", "odd_fields"}, {"create_by", "interpolation"}}));
+        QCOMPARE(core::normalize_filter("blur_average", Json::object(), nullptr), Json::object());
+        const Json custom = core::normalize_filter("other_custom", Json::object(), nullptr);
+        QCOMPARE(custom["kernel"].size(), std::size_t(25));
+        QCOMPARE(custom["kernel"][12], Json(1));
+        QCOMPARE(custom["scale"], Json(1));
+        // refused: a kernel not of 25 numbers, a choice it has not
+        QVERIFY(refused([] { (void)core::normalize_filter("other_custom", Json{{"kernel", Json::array({1, 2, 3})}}, nullptr); }).find("25 numbers") != std::string::npos);
+        QVERIFY(!refused([] { (void)core::normalize_filter("blur_shape", Json{{"shape", "moon"}}, nullptr); }).empty());
+        QVERIFY(!refused([] { (void)core::normalize_filter("blur_lens", Json{{"depth_map", "far"}}, nullptr); }).empty());
+    }
+
     void settingsAreReadAsAnOpsAndABooks() {
         // an op's: its default filled, out of its range clamped (PhotoCraft's 0.1..1000 and 1..2000)
         QCOMPARE(core::normalize_filter("blur_gaussian", Json::object(), nullptr), (Json{{"radius", 1}}));
@@ -97,7 +162,7 @@ private slots:
             if (core::pc4_filter(preset.kind)) ++usable;
         }
         QCOMPARE(core::filter_presets().size(), std::size_t(6));
-        QCOMPARE(usable, 2);  // (ぼかし and ぼかし（強）; the sharpening ones and 輪郭以外をぼかす are D1's kinds)
+        QCOMPARE(usable, 6);  // (D1: the sharpening ones and 輪郭以外をぼかす are kinds of this build too)
         QCOMPARE(core::filter_presets()[0].name, std::string_view("ぼかし"));
         QCOMPARE(core::filter_presets()[0].params, (Json{{"radius", 0.6}}));
         QCOMPARE(core::filter_presets()[1].params, (Json{{"radius", 1.4}}));
@@ -215,7 +280,7 @@ private slots:
         QVERIFY(gaussian);
         QCOMPARE(catalogue["presets"].size(), std::size_t(6));
         QCOMPARE(catalogue["presets"][0]["usable"], Json(true));
-        QCOMPARE(catalogue["presets"][2]["usable"], Json(false));
+        QCOMPARE(catalogue["presets"][2]["usable"], Json(true));  // (シャープ: D1's sharpen_unsharp_mask)
         QVERIFY(catalogue["gallery"].is_array());
     }
 };

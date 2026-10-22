@@ -100,12 +100,84 @@ std::vector<FilterForm> blur_forms() {
         f.note = kLengths;
         out.push_back(std::move(f));
     }
+    // D1: the rest of ぼかし (平均: no window)
+    {  // ぼかし（移動）… (Photoshop: 角度 −360–360°, 距離 1–2000 pixel)
+        FilterForm f;
+        f.kind = "blur_motion";
+        f.labels = {{"angle", QStringLiteral("角度（°）")}, {"distance", QStringLiteral("距離（px）")}};
+        f.decimals = {{"angle", 0}, {"distance", 0}};
+        f.note = kLengths;
+        out.push_back(std::move(f));
+    }
+    {  // ぼかし（放射状）… (量 1–100, 方法 回転・ズーム, 中心)
+        FilterForm f;
+        f.kind = "blur_radial";
+        f.labels = {{"amount", QStringLiteral("量")}, {"method", QStringLiteral("方法")}, {"center_x", QStringLiteral("中心（横）")},
+                    {"center_y", QStringLiteral("中心（縦）")}};
+        f.choices = {{"method", {{QStringLiteral("回転"), Json("spin")}, {QStringLiteral("ズーム"), Json("zoom")}}}};
+        f.decimals = {{"amount", 0}, {"center_x", 2}, {"center_y", 2}};
+        f.note = QStringLiteral("中心は、選択範囲（無ければレイヤー）の幅と高さに対する割合（0〜1）です。");
+        out.push_back(std::move(f));
+    }
+    {  // ぼかし（表面）… (半径 1–100 pixel, しきい値 2–255 レベル)
+        FilterForm f;
+        f.kind = "blur_surface";
+        f.labels = {{"radius", QStringLiteral("半径（px）")}, {"threshold", QStringLiteral("しきい値（レベル）")}};
+        f.decimals = {{"radius", 0}, {"threshold", 0}};
+        f.note = kLengths;
+        out.push_back(std::move(f));
+    }
+    {  // ぼかし（詳細）… (半径, しきい値, 画質, モード)
+        FilterForm f;
+        f.kind = "blur_smart";
+        f.labels = {{"radius", QStringLiteral("半径（px）")}, {"threshold", QStringLiteral("しきい値")}, {"quality", QStringLiteral("画質")},
+                    {"mode", QStringLiteral("モード")}};
+        f.choices = {{"quality", {{QStringLiteral("高"), Json("high")}, {QStringLiteral("中"), Json("medium")}, {QStringLiteral("低"), Json("low")}}},
+                     {"mode", {{QStringLiteral("標準"), Json("normal")}, {QStringLiteral("エッジのみ"), Json("edge_only")},
+                               {QStringLiteral("エッジオーバーレイ"), Json("overlay_edge")}}}};
+        f.decimals = {{"radius", 1}, {"threshold", 1}};
+        f.note = kLengths;
+        out.push_back(std::move(f));
+    }
+    {  // ぼかし（シェイプ）… (半径 5–1000 pixel, the shape: PhotoCraft's built-in ones)
+        FilterForm f;
+        f.kind = "blur_shape";
+        f.labels = {{"radius", QStringLiteral("半径（px）")}, {"shape", QStringLiteral("シェイプ")}};
+        f.choices = {{"shape",
+                      {{QStringLiteral("円"), Json("circle")}, {QStringLiteral("リング"), Json("ring")}, {QStringLiteral("正方形"), Json("square")},
+                       {QStringLiteral("ひし形"), Json("diamond")}, {QStringLiteral("三角形"), Json("triangle")}, {QStringLiteral("六角形"), Json("hexagon")},
+                       {QStringLiteral("星"), Json("star")}, {QStringLiteral("ハート"), Json("heart")}, {QStringLiteral("十字"), Json("cross")}}}};
+        f.decimals = {{"radius", 0}};
+        f.note = kLengths;
+        out.push_back(std::move(f));
+    }
+    {  // ぼかし（レンズ）… (深度情報, 虹彩, 反射光, ノイズ)
+        FilterForm f;
+        f.kind = "blur_lens";
+        f.labels = {{"depth_map", QStringLiteral("深度情報のソース")},
+                    {"focal_distance", QStringLiteral("ぼかしの焦点距離")},
+                    {"invert", QStringLiteral("反転")},
+                    {"shape", QStringLiteral("虹彩の形状")},
+                    {"radius", QStringLiteral("虹彩の半径（px）")},
+                    {"blade_curvature", QStringLiteral("羽根の湾曲")},
+                    {"rotation", QStringLiteral("回転（°）")},
+                    {"brightness", QStringLiteral("反射光の明るさ")},
+                    {"threshold", QStringLiteral("反射光のしきい値")},
+                    {"noise", QStringLiteral("ノイズの量")},
+                    {"distribution", QStringLiteral("ノイズの分布")},
+                    {"monochromatic", QStringLiteral("グレースケールノイズ")}};
+        f.choices = {{"depth_map", {{QStringLiteral("なし"), Json("none")}, {QStringLiteral("透明部分"), Json("transparency")},
+                                    {QStringLiteral("レイヤーマスク"), Json("layer_mask")}}},
+                     {"shape", {{QStringLiteral("六角形（6）"), Json("hexagon")}, {QStringLiteral("三角形（3）"), Json("triangle")},
+                                {QStringLiteral("正方形（4）"), Json("square")}, {QStringLiteral("五角形（5）"), Json("pentagon")},
+                                {QStringLiteral("七角形（7）"), Json("heptagon")}, {QStringLiteral("八角形（8）"), Json("octagon")}}},
+                     {"distribution", {{QStringLiteral("均等に分布"), Json("uniform")}, {QStringLiteral("ガウス分布"), Json("gaussian")}}}};
+        f.decimals = {{"focal_distance", 0}, {"radius", 0}, {"blade_curvature", 0}, {"rotation", 0}, {"brightness", 0}, {"threshold", 0}, {"noise", 0}};
+        f.note = kLengths;
+        out.push_back(std::move(f));
+    }
     return out;
 }
-std::vector<FilterForm> sharpen_forms() { return {}; }       // (D1)
-std::vector<FilterForm> noise_forms() { return {}; }         // (D1)
-std::vector<FilterForm> other_forms() { return {}; }         // (D1)
-std::vector<FilterForm> video_forms() { return {}; }         // (D1)
 std::vector<FilterForm> distort_forms() { return {}; }       // (D2)
 std::vector<FilterForm> pixelate_forms() { return {}; }      // (D2)
 std::vector<FilterForm> stylize_forms() { return {}; }       // (D2)

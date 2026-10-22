@@ -4,7 +4,8 @@
 // build yet grey —; ぼかし（ガウス）…'s window made from its table with the result on the page, one op and one Undo; ぼかし
 // without a window; 前回のフィルター sending the last one again; フェード… after it; on a smart object a smart filter (its
 // window again from the panel); 漫画's 光彩… in its old window; a heavy one's preview on a thread and its progress with 中止;
-// the layer panel's かける… opening the menu. (The frame of D1…D7's windows and kinds: their own tests add theirs.)
+// the layer panel's かける… opening the menu. (The frame of D1…D7's windows and kinds: their own tests add theirs.) D1: its
+// commands lit — ぼかし・シャープ・ノイズ・その他・ビデオ —, カスタム…'s 5 × 5 grid, 平均 and シャープ without a window.
 
 #include <QtTest>
 #include <QAction>
@@ -17,6 +18,7 @@
 #include <QPointer>
 #include <QProgressDialog>
 #include <QPushButton>
+#include <QSpinBox>
 #include <QTimer>
 
 #include "gui_support.hpp"
@@ -195,14 +197,19 @@ private slots:
         QCOMPARE(book.act("act_liquify_filter")->shortcut(), QKeySequence(QStringLiteral("Ctrl+Shift+X")));
         QVERIFY(menus_of(w, book.act("act_smart_filters_convert")).contains(QStringLiteral("フィルター")));
         QVERIFY(menus_of(w, book.act("act_smart_filters_convert")).contains(QStringLiteral("スマートフィルター")));
-        // in this build: the blurs of D0 (and Genko's own); the rest grey until their groups
+        // in this build: the blurs of D0, D1's ぼかし・シャープ・ノイズ・その他・ビデオ (and Genko's own); the rest grey until their groups
         w->set_target_layer("pic");
         emit filter->aboutToShow();
         for (const char* on : {"act_filter_blur", "act_filter_blur_more", "act_filter_blur_gaussian", "act_filter_blur_box", "act_filter_manga_glow",
-                               "act_filter_manga_lineart"})
+                               "act_filter_manga_lineart", "act_filter_blur_motion", "act_filter_blur_radial", "act_filter_blur_average", "act_filter_blur_lens",
+                               "act_filter_sharpen", "act_filter_sharpen_more", "act_filter_sharpen_edges", "act_filter_sharpen_unsharp_mask",
+                               "act_filter_sharpen_smart", "act_filter_despeckle", "act_filter_noise_add", "act_filter_noise_median",
+                               "act_filter_noise_dust_and_scratches", "act_filter_noise_reduce", "act_filter_other_custom", "act_filter_other_high_pass",
+                               "act_filter_other_hsb_hsl", "act_filter_other_maximum", "act_filter_other_minimum", "act_filter_other_offset",
+                               "act_filter_video_de_interlace", "act_filter_video_ntsc_colors"})
             QVERIFY2(book.act(on)->isEnabled(), on);
-        for (const char* off : {"act_filter_blur_motion", "act_filter_gallery", "act_filter_camera_raw", "act_filter_render_tree", "act_filter_vanishing_point",
-                                "act_filter_sharpen", "act_filter_despeckle", "act_filter_last"})
+        for (const char* off : {"act_filter_pixelate_mosaic", "act_filter_distort_twirl", "act_filter_stylize_emboss", "act_filter_gallery",
+                                "act_filter_camera_raw", "act_filter_render_tree", "act_filter_vanishing_point", "act_filter_blur_tilt_shift", "act_filter_last"})
             QVERIFY2(!book.act(off)->isEnabled(), off);
         // 履歴's words of the new ops
         QCOMPARE(app::history::describe(Json::array({Json{{"op", "render_picture"}}})), QStringLiteral("描画した"));
@@ -446,6 +453,69 @@ private slots:
         emit book.menu("menu_filter")->aboutToShow();
         QCOMPARE(book.act("act_filter_last")->text(), QStringLiteral("ぼかし（ガウス）"));
         emit book.menu("menu_filter")->aboutToHide();
+    }
+
+    // D1: カスタム…'s window — its 5 × 5 grid (the centre 1), 拡大・縮小, オフセット — sends its kernel; 平均 and シャープ are sent
+    // without a window, the same as their ops; アンシャープマスク…'s window in Photoshop's words.
+    void theWindowsOfD1() {
+        Book book;
+        gui_test::Answers answers;
+        book.window->set_target_layer("pic");
+        const core::Document start = *book.session->snapshot();
+        bool shown = false;
+        answers.responder->exec = answer(QStringLiteral("other_custom"), [&](QDialog* d) {
+            QCOMPARE(d->windowTitle(), QStringLiteral("カスタム"));
+            auto* centre = d->findChild<QSpinBox*>(QStringLiteral("kernel_12"));
+            auto* right = d->findChild<QSpinBox*>(QStringLiteral("kernel_13"));
+            QVERIFY(centre != nullptr && right != nullptr && d->findChild<QDoubleSpinBox*>(QStringLiteral("field_scale")) != nullptr);
+            QCOMPARE(centre->value(), 1);
+            QCOMPARE(right->value(), 0);
+            centre->setValue(0);
+            right->setValue(1);
+            shown = true;
+        });
+        book.act("act_filter_other_custom")->trigger();
+        QVERIFY(shown);
+        Json kernel = Json::array();
+        for (int i = 0; i < 25; ++i) kernel.push_back(i == 13 ? 1 : 0);
+        const auto expected = core::CommandBus(render::ops_registry())
+                                  .apply(start, Json::array({Json{{"op", "filter_raster"}, {"page", 1}, {"id", "pic"}, {"kind", "other_custom"},
+                                                                  {"kernel", kernel}, {"scale", 1}, {"offset", 0}}}),
+                                         core::Actor("human:tester"))
+                                  .doc;
+        QCOMPARE(*book.layer("pic")->raster_png, *expected.page(0).layers.back().raster_png);
+        emit book.menu("menu_filter")->aboutToShow();
+        QCOMPARE(book.act("act_filter_last")->text(), QStringLiteral("カスタム"));
+        emit book.menu("menu_filter")->aboutToHide();
+        book.window->action(QStringLiteral("act_undo"))->trigger();
+        // 平均 and シャープ: no window
+        int windows = 0;
+        answers.responder->exec = [&](QDialog*) {
+            ++windows;
+            return int(QDialog::Rejected);
+        };
+        // (シャープ first: after 平均 the layer is flat)
+        for (const auto& [name, op] : {std::pair{"act_filter_sharpen", Json{{"kind", "sharpen_unsharp_mask"}, {"amount", 60}, {"radius", 0.5}, {"threshold", 0}}},
+                                       std::pair{"act_filter_blur_average", Json{{"kind", "blur_average"}}}}) {
+            const core::Document before = *book.session->snapshot();
+            book.act(name)->trigger();
+            Json sent{{"op", "filter_raster"}, {"page", 1}, {"id", "pic"}};
+            sent.update(op);
+            const auto done = core::CommandBus(render::ops_registry()).apply(before, Json::array({sent}), core::Actor("human:tester")).doc;
+            QVERIFY2(*book.layer("pic")->raster_png == *done.page(0).layers.back().raster_png, name);  // (PhotoCraft's settings, sent as they are)
+            if (std::string_view(name) == "act_filter_blur_average")  // (シャープ's 0.5 px hardly reaches this smooth picture's stored pixels)
+                QVERIFY2(*book.layer("pic")->raster_png != *before.page(0).layers.back().raster_png, name);
+        }
+        QCOMPARE(windows, 0);
+        // アンシャープマスク…: 量・半径・しきい値
+        answers.responder->exec = answer(QStringLiteral("sharpen_unsharp_mask"), [&](QDialog* d) {
+            QCOMPARE(d->windowTitle(), QStringLiteral("アンシャープマスク"));
+            for (const char* field : {"field_amount", "field_radius", "field_threshold"}) QVERIFY2(d->findChild<QDoubleSpinBox*>(QString::fromLatin1(field)) != nullptr, field);
+            QCOMPARE(d->findChild<QDoubleSpinBox*>(QStringLiteral("field_amount"))->value(), 50.0);
+            ++windows;
+        });
+        book.act("act_filter_sharpen_unsharp_mask")->trigger();
+        QCOMPARE(windows, 1);
     }
 
     // The layer panel's かける…: the フィルター menu (the user's decision 1).

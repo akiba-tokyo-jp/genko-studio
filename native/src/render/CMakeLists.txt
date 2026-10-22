@@ -121,6 +121,12 @@ genko_library(genko_render
     # PC4 節 D (フィルター: the table's kinds by one formula on the three ways)
     fx_engine.cpp
     fx_blur.cpp
+    fx_blur2.cpp
+    fx_noise.cpp
+    fx_other.cpp
+    fx_rank.cpp
+    fx_sharpen.cpp
+    fx_video.cpp
     ops_filters.cpp
     # PC3 C-a (パスとベクトルマスク)
     path_trace.cpp

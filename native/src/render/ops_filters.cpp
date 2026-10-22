@@ -15,6 +15,8 @@
 #include "render/fx.hpp"
 #include "render/image_ops.hpp"
 #include "render/ink_edit.hpp"
+#include "render/layer_masks.hpp"
+#include "render/png.hpp"
 #include "render/raster.hpp"
 #include "render/selection.hpp"
 
@@ -25,6 +27,25 @@ namespace {
 using core::Json;
 
 constexpr std::uint64_t kBudget = 2ULL * 1024 * 1024 * 1024;  // (the imaging budget of a local filter, as PC2c's)
+
+thread_local const core::Layer* g_layer = nullptr;  // (FilterLayer)
+
+// The plane a kind reads beside the layer over a grid of w × h (ぼかし（レンズ）'s "depth_map": "layer_mask": the layer's
+// mask as it shows over the page — its density and feather laid on —, each 0..1); none when it reads none or the layer
+// filtered has no mask (then no depth: as "none").
+std::optional<std::vector<float>> plane_of(const core::Page& page, const Json& params, std::uint32_t w, std::uint32_t h) {
+    const Json* depth = core::get(params, "depth_map");
+    if (depth == nullptr || *depth != Json("layer_mask") || g_layer == nullptr || !g_layer->mask || !g_layer->mask->png || g_layer->mask->png->empty())
+        return std::nullopt;
+    const image_ops::Held held(std::uint64_t(w) * h * (sizeof(float) + 1));
+    const Image decoded = read_png(*g_layer->mask->png).convert("L");
+    const Box whole{0, 0, static_cast<int>(w), static_cast<int>(h)};
+    const std::string bytes =
+        layer_masks::shown(page, *g_layer->mask, decoded, Size{static_cast<int>(w), static_cast<int>(h)}, whole, Resample::Bilinear).tobytes();
+    std::vector<float> out(bytes.size());
+    for (std::size_t i = 0; i < bytes.size(); ++i) out[i] = static_cast<unsigned char>(bytes[i]) / 255.0f;
+    return out;
+}
 
 // The coverage of an area (a resolved {poly} or {mask}) on a grid of w × h over the page, a byte a pixel: an 8-bit layer's
 // as filter_raster draws its area (the working 200 dpi), any other's by render/ink_edit.
@@ -58,17 +79,21 @@ void run(fx::Surface& surface, const fx::Kernel& kernel, core::FilterInks inks, 
     const std::uint32_t w = surface.width(), h = surface.height();
     const fx::Rect grid{0, 0, int(w), int(h)};
     const double s = image_ops::grid_scale(page, w, h);
+    const std::optional<std::vector<float>> plane = plane_of(page, params, w, h);
+    fx::Reads reads;
+    reads.plane = plane ? &*plane : nullptr;
     if (area == nullptr) {
-        fx::apply(surface, kernel, params, inks, grid, nullptr, s);
+        fx::apply(surface, kernel, params, inks, grid, nullptr, s, nullptr, {}, reads);
         return;
     }
     const std::string cover = cover_of(page, *area, w, h, eight);
     const fx::Rect box = covered(cover, w, h);
     if (box.empty()) return;  // (nothing inside: as it was)
     if (mix) {
-        fx::apply(surface, kernel, params, inks, box, &cover, s);
-    } else {
-        fx::apply(surface, kernel, params, inks, box, nullptr, s, &box);
+        fx::apply(surface, kernel, params, inks, box, &cover, s, nullptr, {}, reads);
+    } else {  // (the caller keeps the result to the area; a kind that reads the coverage itself has it: 平均)
+        reads.within = &cover;
+        fx::apply(surface, kernel, params, inks, box, nullptr, s, &box, {}, reads);
     }
 }
 
@@ -108,6 +133,9 @@ adjust_ops::LocalFilter local_of(const fx::Kernel& kernel, core::FilterInks inks
 }
 
 }  // namespace
+
+FilterLayer::FilterLayer(const core::Layer& layer) : before_(g_layer) { g_layer = &layer; }
+FilterLayer::~FilterLayer() { g_layer = before_; }
 
 namespace adjust_ops {
 

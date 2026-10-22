@@ -2370,6 +2370,7 @@ void filter_raster_pixels(OpContext& c) {
     Page& page = doc.edit_page(at);
     Layer& layer = page.layers[resolve_layer(page, op)];
     if (layer.locked) throw OpError("the layer is locked");  // (Python filters it)
+    const FilterLayer working_on(layer);  // (PC4 D1: what a kind reads of the layer — ぼかし（レンズ）'s depth from its mask)
     // (precise pen lines become precise pixels, so the filter reaches them: as 8-bit lines become pixels below)
     // (color-mode@1: on a CMYK or Lab page they are drawn into its inks by the rules, below)
     if (core::has_color_strokes(layer) && !page.color) precise_lines_to_paint(doc, page, layer);
