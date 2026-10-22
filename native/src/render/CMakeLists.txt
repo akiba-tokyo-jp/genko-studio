@@ -132,6 +132,8 @@ genko_library(genko_render
     fx_pixelate.cpp
     fx_stylize.cpp
     fx_oil.cpp
+    fx_lens.cpp
+    vanishing.cpp
     ops_filters.cpp
     # PC3 C-a (パスとベクトルマスク)
     path_trace.cpp

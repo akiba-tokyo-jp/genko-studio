@@ -67,6 +67,7 @@ v3 から外すもの: なし（未知キーも `extra` として書き戻す）
 | `brushes@1` | PC4 E-0（E1・E2 が使う） | ブラシのダブの描き方（`brush.custom[<key>]` の `engine`・`dabs` と先端・模様の絵）、線の入力（`tilt`・`time_ms`・`wheel`・`flow`）、ブラシの状態の `kind`・`background_rgb`。COLOR-09（末尾の「ブラシのダブの描き方」） |
 | `patterns@1` | PC4 E-0（E3・E6 が使う） | 本の `patterns`（使ったパターンの写しとその絵）。COLOR-09（末尾の「パターン」） |
 | `filters@1` | PC4（D0） | スマートフィルターがフィルター メニューの種類（`blur_gaussian` など、PC4 の種類）を持つか、フィルターのファイル（置き換えの地図）を持つこと。COLOR-08（末尾の「フィルター」） |
+| `vanishing-point@1` | PC4（D6） | ページの `vanishing`（消点の面）。COLOR-08（末尾の「消点の面」） |
 
 拡張を使う op が初めて適用されたときに `features` へ加える。拡張を使わない原稿は `features: []`。
 
@@ -424,3 +425,14 @@ v3 の行（`rev`・`actor`・`at`・`changes`・`via`）をそのまま残し�
 - D2 の種類（変形・ピクセレート・表現手法、COLOR-08）: 置き換え `distort_displace` だけがファイルを持つ。スマートフィルターの `"params"` は `{"horizontal", "vertical", "fit", "undefined_areas", "map": "sha256:<64>", "map_suffix": ".png"|".psd"}`（op で地図を層 `{"layer": …}` やデータ `map_data` で渡しても、足す・直すときにその絵を素材にして参照を持つ。スマートフィルターの設定に層の指定・`map_data` があれば読み取り専用）。シアー `distort_shear` の `"points"` は `[[t, offset]…]`（2〜64 点、t の順）。場所を名指す設定は無い（変形は基準の枠を中心に描く）。
 - D1 の種類（ぼかし・シャープ・ノイズ・その他・ビデオ、COLOR-08）はファイルを持たない。場所を名指す設定は ぼかし（放射状）`blur_radial` の中心 `center_x`・`center_y`（基準の枠の 0..1。`"space": "contents"` なら SO の中身の枠の 0..1）だけ。
 - `features` に `filters@1` を加える（書くページ・中身のページのスマートフィルターに PC4 の種類があるか、フィルターのファイルを持つとき。無くなれば外す）。filters@1 を知らない読み手（PC3 までの C++ 版）は、未知の拡張として読み取り専用で開く（どちらも原稿を書き換えない）。
+
+- D6 の種類（レンズ補正・広角補正、COLOR-08）はファイルを持たない。レンズ補正 `lens_correction` の `"params"` は解いた値（`"profile"` は `"none"` か `"generic"` と `"focal_length"`。`"auto"` は足すときに絵の EXIF の焦点距離で `"generic"` に、角度補正の線 `"straighten"` は `"angle"` にして持たない。`"auto_scale"` は描くたびに解く）。広角補正 `adaptive_wide_angle` の焦点距離 0 は足すときに絵の EXIF で埋める。場所を名指す設定は広角補正の拘束線の端 `"constraints"[].a`・`.b`（ページの mm。スマートオブジェクトと一緒に動く）。
+
+## 消点の面（vanishing-point@1。COLOR-08、PC4 節 D6）
+
+フィルター → 消点… の面を、Photoshop が文書に持つのと同じくページに持つ（次に開いたとき面が残り、続けて使える）。C++ 版だけ。
+
+- **ページの `"vanishing"`**: `{"planes": [面…], "focal_mm"?: 数}`。面は 1〜32。最初の面は `{"corners_mm": [[x, y] × 4]}`（ページの mm。面の左上から時計回り。凸の四角形で、面積は 0.01 mm² より大きい）。後の面は自分の 4 隅か、前の面の辺から継ぎ足したもの `{"from": 前の面の番号, "edge": "top"|"right"|"bottom"|"left", "angle": 度（−360〜360。90 で直角）, "depth": 前の面の辺に交わる辺の何倍か（0.05〜20）}`。鍵はこの順（正規形: `angle` 90・`depth` 1 を埋める）。`"focal_mm"` はカメラの焦点距離（mm、0 より大きい。無ければ最初の面の消失点から）。
+- 書き手は面を持つページがあるときだけ `features` に `vanishing-point@1` を加える（無くなれば外す）。面は op `vanishing_point` が `keep_planes`（既定）のときに置く。元に戻すで戻る。
+- **読み手の検査**: 面の形が上と違う（凸でない・有限でない・`from` が前の面でない・知らない鍵）ページの本は、読み取り専用で開く（`a page's vanishing point planes: …`。面は読んだまま書き戻すので失われない）。vanishing-point@1 を知らない読み手（PC4 D6 より前の C++ 版）は、未知の拡張として読み取り専用で開く。
+- PSD には書かない（上流も持たない。Photoshop の形を確かめられない）。面を持たない原稿は、`features` も保存のバイトも今のまま。

@@ -23,7 +23,14 @@
 #include "render/png.hpp"
 #include "render/raster.hpp"
 #include "render/selection.hpp"
+#include "render/smart.hpp"
 #include "render/smart_decode.hpp"
+#include "render/codecs/format.hpp"
+#include "render/codecs/metadata.hpp"
+#include "render/vanishing.hpp"
+#include "core/file_info.hpp"
+#include "core/lens.hpp"
+#include "core/smart.hpp"
 #include "storage/asset_store.hpp"
 
 namespace genko::render {
@@ -288,6 +295,90 @@ void refuse_filter(const core::Document& doc, const Json& op) {
     throw core::OpError("filter_gallery: every effect is hidden, so it would change nothing (a smart filter may keep them hidden)");
 }
 
+std::optional<core::exif::Camera> picture_camera(const core::Document& doc, const core::Page& page, const core::Layer* layer) {
+    // (a smart object's file: its EXIF as the file holds it)
+    if (layer != nullptr && layer->kind == core::LayerKind::Smart) {
+        if (const core::SmartContents* contents = core::smart::contents_of(doc, *layer); contents != nullptr && contents->kind == "file") {
+            try {
+                const core::Bytes bytes = smart::file_bytes(doc, *contents);
+                if (bytes) {
+                    if (const auto format = codecs::detect(*bytes)) {
+                        const codecs::FileMetadata meta = codecs::read_metadata(*format, *bytes);
+                        if (meta.exif) return core::exif::read(*meta.exif);
+                    }
+                }
+            } catch (const core::Error&) {
+            }
+        }
+        return std::nullopt;
+    }
+    // (the file the page was opened from: its EXIF kept with the book, else what its camera said — a RAW file's)
+    if (!page.native_source) return std::nullopt;
+    const core::NativeSource& source = *page.native_source;
+    if (!source.exif.empty()) {
+        std::optional<std::string> bytes;
+        if (const auto held = doc.native_files.find(source.exif); held != doc.native_files.end() && held->second) {
+            bytes = *held->second;
+        } else if (doc.asset_dir && storage::AssetStore::is_ref(source.exif)) {
+            try {
+                bytes = storage::AssetStore(*doc.asset_dir).get_bytes(source.exif, core::kExifSuffix, storage::kAssetMaxBytes);
+            } catch (const std::exception&) {
+                bytes.reset();
+            }
+        }
+        if (bytes) return core::exif::read(*bytes);
+    }
+    if (source.camera && source.camera->focal) {
+        core::exif::Camera camera;
+        camera.focal_length = source.camera->focal;
+        return camera;
+    }
+    return std::nullopt;
+}
+
+Json resolve_filter(const core::Document& doc, const core::Page& page, const core::Layer* layer, std::string_view kind, Json params) {
+    if ((kind != "lens_correction" && kind != "adaptive_wide_angle") || !params.is_object()) return params;
+    const auto focal_given = [&params] {
+        const Json* f = core::get(params, "focal_length");
+        return f != nullptr && f->is_number() && !f->is_boolean() && f->get<double>() > 0;
+    };
+    if (kind == "lens_correction") {
+        if (params.value("profile", Json("none")) != Json("auto") || focal_given()) return params;
+        const auto camera = picture_camera(doc, page, layer);
+        if (!camera) return params;
+        if (const auto f = camera->focal_length_35mm ? camera->focal_length_35mm : camera->focal_length; f && *f > 0) params["focal_length"] = *f;
+        return params;
+    }
+    if (focal_given()) return params;
+    const auto camera = picture_camera(doc, page, layer);
+    if (!camera) return params;
+    if (camera->focal_length && *camera->focal_length > 0) {
+        params["focal_length"] = *camera->focal_length;
+        if (camera->focal_length_35mm) params["crop_factor"] = std::clamp(*camera->focal_length_35mm / *camera->focal_length, 0.1, 10.0);
+    } else if (camera->focal_length_35mm) {
+        params["focal_length"] = *camera->focal_length_35mm;
+        params["crop_factor"] = 1.0;
+    }
+    return params;
+}
+
+std::optional<Json> resolve_filter_op(const core::Document& doc, const Json& op) {
+    const Json* kind = core::get(op, "kind");
+    if (kind == nullptr || !kind->is_string() || (*kind != Json("lens_correction") && *kind != Json("adaptive_wide_angle"))) return std::nullopt;
+    const std::size_t at = core::require_page(doc, op);
+    const core::Page& page = doc.page(at);
+    const core::Layer* layer = nullptr;
+    if (const Json* id = core::get(op, "id"); id != nullptr && id->is_string())
+        for (const core::Layer& l : page.layers)
+            if (l.id == id->get<std::string>()) layer = &l;
+    const Json params = settings_of_op(op);
+    const Json filled = resolve_filter(doc, page, layer, kind->get<std::string>(), params);
+    if (filled == params) return std::nullopt;
+    Json out = op;
+    out.update(filled);
+    return out;
+}
+
 std::optional<Json> filter_report(const core::Document& doc, const Json& op) {
     const Json* kind = core::get(op, "kind");
     if (kind == nullptr || !kind->is_string() || !core::pc4_filter(kind->get_ref<const std::string&>())) return std::nullopt;
@@ -297,6 +388,11 @@ std::optional<Json> filter_report(const core::Document& doc, const Json& op) {
     drawn.update(core::normalize_filter(kind->get_ref<const std::string&>(), params, &doc.page(at)));
     for (const std::string_view key : core::filter_info(kind->get_ref<const std::string&>())->files)
         drawn.erase(std::string(key) + "_data");  // (D2: a file's data said by its ref and suffix, not again)
+    // (D6: レンズ補正's profile by its name, as PhotoCraft's result says it)
+    if (*kind == Json("lens_correction")) {
+        const core::lens::Correction lc = core::lens::correction_of(drawn);
+        drawn["profile_name"] = lc.profile ? Json(lc.profile->name) : Json(nullptr);
+    }
     return Json{{"filter", std::move(drawn)}};
 }
 
@@ -338,7 +434,7 @@ Json keep_filter_files(core::Document& doc, const core::Page& page, std::string_
 void register_filter_ops(core::OpRegistry& registry) {
     // フィルター → 描画 → 炎…・額縁…・木… (D4: render/render_picture.cpp) and 消点… (D6: render/vanishing.cpp)
     registry.add("render_picture", [](core::OpContext&) { op_not_yet("render_picture", "D4"); });
-    registry.add("vanishing_point", [](core::OpContext&) { op_not_yet("vanishing_point", "D6"); });
+    registry.add("vanishing_point", vanishing::vanishing_point);
 }
 
 }  // namespace genko::render

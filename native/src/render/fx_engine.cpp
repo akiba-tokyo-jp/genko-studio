@@ -183,7 +183,6 @@ std::vector<float> conv_sep(const Window& src, const Rect& out, const std::vecto
 Kernels render_kernels() { return {}; }        // (D4)
 Kernels blur_gallery_kernels() { return {}; }  // (D4)
 Kernels camera_raw_kernels() { return {}; }    // (D5)
-Kernels lens_kernels() { return {}; }          // (D6)
 
 const Kernels& kernels() {
     static const Kernels all = [] {
@@ -642,6 +641,11 @@ void apply(Surface& surface, const Kernel& kernel, const Json& params, core::Fil
     Ctx ctx;
     ctx.bounds = bounds_in.intersect(grid);
     if (ctx.bounds.empty()) ctx.bounds = grid;
+    const Rect content = surface.content();
+    if (kernel.shown_frame) {  // (D6: the frame of the picture — what shows —, a selection only keeping the result to it)
+        if (content.empty() && PlaceScope::current() == nullptr) return;
+        ctx.bounds = content;
+    }
     if (const PlaceScope* place = PlaceScope::current()) {  // (D3: a part of the grid — its origin, the grid's base box there)
         ctx.x0 = place->x();
         ctx.y0 = place->y();
@@ -661,7 +665,6 @@ void apply(Surface& surface, const Kernel& kernel, const Json& params, core::Fil
     // the part worked: as far as the halo reaches from what shows (upstream's output_area), the base box for a whole kind
     // or a render; within the selection's box
     Rect area;
-    const Rect content = surface.content();
     ctx.largest = surface.largest();
     ctx.least = surface.least();
     ctx.levels = way.meaning ? 0 : surface.levels();  // (the colours the inks mean: floats)
@@ -673,6 +676,7 @@ void apply(Surface& surface, const Kernel& kernel, const Json& params, core::Fil
         area = content.empty() ? Rect{} : content.inflate(halo.radius).intersect(grid);
     }
     if (cover != nullptr) area = area.intersect(cover_box(*cover, w, h));
+    if (kernel.shown_frame) area = area.intersect(ctx.bounds);  // (D6: within the frame)
     if (area.empty()) return;
 
     // the memory, held in the imaging budget before it is had: a whole kind's one window, then each thread's window (the

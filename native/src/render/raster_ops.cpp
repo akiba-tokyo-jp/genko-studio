@@ -66,6 +66,7 @@
 #include "render/op_limits.hpp"
 #include "render/ops_patterns.hpp"
 #include "render/ops_adjust.hpp"
+#include "render/fx.hpp"
 #include "render/ops_filters.hpp"
 #include "render/ops_paths.hpp"
 #include "render/ops_masks.hpp"
@@ -2509,8 +2510,24 @@ void filter_raster_pixels(OpContext& c) {
 // reply's results (render/ops_filters).
 void filter_raster(OpContext& c) {
     refuse_filter(c.doc, c.op);  // (PC4 D3: what a smart filter keeps and the op does not — a gallery's stack all hidden)
-    filter_raster_pixels(c);
-    if (auto report = filter_report(c.doc, c.op)) c.report = std::move(*report);
+    // (PC4 D6: レンズ補正's and 広角補正's focal length from the picture's EXIF, as the op records it; and what the kinds
+    // resolve as they run — 自動拡大・縮小, 広角補正's model — for the report)
+    const std::optional<Json> resolved = resolve_filter_op(c.doc, c.op);
+    Json notes = Json::object();
+    {
+        const fx::NoteScope noting(notes);
+        if (resolved) {
+            OpContext inner{c.doc, *resolved, c.actor};
+            filter_raster_pixels(inner);
+            c.notes.insert(c.notes.end(), inner.notes.begin(), inner.notes.end());
+        } else {
+            filter_raster_pixels(c);
+        }
+    }
+    if (auto report = filter_report(c.doc, resolved ? *resolved : c.op)) {
+        if (!notes.empty() && report->contains("filter")) (*report)["filter"].update(notes);
+        c.report = std::move(*report);
+    }
 }
 
 // --- the eraser on a paint layer ----------------------------------------------------------------------------------------

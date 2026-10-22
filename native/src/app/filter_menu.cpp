@@ -34,6 +34,8 @@
 #include "app/colours.hpp"
 #include "app/filter_forms.hpp"
 #include "app/filter_gallery_window.hpp"
+#include "app/lens_window.hpp"
+#include "app/vanishing_window.hpp"
 #include "app/layer_dialogs.hpp"
 #include "app/main_window.hpp"
 #include "core/adjust_kinds.hpp"
@@ -203,6 +205,9 @@ const std::vector<std::pair<std::string, FilterWindow>>& filter_windows() {
     // lens_correction, adaptive_wide_angle, vanishing_point: each its group's)
     static const std::vector<std::pair<std::string, FilterWindow>> all{
         {"filter_gallery", [](const FilterWindowCall& call) { filter_gallery::open(call); }},  // (D3: app/filter_gallery_window.cpp)
+        {"lens_correction", [](const FilterWindowCall& call) { lens_window::open_lens(call); }},  // (D6: app/lens_window.cpp)
+        {"adaptive_wide_angle", [](const FilterWindowCall& call) { lens_window::open_wide_angle(call); }},
+        {"vanishing_point", [](const FilterWindowCall& call) { vanishing_window::open(call); }},  // (D6: app/vanishing_window.cpp)
     };
     return all;
 }

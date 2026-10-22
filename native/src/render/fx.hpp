@@ -167,6 +167,10 @@ struct Kernel {
     // (D2) The work done once whatever the layer's pixels (置き換え's map read or drawn — a page drawn, a file decoded), in
     // the units of work(): added to its weight. None: nothing.
     std::function<double(const core::Json& params)> setup;
+    // (D6) Its base box is the frame of the picture — the box of what shows on the layer (a photo placed on the page, a smart
+    // object's picture), a part worked alone its PlaceScope's —, not the selection's box: a selection only keeps the result
+    // to it (レンズ補正, 広角補正: their centre is the lens's). Nothing shows: nothing changes.
+    bool shown_frame = false;
 };
 using Kernels = std::vector<Kernel>;
 inline constexpr double kDefaultCost = 50;
@@ -186,7 +190,7 @@ Kernels gallery_kernels();       // D3
 Kernels render_kernels();        // D4
 Kernels blur_gallery_kernels();  // D4
 Kernels camera_raw_kernels();    // D5
-Kernels lens_kernels();          // D6
+Kernels lens_kernels();          // render/fx_lens.cpp — D6: lens_correction, adaptive_wide_angle
 const Kernels& kernels();
 const Kernel* kernel(std::string_view kind);
 
@@ -318,6 +322,22 @@ private:
     const PlaceScope* before_;
     int x_, y_;
     Rect bounds_;
+};
+
+// (D6) While it lives, what a kind resolves as it runs on this thread — レンズ補正's 自動拡大・縮小, 広角補正's model, focal
+// length and how straight its lines came out — is put into `into` by its key (filter_raster's report, render/ops_filters;
+// a kind puts it from its `once`, on the thread that runs it).
+class NoteScope {
+public:
+    explicit NoteScope(core::Json& into);
+    ~NoteScope();
+    NoteScope(const NoteScope&) = delete;
+    NoteScope& operator=(const NoteScope&) = delete;
+    // Put on the scope living on this thread (none: nowhere).
+    static void put(std::string_view key, core::Json value);
+
+private:
+    core::Json* before_;
 };
 
 // How much work a kind is on a grid of `pixels` at scale `s` (its cost a pixel — on samples of `levels`, Ctx::levels: a

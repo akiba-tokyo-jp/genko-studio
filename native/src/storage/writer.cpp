@@ -19,6 +19,7 @@
 #include "core/psd_keep.hpp"
 #include "core/ruby.hpp"
 #include "core/filter_kinds.hpp"
+#include "core/vanishing.hpp"
 #include "core/smart.hpp"
 #include "core/strokes.hpp"
 #include "core/version.hpp"
@@ -476,6 +477,10 @@ Json project_payload_v4(const core::Document& doc, AssetStore& store) {
     }
     std::erase(features, std::string(core::kFiltersFeature));
     if (core::uses_filters(doc) || !filter_files.empty()) features.emplace_back(core::kFiltersFeature);
+    // PC4 節 D6 (vanishing-point@1): a page's planes of 消点 (its "vanishing"), the feature while a page keeps them
+    core::validate_vanishing(doc);
+    std::erase(features, std::string(core::kVanishingFeature));
+    if (core::uses_vanishing(doc)) features.emplace_back(core::kVanishingFeature);
     core::validate_ink_document(doc);
     core::validate_color_model(doc);
     bool modes = doc.color.has_value() || doc.rgb.has_value() || doc.text_gamma.has_value();

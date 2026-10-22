@@ -328,18 +328,68 @@ Plane mesh(const Plane& src, const Forward& f, int width, int height, Interp int
     return triangles(src, verts, tris, width, height, interp, x0, y0);
 }
 
+namespace {
+
+// The places of the destination pixels of rows [r0, r1) and columns [c0, c1) of the corners' own coordinates (each pixel
+// (x, y) at its centre x + 0.5, y + 0.5) through the triangles, into `uv` (row-major over that box, NaN where none);
+// whether any was found.
+bool places_in(const std::vector<Corner>& verts, const std::vector<std::array<std::size_t, 3>>& tris, int c0, int r0, int c1, int r1,
+               std::vector<std::array<double, 2>>& uv) {
+    const int width = c1 - c0;
+    uv.assign(std::size_t(std::max(width, 0)) * std::size_t(std::max(r1 - r0, 0)), {std::numeric_limits<double>::quiet_NaN(), 0.0});
+    bool any = false;
+    for (const auto& tri : tris) {
+        if (tri[0] >= verts.size() || tri[1] >= verts.size() || tri[2] >= verts.size()) continue;
+        const Corner& p0 = verts[tri[0]];
+        const Corner& p1 = verts[tri[1]];
+        const Corner& p2 = verts[tri[2]];
+        const double det = (p1.dx - p0.dx) * (p2.dy - p0.dy) - (p2.dx - p0.dx) * (p1.dy - p0.dy);
+        if (std::fabs(det) < 1e-12) continue;
+        const int bx0 = std::max(c0, static_cast<int>(std::floor(std::min({p0.dx, p1.dx, p2.dx}) - 0.5)));
+        const int by0 = std::max(r0, static_cast<int>(std::floor(std::min({p0.dy, p1.dy, p2.dy}) - 0.5)));
+        const int bx1 = std::min(c1, static_cast<int>(std::ceil(std::max({p0.dx, p1.dx, p2.dx}) + 0.5)));
+        const int by1 = std::min(r1, static_cast<int>(std::ceil(std::max({p0.dy, p1.dy, p2.dy}) + 0.5)));
+        const double eps = -1e-9;
+        for (int y = by0; y < by1; ++y) {
+            const double py = y + 0.5;
+            for (int x = bx0; x < bx1; ++x) {
+                const double px = x + 0.5;
+                const double l1 = ((px - p0.dx) * (p2.dy - p0.dy) - (p2.dx - p0.dx) * (py - p0.dy)) / det;
+                const double l2 = ((p1.dx - p0.dx) * (py - p0.dy) - (px - p0.dx) * (p1.dy - p0.dy)) / det;
+                const double l0 = 1.0 - l1 - l2;
+                if (l0 < eps || l1 < eps || l2 < eps) continue;
+                uv[std::size_t(y - r0) * std::size_t(width) + std::size_t(x - c0)] = {l0 * p0.sx + l1 * p1.sx + l2 * p2.sx, l0 * p0.sy + l1 * p1.sy + l2 * p2.sy};
+                any = true;
+            }
+        }
+    }
+    return any;
+}
+
+}  // namespace
+
+std::vector<std::array<double, 2>> triangle_places(const std::vector<Corner>& corners, const std::vector<std::array<std::size_t, 3>>& tris, int x0, int y0,
+                                                   int width, int height) {
+    std::vector<std::array<double, 2>> uv;
+    for (const Corner& c : corners) {
+        if (!std::isfinite(c.dx) || !std::isfinite(c.dy) || !std::isfinite(c.sx) || !std::isfinite(c.sy)) {
+            uv.assign(std::size_t(std::max(width, 0)) * std::size_t(std::max(height, 0)), {std::numeric_limits<double>::quiet_NaN(), 0.0});
+            return uv;
+        }
+    }
+    places_in(corners, tris, x0, y0, x0 + width, y0 + height, uv);
+    return uv;
+}
+
 Plane triangles(const Plane& src, const std::vector<Corner>& corners, const std::vector<std::array<std::size_t, 3>>& tris, int width, int height,
                 Interp interp, int x0, int y0) {
     Plane out = empty_like(src, width, height);
     if (src.width <= 0 || src.height <= 0 || width <= 0 || height <= 0) return out;
-    struct Vert {
-        double dx, dy, sx, sy;
-    };
-    std::vector<Vert> verts;
+    std::vector<Corner> verts;
     verts.reserve(corners.size());
     for (const Corner& c : corners) {
         if (!std::isfinite(c.dx) || !std::isfinite(c.dy) || !std::isfinite(c.sx) || !std::isfinite(c.sy)) return out;
-        verts.push_back(Vert{c.dx - x0, c.dy - y0, c.sx, c.sy});
+        verts.push_back(Corner{c.dx - x0, c.dy - y0, c.sx, c.sy});
     }
     const Source s(src);
     // (worked in bands of rows: each band's source positions, then sampled)
@@ -347,34 +397,7 @@ Plane triangles(const Plane& src, const std::vector<Corner>& corners, const std:
     std::vector<std::array<double, 2>> uv;
     for (int b0 = 0; b0 < height; b0 += kBand) {
         const int b1 = std::min(height, b0 + kBand);
-        uv.assign(std::size_t(width) * std::size_t(b1 - b0), {std::numeric_limits<double>::quiet_NaN(), 0.0});
-        bool any = false;
-        for (const auto& tri : tris) {
-            if (tri[0] >= verts.size() || tri[1] >= verts.size() || tri[2] >= verts.size()) continue;
-            const Vert& p0 = verts[tri[0]];
-            const Vert& p1 = verts[tri[1]];
-            const Vert& p2 = verts[tri[2]];
-            const double det = (p1.dx - p0.dx) * (p2.dy - p0.dy) - (p2.dx - p0.dx) * (p1.dy - p0.dy);
-            if (std::fabs(det) < 1e-12) continue;
-            const int bx0 = std::max(0, static_cast<int>(std::floor(std::min({p0.dx, p1.dx, p2.dx}) - 0.5)));
-            const int by0 = std::max(b0, static_cast<int>(std::floor(std::min({p0.dy, p1.dy, p2.dy}) - 0.5)));
-            const int bx1 = std::min(width, static_cast<int>(std::ceil(std::max({p0.dx, p1.dx, p2.dx}) + 0.5)));
-            const int by1 = std::min(b1, static_cast<int>(std::ceil(std::max({p0.dy, p1.dy, p2.dy}) + 0.5)));
-            const double eps = -1e-9;
-            for (int y = by0; y < by1; ++y) {
-                const double py = y + 0.5;
-                for (int x = bx0; x < bx1; ++x) {
-                    const double px = x + 0.5;
-                    const double l1 = ((px - p0.dx) * (p2.dy - p0.dy) - (p2.dx - p0.dx) * (py - p0.dy)) / det;
-                    const double l2 = ((p1.dx - p0.dx) * (py - p0.dy) - (px - p0.dx) * (p1.dy - p0.dy)) / det;
-                    const double l0 = 1.0 - l1 - l2;
-                    if (l0 < eps || l1 < eps || l2 < eps) continue;
-                    uv[std::size_t(y - b0) * std::size_t(width) + std::size_t(x)] = {l0 * p0.sx + l1 * p1.sx + l2 * p2.sx, l0 * p0.sy + l1 * p1.sy + l2 * p2.sy};
-                    any = true;
-                }
-            }
-        }
-        if (!any) continue;
+        if (!places_in(verts, tris, 0, b0, width, b1, uv)) continue;
         for (int y = b0; y < b1; ++y) {
             for (int x = 0; x < width; ++x) {
                 const auto& q = uv[std::size_t(y - b0) * std::size_t(width) + std::size_t(x)];

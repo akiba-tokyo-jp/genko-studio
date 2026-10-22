@@ -866,6 +866,11 @@ void content_aware_fill(core::OpContext& c) {
 
 }  // namespace
 
+image_ops::Pixels page_shown_over(core::OpContext& c, std::size_t at, const std::string& id, const Box& box) {
+    const Ready r = ready(c, at, id);
+    return shown_window(c.doc, at, id, Sample::All, r.grid, box, r.like);
+}
+
 void register_retouch_ops(core::OpRegistry& registry) {
     // the brushes' common keys: page, layer_id, points ([[x_mm, y_mm, pressure?]…]), width_mm, hardness, opacity, flow,
     // spacing (0..100 %, 1..1000 % of the diameter), blend, area?
