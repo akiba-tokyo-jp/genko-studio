@@ -87,10 +87,18 @@ int exact_bits(double largest, double terms) {
 }
 
 // Each row's prefix sums of a premultiplied window in whole numbers of 2^-bits (its channels interleaved), read past the
-// window's edge as its edge pixel (the window is cut to the grid: the grid's edge repeated).
+// window's edge as its edge pixel (the window is cut to the grid: the grid's edge repeated). The bits from the largest
+// sample (`largest`) and the most terms a sum holds (the kernel's count, a row of the window): a sum below 2^62. Samples
+// too large for it (HDR far past 1): each run summed as it is, in doubles in a fixed order (the same whatever window).
 class Prefix {
 public:
-    Prefix(const Window& src, const std::vector<float>& premultiplied, int bits) : rect_(src.rect), n_(src.ch) {
+    Prefix(const Window& src, const std::vector<float>& premultiplied, double largest, double count)
+        : rect_(src.rect), n_(src.ch) {
+        const int bits = exact_bits(largest, std::max(count, double(rect_.width()) + 1.0));
+        if (bits < 16) {
+            plain_ = premultiplied;
+            return;
+        }
         const double scale = std::ldexp(1.0, bits);
         unit_ = std::ldexp(1.0, -bits);
         const std::size_t w = std::size_t(rect_.width()), h = std::size_t(rect_.height());
@@ -112,6 +120,16 @@ public:
     void sum(const Spans& spans, int x, int y, double* acc) const {
         const std::size_t w = std::size_t(rect_.width());
         std::fill(acc, acc + n_, 0.0);
+        if (!plain_.empty()) {
+            for (const Spans::Run& run : spans.rows) {
+                const std::size_t yy = std::size_t(std::clamp(y + run.dy, rect_.y0, rect_.y1 - 1) - rect_.y0);
+                for (int xx = x + run.a; xx <= x + run.b; ++xx) {
+                    const float* px = plain_.data() + (yy * w + std::size_t(std::clamp(xx, rect_.x0, rect_.x1 - 1) - rect_.x0)) * n_;
+                    for (std::size_t c = 0; c < n_; ++c) acc[c] += px[c];
+                }
+            }
+            return;
+        }
         std::vector<std::int64_t>& total = scratch_;
         total.assign(n_, 0);
         for (const Spans::Run& run : spans.rows) {
@@ -136,6 +154,7 @@ private:
     std::size_t n_;
     double unit_ = 1;
     std::vector<std::int64_t> sums_, first_, last_;
+    std::vector<float> plain_;
     mutable std::vector<std::int64_t> scratch_;
 };
 
@@ -308,7 +327,7 @@ Kernels blur_shaped_kernels() {
         k.run = [radius](const Json& params, const Window& src, const Rect& out, const Ctx& ctx) {
             const Spans spans(radius(params, ctx), shape_inside(text(params, "shape", "circle")));
             const std::size_t n = src.ch;
-            const Prefix prefix(src, premultiplied(src), exact_bits(ctx.largest, spans.count));
+            const Prefix prefix(src, premultiplied(src), ctx.largest, spans.count);
             std::vector<float> res;
             res.reserve(out.area() * n);
             std::vector<double> acc(n);
@@ -362,7 +381,7 @@ Kernels blur_shaped_kernels() {
                     for (std::size_t c = 0; c < colours; ++c) p[i + c] = sub ? a - (a - p[i + c]) / kk : p[i + c] * kk;
                 }
             }
-            const Prefix prefix(src, p, exact_bits(ctx.largest * (1.0 + boost), levels.back().count));
+            const Prefix prefix(src, p, ctx.largest * (1.0 + boost), levels.back().count);
             const std::string depth = text(params, "depth_map", "none");
             const bool invert = flag(params, "invert");
             const float focal = static_cast<float>(std::clamp(number(params, "focal_distance", 0), 0.0, 255.0) / 255.0);

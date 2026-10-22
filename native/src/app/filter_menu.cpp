@@ -22,6 +22,9 @@
 #include <QTimer>
 #include <QtConcurrent>
 
+#include <QRandomGenerator>
+
+#include <algorithm>
 #include <atomic>
 #include <memory>
 #include <stop_token>
@@ -381,19 +384,26 @@ void MainWindow::filter_command(const FilterItem& item) {
     const std::string layer_id = layer->id, kind = item.kind;
     const Json index = page->index.json();
     const std::string op_name = smart ? "smart_filter_add" : item.op;
-    const auto op_of = [op_name, index, layer_id, kind, area](const Json& params) {
+    // (a kind with a seed — ノイズを加える, ぼかし（レンズ）'s noise —: a new one each time it is applied, as Photoshop's grains
+    // differ each time — 前回のフィルター too —; the window's preview and its かける the same one; the op holds it)
+    const bool python = item.python;
+    const core::AdjustKind* table = core::adjust_kind(kind);
+    const bool seeded = !python && table != nullptr &&
+                        std::any_of(table->params.begin(), table->params.end(), [](const core::AdjustParam& p) { return p.key == "seed"; });
+    const std::optional<std::uint32_t> seed = seeded ? std::optional<std::uint32_t>(QRandomGenerator::global()->generate()) : std::nullopt;
+    const auto op_of = [op_name, index, layer_id, kind, area, seed](const Json& params) {
         Json op{{"op", op_name}, {"page", index}, {"id", layer_id}, {"kind", kind}};
         op.update(params);
+        if (seed && !op.contains("seed")) op["seed"] = *seed;
         if (area) op["area"] = *area;
         return op;
     };
     // (heavy: its work on the layer's grid past what a moment takes — render::fx; Python's and the plugins' as before)
     const render::fx::Grid grid = render::fx::layer_grid(*page, *layer);
     const auto heavy = [grid, kind](const Json& params) {
-        return render::fx::work(kind, params, std::uint64_t(grid.width) * grid.height, grid.s) >= render::fx::kHeavyWork;
+        return render::fx::work(kind, params, std::uint64_t(grid.width) * grid.height, grid.s, grid.levels) >= render::fx::kHeavyWork;
     };
     const std::string op = item.op;
-    const bool python = item.python;
     const auto send = [this, op_of, heavy, name, kind, op, python, asked](const Json& params) {
         if (!still(asked)) return;
         if (!send_filter(Json::array({op_of(params)}), name, heavy(params))) return;  // (refused, stopped: not remembered)
@@ -430,6 +440,7 @@ void MainWindow::filter_command(const FilterItem& item) {
     } else if (const core::AdjustKind* found = core::adjust_kind(kind); found != nullptr && !found->params.empty()) {
         adjust_forms::FormContext context;
         context.page = page;
+        context.smart = smart;
         const auto& rgb = pen().rgb;
         context.pen = {static_cast<int>(rgb[0]), static_cast<int>(rgb[1]), static_cast<int>(rgb[2])};
         if (colours() != nullptr) context.sub = colours()->sub_rgb();

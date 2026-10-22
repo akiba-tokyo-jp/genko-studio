@@ -107,7 +107,8 @@ Edge edge_of(const std::string& undefined) {
 Kernels other_kernels() {
     Kernels all;
     {  // カスタム (filter.other.custom): Σ kernel · pixel / scale + offset / 255 of each colour (the alpha kept); the 5 × 5
-       // grid row by row, its centre the 13th, its taps a working pixel apart
+       // grid row by row, its centre the 13th, its taps a working pixel apart. A Lab page's a and b about their 0 (their
+       // middle + Σ kernel · (pixel − middle) / scale; the offset the lightness's alone: as RGB's colours about grey)
         Kernel k;
         k.kind = "other_custom";
         k.halo = [](const Json&, const Ctx& ctx) { return Halo::margin(static_cast<int>(std::ceil(2.0 * ctx.s)) + 2); };
@@ -133,26 +134,27 @@ Kernels other_kernels() {
             for (int y = out.y0; y < out.y1; ++y)
                 for (int x = out.x0; x < out.x1; ++x, i += n)
                     for (std::size_t c = 0; c + 1 < n; ++c) {
+                        const bool colour = ctx.space == Space::Lab && c > 0;
+                        const float middle = colour ? middle_of(ctx, c) : 0.0f;
                         float sum = 0;
-                        for (const Tap& t : taps) sum += between(src, static_cast<float>(x) + t.dx, static_cast<float>(y) + t.dy, c) * t.w;
-                        res[i + c] = sum / div + offset;
+                        for (const Tap& t : taps) sum += (between(src, static_cast<float>(x) + t.dx, static_cast<float>(y) + t.dy, c) - middle) * t.w;
+                        res[i + c] = colour ? middle + sum / div : sum / div + offset;
                     }
             return res;
         };
         k.cost = [](const Json&, const Ctx&) { return 4.0 * 25.0 * 2.0; };
         all.push_back(std::move(k));
     }
-    {  // ハイパス (filter.other.highPass): the difference from the Gaussian of the radius about a middle grey
+    {  // ハイパス (filter.other.highPass): the difference from the Gaussian of the radius about a middle grey (a Lab page's a
+       // and b about their 0)
         Kernel k;
         k.kind = "other_high_pass";
         k.halo = [](const Json& params, const Ctx& ctx) { return Halo::margin(gaussian_halo(ctx.px(number(params, "radius", 10)))); };
         k.run = [](const Json& params, const Window& src, const Rect& out, const Ctx& ctx) {
-            return with_blur(src, out, ctx, ctx.px(number(params, "radius", 10)), [](float o, float b) { return 0.5f + (o - b); });
+            return with_blur(src, out, ctx, ctx.px(number(params, "radius", 10)),
+                             [&ctx](float o, float b, std::size_t c) { return middle_of(ctx, c) + (o - b); });
         };
-        k.cost = [](const Json& params, const Ctx& ctx) {
-            const float s = ctx.px(number(params, "radius", 10));
-            return (s <= 4.0f ? 8.0 * (2.0 * std::ceil(3.0 * s) + 1.0) : 80.0) + 10.0;
-        };
+        k.cost = [](const Json& params, const Ctx& ctx) { return with_blur_cost(ctx.px(number(params, "radius", 10))); };
         all.push_back(std::move(k));
     }
     {  // HSB/HSL (filter.other.hsbHsl): the three colours read as RGB, HSB or HSL (入力モード) and written as one of them (行の

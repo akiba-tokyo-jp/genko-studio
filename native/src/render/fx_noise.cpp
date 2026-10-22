@@ -263,22 +263,24 @@ std::vector<float> reduce_noise(const Json& params, const Window& src, const Rec
 Kernels noise_kernels() {
     Kernels all;
     {  // ノイズを加える (filter.noise.addNoise): each colour of each pixel that shows ± amount/2 % (均等に分布), or a Gaussian of
-       // amount/4 % (ガウス分布); グレースケールノイズ: the same for every colour; the seed's
+       // amount/4 % (ガウス分布); グレースケールノイズ: the same for every colour (a Lab page's L alone: grey grains); the
+       // seed's
         Kernel k;
         k.kind = "noise_add";
         k.halo = [](const Json&, const Ctx&) { return Halo::margin(0); };
-        k.run = [](const Json& params, const Window& src, const Rect& out, const Ctx&) {
-            const std::size_t n = src.ch, cc = n - 1;
+        k.run = [](const Json& params, const Window& src, const Rect& out, const Ctx& ctx) {
+            const std::size_t n = src.ch;
             const float a = static_cast<float>(std::max(0.0, number(params, "amount", 12.5)) / 100.0 * 0.5);
             const bool gaussian = text(params, "distribution", "uniform") == "gaussian";
             const bool mono = flag(params, "monochromatic");
+            const std::size_t cc = n - 1, noisy = mono && ctx.space == Space::Lab ? std::min<std::size_t>(cc, 1) : cc;
             const auto seed = static_cast<std::uint32_t>(std::clamp(number(params, "seed", 0), 0.0, 4294967295.0));
             std::vector<float> res = src.crop(out);
             std::size_t i = 0;
             for (int y = out.y0; y < out.y1; ++y)
                 for (int x = out.x0; x < out.x1; ++x, i += n) {
                     if (!(res[i + cc] > 0.0f)) continue;
-                    for (std::size_t c = 0; c < cc; ++c) {
+                    for (std::size_t c = 0; c < noisy; ++c) {
                         const auto ch = static_cast<std::uint32_t>(mono ? 0 : c);
                         float v = 0;
                         if (!gaussian) {
@@ -297,8 +299,9 @@ Kernels noise_kernels() {
     }
     const auto radius = [](const Json& params, const Ctx& ctx) { return static_cast<int>(std::lround(std::max(0.0f, ctx.px(number(params, "radius", 1))))); };
     const auto rank_cost = [radius](const Json& params, const Ctx& ctx) {
+        // (as written below 3 pixels; the sliding histogram past it — on floats the window's values sorted first)
         const double r = radius(params, ctx);
-        return r < 3 ? 4.0 * 3.0 * (r * r * 3.2 + 1) : 4.0 * (4.0 * r + 2.0) + 40.0;
+        return r < 3 ? 4.0 * 3.0 * (r * r * 3.2 + 1) : 4.0 * (4.0 * r + 2.0) + 40.0 + (ctx.levels == 0 ? 4.0 * 100.0 : 0.0);
     };
     {  // ダスト＆スクラッチ (filter.noise.dustAndScratches): the median of the disc where a sample differs from it past the
        // threshold (levels)
@@ -326,6 +329,7 @@ Kernels noise_kernels() {
         k.kind = "noise_reduce";
         k.halo = [](const Json& params, const Ctx& ctx) { return Halo::margin(Denoise(params, ctx.s).reach() + 1); };
         k.run = [](const Json& params, const Window& src, const Rect& out, const Ctx& ctx) { return reduce_noise(params, src, out, ctx); };
+        k.work_bytes = 20 * sizeof(double);  // (its planes over the window: the lumas, chromas, moments and coefficients)
         k.cost = [](const Json& params, const Ctx& ctx) {
             const Denoise d(params, ctx.s);
             return 24.0 * (2.0 * d.rl + 1) + 3.0 * 24.0 * (2.0 * d.rc + 1) + 2.0 * (2.0 * d.sharp_reach + 1) + 40.0;

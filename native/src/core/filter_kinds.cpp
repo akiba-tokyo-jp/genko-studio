@@ -219,6 +219,7 @@ std::string_view to_string(FilterInks inks) {
     switch (inks) {
         case FilterInks::Plates: return "plates";
         case FilterInks::Lightness: return "lightness";
+        case FilterInks::LightnessAndColour: return "lightness_and_colour";
         case FilterInks::Meaning: return "meaning";
         case FilterInks::Halftone: return "halftone";
     }
@@ -295,9 +296,10 @@ std::vector<FilterKind> other_kinds() {
     std::vector<FilterKind> out;
     std::vector<double> identity(25, 0.0);
     identity[12] = 1;
-    out.push_back(kind(info("other_custom", "filter.other.custom", "カスタム", "その他", FilterInks::Lightness),
+    out.push_back(kind(info("other_custom", "filter.other.custom", "カスタム", "その他", FilterInks::LightnessAndColour),
                        {numbers("kernel", identity, -999, 999), number("scale", 1, 1, 9999), number("offset", 0, -9999, 9999)}));
-    out.push_back(kind(info("other_high_pass", "filter.other.highPass", "ハイパス", "その他", FilterInks::Lightness), {number("radius", 10, 0.1, 1000)}));
+    out.push_back(kind(info("other_high_pass", "filter.other.highPass", "ハイパス", "その他", FilterInks::LightnessAndColour),
+                       {number("radius", 10, 0.1, 1000)}));
     out.push_back(kind(info("other_hsb_hsl", "filter.other.hsbHsl", "HSB/HSL", "その他", FilterInks::Meaning),
                        {choice("input_mode", {"rgb", "hsb", "hsl"}), choice("row_order", {"hsb", "hsl", "rgb"})}));
     out.push_back(kind(info("other_maximum", "filter.other.maximum", "明るさの最大値", "その他", FilterInks::Lightness),

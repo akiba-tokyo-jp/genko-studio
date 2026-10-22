@@ -7,9 +7,11 @@
 // the colours it means), the same look at 200 and 600 dpi, the imaging budget refusing a window it cannot hold, a run
 // stopped and its progress, a heavy filter told, a preview's copy at the screen's resolution, and PC4's new ops' frames.
 // D1 (ぼかし・シャープ・ノイズ・その他・ビデオ): PhotoCraft's tests of them (tests.rs 182-335, 379; tests_ext.rs 476-563,
-// 589-637), the fast algorithms (render/fx_rank) against the ones as written (8 and 16 bits the same values, floats within
-// a bound), 平均 the mean colour inside the selection, the presets at PhotoCraft's settings, a page of inks worked by the
-// lightness and the same look at 200 and 600 dpi.
+// 589-637), the fast algorithms (render/fx_rank) against the ones as written (the same values; floats, a shape at the
+// surface blur's threshold's very edge and pages of inks too), 平均 the mean colour inside the selection, the presets at
+// PhotoCraft's settings, a page of inks worked by the lightness, a Lab page's ハイパス・カスタム about their middle and its
+// grey grains grey, the sharpening's exact Gaussian, the work a kind is on floats, and the same look at 200 and 600 dpi.
+// The review of D1: a window past the budget worked in smaller tiles, a smart filter past it even then said.
 
 #include <QtTest/QtTest>
 
@@ -35,6 +37,7 @@
 #include "render/fx_rank.hpp"
 #include "render/image.hpp"
 #include "render/ink.hpp"
+#include "render/not_yet_ported.hpp"
 #include "render/ops_registry.hpp"
 #include "render/page.hpp"
 #include "render/png.hpp"
@@ -131,10 +134,11 @@ const core::Layer& layer_of(const core::Document& doc, const char* id) {
     throw core::Error("value", std::string("no layer ") + id);
 }
 
-// A page of inks (`mode` cmyk, lab, gray or multichannel, 16 bits) with a paint layer "pic" of side × side pixels over the page
-// (1 inch): `ink(x, y, c)` its values.
-core::Document ink_page(const std::string& mode, const std::function<double(std::uint32_t, std::uint32_t, unsigned)>& ink, std::uint32_t side = 64) {
-    Json set{{"op", "set_color_mode"}, {"mode", mode}, {"depth", mode == "multichannel" ? 8 : 16}};
+// A page of inks (`mode` cmyk, lab, gray or multichannel, 16 bits — multichannel 8 — or `depth`) with a paint layer "pic" of
+// side × side pixels over the page (1 inch): `ink(x, y, c)` its values.
+core::Document ink_page(const std::string& mode, const std::function<double(std::uint32_t, std::uint32_t, unsigned)>& ink, std::uint32_t side = 64,
+                        int depth = 0) {
+    Json set{{"op", "set_color_mode"}, {"mode", mode}, {"depth", depth != 0 ? depth : mode == "multichannel" ? 8 : 16}};
     if (mode == "cmyk") set["profile"] = "coated-cmyk";
     auto doc = core::CommandBus(render::ops_registry())
                    .apply(blank(), Json::array({set, Json{{"op", "add_layer"}, {"page", 1}, {"kind", "paint"}, {"id", "pic"}}}),
@@ -585,17 +589,77 @@ private slots:
 
     // --- the budget, stopping, progress, heaviness, the preview's copy --------------------------------------------------
 
+    // A window past the imaging budget: at the kind's own tile, smaller tiles (on fewer threads if need be) — the same
+    // bytes —; a tile asked for, or a window the whole grid even in the smallest tiles, refused as too large (review P2-2).
     void aWindowPastTheBudgetIsRefused() {
         const std::string raster = precise(512, 512, pattern(512, 512), true);
+        const std::string unbounded = run_precise(raster, "blur_gaussian", Json{{"radius", 40}});
         const render::ImageAllocationBudget budget{16ULL * 1024 * 1024};
-        try {
-            (void)run_precise(raster, "blur_gaussian", Json{{"radius", 40}});
-            QFAIL("a window past the budget was had");
-        } catch (const core::OpError& error) {
-            QVERIFY2(std::string(error.what()).find("too large to work on at once") != std::string::npos, error.what());
-        }
-        // a small one fits (on fewer threads if need be)
+        const auto refusal_of = [&](const Json& params, render::fx::Tiling tiling) {
+            try {
+                (void)run_precise(raster, "blur_gaussian", params, nullptr, tiling);
+            } catch (const core::OpError& error) {
+                return std::string(error.what());
+            }
+            return std::string();
+        };
+        QVERIFY(run_precise(raster, "blur_gaussian", Json{{"radius", 40}}) == unbounded);
+        QVERIFY(refusal_of(Json{{"radius", 40}}, {512, 0}).find("too large to work on at once") != std::string::npos);
+        QVERIFY(refusal_of(Json{{"radius", 200}}, {}).find("too large to work on at once") != std::string::npos);
+        // a small one fits
         QVERIFY(run_precise(raster, "blur_gaussian", Json{{"radius", 1}}) != raster);
+    }
+
+    // A smart filter on a page drawn at 600 dpi (its smart object's picture the page's grid): one whose window at its own
+    // tile is past the budget drawn in smaller tiles; one past it even then — its window the whole grid — not left out
+    // silently: a render that does not leave things out stops with smart:filters, one that does lists it (review P2-2).
+    void aSmartFilterPastTheBudgetIsSaid() {
+        std::string bytes;
+        for (int y = 0; y < 120; ++y)
+            for (int x = 0; x < 120; ++x)
+                for (const int v : {(x * 7) % 256, (y * 5) % 256, (x * y) % 256, 255}) bytes.push_back(static_cast<char>(v));
+        const std::string png = render::write_png(render::Image::frombytes("RGBA", render::Size{120, 120}, bytes));
+        auto doc = blank(60);
+        doc = core::CommandBus(render::ops_registry())
+                  .apply(doc, Json::array({Json{{"op", "add_layer"}, {"page", 1}, {"kind", "paint"}, {"id", "p1"}},
+                                           Json{{"op", "put_raster"}, {"page", 1}, {"id", "p1"}, {"png_base64", core::b64encode(png)}},
+                                           Json{{"op", "smart_convert"}, {"page", 1}, {"ids", Json::array({"p1"})}, {"new_id", "so"}}}),
+                         core::Actor("human:test"))
+                  .doc;
+        const auto with = [&](double radius) {
+            return core::CommandBus(render::ops_registry())
+                .apply(doc, Json::array({Json{{"op", "smart_filter_add"}, {"page", 1}, {"id", "so"}, {"kind", "other_maximum"}, {"radius", radius}}}),
+                       core::Actor("human:test"))
+                .doc;
+        };
+        const auto draw = [](const core::Document& d, bool skip) {
+            render::RenderOptions options;
+            options.mode = "print";
+            options.skip_unported = skip;
+            return render::render_page(d.page(0), 600, options, &d);
+        };
+        std::uint64_t plain_peak = 0;
+        {
+            const render::ImageAllocationBudget measure{8ULL * 1024 * 1024 * 1024};
+            (void)draw(doc, false);
+            plain_peak = measure.peak();
+        }
+        // (the page 1417 pixels square at 600 dpi: the whole grid's window about 160 MB, a window of 128-pixel tiles of a
+        // reach of 200 about 22 MB, of its own tile 57 MB)
+        const auto past = with(500), within = with(66);
+        const render::ImageAllocationBudget budget{plain_peak + 32ULL * 1024 * 1024};
+        bool said = false;
+        try {
+            (void)draw(past, false);
+        } catch (const render::NotYetPorted& e) {
+            said = e.element() == "smart:filters";
+        }
+        QVERIFY(said);
+        const render::RenderResult left = draw(past, true);
+        QVERIFY(std::find(left.omitted.begin(), left.omitted.end(), "smart:filters") != left.omitted.end());
+        const render::RenderResult drawn = draw(within, false);
+        QVERIFY(drawn.omitted.empty());
+        QVERIFY(drawn.image.tobytes() != draw(doc, false).image.tobytes());
     }
 
     void aRunStopsAndSaysHowFarItIs() {
@@ -629,6 +693,27 @@ private slots:
         const auto grid = render::fx::layer_grid(doc.page(0), layer_of(doc, "paint"));
         QCOMPARE(grid.width, 600u);
         QVERIFY(std::fabs(grid.s - 3.0) < 1e-9);
+        // the samples' grid: 65535ths, floats, a page of inks' depth, an 8-bit layer's 255ths (review P2-1)
+        QCOMPARE(grid.levels, 65535u);
+        const auto floats = precise_page(60, 60, pattern(60, 60), true);
+        QCOMPARE(render::fx::layer_grid(floats.page(0), layer_of(floats, "paint")).levels, 0u);
+        const auto grey8 = ink_page("gray", [](std::uint32_t x, std::uint32_t, unsigned) { return x / 64.0; }, 64, 8);
+        QCOMPARE(render::fx::layer_grid(grey8.page(0), layer_of(grey8, "pic")).levels, 255u);
+        auto eight = blank();
+        core::Layer paint;
+        paint.id = "paint";
+        paint.kind = core::LayerKind::Raster;
+        eight.edit_page(0).layers.push_back(paint);
+        QCOMPARE(render::fx::layer_grid(eight.page(0), layer_of(eight, "paint")).levels, 255u);
+        // a rank filter and the surface blur reckoned on floats by their work there (the values sorted, more bins)
+        for (const auto& [kind, params] : {std::pair{"noise_median", Json{{"radius", 50}}}, std::pair{"noise_dust_and_scratches", Json{{"radius", 50}}},
+                                           std::pair{"blur_surface", Json{{"radius", 30}}}})
+            QVERIFY2(render::fx::work(kind, params, 700000, 0.36, 0) > render::fx::work(kind, params, 700000, 0.36, 65535), kind);
+        // the kinds of one pixel on B4 at 600 dpi: heavy (the engine's reading and writing of each pixel counted)
+        for (const char* kind : {"blur_average", "noise_add", "video_de_interlace", "other_offset"})
+            QVERIFY2(render::fx::work(kind, Json::object(), 6071ULL * 8598, 3) >= render::fx::kHeavyWork, kind);
+        // the sharpening's exact Gaussian costs its radius
+        QVERIFY(render::fx::work("sharpen_unsharp_mask", Json{{"radius", 100}}, 1000, 1) > 5 * render::fx::work("sharpen_unsharp_mask", Json{{"radius", 10}}, 1000, 1));
     }
 
     void aPreviewsCopyIsAtTheScreensResolution() {
@@ -1004,6 +1089,10 @@ private slots:
                 const std::string fast16 = on_precise(by(Method::Fast), false), naive16 = on_precise(by(Method::Naive), false);
                 QVERIFY2(fast16 == naive16, qPrintable(QStringLiteral("median 16 bits r %1 %2: %3").arg(r).arg(bool(threshold)).arg(differ(fast16, naive16, true))));
                 QVERIFY(fast16 == on_precise(by(Method::Fast), false, {11, 2}));
+                // (floats: the window's own values ranked — the same values)
+                const std::string fast32 = on_precise(by(Method::Fast), true), naive32 = on_precise(by(Method::Naive), true);
+                QVERIFY2(fast32 == naive32, qPrintable(QStringLiteral("median f32 r %1 %2: %3").arg(r).arg(bool(threshold)).arg(differ(fast32, naive32, true))));
+                QVERIFY(fast32 == on_precise(by(Method::Fast), true, {11, 2}));
             }
             for (const double radius : {double(r), r + 0.5}) {
                 for (const bool square : {true, false})
@@ -1031,10 +1120,166 @@ private slots:
                     double worst = 0;
                     for (std::uint32_t i = 0; i < w * h; ++i)
                         for (unsigned c = 0; c < 4; ++c) worst = std::max(worst, std::fabs(pixel(a, i % w, i / w)[c] - pixel(b, i % w, i / w)[c]));
-                    QVERIFY2(worst <= 0.5 / 255.0, qPrintable(QStringLiteral("surface %1 r %2 t %3: %4").arg(f32 ? "f32" : "u16").arg(r).arg(t).arg(worst)));
+                    // (each sample weighed as written: 16 bits the same, floats within their last bits)
+                    if (!f32) QVERIFY2(a == b, qPrintable(QStringLiteral("surface u16 r %1 t %2: %3").arg(r).arg(t).arg(differ(a, b, true))));
+                    QVERIFY2(worst <= 1e-6, qPrintable(QStringLiteral("surface %1 r %2 t %3: %4").arg(f32 ? "f32" : "u16").arg(r).arg(t).arg(worst)));
                     QVERIFY(a == on_precise(by(Method::Fast), f32, {9, 2}));
                 }
             }
+        }
+    }
+
+    // The fast algorithms where the review found them unchecked: the surface blur on a shape at its threshold's very edge
+    // (points ringed by a step of exactly the threshold, 8 bits raised to 16 and to floats: P3-1) and pages of inks (CMYK
+    // and Lab at 16 bits, grey at 8: P3-2) — the same values as written.
+    void fastAlgorithmsOnTheEdgeAndOnInks() {
+        using render::fx::Method;
+        const auto with = [](std::function<std::vector<float>(const render::fx::Window&, const Rect&, const render::fx::Ctx&)> work, int reach) {
+            render::fx::Kernel k;
+            k.kind = "test_rank";
+            k.halo = [reach](const Json&, const render::fx::Ctx&) { return render::fx::Halo::margin(reach); };
+            k.run = [work](const Json&, const render::fx::Window& src, const Rect& out, const render::fx::Ctx& ctx) { return work(src, out, ctx); };
+            return k;
+        };
+        const auto surface_by = [&](int r, float t, Method m) {
+            return with([r, t, m](const auto& src, const auto& out, const auto& ctx) { return render::fx::surface(src, out, ctx, r, t, m); }, r + 1);
+        };
+        // (levels 15 with points of 10 and 20 and a block of 30: steps of 5 levels, ブラー（表面）'s threshold 2 × 2.5)
+        const std::uint32_t w = 61, h = 47;
+        std::string bytes;
+        std::vector<std::array<float, 4>> px;
+        for (std::uint32_t y = 0; y < h; ++y)
+            for (std::uint32_t x = 0; x < w; ++x) {
+                const int level = x % 7 == 3 && y % 5 == 2 ? ((x + y) % 2 != 0 ? 10 : 20) : x > 40 && y > 30 ? 30 : 15;
+                for (const int v : {level, 25 - level / 2, level, 255}) bytes.push_back(static_cast<char>(v));
+                px.push_back({level / 255.0f, (25 - level / 2) / 255.0f, level / 255.0f, 1.0f});
+            }
+        const render::Image picture = render::Image::frombytes("RGBA", render::Size{int(w), int(h)}, bytes);
+        for (const int r : {9, 12}) {
+            for (const float t : {static_cast<float>(2 / 255.0 * 2.5), static_cast<float>(1 / 255.0 * 2.5), static_cast<float>(4 / 255.0 * 2.5)}) {
+                const auto eight = [&](Method m) {
+                    const auto surface = render::fx::eight_surface(picture);
+                    render::fx::apply(*surface, surface_by(r, t, m), Json::object(), core::FilterInks::Plates, Rect{0, 0, int(w), int(h)}, nullptr, 1);
+                    return render::fx::take_image(*surface).tobytes();
+                };
+                QVERIFY2(eight(Method::Fast) == eight(Method::Naive), qPrintable(QStringLiteral("8 bits r %1 t %2").arg(r).arg(t)));
+                for (const bool f32 : {false, true}) {
+                    const std::string raster = precise(w, h, px, f32);
+                    const auto run = [&](Method m) {
+                        const auto surface = render::fx::precise_surface(raster);
+                        render::fx::apply(*surface, surface_by(r, t, m), Json::object(), core::FilterInks::Plates, Rect{0, 0, int(w), int(h)}, nullptr, 1);
+                        return render::fx::take_bytes(*surface);
+                    };
+                    const std::string a = run(Method::Fast), b = run(Method::Naive);
+                    double worst = 0;
+                    for (std::uint32_t i = 0; i < w * h; ++i)
+                        for (unsigned c = 0; c < 4; ++c) worst = std::max(worst, std::fabs(pixel(a, i % w, i / w)[c] - pixel(b, i % w, i / w)[c]));
+                    if (!f32) QVERIFY2(a == b, qPrintable(QStringLiteral("u16 r %1 t %2: %3").arg(r).arg(t).arg(worst)));
+                    QVERIFY2(worst <= 1e-6, qPrintable(QStringLiteral("%1 r %2 t %3: %4").arg(f32 ? "f32" : "u16").arg(r).arg(t).arg(worst)));
+                }
+            }
+        }
+        // pages of inks: the median (and dust), the extremes and the surface blur, fast and as written
+        for (const auto& [mode, depth] : {std::pair{"cmyk", 16}, std::pair{"lab", 16}, std::pair{"gray", 8}}) {
+            const auto doc = ink_page(mode, [](std::uint32_t x, std::uint32_t y, unsigned c) { return ((x * 37 + y * 11 + c * 23) % 97) / 96.0; }, 48, depth);
+            const core::InkPixels inks = core::decode_ink_raster(*layer_of(doc, "pic").ink_raster);
+            const core::PageColor& color = *doc.page(0).color;
+            const auto on = [&](const render::fx::Kernel& k, core::FilterInks way) {
+                auto surface = render::fx::ink_surface(inks, color);
+                render::fx::apply(*surface, k, Json::object(), way, Rect{0, 0, 48, 48}, nullptr, 1);
+                return render::fx::take_bytes(*surface);
+            };
+            const auto median_by = [&](std::optional<float> threshold, Method m) {
+                return with([threshold, m](const auto& src, const auto& out, const auto& ctx) { return render::fx::median(src, out, ctx, 5, threshold, m); }, 6);
+            };
+            const auto extreme_by = [&](Method m) {
+                return with([m](const auto& src, const auto& out, const auto&) { return render::fx::extreme(src, out, 3.5, false, true, m); }, 5);
+            };
+            for (const std::optional<float> threshold : {std::optional<float>(), std::optional<float>(10.0f / 255.0f)})
+                QVERIFY2(on(median_by(threshold, Method::Fast), core::FilterInks::Plates) == on(median_by(threshold, Method::Naive), core::FilterInks::Plates), mode);
+            QVERIFY2(on(extreme_by(Method::Fast), core::FilterInks::Lightness) == on(extreme_by(Method::Naive), core::FilterInks::Lightness), mode);
+            QVERIFY2(on(surface_by(10, 0.1f, Method::Fast), core::FilterInks::Plates) == on(surface_by(10, 0.1f, Method::Naive), core::FilterInks::Plates), mode);
+        }
+    }
+
+    // A Lab page: ハイパス and カスタム about their middle — L at its middle grey, a and b at their 0 (as RGB's colours about
+    // grey) —, グレースケールノイズ on L alone (grey grains: a and b as they were) (review P3-9).
+    void aLabPageAboutItsMiddle() {
+        const double neutral = 128.0 / 255.0;
+        const auto lab = ink_page("lab", [](std::uint32_t, std::uint32_t, unsigned c) { return c == 0 ? 0.7 : c == 1 ? 0.3 : 0.8; });
+        const auto values = [](const core::Document& d) { return core::decode_ink_raster(*layer_of(d, "pic").ink_raster); };
+        const core::InkPixels high = values(run(lab, Json{{"op", "filter_raster"}, {"page", 1}, {"id", "pic"}, {"kind", "other_high_pass"}, {"radius", 4}}).doc);
+        QVERIFY(std::fabs(high.value(32 * 64 + 32, 0) - 0.5) < 1e-4);
+        QVERIFY(std::fabs(high.value(32 * 64 + 32, 1) - neutral) < 1e-4);
+        QVERIFY(std::fabs(high.value(32 * 64 + 32, 2) - neutral) < 1e-4);
+        // カスタム: a kernel of the difference from the right neighbour (its sum 0) and an offset: L the offset, a and b their 0;
+        // the identity: as it was
+        Json edge = Json::array(), same = Json::array();
+        for (int i = 0; i < 25; ++i) {
+            edge.push_back(i == 12 ? 1 : i == 13 ? -1 : 0);
+            same.push_back(i == 12 ? 1 : 0);
+        }
+        const core::InkPixels custom = values(
+            run(lab, Json{{"op", "filter_raster"}, {"page", 1}, {"id", "pic"}, {"kind", "other_custom"}, {"kernel", edge}, {"scale", 1}, {"offset", 128}}).doc);
+        QVERIFY(std::fabs(custom.value(32 * 64 + 32, 0) - neutral) < 1e-4);
+        QVERIFY(std::fabs(custom.value(32 * 64 + 32, 1) - neutral) < 1e-4);
+        QVERIFY(std::fabs(custom.value(32 * 64 + 32, 2) - neutral) < 1e-4);
+        const core::InkPixels kept = values(run(lab, Json{{"op", "filter_raster"}, {"page", 1}, {"id", "pic"}, {"kind", "other_custom"}, {"kernel", same}}).doc);
+        const core::InkPixels was = values(lab);
+        for (std::size_t i = 0; i < was.pixel_count(); ++i)
+            for (unsigned c = 0; c < 3; ++c) QVERIFY(std::fabs(kept.value(i, c) - was.value(i, c)) <= 1.0 / 65535.0);
+        // グレースケールノイズ: L alone; colour noise: a and b too
+        const core::InkPixels grey = values(
+            run(lab, Json{{"op", "filter_raster"}, {"page", 1}, {"id", "pic"}, {"kind", "noise_add"}, {"amount", 25}, {"monochromatic", true}, {"seed", 3}}).doc);
+        const core::InkPixels colour = values(run(lab, Json{{"op", "filter_raster"}, {"page", 1}, {"id", "pic"}, {"kind", "noise_add"}, {"amount", 25}, {"seed", 3}}).doc);
+        bool lightness_moved = false, colour_moved = false;
+        for (std::size_t i = 0; i < was.pixel_count(); ++i) {
+            QCOMPARE(grey.value(i, 1), was.value(i, 1));
+            QCOMPARE(grey.value(i, 2), was.value(i, 2));
+            lightness_moved = lightness_moved || grey.value(i, 0) != was.value(i, 0);
+            colour_moved = colour_moved || colour.value(i, 1) != was.value(i, 1);
+        }
+        QVERIFY(lightness_moved && colour_moved);
+        // (an RGB page's ハイパス: grey as before)
+        const auto p = pixel(run_precise(precise(40, 30, flat(40, 30, {0.9f, 0.1f, 0.4f, 1.0f}), true), "other_high_pass", Json{{"radius", 4}}), 20, 15);
+        QVERIFY(std::fabs(p[0] - 0.5) < 1e-5 && std::fabs(p[2] - 0.5) < 1e-5);
+    }
+
+    // アンシャープマスク・ハイパス blur by the exact Gaussian at every radius (upstream's with_blur: no box passes past 4, whose
+    // difference × the amount would show — review P3-6): ハイパス of a step against the Gaussian worked out here.
+    void theSharpeningsGaussianIsExact() {
+        const std::uint32_t w = 96, h = 6;
+        std::vector<std::array<float, 4>> px;
+        for (std::uint32_t y = 0; y < h; ++y)
+            for (std::uint32_t x = 0; x < w; ++x) px.push_back(x < 48 ? std::array<float, 4>{0.2f, 0.2f, 0.2f, 1.0f} : std::array<float, 4>{0.8f, 0.8f, 0.8f, 1.0f});
+        const double sigma = 6;
+        const std::string high = run_precise(precise(w, h, px, true), "other_high_pass", Json{{"radius", sigma}});
+        const int reach = static_cast<int>(std::ceil(3 * sigma));
+        double total = 0;
+        for (int i = -reach; i <= reach; ++i) total += std::exp(-i * i / (2 * sigma * sigma));
+        double worst = 0;
+        for (int x = 0; x < int(w); ++x) {
+            double blurred = 0;
+            for (int i = -reach; i <= reach; ++i) blurred += std::exp(-i * i / (2 * sigma * sigma)) / total * (std::clamp(x + i, 0, int(w) - 1) < 48 ? 0.2 : 0.8);
+            const double o = x < 48 ? 0.2 : 0.8;
+            worst = std::max(worst, std::fabs(pixel(high, std::uint32_t(x), 3)[0] - (0.5 + o - blurred)));
+        }
+        QVERIFY2(worst < 2e-5, qPrintable(QString::number(worst)));
+    }
+
+    // ぼかし（シェイプ）・ぼかし（レンズ） on HDR samples too large for their whole-number sums (1e18: past 2^62 in a row's
+    // prefix sums): summed as they are instead — a flat area stays flat, the same whatever the tiling (review P3-3).
+    void shapedBlursOfHugeSamples() {
+        std::vector<std::array<float, 4>> px;
+        for (std::uint32_t y = 0; y < 30; ++y)
+            for (std::uint32_t x = 0; x < 40; ++x) px.push_back(x < 20 ? std::array<float, 4>{1e18f, 2e18f, 1e18f, 1.0f} : std::array<float, 4>{2e18f, 1e18f, 2e18f, 1.0f});
+        const std::string raster = precise(40, 30, px, true);
+        for (const auto& [kind, params] : {std::pair{"blur_shape", Json{{"radius", 5}, {"shape", "circle"}}}, std::pair{"blur_lens", Json{{"radius", 4}}}}) {
+            const std::string a = run_precise(raster, kind, params, nullptr, {256, 1});
+            QVERIFY2(a == run_precise(raster, kind, params, nullptr, {7, 3}), kind);
+            const auto inside = pixel(a, 5, 15), across = pixel(a, 20, 15);
+            QVERIFY2(std::fabs(inside[0] / 1e18 - 1.0) < 1e-5 && std::fabs(inside[1] / 2e18 - 1.0) < 1e-5, kind);
+            QVERIFY2(across[0] > 1.05e18 && across[0] < 1.95e18, kind);  // (blurred across the edge)
         }
     }
 

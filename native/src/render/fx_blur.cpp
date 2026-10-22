@@ -391,9 +391,13 @@ Kernels blur_kernels() {
             return surface(src, out, ctx, radius(params, ctx), limit(params));
         };
         k.cost = [radius](const Json& params, const Ctx& ctx) {
+            // (as written up to 8 pixels; the sliding bins past it — on floats a bin each value of the window's: its values
+            // sorted first, and more bins to look through)
             const double r = radius(params, ctx);
-            return r <= 8 ? 3.0 * (2 * r + 1) * (2 * r + 1) + 4 : 16.0 * (2 * r + 1) + 600;
+            if (r <= 8) return 3.0 * (2 * r + 1) * (2 * r + 1) + 4;
+            return 16.0 * (2 * r + 1) + 1200 + (ctx.levels == 0 ? 9.0 * (256 + 2 * r) + 160 : 0.0);
         };
+        k.work_bytes = 80;  // (a window's pixel: its samples as whole units, their bins, the values held)
         all.push_back(std::move(k));
     }
     for (Kernel& shaped : blur_shaped_kernels()) all.push_back(std::move(shaped));

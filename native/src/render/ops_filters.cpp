@@ -33,11 +33,13 @@ thread_local const core::Layer* g_layer = nullptr;  // (FilterLayer)
 // The plane a kind reads beside the layer over a grid of w × h (ぼかし（レンズ）'s "depth_map": "layer_mask": the layer's
 // mask as it shows over the page — its density and feather laid on —, each 0..1); none when it reads none or the layer
 // filtered has no mask (then no depth: as "none").
-std::optional<std::vector<float>> plane_of(const core::Page& page, const Json& params, std::uint32_t w, std::uint32_t h) {
+// (the plane held in the imaging budget, by `held`, while the caller keeps it)
+std::optional<std::vector<float>> plane_of(const core::Page& page, const Json& params, std::uint32_t w, std::uint32_t h,
+                                           std::optional<image_ops::Held>& held) {
     const Json* depth = core::get(params, "depth_map");
     if (depth == nullptr || *depth != Json("layer_mask") || g_layer == nullptr || !g_layer->mask || !g_layer->mask->png || g_layer->mask->png->empty())
         return std::nullopt;
-    const image_ops::Held held(std::uint64_t(w) * h * (sizeof(float) + 1));
+    held.emplace(std::uint64_t(w) * h * (sizeof(float) + 1));
     const Image decoded = read_png(*g_layer->mask->png).convert("L");
     const Box whole{0, 0, static_cast<int>(w), static_cast<int>(h)};
     const std::string bytes =
@@ -79,7 +81,8 @@ void run(fx::Surface& surface, const fx::Kernel& kernel, core::FilterInks inks, 
     const std::uint32_t w = surface.width(), h = surface.height();
     const fx::Rect grid{0, 0, int(w), int(h)};
     const double s = image_ops::grid_scale(page, w, h);
-    const std::optional<std::vector<float>> plane = plane_of(page, params, w, h);
+    std::optional<image_ops::Held> plane_held;
+    const std::optional<std::vector<float>> plane = plane_of(page, params, w, h, plane_held);
     fx::Reads reads;
     reads.plane = plane ? &*plane : nullptr;
     if (area == nullptr) {

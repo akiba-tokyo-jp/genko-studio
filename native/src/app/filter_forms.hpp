@@ -32,6 +32,9 @@ struct FilterForm {
     // A group's own fields after the table's (lists, a grid, a curve, a picture to click…).
     std::function<void(adjust_forms::Form& form, const adjust_forms::FormContext& context)> more;
     QString note;  // (under the fields)
+    // A smart filter's window (FormContext::smart): a choice's values not offered there, and what it says of them.
+    std::map<std::string, std::vector<core::Json>> not_smart;
+    QString smart_note;
 };
 std::vector<FilterForm> blur_forms();          // D0: ぼかし（ガウス）・ぼかし（ボックス）; D1: the rest of ぼかし
 std::vector<FilterForm> sharpen_forms();       // D1: app/filter_forms_basic.cpp

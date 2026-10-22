@@ -34,6 +34,9 @@ enum class FilterInks {
     Plates,     // on each plate's canvas value as it is, alpha-weighted (blurs, sharpening, noise, distortions, cells…)
     Lightness,  // on the lightness: CMYK and multichannel plates as 1 − ink, back after; a Lab page's L alone (its a and b as
                 // they were); grey as it is (maximum, emboss, edges…)
+    LightnessAndColour,  // (D1) CMYK and multichannel plates as 1 − ink, back after; a Lab page's L, a and b each (the kernel
+                         // told it is Lab: a and b about their 0, as RGB's colours about their grey); grey as it is — a kernel
+                         // whose result is about a middle (ハイパス, カスタム)
     Meaning,    // on the colours the inks mean, back by the page's rules (the gallery, HSB/HSL, Camera Raw…)
     Halftone,   // its own screen on each plate (Color Halftone)
 };

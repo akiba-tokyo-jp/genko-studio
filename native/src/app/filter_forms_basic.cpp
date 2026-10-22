@@ -21,6 +21,16 @@ namespace {
 // (lengths are the working 200 dpi's pixels: design 2.2, 9 章)
 const QString kLengths = QStringLiteral("長さは 200 dpi の画素で数えます（600 dpi のページでは 3 倍の画素に掛かり、紙の上の大きさは同じです）。");
 
+// (review P2-2: a page-wide layer at 600 dpi — B4's 6071 × 8598 — holds a window of the imaging budget only so far; the
+// lengths past it are refused as too large, SPEC.md COLOR-08)
+QString large(const QString& what, int rgb, int cmyk) {
+    return kLengths + QStringLiteral("\n600 dpi の B4 ほどのページいっぱいのレイヤーでは、%1が約 %2（CMYK は約 %3）を超えると大きすぎて掛けられません"
+                                     "（原稿は変わりません。スマートフィルターは印刷・書き出しでそう知らせます）。")
+                          .arg(what)
+                          .arg(rgb)
+                          .arg(cmyk);
+}
+
 // カスタム…'s kernel: 5 × 5 whole numbers −999..999, row by row (its centre the 13th); empty boxes are 0.
 void kernel_grid(adjust_forms::Form& form, const adjust_forms::FormContext&) {
     auto* grid = new QWidget;
@@ -66,7 +76,7 @@ std::vector<FilterForm> sharpen_forms() {
         f.kind = "sharpen_unsharp_mask";
         f.labels = {{"amount", QStringLiteral("量（%）")}, {"radius", QStringLiteral("半径（px）")}, {"threshold", QStringLiteral("しきい値（レベル）")}};
         f.decimals = {{"amount", 0}, {"radius", 1}, {"threshold", 0}};
-        f.note = kLengths;
+        f.note = large(QStringLiteral("半径"), 280, 250);
         out.push_back(std::move(f));
     }
     {  // スマートシャープ… (量, 半径 0.1–64 pixel, ノイズを軽減 %)
@@ -146,7 +156,7 @@ std::vector<FilterForm> other_forms() {
         f.kind = "other_high_pass";
         f.labels = {{"radius", QStringLiteral("半径（px）")}};
         f.decimals = {{"radius", 1}};
-        f.note = kLengths;
+        f.note = large(QStringLiteral("半径"), 280, 250);
         out.push_back(std::move(f));
     }
     for (const char* kind : {"other_minimum", "other_maximum"}) {  // 明るさの最小値…・最大値… (半径, 保持: 直角度・真円率)

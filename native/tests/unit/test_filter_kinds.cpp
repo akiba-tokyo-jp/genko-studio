@@ -75,8 +75,9 @@ private slots:
     }
 
     // D1's kinds (ぼかし・シャープ・ノイズ・その他・ビデオ): in the table with PhotoCraft's command ids, Photoshop's names and
-    // submenus; how a page of inks takes them (the lightness: カスタム・ハイパス・明るさの最大値・最小値; the colours it means:
-    // HSB/HSL・NTSC カラー; each plate: the rest); ぼかし（放射状）'s centre a place that moves with a smart object.
+    // submenus; how a page of inks takes them (the lightness: 明るさの最大値・最小値; the lightness, a Lab page's a and b too:
+    // カスタム・ハイパス; the colours it means: HSB/HSL・NTSC カラー; each plate: the rest); ぼかし（放射状）'s centre a place that
+    // moves with a smart object.
     void theKindsOfD1() {
         const std::vector<std::tuple<const char*, const char*, const char*, const char*, core::FilterInks>> want{
             {"blur_average", "filter.blur.average", "平均", "ぼかし", core::FilterInks::Plates},
@@ -92,8 +93,8 @@ private slots:
             {"noise_dust_and_scratches", "filter.noise.dustAndScratches", "ダスト＆スクラッチ", "ノイズ", core::FilterInks::Plates},
             {"noise_median", "filter.noise.median", "明るさの中間値", "ノイズ", core::FilterInks::Plates},
             {"noise_reduce", "filter.noise.reduceNoise", "ノイズを軽減", "ノイズ", core::FilterInks::Plates},
-            {"other_custom", "filter.other.custom", "カスタム", "その他", core::FilterInks::Lightness},
-            {"other_high_pass", "filter.other.highPass", "ハイパス", "その他", core::FilterInks::Lightness},
+            {"other_custom", "filter.other.custom", "カスタム", "その他", core::FilterInks::LightnessAndColour},
+            {"other_high_pass", "filter.other.highPass", "ハイパス", "その他", core::FilterInks::LightnessAndColour},
             {"other_hsb_hsl", "filter.other.hsbHsl", "HSB/HSL", "その他", core::FilterInks::Meaning},
             {"other_maximum", "filter.other.maximum", "明るさの最大値", "その他", core::FilterInks::Lightness},
             {"other_minimum", "filter.other.minimum", "明るさの最小値", "その他", core::FilterInks::Lightness},

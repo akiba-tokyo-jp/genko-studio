@@ -28,7 +28,8 @@
 //
 // A page of inks is worked as its kind says (core::FilterInks): each plate's value as it is, its lightness (CMYK and
 // multichannel plates as 1 − ink, back after; a Lab page's L alone — the kernel then works one colour, as grey —, its a
-// and b as they were; grey as it is) or the colours the inks mean (back by the page's rules, render/ink).
+// and b as they were; grey as it is; or, a kernel about a middle, a Lab page's L, a and b each, Ctx::space Lab) or the
+// colours the inks mean (back by the page's rules, render/ink).
 // A selection mixes the result with the layer by its coverage (upstream's apply_tiled: straight, every channel).
 //
 // Lengths in a kind's settings are pixels of the working 200 dpi; a kernel scales them to the layer's grid by Ctx::s.
@@ -136,6 +137,9 @@ struct Kernel {
     // (D1) A whole kind's work done once on the base box's window before its tiles (平均's mean), given to each tile's run
     // as its settings; none: the settings as they are.
     std::function<core::Json(const core::Json& params, const Window& whole, const Ctx& ctx)> once;
+    // (D1) The bytes of its own work a pixel of a tile's window takes past what the engine counts (ノイズを軽減's planes):
+    // held in the imaging budget with the window.
+    std::size_t work_bytes = 0;
 };
 using Kernels = std::vector<Kernel>;
 inline constexpr double kDefaultCost = 50;
@@ -243,16 +247,19 @@ private:
     std::atomic<double>* before_;
 };
 
-// How much work a kind is on a grid of `pixels` at scale `s` (its cost a pixel × the pixels), and whether that is a
-// heavy one: the window then works it on a thread of its own with 中止 and its preview at the screen's resolution
-// (design 4.4, the user's decision 4 — never refused for it).
-double work(std::string_view kind, const core::Json& params, std::uint64_t pixels, double s);
+// How much work a kind is on a grid of `pixels` at scale `s` (its cost a pixel — on samples of `levels`, Ctx::levels: a
+// rank filter of floats costs more — and the engine's reading and writing of a pixel, kPixelWork, × the pixels), and
+// whether that is a heavy one: the window then works it on a thread of its own with 中止 and its preview at the screen's
+// resolution (design 4.4, the user's decision 4 — never refused for it).
+double work(std::string_view kind, const core::Json& params, std::uint64_t pixels, double s, unsigned levels = 255);
+inline constexpr double kPixelWork = 10;
 inline constexpr double kHeavyWork = 4e8;
 // A layer's grid as a filter works it (a precise or ink layer's own; an 8-bit layer's, or lines alone, the page's at the
 // working 200 dpi — at its dpi on a deep page) and its scale.
 struct Grid {
     std::uint32_t width = 0, height = 0;
     double s = 1;
+    unsigned levels = 255;  // (D1: 0 for a layer of floats — a 32-bit page's —, Ctx::levels)
 };
 Grid layer_grid(const core::Page& page, const core::Layer& layer);
 // The work of `kind` on a layer of the page (its grid, its scale).

@@ -5,11 +5,13 @@
 // without a window; 前回のフィルター sending the last one again; フェード… after it; on a smart object a smart filter (its
 // window again from the panel); 漫画's 光彩… in its old window; a heavy one's preview on a thread and its progress with 中止;
 // the layer panel's かける… opening the menu. (The frame of D1…D7's windows and kinds: their own tests add theirs.) D1: its
-// commands lit — ぼかし・シャープ・ノイズ・その他・ビデオ —, カスタム…'s 5 × 5 grid, 平均 and シャープ without a window.
+// commands lit — ぼかし・シャープ・ノイズ・その他・ビデオ —, カスタム…'s 5 × 5 grid, 平均 and シャープ without a window, new grains
+// each time ノイズを加える… is applied, ぼかし（レンズ）… on a smart object without the layer mask as its depth.
 
 #include <QtTest>
 #include <QAction>
 #include <QApplication>
+#include <QComboBox>
 #include <QDialog>
 #include <QDoubleSpinBox>
 #include <QLabel>
@@ -202,6 +204,7 @@ private slots:
         emit filter->aboutToShow();
         for (const char* on : {"act_filter_blur", "act_filter_blur_more", "act_filter_blur_gaussian", "act_filter_blur_box", "act_filter_manga_glow",
                                "act_filter_manga_lineart", "act_filter_blur_motion", "act_filter_blur_radial", "act_filter_blur_average", "act_filter_blur_lens",
+                               "act_filter_blur_surface", "act_filter_blur_smart", "act_filter_blur_shape",
                                "act_filter_sharpen", "act_filter_sharpen_more", "act_filter_sharpen_edges", "act_filter_sharpen_unsharp_mask",
                                "act_filter_sharpen_smart", "act_filter_despeckle", "act_filter_noise_add", "act_filter_noise_median",
                                "act_filter_noise_dust_and_scratches", "act_filter_noise_reduce", "act_filter_other_custom", "act_filter_other_high_pass",
@@ -516,6 +519,65 @@ private slots:
         });
         book.act("act_filter_sharpen_unsharp_mask")->trigger();
         QCOMPARE(windows, 1);
+    }
+
+    // ノイズを加える…: a new seed each time it is applied — the window's, again, 前回のフィルター's — held in the op (on a smart
+    // object: in its smart filters); ぼかし（レンズ）… on a smart object does not offer the layer mask as its depth (said
+    // under the fields), on a paint layer it does (review P3-7, P3-4).
+    void aSeedEachTimeAndTheLensOnASmartObject() {
+        Book book;
+        gui_test::Answers answers;
+        // (a paint layer: two applications from the same pixels differ)
+        book.window->set_target_layer("pic");
+        answers.responder->exec = answer(QStringLiteral("noise_add"));
+        book.act("act_filter_noise_add")->trigger();
+        const core::Bytes first = book.layer("pic")->raster_png;
+        book.window->action(QStringLiteral("act_undo"))->trigger();
+        book.act("act_filter_noise_add")->trigger();
+        QVERIFY(book.layer("pic")->raster_png != first);
+        book.window->action(QStringLiteral("act_undo"))->trigger();
+        // (a smart object: each smart filter's seed)
+        QVERIFY(book.window->apply_ops(Json::array({Json{{"op", "smart_convert"}, {"page", 1}, {"ids", Json::array({"pic"})}, {"new_id", "so"}}})));
+        book.window->set_target_layer("so");
+        book.act("act_filter_noise_add")->trigger();
+        book.act("act_filter_noise_add")->trigger();
+        emit book.menu("menu_filter")->aboutToShow();
+        book.act("act_filter_last")->trigger();
+        emit book.menu("menu_filter")->aboutToHide();
+        const Json filters = (*book.layer("so")->smart)["filters"];
+        QCOMPARE(filters.size(), std::size_t(3));
+        std::vector<Json> seeds;
+        for (const Json& f : filters) {
+            QVERIFY(f["params"].contains("seed"));
+            seeds.push_back(f["params"]["seed"]);
+        }
+        QVERIFY(seeds[0] != seeds[1] && seeds[1] != seeds[2] && seeds[0] != seeds[2]);
+        // ぼかし（レンズ）…'s depth: なし・透明部分 on a smart object, said; なし・透明部分・レイヤーマスク on a paint layer
+        QStringList shown;
+        bool said = false;
+        answers.responder->exec = [&](QDialog* d) {
+            if (d->property("kind").toString() != QStringLiteral("blur_lens")) return int(QDialog::Rejected);
+            auto* depth = d->findChild<QComboBox*>(QStringLiteral("field_depth_map"));
+            if (depth != nullptr)
+                for (int i = 0; i < depth->count(); ++i) shown << depth->itemText(i);
+            for (QLabel* label : d->findChildren<QLabel*>())
+                if (label->text().contains(QStringLiteral("スマートフィルターでは、深度情報のソースにレイヤーマスクは選べません"))) said = true;
+            return int(QDialog::Rejected);
+        };
+        book.act("act_filter_blur_lens")->trigger();
+        QCOMPARE(shown, (QStringList{QStringLiteral("なし"), QStringLiteral("透明部分")}));
+        QVERIFY(said);
+        book.window->action(QStringLiteral("act_undo"))->trigger();
+        book.window->action(QStringLiteral("act_undo"))->trigger();
+        book.window->action(QStringLiteral("act_undo"))->trigger();
+        book.window->action(QStringLiteral("act_undo"))->trigger();
+        QVERIFY(book.layer("pic") != nullptr);
+        book.window->set_target_layer("pic");
+        shown.clear();
+        said = false;
+        book.act("act_filter_blur_lens")->trigger();
+        QCOMPARE(shown, (QStringList{QStringLiteral("なし"), QStringLiteral("透明部分"), QStringLiteral("レイヤーマスク")}));
+        QVERIFY(!said);
     }
 
     // The layer panel's かける…: the フィルター menu (the user's decision 1).

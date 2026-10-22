@@ -27,6 +27,16 @@ QString words(std::string_view text) { return QString::fromUtf8(text.data(), sta
 // (lengths are the working 200 dpi's pixels: design 2.2, 9 章)
 const QString kLengths = QStringLiteral("長さは 200 dpi の画素で数えます（600 dpi のページでは 3 倍の画素に掛かり、紙の上の大きさは同じです）。");
 
+// (review P2-2: a page-wide layer at 600 dpi — B4's 6071 × 8598 — holds a window of the imaging budget only so far; the
+// lengths past it are refused as too large, SPEC.md COLOR-08)
+QString large(const QString& what, int rgb, int cmyk) {
+    return kLengths + QStringLiteral("\n600 dpi の B4 ほどのページいっぱいのレイヤーでは、%1が約 %2（CMYK は約 %3）を超えると大きすぎて掛けられません"
+                                     "（原稿は変わりません。スマートフィルターは印刷・書き出しでそう知らせます）。")
+                          .arg(what)
+                          .arg(rgb)
+                          .arg(cmyk);
+}
+
 // The table's fields of a kind (those with a word), then the group's own.
 void build(adjust_forms::Form& form, const core::AdjustKind& kind, const core::FilterInfo* info, const FilterForm* own,
            const adjust_forms::FormContext& context) {
@@ -57,6 +67,10 @@ void build(adjust_forms::Form& form, const core::AdjustKind& kind, const core::F
                 } else {
                     for (const std::string_view c : p.choices) options.emplace_back(words(c), Json(std::string(c)));
                 }
+                if (context.smart && own != nullptr && own->not_smart.contains(key)) {  // (not on a smart filter: its note says why)
+                    const std::vector<Json>& left_out = own->not_smart.at(key);
+                    std::erase_if(options, [&left_out](const auto& o) { return std::find(left_out.begin(), left_out.end(), o.second) != left_out.end(); });
+                }
                 form.choice(key, label, std::move(options), Json(std::string(p.text)));
                 break;
             }
@@ -76,6 +90,7 @@ void build(adjust_forms::Form& form, const core::AdjustKind& kind, const core::F
     }
     if (own != nullptr && own->more) own->more(form, context);
     if (own != nullptr && !own->note.isEmpty()) form.note(own->note);
+    if (context.smart && own != nullptr && !own->smart_note.isEmpty()) form.note(own->smart_note);
 }
 
 }  // namespace
@@ -89,7 +104,7 @@ std::vector<FilterForm> blur_forms() {
         f.kind = "blur_gaussian";
         f.labels = {{"radius", QStringLiteral("半径（px）")}};
         f.decimals = {{"radius", 1}};
-        f.note = kLengths;
+        f.note = large(QStringLiteral("半径"), 280, 250);
         out.push_back(std::move(f));
     }
     {  // ぼかし（ボックス）… (Photoshop: 半径 1–2000 pixel)
@@ -106,7 +121,7 @@ std::vector<FilterForm> blur_forms() {
         f.kind = "blur_motion";
         f.labels = {{"angle", QStringLiteral("角度（°）")}, {"distance", QStringLiteral("距離（px）")}};
         f.decimals = {{"angle", 0}, {"distance", 0}};
-        f.note = kLengths;
+        f.note = large(QStringLiteral("距離"), 1700, 1500);
         out.push_back(std::move(f));
     }
     {  // ぼかし（放射状）… (量 1–100, 方法 回転・ズーム, 中心)
@@ -148,7 +163,7 @@ std::vector<FilterForm> blur_forms() {
                        {QStringLiteral("ひし形"), Json("diamond")}, {QStringLiteral("三角形"), Json("triangle")}, {QStringLiteral("六角形"), Json("hexagon")},
                        {QStringLiteral("星"), Json("star")}, {QStringLiteral("ハート"), Json("heart")}, {QStringLiteral("十字"), Json("cross")}}}};
         f.decimals = {{"radius", 0}};
-        f.note = kLengths;
+        f.note = large(QStringLiteral("半径"), 850, 760);
         out.push_back(std::move(f));
     }
     {  // ぼかし（レンズ）… (深度情報, 虹彩, 反射光, ノイズ)
@@ -174,6 +189,9 @@ std::vector<FilterForm> blur_forms() {
                      {"distribution", {{QStringLiteral("均等に分布"), Json("uniform")}, {QStringLiteral("ガウス分布"), Json("gaussian")}}}};
         f.decimals = {{"focal_distance", 0}, {"radius", 0}, {"blade_curvature", 0}, {"rotation", 0}, {"brightness", 0}, {"threshold", 0}, {"noise", 0}};
         f.note = kLengths;
+        // (a smart object has no layer mask of its own pixels to read as the depth: the filter would see none)
+        f.not_smart = {{"depth_map", {Json("layer_mask")}}};
+        f.smart_note = QStringLiteral("スマートフィルターでは、深度情報のソースにレイヤーマスクは選べません（スマートオブジェクトのマスクは深度に読みません）。");
         out.push_back(std::move(f));
     }
     return out;

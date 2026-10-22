@@ -8001,7 +8001,7 @@
         "gap": "レンズぼかし（絞りの形・羽根の曲がり・深度マップ・ハイライト・ノイズ）がない",
         "note": "足すなら 8 ビット（render/filters.cpp）・16/32 ビット（color_filters.cpp）・CMYK/Lab（ink_filters.cpp）の 3 経路と画面の欄に要る。上流は MIT/Apache-2.0（帰属は native/third_party/photocraft）"
       },
-      "remaining": "深度のレイヤーマスクは破壊的な filter_raster だけ（スマートフィルターでは使わず一様にぼかす）"
+      "remaining": "深度のレイヤーマスクは破壊的な filter_raster だけ（スマートフィルターでは使わず一様にぼかす。窓では選べず、そう書く）"
     },
     {
       "id": "filter.blur.motionBlur",
@@ -8066,7 +8066,7 @@
         "gap": "距離・角度の移動ぼかしはある（8/16/32 ビット・CMYK/Lab、試験あり）。重ねる枚数が 64 枚までで長い距離は段になる、画像を巻き戻してずらすため端で反対側の絵が入り込む、角度の向きが上流と逆（時計回り）、画面の距離が 300px まで（上流 2000）",
         "note": ""
       },
-      "remaining": "距離は 200 dpi の作業の画素。今の motion_blur（Python の種類）は op・スマートフィルター・原稿でそのまま効く"
+      "remaining": "距離は 200 dpi の作業の画素。今の motion_blur（Python の種類）は op・スマートフィルター・原稿でそのまま効く。600 dpi の B4 ほどのページいっぱいの層では距離約 1700（CMYK 約 1500）まで"
     },
     {
       "id": "filter.blur.radialBlur",
@@ -8189,7 +8189,7 @@
         "gap": "形（円・リング・星・ハートなど 9 種）を核にしたぼかしがない",
         "note": "足すなら 8 ビット（render/filters.cpp）・16/32 ビット（color_filters.cpp）・CMYK/Lab（ink_filters.cpp）の 3 経路と画面の欄に要る。上流は MIT/Apache-2.0（帰属は native/third_party/photocraft）"
       },
-      "remaining": "形は上流の組み込みの 9 つ（Photoshop のカスタムシェイプは読まない）"
+      "remaining": "形は上流の組み込みの 9 つ（Photoshop のカスタムシェイプは読まない）。600 dpi の B4 ほどのページいっぱいの層では半径約 850（CMYK 約 760）まで"
     },
     {
       "id": "filter.blur.smartBlur",
@@ -8298,7 +8298,7 @@
         "gap": "輪郭を保つぼかし（半径・しきい値）がない",
         "note": "半径 100 まで素直に回すと遅いので工夫が要る。足すなら 8 ビット（render/filters.cpp）・16/32 ビット（color_filters.cpp）・CMYK/Lab（ink_filters.cpp）の 3 経路と画面の欄に要る。上流は MIT/Apache-2.0（帰属は native/third_party/photocraft）"
       },
-      "remaining": "半径 8 画素を超えると滑らせる箱（8 bit は同じ値、0〜1 の高精度は 0.5/255 以内）"
+      "remaining": "半径 8 画素を超えると滑らせる箱（8・16 bit は段ごと、32 bit・HDR は窓の値ごと。重みは上流と同じで、違うのは和の順の丸めだけ）"
     },
     {
       "id": "filter.blurGallery.fieldBlur",
@@ -10626,7 +10626,7 @@
         "gap": "ノイズ（量・単色/色ごと・種、試験あり）はある。乱数の灰色へ混ぜる方式で、上流の「元の値に足す」と違い明暗が平たくなる、量が 0〜1（上流 0.1〜400%）、ガウス分布がない、画面に単色/色の切り替えがない",
         "note": ""
       },
-      "remaining": "粒は層の画素ごと（解像度の高いページほど細かい。Photoshop と同じ）。今の noise（Python の種類）はそのまま効く"
+      "remaining": "粒は層の画素ごと（解像度の高いページほど細かい。Photoshop と同じ）。今の noise（Python の種類）はそのまま効く。乱数の種は窓に出さず、掛けるたびに新しい種を op に入れる。Lab のグレースケールノイズは L だけ"
     },
     {
       "id": "filter.noise.despeckle",
@@ -10735,7 +10735,7 @@
         "gap": "ダスト＆スクラッチ（半径・しきい値つきのメディアン）がない",
         "note": "目的が近いのは Genko のゴミ取り（despeckle、連結成分で点を消す）。中に Filter::median_filter（native/src/render/image.hpp:125、四角の窓・最大 101px）がある。足すなら 8 ビット（render/filters.cpp）・16/32 ビット（color_filters.cpp）・CMYK/Lab（ink_filters.cpp）の 3 経路と画面の欄に要る。上流は MIT/Apache-2.0（帰属は native/third_party/photocraft）"
       },
-      "remaining": "8・16 bit は滑らせるヒストグラム（同じ値）、32 bit は上流の書き方のまま"
+      "remaining": "滑らせるヒストグラム（8・16 bit は段の箱、32 bit は窓の値の順位の箱。どれも同じ値）"
     },
     {
       "id": "filter.noise.median",
@@ -10790,7 +10790,7 @@
         "gap": "メディアン（半径 1〜500、円の窓）がフィルターとしてない",
         "note": "中に Filter::median_filter（native/src/render/image.hpp:125、四角の窓・最大 101px）がある。足すなら 8 ビット（render/filters.cpp）・16/32 ビット（color_filters.cpp）・CMYK/Lab（ink_filters.cpp）の 3 経路と画面の欄に要る。上流は MIT/Apache-2.0（帰属は native/third_party/photocraft）"
       },
-      "remaining": "8・16 bit は滑らせるヒストグラム（同じ値）、32 bit は上流の書き方のまま"
+      "remaining": "滑らせるヒストグラム（8・16 bit は段の箱、32 bit は窓の値の順位の箱。どれも同じ値）"
     },
     {
       "id": "filter.noise.reduceNoise",
@@ -10898,7 +10898,7 @@
         "gap": "5×5 の核・scale・offset を打ち込むカスタムフィルターがない",
         "note": "中に Filter::kernel（5×5・scale・offset、native/src/render/image.hpp:128）がある。足すなら 8 ビット（render/filters.cpp）・16/32 ビット（color_filters.cpp）・CMYK/Lab（ink_filters.cpp）の 3 経路と画面の欄に要る。上流は MIT/Apache-2.0（帰属は native/third_party/photocraft）"
       },
-      "remaining": "目の間は作業の 1 画素（細かい格子では画素の間を読む）。インキのページは明るさの向き"
+      "remaining": "目の間は作業の 1 画素（細かい格子では画素の間を読む）。インキのページは明るさの向き（Lab は L・a・b に、a・b は 0 の周り、オフセットは L だけ）"
     },
     {
       "id": "filter.other.highPass",
@@ -10953,7 +10953,7 @@
         "gap": "ハイパス（元−ぼかし＋灰色）がない",
         "note": "足すなら 8 ビット（render/filters.cpp）・16/32 ビット（color_filters.cpp）・CMYK/Lab（ink_filters.cpp）の 3 経路と画面の欄に要る。上流は MIT/Apache-2.0（帰属は native/third_party/photocraft）"
       },
-      "remaining": "インキのページは明るさの向き（Lab は L だけ）"
+      "remaining": "ぼかしはどの半径でも正確なガウス（上流と同じ）。インキのページは明るさの向き（Lab は L・a・b に、a・b は 0 の周り）。600 dpi の B4 ほどのページいっぱいの層では半径約 280（CMYK 約 250）まで"
     },
     {
       "id": "filter.other.hsbHsl",
@@ -12091,7 +12091,7 @@
         "gap": "量と半径のシャープ（sharpen）はある。ノイズを抑える（reduceNoise：小さな差を弱める）がない",
         "note": ""
       },
-      "remaining": "上流と同じ基本の形（ぼかし（ガウス）のアンシャープに、ノイズを軽減。Photoshop の除去する対象・シャドウ・ハイライトの欄は無い）"
+      "remaining": "上流と同じ基本の形（ぼかし（ガウス）のアンシャープに、ノイズを軽減。Photoshop の除去する対象・シャドウ・ハイライトの欄は無い）。ぼかしはどの半径でも正確なガウス（上流と同じ）"
     },
     {
       "id": "filter.sharpen.unsharpMask",
@@ -12156,7 +12156,7 @@
         "gap": "アンシャープマスクは sharpen の amount 指定である（120×amount% ＝ 12〜600%、radius、試験あり、8/16/32 ビット・CMYK/Lab）。しきい値が 2 固定で変えられない、画面に半径の欄がない（量だけ）",
         "note": ""
       },
-      "remaining": "半径は 200 dpi の作業の画素。今の sharpen（Python の種類）はそのまま効く"
+      "remaining": "半径は 200 dpi の作業の画素。今の sharpen（Python の種類）はそのまま効く。ぼかしはどの半径でも正確なガウス（上流と同じ）。600 dpi の B4 ほどのページいっぱいの層では半径約 280（CMYK 約 250）まで"
     },
     {
       "id": "filter.stylize.diffuse",

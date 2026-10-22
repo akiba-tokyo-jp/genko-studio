@@ -3,12 +3,15 @@
 // (surface), MIT: native/third_party/photocraft/NOTICE.md. The fast algorithms (design 4.3) are Genko's: Huang's sliding
 // histogram ("A fast two-dimensional median filtering algorithm", 1979) with two levels of bins, and van Herk / Gil-Werman
 // running extremes along the rows and columns; their bins hold whole numbers, so a sample's result is the same whichever
-// window — whatever tile — holds it.
+// window — whatever tile — holds it. A median of floats (a 32-bit layer: no grid of levels) is taken over the ranks of
+// the window's own values (each channel's sorted once a tile): exact, a cost of the radius a pixel as for 8 and 16 bits.
 
 #include "render/fx_rank.hpp"
 
 #include <algorithm>
+#include <bit>
 #include <cmath>
+#include <functional>
 #include <limits>
 
 namespace genko::render::fx {
@@ -25,6 +28,13 @@ float value_of(int k, unsigned levels) {
     if (levels == 255) return static_cast<float>(k) / 255.0f;
     return static_cast<float>(k / static_cast<double>(levels));
 }
+
+// A float's place in the total order (noise.rs sorts by total_cmp: −0 before +0), as a whole number.
+std::int32_t float_order(float v) {
+    const auto bits = std::bit_cast<std::int32_t>(v);
+    return bits < 0 ? bits ^ 0x7fffffff : bits;
+}
+bool before(float a, float b) { return float_order(a) < float_order(b); }
 
 // The disc's half widths: row dy (−r..r) holds dx with dx² + dy² ≤ r² + r (noise.rs's), at index dy + r.
 std::vector<int> disc_rows(int r) {
@@ -93,7 +103,7 @@ std::vector<float> median_naive(const Window& src, const Rect& out, int r, std::
         for (int x = out.x0; x < out.x1; ++x)
             for (std::size_t c = 0; c < n; ++c) {
                 for (std::size_t i = 0; i < offs.size(); ++i) vals[i] = src.at(x + offs[i].first, y + offs[i].second, c);
-                std::nth_element(vals.begin(), vals.begin() + static_cast<std::ptrdiff_t>(mid), vals.end());
+                std::nth_element(vals.begin(), vals.begin() + static_cast<std::ptrdiff_t>(mid), vals.end(), before);
                 const float m = vals[mid];
                 const float o = src.at(x, y, c);
                 res.push_back(threshold && std::fabs(o - m) <= *threshold ? o : m);
@@ -101,22 +111,22 @@ std::vector<float> median_naive(const Window& src, const Rect& out, int r, std::
     return res;
 }
 
-std::vector<float> median_fast(const Window& src, const Rect& out, unsigned levels, int r, std::optional<float> threshold) {
+// The median over the disc by a histogram of the samples' keys (each sample's key in `keys`, the window's; each
+// channel's count of keys; a key's value back), slid along each row.
+std::vector<float> median_keyed(const Window& src, const Rect& out, int r, std::optional<float> threshold, const std::vector<std::int32_t>& keys,
+                                const std::vector<std::size_t>& counts, const std::function<float(std::size_t, int)>& value_of_key) {
     const std::size_t n = src.ch;
     const std::vector<int> rows = disc_rows(r);
     std::int64_t count = 0;
     for (const int hw : rows) count += 2 * hw + 1;
     const std::int64_t mid = count / 2;
-    // (each sample's key once: the window's)
     const Rect& win = src.rect;
-    std::vector<std::int32_t> keys(src.data.size());
-    for (std::size_t i = 0; i < keys.size(); ++i) keys[i] = key_of(src.data[i], levels);
     const auto key = [&](int x, int y, std::size_t c) {
         const int cx = std::clamp(x, win.x0, win.x1 - 1), cy = std::clamp(y, win.y0, win.y1 - 1);
         return keys[src.index(cx, cy) + c];
     };
     std::vector<Bins> bins(n);
-    for (Bins& b : bins) b.reset(std::size_t(levels) + 1);
+    for (std::size_t c = 0; c < n; ++c) bins[c].reset(std::max<std::size_t>(counts[c], 1));
     std::vector<float> res(out.area() * n);
     const std::size_t ow = std::size_t(out.width());
     for (int y = out.y0; y < out.y1; ++y) {
@@ -133,7 +143,7 @@ std::vector<float> median_fast(const Window& src, const Rect& out, unsigned leve
         for (int x = out.x0; x < out.x1; ++x) {
             float* dst = res.data() + (std::size_t(y - out.y0) * ow + std::size_t(x - out.x0)) * n;
             for (std::size_t c = 0; c < n; ++c) {
-                const float m = value_of(bins[c].at(mid), levels);
+                const float m = value_of_key(c, bins[c].at(mid));
                 const float o = src.at(x, y, c);
                 dst[c] = threshold && std::fabs(o - m) <= *threshold ? o : m;
             }
@@ -156,6 +166,37 @@ std::vector<float> median_fast(const Window& src, const Rect& out, unsigned leve
         }
     }
     return res;
+}
+
+// On a grid of levels (8 and 16 bits): each sample's key its level.
+std::vector<float> median_levels(const Window& src, const Rect& out, unsigned levels, int r, std::optional<float> threshold) {
+    std::vector<std::int32_t> keys(src.data.size());
+    for (std::size_t i = 0; i < keys.size(); ++i) keys[i] = key_of(src.data[i], levels);
+    return median_keyed(src, out, r, threshold, keys, std::vector<std::size_t>(src.ch, std::size_t(levels) + 1),
+                        [levels](std::size_t, int k) { return value_of(k, levels); });
+}
+
+// Floats: each sample's key its rank among the window's values of its channel (in the total order) — the median's
+// value the window's own sample, exactly as written.
+std::vector<float> median_ranked(const Window& src, const Rect& out, int r, std::optional<float> threshold) {
+    const std::size_t n = src.ch, pixels = src.data.size() / std::max<std::size_t>(n, 1);
+    std::vector<std::vector<float>> sorted(n);
+    std::vector<std::size_t> counts(n);
+    for (std::size_t c = 0; c < n; ++c) {
+        std::vector<float>& v = sorted[c];
+        v.reserve(pixels);
+        for (std::size_t i = 0; i < pixels; ++i) v.push_back(src.data[i * n + c]);
+        std::sort(v.begin(), v.end(), before);
+        v.erase(std::unique(v.begin(), v.end(), [](float a, float b) { return float_order(a) == float_order(b); }), v.end());
+        counts[c] = v.size();
+    }
+    std::vector<std::int32_t> keys(src.data.size());
+    for (std::size_t i = 0; i < pixels; ++i)
+        for (std::size_t c = 0; c < n; ++c) {
+            const std::vector<float>& v = sorted[c];
+            keys[i * n + c] = static_cast<std::int32_t>(std::lower_bound(v.begin(), v.end(), src.data[i * n + c], before) - v.begin());
+        }
+    return median_keyed(src, out, r, threshold, keys, counts, [&sorted](std::size_t c, int k) { return sorted[c][std::size_t(k)]; });
 }
 
 // --- the extremes ------------------------------------------------------------------------------------------------------
@@ -272,59 +313,64 @@ std::vector<float> surface_naive(const Window& src, const Rect& out, int r, floa
     return res;
 }
 
-// The bins of one colour slid along a row: each fine bin's count and its values' sum (whole units), each coarse bin's —
-// and the sums of the fine bins' centres (`mul`·`centre` units) times their counts and their values.
+// The bins of one colour slid along a row: a bin a value (`value[b]` whole units, increasing) and its count; each coarse
+// bin's count, its values' sum and their squares' sum (whole numbers, 128 bits: the same whatever order they came in).
+__extension__ typedef __int128 Wide;  // (GCC's and Clang's 128-bit whole numbers)
+
 struct Weighted {
     int fine_bits = 4;
-    double width = 1;   // (a fine bin's width, units)
-    double centre = 1;  // (a centre's unit: mul[b]·centre units)
-    std::vector<std::int64_t> mul, h, s, hc, sc, pc, qc;
+    std::vector<std::int64_t> value, h, hc;
+    std::vector<Wide> sc, qc;
 
-    void reset(std::size_t bins, int bits) {
+    void reset(std::vector<std::int64_t> values, int bits) {
         fine_bits = bits;
-        h.assign(bins, 0);
-        s.assign(bins, 0);
-        const std::size_t coarse = (bins + (std::size_t(1) << bits) - 1) >> bits;
+        value = std::move(values);
+        h.assign(value.size(), 0);
+        const std::size_t coarse = (value.size() + (std::size_t(1) << bits) - 1) >> bits;
         hc.assign(coarse, 0);
         sc.assign(coarse, 0);
-        pc.assign(coarse, 0);
         qc.assign(coarse, 0);
     }
-    void add(std::size_t b, std::int64_t v, int sign) {
+    void add(std::size_t b, int sign) {
         const std::size_t c = b >> fine_bits;
+        const Wide v = value[b];
         h[b] += sign;
-        s[b] += sign * v;
         hc[c] += sign;
         sc[c] += sign * v;
-        pc[c] += sign * mul[b];
-        qc[c] += sign * mul[b] * v;
+        qc[c] += sign * v * v;
     }
-    // The weighted mean about v0 (units) with the threshold `tu` (units), and whether anything weighed.
+    // The weighted mean about v0 (units) with the threshold `tu` (units), and whether anything weighed: each value weighs
+    // 1 − |v − v0| / tu (as written); a coarse bin wholly on one side of v0 and within the threshold by its sums (the
+    // weight is linear there: Σ w·v = a·Σv ± Σv²/tu), the others value by value.
     std::optional<double> mean(double v0, double tu) const {
-        const std::size_t bins = h.size(), per = std::size_t(1) << fine_bits;
+        const std::size_t bins = value.size(), per = std::size_t(1) << fine_bits;
         const double lo = v0 - tu, hi = v0 + tu;
+        const auto from = std::lower_bound(value.begin(), value.end(), lo, [](std::int64_t v, double u) { return double(v) < u; });
+        const auto to = std::upper_bound(value.begin(), value.end(), hi, [](double u, std::int64_t v) { return u < double(v); });
+        if (from >= to) return std::nullopt;
+        const std::size_t first = std::size_t(from - value.begin()), last = std::size_t(to - value.begin()) - 1;
         double num = 0, den = 0;
-        const auto bin_of = [&](double u) { return std::size_t(std::clamp(std::floor(u / width), 0.0, double(bins - 1))); };
-        const std::size_t first = bin_of(lo) >> fine_bits, last = bin_of(hi) >> fine_bits;
-        for (std::size_t c = first; c <= last && c < hc.size(); ++c) {
+        const double k = 1.0 / tu;
+        for (std::size_t c = first >> fine_bits; c <= (last >> fine_bits); ++c) {
             if (hc[c] == 0) continue;
             const std::size_t b0 = c << fine_bits, b1 = std::min(bins, b0 + per) - 1;
-            const double c0 = double(mul[b0]) * centre, c1 = double(mul[b1]) * centre;
+            const double c0 = double(value[b0]), c1 = double(value[b1]);
+            const double s = double(sc[c]), q = double(qc[c]), n = double(hc[c]);
             if (c0 > lo && c1 <= v0) {  // (wholly below v0, within the threshold: its sums)
-                const double a = 1.0 - v0 / tu, k = centre / tu;
-                num += a * double(sc[c]) + k * double(qc[c]);
-                den += a * double(hc[c]) + k * double(pc[c]);
+                const double a = 1.0 - v0 * k;
+                num += a * s + k * q;
+                den += a * n + k * s;
             } else if (c0 >= v0 && c1 < hi) {  // (wholly above)
-                const double a = 1.0 + v0 / tu, k = centre / tu;
-                num += a * double(sc[c]) - k * double(qc[c]);
-                den += a * double(hc[c]) - k * double(pc[c]);
+                const double a = 1.0 + v0 * k;
+                num += a * s - k * q;
+                den += a * n - k * s;
             } else {
-                for (std::size_t b = b0; b <= b1; ++b) {
-                    if (h[b] == 0) continue;
-                    const double w = 1.0 - std::fabs(double(mul[b]) * centre - v0) / tu;
+                for (std::size_t bb = std::max(b0, first); bb <= std::min(b1, last); ++bb) {
+                    if (h[bb] == 0) continue;
+                    const double w = 1.0 - std::fabs(double(value[bb]) - v0) * k;
                     if (!(w > 0)) continue;
-                    num += w * double(s[b]);
-                    den += w * double(h[b]);
+                    num += w * double(h[bb]) * double(value[bb]);
+                    den += w * double(h[bb]);
                 }
             }
         }
@@ -333,34 +379,47 @@ struct Weighted {
     }
 };
 
-std::vector<float> surface_fast(const Window& src, const Rect& out, bool eight, int r, float t) {
+// `levels` 255 or 65535: a bin a level; 0 (floats, HDR too): a bin each value the window's channel holds. A bin's value
+// the sample's own float (a level's as the surfaces read it), in whole units of 2^(e − 48) (|sample| < 2^e: the
+// largest's; exact but for samples below 2^(e − 25), within 2^(e − 49) of theirs). Each sample weighs as written either
+// way: the result the naive one's but for the rounding of its sums (made in another order).
+std::vector<float> surface_fast(const Window& src, const Rect& out, unsigned levels, double largest, int r, float t) {
     const std::size_t n = src.ch, cc = n - 1;
-    // (8 bits: a bin a level, its centre its value; within 0..1: 4096 bins of 2^12 units of 2^-24, their centres (2b + 1)·2^11)
-    const std::size_t bins = eight ? 256 : 4096;
-    const int bits = eight ? 4 : 6;
-    const double unit = eight ? 1.0 / 255.0 : std::ldexp(1.0, -24);
+    const bool grid = levels != 0;
+    int e = 0;
+    (void)std::frexp(std::max(largest, 1e-30), &e);
+    const double unit = std::ldexp(1.0, e - 48);
+    const std::int64_t most = std::int64_t(1) << 50;
+    const auto units = [unit, most](double v) { return std::isfinite(v) ? std::clamp<std::int64_t>(std::llround(v / unit), -most, most) : 0; };
     const Rect& win = src.rect;
     std::vector<std::int64_t> values(src.data.size());
-    std::vector<std::uint16_t> bin_of(src.data.size());
-    for (std::size_t i = 0; i < values.size(); ++i) {
-        const double v = std::clamp(static_cast<double>(src.data[i]), 0.0, 1.0);
-        const std::int64_t q = eight ? std::lround(v * 255.0) : std::llround(std::ldexp(v, 24));
-        values[i] = q;
-        bin_of[i] = static_cast<std::uint16_t>(eight ? q : std::min<std::int64_t>(4095, q >> 12));
-    }
+    for (std::size_t i = 0; i < values.size(); ++i) values[i] = grid ? key_of(src.data[i], levels) : units(static_cast<double>(src.data[i]));
     std::vector<Weighted> weighted(cc);
-    for (Weighted& w : weighted) {
-        w.reset(bins, bits);
-        w.width = eight ? 1.0 : 4096.0;
-        w.centre = eight ? 1.0 : std::ldexp(1.0, 11);
-        w.mul.resize(bins);
-        for (std::size_t b = 0; b < bins; ++b) w.mul[b] = eight ? std::int64_t(b) : std::int64_t(2 * b + 1);
+    std::vector<std::uint32_t> bin_of(src.data.size());
+    const std::size_t pixels = src.data.size() / n;
+    for (std::size_t c = 0; c < cc; ++c) {
+        std::vector<std::int64_t> held;
+        if (grid) {
+            held.resize(std::size_t(levels) + 1);
+            for (std::size_t b = 0; b < held.size(); ++b) held[b] = units(static_cast<double>(value_of(int(b), levels)));
+            for (std::size_t i = 0; i < pixels; ++i) bin_of[i * n + c] = static_cast<std::uint32_t>(values[i * n + c]);
+        } else {
+            held.reserve(pixels);
+            for (std::size_t i = 0; i < pixels; ++i) held.push_back(values[i * n + c]);
+            std::sort(held.begin(), held.end());
+            held.erase(std::unique(held.begin(), held.end()), held.end());
+            for (std::size_t i = 0; i < pixels; ++i)
+                bin_of[i * n + c] = static_cast<std::uint32_t>(std::lower_bound(held.begin(), held.end(), values[i * n + c]) - held.begin());
+        }
+        // (coarse bins of about the square root of the bins: 16 levels of 8 bits, 256 of 16 bits)
+        const int bits = std::max(4, (std::bit_width(held.size()) + 1) / 2);
+        weighted[c].reset(std::move(held), bits);
     }
     const auto take = [&](int x, int y, int sign) {
         const int cx = std::clamp(x, win.x0, win.x1 - 1), cy = std::clamp(y, win.y0, win.y1 - 1);
         const std::size_t i = src.index(cx, cy);
         if (!(src.data[i + cc] > 0.0f)) return;  // (what does not show weighs nothing)
-        for (std::size_t c = 0; c < cc; ++c) weighted[c].add(bin_of[i + c], values[i + c], sign);
+        for (std::size_t c = 0; c < cc; ++c) weighted[c].add(bin_of[i + c], sign);
     };
     const double tu = t / unit;
     std::vector<float> res(out.area() * n);
@@ -402,10 +461,10 @@ float hash01(int x, int y, std::uint32_t c, std::uint32_t seed) {
 
 std::vector<float> median(const Window& src, const Rect& out, const Ctx& ctx, int r, std::optional<float> threshold, Method method) {
     if (r <= 0) return src.crop(out);
-    const bool exact = ctx.levels == 255 || ctx.levels == 65535;
     // (a small disc is as quick as written; the same values either way)
-    if (method == Method::Naive || !exact || (method == Method::Auto && r < 3)) return median_naive(src, out, r, threshold);
-    return median_fast(src, out, ctx.levels, r, threshold);
+    if (method == Method::Naive || (method == Method::Auto && r < 3)) return median_naive(src, out, r, threshold);
+    if (ctx.levels == 255 || ctx.levels == 65535) return median_levels(src, out, ctx.levels, r, threshold);
+    return median_ranked(src, out, r, threshold);
 }
 
 std::vector<float> extreme(const Window& src, const Rect& out, double radius, bool square, bool max, Method method) {
@@ -415,10 +474,9 @@ std::vector<float> extreme(const Window& src, const Rect& out, double radius, bo
 
 std::vector<float> surface(const Window& src, const Rect& out, const Ctx& ctx, int r, float t, Method method) {
     if (r <= 0) return src.crop(out);
-    const bool eight = ctx.levels == 255;
-    const bool unit = ctx.least >= 0 && ctx.largest <= 1;
-    if (method == Method::Naive || (method == Method::Auto && r <= 8) || (!eight && !unit)) return surface_naive(src, out, r, t);
-    return surface_fast(src, out, eight, r, t);
+    const bool levels = ctx.levels == 255 || ctx.levels == 65535;
+    if (method == Method::Naive || (method == Method::Auto && r <= 8) || !std::isfinite(ctx.largest)) return surface_naive(src, out, r, t);
+    return surface_fast(src, out, levels ? ctx.levels : 0, ctx.largest, r, t);
 }
 
 float lightness(const Ctx& ctx, const float* px) {
