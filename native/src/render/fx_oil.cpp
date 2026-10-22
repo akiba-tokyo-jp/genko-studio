@@ -93,12 +93,25 @@ std::vector<float> oil_paint(const Json& params, const Window& src, const Rect& 
     const float h = std::max(len / 10.0f, 1.0f);
     const int steps = static_cast<int>(std::ceil(len / h));
     std::vector<float> col(rw * rh * n, 0.0f), bristle(rw * rh, 0.0f);
-    const auto sample = [&](float x, float y, float* acc, float k) {
-        x = std::clamp(x, 0.0f, static_cast<float>(ww - 1));
-        y = std::clamp(y, 0.0f, static_cast<float>(wh - 1));
-        const std::size_t x0 = static_cast<std::size_t>(std::floor(x)), y0 = static_cast<std::size_t>(std::floor(y));
+    // (a place on the walk: a pixel of the window and an offset from it — the offset's sums the same whatever window holds
+    // the stroke, so its samples are the same bytes whatever the tiling)
+    const auto whole = [](int base, float off, int most, float& frac) {
+        const float f = std::floor(off);
+        int v = base + static_cast<int>(f);
+        frac = off - f;
+        if (v < 0) {
+            v = 0;
+            frac = 0.0f;
+        } else if (v >= most) {
+            v = most;
+            frac = 0.0f;
+        }
+        return static_cast<std::size_t>(v);
+    };
+    const auto sample = [&](int bx, int by, float offx, float offy, float* acc, float k) {
+        float ax = 0, ay = 0;
+        const std::size_t x0 = whole(bx, offx, static_cast<int>(ww) - 1, ax), y0 = whole(by, offy, static_cast<int>(wh) - 1, ay);
         const std::size_t x1 = std::min(x0 + 1, ww - 1), y1 = std::min(y0 + 1, wh - 1);
-        const float ax = x - static_cast<float>(x0), ay = y - static_cast<float>(y0);
         const float w00 = (1.0f - ax) * (1.0f - ay) * k, w10 = ax * (1.0f - ay) * k, w01 = (1.0f - ax) * ay * k, w11 = ax * ay * k;
         const std::size_t i00 = (y0 * ww + x0) * n, i10 = (y0 * ww + x1) * n, i01 = (y1 * ww + x0) * n, i11 = (y1 * ww + x1) * n;
         for (std::size_t c = 0; c < n; ++c) acc[c] += p[i00 + c] * w00 + p[i10 + c] * w10 + p[i01 + c] * w01 + p[i11 + c] * w11;
@@ -106,16 +119,16 @@ std::vector<float> oil_paint(const Json& params, const Window& src, const Rect& 
     std::vector<float> acc(n);
     for (std::size_t ry = 0; ry < rh; ++ry)
         for (std::size_t rx = 0; rx < rw; ++rx) {
-            const float dx = static_cast<float>(r1.x0 - win.x0) + static_cast<float>(rx), dy = static_cast<float>(r1.y0 - win.y0) + static_cast<float>(ry);
+            const int dx = r1.x0 - win.x0 + static_cast<int>(rx), dy = r1.y0 - win.y0 + static_cast<int>(ry);
             std::fill(acc.begin(), acc.end(), 0.0f);
             float wsum = 1.0f;
-            sample(dx, dy, acc.data(), 1.0f);
-            float nsum = bristle_noise(static_cast<float>(win.x0) + dx, static_cast<float>(win.y0) + dy, ctx);
+            sample(dx, dy, 0.0f, 0.0f, acc.data(), 1.0f);
+            float nsum = bristle_noise(static_cast<float>(win.x0 + dx), static_cast<float>(win.y0 + dy), ctx);
             for (const float dir : {1.0f, -1.0f}) {
-                float qx = dx, qy = dy, px = 0, py = 0;
+                float qx = 0, qy = 0, px = 0, py = 0;  // (the offset walked from the pixel)
                 for (int k = 1; k <= steps; ++k) {
-                    const std::size_t ti = static_cast<std::size_t>(std::clamp(std::round(qy), 0.0f, static_cast<float>(wh - 1))) * ww +
-                                           static_cast<std::size_t>(std::clamp(std::round(qx), 0.0f, static_cast<float>(ww - 1)));
+                    const int nx = dx + static_cast<int>(std::round(qx)), ny = dy + static_cast<int>(std::round(qy));
+                    const std::size_t ti = static_cast<std::size_t>(std::clamp(ny, 0, static_cast<int>(wh) - 1)) * ww + static_cast<std::size_t>(std::clamp(nx, 0, static_cast<int>(ww) - 1));
                     auto [tx, ty] = tangent[ti];
                     if (k == 1) {
                         tx *= dir;
@@ -129,9 +142,9 @@ std::vector<float> oil_paint(const Json& params, const Window& src, const Rect& 
                     qx += tx * h;
                     qy += ty * h;
                     const float wk = 1.0f - static_cast<float>(k) / static_cast<float>(steps + 1);
-                    sample(qx, qy, acc.data(), wk);
+                    sample(dx, dy, qx, qy, acc.data(), wk);
                     wsum += wk;
-                    nsum += wk * bristle_noise(static_cast<float>(win.x0) + std::round(qx), static_cast<float>(win.y0) + std::round(qy), ctx);
+                    nsum += wk * bristle_noise(static_cast<float>(win.x0 + dx + static_cast<int>(std::round(qx))), static_cast<float>(win.y0 + dy + static_cast<int>(std::round(qy))), ctx);
                 }
             }
             const std::size_t o = (ry * rw + rx) * n;

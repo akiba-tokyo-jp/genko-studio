@@ -611,7 +611,8 @@ private slots:
                 for (std::uint32_t x = 0; x < 48; ++x) {
                     const auto p = pixel(out, x, y);
                     if (p[3] < 0.01) continue;
-                    QVERIFY2(p[0] > 0.99 && p[1] < 0.01 && p[2] < 0.01,
+                    const double jitter = kind == "pixelate_pointillize" ? 0.041 : 0.01;  // (点描's dots: ±4 % of their colour, PhotoCraft's)
+                    QVERIFY2(p[0] > 1.0 - jitter && p[1] < jitter && p[2] < jitter,
                              qPrintable(QStringLiteral("%1 (%2, %3): %4 %5 %6 %7").arg(QString::fromStdString(kind)).arg(x).arg(y).arg(p[0]).arg(p[1]).arg(p[2]).arg(p[3])));
                 }
         }
@@ -713,10 +714,11 @@ private slots:
         }
         {
             const auto now = inks_of(apply_ops(lab, Json::array({Json{{"op", "filter_raster"}, {"page", 1}, {"id", "pic"}, {"kind", "stylize_solarize"}}})).doc);
-            QVERIFY(std::fabs(now.value(10 * 64 + 40, 0) - 10.0) < 0.1);  // (L 90 past the middle: 10)
-            QVERIFY(std::fabs(now.value(10 * 64 + 10, 0) - 20.0) < 0.1);  // (L 20: as it was)
-            QVERIFY(std::fabs(now.value(10 * 64 + 10, 1) - 40.0) < 0.6);  // (its a and b as they were)
-            QVERIFY(std::fabs(now.value(10 * 64 + 10, 2) + 30.0) < 0.6);
+            const auto said = [&](std::size_t i, unsigned c) { return QString::number(now.value(i, c)).toUtf8(); };
+            QVERIFY2(std::fabs(now.value(10 * 64 + 40, 0) - 10.0) < 0.1, said(10 * 64 + 40, 0).constData());  // (L 90 past the middle: 10)
+            QVERIFY2(std::fabs(now.value(10 * 64 + 10, 0) - 20.0) < 0.1, said(10 * 64 + 10, 0).constData());  // (L 20: as it was)
+            QVERIFY2(std::fabs(now.value(10 * 64 + 10, 1) - 40.0) < 0.6, said(10 * 64 + 10, 1).constData());  // (its a and b as they were)
+            QVERIFY2(std::fabs(now.value(10 * 64 + 10, 2) + 30.0) < 0.6, said(10 * 64 + 10, 2).constData());
         }
         // a multichannel page and a grey one take each of them
         for (const std::string mode : {"multichannel", "gray"}) {
@@ -858,7 +860,8 @@ private slots:
         const render::Image picture = eight_pattern(200, 200);
         auto doc = eight_page(picture, render::Image::create("RGBA", render::Size{200, 200}, render::Ink{255, 60, 128, 255}));
         doc = apply_ops(doc, Json::array({Json{{"op", "smart_convert"}, {"page", 1}, {"ids", Json::array({"paint"})}, {"new_id", "so"}}})).doc;
-        const auto drawn = [](const core::Document& d) { return render::render_page(d.page(0), 100, render::proof_options(), &d).image.tobytes(); };
+        // (the smart object drawn alone: the map layer over it covers the page)
+        const auto drawn = [](const core::Document& d) { return render::layer_image(d.page(0), layer_of(d, "so"), 100, &d).tobytes(); };
         const std::string plain = drawn(doc);
         // the layer as the map: made a PNG the book holds
         const auto by_layer = apply_ops(doc, Json::array({Json{{"op", "smart_filter_add"}, {"page", 1}, {"id", "so"}, {"kind", "distort_displace"},
@@ -878,8 +881,7 @@ private slots:
         const auto changed = apply_ops(by_layer, Json::array({Json{{"op", "put_raster"}, {"page", 1}, {"id", "map"},
                                                                    {"png_base64", png_b64(render::Image::create("RGBA", render::Size{20, 20}, render::Ink{0, 255, 128, 255}))}}}))
                                  .doc;
-        const auto smart_drawn = [](const core::Document& d) { return render::layer_image(d.page(0), layer_of(d, "so"), 100, &d).tobytes(); };
-        QCOMPARE(smart_drawn(changed), smart_drawn(by_layer));
+        QCOMPARE(drawn(changed), drawn(by_layer));
         // the data as the map, set again on the filter: another file of the book
         const render::Image other = render::Image::create("RGBA", render::Size{4, 4}, render::Ink{40, 200, 128, 255});
         const auto set = apply_ops(by_layer, Json::array({Json{{"op", "smart_filter_set"}, {"page", 1}, {"id", "so"}, {"index", 0},
