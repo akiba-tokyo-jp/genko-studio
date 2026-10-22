@@ -158,7 +158,7 @@ private slots:
     // as the built-in groups with why, and saving over it is refused: the file stays as it was. Groups that cannot be
     // are not written.
     void aFileThatCannotBeReadIsNotWrittenOver() {
-        for (const std::string text : {std::string("{not json"), std::string(R"({"version": 2, "groups": []})"),
+        for (const std::string& text : {std::string("{not json"), std::string(R"({"version": 2, "groups": []})"),
                                        std::string(R"({"version": 1, "groups": [{"name": "g", "items": [{"name": "a", "value": -1}]}]})"),
                                        std::string(R"({"version": 1, "groups": [{"name": "g", "items": [{"name": "a", "value": 1}, {"name": "a", "value": 2}]}]})"),
                                        std::string(R"({"version": 1, "groups": {}})"), std::string(store::kFileMaxBytes + 1, ' ')}) {

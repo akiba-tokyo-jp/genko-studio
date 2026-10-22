@@ -16,7 +16,8 @@
 // Replacement; retouch::apply_dab_stroke) — the tiles of the layer's own grid a stroke reaches, kTile pixels square
 // (smaller at the grid's right and bottom edges), each held as the layer's own values (image_ops::Pixels: 8 bits,
 // precise, inks), read through the windowed read (image_ops::layer_pixels(…, boxes): the layer read once for them all)
-// and written back the same way, only the tiles changed: the rest of the layer keeps its bytes. A stroke across a 600 dpi
+// and written back the same way, only the pixels edited (each changed tile's box of them): the rest of the layer keeps its
+// bytes. A stroke across a 600 dpi
 // B4 page holds only the tiles along it, never the page in floats; the tiles are held in the imaging budget (past it:
 // too_large, nothing changed).
 
@@ -48,21 +49,21 @@ public:
     // Whether the pixel's tile is held.
     bool holds(int x, int y) const;
     // A pixel of a held tile (core::Error("value") for one that is not held): its values, colours then the alpha. edit()
-    // marks its tile changed.
+    // marks it edited (its tile changed).
     const float* at(int x, int y) const;
     float* edit(int x, int y);
     // The boxes of the tiles held, and of those changed (in the order of the grid's rows).
     std::vector<Box> held() const;
     std::vector<Box> changed() const;
-    // The changed tiles written back into the layer (one write; the pixels outside them keep their bytes), and the box
-    // they cover (none: empty). On a copy: core::Error("value").
+    // The pixels edited written back into the layer — each changed tile's box of them, in one write (the pixels outside
+    // them keep their bytes) —, and the box they cover (none: empty). On a copy: core::Error("value").
     Box put(core::Document& doc) const;
 
 private:
     struct Tile {
         Box box;
         image_ops::Pixels pixels;
-        bool changed = false;
+        Box edited;  // (the box of its pixels edited; empty: none)
     };
     std::int64_t key(int tx, int ty) const { return std::int64_t(ty) * columns_ + tx; }
     const Tile* tile_at(int x, int y) const;

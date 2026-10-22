@@ -1,7 +1,7 @@
 // PC4 E-0 (SPEC.md COLOR-08, ARCHITECTURE.md「描く道具の土台」): a layer's sparse tiles (render/tiled_pixels) and the
 // sequential-dab stroke on them (retouch::apply_dab_stroke and Smudge: upstream's paint/src/retouch.rs tests), on every
 // kind of layer (8 bits; 16 and 32 bits; the inks of CMYK, Lab and grey pages): only the tiles reached are read (each
-// once, all in one read) and only those changed written back — every other pixel of the layer keeps its value —; the
+// once, all in one read) and only the pixels edited written back — every other pixel of the layer keeps its value —; the
 // tiles read are the layer's values as the windowed read gives them; the dabs run in order on a working copy each sees,
 // and are mixed back by the opacity and the selection (a protected alpha kept); the Smudge drags a colour along; the
 // tiles are held in the imaging budget (past it: too_large, nothing changed); and the drawing tools' and patterns' ops
@@ -141,7 +141,7 @@ private slots:
     }
 
     // On every kind of layer: a tile read once, its values as the windowed read gives them; a pixel changed written back
-    // and every other pixel of the layer as it was; only the tiles changed written; the multi-window read of several
+    // and every other pixel of the layer as it was (a clear one's hidden colours too); only the pixels edited written; the multi-window read of several
     // boxes the same as each read alone.
     void onlyTheTilesReachedAreReadAndWritten() {
         for (const std::string& kind : kinds()) {
@@ -187,7 +187,7 @@ private slots:
             px[0] = 0.5f;
             px[tiles.colours()] = 0.75f;
             QCOMPARE(tiles.changed(), (std::vector<Box>{Box{256, 256, 512, 512}}));
-            QCOMPARE(tiles.put(doc), (Box{256, 256, 512, 512}));
+            QCOMPARE(tiles.put(doc), (Box{300, 301, 301, 302}));  // (only the pixels edited are written)
             const Pixels after = whole(doc);
             QCOMPARE(differing(before, after), (std::vector<std::pair<int, int>>{{300, 301}}));
             QVERIFY2(std::fabs(after.at(std::size_t(301) * after.width() + 300)[after.colours()] - 0.75f) < 1e-3f, kind.c_str());
@@ -256,7 +256,7 @@ private slots:
             QVERIFY2(tiles.at(250, 250)[0] > at[0] + 0.05f || at[0] > 0.95f, kind.c_str());  // (the dabs build up)
             const float* out = before.at(std::size_t(250) * before.width() + 270);
             QVERIFY(std::equal(out, out + n, tiles.at(270, 250)));  // (outside the selection: untouched)
-            tiles.put(doc);
+            QCOMPARE(tiles.put(doc), changed);
             for (const auto& [x, y] : differing(before, whole(doc))) QVERIFY2(x >= changed.x0 && x < changed.x1 && y >= changed.y0 && y < changed.y1, kind.c_str());
         }
         // the opacity and a protected alpha

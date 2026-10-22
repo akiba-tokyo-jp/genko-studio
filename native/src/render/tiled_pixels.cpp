@@ -67,10 +67,15 @@ std::size_t TiledPixels::reach(const std::vector<Box>& boxes) {
     if (context_ != nullptr) {
         std::vector<Pixels> read = image_ops::layer_pixels(*context_, at_, id_, missing);
         for (std::size_t i = 0; i < missing.size(); ++i) {
-            tiles_.emplace(key(missing[i].x0 / kTile, missing[i].y0 / kTile), Tile{missing[i], std::move(read[i]), false});
+            tiles_.emplace(key(missing[i].x0 / kTile, missing[i].y0 / kTile), Tile{missing[i], std::move(read[i]), Box{}});
         }
     } else {
-        for (const Box& box : missing) tiles_.emplace(key(box.x0 / kTile, box.y0 / kTile), Tile{box, clear_like(*like_, box), false});
+        std::vector<Pixels> made;  // (all made before any is held: past the budget, none)
+        made.reserve(missing.size());
+        for (const Box& box : missing) made.push_back(clear_like(*like_, box));
+        for (std::size_t i = 0; i < missing.size(); ++i) {
+            tiles_.emplace(key(missing[i].x0 / kTile, missing[i].y0 / kTile), Tile{missing[i], std::move(made[i]), Box{}});
+        }
     }
     return missing.size();
 }
@@ -92,7 +97,9 @@ const float* TiledPixels::at(int x, int y) const {
 float* TiledPixels::edit(int x, int y) {
     Tile* t = const_cast<Tile*>(tile_at(x, y));
     if (t == nullptr) throw core::Error("value", "the pixel (" + std::to_string(x) + ", " + std::to_string(y) + ") is not in a tile held");
-    t->changed = true;
+    t->edited = t->edited.width() <= 0 ? Box{x, y, x + 1, y + 1}
+                                       : Box{std::min(t->edited.x0, x), std::min(t->edited.y0, y), std::max(t->edited.x1, x + 1),
+                                             std::max(t->edited.y1, y + 1)};
     return t->pixels.at(std::size_t(y - t->box.y0) * std::size_t(t->box.width()) + std::size_t(x - t->box.x0));
 }
 
@@ -108,7 +115,7 @@ std::vector<Box> TiledPixels::held() const {
 std::vector<Box> TiledPixels::changed() const {
     std::vector<std::pair<std::int64_t, Box>> all;
     for (const auto& [k, t] : tiles_) {
-        if (t.changed) all.emplace_back(k, t.box);
+        if (t.edited.width() > 0) all.emplace_back(k, t.box);
     }
     std::sort(all.begin(), all.end(), [](const auto& a, const auto& b) { return a.first < b.first; });
     std::vector<Box> out;
@@ -118,15 +125,28 @@ std::vector<Box> TiledPixels::changed() const {
 
 Box TiledPixels::put(core::Document& doc) const {
     if (context_ == nullptr) throw core::Error("value", "these tiles are not a layer's");
-    std::vector<std::pair<Box, const Pixels*>> parts;
+    // (each changed tile's box of the pixels edited, copied out: a pixel never edited is never written — the encoders put a
+    // clear pixel's colours to nothing, an ink's back by its depth)
+    std::vector<Pixels> edited;
+    std::vector<Box> boxes;
     Box covered;
     for (const Box& box : changed()) {
         const Tile& t = tiles_.at(key(box.x0 / kTile, box.y0 / kTile));
-        parts.emplace_back(t.box, &t.pixels);
-        covered = covered.width() <= 0 ? t.box
-                                       : Box{std::min(covered.x0, t.box.x0), std::min(covered.y0, t.box.y0), std::max(covered.x1, t.box.x1),
-                                             std::max(covered.y1, t.box.y1)};
+        const Box& e = t.edited;
+        Pixels part = clear_like(*like_, e);
+        const unsigned n = part.all();
+        for (int y = e.y0; y < e.y1; ++y) {
+            for (int x = e.x0; x < e.x1; ++x) {
+                const float* from = t.pixels.at(std::size_t(y - t.box.y0) * std::size_t(t.box.width()) + std::size_t(x - t.box.x0));
+                std::copy(from, from + n, part.at(std::size_t(y - e.y0) * std::size_t(e.width()) + std::size_t(x - e.x0)));
+            }
+        }
+        edited.push_back(std::move(part));
+        boxes.push_back(e);
+        covered = covered.width() <= 0 ? e : Box{std::min(covered.x0, e.x0), std::min(covered.y0, e.y0), std::max(covered.x1, e.x1), std::max(covered.y1, e.y1)};
     }
+    std::vector<std::pair<Box, const Pixels*>> parts;
+    for (std::size_t i = 0; i < edited.size(); ++i) parts.emplace_back(boxes[i], &edited[i]);
     image_ops::put_layer_pixels(doc, at_, id_, parts);
     return covered;
 }
