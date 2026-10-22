@@ -548,6 +548,19 @@ const std::vector<Rule>& rules() {
         r.push_back(rule(R"(adjust filter_gallery\.effects\[\d+\] must .*)", "フィルターギャラリーのエフェクトレイヤーの書き方が違います（{filter, params, visible}）"));
         r.push_back(rule(R"(filter_gallery: every effect is hidden.*)",
                          "フィルターギャラリーのエフェクトレイヤーが全部隠れているので、何も変わりません（スマートフィルターなら隠したまま持てます）"));
+        // (D2: 置き換え's map and シアー's curve, core/filter_kinds, render/ops_filters)
+        r.push_back(rule(R"(adjust distort_displace\.map is required.*)", "置き換えには置き換えマップが要ります（この原稿のレイヤーか、PNG・PSD のファイル）"));
+        r.push_back(rule(R"(adjust distort_displace\.map_data is larger than 32 MiB)", "置き換えマップのファイルが大きすぎます（32 MiB まで）"));
+        r.push_back(rule(R"(adjust distort_displace\.map_data must be .*)", "置き換えマップのファイルは PNG か PSD です"));
+        r.push_back(rule(R"(adjust distort_displace\.map has no setting '(.*)' .*)", "置き換えマップの指定に「\\1」という設定はありません（page・layer）"));
+        r.push_back(rule(R"(adjust distort_displace\.map(?:\.page|\.layer|_suffix)? must .*)",
+                         "置き換えマップの指定が正しくありません（{\"layer\": レイヤーの id か \"merged\"}、または map_data）"));
+        r.push_back(rule(R"(the displacement map cannot be read \(.*\))", "置き換えマップが読めません（PNG か PSD のファイルを確かめます）"));
+        r.push_back(rule(R"(the displacement map's layer (\S+) is not on the page)", "置き換えマップのレイヤー（\\1）がそのページにありません"));
+        r.push_back(rule(R"(the displacement map's page (\S+) is not in the book)", "置き換えマップのページ（\\1）がこの原稿にありません"));
+        r.push_back(rule(R"(the displacement map \S+ is not in the book)", "置き換えマップのファイルがこの原稿にありません"));
+        r.push_back(rule(R"(adjust distort_shear\.points must be .*)", "シアーの曲線は、2〜64 個の点 [上からの位置 0〜1, ずらす量 −1〜1] で指定します"));
+        r.push_back(rule(R"(the smart object \S+'s filter \S+_data: .*)", "スマートフィルターのファイルは原稿の素材として持ちます（ファイルのデータのままでは持てません）"));
         r.push_back(rule(R"(adjust ((?:blur|sharpen|noise|other|video|distort|pixelate|stylize|render|filter|camera|lens|adaptive)_\S+?) has no setting '(.*)')",
                          "フィルター（\\1）に「\\2」という設定はありません"));
         r.push_back(rule(R"(adjust ((?:blur|sharpen|noise|other|video|distort|pixelate|stylize|render|filter|camera|lens|adaptive)_\S+?)\.(\S+) (?:must|needs|is) .*)",

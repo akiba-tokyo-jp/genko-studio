@@ -100,6 +100,7 @@ genko_library(genko_app
     image_dialogs.cpp
     filter_forms.cpp
     filter_forms_basic.cpp
+    filter_forms_distort.cpp
     filter_menu.cpp
     filter_gallery_window.cpp
     main_window_adjust.cpp

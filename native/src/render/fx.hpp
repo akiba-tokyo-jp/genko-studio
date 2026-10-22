@@ -63,21 +63,25 @@ struct Window {
     Rect rect;
     std::size_t ch = 4;
     std::vector<float> data;
+    // (D2) The layer's own samples read in place instead of `data` (a whole kind's base box on a 32-bit precise layer, its
+    // rows whole: no copy of them — design 4.3): a kernel of a whole kind reads by get, at, px or base(), never `data`.
+    const float* view = nullptr;
 
     Window() = default;
     Window(const Rect& r, std::size_t channels) : rect(r), ch(channels), data(r.area() * channels, 0.0f) {}
     int w() const { return rect.width(); }
+    const float* base() const { return view != nullptr ? view : data.data(); }
     std::size_t index(int x, int y) const { return ((std::size_t(y - rect.y0) * std::size_t(rect.width())) + std::size_t(x - rect.x0)) * ch; }
     // The sample at (x, y); 0 outside.
-    float get(int x, int y, std::size_t c) const { return rect.contains(x, y) ? data[index(x, y) + c] : 0.0f; }
+    float get(int x, int y, std::size_t c) const { return rect.contains(x, y) ? base()[index(x, y) + c] : 0.0f; }
     // The sample at (x, y), past the window's edge its edge pixel's (a kernel's window is cut to the layer's grid: this
     // repeats the grid's edge, upstream's read_clamped).
     float at(int x, int y, std::size_t c) const {
         if (rect.empty()) return 0.0f;
-        return data[index(std::clamp(x, rect.x0, rect.x1 - 1), std::clamp(y, rect.y0, rect.y1 - 1)) + c];
+        return base()[index(std::clamp(x, rect.x0, rect.x1 - 1), std::clamp(y, rect.y0, rect.y1 - 1)) + c];
     }
     // The pixel at (x, y) (inside).
-    const float* px(int x, int y) const { return data.data() + index(x, y); }
+    const float* px(int x, int y) const { return base() + index(x, y); }
     // The sample with an edge rule relative to `area`.
     float get_edge(int x, int y, std::size_t c, Edge edge, const Rect& area) const;
     // The bilinear sample of the premultiplied pixel at (x, y) (pixel centres at .5) into `out` (straight colour, the
@@ -85,6 +89,18 @@ struct Window {
     void sample(float x, float y, Edge edge, const Rect& area, bool alpha, float* out) const;
     // The samples inside `out` (an identity pass).
     std::vector<float> crop(const Rect& out) const;
+};
+
+// (D2) A picture a kind reads beside the layer: width × height pixels of 8-bit straight RGBA bytes, rows from the top.
+struct Picture {
+    int width = 0, height = 0;
+    std::string rgba;
+    bool empty() const { return width <= 0 || height <= 0; }
+    // Channel c of the pixel at (x, y), 0..1, clamped to the picture's edge.
+    float at(int x, int y, unsigned c) const {
+        const std::size_t i = (std::size_t(std::clamp(y, 0, height - 1)) * std::size_t(width) + std::size_t(std::clamp(x, 0, width - 1))) * 4 + c;
+        return static_cast<unsigned char>(rgba[i]) / 255.0f;
+    }
 };
 
 // What a kernel runs in (upstream's Ctx, with Genko's scale): the base box (distortions are centred on it and sample
@@ -114,6 +130,9 @@ struct Ctx {
     float coverage(int x, int y) const {
         return cover == nullptr ? 1.0f : static_cast<unsigned char>((*cover)[std::size_t(y) * grid_width + std::size_t(x)]) / 255.0f;
     }
+    // (D2) A picture a kind reads beside the layer (置き換え's displacement map, a pixel of it a working 200 dpi pixel — the
+    // caller's, render/ops_filters: a layer of the book, a file's data or one the book holds); none: none.
+    const Picture* map = nullptr;
     // (D3) Where the surface's (0, 0) is on the layer's grid (0, 0 but for a part of it worked alone — フィルターギャラリー's
     // preview, PlaceScope —; `bounds` is then that part's own coordinates, past its edges): a kernel that draws marks by the
     // grid's coordinates adds it.
@@ -155,9 +174,10 @@ Kernels sharpen_kernels();       // render/fx_sharpen.cpp — D1
 Kernels noise_kernels();         // render/fx_noise.cpp — D1
 Kernels other_kernels();         // render/fx_other.cpp — D1
 Kernels video_kernels();         // render/fx_video.cpp — D1
-Kernels distort_kernels();       // D2
-Kernels pixelate_kernels();      // D2
-Kernels stylize_kernels();       // D2
+Kernels distort_kernels();       // render/fx_distort.cpp — D2: 変形
+Kernels pixelate_kernels();      // render/fx_pixelate.cpp — D2: ピクセレート
+Kernels stylize_kernels();       // render/fx_stylize.cpp — D2: 表現手法 (油彩: render/fx_oil.cpp, oil_kernel)
+Kernel oil_kernel();             // render/fx_oil.cpp — D2: 油彩 (stylize_kernels takes it)
 Kernels gallery_kernels();       // D3
 Kernels render_kernels();        // D4
 Kernels blur_gallery_kernels();  // D4
@@ -215,6 +235,12 @@ public:
     // shows (after content(); 0 but for floats).
     virtual unsigned levels() const { return 0; }
     virtual double least() const { return 0.0; }
+    // (D2) Its samples from row y on as the straight floats a window holds (colours, then the alpha; rows whole), read in
+    // place — a 32-bit precise layer's, as stored —; none for any other.
+    virtual const float* floats(int y) const {
+        (void)y;
+        return nullptr;
+    }
 };
 // The three ways' surfaces: an 8-bit RGBA picture's bytes, a precise raster's (GKCR), an ink raster (its pixels — kept by
 // the caller while the surface lives —, the page's mode). After a run, an 8-bit surface's new picture (take_image) and
@@ -231,10 +257,11 @@ std::string take_bytes(Surface& surface);
 // are worked as `inks` says on a page of inks. OpError (too_large) when the imaging budget cannot hold one window;
 // render::Cancelled when the run is stopped (StopScope). `reads` (D1): what its kernel may read besides the layer —
 // the selection's coverage when the caller keeps the result to it itself (an 8-bit layer, `cover` none: Ctx::cover), a
-// plane over the grid (Ctx::plane).
+// plane over the grid (Ctx::plane), a picture of its own (D2: Ctx::map).
 struct Reads {
     const std::string* within = nullptr;
     const std::vector<float>* plane = nullptr;
+    const Picture* map = nullptr;  // (D2: Ctx::map)
 };
 void apply(Surface& surface, const Kernel& kernel, const core::Json& params, core::FilterInks inks, const Rect& bounds, const std::string* cover,
            double s, const Rect* limit = nullptr, const Tiling& tiling = {}, const Reads& reads = {});

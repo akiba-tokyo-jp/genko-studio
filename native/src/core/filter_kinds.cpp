@@ -6,11 +6,16 @@
 #include "core/filter_kinds.hpp"
 
 #include <algorithm>
+#include <array>
 #include <cmath>
 #include <set>
 
+#include "core/base64.hpp"
+#include "core/pyconv.hpp"
 #include "core/command_bus.hpp"
+#include "core/error.hpp"
 #include "core/gallery_kinds.hpp"
+#include "core/ink.hpp"
 #include "core/pyops.hpp"
 #include "core/smart.hpp"
 
@@ -321,9 +326,210 @@ std::vector<FilterKind> video_kinds() {
     out.push_back(kind(info("video_ntsc_colors", "filter.video.ntscColors", "NTSC カラー", "ビデオ", FilterInks::Meaning), {}));
     return out;
 }
-std::vector<FilterKind> distort_kinds() { return {}; }       // (D2)
-std::vector<FilterKind> pixelate_kinds() { return {}; }      // (D2)
-std::vector<FilterKind> stylize_kinds() { return {}; }       // (D2)
+// --- D2: 変形・ピクセレート・表現手法 ----------------------------------------------------------------------------------
+
+namespace {
+
+// (D2) A choice whose default is not its first value.
+AdjustParam choice_of(std::string_view key, std::vector<std::string_view> choices, std::string_view fallback) {
+    AdjustParam p = choice(key, std::move(choices));
+    p.text = fallback;
+    return p;
+}
+
+// (D2) A setting read by the kind's own normalize (absent: what the normalize says).
+AdjustParam custom(std::string_view key, bool optional) {
+    AdjustParam p;
+    p.key = key;
+    p.type = Type::Custom;
+    p.optional = optional;
+    return p;
+}
+
+// (D2) A colour [r, g, b] 0..255 with its default.
+AdjustParam rgb(std::string_view key, std::array<int, 3> fallback) {
+    AdjustParam p;
+    p.key = key;
+    p.type = Type::Rgb;
+    p.numbers = {static_cast<double>(fallback[0]), static_cast<double>(fallback[1]), static_cast<double>(fallback[2])};
+    p.lo = 0;
+    p.hi = 255;
+    return p;
+}
+
+bool finite_number(const Json& v) { return v.is_number() && !v.is_boolean() && std::isfinite(v.get<double>()); }
+
+// 置き換え's map (design 2.6) in its normal form: a file's data (map_data: a PNG or PSD, base64 — the map is then that
+// file, its ref and suffix added), a layer of the book ({"page"?, "layer": id | "merged"}) or a file the book holds
+// ("map": "sha256:…" and its "map_suffix"). One is required; the data first, then a layer, else a file.
+Json read_displacement_map(Json read) {
+    const std::string where = "adjust distort_displace";
+    if (const Json* data = get(read, "map_data"); data != nullptr && !data->is_null()) {
+        const std::string wrong = where + ".map_data must be the base64 text of a PNG or PSD file";
+        if (!data->is_string()) throw OpError(wrong);
+        std::string bytes;
+        try {
+            bytes = a2b_base64(data->get_ref<const std::string&>());
+        } catch (const Error&) {
+            throw OpError(wrong);
+        }
+        if (bytes.size() > kDisplacementMapMaxBytes) throw OpError(where + ".map_data is larger than 32 MiB");
+        std::string suffix;
+        if (bytes.starts_with(std::string_view("\x89PNG\r\n\x1a\n", 8))) suffix = ".png";
+        else if (bytes.starts_with("8BPS")) suffix = ".psd";
+        else throw OpError(wrong);
+        read["map"] = bytes_ref(bytes);
+        read["map_suffix"] = suffix;
+        return read;
+    }
+    read.erase("map_data");
+    const Json* map = get(read, "map");
+    if (map == nullptr || map->is_null())
+        throw OpError(where + ".map is required: a layer of the book ({\"layer\": id or \"merged\"}) or a file's data (map_data: a PNG or PSD)");
+    if (map->is_object()) {
+        for (const auto& [key, value] : map->items()) {
+            if (key != "page" && key != "layer") throw OpError(where + ".map has no setting " + py_repr_str(key) + " (page, layer)");
+        }
+        Json layer = Json::object();
+        if (const Json* page = get(*map, "page"); page != nullptr && !page->is_null()) {
+            if (!page->is_number_integer() && !page->is_string()) throw OpError(where + ".map.page must be a page of the book");
+            layer["page"] = *page;
+        }
+        const Json* id = get(*map, "layer");
+        if (id == nullptr || !id->is_string() || id->get_ref<const std::string&>().empty())
+            throw OpError(where + ".map.layer must be a layer's id or \"merged\"");
+        layer["layer"] = *id;
+        read["map"] = std::move(layer);
+        read.erase("map_suffix");  // (a layer's: none)
+        return read;
+    }
+    if (!map->is_string() || !is_ref(map->get<std::string>()))
+        throw OpError(where + ".map must be a layer of the book ({\"layer\": id or \"merged\"}) or one of its files (sha256:…)");
+    const Json* suffix = get(read, "map_suffix");
+    if (suffix == nullptr || !suffix->is_string() || !known_suffix(suffix->get<std::string>()))
+        throw OpError(where + ".map_suffix must be .png or .psd (the kind of the book's file)");
+    return read;
+}
+
+// シアー's curve (filters_ext.rs Shear, distort2.rs shear): 2 to 64 points [t, offset] — t 0..1 from the base box's top
+// to its bottom, offset −1..1 of half its width —, clamped, sorted by t, the second of two within 1e-6 left out; none
+// given: the straight line [[0, 0], [1, 0]].
+Json read_shear_points(Json read) {
+    const Json* points = get(read, "points");
+    if (points == nullptr || points->is_null()) {
+        read["points"] = Json::array({Json::array({0, 0}), Json::array({1, 0})});
+        return read;
+    }
+    const std::string message = "adjust distort_shear.points must be a list of 2 to " + std::to_string(kShearMostPoints) +
+                                " points [t, offset] (t 0..1 from the top, offset −1..1 of half the width)";
+    if (!points->is_array() || points->size() < 2 || points->size() > kShearMostPoints) throw OpError(message);
+    std::vector<std::array<double, 2>> kept;
+    for (const Json& point : *points) {
+        if (!point.is_array() || point.size() != 2 || !finite_number(point[0]) || !finite_number(point[1])) throw OpError(message);
+        kept.push_back({std::clamp(point[0].get<double>(), 0.0, 1.0), std::clamp(point[1].get<double>(), -1.0, 1.0)});
+    }
+    std::stable_sort(kept.begin(), kept.end(), [](const auto& a, const auto& b) { return a[0] < b[0]; });
+    Json out = Json::array();
+    for (const auto& point : kept) {
+        if (!out.empty() && std::fabs(point[0] - out.back()[0].get<double>()) < 1e-6) continue;
+        out.push_back(Json::array({number_json(point[0]), number_json(point[1])}));
+    }
+    read["points"] = std::move(out);
+    return read;
+}
+
+}  // namespace
+
+std::vector<FilterKind> distort_kinds() {
+    // D2 (filters.rs 92-129, filters_ext.rs 151-171; design 2.1, 2.6): each a distortion of the base box — a selection's
+    // box, else the layer's grid — centred on it, its pixels moved (each plate of a page of inks as it is). Lengths (波形's
+    // wavelengths and amplitudes, 波紋's sizes, 置き換え's 100 % = 128 px) are pixels of the working 200 dpi.
+    std::vector<FilterKind> out;
+    {
+        FilterKind displace = kind(info("distort_displace", "filter.distort.displace", "置き換え", "変形"),
+                                   {number("horizontal", 10, -999, 999), number("vertical", 10, -999, 999), choice("fit", {"stretch", "tile"}),
+                                    choice("undefined_areas", {"repeat", "wrap"}), custom("map", true), custom("map_suffix", true), custom("map_data", true)});
+        displace.info.files = {"map"};
+        displace.kind.hooks.normalize = [](Json read, const Page*, LookupTables*) { return read_displacement_map(std::move(read)); };
+        out.push_back(std::move(displace));
+    }
+    out.push_back(kind(info("distort_pinch", "filter.distort.pinch", "つまむ", "変形"), {number("amount", 50, -100, 100)}));
+    out.push_back(kind(info("distort_polar_coordinates", "filter.distort.polarCoordinates", "極座標", "変形"),
+                       {choice("mode", {"rectangular_to_polar", "polar_to_rectangular"})}));
+    out.push_back(kind(info("distort_ripple", "filter.distort.ripple", "波紋", "変形"),
+                       {number("amount", 100, -999, 999), choice_of("size", {"small", "medium", "large"}, "medium")}));
+    {
+        FilterKind shear = kind(info("distort_shear", "filter.distort.shear", "シアー", "変形"), {custom("points", false), choice("undefined_areas", {"wrap", "repeat"})});
+        shear.kind.hooks.normalize = [](Json read, const Page*, LookupTables*) { return read_shear_points(std::move(read)); };
+        out.push_back(std::move(shear));
+    }
+    out.push_back(kind(info("distort_spherize", "filter.distort.spherize", "球面", "変形"),
+                       {number("amount", 100, -100, 100), choice("mode", {"normal", "horizontal_only", "vertical_only"})}));
+    out.push_back(kind(info("distort_twirl", "filter.distort.twirl", "渦巻き", "変形"), {number("angle", 50, -999, 999)}));
+    out.push_back(kind(info("distort_wave", "filter.distort.wave", "波形", "変形"),
+                       {whole("generators", 5, 1, 999), number("wavelength_min", 10, 1, 998), number("wavelength_max", 120, 2, 999),
+                        number("amplitude_min", 5, 1, 998), number("amplitude_max", 35, 1, 999), choice("type", {"sine", "triangle", "square"}),
+                        choice("undefined_areas", {"wrap", "repeat"}), seed()}));
+    out.push_back(kind(info("distort_zigzag", "filter.distort.zigZag", "ジグザグ", "変形"),
+                       {number("amount", 10, -100, 100), number("ridges", 5, 0, 20), choice("style", {"pond_ripples", "out_from_center", "around_center"})}));
+    return out;
+}
+
+std::vector<FilterKind> pixelate_kinds() {
+    // D2 (filters.rs 86, filters_ext.rs 74-99): cells and screens anchored at the base box's corner, a cell's size in
+    // pixels of the working 200 dpi. カラーハーフトーン and メゾティント screen each plate of a page of inks (a Lab page: the
+    // colours it means); 点描 lays its dots on the background colour (the colours the inks mean).
+    std::vector<FilterKind> out;
+    out.push_back(kind(info("pixelate_color_halftone", "filter.pixelate.colorHalftone", "カラーハーフトーン", "ピクセレート", FilterInks::Halftone),
+                       {number("max_radius", 8, 4, 127), number("channel1", 108, -360, 360), number("channel2", 162, -360, 360), number("channel3", 90, -360, 360),
+                        number("channel4", 45, -360, 360)}));
+    out.push_back(kind(info("pixelate_crystallize", "filter.pixelate.crystallize", "水晶", "ピクセレート"), {number("cell_size", 10, 3, 300), seed()}));
+    out.push_back(kind(info("pixelate_facet", "filter.pixelate.facet", "ファセット", "ピクセレート"), {}));
+    out.push_back(kind(info("pixelate_fragment", "filter.pixelate.fragment", "ぶれ", "ピクセレート"), {}));
+    out.push_back(kind(info("pixelate_mezzotint", "filter.pixelate.mezzotint", "メゾティント", "ピクセレート", FilterInks::Halftone),
+                       {choice("type", {"fine_dots", "medium_dots", "grainy_dots", "coarse_dots", "short_lines", "medium_lines", "long_lines",
+                                        "short_strokes", "medium_strokes", "long_strokes"}),
+                        seed()}));
+    out.push_back(kind(info("pixelate_mosaic", "filter.pixelate.mosaic", "モザイク", "ピクセレート"), {number("cell_size", 10, 2, 200)}));
+    {
+        FilterInfo dots = info("pixelate_pointillize", "filter.pixelate.pointillize", "点描", "ピクセレート", FilterInks::Meaning);
+        dots.colours = {"background"};
+        out.push_back(kind(std::move(dots), {number("cell_size", 5, 3, 300), seed(), rgb("background", {255, 255, 255})}));
+    }
+    return out;
+}
+
+std::vector<FilterKind> stylize_kinds() {
+    // D2 (filters.rs 87-91, filters_ext.rs 100-150): on a page of inks by the lightness (CMYK and multichannel plates as
+    // 1 − ink — a relief, an edge, a shade and a streak as on RGB —; a Lab page's L, a and b each: the kernel keeps or greys
+    // its a and b), タイル by the colours the inks mean (its fills are colours). Lengths in pixels of the working 200 dpi.
+    std::vector<FilterKind> out;
+    const FilterInks light = FilterInks::LightnessAndColour;
+    out.push_back(kind(info("stylize_diffuse", "filter.stylize.diffuse", "拡散", "表現手法", light),
+                       {choice("mode", {"normal", "darken_only", "lighten_only", "anisotropic"}), seed()}));
+    out.push_back(kind(info("stylize_emboss", "filter.stylize.emboss", "エンボス", "表現手法", light),
+                       {number("angle", 135, -180, 180), number("height", 3, 1, 100), number("amount", 100, 1, 500)}));
+    out.push_back(kind(info("stylize_extrude", "filter.stylize.extrude", "押し出し", "表現手法", light),
+                       {choice("type", {"blocks", "pyramids"}), number("size", 30, 2, 255), number("depth", 30, 1, 255), choice("depth_mode", {"random", "level_based"}),
+                        boolean("solid_front_faces", false), boolean("mask_incomplete_blocks", false), seed()}));
+    out.push_back(kind(info("stylize_find_edges", "filter.stylize.findEdges", "輪郭検出", "表現手法", light), {}));
+    out.push_back(kind(info("stylize_oil_paint", "filter.stylize.oilPaint", "油彩", "表現手法", light),
+                       {number("stylization", 4, 0.1, 10), number("cleanliness", 5, 0, 10), number("scale", 1, 0.1, 10), number("bristle_detail", 5, 0, 10),
+                        boolean("lighting", true), number("angle", -60, -180, 180), number("shine", 1, 0, 10)}));
+    out.push_back(kind(info("stylize_solarize", "filter.stylize.solarize", "ソラリゼーション", "表現手法", light), {}));
+    {
+        FilterInfo tiles = info("stylize_tiles", "filter.stylize.tiles", "タイル", "表現手法", FilterInks::Meaning);
+        tiles.colours = {"foreground", "background"};
+        out.push_back(kind(std::move(tiles), {whole("count", 10, 1, 99), number("max_offset", 10, 1, 99), choice("fill", {"background", "foreground", "inverse", "unaltered"}),
+                                              rgb("foreground", {0, 0, 0}), rgb("background", {255, 255, 255}), seed()}));
+    }
+    out.push_back(kind(info("stylize_trace_contour", "filter.stylize.traceContour", "等高線", "表現手法", light),
+                       {number("level", 128, 0, 255), choice("edge", {"lower", "upper"})}));
+    out.push_back(kind(info("stylize_wind", "filter.stylize.wind", "風", "表現手法", light),
+                       {choice("method", {"wind", "blast", "stagger"}), choice("direction", {"from_right", "from_left"}), seed()}));
+    return out;
+}
+
 std::vector<FilterKind> render_kinds() { return {}; }        // (D4)
 std::vector<FilterKind> blur_gallery_kinds() { return {}; }  // (D4)
 std::vector<FilterKind> camera_raw_kinds() { return {}; }    // (D5)
@@ -418,9 +624,12 @@ void validate_filters(const Document& doc, const std::function<bool(const std::s
         const FilterInfo* found = filter_info(kind);
         if (found == nullptr) return;
         for (const std::string_view key : found->files) {
+            const std::string where = "the smart object " + layer.id + "'s filter " + kind + "." + std::string(key);
+            // (D2: a smart filter holds its file as the book's — never the file's data, which the op makes the book's)
+            if (const Json* data = get(params, std::string(key) + "_data"); data != nullptr && !data->is_null())
+                throw Error("value", where + "_data: a smart filter's file is one of the book's files (sha256:…), not its data");
             const Json* ref = get(params, key);
             if (ref == nullptr || ref->is_null()) continue;
-            const std::string where = "the smart object " + layer.id + "'s filter " + kind + "." + std::string(key);
             const Json* suffix = get(params, std::string(key) + "_suffix");
             if (!ref->is_string() || !is_ref(ref->get<std::string>()))
                 throw Error("value", where + " is not one of the book's files (sha256:…)");

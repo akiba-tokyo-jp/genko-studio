@@ -24,6 +24,7 @@
 #include "render/ink_filters.hpp"
 #include "render/layer_transform.hpp"
 #include "render/ops_adjust.hpp"
+#include "render/ops_filters.hpp"
 #include "render/page_internal.hpp"
 #include "render/png.hpp"
 #include "render/resample.hpp"
@@ -619,7 +620,8 @@ std::size_t push_filter(core::Document& doc, const core::Page& page, core::Layer
                         const std::optional<Json>& area) {
     if (layer.kind != core::LayerKind::Smart || !layer.smart || !layer.smart->is_object()) throw core::OpError("layer " + layer.id + " is not a smart object");
     if (layer.locked) throw core::OpError("the layer is locked");
-    const Json stored = settled(doc, page, kind, params);
+    // (PC4 D2: a filter's file — 置き換え's map given as data or a layer — made the book's first: design 2.6)
+    const Json stored = settled(doc, page, kind, keep_filter_files(doc, page, kind, params));
     const Json* now = core::get(*layer.smart, "filters");
     Json filters = now != nullptr && now->is_array() ? *now : Json::array();
     if (filters.size() >= core::smart::kFiltersMax)

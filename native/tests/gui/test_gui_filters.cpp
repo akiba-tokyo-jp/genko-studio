@@ -6,7 +6,9 @@
 // window again from the panel); 漫画's 光彩… in its old window; a heavy one's preview on a thread and its progress with 中止;
 // the layer panel's かける… opening the menu. (The frame of D1…D7's windows and kinds: their own tests add theirs.) D1: its
 // commands lit — ぼかし・シャープ・ノイズ・その他・ビデオ —, カスタム…'s 5 × 5 grid, 平均 and シャープ without a window, new grains
-// each time ノイズを加える… is applied, ぼかし（レンズ）… on a smart object without the layer mask as its depth.
+// each time ノイズを加える… is applied, ぼかし（レンズ）… on a smart object without the layer mask as its depth. D2: its commands lit
+// — 変形・ピクセレート・表現手法 — in Photoshop's words, 渦巻き…'s window, ぶれ without one, シアー…'s curve, 置き換え…'s map (a layer
+// of the page; on a smart object made the book's file).
 
 #include <QtTest>
 #include <QAction>
@@ -26,6 +28,7 @@
 #include <QTreeWidget>
 
 #include "gui_support.hpp"
+#include "app/adjust_forms.hpp"
 #include "app/canvas.hpp"
 #include "app/colours.hpp"
 #include "app/history_panel.hpp"
@@ -189,6 +192,16 @@ private slots:
         QCOMPARE(words_of(book.menu("menu_filter_render")),
                  (QStringList{QStringLiteral("炎…"), QStringLiteral("額縁…"), QStringLiteral("木…"), QStringLiteral("-"), QStringLiteral("ファイバー…"),
                               QStringLiteral("雲模様 1"), QStringLiteral("雲模様 2"), QStringLiteral("照明効果…"), QStringLiteral("逆光…")}));
+        // (D2's: Photoshop's words and order)
+        QCOMPARE(words_of(book.menu("menu_filter_pixelate")),
+                 (QStringList{QStringLiteral("カラーハーフトーン…"), QStringLiteral("ぶれ"), QStringLiteral("メゾティント…"), QStringLiteral("モザイク…"),
+                              QStringLiteral("水晶…"), QStringLiteral("点描…"), QStringLiteral("ファセット")}));
+        QCOMPARE(words_of(book.menu("menu_filter_stylize")),
+                 (QStringList{QStringLiteral("エンボス…"), QStringLiteral("ソラリゼーション"), QStringLiteral("タイル…"), QStringLiteral("押し出し…"),
+                              QStringLiteral("拡散…"), QStringLiteral("風…"), QStringLiteral("輪郭検出"), QStringLiteral("等高線…"), QStringLiteral("油彩…")}));
+        QCOMPARE(words_of(book.menu("menu_filter_distort")),
+                 (QStringList{QStringLiteral("シアー…"), QStringLiteral("ジグザグ…"), QStringLiteral("つまむ…"), QStringLiteral("波形…"), QStringLiteral("波紋…"),
+                              QStringLiteral("球面…"), QStringLiteral("極座標…"), QStringLiteral("置き換え…"), QStringLiteral("渦巻き…")}));
         QCOMPARE(words_of(book.menu("menu_filter_manga")),
                  (QStringList{QStringLiteral("線画抽出…"), QStringLiteral("ゴミ取り…"), QStringLiteral("雨…"), QStringLiteral("光彩…"), QStringLiteral("白黒にする…")}));
         QCOMPARE(words_of(book.menu("menu_filter_plugins")), (QStringList{QStringLiteral("プラグインのフォルダーを開く"), QStringLiteral("プラグインの設定…")}));
@@ -216,10 +229,18 @@ private slots:
                                "act_filter_sharpen_smart", "act_filter_despeckle", "act_filter_noise_add", "act_filter_noise_median",
                                "act_filter_noise_dust_and_scratches", "act_filter_noise_reduce", "act_filter_other_custom", "act_filter_other_high_pass",
                                "act_filter_other_hsb_hsl", "act_filter_other_maximum", "act_filter_other_minimum", "act_filter_other_offset",
-                               "act_filter_video_de_interlace", "act_filter_video_ntsc_colors", "act_filter_gallery"})
+                               "act_filter_video_de_interlace", "act_filter_video_ntsc_colors", "act_filter_gallery",
+                               // (D2: 変形・ピクセレート・表現手法)
+                               "act_filter_distort_shear", "act_filter_distort_zigzag", "act_filter_distort_pinch", "act_filter_distort_wave",
+                               "act_filter_distort_ripple", "act_filter_distort_spherize", "act_filter_distort_polar_coordinates", "act_filter_distort_displace",
+                               "act_filter_distort_twirl", "act_filter_pixelate_color_halftone", "act_filter_pixelate_fragment", "act_filter_pixelate_mezzotint",
+                               "act_filter_pixelate_mosaic", "act_filter_pixelate_crystallize", "act_filter_pixelate_pointillize", "act_filter_pixelate_facet",
+                               "act_filter_stylize_emboss", "act_filter_stylize_solarize", "act_filter_stylize_tiles", "act_filter_stylize_extrude",
+                               "act_filter_stylize_diffuse", "act_filter_stylize_wind", "act_filter_stylize_find_edges", "act_filter_stylize_trace_contour",
+                               "act_filter_stylize_oil_paint"})
             QVERIFY2(book.act(on)->isEnabled(), on);
-        for (const char* off : {"act_filter_pixelate_mosaic", "act_filter_distort_twirl", "act_filter_stylize_emboss",
-                                "act_filter_camera_raw", "act_filter_render_tree", "act_filter_vanishing_point", "act_filter_blur_tilt_shift", "act_filter_last"})
+        for (const char* off : {"act_filter_render_fibers", "act_filter_camera_raw", "act_filter_render_tree", "act_filter_vanishing_point",
+                                "act_filter_blur_tilt_shift", "act_filter_last"})
             QVERIFY2(!book.act(off)->isEnabled(), off);
         // 履歴's words of the new ops
         QCOMPARE(app::history::describe(Json::array({Json{{"op", "render_picture"}}})), QStringLiteral("描画した"));
@@ -855,6 +876,98 @@ private slots:
                 for (int c = 0; c < 4; ++c) QCOMPARE(at(inside, wide.width(), x - wide.x0, y - wide.y0, c), at(result_in, 315, x, y, c));
         QVERIFY(compared >= 100 * 100);
         book.window->canvas()->set_selection(std::nullopt);
+    }
+
+    // D2: 渦巻き… from its table's window (角度), ぶれ without a window — each the op's pixels, one Undo —; シアー…'s curve dragged
+    // (a point added in the middle and moved across: three points sent); 置き換え…'s map a layer of the page (the page's merged
+    // picture by default), and on a smart object the smart filter's map a file of the book.
+    void theWindowsOfD2() {
+        Book book;
+        gui_test::Answers answers;
+        book.window->set_target_layer("pic");
+        const core::Document start = *book.session->snapshot();
+        const auto op_result = [&](const core::Document& from, const Json& op) {
+            Json sent{{"op", "filter_raster"}, {"page", 1}, {"id", "pic"}};
+            sent.update(op);
+            return *core::CommandBus(render::ops_registry()).apply(from, Json::array({sent}), core::Actor("human:tester")).doc.page(0).layers.back().raster_png;
+        };
+        // 渦巻き…
+        bool shown = false;
+        answers.responder->exec = answer(QStringLiteral("distort_twirl"), [&](QDialog* d) {
+            QCOMPARE(d->windowTitle(), QStringLiteral("渦巻き"));
+            auto* angle = d->findChild<QDoubleSpinBox*>(QStringLiteral("field_angle"));
+            QVERIFY(angle != nullptr);
+            QCOMPARE(angle->value(), 50.0);
+            angle->setValue(120);
+            shown = true;
+        });
+        book.act("act_filter_distort_twirl")->trigger();
+        QVERIFY(shown);
+        QCOMPARE(*book.layer("pic")->raster_png, op_result(start, Json{{"kind", "distort_twirl"}, {"angle", 120}}));
+        QVERIFY(*book.layer("pic")->raster_png != *start.page(0).layers.back().raster_png);
+        book.window->action(QStringLiteral("act_undo"))->trigger();
+        QCOMPARE(*book.layer("pic")->raster_png, *start.page(0).layers.back().raster_png);
+        // ぶれ, 輪郭検出: no window
+        int windows = 0;
+        answers.responder->exec = [&](QDialog*) {
+            ++windows;
+            return int(QDialog::Rejected);
+        };
+        book.act("act_filter_pixelate_fragment")->trigger();
+        QCOMPARE(windows, 0);
+        QCOMPARE(*book.layer("pic")->raster_png, op_result(start, Json{{"kind", "pixelate_fragment"}}));
+        book.window->action(QStringLiteral("act_undo"))->trigger();
+        // シアー…: the curve dragged — a point added in its middle, moved across
+        Json sheared;
+        answers.responder->exec = answer(QStringLiteral("distort_shear"), [&](QDialog* d) {
+            QWidget* curve = d->findChild<QWidget*>(QStringLiteral("field_points"));
+            QVERIFY(curve != nullptr);
+            QTest::mousePress(curve, Qt::LeftButton, {}, QPoint(curve->width() / 2, curve->height() / 2));
+            QTest::mouseMove(curve, QPoint(curve->width() - 20, curve->height() / 2));
+            QTest::mouseRelease(curve, Qt::LeftButton, {}, QPoint(curve->width() - 20, curve->height() / 2));
+            sheared = d->findChild<app::adjust_forms::Form*>()->values();
+        });
+        book.act("act_filter_distort_shear")->trigger();
+        QCOMPARE(sheared["points"].size(), std::size_t(3));
+        QVERIFY(sheared["points"][1][1].get<double>() > 0.5);
+        QCOMPARE(*book.layer("pic")->raster_png, op_result(start, Json{{"kind", "distort_shear"}, {"points", sheared["points"]}, {"undefined_areas", "wrap"}}));
+        book.window->action(QStringLiteral("act_undo"))->trigger();
+        // 置き換え…: its map the page's merged picture by default, a layer of the page chosen
+        Json displaced;
+        answers.responder->exec = answer(QStringLiteral("distort_displace"), [&](QDialog* d) {
+            auto* map = d->findChild<QComboBox*>(QStringLiteral("displace_map"));
+            QVERIFY(map != nullptr);
+            QCOMPARE(map->currentText(), QStringLiteral("統合した絵"));
+            QVERIFY(d->findChild<QPushButton*>(QStringLiteral("displace_map_file")) != nullptr);
+            map->setCurrentIndex(map->findData(QStringLiteral("layer:pic")));
+            d->findChild<QDoubleSpinBox*>(QStringLiteral("field_horizontal"))->setValue(40);
+            displaced = d->findChild<app::adjust_forms::Form*>()->values();
+        });
+        book.act("act_filter_distort_displace")->trigger();
+        QCOMPARE(displaced["map"], (Json{{"layer", "pic"}}));
+        QCOMPARE(*book.layer("pic")->raster_png, op_result(start, Json{{"kind", "distort_displace"}, {"horizontal", 40}, {"map", Json{{"layer", "pic"}}}}));
+        book.window->action(QStringLiteral("act_undo"))->trigger();
+        // on a smart object: the smart filter's map a file of the book (the layer drawn then)
+        QVERIFY(book.window->apply_ops(Json::array({Json{{"op", "add_layer"}, {"page", 1}, {"kind", "paint"}, {"id", "map"}},
+                                                    Json{{"op", "smart_convert"}, {"page", 1}, {"ids", Json::array({"pic"})}, {"new_id", "so"}}})));
+        book.window->set_target_layer("so");
+        answers.responder->exec = answer(QStringLiteral("distort_displace"), [&](QDialog* d) {
+            auto* map = d->findChild<QComboBox*>(QStringLiteral("displace_map"));
+            map->setCurrentIndex(map->findData(QStringLiteral("layer:map")));
+        });
+        book.act("act_filter_distort_displace")->trigger();
+        const Json filter = (*book.layer("so")->smart)["filters"][0];
+        QCOMPARE(filter["kind"], Json("distort_displace"));
+        const std::string ref = filter["params"]["map"].get<std::string>();
+        QVERIFY2(ref.starts_with("sha256:"), filter.dump().c_str());
+        QCOMPARE(filter["params"]["map_suffix"], Json(".png"));
+        QVERIFY(book.session->snapshot()->filter_files.contains(ref));
+        // (its window again from the panel: the map it holds offered as it is)
+        QString offered;
+        answers.responder->exec = answer(QStringLiteral("distort_displace"), [&](QDialog* d) { offered = d->findChild<QComboBox*>(QStringLiteral("displace_map"))->currentText(); });
+        book.window->layer_panel()->edit_smart_filter(0);
+        QCOMPARE(offered, QStringLiteral("今の置き換えマップ"));
+        QCOMPARE((*book.layer("so")->smart)["filters"][0]["params"]["map"], Json(ref));
     }
 };
 

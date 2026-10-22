@@ -18,6 +18,7 @@
 #include "core/pyops.hpp"
 #include "core/smart.hpp"
 #include "render/ink_canvas.hpp"
+#include "render/ops_filters.hpp"
 #include "render/smart_filters.hpp"
 
 namespace genko::render::smart_filters {
@@ -136,6 +137,8 @@ void set(OpContext& c) {
         // (laid over its settings as the page has them; kept in the smart object's own mm when they name places)
         Json merged = params_on_page(doc, doc.page(at), doc.page(at).layers[i], f);
         lay_over(merged, *params);
+        // (PC4 D2: a filter's file — 置き換え's map given as data or a layer — made the book's first: design 2.6)
+        merged = keep_filter_files(doc, doc.page(at), core::py_str(f["kind"]), std::move(merged));
         keep_params(doc, doc.page(at), doc.page(at).layers[i], f, settled(doc, doc.page(at), core::py_str(f["kind"]), merged));
         changed = true;
     }

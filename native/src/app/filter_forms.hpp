@@ -41,9 +41,9 @@ std::vector<FilterForm> sharpen_forms();       // D1: app/filter_forms_basic.cpp
 std::vector<FilterForm> noise_forms();         // D1: app/filter_forms_basic.cpp
 std::vector<FilterForm> other_forms();         // D1: app/filter_forms_basic.cpp (カスタム…'s 5 × 5 grid)
 std::vector<FilterForm> video_forms();         // D1: app/filter_forms_basic.cpp
-std::vector<FilterForm> distort_forms();       // D2
-std::vector<FilterForm> pixelate_forms();      // D2
-std::vector<FilterForm> stylize_forms();       // D2
+std::vector<FilterForm> distort_forms();       // D2: app/filter_forms_distort.cpp (シアー…'s curve, 置き換え…'s map)
+std::vector<FilterForm> pixelate_forms();      // D2: app/filter_forms_distort.cpp
+std::vector<FilterForm> stylize_forms();       // D2: app/filter_forms_distort.cpp
 std::vector<FilterForm> render_forms();        // D4
 std::vector<FilterForm> blur_gallery_forms();  // D4
 const std::vector<FilterForm>& filter_forms();

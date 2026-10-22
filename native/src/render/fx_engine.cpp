@@ -180,9 +180,6 @@ std::vector<float> conv_sep(const Window& src, const Rect& out, const std::vecto
 
 // --- the kernels -----------------------------------------------------------------------------------------------------
 
-Kernels distort_kernels() { return {}; }       // (D2)
-Kernels pixelate_kernels() { return {}; }      // (D2)
-Kernels stylize_kernels() { return {}; }       // (D2)
 Kernels render_kernels() { return {}; }        // (D4)
 Kernels blur_gallery_kernels() { return {}; }  // (D4)
 Kernels camera_raw_kernels() { return {}; }    // (D5)
@@ -326,6 +323,13 @@ public:
     unsigned levels() const override { return bytes_ == 2 ? 65535 : 0; }
     double least() const override { return least_; }
     std::string taken() { return std::move(out_); }
+    // (its f32 samples, little-endian RGBA after the 16 bytes of the header, are the floats themselves on a little-endian
+    // machine)
+    const float* floats(int y) const override {
+        if constexpr (std::endian::native != std::endian::little) return nullptr;
+        if (bytes_ != 4 || reinterpret_cast<std::uintptr_t>(src_.data() + 16) % alignof(float) != 0) return nullptr;
+        return reinterpret_cast<const float*>(src_.data() + 16) + std::size_t(y) * width_ * 4;
+    }
 
 private:
     float sample(std::size_t i, unsigned c) const {
@@ -599,7 +603,8 @@ void apply(Surface& surface, const Kernel& kernel, const Json& params, core::Fil
     if (reads.plane != nullptr && reads.plane->size() != std::size_t(w) * h) throw std::logic_error("fx::apply: the plane is not the grid's");
     Way way;
     way.colours = surface.colours();
-    way.meaning = inks == core::FilterInks::Meaning && surface.ink() != nullptr;
+    // (D2: a screen — カラーハーフトーン, メゾティント — on each plate; a Lab page's L, a and b are no plates: the colours they mean)
+    way.meaning = (inks == core::FilterInks::Meaning || (inks == core::FilterInks::Halftone && surface.space() == Space::Lab)) && surface.ink() != nullptr;
     way.lightness = (inks == core::FilterInks::Lightness || inks == core::FilterInks::LightnessAndColour) &&
                     (surface.space() == Space::Cmyk || surface.space() == Space::Multi);
     way.lab_lightness = inks == core::FilterInks::Lightness && surface.space() == Space::Lab;
@@ -621,6 +626,7 @@ void apply(Surface& surface, const Kernel& kernel, const Json& params, core::Fil
     ctx.cover = cover != nullptr ? cover : reads.within;
     ctx.grid_width = w;
     ctx.plane = reads.plane;
+    ctx.map = reads.map;
     const Halo halo = kernel.halo ? kernel.halo(params, ctx) : Halo::margin(0);
 
     // the part worked: as far as the halo reaches from what shows (upstream's output_area), the base box for a whole kind
@@ -647,7 +653,11 @@ void apply(Surface& surface, const Kernel& kernel, const Json& params, core::Fil
     // result the same whatever the tiling) before it is refused as too large.
     const std::size_t sch = way.colours + 1, kch = way.kernel_colours + 1;
     const Rect whole = halo.bounds ? ctx.bounds.intersect(grid).unite(area) : Rect{};
-    const image_ops::Held shared_held(std::uint64_t(whole.area()) * kch * sizeof(float));
+    // (D2: a 32-bit precise layer's base box of whole rows read in place — no float copy, nothing held for it)
+    const float* in_place = halo.bounds && !way.meaning && !way.lightness && !way.lab_lightness && kch == sch && whole.x0 == 0 && whole.x1 == int(w)
+                                ? surface.floats(whole.y0)
+                                : nullptr;
+    const image_ops::Held shared_held(in_place != nullptr ? 0 : std::uint64_t(whole.area()) * kch * sizeof(float));
     const auto per_thread_of = [&](int tile_side) {
         const std::uint64_t tile_px = std::uint64_t(tile_side) * tile_side;
         const std::uint64_t reach = std::uint64_t(tile_side) + 2 * std::uint64_t(halo.radius);
@@ -690,7 +700,14 @@ void apply(Surface& surface, const Kernel& kernel, const Json& params, core::Fil
     };
     if (halo.bounds) {
         const auto rules = rules_of();
-        shared = read_window(surface, whole, way, rules.get());
+        if (in_place != nullptr) {
+            shared.emplace();
+            shared->rect = whole;
+            shared->ch = kch;
+            shared->view = in_place;
+        } else {
+            shared = read_window(surface, whole, way, rules.get());
+        }
     }
     // (a whole kind's work done once — 平均's mean —, its tiles given what it found)
     const Json found = kernel.once && shared ? kernel.once(params, *shared, ctx) : Json();

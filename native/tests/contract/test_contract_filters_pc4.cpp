@@ -4,7 +4,8 @@
 // Undo stack; on a smart object as a smart filter — the book then names filters@1, and a reader that does not know it
 // opens the book read-only —; a book without them written as it was (no feature added, the same bytes when written
 // again); refusals (a kind not in the table, a setting it has not); genko inspect --filters. Python's 22 filters keep
-// their own contracts (raster_cases.json, test_color_filters, test_ink_filters: run as they are).
+// their own contracts (raster_cases.json, test_color_filters, test_ink_filters: run as they are). D2: 置き換え's map (a
+// layer, a file's data; on a smart object a file of the book's assets that genko gc keeps) with D2's kinds on both pages.
 
 #include <QtTest>
 
@@ -310,6 +311,96 @@ private slots:
         QCOMPARE(catalogue["gallery"].size(), std::size_t(47));
         QCOMPARE(catalogue["gallery"][11]["command"], Json("filter.gallery.smudgeStick"));
         QCOMPARE(genko::test::book_problems(book), std::string());
+    }
+
+    // D2 (変形・ピクセレート・表現手法) through the command line: 置き換え with a layer of the book and with a file's data on the
+    // 8-bit page and the 16-bit one (the reply: the map's file and kind, not its data), 渦巻き・モザイク・エンボス on both; on a
+    // smart object the map made a file of the book's assets (assets/…/<sha256>.png, filters@1) — drawn at 200 dpi, opened
+    // again writable, kept by genko gc, gone with the filter by Undo and back by Redo, its file missing: read-only.
+    void theDisplacementMapThroughTheCommandLine() {
+        const QString book = two_pages(QStringLiteral("displace.genko"));
+        const Json before = project(book);
+        std::string precise_layer;
+        for (const Json& layer : before["pages"][1]["layers"])
+            if (layer.contains("color_raster")) precise_layer = layer["id"].get<std::string>();
+        QVERIFY(!precise_layer.empty());
+        // (a map layer on page 1: red at full, green at the middle — every pixel across)
+        const std::string map_png = genko::render::write_png(genko::render::Image::create("RGBA", genko::render::Size{60, 40}, genko::render::Ink{255, 128, 128, 255}));
+        const Json made = apply(book, QStringLiteral("maplayer.json"),
+                                Json::array({Json{{"op", "add_layer"}, {"page", 1}, {"kind", "paint"}, {"id", "map"}},
+                                             Json{{"op", "put_raster"}, {"page", 1}, {"id", "map"}, {"png_base64", genko::core::b64encode(map_png)}}}));
+        QVERIFY2(made.value("ok", false), made.dump().c_str());
+        const Json done = apply(book, QStringLiteral("displace.json"),
+                                Json::array({Json{{"op", "filter_raster"}, {"page", 1}, {"id", "pic1"}, {"kind", "distort_displace"}, {"horizontal", 20},
+                                                  {"vertical", 0}, {"map", Json{{"layer", "map"}}}},
+                                             Json{{"op", "filter_raster"}, {"page", 2}, {"id", precise_layer}, {"kind", "distort_displace"}, {"horizontal", 20},
+                                                  {"map_data", genko::core::b64encode(map_png)}},
+                                             Json{{"op", "filter_raster"}, {"page", 1}, {"id", "pic1"}, {"kind", "distort_twirl"}, {"angle", 90}},
+                                             Json{{"op", "filter_raster"}, {"page", 2}, {"id", precise_layer}, {"kind", "pixelate_mosaic"}, {"cell_size", 12}},
+                                             Json{{"op", "filter_raster"}, {"page", 2}, {"id", precise_layer}, {"kind", "stylize_emboss"}}}));
+        QVERIFY2(done.value("ok", false), done.dump().c_str());
+        QCOMPARE(done["results"][0]["filter"]["map"], (Json{{"layer", "map"}}));
+        QCOMPARE(done["results"][1]["filter"]["map"], Json(genko::core::bytes_ref(map_png)));
+        QCOMPARE(done["results"][1]["filter"]["map_suffix"], Json(".png"));
+        QVERIFY(!done["results"][1]["filter"].contains("map_data"));
+        const Json after = project(book);
+        QVERIFY(layer_in(after, 1, "pic1")["asset"] != layer_in(before, 1, "pic1")["asset"]);
+        QVERIFY(layer_in(after, 2, precise_layer)["color_raster"] != layer_in(before, 2, precise_layer)["color_raster"]);
+        QVERIFY(!has(after["features"], "filters@1"));  // (destructive: pixels)
+        // refused: no map (the book as it was)
+        int exit = -1;
+        const Json none = apply(book, QStringLiteral("nomap.json"),
+                                Json::array({Json{{"op", "filter_raster"}, {"page", 1}, {"id", "pic1"}, {"kind", "distort_displace"}}}), &exit);
+        QVERIFY2(exit != 0 && none.dump().find("map is required") != std::string::npos, none.dump().c_str());
+        // on a smart object: the data and the layer each a file of the book
+        const Json smart = apply(book, QStringLiteral("smart.json"),
+                                 Json::array({Json{{"op", "smart_convert"}, {"page", 1}, {"ids", Json::array({"pic1"})}, {"new_id", "so"}},
+                                              Json{{"op", "smart_filter_add"}, {"page", 1}, {"id", "so"}, {"kind", "distort_displace"}, {"horizontal", 15},
+                                                   {"map_data", genko::core::b64encode(map_png)}},
+                                              Json{{"op", "smart_filter_add"}, {"page", 1}, {"id", "so"}, {"kind", "distort_displace"}, {"vertical", 15},
+                                                   {"map", Json{{"layer", "map"}}}}}));
+        QVERIFY2(smart.value("ok", false), smart.dump().c_str());
+        Json saved = project(book);
+        QVERIFY2(has(saved["features"], "filters@1"), saved["features"].dump().c_str());
+        const Json filters = layer_in(saved, 1, "so")["smart"]["filters"];
+        QCOMPARE(filters.size(), std::size_t(2));
+        storage::AssetStore store(path_of(book));
+        std::vector<std::string> refs;
+        for (const Json& f : filters) {
+            QCOMPARE(f["kind"], Json("distort_displace"));
+            QCOMPARE(f["params"]["map_suffix"], Json(".png"));
+            QVERIFY(!f["params"].contains("map_data"));
+            refs.push_back(f["params"]["map"].get<std::string>());
+            QVERIFY2(store.has(refs.back(), ".png"), refs.back().c_str());
+        }
+        QCOMPARE(refs[0], genko::core::bytes_ref(map_png));
+        const auto drawn = genko::test::run_genko({QStringLiteral("render"), book, QStringLiteral("--page"), QStringLiteral("1"), QStringLiteral("--dpi"),
+                                                   QStringLiteral("200"), QStringLiteral("--out"), path(QStringLiteral("displace200.png"))});
+        QVERIFY2(drawn.exit_code == 0, qPrintable(drawn.described()));
+        QVERIFY(storage::load_document(path_of(book)).document.read_only_reason.empty());
+        // genko gc keeps them (the project names them)
+        const Json gc = genko({QStringLiteral("gc"), book}, &exit);
+        QCOMPARE(exit, 0);
+        for (const std::string& ref : refs) QVERIFY2(store.has(ref, ".png"), gc.dump().c_str());
+        QCOMPARE(genko::test::book_problems(book), std::string());
+        // undone: the filters and the feature go; redone: back
+        (void)genko({QStringLiteral("undo"), book, QStringLiteral("--as"), QStringLiteral("human:test")}, &exit);
+        QCOMPARE(exit, 0);
+        QVERIFY(!has(project(book)["features"], "filters@1"));
+        (void)genko({QStringLiteral("redo"), book, QStringLiteral("--as"), QStringLiteral("human:test")}, &exit);
+        QCOMPARE(exit, 0);
+        saved = project(book);
+        QVERIFY(has(saved["features"], "filters@1"));
+        QCOMPARE(layer_in(saved, 1, "so")["smart"]["filters"][0]["params"]["map"], Json(refs[0]));
+        // its file missing: read-only, saying so
+        const std::filesystem::path file = store.path(refs[0], ".png");
+        QVERIFY2(std::filesystem::exists(file), file.string().c_str());
+        const std::string kept = genko::test::read_bytes(QString::fromStdString(file.string()));
+        std::filesystem::remove(file);
+        const std::string why = storage::load_document(path_of(book)).document.read_only_reason;
+        QVERIFY2(!why.empty(), why.c_str());
+        genko::test::write_bytes(QString::fromStdString(file.string()), kept);
+        QVERIFY(storage::load_document(path_of(book)).document.read_only_reason.empty());
     }
 };
 
