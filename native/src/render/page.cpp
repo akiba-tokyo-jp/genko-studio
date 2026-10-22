@@ -35,6 +35,7 @@
 #include "render/color_filters.hpp"
 #include "render/covers.hpp"
 #include "render/effects.hpp"
+#include "render/image_ops.hpp"
 #include "render/imaging.hpp"
 #include "render/ink.hpp"
 #include "render/ink_canvas.hpp"
@@ -484,7 +485,10 @@ struct StrokeSet {
 std::optional<Image> draw_strokes(const Ctx& ctx, const Layer& layer, const StrokeSet& set, const Box& area,
                                   const Image* panel_mask, const Image* raster, bool rough) {
     const bool guide = guide_role(layer.role);
-    if (ctx.episode != nullptr) paper::keep_all(ctx.episode->papers);  // (BRUSH-01: its brushes' papers)
+    if (ctx.episode != nullptr) {
+        paper::keep_all(ctx.episode->papers);  // (BRUSH-01: its brushes' papers)
+        dabs::keep_pictures(ctx.episode->brush_tips);  // (brushes@1: its dab brushes' pictures)
+    }
     if (ctx.dpi <= kQuickDpi || rough) {
         return clipped(layer, quick_strokes(ctx, set.strokes, set.patches, area, guide, set.parts), panel_mask, raster);
     }
@@ -538,8 +542,11 @@ std::optional<Image> draw_strokes(const Ctx& ctx, const Layer& layer, const Stro
             ink_rgb = rgb;
         }
         if (!intersects(*reach, area)) continue;  // (it covers nothing of this part of the page)
-        auto drawn = brushes::draw(ctx.size, points, ctx.dpi, width, stroke.kind, stroke.id, stroke.rotation,
-                                   stroke.pressure_opacity);
+        // (brushes@1, PC4 E1: a dab brush's line with its inputs, laid only over this part)
+        const bool dab = b.dabs.has_value();
+        const dabs::LineInputs inputs = dab ? brushes::line_inputs(stroke, rgb) : dabs::LineInputs{};
+        auto drawn = dab ? brushes::draw(ctx.size, points, ctx.dpi, width, stroke.kind, stroke.id, stroke.rotation, stroke.pressure_opacity, &inputs, area)
+                         : brushes::draw(ctx.size, points, ctx.dpi, width, stroke.kind, stroke.id, stroke.rotation, stroke.pressure_opacity);
         if (!drawn) continue;
         Image cover = std::move(drawn->mask);
         const double opacity = core::py_clamp(stroke.opacity, 0.0, 1.0) * b.opacity;
@@ -549,6 +556,20 @@ std::optional<Image> draw_strokes(const Ctx& ctx, const Layer& layer, const Stro
         if (part.x1 <= part.x0 || part.y1 <= part.y0) continue;
         const Box in_ink = shifted(part, -area.x0, -area.y0);
         const Image piece = (part == box) ? cover : cover.crop(shifted(part, -box.x0, -box.y0));
+        if (!guide && drawn->dabs && drawn->dabs->coloured()) {
+            // (the colour dynamics: the line is a picture of its own colours, laid over the lines before it on its own)
+            lay();
+            std::vector<std::array<float, 3>> colours;
+            drawn->dabs->fill_colours(part, colours);
+            std::string rgba(colours.size() * 4, '\0');
+            const std::string alpha = piece.tobytes();
+            for (std::size_t i = 0; i < colours.size(); ++i) {
+                for (std::size_t c = 0; c < 3; ++c) rgba[i * 4 + c] = static_cast<char>(static_cast<int>(std::clamp(colours[i][c], 0.0f, 1.0f) * 255.0f + 0.5f));
+                rgba[i * 4 + 3] = alpha[i];
+            }
+            out.alpha_composite(Image::frombytes("RGBA", size_of(part), rgba), Point{in_ink.x0, in_ink.y0});
+            continue;
+        }
         if (!ink) ink = Image::create("L", size_of(area), Ink(0));
         ink->paste(chops::screen(ink->crop(in_ink), piece), Point{in_ink.x0, in_ink.y0});
     }
@@ -988,31 +1009,77 @@ Box area_of(const RenderOptions& options, Size size) {
     return Box{r.x, r.y, r.x + r.w, r.y + r.h};
 }
 
+// brushes@1 (PC4 E1): a dab brush's line laid on a precise canvas over `box`: its coverage in float (its 8-bit one when a
+// paper or the light touch's shading is laid on it), cut by `masks` ("L", the box's size; none skipped), in `color` or,
+// with the colour dynamics, in each pixel's own. False for any other brush's line (laid by its 8-bit coverage).
+bool lay_dab_line(ColorCanvas& own, const brushes::Coverage& drawn, const Box& box, std::initializer_list<const Image*> masks, const Json& color,
+                  double opacity, bool guide) {
+    if (!drawn.dabs) return false;
+    const auto w = static_cast<std::size_t>(box.width()), h = static_cast<std::size_t>(box.height());
+    const bool with_colours = !guide && drawn.dabs->coloured();
+    const image_ops::Held held(std::uint64_t(w) * h * (4 + (with_colours ? 12 : 0)));  // (in the imaging budget first)
+    std::vector<float> cover;
+    if (drawn.fine) {
+        drawn.dabs->fill(box, cover);
+    } else {
+        cover.assign(w * h, 0.0f);
+        const std::string bytes = drawn.mask.tobytes();
+        const int mw = drawn.mask.width();
+        for (int y = std::max(box.y0, drawn.origin.y); y < std::min(box.y1, drawn.origin.y + drawn.mask.height()); ++y) {
+            for (int x = std::max(box.x0, drawn.origin.x); x < std::min(box.x1, drawn.origin.x + mw); ++x) {
+                cover[std::size_t(y - box.y0) * w + std::size_t(x - box.x0)] =
+                    static_cast<unsigned char>(bytes[std::size_t(y - drawn.origin.y) * std::size_t(mw) + std::size_t(x - drawn.origin.x)]) / 255.0f;
+            }
+        }
+    }
+    for (const Image* m : masks) {
+        if (m == nullptr) continue;
+        const std::string bytes = m->tobytes();
+        for (std::size_t i = 0; i < cover.size() && i < bytes.size(); ++i) cover[i] *= static_cast<unsigned char>(bytes[i]) / 255.0f;
+    }
+    std::vector<std::array<float, 3>> colours;
+    const bool coloured = !guide && drawn.dabs->coloured();
+    if (coloured) drawn.dabs->fill_colours(box, colours);
+    own.blend_stroke(cover, color, opacity, coloured ? &colours : nullptr);
+    return true;
+}
+
 void precise_strokes(ColorCanvas& target, const Ctx& ctx, const Layer& layer, const Box& area, const Image* panel) {
     if (layer.mask || layer.vector_mask || layer.effect || layer.screen || layer.color || layer.panel_each || !layer.patches.empty() || layer.raster_png ||
         shape_parts::any(layer))
         throw NotYetPorted("precise stroke layer style");
     ColorCanvas own(transparent(area), target.space());
-    if (ctx.episode != nullptr) paper::keep_all(ctx.episode->papers);  // (BRUSH-01: its brushes' papers)
+    if (ctx.episode != nullptr) {
+        paper::keep_all(ctx.episode->papers);  // (BRUSH-01: its brushes' papers)
+        dabs::keep_pictures(ctx.episode->brush_tips);  // (brushes@1: its dab brushes' pictures)
+    }
     for (const auto& stroke : layer.strokes->items) {
         check_cancel(ctx);
         const auto brush=brushes::brush(stroke->kind);
         const auto reach=brushes::extent(ctx.size,core::stroke_points(*stroke),ctx.dpi,stroke_width(*stroke),stroke->kind);
         if (!reach || !intersects(*reach,area)) continue;
-        auto drawn=brushes::draw(ctx.size,core::stroke_points(*stroke),ctx.dpi,stroke_width(*stroke),stroke->kind,stroke->id,stroke->rotation,stroke->pressure_opacity);
+        const auto line_rgb = guide_role(layer.role) ? kNameColor : stroke_rgb(*stroke, brush);
+        const dabs::LineInputs inputs = brush.dabs ? brushes::line_inputs(*stroke, line_rgb) : dabs::LineInputs{};  // (brushes@1)
+        auto drawn = brush.dabs ? brushes::draw(ctx.size, core::stroke_points(*stroke), ctx.dpi, stroke_width(*stroke), stroke->kind, stroke->id,
+                                                stroke->rotation, stroke->pressure_opacity, &inputs, area)
+                                : brushes::draw(ctx.size,core::stroke_points(*stroke),ctx.dpi,stroke_width(*stroke),stroke->kind,stroke->id,stroke->rotation,stroke->pressure_opacity);
         if (!drawn) continue;
         const Box box{drawn->origin.x,drawn->origin.y,drawn->origin.x+drawn->mask.width(),drawn->origin.y+drawn->mask.height()};
         const auto part=intersection(box,area);
         if (part.width()<=0 || part.height()<=0) continue;
-        Image mask=Image::create("L",size_of(area),Ink(0));
-        mask.paste(drawn->mask.crop(shifted(part,-box.x0,-box.y0)),Point{part.x0-area.x0,part.y0-area.y0});
-        if (panel && layer.panel_clip) mask=chops::multiply(mask,*panel);
         Json color;
         if (stroke->color_rgb && !guide_role(layer.role)) color=*stroke->color_rgb;
         else {
-            const auto rgb=guide_role(layer.role)?kNameColor:stroke_rgb(*stroke,brush);
+            const auto rgb=line_rgb;
             color=Json{{"precision","f32"},{"values",Json::array({rgb[0]/255.,rgb[1]/255.,rgb[2]/255.})}};
         }
+        if (lay_dab_line(own, *drawn, area, {panel && layer.panel_clip ? panel : nullptr}, color,
+                         core::py_clamp(stroke->opacity, 0., 1.) * brush.opacity, guide_role(layer.role))) {
+            continue;
+        }
+        Image mask=Image::create("L",size_of(area),Ink(0));
+        mask.paste(drawn->mask.crop(shifted(part,-box.x0,-box.y0)),Point{part.x0-area.x0,part.y0-area.y0});
+        if (panel && layer.panel_clip) mask=chops::multiply(mask,*panel);
         own.blend_stroke(mask,color,core::py_clamp(stroke->opacity,0.,1.)*brush.opacity);
     }
     target.blend(own,layer.opacity,layer.clip,layer.blend);
@@ -1049,7 +1116,10 @@ bool plain_precise(const Layer& layer) {
 ColorPicture precise_lines(const Ctx& ctx, const Layer& layer, const Box& box, const Image* panel, const Image* kept, const RgbSpace& space) {
     ColorCanvas own(transparent(box), space);
     const bool guide = guide_role(layer.role);
-    if (ctx.episode != nullptr) paper::keep_all(ctx.episode->papers);  // (BRUSH-01: its brushes' papers)
+    if (ctx.episode != nullptr) {
+        paper::keep_all(ctx.episode->papers);  // (BRUSH-01: its brushes' papers)
+        dabs::keep_pictures(ctx.episode->brush_tips);  // (brushes@1: its dab brushes' pictures)
+    }
     if (!layer.patches.empty()) {
         Image pictures = transparent(box);
         for (const core::Patch& patch : layer.patches) paint_patch(pictures, box, patch, ctx.dpi, guide ? &kNameColor : nullptr);
@@ -1106,23 +1176,30 @@ ColorPicture precise_lines(const Ctx& ctx, const Layer& layer, const Box& box, c
             const auto brush = brushes::brush(stroke.kind);
             const auto reach = brushes::extent(ctx.size, core::stroke_points(stroke), ctx.dpi, stroke_width(stroke), stroke.kind);
             if (!reach || !intersects(*reach, box)) continue;
-            auto drawn = brushes::draw(ctx.size, core::stroke_points(stroke), ctx.dpi, stroke_width(stroke), stroke.kind, stroke.id, stroke.rotation,
-                                       stroke.pressure_opacity);
+            const auto line_rgb = guide ? kNameColor : stroke_rgb(stroke, brush);
+            const dabs::LineInputs inputs = brush.dabs ? brushes::line_inputs(stroke, line_rgb) : dabs::LineInputs{};  // (brushes@1)
+            auto drawn = brush.dabs ? brushes::draw(ctx.size, core::stroke_points(stroke), ctx.dpi, stroke_width(stroke), stroke.kind, stroke.id,
+                                                    stroke.rotation, stroke.pressure_opacity, &inputs, box)
+                                    : brushes::draw(ctx.size, core::stroke_points(stroke), ctx.dpi, stroke_width(stroke), stroke.kind, stroke.id, stroke.rotation,
+                                                    stroke.pressure_opacity);
             if (!drawn) continue;
             const Box at{drawn->origin.x, drawn->origin.y, drawn->origin.x + drawn->mask.width(), drawn->origin.y + drawn->mask.height()};
             const Box part = intersection(at, box);
             if (part.width() <= 0 || part.height() <= 0) continue;
-            Image mask = Image::create("L", size_of(box), Ink(0));
-            mask.paste(drawn->mask.crop(shifted(part, -at.x0, -at.y0)), Point{part.x0 - box.x0, part.y0 - box.y0});
-            if (inside != nullptr) mask = chops::multiply(mask, *inside);
-            if (lock) mask = chops::multiply(mask, *lock);
             Json color;
             if (stroke.color_rgb && !guide) {
                 color = *stroke.color_rgb;
             } else {
-                const auto rgb = guide ? kNameColor : stroke_rgb(stroke, brush);
+                const auto rgb = line_rgb;
                 color = Json{{"precision", "f32"}, {"values", Json::array({rgb[0] / 255., rgb[1] / 255., rgb[2] / 255.})}};
             }
+            if (lay_dab_line(own, *drawn, box, {inside, lock ? &*lock : nullptr}, color, core::py_clamp(stroke.opacity, 0., 1.) * brush.opacity, guide)) {
+                continue;
+            }
+            Image mask = Image::create("L", size_of(box), Ink(0));
+            mask.paste(drawn->mask.crop(shifted(part, -at.x0, -at.y0)), Point{part.x0 - box.x0, part.y0 - box.y0});
+            if (inside != nullptr) mask = chops::multiply(mask, *inside);
+            if (lock) mask = chops::multiply(mask, *lock);
             own.blend_stroke(mask, color, core::py_clamp(stroke.opacity, 0., 1.) * brush.opacity);
         }
     }

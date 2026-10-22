@@ -156,7 +156,7 @@ void CanvasOnly::show_side(const QString& side) {
 bool radial_tool(const QString& tool) {
     static const QStringList tools{QStringLiteral("pen"),   QStringLiteral("eraser"),   QStringLiteral("fill"),  QStringLiteral("lassofill"),
                                    QStringLiteral("blend"), QStringLiteral("gradient"), QStringLiteral("shape"), QStringLiteral("picker"),
-                                   QStringLiteral("effect"), QStringLiteral("stamp")};
+                                   QStringLiteral("effect"), QStringLiteral("stamp"), QStringLiteral("pencil")};  // (PC4 E1: 鉛筆ツール)
     return tools.contains(tool);
 }
 

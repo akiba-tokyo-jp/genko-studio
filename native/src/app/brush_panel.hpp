@@ -92,6 +92,17 @@ public:
     QDoubleSpinBox* gap_size = nullptr;
     QCheckBox* crossing = nullptr;
     LineSample* sample = nullptr;
+    // brushes@1 (PC4 E1, Photoshop's options bar): 流量 (a dab brush's), モード (the blend a line is painted into a paint
+    // layer with: grey on a pen layer, set_blend_allowed), 滑らかさ (its way and amount), and the 鉛筆ツール's 自動消去
+    QSlider* flow = nullptr;
+    QComboBox* blend = nullptr;
+    QComboBox* smoothing = nullptr;
+    QSlider* smoothing_amount = nullptr;
+    QCheckBox* auto_erase = nullptr;
+    // Whether the layer drawn on takes a blend (a paint layer): else モード is grey and lines are drawn normal.
+    void set_blend_allowed(bool on);
+    // The 鉛筆ツール in hand: its own rows shown (自動消去), the brush list's choice not used.
+    void set_pencil(bool on);
 
 signals:
     void changed();

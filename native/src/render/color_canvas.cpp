@@ -440,6 +440,21 @@ void ColorCanvas::blend_stroke(const Image& mask, const core::Json& color, doubl
     }
     impl_->previous=true;
 }
+void ColorCanvas::blend_stroke(const std::vector<float>& cover, const core::Json& color, double opacity, const std::vector<std::array<float, 3>>* colours) {
+    core::validate_stroke_color(color);
+    const std::size_t n = std::size_t(impl_->size.width) * impl_->size.height;
+    if (cover.size() != n || (colours != nullptr && colours->size() != n)) throw core::Error("value", "stroke coverage does not match");
+    auto p = linear_srgb(impl_->space, {color["values"][0].get<double>(), color["values"][1].get<double>(), color["values"][2].get<double>(), 1});
+    for (std::size_t i = 0; i < n; ++i) {
+        if (colours != nullptr && cover[i] > 0.0f) {
+            const auto& c = (*colours)[i];
+            p = linear_srgb(impl_->space, {c[0], c[1], c[2], 1});
+        }
+        p[3] = cover[i];
+        impl_->over(i, p, opacity, false, "normal");
+    }
+    impl_->previous = true;
+}
 void ColorCanvas::expose(const core::Exposure& e, double opacity, bool clip, const Image* mask, std::string_view mode) {
     if (mask && (mask->mode() != "L" || mask->size() != impl_->size)) throw core::Error("value", "exposure mask does not match");
     if (!supports_blend(mode)) throw core::Error("not_yet_ported", "high-precision blend:" + std::string(mode));

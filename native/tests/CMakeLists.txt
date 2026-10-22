@@ -138,6 +138,14 @@ genko_test(test_brushes_model SOURCES unit/test_brushes_model.cpp DEPS genko_tes
 genko_test(test_patterns_model SOURCES unit/test_patterns_model.cpp DEPS genko_test_support genko_render_ops LABELS unit)
 genko_test(test_preset_store SOURCES unit/test_preset_store.cpp DEPS genko_test_support genko_render_ops LABELS unit)
 genko_test(test_tiled_pixels SOURCES unit/test_tiled_pixels.cpp DEPS genko_test_support genko_render_ops LABELS unit TIMEOUT 600)
+# PC4 E1 (SPEC.md COLOR-09「ブラシのダブの描き方」): the dab engine (render/dabs) against PhotoCraft's own brush tests in mm
+# (spacing, tips, dynamics, scatter, colour, transfer, build-up, the textures' modes, dual, wet edges, noise, smoothing,
+# pose), the same dabs at every resolution and in parts; and the line ops with a dab brush (define_brush's dabs and
+# pictures, add_stroke's inputs and blend on 8-bit, 16-bit, 32-bit, CMYK, Lab and grey pages, refused on a pen layer,
+# erase's brush and block, set_brush's kind, 背景色 and reset; saved, opened, undone and redone) — and every other
+# brush's line drawn as before.
+genko_test(test_dab_engine SOURCES unit/test_dab_engine.cpp DEPS genko_test_support genko_render_ops LABELS unit)
+genko_test(test_dab_lines SOURCES unit/test_dab_lines.cpp DEPS genko_test_support genko_render_ops LABELS unit TIMEOUT 600)
 genko_test(test_resample SOURCES unit/test_resample.cpp DEPS genko_test_support genko_render_ops LABELS unit)
 genko_test(test_page_geometry SOURCES unit/test_page_geometry.cpp DEPS genko_test_support LABELS unit)
 # PC3 C-e (SPEC.md COLOR-07「判型」): the page size ops on a book in memory — each thing on a page where the map takes it,

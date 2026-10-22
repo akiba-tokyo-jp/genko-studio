@@ -2,6 +2,7 @@
 
 #include <cmath>
 
+#include "core/brush_dabs.hpp"
 #include "core/ids.hpp"
 #include "core/pyconv.hpp"
 
@@ -36,6 +37,17 @@ Json stroke_to_dict(const Stroke& stroke) {
     if (stroke.rgb) out["rgb"] = ints_json(*stroke.rgb);
     if (stroke.color_rgb) out["color_rgb"] = *stroke.color_rgb;
     if (stroke.opacity != 1.0) out["opacity"] = stroke.opacity;
+    // (brushes@1, PC4 E1: a line's inputs, when it has them — coerce_stroke reads them back)
+    const std::size_t n = stroke.points.size();
+    if (inputs_fit(stroke.tilt, n, 2)) {
+        Json tilt = Json::array();
+        for (std::size_t i = 0; i < n; ++i) tilt.push_back(Json::array({stroke.tilt[2 * i], stroke.tilt[2 * i + 1]}));
+        out["tilt"] = std::move(tilt);
+    }
+    if (inputs_fit(stroke.time_ms, n, 1)) out["time_ms"] = stroke.time_ms;
+    if (inputs_fit(stroke.wheel, n, 1)) out["wheel"] = stroke.wheel;
+    if (stroke.flow) out["flow"] = *stroke.flow;
+    if (stroke.background_rgb) out["background_rgb"] = ints_json(*stroke.background_rgb);
     return out;
 }
 

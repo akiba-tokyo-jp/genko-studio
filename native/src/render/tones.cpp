@@ -513,7 +513,10 @@ Image tone_mask(const core::Layer& layer, const Page& p, const Box& box) {
         const double width = stroke->width_mm != 0.0 ? stroke->width_mm : 1.0;
         const auto reach = brushes::extent(p.size, points, p.dpi, width, brush);
         if (!reach || !intersects(*reach, box)) continue;  // (it changes nothing of this box)
-        const auto drawn = brushes::draw(p.size, points, p.dpi, width, brush, stroke->id);
+        // (brushes@1, PC4 E1: a dab brush's line with its inputs, laid only over this box; its colour is the tone's)
+        const dabs::LineInputs inputs = brushes::is_dab(brush) ? brushes::line_inputs(*stroke, {}) : dabs::LineInputs{};
+        const auto drawn = brushes::is_dab(brush) ? brushes::draw(p.size, points, p.dpi, width, brush, stroke->id, {}, 0.0, &inputs, box)
+                                                  : brushes::draw(p.size, points, p.dpi, width, brush, stroke->id);
         if (!drawn) continue;
         const Box where{drawn->origin.x, drawn->origin.y, drawn->origin.x + drawn->mask.width(), drawn->origin.y + drawn->mask.height()};
         const Box part = intersection(where, box);

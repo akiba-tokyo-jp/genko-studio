@@ -212,7 +212,81 @@ bool in_a_panel(const Page& page, const std::vector<PointF>& points_in, double p
     return false;
 }
 
-void add_stroke_mixing(OpContext& c, const MixPieces& mix_pieces) {
+// brushes@1 (PC4 E1): a line of this build's own brushes (a dab brush's, or one with the pen's inputs, a flow or a 背景色):
+// edit_stroke and simplify_stroke keep what it was drawn with, as they keep a precise line's (Python's lines are made
+// plain again, as there).
+bool own_line(const Stroke& line, const Document& doc) {
+    return has_stroke_inputs(line) || brush_for(Json(line.kind), doc).dabs.has_value();
+}
+
+// Each point of `to` placed along `from` (its length along it): on the nearest of `from`'s segments, looked for onward
+// from the last one — a simplified line's points are the line's own, in order (found at once).
+std::vector<double> places_on(const Stroke& from, const Stroke& to) {
+    const std::vector<double> along = lengths_along(from.points);
+    std::vector<double> out;
+    out.reserve(to.points.size());
+    std::size_t k = 0;
+    for (const PointF& q : to.points) {
+        double best = -1.0, at = along.empty() ? 0.0 : along[k];
+        for (std::size_t i = k; i + 1 < from.points.size(); ++i) {
+            const PointF& a = from.points[i];
+            const PointF& b = from.points[i + 1];
+            const double dx = b.x - a.x, dy = b.y - a.y, seg = dx * dx + dy * dy;
+            const double t = seg == 0 ? 0.0 : std::clamp(((q.x - a.x) * dx + (q.y - a.y) * dy) / seg, 0.0, 1.0);
+            const double d = std::hypot(q.x - (a.x + t * dx), q.y - (a.y + t * dy));
+            if (best < 0 || d < best) {
+                best = d;
+                at = along[i] + (along[i + 1] - along[i]) * t;
+                k = i;
+            }
+            if (d == 0.0) break;
+        }
+        out.push_back(at);
+    }
+    return out;
+}
+
+// brushes@1 (PC4 E1): one of a line's inputs as add_stroke is given it — one for each point given (`per`: tilt is [x°, y°]),
+// finite, within lo..hi — or none when the key is not given.
+std::vector<double> line_input(const Json& op, const char* key, std::size_t points, std::size_t per, double lo, double hi, const char* says) {
+    const Json* given = get(op, key);
+    if (given == nullptr || given->is_null()) return {};
+    const auto bad = [&] { throw OpError(std::string(key) + " is " + says + ", one for each point"); };
+    if (!given->is_array() || given->size() != points) bad();
+    std::vector<double> out;
+    out.reserve(points * per);
+    for (const Json& item : *given) {
+        const auto take = [&](const Json& v) {
+            if (!v.is_number() || v.is_boolean()) bad();
+            const double x = v.get<double>();
+            if (!(std::isfinite(x) && lo <= x && x <= hi)) bad();
+            out.push_back(x);
+        };
+        if (per == 1) {
+            take(item);
+        } else {
+            if (!item.is_array() || item.size() != per) bad();
+            for (const Json& v : item) take(v);
+        }
+    }
+    return out;
+}
+
+// A colour given as three whole numbers 0..255 (OpError with the key's name otherwise).
+std::vector<std::int64_t> rgb_of(const Json& v, const char* key) {
+    const auto bad = [&] { throw OpError(std::string(key) + " is [r, g, b], whole numbers 0..255"); };
+    if (!v.is_array() || v.size() != 3) bad();
+    std::vector<std::int64_t> out;
+    for (const Json& x : v) {
+        if (!x.is_number_integer()) bad();
+        if (x.is_number_unsigned() ? x.get<std::uint64_t>() > 255 : (x.get<std::int64_t>() < 0 || x.get<std::int64_t>() > 255)) bad();
+        out.push_back(x.get<std::int64_t>());
+    }
+    return out;
+}
+
+void add_stroke_mixing(OpContext& c, const StrokeHooks& hooks) {
+    const MixPieces& mix_pieces = hooks.mix;
     Document& doc = c.doc;
     const Json& op = c.op;
     std::size_t at = require_page(doc, op);
@@ -220,6 +294,10 @@ void add_stroke_mixing(OpContext& c, const MixPieces& mix_pieces) {
     const Json* raw = get(op, "points");
     PenPoints points = parse_points(raw != nullptr && py_truthy(*raw) ? *raw : Json::array());
     if (points.size() < 2) throw OpError("points needs at least two [x_mm, y_mm] pairs");
+    // brushes@1 (PC4 E1): the pen's inputs, one for each point given (stretched over the points the line keeps below)
+    const std::vector<double> tilt_in = line_input(op, "tilt", points.size(), 2, -90.0, 90.0, "[[x°, y°]…], each between -90 and 90");
+    const std::vector<double> time_in = line_input(op, "time_ms", points.size(), 1, 0.0, 1e12, "[ms…] from the first point, 0 or more");
+    const std::vector<double> wheel_in = line_input(op, "wheel", points.size(), 1, 0.0, 1.0, "[0..1…]");
     const Json* space_value = get(op, "space");
     std::tie(at, points) =
         stroke_target(doc, at, points, space_value != nullptr && py_truthy(*space_value) ? py_str(*space_value) : "page");
@@ -227,7 +305,17 @@ void add_stroke_mixing(OpContext& c, const MixPieces& mix_pieces) {
     const Json stabilize = op.contains("stabilize") ? op["stabilize"] : Json(doc.brush_stabilize);
     if (py_truthy(stabilize)) points = stabilize_points(points, to_int(stabilize), truthy_at(op, "stabilize_speed"));
     // (the brush's own after-smoothing: its kind is checked here, even when post_smooth is given)
-    const Json kind_value = truthy_at(op, "kind") ? op["kind"] : Json("gpen");
+    // (brushes@1: the brush state's kind when the op names none, else the G pen)
+    // (a kind the book no longer has — a book of another build — is the G pen, as with none)
+    const auto state_kind = [&doc]() -> std::string {
+        if (!doc.brush_kind) return "gpen";
+        try {
+            return brush_kind(Json(*doc.brush_kind), doc);
+        } catch (const OpError&) {
+            return "gpen";
+        }
+    };
+    const Json kind_value = truthy_at(op, "kind") ? op["kind"] : Json(state_kind());
     const std::string kind = brush_kind(kind_value, doc);
     const Json post_smooth = op.contains("post_smooth") ? op["post_smooth"] : Json(brush_for(Json(kind), doc).post_smooth);
     if (py_truthy(post_smooth)) points = smoothed(points, to_int(post_smooth));
@@ -327,21 +415,71 @@ void add_stroke_mixing(OpContext& c, const MixPieces& mix_pieces) {
     const Json* opacity = get(op, "opacity");
     if (opacity != nullptr && !opacity->is_null()) stroke.opacity = py_clamp(to_float(*opacity), 0.0, 1.0);
     const Brush brush = brush_for(Json(stroke.kind), doc);
+    // brushes@1 (PC4 E1): the inputs over the points kept, the window's flow, the 背景色 of the colour dynamics
+    stroke.tilt = resample_inputs(tilt_in, 2, stroke.points.size(), 1);
+    stroke.time_ms = resample_inputs(time_in, 1, stroke.points.size(), 1);
+    stroke.wheel = resample_inputs(wheel_in, 1, stroke.points.size(), 3);
+    if (const Json* flow = get(op, "flow"); flow != nullptr && !flow->is_null()) {
+        if (!flow->is_number() || flow->is_boolean() || !(flow->get<double>() >= 0.0 && flow->get<double>() <= 1.0)) {
+            throw OpError("flow is a number between 0 and 1");
+        }
+        stroke.flow = py_round(flow->get<double>(), 3);
+    }
+    if (const Json* bg = get(op, "background_rgb"); bg != nullptr && !bg->is_null()) {
+        stroke.background_rgb = rgb_of(*bg, "background_rgb");
+    } else if (brush.dabs && brush.dabs->color.enabled &&
+               (brush.dabs->color.fg_bg.jitter > 0.0 || brush.dabs->color.fg_bg.control != DabControl::Off) && doc.brush_background_rgb) {
+        stroke.background_rgb = *doc.brush_background_rgb;  // (the book's 背景色, kept with the line)
+    }
+    if (!brush.dabs && has_stroke_inputs(stroke)) {
+        // (review P3-8: only a dab brush's line is drawn with them — another's keeps its bytes as before, the op says so)
+        stroke.tilt.clear();
+        stroke.time_ms.clear();
+        stroke.wheel.clear();
+        stroke.flow.reset();
+        stroke.background_rgb.reset();
+        c.notes.push_back("tilt, time_ms, wheel, flow and background_rgb are a dab brush's line's (a brush of engine dabs): not used for " + stroke.kind);
+    }
+    if (brush.dabs && brush.dabs->erase) {
+        throw OpError("this brush erases (its dabs' erase): erase with it by erase's brush, not add_stroke");
+    }
+    const Json* blend_value = get(op, "blend");
+    const std::string blend = blend_value != nullptr && !blend_value->is_null() ? py_str(*blend_value) : std::string("normal");
+    if (blend != "normal" && target.kind != LayerKind::Raster) {
+        throw OpError("blend paints a paint layer's pixels (a pen or tone layer keeps its lines: leave blend out)");
+    }
+    if (brush.dabs && hooks.check_dabs) hooks.check_dabs(doc, stroke);
     const Json mix = op.contains("mix") ? op["mix"] : Json(brush.mix);
     const Json stretch = op.contains("stretch") ? op["stretch"] : Json(brush.stretch);
     const bool mixing = py_truthy(mix) && to_float(mix) > 0 &&
                         (target.stroke_count() > 0 || !target.patches.empty() || (target.raster_png && !target.raster_png->empty()) ||
-                         (target.shapes && !target.shapes->items.empty()));
+                         (target.shapes && !target.shapes->items.empty()) ||
+                         // (PC4 E1: a precise layer's pixels and an ink layer's are what is under the line too)
+                         (target.color_raster && !target.color_raster->empty()) || (page.color && target.ink_raster && !target.ink_raster->empty()));
+    if (mixing && blend != "normal") throw OpError("mix and blend do not go together (a blend paints the pixels the mixing reads)");
     if (mixing && !mix_pieces) {
         not_yet_ported("add_stroke with mix (下地混色) on a layer that has something on it: the colour under the line is "
                        "read by the drawing build (render::ops_registry)");
     }
-    if (mixing && (stroke.color_rgb || target.color_raster || target.ink_raster)) {
-        // (this build's precise colours and CMYK/Lab inks: Python has neither, nor mixing on them)
-        not_yet_ported("add_stroke with mix (下地混色) on precise colours or on a CMYK or Lab page is not in the C++ build");
-    }
+    // (PC4 E1: on precise colours and on CMYK and Lab inks too — the colour under the line read in float, each piece's
+    // colour a precise line's color_rgb or the ink page's rgb: render/raster mixed_pieces)
     const std::vector<PointF> drawn = stroke.points;
     const double pad = stroke.width_mm / 2;
+    if (blend != "normal") {
+        // (brushes@1, PC4 E1: a line with a blend is painted into the paint layer's pixels, as fill_area's blend; its
+        // symmetry copies too. It is not kept as a line)
+        if (!hooks.blend) not_yet_ported("add_stroke's blend: the line is painted into the pixels by the drawing build (render::ops_registry)");
+        const std::string id = target.id;
+        hooks.blend(c, at, id, stroke, blend);
+        for (const PenPoints& copy_points : copies) {
+            Stroke twin = stroke;
+            twin.id = new_id();
+            twin.points.clear();
+            for (const PenPoint& p : copy_points) twin.points.push_back(PointF{p.x, p.y});
+            hooks.blend(c, at, id, twin, blend);
+        }
+        return;
+    }
     std::vector<StrokePtr> items = target.strokes->items;
     if (mixing) {
         const double amount = py_clamp(to_float(mix), 0.0, 1.0);
@@ -407,7 +545,14 @@ void edit_stroke(OpContext& c) {
     std::vector<StrokePtr> items = layer.strokes->items;
     Stroke edited=coerce_stroke(points);
     const auto& old=*items[static_cast<std::size_t>(index)];
-    if(old.color_rgb) {edited.id=old.id;edited.color_rgb=old.color_rgb;edited.rgb=old.rgb;edited.width_mm=old.width_mm;edited.kind=old.kind;edited.opacity=old.opacity;edited.pressure_opacity=old.pressure_opacity;}
+    if(old.color_rgb || own_line(old, doc)) {edited.id=old.id;edited.color_rgb=old.color_rgb;edited.rgb=old.rgb;edited.width_mm=old.width_mm;edited.kind=old.kind;edited.opacity=old.opacity;edited.pressure_opacity=old.pressure_opacity;}
+    if (own_line(old, doc)) {  // (brushes@1, PC4 E1: the pen's inputs spread over the new points along the old line)
+        const std::vector<double> along = lengths_along(old.points);
+        std::vector<double> places;
+        const std::size_t m = edited.points.size();
+        for (std::size_t i = 0; i < m; ++i) places.push_back(m < 2 || along.empty() ? 0.0 : along.back() * static_cast<double>(i) / static_cast<double>(m - 1));
+        carry_inputs(old, edited, &places);
+    }
     items[static_cast<std::size_t>(index)] = std::make_shared<const Stroke>(std::move(edited));
     layer.strokes = make_strokes(std::move(items));
 }
@@ -425,7 +570,11 @@ void simplify_stroke(OpContext& c) {
     std::vector<StrokePtr> items = layer.strokes->items;
     Stroke edited=coerce_stroke(simplified);
     const auto& old=*items[static_cast<std::size_t>(index)];
-    if(old.color_rgb) {edited.id=old.id;edited.color_rgb=old.color_rgb;edited.rgb=old.rgb;edited.width_mm=old.width_mm;edited.kind=old.kind;edited.opacity=old.opacity;edited.pressure_opacity=old.pressure_opacity;}
+    if(old.color_rgb || own_line(old, doc)) {edited.id=old.id;edited.color_rgb=old.color_rgb;edited.rgb=old.rgb;edited.width_mm=old.width_mm;edited.kind=old.kind;edited.opacity=old.opacity;edited.pressure_opacity=old.pressure_opacity;}
+    if (own_line(old, doc)) {  // (brushes@1, PC4 E1: the kept points' inputs, where they were)
+        const std::vector<double> places = places_on(old, edited);
+        carry_inputs(old, edited, &places);
+    }
     items[static_cast<std::size_t>(index)] = std::make_shared<const Stroke>(std::move(edited));
     layer.strokes = make_strokes(std::move(items));
 }
@@ -495,18 +644,21 @@ void erase(OpContext& c) {
     if (target.stroke_count() > 0) {
         std::vector<StrokePtr> kept;
         for (const StrokePtr& stroke : target.strokes->items) {
-            const auto pieces = split_by_eraser(stroke_points(*stroke), points, width / 2);
+            std::vector<std::vector<double>> places;
+            const auto pieces = split_by_eraser(stroke_points(*stroke), points, width / 2, places);
             if (pieces.size() == 1 && pieces[0].size() >= stroke->points.size() && untouched(*stroke, points, width / 2)) {
                 kept.push_back(stroke);
                 continue;
             }
-            for (const PenPoints& piece : pieces) {
-                Stroke part = coerce_stroke(piece);
+            for (std::size_t k = 0; k < pieces.size(); ++k) {
+                Stroke part = coerce_stroke(pieces[k]);
                 part.width_mm = stroke->width_mm;
                 part.kind = stroke->kind;
                 part.rgb = stroke->rgb;
                 part.color_rgb = stroke->color_rgb;
                 part.opacity = stroke->opacity;
+                // (brushes@1, PC4 E1: the whole line's flow and 背景色 with each piece, the pen's inputs where it was)
+                carry_inputs(*stroke, part, &places[k]);
                 kept.push_back(std::make_shared<const Stroke>(std::move(part)));
             }
         }
@@ -562,15 +714,87 @@ Json paper_settings(const Json& given, const Document& doc, const PaperTakeIn& t
 
 }  // namespace
 
-void register_define_brush(OpRegistry& registry, PaperTakeIn take_in) {
-    registry.add("define_brush",[take_in](OpContext& c) {
+namespace {
+
+// brushes@1 (PC4 E1): define_brush's dab brush — "engine" ("dabs"; null: the brush draws as before), "dabs" (Genko's
+// settings, or upstream's with "format": "photocraft"), their pictures given as "png" taken in (`tips`: their refs and
+// bytes). The data with "engine" and "dabs" as brush_from_dict takes them.
+Json dab_settings(Json data, OpContext& c, const DabTakeIn& hooks, std::map<std::string, Bytes>& tips) {
+    const Json format = data.contains("format") ? data["format"] : Json(nullptr);
+    data.erase("format");
+    if (!format.is_null() && format != Json("photocraft") && format != Json("genko")) {
+        throw OpError("format must be photocraft (upstream's brush settings) or genko");
+    }
+    const Json* engine = get(data, "engine");
+    if (engine != nullptr && engine->is_null()) {  // (back to the way a brush of its base draws)
+        data["dabs"] = nullptr;
+        return data;
+    }
+    if (engine != nullptr && *engine != Json(std::string(kDabEngine))) throw OpError("engine must be dabs (or null: the brush draws as before)");
+    Json dabs = data.contains("dabs") && !data["dabs"].is_null() ? data["dabs"] : Json::object();
+    if (format == Json("photocraft")) {
+        if (!hooks.photocraft) not_yet_ported("define_brush's photocraft settings: they are read by the drawing build");
+        std::vector<std::string> ignored;
+        try {
+            dabs = hooks.photocraft(dabs, tips, ignored);
+        } catch (const Error& error) {
+            throw OpError(error.what());
+        }
+        if (!ignored.empty()) {
+            std::string list;
+            for (const std::string& k : ignored) list += (list.empty() ? "" : ", ") + k;
+            c.notes.push_back("photocraft settings that are not the brush's here were not used: " + list);
+        }
+    } else if (dabs.is_object()) {
+        const auto take = [&](Json& holder, const char* key, bool ink, std::uint32_t edge) {
+            if (!holder.is_object() || !holder.contains(key)) return;
+            Json& v = holder[key];
+            if (!v.is_object() || !v.contains("png")) return;
+            if (v.size() != 1) throw OpError(std::string(key) + " takes its picture once: png or asset, not both");
+            if (!hooks.picture) not_yet_ported("define_brush's dab pictures (png): they are taken in by the drawing build");
+            std::string file;
+            try {
+                if (!v["png"].is_string()) throw Error("value", "png is not text");
+                file = a2b_base64(v["png"].get_ref<const std::string&>());
+            } catch (const Error&) {
+                throw OpError(std::string("the ") + key + "'s picture cannot be read (png must be the picture file in base64)");
+            }
+            std::pair<std::string, Bytes> made;
+            try {
+                made = hooks.picture(file, ink, edge);
+            } catch (const Error& error) {
+                throw OpError(std::string("the ") + key + "'s picture: " + error.what());
+            }
+            tips[made.first] = made.second;
+            v = Json{{"asset", made.first}};
+        };
+        take(dabs, "tip", true, kMaxTipEdge);
+        if (dabs.contains("dual")) take(dabs["dual"], "tip", true, kMaxTipEdge);
+        if (dabs.contains("texture")) take(dabs["texture"], "pattern", false, kMaxPatternEdge);
+    }
+    data["engine"] = std::string(kDabEngine);
+    data["dabs"] = dabs;
+    return data;
+}
+
+}  // namespace
+
+void register_define_brush(OpRegistry& registry, PaperTakeIn take_in) { register_define_brush(registry, std::move(take_in), DabTakeIn{}); }
+
+void register_define_brush(OpRegistry& registry, PaperTakeIn take_in, DabTakeIn dab_hooks) {
+    registry.add("define_brush",[take_in, dab_hooks](OpContext& c) {
         const std::string key=truthy_at(c.op,"key")?py_str(c.op["key"]):std::string();
         if(!key.starts_with("my_") || key.size()>40)throw OpError("a brush of one's own has a key starting with my_");
-        if(truthy_at(c.op,"delete")){c.doc.brush_custom.erase(key);return;}
+        if(truthy_at(c.op,"delete")){
+            c.doc.brush_custom.erase(key);
+            if (c.doc.brush_kind == key) c.doc.brush_kind.reset();  // (brushes@1, review P3-9: the brush state's kind goes with it)
+            return;
+        }
         Json data=c.op;for(const char* k:{"op","key","delete"})data.erase(k);
-        // (brushes@1: a dab brush's "engine" and "dabs" are taken by PC4 E1, with its pictures; until then not read, as
-        // before — a brush made on a dab brush of the book keeps its dabs)
-        for (const char* k : {"engine", "dabs"}) data.erase(k);
+        // brushes@1 (PC4 E1): a dab brush's "engine" and "dabs" (and upstream's "format"), with its pictures; a brush made
+        // on a dab brush of the book without them keeps its dabs
+        std::map<std::string, Bytes> tips;
+        if (data.contains("engine") || data.contains("dabs") || data.contains("format")) data = dab_settings(std::move(data), c, dab_hooks, tips);
         // BRUSH-01 (this build): the paper's picture taken in and given by its asset, the book keeping it
         std::optional<std::pair<std::string, Bytes>> picture;
         if (const auto given = data.find("paper"); given != data.end() && !given->is_null()) {
@@ -581,21 +805,38 @@ void register_define_brush(OpRegistry& registry, PaperTakeIn take_in) {
         if (made.paper && !picture && !c.doc.papers.contains(made.paper->asset)) {
             throw OpError("the book has no paper picture " + made.paper->asset + " (give the picture as png)");
         }
+        if (made.dabs) {  // (brushes@1: every picture it names, given now or kept by the book)
+            for (const std::string& ref : dab_assets(*made.dabs)) {
+                const auto given = tips.find(ref);
+                const auto held = c.doc.brush_tips.find(ref);
+                const Bytes png = given != tips.end() ? given->second : (held != c.doc.brush_tips.end() ? held->second : Bytes());
+                if (!png) throw OpError("the book has no brush picture " + ref + " (give the picture as png)");
+                const std::uint32_t edge = ref == made.dabs->texture.pattern.asset ? kMaxPatternEdge : kMaxTipEdge;
+                if (const auto why = check_tip_png(*png, edge)) throw OpError("the brush picture " + ref + ": " + *why);
+            }
+        }
         c.doc.brush_custom[key]=brush_to_dict(made);
         if (picture) c.doc.papers[picture->first] = std::move(picture->second);
+        if (made.dabs) {
+            for (const std::string& ref : dab_assets(*made.dabs)) {
+                if (const auto given = tips.find(ref); given != tips.end()) c.doc.brush_tips[ref] = given->second;
+            }
+        }
         if (made.paper && std::find(c.doc.features.begin(), c.doc.features.end(), kPaperFeature) == c.doc.features.end()) {
             c.doc.features.emplace_back(kPaperFeature);  // (schema-v4 §3: the first use of a paper declares it)
         }
     });
 }
 
-void register_add_stroke(OpRegistry& registry, MixPieces mix) {
-    registry.add("add_stroke", [mix](OpContext& c) { add_stroke_mixing(c, mix); });
+void register_add_stroke(OpRegistry& registry, MixPieces mix) { register_add_stroke(registry, StrokeHooks{std::move(mix), {}, {}}); }
+
+void register_add_stroke(OpRegistry& registry, StrokeHooks hooks) {
+    registry.add("add_stroke", [hooks](OpContext& c) { add_stroke_mixing(c, hooks); });
 }
 
 void register_stroke_ops(OpRegistry& registry) {
     register_define_brush(registry);
-    registry.add("add_stroke", [](OpContext& c) { add_stroke_mixing(c, {}); });
+    registry.add("add_stroke", [](OpContext& c) { add_stroke_mixing(c, StrokeHooks{}); });
     registry.add("delete_stroke", delete_stroke);
     registry.add("edit_stroke", edit_stroke);
     registry.add("simplify_stroke", simplify_stroke);

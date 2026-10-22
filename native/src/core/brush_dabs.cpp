@@ -129,39 +129,43 @@ DabPattern pattern_of(const Json& data, const std::string& at) {
 // --- writing (only what differs) ---------------------------------------------------------------------------------------
 
 template <typename T>
-void put(Json& out, const char* key, const T& mine, const T& plain) {
-    if (!(mine == plain)) out[key] = mine;
+void put(bool every, Json& out, const char* key, const T& mine, const T& plain) {
+    if (every || !(mine == plain)) out[key] = mine;
 }
 
-Json dynamic_json(const DabDynamic& d) {
+Json dynamic_json(bool every, const DabDynamic& d) {
     const DabDynamic plain;
     Json out = Json::object();
-    put(out, "jitter", d.jitter, plain.jitter);
-    if (d.control != plain.control) out["control"] = kControls[static_cast<std::size_t>(d.control)];
-    put(out, "fade_steps", d.fade_steps, plain.fade_steps);
-    put(out, "minimum", d.minimum, plain.minimum);
+    put(every, out, "jitter", d.jitter, plain.jitter);
+    if (every || d.control != plain.control) out["control"] = kControls[static_cast<std::size_t>(d.control)];
+    put(every, out, "fade_steps", d.fade_steps, plain.fade_steps);
+    put(every, out, "minimum", d.minimum, plain.minimum);
     return out;
 }
 
-void put_dynamic(Json& out, const char* key, const DabDynamic& mine) {
-    if (!(mine == DabDynamic{})) out[key] = dynamic_json(mine);
+void put_dynamic(bool every, Json& out, const char* key, const DabDynamic& mine) {
+    if (every || !(mine == DabDynamic{})) out[key] = dynamic_json(every, mine);
 }
 
-void put_mode(Json& out, DabMaskMode mode) {
-    if (mode != DabMaskMode::Multiply) out["mode"] = kMaskModes[static_cast<std::size_t>(mode)];
+void put_mode(bool every, Json& out, DabMaskMode mode) {
+    if (every || mode != DabMaskMode::Multiply) out["mode"] = kMaskModes[static_cast<std::size_t>(mode)];
 }
 
-void put_tip(Json& out, const char* key, const std::string& tip) {
-    if (!tip.empty()) out[key] = Json{{"asset", tip}};
+void put_tip(bool every, Json& out, const char* key, const std::string& tip) {
+    if (!tip.empty()) {
+        out[key] = Json{{"asset", tip}};
+    } else if (every) {
+        out[key] = "round";
+    }
 }
 
-Json pattern_json(const DabPattern& p) {
+Json pattern_json(bool every, const DabPattern& p) {
     if (!p.asset.empty()) return Json{{"asset", p.asset}};
     const DabPattern plain;
     Json out = Json::object();
-    put(out, "procedural", p.procedural, plain.procedural);
-    put(out, "size", p.size, plain.size);
-    put(out, "seed", p.seed, plain.seed);
+    put(every, out, "procedural", p.procedural, plain.procedural);
+    put(every, out, "size", p.size, plain.size);
+    put(every, out, "seed", p.seed, plain.seed);
     return out;
 }
 
@@ -169,112 +173,112 @@ const Json* custom_brushes(const Document& doc) { return doc.brush_custom.is_obj
 
 }  // namespace
 
-Json dabs_to_json(const DabSettings& s) {
+Json dabs_to_json(const DabSettings& s, bool every) {
     const DabSettings plain;
     Json out = Json::object();
-    put(out, "size_mm", s.size_mm, plain.size_mm);
-    put(out, "hardness", s.hardness, plain.hardness);
-    put(out, "spacing", s.spacing, plain.spacing);
-    put(out, "angle", s.angle, plain.angle);
-    put(out, "roundness", s.roundness, plain.roundness);
-    put(out, "flip_x", s.flip_x, plain.flip_x);
-    put(out, "flip_y", s.flip_y, plain.flip_y);
-    put(out, "aliased", s.aliased, plain.aliased);
-    put(out, "opacity", s.opacity, plain.opacity);
-    put(out, "flow", s.flow, plain.flow);
-    put(out, "pressure_size", s.pressure_size, plain.pressure_size);
-    put(out, "pressure_opacity", s.pressure_opacity, plain.pressure_opacity);
-    put(out, "erase", s.erase, plain.erase);
-    put_tip(out, "tip", s.tip);
-    if (!(s.shape == plain.shape)) {
+    put(every, out, "size_mm", s.size_mm, plain.size_mm);
+    put(every, out, "hardness", s.hardness, plain.hardness);
+    put(every, out, "spacing", s.spacing, plain.spacing);
+    put(every, out, "angle", s.angle, plain.angle);
+    put(every, out, "roundness", s.roundness, plain.roundness);
+    put(every, out, "flip_x", s.flip_x, plain.flip_x);
+    put(every, out, "flip_y", s.flip_y, plain.flip_y);
+    put(every, out, "aliased", s.aliased, plain.aliased);
+    put(every, out, "opacity", s.opacity, plain.opacity);
+    put(every, out, "flow", s.flow, plain.flow);
+    put(every, out, "pressure_size", s.pressure_size, plain.pressure_size);
+    put(every, out, "pressure_opacity", s.pressure_opacity, plain.pressure_opacity);
+    put(every, out, "erase", s.erase, plain.erase);
+    put_tip(every, out, "tip", s.tip);
+    if (every || !(s.shape == plain.shape)) {
         Json shape = Json::object();
-        put(shape, "enabled", s.shape.enabled, plain.shape.enabled);
-        put_dynamic(shape, "size", s.shape.size);
-        put_dynamic(shape, "angle", s.shape.angle);
-        put_dynamic(shape, "roundness", s.shape.roundness);
-        put(shape, "flip_x_jitter", s.shape.flip_x_jitter, plain.shape.flip_x_jitter);
-        put(shape, "flip_y_jitter", s.shape.flip_y_jitter, plain.shape.flip_y_jitter);
+        put(every, shape, "enabled", s.shape.enabled, plain.shape.enabled);
+        put_dynamic(every, shape, "size", s.shape.size);
+        put_dynamic(every, shape, "angle", s.shape.angle);
+        put_dynamic(every, shape, "roundness", s.shape.roundness);
+        put(every, shape, "flip_x_jitter", s.shape.flip_x_jitter, plain.shape.flip_x_jitter);
+        put(every, shape, "flip_y_jitter", s.shape.flip_y_jitter, plain.shape.flip_y_jitter);
         out["shape"] = std::move(shape);
     }
-    if (!(s.scatter == plain.scatter)) {
+    if (every || !(s.scatter == plain.scatter)) {
         Json scatter = Json::object();
-        put(scatter, "enabled", s.scatter.enabled, plain.scatter.enabled);
-        put_dynamic(scatter, "scatter", s.scatter.scatter);
-        put(scatter, "both_axes", s.scatter.both_axes, plain.scatter.both_axes);
-        put(scatter, "count", s.scatter.count, plain.scatter.count);
-        put_dynamic(scatter, "count_jitter", s.scatter.count_jitter);
+        put(every, scatter, "enabled", s.scatter.enabled, plain.scatter.enabled);
+        put_dynamic(every, scatter, "scatter", s.scatter.scatter);
+        put(every, scatter, "both_axes", s.scatter.both_axes, plain.scatter.both_axes);
+        put(every, scatter, "count", s.scatter.count, plain.scatter.count);
+        put_dynamic(every, scatter, "count_jitter", s.scatter.count_jitter);
         out["scatter"] = std::move(scatter);
     }
-    if (!(s.texture == plain.texture)) {
+    if (every || !(s.texture == plain.texture)) {
         const DabTexture& t = s.texture;
         Json texture = Json::object();
-        put(texture, "enabled", t.enabled, plain.texture.enabled);
-        if (!(t.pattern == plain.texture.pattern)) texture["pattern"] = pattern_json(t.pattern);
-        put(texture, "invert", t.invert, plain.texture.invert);
-        put(texture, "scale", t.scale, plain.texture.scale);
-        put(texture, "brightness", t.brightness, plain.texture.brightness);
-        put(texture, "contrast", t.contrast, plain.texture.contrast);
-        put(texture, "each_tip", t.each_tip, plain.texture.each_tip);
-        put_mode(texture, t.mode);
-        put(texture, "depth", t.depth, plain.texture.depth);
-        put_dynamic(texture, "depth_jitter", t.depth_jitter);
+        put(every, texture, "enabled", t.enabled, plain.texture.enabled);
+        if (every || !(t.pattern == plain.texture.pattern)) texture["pattern"] = pattern_json(every, t.pattern);
+        put(every, texture, "invert", t.invert, plain.texture.invert);
+        put(every, texture, "scale", t.scale, plain.texture.scale);
+        put(every, texture, "brightness", t.brightness, plain.texture.brightness);
+        put(every, texture, "contrast", t.contrast, plain.texture.contrast);
+        put(every, texture, "each_tip", t.each_tip, plain.texture.each_tip);
+        put_mode(every, texture, t.mode);
+        put(every, texture, "depth", t.depth, plain.texture.depth);
+        put_dynamic(every, texture, "depth_jitter", t.depth_jitter);
         out["texture"] = std::move(texture);
     }
-    if (!(s.dual == plain.dual)) {
+    if (every || !(s.dual == plain.dual)) {
         const DabDual& d = s.dual;
         Json dual = Json::object();
-        put(dual, "enabled", d.enabled, plain.dual.enabled);
-        put_mode(dual, d.mode);
-        put_tip(dual, "tip", d.tip);
-        put(dual, "size_mm", d.size_mm, plain.dual.size_mm);
-        put(dual, "hardness", d.hardness, plain.dual.hardness);
-        put(dual, "roundness", d.roundness, plain.dual.roundness);
-        put(dual, "angle", d.angle, plain.dual.angle);
-        put(dual, "spacing", d.spacing, plain.dual.spacing);
-        put(dual, "scatter", d.scatter, plain.dual.scatter);
-        put(dual, "both_axes", d.both_axes, plain.dual.both_axes);
-        put(dual, "count", d.count, plain.dual.count);
-        put(dual, "flip", d.flip, plain.dual.flip);
+        put(every, dual, "enabled", d.enabled, plain.dual.enabled);
+        put_mode(every, dual, d.mode);
+        put_tip(every, dual, "tip", d.tip);
+        put(every, dual, "size_mm", d.size_mm, plain.dual.size_mm);
+        put(every, dual, "hardness", d.hardness, plain.dual.hardness);
+        put(every, dual, "roundness", d.roundness, plain.dual.roundness);
+        put(every, dual, "angle", d.angle, plain.dual.angle);
+        put(every, dual, "spacing", d.spacing, plain.dual.spacing);
+        put(every, dual, "scatter", d.scatter, plain.dual.scatter);
+        put(every, dual, "both_axes", d.both_axes, plain.dual.both_axes);
+        put(every, dual, "count", d.count, plain.dual.count);
+        put(every, dual, "flip", d.flip, plain.dual.flip);
         out["dual"] = std::move(dual);
     }
-    if (!(s.color == plain.color)) {
+    if (every || !(s.color == plain.color)) {
         const DabColor& c = s.color;
         Json color = Json::object();
-        put(color, "enabled", c.enabled, plain.color.enabled);
-        put(color, "per_tip", c.per_tip, plain.color.per_tip);
-        put_dynamic(color, "fg_bg", c.fg_bg);
-        put(color, "hue_jitter", c.hue_jitter, plain.color.hue_jitter);
-        put(color, "saturation_jitter", c.saturation_jitter, plain.color.saturation_jitter);
-        put(color, "brightness_jitter", c.brightness_jitter, plain.color.brightness_jitter);
-        put(color, "purity", c.purity, plain.color.purity);
+        put(every, color, "enabled", c.enabled, plain.color.enabled);
+        put(every, color, "per_tip", c.per_tip, plain.color.per_tip);
+        put_dynamic(every, color, "fg_bg", c.fg_bg);
+        put(every, color, "hue_jitter", c.hue_jitter, plain.color.hue_jitter);
+        put(every, color, "saturation_jitter", c.saturation_jitter, plain.color.saturation_jitter);
+        put(every, color, "brightness_jitter", c.brightness_jitter, plain.color.brightness_jitter);
+        put(every, color, "purity", c.purity, plain.color.purity);
         out["color"] = std::move(color);
     }
-    if (!(s.transfer == plain.transfer)) {
+    if (every || !(s.transfer == plain.transfer)) {
         Json transfer = Json::object();
-        put(transfer, "enabled", s.transfer.enabled, plain.transfer.enabled);
-        put_dynamic(transfer, "opacity", s.transfer.opacity);
-        put_dynamic(transfer, "flow", s.transfer.flow);
+        put(every, transfer, "enabled", s.transfer.enabled, plain.transfer.enabled);
+        put_dynamic(every, transfer, "opacity", s.transfer.opacity);
+        put_dynamic(every, transfer, "flow", s.transfer.flow);
         out["transfer"] = std::move(transfer);
     }
-    if (!(s.pose == plain.pose)) {
+    if (every || !(s.pose == plain.pose)) {
         const DabPose& p = s.pose;
         Json pose = Json::object();
-        put(pose, "enabled", p.enabled, plain.pose.enabled);
-        put(pose, "tilt_x", p.tilt_x, plain.pose.tilt_x);
-        put(pose, "tilt_y", p.tilt_y, plain.pose.tilt_y);
-        put(pose, "rotation", p.rotation, plain.pose.rotation);
-        put(pose, "pressure", p.pressure, plain.pose.pressure);
-        put(pose, "override_tilt", p.override_tilt, plain.pose.override_tilt);
-        put(pose, "override_rotation", p.override_rotation, plain.pose.override_rotation);
-        put(pose, "override_pressure", p.override_pressure, plain.pose.override_pressure);
+        put(every, pose, "enabled", p.enabled, plain.pose.enabled);
+        put(every, pose, "tilt_x", p.tilt_x, plain.pose.tilt_x);
+        put(every, pose, "tilt_y", p.tilt_y, plain.pose.tilt_y);
+        put(every, pose, "rotation", p.rotation, plain.pose.rotation);
+        put(every, pose, "pressure", p.pressure, plain.pose.pressure);
+        put(every, pose, "override_tilt", p.override_tilt, plain.pose.override_tilt);
+        put(every, pose, "override_rotation", p.override_rotation, plain.pose.override_rotation);
+        put(every, pose, "override_pressure", p.override_pressure, plain.pose.override_pressure);
         out["pose"] = std::move(pose);
     }
-    put(out, "noise", s.noise, plain.noise);
-    put(out, "wet_edges", s.wet_edges, plain.wet_edges);
-    put(out, "build_up", s.build_up, plain.build_up);
-    put(out, "build_up_rate", s.build_up_rate, plain.build_up_rate);
-    put(out, "protect_texture", s.protect_texture, plain.protect_texture);
-    put(out, "seed", s.seed, plain.seed);
+    put(every, out, "noise", s.noise, plain.noise);
+    put(every, out, "wet_edges", s.wet_edges, plain.wet_edges);
+    put(every, out, "build_up", s.build_up, plain.build_up);
+    put(every, out, "build_up_rate", s.build_up_rate, plain.build_up_rate);
+    put(every, out, "protect_texture", s.protect_texture, plain.protect_texture);
+    put(every, out, "seed", s.seed, plain.seed);
     return out;
 }
 
@@ -434,15 +438,99 @@ void validate_stroke_inputs(const Stroke& stroke) {
     if (stroke.flow && !(std::isfinite(*stroke.flow) && *stroke.flow >= 0.0 && *stroke.flow <= 1.0)) {
         throw Error("format", "a line's flow is between 0 and 1");
     }
+    if (stroke.background_rgb && (stroke.background_rgb->size() != 3 ||
+                                  std::any_of(stroke.background_rgb->begin(), stroke.background_rgb->end(), [](std::int64_t v) { return v < 0 || v > 255; }))) {
+        throw Error("format", "a line's background_rgb is three whole numbers 0..255");
+    }
 }
 
 bool inputs_fit(const std::vector<double>& values, std::size_t points, std::size_t per_point) {
     return !values.empty() && values.size() == points * per_point;
 }
 
+std::vector<double> resample_inputs(const std::vector<double>& values, std::size_t per, std::size_t count, int digits) {
+    if (values.empty() || count == 0 || per == 0) return {};
+    const std::size_t given = values.size() / per;
+    if (given == 0) return {};
+    std::vector<double> out;
+    out.reserve(count * per);
+    for (std::size_t i = 0; i < count; ++i) {
+        const double t = count == 1 || given == 1 ? 0.0 : static_cast<double>(i) * static_cast<double>(given - 1) / static_cast<double>(count - 1);
+        const auto j = std::min(static_cast<std::size_t>(std::floor(t)), given - 1);
+        const std::size_t k = std::min(j + 1, given - 1);
+        const double f = t - static_cast<double>(j);
+        for (std::size_t c = 0; c < per; ++c) {
+            const double a = values[j * per + c], b = values[k * per + c];
+            out.push_back(py_round(a + (b - a) * f, digits));
+        }
+    }
+    return out;
+}
+
+std::vector<double> lengths_along(const std::vector<PointF>& points) {
+    std::vector<double> out;
+    out.reserve(points.size());
+    double total = 0.0;
+    for (std::size_t i = 0; i < points.size(); ++i) {
+        if (i > 0) total += std::hypot(points[i].x - points[i - 1].x, points[i].y - points[i - 1].y);
+        out.push_back(total);
+    }
+    return out;
+}
+
+std::vector<double> lengths_along(const PenPoints& points) {
+    std::vector<PointF> xy;
+    xy.reserve(points.size());
+    for (const PenPoint& p : points) xy.push_back(PointF{p.x, p.y});
+    return lengths_along(xy);
+}
+
+void carry_inputs(const Stroke& from, Stroke& to, const std::vector<double>* positions) {
+    to.flow = from.flow;
+    to.background_rgb = from.background_rgb;
+    to.tilt.clear();
+    to.time_ms.clear();
+    to.wheel.clear();
+    const std::size_t n = from.points.size(), m = to.points.size();
+    if (n == 0 || m == 0) return;
+    struct Input {
+        const std::vector<double>& values;
+        std::vector<double>& into;
+        std::size_t per;
+        int digits;
+    };
+    const Input inputs[] = {{from.tilt, to.tilt, 2, 1}, {from.time_ms, to.time_ms, 1, 1}, {from.wheel, to.wheel, 1, 3}};
+    if (positions == nullptr) {  // (the same points, from the first)
+        if (m > n) return;
+        for (const Input& in : inputs) {
+            if (inputs_fit(in.values, n, in.per)) in.into.assign(in.values.begin(), in.values.begin() + static_cast<std::ptrdiff_t>(m * in.per));
+        }
+        return;
+    }
+    if (positions->size() != m) return;
+    const std::vector<double> along = lengths_along(from.points);
+    for (const Input& in : inputs) {
+        if (!inputs_fit(in.values, n, in.per)) continue;
+        in.into.reserve(m * in.per);
+        std::size_t k = 0;  // (the segment the last place was on: the places mostly go on along the line)
+        for (const double s : *positions) {
+            if (k > 0 && s < along[k]) k = 0;
+            while (k + 2 < n && along[k + 1] < s) ++k;
+            const std::size_t j = n == 1 ? 0 : k + 1;
+            const double span = along[j] - along[k];
+            const double t = span > 0 ? std::clamp((s - along[k]) / span, 0.0, 1.0) : 0.0;
+            for (std::size_t c = 0; c < in.per; ++c) {
+                const double a = in.values[k * in.per + c], b = in.values[j * in.per + c];
+                in.into.push_back(py_round(a + (b - a) * t, in.digits));
+            }
+        }
+    }
+}
+
 bool has_stroke_inputs(const Stroke& stroke) {
     const std::size_t n = stroke.points.size();
-    return inputs_fit(stroke.tilt, n, 2) || inputs_fit(stroke.time_ms, n, 1) || inputs_fit(stroke.wheel, n, 1) || stroke.flow.has_value();
+    return inputs_fit(stroke.tilt, n, 2) || inputs_fit(stroke.time_ms, n, 1) || inputs_fit(stroke.wheel, n, 1) || stroke.flow.has_value() ||
+           stroke.background_rgb.has_value();
 }
 
 bool uses_brushes(const Document& doc) {

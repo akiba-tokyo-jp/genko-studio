@@ -1,5 +1,6 @@
 #pragma once
 
+#include <functional>
 #include <string>
 #include <string_view>
 
@@ -54,6 +55,12 @@ std::vector<core::Stroke> mixed_pieces(const core::Page& page, const core::Layer
 // fades out) or "rough" (a grain left behind; its random grain seeded with `seed`, Python's f"{layer.id}{points[0]}").
 void erase_raster(const core::Page& page, core::Layer& layer, const core::PenPoints& points, double width_mm, int dpi,
                   std::string_view texture, const std::string& seed);
+
+// brushes@1 (PC4 E1): erase by a brush (render/dab_ops.hpp eraser_mask) on the layer's 8-bit pixels: the alpha loses
+// what `mask_of(size, dpi)` takes — an "L" mask the size of the layer's picture, `dpi` its pixels an inch across the page
+// (the layer's own grid: a picture not of 200 dpi keeps its size). Its pixels only: the layer's lines are cut by core's
+// erase before (raster_ops erase calls this for a layer that has a picture).
+void erase_raster_masked(const core::Page& page, core::Layer& layer, const std::function<Image(Size, int)>& mask_of);
 
 // What erase_raster takes away, as an "L" mask of `size` (pixels at dpi): 255 where the eraser clears all, less at a
 // soft edge or between the grains of a rough one ("" or "hard": a clean edge).

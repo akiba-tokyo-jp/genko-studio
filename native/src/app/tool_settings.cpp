@@ -35,6 +35,8 @@ const std::map<QString, std::pair<QString, QString>>& titles() {
         {QStringLiteral("select"), {QStringLiteral("選択（V）"), QStringLiteral("コマをクリックで選ぶ・フキダシをドラッグで動かす・ダブルクリックで打ち直す・何もない所のドラッグで表示を動かす")}},
         {QStringLiteral("pen"), {QStringLiteral("ブラシツール（B）"), QStringLiteral("描く先はレイヤー パネルで選んだレイヤー。Shift で直線、[ ] で太さ")}},
         {QStringLiteral("eraser"), {QStringLiteral("消しゴムツール（E）"), QStringLiteral("ペンの線は触れた所で切れる。トーンの上では削る")}},
+        // (PC4 E1: brushes@1)
+        {QStringLiteral("pencil"), {QStringLiteral("鉛筆ツール"), QStringLiteral("縁のくっきりした線で描く。Shift で直線。「自動消去」で、描画色の所から描き始めると背景色で描く")}},
         {QStringLiteral("text"), {QStringLiteral("テキスト（T）"), QStringLiteral("台詞を入れたい所をクリックして打つ（Ctrl+Enter で決定）")}},
         {QStringLiteral("frame"), {QStringLiteral("コマ割り（F）"), QStringLiteral("コマの中をドラッグで割る（ほぼ水平・垂直に吸い付く、Alt で自由）・間の白をドラッグで動かす・角をドラッグで形を変える。"
                                                                             "「作り方」で長方形・折れ線・フリーハンドにすると、新しいコマを描ける")}},
@@ -241,8 +243,13 @@ ToolSettings::ToolSettings(QWidget* parent) : QWidget(parent) {
     fold_->setCheckable(true);
     fold_->setToolTip(QStringLiteral("ツールの設定をたたむ・開く"));
     connect(fold_, &QPushButton::toggled, this, [this](bool on) { set_folded(on); });
+    badge_ = new QLabel;
+    badge_->setObjectName(QStringLiteral("tool_badge"));
+    theme::hint(badge_);
+    badge_->setVisible(false);
     auto* head = new QHBoxLayout;
     head->addWidget(title_, 1);
+    head->addWidget(badge_);
     head->addWidget(fold_);
     stack_widget_ = new QWidget;  // (the pages, one shown at a time, as tall as the one shown)
     stack_ = new QVBoxLayout(stack_widget_);
@@ -282,6 +289,12 @@ void ToolSettings::set_folded(bool on) {
     while (dock != nullptr && !dock->inherits("QDockWidget")) dock = dock->parentWidget();
     const int title_height = title_->width() > 0 ? title_->heightForWidth(title_->width()) : -1;  // (its lines at its width)
     if (dock != nullptr) dock->setMaximumHeight(on ? (title_height > 0 ? title_height : title_->sizeHint().height()) + 18 : QWIDGETSIZE_MAX);
+}
+
+void ToolSettings::set_badge(const QString& text) {
+    badge_->setText(text);
+    badge_->setToolTip(text.isEmpty() ? QString() : QStringLiteral("ブラシ パネルの「モード」が通常ではありません。この描画モードで、ペイントのレイヤーの画素に描き込みます"));
+    badge_->setVisible(!text.isEmpty());
 }
 
 void ToolSettings::show_tool(const QString& tool) {

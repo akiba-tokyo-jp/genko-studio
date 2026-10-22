@@ -286,6 +286,17 @@ std::string erase(const core::Page& page, const core::Layer& layer, const core::
     return std::move(out).take();
 }
 
+std::string erase_masked(const core::Page& page, const core::Layer& layer, const std::function<Image(Size, int)>& mask_of) {
+    core::ColorRasterEdit out(*layer.color_raster);
+    const Grid g = grid_of(page, core::ColorRasterView(*layer.color_raster));
+    const std::string taken = on_raster(mask_of(g.page, g.dpi), g).tobytes();
+    for (std::size_t i = 0; i < taken.size(); ++i) {
+        const int m = static_cast<unsigned char>(taken[i]);
+        if (m != 0) out.set_alpha(i, std::max(0.0, out.pixel(i)[3] - m / 255.0));
+    }
+    return std::move(out).take();
+}
+
 std::string delete_area(const core::Page& page, const core::Layer& layer, const core::Json& area) {
     core::ColorRasterEdit out(*layer.color_raster);
     (void)leave(out, area, grid_of(page, core::ColorRasterView(*layer.color_raster)));

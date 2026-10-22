@@ -186,6 +186,13 @@ PhotoCraft v0.2.0（`ad863217386440ca968fccc9bfff65ba24e61142`、MIT、同梱 `L
 - `crates/paint/src/brush.rs`（1-451 行）: ブラシの設定（先端・硬さ・間隔・不透明度・流量・シェイプ・散布・テクスチャ・デュアル・カラー・伝達・ポーズ・ノイズ・ウェットエッジ・ビルドアップ・テクスチャを保護・seed）と既定の値、揺らぎとコントロール、マスクの合成の種類、手続きの模様の種類 → `native/src/core/brush_dabs.*`（mm とスネークケースに直したもの。E-0）
 - `crates/paint/src/retouch.rs`（225-428 行: `apply_dab_stroke`・`Smudge` と試験）: 順に打つ点の作業の写しと、不透明度×選択範囲での混ぜ戻し、指先の絵の具の運び → `native/src/render/retouch_dabs.*`（層のタイルの上で。E-0）
 - `crates/engine/src/presets/mod.rs`（35-45 行 `Group`、193-276 行 `find`・`unique_name`・`group_index`・`edit_groups`）: 群のあるプリセットと名前の重なりの避け方、編集の動き → `native/src/render/preset_store.*`（E-0）
+- `crates/paint/src/rng.rs`（1-82 行）: 数え上げの乱数（SplitMix64 の混ぜ、点の番号と使い道からの値）→ `native/src/render/dabs/rng.hpp`（E1。線の種はブラシの seed と線の id の FNV-1a 64 の XOR にした）
+- `crates/paint/src/tile.rs`（1-262 行）: 先端の絵・円の先端（硬さ・アンチエイリアス）・模様の標本（双一次、繰り返し）→ `native/src/render/dabs/tile.*`（E1。絵は原稿のグレーの PNG）
+- `crates/paint/src/procedural.rs`（1-277 行）: 手続きの模様（ノイズ・キャンバス・紙・点）→ `native/src/render/dabs/procedural.*`（E1。三角関数は Genko の自前の式）
+- `crates/paint/src/dynamics.rs`（1-580 行）と `crates/paint/src/lib.rs`（43-170 行: `StrokePoint`・`Stroke`・`Dab`・`dabs`・`smooth`）: 揺らぎとコントロール（フェード・筆圧・傾き・ホイール・回転・最初の向き・向き）、間隔の歩み・ビルドアップ、シェイプ・散布・カラー・伝達・ポーズ、点の並び、滑らかさ → `native/src/render/dabs/dynamics.*`（E1。長さは mm、上流の 1 画素を 1/200 インチ）
+- `crates/paint/src/render.rs`（1-647 行: `mask_combine`・`BrushContext`・`CoverageMap`・`StrokeRenderer`）: マスクの合成の 10 の種類、点の覆いのタイル（上限まで重ねる式・ウェットエッジ）、デュアルブラシ・テクスチャの覆い、ノイズ、色の揺らぎの色 → `native/src/render/dabs/coverage.*`・`lines.*`（E1。描く窓の外は持たない、atan2 などは `maths.*` の自前の式）
+- 試験 `crates/paint/src/brush_tests.rs`（1-640 行）・`crates/paint/src/lib.rs`（166-279 行）の考え（間隔・覆いの形・不透明度の天井・流量の重なり・揺らぎ・散布・テクスチャの種類・デュアル・カラー・伝達・ポーズ・ノイズ・ウェットエッジ・ビルドアップ・同じ seed で同じ）→ `native/tests/unit/test_dab_engine.cpp`（E1。mm の並びが 200 dpi と 600 dpi で同じ形、部分を描いても全体と同じを足した）
+- `crates/engine/src/brush_cmds.rs`（1-561 行）の上流のブラシの設定の形 → `native/src/render/dabs/lines.cpp` の `dabs_from_photocraft`（E1。`define_brush` の `format: "photocraft"`）
 
 ## フィルター（filters@1、PC4 節 D）
 

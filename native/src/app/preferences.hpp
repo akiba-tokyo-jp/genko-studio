@@ -66,6 +66,11 @@ bool lowercase_extension();
 bool ignore_exif_profile();
 std::optional<double> tablet_gamma();
 QString pen_button();
+// brushes@1 (PC4 E1, edit.preferences.cursors and view.show.brushPreview): 表示 › ブラシプレビュー (the brush's outline at
+// the pointer; on unless turned off) and 環境設定's 描いている間は十字だけ (off unless chosen).
+bool brush_preview();
+void set_brush_preview(bool on);
+bool cross_while_drawing();
 // The pressure curve that turns the person's usual pressing (the median) into the middle width. Throws
 // std::invalid_argument("もう少し長く試し描きします") with too few presses.
 double gamma_for(const std::vector<double>& pressures);
@@ -162,6 +167,7 @@ public:
     QCheckBox* gpu = nullptr;
     QCheckBox* motion = nullptr;
     QComboBox* cursor = nullptr;
+    QCheckBox* cross_drawing = nullptr;  // (PC4 E1: 描いている間は十字だけ)
     QComboBox* alt_tool = nullptr;
     QComboBox* ctrl_tool = nullptr;
     QLineEdit* backup_folder = nullptr;

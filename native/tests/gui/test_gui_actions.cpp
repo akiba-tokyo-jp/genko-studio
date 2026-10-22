@@ -355,8 +355,9 @@ private slots:
         // act_filter_sharpen_edges, act_filter_despeckle; 漫画's five act_filter_manga_<kind>) and 前回のフィルター (act_filter_last)
         // — theirs (test_gui_filters).
         // and the 1 of PC4 F-b (SPEC FILE-01) — ページ → 複製… (act_duplicate_image, image.duplicate) — theirs (test_gui_file),
-        // which connects F-0's six frames of ファイル too.
-        QCOMPARE(w->actions_by_name().size(), std::size_t{544});
+        // which connects F-0's six frames of ファイル too; and the 2 of PC4 E1 (SPEC COLOR-09「ブラシエンジンと線」) — ツール →
+        // 鉛筆ツール (act_pencil) and 表示 → ブラシプレビュー (act_brush_preview) — theirs (test_gui_brushes).
+        QCOMPARE(w->actions_by_name().size(), std::size_t{546});
         QVERIFY(w->action("act_chat_approval"));
         QVERIFY(w->action("act_style"));
         QVERIFY(w->action("act_exposure"));
@@ -393,8 +394,8 @@ private slots:
         // drawing tools and line editing (test_gui_paint), the effect lines and the material tool (test_gui_effects), the
         // text tool (test_gui_lines); PC3 C-a's three path tools (test_gui_paths); the crop tool (PC3 C-e, test_gui_page_size);
         // PC3 B4's four retouching tools (test_gui_retouch); PC3 C-b's five shape tools besides 長方形ツール (test_gui_shapes)
-        // PC3 B3's オブジェクト選択ツール and クイック選択ツール (test_gui_select_mask)
-        QCOMPARE(w->tools_group()->actions().size(), 43);
+        // PC3 B3's オブジェクト選択ツール and クイック選択ツール (test_gui_select_mask); PC4 E1's 鉛筆ツール (test_gui_brushes)
+        QCOMPARE(w->tools_group()->actions().size(), 44);
     }
 
     // PC4 F-0 (SPEC FILE-01; 節 F 5.1・5.2): ファイル in Photoshop's order and names — the book's export is 書き出し ▸
@@ -563,7 +564,9 @@ private slots:
                                                   {"shape_polygon", "act_shape_polygon"}, {"shape_line", "act_shape_line"},
                                                   {"shape_custom", "act_shape_custom"},
                                                   // (PC3 B3: クイック選択ツール, オブジェクト選択ツール)
-                                                  {"quick", "act_quick_select"}, {"object", "act_object_select"}};
+                                                  {"quick", "act_quick_select"}, {"object", "act_object_select"},
+                                                  // (PC4 E1: 鉛筆ツール)
+                                                  {"pencil", "act_pencil"}};
         QCOMPARE(w->tool_actions().size(), tools.size());
         QVERIFY(w->tools_group()->isExclusive());
         QVERIFY(w->action(QStringLiteral("act_select"))->isChecked());

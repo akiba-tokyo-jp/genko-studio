@@ -42,9 +42,19 @@ const Json& item(const Json& pt, std::size_t i) {
 // brushes@1: a line's flow (a number, not a bool), none when not given.
 void read_flow(const Json& raw, Stroke& stroke) {
     const Json* flow = get(raw, "flow");
-    if (flow == nullptr || flow->is_null()) return;
-    if (!flow->is_number()) throw Error("format", "a line's flow is between 0 and 1");
-    stroke.flow = flow->get<double>();
+    if (flow != nullptr && !flow->is_null()) {
+        if (!flow->is_number()) throw Error("format", "a line's flow is between 0 and 1");
+        stroke.flow = flow->get<double>();
+    }
+    // (PC4 E1: the 背景色 of its colour dynamics, three whole numbers 0..255)
+    const Json* bg = get(raw, "background_rgb");
+    if (bg == nullptr || bg->is_null()) return;
+    if (!bg->is_array() || bg->size() != 3 || !std::all_of(bg->begin(), bg->end(), [](const Json& v) { return v.is_number_integer(); })) {
+        throw Error("format", "a line's background_rgb is three whole numbers 0..255");
+    }
+    std::vector<std::int64_t> rgb;
+    for (const Json& v : *bg) rgb.push_back(v.is_number_unsigned() && v.get<std::uint64_t>() > 255 ? 256 : v.get<std::int64_t>());
+    stroke.background_rgb = std::move(rgb);
 }
 
 }  // namespace
@@ -121,6 +131,7 @@ Json stroke_to_packed(const Stroke& stroke) {
         if (inputs_fit(stroke.time_ms, n, 1)) out["time_ms"] = pack_doubles(stroke.time_ms);
         if (inputs_fit(stroke.wheel, n, 1)) out["wheel"] = pack_doubles(stroke.wheel);
         if (stroke.flow) out["flow"] = *stroke.flow;
+        if (stroke.background_rgb) out["background_rgb"] = *stroke.background_rgb;
     }
     return out;
 }

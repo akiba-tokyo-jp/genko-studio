@@ -7,6 +7,7 @@
 #include <string>
 #include <vector>
 
+#include "core/brush_dabs.hpp"
 #include "core/ops_util.hpp"
 #include "core/pyconv.hpp"
 #include "core/pynum.hpp"
@@ -233,6 +234,8 @@ void densify(core::Stroke& stroke, const std::array<double, 4>& box, double step
     std::vector<double> out_p{pressure[0]};
     std::vector<double> out_r;
     if (rotated) out_r.push_back(stroke.rotation[0]);
+    std::vector<double> places{0.0};  // (brushes@1, PC4 E1: each point's length along the line, for the pen's inputs)
+    double walked = 0.0;
     for (std::size_t k = 1; k < pts.size(); ++k) {
         const double ax = pts[k - 1].x, ay = pts[k - 1].y, bx = pts[k].x, by = pts[k].y;
         const bool touches = !(std::max(ax, bx) < box[0] || std::min(ax, bx) > box[2] || std::max(ay, by) < box[1] || std::min(ay, by) > box[3]);
@@ -242,12 +245,16 @@ void densify(core::Stroke& stroke, const std::array<double, 4>& box, double step
             out.push_back(core::PointF{ax + (bx - ax) * t, ay + (by - ay) * t});
             out_p.push_back(pressure[k - 1] + (pressure[k] - pressure[k - 1]) * t);
             if (rotated) out_r.push_back(stroke.rotation[k - 1] + (stroke.rotation[k] - stroke.rotation[k - 1]) * t);
+            places.push_back(walked + std::hypot(bx - ax, by - ay) * t);
         }
+        walked += std::hypot(bx - ax, by - ay);
     }
     if (out.size() == pts.size()) return;
+    const core::Stroke before = stroke;
     stroke.points = std::move(out);
     stroke.pressure = std::move(out_p);
     if (rotated) stroke.rotation = std::move(out_r);
+    core::carry_inputs(before, stroke, &places);
 }
 
 // The plane drawn through the field: each place shows what was at it + d (the source plane's pixel (0, 0) at the grid's

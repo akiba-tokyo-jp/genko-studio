@@ -146,8 +146,9 @@ struct DabSettings {
 };
 
 // The settings as a book keeps them: only those that differ from the defaults, in the order above (a section only when
-// it differs; within it, only its settings that differ). The defaults are an empty object.
-Json dabs_to_json(const DabSettings& settings);
+// it differs; within it, only its settings that differ). The defaults are an empty object. `every` (PC4 E1, brush.get):
+// every setting, the defaults too (a round tip as "round"), in the same order.
+Json dabs_to_json(const DabSettings& settings, bool every = false);
 // The settings from that form. core::Error("value", "dabs …") for an unknown key, a value of the wrong kind (a number
 // that is not finite, a bool for a number, a whole number given as a fraction), out of its range, a choice not named
 // above, or a picture that is not an asset ref.
@@ -161,15 +162,28 @@ bool is_dab_brush(const Json& brush);
 // reports them).
 std::vector<std::string> dab_asset_refs(const Json& brush_custom);
 
-// A line's inputs (brushes@1; strokes_blob's "tilt", "time_ms", "wheel" — one per point, as "r" — and "flow"): their
-// check. core::Error("format") for a list that is not one per point (tilt: x and y per point), a tilt past ±90°, a time
-// below 0 or not finite, a wheel or a flow out of 0..1.
+// A line's inputs (brushes@1; strokes_blob's "tilt", "time_ms", "wheel" — one per point, as "r" — "flow" and, PC4 E1,
+// "background_rgb"): their check. core::Error("format") for a list that is not one per point (tilt: x and y per point),
+// a tilt past ±90°, a time below 0 or not finite, a wheel or a flow out of 0..1, a background_rgb that is not three
+// whole numbers 0..255.
 void validate_stroke_inputs(const Stroke& stroke);
 // Whether a list of a line's inputs is there and is `per_point` values for each of its `points`; and whether the line
 // has an input that is written (a list that fits, or a flow). An op that changes a line's points without carrying its
 // inputs (as liquify carries "rotation") leaves lists that no longer fit: they are not written (E1 carries them).
 bool inputs_fit(const std::vector<double>& values, std::size_t points, std::size_t per_point);
+// (PC4 E1) A line's inputs (`per` values a point) stretched or squeezed evenly over `count` points (linearly by place
+// along the list, as ops._resampled does the barrel's turn), rounded to `digits`: add_stroke keeps them so over the
+// points it keeps, and the live line draws them so.
+std::vector<double> resample_inputs(const std::vector<double>& values, std::size_t per, std::size_t count, int digits);
 bool has_stroke_inputs(const Stroke& stroke);
+// (PC4 E1) The lengths along a line's points: mm from its first point, one a point.
+std::vector<double> lengths_along(const std::vector<PointF>& points);
+std::vector<double> lengths_along(const PenPoints& points);
+// (PC4 E1) What a line keeps when an op makes it again from its points (moved, transformed, warped, cut, copied): its
+// flow and 背景色 whole, and its pen inputs (tilt, time, wheel) at the new line's points — `positions`: each new point's
+// length along the old line (lengths_along), the inputs there between its points; none: the new points are the old
+// ones from the first, as many or fewer. Inputs that do not fit the old line's points are not carried.
+void carry_inputs(const Stroke& from, Stroke& to, const std::vector<double>* positions = nullptr);
 
 // Whether the book uses brushes@1 (a dab brush, a line with inputs, the brush state's kind or background_rgb).
 bool uses_brushes(const Document& doc);

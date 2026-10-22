@@ -76,6 +76,9 @@ public:
     QWidget* current_page() const { return current_; }
     QLabel* title() const { return title_; }
     QLabel* hint() const { return hint_; }
+    // (PC4 E1) A short word beside the tool's name — the blend a brush draws with when it is not 通常 — or none (empty).
+    void set_badge(const QString& text);
+    QLabel* badge() const { return badge_; }
     // Folded to the tool's name (the fold button and the pages under it).
     bool folded() const { return folded_; }
     QPushButton* fold_button() const { return fold_; }
@@ -84,6 +87,7 @@ public:
 private:
     QLabel* title_ = nullptr;
     QLabel* hint_ = nullptr;
+    QLabel* badge_ = nullptr;
     QPushButton* fold_ = nullptr;
     QVBoxLayout* stack_ = nullptr;
     QWidget* stack_widget_ = nullptr;

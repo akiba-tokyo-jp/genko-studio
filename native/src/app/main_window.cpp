@@ -6,6 +6,7 @@
 #include "app/layer_panel.hpp"
 
 #include <QCheckBox>
+#include <QComboBox>
 #include <QSignalBlocker>
 #include <QApplication>
 #include <QPointer>
@@ -36,6 +37,7 @@
 #include <chrono>
 
 #include "app/actions.hpp"
+#include "app/brush_panel.hpp"  // (PC4 E1: the blend and the pencil)
 #include "app/adjust_forms.hpp"
 #include "app/ask.hpp"
 #include "app/backup.hpp"
@@ -65,6 +67,7 @@
 #include "core/paths.hpp"
 #include "core/pyconv.hpp"
 #include "render/brushes.hpp"
+#include "render/dabs/lines.hpp"
 #include "render/placed.hpp"
 #include "render/timelapse.hpp"
 #include "render/ops_registry.hpp"
@@ -606,9 +609,27 @@ void MainWindow::show_preview(std::optional<core::Document> doc) {
 
 void MainWindow::pen_changed() {
     const core::Layer* layer = target_layer();
-    canvas_->set_live_pen(pen_.stroke_fields(), layer != nullptr && drawable(*layer) ? std::optional<std::string>(layer->id) : std::nullopt);
+    Json fields = pen_.stroke_fields();
+    // (brushes@1, PC4 E1: the 鉛筆ツール's own brush; the blend only a paint layer takes; the smoothing the window keeps)
+    if (canvas_->tool() == QLatin1String("pencil")) {
+        fields["kind"] = pencil_key();
+    }
+    if (brush_ != nullptr) {
+        brush_->set_blend_allowed(layer == nullptr || layer->kind == core::LayerKind::Raster);
+        pen_.blend = brush_->pen().blend;  // (the モード as it shows now: a paint layer's, or 通常 — review P3-6)
+    }
+    if (tool_settings_ != nullptr) {  // (review P2-6: a blend other than 通常 seen beside the tool's name)
+        const bool drawing = PageCanvas::draws_line(canvas_->tool());
+        tool_settings_->set_badge(drawing && pen_.blend != "normal" && brush_ != nullptr
+                                      ? QStringLiteral("モード: ") + brush_->blend->currentText()
+                                      : QString());
+    }
+    canvas_->set_live_pen(fields, layer != nullptr && drawable(*layer) ? std::optional<std::string>(layer->id) : std::nullopt);
     canvas_->brush_width_mm = pen_.width_mm;
     canvas_->eraser_mm = eraser_mm_;
+    canvas_->smoothing = QString::fromStdString(pen_.smoothing);
+    canvas_->smoothing_amount = pen_.smoothing_amount;
+    canvas_->pointer_kind = fields.value("kind", std::string());
 }
 
 // --- the session ---------------------------------------------------------------------------------------------------

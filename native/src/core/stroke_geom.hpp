@@ -45,6 +45,8 @@ bool near_eraser(double x, double y, const PenPoints& eraser, double radius_mm);
 
 // The pieces of a line that survive an eraser path (the line is cut, not painted over).
 std::vector<PenPoints> split_by_eraser(const PenPoints& points, const PenPoints& eraser, double radius_mm);
+// (PC4 E1) The same, with each piece's points' lengths along the line (`places`, one list a piece).
+std::vector<PenPoints> split_by_eraser(const PenPoints& points, const PenPoints& eraser, double radius_mm, std::vector<std::vector<double>>& places);
 
 // stroke._seg_cross: the parameter t along a→b where it crosses c→d, or nothing.
 std::optional<double> seg_cross(const PointF& a, const PointF& b, const PointF& c, const PointF& d);

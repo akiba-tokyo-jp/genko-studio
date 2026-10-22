@@ -161,7 +161,8 @@ void MainWindow::panel_for_tool(const QString& tool) {
     if (lines_dock_ == nullptr || layers == nullptr) return;
     static const QStringList drawing = {QStringLiteral("pen"),   QStringLiteral("eraser"), QStringLiteral("fill"),
                                         QStringLiteral("lassofill"), QStringLiteral("vector"), QStringLiteral("blend"),
-                                        QStringLiteral("liquify"), QStringLiteral("gradient"), QStringLiteral("shape")};
+                                        QStringLiteral("liquify"), QStringLiteral("gradient"), QStringLiteral("shape"),
+                                        QStringLiteral("pencil")};  // (PC4 E1)
     QDockWidget* want = tool == QLatin1String("text") ? lines_dock_ : drawing.contains(tool) ? layers : nullptr;
     QDockWidget* other = want == lines_dock_ ? layers : lines_dock_;
     const auto seen = [this](QDockWidget* dock) { return dock->isVisible() && (dock->isFloating() || rect().intersects(dock->geometry())); };

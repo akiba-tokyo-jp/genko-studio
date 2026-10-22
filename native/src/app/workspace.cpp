@@ -487,7 +487,9 @@ bool known(const Choices& choices, const QString& value) {
 
 const Choices& cursors() {
     static const Choices all{{QStringLiteral("ブラシの大きさの円"), QStringLiteral("circle")}, {QStringLiteral("円と十字"), QStringLiteral("circle_cross")},
-                             {QStringLiteral("十字"), QStringLiteral("cross")}, {QStringLiteral("点"), QStringLiteral("dot")}};
+                             {QStringLiteral("十字"), QStringLiteral("cross")}, {QStringLiteral("点"), QStringLiteral("dot")},
+                             // (PC4 E1: Photoshop's 実際の先端 — a dab brush's own tip, its size and angle; another brush's circle)
+                             {QStringLiteral("ブラシの先端の形"), QStringLiteral("tip")}};
     return all;
 }
 

@@ -20,6 +20,7 @@
 #include "app/brush_panel.hpp"
 #include "app/colours.hpp"
 #include "app/fields.hpp"
+#include "app/preferences.hpp"
 #include "app/main_window.hpp"
 #include "app/theme.hpp"
 #include "app/tool_settings.hpp"
@@ -66,6 +67,21 @@ void MainWindow::build_paint_actions() {
     // (PC4 E-0, the user's decision 2: スポイトツール, 塗りつぶしツール, グラデーションツール, 描画色と背景色 by Photoshop's
     // names — their ids and keys kept, preferences::renamed())
     tool("act_picker", QStringLiteral("スポイトツール"), "picker", key("I"), QStringLiteral("クリックした所の色を描画色にします"));
+    // (PC4 E1: Photoshop's 鉛筆ツール — a hard line without anti-aliasing, drawn with its own dab brush; in the brush tools'
+    // group, its key that of the group: none of its own)
+    tool("act_pencil", QStringLiteral("鉛筆ツール"), "pencil", {},
+         QStringLiteral("縁のくっきりした（アンチエイリアスのない）線を描きます。自動消去で、描画色の所から描き始めると背景色で描きます"));
+    // (PC4 E1, view.show.brushPreview: the brush's outline on the page as 環境設定 › ペンのカーソル says, or the cross alone)
+    QAction* preview = make("act_brush_preview", QStringLiteral("ブラシプレビュー"), [] {}, {},
+                            QStringLiteral("描く道具のポインターに、ブラシの大きさ・形を見せます（オフ: 十字だけ）"), true);
+    preview->setChecked(preferences::brush_preview());
+    connect(preview, &QAction::toggled, this, [this](bool on) {
+        preferences::set_brush_preview(on);
+        canvas_->brush_preview = on;
+        canvas_->refresh_cursor();
+        canvas_->update();
+    });
+    canvas_->brush_preview = preview->isChecked();
     tool("act_fill", QStringLiteral("塗りつぶしツール"), "fill", key("G"), QStringLiteral("線で囲まれた所をクリックで塗ります（隙間閉じ・見る範囲はブラシ パネルで）"));
     tool("act_lassofill", QStringLiteral("囲って塗る"), "lassofill", key("Shift+G"), QStringLiteral("ドラッグで囲んだ所を塗ります"));
     tool("act_gradient", QStringLiteral("グラデーションツール"), "gradient", key("U"), QStringLiteral("ドラッグの向きに色をなめらかに変えて塗る（選択範囲があればその中だけ）"));
@@ -464,7 +480,7 @@ bool MainWindow::paint_stroke(const StrokeInput& stroke, const core::Page& page,
     // 透明色 (the pen takes away where it passes), ゆがみ and 色混ぜ: not lines of their own
     Json flat = Json::array();
     for (const core::PenPoint& p : stroke.points) flat.push_back(Json::array({p.x, p.y}));
-    if (stroke.tool == QLatin1String("pen") && colours_ != nullptr && colours_->transparent->isChecked()) {
+    if (PageCanvas::draws_line(stroke.tool) && colours_ != nullptr && colours_->transparent->isChecked()) {  // (PC4 E1: the pencil too)
         canvas_->stroke_dropped();
         apply_ops(Json::array({Json{{"op", "erase"}, {"page", page.index.json()}, {"layer_id", layer.id}, {"points", flat},
                                     {"width_mm", std::max(0.3, brush_->size->value())}}}));

@@ -5,6 +5,7 @@
 #include <cmath>
 #include <memory>
 
+#include "core/brush_dabs.hpp"
 #include "core/command_bus.hpp"
 #include "core/pyconv.hpp"
 #include "core/pynum.hpp"
@@ -196,6 +197,9 @@ core::Stroke warp_stroke(const core::Stroke& stroke, const Go& go) {
     out.color_rgb = stroke.color_rgb;
     out.opacity = stroke.opacity;
     out.id = stroke.id;
+    // (brushes@1, PC4 E1: its flow and 背景色, and its pen inputs where each point of the denser line was on it)
+    const std::vector<double> positions = core::lengths_along(along);
+    core::carry_inputs(stroke, out, &positions);
     return out;
 }
 

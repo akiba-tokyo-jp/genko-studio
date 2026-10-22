@@ -20,11 +20,13 @@
 
 #include "app/frame_tools.hpp"
 #include "app/live_ink.hpp"
+#include "app/pen.hpp"
 #include "app/tiles.hpp"
 #include "core/geometry.hpp"
 #include "core/json.hpp"
 #include "core/model.hpp"
 #include "core/snap.hpp"
+#include "render/dabs/dynamics.hpp"
 
 class QKeyEvent;
 class QVariantAnimation;
@@ -65,7 +67,12 @@ struct StrokeInput {
     core::PenPoints points;
     std::vector<double> rotation;
     std::string id;
-    QString tool;  // pen | eraser
+    QString tool;  // pen | pencil | eraser
+    // brushes@1 (PC4 E1): the pen's inputs at each point — its tilt (x and y), the time (ms from the first point) and the
+    // airbrush wheel (0..1) —, what a dab brush's line reads
+    std::vector<double> tilt;
+    std::vector<double> time_ms;
+    std::vector<double> wheel;
 };
 
 class PageCanvas : public QWidget {
@@ -104,6 +111,13 @@ public:
     const core::Json& live_pen() const { return pen_fields_; }
     double brush_width_mm = 0.35;
     double eraser_mm = 2.0;
+    // brushes@1 (PC4 E1): the smoothing's way — "stabilize" (add_stroke's 手ぶれ補正), "string" (紐で引く) or "catch_up"
+    // (追いつく: the pen's input smoothed here, render/dabs Smoother; the line shown and kept is the smoothed one) — and its
+    // amount (0..1)
+    QString smoothing = QStringLiteral("stabilize");
+    double smoothing_amount = 0.5;
+    // The tools that draw a line (ブラシツール, 鉛筆ツール).
+    static bool draws_line(const QString& tool);
     QString frame_mode = QStringLiteral("cut");  // cut | rect | poly | free
     bool show_guides = true;
     bool show_frame_numbers = false;
@@ -404,6 +418,11 @@ public:
     QString pen_button = QStringLiteral("menu");
     // The pen's pointer on the page: circle (the brush's circle and a dot) | circle_cross | cross | dot.
     QString cursor_kind = QStringLiteral("circle_cross");
+    // brushes@1 (PC4 E1): 表示 › ブラシプレビュー (off: the cross alone) and 描いている間は十字だけ; the pen's brush (its kind: a
+    // dab brush's tip drawn as the pointer for cursor_kind "tip")
+    bool brush_preview = true;
+    bool cross_while_drawing = false;
+    std::string pointer_kind;
     // The tool a held Alt or Ctrl switches to for a moment ("": none).
     std::map<QString, QString> modifier_tools{{QStringLiteral("alt"), QStringLiteral("picker")}, {QStringLiteral("ctrl"), QStringLiteral("select")}};
     // 道具ごとの修飾キー: {tool: {alt | ctrl | shift: a tool, or "none"}} — a tool's own wins over the common one; Shift
@@ -577,8 +596,13 @@ private:
     // out of the event that drew it.
     void live_sync();
     void live_draw();
-    void begin_stroke(const QPointF& mm, double pressure, double rotation, bool tablet);
-    void extend_stroke(const QPointF& mm, double pressure, double rotation, bool straight);
+    // (brushes@1, PC4 E1) a dab brush's tip as the pointer at `at` (the view's pixels), `size_mm` across; false for a brush
+    // that is not a dab brush (or one that cannot be laid)
+    bool draw_tip(QPainter& painter, const QPointF& at, double size_mm) const;
+    void begin_stroke(const QPointF& mm, double pressure, double rotation, bool tablet, const PenSample& sample = {});
+    void extend_stroke(const QPointF& mm, double pressure, double rotation, bool straight, const PenSample& sample = {});
+    // (brushes@1, PC4 E1) one point of the line being drawn, with its inputs
+    void add_point(const core::PenPoint& p, double rotation, const PenSample& sample);
     void finish_stroke();
     void back_from_eraser_end();
 
@@ -765,6 +789,9 @@ private:
     // the line being drawn
     core::PenPoints stroke_;
     std::vector<double> turns_;
+    std::vector<double> tilts_, times_, wheels_;   // (brushes@1: the pen's inputs, one a point; tilt two)
+    double stroke_t0_ = 0.0;                        // (the time of the line's first point)
+    std::optional<render::dabs::Smoother> smoother_;  // (the smoothing's way, when it is the window's)
     std::string stroke_id_;
     bool stroke_tablet_ = false;
     std::unique_ptr<LiveInk> live_;

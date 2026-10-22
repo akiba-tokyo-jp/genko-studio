@@ -67,9 +67,14 @@
       },
       "upstream_menu": null,
       "genko_status": "一部（2026-10-16 照合）",
-      "implementation_status": "未着手",
+      "implementation_status": "実装済み（PC4 E1、未統合）",
       "acceptance_status": "未実施",
-      "evidence": [],
+      "evidence": [
+        "native/src/api/cli.cpp",
+        "native/src/core/brush_dabs.cpp",
+        "native/src/service/briefs.cpp",
+        "native/tests/unit/test_dab_lines.cpp"
+      ],
       "pc0": {
         "date": "2026-10-16",
         "cpp_base": "962faa4",
@@ -2894,9 +2899,14 @@
         "alternate_menus": []
       },
       "genko_status": "一部（2026-10-16 照合）",
-      "implementation_status": "未着手",
+      "implementation_status": "実装済み（PC4 E1、未統合）",
       "acceptance_status": "未実施",
-      "evidence": [],
+      "evidence": [
+        "native/src/app/preferences.cpp",
+        "native/src/app/workspace.cpp",
+        "native/src/app/canvas_paint.cpp",
+        "native/tests/gui/test_gui_brushes.cpp"
+      ],
       "pc0": {
         "date": "2026-10-16",
         "cpp_base": "962faa4",
@@ -27056,9 +27066,14 @@
       },
       "upstream_menu": null,
       "genko_status": "一部（2026-10-16 照合）",
-      "implementation_status": "未着手",
+      "implementation_status": "実装済み（PC4 E1、未統合）",
       "acceptance_status": "未実施",
-      "evidence": [],
+      "evidence": [
+        "native/src/render/dabs/lines.cpp",
+        "native/src/app/main_window_actions.cpp",
+        "native/src/app/brush_panel.cpp",
+        "native/tests/gui/test_gui_brushes.cpp"
+      ],
       "pc0": {
         "date": "2026-10-16",
         "cpp_base": "962faa4",
@@ -27076,7 +27091,8 @@
         ],
         "gap": "アンチエイリアスなし（aa=none）の自作ブラシで硬い縁の線は描ける（「鉛筆」の名のブラシはざらつきの質感で別物）。自動消去（autoErase）、描画モード、マスク/クイックマスク/チャンネル対象の指定がない。8 ビット RGB の画素だけ（上流は 8/16/32 ビット・CMYK/Lab 等の各色モデルで動く）",
         "note": ""
-      }
+      },
+      "remaining": "描く先にクイックマスク・チャンネルを名指す target は無い（paint.stroke と同じ）"
     },
     {
       "id": "paint.sharpen",
@@ -27221,9 +27237,16 @@
       },
       "upstream_menu": null,
       "genko_status": "一部（2026-10-16 照合）",
-      "implementation_status": "未着手",
+      "implementation_status": "実装済み（PC4 E1、未統合）",
       "acceptance_status": "未実施",
-      "evidence": [],
+      "evidence": [
+        "native/src/render/dabs/lines.cpp",
+        "native/src/render/dab_ops.cpp",
+        "native/src/core/ops_strokes.cpp",
+        "native/src/render/page.cpp",
+        "native/tests/unit/test_dab_lines.cpp",
+        "native/tests/unit/test_dab_engine.cpp"
+      ],
       "pc0": {
         "date": "2026-10-16",
         "cpp_base": "962faa4",
@@ -27244,7 +27267,8 @@
         ],
         "gap": "ペンの線（ベクター、ブラシ種・太さ・不透明度・筆圧・軸の回転・手ぶれ補正・入り抜き）、レイヤーマスクへの描画、高精度（u16/f32）の画素への描画はある。ラスタのダブ描画（硬さ・流量・間隔の指定）、描画モード、傾き・ホイール・時刻の入力、smoothing の方式と zoom、クイックマスク/チャンネルを対象にする指定、グレー等の色モデルと 32 ビットの CMYK/Lab がない",
         "note": "paint:brush-dynamics と document:color-depth-model（PC1）が前提"
-      }
+      },
+      "remaining": "描く先にクイックマスク・チャンネルを名指す target は無い（レイヤーマスクは今の「マスクを編集する」、クイックマスクは選択ペン）。zoom は mm で描くので要らない"
     },
     {
       "id": "path.delete",
@@ -30835,9 +30859,12 @@
       },
       "upstream_menu": null,
       "genko_status": "一部（2026-10-16 照合）",
-      "implementation_status": "未着手",
+      "implementation_status": "実装済み（PC4 E1、未統合）",
       "acceptance_status": "未実施",
-      "evidence": [],
+      "evidence": [
+        "native/src/core/ops_pages.cpp",
+        "native/tests/unit/test_dab_lines.cpp"
+      ],
       "pc0": {
         "date": "2026-10-16",
         "cpp_base": "962faa4",
@@ -30855,7 +30882,8 @@
         ],
         "gap": "set_brush（色・太さ・手ぶれ補正・入り抜き・筆圧曲線）とブラシパネルで今のブラシを変えられる。プリセット名での切り替え、reset、BrushSettings の各項目の深いマージは API にない",
         "note": "項目の不足そのものは paint:brush-dynamics"
-      }
+      },
+      "remaining": "プリセットの名前での切り替えは E2（プリセット）。BrushSettings の各項目は set_brush では変えず、define_brush で自分のブラシとして持つ"
     },
     {
       "id": "tools.setColors",
@@ -35644,9 +35672,13 @@
         "alternate_menus": []
       },
       "genko_status": "一部（2026-10-16 照合）",
-      "implementation_status": "未着手",
+      "implementation_status": "実装済み（PC4 E1、未統合）",
       "acceptance_status": "未実施",
-      "evidence": [],
+      "evidence": [
+        "native/src/app/main_window_paint.cpp",
+        "native/src/app/canvas_paint.cpp",
+        "native/tests/gui/test_gui_brushes.cpp"
+      ],
       "pc0": {
         "date": "2026-10-16",
         "cpp_base": "962faa4",
@@ -39131,9 +39163,16 @@
       "kind": "tool",
       "upstream_source": "crates/ui-egui/src/state.rs",
       "genko_status": "一部（2026-10-16 照合）",
-      "implementation_status": "未着手",
+      "implementation_status": "実装済み（PC4 E1、未統合）",
       "acceptance_status": "未実施",
-      "evidence": [],
+      "evidence": [
+        "native/src/app/brush_panel.cpp",
+        "native/src/app/pen.cpp",
+        "native/src/app/canvas_input.cpp",
+        "native/src/app/live_ink.cpp",
+        "native/tests/gui/test_gui_pen.cpp",
+        "native/tests/gui/test_gui_brushes.cpp"
+      ],
       "pc0": {
         "date": "2026-10-16",
         "cpp_base": "962faa4",
@@ -39153,16 +39192,23 @@
         ],
         "gap": "ペン（ブラシ種・太さ・不透明度・筆圧曲線・手ぶれ補正・入り抜き・先端・紙質）で描ける。流量・硬さ・描画モードの指定、Photoshop 型のブラシ設定パネル（形状・散布・テクスチャ・デュアル・カラー・伝達・ポーズ・ウェットエッジ・エアブラシ）、チャンネルへの描画がない（クイックマスクは選択ペン・選択消しで直す）",
         "note": "エンジン側は paint.stroke の行と paint:brush-dynamics"
-      }
+      },
+      "remaining": "Photoshop 型のブラシ設定パネル（形状・散布・テクスチャ…の編集）と、ツールの設定の 硬さ・エアブラシ・筆圧で不透明度／サイズ の欄は E2"
     },
     {
       "id": "tool:Eraser",
       "kind": "tool",
       "upstream_source": "crates/ui-egui/src/state.rs",
       "genko_status": "一部（2026-10-16 照合）",
-      "implementation_status": "未着手",
+      "implementation_status": "実装済み（PC4 E1、未統合）",
       "acceptance_status": "未実施",
-      "evidence": [],
+      "evidence": [
+        "native/src/render/dab_ops.cpp",
+        "native/src/render/raster_ops.cpp",
+        "native/src/app/main_window_brushes.cpp",
+        "native/tests/unit/test_dab_lines.cpp",
+        "native/tests/gui/test_gui_brushes.cpp"
+      ],
       "pc0": {
         "date": "2026-10-16",
         "cpp_base": "962faa4",
@@ -40440,9 +40486,15 @@
       "label_ja": "ブラシ詳細ダイナミクス・再生",
       "kind": "cross_cutting",
       "genko_status": "一部（2026-10-16 照合）",
-      "implementation_status": "未着手",
+      "implementation_status": "実装済み（PC4 E1、未統合）",
       "acceptance_status": "未実施",
-      "evidence": [],
+      "evidence": [
+        "native/src/render/dabs/dynamics.cpp",
+        "native/src/render/dabs/coverage.cpp",
+        "native/src/render/dabs/procedural.cpp",
+        "native/src/render/dabs/tile.cpp",
+        "native/tests/unit/test_dab_engine.cpp"
+      ],
       "pc0": {
         "date": "2026-10-16",
         "cpp_base": "962faa4",

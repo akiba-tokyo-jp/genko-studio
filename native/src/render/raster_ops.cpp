@@ -1,5 +1,6 @@
 #include "render/raster_ops.hpp"
 
+#include "render/dab_ops.hpp"
 #include "render/ink.hpp"
 #include "render/ink_edit.hpp"
 #include "render/ink_filters.hpp"
@@ -2523,6 +2524,7 @@ void erase(OpContext& c) {
     // does them and then stops at a paint layer's pixels with not_yet_ported. Those are erased here, after it.
     // (color-mode@1: a paint layer's inks it does not see — they are no PNG — and are erased here too, render/ink_edit)
     static const core::OpFunction* const lines = core::OpRegistry::builtin().find("erase");
+    const std::optional<dab_ops::Eraser> eraser = dab_ops::eraser_of(c.op, c.doc, c.notes);  // (brushes@1, PC4 E1: checked first)
     try {
         (*lines)(c);
         if (!erases_inks(c.doc, c.op)) return;
@@ -2555,6 +2557,24 @@ void erase(OpContext& c) {
     const Json* texture_value = core::get(op, "texture");
     const std::string texture = texture_value != nullptr && core::py_truthy(*texture_value) ? core::py_str(*texture_value) : "";
     Layer& target = page.layers[li];
+    // (brushes@1, PC4 E1: the eraser of a dab brush, or the block: its mask at each layer's grid)
+    if (eraser) {
+        const std::string seed = target.id + raster::first_point_repr(points);
+        const auto mask_of = [&](Size size, int dpi) { return dab_ops::eraser_mask(size, points, width, dpi, *eraser, seed); };
+        if (target.color_raster) {
+            precise_edit(target, [&] { return color_edit::erase_masked(page, target, mask_of); });
+            return;
+        }
+        if (page.color && target.ink_raster) {
+            ink_pixels_edit(target, [&] { return ink_edit::erase_masked(page, target, mask_of); });
+            return;
+        }
+        if (target.kind == LayerKind::Raster && !target.patches.empty() && !(target.raster_png && !target.raster_png->empty())) {
+            raster::bake_vectors(page, target, core::profiled_rgb(page));
+        }
+        if (target.raster_png && !target.raster_png->empty()) raster::erase_raster_masked(page, target, mask_of);  // (at its own grid)
+        return;
+    }
     if (target.color_raster) {
         precise_edit(target, [&] {
             return color_edit::erase(page, target, points, width, texture == "hard" ? "" : texture, target.id + raster::first_point_repr(points));

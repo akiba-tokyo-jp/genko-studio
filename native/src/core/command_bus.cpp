@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <cstdint>
+#include <functional>
 #include <map>
 #include <mutex>
 #include <set>
@@ -57,6 +58,15 @@ std::string join(const std::vector<std::string>& items, std::string_view separat
 bool paper_key(const Json& op, std::string_view key) { return key == "paper" && is_op(op, "define_brush"); }
 // add_stroke's color_rgb (PC4 E-0: the 描画色's precise values on a page of 16 or 32 bits): this build's own too.
 bool stroke_colour_key(const Json& op, std::string_view key) { return key == "color_rgb" && is_op(op, "add_stroke"); }
+// brushes@1 (PC4 E1): the keys of the line ops this build adds — add_stroke's line inputs, flow, blend and 背景色,
+// define_brush's dab brush, set_brush's kind, 背景色 and reset, erase's brush (or block) with its opacity and flow.
+bool dab_key(std::string_view op, std::string_view key) {
+    if (op == "add_stroke") return key == "tilt" || key == "time_ms" || key == "wheel" || key == "flow" || key == "blend" || key == "background_rgb";
+    if (op == "define_brush") return key == "engine" || key == "dabs" || key == "format";
+    if (op == "set_brush") return key == "kind" || key == "background_rgb" || key == "reset";
+    if (op == "erase" || op == "erase_raster") return key == "brush" || key == "block" || key == "opacity" || key == "flow";
+    return false;
+}
 
 bool own_setting(const Json& op, std::string_view name, std::string_view key);
 
@@ -70,7 +80,7 @@ std::string usage(const Json& op, bool channel = false) {
     std::vector<std::string> strange;
     for (const auto& [key, value] : op.items()) {
         if (!schema->contains(key) && key != "op" && key != "area" && !key.starts_with("_") && !paper_key(op, key) &&
-            !stroke_colour_key(op, key) && !(key == "channel" && channel) && !own_setting(op, name, key)) {
+            !stroke_colour_key(op, key) && !dab_key(name, key) && !(key == "channel" && channel) && !own_setting(op, name, key)) {
             strange.push_back(key);
         }
     }
@@ -91,7 +101,7 @@ std::string usage(const Json& op, bool channel = false) {
 bool native_key(std::string_view op, std::string_view key) {
     return (op == "merge_visible" && key == "flatten") || (op == "convert_layer" && key == "preserve_precision") ||
            (op == "define_brush" && key == "paper") || ((op == "add_line" || op == "edit_line") && key == "ruby_spans") ||
-           (op == "add_stroke" && key == "color_rgb") ||
+           (op == "add_stroke" && key == "color_rgb") || dab_key(op, key) ||
            key == "contents" ||  // (smart-objects@1: any op on a smart object's page)
            // PC3 (masks@1): set_layer_mask's linked, density and feather_mm; a pixel op's layer_mask (its layer's mask
            // painted instead of its pixels)
@@ -755,6 +765,23 @@ Json journal_op(const Json& op) {
                     *png = "<" + std::to_string(code_points(png->get_ref<const std::string&>())) + " base64 chars>";
                 }
             }
+            // (brushes@1, PC4 E1 — review P3-1: a dab brush's pictures — tips and textures as "png", upstream's tiles'
+            // "data" under "sampled" and "tile" — kept by the book as assets)
+            const std::function<void(Json&)> pictures = [&pictures](Json& v) {
+                if (!v.is_object()) return;
+                for (auto& [key, child] : v.items()) {
+                    if (key == "png" && child.is_string()) {
+                        child = "<" + std::to_string(code_points(child.get_ref<const std::string&>())) + " base64 chars>";
+                    } else if ((key == "sampled" || key == "tile") && child.is_object() && child.contains("data")) {
+                        Json& data = child["data"];
+                        if (data.is_string()) data = "<" + std::to_string(code_points(data.get_ref<const std::string&>())) + " base64 chars>";
+                        if (data.is_array()) data = "<" + std::to_string(data.size()) + " values>";
+                    } else {
+                        pictures(child);
+                    }
+                }
+            };
+            if (const auto dabs = out.find("dabs"); dabs != out.end()) pictures(*dabs);
         }
         // (PC2a: a 3D LUT file's text a color_lookup gives — add_layer's and set_layer's adjust, set_adjustment's and
         // filter_raster's own —: its table is the book's asset, and an op is not done again from the journal)

@@ -4,15 +4,21 @@
 #include <array>
 #include <cmath>
 #include <cstdio>
+#include <map>
+#include <unordered_map>
 
 #include "core/command_bus.hpp"
 #include "core/ids.hpp"
 #include "core/pynum.hpp"
 #include "core/pyrandom.hpp"
 #include "core/strokes.hpp"
+#include "core/brush_dabs.hpp"
+#include "core/color_raster.hpp"
+#include "core/ink.hpp"
 #include "render/color_canvas.hpp"
 #include "render/draw.hpp"
 #include "render/fill.hpp"
+#include "render/image_ops.hpp"
 #include "render/layer_masks.hpp"
 #include "render/op_limits.hpp"
 #include "render/page.hpp"
@@ -174,25 +180,95 @@ Image layer_pixels(const core::Page& page, const core::Layer& layer) {
     return ensure_raster(page, layer);
 }
 
+namespace {
+
+// (PC4 E1) A precise or an ink layer's colours at some of its pixels (`wanted`: indices on its grid), straight sRGB 0..255
+// and the alpha 0..1 — read at those pixels only: a precise layer's values (a page of a profile's turned to sRGB, pixel
+// by pixel), an ink layer's rows read one at a time and the inks of the pixels wanted given the colours they mean (as
+// rgba_of means a whole layer's, each pixel on its own).
+std::unordered_map<std::size_t, std::array<float, 4>> colours_at(const core::Page& page, const core::Layer& layer, const std::vector<std::size_t>& wanted) {
+    std::unordered_map<std::size_t, std::array<float, 4>> out;
+    if (wanted.empty()) return out;
+    if (layer.color_raster && !page.color) {
+        const core::ColorRasterView view(*layer.color_raster);
+        const RgbSpace space = RgbSpace::of(page);
+        for (const std::size_t i : wanted) {
+            if (out.contains(i)) continue;
+            const auto v = view.pixel(i);
+            double rgb[3] = {v[0], v[1], v[2]};
+            if (!space.is_srgb()) space.to_srgb(rgb, 1);
+            out[i] = {static_cast<float>(rgb[0] * 255.0), static_cast<float>(rgb[1] * 255.0), static_cast<float>(rgb[2] * 255.0), static_cast<float>(v[3])};
+        }
+        return out;
+    }
+    const core::InkRasterHeader head = core::ink_raster_header(*layer.ink_raster);
+    std::map<std::size_t, std::size_t> slot;  // (pixel → its place among the ones read)
+    for (const std::size_t i : wanted) slot.emplace(i, slot.size());
+    core::InkPixels some = core::blank_ink_pixels(head.space, head.depth, static_cast<std::uint32_t>(slot.size()), 1, head.planes);
+    const unsigned channels = some.channels();
+    auto next = slot.begin();
+    core::read_ink_raster_rows(*layer.ink_raster, [&](std::uint32_t y, const float* values) {
+        for (; next != slot.end() && next->first / head.width == y; ++next) {
+            const std::size_t x = next->first % head.width;
+            for (unsigned c = 0; c < channels; ++c) some.set(next->second, c, values[x * channels + c]);
+        }
+    });
+    const std::vector<image_ops::Rgba> meant = image_ops::rgba_of(image_ops::from_inks(some, *page.color));
+    for (const auto& [i, k] : slot) out[i] = {meant[k][0] * 255.0f, meant[k][1] * 255.0f, meant[k][2] * 255.0f, meant[k][3]};
+    return out;
+}
+
+}  // namespace
+
 std::vector<core::Stroke> mixed_pieces(const core::Page& page, const core::Layer& layer, const core::Stroke& stroke, double mix,
                                        double stretch) {
     constexpr double kStepMm = 1.5;
-    // (color-model@1: the colour under it on an RGB page of a profile is its value: picked up as the sRGB it shows)
-    const Image under = core::holds_page_values(page, layer) ? srgb_from(layer_pixels(page, layer).convert("RGBA"), RgbSpace(*page.rgb))
-                                                              : layer_pixels(page, layer).convert("RGBA");
-    const std::string px = under.tobytes();
-    const int w = under.width(), h = under.height();
+    // The colour under the line, on the layer's grid: its colours (0..255) and alpha (0..1). An 8-bit layer's picture
+    // (color-model@1: on an RGB page of a profile its values picked up as the sRGB they show); PC4 E1 (the user's leftover
+    // of PC2, design 0.4): a precise layer's own values and an ink layer's colours, in float, the same way.
+    // (review P2-3: the precise and ink layers' colours are read at the line's points only, below — the layer is never
+    // copied whole)
+    int w = 0, h = 0;
+    std::string px;
+    const bool precise_layer = layer.color_raster && !page.color;
+    const bool ink_layer = !precise_layer && page.color && layer.ink_raster;
+    std::unordered_map<std::size_t, std::array<float, 4>> fine;  // (straight sRGB 0..255 and the alpha 0..1, by pixel)
+    if (precise_layer) {
+        const core::ColorRasterView view(*layer.color_raster);
+        w = static_cast<int>(view.width());
+        h = static_cast<int>(view.height());
+    } else if (ink_layer) {
+        const core::InkRasterHeader head = core::ink_raster_header(*layer.ink_raster);
+        w = static_cast<int>(head.width);
+        h = static_cast<int>(head.height);
+    } else {
+        const Image under = core::holds_page_values(page, layer) ? srgb_from(layer_pixels(page, layer).convert("RGBA"), RgbSpace(*page.rgb))
+                                                                  : layer_pixels(page, layer).convert("RGBA");
+        px = under.tobytes();
+        w = under.width();
+        h = under.height();
+    }
     const double scale = static_cast<double>(w) / page.spec.width_mm.value();
     std::array<float, 3> base{20.0f, 20.0f, 20.0f};
     if (stroke.rgb && !stroke.rgb->empty()) {
         for (std::size_t i = 0; i < 3 && i < stroke.rgb->size(); ++i) base[i] = static_cast<float>((*stroke.rgb)[i]);
     }
+    // (PC4 E1: a precise line's own colour, its color_rgb, mixed in float; the pieces keep theirs so)
+    const bool precise = stroke.color_rgb && stroke.color_rgb->is_object() && stroke.color_rgb->contains("values");
+    if (precise) {
+        for (std::size_t i = 0; i < 3; ++i) base[i] = static_cast<float>((*stroke.color_rgb)["values"][i].get<double>() * 255.0);
+    }
     std::array<float, 3> carried = base;
-    // (long straight parts get points in between, so the colour can change)
+    // (long straight parts get points in between, so the colour can change; brushes@1: the pen's inputs with them)
     std::vector<core::PointF> points{stroke.points.front()};
-    std::vector<double> pressure, rotation;
+    std::vector<double> pressure, rotation, tilt, time_ms, wheel;
     if (!stroke.pressure.empty()) pressure.push_back(stroke.pressure.front());
     if (!stroke.rotation.empty()) rotation.push_back(stroke.rotation.front());
+    const std::size_t n = stroke.points.size();
+    const bool tilted = core::inputs_fit(stroke.tilt, n, 2), timed = core::inputs_fit(stroke.time_ms, n, 1), wheeled = core::inputs_fit(stroke.wheel, n, 1);
+    if (tilted) tilt = {stroke.tilt[0], stroke.tilt[1]};
+    if (timed) time_ms.push_back(stroke.time_ms.front());
+    if (wheeled) wheel.push_back(stroke.wheel.front());
     for (std::size_t i = 1; i < stroke.points.size(); ++i) {
         const core::PointF a = stroke.points[i - 1], b = stroke.points[i];
         const auto steps = std::max<std::int64_t>(1, static_cast<std::int64_t>(core::py_ceil(core::py_dist(a.x, a.y, b.x, b.y) / (kStepMm / 3))));
@@ -205,7 +281,23 @@ std::vector<core::Stroke> mixed_pieces(const core::Page& page, const core::Layer
             if (!stroke.rotation.empty() && i < stroke.rotation.size()) {
                 rotation.push_back(stroke.rotation[i - 1] + (stroke.rotation[i] - stroke.rotation[i - 1]) * t);
             }
+            const auto between = [t](double p, double q) { return p + (q - p) * t; };
+            if (tilted) {
+                tilt.push_back(core::py_round(between(stroke.tilt[2 * (i - 1)], stroke.tilt[2 * i]), 1));
+                tilt.push_back(core::py_round(between(stroke.tilt[2 * (i - 1) + 1], stroke.tilt[2 * i + 1]), 1));
+            }
+            if (timed) time_ms.push_back(core::py_round(between(stroke.time_ms[i - 1], stroke.time_ms[i]), 1));
+            if (wheeled) wheel.push_back(core::py_round(between(stroke.wheel[i - 1], stroke.wheel[i]), 3));
         }
+    }
+    if (precise_layer || ink_layer) {  // (the pixels under the points, read there)
+        std::vector<std::size_t> wanted;
+        for (const core::PointF& p : points) {
+            const auto x = static_cast<std::int64_t>(p.x * scale);
+            const auto y = static_cast<std::int64_t>(p.y * scale);
+            if (0 <= x && x < w && 0 <= y && y < h) wanted.push_back(static_cast<std::size_t>(y) * std::size_t(w) + static_cast<std::size_t>(x));
+        }
+        fine = colours_at(page, layer, wanted);
     }
     // numpy's float32 with Python floats as weak scalars (NEP 50): each Python float cast to float32 first
     const float mix_f = static_cast<float>(mix), unmix_f = static_cast<float>(1 - mix);
@@ -216,7 +308,10 @@ std::vector<core::Stroke> mixed_pieces(const core::Page& page, const core::Layer
         std::array<float, 3> target = base;
         const auto x = static_cast<std::int64_t>(p.x * scale);  // (int(): toward zero)
         const auto y = static_cast<std::int64_t>(p.y * scale);
-        if (0 <= x && x < w && 0 <= y && y < h) {
+        if (0 <= x && x < w && 0 <= y && y < h && (precise_layer || ink_layer)) {
+            const auto& at = fine.at(static_cast<std::size_t>(y) * std::size_t(w) + static_cast<std::size_t>(x));
+            for (int c = 0; c < 3; ++c) target[c] = base[c] + (at[static_cast<std::size_t>(c)] - base[c]) * at[3];
+        } else if (0 <= x && x < w && 0 <= y && y < h) {
             const auto* at = reinterpret_cast<const unsigned char*>(px.data()) + (static_cast<std::size_t>(y) * w + static_cast<std::size_t>(x)) * 4;
             const float alpha = static_cast<float>(at[3]) / 255.0f;  // (see-through places give nothing to pick up)
             for (int c = 0; c < 3; ++c) {
@@ -255,17 +350,29 @@ std::vector<core::Stroke> mixed_pieces(const core::Page& page, const core::Layer
             };
             piece.pressure = slice(pressure);
             piece.rotation = slice(rotation);
+            piece.time_ms = slice(time_ms);
+            piece.wheel = slice(wheel);
+            piece.tilt = tilted ? std::vector<double>(tilt.begin() + static_cast<std::ptrdiff_t>(2 * start), tilt.begin() + static_cast<std::ptrdiff_t>(2 * (i + 1)))
+                                : std::vector<double>{};
             // np.mean(colours[start:i + 1], axis=0): each column added in order in float32 (a reduction across rows),
             // then divided by the count as an intp — in float64 — into the float32 result
             std::vector<std::int64_t> rgb;
-            const auto n = static_cast<double>(i + 1 - start);
+            std::array<double, 3> exact{};
+            const auto count = static_cast<double>(i + 1 - start);
             for (int c = 0; c < 3; ++c) {
                 float sum = 0.0f;
                 for (std::size_t k = start; k <= i; ++k) sum = sum + colours[k][c];
-                const auto mean = static_cast<float>(static_cast<double>(sum) / n);
-                rgb.push_back(static_cast<std::int64_t>(std::nearbyint(mean)));  // (round(): half to even)
+                const auto mean = static_cast<float>(static_cast<double>(sum) / count);
+                exact[static_cast<std::size_t>(c)] = mean;
+                rgb.push_back(std::clamp<std::int64_t>(static_cast<std::int64_t>(std::nearbyint(mean)), 0, 255));  // (round(): half to even)
             }
             piece.rgb = rgb;
+            if (precise) {  // (PC4 E1: the piece's own precise colour, of the line's precision)
+                const std::string precision = (*stroke.color_rgb)["precision"].get<std::string>();
+                core::Json values = core::Json::array();
+                for (const double v : exact) values.push_back(precision == "u16" ? std::clamp(v / 255.0, 0.0, 1.0) : v / 255.0);
+                piece.color_rgb = core::Json{{"precision", precision}, {"values", values}};
+            }
             pieces.push_back(std::move(piece));
             start = i;
             walked = 0.0;
@@ -294,6 +401,17 @@ void erase_raster(const core::Page& page, core::Layer& layer, const core::PenPoi
     const Image mask = eraser_mask(image.size(), points, width_mm, dpi, texture, seed);
     const Image alpha = image.getchannel(3);
     image.putalpha(chops::subtract(alpha, mask));
+    save_raster(page, layer, image);
+}
+
+void erase_raster_masked(const core::Page& page, core::Layer& layer, const std::function<Image(Size, int)>& mask_of) {
+    if (!layer.raster_png || layer.raster_png->empty()) return;  // (no picture: nothing of pixels to erase)
+    Image image = ensure_raster(page, layer, kWorkingDpi);
+    // (the picture's own grid: its pixels an inch across the page — PC4 F-b's image grids are not of 200 dpi)
+    const double width_mm = page.spec.width_mm.value();
+    const int dpi = width_mm > 0 ? std::max(1, static_cast<int>(std::lround(image.width() * 25.4 / width_mm))) : kWorkingDpi;
+    const Image alpha = image.getchannel(3);
+    image.putalpha(chops::subtract(alpha, mask_of(image.size(), dpi)));
     save_raster(page, layer, image);
 }
 

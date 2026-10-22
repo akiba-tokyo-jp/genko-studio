@@ -8,6 +8,7 @@
 #include <utility>
 
 #include "core/base64.hpp"
+#include "core/brush_dabs.hpp"
 #include "core/color_model.hpp"
 #include "core/channels.hpp"
 #include "core/command_bus.hpp"
@@ -255,6 +256,7 @@ core::Stroke transform_stroke(const core::Stroke& stroke, const Matrix& m) {
     out.rgb = stroke.rgb;
     out.color_rgb = stroke.color_rgb;
     out.opacity = stroke.opacity;
+    core::carry_inputs(stroke, out);  // (brushes@1, PC4 E1: its flow, 背景色 and pen inputs, point for point)
     return out;
 }
 
