@@ -461,7 +461,6 @@ private slots:
             QVERIFY2(!pen_ops.back()[0].contains("brush") && !pen_ops.back()[0].contains("block") && !pen_ops.back()[0].contains("opacity"), way);
         }
         QVERIFY(!core::uses_brushes(pen.session->document()));
-        QVERIFY2(!core::uses_brushes(pen.session->document()), (pen.session->document().brush_custom.dump() + " kind " + pen.session->document().brush_kind.value_or("-") + " lines " + [&] { std::string all; for (const auto& s : pen.ink().strokes->items) all += Json(core::stroke_to_packed(*s)).dump().substr(0, 400) + " "; return all; }()).c_str());
     }
 
     // brushes@1 (PC4 E1, review P2-6): a line with a blend on a paint layer that has lines of its own — they become its
