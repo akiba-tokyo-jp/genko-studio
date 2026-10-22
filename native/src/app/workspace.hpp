@@ -7,6 +7,7 @@
 #include <QWidget>
 
 #include <map>
+#include <unordered_map>
 #include <utility>
 #include <vector>
 
@@ -37,6 +38,9 @@ QString command_name(const std::map<const QAction*, QString>& names, const QActi
 std::map<QString, QAction*> by_text(QMainWindow* window);
 // The menu path of a command ("ページ → コマ"; empty when it is in no menu).
 QString where(QMainWindow* window, const QAction* action);
+// Every item of the menu bar's menus with its menu path, as where() gives it (one in two menus: its first place) — in one
+// walk, for naming many commands at once (where() walks the menus again for each).
+std::unordered_map<const QAction*, QString> menu_places(QMainWindow* window);
 // An item a menu makes again each time it opens (recent books, オートアクション, ワークスペース, ストック: the menus with
 // the property "remade"), deleted then: not a command to keep in the quick access, the command bar or the keys, nor to
 // find.

@@ -75,18 +75,6 @@ void places_in(QMenu* menu, QStringList& trail, std::unordered_map<const QAction
     }
 }
 
-// The menu path of every item in the menu bar's menus, as where() gives it — in one walk, so naming every command
-// (command_names, done each time the window lists them: many times as it opens) does not walk the menus again for each.
-std::unordered_map<const QAction*, QString> places(QMainWindow* window) {
-    std::unordered_map<const QAction*, QString> out;
-    for (QAction* top : window->menuBar()->actions()) {
-        if (top->menu() == nullptr) continue;
-        QStringList trail{top->text()};
-        places_in(top->menu(), trail, out);
-    }
-    return out;
-}
-
 QString place_of(const std::unordered_map<const QAction*, QString>& known, const QAction* action) {
     const auto found = known.find(action);
     return found != known.end() ? found->second : QString();
@@ -126,15 +114,17 @@ std::vector<QAction*> menu_commands(QMainWindow* window) {
 
 namespace {
 
-std::map<const QAction*, QString> command_names(const std::vector<QAction*>& all, QMainWindow* window) {
+// (known: the menu paths, when the caller has them already — else walked here once, when a name needs one)
+std::map<const QAction*, QString> command_names(const std::vector<QAction*>& all, QMainWindow* window,
+                                                const std::unordered_map<const QAction*, QString>* known = nullptr) {
     std::map<QString, int> count;
     for (const QAction* action : all) ++count[action->text()];
     std::map<const QAction*, QString> out;
-    std::optional<std::unordered_map<const QAction*, QString>> known;  // (the menu paths, walked once when a name needs one)
+    std::optional<std::unordered_map<const QAction*, QString>> walked;
     for (const QAction* action : all) {
         QString place;
         if (count[action->text()] > 1) {
-            if (!known) known = places(window);
+            if (known == nullptr) known = &walked.emplace(menu_places(window));
             place = place_of(*known, action);
         }
         out[action] = place.isEmpty() ? action->text() : QStringLiteral("%1（%2）").arg(action->text(), place);
@@ -189,12 +179,23 @@ QString where(QMainWindow* window, const QAction* action) {
     return {};
 }
 
+std::unordered_map<const QAction*, QString> menu_places(QMainWindow* window) {
+    std::unordered_map<const QAction*, QString> out;
+    for (QAction* top : window->menuBar()->actions()) {
+        if (top->menu() == nullptr) continue;
+        QStringList trail{top->text()};
+        places_in(top->menu(), trail, out);
+    }
+    return out;
+}
+
 std::vector<QAction*> search(QMainWindow* window, const QString& words) {
     static const QRegularExpression space(QStringLiteral("\\s+"), QRegularExpression::UseUnicodePropertiesOption);
     const QStringList parts = words.toLower().split(space, Qt::SkipEmptyParts);
     std::vector<QAction*> out;
-    const auto known = places(window);
-    for (QAction* action : commands(window)) {
+    const std::vector<QAction*> all = menu_commands(window);
+    const auto known = menu_places(window);  // (the menus walked once: for the names and the places both)
+    for (QAction* action : commands(all, command_names(all, window, &known))) {
         const QString text = (action->text() + QLatin1Char(' ') + place_of(known, action) + QLatin1Char(' ') + action->statusTip()).toLower();
         if (std::all_of(parts.begin(), parts.end(), [&text](const QString& part) { return text.contains(part); })) out.push_back(action);
     }

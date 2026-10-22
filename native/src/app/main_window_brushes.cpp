@@ -71,7 +71,9 @@ void MainWindow::build_tool_settings() {
     ToolSettings* ts = tool_settings_;
     // (the panel in its scroll area and its dock first, its pages added after: a widget that changes parent has the app's
     // style sheet given again to everything under it, so each page is styled once as it is added — not twice more with
-    // all the others, as the whole panel goes into the scroll area and the dock; it opens the window quicker)
+    // all the others, as the whole panel goes into the scroll area and the dock; it opens the window quicker). Nothing
+    // asks the dock's, the scroll area's or the window's size until the last page is in (no adjustSize, layout()->activate,
+    // sizeHint, nor events run): a scroll area measures its panel again only at setWidget, so it would keep the empty one's.
     auto* dock = new QDockWidget(QStringLiteral("ツールの設定"), this);
     auto* scroll = new QScrollArea;
     scroll->setWidgetResizable(true);
