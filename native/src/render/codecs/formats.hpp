@@ -83,8 +83,11 @@ CodecImage from_eight_bit(std::uint32_t width, std::uint32_t height, Layout layo
 // The picture this build's own readers read (PNG, JPEG, TIFF, WebP, GIF, BMP): its size and the readers' work checked
 // against the limits on its header first; then open_image's picture in Pillow's mode as the codecs' (8 bits; a colour
 // table's colours, a transparent colour or entry as an alpha), or — `deep` — render/smart_decode's deep_picture with all its
-// bits (a PNG of 16 bits, a TIFF of 8, 16 or 32 bits of grey, RGB or CMYK with or without an alpha).
-CodecImage this_builds_picture(std::string_view bytes, const Limits& limits, bool deep);
+// bits (a PNG of 16 bits, a TIFF of 8, 16 or 32 bits of grey, RGB or CMYK with or without an alpha). `size`: its size as
+// the caller has read it from its header (a deep TIFF's, whose samples Pillow's table of modes does not know — a grey and
+// alpha of 16 bits, an RGB of floats —); without it, the size render/png's picture_size reads.
+CodecImage this_builds_picture(std::string_view bytes, const Limits& limits, bool deep,
+                               std::optional<std::pair<std::uint32_t, std::uint32_t>> size = std::nullopt);
 
 // Byte order helpers.
 inline unsigned u8(std::string_view b, std::size_t at) { return static_cast<unsigned char>(b[at]); }

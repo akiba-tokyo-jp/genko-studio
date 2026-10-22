@@ -1,5 +1,5 @@
 // AVIF (render/codecs/formats.hpp; libavif with libaom, BSD-2-Clause): the first picture read — its header parsed and its
-// size checked against the limits before its pixels are decoded (libavif's own limits set to them too) — as RGB or RGBA of
+// size checked against the limits before its pixels are decoded (within libavif's own bound, 16384² pixels) — as RGB or RGBA of
 // 8 bits (16 for a deeper file), with its ICC profile, EXIF and XMP; written as 8-bit 4:4:4 at the quality asked (libaom,
 // speed 6), its colours sRGB's (BT.709 primaries, sRGB's curve) unless it carries a profile, with its EXIF and XMP. libavif
 // is asked for libaom by name both ways, so that a file reads and writes the same on every computer.
@@ -72,8 +72,11 @@ void parse(Decoder& decoder, std::string_view bytes, const Limits& limits) {
     if (decoder.d == nullptr) throw core::Error("memory", "the AVIF reader cannot be made");
     decoder.d->codecChoice = AVIF_CODEC_CHOICE_AOM;
     decoder.d->strictFlags = AVIF_STRICT_DISABLED;
-    decoder.d->imageSizeLimit = static_cast<uint32_t>(std::clamp<std::int64_t>(limits.max_pixels, 1, 0xffffffffLL));
-    decoder.d->imageDimensionLimit = static_cast<uint32_t>(std::clamp<std::int64_t>(std::max(limits.max_width, limits.max_height), 1, 0xffffffffLL));
+    // (libavif takes no bound on the pixels past its own, 16384² — it refuses to parse at all with one wider, "Not
+    // implemented" —: the smaller of the two; the sides' bound 0, none, when the limits have none)
+    decoder.d->imageSizeLimit = static_cast<uint32_t>(std::clamp<std::int64_t>(limits.max_pixels, 1, AVIF_DEFAULT_IMAGE_SIZE_LIMIT));
+    const std::int64_t side = std::max(limits.max_width, limits.max_height);
+    decoder.d->imageDimensionLimit = side >= 0xffffffffLL ? 0 : static_cast<uint32_t>(std::max<std::int64_t>(side, 1));
     avifResult r = avifDecoderSetIOMemory(decoder.d, reinterpret_cast<const uint8_t*>(bytes.data()), bytes.size());
     if (r != AVIF_RESULT_OK) failed(r);
     r = avifDecoderParse(decoder.d);

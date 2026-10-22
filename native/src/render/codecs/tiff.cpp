@@ -130,9 +130,12 @@ std::span<const std::pair<std::uint16_t, std::string_view>> tiff_text_tags() { r
 
 CodecImage read_tiff(std::string_view bytes, const Limits& limits) {
     std::uint16_t bits = 8, samples = 1, photometric = PHOTOMETRIC_MINISBLACK, planar = PLANARCONFIG_CONTIG;
+    std::uint32_t width = 0, height = 0;
     {
         File f(bytes, "rm");
         if (f.tif == nullptr) throw core::Error("unidentified_image", "cannot identify image file (not a TIFF file)");
+        TIFFGetField(f.tif, TIFFTAG_IMAGEWIDTH, &width);
+        TIFFGetField(f.tif, TIFFTAG_IMAGELENGTH, &height);
         TIFFGetFieldDefaulted(f.tif, TIFFTAG_BITSPERSAMPLE, &bits);
         TIFFGetFieldDefaulted(f.tif, TIFFTAG_SAMPLESPERPIXEL, &samples);
         TIFFGetFieldDefaulted(f.tif, TIFFTAG_PLANARCONFIG, &planar);
@@ -140,7 +143,9 @@ CodecImage read_tiff(std::string_view bytes, const Limits& limits) {
     }
     // (with all their bits: 16 and 32; CMYK and an alpha of 8 — smart_decode's reader)
     const bool deep = bits == 16 || bits == 32 || smart::cmyk_alpha_tiff(bytes);
-    CodecImage out = this_builds_picture(bytes, limits, deep);
+    // (a deep one's size from libtiff: Pillow's table of modes, which render/png's picture_size reads it through, does not
+    // know every layout of 16 bits or of floats this build writes)
+    CodecImage out = deep ? this_builds_picture(bytes, limits, true, std::make_pair(width, height)) : this_builds_picture(bytes, limits, false);
     out.icc = proof::embedded_profile(bytes);
     out.meta.xmp = read_metadata(Format::Tiff, bytes).xmp;
     File f(bytes, "rm");

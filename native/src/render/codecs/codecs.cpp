@@ -85,15 +85,19 @@ CodecImage from_deep(const smart::DeepPicture& deep) {
     return CodecImage::from_normalized(static_cast<std::uint32_t>(deep.width), static_cast<std::uint32_t>(deep.height), layout, sample, deep.samples);
 }
 
-CodecImage this_builds_picture(std::string_view bytes, const Limits& limits, bool deep) {
+CodecImage this_builds_picture(std::string_view bytes, const Limits& limits, bool deep,
+                               std::optional<std::pair<std::uint32_t, std::uint32_t>> known) {
     // (its size from its header first: no pixel is allocated for a picture past the limits)
-    const Size size = picture_size(bytes);
+    const auto size = known ? *known : [&] {
+        const Size s = picture_size(bytes);
+        return std::make_pair(static_cast<std::uint32_t>(s.width), static_cast<std::uint32_t>(s.height));
+    }();
     const int depth = smart::stored_depth(bytes);
     // (the readers' work at its height: 4 bytes a pixel for an 8-bit picture; a deep one's floats — 4 bytes a sample —
     // held with the picture made from them, 2 bytes a 16-bit sample and 4 a float (a 16-bit PNG's rows as libpng gives
     // them, 2 bytes a sample, are held with the floats the same way); an 8-bit one read with all its bits, 1 byte a sample)
     const auto samples = static_cast<std::uint64_t>(std::clamp(smart::stored_samples(bytes), 1, 5));
-    limits.check_bytes(size.width, size.height, deep ? samples * (4 + (depth > 16 ? 4 : depth > 8 ? 2 : 1)) : 4);
+    limits.check_bytes(size.first, size.second, deep ? samples * (4 + (depth > 16 ? 4 : depth > 8 ? 2 : 1)) : 4);
     if (deep) return from_deep(smart::deep_picture(bytes));
     PngLimits reading;
     reading.max_pixels = std::min<std::int64_t>(limits.max_pixels, reading.max_pixels);

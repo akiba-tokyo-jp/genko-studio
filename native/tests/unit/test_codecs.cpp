@@ -461,7 +461,13 @@ private slots:
             if (!codecs::caps(f).write) continue;
             for (const Layout l : codecs::kLayouts) {
                 for (const Sample s : codecs::kSamples) {
-                    const CodecImage p = synth(17, 9, l, s, 9);
+                    CodecImage p = synth(17, 9, l, s, 9);
+                    if (s == Sample::F16) {
+                        // (one value 16 bits cannot hold — 2^-20, a half's subnormal —: F16 taken to U16 then shows its loss,
+                        // the smooth values alone being ones 16 bits happen to keep)
+                        const std::uint16_t tiny = codecs::half_from_float(std::ldexp(1.0f, -20));
+                        std::memcpy(p.data().data(), &tiny, 2);
+                    }
                     const auto losses = codecs::losses(p, f);
                     const CodecImage back = codecs::decode(codecs::encode(p, f));
                     const codecs::Plan plan = codecs::plan(p, f);
@@ -472,6 +478,14 @@ private slots:
                                       has(losses, Loss::Kind::CmykConverted) || has(losses, Loss::Kind::ColorToGray) ||
                                       has(losses, Loss::Kind::PaletteQuantized) || has(losses, Loss::Kind::LossyCompression);
                     const std::string what = std::string(codecs::name(f)) + " " + std::string(codecs::to_string(l)) + " " + std::string(codecs::to_string(s));
+                    if (f == Format::Hdr && s == Sample::U8 && (l == Layout::Gray || l == Layout::Rgb)) {
+                        // (Radiance HDR is lossy — RGBE: 8 bits of mantissa the three colours share —, and said so, as upstream
+                        // says it of the format; but while a pixel's brightest colour is below 1 those 8 bits come within
+                        // 1/512 of each colour, nearer than half an 8-bit step: an 8-bit picture whose colours are all below
+                        // 1, as this one's are, comes back the same)
+                        QVERIFY2(has(losses, Loss::Kind::LossyCompression) && pixels_kept, what.c_str());
+                        continue;
+                    }
                     QVERIFY2(said != pixels_kept, what.c_str());
                 }
             }
@@ -620,21 +634,25 @@ private slots:
         for (const Format f : codecs::kFormats) {
             if (!codecs::caps(f).write) continue;
             const std::string bytes = codecs::encode(synth(64, 48, Layout::Rgba, Sample::U8), f);
+            const auto refused = [&](const codecs::Limits& l, const std::string& want, const char* which) {
+                const std::string code = code_of([&] { (void)codecs::decode(bytes, l); });
+                QVERIFY2(code == want, (std::string(codecs::name(f)) + " " + which + ": " + code).c_str());
+            };
             codecs::Limits l;
             l.max_pixels = 1000;
-            QCOMPARE(code_of([&] { (void)codecs::decode(bytes, l); }), std::string("image_too_large"));
+            refused(l, "image_too_large", "max_pixels 1000");
             l.max_pixels = 64 * 48;
-            QCOMPARE(code_of([&] { (void)codecs::decode(bytes, l); }), std::string());
+            refused(l, "", "max_pixels 64x48");
             l = {};
             l.max_width = 63;
-            QCOMPARE(code_of([&] { (void)codecs::decode(bytes, l); }), std::string("image_too_large"));
+            refused(l, "image_too_large", "max_width 63");
             l = {};
             l.max_height = 47;
-            QCOMPARE(code_of([&] { (void)codecs::decode(bytes, l); }), std::string("image_too_large"));
+            refused(l, "image_too_large", "max_height 47");
             l = {};
             l.max_alloc = 64 * 48;
-            QVERIFY(!code_of([&] { (void)codecs::decode(bytes, l); }).empty());
-            QCOMPARE(code_of([&] { (void)codecs::decode(bytes, codecs::Limits::none()); }), std::string());
+            QVERIFY2(!code_of([&] { (void)codecs::decode(bytes, l); }).empty(), std::string(codecs::name(f)).c_str());
+            refused(codecs::Limits::none(), "", "none");
         }
         // (a PNG whose header says 100000 × 100000 16-bit RGBA: refused on its header)
         std::string ihdr = be32(100000) + be32(100000) + std::string("\x10\x06\0\0\0", 5);
@@ -815,10 +833,10 @@ private slots:
         codecs::EncodeOptions lossy;
         lossy.webp_lossless = false;
         lossy.jpeg_quality = 80;
-        const CodecImage photo = gradient(64, 48, Layout::Rgb, Sample::U8, 5, 0.3f);
+        const CodecImage photo = gradient(64, 48, Layout::Rgb, Sample::U8, 5, 0.04f);
         const std::string wl = codecs::encode(photo, Format::WebP, lossy);
         QVERIFY(wl.size() < codecs::encode(photo, Format::WebP).size());
-        QVERIFY(clamped_psnr(photo, codecs::decode(wl)) > 25.0);
+        QVERIFY2(clamped_psnr(photo, codecs::decode(wl)) > 30.0, std::to_string(clamped_psnr(photo, codecs::decode(wl))).c_str());
         // (AVIF: a lower quality is smaller)
         codecs::EncodeOptions av_lo, av_hi;
         av_lo.jpeg_quality = 30;

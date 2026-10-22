@@ -60,6 +60,7 @@ core::Document small_book() {
     spec.dpi = core::Num(150);
     spec.bleed_mm = core::Num(3);
     spec.inner_margin_mm = core::Num(5);
+    spec.expression = "color";  // (a colour page: its smart objects' colours as they are, not a mono page's finish)
     return core::new_episode("codecs", core::Num(1), 1, spec, core::Binding::Right);
 }
 
@@ -72,6 +73,7 @@ void write_book(const core::Document& doc, const fs::path& dir) {
     lock.try_acquire();
     storage::SaveRequest request;
     request.actor = "human:test";
+    request.base_revision = doc.revision;  // (0 for a new book; the revision a book read back was read at)
     request.ops = Json::array();
     storage::Saver(lock).save(doc, request);
 }
@@ -120,7 +122,7 @@ CodecImage blocks(std::uint32_t w, std::uint32_t h) {
 core::Document with_contents(const core::Document& doc, const std::string& bytes, const std::string& name) {
     const core::Page& page = doc.page(0);
     const double w = page.spec.width_mm.value(), h = page.spec.height_mm.value();
-    return run(doc, Json::array({Json{{"op", "smart_place"}, {"page", 1}, {"data", core::b64encode(bytes)}, {"name", name}, {"id", "so"},
+    return run(doc, Json::array({Json{{"op", "smart_place"}, {"page", 1}, {"data", core::b64encode(bytes)}, {"name", name},
                                       {"placement_mm", Json::array({0, 0, w, h})}, {"clip_to", "none"}}}));
 }
 
@@ -211,7 +213,7 @@ private slots:
             const core::Document doc = with_contents(base, codecs::encode(pixels, f), name);
             QCOMPARE(doc.smart_contents.size(), std::size_t(1));
             const core::SmartContents& c = *doc.smart_contents.begin()->second;
-            QCOMPARE(c.suffix, std::string(".") + std::string(fs::path(name).extension().string().substr(1)));
+            QCOMPARE(c.suffix, "." + std::string(codecs::extensions(f).front()));  // (its format's first suffix, as a .jpeg's .jpg)
             QCOMPARE(c.width_px, std::int64_t(40));
             render::clear_render_caches();
             QVERIFY2(render::render_page(doc.page(0), 40, render::RenderOptions{}, &doc).image.tobytes() == want.tobytes(), name);
@@ -253,8 +255,9 @@ private slots:
             render::clear_render_caches();
             const Json hdr = middle(with_contents(page, codecs::encode(bright, Format::OpenExr), "b.exr"));
             const double red = hdr["values"][0].get<double>();
-            if (depth == 32) QVERIFY2(std::abs(red - 1.3532) < 0.01, hdr.dump().c_str());  // (2.0 with sRGB's curve: past 1, kept)
-            else QVERIFY2(std::abs(red - 1.0) < 1e-6, hdr.dump().c_str());
+            // (2.0 with sRGB's curve, 1.3532: mixed as it is on both, stored past 1 on the 32-bit page, at 1 on the 16-bit one)
+            QVERIFY2(std::abs(red - 1.3532) < 0.01, hdr.dump().c_str());
+            if (depth == 16) QCOMPARE(hdr["stored"][0], Json(65535));
         }
         // (a grey page of 16 bits: a 16-bit PAM's samples as a 16-bit TIFF's)
         std::vector<float> ramp(24 * 24);
@@ -273,7 +276,7 @@ private slots:
             QVERIFY2(t["stored"] == p["stored"], (t.dump() + " " + p.dump()).c_str());
         }
         // (a CMYK page: drawn, the colours near the 8-bit page's)
-        const core::Document cmyk_page = run(small_book(), Json::array({Json{{"op", "set_color_mode"}, {"page", 1}, {"mode", "cmyk"}, {"depth", 8}}}));
+        const core::Document cmyk_page = run(small_book(), Json::array({Json{{"op", "set_color_mode"}, {"page", 1}, {"mode", "cmyk"}, {"depth", 8}, {"profile", "coated-cmyk"}}}));
         render::clear_render_caches();
         const Json exr = middle(with_contents(cmyk_page, codecs::encode(light, Format::OpenExr), "l.exr"));
         QVERIFY2(exr["values"].size() == 4 && near(exr["srgb"], {124, 188, 231}, 30), exr.dump().c_str());
@@ -302,7 +305,10 @@ private slots:
         render::clear_render_caches();
         QCOMPARE(middle(back)["srgb"], middle(exr)["srgb"]);
         // (the smart object gone: so is the name)
-        write_book(run(back, Json::array({Json{{"op", "delete_layer"}, {"page", 1}, {"id", "so"}}})), at("exr.genko"));
+        const auto so = std::find_if(back.page(0).layers.begin(), back.page(0).layers.end(),
+                                     [&](const core::Layer& l) { return core::smart::contents_of(back, l) != nullptr; });
+        QVERIFY(so != back.page(0).layers.end());
+        write_book(run(back, Json::array({Json{{"op", "delete_layer"}, {"page", 1}, {"id", so->id}}})), at("exr.genko"));
         QVERIFY(!has_feature(project(at("exr.genko")), core::kFormatsFeature));
     }
 
@@ -330,7 +336,7 @@ private slots:
         tagged.meta.xmp = core::write_xmp(std::nullopt, info, "AVIF");
         const formats::Opened avif = formats::open_file(codecs::encode(tagged, Format::Avif), "tagged.avif");
         QVERIFY(avif.doc.file_info && avif.doc.file_info->author == info.author && avif.doc.file_info->copyright == info.copyright);
-        QVERIFY(avif.doc.page(0).native_source->xmp);
+        QVERIFY(!avif.doc.page(0).native_source->xmp.empty());
         for (const auto& [f, name] : {std::make_pair(Format::Tga, "a.tga"), std::make_pair(Format::Ico, "a.ico"), std::make_pair(Format::Qoi, "a.qoi"),
                                       std::make_pair(Format::Hdr, "a.hdr")}) {
             const formats::Opened opened = formats::open_file(codecs::encode(blocks(20, 10), f), name);
