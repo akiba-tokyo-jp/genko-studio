@@ -17,13 +17,17 @@
 #include <optional>
 #include <cmath>
 #include <cstddef>
+#include <cstdio>
 #include <limits>
+#include <mutex>
 #include <string>
 #include <vector>
 
 #include "core/lens.hpp"
 #include "core/pyops.hpp"
 #include "render/fx.hpp"
+#include "render/ink.hpp"
+#include "render/ink_canvas.hpp"
 #include "render/resample.hpp"
 #include "render/segment/segment.hpp"
 
@@ -32,8 +36,6 @@ namespace genko::render::fx {
 using core::Json;
 
 namespace {
-
-thread_local Json* g_notes = nullptr;  // (NoteScope)
 
 constexpr double kMmPerInch = 25.4;
 constexpr double kWorkingDpi = 200.0;
@@ -67,9 +69,17 @@ void paper(const Ctx& ctx, float* px) {
     }
 }
 
-// An RGB colour (0..1) as the samples' space's values (the edge's colour: black, white or its own).
+// An RGB colour (0..1) as the samples' space's values (the edge's colour: black, white or its own): on a page of inks by
+// its rules (render/ink: Genko's black, white no ink, a grey on K alone, else the page's profile), as the page lays that
+// colour; else (a surface without the page's colour mode: the tests') the plain formulas.
 std::vector<float> colour_in(const Ctx& ctx, const std::array<double, 3>& rgb) {
     std::vector<float> out(ctx.colours, 0.0f);
+    if (ctx.ink != nullptr && ctx.space != Space::Rgb) {
+        std::vector<double> inks(std::max<std::size_t>(ctx.colours, 4), 0.0);
+        ink::inks_by_rules(*ctx.ink, rgb.data(), inks.data(), 1);
+        for (unsigned c = 0; c < ctx.colours; ++c) out[c] = static_cast<float>(to_canvas(ctx.ink->space, c, inks[c]));
+        return out;
+    }
     const double grey = 0.299 * rgb[0] + 0.587 * rgb[1] + 0.114 * rgb[2];
     switch (ctx.space) {
         case Space::Rgb:
@@ -241,6 +251,43 @@ core::lens::WideAngle wide_of(const Json& params, const Ctx& ctx) {
 }
 
 // The mesh on the surface's grid: solved at the working 200 dpi (the frame and the constraints over s), laid back by s.
+// The problem at the working 200 dpi as text (the solved meshes' key): the lens, the constraints and the frame.
+std::string mesh_key(const core::lens::WideAngle& wa, const std::array<double, 4>& frame) {
+    std::string key;
+    char buf[32];
+    const auto put = [&](double v) {
+        std::snprintf(buf, sizeof buf, "%.17g,", v);
+        key += buf;
+    };
+    put(static_cast<double>(wa.model));
+    put(wa.focal_length);
+    put(wa.crop_factor);
+    put(wa.scale);
+    for (const double v : frame) put(v);
+    for (const core::lens::Constraint& c : wa.constraints) {
+        put(c.a[0]);
+        put(c.a[1]);
+        put(c.b[0]);
+        put(c.b[1]);
+        put(static_cast<double>(c.orientation));
+    }
+    return key;
+}
+
+// The meshes solved last (a smart filter drawn again for the screen, the print, after its object moved within the page:
+// the same problem at the working dpi), a few kept.
+struct SolvedMeshes {
+    std::mutex lock;
+    std::vector<std::pair<std::string, core::lens::Mesh>> kept;  // (the latest last)
+};
+
+SolvedMeshes& solved_meshes() {
+    static SolvedMeshes all;
+    return all;
+}
+
+constexpr std::size_t kMeshesKept = 8;
+
 core::lens::Mesh wide_mesh(const Json& params, const Ctx& ctx) {
     core::lens::WideAngle wa = wide_of(params, ctx);
     const double s = ctx.s > 0 ? ctx.s : 1.0;
@@ -249,7 +296,26 @@ core::lens::Mesh wide_mesh(const Json& params, const Ctx& ctx) {
         c.b = {c.b[0] / s, c.b[1] / s};
     }
     const Rect& f = ctx.bounds;
-    core::lens::Mesh mesh = core::lens::solve(wa, f.x0 / s, f.y0 / s, f.x1 / s, f.y1 / s);
+    const std::array<double, 4> frame{f.x0 / s, f.y0 / s, f.x1 / s, f.y1 / s};
+    const std::string key = mesh_key(wa, frame);
+    std::optional<core::lens::Mesh> found;
+    {
+        SolvedMeshes& kept = solved_meshes();
+        const std::lock_guard<std::mutex> hold(kept.lock);
+        for (const auto& [k, m] : kept.kept)
+            if (k == key) found = m;
+    }
+    core::lens::Mesh mesh;
+    if (found) {
+        mesh = std::move(*found);
+    } else {
+        // (the solve stopped with the run: every 20 of its steps)
+        mesh = core::lens::solve(wa, frame[0], frame[1], frame[2], frame[3], [] { segment::check_stop(); });
+        SolvedMeshes& kept = solved_meshes();
+        const std::lock_guard<std::mutex> hold(kept.lock);
+        if (kept.kept.size() >= kMeshesKept) kept.kept.erase(kept.kept.begin());
+        kept.kept.emplace_back(key, mesh);
+    }
     for (auto& [o, src] : mesh.verts) {
         o = {o[0] * s, o[1] * s};
         src = {src[0] * s, src[1] * s};
@@ -373,14 +439,6 @@ Kernel adaptive_wide_angle() {
 }
 
 }  // namespace
-
-NoteScope::NoteScope(Json& into) : before_(g_notes) { g_notes = &into; }
-NoteScope::~NoteScope() { g_notes = before_; }
-void NoteScope::put(std::string_view key, Json value) {
-    if (g_notes == nullptr) return;
-    if (!g_notes->is_object()) *g_notes = Json::object();
-    (*g_notes)[std::string(key)] = std::move(value);
-}
 
 Kernels lens_kernels() { return {lens_correction(), adaptive_wide_angle()}; }
 

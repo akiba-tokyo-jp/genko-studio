@@ -2,6 +2,7 @@
 
 #include <array>
 #include <cstddef>
+#include <functional>
 #include <optional>
 #include <string>
 #include <vector>
@@ -133,7 +134,9 @@ struct Mesh {
     // The output place of a source point (bilinear in its cell).
     XY map(double x0, double y0, double x1, double y1, const XY& p) const;
 };
-Mesh solve(const WideAngle& p, double x0, double y0, double x1, double y1);
+// `check` (none: nothing) is called every 20 steps of the least squares: it throws to stop the solve (render/fx_lens: the
+// run's stop, render::Cancelled).
+Mesh solve(const WideAngle& p, double x0, double y0, double x1, double y1, const std::function<void()>& check = {});
 
 std::string_view to_string(Model model);
 

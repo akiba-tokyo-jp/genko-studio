@@ -27,7 +27,10 @@
 // PNG's base64, "at": [u, v], "width"}], "clone"?: [{"source": [x, y], "points": [[x, y]…] (mm), "size_px" (the working
 // 200 dpi), "hardness", "opacity" (0..100)}], "area"?} → {"id", "new_layer", "planes": [{"corners_mm", "aspect"}],
 // "focal_mm", "pasted", "dabs", "box_mm"}. Every kind of a paint layer's pixels (8 bits, precise, inks); inside the
-// selection; one Undo. The planes kept on the page (vanishing-point@1) unless keep_planes is false.
+// selection; one Undo. The planes kept on the page (vanishing-point@1) unless keep_planes is false; "planes": [] takes
+// the page's away (nothing pasted or stamped then). Without pastes and strokes no layer is needed (none made). A stroke's
+// places and its source lie within the page's size round the page. Stopped (render::Cancelled) at its run's stop
+// (segment::StopScope: フィルター's 消点… works it on a thread), between its pastes and strokes and within them.
 
 namespace genko::render::vanishing {
 
@@ -85,6 +88,8 @@ struct Stamp {
     std::vector<float> cov;  // over `box`
     Box box;
     std::size_t dabs = 0;
+    // the dabs left out: a footprint reaching toward the horizon past 4096 pixels of the working 200 dpi a side
+    std::size_t skipped = 0;
     // the metric offset to the source and the planes (none: nothing laid)
     std::optional<std::size_t> from, to;
     XY offset{0, 0};

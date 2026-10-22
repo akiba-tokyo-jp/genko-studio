@@ -20,6 +20,7 @@
 #include <QVBoxLayout>
 
 #include <algorithm>
+#include <cstdint>
 #include <cmath>
 #include <map>
 #include <optional>
@@ -98,7 +99,7 @@ public:
         // the tools
         tools_ = new QButtonGroup(this);
         const char* names[] = {"vanishing_create", "vanishing_edit", "vanishing_stamp", "vanishing_paste"};
-        const QString words[] = {QStringLiteral("面作成ツール"), QStringLiteral("面修正ツール"), QStringLiteral("スタンプツール"), QStringLiteral("貼り付けた絵を動かす")};
+        const QString words[] = {QStringLiteral("面作成ツール"), QStringLiteral("面修正ツール"), QStringLiteral("スタンプツール"), QStringLiteral("変形ツール")};
         for (int i = 0; i < 4; ++i) {
             auto* button = new QRadioButton(words[i], this);
             button->setObjectName(QString::fromLatin1(names[i]));
@@ -166,17 +167,7 @@ public:
         timer_->setInterval(120);
         connect(timer_, &QTimer::timeout, this, [this] { preview(); });
         connect(tear_button, &QPushButton::clicked, this, [this] { tear_off(); });
-        connect(remove, &QPushButton::clicked, this, [this] {
-            if (planes_.empty()) return;
-            const std::size_t last = planes_.size() - 1;
-            planes_.erase(planes_.begin() + static_cast<std::ptrdiff_t>(last));
-            Json kept = Json::array();
-            for (const Json& p : pastes_)
-                if (p["plane"].get<std::size_t>() < last) kept.push_back(p);
-            pastes_ = std::move(kept);
-            chosen_ = planes_.empty() ? -1 : static_cast<int>(planes_.size()) - 1;
-            changed();
-        });
+        connect(remove, &QPushButton::clicked, this, [this] { remove_chosen(); });
         connect(paste, &QPushButton::clicked, this, [this] {
             if (planes_.empty() || source_->currentIndex() < 0) return;
             const int plane = chosen_ >= 0 ? chosen_ : 0;
@@ -228,10 +219,52 @@ private:
         } else {
             status_->setText(QStringLiteral("面 %1 つ・貼り付け %2・スタンプ %3").arg(planes_.size()).arg(pastes_.size()).arg(strokes_.size()));
         }
-        ok_->setEnabled(scene_.has_value());
+        // (OK with no plane: the page's planes taken away — nothing to paste or stamp then)
+        ok_->setEnabled(scene_.has_value() || (planes_.empty() && pastes_.empty() && strokes_.empty()));
         setProperty("planes", static_cast<int>(planes_.size()));
         timer_->start();
         view_->update();
+    }
+
+    // 面を削除: the chosen plane and those torn off it (and off them), as Photoshop deletes a plane with its children; the
+    // planes after them numbered again, the pastes on them gone; no plane left, no stroke either.
+    void remove_chosen() {
+        if (planes_.empty()) return;
+        const std::size_t n = planes_.size();
+        const std::size_t chosen = chosen_ >= 0 && static_cast<std::size_t>(chosen_) < n ? static_cast<std::size_t>(chosen_) : n - 1;
+        std::vector<bool> gone(n, false);
+        gone[chosen] = true;
+        for (std::size_t i = chosen + 1; i < n; ++i) {
+            const Json* from = core::get(planes_[i], "from");
+            if (from != nullptr && from->is_number_integer() && from->get<std::int64_t>() >= 0 && static_cast<std::size_t>(from->get<std::int64_t>()) < i &&
+                gone[static_cast<std::size_t>(from->get<std::int64_t>())])
+                gone[i] = true;
+        }
+        std::vector<std::int64_t> renumbered(n, -1);
+        Json kept = Json::array();
+        for (std::size_t i = 0; i < n; ++i) {
+            if (gone[i]) continue;
+            renumbered[i] = static_cast<std::int64_t>(kept.size());
+            Json plane = planes_[i];
+            if (const Json* from = core::get(plane, "from"); from != nullptr && from->is_number_integer())
+                plane["from"] = renumbered[static_cast<std::size_t>(from->get<std::int64_t>())];
+            kept.push_back(std::move(plane));
+        }
+        planes_ = std::move(kept);
+        Json pastes = Json::array();
+        for (Json p : pastes_) {
+            const auto plane = p["plane"].get<std::size_t>();
+            if (plane >= n || gone[plane]) continue;
+            p["plane"] = renumbered[plane];
+            pastes.push_back(std::move(p));
+        }
+        pastes_ = std::move(pastes);
+        if (planes_.empty()) {
+            strokes_ = Json::array();
+            stamp_source_.reset();
+        }
+        chosen_ = planes_.empty() ? -1 : static_cast<int>(std::min(chosen, planes_.size() - 1));
+        changed();
     }
 
     void tear_off() {
@@ -522,7 +555,10 @@ void open(const FilterWindowCall& call) {
     if (call.window == nullptr || call.page == nullptr || call.layer == nullptr) return;
     VanishingDialog dialog(call.window, call);
     if (ask::exec(&dialog) != QDialog::Accepted) return;
-    if (call.send) call.send(dialog.settings());
+    const Json settings = dialog.settings();
+    // (no plane: the page's taken away — none on the page, nothing sent)
+    if (settings["planes"].empty() && core::page_vanishing(*call.page) == nullptr) return;
+    if (call.send) call.send(settings);
 }
 
 }  // namespace genko::app::vanishing_window

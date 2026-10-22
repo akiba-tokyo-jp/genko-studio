@@ -469,6 +469,7 @@ namespace {
 
 thread_local std::atomic<double>* g_progress = nullptr;
 thread_local const PlaceScope* g_place = nullptr;
+thread_local Json* g_notes = nullptr;  // (NoteScope, D6)
 
 // Upstream's auto_tile: results do not depend on the tiling, so wide halos take bigger tiles (the margin read again
 // kept below about twice the tile).
@@ -616,6 +617,18 @@ ProgressScope::ProgressScope(std::atomic<double>& done) : before_(g_progress) {
     g_progress = &done;
 }
 ProgressScope::~ProgressScope() { g_progress = before_; }
+void ProgressScope::put(double done) {
+    if (g_progress != nullptr) g_progress->store(std::clamp(done, 0.0, 1.0));
+}
+
+// (D6) What the kinds resolve as they run, for the op's report (NoteScope)
+NoteScope::NoteScope(Json& into) : before_(g_notes) { g_notes = &into; }
+NoteScope::~NoteScope() { g_notes = before_; }
+void NoteScope::put(std::string_view key, Json value) {
+    if (g_notes == nullptr) return;
+    if (!g_notes->is_object()) *g_notes = Json::object();
+    (*g_notes)[std::string(key)] = std::move(value);
+}
 
 PlaceScope::PlaceScope(int x, int y, const Rect& bounds) : before_(g_place), x_(x), y_(y), bounds_(bounds) { g_place = this; }
 PlaceScope::~PlaceScope() { g_place = before_; }
@@ -660,6 +673,7 @@ void apply(Surface& surface, const Kernel& kernel, const Json& params, core::Fil
     ctx.grid_width = w;
     ctx.plane = reads.plane;
     ctx.map = reads.map;
+    ctx.ink = surface.ink();  // (D6)
     const Halo halo = kernel.halo ? kernel.halo(params, ctx) : Halo::margin(0);
 
     // the part worked: as far as the halo reaches from what shows (upstream's output_area), the base box for a whole kind

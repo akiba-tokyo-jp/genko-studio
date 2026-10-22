@@ -47,7 +47,7 @@ public:
         for (auto& [i, c] : row) c *= w;
         rows_.push_back({std::move(row), rhs * w});
     }
-    std::vector<double> solve(const std::vector<double>& x0, std::size_t iters) const {
+    std::vector<double> solve(const std::vector<double>& x0, std::size_t iters, const std::function<void()>& check) const {
         std::vector<double> x = x0;
         const auto ax = [this](const std::vector<double>& v) {
             std::vector<double> out(rows_.size(), 0.0);
@@ -71,6 +71,7 @@ public:
         for (const double v : s) gamma += v * v;
         const double g0 = std::max(gamma, 1e-30);
         for (std::size_t it = 0; it < iters; ++it) {
+            if (check && it % 20 == 0) check();
             if (gamma <= g0 * 1e-20) break;
             const std::vector<double> q = ax(p);
             double qq = 0;
@@ -351,7 +352,7 @@ XY Mesh::map(double x0, double y0, double x1, double y1, const XY& p) const {
             (a[1] * (1.0 - tx) + b[1] * tx) * (1.0 - ty) + (c[1] * (1.0 - tx) + d[1] * tx) * ty};
 }
 
-Mesh solve(const WideAngle& p, double x0, double y0, double x1, double y1) {
+Mesh solve(const WideAngle& p, double x0, double y0, double x1, double y1, const std::function<void()>& check) {
     const Camera cam = Camera::of(p, x0, y0, x1, y1);
     const double fw = std::max(x1 - x0, 1.0), fh = std::max(y1 - y0, 1.0);
     const double cell = std::max(fw, fh) / 48.0;
@@ -439,7 +440,7 @@ Mesh solve(const WideAngle& p, double x0, double y0, double x1, double y1) {
                     ls.add(std::move(row), 0.0, 10.0);
                 }
             }
-            x = ls.solve(x, static_cast<std::size_t>(400 + 200 * round));
+            x = ls.solve(x, static_cast<std::size_t>(400 + 200 * round), check);
             // the free normals again, from the ends as they are now
             const auto pos = [&](const XY& q) {
                 XY acc{0.0, 0.0};

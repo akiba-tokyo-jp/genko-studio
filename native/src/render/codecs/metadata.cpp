@@ -8,6 +8,8 @@
 #include <cstdint>
 #include <cstring>
 
+#include "core/exif.hpp"
+
 namespace genko::render::codecs {
 
 namespace {
@@ -23,64 +25,14 @@ std::uint32_t le32(std::string_view b, std::size_t at) {
            (std::uint32_t(static_cast<unsigned char>(b[at + 2])) << 16) | (std::uint32_t(static_cast<unsigned char>(b[at + 3])) << 24);
 }
 
-// A TIFF structure's numbers in its byte order.
-struct Tiff {
-    std::string_view b;
-    bool little = true;
-    bool ok = false;
+// A TIFF structure (a file's, its EXIF's): core/exif's reader, the one this build has (PC4 D6's review P3-4).
+using Tiff = core::exif::Tiff;
 
-    explicit Tiff(std::string_view bytes) : b(bytes) {
-        if (b.size() < 8) return;
-        if (b.substr(0, 4) == std::string_view("II*\0", 4)) little = true;
-        else if (b.substr(0, 4) == std::string_view("MM\0*", 4)) little = false;
-        else return;
-        ok = true;
-    }
-    bool has(std::size_t at, std::size_t n) const { return at <= b.size() && n <= b.size() - at; }
-    std::uint16_t u16(std::size_t at) const {
-        const auto lo = static_cast<unsigned char>(b[at]), hi = static_cast<unsigned char>(b[at + 1]);
-        return little ? static_cast<std::uint16_t>(lo | (hi << 8)) : static_cast<std::uint16_t>((lo << 8) | hi);
-    }
-    std::uint32_t u32(std::size_t at) const { return little ? le32(b, at) : be32(b, at); }
-    std::uint32_t first_ifd() const { return u32(4); }
-
-    // The entry of `tag` in the IFD at `ifd`: where its 12 bytes are.
-    std::optional<std::size_t> entry(std::size_t ifd, std::uint16_t tag) const {
-        if (!has(ifd, 2)) return std::nullopt;
-        const std::uint16_t n = u16(ifd);
-        for (std::uint16_t i = 0; i < n; ++i) {
-            const std::size_t at = ifd + 2 + std::size_t(i) * 12;
-            if (!has(at, 12)) return std::nullopt;
-            if (u16(at) == tag) return at;
-        }
-        return std::nullopt;
-    }
-    // A SHORT or LONG entry's first value.
-    std::optional<std::uint32_t> number(std::size_t ifd, std::uint16_t tag) const {
-        const auto at = entry(ifd, tag);
-        if (!at) return std::nullopt;
-        const std::uint16_t type = u16(*at + 2);
-        if (type == 3) return u16(*at + 8);
-        if (type == 4) return u32(*at + 8);
-        return std::nullopt;
-    }
-    // A BYTE or UNDEFINED entry's bytes.
-    std::optional<std::string_view> bytes_of(std::size_t ifd, std::uint16_t tag) const {
-        const auto at = entry(ifd, tag);
-        if (!at) return std::nullopt;
-        const std::uint16_t type = u16(*at + 2);
-        if (type != 1 && type != 7 && type != 2) return std::nullopt;
-        const std::uint32_t count = u32(*at + 4);
-        const std::size_t from = count <= 4 ? *at + 8 : u32(*at + 8);
-        if (!has(from, count) || count > kMetaMax) return std::nullopt;
-        return b.substr(from, count);
-    }
-    std::size_t next_ifd(std::size_t ifd) const {
-        if (!has(ifd, 2)) return 0;
-        const std::size_t at = ifd + 2 + std::size_t(u16(ifd)) * 12;
-        return has(at, 4) ? u32(at) : 0;
-    }
-};
+// A SHORT or LONG entry's first value in the IFD at `ifd`.
+std::optional<std::uint32_t> whole_of(const Tiff& t, std::size_t ifd, std::uint16_t tag) {
+    const auto e = t.entry(ifd, tag);
+    return e ? t.whole(*e) : std::nullopt;
+}
 
 std::optional<std::string> inflate_text(std::string_view data) {
     z_stream z{};
@@ -169,11 +121,13 @@ void jpeg(std::string_view b, FileMetadata& m) {
 
 void tiff(std::string_view b, FileMetadata& m) {
     const Tiff t(b);
-    if (!t.ok) return;
+    if (!t.ok()) return;
     const std::size_t first = t.first_ifd();
-    if (const auto xmp = t.bytes_of(first, 700)) m.xmp = std::string(*xmp);
-    const auto photometric = t.number(first, 262);
-    const auto bits = t.number(first, 258);
+    if (const auto e = t.entry(first, 700); e && e->count <= kMetaMax) {
+        if (const auto xmp = t.bytes_of(*e)) m.xmp = std::string(*xmp);
+    }
+    const auto photometric = whole_of(t, first, 262);
+    const auto bits = whole_of(t, first, 258);
     m.palette = photometric && *photometric == 3;
     m.one_bit = bits && *bits == 1 && photometric && (*photometric == 0 || *photometric == 1);
     // (its pages: the IFDs after the first; a chain that loops is cut)
@@ -265,41 +219,41 @@ FileMetadata read_metadata(Format format, std::string_view bytes) {
     case Format::Bmp: bmp(bytes, m); break;
     default: break;
     }
-    if (m.exif && !Tiff(*m.exif).ok) m.exif.reset();  // (not a TIFF structure: not EXIF this build reads)
+    if (m.exif && !Tiff(*m.exif).ok()) m.exif.reset();  // (not a TIFF structure: not EXIF this build reads)
     if (m.xmp && m.xmp->empty()) m.xmp.reset();
     return m;
 }
 
 int exif_orientation(std::string_view exif) {
     const Tiff t(exif);
-    if (!t.ok) return 1;
-    const auto value = t.number(t.first_ifd(), 0x0112);
+    if (!t.ok()) return 1;
+    const auto value = whole_of(t, t.first_ifd(), 0x0112);
     return value && *value >= 1 && *value <= 8 ? static_cast<int>(*value) : 1;
 }
 
 std::string exif_upright(std::string exif) {
     const Tiff t(exif);
-    if (!t.ok) return exif;
-    const auto at = t.entry(t.first_ifd(), 0x0112);
-    if (!at) return exif;
-    const unsigned type = t.u16(*at + 2);
-    if (type == 3) {
+    if (!t.ok()) return exif;
+    const auto e = t.entry(t.first_ifd(), 0x0112);
+    if (!e) return exif;
+    const bool little = t.little();
+    if (e->type == 3) {
         // (a SHORT's value in the entry's first two bytes, in the block's own order)
-        exif[*at + 8] = t.little ? '\x01' : '\0';
-        exif[*at + 9] = t.little ? '\0' : '\x01';
-    } else if (type == 4) {
+        exif[e->field] = little ? '\x01' : '\0';
+        exif[e->field + 1] = little ? '\0' : '\x01';
+    } else if (e->type == 4) {
         // (a LONG — some writers' —: its four bytes)
-        for (int k = 0; k < 4; ++k) exif[*at + 8 + static_cast<std::size_t>(k)] = (t.little ? k == 0 : k == 3) ? '\x01' : '\0';
+        for (int k = 0; k < 4; ++k) exif[e->field + static_cast<std::size_t>(k)] = (little ? k == 0 : k == 3) ? '\x01' : '\0';
     }
     return exif;
 }
 
 int exif_colour_space(std::string_view exif) {
     const Tiff t(exif);
-    if (!t.ok) return 0;
-    const auto sub = t.number(t.first_ifd(), 0x8769);
+    if (!t.ok()) return 0;
+    const auto sub = whole_of(t, t.first_ifd(), 0x8769);
     if (!sub || *sub == 0) return 0;
-    const auto value = t.number(*sub, 0xA001);
+    const auto value = whole_of(t, *sub, 0xA001);
     return value ? static_cast<int>(*value) : 0;
 }
 

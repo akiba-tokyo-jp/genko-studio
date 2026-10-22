@@ -20,6 +20,7 @@
 #include <fstream>
 #include <functional>
 #include <sstream>
+#include <stop_token>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -36,15 +37,22 @@
 #include "formats/open_file.hpp"
 #include "formats/pillow_save.hpp"
 #include "render/fx.hpp"
+#include "render/codecs/metadata.hpp"
 #include "render/image.hpp"
+#include "render/ink.hpp"
 #include "render/ops_registry.hpp"
 #include "render/page.hpp"
 #include "render/png.hpp"
 #include "render/raster.hpp"
+#include "render/retouch_dabs.hpp"
+#include "render/segment/segment.hpp"
+#include "render/smart_filters.hpp"
 #include "render/vanishing.hpp"
+#include "storage/asset_store.hpp"
 #include "storage/lock.hpp"
 #include "storage/reader.hpp"
 #include "storage/transaction.hpp"
+#include "storage/writer.hpp"
 #include "testsupport.hpp"
 
 using namespace genko;
@@ -155,9 +163,9 @@ core::Document eight_page(int w, int h, const std::vector<std::pair<std::string,
 
 render::Image picture_of(const core::Document& doc, const std::string& id) { return render::raster::layer_pixels(doc.page(0), layer_of(doc, id)).convert("RGBA"); }
 
-// A precise page of w × h pixels (at 200 dpi) with one paint layer "paint".
-core::Document precise_page(std::uint32_t w, std::uint32_t h, const std::vector<Px>& px, bool f32) {
-    auto doc = blank(w * kInch / 200.0, h * kInch / 200.0);
+// A precise page of w × h pixels (at 200 dpi, or over a page of `side_mm`) with one paint layer "paint".
+core::Document precise_page(std::uint32_t w, std::uint32_t h, const std::vector<Px>& px, bool f32, double side_mm = 0) {
+    auto doc = side_mm > 0 ? blank(side_mm, side_mm) : blank(w * kInch / 200.0, h * kInch / 200.0);
     Json pixels = Json::array();
     for (const auto& p : px)
         for (const float v : p) pixels.push_back(f32 ? Json(static_cast<double>(v)) : Json(static_cast<std::int64_t>(std::lround(std::clamp(v, 0.0f, 1.0f) * 65535))));
@@ -167,11 +175,11 @@ core::Document precise_page(std::uint32_t w, std::uint32_t h, const std::vector<
     return doc;
 }
 
-// A CMYK page (16 bits) of side × side with a paint layer "pic": `ink(x, y, c)` its plates.
-core::Document cmyk_page(std::uint32_t side, const std::function<double(std::uint32_t, std::uint32_t, unsigned)>& ink) {
-    auto doc = apply_ops(blank(side * kInch / 200.0, side * kInch / 200.0),
-                         Json::array({Json{{"op", "set_color_mode"}, {"mode", "cmyk"}, {"depth", 16}, {"profile", "coated-cmyk"}},
-                                      Json{{"op", "add_layer"}, {"page", 1}, {"kind", "paint"}, {"id", "pic"}}}))
+// A page of inks (16 bits; `mode` set_color_mode's) of side × side with a paint layer "pic": `ink(x, y, c)` its plates.
+core::Document ink_page(const Json& mode, std::uint32_t side, const std::function<double(std::uint32_t, std::uint32_t, unsigned)>& ink) {
+    Json set{{"op", "set_color_mode"}, {"depth", 16}};
+    set.update(mode);
+    auto doc = apply_ops(blank(side * kInch / 200.0, side * kInch / 200.0), Json::array({set, Json{{"op", "add_layer"}, {"page", 1}, {"kind", "paint"}, {"id", "pic"}}}))
                    .doc;
     const core::PageColor& color = *doc.page(0).color;
     core::InkPixels p = core::blank_ink_pixels(color.space, color.depth, side, side, 0);
@@ -182,6 +190,30 @@ core::Document cmyk_page(std::uint32_t side, const std::function<double(std::uin
         }
     doc.edit_page(0).layers.back().ink_raster = std::make_shared<const std::string>(core::encode_ink_raster(p));
     return doc;
+}
+
+// A CMYK page (16 bits) of side × side with a paint layer "pic": `ink(x, y, c)` its plates.
+core::Document cmyk_page(std::uint32_t side, const std::function<double(std::uint32_t, std::uint32_t, unsigned)>& ink) {
+    return ink_page(Json{{"mode", "cmyk"}, {"profile", "coated-cmyk"}}, side, ink);
+}
+
+// A little-endian TIFF structure of raw IFD entries {tag, type, count, value field (4 bytes as a number)} at 8, then
+// `tail` (its bytes from 8 + 2 + 12 n + 4 on): broken ones made by hand.
+std::string tiff_of(const std::vector<std::array<std::uint32_t, 4>>& entries, const std::string& tail = {}, std::uint32_t next = 0) {
+    const auto le16 = [](std::uint32_t v) { return std::string{static_cast<char>(v & 255), static_cast<char>((v >> 8) & 255)}; };
+    const auto le32 = [](std::uint32_t v) {
+        return std::string{static_cast<char>(v & 255), static_cast<char>((v >> 8) & 255), static_cast<char>((v >> 16) & 255), static_cast<char>((v >> 24) & 255)};
+    };
+    std::string out("II*\0", 4);
+    out += le32(8) + le16(static_cast<std::uint32_t>(entries.size()));
+    for (const auto& [tag, type, count, field] : entries) out += le16(tag) + le16(type) + le32(count) + le32(field);
+    return out + le32(next) + tail;
+}
+
+// The payload a book is written as (storage/writer), its assets in `tmp`.
+Json payload_of(const core::Document& doc, const QTemporaryDir& tmp) {
+    storage::AssetStore assets(std::filesystem::path(tmp.path().toStdString()));
+    return storage::project_payload_v4(doc, assets);
 }
 
 double mm(double px) { return px * kInch / 200.0; }  // (a pixel of the working 200 dpi in mm)
@@ -248,6 +280,37 @@ private slots:
         // (a big-endian block too)
         std::string be("MM\0*\0\0\0\x08\0\x01\x92\x0a\0\x05\0\0\0\x01\0\0\0\x1a\0\0\0\0\0\0\0\x18\0\0\0\x01", 34);
         QCOMPARE(core::exif::read(be).focal_length.value_or(0), 24.0);
+        // broken by hand (the review's P3-18 c): an IFD that says 65535 entries; the Exif IFD pointing at itself and back
+        // at IFD0 (a loop); values placed past the block; a text of 2³² − 1 bytes; a zero denominator — read what can be,
+        // nothing past the bytes, no error
+        std::string many = tiff_of({{0x920A, 5, 1, 0xFFFFFFF0u}});
+        many[8] = '\xff';
+        many[9] = '\xff';
+        QVERIFY(core::exif::read(many) == core::exif::Camera{});
+        const std::string loop = tiff_of({{0x8769, 4, 1, 8}, {0xA405, 3, 1, 35}});
+        QCOMPARE(core::exif::read(loop).focal_length_35mm.value_or(0), 35.0);
+        const std::string self = tiff_of({{0x8769, 4, 1, 26}}, std::string("\x02\0", 2) + tiff_of({{0x8769, 4, 1, 26}, {0xA405, 3, 1, 28}}).substr(10, 24) +
+                                                           std::string(4, '\0'));
+        QCOMPARE(core::exif::read(self).focal_length_35mm.value_or(0), 28.0);
+        const std::string past = tiff_of({{0x920A, 5, 1, 0xFFFFFFF8u}, {0x010F, 2, 0xFFFFFFFFu, 20}, {0x829D, 5, 1, 62}, {0xA434, 2, 3, 0x0061}},
+                                         std::string("\x05\0\0\0\0\0\0\0", 8));
+        const core::exif::Camera got = core::exif::read(past);
+        QVERIFY(!got.focal_length && !got.make && !got.f_number);
+        QCOMPARE(QString::fromStdString(got.lens.value_or("")), QStringLiteral("a"));
+        // the codecs read a file's EXIF through the same reader: the orientation, a SHORT or a LONG, either byte order
+        QCOMPARE(render::codecs::exif_orientation(tiff_of({{0x0112, 3, 1, 6}})), 6);
+        QCOMPARE(render::codecs::exif_orientation(tiff_of({{0x0112, 4, 1, 8}})), 8);
+        QCOMPARE(render::codecs::exif_orientation(std::string("MM\0*\0\0\0\x08\0\x01\x01\x12\0\x03\0\0\0\x01\0\x03\0\0\0\0\0\0", 26)), 3);
+        QCOMPARE(render::codecs::exif_orientation(many), 1);
+        QCOMPARE(render::codecs::exif_orientation(b), 1);
+        const std::string upright = render::codecs::exif_upright(tiff_of({{0x0112, 3, 1, 6}}));
+        QCOMPARE(render::codecs::exif_orientation(upright), 1);
+        QCOMPARE(render::codecs::exif_colour_space(tiff_of({{0x8769, 4, 1, 26}}, std::string("\x01\0\x01\xa0\x03\0\x01\0\0\0\x01\0\0\0\0\0\0\0", 18))), 1);
+        const std::string three = tiff_of({{0x0102, 3, 3, 26}}, std::string("\x08\0\x08\0\x08\0", 6));
+        const core::exif::Tiff tiff(three);
+        const auto bits = tiff.entry(tiff.first_ifd(), 0x0102);
+        QVERIFY(bits && tiff.whole(*bits) == std::optional<std::uint32_t>(8));  // (three SHORTs: placed past the field)
+        QVERIFY(!core::exif::Tiff("II*\0\x08").ok());
     }
 
     // --- レンズ補正 (lens.rs) -------------------------------------------------------------------------------------------------
@@ -261,14 +324,13 @@ private slots:
             for (std::uint32_t y = 0; y < 64; ++y)
                 for (std::uint32_t x = 0; x < 96; ++x)
                     for (unsigned c = 0; c < 4; ++c) err = std::max(err, std::fabs(pixel(raster, x, y)[c] - pixel(out, x, y)[c]));
-            QVERIFY2(err < 2.0 / 255.0, qPrintable(QString::number(err)));
+            // (the bicubic at whole places is the pixel itself: 16 bits exact, 32 bits but the float's rounding of the
+            // alpha's premultiplying and back)
+            QVERIFY2(err <= (f32 ? 1e-6 : 0.0), qPrintable(QString::number(err)));
         }
         const render::Image eight = eight_of(96, 64, px);
         const std::string out = run_eight(eight, "lens_correction", Json::object());
-        int err = 0;
-        const std::string in = eight.tobytes();
-        for (std::size_t i = 0; i < in.size(); ++i) err = std::max(err, std::abs(int(static_cast<unsigned char>(in[i])) - int(static_cast<unsigned char>(out[i]))));
-        QVERIFY2(err <= 2, qPrintable(QString::number(err)));
+        QVERIFY(out == eight.tobytes());
     }
 
     void lensDistortionRoundTripAndEdges() {
@@ -336,6 +398,20 @@ private slots:
         QVERIFY2(inks.value(0, 0) < 0.4, qPrintable(QString::number(inks.value(0, 0))));
         QVERIFY(std::fabs(inks.value(20 * 40 + 20, 0) - 0.5) < 0.02);
         QVERIFY(std::fabs(inks.value(0, 4) - 1.0) < 1e-6);  // (opaque: extension)
+        // the edge's black and white on the plates as the page's rules lay those colours (Genko's black, no ink)
+        const core::PageColor& color = *doc.page(0).color;
+        for (const auto& [edge, rgb] : std::vector<std::pair<std::string, std::array<double, 3>>>{{"black", {0, 0, 0}}, {"white", {1, 1, 1}}}) {
+            std::array<double, 4> expected{};
+            render::ink::inks_by_rules(color, rgb.data(), expected.data(), 1);
+            const auto edged = apply_ops(doc, Json::array({Json{{"op", "filter_raster"}, {"page", 1}, {"id", "pic"}, {"kind", "lens_correction"}, {"distortion", -60},
+                                                                {"edge", edge}}}))
+                                   .doc;
+            const core::InkPixels got = core::decode_ink_raster(*layer_of(edged, "pic").ink_raster);
+            for (unsigned c = 0; c < 4; ++c)
+                QVERIFY2(std::fabs(got.value(0, c) - expected[c]) < 2.0 / 65535.0,
+                         qPrintable(QStringLiteral("%1 plate %2: %3, the rules %4").arg(QString::fromStdString(edge)).arg(c).arg(got.value(0, c)).arg(expected[c])));
+            QCOMPARE(got.value(0, 4), 1.0);
+        }
     }
 
     // lens_cmds.rs: on 8, 16 and 32 bits through filter_raster — the corners cleared, the book before it as it was (one Undo),
@@ -584,6 +660,113 @@ private slots:
         QCOMPARE(after.getpixel(110, 2), picture_of(doc, "paint").getpixel(110, 2));  // (outside: as it was)
     }
 
+    // The frame is what shows of the layer (Kernel::shown_frame, SPEC's known limits): a picture on a part of the layer
+    // corrected the same wherever it lies (its centre the lens's); a stain apart from it widens the frame — the lens's
+    // centre moves, the picture comes out otherwise.
+    void theFrameIsWhatShowsOfTheLayer() {
+        const auto photo = eight_of(80, 60, grid_picture(80, 60, 10));
+        const auto layer_with = [&](int x, int y, bool stain) {
+            render::Image layer = render::Image::create("RGBA", render::Size{200, 140}, render::Ink{0, 0, 0, 0});
+            layer.paste(photo, render::Box{x, y, x + 80, y + 60});
+            if (stain) layer.paste(render::Ink{0, 0, 0, 255}, render::Box{198, 138, 199, 139});
+            return layer;
+        };
+        const auto part = [](const std::string& bytes, int x, int y) {
+            std::string out;
+            for (int r = 0; r < 60; ++r) out += bytes.substr((std::size_t(y + r) * 200 + std::size_t(x)) * 4, 80 * 4);
+            return out;
+        };
+        const Json params{{"distortion", -50}, {"vignette_amount", 40}};
+        const std::string here = part(run_eight(layer_with(20, 10, false), "lens_correction", params), 20, 10);
+        const std::string there = part(run_eight(layer_with(110, 70, false), "lens_correction", params), 110, 70);
+        QVERIFY(here == there);
+        QVERIFY(here != part(layer_with(20, 10, false).tobytes(), 20, 10));
+        const std::string stained = part(run_eight(layer_with(20, 10, true), "lens_correction", params), 20, 10);
+        QVERIFY(stained != here);
+        // (the whole layer outside the frame as it was: the frame's own corner cleared, the stain's too far to reach)
+        const std::string far = run_eight(layer_with(20, 10, false), "lens_correction", params);
+        QCOMPARE(eight_px(far, 200, 150, 120), (std::array<int, 4>{0, 0, 0, 0}));
+    }
+
+    // On a page of inks — CMYK, Lab, grey —: the corners the scale uncovers clear, their colours the paper's (no ink, Lab's
+    // and grey's white), the middle as it was.
+    void wideAngleOnPagesOfInks() {
+        const std::vector<std::pair<Json, std::vector<double>>> modes{{Json{{"mode", "cmyk"}, {"profile", "coated-cmyk"}}, {0, 0, 0, 0}},
+                                                                      {Json{{"mode", "lab"}}, {1, 32896.0 / 65535.0, 32896.0 / 65535.0}},
+                                                                      {Json{{"mode", "gray"}}, {1}}};
+        for (const auto& [mode, paper] : modes) {
+            const auto doc = ink_page(mode, 60, [](std::uint32_t, std::uint32_t, unsigned) { return 0.5; });
+            const auto done = apply_ops(doc, Json::array({Json{{"op", "filter_raster"}, {"page", 1}, {"id", "pic"}, {"kind", "adaptive_wide_angle"}, {"scale", 80},
+                                                               {"interpolation", "bilinear"}}}))
+                                  .doc;
+            const core::InkPixels got = core::decode_ink_raster(*layer_of(done, "pic").ink_raster);
+            const unsigned n = got.colours();
+            QCOMPARE(n, static_cast<unsigned>(paper.size()));
+            QCOMPARE(got.value(0, n), 0.0);
+            for (unsigned c = 0; c < n; ++c)
+                QVERIFY2(std::fabs(got.value(0, c) - paper[c]) < 2.0 / 65535.0, qPrintable(QStringLiteral("%1 %2: %3").arg(QString::fromStdString(mode.dump())).arg(c).arg(got.value(0, c))));
+            QCOMPARE(got.value(30 * 60 + 30, n), 1.0);
+            for (unsigned c = 0; c < n; ++c) QVERIFY(std::fabs(got.value(30 * 60 + 30, c) - 0.5) < 1e-3);
+        }
+    }
+
+    // 広角補正's least squares stops as its run is stopped (every 20 of its steps: render::Cancelled through the run).
+    void theSolveStopsWhenAsked() {
+        core::lens::WideAngle p;
+        p.model = core::lens::Model::Fisheye;
+        p.focal_length = 8;
+        p.constraints = {core::lens::Constraint{{60, 70}, {420, 70}, core::lens::Orientation::Horizontal}};
+        int checked = 0;
+        bool stopped = false;
+        try {
+            (void)core::lens::solve(p, 0, 0, 480, 320, [&] {
+                if (++checked == 3) throw std::runtime_error("stop");
+            });
+        } catch (const std::runtime_error&) {
+            stopped = true;
+        }
+        QVERIFY(stopped);
+        QCOMPARE(checked, 3);
+        // through the kind's run: stopped, the layer as it was
+        const render::Image flat = render::Image::create("RGBA", render::Size{240, 160}, render::Ink{51, 102, 153, 255});
+        std::stop_source stop;
+        stop.request_stop();
+        const render::segment::StopScope scope(stop.get_token());
+        bool cancelled = false;
+        try {
+            (void)run_eight(flat, "adaptive_wide_angle",
+                            Json{{"model", "fisheye"}, {"focal_length", 9},
+                                 {"constraints", Json::array({Json{{"a", Json::array({mm(20), mm(30)})}, {"b", Json::array({mm(200), mm(31)})}}})}});
+        } catch (const render::Cancelled&) {
+            cancelled = true;
+        }
+        QVERIFY(cancelled);
+    }
+
+    // A smart filter's constraints are the contents' places: moving the smart object moves them on the page, its own as
+    // they were.
+    void wideAngleConstraintsMoveWithTheSmartObject() {
+        const auto doc = apply_ops(eight_page(120, 80, {{"paint", eight_of(120, 80, grid_picture(120, 80, 12))}}),
+                                   Json::array({Json{{"op", "smart_convert"}, {"page", 1}, {"ids", Json::array({"paint"})}, {"new_id", "so"}},
+                                                Json{{"op", "smart_filter_add"}, {"page", 1}, {"id", "so"}, {"kind", "adaptive_wide_angle"}, {"model", "fisheye"},
+                                                     {"focal_length", 10},
+                                                     {"constraints", Json::array({Json{{"a", Json::array({mm(10), mm(15)})}, {"b", Json::array({mm(110), mm(15)})},
+                                                                                       {"orientation", "horizontal"}}})}}}))
+                             .doc;
+        const Json filter = (*layer_of(doc, "so").smart)["filters"][0];
+        const auto moved = apply_ops(doc, Json::array({Json{{"op", "smart_transform"}, {"page", 1}, {"id", "so"}, {"matrix", Json::array({1, 0, 0, 1, 5, 2})}}})).doc;
+        const Json moved_filter = (*layer_of(moved, "so").smart)["filters"][0];
+        QCOMPARE(moved_filter["params"], filter["params"]);
+        const Json was = render::smart_filters::params_on_page(doc, doc.page(0), layer_of(doc, "so"), filter);
+        const Json now = render::smart_filters::params_on_page(moved, moved.page(0), layer_of(moved, "so"), moved_filter);
+        for (const char* end : {"a", "b"}) {
+            const Json& p0 = was["constraints"][0][end];
+            const Json& p1 = now["constraints"][0][end];
+            QVERIFY2(std::fabs(p1[0].get<double>() - p0[0].get<double>() - 5) < 1e-6 && std::fabs(p1[1].get<double>() - p0[1].get<double>() - 2) < 1e-6,
+                     qPrintable(QString::fromStdString(was.dump() + " → " + now.dump())));
+        }
+    }
+
     // --- 消点 (vanishing.rs, vp_cmds.rs) ----------------------------------------------------------------------------------------
 
     void focalAndMetricAspectFromOnePlane() {
@@ -689,7 +872,7 @@ private slots:
         QVERIFY(!refusal(doc, Json{{"op", "vanishing_point"}, {"page", 1}, {"id", "floor"},
                                    {"planes", Json::array({Json{{"corners_mm", Json::array({Json::array({0, 0}), Json::array({1, 1})})}}})}})
                      .empty());
-        QVERIFY(!refusal(doc, Json{{"op", "vanishing_point"}, {"page", 1}, {"planes", planes}}).empty());
+        QVERIFY(!refusal(doc, Json{{"op", "vanishing_point"}, {"page", 1}, {"planes", planes}, {"paste", Json::array({Json{{"layer", "sticker"}}})}}).empty());
         // a bow-tie (not convex): refused
         QVERIFY(refusal(doc, Json{{"op", "vanishing_point"}, {"page", 1}, {"id", "floor"},
                                   {"planes", Json::array({Json{{"corners_mm", quad_json({{120, 120}, {360, 280}, {280, 120}, {40, 280}})}}})}})
@@ -705,6 +888,82 @@ private slots:
         // keep_planes false: the page without them
         const auto unkept = apply_ops(doc, Json::array({Json{{"op", "vanishing_point"}, {"page", 1}, {"id", "floor"}, {"planes", planes}, {"keep_planes", false}}})).doc;
         QVERIFY(core::page_vanishing(unkept.page(0)) == nullptr);
+        // the planes alone (the window's OK with nothing pasted): no layer named or made, "新しいレイヤーに描く" or not
+        const core::ApplyResult alone = apply_ops(doc, Json::array({Json{{"op", "vanishing_point"}, {"page", 1}, {"planes", planes}, {"new_layer", true}}}));
+        QCOMPARE(alone.doc.page(0).layers.size(), doc.page(0).layers.size());
+        QCOMPARE(alone.results.at(0)["new_layer"], Json(false));
+        QVERIFY(core::page_vanishing(alone.doc.page(0)) != nullptr);
+        // a new layer's stroke copies from the page as it shows under it
+        const core::ApplyResult stamped = apply_ops(
+            with_stripe, Json::array({Json{{"op", "vanishing_point"}, {"page", 1}, {"id", "floor"}, {"planes", planes}, {"new_layer", true},
+                                           {"clone", Json::array({Json{{"source", Json::array({mm(200), mm(257)})}, {"points", quad_json({{200, 160}, {205, 160}})},
+                                                                       {"size_px", 12}, {"hardness", 80}},
+                                                                  Json{{"source", Json::array({mm(200), mm(257)})}, {"points", quad_json({{150, 200}})}, {"size_px", 12}}})}}}));
+        const std::string made_id = stamped.results.at(0)["id"].get<std::string>();
+        QVERIFY(made_id != "floor");
+        QVERIFY2(picture_of(stamped.doc, made_id).getpixel(200, 160)[1] > 200, "the stripe copied onto the new layer");
+        QCOMPARE(picture_of(stamped.doc, "floor").tobytes(), striped.tobytes());
+        // a stroke's places far from the page: refused at once; a stroke longer than its dabs may be: refused
+        Json far = Json{{"op", "vanishing_point"}, {"page", 1}, {"id", "floor"}, {"planes", planes},
+                        {"clone", Json::array({Json{{"source", Json::array({mm(200), mm(250)})}, {"points", Json::array({Json::array({mm(200), mm(200)}), Json::array({1e5, 0})})},
+                                                    {"size_px", 1}}})}};
+        QVERIFY2(refusal(doc, far).find("near the page") != std::string::npos, refusal(doc, far).c_str());
+        Json zigzag = Json::array({Json::array({mm(200), mm(200)})});
+        for (int k = 0; k < 4000; ++k) zigzag.push_back(k % 2 == 0 ? Json::array({mm(-390), mm(-290)}) : Json::array({mm(790), mm(590)}));
+        far["clone"][0]["points"] = zigzag;
+        QVERIFY2(refusal(doc, far).find("more than 1000000 dabs") != std::string::npos, refusal(doc, far).c_str());
+        // stopped (its run's stop: フィルター's 消点… on a thread): render::Cancelled, the book as it was
+        {
+            std::stop_source stop;
+            stop.request_stop();
+            const render::segment::StopScope scope(stop.get_token());
+            bool cancelled = false;
+            try {
+                (void)apply_ops(doc, Json::array({Json{{"op", "vanishing_point"}, {"page", 1}, {"id", "floor"}, {"planes", planes},
+                                                       {"paste", Json::array({Json{{"layer", "sticker"}}})}}}));
+            } catch (const render::Cancelled&) {
+                cancelled = true;
+            }
+            QVERIFY(cancelled);
+        }
+    }
+
+    // "planes": [] takes the page's planes away (消点's window with every plane deleted): vanishing-point@1 no longer named,
+    // the pages and features written as a book that never had them; nothing to paste on then; a page without planes as it was.
+    void thePlanesTakenAway() {
+        const auto doc = eight_page(400, 300, {{"floor", render::Image::create("RGBA", render::Size{400, 300}, render::Ink{64, 64, 64, 255})},
+                                               {"sticker", render::Image::create("RGBA", render::Size{400, 300}, render::Ink{255, 0, 0, 255})}});
+        const Json planes = Json::array({Json{{"corners_mm", quad_json({{120, 120}, {280, 120}, {360, 280}, {40, 280}})}}});
+        const auto kept = apply_ops(doc, Json::array({Json{{"op", "vanishing_point"}, {"page", 1}, {"id", "floor"}, {"planes", planes}}})).doc;
+        QVERIFY(core::uses_vanishing(kept));
+        const core::ApplyResult gone = apply_ops(kept, Json::array({Json{{"op", "vanishing_point"}, {"page", 1}, {"id", "floor"}, {"planes", Json::array()}}}));
+        QCOMPARE(gone.results.at(0)["removed"], Json(true));
+        QVERIFY(core::page_vanishing(gone.doc.page(0)) == nullptr);
+        QVERIFY(!core::uses_vanishing(gone.doc));
+        QTemporaryDir tmp;
+        const Json before = payload_of(doc, tmp), after = payload_of(gone.doc, tmp), with = payload_of(kept, tmp);
+        QCOMPARE(after["pages"].dump(), before["pages"].dump());
+        QCOMPARE(after["features"], before["features"]);
+        QVERIFY(with["features"].dump().find(core::kVanishingFeature) != std::string::npos);
+        // nothing to paste on; a page without planes: nothing changed
+        QVERIFY2(refusal(kept, Json{{"op", "vanishing_point"}, {"page", 1}, {"id", "floor"}, {"planes", Json::array()}, {"paste", Json::array({Json{{"layer", "sticker"}}})}})
+                         .find("no planes to paste") != std::string::npos,
+                 "refused");
+        const core::ApplyResult none = apply_ops(doc, Json::array({Json{{"op", "vanishing_point"}, {"page", 1}, {"planes", Json::array()}}}));
+        QCOMPARE(none.results.at(0)["removed"], Json(false));
+        QCOMPARE(payload_of(none.doc, tmp)["pages"].dump(), before["pages"].dump());
+    }
+
+    // A big stamp on a 600 dpi page (its footprint past 4096 pixels of the page's grid, within 4096 of the working 200 dpi):
+    // laid, not left out (the review's P3-11).
+    void aBigStampAt600Dpi() {
+        const auto doc = precise_page(600, 600, std::vector<Px>(600 * 600, Px{0.25f, 0.5f, 0.75f, 1}), false, kInch);
+        const Json planes = Json::array({Json{{"corners_mm", Json::array({Json::array({2, 2}), Json::array({23, 2}), Json::array({23.5, 23}), Json::array({1.5, 23})})}}});
+        const core::ApplyResult done = apply_ops(doc, Json::array({Json{{"op", "vanishing_point"}, {"page", 1}, {"id", "paint"}, {"planes", planes},
+                                                                        {"clone", Json::array({Json{{"source", Json::array({12, 18})}, {"points", Json::array({Json::array({12, 8})})},
+                                                                                                    {"size_px", 1500}}})}}}));
+        const Json report = done.results.at(0);
+        QVERIFY2(report["dabs"].get<int>() >= 1 && !report.contains("skipped_dabs"), report.dump().c_str());
     }
 
     // On every kind of a paint layer's pixels (precise 16 and 32 bits, CMYK), and inside a selection.

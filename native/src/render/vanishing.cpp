@@ -7,9 +7,13 @@
 
 #include <algorithm>
 #include <cmath>
+#include <cstdint>
+#include <memory>
 #include <numbers>
+#include <optional>
 #include <string>
 #include <utility>
+#include <vector>
 
 #include "core/areas.hpp"
 #include "core/base64.hpp"
@@ -19,7 +23,9 @@
 #include "core/pyops.hpp"
 #include "core/vanishing.hpp"
 #include "render/ops_pc3.hpp"
+#include "render/fx.hpp"
 #include "render/retouch_dabs.hpp"
+#include "render/segment/segment.hpp"
 #include "render/smart_decode.hpp"
 
 namespace genko::render::vanishing {
@@ -273,7 +279,10 @@ Stamp stamp_coverage(const Scene& scene, const XY& source_mm, const std::vector<
         Box area;
     };
     std::vector<Dab> dabs;
+    // (a footprint at most 4096 pixels of the working 200 dpi a side: one reaching toward the horizon left out, counted)
+    const double most = 4096.0 * std::max(1.0, per_mm * 25.4 / 200.0);
     for (const retouch::Dab& d : retouch::dabs(brush, on_grid)) {
+        segment::check_stop();
         const XY mc = metric(*dd, *fd, {d.x / per_mm, d.y / per_mm});
         // (its footprint on the page: a metric circle's image, sixteen points round it)
         std::vector<XY> rim;
@@ -283,7 +292,11 @@ Stamp stamp_coverage(const Scene& scene, const XY& source_mm, const std::vector<
             rim.push_back({x * per_mm, y * per_mm});
         }
         const Box area = box_of(rim);
-        if (empty(area) || area.width() > 4096 || area.height() > 4096) continue;
+        if (empty(area)) continue;
+        if (area.width() > most || area.height() > most) {
+            ++out.skipped;
+            continue;
+        }
         const Box inside = meet_box(area, grid);
         if (empty(inside)) continue;
         dabs.push_back({mc, inside});
@@ -295,6 +308,7 @@ Stamp stamp_coverage(const Scene& scene, const XY& source_mm, const std::vector<
     const auto hard = static_cast<float>(std::clamp(hardness, 0.0, 1.0));
     const auto rad = static_cast<float>(radius_px);
     for (const Dab& d : dabs) {
+        segment::check_stop();
         bool laid = false;
         for (int y = d.area.y0; y < d.area.y1; ++y)
             for (int x = d.area.x0; x < d.area.x1; ++x) {
@@ -473,6 +487,27 @@ void vanishing_point(core::OpContext& c) {
     if (const Json* kind = core::get(op, "kind"); kind != nullptr && !kind->is_null() && *kind != Json("vanishing_point"))
         throw OpError("vanishing_point has no kind (the フィルター menu's: vanishing_point)");
     const std::size_t at = core::require_page(doc, op);
+    const Json* keep_given = core::get(op, "keep_planes");
+    const bool keep = keep_given == nullptr || keep_given->is_null() || core::py_truthy(*keep_given);
+    // what it is asked to lay (none: the planes alone — no layer needed)
+    const auto asked = [&](const char* key) {
+        const Json* list = core::get(op, key);
+        return list != nullptr && !list->is_null() && !(list->is_array() && list->empty());
+    };
+    const bool draws = asked("paste") || asked("clone");
+    // the planes taken away ("planes": [] — 消点's window with every plane deleted): the page's gone, nothing laid
+    if (const Json* planes = core::get(op, "planes"); planes != nullptr && planes->is_array() && planes->empty()) {
+        if (draws) throw OpError("vanishing_point: no planes to paste or stamp on (planes is empty)");
+        bool removed = false;
+        if (keep && core::page_vanishing(doc.page(at)) != nullptr) {
+            core::Page& page = doc.edit_page(at);
+            page.extra.erase(std::string(core::kVanishingKey));
+            removed = true;
+        }
+        c.report = Json{{"id", nullptr}, {"new_layer", false}, {"planes", Json::array()}, {"focal_mm", nullptr}, {"pasted", 0},
+                        {"dabs", 0},     {"box_mm", nullptr}, {"removed", removed}};
+        return;
+    }
     // the planes: given, else the page's
     Json normal;
     if (const Json* planes = core::get(op, "planes"); planes != nullptr && !planes->is_null()) {
@@ -488,15 +523,13 @@ void vanishing_point(core::OpContext& c) {
     }
     const double width_mm = doc.page(at).spec.width_mm.value(), height_mm = doc.page(at).spec.height_mm.value();
     const Scene scene = scene_of(normal, width_mm, height_mm);
-    const Json* keep_given = core::get(op, "keep_planes");
-    const bool keep = keep_given == nullptr || keep_given->is_null() || core::py_truthy(*keep_given);
-    const bool new_layer = core::truthy_at(op, "new_layer");
+    const bool new_layer = draws && core::truthy_at(op, "new_layer");
     std::string id;
     if (const Json* given = core::get(op, "id"); given != nullptr && !given->is_null()) {
         if (!given->is_string() || given->get_ref<const std::string&>().empty()) throw OpError("id must be a layer's id");
         id = given->get<std::string>();
     }
-    if (id.empty() && !new_layer) throw OpError("vanishing_point needs the paint layer it lays on (id), or a new layer (new_layer)");
+    if (draws && id.empty() && !new_layer) throw OpError("vanishing_point needs the paint layer it lays on (id), or a new layer (new_layer)");
     // the pastes and strokes read (their pictures read before anything changes)
     std::vector<PasteItem> pastes;
     std::vector<CloneItem> clones;
@@ -567,16 +600,47 @@ void vanishing_point(core::OpContext& c) {
             CloneItem made;
             const Json* source = core::get(item, "source");
             if (source == nullptr) throw OpError(where + ".source must be a place [x, y] (mm)");
+            // (its places within the page's size round the page: a stroke from outside reaching far is refused, P2-4)
+            const auto near_page = [&](const XY& p) {
+                return p[0] >= -width_mm && p[0] <= 2.0 * width_mm && p[1] >= -height_mm && p[1] <= 2.0 * height_mm;
+            };
             made.source = point_of(*source, where + ".source");
+            if (!near_page(made.source)) throw OpError(where + ".source must lie near the page (within its width and height round it)");
             const Json* points = core::get(item, "points");
             if (points == nullptr || !points->is_array() || points->empty() || points->size() > kMostPoints)
                 throw OpError(where + ".points must be a list of 1 to " + std::to_string(kMostPoints) + " places [x, y] (mm)");
-            for (const Json& p : *points) made.points.push_back(point_of(p, where + ".points"));
+            for (const Json& p : *points) {
+                made.points.push_back(point_of(p, where + ".points"));
+                if (!near_page(made.points.back())) throw OpError(where + ".points must lie near the page (within its width and height round it)");
+            }
             made.size = number_of(item, "size_px", 40, 1, 2000, where);
             made.hardness = number_of(item, "hardness", 50, 0, 100, where) / 100.0;
             made.opacity = number_of(item, "opacity", 100, 0, 100, where) / 100.0;
             clones.push_back(std::move(made));
         }
+    }
+    // the planes as the report gives them, and kept on the page
+    const auto planes_of_scene = [&scene] {
+        Json planes = Json::array();
+        for (std::size_t i = 0; i < scene.planes.size(); ++i) {
+            const auto [lu, lv] = scene.lifted(i).lengths();
+            Json corners = Json::array();
+            for (const XY& p : scene.planes[i]) corners.push_back(Json::array({p[0], p[1]}));
+            planes.push_back(Json{{"corners_mm", std::move(corners)}, {"aspect", lv > 0 ? lu / lv : 0.0}});
+        }
+        return planes;
+    };
+    const auto keep_planes = [&] {
+        if (!keep) return;
+        core::Page& page = doc.edit_page(at);
+        if (!page.extra.is_object()) page.extra = Json::object();
+        page.extra[std::string(core::kVanishingKey)] = normal;
+    };
+    if (!draws) {  // (the planes alone: no layer named or made, P3-15)
+        keep_planes();
+        c.report = Json{{"id", id.empty() ? Json(nullptr) : Json(id)}, {"new_layer", false}, {"planes", planes_of_scene()}, {"focal_mm", scene.focal},
+                        {"pasted", 0}, {"dabs", 0}, {"box_mm", nullptr}};
+        return;
     }
     const std::optional<Json> area = core::truthy_at(op, "area") ? std::optional<Json>(core::op_area(op)) : std::nullopt;
     // the layer: the one named, or a new one above it (or on top)
@@ -611,6 +675,7 @@ void vanishing_point(core::OpContext& c) {
     // the selection's coverage over the grid (none: everywhere)
     std::optional<std::vector<float>> cover;
     Box within = grid;
+    const image_ops::Held cover_held(area ? std::uint64_t(grid.x1) * std::uint64_t(grid.y1) * sizeof(float) : 0);
     if (area) {
         cover = image_ops::coverage(doc.page(at), *area, static_cast<std::uint32_t>(grid.x1), static_cast<std::uint32_t>(grid.y1), like.kind() == Pixels::Kind::Eight);
         int x0 = grid.x1, y0 = grid.y1, x1 = 0, y1 = 0;
@@ -632,8 +697,13 @@ void vanishing_point(core::OpContext& c) {
         work = join_box(work, paste_boxes.back());
     }
     std::vector<Stamp> stamps;
+    std::vector<std::unique_ptr<image_ops::Held>> stamps_held;
+    std::size_t skipped = 0;
     for (const CloneItem& k : clones) {
+        segment::check_stop();
         Stamp st = stamp_coverage(scene, k.source, k.points, k.size, k.hardness, per_mm, grid);
+        skipped += st.skipped;
+        stamps_held.push_back(std::make_unique<image_ops::Held>(std::uint64_t(st.cov.size()) * sizeof(float)));
         if (st.dabs > 0) {
             st.box = meet_box(st.box, within);
             if (!empty(st.box)) {
@@ -664,14 +734,22 @@ void vanishing_point(core::OpContext& c) {
         const unsigned n = target.colours();
         const auto bw = std::size_t(box.width());
         const auto cover_at = [&](int x, int y) { return cover ? (*cover)[std::size_t(y) * std::size_t(grid.x1) + std::size_t(x)] : 1.0f; };
+        // (how far it is: each paste and stroke a share)
+        const double shares = static_cast<double>(pastes.size() + clones.size());
+        std::size_t done = 0;
         // the pastes, in their order, over the layer
         for (std::size_t k = 0; k < pastes.size(); ++k) {
+            segment::check_stop();
+            fx::ProgressScope::put(static_cast<double>(done++) / shares);
             const Box pb = meet_box(paste_boxes[k], box);
             if (empty(pb)) continue;
+            const image_ops::Held picture_held(std::uint64_t(pastes[k].picture.size()) * (n + 1) * sizeof(float) * 2);
             const auto picture = shown_plane(as_kind(pastes[k].picture, like));
             if (!picture) continue;
+            const image_ops::Held made_held(std::uint64_t(pb.width()) * std::uint64_t(pb.height()) * (n + 1) * sizeof(float));
             const auto made = pasted(scene, pastes[k].plane, *picture, pastes[k].at, pastes[k].width, per_mm, pb);
             if (!made) continue;
+            segment::check_stop();
             bool laid = false;
             for (int y = pb.y0; y < pb.y1; ++y)
                 for (int x = pb.x0; x < pb.x1; ++x) {
@@ -686,30 +764,40 @@ void vanishing_point(core::OpContext& c) {
         }
         // the strokes, each copying from what is there before it (a new layer: the page as it shows, what was pasted on it
         // over that)
+        // (a new layer's strokes copy from the page as it shows under it — drawn once: the new layer is empty in the book
+        // until the end — with what is laid on the layer so far over it)
+        std::optional<Pixels> under;
+        const image_ops::Held work_held(clones.empty() ? 0 : std::uint64_t(box.width()) * std::uint64_t(box.height()) * (n + 1) * sizeof(float) * (new_layer ? 3 : 2));
         for (std::size_t k = 0; k < clones.size(); ++k) {
+            segment::check_stop();
+            fx::ProgressScope::put(static_cast<double>(done++) / shares);
             const Stamp& st = stamps[k];
             if (st.dabs == 0 || empty(st.box)) continue;
-            Pixels before = target;
-            if (new_layer) {
-                Pixels shown = page_shown_over(c, at, id, box);
+            Pixels before = [&] {
+                if (!new_layer) return target;
+                if (!under) under = page_shown_over(c, at, id, box);
+                Pixels shown = *under;
                 for (std::size_t i = 0; i < shown.size(); ++i) retouch::over(shown.at(i), target.at(i), n, 1.0f, false);
-                before = std::move(shown);
-            }
+                return shown;
+            }();
             Pixels paint(like.kind(), box.width() > 0 ? std::uint32_t(box.width()) : 0u, std::uint32_t(std::max(box.height(), 0)), like.colours());
             paint.floating = like.floating;
             paint.ink = like.ink;
             const Box sb = meet_box(st.box, box);
-            for (int y = sb.y0; y < sb.y1; ++y)
+            for (int y = sb.y0; y < sb.y1; ++y) {
+                if ((y - sb.y0) % 64 == 0) segment::check_stop();
                 for (int x = sb.x0; x < sb.x1; ++x) {
                     if (!(st.cov[std::size_t(y - st.box.y0) * std::size_t(st.box.width()) + std::size_t(x - st.box.x0)] > 0.0f)) continue;
                     const auto q = stamp_source(scene, st, {x + 0.5, y + 0.5}, per_mm);
                     if (!q) continue;
                     sample(before, box, (*q)[0] - 0.5, (*q)[1] - 0.5, paint.at(std::size_t(y - box.y0) * bw + std::size_t(x - box.x0)));
                 }
+            }
             retouch::Coverage cov;
             cov.box = st.box;
             cov.cov = st.cov;
             std::optional<std::vector<float>> chosen;
+            const image_ops::Held chosen_held(cover ? std::uint64_t(bw) * std::uint64_t(box.height()) * sizeof(float) : 0);
             if (cover) {
                 chosen.emplace(bw * std::size_t(box.height()));
                 for (int y = box.y0; y < box.y1; ++y)
@@ -721,25 +809,19 @@ void vanishing_point(core::OpContext& c) {
                 dab_count += st.dabs;
             }
         }
+        segment::check_stop();
+        fx::ProgressScope::put(1.0);
         if (!empty(damaged)) image_ops::put_layer_pixels(doc, at, id, target, box);
     }
-    if (keep) {
-        core::Page& page = doc.edit_page(at);
-        if (!page.extra.is_object()) page.extra = Json::object();
-        page.extra[std::string(core::kVanishingKey)] = normal;
-    }
-    Json planes = Json::array();
-    for (std::size_t i = 0; i < scene.planes.size(); ++i) {
-        const auto [lu, lv] = scene.lifted(i).lengths();
-        Json corners = Json::array();
-        for (const XY& p : scene.planes[i]) corners.push_back(Json::array({p[0], p[1]}));
-        planes.push_back(Json{{"corners_mm", std::move(corners)}, {"aspect", lv > 0 ? lu / lv : 0.0}});
-    }
+    keep_planes();
+    if (skipped > 0)
+        c.notes.push_back("vanishing_point: " + std::to_string(skipped) + " dabs reached toward the horizon too far to lay and were left out");
     Json box_mm = nullptr;
     if (!empty(damaged))
         box_mm = Json::array({damaged.x0 / per_mm, damaged.y0 / per_mm, damaged.width() / per_mm, damaged.height() / per_mm});
-    c.report = Json{{"id", id}, {"new_layer", new_layer}, {"planes", std::move(planes)}, {"focal_mm", scene.focal}, {"pasted", pasted_count},
+    c.report = Json{{"id", id}, {"new_layer", new_layer}, {"planes", planes_of_scene()}, {"focal_mm", scene.focal}, {"pasted", pasted_count},
                     {"dabs", dab_count}, {"box_mm", std::move(box_mm)}};
+    if (skipped > 0) (*c.report)["skipped_dabs"] = skipped;
 }
 
 }  // namespace genko::render::vanishing

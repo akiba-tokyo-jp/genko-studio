@@ -149,7 +149,8 @@ Json MainWindow::with_channel_target(const Json& ops) const {
     // 塗りつぶし, the Magic Eraser, 境界線を描く, the matting —: refused while a channel, the Quick Mask too, is drawn on, rather
     // than changing the layer under it)
     static const std::set<std::string, std::less<>> kLayerOnly{"clone_stamp", "healing_brush", "spot_healing", "history_brush",
-                                                               "content_aware_fill", "magic_erase", "outline_area", "matting"};
+                                                               "content_aware_fill", "magic_erase", "outline_area", "matting",
+                                                               "vanishing_point"};  // (PC4 D6: 消点's pastes and strokes)
     const auto on_this_page = [&](const Json& op) {
         try {
             return core::Num(core::py_int(op.value("page", Json()))) == page->index;

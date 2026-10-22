@@ -16,6 +16,7 @@
 #include <QApplication>
 #include <QComboBox>
 #include <QDialog>
+#include <QDialogButtonBox>
 #include <QDoubleSpinBox>
 #include <QLabel>
 #include <QListWidget>
@@ -1049,9 +1050,37 @@ private slots:
         QVERIFY(book.layer("pic")->raster_png != before);
         QVERIFY(core::page_vanishing(book.page()) != nullptr);
         QVERIFY(!book.act("act_filter_last")->isEnabled() || book.act("act_filter_last")->statusTip().indexOf(QStringLiteral("消点")) < 0);
+        // (元に戻す: the paste and the planes both gone; やり直す: both back)
+        const core::Bytes pasted = book.layer("pic")->raster_png;
+        book.window->action(QStringLiteral("act_undo"))->trigger();
+        QCOMPARE(book.layer("pic")->raster_png, before);
+        QVERIFY(core::page_vanishing(book.page()) == nullptr);
+        book.window->action(QStringLiteral("act_redo"))->trigger();
+        QCOMPARE(book.layer("pic")->raster_png, pasted);
+        QVERIFY(core::page_vanishing(book.page()) != nullptr);
         answers.responder->exec = answer(QStringLiteral("vanishing_point"), [&](QDialog* d) { planes_again = d->property("planes").toInt(); });
         book.act("act_filter_vanishing_point")->trigger();
         QCOMPARE(planes_again, 1);
+        // 面を削除 (the chosen plane and those torn off it), OK with no plane: the page's planes taken away, the pixels kept
+        bool could_ok = false;
+        answers.responder->exec = answer(QStringLiteral("vanishing_point"), [&](QDialog* d) {
+            d->findChild<QRadioButton*>(QStringLiteral("vanishing_edit"))->setChecked(true);
+            d->findChild<QPushButton*>(QStringLiteral("vanishing_tear"))->click();
+            QCOMPARE(d->property("planes").toInt(), 2);
+            auto* view = dynamic_cast<app::lens_window::PictureView*>(d->findChild<QWidget*>(QStringLiteral("vanishing_view")));
+            view->press({12, 12}, Qt::NoModifier, Qt::LeftButton);  // (the first plane chosen by its corner)
+            view->release({12, 12}, Qt::NoModifier);
+            d->findChild<QPushButton*>(QStringLiteral("vanishing_remove"))->click();
+            QCOMPARE(d->property("planes").toInt(), 0);
+            auto* buttons = d->findChild<QDialogButtonBox*>();
+            could_ok = buttons != nullptr && buttons->button(QDialogButtonBox::Ok)->isEnabled();
+        });
+        book.act("act_filter_vanishing_point")->trigger();
+        QVERIFY(could_ok);
+        QVERIFY(core::page_vanishing(book.page()) == nullptr);
+        QCOMPARE(book.layer("pic")->raster_png, pasted);
+        book.window->action(QStringLiteral("act_undo"))->trigger();
+        QVERIFY(core::page_vanishing(book.page()) != nullptr);
         // on a smart object: grey (ラスタライズしてから)
         QVERIFY(book.window->apply_ops(Json::array({Json{{"op", "smart_convert"}, {"page", 1}, {"ids", Json::array({"pic"})}, {"new_id", "so"}}})));
         book.window->set_target_layer("so");

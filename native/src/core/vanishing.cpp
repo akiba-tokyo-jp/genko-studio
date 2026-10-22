@@ -119,15 +119,21 @@ bool uses_vanishing(const Document& doc) {
 }
 
 void validate_vanishing(const Document& doc) {
-    for (const smart::WrittenPage& written : smart::written_pages(doc)) {
-        const Json* v = page_vanishing(*written.page);
-        if (v == nullptr) continue;
+    const auto check = [](const Page& page) {
+        const Json* v = page_vanishing(page);
+        if (v == nullptr) return;
         try {
             (void)read_vanishing(*v);
         } catch (const OpError& error) {
             throw Error("value", std::string("a page's vanishing point planes: ") + error.what());
         }
-    }
+    };
+    // (every page, those whose pictures are read later too — the planes are the page's own, not its assets' —, and the
+    // contents' pages the book writes)
+    for (const PagePtr& page : doc.pages)
+        if (page) check(*page);
+    for (const smart::WrittenPage& written : smart::written_pages(doc))
+        if (!written.contents.empty()) check(*written.page);
 }
 
 }  // namespace genko::core

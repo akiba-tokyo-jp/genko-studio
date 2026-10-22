@@ -606,6 +606,9 @@ const std::vector<Rule>& rules() {
         r.push_back(rule(R"(vanishing_point: the plane (\d+) is degenerate)", "消点の面 \\1 がつぶれています"));
         r.push_back(rule(R"(vanishing_point: the plane (\d+) reaches too far.*)", "消点の面 \\1 が遠くへ伸びすぎます（角度・奥行きを変えます）"));
         r.push_back(rule(R"(vanishing_point: the page has no planes yet.*)", "このページには消点の面がまだありません（面を作ってから使います）"));
+        r.push_back(rule(R"(vanishing_point: no planes to paste or stamp on.*)", "消点の面をすべて消すときは、貼り付けもスタンプもできません"));
+        r.push_back(rule(R"(vanishing_point: (\d+) dabs reached toward the horizon.*)",
+                         "消点のスタンプの跡のうち \\1 個は、地平線に近く大きくなりすぎるため描きませんでした"));
         r.push_back(rule(R"(vanishing_point needs the paint layer it lays on.*)", "消点で描くペイントのレイヤーを選ぶか、新しいレイヤーにします"));
         r.push_back(rule(R"(vanishing_point has no setting '(.*)'.*)", "消点に「\\1」という設定はありません"));
         r.push_back(rule(R"(vanishing_point has no kind.*)", "消点の種類の指定が違います"));
@@ -613,9 +616,14 @@ const std::vector<Rule>& rules() {
         r.push_back(rule(R"(paste\[\d+\]\.data .*)", "消点で貼り付ける絵のデータが読めません（PNG のファイル、32 MiB まで）"));
         r.push_back(rule(R"(paste\[\d+\]\.layer: no layer (\S+) on the page)", "消点で貼り付けるレイヤー（\\1）がそのページにありません"));
         r.push_back(rule(R"(paste\[\d+\]\.plane must be .*)", "消点で貼り付ける面の番号が違います"));
+        r.push_back(rule(R"(paste\[\d+\]\.at must be .*)", "消点で貼り付ける位置（at）は、面の上の [u, v]（数 2 つ）です"));
+        r.push_back(rule(R"(paste\[\d+\]\.width must be .*)", "消点で貼り付ける幅（width）は、面の幅に対する割合の数（0.01〜10）です"));
         r.push_back(rule(R"(paste\[\d+\] .*)", "消点で貼り付ける絵の指定が違います（{plane, layer か data, at: [u, v], width}）"));
         r.push_back(rule(R"(clone must be a list of at most (\d+) .*)", "消点のスタンプは \\1 本までです"));
+        r.push_back(rule(R"(clone\[\d+\]\.(?:source|points) must lie near the page.*)",
+                         "消点のスタンプの点とコピー元は、ページとその周り（ページの幅と高さの分）に置きます"));
         r.push_back(rule(R"(clone\[\d+\].*)", "消点のスタンプの指定が違います（{source: [x, y], points: [[x, y]…]（mm）, size_px, hardness, opacity}）"));
+        r.push_back(rule(R"(a stroke has more than (\d+) dabs.*)", "線が長すぎます（ブラシの間隔で \\1 個を超える跡になります。点を近づけるか、ブラシを大きくします）"));
         r.push_back(rule(R"(a page's vanishing point planes: .*)", "ページの消点の面が正しくありません（原稿は読み取り専用で開きます）"));
         r.push_back(rule(R"(the smart object \S+'s filter \S+_data: .*)", "スマートフィルターのファイルは原稿の素材として持ちます（ファイルのデータのままでは持てません）"));
         r.push_back(rule(R"(adjust ((?:blur|sharpen|noise|other|video|distort|pixelate|stylize|render|filter|camera|lens|adaptive)_\S+?) has no setting '(.*)')",

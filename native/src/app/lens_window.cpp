@@ -211,6 +211,8 @@ public:
         setProperty("kind", QString::fromStdString(kind_));
         setWindowTitle(title);
         shown_ = shown_of(*call.window, call);
+        // (the picture's camera read once: the settings filled from it as the window draws and previews, P2-3)
+        camera_ = render::picture_camera(call.window->book(), *call.page, call.layer);
         auto* outer = new QHBoxLayout(this);
         auto* left = new QVBoxLayout;
         view_ = new PictureView(this);
@@ -255,7 +257,7 @@ protected:
         Json params;
         try {
             const Json given = settings();
-            const Json filled = render::resolve_filter(call_.window->book(), *call_.page, call_.layer, kind_, given);
+            const Json filled = render::resolve_filter(call_.window->book(), *call_.page, call_.layer, kind_, given, &camera_);
             params = core::normalize_filter(kind_, filled, call_.page);
             status_->setText(QString());
         } catch (const std::exception& error) {
@@ -289,6 +291,7 @@ protected:
     FilterWindowCall call_;
     std::string kind_;
     Shown shown_;
+    std::optional<core::exif::Camera> camera_;
     PictureView* view_ = nullptr;
     QLabel* status_ = nullptr;
     QVBoxLayout* right_ = nullptr;
@@ -308,7 +311,7 @@ public:
         // 自動補正
         auto* automatic = new QWidget(tabs);
         auto* form = new QFormLayout(automatic);
-        const auto camera = render::picture_camera(call.window->book(), *call.page, call.layer);
+        const auto& camera = camera_;
         QString said = QStringLiteral("この画像の EXIF には、カメラとレンズの情報がありません");
         if (camera) {
             QStringList parts;
@@ -629,7 +632,7 @@ private:
         wa.focal_length = focal_->value();
         wa.crop_factor = crop_->value();
         try {
-            const Json filled = render::resolve_filter(call_.window->book(), *call_.page, call_.layer, kind_, settings());
+            const Json filled = render::resolve_filter(call_.window->book(), *call_.page, call_.layer, kind_, settings(), &camera_);
             wa.focal_length = number(filled, "focal_length", wa.focal_length);
             wa.crop_factor = number(filled, "crop_factor", wa.crop_factor);
         } catch (const std::exception&) {

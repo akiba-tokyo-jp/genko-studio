@@ -138,6 +138,9 @@ struct Ctx {
     // preview, PlaceScope —; `bounds` is then that part's own coordinates, past its edges): a kernel that draws marks by the
     // grid's coordinates adds it.
     int x0 = 0, y0 = 0;
+    // (D6) A page of inks' colour mode (none: not a page of inks): a colour a kind lays of its own (レンズ補正's edge) goes
+    // onto the plates by the page's rules (render/ink inks_by_rules).
+    const core::PageColor* ink = nullptr;
 };
 
 // How far outside an output tile a kernel reads (upstream's Halo): a margin of pixels, or the whole base box.
@@ -298,6 +301,9 @@ public:
     ~ProgressScope();
     ProgressScope(const ProgressScope&) = delete;
     ProgressScope& operator=(const ProgressScope&) = delete;
+
+    // (D6) How far a run on this thread is (0..1) — an op that is not a kind's run (消点) says it so —; none: nowhere.
+    static void put(double done);
 
 private:
     std::atomic<double>* before_;
