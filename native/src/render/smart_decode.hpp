@@ -11,8 +11,10 @@
 #include "render/image.hpp"
 
 // smart-objects@1 (PC3 A0, decision 2: 画像を読み込む… places a smart object of the file itself): the readers of a smart
-// object's file, by its format (kReaders: PNG, JPEG, TIFF, WebP, BMP, GIF, PSD/PSB — a later step adds a format with a
-// row). The file's bytes are never changed: the 8-bit page draws them as open_image reads any picture (a placed picture's
+// object's file, by its format (PNG, JPEG, TIFF, WebP, BMP, GIF, PSD/PSB; PC4 F-a, formats@1: TGA, ICO, Netpbm, QOI,
+// OpenEXR, Radiance HDR and AVIF through the codecs — render/codecs: their 8-bit picture as open_image reads it, their
+// 16-bit or float samples with all their bits, a grey or CMYK one's as 16-bit inks; OpenEXR's and Radiance HDR's linear
+// light with sRGB's curve on it — values past 1 kept —, no profile of their own — a later step adds a format with a row). The file's bytes are never changed: the 8-bit page draws them as open_image reads any picture (a placed picture's
 // pixels); a page in precise colour draws a PNG of 16 bits and a TIFF of 16 or 32 bits with all their bits (deep_picture);
 // a CMYK, grey or Lab page takes a CMYK, grey or Lab file into its inks as they are (file_inks). Its colours come onto the
 // page by the use the contents keep (core::SmartContents::profile): keep (its numbers), embedded (from the profile it
@@ -68,8 +70,12 @@ int stored_depth(std::string_view bytes);
 int stored_samples(std::string_view bytes);
 double stored_dpi(std::string_view bytes);
 
+// PC4 F-a: a TIFF of 8-bit CMYK and an alpha (its fifth sample an associated or unassociated alpha, the samples together),
+// which open_image does not read: deep_picture reads it with its bits as a TIFF of 16 or 32 bits is read.
+bool cmyk_alpha_tiff(std::string_view bytes);
+
 // The file's pixels with all their bits: a PNG of 16 bits, a TIFF of 16 or 32 bits (grey, RGB, CMYK, with an alpha or
-// not, samples together) as they are stored, a grey or RGB PSD or PSB of 16 or 32 bits (PC3 A3: its merged picture, a
+// not, samples together) — or of 8-bit CMYK and an alpha (cmyk_alpha_tiff) — as they are stored, a grey or RGB PSD or PSB of 16 or 32 bits (PC3 A3: its merged picture, a
 // 32-bit file's linear light encoded by 1/2.2, its values past 1 kept); any other file as the 8-bit page reads it (its
 // 8-bit values / 255).
 DeepPicture deep_picture(std::string_view bytes);

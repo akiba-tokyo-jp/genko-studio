@@ -87,7 +87,7 @@ const char* const kPsdLab =
 const char* const kWebp = "UklGRh4AAABXRUJQVlA4TBEAAAAvAUAAAAdQhSJXof+BiOh/AAA=";
 // A PPM of 2×2 (netpbm), which Pillow opens and this build does not read (M7: a recorded limit; TIFFs in planes are
 // read since M7).
-const char* const kUnreadPicture = "UDYKMiAyCjI1NQr/AAAA/wAAAP////8=";
+const char* const kUnreadPicture = "AAAADGpQICANCocKAAAAFGZ0eXBqcDIgAAAAAGpwMiA=";
 
 const genko::core::CommandBus& bus() {
     static const genko::core::CommandBus b(render::ops_registry());
@@ -446,7 +446,7 @@ private slots:
         const auto with_webp = bus().apply(doc, Json::array({Json::object({{"op", "place_asset"}, {"page", 1}, {"asset", webp}})}), Actor("human:作者"));
         render::clear_render_caches();
         (void)render::render_page(with_webp.doc.page(0), 60, render::RenderOptions{}, &with_webp.doc);
-        // a picture in a format this build does not read (a PPM): placing it is refused as not read by this build (its
+        // a picture in a format this build does not read (JPEG 2000; a PPM until PC4 F-a): placing it is refused as not read by this build (its
         // size is not read as Image.open reads it); one a book has (placed by the Python app) is said not drawn — never
         // another picture in its place; a preview leaves it out
         const std::string ref = put(tmp.path(), genko::core::a2b_base64(kUnreadPicture));

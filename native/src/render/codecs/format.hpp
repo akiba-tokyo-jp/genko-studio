@@ -15,9 +15,9 @@
 //
 // caps() is this build's table: `read` and `write` say what it does now, and the depths, layouts and metadata of a
 // format it writes are what its writer keeps — the plan of a write and the losses it says (render/codecs/fidelity.hpp)
-// are made from them, so a loss is said exactly when the file changes. PC4 F-0 reads PNG, JPEG, TIFF, WebP, GIF and BMP
-// through this build's readers (render/png.hpp, render/smart_decode.hpp) and writes PNG and JPEG through its writers
-// (render::write_png, render::write_jpeg: the pixels only); F-a widens each row as it writes the format's own codec.
+// are made from them, so a loss is said exactly when the file changes. Since PC4 F-a every format is read and written
+// (render/codecs/formats.hpp: one reader and one writer each), as PhotoCraft's table has it but for what this build's
+// writers add (a BMP's resolution, a lossy WebP when asked, AVIF read and written with its profile, EXIF and XMP).
 
 namespace genko::render::codecs {
 

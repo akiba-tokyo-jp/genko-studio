@@ -11,6 +11,8 @@
     {"name": "freetype", "default-features": false, "features": ["zlib", "png"]},
     "harfbuzz",
     "libwebp",
-    "lcms"
+    "lcms",
+    "openexr",
+    {"name": "libavif", "default-features": false, "features": ["aom"]}
   ]
 }

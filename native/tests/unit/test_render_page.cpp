@@ -43,9 +43,10 @@ using genko::core::Num;
 
 namespace {
 
-// A PPM of 2 × 2 (red, green, blue, white), as base64: Pillow opens it; this build does not read the netpbm formats
-// (render::NotYetPorted "image_format", known from its first bytes; M7: a recorded limit).
-const char* const kUnreadPicture = "UDYKMiAyCjI1NQr/AAAA/wAAAP////8=";
+// A JPEG 2000 file's first boxes (its signature and its file type), as base64: Pillow opens JPEG 2000; this build does not
+// read it (render::NotYetPorted "image_format", known from its first bytes; M7: a recorded limit — PC4 F-a reads the
+// netpbm formats, the PPM this was before).
+const char* const kUnreadPicture = "AAAADGpQICANCocKAAAAFGZ0eXBqcDIgAAAAAGpwMiA=";
 
 genko::core::StrokePtr line(double x, double y, double dx, double dy, std::string kind = "gpen") {
     auto s = std::make_shared<genko::core::Stroke>();
@@ -290,7 +291,7 @@ private slots:
         if (w == "nombre") page.numero = true;
         if (w == "anim") page.extra["anim"] = Json::object({{"fps", 12}, {"tracks", Json::array()}});
         QTemporaryDir assets;
-        if (w == "image_format") {  // (a placed picture whose asset is a PPM of 2×2, which Pillow opens)
+        if (w == "image_format") {  // (a placed picture whose asset is a JPEG 2000 file, which Pillow opens)
             QVERIFY(assets.isValid());
             doc.asset_dir = std::filesystem::path(assets.path().toStdString());
             Layer placed;
@@ -537,7 +538,7 @@ private slots:
     }
 
     void unported_picture_leaves_its_group_out_everywhere() {
-        // A joined group (style.group) with a picture balloon this build does not read (a PPM): the whole page drawn with
+        // A joined group (style.group) with a picture balloon this build does not read (JPEG 2000): the whole page drawn with
         // skip_unported leaves the whole group out and says so; so does every part of the page — one the picture reaches,
         // and one it does not that the group's other balloon reaches — so each part is the whole page cut.
         Document doc = book();

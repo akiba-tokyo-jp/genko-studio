@@ -272,9 +272,16 @@ Opened open_file(std::string_view bytes, std::string_view name, const OpenOption
     const auto format = options.as ? options.as : render::codecs::detect(bytes);
     if (!format) throw core::Error("unidentified_image", "the file is not a picture of a format this build knows");
     CodecImage picture = render::codecs::decode_as(*format, bytes, options.limits);
+    if (render::codecs::linear_light(*format) && render::codecs::is_gray(picture.layout())) {
+        // (PC4 F-a: an OpenEXR's or Radiance HDR's grey linear light — no built-in grey is linear —: with sRGB's curve, in
+        // the built-in sgray, which has it)
+        picture = render::codecs::srgb_encoded(picture);
+        picture.icc = builtin_bytes("sgray");
+    }
     const render::codecs::FileMetadata meta = render::codecs::read_metadata(*format, bytes);
     std::vector<std::string> notes;
-    std::optional<std::string> exif = meta.exif, xmp = meta.xmp;
+    // (PC4 F-a: what the codecs read with the pixels where the containers' reader reads none — an AVIF's, by libavif)
+    std::optional<std::string> exif = meta.exif ? meta.exif : picture.meta.exif, xmp = meta.xmp ? meta.xmp : picture.meta.xmp;
     // (the EXIF's orientation applied to the pixels, and the EXIF and XMP kept upright: as Photoshop opens it. A TIFF's
     // reader turns its pixels itself.)
     if (exif && *format != render::codecs::Format::Tiff) {

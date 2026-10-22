@@ -39966,9 +39966,19 @@
       "upstream_source": "crates/codecs/src/format.rs",
       "limitations": "AVIFは非既定featureの出力のみ。各形式の色・深度・metadata capabilityを別々に検査",
       "genko_status": "一部（2026-10-16 照合）",
-      "implementation_status": "未着手",
+      "implementation_status": "実装済み（PC4 F-a、未統合）",
       "acceptance_status": "未実施",
-      "evidence": [],
+      "evidence": [
+        "native/src/render/codecs/png.cpp",
+        "native/src/render/png.cpp",
+        "native/src/render/smart_decode.cpp",
+        "native/src/render/codecs/codecs.cpp",
+        "native/src/render/codecs/format.cpp",
+        "native/src/render/codecs/fidelity.cpp",
+        "native/src/formats/copy.cpp",
+        "native/tests/unit/test_codecs.cpp",
+        "native/tests/contract/test_contract_codecs.cpp"
+      ],
       "pc0": {
         "date": "2026-10-16",
         "cpp_base": "962faa4",
@@ -39988,7 +39998,8 @@
         ],
         "gap": "読み書きはあるが Pillow 準拠で 16 ビットの RGB/RGBA は 8 ビットに落とす（16 ビットはグレーの I;16 のみ）。書き込みは ICC と dpi のみで EXIF・XMP・テキストを保持しない。APNG はアニメ書き出しのみ",
         "note": "16 ビットのカラーを保つには PC1 の土台が要る"
-      }
+      },
+      "remaining": "APNG は最初のコマを読み、1 枚を書く（アニメの PNG は今どおり render/movie）"
     },
     {
       "id": "codec:Jpeg",
@@ -39996,9 +40007,18 @@
       "upstream_source": "crates/codecs/src/format.rs",
       "limitations": "AVIFは非既定featureの出力のみ。各形式の色・深度・metadata capabilityを別々に検査",
       "genko_status": "一部（2026-10-16 照合）",
-      "implementation_status": "未着手",
+      "implementation_status": "実装済み（PC4 F-a、未統合）",
       "acceptance_status": "未実施",
-      "evidence": [],
+      "evidence": [
+        "native/src/render/codecs/jpeg.cpp",
+        "native/src/render/png.cpp",
+        "native/src/render/codecs/codecs.cpp",
+        "native/src/render/codecs/format.cpp",
+        "native/src/render/codecs/fidelity.cpp",
+        "native/src/formats/copy.cpp",
+        "native/tests/unit/test_codecs.cpp",
+        "native/tests/contract/test_contract_codecs.cpp"
+      ],
       "pc0": {
         "date": "2026-10-16",
         "cpp_base": "962faa4",
@@ -40017,7 +40037,8 @@
         ],
         "gap": "8 ビットの L/RGB/CMYK を読めるが、書き込みは L/RGB のみ（CMYK なし）。書き込みで解像度（density）・EXIF・XMP を入れない（ICC は可）",
         "note": ""
-      }
+      },
+      "remaining": "12 bit の JPEG・COM の文字は読み書きしない（上流と同じ）。1 つの APP1 に入らない EXIF・XMP は書かずに失うものとして言う"
     },
     {
       "id": "codec:Tiff",
@@ -40025,9 +40046,19 @@
       "upstream_source": "crates/codecs/src/format.rs",
       "limitations": "AVIFは非既定featureの出力のみ。各形式の色・深度・metadata capabilityを別々に検査",
       "genko_status": "一部（2026-10-16 照合）",
-      "implementation_status": "未着手",
+      "implementation_status": "実装済み（PC4 F-a、未統合）",
       "acceptance_status": "未実施",
-      "evidence": [],
+      "evidence": [
+        "native/src/render/codecs/tiff.cpp",
+        "native/src/render/tiff_webp.cpp",
+        "native/src/render/smart_decode.cpp",
+        "native/src/render/codecs/codecs.cpp",
+        "native/src/render/codecs/format.cpp",
+        "native/src/render/codecs/fidelity.cpp",
+        "native/src/formats/copy.cpp",
+        "native/tests/unit/test_codecs.cpp",
+        "native/tests/contract/test_contract_codecs.cpp"
+      ],
       "pc0": {
         "date": "2026-10-16",
         "cpp_base": "962faa4",
@@ -40046,7 +40077,8 @@
         ],
         "gap": "読み込みは libtiff で多くの形を読むがカラーは 8 ビットに落とし、別プレーンの 8 ビット未満は未対応。書き込みは 1/L/RGB/CMYK の 8 ビットと CMYK/Lab の 8/16 ビット（インク）のみで、アルファ（RGBA/CMYKA）・16 ビット RGB・32 ビット浮動小数・XMP・テキストがない",
         "note": "32 ビットは PC1 の土台が要る"
-      }
+      },
+      "remaining": "EXIF（サブ IFD）は保たない（上流と同じ）。Lab の TIFF を Lab のまま書く並びはコーデックの絵に無い（Lab のページは書き出しの PSD・TIFF の道）"
     },
     {
       "id": "codec:WebP",
@@ -40054,9 +40086,18 @@
       "upstream_source": "crates/codecs/src/format.rs",
       "limitations": "AVIFは非既定featureの出力のみ。各形式の色・深度・metadata capabilityを別々に検査",
       "genko_status": "一部（2026-10-16 照合）",
-      "implementation_status": "未着手",
+      "implementation_status": "実装済み（PC4 F-a、未統合）",
       "acceptance_status": "未実施",
-      "evidence": [],
+      "evidence": [
+        "native/src/render/codecs/webp.cpp",
+        "native/src/render/tiff_webp.cpp",
+        "native/src/render/codecs/codecs.cpp",
+        "native/src/render/codecs/format.cpp",
+        "native/src/render/codecs/fidelity.cpp",
+        "native/src/formats/copy.cpp",
+        "native/tests/unit/test_codecs.cpp",
+        "native/tests/contract/test_contract_codecs.cpp"
+      ],
       "pc0": {
         "date": "2026-10-16",
         "cpp_base": "962faa4",
@@ -40074,7 +40115,8 @@
         ],
         "gap": "読み込み（最初のフレーム）と、非可逆 q80 の書き込み（1 枚・アニメ）はある。上流の可逆書き込み、ICC・EXIF・XMP の保持がない",
         "note": ""
-      }
+      },
+      "remaining": "アニメの WebP は最初のコマを読む（アニメの書き出しは今どおり render/movie）"
     },
     {
       "id": "codec:Gif",
@@ -40082,9 +40124,21 @@
       "upstream_source": "crates/codecs/src/format.rs",
       "limitations": "AVIFは非既定featureの出力のみ。各形式の色・深度・metadata capabilityを別々に検査",
       "genko_status": "一部（2026-10-16 照合）",
-      "implementation_status": "未着手",
+      "implementation_status": "実装済み（PC4 F-a、未統合）",
       "acceptance_status": "未実施",
-      "evidence": [],
+      "evidence": [
+        "native/src/render/codecs/gif.cpp",
+        "native/src/render/gif.cpp",
+        "native/src/render/quantize.cpp",
+        "native/src/render/movie.cpp",
+        "native/src/api/cli.cpp",
+        "native/src/render/codecs/codecs.cpp",
+        "native/src/render/codecs/format.cpp",
+        "native/src/render/codecs/fidelity.cpp",
+        "native/src/formats/copy.cpp",
+        "native/tests/unit/test_codecs.cpp",
+        "native/tests/contract/test_contract_codecs.cpp"
+      ],
       "pc0": {
         "date": "2026-10-16",
         "cpp_base": "962faa4",
@@ -40101,7 +40155,8 @@
         ],
         "gap": "読み込み（最初のフレーム）とアニメ GIF の書き出しはあるが、1 枚の画像を GIF で書く経路がない（genko render の .gif は NotYetPorted）",
         "note": ""
-      }
+      },
+      "remaining": "アニメの GIF は最初のコマを読む（アニメの書き出しは今どおり render/movie）。Web 用の減色の窓は F-c"
     },
     {
       "id": "codec:Bmp",
@@ -40109,9 +40164,19 @@
       "upstream_source": "crates/codecs/src/format.rs",
       "limitations": "AVIFは非既定featureの出力のみ。各形式の色・深度・metadata capabilityを別々に検査",
       "genko_status": "一部（2026-10-16 照合）",
-      "implementation_status": "未着手",
+      "implementation_status": "実装済み（PC4 F-a、未統合）",
       "acceptance_status": "未実施",
-      "evidence": [],
+      "evidence": [
+        "native/src/render/codecs/bmp.cpp",
+        "native/src/render/bmp.cpp",
+        "native/src/api/cli.cpp",
+        "native/src/render/codecs/codecs.cpp",
+        "native/src/render/codecs/format.cpp",
+        "native/src/render/codecs/fidelity.cpp",
+        "native/src/formats/copy.cpp",
+        "native/tests/unit/test_codecs.cpp",
+        "native/tests/contract/test_contract_codecs.cpp"
+      ],
       "pc0": {
         "date": "2026-10-16",
         "cpp_base": "962faa4",
@@ -40136,9 +40201,20 @@
       "upstream_source": "crates/codecs/src/format.rs",
       "limitations": "AVIFは非既定featureの出力のみ。各形式の色・深度・metadata capabilityを別々に検査",
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "未着手",
+      "implementation_status": "実装済み（PC4 F-a、未統合）",
       "acceptance_status": "未実施",
-      "evidence": [],
+      "evidence": [
+        "native/src/render/codecs/tga.cpp",
+        "native/src/render/png.cpp",
+        "native/src/render/smart_decode.cpp",
+        "native/src/api/cli.cpp",
+        "native/src/render/codecs/codecs.cpp",
+        "native/src/render/codecs/format.cpp",
+        "native/src/render/codecs/fidelity.cpp",
+        "native/src/formats/copy.cpp",
+        "native/tests/unit/test_codecs.cpp",
+        "native/tests/contract/test_contract_codecs.cpp"
+      ],
       "pc0": {
         "date": "2026-10-16",
         "cpp_base": "962faa4",
@@ -40157,9 +40233,20 @@
       "upstream_source": "crates/codecs/src/format.rs",
       "limitations": "AVIFは非既定featureの出力のみ。各形式の色・深度・metadata capabilityを別々に検査",
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "未着手",
+      "implementation_status": "実装済み（PC4 F-a、未統合）",
       "acceptance_status": "未実施",
-      "evidence": [],
+      "evidence": [
+        "native/src/render/codecs/ico.cpp",
+        "native/src/render/png.cpp",
+        "native/src/render/smart_decode.cpp",
+        "native/src/api/cli.cpp",
+        "native/src/render/codecs/codecs.cpp",
+        "native/src/render/codecs/format.cpp",
+        "native/src/render/codecs/fidelity.cpp",
+        "native/src/formats/copy.cpp",
+        "native/tests/unit/test_codecs.cpp",
+        "native/tests/contract/test_contract_codecs.cpp"
+      ],
       "pc0": {
         "date": "2026-10-16",
         "cpp_base": "962faa4",
@@ -40180,9 +40267,20 @@
       "upstream_source": "crates/codecs/src/format.rs",
       "limitations": "AVIFは非既定featureの出力のみ。各形式の色・深度・metadata capabilityを別々に検査",
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "未着手",
+      "implementation_status": "実装済み（PC4 F-a、未統合）",
       "acceptance_status": "未実施",
-      "evidence": [],
+      "evidence": [
+        "native/src/render/codecs/pnm.cpp",
+        "native/src/render/png.cpp",
+        "native/src/render/smart_decode.cpp",
+        "native/src/api/cli.cpp",
+        "native/src/render/codecs/codecs.cpp",
+        "native/src/render/codecs/format.cpp",
+        "native/src/render/codecs/fidelity.cpp",
+        "native/src/formats/copy.cpp",
+        "native/tests/unit/test_codecs.cpp",
+        "native/tests/contract/test_contract_codecs.cpp"
+      ],
       "pc0": {
         "date": "2026-10-16",
         "cpp_base": "962faa4",
@@ -40203,9 +40301,20 @@
       "upstream_source": "crates/codecs/src/format.rs",
       "limitations": "AVIFは非既定featureの出力のみ。各形式の色・深度・metadata capabilityを別々に検査",
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "未着手",
+      "implementation_status": "実装済み（PC4 F-a、未統合）",
       "acceptance_status": "未実施",
-      "evidence": [],
+      "evidence": [
+        "native/src/render/codecs/qoi.cpp",
+        "native/src/render/png.cpp",
+        "native/src/render/smart_decode.cpp",
+        "native/src/api/cli.cpp",
+        "native/src/render/codecs/codecs.cpp",
+        "native/src/render/codecs/format.cpp",
+        "native/src/render/codecs/fidelity.cpp",
+        "native/src/formats/copy.cpp",
+        "native/tests/unit/test_codecs.cpp",
+        "native/tests/contract/test_contract_codecs.cpp"
+      ],
       "pc0": {
         "date": "2026-10-16",
         "cpp_base": "962faa4",
@@ -40226,9 +40335,21 @@
       "upstream_source": "crates/codecs/src/format.rs",
       "limitations": "AVIFは非既定featureの出力のみ。各形式の色・深度・metadata capabilityを別々に検査",
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "未着手",
+      "implementation_status": "実装済み（PC4 F-a、未統合）",
       "acceptance_status": "未実施",
-      "evidence": [],
+      "evidence": [
+        "native/src/render/codecs/exr.cpp",
+        "native/src/render/png.cpp",
+        "native/src/render/smart_decode.cpp",
+        "native/src/formats/open_file.cpp",
+        "native/cmake/GenkoDeps.cmake",
+        "native/src/render/codecs/codecs.cpp",
+        "native/src/render/codecs/format.cpp",
+        "native/src/render/codecs/fidelity.cpp",
+        "native/src/formats/copy.cpp",
+        "native/tests/unit/test_codecs.cpp",
+        "native/tests/contract/test_contract_codecs.cpp"
+      ],
       "pc0": {
         "date": "2026-10-16",
         "cpp_base": "962faa4",
@@ -40239,7 +40360,8 @@
         "tests": [],
         "gap": "OpenEXR（16 ビット半精度/32 ビット浮動小数、Gray/RGB(A)）の読み書きがない",
         "note": "新しい外部ライブラリ: OpenEXR（BSD-3-Clause）または tinyexr（BSD-3-Clause）。PC1 の 16/32 ビットの土台が要る"
-      }
+      },
+      "remaining": "最初のパートだけを読む（マルチパートの残り・deep・間引いたチャンネルは読まない）。読める圧縮は OS の OpenEXR の版による（HTJ2K は Windows の 3.4 だけ）"
     },
     {
       "id": "codec:Hdr",
@@ -40247,9 +40369,19 @@
       "upstream_source": "crates/codecs/src/format.rs",
       "limitations": "AVIFは非既定featureの出力のみ。各形式の色・深度・metadata capabilityを別々に検査",
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "未着手",
+      "implementation_status": "実装済み（PC4 F-a、未統合）",
       "acceptance_status": "未実施",
-      "evidence": [],
+      "evidence": [
+        "native/src/render/codecs/hdr.cpp",
+        "native/src/render/png.cpp",
+        "native/src/render/smart_decode.cpp",
+        "native/src/render/codecs/codecs.cpp",
+        "native/src/render/codecs/format.cpp",
+        "native/src/render/codecs/fidelity.cpp",
+        "native/src/formats/copy.cpp",
+        "native/tests/unit/test_codecs.cpp",
+        "native/tests/contract/test_contract_codecs.cpp"
+      ],
       "pc0": {
         "date": "2026-10-16",
         "cpp_base": "962faa4",
@@ -40260,7 +40392,8 @@
         "tests": [],
         "gap": "Radiance HDR（RGBE, 32 ビット浮動小数 RGB）の読み書きがない",
         "note": "形式自体は小さいが PC1 の 32 ビットの土台が要る"
-      }
+      },
+      "remaining": "XYZE の Radiance HDR は読まない"
     },
     {
       "id": "codec:Avif",
@@ -40268,9 +40401,22 @@
       "upstream_source": "crates/codecs/src/format.rs",
       "limitations": "AVIFは非既定featureの出力のみ。各形式の色・深度・metadata capabilityを別々に検査",
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "未着手",
+      "implementation_status": "実装済み（PC4 F-a、未統合）",
       "acceptance_status": "未実施",
-      "evidence": [],
+      "evidence": [
+        "native/src/render/codecs/avif.cpp",
+        "native/src/render/png.cpp",
+        "native/src/render/smart_decode.cpp",
+        "native/src/formats/open_file.cpp",
+        "native/src/api/cli.cpp",
+        "native/cmake/GenkoDeps.cmake",
+        "native/src/render/codecs/codecs.cpp",
+        "native/src/render/codecs/format.cpp",
+        "native/src/render/codecs/fidelity.cpp",
+        "native/src/formats/copy.cpp",
+        "native/tests/unit/test_codecs.cpp",
+        "native/tests/contract/test_contract_codecs.cpp"
+      ],
       "pc0": {
         "date": "2026-10-16",
         "cpp_base": "962faa4",
@@ -40283,7 +40429,8 @@
         "tests": [],
         "gap": "AVIF の書き出しがない（判定のみ）。上流も既定では無効の feature で書き出しのみ",
         "note": "新しい外部ライブラリ: libavif（BSD-2-Clause）＋符号器 libaom（BSD-2-Clause）または rav1e（BSD-2-Clause）"
-      }
+      },
+      "remaining": "シーケンス（avis）は最初の絵だけを読む。HDR（PQ・HLG）の AVIF は値をそのまま読む（色の変換をしない）"
     },
     {
       "id": "document:color-depth-model",

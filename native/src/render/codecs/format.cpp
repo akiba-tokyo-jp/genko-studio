@@ -14,10 +14,12 @@ using L = Layout;
 using S = Sample;
 
 constexpr std::array<Sample, 1> kU8{S::U8};
+constexpr std::array<Sample, 2> kU8U16{S::U8, S::U16};
 constexpr std::array<Sample, 3> kU8U16F32{S::U8, S::U16, S::F32};
 constexpr std::array<Sample, 2> kF16F32{S::F16, S::F32};
 constexpr std::array<Sample, 1> kF32{S::F32};
 constexpr std::array<Layout, 1> kRgbOnly{L::Rgb};
+constexpr std::array<Layout, 3> kJpegLayouts{L::Gray, L::Rgb, L::Cmyk};
 constexpr std::array<Layout, 2> kRgbRgba{L::Rgb, L::Rgba};
 constexpr std::array<Layout, 1> kRgbaOnly{L::Rgba};
 constexpr std::array<Layout, 4> kRgbGray{L::Gray, L::GrayA, L::Rgb, L::Rgba};
@@ -37,16 +39,8 @@ constexpr std::array<std::string_view, 1> kExrExt{"exr"};
 constexpr std::array<std::string_view, 1> kHdrExt{"hdr"};
 constexpr std::array<std::string_view, 1> kAvifExt{"avif"};
 
-// (PC4 F-0: what each writer of this build keeps; the formats it does not write yet have the rows their F-a writers aim at)
-constexpr std::array<Asymmetric, 4> kAsymmetric{{
-    {Format::Tiff, "read by this build's TIFF reader (render/tiff_webp.hpp, 16 and 32 bits by render/smart_decode.hpp); its own "
-                   "writer — depths, layouts, alpha, ICC, XMP, text — is F-a's (the exports' Pillow-shaped TIFFs stay formats')"},
-    {Format::WebP, "read by this build's WebP reader (its first frame); its writer — lossless and lossy, ICC, EXIF, XMP — is F-a's "
-                   "(the animations' WebP stays render/movie's)"},
-    {Format::Gif, "read by this build's GIF reader (its first frame); a single GIF's writer — quantized, LZW — is F-a's (the "
-                  "animations' GIF stays render/movie's)"},
-    {Format::Bmp, "read by this build's BMP reader; its writer is F-a's (genko render's own BMP moves there)"},
-}};
+// (PC4 F-a: every format is read and written; none left asymmetric)
+constexpr std::array<Asymmetric, 0> kAsymmetric{};
 
 FormatCaps base() {
     FormatCaps c;
@@ -97,69 +91,65 @@ bool looks_like_tga(std::string_view b) {
 }  // namespace
 
 FormatCaps caps(Format format) {
+    // (PC4 F-a: what each writer keeps — the plan and the losses come from these —, as PhotoCraft's table has it but for
+    // what this build's own writers add: a BMP's resolution, a WebP written lossy too, AVIF read and written with its
+    // profile, EXIF and XMP)
     FormatCaps c = base();
     switch (format) {
     case Format::Png:
-        // (F-0: render::write_png keeps 8-bit grey and RGB with or without alpha, no metadata. F-a: 16 bits, ICC, EXIF, XMP, dpi, text)
+        c.depths = kU8U16;
         c.layouts = kRgbGray;
+        c.icc = c.exif = c.xmp = c.dpi = c.text = true;
         c.animation = true;
         break;
     case Format::Jpeg:
-        // (F-0: render::write_jpeg writes RGB, no metadata. F-a: grey and CMYK, ICC, EXIF, XMP, dpi)
-        c.layouts = kRgbOnly;
+        c.layouts = kJpegLayouts;
         c.alpha = false;
+        c.icc = c.exif = c.xmp = c.dpi = true;
         c.lossy = true;
         break;
     case Format::Tiff:
-        c.write = false;
         c.depths = kU8U16F32;
         c.layouts = kAllLayouts;
         c.icc = c.xmp = c.dpi = c.text = true;
         break;
     case Format::WebP:
-        c.write = false;
         c.icc = c.exif = c.xmp = true;
         c.animation = true;
         break;
     case Format::Gif:
-        c.write = false;
         c.layouts = kRgbaOnly;
         c.animation = true;
         c.lossy = true;
         break;
     case Format::Bmp:
-        c.write = false;
+        c.dpi = true;
         break;
     case Format::Tga:
-        c.read = c.write = false;
         c.layouts = kRgbGray;
         break;
     case Format::Ico:
-        c.read = c.write = false;
         c.layouts = kRgbaOnly;
         break;
     case Format::Pnm:
-        c.read = c.write = false;
         c.depths = kU8U16F32;
         c.layouts = kAllLayouts;
         break;
     case Format::Qoi:
-        c.read = c.write = false;
         break;
     case Format::OpenExr:
-        c.read = c.write = false;
         c.depths = kF16F32;
         c.layouts = kRgbGray;
         break;
     case Format::Hdr:
-        c.read = c.write = false;
         c.depths = kF32;
         c.layouts = kRgbOnly;
         c.alpha = false;
         c.lossy = true;
         break;
     case Format::Avif:
-        c.read = c.write = false;
+        c.icc = c.exif = c.xmp = true;
+        c.animation = true;
         c.lossy = true;
         break;
     }
@@ -256,10 +246,12 @@ std::string_view mime_type(Format format) {
 
 std::optional<std::pair<std::uint32_t, std::uint32_t>> max_dimensions(Format format) {
     switch (format) {
-    case Format::Jpeg:
-    case Format::Gif: return std::make_pair(65535u, 65535u);
-    case Format::WebP: return std::make_pair(16384u, 16384u);
+    case Format::Jpeg: return std::make_pair(65500u, 65500u);  // (libjpeg's JPEG_MAX_DIMENSION)
+    case Format::Gif:
+    case Format::Tga: return std::make_pair(65535u, 65535u);
+    case Format::WebP: return std::make_pair(16383u, 16383u);
     case Format::Ico: return std::make_pair(256u, 256u);
+    case Format::Avif: return std::make_pair(65536u, 65536u);
     default: return std::nullopt;
     }
 }

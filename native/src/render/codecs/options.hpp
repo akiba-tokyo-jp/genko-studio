@@ -1,7 +1,7 @@
 #pragma once
 
-// How a picture is written (PC4 F-0; PhotoCraft's EncodeOptions, crates/codecs/src/options.rs). The options a writer of
-// this build does not take yet (F-0 writes PNG and JPEG through render::write_png and write_jpeg) are kept for F-a's.
+// How a picture is written (PC4 F-0, F-a; PhotoCraft's EncodeOptions, crates/codecs/src/options.rs). jpeg_quality is also
+// a lossy WebP's and an AVIF's quality; webp_lossless false writes a lossy WebP (PhotoCraft's writes lossless only).
 
 namespace genko::render::codecs {
 

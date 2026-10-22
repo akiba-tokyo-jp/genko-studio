@@ -262,7 +262,8 @@ private slots:
             {"cpython-re", QStringLiteral("| CPython の `re`")}, {"fonts", QStringLiteral("| Dela Gothic One")}, {"lucide", QStringLiteral("| Lucide")},
             {"zlib", QStringLiteral("| zlib")}, {"libpng", QStringLiteral("| libpng")}, {"libjpeg-turbo", QStringLiteral("| libjpeg-turbo")},
             {"libtiff", QStringLiteral("| libtiff")}, {"harfbuzz", QStringLiteral("| HarfBuzz")}, {"libwebp", QStringLiteral("| libwebp")},
-            {"lcms2", QStringLiteral("| Little CMS 2")}, {"msvc-runtime", QStringLiteral("| Microsoft Visual C++")}};
+            {"lcms2", QStringLiteral("| Little CMS 2")}, {"msvc-runtime", QStringLiteral("| Microsoft Visual C++")},
+            {"openexr", QStringLiteral("| OpenEXR")}, {"libavif", QStringLiteral("| libavif")}, {"aom", QStringLiteral("| libaom")}};
         std::set<std::string> listed;
         std::map<std::string, std::string> relation;
         for (const Json& r : sbom["relationships"]) {

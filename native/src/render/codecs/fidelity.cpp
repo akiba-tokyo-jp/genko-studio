@@ -3,6 +3,11 @@
 #include "render/codecs/fidelity.hpp"
 
 #include <algorithm>
+#include <set>
+
+#include "core/color_model.hpp"
+#include "render/codecs/codecs.hpp"
+#include "render/codecs/formats.hpp"
 
 namespace genko::render::codecs {
 
@@ -45,6 +50,37 @@ std::string_view depth_words(Sample s) {
     case Sample::F32: return "32 bit（浮動小数点）";
     }
     return "";
+}
+
+// The picture's profile is the one the format implies (OpenEXR's and Radiance HDR's linear light: the built-in linear-srgb).
+bool implied_profile(const CodecImage& image, Format format) {
+    if (!image.icc || !linear_light(format)) return false;
+    const core::BuiltinProfile* p = core::builtin_profile("linear-srgb");
+    return p != nullptr && p->bytes && *p->bytes == *image.icc;
+}
+
+// (GIF) The opaque colours of the picture as it is written — more than half transparent is transparent —, and whether one
+// is partly transparent.
+struct GifColours {
+    std::size_t colours = 0;
+    bool transparent = false;
+    bool partial = false;
+};
+GifColours gif_colours(const CodecImage& stored) {
+    GifColours out;
+    std::set<std::uint32_t> seen;
+    const auto* d = reinterpret_cast<const unsigned char*>(stored.data().data());
+    for (std::size_t i = 0; i < stored.pixel_count(); ++i) {
+        const unsigned char* p = d + i * 4;
+        if (p[3] != 0 && p[3] != 255) out.partial = true;
+        if (p[3] < 128) {
+            out.transparent = true;
+            continue;
+        }
+        if (seen.size() <= 256) seen.insert((std::uint32_t(p[0]) << 16) | (std::uint32_t(p[1]) << 8) | p[2]);
+    }
+    out.colours = seen.size();
+    return out;
 }
 
 std::string_view layout_words(Layout l) {
@@ -122,26 +158,34 @@ std::vector<Loss> losses(const CodecImage& image, Format format, const EncodeOpt
     }
     if (is_float(from_sample) && !is_float(p.sample) && image.has_out_of_range()) add(Loss::Kind::RangeClipped);
 
-    // the layout
+    // the layout (GIF: an alpha of all or nothing — a pixel more transparent than half one transparent colour —, its colours
+    // as they are when they are 256 or fewer)
     if (has_alpha(from_layout) && !has_alpha(p.layout) && image.has_translucency()) add(Loss::Kind::AlphaDiscarded);
-    if (format == Format::Gif && has_alpha(p.layout) && image.has_translucency()) add(Loss::Kind::AlphaBinarized);
+    std::optional<GifColours> gif;
+    if (format == Format::Gif) gif = gif_colours(image.convert(p.layout, p.sample));
+    if (gif && gif->partial) add(Loss::Kind::AlphaBinarized);
     if (is_cmyk(from_layout) && !is_cmyk(p.layout)) add(Loss::Kind::CmykConverted).layout = p.layout;
     if (!is_gray(from_layout) && is_gray(p.layout)) add(Loss::Kind::ColorToGray);
 
     // the compression
-    if (format == Format::Gif) {
-        add(Loss::Kind::PaletteQuantized);
-    } else if (c.lossy) {
+    if (gif) {
+        if (gif->colours > (gif->transparent ? 255u : 256u)) add(Loss::Kind::PaletteQuantized);
+    } else if (c.lossy || (format == Format::WebP && !options.webp_lossless)) {
         add(Loss::Kind::LossyCompression);
     }
 
-    // the metadata
-    if (image.icc && options.embed_icc && (!c.icc || !same_model(from_layout, p.layout))) add(Loss::Kind::IccDropped);
+    // the metadata (JPEG: each in one segment — an EXIF block or an XMP packet past it, a profile past 255 of them, not
+    // written —; PNG: text under a keyword of 1 to 79 Latin-1 characters; TIFF: text of its seven tags)
+    const bool icc_kept = c.icc && same_model(from_layout, p.layout) && !(format == Format::Jpeg && image.icc && image.icc->size() > detail::kJpegIccMax);
+    if (image.icc && options.embed_icc && !icc_kept && !implied_profile(image, format)) add(Loss::Kind::IccDropped);
     if (options.embed_metadata) {
-        if (image.meta.exif && !c.exif) add(Loss::Kind::ExifDropped);
-        if (image.meta.xmp && !c.xmp) add(Loss::Kind::XmpDropped);
+        if (image.meta.exif && (!c.exif || (format == Format::Jpeg && image.meta.exif->size() > detail::kJpegExifMax))) add(Loss::Kind::ExifDropped);
+        if (image.meta.xmp && (!c.xmp || (format == Format::Jpeg && image.meta.xmp->size() > detail::kJpegXmpMax))) add(Loss::Kind::XmpDropped);
         if (image.meta.dpi && !c.dpi) add(Loss::Kind::DpiDropped);
-        if (!image.meta.text.empty() && !c.text) add(Loss::Kind::TextDropped);
+        const bool text_kept = c.text && std::all_of(image.meta.text.begin(), image.meta.text.end(), [format](const auto& kv) {
+            return format == Format::Png ? detail::png_keyword(kv.first).has_value() : detail::tiff_text_tag(kv.first).has_value();
+        });
+        if (!image.meta.text.empty() && !text_kept) add(Loss::Kind::TextDropped);
     }
     return out;
 }

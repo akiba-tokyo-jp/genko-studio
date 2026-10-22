@@ -16,8 +16,10 @@
 #include "formats/output.hpp"
 #include "formats/page_picture.hpp"
 #include "formats/pillow_save.hpp"
+#include "core/color_model.hpp"
 #include "render/codecs/codecs.hpp"
 #include "render/not_yet_ported.hpp"
+#include "render/smart_decode.hpp"
 
 namespace genko::formats {
 
@@ -28,7 +30,9 @@ using render::codecs::CodecImage;
 using render::codecs::Layout;
 using render::codecs::Sample;
 
-constexpr std::array<std::string_view, 5> kExtensions{"psd", "tif", "png", "jpg", "jpeg"};
+// (PC4 F-a: and the codecs' formats, the default extension of each first)
+constexpr std::array<std::string_view, 23> kExtensions{"psd", "tif",  "png", "jpg", "jpeg", "webp", "gif", "bmp", "tga", "ico", "pnm", "pbm",
+                                                       "pgm", "ppm", "pam", "pfm", "qoi", "exr", "hdr", "avif", "jpe", "jfif", "dib"};
 
 std::string lower_suffix(const fs::path& dest) {
     std::string suffix = dest.extension().string();
@@ -64,6 +68,39 @@ std::string tiff_of(const PagePicture& picture, int dpi, const std::optional<std
     }
     const CodecImage rgb = image.convert(Layout::Rgb, Sample::U8);
     return tiff_bytes(render::Image::frombytes("RGB", render::Size{static_cast<int>(w), static_cast<int>(h)}, rgb.data()), save);
+}
+
+// (PC4 F-a) The page's picture as linear light of sRGB's primaries (OpenEXR, Radiance HDR: their light is linear): its
+// colours to sRGB through its profile (Little CMS in floats, values past 1 kept — render/smart_decode's srgb_floats), then
+// sRGB's curve undone; the built-in linear-srgb as its profile (the formats' own: no loss said of it).
+CodecImage linear_srgb(const CodecImage& picture) {
+    render::smart::DeepPicture deep;
+    deep.width = picture.width();
+    deep.height = picture.height();
+    deep.channels = render::codecs::channels(picture.layout());
+    deep.alpha = render::codecs::has_alpha(picture.layout());
+    deep.depth = render::codecs::depth_of(picture.sample());
+    deep.mode = std::string(render::codecs::to_string(picture.layout()));
+    deep.samples = picture.normalized();
+    std::vector<float> rgba = render::smart::srgb_floats(deep, picture.icc, "relative", true);
+    const auto linear = [](float v) {
+        if (std::isnan(v)) return 0.0f;
+        return v <= 0.04045f ? v / 12.92f : std::pow((v + 0.055f) / 1.055f, 2.4f);
+    };
+    for (std::size_t i = 0; i < rgba.size(); ++i) {
+        if (i % 4 != 3) rgba[i] = linear(rgba[i]);
+    }
+    const Layout layout = deep.alpha ? Layout::Rgba : Layout::Rgb;
+    if (!deep.alpha) {
+        std::vector<float> rgb;
+        rgb.reserve(rgba.size() / 4 * 3);
+        for (std::size_t i = 0; i < rgba.size(); i += 4) rgb.insert(rgb.end(), rgba.begin() + static_cast<std::ptrdiff_t>(i), rgba.begin() + static_cast<std::ptrdiff_t>(i + 3));
+        rgba = std::move(rgb);
+    }
+    CodecImage out = CodecImage::from_normalized(picture.width(), picture.height(), layout, Sample::F32, rgba);
+    out.meta = picture.meta;
+    if (const core::BuiltinProfile* p = core::builtin_profile("linear-srgb"); p != nullptr && p->bytes) out.icc = *p->bytes;
+    return out;
 }
 
 }  // namespace
@@ -106,14 +143,17 @@ PlannedCopy plan_copy(const core::Document& doc, std::size_t at, const fs::path&
     if (suffix == "tif") {
         plan.bytes = tiff_of(picture, dpi, xmp);
     } else {
-        const render::codecs::Format format = suffix == "png" ? render::codecs::Format::Png : render::codecs::Format::Jpeg;
+        // (PC4 F-a: every other picture through the codecs, the book's XMP and the page's profile and resolution in the
+        // file where its format holds them — what it does not, said in the notes)
+        const render::codecs::Format format = *render::codecs::from_extension(suffix);
         render::codecs::EncodeOptions encode;
         encode.jpeg_quality = jpeg_quality_of(options.quality.value_or(10));
-        for (const render::codecs::Loss& loss : render::codecs::losses(picture.image, format, encode)) {
+        CodecImage image = render::codecs::linear_light(format) ? linear_srgb(picture.image) : std::move(picture.image);
+        if (xmp) image.meta.xmp = *xmp;
+        for (const render::codecs::Loss& loss : render::codecs::losses(image, format, encode)) {
             if (!loss.fatal()) plan.notes.push_back(loss.text());
         }
-        plan.bytes = render::codecs::encode(picture.image, format, encode);
-        if (xmp) plan.bytes = format == render::codecs::Format::Png ? png_with_xmp(std::move(plan.bytes), *xmp) : jpeg_with_xmp(std::move(plan.bytes), *xmp);
+        plan.bytes = render::codecs::encode(image, format, encode);
     }
     return plan;
 }

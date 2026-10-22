@@ -18,6 +18,7 @@
 
 #include "core/error.hpp"
 #include "core/smart.hpp"
+#include "render/codecs/codecs.hpp"
 #include "render/imaging.hpp"
 #include "render/ink.hpp"
 #include "render/not_yet_ported.hpp"
@@ -44,7 +45,31 @@ std::optional<std::pair<std::string, std::string>> sniff(std::string_view b) {
     if (b.size() >= 2 && b.substr(0, 2) == "BM") return std::make_pair("bmp", ".bmp");
     if (b.size() >= 6 && (b.substr(0, 6) == "GIF87a" || b.substr(0, 6) == "GIF89a")) return std::make_pair("gif", ".gif");
     if (b.size() >= 6 && b.substr(0, 4) == "8BPS") return std::make_pair("psd", be16(b, 4) == 2 ? ".psb" : ".psd");
+    // (PC4 F-a, formats@1: the codecs' own formats — TGA, ICO, Netpbm, QOI, OpenEXR, Radiance HDR, AVIF — by their ids, each
+    // with its first suffix)
+    if (const auto f = codecs::detect(b); f && codecs::read_here(*f)) {
+        return std::make_pair(std::string(codecs::id_of(*f)), "." + std::string(codecs::extensions(*f).front()));
+    }
     return std::nullopt;
+}
+
+// PC4 F-a: the codecs' format of a kind sniff gives, when the codecs read it themselves (formats@1).
+std::optional<codecs::Format> codecs_kind(const std::optional<std::pair<std::string, std::string>>& kind) {
+    if (!kind) return std::nullopt;
+    const auto f = codecs::from_id(kind->first);
+    return f && codecs::read_here(*f) ? f : std::nullopt;
+}
+
+// The codecs' picture of such a file, within the drawing's limits (Pillow's DecompressionBombError: twice MAX_IMAGE_PIXELS) —
+// OpenEXR's and Radiance HDR's linear light with sRGB's curve on it (as their 8-bit picture has it, past 1 kept), so that a
+// smart object of one shows the same on every page and its numbers are an sRGB picture's (no profile of its own).
+codecs::CodecImage codecs_picture(codecs::Format format, std::string_view bytes, int* depth = nullptr) {
+    codecs::Limits within = codecs::Limits::none();
+    within.max_pixels = kPillowOpenLimits.max_pixels;
+    within.max_alloc = codecs::kAllocBudget;
+    codecs::CodecImage picture = codecs::decode_as(format, bytes, within);
+    if (depth != nullptr) *depth = codecs::depth_of(picture.sample());
+    return codecs::linear_light(format) ? codecs::srgb_encoded(picture) : picture;
 }
 
 // --- PNG with every bit (libpng) --------------------------------------------------------------------------------------
@@ -253,7 +278,7 @@ DeepPicture tiff_deep(std::string_view bytes) {
     const TiffShape s = tiff_shape(t.tif);
     const unsigned colours = tiff_colours(s);
     if (s.planar != PLANARCONFIG_CONTIG) throw NotYetPorted("image_format");
-    if (s.samples < colours || s.samples > colours + 1 || (s.bits != 16 && s.bits != 32))
+    if (s.samples < colours || s.samples > colours + 1 || (s.bits != 16 && s.bits != 32 && !(s.bits == 8 && colours == 4)))
         throw core::Error("format", "the TIFF's samples cannot be read with all their bits");
     if (static_cast<std::uint64_t>(s.width) * s.height > static_cast<std::uint64_t>(2 * kMaxImagePixels))
         throw core::Error("image_too_large", "the picture has too many pixels");
@@ -269,7 +294,9 @@ DeepPicture tiff_deep(std::string_view bytes) {
     const auto take = [&](const unsigned char* from, std::size_t x, std::size_t y, std::size_t n) {
         for (std::size_t i = 0; i < n * s.samples; ++i) {
             float v = 0;
-            if (s.bits == 16) {
+            if (s.bits == 8) {
+                v = static_cast<float>(from[i] / 255.0);
+            } else if (s.bits == 16) {
                 std::uint16_t raw = 0;
                 std::memcpy(&raw, from + i * 2, 2);
                 v = static_cast<float>(raw / 65535.0);
@@ -463,6 +490,18 @@ FileInfo look_at(std::string_view bytes, std::string_view suffix) {
         info.icc = proof::embedded_profile(bytes);
         return info;
     }
+    if (const auto format = codecs_kind(kind)) {  // (PC4 F-a, formats@1: decoded whole by the codecs, at its depth)
+        const codecs::CodecImage picture = codecs_picture(*format, bytes, &info.depth);
+        info.width = picture.width();
+        info.height = picture.height();
+        info.mode = std::string(codecs::to_string(picture.layout()));
+        if (picture.meta.dpi) info.dpi = picture.meta.dpi->first;
+        if (!std::isfinite(info.dpi) || info.dpi < 1 || info.dpi > 100000) info.dpi = 0;
+        info.dpi = std::round(info.dpi * 1000) / 1000;
+        info.icc = picture.icc;  // (none for OpenEXR's and Radiance HDR's: their numbers made sRGB's)
+        if (info.icc && (info.icc->size() < 132 || info.icc->size() > core::kProfileMaxBytes)) info.icc.reset();
+        return info;
+    }
     // (the whole picture decoded as the drawing decodes it: a picture cut short, broken or too large is refused here)
     const Image picture = eight_bit_picture(bytes);
     info.width = picture.width();
@@ -491,6 +530,19 @@ FileInfo look_at(std::string_view bytes, std::string_view suffix) {
     return info;
 }
 
+bool cmyk_alpha_tiff(std::string_view bytes) {
+    const auto kind = sniff(bytes);
+    if (!kind || kind->first != "tiff") return false;
+    try {
+        Tiff t(bytes);
+        const TiffShape s = tiff_shape(t.tif);
+        return s.bits == 8 && s.photometric == PHOTOMETRIC_SEPARATED && s.samples == 5 && s.planar == PLANARCONFIG_CONTIG && s.extra == 1 &&
+               (s.extra_kind == EXTRASAMPLE_ASSOCALPHA || s.extra_kind == EXTRASAMPLE_UNASSALPHA);
+    } catch (const core::Error&) {
+        return false;
+    }
+}
+
 int stored_depth(std::string_view bytes) {
     const auto kind = sniff(bytes);
     try {
@@ -502,7 +554,7 @@ int stored_depth(std::string_view bytes) {
         }
     } catch (const core::Error&) {
     }
-    return 8;
+    return 8;  // (PC4 F-a: the codecs' own formats say theirs as their reader reads them — FileInfo::depth)
 }
 
 int stored_samples(std::string_view bytes) {
@@ -562,7 +614,7 @@ Image eight_bit_picture(std::string_view bytes) {
             } else {
                 Tiff t(bytes);
                 const TiffShape s = tiff_shape(t.tif);
-                deep_file = s.bits == 16 || s.bits == 32;
+                deep_file = s.bits == 16 || s.bits == 32 || cmyk_alpha_tiff(bytes);
             }
         } catch (const core::Error&) {
         }
@@ -619,7 +671,21 @@ DeepPicture deep_picture(std::string_view bytes) {
     if (kind && kind->first == "tiff") {
         Tiff t(bytes);
         const TiffShape s = tiff_shape(t.tif);
-        if (s.bits == 16 || s.bits == 32) return tiff_deep(bytes);
+        if (s.bits == 16 || s.bits == 32 || cmyk_alpha_tiff(bytes)) return tiff_deep(bytes);
+    }
+    if (const auto format = codecs_kind(kind)) {  // (PC4 F-a: a picture of 16 bits or of floats of the codecs' formats)
+        const codecs::CodecImage picture = codecs_picture(*format, bytes);
+        if (picture.sample() != codecs::Sample::U8) {
+            DeepPicture out;
+            out.width = picture.width();
+            out.height = picture.height();
+            out.channels = codecs::channels(picture.layout());
+            out.alpha = codecs::has_alpha(picture.layout());
+            out.mode = std::string(codecs::to_string(picture.layout()));
+            out.depth = picture.sample() == codecs::Sample::U16 ? 16 : 32;
+            out.samples = picture.normalized();
+            return out;
+        }
     }
     const Image picture = eight_bit_picture(bytes);
     const std::string_view mode = picture.mode();
@@ -752,6 +818,39 @@ core::InkPixels file_inks(std::string_view bytes, const core::PageColor& color, 
             if (!keep && !icc.empty()) {
                 own.icc = std::make_shared<const std::string>(icc);
                 own.profile = core::bytes_ref(icc);
+            } else if (color.space == source.space) {
+                own.icc = color.icc;  // (its numbers as the page's own)
+                own.profile = color.profile;
+            }
+            return ink::convert(source, own, color);
+        }
+    }
+    if (const auto format = codecs_kind(kind)) {  // (PC4 F-a: grey and CMYK of 16 bits or of floats as 16-bit inks)
+        const codecs::CodecImage picture = codecs_picture(*format, bytes);
+        const codecs::Layout layout = picture.layout();
+        if (picture.sample() != codecs::Sample::U8 && (codecs::is_gray(layout) || codecs::is_cmyk(layout))) {
+            const bool cmyk = codecs::is_cmyk(layout);
+            core::InkPixels source;
+            source.space = cmyk ? core::InkSpace::Cmyk : core::InkSpace::Gray;
+            source.depth = 16;
+            source.width = picture.width();
+            source.height = picture.height();
+            const unsigned colours = cmyk ? 4 : 1, all = colours + 1, stored = codecs::channels(layout);
+            const bool alpha = codecs::has_alpha(layout);
+            source.samples.assign(source.pixel_count() * all, 0);
+            for (std::size_t i = 0; i < source.pixel_count(); ++i) {
+                for (unsigned c = 0; c < colours; ++c)
+                    source.samples[i * all + c] = static_cast<std::uint16_t>(std::lround(std::clamp(picture.value(i * stored + c), 0.0f, 1.0f) * 65535.0f));
+                source.samples[i * all + colours] =
+                    static_cast<std::uint16_t>(std::lround((alpha ? std::clamp(picture.value(i * stored + colours), 0.0f, 1.0f) : 1.0f) * 65535.0f));
+            }
+            core::PageColor own;
+            own.space = source.space;
+            own.depth = 16;
+            own.intent = color.intent;
+            if (!keep && picture.icc && !picture.icc->empty()) {
+                own.icc = std::make_shared<const std::string>(*picture.icc);
+                own.profile = core::bytes_ref(*picture.icc);
             } else if (color.space == source.space) {
                 own.icc = color.icc;  // (its numbers as the page's own)
                 own.profile = color.profile;

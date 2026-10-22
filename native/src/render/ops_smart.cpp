@@ -153,7 +153,11 @@ std::pair<std::string, std::string> asset_file(const Document& doc, const std::s
     if (!doc.asset_dir) throw OpError("placing an asset needs a saved project");
     if (!storage::AssetStore::is_ref(ref)) throw OpError("asset must be sha256:…, got " + core::py_repr_str(ref));
     const storage::AssetStore store(*doc.asset_dir);
-    for (const core::smart::FileFormat& format : core::smart::kFileFormats) {
+    std::vector<core::smart::FileFormat> formats(core::smart::kFileFormats.begin(), core::smart::kFileFormats.end());
+    for (const core::smart::FileFormat& later : core::smart::kLaterFileFormats) {  // (PC4 F-a: formats@1's)
+        if (later.format != "raw") formats.push_back(later);
+    }
+    for (const core::smart::FileFormat& format : formats) {
         if (!store.has(ref, format.suffix)) continue;
         std::optional<std::string> bytes;
         try {
@@ -165,7 +169,7 @@ std::pair<std::string, std::string> asset_file(const Document& doc, const std::s
         if (storage::AssetStore::ref(*bytes) != ref) throw OpError("the asset's picture cannot be read (its bytes are not what its name says)");
         return {std::move(*bytes), std::string(format.suffix)};
     }
-    throw OpError("no asset " + ref + " of a picture (png, jpg, tif, webp, bmp, gif, psd)");
+    throw OpError("no asset " + ref + " of a picture (png, jpg, tif, webp, bmp, gif, psd, tga, ico, pnm, qoi, exr, hdr, avif)");
 }
 
 // The contents' colour use the op asks for: embedded_profile keep (its numbers), convert (from the profile the file

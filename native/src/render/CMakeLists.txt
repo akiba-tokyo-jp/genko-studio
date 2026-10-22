@@ -165,6 +165,20 @@ genko_library(genko_render
     ops_formats.cpp
     # PC4 F-b (ファイルの入口: 開いたファイルの EXIF・XMP・向き・コマの数)
     codecs/metadata.cpp
+    # PC4 F-a (コーデック: 形式ごとの読み手と書き手。OpenEXR と libavif＋libaom)
+    codecs/png.cpp
+    codecs/jpeg.cpp
+    codecs/tiff.cpp
+    codecs/webp.cpp
+    codecs/gif.cpp
+    codecs/bmp.cpp
+    codecs/tga.cpp
+    codecs/ico.cpp
+    codecs/pnm.cpp
+    codecs/qoi.cpp
+    codecs/exr.cpp
+    codecs/hdr.cpp
+    codecs/avif.cpp
     # PC4 E-0 (描く道具の土台: 層のタイル、プリセットの置き場、描く道具とパターンの op の枠)
     tiled_pixels.cpp
     preset_store.cpp
@@ -181,7 +195,8 @@ genko_library(genko_render
     ${GENKO_MATERIAL_RESOURCES}
     ${GENKO_TEXT_RESOURCES}
   PUBLIC_DEPS genko_core Qt6::Core
-  PRIVATE_DEPS genko_storage pillow_imaging PNG::PNG JPEG::JPEG ZLIB::ZLIB TIFF::TIFF Freetype::Freetype ${GENKO_WEBP} ${GENKO_LCMS2})
+  PRIVATE_DEPS genko_storage pillow_imaging PNG::PNG JPEG::JPEG ZLIB::ZLIB TIFF::TIFF Freetype::Freetype ${GENKO_WEBP} ${GENKO_LCMS2}
+               ${GENKO_OPENEXR} ${GENKO_AVIF})
 # (sin, cos, atan2, hypot, pow, log go through core/pymath.cpp, which calls libm exactly as CPython does)
 # (numpy's float32 hypotf, atan2f: called in libm as numpy calls them; sinf, cosf, powf: glibc's, libm_float.cpp, with
 # std::fma where glibc's FMA build fuses. MSVC: /fp:precise, with which these have no intrinsic forms)

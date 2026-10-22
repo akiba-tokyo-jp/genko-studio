@@ -11,9 +11,12 @@
 
 // コピーを保存… (file.saveACopy, PC4 F-b; PhotoCraft's file_cmds.rs save_a_copy; SPEC.md FILE-01): one page of the book as
 // one file of the format its extension names, the book unchanged (its place, its name and its history as they were). PC4
-// F-b's formats:
-//   - .png, .jpg / .jpeg: the page's picture at its resolution (page_picture) through the codecs (render::codecs::encode:
-//     what the format holds of its depth and colours; the losses said in the notes, as the codecs' plan makes them);
+// F-b's formats, and F-a's codecs:
+//   - .png, .jpg / .jpeg, and since F-a .webp, .gif, .bmp, .tga, .ico, the Netpbm ones (.pnm .pbm .pgm .ppm .pam .pfm),
+//     .qoi, .exr, .hdr, .avif: the page's picture at its resolution (page_picture) through the codecs
+//     (render::codecs::encode: what the format holds of its depth, colours, profile, resolution and the book's XMP; the
+//     losses said in the notes, as the codecs' plan makes them) — for OpenEXR and Radiance HDR its colours as linear light
+//     of sRGB's primaries (Little CMS from its profile);
 //   - .tif / .tiff: the page at its depth as the exports write a page's TIFF (an RGB page's values or an 8-bit picture,
 //     a grey or CMYK page's inks, with its profile);
 //   - .psd: the page with its layers as the exports write a page's PSD; `layers` false, its merged picture alone;

@@ -1171,7 +1171,7 @@ QString unported_element(const QString& element) {
         {"text_features", "横書きの文字の字形の指定（OpenType 機能）"}, {"text_warp", "文字のゆがみ"}, {"tones", "トーン"}, {"effects", "効果線"},
         {"prims", "3D"}, {"placed", "配置した画像"}, {"nombre", "ノンブル"}, {"covers", "表紙の折り目"}, {"anim", "アニメーション"},
         {"screen", "トーン化"}, {"finish", "仕上げの白黒化"}, {"brush_library", "自作ブラシの読み込み"},
-        {"image_format", "この版では読めない形式の画像（PPM・ICO・JPEG 2000 など）"},
+        {"image_format", "この版では読めない形式の画像（JPEG 2000・ICNS・DDS など）"},
         // PC4 F-0 (render/codecs): a format this build does not write yet
         {"image_write", "この版では書けない形式の画像"},
         // PC4 F-b (formats/open_file): the files 開く… opens in later groups

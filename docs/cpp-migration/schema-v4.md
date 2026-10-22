@@ -385,6 +385,7 @@ v3 の行（`rev`・`actor`・`at`・`changes`・`via`）をそのまま残し�
 - **層の `native_psd`**（`psd-keep@1`。F-d）: `{"blocks": [[キー（4 文字）, "sha256:…"]…], "ranges"?: "sha256:…"（混合の範囲（Blend If）の生のバイト。全部が既定なら無し）, "id"?: 0..4294967295（読んだ lyid）}`。層のキーの最後に書く。
 - **ページの `native_psd`**（`psd-keep@1`。F-d）: `{"resources": [[ID 0..65535, 名前（255 バイトまで）, "sha256:…"]…], "globals": [["8BIM"|"8B64", キー（4 文字）, "sha256:…"]…], "from"?: {"version": 1|2, "mode": 0..9, "depth": 1|8|16|32}}`。塊・リソースは `assets/<ab>/<64>.psdblock`（そのバイトのまま）。1 つの層・ページに 4096 まで。
 - **スマートオブジェクトの中身の新しい形式**（`formats@1`。F-a）: 中身のファイルの `suffix`・`format` に `.tga`→`tga`・`.ico`→`ico`・`.pnm` `.pbm` `.pgm` `.ppm` `.pam` `.pfm`→`pnm`・`.qoi`→`qoi`・`.exr`→`exr`・`.hdr`→`hdr`・`.avif`→`avif`。
+  - PC4 F-a: これらの中身を置き、描く（FILE-01「スマートオブジェクトの中身の新しい形式」）。`depth` はファイルの標本（OpenEXR の半精度は 16、浮動小数は 32）、`mode` はその並び（`gray`・`graya`・`rgb`・`rgba`・`cmyk`・`cmyka`）、`dpi` はファイルが言うもの（無ければ 0 で書かない形は今どおり）。OpenEXR・Radiance HDR の中身はプロファイルを持たない（その線形の光に sRGB の曲線をかけた値を描く）。
 - **カメラ RAW の中身**（`camera-raw@1`。F-e）: 中身のファイルの `format: "raw"`（`suffix` は `.dng` `.cr2` `.cr3` `.nef` `.nrw` `.arw` `.srf` `.sr2` `.raf` `.orf` `.rw2` `.pef` `.srw` `.x3f` `.3fr` `.iiq` `.erf` `.mrw` `.dcr` `.kdc` `.mos`）と、中身のキーの最後の `"raw": {"develop", "adjust"?, "camera"}`（現像の設定。各項目の形は F-e）。`raw` は RAW の中身だけが持つ。
 - 素材（`.xmp`・`.exif`・`.psdblock`）は、ファイルから開いてまだ保存していない本ではメモリーに持ち、書き手が名指すものを書く。読み手は `assets/` にあるかを確かめる（無ければ `missing_asset`）。片付け（`genko gc`）・別の場所に保存・復旧用コピーは、ほかの素材と同じく原稿の中の参照で残し写す。
 - 知らないキー・型の違い・範囲外・知らない形式やモード・素材の参照でない値は、読み取り専用で開く（そのまま書き戻す）。

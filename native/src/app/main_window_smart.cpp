@@ -130,7 +130,7 @@ std::string read_picture(const QString& file, render::smart::FileInfo* info) {
     return bytes;
 }
 
-constexpr const char* kPictures = "画像 (*.png *.jpg *.jpeg *.tif *.tiff *.bmp *.webp *.gif *.psd *.psb)";
+constexpr const char* kPictures = "画像 (*.png *.jpg *.jpeg *.tif *.tiff *.bmp *.webp *.gif *.psd *.psb *.tga *.ico *.pnm *.pbm *.pgm *.ppm *.pam *.pfm *.qoi *.exr *.hdr *.avif)";
 
 
 // レイヤー → スマートフィルター's commands on the smart object drawn on (PC3 A2, render/ops_smart_filters.cpp): "off"
@@ -296,7 +296,7 @@ bool MainWindow::place_embedded(std::optional<QString> chosen) {
         return false;
     }
     const QString file =
-        chosen ? *chosen : ask::open_path(this, QStringLiteral("埋め込みを配置"), QStringLiteral("画像 (*.png *.jpg *.jpeg *.tif *.tiff *.bmp *.webp *.gif *.psd *.psb)"));
+        chosen ? *chosen : ask::open_path(this, QStringLiteral("埋め込みを配置"), QStringLiteral("画像 (*.png *.jpg *.jpeg *.tif *.tiff *.bmp *.webp *.gif *.psd *.psb *.tga *.ico *.pnm *.pbm *.pgm *.ppm *.pam *.pfm *.qoi *.exr *.hdr *.avif)"));
     if (file.isEmpty() || !still(asked)) return false;
     return place_smart(file, false);
 }
