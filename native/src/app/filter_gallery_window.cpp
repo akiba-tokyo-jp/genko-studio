@@ -430,6 +430,8 @@ private:
         quiet_ = false;
     }
 
+    // The list dragged into another order: the stack in its order (the list's items as they are — a drop may still use
+    // them —, the one chosen kept).
     void reordered() {
         if (quiet_) return;
         const int keep = entries_[static_cast<std::size_t>(current_)].serial;
@@ -443,7 +445,6 @@ private:
         entries_ = std::move(order);
         for (std::size_t i = 0; i < entries_.size(); ++i)
             if (entries_[i].serial == keep) current_ = static_cast<int>(i);
-        rebuild_list();
         schedule();
     }
 
@@ -484,9 +485,10 @@ private:
         const core::GalleryEffectKind* kind = core::gallery_effect(key);
         if (kind == nullptr) return;
         effect_->setCurrentIndex(effect_->findData(words(kind->filter)));
-        if (form_ != nullptr) {
+        if (form_ != nullptr) {  // (never from the form's own signal: a list, a folder or the effects' list chose another)
             form_box_->removeWidget(form_);
-            form_->deleteLater();
+            delete form_;
+            form_ = nullptr;
         }
         form_ = new adjust_forms::Form;
         form_->setObjectName(QStringLiteral("gallery_form"));
