@@ -61,8 +61,10 @@ class TestContractFiltersPc4 : public QObject {
         const QString book = path(name);
         const auto made = genko::test::run_genko({QStringLiteral("new"), book, QStringLiteral("--pages"), QStringLiteral("2")});
         if (made.exit_code != 0) qWarning("%s", qPrintable(made.described()));
-        genko::render::Image picture = genko::render::Image::create("RGBA", genko::render::Size{60, 40}, genko::render::Ink{40, 40, 40, 255});
-        picture.paste(genko::render::Ink{220, 200, 30, 255}, genko::render::Box{20, 10, 40, 30});
+        // (a paint layer's picture is stretched over the page: 600 × 400 pixels over A4, a filter's working pixel some third of
+        // one of them)
+        genko::render::Image picture = genko::render::Image::create("RGBA", genko::render::Size{600, 400}, genko::render::Ink{40, 40, 40, 255});
+        picture.paste(genko::render::Ink{220, 200, 30, 255}, genko::render::Box{200, 100, 400, 300});
         const std::string png = genko::core::b64encode(genko::render::write_png(picture));
         Json ops = Json::array();
         for (int p = 1; p <= 2; ++p) {
