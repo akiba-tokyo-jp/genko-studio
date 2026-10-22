@@ -875,8 +875,9 @@ void into_color_pixels(Layer& target, std::pair<std::string, bool> pixels) {
 std::pair<std::string, bool> composite_color_layers(const Document& doc, const Page& page,
                                    const std::vector<std::size_t>& layers, bool flatten = false) {
     // (at the finest grid of the page's pixel layers, 200 to 600 dpi — its masks' and selections' —: a picture opened at
-    // 300 ppi merges at 300, never down to 200; PC4 F-b)
-    const int dpi = layer_masks::grid_dpi(page);
+    // 300 ppi merges at 300, never down to 200; PC4 F-b. Precise layers on an 8-bit page of no colour model, whose masks are
+    // at 150 dpi, at the working 200 dpi as before)
+    const int dpi = std::max(kWorkingDpi, layer_masks::grid_dpi(page));
     const Size size = page_px(page, dpi);
     if (size.width <= 0 || size.height <= 0 ||
         std::uint64_t(size.width) * std::uint64_t(size.height) > core::kColorRasterMaxPixels)
