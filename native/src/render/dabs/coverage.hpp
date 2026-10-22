@@ -115,7 +115,4 @@ struct LineCover {
 std::shared_ptr<const LineCover> lay(std::shared_ptr<const BrushContext> ctx, const std::vector<Dab>& dabs, const std::vector<Dab>& dual,
                                      const Box& within, bool coloured);
 
-// The most dabs a line has (the op refuses more: too_large).
-inline constexpr std::size_t kMaxDabs = 200000;
-
 }  // namespace genko::render::dabs

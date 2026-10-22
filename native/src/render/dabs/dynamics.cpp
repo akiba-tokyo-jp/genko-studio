@@ -2,7 +2,9 @@
 
 #include <algorithm>
 #include <cmath>
+#include <string>
 
+#include "core/error.hpp"
 #include "render/dabs/maths.hpp"
 #include "render/dabs/rng.hpp"
 
@@ -391,17 +393,29 @@ void DabGenerator::build_dual(const StepInput& s, std::vector<Dab>& out) {
     }
 }
 
+namespace {
+
+// A step kept, unless the line would have more than kMaxDabs dabs (each step lays one or more): core::Error("too_large").
+void keep_step(std::vector<StepInput>& steps, std::size_t laid, const StepInput& s) {
+    if (laid + steps.size() >= kMaxDabs) {
+        throw core::Error("too_large", "the line has more than " + std::to_string(kMaxDabs) + " dabs (a longer line than the brush's spacing takes)");
+    }
+    steps.push_back(s);
+}
+
+}  // namespace
+
 void DabGenerator::walk(const std::vector<InputPoint>& points, std::vector<Dab>& dabs, std::vector<Dab>& dual) {
     const auto len = [this](const InputPoint& q) { return step_len(q); };
     const auto dual_len = [this](const InputPoint&) { return dual_step_len(); };
     for (const InputPoint& raw : points) {
         const InputPoint p = apply_pose(brush_.settings, raw);
         std::vector<StepInput> steps;
-        walker_.push(p, len, [&](const StepInput& s) { steps.push_back(s); });
+        walker_.push(p, len, [&](const StepInput& s) { keep_step(steps, dabs.size(), s); });
         for (const StepInput& s : steps) build(s, dabs);
         if (dual_walker_) {
             std::vector<StepInput> dual_steps;
-            dual_walker_->push(p, dual_len, [&](const StepInput& s) { dual_steps.push_back(s); });
+            dual_walker_->push(p, dual_len, [&](const StepInput& s) { keep_step(dual_steps, dual.size(), s); });
             for (const StepInput& s : dual_steps) build_dual(s, dual);
         }
     }
@@ -411,11 +425,11 @@ void DabGenerator::push(const std::vector<InputPoint>& points, std::vector<Dab>&
 
 void DabGenerator::finish(std::vector<Dab>& dabs, std::vector<Dab>& dual) {
     std::vector<StepInput> steps;
-    walker_.finish([&](const StepInput& s) { steps.push_back(s); });
+    walker_.finish([&](const StepInput& s) { keep_step(steps, dabs.size(), s); });
     for (const StepInput& s : steps) build(s, dabs);
     if (dual_walker_) {
         std::vector<StepInput> dual_steps;
-        dual_walker_->finish([&](const StepInput& s) { dual_steps.push_back(s); });
+        dual_walker_->finish([&](const StepInput& s) { keep_step(dual_steps, dual.size(), s); });
         for (const StepInput& s : dual_steps) build_dual(s, dual);
     }
 }

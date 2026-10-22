@@ -799,12 +799,13 @@ private slots:
         LineInputs bad;
         bad.wheel = wrong;
         QCOMPARE(input_points(core::PenPoints{{1, 1, std::nullopt}, {2, 2, std::nullopt}}, {}, bad)[0].wheel, 1.0);
-        // too many dabs: refused
+        // too many dabs: refused (the steps are at least half an upstream pixel, 1/400 inch: 20 m of line are 315,000 of
+        // them), before they are all made
         DabSettings dense = brush();
         dense.spacing = 0.01;
         bool refused = false;
         try {
-            (void)line_dabs(line_brush(dense, 0.01, "x", inputs), input_points(core::PenPoints{{0, 0, std::nullopt}, {2000, 0, std::nullopt}}, {}, inputs));
+            (void)line_dabs(line_brush(dense, 0.01, "x", inputs), input_points(core::PenPoints{{0, 0, std::nullopt}, {20000, 0, std::nullopt}}, {}, inputs));
         } catch (const core::Error& error) {
             refused = error.code() == "too_large";
         }

@@ -20,6 +20,7 @@
 #include "gui_support.hpp"
 #include "app/brush_panel.hpp"
 #include "app/canvas.hpp"
+#include "app/colours.hpp"
 #include "app/config.hpp"
 #include "app/fields.hpp"
 #include "app/inject.hpp"
@@ -334,7 +335,7 @@ private slots:
             if (c.why == app::BookChange::Why::Edit) ops.push_back(c.ops);
         });
         auto* ts = studio.window->tool_settings();
-        QVERIFY(studio.window->findChild<QAction*>(QStringLiteral("act_pencil")) != nullptr);
+        QVERIFY(studio.window->action(QStringLiteral("act_pencil")) != nullptr);
         studio.window->choose_tool(QStringLiteral("pencil"));
         QCOMPARE(ts->title()->text(), QStringLiteral("鉛筆ツール"));
         QVERIFY(studio.brush().auto_erase->isVisibleTo(studio.window.get()));
@@ -364,7 +365,7 @@ private slots:
         studio.draw({QPointF(10, 50), QPointF(30, 50)});
         QCOMPARE(studio.ink().strokes->items.back()->kind, std::string(core::kDefaultBrush));
         // ブラシプレビュー: on at first; off, the pointer is the cross alone
-        auto* preview = studio.window->findChild<QAction*>(QStringLiteral("act_brush_preview"));
+        auto* preview = studio.window->action(QStringLiteral("act_brush_preview"));
         QVERIFY(preview != nullptr && preview->isCheckable() && preview->isChecked());
         QVERIFY(studio.window->canvas()->brush_preview);
         preview->setChecked(false);

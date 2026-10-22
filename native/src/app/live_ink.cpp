@@ -77,6 +77,12 @@ LiveInk::LiveInk(std::shared_ptr<const core::Document> doc_ptr, const core::Page
         kind_ = core::brush_kind(truthy(fields, "kind") ? fields["kind"] : Json("gpen"), doc);
     } catch (const std::exception&) {
         kind_ = std::string(core::kDefaultBrush);
+        // (PC4 E1: one's own brush the book does not have yet — the window gives the book it with the line — is drawn as
+        // itself, as the line will be: a dab brush's dabs, not the G pen's)
+        if (truthy(fields, "kind") && fields["kind"].is_string()) {
+            const std::string own = fields["kind"].get<std::string>();
+            if (own.starts_with("my_") && render::brushes::brush(own).key == own) kind_ = own;
+        }
     }
     const core::Brush b = render::brushes::brush(kind_);
     const Json* width = field(fields, "width_mm");

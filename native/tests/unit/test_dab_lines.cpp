@@ -272,7 +272,10 @@ private slots:
         Json dense = define_dab("my_dense", Json::parse(R"({"spacing": 0.01})"));
         Json long_line = stroke("my_dense");
         long_line["width_mm"] = 0.01;
-        long_line["points"] = Json::parse("[[0, 1], [50, 1], [0, 2], [50, 2], [0, 3], [50, 3]]");
+        // (the steps are at least 1/400 inch: 320 times across the page, 16 m of line, are 250,000 of them)
+        Json zigzag = Json::array();
+        for (int i = 0; i < 320; ++i) zigzag.push_back(Json::array({i % 2 == 0 ? 0 : 50, 1 + i % 40}));
+        long_line["points"] = zigzag;
         QVERIFY(refusal(doc, Json::array({dense, long_line})).find("dabs") != std::string::npos);
         // an erasing brush does not draw a line
         QVERIFY(refusal(doc, Json::array({define_dab("my_erasing", Json::parse(R"({"erase": true})")), stroke("my_erasing")}))
@@ -418,8 +421,9 @@ private slots:
     }
 
     // 下地混色 (design 0.4, the leftover of PC2) on the paint layer of each kind: the grey under the blue line picked up
-    // (each piece's colour moves toward it), its pen inputs carried by the pieces; a precise line's pieces keep their
-    // precise colour, of the line's precision.
+    // (the line drawn greyer than without mix: a precise or ink layer draws its lines into its pixels), each piece's
+    // colour moving toward it with the pen's inputs carried; a precise line's pieces keep a precise colour, of the line's
+    // precision.
     void mixingOnEveryKindOfLayer() {
         for (const std::string& kind : kinds()) {
             const core::Document doc = as_kind(paint_book(), kind);
@@ -432,19 +436,44 @@ private slots:
             op["tilt"] = Json::parse("[[10, 20], [30, 40], [50, 60]]");
             const bool precise = kind == "16" || kind == "32";
             if (precise) op["color_rgb"] = Json{{"precision", kind == "16" ? "u16" : "f32"}, {"values", Json::array({0.0, 0.0, 1.0})}};
-            const auto result = run_ops(doc, Json::array({op}));
-            const core::Layer& layer = result.doc.page(0).layers[0];
-            QVERIFY2(layer.stroke_count() > 1, kind.c_str());
-            for (const core::StrokePtr& piece : layer.strokes->items) {
-                QVERIFY2((*piece->rgb)[0] > 100 && (*piece->rgb)[2] < 250, qPrintable(QString::fromStdString(kind + " " + Json(*piece->rgb).dump())));
-                QCOMPARE(piece->tilt.size(), 2 * piece->points.size());
-                QCOMPARE(piece->color_rgb.has_value(), precise);
+            Json plain_op = op;
+            plain_op.erase("mix");
+            const auto mixed = run_ops(doc, Json::array({op}));
+            const auto plain = run_ops(doc, Json::array({plain_op}));
+            QVERIFY2(mixed.warnings.dump().find("color_rgb") == std::string::npos || !precise, kind.c_str());
+            // drawn: at the line's middle point (25, 30 mm), greyer than the line without mix
+            const auto colour_at = [](const core::Document& d) {
+                brushes::register_book(d);
+                return render::render_page(d.page(0), 200, render::RenderOptions{}, &d).image.convert("RGB").getpixel(197, 236);
+            };
+            const std::vector<double> m = colour_at(mixed.doc), q = colour_at(plain.doc);
+            const QString seen = QStringLiteral("%1: mixed %2,%3,%4 plain %5,%6,%7").arg(QString::fromStdString(kind)).arg(m[0]).arg(m[1]).arg(m[2]).arg(q[0]).arg(q[1]).arg(q[2]);
+            if (kind != "gray") QVERIFY2(q[2] - q[0] > 50, qPrintable(seen));  // (the plain line blue, as far as the page shows it)
+            QVERIFY2(m[0] > q[0] + 60 && m[2] - m[0] < q[2] - q[0] + 1, qPrintable(seen));
+            // the pieces themselves (an 8-bit layer keeps them as lines)
+            const core::Page& page = doc.page(0);
+            const core::Layer& layer = page.layers[0];
+            core::Stroke line;
+            line.id = "line";
+            line.points = {core::PointF{8, 25}, core::PointF{25, 30}, core::PointF{42, 22}};
+            line.width_mm = 3.0;
+            line.rgb = std::vector<std::int64_t>{0, 0, 255};
+            line.tilt = {10, 20, 30, 40, 50, 60};
+            line.time_ms = {0, 16, 32};
+            if (precise) line.color_rgb = op["color_rgb"];
+            const std::vector<core::Stroke> pieces = render::raster::mixed_pieces(page, layer, line, 0.8, 0.0);
+            QVERIFY2(pieces.size() > 1, kind.c_str());
+            for (const core::Stroke& piece : pieces) {
+                QVERIFY2((*piece.rgb)[0] > 100 && (*piece.rgb)[2] < 250, qPrintable(QString::fromStdString(kind + " " + Json(*piece.rgb).dump())));
+                QCOMPARE(piece.tilt.size(), 2 * piece.points.size());
+                QCOMPARE(piece.time_ms.size(), piece.points.size());
+                QCOMPARE(piece.color_rgb.has_value(), precise);
                 if (precise) {
-                    QCOMPARE((*piece->color_rgb)["precision"].get<std::string>(), std::string(kind == "16" ? "u16" : "f32"));
-                    QVERIFY((*piece->color_rgb)["values"][0].get<double>() > 0.4);
+                    QCOMPARE((*piece.color_rgb)["precision"].get<std::string>(), std::string(kind == "16" ? "u16" : "f32"));
+                    QVERIFY((*piece.color_rgb)["values"][0].get<double>() > 0.4);
                 }
             }
-            QVERIFY2(result.warnings.dump().find("color_rgb") == std::string::npos || !precise, kind.c_str());
+            if (kind == "8") QCOMPARE(mixed.doc.page(0).layers[0].stroke_count(), pieces.size());
         }
     }
 

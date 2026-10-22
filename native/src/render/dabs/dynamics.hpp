@@ -145,6 +145,10 @@ private:
     std::uint64_t next_index_ = 0, next_dual_ = 0;
 };
 
+// The most dabs a line has (the op refuses more: too_large). The generator stops as soon as a line would have more, so a
+// long line of a fine spacing is refused before its dabs are all made.
+inline constexpr std::size_t kMaxDabs = 200000;
+
 // The primary dabs of a whole line (lib.rs dabs).
 std::vector<Dab> all_dabs(const LineBrush& brush, const std::vector<InputPoint>& points);
 
