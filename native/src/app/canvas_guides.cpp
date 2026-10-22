@@ -131,7 +131,7 @@ bool PageCanvas::snapped_preview_applies() const {
 }
 
 QPointF PageCanvas::grid_point(double x, double y) const {
-    if (grid_snap && grid_mm > 0) {
+    if (grid_snap && snap_on && grid_mm > 0) {  // (PC3 C-d: 表示 → スナップ off, nothing snaps)
         const auto snapped = core::rulers::snap_to_grid({x, y}, grid_mm);
         return QPointF(snapped.x, snapped.y);
     }

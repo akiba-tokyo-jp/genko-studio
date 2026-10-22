@@ -18,6 +18,7 @@
 #include "core/pyops.hpp"
 #include "core/stroke_tools.hpp"
 #include "core/strokes.hpp"
+#include "render/distort_ops.hpp"
 #include "render/draw.hpp"
 #include "render/fill_patches.hpp"
 #include "render/filters.hpp"
@@ -25,6 +26,7 @@
 #include "render/raster.hpp"
 #include "render/raster_ops.hpp"
 #include "render/selection.hpp"
+#include "render/shape_parts.hpp"
 #include "render/stroke.hpp"
 
 namespace genko::render {
@@ -367,6 +369,10 @@ void densify(core::Stroke& stroke, const std::array<double, 4>& box, double step
 }
 
 void liquify(OpContext& c) {
+    if (core::truthy_at(c.op, "strokes")) {  // (PC3 C-c: Filter › Liquify's strokes replayed on a field, render/distort_ops)
+        liquify_strokes(c);
+        return;
+    }
     use_brushes_of(c.doc);
     const Json& op = c.op;
     const std::size_t at = core::require_page(c.doc, op);
@@ -420,12 +426,34 @@ void liquify(OpContext& c) {
         s = std::move(stroke);
     }
     layer.strokes = core::make_strokes(std::move(items));
+    if (shape_parts::any(layer)) {
+        // (pen-shapes@1, PC3 C-b: a shape part the tool reaches bent by the same pushes — each segment cut to 1.5 mm, every
+        // anchor and handle moved, as a line's points are; its live shape gone)
+        std::vector<core::vector::ShapePart> parts = layer.shapes->items;
+        for (core::vector::ShapePart& part : parts) {
+            const auto b = shape_parts::drawn_bounds(part);
+            const auto ctl = part.path.control_bounds();
+            if (!b || !ctl || std::max((*b)[2], (*ctl)[2]) < reach[0] || std::min((*b)[0], (*ctl)[0]) > reach[2] ||
+                std::max((*b)[3], (*ctl)[3]) < reach[1] || std::min((*b)[1], (*ctl)[1]) > reach[3]) {
+                continue;
+            }
+            part.path = shape_parts::bent(part.path, [&](double x, double y) {
+                for (const Dab& dab : dabs) std::tie(x, y) = displace(x, y, dab, radius, mode, strength);
+                return std::pair<double, double>{x, y};
+            });
+            part.live.reset();
+            part = core::vector::part_from_json(core::vector::to_json(part));  // (its normal form, as kept)
+        }
+        layer.shapes = core::vector::make_shapes(std::move(parts));
+    }
     if ((layer.raster_png && !layer.raster_png->empty()) || !layer.patches.empty()) {
         // pixels: each place fetches from where the dabs pulled it
         constexpr int dpi = raster::kWorkingDpi;
         Layer pixels_only = layer;
         pixels_only.strokes = core::empty_strokes();
+        pixels_only.shapes = core::vector::empty_shapes();  // (pen-shapes@1: its parts bent above, not drawn in)
         pixels_only.mask.reset();
+        pixels_only.vector_mask.reset();  // (vector@1, PC3 C-a)
         Image picture = layer_image(page, pixels_only, dpi, &c.doc);
         if (picture.getbbox()) {
             const double scale = dpi / 25.4;

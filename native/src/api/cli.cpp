@@ -6,6 +6,7 @@
 #include <algorithm>
 #include <array>
 #include <cctype>
+#include <cmath>
 #include <cstdio>
 #include <exception>
 #include <initializer_list>
@@ -41,12 +42,16 @@
 #include "formats/export.hpp"
 #include "formats/exporting.hpp"
 #include "formats/pillow_save.hpp"
+#include "formats/smart_files.hpp"
 #include "render/anim.hpp"
 #include "render/brushes.hpp"
 #include "render/draw.hpp"
 #include "render/inspect.hpp"
+#include "render/layer_bounds.hpp"
+#include "render/path_info.hpp"
 #include "render/proof.hpp"
 #include "render/movie.hpp"
+#include "render/shape_presets.hpp"
 #include "render/ops_registry.hpp"
 #include "render/page.hpp"
 #include "render/png.hpp"
@@ -276,6 +281,9 @@ int inspect(const QStringList& args, bool ascii) {
     // (color-model@1, the C++ build's own: --pixel <page>:<x_mm>,<y_mm> [--layer ID] [--dpi N]; PC2d: --profile <id|page|sha256>)
     QString pixel, layer, dpi_text, profile;
     bool looks = false;  // (PC2a, the C++ build's own: --looks, image.adjustments.colorLookup.list)
+    QString area_text, page_text;  // (PC3 B1, the C++ build's own: --page N --area '<area>'; PC3 C-a: --paths [--page N])
+    bool paths = false;  // (vector@1, PC3 C-a, the C++ build's own: --paths [--page N], path.list / path.info / layer.vectorMask.info)
+    QString at_text;  // (PC3 C-d, the C++ build's own: --at <page>:<x_mm>,<y_mm>, layer.pickAt — the layers showing there)
     const auto value_of = [&](qsizetype& i, const char* name, QString& into) -> bool {
         const QString& arg = args[i];
         const QString flag = QString::fromLatin1(name);
@@ -293,6 +301,8 @@ int inspect(const QStringList& args, bool ascii) {
             full = true;
         } else if (arg == QLatin1String("--looks")) {
             looks = true;
+        } else if (arg == QLatin1String("--paths")) {
+            paths = true;
         } else if (arg == QLatin1String("--stroke")) {
             if (i + 1 >= args.size()) return usage("argument --stroke: expected one argument");
             stroke = args[++i];
@@ -306,6 +316,12 @@ int inspect(const QStringList& args, bool ascii) {
             if (!value_of(i, "--dpi", dpi_text)) return usage("argument --dpi: expected one argument");
         } else if (arg == QLatin1String("--profile") || arg.startsWith(QLatin1String("--profile="))) {
             if (!value_of(i, "--profile", profile) || profile.isEmpty()) return usage("argument --profile: expected one argument");
+        } else if (arg == QLatin1String("--area") || arg.startsWith(QLatin1String("--area="))) {
+            if (!value_of(i, "--area", area_text) || area_text.isEmpty()) return usage("argument --area: expected one argument");
+        } else if (arg == QLatin1String("--page") || arg.startsWith(QLatin1String("--page="))) {
+            if (!value_of(i, "--page", page_text) || page_text.isEmpty()) return usage("argument --page: expected one argument");
+        } else if (arg == QLatin1String("--at") || arg.startsWith(QLatin1String("--at="))) {
+            if (!value_of(i, "--at", at_text) || at_text.isEmpty()) return usage("argument --at: expected one argument");
         } else if (arg.startsWith(QLatin1Char('-')) && arg.size() > 1) {
             return usage("unrecognized arguments: " + arg.toStdString());
         } else if (!have_src) {
@@ -338,13 +354,74 @@ int inspect(const QStringList& args, bool ascii) {
         }
     }
     if (!profile.isEmpty() && !pixel.isEmpty()) return usage("argument --profile: not with --pixel");
+    if (!area_text.isEmpty() && page_text.isEmpty()) return usage("argument --area, --page: --area <area> with --page <N>");
+    if (!page_text.isEmpty() && area_text.isEmpty() && !paths) return usage("argument --page: only with --area or --paths");
+    if (paths && !area_text.isEmpty()) return usage("argument --paths: not with --area");
+    std::optional<std::int64_t> page_number;
+    if (!page_text.isEmpty()) {
+        bool ok = false;
+        page_number = page_text.toLongLong(&ok);
+        if (!ok) return usage("argument --page: invalid int value: " + core::py_repr_str(page_text.toStdString()));
+    }
+    std::optional<core::Json> area;
+    if (!area_text.isEmpty()) {
+        if (!pixel.isEmpty() || !profile.isEmpty()) return usage("argument --area: not with --pixel or --profile");
+        try {
+            area = core::Json::parse(area_text.toStdString());
+        } catch (const std::exception&) {
+            return usage("argument --area: an area as JSON, e.g. '{\"range\": {\"select\": \"reds\"}}'");
+        }
+    }
+    std::optional<std::int64_t> at_page;
+    double at_x = 0, at_y = 0;
+    if (!at_text.isEmpty()) {  // (<page>:<x_mm>,<y_mm>, as --pixel)
+        if (!pixel.isEmpty() || !profile.isEmpty() || !area_text.isEmpty() || paths || !page_text.isEmpty())
+            return usage("argument --at: not with --pixel, --profile, --area, --paths or --page");
+        const qsizetype colon = at_text.indexOf(QLatin1Char(':'));
+        const QStringList xy = colon < 0 ? QStringList() : at_text.mid(colon + 1).split(QLatin1Char(','));
+        bool ok_page = false, ok_x = false, ok_y = false;
+        if (colon > 0 && xy.size() == 2) {
+            at_page = at_text.left(colon).toLongLong(&ok_page);
+            at_x = xy[0].toDouble(&ok_x);
+            at_y = xy[1].toDouble(&ok_y);
+        }
+        if (!ok_page || !ok_x || !ok_y) return usage("argument --at: <page>:<x_mm>,<y_mm>, e.g. 1:10.5,20");
+    }
     const auto loaded = storage::load_document(path_arg(src));
+    if (at_page) {  // (PC3 C-d, layer.pickAt: the layers showing something there, the topmost first)
+        const core::Document& doc = loaded.document;
+        for (std::size_t i = 0; i < doc.pages.size(); ++i) {
+            if (doc.pages[i]->index != core::Num(*at_page)) continue;
+            if (doc.is_deferred(i)) break;
+            const core::Page& page = doc.page(i);
+            core::Json layers = core::Json::array();
+            for (const std::string& id : render::layer_bounds::layers_at(doc, page, at_x, at_y)) {
+                for (const core::Layer& shown : page.layers) {
+                    if (shown.id != id) continue;
+                    const std::string folder = render::layer_bounds::outermost(page, id);
+                    layers.push_back(core::Json{{"id", id}, {"name", shown.title}, {"kind", std::string(core::to_string(shown.kind))},
+                                                {"folder", folder != id ? core::Json(folder) : core::Json(nullptr)}});
+                }
+            }
+            print_json(core::Json{{"page", *at_page}, {"at", core::Json::array({at_x, at_y})}, {"layers", layers}}, ascii);
+            return 0;
+        }
+        throw core::Error("key", "no page " + std::to_string(*at_page));
+    }
+    if (paths) {  // (vector@1: the pages' paths, work paths, clipping paths and the layers' vector masks and shapes)
+        print_json(render::path_info::book_paths(loaded.document, page_number), ascii);
+        return 0;
+    }
     if (looks) {  // the built-in looks and the book's lookup tables (PC2a: カラールックアップの一覧)
         print_json(looks_listing(loaded.document), ascii);
         return 0;
     }
     if (!profile.isEmpty()) {  // (edit.profileInfo: what the profile says of itself, and the built-in ones)
         print_json(render::proof::profile_info_of(loaded.document, profile.toStdString()), ascii);
+        return 0;
+    }
+    if (area) {  // (PC3 B1: the area as the ops are given it — resolved —, how much of the page it covers, its box)
+        print_json(render::inspect_area(loaded.document, *page_number, *area), ascii);
         return 0;
     }
     if (pixel_page) {
@@ -665,6 +742,41 @@ int export_cube(const Arguments& a, bool ascii) {
     return 0;
 }
 
+// vector@1 (PC3 C-a, file.export.pathsToIllustrator): `genko export <book> <out> --format ai [--page N] [--paths all|work|<name>]`
+// — the page's paths as an Adobe Illustrator file (a folder: p<page>.ai in it); the file's path, or with --json {"ok",
+// "count", "files", "paths"}.
+int export_ai(const Arguments& a, bool ascii) {
+    std::int64_t wanted = 1;
+    if (const auto value = a.value("--page")) {
+        const auto n = int_option(*value);
+        if (!n) return usage("genko export: argument --page: invalid int value: " + core::py_repr_str(value->toStdString()));
+        wanted = *n;
+    }
+    const std::string which = a.value("--paths") ? a.value("--paths")->toStdString() : std::string("all");
+    const fs::path src = path_arg(a.positional[0]);
+    const fs::path out = path_arg(a.positional[1]);
+    const auto loaded = storage::load_document(src);
+    const core::Document& doc = loaded.document;
+    const core::Page* page = nullptr;
+    for (std::size_t i = 0; i < doc.pages.size(); ++i) {
+        if (doc.pages[i]->index == core::Num(wanted) && !doc.is_deferred(i)) page = &doc.page(i);
+    }
+    if (page == nullptr) return usage("no page " + std::to_string(wanted), 1);
+    int count = 0;
+    const std::string text = render::path_info::illustrator(doc, *page, which, &count);
+    if (count == 0) return fail("no paths match " + core::py_repr_str(which) + " on page " + std::to_string(wanted), "apply", ascii, 1);
+    const bool file_given = !formats::detail::suffix(out).empty();
+    const fs::path dest = file_given ? out : formats::detail::join(out, "p" + formats::detail::padded(page->index, 3) + ".ai");
+    if (!file_given) fs::create_directories(out);
+    storage::write_atomic(dest, text);
+    if (a.flag("--json")) {
+        print_json(core::Json{{"ok", true}, {"count", 1}, {"files", core::Json::array({core::path_to_utf8(dest)})}, {"paths", count}}, ascii);
+    } else {
+        write_text(core::path_to_utf8(dest) + "\n", stdout);
+    }
+    return 0;
+}
+
 // `genko export <book> <out> [--format F] [options]` (Python's export command, genko/__main__.py): the book written
 // out in one format; the paths of the files one a line, or with --json {"ok": true, "count", "files"}.
 int export_command(const QStringList& args, bool ascii) {
@@ -673,12 +785,15 @@ int export_command(const QStringList& args, bool ascii) {
                                           {"--color", true},      {"--icc", true},       {"--screen-lpi", true}, {"--screen-shape", true},
                                           {"--area", true},       {"--fps", true},       {"--seconds", true},    {"--page", true},
                                           {"--psd-text", true},   {"--rasterize-unsupported", false}, {"--lut-size", true},
-                                          {"--title", true}};
+                                          {"--title", true},      {"--paths", true}};
     Arguments a;
     if (auto error = parse_arguments(args, kOptions, 2, "src, out", a)) return usage("genko export: " + *error);
     // PC2a (file.export.colorLookupTables, the C++ build's own: not among Python's formats, whose choices it leaves as they
     // are): a page's correction layers as a .cube file
     if (a.value("--format") == std::optional<QString>(QStringLiteral("cube"))) return export_cube(a, ascii);
+    // vector@1 (PC3 C-a, file.export.pathsToIllustrator, the C++ build's own): a page's paths as an Illustrator file
+    if (a.value("--format") == std::optional<QString>(QStringLiteral("ai"))) return export_ai(a, ascii);
+    if (a.value("--paths")) return usage("genko export: argument --paths: only with --format ai");
     if (a.value("--lut-size") || a.value("--title")) return usage("genko export: argument --lut-size, --title: only with --format cube");
     // argparse's choices
     const auto choice = [&](const char* name, const char* fallback, std::initializer_list<const char*> choices) -> std::optional<std::string> {
@@ -1087,6 +1202,162 @@ int migrate(const QStringList& args, bool ascii) {
     return 0;
 }
 
+// smart-objects@1 (PC3 A1, SPEC COLOR-05「中身とリンク」, the C++ build's own): `genko smart <dir> --links` — the book's
+// linked files, each ok, modified or missing (the files are read here, never by an op) —, and `genko smart <dir> --export
+// <page> <id> <path> [--format psd|png]` (コンテンツを書き出し…: a file's own bytes, a page's as a PSD or a PNG).
+int smart_command(const QStringList& args, bool ascii) {
+    QString src, format;
+    bool links = false;
+    std::optional<std::array<QString, 3>> exported;
+    for (qsizetype i = 0; i < args.size(); ++i) {
+        const QString& arg = args[i];
+        if (arg == QLatin1String("--links")) {
+            links = true;
+        } else if (arg == QLatin1String("--export")) {
+            if (i + 3 >= args.size()) return usage("genko smart: argument --export: expected three arguments (page, id, path)");
+            exported = std::array<QString, 3>{args[i + 1], args[i + 2], args[i + 3]};
+            i += 3;
+        } else if (arg == QLatin1String("--format") || arg.startsWith(QLatin1String("--format="))) {
+            if (arg.contains(QLatin1Char('='))) {
+                format = arg.mid(9);
+            } else {
+                if (i + 1 >= args.size()) return usage("genko smart: argument --format: expected one argument");
+                format = args[++i];
+            }
+        } else if (arg.startsWith(QLatin1Char('-')) && arg.size() > 1) {
+            return usage("genko smart: unrecognized arguments: " + arg.toStdString());
+        } else if (src.isEmpty()) {
+            src = arg;
+        } else {
+            return usage("genko smart: unrecognized arguments: " + arg.toStdString());
+        }
+    }
+    if (src.isEmpty()) return usage("genko smart <dir> --links | --export <page> <id> <path> [--format psd|png]: the following arguments are required: src");
+    if (links == exported.has_value()) return usage("genko smart: one of --links or --export");
+    if (!format.isEmpty() && !exported) return usage("genko smart: argument --format: only with --export");
+    const fs::path dir = path_arg(src);
+    refuse_legacy(dir);
+    const storage::LoadResult loaded = storage::load_document(dir);
+    const core::Document& doc = loaded.document;
+    if (links) {
+        Json listed = Json::array();
+        for (const auto& state : formats::smart_files::link_states(doc)) listed.push_back(formats::smart_files::to_json(state));
+        print_json(Json{{"ok", true}, {"links", listed}}, ascii);
+        return 0;
+    }
+    const auto page_number = py_int_arg((*exported)[0]);
+    if (!page_number) return usage("genko smart: argument --export: the page is a number");
+    const std::string layer_id = (*exported)[1].toStdString();
+    for (std::size_t i = 0; i < doc.pages.size(); ++i) {
+        if (doc.pages[i]->index != core::Num(*page_number)) continue;
+        for (const core::Layer& layer : doc.page(i).layers) {
+            if (layer.id != layer_id) continue;
+            const auto contents = core::smart::contents_id(layer);
+            if (layer.kind != core::LayerKind::Smart || !contents) throw core::Error("value", "layer " + layer_id + " is not a smart object");
+            Json out = formats::smart_files::export_contents(doc, *contents, path_arg((*exported)[2]), format.toStdString());
+            out["ok"] = true;
+            out["contents"] = *contents;
+            print_json(out, ascii);
+            return 0;
+        }
+        throw core::Error("key", "no layer " + layer_id + " on page " + std::to_string(*page_number));
+    }
+    throw core::Error("key", "no page " + std::to_string(*page_number));
+}
+
+// pen-shapes@1 (PC3 C-b, SPEC.md COLOR-07「シェイプのプリセット」, the C++ build's own): the shape presets of this machine
+// (the settings folder's shapes.json, render/shape_presets) — `genko shapes list`, `genko shapes path <name> --rect
+// x,y,w,h [--group G] [--stretch]` (the preset fitted into the box, mm: the path add_shape_part's "shape" {"kind":
+// "path"} takes), `genko shapes new --path <path JSON | path language | "M …"> [--name N] [--group G]`, `genko shapes
+// edit <{"action", …} JSON>`, `genko shapes reset [--append]`. The ops do not read them (a machine's setting).
+int shapes_command(const QStringList& args, bool ascii) {
+    namespace presets = render::shape_presets;
+    if (args.isEmpty()) return usage("genko shapes list | path | new | edit | reset");
+    const QString what = args.front();
+    const QStringList rest = args.mid(1);
+    const fs::path dir = core::config_dir();
+    std::string problem;
+    std::vector<presets::Group> groups = presets::load(dir, &problem);
+    if (what == QLatin1String("list")) {
+        Arguments a;
+        if (auto error = parse_arguments(rest, {}, 0, "", a)) return usage("genko shapes list: " + *error);
+        Json out = presets::list(groups);
+        out["ok"] = true;
+        if (!problem.empty()) out["problem"] = problem;
+        print_json(out, ascii);
+        return 0;
+    }
+    if (what == QLatin1String("path")) {
+        static constexpr Option kOptions[] = {{"--rect", true}, {"--group", true}, {"--stretch", false}};
+        Arguments a;
+        if (auto error = parse_arguments(rest, kOptions, 1, "name", a)) return usage("genko shapes path: " + *error);
+        const auto group = a.value("--group");
+        const std::string group_text = group ? group->toStdString() : std::string();
+        const presets::Preset* found = presets::find(groups, a.positional[0].toStdString(), group ? std::optional<std::string_view>(group_text) : std::nullopt);
+        if (found == nullptr) throw core::Error("key", "no shape named " + a.positional[0].toStdString());
+        const QStringList box = a.value("--rect").value_or(QString()).split(QLatin1Char(','));
+        if (box.size() != 4) return usage("genko shapes path: --rect is x,y,w,h (mm)");
+        std::array<double, 4> rect{};
+        for (int i = 0; i < 4; ++i) {
+            bool ok = false;
+            rect[static_cast<std::size_t>(i)] = box[i].trimmed().toDouble(&ok);
+            if (!ok || !std::isfinite(rect[static_cast<std::size_t>(i)])) return usage("genko shapes path: --rect is x,y,w,h (mm)");
+        }
+        const core::vector::Path path = presets::fit(found->path, rect, !a.flag("--stretch"));
+        print_json(Json{{"ok", true}, {"name", found->name}, {"path", core::vector::to_json(core::vector::path_from_json(core::vector::to_json(path)))}}, ascii);
+        return 0;
+    }
+    if (what == QLatin1String("new")) {
+        static constexpr Option kOptions[] = {{"--path", true}, {"--name", true}, {"--group", true}};
+        Arguments a;
+        if (auto error = parse_arguments(rest, kOptions, 0, "", a)) return usage("genko shapes new: " + *error);
+        const auto given = a.value("--path");
+        if (!given) return usage("genko shapes new: the following arguments are required: --path");
+        const std::string text = given->trimmed().toStdString();
+        const core::vector::Path path = text.starts_with("{") ? core::vector::path_from_json(core::parse_python_json(text)) : presets::parse(text);
+        const auto group = a.value("--group");
+        const std::string group_text = group ? group->toStdString() : std::string();
+        Json out = presets::add(groups, a.value("--name").value_or(QString()).toStdString(), group ? std::optional<std::string_view>(group_text) : std::nullopt, path);
+        presets::save(dir, groups);
+        out["ok"] = true;
+        print_json(out, ascii);
+        return 0;
+    }
+    if (what == QLatin1String("edit")) {
+        Arguments a;
+        if (auto error = parse_arguments(rest, {}, 1, "edit", a)) return usage("genko shapes edit: " + *error);
+        Json out = presets::edit(groups, core::parse_python_json(a.positional[0].toStdString()));
+        presets::save(dir, groups);
+        out["ok"] = true;
+        print_json(out, ascii);
+        return 0;
+    }
+    if (what == QLatin1String("reset")) {
+        static constexpr Option kOptions[] = {{"--append", false}};
+        Arguments a;
+        if (auto error = parse_arguments(rest, kOptions, 0, "", a)) return usage("genko shapes reset: " + *error);
+        groups = presets::reset(groups, a.flag("--append"));
+        presets::save(dir, groups);
+        print_json(Json{{"ok", true}, {"groups", static_cast<std::int64_t>(groups.size())}}, ascii);
+        return 0;
+    }
+    return usage("genko shapes: list, path, new, edit or reset");
+}
+
+// smart-objects@1 (PC3 A1, the C++ build's own): `genko package <dir> --out <folder>` (パッケージ…) — the book copied as a
+// new book into <folder>/<its folder's name>, with its linked files' copies in Links/ and linked there.
+int package_command(const QStringList& args, bool ascii) {
+    static constexpr Option kOptions[] = {{"--out", true}, {"--as", true}};
+    Arguments a;
+    if (auto error = parse_arguments(args, kOptions, 1, "src", a)) return usage("genko package: " + *error);
+    const auto out = a.value("--out");
+    if (!out || out->isEmpty()) return usage("genko package: the following arguments are required: --out");
+    const fs::path dir = path_arg(a.positional[0]);
+    refuse_legacy(dir);
+    print_json(formats::smart_files::package(dir, path_arg(*out), a.value("--as").value_or(QStringLiteral("genko")).toStdString()), ascii);
+    return 0;
+}
+
 }  // namespace
 
 int run_cli(int argc, char** argv) {
@@ -1123,6 +1394,9 @@ int run_cli(int argc, char** argv) {
         if (command == QLatin1String("migrate")) return migrate(args, ascii);
         if (command == QLatin1String("render")) return render_command(args, ascii);
         if (command == QLatin1String("export")) return export_command(args, ascii);
+        if (command == QLatin1String("smart")) return smart_command(args, ascii);      // (smart-objects@1, PC3 A1)
+        if (command == QLatin1String("package")) return package_command(args, ascii);  // (smart-objects@1, PC3 A1)
+        if (command == QLatin1String("shapes")) return shapes_command(args, ascii);    // (pen-shapes@1, PC3 C-b)
         if (command == QLatin1String("studio")) return studio_command(args, ascii);
         if (command == QLatin1String("mcp")) return mcp_command(args);
         if (command == QLatin1String("serve")) return serve_command(args);

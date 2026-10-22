@@ -147,6 +147,10 @@ std::string page_fingerprint(const core::Document& doc, const core::Page& page) 
         } else {
             h.add(storage::AssetStore::ref(core::strokes_blob(strokes)));
         }
+        if (layer.shapes && !layer.shapes->items.empty()) {  // (pen-shapes@1, PC3 C-b: its shape parts)
+            h.add(std::string_view("pen-shapes/1"));
+            h.add(!layer.shapes->blob_ref.empty() ? layer.shapes->blob_ref : storage::AssetStore::ref(core::vector::shapes_blob(*layer.shapes)));
+        }
     }
     h.add(doc.brush_custom);
     return h.hex();

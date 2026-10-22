@@ -267,7 +267,8 @@ private slots:
         QVERIFY(palette != nullptr);
         const auto tools = palette->actions();
         QVERIFY(tools.indexOf(text) >= 0 && tools.indexOf(text) + 1 == tools.indexOf(s.window->action(QStringLiteral("act_frame"))));
-        // ツール: … 図形, テキスト, コマ割り; ページ → 台詞 (with フキダシの形: Python's kinds), then the book's lines
+        // ツール: … 図形, テキスト, コマ割り; ページ → 台詞 (with フキダシの形: Python's kinds; PC3 C-a: 作業用パスを作成 after
+        // them, Photoshop's 書式 → 作業用パスを作成), then the book's lines
         QMenu* tool_menu = s.menu_at(QStringLiteral("ツール"));
         const auto in_tools = tool_menu->actions();
         QCOMPARE(in_tools.indexOf(text), in_tools.indexOf(s.window->action(QStringLiteral("act_shape"))) + 1);
@@ -276,8 +277,9 @@ private slots:
         QStringList order;
         for (QAction* a : lines->actions()) order << (a->isSeparator() ? QStringLiteral("|") : a->text());
         QCOMPARE(order, QStringList({QStringLiteral("台詞を入れる（テキストの道具）"), QStringLiteral("フキダシを手で描く"), QStringLiteral("|"),
-                                     QStringLiteral("選んだ台詞をその場で直す"), QStringLiteral("縦書き・横書きを切り替える"), QStringLiteral("フキダシの形"),
-                                     QStringLiteral("選んだ台詞を消す")}));
+                                     QStringLiteral("選んだ台詞をその場で直す"), QStringLiteral("縦書き・横書きを切り替える"), QStringLiteral("ワープテキスト…"),
+                                     QStringLiteral("フキダシの形"), QStringLiteral("選んだ台詞を消す"), QStringLiteral("|"), QStringLiteral("作業用パスを作成"),
+                                     QStringLiteral("シェイプに変換")}));
         QMenu* shapes = s.menu_at(QStringLiteral("ページ/台詞/フキダシの形"));
         QVERIFY(shapes != nullptr);
         QCOMPARE(shapes->actions().size(), 15);
@@ -1018,8 +1020,8 @@ private slots:
         for (QAction* act : menu->actions()) items << (act->isSeparator() ? QStringLiteral("|") : act->text());
         QCOMPARE(items, QStringList({QStringLiteral("打ち直す（ダブルクリック）"), QStringLiteral("フキダシの形"), QStringLiteral("横書きにする"), QStringLiteral("|"),
                                      QStringLiteral("しっぽを足す"), QStringLiteral("|"), QStringLiteral("次の台詞のフキダシとつなげる"),
-                                     QStringLiteral("画像のフキダシにする…"), QStringLiteral("文字をパスに沿わせる"), QStringLiteral("|"),
-                                     QStringLiteral("AI 用の参照をコピー（この台詞のコマ）"), QStringLiteral("|"), QStringLiteral("消す")}));
+                                     QStringLiteral("画像のフキダシにする…"), QStringLiteral("ワープテキスト…"), QStringLiteral("文字をパスに沿わせる"),
+                                     QStringLiteral("|"), QStringLiteral("AI 用の参照をコピー（この台詞のコマ）"), QStringLiteral("|"), QStringLiteral("消す")}));
         QVERIFY(find_action(menu.get(), QStringLiteral("普通（楕円）"))->isChecked());
         find_action(menu.get(), QStringLiteral("横書きにする"))->trigger();
         QCOMPARE(s.last().dump(), (Json{{"op", "edit_line"}, {"id", a}, {"wrap", "horizontal"}}).dump());

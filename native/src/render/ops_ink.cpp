@@ -23,6 +23,7 @@
 #include "render/ink.hpp"
 #include "render/ink_canvas.hpp"
 #include "render/ops_registry.hpp"
+#include "render/ops_smart_parts.hpp"
 #include "render/png.hpp"
 #include "render/quantize.hpp"
 
@@ -580,6 +581,7 @@ std::int64_t convert_pages(Document& doc, const std::vector<std::size_t>& pages,
         page.color = std::move(keep[k].inks);
         page.rgb = std::move(keep[k].rgb);
         refuse_undrawable(page);
+        smart_ops::fits_deep_page(doc, page);  // (a smart object's file of more bits: within what the page keeps whole)
     }
     return static_cast<std::int64_t>(plan.size());
 }

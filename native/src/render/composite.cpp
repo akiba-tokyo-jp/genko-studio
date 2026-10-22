@@ -8,6 +8,7 @@
 #include <cmath>
 #include <cstring>
 #include <functional>
+#include <numbers>
 #include <stdexcept>
 #include <tuple>
 
@@ -16,18 +17,21 @@
 #include "core/command_bus.hpp"
 #include "core/error.hpp"
 #include "core/filters.hpp"
+#include "core/masks.hpp"
 #include "core/pyconv.hpp"
 #include "core/pynum.hpp"
 #include "core/pyops.hpp"
 #include "core/paths.hpp"
 #include "render/adjust.hpp"
 #include "render/color_canvas.hpp"
+#include "render/layer_masks.hpp"
 #include "render/plugins.hpp"
 #include "render/filters.hpp"
 #include "render/ink.hpp"
 #include "render/ink_canvas.hpp"
 #include "render/page_internal.hpp"
 #include "render/png.hpp"
+#include "render/vector_masks.hpp"
 
 namespace genko::render::detail {
 
@@ -90,13 +94,17 @@ std::vector<Stop> gradient_stops(const Json& spec) {
 }
 
 struct GradientT {
-    enum class Shape { Linear, Radial, Ellipse };
+    // (vector@1, PC3 C-b: Angle, Reflected and Diamond — PhotoCraft v0.2.0's vector/src/lib.rs gradient_t, MIT — and
+    // "reverse", from Genko's from–to: the angle's way round from the direction from → to, reflected about `from`, the
+    // diamond's corners on that line)
+    enum class Shape { Linear, Radial, Ellipse, Angle, Reflected, Diamond };
     enum class Repeat { None, Repeat, Mirror };
     double fx = 0, fy = 0, tx = 0, ty = 100;
     double length = 1.0;
     Shape shape_id = Shape::Linear;
     Repeat repeat_id = Repeat::None;
     double ux = 0, uy = 0, ratio = 0.5;
+    bool reverse = false;
 
     explicit GradientT(const Json& spec) {
         const auto pair = [&](std::string_view key, double a, double b) {
@@ -116,13 +124,20 @@ struct GradientT {
         if (s != nullptr && core::py_truthy(*s)) shape = core::py_str(*s);
         const Json* r = get(spec, "repeat");
         if (r != nullptr && core::py_truthy(*r)) repeat = core::py_str(*r);
-        shape_id = shape == "radial" ? Shape::Radial : shape == "ellipse" ? Shape::Ellipse : Shape::Linear;
+        shape_id = shape == "radial"      ? Shape::Radial
+                   : shape == "ellipse"   ? Shape::Ellipse
+                   : shape == "angle"     ? Shape::Angle
+                   : shape == "reflected" ? Shape::Reflected
+                   : shape == "diamond"   ? Shape::Diamond
+                                          : Shape::Linear;
         repeat_id = repeat == "repeat" ? Repeat::Repeat : repeat == "mirror" ? Repeat::Mirror : Repeat::None;
-        if (shape_id == Shape::Ellipse) {
+        if (shape_id == Shape::Ellipse || shape_id == Shape::Diamond) {
             ux = (tx - fx) / length;
             uy = (ty - fy) / length;
-            ratio = py_max(0.05, number(spec, "ratio", 0.5));
+            if (shape_id == Shape::Ellipse) ratio = py_max(0.05, number(spec, "ratio", 0.5));
         }
+        const Json* rev = get(spec, "reverse");
+        reverse = rev != nullptr && rev->is_boolean() && rev->get<bool>();
     }
 
     double operator()(double gx, double gy) const {
@@ -133,13 +148,24 @@ struct GradientT {
             const double along = (gx - fx) * ux + (gy - fy) * uy;
             const double across = (-(gx - fx) * uy + (gy - fy) * ux) / ratio;
             t = g_hypot(along, across) / length;
+        } else if (shape_id == Shape::Reflected) {
+            t = std::fabs(((gx - fx) * (tx - fx) + (gy - fy) * (ty - fy)) / (length * length));
+        } else if (shape_id == Shape::Diamond) {
+            const double along = (gx - fx) * ux + (gy - fy) * uy;
+            const double across = -(gx - fx) * uy + (gy - fy) * ux;
+            t = (std::fabs(along) + std::fabs(across)) / length;
+        } else if (shape_id == Shape::Angle) {
+            // (counter-clockwise on the page from the direction from → to, a turn from 0 to 1)
+            const double a = std::atan2(-(ty - fy), tx - fx), b = std::atan2(-(gy - fy), gx - fx);
+            t = (b - a) / (2.0 * std::numbers::pi);
+            t -= std::floor(t);
         } else {
             t = ((gx - fx) * (tx - fx) + (gy - fy) * (ty - fy)) / (length * length);
         }
-        if (repeat_id == Repeat::Repeat) return t - std::floor(t);
-        if (repeat_id == Repeat::Mirror) return 1 - std::fabs(core::py_fmod(t, 2.0) - 1);
-        // np.clip(t, 0.0, 1.0)
-        return std::isnan(t) ? t : std::min(std::max(t, 0.0), 1.0);
+        if (repeat_id == Repeat::Repeat) t = t - std::floor(t);
+        else if (repeat_id == Repeat::Mirror) t = 1 - std::fabs(core::py_fmod(t, 2.0) - 1);
+        else t = std::isnan(t) ? t : std::min(std::max(t, 0.0), 1.0);  // np.clip(t, 0.0, 1.0)
+        return reverse ? 1.0 - t : t;
     }
 };
 
@@ -729,9 +755,14 @@ Image adjusted(const Ctx& ctx, Image rgba, const core::Layer& layer, const Image
     const double opacity = layer.opacity;
     Image strength = Image::create("L", rgba.size(), Ink(py_round_i(255 * py_max(0.0, py_min(1.0, opacity)))));
     if (layer.mask && layer.mask->enabled && layer.mask->png && !layer.mask->png->empty()) {
-        const Image shown =
-            resized_part(open_image(*layer.mask->png, kPillowOpenLimits).convert("L"), ctx.size, area, Resample::Bicubic);
+        const Image picture = open_image(*layer.mask->png, kPillowOpenLimits).convert("L");
+        // (masks@1, PC3: its density and feather, render/layer_masks; a mask of none as before)
+        const Image shown = core::mask_has_settings(*layer.mask) ? layer_masks::shown(*ctx.page, *layer.mask, picture, ctx.size, area, Resample::Bicubic)
+                                                                 : resized_part(picture, ctx.size, area, Resample::Bicubic);
         strength = chops::multiply(strength, shown);
+    }
+    if (vector_masks::shows(layer)) {  // (vector@1, PC3 C-a: its vector mask too)
+        strength = chops::multiply(strength, vector_masks::shown(*ctx.page, *layer.vector_mask, ctx.size, area));
     }
     if (clip != nullptr) strength = chops::multiply(strength, clip->convert("L"));
     return composite(changed.convert("RGBA"), rgba, strength);

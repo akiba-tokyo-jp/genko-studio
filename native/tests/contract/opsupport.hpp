@@ -116,8 +116,30 @@ std::string compare_deviating_steps(const std::vector<StepOutcome>& outcomes, co
 //     D1).
 // "" when it holds; else where it does not.
 std::string kept_by_deviation(const core::Json& keeps, const core::Document& before, const core::Document& after);
+// The review of PC3, fix 1 (on any case): set_page_spec moves a paint layer whose picture is not at raster.WORKING_DPI of
+// its page's paper (a picture put_raster put as it was given) keeping its resolution here, where Python takes it for one at
+// 200 dpi. Followed through a case's steps (each step's ops taken again one by one on the book before it): at each
+// set_page_spec, this build's picture is checked to be render::relayout_raster's move of the one it had, and Python's side
+// is made by relayout_working_raster from Python's picture before it; after each step, while this build's and Python's
+// pictures of a layer differ so, Python's record is checked to hold Python's side there and is put in its place in the
+// step's outcome (payload), the place added to `paths` (as cpp_differs' kind, for the book read back) and each layer
+// counted once in `kept`. An op of another kind that changes such a picture cannot be followed: said so.
+class KeptResolution {
+public:
+    // "" when the step is so; else what is not.
+    std::string step(const core::Document& before, const core::Document& after, const core::Json& step, StepOutcome& outcome,
+                     const core::Json& python);
+    std::vector<std::string> paths;
+    int kept = 0;
+
+private:
+    std::map<std::string, std::string> python_;  // "<page id>/<layer id>" → Python's picture (PNG), as made here
+};
 // Python's words without the addresses of its objects ("<_io.BytesIO object at 0x7f…>" → "<_io.BytesIO object>").
 std::string without_addresses(std::string text);
+// Python's words as this build says them where a decision changed them (the expectation is this build's; the reason by
+// each): compared so, the rest of the reply still is Python's.
+std::string with_decided_words(std::string text);
 
 // The layers' PNGs of `doc` (its pixels, masks and patches) written into `dir` as
 // "<prefix>p<page>-l<layer>-<asset|mask|patchN>.png", as the harness's "dump" writes Python's.
@@ -155,5 +177,22 @@ std::string compare_step_near(const StepOutcome& cpp, const core::Json& python, 
 // Whether a batch (its "ops") warps an area in perspective (transform_area with warp.perspective).
 void affect_perspective(NearSides& sides, const core::Json& ops, const core::Json& payload);
 bool warps_in_perspective(const core::Json& ops);
+
+// PC3 B-0 (the coordinator's decision, design ch. 9; SPEC.md COLOR-06): an area whose picture is grey — a feathered one,
+// feather_mm anywhere in it — is stretched onto the patches' 300 dpi and a mask's grid bilinear, where Python stretched
+// it nearest (a two-valued picture is stretched nearest on both sides). A fixed case that fills, masks or deletes with
+// one (stretches_grey_area) is marked "cpp": "deviates": Python's but at its pictures (its cpp_differs), where it holds
+// this build's values kept in "cpp_pictures" (paths into the last step's record → its values; pinned_difference says
+// where this build's record does not hold them). Where Python's books are replayed to compare everything else with
+// Python's (the random sequences, the pages drawn), a PythonStretch, while it lives, has a grey area's picture stretched
+// as Python stretched it (render::selection::set_grey_area_stretch).
+bool stretches_grey_area(const core::Json& ops);
+std::string pinned_difference(const StepOutcome& outcome, const core::Json& pinned);
+struct PythonStretch {
+    PythonStretch();
+    ~PythonStretch();
+    PythonStretch(const PythonStretch&) = delete;
+    PythonStretch& operator=(const PythonStretch&) = delete;
+};
 
 }  // namespace genko::test

@@ -451,6 +451,8 @@ private slots:
                     .contains(QStringLiteral("承認済み")));
         QCOMPARE(wording::error(QStringLiteral("page 2 locked by ai:hermes")), QStringLiteral("2 ページは ai:hermes が作業中です"));
         QCOMPARE(wording::error(QStringLiteral("no page 9")), QStringLiteral("9 ページはありません"));
+        QCOMPARE(wording::error(QStringLiteral("ops[0] add_layer: shape must be linear, radial, ellipse, angle, reflected or diamond")),
+                 QStringLiteral("グラデーションの形は、直線・円・楕円・角度・反射・菱形から選びます"));
         QVERIFY(wording::error(QStringLiteral("something new")).startsWith(QStringLiteral("この操作はできませんでした")));
         QCOMPARE(wording::actor("ai:hermes"), QStringLiteral("AI（hermes）"));
         QCOMPARE(wording::actor("human:leaf"), QStringLiteral("leaf"));
@@ -796,7 +798,7 @@ private slots:
     }
 
     // test_skew_handles_and_the_resampling_choice: the selection's diamond on its top side slants it (the top slides, the
-    // bottom stays), and the transform goes through with the resampling chosen in 選択 → 変形の補間.
+    // bottom stays), and the transform goes through with the resampling chosen in 編集 → 変形 → 補間方法.
     void skewHandlesAndTheResamplingChoice() {
         Desk desk(layers_book());
         app::MainWindow* w = desk.window.get();
@@ -806,7 +808,7 @@ private slots:
         canvas->center_on(70, 70);
         const std::vector<QPointF> square{QPointF(50, 50), QPointF(90, 50), QPointF(90, 90), QPointF(50, 90)};
         canvas->set_selection(Json{{"poly", Json::array({Json::array({50, 50}), Json::array({90, 50}), Json::array({90, 90}), Json::array({50, 90})})}}, square);
-        QAction* nearest = titled(menu_at(w, QStringLiteral("選択/変形の補間")), QStringLiteral("ハード（ニアレストネイバー・ドット絵やトーンに）"));
+        QAction* nearest = titled(menu_at(w, QStringLiteral("編集/変形/補間方法")), QStringLiteral("ハード（ニアレストネイバー・ドット絵やトーンに）"));
         QVERIFY(nearest != nullptr);
         nearest->trigger();
         w->set_target_layer("red");
@@ -818,10 +820,12 @@ private slots:
         const double a = (*matrix)[0], b = (*matrix)[1], c = (*matrix)[2], d = (*matrix)[3], e = (*matrix)[4];
         QVERIFY(a == 1 && b == 0 && d == 1);
         QVERIFY(std::abs(c * 50 + e - 10) < 1e-6 && std::abs(c * 90 + e) < 1e-6);  // top slides, bottom stays
-        const Json transform = desk.last_op("transform_area");
+        // (PC3 C-c: the selection's transform goes as transform_layers over the area — the drawing layer — since 自由変形)
+        const Json transform = desk.last_op("transform_layers");
         QVERIFY(transform.is_object());
         QCOMPARE(transform["interp"], Json("nearest"));  // (the transform went through with the choice)
-        QCOMPARE(transform["layer_id"], Json("red"));
+        QCOMPARE(transform["ids"], Json::array({"red"}));
+        QVERIFY(transform.contains("area"));
     }
 
     // --- test_j6 -----------------------------------------------------------------------------------------------------

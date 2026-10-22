@@ -135,7 +135,11 @@ void PageCanvas::paint_page(QPainter& painter) {
         painter.drawRect(where);
     }
     draw_marquee(painter);  // (the selection, its handles, what the marquee tool is drawing: canvas_select.cpp)
-    draw_tools(painter);    // (the area being filled, the gradient's drag, the figure being drawn: canvas_tools.cpp)
+    draw_crop(painter);       // (the crop tool's box: canvas_crop.cpp)
+    draw_transform(painter);  // (自由変形 and the warps' box: canvas_transform.cpp)
+    draw_tools(painter);      // (the area being filled, the gradient's drag, the figure being drawn: canvas_tools.cpp)
+    draw_move_box(painter);   // (the move tool's バウンディングボックス: canvas_snap.cpp)
+    draw_snap(painter);       // (what a drag snapped to: canvas_snap.cpp)
     draw_prims(painter);    // (the 3D tool's handles: canvas_guides.cpp)
     draw_effect_handles(painter);  // (the effect tool's centres: canvas_effects.cpp)
     draw_highlight(painter);       // (a problem the checks found: canvas_scale.cpp)
@@ -152,7 +156,8 @@ void PageCanvas::paint_page(QPainter& painter) {
         draw_in_page_px(painter, live_->image(), live_->box(), live_->dpi());
     } else if (!stroke_.empty()) {
         const QColor colour = tool_ == QLatin1String("pen") ? theme::accent() : QColor(200, 60, 60, 160);
-        QPen line(colour, std::max(1.5, brush_width_mm * view_.scale), Qt::SolidLine, Qt::RoundCap, Qt::RoundJoin);
+        const double width_mm = is_retouch_tool(tool_) ? retouch_mm : brush_width_mm;  // (PC3 B4: the retouching brush's own)
+        QPen line(colour, std::max(1.5, width_mm * view_.scale), Qt::SolidLine, Qt::RoundCap, Qt::RoundJoin);
         painter.setPen(line);
         painter.setBrush(Qt::NoBrush);
         // the line snapped to the rulers (the pen: with its symmetry copies; the eraser: the line alone)
@@ -175,7 +180,10 @@ void PageCanvas::paint_page(QPainter& painter) {
     if (hover_ && stroke_.empty() && is_stroke_tool(tool_)) {
         // the brush's circle and (circle, dot) its centre, as the pointer chosen in 環境設定 (the cross is the system's)
         const QPointF h = pt(hover_->x(), hover_->y());
-        const double size = tool_ == QLatin1String("pen") ? brush_width_mm : tool_ == QLatin1String("eraser") ? eraser_mm : blend_mm;
+        const double size = tool_ == QLatin1String("pen")      ? brush_width_mm
+                            : tool_ == QLatin1String("eraser") ? eraser_mm
+                            : is_retouch_tool(tool_)           ? retouch_mm  // (PC3 B4)
+                                                               : blend_mm;
         const double radius = std::max(2.0, size / 2 * view_.scale);
         painter.setPen(QPen(theme::accent(), 1));
         painter.setBrush(Qt::NoBrush);
@@ -186,6 +194,7 @@ void PageCanvas::paint_page(QPainter& painter) {
             painter.setBrush(Qt::NoBrush);
         }
     }
+    draw_retouch(painter);     // (PC3 B4: the clone source's cross and overlay, retouch_tools.cpp)
     draw_guide_drag(painter);  // (a guide line pulled from a scale, and the scales: canvas_scale.cpp)
     draw_scale(painter);
 }

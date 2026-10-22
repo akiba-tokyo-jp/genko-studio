@@ -237,6 +237,12 @@ Json layer_to_dict(const Layer& layer) {
         out["source"] = opt_json(layer.source);
         out["finish"] = opt_json(layer.finish);
     }
+    if (layer.kind == LayerKind::Smart) {  // (smart-objects@1: its panel, finish and settings)
+        out["frame_id"] = opt_string(layer.frame_id);
+        out["clip_to"] = layer.clip_to;
+        out["finish"] = opt_json(layer.finish);
+        out["smart"] = layer.smart ? *layer.smart : Json::object();
+    }
     return out;
 }
 

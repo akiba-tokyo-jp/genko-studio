@@ -11,8 +11,12 @@
 #include "core/exposure.hpp"
 #include "core/ids.hpp"
 #include "core/lut3d.hpp"
+#include "core/ink.hpp"
+#include "core/masks.hpp"
 #include "core/pyconv.hpp"
+#include "core/vector.hpp"
 #include "core/ruby.hpp"
+#include "core/smart.hpp"
 #include "core/strokes.hpp"
 #include "core/version.hpp"
 #include "storage/fsutil.hpp"
@@ -166,6 +170,7 @@ Json layer_json(const core::Layer& layer, AssetStore& store, const std::string& 
         Json mask = Json::object();
         mask["enabled"] = layer.mask->enabled;
         if (layer.mask->png && !layer.mask->png->empty()) mask["asset"] = put_png(store, layer.mask->png, layer.mask->memo);
+        core::write_mask_settings(*layer.mask, mask);  // (masks@1, PC3: only what is not the default)
         out["mask"] = std::move(mask);
     }
     if (layer.color && !layer.color->empty()) out["color"] = ints_json(*layer.color);
@@ -176,6 +181,10 @@ Json layer_json(const core::Layer& layer, AssetStore& store, const std::string& 
     if (layer.color_prints) out["color_prints"] = true;
     if (truthy(layer.screen)) out["screen"] = *layer.screen;
     if (truthy(layer.source) && !placed) out["source"] = *layer.source;
+    // (PC3: vector@1's vector mask, transform@1's link and position lock — none: nothing written)
+    if (layer.vector_mask) out["vector_mask"] = core::vector::to_json(*layer.vector_mask);
+    if (layer.link) out["link"] = *layer.link;
+    if (layer.lock_position) out["lock_position"] = true;
     if (placed) {
         out["asset"] = opt_string(layer.asset);
         out["frame_id"] = opt_string(layer.frame_id);
@@ -184,6 +193,13 @@ Json layer_json(const core::Layer& layer, AssetStore& store, const std::string& 
         out["clip_to"] = layer.clip_to;
         out["source"] = opt_json(layer.source);
         out["finish"] = opt_json(layer.finish);
+        return out;
+    }
+    if (layer.kind == core::LayerKind::Smart) {  // (smart-objects@1: its panel as a placed picture's, and its settings)
+        if (layer.frame_id) out["frame_id"] = *layer.frame_id;
+        out["clip_to"] = layer.clip_to;
+        if (truthy(layer.finish)) out["finish"] = *layer.finish;
+        out["smart"] = layer.smart ? *layer.smart : Json::object();
         return out;
     }
     if (layer.raster_png && !layer.raster_png->empty()) {
@@ -200,6 +216,18 @@ Json layer_json(const core::Layer& layer, AssetStore& store, const std::string& 
         }
         out["strokes_blob"] = ref;
         out["stroke_count"] = static_cast<std::int64_t>(list.items.size());
+    }
+    // (pen-shapes@1, PC3: a pen layer's shape parts as their own asset, as its strokes are — none: nothing written)
+    if (layer.shapes && !layer.shapes->items.empty()) {
+        const core::vector::ShapeList& list = *layer.shapes;
+        std::string ref;
+        if (!list.blob_ref.empty() && store.has(list.blob_ref, core::vector::kShapesSuffix)) {
+            ref = list.blob_ref;
+        } else {
+            ref = store.put_bytes(core::vector::shapes_blob(list), core::vector::kShapesSuffix);
+        }
+        out["shapes_blob"] = ref;
+        out["shape_count"] = static_cast<std::int64_t>(list.items.size());
     }
     return out;
 }
@@ -280,6 +308,15 @@ Json page_json(const core::Page& page, AssetStore& store) {
         }
         out["channels"] = std::move(channels);
     }
+    // (PC3: vector@1's paths, page-spec@1's own paper — none: nothing written)
+    if (!page.paths.empty()) out["paths"] = core::vector::to_json(page.paths);
+    if (page.work_path) out["work_path"] = core::vector::to_json(*page.work_path);
+    if (page.clipping_path) out["clipping_path"] = core::vector::to_json(*page.clipping_path);
+    if (page.own_spec) {
+        Json spec = spec_to_json(page.spec);
+        if (page.spec.trim_origin_mm) spec["trim_origin_mm"] = Json::array({page.spec.trim_origin_mm->first, page.spec.trim_origin_mm->second});
+        out["native_spec"] = std::move(spec);
+    }
     for (const auto& [key, value] : page.extra.items()) {
         if (!is_known_page_key(key)) out[key] = value;
     }
@@ -352,6 +389,74 @@ Json project_payload_v4(const core::Document& doc, AssetStore& store) {
         }
         store.put_known(ref, *table->second, core::lut3d::kSuffix);
     }
+    // smart-objects@1: the contents the book's smart objects show (only those), and the files ops were given for them
+    core::smart::validate_smart(doc);
+    Json smart_contents = Json::object();
+    for (const std::string& id : core::smart::used_contents(doc)) {
+        const auto found = doc.smart_contents.find(id);
+        if (found == doc.smart_contents.end() || !found->second) {
+            throw core::Error("value", "the smart object contents " + id + " are not held: the book is not written");
+        }
+        const core::SmartContents& contents = *found->second;
+        if (contents.kind == "page") {
+            Json item = Json::object();
+            item["kind"] = "page";
+            item["name"] = contents.name;
+            item["spec"] = spec_to_json(contents.page->spec);
+            item["page"] = page_json(*contents.page, store);
+            smart_contents[id] = std::move(item);
+            continue;
+        }
+        if (const auto file = doc.smart_files.find(contents.asset); file != doc.smart_files.end() && file->second) {
+            store.put_known(contents.asset, *file->second, contents.suffix);
+        }
+        if (const auto icc = contents.profile.is_object() ? contents.profile.find("icc") : contents.profile.end();
+            icc != contents.profile.end() && icc->is_string()) {
+            if (const auto file = doc.smart_files.find(icc->get<std::string>()); file != doc.smart_files.end() && file->second) {
+                store.put_known(icc->get<std::string>(), *file->second, ".icc");
+            }
+        }
+        // (PC3 A3: a PSD's linked-layer item, without the file's bytes)
+        if (contents.psd && contents.psd->is_object() && contents.psd->contains("item") && (*contents.psd)["item"].is_string()) {
+            const std::string ref = (*contents.psd)["item"].get<std::string>();
+            if (const auto file = doc.smart_files.find(ref); file != doc.smart_files.end() && file->second) store.put_known(ref, *file->second, ".bin");
+        }
+        smart_contents[id] = core::smart::file_json(contents);
+    }
+    // (PC3 A2: the filter masks ops made for the smart objects, as the book's files)
+    const auto filter_masks = [&](const core::Page& page) {
+        for (const core::Layer& layer : page.layers) {
+            if (layer.kind != core::LayerKind::Smart || !layer.smart || !layer.smart->is_object()) continue;
+            const auto mask = layer.smart->find("filter_mask");
+            if (mask == layer.smart->end() || !mask->is_object() || !mask->contains("asset") || !mask->at("asset").is_string()) continue;
+            const std::string ref = mask->at("asset").get<std::string>();
+            if (const auto file = doc.smart_files.find(ref); file != doc.smart_files.end() && file->second) store.put_known(ref, *file->second, ".png");
+        }
+        // (PC3 A3: a PSD's placed layer block and Photoshop's picture of it)
+        for (const core::Layer& layer : page.layers) {
+            if (layer.kind != core::LayerKind::Smart || !layer.smart || !layer.smart->is_object()) continue;
+            const auto psd = layer.smart->find("psd");
+            if (psd == layer.smart->end() || !psd->is_object()) continue;
+            const auto put = [&](const core::Json& in, const char* key, std::string_view suffix) {
+                const auto ref = in.find(key);
+                if (ref == in.end() || !ref->is_string()) return;
+                if (const auto file = doc.smart_files.find(ref->get<std::string>()); file != doc.smart_files.end() && file->second)
+                    store.put_known(ref->get<std::string>(), *file->second, suffix);
+            };
+            put(*psd, "raw", ".bin");
+            if (const auto shown = psd->find("shown"); shown != psd->end() && shown->is_object()) {
+                put(*shown, "asset", ".png");
+                put(*shown, "ink_raster", core::kInkRasterSuffix);
+            }
+        }
+    };
+    for (const auto& page : doc.pages) filter_masks(*page);
+    for (const std::string& id : core::smart::used_contents(doc)) {
+        if (const auto found = doc.smart_contents.find(id); found != doc.smart_contents.end() && found->second && found->second->page)
+            filter_masks(*found->second->page);
+    }
+    std::erase(features, std::string(core::kSmartObjectsFeature));  // (named while a smart object is shown)
+    if (!smart_contents.empty()) features.emplace_back(core::kSmartObjectsFeature);
     core::validate_ink_document(doc);
     core::validate_color_model(doc);
     bool modes = doc.color.has_value() || doc.rgb.has_value() || doc.text_gamma.has_value();
@@ -364,6 +469,18 @@ Json project_payload_v4(const core::Document& doc, AssetStore& store) {
     core::validate_adjustments(doc);
     std::erase(features, std::string(core::kAdjustmentsFeature));  // (named while a correction uses it)
     if (core::uses_adjustments(doc)) features.emplace_back(core::kAdjustmentsFeature);
+    // PC3: masks@1, vector@1, pen-shapes@1, transform@1, page-spec@1 (each named while the book uses it)
+    core::validate_masks(doc);
+    core::vector::validate_vector(doc);
+    const std::pair<std::string_view, bool> pc3[] = {{core::kMasksFeature, core::uses_masks(doc)},
+                                                     {core::vector::kVectorFeature, core::vector::uses_vector(doc)},
+                                                     {core::vector::kPenShapesFeature, core::vector::uses_pen_shapes(doc)},
+                                                     {core::vector::kTransformFeature, core::vector::uses_transform(doc)},
+                                                     {core::vector::kPageSpecFeature, core::vector::uses_page_spec(doc)}};
+    for (const auto& [feature, used] : pc3) {
+        std::erase(features, std::string(feature));
+        if (used) features.emplace_back(feature);
+    }
     std::sort(features.begin(), features.end());
     features.erase(std::unique(features.begin(), features.end()), features.end());
 
@@ -405,6 +522,7 @@ Json project_payload_v4(const core::Document& doc, AssetStore& store) {
     out["bible"] = std::move(bible);
     out["tickets"] = doc.tickets;
     out["studio"] = doc.studio;
+    if (!smart_contents.empty()) out["smart_contents"] = std::move(smart_contents);  // (smart-objects@1)
     Json pages = Json::array();
     for (const auto& page : doc.pages) pages.push_back(page_json(*page, store));
     out["pages"] = std::move(pages);

@@ -12,6 +12,7 @@
 #include "core/ink.hpp"
 #include "core/json.hpp"
 #include "render/image.hpp"
+#include "render/psd_smart.hpp"
 #include "render/psd_text.hpp"
 
 // Photoshop files read as layers (Python's genko/psd.py: read_psd and its helpers), for import_psd. (ARCHITECTURE.md §1
@@ -70,8 +71,23 @@ struct Layer {
     std::string blend = "normal";
     bool clip = false;
     std::optional<std::size_t> parent;  // the index (in layers()) of the folder it is in
-    std::string kind = "pixels";        // pixels | folder | text | adjust
+    std::string kind = "pixels";        // pixels | folder | text | adjust | smart | shape (pen-shapes@1, PC3 C-b)
     bool has_mask = false;
+    // (the user's decision 3: a mask's settings always read) whether its mask is used — Photoshop's flags bit 1 off. A
+    // mask that is off is read too (has_mask), unless its picture could not be read as one that is on (then none, as
+    // before); composited() leaves it out.
+    bool mask_enabled = true;
+    // (PC3 B2, the user's decision 3: masks@1) its mask's record past its picture: whether it carries parameters (flags
+    // bit 4) — then whether it is placed relative to the layer (bit 0: not linked), its user density (0..255) and feather
+    // (pixels of the canvas), each when the parameters hold it.
+    bool mask_parameters = false;
+    bool mask_unlinked = false;
+    std::optional<int> mask_density;
+    std::optional<double> mask_feather;
+    // (vector@1, PC3 C-a, the same decision) its vector mask's density (0..255) and feather (pixels of the canvas): the mask
+    // parameters' bits 2 and 3, whether or not it has a mask of its own.
+    std::optional<int> vector_density;
+    std::optional<double> vector_feather;
     std::size_t record = 0;  // (pixel layers) the layer record it was read from
     // (PC2, the user's decision 5) an adjustment layer a codec read (render/psd_adjust.hpp): the correction's adjust.
     // One no codec reads is left out (skipped), as psd.py leaves every one out.
@@ -79,6 +95,9 @@ struct Layer {
     // (PC2a) the lookup tables its adjust uses (a color lookup's: the table its block holds, as GKLU bytes by their
     // asset ref), which import_psd takes into the book with the correction.
     std::map<std::string, core::Bytes> luts;
+    // (PC3 A3, the user's decision 3) a placed layer (kind smart): its block read (render/psd_smart.hpp) — SoLd, else SoLE,
+    // else PlLd, with PlLd's corners where SoLd has none. Its pixels are Photoshop's picture of it (image()).
+    std::optional<Placed> placed;
 };
 
 class File {
@@ -102,28 +121,64 @@ public:
 
     // A pixel layer's picture over the whole canvas (PSDLayer.image: RGBA).
     Image image(const Layer& layer) const;
-    // Its mask over the whole canvas (PSDLayer.mask: "L", white shows); nothing when it has none.
+    // Its mask over the whole canvas (PSDLayer.mask: "L", white shows) — one that is off too (Layer::mask_enabled);
+    // nothing when it has none.
     std::optional<Image> mask(const Layer& layer) const;
     // The merged picture (PSDFile.merged: RGBA), nothing where read_psd has none.
     std::optional<Image> merged() const;
     // color-mode@1: a pixel layer's picture over the whole canvas, and the merged picture, as a CMYK or Lab page's inks
     // (CMYK from the file's own profile or the page's, Lab from Lab, the rest from RGB; 8-bit samples as read).
     core::InkPixels image_inks(const Layer& layer, const core::PageColor& color) const;
-    std::optional<core::InkPixels> merged_inks(const core::PageColor& color) const;
+    // (`own_profile` false: a CMYK file's inks taken as the page's, its profile left aside — PC3 A3, a smart object's
+    // file kept as its numbers)
+    std::optional<core::InkPixels> merged_inks(const core::PageColor& color, bool own_profile = true) const;
     // The ICC profile the file carries (image resource 1039), or "".
     const std::string& icc() const { return icc_; }
+
+    // PC3 A3 (smart-objects@1: a PSD or PSB as a smart object's file, and its placed layers). The header's depth (1, 8,
+    // 16, 32), colour mode number and channels; whether it is a PSB.
+    int depth() const { return depth_; }
+    int mode() const { return mode_; }
+    int channel_count() const { return nchan_; }
+    bool psb() const { return psb_; }
+    // Whether its merged picture is Photoshop's picture of the layers (image resource 1057's hasRealMergedData; true when
+    // the file does not say): a file saved without maximised compatibility holds a blank one.
+    bool real_merged() const { return real_merged_; }
+    // The merged picture in the file's own colours, 8 bits a sample: "L" (grey, bitmap, duotone, multichannel, indexed as
+    // psd.py reads them), "LA", "RGB", "RGBA", "CMYK" (its inks), "LAB" (its L, a+128, b+128 bytes); the alpha a flat
+    // file's transparency. Nothing where it has none (merged()).
+    std::optional<Image> merged_picture() const;
+    // The merged picture with every bit: per pixel its colour channels and (a flat file's) its alpha as floats — 0..1 for
+    // 1, 8 and 16 bits (a CMYK file's as ink, 1 full), as stored for 32 (linear light, HDR kept); rows from the top.
+    struct Deep {
+        std::int64_t width = 0, height = 0;
+        unsigned colours = 3;
+        bool alpha = false;
+        std::vector<float> samples;
+    };
+    std::optional<Deep> merged_deep() const;
+    // Its visible pixel layers (in visible folders) laid over each other in normal at their opacity, through their masks
+    // that are on ("RGBA" over the canvas): the picture of a file with no merged picture, or a blank one (real_merged()).
+    Image composited() const;
+    // The file its linked-layer blocks (the global lnk2, lnk3, lnkD) hold for a placed layer's uuid; none when none
+    // does.
+    std::optional<LinkedItem> linked(std::string_view uuid) const;
+    // A placed layer's block as the layer record holds it (its payload: what import_psd keeps to write it back); empty
+    // for another layer.
+    std::string_view placed_block(const Layer& layer) const;
     // channels@1 (this build's own, not psd.py's): the merged picture's extra channels — the alpha and spot channels past
     // its colours (and past a flat file's transparency) —, each with its name (image resource 1045, else 1006) and how
     // it shows (1077: 0 selected areas, 1 masked areas, 2 spot; its RGB colour; its opacity, a spot's solidity, in
     // percent) and its 8-bit samples over the canvas as stored (the grey Photoshop shows: a spot's and a selected-areas
     // channel's 0 is its colour, a masked-areas channel's 255 is selected). None when the file has no merged picture this
-    // reads.
+    // reads. masks@1 (PC3 B1): the one image resource 1022 names is the Quick Mask the file was saved in.
     struct ExtraChannel {
         std::string name;
         int kind = 1;
         std::array<int, 3> color{255, 0, 0};
         int opacity = 50;
         std::string samples;
+        bool quick_mask = false;
     };
     std::vector<ExtraChannel> extra_channels() const;
     // PSD-01 (not psd.py's: the structure checks of the editable PSD): a layer's text, read from its TySh block
@@ -131,6 +186,23 @@ public:
     // core::Error("format") for a block that cannot be read.
     std::optional<TextLayer> text(const Layer& layer) const;
     std::optional<Stroke> stroke(const Layer& layer) const;
+    // vector@1 (PC3 C-a, render/psd_paths): a layer's vmsk (or vsms) block's payload — its vector mask —, nothing for a layer
+    // without one; and the file's path resources (its saved paths 2000–2997 with their names, its work path 1025, its
+    // clipping path 2999), in the file's order.
+    std::optional<std::string_view> vector_mask(const Layer& layer) const;
+    // pen-shapes@1 (PC3 C-b, render/psd_shapes): a shape layer's blocks (kind "shape": a fill — its fill layer's block
+    // SoCo, GdFl or PtFl, or vscg — and a vector mask), their payloads; nothing for another layer.
+    struct ShapeBlocks {
+        std::string fill_key;
+        std::string_view fill, vscg, vstk, vogk, path;
+    };
+    std::optional<ShapeBlocks> shape_blocks(const Layer& layer) const;
+    struct PathResource {
+        unsigned id = 0;
+        std::string name;  // (the resource's Pascal name, as its bytes)
+        std::string data;
+    };
+    const std::vector<PathResource>& path_resources() const { return path_resources_; }
 
     struct ChannelRef {
         int id = 0;
@@ -154,6 +226,13 @@ public:
         std::int64_t mask_left = 0, mask_top = 0, mask_right = 0, mask_bottom = 0;
         int mask_default = 0;
         bool mask_disabled = false;
+        // (PC3 B2) its mask's flags past disabled and its parameters (Layer's mask_*)
+        bool mask_parameters = false;
+        bool mask_unlinked = false;
+        std::optional<int> mask_density;
+        std::optional<double> mask_feather;
+        std::optional<int> vector_density;  // (vector@1: Layer's vector_*)
+        std::optional<double> vector_feather;
         // (PSD-01) where its TySh and lfx2 blocks' payloads are in the file (size 0: none)
         std::uint64_t tysh_at = 0, tysh_size = 0;
         std::uint64_t lfx2_at = 0, lfx2_size = 0;
@@ -161,6 +240,12 @@ public:
         std::string adjust_key;
         std::uint64_t adjust_at = 0, adjust_size = 0;
         std::uint64_t cged_at = 0, cged_size = 0;  // (its CgEd block: brightness_contrast's modern settings)
+        // (PC3 A3) its placed layer blocks' payloads: SoLd, SoLE, PlLd (size 0: none)
+        std::uint64_t sold_at = 0, sold_size = 0, sole_at = 0, sole_size = 0, plld_at = 0, plld_size = 0;
+        std::uint64_t vmsk_at = 0, vmsk_size = 0;  // (vector@1, PC3 C-a: its vmsk or vsms block — its vector mask)
+        // (pen-shapes@1, PC3 C-b: a shape layer's fill layer block — its key — and its vscg, vstk, vogk blocks)
+        std::string fill_key;
+        std::uint64_t fill_at = 0, fill_size = 0, vscg_at = 0, vscg_size = 0, vstk_at = 0, vstk_size = 0, vogk_at = 0, vogk_size = 0;
         const ChannelRef* channel(int id) const;
     };
 
@@ -178,6 +263,10 @@ private:
     std::string channel_names_;    // (1045, else 1006)
     bool unicode_names_ = false;
     std::string display_info_;     // (1077)
+    bool real_merged_ = true;      // (1057)
+    std::vector<std::pair<std::uint64_t, std::uint64_t>> linked_blocks_;  // (PC3 A3: the global lnk2, lnk3, lnkD: where, how long)
+    std::optional<unsigned> quick_mask_;  // (1022: the Quick Mask's channel)
+    std::vector<PathResource> path_resources_;  // (vector@1: 2000–2997, 1025, 2999)
     std::uint64_t merged_at_ = 0;
     Limits limits_{};
     std::vector<Record> records_;
@@ -199,6 +288,8 @@ private:
     Image part(const Record& record) const;
     std::map<int, std::string> part_channels(const Record& record) const;
     std::optional<std::map<int, std::string>> merged_channels() const;
+    // (each merged plane's raw bytes at the file's depth: the colours', and a flat file's transparency)
+    std::optional<std::map<int, std::string>> merged_raw() const;
 };
 
 // psd.BLEND_KEYS: the blend mode of a layer record's key ("normal" for one not there).

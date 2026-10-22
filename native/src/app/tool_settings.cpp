@@ -42,18 +42,28 @@ const std::map<QString, std::pair<QString, QString>>& titles() {
         {QStringLiteral("zoom"), {QStringLiteral("虫めがね（Z）"), QStringLiteral("クリックで拡大、Alt＋クリックで縮小、ドラッグで囲んだ所を画面いっぱいに")}},
         {QStringLiteral("fill"), {QStringLiteral("塗りつぶし（G）"), QStringLiteral("線で囲まれた所をクリックで塗る。隙間は「隙間を閉じる」の幅まで閉じる")}},
         {QStringLiteral("lassofill"), {QStringLiteral("囲って塗る（Shift+G）"), QStringLiteral("ドラッグで囲んだ所を塗る")}},
-        {QStringLiteral("marquee"), {QStringLiteral("範囲選択（M・L・W）"), QStringLiteral("ドラッグで選ぶ。中をドラッグで移動、□で拡大縮小、○で回転（Shift で 15° 刻み）")}},
-        {QStringLiteral("vector"), {QStringLiteral("線の編集（Shift+Y）"), QStringLiteral("ペンの線の制御点を動かす・足す・消す。線をつなぐ・切る・色を変える")}},
+        {QStringLiteral("marquee"), {QStringLiteral("選択範囲ツール（M・L・W）"), QStringLiteral("ドラッグで選ぶ。中をドラッグで移動、□で拡大縮小、○で回転（Shift で 15° 刻み）")}},
+        {QStringLiteral("vector"), {QStringLiteral("部分選択ツール（Shift+Y）"), QStringLiteral("ペンの線の制御点を動かす・足す・消す。線をつなぐ・切る・色を変える")}},
         {QStringLiteral("blend"), {QStringLiteral("色混ぜ（Shift+B）"), QStringLiteral("なぞった所の色をぼかす・のばす・なじませる")}},
-        {QStringLiteral("liquify"), {QStringLiteral("ゆがみ（Shift+L）"), QStringLiteral("なぞった所の絵と線を押し流す・縮める・ふくらませる・渦を巻く")}},
-        {QStringLiteral("shape"), {QStringLiteral("図形（O）"), QStringLiteral("ドラッグで直線・長方形・楕円・多角形。折れ線と曲線はクリックで点を置く")}},
+        {QStringLiteral("liquify"), {QStringLiteral("前方ワープツール（Shift+L）"), QStringLiteral("なぞった所の絵と線を押し流す・縮める・ふくらませる・渦を巻く")}},
+        {QStringLiteral("shape"), {QStringLiteral("シェイプツール（O・Shift+O）"),
+                                   QStringLiteral("ドラッグで長方形・楕円・三角形・多角形・直線・カスタムシェイプ（Alt で中心から）。モードで、シェイプ・パス・ピクセルのどれにするかを選ぶ")}},
+        {QStringLiteral("pathpen"), {QStringLiteral("ペンツール（P）"), QStringLiteral("クリックで角、ドラッグでなめらかな点。最初の点で閉じる、Enter で終える")}},
+        {QStringLiteral("curvepen"), {QStringLiteral("曲線ペンツール（Shift+P）"), QStringLiteral("クリックした点をなめらかに通る曲線。最初の点で閉じる、Enter で終える")}},
         {QStringLiteral("reshape"), {QStringLiteral("線の修正（Y）"), QStringLiteral("線をつまんでドラッグすると、その辺りが滑らかに曲がる")}},
         {QStringLiteral("ruler"), {QStringLiteral("定規（R）"), QStringLiteral("下で定規の種類を選び、ドラッグやクリックで置く。□をドラッグで動かす、Delete で消す")}},
         {QStringLiteral("3d"), {QStringLiteral("3D 操作（J）"), QStringLiteral("デッサン人形の関節（○）や箱をドラッグ。箱の上の○で回す")}},
         {QStringLiteral("effect"), {QStringLiteral("効果線（K）"), QStringLiteral("下で種類を選び、コマの中をクリックで入れる。中心の＋をドラッグで動かす")}},
         {QStringLiteral("stamp"), {QStringLiteral("素材を置く"), QStringLiteral("素材パネルで選んだ素材を、クリックした所に置く")}},
-        {QStringLiteral("move"), {QStringLiteral("レイヤー移動（Q）"), QStringLiteral("描く先のレイヤーの線・塗り・絵を、ドラッグで丸ごと動かす。Shift で縦・横・45° に")}},
+        {QStringLiteral("move"), {QStringLiteral("移動ツール（Q）"),
+                                  QStringLiteral("選んだレイヤー（リンクしたレイヤー・フォルダーの中も）をドラッグで動かす。Shift で縦・横・45° に、Ctrl+クリックでそこのレイヤーを選ぶ")}},
         {QStringLiteral("gradient"), {QStringLiteral("グラデーション（U）"), QStringLiteral("ドラッグの向きに塗る。始めの点がはじめの色、終わりの点が終わりの色。選択範囲があればその中だけ")}},
+        {QStringLiteral("magiceraser"), {QStringLiteral("マジック消しゴムツール"), QStringLiteral("クリックした所に近い色の所を透明にする（描く先のペイントのレイヤー）")}},
+        // (PC3 B4: the retouching tools, app/retouch_tools.cpp)
+        {QStringLiteral("spotheal"), {QStringLiteral("スポット修復ブラシツール"), QStringLiteral("なぞった所のしみやごみを、まわりの絵から作って埋める")}},
+        {QStringLiteral("heal"), {QStringLiteral("修復ブラシツール"), QStringLiteral("Alt+クリックで決めたコピー元の模様を、なぞった所の色になじませて写す")}},
+        {QStringLiteral("clone"), {QStringLiteral("コピースタンプツール（S）"), QStringLiteral("Alt+クリックで決めたコピー元を、なぞった所にそのまま写す")}},
+        {QStringLiteral("historybrush"), {QStringLiteral("ヒストリーブラシツール"), QStringLiteral("なぞった所を、履歴で選んだ状態（◆）の絵に塗り戻す")}},
     };
     return all;
 }
@@ -220,6 +230,7 @@ ToolSettings::ToolSettings(QWidget* parent) : QWidget(parent) {
     setObjectName(QStringLiteral("tool_settings"));
     title_ = new QLabel;
     theme::role(title_, "heading");
+    title_->setWordWrap(true);  // (a long name — 選択範囲ツール（M・L・W） — goes on two lines rather than past a narrow panel)
     hint_ = new QLabel;
     hint_->setWordWrap(true);
     theme::hint(hint_);
@@ -269,7 +280,8 @@ void ToolSettings::set_folded(bool on) {
     stack_widget_->setVisible(!on && page_for(tool_) != nullptr);
     QWidget* dock = parentWidget();
     while (dock != nullptr && !dock->inherits("QDockWidget")) dock = dock->parentWidget();
-    if (dock != nullptr) dock->setMaximumHeight(on ? title_->sizeHint().height() + 18 : QWIDGETSIZE_MAX);
+    const int title_height = title_->width() > 0 ? title_->heightForWidth(title_->width()) : -1;  // (its lines at its width)
+    if (dock != nullptr) dock->setMaximumHeight(on ? (title_height > 0 ? title_height : title_->sizeHint().height()) + 18 : QWIDGETSIZE_MAX);
 }
 
 void ToolSettings::show_tool(const QString& tool) {

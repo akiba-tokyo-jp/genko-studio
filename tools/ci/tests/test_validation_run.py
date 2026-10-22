@@ -22,6 +22,16 @@ class LogTests(unittest.TestCase):
     def test_valid_single_run(self):
         self.assertEqual(runner.audit_log(log(), ['test_gui_layout'], 'windows-debug')['failures'], [])
 
+    def test_tests_run_side_by_side_are_read_one_by_one(self):
+        # (ctest --parallel: the lines of two tests interleave, each with its own number)
+        raw = (b'Start 1: test_json\nStart 2: test_gui_layout\n2: PASS   : Layout::initTestCase()\n1: PASS   : Json::initTestCase()\n'
+               b'2: Totals: 19 passed, 0 failed, 0 skipped, 9ms\n1: Totals: 5 passed, 0 failed, 0 skipped, 3ms\n'
+               b'100% tests passed, 0 tests failed out of 2\n')
+        result = runner.audit_log(raw, ['test_gui_layout', 'test_json'], 'linux-release')
+        self.assertEqual(result['failures'], [])
+        bad = raw.replace(b'1: Totals: 5 passed, 0 failed', b'1: Totals: 4 passed, 1 failed')
+        self.assertIn('test_json: QtTestが成功していない', runner.audit_log(bad, ['test_gui_layout', 'test_json'], 'linux-release')['failures'])
+
     def test_missing_test_is_rejected(self):
         self.assertTrue(runner.audit_log(log(), ['test_gui_layout', 'test_json'], 'windows-debug')['failures'])
 

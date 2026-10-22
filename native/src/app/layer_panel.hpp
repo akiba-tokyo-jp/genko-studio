@@ -75,11 +75,44 @@ public:
     void remove();
     void duplicate();
     void merge_down();
+    // 前面へ (1) and 背面へ (-1): the window's arrange_layers (PC3 C-d).
     void move(int delta);
+    // These layers chosen in the list (the others not; the layer drawn on as it is): リンクしたレイヤーを選択, 自動選択.
+    void select_ids(const std::vector<std::string>& ids);
     void set(const std::string& key, const core::Json& value);
     void mask(const core::Json& change);
+    // PC3 B2 (app/layer_panel_masks.cpp): レイヤーマスク's own — 選択範囲をマスク (a mask hiding the selection), 透明部分から,
+    // 適用, リンク (checked: the mask moves with the layer) — and the layers' selection: すべてのレイヤー, レイヤーの選択を解除
+    // (the layer drawn on stays chosen), レイヤーを検索 (the search shown and the layers its words find chosen), レイヤーを分離
+    // (only the chosen layers listed, until it is turned off).
+    void hide_selection();
+    void mask_from_transparency();
+    void apply_mask();
+    QAction* mask_link_action() const { return mask_link_; }
+    void select_all_layers();
+    void deselect_layers();
+    void find_layers();
+    void choose_found();
+    void isolate_layers(bool on);
+    bool isolated() const { return !isolated_.empty(); }
+    // smart-objects@1, PC3 A2 (app/layer_panel_smart_filters.cpp): a smart object's smart filters under its row — a row
+    // スマートフィルター (its eye: all of them on or off; its marks: the filter mask) and a row for each filter, the top
+    // one first (its eye: shown; a double-click: スマートフィルターを編集…; the right button: 描画オプション…, moving it,
+    // deleting it). Each row's place in the list: its smart object's id in ids(), and what it is here (kLayerRow, kFiltersRow,
+    // or the filter's index from the bottom).
+    static constexpr int kLayerRow = -2;
+    static constexpr int kFiltersRow = -1;
+    int row_kind(int row) const;
+    // スマートフィルターを編集… (the filter's window with its settings now), 描画オプション… (its blend and opacity), and
+    // the rest of a filter's or the header's right-button menu.
+    void edit_smart_filter(int index);
+    void smart_filter_blending(int index);
+    void smart_filter_op(const core::Json& fields, const std::string& op = "smart_filter_set", const std::string& id = {});
 
 private:
+    void add_smart_filter_rows(const core::Layer& layer, const QString& indent);
+    void smart_filter_menu(const QPoint& at);
+    bool smart_filter_visibility(int row, bool shown);
     std::pair<const core::Page*, const core::Layer*> layer() const;
     void selected(bool from_list = true);
     void visibility(QListWidgetItem* item);
@@ -104,6 +137,7 @@ private:
 
     MainWindow* window_;
     std::vector<std::string> ids_;
+    std::vector<int> rows_;  // (each row's row_kind, alongside ids_)
     bool loading_ = false;
     QLabel* target_ = nullptr;
     QLineEdit* search_ = nullptr;
@@ -121,6 +155,10 @@ private:
     QComboBox* tint_ = nullptr;
     QPushButton* mask_button_ = nullptr;
     QPushButton* effect_button_ = nullptr;
+    QAction* mask_link_ = nullptr;          // (PC3 B2: レイヤーマスク → リンク)
+    std::vector<std::string> isolated_;     // (PC3 B2: レイヤーを分離 — the layers listed alone; empty: all)
+    std::string listed_page_;               // (PC3 C-d: the page listed last — its layers chosen together kept)
+    std::string isolated_page_;             // (the page they are on: another page lists all)
     std::map<QString, QIcon> marks_;  // (the kinds' marks, per colour)
     QIcon kind_mark(core::LayerKind kind);
     QMenu* special_ = nullptr;

@@ -311,6 +311,7 @@ void duplicate_channel(OpContext& c) {
     }
     made.id = core::new_channel_id();
     made.memo = {};
+    made.quick_mask = false;  // (masks@1: a copy of the Quick Mask is an ordinary alpha channel)
     made.raster = channels::encode(plane, core::page_depth(target));
     doc.edit_page(into).channels.push_back(made);
     c.report = Json{{"channel", made.id}, {"page", doc.page(into).index.json()}};
@@ -420,6 +421,7 @@ void set_channel(OpContext& c) {
     if (field(op, "kind") != nullptr) {
         const auto kind = core::channel_kind_from(text_of(op, "kind", ""));
         if (!kind) throw OpError("kind is alpha or spot");
+        if (*kind != channel.kind && channel.quick_mask) throw OpError("the Quick Mask stays an alpha channel");
         if (*kind != channel.kind) {  // (PhotoCraft's Channel Options: the other kind's settings start at their defaults)
             channel.kind = *kind;
             channel.opacity = 0.5;
@@ -439,6 +441,33 @@ void set_channel(OpContext& c) {
     } else {
         if (field(op, "opacity") != nullptr || field(op, "indicates") != nullptr) throw OpError("opacity and indicates are an alpha channel's");
         if (const auto solidity = unit_of(op, "solidity")) channel.solidity = *solidity;
+    }
+    // (PC3 B1, 選択範囲を保存… into a channel the page has: the selection replacing it, added (the larger), taken away
+    // (what is left) or intersected (the smaller) — PhotoCraft's save_selection, channel_cmds.rs:623-676 — at the channel's
+    // own resolution)
+    const Json* area = field(op, "area");
+    const std::string operation = text_of(op, "operation", area != nullptr ? "replace" : "");
+    if (field(op, "operation") != nullptr && area == nullptr) throw OpError("operation needs the area (the selection)");
+    if (area != nullptr) {
+        if (operation != "replace" && operation != "add" && operation != "subtract" && operation != "intersect") {
+            throw OpError("operation is replace, add, subtract or intersect");
+        }
+        if (channel.kind != ChannelKind::Alpha) throw OpError("a selection is saved into an alpha channel");
+        const Page& page = doc.page(at);
+        const Plane old_plane = channels::plane_of(page, channel);
+        const double dpi = std::max(1.0, std::round(old_plane.width / page.spec.width_mm.value() * 25.4));
+        const Plane chosen = channels::resized(channels::from_mask(selection::to_mask(*area, page, &doc, static_cast<int>(dpi))), old_plane.width,
+                                               old_plane.height);
+        Plane plane = old_plane;
+        for (std::size_t i = 0; i < plane.values.size(); ++i) {
+            const float a = old_plane.values[i], b = chosen.values[i];
+            plane.values[i] = operation == "add"        ? std::max(a, b)
+                              : operation == "subtract" ? std::max(a - b, 0.0f)
+                              : operation == "intersect" ? std::min(a, b)
+                                                         : b;
+        }
+        channel.raster = channels::encode(plane, core::page_depth(page));
+        channel.memo = {};
     }
     doc.edit_page(at).channels[index] = std::move(channel);
 }
@@ -476,7 +505,8 @@ bool flattened(const core::Layer& layer) {
 // roles hold nothing.
 bool holds_drawing(const core::Layer& layer) {
     return (layer.raster_png && !layer.raster_png->empty()) || layer.color_raster || layer.ink_raster || layer.stroke_count() > 0 ||
-           !layer.patches.empty() || (layer.kind == core::LayerKind::Fill && ((layer.fill && core::py_truthy(*layer.fill)) || layer.fill_rgb)) ||
+           !layer.patches.empty() || (layer.shapes && !layer.shapes->items.empty()) ||
+           (layer.kind == core::LayerKind::Fill && ((layer.fill && core::py_truthy(*layer.fill)) || layer.fill_rgb)) ||
            (layer.kind == core::LayerKind::Adjust && layer.adjust && core::py_truthy(*layer.adjust));
 }
 

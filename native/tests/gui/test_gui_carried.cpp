@@ -27,6 +27,8 @@
 #include "app/layer_panel.hpp"
 #include "app/main_window.hpp"
 #include "gui_support.hpp"
+#include "core/smart.hpp"
+#include "storage/asset_store.hpp"
 #include "storage/reader.hpp"
 
 using namespace genko;
@@ -192,15 +194,26 @@ private slots:
         };
         book.act("act_import")->trigger();
         QVERIFY2(filter.contains(QStringLiteral("*.jpg")) && filter.contains(QStringLiteral("*.psd")), qPrintable(filter));
+        // (PC3, the user's decision 2: a smart object of the file itself — its contents the JPEG's own bytes —, laid in
+        // the panel as the placed picture was)
         const core::Layer* placed = nullptr;
         for (const core::Layer& l : book.page(0).layers) {
-            if (l.kind == core::LayerKind::Placed) placed = &l;
+            if (l.kind == core::LayerKind::Smart) placed = &l;
         }
         QVERIFY(placed != nullptr && placed->frame_id && *placed->frame_id == frame && placed->title == "pic");
+        const core::SmartContents* contents = core::smart::contents_of(book.doc(), *placed);
+        QVERIFY(contents != nullptr);
+        QCOMPARE(contents->kind, std::string("file"));
+        QCOMPARE(contents->suffix, std::string(".jpg"));
+        QFile jpeg(file);
+        QVERIFY(jpeg.open(QIODevice::ReadOnly));
+        const QByteArray original = jpeg.readAll();
+        const auto kept = storage::AssetStore(book.path).get_bytes(contents->asset, contents->suffix);
+        QVERIFY(kept.has_value() && *kept == original.toStdString());
         QVERIFY(book.window->session().wait_saved(std::chrono::milliseconds(30000)));
         bool on_disk = false;
         const core::Document saved = gui_test::read_book(book.path);  // (kept: a loop over a part of a temporary outlives it)
-        for (const core::Layer& l : saved.pages[0]->layers) on_disk = on_disk || l.kind == core::LayerKind::Placed;
+        for (const core::Layer& l : saved.pages[0]->layers) on_disk = on_disk || (l.kind == core::LayerKind::Smart && core::smart::contents_of(saved, l) != nullptr);
         QVERIFY(on_disk);
         // not a picture: said, nothing placed
         const QString junk = book.tmp.path() + QStringLiteral("/junk.png");
@@ -301,7 +314,7 @@ private slots:
         QVERIFY(guide.contains(QStringLiteral("「ページ → 台詞 → フキダシを手で描く」")));
         const QString faq = app::help::faq(w);
         QVERIFY(faq.contains(QStringLiteral("「ウィンドウ → ワークスペース → はじめの配置に戻す」")));  // (a menu filled as it opens)
-        QVERIFY(faq.contains(QStringLiteral("「マスク ▾」、または「レイヤー → マスク → マスクを編集する（ペンで見せる・消しゴムで隠す）」")));
+        QVERIFY(faq.contains(QStringLiteral("「マスク ▾」、または「レイヤー → レイヤーマスク → マスクを編集する（ペンで見せる・消しゴムで隠す）」")));
         QVERIFY(app::help::shortcut_html(w).contains(QStringLiteral("キーは「ファイル → 環境設定…」で変えられます")));
         // a key changed: the guide and the list say the new one
         book.act("act_pen")->setShortcut(QKeySequence(QStringLiteral("P")));

@@ -7,15 +7,24 @@
 #include <QtTest>
 
 #include <QElapsedTimer>
+#include <QFile>
 
+#include <cstring>
 #include <memory>
+#include <thread>
 #include <vector>
 
+#include "core/color_model.hpp"
 #include "core/ids.hpp"
+#include "core/ink.hpp"
 #include "core/model.hpp"
 #include "core/pynum.hpp"
 #include "core/pyrandom.hpp"
+#include "core/smart.hpp"
+#include "render/image.hpp"
 #include "render/page.hpp"
+#include "render/png.hpp"
+#include "render/smart.hpp"
 
 namespace render = genko::render;
 using genko::core::Document;
@@ -44,6 +53,49 @@ Document f1_page(int lines = 1500) {
         }
         layer.strokes = genko::core::make_strokes(std::move(items));
     }
+    return doc;
+}
+
+// The most memory this process has held (kB: VmHWM), and what it holds now (VmRSS).
+long proc_kb(const char* key) {
+    QFile status(QStringLiteral("/proc/self/status"));
+    if (!status.open(QIODevice::ReadOnly)) return -1;
+    for (const QByteArray& line : status.readAll().split('\n')) {
+        if (line.startsWith(key)) return line.mid(static_cast<int>(std::strlen(key))).trimmed().split(' ').first().toLong();
+    }
+    return -1;
+}
+
+// A B4 colour page of 16 bits showing a 16-bit grey file of w × h pixels laid over it as a smart object.
+Document deep_file_page(int w, int h) {
+    genko::core::PageSpec spec = genko::core::PageSpec::b4_comic();
+    spec.expression = "color";
+    Document doc = genko::core::new_episode("深い", genko::core::Num(1), 1, spec);
+    genko::core::Page& page = doc.edit_page(0);
+    page.numero = false;
+    genko::core::RgbMode rgb;
+    rgb.depth = 16;
+    page.rgb = rgb;
+    std::string png = render::write_png(render::Image::create("I;16", render::Size{w, h}, render::Ink(1000)));
+    auto contents = std::make_shared<genko::core::SmartContents>();
+    contents->kind = "file";
+    contents->name = "scan.png";
+    contents->asset = genko::core::bytes_ref(png);
+    contents->suffix = ".png";
+    contents->format = "png";
+    contents->width_px = w;
+    contents->height_px = h;
+    contents->dpi = w / (page.spec.width_mm.value() / 25.4);
+    contents->depth = 16;
+    contents->mode = "gray";
+    doc.smart_files[contents->asset] = std::make_shared<const std::string>(std::move(png));
+    doc.smart_contents["sc_000000000001"] = contents;
+    genko::core::Layer layer;
+    layer.id = "so";
+    layer.kind = genko::core::LayerKind::Smart;
+    layer.clip_to = "none";
+    layer.smart = genko::core::smart::settings("sc_000000000001", genko::core::smart::Matrix{}, "lanczos");
+    page.layers.push_back(std::move(layer));
     return doc;
 }
 
@@ -101,6 +153,54 @@ private slots:
     }
 
     // test_h1.test_small_pictures_draw_lines_plainly (_thick(1, 200)): judged, as Python's
+    // (independent review A P1-1) A 16-bit grey file of 20 million pixels on a 16-bit B4 page drawn as the screen draws it
+    // at 100 dpi, in tiles of 512 pixels: one after another, then four at once. Shown: the time, the files decoded and the
+    // memory the process held at most (run alone, so that its high-water mark is this work's).
+    void smart_deep_file_tiles() {
+        const long before = proc_kb("VmHWM:");
+        const Document doc = deep_file_page(4000, 5000);
+        render::RenderOptions options;
+        options.mode = "proof";
+        options.precise = true;
+        const int dpi = 100;
+        const int w = render::mm_to_px(doc.page(0).spec.width_mm.value(), dpi), h = render::mm_to_px(doc.page(0).spec.height_mm.value(), dpi);
+        std::vector<render::RenderRegion> tiles;
+        for (int y = 0; y < h; y += 512)
+            for (int x = 0; x < w; x += 512) tiles.push_back(render::RenderRegion{x, y, std::min(512, w - x), std::min(512, h - y)});
+        render::clear_render_caches();
+        auto decoded = render::smart::counts().files_decoded;
+        QElapsedTimer clock;
+        clock.start();
+        for (const render::RenderRegion& tile : tiles) {
+            options.region = tile;
+            QVERIFY(render::render_page(doc.page(0), dpi, options, &doc).precise.has_value());
+        }
+        const qint64 one_by_one = clock.elapsed();
+        const auto first = render::smart::counts().files_decoded - decoded;
+        render::clear_render_caches();
+        decoded = render::smart::counts().files_decoded;
+        clock.restart();
+        std::vector<std::thread> threads;
+        for (std::size_t k = 0; k < 4; ++k) {
+            threads.emplace_back([&doc, &tiles, k, dpi] {
+                render::RenderOptions o;
+                o.mode = "proof";
+                o.precise = true;
+                for (std::size_t i = k; i < tiles.size(); i += 4) {
+                    o.region = tiles[i];
+                    (void)render::render_page(doc.page(0), dpi, o, &doc);
+                }
+            });
+        }
+        for (std::thread& t : threads) t.join();
+        const qint64 together = clock.elapsed();
+        const auto second = render::smart::counts().files_decoded - decoded;
+        qInfo("smart_deep_file_tiles: %zu tiles: one by one %lld ms (%llu decoded), four at once %lld ms (%llu decoded); the process held at most %ld MB "
+              "(%ld MB before)",
+              tiles.size(), static_cast<long long>(one_by_one), static_cast<unsigned long long>(first), static_cast<long long>(together),
+              static_cast<unsigned long long>(second), proc_kb("VmHWM:") / 1024, before / 1024);
+    }
+
     void small_picture_of_200_lines() {
         Document doc = f1_page(200);
         render::RenderOptions proof;

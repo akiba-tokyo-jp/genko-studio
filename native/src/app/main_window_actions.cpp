@@ -69,6 +69,7 @@
 #include "core/pynum.hpp"
 #include "render/brushes.hpp"
 #include "render/image.hpp"
+#include "render/layer_bounds.hpp"
 #include "render/page.hpp"
 
 namespace genko::app {
@@ -295,6 +296,7 @@ bool MainWindow::hold_key_released(int key, std::optional<double> now) {
     if (now.value_or(monotonic_seconds()) - switched.since < kHoldSeconds) return false;  // (a tap: the tool stays)
     QString back = switched.before;
     if (!tool_actions_.contains(back) && back == QLatin1String("marquee")) back = QStringLiteral("rect");
+    if (back == QLatin1String("shape") && !shape_tool_of(canvas_->shape_kind).isEmpty()) back = shape_tool_of(canvas_->shape_kind);  // (PC3 C-b)
     if (!tool_actions_.contains(back)) return false;
     choose_tool(back);
     tool_switch_.reset();
@@ -440,8 +442,8 @@ void MainWindow::build_actions() {
          QStringLiteral("ペンの線は触れた所で切れます"), true);
     make("act_frame", QStringLiteral("コマ割り"), [this] { choose_tool(QStringLiteral("frame")); }, keys({QKeySequence(QStringLiteral("F"))}),
          QStringLiteral("コマの中をドラッグして割る（斜めも。水平・垂直に吸い付く、Alt で自由）・間の白をドラッグで間隔を動かす・選んだコマの角をドラッグで形を変える"), true);
-    make("act_move", QStringLiteral("レイヤー移動"), [this] { choose_tool(QStringLiteral("move")); }, keys({QKeySequence(QStringLiteral("Q"))}),
-         QStringLiteral("描く先のレイヤーを丸ごとドラッグで動かす（Shift で縦・横・45°）"), true);
+    make("act_move", QStringLiteral("移動ツール"), [this] { choose_tool(QStringLiteral("move")); }, keys({QKeySequence(QStringLiteral("Q"))}),
+         QStringLiteral("選んだレイヤーをリンクしたレイヤーと一緒にドラッグで動かす（Shift で縦・横・45°、Ctrl+クリックでそこのレイヤーを選ぶ）"), true);
     tools_ = new QActionGroup(this);
     for (const auto& [tool, name] : {std::pair{"select", "act_select"}, {"pen", "act_pen"}, {"eraser", "act_eraser"}, {"frame", "act_frame"},
                                      {"move", "act_move"}, {"zoom", "act_zoom_tool"}}) {
@@ -451,8 +453,12 @@ void MainWindow::build_actions() {
         tool_actions_[QString::fromLatin1(tool)] = act;
     }
     actions_.at("act_select")->setChecked(true);
-    build_selection_actions();  // (範囲選択 and the selection's commands: main_window_select.cpp)
-    build_anim_actions();       // (アニメーション, タイムラプス: main_window_anim.cpp)
+    build_selection_actions();  // (the selection's tools and commands: main_window_select.cpp)
+    build_smart_select_actions();  // (PC3 B3: クイック選択・オブジェクト選択, 被写体・空・フォーカス領域, 選択とマスク…, マッティング)
+    build_clipboard_actions();  // (PC3 B2: 結合部分をコピー, 特殊ペースト, 塗りつぶし…, 境界線を描く…: main_window_clipboard.cpp)
+    build_mask_actions();       // (PC3 B2: すべてのマスクを統合, the layers chosen: main_window_masks.cpp)
+    build_transform_actions();  // (PC3 C-c: 自由変形, 変形 ▸, パペットワープ, 遠近法ワープ, ゆがみ…, ワープテキスト…: main_window_transform.cpp)
+    build_anim_actions();      // (アニメーション, タイムラプス: main_window_anim.cpp)
     build_channel_actions();    // (channels@1: the channel targets, the selection to a channel: main_window_channels.cpp)
     build_paint_actions();      // (スポイト … ゆがみ, 色の入れ替え, 透明色, 太く・細く: main_window_paint.cpp)
     build_vector_actions();     // (線の修正, 線の編集 and its commands: main_window_vector.cpp)
@@ -461,8 +467,14 @@ void MainWindow::build_actions() {
     build_line_actions();       // (テキスト, 台詞 and the book's lines, the 台詞 panel: main_window_lines.cpp)
     build_output_actions();     // (書き出し, 印刷, 履歴, 入稿前の点検, スマホの画面, 目盛り: main_window_output.cpp)
     build_studio_actions();     // (チャットでの承認: main_window_studio.cpp)
+    build_smart_actions();      // (smart-objects@1: スマートオブジェクト, 埋め込みを配置…, ラスタライズ: main_window_smart.cpp)
+    build_path_actions();       // (vector@1, PC3 C-a: ペンツール, パス選択ツール, ベクトルマスク: main_window_paths.cpp)
+    build_page_size_actions();  // (PC3 C-e: 画像解像度…, カンバスサイズ…, 画像の回転, 切り抜き(ツール): main_window_page_size.cpp)
+    build_retouch_actions();    // (PC3 B4: the retouching tools, コンテンツに応じた塗りつぶし…: retouch_tools.cpp)
+    build_shape_actions();      // (pen-shapes@1, PC3 C-b: the shape tools, シェイプを結合…: main_window_shapes.cpp)
+    build_align_actions();      // (PC3 C-d: 重ね順・整列・分布・リンク・ロック, スナップ (with 定規's グリッドにスナップ), the move tool's: main_window_align.cpp)
     make("act_point_wider", QStringLiteral("選んだ点を太く"), [this] { point_width(1.25); }, keys({QKeySequence(QStringLiteral("Ctrl+Alt+]"))}),
-         QStringLiteral("線の編集で選んだ制御点のところだけ、線を太くします"));
+         QStringLiteral("部分選択ツールで選んだ制御点のところだけ、線を太くします"));
     make("act_color", QStringLiteral("ペンの色…"), [this] { pick_colour(); }, keys({QKeySequence(QStringLiteral("C"))}));
     // (one chosen in a list, then merged with the one under it: named apart from Python's 下のレイヤーと結合, which
     // merges the panel's chosen layer at once — a command's name says one thing)
@@ -607,6 +619,7 @@ void MainWindow::build_menus() {
     file->addAction(action("act_timelapse"));
     file->addAction(action("act_timelapse_export"));
     file->addSeparator();
+    file->addMenu(QStringLiteral("スクリプト"))->addAction(action("act_flatten_masks"));  // (PC3 B2: file.scripts.*)
     actions_menu_ = file->addMenu(QStringLiteral("オートアクション"));
     actions_menu_->setProperty("remade", true);
     connect(actions_menu_, &QMenu::aboutToShow, this, &MainWindow::fill_actions_menu);
@@ -621,7 +634,7 @@ void MainWindow::build_menus() {
     edit->addAction(action("act_redo"));
     edit->addAction(action("act_history"));
     edit->addSeparator();
-    for (const char* name : {"act_cut", "act_copy", "act_paste", "act_delete_area"}) edit->addAction(action(name));
+    build_clipboard_menu(edit);  // (カット … 描画色で塗りつぶし, 変形: main_window_clipboard.cpp)
     edit->addSeparator();
     for (const char* name : {"act_select_all", "act_deselect"}) edit->addAction(action(name));
     edit->addSeparator();
@@ -636,6 +649,7 @@ void MainWindow::build_menus() {
     view->addAction(action("act_guides"));
     view->addAction(action("act_phone"));
     view->addAction(action("act_scale"));
+    view->addAction(action("act_sel_edges"));  // (PC3 B1: 選択範囲の境界線)
     view->addAction(action("act_onion"));
     view->addAction(action("act_cmyk_proof"));
     // 校正の設定 (view.proofSetup.*): what 色の校正 shows; 色域外警告 (view.gamutWarning)
@@ -661,8 +675,8 @@ void MainWindow::build_menus() {
     for (const char* name : {"act_picker", "act_fill", "act_lassofill", "act_fill_gaps", "act_gradient", "act_reshape", "act_vector", "act_liquify"})
         tools->addAction(action(name));
     tools->addSeparator();
-    for (const char* name : {"act_marquee", "act_lasso", "act_wand"}) tools->addAction(action(name));
-    tools->addSeparator();
+    build_tool_groups(tools);  // (the selection's tools, the retouching's: main_window_select.cpp)
+    tools->addAction(action("act_crop_tool"));  // (PC3 C-e)
     for (const char* name : {"act_ruler", "act_3d", "act_effect", "act_stamp"}) tools->addAction(action(name));
     tools->addSeparator();
     for (const char* name : {"act_thicker", "act_thinner"}) tools->addAction(action(name));
@@ -683,9 +697,11 @@ void MainWindow::build_menus() {
     tools->addAction(action("act_point_thinner"));
     tools->addSeparator();
     build_guide_menus(tools);  // (定規 and 3D: main_window_guides.cpp)
-    build_selection_menu(bar->addMenu(QStringLiteral("選択")));
+    build_selection_menu(bar->addMenu(QStringLiteral("選択範囲")));
     QMenu* layers = bar->addMenu(QStringLiteral("レイヤー"));
     for (const char* name : {"act_layer_pen", "act_layer_paint", "act_layer_folder"}) layers->addAction(action(name));
+    QMenu* made = layers->addMenu(QStringLiteral("新規"));  // (PC3 B2: Photoshop's レイヤー → 新規)
+    for (const char* name : {"act_layer_via_copy", "act_layer_via_cut"}) made->addAction(action(name));
     layers->addSeparator();
     for (const char* name : {"act_layer_dup", "act_layer_merge", "act_layer_delete"}) layers->addAction(action(name));
     layers->addSeparator();
@@ -694,18 +710,26 @@ void MainWindow::build_menus() {
     layer_special_menu_ = layers->addMenu(QStringLiteral("塗り・グラデーション・色調補正のレイヤー"));
     layer_many_menu_ = layers->addMenu(QStringLiteral("まとめて（複数のレイヤー・表示レイヤー・変換）"));
     layers->addSeparator();
-    for (const char* name : {"act_layer_up", "act_layer_down"}) layers->addAction(action(name));
+    QMenu* arrange = layers->addMenu(QStringLiteral("重ね順"));  // (decision 5; PC3 C-d: arrange_layers, among siblings)
+    for (const char* name : {"act_layer_front", "act_layer_up", "act_layer_down", "act_layer_back"}) arrange->addAction(action(name));
+    arrange->addSeparator();
+    arrange->addAction(action("act_layer_reverse"));
+    build_align_menus(layers, view);  // (PC3 C-d: 整列 ▸, 分布 ▸, レイヤーをリンク…; 表示 → スナップ・スナップ先: main_window_align.cpp)
     layers->addSeparator();
     layers->addAction(action("act_layer_draft"));
     layer_effect_menu_ = layers->addMenu(QStringLiteral("境界効果・表示色の印刷"));
-    layer_mask_menu_ = layers->addMenu(QStringLiteral("マスク"));
+    layer_mask_menu_ = layers->addMenu(QStringLiteral("レイヤーマスク"));  // (PC3 B2, decision 5: Photoshop's name)
+    layers->addAction(action("act_mask_all_objects"));  // (PC3 B3)
     layers->addSeparator();
     for (const char* name : {"act_layer_merge_down", "act_layer_merge_layers", "act_layer_merge_visible", "act_layer_flatten", "act_layer_convert_paint", "act_layer_convert_pen"})
         layers->addAction(action(name));
     layers->addSeparator();
+    build_matting_menu(layers);  // (PC3 B3: マッティング ▸, main_window_smart_select.cpp)
+    layers->addSeparator();
     layers->addAction(action("act_plugins"));
     layers->addAction(action("act_plugin_settings"));
     build_adjust_menus(layers, edit);  // (PC2: レイヤー → 色調補正, app/main_window_adjust.cpp)
+    build_smart_menus(layers, file);   // (PC3: スマートオブジェクト and the placing commands, app/main_window_smart.cpp)
     QMenu* pages = bar->addMenu(QStringLiteral("ページ"));
     for (const char* name : {"act_add_page", "act_dup_page", "act_del_page"}) pages->addAction(action(name));
     pages->addSeparator();
@@ -744,7 +768,11 @@ void MainWindow::build_menus() {
     frames->addAction(action("act_reset_shape"));
     frames->addSeparator();
     frames->addAction(action("act_frame_numbers"));
+    pages->addSeparator();
+    build_page_size_menu(pages);  // (PC3 C-e: Photoshop's イメージ's paper commands, main_window_page_size.cpp)
     build_line_menus(pages);  // (台詞, ストーリーエディター, 台詞の検索・置換: main_window_lines.cpp)
+    build_path_menus(file, view, tools, layers);  // (PC3 C-a: the paths' commands — ページ → 台詞's too —, app/main_window_paths.cpp)
+    build_shape_menus(edit, view, tools, layers);  // (PC3 C-b: the shape tools and the shape parts' commands, app/main_window_shapes.cpp)
     pages->addAction(action("act_book_preview"));
     pages->addAction(action("act_checks"));
     pages->addSeparator();
@@ -799,7 +827,7 @@ void MainWindow::build_toolbars() {
     for (const char* name : {"act_marquee", "act_lasso", "act_wand", "act_reshape"}) palette_->addAction(action(name));
     palette_->addSeparator();
     for (const char* name : {"act_ruler", "act_3d", "act_effect"}) palette_->addAction(action(name));
-    for (const auto& [name, label] : {std::pair{"act_marquee", "長方形選択"}, {"act_lasso", "投げ縄選択"}, {"act_reshape", "線の修正"}, {"act_3d", "3D"}})
+    for (const auto& [name, label] : {std::pair{"act_marquee", "長方形選択"}, {"act_lasso", "なげなわ"}, {"act_reshape", "線の修正"}, {"act_3d", "3D"}})
         action(QString::fromLatin1(name))->setIconText(QString::fromUtf8(label));  // (the palette's names stay short; menus keep the full name)
     addToolBar(Qt::LeftToolBarArea, palette_);
     {
@@ -891,6 +919,9 @@ void MainWindow::build_docks() {
     view_menu_->addAction(layers->toggleViewAction());
     layers_dock_ = layers;
     build_channel_dock();  // (チャンネル, a tab beside the layers: main_window_channels.cpp)
+    build_path_dock();     // (パス, a tab beside the layers: main_window_paths.cpp)
+    build_clone_source_dock();  // (PC3 B4: コピーソース, when it is opened: retouch_tools.cpp)
+    build_shape_dock();    // (シェイプ, a tab beside the layers: main_window_shapes.cpp)
     build_adjust_docks();  // (PC2a: 色調補正 and 属性, app/adjust_panels.cpp)
     build_info_docks();    // (ヒストグラム, 情報: info_panels.cpp)
     build_line_dock();  // (台詞, a tab beside the pages and the layers: main_window_lines.cpp)
@@ -921,17 +952,20 @@ void MainWindow::build_docks() {
 void MainWindow::choose_tool(const QString& tool) {
     // (what was in hand before, for キーを押している間だけ持ち替え: hold_key_released)
     const QString before = canvas_->tool();
-    if (before != (is_marquee_tool(tool) ? QStringLiteral("marquee") : tool)) tool_switch_ = ToolSwitch{tool, before, monotonic_seconds()};
+    const QString becomes = is_marquee_tool(tool) ? QStringLiteral("marquee") : is_shape_tool(tool) ? QStringLiteral("shape") : tool;
+    if (before != becomes) tool_switch_ = ToolSwitch{tool, before, monotonic_seconds()};
     if (is_marquee_tool(tool)) {  // (範囲選択: the marquee tool, in one of its ways)
         choose_marquee(tool);
         if (marquee_mode_ != nullptr) marquee_mode_->setCurrentIndex(std::max(0, marquee_mode_->findData(tool)));
+    } else if (is_shape_tool(tool)) {  // (PC3 C-b: the shape tools, the canvas's 図形 in one of its figures)
+        choose_shape_tool(tool);
     } else {
         canvas_->set_tool(tool);
     }
     if (const auto it = tool_actions_.find(tool); it != tool_actions_.end()) it->second->setChecked(true);
     if (tool == QLatin1String("effect")) set_effect_pictures(effect_actions_, {"focus", "speed", "uni_flash", "beta_flash"});  // (drawn when first needed)
     if (tool_settings_ != nullptr) tool_settings_->show_tool(canvas_->tool());
-    panel_for_tool(tool);  // (the lines for the text tool, the layers for the drawing tools: main_window_lines.cpp)
+    panel_for_tool(becomes);  // (the lines for the text tool, the layers for the drawing tools: main_window_lines.cpp)
     pen_changed();
 }
 
@@ -991,6 +1025,7 @@ void MainWindow::on_stroke(const StrokeInput& stroke) {
                                     {"width_mm", erase ? eraser_mm_ : std::max(0.5, brush_->size->value())}, {"show", !erase}}}));
         return;
     }
+    if (retouch_stroke(stroke, *page, *layer)) return;  // (PC3 B4: the retouching brushes, retouch_tools.cpp)
     if (paint_stroke(stroke, *page, *layer)) return;  // (透明色, ゆがみ, 色混ぜ: main_window_paint.cpp)
     const bool rulers = canvas_->snap_rulers && page->rulers.is_array() && !page->rulers.empty();
     if (stroke.tool == QLatin1String("eraser")) {
@@ -1069,6 +1104,7 @@ void MainWindow::on_frame_selected(const QString& frame_id) {
 }
 
 void MainWindow::context_menu(const QString& frame_id, const QPoint& global) {
+    if (selection_context_menu(global)) return;  // (PC3 B1: over the selection with a selection tool, Photoshop's menu)
     // a drawing tool's right click: the round menu at the pen (Shift: the usual menu)
     const bool shift = (QApplication::keyboardModifiers() & Qt::ShiftModifier) != 0;
     if (radial_on() && radial_tool(canvas_->tool()) && !shift) {
@@ -1560,7 +1596,7 @@ void MainWindow::point_width(double factor) {
     const std::optional<int> point = canvas_->vector_point;
     const core::Layer* layer = paint_layer();
     if (ids.empty() || !point || layer == nullptr) {
-        flash(QStringLiteral("先に「線の編集」で線を選び、□（制御点）をクリックします"), 4000);
+        flash(QStringLiteral("先に「部分選択ツール」で線を選び、□（制御点）をクリックします"), 4000);
         return;
     }
     const core::Stroke* stroke = nullptr;
@@ -1668,14 +1704,15 @@ void MainWindow::frame_drawn(const QVector<QPointF>& points) {
 }
 
 void MainWindow::layer_move_started() {
-    // the picture of the layer being moved, for the canvas to carry under the pen (drawn on a worker thread)
+    // the picture of the layers being moved (PC3 C-d: the layers chosen, their folders' and linked layers), for the
+    // canvas to carry under the pen (drawn on a worker thread); they are not snapped to
     const core::Page* page = current_page();
-    const core::Layer* layer = target_layer();
-    if (page == nullptr || layer == nullptr) return;
+    const std::vector<std::string> moved = move_targets();
+    canvas_->snap_moving = moved;
+    if (page == nullptr || moved.empty()) return;
     const int dpi = std::max(24, std::min(150, static_cast<int>(std::nearbyint(canvas_->scale() * 25.4))));
     const auto doc = session_->snapshot();
     const std::size_t index = static_cast<std::size_t>(page_index_);
-    const std::string layer_id = layer->id;
     const std::uint64_t ticket = ++move_ticket_;
     auto* watcher = new QFutureWatcher<std::pair<QImage, QRectF>>(this);
     connect(watcher, &QFutureWatcher<std::pair<QImage, QRectF>>::finished, this, [this, watcher, ticket] {
@@ -1683,13 +1720,22 @@ void MainWindow::layer_move_started() {
         watcher->deleteLater();
         if (ticket == move_ticket_ && !image.isNull()) canvas_->set_move_image(image, where);
     });
-    watcher->setFuture(QtConcurrent::run([doc, index, layer_id, dpi]() -> std::pair<QImage, QRectF> {
+    watcher->setFuture(QtConcurrent::run([doc, index, moved, dpi]() -> std::pair<QImage, QRectF> {
         try {
             const core::Page& p = doc->page(index);
+            std::optional<render::Image> together;  // (the layers drawn one over another, in the page's order)
             for (const core::Layer& l : p.layers) {
-                if (l.id != layer_id) continue;
-                const render::Image drawn = render::layer_image(p, l, dpi, doc.get(), true);
-                const render::Image image = drawn.mode() == "RGBA" ? drawn : drawn.convert("RGBA");
+                if (std::find(moved.begin(), moved.end(), l.id) == moved.end() || l.kind == core::LayerKind::Folder) continue;
+                render::Image drawn = render::layer_image(p, l, dpi, doc.get(), true);
+                if (drawn.mode() != "RGBA") drawn = drawn.convert("RGBA");
+                if (!together) {
+                    together = std::move(drawn);
+                } else if (together->size() == drawn.size()) {
+                    together = render::alpha_composite(*together, drawn);
+                }
+            }
+            if (together) {
+                const render::Image& image = *together;
                 const auto box = image.getbbox();
                 if (!box) return {};
                 const render::Image piece = image.crop(*box);
@@ -1707,20 +1753,19 @@ void MainWindow::layer_move_started() {
 }
 
 void MainWindow::layer_moved(double dx, double dy) {
+    // (PC3 C-d, decision 5's 移動ツール: the layers chosen — else the layer drawn on —, their folders' and linked layers
+    // with them, by whole pixels of the page's working grid (200 dpi, as the paint layers hold their pixels), so their
+    // pixels move exactly: transform_layers' move; their linked masks with them)
+    canvas_->snap_moving.clear();
     const core::Page* page = current_page();
-    const core::Layer* layer = paint_layer();
-    if (page == nullptr || layer == nullptr) return;
-    // (Python's w + m: an int paper size and the float margin make a float)
-    const core::Num m = 30.0;  // everything on the layer, and a little beyond the paper
-    const core::Num w = page->spec.width_mm;
-    const core::Num h = page->spec.height_mm;
-    const Json whole = Json::object({{"poly", Json::array({Json::array({(-m).json(), (-m).json()}), Json::array({(w + m).json(), (-m).json()}),
-                                                           Json::array({(w + m).json(), (h + m).json()}), Json::array({(-m).json(), (h + m).json()})})}});
-    apply_ops(Json::array({Json::object({{"op", "transform_area"},
-                                         {"page", page->index.json()},
-                                         {"layer_id", layer->id},
-                                         {"area", whole},
-                                         {"matrix", Json::array({1, 0, 0, 1, dx, dy})}})}));
+    const std::vector<std::string> ids = transform_targets();
+    if (page == nullptr || ids.empty()) return;
+    const auto g = render::layer_bounds::grid(*page);
+    const double mx = core::py_round(std::nearbyint(dx * g[0]) / g[0], 6), my = core::py_round(std::nearbyint(dy * g[1]) / g[1], 6);
+    if (mx == 0 && my == 0) return;
+    Json list = Json::array();
+    for (const std::string& id : ids) list.push_back(id);
+    apply_ops(Json::array({Json{{"op", "transform_layers"}, {"page", page->index.json()}, {"ids", list}, {"move", Json::array({mx, my})}, {"interp", transform_interp_}}}));
 }
 
 CommandSearch* MainWindow::find_command() {
@@ -1778,10 +1823,12 @@ void MainWindow::make_launcher() {
     auto* row = new QHBoxLayout(bar);
     row->setContentsMargins(3, 2, 3, 2);
     row->setSpacing(2);
-    launcher_actions_ = {{QStringLiteral("塗る"), action("act_fill_selection")}, {QStringLiteral("消す"), action("act_delete_area")},
+    launcher_actions_ = {{QStringLiteral("塗りつぶし"), action("act_fill_selection")}, {QStringLiteral("消去"), action("act_delete_area")},
                          {QStringLiteral("トーン"), action("act_tone_here")},    {QStringLiteral("反転"), action("act_sel_invert")},
-                         {QStringLiteral("広げる"), action("act_sel_grow")},     {QStringLiteral("変形"), action("act_warp_perspective")},
-                         {QStringLiteral("コピー"), action("act_copy")},         {QStringLiteral("解除"), action("act_deselect")}};
+                         {QStringLiteral("拡張"), action("act_sel_grow")},     {QStringLiteral("変形"), action("act_warp_perspective")},
+                         {QStringLiteral("コピー"), action("act_copy")},
+                         {QStringLiteral("選択とマスク"), action("act_select_mask")},  // (PC3 B3)
+                         {QStringLiteral("選択を解除"), action("act_deselect")}};
     for (const auto& [label, act] : launcher_actions_) {
         auto* button = new QToolButton;
         button->setText(label);

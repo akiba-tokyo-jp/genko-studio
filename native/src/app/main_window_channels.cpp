@@ -8,12 +8,15 @@
 #include <QMenu>
 
 #include <algorithm>
+#include <set>
+#include <string>
 
 #include "app/ask.hpp"
 #include "app/canvas.hpp"
 #include "app/channel_panel.hpp"
 #include "app/main_window.hpp"
 #include "core/channels.hpp"
+#include "core/error.hpp"
 #include "core/pyconv.hpp"
 #include "render/selection.hpp"
 
@@ -142,14 +145,29 @@ Json MainWindow::with_channel_target(const Json& ops) const {
     const ChannelView view = channel_view();
     if (view.target.empty()) return ops;
     const bool plate = core::find_channel(*page, view.target) == nullptr;
+    // (PC3: the pixel ops that change a layer's pixels and cannot paint a channel — the retouching brushes, コンテンツに応じた
+    // 塗りつぶし, the Magic Eraser, 境界線を描く, the matting —: refused while a channel, the Quick Mask too, is drawn on, rather
+    // than changing the layer under it)
+    static const std::set<std::string, std::less<>> kLayerOnly{"clone_stamp", "healing_brush", "spot_healing", "history_brush",
+                                                               "content_aware_fill", "magic_erase", "outline_area", "matting"};
+    const auto on_this_page = [&](const Json& op) {
+        try {
+            return core::Num(core::py_int(op.value("page", Json()))) == page->index;
+        } catch (const std::exception&) {
+            return false;
+        }
+    };
     Json out = ops;
     for (Json& op : out) {
-        if (!op.is_object() || !op.contains("op") || !op["op"].is_string() || !core::channel_target_op(op["op"].get<std::string>())) continue;
-        try {
-            if (!(core::Num(core::py_int(op.value("page", Json()))) == page->index)) continue;  // (another page's op: as it is)
-        } catch (const std::exception&) {
+        if (!op.is_object() || !op.contains("op") || !op["op"].is_string()) continue;
+        if (!core::channel_target_op(op["op"].get<std::string>())) {
+            if (!plate && kLayerOnly.contains(op["op"].get<std::string>()) && on_this_page(op)) {
+                throw core::Error("value", "チャンネル（クイックマスクも）に描いている間は、この操作はできません（レイヤーの画素だけを変える操作です）。"
+                                    "描く先をレイヤーに戻してから使います");
+            }
             continue;
         }
+        if (!on_this_page(op)) continue;  // (another page's op: as it is)
         if (core::python_channel_kind(op)) {
             // (levels, curve and brightness_contrast take Python's own channel — r, g or b, else all three —, which the
             // target fills in when the op names none (all three): an RGB page's plate as r, g or b; a CMYK or Lab page's
@@ -176,7 +194,7 @@ bool MainWindow::save_selection_to_channel(std::optional<QString> name) {
     if (!area || page == nullptr) return false;
     if (!name) {
         const Asked asked = asking();
-        name = ask::get_text(this, QStringLiteral("選択範囲をチャンネルに保存"), QStringLiteral("チャンネルの名前（空のままなら「Alpha n」）"));
+        name = ask::get_text(this, QStringLiteral("選択範囲を保存"), QStringLiteral("チャンネルの名前（空のままなら「Alpha n」）"));
         if (!name || !still(asked)) return false;
     }
     Json op{{"op", "add_channel"}, {"page", page->index.json()}, {"fill", "area"}, {"area", *area}};
@@ -198,20 +216,6 @@ void MainWindow::load_selection_from_channel(const std::string& id) {
     join_selection(area, QStringLiteral("replace"));
 }
 
-void MainWindow::fill_channel_menu() {
-    QMenu* menu = channel_load_menu_;
-    menu->clear();
-    const core::Page* page = current_page();
-    if (page == nullptr || page->channels.empty()) {
-        menu->addAction(QStringLiteral("（このページにチャンネルはありません）"))->setEnabled(false);
-        return;
-    }
-    for (const core::Channel& channel : page->channels) {
-        const std::string id = channel.id;
-        menu->addAction(QString::fromStdString(channel.name), this, [this, id] { load_selection_from_channel(id); });
-    }
-}
-
 void MainWindow::build_channel_actions() {
     const QString tip = QStringLiteral("ペン・消しゴム・塗り・フィルターの描く先を、ページのすべての色（合成）に戻す");
     make("act_channel_composite", QStringLiteral("合成チャンネルを対象にする"), [this] { target_slot(2); }, {QKeySequence(QStringLiteral("Ctrl+Alt+2"))}, tip);
@@ -220,8 +224,8 @@ void MainWindow::build_channel_actions() {
              {QKeySequence(QStringLiteral("Ctrl+Alt+%1").arg(slot))},
              QStringLiteral("チャンネル パネルの %1 番目（合成の次から: 色の版、アルファ・特色の順）を描く先にする").arg(slot - 1));
     }
-    make("act_sel_to_channel", QStringLiteral("選択範囲をチャンネルに保存…"), [this] { save_selection_to_channel(); }, {},
-         QStringLiteral("選択範囲をアルファチャンネルとしてページに残す（白が選ばれた所。チャンネル パネルで直せる）"));
+    make("act_sel_to_channel", QStringLiteral("選択範囲を保存…"), [this] { save_selection_dialog(); }, {},
+         QStringLiteral("選択範囲をアルファチャンネルとしてページに残す（新規か、あるチャンネルに置き換え・追加・削除・交差。白が選ばれた所）"));
 }
 
 void MainWindow::build_channel_dock() {

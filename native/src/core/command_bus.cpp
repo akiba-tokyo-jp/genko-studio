@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <cstdint>
 #include <map>
+#include <mutex>
 #include <set>
 #include <unordered_set>
 #include <utility>
@@ -12,11 +13,13 @@
 #include "core/adjust_kinds.hpp"
 #include "core/channels.hpp"
 #include "core/covers.hpp"
+#include "core/masks.hpp"
 #include "core/ops_schema.hpp"
 #include "core/ops_util.hpp"
 #include "core/color_raster.hpp"
 #include "core/pyconv.hpp"
 #include "core/pyops.hpp"
+#include "core/smart.hpp"
 #include "core/studio.hpp"
 
 namespace genko::core {
@@ -85,7 +88,18 @@ std::string usage(const Json& op, bool channel = false) {
 // Python's.
 bool native_key(std::string_view op, std::string_view key) {
     return (op == "merge_visible" && key == "flatten") || (op == "convert_layer" && key == "preserve_precision") ||
-           (op == "define_brush" && key == "paper") || ((op == "add_line" || op == "edit_line") && key == "ruby_spans");
+           (op == "define_brush" && key == "paper") || ((op == "add_line" || op == "edit_line") && key == "ruby_spans") ||
+           key == "contents" ||  // (smart-objects@1: any op on a smart object's page)
+           // PC3 (masks@1): set_layer_mask's linked, density and feather_mm; a pixel op's layer_mask (its layer's mask
+           // painted instead of its pixels)
+           (op == "set_layer_mask" && (key == "linked" || key == "density" || key == "feather_mm")) ||
+           (key == "layer_mask" && channel_target_op(op)) ||
+           // PC3 B2: transform_area's mask (follow: the layer's mask moved with its pixels), paste's center_mm, fill_area's
+           // preserve_transparency
+           (op == "transform_area" && key == "mask") || (op == "paste" && key == "center_mm") ||
+           (op == "fill_area" && key == "preserve_transparency") ||
+           // PC3 C-c (SPEC COLOR-07): Filter › Liquify's strokes and its field's spacing
+           (op == "liquify" && (key == "strokes" || key == "mesh_mm"));
 }
 
 // PC2 (SPEC COLOR-04): the settings of this build's own an op of Python's reads by what else it was given —
@@ -404,6 +418,21 @@ void check_page_lock(Document& doc, const Json& op, const Actor& actor) {
         }
         return;
     }
+    if (named && one_of(name, {"smart_profile", "smart_replace", "smart_relink", "smart_update", "smart_embed", "smart_link", "smart_to_page"})) {
+        // (smart-objects@1, PC3 A1: the contents change on every page showing them — each is asked, then the op's own)
+        const auto index = op_page_index(doc, op);
+        const Page* page = index ? first_page(doc, *index) : nullptr;
+        const Json* id = get(op, "id");
+        if (page != nullptr && id != nullptr && id->is_string()) {
+            for (const Layer& layer : page->layers) {
+                if (layer.id != id->get_ref<const std::string&>()) continue;
+                if (const auto contents = smart::contents_id(layer)) {
+                    for (const std::size_t at : smart::pages_using(doc, *contents)) check_held(doc, doc.page(at), doc.page(at).index, actor);
+                }
+                break;
+            }
+        }
+    }
     // (Python takes a lock on a page the book does not have, and lets it go, without a word: refused here)
     const bool lock_op = named && (name == "lock_page" || name == "unlock_page");
     if (const Json* page_value = get(op, "page"); lock_op && page_value != nullptr) {
@@ -530,7 +559,7 @@ void check_strict(const Document& doc, const Json& op_in, const Actor& actor) {
                 break;
             }
         }
-        const bool drawn = target != nullptr && (target->stroke_count() > 0 || !target->patches.empty() ||
+        const bool drawn = target != nullptr && (target->stroke_count() > 0 || !target->patches.empty() || (target->shapes && !target->shapes->items.empty()) ||
                                                  (target->raster_png && !target->raster_png->empty()));
         if (drawn && printed(*target) && !target->exportable && !page.name_ok) {
             throw OpError("set_layer exportable on a drawn layer needs name_ok on page " + page.index.repr() +
@@ -609,12 +638,32 @@ Json expand_for_pages(const Document& doc, const Json& op) {
     return out;
 }
 
+namespace {
+
+// (PC3: the kinds and modifiers of an area the drawing build adds, render/area_kinds.cpp)
+std::mutex g_area_keys_mutex;
+std::set<std::string, std::less<>>& area_keys() {
+    static std::set<std::string, std::less<>> keys;
+    return keys;
+}
+
+}  // namespace
+
+void add_area_key(std::string key) {
+    const std::lock_guard lock(g_area_keys_mutex);
+    area_keys().insert(std::move(key));
+}
+
 bool area_needs_resolving(const Json& area) {
     if (!area.is_object()) return false;
     // (channels@1: "channel", a page's alpha or spot channel — this build's own kind)
     for (const char* key : {"rect", "ellipse", "layer", "color", "all", "saved", "union", "intersect", "subtract", "invert",
                             "grow_mm", "feather_mm", "channel"}) {
         if (area.contains(key)) return true;
+    }
+    const std::lock_guard lock(g_area_keys_mutex);
+    for (const auto& [key, value] : area.items()) {
+        if (area_keys().contains(key)) return true;
     }
     return false;
 }
@@ -663,6 +712,11 @@ std::vector<std::string> validate_document(const Document& doc) {
                 !leaves.contains(*layer.frame_id)) {
                 warnings.push_back("page " + page->index.repr() + " layer " + layer.id + ": panel " + *layer.frame_id +
                                    " is gone (placed art will not clip)");
+            }
+            // (smart-objects@1: a picture's smart object follows its panel as placed art does)
+            if (layer.kind == LayerKind::Smart && layer.frame_id && !layer.frame_id->empty() && !leaves.contains(*layer.frame_id)) {
+                warnings.push_back("page " + page->index.repr() + " layer " + layer.id + ": panel " + *layer.frame_id +
+                                   " is gone (the smart object will not clip)");
             }
         }
     }
@@ -852,6 +906,84 @@ void refuse_changed_unread_pages(const Document& before, const Document& after) 
     }
 }
 
+// smart-objects@1 (PC3 A0): an op given "contents" ("sc_…") works on that smart object's page — the only page (1) of a book
+// of its own, without lines, locks or gates, the book's settings, studio and assets as they are — and the page it leaves
+// goes back into the contents (every smart object showing them, on any page, shows the change). What it may change
+// besides that page are the book's tables, files and contents (a smart object made inside); an op that changes the lines,
+// the pages, their panels, approvals or the book's own settings is refused. Asked first: the lock of every page showing
+// the contents (they would look different). What the op reports, its report; its warnings, said of the contents.
+std::optional<Json> apply_in_contents(const CommandBus& bus, Document& work, const Json& op, const Actor& actor, bool dry_run, Json& warnings,
+                                      const std::string& prefix, const std::string& name) {
+    const Json& target = op["contents"];
+    const std::string id = target.is_string() ? target.get<std::string>() : std::string();
+    const auto found = work.smart_contents.find(id);
+    if (found == work.smart_contents.end() || !found->second) throw ApplyError(prefix + "no smart object contents " + py_str(target));
+    if (found->second->kind != "page" || !found->second->page) {
+        throw ApplyError(prefix + "the smart object contents " + id + " are a file, not a page");
+    }
+    const bool refused = not_per_page(name) || layout_op(name) || line_op(name) || book_op(name) ||
+                         one_of(name, {"set_frame", "select_frame", "add_line", "lock_page", "unlock_page", "name_ok", "advance", "approve",
+                                       "revoke", "for_pages", "undo", "set_meta", "set_spread", "set_assignee"});
+    if (refused) throw ApplyError(prefix + "this op cannot be used inside smart object contents");
+    for (const std::size_t at : smart::pages_using(work, id)) {
+        try {
+            check_held(work, work.page(at), work.page(at).index, actor);
+        } catch (const OpError& error) {
+            throw ApplyError(prefix + error.what());
+        }
+    }
+    const PagePtr page = found->second->page;
+    Document inner = work;
+    inner.pages = {page};
+    inner.deferred.clear();
+    inner.story.clear();
+    inner.page_locks = Json::object();
+    inner.strict_gates = false;
+    Json one = op;
+    one.erase("contents");
+    ApplyResult result;
+    try {
+        result = bus.apply(inner, Json::array({one}), actor, dry_run);
+    } catch (const ApplyError& error) {
+        std::string message = error.what();
+        const std::string head = "ops[0] " + name + ": ";
+        if (message.starts_with(head)) message = message.substr(head.size());
+        throw ApplyError(prefix + message, error.code());
+    }
+    const Document& after = result.doc;
+    const bool same_book = after.pages.size() == 1 && after.pages[0]->id == page->id && after.pages[0]->index == page->index &&
+                           after.story.empty() && after.page_locks == Json::object() && after.title == work.title &&
+                           after.episode == work.episode && after.binding == work.binding && after.tickets == work.tickets &&
+                           after.nombre == work.nombre && after.bible.plot == work.bible.plot && after.bible.characters == work.bible.characters &&
+                           after.pages[0]->name_ok == page->name_ok && after.pages[0]->art_ok == page->art_ok &&
+                           after.pages[0]->stage == page->stage && smart::same_panels(after.pages[0]->frames, page->frames);
+    if (!same_book) throw ApplyError(prefix + "this op cannot be used inside smart object contents");
+    work.luts = after.luts;
+    work.papers = after.papers;
+    work.smart_files = after.smart_files;
+    work.smart_contents = after.smart_contents;
+    work.features = after.features;
+    work.studio = after.studio;
+    work.edit_contents(id).page = after.pages[0];
+    smart::renew_containers(work, id);  // (PC3 A1: contents showing them — a nested smart object's — are drawn again too)
+    for (const std::size_t at : smart::pages_using(work, id)) {  // (the pages showing them look different now)
+        if (!work.is_deferred(at)) (void)work.edit_page(at);
+    }
+    try {
+        smart::validate_smart(work);  // (contents that would show themselves)
+    } catch (const Error& error) {
+        throw ApplyError(prefix + error.what());
+    }
+    for (const Json& warning : result.warnings) warnings.push_back(prefix + "(in the smart object contents " + id + ") " + py_str(warning));
+    for (const Json& item : result.results) {
+        Json report = item;
+        report.erase("index");
+        report.erase("op");
+        return report;
+    }
+    return std::nullopt;
+}
+
 }  // namespace
 
 ApplyResult CommandBus::apply(const Document& doc, const Json& ops_in, const Actor& actor, bool dry_run) const {
@@ -915,7 +1047,9 @@ ApplyResult CommandBus::apply(const Document& doc, const Json& ops_in, const Act
         Json resolved;
         Json* current = &op;
         std::optional<Json> report;
-        try {
+        if (get(op, "contents") != nullptr) {  // (smart-objects@1: an op on a smart object's page)
+            report = apply_in_contents(*this, work, op, actor, dry_run, result.warnings, prefix, name_text);
+        } else try {
             if (const Json* area = get(op, "area"); area != nullptr && area_needs_resolving(*area)) {
                 const std::size_t at = require_page(work, op);
                 if (!registry_.area_resolver()) {
@@ -949,6 +1083,9 @@ ApplyResult CommandBus::apply(const Document& doc, const Json& ops_in, const Act
                     validate_color_model(work);   // (color-model@1: an RGB page's mode)
                     validate_channels(work);      // (channels@1: a page's alpha and spot channels)
                     validate_adjustments(work);   // (adjustments@1: a correction's native and own kinds)
+                    smart::validate_smart(work);  // (smart-objects@1: a smart object, its contents; no pixels drawn on it)
+                    validate_masks(work);         // (masks@1, PC3: a mask's settings, a page's Quick Mask)
+                    vector::validate_vector(work);  // (PC3: vector@1, pen-shapes@1, transform@1, page-spec@1)
                 } catch (const Error& error) {
                     if (error.code() == "not_yet_ported") throw;
                     throw OpError(error.what());

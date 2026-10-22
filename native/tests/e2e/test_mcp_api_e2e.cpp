@@ -781,7 +781,9 @@ private slots:
         QCOMPARE(listed["tokens"][0]["id"], Json(str(added["token"]).substr(0, 8)));
         Json none = genko::test::one_line(genko::test::run_genko({"token", "revoke"}, env).out);
         QCOMPARE(none, Json::object({{"ok", false}, {"error", "--id is required"}}));
-        Json revoked = genko::test::one_line(genko::test::run_genko({"token", "revoke", "--id", QString::fromStdString(str(added["token"]).substr(0, 8))}, env).out);
+        // (--id=…: a token is URL-safe base64, and one in 64 starts with "-", which as a separate word reads as an option)
+        Json revoked =
+            genko::test::one_line(genko::test::run_genko({"token", "revoke", "--id=" + QString::fromStdString(str(added["token"]).substr(0, 8))}, env).out);
         QVERIFY2(revoked.is_object() && revoked["revoked"] == Json(1), genko::core::dump_python(revoked).c_str());
     }
 

@@ -612,6 +612,7 @@ const std::vector<Rule>& rules() {
         r.push_back(rule("set_layers needs something to set.*", "まとめて変える設定がありません"));
         r.push_back(rule("shape must be linear or radial", "グラデーションの形は、直線か円です"));
         r.push_back(rule("shape must be linear, radial or ellipse", "グラデーションの形は、直線・円・楕円から選びます"));
+        r.push_back(rule("shape must be linear, radial, ellipse, angle, reflected or diamond", "グラデーションの形は、直線・円・楕円・角度・反射・菱形から選びます"));
         r.push_back(rule(R"(stops are \[\[position.*)", "グラデーションの色は 2〜16 色で、それぞれ位置（0〜100 %）・色・濃さ（0〜100 %）を指定します"));
         r.push_back(rule("repeat is none, repeat or mirror", "繰り返しは、なし・繰り返す・折り返すから選びます"));
         r.push_back(rule(R"(the other book cannot be read \(this book (?:needs repairs|uses features).*\))",
@@ -649,6 +650,15 @@ const std::vector<Rule>& rules() {
         r.push_back(rule("placed images and tones cannot be merged", "配置した画像とトーンのレイヤーは結合できません"));
         r.push_back(rule("a folder cannot take a mask.*", "フォルダにはマスクを付けられません（中のレイヤーに付けます）"));
         r.push_back(rule("fill must be show or hide", "マスクは「全部見せる」か「全部隠す」で作ります"));
+        // (PC3 B2: render/ops_masks — レイヤーマスクの適用・透明部分から、境界線を描く)
+        r.push_back(rule("the layer \\S+ has no layer mask", "このレイヤーにはマスクがありません"));
+        r.push_back(rule("(apply_layer_mask|mask_from_transparency): the layer \\S+ is not a pen or paint layer.*",
+                         "ペン・ペイントのレイヤーではないため、できません（先にラスタライズします）"));
+        r.push_back(rule("width_mm must be more than 0", "幅は 0 より大きくします"));
+        r.push_back(rule("location must be inside, center or outside", "境界線の位置は、内側・中央・外側から選びます"));
+        r.push_back(rule("the layer has nothing drawn to stroke", "このレイヤーには、まだ何も描いてありません（境界線を描く縁がありません）"));
+        r.push_back(rule("the stroke has nothing to draw", "境界線を描く所がありません"));
+        r.push_back(rule("the area is off the page", "範囲がページの外です"));
         r.push_back(rule(R"(points needs at least one \[x_mm, y_mm\] pair)", "点が 1 つもありません"));
         // undo, pages, layers
         r.push_back(rule("nothing to undo", "これ以上戻せません"));
@@ -809,8 +819,6 @@ const std::vector<Rule>& rules() {
                 .arg(m.captured(1), QString::number(m.captured(2).toULongLong() / (1024 * 1024)));
         }));
         r.push_back(rule("the basic frame must be a finite size", "基本枠の大きさは、ふつうの数で指定します（無限大や NaN は使えません）"));
-        r.push_back(rule("set_page_spec moving high-precision colour pixels is not in the C\\+\\+ build yet",
-                         "この版の Genko では、高精度の色のレイヤーがある原稿の用紙を、中身ごと変えることはまだできません（中身を動かさない変更はできます）"));
         r.push_back(rule(R"(a (\w+) ruler needs (\d+) point\(s\))", "この定規には点が \\2 つ要ります"));
         r.push_back(rule("a perspective ruler has 1 to 3 vanishing points", "パース定規の消失点は 1〜3 つです"));
         r.push_back(rule("ratio must be above 0", "縦横の比は 0 より大きくします"));
@@ -859,6 +867,198 @@ const std::vector<Rule>& rules() {
             name.replace(QStringLiteral(" (int)"), QString());
             return QStringLiteral("%1の指定が要ります").arg(field(name));
         }));
+        // (smart-objects@1, PC3 — the C++ build's own: smart objects, render/ops_smart, core/smart)
+        r.push_back(rule("(?:layer \\S+ is a smart object: .*|a smart object cannot receive strokes.*)",
+                         "スマートオブジェクトには直接描けません（レイヤー → ラスタライズ で画素にしてから描きます）"));
+        r.push_back(rule("a smart object cannot be merged.*", "スマートオブジェクトは結合できません（先にラスタライズします）"));
+        r.push_back(rule("this op cannot be used inside smart object contents", "この操作はスマートオブジェクトの中では使えません"));
+        r.push_back(rule("no smart object contents .*", "スマートオブジェクトの中身が見つかりません"));
+        r.push_back(rule("the smart object contents \\S+ are a file, not a page", "このスマートオブジェクトの中身はファイルのため、この操作はできません"));
+        r.push_back(rule("the smart object contents \\S+ show themselves.*", "スマートオブジェクトの中に、それ自身は置けません"));
+        r.push_back(rule("smart objects inside smart objects go deeper than .*", "スマートオブジェクトの入れ子は 8 段までです"));
+        r.push_back(rule("layer \\S+ is not a smart object", "スマートオブジェクトを選んでください"));
+        r.push_back(rule("the layers have nothing to draw", "選んだレイヤーには、描かれたものがありません"));
+        r.push_back(rule("layer \\S+ has nothing to rasterize", "このレイヤーには、ラスタライズするものがありません（すでに画素のレイヤーです）"));
+        r.push_back(rule("the transform squashes the smart object flat|the picture would be laid too small", "スマートオブジェクトが潰れてしまう変形はできません"));
+        r.push_back(rule("the picture is too large to keep its 16 or 32 bits on this page.*", "画像が大きすぎて、このページでは 16・32 bit のまま置けません"));
+        r.push_back(rule("(?:the asset's picture cannot be read \\()?the file is larger than 256 MiB\\)?", "ファイルが大きすぎます（256 MiB まで）"));
+        r.push_back(rule("(?:the asset's picture cannot be read \\()?the file is not .* its name says\\)?", "ファイルの中身が、名前の形式と違います"));
+        r.push_back(rule("(?:the asset's picture cannot be read \\()?the file is not a picture this build reads\\)?", "読み込めない画像です"));
+        r.push_back(rule("no asset \\S+ of a picture.*", "画像の素材が見つかりません"));
+        r.push_back(rule("the smart object's contents are a page, not a file.*", "スマートオブジェクトの中身はページのため、色の扱いは中のレイヤーのものです"));
+        r.push_back(rule("embedded_profile is keep, convert or assign", "プロファイルの扱いは「値のまま」「埋め込みから変換」「作業用とみなす」のどれかです"));
+        // (PC3 A1: contents and links, render/ops_smart_contents)
+        r.push_back(rule("the smart object has no contents", "スマートオブジェクトの中身が見つかりません"));
+        r.push_back(rule("the smart object is not linked to a file", "このスマートオブジェクトはファイルにリンクしていません"));
+        r.push_back(rule("the smart object's contents are a page already", "このスマートオブジェクトの中身は、すでに編集できるページです"));
+        r.push_back(rule("contents of a page are linked as the file they were written to.*", "ページの中身は、書き出したファイルとしてリンクします"));
+        r.push_back(rule("a file's contents are linked as they are.*", "ファイルの中身は、そのままのファイルとしてリンクします"));
+        r.push_back(rule("asset \\(sha256:…\\) or data gives the file|the file is an asset ref .*", "読み込むファイルが指定されていません"));
+        r.push_back(rule("(?:link is \\{path, relative\\?\\}|link names the file's path|link's bytes is the file's size|its link.*)",
+                         "リンクの記録（ファイルの場所）が正しくありません"));
+        r.push_back(rule("the smart object's file is not in the book.*", "スマートオブジェクトのファイルが原稿にありません"));
+        r.push_back(rule("the package's place holds a book already: .*", "そのフォルダーには、もう同じ名前の原稿があります（別のフォルダーを選びます）"));
+        r.push_back(rule("the book is not whole, so it is not packed: .*", "原稿に欠けたものがあるため、パッケージにできません"));
+        r.push_back(rule("(?:a file's contents are written as they are|a page's contents are written as psd or png).*",
+                         "この中身は、その形式では書き出せません"));
+        // (PC3 A2: smart filters, render/ops_smart_filters)
+        r.push_back(rule("the smart object has no smart filters", "このスマートオブジェクトには、スマートフィルターがありません"));
+        r.push_back(rule("the smart object has no filter mask", "このスマートオブジェクトには、フィルターマスクがありません"));
+        r.push_back(rule("a filter plugin cannot be a smart filter.*", "プラグインのフィルターは、スマートフィルターにできません（ラスタライズしてからかけます）"));
+        r.push_back(rule("the filter \\S+ cannot be a smart filter", "このフィルターは、スマートフィルターにできません（ラスタライズしてからかけます）"));
+        r.push_back(rule("a smart filter works on the whole picture, not on one channel", "スマートフィルターは、1 つのチャンネルだけにはかけられません"));
+        r.push_back(rule("a smart filter's colour lookup is one of the looks.*",
+                         "スマートフィルターのカラールックアップは、用意された見た目だけを使えます（ファイルの表は色調補正のレイヤーで使います）"));
+        r.push_back(rule("a smart object holds at most \\d+ smart filters", "スマートフィルターは 1 つのスマートオブジェクトに 64 個までです"));
+        r.push_back(rule("this page does not composite the blend mode \\S+", "このページの色では、その描画モードは使えません"));
+        r.push_back(rule("(?:index|to) is the filter's place .*", "スマートフィルターの位置の指定が正しくありません"));
+        r.push_back(rule("mask from_area takes the area", "フィルターマスクにする選択範囲がありません"));
+        // (PC3 A4: stack modes and lines rasterized, render/ops_smart)
+        r.push_back(rule("mode is a stack mode .*", "スタックモードの名前が正しくありません"));
+        r.push_back(rule("ids \\(or id\\) names the lines|ids is a list of the lines' ids", "ラスタライズする台詞を選んでください"));
+        r.push_back(rule("line \\S+ is not on page \\S+", "その台詞は、このページにありません"));
+        r.push_back(rule("line \\S+ has no balloon on the page", "その台詞はフキダシに入っていないため、ラスタライズできません"));
+        r.push_back(rule("the lines are drawn at different places among the layers.*",
+                         "選んだ台詞はレイヤーの重ね順の中の置き場所が違うため、まとめてラスタライズできません（1 つずつラスタライズします）"));
+        // (PC3 B1: choosing by colour, the Quick Mask, the Magic Eraser — render/select_color, ops_quick_mask, erase_magic)
+        r.push_back(rule("page \\S+ is in Quick Mask already", "このページは、すでにクイックマスクモードです"));
+        r.push_back(rule("page \\S+ is not in Quick Mask", "このページは、クイックマスクモードではありません"));
+        r.push_back(rule("the Quick Mask stays an alpha channel", "クイックマスクのチャンネルは、特色チャンネルにできません"));
+        r.push_back(rule("(?:grow|similar): the area is empty", "先に選択範囲を作ります"));
+        r.push_back(rule("range: Sampled Colors needs colors or points_mm", "指定色域には、色かスポイトで拾った点が要ります"));
+        r.push_back(rule("range: localized clusters need points_mm", "ローカライズされたカラークラスタには、スポイトで拾った点が要ります"));
+        r.push_back(rule("range(?:\\.\\w+)?[: ].*", "色域指定の設定が正しくありません"));
+        r.push_back(rule("a selection is saved into an alpha channel", "選択範囲は、アルファチャンネルに保存します（特色チャンネルには保存できません）"));
+        // (PC3 B4: the retouching ops — render/ops_retouch)
+        r.push_back(rule("source_mm \\(where to sample from\\) or offset_mm is required", "先にコピー元を決めます（Alt キーを押しながらクリック）"));
+        r.push_back(rule("from is not the pixels of this layer .*cannot be painted back",
+                         "その状態からは、このレイヤーに塗り戻せません（レイヤーの種類か大きさが違います）"));
+        r.push_back(rule("history_brush reads the pixels before from the book's folder.*", "ヒストリーブラシの前に、原稿を保存します"));
+        r.push_back(rule("content_aware_fill: the area covers nothing of the layer", "埋める所（選択範囲）が、このレイヤーにありません"));
+        r.push_back(rule("content_aware_fill: source_area covers nothing of the layer", "カスタムのサンプリング領域が、このレイヤーにありません"));
+        r.push_back(rule("custom sampling needs source_area.*", "カスタムのサンプリング領域を選びます"));
+        r.push_back(rule("the layer \\S+ has no pixels to work on", "このレイヤーには、直す画素がありません"));
+        // (PC3 B3: the smart selection and the matting — render/select_smart, render/ops_matting)
+        r.push_back(rule("kind is defringe, remove_black, remove_white or decontaminate",
+                         "マッティングの種類は、カラーの除去・フリンジ削除・黒マット削除・白マット削除から選びます"));
+        r.push_back(rule("id \\(the layer\\) is required", "レイヤーを選んでから行います"));
+        r.push_back(rule("radius_mm must be more than 0", "半径は 0 より大きくします"));
+        r.push_back(rule("(?:subject|sky|object|quick|focus|refine): no layer .*", "そのレイヤーはありません"));
+        r.push_back(rule("refine\\.area \\(the selection to refine\\) is required", "先に選択範囲を作ります"));
+        r.push_back(rule("(?:subject|sky|object|quick|focus|refine)(?:\\.\\w+)?[: ].*",
+                         "賢い選択（被写体・空・オブジェクト選択・クイック選択・フォーカス領域・選択とマスク）の設定が正しくありません"));
+        // (vector@1, PC3 C-a: paths and vector masks, render/ops_paths, render/path_areas)
+        r.push_back(rule("the page has no work path", "このページには作業用パスがありません（ペンツールで描くか、選択範囲から作ります）"));
+        r.push_back(rule("no path named '(.*)'", "パス「\\1」はありません"));
+        r.push_back(rule("a path named '(.*)' is already on the page", "パス「\\1」はもうあります。ほかの名前にします"));
+        r.push_back(rule(R"(to cannot be the work path.*)", "「work」は作業用パスの名前です。ほかの名前にします"));
+        r.push_back(rule(R"((?:name|to): .*(?:empty|longer|characters).*)", "パスの名前は 1〜64 文字にします"));
+        r.push_back(rule("the path has nothing to stroke", "パスに、線を引ける所がありません"));
+        r.push_back(rule("the layer has no vector mask.*", "このレイヤーにはベクトルマスクがありません"));
+        r.push_back(rule("layer \\S+ has no vector mask", "このレイヤーにはベクトルマスクがありません"));
+        r.push_back(rule("vector_mask: the layer \\S+ has no vector mask", "そのレイヤーにはベクトルマスクがありません"));
+        r.push_back(rule("the layer mask of layer \\S+ is off: enable or delete it before rasterizing the vector mask",
+                         "このレイヤーのレイヤーマスクは「使用しない」になっています。ベクトルマスクをラスタライズする前に、レイヤーマスクを使用するか削除します"));
+        r.push_back(rule("the vector mask of layer \\S+ is off over a layer mask: enable or delete it before rasterizing it",
+                         "このレイヤーのベクトルマスクは「使用しない」になっています（レイヤーマスクもあります）。ラスタライズする前に、ベクトルマスクを使用するか削除します"));
+        r.push_back(rule("a folder cannot take a vector mask.*", "フォルダにはベクトルマスクを付けられません（中のレイヤーに付けます）"));
+        r.push_back(rule("give one of path, path_name, reveal_all and hide_all", "ベクトルマスクの形は、パス・すべての領域を表示・すべての領域を隠すのどれか 1 つで指定します"));
+        r.push_back(rule("the line \\S+ has no letters to trace", "この台詞には、パスにする文字がありません"));
+        r.push_back(rule("the line \\S+ is not placed on a page", "この台詞はページに置かれていません"));
+        r.push_back(rule("blend paints a paint layer's pixels.*", "描画モードを付けた塗りつぶしは、ペイントレイヤーにだけできます"));
+        r.push_back(rule("shape_part: the layer \\S+ has no shape part.*", "そのレイヤーに、その形はありません"));
+        // (PC3 C-e: the page size ops, render/ops_pagesize; core/page_geometry)
+        r.push_back(rule("the finished size and its bleed would not fit the new paper.*",
+                         "仕上がりと裁ち落としが新しい用紙に入りません（仕上がり・裁ち落とし・余白を決め直すか、仕上がりを新しい用紙に合わせます）"));
+        r.push_back(rule("the basic frame would not fit the finished size.*", "基本枠が仕上がりに入りません（余白を決め直すか、仕上がりを新しい用紙に合わせます）"));
+        r.push_back(rule("the new (?:paper|canvas) must have a size", "新しい用紙の大きさが 0 以下になります"));
+        r.push_back(rule(R"(the page on its new paper is too large \(.*\))", "新しい用紙が大きすぎます"));
+        r.push_back(rule(R"(the saved area on the new paper is too large \(.*\))", "用紙が大きすぎて、ストックした範囲を新しい用紙に移せません"));
+        r.push_back(rule("the precise layer on the new paper is too large", "用紙が大きすぎて、高精度のレイヤーを新しい用紙に移せません"));
+        r.push_back(rule("the inks on the new paper are too large", "用紙が大きすぎて、インキのレイヤーやチャンネルを新しい用紙に移せません"));
+        r.push_back(rule(R"(page (\S+) is a cover: its paper is set by its cover settings)",
+                         "\\1 ページは表紙・カバー・帯です。用紙は表紙の設定で決まるため、大きさは変えられません"));
+        r.push_back(rule(R"(page (\S+) is in a spread with page (\S+): change both pages)", "\\1 ページは \\2 ページと見開きです。両方のページに掛けてください"));
+        r.push_back(rule(R"(page (\S+) is in a spread with page (\S+): both must keep the same size)", "見開きの \\1・\\2 ページは同じ大きさにします"));
+        r.push_back(rule("the resolution is the whole book's: give pages \"all\"", "解像度は本全体で変えます（すべてのページに掛けてください）"));
+        r.push_back(rule("resample none keeps the pixels: give dpi alone", "再サンプルしないときは、解像度だけを変えます（大きさは解像度に合わせて変わります）"));
+        r.push_back(rule("give the size in mm or in pixels, not both", "大きさは mm か pixel のどちらかで指定します"));
+        r.push_back(rule("dpi is a whole number of 1 to 10000", "解像度は 1〜10000 の整数です"));
+        r.push_back(rule("resample is bicubic, .*", "再サンプルの方法は バイキュービック・バイリニア・ニアレストネイバー・Lanczos・ディテールを保持・しない のどれかです"));
+        r.push_back(rule("anchor is top_left, .*", "基準位置の指定が正しくありません"));
+        r.push_back(rule("extension is \"transparent\" or \\[r, g, b\\]", "カンバス拡張カラーは 透明 か [r, g, b] です"));
+        r.push_back(rule("the canvas extension colour needs a paint layer at the bottom of the page.*",
+                         "カンバス拡張カラーで塗るペイントレイヤーが、ページのいちばん下にありません（透明で広げるか、ペイントレイヤーを作ってから）"));
+        r.push_back(rule("delete_pixels must be true.*", "切り抜いた画素は残せません（線・絵・台詞は用紙の外に残り、すべての領域を表示 で戻せます）"));
+        r.push_back(rule("give rect \\[x, y, w, h\\] or an area to crop to", "切り抜く枠か範囲を指定します"));
+        r.push_back(rule("rect must (?:be finite numbers|have a size)", "切り抜く枠の指定が正しくありません"));
+        r.push_back(rule("angle is -359.99 to 359.99 degrees", "角度は -359.99〜359.99° です"));
+        r.push_back(rule("interp is bicubic, bilinear or nearest", "補間方法は バイキュービック・バイリニア・ニアレストネイバー のどれかです"));
+        r.push_back(rule("based_on is transparent, top_left or bottom_right", "トリミングの基準は 透明ピクセル・左上のピクセルの色・右下のピクセルの色 のどれかです"));
+        r.push_back(rule(R"(page (\S+) has nothing to trim to)", "\\1 ページには、トリミングの基準になる描いたものがありません"));
+        r.push_back(rule("text is upright: .*", "台詞の文字は立てたまま回します（文字だけを回す・鏡にすることはできません）"));
+        r.push_back(rule("turn is 90cw, 90ccw, 180, flip_h or flip_v", "回し方は 90°（時計回り・反時計回り）・180°・左右反転・上下反転 のどれかです"));
+        r.push_back(rule("give turn or angle, not both", "回し方か角度の、どちらかを指定します"));
+        r.push_back(rule("pages is a list of page numbers or \"all\"", "ページは番号のリストか、すべて（\"all\"）で指定します"));
+        r.push_back(rule("trim is \\[width, height\\] or \"fit\"|trim must be positive numbers", "仕上がりは [幅, 高さ] か、用紙に合わせる（\"fit\"）で指定します"));
+        r.push_back(rule("bleed_mm must not be negative", "裁ち落としは 0 以上にします"));
+        r.push_back(rule("margins (?:is \\[top, bottom, inner, outer\\]|must be finite numbers|takes top, bottom, inner and outer)",
+                         "余白は [天, 地, のど, 小口] で指定します"));
+        r.push_back(rule("a 3D prop cannot be turned or mirrored with the page.*", "3D は、ページと一緒に回す・反転することはできません（3D を線と面にしてから）"));
+        // (pen-shapes@1, PC3 C-b: the shape parts of pen layers, render/ops_shapes)
+        r.push_back(rule("a shape part goes on a pen layer.*", "シェイプはペンのレイヤーに置けます（「新しいレイヤー」を入れると、ペンのレイヤーを作って置きます）"));
+        r.push_back(rule("the layer \\S+ has no shape part .*", "そのレイヤーに、そのシェイプはありません"));
+        r.push_back(rule("the layer \\S+ has a shape part \\S+ already", "そのレイヤーには、同じ id のシェイプがもうあります"));
+        r.push_back(rule("choose two or more shape parts to combine", "結合するシェイプを 2 つ以上選びます"));
+        r.push_back(rule("the shape (?:is|would be) empty", "シェイプの形が空になります"));
+        r.push_back(rule("the area is empty", "先に選択範囲を作ります"));
+        r.push_back(rule("a pen layer holds at most (\\d+) shape parts", "1 つのペンのレイヤーに置けるシェイプは \\1 個までです"));
+        r.push_back(rule("the shape would have more than (\\d+) knots", "シェイプの点が多すぎます（\\1 個まで）"));
+        r.push_back(rule("the matrix squashes the shape flat", "その変形では、シェイプがつぶれてしまいます"));
+        r.push_back(rule("\\S+ is a shape part: its anchors and handles are its path.*", "シェイプの点とハンドルは、パス選択ツールで動かします"));
+        r.push_back(rule("\\S+ is a shape part, not a line", "シェイプは線ではありません（パス選択ツールで直します）"));
+        r.push_back(rule(".*a pattern fill is not in this build yet", "パターンの塗りは、この版の Genko ではまだ使えません"));
+        r.push_back(rule("shape's kind is .*|a shape of kind \\S+ needs .*|shape has no key .*", "シェイプの形の指定が正しくありません"));
+        // (PC3 C-c: the transforms, Content-Aware Scale, Liquify's strokes, Warp Text — render/layer_transform, distort_ops)
+        r.push_back(rule("the layer \\S+ is locked", "ロックされているレイヤーは変形できません（レイヤー パネルでロックを外します）"));
+        r.push_back(rule("the position of the layer \\S+ is locked", "位置をロックしたレイヤーは動かせません（レイヤー パネルでロックを外します）"));
+        r.push_back(rule("a (?:smart object|placed picture) moves whole: .*", "選択範囲の中だけを変形することはできません（選択を解除してから変形します）"));
+        r.push_back(rule("a placed picture is turned and bent as a smart object: .*", "配置画像を回す・曲げるときは、先にスマートオブジェクトに変換します"));
+        // (PC3 A5: a smart object's warp and corners, its perspective warp, puppet warp and Liquify kept as smart filters)
+        r.push_back(rule("a smart object's corners must make a convex shape", "スマートオブジェクトの 4 隅が、へこみの無い四角形になりません"));
+        r.push_back(rule("perspective is the contents' four corners on the page.*", "スマートオブジェクトの 4 隅の指定が正しくありません"));
+        r.push_back(rule("a smart object is puppet-warped alone.*", "スマートオブジェクトのパペットワープは、そのスマートオブジェクトだけを選んでかけます"));
+        r.push_back(rule("a smart object is bent by a warp, a perspective warp or a puppet warp", "スマートオブジェクトは、ワープ・遠近法ワープ・パペットワープで曲げます"));
+        r.push_back(rule("(?:liquify has no key|liquify's settings|mesh_mm must be) .*", "ゆがみの設定が正しくありません"));
+        r.push_back(rule("the transform squashes the layers flat", "つぶれてしまう変形はできません"));
+        r.push_back(rule("give one of move, matrix, quad, turn, warp, perspective or puppet", "変形のしかたを 1 つだけ指定します"));
+        r.push_back(rule("the layers show nothing to (?:transform|pin)", "変形するものがありません"));
+        r.push_back(rule("the quad's corners must make a quad|a plane is degenerate: .*", "4 隅が四角形になっていません"));
+        r.push_back(rule("ids is \\[layer id, …\\]", "変形するレイヤーを選んでください"));
+        r.push_back(rule("(?:the |a )?warp(?:'s)? .*|warp (?:is|has) .*", "ワープの設定が正しくありません"));
+        r.push_back(rule("(?:a plane's|perspective|a perspective warp|straighten) .*", "遠近法ワープの設定が正しくありません"));
+        r.push_back(rule("(?:puppet|a puppet warp|a pin's) .*", "パペットワープの設定が正しくありません"));
+        r.push_back(rule("Content-Aware Scale works on a paint layer's pixels: .*",
+                         "コンテンツに応じて拡大・縮小は、ペイントのレイヤーの画素にかけます（ペンのレイヤーやスマートオブジェクトは先にラスタライズします）"));
+        r.push_back(rule("nothing to scale: the layer is empty there", "拡大・縮小する絵がありません"));
+        r.push_back(rule("protect is an alpha channel's id or name, or none", "保護するチャンネルは、アルファチャンネルを選びます"));
+        r.push_back(rule("Liquify works on a pen or paint layer", "ゆがみは、ペンかペイントのレイヤーにかけます"));
+        r.push_back(rule("(?:strokes is|liquify takes|a liquify stroke) .*", "ゆがみの設定が正しくありません"));
+        r.push_back(rule("style a line's native_warp .*", "ワープテキストの設定が正しくありません"));
+        // (PC3 C-d: align, distribute, arrange, link — render/layer_align)
+        r.push_back(rule("edge is top, vcenter, bottom, left, hcenter or right", "そろえる辺の指定が正しくありません"));
+        r.push_back(rule("to is auto, layers, selection, page, trim, frame or panel", "そろえる基準の指定が正しくありません"));
+        r.push_back(rule("the layers show nothing to align", "整列するものがありません（描いてあるレイヤーか台詞を選びます）"));
+        r.push_back(rule("there is no selection to align to", "先に選択範囲を作ります"));
+        r.push_back(rule("frame_id names the panel to align to", "先にそろえるコマを選びます"));
+        r.push_back(rule("by is top, vcenter, bottom, left, hcenter, right, horizontal or vertical", "分布のしかたの指定が正しくありません"));
+        r.push_back(rule("distributing needs three or more layers or lines that show something", "分布するには、描いてあるレイヤーか台詞を 3 つ以上選びます"));
+        r.push_back(rule("to is front, forward, backward, back or reverse", "重ね順の指定が正しくありません"));
+        r.push_back(rule("choose two or more layers to reverse", "逆順にするには、レイヤーを 2 つ以上選びます"));
+        r.push_back(rule("the layers cannot move further", "これ以上は動かせません"));
+        r.push_back(rule("link is true or false", "リンクの指定が正しくありません"));
+        r.push_back(rule("choose two or more layers to link", "リンクするには、レイヤーを 2 つ以上選びます"));
+        r.push_back(rule("lines is \\[line id, …\\]", "台詞の指定が正しくありません"));
         // (the C++ build's own: what it does not do yet, and saving)
         r.push_back(rule("official export is not in the C\\+\\+ build yet",
                          "この版の Genko では、まだ正式な書き出し（確認と承認の記録つき）はできません（ふつうの書き出しはできます）"));
@@ -938,6 +1138,7 @@ QString layer_label(const core::Layer& layer) {
     const QString role = qs(core::to_string(layer.role));
     QString base = layer_role(core::to_string(layer.role));
     if (layer.kind == core::LayerKind::Placed) base = QStringLiteral("絵（配置）");
+    if (layer.kind == core::LayerKind::Smart) base = QStringLiteral("スマートオブジェクト");  // (smart-objects@1)
     // titles made of ids (placed art) are not names people gave
     static const QRegularExpression made(
         QRegularExpression::anchoredPattern(QStringLiteral(R"((art|ink|placed)?\s*[0-9a-f]{8,}|placed (art|bg|draft|name)|layer)")));
@@ -954,6 +1155,14 @@ QString unported_element(const QString& element) {
         {"image_format", "この版では読めない形式の画像（PPM・ICO・JPEG 2000 など）"}};
     if (const auto it = words.find(element); it != words.end()) return it->second;
     if (element.startsWith(QStringLiteral("adjust:"))) return QStringLiteral("色調補正（%1）").arg(element.mid(7));
+    if (element.startsWith(QStringLiteral("smart:"))) {  // (smart-objects@1: what PC3's later steps draw)
+        static const std::map<QString, QString> later = {{"perspective", "遠近の変形"}, {"warp", "ワープ"}, {"stack", "スタックモード"},
+                                                         {"filters", "スマートフィルター"}, {"filter_mask", "フィルターマスク"},
+                                                         {"psd", "PSD のスマートオブジェクトの絵"}, {"psb", "PSB の画像"},
+                                                         {"too_large", "大きすぎる絵（作業に使える記憶の上限 2 GiB を超えるため描いていません）"}};
+        const auto it = later.find(element.mid(6));
+        return QStringLiteral("スマートオブジェクトの%1").arg(it != later.end() ? it->second : element.mid(6));
+    }
     return element;
 }
 

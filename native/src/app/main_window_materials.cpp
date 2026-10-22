@@ -84,9 +84,9 @@ void MainWindow::build_material_actions() {
         effect_actions_.push_back(act);
     }
     make("act_effect_within", QStringLiteral("選択範囲の中にだけ描く"), [this] { effect_clearing(std::string("within")); }, {},
-         QStringLiteral("選んだ効果線を、投げ縄・長方形の選択範囲の中にだけ描きます"));
+         QStringLiteral("選んだ効果線を、なげなわ・長方形選択の選択範囲の中にだけ描きます"));
     make("act_effect_avoid", QStringLiteral("選択範囲を避ける"), [this] { effect_clearing(std::string("avoid")); }, {},
-         QStringLiteral("選んだ効果線を、選択範囲（顔や人物を投げ縄で囲む）の手前で止めます。線は止まる所で細くなります"));
+         QStringLiteral("選んだ効果線を、選択範囲（顔や人物をなげなわで囲む）の手前で止めます。線は止まる所で細くなります"));
     make("act_effect_clear", QStringLiteral("避ける範囲を外す"), [this] { effect_clearing(std::nullopt); }, {},
          QStringLiteral("選んだ効果線の「中にだけ描く」「避ける」を外して、コマ全体に描きます"));
     make("act_materials", QStringLiteral("素材パネルを開く"), [this] { show_dock(QStringLiteral("素材")); });
@@ -119,11 +119,13 @@ void MainWindow::build_material_actions() {
     make("act_layer_pen", QStringLiteral("新しいペンのレイヤー"), layers([](LayerPanel& p) { p.add("pen", QStringLiteral("ペン")); }), key("Ctrl+Shift+N"));
     make("act_layer_paint", QStringLiteral("新しいペイントのレイヤー"), layers([](LayerPanel& p) { p.add("paint", QStringLiteral("ペイント")); }));
     make("act_layer_folder", QStringLiteral("新しいフォルダ"), layers([](LayerPanel& p) { p.add("folder", QStringLiteral("フォルダ")); }));
-    make("act_layer_dup", QStringLiteral("レイヤーを複製"), layers([](LayerPanel& p) { p.duplicate(); }), key("Ctrl+J"));
+    // (PC3 B2, the user's decision 5: Ctrl+J is Photoshop's 選択範囲をコピーしたレイヤー's — without a selection it duplicates
+    // the layer as this did —, main_window_clipboard.cpp)
+    make("act_layer_dup", QStringLiteral("レイヤーを複製"), layers([](LayerPanel& p) { p.duplicate(); }));
     make("act_layer_merge", QStringLiteral("下のレイヤーと結合"), layers([](LayerPanel& p) { p.merge_down(); }), key("Ctrl+Shift+E"));
     make("act_layer_delete", QStringLiteral("レイヤーを消す"), layers([](LayerPanel& p) { p.remove(); }));
-    make("act_layer_up", QStringLiteral("レイヤーを前へ"), layers([](LayerPanel& p) { p.move(1); }), key("Ctrl+]"));
-    make("act_layer_down", QStringLiteral("レイヤーを後ろへ"), layers([](LayerPanel& p) { p.move(-1); }), key("Ctrl+["));
+    make("act_layer_up", QStringLiteral("前面へ"), layers([](LayerPanel& p) { p.move(1); }), key("Ctrl+]"));
+    make("act_layer_down", QStringLiteral("背面へ"), layers([](LayerPanel& p) { p.move(-1); }), key("Ctrl+["));
     make("act_layer_draft", QStringLiteral("下描きにする（書き出さない）／戻す"), layers([](LayerPanel& p) {
         if (auto* draft = p.findChild<QCheckBox*>(QStringLiteral("layer_draft")); draft != nullptr && draft->isEnabled()) draft->click();
     }));
@@ -323,7 +325,7 @@ std::optional<Json> MainWindow::copy_selection_items() {
         flash(wording::error(QString::fromUtf8(error.what())), 4000, true);
         return std::nullopt;
     }
-    if (items.strokes.empty() && items.patches.empty()) {
+    if (items.empty()) {  // (pen-shapes@1: shape parts too)
         flash(QStringLiteral("選んだ範囲に、描く先のレイヤーの絵がありません"), 3000);
         return std::nullopt;
     }
@@ -395,7 +397,7 @@ void MainWindow::effect_clearing(const std::optional<std::string>& how) {
     }
     const auto shape = selection_shape();
     if (!shape) {
-        flash(QStringLiteral("投げ縄か長方形で選択範囲を作ってから選びます（色で選んだ範囲や反転した範囲は使えません）"), 5000);
+        flash(QStringLiteral("なげなわか長方形選択で選択範囲を作ってから選びます（色で選んだ範囲や反転した範囲は使えません）"), 5000);
         return;
     }
     Json change;
@@ -443,48 +445,12 @@ bool MainWindow::import_image(std::optional<QString> chosen) {
         flash(QStringLiteral("画像を読み込む前に、原稿を保存します（ファイル → 別の場所に保存）"), 6000);
         return false;
     }
-    const QString file = chosen ? *chosen : ask::open_path(this, QStringLiteral("画像を読み込む"), QStringLiteral("画像 (*.png *.jpg *.jpeg *.tif *.tiff *.bmp *.webp *.psd)"));
+    const QString file =
+        chosen ? *chosen : ask::open_path(this, QStringLiteral("画像を読み込む"), QStringLiteral("画像 (*.png *.jpg *.jpeg *.tif *.tiff *.bmp *.webp *.gif *.psd *.psb)"));
     if (file.isEmpty() || !still(asked)) return false;
-    std::string png;
-    try {
-        std::ifstream in(core::path_from_utf8(file.toStdString()), std::ios::binary);
-        if (!in) throw core::Error("io", "cannot read " + file.toStdString());
-        const std::string bytes((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
-        render::Image picture = render::open_image(bytes, render::kPillowOpenLimits);
-        // (カラー設定's policy for its own profile: kept as its numbers, as Python's, unless chosen — and asked)
-        if (!picture_policy(bytes, picture) || !still(asked)) return false;
-        const std::string_view mode = picture.mode();
-        png = render::write_png(picture.convert(mode == "RGBA" || mode == "LA" || mode == "P" ? "RGBA" : "RGB"));
-    } catch (const std::exception& error) {  // (a file that cannot be read as a picture)
-        flash(QStringLiteral("読み込めない画像です:\n%1").arg(wording::error(QString::fromUtf8(error.what()))), 6000, true);
-        return false;
-    }
-    session_->save_now();  // (Python's commit_now)
-    std::string ref;
-    try {
-        ref = storage::AssetStore(*session_->path()).put_bytes(png, ".png");
-    } catch (const std::exception& error) {
-        flash(wording::error(QString::fromUtf8(error.what())), 6000, true);
-        return false;
-    }
-    // (the page and the panel taken now, after the book was saved: never a pointer from before the dialog)
-    const core::Page* page = current_page();
-    if (page == nullptr) return false;
-    const QFileInfo info(file);
-    const core::Frame* frame = selected_frame();
-    Json place{{"op", "place_asset"}, {"page", page->index.json()}, {"asset", ref}, {"to", "art"}, {"title", info.completeBaseName().toStdString()}};
-    if (frame != nullptr) {
-        place["frame_id"] = frame->id;
-    } else {
-        const core::Rect b = page->bleed_rect_mm();  // the whole page, out to the bleed
-        place["placement_mm"] = Json::array({b.x.json(), b.y.json(), b.width.json(), b.height.json()});
-    }
-    const Json ops = Json::array({Json{{"op", "register_assets"},
-                                       {"assets", Json{{ref, Json{{"kind", "image"}, {"origin", Json{{"kind", "self"}, {"file", info.fileName().toStdString()}}}}}}}},
-                                  place});
-    if (!apply_ops(ops)) return false;
-    flash(QStringLiteral("%1に「%2」を置きました").arg(frame != nullptr ? QStringLiteral("選んだコマ") : QStringLiteral("ページ全体"), info.fileName()), 4000);
-    return true;
+    // (smart-objects@1, PC3 decision 2: a smart object of the file itself — its 16 bits, CMYK and profile kept —, laid as
+    // the placed picture was: over the panel chosen, else over the page out to the bleed; app/main_window_smart.cpp)
+    return place_smart(file, true);
 }
 
 void MainWindow::import_scan(bool from_scanner) {

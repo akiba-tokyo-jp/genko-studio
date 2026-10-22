@@ -9,12 +9,14 @@
 #include <cmath>
 #include <future>
 #include <mutex>
+#include <set>
 #include <unordered_set>
 
 #include "app/display_color.hpp"
 #include "core/anim.hpp"
 #include "core/covers.hpp"
 #include "core/pyconv.hpp"
+#include "core/smart.hpp"
 #include "core/strokes.hpp"
 #include "render/brushes.hpp"
 #include "render/not_yet_ported.hpp"
@@ -88,7 +90,32 @@ bool same_layer_look(const core::Layer& a, const core::Layer& b) {
            a.raster_png == b.raster_png && a.color_raster == b.color_raster && a.ink_raster == b.ink_raster && a.fill_rgb == b.fill_rgb && a.opacity == b.opacity && a.blend == b.blend && a.clip == b.clip &&
            a.lock_alpha == b.lock_alpha && a.panel_clip == b.panel_clip && a.panel_each == b.panel_each && a.tone == b.tone &&
            a.color == b.color && a.fill == b.fill && a.adjust == b.adjust && a.effect == b.effect && a.color_prints == b.color_prints &&
-           a.screen == b.screen && a.asset == b.asset && a.region.has_value() == b.region.has_value() && a.angle == b.angle;
+           a.screen == b.screen && a.asset == b.asset && a.region.has_value() == b.region.has_value() && a.angle == b.angle &&
+           a.smart == b.smart &&  // (smart-objects@1: its matrix and settings)
+           a.shapes == b.shapes && a.vector_mask == b.vector_mask;  // (pen-shapes@1: its shape parts, a list made anew when changed; vector@1)
+}
+
+// smart-objects@1 (PC3 A1): the contents the page's smart objects show — and those inside them — are the same in both
+// books (contents are values: changed, they are other objects — edited in コンテンツを編集's tab, replaced, updated).
+bool same_contents(const core::Document& a, const core::Document& b, const core::Page& page) {
+    if (a.smart_contents.empty() && b.smart_contents.empty()) return true;
+    std::set<std::string> seen;
+    std::vector<std::string> todo;
+    for (const std::string& id : core::smart::shown_on(page)) todo.push_back(id);
+    while (!todo.empty()) {
+        const std::string id = std::move(todo.back());
+        todo.pop_back();
+        if (!seen.insert(id).second) continue;
+        const auto x = a.smart_contents.find(id);
+        const auto y = b.smart_contents.find(id);
+        const core::SmartContents* was = x == a.smart_contents.end() ? nullptr : x->second.get();
+        const core::SmartContents* now = y == b.smart_contents.end() ? nullptr : y->second.get();
+        if (was != now) return false;
+        if (now != nullptr && now->page) {
+            for (const std::string& inner : core::smart::shown_on(*now->page)) todo.push_back(inner);
+        }
+    }
+    return true;
 }
 
 // The page's lines of dialogue as they are drawn: the same words, places, balloons, tails and styles.
@@ -353,7 +380,7 @@ void PageRenderer::show(DocPtr doc, std::size_t index) {
         emit omittedChanged(omitted_);
     } else if (shown_page_ != &page || doc_->brush_custom != doc->brush_custom || doc_->story.size() != doc->story.size() || !same_onion ||
                !same_book || !same_story(*doc_, *doc, page.index) ||
-               covers_before(*doc_, *shown_page_) != covers_before(*doc, page)) {
+               covers_before(*doc_, *shown_page_) != covers_before(*doc, page) || !same_contents(*doc_, *doc, page)) {
         // the same page, changed: only the tiles its new or removed lines cover are drawn again (anything else
         // changed: all of them — its number too, and the covers before it, which the nombre and the binding edge
         // follow)
@@ -366,7 +393,8 @@ void PageRenderer::show(DocPtr doc, std::size_t index) {
                        old.rulers == page.rulers && old.prims == page.prims && old.numero == page.numero &&
                        old.onion_from == page.onion_from && same_onion && same_book && old.layers.size() == page.layers.size() &&
                        doc_->brush_custom == doc->brush_custom && doc_->story.size() == doc->story.size() &&
-                       same_story(*doc_, *doc, page.index));  // (a line edited, moved or restyled: the whole page, as Python draws it)
+                       same_story(*doc_, *doc, page.index) &&  // (a line edited, moved or restyled: the whole page, as Python draws it)
+                       same_contents(*doc_, *doc, page));      // (smart-objects@1: a smart object's contents changed)
         std::vector<core::StrokePtr> touched;
         if (!whole) {
             for (std::size_t i = 0; i < page.layers.size() && !whole; ++i) {

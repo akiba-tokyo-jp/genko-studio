@@ -552,13 +552,17 @@ void Connection::dispatch_request(Inbound message, const std::string& era) {
     Json params = message.body.contains("params") ? message.body["params"] : Json();
     auto flight = std::make_shared<InFlight>();
     flight->id = id;
+    bool initialized = false;
+    std::string version;
     {
         std::lock_guard<std::mutex> lock(mutex_);
         in_flight_[id_key(id)] = flight;  // (a repeated id replaces the earlier one, as the SDK's table does)
+        initialized = initialize_accepted_;
+        version = version_;
     }
     if (era == "legacy" && method == "initialize") {
         // (inline: the next message waits until the handshake is answered)
-        run_request(std::move(id), method, std::move(params), std::move(message.odd_numbers), flight, era);
+        run_request(std::move(id), method, std::move(params), std::move(message.odd_numbers), flight, era, initialized, std::move(version));
         return;
     }
     std::vector<Worker> ended;
@@ -575,8 +579,9 @@ void Connection::dispatch_request(Inbound message, const std::string& era) {
     std::lock_guard<std::mutex> lock(mutex_);
     auto done = std::make_shared<std::atomic<bool>>(false);
     workers_.push_back(Worker{std::thread([this, id = std::move(id), method, params = std::move(params), odd = std::move(message.odd_numbers), flight,
-                                           era, done, permit]() mutable {
-                                  run_request(std::move(id), std::move(method), std::move(params), std::move(odd), flight, std::move(era));
+                                           era, done, permit, initialized, version = std::move(version)]() mutable {
+                                  run_request(std::move(id), std::move(method), std::move(params), std::move(odd), flight, std::move(era),
+                                              initialized, std::move(version));
                                   permit.reset();
                                   std::lock_guard<std::mutex> finished(mutex_);
                                   --running_;
@@ -587,7 +592,7 @@ void Connection::dispatch_request(Inbound message, const std::string& era) {
 }
 
 void Connection::run_request(Json id, std::string method, Json params, std::vector<std::string> odd, std::shared_ptr<InFlight> flight,
-                             std::string era) {
+                             std::string era, bool initialized, std::string version) {
     {
         std::unique_lock<std::mutex> lock(mutex_);
         if (flight->cancelled) {  // (cancelled while it waited for a thread: never started)
@@ -618,13 +623,6 @@ void Connection::run_request(Json id, std::string method, Json params, std::vect
                 throw RpcError{kInvalidRequest,
                                "this connection serves the handshake protocol era; requests carrying the 2026-07-28 envelope are not accepted on it",
                                std::nullopt};
-            }
-            std::string version;
-            bool initialized = false;
-            {
-                std::lock_guard<std::mutex> lock(mutex_);
-                version = version_;
-                initialized = initialize_accepted_;
             }
             if (method == "initialize") {
                 auto [result, negotiated] = engine_.initialize(params, version);

@@ -1193,7 +1193,21 @@ private slots:
                                            "add_channel", "duplicate_channel", "delete_channel", "rename_channel", "move_channel",
                                            "set_channel", "merge_spot_channel", "split_channels", "merge_channels",
                                            "to_indexed", "set_color_table", "to_bitmap", "set_duotone",
-                                           "set_adjustment", "auto_adjust", "hdr_toning", "apply_image", "calculations", "trap", "fade_layer"};
+                                           "set_adjustment", "auto_adjust", "hdr_toning", "apply_image", "calculations", "trap", "fade_layer",
+                                           // (PC3 A0, smart-objects@1: this build's own, and the later steps' registered)
+                                           "smart_convert", "smart_place", "smart_profile", "smart_copy", "smart_transform", "rasterize_layer",
+                                           "smart_replace", "smart_relink", "smart_update", "smart_embed", "smart_link", "smart_to_page",
+                                           "smart_filter_add", "smart_filter_set", "smart_filter_move", "smart_filter_delete", "smart_filter_state",
+                                           "smart_stack", "rasterize_lines",
+                                           // (PC3 B1, SPEC COLOR-06: this build's own)
+                                           "quick_mask", "magic_erase",
+                                           // (PC3-0: the later groups' ops registered, SPEC COLOR-06 and COLOR-07)
+                                           "outline_area", "apply_layer_mask", "mask_from_transparency", "matting", "clone_stamp",
+                                           "healing_brush", "spot_healing", "history_brush", "content_aware_fill", "set_path", "delete_path",
+                                           "rename_path", "make_work_path", "text_to_path", "stroke_path", "set_vector_mask", "add_shape_part",
+                                           "edit_shape_part", "combine_shape_parts", "move_shape_parts", "transform_layers",
+                                           "content_aware_scale", "align_layers", "distribute_layers", "arrange_layers", "link_layers",
+                                           "resize_pages", "set_canvas_size", "crop_page", "trim_page", "reveal_all", "rotate_pages"};
         for (const std::string& name : genko::render::ops_registry().names()) {
             if (listed.count(name) == 0 && own.count(name) == 0) missing += (missing.empty() ? "" : ", ") + name;
         }

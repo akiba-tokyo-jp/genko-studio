@@ -5,13 +5,19 @@
 #include <memory>
 
 #include "core/color_raster.hpp"
+#include "core/command_bus.hpp"
 #include "core/error.hpp"
+#include "core/pyconv.hpp"
+#include "core/pynum.hpp"
+#include "render/area_kinds.hpp"
 #include "render/color_canvas.hpp"
 #include "render/image.hpp"
 #include "render/ink.hpp"
 #include "render/ink_canvas.hpp"
 #include "render/page.hpp"
 #include "render/png.hpp"
+#include "render/raster_ops.hpp"
+#include "render/selection.hpp"
 
 namespace genko::render {
 
@@ -162,6 +168,40 @@ Json pixel_at(const core::Page& page, const core::Document* episode, double x_mm
     }
     out["srgb"] = std::move(srgb);
     return out;
+}
+
+core::Json inspect_area(const core::Document& doc, std::int64_t number, const core::Json& area) {
+    const core::Page* page = nullptr;
+    for (std::size_t i = 0; i < doc.pages.size(); ++i) {
+        if (doc.pages[i]->index == core::Num(number) && !doc.is_deferred(i)) page = &doc.page(i);
+    }
+    if (page == nullptr) throw core::Error("key", "no page " + std::to_string(number));
+    use_brushes_of(doc);  // (as the ops that draw see the book)
+    area_kinds::use_keys();  // (the kinds and modifiers this build adds are known to the bus's resolving)
+    try {
+        const int dpi = selection::grid_dpi(*page);  // (as the bus resolves it)
+        const Image mask = selection::to_mask(area, *page, &doc, dpi);
+        const auto box = mask.getbbox();
+        if (!box) return Json{{"area", nullptr}, {"coverage", 0.0}, {"box_mm", nullptr}, {"selected", false}};
+        double covered = 0;
+        for (const char v : mask.tobytes()) covered += static_cast<unsigned char>(v);
+        const double coverage = covered / 255.0 / (static_cast<double>(mask.width()) * mask.height());
+        // (the area as the bus gives it to an op: a plain one as it is, a rectangle or an ellipse alone as its polygon,
+        // any other the mask made of it)
+        Json resolved = area;
+        if (core::area_needs_resolving(area)) {
+            if (const auto plain = core::resolve_plain_area(area)) resolved = *plain;
+            else resolved = *selection::from_mask(mask, dpi);
+        }
+        const double mm = 25.4 / dpi;
+        return Json{{"area", std::move(resolved)},
+                    {"coverage", core::py_round(coverage, 4)},
+                    {"box_mm", Json::array({core::py_round(box->x0 * mm, 3), core::py_round(box->y0 * mm, 3), core::py_round((box->x1 - box->x0) * mm, 3),
+                                            core::py_round((box->y1 - box->y0) * mm, 3)})},
+                    {"selected", true}};
+    } catch (const core::OpError& error) {
+        throw core::Error("value", std::string("the area cannot be read: ") + error.what());
+    }
 }
 
 }  // namespace genko::render

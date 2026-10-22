@@ -2,6 +2,8 @@
 
 #include <cstdint>
 #include <filesystem>
+#include <functional>
+#include <memory>
 #include <optional>
 #include <string>
 #include <string_view>
@@ -60,6 +62,14 @@ PictureChecks picture_checks();
 // A ref that is not "sha256:" + 64 hex digits is no file (Python would look outside assets/ for some).
 std::optional<Image> placed_raster(const core::Layer& layer, const core::Page& page, const core::Document* episode, Size size,
                                    int dpi, std::string_view mode, bool finish, bool dots, const Box& area);
+
+// placed_raster with the picture given (smart-objects@1: a smart object's file, or its contents drawn, laid as a placed
+// picture is — render/smart.cpp): `picture` gives its pixels ("RGBA"; asked only when some of it is on the page, null:
+// nothing drawn), `source_key` names them (the finished art is kept by it), `placement` is where the whole picture lands
+// (mm) and `resample` how it is resampled. The same pixels as placed_raster draws of an asset of those pixels at that place.
+std::optional<Image> placed_picture(const core::Layer& layer, const core::Rect& placement, const std::function<std::shared_ptr<const Image>()>& picture,
+                                    const std::string& source_key, Resample resample, const core::Page& page, const core::Document* episode,
+                                    Size size, int dpi, std::string_view mode, bool finish, bool dots, const Box& area);
 
 // The pictures placed_raster remembers between tiles (decoded assets, finished art), forgotten (clear_render_caches; the
 // window when another book comes in front or the window closes), and how many pixels they hold.

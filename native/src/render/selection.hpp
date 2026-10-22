@@ -26,6 +26,11 @@ namespace genko::render::selection {
 inline constexpr int kWorkingDpi = 200;  // raster.WORKING_DPI
 inline constexpr int kSelDpi = 200;      // selops.SEL_DPI
 
+// The grid a page's selection is made at (resolve, combine, and the window's areas it makes with to_mask and from_mask):
+// kSelDpi on an 8-bit page, as before; on a precise (16, 32 bits) or ink page the finest grid of its pixel layers, as its
+// layer masks are made (render/layer_masks grid_dpi: 200 dpi at least, 600 at most — the coordinator's 8-2 (b)).
+int grid_dpi(const core::Page& page);
+
 using Matrix = std::array<double, 6>;
 inline constexpr Matrix kIdentity{1.0, 0.0, 0.0, 1.0, 0.0, 0.0};
 
@@ -36,9 +41,15 @@ struct AreaMask {
     std::int64_t y0 = 0;
 };
 
-// selection.area_mask(area, dpi): {"poly"} drawn, or {"mask": {"box", "png"}} read and resized (NEAREST). `what` names
-// the op's key in the errors of this build ("<what> must be a finite number", "<what> is too large").
+// selection.area_mask(area, dpi): {"poly"} drawn, or {"mask": {"box", "png"}} read and resized (NEAREST; a grey one as
+// grey_area_stretch says, below). `what` names the op's key in the errors of this build ("<what> must be a finite
+// number", "<what> is too large").
 AreaMask area_mask(const core::Json& area, int dpi = fills::kFillDpi, std::string_view what = "area");
+// PC3 B-0: how area_mask stretches a grey picture (an anti-aliased or feathered area's) onto its grid — bilinear; a
+// two-valued one is stretched nearest. The contract tests that replay Python's books set nearest (Python's) while they
+// compare everything else with Python's; nothing else changes it.
+Resample grey_area_stretch();
+void set_grey_area_stretch(Resample resample);
 
 // base64.b64decode(value) of a str (Python's errors for other values and for text that is not ASCII).
 std::string b64decode(const core::Json& value);
@@ -89,25 +100,36 @@ std::optional<core::Patch> to_patch(const Image& image, std::int64_t x0, std::in
 // selection.transform_patch
 std::optional<core::Patch> transform_patch(const core::Patch& patch, const Matrix& m, Resample resample = Resample::Bilinear);
 
-// What lies in an area: the lines and the patches lifted from a layer (or copied, to paste).
+// What lies in an area: the lines and the patches lifted from a layer (or copied, to paste) — and a pen layer's shape
+// parts (pen-shapes@1, PC3 C-b).
 struct Items {
     std::vector<core::StrokePtr> strokes;
     std::vector<core::Patch> patches;
+    std::vector<core::vector::ShapePart> shapes;
+    bool empty() const { return strokes.empty() && patches.empty() && shapes.empty(); }
 };
 
 // selection.lift: what lies in the area taken off the layer (the layer keeps the rest; its own pixels in the area
 // become an image patch — color-model@1: on an RGB page of a profile, one of its values that says its profile,
-// render/color_edit's kPatchProfileKey).
+// render/color_edit's kPatchProfileKey). A shape part (pen-shapes@1, PC3 C-b) wholly inside goes whole, one wholly outside
+// stays; one the area's edge crosses is cut in two along it (render/shape_parts cut: both halves vector parts, the
+// lifted one a new id) — an open one, which has no inside to cut, goes whole when most of its anchors are inside.
 Items lift(core::Layer& layer, const core::Json& area, const core::Page& page);
 
-// selection.drop: lifted (or copied) items put back on the layer through m; fresh ids for a paste.
-void drop(core::Layer& layer, Items items, const Matrix& m, bool fresh_ids = false, Resample resample = Resample::Bilinear);
+// selection.drop: lifted (or copied) items put back on the layer through m; fresh ids for a paste. Shape parts go
+// through m exactly (their stroke widths scaled as a line's); on a layer that is not a pen layer they are laid as
+// pictures (patches) instead.
+void drop(core::Layer& layer, Items items, const Matrix& m, bool fresh_ids = false, Resample resample = Resample::Bilinear,
+          const core::Page* page = nullptr);
 
-// selection.drop_warped: through a free transform (render/warp.hpp): lines point by point, pixels piece by piece.
+// selection.drop_warped: through a free transform (render/warp.hpp): lines point by point, pixels piece by piece; shape
+// parts bent (render/shape_parts bent).
 using WarpFunction = std::function<std::pair<double, double>(double, double)>;
-void drop_warped(core::Layer& layer, Items items, const WarpFunction& go, Resample resample = Resample::Bilinear);
+void drop_warped(core::Layer& layer, Items items, const WarpFunction& go, Resample resample = Resample::Bilinear,
+                 const core::Page* page = nullptr);
 
-// selection.items_from_json: copied items as an op carries them ({"strokes", "patches": [{…, "png": base64}]}).
+// selection.items_from_json: copied items as an op carries them ({"strokes", "patches": [{…, "png": base64}], "shapes"?:
+// [shape parts]}).
 Items items_from_json(const core::Json& data);
 
 // selection.area_bbox: (x, y, w, h) of a poly; the mask's box as it is (any length) of a mask area.
@@ -119,14 +141,16 @@ std::vector<double> area_bbox(const core::Json& area);
 // words.
 Image to_mask(const core::Json& area, const core::Page& page, const core::Document* episode, int dpi = kSelDpi);
 
-// selops.resolve: any area to a plain one ({"poly"} or {"mask"}) the drawing ops take. OpError "the area is empty".
+// selops.resolve: any area to a plain one ({"poly"} or {"mask"} at the page's grid_dpi) the drawing ops take. OpError
+// "the area is empty".
 core::Json resolve(const core::Json& area, const core::Page& page, const core::Document* episode);
 
 // selops.from_mask: a page-sized mask back to {"mask": {"box", "png"}} (cropped to what it covers); nothing when empty.
 std::optional<core::Json> from_mask(const Image& mask, int dpi = kSelDpi);
 
 // selops.combine: a selection drawn with Shift (add), Alt (subtract) or both (intersect) joined to the one there
-// (none, or replace: the new one, resolved when it is not plain); nothing when nothing is left.
+// (none, or replace: the new one, resolved when it is not plain; joined: a mask at the page's grid_dpi); nothing when
+// nothing is left.
 std::optional<core::Json> combine(const std::optional<core::Json>& current, const core::Json& area, std::string_view how,
                                   const core::Page& page, const core::Document* episode);
 

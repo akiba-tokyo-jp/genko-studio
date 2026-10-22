@@ -22,7 +22,10 @@
 #include "core/ids.hpp"
 #include "core/pyconv.hpp"
 #include "core/ruby.hpp"
+#include "core/smart.hpp"
 #include "core/strokes.hpp"
+#include "core/masks.hpp"
+#include "core/vector.hpp"
 #include "storage/asset_store.hpp"
 #include "storage/fsutil.hpp"
 
@@ -36,11 +39,13 @@ using core::Point;
 
 namespace {
 
-constexpr std::array<std::string_view, 22> kTopKeys{
+constexpr std::array<std::string_view, 23> kTopKeys{
     "version", "revision", "title", "episode", "binding", "start_side", "strict_gates", "autosave",
     "font_path", "page_locks", "brush", "nombre", "spec", "bible", "tickets", "studio", "pages", "story",
     // v4
-    "min_reader", "writer", "book_id", "features"};
+    "min_reader", "writer", "book_id", "features",
+    // smart-objects@1
+    "smart_contents"};
 
 constexpr std::array<std::string_view, 21> kPageKeys{
     "id", "art_ok", "plan", "index", "note", "name_ok", "stage", "spread_with", "numero", "onion_from", "lt_threshold",
@@ -60,15 +65,21 @@ constexpr std::array<std::string_view, 20> kLineKeys{"id", "page_index", "text",
                                                      "x_mm", "y_mm", "w_mm", "h_mm", "balloon", "tail", "wrap",
                                                      "ruby_runs", "ruby_spans", "path", "emphasis_runs", "style_runs",
                                                      "style", "tails"};
-constexpr std::array<std::string_view, 43> kLayerKeys{
+constexpr std::array<std::string_view, 49> kLayerKeys{
     "id", "role", "kind", "visible", "exportable", "strokes", "raster_relpath", "fill_rgb", "lpi", "density",
     "region", "opacity", "material_id", "angle", "title", "blend", "clip", "lock_alpha", "locked", "panel_clip",
     "panel_each", "patches", "tone", "parent_id", "asset", "mask", "color", "reference", "fill", "adjust", "effect",
     "color_prints", "screen", "source", "strokes_blob", "stroke_count",
     // placed layers only
-    "frame_id", "placement_mm", "fit", "clip_to", "finish", "color_raster", "ink_raster"};
+    "frame_id", "placement_mm", "fit", "clip_to", "finish", "color_raster", "ink_raster",
+    // smart-objects@1
+    "smart",
+    // PC3 (pen-shapes@1, vector@1, transform@1)
+    "shapes_blob", "shape_count", "vector_mask", "link", "lock_position"};
 constexpr std::array<std::string_view, 5> kPlacedOnlyKeys{"frame_id", "placement_mm", "fit", "clip_to", "finish"};
-constexpr std::array<std::string_view, 2> kMaskKeys{"enabled", "asset"};
+constexpr std::array<std::string_view, 5> kMaskKeys{"enabled", "asset",
+                                                    // masks@1 (PC3)
+                                                    "linked", "density", "feather_mm"};
 constexpr std::array<std::string_view, 10> kPackedStrokeKeys{"id", "kind", "width_mm", "xy", "p", "rgb", "opacity", "r", "po", "color_rgb"};
 constexpr std::array<std::string_view, 11> kDictStrokeKeys{"id", "points", "pressure", "width_mm", "kind", "rgb",
                                                            "opacity", "rotation", "po", "pressure_opacity", "color_rgb"};
@@ -364,6 +375,14 @@ private:
     core::Bytes read_profile(const std::string& ref, core::ProfileSpace space, const std::string& at_profile);
     void check_ink_rasters(core::Page& page, const Json& raw, const std::string& at);
     void read_channels(core::Page& page, const std::string& at);
+    // smart-objects@1: the book's smart object contents, and a page of them
+    std::map<std::string, std::shared_ptr<const core::SmartContents>> read_smart_contents(const Json& payload, core::Binding binding);
+    core::Page read_contents_page(const Json& raw, const std::string& at, const core::PageSpec& spec, core::Binding binding);
+    // PC3 (vector@1, pen-shapes@1, transform@1, page-spec@1)
+    void read_layer_vectors(core::Layer& layer, const Json& data, const std::string& at);
+    core::vector::ShapeListPtr read_shapes_blob(const Json& ref_value, const std::string& at);
+    void read_page_vectors(core::Page& page, const std::string& at);
+    std::unordered_map<std::string, core::vector::ShapeListPtr> shape_blobs_;  // (shapes read in this load)
 };
 
 core::PageSpec Reader::read_spec(const Json& raw) {
@@ -1043,6 +1062,36 @@ core::Layer Reader::read_layer(const Json& data, const std::string& at) {
         layer.source = asis_json(data, "source");
         layer.finish = asis_json(data, "finish");
     }
+    const bool smart = layer.kind == core::LayerKind::Smart;
+    if (smart) {  // smart-objects@1: its panel and finish as a placed picture's, its settings (core::smart::validate_smart)
+        layer.frame_id = asis_opt_str(data, "frame_id", at);
+        layer.clip_to = truthy_at(data, "clip_to") ? asis_str(data, "clip_to", "frame", at) : "frame";
+        layer.finish = asis_json(data, "finish");
+    }
+    if (const Json* settings = find(data, "smart")) layer.smart = *settings;  // (on another kind: refused by validate_smart)
+    if (smart && layer.smart && layer.smart->is_object()) {  // (PC3 A2: its filter mask, a PNG of the book's assets)
+        const Json* mask = find(*layer.smart, "filter_mask");
+        const Json* asset = mask != nullptr && mask->is_object() ? find(*mask, "asset") : nullptr;
+        if (asset != nullptr && asset->is_string() && AssetStore::is_ref(asset->get<std::string>()) && !dir_.empty() &&
+            !store_.has(asset->get<std::string>(), ".png")) {
+            issue("missing_asset", at_key(at_key(at_key(at, "smart"), "filter_mask"), "asset"), asset->get<std::string>(),
+                  "the smart object's filter mask " + AssetStore::relpath(asset->get<std::string>(), ".png") + " is missing");
+        }
+        // (PC3 A3: a PSD's placed layer block and Photoshop's picture of it)
+        const Json* psd = find(*layer.smart, "psd");
+        if (psd != nullptr && psd->is_object() && !dir_.empty()) {
+            const std::string here = at_key(at_key(at, "smart"), "psd");
+            const auto check = [&](const Json* ref, std::string_view suffix, const std::string& where, const std::string& noun) {
+                if (ref == nullptr || !ref->is_string() || !AssetStore::is_ref(ref->get<std::string>()) || store_.has(ref->get<std::string>(), suffix)) return;
+                issue("missing_asset", where, ref->get<std::string>(), noun + " " + AssetStore::relpath(ref->get<std::string>(), suffix) + " is missing");
+            };
+            check(find(*psd, "raw"), ".bin", at_key(here, "raw"), "the smart object's PSD block");
+            if (const Json* shown = find(*psd, "shown"); shown != nullptr && shown->is_object()) {
+                check(find(*shown, "asset"), ".png", at_key(at_key(here, "shown"), "asset"), "the smart object's PSD picture");
+                check(find(*shown, "ink_raster"), core::kInkRasterSuffix, at_key(at_key(here, "shown"), "ink_raster"), "the smart object's PSD picture");
+            }
+        }
+    }
     if (const Json* mask = find(data, "mask"); mask && core::py_truthy(*mask)) {
         const std::string here = at_key(at, "mask");
         if (!mask->is_object()) format_error(here, "a mask must be an object, not " + core::py_repr(*mask));
@@ -1052,13 +1101,20 @@ core::Layer Reader::read_layer(const Json& data, const std::string& at) {
             if (png && !png->empty()) {
                 m.png = std::move(png);
                 m.enabled = to_bool(*mask, "enabled", true);
+                // (masks@1, PC3: linked, density, feather_mm — one not well formed: the book opens read-only)
+                try {
+                    core::read_mask_settings(*mask, m);
+                } catch (const core::Error& error) {
+                    issue("broken_value", here, {}, error.what());
+                }
                 layer.mask = std::move(m);
             }
         }
         check_keys(*mask, kMaskKeys, here, "mask");
     }
+    read_layer_vectors(layer, data, at);  // (PC3: vector@1's vector mask, transform@1's link and position lock)
     check_keys(data, kLayerKeys, at, "layer");
-    if (!placed) {
+    if (!placed && !smart) {
         for (const auto& key : kPlacedOnlyKeys) {
             if (find(data, key) != nullptr) {
                 issue("unknown_key", at_key(at, key), {},
@@ -1074,6 +1130,14 @@ core::Layer Reader::read_layer(const Json& data, const std::string& at) {
             if (truthy_at(data, key)) {
                 issue("unknown_key", at_key(at, key), {},
                       "a placed layer's " + std::string(key) + " is not written back (Python drops it too)");
+            }
+        }
+        return layer;
+    }
+    if (smart) {  // (smart-objects@1: a smart object holds no pixels or lines of its own)
+        for (const auto* key : {"strokes", "patches", "strokes_blob", "raster_relpath", "asset", "ink_raster", "placement_mm", "fit"}) {
+            if (truthy_at(data, key)) {
+                issue("unknown_key", at_key(at, key), {}, "a smart object's " + std::string(key) + " is not written back");
             }
         }
         return layer;
@@ -1119,7 +1183,97 @@ core::Layer Reader::read_layer(const Json& data, const std::string& at) {
     if (const Json* blob = find(data, "strokes_blob"); blob && core::py_truthy(*blob)) {
         if (auto list = read_strokes_blob(*blob, at_key(at, "strokes_blob"))) layer.strokes = std::move(list);
     }
+    // (pen-shapes@1, PC3: a pen layer's shape parts, assets/<ab>/<64 hex>.shapes.json)
+    if (const Json* blob = find(data, "shapes_blob"); blob && !blob->is_null()) {
+        if (auto list = read_shapes_blob(*blob, at_key(at, "shapes_blob"))) layer.shapes = std::move(list);
+    }
     return layer;
+}
+
+// PC3 (vector@1, transform@1): a layer's vector mask, its link group and its position lock. One not well formed is
+// reported (the book opens read-only: it is never written without it).
+void Reader::read_layer_vectors(core::Layer& layer, const Json& data, const std::string& at) {
+    if (const Json* mask = find(data, "vector_mask"); mask && !mask->is_null()) {
+        try {
+            layer.vector_mask = core::vector::vector_mask_from_json(*mask);
+        } catch (const core::Error& error) {
+            issue("broken_value", at_key(at, "vector_mask"), {}, error.what());
+        }
+    }
+    if (const Json* link = find(data, "link"); link && !link->is_null()) {
+        if (link->is_string() && !link->get_ref<const std::string&>().empty() && link->get_ref<const std::string&>().size() <= 64) {
+            layer.link = link->get<std::string>();
+        } else {
+            issue("broken_value", at_key(at, "link"), {}, "a layer's link must be text (1..64 bytes)");
+        }
+    }
+    if (const Json* lock = find(data, "lock_position"); lock && !lock->is_null()) {
+        if (lock->is_boolean()) {
+            layer.lock_position = lock->get<bool>();
+        } else {
+            issue("broken_value", at_key(at, "lock_position"), {}, "a layer's lock_position must be true or false");
+        }
+    }
+}
+
+// pen-shapes@1 (PC3): a pen layer's shape parts, read and checked once per asset in a load (as the strokes are).
+core::vector::ShapeListPtr Reader::read_shapes_blob(const Json& ref_value, const std::string& at) {
+    const core::Bytes bytes = read_blob(ref_value, at, nullptr, core::vector::kShapesSuffix, "shapes");
+    if (!bytes) return nullptr;
+    const std::string& ref = ref_value.get_ref<const std::string&>();
+    if (const auto it = shape_blobs_.find(ref); it != shape_blobs_.end()) return it->second;
+    try {
+        auto list = core::vector::make_shapes(core::vector::shapes_from_blob(*bytes), ref);
+        shape_blobs_.emplace(ref, list);
+        return list;
+    } catch (const core::Error& error) {
+        issue("broken_asset", at, ref, std::string("the shapes ") + AssetStore::relpath(ref, core::vector::kShapesSuffix) + " cannot be read: " + error.what());
+        return nullptr;
+    }
+}
+
+// PC3 (vector@1, page-spec@1): the page's saved paths, work path and clipping path, and its own paper, kept under
+// "paths", "work_path", "clipping_path" and "native_spec" (taken out of the keys written back as they were read). What
+// cannot be read is reported (the book opens read-only) and is kept as it was read: the page is never written without it.
+void Reader::read_page_vectors(core::Page& page, const std::string& at) {
+    const auto take = [&](const char* key, const auto& read) {
+        const auto it = page.extra.find(key);
+        if (it == page.extra.end()) return;
+        try {
+            read(*it);
+        } catch (const core::Error& error) {
+            issue("broken_value", at_key(at, key), {}, error.what());
+            return;  // (left in the keys written back as they were: the book is read-only)
+        }
+        page.extra.erase(key);
+    };
+    take("paths", [&](const Json& raw) { page.paths = core::vector::paths_from_json(raw); });
+    take("work_path", [&](const Json& raw) {
+        if (!raw.is_null()) page.work_path = core::vector::path_from_json(raw);
+    });
+    take("clipping_path", [&](const Json& raw) {
+        if (!raw.is_null()) page.clipping_path = core::vector::clipping_from_json(raw);
+    });
+    take("native_spec", [&](const Json& raw) {
+        if (!raw.is_object()) throw core::Error("value", "a page's native_spec must be an object");
+        Json spec = raw;
+        std::optional<std::pair<double, double>> origin;
+        if (const auto o = spec.find("trim_origin_mm"); o != spec.end()) {
+            if (!o->is_array() || o->size() != 2 || !(*o)[0].is_number() || !(*o)[1].is_number())
+                throw core::Error("value", "a page's trim_origin_mm must be [x, y]");
+            origin = std::make_pair((*o)[0].get<double>(), (*o)[1].get<double>());
+            spec.erase("trim_origin_mm");
+        }
+        const std::size_t before = report_.issues.size();
+        core::PageSpec own = read_spec(spec);
+        if (report_.issues.size() != before) {  // (said once, here, for the page)
+            report_.issues.erase(report_.issues.begin() + static_cast<std::ptrdiff_t>(before), report_.issues.end());
+            throw core::Error("value", "a page's native_spec is not a paper this build reads");
+        }
+        own.trim_origin_mm = origin;
+        page.spec = std::move(own);
+        page.own_spec = true;
+    });
 }
 
 core::Document Reader::migrate(const Json& payload) {
@@ -1237,11 +1391,13 @@ core::Document Reader::migrate(const Json& payload) {
         }
         check_ink_rasters(page, raw, at);
         read_channels(page, at);
+        read_page_vectors(page, at);
         page_list.push_back(std::make_shared<core::Page>(std::move(page)));
         if (skip_assets_) deferred.push_back(page_list.back());
     }
     skip_assets_ = false;
     if (!had_story) story = std::move(page_texts);
+    auto smart_contents = read_smart_contents(payload, *binding);  // (smart-objects@1)
 
     core::Document doc;
     const Json* title = find(payload, "title");
@@ -1252,6 +1408,7 @@ core::Document Reader::migrate(const Json& payload) {
     doc.binding = *binding;
     doc.pages = std::move(page_list);
     doc.deferred = std::move(deferred);
+    doc.smart_contents = std::move(smart_contents);
     doc.luts = std::move(luts_);
     doc.story = std::move(story);
     doc.tickets = list_or_empty(payload, "tickets");
@@ -1357,7 +1514,118 @@ core::Document Reader::migrate(const Json& payload) {
     // (adjustments@1: a correction's native or own kind that is not well formed)
     try { core::validate_adjustments(doc); }
     catch (const core::Error& error) { issue("broken_value", "/pages", {}, error.what()); }
+    // (smart-objects@1: a smart object's settings, its contents and contents inside contents)
+    try { core::smart::validate_smart(doc); }
+    catch (const core::Error& error) { issue("broken_value", "/smart_contents", {}, error.what()); }
+    // (PC3: masks@1's settings and Quick Mask; vector@1, pen-shapes@1, transform@1, page-spec@1)
+    try { core::validate_masks(doc); }
+    catch (const core::Error& error) { issue("broken_value", "/pages", {}, error.what()); }
+    try { core::vector::validate_vector(doc); }
+    catch (const core::Error& error) { issue("broken_value", "/pages", {}, error.what()); }
     return doc;
+}
+
+std::map<std::string, std::shared_ptr<const core::SmartContents>> Reader::read_smart_contents(const Json& payload, core::Binding binding) {
+    std::map<std::string, std::shared_ptr<const core::SmartContents>> out;
+    const Json* raw = find(payload, "smart_contents");
+    if (raw == nullptr || raw->is_null()) return out;
+    if (!raw->is_object()) {
+        issue("broken_value", "/smart_contents", {}, "the smart object contents must be an object, not " + core::py_repr(*raw));
+        return out;
+    }
+    for (const auto& [id, item] : raw->items()) {
+        const std::string at = at_key("/smart_contents", id);
+        auto contents = std::make_shared<core::SmartContents>();
+        try {
+            *contents = core::smart::contents_from_json(item);
+        } catch (const core::Error& error) {
+            issue("broken_value", at, {}, error.what());
+            continue;
+        }
+        if (contents->kind == "page") {
+            const Json* spec = find(item, "spec");
+            const Json* page = find(item, "page");
+            if (spec == nullptr || page == nullptr) {
+                issue("broken_value", at, {}, "the contents of kind page hold their spec and page");
+                continue;
+            }
+            contents->page = std::make_shared<core::Page>(read_contents_page(*page, at_key(at, "page"), read_spec(*spec), binding));
+        } else if (AssetStore::is_ref(contents->asset) && AssetStore::is_suffix(contents->suffix)) {
+            // (the file's bytes are read as it is drawn: here only that it is there)
+            if (!dir_.empty() && !store_.has(contents->asset, contents->suffix)) {
+                issue("missing_asset", at_key(at, "asset"), contents->asset,
+                      "the smart object's file " + AssetStore::relpath(contents->asset, contents->suffix) + " is missing");
+            }
+            const Json* icc = find(contents->profile, "icc");
+            if (icc != nullptr && icc->is_string() && AssetStore::is_ref(icc->get<std::string>()) && !dir_.empty() &&
+                !store_.has(icc->get<std::string>(), core::kProfileSuffix)) {
+                issue("missing_asset", at_key(at_key(at, "profile"), "icc"), icc->get<std::string>(),
+                      "the ICC profile " + AssetStore::relpath(icc->get<std::string>(), core::kProfileSuffix) + " is missing");
+            }
+            // (PC3 A3: a PSD's linked-layer item, written back with the file)
+            const Json* record = contents->psd && contents->psd->is_object() ? find(*contents->psd, "item") : nullptr;
+            if (record != nullptr && record->is_string() && AssetStore::is_ref(record->get<std::string>()) && !dir_.empty() &&
+                !store_.has(record->get<std::string>(), ".bin")) {
+                issue("missing_asset", at_key(at_key(at, "psd"), "item"), record->get<std::string>(),
+                      "the PSD's linked file record " + AssetStore::relpath(record->get<std::string>(), ".bin") + " is missing");
+            }
+        }
+        out.emplace(id, std::move(contents));
+    }
+    return out;
+}
+
+// A smart object's page (its contents of kind page): read as a page of the book is, with its own spec — its channels, and
+// PC3's paths, work path, clipping path and own paper (read_page_vectors: kept as the keys read, they would be written over
+// what the page holds later) —; it has no lines, and (none given) no layers.
+core::Page Reader::read_contents_page(const Json& raw, const std::string& at, const core::PageSpec& spec, core::Binding binding) {
+    if (!raw.is_object()) format_error(at, "a page must be an object, not " + core::py_repr(raw));
+    core::Page page;
+    page.id = truthy_at(raw, "id") ? asis_str(raw, "id", {}, at) : core::new_page_id();
+    page.art_ok = to_bool(raw, "art_ok", false);
+    page.plan = asis_json(raw, "plan");
+    page.index = find(raw, "index") != nullptr ? required_num(raw, "index", at) : Num(1);
+    page.spec = spec;
+    if (const Json* frames = find(raw, "frames")) {
+        const Json items = iterable(*frames, at_key(at, "frames"));
+        for (std::size_t i = 0; i < items.size(); ++i) page.frames.push_back(read_frame(items[i], at_index(at_key(at, "frames"), i)));
+    }
+    page.binding = binding;
+    page.note = asis_str(raw, "note", "", at);
+    page.name_ok = asis_bool(raw, "name_ok", false, at);
+    page.stage = asis_str(raw, "stage", "name", at);
+    page.spread_with = asis_opt_num(raw, "spread_with", at);
+    page.numero = asis_bool(raw, "numero", true, at);
+    page.effects = list_or_empty(raw, "effects");
+    page.ruler = asis_json(raw, "ruler");
+    page.rulers = list_or_empty(raw, "rulers");
+    page.prims = list_or_empty(raw, "prims");
+    page.onion_from = asis_opt_num(raw, "onion_from", at);
+    page.lt_threshold = asis_opt_num(raw, "lt_threshold", at);
+    const Json* fills_raw = find(raw, "fills");
+    const Json fills = fills_raw ? *fills_raw : Json::object();
+    if (!fills.is_object()) format_error(at_key(at, "fills"), "fills must be an object, not " + core::py_repr(fills));
+    for (const auto& [role_name, rgb] : fills.items()) {
+        const auto role = core::layer_role_from(role_name);
+        if (!role) format_error(at_key(at, "fills"), core::py_repr_str(role_name) + " is not a valid LayerRole");
+        page.fills.emplace_back(*role, numbers_of(rgb, at_key(at_key(at, "fills"), role_name)));
+    }
+    if (const Json* layers = find(raw, "layers")) {
+        const Json items = iterable(*layers, at_key(at, "layers"));
+        for (std::size_t i = 0; i < items.size(); ++i) page.layers.push_back(read_layer(items[i], at_index(at_key(at, "layers"), i)));
+    }
+    for (const auto& [key, value] : raw.items()) {
+        if (!in(kPageKeys, key)) page.extra[key] = value;
+    }
+    {
+        core::ColorModel model = read_color(page.extra, at);
+        page.color = std::move(model.inks);
+        page.rgb = std::move(model.rgb);
+    }
+    check_ink_rasters(page, raw, at);
+    read_channels(page, at);
+    read_page_vectors(page, at);
+    return page;
 }
 
 std::string read_only_reason(const LoadReport& report) {
@@ -1418,7 +1686,10 @@ bool is_known_feature(std::string_view feature) {
     return feature == core::kColorRasterFeature || feature == core::kColorTilesFeature || feature == core::kExposureFeature ||
            feature == core::kColorStrokeFeature || feature == core::kPaperFeature || feature == core::kRubyLayoutFeature ||
            feature == core::kColorModeFeature || feature == core::kColorModelFeature || feature == core::kChannelsFeature ||
-           feature == core::kAdjustmentsFeature;
+           feature == core::kAdjustmentsFeature || feature == core::kSmartObjectsFeature ||
+           // PC3 (core/masks.hpp, core/vector.hpp)
+           feature == core::kMasksFeature || feature == core::vector::kVectorFeature || feature == core::vector::kPenShapesFeature ||
+           feature == core::vector::kTransformFeature || feature == core::vector::kPageSpecFeature;
 }
 
 int project_version(const Json& payload) {

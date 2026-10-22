@@ -17,6 +17,7 @@
 #include "render/page.hpp"
 #include "render/page_internal.hpp"
 #include "render/selection.hpp"
+#include "render/shape_parts.hpp"
 #include "render/stroke.hpp"
 
 namespace genko::render::raster {
@@ -141,13 +142,14 @@ void bake_vectors(const core::Page& page, core::Layer& layer, bool page_values) 
     const Image base = baked(page, layer, page_values);
     layer.strokes = core::empty_strokes();
     layer.patches.clear();
+    layer.shapes = core::vector::empty_shapes();  // (pen-shapes@1, PC3 C-b: its shape parts drawn in too)
     save_raster(page, layer, base);
     layer.kind = core::LayerKind::Raster;
 }
 
 Image layer_pixels(const core::Page& page, const core::Layer& layer) {
     // (the same pixels as _bake_vectors on a copy and ensure_raster of it: PNG keeps them)
-    if (layer.stroke_count() > 0 || !layer.patches.empty()) {
+    if (layer.stroke_count() > 0 || !layer.patches.empty() || shape_parts::any(layer)) {
         core::Layer copy = layer;
         (void)index3(page.index);  // (save_raster's page number)
         return baked(page, copy, core::holds_page_values(page, layer));

@@ -38,6 +38,7 @@ genko_library(genko_render
     abr.cpp
     psd.cpp
     psd_descriptor.cpp
+    psd_smart.cpp
     psd_text.cpp
     movie.cpp
     anim.cpp
@@ -69,11 +70,81 @@ genko_library(genko_render
     covers.cpp
     bookpages.cpp
     placed.cpp
+    smart.cpp
+    smart_decode.cpp
+    ops_smart.cpp
+    ops_smart_contents.cpp
+    smart_filters.cpp
+    ops_smart_filters.cpp
+    stack.cpp
     screentone.cpp
     text/fonts.cpp
     text/tategaki.cpp
     text/lettering.cpp
     text/balloons.cpp
+    # PC3 (選択・マスク・パス・変形・判型の土台: B-0, C-0)
+    selection_ext.cpp
+    area_kinds.cpp
+    layer_masks.cpp
+    mask_lending.cpp
+    path_raster.cpp
+    resample.cpp
+    ops_select.cpp
+    ops_retouch.cpp
+    # PC3 B2: レイヤーマスクの適用・透明部分から、境界線を描く
+    ops_masks.cpp
+    ops_vector2.cpp
+    ops_transform.cpp
+    ops_pagesize.cpp
+    # PC3 B1 (選択の基本と選択範囲の編集)
+    select_color.cpp
+    ops_quick_mask.cpp
+    erase_magic.cpp
+    # PC3 B4 (修復)
+    retouch_dabs.cpp
+    poisson.cpp
+    inpaint.cpp
+    content_aware.cpp
+    # PC3 B3 (賢い選択・選択とマスク・マット)
+    segment/mod.cpp
+    segment/maxflow.cpp
+    segment/gmm.cpp
+    segment/slic.cpp
+    segment/grabcut.cpp
+    segment/quick.cpp
+    segment/subject.cpp
+    segment/sky.cpp
+    segment/focus.cpp
+    matting.cpp
+    select_smart.cpp
+    ops_matting.cpp
+    # PC3 C-a (パスとベクトルマスク)
+    path_trace.cpp
+    path_areas.cpp
+    vector_masks.cpp
+    psd_paths.cpp
+    path_info.cpp
+    ops_paths.cpp
+    # PC3 C-e (判型)
+    page_pixels.cpp
+    # PC3 C-b (シェイプ: ペンの層の形の部品)
+    shape_parts.cpp
+    ops_shapes.cpp
+    psd_shapes.cpp
+    shape_presets.cpp
+    # PC3 C-c (変形: 自由変形・ワープ・パペットワープ・遠近法ワープ・コンテンツに応じて拡大・縮小・ゆがみ)
+    puppet.cpp
+    perspective_warp.cpp
+    liquify_field.cpp
+    seam.cpp
+    own_pixels.cpp
+    layer_transform.cpp
+    distort_ops.cpp
+    # PC3 C-d (移動・整列・分布・重ね順・リンク)
+    layer_bounds.cpp
+    layer_align.cpp
+    # PC3 A5 (スマートオブジェクトの上の変形: ゆがみ・遠近法ワープ・パペットワープのスマートフィルター)
+    smart_bends.cpp
     ${GENKO_MATERIAL_RESOURCES}
     ${GENKO_TEXT_RESOURCES}
   PUBLIC_DEPS genko_core Qt6::Core
@@ -96,4 +167,8 @@ if(GENKO_LIBRARY_KIND STREQUAL "SHARED")
   target_link_libraries(genko_render_ops INTERFACE genko_render genko_core Qt6::Core)
 else()
   genko_library(genko_render_ops SOURCES ${GENKO_RENDER_OPS_SOURCES} PUBLIC_DEPS genko_render genko_core Qt6::Core)
+  # (PC3 A2: a smart object's smart filters are drawn with filter_raster's own ways, render/ops_adjust, whose local
+  # corrections apply ops through ops_registry(): a page drawn needs genko_render_ops too. Two static libraries that
+  # need each other: CMake links them as such, once more after each other)
+  target_link_libraries(genko_render INTERFACE genko_render_ops)
 endif()

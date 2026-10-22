@@ -25,6 +25,7 @@
 #include "render/timelapse.hpp"
 #include "storage/asset_store.hpp"
 #include "storage/fsutil.hpp"
+#include "storage/gc.hpp"
 #include "storage/journal.hpp"
 #include "storage/lock.hpp"
 #include "storage/reader.hpp"
@@ -288,6 +289,17 @@ Session::JobResult Session::execute(const Job& job) {
             storage::make_dirs_durable(folder);
             storage::AssetStore store(folder);
             Json payload = storage::project_payload_v4(*job.doc, store);
+            // (what the book names that only its folder holds — a smart object's file, filter mask, PSD record and
+            // assigned profile, a placed picture — goes with the recovery point, which is read from its own folder; when
+            // the book's folder cannot be read, the point is written all the same: the changes it keeps come first)
+            if (job.doc->asset_dir) {
+                std::set<std::string> named;
+                storage::refs_in(payload, named);
+                try {
+                    storage::copy_named_assets(*job.doc->asset_dir, folder, named);
+                } catch (const core::Error&) {
+                }
+            }
             payload["revision"] = job.base_revision;
             const std::string state = storage::state_ref(payload);
             storage::write_atomic(folder / "state.json", core::dump_python_indent2(payload));
@@ -319,6 +331,9 @@ Session::JobResult Session::execute(const Job& job) {
             request.actor = job.actor;
             request.base_revision = 0;
             request.ops = Json::array();
+            // (what the book names that only its folder's assets hold — a smart object's file, filter mask, PSD record
+            // and assigned profile, a placed picture — goes with it: independent review A P1-2)
+            request.assets_from = job.doc->asset_dir;
             const storage::SaveResult saved = storage::Saver(lock).save(*job.doc, request);
             render::timelapse::after_save(job.dir, *job.doc, Json());  // (a new book: every page, when it is on)
             r.revision = saved.revision;
@@ -707,11 +722,23 @@ core::ApplyResult Session::apply(const Json& ops, const std::vector<std::string>
     const core::CommandBus bus(*registry_);
     core::ScopedIdScript script(ids);
     core::ApplyResult result = bus.apply(*doc_, ops, core::Actor(actor_));
+    return keep_applied(ops, std::move(result), script.taken());
+}
+
+core::ApplyResult Session::apply_worked(const Json& ops, const DocPtr& base, core::ApplyResult result, const std::vector<std::string>& taken) {
+    if (base != doc_) return apply(ops, taken);  // (the book changed meanwhile: worked out again on it, the same ids first)
+    if (saving_as_) throw core::ApplyError("別名保存中です。完了してから編集してください。", "save_as_busy");
+    if (!read_only_.empty()) throw core::ApplyError("this book is open read-only: " + read_only_, "read_only");
+    if (discarded_) throw core::ApplyError("the book was closed", "closed");
+    return keep_applied(ops, std::move(result), taken);
+}
+
+core::ApplyResult Session::keep_applied(const Json& ops, core::ApplyResult result, std::vector<std::string> ids) {
     auto change = std::make_shared<Change>();
     change->id = new_change_id();
     change->ops = ops;
     change->journal_ops = result.journal_ops;
-    change->ids = script.taken();
+    change->ids = std::move(ids);
     change->before = doc_;
     change->after = std::make_shared<const core::Document>(std::move(result.doc));
     change->held = replaced_precise_bytes(*change->before, *change->after);
@@ -1048,6 +1075,61 @@ Session::History Session::history() const {
     return out;
 }
 
+std::optional<DocPtr> Session::state_at(std::size_t done) const {
+    // (the timeline as history() lays it: the saved changes before this session that are done, then this session's)
+    std::set<std::string> mine;
+    for (const auto* list : {&done_, &undone_}) {
+        for (const auto& change : *list) {
+            if (!change->txn.empty()) mine.insert(change->txn);
+        }
+    }
+    std::vector<std::string> journal;
+    if (path_) {
+        try {
+            const std::shared_ptr<const JournalRead> read = read_journal();
+            for (const auto* stack : {&read->undo, &read->redo}) {
+                for (const auto& [id, entry] : *stack) {
+                    if (mine.count(id) == 0) journal.push_back(id);
+                }
+            }
+        } catch (const std::exception&) {
+            journal.clear();
+        }
+    }
+    const std::size_t before = std::min(journal.size(), static_cast<std::size_t>(std::max<std::int64_t>(journal_after().undo, 0)));
+    if (done > before + done_.size()) return std::nullopt;
+    if (done > before) return DocPtr(done_[done - before - 1]->after);
+    if (done == before) return done_.empty() ? doc_ : done_.front()->before;
+    // a saved change's state: the one after it (（はじめ）: the one before the first)
+    try {
+        const std::string& txn = journal[done == 0 ? 0 : done - 1];
+        const storage::journal::Stacks stacks = storage::journal::stacks(*path_);
+        std::optional<std::string> ref;
+        for (const auto* stack : {&stacks.undo, &stacks.redo}) {
+            for (const storage::journal::HistoryItem& item : *stack) {
+                if (item.id == txn) ref = done == 0 ? item.before : item.after;
+            }
+        }
+        if (!ref) return std::nullopt;
+        for (const auto& [seen, state] : states_read_) {
+            if (seen == *ref) return state;
+        }
+        const storage::AssetStore store(*path_);
+        const auto data = store.get_bytes(*ref, storage::kStateSuffix);
+        if (!data) return std::nullopt;
+        const core::Json state = core::parse_python_json(*data);
+        if (!state.is_object()) return std::nullopt;
+        storage::LoadResult loaded = storage::load_document_payload(state, *path_);
+        if (!loaded.report.clean()) return std::nullopt;
+        auto made = std::make_shared<const core::Document>(std::move(loaded.document));
+        states_read_.emplace_back(*ref, made);
+        if (states_read_.size() > kStatesKept) states_read_.erase(states_read_.begin());
+        return DocPtr(made);
+    } catch (const std::exception&) {
+        return std::nullopt;
+    }
+}
+
 bool Session::can_undo() const {
     const std::int64_t undo = journal_after().undo;
     return !saving_as_ && read_only_.empty() &&
@@ -1348,9 +1430,9 @@ void Session::job_done(const JobResult& r) {
             recover_floor_.reset();
             auto copy = std::make_shared<core::Document>(*r.doc);
             copy->revision = r.revision;
-            // (the book's folder, where import_psd reads a relative path from: save_episode sets episode.asset_dir when
-            // it has none — a new book's first save; a book read has the folder it was read from)
-            if (!copy->asset_dir) copy->asset_dir = target;
+            // (the book's folder now — where its pictures and files are read from, the window puts what it imports and
+            // import_psd reads a relative path from: every asset it names was copied there)
+            copy->asset_dir = target;
             last_saved_ = QDateTime::currentDateTime();
             last_revision_ = r.revision;
             rebase_onto(copy, r.revision, 0, 0);
@@ -1680,6 +1762,14 @@ void Session::adopt_recovery() {
     const Json payload = core::parse_python_json(storage::read_file(point.folder / "state.json"));
     storage::LoadResult loaded = storage::load_document_payload(payload, point.folder);
     if (!loaded.document.read_only_reason.empty()) throw core::Error("read_only", loaded.document.read_only_reason);
+    // (what the point holds that the book does not — a smart object placed and not saved, its filter mask and PSD
+    // record — goes into the book's assets first: the book reads its pictures from its own folder, and the point is
+    // removed once saved. Nothing is taken when they cannot be written.)
+    if (doc_->asset_dir) {
+        std::set<std::string> named;
+        storage::refs_in(payload, named);
+        storage::copy_named_assets(point.folder, *doc_->asset_dir, named);
+    }
     core::Document doc = std::move(loaded.document);
     doc.revision = doc_->revision;
     doc.book_id = doc_->book_id;

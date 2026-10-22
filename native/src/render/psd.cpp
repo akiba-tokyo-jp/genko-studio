@@ -498,6 +498,63 @@ void pillow_size(std::int64_t width, std::int64_t height) {
     if (width > INT_MAX / 4 - 1) throw ReadError("MemoryError", "", false);
 }
 
+std::uint64_t be64(std::string_view d, std::uint64_t at) {
+    return (std::uint64_t{be32(d.substr(static_cast<std::size_t>(at), 4))} << 32) | be32(d.substr(static_cast<std::size_t>(at + 4), 4));
+}
+
+// (PC3 A3) the global tagged blocks after the layers (from `from` to `end`: the global layer mask, then the blocks), the
+// places of the linked-layer ones (lnk2, lnk3, lnkD) kept. Nothing past what can be read is looked at, and nothing read
+// here is refused: psd.py does not read these.
+void linked_blocks(std::string_view d, bool psb, std::uint64_t from, std::uint64_t end, std::vector<std::pair<std::uint64_t, std::uint64_t>>& out) {
+    end = std::min<std::uint64_t>(end, d.size());
+    if (from > end || end - from < 4) return;
+    std::uint64_t pos = from;
+    const std::uint64_t mask = be32(d.substr(static_cast<std::size_t>(pos), 4));
+    pos += 4;
+    if (mask > end - pos) return;
+    pos += mask;
+    const auto signature = [&](std::uint64_t at) {
+        if (at > end || end - at < 4) return false;
+        const std::string_view sig = d.substr(static_cast<std::size_t>(at), 4);
+        return sig == "8BIM" || sig == "8B64";
+    };
+    while (end - pos >= 12 && signature(pos)) {
+        const std::string_view key = d.substr(static_cast<std::size_t>(pos + 4), 4);
+        pos += 8;
+        // (a PSB's long blocks have 8-byte lengths: the layers' keys and, as psd-tools reads them, the linked layers')
+        const bool big = psb && (long_key(key) || key == "lnk3" || key == "lnkE");
+        std::uint64_t length = 0;
+        if (big) {
+            if (end - pos < 8) return;
+            length = be64(d, pos);
+            pos += 8;
+        } else {
+            length = be32(d.substr(static_cast<std::size_t>(pos), 4));
+            pos += 4;
+        }
+        if (length > end - pos) return;
+        if (key == "lnk2" || key == "lnk3" || key == "lnkD") out.emplace_back(pos, length);
+        pos += length;
+        // (padded to 4 bytes when its length did not count the padding)
+        if (length % 4 != 0 && !signature(pos) && signature(pos + (4 - length % 4))) pos += 4 - length % 4;
+    }
+}
+
+// (PC3 A3) a pixel layer's placed layer block read: SoLd, else SoLE, else PlLd — PlLd's corners where SoLd has none.
+std::optional<Placed> placed_of(std::string_view d, const File::Record& rec) {
+    const auto block = [&](std::uint64_t at, std::uint64_t size) { return d.substr(static_cast<std::size_t>(at), static_cast<std::size_t>(size)); };
+    std::optional<Placed> legacy = rec.plld_size > 0 ? read_placed("PlLd", block(rec.plld_at, rec.plld_size)) : std::nullopt;
+    std::optional<Placed> out;
+    if (rec.sold_size > 0) out = read_placed("SoLd", block(rec.sold_at, rec.sold_size));
+    if (!out && rec.sole_size > 0) out = read_placed("SoLE", block(rec.sole_at, rec.sole_size));
+    if (!out) return legacy;
+    if (!out->has_corners && legacy && legacy->has_corners) {
+        out->corners = legacy->corners;
+        out->has_corners = true;
+    }
+    return out;
+}
+
 }  // namespace
 
 std::string blend_of(std::string_view key) {
@@ -530,9 +587,13 @@ File File::read(std::string data, const Limits& limits, bool lab) {
         if (r.take(4) != "8BIM") break;
         const unsigned rid = r.u16();
         const unsigned nlen = r.u8();
-        r.take(nlen + (1 - nlen % 2));  // (the Pascal name, padded to even with its length byte)
+        const std::string_view resource_name = r.take(nlen + (1 - nlen % 2)).substr(0, nlen);  // (a Pascal name, padded to even)
         const std::uint32_t size = r.u32();
         const std::string_view block = r.take(std::uint64_t{size} + size % 2);
+        // (vector@1, PC3 C-a: the saved paths, the work path, the clipping path — render/psd_paths reads them)
+        if ((rid >= 2000 && rid <= 2997) || rid == 1025 || rid == 2999) {
+            f.path_resources_.push_back(PathResource{rid, std::string(resource_name), std::string(block.substr(0, size))});
+        }
         if (rid == 1005 && size >= 4) {
             const std::uint32_t fixed = be32(block);
             f.dpi_ = fixed == 0 ? 72.0 : fixed / 65536.0;
@@ -545,6 +606,8 @@ File File::read(std::string data, const Limits& limits, bool lab) {
         }
         if (rid == 1006 && !f.unicode_names_) f.channel_names_ = std::string(block.substr(0, size));
         if (rid == 1077) f.display_info_ = std::string(block.substr(0, size));
+        if (rid == 1057 && size >= 5) f.real_merged_ = byte_at(block, 4) != 0;  // (PC3 A3: version info, hasRealMergedData)
+        if (rid == 1022 && size >= 2) f.quick_mask_ = (byte_at(block, 0) << 8) | byte_at(block, 1);  // (masks@1: the Quick Mask)
     }
     r.pos = res_end;
     static const std::map<int, std::string> kModeNames{{0, "bitmap"}, {1, "gray"},         {2, "indexed"}, {3, "rgb"},
@@ -593,8 +656,32 @@ File File::read(std::string data, const Limits& limits, bool lab) {
                     rec.mask_bottom = r.i32();
                     rec.mask_right = r.i32();
                     rec.mask_default = static_cast<int>(r.u8());
-                    rec.mask_disabled = (r.u8() & 2) != 0;
+                    const unsigned flags = r.u8();
+                    rec.mask_disabled = (flags & 2) != 0;
                     rec.mask = true;
+                    // (PC3 B2, masks@1: the mask parameters after the flags — its user density and feather — and its
+                    // position relative to the layer, as PhotoCraft's io reads them; vector@1, PC3 C-a: its vector
+                    // mask's density and feather after those, bits 2 and 3)
+                    if ((flags & 16) != 0 && r.pos < mend) {
+                        const unsigned held = r.u8();
+                        rec.mask_parameters = true;
+                        rec.mask_unlinked = (flags & 1) != 0;
+                        const auto density = [&r, mend]() -> std::optional<int> {
+                            if (r.pos + 1 > mend) return std::nullopt;
+                            return static_cast<int>(r.u8());
+                        };
+                        const auto feather = [&r, mend]() -> std::optional<double> {
+                            if (r.pos + 8 > mend) return std::nullopt;
+                            const std::uint64_t bits = r.u64();
+                            double px = 0;
+                            std::memcpy(&px, &bits, sizeof px);
+                            return std::isfinite(px) && px >= 0 ? std::optional<double>(px) : std::nullopt;
+                        };
+                        if ((held & 1) != 0) rec.mask_density = density();
+                        if ((held & 2) != 0) rec.mask_feather = feather();
+                        if ((held & 4) != 0) rec.vector_density = density();
+                        if ((held & 8) != 0) rec.vector_feather = feather();
+                    }
                     r.pos = mend;
                 }
                 const std::uint32_t ranges = r.u32();  // blending ranges
@@ -622,15 +709,30 @@ File File::read(std::string data, const Limits& limits, bool lab) {
                     } else if (tag == "lfx2") {
                         rec.lfx2_at = static_cast<std::uint64_t>(body.data() - d.data());
                         rec.lfx2_size = body.size();
+                    } else if (tag == "vmsk" || (tag == "vsms" && rec.vmsk_size == 0)) {  // (vector@1, PC3 C-a: its vector mask)
+                        rec.vmsk_at = static_cast<std::uint64_t>(body.data() - d.data());
+                        rec.vmsk_size = body.size();
                     } else if (tag == "CgEd") {  // (PC2a: read with its brit)
                         rec.cged_at = static_cast<std::uint64_t>(body.data() - d.data());
                         rec.cged_size = body.size();
+                    } else if (tag == "SoLd" || tag == "SoLE" || tag == "PlLd") {  // (PC3 A3: a placed layer, read with its layer)
+                        const auto at = static_cast<std::uint64_t>(body.data() - d.data());
+                        (tag == "SoLd" ? rec.sold_at : tag == "SoLE" ? rec.sole_at : rec.plld_at) = at;
+                        (tag == "SoLd" ? rec.sold_size : tag == "SoLE" ? rec.sole_size : rec.plld_size) = body.size();
+                    } else if (tag == "vscg" || tag == "vstk" || tag == "vogk") {  // (pen-shapes@1, PC3 C-b: a shape layer's)
+                        const auto at = static_cast<std::uint64_t>(body.data() - d.data());
+                        (tag == "vscg" ? rec.vscg_at : tag == "vstk" ? rec.vstk_at : rec.vogk_at) = at;
+                        (tag == "vscg" ? rec.vscg_size : tag == "vstk" ? rec.vstk_size : rec.vogk_size) = body.size();
                     } else if (adjust_tag(tag)) {
                         rec.kind = "adjust";
                         if (tag != "SoCo" && tag != "GdFl" && tag != "PtFl") {  // (PC2: an adjustment, not a fill layer)
                             rec.adjust_key = std::string(tag);
                             rec.adjust_at = static_cast<std::uint64_t>(body.data() - d.data());
                             rec.adjust_size = body.size();
+                        } else {  // (a fill layer's, or a shape layer's fill: pen-shapes@1)
+                            rec.fill_key = std::string(tag);
+                            rec.fill_at = static_cast<std::uint64_t>(body.data() - d.data());
+                            rec.fill_size = body.size();
                         }
                     }
                     if (size % 2 != 0 && r.pos < extra_end) {
@@ -639,6 +741,11 @@ File File::read(std::string data, const Limits& limits, bool lab) {
                     }
                 }
                 r.pos = extra_end;
+                // (pen-shapes@1, PC3 C-b: a fill with a vector mask is a shape layer — a pen layer's shape part, import_psd)
+                if (rec.vmsk_size > 0 && rec.adjust_key.empty() && (rec.fill_size > 0 || rec.vscg_size > 0) &&
+                    (rec.kind == "adjust" || rec.kind == "pixels")) {
+                    rec.kind = "shape";
+                }
                 f.records_.push_back(std::move(rec));
                 entries.push_back(std::move(chans));
             }
@@ -679,12 +786,22 @@ File File::read(std::string data, const Limits& limits, bool lab) {
             }
         }
         r.pos = li_end;
+        linked_blocks(d, f.psb_, li_end, lm_end, f.linked_blocks_);  // (PC3 A3: the files of its placed layers)
     }
     r.pos = lm_end;
     f.merged_at_ = r.pos;
     // (read_psd makes the merged picture here, before the layers' pictures)
     if (f.plan_merged().reaches) pillow_size(f.width_, f.height_);
 
+    // (the user's decision 3: a mask's settings always read) a record's mask kept: one that is on, or one that is off —
+    // flags bit 1, read too and kept off — whose picture would not be refused were it on (else left out, as every mask
+    // that is off was before)
+    const auto mask_kept = [&limits](const Record& rec, const ChannelRef* mask) {
+        if (!rec.mask || mask == nullptr) return false;
+        if (!rec.mask_disabled || mask->width <= 0 || mask->height <= 0 || mask->length == 0) return true;
+        const std::uint64_t pixels = static_cast<std::uint64_t>(mask->width) * static_cast<std::uint64_t>(mask->height);
+        return pixels <= static_cast<std::uint64_t>(limits.max_layer_pixels) && mask->length >= pixels;
+    };
     // the layers, bottom to top, folders after the layers in them (read_psd's loop), with the errors its pictures
     // would raise as they are made
     std::vector<std::vector<std::size_t>> pending;
@@ -716,6 +833,25 @@ File File::read(std::string data, const Limits& limits, bool lab) {
         const std::int64_t w = rec.right - rec.left;
         const std::int64_t h = rec.bottom - rec.top;
         const bool colour = std::any_of(rec.data.begin(), rec.data.end(), [](const ChannelRef& c) { return c.id >= 0; });
+        if (rec.kind == "shape") {
+            // (pen-shapes@1, PC3 C-b: a shape layer — a pen layer's shape part for import_psd, render/psd_shapes; psd.py
+            // leaves it out with the fill layers)
+            Layer layer;
+            layer.name = rec.name.empty() ? std::string("シェイプ") : rec.name;
+            layer.opacity = rec.opacity / 255.0;
+            layer.visible = rec.visible;
+            layer.blend = rec.blend;
+            layer.clip = rec.clip;
+            layer.kind = "shape";
+            layer.record = n;
+            const ChannelRef* mask = rec.channel(-2);
+            layer.has_mask = mask_kept(rec, mask) && mask->width > 0 && mask->height > 0 && mask->length > 0;
+            layer.mask_enabled = !rec.mask_disabled;
+            f.layers_.push_back(std::move(layer));
+            if (!pending.empty()) pending.back().push_back(f.layers_.size() - 1);
+            f.python_skipped_.push_back(rec.name);
+            continue;
+        }
         if (rec.kind == "adjust" && !rec.adjust_key.empty()) {
             // (PC2, the user's decision 5: an adjustment layer a codec reads is a correction layer — render/psd_adjust;
             // one none reads is left out, as psd.py leaves every one out)
@@ -741,7 +877,14 @@ File File::read(std::string data, const Limits& limits, bool lab) {
                 layer.adjust = std::move(adjust);
                 layer.luts = std::move(tables);
                 const ChannelRef* mask = rec.channel(-2);
-                layer.has_mask = rec.mask && mask != nullptr && !rec.mask_disabled;
+                layer.has_mask = mask_kept(rec, mask);
+                layer.mask_enabled = !rec.mask_disabled;
+                layer.mask_parameters = rec.mask_parameters;  // (PC3 B2: masks@1)
+                layer.mask_unlinked = rec.mask_unlinked;
+                layer.mask_density = rec.mask_density;
+                layer.mask_feather = rec.mask_feather;
+                layer.vector_density = rec.vector_density;  // (vector@1)
+                layer.vector_feather = rec.vector_feather;
                 f.layers_.push_back(std::move(layer));
                 if (!pending.empty()) pending.back().push_back(f.layers_.size() - 1);
                 f.python_skipped_.push_back(rec.name);  // (psd.py leaves every adjustment layer out)
@@ -774,15 +917,28 @@ File File::read(std::string data, const Limits& limits, bool lab) {
         layer.clip = rec.clip;
         layer.kind = rec.kind;
         layer.record = n;
+        if (rec.kind == "pixels") {  // (PC3 A3, the user's decision 3: a placed layer is a smart object)
+            if (auto placed = placed_of(f.data_, rec)) {
+                layer.kind = "smart";
+                layer.placed = std::move(placed);
+            }
+        }
         const ChannelRef* mask = rec.channel(-2);
-        if (rec.mask && mask != nullptr && !rec.mask_disabled) {
+        if (mask_kept(rec, mask)) {
             layer.has_mask = true;
+            layer.mask_enabled = !rec.mask_disabled;
+            layer.mask_parameters = rec.mask_parameters;  // (PC3 B2: masks@1)
+            layer.mask_unlinked = rec.mask_unlinked;
+            layer.mask_density = rec.mask_density;
+            layer.mask_feather = rec.mask_feather;
             if (mask->width > 0 && mask->height > 0 && mask->length > 0) {
                 const std::uint64_t pixels = static_cast<std::uint64_t>(mask->width) * static_cast<std::uint64_t>(mask->height);
                 if (pixels > static_cast<std::uint64_t>(limits.max_layer_pixels)) too_large("a layer is too large to read");
                 if (mask->length < pixels) value_error("not enough image data");
             }
         }
+        layer.vector_density = rec.vector_density;  // (vector@1: with a mask of its own or without)
+        layer.vector_feather = rec.vector_feather;
         f.layers_.push_back(std::move(layer));
         if (!pending.empty()) pending.back().push_back(f.layers_.size() - 1);
     }
@@ -794,6 +950,30 @@ std::optional<TextLayer> File::text(const Layer& layer) const {
     const Record& rec = records_[layer.record];
     if (rec.tysh_size == 0) return std::nullopt;
     return read_tysh(std::string_view(data_).substr(static_cast<std::size_t>(rec.tysh_at), static_cast<std::size_t>(rec.tysh_size)));
+}
+
+std::optional<std::string_view> File::vector_mask(const Layer& layer) const {
+    if (layer.folder || layer.record >= records_.size()) return std::nullopt;
+    const Record& rec = records_[layer.record];
+    if (rec.vmsk_size == 0) return std::nullopt;
+    return std::string_view(data_).substr(static_cast<std::size_t>(rec.vmsk_at), static_cast<std::size_t>(rec.vmsk_size));
+}
+
+std::optional<File::ShapeBlocks> File::shape_blocks(const Layer& layer) const {
+    if (layer.kind != "shape" || layer.record >= records_.size()) return std::nullopt;
+    const Record& rec = records_[layer.record];
+    const std::string_view all(data_);
+    const auto at = [&](std::uint64_t pos, std::uint64_t size) {
+        return size == 0 ? std::string_view() : all.substr(static_cast<std::size_t>(pos), static_cast<std::size_t>(size));
+    };
+    ShapeBlocks out;
+    out.fill_key = rec.fill_key;
+    out.fill = at(rec.fill_at, rec.fill_size);
+    out.vscg = at(rec.vscg_at, rec.vscg_size);
+    out.vstk = at(rec.vstk_at, rec.vstk_size);
+    out.vogk = at(rec.vogk_at, rec.vogk_size);
+    out.path = at(rec.vmsk_at, rec.vmsk_size);
+    return out;
 }
 
 std::optional<Stroke> File::stroke(const Layer& layer) const {
@@ -918,6 +1098,13 @@ File::MergedPlan File::plan_merged() const {
 }
 
 std::optional<std::map<int, std::string>> File::merged_channels() const {
+    auto raw = merged_raw();
+    if (!raw) return std::nullopt;
+    for (auto& [id, plane] : *raw) plane = depth8(&plane, plane.size(), width_, height_, depth_).bytes;
+    return raw;
+}
+
+std::optional<std::map<int, std::string>> File::merged_raw() const {
     const MergedPlan plan = plan_merged();
     if (!plan.exists) return std::nullopt;
     canvas_fits(width_, height_);
@@ -939,7 +1126,7 @@ std::optional<std::map<int, std::string>> File::merged_channels() const {
                 at += n;
             }
         }
-        return depth8(&raw, raw.size(), width_, height_, depth_).bytes;
+        return raw;
     };
     std::map<int, std::string> channels;
     const int colour = colour_bands(mode_);
@@ -956,10 +1143,128 @@ std::optional<Image> File::merged() const {
     return to_rgba(mode_, *channels, Size{as_int(width_), as_int(height_)});
 }
 
-std::optional<core::InkPixels> File::merged_inks(const core::PageColor& color) const {
+std::optional<core::InkPixels> File::merged_inks(const core::PageColor& color, bool own_profile) const {
     const auto channels = merged_channels();
     if (!channels) return std::nullopt;
-    return to_inks(mode_, *channels, Size{as_int(width_), as_int(height_)}, color, icc_);
+    return to_inks(mode_, *channels, Size{as_int(width_), as_int(height_)}, color, own_profile ? icc_ : std::string());
+}
+
+std::optional<Image> File::merged_picture() const {
+    const auto channels = merged_channels();
+    if (!channels) return std::nullopt;
+    const Size size{as_int(width_), as_int(height_)};
+    const auto band = [&](int id, int fallback) {
+        const auto found = channels->find(id);
+        if (found != channels->end() && !found->second.empty()) return Image::frombytes("L", size, found->second);
+        return Image::create("L", size, Ink(fallback));
+    };
+    Image out;
+    if (mode_ == 4) {  // (its inks: stored inverted)
+        std::vector<Image> inks;
+        for (int i = 0; i < 4; ++i) inks.push_back(ops::invert(band(i, 255)));
+        return Image::merge("CMYK", inks);
+    }
+    if (mode_ == 9) return Image::merge("LAB", {band(0, 255), band(1, 128), band(2, 128)});
+    const bool alpha = channels->contains(-1);
+    if (mode_ == 1 || mode_ == 0 || mode_ == 2 || mode_ == 8) {
+        out = band(0, 255);
+        if (!alpha) return out;
+        out = out.convert("LA");
+    } else {
+        out = Image::merge("RGB", {band(0, 0), band(1, 0), band(2, 0)});
+        if (!alpha) return out;
+        out = out.convert("RGBA");
+    }
+    out.putalpha(band(-1, 255));
+    return out;
+}
+
+std::optional<File::Deep> File::merged_deep() const {
+    const auto raw = merged_raw();
+    if (!raw) return std::nullopt;
+    Deep out;
+    out.width = width_;
+    out.height = height_;
+    out.colours = static_cast<unsigned>(colour_bands(mode_));
+    out.alpha = raw->contains(-1);
+    const unsigned all = out.colours + (out.alpha ? 1 : 0);
+    const std::size_t count = static_cast<std::size_t>(width_) * static_cast<std::size_t>(height_);
+    out.samples.assign(count * all, 0.0f);
+    const std::uint64_t rowbytes = row_bytes(width_, depth_);
+    for (unsigned c = 0; c < all; ++c) {
+        const int id = c < out.colours ? static_cast<int>(c) : -1;
+        const auto found = raw->find(id);
+        const bool inverted = mode_ == 4 && id >= 0;  // (CMYK stored as 255 for no ink)
+        for (std::size_t i = 0; i < count; ++i) {
+            float v = id < 0 ? 1.0f : 0.0f;
+            if (found != raw->end()) {
+                const std::string& plane = found->second;
+                const std::size_t y = i / static_cast<std::size_t>(width_), x = i % static_cast<std::size_t>(width_);
+                if (depth_ == 1) {
+                    const std::size_t at = y * rowbytes + x / 8;
+                    if (at < plane.size()) v = ((byte_at(plane, at) >> (7 - x % 8)) & 1) != 0 ? 0.0f : 1.0f;
+                } else if (depth_ == 8) {
+                    if (i < plane.size()) v = byte_at(plane, i) / 255.0f;
+                } else if (depth_ == 16) {
+                    if (2 * i + 1 < plane.size()) v = static_cast<float>((byte_at(plane, 2 * i) << 8) | byte_at(plane, 2 * i + 1)) / 65535.0f;
+                } else if (depth_ == 32) {
+                    if (4 * i + 3 < plane.size()) {
+                        const std::uint32_t bits = be32(std::string_view(plane).substr(4 * i, 4));
+                        std::memcpy(&v, &bits, 4);
+                        if (!std::isfinite(v)) v = 0.0f;
+                    }
+                }
+            }
+            out.samples[i * all + c] = inverted ? 1.0f - v : v;
+        }
+    }
+    return out;
+}
+
+Image File::composited() const {
+    canvas_fits(width_, height_);
+    Image out = Image::create("RGBA", Size{as_int(width_), as_int(height_)}, Ink{0, 0, 0, 0});
+    for (const Layer& layer : layers_) {
+        if (layer.folder || layer.kind == "adjust") continue;
+        bool shown = layer.visible;
+        double opacity = layer.opacity;
+        for (auto in = layer.parent; in && *in < layers_.size(); in = layers_[*in].parent) {
+            shown = shown && layers_[*in].visible;
+            opacity *= layers_[*in].opacity;
+        }
+        if (!shown || opacity <= 0) continue;
+        Image picture = image(layer);
+        Image alpha = picture.getchannel("A");
+        if (layer.mask_enabled) {  // (a mask that is off has no part in the picture)
+            if (const auto mask = this->mask(layer)) alpha = chops::multiply(alpha, *mask);
+        }
+        if (opacity < 1) alpha = alpha.point([opacity](int v) { return static_cast<int>(std::lround(v * opacity)); });
+        picture.putalpha(alpha);
+        out = alpha_composite(out, picture);
+    }
+    return out;
+}
+
+std::optional<LinkedItem> File::linked(std::string_view uuid) const {
+    if (uuid.empty()) return std::nullopt;
+    std::optional<LinkedItem> found;
+    for (const auto& [at, size] : linked_blocks_) {
+        for (const LinkedItem& item : read_linked(std::string_view(data_).substr(static_cast<std::size_t>(at), static_cast<std::size_t>(size)))) {
+            if (item.uuid != uuid) continue;
+            if (item.kind == "liFD") return item;  // (the file's own bytes before an external one's name)
+            if (!found) found = item;
+        }
+    }
+    return found;
+}
+
+std::string_view File::placed_block(const Layer& layer) const {
+    if (!layer.placed || layer.folder || layer.record >= records_.size()) return {};
+    const Record& rec = records_[layer.record];
+    const std::string_view d = data_;
+    if (layer.placed->key == "SoLd") return d.substr(static_cast<std::size_t>(rec.sold_at), static_cast<std::size_t>(rec.sold_size));
+    if (layer.placed->key == "SoLE") return d.substr(static_cast<std::size_t>(rec.sole_at), static_cast<std::size_t>(rec.sole_size));
+    return d.substr(static_cast<std::size_t>(rec.plld_at), static_cast<std::size_t>(rec.plld_size));
 }
 
 std::vector<File::ExtraChannel> File::extra_channels() const {
@@ -1035,6 +1340,7 @@ std::vector<File::ExtraChannel> File::extra_channels() const {
             }
         }
         channel.samples = depth8(&raw, raw.size(), width_, height_, depth_).bytes;
+        channel.quick_mask = quick_mask_ && *quick_mask_ == static_cast<unsigned>(c);
         out.push_back(std::move(channel));
     }
     return out;

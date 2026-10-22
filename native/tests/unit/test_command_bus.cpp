@@ -19,6 +19,7 @@
 #include "core/model.hpp"
 #include "render/image.hpp"
 #include "render/ops_registry.hpp"
+#include "render/page.hpp"
 #include "render/png.hpp"
 #include "testsupport.hpp"
 
@@ -307,8 +308,8 @@ private slots:
 
     // The book and page ops of M4 that need more than core: core's own bus refuses a paint layer's pixels moved by
     // set_page_spec and the other book import_pages reads (not_yet_ported), and does the rest; this build's precise
-    // colour pixels, which Python does not have, are not moved yet (not_yet_ported): the paper alone changes with
-    // move false.
+    // colour pixels, which Python does not have, are moved by the drawing build (PC3 C-e: at their own resolution;
+    // core's own bus refuses them), and the paper alone changes with move false.
     void bookPageOpsNeedTheDrawingBuild() {
         const Json move = ops(R"([{"op": "set_page_spec", "preset": "b5"}])");
         const Json paper = ops(R"([{"op": "set_page_spec", "preset": "b5", "move": false}])");
@@ -331,10 +332,23 @@ private slots:
         const std::string refused = code_of(CommandBus(), doc, move);
         QVERIFY2(refused.starts_with("not_yet_ported: ops[0] set_page_spec: set_page_spec moving a paint layer's pixels"), refused.c_str());
         QCOMPARE(code_of(CommandBus(), doc, paper), std::string("(applied)"));
+        // (a picture at raster.WORKING_DPI onto the new paper, 208 × 283 mm, at that 200 dpi; one of another resolution —
+        // the 8 × 6 picture over the page — keeps it, never taken for one at 200 dpi: the review of PC3, fix 1)
+        genko::core::Layer working = paint;
+        working.id = "working";
+        const genko::core::PageSpec was = doc.page(1).spec;
+        working.raster_png = std::make_shared<const std::string>(genko::render::write_png(genko::render::Image::create(
+            "RGBA", {genko::render::mm_to_px(was.width_mm.value(), 200), genko::render::mm_to_px(was.height_mm.value(), 200)},
+            genko::render::Ink{200, 20, 20, 255})));
+        doc.edit_page(1).layers.push_back(working);
         const Document moved = bus().apply(doc, move, Actor("genko")).doc;
         const genko::render::Image picture = genko::render::read_png(*moved.page(1).layers.back().raster_png);
-        QCOMPARE(picture.width(), 1638);  // (the new paper, 208 × 283 mm, at raster.WORKING_DPI)
+        QCOMPARE(picture.width(), 1638);
         QCOMPARE(picture.height(), 2228);
+        const genko::render::Image small = genko::render::read_png(*moved.page(1).layers.at(moved.page(1).layers.size() - 2).raster_png);
+        const genko::core::PageSpec& now = moved.page(1).spec;
+        QCOMPARE(small.width(), static_cast<int>(std::lround(now.width_mm.value() * 8 / was.width_mm.value())));
+        QCOMPARE(small.height(), static_cast<int>(std::lround(now.height_mm.value() * 6 / was.height_mm.value())));
         const std::string imported = code_of(CommandBus(), book(), ops(R"([{"op": "import_pages", "from": "nowhere.genko"}])"));
         QVERIFY2(imported.starts_with("not_yet_ported: ops[0] import_pages: import_pages reads the other book"), imported.c_str());
         // precise colour pixels
@@ -346,8 +360,14 @@ private slots:
         colour.color_raster = std::make_shared<const std::string>(genko::core::encode_color_raster(
             Json{{"width", 1}, {"height", 1}, {"precision", "u16"}, {"pixels", Json::array({65535, 0, 0, 65535})}}));
         precise.edit_page(0).layers.push_back(colour);
-        const std::string kept = code_of(bus(), precise, move);
+        const std::string kept = code_of(CommandBus(), precise, move);
         QVERIFY2(kept.starts_with("not_yet_ported: ops[0] set_page_spec: set_page_spec moving high-precision colour pixels"), kept.c_str());
+        const Document moved_precise = bus().apply(precise, move, Actor("genko")).doc;
+        const auto& precise_layer = moved_precise.page(0).layers.back();
+        QVERIFY(precise_layer.color_raster && precise_layer.color_raster != colour.color_raster);
+        const genko::core::ColorRasterView view(*precise_layer.color_raster);
+        QCOMPARE(view.width(), 1u);  // (its resolution kept: a pixel over the page's 208 mm)
+        QCOMPARE(view.pixel(0)[0], 1.0);
         const Document repapered = bus().apply(precise, paper, Actor("genko")).doc;
         QVERIFY(repapered.page(0).layers.back().color_raster == colour.color_raster);
         QCOMPARE(repapered.spec.preset.value(), std::string("doujin-b5"));
@@ -425,7 +445,17 @@ private slots:
             "merge_spot_channel", "split_channels", "merge_channels",  // (channels@1: the C++ build's own, SPEC.md COLOR-03)
             "to_indexed", "set_color_table", "to_bitmap", "set_duotone",  // (color-model@1's own modes, PC1d: the C++ build's own, SPEC.md COLOR-03)
             "set_adjustment", "auto_adjust", "hdr_toning", "apply_image", "calculations", "trap",
-            "fade_layer"};  // (PC2's corrections, adjustments@1: the C++ build's own, SPEC.md COLOR-04)
+            "fade_layer",  // (PC2's corrections, adjustments@1: the C++ build's own, SPEC.md COLOR-04)
+            "smart_convert", "smart_place", "smart_profile", "smart_copy", "smart_transform", "rasterize_layer",
+            "smart_replace", "smart_relink", "smart_update", "smart_embed", "smart_link", "smart_to_page",
+            "smart_filter_add", "smart_filter_set", "smart_filter_move", "smart_filter_delete", "smart_filter_state",
+            "smart_stack", "rasterize_lines",  // (PC3 A0, smart-objects@1: the C++ build's own and the later steps', SPEC.md COLOR-05)
+            "quick_mask", "magic_erase", "outline_area", "apply_layer_mask", "mask_from_transparency", "matting", "clone_stamp",
+            "healing_brush", "spot_healing", "history_brush", "content_aware_fill",  // (PC3 節 B's ops, frames until their groups: SPEC.md COLOR-06)
+            "set_path", "delete_path", "rename_path", "make_work_path", "text_to_path", "stroke_path", "set_vector_mask", "add_shape_part",
+            "edit_shape_part", "combine_shape_parts", "move_shape_parts", "transform_layers", "content_aware_scale", "align_layers",
+            "distribute_layers", "arrange_layers", "link_layers", "resize_pages", "set_canvas_size", "crop_page", "trim_page", "reveal_all",
+            "rotate_pages"};  // (PC3 節 C's ops, frames until their groups: SPEC.md COLOR-07)
         expected.insert(drawing_names.begin(), drawing_names.end());
         const std::set<std::string> actual(all_names.begin(), all_names.end());
         QCOMPARE(actual, expected);

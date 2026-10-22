@@ -23,6 +23,7 @@
 #include "render/color_canvas.hpp"
 #include "formats/psd_text.hpp"
 #include "render/not_yet_ported.hpp"
+#include "render/psd_shapes.hpp"
 
 namespace genko::formats {
 
@@ -366,6 +367,8 @@ std::vector<std::string> export_notes(const core::Document& episode, std::string
     }
     if (key == "psd") {  // (PC2, the user's decision 5: what the PSD's adjustment layers hold of the correction layers)
         for (std::string& note : psd_adjust_notes(episode)) notes.push_back(std::move(note));
+        for (std::string& note : psd_smart_notes(episode)) notes.push_back(std::move(note));  // (PC3 A3: the placed layers)
+        for (std::string& note : render::psd_shapes::notes(episode)) notes.push_back(std::move(note));  // (PC3 C-b: the shape layers)
     }
     return notes;
 }

@@ -17,6 +17,7 @@
 #include "core/ink.hpp"
 #include "core/json.hpp"
 #include "core/pynum.hpp"
+#include "core/vector.hpp"
 
 // The manuscript model (docs/cpp-migration/ARCHITECTURE.md §2): Python's genko/models.py in C++.
 //
@@ -30,7 +31,7 @@ namespace genko::core {
 
 enum class Binding { Right, Left };
 enum class LayerRole { Name, Draft, Ink, Bg, Finish, Tone, Effect, Frames, Text, User };
-enum class LayerKind { Raster, Strokes, Fill, Tone, Folder, Placed, Adjust };
+enum class LayerKind { Raster, Strokes, Fill, Tone, Folder, Placed, Adjust, Smart };
 
 std::string_view to_string(Binding binding);
 std::string_view to_string(LayerRole role);
@@ -55,6 +56,9 @@ struct PageSpec {
     std::optional<Num> trim_w_mm;
     std::optional<Num> trim_h_mm;
     std::optional<NumList> margins_mm;  // top, bottom, inner (のど), outer (小口)
+    // PC3 (page-spec@1, core/vector.hpp): where the trim's top left is on a page of its own paper whose trim is not in the
+    // paper's middle (none: in the middle)
+    std::optional<std::pair<double, double>> trim_origin_mm;
 
     struct Margins {
         double top = 0, bottom = 0, inner = 0, outer = 0;
@@ -137,6 +141,11 @@ struct Mask {
     Bytes png;
     bool enabled = true;
     BlobMemo memo;
+    // masks@1 (PC3, core/masks.hpp): moves with the layer's pixels (none: fixed to the page, as every mask before it);
+    // its density (0..1: the mask's value m drawn as 1 − density·(1 − m)); its feather (mm: a Gaussian of σ = feather/2)
+    bool linked = false;
+    double density = 1.0;
+    double feather_mm = 0.0;
 };
 
 // A fill or pasted picture kept at its own resolution over a box: {"id", "box", "mode", "rgb", "opacity", …}.
@@ -199,6 +208,17 @@ struct Layer {
     BlobMemo ink_memo;
     bool color_prints = false;
     std::optional<Json> screen;
+    // smart-objects@1 (core/smart.hpp): a smart object's own settings — {"contents", "matrix", "interp", …} — on a layer
+    // of kind "smart" (which holds no pixels, lines or fill of its own; frame_id, clip_to, source and finish as a placed
+    // picture's).
+    std::optional<Json> smart;
+    // PC3 (pen-shapes@1, core/vector.hpp): a pen layer's shape parts (決定 7; never null: the shared empty list)
+    vector::ShapeListPtr shapes = vector::empty_shapes();
+    // PC3 (vector@1): its vector mask
+    std::optional<vector::VectorMask> vector_mask;
+    // PC3 (transform@1): its link group (the layers of one link move together) and its position lock
+    std::optional<std::string> link;
+    bool lock_position = false;
 
     std::size_t stroke_count() const { return strokes ? strokes->items.size() : 0; }
 };
@@ -283,6 +303,7 @@ struct Channel {
     double opacity = 0.5;                 // alpha: 0..1
     std::string indicates = "masked";     // alpha: masked | selected
     double solidity = 0.0;                // spot: 0..1
+    bool quick_mask = false;              // masks@1 (PC3): the page's Quick Mask (an alpha channel; one at most)
 };
 
 struct Bible {
@@ -321,6 +342,12 @@ struct Page {
     std::optional<RgbMode> rgb;
     // channels@1: its alpha and spot channels, in the order the channel panel lists them.
     std::vector<Channel> channels;
+    // PC3 (vector@1, core/vector.hpp): its saved paths (the Paths panel's order), its work path, its clipping path.
+    std::vector<vector::NamedPath> paths;
+    std::optional<vector::Path> work_path;
+    std::optional<vector::ClippingPath> clipping_path;
+    // PC3 (page-spec@1): `spec` is this page's own paper (the book's is doc.spec), written as the page's native_spec.
+    bool own_spec = false;
 
     Rect paper_rect_mm() const;
     Rect trim_rect_mm() const;
@@ -356,6 +383,32 @@ struct Page {
 
 using PagePtr = std::shared_ptr<Page>;
 
+// smart-objects@1 (core/smart.hpp, docs/cpp-migration/schema-v4.md「スマートオブジェクト」): what a smart object shows —
+// a page of its own (kind "page": the layers it wraps, its own spec and colour mode; index 1, no lines) or a picture
+// file kept as the bytes it was read from (kind "file": an asset of its own suffix, never changed). Shared by every
+// layer that shows it (in any page of the book) and never changed once made: Document::edit_contents copies it first
+// when another Document still shares it.
+struct SmartContents {
+    std::string kind = "page";  // page | file
+    std::string name;           // the layer's title, or the file's name (what exporting it names it)
+    PagePtr page;               // kind page: its page
+    // kind file: the file's bytes ("sha256:…", in assets/ with its suffix, or in Document::smart_files) and what its
+    // header said when it was placed (the drawing reads the file again)
+    std::string asset;
+    std::string suffix;         // ".png", ".jpg", ".tif", ".webp", ".bmp", ".gif", ".psd", ".psb"
+    std::string format;         // png | jpeg | tiff | webp | bmp | gif | psd
+    std::int64_t width_px = 0;
+    std::int64_t height_px = 0;
+    double dpi = 0;             // its resolution (the page's when the file has none): its size in mm
+    int depth = 8;              // bits per sample (1, 8, 16, 32)
+    std::string mode = "rgb";   // gray | rgb | cmyk | lab (with an alpha or not)
+    // How its colours come onto a page (the colour settings' answer, kept: the pixels are never converted when placed):
+    // {"use": "keep" | "embedded" | "assign", "icc": "sha256:…" (assign), "intent", "bpc"}
+    Json profile = Json::object({{"use", "keep"}});
+    std::optional<Json> link;  // a linked file's place (PC3 A1): the contents are its last copy
+    std::optional<Json> psd;   // what a PSD's placed layer kept (PC3 A3)
+};
+
 // Python's Episode (without its undo stack, pending journal and asset folder, which belong to the session).
 struct Document {
     std::string title;
@@ -381,6 +434,12 @@ struct Document {
     // PC2a (adjustments@1): the 3D lookup tables its color_lookup corrections use (their "lut"), by their asset ref
     // (core/lut3d: GKLU bytes). Written as assets/<ab>/<64 hex>.gklut; only those a correction uses are written and read.
     std::map<std::string, Bytes> luts;
+    // smart-objects@1 (core/smart.hpp): the contents of its smart objects, by id ("sc_" and 12 hex digits). Only those a
+    // layer shows (on a page, or inside other contents) are written.
+    std::map<std::string, std::shared_ptr<const SmartContents>> smart_contents;
+    // smart-objects@1: the bytes of the files ops were given (their "data") that are not in assets/ yet, by their asset ref;
+    // the writer writes those its contents use (with their suffix), as it writes luts.
+    std::map<std::string, Bytes> smart_files;
     Json nombre = Json::object();
     Json extra = Json::object();  // top-level keys this build does not know; written back unchanged
     std::int64_t revision = 0;
@@ -413,6 +472,10 @@ struct Document {
     bool is_deferred(std::size_t i) const;
     // The page to change: copied first when another Document still shares it.
     Page& edit_page(std::size_t i);
+    // smart-objects@1: the contents to change (core::Error("key") for none), copied first when another Document still
+    // shares them; and the page of contents of kind page, copied first as edit_page copies one.
+    SmartContents& edit_contents(const std::string& id);
+    Page& edit_contents_page(const std::string& id);
 
     // Python's Episode.story_for_page: the lines whose page_index is page_index.
     std::vector<const StoryLine*> story_for_page(const Num& page_index) const;

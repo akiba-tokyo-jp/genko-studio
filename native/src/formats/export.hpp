@@ -112,6 +112,14 @@ std::vector<fs::path> export_psd_pages(const core::Document& episode, const fs::
 // Python's StopIteration).
 fs::path export_psd(const core::Document& episode, const fs::path& dest, std::int64_t dpi = 150, std::int64_t page = 1,
                     const PsdText& text = {}, PsdTextReport* report = nullptr);
+// smart-objects@1 (PC3 A1): a smart object's contents page as a PSD — its layers alone (no paper, no panels' borders),
+// the merged picture its layers over white; a page in precise colour or inks as export_page_psd writes it.
+fs::path export_contents_psd(const core::Document& episode, const core::Page& page, const fs::path& dest,
+                             std::optional<std::int64_t> dpi = std::nullopt);
+// PC3 A3 (the user's decision 3): a PSD's smart objects are Photoshop's placed layers of the files they show. What the
+// PSD of these pages says of them (the export's notes, each once): smart filters baked in the picture (Photoshop drops
+// them when the contents are edited), linked contents embedded.
+std::vector<std::string> psd_smart_notes(const core::Document& episode);
 
 namespace detail {
 class Output;

@@ -64,6 +64,9 @@ std::string blend_mode(const Json& value);
 // ops._gradient_extras(g): 多色 (stops), 楕円 (ratio), 繰り返し (repeat) of a gradient, checked (core/ops_layers.cpp; also
 // gradient_fill's). OpError with Python's words.
 Json gradient_extras(const Json& g);
+// ops._fill_spec: a fill layer's {"rgb"} or {"gradient"} checked and in its normal form (core/ops_layers.cpp; also a
+// shape part's fill, pen-shapes@1). OpError with Python's words.
+Json fill_spec(const Json& raw);
 
 // The JSON of a list of ints.
 Json ints_json(const std::vector<std::int64_t>& values);
@@ -147,26 +150,40 @@ void register_line_ops(OpRegistry& registry, PictureCheck check = {});
 // What the book and page ops of M4 need beyond core (render::register_bookpage_ops gives them; without them the ops
 // refuse that part with not_yet_ported).
 struct BookPageHooks {
-    // pagespec._raster: a whole-page paint layer's PNG moved and resized from the old basic frame onto the new one, as
-    // big as the page's new paper `spec` at raster.WORKING_DPI. Pillow's errors as Python raises them (PyUncaught).
-    // (Python makes every page's pixels as big as the book's paper, which cuts off what a jacket or a band, wider than
-    // the book, has beyond it: here a cover's own paper, covers::spec_for — the user's decision D1.)
-    std::function<std::string(const std::string& png, const PageSpec& spec, const Rect& old_frame, const Rect& new_frame)>
+    // pagespec._raster: a whole-page paint layer's PNG (over the page's old paper `old_paper`) moved and resized from the
+    // old basic frame onto the new one, as big as the page's new paper `spec` at raster.WORKING_DPI. Pillow's errors as
+    // Python raises them (PyUncaught). (Python makes every page's pixels as big as the book's paper, which cuts off what a
+    // jacket or a band, wider than the book, has beyond it: here a cover's own paper, covers::spec_for — the user's
+    // decision D1.) A picture that is not at that 200 dpi (a PSD's, put_raster's, one Image Size kept without
+    // resampling) keeps its resolution, as relayout_color's (Python takes it for one at 200 dpi: the review of PC3).
+    std::function<std::string(const std::string& png, const PageSpec& old_paper, const PageSpec& spec, const Rect& old_frame, const Rect& new_frame)>
         relayout_raster;
     // A layer mask (its PNG over the page's old paper `old_paper`) moved as its layer's pixels and lines are, from the
-    // old basic frame onto the new one, over the page's new paper `paper` at ops.MASK_DPI; nothing when that changes
+    // old basic frame onto the new one, over the page's new paper `paper` at the mask's resolution (ops.MASK_DPI's 150, a
+    // precise or ink page's finer grid — PC3 B2); nothing when that changes
     // nothing (a mask of one value everywhere; the same paper and frame) and for a mask that cannot be read (left as it
     // is). Python leaves a mask as it was, stretched over the new paper while what it masks moves (the user's decision
     // D1).
     std::function<std::optional<std::string>(const std::string& png, const PageSpec& old_paper, const PageSpec& paper,
                                              const Rect& old_frame, const Rect& new_frame)>
         relayout_mask;
-    // color-mode@1: a paint layer's inks (GKIR) on a CMYK or Lab page moved as relayout_raster moves a PNG.
-    std::function<std::string(const std::string& gkir, const PageSpec& spec, const Rect& old_frame, const Rect& new_frame)> relayout_inks;
+    // color-mode@1: a paint layer's inks (GKIR) on a CMYK or Lab page moved as relayout_raster moves a PNG (at 200 dpi
+    // onto 200 dpi, at any other resolution keeping it).
+    std::function<std::string(const std::string& gkir, const PageSpec& old_paper, const PageSpec& spec, const Rect& old_frame, const Rect& new_frame)>
+        relayout_inks;
+    // PC3 C-e: a precise paint layer's raster (GKCR over the page's old paper `old_paper`) moved as relayout_raster moves a
+    // PNG, over the new paper `paper` at the resolution it had (bilinear).
+    std::function<std::string(const std::string& gkcr, const PageSpec& old_paper, const PageSpec& paper, const Rect& old_frame, const Rect& new_frame)>
+        relayout_color;
     // channels@1: a page's channel (its GKIR mask over the page's old paper `old_paper`) moved as its layers are, over the
     // new paper `paper` at the resolution it had.
     std::function<Bytes(const Bytes& gkir, const PageSpec& old_paper, const PageSpec& paper, const Rect& old_frame, const Rect& new_frame)>
         relayout_channel;
+    // PC3 A2: a smart object's filter mask (a PNG of the book's files over the page, as a layer's mask) moved as
+    // relayout_mask moves a layer's; the smart object then names the moved one (held in `doc`'s smart_files). One that is
+    // not in the book, or that moving does not change, stays as it is.
+    std::function<void(Document& doc, Layer& layer, const PageSpec& old_paper, const PageSpec& paper, const Rect& old_frame, const Rect& new_frame)>
+        relayout_filter_mask;
     // io.load_episode(Path(from)) for import_pages: the other book, read whole. OpError "the other book cannot be read
     // (<why>)" for one that cannot be read, Python's words where Python has them.
     std::function<Document(const std::string& from)> load_book;

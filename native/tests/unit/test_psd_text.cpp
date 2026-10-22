@@ -717,6 +717,43 @@ private slots:
         for (const auto& layer : p3.layers) QVERIFY(layer.name.find("hidden") == std::string::npos);
     }
 
+    // Warp Text (PC3 C-c, the style's native_warp): the body's text layer holds the warp — Photoshop's style by its name,
+    // the bend and the distortions, across or down; a line with rubies cannot be text (they are layers of their own:
+    // warp_ruby), and is drawn as the image way draws it when asked.
+    void warpTextIsTheTextLayersWarp() {
+        const Document blank = genko::core::new_episode("ワープ", genko::core::Num(1), 1, genko::core::PageSpec::a4_mono());
+        const Document doc = run_ops(blank, Json::parse(R"([
+            {"op": "add_line", "page": 1, "id": "flag", "text": "旗の字", "x_mm": 40, "y_mm": 40, "w_mm": 60, "h_mm": 30, "wrap": "horizontal",
+             "style": {"native_warp": {"style": "flag", "bend": 30, "h_distort": -10, "v_distort": 5, "vertical": true}}},
+            {"op": "add_line", "page": 1, "id": "plain", "text": "まっすぐ", "x_mm": 40, "y_mm": 120, "w_mm": 60, "h_mm": 30, "wrap": "horizontal"},
+            {"op": "add_line", "page": 1, "id": "ruby", "text": "東京", "x_mm": 140, "y_mm": 40, "w_mm": 30, "h_mm": 60, "wrap": "vertical",
+             "ruby_spans": [{"start": 0, "end": 2, "ruby": "とうきょう"}], "style": {"native_warp": {"style": "arc"}}}])"));
+        QCOMPARE(genko::formats::issues_json(genko::formats::psd_text_issues(doc, kDpi)),
+                 Json::parse(R"([{"page": 1, "line": "ruby", "text": "東京", "features": ["warp_ruby"]}])"));
+        genko::formats::PsdTextReport report;
+        const auto files = genko::formats::export_psd_pages(doc, genko::core::path_from_utf8(path("warped")), kDpi, genko::formats::PsdText{true, true}, &report);
+        QCOMPARE(report.rasterized.size(), std::size_t{1});
+        QCOMPARE(report.rasterized.front().line, std::string("ruby"));
+        const Read r = read_psd(files.front().string());
+        const psd::TextLayer bent = text_of(r, "本文 #flag");
+        QCOMPARE(bent.warp, std::string("warpFlag"));
+        QCOMPARE(bent.warp_value, 30.0);
+        QCOMPARE(bent.warp_perspective, -10.0);
+        QCOMPARE(bent.warp_perspective_other, 5.0);
+        QVERIFY(bent.warp_vertical);
+        const psd::TextLayer plain = text_of(r, "本文 #plain");
+        QCOMPARE(plain.warp, std::string("warpNone"));
+        QCOMPARE(plain.warp_value, 0.0);
+        QVERIFY(!plain.warp_vertical);
+        // (the style's own bend when it gives none: 50, as the letters are drawn)
+        const Document arc = run_ops(blank, Json::parse(R"([{"op": "add_line", "page": 1, "id": "arc", "text": "円弧", "x_mm": 40, "y_mm": 40,
+            "w_mm": 60, "h_mm": 30, "wrap": "horizontal", "style": {"native_warp": {"style": "arcLower"}}}])"));
+        const auto arc_files = genko::formats::export_psd_pages(arc, genko::core::path_from_utf8(path("warped-arc")), kDpi, genko::formats::PsdText{true, false});
+        const psd::TextLayer lower = text_of(read_psd(arc_files.front().string()), "本文 #arc");
+        QCOMPARE(lower.warp, std::string("warpArcLower"));
+        QCOMPARE(lower.warp_value, 50.0);
+    }
+
     // The editable book's page 4: a reading broken over two columns (a layer for each part), each ruby its own font and
     // spacing, the columns justified (area text), across justified, down to the foot.
     void editableJustified() {

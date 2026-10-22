@@ -67,8 +67,8 @@ double gamma_for(const std::vector<double>& pressures);
 // (MainWindow::default_shortcuts). The keys chosen are kept by the name ("shortcuts/<name>").
 std::vector<QAction*> commands(QMainWindow* window);
 void name_commands(MainWindow* window);
-// (new name: old name) a command renamed later keeps the keys chosen under its old name
-const std::map<QString, QString>& renamed();
+// (new name: old name, one or more) a command renamed later keeps the keys and places chosen under an old name
+const std::multimap<QString, QString>& renamed();
 void apply_shortcuts(MainWindow* window);
 // Every command's tooltip says its name, its keys as they are now, and what it does (written again when the keys
 // change, so a changed key never shows the old one).

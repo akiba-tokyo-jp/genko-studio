@@ -120,6 +120,7 @@ void MainWindow::build_line_menus(QMenu* pages) {
     lines->addSeparator();
     lines->addAction(action("act_line_edit"));
     lines->addAction(action("act_line_wrap"));
+    lines->addAction(action("act_warp_text"));  // (ワープテキスト…: main_window_transform.cpp, PC3 C-c)
     QMenu* shapes = lines->addMenu(QStringLiteral("フキダシの形"));
     for (const auto& [key, label] : lettering::kinds()) shapes->addAction(label, this, [this, key = key] { set_selected_balloon(key); });
     lines->addAction(action("act_line_delete"));
@@ -493,6 +494,10 @@ std::unique_ptr<QMenu> MainWindow::line_menu(const std::string& line_id) {
         });
     }
     menu->addAction(QStringLiteral("画像のフキダシにする…"), this, [this, line_id] { picture_balloon(line_id); });
+    menu->addAction(QStringLiteral("ワープテキスト…"), this, [this, line_id] {  // (PC3 C-c: main_window_transform.cpp)
+        canvas_->selected_line_id = line_id;
+        warp_text_dialog();
+    });
     QMenu* paths = menu->addMenu(QStringLiteral("文字をパスに沿わせる"));
     const Num w = line->w_mm.truthy() ? line->w_mm : Num(40);
     const Num h = line->h_mm.truthy() ? line->h_mm : Num(20);

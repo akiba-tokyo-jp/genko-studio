@@ -22,6 +22,7 @@ add_dependencies(genko_test_support genko genko_lock_helper genko_argv_helper)
 genko_test(test_buildinfo SOURCES unit/test_buildinfo.cpp DEPS genko_api LABELS unit)
 # The HTTP server of `genko serve` and `genko mcp --transport streamable-http` (M5③): errors, the head before the body.
 genko_test(test_http_server SOURCES unit/test_http_server.cpp DEPS genko_api Qt6::Network LABELS unit)
+genko_test(test_mcp_connection SOURCES unit/test_mcp_connection.cpp DEPS genko_api LABELS unit)
 genko_test(test_json SOURCES unit/test_json.cpp DEPS genko_test_support LABELS unit)
 genko_test(test_pynum SOURCES unit/test_pynum.cpp DEPS genko_test_support LABELS unit)
 genko_test(test_model SOURCES unit/test_model.cpp DEPS genko_test_support LABELS unit)
@@ -53,7 +54,7 @@ else()
 endif()
 genko_test(test_png SOURCES unit/test_png.cpp DEPS genko_test_support genko_render genko_formats LABELS unit)
 genko_test(test_color_raster SOURCES unit/test_color_raster.cpp DEPS genko_core genko_storage genko_render genko_render_ops LABELS unit)
-genko_test(test_color_filters SOURCES unit/test_color_filters.cpp DEPS genko_core genko_storage genko_render genko_render_ops LABELS unit)
+genko_test(test_color_filters SOURCES unit/test_color_filters.cpp DEPS genko_core genko_storage genko_render genko_render_ops LABELS unit TIMEOUT 600)
 genko_test(test_color_raster_edit SOURCES unit/test_color_raster_edit.cpp DEPS genko_core genko_storage genko_render genko_render_ops LABELS unit)
 # (91 merge/flatten/convert cases at u16 and f32: about 460 s under ASan, alone)
 genko_test(test_precision_merge_controls SOURCES unit/test_precision_merge_controls.cpp DEPS genko_core genko_storage genko_render genko_render_ops LABELS unit TIMEOUT 1200)
@@ -92,13 +93,55 @@ genko_test(test_proof SOURCES unit/test_proof.cpp DEPS genko_test_support genko_
 genko_test(test_ink SOURCES unit/test_ink.cpp DEPS genko_test_support genko_render_ops genko_formats LABELS unit TIMEOUT 600)
 # color-mode@1, step two: the pixel ops of CMYK and Lab pages through their pictures, the eyedropper's inks, a colour
 # for chosen inks and the gamut mark.
-genko_test(test_ink_edit SOURCES unit/test_ink_edit.cpp DEPS genko_test_support genko_render_ops LABELS unit TIMEOUT 600)
+genko_test(test_ink_edit SOURCES unit/test_ink_edit.cpp DEPS genko_test_support genko_render_ops LABELS unit TIMEOUT 1200)
 # color-mode@1, step three: the filters and the corrections of CMYK and Lab pages in their inks.
 genko_test(test_ink_filters SOURCES unit/test_ink_filters.cpp DEPS genko_test_support genko_render_ops LABELS unit TIMEOUT 600)
 # channels@1 (SPEC.md COLOR-03): a page's alpha and spot channels without Python — their JSON, the channel ops and their
 # refusals, the selection from a channel, the pixel ops on a channel or one colour plate, split and merge back byte for
 # byte, Merge Spot Channel against PhotoCraft's formula, the spots printed and the panel's view, the book on disk.
 genko_test(test_channels SOURCES unit/test_channels.cpp DEPS genko_test_support genko_render_ops genko_formats LABELS unit TIMEOUT 600)
+# PC3-0 (SPEC.md COLOR-06, COLOR-07): the selection's algorithms (PhotoCraft's algo/selection.rs), the area kinds and
+# modifiers this build adds, masks@1 (settings, the Quick Mask, density and feather on the three ways, a mask lent to a
+# pixel op); a path's coverage (vector/src), the vector data's JSON and the book's frames for vector@1, pen-shapes@1,
+# transform@1 and page-spec@1; pixels drawn again through a map (algo/src/transform.rs, warp.rs, resample.rs); everything
+# on a page moved by one map and the warps (geom/src/warp.rs)
+genko_test(test_selection_ext SOURCES unit/test_selection_ext.cpp DEPS genko_test_support genko_render_ops LABELS unit TIMEOUT 600)
+# PC3 B1 (SPEC.md COLOR-06): choosing by colour (the wand's colour on a layer or the page, a precise page by its values,
+# Color Range's samples, families, tones and out of gamut, Grow and Similar), Select › Modify by distance and the op
+# quick_mask; the op magic_erase (PhotoCraft's eraser_cmds/tests.rs and algo/src/erase.rs) on 8-bit, 16-bit and CMYK layers.
+genko_test(test_select_color SOURCES unit/test_select_color.cpp DEPS genko_test_support genko_render_ops LABELS unit TIMEOUT 600)
+genko_test(test_magic_erase SOURCES unit/test_magic_erase.cpp DEPS genko_test_support genko_render_ops LABELS unit TIMEOUT 600)
+# PC3 B2 (SPEC.md COLOR-06): a layer's mask applied and made from the transparency, a linked mask moved with its layer,
+# outline_area's bands, fill_area's preserve_transparency, paste's center_mm, the masks of a precise or ink page at its
+# finest grid — on 8-bit, precise (16, 32 bits) and CMYK pages, without Python.
+genko_test(test_masks SOURCES unit/test_masks.cpp DEPS genko_test_support genko_render_ops LABELS unit TIMEOUT 600)
+# PC3 B4 (SPEC.md COLOR-06「修復」): the fills (PhotoCraft's poisson.rs, inpaint.rs and content_aware.rs tests) and the
+# retouching ops (retouch_cmds/tests.rs: Clone Stamp, Healing Brush, Spot Healing, History Brush, Content-Aware Fill) on
+# 8-bit, 16-bit, 32-bit, CMYK, Lab and grey layers.
+genko_test(test_inpaint SOURCES unit/test_inpaint.cpp DEPS genko_test_support genko_render_ops LABELS unit TIMEOUT 600)
+genko_test(test_retouch SOURCES unit/test_retouch.cpp DEPS genko_test_support genko_render_ops LABELS unit TIMEOUT 900)
+# PC3 B3 (SPEC.md COLOR-06「賢い選択」「選択とマスク」「マッティング」): PhotoCraft's algo/segment tests (the max-flow against a
+# reference, GrabCut, Quick Selection, Select Subject, Focus Area, Select Sky; the same bytes again, a stop asked for) and
+# algo/matting.rs's (the guided filter, feather, contrast, shift, the tiles, decontaminate, defringe), the op matting on
+# 8-bit, 16-bit and CMYK layers, and the smart area kinds on a page (the same area on an 8-bit, a 16-bit and a CMYK page).
+genko_test(test_segment SOURCES unit/test_segment.cpp DEPS genko_test_support genko_render_ops LABELS unit TIMEOUT 600)
+genko_test(test_matting SOURCES unit/test_matting.cpp DEPS genko_test_support genko_render_ops LABELS unit TIMEOUT 900)
+genko_test(test_path_raster SOURCES unit/test_path_raster.cpp DEPS genko_test_support genko_render_ops LABELS unit)
+# PC3 C-b (pen-shapes@1): the live shapes, the path operations' coverage, a stroke's alignments and dashes, the gradient
+# forms, a part baked, cut, erased, bent and transformed; the shape presets' language and settings file.
+genko_test(test_shapes SOURCES unit/test_shapes.cpp DEPS genko_test_support genko_render_ops LABELS unit)
+genko_test(test_resample SOURCES unit/test_resample.cpp DEPS genko_test_support genko_render_ops LABELS unit)
+genko_test(test_page_geometry SOURCES unit/test_page_geometry.cpp DEPS genko_test_support LABELS unit)
+# PC3 C-e (SPEC.md COLOR-07「判型」): the page size ops on a book in memory — each thing on a page where the map takes it,
+# turns and flips coming back, the finished size and basic frame kept with what the page holds, a page's own paper.
+genko_test(test_page_size SOURCES unit/test_page_size.cpp DEPS genko_test_support genko_render_ops LABELS unit TIMEOUT 600)
+# PC3 C-c (SPEC.md COLOR-07): the transforms' algorithms (PhotoCraft's puppet.rs, perspective.rs, liquify.rs, seam.rs and
+# geom/src/warp.rs tests: the identity, rigid moves, the energy, the shared edges, each Liquify tool's sense, the seams),
+# the warps' forms and splits, render/resample's triangles and inverse map.
+genko_test(test_transform SOURCES unit/test_transform.cpp DEPS genko_test_support genko_render_ops LABELS unit TIMEOUT 600)
+# PC3 C-d (SPEC.md COLOR-07「移動・整列」): align and distribute by whole working pixels (PhotoCraft's layer_multi_cmds.rs
+# tests), the stacking order among siblings with folders, links, snapping's targets (snap.rs' tests).
+genko_test(test_align SOURCES unit/test_align.cpp DEPS genko_test_support genko_render_ops LABELS unit)
 # PC2-0 (SPEC.md COLOR-04, adjustments@1): the corrections' common ground without Python — Python's form kept, a
 # correction's native read and stored, native.method, the kinds' table and what is not in this build yet, one
 # AdjustFunction to the three ways, native.blend on 8 and 16 bits and on CMYK, the PSD's frame; and PC2a's tone kinds
@@ -117,6 +160,39 @@ genko_test(test_adjust_color SOURCES unit/test_adjust_color.cpp DEPS genko_test_
 # PC2a (SPEC.md COLOR-04): color_lookup's 3D tables without Python — the LUT files read as PhotoCraft reads them, the
 # generated looks, the lookup and its dither, the table as a book holds it.
 genko_test(test_lut3d SOURCES unit/test_lut3d.cpp DEPS genko_core LABELS unit)
+# PC3 A0 (SPEC.md「スマートオブジェクト」, smart-objects@1): the model's rules — the matrix, the book written and read back,
+# validate_smart's refusals, an op sent into contents, the ops of A0 and the later steps refused by name.
+genko_test(test_smart SOURCES unit/test_smart.cpp DEPS genko_test_support genko_render_ops LABELS unit TIMEOUT 600)
+# PC3 A0: a smart object's file read with every bit (PNG 16, TIFF 16 and 32), a CMYK file's inks kept, what is refused
+# (too large, a decompression bomb, broken), its colours by the use kept (keep, embedded, assign).
+genko_test(test_smart_decode SOURCES unit/test_smart_decode.cpp DEPS genko_test_support genko_render PNG::PNG TIFF::TIFF JPEG::JPEG ZLIB::ZLIB
+           LABELS unit TIMEOUT 600)
+# PC3 A0: a smart object drawn — one layer converted draws as it did (8, 16, 32 bits, CMYK, Lab, grey), a placed picture
+# converted and a file placed as place_asset places it draw as it did (the monochrome finish too), smaller and back the same,
+# a part the same as the whole.
+genko_test(test_smart_render SOURCES unit/test_smart_render.cpp DEPS genko_test_support genko_render_ops genko_formats LABELS unit TIMEOUT 900)
+# PC3 A1 (SPEC.md COLOR-05「中身とリンク」): smart_replace, smart_relink, smart_update, smart_embed, smart_link and
+# smart_to_page (the same pixels), a link's record, every page showing the contents asked its lock, nested contents drawn again.
+genko_test(test_smart_contents SOURCES unit/test_smart_contents.cpp DEPS genko_test_support genko_render_ops LABELS unit TIMEOUT 600)
+# PC3 A2 (SPEC.md COLOR-05「スマートフィルター」): a smart object's smart filters — set again from the contents, their order,
+# blend modes, opacities, all off and on, cleared, the selection their mask, following the transforms; at 200 dpi as
+# rasterize_layer and filter_raster (8, 16 bits, CMYK, Lab); a part the whole cut there; refused kinds; read back.
+genko_test(test_smart_filters SOURCES unit/test_smart_filters.cpp DEPS genko_test_support genko_render_ops genko_formats LABELS unit TIMEOUT 2400)
+# (ASan with tests run beside it: about 15 minutes, past the 900 s it had; 113 s in Release)
+set_property(TEST test_smart_filters APPEND PROPERTY ENVIRONMENT "QTEST_FUNCTION_TIMEOUT=1700000")
+# PC3 A3 (SPEC.md COLOR-05「PSD のスマートオブジェクト」): a PSD's placed layer blocks and linked files (upstream's
+# linked.rs and blocks.rs tests, this build's SoLd and PlLd read back), a PSD or PSB as a smart object's file (16 and 32 bits
+# kept, CMYK inks, Lab, a blank merged picture), import_psd's smart objects drawn and written back byte for byte.
+genko_test(test_psd_smart SOURCES unit/test_psd_smart.cpp DEPS genko_test_support genko_render_ops genko_formats LABELS unit TIMEOUT 600)
+# PC3 A4 (SPEC.md COLOR-05「スタックモード」): a smart object's stack mode — PhotoCraft's statistics, the shots combined in
+# the three ways (the median taking the passer-by out), a folder, hidden layers, a part the whole cut there, a file one
+# layer, rasterized; rasterize_lines drawing the lines as the page drew them; a tone rasterized on precise and ink pages.
+genko_test(test_smart_stack SOURCES unit/test_smart_stack.cpp DEPS genko_test_support genko_render_ops genko_formats LABELS unit TIMEOUT 1800)
+# PC3 A5 (SPEC.md COLOR-05「スマートオブジェクトの上の変形」): a smart object's warp kept in its contents' mm and undone
+# without loss (PhotoCraft's smart_object_warp_is_lossless), a new warp in place of the old, a quad its corners, perspective
+# and puppet warps and Liquify its smart filters (as the ops bend a paint layer; set again), its filter mask moved with it,
+# the three ways and a part the whole cut there, its warp to a PSD and back, what a reader refuses.
+genko_test(test_smart_warp SOURCES unit/test_smart_warp.cpp DEPS genko_test_support genko_render_ops genko_formats LABELS unit TIMEOUT 1800)
 
 # core/pyre's own bounds (Python 3.12's re, ported; SPEC COMP-01a): a search that backtracks without end stopped when its
 # steps are spent, groups more than 200 deep refused, replace_text refused without a change; without Python.
@@ -288,8 +364,61 @@ genko_test(test_contract_channels SOURCES contract/test_contract_channels.cpp DE
            LABELS contract TIMEOUT 900)
 # PC2c (COLOR-04) through the command line: a local correction saved, undone and done again; fade_layer from the
 # pixels before (an asset gc keeps); apply_image and calculations; hdr_toning's flatten; trap on a CMYK page only.
+# PC3 A0 (smart-objects@1) through the command line: converted, saved, opened again, undone and redone, gc keeping the
+# contents' files, the journal; a 16-bit file drawn with its bits; import_pages bringing contents; panels and checks.
+genko_test(test_contract_smart SOURCES contract/test_contract_smart.cpp DEPS genko_test_support genko_render_ops genko_formats
+           LABELS contract TIMEOUT 900)
+# PC3 A3 through the command line: Genko's smart objects written as placed layers that psd-tools (GENKO_PYREF) and this build
+# read (ids, embedded files, boxes; a page's contents a PSD), a PSD's placed layer imported as a smart object, drawn,
+# undone and redone, drawn from its file once changed, written back with the block and item it was read with.
+genko_test(test_contract_psd_smart SOURCES contract/test_contract_psd_smart.cpp DEPS genko_test_support genko_render_ops genko_formats
+           LABELS contract TIMEOUT 900)
+# PC3 A1 through the command line: a linked file placed, `genko smart --links` (ok, modified, missing), updated, relinked,
+# embedded, drawn from its copy when the file is gone; contents written out (a page's PSD read by psd-tools); `genko package`.
+genko_test(test_contract_smart_links SOURCES contract/test_contract_smart_links.cpp DEPS genko_test_support genko_render_ops genko_formats
+           LABELS contract TIMEOUT 900)
+# PC3 B1 through the command line: inspect --area, the colour kinds given to ops, quick_mask in and out (saved, undone,
+# done again), the Quick Mask in a PSD (resource 1022, read back by psd-tools and this build's reader), magic_erase.
+genko_test(test_contract_select SOURCES contract/test_contract_select.cpp DEPS genko_test_support genko_render
+           LABELS contract TIMEOUT 900)
+# PC3 C-a (vector@1): a page's paths and a layer's vector mask — set, saved, the path kinds of an area, fill (its blend),
+# stroke, work paths from an area and from letters, the vector mask drawn on every kind of page, rasterized, merged;
+# through the command line saved, undone, inspect --paths, export --format ai; a PSD's paths and vmsk (psd-tools, import_psd).
+genko_test(test_contract_paths SOURCES contract/test_contract_paths.cpp DEPS genko_test_support genko_render_ops genko_formats
+           LABELS contract TIMEOUT 900)
+# PC3 B2 (masks@1) through the command line: a mask's link, density and feather saved, drawn, undone and redone;
+# apply_layer_mask, mask_from_transparency, outline_area, a copy pasted at a point; a PSD's masks written with Photoshop's
+# flags and parameters that psd-tools (GENKO_PYREF) and this build read, imported back with them.
+genko_test(test_contract_masks SOURCES contract/test_contract_masks.cpp DEPS genko_test_support genko_render_ops genko_formats
+           LABELS contract TIMEOUT 900)
+# PC3 B4 through the command line: the retouching ops saved, undone and done again, history_brush's `from` (an asset the
+# collection keeps while the journal names it), content_aware_fill on the layer, a new layer and a copy.
+genko_test(test_contract_retouch SOURCES contract/test_contract_retouch.cpp DEPS genko_test_support genko_render
+           LABELS contract TIMEOUT 900)
+# PC3 C-b (pen-shapes@1): a pen layer's shape parts — added, edited, combined, moved, made patches and lines; drawn in their
+# place on every kind of page; the selection, the eraser, ゆがみ, merges and the bucket with them; a fill layer's new
+# gradients; through the command line saved and undone (a pen layer without parts as before), `genko shapes`; the PSD's
+# shape layers and groups (psd-tools, import_psd).
+genko_test(test_contract_shapes SOURCES contract/test_contract_shapes.cpp DEPS genko_test_support genko_render_ops genko_formats
+           LABELS contract TIMEOUT 900)
+# PC3 C-c: transform_layers on each kind of layer and pixels (exact moves and turns on 8, 16, 32 bits, CMYK, Lab; lines,
+# patches, quads, warps, perspective, puppet; folders, links, masks, areas, parts; smart objects, placed pictures, locks,
+# lines of dialogue), content_aware_scale, liquify's strokes, Warp Text; through the command line saved and undone.
+genko_test(test_contract_transform SOURCES contract/test_contract_transform.cpp DEPS genko_test_support genko_render_ops
+           LABELS contract TIMEOUT 900)
+# PC3 C-d: align_layers and distribute_layers by each kind of layer's box (pen lines and shape parts, paint, placed,
+# tone, folders) and the lines of dialogue, the Genko bases (trim, basic frame, panel), the locks refused; arrange_layers
+# in a folder; link_layers and the moves of linked layers; set_layer's lock_position; through the command line saved and
+# undone, `genko inspect --at`.
+genko_test(test_contract_align SOURCES contract/test_contract_align.cpp DEPS genko_test_support genko_render_ops
+           LABELS contract TIMEOUT 900)
 genko_test(test_contract_image_ops SOURCES contract/test_contract_image_ops.cpp DEPS genko_test_support genko_render
            LABELS contract TIMEOUT 900)
+# PC3 C-e through the command line: every kind of page turned (inspect --pixel), undone and redone; a page of its own paper
+# (page-spec@1) written, read again, exported as PDF and PSD at its size; Image Size, Canvas Size's colour; set_page_spec
+# moving a precise layer's pixels.
+genko_test(test_contract_page_size SOURCES contract/test_contract_page_size.cpp DEPS genko_test_support genko_render
+           LABELS contract TIMEOUT 1800)
 
 genko_test(test_contract_psd_text SOURCES contract/test_contract_psd_text.cpp DEPS genko_test_support genko_formats genko_render_ops
            LABELS contract TIMEOUT 1800)
@@ -380,7 +509,7 @@ if(GENKO_BUILD_APP)
   genko_test(test_material_preview_cache SOURCES unit/test_material_preview_cache.cpp DEPS genko_app LABELS unit)
   genko_test(test_migration SOURCES unit/test_migration.cpp DEPS genko_app LABELS unit)
   # (about 60 s in Release; under ASan about 270 s, close to the 300 it had: a guard against a hang, as the GUI tests near it)
-  genko_test(test_gui_color SOURCES gui/test_gui_color.cpp DEPS genko_app ZLIB::ZLIB GUI TIMEOUT 900)
+  genko_test(test_gui_color SOURCES gui/test_gui_color.cpp DEPS genko_app ZLIB::ZLIB GUI TIMEOUT 1800)
   # the layer panel: its list, buttons, settings, menus (several at once, masks, effects), fill and correction layers,
   # a filter with its result on the page while its numbers change
   genko_test(test_gui_layers SOURCES gui/test_gui_layers.cpp DEPS genko_app GUI TIMEOUT 600)
@@ -388,6 +517,18 @@ if(GENKO_BUILD_APP)
   genko_test(test_gui_adjust_color SOURCES gui/test_gui_adjust_color.cpp DEPS genko_app GUI TIMEOUT 600)
   # 範囲選択: the marquee's ways with Shift / Alt, the selection's commands, the chosen part moved, copied, pasted
   genko_test(test_gui_select SOURCES gui/test_gui_select.cpp DEPS genko_app GUI TIMEOUT 600)
+  # PC3 B2: 編集's clipboard with the system's, 結合部分をコピー, 特殊ペースト, 選択範囲をコピー／カットしたレイヤー,
+  # 塗りつぶし… and 境界線を描く…, a precise page's copy as precise pixels
+  genko_test(test_gui_clipboard SOURCES gui/test_gui_clipboard.cpp DEPS genko_app GUI TIMEOUT 600)
+  # PC3 C-c: 自由変形 (the box previewed, Enter one op, Esc, 再実行), the turns, the warp's splits, puppet pins, ゆがみ…,
+  # コンテンツに応じて拡大・縮小…, ワープテキスト… and the commands' names
+  genko_test(test_gui_transform SOURCES gui/test_gui_transform.cpp DEPS genko_app GUI TIMEOUT 600)
+  # PC3 B3: クイック選択ツール・オブジェクト選択ツール, 被写体を選択・空を選択・フォーカス領域…, 選択とマスク… (its preview, its 4
+  # outputs, each one Undo), すべてのオブジェクトをマスク, マッティング, the worker thread stopped
+  genko_test(test_gui_select_mask SOURCES gui/test_gui_select_mask.cpp DEPS genko_app GUI TIMEOUT 900)
+  # PC3 C-d: レイヤー → 重ね順・整列・分布・リンク・ロック…, 表示 → スナップ・スナップ先 (the words, keys and places), the move
+  # tool's drag (by whole working pixels, the linked layers along), 自動選択 (Ctrl+click), snapping (a guide, Ctrl off)
+  genko_test(test_gui_align SOURCES gui/test_gui_align.cpp DEPS genko_app GUI TIMEOUT 600)
   # チャンネル (channels@1, COLOR-03): the panel, the target keys, a fill on a channel, the view, options, split.
   genko_test(test_gui_channels SOURCES gui/test_gui_channels.cpp DEPS genko_app GUI TIMEOUT 600)
   # PC2c (COLOR-04): レイヤー → 色調補正's local corrections and image calculations, 編集 → フェード (only right after).
@@ -410,6 +551,22 @@ if(GENKO_BUILD_APP)
   genko_test(test_gui_workspace SOURCES gui/test_gui_workspace.cpp DEPS genko_app genko_test_support GUI TIMEOUT 600)
   genko_test(test_gui_look SOURCES gui/test_gui_look.cpp DEPS genko_app genko_test_support GUI TIMEOUT 600)
   genko_test(test_gui_carried SOURCES gui/test_gui_carried.cpp DEPS genko_app genko_test_support GUI TIMEOUT 600)
+  # PC3 A0 (smart-objects@1): レイヤー → スマートオブジェクト・ラスタライズ, the layer panel, 埋め込みを配置…, a large file on a
+  # 16-bit page, the 属性 panel's part (its size, its colours).
+  genko_test(test_gui_smart SOURCES gui/test_gui_smart.cpp DEPS genko_app genko_test_support ZLIB::ZLIB GUI TIMEOUT 600)
+  # PC3 A1: コンテンツを編集 in a tab of the book (the parent page follows, undone, what the tab cannot use greyed), a
+  # picture made a page first, the linked files (placed, marked, updated after asking where an agent wrote it), replaced,
+  # written out, embedded and linked, packed; a candidate adopted over a picture's smart object said.
+  genko_test(test_gui_smart_contents SOURCES gui/test_gui_smart_contents.cpp DEPS genko_app genko_test_support GUI TIMEOUT 600)
+  # PC3 C-a (vector@1): ペンツール・曲線ペンツール・パス選択ツール on the canvas, the パス panel's buttons, レイヤー →
+  # ベクトルマスク and ラスタライズ, 選択範囲 → 作業用パスを作成…, the target path shown, パスを Illustrator へ….
+  genko_test(test_gui_paths SOURCES gui/test_gui_paths.cpp DEPS genko_app genko_test_support GUI TIMEOUT 600)
+  # PC3 B4: スポット修復ブラシツール・修復ブラシツール・コピースタンプツール・ヒストリーブラシツール (the tools, their settings, Alt+click
+  # and strokes), コピーソース panel, 履歴's ◆ row, コンテンツに応じた塗りつぶし…'s window.
+  genko_test(test_gui_retouch SOURCES gui/test_gui_retouch.cpp DEPS genko_app genko_test_support GUI TIMEOUT 600)
+  # PC3 C-b (pen-shapes@1): the shape tools in their モード (シェイプ・パス・ピクセル, Alt from the centre, a new layer), the
+  # pen tools' モード, パス選択ツール on a part, the シェイプ panel, カスタムシェイプを定義…, シェイプを結合 and the other commands.
+  genko_test(test_gui_shapes SOURCES gui/test_gui_shapes.cpp DEPS genko_app genko_test_support GUI TIMEOUT 600)
   # M7 (the ledger counted against the C++ tree): the checks of Python's window tests no C++ test made before
   genko_test(test_gui_ledger_a SOURCES gui/test_gui_ledger_a.cpp DEPS genko_app genko_test_support GUI TIMEOUT 900)
   genko_test(test_gui_ledger_c SOURCES gui/test_gui_ledger_c.cpp DEPS genko_app genko_test_support GUI TIMEOUT 900)
@@ -435,6 +592,8 @@ if(GENKO_BUILD_APP)
   # the book and its pages (M4②c): spreads, the nombre, the paper, covers, who draws a page, another book's pages taken
   # in (its assets copied first), a PSD as layers, the page list's menu; each command's ops against Python's window
   genko_test(test_gui_book SOURCES gui/test_gui_book.cpp DEPS genko_app genko_test_support GUI TIMEOUT 900)
+  # PC3 C-e: ページ's paper commands and the crop tool, their ops, the finished size fitted when asked, the book preview
+  genko_test(test_gui_page_size SOURCES gui/test_gui_page_size.cpp DEPS genko_app genko_test_support GUI TIMEOUT 900)
   # the book going out (M4③b): 書き出し… (the dialog's exports as `genko export` writes them), 印刷… (to a PDF: the
   # pages as render_page draws them at the printer's resolution), 履歴 (undo and redo by a click), 入稿前の点検 and its
   # panel (the issues listed, each shown on its page), the phone screens and the scales (a guide pulled out)
@@ -447,7 +606,7 @@ if(GENKO_BUILD_APP)
   # the 52 commands of M2 and their groups: Python's words, keys and tips, the menus, and what each does
   genko_test(test_gui_actions SOURCES gui/test_gui_actions.cpp DEPS genko_app GUI TIMEOUT 900)
   # the canvas's gestures: the panel tool (cuts, gutters, corners, drawn panels) and the view
-  genko_test(test_gui_canvas SOURCES gui/test_gui_canvas.cpp DEPS genko_app GUI TIMEOUT 600)
+  genko_test(test_gui_canvas SOURCES gui/test_gui_canvas.cpp DEPS genko_app GUI TIMEOUT 1200)
   # saving and closing (AC-SAVE 2, 3, 4, 6, 8, 10): failures shown, the question before closing, recovery, retries
   genko_test(test_gui_save SOURCES gui/test_gui_save.cpp DEPS genko_app GUI TIMEOUT 900)
   target_compile_definitions(test_gui_save PRIVATE GENKO_CLI="$<TARGET_FILE:genko>")

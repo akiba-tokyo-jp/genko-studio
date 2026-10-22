@@ -82,6 +82,7 @@ Json to_json(const Channel& channel, const std::string& raster_ref) {
     } else {
         out["solidity"] = channel.solidity;
     }
+    if (channel.quick_mask) out["quick_mask"] = true;  // (masks@1, PC3: the page's Quick Mask)
     return out;
 }
 
@@ -95,6 +96,11 @@ Channel channel_from_json(const Json& value, std::string& raster_ref) {
     // sorted —; anything else is not this build's to keep)
     std::set<std::string> keys;
     for (const auto& [key, item] : value.items()) keys.insert(key);
+    // (masks@1, PC3: an alpha channel marked the page's Quick Mask)
+    if (keys.erase("quick_mask") > 0) {
+        if (out.kind != ChannelKind::Alpha || value["quick_mask"] != Json(true)) bad("only an alpha channel is a Quick Mask (quick_mask: true)");
+        out.quick_mask = true;
+    }
     const std::set<std::string> expected = out.kind == ChannelKind::Alpha ? std::set<std::string>(kAlphaKeys.begin(), kAlphaKeys.end())
                                                                           : std::set<std::string>(kSpotKeys.begin(), kSpotKeys.end());
     if (keys != expected) bad("a channel's keys are not its kind's");

@@ -26,6 +26,7 @@
 #include "app/canvas.hpp"
 #include "app/config.hpp"
 #include "app/main_window.hpp"
+#include "app/preferences.hpp"
 #include "app/theme.hpp"
 #include "app/workspace.hpp"
 #include "gui_support.hpp"
@@ -322,7 +323,7 @@ private slots:
         QVERIFY(texts(help).contains(QStringLiteral("コマンドを探す…")));
         QMenu* layers = b.menu(QStringLiteral("レイヤー"));
         for (const QString& title : {QStringLiteral("塗り・グラデーション・色調補正のレイヤー"), QStringLiteral("まとめて（複数のレイヤー・表示レイヤー・変換）"),
-                                     QStringLiteral("境界効果・表示色の印刷"), QStringLiteral("マスク")}) {
+                                     QStringLiteral("境界効果・表示色の印刷"), QStringLiteral("レイヤーマスク")}) {
             QMenu* sub = submenu(layers, title);
             QVERIFY2(sub != nullptr && !sub->actions().isEmpty(), qPrintable(title));
         }
@@ -425,7 +426,7 @@ private slots:
         QVERIFY(other.window->first_steps() == nullptr || !other.window->first_steps()->isVisible());
     }
 
-    // 選択範囲ランチャー: under the selection while there is one (塗る・消す・トーン・反転・広げる・変形・コピー・解除), each its
+    // 選択範囲ランチャー: under the selection while there is one (塗りつぶし・消去・トーン・反転・拡張・変形・コピー・選択を解除), each its
     // command; gone with the selection.
     void theLauncherUnderTheSelection() {
         Book b;
@@ -437,8 +438,9 @@ private slots:
             QVERIFY(act != nullptr);
             words << word;
         }
-        QCOMPARE(words, (QStringList{QStringLiteral("塗る"), QStringLiteral("消す"), QStringLiteral("トーン"), QStringLiteral("反転"), QStringLiteral("広げる"),
-                                     QStringLiteral("変形"), QStringLiteral("コピー"), QStringLiteral("解除")}));
+        // (PC3 B3: 選択とマスク… joins it, as the PC3 design's launcher has it)
+        QCOMPARE(words, (QStringList{QStringLiteral("塗りつぶし"), QStringLiteral("消去"), QStringLiteral("トーン"), QStringLiteral("反転"), QStringLiteral("拡張"),
+                                     QStringLiteral("変形"), QStringLiteral("コピー"), QStringLiteral("選択とマスク"), QStringLiteral("選択を解除")}));
         // (an area as the selection tools give it: its outline in mm)
         b.window->canvas()->set_selection(
             Json{{"poly", Json::array({Json::array({30, 40}), Json::array({90, 40}), Json::array({90, 90}), Json::array({30, 90})})}});
@@ -448,7 +450,7 @@ private slots:
         QVERIFY(QRect(QPoint(0, 0), b.window->canvas()->size()).contains(launcher->geometry()));
         QToolButton* clear = nullptr;
         for (QToolButton* button : launcher->findChildren<QToolButton*>()) {
-            if (button->text() == QStringLiteral("解除")) clear = button;
+            if (button->text() == QStringLiteral("選択を解除")) clear = button;
         }
         QVERIFY(clear != nullptr);
         clear->click();
@@ -461,11 +463,70 @@ private slots:
     // name — PC1b's 色の校正 (Python's 「CMYK で見る（色校正）」) among them, as the keys (preferences' RENAMED).
     void aRenamedCommandKeepsItsPlace() {
         Book b;
-        app::settings()->setValue(QStringLiteral("ui/quick"), QStringLiteral("CMYK で見る（色校正）\tレイヤーを削除\t履歴…"));
+        app::settings()->setValue(QStringLiteral("ui/quick"), QStringLiteral("CMYK で見る（色校正）\tレイヤーを削除\t切り取り\t履歴…"));
         QCOMPARE(app::chosen(QStringLiteral("ui/quick"), app::kDefaultQuick),
-                 (QStringList{QStringLiteral("色の校正"), QStringLiteral("レイヤーを消す"), QStringLiteral("履歴…")}));
+                 (QStringList{QStringLiteral("色の校正"), QStringLiteral("レイヤーを消す"), QStringLiteral("カット"), QStringLiteral("履歴…")}));
         app::settings()->remove(QStringLiteral("ui/quick"));
         QVERIFY(app::by_text(b.window.get()).count(QStringLiteral("色の校正")) == 1);
+        QVERIFY(app::by_text(b.window.get()).count(QStringLiteral("カット")) == 1);
+    }
+
+    // PC3-0 (the user's decision 5: the selection's, 編集's, 変形's and the moving's commands by Photoshop's names): every
+    // name the table reads an old one as is a command in the menus now and no old name is, so nothing chosen under an old
+    // name is lost; the keys chosen under an old name stay with the command (the command bar's names likewise).
+    void theRenamedCommandsAreAllFound() {
+        Book b;
+        QSet<QString> now;
+        for (const auto& [action, name] : app::command_names(b.window.get())) {
+            now.insert(name);
+            now.insert(action->text());  // (words two commands share are told apart by their places there: decision 8)
+        }
+        int pc3 = 0;
+        for (const auto& [name, before] : app::preferences::renamed()) {
+            QVERIFY2(now.contains(name), qPrintable(name));
+            QVERIFY2(!now.contains(before), qPrintable(before));
+            if (name == QStringLiteral("長方形選択ツール") || name == QStringLiteral("カット") || name == QStringLiteral("移動ツール") ||
+                name == QStringLiteral("自由な形に") || name == QStringLiteral("前面へ"))
+                ++pc3;
+        }
+        QCOMPARE(pc3, 5);
+        // (each command renamed by its id, under the old name: its new one)
+        const std::vector<std::pair<const char*, const char*>> renamed{
+            {"act_marquee", "範囲選択（長方形）"}, {"act_sel_ellipse", "範囲選択（楕円）"}, {"act_lasso", "範囲選択（投げ縄）"},
+            {"act_sel_polyline", "範囲選択（折れ線）"}, {"act_wand", "自動選択"}, {"act_select_all", "すべて選択"},
+            {"act_sel_grow", "選択範囲を広げる…"}, {"act_sel_shrink", "選択範囲を狭める…"}, {"act_sel_layer", "描画部分から選択"},
+            {"act_sel_to_channel", "選択範囲をチャンネルに保存…"}, {"act_quick_mask", "クイックマスク"}, {"act_cut", "切り取り"},
+            {"act_paste", "貼り付け"}, {"act_delete_area", "選択範囲を消す"}, {"act_fill_selection", "選択範囲を塗る"},
+            {"act_flip_h", "左右反転"}, {"act_flip_v", "上下反転"}, {"act_warp_perspective", "自由変形（遠近・4 隅）"},
+            {"act_warp_mesh", "自由変形（メッシュ・3×3）"}, {"act_warp_mesh_grid", "自由変形（メッシュ・格子の数を決める）…"},
+            {"act_warp_apply", "自由変形を確定"}, {"act_move", "レイヤー移動"}, {"act_layer_up", "レイヤーを前へ"},
+            {"act_layer_down", "レイヤーを後ろへ"}, {"act_liquify", "ゆがみ（指で押す）"}};
+        QStringList bar;
+        for (const auto& [attribute, before] : renamed) {
+            const QString old = QString::fromUtf8(before);
+            const QString name = b.window->action(QString::fromLatin1(attribute))->text();
+            bool kept = false;
+            for (auto [it, end] = app::preferences::renamed().equal_range(name); it != end; ++it) kept = kept || it->second == old;
+            QVERIFY2(kept, attribute);
+            bar << old;
+        }
+        app::settings()->setValue(QStringLiteral("ui/commandbar"), bar.join(QLatin1Char('\t')));
+        const QStringList read = app::chosen(QStringLiteral("ui/commandbar"), app::kDefaultCommandBar);
+        app::settings()->remove(QStringLiteral("ui/commandbar"));
+        QCOMPARE(read.size(), static_cast<qsizetype>(renamed.size()));
+        for (std::size_t i = 0; i < renamed.size(); ++i) QCOMPARE(read[static_cast<qsizetype>(i)], b.window->action(QString::fromLatin1(renamed[i].first))->text());
+        // a key chosen under the old name
+        app::settings()->setValue(QStringLiteral("shortcuts/切り取り"), QStringLiteral("Ctrl+Alt+K"));
+        app::preferences::apply_shortcuts(b.window.get());
+        app::settings()->remove(QStringLiteral("shortcuts/切り取り"));
+        QCOMPARE(b.window->action("act_cut")->shortcut(), QKeySequence(QStringLiteral("Ctrl+Alt+K")));
+        // a key chosen under an old name whose new words another command also has (ワープ: 編集 → 変形, and レイヤー →
+        // スマートオブジェクト): the first of them in the menus, the renamed one, has it — not the other
+        app::settings()->setValue(QStringLiteral("shortcuts/自由変形（メッシュ・3×3）"), QStringLiteral("Ctrl+Alt+J"));
+        app::preferences::apply_shortcuts(b.window.get());
+        app::settings()->remove(QStringLiteral("shortcuts/自由変形（メッシュ・3×3）"));
+        QCOMPARE(b.window->action("act_warp_mesh")->shortcut(), QKeySequence(QStringLiteral("Ctrl+Alt+J")));
+        QVERIFY(b.window->action("act_smart_warp")->shortcut() != QKeySequence(QStringLiteral("Ctrl+Alt+J")));
     }
 
     // A short window: the palette's pictures shrink (down to 16 px) so the last tool stays within reach; the layers'

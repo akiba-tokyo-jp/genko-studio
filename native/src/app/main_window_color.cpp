@@ -28,6 +28,7 @@
 #include <memory>
 
 #include "app/ask.hpp"
+#include "core/base64.hpp"
 #include "app/canvas.hpp"
 #include "app/color_settings_dialog.hpp"
 #include "app/config.hpp"
@@ -584,6 +585,51 @@ bool MainWindow::picture_policy(const std::string& bytes, render::Image& picture
         flash(QStringLiteral("画像のプロファイルで変換できませんでした（値のまま置きます）: %1").arg(wording::error(QString::fromUtf8(error.what()))), 6000, true);
     }
     return true;
+}
+
+core::Json MainWindow::picture_use(const std::string& bytes, std::string_view mode) {
+    // (the same policies and questions as picture_policy; the answer kept by the smart object, its pixels as they are)
+    const cs::Settings s = cs::load();
+    const cs::Space space = mode == "CMYK" ? cs::Space::Cmyk
+                            : (mode == "L" || mode == "LA" || mode == "1" || mode.starts_with("I")) ? cs::Space::Gray
+                                                                                                     : cs::Space::Rgb;
+    const core::ProfileSpace wanted = space == cs::Space::Rgb ? core::ProfileSpace::Rgb : space == cs::Space::Gray ? core::ProfileSpace::Gray : core::ProfileSpace::Cmyk;
+    const QString policy = policy_of(s, space);
+    const Json keep{{"embedded_profile", "keep"}};
+    const Json how{{"intent", s.intent.toStdString()}, {"bpc", s.bpc}};
+    std::optional<std::string> embedded = render::proof::embedded_profile(bytes);
+    if (embedded && render::ink::profile_space(*embedded) != wanted) embedded.reset();  // (not one for its colours: as none)
+    if (embedded) {
+        if (render::proof::same_as_srgb(*embedded)) return keep;
+        bool convert = policy == QLatin1String("convert");
+        if (s.ask_paste) {
+            const QString name = QString::fromStdString(core::icc_description(*embedded));
+            const QStringList choices{QStringLiteral("変換しない（値のまま。いままでどおり）"), QStringLiteral("sRGB に変換する（見た目を保つ）")};
+            const auto chosen = ask::get_item(this, QStringLiteral("埋め込まれたプロファイル"),
+                                              QStringLiteral("この画像にはプロファイル「%1」が埋め込まれています。どちらにしても、あとから属性パネルで変えられます。")
+                                                  .arg(name.isEmpty() ? QStringLiteral("（名前なし）") : name),
+                                              choices, convert ? 1 : 0);
+            if (chosen) convert = chosen == choices[1];  // (closed without a choice: the policy's)
+        }
+        if (!convert) return keep;
+        Json out{{"embedded_profile", "convert"}};
+        out.update(how);
+        return out;
+    }
+    // (no profile: taken as the working space's when that is not the default one, as upstream assigns it)
+    const cs::Working w = cs::working(space, s);
+    if (w.is_default || !w.usable || !w.icc || policy == QLatin1String("off")) return keep;
+    bool assign = true;
+    if (s.ask_missing) {
+        const QStringList choices{QStringLiteral("そのまま（sRGB として置く）"), QStringLiteral("作業用の空間（%1）とみなして変換する").arg(w.name)};
+        const auto chosen = ask::get_item(this, QStringLiteral("プロファイルのない画像"),
+                                          QStringLiteral("この画像にはプロファイルがありません。どちらにしても、あとから属性パネルで変えられます。"), choices, 1);
+        if (chosen) assign = chosen == choices[1];
+    }
+    if (!assign) return keep;
+    Json out{{"embedded_profile", "assign"}, {"icc", core::b64encode(*w.icc)}};
+    out.update(how);
+    return out;
 }
 
 // --- ウィンドウ → 開いている原稿 ------------------------------------------------------------------------------------------

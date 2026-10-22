@@ -100,8 +100,9 @@ const std::vector<Expected>& expected() {
         {"act_frame", "コマ割り", k({s("F")}),
          "コマの中をドラッグして割る（斜めも。水平・垂直に吸い付く、Alt で自由）・間の白をドラッグで間隔を動かす・選んだコマの角をドラッグで形を変える", true,
          "ツール"},
-        {"act_move", "レイヤー移動", k({s("Q")}), "描く先のレイヤーを丸ごとドラッグで動かす（Shift で縦・横・45°）", true, "ツール"},
-        {"act_point_wider", "選んだ点を太く", k({s("Ctrl+Alt+]")}), "線の編集で選んだ制御点のところだけ、線を太くします", false, "ツール"},
+        // (PC3 C-d, decision 5's 移動ツール: the layers chosen and their linked ones, Ctrl+click picking a layer)
+        {"act_move", "移動ツール", k({s("Q")}), "選んだレイヤーをリンクしたレイヤーと一緒にドラッグで動かす（Shift で縦・横・45°、Ctrl+クリックでそこのレイヤーを選ぶ）", true, "ツール"},
+        {"act_point_wider", "選んだ点を太く", k({s("Ctrl+Alt+]")}), "部分選択ツールで選んだ制御点のところだけ、線を太くします", false, "ツール"},  // (PC3 C-b)
         {"act_color", "ペンの色…", k({s("C")}), "", false, "ツール"},
         {"act_split_h", "コマを横に割る（上下に分ける）", k({s("Ctrl+Shift+H")}), "", false, "ページ/コマ"},
         {"act_split_v", "コマを縦に割る（左右に分ける）", k({s("Ctrl+Shift+V")}), "", false, "ページ/コマ"},
@@ -257,7 +258,7 @@ private slots:
         // 9 of color-model@1 — ページ → 色モード (act_mode_rgb, act_mode_gray, act_mode_cmyk, act_mode_lab, act_depth_8,
         // act_depth_16, act_depth_32) and 編集 → プロファイルの指定… / プロファイルに変換… (act_assign_profile,
         // act_convert_profile) — theirs (test_gui_book), the 9 of channels@1 — the targets Ctrl+Alt+2…9 (act_channel_composite,
-        // act_channel_3 … act_channel_9) and 選択 → 選択範囲をチャンネルに保存… (act_sel_to_channel) — theirs (test_gui_channels,
+        // act_channel_3 … act_channel_9) and 選択範囲 → 選択範囲を保存… (act_sel_to_channel) — theirs (test_gui_channels,
         // test_gui_select), the
         // 17 of M6 — 環境設定 and the work (act_prefs, act_canvas_only, act_hints, act_tool_names, act_edit_commandbar,
         // act_edit_quick, act_save_workspace, act_next_steps, act_find_command, act_ai) theirs (test_gui_look,
@@ -282,7 +283,65 @@ private slots:
         // act_adjust_invert, act_adjust_posterize, act_adjust_threshold, act_adjust_gradient_map, act_adjust_equalize,
         // act_auto_tone, act_auto_contrast, act_auto_color, act_export_lookup) — theirs (test_gui_adjust).
         // and the 1 of PC2d (SPEC COLOR-04) — 編集 → プロファイルの情報… (act_profile_info) — its own (test_gui_info).
-        QCOMPARE(w->actions_by_name().size(), std::size_t{281});
+        // and the 41 of PC3 A0 (SPEC「スマートオブジェクト」) — ファイル → 埋め込みを配置…・リンクを配置…・パッケージ…
+        // (act_place_embedded, act_place_linked, act_package), レイヤー → スマートオブジェクト (act_smart_convert,
+        // act_smart_copy, act_smart_edit, act_smart_export, act_smart_replace, act_smart_relink, act_smart_embed,
+        // act_smart_link, act_smart_update, act_smart_update_all, act_smart_reveal, the 12 of スタックモード
+        // act_smart_stack_<mode>, act_smart_warp, act_smart_perspective_warp, act_smart_puppet_warp, act_smart_rasterize),
+        // レイヤー → スマートフィルター (act_smart_filters_convert, act_smart_filters_off, act_smart_filter_mask_delete,
+        // act_smart_filter_mask_off, act_smart_filters_clear), レイヤー → ラスタライズ (act_rasterize_type, act_rasterize_fill,
+        // act_rasterize_smart, act_rasterize_layer, act_rasterize_all) and レイヤーの内容オプション… (act_layer_content_options)
+        // — theirs (test_gui_smart; act_import stays test_gui_carried's).
+        // and the 10 of PC3 B1 (SPEC COLOR-06) — 選択範囲 の 再選択・色域指定…・境界線…・滑らかに…・選択範囲を拡大・近似色を選択・
+        // 選択範囲を変形・選択範囲を読み込む…, 表示 → 選択範囲の境界線 and ツール → マジック消しゴムツール (act_sel_reselect,
+        // act_color_range, act_sel_border, act_sel_smooth, act_sel_grow_colour, act_sel_similar, act_sel_transform, act_sel_load,
+        // act_sel_edges, act_magic_eraser), less 色域選択 (act_sel_colour: 自動選択ツール's 色の近さ now, the user's decision 5)
+        // — theirs (test_gui_select).
+        // and the 14 of PC3 C-a (SPEC COLOR-07, vector@1) — ツール の ペンツール・曲線ペンツール・パス選択ツール (act_path_pen,
+        // act_curvature_pen, act_path_select), 選択範囲 → 作業用パスを作成… (act_work_path), ページ → 台詞 → 作業用パスを作成
+        // (act_line_work_path), 表示 → ターゲットパス (act_show_target_path), ファイル → パスを Illustrator へ… (act_export_paths_ai),
+        // レイヤー → ベクトルマスク (act_vmask_reveal_all, act_vmask_hide_all, act_vmask_current_path, act_vmask_delete,
+        // act_vmask_disable, act_vmask_link) and ラスタライズ → ベクトルマスク (act_rasterize_vmask) — theirs (test_gui_paths).
+        // and the 12 of PC3 C-e (SPEC COLOR-07「判型」) — ページ → 画像解像度…・カンバスサイズ…・画像の回転 ▸・切り抜き・トリミング…・
+        // すべての領域を表示 (act_image_size, act_canvas_size, act_rotate_180, act_rotate_90cw, act_rotate_90ccw, act_rotate_angle,
+        // act_flip_canvas_h, act_flip_canvas_v, act_crop, act_trim, act_reveal_all) and ツール → 切り抜きツール (act_crop_tool) —
+        // theirs (test_gui_page_size).
+        // and the 13 of PC3 B2 (SPEC COLOR-06) — 編集 の 結合部分をコピー・特殊ペースト ▸ 3 つ・塗りつぶし…・境界線を描く…
+        // (act_copy_merged, act_paste_in_place, act_paste_into, act_paste_outside, act_fill_dialog, act_stroke_dialog),
+        // レイヤー → 新規 の 選択範囲をコピー／カットしたレイヤー (act_layer_via_copy, act_layer_via_cut), 選択範囲 の
+        // すべてのレイヤー・レイヤーの選択を解除・レイヤーを検索・レイヤーを分離 (act_select_all_layers, act_deselect_layers,
+        // act_find_layers, act_isolate_layers) and ファイル → スクリプト → すべてのマスクを統合 (act_flatten_masks) — theirs
+        // (test_gui_clipboard).
+        // and the 5 of PC3 B4 (SPEC COLOR-06「修復」) — ツール の スポット修復ブラシツール・修復ブラシツール・コピースタンプツール・
+        // ヒストリーブラシツール (act_spot_healing, act_healing, act_clone_stamp, act_history_brush) and 編集 → コンテンツに応じた
+        // 塗りつぶし… (act_content_aware_fill) — theirs (test_gui_retouch).
+        // and the 16 of PC3 C-b (SPEC COLOR-07, pen-shapes@1) — ツール の 楕円形ツール・三角形ツール・多角形ツール・ラインツール・
+        // カスタムシェイプツール・次のシェイプツール (act_shape_ellipse, act_shape_triangle, act_shape_polygon, act_shape_line,
+        // act_shape_custom, act_next_shape_tool), 編集 → カスタムシェイプを定義… (act_define_custom_shape), レイヤー → シェイプを結合
+        // (act_combine_unite, act_combine_subtract, act_combine_intersect, act_combine_exclude, act_merge_components), ラスタライズ →
+        // シェイプ (act_rasterize_shape), 選択範囲 → シェイプに変換 (act_sel_to_shape), ページ → 台詞 → シェイプに変換
+        // (act_line_to_shape) and 表示 → シェイプから新規ガイドを作成 (act_guides_from_shape) — theirs (test_gui_shapes).
+        // and the 18 of PC3 C-c (SPEC COLOR-07「変形」) — 編集 の 自由変形・パペットワープ・遠近法ワープ・コンテンツに応じて拡大・縮小…・
+        // ゆがみ…, 編集 → 変形 の 再実行・拡大・縮小・回転・ゆがみ・遠近法・水平方向に／垂直方向に／交差方向に分割ワープ・ワープ分割を削除・
+        // 180° 回転・90° 回転（時計回り）・90° 回転（反時計回り）, ページ → 台詞 → ワープテキスト… (act_free_transform,
+        // act_puppet_warp, act_perspective_warp, act_content_aware_scale, act_liquify_filter, act_transform_again,
+        // act_transform_scale, act_transform_rotate, act_transform_skew, act_transform_perspective, act_split_warp_h,
+        // act_split_warp_v, act_split_warp_cross, act_remove_warp_split, act_transform_rotate_180, act_transform_rotate_90cw,
+        // act_transform_rotate_90ccw, act_warp_text) — theirs (test_gui_transform).
+        // and the 11 of PC3 B3 (SPEC COLOR-06) — ツール の オブジェクト選択ツール・クイック選択ツール (act_object_select,
+        // act_quick_select), 選択範囲 の フォーカス領域…・被写体を選択・空を選択・選択とマスク… (act_focus_area,
+        // act_select_subject, act_select_sky, act_select_mask), レイヤー → すべてのオブジェクトをマスク (act_mask_all_objects)
+        // and マッティング ▸ カラーの除去…・フリンジ削除…・黒マット削除・白マット削除 (act_matting_decontaminate,
+        // act_matting_defringe, act_matting_black, act_matting_white) — theirs (test_gui_select_mask).
+        // and the 33 of PC3 C-d (SPEC COLOR-07「移動・整列」) — レイヤー → 重ね順 の 最前面へ・最背面へ・逆順 (act_layer_front,
+        // act_layer_back, act_layer_reverse), 整列 ▸ 6 and its 4 bases (act_align_top, act_align_vcenter, act_align_bottom,
+        // act_align_left, act_align_hcenter, act_align_right, act_align_to_auto, act_align_to_trim, act_align_to_frame,
+        // act_align_to_panel), 分布 ▸ 8 (act_distribute_top … act_distribute_right, act_distribute_horizontal,
+        // act_distribute_vertical), レイヤーをリンク・リンクしたレイヤーを選択・レイヤーをロック… (act_link_layers, act_select_linked,
+        // act_lock_layers), 表示 → スナップ and スナップ先 ▸ (act_snap_on, act_snap_guides, act_snap_grid, act_snap_layers,
+        // act_snap_bounds, act_snap_all, act_snap_none) and the move tool's 自動選択・バウンディングボックスを表示
+        // (act_move_auto_select, act_move_show_box) — theirs (test_gui_align).
+        QCOMPARE(w->actions_by_name().size(), std::size_t{453});
         QVERIFY(w->action("act_chat_approval"));
         QVERIFY(w->action("act_style"));
         QVERIFY(w->action("act_exposure"));
@@ -317,8 +376,10 @@ private slots:
         }
         // the palette and the command bar (Python's order); with M3's eight ways of the marquee (test_gui_select) and its
         // drawing tools and line editing (test_gui_paint), the effect lines and the material tool (test_gui_effects), the
-        // text tool (test_gui_lines)
-        QCOMPARE(w->tools_group()->actions().size(), 28);
+        // text tool (test_gui_lines); PC3 C-a's three path tools (test_gui_paths); the crop tool (PC3 C-e, test_gui_page_size);
+        // PC3 B4's four retouching tools (test_gui_retouch); PC3 C-b's five shape tools besides 長方形ツール (test_gui_shapes)
+        // PC3 B3's オブジェクト選択ツール and クイック選択ツール (test_gui_select_mask)
+        QCOMPARE(w->tools_group()->actions().size(), 43);
     }
 
     // No two commands share a key (Qt would take the key as ambiguous and do neither): PC1b's 色の校正 (Ctrl+Alt+Y — Ctrl+Y
@@ -341,7 +402,7 @@ private slots:
         QCOMPARE(owner.at(QStringLiteral("Ctrl+Shift+Y")), QStringLiteral("act_gamut_warning"));
         QCOMPARE(owner.at(QStringLiteral("Ctrl+Shift+K")), QStringLiteral("act_color_settings"));
         QCOMPARE(owner.at(QStringLiteral("Ctrl+Y")), QStringLiteral("act_redo"));
-        // (選択を解除 keeps Ctrl+D on X11 too, whose keys for Delete hold it: 選択範囲を消す takes Delete's first and Backspace,
+        // (選択を解除 keeps Ctrl+D on X11 too, whose keys for Delete hold it: 消去 takes Delete's first and Backspace,
         // as Python's)
         QCOMPARE(owner.at(QStringLiteral("Ctrl+D")), QStringLiteral("act_deselect"));
     }
@@ -405,12 +466,25 @@ private slots:
                                                   {"frame", "act_frame"},      {"move", "act_move"},     {"zoom", "act_zoom_tool"},
                                                   {"rect", "act_marquee"},     {"lasso", "act_lasso"},   {"wand", "act_wand"},
                                                   {"ellipse", "act_sel_ellipse"}, {"polyline", "act_sel_polyline"},
-                                                  {"colour", "act_sel_colour"}, {"selpen", "act_sel_pen"}, {"selerase", "act_sel_erase"},
+                                                  {"selpen", "act_sel_pen"}, {"selerase", "act_sel_erase"}, {"magiceraser", "act_magic_eraser"},
                                                   {"picker", "act_picker"},   {"fill", "act_fill"},     {"lassofill", "act_lassofill"},
                                                   {"gradient", "act_gradient"}, {"shape", "act_shape"}, {"blend", "act_blend"},
                                                   {"liquify", "act_liquify"}, {"reshape", "act_reshape"}, {"vector", "act_vector"},
                                                   {"ruler", "act_ruler"},     {"3d", "act_3d"},         {"effect", "act_effect"},
-                                                  {"stamp", "act_stamp"},     {"text", "act_text"}};
+                                                  {"stamp", "act_stamp"},     {"text", "act_text"},
+                                                  // (PC3 C-a: ペンツール, 曲線ペンツール, パス選択ツール)
+                                                  {"pathpen", "act_path_pen"}, {"curvepen", "act_curvature_pen"}, {"pathselect", "act_path_select"},
+                                                  // (PC3 C-e: 切り抜きツール)
+                                                  {"crop", "act_crop_tool"},
+                                                  // (PC3 B4: the retouching tools)
+                                                  {"spotheal", "act_spot_healing"}, {"heal", "act_healing"}, {"clone", "act_clone_stamp"},
+                                                  {"historybrush", "act_history_brush"},
+                                                  // (PC3 C-b: the shape tools besides 長方形ツール, the 図形 of before)
+                                                  {"shape_ellipse", "act_shape_ellipse"}, {"shape_triangle", "act_shape_triangle"},
+                                                  {"shape_polygon", "act_shape_polygon"}, {"shape_line", "act_shape_line"},
+                                                  {"shape_custom", "act_shape_custom"},
+                                                  // (PC3 B3: クイック選択ツール, オブジェクト選択ツール)
+                                                  {"quick", "act_quick_select"}, {"object", "act_object_select"}};
         QCOMPARE(w->tool_actions().size(), tools.size());
         QVERIFY(w->tools_group()->isExclusive());
         QVERIFY(w->action(QStringLiteral("act_select"))->isChecked());
@@ -420,7 +494,9 @@ private slots:
             QCOMPARE(a->actionGroup(), w->tools_group());
             QVERIFY(!a->autoRepeat());  // (a held key chooses the tool once)
             studio.trigger(attribute.toLatin1().constData());
-            QCOMPARE(studio.canvas()->tool(), MainWindow::is_marquee_tool(tool) ? QStringLiteral("marquee") : tool);
+            QCOMPARE(studio.canvas()->tool(), MainWindow::is_marquee_tool(tool) ? QStringLiteral("marquee")
+                                              : MainWindow::is_shape_tool(tool) ? QStringLiteral("shape")  // (PC3 C-b)
+                                                                                 : tool);
             QVERIFY(a->isChecked());
             for (const auto& [other, other_attribute] : tools) {
                 if (other != tool) QVERIFY(!w->action(other_attribute)->isChecked());
@@ -576,7 +652,7 @@ private slots:
         inject::mouse_stroke(studio.canvas(), {c, c + QPointF(10, 3), c + QPointF(20, 5)});
         const std::string id = ink_of(studio.page())->strokes->items.at(0)->id;
         studio.trigger("act_point_wider");
-        QCOMPARE(w->last_notice(), QStringLiteral("先に「線の編集」で線を選び、□（制御点）をクリックします"));
+        QCOMPARE(w->last_notice(), QStringLiteral("先に「部分選択ツール」で線を選び、□（制御点）をクリックします"));
         studio.canvas()->vector_ids = {id};
         studio.canvas()->vector_point = 1;
         const auto before = studio.doc().pages[0];

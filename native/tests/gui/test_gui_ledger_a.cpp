@@ -869,13 +869,13 @@ private slots:
         Book b(doc, QSize(1280, 800), QStringLiteral("b.genko"), [](const fs::path& path) { app::remember_project(path); });
         QStringList titles;
         for (QAction* top : b.w()->menuBar()->actions()) titles << top->text();
-        QCOMPARE(titles, (QStringList{QStringLiteral("ファイル"), QStringLiteral("編集"), QStringLiteral("表示"), QStringLiteral("ツール"), QStringLiteral("選択"),
+        QCOMPARE(titles, (QStringList{QStringLiteral("ファイル"), QStringLiteral("編集"), QStringLiteral("表示"), QStringLiteral("ツール"), QStringLiteral("選択範囲"),
                                       QStringLiteral("レイヤー"), QStringLiteral("ページ"), QStringLiteral("ウィンドウ"), QStringLiteral("ヘルプ")}));
         const QStringList file = texts(b.menu(QStringLiteral("ファイル")));
         QVERIFY(file.contains(QStringLiteral("最近使った原稿")) && file.contains(QStringLiteral("閉じる")) && file.contains(QStringLiteral("Genko を終わる")));
         const QStringList edit = texts(b.menu(QStringLiteral("編集")));
-        QVERIFY(edit.contains(QStringLiteral("すべて選択")) && edit.contains(QStringLiteral("選択範囲を消す")));
-        QVERIFY(texts(b.menu(QStringLiteral("レイヤー"))).contains(QStringLiteral("マスク")));
+        QVERIFY(edit.contains(QStringLiteral("すべてを選択")) && edit.contains(QStringLiteral("消去")));
+        QVERIFY(texts(b.menu(QStringLiteral("レイヤー"))).contains(QStringLiteral("レイヤーマスク")));
         QVERIFY(texts(submenu(b.menu(QStringLiteral("ページ")), QStringLiteral("台詞"))).contains(QStringLiteral("フキダシの形")));
         QMenu* tools = b.menu(QStringLiteral("ツール"));
         QVERIFY(texts(submenu(tools, QStringLiteral("定規"))).contains(QStringLiteral("直線定規")));
@@ -909,7 +909,7 @@ private slots:
 
     // --- tests/test_g5.py -------------------------------------------------------------------------------------------
 
-    // test_the_layer_move_tool_moves_everything_on_the_layer: レイヤー移動 (its settings named so) moves the layer's lines
+    // test_the_layer_move_tool_moves_everything_on_the_layer: 移動ツール (its settings named so) moves the layer's lines
     // and filled patches by the drag's offset.
     void test_the_layer_move_tool_moves_everything_on_the_layer() {
         Book b(g5_book());
@@ -917,7 +917,7 @@ private slots:
         w->set_target_layer(ink_of(b.page())->id);
         b.trigger("act_move");
         QCOMPARE(b.canvas()->tool(), QStringLiteral("move"));
-        QVERIFY2(w->tool_settings()->title()->text().startsWith(QStringLiteral("レイヤー移動")), qPrintable(w->tool_settings()->title()->text()));
+        QVERIFY2(w->tool_settings()->title()->text().startsWith(QStringLiteral("移動ツール")), qPrintable(w->tool_settings()->title()->text()));
         inject::mouse_stroke(b.canvas(), {QPointF(100, 150), QPointF(110, 155), QPointF(120, 160)});
         const core::Layer* ink = ink_of(b.page());
         QVERIFY(ink != nullptr && ink->stroke_count() > 0);
@@ -966,7 +966,7 @@ private slots:
     // --- tests/test_h2.py -------------------------------------------------------------------------------------------
 
     // test_tools_can_show_their_names_and_it_is_remembered: 道具の名前を表示 (in a menu) puts the names beside the
-    // pictures and is kept in the settings; the marquee is 長方形選択 in the palette, 範囲選択（長方形） in the menus.
+    // pictures and is kept in the settings; the marquee is 長方形選択 in the palette, 長方形選択ツール in the menus.
     void test_tools_can_show_their_names_and_it_is_remembered() {
         app::settings()->remove(QStringLiteral("ui/tool_names"));
         Book b(h2_book(), QSize(1280, 720));
@@ -976,7 +976,7 @@ private slots:
         QCOMPARE(w->tool_palette()->toolButtonStyle(), Qt::ToolButtonTextBesideIcon);
         QCOMPARE(app::settings()->value(QStringLiteral("ui/tool_names")).toString(), QStringLiteral("1"));
         QCOMPARE(b.act("act_marquee")->iconText(), QStringLiteral("長方形選択"));
-        QCOMPARE(b.act("act_marquee")->text(), QStringLiteral("範囲選択（長方形）"));
+        QCOMPARE(b.act("act_marquee")->text(), QStringLiteral("長方形選択ツール"));
         bool in_menu = false;
         for (QAction* top : w->menuBar()->actions()) {
             if (top->menu() != nullptr && top->menu()->actions().contains(b.act("act_tool_names"))) in_menu = true;
@@ -999,11 +999,11 @@ private slots:
     }
 
     // test_the_help_knows_todays_tools: the guide and the answers (as the person reads them, the menus' words filled in)
-    // speak of {大|…}, レイヤー移動, グラデーション, 全体図, 道具の名前を表示, 印刷 and 電子音.
+    // speak of {大|…}, 移動ツール, グラデーション, 全体図, 道具の名前を表示, 印刷 and 電子音.
     void test_the_help_knows_todays_tools() {
         Book b(h2_book(), QSize(1280, 720));
         const QString help = app::help::guide(b.w()) + app::help::faq(b.w());
-        for (const QString& words : {QStringLiteral("{大|"), QStringLiteral("レイヤー移動"), QStringLiteral("グラデーション"), QStringLiteral("全体図"),
+        for (const QString& words : {QStringLiteral("{大|"), QStringLiteral("移動ツール"), QStringLiteral("グラデーション"), QStringLiteral("全体図"),
                                      QStringLiteral("道具の名前を表示"), QStringLiteral("印刷"), QStringLiteral("電子音")}) {
             QVERIFY2(help.contains(words), qPrintable(words));
         }

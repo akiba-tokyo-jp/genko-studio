@@ -12,10 +12,12 @@
 #include <deque>
 #include <filesystem>
 #include <functional>
+#include <map>
 #include <memory>
 #include <optional>
 #include <set>
 #include <string>
+#include <utility>
 #include <vector>
 
 #include "core/command_bus.hpp"
@@ -158,6 +160,10 @@ public:
     // Apply ops at once in memory (throws core::ApplyError and leaves the book as it was). `ids`: the ids new_id()
     // gives first while they are applied (a pen line's id chosen before it was drawn). [{"op": "undo"}] is undo().
     core::ApplyResult apply(const core::Json& ops, const std::vector<std::string>& ids = {});
+    // apply() of ops a worker applied already to `base` (a window's preview, PC3 B4: its result, the ids new_id() gave
+    // meanwhile): taken as it is when the book is still `base` (the same change, journal and ids as apply() makes), else
+    // applied again with those ids first.
+    core::ApplyResult apply_worked(const core::Json& ops, const DocPtr& base, core::ApplyResult result, const std::vector<std::string>& taken);
     // Take back the latest change (in memory when it is not saved yet, else through the journal). Throws
     // core::ApplyError("nothing to undo").
     void undo();
@@ -182,6 +188,11 @@ public:
         std::vector<HistoryEntry> later;
     };
     History history() const;
+    // (PC3 B4, ヒストリーブラシ) A row of 履歴 as a book: the book after the first `done` changes of history().done (0:
+    // before them all — （はじめ）). This session's from memory; a saved change's state from the journal (its .state.json
+    // asset, read as the book reads its project.json); none when that state is not held (an older Genko's genko gc took
+    // it, the journal cannot be read) or past the changes done.
+    std::optional<DocPtr> state_at(std::size_t done) const;
 
     // --- the disk -------------------------------------------------------------------------------------------
     SaveStatus status() const;
@@ -280,6 +291,8 @@ private:
     // A job on the worker thread (static: it sees only what the job carries).
     static JobResult execute(const Job& job);
 
+    // apply()'s change of `result` (its ops applied to the book as it is, new_id() giving `ids`) kept, shown and saved.
+    core::ApplyResult keep_applied(const core::Json& ops, core::ApplyResult result, std::vector<std::string> ids);
     void touch(BookChange change);
     void schedule_save();
     void start_job();
@@ -332,6 +345,10 @@ private:
     bool trimmed_ = false;        // trim_history let changes of this session go to the journal
     std::uint64_t redo_floor_ = 0;  // apply(): what was undone before it (an action's seq below this) is not redone
     mutable std::shared_ptr<const JournalRead> journal_read_;  // history(): the journal as last read
+    // state_at(): the journal's states read last, by their refs (at most kStatesKept, the latest last: a book of many pages
+    // read again and again — the History Brush's source changed — is not held without end)
+    mutable std::vector<std::pair<std::string, DocPtr>> states_read_;
+    static constexpr std::size_t kStatesKept = 2;
 
     bool job_running_ = false;
     bool save_wanted_ = false;

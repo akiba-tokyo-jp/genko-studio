@@ -1602,7 +1602,7 @@ private slots:
         row("subtract", R"([{"op": "fill_area", "page": 1, "layer_id": "paint-1", "area": {"subtract": [{"rect": [10, 10, 30, 30]}, {"ellipse": [20, 20, 10, 10]},
             {"rect": [12, 12, 3, 3]}]}}])", 1, "3062809130/242");
         row("saved grown feathered", R"([{"op": "fill_area", "page": 1, "layer_id": "paint-1", "area": {"union": [{"saved": "s"}, {"rect": [40, 40, 10, 10], "grow_mm": 1}],
-            "feather_mm": 0.5}}])", 1, "3962260918/241");
+            "feather_mm": 0.5}}])", 1, "1224081067/240");  // (PC3 B-0: a feathered area's grey picture stretched bilinear)
         row("nested", R"([{"op": "fill_area", "page": 1, "layer_id": "paint-1", "area": {"union": [{"intersect": [{"all": true}, {"saved": "s", "invert": true}]},
             {"subtract": [{"union": [{"rect": [5, 5, 10, 10]}, {"rect": [12, 12, 10, 10]}]}, {"ellipse": [8, 8, 6, 6]}]}], "grow_mm": -0.5}}])", 1, "2828267568/239");
         row("one part", R"([{"op": "fill_area", "page": 1, "layer_id": "paint-1", "area": {"subtract": [{"rect": [10, 10, 30, 30]}]}}])", 1, "3473190623/242");

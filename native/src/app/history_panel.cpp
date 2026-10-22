@@ -6,7 +6,12 @@
 #include <QDateTime>
 #include <QFont>
 #include <QLabel>
+#include <QIcon>
 #include <QListWidget>
+#include <QMenu>
+#include <QPainter>
+#include <QPixmap>
+#include <QPolygonF>
 #include <QVBoxLayout>
 
 #include <algorithm>
@@ -32,8 +37,8 @@ namespace {
 const std::map<std::string, const char*>& names() {
     static const std::map<std::string, const char*> table = {
         {"add_stroke", "ペンで描いた"}, {"erase", "消しゴムで消した"}, {"fill", "塗りつぶした"}, {"fill_area", "囲って塗った"},
-        {"fill_enclosed", "囲った中の閉じた所を塗った"}, {"delete_area", "範囲を消した"}, {"transform_area", "範囲を動かした・変形した"},
-        {"paste", "貼り付けた"}, {"set_stroke_width", "線の太さを変えた"}, {"reshape_stroke", "線を修正した"}, {"split_frame", "コマを割った"},
+        {"fill_enclosed", "囲った中の閉じた所を塗った"}, {"delete_area", "消去した"}, {"transform_area", "範囲を動かした・変形した"},
+        {"paste", "ペーストした"}, {"set_stroke_width", "線の太さを変えた"}, {"reshape_stroke", "線を修正した"}, {"split_frame", "コマを割った"},
         {"cut_frame", "コマを割った"}, {"merge_frame", "コマを結合した"}, {"add_frame", "コマを描いた"}, {"delete_frame", "コマを消した"},
         {"move_gutter", "コマの間を動かした"}, {"set_frame", "コマの形を変えた"}, {"apply_template", "テンプレートでコマを割った"},
         {"set_border", "枠線を変えた"}, {"add_line", "台詞を入れた"}, {"edit_line", "台詞を直した"}, {"move_line", "フキダシを動かした"},
@@ -65,6 +70,42 @@ const std::map<std::string, const char*>& names() {
         {"hdr_toning", "HDR トーンをかけた"}, {"apply_image", "画像操作をした"}, {"calculations", "演算をした"}, {"trap", "トラッピングした"},
         {"fade_layer", "フェードした"},
         {"set_adjustment", "色調補正の設定を変えた"}, {"auto_adjust", "自動で色調補正した"},  // (PC2a, SPEC COLOR-04)
+        // (smart-objects@1, PC3: render/ops_smart)
+        {"smart_convert", "スマートオブジェクトに変換した"}, {"smart_place", "画像をスマートオブジェクトとして置いた"},
+        {"smart_profile", "スマートオブジェクトの色の扱いを変えた"}, {"smart_copy", "スマートオブジェクトをコピーした"},
+        {"smart_transform", "スマートオブジェクトを変形した"}, {"rasterize_layer", "ラスタライズした"},
+        {"smart_replace", "コンテンツを置換した"}, {"smart_relink", "ファイルに再リンクした"}, {"smart_update", "変更されたコンテンツを更新した"},
+        {"smart_embed", "埋め込みに変換した"}, {"smart_link", "リンクに変換した"}, {"smart_to_page", "コンテンツを編集できる形にした"},
+        // (PC3 A2: render/ops_smart_filters)
+        {"smart_filter_add", "スマートフィルターをかけた"}, {"smart_filter_set", "スマートフィルターを直した"},
+        {"smart_filter_move", "スマートフィルターを並べ替えた"}, {"smart_filter_delete", "スマートフィルターを削除した"},
+        {"smart_filter_state", "スマートフィルターを切り替えた"},
+        // (PC3 A4: render/ops_smart)
+        {"smart_stack", "スタックモードを変えた"}, {"rasterize_lines", "台詞をラスタライズした"},
+        // (PC3 B1: render/ops_quick_mask, render/erase_magic)
+        {"quick_mask", "クイックマスクを切り替えた"}, {"magic_erase", "マジック消しゴムで消した"},
+        // (PC3 B4: render/ops_retouch)
+        {"clone_stamp", "コピースタンプで描いた"}, {"healing_brush", "修復ブラシで直した"}, {"spot_healing", "スポット修復ブラシで直した"},
+        {"history_brush", "ヒストリーブラシで塗り戻した"}, {"content_aware_fill", "コンテンツに応じて塗りつぶした"},
+        // (vector@1, PC3 C-a: render/ops_paths)
+        {"set_path", "パスを描いた"}, {"delete_path", "パスを削除した"}, {"rename_path", "パスを保存した"},
+        {"make_work_path", "作業用パスを作成した"}, {"text_to_path", "文字から作業用パスを作成した"},
+        {"stroke_path", "パスの境界線を描いた"}, {"set_vector_mask", "ベクトルマスクを変えた"},
+        // (PC3 C-e: render/ops_pagesize)
+        {"resize_pages", "画像解像度を変えた"}, {"set_canvas_size", "カンバスサイズを変えた"}, {"crop_page", "切り抜いた"},
+        {"trim_page", "トリミングした"}, {"reveal_all", "すべての領域を表示した"}, {"rotate_pages", "カンバスを回転した"},
+        // (PC3 B2: render/ops_masks)
+        {"outline_area", "境界線を描いた"}, {"apply_layer_mask", "レイヤーマスクを適用した"},
+        {"mask_from_transparency", "透明部分からマスクを作った"},
+        // (pen-shapes@1, PC3 C-b: render/ops_shapes)
+        {"add_shape_part", "シェイプを描いた"}, {"edit_shape_part", "シェイプを直した"}, {"combine_shape_parts", "シェイプを結合した"},
+        {"move_shape_parts", "シェイプを別のレイヤーへ移した"},
+        // (PC3 C-c: render/layer_transform, render/distort_ops)
+        {"transform_layers", "変形した"}, {"content_aware_scale", "コンテンツに応じて拡大・縮小した"},
+        // (PC3 B3: render/ops_matting)
+        {"matting", "マッティングした"},
+        // (PC3 C-d: render/layer_align)
+        {"align_layers", "整列した"}, {"distribute_layers", "分布した"}, {"arrange_layers", "重ね順を変えた"}, {"link_layers", "レイヤーのリンクを変えた"},
     };
     return table;
 }
@@ -83,11 +124,14 @@ QString describe(const Json& ops) {
         }
     }
     if (named.isEmpty()) return QStringLiteral("原稿を変えた");
+    // (smart-objects@1, PC3 A1: a step made in a smart object's contents — コンテンツを編集's tab — says where)
+    const bool inside = ops.is_array() && std::any_of(ops.begin(), ops.end(), [](const Json& op) { return op.is_object() && op.contains("contents"); });
+    const QString where = inside ? QStringLiteral("中身: ") : QString();
     const QString first = named.front();
     const bool same = std::all_of(named.begin(), named.end(), [&](const QString& n) { return n == first; });
-    if (named.size() > 1 && same) return QStringLiteral("%1（%2 回）").arg(first).arg(named.size());
-    if (named.size() > 1) return QStringLiteral("%1 ほか %2 件").arg(first).arg(named.size() - 1);
-    return first;
+    if (named.size() > 1 && same) return where + QStringLiteral("%1（%2 回）").arg(first).arg(named.size());
+    if (named.size() > 1) return where + QStringLiteral("%1 ほか %2 件").arg(first).arg(named.size() - 1);
+    return where + first;
 }
 
 QString when(std::optional<double> at) {
@@ -105,7 +149,19 @@ HistoryPanel::HistoryPanel(MainWindow* window) : window_(window) {
     list_ = new QListWidget;
     list_->setObjectName(QStringLiteral("history_list"));
     connect(list_, &QListWidget::itemClicked, this, [this](QListWidgetItem* item) { go_to(item->data(Qt::UserRole).toInt()); });
-    auto* note = new QLabel(QStringLiteral("クリックで、その変更をした直後まで戻る（進む）。灰色は取り消した変更（やり直せる）。"));
+    // (PC3 B4: a row's right-click chooses it as ヒストリーブラシのソース)
+    list_->setContextMenuPolicy(Qt::CustomContextMenu);
+    connect(list_, &QListWidget::customContextMenuRequested, this, [this](const QPoint& at) {
+        QListWidgetItem* item = list_->itemAt(at);
+        if (item == nullptr) return;
+        const int row = item->data(Qt::UserRole).toInt();
+        QMenu menu(this);
+        QAction* source = menu.addAction(QStringLiteral("ヒストリーブラシのソースに設定"), this, [this, row] { set_brush_source(row); });
+        source->setEnabled(row <= done_);
+        menu.exec(list_->viewport()->mapToGlobal(at));
+    });
+    auto* note = new QLabel(QStringLiteral("クリックで、その変更をした直後まで戻る（進む）。灰色は取り消した変更（やり直せる）。"
+                                           "右クリックで、ヒストリーブラシで塗り戻す状態（◆の行）を選ぶ。"));
     note->setWordWrap(true);
     theme::hint(note);
     auto* layout = new QVBoxLayout(this);
@@ -141,6 +197,21 @@ void HistoryPanel::refresh() {
         item->setData(Qt::UserRole, n);
         list_->addItem(item);
     }
+    // (PC3 B4: the History Brush's source marked — a row past the present cannot be one: back to （はじめ）)
+    if (brush_source() > done_) window_->history_brush_row.reset();
+    if (QListWidgetItem* source = list_->item(brush_source())) {
+        QPixmap mark(12, 12);  // (a diamond, as the panel's words stay as they are)
+        mark.fill(Qt::transparent);
+        QPainter painter(&mark);
+        painter.setRenderHint(QPainter::Antialiasing);
+        painter.setPen(Qt::NoPen);
+        painter.setBrush(theme::accent());
+        painter.drawPolygon(QPolygonF({QPointF(6, 0.5), QPointF(11.5, 6), QPointF(6, 11.5), QPointF(0.5, 6)}));
+        painter.end();
+        source->setIcon(QIcon(mark));
+        source->setData(Qt::UserRole + 1, true);
+        source->setToolTip(QStringLiteral("ヒストリーブラシは、この状態に塗り戻します"));
+    }
     QListWidgetItem* now = list_->item(done_);
     now->setText(QStringLiteral("▶ ") + now->text());
     QFont font = now->font();
@@ -149,6 +220,18 @@ void HistoryPanel::refresh() {
     list_->setCurrentRow(done_);
     list_->scrollToItem(now);
 }
+
+void HistoryPanel::set_brush_source(int row) {
+    if (row < 0 || row > done_) return;
+    if (row == 0) {
+        window_->history_brush_row.reset();
+    } else {
+        window_->history_brush_row = row;
+    }
+    refresh();
+}
+
+int HistoryPanel::brush_source() const { return window_->history_brush_row.value_or(0); }
 
 void HistoryPanel::go_to(int target) {
     Session& session = window_->session();

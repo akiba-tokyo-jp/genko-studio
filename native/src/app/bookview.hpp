@@ -40,6 +40,9 @@ class BookPreview;
 class BookView : public QWidget {
 public:
     explicit BookView(BookPreview* dialog);
+    // Where the open spread's pages are drawn (left, right; empty for none), each as big as its own paper (PC3 C-e: a
+    // page of its own paper), at one scale.
+    std::pair<QRectF, QRectF> page_rects();
     double turn = 0.0;  // 0..1 while a page turns
     int direction = 1;
 

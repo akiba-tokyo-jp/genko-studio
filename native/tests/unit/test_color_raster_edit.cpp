@@ -1,8 +1,10 @@
 #include <QtTest/QtTest>
 #include <QTemporaryDir>
+#include <algorithm>
 #include <array>
 #include <cmath>
 #include <functional>
+#include <optional>
 #include "core/base64.hpp"
 #include "core/color_raster.hpp"
 #include "core/command_bus.hpp"
@@ -13,6 +15,7 @@
 #include "storage/reader.hpp"
 #include "storage/writer.hpp"
 #include "render/ops_registry.hpp"
+#include "render/color_edit.hpp"
 #include "render/fill.hpp"
 #include "render/page.hpp"
 #include "render/raster.hpp"
@@ -54,6 +57,29 @@ Pixel patterned(std::uint32_t x, std::uint32_t y, bool hdr) {
 core::Document patterned_page(const QString& precision, std::uint32_t side = 200) {
     const bool hdr = precision == "f32";
     return page_with(precision.toStdString(), side, side, [&](std::uint32_t x, std::uint32_t y) { return patterned(x, y, hdr); });
+}
+// (PC3 B2) The patterned layer — or one of a colour all over — on a page of its depth (color-model@1: 16 or 32 bits), where
+// pieces of precise pixels are pasted as their samples.
+core::Document deep_page(const QString& precision, std::uint32_t side = 200, std::optional<Pixel> colour = std::nullopt) {
+    auto doc = core::new_episode("高精度の断片", core::Num(1), 1, core::PageSpec::custom(kInch, kInch, 20, 20, 1, 2, 2, 2, 2, 200, "color"));
+    doc = core::CommandBus(render::ops_registry())
+              .apply(doc, Json::array({Json{{"op", "set_color_mode"}, {"page", 1}, {"mode", "rgb"}, {"depth", precision == "f32" ? 32 : 16}}}),
+                     core::Actor("human:test"))
+              .doc;
+    auto& p = doc.edit_page(0); p.numero = false; p.frames.clear(); p.layers.clear();
+    const bool hdr = precision == "f32";
+    Json pixels = Json::array();
+    for (std::uint32_t y = 0; y < side; ++y) for (std::uint32_t x = 0; x < side; ++x) {
+        const Pixel v = colour ? *colour : patterned(x, y, hdr);
+        for (unsigned c = 0; c < 4; ++c) {
+            if (precision == "u16") pixels.push_back(static_cast<std::int64_t>(std::lround(v[c] * 65535)));
+            else pixels.push_back(static_cast<double>(static_cast<float>(v[c])));
+        }
+    }
+    const Json put{{"op", "put_color_raster"}, {"page", 1}, {"width", side}, {"height", side}, {"precision", precision.toStdString()}, {"pixels", pixels}};
+    doc = core::CommandBus().apply(doc, Json::array({put}), core::Actor("human:test")).doc;
+    doc.edit_page(0).layers[0].id = "paint";
+    return doc;
 }
 core::Document edit(const core::Document& doc, const Json& op) {
     return core::CommandBus(render::ops_registry()).apply(doc, Json::array({op}), core::Actor("human:test")).doc;
@@ -541,6 +567,119 @@ private slots:
             QVERIFY_EXCEPTION_THROWN(edit(doc, op), core::Error);
             QCOMPARE(paint(doc).color_raster, original);
         }
+    }
+
+    // --- PC3 B2: pieces of precise pixels (カット・コピー・ペースト on a precise page) ---------------------------------
+
+    void piecesKeepTheirSamples_data() {
+        QTest::addColumn<QString>("precision");
+        QTest::newRow("u16") << QString("u16"); QTest::newRow("f32") << QString("f32");
+    }
+    // A piece lifted from a precise layer (alpha × the area, cut to what shows) pasted into a new paint layer of a precise
+    // page: precise pixels of the page's precision, each sample as it was where it lands on a pixel; moved by whole
+    // pixels, the same; turned, resampled in linear light (HDR kept), never an 8-bit picture.
+    void piecesKeepTheirSamples() {
+        QFETCH(QString, precision);
+        const auto doc = deep_page(precision);
+        const Json area{{"poly", Json::array({Json::array({2.54, 2.54}), Json::array({12.7, 2.54}), Json::array({12.7, 12.7}), Json::array({2.54, 12.7})})}};
+        const auto piece = render::color_edit::lift_piece(doc.page(0), paint(doc), area);
+        QVERIFY(piece);
+        QCOMPARE(piece->space, std::string("srgb"));
+        // (pixels 20..100: the polygon's far edge drawn too, as the area language draws a polygon)
+        QVERIFY2(std::abs(piece->box_mm[0] - 2.54) < 1e-9 && std::abs(piece->box_mm[1] - 2.54) < 1e-9 && std::abs(piece->box_mm[2] - 81 * kInch / 200) < 1e-9 &&
+                     std::abs(piece->box_mm[3] - 81 * kInch / 200) < 1e-9,
+                 qPrintable(QString("box %1 %2 %3 %4").arg(piece->box_mm[0], 0, 'g', 17).arg(piece->box_mm[1], 0, 'g', 17).arg(piece->box_mm[2], 0, 'g', 17).arg(piece->box_mm[3], 0, 'g', 17)));
+        const core::Patch patch = render::color_edit::piece_patch(*piece);
+        QVERIFY(patch.attrs.contains("gkcr") && patch.attrs["gkcr_space"] == Json("srgb"));
+        QCOMPARE(render::selection::open_picture(*patch.png).size(), (render::Size{81, 81}));
+        Json one = patch.attrs;
+        one["png"] = core::b64encode(*patch.png);
+        const Json items{{"strokes", Json::array()}, {"patches", Json::array({one})}};
+        const auto paste_with = [&](const Json& matrix) {
+            return core::CommandBus(render::ops_registry())
+                .apply(doc, Json::array({Json{{"op", "add_layer"}, {"page", 1}, {"kind", "paint"}, {"id", "copy"}, {"name", "貼り付け"}},
+                                         Json{{"op", "paste"}, {"page", 1}, {"layer_id", "copy"}, {"items", items}, {"matrix", matrix}}}),
+                       core::Actor("human:test"))
+                .doc;
+        };
+        const auto copy_of = [](const core::Document& d) -> const core::Layer& { return d.page(0).layers.back(); };
+        // where it was, and five pixels on (0.635 mm)
+        for (const int shift : {0, 5}) {
+            const auto pasted = paste_with(Json::array({1, 0, 0, 1, shift * kInch / 200, 0}));
+            const core::Layer& copy = copy_of(pasted);
+            QVERIFY(copy.color_raster && !copy.raster_png && copy.patches.empty());
+            const core::ColorRasterView view(*copy.color_raster);
+            QCOMPARE(view.width(), 200u);
+            QCOMPARE(view.metadata("")["precision"], Json(precision.toStdString()));
+            const auto& bytes = *copy.color_raster;
+            const std::size_t size = static_cast<unsigned char>(bytes[5]);
+            for (std::uint32_t y = 20; y < 100; y += 7)
+                for (std::uint32_t x = 20; x < 100; x += 3)
+                    if (std::string_view(bytes).substr(16 + (std::size_t(y) * 200 + x + shift) * 4 * size, 4 * size) != sample_bytes(doc, std::size_t(y) * 200 + x))
+                        QFAIL(qPrintable(QString("pixel %1,%2 is not its samples").arg(x).arg(y)));
+            QCOMPARE(view.pixel(std::size_t(150) * 200 + 150)[3], 0.0);
+            QVERIFY(std::find(pasted.features.begin(), pasted.features.end(), core::kColorRasterFeature) != pasted.features.end());
+        }
+        // turned a quarter about the piece's middle (7.62, 7.62): resampled, still precise
+        const auto turned = paste_with(Json::array({0, 1, -1, 0, 15.24, 0}));
+        const core::ColorRasterView view(*copy_of(turned).color_raster);
+        double brightest = 0;
+        std::size_t laid = 0;
+        for (std::size_t i = 0; i < std::size_t(200) * 200; ++i) {
+            const auto p = view.pixel(i);
+            if (p[3] > 0) ++laid;
+            brightest = std::max(brightest, p[0]);
+        }
+        QVERIFY(laid > 6000);
+        if (precision == "f32") QVERIFY2(brightest > 1.2, qPrintable(QString::number(brightest)));  // (HDR: no 8-bit picture on the way)
+    }
+
+    // A piece of sRGB values pasted onto a page of another profile: its colours brought into the page's space (through
+    // sRGB, not 8 bits); the piece of a page of a profile says its profile.
+    void piecesTakeThePageSpace() {
+        auto doc = deep_page("u16", 40, Pixel{1, 0, 0, 1});
+        const Json area{{"poly", Json::array({Json::array({0.0, 0.0}), Json::array({25.4, 0.0}), Json::array({25.4, 25.4}), Json::array({0.0, 25.4})})}};
+        const auto piece = render::color_edit::lift_piece(doc.page(0), paint(doc), area);
+        QVERIFY(piece);
+        Json one = render::color_edit::piece_patch(*piece).attrs;
+        one["png"] = core::b64encode(*render::color_edit::piece_patch(*piece).png);
+        const Json items{{"strokes", Json::array()}, {"patches", Json::array({one})}};
+        doc = edit(doc, Json{{"op", "assign_profile"}, {"page", 1}, {"profile", "display-p3"}});
+        const auto pasted = core::CommandBus(render::ops_registry())
+                                .apply(doc, Json::array({Json{{"op", "add_layer"}, {"page", 1}, {"kind", "paint"}, {"id", "copy"}},
+                                                         Json{{"op", "paste"}, {"page", 1}, {"layer_id", "copy"}, {"items", items}}}),
+                                       core::Actor("human:test"))
+                                .doc;
+        const core::ColorRasterView view(*pasted.page(0).layers.back().color_raster);
+        const auto red = view.pixel(std::size_t(view.height() / 2) * view.width() + view.width() / 2);
+        QVERIFY2(red[0] < 0.97 && red[0] > 0.85 && red[1] > 0.1 && red[1] < 0.3, qPrintable(QString("%1 %2 %3").arg(red[0]).arg(red[1]).arg(red[2])));
+        // (lifted from the page of a profile: its profile said)
+        const auto own = render::color_edit::lift_piece(pasted.page(0), paint(pasted), area);
+        QVERIFY(own && own->space == pasted.page(0).rgb->profile);
+        QCOMPARE(render::color_edit::piece_patch(*own).attrs[std::string(render::color_edit::kPatchProfileKey)], Json(pasted.page(0).rgb->profile));
+    }
+
+    // Precise lines and pictures pasted together onto precise pixels: the pictures first, the lines over them (as the layer
+    // draws them).
+    void preciseLinesWithPictures_data() {
+        QTest::addColumn<QString>("precision");
+        QTest::newRow("u16") << QString("u16"); QTest::newRow("f32") << QString("f32");
+    }
+    void preciseLinesWithPictures() {
+        QFETCH(QString, precision);
+        const auto doc = patterned_page(precision);
+        const Json line{{"points", Json::array({Json::array({2.0, 6.0}), Json::array({23.0, 6.0})})}, {"width_mm", 1.0}, {"kind", "mili"},
+                        {"color_rgb", Json{{"precision", "f32"}, {"values", Json::array({.125, 1.5, .5})}}}};
+        const auto picture = render::Image::create("RGBA", render::Size{40, 40}, render::Ink{10, 20, 220, 255});
+        const Json patch{{"box", Json::array({2.54, 3.81, 5.08, 5.08})}, {"png", core::b64encode(*render::fills::png_bytes(picture))}, {"mode", "image"}};
+        const auto pasted = edit(doc, Json{{"op", "paste"}, {"page", 1}, {"layer_id", "paint"},
+                                            {"items", Json{{"strokes", Json::array({line})}, {"patches", Json::array({patch})}}}});
+        const auto after = pixels(pasted);
+        const auto over = after.pixel(std::size_t(47) * 200 + 30);   // (6 mm down, 3.8 mm across: the line over the picture)
+        const auto under = after.pixel(std::size_t(66) * 200 + 30);  // (8.3 mm down: the picture alone)
+        QVERIFY2(std::abs(over[1] - (precision == "f32" ? 1.5 : 1.0)) < 1e-4, qPrintable(QString::number(over[1])));
+        QVERIFY(std::abs(under[2] - 220 / 255.) < 1e-6 && under[3] == 1);
+        same_book_after_reopening(pasted);
     }
 };
 

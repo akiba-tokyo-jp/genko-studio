@@ -448,7 +448,7 @@ QString cursor_kind() {
 
 const Choices& modifier_tool_choices() {
     static const Choices all{{QStringLiteral("何もしない"), QString()}, {QStringLiteral("スポイト"), QStringLiteral("picker")},
-                             {QStringLiteral("選択"), QStringLiteral("select")}, {QStringLiteral("レイヤー移動"), QStringLiteral("move")},
+                             {QStringLiteral("選択"), QStringLiteral("select")}, {QStringLiteral("移動ツール"), QStringLiteral("move")},
                              {QStringLiteral("消しゴム"), QStringLiteral("eraser")}};
     return all;
 }
@@ -472,7 +472,7 @@ const Choices& keyed_tools() {
 const Choices& held_tools() {
     static const Choices all{{QStringLiteral("共通の設定のまま"), QString()}, {QStringLiteral("何もしない"), QStringLiteral("none")},
                              {QStringLiteral("スポイト"), QStringLiteral("picker")},   {QStringLiteral("選択"), QStringLiteral("select")},
-                             {QStringLiteral("レイヤー移動"), QStringLiteral("move")},  {QStringLiteral("消しゴム"), QStringLiteral("eraser")},
+                             {QStringLiteral("移動ツール"), QStringLiteral("move")},  {QStringLiteral("消しゴム"), QStringLiteral("eraser")},
                              {QStringLiteral("ペン"), QStringLiteral("pen")},          {QStringLiteral("塗りつぶし"), QStringLiteral("fill")}};
     return all;
 }

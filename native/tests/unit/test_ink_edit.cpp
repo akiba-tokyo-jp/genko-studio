@@ -13,6 +13,8 @@
 #include <functional>
 #include <random>
 #include <string>
+#include <string_view>
+#include <tuple>
 #include <vector>
 
 #include "core/base64.hpp"
@@ -441,6 +443,75 @@ private slots:
         QVERIFY(!layer_of(rgb, "p").patches[0].attrs.contains("gkir_profile"));
     }
 
+    // PC3 B2: a piece of inks turned, flipped or sheared as it is pasted stays inks — resampled as inks (premultiplied by
+    // the alpha), as transform_area moves them —, never its picture: a colour all over the same inks.
+    void turnedPiecesStayInks() {
+        const core::Document doc = ink_book();
+        // (the piece: S, from the top right — 35..45 × 5..15 mm)
+        const auto piece = render::ink_edit::lift_piece(doc.page(0), layer_of(doc, "pic"),
+                                                        Json{{"poly", Json::array({Json::array({35, 5}), Json::array({45, 5}), Json::array({45, 15}), Json::array({35, 15})})}});
+        QVERIFY(piece);
+        const core::Patch patch = render::ink_edit::piece_patch(*piece, *doc.page(0).color);
+        Json one = patch.attrs;
+        one["png"] = core::b64encode(*patch.png);
+        const Json items{{"strokes", Json::array()}, {"patches", Json::array({one})}};
+        // turned a quarter about (40, 10) and moved down by 50 mm; flipped; sheared
+        for (const Json& matrix : {Json::array({0, 1, -1, 0, 50, 10}), Json::array({-1, 0, 0, 1, 80, 50}), Json::array({1, 0, 0.3, 1, -30, 50})}) {
+            const core::Document pasted =
+                run_ops(doc, Json::array({Json{{"op", "add_layer"}, {"page", 1}, {"kind", "paint"}, {"id", "pasted"}},
+                                          Json{{"op", "paste"}, {"page", 1}, {"layer_id", "pasted"}, {"items", items}, {"matrix", matrix}}}))
+                    .doc;
+            QVERIFY(layer_of(pasted, "pasted").patches.empty());
+            QVERIFY(layer_of(pasted, "pasted").ink_raster);
+            const core::InkPixels laid = pixels_of(pasted, "pasted");
+            // (where the middle of the piece, (40, 10) mm, went)
+            const auto m = matrix;
+            const double x = m[0].get<double>() * 40 + m[2].get<double>() * 10 + m[4].get<double>(),
+                         y = m[1].get<double>() * 40 + m[3].get<double>() * 10 + m[5].get<double>();
+            const std::uint16_t* middle = at(laid, px(x), px(y));
+            for (unsigned c = 0; c < 4; ++c) QVERIFY2(std::abs(int(middle[c]) - int(kS[c])) <= 1, qPrintable(QString::number(c)));
+            QCOMPARE(middle[4], std::uint16_t{65535});
+            QCOMPARE(at(laid, px(5), px(5))[4], std::uint16_t{0});  // (nothing laid far from it)
+        }
+    }
+
+    // A piece of 600 dpi inks pasted onto a layer with no inks yet: the layer's inks made at the piece's 600 dpi (as a
+    // precise piece's are), each of its pixels laid whole — a pattern of single pixels kept.
+    void finePiecesKeepTheirResolution() {
+        core::Document doc = ink_book();
+        const std::uint32_t w = static_cast<std::uint32_t>(render::mm_to_px(60, 600)), h = static_cast<std::uint32_t>(render::mm_to_px(80, 600));
+        core::InkPixels p = core::blank_ink_pixels(core::InkSpace::Cmyk, 16, w, h);
+        for (std::uint32_t y = 0; y < h; ++y) {
+            for (std::uint32_t x = 0; x < w; ++x) {
+                std::uint16_t* s = p.samples.data() + (std::size_t(y) * w + x) * 5;
+                const auto& colour = (x + y) % 2 == 0 ? kS : kT;  // (a checkerboard of single pixels)
+                std::copy(colour.begin(), colour.end(), s);
+                s[4] = 65535;
+            }
+        }
+        for (auto& layer : doc.edit_page(0).layers)
+            if (layer.id == "pic") layer.ink_raster = std::make_shared<const std::string>(core::encode_ink_raster(p));
+        const auto piece = render::ink_edit::lift_piece(doc.page(0), layer_of(doc, "pic"),
+                                                        Json{{"poly", Json::array({Json::array({10, 10}), Json::array({20, 10}), Json::array({20, 20}), Json::array({10, 20})})}});
+        QVERIFY(piece);
+        const core::Patch patch = render::ink_edit::piece_patch(*piece, *doc.page(0).color);
+        Json one = patch.attrs;
+        one["png"] = core::b64encode(*patch.png);
+        const Json items{{"strokes", Json::array()}, {"patches", Json::array({one})}};
+        const core::Document pasted = run_ops(doc, Json::array({Json{{"op", "add_layer"}, {"page", 1}, {"kind", "paint"}, {"id", "pasted"}},
+                                                                Json{{"op", "paste"}, {"page", 1}, {"layer_id", "pasted"}, {"items", items}}}))
+                                          .doc;
+        const core::InkPixels laid = pixels_of(pasted, "pasted");
+        QCOMPARE(laid.width, w);
+        QCOMPARE(laid.height, h);
+        for (std::uint32_t y = px(14) * 3; y < px(16) * 3; ++y) {
+            for (std::uint32_t x = px(14) * 3; x < px(16) * 3; ++x) {
+                const auto& colour = (x + y) % 2 == 0 ? kS : kT;
+                for (unsigned c = 0; c < 4; ++c) QCOMPARE(at(laid, x, y)[c], colour[c]);
+            }
+        }
+    }
+
     // New paper (set_page_spec): the inks moved onto it, a colour all over the same inks.
     void newPaperKeepsTheInks() {
         const core::Document doc = ink_book();
@@ -455,6 +526,51 @@ private slots:
                 if (p[4] == 65535 && p[0] == kS[0] && p[1] == kS[1] && p[2] == kS[2] && p[3] == kS[3]) ++s_seen;
             }
         QVERIFY(s_seen > 1000);
+    }
+
+    // New paper (set_page_spec): inks at the working 200 dpi moved to the very inks they were before; inks of another
+    // resolution (2 pixels a mm here: a PSD's, put_raster's, resized without resampling) keep it — not taken for 200 dpi —,
+    // each pixel the inks that moved there with the basic frame.
+    void newPaperKeepsTheResolution() {
+        const core::Document doc = ink_book();
+        const core::InkPixels working = pixels_of(run_ops(doc, Json::array({Json{{"op", "set_page_spec"}, {"preset", "b5"}}})).doc, "pic");
+        const std::string working_ref =
+            core::bytes_ref(std::string_view(reinterpret_cast<const char*>(working.samples.data()), working.samples.size() * sizeof(std::uint16_t)));
+        QCOMPARE(working.width, 1638u);
+        QCOMPARE(working_ref, std::string("sha256:141f5b0142aacbdefb7977871b2dfa78caaeeb84b4c0099ec22fbd780311ae5e"));
+        // (60 × 80 mm at 2 pixels a mm: 120 × 160; S at the top right, T at the bottom left, as ink_book's)
+        core::Document coarse = doc;
+        core::InkPixels p = core::blank_ink_pixels(core::InkSpace::Cmyk, 16, 120, 160);
+        for (std::uint32_t y = 0; y < 160; ++y) {
+            for (std::uint32_t x = 0; x < 120; ++x) {
+                std::uint16_t* s = p.samples.data() + (std::size_t(y) * 120 + x) * 5;
+                if (y < 80 && x >= 60) std::copy(kS.begin(), kS.end(), s);
+                if (y >= 80 && x < 60) std::copy(kT.begin(), kT.end(), s);
+                s[4] = (y < 80 || x < 60) ? 65535 : 0;
+            }
+        }
+        for (auto& layer : coarse.edit_page(0).layers) {
+            if (layer.id == "pic") layer.ink_raster = std::make_shared<const std::string>(core::encode_ink_raster(p));
+        }
+        const core::Document moved = run_ops(coarse, Json::array({Json{{"op", "set_page_spec"}, {"preset", "b5"}}})).doc;
+        all_in_inks(moved);
+        const core::InkPixels got = pixels_of(moved, "pic");
+        const double w = moved.page(0).spec.width_mm.value(), h = moved.page(0).spec.height_mm.value();
+        QCOMPARE(got.width, static_cast<std::uint32_t>(std::lround(w * 2)));
+        QCOMPARE(got.height, static_cast<std::uint32_t>(std::lround(h * 2)));
+        const std::string side = coarse.start_side.value_or("");
+        const core::Rect a = coarse.page(0).inner_rect_mm(side), b = moved.page(0).inner_rect_mm(side);
+        const auto there = [&](double x, double y) {
+            const double nx = b.x.value() + (x - a.x.value()) * (b.width / a.width).value();
+            const double ny = b.y.value() + (y - a.y.value()) * (b.height / a.height).value();
+            return at(got, static_cast<std::uint32_t>(nx * 2), static_cast<std::uint32_t>(ny * 2));
+        };
+        for (const auto& [x, y, inks] : {std::tuple{45.0, 20.0, kS}, std::tuple{15.0, 60.0, kT}}) {
+            const std::uint16_t* q = there(x, y);
+            for (unsigned c = 0; c < 4; ++c) QVERIFY2(std::abs(int(q[c]) - int(inks[c])) <= 1, qPrintable(QStringLiteral("(%1, %2) %3: %4").arg(x).arg(y).arg(c).arg(q[c])));
+            QCOMPARE(q[4], std::uint16_t{65535});
+        }
+        QCOMPARE(there(50, 70)[4], std::uint16_t{0});  // (the clear bottom right)
     }
 
     // A picture pasted onto a paint layer (no inks of its own: an RGB picture) is drawn into its inks there and then —

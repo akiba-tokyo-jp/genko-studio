@@ -24,6 +24,7 @@
 #include "core/geometry.hpp"
 #include "core/json.hpp"
 #include "core/model.hpp"
+#include "core/snap.hpp"
 
 class QKeyEvent;
 class QVariantAnimation;
@@ -128,15 +129,45 @@ public:
     };
     void set_selection(std::optional<core::Json> area, std::optional<std::vector<QPointF>> outline = std::nullopt);
     const std::optional<Selection>& selection() const { return selection_; }
-    // How the marquee tool chooses: rect | ellipse | lasso | polyline | wand | color | pen | erase (選択ペン・選択消し).
+    // How the marquee tool chooses: rect | ellipse | lasso | polyline | wand | pen | erase (選択ペン・選択消し).
     QString marquee = QStringLiteral("rect");
     double selection_pen_mm = 4.0;
-    bool quick_mask = false;  // the selection shown in red where it is not, to be painted with the selection pen
+    bool quick_mask = false;  // the page is in Quick Mask (its channel, laid over in its colour, is what the tools paint)
+    // PC3 B1 (ツールの設定 選択範囲ツール): how a new area joins when no key is held (選択方法: replace | add | subtract |
+    // intersect; Shift, Alt and both still choose for one drag), whether an ellipse, a lasso and a polygon are drawn
+    // anti-aliased (a rectangle never is), the feather they are made with (mm), and the rectangle's and ellipse's style
+    // (normal | ratio: 縦横比を固定 | fixed: 固定, its width and height — the ratio's two numbers, or the size in mm).
+    QString select_method = QStringLiteral("replace");
+    bool select_antialias = true;
+    double select_feather_mm = 0;
+    QString marquee_style = QStringLiteral("normal");
+    double style_width = 1;
+    double style_height = 1;
+    // PC3 B3: クイック選択ツール's brush (its diameter, mm) — the marquee's way "quick" —; オブジェクト選択ツール is "object".
+    double quick_size_mm = 4.0;
+    // 表示 → 選択範囲の境界線: the outline (and a mask selection's tint) shown or not; the handles stay.
+    bool show_selection_edges = true;
+    // 選択範囲を変形: the handles move, scale, turn and slant the selection's outline only, not what is in it.
+    bool transform_outline = false;
+    // 再選択: the selection let go last on the page shown (none: none).
+    std::optional<Selection> previous_selection() const;
     // 選択範囲ランチャー (M6, Python's launcher): what is usually done next with a selection, kept just under it (hidden
     // while there is none, while it is dragged or warped). Made by the window; null: none.
     QWidget* launcher = nullptr;
     void place_launcher();
     bool pivot_mode = false;  // 基準位置を動かす: the next press with the marquee tool puts the pivot there
+    // 切り抜きツール (PC3 C-e, canvas_crop.cpp): the box drawn (its middle and size in mm, its turn clockwise in degrees) and
+    // the shape a box drawn or resized keeps (its width over its height; 0: free). Enter: cropRequested, Esc: let go.
+    struct CropBox {
+        QPointF centre;
+        QSizeF size;
+        double angle = 0.0;
+        // The box upright (before its turn), mm.
+        QRectF rect() const { return QRectF(centre.x() - size.width() / 2, centre.y() - size.height() / 2, size.width(), size.height()); }
+    };
+    const std::optional<CropBox>& crop() const { return crop_; }
+    void set_crop(std::optional<CropBox> box);
+    double crop_ratio = 0.0;
     // How a new area joins the selection: Shift adds, Alt takes away, both keep the overlap.
     static QString how_from(Qt::KeyboardModifiers modifiers);
     const QString& selection_how() const { return sel_how_; }
@@ -152,9 +183,43 @@ public:
     // The polyline selection's corners: Enter or a double click closes it; Esc forgets them.
     bool finish_points();
     bool cancel_points();
-    // 図形 (canvas_tools.cpp): line | polyline | curve | rect | ellipse | polygon, and a polygon's corners.
+    // 自由変形 and the warps (canvas_transform.cpp, PC3 C-c): a box over what the window transforms (its box, mm: x0, y0,
+    // x1, y1) taking the mouse and the keys until Enter or Esc. "free": inside moves, a □ scales from the other side
+    // (Shift: the ratio kept), outside turns (Shift: by 15°), Ctrl+□ a corner alone (自由な形に) or a side slid along
+    // itself (ゆがみ), Ctrl+Alt+Shift+corner a corner and its mirror (遠近法); "scale", "rotate", "skew", "distort" and
+    // "perspective" make a drag do only that. "warp": a Bézier mesh's anchors (their handles with them) and handles
+    // dragged, a click marks where a split goes. "puppet": a click puts a pin, a drag moves one, Alt+click takes one out.
+    // "perspective_warp": Layout — the planes' corners dragged (corners that meet move together), a drag on nothing a new
+    // plane; Warp — where the corners go. A drag let go: transformPreview(the spec); Enter: transformCommitted(spec); Esc:
+    // transformCancelled(). The spec is transform_layers' way: {"matrix"} | {"quad"} | {"warp"} | {"puppet": {pins}} |
+    // {"perspective": {planes}}.
+    bool start_transform(const QString& mode, const std::array<double, 4>& box);
+    void finish_transform();
+    void cancel_transform();
+    bool transforming() const;
+    QString transform_mode() const;
+    std::array<double, 4> transform_box() const;
+    core::Json transform_spec() const;
+    // The warp being edited (its normal form, render/layer_transform), set again (a style chosen, a split made); the last
+    // place clicked in the box (where a split goes).
+    core::Json transform_warp() const;
+    void set_transform_warp(const core::Json& warp);
+    std::optional<QPointF> transform_point() const;
+    // Puppet Warp's pins (where each was put, where it is); Perspective Warp's phase (Warp, else Layout) and planes.
+    std::vector<std::pair<QPointF, QPointF>> puppet_pins() const;
+    // (PC3 A5: the pins a smart object's puppet warp filter has, edited again: each where it was put and where it is)
+    void set_puppet_pins(const std::vector<std::pair<QPointF, QPointF>>& pins);
+    void set_perspective_warping(bool on);
+    bool perspective_warping() const;
+    std::vector<std::array<QPointF, 4>> perspective_planes(bool destination) const;
+    void set_perspective_planes(const std::vector<std::array<QPointF, 4>>& src, const std::vector<std::array<QPointF, 4>>& dst);
+    // 図形 (canvas_tools.cpp): line | polyline | curve | rect | ellipse | polygon, and a polygon's corners. The shape
+    // tools (PC3 C-b) add triangle and custom (the custom shape's path: shape_custom, shown fitted into the box dragged;
+    // Shift keeps its proportions) and a star's inner ratio (shape_star: 1 a polygon). Alt draws from the centre.
     QString shape_kind = QStringLiteral("line");
     int shape_sides = 5;
+    double shape_star = 1.0;
+    std::optional<core::vector::Path> shape_custom;
     // 色混ぜ and ゆがみ: the brush's size (mm).
     double blend_mm = 6.0;
     // スポイト: where it picked last (mm) and whether from the drawing layer (color-mode@1: the window reads the inks
@@ -166,8 +231,32 @@ public:
     // The polyline or curve being drawn with 図形 ended (Enter or a double click; closed: Shift+Enter), or forgotten (Esc).
     bool finish_shape(bool closed = false);
     bool cancel_shape();
-    // A tool that draws a line as the pen does: pen, eraser, 色混ぜ (blend), ゆがみ (liquify).
+    // A tool that draws a line as the pen does: pen, eraser, 色混ぜ (blend), ゆがみ (liquify), the retouching brushes.
     static bool is_stroke_tool(const QString& tool);
+    // 修復の道具 (PC3 B4, retouch_tools.cpp): スポット修復ブラシツール (spotheal), 修復ブラシツール (heal), コピースタンプツール
+    // (clone), ヒストリーブラシツール (historybrush); the two that sample a source (heal, clone: Alt+click sets it).
+    static bool is_retouch_tool(const QString& tool);
+    static bool is_clone_tool(const QString& tool);
+    // Their brush's diameter (mm), and the clone source as the window keeps it (コピーソース): where it was set (mm), the
+    // destination paired with it by the first stroke after (調整あり; none: the stroke's own start), how the destination's
+    // offsets map to the source's (W/H, rotation, flips: clone_matrix's), and the overlay — a picture of what is sampled
+    // (its place on the page, mm) shown at the brush as the source lies there, at an opacity, clipped to the brush, hidden
+    // while painting, inverted, by a blend (normal, darken, lighten, difference).
+    double retouch_mm = 5.0;
+    struct CloneShown {
+        std::optional<QPointF> source;
+        std::optional<QPointF> anchor;
+        std::array<double, 4> m{1.0, 0.0, 0.0, 1.0};
+        bool overlay = true;
+        double opacity = 1.0;
+        bool clipped = true;
+        bool auto_hide = true;
+        bool invert = false;
+        QString blend = QStringLiteral("normal");
+        QImage picture;
+        QRectF picture_mm;
+    };
+    CloneShown clone_shown;
     // 線の編集 (the vector tool, canvas_vector.cpp): the lines chosen and the point chosen of the first; cut where clicked
     // (クリックした所で線を切る); edit | widen | narrow | redraw | redraw_width | join | simplify (なぞって直す) and how far
     // from a trace the lines are mended. 線の修正（つまむ）: how far the pinch reaches, the line's ends kept.
@@ -202,8 +291,50 @@ public:
     bool cancel_ruler();
     // Delete with the vector tool: the chosen point, else the chosen lines.
     bool vector_delete();
+    // --- paths (canvas_pen.cpp, PC3 C-a: ペンツール, 曲線ペンツール, パス選択ツール) -------------------------------------
+    // The path the path tools draw on and show: "work" (the work path), "saved:<name>" (a saved path), "mask:<layer id>"
+    // (a layer's vector mask), "shape:<layer id>/<part id>" (a pen layer's shape part, PC3 C-b) — the Paths panel's
+    // choice, or the shape part the path selection tool clicked.
+    QString target_path = QStringLiteral("work");
+    // The shape part on the page under a point (mm; the topmost of the shown pen layers'): its "shape:<layer>/<part>"
+    // target and which of its subpaths, or none.
+    std::optional<std::pair<QString, std::size_t>> shape_part_at(const QPointF& mm) const;
+    // 表示 → ターゲットパス: the target path drawn over the page (always while a path tool is in hand).
+    bool show_target_path = true;
+    // The target path as the page holds it now (none: there is none).
+    std::optional<core::vector::Path> target_path_now() const;
+    // The pen's subpath being drawn ended (closed or open; one anchor alone: forgotten): pathDrawn.
+    bool finish_pen(bool closed = false);
+    bool pen_drawing() const { return !pen_knots_.empty(); }
+    // The pen's last anchor taken back (Backspace while drawing).
+    bool pen_back();
+    // The path selection tool's chosen subpath (its place in the target path); Delete takes it out (pathEdited).
+    std::optional<std::size_t> path_subpath;
+    bool path_delete();
     // The moving layer's picture (QImage and where it sits, mm), given by the window when a layer move starts.
     void set_move_image(const QImage& image, const QRectF& where_mm);
+    // --- 表示 → スナップ・スナップ先 and the move tool's options (PC3 C-d, canvas_snap.cpp) ---------------------------------
+    // Snapping on (スナップ) and what to (スナップ先: the guides — the guide rulers —, the grid — grid_snap —, the layers —
+    // their boxes' edges and middles —, the document's bounds — the paper's edges and middle). The move tool's layers,
+    // the free transform box, the crop tool's box, the shape tools' corners and the pen tools' anchors snap within 8
+    // screen pixels; Ctrl held: not. What they line up with is drawn while the drag lasts (smart guides in magenta).
+    bool snap_on = true;
+    bool snap_guides = true;
+    bool snap_layers = true;
+    bool snap_bounds = true;
+    // The layers' boxes to snap to (x0, y0, x1, y1 mm: the window's, drawn on a worker; none until they are), and the
+    // layers a drag moves (not snapped to).
+    std::function<std::vector<std::pair<std::string, std::array<double, 4>>>()> snap_boxes;
+    std::vector<std::string> snap_moving;
+    // What the last snap lined up with (drawn while the drag lasts).
+    const std::vector<core::snap::Line>& snap_lines() const { return snap_lines_; }
+    // The move tool (移動ツール): 自動選択 (a click picks the layer — or its outermost folder: auto_select_group — showing
+    // there, the topmost; Ctrl+click does when it is off), バウンディングボックスを表示 (the box of what it moves, its □
+    // grabbed: 自由変形 from there). The box is the window's (moving_box); the click asks the window (layerPicked).
+    bool auto_select = false;
+    bool auto_select_group = false;
+    bool show_move_box = false;
+    std::function<std::optional<std::array<double, 4>>()> moving_box;
     // --- the lines (台詞, canvas_lines.cpp) ------------------------------------------------------------------
     // The line chosen: its box shown, and with the select tool its handles.
     std::optional<std::string> selected_line_id;
@@ -319,6 +450,10 @@ signals:
     void frameDrawn(const QVector<QPointF>& points);
     void layerMoveStarted();
     void layerMoved(double dx, double dy);
+    // the move tool (PC3 C-d): 自動選択 asked at a point (mm; group: its outermost folder); the bounding box's □ grabbed
+    // (the window starts 自由変形 for the press to go on in)
+    void layerPicked(double x_mm, double y_mm, bool group);
+    void moveBoxGrabbed();
     void contextMenuAt(const QString& frame_id, const QPoint& global);
     void toolHeld(const QString& tool);
     void omittedChanged(const QStringList& elements);
@@ -331,9 +466,22 @@ signals:
     void selectionDrawn(const genko::core::Json& area, const QString& how);
     void selectionPainted(const QVector<QPointF>& points, bool add);
     void wandRequested(double x_mm, double y_mm);
-    void colourAreaRequested(double x_mm, double y_mm);
+    // マジック消しゴムツール (PC3 B1): a click on the page (mm).
+    void magicEraseRequested(double x_mm, double y_mm);
+    // コピースタンプツール・修復ブラシツール (PC3 B4): Alt+click — the clone source set there (mm).
+    void cloneSourcePicked(double x_mm, double y_mm);
     void selectionTransformed(const QVector<double>& matrix);
     void selectionWarped(const genko::core::Json& warp);
+    // PC3 B3: クイック選択ツール's stroke (mm) and オブジェクト選択ツール's rectangle (mm), and how the area they find joins.
+    void quickSelected(const QVector<QPointF>& points, const QString& how);
+    void objectSelected(const QRectF& box, const QString& how);
+    // the crop tool: its box changed; Enter on it (the box upright, mm, and its turn clockwise in degrees)
+    void cropChanged();
+    void cropRequested(const QRectF& box, double angle);
+    // 自由変形 and the warps (PC3 C-c): a drag of the box let go (preview it), Enter (apply it), Esc.
+    void transformPreview(const genko::core::Json& spec);
+    void transformCommitted(const genko::core::Json& spec);
+    void transformCancelled();
     // the drawing tools: the colour under the eyedropper; the fill tool's click; the area drawn around to fill; the
     // gradient's drag (mm); a figure drawn ({shape, points | box, sides?, closed?}: an add_shape op)
     void colourPicked(const std::array<int, 3>& rgb);
@@ -370,6 +518,12 @@ signals:
     void lineEditRequested(const QString& line_id);
     void lineContextMenu(const QString& line_id, const QPoint& global);
     void textMoved(const QString& line_id, double x_mm, double y_mm);
+    // the paths: a subpath drawn with a pen ({"closed", "knots"} in mm: a set_path's subpath); the target path changed by
+    // the path selection tool (its whole path)
+    void pathDrawn(const genko::core::Json& subpath);
+    void pathEdited(const genko::core::Json& path);
+    // the path selection tool chose another target path (a shape part clicked on the page: PC3 C-b)
+    void targetPathChosen();
 
 protected:
     void paintEvent(QPaintEvent* event) override;
@@ -448,11 +602,54 @@ private:
     std::vector<SelHandle> sel_handles() const;
     std::array<double, 6> sel_matrix(const QPointF& mm) const;
     std::vector<QPointF> marquee_points() const;
+    // The rectangle's or ellipse's other corner from where it started, by the style (縦横比を固定, 固定).
+    QPointF styled_corner(const QPointF& from, const QPointF& to) const;
+    // A drawn polygon as the selection's area: anti-aliased (an ellipse, a lasso, a polygon) and feathered as the tool says.
+    core::Json drawn_area(const core::Json& poly, bool smooth) const;
     void selection_done(const core::Json& area);
     bool marquee_press(const QPointF& pos, const QPointF& mm, Qt::KeyboardModifiers modifiers);
     bool marquee_move(const QPointF& mm, Qt::KeyboardModifiers modifiers, bool pressed);
     bool marquee_release();
     bool marquee_key(QKeyEvent* event);
+    // PC3 B3: クイック選択ツール's stroke and オブジェクト選択ツール's rectangle (canvas_select.cpp)
+    bool smart_press(const QPointF& mm, Qt::KeyboardModifiers modifiers);
+    bool smart_move(const QPointF& mm, bool pressed);
+    bool smart_release();
+    void draw_smart_drag(QPainter& painter) const;
+    // the crop tool (canvas_crop.cpp)
+    struct CropDrag {
+        QString kind;  // new | move | corner | turn
+        QPointF start;
+        CropBox was;
+        int corner = 0;
+    };
+    std::optional<CropBox> crop_;
+    std::optional<CropDrag> crop_drag_;
+    bool crop_press(const QPointF& pos, const QPointF& mm, Qt::KeyboardModifiers modifiers);
+    bool crop_move(const QPointF& mm, Qt::KeyboardModifiers modifiers, bool pressed);
+    bool crop_release();
+    bool crop_key(QKeyEvent* event);
+    void draw_crop(QPainter& painter) const;
+    // 自由変形 and the warps (canvas_transform.cpp): the box's state (null: none) and its handling of the mouse and keys.
+    struct Transforming;
+    std::shared_ptr<Transforming> xform_;
+    bool transform_press(const QPointF& pos, const QPointF& mm, Qt::KeyboardModifiers modifiers);
+    bool transform_move(const QPointF& mm, Qt::KeyboardModifiers modifiers);
+    bool transform_release(const QPointF& mm);
+    bool transform_key(QKeyEvent* event);
+    void draw_transform(QPainter& painter) const;
+    // snapping and the move tool's box (canvas_snap.cpp): the targets now; a point snapped (Ctrl: as it is); the move
+    // that snaps a moving box (Ctrl: none); the lines drawn; the move tool's box and its □
+    std::vector<core::snap::Line> snap_lines_;
+    core::snap::Targets snap_targets() const;
+    double snap_reach() const;
+    QPointF snap_point(const QPointF& mm, Qt::KeyboardModifiers modifiers);
+    QPointF snap_box(const std::array<double, 4>& box, Qt::KeyboardModifiers modifiers);
+    void draw_snap(QPainter& painter) const;
+    std::optional<std::array<double, 4>> move_box_now() const;
+    std::optional<int> move_box_handle(const QPointF& pos) const;
+    void draw_move_box(QPainter& painter) const;
+    std::optional<std::array<double, 4>> move_snap_box_;  // (the moving layers' box as the drag began)
     void draw_frame_numbers(QPainter& painter) const;
     void draw_frame_tool(QPainter& painter) const;
     void draw_polygon_mm(QPainter& painter, const std::vector<QPointF>& points) const;
@@ -476,6 +673,16 @@ private:
     std::vector<QPointF> shape_preview(bool& closed) const;
     void pick_colour(const QPointF& pos);
     void draw_tools(QPainter& painter) const;
+    // the retouching brushes (retouch_tools.cpp): Alt+click sets the clone source (true: taken); the source's cross and
+    // the overlay at the brush
+    bool retouch_press(const QPointF& mm, Qt::KeyboardModifiers modifiers);
+    void draw_retouch(QPainter& painter) const;
+    // the path tools (canvas_pen.cpp): true when the press, move or release was theirs
+    bool path_press(const QPointF& pos, const QPointF& mm, Qt::KeyboardModifiers modifiers);
+    bool path_move(const QPointF& mm, Qt::KeyboardModifiers modifiers);
+    bool path_release();
+    std::optional<core::vector::Path> path_dragged() const;
+    void draw_paths(QPainter& painter) const;
     // 定規, the grid and 3D (canvas_guides.cpp)
     core::Json page_rulers() const;
     // snapped_preview: what the line will become on the rulers (and its symmetry copies), for showing while the pen is
@@ -590,12 +797,28 @@ private:
     std::optional<GuideDrag> guide_drag_;
     bool zoom_out_ = false;
     std::optional<std::pair<QPointF, QPointF>> tool_drag_;  // the layer-move tool (mm)
+    // the path tools (canvas_pen.cpp): the pen's anchors so far (the curvature pen's: its anchors, a corner not smooth),
+    // the anchor whose handles a drag pulls; a subpath or one of its points dragged with the path selection tool
+    std::vector<core::vector::Knot> pen_knots_;
+    bool pen_curve_ = false;
+    std::optional<std::size_t> pen_handle_;
+    struct PathDrag {
+        core::vector::Path path;  // (as it was)
+        std::size_t subpath = 0;
+        int knot = -1;  // (-1: the whole subpath)
+        int part = 0;   // (0 the anchor, 1 its handle in, 2 its handle out)
+        QPointF start;
+        QPointF now;
+        bool copy = false;
+    };
+    std::optional<PathDrag> path_drag_;
     QImage move_image_;
     QRectF move_where_;
     std::optional<FrameDrag> frame_drag_;
     std::vector<QPointF> frame_poly_;
     Qt::KeyboardModifiers modifiers_;
     std::optional<Selection> selection_;
+    std::optional<std::pair<std::string, Selection>> previous_;  // (再選択: the page's id and the selection let go)
     QString sel_how_ = QStringLiteral("replace");
     struct SelDrag {
         QString kind;  // move | scale | rotate | skew | pivot | warp
@@ -610,6 +833,8 @@ private:
     std::vector<QPointF> marquee_stroke_;  // the rectangle's, lasso's or selection pen's drag (mm)
     std::optional<std::pair<QPointF, QPointF>> ellipse_drag_;
     std::vector<QPointF> poly_points_;  // the polyline selection's corners
+    std::vector<QPointF> smart_drag_;   // (PC3 B3: the quick selection's stroke, the object selection's two corners; mm)
+    QString smart_how_;
     std::optional<std::pair<QPointF, QPointF>> shape_drag_;  // 図形 dragged (mm)
     std::vector<QPointF> shape_pts_;                         // 図形's polyline or curve clicked (mm)
     std::vector<QPointF> lasso_fill_;                        // 囲って塗る's drag (mm)

@@ -330,7 +330,7 @@ private slots:
         Studio studio;
         auto* ts = studio.window->tool_settings();
         for (const auto& [tool, title] : {std::pair{"pen", "ペン（B）"}, {"eraser", "消しゴム（E）"}, {"frame", "コマ割り（F）"}, {"select", "選択（V）"},
-                                          {"move", "レイヤー移動（Q）"}, {"zoom", "虫めがね（Z）"}, {"lasso", "範囲選択（M・L・W）"}}) {
+                                          {"move", "移動ツール（Q）"}, {"zoom", "虫めがね（Z）"}, {"lasso", "選択範囲ツール（M・L・W）"}}) {
             studio.window->choose_tool(QString::fromLatin1(tool));
             QCOMPARE(ts->title()->text(), QString::fromUtf8(title));
         }

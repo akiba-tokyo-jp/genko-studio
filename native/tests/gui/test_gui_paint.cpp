@@ -104,11 +104,12 @@ private slots:
             {"act_fill", "塗りつぶし", "G", "線で囲まれた所をクリックで塗ります（隙間閉じ・見る範囲はブラシ パネルで）", true},
             {"act_lassofill", "囲って塗る", "Shift+G", "ドラッグで囲んだ所を塗ります", true},
             {"act_gradient", "グラデーション", "U", "ドラッグの向きに色をなめらかに変えて塗る（選択範囲があればその中だけ）", true},
-            {"act_shape", "図形", "O",
-             "直線・折れ線・曲線・長方形・楕円・多角形を描く（Shift で 45° と正方形。折れ線と曲線はクリックで点、ダブルクリックか Enter で終わり）", true},
+            // (PC3 C-b, the user's decisions 5 and 7: the 図形 is the shape tools' 長方形ツール — test_gui_shapes)
+            {"act_shape", "長方形ツール", "O",
+             "ドラッグで長方形のシェイプを描きます（Shift で正方形、Alt で中心から。モードがピクセルなら直線・折れ線・曲線なども）", true},
             {"act_blend", "色混ぜ", "Shift+B", "ペイントのレイヤーの色をぼかす・指先でのばす・なじませる", true},
-            {"act_liquify", "ゆがみ（指で押す）", "Shift+L", "なぞった所の絵と線を押し流す・縮める・ふくらませる・渦を巻く", true},
-            {"act_point_thinner", "選んだ点を細く", "Ctrl+Alt+[", "線の編集で選んだ制御点のところだけ、線を細くします", false},
+            {"act_liquify", "前方ワープツール", "Shift+L", "なぞった所の絵と線を押し流す・縮める・ふくらませる・渦を巻く", true},
+            {"act_point_thinner", "選んだ点を細く", "Ctrl+Alt+[", "部分選択ツールで選んだ制御点のところだけ、線を細くします", false},  // (PC3 C-b)
             {"act_fill_gaps", "塗り残しを塗る", "",
              "塗った色の間に残った小さなすき間を、同じ色で塗ります。選択範囲があればその中を、無ければなぞった所を", false},
             {"act_swap_colour", "メインとサブの色を入れ替える", "X", "", false},
@@ -255,6 +256,12 @@ private slots:
         Studio s;
         s.brush().set_colour({5, 6, 7});
         s.window->choose_tool(QStringLiteral("shape"));
+        // (PC3 C-b, the user's decision 7: the shape tools draw shape parts by default — シェイプ —; ピクセル draws as the
+        // 図形 of before)
+        auto* shape_mode = s.window->findChild<QComboBox*>(QStringLiteral("shape_mode"));
+        QVERIFY(shape_mode != nullptr);
+        shape_mode->setCurrentIndex(shape_mode->findData(QStringLiteral("pixel")));
+        emit shape_mode->activated(shape_mode->currentIndex());
         auto* kind = s.window->findChild<QComboBox*>(QStringLiteral("shape_kind"));
         auto* style = s.window->findChild<QComboBox*>(QStringLiteral("shape_style"));
         auto* sides = s.window->findChild<QSpinBox*>(QStringLiteral("shape_sides"));
@@ -376,7 +383,8 @@ private slots:
         Studio s;
         const std::vector<Expected> expected = {
             {"act_reshape", "線の修正（つまむ）", "Y", "描いた線をつまんでドラッグすると、その辺りが滑らかに動きます", true},
-            {"act_vector", "線の編集（制御点）", "Shift+Y", "線を選んで制御点を動かす（Alt+クリックで点を足す、Delete で消す、Shift+クリックで 2 本目）", true},
+            // (PC3 C-b, the user's decision 5: 線の編集（制御点） by Photoshop's name)
+            {"act_vector", "部分選択ツール", "Shift+Y", "ペンの線を選んで制御点を動かす（Alt+クリックで点を足す、Delete で消す、Shift+クリックで 2 本目）", true},
             {"act_vector_join", "選んだ 2 本の線をつなぐ", "", "", false},
             {"act_vector_cut", "クリックした所で線を切る", "", "オンの間、線をクリックするとそこで 2 本に分かれます", true},
             {"act_vector_colour", "選んだ線をペンの色にする", "", "", false},
@@ -452,7 +460,7 @@ private slots:
         inject::click_mm(s.canvas(), QPointF(100, 140));
         QVERIFY(s.canvas()->vector_ids.empty());
         s.trigger("act_vector_delete");
-        QVERIFY(s.window->last_notice().startsWith(QStringLiteral("先に「線の編集」")));
+        QVERIFY(s.window->last_notice().startsWith(QStringLiteral("先に「部分選択ツール」")));  // (PC3 C-b: its Photoshop name)
         // なぞって直す: a trace becomes a trace_edit op with the tool's settings
         auto* mode = s.window->findChild<QComboBox*>(QStringLiteral("vector_mode"));
         QVERIFY(mode != nullptr);

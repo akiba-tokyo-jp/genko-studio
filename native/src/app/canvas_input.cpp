@@ -120,7 +120,7 @@ void PageCanvas::update_cursor(std::optional<QPointF> pos) {
         setCursor(blank ? Qt::BlankCursor : Qt::CrossCursor);
     } else if (tool_ == QLatin1String("move")) {
         setCursor(Qt::SizeAllCursor);
-    } else if (tool_ == QLatin1String("picker") || tool_ == QLatin1String("fill")) {
+    } else if (tool_ == QLatin1String("picker") || tool_ == QLatin1String("fill") || tool_ == QLatin1String("magiceraser")) {
         setCursor(Qt::PointingHandCursor);
     } else if (tool_ == QLatin1String("lassofill") || tool_ == QLatin1String("gradient") ||
                tool_ == QLatin1String("reshape") || tool_ == QLatin1String("ruler") || tool_ == QLatin1String("3d") ||
@@ -184,9 +184,19 @@ void PageCanvas::mousePressEvent(QMouseEvent* event) {
     if (page() == nullptr || event->button() != Qt::LeftButton) return;
     if (guide_press(event->position())) return;  // (a guide line pulled from a scale: canvas_scale.cpp)
     const QPointF mm = mm_of(pos);
+    if (transform_press(pos, mm, event->modifiers())) return;  // (自由変形 and the warps' box: canvas_transform.cpp)
     press_pos_ = pos;
+    snap_lines_.clear();
+    snap_moving.clear();  // (the move tool's are given again as its drag starts)
     if (tool_ == QLatin1String("move")) {
+        if (move_box_handle(pos)) {  // (PC3 C-d: バウンディングボックス's □ — 自由変形 from here: canvas_snap.cpp)
+            emit moveBoxGrabbed();
+            if (transform_press(pos, mm, event->modifiers())) return;
+        }
+        // (自動選択, or Ctrl+click when it is off: the layer showing there first)
+        if (auto_select != ((event->modifiers() & Qt::ControlModifier) != 0)) emit layerPicked(mm.x(), mm.y(), auto_select_group);
         tool_drag_ = std::make_pair(mm, mm);
+        move_snap_box_ = moving_box ? moving_box() : std::nullopt;
         emit layerMoveStarted();
         update();
         return;
@@ -210,6 +220,10 @@ void PageCanvas::mousePressEvent(QMouseEvent* event) {
     }
     if (tool_ == QLatin1String("marquee")) {
         marquee_press(pos, mm, event->modifiers());
+        return;
+    }
+    if (tool_ == QLatin1String("crop")) {  // (切り抜きツール: canvas_crop.cpp)
+        crop_press(pos, mm, event->modifiers());
         return;
     }
     if (is_drawing_tool(tool_)) {
@@ -250,6 +264,7 @@ void PageCanvas::mouseMoveEvent(QMouseEvent* event) {
         update();
         return;
     }
+    if (transform_move(mm_of(pos), event->modifiers())) return;
     if (tool_drag_) {
         QPointF mm = mm_of(pos);
         if (event->modifiers() & Qt::ShiftModifier) {  // Shift: straight across, down or at 45°
@@ -257,6 +272,25 @@ void PageCanvas::mouseMoveEvent(QMouseEvent* event) {
             const double angle = std::nearbyint(std::atan2(mm.y() - s.y(), mm.x() - s.x()) / (kPi / 4)) * (kPi / 4);
             const double length = std::hypot(mm.x() - s.x(), mm.y() - s.y());
             mm = QPointF(s.x() + length * std::cos(angle), s.y() + length * std::sin(angle));
+        }
+        if (tool_ == QLatin1String("move")) {  // (PC3 C-d: the layers' box snapped — with Shift, along the way it is held to)
+            std::optional<std::array<double, 4>> box = move_snap_box_;
+            if (!box && !move_image_.isNull()) box = std::array<double, 4>{move_where_.left(), move_where_.top(), move_where_.right(), move_where_.bottom()};
+            if (box) {
+                const QPointF d = mm - tool_drag_->first;
+                QPointF off = snap_box({(*box)[0] + d.x(), (*box)[1] + d.y(), (*box)[2] + d.x(), (*box)[3] + d.y()}, event->modifiers());
+                if (event->modifiers() & Qt::ShiftModifier) {
+                    if (std::abs(d.y()) < 1e-9) {
+                        off.setY(0);
+                    } else if (std::abs(d.x()) < 1e-9) {
+                        off.setX(0);
+                    } else {
+                        off = QPointF(0, 0);
+                    }
+                    std::erase_if(snap_lines_, [&](const core::snap::Line& l) { return l.vertical ? off.x() == 0 : off.y() == 0; });
+                }
+                mm += off;
+            }
         }
         tool_drag_->second = mm;
         update();
@@ -275,6 +309,7 @@ void PageCanvas::mouseMoveEvent(QMouseEvent* event) {
     if (prim_move(pos)) return;
     if (tool_move(mm_of(pos), event->modifiers(), pressed)) return;
     if (tool_ == QLatin1String("marquee") && marquee_move(mm_of(pos), event->modifiers(), pressed)) return;
+    if (tool_ == QLatin1String("crop") && crop_move(mm_of(pos), event->modifiers(), pressed)) return;
     if (tool_ == QLatin1String("select") && pressed && press_pos_) {
         if ((pos - *press_pos_).manhattanLength() > 6) {
             start_pan(last_pos_);
@@ -306,6 +341,11 @@ void PageCanvas::mouseReleaseEvent(QMouseEvent* event) {
         return;
     }
     if (guide_release(event->position())) return;
+    if (!snap_lines_.empty()) {  // (PC3 C-d: what a drag snapped to shows while it lasts)
+        snap_lines_.clear();
+        update();
+    }
+    move_snap_box_.reset();
     if (zoom_drag_) {
         const auto [start, end] = *zoom_drag_;
         zoom_drag_.reset();
@@ -343,6 +383,7 @@ void PageCanvas::mouseReleaseEvent(QMouseEvent* event) {
         request_tiles();
         return;
     }
+    if (event->button() == Qt::LeftButton && transform_release(mm_of(unturned(event->position())))) return;
     if (frame_drag_) {
         press_pos_.reset();
         frame_release();
@@ -360,6 +401,11 @@ void PageCanvas::mouseReleaseEvent(QMouseEvent* event) {
     if (tool_ == QLatin1String("marquee")) {
         press_pos_.reset();
         marquee_release();
+        return;
+    }
+    if (tool_ == QLatin1String("crop")) {
+        press_pos_.reset();
+        crop_release();
         return;
     }
     if (tool_ == QLatin1String("select")) {
@@ -384,6 +430,10 @@ void PageCanvas::mouseDoubleClickEvent(QMouseEvent* event) {
     }
     if (tool_ == QLatin1String("shape") && !shape_pts_.empty()) {
         finish_shape();
+        return;
+    }
+    if ((tool_ == QLatin1String("pathpen") || tool_ == QLatin1String("curvepen")) && pen_drawing()) {
+        finish_pen(false);  // (the pen's subpath ends open: canvas_pen.cpp)
         return;
     }
     if (tool_ == QLatin1String("ruler")) {
@@ -470,6 +520,12 @@ void PageCanvas::hold_modifier(const QString& key, bool down) {
     if ((base == QLatin1String("zoom") || base == QLatin1String("marquee")) && key == QLatin1String("alt")) {
         tool.clear();  // (Alt takes away from the selection there, and zooms out with the magnifier)
     }
+    if ((base == QLatin1String("pathpen") || base == QLatin1String("curvepen") || base == QLatin1String("pathselect")) &&
+        (key == QLatin1String("alt") || key == QLatin1String("ctrl"))) {
+        tool.clear();  // (the path tools' own: Alt breaks a handle, puts a corner, copies)
+    }
+    if (is_clone_tool(base) && key == QLatin1String("alt")) tool.clear();  // (PC3 B4: Alt+click sets the clone source)
+    if (base == QLatin1String("move") && key == QLatin1String("ctrl")) tool.clear();  // (PC3 C-d: Ctrl+click picks the layer there)
     if (const auto own_tool = tool_modifiers.find(base); own_tool != tool_modifiers.end()) {
         // (this tool's own setting wins; Shift switches only when a tool says so)
         if (const auto own = own_tool->second.find(key); own != own_tool->second.end() && !own->second.isEmpty()) {
@@ -480,7 +536,8 @@ void PageCanvas::hold_modifier(const QString& key, bool down) {
         // (not while a line, a selection or its handles are being dragged: the drag ends with the tool it began with)
         const bool dragging = !stroke_.empty() || !marquee_stroke_.empty() || sel_drag_ || ellipse_drag_ || !lasso_fill_.empty() || shape_drag_ ||
                               vector_drag_ || vector_trace_ || reshape_ || tool_drag_ || zoom_drag_ || frame_drag_ || prim_drag_ ||
-                              ruler_drag_ || effect_drag_ || line_drag_ || handle_drag_ || !balloon_stroke_.empty() || panning_;
+                              ruler_drag_ || effect_drag_ || line_drag_ || handle_drag_ || !balloon_stroke_.empty() || panning_ ||
+                              crop_drag_;  // (PC3 C-d: Ctrl held while the crop box is dragged lets it go unsnapped)
         if (!tool.isEmpty() && !held_tool_ && !dragging && tool != tool_) {
             held_tool_ = tool_;
             held_key_ = key;
@@ -517,6 +574,7 @@ void PageCanvas::keyPressEvent(QKeyEvent* event) {
         update_cursor();
         return;
     }
+    if (transform_key(event)) return;  // (Enter: the box's change made; Esc: let go)
     if ((event->key() == Qt::Key_Alt || event->key() == Qt::Key_Control || event->key() == Qt::Key_Shift) && !event->isAutoRepeat()) {
         hold_modifier(event->key() == Qt::Key_Alt ? QStringLiteral("alt") : event->key() == Qt::Key_Control ? QStringLiteral("ctrl")
                                                                                                                : QStringLiteral("shift"),
@@ -527,6 +585,12 @@ void PageCanvas::keyPressEvent(QKeyEvent* event) {
         return;
     }
     if (event->key() == Qt::Key_Escape && cancel_shape()) return;
+    if (pen_drawing() && (event->key() == Qt::Key_Return || event->key() == Qt::Key_Enter || event->key() == Qt::Key_Escape)) {
+        finish_pen(false);  // (the pen's subpath ends open)
+        return;
+    }
+    if (pen_drawing() && (event->key() == Qt::Key_Backspace || event->key() == Qt::Key_Delete) && pen_back()) return;
+    if (tool_ == QLatin1String("pathselect") && (event->key() == Qt::Key_Delete || event->key() == Qt::Key_Backspace) && path_delete()) return;
     if (tool_ == QLatin1String("vector") && (event->key() == Qt::Key_Delete || event->key() == Qt::Key_Backspace) && vector_delete()) return;
     if (tool_ == QLatin1String("ruler") && (event->key() == Qt::Key_Return || event->key() == Qt::Key_Enter)) {
         finish_curve();
@@ -543,6 +607,7 @@ void PageCanvas::keyPressEvent(QKeyEvent* event) {
         return;
     }
     if (marquee_key(event)) return;
+    if (crop_key(event)) return;
     if (event->key() == Qt::Key_Escape && selection_) {
         set_selection(std::nullopt);
         return;
@@ -626,6 +691,10 @@ void PageCanvas::tabletEvent(QTabletEvent* event) {
     }
     const QPointF mm = to_mm(event->position());
     const PenSample sample = tablet_sample(mm.x(), mm.y(), *event);
+    if (type == QEvent::TabletPress && retouch_press(mm, event->modifiers())) {  // (PC3 B4: Alt+tap sets the clone source)
+        event->accept();
+        return;
+    }
     if (type == QEvent::TabletPress) {
         perf::input(event, "tablet_press");
         begin_stroke(QPointF(sample.x_mm, sample.y_mm), sample.pressure, sample.rotation, true);

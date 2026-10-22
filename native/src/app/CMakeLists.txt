@@ -51,6 +51,7 @@ genko_library(genko_app
     main_window.cpp
     main_window_actions.cpp
     main_window_select.cpp
+    select_dialogs.cpp
     main_window_channels.cpp
     main_window_brushes.cpp
     main_window_anim.cpp
@@ -98,6 +99,11 @@ genko_library(genko_app
     adjust_forms_color.cpp
     image_dialogs.cpp
     main_window_adjust.cpp
+    main_window_smart.cpp
+    main_window_page_size.cpp
+    page_size_dialogs.cpp
+    canvas_crop.cpp
+    layer_panel_smart_filters.cpp
     inject.cpp
     review_model.cpp
     ai_link.cpp
@@ -112,6 +118,33 @@ genko_library(genko_app
     main_window_studio.cpp
     test_script.cpp
     app_main.cpp
+    # PC3-0: 編集's clipboard items (split from main_window_select.cpp)
+    main_window_clipboard.cpp
+    # PC3 B3: 賢い選択 (クイック選択・オブジェクト選択・被写体・空・フォーカス領域), 選択とマスク…, マッティング
+    main_window_smart_select.cpp
+    select_mask_window.cpp
+    # PC3 C-a: the path tools, the Paths panel, the paths' and vector masks' commands
+    canvas_pen.cpp
+    paths_panel.cpp
+    main_window_paths.cpp
+    # PC3 B2: 塗りつぶし…・境界線を描く…, レイヤーマスク and the layers chosen, すべてのマスクを統合, 属性's mask
+    fill_dialogs.cpp
+    main_window_masks.cpp
+    layer_panel_masks.cpp
+    mask_panel.cpp
+    # PC3 B4: the retouching tools, コピーソース, コンテンツに応じた塗りつぶし…
+    retouch_tools.cpp
+    clone_source_panel.cpp
+    content_aware_window.cpp
+    # PC3 C-b: the shape tools, the Shapes panel, the shape parts' commands
+    shapes_panel.cpp
+    main_window_shapes.cpp
+    # PC3 C-c: 自由変形 and the warps (the box on the canvas; the window's commands, options bar and dialogs)
+    canvas_transform.cpp
+    main_window_transform.cpp
+    # PC3 C-d: 表示 → スナップ・スナップ先 (the canvas's snapping), the move tool's options, レイヤー → 整列・分布・重ね順・リンク
+    canvas_snap.cpp
+    main_window_align.cpp
     ${GENKO_APP_RESOURCES}
     ${GENKO_APP_FONTS}
   PUBLIC_DEPS genko_core genko_storage genko_render genko_render_ops genko_formats genko_service Qt6::Core Qt6::Gui Qt6::Widgets Qt6::Svg Qt6::Concurrent

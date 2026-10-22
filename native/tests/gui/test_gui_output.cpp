@@ -244,14 +244,18 @@ private slots:
         // their places in Python's menus (among the commands this build has)
         const QStringList file = menu_items(w, QStringLiteral("ファイル"));
         QCOMPARE(file.indexOf(QStringLiteral("書き出し…")), file.indexOf(QStringLiteral("PSD をレイヤーのまま読み込む…")) + 1);
-        QCOMPARE(file.indexOf(QStringLiteral("印刷…")), file.indexOf(QStringLiteral("書き出し…")) + 1);
+        // (PC3 C-a: パスを Illustrator へ… — Photoshop's 書き出し → パスを Illustrator へ… — right after 書き出し…)
+        QCOMPARE(file.indexOf(QStringLiteral("パスを Illustrator へ…")), file.indexOf(QStringLiteral("書き出し…")) + 1);
+        QCOMPARE(file.indexOf(QStringLiteral("印刷…")), file.indexOf(QStringLiteral("書き出し…")) + 2);
         QCOMPARE(file.at(file.indexOf(QStringLiteral("印刷…")) + 1), QStringLiteral("|"));
         const QStringList edit = menu_items(w, QStringLiteral("編集"));
         QCOMPARE(edit.mid(0, 4), (QStringList{QStringLiteral("元に戻す"), QStringLiteral("やり直す"), QStringLiteral("履歴…"), QStringLiteral("|")}));
         const QStringList view = menu_items(w, QStringLiteral("表示"));
         const int guides = view.indexOf(QStringLiteral("仕上がり線・基本枠を表示"));
-        QCOMPARE(view.mid(guides, 4), (QStringList{QStringLiteral("仕上がり線・基本枠を表示"), QStringLiteral("スマホの画面の範囲を表示"),
-                                                   QStringLiteral("目盛りを表示"), QStringLiteral("前のページを透かす（オニオンスキン）")}));
+        // (PC3 B1: 選択範囲の境界線 — Photoshop's 表示 → 表示・非表示 → 選択範囲の境界線 — after 目盛りを表示)
+        QCOMPARE(view.mid(guides, 5), (QStringList{QStringLiteral("仕上がり線・基本枠を表示"), QStringLiteral("スマホの画面の範囲を表示"),
+                                                   QStringLiteral("目盛りを表示"), QStringLiteral("選択範囲の境界線"),
+                                                   QStringLiteral("前のページを透かす（オニオンスキン）")}));
         const QStringList pages = menu_items(w, QStringLiteral("ページ"));
         // (Python's row: 台詞の検索・置換…, 本の形でプレビュー… (M6), 入稿前の点検)
         QCOMPARE(pages.indexOf(QStringLiteral("本の形でプレビュー…")), pages.indexOf(QStringLiteral("台詞の検索・置換…")) + 1);

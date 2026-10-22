@@ -38,6 +38,7 @@
 #include "core/adjust.hpp"
 #include "core/ids.hpp"
 #include "core/pyconv.hpp"
+#include "core/smart.hpp"
 #include "render/ink.hpp"
 #include "render/plugins.hpp"
 #include "render/page.hpp"
@@ -57,6 +58,7 @@ QString kind_name(core::LayerKind kind) {
     case core::LayerKind::Tone: return QStringLiteral("トーン");
     case core::LayerKind::Fill: return QStringLiteral("塗り");
     case core::LayerKind::Adjust: return QStringLiteral("色調補正");
+    case core::LayerKind::Smart: return QStringLiteral("スマートオブジェクト");
     default: return {};
     }
 }
@@ -76,6 +78,7 @@ std::string thumb_state(const core::Layer& layer) {
                       "|" + dump(layer.effect) + "|" + dump(layer.adjust) + "|" + layer.asset.value_or("") + "|" + layer.material_id.value_or("") +
                       "|" + (layer.mask && layer.mask->enabled ? "mask" : "") + "|" + std::to_string(layer.opacity);
     for (const core::Patch& patch : layer.patches) out += "|" + patch.attrs.dump();
+    out += "|" + dump(layer.smart);  // (smart-objects@1: its settings)
     return out;
 }
 
@@ -144,12 +147,19 @@ LayerPanel::LayerPanel(MainWindow* window) : window_(window) {
     list_->setIconSize(QSize(30, 38));
     list_->setItemDelegate(new LayerRow(list_));
     connect(list_, &QListWidget::itemChanged, this, [this](QListWidgetItem* item) { visibility(item); });
-    connect(list_, &QListWidget::itemDoubleClicked, this, [this](QListWidgetItem*) { edit_special(); });
+    connect(list_, &QListWidget::itemDoubleClicked, this, [this](QListWidgetItem* item) {
+        const int kind = row_kind(list_->row(item));  // (PC3 A2: a smart filter's row — its window; the header: nothing)
+        if (kind >= 0) edit_smart_filter(kind);
+        else if (kind == kLayerRow) edit_special();
+    });
+    list_->setContextMenuPolicy(Qt::CustomContextMenu);
+    connect(list_, &QListWidget::customContextMenuRequested, this, [this](const QPoint& at) { smart_filter_menu(at); });
     connect(list_, &QListWidget::currentRowChanged, this, [this](int) { selected(); });
     search_ = new QLineEdit;
     search_->setPlaceholderText(QStringLiteral("レイヤーを探す（名前）"));
     search_->setClearButtonEnabled(true);
     connect(search_, &QLineEdit::textChanged, this, [this](const QString& text) { search(text); });
+    connect(search_, &QLineEdit::returnPressed, this, [this] { choose_found(); });  // (PC3 B2: レイヤーを検索)
     name_ = new QLineEdit;
     name_->setObjectName(QStringLiteral("layer_name"));
     name_->setPlaceholderText(QStringLiteral("レイヤーの名前"));
@@ -283,17 +293,31 @@ LayerPanel::LayerPanel(MainWindow* window) : window_(window) {
     mask_button_ = button(QStringLiteral("マスク ▾"), QStringLiteral("レイヤーの一部を隠す。選択範囲から作り、ペンで見せる所を足し、消しゴムで隠す"),
                           QStringLiteral("layer_mask"));
     mask_menu_ = new QMenu(mask_button_);
-    mask_menu_->addAction(QStringLiteral("選択範囲からマスクを作る"), this, [this] { mask_from_selection(); });
-    mask_menu_->addAction(QStringLiteral("全部見せるマスクを作る"), this, [this] { mask(Json{{"fill", "show"}}); });
+    // (PC3 B2, the user's decision 5: レイヤー → レイヤーマスク by Photoshop's names; マスクを編集する and マスクを反転 Genko's own)
+    mask_menu_->addAction(QStringLiteral("すべての領域を表示"), this, [this] { mask(Json{{"fill", "show"}}); });
+    mask_menu_->addAction(QStringLiteral("すべての領域を隠す"), this, [this] { mask(Json{{"fill", "hide"}}); });
+    mask_menu_->addAction(QStringLiteral("選択範囲外をマスク"), this, [this] { mask_from_selection(); });
+    mask_menu_->addAction(QStringLiteral("選択範囲をマスク"), this, [this] { hide_selection(); });
+    mask_menu_->addAction(QStringLiteral("透明部分から"), this, [this] { mask_from_transparency(); });
+    mask_menu_->addSeparator();
     mask_edit_ = mask_menu_->addAction(QStringLiteral("マスクを編集する（ペンで見せる・消しゴムで隠す）"));
     mask_edit_->setCheckable(true);
     mask_edit_->setProperty("genko_attribute", QStringLiteral("act_mask_edit"));  // (named, as the window's commands: the help finds it by it)
     connect(mask_edit_, &QAction::toggled, this, [this](bool on) { edit_mask(on); });
     mask_menu_->addAction(QStringLiteral("マスクを反転"), this, [this] { mask(Json{{"invert", true}}); });
-    mask_off_ = mask_menu_->addAction(QStringLiteral("マスクを使わない"));
+    mask_menu_->addSeparator();
+    mask_menu_->addAction(QStringLiteral("削除"), this, [this] { mask(Json{{"delete", true}}); });
+    mask_menu_->addAction(QStringLiteral("適用"), this, [this] { apply_mask(); });
+    mask_off_ = mask_menu_->addAction(QStringLiteral("使用しない"));
     mask_off_->setCheckable(true);
     connect(mask_off_, &QAction::toggled, this, [this](bool on) { if (!loading_) mask(Json{{"enabled", !on}}); });
-    mask_menu_->addAction(QStringLiteral("マスクを消す"), this, [this] { mask(Json{{"delete", true}}); });
+    mask_link_ = mask_menu_->addAction(QStringLiteral("リンク"));
+    mask_link_->setCheckable(true);
+    mask_link_->setToolTip(QStringLiteral("マスクをレイヤーと一緒に動かします（外すと、マスクはページに固定）"));
+    connect(mask_link_, &QAction::toggled, this, [this](bool on) {
+        const auto [page, layer] = this->layer();
+        if (!loading_ && layer != nullptr && layer->mask && layer->mask->linked != on) mask(Json{{"linked", on}});
+    });
     mask_button_->setMenu(mask_menu_);
     filter_ = new QComboBox;
     filter_->setObjectName(QStringLiteral("layer_filter"));
@@ -419,9 +443,13 @@ void LayerPanel::refresh_look() {
 
 void LayerPanel::refresh() {
     const core::Page* page = window_->current_page();
+    // (PC3 C-d: the layers chosen together stay chosen after a change of the same page — aligned, linked or moved again)
+    const std::vector<std::string> chosen = page != nullptr && page->id == listed_page_ ? selected_ids() : std::vector<std::string>{};
+    listed_page_ = page != nullptr ? page->id : std::string();
     loading_ = true;
     list_->clear();
     ids_.clear();
+    rows_.clear();
     if (page != nullptr) {
         for (auto it = page->layers.rbegin(); it != page->layers.rend(); ++it) {  // front first
             const core::Layer& layer = *it;
@@ -429,8 +457,23 @@ void LayerPanel::refresh() {
             QStringList marks;
             if (!layer.exportable && layer.role != core::LayerRole::Name && layer.role != core::LayerRole::Draft) marks << QStringLiteral("下描き");
             if (layer.reference) marks << QStringLiteral("参照");
-            if (layer.mask) marks << QStringLiteral("マスク");
+            if (layer.mask) marks << (layer.mask->linked ? QStringLiteral("マスク（リンク）") : QStringLiteral("マスク"));  // (PC3 B2: masks@1)
+            if (layer.shapes && !layer.shapes->items.empty()) marks << QStringLiteral("形 %1").arg(layer.shapes->items.size());  // (pen-shapes@1)
             if (layer.locked) marks << QStringLiteral("ロック");
+            if (layer.lock_position) marks << QStringLiteral("位置ロック");  // (transform@1, PC3 C-d)
+            if (layer.link) {  // (transform@1, PC3 C-d: its link group, by its number when it has one)
+                const QString group = QString::fromStdString(*layer.link);
+                marks << (group.startsWith(QStringLiteral("link-")) ? QStringLiteral("リンク %1").arg(group.mid(5)) : QStringLiteral("レイヤーリンク"));
+            }
+            if (layer.kind == core::LayerKind::Smart) {  // (smart-objects@1: its contents in the book, or a file linked)
+                const core::SmartContents* contents = core::smart::contents_of(window_->book(), layer);
+                marks << (contents != nullptr && contents->link ? QStringLiteral("リンク") : QStringLiteral("埋め込み"));
+                if (contents != nullptr && contents->link) {  // (PC3 A1: the linked file gone, or changed)
+                    const std::string status = window_->link_status(*core::smart::contents_id(layer));
+                    if (status == "missing") marks << QStringLiteral("リンク切れ");
+                    if (status == "modified") marks << QStringLiteral("更新あり");
+                }
+            }
             QString blend;
             const bool correction = layer.kind == core::LayerKind::Adjust && layer.adjust && layer.adjust->is_object();
             const std::string drawn = correction ? core::native_of(*layer.adjust).blend : layer.blend;  // (a correction's: its native's)
@@ -450,11 +493,18 @@ void LayerPanel::refresh() {
             item->setCheckState(layer.visible ? Qt::Checked : Qt::Unchecked);
             list_->addItem(item);
             ids_.push_back(layer.id);
+            rows_.push_back(kLayerRow);
+            if (layer.kind == core::LayerKind::Smart) add_smart_filter_rows(layer, indent);  // (PC3 A2)
         }
     }
     if (const core::Layer* target = window_->target_layer()) {
         const auto at = std::find(ids_.begin(), ids_.end(), target->id);
         if (at != ids_.end()) list_->setCurrentRow(static_cast<int>(at - ids_.begin()));
+    }
+    if (chosen.size() > 1) {
+        for (int row = 0; row < list_->count() && row < static_cast<int>(ids_.size()); ++row)
+            if (row_kind(row) == kLayerRow && std::find(chosen.begin(), chosen.end(), ids_[static_cast<std::size_t>(row)]) != chosen.end())
+                list_->item(row)->setSelected(true);
     }
     loading_ = false;
     search_->setVisible(ids_.size() > 8 || !search_->text().isEmpty());  // (finding a layer by name: a thick page only)
@@ -483,11 +533,19 @@ QIcon LayerPanel::thumbnail(const core::Page& page, const core::Layer& layer) {
     if (layer.kind == core::LayerKind::Folder) return {};
     const bool drawn = layer.stroke_count() > 0 || !layer.patches.empty() || (layer.raster_png && !layer.raster_png->empty()) || layer.color_raster ||
                        layer.ink_raster ||
-                       layer.kind == core::LayerKind::Placed || layer.kind == core::LayerKind::Tone || (layer.fill && core::py_truthy(*layer.fill));
+                       layer.kind == core::LayerKind::Placed || layer.kind == core::LayerKind::Tone || (layer.fill && core::py_truthy(*layer.fill)) ||
+                       layer.kind == core::LayerKind::Smart || (layer.shapes && !layer.shapes->items.empty());
     if (!drawn) return {};
     const std::string key = page.id + "/" + layer.id;
     Thumb made{layer.strokes, layer.raster_png, layer.color_raster, layer.ink_raster, layer.mask ? layer.mask->png : nullptr, {}, thumb_state(layer), {}, {}};
     for (const core::Patch& patch : layer.patches) made.patches.push_back(patch.png);
+    if (layer.shapes && !layer.shapes->items.empty()) {  // (pen-shapes@1: its parts, a list made anew when they change)
+        made.state += "|shapes " + std::to_string(reinterpret_cast<std::uintptr_t>(layer.shapes.get())) + " " +
+                      std::to_string(core::vector::shapes_blob(*layer.shapes).size());
+    }
+    if (const core::SmartContents* contents = core::smart::contents_of(window_->book(), layer)) {  // (its contents as they are now)
+        made.state += "|" + std::to_string(reinterpret_cast<std::uintptr_t>(contents));
+    }
     if (const auto found = thumbs_.find(key); found != thumbs_.end()) {
         const Thumb& was = found->second;
         if (was.strokes == made.strokes && was.raster == made.raster && was.color == made.color && was.ink == made.ink && was.mask == made.mask &&
@@ -566,6 +624,8 @@ void LayerPanel::selected(bool from_list) {
             if (tints()[i].second == Json(*layer->color)) tint = static_cast<int>(i);
     tint_->setCurrentIndex(tint);
     mask_off_->setChecked(layer->mask && !layer->mask->enabled);
+    mask_link_->setChecked(layer->mask && layer->mask->linked);  // (PC3 B2: masks@1)
+    mask_link_->setEnabled(layer->mask.has_value());
     mask_button_->setText(layer->mask ? QStringLiteral("マスク ◐ ▾") : QStringLiteral("マスク ▾"));
     color_prints_->setChecked(layer->color_prints);
     effect_button_->setText(layer->effect && core::py_truthy(*layer->effect) ? QStringLiteral("効果 ✓ ▾") : QStringLiteral("効果 ▾"));
@@ -594,6 +654,7 @@ void LayerPanel::visibility(QListWidgetItem* item) {
     const auto it = std::find_if(page->layers.begin(), page->layers.end(), [&](const core::Layer& l) { return l.id == id; });
     if (it == page->layers.end()) return;
     const bool visible = item->checkState() == Qt::Checked;
+    if (smart_filter_visibility(row, visible)) return;  // (PC3 A2: a smart filter's eye, or all of them)
     if (QApplication::keyboardModifiers() & Qt::AltModifier) {
         solo(id);  // (Alt+クリック: only this one shown; again: all back)
         return;
@@ -673,6 +734,8 @@ void LayerPanel::mask(const Json& change) {
     if (layer == nullptr || loading_) return;
     Json op{{"op", "set_layer_mask"}, {"page", page->index.json()}, {"id", layer->id}};
     op.update(change);
+    // (masks@1, the user's decision: a new mask moves with its layer, as Photoshop's; the masks books have keep their place)
+    if (!layer->mask && !change.contains("delete") && !change.contains("linked")) op["linked"] = true;
     window_->apply_ops(Json::array({op}));
     selected(false);
 }
@@ -680,22 +743,26 @@ void LayerPanel::mask(const Json& change) {
 void LayerPanel::mask_from_selection() {
     const auto area = window_->selection_area();
     if (!area) {
-        window_->flash(QStringLiteral("先に範囲選択（M・L・W）で見せたい所を選びます"), 5000);
+        window_->flash(QStringLiteral("先に選択範囲ツール（M・L・W）で見せたい所を選びます"), 5000);
         return;
     }
     mask(Json{{"area", *area}});
+    window_->canvas()->set_selection(std::nullopt);  // (PC3 B2: made, the selection let go — as Photoshop does)
 }
 
 void LayerPanel::move(int delta) {
-    const auto [page, layer] = this->layer();
-    if (layer == nullptr) return;
-    std::vector<std::string> order;
-    for (const core::Layer& l : page->layers) order.push_back(l.id);
-    const auto i = static_cast<std::ptrdiff_t>(std::find(order.begin(), order.end(), layer->id) - order.begin());
-    const auto j = i + delta;
-    if (j < 0 || j >= static_cast<std::ptrdiff_t>(order.size())) return;
-    std::swap(order[static_cast<std::size_t>(i)], order[static_cast<std::size_t>(j)]);
-    window_->apply_ops(Json::array({Json{{"op", "reorder_layers"}, {"page", page->index.json()}, {"order", order}}}));
+    // (PC3 C-d, decision 5: 前面へ・背面へ among its siblings — a folder with its layers —, the layers chosen together)
+    if (delta != 0) window_->arrange_layers(delta > 0 ? "forward" : "backward");
+}
+
+void LayerPanel::select_ids(const std::vector<std::string>& ids) {
+    loading_ = true;
+    list_->clearSelection();
+    for (int row = 0; row < list_->count() && row < static_cast<int>(ids_.size()); ++row) {
+        if (row_kind(row) != kLayerRow) continue;
+        if (std::find(ids.begin(), ids.end(), ids_[static_cast<std::size_t>(row)]) != ids.end()) list_->item(row)->setSelected(true);
+    }
+    loading_ = false;
 }
 
 void LayerPanel::remove() {
@@ -713,20 +780,24 @@ std::vector<std::string> LayerPanel::selected_ids() const {
     std::sort(rows.begin(), rows.end());
     rows.erase(std::unique(rows.begin(), rows.end()), rows.end());
     std::vector<std::string> out;
-    for (const int row : rows)
-        if (row >= 0 && row < static_cast<int>(ids_.size())) out.push_back(ids_[static_cast<std::size_t>(row)]);
+    for (const int row : rows)  // (a smart filter's row is its smart object's: once)
+        if (row >= 0 && row < static_cast<int>(ids_.size()) && std::find(out.begin(), out.end(), ids_[static_cast<std::size_t>(row)]) == out.end())
+            out.push_back(ids_[static_cast<std::size_t>(row)]);
     return out;
 }
 
 void LayerPanel::search(const QString& text) {
     const core::Page* page = window_->current_page();
     const QString words = text.trimmed().toLower();
+    // (PC3 B2, レイヤーを分離: on its page, only the layers isolated are listed)
+    const bool alone = page != nullptr && !isolated_.empty() && isolated_page_ == page->id;
     for (std::size_t row = 0; row < ids_.size(); ++row) {
         QString label;
         if (page != nullptr)
             for (const core::Layer& l : page->layers)
                 if (l.id == ids_[row]) label = wording::layer_label(l).toLower();
-        if (QListWidgetItem* item = list_->item(static_cast<int>(row))) item->setHidden(!words.isEmpty() && !label.contains(words));
+        const bool apart = alone && std::find(isolated_.begin(), isolated_.end(), ids_[row]) == isolated_.end();
+        if (QListWidgetItem* item = list_->item(static_cast<int>(row))) item->setHidden(apart || (!words.isEmpty() && !label.contains(words)));
     }
 }
 
@@ -881,6 +952,10 @@ void LayerPanel::add_adjust(const std::string& kind) {
 void LayerPanel::edit_special() {
     const auto [page, layer] = this->layer();
     if (layer == nullptr) return;
+    if (layer->kind == core::LayerKind::Smart) {  // (smart-objects@1: レイヤーの内容オプション… — its contents)
+        window_->content_options();
+        return;
+    }
     const auto asked = window_->asking();  // (each dialog's answer applied only to the book it was asked about)
     if (layer->kind == core::LayerKind::Adjust && layer->adjust && layer->adjust->is_object()) {
         const std::string kind = layer->adjust->value("kind", std::string("levels"));
@@ -996,22 +1071,31 @@ void LayerPanel::apply_filter() {
     std::string kind = filter_->currentData().toString().toStdString();
     if (kind == "hue" && adjust_forms::form_kind("hue_saturation") != nullptr) kind = "hue_saturation";
     const auto area = window_->selection_area();
+    // (PC3 A2: on a smart object, a smart filter — kept with its settings, the selection its filter mask)
+    const bool smart = layer->kind == core::LayerKind::Smart;
+    const std::string op_name = smart ? "smart_filter_add" : "filter_raster";
+    if (smart && kind.starts_with(render::plugins::kPrefix)) {
+        window_->flash(QStringLiteral("プラグインのフィルターは、スマートフィルターにできません（ラスタライズしてからかけます）"), 5000, true);
+        return;
+    }
     const QString extra = layer->stroke_count() > 0 ? QStringLiteral("\nペンの線は画像になり、あとから線として消せなくなります。") : QString();
     const QString where = area ? QStringLiteral("の選択範囲の中") : QStringLiteral("全体");
     const auto asked = window_->asking();
-    if (!ask::question(this, QStringLiteral("Genko"),
-                       QStringLiteral("レイヤー「%1」%2に「%3」をかけます。%4\n（元に戻す で取り消せます）").arg(wording::layer_label(*layer), where, label, extra)))
-        return;
+    const QString text = smart ? QStringLiteral("スマートオブジェクト「%1」に「%2」をスマートフィルターとして足します（あとから直せます）。%3\n（元に戻す で取り消せます）")
+                                     .arg(wording::layer_label(*layer), label,
+                                          area ? QStringLiteral("\n選択範囲がフィルターマスクになります。") : QString())
+                               : QStringLiteral("レイヤー「%1」%2に「%3」をかけます。%4\n（元に戻す で取り消せます）").arg(wording::layer_label(*layer), where, label, extra);
+    if (!ask::question(this, QStringLiteral("Genko"), text)) return;
     if (!window_->still(asked)) return;
     const std::string layer_id = layer->id;
     const Json index = page->index.json();
     std::optional<Json> params;
-    const FilterPreview preview = [this, index, layer_id, kind, area](const std::optional<Json>& values) {
+    const FilterPreview preview = [this, index, layer_id, kind, area, op_name](const std::optional<Json>& values) {
         if (!values) {
             window_->preview_ops(std::nullopt);
             return;
         }
-        Json op{{"op", "filter_raster"}, {"page", index}, {"id", layer_id}, {"kind", kind}};
+        Json op{{"op", op_name}, {"page", index}, {"id", layer_id}, {"kind", kind}};
         op.update(*values);
         if (area) op["area"] = *area;
         window_->preview_ops(Json::array({op}));
@@ -1028,7 +1112,7 @@ void LayerPanel::apply_filter() {
         params = filter_params(this, kind, Json::object(), preview, kind == "levels" || kind == "curve" ? histogram(*page, *layer) : std::nullopt);
     }
     if (!params || !window_->still(asked)) return;
-    Json op{{"op", "filter_raster"}, {"page", index}, {"id", layer_id}, {"kind", kind}};
+    Json op{{"op", op_name}, {"page", index}, {"id", layer_id}, {"kind", kind}};
     op.update(*params);
     if (area) op["area"] = *area;
     window_->apply_ops(Json::array({op}));
@@ -1039,7 +1123,7 @@ QIcon LayerPanel::kind_mark(core::LayerKind kind) {
     static const std::map<core::LayerKind, const char*> names{
         {core::LayerKind::Strokes, "kind_strokes"}, {core::LayerKind::Raster, "kind_raster"}, {core::LayerKind::Folder, "kind_folder"},
         {core::LayerKind::Placed, "kind_placed"},   {core::LayerKind::Tone, "kind_tone"},     {core::LayerKind::Fill, "kind_fill"},
-        {core::LayerKind::Adjust, "kind_adjust"}};
+        {core::LayerKind::Adjust, "kind_adjust"},   {core::LayerKind::Smart, "kind_smart"}};
     const theme::Tokens t = theme::tokens();
     const auto found = names.find(kind);
     const QString key = QString::fromLatin1(found != names.end() ? found->second : "kind_other") + t.muted;

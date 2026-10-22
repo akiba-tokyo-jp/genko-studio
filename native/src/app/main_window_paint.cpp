@@ -28,6 +28,7 @@
 #include "render/ink.hpp"
 #include "render/ink_edit.hpp"
 #include "render/page.hpp"
+#include "render/path_raster.hpp"
 #include "render/selection.hpp"
 
 namespace genko::app {
@@ -66,12 +67,13 @@ void MainWindow::build_paint_actions() {
     tool("act_fill", QStringLiteral("塗りつぶし"), "fill", key("G"), QStringLiteral("線で囲まれた所をクリックで塗ります（隙間閉じ・見る範囲はブラシ パネルで）"));
     tool("act_lassofill", QStringLiteral("囲って塗る"), "lassofill", key("Shift+G"), QStringLiteral("ドラッグで囲んだ所を塗ります"));
     tool("act_gradient", QStringLiteral("グラデーション"), "gradient", key("U"), QStringLiteral("ドラッグの向きに色をなめらかに変えて塗る（選択範囲があればその中だけ）"));
-    tool("act_shape", QStringLiteral("図形"), "shape", key("O"),
-         QStringLiteral("直線・折れ線・曲線・長方形・楕円・多角形を描く（Shift で 45° と正方形。折れ線と曲線はクリックで点、ダブルクリックか Enter で終わり）"));
+    // (PC3 C-b, the user's decision 5: the 図形 of before is the shape tools' 長方形ツール — the others: main_window_shapes.cpp)
+    tool("act_shape", QStringLiteral("長方形ツール"), "shape", key("O"),
+         QStringLiteral("ドラッグで長方形のシェイプを描きます（Shift で正方形、Alt で中心から。モードがピクセルなら直線・折れ線・曲線なども）"));
     tool("act_blend", QStringLiteral("色混ぜ"), "blend", key("Shift+B"), QStringLiteral("ペイントのレイヤーの色をぼかす・指先でのばす・なじませる"));
-    tool("act_liquify", QStringLiteral("ゆがみ（指で押す）"), "liquify", key("Shift+L"), QStringLiteral("なぞった所の絵と線を押し流す・縮める・ふくらませる・渦を巻く"));
+    tool("act_liquify", QStringLiteral("前方ワープツール"), "liquify", key("Shift+L"), QStringLiteral("なぞった所の絵と線を押し流す・縮める・ふくらませる・渦を巻く"));
     make("act_point_thinner", QStringLiteral("選んだ点を細く"), [this] { point_width(0.8); }, key("Ctrl+Alt+["),
-         QStringLiteral("線の編集で選んだ制御点のところだけ、線を細くします"));
+         QStringLiteral("部分選択ツールで選んだ制御点のところだけ、線を細くします"));
     make("act_fill_gaps", QStringLiteral("塗り残しを塗る"), [this] { fill_gaps(); }, {},
          QStringLiteral("塗った色の間に残った小さなすき間を、同じ色で塗ります。選択範囲があればその中を、無ければなぞった所を"));
     make("act_swap_colour", QStringLiteral("メインとサブの色を入れ替える"), [this] { colours_->swap(); }, key("X"));
@@ -89,9 +91,18 @@ void MainWindow::build_paint_pages(ToolSettings* ts) {
     shape_kind_->setObjectName(QStringLiteral("shape_kind"));
     for (const auto& [label, key] : {std::pair{QStringLiteral("直線"), QStringLiteral("line")}, {QStringLiteral("折れ線"), QStringLiteral("polyline")},
                                      {QStringLiteral("曲線"), QStringLiteral("curve")}, {QStringLiteral("長方形"), QStringLiteral("rect")},
-                                     {QStringLiteral("楕円"), QStringLiteral("ellipse")}, {QStringLiteral("多角形"), QStringLiteral("polygon")}})
+                                     {QStringLiteral("楕円"), QStringLiteral("ellipse")}, {QStringLiteral("多角形"), QStringLiteral("polygon")},
+                                     {QStringLiteral("三角形"), QStringLiteral("triangle")}, {QStringLiteral("カスタムシェイプ"), QStringLiteral("custom")}})
         shape_kind_->addItem(label, key);
-    connect(shape_kind_, &QComboBox::activated, this, [this](int) { canvas_->shape_kind = shape_kind_->currentData().toString(); });
+    connect(shape_kind_, &QComboBox::activated, this, [this](int) {
+        // (a figure of a shape tool takes that tool: PC3 C-b; 折れ線・曲線 stay the 図形's own)
+        const QString kind = shape_kind_->currentData().toString();
+        if (const QString tool = shape_tool_of(kind); !tool.isEmpty()) {
+            choose_tool(tool);
+        } else {
+            canvas_->shape_kind = kind;
+        }
+    });
     shape_style_ = new QComboBox;
     shape_style_->setObjectName(QStringLiteral("shape_style"));
     for (const auto& [label, key] : {std::pair{QStringLiteral("線"), QStringLiteral("line")}, {QStringLiteral("塗り"), QStringLiteral("fill")},
@@ -109,11 +120,12 @@ void MainWindow::build_paint_pages(ToolSettings* ts) {
     auto* shape_page = new QWidget;
     QFormLayout* shl = form_on(shape_page);
     shl->addRow(QStringLiteral("形"), shape_kind_);
-    shl->addRow(QStringLiteral("描き方"), shape_style_);
+    shl->addRow(QStringLiteral("描き方（ピクセル）"), shape_style_);
     shl->addRow(QStringLiteral("多角形の角"), shape_sides_);
     shl->addRow(QStringLiteral("長方形の角の丸み"), shape_radius_);
-    shl->addRow(hint(QStringLiteral("線の太さと色はペンと同じ。Shift で 45° と正方形。折れ線・曲線はクリックで点を置き、"
+    shl->addRow(hint(QStringLiteral("ピクセルでは線の太さと色はペンと同じ。Shift で 45° と正方形、Alt で中心から。折れ線・曲線はクリックで点を置き、"
                                     "ダブルクリックか Enter で終わり（Shift+Enter で閉じる）。")));
+    build_shape_pages(ts, shl);  // (PC3 C-b: モード, 塗り, 線…, and the pen tools' モード: main_window_shapes.cpp)
     ts->add({QStringLiteral("shape")}, shape_page);
     // 色混ぜ
     blend_mode_ = new QComboBox;
@@ -334,18 +346,47 @@ void MainWindow::lasso_filled(const QVector<QPointF>& points) {
 }
 
 void MainWindow::shape_drawn(const Json& shape) {
+    // (PC3 C-b: the shape tools' シェイプ and パス make a shape part or subpaths — main_window_shapes.cpp —, ピクセル the
+    // 図形 of before)
+    const QString mode = shape_mode_ != nullptr ? shape_mode_->currentData().toString() : QStringLiteral("pixel");
+    if (mode != QLatin1String("pixel")) {
+        shape_part_drawn(shape, mode);
+        return;
+    }
     const core::Layer* layer = paint_layer();
     const core::Page* page = current_page();
     if (layer == nullptr || page == nullptr) return;
     const QString how = shape_style_->currentData().toString();
-    Json op{{"op", "add_shape"}, {"page", page->index.json()}, {"layer_id", layer->id}};
-    for (const auto& [key, value] : shape.items()) op[key] = value;
-    op["line"] = how == QLatin1String("line") || how == QLatin1String("both");
-    op["fill"] = how == QLatin1String("fill") || how == QLatin1String("both");
-    op["width_mm"] = canvas_->brush_width_mm;
-    op["rgb"] = pen_.rgb;
-    if (shape.value("shape", std::string()) == "rect" && shape_radius_->value() != 0.0) op["radius_mm"] = shape_radius_->value();
-    apply_ops(Json::array({op}));
+    const std::string kind = shape.value("shape", std::string());
+    Json figures = Json::array({shape});
+    if (kind == "triangle") {
+        figures[0]["shape"] = "polygon";
+        figures[0]["sides"] = 3;
+    } else if (kind == "custom" || (kind == "polygon" && shape_star_ != nullptr && shape_star_->value() < 100)) {
+        // (the custom shape and the star: their outlines as closed polylines, one a subpath)
+        const auto path = figure_path(shape);
+        if (!path) return;
+        figures = Json::array();
+        for (const auto& line : render::path_raster::flatten_path(*path, 0.05)) {
+            Json points = Json::array();
+            for (const auto& [x, y] : line.pts) points.push_back(Json::array({core::py_round(x, 3), core::py_round(y, 3)}));
+            if (points.size() >= 3) figures.push_back(Json{{"shape", "polyline"}, {"points", points}, {"closed", true}});
+        }
+    }
+    Json ops = Json::array();
+    for (const Json& figure : figures) {
+        Json op{{"op", "add_shape"}, {"page", page->index.json()}, {"layer_id", layer->id}};
+        for (const auto& [key, value] : figure.items()) {
+            if (key != "keep_aspect") op[key] = value;
+        }
+        op["line"] = how == QLatin1String("line") || how == QLatin1String("both");
+        op["fill"] = how == QLatin1String("fill") || how == QLatin1String("both");
+        op["width_mm"] = canvas_->brush_width_mm;
+        op["rgb"] = pen_.rgb;
+        if (figure.value("shape", std::string()) == "rect" && shape_radius_->value() != 0.0) op["radius_mm"] = shape_radius_->value();
+        ops.push_back(op);
+    }
+    if (!ops.empty()) apply_ops(ops);
 }
 
 void MainWindow::gradient(const QPointF& from, const QPointF& to) {
@@ -380,7 +421,7 @@ void MainWindow::fill_gaps() {
         brush_->lasso_mode->setCurrentIndex(std::max(0, brush_->lasso_mode->findData(QStringLiteral("gaps"))));
         choose_tool(QStringLiteral("lassofill"));
         flash(QStringLiteral("塗り残しの所をなぞると、そこだけ塗ります（囲って塗る・なぞった所の塗り残し）。"
-                             "レイヤー全体なら、先にすべて選択（Ctrl+A）してから"),
+                             "レイヤー全体なら、先にすべてを選択（Ctrl+A）してから"),
               6000);
         return;
     }

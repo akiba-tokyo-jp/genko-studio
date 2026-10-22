@@ -40,6 +40,15 @@ public:
     void boolean(std::string_view key, bool value);
     void object(std::string_view key, const Writer& value, std::string_view class_id);
     void raw(std::string_view key, std::string_view bytes);
+    // (PC3 A3) a list of doubles (VlLs of doub: a placed layer's Trnf), and an object array whose items are lists of
+    // unit floats (ObAr: a custom warp's meshPoints) — `count` the items of each list.
+    void numbers(std::string_view key, const std::vector<double>& values);
+    void object_array(std::string_view key, std::uint32_t count, std::string_view class_id,
+                      const std::vector<std::pair<std::string, std::vector<double>>>& lists, std::string_view unit);
+    // (PC3 C-b) a list of objects (VlLs of Objc: a gradient's stops, a shape's originations), each its class id and its
+    // items; and a list of unit floats (VlLs of UntF: a shape stroke's dashes).
+    void objects(std::string_view key, const std::vector<std::pair<std::string, Writer>>& items);
+    void units(std::string_view key, std::string_view unit, const std::vector<double>& values);
     // The class structure (an empty name, the class id), its count and items.
     std::string structure(std::string_view class_id) const;
     // A versioned descriptor: version 16, then the structure.
@@ -80,13 +89,14 @@ struct Value {
     std::string type;
     std::u16string text;              // TEXT
     std::int64_t integer = 0;         // long, comp
-    double number = 0.0;              // doub, UntF, UnFl
+    double number = 0.0;              // doub, UntF; UnFl: its first value
     std::string unit;                 // UntF, UnFl
+    std::vector<double> numbers;      // UnFl (a unit and a list of doubles)
     bool boolean = false;             // bool
     std::string enum_type;            // enum
     std::string enum_value;           // enum; type and GlbC: the class id
-    std::shared_ptr<Object> object;   // Objc, GlbO
-    std::string raw;                  // tdta, alis
+    std::shared_ptr<Object> object;   // Objc, GlbO, ObAr (its lists of unit floats)
+    std::string raw;                  // tdta, alis, Pth
     std::vector<Value> list;          // VlLs
     // A number of any of the number types (long, comp, doub, UntF, UnFl); none for another type.
     std::optional<double> numeric() const;

@@ -32,6 +32,7 @@
 #include "core/paths.hpp"
 #include "core/pyconv.hpp"
 #include "core/pyops.hpp"
+#include "core/smart.hpp"
 #include "formats/checks.hpp"
 #include "render/page.hpp"
 #include "service/atari.hpp"
@@ -1092,7 +1093,22 @@ void PanelView::adopt() {
     if (page == nullptr || !cand || !frame_id) return;
     const std::string to = at(at(*cand, "origin"), "tool_id") == Json("genko:lineart") ? "ink" : "art";
     const Json ops = Json::array({Json{{"op", "adopt_candidate"}, {"page", page->index.json()}, {"frame_id", *frame_id}, {"candidate_id", at(*cand, "id")}, {"to", to}}});
-    if (window_->apply_ops(ops)) emit changed();
+    if (!window_->apply_ops(ops)) return;
+    // (smart-objects@1, PC3 A1: a picture placed in the panel with 画像を読み込む… is a smart object, which the candidate does
+    // not replace — said, so the two are not left on each other unseen)
+    QStringList kept;
+    if (const core::Page* now = window_->current_page()) {
+        for (const core::Layer& layer : now->layers) {
+            const core::SmartContents* contents = layer.kind == core::LayerKind::Smart ? core::smart::contents_of(window_->book(), layer) : nullptr;
+            if (contents != nullptr && contents->kind == "file" && layer.frame_id == *frame_id) kept << QString::fromStdString(layer.title.empty() ? layer.id : layer.title);
+        }
+    }
+    if (!kept.isEmpty()) {
+        window_->flash(QStringLiteral("候補を採用しました。このコマには「画像を読み込む…」で置いたスマートオブジェクト（%1）が残っています（重なって見えるときはレイヤーを消すか隠します）")
+                           .arg(kept.join(QStringLiteral("・"))),
+                       8000);
+    }
+    emit changed();
 }
 
 void PanelView::send_instruction() {

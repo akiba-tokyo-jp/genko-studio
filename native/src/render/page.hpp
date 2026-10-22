@@ -79,6 +79,9 @@ struct RenderOptions {
     // channels laid over the picture in their colours (their ids).
     std::optional<std::vector<bool>> planes;
     std::vector<std::string> overlays;
+    // smart-objects@1 (render/smart.hpp): a smart object's contents page — its layers alone over nothing ("RGBA"): no paper,
+    // panels' borders, lines, nombres, effect lines, guides or marks (render_contents).
+    bool contents = false;
 };
 
 struct RenderResult {
@@ -126,6 +129,11 @@ core::InkPixels composite_ink_layers(const core::Page& page, const std::vector<c
 RenderResult render_page(const core::Page& page, int dpi, const RenderOptions& options = {},
                          const core::Document* episode = nullptr);
 
+// smart-objects@1 (render/smart.hpp): a smart object's contents page drawn as its layers alone (RenderOptions::contents):
+// "RGBA" over nothing, with (precise) the values of a page in precise colour, its alpha the layers'. A part of it as the
+// whole cut there; never in tiles, never its channels.
+RenderResult render_contents(const core::Page& page, int dpi, const RenderOptions& options, const core::Document* episode = nullptr);
+
 // One panel, cut from the page (bleed panels with their bleed). core::Error("key") for a frame that is not there.
 Image render_frame(const core::Page& page, std::string_view frame_id, int dpi, const RenderOptions& options = proof_options(),
                    const core::Document* episode = nullptr);
@@ -138,6 +146,10 @@ Image render_spread(const core::Document& episode, const core::Num& first, const
 // panels, its mask or its opacity (the onion skin and the light table).
 Image cel_image(const core::Page& page, const core::Layer& layer, int dpi, const core::Document* episode = nullptr);
 
+// layer_image over `area` of the page's pixels at `dpi` only: the same pixels as the whole picture cut there (its effects
+// drawn as far as they reach into it). What Auto-Select looks at round a point (independent review A P2-3).
+Image layer_image_over(const core::Page& page, const core::Layer& layer, int dpi, const Box& area, const core::Document* episode = nullptr,
+                       bool skip_unported = false);
 // One layer alone over a transparent page (its pixels, fills and lines, panel clip and mask).
 Image layer_image(const core::Page& page, const core::Layer& layer, int dpi, const core::Document* episode = nullptr,
                   bool skip_unported = false, bool bake_color = false);
@@ -166,6 +178,19 @@ struct PageLayer {
     std::string blend = "normal";
     bool clip = false;
     std::optional<Image> mask;
+    // (PC3 A3) the page layer it is the picture of (empty: none, the paper, fills, lines, panels…), and — a smart object's
+    // picture (one that draws as a layer of its own too) — that smart object, the page's: a PSD writes it as a placed
+    // layer of its contents.
+    std::string id;
+    const core::Layer* smart = nullptr;
+    // vector@1 (PC3 C-a): the layer's vector mask (a PSD writes it as its vmsk block; a picture of the layer lays it on its
+    // alpha when it is on, as the mask)
+    std::optional<core::vector::VectorMask> vector_mask;
+    // pen-shapes@1 (PC3 C-b): a pen layer's shape part — a PSD writes it as a shape layer (render/psd_shapes), `image`
+    // its look —; and the group a pen layer of parts and lines is written as: "end" (below its layers: the group's end) and
+    // "group" (above them: the group with the layer's name and settings), no picture of their own.
+    const core::vector::ShapePart* shape = nullptr;
+    std::string section;
 };
 
 // psd.page_layers(page, episode, dpi), bottom to top: the paper, the page's fills, each visible exported pixel layer
@@ -176,10 +201,12 @@ struct PageLayer {
 // 8-bit picture.) `line_layers` (PSD-01, the editable PSD): each placed line is handed to it, in its place among the
 // layers, instead of being given as a layer of its own. `adjust_layers` (PC2, the user's decision 5: the PSD's adjustment
 // layers): each correction layer shown is handed to it in its place among the layers (Python's leaves them out: their
-// change is in the merged picture only).
+// change is in the merged picture only). A pen layer with shape parts (pen-shapes@1, PC3 C-b) is given in its place:
+// with `shapes` (a PSD) as a shape layer of its one part or as a group of its pictures, parts and lines
+// (render/psd_shapes' plan), else (and where a group would not show it the same) as one layer of its look.
 void page_layers(const core::Page& page, const core::Document& episode, int dpi, const std::function<void(PageLayer&&)>& each,
                  const std::function<void(const core::StoryLine&)>* line_layers = nullptr,
-                 const std::function<void(const core::Layer&)>* adjust_layers = nullptr);
+                 const std::function<void(const core::Layer&)>* adjust_layers = nullptr, bool shapes = false);
 
 // Pure black and white: grey above `threshold` is white; with `screen` the greys become a pattern (dot, line, cross or
 // noise; 書き出しでのトーン化).

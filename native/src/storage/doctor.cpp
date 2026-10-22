@@ -76,6 +76,7 @@ Json doctor(const fs::path& dir) {
                 check_asset(store, get(layer, "asset"), ".png", where, problems);
                 check_asset(store, get(layer, "strokes_blob"), ".strokes.json", where, problems);
                 if (version < 4) continue;
+                check_asset(store, get(layer, "shapes_blob"), ".shapes.json", where + " shapes", problems);  // (pen-shapes@1)
                 if (const Json* mask = get(layer, "mask")) check_asset(store, get(*mask, "asset"), ".png", where + " mask", problems);
                 if (const Json* patches = get(layer, "patches"); patches != nullptr && patches->is_array()) {
                     for (const Json& patch : *patches) {

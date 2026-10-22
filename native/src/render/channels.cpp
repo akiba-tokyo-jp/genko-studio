@@ -17,6 +17,7 @@
 #include "render/op_limits.hpp"
 #include "render/png.hpp"
 #include "render/raster.hpp"
+#include "render/shape_parts.hpp"
 
 namespace genko::render::channels {
 
@@ -619,7 +620,7 @@ bool ChannelLending::take_back(core::Document& doc) const {
     page.layers.erase(lent);
     const std::size_t index = core::channel_index(page, channel_id_);
     if (index >= page.channels.size()) return false;
-    if (layer.stroke_count() > 0 || !layer.patches.empty()) raster::bake_vectors(page, layer);
+    if (layer.stroke_count() > 0 || !layer.patches.empty() || shape_parts::any(layer)) raster::bake_vectors(page, layer);
     // what the op changed, at 200 dpi: each pixel's density after it, and whether it changed
     const std::size_t n = std::size_t(lent_size_.width) * lent_size_.height;
     std::vector<std::uint8_t> changed(n, 0);
@@ -751,7 +752,7 @@ void PlateKeep::restore(core::Document& doc) const {
         return;
     }
     // (8-bit pixels: the layer's lines and pictures drawn into them first, before and after)
-    if (layer.stroke_count() > 0 || !layer.patches.empty()) raster::bake_vectors(page, layer);
+    if (layer.stroke_count() > 0 || !layer.patches.empty() || shape_parts::any(layer)) raster::bake_vectors(page, layer);
     if (!layer.raster_png || layer.raster_png->empty()) return;
     const Image now = open_image(*layer.raster_png, kPillowOpenLimits).convert("RGBA");
     Image was = raster::layer_pixels(page, before).convert("RGBA");

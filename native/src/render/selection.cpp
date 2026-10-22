@@ -1,6 +1,7 @@
 #include "render/selection.hpp"
 
 #include <algorithm>
+#include <atomic>
 #include <cmath>
 #include <set>
 #include <string>
@@ -16,11 +17,16 @@
 #include "core/pynum.hpp"
 #include "core/pyops.hpp"
 #include "core/strokes.hpp"
+#include "render/area_kinds.hpp"
 #include "render/channels.hpp"
 #include "render/draw.hpp"
+#include "render/layer_masks.hpp"
 #include "render/op_limits.hpp"
 #include "render/page.hpp"
+#include "render/path_trace.hpp"
 #include "render/png.hpp"
+#include "render/select_color.hpp"
+#include "render/shape_parts.hpp"
 #include "render/warp.hpp"
 
 namespace genko::render::selection {
@@ -117,6 +123,16 @@ Image open_picture(const std::string& bytes) {
     }
 }
 
+namespace {
+
+std::atomic<int> g_grey_area_stretch{static_cast<int>(Resample::Bilinear)};
+
+}  // namespace
+
+Resample grey_area_stretch() { return static_cast<Resample>(g_grey_area_stretch.load()); }
+
+void set_grey_area_stretch(Resample resample) { g_grey_area_stretch.store(static_cast<int>(resample)); }
+
 AreaMask area_mask(const Json& area, int dpi, std::string_view what) {
     if (!area.is_object()) no_get(area);
     if (core::truthy_at(area, "poly")) {
@@ -157,7 +173,18 @@ AreaMask area_mask(const Json& area, int dpi, std::string_view what) {
     const double w = std::max(1.0, core::py_round_whole(mm2px(box[2], dpi)));
     const double h = std::max(1.0, core::py_round_whole(mm2px(box[3], dpi)));
     limits::check_sides(w, h, what);
-    Image sized = image.resize(Size{static_cast<int>(w), static_cast<int>(h)}, Resample::Nearest);
+    // (PC3 B-0: a grey picture — an anti-aliased or feathered selection's — stretched bilinear, its grey edge staying
+    // smooth at the patches' 300 dpi and a precise page's finer grid; a two-valued one stays hard, as Photoshop keeps a
+    // selection made without anti-aliasing, pixel for pixel what it was)
+    bool grey = false;
+    for (const char v : image.tobytes()) {
+        const auto u = static_cast<unsigned char>(v);
+        if (u != 0 && u != 255) {
+            grey = true;
+            break;
+        }
+    }
+    Image sized = image.resize(Size{static_cast<int>(w), static_cast<int>(h)}, grey ? grey_area_stretch() : Resample::Nearest);
     const double x0 = rounded_corner(mm2px(box[0], dpi), what);
     const double y0 = rounded_corner(mm2px(box[1], dpi), what);
     return AreaMask{std::move(sized), static_cast<std::int64_t>(x0), static_cast<std::int64_t>(y0)};
@@ -363,13 +390,85 @@ std::pair<std::optional<core::Patch>, std::optional<core::Patch>> split_patch(co
     return {std::move(outside), std::move(inside)};
 }
 
+// pen-shapes@1 (PC3 C-b): an area's outline as a path in mm — its polygon, or its mask's outline traced at the
+// selection's 200 dpi within half a pixel.
+core::vector::Path area_outline(const Json& area) {
+    namespace vec = core::vector;
+    if (area.is_object() && core::truthy_at(area, "poly")) {
+        vec::Subpath s;
+        for (const auto& [x, y] : poly_points(area["poly"], "area")) s.knots.push_back(vec::Knot::corner(x, y));
+        vec::Path out;
+        if (s.knots.size() >= 3) out.subpaths.push_back(std::move(s));
+        return out;
+    }
+    const AreaMask m = area_mask(area, kSelDpi);
+    const std::string bytes = m.mask.tobytes();
+    std::vector<float> values(bytes.size());
+    for (std::size_t i = 0; i < bytes.size(); ++i) values[i] = static_cast<unsigned char>(bytes[i]) / 255.0f;
+    const int x0 = static_cast<int>(m.x0), y0 = static_cast<int>(m.y0);
+    const double k = 25.4 / kSelDpi;
+    return path_trace::trace_mask(values, path_raster::PixelBox{x0, y0, x0 + m.mask.width(), y0 + m.mask.height()}, 0.0f, 0.5)
+        .transformed({k, 0.0, 0.0, k, 0.0, 0.0});
+}
+
+// The layer's shape parts that stay, those lifted added to `in`: a part wholly inside the area goes whole, one wholly
+// outside stays, one the area's edge crosses is cut in two along it (render/shape_parts cut, baked: the lifted half a new
+// id); an open or inverted part, which has no inside to cut, goes whole when most of its anchors are inside.
+std::vector<core::vector::ShapePart> lift_parts(const core::Layer& layer, const Json& area, AreaTest& test, Items& in) {
+    namespace vec = core::vector;
+    constexpr double kSliver = 0.002;  // (mm²: about a twelfth of a pixel at 200 dpi — nothing of it on that side)
+    std::vector<vec::ShapePart> kept;
+    std::optional<vec::Path> outline;
+    std::set<std::string> ids;
+    for (const vec::ShapePart& part : layer.shapes->items) ids.insert(part.id);
+    for (const vec::ShapePart& part : layer.shapes->items) {
+        if (part.path.empty()) {
+            kept.push_back(part);
+            continue;
+        }
+        if (!shape_parts::closed(part.path) || part.path.inverted) {
+            std::size_t inside = 0, all = 0;
+            for (const vec::Subpath& s : part.path.subpaths) {
+                for (const vec::Knot& k : s.knots) {
+                    ++all;
+                    if (test.contains(k.anchor.x, k.anchor.y)) ++inside;
+                }
+            }
+            (all > 0 && inside * 2 >= all ? in.shapes : kept).push_back(part);
+            continue;
+        }
+        if (!outline) outline = area_outline(area);
+        const auto [inner, outer] = shape_parts::shares(part.path, *outline);
+        if (outer <= kSliver) {
+            in.shapes.push_back(part);
+            continue;
+        }
+        if (inner <= kSliver) {
+            kept.push_back(part);
+            continue;
+        }
+        vec::ShapePart lifted = part, left = part;
+        lifted.path = shape_parts::cut(part.path, *outline, true);
+        left.path = shape_parts::cut(part.path, *outline, false);
+        lifted.live.reset();
+        left.live.reset();
+        do {
+            lifted.id = core::new_id();
+        } while (ids.contains(lifted.id));
+        ids.insert(lifted.id);
+        if (!lifted.path.empty()) in.shapes.push_back(vec::part_from_json(vec::to_json(lifted)));
+        if (!left.path.empty()) kept.push_back(vec::part_from_json(vec::to_json(left)));
+    }
+    return kept;
+}
+
 }  // namespace
 
 Items lift(core::Layer& layer, const Json& area, const core::Page& page) {
     // (color-model@1: an RGB page of a profile's paint pixels are its values: the picture lifted says so)
     const bool page_values = core::holds_page_values(page, layer);
-    if (layer.color_raster)
-        core::not_yet_ported("selection edits on high-precision raster pixels are not supported yet");
+    // (PC3 B2: a precise layer's own pixels are lifted as a piece that keeps their samples, color_edit::lift_piece; its
+    // lines and pictures here)
     AreaTest test(area);
     Items in;
     std::vector<core::StrokePtr> strokes_out;
@@ -408,11 +507,51 @@ Items lift(core::Layer& layer, const Json& area, const core::Page& page) {
     }
     layer.strokes = core::make_strokes(std::move(strokes_out));
     layer.patches = std::move(patches_out);
+    if (shape_parts::any(layer)) layer.shapes = core::vector::make_shapes(lift_parts(layer, area, test, in));
     return in;
 }
 
-void drop(core::Layer& layer, Items items, const Matrix& m, bool fresh_ids, Resample resample) {
+namespace {
+
+// pen-shapes@1 (PC3 C-b): the parts put on the layer (each through `move`): a pen layer's parts, an id it has already
+// given a new one; on a layer that is not a pen layer, their pictures as patches.
+void drop_parts(core::Layer& layer, std::vector<core::vector::ShapePart> parts, bool fresh_ids, const core::Page* page,
+                const std::function<core::vector::ShapePart(const core::vector::ShapePart&)>& move) {
+    namespace vec = core::vector;
+    if (parts.empty()) return;
+    std::vector<vec::ShapePart> out = layer.shapes->items;
+    std::set<std::string> ids;
+    for (const vec::ShapePart& p : out) ids.insert(p.id);
+    for (const vec::ShapePart& part : parts) {
+        vec::ShapePart moved = vec::part_from_json(vec::to_json(move(part)));
+        if (layer.kind != core::LayerKind::Strokes) {
+            if (auto patch = shape_parts::as_patch(page, moved)) {
+                if (fresh_ids) patch_set(*patch, "id", core::new_id());
+                layer.patches.push_back(std::move(*patch));
+            }
+            continue;
+        }
+        if (fresh_ids || ids.contains(moved.id)) {
+            do {
+                moved.id = core::new_id();
+            } while (ids.contains(moved.id));
+        }
+        ids.insert(moved.id);
+        out.push_back(std::move(moved));
+    }
+    if (layer.kind == core::LayerKind::Strokes) {
+        if (out.size() > vec::kShapePartsMax) throw core::OpError("a pen layer holds at most " + std::to_string(vec::kShapePartsMax) + " shape parts");
+        layer.shapes = vec::make_shapes(std::move(out));
+    }
+}
+
+}  // namespace
+
+void drop(core::Layer& layer, Items items, const Matrix& m, bool fresh_ids, Resample resample, const core::Page* page) {
     const bool identity = m == kIdentity;  // (-0.0 is 0.0 here, as in Python's tuple comparison)
+    drop_parts(layer, std::move(items.shapes), fresh_ids, page, [&](const core::vector::ShapePart& part) {
+        return identity ? part : shape_parts::transformed(part, {m[0], m[1], m[2], m[3], m[4], m[5]}, true);
+    });
     std::vector<core::StrokePtr> strokes = layer.strokes->items;
     for (const core::StrokePtr& stroke : items.strokes) {
         if (!identity) {
@@ -436,7 +575,13 @@ void drop(core::Layer& layer, Items items, const Matrix& m, bool fresh_ids, Resa
     }
 }
 
-void drop_warped(core::Layer& layer, Items items, const WarpFunction& go, Resample resample) {
+void drop_warped(core::Layer& layer, Items items, const WarpFunction& go, Resample resample, const core::Page* page) {
+    drop_parts(layer, std::move(items.shapes), false, page, [&](const core::vector::ShapePart& part) {
+        core::vector::ShapePart bent = part;
+        bent.path = shape_parts::bent(part.path, go);
+        bent.live.reset();
+        return bent;
+    });
     std::vector<core::StrokePtr> strokes = layer.strokes->items;
     for (const core::StrokePtr& stroke : items.strokes) {
         strokes.push_back(std::make_shared<const core::Stroke>(warp::warp_stroke(*stroke, go)));
@@ -487,6 +632,17 @@ Items items_from_json(const Json& data) {
             (after ? patch.after_asset : patch.attrs)[key] = value;
         }
         items.patches.push_back(std::move(patch));
+    }
+    // (pen-shapes@1, PC3 C-b: a pen layer's shape parts, as a layer keeps them)
+    if (const Json* shapes = core::get(data, "shapes"); shapes != nullptr && !shapes->is_null()) {
+        if (!shapes->is_array()) throw core::OpError("items' shapes is a list of shape parts");
+        for (const Json& item : *shapes) {
+            try {
+                items.shapes.push_back(core::vector::part_from_json(item));
+            } catch (const core::Error& error) {
+                throw core::OpError(std::string("items' shapes: ") + error.what());
+            }
+        }
     }
     return items;
 }
@@ -614,6 +770,8 @@ void floodfill_l(Image& image, int x, int y, int value) {
 
 // selops._colour_area: the colour found at a point of the page as seen
 Image colour_area(const Json& spec, const core::Page& page, const core::Document* episode, int dpi, Size size) {
+    // (PC3 B1: a layer's own colours, an anti-aliased edge, a precise or ink page's values — render/select_color)
+    if (spec.is_object() && select_color::own_colour(spec, page)) return select_color::colour(spec, page, episode, size);
     RenderOptions options;
     options.mode = "proof";
     Image image = render_page(page, dpi, options, episode).image.resize(size);
@@ -639,12 +797,19 @@ Image colour_area(const Json& spec, const core::Page& page, const core::Document
 Image base_mask(const Json& area, const core::Page& page, const core::Document* episode, int dpi, Size size, int depth, Budget& budget) {
     if (core::truthy_at(area, "all")) return Image::create("L", size, Ink(255));
     if (core::truthy_at(area, "rect") || core::truthy_at(area, "ellipse") || core::truthy_at(area, "poly")) {
+        // (PC3: "antialias": true, the edge grey — an ellipse then of 360 corners)
+        const bool smooth = area_kinds::antialiased(area);
         const Json points = core::truthy_at(area, "poly")   ? area["poly"]
                             : core::truthy_at(area, "rect") ? rect_poly(area["rect"])
-                                                            : ellipse_poly(area["ellipse"]);
+                                                            : ellipse_poly(area["ellipse"], smooth ? 360 : 72);
         if (core::length(points) < 3) area_error("an area needs at least three points");
         std::vector<PointD> corners;
         for (const auto& [x, y] : poly_points(points, "area")) corners.push_back(PointD{mm2px(x, dpi), mm2px(y, dpi)});
+        if (smooth) {
+            std::vector<std::pair<double, double>> pixels;
+            for (const PointD& p : corners) pixels.emplace_back(p.x, p.y);
+            return area_kinds::antialiased_polygon(pixels, size);
+        }
         Image mask = Image::create("L", size, Ink(0));
         Draw(mask).polygon(corners, Ink(255));
         return mask;
@@ -671,8 +836,19 @@ Image base_mask(const Json& area, const core::Page& page, const core::Document* 
     if (core::truthy_at(area, "color")) return colour_area(area["color"], page, episode, dpi, size);
     if (core::truthy_at(area, "channel")) {  // (channels@1: a page's alpha or spot channel, its density; this build's own)
         const core::Channel* channel = area["channel"].is_string() ? core::find_channel(page, area["channel"].get<std::string>()) : nullptr;
-        if (channel == nullptr) area_error("no channel " + core::py_str(area["channel"]));
-        return channels::mask_of(*channel, size);
+        if (channel != nullptr) return channels::mask_of(*channel, size);
+        // (PC3 B1, 選択範囲を読み込む: a colour plate of the page — its value as the panel shows the plate alone — or the
+        // composite, the page's lightness; a channel's id or name comes first)
+        if (area["channel"].is_string()) {
+            const std::string name = area["channel"].get<std::string>();
+            const auto plate = core::plate_index(page, name);
+            if (plate || name == "composite") {
+                const bool alone = core::plate_names(page).size() == 1;
+                const channels::Plane plane = channels::page_plane(page, episode, plate && !alone ? plate : std::nullopt);
+                return channels::mask_image(plane, size);
+            }
+        }
+        area_error("no channel " + core::py_str(area["channel"]));
     }
     if (core::truthy_at(area, "saved")) {
         const Json* kept = core::get(page.extra, "saved_areas");
@@ -708,6 +884,12 @@ Image base_mask(const Json& area, const core::Page& page, const core::Document* 
         if (!out) area_error(std::string(key) + " needs areas");
         return std::move(*out);
     }
+    // (PC3: the kinds this build adds, render/area_kinds)
+    if (const area_kinds::Kind* kind = area_kinds::kind_of(area)) {
+        const area_kinds::Context context{page, episode, dpi, size,
+                                          [&](const Json& inner) { return to_mask_at(inner, page, episode, dpi, depth + 1, budget); }};
+        return area_kinds::solve(*kind, area, context);
+    }
     area_error("an area is poly, mask, rect, ellipse, layer, color, all, saved, union, intersect or subtract");
 }
 
@@ -717,7 +899,13 @@ Image to_mask_at(const Json& area, const core::Page& page, const core::Document*
     const Size size = page_size(page, dpi);
     budget.visit(static_cast<double>(size.width) * static_cast<double>(size.height));
     Image mask = base_mask(area, page, episode, dpi, size, depth, budget);
+    // (PC3, render/area_kinds: the kind → matrix → grow_mm → expand_mm, contract_mm → border_mm → smooth_mm → invert →
+    // feather_mm; an area without the new modifiers as before)
+    const area_kinds::Context context{page, episode, dpi, size,
+                                      [&](const Json& inner) { return to_mask_at(inner, page, episode, dpi, depth + 1, budget); }};
+    mask = area_kinds::before_grow(std::move(mask), area, context);
     if (core::truthy_at(area, "grow_mm")) mask = grow(mask, mm2px(core::finite_float(area["grow_mm"], "grow_mm"), dpi));
+    mask = area_kinds::after_grow(std::move(mask), area, context);
     if (core::truthy_at(area, "invert")) mask = chops::invert(mask);
     if (core::truthy_at(area, "feather_mm")) {
         const double radius = core::py_max(0.1, mm2px(core::finite_float(area["feather_mm"], "feather_mm"), dpi) / 2);
@@ -735,6 +923,11 @@ bool only_key(const Json& area, std::string_view key) {
 }
 
 }  // namespace
+
+int grid_dpi(const core::Page& page) {
+    const bool precise = page.rgb && page.rgb->depth > 8;
+    return page.color || precise ? layer_masks::grid_dpi(page) : kSelDpi;
+}
 
 Image to_mask(const Json& area, const core::Page& page, const core::Document* episode, int dpi) {
     ImageAllocationBudget live(static_cast<std::uint64_t>(limits::kAreaHeld));
@@ -790,7 +983,8 @@ std::optional<Json> combine(const std::optional<Json>& current, const Json& area
     }
     const std::string key = how == "add" ? "union" : how == "subtract" ? "subtract" : how == "intersect" ? "intersect" : "";
     if (key.empty()) throw core::OpError("how must be replace, add, subtract or intersect");
-    return from_mask(to_mask(Json{{key, Json::array({*current, area})}}, page, episode));
+    const int dpi = grid_dpi(page);
+    return from_mask(to_mask(Json{{key, Json::array({*current, area})}}, page, episode, dpi), dpi);
 }
 
 std::optional<Json> stroke_area(const std::vector<std::array<double, 2>>& points, double width_mm) {
@@ -837,13 +1031,20 @@ Json items_to_json(const Items& items) {
         out["png"] = core::b64encode(*patch.png);
         patches.push_back(std::move(out));
     }
-    return Json{{"strokes", std::move(strokes)}, {"patches", std::move(patches)}};
+    Json out{{"strokes", std::move(strokes)}, {"patches", std::move(patches)}};
+    if (!items.shapes.empty()) {  // (pen-shapes@1, PC3 C-b)
+        Json shapes = Json::array();
+        for (const core::vector::ShapePart& part : items.shapes) shapes.push_back(core::vector::to_json(part));
+        out["shapes"] = std::move(shapes);
+    }
+    return out;
 }
 
 Json resolve(const Json& area, const core::Page& page, const core::Document* episode) {
     if (only_key(area, "rect")) return Json::object({{"poly", rect_poly(area["rect"])}});
     if (only_key(area, "ellipse")) return Json::object({{"poly", ellipse_poly(area["ellipse"])}});
-    auto out = from_mask(to_mask(area, page, episode));
+    const int dpi = grid_dpi(page);
+    auto out = from_mask(to_mask(area, page, episode, dpi), dpi);
     if (!out) area_error("the area is empty");
     return std::move(*out);
 }

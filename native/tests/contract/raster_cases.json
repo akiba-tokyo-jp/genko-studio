@@ -1,5 +1,5 @@
 {
-  "note": "The ops of M3-A1 on the book `pyref_harness.py make-rasterbook` makes (counted ids: page 1's layers bg 000000000002, name 000000000003, ink 000000000004, finish 000000000005, then paint-1, pen-1, fold-1 (in-a, in-b), fill-1, adj-1, mask-1, lock-1, ref-1; page 2's bg 000000000008, grad-2, name 000000000009, ink 00000000000a, finish 00000000000b, draft 000000000029, paint-2; page 3 (a nombre, a line, tone-3, paint-3); page 4's bg 000000000014, name 000000000015, ink 000000000016, finish 000000000017, blank-4, multi-4). Each case: one batch (ops, agent, dry) or steps; ok: whether its last step succeeds in Python; cpp: a refusal this build makes on purpose (not_yet_ported: what it does not draw yet); near: compared within the tolerance (a perspective warp: Python's homography comes from numpy's SVD, whose last bits this build cannot ask for); other: a batch failing at another op.",
+  "note": "The ops of M3-A1 on the book `pyref_harness.py make-rasterbook` makes (counted ids: page 1's layers bg 000000000002, name 000000000003, ink 000000000004, finish 000000000005, then paint-1, pen-1, fold-1 (in-a, in-b), fill-1, adj-1, mask-1, lock-1, ref-1; page 2's bg 000000000008, grad-2, name 000000000009, ink 00000000000a, finish 00000000000b, draft 000000000029, paint-2; page 3 (a nombre, a line, tone-3, paint-3); page 4's bg 000000000014, name 000000000015, ink 000000000016, finish 000000000017, blank-4, multi-4). Each case: one batch (ops, agent, dry) or steps; ok: whether its last step succeeds in Python; cpp: a refusal this build makes on purpose (not_yet_ported: what it does not draw yet); near: compared within the tolerance (a perspective warp: Python's homography comes from numpy's SVD, whose last bits this build cannot ask for); other: a batch failing at another op. A case marked cpp: deviates is this build's on purpose (cpp_says): Python's but at its cpp_differs, where it holds cpp_pictures (this build's values).",
   "first_id": 4096,
   "cases": [
     {
@@ -3856,7 +3856,15 @@
             "feather_mm": 1
           }
         }
-      ]
+      ],
+      "cpp": "deviates",
+      "cpp_says": "PC3 B-0 (the coordinator's decision, design ch. 9): a grey area's picture (a feathered one) is stretched bilinear onto the patches' grid, where Python stretched it nearest",
+      "cpp_differs": [
+        "payload/pages/3/layers/2/patches/0/asset"
+      ],
+      "cpp_pictures": {
+        "payload/pages/3/layers/2/patches/0/asset": "png:9d750e32d1d0b578291d26a6e481dbb54ac716e72d55754f32f44f11323a1c75"
+      }
     },
     {
       "n": "fill_area shrunk",
@@ -5361,7 +5369,15 @@
             "feather_mm": 2
           }
         }
-      ]
+      ],
+      "cpp": "deviates",
+      "cpp_says": "PC3 B-0 (the coordinator's decision, design ch. 9): a grey area's picture (a feathered one) is stretched bilinear onto the patches' grid, where Python stretched it nearest",
+      "cpp_differs": [
+        "payload/pages/0/layers/2/patches/0/asset"
+      ],
+      "cpp_pictures": {
+        "payload/pages/0/layers/2/patches/0/asset": "png:a48bb0317c274a8ca654fec9a15aadb18b68ef3f91d042c9f51cb83365fdb01f"
+      }
     },
     {
       "n": "gradient_fill colours",

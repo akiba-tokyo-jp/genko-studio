@@ -7,16 +7,20 @@
 #include <utility>
 #include <vector>
 
+#include "core/ink.hpp"
 #include "core/ops_util.hpp"
 #include "core/paths.hpp"
 #include "core/pyconv.hpp"
 #include "render/channels.hpp"
+#include "render/color_edit.hpp"
 #include "render/op_limits.hpp"
 #include "render/page.hpp"
+#include "render/page_pixels.hpp"
 #include "render/png.hpp"
 #include "render/raster.hpp"
 #include "render/selection.hpp"
 #include "render/ink_edit.hpp"
+#include "render/smart_filters.hpp"
 #include "storage/reader.hpp"
 
 namespace genko::render {
@@ -25,15 +29,21 @@ namespace {
 
 constexpr int kMaskDpi = 150;  // ops.MASK_DPI
 
-}  // namespace
+// pagespec._raster's work before it draws: the new paper at raster.WORKING_DPI and the map of its pixels onto the old
+// picture's (taken for one at 200 dpi), each refused as Python refuses it — a paper of no finite size (Python's words), too
+// large to hold, a basic frame of no width (ZeroDivisionError) or of no finite size.
+struct WorkingMap {
+    int width = 0;
+    int height = 0;
+    std::array<double, 6> coeffs{};
+};
 
-std::string relayout_raster(const std::string& png, const core::PageSpec& spec, const core::Rect& old_frame,
-                            const core::Rect& new_frame) {
-    const Image image = selection::open_picture(png).convert("RGBA");
+WorkingMap working_map(const core::PageSpec& spec, const core::Rect& old_frame, const core::Rect& new_frame) {
     const double k = raster::kWorkingDpi / 25.4;
-    const int width = mm_to_px(spec.width_mm.value(), raster::kWorkingDpi);
-    const int height = mm_to_px(spec.height_mm.value(), raster::kWorkingDpi);
-    limits::check_picture(width, height, "the paint layer on the new paper");
+    WorkingMap out;
+    out.width = mm_to_px(spec.width_mm.value(), raster::kWorkingDpi);
+    out.height = mm_to_px(spec.height_mm.value(), raster::kWorkingDpi);
+    limits::check_picture(out.width, out.height, "the paint layer on the new paper");
     // sx = new_frame.width / old_frame.width (Python's ZeroDivisionError for a frame of no width)
     const auto ratio = [](const core::Num& a, const core::Num& b) {
         if (!b.truthy()) {
@@ -48,14 +58,39 @@ std::string relayout_raster(const std::string& png, const core::PageSpec& spec, 
         return 1 / v;
     };
     // output pixel (u, v) takes input ((u/k - nx)/sx + ox) * k, … (PIL maps output → input)
-    const std::array<double, 6> coeffs{inverse(sx), 0, (old_frame.x.value() - new_frame.x.value() / sx) * k,
-                                       0, inverse(sy), (old_frame.y.value() - new_frame.y.value() / sy) * k};
+    out.coeffs = {inverse(sx), 0, (old_frame.x.value() - new_frame.x.value() / sx) * k,
+                  0, inverse(sy), (old_frame.y.value() - new_frame.y.value() / sy) * k};
     // (a basic frame of no finite size — margins or a trim of NaN on a finite paper — makes Pillow sample nowhere and
     // write the picture as it comes: refused here, as the op refuses such a paper)
-    for (const double c : coeffs) {
+    for (const double c : out.coeffs) {
         if (!std::isfinite(c)) throw core::OpError("the basic frame must be a finite size");
     }
-    const Image out = image.transform(Size{width, height}, TransformMethod::Affine, coeffs, Resample::Bilinear);
+    return out;
+}
+
+}  // namespace
+
+std::string relayout_raster(const std::string& png, const core::PageSpec& old_paper, const core::PageSpec& spec, const core::Rect& old_frame,
+                            const core::Rect& new_frame) {
+    // (its size from its header; one that cannot be read goes the working way, which says why as Python does)
+    std::optional<Size> size;
+    try {
+        size = picture_size(png);
+    } catch (const core::Error&) {
+    }
+    if (!size || (size->width == mm_to_px(old_paper.width_mm.value(), raster::kWorkingDpi) &&
+                  size->height == mm_to_px(old_paper.height_mm.value(), raster::kWorkingDpi))) {
+        return relayout_working_raster(png, spec, old_frame, new_frame);
+    }
+    (void)working_map(spec, old_frame, new_frame);  // (a paper or a frame refused as before, whatever the picture)
+    return page_pixels::move_png(png, page_pixels::frame_how(), page_pixels::frame_map(old_frame, new_frame), old_paper, spec);
+}
+
+std::string relayout_working_raster(const std::string& png, const core::PageSpec& spec, const core::Rect& old_frame,
+                                    const core::Rect& new_frame) {
+    const Image image = selection::open_picture(png).convert("RGBA");
+    const WorkingMap map = working_map(spec, old_frame, new_frame);
+    const Image out = image.transform(Size{map.width, map.height}, TransformMethod::Affine, map.coeffs, Resample::Bilinear);
     return write_png(out);
 }
 
@@ -76,13 +111,19 @@ std::optional<std::string> relayout_mask(const std::string& png, const core::Pag
     const bool same_frame = old_frame.x == new_frame.x && old_frame.y == new_frame.y && old_frame.width == new_frame.width &&
                             old_frame.height == new_frame.height;
     if (same_frame && old_paper.width_mm == paper.width_mm && old_paper.height_mm == paper.height_mm) return std::nullopt;
-    // the new mask over the new paper at ops.MASK_DPI, as ops._mask_image makes a page's
+    // the new mask over the new paper at the mask's resolution: on the grid of whole dots per inch it lies on over the old
+    // paper — ops.MASK_DPI's 150, as ops._mask_image makes a page's, or a precise or ink page's finer one (PC3 B2) — the
+    // same grid over the new paper; else as many pixels a mm as it has
     const double old_w = old_paper.width_mm.value();
     const double old_h = old_paper.height_mm.value();
     const double new_w = paper.width_mm.value();
     const double new_h = paper.height_mm.value();
-    const double width = std::max(1.0, core::py_round_whole(new_w / 25.4 * kMaskDpi));
-    const double height = std::max(1.0, core::py_round_whole(new_h / 25.4 * kMaskDpi));
+    const auto on_grid = [](double mm, double dpi) { return std::max(1.0, core::py_round_whole(mm / 25.4 * dpi)); };
+    const auto grid_of = [&](double dpi) { return on_grid(old_w, dpi) == mask.width() && on_grid(old_h, dpi) == mask.height(); };
+    const double near_dpi = std::round(mask.width() * 25.4 / old_w);
+    const double dpi = grid_of(kMaskDpi) ? static_cast<double>(kMaskDpi) : (near_dpi >= 1 && grid_of(near_dpi) ? near_dpi : 0.0);
+    const double width = dpi > 0 ? on_grid(new_w, dpi) : std::max(1.0, std::round(new_w * mask.width() / old_w));
+    const double height = dpi > 0 ? on_grid(new_h, dpi) : std::max(1.0, std::round(new_h * mask.height() / old_h));
     limits::check_sides(width, height, "the layer mask on the new paper");
     const Size size{static_cast<int>(width), static_cast<int>(height)};
     // as pagespec._Map moves a point: the frame's scale in x and y (1 for an old frame of no size)
@@ -136,6 +177,21 @@ std::optional<std::string> relayout_mask(const std::string& png, const core::Pag
     return write_png(Image::frombytes("L", size, out));
 }
 
+void relayout_filter_mask(core::Document& doc, core::Layer& layer, const core::PageSpec& old_paper, const core::PageSpec& paper,
+                          const core::Rect& old_frame, const core::Rect& new_frame) {
+    if (layer.kind != core::LayerKind::Smart || !layer.smart || !layer.smart->is_object()) return;
+    const auto mask = layer.smart->find("filter_mask");
+    if (mask == layer.smart->end() || !mask->is_object() || !mask->contains("asset") || !(*mask)["asset"].is_string()) return;
+    // (one that is not in the book stays as it is: the book says so where it is read)
+    const core::Bytes bytes = smart_filters::mask_bytes(doc, (*mask)["asset"].get<std::string>());
+    if (!bytes) return;
+    std::optional<std::string> moved = relayout_mask(*bytes, old_paper, paper, old_frame, new_frame);
+    if (!moved) return;
+    const std::string ref = core::bytes_ref(*moved);
+    doc.smart_files[ref] = std::make_shared<const std::string>(std::move(*moved));
+    (*mask)["asset"] = ref;
+}
+
 core::Document load_other_book(const std::string& from) {
     storage::LoadResult loaded;
     try {
@@ -156,7 +212,9 @@ void register_bookpage_ops(core::OpRegistry& registry) {
     hooks.relayout_raster = relayout_raster;
     hooks.relayout_mask = relayout_mask;
     hooks.relayout_inks = ink_edit::relayout_inks;
+    hooks.relayout_color = color_edit::relayout;  // (PC3 C-e: a precise layer's pixels)
     hooks.relayout_channel = channels::relayout;
+    hooks.relayout_filter_mask = relayout_filter_mask;  // (PC3 A2: a smart object's filter mask)
     hooks.load_book = load_other_book;
     core::register_bookpage_ops(registry, std::move(hooks));
 }

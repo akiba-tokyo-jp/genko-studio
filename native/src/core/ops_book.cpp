@@ -86,6 +86,7 @@ void set_meta(OpContext& c) {
         for (std::size_t i = 0; i < doc.pages.size(); ++i) {
             Page& page = doc.edit_page(i);
             page.spec = covered(page, doc.spec);
+            page.own_spec = false;  // (page-spec@1: every page on the book's paper)
         }
     };
     if (const Json* preset = get(c.op, "preset")) respec(PageSpec::publisher(py_str(*preset)));

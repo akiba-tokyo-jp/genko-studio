@@ -44,6 +44,7 @@
 #include "core/filters.hpp"
 #include "core/frames.hpp"
 #include "core/ids.hpp"
+#include "core/masks.hpp"
 #include "core/ops_util.hpp"
 #include "core/paths.hpp"
 #include "core/pyconv.hpp"
@@ -59,9 +60,12 @@
 #include "render/fill.hpp"
 #include "render/filters.hpp"
 #include "render/import_profile.hpp"
+#include "render/layer_masks.hpp"
 #include "render/proof.hpp"
 #include "render/op_limits.hpp"
 #include "render/ops_adjust.hpp"
+#include "render/ops_paths.hpp"
+#include "render/ops_masks.hpp"
 #include "render/ops_registry.hpp"
 #include "render/page.hpp"
 #include "render/color_canvas.hpp"
@@ -70,7 +74,9 @@
 #include "render/psd_image.hpp"
 #include "render/raster.hpp"
 #include "render/selection.hpp"
+#include "render/shape_parts.hpp"
 #include "render/stroke.hpp"
+#include "render/vector_masks.hpp"
 #include "render/vectorize.hpp"
 #include "render/warp.hpp"
 
@@ -295,6 +301,27 @@ void fill_area(OpContext& c) {
     Page& page = doc.edit_page(at);
     const std::size_t ti = raster_paint_target(page, op);
     const Json area = core::op_area(op);
+    // (vector@1, PC3 C-a: a blend — Fill Path's mode — paints the paint layer's own pixels; normal, as before, a picture)
+    if (const Json* blend = core::get(op, "blend"); blend != nullptr && !blend->is_null() && *blend != Json("normal")) {
+        if (!blend->is_string()) throw OpError("blend is one of the blends (normal, multiply, screen, …)");
+        fill_area_blended(c, at, page.layers[ti].id, area, blend->get<std::string>(), rgb_of(op, doc), float_at(op, "opacity", 1.0));
+        return;
+    }
+    if (core::truthy_at(op, "preserve_transparency")) {
+        // (PC3 B2, 透明部分の保持: the colour laid into the layer's pixels, their alpha kept — render/ops_masks)
+        const selection::AreaMask m = selection::area_mask(area, fills::kFillDpi);
+        limits::check_coordinate(static_cast<double>(m.x0), "area");
+        limits::check_coordinate(static_cast<double>(m.y0), "area");
+        if (!m.mask.getbbox()) throw OpError("the area is empty");
+        std::vector<std::int64_t> rgb = rgb_of(op, doc);
+        if (rgb.size() < 3 || std::any_of(rgb.begin(), rgb.begin() + 3, [](std::int64_t v) { return v < 0 || v > 255; })) {
+            throw OpError("rgb is [r, g, b], each 0..255");
+        }
+        rgb.resize(3);
+        const std::string id = page.layers[ti].id;
+        fill_keeping_alpha(c, at, id, m.mask, Point{static_cast<int>(m.x0), static_cast<int>(m.y0)}, fills::kFillDpi, rgb, float_at(op, "opacity", 1.0));
+        return;
+    }
     std::optional<core::Patch> patch;
     if (core::truthy_at(area, "poly")) {
         const std::vector<std::int64_t> rgb = rgb_of(op, doc);
@@ -617,12 +644,10 @@ void gradient_fill(OpContext& c) {
 
 // --- masks --------------------------------------------------------------------------------------------------------
 
-// ops._mask_image: the layer's mask over the page at MASK_DPI ("L"; all white — everything shows — when it has none)
+// ops._mask_image: the layer's mask over the page at MASK_DPI ("L"; all white — everything shows — when it has none).
+// (PC3 B2: a precise or ink page's at the finest grid of its pixel layers, layer_masks::grid_dpi)
 Image mask_image(const Page& page, const Layer& layer) {
-    const double w = std::max(1.0, core::py_round_whole(page.spec.width_mm.value() / 25.4 * kMaskDpi));
-    const double h = std::max(1.0, core::py_round_whole(page.spec.height_mm.value() / 25.4 * kMaskDpi));
-    limits::check_sides(w, h, "the page");
-    const Size size{static_cast<int>(w), static_cast<int>(h)};
+    const Size size = layer_masks::grid_size(page);
     if (layer.mask && layer.mask->png && !layer.mask->png->empty()) {
         return selection::open_picture(*layer.mask->png).convert("L").resize(size);
     }
@@ -634,6 +659,34 @@ core::Mask mask_of(const Image& image, bool enabled) {
     mask.png = fills::png_bytes(image);
     mask.enabled = enabled;
     return mask;
+}
+
+// masks@1 (PC3): what the mask held past its picture kept when its picture is made again (linked, density, feather_mm),
+// then the op's own of them ("linked": bool, "density": 0..1, "feather_mm": 0..100 — this build's).
+void mask_settings(const std::optional<core::Mask>& before, core::Mask& mask, const Json& op) {
+    if (before) {
+        mask.linked = before->linked;
+        mask.density = before->density;
+        mask.feather_mm = before->feather_mm;
+    }
+    Json given = Json::object();
+    for (const char* key : {"linked", "density", "feather_mm"}) {
+        if (const Json* v = core::get(op, key); v != nullptr && !v->is_null()) given[key] = *v;
+    }
+    if (given.empty()) return;
+    try {
+        core::read_mask_settings(given, mask);
+    } catch (const core::Error& error) {
+        throw OpError(error.what());
+    }
+}
+
+// A layer's mask over the whole page at `size` as a merge lays it (masks@1, PC3: its density and feather as the page
+// draws them, render/layer_masks; a mask of none as before)
+Image merge_mask(const Page& page, const core::Mask& mask, Size size, Resample resample) {
+    const Image picture = read_png(*mask.png).convert("L");
+    if (!core::mask_has_settings(mask)) return picture.resize(size, resample);
+    return layer_masks::shown(page, mask, picture, size, Box{0, 0, size.width, size.height}, resample);
 }
 
 void set_layer_mask(OpContext& c) {
@@ -648,9 +701,19 @@ void set_layer_mask(OpContext& c) {
         layer.mask.reset();
         return;
     }
+    const int mask_dpi = layer_masks::grid_dpi(page);  // (PC3 B2: a precise or ink page's finest grid)
+    const bool repaint = core::truthy_at(op, "area") || core::truthy_at(op, "fill") || core::truthy_at(op, "invert");
+    const bool enabled = core::has(op, "enabled") ? core::py_truthy(op["enabled"]) : (layer.mask ? layer.mask->enabled : true);
+    const std::optional<core::Mask> before = layer.mask;
+    if (!repaint && before && mask_dpi != kMaskDpi) {
+        // (its settings alone changed, on a precise or ink page: its picture kept as it is, whatever its grid)
+        layer.mask->enabled = enabled;
+        mask_settings(before, *layer.mask, op);
+        return;
+    }
     Image image = mask_image(page, layer);
     if (core::truthy_at(op, "area")) {
-        const selection::AreaMask shown = selection::area_mask(op["area"], kMaskDpi);
+        const selection::AreaMask shown = selection::area_mask(op["area"], mask_dpi);
         image = Image::create("L", image.size(), Ink(0));
         image.paste(shown.mask, Point{static_cast<int>(shown.x0), static_cast<int>(shown.y0)});
     } else if (core::truthy_at(op, "fill")) {
@@ -659,8 +722,8 @@ void set_layer_mask(OpContext& c) {
         image = Image::create("L", image.size(), Ink(fill == Json("show") ? 255 : 0));
     }
     if (core::truthy_at(op, "invert")) image = ops::invert(image);
-    const bool enabled = core::has(op, "enabled") ? core::py_truthy(op["enabled"]) : (layer.mask ? layer.mask->enabled : true);
     layer.mask = mask_of(image, enabled);
+    mask_settings(before, *layer.mask, op);  // (masks@1, PC3)
 }
 
 void paint_mask(OpContext& c) {
@@ -675,10 +738,11 @@ void paint_mask(OpContext& c) {
     core::PenPoints points = core::parse_points(raw != nullptr && core::py_truthy(*raw) ? *raw : Json::array());
     if (points.empty()) throw OpError("points needs at least one [x_mm, y_mm] pair");
     limits::check_count(static_cast<double>(points.size()), static_cast<double>(limits::kPoints), "points");
+    const int mask_dpi = layer_masks::grid_dpi(page);  // (PC3 B2: a precise or ink page's finest grid)
     for (const core::PenPoint& p : points) {
         if (!std::isfinite(p.x) || !std::isfinite(p.y)) throw OpError("points must be a finite number");
-        limits::check_coordinate(p.x / 25.4 * kMaskDpi, "points");
-        limits::check_coordinate(p.y / 25.4 * kMaskDpi, "points");
+        limits::check_coordinate(p.x / 25.4 * mask_dpi, "points");
+        limits::check_coordinate(p.y / 25.4 * mask_dpi, "points");
     }
     Image image = mask_image(page, layer);
     if (points.size() == 1) points = {points[0], core::PenPoint{points[0].x + 0.01, points[0].y + 0.01, std::nullopt}};
@@ -686,13 +750,15 @@ void paint_mask(OpContext& c) {
     for (const core::PenPoint& p : points) flat.push_back(core::PenPoint{p.x, p.y, std::nullopt});
     const Json* width_value = core::get(op, "width_mm");
     const double width = width_value != nullptr && core::py_truthy(*width_value) ? core::finite_float(*width_value, "width_mm") : 3.0;
-    limits::check_count(std::fabs(width) / 25.4 * kMaskDpi / 2, limits::kReach, "width_mm");
+    limits::check_count(std::fabs(width) / 25.4 * mask_dpi / 2, limits::kReach, "width_mm");
     const int value = core::py_truthy(core::get_or(op, "show", Json(true))) ? 255 : 0;
     {
         Draw draw(image);
-        draw_stroke_mm(draw, flat, kMaskDpi, width, Ink(value), false);
+        draw_stroke_mm(draw, flat, mask_dpi, width, Ink(value), false);
     }
+    const std::optional<core::Mask> before = layer.mask;
     layer.mask = mask_of(image, layer.mask ? layer.mask->enabled : true);
+    mask_settings(before, *layer.mask, Json::object());  // (masks@1, PC3: its settings kept)
 }
 
 // --- several layers into one ------------------------------------------------------------------------------------------
@@ -705,6 +771,7 @@ bool core_role(LayerRole role) {
 void check_mergeable(const Page& page, const std::vector<std::size_t>& layers) {
     for (const std::size_t i : layers) {
         const Layer& layer = page.layers[i];
+        if (layer.kind == LayerKind::Smart) throw OpError("a smart object cannot be merged (rasterize it first)");  // (smart-objects@1)
         if (layer.kind == LayerKind::Placed || (layer.tone && core::py_truthy(*layer.tone)) || layer.kind == LayerKind::Tone) {
             throw OpError("placed images and tones cannot be merged");
         }
@@ -716,7 +783,9 @@ void check_mergeable(const Page& page, const std::vector<std::size_t>& layers) {
 void into_pixels(const Page& page, Layer& target, const Image& picture) {
     target.strokes = core::empty_strokes();
     target.patches.clear();
+    target.shapes = core::vector::empty_shapes();  // (pen-shapes@1, PC3 C-b: drawn in)
     target.mask.reset();
+    target.vector_mask.reset();  // (vector@1, PC3 C-a: drawn in, as the mask)
     target.kind = LayerKind::Raster;
     target.fill.reset();
     target.adjust.reset();
@@ -769,10 +838,10 @@ bool merge_printed(const Layer& layer) {
     return layer.exportable && layer.role != LayerRole::Name && layer.role != LayerRole::Draft;
 }
 bool merge_draws(const Layer& l) {
-    return l.color_raster || l.raster_png || l.stroke_count() || !l.patches.empty() ||
+    return l.color_raster || l.raster_png || l.stroke_count() || !l.patches.empty() || shape_parts::any(l) ||
            (l.kind == LayerKind::Fill && l.fill && core::py_truthy(*l.fill)) ||
            (l.kind == LayerKind::Adjust && l.adjust && core::py_truthy(*l.adjust)) ||
-           l.kind == LayerKind::Tone || l.kind == LayerKind::Placed;
+           l.kind == LayerKind::Tone || l.kind == LayerKind::Placed || l.kind == LayerKind::Smart;
 }
 bool merge_tail_clipped(const Page& page, const std::vector<std::size_t>& layers) {
     bool proof = true, print = merge_printed(page.layers[layers.front()]);
@@ -793,6 +862,8 @@ bool merge_tail_clipped(const Page& page, const std::vector<std::size_t>& layers
 }
 void into_color_pixels(Layer& target, std::pair<std::string, bool> pixels) {
     target.strokes = core::empty_strokes(); target.patches.clear(); target.mask.reset();
+    target.shapes = core::vector::empty_shapes();  // (pen-shapes@1, PC3 C-b: drawn in)
+    target.vector_mask.reset();  // (vector@1, PC3 C-a: drawn in, as the mask)
     target.kind = pixels.first.empty() ? LayerKind::Strokes : LayerKind::Raster;
     target.raster_png.reset(); target.asset.reset();
     target.fill.reset(); target.adjust.reset(); target.effect.reset(); target.fill_rgb.reset();
@@ -859,13 +930,15 @@ std::pair<std::string, bool> composite_color_layers(const Document& doc, const P
                 if (!out.is_opaque()) throw NotYetPorted("high-precision merge adjustment depends on external background");
                 std::optional<Image> mask;
                 if (layer.mask && layer.mask->enabled && layer.mask->png && !layer.mask->png->empty())
-                    mask = read_png(*layer.mask->png).convert("L").resize(size, Resample::Bicubic);
+                    mask = merge_mask(page, *layer.mask, size, Resample::Bicubic);
+                mask = vector_masks::with_vector_mask(page, layer, size, all, std::move(mask));  // (vector@1, PC3 C-a)
                 out.adjust(*correction, layer.opacity, layer.clip, mask ? &*mask : nullptr, blend);
                 continue;
             }
             std::optional<Image> mask;
             if (layer.mask && layer.mask->enabled && layer.mask->png)
-                mask = read_png(*layer.mask->png).convert("L").resize(size, Resample::Bilinear);
+                mask = merge_mask(page, *layer.mask, size, Resample::Bilinear);
+            mask = vector_masks::with_vector_mask(page, layer, size, all, std::move(mask));  // (vector@1, PC3 C-a)
             const auto exposure = core::Exposure::parse(*layer.adjust);
             if (layer.opacity > 0 && (exposure.stops != 0 || exposure.offset != 0 || exposure.gamma != 1) && !out.is_opaque())
                 throw NotYetPorted("high-precision merge adjustment depends on external background");
@@ -887,7 +960,8 @@ std::pair<std::string, bool> composite_color_layers(const Document& doc, const P
             floating = floating || pixels.metadata("")["precision"] == "f32";
             std::optional<Image> shown;  // (its mask, as the page shows it)
             if (layer.mask && layer.mask->enabled && layer.mask->png && !layer.mask->png->empty())
-                shown = read_png(*layer.mask->png).convert("L").resize(size, Resample::Bilinear);
+                shown = merge_mask(page, *layer.mask, size, Resample::Bilinear);
+            shown = vector_masks::with_vector_mask(page, layer, size, all, std::move(shown));  // (vector@1, PC3 C-a)
             out.blend(pixels, size, all, layer.opacity, layer.clip, layer.blend, shown ? &*shown : nullptr);
         } else {
             auto picture = drawable_layer_image(page, layer, kWorkingDpi, &doc, false, true);
@@ -938,6 +1012,7 @@ void after_merge(Page& page, const std::vector<std::size_t>& merged) {
         if (core_role(layer.role)) {  // layerops._empty
             layer.strokes = core::empty_strokes();
             layer.patches.clear();
+            layer.shapes = core::vector::empty_shapes();  // (pen-shapes@1)
             layer.raster_png.reset();
             layer.color_raster.reset();
             if (!merged.empty() && page.layers[merged.front()].color_raster) {
@@ -1224,6 +1299,7 @@ void merge_down(OpContext& c) {
     const std::size_t li = *(found - 1);
     for (const std::size_t i : {ui, li}) {
         const Layer& item = page.layers[i];
+        if (item.kind == LayerKind::Smart) throw OpError("a smart object cannot be merged (rasterize it first)");  // (smart-objects@1)
         if (item.kind == LayerKind::Placed || item.kind == LayerKind::Tone || (item.tone && core::py_truthy(*item.tone))) {
             throw OpError("placed images and tones cannot be merged");
         }
@@ -1241,7 +1317,7 @@ void merge_down(OpContext& c) {
                             [](const Layer& l) { return l.raster_png && !l.raster_png->empty(); }(lower);
     const std::string blend = upper.blend.empty() ? "normal" : upper.blend;
     const bool plain = upper.kind == LayerKind::Strokes && lower.kind == LayerKind::Strokes && !has_raster && !upper.mask &&
-                       !lower.mask && blend == "normal" && !upper.clip && upper.opacity >= 1 && upper.panel_clip == lower.panel_clip &&
+                       !lower.mask && !upper.vector_mask && !lower.vector_mask && blend == "normal" && !upper.clip && upper.opacity >= 1 && upper.panel_clip == lower.panel_clip &&
                        upper.panel_each == lower.panel_each && upper.color == lower.color;
     if (plain) {
         Layer& into = page.layers[li];
@@ -1249,6 +1325,18 @@ void merge_down(OpContext& c) {
         strokes.insert(strokes.end(), upper.strokes->items.begin(), upper.strokes->items.end());
         into.strokes = core::make_strokes(std::move(strokes));
         into.patches.insert(into.patches.end(), upper.patches.begin(), upper.patches.end());
+        if (shape_parts::any(upper)) {  // (pen-shapes@1, PC3 C-b: the lower layer's parts, then the upper's; an id it has, a new one)
+            std::vector<core::vector::ShapePart> parts = into.shapes->items;
+            std::set<std::string> ids;
+            for (const core::vector::ShapePart& p : parts) ids.insert(p.id);
+            for (core::vector::ShapePart p : upper.shapes->items) {
+                while (ids.contains(p.id)) p.id = core::new_id();
+                ids.insert(p.id);
+                parts.push_back(std::move(p));
+            }
+            if (parts.size() > core::vector::kShapePartsMax) throw OpError("the merged layer would hold too many shape parts");
+            into.shapes = core::vector::make_shapes(std::move(parts));
+        }
     } else {
         const int dpi = kWorkingDpi;
         const Image below = layer_image(page, lower, dpi, &doc);
@@ -1265,7 +1353,9 @@ void merge_down(OpContext& c) {
         Layer& into = page.layers[li];
         into.strokes = core::empty_strokes();
         into.patches.clear();
+        into.shapes = core::vector::empty_shapes();  // (pen-shapes@1, PC3 C-b: drawn in)
         into.mask.reset();
+        into.vector_mask.reset();  // (vector@1, PC3 C-a: drawn in, as the mask)
         into.kind = LayerKind::Raster;
         raster::save_raster(page, into, merged);
     }
@@ -1303,7 +1393,7 @@ void convert_layer(OpContext& c) {
             const auto* preserve=core::get(op,"preserve_precision");
             if(!preserve || !preserve->is_boolean() || !preserve->get<bool>())
                 throw OpError("high-precision vector conversion requires preserve_precision: true");
-            if(layer.mask || layer.effect || layer.screen || layer.color || !layer.patches.empty() || layer.stroke_count() || layer.panel_each)
+            if(layer.mask || layer.vector_mask || layer.effect || layer.screen || layer.color || !layer.patches.empty() || layer.stroke_count() || layer.panel_each)
                 throw OpError("high-precision vector source style is not supported yet");
             const auto min_mm = core::finite_float(core::get_or(op,"min_mm",Json(.8)),"min_mm");
             const Image picture = layer_image(page,layer,kWorkingDpi,&doc);
@@ -1357,6 +1447,7 @@ void convert_layer(OpContext& c) {
         for (core::Stroke& s : traced) strokes.push_back(std::make_shared<const core::Stroke>(std::move(s)));
         layer.strokes = core::make_strokes(std::move(strokes));
         layer.patches.clear();
+        layer.shapes = core::vector::empty_shapes();  // (pen-shapes@1, PC3 C-b: traced with the rest)
         layer.raster_png.reset();
         layer.kind = LayerKind::Strokes;
         return;
@@ -1479,7 +1570,27 @@ void delete_or_transform_area(OpContext& c, bool transform) {
 }
 
 void delete_area(OpContext& c) { delete_or_transform_area(c, false); }
-void transform_area(OpContext& c) { delete_or_transform_area(c, true); }
+
+// (PC3 B2, masks@1: "mask": "follow" moves the layer's mask with its pixels — the window sends it for a linked mask as
+// the layer moves —; "stay", the default, leaves the mask where it is on the page)
+void transform_area(OpContext& c) {
+    const Json* how = core::get(c.op, "mask");
+    const bool given = how != nullptr && !how->is_null();
+    if (given && *how != Json("follow") && *how != Json("stay")) throw OpError("mask must be follow or stay");
+    delete_or_transform_area(c, true);
+    if (!given || *how != Json("follow")) return;
+    const std::size_t at = core::require_page(c.doc, c.op);
+    Page& page = c.doc.edit_page(at);
+    Layer& target = page.layers[raster_paint_target(page, c.op)];
+    if (!target.mask || !target.mask->png || target.mask->png->empty()) return;
+    const Json area = core::op_area(c.op);
+    if (core::truthy_at(c.op, "warp")) {
+        target.mask = layer_masks::warp_mask(page, *target.mask, area, warp::mapping(selection::area_bbox(area), c.op["warp"]));
+        return;
+    }
+    const std::vector<double> m = matrix_of(c.op);
+    target.mask = layer_masks::move_mask(page, *target.mask, area, std::array<double, 6>{m[0], m[1], m[2], m[3], m[4], m[5]});
+}
 
 void validate_patch_items(const selection::Items& items,bool bounded=false){
     for (const core::Patch& patch : items.patches) {
@@ -1515,12 +1626,85 @@ void paste(OpContext& c) {
     Page& page = doc.edit_page(at);
     const std::size_t ti = raster_paint_target(page, op);
     selection::Items items = selection::items_from_json(core::truthy_at(op, "items") ? op["items"] : Json::object());
-    if (items.strokes.empty() && items.patches.empty()) throw OpError("nothing to paste");
+    if (items.empty()) throw OpError("nothing to paste");
     validate_patch_items(items);
-    const std::vector<double> m = matrix_of(op);
+    std::vector<double> m = matrix_of(op);
     if (m.size() != 6) {
         throw core::PyValueError(m.size() < 6 ? "not enough values to unpack (expected 6, got " + std::to_string(m.size()) + ")"
                                               : "too many values to unpack (expected 6)");
+    }
+    // (PC3 B2) "center_mm": [x, y] — the items' box, through the matrix, centred there (ペースト at the view's centre)
+    if (const Json* centre = core::get(op, "center_mm"); centre != nullptr && !centre->is_null()) {
+        if (!centre->is_array() || centre->size() != 2) throw OpError("center_mm is [x_mm, y_mm]");
+        const double cx = core::finite_float((*centre)[0], "center_mm"), cy = core::finite_float((*centre)[1], "center_mm");
+        double x0 = INFINITY, y0 = INFINITY, x1 = -INFINITY, y1 = -INFINITY;
+        const auto take = [&](double x, double y) { x0 = std::min(x0, x); y0 = std::min(y0, y); x1 = std::max(x1, x); y1 = std::max(y1, y); };
+        for (const core::StrokePtr& stroke : items.strokes)
+            for (const auto& p : stroke->points) take(p.x, p.y);
+        for (const core::Patch& patch : items.patches) {
+            const Json* box = patch.attrs.contains("box") ? &patch.attrs["box"] : core::get(patch.after_asset, "box");
+            const double x = core::to_float((*box)[0]), y = core::to_float((*box)[1]);
+            take(x, y);
+            take(x + core::to_float((*box)[2]), y + core::to_float((*box)[3]));
+        }
+        for (const core::vector::ShapePart& part : items.shapes) {  // (pen-shapes@1: the parts' paths too)
+            if (const auto b = part.path.control_bounds()) {
+                take((*b)[0], (*b)[1]);
+                take((*b)[2], (*b)[3]);
+            }
+        }
+        if (std::isfinite(x0) && std::isfinite(x1)) {
+            const double mx = (x0 + x1) / 2, my = (y0 + y1) / 2;
+            m[4] += cx - (m[0] * mx + m[2] * my + m[4]);
+            m[5] += cy - (m[1] * mx + m[3] * my + m[5]);
+            if (!std::isfinite(m[4]) || !std::isfinite(m[5])) throw OpError("center_mm is too far off the page");
+        }
+    }
+    // (PC3 B2) pieces of precise pixels ("gkcr", color_edit::piece_patch) laid as their samples into a paint layer of a
+    // precise page — one with no pixels yet gets precise pixels of the page's precision —; anywhere else their picture,
+    // the keys dropped (never saved)
+    {
+        Layer& target = page.layers[ti];
+        const bool precise_page = !page.color && page.rgb && page.rgb->depth > 8;
+        const bool bare = target.kind == LayerKind::Raster && !target.raster_png && !target.ink_raster && target.stroke_count() == 0 && target.patches.empty();
+        std::vector<core::Patch> rest;
+        for (core::Patch& patch : items.patches) {
+            if (!patch.attrs.is_object() || !patch.attrs.contains(std::string(color_edit::kPieceKey))) {
+                if (patch.attrs.is_object()) patch.attrs.erase(std::string(color_edit::kPieceSpaceKey));
+                rest.push_back(std::move(patch));
+                continue;
+            }
+            std::optional<std::string> samples;
+            if (precise_page && (target.color_raster || bare)) samples = color_edit::patch_samples(patch, page, &doc);
+            if (samples) {
+                const Json box = core::subscript(patch.attrs, "box");
+                const std::array<double, 4> b{core::to_float(box[0]), core::to_float(box[1]), core::to_float(box[2]), core::to_float(box[3])};
+                const selection::Matrix through{m[0], m[1], m[2], m[3], m[4], m[5]};
+                const Resample resample = interp(op);
+                if (target.color_raster) {
+                    precise_edit(target, [&] { return color_edit::lay_piece(page, target, *samples, b, through, resample); });
+                } else {
+                    std::string pixels;
+                    try {
+                        pixels = color_edit::lay_piece(page, target, *samples, b, through, resample);
+                    } catch (const core::PyUncaught&) {
+                        throw;
+                    } catch (const core::Error& error) {
+                        if (error.code() != "value" && error.code() != "format") throw;
+                        throw OpError(error.what());
+                    }
+                    target.color_raster = std::make_shared<const std::string>(std::move(pixels));
+                    if (std::find(doc.features.begin(), doc.features.end(), core::kColorRasterFeature) == doc.features.end())
+                        doc.features.emplace_back(core::kColorRasterFeature);
+                }
+                continue;
+            }
+            patch.attrs.erase(std::string(color_edit::kPieceKey));
+            patch.attrs.erase(std::string(color_edit::kPieceSpaceKey));
+            rest.push_back(std::move(patch));
+        }
+        items.patches = std::move(rest);
+        if (items.empty()) return;  // (pen-shapes@1: shape parts too)
     }
     if (page.layers[ti].color_raster) {  // drawn into the precise pixels (render/color_edit)
         for (core::Patch& patch : items.patches) color_edit::patch_to_srgb(patch, doc);  // (color-model@1: its sRGB, brought in)
@@ -1530,14 +1714,14 @@ void paste(OpContext& c) {
         pasted.kind = LayerKind::Raster;
         pasted.panel_clip = page.layers[ti].panel_clip;
         pasted.panel_each = page.layers[ti].panel_each;
-        selection::drop(pasted, std::move(items), selection::Matrix{m[0], m[1], m[2], m[3], m[4], m[5]}, true);
+        selection::drop(pasted, std::move(items), selection::Matrix{m[0], m[1], m[2], m[3], m[4], m[5]}, true, Resample::Bilinear, &page);
         Layer& target = page.layers[ti];
         precise_edit(target, [&] { return color_edit::paste(page, target, pasted, &doc); });
         return;
     }
     // color-mode@1: pieces of inks copied from a CMYK or Lab page ("gkir", ink_edit::piece_patch) laid into a paint
-    // layer's inks on a page of the same mode and profile, when the paste moves and scales without turning; anywhere
-    // else their picture, the keys dropped (never saved)
+    // layer's inks on a page of the same mode and profile (moved and scaled: each pixel whole where it can be; PC3 B2:
+    // turned, sheared or flipped, resampled as inks); anywhere else their picture, the keys dropped (never saved)
     std::vector<core::Patch> pictures;
     const bool upright = m[1] == 0 && m[2] == 0 && m[0] > 0 && m[3] > 0;
     Layer& target = page.layers[ti];
@@ -1548,12 +1732,18 @@ void paste(OpContext& c) {
             continue;
         }
         std::optional<core::InkPixels> inks;
-        if (page.color && target.kind == LayerKind::Raster && upright) inks = ink_edit::patch_inks(patch, *page.color);
+        if (page.color && target.kind == LayerKind::Raster) inks = ink_edit::patch_inks(patch, *page.color);
         if (inks) {
             const Json box = core::subscript(patch.attrs, "box");
             const double x = core::to_float(box[0]), y = core::to_float(box[1]), w = core::to_float(box[2]), h = core::to_float(box[3]);
-            const std::array<double, 4> placed{m[0] * x + m[4], m[3] * y + m[5], m[0] * w, m[3] * h};
-            ink_pixels_edit(target, [&] { return ink_edit::lay_piece(page, target, *inks, placed); });
+            if (upright) {
+                const std::array<double, 4> placed{m[0] * x + m[4], m[3] * y + m[5], m[0] * w, m[3] * h};
+                ink_pixels_edit(target, [&] { return ink_edit::lay_piece(page, target, *inks, placed); });
+            } else {
+                const selection::Matrix through{m[0], m[1], m[2], m[3], m[4], m[5]};
+                const Resample resample = interp(op);
+                ink_pixels_edit(target, [&] { return ink_edit::lay_piece(page, target, *inks, std::array<double, 4>{x, y, w, h}, through, resample); });
+            }
             continue;
         }
         patch.attrs.erase("gkir");
@@ -1561,8 +1751,8 @@ void paste(OpContext& c) {
         pictures.push_back(std::move(patch));
     }
     items.patches = std::move(pictures);
-    if (items.strokes.empty() && items.patches.empty()) return;
-    selection::drop(target, std::move(items), selection::Matrix{m[0], m[1], m[2], m[3], m[4], m[5]}, true);
+    if (items.empty()) return;
+    selection::drop(target, std::move(items), selection::Matrix{m[0], m[1], m[2], m[3], m[4], m[5]}, true, Resample::Bilinear, &page);
 }
 
 // --- pixels in --------------------------------------------------------------------------------------------------------
@@ -2144,7 +2334,7 @@ void stamp_material(OpContext& c) {
             for(const auto& patch:items.patches){const auto& b=patch.attrs.at("box");const double x=core::py_float(b[0]),y=core::py_float(b[1]);point(x,y);point(x+core::py_float(b[2]),y+core::py_float(b[3]));}
             if(std::isfinite(loX)){matrix[4]=core::py_float(c.op["x_mm"])-(loX+hiX)/2;matrix[5]=core::py_float(c.op["y_mm"])-(loY+hiY)/2;}
         }
-        selection::drop(target,std::move(items),matrix,true);return;
+        selection::drop(target,std::move(items),matrix,true,Resample::Bilinear,&c.doc.page(at));return;
     }
     throw OpError("unknown material kind " + core::py_str(kind_value));
 }
@@ -2237,7 +2427,7 @@ void filter_raster(OpContext& c) {
             if (!own || own->python) color_filters::check(kind, own ? own->params : params);
         });
         const std::optional<Json> area = core::truthy_at(op, "area") ? std::optional<Json>(core::op_area(op)) : std::nullopt;
-        const bool marks = layer.stroke_count() > 0 || !layer.patches.empty();
+        const bool marks = layer.stroke_count() > 0 || !layer.patches.empty() || shape_parts::any(layer);
         const core::InkPixels inks = ink_edit::with_marks(page, layer, &doc);
         std::string pixels = refused([&] {
             if (own && !own->python) return adjust_ops::filter_inks(*own, doc, page, inks, kind, area ? &*area : nullptr);
@@ -2248,13 +2438,14 @@ void filter_raster(OpContext& c) {
         if (marks) {  // (as raster.bake_vectors leaves the layer: its marks in its pixels)
             layer.strokes = core::empty_strokes();
             layer.patches.clear();
+            layer.shapes = core::vector::empty_shapes();
         }
         layer.kind = LayerKind::Raster;  // (as the 8-bit filter leaves it: a paint layer)
         return;
     }
     // (pen lines and shape fills become pixels, so the filter reaches them)
     // (color-model@1: on an RGB page of a profile, into its values — not while a plugin works the page lent as sRGB)
-    if (layer.stroke_count() > 0 || !layer.patches.empty()) raster::bake_vectors(page, layer, core::profiled_rgb(page));
+    if (layer.stroke_count() > 0 || !layer.patches.empty() || shape_parts::any(layer)) raster::bake_vectors(page, layer, core::profiled_rgb(page));
     const std::string kind = core::truthy_at(op, "kind") ? core::py_str(op["kind"]) : std::string();
     // ops.filtered_raster
     const Image image = raster::layer_pixels(page, layer);
@@ -2498,6 +2689,7 @@ void lt_convert(OpContext& c) {
     Layer& dest = page.layers[core::layer_for_role(page, dest_role)];
     if (dest.locked) throw OpError("the layer is locked");  // (Python draws on it)
     if (dest.kind == LayerKind::Placed) throw OpError("a placed layer cannot receive strokes");
+    if (dest.kind == LayerKind::Smart) throw OpError("a smart object cannot receive strokes (rasterize it first)");  // (smart-objects@1)
     // lt.runs_to_strokes (points that are not finite, or more of them than an op may make, refused before a line is added)
     const double width_mm = page.spec.width_mm.value();
     const double height_mm = page.spec.height_mm.value();

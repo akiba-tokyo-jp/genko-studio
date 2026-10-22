@@ -21,6 +21,7 @@
 #include "render/ink_canvas.hpp"
 #include "render/op_limits.hpp"
 #include "render/page.hpp"
+#include "render/page_pixels.hpp"
 #include "render/png.hpp"
 #include "render/raster.hpp"
 
@@ -654,13 +655,23 @@ std::optional<core::InkPixels> patch_inks(const core::Patch& patch, const core::
     }
 }
 
+namespace {
+
+// The inks of a layer that has none yet, a piece is laid on: clear ones at the piece's resolution (its pixels over its
+// box's width, 200 to 600 dpi), as a precise piece makes its layer's (render/color_edit).
+core::InkPixels blank_for(const core::Page& page, const core::InkPixels& piece, const std::array<double, 4>& box_mm) {
+    const double own = piece.width > 0 && box_mm[2] > 0 ? std::round(piece.width * 25.4 / box_mm[2]) : raster::kWorkingDpi;
+    const int dpi = static_cast<int>(std::clamp(std::isfinite(own) ? own : raster::kWorkingDpi, static_cast<double>(raster::kWorkingDpi), 600.0));
+    const int w = mm_to_px(page.spec.width_mm.value(), dpi), h = mm_to_px(page.spec.height_mm.value(), dpi);
+    limits::check_picture(w, h, "the layer's inks");
+    return core::blank_ink_pixels(page.color->space, page.color->depth, static_cast<std::uint32_t>(w), static_cast<std::uint32_t>(h), page.color->planes());
+}
+
+}  // namespace
+
 std::string lay_piece(const core::Page& page, const core::Layer& layer, const core::InkPixels& piece, const std::array<double, 4>& box_mm) {
     if (!page.color) throw core::OpError("an RGB page holds no ink pixels");
-    Inks out = layer.ink_raster ? layer_inks(layer)
-                                : Inks(core::blank_ink_pixels(page.color->space, page.color->depth,
-                                                              static_cast<std::uint32_t>(mm_to_px(page.spec.width_mm.value(), raster::kWorkingDpi)),
-                                                              static_cast<std::uint32_t>(mm_to_px(page.spec.height_mm.value(), raster::kWorkingDpi)),
-                                                              page.color->planes()));
+    Inks out = layer.ink_raster ? layer_inks(layer) : Inks(blank_for(page, piece, box_mm));
     if (piece.space != out.p.space || piece.depth != out.p.depth || piece.planes != out.p.planes) {
         throw core::OpError("the piece of inks is not in the page's colour mode");
     }
@@ -696,7 +707,37 @@ std::string lay_piece(const core::Page& page, const core::Layer& layer, const co
     return out.take();
 }
 
-std::string relayout_inks(const std::string& gkir, const core::PageSpec& spec, const core::Rect& old_frame, const core::Rect& new_frame) {
+std::string lay_piece(const core::Page& page, const core::Layer& layer, const core::InkPixels& piece, const std::array<double, 4>& box_mm,
+                      const selection::Matrix& m, Resample resample) {
+    if (!page.color) throw core::OpError("an RGB page holds no ink pixels");
+    Inks out = layer.ink_raster ? layer_inks(layer) : Inks(blank_for(page, piece, box_mm));
+    if (piece.space != out.p.space || piece.depth != out.p.depth || piece.planes != out.p.planes) {
+        throw core::OpError("the piece of inks is not in the page's colour mode");
+    }
+    if (piece.width == 0 || piece.height == 0 || !(box_mm[2] > 0) || !(box_mm[3] > 0)) return out.take();
+    const Grid g = grid_of(page, out.p.width, out.p.height);
+    const selection::Matrix inverse = selection::invert(m);
+    const Inks source(piece);
+    const Lifted lifted(source, std::string(piece.pixel_count(), '\xff'), Box{0, 0, static_cast<int>(piece.width), static_cast<int>(piece.height)});
+    const double kx = piece.width / box_mm[2], ky = piece.height / box_mm[3];  // (the piece's pixels per mm)
+    std::vector<std::pair<double, double>> corners;
+    for (const auto& [x, y] : {std::pair{box_mm[0], box_mm[1]}, std::pair{box_mm[0] + box_mm[2], box_mm[1]},
+                               std::pair{box_mm[0] + box_mm[2], box_mm[1] + box_mm[3]}, std::pair{box_mm[0], box_mm[1] + box_mm[3]}}) {
+        corners.emplace_back((m[0] * x + m[2] * y + m[4]) * g.sx, (m[1] * x + m[3] * y + m[5]) * g.sy);
+    }
+    const Box to = covering(corners, 3, g.width, g.height);
+    for (int y = to.y0; y < to.y1; ++y) {
+        for (int x = to.x0; x < to.x1; ++x) {
+            const double xm = (x + .5) / g.sx, ym = (y + .5) / g.sy;
+            const double sx = inverse[0] * xm + inverse[2] * ym + inverse[4], sy = inverse[1] * xm + inverse[3] * ym + inverse[5];
+            lifted.lay_at(out, std::size_t(y) * g.width + x, (sx - box_mm[0]) * kx, (sy - box_mm[1]) * ky, resample);
+        }
+    }
+    return out.take();
+}
+
+std::string relayout_inks(const std::string& gkir, const core::PageSpec& old_paper, const core::PageSpec& spec, const core::Rect& old_frame,
+                          const core::Rect& new_frame) {
     const Inks source(core::decode_ink_raster(gkir));
     const double k = raster::kWorkingDpi / 25.4;
     const int width = mm_to_px(spec.width_mm.value(), raster::kWorkingDpi);
@@ -712,6 +753,12 @@ std::string relayout_inks(const std::string& gkir, const core::PageSpec& spec, c
     for (const double v : c) {
         if (!std::isfinite(v)) throw core::OpError("the basic frame must be a finite size");
     }
+    // (inks not at the working 200 dpi of the old paper keep their resolution — never taken for 200 dpi —, refused as
+    // those at 200 dpi are above)
+    if (source.p.width != static_cast<std::uint32_t>(mm_to_px(old_paper.width_mm.value(), raster::kWorkingDpi)) ||
+        source.p.height != static_cast<std::uint32_t>(mm_to_px(old_paper.height_mm.value(), raster::kWorkingDpi))) {
+        return page_pixels::move_inks(gkir, page_pixels::frame_how(), page_pixels::frame_map(old_frame, new_frame), old_paper, spec);
+    }
     Inks out(core::blank_ink_pixels(source.p.space, source.p.depth, static_cast<std::uint32_t>(width), static_cast<std::uint32_t>(height), source.p.planes));
     const Lifted lifted(source, std::string(source.p.pixel_count(), '\xff'),
                         Box{0, 0, static_cast<int>(source.p.width), static_cast<int>(source.p.height)});
@@ -725,7 +772,7 @@ std::string relayout_inks(const std::string& gkir, const core::PageSpec& spec, c
 
 InkPixels with_marks(const core::Page& page, const core::Layer& layer, const core::Document* episode) {
     if (!page.color) throw core::OpError("an RGB page holds no ink pixels");
-    if (layer.stroke_count() == 0 && layer.patches.empty()) {
+    if (layer.stroke_count() == 0 && layer.patches.empty() && (!layer.shapes || layer.shapes->items.empty())) {
         if (layer.ink_raster) return core::decode_ink_raster(*layer.ink_raster);
         return core::blank_ink_pixels(page.color->space, page.color->depth,
                                       static_cast<std::uint32_t>(mm_to_px(page.spec.width_mm.value(), raster::kWorkingDpi)),
@@ -739,6 +786,7 @@ InkPixels with_marks(const core::Page& page, const core::Layer& layer, const cor
     marks.panel_each = layer.panel_each;
     marks.strokes = layer.strokes;
     marks.patches = layer.patches;
+    marks.shapes = layer.shapes;  // (pen-shapes@1, PC3 C-b: its shape parts, drawn with its lines)
     InkPixels drawn = composite_ink_layers(page, {marks}, raster::kWorkingDpi, episode);
     inside_own_pixels(drawn, layer);
     return core::decode_ink_raster(lay_piece(page, layer, drawn, {0.0, 0.0, page.spec.width_mm.value(), page.spec.height_mm.value()}));
@@ -864,6 +912,8 @@ bool shown_in_page(const core::Page& page, const core::Layer& layer) {
 
 bool lends(std::string_view op, const core::Json& args) {
     if (op == "filter_raster") return core::truthy_at(args, "kind") && core::py_str(args["kind"]).starts_with("plugin:");
+    // (PC3 C-c: Liquify's strokes move the inks themselves, render/distort_ops)
+    if (op == "liquify" && core::truthy_at(args, "strokes")) return false;
     static constexpr std::array<std::string_view, 7> kOnTarget{"smudge", "liquify", "add_shape", "flood_fill", "gradient_fill",
                                                               "fill_gaps", "ruler_to_layer"};
     return std::find(kPageWide.begin(), kPageWide.end(), op) != kPageWide.end() ||
@@ -1007,6 +1057,7 @@ void Lending::take_back(core::Document& doc) const {
                     // as the 8-bit tools draw them when they work its pixels, so what they did not change keeps its inks)
                     core::Layer drawn = layer;
                     drawn.strokes = core::empty_strokes();
+                    drawn.shapes = core::vector::empty_shapes();
                     drawn.patches.assign(layer.patches.begin() + std::ptrdiff_t(lent->patches), layer.patches.end());
                     raster::bake_vectors(page, drawn);
                     layer.raster_png = drawn.raster_png;
