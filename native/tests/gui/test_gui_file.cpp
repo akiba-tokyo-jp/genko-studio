@@ -31,12 +31,15 @@
 #include "app/theme.hpp"
 #include "core/base64.hpp"
 #include "core/color_model.hpp"
+#include "core/command_bus.hpp"
 #include "core/file_info.hpp"
+#include "formats/copy.hpp"
 #include "formats/pillow_save.hpp"
 #include "gui_support.hpp"
 #include "render/image.hpp"
 #include "render/page.hpp"
 #include "render/png.hpp"
+#include "render/ops_registry.hpp"
 #include "storage/fsutil.hpp"
 #include "testsupport.hpp"
 
@@ -462,6 +465,88 @@ private slots:
         QVERIFY(d.doc().page(0).rgb && d.doc().page(0).rgb->profile == core::builtin_profile("display-p3")->ref());
         genko::app::settings()->remove(QStringLiteral("color/askOnMissing"));
         genko::app::settings()->remove(QStringLiteral("color/workingRgb"));
+    }
+
+    // 複製… and コピーを保存… of the page chosen in a book of many pages (review of P2-4): the 10th page of a book of 12 read
+    // first page first — while it is not read yet, said and nothing made; once read, the 10th page itself —, and of a book
+    // in memory (a picture opened, pages added to it) the 10th page itself.
+    void theTenthPageOfALongBookIsTheOneCopied() {
+        // (a book of 12 pages, each its own line and note)
+        core::Document many = new_doc(12);
+        Json ops = Json::array();
+        for (int n = 1; n <= 12; ++n) {
+            ops.push_back(Json{{"op", "set_note"}, {"page", n}, {"note", "頁" + std::to_string(n)}});
+            ops.push_back(Json{{"op", "add_stroke"}, {"page", n}, {"layer", "ink"},
+                               {"points", Json::array({Json::array({20.0, 10.0 + n * 15.0, 0.7}), Json::array({150.0, 10.0 + n * 15.0, 0.7})})},
+                               {"width_mm", 2.0}, {"stabilize", 0}});
+        }
+        many = core::CommandBus(render::ops_registry()).apply(many, ops, core::Actor("human:test")).doc;
+        Desk d;
+        const fs::path long_book = path_of(d.dir.filePath("long.genko"));
+        write_book(long_book, many);
+        Session::Options options = quick(path_of(d.dir.filePath("recovery-long")));
+        options.defer_pages = true;
+        options.read_rest_now = false;
+        auto session = Session::from(Session::read(long_book, options), long_book, options);
+        QVERIFY(session->loading());
+        MainWindow window(session);
+        window.resize(1200, 860);
+        window.show();
+        d.dialog = [](QDialog* dialog) { return dialog->objectName() == QStringLiteral("duplicateDialog") ? static_cast<int>(QDialog::Accepted) : 0; };
+        window.go_to_page(10);
+        QCOMPARE(window.page_index(), 9);
+        // (not read yet: said, nothing made, nothing written)
+        const fs::path png = path_of(d.dir.filePath("tenth.png"));
+        d.save_as_target = qpath(png);
+        window.action(QStringLiteral("act_duplicate_image"))->trigger();
+        QCOMPARE(static_cast<int>(window.documents().size()), 1);
+        QVERIFY2(window.last_notice().contains(QStringLiteral("読み込んでいます")), qPrintable(window.last_notice()));
+        window.action(QStringLiteral("act_save_copy"))->trigger();
+        QVERIFY(!fs::exists(png));
+        QVERIFY2(window.last_notice().contains(QStringLiteral("読み込んでいます")), qPrintable(window.last_notice()));
+        // (read: the 10th page itself)
+        session->read_rest();
+        QVERIFY(wait_for([&] { return !session->loading(); }));
+        window.go_to_page(10);
+        QCOMPARE(window.page_index(), 9);
+        window.action(QStringLiteral("act_save_copy"))->trigger();
+        QVERIFY(fs::exists(png));
+        const fs::path direct = path_of(d.dir.filePath("direct.png"));
+        (void)genko::formats::write_copy(*session->snapshot(), 9, direct);
+        QVERIFY(render::open_image(bytes_of(png)).convert("RGB").tobytes() == render::open_image(bytes_of(direct)).convert("RGB").tobytes());
+        window.action(QStringLiteral("act_duplicate_image"))->trigger();
+        QCOMPARE(static_cast<int>(window.documents().size()), 2);
+        QCOMPARE(window.session().document().pages.size(), std::size_t(1));
+        QCOMPARE(window.session().document().page(0).note, std::string("頁10"));
+        window.close();
+        // (a book in memory: a picture opened, 11 pages added — its 10th page, not the picture's —)
+        d.window->open_path(d.picture("memory.png"));
+        QVERIFY(wait_for([&] { return d.tabs() == 2; }));
+        Json added = Json::array();
+        for (int n = 2; n <= 12; ++n) added.push_back(Json{{"op", "add_page"}});
+        for (int n = 2; n <= 12; ++n) added.push_back(Json{{"op", "set_note"}, {"page", n}, {"note", "メモ" + std::to_string(n)}});
+        QVERIFY(d.window->apply_ops(added));
+        QVERIFY(!d.window->session().path());
+        QCOMPARE(d.doc().pages.size(), std::size_t(12));
+        d.window->go_to_page(10);
+        QCOMPARE(d.window->page_index(), 9);
+        const fs::path memory_png = path_of(d.dir.filePath("memory-tenth.png"));
+        d.save_as_target = qpath(memory_png);
+        d.trigger("act_save_copy");
+        QVERIFY(fs::exists(memory_png));
+        const fs::path memory_direct = path_of(d.dir.filePath("memory-direct.png"));
+        (void)genko::formats::write_copy(*d.window->session().snapshot(), 9, memory_direct);
+        QVERIFY(render::open_image(bytes_of(memory_png)).convert("RGB").tobytes() ==
+                render::open_image(bytes_of(memory_direct)).convert("RGB").tobytes());
+        const fs::path memory_first = path_of(d.dir.filePath("memory-first.png"));
+        (void)genko::formats::write_copy(*d.window->session().snapshot(), 0, memory_first);
+        QVERIFY(render::open_image(bytes_of(memory_png)).convert("RGB").tobytes() !=
+                render::open_image(bytes_of(memory_first)).convert("RGB").tobytes());  // (not the picture's page)
+        d.trigger("act_duplicate_image");
+        QCOMPARE(d.tabs(), 3);
+        QCOMPARE(d.doc().pages.size(), std::size_t(1));
+        QCOMPARE(d.doc().page(0).note, std::string("メモ10"));
+        d.dialog = nullptr;
     }
 
     // ファイル情報…: the items set (one change, 取り消し takes it back).

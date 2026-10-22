@@ -332,6 +332,21 @@ void MainWindow::revert() {
     flash(QStringLiteral("最後に保存したときの状態に戻しました（取り消せます）"), 4000);
 }
 
+std::optional<std::size_t> MainWindow::shown_page_at(const std::shared_ptr<const core::Document>& doc, const core::Page* page) {
+    if (doc && page != nullptr) {
+        for (std::size_t i = 0; i < doc->pages.size(); ++i) {
+            if (!doc->pages[i] || doc->pages[i]->id != page->id) continue;
+            if (doc->is_deferred(i)) {
+                flash(QStringLiteral("このページを読み込んでいます。読み込みが終わってから、もう一度選んでください。"), 6000, true);
+                return std::nullopt;
+            }
+            return i;
+        }
+    }
+    flash(QStringLiteral("見ているページが見つかりません（原稿は変わりません）"), 6000, true);
+    return std::nullopt;
+}
+
 bool MainWindow::save_copy_to(const QString& chosen) {
     const QString extension = picture_extension(chosen);
     QString path = chosen;
@@ -378,17 +393,11 @@ bool MainWindow::save_copy_to(const QString& chosen) {
             }
         }
     }
-    // (the page shown: コンテンツを編集's tab, its contents' page — never another page of the book in its place)
-    const std::shared_ptr<const core::Document> shown = shown_book();
-    const core::Page* page = current_page();
-    std::optional<std::size_t> index;
-    for (std::size_t i = 0; shown && page != nullptr && i < shown->pages.size(); ++i) {
-        if (!shown->is_deferred(i) && shown->pages[i] && shown->pages[i]->id == page->id) index = i;
-    }
-    if (!index) {
-        flash(QStringLiteral("コピーを保存できませんでした: 書くページが見つかりません"), 6000, true);
-        return false;
-    }
+    // (the page shown, by its id: the book's — the session's book, as before —, or in コンテンツを編集's tab its contents'
+    // page; a page not read yet is said, never another page in its place)
+    const std::shared_ptr<const core::Document> shown = contents_ ? shown_book() : session_->snapshot();
+    const std::optional<std::size_t> index = shown_page_at(shown, current_page());
+    if (!index) return false;
     formats::CopyOptions options;
     if (extension == QLatin1String("jpg") || extension == QLatin1String("jpeg")) {
         const auto quality = ask::get_int(this, QStringLiteral("JPEG のオプション"), QStringLiteral("画質（0〜12。12 が最高）"), 10, 0, 12);
@@ -462,16 +471,11 @@ void MainWindow::duplicate_dialog() {
     QObject::connect(buttons, &QDialogButtonBox::rejected, &dialog, &QDialog::reject);
     look::frame(&dialog, look::header(QStringLiteral("複製"), QStringLiteral("このページを、名前の無い 1 ページの原稿にします")), rows, nullptr, look::footer(buttons));
     if (ask::exec(&dialog) != QDialog::Accepted) return;
-    // (the page shown: コンテンツを編集's tab, its contents' page — never another page of the book in its place)
-    const std::shared_ptr<const core::Document> now = shown_book();
-    std::optional<std::size_t> index;
-    for (std::size_t i = 0; now && i < now->pages.size(); ++i) {
-        if (!now->is_deferred(i) && now->pages[i] && now->pages[i]->id == page->id) index = i;
-    }
-    if (!index) {
-        flash(QStringLiteral("複製できませんでした: 複製するページが見つかりません"), 6000, true);
-        return;
-    }
+    // (the page shown, by its id: the book's — the session's book, as before —, or in コンテンツを編集's tab its contents'
+    // page; a page not read yet is said, never another page in its place)
+    const std::shared_ptr<const core::Document> now = contents_ ? shown_book() : session_->snapshot();
+    const std::optional<std::size_t> index = shown_page_at(now, page);
+    if (!index) return;
     try {
         // (the merged picture made on a worker: the window goes on drawing)
         const std::string title = name->text().trimmed().toStdString();

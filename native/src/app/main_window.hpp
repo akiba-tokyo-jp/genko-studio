@@ -708,6 +708,9 @@ public:
     // 画像 → 複製… (image.duplicate): the page in front as a book of its own in memory (its merged picture alone when
     // asked).
     void duplicate_dialog();
+    // The place of the page shown in `doc` (the session's book, or コンテンツを編集's view of its contents), by its id; none
+    // — said — when it is not read yet or not there (never another page in its place).
+    std::optional<std::size_t> shown_page_at(const std::shared_ptr<const core::Document>& doc, const core::Page* page);
 
 private:
     void path_drawn(const core::Json& subpath);
