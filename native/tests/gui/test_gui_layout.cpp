@@ -241,7 +241,7 @@ int probe(int argc, char** argv) {
         app::CloseGuard guard(nullptr, status, QStringLiteral("とても長い題名の原稿をここに書いておく 第12話"));
         out << look_at(QStringLiteral("close"), &guard, guard.size(),
                        {{QStringLiteral("保存して閉じる"), guard.save_button(), true},
-                        {QStringLiteral("別の場所に保存して閉じる"), guard.save_as_button(), true},
+                        {QStringLiteral("別名で保存して閉じる"), guard.save_as_button(), true},
                         {QStringLiteral("保存せずに閉じる…"), guard.discard_button(), true},
                         {QStringLiteral("キャンセル"), guard.cancel_button(), true}})
                    .dump()

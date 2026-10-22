@@ -292,7 +292,7 @@ bool MainWindow::place_embedded(std::optional<QString> chosen) {
     if (current_page() == nullptr) return false;
     const Asked asked = asking();
     if (!session_->path()) {
-        flash(QStringLiteral("画像を置く前に、原稿を保存します（ファイル → 別の場所に保存）"), 6000);
+        flash(QStringLiteral("画像を置く前に、原稿を保存します（ファイル → 別名で保存…）"), 6000);
         return false;
     }
     const QString file =
@@ -892,7 +892,7 @@ bool MainWindow::replace_contents(std::optional<QString> path) {
     const auto chosen = chosen_smart(*this);
     if (!chosen) return false;
     if (!session_->path()) {
-        flash(QStringLiteral("画像を置く前に、原稿を保存します（ファイル → 別の場所に保存）"), 6000);
+        flash(QStringLiteral("画像を置く前に、原稿を保存します（ファイル → 別名で保存…）"), 6000);
         return false;
     }
     const Asked asked = asking();
@@ -914,7 +914,7 @@ bool MainWindow::relink_contents(std::optional<QString> path) {
     const auto chosen = chosen_smart(*this);
     if (!chosen) return false;
     if (!session_->path()) {
-        flash(QStringLiteral("画像を置く前に、原稿を保存します（ファイル → 別の場所に保存）"), 6000);
+        flash(QStringLiteral("画像を置く前に、原稿を保存します（ファイル → 別名で保存…）"), 6000);
         return false;
     }
     const Asked asked = asking();
@@ -954,7 +954,7 @@ bool MainWindow::link_contents(std::optional<QString> path) {
         return false;
     }
     if (!session_->path()) {
-        flash(QStringLiteral("リンクにする前に、原稿を保存します（ファイル → 別の場所に保存）"), 6000);
+        flash(QStringLiteral("リンクにする前に、原稿を保存します（ファイル → 別名で保存…）"), 6000);
         return false;
     }
     const bool page_contents = chosen->contents->kind == "page";
@@ -1015,7 +1015,7 @@ std::optional<std::pair<std::string, std::string>> MainWindow::read_linked(const
 
 bool MainWindow::update_contents(bool all) {
     if (!session_->path()) {
-        flash(QStringLiteral("原稿を保存してから更新します（ファイル → 別の場所に保存）"), 6000);
+        flash(QStringLiteral("原稿を保存してから更新します（ファイル → 別名で保存…）"), 6000);
         return false;
     }
     check_links();
@@ -1107,7 +1107,7 @@ bool MainWindow::place_linked(std::optional<QString> chosen) {
     if (current_page() == nullptr) return false;
     const Asked asked = asking();
     if (!session_->path()) {
-        flash(QStringLiteral("画像を置く前に、原稿を保存します（ファイル → 別の場所に保存）"), 6000);
+        flash(QStringLiteral("画像を置く前に、原稿を保存します（ファイル → 別名で保存…）"), 6000);
         return false;
     }
     const QString file = chosen ? *chosen : ask::open_path(this, QStringLiteral("リンクを配置"), QString::fromLatin1(kPictures));
@@ -1119,7 +1119,7 @@ bool MainWindow::place_linked(std::optional<QString> chosen) {
 
 bool MainWindow::package_book(std::optional<QString> folder) {
     if (!session_->path()) {
-        flash(QStringLiteral("パッケージの前に、原稿を保存します（ファイル → 別の場所に保存）"), 6000);
+        flash(QStringLiteral("パッケージの前に、原稿を保存します（ファイル → 別名で保存…）"), 6000);
         return false;
     }
     const QString out = folder ? *folder : ask::existing_dir(this, QStringLiteral("パッケージを作るフォルダー"));

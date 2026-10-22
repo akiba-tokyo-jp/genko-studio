@@ -1207,7 +1207,9 @@ private slots:
                                            "rename_path", "make_work_path", "text_to_path", "stroke_path", "set_vector_mask", "add_shape_part",
                                            "edit_shape_part", "combine_shape_parts", "move_shape_parts", "transform_layers",
                                            "content_aware_scale", "align_layers", "distribute_layers", "arrange_layers", "link_layers",
-                                           "resize_pages", "set_canvas_size", "crop_page", "trim_page", "reveal_all", "rotate_pages"};
+                                           "resize_pages", "set_canvas_size", "crop_page", "trim_page", "reveal_all", "rotate_pages",
+                                           // (PC4 F-0: 節 F's ops registered for F-b and F-e, SPEC FILE-01)
+                                           "set_file_info", "set_camera_raw"};
         for (const std::string& name : genko::render::ops_registry().names()) {
             if (listed.count(name) == 0 && own.count(name) == 0) missing += (missing.empty() ? "" : ", ") + name;
         }

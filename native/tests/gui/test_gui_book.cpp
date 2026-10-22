@@ -1807,7 +1807,7 @@ private slots:
             };
             QVERIFY(s.trigger("act_merge_book"));
             QVERIFY(!asked);
-            QCOMPARE(s.window->last_notice(), QStringLiteral("取り込む前に、この原稿を保存します（ファイル → 別の場所に保存）"));
+            QCOMPARE(s.window->last_notice(), QStringLiteral("取り込む前に、この原稿を保存します（ファイル → 別名で保存…）"));
         }
         Studio s(2);
         const auto before = s.session->snapshot();

@@ -572,7 +572,7 @@ const std::vector<Rule>& rules() {
         r.push_back(rule(R"(the layer \S+ is not a paint layer \(pen or paint\))", "描画のレイヤー（ペン・ペイント）を選びます"));
         r.push_back(rule(R"(id \(the (?:paint layer to trap|layer to fade)\) is required)", "対象のレイヤーが要ります"));
         r.push_back(rule(R"(from \(the layer's pixels before.*\) is required)", "フェードする前の画素（from）が要ります"));
-        r.push_back(rule(R"(fade_layer reads the pixels before from the book's folder.*)", "フェードの前に、原稿を保存します（ファイル → 別の場所に保存）"));
+        r.push_back(rule(R"(fade_layer reads the pixels before from the book's folder.*)", "フェードの前に、原稿を保存します（ファイル → 別名で保存…）"));
         r.push_back(rule(R"(the book has no asset \S+ \((?:a tile of )?the pixels before\))", "フェードする前の画素が、原稿の素材にありません"));
         r.push_back(rule(R"(from as tiles is a precise layer's.*)", "タイルの形の前の画素（from）は、高精度のレイヤーのものです（ほかのレイヤーは素材の sha256 を渡します）"));
         r.push_back(rule(R"(the pixels before are too large to read whole.*)",

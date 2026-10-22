@@ -442,7 +442,7 @@ bool MainWindow::import_image(std::optional<QString> chosen) {
     if (current_page() == nullptr) return false;
     const Asked asked = asking();  // (the book and page asked about: the file dialog waits for the person)
     if (!session_->path()) {
-        flash(QStringLiteral("画像を読み込む前に、原稿を保存します（ファイル → 別の場所に保存）"), 6000);
+        flash(QStringLiteral("画像を読み込む前に、原稿を保存します（ファイル → 別名で保存…）"), 6000);
         return false;
     }
     const QString file =

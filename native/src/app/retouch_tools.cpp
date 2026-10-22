@@ -415,7 +415,7 @@ void MainWindow::build_clone_source_dock() {
 
 std::optional<Json> MainWindow::history_brush_from(const core::Page& page, const core::Layer& layer) {
     if (!session_->path()) {
-        flash(QStringLiteral("ヒストリーブラシの前に、原稿を保存します（ファイル → 別の場所に保存）"), 6000);
+        flash(QStringLiteral("ヒストリーブラシの前に、原稿を保存します（ファイル → 別名で保存…）"), 6000);
         return std::nullopt;
     }
     const int row = history_brush_row.value_or(0);

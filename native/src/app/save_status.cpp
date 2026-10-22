@@ -40,7 +40,7 @@ QString state_words(const SaveStatus& status) {
         return words;
     }
     case SaveKind::Dirty:
-        return status.target ? QStringLiteral("未保存（まもなく自動で保存）") : QStringLiteral("未保存（ファイル → 別の場所に保存）");
+        return status.target ? QStringLiteral("未保存（まもなく自動で保存）") : QStringLiteral("未保存（ファイル → 別名で保存…）");
     case SaveKind::Saving:
         return status.newer_waiting ? QStringLiteral("保存中…（その後の変更は次に保存）") : QStringLiteral("保存中…");
     case SaveKind::Failed:
@@ -180,7 +180,7 @@ CloseGuard::CloseGuard(QWidget* parent, const SaveStatus& status, const QString&
     where->set_path(target_of(status), status.target ? QStringLiteral("保存先: ") : QString());
     save_ = new QPushButton(QStringLiteral("保存して%1").arg(verb));
     save_->setToolTip(QStringLiteral("原稿に保存できたときだけ%1ます").arg(verb.left(verb.size() - 1)));
-    save_as_ = new QPushButton(QStringLiteral("別の場所に保存して%1").arg(verb));
+    save_as_ = new QPushButton(QStringLiteral("別名で保存して%1").arg(verb));
     discard_ = new QPushButton(QStringLiteral("保存せずに%1…").arg(verb));
     discard_->setToolTip(QStringLiteral("保存していない変更を捨てます（もう一度確かめます）"));
     cancel_ = new QPushButton(QStringLiteral("キャンセル"));
@@ -192,7 +192,7 @@ CloseGuard::CloseGuard(QWidget* parent, const SaveStatus& status, const QString&
     cancel_->setAutoDefault(true);
     cancel_->setDefault(true);
     theme::primary(cancel_);  // the safe default must be visible, not merely an internal Qt flag
-    if (!status.target) save_->setEnabled(false);  // (a book never given a folder: only 別の場所に保存)
+    if (!status.target) save_->setEnabled(false);  // (a book never given a folder: only 別名で保存)
     connect(save_, &QPushButton::clicked, this, [this] {
         choice_ = Choice::Save;
         accept();
