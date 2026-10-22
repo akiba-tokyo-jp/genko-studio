@@ -7,7 +7,7 @@
 // page, the lightness of a page of inks (an edge, a relief, a grey on K alone; a Lab page's a and b grey), the same look at
 // 200 and 600 dpi, and 置き換え's map — a file's data, a layer of the book, its merged picture, a map the book holds —,
 // refused when it cannot be read, made the book's in a smart filter (Document::filter_files) and carried to another book
-// with its smart object (bring_contents).
+// with its smart object (bring_contents); and each kind on an opened picture's page (its grid "finest", 300 ppi).
 
 #include <QtTest/QtTest>
 
@@ -25,6 +25,8 @@
 #include "core/filter_kinds.hpp"
 #include "core/ink.hpp"
 #include "core/smart.hpp"
+#include "formats/open_file.hpp"
+#include "formats/pillow_save.hpp"
 #include "render/fx.hpp"
 #include "render/image.hpp"
 #include "render/ops_registry.hpp"
@@ -938,6 +940,31 @@ private slots:
 
     // How heavy (render::fx::work): 油彩 on a B4 page at 600 dpi is heavy (a thread of its own, 中止), メゾティント on an 8-bit
     // page is not.
+    // An opened picture's page (PC4 F-b's grid "finest", 300 ppi; the integration 441a58f): each kind works on the picture's
+    // own pixels, its lengths the working 200 dpi's scaled (モザイク's 10: a cell of 15 pixels).
+    void onAnOpenedPicture() {
+        const render::Image picture = eight_pattern(300, 200).convert("RGB");
+        const std::string png = formats::png_bytes(picture, formats::PngSave{std::array<double, 2>{300, 300}, {}, false});
+        const core::Document doc = formats::open_file(png, "picture.png").doc;
+        const std::string back = doc.page(0).layers[0].id;
+        QVERIFY(std::fabs(render::fx::layer_grid(doc.page(0), doc.page(0).layers[0]).s - 1.5) < 1e-9);
+        const auto picture_of = [](const core::Document& d) { return render::raster::layer_pixels(d.page(0), d.page(0).layers[0]).convert("RGBA"); };
+        for (const auto& [kind, params] : d2_kinds()) {
+            Json op{{"op", "filter_raster"}, {"page", 1}, {"id", back}, {"kind", kind}};
+            op.update(params);
+            if (kind == "distort_displace") op["map"] = Json{{"layer", "merged"}};
+            const render::Image done = picture_of(apply_ops(doc, Json::array({op})).doc);
+            QCOMPARE(done.size(), (render::Size{300, 200}));
+            QVERIFY2(done.tobytes() != picture.convert("RGBA").tobytes(), kind.c_str());
+        }
+        const Json mosaic{{"op", "filter_raster"}, {"page", 1}, {"id", back}, {"kind", "pixelate_mosaic"}, {"cell_size", 10}};
+        const render::Image cells = picture_of(apply_ops(doc, Json::array({mosaic})).doc);
+        for (int y = 15; y < 30; ++y)
+            for (int x = 15; x < 30; ++x) QCOMPARE(cells.getpixel(x, y), cells.getpixel(15, 15));
+        QVERIFY(cells.getpixel(29, 15) != cells.getpixel(30, 15));
+        QVERIFY(cells.getpixel(15, 29) != cells.getpixel(15, 30));
+    }
+
     void howHeavy() {
         const Json oil = normal("stylize_oil_paint", Json::object());
         QVERIFY(render::fx::work("stylize_oil_paint", oil, 6071ull * 8598ull, 3) >= render::fx::kHeavyWork);

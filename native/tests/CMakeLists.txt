@@ -179,7 +179,7 @@ genko_test(test_fx_gallery SOURCES unit/test_fx_gallery.cpp DEPS genko_test_supp
 # PC4 節 D2 (変形・ピクセレート・表現手法): PhotoCraft's tests of its 25 kinds, the same bytes whatever the tiling at a finer
 # grid's scale, a part worked alone, no clear pixel's colour, a distortion centred on the selection, カラーハーフトーン's four
 # plates, a page of inks' lightness, 200 and 600 dpi, 置き換え's maps (data, layers, the book's in a smart filter, carried).
-genko_test(test_fx_d2 SOURCES unit/test_fx_d2.cpp DEPS genko_test_support genko_render_ops LABELS unit TIMEOUT 900)
+genko_test(test_fx_d2 SOURCES unit/test_fx_d2.cpp DEPS genko_test_support genko_formats genko_render_ops LABELS unit TIMEOUT 900)
 # PC2c (COLOR-04): Apply Image and Calculations (Blending, the sources, a layer, a channel, inks; the three results),
 # trapping (algo/trap.rs's tests and the op) and the fade (its mix, the op reading the pixels before from the assets).
 genko_test(test_image_calc SOURCES unit/test_image_calc.cpp DEPS genko_test_support genko_render_ops LABELS unit TIMEOUT 600)
