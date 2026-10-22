@@ -91,8 +91,9 @@ Image blend_over(const Image& base, const Image& over, std::string_view mode, do
 // The colours of two "RGB" pictures mixed in a blend mode as render._blend_over mixes them (normal or a mode it does not
 // know: `over`'s). (PC2: a correction's native.blend on the 8-bit page, render/adjust.)
 Image blend_colours(const Image& base_rgb, const Image& over_rgb, std::string_view mode);
-// render.fill_layer_image over `area`.
-Image fill_layer_image(const core::Layer& layer, Size size, int dpi, bool mono, const Box& area);
+// render.fill_layer_image over `area`. (patterns@1, PC4 E3: a pattern fill is the pattern of `book` laid over the page —
+// its RGB values as they are, the colours inks mean —; nothing without the book.)
+Image fill_layer_image(const core::Layer& layer, Size size, int dpi, bool mono, const Box& area, const core::Document* book = nullptr);
 // render.layer_effects (the whole of `raster`: the caller gives it a margin).
 Image layer_effects(const core::Layer& layer, Image raster, int dpi);
 // How far layer_effects reaches (px): a picture computed this much larger gives exact pixels inside.

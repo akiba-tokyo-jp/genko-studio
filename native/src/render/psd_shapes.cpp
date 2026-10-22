@@ -7,7 +7,10 @@
 #include "core/json.hpp"
 #include "core/ops_util.hpp"
 #include "core/pyconv.hpp"
+#include "core/patterns.hpp"
 #include "core/pynum.hpp"
+#include "render/pat.hpp"
+#include "render/patterns.hpp"
 #include "render/psd_descriptor.hpp"
 #include "render/psd_paths.hpp"
 #include "render/shape_parts.hpp"
@@ -162,9 +165,70 @@ d::Writer gradient_descriptor(const Json& g, const vec::Path& path, const Canvas
     return w;
 }
 
+// patterns@1 (PC4 E3): a pattern fill's PtFl descriptor (PhotoCraft v0.2.0 crates/io/src/blocks.rs fill_to_desc,
+// pattern_ref_desc, with_pattern_placement).
+d::Writer pattern_descriptor(const Json& pattern, const Canvas& canvas) {
+    const std::string id = pattern.is_object() && pattern.contains("id") && pattern["id"].is_string() ? pattern["id"].get<std::string>() : std::string();
+    const core::Pattern* kept = canvas.book != nullptr ? core::find_pattern(*canvas.book, id) : nullptr;
+    const patterns::Spot spot = patterns::spot_of(pattern);
+    const double mm_px = canvas.width_px > 0 && canvas.width_mm > 0 ? canvas.width_mm / canvas.width_px : 25.4 / std::max(canvas.dpi, 1.0);
+    const double pattern_dpi = kept != nullptr ? kept->dpi : 25.4 / mm_px;
+    d::Writer w;
+    w.unit("Scl ", "#Prc", core::py_round(std::clamp(spot.scale * 100.0 * (25.4 / pattern_dpi) / mm_px, 1.0, 1000.0), 6));
+    d::Writer ref;
+    ref.text("Nm  ", psd::utf16(kept != nullptr ? kept->name : id));
+    ref.text("Idnt", psd::utf16(kept != nullptr ? pat::file_id(*kept) : id));
+    w.object("Ptrn", ref, "Ptrn");
+    if (spot.angle != 0.0) w.unit("Angl", "#Ang", spot.angle);
+    w.boolean("Algn", spot.link);
+    d::Writer phase;
+    phase.number("Hrzn", core::py_round(spot.phase_x_mm / mm_px, 6));
+    phase.number("Vrtc", core::py_round(spot.phase_y_mm / mm_px, 6));
+    w.object("phase", phase, "Pnt ");
+    return w;
+}
+
+// A PtFl descriptor read back as a pattern fill (PhotoCraft's pattern_ref, pattern_placement).
+std::optional<Json> pattern_read(const d::Object& o, const Placement& at) {
+    if (!at.pattern) return std::nullopt;
+    std::string name, id;
+    if (const d::Value* ref = o.get("Ptrn"); ref != nullptr && ref->object) {
+        if (const d::Value* n = ref->object->get("Nm  ")) name = psd::utf8_of(n->text);
+        if (const d::Value* i = ref->object->get("Idnt")) id = psd::utf8_of(i->text);
+    }
+    const auto found = at.pattern(id, name);
+    if (!found) return std::nullopt;
+    const auto number = [&](const d::Object& from, std::string_view key, double fallback) {
+        const d::Value* v = from.get(key);
+        const std::optional<double> n = v != nullptr ? v->numeric() : std::nullopt;
+        return n && std::isfinite(*n) ? *n : fallback;
+    };
+    // (Photoshop's one pattern pixel is Scl % of a canvas pixel: mm_x of the page; the book's is 1/dpi inch × its scale)
+    const double scale = number(o, "Scl ", 100.0) * at.mm_x * found->second / 25.4;
+    double px = 0.0, py = 0.0;
+    if (const d::Value* phase = o.get("phase"); phase != nullptr && phase->object) {
+        px = number(*phase->object, "Hrzn", 0.0);
+        py = number(*phase->object, "Vrtc", 0.0);
+    }
+    const d::Value* link = o.get("Algn");
+    Json spec = Json::object();
+    spec["id"] = found->first;
+    spec["scale"] = core::py_round(std::clamp(scale, core::kPatternScaleMin, core::kPatternScaleMax), 4);
+    spec["angle"] = core::py_round(std::clamp(number(o, "Angl", 0.0), -360.0, 360.0), 4);
+    spec["phase_mm"] = Json::array({core::py_round(std::clamp(at.x0_mm + px * at.mm_x, -core::kPatternPhaseMax, core::kPatternPhaseMax), 4),
+                                    core::py_round(std::clamp(at.y0_mm + py * at.mm_y, -core::kPatternPhaseMax, core::kPatternPhaseMax), 4)});
+    spec["link"] = link == nullptr || link->type != "bool" || link->boolean;
+    try {
+        return core::pattern_fill_spec(spec);
+    } catch (const std::exception&) {
+        return std::nullopt;
+    }
+}
+
 // A fill as its block's key and descriptor (a fill of none: black, its vstk saying the fill is off).
 std::pair<std::string, d::Writer> fill_descriptor(const Json& fill, const vec::Path& path, const Canvas& canvas) {
     if (fill.is_object()) {
+        if (const auto p = fill.find("pattern"); p != fill.end() && p->is_object()) return {"PtFl", pattern_descriptor(*p, canvas)};  // (patterns@1)
         if (const auto g = fill.find("gradient"); g != fill.end() && g->is_object()) return {"GdFl", gradient_descriptor(*g, path, canvas, false)};
         if (const auto rgb = fill.find("rgb"); rgb != fill.end()) {
             d::Writer w;
@@ -206,7 +270,7 @@ std::string vstk(const vec::ShapePart& part, const Canvas& canvas) {
     w.unit("strokeStyleOpacity", "#Prc", std::clamp(s.opacity, 0.0, 1.0) * 100.0);
     const Json& paint = s.fill.is_null() ? Json{{"rgb", nullptr}} : s.fill;
     auto [key, content] = fill_descriptor(paint, part.path, canvas);
-    w.object("strokeStyleContent", content, key == "GdFl" ? "gradientLayer" : "solidColorLayer");
+    w.object("strokeStyleContent", content, key == "GdFl" ? "gradientLayer" : key == "PtFl" ? "patternLayer" : "solidColorLayer");
     w.number("strokeStyleResolution", canvas.dpi);
     return w.versioned("strokeStyle");
 }
@@ -418,8 +482,13 @@ std::optional<Json> gradient_read(const d::Object& o, const vec::Path& path, con
     }
 }
 
-// A fill block's descriptor as a fill (SoCo: a colour; GdFl: a gradient); none for another (PtFl: a pattern, PC4's).
+// A fill block's descriptor as a fill (SoCo: a colour; GdFl: a gradient; PtFl: a pattern of the file, patterns@1); none for
+// another.
 std::optional<Json> fill_read(std::string_view key, const d::Object& o, const vec::Path& path, const Placement& at) {
+    if (key == "PtFl" || key == "patternLayer") {
+        if (auto spec = pattern_read(o, at)) return Json{{"pattern", std::move(*spec)}};
+        return std::nullopt;
+    }
     if (key == "SoCo" || key == "solidColorLayer") {
         const auto c = colour_in(o);
         if (!c) return std::nullopt;
@@ -458,7 +527,8 @@ bool writable(const vec::ShapePart& part) {
     const auto ok = [](const Json& fill) {
         if (fill.is_null()) return true;
         if (!fill.is_object()) return false;
-        return fill.contains("rgb") || (fill.contains("gradient") && fill["gradient"].is_object());
+        return fill.contains("rgb") || (fill.contains("gradient") && fill["gradient"].is_object()) ||
+               (fill.contains("pattern") && fill["pattern"].is_object());  // (patterns@1: PtFl)
     };
     return ok(part.fill) && (!part.stroke || ok(part.stroke->fill));
 }
@@ -498,6 +568,13 @@ std::string blocks(const vec::ShapePart& given, const Canvas& canvas) {
         out += tagged("iOpa", opacity);
     }
     return out;
+}
+
+std::string pattern_block(const Json& pattern, const Canvas& canvas) { return pattern_descriptor(pattern, canvas).versioned("null"); }
+
+std::optional<Json> pattern_fill_of(std::string_view payload, const Placement& at) {
+    const std::optional<d::Object> o = versioned_at(payload, 0);
+    return o ? pattern_read(*o, at) : std::nullopt;
 }
 
 std::optional<vec::ShapePart> part_of(const Blocks& blocks, const Placement& at) {

@@ -23,6 +23,7 @@
 #include "core/error.hpp"
 #include "core/filters.hpp"
 #include "core/frames.hpp"
+#include "core/patterns.hpp"
 #include "core/pyconv.hpp"
 #include "core/placement.hpp"
 #include "core/pynum.hpp"
@@ -44,6 +45,7 @@
 #include "render/op_limits.hpp"
 #include "render/page_internal.hpp"
 #include "render/paper.hpp"
+#include "render/patterns.hpp"
 #include "render/placed.hpp"
 #include "render/png.hpp"
 #include "render/prims.hpp"
@@ -418,7 +420,7 @@ Image quick_strokes(const Ctx& ctx, std::span<const core::StrokePtr> strokes, st
                     const Box& area, bool guide, const std::vector<const core::vector::ShapePart*>& parts = {}) {
     Image out = transparent(area);
     for (const core::Patch& patch : patches) paint_patch(out, area, patch, ctx.dpi, guide ? &kNameColor : nullptr);
-    if (!parts.empty()) shape_parts::draw(out, area, ctx.dpi, parts_of(parts, false), guide ? &kNameColor : nullptr);  // (pen-shapes@1)
+    if (!parts.empty()) shape_parts::draw(out, area, ctx.dpi, parts_of(parts, false), guide ? &kNameColor : nullptr, ctx.episode);  // (pen-shapes@1)
     PageCanvas canvas(out, area, ctx.size);
     Draw& draw = canvas.draw();
     const double scale = ctx.dpi / 25.4;
@@ -453,7 +455,7 @@ Image quick_strokes(const Ctx& ctx, std::span<const core::StrokePtr> strokes, st
         }
     }
     canvas.commit();
-    if (!parts.empty()) shape_parts::draw(out, area, ctx.dpi, parts_of(parts, true), guide ? &kNameColor : nullptr);  // (over the lines)
+    if (!parts.empty()) shape_parts::draw(out, area, ctx.dpi, parts_of(parts, true), guide ? &kNameColor : nullptr, ctx.episode);  // (over the lines)
     return out;
 }
 
@@ -512,7 +514,7 @@ std::optional<Image> draw_strokes(const Ctx& ctx, const Layer& layer, const Stro
     } else {
         out = transparent(area);
         for (const core::Patch& patch : set.patches) paint_patch(out, area, patch, ctx.dpi, guide ? &kNameColor : nullptr);
-        if (!under.empty()) shape_parts::draw(out, area, ctx.dpi, under, guide ? &kNameColor : nullptr);  // (pen-shapes@1)
+        if (!under.empty()) shape_parts::draw(out, area, ctx.dpi, under, guide ? &kNameColor : nullptr, ctx.episode);  // (pen-shapes@1)
     }
     // lines of one colour gather in one coverage mask (screen: a + b − ab) and go onto the layer once per colour
     // (the mask is made when a line of the colour first covers part of this area: an empty one lays nothing)
@@ -574,7 +576,7 @@ std::optional<Image> draw_strokes(const Ctx& ctx, const Layer& layer, const Stro
         ink->paste(chops::screen(ink->crop(in_ink), piece), Point{in_ink.x0, in_ink.y0});
     }
     lay();
-    if (!over.empty()) shape_parts::draw(out, area, ctx.dpi, over, guide ? &kNameColor : nullptr);  // (pen-shapes@1: over the lines)
+    if (!over.empty()) shape_parts::draw(out, area, ctx.dpi, over, guide ? &kNameColor : nullptr, ctx.episode);  // (pen-shapes@1: over the lines)
     if (!set.id.empty()) {
         auto entry = std::make_shared<CacheEntry>();
         entry->id = set.id;
@@ -1144,7 +1146,7 @@ ColorPicture precise_lines(const Ctx& ctx, const Layer& layer, const Box& box, c
         std::vector<const core::vector::ShapePart*> together;
         const auto lay = [&](const std::vector<const core::vector::ShapePart*>& parts, const Image* inside) {
             if (parts.empty()) return;
-            Image picture = shape_parts::picture(box, ctx.dpi, parts, guide ? &kNameColor : nullptr);
+            Image picture = shape_parts::picture(box, ctx.dpi, parts, guide ? &kNameColor : nullptr, ctx.episode);
             if (inside != nullptr) picture.putalpha(chops::multiply(alpha_of(picture), *inside));
             if (lock) picture.putalpha(chops::multiply(alpha_of(picture), *lock));
             own.blend(picture, 1, false);
@@ -1376,6 +1378,56 @@ bool smart_ink_layer(InkCanvas& canvas, const Ctx& ctx, const Layer& layer, cons
     return true;
 }
 
+// patterns@1 (PC4 E3): a pattern fill layer on a page in precise colour or of inks — the book's pattern in the canvas's own
+// values (render/patterns: an RGB pattern's values as the page's, the colours inks mean in its space; on a page of inks a
+// pattern of its mode as it is, another by its rules), cut to its panels, with its mask, laid as a precise or ink layer's
+// is. False: not a pattern fill, or one drawn as an 8-bit picture (an effect, a screen, a monochrome page's greys).
+const Json* pattern_fill_here(const Ctx& ctx, const Layer& layer) {
+    if (layer.kind != LayerKind::Fill || !layer.fill) return nullptr;
+    const Json* pattern = core::pattern_of_fill(*layer.fill);
+    if (pattern == nullptr || (layer.effect && core::py_truthy(*layer.effect)) || screened_here(ctx, layer)) return nullptr;
+    return pattern;
+}
+
+std::optional<Image> pattern_mask(const Ctx& ctx, const Layer& layer, const Box& area) {
+    std::optional<Image> shown;
+    if (layer.mask && layer.mask->png && !layer.mask->png->empty() && layer.mask->enabled)
+        shown = layer_masks::shown(*ctx.page, *layer.mask, decoded(layer.mask->png, "L"), ctx.size, area, Resample::Bilinear);
+    return vector_masks::with_vector_mask(*ctx.page, layer, ctx.size, area, std::move(shown));
+}
+
+bool pattern_precise_layer(ColorCanvas& canvas, const Ctx& ctx, const Layer& layer, const Box& area, const Image* panel) {
+    const Json* pattern = pattern_fill_here(ctx, layer);
+    if (pattern == nullptr || ctx.page->spec.expression != "color" || !ColorCanvas::supports_blend(layer.blend)) return false;
+    const std::optional<patterns::Laid> laid = patterns::laid(ctx.episode, *pattern, patterns::Target::rgb(*ctx.page), ctx.dpi);
+    if (!laid) return true;  // (a pattern the book does not hold: nothing — such a book is read-only)
+    ColorPicture picture = patterns::linear(*laid, area, canvas.space());
+    if (panel != nullptr && layer.panel_clip) {
+        const std::string cut = panel->tobytes();
+        for (std::size_t i = 0; i < picture.pixels.size() && i < cut.size(); ++i) picture.pixels[i][3] *= static_cast<unsigned char>(cut[i]) / 255.0;
+    }
+    const std::optional<Image> shown = pattern_mask(ctx, layer, area);
+    canvas.blend(picture, layer.opacity, layer.clip, layer.blend, shown ? &*shown : nullptr);
+    return true;
+}
+
+bool pattern_ink_layer(InkCanvas& canvas, const Ctx& ctx, const Layer& layer, const Box& area, const Image* panel) {
+    const Json* pattern = pattern_fill_here(ctx, layer);
+    if (pattern == nullptr) return false;
+    const std::optional<patterns::Laid> laid = patterns::laid(ctx.episode, *pattern, patterns::Target::inks(*ctx.page->color), ctx.dpi);
+    if (!laid) return true;
+    InkPicture picture = patterns::inks(*laid, area);
+    const unsigned all = picture.channels + 1;
+    if (panel != nullptr && layer.panel_clip) {
+        const std::string cut = panel->tobytes();
+        for (std::size_t i = 0; i * all < picture.values.size() && i < cut.size(); ++i)
+            picture.values[i * all + picture.channels] *= static_cast<unsigned char>(cut[i]) / 255.0;
+    }
+    const std::optional<Image> shown = pattern_mask(ctx, layer, area);
+    canvas.blend(picture, layer.opacity, layer.clip, layer.blend, shown ? &*shown : nullptr);
+    return true;
+}
+
 // smart-objects@1: a layer laid on a smart object's contents page so far (over nothing, render_contents): as blend_over
 // lays it — and in a blend mode, its colour over what is not there yet as it is (the contents are composited alone, as a
 // group of their own: a mode mixes with what is below it inside, never with the paper).
@@ -1560,6 +1612,7 @@ void ink_layer(InkCanvas& canvas, const Ctx& ctx, const Layer& layer, const Box&
         return;
     }
     if (layer.kind == LayerKind::Smart && smart_ink_layer(canvas, ctx, layer, area)) return;  // (smart-objects@1)
+    if (pattern_ink_layer(canvas, ctx, layer, area, panel)) return;                            // (patterns@1, PC4 E3)
     if (layer.ink_raster) {
         const core::PageColor& color = *ctx.page->color;
         // its picture over a box (its pixels, its lines over them inside the box's panels), as layer_with_effects takes
@@ -1623,7 +1676,7 @@ void ink_layer(InkCanvas& canvas, const Ctx& ctx, const Layer& layer, const Box&
         return;
     }
     if (layer.kind == LayerKind::Fill && truthy_json(layer.fill)) {
-        Image raster = fill_layer_image(layer, ctx.size, ctx.dpi, false, area);
+        Image raster = fill_layer_image(layer, ctx.size, ctx.dpi, false, area, ctx.episode);
         if (panel != nullptr && layer.panel_clip) raster.putalpha(chops::multiply(alpha_of(raster), *panel));
         raster = masked(ctx, layer, std::move(raster), area);
         canvas.blend_rgba(raster, layer.opacity, layer.clip, layer.blend);
@@ -1862,6 +1915,7 @@ RenderResult render(const Page& page_in, int dpi, const RenderOptions& options, 
         if (print && !layer.exportable) continue;
         if (guide_role(layer.role) && print) continue;
         if (precision && layer.kind == LayerKind::Smart && smart_precise_layer(*precision, ctx, layer, area)) continue;  // (smart-objects@1)
+        if (precision && pattern_precise_layer(*precision, ctx, layer, area, panel)) continue;                          // (patterns@1, PC4 E3)
         if (precision && (core::has_color_strokes(layer) || layer.color_raster)) {
             precise_layer(*precision, ctx, layer, area, panel);  // (PC2d: with its lines, effects, colour; a tone as tones)
             continue;
@@ -1927,7 +1981,7 @@ RenderResult render(const Page& page_in, int dpi, const RenderOptions& options, 
             continue;
         }
         if (layer.kind == LayerKind::Fill && truthy_json(layer.fill)) {
-            Image raster = fill_layer_image(layer, ctx.size, dpi, page.spec.expression != "color", area);
+            Image raster = fill_layer_image(layer, ctx.size, dpi, page.spec.expression != "color", area, ctx.episode);
             if (panel != nullptr && layer.panel_clip) raster.putalpha(chops::multiply(alpha_of(raster), *panel));
             raster = masked(ctx, layer, std::move(raster), area);
             const Image* clip = layer.clip && prev_alpha ? &*prev_alpha : nullptr;
@@ -2064,7 +2118,7 @@ void pen_shape_layers(const Ctx& ctx, const Layer& layer, const std::function<vo
         else out.settings = true;
         out.name = part.name ? *part.name : alone ? name : name + "・形 " + std::to_string(n);
         out.shape = &part;
-        Image picture = shape_parts::picture(whole, ctx.dpi, {&part});
+        Image picture = shape_parts::picture(whole, ctx.dpi, {&part}, nullptr, ctx.episode);
         std::optional<Image> cut;
         if (panels) {
             cut = *panels;
@@ -2198,6 +2252,25 @@ void page_layers(const core::Page& page, const core::Document& episode, int dpi,
         // look with its mask, vector mask and settings, not among the ink's lines)
         if (layer.kind == LayerKind::Strokes && (shape_parts::any(layer) || (shapes && layer.vector_mask))) {
             pen_shape_layers(ctx, layer, each, shapes);
+            continue;
+        }
+        if (shapes && layer.kind == LayerKind::Fill && layer.fill && core::pattern_of_fill(*layer.fill)) {
+            // (patterns@1, PC4 E3: a pattern fill layer as Photoshop's — its look, its settings and masks, its pattern)
+            PageLayer out;
+            out.id = layer.id;
+            out.name = !layer.title.empty() ? layer.title : std::string("パターン");
+            out.image = fill_layer_image(layer, size, dpi, page.spec.expression != "color", whole, &episode);
+            if (layer.panel_clip) {
+                if (const std::optional<Image> panels = clip_mask(page, size, dpi, whole)) out.image.putalpha(chops::multiply(alpha_of(out.image), *panels));
+            }
+            out.settings = true;
+            out.opacity = layer.opacity;
+            out.blend = layer.blend;
+            out.clip = layer.clip;
+            if (layer.mask && layer.mask->png && !layer.mask->png->empty() && layer.mask->enabled) out.mask = decoded(layer.mask->png, "L").resize(size);
+            out.vector_mask = layer.vector_mask;
+            out.pattern = core::pattern_of_fill(*layer.fill);
+            each(std::move(out));
             continue;
         }
         std::optional<Image> raster;
@@ -2682,7 +2755,7 @@ Image layer_image(const core::Page& page, const core::Layer& layer, int dpi, con
     if (layer.kind == LayerKind::Adjust) return empty;
     const std::optional<Image> panel_mask = clip_mask(page, ctx.size, dpi, area);
     if (layer.kind == LayerKind::Fill && truthy_json(layer.fill)) {
-        Image raster = fill_layer_image(layer, ctx.size, dpi, page.spec.expression != "color", area);
+        Image raster = fill_layer_image(layer, ctx.size, dpi, page.spec.expression != "color", area, ctx.episode);
         if (panel_mask && layer.panel_clip) raster.putalpha(chops::multiply(alpha_of(raster), *panel_mask));
         return colored(masked(ctx, layer, std::move(raster), area));
     }
@@ -2716,7 +2789,7 @@ Image layer_image_over(const core::Page& page, const core::Layer& layer, int dpi
     }
     const std::optional<Image> panel_mask = clip_mask(page, ctx.size, dpi, area);
     if (layer.kind == LayerKind::Fill && truthy_json(layer.fill)) {
-        Image raster = fill_layer_image(layer, ctx.size, dpi, page.spec.expression != "color", area);
+        Image raster = fill_layer_image(layer, ctx.size, dpi, page.spec.expression != "color", area, ctx.episode);
         if (panel_mask && layer.panel_clip) raster.putalpha(chops::multiply(alpha_of(raster), *panel_mask));
         return masked(ctx, layer, std::move(raster), area);
     }
@@ -2733,6 +2806,31 @@ Image tone_mask(const core::Page& page, const core::Layer& layer, Size size, int
 
 bool picture_holds_page_values(const core::Page& page, const core::Layer& layer, bool tinted) {
     return core::holds_page_values(page, layer) && !(layer.effect && core::py_truthy(*layer.effect)) && !tinted;
+}
+
+std::optional<ColorPicture> pattern_fill_precise(const core::Page& page, const core::Layer& layer, int dpi, const core::Document* episode,
+                                                 const RgbSpace& space) {
+    std::vector<std::string> omitted;
+    Ctx ctx;
+    ctx.page = &page;
+    ctx.episode = episode;
+    ctx.dpi = dpi;
+    ctx.mode = "proof";
+    ctx.omitted = &omitted;
+    ctx.size = Size{mm_to_px(page.spec.width_mm.value(), dpi), mm_to_px(page.spec.height_mm.value(), dpi)};
+    const Json* pattern = pattern_fill_here(ctx, layer);
+    if (pattern == nullptr || page.spec.expression != "color") return std::nullopt;
+    const std::optional<patterns::Laid> laid = patterns::laid(episode, *pattern, patterns::Target::rgb(page), dpi);
+    if (!laid) return std::nullopt;
+    const Box area{0, 0, ctx.size.width, ctx.size.height};
+    ColorPicture picture = patterns::linear(*laid, area, space);
+    if (layer.panel_clip) {
+        if (const std::optional<Image> panels = clip_mask(page, ctx.size, dpi, area)) {
+            const std::string cut = panels->tobytes();
+            for (std::size_t i = 0; i < picture.pixels.size() && i < cut.size(); ++i) picture.pixels[i][3] *= static_cast<unsigned char>(cut[i]) / 255.0;
+        }
+    }
+    return picture;
 }
 
 std::optional<Image> drawable_layer_image(const core::Page& page, const core::Layer& layer, int dpi, const core::Document* episode,
@@ -2762,7 +2860,7 @@ std::optional<Image> drawable_layer_image(const core::Page& page, const core::La
     if (layer.kind == LayerKind::Adjust) return std::nullopt;
     const std::optional<Image> panel_mask = clip_mask(page, ctx.size, dpi, area);
     if (layer.kind == LayerKind::Fill && truthy_json(layer.fill)) {
-        Image raster = fill_layer_image(layer, ctx.size, dpi, page.spec.expression != "color", area);
+        Image raster = fill_layer_image(layer, ctx.size, dpi, page.spec.expression != "color", area, ctx.episode);
         if (panel_mask && layer.panel_clip) raster.putalpha(chops::multiply(alpha_of(raster), *panel_mask));
         return masked(ctx, layer, std::move(raster), area);
     }

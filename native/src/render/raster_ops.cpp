@@ -64,6 +64,7 @@
 #include "render/layer_masks.hpp"
 #include "render/proof.hpp"
 #include "render/op_limits.hpp"
+#include "render/ops_patterns.hpp"
 #include "render/ops_adjust.hpp"
 #include "render/ops_filters.hpp"
 #include "render/ops_paths.hpp"
@@ -291,6 +292,10 @@ void fill(OpContext& c) {
     limits::check_count(expand, static_cast<double>(limits::kSteps), "expand_mm");
     const auto mask = fills::region_mask(ref, ax, ay, gap, threshold, expand, window);
     if (!mask) throw OpError("nothing to fill there (the click is on a line)");
+    if (const Json* pattern = core::get(op, "pattern"); pattern != nullptr && !pattern->is_null()) {  // (patterns@1, PC4 E3)
+        c.report = fill_with_pattern(c, at, ti, *mask, Point{0, 0}, dpi);
+        return;
+    }
     const std::vector<std::int64_t> rgb = rgb_of(op, doc);
     const double opacity = float_at(op, "opacity", 1.0);
     if (auto patch = fills::mask_patch(*mask, dpi, rgb, opacity)) page.layers[ti].patches.push_back(std::move(*patch));
@@ -303,6 +308,13 @@ void fill_area(OpContext& c) {
     Page& page = doc.edit_page(at);
     const std::size_t ti = raster_paint_target(page, op);
     const Json area = core::op_area(op);
+    if (const Json* pattern = core::get(op, "pattern"); pattern != nullptr && !pattern->is_null()) {  // (patterns@1, PC4 E3)
+        const selection::AreaMask m = selection::area_mask(area, fills::kFillDpi);
+        limits::check_coordinate(static_cast<double>(m.x0), "area");
+        limits::check_coordinate(static_cast<double>(m.y0), "area");
+        c.report = fill_with_pattern(c, at, ti, m.mask, Point{static_cast<int>(m.x0), static_cast<int>(m.y0)}, fills::kFillDpi);
+        return;
+    }
     // (vector@1, PC3 C-a: a blend — Fill Path's mode — paints the paint layer's own pixels; normal, as before, a picture)
     if (const Json* blend = core::get(op, "blend"); blend != nullptr && !blend->is_null() && *blend != Json("normal")) {
         if (!blend->is_string()) throw OpError("blend is one of the blends (normal, multiply, screen, …)");
@@ -1430,7 +1442,7 @@ void convert_layer(OpContext& c) {
         }
         Image picture = layer_image(page, layer, kWorkingDpi, &doc);
         if (layer.kind == LayerKind::Fill && ((layer.fill && core::py_truthy(*layer.fill)) || (layer.fill_rgb && !layer.fill_rgb->empty()))) {
-            picture = detail::fill_layer_image(layer, picture.size(), kWorkingDpi, false, Box{0, 0, picture.width(), picture.height()});
+            picture = detail::fill_layer_image(layer, picture.size(), kWorkingDpi, false, Box{0, 0, picture.width(), picture.height()}, &doc);
         }
         const std::string blend = layer.blend;
         const double opacity = layer.opacity;

@@ -38,7 +38,8 @@ inline const std::vector<std::int64_t> kInkColour{20, 20, 20};
 // at `dpi`). `colour`: every colour drawn in this one (a name or draft layer's guide colour), its alphas kept.
 class Compiled {
 public:
-    Compiled(const ShapePart& part, double dpi, const std::vector<std::int64_t>* colour = nullptr);
+    // `book`: the book whose patterns a pattern fill names (patterns@1, PC4 E3; none: a pattern fill draws nothing).
+    Compiled(const ShapePart& part, double dpi, const std::vector<std::int64_t>* colour = nullptr, const core::Document* book = nullptr);
     ~Compiled();
     Compiled(Compiled&&) noexcept;
     Compiled& operator=(Compiled&&) noexcept;
@@ -54,9 +55,11 @@ private:
 
 // The parts (in their order) laid normal over `out` ("RGBA", the box `area` of the page at `dpi`), each in bands of
 // rows. `colour` as Compiled's.
-void draw(Image& out, const Box& area, int dpi, const std::vector<const ShapePart*>& parts, const std::vector<std::int64_t>* colour = nullptr);
+void draw(Image& out, const Box& area, int dpi, const std::vector<const ShapePart*>& parts, const std::vector<std::int64_t>* colour = nullptr,
+          const core::Document* book = nullptr);
 // The same over nothing: an "RGBA" picture of `area`.
-Image picture(const Box& area, int dpi, const std::vector<const ShapePart*>& parts, const std::vector<std::int64_t>* colour = nullptr);
+Image picture(const Box& area, int dpi, const std::vector<const ShapePart*>& parts, const std::vector<std::int64_t>* colour = nullptr,
+              const core::Document* book = nullptr);
 
 // --- geometry (mm on the page) ------------------------------------------------------------------------------------
 
@@ -92,7 +95,8 @@ Path bent(const Path& path, const MapFunction& go, double step_mm = 1.5);
 // scale); `scale_stroke`: its stroke's width by √|det| (as a pen line's, through a selection's transform).
 ShapePart transformed(const ShapePart& part, const core::vector::Affine& m, bool scale_stroke);
 
-// A fill as the drawing reads it: none (null), a colour, the layer's ink ({"rgb": null}), a gradient.
+// A fill as the drawing reads it: none (null), a colour, the layer's ink ({"rgb": null}), a gradient, a pattern
+// (patterns@1).
 bool fills(const core::Json& fill);
 
 // How much of the path's area (mm², its fill's coverage at `dpi`) lies inside `area`'s and outside it.
@@ -101,10 +105,10 @@ std::pair<double, double> shares(const Path& path, const Path& area, double dpi 
 // The part as a picture patch ({"mode": "image"}, at the patches' 300 dpi), or none when it draws nothing (Layer ›
 // Rasterize › Shape; a part laid on a layer that is not a pen layer). An inverted part as far as the page (none without
 // one).
-std::optional<core::Patch> as_patch(const core::Page* page, const ShapePart& part);
+std::optional<core::Patch> as_patch(const core::Page* page, const ShapePart& part, const core::Document* book = nullptr);
 // Every part of the layer as patches, in the order they are drawn (those under the lines, then those over them), after
 // its own (the lines kept as they are: a part over a line would go under it — Layer › Rasterize › Shape draws such a layer
 // in whole, render/ops_smart).
-void rasterize_parts(const core::Page& page, core::Layer& layer);
+void rasterize_parts(const core::Page& page, core::Layer& layer, const core::Document* book = nullptr);
 
 }  // namespace genko::render::shape_parts

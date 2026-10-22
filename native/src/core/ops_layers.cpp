@@ -12,6 +12,7 @@
 #include "core/filters.hpp"
 #include "core/ids.hpp"
 #include "core/lut3d.hpp"
+#include "core/patterns.hpp"
 #include "core/ops_util.hpp"
 #include "core/pyconv.hpp"
 
@@ -107,9 +108,24 @@ Json gradient_extras(const Json& g) {
     return out;
 }
 
+// patterns@1 (PC4 E3): a pattern fill names a pattern the book keeps (add_pattern puts one in).
+void check_pattern_kept(const Document& doc, const Json& fill) {
+    const Json* pattern = pattern_of_fill(fill);
+    if (pattern == nullptr) return;
+    const std::string& id = (*pattern)["id"].get_ref<const std::string&>();
+    if (find_pattern(doc, id) == nullptr) throw OpError("the book has no pattern " + id + " (add_pattern puts one in)");
+}
+
 // ops._fill_spec: a fill layer's colour, or its gradient (also a shape part's fill's, pen-shapes@1: render/ops_shapes).
 Json fill_spec(const Json& raw) {
     if (!raw.is_object()) throw OpError("fill is {rgb} or {gradient}");
+    if (const Json* pattern = pattern_of_fill(raw)) {  // (patterns@1, PC4 E3: a pattern the book keeps, by its id)
+        try {
+            return Json::object({{"pattern", pattern_fill_spec(*pattern)}});
+        } catch (const Error& error) {
+            throw OpError(error.what());
+        }
+    }
     const Json* gradient = get(raw, "gradient");
     if (gradient != nullptr && !gradient->is_null()) {
         const Json g = gradient->is_object() ? *gradient : Json::object();
@@ -253,6 +269,7 @@ void set_layer_with(Document& doc, const Json& op) {
         if (layer.kind != LayerKind::Fill) throw OpError("fill is set on a fill layer");
         if (py_truthy(op["fill"])) {
             layer.fill = fill_spec(op["fill"]);
+            check_pattern_kept(doc, *layer.fill);  // (patterns@1, PC4 E3)
         } else {
             layer.fill.reset();
         }
@@ -305,7 +322,11 @@ void add_layer(OpContext& c) {
     layer.exportable = true;
     // (a new drawing layer keeps each line in the panel it began in, as CLIP STUDIO's panel folders do)
     layer.panel_each = op.contains("panel_each") ? py_truthy(op["panel_each"]) : (kind_name == "pen" || kind_name == "paint");
-    if (kind_name == "fill") {
+    if (kind_name == "fill" && truthy_at(op, "pattern")) {  // (patterns@1, PC4 E3: Layer › New Fill Layer › Pattern…)
+        layer.fill = fill_spec(Json::object({{"pattern", op["pattern"]}}));
+        check_pattern_kept(doc, *layer.fill);
+        layer.title = truthy_at(op, "name") ? py_str(op["name"]) : std::string("パターン");
+    } else if (kind_name == "fill") {
         layer.fill = fill_spec(Json::object({{"rgb", truthy_at(op, "rgb") ? op["rgb"] : Json::array({255, 255, 255})}}));
         layer.title = truthy_at(op, "name") ? py_str(op["name"]) : std::string("ベタ塗り");
     } else if (kind_name == "gradient") {

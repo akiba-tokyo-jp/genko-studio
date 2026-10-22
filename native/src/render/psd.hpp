@@ -197,6 +197,10 @@ public:
         std::string_view fill, vscg, vstk, vogk, path;
     };
     std::optional<ShapeBlocks> shape_blocks(const Layer& layer) const;
+    // patterns@1 (PC4 E3, render/pat): the payloads of the file's global Patt, Pat2 and Pat3 blocks (its patterns); and a
+    // fill layer's block (kind "adjust" without a correction: its key SoCo, GdFl or PtFl and its payload), or nothing.
+    std::vector<std::string_view> pattern_blocks() const;
+    std::optional<std::pair<std::string, std::string_view>> fill_block(const Layer& layer) const;
     struct PathResource {
         unsigned id = 0;
         std::string name;  // (the resource's Pascal name, as its bytes)
@@ -265,6 +269,7 @@ private:
     std::string display_info_;     // (1077)
     bool real_merged_ = true;      // (1057)
     std::vector<std::pair<std::uint64_t, std::uint64_t>> linked_blocks_;  // (PC3 A3: the global lnk2, lnk3, lnkD: where, how long)
+    std::vector<std::pair<std::uint64_t, std::uint64_t>> pattern_blocks_;  // (PC4 E3: the global Patt, Pat2, Pat3)
     std::optional<unsigned> quick_mask_;  // (1022: the Quick Mask's channel)
     std::vector<PathResource> path_resources_;  // (vector@1: 2000–2997, 1025, 2999)
     std::uint64_t merged_at_ = 0;

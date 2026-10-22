@@ -128,7 +128,7 @@ struct LiveShape {
 
 // A shape part of a pen layer (決定 7, pen-shapes@1): a path filled and stroked, drawn after the layer's patches and
 // before its lines (`over`: after its lines). A fill is null (none), {"rgb": [r, g, b] | null} (null: the layer's ink),
-// {"gradient": {…a fill layer's gradient…}}; a pattern ({"pattern"}) is PC4's.
+// {"gradient": {…a fill layer's gradient…}}, {"pattern": {…}} (patterns@1, PC4 E3: core::pattern_fill_spec's normal form).
 struct ShapePart {
     std::string id;
     std::optional<std::string> name;

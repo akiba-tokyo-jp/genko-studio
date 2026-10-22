@@ -1,6 +1,7 @@
 #pragma once
 
 #include <optional>
+#include <set>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -37,9 +38,29 @@ std::optional<std::string> check_pattern_file(const Pattern& pattern, std::strin
 
 bool uses_patterns(const Document& doc);
 // The book's patterns checked (at most 512; the ids each once; each one's picture held and as check_pattern_file
-// says). core::Error("value") says what is wrong.
+// says; E3: every pattern fill in its normal form and naming a pattern the book keeps). core::Error("value") says what
+// is wrong.
 void validate_patterns(const Document& doc);
 // The pattern of that id, or none.
 const Pattern* find_pattern(const Document& doc, std::string_view id);
+
+// --- pattern fills (PC4 E3) -------------------------------------------------------------------------------------------
+
+inline constexpr double kPatternScaleMin = 1.0, kPatternScaleMax = 1000.0;  // (%)
+inline constexpr double kPatternPhaseMax = 100000.0;                         // (mm, either way)
+// A pattern fill — a fill layer's {"pattern": …}, a shape part's fill's or stroke's, an op's — checked, in its normal
+// form {"id", "scale", "angle", "phase_mm", "link"}: the pattern's id, its scale 1..1000 % (100), its angle −360..360°
+// counter-clockwise (0), where it starts on the page [x, y] mm (±100000, [0, 0]), whether it moves with its layer
+// (true). core::Error("value") says what is wrong.
+Json pattern_fill_spec(const Json& raw);
+// Is a fill ({"rgb"}, {"gradient"}, {"pattern"} …) a pattern's? Its pattern fill, or null.
+const Json* pattern_of_fill(const Json& fill);
+// The ids of the patterns the book's fills name — its fill layers', its shape parts' fills and strokes' — on its pages
+// and its smart objects' contents (core::smart::written_pages).
+std::set<std::string> patterns_used(const Document& doc);
+// The same on one page (its fill layers' and shape parts').
+std::set<std::string> patterns_on(const Page& page);
+// The next free id of a pattern ("pat-1", "pat-2"…).
+std::string next_pattern_id(const Document& doc);
 
 }  // namespace genko::core

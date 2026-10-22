@@ -69,6 +69,8 @@ bool dab_key(std::string_view op, std::string_view key) {
 }
 
 bool own_setting(const Json& op, std::string_view name, std::string_view key);
+// patterns@1 (PC4 E3): a pattern fill — fill_area's and fill's pattern, add_layer's of kind fill.
+bool pattern_key(std::string_view op, std::string_view key) { return key == "pattern" && (op == "fill_area" || op == "fill" || op == "add_layer"); }
 
 // Python's _usage: the keys given that the op does not take, and how the op is written. (`channel`: the op's "channel"
 // is this build's own there — it names a channel or plate of its page: core::channel_target —, so not one of them; nor
@@ -80,7 +82,7 @@ std::string usage(const Json& op, bool channel = false) {
     std::vector<std::string> strange;
     for (const auto& [key, value] : op.items()) {
         if (!schema->contains(key) && key != "op" && key != "area" && !key.starts_with("_") && !paper_key(op, key) &&
-            !stroke_colour_key(op, key) && !dab_key(name, key) && !(key == "channel" && channel) && !own_setting(op, name, key)) {
+            !stroke_colour_key(op, key) && !dab_key(name, key) && !pattern_key(name, key) && !(key == "channel" && channel) && !own_setting(op, name, key)) {
             strange.push_back(key);
         }
     }
@@ -112,7 +114,9 @@ bool native_key(std::string_view op, std::string_view key) {
            (op == "transform_area" && key == "mask") || (op == "paste" && key == "center_mm") ||
            (op == "fill_area" && key == "preserve_transparency") ||
            // PC3 C-c (SPEC COLOR-07): Filter › Liquify's strokes and its field's spacing
-           (op == "liquify" && (key == "strokes" || key == "mesh_mm"));
+           (op == "liquify" && (key == "strokes" || key == "mesh_mm")) ||
+           // PC4 E3 (patterns@1): a pattern fill — fill_area's and fill's pattern, add_layer's of kind fill
+           pattern_key(op, key);
 }
 
 // PC2 (SPEC COLOR-04): the settings of this build's own an op of Python's reads by what else it was given —
@@ -783,6 +787,17 @@ Json journal_op(const Json& op) {
             };
             if (const auto dabs = out.find("dabs"); dabs != out.end()) pictures(*dabs);
         }
+        // (patterns@1, PC4 E3: a pattern's picture — add_pattern's, and a fill's pattern given whole — kept by the book as
+        // an asset)
+        const auto pattern_picture = [](Json& holder) {
+            for (const char* key : {"png", "gkcr", "gkir"}) {
+                if (const auto data = holder.find(key); data != holder.end() && data->is_string()) {
+                    *data = "<" + std::to_string(code_points(data->get_ref<const std::string&>())) + " base64 chars>";
+                }
+            }
+        };
+        if (is_op(out, "add_pattern")) pattern_picture(out);
+        if (const auto pattern = out.find("pattern"); pattern != out.end() && pattern->is_object()) pattern_picture(*pattern);
         // (PC2a: a 3D LUT file's text a color_lookup gives — add_layer's and set_layer's adjust, set_adjustment's and
         // filter_raster's own —: its table is the book's asset, and an op is not done again from the journal)
         const auto file_text = [](Json& holder) {

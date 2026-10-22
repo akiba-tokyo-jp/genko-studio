@@ -157,6 +157,9 @@ genko_library(genko_app
     file_info_dialog.cpp
     # PC4 E-0: the drawing tools' groups (the ツール menu, the palette's long press) and the frames of their panels
     paint_panels.cpp
+    # PC4 E3: the Patterns panel, パターンを定義…, the pattern fill layer, パターンプレビュー
+    patterns_panel.cpp
+    main_window_patterns.cpp
     ${GENKO_APP_RESOURCES}
     ${GENKO_APP_FONTS}
   PUBLIC_DEPS genko_core genko_storage genko_render genko_render_ops genko_formats genko_service Qt6::Core Qt6::Gui Qt6::Widgets Qt6::Svg Qt6::Concurrent

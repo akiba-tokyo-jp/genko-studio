@@ -1,5 +1,6 @@
 #include "app/tool_settings.hpp"
 #include "app/main_window.hpp"
+#include "app/patterns_panel.hpp"
 #include "app/timeline.hpp"
 #include "app/guide_panel.hpp"
 #include "app/material_tabs.hpp"
@@ -795,6 +796,7 @@ void MainWindow::show_page() {
     channel_view_changed();  // (channels@1: this page's view on screen, its panel)
     quick_mask_follow();     // (masks@1: the page's Quick Mask, its menu item and the tools painting it)
     if (paths_panel_ != nullptr && paths_dock_ != nullptr && paths_dock_->isVisible()) paths_panel_->refresh();  // (vector@1, PC3 C-a)
+    if (patterns_panel_ != nullptr && patterns_dock_ != nullptr && patterns_dock_->isVisible()) patterns_panel_->refresh();  // (PC4 E3)
     if (lines_later_) {
         lines_timer_.start();
     } else {

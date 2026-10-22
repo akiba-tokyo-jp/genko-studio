@@ -1,5 +1,6 @@
 #pragma once
 
+#include <functional>
 #include <optional>
 #include <string>
 #include <string_view>
@@ -35,6 +36,7 @@ struct Canvas {
     int width_px = 0;
     int height_px = 0;
     double dpi = 0;
+    const core::Document* book = nullptr;  // (patterns@1, PC4 E3: whose patterns a pattern fill names — their names and dpi)
 };
 // The part's tagged blocks after its name (each "8BIM", its key, its length, its payload padded to 4).
 std::string blocks(const core::vector::ShapePart& part, const Canvas& canvas);
@@ -58,8 +60,19 @@ struct Placement {
     double width_px = 1.0;  // (the canvas, pixels)
     double height_px = 1.0;
     double dpi = 72.0;  // (the file's resolution: a point's pixels)
+    // (patterns@1, PC4 E3) the book's pattern for the file's pattern of this unique id and name — taken into the book when a
+    // fill names it — and its dpi; none when the file holds no such pattern (the fill is not read)
+    std::function<std::optional<std::pair<std::string, double>>(const std::string& id, const std::string& name)> pattern;
 };
 std::optional<core::vector::ShapePart> part_of(const Blocks& blocks, const Placement& placement);
+
+// patterns@1 (PC4 E3): a pattern fill (core::pattern_fill_spec's form) as a PtFl block's payload — Photoshop's pattern fill
+// layer, a shape layer's fill — on the canvas (Ptrn: the pattern's name and the unique id render/pat writes it with; Scl:
+// the % that makes one of its pixels as long as the book's 1/dpi inch × its scale; Angl; Algn: link; phase: its phase in
+// the canvas's pixels); and a PtFl payload read back as a pattern fill (its pattern through placement.pattern), none when
+// it names no pattern of the file.
+std::string pattern_block(const core::Json& pattern, const Canvas& canvas);
+std::optional<core::Json> pattern_fill_of(std::string_view payload, const Placement& placement);
 
 // What a PSD of the book says of its shape parts (the export's notes): layers written as pixels, gradients Photoshop's
 // cannot be (an ellipse's, a repeated one), a rule of even and odd baked.

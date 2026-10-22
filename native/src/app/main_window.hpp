@@ -61,6 +61,7 @@ class BrushPanel;
 class ChannelPanel;
 class CloneSourcePanel;
 class PathsPanel;
+class PatternsPanel;
 class ShapesPanel;
 class HistogramPanel;
 class InfoPanel;
@@ -1023,6 +1024,25 @@ private:
     void attach_tool_groups(QToolBar* palette);
     QDockWidget* paint_dock(const QString& title, const char* name, const QString& about);
     void build_paint_docks();
+public:
+    // PC4 E3 (main_window_patterns.cpp, patterns_panel.cpp; SPEC.md COLOR-09「パターン」): the chosen pattern
+    // (Photoshop's 今のパターン: "library:<name>" or "book:<id>", the window's state in the settings), パターンを定義…,
+    // a new pattern fill layer and its settings, パターンプレビュー, and the ops that put a library pattern into the book.
+    QString current_pattern() const;
+    void set_current_pattern(const QString& choice);
+    // A pattern fill of the chosen pattern for an op: its spec ({"id", "scale", "angle", "phase_mm", "link"}) and, for a
+    // library pattern the book does not keep yet, the add_pattern op to send first (`before`); none when the choice names
+    // nothing there.
+    std::optional<core::Json> pattern_fill_of(const QString& choice, double scale, double angle, bool link, core::Json& before);
+    void define_pattern(std::optional<QString> name = std::nullopt);
+    void new_pattern_layer(const QString& choice = {});
+    PatternsPanel* patterns_panel() const { return patterns_panel_; }
+    QDockWidget* patterns_dock() const { return patterns_dock_; }
+private:
+    void build_pattern_actions();
+    void build_pattern_menus(QMenu* edit, QMenu* view);
+    PatternsPanel* patterns_panel_ = nullptr;
+    QDockWidget* patterns_dock_ = nullptr;
     void build_clipboard_menu(QMenu* edit);
     static const std::vector<const char*>& selection_tools();
     static const std::vector<const char*>& retouch_tools();

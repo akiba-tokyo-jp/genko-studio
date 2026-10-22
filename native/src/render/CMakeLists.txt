@@ -196,6 +196,10 @@ genko_library(genko_render
     dabs/coverage.cpp
     dabs/lines.cpp
     dab_ops.cpp
+    # PC4 E3 (パターン: 模様の敷き詰め・.pat と PSD の Patt・ライブラリ)
+    patterns.cpp
+    pat.cpp
+    pattern_library.cpp
     ${GENKO_MATERIAL_RESOURCES}
     ${GENKO_TEXT_RESOURCES}
   PUBLIC_DEPS genko_core Qt6::Core

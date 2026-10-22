@@ -766,6 +766,8 @@ void rasterize(Document& doc, std::size_t at, std::size_t i) {
             ctx.mode = "proof";
             ctx.omitted = &omitted;
             deep = smart::picture_precise(ctx, look, Box{0, 0, size.width, size.height}, canvas.space());
+        } else if (look.kind == LayerKind::Fill) {  // (patterns@1, PC4 E3: a pattern's values kept)
+            deep = pattern_fill_precise(page, look, dpi, &doc, canvas.space());
         }
         if (tone) {
             canvas.blend(tone_black(layer_image(page, look, dpi, &doc)), 1.0, false);
@@ -846,7 +848,7 @@ void rasterize_layer(OpContext& c) {
             return;
         }
         Page& page = doc.edit_page(at);
-        shape_parts::rasterize_parts(page, page.layers[i]);
+        shape_parts::rasterize_parts(page, page.layers[i], &doc);
         c.report = Json{{"ids", Json::array({page.layers[i].id})}};
         return;
     }
