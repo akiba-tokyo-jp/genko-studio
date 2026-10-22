@@ -26,6 +26,7 @@
 #include "app/colours.hpp"
 #include "app/fields.hpp"
 #include "app/gradients_panel.hpp"
+#include "app/patterns_panel.hpp"
 #include "app/layer_dialogs.hpp"
 #include "app/config.hpp"
 #include "app/ask.hpp"
@@ -376,14 +377,14 @@ void MainWindow::build_fill_page(ToolSettings* ts) {
     fill_basis_->setToolTip(QStringLiteral("線で囲まれた所: 線を壁にして、その中を塗る（隙間は閉じる）。色の近さ: クリックした所の色に近い所を塗る（Photoshop の塗りつぶしツール）"));
     fill_source_ = kept_choice("fill_source", {{QStringLiteral("描画色"), QStringLiteral("foreground")}, {QStringLiteral("パターン"), QStringLiteral("pattern")}},
                                QStringLiteral("fill/source"), QStringLiteral("foreground"));
-    // (パターン: the patterns' group, E3 — until it is in, the item is grey and the 描画色 is used)
-    if (auto* model = qobject_cast<QStandardItemModel*>(fill_source_->model())) {
-        if (QStandardItem* pattern = model->item(1)) {
-            pattern->setEnabled(false);
-            pattern->setToolTip(QStringLiteral("パターンで塗るのは、パターンが使えるようになってから（準備中）"));
-        }
-    }
-    if (fill_source_->currentData() != QStringLiteral("foreground")) fill_source_->setCurrentIndex(0);
+    // (パターン, since E3's merge: the chosen pattern — the パターン panel's, Photoshop's 今のパターン — laid where it fills, its
+    // fill op's `pattern`; a library pattern the book does not keep put in first by the same step)
+    fill_source_->setToolTip(QStringLiteral("描画色: 描画色で塗る。パターン: 選んだパターン（パターン パネルと同じ）を敷き詰めて塗る"));
+    fill_pattern_row_ = new QWidget;
+    fill_pattern_row_->setObjectName(QStringLiteral("fill_pattern_row"));
+    auto* pattern_row = new QHBoxLayout(fill_pattern_row_);
+    pattern_row->setContentsMargins(0, 0, 0, 0);
+    connect(fill_source_, &QComboBox::activated, this, [this](int) { refresh_fill_pattern(); });
     fill_blend_ = blend_choice("fill_blend", QStringLiteral("fill/blend"));
     connect(fill_blend_, &QComboBox::activated, this, [this](int) { pen_changed(); });  // (its badge: review P3-2)
     fill_blend_->setToolTip(QStringLiteral("描画モード: 通常のほかは、ペイントのレイヤーの画素に塗ります"));
@@ -407,6 +408,7 @@ void MainWindow::build_fill_page(ToolSettings* ts) {
     QFormLayout* form = form_on(top);
     form->addRow(QStringLiteral("基準"), fill_basis_);
     form->addRow(QStringLiteral("塗りつぶし"), fill_source_);
+    form->addRow(QStringLiteral("パターン"), fill_pattern_row_);
     form->addRow(QStringLiteral("モード"), fill_blend_);
     form->addRow(QStringLiteral("不透明度"), fill_opacity_);
     auto* by_colour = new QWidget;  // ("near" is a macro on Windows)
@@ -424,7 +426,38 @@ void MainWindow::build_fill_page(ToolSettings* ts) {
     const auto follow = [this, by_colour] { by_colour->setEnabled(fill_basis_->currentData().toString() == QLatin1String("color")); };
     connect(fill_basis_, &QComboBox::activated, this, follow);
     follow();
+    refresh_fill_pattern();
     ts->add({QStringLiteral("fill"), QStringLiteral("lassofill")}, page);
+}
+
+void MainWindow::refresh_fill_pattern() {
+    if (fill_pattern_row_ == nullptr || fill_source_ == nullptr) return;
+    const bool on = fill_source_->currentData().toString() == QLatin1String("pattern");
+    fill_pattern_row_->setEnabled(on);
+    // (the list of the book's and the library's patterns as they are now, the chosen one shown)
+    // (the one before taken out at once — never from its own signal: the 塗りつぶし box's and choose_tool call this)
+    delete fill_pattern_;
+    fill_pattern_ = nullptr;
+    fill_pattern_ = pattern_combo(book(), current_pattern());
+    fill_pattern_->setObjectName(QStringLiteral("fill_pattern"));
+    // (as narrow as the page: its names cut short in the box, whole in its list)
+    fill_pattern_->setSizeAdjustPolicy(QComboBox::AdjustToMinimumContentsLengthWithIcon);
+    fill_pattern_->setMinimumContentsLength(6);
+    fill_pattern_->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Fixed);
+    fill_pattern_->setToolTip(QStringLiteral("塗るパターン（パターン パネルで選んだものと同じ）"));
+    connect(fill_pattern_, &QComboBox::activated, this, [this](int) {
+        if (fill_pattern_ != nullptr) set_current_pattern(fill_pattern_->currentData().toString());
+    });
+    fill_pattern_row_->layout()->addWidget(fill_pattern_);
+}
+
+std::optional<Json> MainWindow::fill_pattern_ops(Json& before) {
+    before = Json::array();
+    if (fill_source_ == nullptr || fill_source_->currentData().toString() != QLatin1String("pattern")) return std::nullopt;
+    // (PC4 E3's pattern, as 塗りつぶし… lays it: 100 %, 0°, from the page's corner)
+    auto spec = pattern_fill_of(current_pattern(), 100.0, 0.0, true, before);
+    if (!spec) flash(QStringLiteral("塗るパターンがありません（パターン パネルで選びます）"), 4000, true);
+    return spec;
 }
 
 void MainWindow::build_picker_page(ToolSettings* ts) {
@@ -715,6 +748,11 @@ void MainWindow::fill_at(double x_mm, double y_mm) {
     const core::Layer* layer = paint_layer();
     if (layer == nullptr) return;
     const core::Page* page = current_page();
+    // (パターン: the chosen pattern, a library one put into the book first by the same step)
+    Json ops = Json::array();
+    const bool by_pattern = fill_source_ != nullptr && fill_source_->currentData().toString() == QLatin1String("pattern");
+    const std::optional<Json> pattern = fill_pattern_ops(ops);
+    if (by_pattern && !pattern) return;
     Json op;
     if (fill_basis_ != nullptr && fill_basis_->currentData().toString() == QLatin1String("color")) {
         // (PC4 E4, 色の近さ: Photoshop's paint bucket — the area of colours near the one clicked, PC3 B1's {"color"})
@@ -731,10 +769,16 @@ void MainWindow::fill_at(double x_mm, double y_mm) {
         }
     }
     op.update(fill_tool_fields(layer->kind == core::LayerKind::Raster));  // (review P3-2: a pen layer's fill in 通常)
+    if (pattern) {  // (the pattern instead of a colour)
+        op.erase("rgb");
+        op.erase("color_rgb");
+        op["pattern"] = *pattern;
+    }
     if (op.contains("blend") && layer->kind == core::LayerKind::Raster && channel_view().target.empty() &&
         !blend_bakes_ok(*page, *layer, QStringLiteral("塗りつぶしツール")))
         return;
-    apply_ops(Json::array({op}));
+    ops.push_back(std::move(op));
+    apply_ops(ops);
 }
 
 void MainWindow::lasso_filled(const QVector<QPointF>& points) {
@@ -745,12 +789,21 @@ void MainWindow::lasso_filled(const QVector<QPointF>& points) {
     if (mode == QLatin1String("shape")) {
         const core::Layer* layer = paint_layer();
         if (layer == nullptr) return;
+        Json ops = Json::array();
+        const bool by_pattern = fill_source_ != nullptr && fill_source_->currentData().toString() == QLatin1String("pattern");
+        const std::optional<Json> pattern = fill_pattern_ops(ops);
+        if (by_pattern && !pattern) return;
         Json op{{"op", "fill_area"}, {"page", current_page()->index.json()}, {"layer_id", layer->id}, {"area", Json{{"poly", pts}}}};
         op.update(fill_tool_fields(layer->kind == core::LayerKind::Raster));  // (PC4 E4: the page's モード and 不透明度)
+        if (pattern) {
+            op.erase("rgb");
+            op["pattern"] = *pattern;
+        }
         if (op.contains("blend") && layer->kind == core::LayerKind::Raster && channel_view().target.empty() &&
             !blend_bakes_ok(*current_page(), *layer, QStringLiteral("囲って塗る")))
             return;
-        apply_ops(Json::array({op}));
+        ops.push_back(std::move(op));
+        apply_ops(ops);
         return;
     }
     const core::Layer* layer = paint_layer();

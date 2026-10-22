@@ -40,7 +40,8 @@ int pattern_fill_dpi(const core::Page& page);
 // page that is not of inks nor of the finest grid. Otherwise into the layer's pixels in their own values on their own
 // grid (design 0.4: an RGB pattern's values as the page's, on a page of inks a pattern of its mode as it is, another by
 // its rules), cut at the panels when the layer is; a paint layer with no pixels yet of a precise RGB page that can hold
-// precise pixels gets them first. → {"pattern": its id}. OpError for a tone layer, a blend on a pen layer, an area that
+// precise pixels gets them first (render/paint_fill since E4's merge: paint_values and becomes_precise, a colour's fill's and
+// a gradient's way — an ink paint layer's lines kept as lines in the 通常 mode). → {"pattern": its id}. OpError for a tone layer, a blend on a pen layer, an area that
 // covers nothing.
 core::Json fill_with_pattern(core::OpContext& c, std::size_t at, std::size_t ti, const Image& coverage, Point offset, int dpi);
 

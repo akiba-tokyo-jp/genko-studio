@@ -860,6 +860,11 @@ private:
     std::optional<std::array<double, 3>> sampled_colour(const core::Page& page, const QPointF& mm, const QString& source, int size) const;
     // The fill's colour and opacity (the 塗りつぶしツール's page): {"rgb", "opacity"?, "blend"?}.
     core::Json fill_tool_fields(bool blend) const;
+    // (PC4 E4 after E3's merge) the 塗りつぶしツール's パターン: its list as the book and the library hold them now, and the
+    // chosen pattern's fill for the op (none when the 塗りつぶし is the 描画色, or nothing is chosen: said) with the
+    // add_pattern op to send first in `before`
+    void refresh_fill_pattern();
+    std::optional<core::Json> fill_pattern_ops(core::Json& before);
     void fill_gaps();
     void nudge_brush(int step);
     bool paint_stroke(const StrokeInput& stroke, const core::Page& page, const core::Layer& layer);
@@ -1262,6 +1267,8 @@ private:
     // PC4 E4: the 塗りつぶしツール's, the グラデーションツール's and the スポイトツール's settings, the gradients
     QComboBox* fill_basis_ = nullptr;
     QComboBox* fill_source_ = nullptr;
+    QWidget* fill_pattern_row_ = nullptr;  // (PC4 E4 after E3's merge: the パターン the fill lays — app::pattern_combo)
+    QComboBox* fill_pattern_ = nullptr;
     QComboBox* fill_blend_ = nullptr;
     QSpinBox* fill_opacity_ = nullptr;
     QSpinBox* fill_tolerance_ = nullptr;

@@ -27111,7 +27111,8 @@
         "native/src/render/select_color.cpp",
         "native/src/app/main_window_paint.cpp",
         "native/tests/unit/test_gradient_tool.cpp",
-        "native/tests/gui/test_gui_paint.cpp"
+        "native/tests/gui/test_gui_paint.cpp",
+        "native/src/render/ops_patterns.cpp"
       ],
       "pc0": {
         "date": "2026-10-16",
@@ -27133,7 +27134,7 @@
         "gap": "クリックで線に囲まれた所を塗る（参照 ページ/レイヤー・隙間閉じ・はみ出し・不透明度、tolerance は線の濃さの閾値）。クリックした色との色差での判定、隣接しない同じ色も塗る（contiguous=false）、アンチエイリアス、パターンで塗る（倍率・角度）、マスク/クイックマスク/チャンネルを対象にする指定がない。8 ビット RGB の画素だけ（上流は 8/16/32 ビット・CMYK/Lab 等の各色モデルで動く）",
         "note": ""
       },
-      "remaining": "パターンで塗る（contents=pattern・倍率・角度）は E3 の `pattern` のキーを窓から送るまで灰色。色の近さ（fill_area の {\"color\"}）は高精度・インキの層でも 8 bit の絵（fill_area の float の画素は E3）。16・32 bit のページでも、コマで切るペイントのレイヤー（新しいペイントのレイヤーの既定 panel_clip: true）は高精度の画素を持てない（PC2 からのモデルの決まり）ので 8 bit の値（グラデーションはディザ）で塗る。高精度にはレイヤー パネルの「コマの外にもはみ出す」"
+      "remaining": "パターンは塗りつぶしツールでは倍率 100 %・角度 0°（倍率・角度は 編集 → 塗りつぶし… とパターンの塗りの層で）。色の近さ（fill_area の {\"color\"}）は高精度・インキの層でも 8 bit の絵（fill_area の float の画素は E3）。16・32 bit のページでも、コマで切るペイントのレイヤー（新しいペイントのレイヤーの既定 panel_clip: true）は高精度の画素を持てない（PC2 からのモデルの決まり）ので 8 bit の値（グラデーションはディザ）で塗る。高精度にはレイヤー パネルの「コマの外にもはみ出す」"
     },
     {
       "id": "paint.burn",
@@ -39838,8 +39839,7 @@
         ],
         "gap": "クリックで線に囲まれた所を塗る。色差の許容値・隣接・アンチエイリアス・パターンで塗るのオプションがない",
         "note": "エンジン側は paint.bucket の行"
-      },
-      "remaining": "塗りつぶし: パターンは E3 が入るまで灰色"
+      }
     },
     {
       "id": "tool:Type",

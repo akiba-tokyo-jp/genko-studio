@@ -366,11 +366,41 @@ private slots:
         QVERIFY(!s.brush().isAncestorOf(s.brush().gap));  // (no longer under the brush's settings)
         QCOMPARE(s.window->tool_settings()->page_for(QStringLiteral("pen")), static_cast<QWidget*>(&s.brush()));
         auto* model = qobject_cast<QStandardItemModel*>(source->model());
-        QVERIFY(model != nullptr && !model->item(1)->isEnabled());
+        QVERIFY(model != nullptr && model->item(1)->isEnabled());  // (パターン: since E3's merge)
         QCOMPARE(source->currentData().toString(), QStringLiteral("foreground"));
         QCOMPARE(basis->currentData().toString(), QStringLiteral("lines"));
         QCOMPARE(tolerance->value(), 32);
         QVERIFY(contiguous->isChecked() && antialias->isChecked() && !all_layers->isChecked());
+        // パターン (E3's): the chosen pattern — the library's first, put into the book by the same step — its fill's `pattern`;
+        // its list on the page, grey while the 描画色 is chosen; undone as one step
+        auto* pattern_row = s.window->findChild<QWidget*>(QStringLiteral("fill_pattern_row"));
+        QVERIFY(pattern_row != nullptr && page->isAncestorOf(pattern_row) && !pattern_row->isEnabled());
+        source->setCurrentIndex(source->findData(QStringLiteral("pattern")));
+        emit source->activated(source->currentIndex());
+        QVERIFY(pattern_row->isEnabled());
+        auto* chooser = s.window->findChild<QComboBox*>(QStringLiteral("fill_pattern"));
+        QVERIFY(chooser != nullptr && chooser->count() > 0 && chooser->currentData().toString() == s.window->current_pattern());
+        const std::size_t steps = s.ops.size();
+        inject::click_mm(s.canvas(), QPointF(40, 50));
+        QCOMPARE(s.ops.size(), steps + 2);
+        QCOMPARE(s.ops[steps]["op"], Json("add_pattern"));
+        const Json laid = s.last();
+        QCOMPARE(laid["op"], Json("fill"));
+        QCOMPARE(laid["pattern"]["id"], s.ops[steps]["id"]);
+        QVERIFY(!laid.contains("rgb"));
+        QCOMPARE(s.session->document().patterns.size(), std::size_t(1));
+        s.trigger("act_undo");
+        QVERIFY(s.session->document().patterns.empty());
+        // 囲って塗る too
+        s.window->choose_tool(QStringLiteral("lassofill"));
+        s.brush().lasso_mode->setCurrentIndex(s.brush().lasso_mode->findData(QStringLiteral("shape")));
+        inject::mouse_stroke(s.canvas(), {QPointF(20, 20), QPointF(60, 20), QPointF(60, 60), QPointF(20, 60)});
+        QCOMPARE(s.last()["op"], Json("fill_area"));
+        QVERIFY(s.last().contains("pattern"));
+        s.trigger("act_undo");
+        s.window->choose_tool(QStringLiteral("fill"));
+        source->setCurrentIndex(source->findData(QStringLiteral("foreground")));
+        emit source->activated(source->currentIndex());
         // (review P3-2) on a pen layer the モード is grey and the fill goes in 通常 (the setting kept for paint layers)
         blend->setCurrentIndex(blend->findData(QStringLiteral("multiply")));
         emit blend->activated(blend->currentIndex());

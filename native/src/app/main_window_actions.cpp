@@ -937,6 +937,8 @@ void MainWindow::choose_tool(const QString& tool) {
     if (tool_settings_ != nullptr) tool_settings_->show_tool(canvas_->tool());
     if (brush_ != nullptr) brush_->set_pencil(tool == QLatin1String("pencil"));  // (PC4 E1: 自動消去)
     if (tool == QLatin1String("pencil")) (void)pencil_key();
+    // (PC4 E4 after E3's merge: the 塗りつぶしツール's パターン as the book and the library hold them now)
+    if (tool == QLatin1String("fill") || tool == QLatin1String("lassofill")) refresh_fill_pattern();
     panel_for_tool(becomes);  // (the lines for the text tool, the layers for the drawing tools: main_window_lines.cpp)
     pen_changed();
 }
