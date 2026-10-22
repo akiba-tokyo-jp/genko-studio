@@ -392,8 +392,8 @@ Pixels layer_pixels(core::OpContext& c, std::size_t at, const std::string& id) {
     }
     if (page.color && !layer.raster_png) return from_inks(ink_edit::with_marks(page, layer, &doc), *page.color);
     // (pen lines and fills become pixels, as filter_raster bakes them; an RGB page of a profile's: its values)
-    if (layer.stroke_count() > 0 || !layer.patches.empty() || shape_parts::any(layer)) raster::bake_vectors(page, layer, core::profiled_rgb(page));
-    return from_image(raster::layer_pixels(page, layer));
+    if (layer.stroke_count() > 0 || !layer.patches.empty() || shape_parts::any(layer)) raster::bake_vectors(page, layer, &doc, core::profiled_rgb(page));
+    return from_image(raster::layer_pixels(page, layer, &doc));
 }
 
 void put_layer_pixels(core::Document& doc, std::size_t at, const std::string& id, const Pixels& p) {
@@ -515,8 +515,8 @@ std::vector<Pixels> layer_pixels(core::OpContext& c, std::size_t at, const std::
         }
         return out;
     }
-    if (layer.stroke_count() > 0 || !layer.patches.empty() || shape_parts::any(layer)) raster::bake_vectors(page, layer, core::profiled_rgb(page));
-    const Image picture = raster::layer_pixels(page, layer);
+    if (layer.stroke_count() > 0 || !layer.patches.empty() || shape_parts::any(layer)) raster::bake_vectors(page, layer, &doc, core::profiled_rgb(page));
+    const Image picture = raster::layer_pixels(page, layer, &doc);
     if (grid_of != nullptr) *grid_of = picture.size();
     for (const Box& one : wanted) {
         const Box box = clamped(one, picture.size());
@@ -550,7 +550,7 @@ void put_layer_pixels(core::Document& doc, std::size_t at, const std::string& id
     core::Layer& layer = page.layers[layer_at(page, id)];
     switch (parts.front().pixels->kind()) {
         case Pixels::Kind::Eight: {
-            Image picture = raster::layer_pixels(page, layer).convert("RGBA");
+            Image picture = raster::layer_pixels(page, layer, &doc).convert("RGBA");
             for (const PixelsPart& part : parts) {
                 if (part.only == nullptr) {
                     picture.paste(to_image(*part.pixels), Point{part.box.x0, part.box.y0});
@@ -648,7 +648,9 @@ void from_rgba(Pixels& p, const std::vector<Rgba>& px) {
     }
 }
 
-Pixels page_pixels(const core::Document& doc, const core::Page& page) {
+Pixels page_pixels(const core::Document& doc, const core::Page& page) { return page_pixels(doc, page, raster::kWorkingDpi); }
+
+Pixels page_pixels(const core::Document& doc, const core::Page& page, int dpi) {
     RenderOptions options;
     options.mode = "print";
     options.finish = false;
@@ -659,7 +661,7 @@ Pixels page_pixels(const core::Document& doc, const core::Page& page) {
     options.precise = deep;
     core::Page shown = page;  // (without its nombre)
     shown.numero = false;
-    const RenderResult made = render_page(shown, raster::kWorkingDpi, options, &doc);
+    const RenderResult made = render_page(shown, dpi, options, &doc);
     if (page.color && made.inks) return from_inks(*made.inks, *page.color);
     if (deep && made.precise) return from_precise(*made.precise);
     return from_image(made.image);
@@ -671,7 +673,7 @@ Pixels shown_layer_pixels(const core::Document& doc, const core::Page& page, con
     if (page.color && !layer.raster_png && (layer.ink_raster || layer.kind == core::LayerKind::Raster || layer.kind == core::LayerKind::Strokes))
         return from_inks(ink_edit::with_marks(page, layer, &doc), *page.color);
     if ((layer.kind == core::LayerKind::Raster || layer.kind == core::LayerKind::Strokes) && !layer.color_raster)
-        return from_image(raster::layer_pixels(page, layer));
+        return from_image(raster::layer_pixels(page, layer, &doc));
     return from_image(layer_image(page, layer, raster::kWorkingDpi, &doc, true));
 }
 

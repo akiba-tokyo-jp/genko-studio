@@ -30,6 +30,7 @@
 #include "render/ink.hpp"
 #include "render/ink_canvas.hpp"
 #include "render/page_internal.hpp"
+#include "render/patterns.hpp"
 #include "render/png.hpp"
 #include "render/vector_masks.hpp"
 
@@ -512,11 +513,14 @@ Image blend_colours(const Image& base_rgb, const Image& over_rgb, std::string_vi
 
 // --- fill layers ------------------------------------------------------------------------------------------------------
 
-Image fill_layer_image(const core::Layer& layer, Size size, int dpi, bool mono, const Box& area) {
+Image fill_layer_image(const core::Layer& layer, Size size, int dpi, bool mono, const Box& area, const core::Document* book) {
     const Json spec = layer.fill ? *layer.fill : Json::object();
     Image image;
     const Json* gradient = get(spec, "gradient");
-    if (gradient != nullptr && core::py_truthy(*gradient)) {
+    if (const Json* pattern = get(spec, "pattern"); pattern != nullptr && pattern->is_object()) {  // (patterns@1, PC4 E3)
+        const std::optional<patterns::Laid> laid = patterns::laid(book, *pattern, patterns::Target::srgb(), dpi);
+        image = laid ? patterns::rgba8(*laid, area) : Image::create("RGBA", Size{area.width(), area.height()}, Ink{0, 0, 0, 0});
+    } else if (gradient != nullptr && core::py_truthy(*gradient)) {
         image = gradient_image(size, dpi, *gradient, area);
     } else {
         std::vector<std::int64_t> rgb{255, 255, 255};

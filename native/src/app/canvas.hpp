@@ -421,6 +421,9 @@ public:
     // brushes@1 (PC4 E1): 表示 › ブラシプレビュー (off: the cross alone) and 描いている間は十字だけ; the pen's brush (its kind: a
     // dab brush's tip drawn as the pointer for cursor_kind "tip")
     bool brush_preview = true;
+    // PC4 E3 (view.patternPreview): the page shown repeated around itself, as Photoshop's パターンプレビュー (the book does
+    // not change)
+    bool pattern_preview = false;
     bool cross_while_drawing = false;
     std::string pointer_kind;
     // The tool a held Alt or Ctrl switches to for a moment ("": none).

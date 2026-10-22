@@ -39,6 +39,7 @@
 #include "core/paths.hpp"
 #include "core/pynum.hpp"
 #include "core/pyops.hpp"
+#include "render/ops_patterns.hpp"
 #include "render/color_edit.hpp"
 #include "render/effects.hpp"
 #include "render/materials.hpp"
@@ -329,6 +330,7 @@ std::optional<Json> MainWindow::copy_selection_items() {
         flash(QStringLiteral("選んだ範囲に、描く先のレイヤーの絵がありません"), 3000);
         return std::nullopt;
     }
+    items.patterns = render::patterns_of_parts(book(), items.shapes);  // (patterns@1, PC4 E3: carried with them)
     return render::selection::items_to_json(items);
 }
 

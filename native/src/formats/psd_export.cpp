@@ -36,6 +36,8 @@
 #include "render/psd_smart.hpp"
 #include "render/psd_paths.hpp"
 #include "render/psd_shapes.hpp"
+#include "render/pat.hpp"
+#include "core/patterns.hpp"
 #include "render/psd_text.hpp"
 #include "render/smart.hpp"
 #include "render/text/balloons.hpp"
@@ -212,6 +214,9 @@ std::string blend_key(const std::string& blend) {
 }
 
 // psd._layer_records, one layer at a time: its record and its channels' data.
+// A tagged block of a layer record (below).
+std::string tagged(std::string_view key, std::string payload);
+
 class Records {
 public:
     // (`ink`: a CMYK, Lab or grey page's PSD — its layers in the page's inks; `rgb`: an RGB page of a colour model's —
@@ -241,6 +246,8 @@ public:
 
     // (PC3 B2, masks@1) the page its layers are of: a layer's mask of masks@1 is written with its flags and parameters
     void masks_of(const core::Page& page) { page_ = &page; }
+    // patterns@1 (PC4 E3): the book whose patterns its pattern fills name (their names, unique ids and dpi)
+    void patterns_of(const core::Document& book) { book_ = &book; }
     // The next record's mask settings: the page layer's mask, when it has masks@1's (one not used is written too, as
     // Photoshop keeps it, disabled); none for a mask without them (written as before).
     void note_mask(render::PageLayer& layer) {
@@ -266,7 +273,20 @@ public:
         canvas.width_px = size_.width;
         canvas.height_px = size_.height;
         canvas.dpi = paper_[0] > 0 ? size_.width / (paper_[0] / 25.4) : 72.0;
+        canvas.book = book_;  // (patterns@1, PC4 E3)
         return render::psd_shapes::blocks(part, canvas);
+    }
+    // patterns@1 (PC4 E3): a pattern fill layer's PtFl block on this canvas
+    std::string pattern_blocks(const render::PageLayer& layer) const {
+        if (layer.pattern == nullptr) return {};
+        render::psd_shapes::Canvas canvas;
+        canvas.width_mm = paper_[0];
+        canvas.height_mm = paper_[1];
+        canvas.width_px = size_.width;
+        canvas.height_px = size_.height;
+        canvas.dpi = paper_[0] > 0 ? size_.width / (paper_[0] / 25.4) : 72.0;
+        canvas.book = book_;
+        return tagged("PtFl", render::psd_shapes::pattern_block(*layer.pattern, canvas));
     }
 
     void add(render::PageLayer&& layer) {
@@ -283,7 +303,8 @@ public:
             return;
         }
         if (layer.shape != nullptr) flags_ = 0x18;  // (bits 3 and 4: its pixel data is not what it shows)
-        const std::string blocks = vector_block(layer.vector_mask) + placed_blocks(layer) + (layer.shape != nullptr ? shape_blocks(*layer.shape) : std::string());
+        const std::string blocks = vector_block(layer.vector_mask) + placed_blocks(layer) + (layer.shape != nullptr ? shape_blocks(*layer.shape) : std::string()) +
+                                   pattern_blocks(layer);  // (patterns@1, PC4 E3)
         const Image rgba = layer.image.mode() == "RGBA" ? std::move(layer.image) : layer.image.convert("RGBA");
         if (ink_) {  // (its colours by the page's rules)
             add_inks(layer.name, render::ink_picture(rgba, *ink_).values, ink_->space, ink_->depth, layer.settings ? layer.opacity : 1.0,
@@ -629,6 +650,7 @@ private:
     std::optional<core::Mask> settings_;  // (the next record's mask settings: note_mask)
     std::optional<core::vector::VectorMask> vector_;  // (the next record's vector mask: vector_block)
     unsigned flags_ = 0;  // (the next record's flags: a shape layer's, pen-shapes@1)
+    const core::Document* book_ = nullptr;  // (patterns@1, PC4 E3)
 };
 
 // A tagged block of a layer record: its key, its length and its payload, padded to 4 bytes.
@@ -1344,6 +1366,7 @@ std::string page_psd_inks(const core::Document& episode, const core::Page& page,
     const render::Size size{static_cast<int>(merged.width), static_cast<int>(merged.height)};
     Records records(size, color);
     records.masks_of(page);                    // (PC3 B2)
+    records.patterns_of(episode);  // (patterns@1, PC4 E3)
     PlacedLayers placed(episode, dpi, depth);  // (PC3 A3)
     records.placed([&placed](const core::Layer& layer) { return placed.blocks(layer); });
     records.paper(page.spec.width_mm.value(), page.spec.height_mm.value());
@@ -1379,7 +1402,7 @@ std::string page_psd_inks(const core::Document& episode, const core::Page& page,
     put_u32(body, 0);  // (no colour mode data)
     body += with_channels(resources_with_icc(dpi, color.space != core::InkSpace::Lab && color.icc ? std::string_view(*color.icc) : std::string_view()),
                           page, n);
-    body += records.finish(placed.global());
+    body += records.finish(placed.global() + render::pat::global_block(episode, core::patterns_on(page), color.depth));  // (PC4 E3: Patt)
     // the merged picture: each colour plane (CMYK inverted); 8 bits RLE (every row's count first), 16 and 32 raw
     const unsigned all = merged.channels();
     const auto plane = [&](unsigned c) {
@@ -1424,6 +1447,7 @@ std::string page_psd_rgb(const core::Document& episode, const core::Page& page, 
     const render::Size size{static_cast<int>(merged.width()), static_cast<int>(merged.height())};
     Records records(size, std::nullopt, RgbOut{depth, render::RgbSpace::of(page)});
     records.masks_of(page);                                 // (PC3 B2)
+    records.patterns_of(episode);  // (patterns@1, PC4 E3)
     PlacedLayers placed(episode, dpi, depth_of_contents);  // (PC3 A3)
     records.placed([&placed](const core::Layer& layer) { return placed.blocks(layer); });
     records.paper(page.spec.width_mm.value(), page.spec.height_mm.value());
@@ -1447,7 +1471,7 @@ std::string page_psd_rgb(const core::Document& episode, const core::Page& page, 
     put_u16(body, 3);
     put_u32(body, 0);  // (no colour mode data)
     body += with_channels(resources_with_icc(dpi, detail::rgb_icc(mode)), page, 3);
-    body += records.finish(placed.global());
+    body += records.finish(placed.global() + render::pat::global_block(episode, core::patterns_on(page), depth));  // (PC4 E3: Patt)
     // the merged picture: 8 bits RLE (every row's count first), 16 and 32 raw
     const std::size_t pixels = std::size_t(merged.width()) * merged.height();
     const auto plane = [&](unsigned c) {
@@ -1604,6 +1628,7 @@ std::string page_psd_bytes(const core::Document& episode, const core::Page& page
     const Image rgb = merged.mode() == "RGB" ? merged : merged.convert("RGB");
     Records records(rgb.size());
     records.masks_of(page);                    // (PC3 B2)
+    records.patterns_of(episode);  // (patterns@1, PC4 E3)
     PlacedLayers placed(episode, dpi, depth);  // (PC3 A3)
     records.placed([&placed](const core::Layer& layer) { return placed.blocks(layer); });
     records.paper(page.spec.width_mm.value(), page.spec.height_mm.value());
@@ -1627,7 +1652,7 @@ std::string page_psd_bytes(const core::Document& episode, const core::Page& page
     put_u16(body, 3);
     put_u32(body, 0);  // (no colour mode data)
     body += with_channels(resources(dpi), page, 3);
-    body += records.finish(placed.global());
+    body += records.finish(placed.global() + render::pat::global_block(episode, core::patterns_on(page), 8));  // (PC4 E3: Patt)
     // the merged picture: RLE, every row's count of every channel first
     std::string counts, packed;
     for (const Image& channel : rgb.split()) packbits_rows(channel, counts, packed);
@@ -1661,6 +1686,7 @@ std::string contents_psd_bytes(const core::Document& episode, const core::Page& 
     const Image rgb = render::alpha_composite(Image::create("RGBA", drawn.size(), render::Ink{255, 255, 255, 255}), drawn.convert("RGBA")).convert("RGB");
     Records records(rgb.size());
     records.masks_of(page);  // (PC3 B2)
+    records.patterns_of(episode);  // (patterns@1, PC4 E3)
     PlacedLayers placed(episode, dpi, depth);
     records.placed([&placed](const core::Layer& layer) { return placed.blocks(layer); });
     records.paper(page.spec.width_mm.value(), page.spec.height_mm.value());
@@ -1680,7 +1706,7 @@ std::string contents_psd_bytes(const core::Document& episode, const core::Page& 
     put_u16(body, 3);
     put_u32(body, 0);
     body += with_channels(resources(dpi), page, 3);
-    body += records.finish(placed.global());
+    body += records.finish(placed.global() + render::pat::global_block(episode, core::patterns_on(page), 8));  // (PC4 E3: Patt)
     std::string counts, packed;
     for (const Image& channel : rgb.split()) packbits_rows(channel, counts, packed);
     put_channels_rle(page, rgb.size(), counts, packed);

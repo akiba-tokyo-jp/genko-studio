@@ -13,6 +13,7 @@
 
 #include "app/colours.hpp"
 #include "app/main_window.hpp"
+#include "app/patterns_panel.hpp"
 #include "app/theme.hpp"
 
 namespace genko::app {
@@ -106,7 +107,15 @@ void MainWindow::build_paint_docks() {
     settings_dock->toggleViewAction()->setShortcut(QKeySequence(QStringLiteral("F5")));  // (Photoshop's ブラシ設定)
     paint_dock(QStringLiteral("ブラシ"), "brushes_panel", QStringLiteral("グループに分けたブラシの一覧と、ブラシの読み込み・書き出し") + soon);
     // (グラデーション: E4's — its name is the gradient tool's old one, which preferences::renamed() reads as グラデーションツール)
-    paint_dock(QStringLiteral("パターン"), "patterns_panel", QStringLiteral("パターンのライブラリと、この原稿のパターン") + soon);
+    // (PC4 E3: the Patterns panel — the library and this book's patterns, app/patterns_panel.cpp — in the dock E-0 made)
+    patterns_dock_ = paint_dock(QStringLiteral("パターン"), "patterns_panel_frame", QStringLiteral("パターンのライブラリと、この原稿のパターン"));
+    QWidget* frame = patterns_dock_->widget();
+    patterns_panel_ = new PatternsPanel(this);
+    patterns_dock_->setWidget(patterns_panel_);
+    delete frame;
+    connect(patterns_dock_, &QDockWidget::visibilityChanged, this, [this](bool shown) {
+        if (shown) patterns_panel_->refresh();
+    });
     paint_dock(QStringLiteral("スタイル"), "styles_panel", QStringLiteral("レイヤースタイルのプリセット") + soon);
     paint_dock(QStringLiteral("ツールプリセット"), "tool_presets_panel", QStringLiteral("道具と設定をまとめたプリセット") + soon);
     layers_dock_->raise();

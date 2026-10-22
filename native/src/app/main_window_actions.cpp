@@ -475,6 +475,7 @@ void MainWindow::build_actions() {
     build_page_size_actions();  // (PC3 C-e: 画像解像度…, カンバスサイズ…, 画像の回転, 切り抜き(ツール): main_window_page_size.cpp)
     build_retouch_actions();    // (PC3 B4: the retouching tools, コンテンツに応じた塗りつぶし…: retouch_tools.cpp)
     build_shape_actions();      // (pen-shapes@1, PC3 C-b: the shape tools, シェイプを結合…: main_window_shapes.cpp)
+    build_pattern_actions();    // (PC4 E3: パターンを定義…, パターンのレイヤー…, パターンプレビュー: main_window_patterns.cpp)
     build_align_actions();      // (PC3 C-d: 重ね順・整列・分布・リンク・ロック, スナップ (with 定規's グリッドにスナップ), the move tool's: main_window_align.cpp)
     build_file_actions();       // (PC4 F-0: 節 F's new commands of ファイル, frames until F-b and F-c: main_window_file.cpp)
     build_filter_actions();     // (PC4 節 D: フィルター's commands, 前回のフィルター: filter_menu.cpp)
@@ -739,6 +740,7 @@ void MainWindow::build_menus() {
     build_line_menus(pages);  // (台詞, ストーリーエディター, 台詞の検索・置換: main_window_lines.cpp)
     build_path_menus(file, view, tools, layers);  // (PC3 C-a: the paths' commands — ページ → 台詞's too —, app/main_window_paths.cpp)
     build_shape_menus(edit, view, tools, layers);  // (PC3 C-b: the shape tools and the shape parts' commands, app/main_window_shapes.cpp)
+    build_pattern_menus(edit, view);  // (PC4 E3: パターンを定義…, パターンプレビュー: app/main_window_patterns.cpp)
     pages->addAction(action("act_book_preview"));
     pages->addAction(action("act_checks"));
     pages->addSeparator();

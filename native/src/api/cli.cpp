@@ -31,6 +31,8 @@
 #include "core/brush_dabs.hpp"
 #include "core/brushes.hpp"
 #include "core/filter_kinds.hpp"
+#include "core/areas.hpp"
+#include "core/base64.hpp"
 #include "core/config_dir.hpp"
 #include "core/actor.hpp"
 #include "core/clock.hpp"
@@ -57,6 +59,9 @@
 #include "render/proof.hpp"
 #include "render/movie.hpp"
 #include "render/shape_presets.hpp"
+#include "render/pat.hpp"
+#include "render/pattern_library.hpp"
+#include "render/patterns.hpp"
 #include "render/ops_registry.hpp"
 #include "render/page.hpp"
 #include "render/codecs/codecs.hpp"
@@ -1483,6 +1488,212 @@ int brushes_command(const QStringList& args, bool ascii) {
     return 0;
 }
 
+// patterns@1 (PC4 E3, SPEC.md COLOR-09「パターン」, the C++ build's own): the machine's library of patterns (the settings
+// folder's patterns.json and patterns/, render/pattern_library) — `genko patterns list [--full]`, `genko patterns define
+// <dir> --page N [--area <{poly} | {mask} JSON> | --rect x,y,w,h] [--name N] [--group G]` (パターンを定義…: the page as it
+// shows, cut to the area), `genko patterns import <file.pat> [--group G] [--dpi D]`, `genko patterns export <file.pat>
+// [--patterns name,…]`, `genko patterns rename <name> <new name>`, `genko patterns delete <name>…`, `genko patterns edit
+// <{"action", …} JSON>`, `genko patterns reset [--append]`, `genko patterns op <name>` (the add_pattern op that puts it
+// into a book), `genko patterns texture <name> [--out <file.png>]` (its grey as a brush's paper or a dab brush's texture:
+// brush.texturePattern). The ops never read the library.
+int patterns_command(const QStringList& args, bool ascii) {
+    namespace library = render::pattern_library;
+    namespace store = render::preset_store;
+    if (args.isEmpty()) return usage("genko patterns list | define | import | export | rename | delete | edit | reset | op | texture");
+    const QString what = args.front();
+    const QStringList rest = args.mid(1);
+    const fs::path dir = core::config_dir();
+    store::Library lib = library::load(dir);
+    const auto save = [&] {
+        library::save(dir, lib.groups);
+        library::tidy(dir, lib.groups);
+    };
+    const auto named = [&](const std::string& name) {
+        const Json* item = store::find(lib.groups, name);
+        if (item == nullptr) throw core::Error("key", "no pattern named " + name);
+        core::Pattern p = library::pattern_of(*item);
+        p.name = name;
+        const core::Bytes bytes = library::picture(dir, p);
+        if (!bytes) throw core::Error("value", "the picture of the pattern " + name + " is not in the library");
+        return std::pair<core::Pattern, core::Bytes>{p, bytes};
+    };
+    const auto group_of = [](const Arguments& a) {
+        const auto g = a.value("--group");
+        return g ? std::optional<std::string>(g->toStdString()) : std::nullopt;
+    };
+    if (what == QLatin1String("list")) {
+        static constexpr Option kOptions[] = {{"--full", false}};
+        Arguments a;
+        if (auto error = parse_arguments(rest, kOptions, 0, "", a)) return usage("genko patterns list: " + *error);
+        Json out = a.flag("--full") ? library::list(lib.groups) : store::list(lib.groups);
+        out["ok"] = true;
+        if (!lib.problem.empty()) out["problem"] = lib.problem;
+        print_json(out, ascii);
+        return 0;
+    }
+    if (what == QLatin1String("define")) {
+        static constexpr Option kOptions[] = {{"--page", true}, {"--area", true}, {"--rect", true}, {"--name", true}, {"--group", true}};
+        Arguments a;
+        if (auto error = parse_arguments(rest, kOptions, 1, "src", a)) return usage("genko patterns define: " + *error);
+        std::int64_t wanted = 1;
+        if (const auto value = a.value("--page")) {
+            const auto n = int_option(*value);
+            if (!n) return usage("genko patterns define: argument --page: invalid int value: " + core::py_repr_str(value->toStdString()));
+            wanted = *n;
+        }
+        std::optional<Json> area;
+        if (const auto given = a.value("--area")) area = core::op_area(Json{{"area", core::parse_python_json(given->toStdString())}});
+        if (const auto rect = a.value("--rect")) {
+            const QStringList box = rect->split(QLatin1Char(','));
+            std::array<double, 4> r{};
+            bool ok = box.size() == 4;
+            for (int i = 0; ok && i < 4; ++i) r[static_cast<std::size_t>(i)] = box[i].trimmed().toDouble(&ok);
+            if (!ok) return usage("genko patterns define: --rect is x,y,w,h (mm)");
+            area = Json{{"poly", Json::array({Json::array({r[0], r[1]}), Json::array({r[0] + r[2], r[1]}), Json::array({r[0] + r[2], r[1] + r[3]}),
+                                              Json::array({r[0], r[1] + r[3]})})}};
+        }
+        const fs::path src = path_arg(a.positional[0]);
+        refuse_legacy(src);
+        const auto loaded = storage::load_document(src);
+        const core::Document& doc = loaded.document;
+        render::brushes::register_book(doc);
+        const core::Page* page = nullptr;
+        for (std::size_t i = 0; i < doc.pages.size(); ++i) {
+            if (doc.pages[i]->index == core::Num(wanted) && !doc.is_deferred(i)) page = &doc.page(i);
+        }
+        if (page == nullptr) return usage("no page " + std::to_string(wanted), 1);
+        const render::patterns::FromPage made =
+            render::patterns::from_page(doc, *page, area ? &*area : nullptr, a.value("--name").value_or(QString()).toStdString());
+        const auto group = group_of(a);
+        Json out = library::add(dir, lib.groups, made.pattern, made.bytes, group ? std::optional<std::string_view>(*group) : std::nullopt);
+        save();
+        out["ok"] = true;
+        out["width"] = made.pattern.width;
+        out["height"] = made.pattern.height;
+        out["mode"] = made.pattern.mode;
+        out["depth"] = made.pattern.depth;
+        out["dpi"] = made.pattern.dpi;
+        print_json(out, ascii);
+        return 0;
+    }
+    if (what == QLatin1String("import")) {
+        static constexpr Option kOptions[] = {{"--group", true}, {"--dpi", true}};
+        Arguments a;
+        if (auto error = parse_arguments(rest, kOptions, 1, "pat", a)) return usage("genko patterns import: " + *error);
+        double dpi = 300.0;
+        if (const auto value = a.value("--dpi")) {
+            bool ok = false;
+            dpi = value->toDouble(&ok);
+            if (!ok || !(dpi >= 50 && dpi <= 2400)) return usage("genko patterns import: --dpi is 50..2400");
+        }
+        const fs::path file = path_arg(a.positional[0]);
+        const std::string bytes = storage::read_file_bounded(file, static_cast<std::size_t>(render::pat::kMaxFileBytes));
+        const auto group = group_of(a);
+        Json added = Json::array(), skipped = Json::array();
+        for (const render::pat::PsdPattern& p : render::pat::parse_file(bytes)) {
+            std::string why;
+            auto taken = render::pat::from_psd(p, dpi, &why);
+            if (!taken) {
+                skipped.push_back(Json{{"name", render::pat::shown_name(p.name)}, {"why", why}});
+                continue;
+            }
+            added.push_back(library::add(dir, lib.groups, taken->pattern, taken->bytes, group ? std::optional<std::string_view>(*group) : std::nullopt)["name"]);
+        }
+        save();
+        print_json(Json{{"ok", true}, {"imported", std::move(added)}, {"skipped", std::move(skipped)}}, ascii);
+        return 0;
+    }
+    if (what == QLatin1String("export")) {
+        static constexpr Option kOptions[] = {{"--patterns", true}};
+        Arguments a;
+        if (auto error = parse_arguments(rest, kOptions, 1, "pat", a)) return usage("genko patterns export: " + *error);
+        std::vector<std::string> names;
+        if (const auto given = a.value("--patterns")) {
+            for (const QString& n : given->split(QLatin1Char(','), Qt::SkipEmptyParts)) names.push_back(n.trimmed().toStdString());
+        } else {
+            for (const store::Group& g : lib.groups)
+                for (const Json& item : g.items) names.push_back(item.value("name", std::string()));
+        }
+        std::vector<render::pat::PsdPattern> written;
+        for (const std::string& name : names) {
+            const auto [p, bytes] = named(name);
+            written.push_back(render::pat::to_psd(p, *bytes, render::pat::file_id(p)));
+        }
+        const std::string bytes = render::pat::write_file(written);
+        const fs::path out = path_arg(a.positional[0]);
+        if (out.has_parent_path()) fs::create_directories(out.parent_path());
+        storage::write_atomic(out, bytes);
+        print_json(Json{{"ok", true}, {"path", storage::path_to_utf8(out)}, {"count", static_cast<std::int64_t>(written.size())},
+                        {"bytes", static_cast<std::int64_t>(bytes.size())}},
+                   ascii);
+        return 0;
+    }
+    if (what == QLatin1String("rename")) {
+        Arguments a;
+        if (auto error = parse_arguments(rest, {}, 2, "name", a)) return usage("genko patterns rename <name> <new name>: " + *error);
+        Json out = store::edit(lib.groups, library::kind(), Json{{"action", "rename"}, {"preset", a.positional[0].toStdString()}, {"name", a.positional[1].toStdString()}});
+        save();
+        out["ok"] = true;
+        print_json(out, ascii);
+        return 0;
+    }
+    if (what == QLatin1String("delete")) {
+        if (rest.isEmpty()) return usage("genko patterns delete <name>…");
+        Json names = Json::array();
+        for (const QString& n : rest) names.push_back(n.toStdString());
+        Json out = store::edit(lib.groups, library::kind(), Json{{"action", "delete"}, {"preset", names}});
+        save();
+        out["ok"] = true;
+        print_json(out, ascii);
+        return 0;
+    }
+    if (what == QLatin1String("edit")) {
+        Arguments a;
+        if (auto error = parse_arguments(rest, {}, 1, "edit", a)) return usage("genko patterns edit: " + *error);
+        Json out = store::edit(lib.groups, library::kind(), core::parse_python_json(a.positional[0].toStdString()));
+        save();
+        out["ok"] = true;
+        print_json(out, ascii);
+        return 0;
+    }
+    if (what == QLatin1String("reset")) {
+        static constexpr Option kOptions[] = {{"--append", false}};
+        Arguments a;
+        if (auto error = parse_arguments(rest, kOptions, 0, "", a)) return usage("genko patterns reset: " + *error);
+        lib.groups = store::reset(lib.groups, library::kind(), a.flag("--append"));
+        save();
+        print_json(Json{{"ok", true}, {"groups", static_cast<std::int64_t>(lib.groups.size())}}, ascii);
+        return 0;
+    }
+    if (what == QLatin1String("op")) {
+        Arguments a;
+        if (auto error = parse_arguments(rest, {}, 1, "name", a)) return usage("genko patterns op: " + *error);
+        const auto [p, bytes] = named(a.positional[0].toStdString());
+        print_json(library::add_op(p, bytes), ascii);
+        return 0;
+    }
+    if (what == QLatin1String("texture")) {
+        static constexpr Option kOptions[] = {{"--out", true}};
+        Arguments a;
+        if (auto error = parse_arguments(rest, kOptions, 1, "name", a)) return usage("genko patterns texture: " + *error);
+        const auto [p, bytes] = named(a.positional[0].toStdString());
+        const std::string grey = render::patterns::grey(p, *bytes);
+        const std::string png = render::write_png(render::Image::frombytes("L", render::Size{static_cast<int>(p.width), static_cast<int>(p.height)}, grey));
+        Json out{{"ok", true}, {"name", p.name}, {"width", p.width}, {"height", p.height}};
+        if (const auto file = a.value("--out")) {
+            const fs::path path = path_arg(*file);
+            if (path.has_parent_path()) fs::create_directories(path.parent_path());
+            storage::write_atomic(path, png);
+            out["path"] = storage::path_to_utf8(path);
+        } else {
+            out["png"] = core::b64encode(png);
+        }
+        print_json(out, ascii);
+        return 0;
+    }
+    return usage("genko patterns: list, define, import, export, rename, delete, edit, reset, op or texture");
+}
+
 // smart-objects@1 (PC3 A1, the C++ build's own): `genko package <dir> --out <folder>` (パッケージ…) — the book copied as a
 // new book into <folder>/<its folder's name>, with its linked files' copies in Links/ and linked there.
 int package_command(const QStringList& args, bool ascii) {
@@ -1537,6 +1748,7 @@ int run_cli(int argc, char** argv) {
         if (command == QLatin1String("package")) return package_command(args, ascii);  // (smart-objects@1, PC3 A1)
         if (command == QLatin1String("shapes")) return shapes_command(args, ascii);    // (pen-shapes@1, PC3 C-b)
         if (command == QLatin1String("brushes")) return brushes_command(args, ascii);  // (brushes@1, PC4 E1: brush.get)
+        if (command == QLatin1String("patterns")) return patterns_command(args, ascii);  // (patterns@1, PC4 E3)
         if (command == QLatin1String("studio")) return studio_command(args, ascii);
         if (command == QLatin1String("mcp")) return mcp_command(args);
         if (command == QLatin1String("serve")) return serve_command(args);

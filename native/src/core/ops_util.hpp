@@ -66,8 +66,11 @@ std::string blend_mode(const Json& value);
 // gradient_fill's). OpError with Python's words.
 Json gradient_extras(const Json& g);
 // ops._fill_spec: a fill layer's {"rgb"} or {"gradient"} checked and in its normal form (core/ops_layers.cpp; also a
-// shape part's fill, pen-shapes@1). OpError with Python's words.
+// shape part's fill, pen-shapes@1). OpError with Python's words. (patterns@1, PC4 E3: {"pattern": …} too, in
+// core::pattern_fill_spec's normal form.)
 Json fill_spec(const Json& raw);
+// patterns@1 (PC4 E3): OpError unless a fill's pattern (when it is one) is a pattern the book keeps.
+void check_pattern_kept(const Document& doc, const Json& fill);
 
 // The JSON of a list of ints.
 Json ints_json(const std::vector<std::int64_t>& values);

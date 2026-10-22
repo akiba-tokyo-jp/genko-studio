@@ -100,8 +100,12 @@ void bake_stroke(const core::Page& page, core::Layer& layer, const core::PenPoin
 }
 
 // _bake_vectors' picture: the layer's pixels with its fills and lines drawn in (`page_values`: color-model@1, those of
-// an RGB page of a profile, the fills and lines brought into them)
-Image baked(const core::Page& page, const core::Layer& layer, bool page_values = false) {
+// an RGB page of a profile, the fills and lines brought into them; `book`: whose patterns its shape parts' pattern fills
+// name — none: such a layer refused, unless `lenient`, which draws them as nothing: only a colour picked up, never kept)
+Image baked(const core::Page& page, const core::Layer& layer, const core::Document* book, bool page_values = false, bool lenient = false) {
+    if (book == nullptr && !lenient && shape_parts::any_pattern(layer)) {
+        throw core::Error("value", "the layer " + layer.id + " has shape parts filled with the book's patterns: its pixels are made with its book");
+    }
     Image base = ensure_raster(page, layer);
     const Size size = base.size();
     int dpi = kWorkingDpi;
@@ -118,6 +122,7 @@ Image baked(const core::Page& page, const core::Layer& layer, bool page_values =
     detail::Ctx ctx;
     std::vector<std::string> omitted;
     ctx.page = &page;
+    ctx.episode = book;  // (patterns@1, PC4 E3: its shape parts' patterns)
     ctx.dpi = dpi;
     ctx.size = size;
     ctx.mode = "proof";
@@ -161,8 +166,8 @@ void save_raster(const core::Page& page, core::Layer& layer, const Image& image)
     layer.raster_relpath = folder + "/" + std::string(core::to_string(layer.role)) + ".png";
 }
 
-void bake_vectors(const core::Page& page, core::Layer& layer, bool page_values) {
-    const Image base = baked(page, layer, page_values);
+void bake_vectors(const core::Page& page, core::Layer& layer, const core::Document* book, bool page_values) {
+    const Image base = baked(page, layer, book, page_values);
     layer.strokes = core::empty_strokes();
     layer.patches.clear();
     layer.shapes = core::vector::empty_shapes();  // (pen-shapes@1, PC3 C-b: its shape parts drawn in too)
@@ -170,12 +175,14 @@ void bake_vectors(const core::Page& page, core::Layer& layer, bool page_values) 
     layer.kind = core::LayerKind::Raster;
 }
 
-Image layer_pixels(const core::Page& page, const core::Layer& layer) {
+Image layer_pixels(const core::Page& page, const core::Layer& layer) { return layer_pixels(page, layer, nullptr); }
+
+Image layer_pixels(const core::Page& page, const core::Layer& layer, const core::Document* book) {
     // (the same pixels as _bake_vectors on a copy and ensure_raster of it: PNG keeps them)
     if (layer.stroke_count() > 0 || !layer.patches.empty() || shape_parts::any(layer)) {
         core::Layer copy = layer;
         (void)index3(page.index);  // (save_raster's page number)
-        return baked(page, copy, core::holds_page_values(page, layer));
+        return baked(page, copy, book, core::holds_page_values(page, layer));
     }
     return ensure_raster(page, layer);
 }
@@ -242,8 +249,10 @@ std::vector<core::Stroke> mixed_pieces(const core::Page& page, const core::Layer
         w = static_cast<int>(head.width);
         h = static_cast<int>(head.height);
     } else {
-        const Image under = core::holds_page_values(page, layer) ? srgb_from(layer_pixels(page, layer).convert("RGBA"), RgbSpace(*page.rgb))
-                                                                  : layer_pixels(page, layer).convert("RGBA");
+        // (patterns@1: the colour picked up only — a shape part's pattern, which needs its book, picked up as clear)
+        const bool lines = layer.stroke_count() > 0 || !layer.patches.empty() || shape_parts::any(layer);
+        const Image seen = lines ? baked(page, layer, nullptr, core::holds_page_values(page, layer), true) : ensure_raster(page, layer);
+        const Image under = core::holds_page_values(page, layer) ? srgb_from(seen.convert("RGBA"), RgbSpace(*page.rgb)) : seen.convert("RGBA");
         px = under.tobytes();
         w = under.width();
         h = under.height();

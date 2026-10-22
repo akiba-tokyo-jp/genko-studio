@@ -35,7 +35,10 @@
 #include "render/fill.hpp"
 #include "render/import_profile.hpp"
 #include "render/op_limits.hpp"
+#include "core/patterns.hpp"
+#include "render/ops_patterns.hpp"
 #include "render/ops_registry.hpp"
+#include "render/pat.hpp"
 #include "render/ink_canvas.hpp"
 #include "render/psd.hpp"
 #include "render/psd_adjust.hpp"
@@ -599,7 +602,49 @@ void import_psd(core::OpContext& c) {
         }
         return mask;
     };
+    // (patterns@1, PC4 E3: the file's patterns — its Patt, Pat2, Pat3 blocks, read within their budget —, each made a
+    // pattern of the book only when a fill names it: by its unique id, else by its name; its pixel 1/dpi inch as the
+    // file's. A block that cannot be read — broken, too large, out of memory —: its fills are not read, as of a pattern
+    // the file does not hold; the PSD is still read)
+    std::vector<pat::PsdPattern> file_patterns;
+    for (const std::string_view block : file.pattern_blocks()) {
+        try {
+            for (pat::PsdPattern& p : pat::parse_block(block)) file_patterns.push_back(std::move(p));
+        } catch (const std::exception&) {
+        }
+    }
+    std::map<std::string, std::optional<std::pair<std::string, double>>> patterns_taken;  // (the file's id → the book's pattern and dpi)
+    Json patterns_read = Json::array();
+    const auto pattern_of = [&](const std::string& id, const std::string& name) -> std::optional<std::pair<std::string, double>> {
+        const auto found = std::find_if(file_patterns.begin(), file_patterns.end(), [&](const pat::PsdPattern& t) { return !id.empty() && t.id == id; });
+        const auto named = found != file_patterns.end()
+                               ? found
+                               : std::find_if(file_patterns.begin(), file_patterns.end(),
+                                              [&](const pat::PsdPattern& t) { return pat::shown_name(t.name) == pat::shown_name(name); });
+        if (named == file_patterns.end()) return std::nullopt;
+        if (const auto kept = patterns_taken.find(named->id); kept != patterns_taken.end()) return kept->second;
+        std::optional<pat::Taken> taken;
+        try {
+            taken = pat::from_psd(*named, file.dpi());
+        } catch (const std::exception&) {  // (its picture cannot be made: as one the file does not hold)
+        }
+        if (!taken) {
+            patterns_taken[named->id] = std::nullopt;
+            return std::nullopt;
+        }
+        core::Pattern given = taken->pattern;
+        if (core::find_pattern(doc, taken->file_id) == nullptr && !taken->file_id.empty() && taken->file_id.size() <= 64 &&
+            std::all_of(taken->file_id.begin(), taken->file_id.end(), [](char ch) { return std::isalnum(static_cast<unsigned char>(ch)) || ch == '-' || ch == '_'; })) {
+            given.id = taken->file_id;  // (its unique id kept: written back the same)
+        }
+        const auto [book_id, added] = keep_pattern(doc, std::move(given), taken->bytes);
+        if (added) patterns_read.push_back(book_id);
+        const std::pair<std::string, double> out{book_id, taken->pattern.dpi};
+        patterns_taken[named->id] = out;
+        return out;
+    };
     std::vector<core::Layer> made;
+    std::vector<std::string> patterns_filled;  // (patterns@1: the pattern fill layers read)
     std::vector<std::string> shapes_skipped, shapes_read;  // (pen-shapes@1: shape layers this build cannot read, and those read)
     std::map<std::string, std::string> contents_made;  // (PC3 A3: a placed layer's uuid → its contents' id)
     Json smart_objects = Json::array(), placed_pixels = Json::array();
@@ -655,6 +700,7 @@ void import_psd(core::OpContext& c) {
                 placement.width_px = static_cast<double>(file.width());
                 placement.height_px = static_cast<double>(file.height());
                 placement.dpi = file.dpi();
+                placement.pattern = pattern_of;  // (patterns@1, PC4 E3)
                 part = psd_shapes::part_of(psd_shapes::Blocks{blocks->fill_key, blocks->fill, blocks->vscg, blocks->vstk, blocks->vogk, blocks->path},
                                            placement);
             }
@@ -674,6 +720,32 @@ void import_psd(core::OpContext& c) {
             layer.shapes = core::vector::make_shapes({std::move(*part)});
             if (auto mask = mask_of()) layer.mask = std::move(*mask);
             shapes_read.push_back(layer.id);
+        } else if (item.kind == "adjust" && !item.adjust) {
+            // (patterns@1, PC4 E3: a pattern fill layer — a fill layer of the book's pattern, as the PSD shows it: not cut by
+            // the panels; one whose pattern the file does not hold, left out as before)
+            std::optional<Json> spec;
+            if (const auto block = file.fill_block(item); block && block->first == "PtFl") {
+                psd_shapes::Placement placement;
+                placement.mm_x = static_cast<double>(where.shown_w) / std::max<double>(1.0, static_cast<double>(file.width())) * mm_x;
+                placement.mm_y = static_cast<double>(where.shown_h) / std::max<double>(1.0, static_cast<double>(file.height())) * mm_y;
+                placement.x0_mm = static_cast<double>(where.at_x) * mm_x;
+                placement.y0_mm = static_cast<double>(where.at_y) * mm_y;
+                placement.width_px = static_cast<double>(file.width());
+                placement.height_px = static_cast<double>(file.height());
+                placement.dpi = file.dpi();
+                placement.pattern = pattern_of;
+                spec = psd_shapes::pattern_fill_of(block->second, placement);
+            }
+            if (!spec) {
+                shapes_skipped.push_back(item.name);
+                continue;
+            }
+            layer.kind = core::LayerKind::Fill;
+            layer.fill = Json{{"pattern", std::move(*spec)}};
+            layer.panel_clip = false;
+            if (auto mask = mask_of()) layer.mask = std::move(*mask);
+            layer.vector_mask = vector_mask_of(item);
+            patterns_filled.push_back(layer.id);
         } else if (item.kind == "adjust" && item.adjust) {
             // (PC2, the user's decision 5: an adjustment layer a codec read, render/psd_adjust — a correction layer, its
             // blend its native.blend: a correction layer's own blend is not looked at)
@@ -770,6 +842,12 @@ void import_psd(core::OpContext& c) {
     // (PC3 A3: the placed layers made smart objects, and those read as their pixels and why — said only when there are)
     if (!smart_objects.empty()) (*c.report)["smart_objects"] = std::move(smart_objects);
     if (!placed_pixels.empty()) (*c.report)["placed_as_pixels"] = std::move(placed_pixels);
+    if (!patterns_read.empty()) (*c.report)["patterns"] = std::move(patterns_read);  // (patterns@1, PC4 E3: the patterns taken in)
+    if (!patterns_filled.empty()) {  // (and the pattern fill layers read)
+        Json fills = Json::array();
+        for (const std::string& id : patterns_filled) fills.push_back(id);
+        (*c.report)["pattern_fills"] = std::move(fills);
+    }
     if (!shapes_read.empty()) {  // (pen-shapes@1, PC3 C-b: the shape layers read as pen layers of a shape part)
         Json shapes = Json::array();
         for (const std::string& id : shapes_read) shapes.push_back(id);

@@ -136,6 +136,7 @@ genko_test(test_shapes SOURCES unit/test_shapes.cpp DEPS genko_test_support genk
 # retouch_dabs' apply_dab_stroke) on 8-bit, 16-bit, 32-bit, CMYK, Lab and grey layers.
 genko_test(test_brushes_model SOURCES unit/test_brushes_model.cpp DEPS genko_test_support genko_render_ops LABELS unit)
 genko_test(test_patterns_model SOURCES unit/test_patterns_model.cpp DEPS genko_test_support genko_render_ops LABELS unit)
+genko_test(test_patterns SOURCES unit/test_patterns.cpp DEPS genko_test_support genko_render_ops LABELS unit)  # (PC4 E3)
 genko_test(test_preset_store SOURCES unit/test_preset_store.cpp DEPS genko_test_support genko_render_ops LABELS unit)
 genko_test(test_tiled_pixels SOURCES unit/test_tiled_pixels.cpp DEPS genko_test_support genko_render_ops LABELS unit TIMEOUT 600)
 # PC4 E1 (SPEC.md COLOR-09「ブラシのダブの描き方」): the dab engine (render/dabs) against PhotoCraft's own brush tests in mm
@@ -439,6 +440,11 @@ genko_test(test_contract_retouch SOURCES contract/test_contract_retouch.cpp DEPS
 # shape layers and groups (psd-tools, import_psd).
 genko_test(test_contract_shapes SOURCES contract/test_contract_shapes.cpp DEPS genko_test_support genko_render_ops genko_formats
            LABELS contract TIMEOUT 900)
+# PC4 E3 (patterns@1): the book's patterns (add, rename, delete), pattern fill layers on every kind of page, fill_area's and
+# fill's pattern, a shape part's, rasterized; saved, undone, read-only; the PSD's Patt and PtFl (psd-tools, import_psd);
+# `genko patterns`.
+genko_test(test_contract_patterns SOURCES contract/test_contract_patterns.cpp DEPS genko_test_support genko_render_ops genko_formats
+           LABELS contract TIMEOUT 900)
 # PC3 C-c: transform_layers on each kind of layer and pixels (exact moves and turns on 8, 16, 32 bits, CMYK, Lab; lines,
 # patches, quads, warps, perspective, puppet; folders, links, masks, areas, parts; smart objects, placed pictures, locks,
 # lines of dialogue), content_aware_scale, liquify's strokes, Warp Text; through the command line saved and undone.
@@ -604,6 +610,7 @@ if(GENKO_BUILD_APP)
   genko_test(test_gui_paper SOURCES gui/test_gui_paper.cpp DEPS genko_app genko_test_support GUI TIMEOUT 900)
   genko_test(test_gui_anim SOURCES gui/test_gui_anim.cpp DEPS genko_app genko_test_support GUI TIMEOUT 900)
   genko_test(test_gui_paint SOURCES gui/test_gui_paint.cpp DEPS genko_app GUI TIMEOUT 600)
+  genko_test(test_gui_patterns SOURCES gui/test_gui_patterns.cpp DEPS genko_app GUI TIMEOUT 600)  # (PC4 E3)
   genko_test(test_gui_guides SOURCES gui/test_gui_guides.cpp DEPS genko_app GUI TIMEOUT 900)
   genko_test(test_gui_colours SOURCES gui/test_gui_colours.cpp DEPS genko_app genko_test_support GUI TIMEOUT 600)
   genko_test(test_gui_workspace SOURCES gui/test_gui_workspace.cpp DEPS genko_app genko_test_support GUI TIMEOUT 600)

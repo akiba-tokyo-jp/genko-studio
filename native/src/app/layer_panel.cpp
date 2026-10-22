@@ -31,6 +31,8 @@
 #include "app/icons.hpp"
 #include "app/layer_dialogs.hpp"
 #include "app/main_window.hpp"
+#include "app/patterns_panel.hpp"
+#include "core/patterns.hpp"
 #include "app/preferences.hpp"
 #include "app/theme.hpp"
 #include "app/comfort.hpp"
@@ -225,6 +227,7 @@ LayerPanel::LayerPanel(MainWindow* window) : window_(window) {
     special_ = new QMenu(add_special_button);
     special_->addAction(QStringLiteral("ベタ塗りのレイヤー…"), this, [this] { add_fill(); });
     special_->addAction(QStringLiteral("グラデーションのレイヤー…"), this, [this] { add_gradient(); });
+    if (QAction* pattern = window_->action(QStringLiteral("act_layer_pattern"))) special_->addAction(pattern);  // (PC4 E3)
     QMenu* adjust = special_->addMenu(QStringLiteral("色調補正のレイヤー"));
     for (const auto& [key, label] : adjustment_kinds()) {
         // (PC2b, the user's decision 3: a new 色相・彩度 is the upstream form, hue_saturation, in its place; a layer of
@@ -969,6 +972,23 @@ void LayerPanel::edit_special() {
             if (!native.empty()) spec["native"] = native;
         }
         set("adjust", spec);
+    } else if (layer->kind == core::LayerKind::Fill && layer->fill && core::pattern_of_fill(*layer->fill) != nullptr) {
+        // (patterns@1, PC4 E3: its pattern, scale, angle and link; where it starts kept)
+        const Json was = *core::pattern_of_fill(*layer->fill);
+        PatternFillSettings start;
+        start.choice = QStringLiteral("book:") + QString::fromStdString(was.value("id", std::string()));
+        start.scale = was.value("scale", 100.0);
+        start.angle = was.value("angle", 0.0);
+        start.link = was.value("link", true);
+        const auto picked = pattern_fill_dialog(this, window_->book(), start, QStringLiteral("パターンで塗りつぶし"));
+        if (!picked || !window_->still(asked)) return;
+        Json ops;
+        auto spec = window_->pattern_fill_of(picked->choice, picked->scale, picked->angle, picked->link, ops);
+        if (!spec) return;
+        (*spec)["phase_mm"] = was.value("phase_mm", Json::array({0, 0}));
+        window_->set_current_pattern(picked->choice);
+        ops.push_back(Json{{"op", "set_layer"}, {"page", page->index.json()}, {"id", layer->id}, {"fill", Json{{"pattern", *spec}}}});
+        window_->apply_ops(ops);
     } else if (layer->kind == core::LayerKind::Fill && layer->fill && layer->fill->is_object() && layer->fill->contains("gradient")) {
         if (const auto spec = gradient_dialog(this, page, (*layer->fill)["gradient"]); spec && window_->still(asked)) set("fill", Json{{"gradient", *spec}});
     } else if (layer->kind == core::LayerKind::Fill && layer->fill && layer->fill->is_object()) {

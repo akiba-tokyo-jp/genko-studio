@@ -225,6 +225,8 @@ void from_rgba(Pixels& p, const std::vector<Rgba>& px);
 // The page as it shows (print, without its finish, onion skin, nombre and spots) at the working 200 dpi: an RGB page's
 // picture (its values on a page of a profile or of more than 8 bits: precise), an ink page's inks (opaque).
 Pixels page_pixels(const core::Document& doc, const core::Page& page);
+// The same at `dpi` (PC4 E3: Define Pattern at the page's working grid).
+Pixels page_pixels(const core::Document& doc, const core::Page& page, int dpi);
 // A layer's pixels, nothing changed: a paint layer's (its lines and fills drawn in on a copy), any other layer as it
 // shows alone (layer_image, 8 bits).
 Pixels shown_layer_pixels(const core::Document& doc, const core::Page& page, const core::Layer& layer);

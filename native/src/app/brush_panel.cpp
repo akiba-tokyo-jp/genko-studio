@@ -28,6 +28,8 @@
 #include <set>
 
 #include "app/ask.hpp"
+#include "app/main_window.hpp"
+#include "app/patterns_panel.hpp"
 #include "app/config.hpp"
 #include "app/fields.hpp"
 #include "app/look.hpp"
@@ -41,6 +43,8 @@
 #include "render/abr.hpp"
 #include "render/brushes.hpp"
 #include "render/paper.hpp"
+#include "render/patterns.hpp"
+#include "render/png.hpp"
 #include "storage/asset_store.hpp"
 #include "storage/fsutil.hpp"
 
@@ -839,6 +843,44 @@ BrushDialog::BrushDialog(QWidget* parent, const std::string& base, bool editing)
     paper_picture->setToolTip(QStringLiteral("PNG・JPEG・BMP・GIF（縦横 4096 画素まで）。画像は原稿の中に保存されるので、元のファイルを消したり"
                                              "別の PC で開いたりしても同じ線になります"));
     connect(paper_picture, &QPushButton::clicked, this, [this] { pick_paper(); });
+    // (PC4 E3, brush.texturePattern: a pattern of the library or the book as the paper — its lightness over white)
+    auto* paper_pattern = new QPushButton(QStringLiteral("パターンから…"));
+    paper_pattern->setObjectName(QStringLiteral("paper_pattern"));
+    paper_pattern->setToolTip(QStringLiteral("パターンの明るさを紙質にします（パターン パネルのライブラリと、この原稿のパターンから選びます）"));
+    connect(paper_pattern, &QPushButton::clicked, this, [this] {
+        const auto* window = qobject_cast<const MainWindow*>(parentWidget());
+        static const core::Document none;
+        const core::Document& book = window != nullptr ? window->book() : none;
+        QDialog pick(this);
+        pick.setObjectName(QStringLiteral("paper_pattern_dialog"));
+        pick.setWindowTitle(QStringLiteral("パターンから紙質"));
+        auto* form = new QFormLayout(&pick);
+        QComboBox* choice = pattern_combo(book, window != nullptr ? window->current_pattern() : QString());
+        form->addRow(QStringLiteral("パターン"), choice);
+        auto* buttons = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel);
+        connect(buttons, &QDialogButtonBox::accepted, &pick, &QDialog::accept);
+        connect(buttons, &QDialogButtonBox::rejected, &pick, &QDialog::reject);
+        form->addRow(buttons);
+        if (choice->count() == 0 || ask::exec(&pick) != QDialog::Accepted) return;
+        const auto chosen = pattern_chosen(book, choice->currentData().toString());
+        if (!chosen) return;
+        try {
+            const std::string grey = render::patterns::grey(chosen->first, *chosen->second);
+            const std::string png = render::write_png(
+                render::Image::frombytes("L", render::Size{static_cast<int>(chosen->first.width), static_cast<int>(chosen->first.height)}, grey));
+            auto taken = std::make_shared<const std::string>(render::paper::take_in(png));
+            paper_asset = storage::AssetStore::ref(*taken);
+            render::paper::keep(paper_asset, std::move(taken));
+        } catch (const std::exception& error) {
+            ask::warning(this, QStringLiteral("パターンから紙質"), wording::error(QString::fromUtf8(error.what())));
+            return;
+        }
+        paper_on->blockSignals(true);
+        paper_on->setChecked(true);
+        paper_on->blockSignals(false);
+        show_paper();
+        draw_sample();
+    });
     paper_preview = new QLabel;
     paper_preview->setObjectName(QStringLiteral("paper_preview"));
     paper_preview->setMinimumSize(160, 120);
@@ -907,6 +949,7 @@ BrushDialog::BrushDialog(QWidget* parent, const std::string& base, bool editing)
     papers->addRow(section(QStringLiteral("紙質"), QStringLiteral("先端の画像とは別に、線の下に敷く紙の画像です")));
     papers->addRow(QString(), paper_on);
     papers->addRow(QString(), paper_picture);
+    papers->addRow(QString(), paper_pattern);  // (PC4 E3)
     papers->addRow(paper_preview);
     papers->addRow(paper_about);
     papers->addRow(QStringLiteral("濃さ"), paper_density);

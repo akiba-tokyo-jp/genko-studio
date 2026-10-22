@@ -9,6 +9,7 @@
 #include "core/error.hpp"
 #include "core/model.hpp"
 #include "core/ops_util.hpp"
+#include "core/patterns.hpp"
 #include "core/pyconv.hpp"
 #include "core/pynum.hpp"
 #include "core/pyops.hpp"
@@ -251,7 +252,17 @@ Path path_from_json(const Json& value) {
 void check_fill(const Json& fill, std::string_view what) {
     if (fill.is_null()) return;
     object_of(fill, what);
-    if (field(fill, "pattern") != nullptr) bad(std::string(what) + ": a pattern fill is not in this build yet");
+    if (const Json* pattern = field(fill, "pattern")) {  // (patterns@1, PC4 E3: in its normal form; the book keeps it)
+        only_keys(fill, {"pattern"}, what);
+        bool normal = false;
+        try {
+            normal = pattern_fill_normal(*pattern);
+        } catch (const std::exception& error) {
+            bad(std::string(what) + "'s " + error.what());
+        }
+        if (!normal) bad(std::string(what) + "'s pattern fill must be in its normal form {id, scale, angle, phase_mm, link}");
+        return;
+    }
     if (const Json* gradient = field(fill, "gradient")) {
         only_keys(fill, {"gradient"}, what);
         object_of(*gradient, std::string(what) + "'s gradient");

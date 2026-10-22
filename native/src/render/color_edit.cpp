@@ -571,7 +571,7 @@ void bake_page_values(core::Document& doc) {
             marks.strokes = core::empty_strokes();
             marks.shapes = core::vector::empty_shapes();  // (pen-shapes@1: the layer keeps its shape parts)
             marks.patches = std::move(laid);
-            raster::bake_vectors(page, marks);  // (the page's values onto its values: as they are)
+            raster::bake_vectors(page, marks, &doc);  // (the page's values onto its values: as they are)
             layer.raster_png = marks.raster_png;
             layer.raster_relpath = marks.raster_relpath;
             layer.raster_memo = {};

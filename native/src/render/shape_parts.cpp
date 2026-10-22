@@ -5,12 +5,14 @@
 
 #include "core/command_bus.hpp"
 #include "core/json.hpp"
+#include "core/patterns.hpp"
 #include "core/pynum.hpp"
 #include "render/fill.hpp"
 #include "render/op_limits.hpp"
 #include "render/page.hpp"
 #include "render/page_internal.hpp"
 #include "render/path_trace.hpp"
+#include "render/patterns.hpp"
 #include "render/selection.hpp"
 
 // PhotoCraft v0.2.0 crates/vector/src/lib.rs (176-378: Paint::from_fill, CompiledShape) and engine/src/vector_cmds.rs
@@ -30,16 +32,23 @@ namespace {
 // A fill or a stroke's colour source: a colour (straight sRGB 0..1) or a gradient (a fill layer's: render/composite's
 // GradientColours over the page in mm).
 struct Paint {
-    enum class Kind { None, Solid, Gradient };
+    enum class Kind { None, Solid, Gradient, Pattern };
     Kind kind = Kind::None;
     std::array<float, 4> rgba{0, 0, 0, 0};
     std::shared_ptr<const detail::GradientColours> gradient;
+    std::shared_ptr<const patterns::Laid> pattern;  // (patterns@1, PC4 E3: the book's pattern laid on the page's grid)
     double px_per_mm = 1.0;
     std::optional<std::array<float, 3>> guide;  // (every colour this one, its alpha kept)
 
     std::array<float, 4> at(int x, int y) const {
         if (kind == Kind::Solid) return rgba;
         if (kind == Kind::None) return {0, 0, 0, 0};
+        if (kind == Kind::Pattern) {
+            float v[4];
+            pattern->at(x, y, v);
+            if (guide) return {(*guide)[0], (*guide)[1], (*guide)[2], v[3]};
+            return {std::clamp(v[0], 0.0f, 1.0f), std::clamp(v[1], 0.0f, 1.0f), std::clamp(v[2], 0.0f, 1.0f), v[3]};
+        }
         unsigned char rgb[3];
         double opacity = 1.0;
         gradient->at((x + 0.5) / px_per_mm, (y + 0.5) / px_per_mm, rgb, opacity);
@@ -54,7 +63,7 @@ std::array<float, 3> rgb_of(const std::vector<std::int64_t>& rgb) {
 }
 
 // The paint of a fill (null: none — a stroke's null fill is the layer's ink).
-Paint paint_of(const Json& fill, double px_per_mm, const std::vector<std::int64_t>* colour, bool null_is_ink) {
+Paint paint_of(const Json& fill, double px_per_mm, const std::vector<std::int64_t>* colour, bool null_is_ink, const core::Document* book) {
     Paint p;
     p.px_per_mm = px_per_mm;
     if (colour != nullptr) p.guide = rgb_of(*colour);
@@ -68,6 +77,14 @@ Paint paint_of(const Json& fill, double px_per_mm, const std::vector<std::int64_
         return p;
     }
     if (!fill.is_object()) return p;
+    if (const auto pattern = fill.find("pattern"); pattern != fill.end() && pattern->is_object()) {
+        // (patterns@1, PC4 E3: the book's pattern, over the page as a fill layer's — none drawn without the book)
+        if (auto laid = patterns::laid(book, *pattern, patterns::Target::srgb(), px_per_mm * 25.4)) {
+            p.kind = Paint::Kind::Pattern;
+            p.pattern = std::make_shared<const patterns::Laid>(std::move(*laid));
+        }
+        return p;
+    }
     if (const auto g = fill.find("gradient"); g != fill.end() && g->is_object()) {
         p.kind = Paint::Kind::Gradient;
         p.gradient = std::make_shared<const detail::GradientColours>(*g);
@@ -82,7 +99,7 @@ Paint paint_of(const Json& fill, double px_per_mm, const std::vector<std::int64_
             solid(values);
         }
     }
-    return p;  // (a pattern, PC4's: nothing yet)
+    return p;
 }
 
 Box box_of(const path_raster::PixelBox& b) { return Box{b.x0, b.y0, b.x1, b.y1}; }
@@ -102,6 +119,15 @@ unsigned char byte(float v) { return static_cast<unsigned char>(std::lround(std:
 
 }  // namespace
 
+bool has_pattern(const core::vector::ShapePart& part) {
+    return core::pattern_of_fill(part.fill) != nullptr || (part.stroke && core::pattern_of_fill(part.stroke->fill) != nullptr);
+}
+
+bool any_pattern(const core::Layer& layer) {
+    if (!any(layer)) return false;
+    return std::any_of(layer.shapes->items.begin(), layer.shapes->items.end(), [](const core::vector::ShapePart& p) { return has_pattern(p); });
+}
+
 bool closed(const Path& path) {
     return std::all_of(path.subpaths.begin(), path.subpaths.end(), [](const Subpath& s) { return s.closed; });
 }
@@ -110,6 +136,7 @@ bool fills(const Json& fill) {
     if (!fill.is_object()) return false;
     const auto g = fill.find("gradient");
     if (g != fill.end() && g->is_object()) return true;
+    if (const auto pattern = fill.find("pattern"); pattern != fill.end() && pattern->is_object()) return true;  // (patterns@1)
     return fill.contains("rgb");
 }
 
@@ -127,13 +154,14 @@ struct Compiled::Impl {
     std::optional<Box> box;
 };
 
-Compiled::Compiled(const ShapePart& part, double dpi, const std::vector<std::int64_t>* colour) : impl_(std::make_unique<Impl>()) {
+Compiled::Compiled(const ShapePart& part, double dpi, const std::vector<std::int64_t>* colour, const core::Document* book)
+    : impl_(std::make_unique<Impl>()) {
     Impl& m = *impl_;
     const double k = dpi / 25.4;
     m.opacity = static_cast<float>(std::clamp(part.opacity, 0.0, 1.0));
     const Path px = path_raster::to_pixels(part.path, dpi);
     path_raster::Rasterizer area = path_raster::fill_rasterizer(px);
-    m.fill_paint = paint_of(part.fill, k, colour, false);
+    m.fill_paint = paint_of(part.fill, k, colour, false, book);
     if (m.fill_paint.kind != Paint::Kind::None && !part.path.empty()) {
         if (px.inverted) {
             m.box = kPlane;
@@ -153,7 +181,7 @@ Compiled::Compiled(const ShapePart& part, double dpi, const std::vector<std::int
         path_raster::Rasterizer outline = path_raster::stroke_rasterizer(px, style);
         if (const auto b = outline.pixel_bounds()) m.box = joined(m.box, box_of(*b));
         m.stroke = std::move(outline);
-        m.stroke_paint = paint_of(part.stroke->fill, k, colour, true);
+        m.stroke_paint = paint_of(part.stroke->fill, k, colour, true, book);
         m.stroke_opacity = static_cast<float>(std::clamp(part.stroke->opacity, 0.0, 1.0));
         if (m.stroke_paint.kind == Paint::Kind::None) m.stroke.reset();
     }
@@ -205,10 +233,11 @@ std::vector<std::array<float, 4>> Compiled::rgba(const Box& box) const {
     return out;
 }
 
-void draw(Image& out, const Box& area, int dpi, const std::vector<const ShapePart*>& parts, const std::vector<std::int64_t>* colour) {
+void draw(Image& out, const Box& area, int dpi, const std::vector<const ShapePart*>& parts, const std::vector<std::int64_t>* colour,
+          const core::Document* book) {
     constexpr int kBand = 128;
     for (const ShapePart* part : parts) {
-        const Compiled one(*part, dpi, colour);
+        const Compiled one(*part, dpi, colour, book);
         const std::optional<Box> b = one.box();
         if (!b) continue;
         const Box at = clipped(*b, area);
@@ -234,15 +263,16 @@ void draw(Image& out, const Box& area, int dpi, const std::vector<const ShapePar
     }
 }
 
-Image picture(const Box& area, int dpi, const std::vector<const ShapePart*>& parts, const std::vector<std::int64_t>* colour) {
+Image picture(const Box& area, int dpi, const std::vector<const ShapePart*>& parts, const std::vector<std::int64_t>* colour,
+              const core::Document* book) {
     Image out = Image::create("RGBA", Size{area.width(), area.height()}, Ink{0, 0, 0, 0});
-    draw(out, area, dpi, parts, colour);
+    draw(out, area, dpi, parts, colour, book);
     return out;
 }
 
-std::optional<core::Patch> as_patch(const core::Page* page, const ShapePart& part) {
+std::optional<core::Patch> as_patch(const core::Page* page, const ShapePart& part, const core::Document* book) {
     const int dpi = fills::kFillDpi;
-    const Compiled one(part, dpi);
+    const Compiled one(part, dpi, nullptr, book);
     std::optional<Box> b = one.box();
     if (!b) return std::nullopt;
     if (part.path.inverted) {  // (an inverted fill: as far as the page)
@@ -251,19 +281,19 @@ std::optional<core::Patch> as_patch(const core::Page* page, const ShapePart& par
     }
     if (b->width() <= 0 || b->height() <= 0) return std::nullopt;
     limits::check_picture(b->width(), b->height(), "the shape");
-    const Image drawn = picture(*b, dpi, {&part});
+    const Image drawn = picture(*b, dpi, {&part}, nullptr, book);
     core::Patch templ;
     templ.attrs["mode"] = "image";
     templ.attrs["opacity"] = 1.0;
     return selection::to_patch(drawn, b->x0, b->y0, templ, dpi);
 }
 
-void rasterize_parts(const core::Page& page, core::Layer& layer) {
+void rasterize_parts(const core::Page& page, core::Layer& layer, const core::Document* book) {
     // (as they are drawn: the parts under the lines, then those over them)
     for (const bool over : {false, true}) {
         for (const ShapePart& part : layer.shapes->items) {
             if (part.over != over) continue;
-            if (auto patch = as_patch(&page, part)) layer.patches.push_back(std::move(*patch));
+            if (auto patch = as_patch(&page, part, book)) layer.patches.push_back(std::move(*patch));
         }
     }
     layer.shapes = vec::empty_shapes();

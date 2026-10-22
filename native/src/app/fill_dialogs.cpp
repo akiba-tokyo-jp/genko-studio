@@ -1,7 +1,8 @@
 // PC3 B2 (edit.fill, edit.stroke): 編集 → 塗りつぶし… and 境界線を描く…, Photoshop's dialogs. The selection (none: the whole
 // layer, or for 境界線 the edge of what the layer holds) filled or stroked on the layer drawn on with one op — fill_area,
-// outline_area (render/ops_masks) — so one Undo takes it back. (塗りつぶし's パターン joins its contents with the pattern
-// library, PC4; コンテンツに応じる with コンテンツに応じた塗りつぶし…, B4.)
+// outline_area (render/ops_masks) — so one Undo takes it back. (塗りつぶし's パターン — PC4 E3, edit.fill: the chosen pattern
+// of the library or the book, its 比率 and 角度 — fills with fill_area's "pattern", a library pattern put into the book by
+// add_pattern in the same apply; コンテンツに応じる with コンテンツに応じた塗りつぶし…, B4.)
 
 #include <QCheckBox>
 #include <QComboBox>
@@ -18,6 +19,8 @@
 #include "app/colours.hpp"
 #include "app/config.hpp"
 #include "app/main_window.hpp"
+#include "app/patterns_panel.hpp"
+#include "core/patterns.hpp"
 #include "core/pynum.hpp"
 
 namespace genko::app {
@@ -56,19 +59,55 @@ void MainWindow::fill_dialog() {
     auto* form = new QFormLayout(&dialog);
     auto* contents = new QComboBox;
     contents->setObjectName(QStringLiteral("fill_contents"));
-    for (const auto& [label, key] : {std::pair{"描画色", "fore"}, {"背景色", "back"}, {"カラー…", "colour"}, {"ブラック", "black"},
-                                     {"50% グレー", "grey"}, {"ホワイト", "white"}})
+    for (const auto& [label, key] : {std::pair{"描画色", "fore"}, {"背景色", "back"}, {"カラー…", "colour"}, {"パターン", "pattern"},
+                                     {"ブラック", "black"}, {"50% グレー", "grey"}, {"ホワイト", "white"}})
         contents->addItem(QString::fromUtf8(label), QString::fromLatin1(key));
     auto* opacity = percent("fill_opacity", static_cast<int>(std::lround(pen_.opacity * 100)));
     auto* preserve = new QCheckBox(QStringLiteral("透明部分の保持"));
     preserve->setObjectName(QStringLiteral("fill_preserve"));
+    // (PC4 E3: パターン — the chosen pattern, its 比率 and 角度)
+    QComboBox* pattern = pattern_combo(book(), current_pattern());
+    pattern->setObjectName(QStringLiteral("fill_pattern"));
+    auto* scale = new QDoubleSpinBox;
+    scale->setObjectName(QStringLiteral("fill_pattern_scale"));
+    scale->setRange(core::kPatternScaleMin, core::kPatternScaleMax);
+    scale->setDecimals(0);
+    scale->setSuffix(QStringLiteral(" %"));
+    scale->setValue(100);
+    auto* angle = new QDoubleSpinBox;
+    angle->setObjectName(QStringLiteral("fill_pattern_angle"));
+    angle->setRange(-360, 360);
+    angle->setDecimals(1);
+    angle->setSuffix(QStringLiteral("°"));
     form->addRow(QStringLiteral("内容"), contents);
+    form->addRow(QStringLiteral("カスタムパターン"), pattern);
+    form->addRow(QStringLiteral("比率"), scale);
+    form->addRow(QStringLiteral("角度"), angle);
+    const auto pattern_rows = [form, contents, pattern, scale, angle] {
+        const bool on = contents->currentData().toString() == QLatin1String("pattern");
+        for (QWidget* w : std::initializer_list<QWidget*>{pattern, scale, angle}) form->setRowVisible(w, on);
+    };
+    pattern_rows();
+    connect(contents, &QComboBox::currentIndexChanged, &dialog, pattern_rows);
     form->addRow(QStringLiteral("不透明度"), opacity);
     form->addRow(preserve);
     form->addRow(ok_cancel(dialog));
     const Asked asked = asking();
     if (ask::exec(&dialog) != QDialog::Accepted || !still(asked)) return;
     const QString key = contents->currentData().toString();
+    if (key == QLatin1String("pattern")) {  // (PC4 E3: the pattern laid over the area, from the page's corner)
+        Json ops;
+        const auto spec = pattern_fill_of(pattern->currentData().toString(), scale->value(), angle->value(), true, ops);
+        if (!spec) return;
+        set_current_pattern(pattern->currentData().toString());
+        const auto area = selection_area();
+        Json op{{"op", "fill_area"}, {"page", page->index.json()}, {"layer_id", layer->id}, {"area", area ? *area : Json{{"all", true}}}, {"pattern", *spec}};
+        if (opacity->value() < 100) op["opacity"] = opacity->value() / 100.0;
+        if (preserve->isChecked()) op["preserve_transparency"] = true;
+        ops.push_back(std::move(op));
+        apply_ops(ops);
+        return;
+    }
     Json rgb;
     if (key == QLatin1String("fore")) {
         rgb = Json(pen_.rgb);

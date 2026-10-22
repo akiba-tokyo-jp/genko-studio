@@ -244,9 +244,16 @@
       },
       "upstream_menu": null,
       "genko_status": "一部（2026-10-16 照合）",
-      "implementation_status": "未着手",
+      "implementation_status": "実装済み（PC4 E3、未統合）",
       "acceptance_status": "未実施",
-      "evidence": [],
+      "evidence": [
+        "native/src/app/brush_panel.cpp",
+        "native/src/render/patterns.cpp",
+        "native/src/api/cli.cpp",
+        "native/tests/unit/test_patterns.cpp",
+        "native/tests/contract/test_contract_patterns.cpp",
+        "native/tests/gui/test_gui_patterns.cpp"
+      ],
       "pc0": {
         "date": "2026-10-16",
         "cpp_base": "962faa4",
@@ -264,7 +271,8 @@
         ],
         "gap": "ブラシの「紙質」（取り込んだ画像・濃さ・倍率・回転・反転・濃淡反転・乗算/減算・紙面固定/線ごと）はある。パターン（パターンパネルの資産）から選ぶ入口、明るさ・コントラスト、各先端ごとの適用と深さの揺らぎ、PS のテクスチャの各モードがない",
         "note": "パターン資産は pattern.* の行（rows-type）が前提"
-      }
+      },
+      "remaining": "ダブのブラシのテクスチャをパターンから選ぶ窓は E2（ブラシ設定パネル）。今は genko patterns texture の絵を define_brush の dabs.texture.pattern に渡す"
     },
     {
       "id": "channel.delete",
@@ -2288,9 +2296,16 @@
         "alternate_menus": []
       },
       "genko_status": "一部（2026-10-16 照合）",
-      "implementation_status": "未着手",
+      "implementation_status": "実装済み（PC4 E3、未統合）",
       "acceptance_status": "未実施",
-      "evidence": [],
+      "evidence": [
+        "native/src/app/main_window_patterns.cpp",
+        "native/src/render/patterns.cpp",
+        "native/src/render/pattern_library.cpp",
+        "native/src/api/cli.cpp",
+        "native/tests/contract/test_contract_patterns.cpp",
+        "native/tests/gui/test_gui_patterns.cpp"
+      ],
       "pc0": {
         "date": "2026-10-16",
         "cpp_base": "962faa4",
@@ -2385,14 +2400,17 @@
         "alternate_menus": []
       },
       "genko_status": "一部（2026-10-16 照合）",
-      "implementation_status": "一部実装（PC3 B2、PC3 として統合 e9ee13c。パターンの塗りは PC4）",
+      "implementation_status": "実装済み（PC4 E3、未統合）",
       "acceptance_status": "未実施",
       "evidence": [
         "native/src/app/fill_dialogs.cpp",
         "native/src/render/ops_masks.cpp",
         "native/src/render/raster_ops.cpp",
         "native/tests/gui/test_gui_clipboard.cpp",
-        "native/tests/unit/test_masks.cpp"
+        "native/tests/unit/test_masks.cpp",
+        "native/src/render/ops_patterns.cpp",
+        "native/tests/contract/test_contract_patterns.cpp",
+        "native/tests/gui/test_gui_patterns.cpp"
       ],
       "pc0": {
         "date": "2026-10-16",
@@ -2413,7 +2431,8 @@
         "gap": "選択範囲を色と不透明度で塗る（fill_area）はある。パターンで塗る（拡大率・角度）・アルファチャンネル/クイックマスクを対象にする・選択なしで層全体を塗るが無い。塗りは 8 bit の塗り（patch）で置き、高精度の層での扱いは未確認",
         "note": "パターンは edit.definePattern の土台が要る"
       },
-      "note": "PC3 B2: 塗りつぶし…の窓（描画色・背景色・カラー…・ブラック・50% グレー・ホワイト、不透明度、透明部分の保持、選択範囲が無ければレイヤー全体）と fill_area の preserve_transparency を作った。パターン（contents: pattern）は PC4 のパターンのライブラリ（edit.definePattern）の後に足し、そのときにこの行を閉じる。"
+      "note": "PC3 B2: 塗りつぶし…の窓（描画色・背景色・カラー…・ブラック・50% グレー・ホワイト、不透明度、透明部分の保持、選択範囲が無ければレイヤー全体）と fill_area の preserve_transparency を作った。パターン（contents: pattern）は PC4 のパターンのライブラリ（edit.definePattern）の後に足し、そのときにこの行を閉じる。",
+      "remaining": "塗りつぶし… の「スクリプト」パターン（Photoshop のスクリプトで作る模様）は無い"
     },
     {
       "id": "edit.findAndReplaceText",
@@ -22512,9 +22531,22 @@
         "alternate_menus": []
       },
       "genko_status": "一部（2026-10-16 照合）",
-      "implementation_status": "未着手",
+      "implementation_status": "実装済み（PC4 E3、未統合）",
       "acceptance_status": "未実施",
-      "evidence": [],
+      "evidence": [
+        "native/src/core/ops_layers.cpp",
+        "native/src/render/composite.cpp",
+        "native/src/render/page.cpp",
+        "native/src/render/patterns.cpp",
+        "native/src/render/psd_shapes.cpp",
+        "native/src/formats/psd_export.cpp",
+        "native/src/render/import_psd.cpp",
+        "native/src/app/main_window_patterns.cpp",
+        "native/src/app/layer_panel.cpp",
+        "native/tests/unit/test_patterns.cpp",
+        "native/tests/contract/test_contract_patterns.cpp",
+        "native/tests/gui/test_gui_patterns.cpp"
+      ],
       "pc0": {
         "date": "2026-10-16",
         "cpp_base": "962faa4",
@@ -22530,7 +22562,8 @@
         ],
         "gap": "トーンのレイヤーで画像の柄（pattern=image・tile_png・scale_mm）を敷けるが、白黒 2 値の網として描き色を持たない。パターンの一覧からの選択・phase・link がない。塗りレイヤー（fill）は単色とグラデーションだけ",
         "note": "パターンの塗りを fill の 1 種として持たせ、u16/f32・インクの描画と PSD（PtFl）も要る"
-      }
+      },
+      "remaining": "レイヤーにリンク（link）は持つが、層・形の部品を動かしても位相は一緒に動かない（位相はページの mm）"
     },
     {
       "id": "layer.newFillLayer.solidColor",
@@ -27885,9 +27918,16 @@
       },
       "upstream_menu": null,
       "genko_status": "一部（2026-10-16 照合）",
-      "implementation_status": "未着手",
+      "implementation_status": "実装済み（PC4 E3、未統合）",
       "acceptance_status": "未実施",
-      "evidence": [],
+      "evidence": [
+        "native/src/render/ops_patterns.cpp",
+        "native/src/render/pattern_library.cpp",
+        "native/src/api/cli.cpp",
+        "native/src/app/patterns_panel.cpp",
+        "native/tests/contract/test_contract_patterns.cpp",
+        "native/tests/gui/test_gui_patterns.cpp"
+      ],
       "pc0": {
         "date": "2026-10-16",
         "cpp_base": "962faa4",
@@ -27919,9 +27959,16 @@
       },
       "upstream_menu": null,
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "未着手",
+      "implementation_status": "実装済み（PC4 E3、未統合）",
       "acceptance_status": "未実施",
-      "evidence": [],
+      "evidence": [
+        "native/src/render/pat.cpp",
+        "native/src/api/cli.cpp",
+        "native/src/app/patterns_panel.cpp",
+        "native/tests/unit/test_patterns.cpp",
+        "native/tests/contract/test_contract_patterns.cpp",
+        "native/tests/gui/test_gui_patterns.cpp"
+      ],
       "pc0": {
         "date": "2026-10-16",
         "cpp_base": "962faa4",
@@ -27947,9 +27994,16 @@
       },
       "upstream_menu": null,
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "未着手",
+      "implementation_status": "実装済み（PC4 E3、未統合）",
       "acceptance_status": "未実施",
-      "evidence": [],
+      "evidence": [
+        "native/src/render/pat.cpp",
+        "native/src/api/cli.cpp",
+        "native/src/app/patterns_panel.cpp",
+        "native/tests/unit/test_patterns.cpp",
+        "native/tests/contract/test_contract_patterns.cpp",
+        "native/tests/gui/test_gui_patterns.cpp"
+      ],
       "pc0": {
         "date": "2026-10-16",
         "cpp_base": "962faa4",
@@ -27975,9 +28029,16 @@
       },
       "upstream_menu": null,
       "genko_status": "一部（2026-10-16 照合）",
-      "implementation_status": "未着手",
+      "implementation_status": "実装済み（PC4 E3、未統合）",
       "acceptance_status": "未実施",
-      "evidence": [],
+      "evidence": [
+        "native/src/render/pattern_library.cpp",
+        "native/src/api/cli.cpp",
+        "native/src/app/patterns_panel.cpp",
+        "native/tests/unit/test_patterns.cpp",
+        "native/tests/contract/test_contract_patterns.cpp",
+        "native/tests/gui/test_gui_patterns.cpp"
+      ],
       "pc0": {
         "date": "2026-10-16",
         "cpp_base": "962faa4",
@@ -28013,9 +28074,15 @@
       },
       "upstream_menu": null,
       "genko_status": "一部（2026-10-16 照合）",
-      "implementation_status": "未着手",
+      "implementation_status": "実装済み（PC4 E3、未統合）",
       "acceptance_status": "未実施",
-      "evidence": [],
+      "evidence": [
+        "native/src/app/main_window_patterns.cpp",
+        "native/src/app/patterns_panel.cpp",
+        "native/src/core/ops_layers.cpp",
+        "native/tests/contract/test_contract_patterns.cpp",
+        "native/tests/gui/test_gui_patterns.cpp"
+      ],
       "pc0": {
         "date": "2026-10-16",
         "cpp_base": "962faa4",
@@ -28052,9 +28119,16 @@
       },
       "upstream_menu": null,
       "genko_status": "一部（2026-10-16 照合）",
-      "implementation_status": "未着手",
+      "implementation_status": "実装済み（PC4 E3、未統合）",
       "acceptance_status": "未実施",
-      "evidence": [],
+      "evidence": [
+        "native/src/render/pattern_library.cpp",
+        "native/src/render/preset_store.cpp",
+        "native/src/api/cli.cpp",
+        "native/src/app/patterns_panel.cpp",
+        "native/tests/unit/test_patterns.cpp",
+        "native/tests/contract/test_contract_patterns.cpp"
+      ],
       "pc0": {
         "date": "2026-10-16",
         "cpp_base": "962faa4",
@@ -28088,9 +28162,17 @@
       },
       "upstream_menu": null,
       "genko_status": "一部（2026-10-16 照合）",
-      "implementation_status": "未着手",
+      "implementation_status": "実装済み（PC4 E3、未統合）",
       "acceptance_status": "未実施",
-      "evidence": [],
+      "evidence": [
+        "native/src/render/pattern_library.cpp",
+        "native/src/render/preset_store.cpp",
+        "native/src/api/cli.cpp",
+        "native/src/app/patterns_panel.cpp",
+        "native/tests/unit/test_patterns.cpp",
+        "native/tests/contract/test_contract_patterns.cpp",
+        "native/tests/gui/test_gui_patterns.cpp"
+      ],
       "pc0": {
         "date": "2026-10-16",
         "cpp_base": "962faa4",
@@ -28122,9 +28204,16 @@
       },
       "upstream_menu": null,
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "未着手",
+      "implementation_status": "実装済み（PC4 E3、未統合）",
       "acceptance_status": "未実施",
-      "evidence": [],
+      "evidence": [
+        "native/src/render/patterns.cpp",
+        "native/src/render/pattern_library.cpp",
+        "native/src/api/cli.cpp",
+        "native/src/app/main_window_patterns.cpp",
+        "native/tests/contract/test_contract_patterns.cpp",
+        "native/tests/gui/test_gui_patterns.cpp"
+      ],
       "pc0": {
         "date": "2026-10-16",
         "cpp_base": "962faa4",
@@ -28150,9 +28239,13 @@
       },
       "upstream_menu": null,
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "未着手",
+      "implementation_status": "実装済み（PC4 E3、未統合）",
       "acceptance_status": "未実施",
-      "evidence": [],
+      "evidence": [
+        "native/src/app/main_window_patterns.cpp",
+        "native/src/app/patterns_panel.cpp",
+        "native/tests/gui/test_gui_patterns.cpp"
+      ],
       "pc0": {
         "date": "2026-10-16",
         "cpp_base": "962faa4",
@@ -28178,9 +28271,16 @@
       },
       "upstream_menu": null,
       "genko_status": "一部（2026-10-16 照合）",
-      "implementation_status": "未着手",
+      "implementation_status": "実装済み（PC4 E3、未統合）",
       "acceptance_status": "未実施",
-      "evidence": [],
+      "evidence": [
+        "native/src/render/ops_patterns.cpp",
+        "native/src/render/pattern_library.cpp",
+        "native/src/api/cli.cpp",
+        "native/src/app/patterns_panel.cpp",
+        "native/tests/contract/test_contract_patterns.cpp",
+        "native/tests/gui/test_gui_patterns.cpp"
+      ],
       "pc0": {
         "date": "2026-10-16",
         "cpp_base": "962faa4",
@@ -34661,9 +34761,13 @@
         "alternate_menus": []
       },
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "未着手",
+      "implementation_status": "実装済み（PC4 E3、未統合）",
       "acceptance_status": "未実施",
-      "evidence": [],
+      "evidence": [
+        "native/src/app/main_window_patterns.cpp",
+        "native/src/app/canvas_paint.cpp",
+        "native/tests/gui/test_gui_patterns.cpp"
+      ],
       "pc0": {
         "date": "2026-10-16",
         "cpp_base": "962faa4",
@@ -38491,9 +38595,14 @@
         "alternate_menus": []
       },
       "genko_status": "一部（2026-10-16 照合）",
-      "implementation_status": "未着手",
+      "implementation_status": "実装済み（PC4 E3、未統合）",
       "acceptance_status": "未実施",
-      "evidence": [],
+      "evidence": [
+        "native/src/app/patterns_panel.cpp",
+        "native/src/app/paint_panels.cpp",
+        "native/src/app/main_window_patterns.cpp",
+        "native/tests/gui/test_gui_patterns.cpp"
+      ],
       "pc0": {
         "date": "2026-10-16",
         "cpp_base": "962faa4",

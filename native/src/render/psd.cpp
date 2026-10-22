@@ -505,7 +505,8 @@ std::uint64_t be64(std::string_view d, std::uint64_t at) {
 // (PC3 A3) the global tagged blocks after the layers (from `from` to `end`: the global layer mask, then the blocks), the
 // places of the linked-layer ones (lnk2, lnk3, lnkD) kept. Nothing past what can be read is looked at, and nothing read
 // here is refused: psd.py does not read these.
-void linked_blocks(std::string_view d, bool psb, std::uint64_t from, std::uint64_t end, std::vector<std::pair<std::uint64_t, std::uint64_t>>& out) {
+void linked_blocks(std::string_view d, bool psb, std::uint64_t from, std::uint64_t end, std::vector<std::pair<std::uint64_t, std::uint64_t>>& out,
+                   std::vector<std::pair<std::uint64_t, std::uint64_t>>* patterns = nullptr) {
     end = std::min<std::uint64_t>(end, d.size());
     if (from > end || end - from < 4) return;
     std::uint64_t pos = from;
@@ -534,6 +535,7 @@ void linked_blocks(std::string_view d, bool psb, std::uint64_t from, std::uint64
         }
         if (length > end - pos) return;
         if (key == "lnk2" || key == "lnk3" || key == "lnkD") out.emplace_back(pos, length);
+        if (patterns != nullptr && (key == "Patt" || key == "Pat2" || key == "Pat3")) patterns->emplace_back(pos, length);  // (patterns@1, PC4 E3)
         pos += length;
         // (padded to 4 bytes when its length did not count the padding)
         if (length % 4 != 0 && !signature(pos) && signature(pos + (4 - length % 4))) pos += 4 - length % 4;
@@ -786,7 +788,7 @@ File File::read(std::string data, const Limits& limits, bool lab) {
             }
         }
         r.pos = li_end;
-        linked_blocks(d, f.psb_, li_end, lm_end, f.linked_blocks_);  // (PC3 A3: the files of its placed layers)
+        linked_blocks(d, f.psb_, li_end, lm_end, f.linked_blocks_, &f.pattern_blocks_);  // (PC3 A3: the files of its placed layers; PC4 E3: its patterns)
     }
     r.pos = lm_end;
     f.merged_at_ = r.pos;
@@ -891,6 +893,30 @@ File File::read(std::string data, const Limits& limits, bool lab) {
                 continue;
             }
         }
+        if (rec.kind == "adjust" && rec.adjust_key.empty() && rec.fill_key == "PtFl" && rec.vmsk_size == 0 && !f.pattern_blocks_.empty()) {
+            // (patterns@1, PC4 E3: a pattern fill layer of a file that holds patterns — import_psd makes it a pattern fill
+            // layer of the book when its pattern is one of the file's Patt blocks; psd.py leaves it out. In a file of no
+            // patterns it is skipped where it is, as before)
+            Layer layer;
+            layer.name = rec.name.empty() ? std::string("パターン") : rec.name;
+            layer.opacity = rec.opacity / 255.0;
+            layer.visible = rec.visible;
+            layer.blend = rec.blend;
+            layer.clip = rec.clip;
+            layer.kind = "adjust";
+            layer.record = n;
+            const ChannelRef* mask = rec.channel(-2);
+            layer.has_mask = mask_kept(rec, mask);
+            layer.mask_enabled = !rec.mask_disabled;
+            layer.mask_parameters = rec.mask_parameters;
+            layer.mask_unlinked = rec.mask_unlinked;
+            layer.mask_density = rec.mask_density;
+            layer.mask_feather = rec.mask_feather;
+            f.layers_.push_back(std::move(layer));
+            if (!pending.empty()) pending.back().push_back(f.layers_.size() - 1);
+            f.python_skipped_.push_back(rec.name);
+            continue;
+        }
         if (rec.kind == "adjust" || w <= 0 || h <= 0 || !colour) {
             f.skipped_.push_back(rec.name);
             f.python_skipped_.push_back(rec.name);
@@ -974,6 +1000,19 @@ std::optional<File::ShapeBlocks> File::shape_blocks(const Layer& layer) const {
     out.vogk = at(rec.vogk_at, rec.vogk_size);
     out.path = at(rec.vmsk_at, rec.vmsk_size);
     return out;
+}
+
+std::vector<std::string_view> File::pattern_blocks() const {
+    std::vector<std::string_view> out;
+    for (const auto& [at, size] : pattern_blocks_) out.push_back(std::string_view(data_).substr(static_cast<std::size_t>(at), static_cast<std::size_t>(size)));
+    return out;
+}
+
+std::optional<std::pair<std::string, std::string_view>> File::fill_block(const Layer& layer) const {
+    if (layer.folder || layer.kind != "adjust" || layer.adjust || layer.record >= records_.size()) return std::nullopt;
+    const Record& rec = records_[layer.record];
+    if (rec.fill_key.empty() || rec.fill_size == 0 || !rec.adjust_key.empty()) return std::nullopt;
+    return std::pair<std::string, std::string_view>{rec.fill_key, std::string_view(data_).substr(static_cast<std::size_t>(rec.fill_at), static_cast<std::size_t>(rec.fill_size))};
 }
 
 std::optional<Stroke> File::stroke(const Layer& layer) const {
