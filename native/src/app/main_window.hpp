@@ -416,6 +416,15 @@ public:
     QTabBar* doc_tabs() const { return doc_tabs_; }
     // (M6) The tool palette, the command bar under the menus and the quick-access panel (workspace.cpp).
     QToolBar* tool_palette() const { return palette_; }
+    // PC4 E-0 (paint_panels.cpp): the drawing tools' groups — Photoshop's ブラシ, 消しゴム, 塗り, ぼかし, 覆い焼き, スポイト —,
+    // each its tools' ids (the first the palette's; a tool not made yet, its group's, is left out); a tool's group of the
+    // tools made (none: it is in none).
+    struct ToolGroup {
+        const char* name;
+        std::vector<const char*> tools;
+    };
+    static const std::vector<ToolGroup>& paint_tool_groups();
+    std::vector<QAction*> tool_group_of(const QAction* tool) const;
     QToolBar* command_bar() const { return commands_; }
     QuickAccess* quick_access() const { return quick_access_; }
     QDockWidget* quick_dock() const { return quick_dock_; }
@@ -916,15 +925,9 @@ private:
     SnapBoxes snap_boxes_;
     std::uint64_t snap_ticket_ = 0;
     void build_tool_groups(QMenu* tools);
-    // PC4 E-0 (paint_panels.cpp): the drawing tools' groups (each its tools' ids, the first the palette's; the tools not
-    // made yet left out), a tool's group of tools made, the menu's and the palette's (a long press or a right click), and
-    // the frames of the drawing tools' panels (ブラシ設定 F5, ブラシ, パターン, スタイル, ツールプリセット) and スウォッチ
-    struct ToolGroup {
-        const char* name;
-        std::vector<const char*> tools;
-    };
-    static const std::vector<ToolGroup>& paint_tool_groups();
-    std::vector<QAction*> tool_group_of(const QAction* tool) const;
+    // PC4 E-0 (paint_panels.cpp): the drawing tools' groups in the menu and on the palette (a long press or a right
+    // click), and the frames of the drawing tools' panels (ブラシ設定 F5, ブラシ, パターン, スタイル, ツールプリセット) and
+    // スウォッチ
     void build_paint_tool_groups(QMenu* tools);
     void attach_tool_groups(QToolBar* palette);
     QDockWidget* paint_dock(const QString& title, const char* name, const QString& about);

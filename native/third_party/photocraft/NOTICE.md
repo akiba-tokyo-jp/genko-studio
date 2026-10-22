@@ -167,3 +167,9 @@ PhotoCraft v0.2.0（同上、MIT）の次の部分を参照して C++ へ移し�
 - `crates/engine/src/layer_multi_cmds.rs`（196-420 行: `with_links`・`move_layers`・`layer_bounds`・`Edge`・`align`・`dedup_moves`・`distribute`・`link_layers`、485-505 行: `reverse`、試験 795-1006 行）と `crates/engine/src/commands.rs`（516-523 行・1028 行: 重ね順）: 整列（そろえる先の決め方、半画素は上・左へ）・分布（端と中央は外の 2 つの間を等分、水平・垂直方向はすき間を等しく）・リンク（切り替え、1 つだけの組は消す）・逆順・重ね順の動き → `native/src/render/layer_align.cpp`・`native/src/render/layer_bounds.cpp`、`native/tests/unit/test_align.cpp`・`native/tests/contract/test_contract_align.cpp`（C-d。範囲を作業の 200 dpi の格子で求め、台詞を同じ op でそろえ、仕上がり・基本枠・コマの基準と、フォルダーの中の兄弟の重ね順は Genko のもの）。
 - `crates/engine/src/pick_cmds.rs`（1-113 行）: 自動選択（その点に見えている層を上から、隠した層とグループを除く、グループの対象はいちばん外のフォルダー）→ `native/src/render/layer_bounds.cpp`（`layers_at`・`outermost`）・`native/src/api/cli.cpp`（`genko inspect --at`）・`native/src/app/main_window_align.cpp`（C-d）。
 - `crates/engine/src/snap.rs`（1-347 行と試験）: スナップの先（ガイド・グリッド・文書の端と中央・層の端と中央）、点と動く箱の吸い付け方（同じ近さはガイドが先、箱は端か中央のいちばん近い物で、揃った線を全部返す）、スマートガイド → `native/src/core/snap.cpp`、`native/src/app/canvas_snap.cpp`、`native/tests/unit/test_align.cpp`（C-d。単位はページの mm にした）。
+
+## ブラシ・塗り・パターン・プリセット（brushes@1・patterns@1、PC4 節 E）
+
+- `crates/paint/src/brush.rs`（1-451 行）: ブラシの設定（先端・硬さ・間隔・不透明度・流量・シェイプ・散布・テクスチャ・デュアル・カラー・伝達・ポーズ・ノイズ・ウェットエッジ・ビルドアップ・テクスチャを保護・seed）と既定の値、揺らぎとコントロール、マスクの合成の種類、手続きの模様の種類 → `native/src/core/brush_dabs.*`（mm とスネークケースに直したもの。E-0）
+- `crates/paint/src/retouch.rs`（225-428 行: `apply_dab_stroke`・`Smudge` と試験）: 順に打つ点の作業の写しと、不透明度×選択範囲での混ぜ戻し、指先の絵の具の運び → `native/src/render/retouch_dabs.*`（層のタイルの上で。E-0）
+- `crates/engine/src/presets/mod.rs`（35-45 行 `Group`、193-276 行 `find`・`unique_name`・`group_index`・`edit_groups`）: 群のあるプリセットと名前の重なりの避け方、編集の動き → `native/src/render/preset_store.*`（E-0）

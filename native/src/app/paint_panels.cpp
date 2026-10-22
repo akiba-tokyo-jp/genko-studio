@@ -11,6 +11,7 @@
 #include <QToolButton>
 #include <QVBoxLayout>
 
+#include "app/colours.hpp"
 #include "app/main_window.hpp"
 #include "app/theme.hpp"
 

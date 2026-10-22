@@ -59,6 +59,8 @@ v3 から外すもの: なし（未知キーも `extra` として書き戻す）
 | `pen-shapes@1` | PC3-0・C-b | ペンの層の形の部品（`shapes_blob`・`shape_count`）。COLOR-07（末尾の「パスとベクトル」） |
 | `transform@1` | PC3-0（C-d が使う）・C-c | 層の `link`・`lock_position`、台詞の書式の `native_warp`（ワープテキスト）。COLOR-07（末尾の「パスとベクトル」） |
 | `page-spec@1` | PC3-0（C-e が使う） | ページだけの用紙 `native_spec`（`trim_origin_mm` も）。COLOR-07（末尾の「パスとベクトル」） |
+| `brushes@1` | PC4 E-0（E1・E2 が使う） | ブラシのダブの描き方（`brush.custom[<key>]` の `engine`・`dabs` と先端・模様の絵）、線の入力（`tilt`・`time_ms`・`wheel`・`flow`）、ブラシの状態の `kind`・`background_rgb`。COLOR-08（末尾の「ブラシのダブの描き方」） |
+| `patterns@1` | PC4 E-0（E3・E6 が使う） | 本の `patterns`（使ったパターンの写しとその絵）。COLOR-08（末尾の「パターン」） |
 
 拡張を使う op が初めて適用されたときに `features` へ加える。拡張を使わない原稿は `features: []`。
 
@@ -153,7 +155,7 @@ v3 の行（`rev`・`actor`・`at`・`changes`・`via`）をそのまま残し�
 
 `features`へ`native.color_stroke_v1`を登録する。未対応の読み手は従来の未知feature規則により編集・保存を拒否する。既存のRGB8線とモノクロ線の形式は変えない。
 
-線の辞書形式・packed形式に任意の`color_rgb`を加える。値は`{"precision":"u16"|"f32","values":[r,g,b]}`。RGBはstraight sRGBの正規化値（16bitは整数値/65535、32bitは有限のfloat32範囲、HDRを保持）。値は厳密に3個、未知キー・未知precision・非有限値を拒否する。`opacity`は従来どおり独立の0〜1のalpha。`color_rgb`がある線は`rgb`の8bit previewを色の正本にしない。線の座標・幅・筆圧は既存形式のまま編集可能とする。
+線の辞書形式・packed形式に任意の`color_rgb`を加える。値は`{"precision":"u16"|"f32","values":[r,g,b]}`。RGBはstraight sRGBの正規化値（16bitは整数値/65535、32bitは有限のfloat32範囲、HDRを保持）。値は厳密に3個、未知キー・未知precision・非有限値を拒否する。`opacity`は従来どおり独立の0〜1のalpha。`color_rgb`がある線は`rgb`の8bit previewを色の正本にしない。線の座標・幅・筆圧は既存形式のまま編集可能とする。PC4 E-0 から `add_stroke` も 16・32 bit の RGB のページで `color_rgb` を受ける（描画色が 8 bit より細かいとき画面が送る。`rgb` はその 8 bit の見本。ほかのページでは断る）。
 
 ## 紙質（paper-texture@1、BRUSH-01）
 
@@ -365,3 +367,23 @@ v3 の行（`rev`・`actor`・`at`・`changes`・`via`）をそのまま残し�
 - **ページだけの用紙**（`page-spec@1`）: ページの `"native_spec"`（本の `spec` と同じ形の用紙。本と違う用紙を持つページだけ）。`"trim_origin_mm": [x, y]` は仕上がりの左上の位置（無ければ用紙の真ん中に置いた位置）。
 - 知らないキー・型の違い・範囲外・非有限・名前の重なり・無い名前を指すクリッピングパス・ペンの層でない層の形の部品は、読み取り専用で開く（そのまま書き戻す）。
 - `features` に、使う物があるときだけそれぞれを加える（`vector@1`: パス・作業用パス・クリッピングパス・ベクトルマスク、`pen-shapes@1`: 形の部品を持つ層、`transform@1`: リンクか位置のロックを持つ層・`native_warp` を持つ台詞、`page-spec@1`: ページだけの用紙）。本のページと、書くスマートオブジェクトの中身のページ（`smart_contents` の `page`。ここのキーを本のページと同じに読み書きする）を数える。無くなれば外す。知らない読み手は未知の拡張として読み取り専用で開く。
+
+## ブラシのダブの描き方（brushes@1。COLOR-08、PC4 E-0）
+
+上流 PhotoCraft の点（ダブ）を打つブラシ（`BrushSettings`）を、Genko の単位（mm）と名前（スネークケース）で原稿の自分のブラシに持つ。線は今どおり線（点・筆圧・種類）として持ち、ダブの描き方は線の描き方の 1 つ（利用者の決定 3）。ダブの描き方の無いブラシ・入力の無い線・ブラシの状態の新しいキーの無い原稿は、今と同じバイト（拡張も足さない）。
+
+- 原稿のブラシ `brush.custom[<key>]` に `"engine": "dabs"` と `"dabs": {…}` を足す（`brush_to_dict` の最後、紙質の後）。`dabs` は既定と違う設定だけを、次の順に書く（既定は空のオブジェクト。節も既定と違うときだけ、節の中も違う設定だけ）: `size_mm` 0.01..500（2.54）・`hardness` 0..1（1）・`spacing` 0.01..10（直径の割合、0.1）・`angle` −360..360（0）・`roundness` 0..1（1）・`flip_x`・`flip_y`・`aliased`（false）・`opacity`・`flow` 0..1（1）・`pressure_size`（true）・`pressure_opacity`・`erase`（false）・`tip`（`"round"` か `{"asset": "sha256:…"}`）・`shape` `{enabled, size, angle, roundness, flip_x_jitter, flip_y_jitter}`・`scatter` `{enabled, scatter, both_axes, count 1..16, count_jitter}`・`texture` `{enabled, pattern, invert, scale 0.01..10, brightness −1..1, contrast −1..1, each_tip, mode, depth 0..1, depth_jitter}`・`dual` `{enabled, mode, tip, size_mm, hardness, roundness, angle, spacing, scatter 0..10, both_axes, count, flip}`・`color` `{enabled, per_tip（true）, fg_bg, hue_jitter, saturation_jitter, brightness_jitter, purity −1..1}`・`transfer` `{enabled, opacity, flow}`・`pose` `{enabled, tilt_x, tilt_y −90..90, rotation 0..360, pressure 0..1（1）, override_tilt, override_rotation, override_pressure}`・`noise`・`wet_edges`・`build_up`（false）・`build_up_rate` 1..1000（20）・`protect_texture`・`seed` 0..2147483647（0）。揺らぎ（`size` など）は `{"jitter" 0..1（散布は 0..10）, "control": "off"|"fade"|"pressure"|"tilt"|"wheel"|"rotation"|"initial_direction"|"direction", "fade_steps" 1..9999（25）, "minimum" 0..1}`、マスクの合成 `mode` は `multiply`（既定）・`subtract`・`darken`・`overlay`・`color_dodge`・`color_burn`・`linear_burn`・`hard_mix`・`linear_height`・`height`、テクスチャの `pattern` は `{"procedural": "noise"|"canvas"|"paper"（既定）|"dots", "size": 1..1024（128）, "seed"（1）}` か `{"asset": "sha256:…"}`（模様の 1 画素は倍率 / 300 インチ。紙質と同じ）。未知のキー・範囲外・非有限・数の代わりの bool・整数の代わりの小数・`engine` の無い `dabs`・`dabs` 以外の `engine` は読み取り専用（`core::validate_brushes`）。
+- 先端・デュアルブラシの先端・テクスチャの模様の絵は原稿の素材（グレーの PNG、8 か 16 bit、辺 2500 画素まで、テクスチャは 1024 まで。`assets/<ab>/<64桁>.png`）。ブラシが名指す絵だけを書き、読む。欠けた・名前と中身の違う・グレーの PNG でない絵は読み取り専用。素材の片付け（`genko gc`）は `project.json` が名指す絵として残す。
+- 線（`strokes_blob` の中）に足すキー: `"tilt"`（各点の傾き x・y の度、±90。点ごとに 2 つ）・`"time_ms"`（各点の時刻 ms、0 以上）・`"wheel"`（各点のエアブラシのホイール 0..1）を `"r"` と同じに 8 バイトの小数を並べた base64 で、`"flow"`（線の流量 0..1）を数で。辞書形式の線では `"tilt": [[x, y]…]`・`"time_ms": […]`・`"wheel": […]`。点の数と合わない・範囲外は読み取り専用。点を変える op が入力を運ばなかった線（数が合わなくなった並び）は、その並びを書かない（E1 が運ぶ）。
+- 本のブラシの状態（`brush`）に足すキー: `"kind"`（`add_stroke` に種類が無いときのブラシ。1〜40 字）・`"background_rgb": [r, g, b]`（背景色。0..255 の整数 3 つ）。無いときは今のとおり。
+- 書き手は中身から導く: ダブの描き方のブラシ・入力のキーを持つ線（本のページとスマートオブジェクトの中身のページ）・ブラシの状態の新しいキーのどれかがあれば `features` に `brushes@1` を加え、無くなれば外す。PC3 までの C++ 版は知らない拡張として読み取り専用で開く。
+- E-0 の時点では、ダブの描き方のブラシの線は描かない（`not_yet_ported`。今の描き方で代わりに描くことはしない。E1 が描く）。`define_brush` は `engine`・`dabs` をまだ受けない（今までどおり読まない。E1）。
+
+## パターン（patterns@1。COLOR-08、PC4 E-0）
+
+本が持つパターン（使ったパターンの写し。ライブラリは機械の設定: COLOR-08「プリセット」）。パターンを持たない原稿は今と同じバイト（`patterns` も拡張も書かない）。
+
+- 本の `"patterns": [{"id", "name", "asset", "mode", "depth", "width", "height", "dpi"}…]`（512 まで。どのキーもこの順で書く）。`id` は 1〜64 字の A-Z a-z 0-9 - _（本の中で一つ）、`name` は 1〜255 字、`asset` は `"sha256:…"`、`mode` は `rgb`・`gray`・`cmyk`・`lab`、`depth` は 8・16・32、`width`・`height` は 1..8192（合わせて 6,400 万画素まで）、`dpi` は 50..2400（倍率 100 % で模様の 1 画素が 1/`dpi` インチ）。
+- 絵は原稿の素材: 8 bit の RGB は RGBA の PNG、8 bit のグレーは LA の PNG（`.png`）、16・32 bit の RGB は GKCR（`.colorrgba`）、16・32 bit のグレーと CMYK・Lab は GKIR 版 2（`.gkir`）。絵の種類・大きさ・深さはパターンの欄と同じでなければならない（違えば読み取り専用）。素材の片付けは `project.json` が名指す絵として残す。
+- 書き手は本に `patterns` があれば `features` に `patterns@1` を加え、無くなれば外す。読み手は id の重なり・欄の範囲外・欠けた絵・合わない絵を読み取り専用にする。
+- op（E3）: `add_pattern`・`rename_pattern`・`delete_pattern`（どこからも使われていないものだけ消せる）。書き手が黙って落とすことはしない。塗りの層・形の部品・パターンオーバーレイの `pattern`（id で名指す）は E3・E6 が足す。
