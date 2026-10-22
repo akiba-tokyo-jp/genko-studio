@@ -65,6 +65,12 @@ std::string blend_mode(const Json& value);
 // ops._gradient_extras(g): 多色 (stops), 楕円 (ratio), 繰り返し (repeat) of a gradient, checked (core/ops_layers.cpp; also
 // gradient_fill's). OpError with Python's words.
 Json gradient_extras(const Json& g);
+// PC4 E4 (vector@1): a gradient's transparency stops [[position 0..1, opacity 0..1], …] (2 to 16) checked, rounded and
+// sorted by place (OpError), and a gradient whose colours (rgb_from, rgb_to, a stop's colour) say "foreground" or
+// "background" with the book's brush colours put in their place (its 描画色 brush_rgb, its 背景色 brush_background_rgb —
+// white when it has none): a fill layer takes them when it is made.
+Json transparency_stops(const Json& value);
+Json live_colours(const Json& gradient, const Document& doc);
 // ops._fill_spec: a fill layer's {"rgb"} or {"gradient"} checked and in its normal form (core/ops_layers.cpp; also a
 // shape part's fill, pen-shapes@1). OpError with Python's words. (patterns@1, PC4 E3: {"pattern": …} too, in
 // core::pattern_fill_spec's normal form.)

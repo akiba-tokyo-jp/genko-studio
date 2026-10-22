@@ -106,7 +106,8 @@ void MainWindow::build_paint_docks() {
                                             QStringLiteral("ブラシ先端のシェイプ・散布・テクスチャ・デュアルブラシなど、ブラシの細かい設定") + soon);
     settings_dock->toggleViewAction()->setShortcut(QKeySequence(QStringLiteral("F5")));  // (Photoshop's ブラシ設定)
     paint_dock(QStringLiteral("ブラシ"), "brushes_panel", QStringLiteral("グループに分けたブラシの一覧と、ブラシの読み込み・書き出し") + soon);
-    // (グラデーション: E4's — its name is the gradient tool's old one, which preferences::renamed() reads as グラデーションツール)
+    // (グラデーション, PC4 E4: its name is the gradient tool's old one — preferences::reused_names() keeps the two apart)
+    build_gradients_dock();
     // (PC4 E3: the Patterns panel — the library and this book's patterns, app/patterns_panel.cpp — in the dock E-0 made)
     patterns_dock_ = paint_dock(QStringLiteral("パターン"), "patterns_panel_frame", QStringLiteral("パターンのライブラリと、この原稿のパターン"));
     QWidget* frame = patterns_dock_->widget();

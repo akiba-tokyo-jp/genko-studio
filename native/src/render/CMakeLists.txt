@@ -200,6 +200,10 @@ genko_library(genko_render
     patterns.cpp
     pat.cpp
     pattern_library.cpp
+    # PC4 E4 (塗りつぶし・グラデーション・色: 層の値に塗る道、グラデーションのプリセットと .grd)
+    paint_fill.cpp
+    gradient_presets.cpp
+    grd.cpp
     ${GENKO_MATERIAL_RESOURCES}
     ${GENKO_TEXT_RESOURCES}
   PUBLIC_DEPS genko_core Qt6::Core

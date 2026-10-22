@@ -89,7 +89,8 @@ void MainWindow::build_tool_settings() {
     scroll->setWidget(ts);
     scroll->setMinimumHeight(24);  // (on a short screen it scrolls, and the window stays on the screen)
     dock->setWidget(scroll);
-    ts->add({QStringLiteral("pen"), QStringLiteral("pencil"), QStringLiteral("fill"), QStringLiteral("lassofill"), QStringLiteral("picker")}, brush_);
+    // (PC4 E4: the 塗りつぶしツール, 囲って塗る and the スポイトツール have their own pages — main_window_paint.cpp)
+    ts->add({QStringLiteral("pen"), QStringLiteral("pencil")}, brush_);
     // the eraser
     eraser_size_ = new QDoubleSpinBox;
     eraser_size_->setObjectName(QStringLiteral("eraser_size"));
@@ -384,7 +385,7 @@ Json MainWindow::eraser_fields(const core::Layer& layer) const {
     return out;
 }
 
-bool MainWindow::blend_bakes_ok(const core::Page& page, const core::Layer& layer) {
+bool MainWindow::blend_bakes_ok(const core::Page& page, const core::Layer& layer, const QString& how) {
     const std::size_t lines = layer.stroke_count();
     const std::size_t pictures = layer.patches.size();
     if (lines == 0 && pictures == 0) return true;
@@ -392,14 +393,14 @@ bool MainWindow::blend_bakes_ok(const core::Page& page, const core::Layer& layer
     if (blend_baked_.contains(key)) return true;
     QDialog dialog(this);
     dialog.setObjectName(QStringLiteral("blend_bakes"));
-    dialog.setWindowTitle(QStringLiteral("描画モードで描く"));
+    dialog.setWindowTitle(how.isEmpty() ? QStringLiteral("描画モードで描く") : how);
     auto* layout = new QVBoxLayout(&dialog);
     QString what;
     if (lines > 0) what += QStringLiteral("線 %1 本").arg(lines);
     if (pictures > 0) what += (what.isEmpty() ? QString() : QStringLiteral("と")) + QStringLiteral("絵 %1 枚").arg(pictures);
     auto* text = new QLabel(QStringLiteral("このレイヤーの%1は 200 dpi の画素になり、線としては直せなくなります（取り消しで戻せます）。\n"
                                            "「%2」で描きますか？")
-                                .arg(what, brush_ != nullptr ? brush_->blend->currentText() : QString::fromStdString(pen_.blend)));
+                                .arg(what, !how.isEmpty() ? how : brush_ != nullptr ? brush_->blend->currentText() : QString::fromStdString(pen_.blend)));
     text->setWordWrap(true);
     layout->addWidget(text);
     auto* buttons = new QDialogButtonBox;

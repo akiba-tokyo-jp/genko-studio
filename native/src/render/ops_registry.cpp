@@ -417,7 +417,7 @@ const core::OpRegistry& ops_registry() {
                 // move or clear pixels work the inks themselves, render/raster_ops. color-model@1: on an RGB page of a
                 // profile, the same through sRGB: RgbLending. Then the pictures an op left: lifted page values laid
                 // into the pixels, lines and fills into precise pixels and inks.)
-                if (ink_edit::lends(name, c.op)) {
+                if (ink_edit::lends(name, c.op) && !paints_layer_values(name, c.op, c.doc)) {  // (PC4 E4: gradient_fill on a layer's own values)
                     std::vector<std::size_t> pages = profiled_pages_of(c);
                     std::erase_if(pages, [&](std::size_t at) { return !lends_rgb(name, c.op, c.doc, at); });
                     if (!pages.empty()) {
@@ -432,7 +432,7 @@ const core::OpRegistry& ops_registry() {
                         return;
                     }
                 }
-                if (ink_edit::lends(name, c.op)) {
+                if (ink_edit::lends(name, c.op) && !paints_layer_values(name, c.op, c.doc)) {
                     if (const std::vector<std::size_t> pages = ink_pages_of(c); !pages.empty()) {
                         std::vector<ink_edit::Lending> lent;
                         lent.reserve(pages.size());

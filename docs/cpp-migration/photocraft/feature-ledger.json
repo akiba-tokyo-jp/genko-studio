@@ -13742,9 +13742,14 @@
       },
       "upstream_menu": null,
       "genko_status": "一部（2026-10-16 照合）",
-      "implementation_status": "未着手",
+      "implementation_status": "実装済み（PC4 E4、未統合）",
       "acceptance_status": "未実施",
-      "evidence": [],
+      "evidence": [
+        "native/src/app/main_window_paint.cpp",
+        "native/src/core/ops_layers.cpp",
+        "native/src/render/gradient_presets.cpp",
+        "native/tests/gui/test_gui_paint.cpp"
+      ],
       "pc0": {
         "date": "2026-10-16",
         "cpp_base": "962faa4",
@@ -13765,7 +13770,8 @@
         ],
         "gap": "グラデーション塗りレイヤー（add_layer kind=gradient: 色と不透明度の止め・linear/radial/ellipse・repeat/mirror）はあるが、プリセットから作る入口がない。angle/reflected/diamond の形、angle・scale の数値指定（向きと長さは from/to の点で表す）、reverse、描画色/背景色を止めにすること、透明度の止めを色の止めと別に持つことがない。8 ビット RGB だけ（上流は文書の深度 8/16/32 ビット）。",
         "note": "土台（グラデーションのプリセット保管）は gradient.presets.list に計上。素材ライブラリ（native/src/render/materials.cpp: フォルダ・名前変更・削除・パック）を流用できる。"
-      }
+      },
+      "remaining": "角度・倍率の数（angle・scale）は無く、向きと長さは from・to の点で持つ（ページの下から上へ: Photoshop の 90°）"
     },
     {
       "id": "gradient.presets.edit",
@@ -13780,9 +13786,15 @@
       },
       "upstream_menu": null,
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "未着手",
+      "implementation_status": "実装済み（PC4 E4、未統合）",
       "acceptance_status": "未実施",
-      "evidence": [],
+      "evidence": [
+        "native/src/render/preset_store.cpp",
+        "native/src/api/cli.cpp",
+        "native/src/app/gradients_panel.cpp",
+        "native/tests/unit/test_gradient_presets.cpp",
+        "native/tests/gui/test_gui_paint.cpp"
+      ],
       "pc0": {
         "date": "2026-10-16",
         "cpp_base": "962faa4",
@@ -13808,9 +13820,15 @@
       },
       "upstream_menu": null,
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "未着手",
+      "implementation_status": "実装済み（PC4 E4、未統合）",
       "acceptance_status": "未実施",
-      "evidence": [],
+      "evidence": [
+        "native/src/render/grd.cpp",
+        "native/src/api/cli.cpp",
+        "native/src/app/gradients_panel.cpp",
+        "native/tests/unit/test_grd.cpp",
+        "native/tests/gui/test_gui_paint.cpp"
+      ],
       "pc0": {
         "date": "2026-10-16",
         "cpp_base": "962faa4",
@@ -13821,7 +13839,8 @@
         "tests": [],
         "gap": ".grd（v5、Photoshop の記述子形式）の読み込みがない。",
         "note": "外部ライブラリ不要。PSD 文字の記述子読み（native/src/render/psd_text.cpp）と ABR 読み（native/src/render/abr.cpp）を流用できる。プリセット保管（gradient.presets.list）が要る。"
-      }
+      },
+      "remaining": "ノイズのグラデーション（ClNs）は読まずに知らせ、中間点は 50% で描く（知らせる）"
     },
     {
       "id": "gradient.presets.list",
@@ -13836,9 +13855,13 @@
       },
       "upstream_menu": null,
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "未着手",
+      "implementation_status": "実装済み（PC4 E4、未統合）",
       "acceptance_status": "未実施",
-      "evidence": [],
+      "evidence": [
+        "native/src/render/gradient_presets.cpp",
+        "native/src/api/cli.cpp",
+        "native/tests/unit/test_gradient_presets.cpp"
+      ],
       "pc0": {
         "date": "2026-10-16",
         "cpp_base": "962faa4",
@@ -13864,9 +13887,15 @@
       },
       "upstream_menu": null,
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "未着手",
+      "implementation_status": "実装済み（PC4 E4、未統合）",
       "acceptance_status": "未実施",
-      "evidence": [],
+      "evidence": [
+        "native/src/render/gradient_presets.cpp",
+        "native/src/api/cli.cpp",
+        "native/src/app/gradients_panel.cpp",
+        "native/tests/unit/test_gradient_presets.cpp",
+        "native/tests/gui/test_gui_paint.cpp"
+      ],
       "pc0": {
         "date": "2026-10-16",
         "cpp_base": "962faa4",
@@ -13892,9 +13921,14 @@
       },
       "upstream_menu": null,
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "未着手",
+      "implementation_status": "実装済み（PC4 E4、未統合）",
       "acceptance_status": "未実施",
-      "evidence": [],
+      "evidence": [
+        "native/src/render/gradient_presets.cpp",
+        "native/src/api/cli.cpp",
+        "native/src/app/gradients_panel.cpp",
+        "native/tests/unit/test_gradient_presets.cpp"
+      ],
       "pc0": {
         "date": "2026-10-16",
         "cpp_base": "962faa4",
@@ -13920,9 +13954,13 @@
       },
       "upstream_menu": null,
       "genko_status": "一部（2026-10-16 照合）",
-      "implementation_status": "未着手",
+      "implementation_status": "実装済み（PC4 E4、未統合）",
       "acceptance_status": "未実施",
-      "evidence": [],
+      "evidence": [
+        "native/src/app/gradients_panel.cpp",
+        "native/src/app/main_window_paint.cpp",
+        "native/tests/gui/test_gui_paint.cpp"
+      ],
       "pc0": {
         "date": "2026-10-16",
         "cpp_base": "962faa4",
@@ -13940,7 +13978,8 @@
         ],
         "gap": "グラデーションの道具の「色の変わり方」4 種（ペンの色→透明・ペンの色→白・黒→白・円）から選べるだけ。名前のプリセットや任意の止めを今のグラデーションにすること、選んだグラデーション塗りレイヤーへ当てる（applyToLayer）ことができない。",
         "note": "土台（グラデーションのプリセット保管）は gradient.presets.list に計上。素材ライブラリ（native/src/render/materials.cpp: フォルダ・名前変更・削除・パック）を流用できる。"
-      }
+      },
+      "remaining": "今のグラデーションは窓の状態（設定の gradient/current）。CLI・MCP の op は分岐点を直接受ける"
     },
     {
       "id": "image.adjustments.blackWhite",
@@ -27064,9 +27103,16 @@
       },
       "upstream_menu": null,
       "genko_status": "一部（2026-10-16 照合）",
-      "implementation_status": "未着手",
+      "implementation_status": "実装済み（PC4 E4、未統合）",
       "acceptance_status": "未実施",
-      "evidence": [],
+      "evidence": [
+        "native/src/render/raster_ops.cpp",
+        "native/src/render/paint_fill.cpp",
+        "native/src/render/select_color.cpp",
+        "native/src/app/main_window_paint.cpp",
+        "native/tests/unit/test_gradient_tool.cpp",
+        "native/tests/gui/test_gui_paint.cpp"
+      ],
       "pc0": {
         "date": "2026-10-16",
         "cpp_base": "962faa4",
@@ -27086,7 +27132,8 @@
         ],
         "gap": "クリックで線に囲まれた所を塗る（参照 ページ/レイヤー・隙間閉じ・はみ出し・不透明度、tolerance は線の濃さの閾値）。クリックした色との色差での判定、隣接しない同じ色も塗る（contiguous=false）、アンチエイリアス、パターンで塗る（倍率・角度）、マスク/クイックマスク/チャンネルを対象にする指定がない。8 ビット RGB の画素だけ（上流は 8/16/32 ビット・CMYK/Lab 等の各色モデルで動く）",
         "note": ""
-      }
+      },
+      "remaining": "パターンで塗る（contents=pattern・倍率・角度）は E3 の `pattern` のキーを窓から送るまで灰色。色の近さ（fill_area の {\"color\"}）は高精度・インキの層でも 8 bit の絵（fill_area の float の画素は E3）"
     },
     {
       "id": "paint.burn",
@@ -27220,9 +27267,15 @@
       },
       "upstream_menu": null,
       "genko_status": "一部（2026-10-16 照合）",
-      "implementation_status": "未着手",
+      "implementation_status": "実装済み（PC4 E4、未統合）",
       "acceptance_status": "未実施",
-      "evidence": [],
+      "evidence": [
+        "native/src/render/raster_ops.cpp",
+        "native/src/render/paint_fill.cpp",
+        "native/src/render/composite.cpp",
+        "native/src/core/ops_layers.cpp",
+        "native/tests/unit/test_gradient_tool.cpp"
+      ],
       "pc0": {
         "date": "2026-10-16",
         "cpp_base": "962faa4",
@@ -27241,7 +27294,8 @@
         ],
         "gap": "線形・円形・楕円、色の分岐点（16 まで・不透明度付き）、比率、繰り返し/折り返し、選択範囲の中だけ、はある。角度・反射・ダイヤモンドの形、プリセット名での指定、描画色/背景色の分岐点、別の透明度の分岐点、逆順、ディザ、描画モード、マスク/クイックマスク/チャンネルを対象にする指定がない。8 ビット RGB の画素だけ（上流は 8/16/32 ビット・CMYK/Lab 等の各色モデルで動く）",
         "note": ""
-      }
+      },
+      "remaining": "プリセットの名前・今のグラデーションでの指定（gradient・gradient.presets.select の状態）は op ではなく窓・CLI が分岐点を渡す（op は機械の設定を読まない: PC1 9 章）。描く先にクイックマスク・チャンネルを名指す target は無い（channel・layer_mask の貸し出しで描く）"
     },
     {
       "id": "paint.healingBrush",
@@ -31234,9 +31288,13 @@
       },
       "upstream_menu": null,
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "未着手",
+      "implementation_status": "実装済み（PC4 E4、未統合）",
       "acceptance_status": "未実施",
-      "evidence": [],
+      "evidence": [
+        "native/src/app/main_window_paint.cpp",
+        "native/src/app/colours.cpp",
+        "native/tests/gui/test_gui_paint.cpp"
+      ],
       "pc0": {
         "date": "2026-10-16",
         "cpp_base": "962faa4",
@@ -31247,7 +31305,8 @@
         "tests": [],
         "gap": "描画色・背景色（Genko のメイン・サブ）を黒・白に戻す操作（D）がない",
         "note": ""
-      }
+      },
+      "remaining": "画面（D）だけ。Genko では色は窓の状態で、op の本の色は set_brush の rgb・background_rgb"
     },
     {
       "id": "tools.setBrush",
@@ -31301,9 +31360,13 @@
       },
       "upstream_menu": null,
       "genko_status": "一部（2026-10-16 照合）",
-      "implementation_status": "未着手",
+      "implementation_status": "実装済み（PC4 E4、未統合）",
       "acceptance_status": "未実施",
-      "evidence": [],
+      "evidence": [
+        "native/src/app/colours.cpp",
+        "native/src/core/ops_pages.cpp",
+        "native/tests/gui/test_gui_colours.cpp"
+      ],
       "pc0": {
         "date": "2026-10-16",
         "cpp_base": "962faa4",
@@ -31320,7 +31383,8 @@
         ],
         "gap": "メインの色はカラーパネル（16 進・RGB・HSV）と set_brush の rgb で決められる。サブ（背景）色を直接決める入口がない。色は 8 ビットの整数（上流は f32 の RGBA）",
         "note": ""
-      }
+      },
+      "remaining": "画面と set_brush（rgb・background_rgb）。窓の背景色を本のブラシの状態へは送らない（窓の分岐点は色で送る）"
     },
     {
       "id": "tools.swapColors",
@@ -31335,9 +31399,14 @@
       },
       "upstream_menu": null,
       "genko_status": "同等（C++ のソースと試験あり。2026-10-16 照合）",
-      "implementation_status": "未着手",
+      "implementation_status": "実装済み（PC4 E4、未統合）",
       "acceptance_status": "未実施",
-      "evidence": [],
+      "evidence": [
+        "native/src/app/main_window_paint.cpp",
+        "native/src/app/colours.cpp",
+        "native/tests/gui/test_gui_paint.cpp",
+        "native/tests/gui/test_gui_colours.cpp"
+      ],
       "pc0": {
         "date": "2026-10-16",
         "cpp_base": "962faa4",
@@ -38028,9 +38097,14 @@
         "alternate_menus": []
       },
       "genko_status": "同等（C++ のソースと試験あり。2026-10-16 照合）",
-      "implementation_status": "未着手",
+      "implementation_status": "実装済み（PC4 E4、未統合）",
       "acceptance_status": "未実施",
-      "evidence": [],
+      "evidence": [
+        "native/src/app/main_window_paint.cpp",
+        "native/src/app/colours.cpp",
+        "native/tests/gui/test_gui_colours.cpp",
+        "native/tests/gui/test_gui_workspace.cpp"
+      ],
       "pc0": {
         "date": "2026-10-16",
         "cpp_base": "962faa4",
@@ -38098,9 +38172,15 @@
         "alternate_menus": []
       },
       "genko_status": "一部（2026-10-16 照合）",
-      "implementation_status": "未着手",
+      "implementation_status": "実装済み（PC4 E4、未統合）",
       "acceptance_status": "未実施",
-      "evidence": [],
+      "evidence": [
+        "native/src/app/gradients_panel.cpp",
+        "native/src/app/paint_panels.cpp",
+        "native/src/app/preferences.cpp",
+        "native/tests/gui/test_gui_paint.cpp",
+        "native/tests/gui/test_gui_workspace.cpp"
+      ],
       "pc0": {
         "date": "2026-10-16",
         "cpp_base": "962faa4",
@@ -38748,9 +38828,14 @@
         "alternate_menus": []
       },
       "genko_status": "同等（C++ のソースと試験あり。2026-10-16 照合）",
-      "implementation_status": "未着手",
+      "implementation_status": "実装済み（PC4 E4、未統合）",
       "acceptance_status": "未実施",
-      "evidence": [],
+      "evidence": [
+        "native/src/app/colours.cpp",
+        "native/src/app/paint_panels.cpp",
+        "native/tests/gui/test_gui_colours.cpp",
+        "native/tests/gui/test_gui_paint.cpp"
+      ],
       "pc0": {
         "date": "2026-10-16",
         "cpp_base": "962faa4",
@@ -39490,9 +39575,14 @@
       "kind": "tool",
       "upstream_source": "crates/ui-egui/src/state.rs",
       "genko_status": "一部（2026-10-16 照合）",
-      "implementation_status": "未着手",
+      "implementation_status": "実装済み（PC4 E4、未統合）",
       "acceptance_status": "未実施",
-      "evidence": [],
+      "evidence": [
+        "native/src/app/main_window_paint.cpp",
+        "native/src/app/canvas_tools.cpp",
+        "native/src/app/colours.cpp",
+        "native/tests/gui/test_gui_paint.cpp"
+      ],
       "pc0": {
         "date": "2026-10-16",
         "cpp_base": "962faa4",
@@ -39508,7 +39598,8 @@
         ],
         "gap": "クリックで見えている色か描く先のレイヤーの色を拾う（レイヤーから拾えるのは上流より多い）。Alt で背景（サブ）色に拾う動作がない（Genko の Alt は一時的なスポイト）。値は 8 ビット（上流は合成の f32 値）",
         "note": "エンジン側は document.pixel の行（rows-image）"
-      }
+      },
+      "remaining": "サンプル範囲・現在のレイヤー以下・高精度の値は 200 dpi の作業の絵（ページの見え）から拾う"
     },
     {
       "id": "tool:Ruler",
@@ -39692,9 +39783,13 @@
       "kind": "tool",
       "upstream_source": "crates/ui-egui/src/state.rs",
       "genko_status": "一部（2026-10-16 照合）",
-      "implementation_status": "未着手",
+      "implementation_status": "実装済み（PC4 E4、未統合）",
       "acceptance_status": "未実施",
-      "evidence": [],
+      "evidence": [
+        "native/src/app/main_window_paint.cpp",
+        "native/src/app/gradients_panel.cpp",
+        "native/tests/gui/test_gui_paint.cpp"
+      ],
       "pc0": {
         "date": "2026-10-16",
         "cpp_base": "962faa4",
@@ -39719,9 +39814,13 @@
       "kind": "tool",
       "upstream_source": "crates/ui-egui/src/state.rs",
       "genko_status": "一部（2026-10-16 照合）",
-      "implementation_status": "未着手",
+      "implementation_status": "実装済み（PC4 E4、未統合）",
       "acceptance_status": "未実施",
-      "evidence": [],
+      "evidence": [
+        "native/src/app/main_window_paint.cpp",
+        "native/src/app/brush_panel.cpp",
+        "native/tests/gui/test_gui_paint.cpp"
+      ],
       "pc0": {
         "date": "2026-10-16",
         "cpp_base": "962faa4",
@@ -39738,7 +39837,8 @@
         ],
         "gap": "クリックで線に囲まれた所を塗る。色差の許容値・隣接・アンチエイリアス・パターンで塗るのオプションがない",
         "note": "エンジン側は paint.bucket の行"
-      }
+      },
+      "remaining": "塗りつぶし: パターンは E3 が入るまで灰色"
     },
     {
       "id": "tool:Type",

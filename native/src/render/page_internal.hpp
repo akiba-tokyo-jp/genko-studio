@@ -3,6 +3,7 @@
 // Internal to genko_render: the parts of the page renderer (render.py, placement.py, frames.py, filters.py) shared
 // by page.cpp, panels.cpp and composite.cpp.
 
+#include <array>
 #include <memory>
 #include <optional>
 #include <span>
@@ -121,13 +122,25 @@ Image resized_part(const Image& source, Size size, const Box& area, Resample res
 
 // render.gradient_colours(gradient_t(gx, gy, spec), spec) one point at a time (gradient_fill): the colour, each band
 // np.round()ed and cast to uint8 as numpy does, and the opacity (float64) at (gx, gy) in mm.
+// (vector@1, PC4 E4: and the spec's transparency stops, the opacity the colour stops' times theirs.)
+struct GradientStop {
+    double pos = 0;
+    std::array<double, 3> rgb{};  // (0..255, between the levels too)
+    double opacity = 1;
+};
 class GradientColours {
 public:
     explicit GradientColours(const core::Json& spec);
+    // PC4 E4: the spec's shape (from, to, shape, ratio, repeat, reverse) and transparency with these colour stops — their
+    // colours of any precision (a precise 描画色) —, for at()'s floats.
+    GradientColours(const core::Json& spec, const std::vector<GradientStop>& stops);
     ~GradientColours();
     GradientColours(const GradientColours&) = delete;
     GradientColours& operator=(const GradientColours&) = delete;
     void at(double gx, double gy, unsigned char rgb[3], double& opacity) const;
+    // PC4 E4: the colour as it is between the stops — r, g, b 0..255 not rounded — and the opacity (0..1) at (gx, gy) in mm
+    // (OpError for a place along the gradient that cannot be worked out, as at()).
+    void at(double gx, double gy, double rgba[4]) const;
 
 private:
     struct Impl;

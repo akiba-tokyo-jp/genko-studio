@@ -67,6 +67,8 @@ class HistogramPanel;
 class InfoPanel;
 class CheckPanel;
 class ColourPanel;
+class GradientLibrary;
+class GradientsPanel;
 struct FilterItem;  // (PC4 節 D: app/filter_menu.hpp)
 class HistoryPanel;
 class GuidePanel;
@@ -822,7 +824,9 @@ private:
     // (PC4 E1, review P2-6) Whether a line with a blend may be painted into this paint layer: when it has lines or pictures
     // of its own (they become its 200-dpi pixels, no longer lines), asked once a layer while the window is open (描く or
     // やめる); a layer of pixels only, always.
-    bool blend_bakes_ok(const core::Page& page, const core::Layer& layer);
+    // (PC4 E4: `how` the tool that paints into the pixels — the グラデーションツール, the 塗りつぶしツール with a blend —: none, the
+    // brush's blend)
+    bool blend_bakes_ok(const core::Page& page, const core::Layer& layer, const QString& how = {});
     // the drawing tools and the colour (main_window_paint.cpp)
     void build_paint_actions();
     void build_paint_pages(ToolSettings* ts);
@@ -837,6 +841,24 @@ private:
     void lasso_filled(const QVector<QPointF>& points);
     void shape_drawn(const core::Json& shape);
     void gradient(const QPointF& from, const QPointF& to);
+    // PC4 E4 (main_window_paint.cpp): the 塗りつぶしツール's page (基準 線で囲まれた所・色の近さ, 塗りつぶし, モード, 不透明度,
+    // 許容値, アンチエイリアス, 隣接, 全レイヤー, and the lines' fields of the brush panel), the グラデーションツール's (グラデーション
+    // and 編集…, 形, モード, 不透明度, 逆方向, ディザ, 透明部分) and the スポイトツール's (サンプル範囲, サンプル); the グラデーション
+    // panel; the colour a pick takes (an average, the layers below, a precise page's floats).
+    void build_fill_page(ToolSettings* ts);
+    void build_gradient_page(ToolSettings* ts);
+    void build_picker_page(ToolSettings* ts);
+    void fill_gradient_presets();
+    void build_gradients_dock();
+    // A preset clicked in the panel: the current gradient, and a gradient fill layer chosen takes its colours.
+    void gradient_chosen(const core::Json& item);
+    // 新規グラデーション塗りつぶしレイヤー (gradient.presets.apply).
+    void gradient_layer(const core::Json& item);
+    // The colour a pick at `mm` takes (straight sRGB, a precise page's past 1 too): an average of size × size pixels of
+    // the page as it shows, the target layer or the layers up to it; none where nothing shows.
+    std::optional<std::array<double, 3>> sampled_colour(const core::Page& page, const QPointF& mm, const QString& source, int size) const;
+    // The fill's colour and opacity (the 塗りつぶしツール's page): {"rgb", "opacity"?, "blend"?}.
+    core::Json fill_tool_fields(bool blend) const;
     void fill_gaps();
     void nudge_brush(int step);
     bool paint_stroke(const StrokeInput& stroke, const core::Page& page, const core::Layer& layer);
@@ -1236,7 +1258,26 @@ private:
     QSpinBox* blend_strength_ = nullptr;
     QComboBox* liquify_mode_ = nullptr;
     QSpinBox* liquify_strength_ = nullptr;
-    QComboBox* gradient_mode_ = nullptr;
+    // PC4 E4: the 塗りつぶしツール's, the グラデーションツール's and the スポイトツール's settings, the gradients
+    QComboBox* fill_basis_ = nullptr;
+    QComboBox* fill_source_ = nullptr;
+    QComboBox* fill_blend_ = nullptr;
+    QSpinBox* fill_opacity_ = nullptr;
+    QSpinBox* fill_tolerance_ = nullptr;
+    QCheckBox* fill_antialias_ = nullptr;
+    QCheckBox* fill_contiguous_ = nullptr;
+    QCheckBox* fill_all_layers_ = nullptr;
+    QComboBox* gradient_preset_ = nullptr;
+    QComboBox* gradient_shape_ = nullptr;
+    QComboBox* gradient_blend_ = nullptr;
+    QSpinBox* gradient_opacity_ = nullptr;
+    QCheckBox* gradient_reverse_ = nullptr;
+    QCheckBox* gradient_dither_ = nullptr;
+    QCheckBox* gradient_transparency_ = nullptr;
+    QComboBox* pick_size_ = nullptr;
+    QVBoxLayout* pick_samples_ = nullptr;
+    GradientLibrary* gradients_ = nullptr;
+    GradientsPanel* gradients_panel_ = nullptr;
     QComboBox* vector_mode_ = nullptr;
     QSpinBox* vector_amount_ = nullptr;
     QDoubleSpinBox* vector_join_ = nullptr;

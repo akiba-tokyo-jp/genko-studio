@@ -5,8 +5,10 @@
 #include <QtTest>
 #include <QCheckBox>
 #include <QComboBox>
+#include <QDoubleSpinBox>
 #include <QLineEdit>
 #include <QSettings>
+#include <QSignalSpy>
 #include <QSpinBox>
 #include <QTabWidget>
 #include <fstream>
@@ -227,6 +229,81 @@ private slots:
         emit panel.pick_source->activated(1);
         QCOMPARE(chosen.size(), 1);
         QCOMPARE(chosen.front().front().toString(), QStringLiteral("layer"));
+        // (PC4 E4: 現在のレイヤー以下 too)
+        QCOMPARE(panel.pick_source->count(), 3);
+        QCOMPARE(panel.pick_source->itemData(2).toString(), QStringLiteral("below"));
+        QCOMPARE(panel.pick_source->itemText(2), QStringLiteral("サンプル: 現在のレイヤー以下"));
+    }
+
+    // PC4 E4 (tools.setColors, SPEC.md COLOR-09「描画色と背景色」): the 背景色 chosen of its own (kept in the settings, said),
+    // Ctrl+click on a swatch for the 背景色; the 描画色's floats typed on a page of 16 or 32 bits (高精度), shown as they are,
+    // let go when an 8-bit colour is chosen again (a swatch, the picker's 8 bits, the same colour too), swapped with X.
+    void backgroundAndPreciseColours() {
+        auto store = app::settings();
+        for (const char* key : {"colour/sub", "colour/history"}) store->remove(QString::fromLatin1(key));
+        store.reset();
+        app::BrushPanel brush;
+        app::ColourPanel panel(&brush);
+        panel.resize(260, 560);
+        panel.show();
+        QVERIFY(QTest::qWaitForWindowExposed(&panel));
+        QSignalSpy said(&panel, &app::ColourPanel::background_set);
+        brush.set_colour({10, 20, 30});
+        panel.set_background({1, 2, 3});
+        QCOMPARE(panel.sub_rgb(), (Rgb{1, 2, 3}));
+        QCOMPARE(panel.sub->rgb(), (Rgb{1, 2, 3}));
+        QCOMPARE(brush.rgb(), (Rgb{10, 20, 30}));
+        QCOMPARE(said.size(), 1);
+        QCOMPARE(app::settings()->value(QStringLiteral("colour/sub")).toString(), QStringLiteral("1,2,3"));
+        QCOMPARE(panel.background_json("u16")["values"][2].get<double>(), std::round(3.0 / 255.0 * 65535.0) / 65535.0);
+        // Ctrl+click on a swatch: the 背景色 (the 描画色 as it was); a click: the 描画色
+        panel.remember({100, 110, 120});
+        const auto swatches = panel.history_page->findChildren<app::Swatch*>();
+        QVERIFY(!swatches.empty());
+        QTest::mouseClick(swatches.front(), Qt::LeftButton, Qt::ControlModifier);
+        QCOMPARE(panel.sub_rgb(), (Rgb{100, 110, 120}));
+        QCOMPARE(brush.rgb(), (Rgb{10, 20, 30}));
+        QTest::mouseClick(swatches.front(), Qt::LeftButton);
+        QCOMPARE(brush.rgb(), (Rgb{100, 110, 120}));
+        // 高精度: hidden on an 8-bit page, its floats typed on a page of 16 bits
+        QVERIFY(!panel.precise_box->isVisible());
+        panel.set_precise_depth(16);
+        QVERIFY(panel.precise_box->isVisible());
+        QCOMPARE(panel.precise_spins[0]->value(), std::round(100.0 / 255.0 * 1e5) / 1e5);
+        const double typed[3] = {0.12345, 0.5, 0.98765};
+        for (std::size_t i = 0; i < 3; ++i) panel.precise_spins[i]->setValue(typed[i]);
+        emit panel.precise_spins[2]->editingFinished();
+        QVERIFY(panel.is_precise());
+        QCOMPARE(panel.foreground()[0], 0.12345);
+        QCOMPARE(brush.rgb(), (Rgb{31, 128, 252}));  // (its 8-bit picture: the nearest)
+        QCOMPARE(panel.foreground_json("u16")["values"][0].get<double>(), std::round(0.12345 * 65535.0) / 65535.0);
+        // X: the floats go with their colour
+        panel.swap();
+        QVERIFY(!panel.is_precise());
+        QCOMPARE(panel.background()[2], 0.98765);
+        panel.swap();
+        QVERIFY(panel.is_precise());
+        // an 8-bit colour chosen again — a swatch, the same colour as its picture too — lets the floats go (E-0's promise)
+        QTest::mouseClick(swatches.front(), Qt::LeftButton);
+        QVERIFY(!panel.is_precise());
+        QCOMPARE(panel.precise_spins[0]->value(), std::round(100.0 / 255.0 * 1e5) / 1e5);
+        for (std::size_t i = 0; i < 3; ++i) panel.precise_spins[i]->setValue(typed[i]);
+        emit panel.precise_spins[0]->editingFinished();
+        QVERIFY(panel.is_precise());
+        brush.set_colour({31, 128, 252});  // (the picker or the sub view: its 8-bit picture chosen again)
+        QVERIFY(!panel.is_precise());
+        QCOMPARE(panel.foreground()[1], 128.0 / 255.0);
+        // a page of 32 bits takes values past 1; an 8-bit page hides the row again
+        panel.set_precise_depth(32);
+        QVERIFY(panel.precise_spins[0]->maximum() > 1.0);
+        panel.precise_spins[0]->setValue(2.5);
+        emit panel.precise_spins[0]->editingFinished();
+        QCOMPARE(panel.foreground()[0], 2.5);
+        QCOMPARE(brush.rgb()[0], 255);
+        QCOMPARE(panel.foreground_json("f32")["values"][0].get<double>(), 2.5);
+        panel.set_precise_depth(8);
+        QVERIFY(!panel.precise_box->isVisible());
+        app::settings()->remove(QStringLiteral("colour/sub"));
     }
 };
 

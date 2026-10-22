@@ -91,6 +91,7 @@ public:
     QComboBox* lasso_mode = nullptr;
     QDoubleSpinBox* gap_size = nullptr;
     QCheckBox* crossing = nullptr;
+    QWidget* fill_section = nullptr;  // (PC4 E4: the fill fields above, shown on the 塗りつぶしツール's page)
     LineSample* sample = nullptr;
     // brushes@1 (PC4 E1, Photoshop's options bar): 流量 (a dab brush's), モード (the blend a line is painted into a paint
     // layer with: grey on a pen layer, set_blend_allowed), 滑らかさ (its way and amount), and the 鉛筆ツール's 自動消去

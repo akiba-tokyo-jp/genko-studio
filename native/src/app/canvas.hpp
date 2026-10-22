@@ -239,6 +239,8 @@ public:
     // スポイト: where it picked last (mm) and whether from the drawing layer (color-mode@1: the window reads the inks
     // there on a CMYK or Lab page).
     std::optional<std::pair<QPointF, bool>> last_pick;
+    // (PC4 E4) the last pick was an Alt+click with the スポイトツール in hand — not held for a moment by Alt —: for the 背景色.
+    bool last_pick_background = false;
     // スポイト: the colour as seen ("view") or the drawing layer's own ("layer": asked of layer_colour_at).
     QString pick_source = QStringLiteral("view");
     std::function<std::optional<std::array<int, 3>>(double x_mm, double y_mm)> layer_colour_at;
@@ -698,7 +700,7 @@ private:
     bool tool_release();
     QPointF constrained(const QPointF& a, const QPointF& b, Qt::KeyboardModifiers modifiers) const;
     std::vector<QPointF> shape_preview(bool& closed) const;
-    void pick_colour(const QPointF& pos);
+    void pick_colour(const QPointF& pos, bool background = false);
     void draw_tools(QPainter& painter) const;
     // the retouching brushes (retouch_tools.cpp): Alt+click sets the clone source (true: taken); the source's cross and
     // the overlay at the brush

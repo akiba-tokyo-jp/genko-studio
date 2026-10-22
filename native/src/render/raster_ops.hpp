@@ -2,6 +2,7 @@
 
 #include <array>
 #include <string>
+#include <string_view>
 #include <vector>
 
 #include "core/command_bus.hpp"
@@ -35,6 +36,11 @@ void verify_style_picture(const std::string& bytes);
 // ops._verify_image(blob): bytes Pillow cannot open, and absurd sizes, refused before they reach a layer (OpError "not a
 // readable image: …" / "image too large: WxH"; a picture whose pixels cannot be decoded refused too, beyond Python).
 void verify_picture(const std::string& blob);
+
+// PC4 E4 (SPEC.md COLOR-09「グラデーション」): whether the op works a paint layer's own values (render/paint_fill) — a
+// gradient_fill with this build's keys, or on a precise or ink paint layer —, so it is not lent the 8-bit pictures of an
+// ink or profiled page (render/ops_registry): it takes the page's values itself.
+bool paints_layer_values(std::string_view name, const core::Json& op, const core::Document& doc);
 
 // Adds these ops (erase and erase_raster take over core's, which stop at a paint layer's pixels) and the area
 // resolver to `registry`.

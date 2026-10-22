@@ -147,6 +147,13 @@ genko_test(test_tiled_pixels SOURCES unit/test_tiled_pixels.cpp DEPS genko_test_
 # brush's line drawn as before.
 genko_test(test_dab_engine SOURCES unit/test_dab_engine.cpp DEPS genko_test_support genko_render_ops LABELS unit)
 genko_test(test_dab_lines SOURCES unit/test_dab_lines.cpp DEPS genko_test_support genko_render_ops LABELS unit TIMEOUT 600)
+# PC4 E4 (SPEC.md COLOR-09「塗りつぶし・グラデーション」「グラデーションのプリセット」): the gradient's shapes, reverse, dither,
+# transparency and live colours, gradient_fill and fill into a paint layer's own values on 8-bit, 16-bit, 32-bit, CMYK, Lab
+# and grey pages (a pen layer's picture, the calls without the new keys as before), 色の近さ; the gradients' library and
+# `genko gradients`; .grd files written, read and made presets.
+genko_test(test_gradient_tool SOURCES unit/test_gradient_tool.cpp DEPS genko_test_support genko_render_ops LABELS unit TIMEOUT 600)
+genko_test(test_gradient_presets SOURCES unit/test_gradient_presets.cpp DEPS genko_test_support genko_render_ops LABELS unit)
+genko_test(test_grd SOURCES unit/test_grd.cpp DEPS genko_test_support genko_render_ops LABELS unit)
 genko_test(test_resample SOURCES unit/test_resample.cpp DEPS genko_test_support genko_render_ops LABELS unit)
 genko_test(test_page_geometry SOURCES unit/test_page_geometry.cpp DEPS genko_test_support LABELS unit)
 # PC3 C-e (SPEC.md COLOR-07「判型」): the page size ops on a book in memory — each thing on a page where the map takes it,

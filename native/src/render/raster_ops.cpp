@@ -60,6 +60,7 @@
 #include "render/draw.hpp"
 #include "render/fill.hpp"
 #include "render/filters.hpp"
+#include "render/image_ops.hpp"
 #include "render/import_profile.hpp"
 #include "render/layer_masks.hpp"
 #include "render/proof.hpp"
@@ -73,6 +74,7 @@
 #include "render/page.hpp"
 #include "render/color_canvas.hpp"
 #include "render/page_internal.hpp"
+#include "render/paint_fill.hpp"
 #include "render/png.hpp"
 #include "render/psd_image.hpp"
 #include "render/raster.hpp"
@@ -262,6 +264,76 @@ Image fill_reference(const Document& doc, const Page& page, std::size_t target, 
 
 // --- fills --------------------------------------------------------------------------------------------------------
 
+// PC4 E4 (SPEC.md COLOR-09「塗りつぶし・グラデーション」, design section E 0.4 and 3.3): a fill or gradient goes into a paint
+// layer's own values (render/paint_fill) when the layer is precise (its pixels of 16 or 32 bits) or of inks (a paint layer
+// of a CMYK, Lab, grey or multichannel page that holds no 8-bit picture — as image_ops::layer_pixels reads it), or when the
+// op asks for what only those values can do (a blend; the gradient's new keys); an 8-bit layer's fill without them keeps
+// the picture it always laid (the same bytes) — a channel's or a mask's lent to the op too (an 8-bit picture on any page) —,
+// a pen or tone layer's too.
+bool precise_or_inks(const Page& page, const Layer& layer) {
+    return layer.color_raster != nullptr || layer.ink_raster != nullptr || (page.color.has_value() && layer.raster_png == nullptr);
+}
+
+// The op's blend: none for normal or none given; OpError for what is not one of the blends.
+std::optional<std::string> blend_given(const Json& op) {
+    const Json* blend = core::get(op, "blend");
+    if (blend == nullptr || blend->is_null() || *blend == Json("normal")) return std::nullopt;
+    if (!blend->is_string() || !image_ops::is_blend(blend->get<std::string>())) throw OpError("blend is one of the blends (normal, multiply, screen, …)");
+    return blend->get<std::string>();
+}
+
+// A colour of this build's ops: [r, g, b] 0..255 (levels between them too), "foreground" or "background" (the book's brush
+// colours: brush_rgb, brush_background_rgb — white when it has none), or a precise colour as a line's color_rgb
+// ({"precision": "u16" | "f32", "values": [r, g, b]}: straight sRGB 0..1, 32 bits past 1 too). r, g, b 0..255.
+std::array<double, 3> colour_of(const Json& v, const Document& doc, const std::string& what) {
+    const auto three = [](const std::vector<std::int64_t>& rgb) {
+        std::array<double, 3> out{};
+        for (std::size_t k = 0; k < 3; ++k) out[k] = static_cast<double>(k < rgb.size() ? std::clamp<std::int64_t>(rgb[k], 0, 255) : 0);
+        return out;
+    };
+    if (v == Json("foreground")) return three(doc.brush_rgb);
+    if (v == Json("background")) return three(doc.brush_background_rgb.value_or(std::vector<std::int64_t>{255, 255, 255}));
+    if (v.is_object()) {
+        try {
+            core::validate_stroke_color(v);
+        } catch (const core::Error& error) {
+            throw OpError(what + ": " + error.what());
+        }
+        std::array<double, 3> out{};
+        for (std::size_t k = 0; k < 3; ++k) out[k] = v["values"][k].get<double>() * 255.0;
+        return out;
+    }
+    const std::string message = what + " is [r, g, b] (0..255), \"foreground\", \"background\" or {precision, values}";
+    if (!v.is_array() || v.size() < 3) throw OpError(message);
+    std::array<double, 3> out{};
+    for (std::size_t k = 0; k < 3; ++k) {
+        if (!v[k].is_number()) throw OpError(message);
+        out[k] = v[k].get<double>();
+        if (!(out[k] >= 0 && out[k] <= 255)) throw OpError(message);
+    }
+    return out;
+}
+
+// gradient_fill's keys of this build (PC4 E4): reverse, dither, blend, opacity, transparency, the shapes angle, reflected
+// and diamond, a colour of colour_of's that is not three numbers.
+bool new_gradient_keys(const Json& op) {
+    for (const char* key : {"reverse", "dither", "blend", "opacity", "transparency"}) {
+        if (const Json* v = core::get(op, key); v != nullptr && !v->is_null()) return true;
+    }
+    if (const Json* shape = core::get(op, "shape"); shape != nullptr && (*shape == Json("angle") || *shape == Json("reflected") || *shape == Json("diamond"))) {
+        return true;
+    }
+    for (const char* key : {"rgb_from", "rgb_to"}) {
+        if (const Json* v = core::get(op, key); v != nullptr && (v->is_string() || v->is_object())) return true;
+    }
+    if (const Json* stops = core::get(op, "stops"); stops != nullptr && stops->is_array()) {
+        for (const Json& s : *stops) {
+            if (s.is_array() && s.size() > 1 && (s[1].is_string() || s[1].is_object())) return true;
+        }
+    }
+    return false;
+}
+
 void fill(OpContext& c) {
     Document& doc = c.doc;
     const Json& op = c.op;
@@ -298,6 +370,34 @@ void fill(OpContext& c) {
     }
     const std::vector<std::int64_t> rgb = rgb_of(op, doc);
     const double opacity = float_at(op, "opacity", 1.0);
+    // (PC4 E4: a blend, a precise or ink paint layer — the colour into its own values, a precise page's color_rgb as it is)
+    const std::optional<std::string> blend = blend_given(op);
+    const Json* precise = core::get(op, "color_rgb");
+    if (precise != nullptr && precise->is_null()) precise = nullptr;
+    if (page.layers[ti].kind == LayerKind::Raster && (blend || precise_or_inks(page, page.layers[ti]))) {
+        std::array<double, 3> colour{};
+        if (precise != nullptr && !page.color && page.rgb && page.rgb->depth != 8) {
+            colour = colour_of(*precise, doc, "color_rgb");
+        } else {
+            if (precise != nullptr) c.notes.push_back("color_rgb is for an RGB page of 16 or 32 bits: the fill's rgb is used");
+            colour = colour_of(core::ints_json(rgb), doc, "rgb");
+        }
+        const std::string id = page.layers[ti].id;
+        paint_fill::Coverage coverage;
+        coverage.picture = *mask;
+        coverage.dpi = dpi;
+        const auto paint = [&colour](double, double, double rgba[4]) {
+            for (std::size_t k = 0; k < 3; ++k) rgba[k] = colour[k] / 255.0;
+            rgba[3] = 1.0;
+        };
+        paint_fill::How how;
+        how.blend = blend.value_or("normal");
+        how.opacity = std::clamp(opacity, 0.0, 1.0);
+        (void)paint_fill::paint(c, at, id, coverage, paint, how);
+        return;
+    }
+    if (blend) throw OpError("blend paints a paint layer's pixels (a pen layer's fills are pictures laid on it: leave blend out)");
+    if (precise != nullptr) c.notes.push_back("color_rgb is for a precise paint layer: the fill's rgb is used");
     if (auto patch = fills::mask_patch(*mask, dpi, rgb, opacity)) page.layers[ti].patches.push_back(std::move(*patch));
 }
 
@@ -556,6 +656,139 @@ void flood_fill(OpContext& c) {
     raster::save_raster(page, layer, image);  // (pages/NNN/<role>.png)
 }
 
+// PC4 E4 (SPEC.md COLOR-09「グラデーション」): gradient_fill with this build's keys — the shapes angle, reflected and diamond
+// (C-b's GradientColours), reverse, dither (an 8-bit layer's), blend, opacity (0..1), transparency stops, a colour
+// "foreground", "background" or precise — and any gradient on a precise or ink paint layer: a paint layer's own values on
+// its grid (render/paint_fill; its lines and pictures become its pixels), a pen or tone layer's picture as before (150 dpi,
+// a blend refused). PhotoCraft v0.2.0's engine/src/paint_cmds.rs gradient and algo/src/paint.rs paint_gradient, MIT.
+void gradient_fill_new(OpContext& c, std::size_t at, std::size_t ti, const std::vector<double>& from, const std::vector<double>& to) {
+    Document& doc = c.doc;
+    const Json& op = c.op;
+    const Json* shape = core::get(op, "shape");
+    static const std::set<std::string> kShapes{"linear", "radial", "ellipse", "angle", "reflected", "diamond"};
+    if (shape != nullptr && !shape->is_null() && !(shape->is_string() && kShapes.contains(shape->get<std::string>()))) {
+        throw OpError("shape must be linear, radial, ellipse, angle, reflected or diamond");
+    }
+    const auto flag = [&](const char* key) {
+        const Json* v = core::get(op, key);
+        if (v == nullptr || v->is_null()) return false;
+        if (!v->is_boolean()) throw OpError(std::string(key) + " must be true or false");
+        return v->get<bool>();
+    };
+    const bool reverse = flag("reverse");
+    const bool dither = flag("dither");
+    const std::optional<std::string> blend = blend_given(op);
+    double opacity = 1.0;
+    if (const Json* v = core::get(op, "opacity"); v != nullptr && !v->is_null()) {
+        opacity = core::finite_float(*v, "opacity");
+        if (!(opacity >= 0 && opacity <= 1)) throw OpError("opacity is 0..1");
+    }
+    // the shape: from, to, shape, ratio, repeat, reverse and the transparency stops (C-b's gradient, core::gradient_extras)
+    Json spec = Json::object();
+    spec["from"] = Json::array({from[0], from[1]});
+    spec["to"] = Json::array({to[0], to[1]});
+    spec["shape"] = shape != nullptr && shape->is_string() ? *shape : Json("linear");
+    Json plain = op;
+    plain.erase("stops");
+    for (const auto& [key, value] : core::gradient_extras(plain).items()) spec[key] = value;
+    if (reverse) spec["reverse"] = true;
+    // the colour stops (2 to 16): the op's stops, else its two ends as before
+    std::vector<detail::GradientStop> stops;
+    if (core::truthy_at(op, "stops")) {
+        const std::string what = "stops are [[position 0..1, colour, opacity?], …] (2 to 16)";
+        const Json& given = op["stops"];
+        if (!given.is_array() || given.size() < 2 || given.size() > 16) throw OpError(what);
+        for (const Json& one : given) {
+            if (!one.is_array() || one.size() < 2 || one.size() > 3 || !one[0].is_number()) throw OpError(what);
+            detail::GradientStop stop;
+            stop.pos = one[0].get<double>();
+            stop.rgb = colour_of(one[1], doc, "a stop's colour");
+            if (one.size() > 2 && !one[2].is_null()) {
+                if (!one[2].is_number()) throw OpError(what);
+                stop.opacity = one[2].get<double>();
+            }
+            if (!(stop.pos >= 0 && stop.pos <= 1) || !(stop.opacity >= 0 && stop.opacity <= 1)) throw OpError(what);
+            stops.push_back(stop);
+        }
+    } else {
+        const Json from_colour = core::truthy_at(op, "rgb_from") ? op["rgb_from"] : Json::array({20, 20, 20});
+        const Json to_colour = core::truthy_at(op, "rgb_to") ? op["rgb_to"] : from_colour;
+        const auto end = [&](const char* key, double fallback) {
+            const Json* v = core::get(op, key);
+            const double x = v == nullptr || v->is_null() ? fallback : core::finite_float(*v, key);
+            return std::clamp(x, 0.0, 1.0);
+        };
+        stops.push_back(detail::GradientStop{0.0, colour_of(from_colour, doc, "rgb_from"), end("opacity_from", 1.0)});
+        stops.push_back(detail::GradientStop{1.0, colour_of(to_colour, doc, "rgb_to"), end("opacity_to", core::truthy_at(op, "rgb_to") ? 1.0 : 0.0)});
+    }
+    const detail::GradientColours colours(spec, stops);
+    Page& page = doc.edit_page(at);
+    const Layer& target = page.layers[ti];
+    if (target.kind == LayerKind::Raster) {
+        std::optional<paint_fill::Coverage> coverage;
+        if (core::truthy_at(op, "area")) {
+            coverage = paint_fill::Coverage{};
+            coverage->area = core::op_area(op);
+        }
+        const auto colour = [&colours](double x_mm, double y_mm, double rgba[4]) {
+            colours.at(x_mm, y_mm, rgba);
+            for (std::size_t k = 0; k < 3; ++k) rgba[k] /= 255.0;
+        };
+        paint_fill::How how;
+        how.blend = blend.value_or("normal");
+        how.opacity = opacity;
+        how.dither = dither;
+        const std::string id = target.id;
+        if (!paint_fill::paint(c, at, id, coverage, colour, how)) throw OpError("the gradient has nothing to show there");
+        return;
+    }
+    // a pen or tone layer: a picture laid on it, as before (150 dpi)
+    if (blend) throw OpError("blend paints a paint layer's pixels (a pen layer's fills are pictures laid on it: leave blend out)");
+    const int dpi = kGradientDpi;
+    Image shown;
+    std::int64_t x0 = 0;
+    std::int64_t y0 = 0;
+    if (core::truthy_at(op, "area")) {
+        selection::AreaMask m = selection::area_mask(core::op_area(op), dpi);
+        shown = std::move(m.mask);
+        x0 = m.x0;
+        y0 = m.y0;
+    } else {
+        const double w = core::py_round_whole(page.spec.width_mm.value() / 25.4 * dpi);
+        const double h = core::py_round_whole(page.spec.height_mm.value() / 25.4 * dpi);
+        limits::check_sides(w, h, "the page");
+        shown = Image::create("L", Size{static_cast<int>(std::max(0.0, w)), static_cast<int>(std::max(0.0, h))}, Ink(255));
+    }
+    const int w = shown.width();
+    const int h = shown.height();
+    const double scale = dpi / 25.4;
+    const std::string alpha_in = shown.tobytes();
+    std::string data(static_cast<std::size_t>(w) * static_cast<std::size_t>(h) * 4, '\0');
+    std::size_t k = 0;
+    for (int j = 0; j < h; ++j) {
+        const double gy = (static_cast<double>(j + y0) + 0.5) / scale;
+        for (int i = 0; i < w; ++i) {
+            double rgba[4];
+            colours.at((static_cast<double>(i + x0) + 0.5) / scale, gy, rgba);
+            if (dither) {
+                const double n = paint_fill::dither_noise(static_cast<int>(i + x0), static_cast<int>(j + y0)) - 0.5;
+                for (std::size_t ch = 0; ch < 3; ++ch) rgba[ch] += n;
+            }
+            const std::size_t px = static_cast<std::size_t>(j) * static_cast<std::size_t>(w) + static_cast<std::size_t>(i);
+            const double alpha = std::nearbyint(rgba[3] * opacity * static_cast<double>(static_cast<unsigned char>(alpha_in[px])));
+            for (std::size_t ch = 0; ch < 3; ++ch) data[k++] = static_cast<char>(static_cast<unsigned char>(std::clamp(std::nearbyint(rgba[ch]), 0.0, 255.0)));
+            data[k++] = static_cast<char>(static_cast<unsigned char>(std::clamp(alpha, 0.0, 255.0)));
+        }
+    }
+    const Image image = Image::frombytes("RGBA", Size{w, h}, data);
+    core::Patch templ;
+    templ.attrs["mode"] = "image";
+    templ.attrs["opacity"] = 1.0;
+    auto patch = selection::to_patch(image, x0, y0, templ, dpi);
+    if (!patch) throw OpError("the gradient has nothing to show there");
+    page.layers[ti].patches.push_back(std::move(*patch));
+}
+
 void gradient_fill(OpContext& c) {
     Document& doc = c.doc;
     const Json& op = c.op;
@@ -585,6 +818,11 @@ void gradient_fill(OpContext& c) {
     const std::vector<double> to = two("to");
     if (from.size() != 2 || to.size() != 2) throw OpError(message);
     if (core::py_hypot(to[0] - from[0], to[1] - from[1]) < 0.5) throw OpError("the gradient needs a longer drag");
+    // (PC4 E4: the keys of this build, or a precise or ink paint layer — render/paint_fill and new_gradient)
+    if (new_gradient_keys(op) || (page.layers[ti].kind == LayerKind::Raster && precise_or_inks(page, page.layers[ti]))) {
+        gradient_fill_new(c, at, ti, from, to);
+        return;
+    }
     const int dpi = kGradientDpi;
     Image shown;
     std::int64_t x0 = 0;
@@ -2814,6 +3052,28 @@ void verify_style_picture(const std::string& blob) {
         if (error.code() == "unidentified_image") throw core::PyValueError("cannot identify image file <_io.BytesIO object>");
         if (error.code() == "image_too_large") throw core::PyUncaught("PIL.Image.DecompressionBombError", error.what());
         throw core::PyValueError(error.what());
+    }
+}
+
+bool paints_layer_values(std::string_view name, const core::Json& op, const core::Document& doc) {
+    if (name != "gradient_fill") return false;
+    try {
+        const std::size_t at = core::require_page(doc, op);
+        const Page& page = doc.page(at);
+        std::size_t ti = 0;
+        if (core::truthy_at(op, "layer_id")) {
+            ti = core::layer_by_id(page, core::py_str(op["layer_id"]));
+        } else {
+            const Json* layer = core::get(op, "layer");
+            const core::LayerRole role = core::role_from(Json(layer != nullptr && core::py_truthy(*layer) ? core::py_str(*layer) : "ink"));
+            const auto found = std::find_if(page.layers.begin(), page.layers.end(), [&](const Layer& l) { return l.role == role; });
+            if (found == page.layers.end()) return false;  // (made as a pen layer)
+            ti = static_cast<std::size_t>(found - page.layers.begin());
+        }
+        // (a pen or tone layer: lent as before — its picture is the same either way)
+        return page.layers[ti].kind == LayerKind::Raster && (new_gradient_keys(op) || precise_or_inks(page, page.layers[ti]));
+    } catch (const std::exception&) {
+        return false;  // (the op says what is wrong)
     }
 }
 

@@ -83,6 +83,15 @@ std::vector<QAction*> commands(QMainWindow* window);
 void name_commands(MainWindow* window);
 // (new name: old name, one or more) a command renamed later keeps the keys and places chosen under an old name
 const std::multimap<QString, QString>& renamed();
+// PC4 E4: the old names a later command took for its own (グラデーション: the グラデーションツール's before PC4 E-0, the
+// グラデーション panel's since E4). A list of commands or the keys kept by a build that knows the new command (marked when
+// it writes them: names_current) mean the new command by such a name; kept before, the renamed one.
+const std::vector<QString>& reused_names();
+bool reused_name(const QString& name);
+// Whether the settings' `key` ("ui/quick", "ui/commandbar", "shortcuts") was written by a build that knows reused_names(),
+// and that it is now.
+bool names_current(const QString& key);
+void mark_names_current(const QString& key);
 void apply_shortcuts(MainWindow* window);
 // Every command's tooltip says its name, its keys as they are now, and what it does (written again when the keys
 // change, so a changed key never shows the old one).

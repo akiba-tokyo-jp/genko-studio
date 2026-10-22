@@ -9,10 +9,15 @@
 #include <QDoubleSpinBox>
 #include <QFormLayout>
 #include <QFrame>
+#include <QHBoxLayout>
 #include <QLabel>
 #include <QMenu>
+#include <QPushButton>
 #include <QScrollArea>
+#include <QSettings>
 #include <QSpinBox>
+#include <QStandardItemModel>
+#include <QVBoxLayout>
 
 #include <algorithm>
 #include <cmath>
@@ -20,12 +25,19 @@
 #include "app/brush_panel.hpp"
 #include "app/colours.hpp"
 #include "app/fields.hpp"
+#include "app/gradients_panel.hpp"
+#include "app/layer_dialogs.hpp"
+#include "app/config.hpp"
+#include "app/ask.hpp"
 #include "app/preferences.hpp"
 #include "app/main_window.hpp"
 #include "app/theme.hpp"
 #include "app/tool_settings.hpp"
 #include "core/pynum.hpp"
 #include "service/wording.hpp"
+#include "render/color_canvas.hpp"
+#include "render/gradient_presets.hpp"
+#include "render/image_ops.hpp"
 #include "render/ink.hpp"
 #include "render/ink_edit.hpp"
 #include "render/page.hpp"
@@ -52,6 +64,51 @@ QFormLayout* form_on(QWidget* page) {
     return form;
 }
 
+// (PC4 E4) the blends as Photoshop's モード lists them (wording.BLEND's words), the one kept in the settings chosen
+QComboBox* blend_choice(const char* name, const QString& key) {
+    auto* box = new QComboBox;
+    box->setObjectName(QString::fromLatin1(name));
+    for (const auto& [mode, label] : blend_modes()) box->addItem(label, QString::fromStdString(mode));
+    box->setCurrentIndex(std::max(0, box->findData(settings()->value(key, QStringLiteral("normal")).toString())));
+    QObject::connect(box, &QComboBox::activated, box, [box, key](int) { settings()->setValue(key, box->currentData()); });
+    return box;
+}
+
+QSpinBox* percent_box(const char* name, const QString& key, int lo, int value) {
+    auto* box = new QSpinBox;
+    box->setObjectName(QString::fromLatin1(name));
+    box->setRange(lo, 100);
+    box->setSuffix(QStringLiteral(" %"));
+    box->setValue(std::clamp(settings()->value(key, value).toInt(), lo, 100));
+    QObject::connect(box, &QSpinBox::valueChanged, box, [key](int v) { settings()->setValue(key, v); });
+    return box;
+}
+
+QCheckBox* kept_check(const char* name, const QString& text, const QString& key, bool value) {
+    auto* box = new QCheckBox(text);
+    box->setObjectName(QString::fromLatin1(name));
+    box->setChecked(settings()->value(key, value ? QStringLiteral("true") : QStringLiteral("false")).toString() == QLatin1String("true"));
+    QObject::connect(box, &QCheckBox::toggled, box, [key](bool on) { settings()->setValue(key, on ? QStringLiteral("true") : QStringLiteral("false")); });
+    return box;
+}
+
+QComboBox* kept_choice(const char* name, const std::vector<std::pair<QString, QVariant>>& items, const QString& key, const QVariant& value) {
+    auto* box = new QComboBox;
+    box->setObjectName(QString::fromLatin1(name));
+    for (const auto& [label, data] : items) box->addItem(label, data);
+    const QString kept = settings()->value(key, value).toString();  // (the settings give back text)
+    for (int i = 0; i < box->count(); ++i)
+        if (box->itemData(i).toString() == kept) box->setCurrentIndex(i);
+    QObject::connect(box, &QComboBox::activated, box, [box, key](int) { settings()->setValue(key, box->currentData()); });
+    return box;
+}
+
+std::array<int, 3> eight(const std::array<double, 3>& c) {
+    std::array<int, 3> out{};
+    for (std::size_t k = 0; k < 3; ++k) out[k] = static_cast<int>(std::lround(std::clamp(std::isfinite(c[k]) ? c[k] : 0.0, 0.0, 1.0) * 255.0));
+    return out;
+}
+
 }  // namespace
 
 void MainWindow::build_paint_actions() {
@@ -66,7 +123,7 @@ void MainWindow::build_paint_actions() {
     const auto key = [](const char* text) { return QList<QKeySequence>{QKeySequence(QString::fromLatin1(text))}; };
     // (PC4 E-0, the user's decision 2: スポイトツール, 塗りつぶしツール, グラデーションツール, 描画色と背景色 by Photoshop's
     // names — their ids and keys kept, preferences::renamed())
-    tool("act_picker", QStringLiteral("スポイトツール"), "picker", key("I"), QStringLiteral("クリックした所の色を描画色にします"));
+    tool("act_picker", QStringLiteral("スポイトツール"), "picker", key("I"), QStringLiteral("クリックした所の色を描画色にします（Alt＋クリックで背景色）"));
     // (PC4 E1: Photoshop's 鉛筆ツール — a hard line without anti-aliasing, drawn with its own dab brush; in the brush tools'
     // group, its key that of the group: none of its own)
     tool("act_pencil", QStringLiteral("鉛筆ツール"), "pencil", {},
@@ -82,7 +139,8 @@ void MainWindow::build_paint_actions() {
         canvas_->update();
     });
     canvas_->brush_preview = preview->isChecked();
-    tool("act_fill", QStringLiteral("塗りつぶしツール"), "fill", key("G"), QStringLiteral("線で囲まれた所をクリックで塗ります（隙間閉じ・見る範囲はブラシ パネルで）"));
+    tool("act_fill", QStringLiteral("塗りつぶしツール"), "fill", key("G"),
+         QStringLiteral("クリックした所を塗ります（基準は 線で囲まれた所・色の近さ。ツールの設定で）"));
     tool("act_lassofill", QStringLiteral("囲って塗る"), "lassofill", key("Shift+G"), QStringLiteral("ドラッグで囲んだ所を塗ります"));
     tool("act_gradient", QStringLiteral("グラデーションツール"), "gradient", key("U"), QStringLiteral("ドラッグの向きに色をなめらかに変えて塗る（選択範囲があればその中だけ）"));
     // (PC3 C-b, the user's decision 5: the 図形 of before is the shape tools' 長方形ツール — the others: main_window_shapes.cpp)
@@ -197,14 +255,168 @@ void MainWindow::build_paint_pages(ToolSettings* ts) {
     lfl->addRow(QStringLiteral("大きさ"), liquify_size);
     lfl->addRow(hint(QStringLiteral("ペンの線は点が動き、線のまま残ります。")));
     ts->add({QStringLiteral("liquify")}, liquify_page);
-    // グラデーション
-    gradient_mode_ = new QComboBox;
-    gradient_mode_->setObjectName(QStringLiteral("gradient_mode"));
-    // (PC4 E-0, the user's decision 2: the pen's colour is the 描画色)
-    for (const auto& [label, key] : {std::pair{QStringLiteral("描画色 → 透明"), QStringLiteral("fade")}, {QStringLiteral("描画色 → 白"), QStringLiteral("white")},
-                                     {QStringLiteral("黒 → 白"), QStringLiteral("bw")}, {QStringLiteral("円（中心から描画色 → 透明）"), QStringLiteral("radial")}})
-        gradient_mode_->addItem(label, key);
-    ts->add({QStringLiteral("gradient")}, action_page({QStringLiteral("色の変わり方"), static_cast<QWidget*>(gradient_mode_)}));
+    // (PC4 E4: Photoshop's options bars of the グラデーションツール, the 塗りつぶしツール and the スポイトツール)
+    build_gradient_page(ts);
+    build_fill_page(ts);
+    build_picker_page(ts);
+}
+
+void MainWindow::build_gradient_page(ToolSettings* ts) {
+    if (gradients_ == nullptr) gradients_ = new GradientLibrary(this);
+    gradient_preset_ = new QComboBox;
+    gradient_preset_->setObjectName(QStringLiteral("gradient_preset"));
+    gradient_preset_->setIconSize(QSize(64, 12));
+    gradient_preset_->setToolTip(QStringLiteral("グラデーションツールで塗るグラデーション（グラデーション パネルのプリセットから）"));
+    connect(gradient_preset_, &QComboBox::activated, this, [this](int) {
+        const QPoint at = gradient_preset_->currentData().toPoint();
+        const auto& groups = gradients_->groups();
+        if (at.x() < 0 || static_cast<std::size_t>(at.x()) >= groups.size() || at.y() < 0 ||
+            static_cast<std::size_t>(at.y()) >= groups[static_cast<std::size_t>(at.x())].items.size())
+            return;
+        gradients_->set_current(groups[static_cast<std::size_t>(at.x())].items[static_cast<std::size_t>(at.y())]);
+    });
+    connect(gradients_, &GradientLibrary::changed, this, [this] { fill_gradient_presets(); });
+    connect(gradients_, &GradientLibrary::current_changed, this, [this] { fill_gradient_presets(); });
+    auto* edit = new QPushButton(QStringLiteral("編集…"));
+    edit->setObjectName(QStringLiteral("gradient_edit"));
+    edit->setToolTip(QStringLiteral("今のグラデーションをグラデーションエディターで直します"));
+    connect(edit, &QPushButton::clicked, this, [this] {
+        const auto fg = brush_->rgb();
+        const auto bg = colours_ != nullptr ? colours_->sub_rgb() : std::array<int, 3>{255, 255, 255};
+        GradientEditor editor(gradients_->current(), fg, bg, this);
+        if (ask::exec(&editor) != QDialog::Accepted) return;
+        try {
+            gradients_->set_current(editor.item());
+        } catch (const std::exception& error) {
+            flash(wording::error(QString::fromUtf8(error.what())), 4000, true);
+        }
+    });
+    gradient_shape_ = kept_choice("gradient_shape",
+                                  {{QStringLiteral("線形"), QStringLiteral("linear")}, {QStringLiteral("円形"), QStringLiteral("radial")},
+                                   {QStringLiteral("円錐形"), QStringLiteral("angle")}, {QStringLiteral("反射形"), QStringLiteral("reflected")},
+                                   {QStringLiteral("菱形"), QStringLiteral("diamond")}, {QStringLiteral("楕円"), QStringLiteral("ellipse")}},
+                                  QStringLiteral("gradient/shape"), QStringLiteral("linear"));
+    gradient_blend_ = blend_choice("gradient_blend", QStringLiteral("gradient/blend"));
+    gradient_opacity_ = percent_box("gradient_opacity", QStringLiteral("gradient/opacity"), 1, 100);
+    gradient_reverse_ = kept_check("gradient_reverse", QStringLiteral("逆方向"), QStringLiteral("gradient/reverse"), false);
+    gradient_dither_ = kept_check("gradient_dither", QStringLiteral("ディザ"), QStringLiteral("gradient/dither"), true);
+    gradient_dither_->setToolTip(QStringLiteral("8 bit のレイヤーで、色の段（バンディング）が見えないように細かいノイズを混ぜます"));
+    gradient_transparency_ = kept_check("gradient_transparency", QStringLiteral("透明部分"), QStringLiteral("gradient/transparency"), true);
+    gradient_transparency_->setToolTip(QStringLiteral("グラデーションの不透明度の分岐点を使います（オフ: 不透明に塗る）"));
+    auto* page = new QWidget;
+    page->setObjectName(QStringLiteral("gradient_settings"));
+    QFormLayout* form = form_on(page);
+    auto* chooser = new QHBoxLayout;
+    chooser->addWidget(gradient_preset_, 1);
+    chooser->addWidget(edit);
+    form->addRow(QStringLiteral("グラデーション"), chooser);
+    form->addRow(QStringLiteral("形"), gradient_shape_);
+    form->addRow(QStringLiteral("モード"), gradient_blend_);
+    form->addRow(QStringLiteral("不透明度"), gradient_opacity_);
+    form->addRow(gradient_reverse_);
+    form->addRow(gradient_dither_);
+    form->addRow(gradient_transparency_);
+    form->addRow(hint(QStringLiteral("ペイントのレイヤーには画素として塗り、ペンのレイヤーには絵として置きます。描画色・背景色の分岐点は今の色で塗ります")));
+    fill_gradient_presets();
+    ts->add({QStringLiteral("gradient")}, page);
+}
+
+void MainWindow::fill_gradient_presets() {
+    if (gradient_preset_ == nullptr || gradients_ == nullptr) return;
+    const QSignalBlocker quiet(gradient_preset_);
+    gradient_preset_->clear();
+    const auto fg = brush_ != nullptr ? brush_->rgb() : std::array<int, 3>{20, 20, 20};
+    const auto bg = colours_ != nullptr ? colours_->sub_rgb() : std::array<int, 3>{255, 255, 255};
+    const core::Json& now = gradients_->current();
+    // (the first row: the gradient the tool paints with; then the library's presets, by their groups)
+    gradient_preset_->addItem(QIcon(gradient_strip(now, QSize(64, 12), fg, bg)), QString::fromStdString(now.value("name", std::string())), QPoint(-1, -1));
+    gradient_preset_->insertSeparator(1);
+    const auto& groups = gradients_->groups();
+    for (std::size_t g = 0; g < groups.size(); ++g) {
+        for (std::size_t i = 0; i < groups[g].items.size(); ++i) {
+            const core::Json& item = groups[g].items[i];
+            gradient_preset_->addItem(QIcon(gradient_strip(item, QSize(64, 12), fg, bg)),
+                                      QStringLiteral("%1 / %2").arg(QString::fromStdString(groups[g].name), QString::fromStdString(item.value("name", std::string()))),
+                                      QPoint(static_cast<int>(g), static_cast<int>(i)));
+        }
+    }
+    gradient_preset_->setCurrentIndex(0);
+}
+
+void MainWindow::build_fill_page(ToolSettings* ts) {
+    fill_basis_ = kept_choice("fill_basis", {{QStringLiteral("線で囲まれた所"), QStringLiteral("lines")}, {QStringLiteral("色の近さ"), QStringLiteral("color")}},
+                              QStringLiteral("fill/basis"), QStringLiteral("lines"));
+    fill_basis_->setToolTip(QStringLiteral("線で囲まれた所: 線を壁にして、その中を塗る（隙間は閉じる）。色の近さ: クリックした所の色に近い所を塗る（Photoshop の塗りつぶしツール）"));
+    fill_source_ = kept_choice("fill_source", {{QStringLiteral("描画色"), QStringLiteral("foreground")}, {QStringLiteral("パターン"), QStringLiteral("pattern")}},
+                               QStringLiteral("fill/source"), QStringLiteral("foreground"));
+    // (パターン: the patterns' group, E3 — until it is in, the item is grey and the 描画色 is used)
+    if (auto* model = qobject_cast<QStandardItemModel*>(fill_source_->model())) {
+        if (QStandardItem* pattern = model->item(1)) {
+            pattern->setEnabled(false);
+            pattern->setToolTip(QStringLiteral("パターンで塗るのは、パターンが使えるようになってから（準備中）"));
+        }
+    }
+    if (fill_source_->currentData() != QStringLiteral("foreground")) fill_source_->setCurrentIndex(0);
+    fill_blend_ = blend_choice("fill_blend", QStringLiteral("fill/blend"));
+    fill_blend_->setToolTip(QStringLiteral("描画モード: 通常のほかは、ペイントのレイヤーの画素に塗ります"));
+    fill_opacity_ = percent_box("fill_opacity", QStringLiteral("fill/opacity"), 1, 100);
+    fill_tolerance_ = new QSpinBox;
+    fill_tolerance_->setObjectName(QStringLiteral("fill_tolerance"));
+    fill_tolerance_->setRange(0, 255);
+    fill_tolerance_->setValue(std::clamp(settings()->value(QStringLiteral("fill/color_tolerance"), 32).toInt(), 0, 255));
+    fill_tolerance_->setToolTip(QStringLiteral("許容値: クリックした所の色からどれだけ違う色まで塗るか（0〜255）"));
+    connect(fill_tolerance_, &QSpinBox::valueChanged, this, [](int v) { settings()->setValue(QStringLiteral("fill/color_tolerance"), v); });
+    fill_antialias_ = kept_check("fill_antialias", QStringLiteral("アンチエイリアス"), QStringLiteral("fill/antialias"), true);
+    fill_contiguous_ = kept_check("fill_contiguous", QStringLiteral("隣接"), QStringLiteral("fill/contiguous"), true);
+    fill_contiguous_->setToolTip(QStringLiteral("オン: クリックした所につながった所だけ。オフ: 離れた所の近い色も"));
+    fill_all_layers_ = kept_check("fill_all_layers", QStringLiteral("全レイヤー"), QStringLiteral("fill/all_layers"), false);
+    fill_all_layers_->setToolTip(QStringLiteral("オン: 見えている全部の色を見る。オフ: 描く先のレイヤーの色だけを見る"));
+    auto* page = new QWidget;
+    page->setObjectName(QStringLiteral("fill_settings"));
+    auto* layout = new QVBoxLayout(page);
+    layout->setContentsMargins(0, 0, 0, 0);
+    auto* top = new QWidget;
+    QFormLayout* form = form_on(top);
+    form->addRow(QStringLiteral("基準"), fill_basis_);
+    form->addRow(QStringLiteral("塗りつぶし"), fill_source_);
+    form->addRow(QStringLiteral("モード"), fill_blend_);
+    form->addRow(QStringLiteral("不透明度"), fill_opacity_);
+    auto* by_colour = new QWidget;  // ("near" is a macro on Windows)
+    by_colour->setObjectName(QStringLiteral("fill_color_section"));
+    QFormLayout* near_form = form_on(by_colour);
+    near_form->addRow(QStringLiteral("許容値"), fill_tolerance_);
+    near_form->addRow(fill_antialias_);
+    near_form->addRow(fill_contiguous_);
+    near_form->addRow(fill_all_layers_);
+    layout->addWidget(top);
+    layout->addWidget(by_colour);
+    if (brush_ != nullptr && brush_->fill_section != nullptr) layout->addWidget(brush_->fill_section);  // (隙間を閉じる … 囲って塗る)
+    layout->addWidget(hint(QStringLiteral("色の近さで塗るときは、許容値・隣接・全レイヤーを見ます。線で囲まれた所で塗るときは、隙間を閉じる・見る範囲・色の誤差を見ます")));
+    layout->addStretch(1);
+    const auto follow = [this, by_colour] { by_colour->setEnabled(fill_basis_->currentData().toString() == QLatin1String("color")); };
+    connect(fill_basis_, &QComboBox::activated, this, follow);
+    follow();
+    ts->add({QStringLiteral("fill"), QStringLiteral("lassofill")}, page);
+}
+
+void MainWindow::build_picker_page(ToolSettings* ts) {
+    pick_size_ = kept_choice("picker_size",
+                             {{QStringLiteral("指定したピクセル"), 1}, {QStringLiteral("3×3 ピクセル 平均"), 3}, {QStringLiteral("5×5 ピクセル 平均"), 5},
+                              {QStringLiteral("11×11 ピクセル 平均"), 11}, {QStringLiteral("31×31 ピクセル 平均"), 31},
+                              {QStringLiteral("51×51 ピクセル 平均"), 51}, {QStringLiteral("101×101 ピクセル 平均"), 101}},
+                             QStringLiteral("picker/size"), 1);
+    pick_size_->setToolTip(QStringLiteral("サンプル範囲: クリックした所の 1 ピクセルか、まわりの平均の色を拾います（200 dpi の画素で）"));
+    auto* page = new QWidget;
+    page->setObjectName(QStringLiteral("picker_settings"));
+    pick_samples_ = new QVBoxLayout(page);
+    pick_samples_->setContentsMargins(0, 0, 0, 0);
+    auto* size_label = new QLabel(QStringLiteral("サンプル範囲"));
+    pick_samples_->addWidget(size_label);
+    pick_samples_->addWidget(pick_size_);
+    pick_samples_->addWidget(new QLabel(QStringLiteral("サンプル")));  // (the カラー panel's choice comes here: build_colour_dock)
+    pick_samples_->addWidget(hint(QStringLiteral("Alt＋クリックで背景色に。16・32 bit のページでは、8 bit より細かい値で拾います")));
+    pick_samples_->addStretch(1);
+    ts->add({QStringLiteral("picker")}, page);
 }
 
 void MainWindow::build_colour_dock() {
@@ -214,6 +426,14 @@ void MainWindow::build_colour_dock() {
     });
     connect(colours_, &ColourPanel::pick_source_chosen, this, [this](const QString& source) { canvas_->pick_source = source; });
     connect(colours_, &ColourPanel::inks_chosen, this, [this](const std::vector<double>& ink) { choose_inks(ink, false); });
+    // (PC4 E4: スポイトツール's サンプル on its page, after its サンプル範囲; the gradients' strips follow the colours)
+    if (pick_samples_ != nullptr) pick_samples_->insertWidget(3, colours_->pick_source);
+    const auto colours_now = [this] {
+        if (gradients_panel_ != nullptr) gradients_panel_->set_colours(brush_->rgb(), colours_->sub_rgb());
+        fill_gradient_presets();
+    };
+    connect(brush_, &BrushPanel::colour_set, this, colours_now);
+    connect(colours_, &ColourPanel::background_set, this, colours_now);
     auto* dock = new QDockWidget(QStringLiteral("カラー"), this);
     dock->setObjectName(QStringLiteral("カラー"));
     auto* scroll = new QScrollArea;  // (a tall panel scrolls on a small screen instead of making the window taller)
@@ -257,11 +477,34 @@ std::optional<std::array<int, 3>> MainWindow::layer_colour_at(double x_mm, doubl
     }
 }
 
-void MainWindow::colour_picked(const std::array<int, 3>& rgb) {
+void MainWindow::colour_picked(const std::array<int, 3>& seen) {
+    const core::Page* page = current_page();
+    // PC4 E4 (tool:Eyedropper): サンプル範囲 (an average), サンプル 現在のレイヤー以下, a precise page's floats, Alt+click the 背景色
+    const int size = pick_size_ != nullptr ? std::max(1, pick_size_->currentData().toInt()) : 1;
+    const QString source = canvas_->pick_source;
+    const bool background = canvas_->last_pick_background;
+    const bool precise = page != nullptr && !page->color && page->rgb && page->rgb->depth != 8;
+    std::array<int, 3> rgb = seen;
+    std::optional<std::array<double, 3>> floats;
+    if (page != nullptr && canvas_->last_pick && (size > 1 || source == QLatin1String("below") || precise)) {
+        floats = sampled_colour(*page, canvas_->last_pick->first, source, size);
+        if (!floats) return;  // (nothing shows there)
+        rgb = eight(*floats);
+    }
+    if (background) {
+        if (precise && floats) colours_->set_background_precise(*floats);
+        else colours_->set_background(rgb);
+        flash(QStringLiteral("背景色を拾いました (%1, %2, %3)").arg(rgb[0]).arg(rgb[1]).arg(rgb[2]), 2000);
+        return;
+    }
+    if (precise && floats) {
+        colours_->choose_precise(*floats);
+        flash(QStringLiteral("色を拾いました (%1, %2, %3)").arg((*floats)[0], 0, 'f', 4).arg((*floats)[1], 0, 'f', 4).arg((*floats)[2], 0, 'f', 4), 2000);
+        return;
+    }
     // color-mode@1: on a CMYK or Lab page the eyedropper takes the inks there; when the page's rules would put other
     // inks on the colour it saw, the colour goes into the page's table with them (set_inks)
-    const core::Page* page = current_page();
-    if (page != nullptr && page->color && canvas_->last_pick) {
+    if (page != nullptr && page->color && canvas_->last_pick && size == 1 && source != QLatin1String("below")) {
         const auto [mm, from_layer] = *canvas_->last_pick;
         try {
             std::optional<std::vector<double>> ink;
@@ -281,6 +524,68 @@ void MainWindow::colour_picked(const std::array<int, 3>& rgb) {
     }
     brush_->set_colour(rgb);
     flash(QStringLiteral("色を拾いました (%1, %2, %3)").arg(rgb[0]).arg(rgb[1]).arg(rgb[2]), 2000);
+}
+
+std::optional<std::array<double, 3>> MainWindow::sampled_colour(const core::Page& page, const QPointF& mm, const QString& source, int size) const {
+    namespace io = render::image_ops;
+    try {
+        const core::Layer* layer = target_layer();
+        std::optional<io::Pixels> pixels;
+        if (source == QLatin1String("layer")) {
+            if (layer == nullptr) return std::nullopt;
+            pixels.emplace(io::shown_layer_pixels(book(), page, *layer));
+        } else if (source == QLatin1String("below") && layer != nullptr) {
+            core::Page below = page;  // (the layers up to the one drawn on: those above it left out)
+            for (std::size_t i = 0; i < below.layers.size(); ++i) {
+                if (below.layers[i].id == layer->id) {
+                    below.layers.resize(i + 1);
+                    break;
+                }
+            }
+            pixels.emplace(io::page_pixels(book(), below));
+        } else {
+            pixels.emplace(io::page_pixels(book(), page));
+        }
+        const io::Pixels& p = *pixels;
+        const double w_mm = page.spec.width_mm.value(), h_mm = page.spec.height_mm.value();
+        const int cx = static_cast<int>(std::floor(mm.x() / w_mm * p.width())), cy = static_cast<int>(std::floor(mm.y() / h_mm * p.height()));
+        if (cx < 0 || cy < 0 || cx >= static_cast<int>(p.width()) || cy >= static_cast<int>(p.height())) return std::nullopt;
+        const int r = size / 2;
+        const int x0 = std::max(0, cx - r), y0 = std::max(0, cy - r);
+        const int x1 = std::min(static_cast<int>(p.width()), cx + r + 1), y1 = std::min(static_cast<int>(p.height()), cy + r + 1);
+        // (the part as straight colours with their alphas: an ink layer's as the colours its inks mean)
+        io::Pixels part(p.kind(), static_cast<std::uint32_t>(x1 - x0), static_cast<std::uint32_t>(y1 - y0), p.colours());
+        part.floating = p.floating;
+        part.ink = p.ink;
+        for (int y = y0; y < y1; ++y)
+            for (int x = x0; x < x1; ++x)
+                std::copy_n(p.at(std::size_t(y) * p.width() + std::size_t(x)), p.all(),
+                            part.at(std::size_t(y - y0) * part.width() + std::size_t(x - x0)));
+        std::vector<io::Rgba> px;
+        if (part.kind() == io::Pixels::Kind::Inks) {
+            px = io::rgba_of(part);
+        } else {
+            for (std::size_t i = 0; i < part.size(); ++i) {
+                const float* v = part.at(i);
+                px.push_back(io::Rgba{v[0], v[1], v[2], part.colours() == 3 ? v[3] : 1.0f});
+            }
+        }
+        double sum[3] = {0, 0, 0}, weight = 0;
+        for (const io::Rgba& c : px) {
+            if (!(c[3] > 0)) continue;
+            for (std::size_t k = 0; k < 3; ++k) sum[k] += static_cast<double>(c[k]) * c[3];
+            weight += c[3];
+        }
+        if (!(weight > 0.08 * static_cast<double>(px.size()))) return std::nullopt;  // (all but clear there)
+        std::array<double, 3> out{sum[0] / weight, sum[1] / weight, sum[2] / weight};
+        if (part.kind() != io::Pixels::Kind::Inks) {
+            const render::RgbSpace space = render::RgbSpace::of(page);
+            if (!space.is_srgb()) space.to_srgb(out.data(), 1);  // (the page's values as sRGB)
+        }
+        return out;
+    } catch (const std::exception&) {
+        return std::nullopt;
+    }
 }
 
 void MainWindow::choose_inks(const std::vector<double>& ink, bool picked) {
@@ -327,13 +632,38 @@ void MainWindow::choose_inks(const std::vector<double>& ink, bool picked) {
     flash((picked ? QStringLiteral("色を拾いました（%1）") : QStringLiteral("色を選びました（%1）")).arg(said.join(QStringLiteral(" "))), 2000);
 }
 
+Json MainWindow::fill_tool_fields(bool blend) const {
+    Json out{{"rgb", pen_.rgb}};
+    if (fill_opacity_ != nullptr && fill_opacity_->value() < 100) out["opacity"] = fill_opacity_->value() / 100.0;
+    if (blend && fill_blend_ != nullptr && fill_blend_->currentData().toString() != QLatin1String("normal")) {
+        out["blend"] = fill_blend_->currentData().toString().toStdString();
+    }
+    return out;
+}
+
 void MainWindow::fill_at(double x_mm, double y_mm) {
     const core::Layer* layer = paint_layer();
     if (layer == nullptr) return;
-    Json op{{"op", "fill"}, {"page", current_page()->index.json()}, {"layer_id", layer->id}, {"x_mm", core::py_round(x_mm, 2)},
-            {"y_mm", core::py_round(y_mm, 2)}};
-    op.update(brush_->fill_fields());
-    op.update(paint_fields());
+    const core::Page* page = current_page();
+    Json op;
+    if (fill_basis_ != nullptr && fill_basis_->currentData().toString() == QLatin1String("color")) {
+        // (PC4 E4, 色の近さ: Photoshop's paint bucket — the area of colours near the one clicked, PC3 B1's {"color"})
+        Json nearness{{"x_mm", core::py_round(x_mm, 2)}, {"y_mm", core::py_round(y_mm, 2)}, {"tolerance", fill_tolerance_->value()},
+                      {"contiguous", fill_contiguous_->isChecked()}, {"antialias", fill_antialias_->isChecked()}};
+        if (!fill_all_layers_->isChecked()) nearness["layer"] = layer->id;
+        op = Json{{"op", "fill_area"}, {"page", page->index.json()}, {"layer_id", layer->id}, {"area", Json{{"color", nearness}}}};
+    } else {
+        op = Json{{"op", "fill"}, {"page", page->index.json()}, {"layer_id", layer->id}, {"x_mm", core::py_round(x_mm, 2)}, {"y_mm", core::py_round(y_mm, 2)}};
+        op.update(brush_->fill_fields());
+        // (a 描画色 of more than 8 bits on a page of 16 or 32 bits: its floats)
+        if (colours_ != nullptr && colours_->is_precise() && !page->color && page->rgb && page->rgb->depth != 8) {
+            op["color_rgb"] = colours_->foreground_json(page->rgb->depth == 32 ? "f32" : "u16");
+        }
+    }
+    op.update(fill_tool_fields(true));
+    if (op.contains("blend") && layer->kind == core::LayerKind::Raster && channel_view().target.empty() &&
+        !blend_bakes_ok(*page, *layer, QStringLiteral("塗りつぶしツール")))
+        return;
     apply_ops(Json::array({op}));
 }
 
@@ -346,7 +676,10 @@ void MainWindow::lasso_filled(const QVector<QPointF>& points) {
         const core::Layer* layer = paint_layer();
         if (layer == nullptr) return;
         Json op{{"op", "fill_area"}, {"page", current_page()->index.json()}, {"layer_id", layer->id}, {"area", Json{{"poly", pts}}}};
-        op.update(paint_fields());
+        op.update(fill_tool_fields(true));  // (PC4 E4: the page's モード and 不透明度)
+        if (op.contains("blend") && layer->kind == core::LayerKind::Raster && channel_view().target.empty() &&
+            !blend_bakes_ok(*current_page(), *layer, QStringLiteral("囲って塗る")))
+            return;
         apply_ops(Json::array({op}));
         return;
     }
@@ -356,7 +689,7 @@ void MainWindow::lasso_filled(const QVector<QPointF>& points) {
     if (mode == QLatin1String("enclosed")) {
         Json op{{"op", "fill_enclosed"}, {"page", page->index.json()}, {"layer_id", layer->id}, {"poly", pts}};
         op.update(brush_->fill_fields());
-        op.update(paint_fields());
+        op.update(fill_tool_fields(false));
         apply_ops(Json::array({op}));
         return;
     }
@@ -416,24 +749,78 @@ void MainWindow::shape_drawn(const Json& shape) {
 void MainWindow::gradient(const QPointF& from, const QPointF& to) {
     const core::Page* page = current_page();
     const core::Layer* layer = page != nullptr ? paint_layer() : nullptr;
-    if (page == nullptr || layer == nullptr) return;
-    const Json rgb = pen_.rgb;
-    const QString mode = gradient_mode_->currentData().toString();
+    if (page == nullptr || layer == nullptr || gradients_ == nullptr) return;
+    // (PC4 E4, tool:Gradient: the current gradient — its 描画色 and 背景色 now, a precise page's floats —, the 形, モード,
+    // 不透明度, 逆方向, ディザ and 透明部分; a paint layer's pixels take it, a pen layer a picture)
+    const bool precise = colours_ != nullptr && !page->color && page->rgb && page->rgb->depth != 8;
+    const std::string precision = page->rgb && page->rgb->depth == 32 ? "f32" : "u16";
+    const auto rgb_json = [](const std::array<int, 3>& c) { return Json::array({c[0], c[1], c[2]}); };
+    const Json fg = precise ? colours_->foreground_json(precision) : rgb_json(brush_->rgb());
+    const Json bg = precise ? colours_->background_json(precision)
+                            : rgb_json(colours_ != nullptr ? colours_->sub_rgb() : std::array<int, 3>{255, 255, 255});
+    const Json stops = render::gradient_presets::stops_for(gradients_->current(), fg, bg, gradient_transparency_->isChecked());
     Json op{{"op", "gradient_fill"}, {"page", page->index.json()}, {"layer_id", layer->id}, {"from", Json::array({from.x(), from.y()})},
-            {"to", Json::array({to.x(), to.y()})}};
-    if (mode == QLatin1String("white")) {
-        op["rgb_from"] = rgb;
-        op["rgb_to"] = Json::array({255, 255, 255});
-    } else if (mode == QLatin1String("bw")) {
-        op["rgb_from"] = Json::array({20, 20, 20});
-        op["rgb_to"] = Json::array({255, 255, 255});
-    } else {
-        op["rgb_from"] = rgb;
-        op["opacity_to"] = 0.0;
-        op["shape"] = mode == QLatin1String("radial") ? "radial" : "linear";
-    }
+            {"to", Json::array({to.x(), to.y()})}, {"stops", stops["stops"]}, {"shape", gradient_shape_->currentData().toString().toStdString()},
+            {"dither", gradient_dither_->isChecked()}};
+    if (stops.contains("transparency")) op["transparency"] = stops["transparency"];
+    if (gradient_reverse_->isChecked()) op["reverse"] = true;
+    if (gradient_blend_->currentData().toString() != QLatin1String("normal")) op["blend"] = gradient_blend_->currentData().toString().toStdString();
+    if (gradient_opacity_->value() < 100) op["opacity"] = gradient_opacity_->value() / 100.0;
     if (const auto area = selection_area()) op["area"] = *area;
+    // (a paint layer's lines and pictures become its pixels: asked once)
+    // (a channel, the Quick Mask or a layer mask drawn on: the layer's own lines are not touched)
+    if (layer->kind == core::LayerKind::Raster && channel_view().target.empty() && !blend_bakes_ok(*page, *layer, QStringLiteral("グラデーションツール"))) return;
     apply_ops(Json::array({op}));
+}
+
+void MainWindow::build_gradients_dock() {
+    if (gradients_ == nullptr) gradients_ = new GradientLibrary(this);
+    gradients_panel_ = new GradientsPanel(gradients_);
+    gradients_panel_->set_colours(brush_->rgb(), colours_ != nullptr ? colours_->sub_rgb() : std::array<int, 3>{255, 255, 255});
+    connect(gradients_panel_, &GradientsPanel::preset_chosen, this, [this](const Json& item) { gradient_chosen(item); });
+    connect(gradients_panel_, &GradientsPanel::apply_requested, this, [this](const Json& item) { gradient_layer(item); });
+    connect(gradients_panel_, &GradientsPanel::said, this, [this](const QString& words) { flash(words, 5000); });
+    auto* dock = new QDockWidget(QStringLiteral("グラデーション"), this);
+    dock->setObjectName(QStringLiteral("グラデーション"));
+    dock->setWidget(gradients_panel_);
+    dock->setMinimumWidth(200);
+    dock->setFeatures(QDockWidget::DockWidgetMovable | QDockWidget::DockWidgetFloatable | QDockWidget::DockWidgetClosable);
+    addDockWidget(Qt::RightDockWidgetArea, dock);
+    tabifyDockWidget(layers_dock_, dock);
+    dock->hide();  // (brought by ウィンドウ)
+    view_menu_->addAction(dock->toggleViewAction());
+}
+
+void MainWindow::gradient_chosen(const Json& item) {
+    if (gradients_ == nullptr) return;
+    gradients_->set_current(item);
+    // (Photoshop's: a gradient fill layer chosen takes the preset's colours, its direction and shape kept)
+    const core::Page* page = current_page();
+    const core::Layer* layer = page != nullptr ? target_layer() : nullptr;
+    if (layer == nullptr || layer->kind != core::LayerKind::Fill || !layer->fill || !layer->fill->contains("gradient") || layer->locked) return;
+    Json g = layer->fill->at("gradient");
+    const auto rgb_json = [](const std::array<int, 3>& c) { return Json::array({c[0], c[1], c[2]}); };
+    const Json stops = render::gradient_presets::stops_for(item, rgb_json(brush_->rgb()),
+                                                           rgb_json(colours_ != nullptr ? colours_->sub_rgb() : std::array<int, 3>{255, 255, 255}));
+    g["stops"] = stops["stops"];
+    if (stops.contains("transparency")) g["transparency"] = stops["transparency"];
+    else g.erase("transparency");
+    apply_ops(Json::array({Json{{"op", "set_layer"}, {"page", page->index.json()}, {"id", layer->id}, {"fill", Json{{"gradient", g}}}}}));
+}
+
+void MainWindow::gradient_layer(const Json& item) {
+    const core::Page* page = current_page();
+    if (page == nullptr) return;
+    const auto rgb_json = [](const std::array<int, 3>& c) { return Json::array({c[0], c[1], c[2]}); };
+    const Json stops = render::gradient_presets::stops_for(item, rgb_json(brush_->rgb()),
+                                                           rgb_json(colours_ != nullptr ? colours_->sub_rgb() : std::array<int, 3>{255, 255, 255}));
+    // (Photoshop's 90°: from the bottom of the page to its top, the first colour at the bottom)
+    const double w = page->spec.width_mm.value(), h = page->spec.height_mm.value();
+    Json g{{"from", Json::array({core::py_round(w / 2, 3), core::py_round(h, 3)})}, {"to", Json::array({core::py_round(w / 2, 3), 0.0})},
+           {"shape", "linear"}, {"stops", stops["stops"]}};
+    if (stops.contains("transparency")) g["transparency"] = stops["transparency"];
+    apply_ops(Json::array({Json{{"op", "add_layer"}, {"page", page->index.json()}, {"kind", "gradient"}, {"name", item.value("name", std::string("グラデーション"))},
+                                {"gradient", g}}}));
 }
 
 void MainWindow::fill_gaps() {

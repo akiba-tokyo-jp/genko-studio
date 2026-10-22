@@ -12,16 +12,25 @@
 #include <QMenu>
 #include <QMenuBar>
 #include <QSpinBox>
+#include <QStandardItemModel>
 #include <QToolBar>
+#include <QTreeWidget>
+#include <filesystem>
+#include <fstream>
 #include <QToolButton>
 #include "gui_support.hpp"
 #include "app/brush_panel.hpp"
 #include "app/canvas.hpp"
 #include "app/colours.hpp"
+#include "app/gradients_panel.hpp"
 #include "app/inject.hpp"
 #include "app/main_window.hpp"
 #include "core/json.hpp"
+#include "core/poses.hpp"
 #include "core/pynum.hpp"
+#include "render/gradient_presets.hpp"
+#include "render/grd.hpp"
+#include "render/preset_store.hpp"
 using namespace genko;
 using core::Json;
 namespace inject = genko::app::inject;
@@ -103,8 +112,9 @@ private slots:
         Studio s;
         const std::vector<Expected> expected = {
             // (PC4 E-0, the user's decision 2: the drawing tools and the colours by Photoshop's names)
-            {"act_picker", "スポイトツール", "I", "クリックした所の色を描画色にします", true},
-            {"act_fill", "塗りつぶしツール", "G", "線で囲まれた所をクリックで塗ります（隙間閉じ・見る範囲はブラシ パネルで）", true},
+            // (PC4 E4: the スポイトツール's Alt+click, the 塗りつぶしツール's 基準 — their settings on their own pages)
+            {"act_picker", "スポイトツール", "I", "クリックした所の色を描画色にします（Alt＋クリックで背景色）", true},
+            {"act_fill", "塗りつぶしツール", "G", "クリックした所を塗ります（基準は 線で囲まれた所・色の近さ。ツールの設定で）", true},
             {"act_lassofill", "囲って塗る", "Shift+G", "ドラッグで囲んだ所を塗ります", true},
             {"act_gradient", "グラデーションツール", "U", "ドラッグの向きに色をなめらかに変えて塗る（選択範囲があればその中だけ）", true},
             // (PC3 C-b, the user's decisions 5 and 7: the 図形 is the shape tools' 長方形ツール — test_gui_shapes)
@@ -225,35 +235,295 @@ private slots:
         QVERIFY(op.contains("area"));
     }
 
+    // PC4 E4 (tool:Gradient, Photoshop's options bar): the current gradient (描画色から背景色へ at first; a preset of the list) with
+    // the 描画色 and 背景色 now, 形, 逆方向, 不透明度, モード, ディザ, 透明部分; a paint layer's pixels take it (no picture laid on
+    // it), undone as one step; in a selection only; too short a drag nothing
     void gradientFromTheDrag() {
         Studio s;
         s.brush().set_colour({200, 100, 0});
+        s.colours().set_background({0, 0, 255});
         s.window->choose_tool(QStringLiteral("gradient"));
-        auto* mode = s.window->findChild<QComboBox*>(QStringLiteral("gradient_mode"));
-        QVERIFY(mode != nullptr);
+        auto* preset = s.window->findChild<QComboBox*>(QStringLiteral("gradient_preset"));
+        auto* shape = s.window->findChild<QComboBox*>(QStringLiteral("gradient_shape"));
+        auto* blend = s.window->findChild<QComboBox*>(QStringLiteral("gradient_blend"));
+        auto* opacity = s.window->findChild<QSpinBox*>(QStringLiteral("gradient_opacity"));
+        auto* reverse = s.window->findChild<QCheckBox*>(QStringLiteral("gradient_reverse"));
+        auto* dither = s.window->findChild<QCheckBox*>(QStringLiteral("gradient_dither"));
+        auto* transparency = s.window->findChild<QCheckBox*>(QStringLiteral("gradient_transparency"));
+        QVERIFY(preset && shape && blend && opacity && reverse && dither && transparency);
+        QCOMPARE(s.window->tool_settings()->current_page(), s.window->tool_settings()->page_for(QStringLiteral("gradient")));
+        QCOMPARE(preset->itemText(0), QStringLiteral("描画色から背景色へ"));
+        QCOMPARE(shape->currentData().toString(), QStringLiteral("linear"));
+        QVERIFY(dither->isChecked() && transparency->isChecked() && !reverse->isChecked());
+        QStringList shapes;
+        for (int i = 0; i < shape->count(); ++i) shapes << shape->itemText(i);
+        QCOMPARE(shapes, (QStringList{QStringLiteral("線形"), QStringLiteral("円形"), QStringLiteral("円錐形"), QStringLiteral("反射形"),
+                                      QStringLiteral("菱形"), QStringLiteral("楕円")}));
+        const auto layer_p = [&s]() -> const core::Layer& {
+            const core::Page& page = s.session->document().page(0);
+            return *std::find_if(page.layers.begin(), page.layers.end(), [](const core::Layer& l) { return l.id == "p"; });
+        };
+        const auto png_before = layer_p().raster_png;
         inject::mouse_stroke(s.canvas(), {QPointF(20, 30), QPointF(50, 31), QPointF(80, 30)});
         Json op = s.last();
         QCOMPARE(op["op"], Json("gradient_fill"));
         QVERIFY(close2(op["from"], 20, 30) && close2(op["to"], 80, 30));
-        QCOMPARE(op["rgb_from"], Json::array({200, 100, 0}));
-        QCOMPARE(op["opacity_to"], Json(0.0));
+        QCOMPARE(op["stops"], Json::parse("[[0.0, [200, 100, 0], 1.0], [1.0, [0, 0, 255], 1.0]]"));
         QCOMPARE(op["shape"], Json("linear"));
-        mode->setCurrentIndex(mode->findData(QStringLiteral("bw")));
-        inject::mouse_stroke(s.canvas(), {QPointF(20, 30), QPointF(80, 90)});
-        op = s.last();
-        QCOMPARE(op["rgb_from"], Json::array({20, 20, 20}));
-        QCOMPARE(op["rgb_to"], Json::array({255, 255, 255}));
-        mode->setCurrentIndex(mode->findData(QStringLiteral("radial")));
+        QCOMPARE(op["dither"], Json(true));
+        QVERIFY(!op.contains("transparency") && !op.contains("reverse") && !op.contains("blend") && !op.contains("opacity"));
+        QVERIFY(layer_p().patches.empty());  // (the paint layer's pixels: no picture laid on it)
+        QVERIFY(layer_p().raster_png && !layer_p().raster_png->empty() && layer_p().raster_png != png_before);
+        s.trigger("act_undo");
+        QVERIFY(layer_p().raster_png == png_before || (layer_p().raster_png && png_before && *layer_p().raster_png == *png_before));
+        // 描画色から透明に: its transparency; 逆方向, 不透明度, モード and 円形, in a selection
+        const int fading = preset->findText(QStringLiteral("基本 / 描画色から透明に"));
+        QVERIFY(fading > 0);
+        preset->setCurrentIndex(fading);
+        emit preset->activated(fading);
+        QCOMPARE(preset->itemText(0), QStringLiteral("描画色から透明に"));
+        reverse->setChecked(true);
+        opacity->setValue(50);
+        blend->setCurrentIndex(blend->findData(QStringLiteral("multiply")));
+        emit blend->activated(blend->currentIndex());
+        shape->setCurrentIndex(shape->findData(QStringLiteral("radial")));
+        emit shape->activated(shape->currentIndex());
         s.trigger("act_select_all");
         s.window->choose_tool(QStringLiteral("gradient"));
         inject::mouse_stroke(s.canvas(), {QPointF(50, 50), QPointF(70, 50)});
         op = s.last();
         QCOMPARE(op["shape"], Json("radial"));
+        QCOMPARE(op["stops"], Json::parse("[[0.0, [200, 100, 0], 1.0], [1.0, [200, 100, 0], 1.0]]"));
+        QCOMPARE(op["transparency"], Json::parse("[[0.0, 1.0], [1.0, 0.0]]"));
+        QCOMPARE(op["reverse"], Json(true));
+        QCOMPARE(op["opacity"], Json(0.5));
+        QCOMPARE(op["blend"], Json("multiply"));
         QVERIFY(op.contains("area"));  // (only in the selection)
+        // 透明部分 off: opaque; ディザ off
+        transparency->setChecked(false);
+        dither->setChecked(false);
+        inject::mouse_stroke(s.canvas(), {QPointF(50, 50), QPointF(70, 50)});
+        op = s.last();
+        QVERIFY(!op.contains("transparency"));
+        QCOMPARE(op["dither"], Json(false));
         // too short a drag paints nothing
         const std::size_t before = s.ops.size();
         inject::mouse_stroke(s.canvas(), {QPointF(50, 50), QPointF(50.2, 50.1)});
         QCOMPARE(s.ops.size(), before);
+        // (the settings as they were, for the tests after)
+        for (QCheckBox* box : {reverse, transparency, dither}) box->setChecked(box != reverse);
+        opacity->setValue(100);
+        for (QComboBox* box : {blend, shape}) {
+            box->setCurrentIndex(0);
+            emit box->activated(0);
+        }
+        const int first = preset->findText(QStringLiteral("基本 / 描画色から背景色へ"));
+        preset->setCurrentIndex(first);
+        emit preset->activated(first);
+        s.colours().set_background({255, 255, 255});
+    }
+
+    // PC4 E4 (paint.bucket, tool:PaintBucket): the 塗りつぶしツール's own page — 基準, 塗りつぶし (パターン grey until the patterns
+    // are in), モード, 不透明度, 色の近さ's 許容値・アンチエイリアス・隣接・全レイヤー, and the lines' fields of before — also
+    // 囲って塗る's; 色の近さ a fill_area of the colour's area; a モード and 不透明度 sent; a 描画色 of more than 8 bits on a page of
+    // 16 bits its floats.
+    void fillTheToolsWays() {
+        Studio s;
+        s.window->choose_tool(QStringLiteral("fill"));
+        auto* basis = s.window->findChild<QComboBox*>(QStringLiteral("fill_basis"));
+        auto* source = s.window->findChild<QComboBox*>(QStringLiteral("fill_source"));
+        auto* blend = s.window->findChild<QComboBox*>(QStringLiteral("fill_blend"));
+        auto* opacity = s.window->findChild<QSpinBox*>(QStringLiteral("fill_opacity"));
+        auto* tolerance = s.window->findChild<QSpinBox*>(QStringLiteral("fill_tolerance"));
+        auto* contiguous = s.window->findChild<QCheckBox*>(QStringLiteral("fill_contiguous"));
+        auto* all_layers = s.window->findChild<QCheckBox*>(QStringLiteral("fill_all_layers"));
+        auto* antialias = s.window->findChild<QCheckBox*>(QStringLiteral("fill_antialias"));
+        QVERIFY(basis && source && blend && opacity && tolerance && contiguous && all_layers && antialias);
+        QWidget* page = s.window->tool_settings()->current_page();
+        QCOMPARE(page, s.window->tool_settings()->page_for(QStringLiteral("fill")));
+        QCOMPARE(s.window->tool_settings()->page_for(QStringLiteral("lassofill")), page);
+        QVERIFY(page->isAncestorOf(s.brush().gap) && page->isAncestorOf(s.brush().lasso_mode));
+        QVERIFY(!s.brush().isAncestorOf(s.brush().gap));  // (no longer under the brush's settings)
+        QCOMPARE(s.window->tool_settings()->page_for(QStringLiteral("pen")), static_cast<QWidget*>(&s.brush()));
+        auto* model = qobject_cast<QStandardItemModel*>(source->model());
+        QVERIFY(model != nullptr && !model->item(1)->isEnabled());
+        QCOMPARE(source->currentData().toString(), QStringLiteral("foreground"));
+        QCOMPARE(basis->currentData().toString(), QStringLiteral("lines"));
+        QCOMPARE(tolerance->value(), 32);
+        QVERIFY(contiguous->isChecked() && antialias->isChecked() && !all_layers->isChecked());
+        // モード and 不透明度, 線で囲まれた所: fill with them (the paint layer's pixels; the layer holds no lines or pictures yet: not
+        // asked)
+        blend->setCurrentIndex(blend->findData(QStringLiteral("multiply")));
+        emit blend->activated(blend->currentIndex());
+        opacity->setValue(60);
+        s.brush().set_colour({10, 200, 30});
+        inject::click_mm(s.canvas(), QPointF(40, 50));
+        Json op = s.last();
+        QCOMPARE(op["op"], Json("fill"));
+        QCOMPARE(op["blend"], Json("multiply"));
+        QCOMPARE(op["opacity"], Json(0.6));
+        QCOMPARE(op["rgb"], Json::array({10, 200, 30}));
+        QVERIFY(!op.contains("color_rgb"));
+        QVERIFY(s.session->document().page(0).layers.back().patches.empty());
+        blend->setCurrentIndex(0);
+        emit blend->activated(0);
+        opacity->setValue(100);
+        // 色の近さ: a fill_area of the colour's area, the colour the 描画色
+        basis->setCurrentIndex(basis->findData(QStringLiteral("color")));
+        emit basis->activated(basis->currentIndex());
+        tolerance->setValue(40);
+        const std::size_t patches = s.session->document().page(0).layers.back().patches.size();
+        inject::click_mm(s.canvas(), QPointF(40, 50));
+        op = s.last();
+        QCOMPARE(op["op"], Json("fill_area"));
+        QCOMPARE(op["rgb"], Json::array({10, 200, 30}));
+        QCOMPARE(s.session->document().page(0).layers.back().patches.size(), patches + 1);
+        basis->setCurrentIndex(basis->findData(QStringLiteral("lines")));
+        emit basis->activated(basis->currentIndex());
+        // a precise 描画色 on a page of 16 bits: its floats
+        QVERIFY(s.window->apply_ops(Json::array({Json{{"op", "set_color_mode"}, {"page", 1}, {"mode", "rgb"}, {"depth", 16}}})));
+        s.colours().choose_precise({0.3, 0.6, 0.15});
+        inject::click_mm(s.canvas(), QPointF(40, 50));
+        op = s.last();
+        QCOMPARE(op["op"], Json("fill"));
+        QCOMPARE(op["color_rgb"]["precision"], Json("u16"));
+        QCOMPARE(op["color_rgb"]["values"][0].get<double>(), std::round(0.3 * 65535) / 65535);
+        // (the settings as they were)
+        tolerance->setValue(32);
+    }
+
+    // PC4 E4 (tool:Eyedropper): サンプル範囲 (an average of the pixels around), サンプル 現在のレイヤー以下 (the layers above left
+    // out), Alt+click the 背景色 (the 描画色 as it was), a page of 16 bits' floats
+    void eyedropperSamplesAndBackground() {
+        Studio s;
+        s.window->choose_tool(QStringLiteral("picker"));
+        QWidget* page = s.window->tool_settings()->current_page();
+        QCOMPARE(page, s.window->tool_settings()->page_for(QStringLiteral("picker")));
+        auto* size = s.window->findChild<QComboBox*>(QStringLiteral("picker_size"));
+        QVERIFY(size != nullptr && page->isAncestorOf(size) && page->isAncestorOf(s.colours().pick_source));
+        QCOMPARE(size->count(), 7);
+        // red on the left of x 50, blue on its right, a green layer above at the bottom
+        QVERIFY(s.window->apply_ops(Json::array({
+            Json{{"op", "fill_area"}, {"page", 1}, {"layer_id", "p"}, {"rgb", Json::array({255, 0, 0})}, {"area", Json{{"poly", Json::parse("[[0, 0], [50, 0], [50, 160], [0, 160]]")}}}},
+            Json{{"op", "fill_area"}, {"page", 1}, {"layer_id", "p"}, {"rgb", Json::array({0, 0, 255})}, {"area", Json{{"poly", Json::parse("[[50, 0], [120, 0], [120, 160], [50, 160]]")}}}},
+            Json{{"op", "add_layer"}, {"page", 1}, {"kind", "paint"}, {"id", "q"}},
+            Json{{"op", "fill_area"}, {"page", 1}, {"layer_id", "q"}, {"rgb", Json::array({0, 255, 0})}, {"area", Json{{"poly", Json::parse("[[0, 100], [120, 100], [120, 160], [0, 160]]")}}}}})));
+        QVERIFY(s.canvas()->wait_rendered(20000));
+        s.window->set_target_layer("p");
+        s.window->choose_tool(QStringLiteral("picker"));
+        inject::click_mm(s.canvas(), QPointF(40, 40));
+        QCOMPARE(s.brush().rgb(), (app::Rgb{255, 0, 0}));
+        // Alt+click: the 背景色 (the green layer on top there)
+        inject::click_mm(s.canvas(), QPointF(90, 120), Qt::AltModifier);
+        QCOMPARE(s.colours().sub_rgb(), (app::Rgb{0, 255, 0}));
+        QCOMPARE(s.brush().rgb(), (app::Rgb{255, 0, 0}));
+        QVERIFY(s.window->last_notice().startsWith(QStringLiteral("背景色を拾いました")));
+        // 11×11 of the layer on its edge: both colours in it
+        s.colours().pick_source->setCurrentIndex(1);
+        emit s.colours().pick_source->activated(1);
+        size->setCurrentIndex(size->findData(11));
+        emit size->activated(size->currentIndex());
+        inject::click_mm(s.canvas(), QPointF(50, 40));
+        const app::Rgb mixed = s.brush().rgb();
+        QVERIFY2(mixed[0] > 60 && mixed[2] > 60 && mixed[1] < 10, qPrintable(QStringLiteral("%1 %2 %3").arg(mixed[0]).arg(mixed[1]).arg(mixed[2])));
+        size->setCurrentIndex(0);
+        emit size->activated(0);
+        // 現在のレイヤー以下: the green layer above left out; すべてのレイヤー: green
+        s.colours().pick_source->setCurrentIndex(2);
+        emit s.colours().pick_source->activated(2);
+        inject::click_mm(s.canvas(), QPointF(90, 120));
+        QCOMPARE(s.brush().rgb(), (app::Rgb{0, 0, 255}));
+        s.colours().pick_source->setCurrentIndex(0);
+        emit s.colours().pick_source->activated(0);
+        inject::click_mm(s.canvas(), QPointF(90, 120));
+        QCOMPARE(s.brush().rgb(), (app::Rgb{0, 255, 0}));
+        // a page of 16 bits: the floats there
+        QVERIFY(s.window->apply_ops(Json::array({Json{{"op", "set_color_mode"}, {"page", 1}, {"mode", "rgb"}, {"depth", 16}},
+                                                  Json{{"op", "fill"}, {"page", 1}, {"layer_id", "q"}, {"x_mm", 90}, {"y_mm", 120}, {"rgb", Json::array({77, 153, 38})},
+                                                       {"color_rgb", Json{{"precision", "u16"}, {"values", Json::array({0.3, 0.6, 0.15})}}}}})));
+        QVERIFY(s.canvas()->wait_rendered(20000));
+        inject::click_mm(s.canvas(), QPointF(90, 120));
+        QVERIFY(s.colours().is_precise());
+        QVERIFY2(std::abs(s.colours().foreground()[0] - 0.3) < 2e-4 && std::abs(s.colours().foreground()[2] - 0.15) < 2e-4,
+                 qPrintable(QString::number(s.colours().foreground()[0], 'g', 9)));
+        inject::click_mm(s.canvas(), QPointF(90, 120), Qt::AltModifier);
+        QVERIFY(std::abs(s.colours().background()[1] - 0.6) < 2e-4);
+        s.colours().set_background({255, 255, 255});
+    }
+
+    // PC4 E4 (window.panel.gradients, gradient.presets.*): the グラデーション panel in ウィンドウ — a preset clicked is the current
+    // gradient (and recolours a gradient fill layer chosen), a new one from it, renamed, deleted, a group made, a .grd read,
+    // 新規グラデーション塗りつぶしレイヤー; kept in the settings folder's gradients.json; its name apart from the tool's old one.
+    void theGradientsPanel() {
+        const auto file = core::poses::config_dir() / "gradients.json";
+        std::filesystem::remove(file);
+        Studio s;
+        QDockWidget* dock = nullptr;
+        for (QDockWidget* d : s.window->findChildren<QDockWidget*>())
+            if (d->windowTitle() == QStringLiteral("グラデーション")) dock = d;
+        QVERIFY(dock != nullptr && !dock->isVisible());
+        QVERIFY(s.menus_of(dock->toggleViewAction()).contains(QStringLiteral("ウィンドウ")));
+        auto* panel = s.window->findChild<app::GradientsPanel*>();
+        QVERIFY(panel != nullptr);
+        QCOMPARE(panel->tree->topLevelItemCount(), 9);
+        QCOMPARE(panel->tree->topLevelItem(0)->text(0), QStringLiteral("基本"));
+        // a preset clicked: the current gradient
+        QTreeWidgetItem* black_white = panel->tree->topLevelItem(0)->child(2);
+        QCOMPARE(black_white->text(0), QStringLiteral("黒、白"));
+        panel->tree->setCurrentItem(black_white);
+        emit panel->tree->itemClicked(black_white, 0);
+        auto* preset = s.window->findChild<QComboBox*>(QStringLiteral("gradient_preset"));
+        QCOMPARE(preset->itemText(0), QStringLiteral("黒、白"));
+        // a new preset of it, renamed, a group, deleted — written to gradients.json
+        panel->new_group(QStringLiteral("自分の"));
+        panel->tree->setCurrentItem(panel->tree->topLevelItem(9));
+        panel->new_preset(QStringLiteral("白黒"));
+        QVERIFY(std::filesystem::exists(file));
+        QCOMPARE(panel->tree->topLevelItem(9)->childCount(), 1);
+        panel->tree->setCurrentItem(panel->tree->topLevelItem(9)->child(0));
+        panel->rename_chosen(QStringLiteral("モノクロ"));
+        QCOMPARE(panel->tree->topLevelItem(9)->child(0)->text(0), QStringLiteral("モノクロ"));
+        const render::preset_store::Library kept = render::preset_store::load(core::poses::config_dir(), render::gradient_presets::kind());
+        QVERIFY(render::preset_store::find(kept.groups, "モノクロ") != nullptr);
+        panel->tree->setCurrentItem(panel->tree->topLevelItem(9)->child(0));
+        panel->delete_chosen();
+        QCOMPARE(panel->tree->topLevelItem(9)->childCount(), 0);
+        // a .grd read: a group of the file's name
+        QTemporaryDir tmp;
+        render::grd::Gradient g;
+        g.name = "夕焼け";
+        g.stops = {{0.0, 0.5, render::grd::Colour{render::grd::Colour::Kind::Rgb, {1, 0.5, 0, 0}}}, {1.0, 0.5, render::grd::Colour{render::grd::Colour::Kind::Background, {}}}};
+        const QString grd_file = tmp.path() + QStringLiteral("/空.grd");
+        {
+            std::ofstream out(grd_file.toStdString(), std::ios::binary);
+            out << render::grd::write({g});
+        }
+        panel->import_grd(grd_file);
+        QCOMPARE(panel->tree->topLevelItem(panel->tree->topLevelItemCount() - 1)->text(0), QStringLiteral("空"));
+        QVERIFY(s.window->last_notice().contains(QStringLiteral("1 個")));
+        // 新規グラデーション塗りつぶしレイヤー: a gradient fill layer of the preset; a preset clicked with it chosen recolours it
+        const std::size_t layers = s.session->document().page(0).layers.size();
+        panel->tree->setCurrentItem(black_white = panel->tree->topLevelItem(0)->child(2));
+        emit panel->apply->clicked();
+        QCOMPARE(s.session->document().page(0).layers.size(), layers + 1);
+        Json op = s.last();
+        QCOMPARE(op["op"], Json("add_layer"));
+        QCOMPARE(op["kind"], Json("gradient"));
+        QCOMPARE(op["gradient"]["stops"], Json::parse("[[0.0, [0, 0, 0], 1.0], [1.0, [255, 255, 255], 1.0]]"));
+        const auto fill_layer = [&s]() -> const core::Layer& {
+            const core::Page& page = s.session->document().page(0);
+            return *std::find_if(page.layers.begin(), page.layers.end(), [](const core::Layer& l) { return l.kind == core::LayerKind::Fill; });
+        };
+        const std::string made = fill_layer().id;
+        s.window->set_target_layer(made);
+        QTreeWidgetItem* fading = panel->tree->topLevelItem(0)->child(1);
+        panel->tree->setCurrentItem(fading);
+        emit panel->tree->itemClicked(fading, 0);
+        op = s.last();
+        QCOMPARE(op["op"], Json("set_layer"));
+        QCOMPARE(op["fill"]["gradient"]["transparency"], Json::parse("[[0.0, 1.0], [1.0, 0.0]]"));
+        QCOMPARE(fill_layer().fill->at("gradient").at("transparency"), Json::parse("[[0.0, 1.0], [1.0, 0.0]]"));
+        std::filesystem::remove(file);
     }
 
     void figuresDrawnAsPythonsCanvasDrawsThem() {
@@ -585,7 +855,7 @@ private slots:
         }
         QCOMPARE(tools->actions().count(s.window->action(QStringLiteral("act_magic_eraser"))), 1);
         // the panels' frames
-        for (const char* title : {"ブラシ設定", "ブラシ", "パターン", "スタイル", "ツールプリセット"}) {
+        for (const char* title : {"ブラシ設定", "ブラシ", "パターン", "スタイル", "ツールプリセット", "グラデーション"}) {
             QDockWidget* dock = nullptr;
             for (QDockWidget* d : s.window->findChildren<QDockWidget*>())
                 if (d->windowTitle() == QString::fromUtf8(title)) dock = d;

@@ -883,6 +883,7 @@ void MainWindow::refresh_status() {
     if (colours_ != nullptr) {  // (color-model@1, PC1d: an indexed page's table)
         const core::Page* page = current_page();
         colours_->set_color_table(page != nullptr && !page->color && page->rgb ? page->rgb->table : std::nullopt);
+        colours_->set_precise_depth(page != nullptr && !page->color && page->rgb ? page->rgb->depth : 8);  // (PC4 E4: 高精度)
     }
     refresh_first_steps();
     maybe_backup();  // (after a save: バックアップ, when chosen in 環境設定)
