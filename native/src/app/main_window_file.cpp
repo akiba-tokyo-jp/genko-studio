@@ -23,7 +23,7 @@ void MainWindow::build_file_actions() {
     later("act_close_others", QStringLiteral("その他を閉じる"), key("Ctrl+Alt+P"), QStringLiteral("この原稿のほかの原稿を閉じます"));
     later("act_save_copy", QStringLiteral("コピーを保存…"), key("Ctrl+Alt+S"),
           QStringLiteral("原稿はそのままに、別のファイル（.genko・PSD・TIFF・PNG・JPEG など）に書きます"));
-    later("act_revert", QStringLiteral("復帰"), key("F12"), QStringLiteral("最後に保存したとき（無ければ開いたとき）の状態に戻します。元に戻すで取り消せます"));
+    later("act_revert", QStringLiteral("復帰"), key("F12"), QStringLiteral("最後に保存したとき（無ければ開いたとき）の状態に戻します（取り消せます）"));
     later("act_quick_export_png", QStringLiteral("PNG としてクイック書き出し"), {}, QStringLiteral("このページを、書き出しの環境設定のとおり PNG に書き出します"));
     later("act_export_as", QStringLiteral("書き出し形式…"), key("Ctrl+Alt+Shift+W"),
           QStringLiteral("このページを、形式・大きさ・画質を選んで 1 枚の画像に書き出します"));
