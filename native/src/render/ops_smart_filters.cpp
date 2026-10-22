@@ -139,6 +139,8 @@ void set(OpContext& c) {
         lay_over(merged, *params);
         // (PC4 D2: a filter's file — 置き換え's map given as data or a layer — made the book's first: design 2.6)
         merged = keep_filter_files(doc, doc.page(at), core::py_str(f["kind"]), std::move(merged));
+        // (PC4 D6: レンズ補正's and 広角補正's focal length from the smart object's picture's EXIF, kept as resolved)
+        merged = resolve_filter(doc, doc.page(at), &doc.page(at).layers[i], core::py_str(f["kind"]), std::move(merged));
         keep_params(doc, doc.page(at), doc.page(at).layers[i], f, settled(doc, doc.page(at), core::py_str(f["kind"]), merged));
         changed = true;
     }

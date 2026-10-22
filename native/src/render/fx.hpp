@@ -138,6 +138,9 @@ struct Ctx {
     // preview, PlaceScope —; `bounds` is then that part's own coordinates, past its edges): a kernel that draws marks by the
     // grid's coordinates adds it.
     int x0 = 0, y0 = 0;
+    // (D6) A page of inks' colour mode (none: not a page of inks): a colour a kind lays of its own (レンズ補正's edge) goes
+    // onto the plates by the page's rules (render/ink inks_by_rules).
+    const core::PageColor* ink = nullptr;
 };
 
 // How far outside an output tile a kernel reads (upstream's Halo): a margin of pixels, or the whole base box.
@@ -167,6 +170,10 @@ struct Kernel {
     // (D2) The work done once whatever the layer's pixels (置き換え's map read or drawn — a page drawn, a file decoded), in
     // the units of work(): added to its weight. None: nothing.
     std::function<double(const core::Json& params)> setup;
+    // (D6) Its base box is the frame of the picture — the box of what shows on the layer (a photo placed on the page, a smart
+    // object's picture), a part worked alone its PlaceScope's —, not the selection's box: a selection only keeps the result
+    // to it (レンズ補正, 広角補正: their centre is the lens's). Nothing shows: nothing changes.
+    bool shown_frame = false;
 };
 using Kernels = std::vector<Kernel>;
 inline constexpr double kDefaultCost = 50;
@@ -186,7 +193,7 @@ Kernels gallery_kernels();       // D3
 Kernels render_kernels();        // D4
 Kernels blur_gallery_kernels();  // D4
 Kernels camera_raw_kernels();    // D5
-Kernels lens_kernels();          // D6
+Kernels lens_kernels();          // render/fx_lens.cpp — D6: lens_correction, adaptive_wide_angle
 const Kernels& kernels();
 const Kernel* kernel(std::string_view kind);
 
@@ -295,6 +302,9 @@ public:
     ProgressScope(const ProgressScope&) = delete;
     ProgressScope& operator=(const ProgressScope&) = delete;
 
+    // (D6) How far a run on this thread is (0..1) — an op that is not a kind's run (消点) says it so —; none: nowhere.
+    static void put(double done);
+
 private:
     std::atomic<double>* before_;
 };
@@ -318,6 +328,22 @@ private:
     const PlaceScope* before_;
     int x_, y_;
     Rect bounds_;
+};
+
+// (D6) While it lives, what a kind resolves as it runs on this thread — レンズ補正's 自動拡大・縮小, 広角補正's model, focal
+// length and how straight its lines came out — is put into `into` by its key (filter_raster's report, render/ops_filters;
+// a kind puts it from its `once`, on the thread that runs it).
+class NoteScope {
+public:
+    explicit NoteScope(core::Json& into);
+    ~NoteScope();
+    NoteScope(const NoteScope&) = delete;
+    NoteScope& operator=(const NoteScope&) = delete;
+    // Put on the scope living on this thread (none: nowhere).
+    static void put(std::string_view key, core::Json value);
+
+private:
+    core::Json* before_;
 };
 
 // How much work a kind is on a grid of `pixels` at scale `s` (its cost a pixel — on samples of `levels`, Ctx::levels: a

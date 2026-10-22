@@ -584,6 +584,47 @@ const std::vector<Rule>& rules() {
                          "置き換えマップのレイヤー（\\1）はフォルダーか色調補正レイヤーで、絵がありません"));
         r.push_back(rule(R"(the displacement map \S+ is not in the book)", "置き換えマップのファイルがこの原稿にありません"));
         r.push_back(rule(R"(adjust distort_shear\.points must be .*)", "シアーの曲線は、2〜64 個の点 [上からの位置 0〜1, ずらす量 −1〜1] で指定します"));
+        // (D6: レンズ補正・広角補正's settings, core/filter_kinds; 消点's planes and op, core/vanishing, render/vanishing)
+        r.push_back(rule(R"(adjust lens_correction\.straighten must be .*)", "レンズ補正の角度補正の線は、離れた 2 点 [[x, y], [x, y]]（mm）で指定します"));
+        r.push_back(rule(R"(lens_correction: the profile auto needs the focal length.*)",
+                         "レンズ補正のプロファイル「自動」には焦点距離が要ります（画像の EXIF に無いときは、焦点距離を入れます）"));
+        r.push_back(rule(R"(adjust adaptive_wide_angle\.constraints must be .*)",
+                         "広角補正の拘束線は 64 本まで、{a: [x, y], b: [x, y]（mm）, orientation: free・horizontal・vertical} で指定します"));
+        r.push_back(rule(R"(vanishing\.planes must be .*)", "消点の面は 1〜32 面です（最初の面は 4 隅 corners_mm、後の面は 4 隅か from・edge・angle・depth）"));
+        r.push_back(rule(R"(vanishing\.planes\[0\] needs its four corners.*)", "消点の最初の面には 4 隅（corners_mm）が要ります"));
+        r.push_back(rule(R"(vanishing\.planes\[\d+\]\.corners_mm must be .*)", "消点の面の 4 隅は、凸の四角形の 4 つの点 [x, y]（mm）です"));
+        r.push_back(rule(R"(vanishing\.planes\[\d+\]\.from must be .*)", "消点の面の from は、それより前の面の番号です"));
+        r.push_back(rule(R"(vanishing\.planes\[\d+\]\.edge must be .*)", "消点の面の edge は top・right・bottom・left のどれかです"));
+        r.push_back(rule(R"(vanishing\.planes\[\d+\]\.(?:angle|depth) must be .*)", "消点の面の角度と奥行きは数で指定します"));
+        r.push_back(rule(R"(vanishing\.planes\[\d+\] has its corners or is torn off.*)", "消点の面は、4 隅か、前の面からの継ぎ足し（from）のどちらかで指定します"));
+        r.push_back(rule(R"(vanishing\.planes\[\d+\] has no setting '(.*)'.*)", "消点の面に「\\1」という設定はありません"));
+        r.push_back(rule(R"(vanishing\.planes\[\d+\] must be .*)", "消点の面の書き方が違います"));
+        r.push_back(rule(R"(vanishing\.focal_mm must be .*)", "消点の焦点距離は、0 より大きい長さ（mm）です"));
+        r.push_back(rule(R"(vanishing has no setting '(.*)'.*)", "消点の面の指定に「\\1」という設定はありません（planes・focal_mm）"));
+        r.push_back(rule(R"(vanishing must be .*)", "消点の面の書き方が違います（{planes, focal_mm}）"));
+        r.push_back(rule(R"(vanishing_point: the plane (\d+) would lie behind the camera)", "消点の面 \\1 がカメラの後ろに回ってしまいます（角度・奥行きを変えます）"));
+        r.push_back(rule(R"(vanishing_point: the plane (\d+) is degenerate)", "消点の面 \\1 がつぶれています"));
+        r.push_back(rule(R"(vanishing_point: the plane (\d+) reaches too far.*)", "消点の面 \\1 が遠くへ伸びすぎます（角度・奥行きを変えます）"));
+        r.push_back(rule(R"(vanishing_point: the page has no planes yet.*)", "このページには消点の面がまだありません（面を作ってから使います）"));
+        r.push_back(rule(R"(vanishing_point: no planes to paste or stamp on.*)", "消点の面をすべて消すときは、貼り付けもスタンプもできません"));
+        r.push_back(rule(R"(vanishing_point: (\d+) dabs reached toward the horizon.*)",
+                         "消点のスタンプの跡のうち \\1 個は、地平線に近く大きくなりすぎるため描きませんでした"));
+        r.push_back(rule(R"(vanishing_point needs the paint layer it lays on.*)", "消点で描くペイントのレイヤーを選ぶか、新しいレイヤーにします"));
+        r.push_back(rule(R"(vanishing_point has no setting '(.*)'.*)", "消点に「\\1」という設定はありません"));
+        r.push_back(rule(R"(vanishing_point has no kind.*)", "消点の種類の指定が違います"));
+        r.push_back(rule(R"(paste must be a list of at most (\d+) .*)", "消点で貼り付ける絵は \\1 個までです"));
+        r.push_back(rule(R"(paste\[\d+\]\.data .*)", "消点で貼り付ける絵のデータが読めません（PNG のファイル、32 MiB まで）"));
+        r.push_back(rule(R"(paste\[\d+\]\.layer: no layer (\S+) on the page)", "消点で貼り付けるレイヤー（\\1）がそのページにありません"));
+        r.push_back(rule(R"(paste\[\d+\]\.plane must be .*)", "消点で貼り付ける面の番号が違います"));
+        r.push_back(rule(R"(paste\[\d+\]\.at must be .*)", "消点で貼り付ける位置（at）は、面の上の [u, v]（数 2 つ）です"));
+        r.push_back(rule(R"(paste\[\d+\]\.width must be .*)", "消点で貼り付ける幅（width）は、面の幅に対する割合の数（0.01〜10）です"));
+        r.push_back(rule(R"(paste\[\d+\] .*)", "消点で貼り付ける絵の指定が違います（{plane, layer か data, at: [u, v], width}）"));
+        r.push_back(rule(R"(clone must be a list of at most (\d+) .*)", "消点のスタンプは \\1 本までです"));
+        r.push_back(rule(R"(clone\[\d+\]\.(?:source|points) must lie near the page.*)",
+                         "消点のスタンプの点とコピー元は、ページとその周り（ページの幅と高さの分）に置きます"));
+        r.push_back(rule(R"(clone\[\d+\].*)", "消点のスタンプの指定が違います（{source: [x, y], points: [[x, y]…]（mm）, size_px, hardness, opacity}）"));
+        r.push_back(rule(R"(a stroke has more than (\d+) dabs.*)", "線が長すぎます（ブラシの間隔で \\1 個を超える跡になります。点を近づけるか、ブラシを大きくします）"));
+        r.push_back(rule(R"(a page's vanishing point planes: .*)", "ページの消点の面が正しくありません（原稿は読み取り専用で開きます）"));
         r.push_back(rule(R"(the smart object \S+'s filter \S+_data: .*)", "スマートフィルターのファイルは原稿の素材として持ちます（ファイルのデータのままでは持てません）"));
         r.push_back(rule(R"(adjust ((?:blur|sharpen|noise|other|video|distort|pixelate|stylize|render|filter|camera|lens|adaptive)_\S+?) has no setting '(.*)')",
                          "フィルター（\\1）に「\\2」という設定はありません"));

@@ -5,7 +5,9 @@
 #include <cstdint>
 #include <numbers>
 #include <optional>
+#include <string>
 
+#include "core/command_bus.hpp"
 #include "core/error.hpp"
 
 // PhotoCraft v0.2.0 crates/paint/src/lib.rs (lines 43-150: StrokePoint, Stroke, Dab, dabs, dab_coverage),
@@ -46,6 +48,8 @@ std::vector<Dab> dabs(const Brush& brush, const std::vector<StrokePoint>& points
         return std::max(static_cast<double>(std::max(diameter(p), 1.0f) * std::max(brush.spacing, 0.01f)), 0.5);
     };
     const auto emit = [&](const StrokePoint& p) {
+        if (out.size() >= kMostDabs)
+            throw core::OpError("a stroke has more than " + std::to_string(kMostDabs) + " dabs (its points lie too far apart for its brush's spacing)");
         Dab d;
         d.x = p.x;
         d.y = p.y;

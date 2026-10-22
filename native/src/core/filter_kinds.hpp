@@ -48,6 +48,8 @@ std::string_view to_string(FilterInks inks);
 inline constexpr std::size_t kDisplacementMapMaxBytes = 32u * 1024 * 1024;
 // (D2) シアー's curve: at most this many points.
 inline constexpr std::size_t kShearMostPoints = 64;
+// (D6) 広角補正's constraints: at most this many lines.
+inline constexpr std::size_t kWideAngleMostConstraints = 64;
 
 // A setting that names a place on the picture (design 2.2, 3.3): moved and scaled with a smart object (its "space":
 // "contents"), as PC3's bending filters' points.

@@ -8,13 +8,15 @@
 // commands lit — ぼかし・シャープ・ノイズ・その他・ビデオ —, カスタム…'s 5 × 5 grid, 平均 and シャープ without a window, new grains
 // each time ノイズを加える… is applied, ぼかし（レンズ）… on a smart object without the layer mask as its depth. D2: its commands lit
 // — 変形・ピクセレート・表現手法 — in Photoshop's words, 渦巻き…'s window, ぶれ without one, シアー…'s curve, 置き換え…'s map (a layer
-// of the page; on a smart object made the book's file).
+// of the page; on a smart object made the book's file). D6: its commands lit — レンズ補正…・広角補正…・消点… — and their own
+// windows (the result on their pictures, 角度補正ツール, a constraint drawn, a plane made and a layer pasted on it).
 
 #include <QtTest>
 #include <QAction>
 #include <QApplication>
 #include <QComboBox>
 #include <QDialog>
+#include <QDialogButtonBox>
 #include <QDoubleSpinBox>
 #include <QLabel>
 #include <QListWidget>
@@ -23,6 +25,8 @@
 #include <QPointer>
 #include <QProgressDialog>
 #include <QPushButton>
+#include <QRadioButton>
+#include <QTabWidget>
 #include <QSpinBox>
 #include <QTimer>
 #include <QTreeWidget>
@@ -35,12 +39,14 @@
 #include "app/layer_panel.hpp"
 #include "app/config.hpp"
 #include "app/filter_gallery_window.hpp"
+#include "app/lens_window.hpp"
 #include "app/main_window.hpp"
 #include "app/preferences.hpp"
 #include "app/workspace.hpp"
 #include "core/adjust.hpp"
 #include "core/base64.hpp"
 #include "core/command_bus.hpp"
+#include "core/vanishing.hpp"
 #include "render/fx.hpp"
 #include "render/ops_registry.hpp"
 #include "render/page.hpp"
@@ -237,10 +243,11 @@ private slots:
                                "act_filter_pixelate_mosaic", "act_filter_pixelate_crystallize", "act_filter_pixelate_pointillize", "act_filter_pixelate_facet",
                                "act_filter_stylize_emboss", "act_filter_stylize_solarize", "act_filter_stylize_tiles", "act_filter_stylize_extrude",
                                "act_filter_stylize_diffuse", "act_filter_stylize_wind", "act_filter_stylize_find_edges", "act_filter_stylize_trace_contour",
-                               "act_filter_stylize_oil_paint"})
+                               "act_filter_stylize_oil_paint",
+                               // (D6: レンズ補正・広角補正・消点)
+                               "act_filter_lens_correction", "act_filter_adaptive_wide_angle", "act_filter_vanishing_point"})
             QVERIFY2(book.act(on)->isEnabled(), on);
-        for (const char* off : {"act_filter_render_fibers", "act_filter_camera_raw", "act_filter_render_tree", "act_filter_vanishing_point",
-                                "act_filter_blur_tilt_shift", "act_filter_last"})
+        for (const char* off : {"act_filter_render_fibers", "act_filter_camera_raw", "act_filter_render_tree", "act_filter_blur_tilt_shift", "act_filter_last"})
             QVERIFY2(!book.act(off)->isEnabled(), off);
         // 履歴's words of the new ops
         QCOMPARE(app::history::describe(Json::array({Json{{"op", "render_picture"}}})), QStringLiteral("描画した"));
@@ -968,6 +975,118 @@ private slots:
         book.window->layer_panel()->edit_smart_filter(0);
         QCOMPARE(offered, QStringLiteral("今の置き換えマップ"));
         QCOMPARE((*book.layer("so")->smart)["filters"][0]["params"]["map"], Json(ref));
+    }
+
+    // D6: レンズ補正… — its window (自動補正 and カスタム, the result on its picture, 角度補正ツール's line levelling it), OK sends
+    // lens_correction as set, キャンセル nothing; 広角補正… — a constraint drawn on its picture, sent; 消点… on a smart object
+    // grey; on the paint layer a plane made by four clicks and a layer pasted on it, OK sends vanishing_point (the planes kept
+    // on the page), its window again showing them; not 前回のフィルター.
+    void theLensAndVanishingPointWindows() {
+        Book book;
+        gui_test::Answers answers;
+        book.window->set_target_layer("pic");
+        const core::Bytes before = book.layer("pic")->raster_png;
+        int previews = 0;
+        double angle = 0;
+        answers.responder->exec = answer(QStringLiteral("lens_correction"), [&](QDialog* d) {
+            QCOMPARE(d->windowTitle(), QStringLiteral("レンズ補正"));
+            auto* tabs = d->findChild<QTabWidget*>(QStringLiteral("lens_tabs"));
+            QVERIFY(tabs != nullptr);
+            QCOMPARE(tabs->tabText(0), QStringLiteral("自動補正"));
+            QCOMPARE(tabs->tabText(1), QStringLiteral("カスタム"));
+            d->findChild<QDoubleSpinBox*>(QStringLiteral("lens_distortion"))->setValue(-50);
+            QTRY_VERIFY(d->property("previews").toInt() > 0);
+            previews = d->property("previews").toInt();
+            // 角度補正ツール: a line 5 px up over 100 px levelled
+            auto* view = dynamic_cast<app::lens_window::PictureView*>(d->findChild<QWidget*>(QStringLiteral("lens_view")));
+            QVERIFY(view != nullptr);
+            d->findChild<QPushButton*>(QStringLiteral("lens_straighten"))->setChecked(true);
+            view->press({5, 5}, Qt::NoModifier, Qt::LeftButton);
+            view->drag({10, 5.25}, Qt::NoModifier);
+            view->release({15, 5.5}, Qt::NoModifier);
+            angle = d->findChild<QDoubleSpinBox*>(QStringLiteral("lens_angle"))->value();
+        });
+        book.act("act_filter_lens_correction")->trigger();
+        QVERIFY(previews > 0);
+        QVERIFY2(std::fabs(angle + 2.862) < 0.01, qPrintable(QString::number(angle)));
+        QVERIFY(book.layer("pic")->raster_png != before);
+        book.window->action(QStringLiteral("act_undo"))->trigger();
+        QCOMPARE(book.layer("pic")->raster_png, before);
+        answers.responder->exec = [](QDialog*) { return int(QDialog::Rejected); };
+        book.act("act_filter_lens_correction")->trigger();
+        QCOMPARE(book.layer("pic")->raster_png, before);
+        // 広角補正: a constraint drawn (Shift: level), sent
+        int constraints = 0;
+        answers.responder->exec = answer(QStringLiteral("adaptive_wide_angle"), [&](QDialog* d) {
+            QCOMPARE(d->windowTitle(), QStringLiteral("広角補正"));
+            auto* model = d->findChild<QComboBox*>(QStringLiteral("wide_model"));
+            model->setCurrentIndex(model->findData(QStringLiteral("fisheye")));
+            d->findChild<QDoubleSpinBox*>(QStringLiteral("wide_focal_length"))->setValue(10);
+            auto* view = dynamic_cast<app::lens_window::PictureView*>(d->findChild<QWidget*>(QStringLiteral("lens_view")));
+            QVERIFY(view != nullptr);
+            view->press({4, 4}, Qt::NoModifier, Qt::LeftButton);
+            view->drag({8, 4.2}, Qt::NoModifier);
+            view->release({12, 4.3}, Qt::ShiftModifier);
+            constraints = d->findChild<QListWidget*>(QStringLiteral("wide_constraints"))->count();
+        });
+        book.act("act_filter_adaptive_wide_angle")->trigger();
+        QCOMPARE(constraints, 1);
+        QVERIFY(book.layer("pic")->raster_png != before);
+        book.window->action(QStringLiteral("act_undo"))->trigger();
+        // 消点: a plane of four clicks, the layer pasted on it
+        int planes_again = 0;
+        answers.responder->exec = answer(QStringLiteral("vanishing_point"), [&](QDialog* d) {
+            QCOMPARE(d->windowTitle(), QStringLiteral("消点"));
+            auto* view = dynamic_cast<app::lens_window::PictureView*>(d->findChild<QWidget*>(QStringLiteral("vanishing_view")));
+            QVERIFY(view != nullptr);
+            QVERIFY(d->findChild<QRadioButton*>(QStringLiteral("vanishing_create"))->isChecked());
+            for (const std::array<double, 2> at : {std::array<double, 2>{12, 12}, {28, 12}, {36, 30}, {4, 30}}) view->press(at, Qt::NoModifier, Qt::LeftButton);
+            QCOMPARE(d->property("planes").toInt(), 1);
+            auto* source = d->findChild<QComboBox*>(QStringLiteral("vanishing_source"));
+            source->setCurrentIndex(source->findData(QStringLiteral("pic")));
+            d->findChild<QPushButton*>(QStringLiteral("vanishing_paste_button"))->click();
+        });
+        book.act("act_filter_vanishing_point")->trigger();
+        QVERIFY(book.layer("pic")->raster_png != before);
+        QVERIFY(core::page_vanishing(book.page()) != nullptr);
+        QVERIFY(!book.act("act_filter_last")->isEnabled() || book.act("act_filter_last")->statusTip().indexOf(QStringLiteral("消点")) < 0);
+        // (元に戻す: the paste and the planes both gone; やり直す: both back)
+        const core::Bytes pasted = book.layer("pic")->raster_png;
+        book.window->action(QStringLiteral("act_undo"))->trigger();
+        QCOMPARE(book.layer("pic")->raster_png, before);
+        QVERIFY(core::page_vanishing(book.page()) == nullptr);
+        book.window->action(QStringLiteral("act_redo"))->trigger();
+        QCOMPARE(book.layer("pic")->raster_png, pasted);
+        QVERIFY(core::page_vanishing(book.page()) != nullptr);
+        answers.responder->exec = answer(QStringLiteral("vanishing_point"), [&](QDialog* d) { planes_again = d->property("planes").toInt(); });
+        book.act("act_filter_vanishing_point")->trigger();
+        QCOMPARE(planes_again, 1);
+        // 面を削除 (the chosen plane and those torn off it), OK with no plane: the page's planes taken away, the pixels kept
+        bool could_ok = false;
+        answers.responder->exec = answer(QStringLiteral("vanishing_point"), [&](QDialog* d) {
+            d->findChild<QRadioButton*>(QStringLiteral("vanishing_edit"))->setChecked(true);
+            d->findChild<QPushButton*>(QStringLiteral("vanishing_tear"))->click();
+            QCOMPARE(d->property("planes").toInt(), 2);
+            auto* view = dynamic_cast<app::lens_window::PictureView*>(d->findChild<QWidget*>(QStringLiteral("vanishing_view")));
+            view->press({12, 12}, Qt::NoModifier, Qt::LeftButton);  // (the first plane chosen by its corner)
+            view->release({12, 12}, Qt::NoModifier);
+            d->findChild<QPushButton*>(QStringLiteral("vanishing_remove"))->click();
+            QCOMPARE(d->property("planes").toInt(), 0);
+            auto* buttons = d->findChild<QDialogButtonBox*>();
+            could_ok = buttons != nullptr && buttons->button(QDialogButtonBox::Ok)->isEnabled();
+        });
+        book.act("act_filter_vanishing_point")->trigger();
+        QVERIFY(could_ok);
+        QVERIFY(core::page_vanishing(book.page()) == nullptr);
+        QCOMPARE(book.layer("pic")->raster_png, pasted);
+        book.window->action(QStringLiteral("act_undo"))->trigger();
+        QVERIFY(core::page_vanishing(book.page()) != nullptr);
+        // on a smart object: grey (ラスタライズしてから)
+        QVERIFY(book.window->apply_ops(Json::array({Json{{"op", "smart_convert"}, {"page", 1}, {"ids", Json::array({"pic"})}, {"new_id", "so"}}})));
+        book.window->set_target_layer("so");
+        emit book.menu("menu_filter")->aboutToShow();
+        QVERIFY(!book.act("act_filter_vanishing_point")->isEnabled());
+        QVERIFY(book.act("act_filter_lens_correction")->isEnabled());
     }
 };
 

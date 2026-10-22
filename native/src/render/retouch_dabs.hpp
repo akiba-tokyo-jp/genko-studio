@@ -58,8 +58,13 @@ struct Dab {
     std::size_t index = 0;
 };
 
+// The most dabs a stroke lays (PC4 D6's review P2-4: a stroke whose points lie far apart — given to an op from outside —
+// refused before its dabs fill the memory; a stroke drawn on a page, even at 600 dpi with the smallest brush, lays far
+// fewer).
+inline constexpr std::size_t kMostDabs = 1000000;
+
 // The dabs of a stroke, `spacing` × the diameter apart along the points (the first point's dab first; a stroke of one
-// point is one dab).
+// point is one dab). core::OpError "a stroke has more than 1000000 dabs (…)" past kMostDabs.
 std::vector<Dab> dabs(const Brush& brush, const std::vector<StrokePoint>& points);
 // The coverage of a round dab at distance d from its centre: the anti-aliased edge, a smoothstep from the hard core.
 float dab_coverage(float d, float radius, float hardness);

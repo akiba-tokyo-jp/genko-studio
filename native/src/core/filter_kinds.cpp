@@ -16,6 +16,7 @@
 #include "core/error.hpp"
 #include "core/gallery_kinds.hpp"
 #include "core/ink.hpp"
+#include "core/lens.hpp"
 #include "core/pyops.hpp"
 #include "core/smart.hpp"
 
@@ -540,7 +541,113 @@ std::vector<FilterKind> stylize_kinds() {
 std::vector<FilterKind> render_kinds() { return {}; }        // (D4)
 std::vector<FilterKind> blur_gallery_kinds() { return {}; }  // (D4)
 std::vector<FilterKind> camera_raw_kinds() { return {}; }    // (D5)
-std::vector<FilterKind> lens_kinds() { return {}; }          // (D6)
+// --- D6: レンズ補正・広角補正 ----------------------------------------------------------------------------------------------
+
+namespace {
+
+// レンズ補正's settings in their normal form (lens_cmds.rs lens_params, resolved_lens_params): 角度補正's line (straighten,
+// [[x, y], [x, y]] in the page's mm) turned into its angle (core/lens straighten_angle) and left out; a profile "auto" —
+// its focal length found by the op from the picture's EXIF (render/ops_filters resolve_filter) or given — becomes
+// "generic" of that focal length, and "generic" without one is upstream's 50 mm. The angle within −180..180.
+Json read_lens_correction(Json read) {
+    const std::string where = "adjust lens_correction";
+    if (const Json* line = get(read, "straighten"); line != nullptr && !line->is_null()) {
+        const std::string wrong = where + ".straighten must be a line [[x, y], [x, y]] (mm)";
+        if (!line->is_array() || line->size() != 2) throw OpError(wrong);
+        std::array<lens::XY, 2> ends{};
+        for (std::size_t i = 0; i < 2; ++i) {
+            const Json& p = (*line)[i];
+            if (!p.is_array() || p.size() != 2 || !finite_number(p[0]) || !finite_number(p[1])) throw OpError(wrong);
+            ends[i] = {p[0].get<double>(), p[1].get<double>()};
+        }
+        if (std::hypot(ends[1][0] - ends[0][0], ends[1][1] - ends[0][1]) < 1e-9) throw OpError(wrong);
+        const double before = finite_number(read.value("angle", Json(0))) ? read["angle"].get<double>() : 0.0;
+        double angle = before + lens::straighten_angle(ends[0], ends[1]);
+        while (angle > 180.0) angle -= 360.0;
+        while (angle < -180.0) angle += 360.0;
+        read["angle"] = angle;
+    }
+    read.erase("straighten");
+    const std::string profile = read.value("profile", std::string("none"));
+    const double focal = finite_number(read.value("focal_length", Json(0))) ? read["focal_length"].get<double>() : 0.0;
+    if (profile == "auto") {
+        if (!(focal > 0)) throw OpError("lens_correction: the profile auto needs the focal length (the picture's EXIF, or focal_length)");
+        read["profile"] = "generic";
+    } else if (profile == "generic" && !(focal > 0)) {
+        read["focal_length"] = 50.0;
+    }
+    return read;
+}
+
+// 広角補正's constraints (wideangle.rs Constraint): at most kWideAngleMostConstraints, each its ends a and b ([x, y] in the
+// page's mm, apart) and its orientation (free, horizontal, vertical).
+Json read_wide_angle(Json read) {
+    const std::string where = "adjust adaptive_wide_angle";
+    const Json* given = get(read, "constraints");
+    Json out = Json::array();
+    if (given != nullptr && !given->is_null()) {
+        const std::string wrong = where + ".constraints must be a list of at most " + std::to_string(kWideAngleMostConstraints) +
+                                  " lines {\"a\": [x, y], \"b\": [x, y] (mm), \"orientation\": free, horizontal or vertical}";
+        if (!given->is_array() || given->size() > kWideAngleMostConstraints) throw OpError(wrong);
+        for (const Json& c : *given) {
+            if (!c.is_object()) throw OpError(wrong);
+            for (const auto& [key, value] : c.items()) {
+                if (key != "a" && key != "b" && key != "orientation") throw OpError(wrong);
+            }
+            Json line = Json::object();
+            for (const char* end : {"a", "b"}) {
+                const Json* p = get(c, end);
+                if (p == nullptr || !p->is_array() || p->size() != 2 || !finite_number((*p)[0]) || !finite_number((*p)[1])) throw OpError(wrong);
+                line[end] = Json::array({(*p)[0].get<double>(), (*p)[1].get<double>()});
+            }
+            std::string orientation = "free";
+            if (const Json* o = get(c, "orientation"); o != nullptr && !o->is_null()) {
+                if (!o->is_string() || (*o != "free" && *o != "horizontal" && *o != "vertical")) throw OpError(wrong);
+                orientation = o->get<std::string>();
+            }
+            line["orientation"] = orientation;
+            out.push_back(std::move(line));
+        }
+    }
+    read["constraints"] = std::move(out);
+    return read;
+}
+
+}  // namespace
+
+std::vector<FilterKind> lens_kinds() {
+    // D6 (lens_cmds.rs 40-155, 376-422; design 2.5): フィルター's own commands (no submenu), each worked on the frame of the
+    // picture — the box of what shows on the layer, a selection keeping the result to it (render/fx_lens) — moving its
+    // pixels (each plate of a page of inks as it is; 周辺光量 brightens or darkens the colour: CMYK's and a multichannel
+    // page's inks, a Lab page's L). 角度補正's line and the constraints are places on the page (mm): they move with a smart
+    // object.
+    std::vector<FilterKind> out;
+    {
+        FilterInfo lens = info("lens_correction", "filter.lensCorrection", "レンズ補正", "");
+        lens.places = {{FilterPlace::Kind::Points, "straighten", {}, {}}};
+        lens.colours = {};
+        FilterKind made = kind(std::move(lens), {choice("profile", {"none", "generic", "auto"}), number("focal_length", 0, 0, 2000),
+                                                 boolean("correct_distortion", true), boolean("correct_vignette", true), boolean("correct_ca", true),
+                                                 number("distortion", 0, -100, 100), number("red_cyan", 0, -100, 100), number("blue_yellow", 0, -100, 100),
+                                                 number("vignette_amount", 0, -100, 100), number("vignette_midpoint", 50, 0, 100),
+                                                 number("vertical", 0, -100, 100), number("horizontal", 0, -100, 100), number("angle", 0, -180, 180),
+                                                 number("scale", 100, 50, 150), boolean("auto_scale", false),
+                                                 choice("edge", {"transparency", "extension", "black", "white", "color"}), rgb("edge_color", {0, 0, 0}),
+                                                 custom("straighten", true)});
+        made.kind.hooks.normalize = [](Json read, const Page*, LookupTables*) { return read_lens_correction(std::move(read)); };
+        out.push_back(std::move(made));
+    }
+    {
+        FilterInfo wide = info("adaptive_wide_angle", "filter.adaptiveWideAngle", "広角補正", "");
+        wide.places = {{FilterPlace::Kind::Point, "a", {}, "constraints"}, {FilterPlace::Kind::Point, "b", {}, "constraints"}};
+        FilterKind made = kind(std::move(wide), {choice("model", {"auto", "fisheye", "perspective", "full_spherical"}), number("focal_length", 0, 0, 200),
+                                                 number("crop_factor", 1, 0.1, 10), number("scale", 100, 50, 150), custom("constraints", true),
+                                                 choice("interpolation", {"bicubic", "bilinear", "nearest"})});
+        made.kind.hooks.normalize = [](Json read, const Page*, LookupTables*) { return read_wide_angle(std::move(read)); };
+        out.push_back(std::move(made));
+    }
+    return out;
+}
 
 // --- the table ------------------------------------------------------------------------------------------------------
 

@@ -7,6 +7,8 @@
 #include "render/ops_filters.hpp"
 
 #include <algorithm>
+#include <functional>
+#include <mutex>
 
 #include "core/adjust.hpp"
 #include "core/base64.hpp"
@@ -23,7 +25,14 @@
 #include "render/png.hpp"
 #include "render/raster.hpp"
 #include "render/selection.hpp"
+#include "render/smart.hpp"
 #include "render/smart_decode.hpp"
+#include "render/codecs/format.hpp"
+#include "render/codecs/metadata.hpp"
+#include "render/vanishing.hpp"
+#include "core/file_info.hpp"
+#include "core/lens.hpp"
+#include "core/smart.hpp"
 #include "storage/asset_store.hpp"
 
 namespace genko::render {
@@ -288,6 +297,131 @@ void refuse_filter(const core::Document& doc, const Json& op) {
     throw core::OpError("filter_gallery: every effect is hidden, so it would change nothing (a smart filter may keep them hidden)");
 }
 
+namespace {
+
+// What the book's files said of their cameras, by the file's ref (an asset's sha256 never changes): the last few kept.
+struct KnownCameras {
+    std::mutex lock;
+    std::vector<std::pair<std::string, std::optional<core::exif::Camera>>> kept;  // (the latest last)
+};
+
+KnownCameras& known_cameras() {
+    static KnownCameras all;
+    return all;
+}
+
+constexpr std::size_t kCamerasKept = 32;
+
+// What `read` says of the file `ref`, read once while it is kept (a ref not of an asset: read each time).
+std::optional<core::exif::Camera> camera_of(const std::string& ref, const std::function<std::optional<core::exif::Camera>()>& read) {
+    if (!storage::AssetStore::is_ref(ref)) return read();
+    {
+        KnownCameras& known = known_cameras();
+        const std::lock_guard<std::mutex> hold(known.lock);
+        for (const auto& [k, camera] : known.kept)
+            if (k == ref) return camera;
+    }
+    std::optional<core::exif::Camera> camera = read();
+    KnownCameras& known = known_cameras();
+    const std::lock_guard<std::mutex> hold(known.lock);
+    if (known.kept.size() >= kCamerasKept) known.kept.erase(known.kept.begin());
+    known.kept.emplace_back(ref, camera);
+    return camera;
+}
+
+}  // namespace
+
+std::optional<core::exif::Camera> picture_camera(const core::Document& doc, const core::Page& page, const core::Layer* layer) {
+    // (a smart object's file: its EXIF as the file holds it)
+    if (layer != nullptr && layer->kind == core::LayerKind::Smart) {
+        const core::SmartContents* contents = core::smart::contents_of(doc, *layer);
+        if (contents == nullptr || contents->kind != "file") return std::nullopt;
+        return camera_of(contents->asset, [&]() -> std::optional<core::exif::Camera> {
+            try {
+                const core::Bytes bytes = smart::file_bytes(doc, *contents);
+                if (bytes) {
+                    if (const auto format = codecs::detect(*bytes)) {
+                        const codecs::FileMetadata meta = codecs::read_metadata(*format, *bytes);
+                        if (meta.exif) return core::exif::read(*meta.exif);
+                    }
+                }
+            } catch (const core::Error&) {
+            }
+            return std::nullopt;
+        });
+    }
+    // (the file the page was opened from: its EXIF kept with the book; a focal length it lacks from what its camera said
+    // — a RAW file's)
+    if (!page.native_source) return std::nullopt;
+    const core::NativeSource& source = *page.native_source;
+    std::optional<core::exif::Camera> camera;
+    if (!source.exif.empty()) {
+        camera = camera_of(source.exif, [&]() -> std::optional<core::exif::Camera> {
+            std::optional<std::string> bytes;
+            if (const auto held = doc.native_files.find(source.exif); held != doc.native_files.end() && held->second) {
+                bytes = *held->second;
+            } else if (doc.asset_dir && storage::AssetStore::is_ref(source.exif)) {
+                try {
+                    bytes = storage::AssetStore(*doc.asset_dir).get_bytes(source.exif, core::kExifSuffix, storage::kAssetMaxBytes);
+                } catch (const std::exception&) {
+                    bytes.reset();
+                }
+            }
+            if (bytes) return core::exif::read(*bytes);
+            return std::nullopt;
+        });
+    }
+    if (source.camera && source.camera->focal && *source.camera->focal > 0 && (!camera || (!camera->focal_length && !camera->focal_length_35mm))) {
+        if (!camera) camera.emplace();
+        camera->focal_length = source.camera->focal;
+    }
+    return camera;
+}
+
+Json resolve_filter(const core::Document& doc, const core::Page& page, const core::Layer* layer, std::string_view kind, Json params,
+                    const std::optional<core::exif::Camera>* known) {
+    if ((kind != "lens_correction" && kind != "adaptive_wide_angle") || !params.is_object()) return params;
+    const auto focal_given = [&params] {
+        const Json* f = core::get(params, "focal_length");
+        return f != nullptr && f->is_number() && !f->is_boolean() && f->get<double>() > 0;
+    };
+    if (kind == "lens_correction") {
+        if (params.value("profile", Json("none")) != Json("auto") || focal_given()) return params;
+        const auto camera = known != nullptr ? *known : picture_camera(doc, page, layer);
+        if (!camera) return params;
+        if (const auto f = camera->focal_length_35mm ? camera->focal_length_35mm : camera->focal_length; f && *f > 0) params["focal_length"] = *f;
+        return params;
+    }
+    if (focal_given()) return params;
+    const auto camera = known != nullptr ? *known : picture_camera(doc, page, layer);
+    if (!camera) return params;
+    if (camera->focal_length && *camera->focal_length > 0) {
+        params["focal_length"] = *camera->focal_length;
+        if (camera->focal_length_35mm) params["crop_factor"] = std::clamp(*camera->focal_length_35mm / *camera->focal_length, 0.1, 10.0);
+    } else if (camera->focal_length_35mm) {
+        params["focal_length"] = *camera->focal_length_35mm;
+        params["crop_factor"] = 1.0;
+    }
+    return params;
+}
+
+std::optional<Json> resolve_filter_op(const core::Document& doc, const Json& op) {
+    const Json* kind = core::get(op, "kind");
+    if (kind == nullptr || !kind->is_string() || (*kind != Json("lens_correction") && *kind != Json("adaptive_wide_angle"))) return std::nullopt;
+    const std::size_t at = core::require_page(doc, op);
+    const core::Page& page = doc.page(at);
+    const core::Layer* layer = nullptr;
+    if (const Json* id = core::get(op, "id"); id != nullptr && id->is_string())
+        for (const core::Layer& l : page.layers)
+            if (l.id == id->get<std::string>()) layer = &l;
+    const Json params = settings_of_op(op);
+    const Json filled = resolve_filter(doc, page, layer, kind->get<std::string>(), params);
+    if (filled == params) return std::nullopt;
+    Json out = op;
+    out.update(filled);
+    return out;
+}
+
 std::optional<Json> filter_report(const core::Document& doc, const Json& op) {
     const Json* kind = core::get(op, "kind");
     if (kind == nullptr || !kind->is_string() || !core::pc4_filter(kind->get_ref<const std::string&>())) return std::nullopt;
@@ -297,6 +431,11 @@ std::optional<Json> filter_report(const core::Document& doc, const Json& op) {
     drawn.update(core::normalize_filter(kind->get_ref<const std::string&>(), params, &doc.page(at)));
     for (const std::string_view key : core::filter_info(kind->get_ref<const std::string&>())->files)
         drawn.erase(std::string(key) + "_data");  // (D2: a file's data said by its ref and suffix, not again)
+    // (D6: レンズ補正's profile by its name, as PhotoCraft's result says it)
+    if (*kind == Json("lens_correction")) {
+        const core::lens::Correction lc = core::lens::correction_of(drawn);
+        drawn["profile_name"] = lc.profile ? Json(lc.profile->name) : Json(nullptr);
+    }
     return Json{{"filter", std::move(drawn)}};
 }
 
@@ -338,7 +477,7 @@ Json keep_filter_files(core::Document& doc, const core::Page& page, std::string_
 void register_filter_ops(core::OpRegistry& registry) {
     // フィルター → 描画 → 炎…・額縁…・木… (D4: render/render_picture.cpp) and 消点… (D6: render/vanishing.cpp)
     registry.add("render_picture", [](core::OpContext&) { op_not_yet("render_picture", "D4"); });
-    registry.add("vanishing_point", [](core::OpContext&) { op_not_yet("vanishing_point", "D6"); });
+    registry.add("vanishing_point", vanishing::vanishing_point);
 }
 
 }  // namespace genko::render

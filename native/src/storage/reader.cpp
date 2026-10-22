@@ -23,6 +23,7 @@
 #include "core/pyconv.hpp"
 #include "core/ruby.hpp"
 #include "core/filter_kinds.hpp"
+#include "core/vanishing.hpp"
 #include "core/smart.hpp"
 #include "core/strokes.hpp"
 #include "core/masks.hpp"
@@ -1630,6 +1631,9 @@ core::Document Reader::migrate(const Json& payload) {
     } catch (const core::Error& error) {
         issue("missing_asset", "/pages", {}, error.what());
     }
+    // (vanishing-point@1, PC4 節 D6: a page's planes of 消点 — kept as read; not well formed, the book read-only)
+    try { core::validate_vanishing(doc); }
+    catch (const core::Error& error) { issue("broken_value", "/pages", {}, error.what()); }
     // (PC3: masks@1's settings and Quick Mask; vector@1, pen-shapes@1, transform@1, page-spec@1)
     try { core::validate_masks(doc); }
     catch (const core::Error& error) { issue("broken_value", "/pages", {}, error.what()); }
@@ -1887,8 +1891,8 @@ bool is_known_feature(std::string_view feature) {
            feature == core::kFormatsFeature || feature == core::kCameraRawFeature ||
            // PC4 E-0 (core/brush_dabs.hpp, core/patterns.hpp)
            feature == core::kBrushesFeature || feature == core::kPatternsFeature ||
-           // PC4 節 D (core/filter_kinds.hpp)
-           feature == core::kFiltersFeature;
+           // PC4 節 D (core/filter_kinds.hpp, core/vanishing.hpp)
+           feature == core::kFiltersFeature || feature == core::kVanishingFeature;
 }
 
 int project_version(const Json& payload) {

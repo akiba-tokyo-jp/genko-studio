@@ -621,7 +621,8 @@ std::size_t push_filter(core::Document& doc, const core::Page& page, core::Layer
     if (layer.kind != core::LayerKind::Smart || !layer.smart || !layer.smart->is_object()) throw core::OpError("layer " + layer.id + " is not a smart object");
     if (layer.locked) throw core::OpError("the layer is locked");
     // (PC4 D2: a filter's file — 置き換え's map given as data or a layer — made the book's first: design 2.6)
-    const Json stored = settled(doc, page, kind, keep_filter_files(doc, page, kind, params));
+    // (PC4 D6: レンズ補正's and 広角補正's focal length from the smart object's picture's EXIF, kept as resolved)
+    const Json stored = settled(doc, page, kind, resolve_filter(doc, page, &layer, kind, keep_filter_files(doc, page, kind, params)));
     const Json* now = core::get(*layer.smart, "filters");
     Json filters = now != nullptr && now->is_array() ? *now : Json::array();
     if (filters.size() >= core::smart::kFiltersMax)

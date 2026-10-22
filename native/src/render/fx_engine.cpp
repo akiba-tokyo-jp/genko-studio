@@ -183,7 +183,6 @@ std::vector<float> conv_sep(const Window& src, const Rect& out, const std::vecto
 Kernels render_kernels() { return {}; }        // (D4)
 Kernels blur_gallery_kernels() { return {}; }  // (D4)
 Kernels camera_raw_kernels() { return {}; }    // (D5)
-Kernels lens_kernels() { return {}; }          // (D6)
 
 const Kernels& kernels() {
     static const Kernels all = [] {
@@ -470,6 +469,7 @@ namespace {
 
 thread_local std::atomic<double>* g_progress = nullptr;
 thread_local const PlaceScope* g_place = nullptr;
+thread_local Json* g_notes = nullptr;  // (NoteScope, D6)
 
 // Upstream's auto_tile: results do not depend on the tiling, so wide halos take bigger tiles (the margin read again
 // kept below about twice the tile).
@@ -617,6 +617,18 @@ ProgressScope::ProgressScope(std::atomic<double>& done) : before_(g_progress) {
     g_progress = &done;
 }
 ProgressScope::~ProgressScope() { g_progress = before_; }
+void ProgressScope::put(double done) {
+    if (g_progress != nullptr) g_progress->store(std::clamp(done, 0.0, 1.0));
+}
+
+// (D6) What the kinds resolve as they run, for the op's report (NoteScope)
+NoteScope::NoteScope(Json& into) : before_(g_notes) { g_notes = &into; }
+NoteScope::~NoteScope() { g_notes = before_; }
+void NoteScope::put(std::string_view key, Json value) {
+    if (g_notes == nullptr) return;
+    if (!g_notes->is_object()) *g_notes = Json::object();
+    (*g_notes)[std::string(key)] = std::move(value);
+}
 
 PlaceScope::PlaceScope(int x, int y, const Rect& bounds) : before_(g_place), x_(x), y_(y), bounds_(bounds) { g_place = this; }
 PlaceScope::~PlaceScope() { g_place = before_; }
@@ -642,6 +654,11 @@ void apply(Surface& surface, const Kernel& kernel, const Json& params, core::Fil
     Ctx ctx;
     ctx.bounds = bounds_in.intersect(grid);
     if (ctx.bounds.empty()) ctx.bounds = grid;
+    const Rect content = surface.content();
+    if (kernel.shown_frame) {  // (D6: the frame of the picture — what shows —, a selection only keeping the result to it)
+        if (content.empty() && PlaceScope::current() == nullptr) return;
+        ctx.bounds = content;
+    }
     if (const PlaceScope* place = PlaceScope::current()) {  // (D3: a part of the grid — its origin, the grid's base box there)
         ctx.x0 = place->x();
         ctx.y0 = place->y();
@@ -656,12 +673,12 @@ void apply(Surface& surface, const Kernel& kernel, const Json& params, core::Fil
     ctx.grid_width = w;
     ctx.plane = reads.plane;
     ctx.map = reads.map;
+    ctx.ink = surface.ink();  // (D6)
     const Halo halo = kernel.halo ? kernel.halo(params, ctx) : Halo::margin(0);
 
     // the part worked: as far as the halo reaches from what shows (upstream's output_area), the base box for a whole kind
     // or a render; within the selection's box
     Rect area;
-    const Rect content = surface.content();
     ctx.largest = surface.largest();
     ctx.least = surface.least();
     ctx.levels = way.meaning ? 0 : surface.levels();  // (the colours the inks mean: floats)
@@ -673,6 +690,7 @@ void apply(Surface& surface, const Kernel& kernel, const Json& params, core::Fil
         area = content.empty() ? Rect{} : content.inflate(halo.radius).intersect(grid);
     }
     if (cover != nullptr) area = area.intersect(cover_box(*cover, w, h));
+    if (kernel.shown_frame) area = area.intersect(ctx.bounds);  // (D6: within the frame)
     if (area.empty()) return;
 
     // the memory, held in the imaging budget before it is had: a whole kind's one window, then each thread's window (the

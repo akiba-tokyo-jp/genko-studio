@@ -34,6 +34,8 @@
 #include "app/colours.hpp"
 #include "app/filter_forms.hpp"
 #include "app/filter_gallery_window.hpp"
+#include "app/lens_window.hpp"
+#include "app/vanishing_window.hpp"
 #include "app/layer_dialogs.hpp"
 #include "app/main_window.hpp"
 #include "core/adjust_kinds.hpp"
@@ -203,6 +205,9 @@ const std::vector<std::pair<std::string, FilterWindow>>& filter_windows() {
     // lens_correction, adaptive_wide_angle, vanishing_point: each its group's)
     static const std::vector<std::pair<std::string, FilterWindow>> all{
         {"filter_gallery", [](const FilterWindowCall& call) { filter_gallery::open(call); }},  // (D3: app/filter_gallery_window.cpp)
+        {"lens_correction", [](const FilterWindowCall& call) { lens_window::open_lens(call); }},  // (D6: app/lens_window.cpp)
+        {"adaptive_wide_angle", [](const FilterWindowCall& call) { lens_window::open_wide_angle(call); }},
+        {"vanishing_point", [](const FilterWindowCall& call) { vanishing_window::open(call); }},  // (D6: app/vanishing_window.cpp)
     };
     return all;
 }
@@ -404,6 +409,15 @@ void MainWindow::filter_command(const FilterItem& item) {
     // (heavy: its work on the layer's grid past what a moment takes — render::fx; Python's and the plugins' as before)
     const render::fx::Grid grid = render::fx::layer_grid(*page, *layer);
     const auto heavy = [grid, kind](const Json& params) {
+        // (PC4 D6: 消点 — a kind without a kernel — on a thread whenever it pastes or stamps: its pictures over the page's
+        // grid, its strokes' footprints; the planes alone at once)
+        if (kind == "vanishing_point") {
+            const auto given = [&params](const char* key) {
+                const Json* list = core::get(params, key);
+                return list != nullptr && list->is_array() && !list->empty();
+            };
+            return given("paste") || given("clone");
+        }
         return render::fx::work(kind, params, std::uint64_t(grid.width) * grid.height, grid.s, grid.levels) >= render::fx::kHeavyWork;
     };
     const std::string op = item.op;
