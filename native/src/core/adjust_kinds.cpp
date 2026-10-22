@@ -9,6 +9,7 @@
 #include <string>
 
 #include "core/command_bus.hpp"
+#include "core/filter_kinds.hpp"
 #include "core/pyconv.hpp"
 #include "core/pyops.hpp"
 
@@ -214,6 +215,12 @@ std::vector<AdjustKind> make_table() {
     all.back().smart = false;  // (it reads another layer's colours, or the selection's: never a smart filter)
     for (AdjustKind& kind : all) {
         if (kind.group == "PC2c") kind.local = true;
+    }
+    // PC4 節 D: フィルター's kinds (core/filter_kinds.cpp: filter_raster only, local, smart filters; their native's blend
+    // a correction layer's, refused on a filter as every filter kind's)
+    for (AdjustKind& kind : filter_kinds()) {
+        kind.native = native_keys();
+        all.push_back(std::move(kind));
     }
 
     for (const HookTable& hooks : {tone_hooks(), color_hooks()}) {

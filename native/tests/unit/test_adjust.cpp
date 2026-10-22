@@ -25,6 +25,7 @@
 
 #include "core/adjust.hpp"
 #include "core/adjust_kinds.hpp"
+#include "core/filter_kinds.hpp"
 #include "core/adjust_tone.hpp"
 #include "core/base64.hpp"
 #include "core/color_adjust.hpp"
@@ -393,13 +394,15 @@ private slots:
         const auto& kinds = core::adjust_kinds();
         std::vector<std::string> python;
         for (const auto& kind : kinds) {
-            QVERIFY(kind.group == "Python" || kind.group == "PC2a" || kind.group == "PC2b" || kind.group == "PC2c");
+            // (PC4 節 D: フィルター's kinds, core/filter_kinds — their own tests: test_filter_kinds, test_fx)
+            QVERIFY(kind.group == "Python" || kind.group == "PC2a" || kind.group == "PC2b" || kind.group == "PC2c" || kind.group == "PC4");
             QVERIFY(kind.filter);
             QVERIFY(!kind.native.empty() && kind.native.front().key == "blend");
             if (kind.group == "Python") python.emplace_back(kind.name);
         }
         QCOMPARE(python, std::vector<std::string>(core::kAdjustments.begin(), core::kAdjustments.end()));
-        QCOMPARE(kinds.size(), std::size_t(10 + 8 + 2 + 3));  // (Python's, PC2b's eight, PC2a's two, PC2c's three)
+        // (Python's, PC2b's eight, PC2a's two, PC2c's three; then PC4's, as many as its groups have added)
+        QCOMPARE(kinds.size(), std::size_t(10 + 8 + 2 + 3) + core::filter_infos().size());
         const auto doc = eight_bit_page();
         for (const auto& kind : kinds) {
             if (kind.group == "Python") continue;

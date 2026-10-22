@@ -63,7 +63,7 @@ struct AdjustHooks {
 
 struct AdjustKind {
     std::string_view name;
-    std::string_view group;  // "Python" (Python's own kinds), "PC2a", "PC2b" or "PC2c": who writes its formula
+    std::string_view group;  // "Python" (Python's own kinds), "PC2a", "PC2b", "PC2c" or "PC4" (core/filter_kinds): who writes its formula
     std::string_view native_group;  // a Python kind's native that changes its formula: who writes that (PC2a)
     bool layer = false;      // a correction layer's kind (add_layer kind=adjust, set_layer adjust)
     bool filter = false;     // a kind of filter_raster

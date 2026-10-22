@@ -9,7 +9,7 @@
 #include "core/json.hpp"
 #include "core/model.hpp"
 
-// brushes@1 (PC4 E-0, schema-v4.md §3, SPEC.md COLOR-08「ブラシ・塗り・パターン・プリセット」): a brush's dab engine — PhotoCraft
+// brushes@1 (PC4 E-0, schema-v4.md §3, SPEC.md COLOR-09「ブラシ・塗り・パターン・プリセット」): a brush's dab engine — PhotoCraft
 // v0.2.0's paint/src/brush.rs BrushSettings (MIT: native/third_party/photocraft/NOTICE.md), in Genko's units and names
 // (mm, snake_case). A brush of one's own (brush.custom[key]) with "engine": "dabs" keeps these under "dabs": its line is
 // still a line (points, pressure, its kind: the user's decision 3) drawn by laying dabs along it (E1). Only the settings

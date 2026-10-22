@@ -358,10 +358,10 @@ private slots:
         QCOMPARE((*book.layer("py")->adjust)["kind"], Json("hue"));
     }
 
-    // The layer panel's filters (the user's decision 3): 色相・彩度・明度 is the upstream hue_saturation — its window (the
-    // page showing the result while it is open), one filter_raster of hue_saturation, the same pixels as that op —;
-    // Python's hue op draws as it did.
-    void filterListHueIsTheUpstreamForm() {
+    // 色相・彩度… (the user's decision 3) is the upstream hue_saturation — its window (the page showing the result while it is
+    // open), one filter_raster of hue_saturation, the same pixels as that op —; Python's hue op draws as it did. (PC4's
+    // decision 1: the layer panel's filter list is the フィルター menu now; the corrections are レイヤー → 色調補正's.)
+    void hueSaturationIsTheUpstreamForm() {
         Book book;
         gui_test::Answers answers;
         auto& panel = book.panel();
@@ -377,10 +377,8 @@ private slots:
             previewed = gui_test::wait_for([&] { return canvas->doc() != book.session->snapshot(); }, 10000);
             return int(QDialog::Accepted);
         };
-        auto* filter = panel.filter_box();
-        filter->setCurrentIndex(filter->findData(QStringLiteral("hue")));
-        QCOMPARE(filter->currentText(), QStringLiteral("色相・彩度・明度"));
-        panel.apply_filter();
+        (void)panel;
+        book.window->action(QStringLiteral("act_adjust_hue_saturation"))->trigger();
         QVERIFY(previewed);
         const core::CommandBus bus(render::ops_registry());
         const core::Document want = bus.apply(before, Json::array({Json{{"op", "filter_raster"}, {"page", 1}, {"id", "pic"}, {"kind", "hue_saturation"},

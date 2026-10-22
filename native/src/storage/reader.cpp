@@ -22,6 +22,7 @@
 #include "core/ids.hpp"
 #include "core/pyconv.hpp"
 #include "core/ruby.hpp"
+#include "core/filter_kinds.hpp"
 #include "core/smart.hpp"
 #include "core/strokes.hpp"
 #include "core/masks.hpp"
@@ -1621,6 +1622,14 @@ core::Document Reader::migrate(const Json& payload) {
     // (smart-objects@1: a smart object's settings, its contents and contents inside contents)
     try { core::smart::validate_smart(doc); }
     catch (const core::Error& error) { issue("broken_value", "/smart_contents", {}, error.what()); }
+    // (filters@1, PC4 節 D: a smart filter's file — a displacement map — an asset ref the book's folder holds)
+    try {
+        core::validate_filters(doc, [this](const std::string& ref, const std::string& suffix) {
+            return dir_.empty() || skip_assets_ || store_.has(ref, suffix);
+        });
+    } catch (const core::Error& error) {
+        issue("missing_asset", "/pages", {}, error.what());
+    }
     // (PC3: masks@1's settings and Quick Mask; vector@1, pen-shapes@1, transform@1, page-spec@1)
     try { core::validate_masks(doc); }
     catch (const core::Error& error) { issue("broken_value", "/pages", {}, error.what()); }
@@ -1877,7 +1886,9 @@ bool is_known_feature(std::string_view feature) {
            feature == core::kFileInfoFeature || feature == core::kImageGridFeature || feature == core::kPsdKeepFeature ||
            feature == core::kFormatsFeature || feature == core::kCameraRawFeature ||
            // PC4 E-0 (core/brush_dabs.hpp, core/patterns.hpp)
-           feature == core::kBrushesFeature || feature == core::kPatternsFeature;
+           feature == core::kBrushesFeature || feature == core::kPatternsFeature ||
+           // PC4 節 D (core/filter_kinds.hpp)
+           feature == core::kFiltersFeature;
 }
 
 int project_version(const Json& payload) {

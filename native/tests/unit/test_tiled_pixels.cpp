@@ -1,4 +1,4 @@
-// PC4 E-0 (SPEC.md COLOR-08, ARCHITECTURE.md「描く道具の土台」): a layer's sparse tiles (render/tiled_pixels) and the
+// PC4 E-0 (SPEC.md COLOR-09, ARCHITECTURE.md「描く道具の土台」): a layer's sparse tiles (render/tiled_pixels) and the
 // sequential-dab stroke on them (retouch::apply_dab_stroke and Smudge: upstream's paint/src/retouch.rs tests), on every
 // kind of layer (8 bits; 16 and 32 bits; the inks of CMYK, Lab and grey pages): only the tiles reached are read (each
 // once, all in one read) and only the pixels edited written back — every other pixel of the layer keeps its value —; the

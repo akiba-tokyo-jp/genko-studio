@@ -384,15 +384,82 @@ bool filter_kind(std::string_view kind) {
 
 bool bend_filter(std::string_view kind) { return std::find(kBendFilters.begin(), kBendFilters.end(), kind) != kBendFilters.end(); }
 
-bool placed_filter(std::string_view kind) { return bend_filter(kind) || kind == "radial_blur" || kind == "zoom_blur"; }
+bool placed_filter(std::string_view kind) {
+    if (bend_filter(kind) || kind == "radial_blur" || kind == "zoom_blur") return true;
+    const FilterInfo* info = filter_info(kind);  // (PC4: a kind whose table names places)
+    return info != nullptr && !info->places.empty();
+}
 
 bool in_contents(const Json& filter) {
     const Json* space = filter.is_object() ? get(filter, "space") : nullptr;
     return space != nullptr && space->is_string() && space->get<std::string>() == kContentsSpace;
 }
 
+Json map_places(const std::vector<FilterPlace>& places, const Json& params, const PlaceMap& map) {
+    if (!params.is_object()) return params;
+    Json out = params;
+    const auto point_of = [](const Json& p) -> std::optional<std::pair<double, double>> {
+        if (!p.is_array() || p.size() < 2 || !p[0].is_number() || !p[1].is_number() || p[0].is_boolean() || p[1].is_boolean()) return std::nullopt;
+        return std::make_pair(p[0].get<double>(), p[1].get<double>());
+    };
+    const auto moved = [&](Json& p) {
+        const auto at = point_of(p);
+        if (!at) return;
+        const auto [x, y] = map.point(at->first, at->second);
+        p[0] = x;
+        p[1] = y;
+    };
+    // (where a length is scaled: the first point the object names, else the origin)
+    const auto anchor_of = [&](const Json& object) {
+        for (const FilterPlace& place : places) {
+            const Json* v = get(object, place.key);
+            if (v == nullptr) continue;
+            if (place.kind == FilterPlace::Kind::Point) {
+                if (const auto at = point_of(*v)) return *at;
+            } else if (place.kind == FilterPlace::Kind::Points && v->is_array() && !v->empty()) {
+                if (const auto at = point_of((*v)[0])) return *at;
+            }
+        }
+        return std::make_pair(0.0, 0.0);
+    };
+    const auto through = [&](Json& object, const std::vector<const FilterPlace*>& here) {
+        if (!object.is_object()) return;
+        const auto [ax, ay] = anchor_of(object);
+        const auto j = map.slope(ax, ay);
+        const double scale = std::sqrt(std::abs(j[0] * j[3] - j[1] * j[2]));
+        for (const FilterPlace* place : here) {
+            if (!object.contains(place->key)) continue;
+            Json& v = object[std::string(place->key)];
+            switch (place->kind) {
+                case FilterPlace::Kind::Point: moved(v); break;
+                case FilterPlace::Kind::Points:
+                    if (v.is_array())
+                        for (Json& p : v) moved(p);
+                    break;
+                case FilterPlace::Kind::Length:
+                    if (v.is_number() && !v.is_boolean()) v = v.get<double>() * scale;
+                    break;
+                case FilterPlace::Kind::Centre: break;  // (shares of a box: render/smart_filters)
+            }
+        }
+    };
+    std::vector<const FilterPlace*> own;
+    std::map<std::string, std::vector<const FilterPlace*>, std::less<>> lists;
+    for (const FilterPlace& place : places) {
+        if (place.within.empty()) own.push_back(&place);
+        else lists[std::string(place.within)].push_back(&place);
+    }
+    through(out, own);
+    for (const auto& [key, here] : lists) {
+        if (!out.contains(key) || !out[key].is_array()) continue;
+        for (Json& item : out[key]) through(item, here);
+    }
+    return out;
+}
+
 Json map_filter_places(std::string_view kind, const Json& params, const PlaceMap& map) {
     if (!params.is_object()) return params;
+    if (const FilterInfo* info = filter_info(kind); info != nullptr && !info->places.empty()) return map_places(info->places, params, map);
     Json out = params;
     // (how much the map scales a length near a place, and whether it mirrors there)
     const auto scale_at = [&](double x, double y) {
@@ -1077,9 +1144,28 @@ bool same_panels(const std::vector<Frame>& a, const std::vector<Frame>& b) { ret
 
 void bring_contents(Document& doc, const Document& from, Page& page) {
     std::map<std::string, std::string> renamed;  // (their id → its id here)
+    // (filters@1, PC4 節 D: the files its smart filters hold — a displacement map — that the book it comes from holds in
+    // memory, as its contents' files)
+    const auto bring_filter_files = [&](const Layer& layer) {
+        const Json* filters = layer.smart && layer.smart->is_object() ? get(*layer.smart, "filters") : nullptr;
+        if (filters == nullptr || !filters->is_array()) return;
+        for (const Json& f : *filters) {
+            const Json* kind = f.is_object() ? get(f, "kind") : nullptr;
+            const FilterInfo* info = kind != nullptr && kind->is_string() ? filter_info(kind->get_ref<const std::string&>()) : nullptr;
+            const Json* params = info != nullptr ? get(f, "params") : nullptr;
+            if (params == nullptr || !params->is_object()) continue;
+            for (const std::string_view key : info->files) {
+                const Json* ref = get(*params, key);
+                if (ref == nullptr || !ref->is_string()) continue;
+                if (const auto bytes = from.filter_files.find(ref->get_ref<const std::string&>()); bytes != from.filter_files.end())
+                    doc.filter_files.emplace(bytes->first, bytes->second);
+            }
+        }
+    };
     std::function<void(Page&)> bring = [&](Page& on) {
         for (Layer& layer : on.layers) {
             if (!is_smart(layer)) continue;
+            bring_filter_files(layer);
             const auto id = contents_id(layer);
             if (!id) continue;
             auto known = renamed.find(*id);

@@ -2,7 +2,7 @@
 
 #include "core/command_bus.hpp"
 
-// PC4 節 E (描く道具・プリセット; SPEC.md COLOR-08): the new ops of the drawing tools, this build's own (the public list,
+// PC4 節 E (描く道具・プリセット; SPEC.md COLOR-09): the new ops of the drawing tools, this build's own (the public list,
 // `genko schema`, and the MCP tools stay as they are; MCP's and the CLI's apply take them). Each group writes its ops'
 // work in its file; until then an op is registered and refused with not_yet_ported naming it and its group, so a book
 // or a script that names one is told it is not in this build yet rather than that it is unknown (as PC3's frames).

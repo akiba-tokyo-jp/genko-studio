@@ -452,6 +452,7 @@ void MainWindow::back_up(const std::shared_ptr<Session>& session) {
 
 MainWindow::~MainWindow() {
     cancel_smart_select();  // (PC3 B3: a smart selection still worked out on its worker stops — not waited for to its end)
+    stop_filter_work();     // (PC4 節 D: a heavy filter's preview on its worker stops, as the smart selection)
     disconnect_session();
     documents::remove(this);
     render::clear_placed_caches();  // (a window closed: its books' placed pictures are let go)
@@ -1244,6 +1245,14 @@ MainWindow* MainWindow::new_window() {
 void MainWindow::closeEvent(QCloseEvent* event) {
     if (closed_) {
         event->accept();
+        return;
+    }
+    // (PC4 節 D: a heavy filter worked here — its window waits for the thread —: asked to stop, the window closed once it
+    // is back, app/filter_menu.cpp)
+    if (filter_working_) {
+        filter_working_->request_stop();
+        close_after_filter_ = true;
+        event->ignore();
         return;
     }
     // every book here with changes not saved: saved, or the person's choice (キャンセル keeps the window)

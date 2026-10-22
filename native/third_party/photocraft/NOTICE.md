@@ -183,3 +183,10 @@ PhotoCraft v0.2.0（`ad863217386440ca968fccc9bfff65ba24e61142`、MIT、同梱 `L
 - `crates/paint/src/brush.rs`（1-451 行）: ブラシの設定（先端・硬さ・間隔・不透明度・流量・シェイプ・散布・テクスチャ・デュアル・カラー・伝達・ポーズ・ノイズ・ウェットエッジ・ビルドアップ・テクスチャを保護・seed）と既定の値、揺らぎとコントロール、マスクの合成の種類、手続きの模様の種類 → `native/src/core/brush_dabs.*`（mm とスネークケースに直したもの。E-0）
 - `crates/paint/src/retouch.rs`（225-428 行: `apply_dab_stroke`・`Smudge` と試験）: 順に打つ点の作業の写しと、不透明度×選択範囲での混ぜ戻し、指先の絵の具の運び → `native/src/render/retouch_dabs.*`（層のタイルの上で。E-0）
 - `crates/engine/src/presets/mod.rs`（35-45 行 `Group`、193-276 行 `find`・`unique_name`・`group_index`・`edit_groups`）: 群のあるプリセットと名前の重なりの避け方、編集の動き → `native/src/render/preset_store.*`（E-0）
+
+## フィルター（filters@1、PC4 節 D）
+
+- `crates/algo/src/lib.rs`（506-643 行: `halo`・`label`・`halo_ext`、645-825 行: `Ctx`・`kernel`、833-966 行: `output_area`・`apply`・`apply_in`・`auto_tile`・`apply_tiled`）と `crates/algo/src/image.rs`（1-170 行: `Image`・`read_clamped`・`get_edge`・`sample`・`crop`・`premultiply`・`unpremultiply`）: フィルターの核の形（周りを見る幅、基準の枠、タイルごとに窓を読み結果を書く、端の画素を繰り返す、選択範囲の覆いで混ぜる）→ `native/src/render/fx.hpp`・`native/src/render/fx_engine.cpp`（3 つの道・インキの掛け方・画像の予算の中の並列は Genko の作り）。
+- `crates/algo/src/blur.rs`（1-220 行: `gaussian_kernel`・`conv_sep`・`gaussian`・`boxes_for_gauss`・`gaussian_boxes`・`boxed`）: ぼかし（ガウス）・ぼかし（ボックス）→ `native/src/render/fx_blur.cpp`（箱の和は整数で持つ。PC4 D0）。
+- `crates/engine/src/filters.rs`（41-134 行: `params_for` の範囲と既定、45-50 行の固定値の項目、178-241 行: `run_filter` の基準の枠と SO のスマートフィルター、325-327 行: 前回のフィルター）→ `native/src/core/filter_kinds.cpp`（種類の表・固定値の項目・`from_upstream`・`to_upstream`）・`native/src/app/filter_menu.cpp`（PC4 D0）。
+- `crates/algo/src/tests.rs`（79-170 行・400-450 行）の試験の考え: タイルに依らない、選択範囲 0 で変わらず半分で半分、小さいガウスは恒等、平らな色と量が保たれる、16 bit の細かさ、HDR が残る、σ が半径、端の繰り返し → `native/tests/unit/test_fx.cpp`（PC4 D0）。

@@ -661,7 +661,7 @@ private slots:
         QVERIFY(!box->geometry().intersects(quick->geometry()));  // (nothing lies over the approval box)
     }
 
-    // test_nine_menus_and_the_tabs_whole_on_a_1366_screen: nine menus; the panels' row of tabs with レイヤー shows every
+    // test_nine_menus_and_the_tabs_whole_on_a_1366_screen: nine menus (ten since PC4's フィルター); the panels' row of tabs with レイヤー shows every
     // tab whole (none behind the scroll arrows) on a 1366 × 768 screen.
     void nineMenusAndTheTabsWholeOnA1366Screen() {
         core::Document doc = b4(2);
@@ -674,7 +674,7 @@ private slots:
         int menus = 0;
         for (QAction* a : w->menuBar()->actions())
             if (a->menu() != nullptr) ++menus;
-        QCOMPARE(menus, 9);
+        QCOMPARE(menus, 10);  // (PC4 節 D, the user's decision 1: フィルター after レイヤー — the menu bar still whole at 1366)
         QTabBar* bar = nullptr;
         for (QTabBar* b : w->findChildren<QTabBar*>()) {
             if (!b->isVisible()) continue;
@@ -786,9 +786,11 @@ private slots:
         QVERIFY(prints != nullptr);
         prints->setChecked(true);
         QVERIFY(w->target_layer()->color_prints);
-        QStringList filters;
-        for (int i = 0; i < panel->filter_box()->count(); ++i) filters << panel->filter_box()->itemData(i).toString();
-        for (const char* key : {"motion_blur", "lineart", "gradient_map", "posterize"}) QVERIFY2(filters.contains(QString::fromLatin1(key)), key);
+        // (PC4 節 D, the user's decision 1: the filters are フィルター's — the panel's かける… opens it —, Genko's own in 漫画, the
+        // corrections レイヤー → 色調補正's)
+        QVERIFY(panel->filter_button() != nullptr);
+        for (const char* name : {"act_filter_blur_gaussian", "act_filter_manga_lineart", "act_adjust_gradient_map", "act_adjust_posterize"})
+            QVERIFY2(w->action(QString::fromLatin1(name)) != nullptr, name);
         auto* blend = panel->findChild<QComboBox*>(QStringLiteral("layer_blend"));
         QVERIFY(blend != nullptr);
         QStringList blends;

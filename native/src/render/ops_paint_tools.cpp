@@ -1,4 +1,4 @@
-// PC4 節 E (SPEC.md COLOR-08): the ops of the brushes that change pixels — registered here (E-0); E5 writes their work in
+// PC4 節 E (SPEC.md COLOR-09): the ops of the brushes that change pixels — registered here (E-0); E5 writes their work in
 // this file: each a stroke of `points` (mm) on a paint layer's own grid with brushwork's diameter, hardness, opacity, flow
 // and spacing (render/ops_retouch's), laid dab by dab on the layer's tiles (render/tiled_pixels,
 // retouch::apply_dab_stroke) in the layer's own values on 8-bit, precise and ink layers.

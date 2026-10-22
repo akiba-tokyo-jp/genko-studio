@@ -41,6 +41,7 @@ const LocalFilters& local_filters() {
     static const LocalFilters all = [] {
         LocalFilters out = adjust_local_filters();
         for (auto& each : tone_local_filters()) out.push_back(std::move(each));
+        for (auto& each : filter_local_filters()) out.push_back(std::move(each));  // (PC4 節 D)
         return out;
     }();
     return all;

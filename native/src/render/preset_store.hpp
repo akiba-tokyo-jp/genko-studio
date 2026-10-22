@@ -10,7 +10,7 @@
 
 #include "core/json.hpp"
 
-// PC4 E-0 (SPEC.md COLOR-08「プリセット」, design 2.4 and the coordinator's decision: the presets are the machine's library,
+// PC4 E-0 (SPEC.md COLOR-09「プリセット」, design 2.4 and the coordinator's decision: the presets are the machine's library,
 // the book keeps a copy of what it uses): the libraries of presets kept in the settings folder — gradients (E4),
 // patterns (E3), styles (E6), tool presets (E2), each its own JSON file of named groups of named items (PhotoCraft
 // v0.2.0's engine/src/presets/mod.rs: Group, unique_name, edit_groups, MIT: native/third_party/photocraft/NOTICE.md; the

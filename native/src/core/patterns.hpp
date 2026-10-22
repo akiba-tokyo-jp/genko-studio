@@ -8,7 +8,7 @@
 #include "core/json.hpp"
 #include "core/model.hpp"
 
-// patterns@1 (PC4 E-0, schema-v4.md「パターン」, SPEC.md COLOR-08): the patterns a book keeps (Document::patterns, the
+// patterns@1 (PC4 E-0, schema-v4.md「パターン」, SPEC.md COLOR-09): the patterns a book keeps (Document::patterns, the
 // struct core::Pattern in core/model.hpp) — each the copy of a pattern its fills, shape parts and overlays use (E3, E6;
 // the library is the machine's). A book that keeps none is written as before (no "patterns", no feature). The ops that
 // add, rename and delete them are E3's (render/ops_patterns.cpp).

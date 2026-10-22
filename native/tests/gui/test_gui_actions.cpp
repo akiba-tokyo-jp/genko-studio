@@ -346,9 +346,14 @@ private slots:
         // ファイル情報… and 書き出し ▸ PNG としてクイック書き出し・書き出し形式…・書き出しの環境設定…・Web 用に保存（従来）…
         // (act_open_as, act_close_all, act_close_others, act_save_copy, act_revert, act_file_info, act_quick_export_png,
         // act_export_as, act_export_prefs, act_save_for_web): frames until F-b and F-c — theFileMenuIsPhotoshops below.
-        // and the 2 of PC4 E-0 (SPEC COLOR-08) — ツール → 描画色と背景色を初期設定に戻す (act_default_colours) and ウィンドウ →
+        // and the 2 of PC4 E-0 (SPEC COLOR-09) — ツール → 描画色と背景色を初期設定に戻す (act_default_colours) and ウィンドウ →
         // スウォッチ (act_swatches) — theirs (test_gui_paint).
-        QCOMPARE(w->actions_by_name().size(), std::size_t{465});
+        // and the 78 of PC4 節 D0 (SPEC COLOR-08「フィルター」, the user's decision 1) — the フィルター menu's commands
+        // act_filter_<kind> (77: Photoshop's, their kinds' groups D1…D6 lighting them; ぼかし・ぼかし（強）・シャープ・シャープ（強）・
+        // シャープ（輪郭のみ）・輪郭以外をぼかす as act_filter_blur, act_filter_blur_more, act_filter_sharpen, act_filter_sharpen_more,
+        // act_filter_sharpen_edges, act_filter_despeckle; 漫画's five act_filter_manga_<kind>) and 前回のフィルター (act_filter_last)
+        // — theirs (test_gui_filters).
+        QCOMPARE(w->actions_by_name().size(), std::size_t{543});
         QVERIFY(w->action("act_chat_approval"));
         QVERIFY(w->action("act_style"));
         QVERIFY(w->action("act_exposure"));

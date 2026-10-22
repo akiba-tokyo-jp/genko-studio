@@ -1,4 +1,4 @@
-// PC4 E-0 (brushes@1, schema-v4.md §3, SPEC.md COLOR-08): the dab brush's settings as a book keeps them (only those that
+// PC4 E-0 (brushes@1, schema-v4.md §3, SPEC.md COLOR-09): the dab brush's settings as a book keeps them (only those that
 // differ from the defaults; each refused setting), a brush of one's own with them (brush_to_dict, brush_from_dict,
 // define_brush leaving "engine" and "dabs" to E1), a line's inputs (tilt, time_ms, wheel, flow) packed and read, the
 // brush state's kind and background_rgb, a book that has them written with brushes@1 and its pictures and read back the

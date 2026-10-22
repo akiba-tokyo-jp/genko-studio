@@ -1,4 +1,4 @@
-// PC4 E-0 (patterns@1, schema-v4.md「パターン」, SPEC.md COLOR-08): a pattern as a book keeps it (every key, in order; each
+// PC4 E-0 (patterns@1, schema-v4.md「パターン」, SPEC.md COLOR-09): a pattern as a book keeps it (every key, in order; each
 // one that cannot be refused), the suffix its picture is kept with by its mode and depth (PNG, GKCR, GKIR) and the check
 // of the picture against it, a book with patterns written with patterns@1 and their pictures and read back the same
 // (its pictures kept by gc), a book without patterns written as before, and what makes a book read-only.

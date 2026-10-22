@@ -15,6 +15,7 @@
 #include <functional>
 #include <map>
 #include <memory>
+#include <stop_token>
 #include <optional>
 #include <set>
 #include <string>
@@ -59,6 +60,7 @@ class HistogramPanel;
 class InfoPanel;
 class CheckPanel;
 class ColourPanel;
+struct FilterItem;  // (PC4 節 D: app/filter_menu.hpp)
 class HistoryPanel;
 class GuidePanel;
 class SubView;
@@ -247,6 +249,15 @@ public:
     // page as it is.
     void show_preview(std::optional<core::Document> doc);
     LayerPanel* layer_panel() const { return layer_panel_; }
+    // PC4 節 D: the フィルター menu (the layer panel's かける… opens it: the user's decision 1).
+    QMenu* filter_menu() const { return filter_menu_; }
+    // PC4 節 D (app/filter_menu.cpp; the layer panel's スマートフィルターを編集… too): a filter's ops sent — on a thread with
+    // its progress and 中止 when `heavy` (render::fx::work), else at once —; the window's preview of them — on the page at
+    // once, or, `heavy`, worked out on a thread on a copy of the book at the screen's resolution (render::fx::preview_book),
+    // the one before stopped; none: taken away —; and whether such a preview is being worked out now.
+    bool send_filter(const core::Json& ops, const QString& name, bool heavy);
+    void preview_filter(const std::optional<core::Json>& ops, bool heavy);
+    bool filter_previewing() const;
     // channels@1 (main_window_channels.cpp): the channel panel, and what the pixel tools work on and what is shown of a
     // page's channels — the window's, never saved; each page its own —: the target ("" the composite, a colour plate's
     // name, an alpha or spot channel's id; the pixel ops sent are given it as their "channel"), the colour plates
@@ -920,6 +931,16 @@ private:
     // レイヤーをロック…'s window, the move tool's box (the union of the moved layers' snap boxes).
     void build_align_actions();
     void build_align_menus(QMenu* layers, QMenu* view);
+    // PC4 節 D (SPEC COLOR-08, app/filter_menu.cpp): the フィルター menu (after レイヤー; Photoshop's names, the user's decision
+    // 1) and its commands — each kind's window (app/filter_forms) or a group's own, the presets without one, 漫画's five
+    // (Genko's own filters, their old windows), the plugins' filters —, 前回のフィルター (Ctrl+F: the last one sent again on
+    // the layer drawn on now), the result shown while the settings change and a heavy filter worked on a thread with its
+    // progress and 中止 (design 4.4, 5.1, 5.3).
+    void build_filter_actions();
+    void build_filter_menus(QMenu* filter);
+    void filter_command(const FilterItem& item);
+    void repeat_filter();
+    void follow_filter_menu();
     void build_move_page(ToolSettings* ts);
     void snap_toggles();
     void lock_layers_dialog();
@@ -1220,6 +1241,17 @@ private:
     QToolBar* palette_ = nullptr;
     QToolBar* commands_ = nullptr;
     QMenu* recent_menu_ = nullptr;
+    // PC4 節 D (app/filter_menu.cpp): the フィルター menu, its plugins' submenu (made again when it opens), the last filter
+    // sent from it (前回のフィルター: never kept in the book), a heavy filter's preview being worked out.
+    QMenu* filter_menu_ = nullptr;
+    QMenu* filter_plugins_menu_ = nullptr;
+    std::optional<core::Json> last_filter_;
+    struct FilterJob;
+    std::shared_ptr<FilterJob> filter_job_;
+    // a heavy filter being worked (send_filter: its stop; the window asked to close meanwhile, closed when it is back)
+    std::shared_ptr<std::stop_source> filter_working_;
+    bool close_after_filter_ = false;
+    void stop_filter_work();  // (the window going: a heavy filter's preview and work asked to stop)
     QMenu* view_menu_ = nullptr;
     QMenu* books_menu_ = nullptr;   // ウィンドウ → 開いている原稿 (document.activate)
     QLabel* gamut_label_ = nullptr;  // 色域外警告's count

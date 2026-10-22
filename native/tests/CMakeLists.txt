@@ -130,7 +130,7 @@ genko_test(test_path_raster SOURCES unit/test_path_raster.cpp DEPS genko_test_su
 # PC3 C-b (pen-shapes@1): the live shapes, the path operations' coverage, a stroke's alignments and dashes, the gradient
 # forms, a part baked, cut, erased, bent and transformed; the shape presets' language and settings file.
 genko_test(test_shapes SOURCES unit/test_shapes.cpp DEPS genko_test_support genko_render_ops LABELS unit)
-# PC4 E-0 (SPEC.md COLOR-08, brushes@1 and patterns@1): the dab brush's settings and a line's inputs, the book's patterns,
+# PC4 E-0 (SPEC.md COLOR-09, brushes@1 and patterns@1): the dab brush's settings and a line's inputs, the book's patterns,
 # written and read back (a book without them as before; what cannot be opens read-only; gc keeps their pictures); the
 # presets' library in the settings folder; a layer's sparse tiles and the sequential-dab stroke (render/tiled_pixels,
 # retouch_dabs' apply_dab_stroke) on 8-bit, 16-bit, 32-bit, CMYK, Lab and grey layers.
@@ -159,6 +159,12 @@ genko_test(test_adjust SOURCES unit/test_adjust.cpp DEPS genko_test_support genk
 # PC2c (COLOR-04): the local corrections (PhotoCraft's algo/tone.rs tests; filter_raster's shadows_highlights,
 # replace_color and match_color on 8-bit, precise and CMYK layers) and hdr_toning's flatten, without Python.
 genko_test(test_tone_ops SOURCES unit/test_tone_ops.cpp DEPS genko_test_support genko_render_ops LABELS unit TIMEOUT 600)
+# PC4 節 D (COLOR-08): フィルター's engine (render/fx: PhotoCraft's own tests of its filter core, the same bytes whatever
+# the tiling and threads, the three ways, a page of inks' ways, 200 and 600 dpi, the budget, stopping, a heavy filter told,
+# the preview's copy, the new ops' frames) and its kinds' table (settings, presets, .pcraft's commands, places, filters@1,
+# the catalogue), without Python.
+genko_test(test_fx SOURCES unit/test_fx.cpp DEPS genko_test_support genko_render_ops LABELS unit TIMEOUT 600)
+genko_test(test_filter_kinds SOURCES unit/test_filter_kinds.cpp DEPS genko_test_support genko_render_ops LABELS unit)
 # PC2c (COLOR-04): Apply Image and Calculations (Blending, the sources, a layer, a channel, inks; the three results),
 # trapping (algo/trap.rs's tests and the op) and the fade (its mix, the op reading the pixels before from the assets).
 genko_test(test_image_calc SOURCES unit/test_image_calc.cpp DEPS genko_test_support genko_render_ops LABELS unit TIMEOUT 600)
@@ -245,6 +251,11 @@ genko_test(test_contract_render_cli SOURCES contract/test_contract_render_cli.cp
            LABELS contract TIMEOUT 1800)
 # Tones, effect lines and rulers against Python (M3-B): the ops (fixed cases, random sequences, the command line), the
 # drawing, the snapping, and the pen lines and erasers that snap to the rulers (moved from M2-O1's cases).
+# PC4 節 D (COLOR-08) through the command line: フィルター's kinds on 8 and 16 bits, a selection, a channel, saved, undone,
+# the journal; as smart filters (filters@1, read-only for a reader that does not know it); a book without them as it was;
+# genko inspect --filters.
+genko_test(test_contract_filters_pc4 SOURCES contract/test_contract_filters_pc4.cpp DEPS genko_test_support genko_render_ops genko_storage
+           LABELS contract TIMEOUT 900)
 genko_test(test_contract_tone_ops SOURCES contract/test_contract_tone_ops.cpp DEPS genko_test_support genko_render_ops
            LABELS contract TIMEOUT 3600)
 set_tests_properties(test_contract_tone_ops PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen;QTEST_FUNCTION_TIMEOUT=3500000")
@@ -550,6 +561,10 @@ if(GENKO_BUILD_APP)
   genko_test(test_gui_channels SOURCES gui/test_gui_channels.cpp DEPS genko_app GUI TIMEOUT 600)
   # PC2c (COLOR-04): レイヤー → 色調補正's local corrections and image calculations, 編集 → フェード (only right after).
   genko_test(test_gui_image_ops SOURCES gui/test_gui_image_ops.cpp DEPS genko_app GUI TIMEOUT 600)
+  # PC4 節 D (COLOR-08): the フィルター menu (its tree, words, keys and greys), a kind's window from its table with the result
+  # on the page, a preset without one, on a smart object a smart filter, 漫画's five, 前回のフィルター (Ctrl+F), フェード after it,
+  # a heavy one's preview and its 中止, the layer panel's かける… opening the menu.
+  genko_test(test_gui_filters SOURCES gui/test_gui_filters.cpp DEPS genko_app GUI TIMEOUT 600)
   # 色調補正 (PC2a, COLOR-04): the tone commands and their keys, their windows (channels by the page's mode, the formula,
   # 自動, a LUT from a file) with the result on the page, the 色調補正 and 属性 panels (one set_adjustment, one Undo), the
   # .cube written from ファイル.

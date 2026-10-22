@@ -493,6 +493,10 @@ struct Document {
     // book opened from a file, in memory), by their asset ref; the writer writes those it names, with their suffix (as
     // smart_files)
     std::map<std::string, Bytes> native_files;
+    // filters@1 (PC4 節 D, core/filter_kinds.hpp): the bytes of the files ops gave its smart filters (a displacement map)
+    // that are not in assets/ yet, by their asset ref; the writer writes those its smart filters hold (with the suffix
+    // the filter names), as it writes smart_files.
+    std::map<std::string, Bytes> filter_files;
     Json nombre = Json::object();
     Json extra = Json::object();  // top-level keys this build does not know; written back unchanged
     std::int64_t revision = 0;

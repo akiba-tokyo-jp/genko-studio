@@ -538,6 +538,16 @@ const std::vector<Rule>& rules() {
         r.push_back(rule("kind must be one of tone, effect, image, lines, lettering, brush, prim", "素材の種類が違います"));
         r.push_back(rule("adjust is set on a correction layer", "補正の設定は、色調補正のレイヤーにだけできます"));
         r.push_back(rule("adjust kind must be one of .*", "色調補正は、レベル補正・トーンカーブ・色相・反転・階調化・2 値化・グラデーションマップ・白黒から選びます"));
+        // (PC4 節 D, filters@1 — the C++ build's own: フィルター's kinds' settings and files, core/filter_kinds, render/fx)
+        r.push_back(rule(R"(adjust ((?:blur|sharpen|noise|other|video|distort|pixelate|stylize|render|filter|camera|lens|adaptive)_\S+?) has no setting '(.*)')",
+                         "フィルター（\\1）に「\\2」という設定はありません"));
+        r.push_back(rule(R"(adjust ((?:blur|sharpen|noise|other|video|distort|pixelate|stylize|render|filter|camera|lens|adaptive)_\S+?)\.(\S+) (?:must|needs|is) .*)",
+                         "フィルター（\\1）の「\\2」の値が使えません"));
+        r.push_back(rule(R"(the smart object \S+'s filter \S+ is not one of the book's files.*)", "スマートフィルターのファイルの指定が正しくありません"));
+        r.push_back(rule(R"(the smart object \S+'s filter \S+_suffix is not .*)", "スマートフィルターのファイルの形式は PNG か PSD です"));
+        r.push_back(rule(R"(the smart object \S+'s filter \S+: the book holds no file .*)",
+                         "スマートフィルターが使うファイルがこの原稿にありません（原稿は読み取り専用で開きます）"));
+        r.push_back(rule("the result exceeds the finite working range", "結果の値が大きすぎて、扱える範囲を超えました（原稿は変わりません）"));
         // (PC2, adjustments@1 — the C++ build's own: a correction's native settings and kinds, core/adjust)
         r.push_back(rule(R"(adjust kind '(.*)' is not a correction layer's kind)", "「\\1」は色調補正のレイヤーの種類ではありません"));
         // (PC2a — the tone corrections' own: set_adjustment, auto_adjust and a colour lookup's table, render/ops_adjust, core/lut3d)

@@ -1,4 +1,4 @@
-// PC4 E-0 (SPEC.md COLOR-08「プリセット」): the presets' libraries in the settings folder (render/preset_store, upstream's
+// PC4 E-0 (SPEC.md COLOR-09「プリセット」): the presets' libraries in the settings folder (render/preset_store, upstream's
 // presets/mod.rs and presets/tests.rs): the built-in groups when there is no file; the groups written and read back;
 // add's names made unique over every group and its group made when it is not there; each edit action (rename, delete,
 // move with an index, new_group, rename_group, delete_group) and what each refuses; reset and reset --append (the

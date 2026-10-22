@@ -11,7 +11,7 @@
 #include "render/image.hpp"
 #include "render/image_ops.hpp"
 
-// PC4 E-0 (SPEC.md COLOR-08, ARCHITECTURE.md「描く道具の土台」): the sparse working copy of a paint layer the brushes that
+// PC4 E-0 (SPEC.md COLOR-09, ARCHITECTURE.md「描く道具の土台」): the sparse working copy of a paint layer the brushes that
 // change pixels work on (E5: Dodge, Burn, Sponge, Blur, Sharpen, Smudge, the Mixer Brush, the Background Eraser, Color
 // Replacement; retouch::apply_dab_stroke) — the tiles of the layer's own grid a stroke reaches, kTile pixels square
 // (smaller at the grid's right and bottom edges), each held as the layer's own values (image_ops::Pixels: 8 bits,

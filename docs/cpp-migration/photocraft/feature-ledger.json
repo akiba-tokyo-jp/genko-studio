@@ -7719,9 +7719,17 @@
         "alternate_menus": []
       },
       "genko_status": "一部（2026-10-16 照合）",
-      "implementation_status": "未着手",
+      "implementation_status": "実装済み（PC4 D0、未統合）",
       "acceptance_status": "未実施",
-      "evidence": [],
+      "evidence": [
+        "native/src/core/filter_kinds.cpp",
+        "native/src/app/filter_menu.cpp",
+        "native/src/render/fx_blur.cpp",
+        "native/tests/unit/test_fx.cpp",
+        "native/tests/unit/test_filter_kinds.cpp",
+        "native/tests/contract/test_contract_filters_pc4.cpp",
+        "native/tests/gui/test_gui_filters.cpp"
+      ],
       "pc0": {
         "date": "2026-10-16",
         "cpp_base": "962faa4",
@@ -7743,7 +7751,8 @@
         ],
         "gap": "設定なしの一発コマンドがない（op の blur に radius=0.6 を渡せば同じ処理はできる）",
         "note": "Genko のぼかし（blur）に固定値の入口を足すだけ"
-      }
+      },
+      "remaining": "ぼかし（ガウス）半径 0.6 の固定値の項目（200 dpi の作業の画素）"
     },
     {
       "id": "filter.blur.blurMore",
@@ -7773,9 +7782,17 @@
         "alternate_menus": []
       },
       "genko_status": "一部（2026-10-16 照合）",
-      "implementation_status": "未着手",
+      "implementation_status": "実装済み（PC4 D0、未統合）",
       "acceptance_status": "未実施",
-      "evidence": [],
+      "evidence": [
+        "native/src/core/filter_kinds.cpp",
+        "native/src/app/filter_menu.cpp",
+        "native/src/render/fx_blur.cpp",
+        "native/tests/unit/test_fx.cpp",
+        "native/tests/unit/test_filter_kinds.cpp",
+        "native/tests/contract/test_contract_filters_pc4.cpp",
+        "native/tests/gui/test_gui_filters.cpp"
+      ],
       "pc0": {
         "date": "2026-10-16",
         "cpp_base": "962faa4",
@@ -7797,7 +7814,8 @@
         ],
         "gap": "設定なしの一発コマンドがない（op の blur に radius=1.4 を渡せば同じ処理はできる）",
         "note": "filter.blur.blur と同じ"
-      }
+      },
+      "remaining": "ぼかし（ガウス）半径 1.4 の固定値の項目（200 dpi の作業の画素）"
     },
     {
       "id": "filter.blur.boxBlur",
@@ -7827,9 +7845,20 @@
         "alternate_menus": []
       },
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "未着手",
+      "implementation_status": "実装済み（PC4 D0、未統合）",
       "acceptance_status": "未実施",
-      "evidence": [],
+      "evidence": [
+        "native/src/core/filter_kinds.cpp",
+        "native/src/render/fx_engine.cpp",
+        "native/src/render/fx_blur.cpp",
+        "native/src/render/ops_filters.cpp",
+        "native/src/app/filter_menu.cpp",
+        "native/src/app/filter_forms.cpp",
+        "native/tests/unit/test_fx.cpp",
+        "native/tests/unit/test_filter_kinds.cpp",
+        "native/tests/contract/test_contract_filters_pc4.cpp",
+        "native/tests/gui/test_gui_filters.cpp"
+      ],
       "pc0": {
         "date": "2026-10-16",
         "cpp_base": "962faa4",
@@ -7840,7 +7869,8 @@
         "tests": [],
         "gap": "ボックスぼかしがフィルターとしてない",
         "note": "中に Pillow 相当の Filter::box_blur（native/src/render/image.hpp:120）がある。足すなら 8 ビット（render/filters.cpp）・16/32 ビット（color_filters.cpp）・CMYK/Lab（ink_filters.cpp）の 3 経路と画面の欄に要る。上流は MIT/Apache-2.0（帰属は native/third_party/photocraft）"
-      }
+      },
+      "remaining": "半径は 200 dpi の作業の画素を層の画素に丸める"
     },
     {
       "id": "filter.blur.gaussianBlur",
@@ -7870,9 +7900,20 @@
         "alternate_menus": []
       },
       "genko_status": "一部（2026-10-16 照合）",
-      "implementation_status": "未着手",
+      "implementation_status": "実装済み（PC4 D0、未統合）",
       "acceptance_status": "未実施",
-      "evidence": [],
+      "evidence": [
+        "native/src/core/filter_kinds.cpp",
+        "native/src/render/fx_engine.cpp",
+        "native/src/render/fx_blur.cpp",
+        "native/src/render/ops_filters.cpp",
+        "native/src/app/filter_menu.cpp",
+        "native/src/app/filter_forms.cpp",
+        "native/tests/unit/test_fx.cpp",
+        "native/tests/unit/test_filter_kinds.cpp",
+        "native/tests/contract/test_contract_filters_pc4.cpp",
+        "native/tests/gui/test_gui_filters.cpp"
+      ],
       "pc0": {
         "date": "2026-10-16",
         "cpp_base": "962faa4",
@@ -7894,7 +7935,8 @@
         ],
         "gap": "効果と radius は同じ類（ガウスぼかし、選択範囲内だけ・8/16/32 ビット・CMYK/Lab に対応、試験あり）。画面のぼかしの強さが 0.5〜30px まで（op は 2000 まで、上流は 0.1〜1000）。スマートフィルター（非破壊）にできない",
         "note": "画面の上限を広げるだけで足りる。スマートフィルターは filter.convertForSmartFilters 行を参照"
-      }
+      },
+      "remaining": "半径は 200 dpi の作業の画素（600 dpi のページでは 3 倍の画素に掛かる）。半径 4 を超えると箱 3 回の近似（上流と同じ）"
     },
     {
       "id": "filter.blur.lensBlur",
@@ -10324,9 +10366,12 @@
         "alternate_menus": []
       },
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "未着手",
+      "implementation_status": "実装済み（PC4 D0、未統合）",
       "acceptance_status": "未実施",
-      "evidence": [],
+      "evidence": [
+        "native/src/app/filter_menu.cpp",
+        "native/tests/gui/test_gui_filters.cpp"
+      ],
       "pc0": {
         "date": "2026-10-16",
         "cpp_base": "962faa4",
@@ -10337,7 +10382,8 @@
         "tests": [],
         "gap": "直前のフィルターを同じ設定でもう一度かける入口がない（画面のフィルター欄は種類を覚えているだけ）",
         "note": "履歴（filter_raster の op）から引けば足りる"
-      }
+      },
+      "remaining": "画面の機能（原稿に持たない）。フィルター メニューから送ったもの（消点・ゆがみ・色調補正を除く）を覚える"
     },
     {
       "id": "filter.lensCorrection",

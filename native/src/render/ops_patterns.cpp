@@ -1,4 +1,4 @@
-// PC4 節 E (SPEC.md COLOR-08, patterns@1): the ops of the book's patterns — registered here (E-0); E3 writes their work in
+// PC4 節 E (SPEC.md COLOR-09, patterns@1): the ops of the book's patterns — registered here (E-0); E3 writes their work in
 // this file: a pattern the book keeps (core::Pattern, Document::patterns and pattern_files) added from its picture,
 // renamed, and deleted when nothing uses it.
 

@@ -49,7 +49,7 @@ void MainWindow::build_anim_actions() {
     }, {}, QStringLiteral("フィルターのプラグイン（.py）を入れるフォルダー"));
     make("act_plugin_settings", QStringLiteral("プラグインの設定…"), [this] {
         PluginsDialog dialog(this);
-        if (ask::exec(&dialog) == QDialog::Accepted && layer_panel_ != nullptr) layer_panel_->reload_filters();
+        if (ask::exec(&dialog) == QDialog::Accepted) follow_filter_menu();  // (フィルター → プラグイン: the plugins chosen)
     }, {}, QStringLiteral("プラグインを使うか、どの Python で、どれを動かしてよいか"));
 }
 
