@@ -608,6 +608,7 @@ int effect_reach(const Effect& e, const Scale& sc) {
         case F::MosaicTiles:
         case F::Texturizer:
         case F::ConteCrayon:
+        case F::GraphicPen:
         case F::Craquelure: return 0;
         case F::RoughPastels: return sc.r(truncated(g("stroke_length") / 2.0f)) + 1;
         case F::NeonGlow: return gs(std::fabs(g("glow_size")) * 0.6f + 0.5f);
@@ -632,7 +633,6 @@ int effect_reach(const Effect& e, const Scale& sc) {
         case F::BasRelief: return gs(basrelief_sigma(e)) + k + 1;
         case F::Charcoal: return gs(1.0f) + k + 1;
         case F::Chrome: return gs(1.0f + g("smoothness") * 0.4f) + k + 1;
-        case F::GraphicPen: return sc.r(truncated(g("stroke_length") / 2.0f)) + 1;
         case F::HalftonePattern: return gs(0.5f + g("size") * 0.3f);
         case F::NotePaper: return gs(1.0f) + gs(1.2f) + k + 1;
         case F::Photocopy: return gs(1.0f + g("detail") * 0.5f);
@@ -1056,22 +1056,33 @@ void apply_effect(const Effect& e, Win& win, const Scale& sc, const Ctx& ctx) {
             break;
         }
         case F::GraphicPen: {
-            const int r = sc.r(truncated(g("stroke_length") / 2.0f));
+            // (the pen's strokes: the noise of the working pixels drawn out along the direction — PhotoCraft's running mean
+            // of radius r over each working pixel's hash —, read from the coordinates alone; a layer pixel's ink the working
+            // pixels' round it, between them: the same strokes on the paper whatever the resolution, their edges smooth on a
+            // finer grid)
+            const int r = truncated(g("stroke_length") / 2.0f);
+            const std::pair<int, int> d = direction(e.choice("stroke_direction"));
             const float bal = g("light_dark_balance") / 100.0f;
             const std::vector<float> l = win.lum();
-            std::vector<float> nn(n);
-            for (std::size_t i = 0; i < n; ++i) {  // (the pen's noise drawn out into the strokes: at the working pixels)
-                const auto [x, y] = win.xy(i);
-                nn[i] = hash01(sc.cell(x), sc.cell(y), 0, 151);
-            }
-            line_blur(nn, 1, w, h, direction(e.choice("stroke_direction")), r);
-            // (the noise's spread along a stroke: as many working pixels as it draws out — every layer pixel's own below one)
-            const float distinct = std::max(1.0f, static_cast<float>(2 * r + 1) / std::max(1.0f, sc.s));
-            const float sd = 0.2887f / std::sqrt(distinct);
+            const float sd = 0.2887f / std::sqrt(static_cast<float>(2 * r + 1));
+            const auto ink = [r, d, sd, bal](int i, int j, float lightness) {
+                double sum = 0;
+                for (int step = -r; step <= r; ++step) sum += hash01(i + step * d.first, j + step * d.second, 0, 151);
+                const float z = (static_cast<float>(sum / static_cast<double>(2 * r + 1)) - 0.5f) / sd;
+                return smoothstep(bal + 0.04f, bal - 0.04f, lightness + z * 0.16f);
+            };
             for (std::size_t i = 0; i < n; ++i) {
-                const float z = (nn[i] - 0.5f) / sd;
-                const float t = l[i] + z * 0.16f;
-                win.c[i] = mix(bg, fg, smoothstep(bal + 0.04f, bal - 0.04f, t));
+                const auto [x, y] = win.xy(i);
+                const float wx = sc.at(x), wy = sc.at(y);
+                const int i0 = static_cast<int>(std::floor(wx)), j0 = static_cast<int>(std::floor(wy));
+                const float ax = wx - static_cast<float>(i0), ay = wy - static_cast<float>(j0);
+                float cover = ink(i0, j0, l[i]);
+                if (ax > 0.0f || ay > 0.0f) {
+                    const float right = ink(i0 + 1, j0, l[i]), below = ink(i0, j0 + 1, l[i]), across = ink(i0 + 1, j0 + 1, l[i]);
+                    const float top = cover + (right - cover) * ax, bottom = below + (across - below) * ax;
+                    cover = top + (bottom - top) * ay;
+                }
+                win.c[i] = mix(bg, fg, cover);
             }
             break;
         }
@@ -1351,6 +1362,7 @@ double effect_cost(const Effect& e) {
         case F::Craquelure:
         case F::StainedGlass:
         case F::MosaicTiles:
+        case F::GraphicPen:
         case F::Patchwork: return 200;
         case F::GlowingEdges:
         case F::AccentedEdges:

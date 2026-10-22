@@ -68,6 +68,19 @@ std::vector<std::array<float, 4>> pattern(std::uint32_t w, std::uint32_t h) {
     return out;
 }
 
+// PhotoCraft's test picture of the gallery's commands (engine gallery_cmds/tests.rs: session), light and dark squares.
+std::vector<std::array<float, 4>> squares(std::uint32_t w, std::uint32_t h) {
+    std::vector<std::array<float, 4>> out;
+    for (std::uint32_t y = 0; y < h; ++y)
+        for (std::uint32_t x = 0; x < w; ++x) {
+            const float v = static_cast<float>((x * 7 + y * 3) % 23) / 22.0f;
+            std::array<float, 4> px{1, 1, 1, 1};
+            for (unsigned c = 0; c < 3; ++c) px[c] = (x / 10 + y / 8) % 2 == 0 ? v : 1.0f - v * static_cast<float>(c + 1) / 4.0f;
+            out.push_back(px);
+        }
+    return out;
+}
+
 std::vector<std::array<float, 4>> flat(std::uint32_t w, std::uint32_t h, std::array<float, 4> px) { return std::vector<std::array<float, 4>>(std::size_t(w) * h, px); }
 
 const render::fx::Kernel& gallery() {
@@ -104,11 +117,6 @@ render::Image eight_pattern(int w, int h) {
     for (const auto& p : pattern(std::uint32_t(w), std::uint32_t(h)))
         for (const float v : p) bytes.push_back(static_cast<char>(std::lround(v * 255)));
     return render::Image::frombytes("RGBA", render::Size{w, h}, bytes);
-}
-
-std::array<double, 4> pixel(const std::string& raster, std::uint32_t x, std::uint32_t y) {
-    const core::ColorRasterView view(raster);
-    return view.pixel(std::size_t(y) * view.width() + x);
 }
 
 core::ApplyResult run(const core::Document& doc, const Json& op) {
@@ -181,8 +189,9 @@ std::vector<std::array<double, 4>> pixels_of(const std::string& raster) {
 const std::set<std::string> kUnmarked{"cutout", "neon_glow", "paint_daubs", "palette_knife", "plastic_wrap", "poster_edges", "smudge_stick", "watercolor",
                                       "accented_edges", "angled_strokes", "dark_strokes", "ink_outlines", "spatter", "sprayed_strokes", "sumi_e", "glass",
                                       "ocean_ripple", "bas_relief", "chrome", "photocopy", "plaster", "stamp", "glowing_edges"};
-// The effects whose grain is one of the layer's pixels (compared at 200 and 600 dpi by their mean and spread).
-const std::set<std::string> kGrained{"dry_brush", "film_grain", "fresco", "diffuse_glow", "note_paper", "reticulation", "grain"};
+// The effects whose grain is one of the layer's pixels, and グラフィックペン's two tones in strokes a working pixel wide
+// (soft-edged on a finer grid): compared at 200 and 600 dpi by their mean and spread.
+const std::set<std::string> kGrained{"dry_brush", "film_grain", "fresco", "diffuse_glow", "note_paper", "reticulation", "grain", "graphic_pen"};
 
 }  // namespace
 
@@ -373,7 +382,7 @@ private slots:
 
     // The colours: black ink on white paper by default; the stack's (the window's main and sub colours) and an effect's own.
     void theColoursByDefaultAndGiven() {
-        const std::string raster = precise(56, 40, pattern(56, 40), true);
+        const std::string raster = precise(40, 32, squares(40, 32), true);
         // スタンプ is two tones: black and white by default
         for (const auto& p : pixels_of(run_precise(raster, one("stamp")))) {
             const bool black = p[0] < 0.05 && p[1] < 0.05 && p[2] < 0.05, white = p[0] > 0.95 && p[1] > 0.95 && p[2] > 0.95;
@@ -451,7 +460,7 @@ private slots:
 
     // --- the look at 200 and 600 dpi ---------------------------------------------------------------------------------------
 
-    // The same picture on a precise layer of 120 × 120 (the page at 200 dpi) and of 360 × 360 (600 dpi): each effect's
+    // The same picture on a precise layer of 200 × 200 (the page at 200 dpi) and of 600 × 600 (600 dpi): each effect's
     // marks the same size on the paper — the 600 dpi one shrunk to a third near the 200 dpi one; an effect whose grain is
     // one of the layer's pixels, near in its mean and its spread.
     void theSameLookAt200And600Dpi() {
@@ -466,10 +475,9 @@ private slots:
                 }
             return px;
         };
-        const double side_mm = kInch * 0.6;
-        const auto low_doc = precise_page(120, 120, picture(120), false, side_mm);
-        const auto high_doc = precise_page(360, 360, picture(360), false, side_mm);
-        QString table;
+        const auto low_doc = precise_page(200, 200, picture(200), false);
+        const auto high_doc = precise_page(600, 600, picture(600), false);
+        QString table, far;
         for (const core::GalleryEffectKind& e : core::gallery_effects()) {
             const std::string name(e.filter);
             const Json op{{"op", "filter_raster"}, {"page", 1}, {"id", "paint"}, {"kind", "filter_gallery"}, {"effects", Json::array({Json{{"filter", name}}})}};
@@ -477,13 +485,13 @@ private slots:
             const auto high = pixels_of(*layer_of(run(high_doc, op).doc, "paint").color_raster);
             double differs = 0, count = 0;
             std::array<double, 3> mean_low{}, mean_high{}, var_low{}, var_high{};
-            for (std::uint32_t y = 0; y < 120; ++y)
-                for (std::uint32_t x = 0; x < 120; ++x) {
+            for (std::uint32_t y = 0; y < 200; ++y)
+                for (std::uint32_t x = 0; x < 200; ++x) {
                     std::array<double, 3> shrunk{};
                     for (std::uint32_t dy = 0; dy < 3; ++dy)
                         for (std::uint32_t dx = 0; dx < 3; ++dx)
-                            for (unsigned c = 0; c < 3; ++c) shrunk[c] += high[std::size_t(y * 3 + dy) * 360 + x * 3 + dx][c] / 9;
-                    const auto& q = low[std::size_t(y) * 120 + x];
+                            for (unsigned c = 0; c < 3; ++c) shrunk[c] += high[std::size_t(y * 3 + dy) * 600 + x * 3 + dx][c] / 9;
+                    const auto& q = low[std::size_t(y) * 200 + x];
                     for (unsigned c = 0; c < 3; ++c) {
                         differs += std::fabs(shrunk[c] - q[c]);
                         count += 1;
@@ -507,14 +515,11 @@ private slots:
                 if (var_low[c] > 1e-6) spread = std::max(spread, std::max(std::sqrt(var_high[c] / var_low[c]), std::sqrt(var_low[c] / std::max(var_high[c], 1e-12))));
             }
             table += QStringLiteral("%1 %2 %3 %4\n").arg(QString::fromStdString(name)).arg(mad, 0, 'f', 4).arg(mean_gap, 0, 'f', 4).arg(spread, 0, 'f', 3);
-            if (kGrained.contains(name)) {
-                QVERIFY2(mean_gap < 0.03 && spread < 1.35, qPrintable(QStringLiteral("%1: mean %2, spread %3").arg(QString::fromStdString(name)).arg(mean_gap).arg(spread)));
-            } else {
-                QVERIFY2(mad < 0.06, qPrintable(QStringLiteral("%1: %2").arg(QString::fromStdString(name)).arg(mad)));
-                QVERIFY2(mean_gap < 0.03, qPrintable(QStringLiteral("%1: mean %2").arg(QString::fromStdString(name)).arg(mean_gap)));
-            }
+            const bool near = kGrained.contains(name) ? mean_gap < 0.03 && spread < 1.35 : mad < 0.06 && mean_gap < 0.03;
+            if (!near) far += QStringLiteral("%1 (shrunk %2, mean %3, spread %4); ").arg(QString::fromStdString(name)).arg(mad).arg(mean_gap).arg(spread);
         }
         if (qEnvironmentVariableIsSet("GENKO_GALLERY_TABLE")) qInfo("%s", qPrintable(table));
+        QVERIFY2(far.isEmpty(), qPrintable(far));
     }
 
     // --- a smart filter --------------------------------------------------------------------------------------------------------
