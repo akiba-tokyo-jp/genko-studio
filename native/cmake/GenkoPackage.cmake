@@ -74,6 +74,10 @@ install(FILES "${GENKO_SOURCE_ROOT}/third_party/freetype/FTL.TXT" "${GENKO_SOURC
 install(FILES "${GENKO_SOURCE_ROOT}/third_party/cpython/LICENSE" "${GENKO_SOURCE_ROOT}/third_party/cpython/LICENSE-SRE"
               "${GENKO_SOURCE_ROOT}/third_party/cpython/LICENSE-Unicode" DESTINATION "${_genko_doc}/licenses/cpython")
 install(FILES "${GENKO_SOURCE_ROOT}/third_party/optimized-routines/LICENSE-MIT" DESTINATION "${_genko_doc}/licenses/optimized-routines")
+# (PC4 F-f: BLAKE3's C implementation, built into the program: its licences and where it came from)
+install(FILES "${GENKO_SOURCE_ROOT}/third_party/blake3/LICENSE_CC0" "${GENKO_SOURCE_ROOT}/third_party/blake3/LICENSE_A2"
+              "${GENKO_SOURCE_ROOT}/third_party/blake3/LICENSE_A2LLVM" "${GENKO_SOURCE_ROOT}/third_party/blake3/PROVENANCE.json"
+        DESTINATION "${_genko_doc}/licenses/blake3")
 if(UNIX AND NOT APPLE)
   install(PROGRAMS "${GENKO_SOURCE_ROOT}/package/linux/install.sh" "${GENKO_SOURCE_ROOT}/package/linux/uninstall.sh" DESTINATION ".")
   # (a template for install.sh, which writes the menu item with the folder it put Genko in: not itself a menu item)

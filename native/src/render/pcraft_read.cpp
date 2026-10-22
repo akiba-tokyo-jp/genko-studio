@@ -116,7 +116,13 @@ public:
         account(length);
         const std::string name = "tiles/" + hash + ".zst";
         const std::string packed = source_.get(name, length + length / 8 + 4096);
-        std::string data = zstd::decompress_exact(packed, length);
+        std::string data;
+        try {
+            data = zstd::decompress_exact(packed, length);
+        } catch (const core::Error& error) {
+            if (error.code() != "format") throw;
+            broken(name + ": " + error.what());
+        }
         if (blake3::hex(data) != hash) broken(name + ": its content does not match its hash");
         return data;
     }
@@ -127,7 +133,13 @@ public:
         const std::string name = "blobs/" + hash + ".zst";
         const std::string packed = source_.get(name, limits_.max_blob_bytes + limits_.max_blob_bytes / 8 + 4096);
         const std::uint64_t room = limits_.max_unpacked_bytes - unpacked_;
-        std::string data = zstd::decompress_bounded(packed, static_cast<std::size_t>(std::min<std::uint64_t>(limits_.max_blob_bytes, room)));
+        std::string data;
+        try {
+            data = zstd::decompress_bounded(packed, static_cast<std::size_t>(std::min<std::uint64_t>(limits_.max_blob_bytes, room)));
+        } catch (const core::Error& error) {
+            if (error.code() != "format") throw;
+            broken(name + ": " + error.what());
+        }
         account(data.size());
         if (blake3::hex(data) != hash) broken(name + ": its content does not match its hash");
         auto bytes = std::make_shared<const std::string>(std::move(data));
@@ -837,10 +849,6 @@ void take_patterns(Ctx& ctx, const Json& list) {
 
 // --- layers ----------------------------------------------------------------------------------------------------------
 
-struct Built {
-    std::vector<core::Layer> layers;
-};
-
 void read_layers(Ctx& ctx, const Json& list, const Json& parent, bool hidden, std::vector<core::Layer>& out);
 
 std::string layer_name(const Json& m) {
@@ -1281,7 +1289,7 @@ void read_layer(Ctx& ctx, const Json& m, const Json& parent, bool hidden, std::v
         bool made = false;
         try {
             made = smart_layer(ctx, layer, content, name, why);
-        } catch (const Unreadable& error) {
+        } catch (const Unreadable&) {
             why = "スマートオブジェクトが読めないため画素にしました";
         }
         if (!made) {
@@ -1303,9 +1311,8 @@ void read_layers(Ctx& ctx, const Json& list, const Json& parent, bool hidden, st
     for (const Json& m : list) {
         try {
             read_layer(ctx, m, parent, hidden, out);
-        } catch (const Unreadable& error) {
+        } catch (const Unreadable&) {
             ctx.notes.name("この版の Genko が読めない形のレイヤーを外しました", layer_name(m));
-            (void)error;
         }
     }
 }

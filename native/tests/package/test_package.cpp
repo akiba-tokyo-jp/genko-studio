@@ -218,7 +218,8 @@ private slots:
                                   "licenses/qt/GPL-3.0.txt", "licenses/pillow/LICENSE", "licenses/freetype/FTL.TXT", "licenses/freetype/LICENSE.TXT",
                                   "licenses/cpython/LICENSE", "licenses/cpython/LICENSE-SRE", "licenses/cpython/LICENSE-Unicode",
                                   "licenses/optimized-routines/LICENSE-MIT", "licenses/lucide/LICENSE", "licenses/photocraft/LICENSE-MIT",
-                                  "licenses/photocraft/NOTICE.md"}) {
+                                  "licenses/photocraft/NOTICE.md", "licenses/blake3/LICENSE_CC0", "licenses/blake3/LICENSE_A2",
+                                  "licenses/blake3/LICENSE_A2LLVM"}) {  // (PC4 F-f: BLAKE3)
             QVERIFY2(QFileInfo(doc + QLatin1Char('/') + QString::fromLatin1(there)).size() > 0, there);
         }
         QCOMPARE(QDir(doc + QStringLiteral("/licenses/fonts")).entryList({QStringLiteral("*-OFL.txt")}, QDir::Files).size(), 7);
@@ -265,7 +266,9 @@ private slots:
             {"lcms2", QStringLiteral("| Little CMS 2")}, {"msvc-runtime", QStringLiteral("| Microsoft Visual C++")},
             {"openexr", QStringLiteral("| OpenEXR")}, {"libavif", QStringLiteral("| libavif")}, {"aom", QStringLiteral("| libaom")},
             // (PC4 F-a review: what vcpkg's OpenEXR and libavif build into the Windows program)
-            {"libdeflate", QStringLiteral("| libdeflate")}, {"openjph", QStringLiteral("| OpenJPH")}, {"libyuv", QStringLiteral("| libyuv")}};
+            {"libdeflate", QStringLiteral("| libdeflate")}, {"openjph", QStringLiteral("| OpenJPH")}, {"libyuv", QStringLiteral("| libyuv")},
+            // (PC4 F-f: the .pcraft's compression and hashes)
+            {"zstd", QStringLiteral("| Zstandard")}, {"blake3", QStringLiteral("| BLAKE3")}};
         std::set<std::string> listed;
         std::map<std::string, std::string> relation;
         for (const Json& r : sbom["relationships"]) {
