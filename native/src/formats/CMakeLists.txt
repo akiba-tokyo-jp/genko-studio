@@ -20,5 +20,8 @@ genko_library(genko_formats
     # PC4 F-0 (形式の土台: ページ・層をその深さの絵に、ファイルから 1 ページの本)
     page_picture.cpp
     open_file.cpp
+    # PC4 F-b (ファイルの入口: 本のファイル情報をファイルに、コピーを保存)
+    file_xmp.cpp
+    copy.cpp
   PUBLIC_DEPS genko_render genko_core Qt6::Core
   PRIVATE_DEPS genko_storage ZLIB::ZLIB JPEG::JPEG TIFF::TIFF ${GENKO_LCMS2})

@@ -480,6 +480,9 @@ void set_page_spec(OpContext& c, const BookPageHooks& hooks) {
         if (error.code() == "value" || error.code() == "format") throw OpError(error.what());
         throw;
     }
+    // (PC4 F-b, image-grid@1: the paper made again keeps the grid its 8-bit pages work at — a book opened from a picture
+    // stays at its pixels' grid)
+    spec.grid = c.doc.spec.grid;
     // relayout(episode, spec, move=op.get("move", True) is not False)
     const Json* move = get(c.op, "move");
     const bool overflow = relayout(c.doc, spec, !(move != nullptr && move->is_boolean() && !move->get<bool>()), hooks);

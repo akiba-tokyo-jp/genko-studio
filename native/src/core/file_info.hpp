@@ -63,6 +63,20 @@ Json to_json(const FileInfo& info);
 FileInfo file_info_from_json(const Json& value);
 void check_file_info(const FileInfo& info);
 
+// --- XMP (PC4 F-b; PhotoCraft v0.2.0 crates/engine/src/file_cmds.rs:330-497 read_file_info / write_file_info, MIT) ---
+// The File Info an XMP packet says: dc:creator (its names joined by "; "), photoshop:AuthorsPosition, dc:description,
+// dc:subject, dc:rights, xmpRights:Marked (True: copyrighted, False: public_domain, else not said) and
+// xmpRights:WebStatement, as elements or as attributes of an rdf:Description; `xmp` left empty. Never throws: what is not
+// there is empty.
+FileInfo file_info_from_xmp(std::string_view packet);
+// Its dc:title (the first rdf:li), "" for none.
+std::string xmp_title(std::string_view packet);
+// The packet with those eight items rewritten from `info` and the title from `title` — the empty ones removed, the others
+// in an rdf:Description of their own at the end (several in a packet are XMP) — and every other property kept as it was;
+// a new packet when there is none (or it holds no rdf:RDF). The author and the keywords are split at ";" and "," as
+// PhotoCraft writes its Seq and Bag.
+std::string write_xmp(std::optional<std::string_view> packet, const FileInfo& info, std::string_view title);
+
 // The formats a page can be opened from (native_source's format) and the colours it says the file held.
 inline constexpr std::array<std::string_view, 17> kSourceFormats{"png", "jpeg", "tiff", "webp", "gif", "bmp", "tga", "ico", "pnm",
                                                                   "qoi", "exr", "hdr", "avif", "psd", "psb", "raw", "pcraft"};

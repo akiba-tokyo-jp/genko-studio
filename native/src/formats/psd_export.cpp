@@ -20,6 +20,7 @@
 #include "core/pyops.hpp"
 #include "core/ruby.hpp"
 #include "core/smart.hpp"
+#include "formats/file_xmp.hpp"
 #include "formats/export.hpp"
 #include "formats/output.hpp"
 #include "formats/pillow_save.hpp"
@@ -1643,6 +1644,7 @@ void put_page_psd(detail::Output& output, const core::Document& episode, const c
     const std::int64_t dpi = psd_dpi(episode, dpi_given);
     check_dpi(dpi);
     std::string body = page_psd_bytes(episode, page, dpi, text, report, 0);
+    if (const auto xmp = book_xmp(episode)) body = psd_with_xmp(std::move(body), *xmp);  // (PC4 F-b: the book's File Info, 1060)
     if (dest.has_parent_path()) detail::make_dirs(dest.parent_path());
     output.put(dest, body);
 }

@@ -73,9 +73,14 @@ std::string jpeg_bytes(const render::Image& image, const JpegSave& params = {});
 // 1, L, RGB, CMYK; compression "tiff_lzw", "group4" (1-bit only) or "raw" (none: Image.save's default); strips of about
 // 64 KiB; little-endian.
 struct TiffSave {
+    TiffSave() = default;
+    TiffSave(std::string compression_, std::optional<std::array<double, 2>> dpi_, std::string icc_, std::string xmp_ = {})
+        : compression(std::move(compression_)), dpi(dpi_), icc(std::move(icc_)), xmp(std::move(xmp_)) {}
+
     std::string compression = "tiff_lzw";
     std::optional<std::array<double, 2>> dpi;
     std::string icc;
+    std::string xmp;  // (PC4 F-b: the book's File Info, formats/file_xmp.hpp) an XMLPacket tag (700), when not empty
 };
 
 std::string tiff_bytes(const render::Image& image, const TiffSave& params);

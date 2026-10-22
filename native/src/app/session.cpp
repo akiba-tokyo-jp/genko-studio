@@ -40,7 +40,7 @@ namespace fs = std::filesystem;
 using core::Json;
 
 struct Session::Job {
-    enum class Kind { Save, Probe, Rebase, Recovery, DeleteRecovery, SaveAs, ReadRest };
+    enum class Kind { Save, Probe, Rebase, Recovery, DeleteRecovery, SaveAs, ReadRest, SaveCopy };
     struct Step {
         Action::Kind kind = Action::Kind::Edit;
         DocPtr doc;            // Edit: the book to save
@@ -317,7 +317,8 @@ Session::JobResult Session::execute(const Job& job) {
             r.ok = !ec;
             break;
         }
-        case Job::Kind::SaveAs: {
+        case Job::Kind::SaveAs:
+        case Job::Kind::SaveCopy: {  // (PC4 F-b: コピーを保存… as a book, written as a book saved elsewhere is)
             std::error_code ec;
             if (fs::exists(job.dir / "project.json", ec)) {
                 throw core::Error("exists", "a book is there already: " + core::path_to_utf8(job.dir / "project.json"));
@@ -473,6 +474,7 @@ void Session::finish_reading(const JobResult& r) {
     read_so_far_.reset();
     loading_ = false;
     const DocPtr before = doc_;
+    if (!revert_to_ || !revert_to_->deferred.empty()) revert_to_ = r.doc;  // (復帰: the whole book as it was read)
     base_revision_ = r.revision;
     last_revision_ = r.revision;
     journal_undo_ = r.undo_depth;
@@ -514,6 +516,10 @@ void Session::finish_reading(const JobResult& r) {
         again->ops = change->ops;
         again->recover = change->recover;
         again->before = base;
+        if (change->whole) {  // (復帰 is refused while pages are read: never made again on another book)
+            *failures << QStringLiteral("復帰は、ほかの変更の後には当てませんでした");
+            return nullptr;
+        }
         if (change->recover) {
             // (an adopted recovery point is the whole book already)
             again->journal_ops = change->journal_ops;
@@ -662,6 +668,7 @@ Session::Session(core::Document doc, std::optional<fs::path> dir, Options option
     loading_ = !doc.deferred.empty();
     read_in_parts_ = loading_;
     doc_ = std::make_shared<const core::Document>(std::move(doc));
+    revert_to_ = doc_;  // (復帰: as it was opened, until 保存 is chosen)
     idle_timer_.setSingleShot(true);
     longest_timer_.setSingleShot(true);
     retry_timer_.setSingleShot(true);
@@ -1465,6 +1472,11 @@ void Session::job_done(const JobResult& r) {
         reading_rest_ = false;
         if (loading_ && !discarded_) finish_reading(r);
         break;
+    case Job::Kind::SaveCopy:
+        if (!r.ok) emit notice(r.message, true);
+        emit savedCopy(r.ok, r.message);
+        emit statusChanged();
+        break;
     }
 }
 
@@ -1590,6 +1602,10 @@ void Session::rebase_onto(DocPtr fresh, std::int64_t revision, std::int64_t undo
         if (!change) continue;
         if (change->recover) {
             conflicts_found << QStringLiteral("the recovery point was not taken: the book changed meanwhile");
+            continue;
+        }
+        if (change->whole) {  // (PC4 F-b: 復帰 does not write over a change another writer saved meanwhile)
+            conflicts_found << QStringLiteral("復帰は、その間にほかの変更が保存されたため、当てませんでした");
             continue;
         }
         // A choice of a panel (select_frame) is not in the book: it follows its page by id to the number the page has
@@ -1785,6 +1801,7 @@ void Session::adopt_recovery() {
     change->after = std::make_shared<const core::Document>(std::move(doc));
     recovery_offer_.reset();
     doc_ = change->after;
+    revert_to_ = doc_;  // (復帰: to the recovery point taken, saved now as a new generation)
     // (a recovery is not an undoable edit in the journal: the history starts again from it — the changes of this session
     // already in the journal stay there, counted with the saved changes before them now, or once written)
     for (const auto* list : {&done_, &undone_}) {
@@ -1802,6 +1819,61 @@ void Session::adopt_recovery() {
 }
 
 void Session::decline_recovery() { recovery_offer_.reset(); }
+
+// --- 復帰 and コピーを保存 (PC4 F-b) ------------------------------------------------------------------------------------
+
+bool Session::can_revert() const {
+    return read_only_.empty() && !loading_ && !saving_as_ && !discarded_ && revert_to_ && revert_to_ != doc_;
+}
+
+void Session::mark_saved() {
+    if (!loading_) revert_to_ = doc_;
+}
+
+void Session::revert() {
+    if (saving_as_) throw core::ApplyError("別名保存中です。完了してから復帰してください。", "save_as_busy");
+    if (!read_only_.empty()) throw core::ApplyError("this book is open read-only: " + read_only_, "read_only");
+    if (discarded_) throw core::ApplyError("the book was closed", "closed");
+    if (loading_) throw core::ApplyError("ページを読み込んでいる間は、復帰できません", "page_not_loaded");
+    if (!revert_to_ || revert_to_ == doc_) throw core::ApplyError("最後に保存したときから変わっていません", "nothing_to_revert");
+    // (the book as it was then, as this book: its id, revision and folder its own now)
+    core::Document back = *revert_to_;
+    back.book_id = doc_->book_id;
+    back.revision = doc_->revision;
+    back.asset_dir = doc_->asset_dir;
+    back.read_only_reason.clear();
+    core::ApplyResult result{std::move(back)};
+    const Json ops = Json::array({Json::object({{"op", "revert"}})});
+    result.applied = Json::array({"revert"});
+    result.journal_ops = ops;
+    keep_applied(ops, std::move(result), {});
+    done_.back()->whole = true;
+    revert_to_ = doc_;  // (the book as it was then: 復帰 again has nothing to do — after 取り消し, it comes back here)
+}
+
+void Session::save_copy(const fs::path& dir) {
+    if (discarded_) return;
+    if (loading_) {
+        emit savedCopy(false, QStringLiteral("ページを読み込んでいる間は、コピーを保存できません。読み込みが終わってから、もう一度選んでください。"));
+        return;
+    }
+    if (!read_only_.empty()) {
+        // (a book open read-only for want of something is not written anywhere: nothing would be lost)
+        emit savedCopy(false, qs(read_only_));
+        return;
+    }
+    auto copy = std::make_shared<core::Document>(*doc_);
+    copy->book_id = core::new_book_id();  // (a copy is another book: schema-v4 §2)
+    copy->revision = 0;
+    copy->read_only_reason.clear();
+    Job job;
+    job.kind = Job::Kind::SaveCopy;
+    job.dir = dir;
+    job.actor = actor_;
+    job.lock_wait = options_.lock_wait;
+    job.doc = copy;
+    run(std::move(job));
+}
 
 bool Session::wait_idle(std::chrono::milliseconds timeout) {
     QElapsedTimer clock;

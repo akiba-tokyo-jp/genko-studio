@@ -228,6 +228,21 @@ public:
     void adopt_recovery();
     void decline_recovery();
 
+    // --- 復帰 and コピーを保存 (PC4 F-b, file.revert / file.saveACopy) ----------------------------------------------
+    // 復帰: the book as it was when 保存 was last chosen (mark_saved), else as it was opened (a book read from its folder:
+    // the whole book as read; a book in memory — an opened picture, a new image —: as it was made), as one change that
+    // Undo takes back (written as an edit, its ops [{"op": "revert"}]; 履歴 「復帰」). Its book id, revision and folder
+    // stay the book's. core::ApplyError when it cannot: read-only, pages still read, a 別名で保存 under way, nothing to go
+    // back to ("nothing_to_revert": the book is as it was then). A change of another writer saved meanwhile is not
+    // written over: the revert not saved yet is then a conflict (as an adopted recovery point is).
+    void revert();
+    bool can_revert() const;
+    // 保存 was chosen and the book is saved: 復帰 comes back to the book as it is now.
+    void mark_saved();
+    // コピーを保存… as a book: the book as it is written to a new folder (a copy with a new book id, its assets with it, as
+    // save_as writes one), this session going on where it was. Asynchronous: savedCopy when it is written or not.
+    void save_copy(const std::filesystem::path& dir);
+
     // Tests: how many changes wait to be written (an action each: an edit, an undo or a redo).
     std::size_t waiting() const { return queue_.size(); }
     // Tests: how many of this session's changes are undone in memory (the rest through the journal).
@@ -241,6 +256,7 @@ signals:
     // A notice for the status line (error: in red).
     void notice(const QString& message, bool error);
     void savedAs(bool ok, const QString& message);
+    void savedCopy(bool ok, const QString& message);
 
 private:
     // One change made in this session: the ops, the book before and after (shared: pages are copied only where the
@@ -253,6 +269,7 @@ private:
         DocPtr before;
         DocPtr after;
         bool recover = false;          // adopting a recovery point (saved as action "recover")
+        bool whole = false;            // 復帰: the book put back whole (its ops are not made again on another book)
         std::string txn;               // the transaction that first saved it (the journal's entry for it)
         bool on_disk = false;          // that transaction is committed: undo and redo now go through the journal
         bool undone_on_disk = false;   // a journal undo of it is committed (and no redo since)
@@ -367,6 +384,7 @@ private:
     QDateTime last_saved_;
     std::int64_t last_revision_ = 0;
     std::optional<RecoveryPoint> recovery_offer_;
+    DocPtr revert_to_;  // 復帰's book (mark_saved, or as opened)
     std::optional<std::filesystem::path> saving_as_;
     std::uint64_t next_change_ = 0;
 

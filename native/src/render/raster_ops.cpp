@@ -1047,7 +1047,7 @@ void merge_layers(OpContext& c) {
         auto bytes = composite_color_layers(doc, page, layers);
         into_color_pixels(page.layers[layers.front()], std::move(bytes));
     } else {
-        const Image picture = composite_layers(doc, page, layers, kWorkingDpi);
+        const Image picture = composite_layers(doc, page, layers, raster::working_dpi(page));  // (PC4 F-b: a page of grid "finest" at it)
         into_pixels(page, page.layers[layers.front()], picture);
     }
     Layer& target = page.layers[layers.front()];
@@ -1139,11 +1139,12 @@ void merge_visible(OpContext& c) {
                 (printed && layer.color && !layer.color->empty() && !layer.color_prints))
                 throw NotYetPorted("flatten with different proof/print participation");
         }
-        const Image background=page_background(page,page_px(page,kWorkingDpi),false);
-        picture=composite_layers(doc,page,shown,kWorkingDpi,&background);
+        // (PC4 F-b: a page of grid "finest" at its grid, raster::working_dpi; any other at the working dpi as before)
+        const Image background=page_background(page,page_px(page,raster::working_dpi(page)),false);
+        picture=composite_layers(doc,page,shown,raster::working_dpi(page),&background);
         into_pixels(page,page.layers[shown.front()],picture);finish();return;
     }
-    picture=composite_layers(doc,page,shown,kWorkingDpi);
+    picture=composite_layers(doc,page,shown,raster::working_dpi(page));
     if (copy) {
         Layer layer;
         layer.id = core::truthy_at(op, "id") ? core::py_str(op["id"]) : core::new_id();
@@ -1339,7 +1340,7 @@ void merge_down(OpContext& c) {
             into.shapes = core::vector::make_shapes(std::move(parts));
         }
     } else {
-        const int dpi = kWorkingDpi;
+        const int dpi = raster::working_dpi(page);  // (PC4 F-b: a page of grid "finest" at its grid)
         const Image below = layer_image(page, lower, dpi, &doc);
         const Image above = layer_image(page, upper, dpi, &doc);
         const std::optional<Image> clip = upper.clip ? std::optional<Image>(below.getchannel(3)) : std::nullopt;
@@ -2474,7 +2475,7 @@ void filter_raster_pixels(OpContext& c) {
         throw OpError(error.what());
     }
     if (core::truthy_at(op, "area")) {  // (選択範囲の中だけ)
-        const selection::AreaMask inside = selection::area_mask(core::op_area(op), kWorkingDpi);
+        const selection::AreaMask inside = selection::area_mask(core::op_area(op), raster::dpi_across(page, image.width()));  // (PC4 F-b)
         Image mask = Image::create("L", image.size(), Ink(0));
         mask.paste(inside.mask, Point{static_cast<int>(inside.x0), static_cast<int>(inside.y0)});
         filtered = filters::within(image, filtered, mask);

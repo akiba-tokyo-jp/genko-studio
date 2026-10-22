@@ -182,12 +182,18 @@ core::Mask with_picture(const core::Mask& mask, const Image& picture) {
 
 int grid_dpi(const core::Page& page) {
     const bool precise = page.rgb && page.rgb->depth > 8;
-    if (!page.color && !precise) return kMaskDpi;
+    // (PC4 F-b, image-grid@1: an 8-bit page whose paper says grid "finest" — an opened picture, a new image — as a precise
+    // page, its 8-bit pixel layers counted too)
+    const bool finest_grid = page.spec.grid && *page.spec.grid == "finest";
+    if (!page.color && !precise && !finest_grid) return kMaskDpi;
     double finest = raster::kWorkingDpi;
     for (const core::Layer& layer : page.layers) {
         try {
             if (layer.color_raster) finest = std::max(finest, raster_dpi(page, core::ColorRasterView(*layer.color_raster).width()));
             if (layer.ink_raster) finest = std::max(finest, raster_dpi(page, core::ink_raster_header(*layer.ink_raster).width));
+            if (finest_grid && layer.raster_png && !layer.raster_png->empty()) {
+                finest = std::max(finest, raster_dpi(page, static_cast<std::uint32_t>(std::max(0, picture_size(*layer.raster_png).width))));
+            }
         } catch (const core::Error&) {  // (a raster this build cannot read: not looked at)
         }
     }

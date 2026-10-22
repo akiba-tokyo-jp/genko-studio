@@ -448,7 +448,7 @@ void liquify(OpContext& c) {
     }
     if ((layer.raster_png && !layer.raster_png->empty()) || !layer.patches.empty()) {
         // pixels: each place fetches from where the dabs pulled it
-        constexpr int dpi = raster::kWorkingDpi;
+        const int dpi = raster::working_dpi(page);  // (PC4 F-b: a page of grid "finest" at its grid; any other at the working dpi)
         Layer pixels_only = layer;
         pixels_only.strokes = core::empty_strokes();
         pixels_only.shapes = core::vector::empty_shapes();  // (pen-shapes@1: its parts bent above, not drawn in)

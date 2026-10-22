@@ -15,7 +15,16 @@ namespace genko::render::raster {
 
 inline constexpr int kWorkingDpi = 200;
 
-// raster.ensure_raster: the layer's pixels ("RGBA"), or a clear page at dpi when it has none.
+// image-grid@1 (PC4 F-b, design 8-2 (b)): the grid an 8-bit page works at. On a page whose paper says grid "finest" (an
+// opened picture, a new image) the finest grid of its pixel layers (render/layer_masks grid_dpi: 200 to 600 dpi) — its
+// new pixel layers made at it, its merges and its pixels' own ops kept at it —; kWorkingDpi on any other page (as before).
+int working_dpi(const core::Page& page);
+// The resolution `width` pixels across the page are at (a raster layer's own: an area is laid on its pixels so) on a page
+// of grid "finest"; `fallback` on any other page (its rasters are at kWorkingDpi: the same pixels as before).
+int dpi_across(const core::Page& page, int width, int fallback = kWorkingDpi);
+
+// raster.ensure_raster: the layer's pixels ("RGBA"), or a clear page at dpi when it has none (PC4 F-b: at working_dpi on a
+// page of grid "finest").
 Image ensure_raster(const core::Page& page, const core::Layer& layer, int dpi = kWorkingDpi);
 
 // raster.save_raster: the picture as the layer's PNG, its relpath "pages/<NNN>/<role>.png".

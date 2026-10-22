@@ -112,7 +112,7 @@ void each_pixel(const core::Document& doc, const core::Page& page, const core::L
     const Image picture = raster::layer_pixels(page, layer).convert("RGBA");
     std::string inside;
     if (area != nullptr) {
-        const selection::AreaMask mask = selection::area_mask(*area, raster::kWorkingDpi);
+        const selection::AreaMask mask = selection::area_mask(*area, raster::dpi_across(page, picture.width()));  // (PC4 F-b: its own grid)
         Image full = Image::create("L", picture.size(), Ink(0));
         full.paste(mask.mask, Point{static_cast<int>(mask.x0), static_cast<int>(mask.y0)});
         inside = full.tobytes();
@@ -158,7 +158,7 @@ std::array<std::uint64_t, 256> counted(const Image* rgba, const core::Document& 
     if (rgba != nullptr) {  // (an 8-bit layer's picture, the area over the page at the working resolution)
         std::string inside;
         if (area != nullptr) {
-            const selection::AreaMask mask = selection::area_mask(*area, raster::kWorkingDpi);
+            const selection::AreaMask mask = selection::area_mask(*area, raster::dpi_across(page, rgba->width()));  // (PC4 F-b: its own grid)
             Image full = Image::create("L", rgba->size(), Ink(0));
             full.paste(mask.mask, Point{static_cast<int>(mask.x0), static_cast<int>(mask.y0)});
             inside = full.tobytes();

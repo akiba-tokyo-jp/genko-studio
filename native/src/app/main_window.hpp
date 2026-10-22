@@ -25,6 +25,7 @@
 #include "app/canvas.hpp"
 #include "app/pen.hpp"
 #include "app/session.hpp"
+#include "render/codecs/format.hpp"
 #include "render/image.hpp"
 #include "render/proof.hpp"
 
@@ -116,6 +117,10 @@ struct Document {
     // contents this tab shows (its page; every op it sends goes there), and the name of the layer it was opened from.
     std::optional<std::string> contents;
     QString contents_title;
+    // PC4 F-b: a book in memory made as a picture is (an opened file — `source` its file —, a new image, a page
+    // duplicated): its tab named by its title alone; one opened from a file and not changed since is closed without asking.
+    bool picture = false;
+    std::optional<std::filesystem::path> source;
     QString title() const;
 };
 
@@ -630,6 +635,10 @@ public:
 
 protected:
     void closeEvent(QCloseEvent* event) override;
+    // PC4 F-b (ウィンドウへのドロップ, 節 F 5.3): a .genko folder or a file dropped opens (open_path); a file dropped on the
+    // page is placed embedded (埋め込みを配置…, PC3).
+    void dragEnterEvent(QDragEnterEvent* event) override;
+    void dropEvent(QDropEvent* event) override;
     void changeEvent(QEvent* event) override;  // (smart-objects@1: the window come back to looks at its linked files)
     void showEvent(QShowEvent* event) override;
     void resizeEvent(QResizeEvent* event) override;
@@ -663,6 +672,37 @@ private:
     void build_file_actions();
     void build_file_menu(QMenu* file);
     QMenu* export_menu_ = nullptr;  // ファイル → 書き出し
+
+public:
+    // PC4 F-b (app/main_window_file.cpp; SPEC.md FILE-01, the user's decision 4): ファイル's entrances.
+    // A book's folder (open_project), or a file opened as a book of one page in memory (formats::open_file, read on a
+    // worker; `as`: 指定形式で開く…'s format) — the file never written —, put first in 最近使用したファイルを開く. A file
+    // gone (a recent one) is said and taken out of the list.
+    void open_path(const std::filesystem::path& path, std::optional<render::codecs::Format> as = std::nullopt);
+    // 開く… / 指定形式で開く…: the open window (app/open_dialog.hpp; several chosen: each in a tab of its own).
+    void open_dialog(bool as);
+    // A book in memory (an opened file, a new image, a page duplicated) in a tab of its own, its notes said; カラー設定's
+    // policies applied to it as to a book opened.
+    void add_picture_book(core::Document doc, const std::vector<std::string>& notes, std::optional<std::filesystem::path> source = std::nullopt);
+    // すべてを閉じる (file.closeAll): every book of this window closed (each asked first as 閉じる asks), the window left
+    // with an untitled book; その他を閉じる (file.closeOthers): the others, the one in front kept. False: one was kept.
+    bool close_all();
+    bool close_others();
+    // 復帰 (file.revert, F12): the book as it was when 保存 was last chosen, else as it was opened (Session::revert: one
+    // change, undone by 取り消し).
+    void revert();
+    // コピーを保存… (file.saveACopy): the book unchanged, a copy written — a .genko (Session::save_copy) or the page in
+    // front as PSD, TIFF, PNG or JPEG (formats::write_copy; the losses asked about first).
+    void save_copy();
+    // A copy of the page in front at `path` (its format by its extension); false when not written.
+    bool save_copy_to(const QString& path);
+    // ファイル情報… (file.fileInfo): app/file_info_dialog.hpp, set_file_info.
+    void file_info_dialog();
+    // 画像 → 複製… (image.duplicate): the page in front as a book of its own in memory (its merged picture alone when
+    // asked).
+    void duplicate_dialog();
+
+private:
     void path_drawn(const core::Json& subpath);
     void path_edited(const core::Json& path);
     // pen-shapes@1 (PC3 C-b, app/main_window_shapes.cpp): the shape tools and the shape parts' commands, their menus
@@ -711,7 +751,8 @@ private:
     void redo();
     void save();
     void save_as();
-    bool save_as_and_wait(const QString& verb, std::shared_ptr<Session> origin = {});
+    // (`chosen`: the place asked for already — 別名で保存…'s, PC4 F-b —, else asked here)
+    bool save_as_and_wait(const QString& verb, std::shared_ptr<Session> origin = {}, const QString& chosen = {});
     void new_book();
     void open_book();
     void split(const QString& axis);

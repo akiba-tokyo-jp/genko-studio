@@ -79,6 +79,16 @@ int ui_font_pt() { return settings()->value(QStringLiteral("ui/font_pt"), 0).toI
 
 QString default_paper() { return settings()->value(QStringLiteral("new/paper"), QString()).toString(); }
 
+int recent_count() {
+    bool ok = false;
+    const int value = settings()->value(QStringLiteral("files/recent_count"), kRecentDefault).toInt(&ok);
+    return ok ? std::clamp(value, 0, kRecentMax) : kRecentDefault;
+}
+
+bool lowercase_extension() { return truthy(settings()->value(QStringLiteral("files/lowercase_extension"), QStringLiteral("true"))); }
+
+bool ignore_exif_profile() { return truthy(settings()->value(QStringLiteral("files/ignore_exif_profile"), QStringLiteral("false"))); }
+
 int save_after_ms() {
     bool ok = false;
     const int value = settings()->value(QStringLiteral("save/after_ms"), kSaveAfterDefault).toInt(&ok);
@@ -631,10 +641,7 @@ PreferencesDialog::PreferencesDialog(MainWindow* window) : QDialog(window), wind
         {QStringLiteral("描く・操作"),
          {{QStringLiteral("ペンのカーソル"), cursor}, {QStringLiteral("Alt を押している間"), alt_tool}, {QStringLiteral("Ctrl を押している間"), ctrl_tool},
           {QString(), per_tool}, {QString(), hold_swap}, {QString(), radial}}},
-        {QStringLiteral("長い時間の作業"), {{QStringLiteral("休憩の案内"), rest}, {QString(), motion}, {QString(), requests}}},
-        {QStringLiteral("原稿と保存"),
-         {{QStringLiteral("新しい原稿の用紙"), paper}, {QStringLiteral("変更を保存するまで"), save_after}, {QStringLiteral("バックアップの置き場所"), backup_row},
-          {QStringLiteral("バックアップの間隔"), backup_minutes}, {QStringLiteral("バックアップの数"), backup_keep}}}};
+        {QStringLiteral("長い時間の作業"), {{QStringLiteral("休憩の案内"), rest}, {QString(), motion}, {QString(), requests}}}};
     for (const auto& [head, rows] : sections) {
         wl->addRow(look::section(head));
         for (const auto& [label, widget] : rows) wl->addRow(label, widget);
@@ -646,6 +653,44 @@ PreferencesDialog::PreferencesDialog(MainWindow* window) : QDialog(window), wind
     scroll->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
     scroll->setWidget(work);
     tabs->addTab(scroll, QStringLiteral("表示・作業"));
+    // ファイル管理 (PC4 F-b, edit.preferences.fileHandling: 原稿と保存 and the files' own)
+    QWidget* files_page = nullptr;
+    {
+        recent_count = new QSpinBox;
+        recent_count->setObjectName(QStringLiteral("prefs_recent_count"));
+        recent_count->setRange(0, kRecentMax);
+        recent_count->setSuffix(QStringLiteral(" 個"));
+        recent_count->setValue(preferences::recent_count());
+        recent_count->setToolTip(QStringLiteral("ファイル → 最近使用したファイルを開く に並べる原稿・画像の数"));
+        lowercase_extension = new QCheckBox(QStringLiteral("拡張子を小文字にする"));
+        lowercase_extension->setObjectName(QStringLiteral("prefs_lowercase_extension"));
+        lowercase_extension->setChecked(preferences::lowercase_extension());
+        lowercase_extension->setToolTip(QStringLiteral("コピーを保存… で書くファイルの拡張子（.png・.jpg など）を小文字にします"));
+        ignore_exif_profile = new QCheckBox(QStringLiteral("EXIF のプロファイルのタグを無視"));
+        ignore_exif_profile->setObjectName(QStringLiteral("prefs_ignore_exif_profile"));
+        ignore_exif_profile->setChecked(preferences::ignore_exif_profile());
+        ignore_exif_profile->setToolTip(QStringLiteral("プロファイルを持たない画像を開くとき、EXIF の「sRGB」の印を見ずに作業用の RGB を割り当てます"));
+        auto* compatible = new QLabel(QStringLiteral("PSD と PSB の互換性を優先: 常に（Genko の PSD はいつも統合した画像を持ちます）"));
+        compatible->setWordWrap(true);
+        theme::role(compatible, "hint");
+        auto* page = new QWidget;
+        QFormLayout* rows = look::form();
+        page->setLayout(rows);
+        rows->addRow(look::section(QStringLiteral("原稿と保存")));
+        for (const auto& [label, widget] : std::vector<std::pair<QString, QWidget*>>{
+                 {QStringLiteral("新しい原稿の用紙"), paper}, {QStringLiteral("変更を保存するまで"), save_after},
+                 {QStringLiteral("バックアップの置き場所"), backup_row}, {QStringLiteral("バックアップの間隔"), backup_minutes},
+                 {QStringLiteral("バックアップの数"), backup_keep}}) {
+            rows->addRow(label, widget);
+        }
+        rows->addRow(look::section(QStringLiteral("ファイル")));
+        rows->addRow(QStringLiteral("最近使用したファイルの数"), recent_count);
+        rows->addRow(QString(), lowercase_extension);
+        rows->addRow(QString(), ignore_exif_profile);
+        rows->addRow(QString(), compatible);
+        look::quiet_labels(rows);
+        files_page = page;
+    }
     // 透明部分・色域 (edit.preferences.transparencyAndGamut)
     {
         const auto store = settings();
@@ -702,6 +747,7 @@ PreferencesDialog::PreferencesDialog(MainWindow* window) : QDialog(window), wind
         tabs->addTab(page, QStringLiteral("透明部分・色域"));
         show_checker();
     }
+    tabs->addTab(files_page, QStringLiteral("ファイル管理"));
     auto* buttons = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel);
     buttons->button(QDialogButtonBox::Ok)->setText(QStringLiteral("決める"));
     buttons->button(QDialogButtonBox::Cancel)->setText(QStringLiteral("やめる"));
@@ -714,7 +760,7 @@ PreferencesDialog::PreferencesDialog(MainWindow* window) : QDialog(window), wind
     pages_list->setObjectName(QStringLiteral("prefsNav"));
     pages_list->setFixedWidth(150);
     int page = 0;
-    for (const char* picture : {"search", "pen", "settings", "kind_tone"}) {
+    for (const char* picture : {"search", "pen", "settings", "kind_tone", "open"}) {
         pages_list->addItem(new QListWidgetItem(icons::icon(picture), tabs->tabText(page++)));
     }
     connect(pages_list, &QListWidget::currentRowChanged, tabs, &QTabWidget::setCurrentIndex);
@@ -853,6 +899,9 @@ void PreferencesDialog::save() {
     store->setValue(QStringLiteral("backup/folder"), backup_folder->text().trimmed());
     store->setValue(QStringLiteral("backup/minutes"), backup_minutes->value());
     store->setValue(QStringLiteral("backup/keep"), backup_keep->value());
+    store->setValue(QStringLiteral("files/recent_count"), recent_count->value());
+    store->setValue(QStringLiteral("files/lowercase_extension"), lowercase_extension->isChecked() ? QStringLiteral("true") : QStringLiteral("false"));
+    store->setValue(QStringLiteral("files/ignore_exif_profile"), ignore_exif_profile->isChecked() ? QStringLiteral("true") : QStringLiteral("false"));
     store->setValue(QStringLiteral("view/checker_size"), checker_size->currentData());
     store->setValue(QStringLiteral("view/checker_colors"), checker_colours->currentData());
     store->setValue(QStringLiteral("view/checker_light"), checker_light->property("colour").value<QColor>().name());

@@ -734,6 +734,7 @@ void MainWindow::build_menus() {
     frames->addAction(action("act_frame_numbers"));
     pages->addSeparator();
     build_page_size_menu(pages);  // (PC3 C-e: Photoshop's イメージ's paper commands, main_window_page_size.cpp)
+    pages->addAction(action("act_duplicate_image"));  // (PC4 F-b: イメージ → 複製…, after すべての領域を表示 as Photoshop's)
     build_line_menus(pages);  // (台詞, ストーリーエディター, 台詞の検索・置換: main_window_lines.cpp)
     build_path_menus(file, view, tools, layers);  // (PC3 C-a: the paths' commands — ページ → 台詞's too —, app/main_window_paths.cpp)
     build_shape_menus(edit, view, tools, layers);  // (PC3 C-b: the shape tools and the shape parts' commands, app/main_window_shapes.cpp)

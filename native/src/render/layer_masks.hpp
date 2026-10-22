@@ -23,8 +23,9 @@ Image shown(const core::Page& page, const core::Mask& mask, const Image& decoded
 
 // The grid a page's layer masks are made at (set_layer_mask, paint_mask, mask_from_transparency): 150 dpi on an 8-bit RGB
 // page, as every mask before; on a precise (16, 32 bits) or ink page the finest grid of its pixel layers — the working
-// 200 dpi at least, 600 dpi at most (the coordinator's 8-2 (b)). A mask made before keeps its own picture: it is stretched
-// over the page whatever its size.
+// 200 dpi at least, 600 dpi at most (the coordinator's 8-2 (b)) —, and so on an 8-bit page whose paper says grid
+// "finest" (image-grid@1, PC4 F-b: an opened picture, a new image), its 8-bit pixel layers counted too. A mask made before
+// keeps its own picture: it is stretched over the page whatever its size.
 int grid_dpi(const core::Page& page);
 // The page in pixels at that grid.
 Size grid_size(const core::Page& page);

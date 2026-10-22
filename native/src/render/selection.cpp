@@ -926,7 +926,8 @@ bool only_key(const Json& area, std::string_view key) {
 
 int grid_dpi(const core::Page& page) {
     const bool precise = page.rgb && page.rgb->depth > 8;
-    return page.color || precise ? layer_masks::grid_dpi(page) : kSelDpi;
+    const bool finest = page.spec.grid && *page.spec.grid == "finest";  // (PC4 F-b, image-grid@1)
+    return page.color || precise || finest ? layer_masks::grid_dpi(page) : kSelDpi;
 }
 
 Image to_mask(const Json& area, const core::Page& page, const core::Document* episode, int dpi) {

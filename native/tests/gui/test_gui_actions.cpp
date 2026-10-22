@@ -26,6 +26,7 @@
 #include "app/inject.hpp"
 #include "app/main_window.hpp"
 #include "app/navigator.hpp"
+#include "app/open_dialog.hpp"
 #include "app/pages_panel.hpp"
 #include "app/preferences.hpp"
 #include "app/templates.hpp"
@@ -353,7 +354,9 @@ private slots:
         // シャープ（輪郭のみ）・輪郭以外をぼかす as act_filter_blur, act_filter_blur_more, act_filter_sharpen, act_filter_sharpen_more,
         // act_filter_sharpen_edges, act_filter_despeckle; 漫画's five act_filter_manga_<kind>) and 前回のフィルター (act_filter_last)
         // — theirs (test_gui_filters).
-        QCOMPARE(w->actions_by_name().size(), std::size_t{543});
+        // and the 1 of PC4 F-b (SPEC FILE-01) — ページ → 複製… (act_duplicate_image, image.duplicate) — theirs (test_gui_file),
+        // which connects F-0's six frames of ファイル too.
+        QCOMPARE(w->actions_by_name().size(), std::size_t{544});
         QVERIFY(w->action("act_chat_approval"));
         QVERIFY(w->action("act_style"));
         QVERIFY(w->action("act_exposure"));
@@ -395,8 +398,8 @@ private slots:
     }
 
     // PC4 F-0 (SPEC FILE-01; 節 F 5.1・5.2): ファイル in Photoshop's order and names — the book's export is 書き出し ▸
-    // 原稿を書き出す… (Ctrl+E) —, and 節 F's new commands in their places with Photoshop's keys: frames that say they are
-    // not in this build yet and change nothing until F-b and F-c connect them.
+    // 原稿を書き出す… (Ctrl+E) —, and 節 F's new commands in their places with Photoshop's keys: F-b's connected (what they
+    // do: test_gui_file), F-c's frames that say they are not in this build yet and change nothing until F-c connects them.
     void theFileMenuIsPhotoshops() {
         Studio studio;
         MainWindow* w = studio.window.get();
@@ -433,12 +436,18 @@ private slots:
                                              QStringLiteral("カラールックアップテーブル…")}));
         QCOMPARE(studio.act("act_export")->shortcuts(), QList<QKeySequence>{QKeySequence(QStringLiteral("Ctrl+E"))});
         QCOMPARE(studio.act("act_print")->text(), QStringLiteral("プリント…"));
-        // (節 F's new ones: Photoshop's keys; each says it is not in this build yet, the book unchanged)
+        // (節 F's new ones: Photoshop's keys — F-b's connected (PC4 F-b: test_gui_file says what they do) —; F-c's each say
+        // they are not in this build yet, the book unchanged)
+        const std::vector<std::pair<const char*, const char*>> connected{
+            {"act_open_as", "Ctrl+Alt+Shift+O"}, {"act_close_all", "Ctrl+Alt+W"}, {"act_close_others", "Ctrl+Alt+P"},
+            {"act_save_copy", "Ctrl+Alt+S"},     {"act_revert", "F12"},           {"act_file_info", "Ctrl+Alt+Shift+I"}};
+        for (const auto& [name, key] : connected) {
+            QAction* a = studio.act(name);
+            QVERIFY2(a != nullptr, name);
+            QCOMPARE(a->shortcuts(), QList<QKeySequence>{QKeySequence(QString::fromLatin1(key))});
+        }
         const std::vector<std::pair<const char*, const char*>> frames{
-            {"act_open_as", "Ctrl+Alt+Shift+O"}, {"act_close_all", "Ctrl+Alt+W"},   {"act_close_others", "Ctrl+Alt+P"},
-            {"act_save_copy", "Ctrl+Alt+S"},     {"act_revert", "F12"},             {"act_quick_export_png", ""},
-            {"act_export_as", "Ctrl+Alt+Shift+W"}, {"act_export_prefs", ""},        {"act_save_for_web", "Ctrl+Alt+Shift+S"},
-            {"act_file_info", "Ctrl+Alt+Shift+I"}};
+            {"act_quick_export_png", ""}, {"act_export_as", "Ctrl+Alt+Shift+W"}, {"act_export_prefs", ""}, {"act_save_for_web", "Ctrl+Alt+Shift+S"}};
         const std::int64_t revision = studio.doc().revision;
         const std::size_t books = w->documents().size();
         for (const auto& [name, key] : frames) {
@@ -937,8 +946,12 @@ private slots:
         // 開く…: another book in a new tab
         const fs::path other = path_of(studio.dir.filePath("other.genko"));
         write_book(other, new_doc(2, "別の本"));
-        studio.answers->responder->existing_dir = [other](const QString& caption, const QString&) {
-            return caption == QStringLiteral("原稿（.genko のフォルダ）を開く") ? qpath(other) : QString();
+        // (PC4 F-b: Genko's own open window — a .genko folder or a file, app/open_dialog.hpp — in place of the folder's)
+        studio.answers->responder->exec = [other](QDialog* dialog) {
+            auto* open = qobject_cast<genko::app::OpenDialog*>(dialog);
+            if (open == nullptr) return 0;
+            open->choose({qpath(other)});
+            return static_cast<int>(QDialog::Accepted);
         };
         studio.trigger("act_open");
         QVERIFY(wait_for([&] { return w->documents().size() == 2; }));

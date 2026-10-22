@@ -8,6 +8,7 @@
 #include "core/error.hpp"
 #include "core/pynum.hpp"
 #include "formats/export.hpp"
+#include "formats/file_xmp.hpp"
 #include "formats/output.hpp"
 #include "formats/pillow_save.hpp"
 #include "render/colour.hpp"
@@ -21,16 +22,20 @@ namespace {
 
 // profiles._save: the picture as RGB, at path with the suffix .jpg (fmt "jpeg": quality, optimized) or .png
 // (optimized), with the sRGB profile (made anew for each file, as Python's _srgb is).
-fs::path save(detail::Output& output, const Image& image, const fs::path& path, std::string_view fmt, int quality) {
+// (PC4 F-b, file-info@1: `xmp`, the book's File Info, in each file — none for a book with none: the files as before)
+fs::path save(detail::Output& output, const Image& image, const fs::path& path, std::string_view fmt, int quality,
+              const std::optional<std::string>& xmp = std::nullopt) {
     const std::string icc = render::colour::srgb_icc();
     const Image rgb = image.mode() == "RGB" ? image : image.convert("RGB");
     if (fmt == "jpeg") {
         const fs::path file = detail::with_suffix(path, ".jpg");
-        output.put(file, jpeg_bytes(rgb, JpegSave{quality, true, icc}));
+        std::string bytes = jpeg_bytes(rgb, JpegSave{quality, true, icc});
+        output.put(file, xmp ? jpeg_with_xmp(std::move(bytes), *xmp) : bytes);
         return file;
     }
     const fs::path file = detail::with_suffix(path, ".png");
-    output.put(file, png_bytes(rgb, PngSave{std::nullopt, icc, true}));
+    std::string bytes = png_bytes(rgb, PngSave{std::nullopt, icc, true});
+    output.put(file, xmp ? png_with_xmp(std::move(bytes), *xmp) : bytes);
     return file;
 }
 
@@ -74,6 +79,7 @@ std::vector<fs::path> export_webtoon(const core::Document& episode, const fs::pa
     if (max_height == 0 && total > 0) throw core::PyValueError("cannot write empty image");
     detail::Output output;
     std::vector<fs::path> written;
+    const std::optional<std::string> xmp = book_xmp(episode);
     std::map<std::size_t, Image> cache;
     std::int64_t start = 0;
     while (start < total) {
@@ -91,7 +97,7 @@ std::vector<fs::path> export_webtoon(const core::Document& episode, const fs::pa
         for (auto it = cache.begin(); it != cache.end();) {  // pages fully above the next slice are no longer needed
             it = tops[it->first] + heights[it->first] <= end ? cache.erase(it) : std::next(it);
         }
-        written.push_back(save(output, slice, detail::join(dest, detail::padded(core::Num(static_cast<std::int64_t>(written.size()) + 1), 3)), fmt, quality));
+        written.push_back(save(output, slice, detail::join(dest, detail::padded(core::Num(static_cast<std::int64_t>(written.size()) + 1), 3)), fmt, quality, xmp));
         start = end;
     }
     output.commit();
@@ -103,13 +109,14 @@ std::vector<fs::path> export_sns(const core::Document& episode, const fs::path& 
     detail::make_dirs(dest);
     detail::Output output;
     std::vector<fs::path> written;
+    const std::optional<std::string> xmp = book_xmp(episode);
     for (const auto& page : episode.pages) {
         const auto [trim_w, trim_h] = page->spec.trim_size();
         const double longest = std::max(trim_w.value(), trim_h.value());
         const int dpi = static_cast<int>(std::max<std::int64_t>(36, core::py_round_int(long_edge / (longest / 25.4))));
         Image image = trimmed(*page, episode, dpi);
         image.thumbnail(render::Size{long_edge, long_edge}, render::Resample::Lanczos);
-        written.push_back(save(output, image, detail::join(dest, stem(episode) + "_p" + detail::padded(page->index, 3)), fmt, quality));
+        written.push_back(save(output, image, detail::join(dest, stem(episode) + "_p" + detail::padded(page->index, 3)), fmt, quality, xmp));
     }
     if (spreads) {
         std::vector<core::Num> done;
@@ -130,7 +137,7 @@ std::vector<fs::path> export_sns(const core::Document& episode, const fs::path& 
             image.thumbnail(render::Size{long_edge, long_edge}, render::Resample::Lanczos);
             written.push_back(save(output, image,
                                    detail::join(dest, stem(episode) + "_spread_" + detail::padded(first, 3) + "-" + detail::padded(second, 3)), fmt,
-                                   quality));
+                                   quality, xmp));
         }
     }
     output.commit();

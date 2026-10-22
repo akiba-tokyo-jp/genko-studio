@@ -113,7 +113,7 @@ int run_app(int argc, char** argv) {
     auto* window = new MainWindow;
     window->setAttribute(Qt::WA_DeleteOnClose);
     window->show();
-    window->open_project(*path);
+    window->open_path(*path);  // (PC4 F-b: a book's folder, or a file opened as a book of one page in memory)
     for (const QString& url : std::exchange(waiting, {})) window->open_link_when_ready(url);
     const int code = QApplication::exec();
     // (windows still open when the loop was ended some other way: closed without asking, their books as they are)

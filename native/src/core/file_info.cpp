@@ -140,6 +140,207 @@ void check_file_info(const FileInfo& info) {
     check_asset(info.xmp, what + "'s xmp");
 }
 
+// --- XMP ---------------------------------------------------------------------------------------------------------------
+
+namespace {
+
+// The items File Info edits: (the property, its container: Alt, Seq, Bag, or "" for a simple one).
+struct XmpField {
+    std::string_view prop;
+    std::string_view kind;
+};
+constexpr XmpField kTitle{"dc:title", "Alt"};
+constexpr XmpField kCreator{"dc:creator", "Seq"};
+constexpr XmpField kDescription{"dc:description", "Alt"};
+constexpr XmpField kSubject{"dc:subject", "Bag"};
+constexpr XmpField kRights{"dc:rights", "Alt"};
+constexpr XmpField kPosition{"photoshop:AuthorsPosition", ""};
+constexpr std::string_view kMarked = "xmpRights:Marked";
+constexpr std::string_view kWebStatement = "xmpRights:WebStatement";
+
+std::string replace_all(std::string text, std::string_view from, std::string_view to) {
+    for (std::size_t at = text.find(from); at != std::string::npos; at = text.find(from, at + to.size())) text.replace(at, from.size(), to);
+    return text;
+}
+
+std::string xml_escape(std::string_view text) {
+    std::string out;
+    for (const char c : text) {
+        switch (c) {
+        case '&': out += "&amp;"; break;
+        case '<': out += "&lt;"; break;
+        case '>': out += "&gt;"; break;
+        case '"': out += "&quot;"; break;
+        default: out += c;
+        }
+    }
+    return out;
+}
+
+std::string xml_unescape(std::string_view text) {
+    std::string out(text);
+    out = replace_all(std::move(out), "&lt;", "<");
+    out = replace_all(std::move(out), "&gt;", ">");
+    out = replace_all(std::move(out), "&quot;", "\"");
+    out = replace_all(std::move(out), "&apos;", "'");
+    return replace_all(std::move(out), "&amp;", "&");
+}
+
+std::string trimmed(std::string_view text) {
+    const auto space = [](char c) { return c == ' ' || c == '\t' || c == '\n' || c == '\r'; };
+    std::size_t a = 0, b = text.size();
+    while (a < b && space(text[a])) ++a;
+    while (b > a && space(text[b - 1])) --b;
+    return std::string(text.substr(a, b - a));
+}
+
+struct Found {
+    std::size_t start = 0;
+    std::size_t end = 0;
+    std::string_view inner;
+};
+
+// The element <tag …>…</tag> (its first), as file_cmds.rs find_element.
+std::optional<Found> find_element(std::string_view xmp, std::string_view tag) {
+    const std::string open = "<" + std::string(tag);
+    std::size_t from = 0;
+    for (std::size_t i = xmp.find(open, from); i != std::string_view::npos; i = xmp.find(open, from)) {
+        const std::size_t after = i + open.size();
+        const char next = after < xmp.size() ? xmp[after] : '\0';
+        if (next == '>' || next == ' ' || next == '/' || next == '\n' || next == '\r' || next == '\t') {
+            const std::size_t gt = xmp.find('>', i);
+            if (gt == std::string_view::npos) return std::nullopt;
+            if (gt > 0 && xmp[gt - 1] == '/') return Found{i, gt + 1, {}};
+            const std::string close = "</" + std::string(tag) + ">";
+            const std::size_t c = xmp.find(close, gt);
+            if (c == std::string_view::npos) return std::nullopt;
+            return Found{i, c + close.size(), xmp.substr(gt + 1, c - gt - 1)};
+        }
+        from = after;
+    }
+    return std::nullopt;
+}
+
+// The attribute ` prop="value"` (on an rdf:Description).
+std::optional<Found> find_attr(std::string_view xmp, std::string_view prop) {
+    const std::string key = " " + std::string(prop) + "=\"";
+    const std::size_t i = xmp.find(key);
+    if (i == std::string_view::npos) return std::nullopt;
+    const std::size_t v0 = i + key.size();
+    const std::size_t v1 = xmp.find('"', v0);
+    if (v1 == std::string_view::npos) return std::nullopt;
+    return Found{i, v1 + 1, xmp.substr(v0, v1 - v0)};
+}
+
+// A container's rdf:li values (or a simple property's text).
+std::vector<std::string> li_values(std::string_view inner) {
+    std::vector<std::string> out;
+    std::string_view rest = inner;
+    while (const auto li = find_element(rest, "rdf:li")) {
+        out.push_back(xml_unescape(trimmed(li->inner)));
+        rest = rest.substr(li->end);
+    }
+    if (out.empty() && inner.find('<') == std::string_view::npos && !trimmed(inner).empty()) out.push_back(xml_unescape(trimmed(inner)));
+    return out;
+}
+
+std::vector<std::string> values_of(std::string_view xmp, std::string_view prop) {
+    if (const auto element = find_element(xmp, prop)) return li_values(element->inner);
+    if (const auto attr = find_attr(xmp, prop)) return {xml_unescape(attr->inner)};
+    return {};
+}
+
+std::string first_of(std::string_view xmp, std::string_view prop) {
+    const std::vector<std::string> values = values_of(xmp, prop);
+    return values.empty() ? std::string() : values.front();
+}
+
+// "a; b, c" as its items (trimmed, the empty ones left out).
+std::vector<std::string> split_items(std::string_view text) {
+    std::vector<std::string> out;
+    std::size_t from = 0;
+    for (std::size_t i = 0; i <= text.size(); ++i) {
+        if (i == text.size() || text[i] == ';' || text[i] == ',') {
+            std::string item = trimmed(text.substr(from, i - from));
+            if (!item.empty()) out.push_back(std::move(item));
+            from = i + 1;
+        }
+    }
+    return out;
+}
+
+}  // namespace
+
+FileInfo file_info_from_xmp(std::string_view packet) {
+    FileInfo info;
+    const std::vector<std::string> creators = values_of(packet, kCreator.prop);
+    for (std::size_t i = 0; i < creators.size(); ++i) info.author += (i > 0 ? "; " : "") + creators[i];
+    info.author_title = first_of(packet, kPosition.prop);
+    info.description = first_of(packet, kDescription.prop);
+    for (std::string& keyword : values_of(packet, kSubject.prop)) {
+        if (!keyword.empty()) info.keywords.push_back(std::move(keyword));
+    }
+    info.copyright = first_of(packet, kRights.prop);
+    const std::string marked = first_of(packet, kMarked);
+    info.copyright_status = marked == "True" ? "copyrighted" : marked == "False" ? "public_domain" : "";
+    info.copyright_url = first_of(packet, kWebStatement);
+    return info;
+}
+
+std::string xmp_title(std::string_view packet) { return first_of(packet, kTitle.prop); }
+
+std::string write_xmp(std::optional<std::string_view> packet, const FileInfo& info, std::string_view title) {
+    std::string x = packet && packet->find("</rdf:RDF>") != std::string_view::npos
+                        ? std::string(*packet)
+                        : std::string("<?xpacket begin=\"\xEF\xBB\xBF\" id=\"W5M0MpCehiHzreSzNTczkc9d\"?>\n<x:xmpmeta xmlns:x=\"adobe:ns:meta/\">\n"
+                                      " <rdf:RDF xmlns:rdf=\"http://www.w3.org/1999/02/22-rdf-syntax-ns#\">\n </rdf:RDF>\n</x:xmpmeta>\n"
+                                      "<?xpacket end=\"w\"?>");
+    for (const std::string_view prop : {kTitle.prop, kCreator.prop, kDescription.prop, kSubject.prop, kRights.prop, kPosition.prop, kMarked, kWebStatement}) {
+        while (const auto element = find_element(x, prop)) x.erase(element->start, element->end - element->start);
+        while (const auto attr = find_attr(x, prop)) x.erase(attr->start, attr->end - attr->start);
+    }
+    std::string body;
+    const auto put = [&](const XmpField& field, const std::vector<std::string>& values) {
+        if (values.empty()) return;
+        if (field.kind.empty()) {
+            body += "   <" + std::string(field.prop) + ">" + xml_escape(values.front()) + "</" + std::string(field.prop) + ">\n";
+            return;
+        }
+        std::string items;
+        for (const std::string& v : values) {
+            items += field.kind == "Alt" ? "<rdf:li xml:lang=\"x-default\">" + xml_escape(v) + "</rdf:li>" : "<rdf:li>" + xml_escape(v) + "</rdf:li>";
+        }
+        body += "   <" + std::string(field.prop) + "><rdf:" + std::string(field.kind) + ">" + items + "</rdf:" + std::string(field.kind) + "></" +
+                std::string(field.prop) + ">\n";
+    };
+    const auto one = [](std::string_view text) {
+        std::string t = trimmed(text);
+        return t.empty() ? std::vector<std::string>{} : std::vector<std::string>{std::move(t)};
+    };
+    put(kTitle, one(title));
+    put(kCreator, split_items(info.author));
+    put(kDescription, one(info.description));
+    std::vector<std::string> keywords;
+    for (const std::string& keyword : info.keywords) {
+        for (std::string& item : split_items(keyword)) keywords.push_back(std::move(item));
+    }
+    put(kSubject, keywords);
+    put(kRights, one(info.copyright));
+    put(kPosition, one(info.author_title));
+    if (info.copyright_status == "copyrighted") body += "   <xmpRights:Marked>True</xmpRights:Marked>\n";
+    if (info.copyright_status == "public_domain") body += "   <xmpRights:Marked>False</xmpRights:Marked>\n";
+    if (const std::string url = trimmed(info.copyright_url); !url.empty()) body += "   <xmpRights:WebStatement>" + xml_escape(url) + "</xmpRights:WebStatement>\n";
+    if (!body.empty()) {
+        const std::string description =
+            "  <rdf:Description rdf:about=\"\" xmlns:dc=\"http://purl.org/dc/elements/1.1/\" xmlns:photoshop=\"http://ns.adobe.com/photoshop/1.0/\""
+            " xmlns:xmpRights=\"http://ns.adobe.com/xap/1.0/rights/\">\n" +
+            body + "  </rdf:Description>\n ";
+        const std::size_t at = x.rfind("</rdf:RDF>");
+        x.insert(at == std::string::npos ? x.size() : at, description);
+    }
+    return x;
+}
+
 Json to_json(const NativeSource& source) {
     Json out = Json::object();
     out["format"] = source.format;

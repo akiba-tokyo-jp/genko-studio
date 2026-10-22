@@ -1164,7 +1164,11 @@ QString unported_element(const QString& element) {
         {"screen", "トーン化"}, {"finish", "仕上げの白黒化"}, {"brush_library", "自作ブラシの読み込み"},
         {"image_format", "この版では読めない形式の画像（PPM・ICO・JPEG 2000 など）"},
         // PC4 F-0 (render/codecs): a format this build does not write yet
-        {"image_write", "この版では書けない形式の画像"}};
+        {"image_write", "この版では書けない形式の画像"},
+        // PC4 F-b (formats/open_file): the files 開く… opens in later groups
+        {"psd_file", "PSD・PSB を 1 冊として開くこと（ファイル → PSD をレイヤーのまま読み込む… で読み込めます）"},
+        {"raw_file", "カメラ RAW のファイル"},
+        {"pcraft_file", "PhotoCraft の原稿（.pcraft）"}};
     if (const auto it = words.find(element); it != words.end()) return it->second;
     if (element.startsWith(QStringLiteral("adjust:"))) return QStringLiteral("色調補正（%1）").arg(element.mid(7));
     if (element.startsWith(QStringLiteral("smart:"))) {  // (smart-objects@1: what PC3's later steps draw)
