@@ -9,10 +9,12 @@
 // refused when it cannot be read, made the book's in a smart filter (Document::filter_files) and carried to another book
 // with its smart object (bring_contents); and each kind on an opened picture's page (its grid "finest", 300 ppi).
 
+#include <QTemporaryDir>
 #include <QtTest/QtTest>
 
 #include <algorithm>
 #include <cmath>
+#include <filesystem>
 #include <functional>
 #include <map>
 #include <string>
@@ -33,6 +35,11 @@
 #include "render/page.hpp"
 #include "render/png.hpp"
 #include "render/raster.hpp"
+#include "storage/asset_store.hpp"
+#include "storage/gc.hpp"
+#include "storage/lock.hpp"
+#include "storage/reader.hpp"
+#include "storage/transaction.hpp"
 #include "testsupport.hpp"
 
 using namespace genko;
@@ -846,7 +853,7 @@ private slots:
     // On a smart object 置き換え's map is the book's (design 2.6): its data or the layer made a file the book holds
     // (Document::filter_files, the smart filter its ref and kind) — the layer changed afterwards, the smart object as it was
     // —; set again with another; a smart filter holding the data itself refused as read; carried to another book with its
-    // smart object (bring_contents).
+    // smart object (bring_contents); saved, one of the book's assets gc keeps, read back and drawn the same.
     void aSmartFilterHoldsItsMapAsTheBooks() {
         const render::Image picture = eight_pattern(200, 200);
         auto doc = eight_page(picture, render::Image::create("RGBA", render::Size{200, 200}, render::Ink{255, 60, 128, 255}));
@@ -883,6 +890,25 @@ private slots:
         QVERIFY(!g.contains("map_data"));
         QVERIFY(set.filter_files.contains(g["map"].get<std::string>()));
         QVERIFY(drawn(set) != once);
+        // saved: one of the book's assets (its ref in the smart filter: gc keeps it), read back and drawn from it the same
+        {
+            QTemporaryDir tmp;
+            const std::filesystem::path dir = std::filesystem::path(tmp.path().toStdString()) / "b";
+            {
+                storage::ProjectLock lock(dir, "human:test");
+                lock.try_acquire();
+                storage::SaveRequest request;
+                request.actor = "human:test";
+                request.ops = Json::array();
+                storage::Saver(lock).save(set, request);
+            }
+            const std::string kept = g["map"].get<std::string>();
+            QVERIFY(storage::AssetStore(dir).has(kept, ".png"));
+            QVERIFY(storage::referenced_assets(dir).contains(kept));
+            const auto loaded = storage::load_document(dir);
+            QVERIFY2(loaded.document.read_only_reason.empty(), loaded.document.read_only_reason.c_str());
+            QCOMPARE(drawn(loaded.document), drawn(set));
+        }
         // a smart filter holding the map's data itself, or a layer: not the book's file (read-only when read)
         core::Document bad = set;
         Json smart = *layer_of(bad, "so").smart;
