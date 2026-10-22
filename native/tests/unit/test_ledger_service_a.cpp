@@ -1212,7 +1212,9 @@ private slots:
                                            "set_file_info", "set_camera_raw",
                                            // (PC4 E-0: the later groups' ops registered, SPEC COLOR-09)
                                            "dodge", "burn", "sponge", "blur_brush", "sharpen_brush", "smudge_brush", "mixer_brush",
-                                           "background_eraser", "color_replacement", "add_pattern", "rename_pattern", "delete_pattern"};
+                                           "background_eraser", "color_replacement", "add_pattern", "rename_pattern", "delete_pattern",
+                                           // (PC4 D0: 節 D's ops registered for D4 and D6, SPEC COLOR-08)
+                                           "render_picture", "vanishing_point"};
         for (const std::string& name : genko::render::ops_registry().names()) {
             if (listed.count(name) == 0 && own.count(name) == 0) missing += (missing.empty() ? "" : ", ") + name;
         }
