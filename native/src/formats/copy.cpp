@@ -15,6 +15,7 @@
 #include "formats/open_file.hpp"
 #include "formats/output.hpp"
 #include "formats/page_picture.hpp"
+#include "formats/pcraft_write.hpp"
 #include "formats/pillow_save.hpp"
 #include "core/color_model.hpp"
 #include "render/codecs/codecs.hpp"
@@ -30,9 +31,9 @@ using render::codecs::CodecImage;
 using render::codecs::Layout;
 using render::codecs::Sample;
 
-// (PC4 F-a: and the codecs' formats, the default extension of each first; PC4 F-d: and a PSB)
-constexpr std::array<std::string_view, 24> kExtensions{"psd", "tif",  "png", "jpg", "jpeg", "webp", "gif", "bmp", "tga", "ico", "pnm", "pbm",
-                                                       "pgm", "ppm", "pam", "pfm", "qoi", "exr", "hdr", "avif", "jpe", "jfif", "dib", "psb"};
+// (PC4 F-a: and the codecs' formats, the default extension of each first; PC4 F-d: and a PSB; PC4 F-f: PhotoCraft's .pcraft)
+constexpr std::array<std::string_view, 25> kExtensions{"psd", "tif",  "png", "jpg", "jpeg", "webp", "gif", "bmp", "tga", "ico", "pnm", "pbm", "pgm",
+                                                       "ppm", "pam", "pfm", "qoi", "exr", "hdr", "avif", "jpe", "jfif", "dib", "psb", "pcraft"};
 
 std::string lower_suffix(const fs::path& dest) {
     std::string suffix = dest.extension().string();
@@ -161,6 +162,22 @@ PlannedCopy plan_copy(const core::Document& doc, std::size_t at, const fs::path&
         plan.notes = std::move(merged.notes);
         plan.psd_book = std::move(merged.doc);
         plan.psd_page = 0;
+        return plan;
+    }
+    if (suffix == "pcraft") {  // (PC4 F-f: its layers as PhotoCraft's, or its merged picture alone)
+        if (options.layers) {
+            plan.bytes = pcraft_bytes(doc, at, PcraftOptions{}, &plan.notes);
+            return plan;
+        }
+        Opened merged = duplicate_page(doc, at, doc.title, true);
+        merged.doc.file_info = doc.file_info;
+        merged.doc.native_files = doc.native_files;
+        merged.doc.asset_dir = doc.asset_dir;
+        merged.doc.title = doc.title;
+        std::vector<std::string> notes;
+        plan.bytes = pcraft_bytes(merged.doc, 0, PcraftOptions{}, &notes);
+        plan.notes = std::move(merged.notes);
+        for (std::string& note : notes) plan.notes.push_back(std::move(note));
         return plan;
     }
     const std::optional<std::string> xmp = book_xmp(doc);

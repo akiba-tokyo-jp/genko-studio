@@ -1158,4 +1158,30 @@ std::vector<std::string> write_pcraft_file(const core::Document& doc, std::size_
     return notes;
 }
 
+std::vector<std::filesystem::path> export_pcraft(const core::Document& doc, const std::filesystem::path& out, bool file_given, std::optional<int> dpi,
+                                                 std::string_view stem, std::vector<std::string>* notes) {
+    if (doc.pages.empty()) throw core::Error("value", "the book has no pages");
+    const std::size_t count = file_given ? 1 : doc.pages.size();
+    if (!file_given) detail::make_dirs(out);
+    std::vector<std::filesystem::path> paths;
+    std::vector<std::string> said;
+    detail::Output output;
+    for (std::size_t i = 0; i < count; ++i) {
+        const std::filesystem::path dest = file_given ? out : detail::join(out, std::string(stem.empty() ? "page" : stem) + "_p" + detail::padded(doc.page(i).index, 3) + ".pcraft");
+        if (dest.has_parent_path()) detail::make_dirs(dest.parent_path());
+        detail::PartFile part(dest);
+        PcraftOptions options;
+        options.dpi = dpi;
+        for (std::string& note : write_pcraft(doc, i, [&part](std::string_view bytes) { part.write(bytes); }, options)) {
+            if (std::find(said.begin(), said.end(), note) == said.end()) said.push_back(std::move(note));
+        }
+        part.close();
+        output.put(std::move(part));
+        paths.push_back(dest);
+    }
+    output.commit();
+    if (notes != nullptr) *notes = std::move(said);
+    return paths;
+}
+
 }  // namespace genko::formats

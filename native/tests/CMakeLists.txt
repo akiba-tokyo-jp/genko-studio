@@ -257,6 +257,11 @@ set_tests_properties(test_psd_text PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offsc
 # capability table and its symmetric guarantee, the losses said and their round trips, the limits before the pixels, the
 # picture's conversions) on this build's table, and the wrapped formats read through this build's readers.
 genko_test(test_codecs SOURCES unit/test_codecs.cpp DEPS genko_test_support genko_render genko_formats LABELS unit)
+# PC4 F-f (SPEC.md FILE-01, .pcraft): BLAKE3, zstd and the zip read by name and written stored, against PhotoCraft's tests of
+# crates/format (a bundle cut, flipped, missing a tile or swapping one, a manifest not JSON or of a newer version, the limits,
+# a folder bundle, one zipped again with deflate) on bundles upstream's writer made (data/pcraft), and the bombs: zstd frames
+# and zip files that unpack or say they unpack past what may be read, a canvas and tiles past the limits — refused before.
+genko_test(test_pcraft SOURCES unit/test_pcraft.cpp DEPS genko_test_support genko_render_ops genko_formats ${GENKO_ZSTD} LABELS unit TIMEOUT 900)
 
 # Against the Python baseline (skipped when there is no reference Python: $GENKO_PYREF or /opt/pyref/bin/python).
 genko_test(test_contract_storage SOURCES contract/test_contract_storage.cpp DEPS genko_test_support LABELS contract

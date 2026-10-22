@@ -23,6 +23,8 @@
 //     a grey or CMYK page's inks, with its profile);
 //   - .psd: the page with its layers as the exports write a page's PSD; `layers` false, its merged picture alone; (PC4
 //     F-d) .psb the same as a PSB (a page past 30000 px a side or 2 GiB is no PSD: core::Error("psd_too_large"));
+//   - .pcraft (PC4 F-f): the page as PhotoCraft's document (formats/pcraft_write.hpp); `layers` false, its merged picture
+//     alone;
 // each with the book's File Info (formats/file_xmp.hpp; none for a book with none). A .genko copy of the book is the
 // window's (app/session.hpp Session::save_copy). F-c widens this (書き出し形式…, the scale, the metadata, `genko copy`) and
 // F-a the formats the codecs write.
@@ -30,7 +32,7 @@
 namespace genko::formats {
 
 struct CopyOptions {
-    bool layers = true;          // (PSD) its layers; false: its merged picture alone
+    bool layers = true;          // (PSD, .pcraft) its layers; false: its merged picture alone
     std::optional<int> quality;  // (JPEG) Photoshop's 0..12 (PhotoCraft's round(q / 12 × 99 + 1)); none: 10
 };
 

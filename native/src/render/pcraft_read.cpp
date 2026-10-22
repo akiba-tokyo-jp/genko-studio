@@ -7,6 +7,8 @@
 #include <cmath>
 #include <fstream>
 #include <map>
+#include <mutex>
+#include <optional>
 #include <set>
 #include <utility>
 
@@ -1051,7 +1053,6 @@ std::optional<std::string> contents_of(Ctx& ctx, const std::string& file_name, c
         core::Page page = read.doc.page(0);
         page.index = core::Num(std::int64_t{1});
         page.native_source.reset();
-        page.own_spec = true;
         core::smart::bring_contents(ctx.doc, read.doc, page);
         auto contents = std::make_shared<core::SmartContents>();
         contents->kind = "page";
@@ -1699,15 +1700,34 @@ Json read_manifest(std::string_view bytes) {
     return parse_manifest(source, ReadLimits{});
 }
 
+namespace {
+
+std::mutex remembered_lock;
+std::optional<std::pair<std::string, Read>> remembered;
+
+}  // namespace
+
+void remember_read(const std::string& ref, Read read) {
+    const std::lock_guard<std::mutex> hold(remembered_lock);
+    remembered.emplace(ref, std::move(read));
+}
+
 std::string place_as_contents(core::Document& doc, std::string_view bytes, std::string_view name, std::vector<std::string>& notes, const ReadLimits& limits) {
     std::string stem(name);
     if (const std::size_t dot = stem.rfind('.'); dot != std::string::npos && dot > 0) stem.resize(dot);
-    Read read = pcraft::read(bytes, stem, limits);
+    std::optional<Read> kept;
+    {
+        const std::lock_guard<std::mutex> hold(remembered_lock);
+        if (remembered && limits.depth == 0 && remembered->first == core::bytes_ref(bytes)) {
+            kept = std::move(remembered->second);
+            remembered.reset();
+        }
+    }
+    Read read = kept ? std::move(*kept) : pcraft::read(bytes, stem, limits);
     for (std::string& note : read.notes) notes.push_back(std::move(note));
     core::Page page = read.doc.page(0);
     page.index = core::Num(std::int64_t{1});
     page.native_source.reset();
-    page.own_spec = true;
     core::smart::bring_contents(doc, read.doc, page);
     auto contents = std::make_shared<core::SmartContents>();
     contents->kind = "page";

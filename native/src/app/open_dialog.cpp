@@ -19,7 +19,10 @@ namespace codecs = render::codecs;
 
 namespace {
 
-bool is_book(const QString& path) { return QFileInfo(path).isDir() && QFileInfo::exists(path + QStringLiteral("/project.json")); }
+bool is_book(const QString& path) {
+    return QFileInfo(path).isDir() && (QFileInfo::exists(path + QStringLiteral("/project.json")) ||
+                                       (path.endsWith(QStringLiteral(".pcraft"), Qt::CaseInsensitive) && QFileInfo::exists(path + QStringLiteral("/manifest.json"))));
+}
 
 // The patterns of a format's extensions ("*.png *.PNG").
 QString patterns(codecs::Format format) {
@@ -49,8 +52,8 @@ formats::OpenOptions file_open_options() {
 }
 
 QString open_filters() {
-    // (the formats this build reads — PSD・PSB since PC4 F-d —; Camera Raw and PhotoCraft's .pcraft join when their groups
-    // read them)
+    // (the formats this build reads — PSD・PSB since PC4 F-d, PhotoCraft's .pcraft since F-f (below) —; Camera Raw joins when
+    // its group reads it)
     QStringList all{QStringLiteral("*.genko"), QStringLiteral("*.psd"), QStringLiteral("*.psb")};
     QStringList each{QStringLiteral("Genko の原稿 (*.genko)"), QStringLiteral("Photoshop (*.psd *.psb)")};
     for (const codecs::Format format : codecs::kFormats) {
@@ -59,6 +62,8 @@ QString open_filters() {
         const std::string_view name = codecs::name(format);
         each << QStringLiteral("%1 (%2)").arg(QString::fromLatin1(name.data(), static_cast<qsizetype>(name.size())), patterns(format));
     }
+    all << QStringLiteral("*.pcraft *.PCRAFT");  // (PC4 F-f: PhotoCraft's document)
+    each << QStringLiteral("PhotoCraft (*.pcraft *.PCRAFT)");
     return QStringLiteral("すべての形式 (%1);;%2;;すべてのファイル (*)").arg(all.join(QLatin1Char(' ')), each.join(QStringLiteral(";;")));
 }
 

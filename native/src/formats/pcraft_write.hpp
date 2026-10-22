@@ -46,4 +46,10 @@ std::string pcraft_bytes(const core::Document& doc, std::size_t page, const Pcra
 std::vector<std::string> write_pcraft_file(const core::Document& doc, std::size_t page, const std::filesystem::path& dest,
                                            const PcraftOptions& options = {});
 
+// genko export --format pcraft: the book's pages each a .pcraft — `out` a .pcraft path: the first page there; a folder:
+// <stem>_p001.pcraft, <stem>_p002.pcraft … (`stem`: the book's folder's name) —, all written or none (formats/output). The
+// notes of every page, each said once, into `notes`. `dpi` none: each page's own.
+std::vector<std::filesystem::path> export_pcraft(const core::Document& doc, const std::filesystem::path& out, bool file_given,
+                                                 std::optional<int> dpi, std::string_view stem, std::vector<std::string>* notes = nullptr);
+
 }  // namespace genko::formats

@@ -64,4 +64,9 @@ core::Json read_manifest(std::string_view bytes);
 std::string place_as_contents(core::Document& doc, std::string_view bytes, std::string_view name, std::vector<std::string>& notes,
                               const ReadLimits& limits = {});
 
+// The window reads a .pcraft on a worker thread before it places it (the reading is the heavy part, never on the window's
+// thread): the read kept here by its bytes' asset ref ("sha256:…"), taken — once — by place_as_contents for the same bytes
+// (the op), which otherwise reads them itself (the command line, MCP). One at a time; thread-safe.
+void remember_read(const std::string& ref, Read read);
+
 }  // namespace genko::render::pcraft
