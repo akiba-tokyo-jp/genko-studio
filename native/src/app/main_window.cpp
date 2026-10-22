@@ -1079,7 +1079,8 @@ void MainWindow::next_document(int step) {
 void MainWindow::add_document(std::shared_ptr<Session> session) {
     if (session) session->set_idle(std::chrono::milliseconds(save_after_ms_));  // (環境設定's 変更を保存するまで)
     if (session) connect(session.get(), &Session::statusChanged, this, &MainWindow::maybe_backup, Qt::UniqueConnection);
-    const bool untouched = documents_.size() == 1 && !session_->path() && session_->generation() == 0 &&
+    // (PC4 F-b: a book opened from a picture, a new image or a duplicate is a book of its own, never given away so)
+    const bool untouched = documents_.size() == 1 && !documents_.front().picture && !session_->path() && session_->generation() == 0 &&
                            session_->waiting() == 0 && session_->status().kind != SaveKind::Saving;
     if (!untouched && session_->unsaved() && !settle(doc_, QStringLiteral("切り替える"))) return;
     store_document();
