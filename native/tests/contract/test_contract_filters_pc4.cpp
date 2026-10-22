@@ -97,6 +97,9 @@ private slots:
                                              Json{{"op", "filter_raster"}, {"page", 2}, {"id", precise_layer}, {"kind", "blur_box"}, {"radius", 4},
                                                   {"area", Json{{"rect", Json::array({0, 0, 100, 300})}}}}}));
         QVERIFY2(done.value("ok", false), done.dump().c_str());
+        // (the reply: each the settings it was drawn with)
+        QCOMPARE(done["results"][0]["filter"], (Json{{"kind", "blur_gaussian"}, {"radius", 3}}));
+        QCOMPARE(done["results"][1]["filter"], (Json{{"kind", "blur_box"}, {"radius", 4}}));
         const Json after = project(book);
         QVERIFY(layer_in(after, 1, "pic1")["asset"] != layer_in(before, 1, "pic1")["asset"]);
         QVERIFY(layer_in(after, 2, precise_layer)["color_raster"] != layer_in(before, 2, precise_layer)["color_raster"]);
@@ -199,6 +202,7 @@ private slots:
         QCOMPARE(Json::parse(again)["features"], saved["features"]);
         const Json differs = Json::diff(saved, Json::parse(again));
         QVERIFY2(differs.empty(), differs.dump().substr(0, 1000).c_str());
+        QVERIFY2(again == written, "written again, project.json is not the same bytes");
     }
 
     void theCatalogue() {

@@ -285,6 +285,28 @@ private slots:
         QCOMPARE((*book.layer("so")->smart)["filters"][1]["kind"], Json("glow"));
     }
 
+    // A pen layer's lines: asked first that they become pixels (as the layer panel's かける… did) — no: nothing changes;
+    // yes: the filter.
+    void aPenLayersLinesAreAskedFirst() {
+        Book book;
+        gui_test::Answers answers;
+        QVERIFY(book.window->apply_ops(Json::array({Json{{"op", "add_stroke"}, {"page", 1}, {"layer", "ink"},
+                                                         {"points", Json::array({Json::array({10, 10}), Json::array({30, 30})})}, {"width_mm", 1}}})));
+        std::string pen;
+        for (const auto& l : book.page().layers)
+            if (l.stroke_count() > 0) pen = l.id;
+        QVERIFY(!pen.empty());
+        book.window->set_target_layer(pen);
+        book.act("act_filter_blur")->trigger();
+        QCOMPARE(answers.asked.size(), qsizetype(1));
+        QVERIFY2(answers.asked[0].contains(QStringLiteral("ペンの線は画像になり")), qPrintable(answers.asked[0]));
+        QVERIFY(book.layer(pen)->stroke_count() > 0);
+        answers.responder->question = [](const QString&, const QString&) { return true; };
+        book.act("act_filter_blur")->trigger();
+        QCOMPARE(book.layer(pen)->stroke_count(), std::size_t(0));
+        QVERIFY(book.layer(pen)->raster_png != nullptr);
+    }
+
     // The layer panel's かける…: the フィルター menu (the user's decision 1).
     void thePanelOpensTheMenu() {
         Book book;

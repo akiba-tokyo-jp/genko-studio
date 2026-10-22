@@ -1107,9 +1107,28 @@ bool same_panels(const std::vector<Frame>& a, const std::vector<Frame>& b) { ret
 
 void bring_contents(Document& doc, const Document& from, Page& page) {
     std::map<std::string, std::string> renamed;  // (their id → its id here)
+    // (filters@1, PC4 節 D: the files its smart filters hold — a displacement map — that the book it comes from holds in
+    // memory, as its contents' files)
+    const auto bring_filter_files = [&](const Layer& layer) {
+        const Json* filters = layer.smart && layer.smart->is_object() ? get(*layer.smart, "filters") : nullptr;
+        if (filters == nullptr || !filters->is_array()) return;
+        for (const Json& f : *filters) {
+            const Json* kind = f.is_object() ? get(f, "kind") : nullptr;
+            const FilterInfo* info = kind != nullptr && kind->is_string() ? filter_info(kind->get_ref<const std::string&>()) : nullptr;
+            const Json* params = info != nullptr ? get(f, "params") : nullptr;
+            if (params == nullptr || !params->is_object()) continue;
+            for (const std::string_view key : info->files) {
+                const Json* ref = get(*params, key);
+                if (ref == nullptr || !ref->is_string()) continue;
+                if (const auto bytes = from.filter_files.find(ref->get_ref<const std::string&>()); bytes != from.filter_files.end())
+                    doc.filter_files.emplace(bytes->first, bytes->second);
+            }
+        }
+    };
     std::function<void(Page&)> bring = [&](Page& on) {
         for (Layer& layer : on.layers) {
             if (!is_smart(layer)) continue;
+            bring_filter_files(layer);
             const auto id = contents_id(layer);
             if (!id) continue;
             auto known = renamed.find(*id);

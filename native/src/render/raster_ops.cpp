@@ -64,6 +64,7 @@
 #include "render/proof.hpp"
 #include "render/op_limits.hpp"
 #include "render/ops_adjust.hpp"
+#include "render/ops_filters.hpp"
 #include "render/ops_paths.hpp"
 #include "render/ops_masks.hpp"
 #include "render/ops_registry.hpp"
@@ -2362,7 +2363,7 @@ auto plugin_work(Work&& work) {
     throw OpError("a filter plugin works on 8-bit paint layers, not on a layer of precise colours");
 }
 
-void filter_raster(OpContext& c) {
+void filter_raster_pixels(OpContext& c) {
     Document& doc = c.doc;
     const Json& op = c.op;
     const std::size_t at = core::require_page(doc, op);
@@ -2480,6 +2481,13 @@ void filter_raster(OpContext& c) {
     }
     raster::save_raster(page, layer, filtered);
     layer.kind = LayerKind::Raster;
+}
+
+// filter_raster: the pixels, then — a kind of フィルター's (PC4 節 D, design 3.1) — the settings it was drawn with in the
+// reply's results (render/ops_filters).
+void filter_raster(OpContext& c) {
+    filter_raster_pixels(c);
+    if (auto report = filter_report(c.doc, c.op)) c.report = std::move(*report);
 }
 
 // --- the eraser on a paint layer ----------------------------------------------------------------------------------------

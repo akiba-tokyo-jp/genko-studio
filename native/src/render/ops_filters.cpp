@@ -8,6 +8,7 @@
 
 #include <algorithm>
 
+#include "core/adjust.hpp"
 #include "core/command_bus.hpp"
 #include "core/filter_kinds.hpp"
 #include "core/pyops.hpp"
@@ -121,6 +122,19 @@ LocalFilters filter_local_filters() {
 }
 
 }  // namespace adjust_ops
+
+std::optional<Json> filter_report(const core::Document& doc, const Json& op) {
+    const Json* kind = core::get(op, "kind");
+    if (kind == nullptr || !kind->is_string() || !core::pc4_filter(kind->get_ref<const std::string&>())) return std::nullopt;
+    Json params = Json::object();
+    for (const auto& [key, value] : op.items()) {
+        if (key != "op" && key != "page" && key != "layer" && key != "id" && key != "kind" && key != "area" && key != "channel") params[key] = value;
+    }
+    const std::size_t at = core::require_page(doc, op);
+    Json drawn{{"kind", *kind}};
+    drawn.update(core::normalize_filter(kind->get_ref<const std::string&>(), params, &doc.page(at)));
+    return Json{{"filter", std::move(drawn)}};
+}
 
 void register_filter_ops(core::OpRegistry& registry) {
     // フィルター → 描画 → 炎…・額縁…・木… (D4: render/render_picture.cpp) and 消点… (D6: render/vanishing.cpp)

@@ -25,6 +25,7 @@
 #include <stop_token>
 
 #include "app/adjust_forms.hpp"
+#include "app/ask.hpp"
 #include "app/colours.hpp"
 #include "app/filter_forms.hpp"
 #include "app/layer_dialogs.hpp"
@@ -338,6 +339,15 @@ void MainWindow::filter_command(const FilterItem& item) {
         return;
     }
     const auto asked = asking();
+    // (a pen layer's lines become pixels: asked first, as the layer panel's かける… did — Photoshop asks to rasterize a type
+    // layer before a filter; a channel drawn on leaves the lines as they are)
+    if (paint && layer->stroke_count() > 0 && channel_view().target.empty()) {
+        if (!ask::question(this, name,
+                           QStringLiteral("レイヤー「%1」のペンの線は画像になり、あとから線として消せなくなります。「%2」をかけますか\n（元に戻す で取り消せます）")
+                               .arg(wording::layer_label(*layer), name)) ||
+            !still(asked))
+            return;
+    }
     const std::string layer_id = layer->id, kind = item.kind;
     const Json index = page->index.json();
     const std::optional<Json> area = selection_area();
@@ -430,8 +440,14 @@ struct Worked {
 bool MainWindow::send_filter(const Json& ops, const QString& name, bool heavy) {
     if (!heavy) return apply_ops(ops);
     // (a heavy one on a thread, the window waiting with its progress and 中止 — nothing changed when stopped)
-    render::use_brushes_of(book());
-    const Json targeted = with_contents_target(with_channel_target(ops));
+    Json targeted;
+    try {
+        render::use_brushes_of(book());
+        targeted = with_contents_target(with_channel_target(ops));
+    } catch (const std::exception& error) {  // (as apply_ops says it: the book as it was)
+        flash(wording::error(QString::fromUtf8(error.what())), 6000, true);
+        return false;
+    }
     const DocPtr base = session_->snapshot();
     auto stop = std::make_shared<std::stop_source>();
     auto done = std::make_shared<std::atomic<double>>(0.0);
