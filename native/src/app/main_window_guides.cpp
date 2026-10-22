@@ -323,7 +323,7 @@ void MainWindow::place_ruler(const Json& ruler) {
         action("act_snap")->setChecked(true);
         guide_toggles();
     }
-    flash(QStringLiteral("定規を置きました。ペン（B）で描くと沿います（Ctrl+2 で切り替え）"), 3500);
+    flash(QStringLiteral("定規を置きました。ブラシツール（B）で描くと沿います（Ctrl+2 で切り替え）"), 3500);
     if (guides_ != nullptr) guides_->refresh();
 }
 

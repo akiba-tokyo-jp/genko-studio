@@ -29,6 +29,7 @@
 #include "render/layer_masks.hpp"
 #include "render/ops_pc3.hpp"
 #include "render/ops_formats.hpp"
+#include "render/ops_paint_tools.hpp"
 
 namespace genko::render {
 
@@ -387,6 +388,9 @@ void register_render_ops(core::OpRegistry& registry) {
     area_kinds::use_keys();
     // PC4 節 F (形式): the ops that change what a book keeps of its files (frames until their groups: render/ops_formats.cpp)
     register_format_ops(registry);
+    // PC4 節 E (描く道具・パターン): the new ops, frames until their groups write them (render/ops_paint_tools.hpp)
+    register_paint_tool_ops(registry);
+    register_pattern_ops(registry);
 }
 
 const core::OpRegistry& ops_registry() {
@@ -454,6 +458,7 @@ const core::OpRegistry& ops_registry() {
                     plain(inner);
                     (void)lending.take_back(c.doc);
                     c.report = std::move(inner.report);
+                    c.notes = std::move(inner.notes);
                     color_edit::bake_marks(c.doc);
                     ink_edit::bake_marks(c.doc);
                     return;
@@ -474,6 +479,7 @@ const core::OpRegistry& ops_registry() {
                     plain(inner);
                     const bool changed = lending.take_back(c.doc);
                     c.report = std::move(inner.report);
+                    c.notes = std::move(inner.notes);
                     if (changed && lending.depth() > 8) {  // (a 16- or 32-bit channel: what the op changed, drawn at 8 bits)
                         if (!c.report || c.report->is_null()) c.report = core::Json::object();
                         if (c.report->is_object()) (*c.report)["channel_precision"] = 8;
@@ -489,6 +495,7 @@ const core::OpRegistry& ops_registry() {
                 op(inner);
                 keep.restore(c.doc);
                 c.report = std::move(inner.report);
+                c.notes = std::move(inner.notes);
                 channels::follow_depth(c.doc);
                 keep_page_modes(c.doc, before);
             });

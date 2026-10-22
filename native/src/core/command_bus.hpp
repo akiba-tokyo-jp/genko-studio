@@ -45,12 +45,15 @@ public:
 };
 
 // What an op works on: the working copy of the book (change pages only through doc.edit_page), the op and who is
-// applying it. An op may leave a report for the reply's "results" (Python's op["_report"]).
+// applying it. An op may leave a report for the reply's "results" (Python's op["_report"]), and notes for its
+// "warnings" (PC4: what it was given and did not use, said so — "ops[i] <op>: <note>", in the ops' order after the
+// unknown keys'; an op that runs another through a context of its own passes that one's notes on).
 struct OpContext {
     Document& doc;
     const Json& op;
     const Actor& actor;
     std::optional<Json> report = std::nullopt;
+    std::vector<std::string> notes = {};
 };
 
 using OpFunction = std::function<void(OpContext&)>;

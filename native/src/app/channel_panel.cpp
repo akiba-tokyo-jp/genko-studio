@@ -64,7 +64,7 @@ ChannelPanel::ChannelPanel(MainWindow* window) : QWidget(window), window_(window
     list_ = new QListWidget;
     list_->setObjectName(QStringLiteral("channel_list"));
     list_->setIconSize(QSize(28, 36));
-    list_->setToolTip(QStringLiteral("クリックで描く先に（ペン・消しゴム・塗り・フィルター）。目のチェックで見せる・隠す。チャンネルはダブルクリックでオプション"));
+    list_->setToolTip(QStringLiteral("クリックで描く先に（ブラシツール・消しゴムツール・塗り・フィルター）。目のチェックで見せる・隠す。チャンネルはダブルクリックでオプション"));
     layout->addWidget(list_, 1);
     auto* row = new QHBoxLayout;
     const auto add_button = [&](const QString& text, const QString& tip, const QString& name, auto slot) {

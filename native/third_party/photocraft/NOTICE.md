@@ -177,3 +177,9 @@ PhotoCraft v0.2.0（`ad863217386440ca968fccc9bfff65ba24e61142`、MIT、同梱 `L
 - `crates/codecs/src/fidelity.rs`（1-230 行）: 書く計画（標本と並びの選び方）と失うものの一覧 → `native/src/render/codecs/fidelity.cpp`（PC4 F-0。言葉は日本語）。
 - `crates/codecs/src/options.rs`（1-138 行）: 読む上限（ヘッダーで確かめてから確保する）と書く設定 → `native/src/render/codecs/limits.cpp`・`options.hpp`（PC4 F-0。上限の値は Genko の op の上限と作業の記憶の予算にした）。
 - `crates/codecs/tests/detect_caps.rs`・`fidelity.rs`・`limits.rs` の試験の考え（判定の例、拡張子の往復と重なり、対称の保証、失うものの例、ヘッダーの爆弾）→ `native/tests/unit/test_codecs.cpp`（PC4 F-0）。
+
+## ブラシ・塗り・パターン・プリセット（brushes@1・patterns@1、PC4 節 E）
+
+- `crates/paint/src/brush.rs`（1-451 行）: ブラシの設定（先端・硬さ・間隔・不透明度・流量・シェイプ・散布・テクスチャ・デュアル・カラー・伝達・ポーズ・ノイズ・ウェットエッジ・ビルドアップ・テクスチャを保護・seed）と既定の値、揺らぎとコントロール、マスクの合成の種類、手続きの模様の種類 → `native/src/core/brush_dabs.*`（mm とスネークケースに直したもの。E-0）
+- `crates/paint/src/retouch.rs`（225-428 行: `apply_dab_stroke`・`Smudge` と試験）: 順に打つ点の作業の写しと、不透明度×選択範囲での混ぜ戻し、指先の絵の具の運び → `native/src/render/retouch_dabs.*`（層のタイルの上で。E-0）
+- `crates/engine/src/presets/mod.rs`（35-45 行 `Group`、193-276 行 `find`・`unique_name`・`group_index`・`edit_groups`）: 群のあるプリセットと名前の重なりの避け方、編集の動き → `native/src/render/preset_store.*`（E-0）

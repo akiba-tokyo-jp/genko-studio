@@ -147,6 +147,8 @@ genko_library(genko_app
     main_window_align.cpp
     # PC4 F-0: ファイル in Photoshop's order and names, 節 F's new commands as frames
     main_window_file.cpp
+    # PC4 E-0: the drawing tools' groups (the ツール menu, the palette's long press) and the frames of their panels
+    paint_panels.cpp
     ${GENKO_APP_RESOURCES}
     ${GENKO_APP_FONTS}
   PUBLIC_DEPS genko_core genko_storage genko_render genko_render_ops genko_formats genko_service Qt6::Core Qt6::Gui Qt6::Widgets Qt6::Svg Qt6::Concurrent

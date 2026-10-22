@@ -96,15 +96,15 @@ const std::vector<Expected>& expected() {
         // (working CMYK coated-cmyk), Python's own conversion kept there as 書き出しの CMYK)
         {"act_cmyk_proof", "色の校正", k({s("Ctrl+Alt+Y")}), "印刷したときの色など、校正の設定で選んだ見え方で表示します（表示だけ。原稿は変わりません）", true, "表示"},
         {"act_select", "選択", k({s("V")}), "コマを選ぶ・フキダシを動かす・ドラッグで表示を動かす", true, "ツール"},
-        {"act_pen", "ペン", k({s("B")}), "レイヤー パネルで選んだレイヤーに描きます", true, "ツール"},
-        {"act_eraser", "消しゴム", k({s("E")}), "ペンの線は触れた所で切れます", true, "ツール"},
+        {"act_pen", "ブラシツール", k({s("B")}), "レイヤー パネルで選んだレイヤーに描きます", true, "ツール"},
+        {"act_eraser", "消しゴムツール", k({s("E")}), "ペンの線は触れた所で切れます", true, "ツール"},
         {"act_frame", "コマ割り", k({s("F")}),
          "コマの中をドラッグして割る（斜めも。水平・垂直に吸い付く、Alt で自由）・間の白をドラッグで間隔を動かす・選んだコマの角をドラッグで形を変える", true,
          "ツール"},
         // (PC3 C-d, decision 5's 移動ツール: the layers chosen and their linked ones, Ctrl+click picking a layer)
         {"act_move", "移動ツール", k({s("Q")}), "選んだレイヤーをリンクしたレイヤーと一緒にドラッグで動かす（Shift で縦・横・45°、Ctrl+クリックでそこのレイヤーを選ぶ）", true, "ツール"},
         {"act_point_wider", "選んだ点を太く", k({s("Ctrl+Alt+]")}), "部分選択ツールで選んだ制御点のところだけ、線を太くします", false, "ツール"},  // (PC3 C-b)
-        {"act_color", "ペンの色…", k({s("C")}), "", false, "ツール"},
+        {"act_color", "カラーピッカー（描画色）…", k({s("C")}), "", false, "ツール"},  // (PC4 E-0, decision 2)
         {"act_split_h", "コマを横に割る（上下に分ける）", k({s("Ctrl+Shift+H")}), "", false, "ページ/コマ"},
         {"act_split_v", "コマを縦に割る（左右に分ける）", k({s("Ctrl+Shift+V")}), "", false, "ページ/コマ"},
         {"act_merge", "コマを結合（割る前に戻す）", k({s("Ctrl+Shift+M")}), "", false, "ページ/コマ"},
@@ -346,7 +346,9 @@ private slots:
         // ファイル情報… and 書き出し ▸ PNG としてクイック書き出し・書き出し形式…・書き出しの環境設定…・Web 用に保存（従来）…
         // (act_open_as, act_close_all, act_close_others, act_save_copy, act_revert, act_file_info, act_quick_export_png,
         // act_export_as, act_export_prefs, act_save_for_web): frames until F-b and F-c — theFileMenuIsPhotoshops below.
-        QCOMPARE(w->actions_by_name().size(), std::size_t{463});
+        // and the 2 of PC4 E-0 (SPEC COLOR-08) — ツール → 描画色と背景色を初期設定に戻す (act_default_colours) and ウィンドウ →
+        // スウォッチ (act_swatches) — theirs (test_gui_paint).
+        QCOMPARE(w->actions_by_name().size(), std::size_t{465});
         QVERIFY(w->action("act_chat_approval"));
         QVERIFY(w->action("act_style"));
         QVERIFY(w->action("act_exposure"));
@@ -704,7 +706,7 @@ private slots:
         Studio studio;
         MainWindow* w = studio.window.get();
         studio.answers->responder->colour = [](const QColor&, const QString& title) {
-            return title == QStringLiteral("色") ? std::optional<QColor>(QColor(200, 30, 40)) : std::nullopt;
+            return title == QStringLiteral("カラーピッカー（描画色）") ? std::optional<QColor>(QColor(200, 30, 40)) : std::nullopt;
         };
         studio.trigger("act_color");
         QCOMPARE(w->pen().rgb, (std::vector<std::int64_t>{200, 30, 40}));

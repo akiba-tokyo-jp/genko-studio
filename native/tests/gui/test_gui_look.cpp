@@ -740,13 +740,13 @@ private slots:
         app::MainWindow* w = book.window.get();
         app::preferences::PreferencesDialog dialog(w);
         // two commands on one key are refused
-        dialog.editor(QStringLiteral("ペン"))->setKeySequence(QKeySequence(QStringLiteral("E")));
+        dialog.editor(QStringLiteral("ブラシツール"))->setKeySequence(QKeySequence(QStringLiteral("E")));
         dialog.save();
         QVERIFY(dialog.clash->text().contains(QStringLiteral("「E」")));
         QCOMPARE(book.act("act_pen")->shortcut().toString(), QStringLiteral("B"));
         QCOMPARE(dialog.result(), int(QDialog::Rejected));
         // (a free key: F7 — P is ペンツール's since PC3 C-a, Photoshop's)
-        dialog.editor(QStringLiteral("ペン"))->setKeySequence(QKeySequence(QStringLiteral("F7")));
+        dialog.editor(QStringLiteral("ブラシツール"))->setKeySequence(QKeySequence(QStringLiteral("F7")));
         // the pen tablet: a light hand gets a softer curve
         for (int i = 0; i < 60; ++i) dialog.pad->pressures.push_back(0.25 + 0.01 * (i % 10));
         dialog.measure();
@@ -759,7 +759,7 @@ private slots:
         dialog.save();
         QCOMPARE(dialog.result(), int(QDialog::Accepted));
         QCOMPARE(book.act("act_pen")->shortcut().toString(), QStringLiteral("F7"));
-        QVERIFY(book.act("act_pen")->toolTip().startsWith(QStringLiteral("ペン（F7）")));  // (the tooltip says the new key)
+        QVERIFY(book.act("act_pen")->toolTip().startsWith(QStringLiteral("ブラシツール（F7）")));  // (the tooltip says the new key)
         QCOMPARE(w->save_after(), 5000);
         // (never past the longest wait: a test book saves within 0.4 s, a person's within 10 s)
         QCOMPARE(w->session().idle(), std::min(std::chrono::milliseconds(5000), w->session().longest()));

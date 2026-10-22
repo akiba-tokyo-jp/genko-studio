@@ -683,6 +683,8 @@ core::Json with_paper_picture(const core::Json& definition) {
 std::optional<Coverage> draw(Size size, const core::PenPoints& points, int dpi, double width_mm, std::string_view kind,
                              std::string_view seed, std::span<const double> rotation, double pressure_opacity) {
     const Brush b = brush(kind);
+    // (brushes@1: a dab brush's line is laid in dabs, PC4 E1 — never drawn as another brush's in the meantime)
+    if (b.dabs) throw NotYetPorted("brushes@1: the dab brush " + b.key);
     auto drawn = draw_plain(b, size, points, dpi, width_mm, seed, rotation);
     if (drawn && pressure_opacity > 0) {
         const Image light = shade(points, drawn->mask.size(), drawn->origin, dpi, width_mm, py_min(1.0, pressure_opacity));

@@ -203,6 +203,20 @@ Pixels layer_pixels(core::OpContext& c, std::size_t at, const std::string& id, c
 // 8-bit layer's PNG is written again, its other pixels the same; a precise layer's samples outside the box as they were;
 // an ink layer's too).
 void put_layer_pixels(core::Document& doc, std::size_t at, const std::string& id, const Pixels& p, const Box& box);
+// PC4 E-0 (render/tiled_pixels): several parts at once — each of `wanted` as layer_pixels(…, box) gives it, the layer
+// read (an 8-bit one's picture decoded, an ink one's inks drawn) once; `boxes` gets each part's box (clamped to the grid),
+// `grid` the layer's whole grid — and written back at once, each part at its box as put_layer_pixels(…, box) writes one
+// (the layer written once; the pixels outside the parts keep their bytes), or only the pixels its `only` marks (one
+// byte a pixel of the box, row by row: not 0 written; the others keep their bytes — an ink layer's clear pixel its inks
+// too). The parts are of one kind.
+std::vector<Pixels> layer_pixels(core::OpContext& c, std::size_t at, const std::string& id, const std::vector<Box>& wanted,
+                                 std::vector<Box>* boxes = nullptr, Size* grid = nullptr);
+struct PixelsPart {
+    Box box;
+    const Pixels* pixels = nullptr;
+    const std::vector<std::uint8_t>* only = nullptr;  // (none: every pixel of the box)
+};
+void put_layer_pixels(core::Document& doc, std::size_t at, const std::string& id, const std::vector<PixelsPart>& parts);
 
 // An ink layer's pixels set from changed colours and alphas (`px`, one each: rgba_of's form) by the page's rules
 // (render/ink correct: a colour left as it was keeps its inks). Worked in bands, their arrays in the imaging budget.

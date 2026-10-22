@@ -99,7 +99,7 @@ void MainWindow::build_tool_settings() {
     auto* eraser_form = new QFormLayout(eraser_page);
     eraser_form->setRowWrapPolicy(QFormLayout::WrapAllRows);
     eraser_form->setContentsMargins(0, 0, 0, 0);
-    eraser_form->addRow(QStringLiteral("消しゴムの太さ（[ ] でも変わる）"), slider_for(eraser_size_, true));
+    eraser_form->addRow(QStringLiteral("ブラシサイズ（[ ] でも変わる）"), slider_for(eraser_size_, true));
     eraser_form->addRow(brush_->crossing);
     eraser_mode_ = new QComboBox;
     eraser_mode_->setObjectName(QStringLiteral("eraser_mode"));

@@ -32,6 +32,21 @@ bool painted_within(const QPainter& painter, const QRegion& region, const QRectF
     return rect.adjusted(spare, spare, -spare, -spare).contains(back.map(QPolygonF(QRectF(region.boundingRect()))).boundingRect());
 }
 
+// The sheet's rectangle filled (the page's white, a spread's partner): with fillRect while the view is not turned —
+// moved, scaled or mirrored only (TxScale at most: its edges on the pixels as ever) —; in a turned view (TxRotate and
+// beyond) as a path — Qt's fill of a turned rectangle can put an edge pixel otherwise when it is painted under a clip (a
+// part painted again: a line being drawn asks for its piece) than when the whole canvas is, which a path's fill never
+// does (PC4 E-0: found when the default クイックアクセス's longer names made the canvas narrower).
+void fill_sheet(QPainter& painter, const QRectF& rect, const QColor& colour) {
+    if (painter.transform().type() <= QTransform::TxScale) {
+        painter.fillRect(rect, colour);
+        return;
+    }
+    QPainterPath path;
+    path.addRect(rect);
+    painter.fillPath(path, colour);
+}
+
 }  // namespace
 
 void PageCanvas::paintEvent(QPaintEvent* event) {
@@ -98,10 +113,10 @@ void PageCanvas::paint_page(QPainter& painter) {
         // the partner sits on the other physical side; strokes drawn there go to the partner page
         const double step = p->spread_step_mm().value();
         const double offset = p->side() == "right" ? -step : step;
-        painter.fillRect(page_rect.translated(offset * view_.scale, 0), QColor(QStringLiteral("#e9e4d8")));
+        fill_sheet(painter, page_rect.translated(offset * view_.scale, 0), QColor(QStringLiteral("#e9e4d8")));
     }
     draw_shadow(painter, page_rect);
-    painter.fillRect(page_rect, Qt::white);
+    fill_sheet(painter, page_rect, Qt::white);
     if (!shown_frame_.isNull()) {
         painter.drawImage(page_rect, shown_frame_);
     } else if (renderer_->any_shown()) {

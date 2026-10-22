@@ -115,6 +115,9 @@ genko_library(genko_core
     # PC4 F-0 (形式の土台: file-info@1, image-grid@1, psd-keep@1)
     file_info.cpp
     psd_keep.cpp
+    # PC4 E-0 (描く道具の土台: brushes@1, patterns@1)
+    brush_dabs.cpp
+    patterns.cpp
     "${CMAKE_CURRENT_BINARY_DIR}/ops_schema_data.cpp"
     "${CMAKE_CURRENT_BINARY_DIR}/pyre_names_data.cpp"
     "${CMAKE_CURRENT_BINARY_DIR}/builtin_profiles_data.cpp"

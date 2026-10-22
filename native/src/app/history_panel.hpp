@@ -10,7 +10,7 @@
 class QListWidget;
 class QListWidgetItem;
 
-// 履歴 (Python's genko/app/history.py): every change in the order it was made, named in words ("ペンで描いた",
+// 履歴 (Python's genko/app/history.py): every change in the order it was made, named in words ("ブラシで描いた",
 // "コマを割った" …), with the ones undone greyed below the present. Clicking one goes back (or forward) to just after it —
 // plain undo and redo through the book's session, one step at a time. The changes come from the book's journal on disk
 // (saved before this session) and from the session (Session::history).

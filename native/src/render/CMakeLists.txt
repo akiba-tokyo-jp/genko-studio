@@ -152,6 +152,11 @@ genko_library(genko_render
     codecs/limits.cpp
     codecs/codecs.cpp
     ops_formats.cpp
+    # PC4 E-0 (描く道具の土台: 層のタイル、プリセットの置き場、描く道具とパターンの op の枠)
+    tiled_pixels.cpp
+    preset_store.cpp
+    ops_paint_tools.cpp
+    ops_patterns.cpp
     ${GENKO_MATERIAL_RESOURCES}
     ${GENKO_TEXT_RESOURCES}
   PUBLIC_DEPS genko_core Qt6::Core

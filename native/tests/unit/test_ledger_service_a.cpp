@@ -1209,7 +1209,10 @@ private slots:
                                            "content_aware_scale", "align_layers", "distribute_layers", "arrange_layers", "link_layers",
                                            "resize_pages", "set_canvas_size", "crop_page", "trim_page", "reveal_all", "rotate_pages",
                                            // (PC4 F-0: 節 F's ops registered for F-b and F-e, SPEC FILE-01)
-                                           "set_file_info", "set_camera_raw"};
+                                           "set_file_info", "set_camera_raw",
+                                           // (PC4 E-0: the later groups' ops registered, SPEC COLOR-08)
+                                           "dodge", "burn", "sponge", "blur_brush", "sharpen_brush", "smudge_brush", "mixer_brush",
+                                           "background_eraser", "color_replacement", "add_pattern", "rename_pattern", "delete_pattern"};
         for (const std::string& name : genko::render::ops_registry().names()) {
             if (listed.count(name) == 0 && own.count(name) == 0) missing += (missing.empty() ? "" : ", ") + name;
         }

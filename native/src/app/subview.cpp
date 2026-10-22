@@ -41,7 +41,7 @@ void keep_pictures(const QStringList& paths) { settings()->setValue(QStringLiter
 SubPicture::SubPicture() {
     setMinimumHeight(140);
     setCursor(Qt::CrossCursor);
-    setToolTip(QStringLiteral("クリックした所の色をペンの色にします"));
+    setToolTip(QStringLiteral("クリックした所の色を描画色にします"));
 }
 
 void SubPicture::set_image(const QImage& image) {
@@ -95,7 +95,7 @@ SubView::SubView(MainWindow* window) : window_(window) {
     picture = new SubPicture;
     connect(picture, &SubPicture::picked, this, [this](const std::array<int, 3>& rgb) {
         window_->brush_panel()->set_colour(rgb);
-        window_->flash(QStringLiteral("資料の色 (%1, %2, %3) をペンの色にしました").arg(rgb[0]).arg(rgb[1]).arg(rgb[2]), 2000);
+        window_->flash(QStringLiteral("資料の色 (%1, %2, %3) を描画色にしました").arg(rgb[0]).arg(rgb[1]).arg(rgb[2]), 2000);
     });
     auto* row = new QHBoxLayout;
     row->addWidget(add_button);

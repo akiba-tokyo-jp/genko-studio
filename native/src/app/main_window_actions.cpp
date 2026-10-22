@@ -437,9 +437,11 @@ void MainWindow::build_actions() {
     // the tools (one at a time: tool_actions)
     make("act_select", QStringLiteral("選択"), [this] { choose_tool(QStringLiteral("select")); }, keys({QKeySequence(QStringLiteral("V"))}),
          QStringLiteral("コマを選ぶ・フキダシを動かす・ドラッグで表示を動かす"), true);
-    make("act_pen", QStringLiteral("ペン"), [this] { choose_tool(QStringLiteral("pen")); }, keys({QKeySequence(QStringLiteral("B"))}),
+    // (PC4 E-0, the user's decision 2: the drawing tools by Photoshop's names — their ids and keys kept,
+    // preferences::renamed(); the pen layers, lines and the G pen keep theirs)
+    make("act_pen", QStringLiteral("ブラシツール"), [this] { choose_tool(QStringLiteral("pen")); }, keys({QKeySequence(QStringLiteral("B"))}),
          QStringLiteral("レイヤー パネルで選んだレイヤーに描きます"), true);
-    make("act_eraser", QStringLiteral("消しゴム"), [this] { choose_tool(QStringLiteral("eraser")); }, keys({QKeySequence(QStringLiteral("E"))}),
+    make("act_eraser", QStringLiteral("消しゴムツール"), [this] { choose_tool(QStringLiteral("eraser")); }, keys({QKeySequence(QStringLiteral("E"))}),
          QStringLiteral("ペンの線は触れた所で切れます"), true);
     make("act_frame", QStringLiteral("コマ割り"), [this] { choose_tool(QStringLiteral("frame")); }, keys({QKeySequence(QStringLiteral("F"))}),
          QStringLiteral("コマの中をドラッグして割る（斜めも。水平・垂直に吸い付く、Alt で自由）・間の白をドラッグで間隔を動かす・選んだコマの角をドラッグで形を変える"), true);
@@ -477,7 +479,7 @@ void MainWindow::build_actions() {
     build_file_actions();       // (PC4 F-0: 節 F's new commands of ファイル, frames until F-b and F-c: main_window_file.cpp)
     make("act_point_wider", QStringLiteral("選んだ点を太く"), [this] { point_width(1.25); }, keys({QKeySequence(QStringLiteral("Ctrl+Alt+]"))}),
          QStringLiteral("部分選択ツールで選んだ制御点のところだけ、線を太くします"));
-    make("act_color", QStringLiteral("ペンの色…"), [this] { pick_colour(); }, keys({QKeySequence(QStringLiteral("C"))}));
+    make("act_color", QStringLiteral("カラーピッカー（描画色）…"), [this] { pick_colour(); }, keys({QKeySequence(QStringLiteral("C"))}));
     // (one chosen in a list, then merged with the one under it: named apart from Python's 下のレイヤーと結合, which
     // merges the panel's chosen layer at once — a command's name says one thing)
     make("act_layer_merge_down", QStringLiteral("レイヤーを選んで下と結合…"), [this] { layer_operation("merge_down"); });
@@ -635,12 +637,13 @@ void MainWindow::build_menus() {
         tools->addAction(action(name));
     tools->addSeparator();
     build_tool_groups(tools);  // (the selection's tools, the retouching's: main_window_select.cpp)
+    build_paint_tool_groups(tools);  // (PC4 E-0: the drawing tools' groups' tools the menu has not: paint_panels.cpp)
     tools->addAction(action("act_crop_tool"));  // (PC3 C-e)
     for (const char* name : {"act_ruler", "act_3d", "act_effect", "act_stamp"}) tools->addAction(action(name));
     tools->addSeparator();
     for (const char* name : {"act_thicker", "act_thinner"}) tools->addAction(action(name));
     tools->addSeparator();
-    for (const char* name : {"act_swap_colour", "act_transparent"}) tools->addAction(action(name));
+    for (const char* name : {"act_swap_colour", "act_default_colours", "act_transparent"}) tools->addAction(action(name));
     tools->addSeparator();
     QMenu* tones = tools->addMenu(QStringLiteral("トーン・効果線"));
     for (const char* name : {"act_tone_here", "act_tone_click"}) tones->addAction(action(name));
@@ -789,6 +792,7 @@ void MainWindow::build_toolbars() {
     for (const auto& [name, label] : {std::pair{"act_marquee", "長方形選択"}, {"act_lasso", "なげなわ"}, {"act_reshape", "線の修正"}, {"act_3d", "3D"}})
         action(QString::fromLatin1(name))->setIconText(QString::fromUtf8(label));  // (the palette's names stay short; menus keep the full name)
     addToolBar(Qt::LeftToolBarArea, palette_);
+    attach_tool_groups(palette_);  // (PC4 E-0: a tool's group on a long press or a right click: paint_panels.cpp)
     {
         QAction* names = action(QStringLiteral("act_tool_names"));
         const QSignalBlocker quiet(names);
@@ -886,6 +890,7 @@ void MainWindow::build_docks() {
     build_line_dock();  // (台詞, a tab beside the pages and the layers: main_window_lines.cpp)
     pages_dock_->raise();
     build_colour_dock();  // (カラー, a tab beside the pages and the layers: main_window_paint.cpp)
+    build_paint_docks();  // (PC4 E-0: ブラシ設定, ブラシ, パターン, スタイル, ツールプリセット, スウォッチ: paint_panels.cpp)
     tabifyDockWidget(pages_dock_, panel_dock_);  // (コマの詳細 after カラー, as Python's row)
     view_menu_->addAction(panel_dock_->toggleViewAction());
     build_guide_dock();   // (定規・3D, a tab when it is opened: main_window_guides.cpp)
@@ -1003,6 +1008,11 @@ void MainWindow::on_stroke(const StrokeInput& stroke) {
     Json op = Json::object({{"op", "add_stroke"}, {"page", page->index.json()}, {"layer_id", layer->id}, {"points", points}});
     const Json fields = pen_.stroke_fields();
     for (const auto& [key, value] : fields.items()) op[key] = value;
+    // (PC4 E-0: a 描画色 holding more than its 8 bits, on a page of 16 or 32 bits: its precise values as the line's colour —
+    // native.color_stroke_v1's color_rgb —, the 8-bit rgb its picture)
+    if (colours_ != nullptr && op.contains("rgb") && colours_->is_precise() && !page->color && page->rgb && page->rgb->depth != 8) {
+        op["color_rgb"] = colours_->foreground_json(page->rgb->depth == 32 ? "f32" : "u16");
+    }
     if (stroke.rotation.size() == stroke.points.size() &&
         std::any_of(stroke.rotation.begin(), stroke.rotation.end(), [](double v) { return std::abs(v) > 0.5; })) {
         Json turns = Json::array();
@@ -1585,7 +1595,7 @@ void MainWindow::point_width(double factor) {
 
 void MainWindow::pick_colour() {
     const QColor now(static_cast<int>(pen_.rgb[0]), static_cast<int>(pen_.rgb[1]), static_cast<int>(pen_.rgb[2]));
-    if (const auto colour = ask::colour(this, now, QStringLiteral("色"))) brush_->set_colour({colour->red(), colour->green(), colour->blue()});
+    if (const auto colour = ask::colour(this, now, QStringLiteral("カラーピッカー（描画色）"))) brush_->set_colour({colour->red(), colour->green(), colour->blue()});
 }
 
 void MainWindow::ask_zoom() {

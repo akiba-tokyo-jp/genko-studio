@@ -12,6 +12,8 @@
 #include <QMenu>
 #include <QMenuBar>
 #include <QSpinBox>
+#include <QToolBar>
+#include <QToolButton>
 #include "gui_support.hpp"
 #include "app/brush_panel.hpp"
 #include "app/canvas.hpp"
@@ -100,22 +102,24 @@ private slots:
     void commandsAsPythonsWindowHasThem() {
         Studio s;
         const std::vector<Expected> expected = {
-            {"act_picker", "スポイト", "I", "クリックした所の色をペンの色にします", true},
-            {"act_fill", "塗りつぶし", "G", "線で囲まれた所をクリックで塗ります（隙間閉じ・見る範囲はブラシ パネルで）", true},
+            // (PC4 E-0, the user's decision 2: the drawing tools and the colours by Photoshop's names)
+            {"act_picker", "スポイトツール", "I", "クリックした所の色を描画色にします", true},
+            {"act_fill", "塗りつぶしツール", "G", "線で囲まれた所をクリックで塗ります（隙間閉じ・見る範囲はブラシ パネルで）", true},
             {"act_lassofill", "囲って塗る", "Shift+G", "ドラッグで囲んだ所を塗ります", true},
-            {"act_gradient", "グラデーション", "U", "ドラッグの向きに色をなめらかに変えて塗る（選択範囲があればその中だけ）", true},
+            {"act_gradient", "グラデーションツール", "U", "ドラッグの向きに色をなめらかに変えて塗る（選択範囲があればその中だけ）", true},
             // (PC3 C-b, the user's decisions 5 and 7: the 図形 is the shape tools' 長方形ツール — test_gui_shapes)
             {"act_shape", "長方形ツール", "O",
              "ドラッグで長方形のシェイプを描きます（Shift で正方形、Alt で中心から。モードがピクセルなら直線・折れ線・曲線なども）", true},
-            {"act_blend", "色混ぜ", "Shift+B", "ペイントのレイヤーの色をぼかす・指先でのばす・なじませる", true},
+            {"act_blend", "色混ぜ", "Shift+B", "ペイントのレイヤーの色をぼかす・指先でのばす・なじませる（Photoshop のぼかしツール・指先ツールは別の道具）", true},
             {"act_liquify", "前方ワープツール", "Shift+L", "なぞった所の絵と線を押し流す・縮める・ふくらませる・渦を巻く", true},
             {"act_point_thinner", "選んだ点を細く", "Ctrl+Alt+[", "部分選択ツールで選んだ制御点のところだけ、線を細くします", false},  // (PC3 C-b)
             {"act_fill_gaps", "塗り残しを塗る", "",
              "塗った色の間に残った小さなすき間を、同じ色で塗ります。選択範囲があればその中を、無ければなぞった所を", false},
-            {"act_swap_colour", "メインとサブの色を入れ替える", "X", "", false},
-            {"act_transparent", "透明色で描く", "", "ペンで描いた所が消える（もう一度で戻る）", true},
-            {"act_thicker", "太く（ペン・消しゴム）", "]", "", false},
-            {"act_thinner", "細く（ペン・消しゴム）", "[", "", false},
+            {"act_swap_colour", "描画色と背景色を入れ替え", "X", "", false},
+            {"act_default_colours", "描画色と背景色を初期設定に戻す", "D", "描画色を黒に、背景色を白にします", false},
+            {"act_transparent", "透明色で描く", "", "ブラシで描いた所が消える（もう一度で戻る）", true},
+            {"act_thicker", "ブラシサイズを大きく", "]", "", false},
+            {"act_thinner", "ブラシサイズを小さく", "[", "", false},
         };
         for (const Expected& e : expected) {
             QAction* a = s.window->action(QString::fromLatin1(e.attribute));
@@ -387,7 +391,7 @@ private slots:
             {"act_vector", "部分選択ツール", "Shift+Y", "ペンの線を選んで制御点を動かす（Alt+クリックで点を足す、Delete で消す、Shift+クリックで 2 本目）", true},
             {"act_vector_join", "選んだ 2 本の線をつなぐ", "", "", false},
             {"act_vector_cut", "クリックした所で線を切る", "", "オンの間、線をクリックするとそこで 2 本に分かれます", true},
-            {"act_vector_colour", "選んだ線をペンの色にする", "", "", false},
+            {"act_vector_colour", "選んだ線を描画色にする", "", "", false},  // (PC4 E-0)
             {"act_vector_delete", "選んだ線を消す", "", "", false},
             {"act_vector_simplify", "選んだ線の点を減らす", "", "形を保ったまま、制御点を減らします（単純化）", false},
         };
@@ -498,12 +502,40 @@ private slots:
         QCOMPARE(s.colours().sub_rgb(), (app::Rgb{10, 20, 30}));
         s.trigger("act_swap_colour");
         QCOMPARE(s.brush().rgb(), (app::Rgb{10, 20, 30}));
+        // D (PC4 E-0): Genko's black and white
+        s.trigger("act_default_colours");
+        QCOMPARE(s.brush().rgb(), (app::Rgb{20, 20, 20}));
+        QCOMPARE(s.colours().sub_rgb(), (app::Rgb{255, 255, 255}));
+        // the 描画色 as floats (PC4 E-0): its 8-bit picture the nearest; swapped with the 背景色; an 8-bit choice leaves them
+        s.colours().choose_precise({0.5, 0.25, 1.0 / 3.0});
+        QCOMPARE(s.brush().rgb(), (app::Rgb{128, 64, 85}));
+        QVERIFY(s.colours().is_precise());
+        QCOMPARE(s.colours().foreground()[0], 0.5);
+        QCOMPARE(s.colours().foreground_json("u16")["values"][1].get<double>(), std::round(0.25 * 65535) / 65535);
+        QCOMPARE(s.colours().foreground_json("f32")["values"][2].get<double>(), static_cast<double>(static_cast<float>(1.0 / 3.0)));
+        s.trigger("act_swap_colour");
+        QVERIFY(!s.colours().is_precise());
+        QCOMPARE(s.colours().background()[2], 1.0 / 3.0);
+        s.trigger("act_swap_colour");
+        QVERIFY(s.colours().is_precise());
+        s.colours().choose(app::Rgb{10, 20, 30});
+        QVERIFY(!s.colours().is_precise());
+        QCOMPARE(s.colours().foreground()[0], 10.0 / 255.0);
+        // (the same 8-bit colour chosen again — in the panel, or by the brush panel as a swatch or the picker sets it —
+        // lets the floats go too)
+        s.colours().choose_precise({0.5, 0.25, 1.0 / 3.0});
+        s.colours().choose(app::Rgb{128, 64, 85});
+        QVERIFY(!s.colours().is_precise());
+        QCOMPARE(s.colours().foreground()[1], 64.0 / 255.0);
+        s.colours().choose_precise({0.5, 0.25, 1.0 / 3.0});
+        s.brush().set_colour({128, 64, 85});
+        QVERIFY(!s.colours().is_precise());
         // ] and [: the pen's size one step up and down, or the eraser's
         s.window->choose_tool(QStringLiteral("pen"));
         const double width = s.canvas()->brush_width_mm;
         s.trigger("act_thicker");
         QVERIFY(s.canvas()->brush_width_mm > width);
-        QVERIFY(s.window->last_notice().startsWith(QStringLiteral("ペンの太さ")));
+        QVERIFY(s.window->last_notice().startsWith(QStringLiteral("ブラシサイズ ")));
         const double wider = s.canvas()->brush_width_mm;
         s.trigger("act_thinner");
         QVERIFY(s.canvas()->brush_width_mm < wider);
@@ -511,7 +543,7 @@ private slots:
         const double eraser = s.canvas()->eraser_mm;
         s.trigger("act_thicker");
         QVERIFY(s.canvas()->eraser_mm > eraser);
-        QVERIFY(s.window->last_notice().startsWith(QStringLiteral("消しゴムの太さ")));
+        QVERIFY(s.window->last_notice().startsWith(QStringLiteral("ブラシサイズ（消しゴムツール）")));
         auto* box = s.window->findChild<QDoubleSpinBox*>(QStringLiteral("eraser_size"));
         QCOMPARE(box->value(), s.canvas()->eraser_mm);
         s.trigger("act_thinner");
@@ -519,6 +551,53 @@ private slots:
         // 選んだ点を細く without a point chosen: said how
         s.trigger("act_point_thinner");
         QVERIFY(s.window->last_notice().startsWith(QStringLiteral("先に")));
+    }
+
+    // The drawing tools' groups: a palette button whose group has other tools offers them on a long press and a right
+    // click (the eraser's: マジック消しゴムツール), a tool alone none; the ツール menu has each group's tools once; the new
+    // panels' frames are in ウィンドウ, hidden; スウォッチ opens the カラー panel's tab.
+    void theToolGroupsAndThePanels() {
+        Studio s;
+        QToolBar* palette = s.window->tool_palette();
+        auto* eraser = qobject_cast<QToolButton*>(palette->widgetForAction(s.window->action(QStringLiteral("act_eraser"))));
+        QVERIFY(eraser != nullptr && eraser->menu() != nullptr);
+        QCOMPARE(eraser->popupMode(), QToolButton::DelayedPopup);
+        QCOMPARE(eraser->menu()->actions(), (QList<QAction*>{s.window->action(QStringLiteral("act_eraser")), s.window->action(QStringLiteral("act_magic_eraser"))}));
+        QCOMPARE(eraser->contextMenuPolicy(), Qt::CustomContextMenu);
+        auto* picker = qobject_cast<QToolButton*>(palette->widgetForAction(s.window->action(QStringLiteral("act_picker"))));
+        QVERIFY(picker != nullptr && picker->menu() == nullptr);
+        auto* fill = qobject_cast<QToolButton*>(palette->widgetForAction(s.window->action(QStringLiteral("act_fill"))));
+        QVERIFY(fill != nullptr && fill->menu() != nullptr);
+        QCOMPARE(fill->menu()->actions().size(), 3);  // (塗りつぶしツール, 囲って塗る, グラデーションツール)
+        QCOMPARE(s.window->tool_group_of(s.window->action(QStringLiteral("act_blend"))),
+                 (std::vector<QAction*>{s.window->action(QStringLiteral("act_blend"))}));  // (ぼかし: 色混ぜ until E5's)
+        // each tool once in the ツール menu
+        QMenu* tools = nullptr;
+        for (QAction* top : s.window->menuBar()->actions())
+            if (top->text() == QStringLiteral("ツール")) tools = top->menu();
+        QVERIFY(tools != nullptr);
+        for (const auto& group : app::MainWindow::paint_tool_groups()) {
+            for (const char* name : group.tools) {
+                QAction* act = s.window->action(QString::fromLatin1(name));
+                if (act == nullptr) continue;
+                QVERIFY2(s.menus_of(act).contains(QStringLiteral("ツール")), name);
+            }
+        }
+        QCOMPARE(tools->actions().count(s.window->action(QStringLiteral("act_magic_eraser"))), 1);
+        // the panels' frames
+        for (const char* title : {"ブラシ設定", "ブラシ", "パターン", "スタイル", "ツールプリセット"}) {
+            QDockWidget* dock = nullptr;
+            for (QDockWidget* d : s.window->findChildren<QDockWidget*>())
+                if (d->windowTitle() == QString::fromUtf8(title)) dock = d;
+            QVERIFY2(dock != nullptr && !dock->isVisible(), title);
+            QVERIFY2(s.menus_of(dock->toggleViewAction()).contains(QStringLiteral("ウィンドウ")), title);
+        }
+        // スウォッチ
+        s.window->colours()->tabs->setCurrentIndex(2);
+        s.trigger("act_swatches");
+        QCOMPARE(s.window->colours()->tabs->currentIndex(), 0);
+        QCOMPARE(s.window->colours()->tabs->tabText(0), QStringLiteral("スウォッチ"));
+        QVERIFY(s.menus_of(s.window->action(QStringLiteral("act_swatches"))).contains(QStringLiteral("ウィンドウ")));
     }
 };
 

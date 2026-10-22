@@ -2,12 +2,15 @@
 
 #include <array>
 #include <cstddef>
+#include <functional>
+#include <optional>
 #include <string_view>
 #include <utility>
 #include <vector>
 
 #include "render/image.hpp"
 #include "render/image_ops.hpp"
+#include "render/tiled_pixels.hpp"
 
 // PC3 B4 (SPEC.md COLOR-06「修復」): the dabs of the retouching brushes and the way their strokes are laid on a layer —
 // PhotoCraft v0.2.0's paint/src/lib.rs (StrokePoint, Stroke, Dab, dabs, dab_coverage) and paint/src/retouch.rs
@@ -20,8 +23,8 @@
 //   v·(ceil − c)), and a picture made once from the pixels before the stroke (a cloned source, a healed patch, an earlier
 //   state) is laid through it at the stroke's opacity — what the stroke painted is never sampled again (Clone Stamp,
 //   Healing Brush, Spot Healing Brush, History Brush);
-// - sequential dabs (PC4 adds `apply_dab_stroke` here, for Dodge, Burn, Sponge, Blur, Sharpen and Smudge: each dab edits
-//   a working copy the next dab sees, mixed back at the stroke's opacity).
+// - sequential dabs (apply_dab_stroke, PC4 E-0 — for E5's Dodge, Burn, Sponge, Blur, Sharpen and Smudge: each dab edits
+//   a working copy the next dab sees, mixed back at the stroke's opacity), on a layer's tiles (render/tiled_pixels).
 // The pixels are image_ops::Pixels — a layer's own values of any of the three kinds (8 bits, precise, inks: CMYK, Lab,
 // grey and a multichannel page's plates) — so the same code paints every kind; only a blend other than normal goes
 // through the colours (rgba_of, and an ink layer's back by the page's rules).
@@ -94,6 +97,42 @@ void over(float* dst, const float* src, unsigned colours, float k, bool lock_alp
 // The box of the pixels it changed (none: empty).
 Box apply_coverage(image_ops::Pixels& target, const Box& box, const Coverage& coverage, float opacity, const std::vector<float>* selection,
                    bool lock_alpha, const image_ops::Pixels& paint, std::string_view blend);
+
+// --- sequential dabs (PC4 E-0: upstream's apply_dab_stroke, for E5's Dodge, Burn, Sponge, Blur, Sharpen, Smudge) ----------
+
+// The selection's coverage at a pixel of the grid (0..1); none: everywhere.
+using SelectionAt = std::function<float(int x, int y)>;
+// What a dab does to the working copy: it changes only the pixels of its footprint's box (it may read around it, as far
+// as the stroke's halo).
+using DabEffect = std::function<void(tiled::TiledPixels& work, const Footprint& footprint)>;
+
+// The dabs' boxes of a stroke (one each, in order).
+std::vector<Box> dab_boxes(const Brush& brush, const std::vector<StrokePoint>& points);
+
+// A sequential-dab stroke on a layer's tiles: the tiles its dabs reach, grown by `halo` pixels (what a dab's
+// neighbourhood reads), held in `target` (reached first); a working copy of them edited dab by dab in their order — each
+// sees what the dabs before it left —; then each pixel of the dabs' boxes mixed back into `target` by the stroke's
+// opacity × the selection's (target + (work − target) × k, every value of the layer's own kind; the alpha kept with
+// lock_alpha). A pixel the effect left as it was keeps its bytes. The box of the pixels it changed (none: empty).
+Box apply_dab_stroke(tiled::TiledPixels& target, const Brush& brush, const std::vector<StrokePoint>& points, const SelectionAt& selection,
+                     bool lock_alpha, int halo, const DabEffect& effect);
+
+// The Smudge Tool's paint (upstream's Smudge): a patch of colour carried from dab to dab (centred on the dab), laid down
+// at `strength` (0..1) and then picking up what is under the dab; finger painting starts with `finger` (the layer's own
+// values: colours then the alpha) instead of what is under the first dab. Use with apply_dab_stroke and a halo of at
+// least halo() (the patch's reach).
+class Smudge {
+public:
+    Smudge(float strength, std::optional<std::vector<float>> finger, float max_brush_size);
+    int halo() const { return radius_; }
+    void dab(tiled::TiledPixels& work, const Footprint& footprint);
+
+private:
+    float strength_;
+    std::optional<std::vector<float>> finger_;
+    int radius_;
+    std::vector<float> carry_;
+};
 
 // --- the clone source (Window › Clone Source) --------------------------------------------------------------------------
 

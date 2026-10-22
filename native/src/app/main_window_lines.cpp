@@ -562,7 +562,7 @@ void MainWindow::draw_text_path(const std::string& line_id) {
     // the next line drawn with the pen becomes the path the words follow
     text_path_for_ = line_id;
     choose_tool(QStringLiteral("pen"));
-    flash(QStringLiteral("文字を沿わせる線を、ペンで 1 本引きます"), 6000);
+    flash(QStringLiteral("文字を沿わせる線を、ブラシツールで 1 本引きます"), 6000);
 }
 
 bool MainWindow::text_path_stroke(const StrokeInput& stroke) {

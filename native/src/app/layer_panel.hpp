@@ -51,7 +51,7 @@ public:
     QMenu* special_menu() const { return special_; }
     QMenu* many_menu() const { return many_; }
     QMenu* mask_menu() const { return mask_menu_; }
-    // マスクを編集する（ペンで見せる・消しゴムで隠す）: checked while the pen and the eraser paint the mask (a layer without
+    // マスクを編集する（ブラシで見せる・消しゴムで隠す）: checked while the pen and the eraser paint the mask (a layer without
     // one gets a mask showing everything first).
     QAction* mask_edit_action() const { return mask_edit_; }
     void edit_mask(bool on);

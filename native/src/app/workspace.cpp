@@ -33,7 +33,7 @@ const QStringList kDefaultCommandBar{QStringLiteral("元に戻す"), QStringLite
                                      QStringLiteral("全体を表示"), QStringLiteral("縮小"), QStringLiteral("拡大"), QStringLiteral("|"),
                                      QStringLiteral("◀ 前のページ"), QStringLiteral("次のページ ▶"), QStringLiteral("|"),
                                      QStringLiteral("原稿を書き出す…")};  // (PC4 F-0: 書き出し…'s new name)
-const QStringList kDefaultQuick{QStringLiteral("ペン"), QStringLiteral("消しゴム"), QStringLiteral("塗りつぶし"), QStringLiteral("テキスト"),
+const QStringList kDefaultQuick{QStringLiteral("ブラシツール"), QStringLiteral("消しゴムツール"), QStringLiteral("塗りつぶしツール"), QStringLiteral("テキスト"),
                                 QStringLiteral("コマ割り"), QStringLiteral("選択範囲・選んだコマにトーンを貼る"), QStringLiteral("集中線"),
                                 QStringLiteral("左右反転して見る")};
 
@@ -497,9 +497,9 @@ QString cursor_kind() {
 }
 
 const Choices& modifier_tool_choices() {
-    static const Choices all{{QStringLiteral("何もしない"), QString()}, {QStringLiteral("スポイト"), QStringLiteral("picker")},
+    static const Choices all{{QStringLiteral("何もしない"), QString()}, {QStringLiteral("スポイトツール"), QStringLiteral("picker")},
                              {QStringLiteral("選択"), QStringLiteral("select")}, {QStringLiteral("移動ツール"), QStringLiteral("move")},
-                             {QStringLiteral("消しゴム"), QStringLiteral("eraser")}};
+                             {QStringLiteral("消しゴムツール"), QStringLiteral("eraser")}};
     return all;
 }
 
@@ -511,19 +511,19 @@ QString modifier_tool(const QString& key) {
 }
 
 const Choices& keyed_tools() {
-    static const Choices all{{QStringLiteral("ペン"), QStringLiteral("pen")},          {QStringLiteral("消しゴム"), QStringLiteral("eraser")},
-                             {QStringLiteral("塗りつぶし"), QStringLiteral("fill")},    {QStringLiteral("選択範囲"), QStringLiteral("marquee")},
+    static const Choices all{{QStringLiteral("ブラシツール"), QStringLiteral("pen")},  {QStringLiteral("消しゴムツール"), QStringLiteral("eraser")},
+                             {QStringLiteral("塗りつぶしツール"), QStringLiteral("fill")},    {QStringLiteral("選択範囲"), QStringLiteral("marquee")},
                              {QStringLiteral("選択"), QStringLiteral("select")},        {QStringLiteral("テキスト"), QStringLiteral("text")},
                              {QStringLiteral("ベクター線の直し"), QStringLiteral("vector")}, {QStringLiteral("色混ぜ"), QStringLiteral("blend")},
-                             {QStringLiteral("グラデーション"), QStringLiteral("gradient")}, {QStringLiteral("コマ"), QStringLiteral("frame")}};
+                             {QStringLiteral("グラデーションツール"), QStringLiteral("gradient")}, {QStringLiteral("コマ"), QStringLiteral("frame")}};
     return all;
 }
 
 const Choices& held_tools() {
     static const Choices all{{QStringLiteral("共通の設定のまま"), QString()}, {QStringLiteral("何もしない"), QStringLiteral("none")},
-                             {QStringLiteral("スポイト"), QStringLiteral("picker")},   {QStringLiteral("選択"), QStringLiteral("select")},
-                             {QStringLiteral("移動ツール"), QStringLiteral("move")},  {QStringLiteral("消しゴム"), QStringLiteral("eraser")},
-                             {QStringLiteral("ペン"), QStringLiteral("pen")},          {QStringLiteral("塗りつぶし"), QStringLiteral("fill")}};
+                             {QStringLiteral("スポイトツール"), QStringLiteral("picker")}, {QStringLiteral("選択"), QStringLiteral("select")},
+                             {QStringLiteral("移動ツール"), QStringLiteral("move")},  {QStringLiteral("消しゴムツール"), QStringLiteral("eraser")},
+                             {QStringLiteral("ブラシツール"), QStringLiteral("pen")},  {QStringLiteral("塗りつぶしツール"), QStringLiteral("fill")}};
     return all;
 }
 

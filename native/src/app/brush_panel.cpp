@@ -398,9 +398,9 @@ BrushPanel::BrushPanel(QWidget* parent) : QWidget(parent) {
     layout->addLayout(make_row);
     layout->addWidget(section(QStringLiteral("描き味")));
     layout->addLayout(form);
-    layout->addWidget(section(QStringLiteral("色"), QStringLiteral("スポイト（I）で原稿から拾えます")));
+    layout->addWidget(section(QStringLiteral("色"), QStringLiteral("スポイトツール（I）で原稿から拾えます")));
     layout->addLayout(colour_row);
-    layout->addWidget(section(QStringLiteral("塗りつぶし（G）")));
+    layout->addWidget(section(QStringLiteral("塗りつぶしツール（G）")));
     layout->addLayout(fill_form);
     layout->addWidget(crossing);
     layout->addStretch(1);
@@ -623,6 +623,7 @@ void BrushPanel::set_colour(const std::array<int, 3>& rgb) {
     swatch->setToolTip(QStringLiteral("今の色 (%1, %2, %3)").arg(rgb[0]).arg(rgb[1]).arg(rgb[2]));
     settings()->setValue(QStringLiteral("brush/rgb"), QStringLiteral("%1,%2,%3").arg(rgb[0]).arg(rgb[1]).arg(rgb[2]));
     if (sample != nullptr) sample->refresh();
+    emit colour_set();
     emit changed();
 }
 

@@ -309,6 +309,21 @@ void add_stroke_mixing(OpContext& c, const MixPieces& mix_pieces) {
     } else {
         stroke.rgb.reset();
     }
+    // (PC4 E-0: the 描画色's precise values on an RGB page of 16 or 32 bits — native.color_stroke_v1's color_rgb, the rgb
+    // its 8-bit picture. Any other page's lines are of 8 bits or inks: there it is not used — as before, when the op did
+    // not know it — and the note says so; a line read off a precise page draws on an 8-bit one by its rgb)
+    if (const Json* color = get(op, "color_rgb"); color != nullptr && !color->is_null()) {
+        if (page.color || !page.rgb || page.rgb->depth == 8) {
+            c.notes.push_back("color_rgb is for an RGB page of 16 or 32 bits: the line's rgb is used");
+        } else {
+            try {
+                validate_stroke_color(*color);
+            } catch (const Error& error) {
+                throw OpError(error.what());
+            }
+            stroke.color_rgb = *color;
+        }
+    }
     const Json* opacity = get(op, "opacity");
     if (opacity != nullptr && !opacity->is_null()) stroke.opacity = py_clamp(to_float(*opacity), 0.0, 1.0);
     const Brush brush = brush_for(Json(stroke.kind), doc);
@@ -553,6 +568,9 @@ void register_define_brush(OpRegistry& registry, PaperTakeIn take_in) {
         if(!key.starts_with("my_") || key.size()>40)throw OpError("a brush of one's own has a key starting with my_");
         if(truthy_at(c.op,"delete")){c.doc.brush_custom.erase(key);return;}
         Json data=c.op;for(const char* k:{"op","key","delete"})data.erase(k);
+        // (brushes@1: a dab brush's "engine" and "dabs" are taken by PC4 E1, with its pictures; until then not read, as
+        // before — a brush made on a dab brush of the book keeps its dabs)
+        for (const char* k : {"engine", "dabs"}) data.erase(k);
         // BRUSH-01 (this build): the paper's picture taken in and given by its asset, the book keeping it
         std::optional<std::pair<std::string, Bytes>> picture;
         if (const auto given = data.find("paper"); given != data.end() && !given->is_null()) {

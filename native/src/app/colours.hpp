@@ -12,6 +12,7 @@
 
 #include "core/color_model.hpp"
 #include "core/ink.hpp"
+#include "core/json.hpp"
 
 class QCheckBox;
 class QComboBox;
@@ -122,8 +123,22 @@ public:
     const Rgb& sub_rgb() const { return sub_rgb_; }
     void choose(const Rgb& rgb);
     void show_colour(const Rgb& rgb);
-    // メインとサブを入れ替える (X).
+    // 描画色と背景色を入れ替え (X).
     void swap();
+    // 描画色と背景色を初期設定に戻す (D, PC4 E-0): Genko's black (20, 20, 20) and white.
+    void reset_defaults();
+    // PC4 E-0 (描画色・背景色の高精度): the colours as floats — straight sRGB 0..1 (32 bits: beyond 1 too), the form of a
+    // precise line's color_rgb (native.color_stroke_v1) — kept beside their 8-bit pictures. choose_precise() chooses the
+    // 描画色 so (its 8-bit picture the nearest); foreground() and background() give them, the 8-bit colour / 255 for one
+    // not chosen as floats (or an 8-bit colour chosen since, the same one too: BrushPanel::colour_set); is_precise() says
+    // whether the 描画色 holds more than its 8 bits.
+    using Precise = std::array<double, 3>;
+    void choose_precise(const Precise& srgb);
+    Precise foreground() const;
+    Precise background() const;
+    bool is_precise() const;
+    // The 描画色 as a line's color_rgb ({"precision": "u16" | "f32", "values": [r, g, b]}; u16: rounded to 16 bits, 0..1).
+    core::Json foreground_json(std::string_view precision) const;
     // A colour just used goes to the front of 履歴.
     void remember(const Rgb& rgb);
     // The current colour added to the chosen set (a built-in set: to one's own copy of it).
@@ -193,6 +208,7 @@ private:
     bool inks_edited_ = false;  // (an ink value changed by the user since it was shown)
     bool loading_ = false;
     Rgb sub_rgb_{255, 255, 255};
+    std::optional<Precise> fore_precise_, back_precise_;  // (PC4 E-0: as chosen; kept while their 8-bit pictures are shown)
     std::vector<Rgb> history_;
     QTimer* history_write_ = nullptr;  // (履歴 written to the settings a moment after a run of lines)
     std::array<Rgb, 4> corners_{};
