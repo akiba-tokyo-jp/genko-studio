@@ -13,6 +13,7 @@
     "libwebp",
     "lcms",
     "openexr",
-    {"name": "libavif", "default-features": false, "features": ["aom"]}
+    {"name": "libavif", "default-features": false, "features": ["aom"]},
+    "zstd"
   ]
 }

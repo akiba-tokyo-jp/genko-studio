@@ -2,9 +2,11 @@
 
 #include <cstdint>
 #include <filesystem>
+#include <functional>
 #include <map>
 #include <optional>
 #include <string>
+#include <string_view>
 #include <utility>
 #include <vector>
 
@@ -60,5 +62,56 @@ struct Entry {
 // The entries as the bytes of a new archive, in order, as ZipFile writes them (an EPUB's zip: export_epub), each
 // stamped with the local time it is written.
 std::string archive(const std::vector<Entry>& entries);
+
+// PC4 F-f (.pcraft, PhotoCraft's crates/format/src/zip.rs): an archive whose files are read one at a time by name through
+// its central directory — stored or deflated (a .pcraft unpacked and zipped again by another tool still reads), each
+// checked against its CRC-32 —, nothing read before it is asked for. No zip64, encryption or other compression (refused,
+// as PhotoCraft refuses them). The bytes stay the caller's (the reader holds a view of them).
+class NamedReader {
+public:
+    // core::Error("format", "the .pcraft is broken (zip: …)") for bytes that are not such an archive: no end record, a
+    // central directory or a file outside the bytes, an encrypted file.
+    explicit NamedReader(std::string_view bytes);
+    bool contains(std::string_view name) const;
+    // The size a file says it unpacks to (none: no such file).
+    std::optional<std::uint64_t> unpacked_size(std::string_view name) const;
+    // The file's bytes: core::Error("format") when there is no such file, or it is broken (its CRC, its size, its deflate
+    // stream), or of another compression; core::Error("image_too_large", "… too large to read (at most `max` bytes)") when
+    // it says it unpacks past `max` — refused before anything is unpacked.
+    std::string read(std::string_view name, std::uint64_t max) const;
+    std::vector<std::string> names() const;
+
+private:
+    struct Item {
+        std::uint16_t method = 0;
+        std::uint32_t crc = 0;
+        std::uint64_t packed = 0;
+        std::uint64_t size = 0;
+        std::uint64_t at = 0;  // (its data, past its local header)
+    };
+    std::string_view bytes_;
+    std::map<std::string, Item, std::less<>> items_;  // (a later file of a name already met left out)
+    std::vector<std::string> order_;                  // (the names in the archive's order)
+    const Item* find(std::string_view name) const;
+};
+
+// PC4 F-f: a new archive of stored files (PhotoCraft's ZipWriter: STORE, UTF-8 names, the time 1980-01-01 00:00), its
+// bytes handed to `sink` as they are made — each file's local header and bytes when it is added, the central directory
+// when it is finished —, so a large .pcraft is never held whole. core::Error("image_too_large", "the .pcraft would be
+// larger than 4 GiB …") past what a zip without zip64 holds (4 GiB, 65535 files) — before the file is written.
+class StoreWriter {
+public:
+    explicit StoreWriter(std::function<void(std::string_view)> sink);
+    void add(std::string_view name, std::string_view data);
+    void finish();
+    std::uint64_t written() const { return offset_; }
+
+private:
+    std::function<void(std::string_view)> sink_;
+    std::string central_;
+    std::uint64_t offset_ = 0;
+    std::uint32_t count_ = 0;
+    bool finished_ = false;
+};
 
 }  // namespace genko::render::zip

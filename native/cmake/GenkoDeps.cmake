@@ -56,3 +56,20 @@ else()
   pkg_check_modules(GENKO_AVIF_PC REQUIRED IMPORTED_TARGET libavif)
   set(GENKO_AVIF PkgConfig::GENKO_AVIF_PC)
 endif()
+
+# PC4 F-f (.pcraft): zstd (its tiles and blobs; BSD-3-Clause, of its dual licence) and BLAKE3 (their names: its C
+# implementation, kept in native/third_party/blake3 and built there as a static library on both systems). zstd: Linux the
+# distribution's (libzstd-dev, through pkg-config), Windows vcpkg's CMake package.
+if(WIN32)
+  find_package(zstd CONFIG REQUIRED)
+  if(TARGET zstd::libzstd_static)
+    set(GENKO_ZSTD zstd::libzstd_static)
+  else()
+    set(GENKO_ZSTD zstd::libzstd_shared)
+  endif()
+else()
+  find_package(PkgConfig REQUIRED)
+  pkg_check_modules(GENKO_ZSTD_PC REQUIRED IMPORTED_TARGET libzstd)
+  set(GENKO_ZSTD PkgConfig::GENKO_ZSTD_PC)
+endif()
+add_subdirectory("${CMAKE_CURRENT_LIST_DIR}/../third_party/blake3" "${CMAKE_CURRENT_BINARY_DIR}/third_party/blake3")
