@@ -1026,7 +1026,9 @@ private:
     void build_paint_docks();
 public:
     // PC4 E3 (main_window_patterns.cpp, patterns_panel.cpp; SPEC.md COLOR-09「パターン」): the chosen pattern
-    // (Photoshop's 今のパターン: "library:<name>" or "book:<id>", the window's state in the settings), パターンを定義…,
+    // (Photoshop's 今のパターン: "library:<name>" — the window's state in the settings — or "book:<id>" — the open book's,
+    // kept with the window while that book is open, never in the settings: another book's same id is another picture),
+    // パターンを定義…,
     // a new pattern fill layer and its settings, パターンプレビュー, and the ops that put a library pattern into the book.
     QString current_pattern() const;
     void set_current_pattern(const QString& choice);
@@ -1043,6 +1045,8 @@ private:
     void build_pattern_menus(QMenu* edit, QMenu* view);
     PatternsPanel* patterns_panel_ = nullptr;
     QDockWidget* patterns_dock_ = nullptr;
+    QString book_pattern_;                    // (a "book:<id>" chosen, and the session of the book it is of)
+    const void* book_pattern_of_ = nullptr;
     void build_clipboard_menu(QMenu* edit);
     static const std::vector<const char*>& selection_tools();
     static const std::vector<const char*>& retouch_tools();

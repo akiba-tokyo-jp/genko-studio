@@ -24,7 +24,9 @@
 //
 // In a PSD's block each pattern has its u32 length before it and is padded to 4 bytes; a .pat file is "8BPT", version
 // u16 (1), count u32, then the patterns as they are. Photoshop writes the channel count as 24 and marks only the real
-// channels written: the first written arrays are the colours, the next the transparency (as ag-psd, MIT, takes them).
+// channels written: the first written arrays are the colours, the next the transparency (as ag-psd, MIT, takes them —
+// its behaviour, no code taken). A pattern past 8192 pixels a side or 64 M pixels (no book takes one) is read without
+// its channels (from_psd says why it is not taken); a channel placed in a whole plane counts that plane in the budget.
 
 namespace genko::render::pat {
 

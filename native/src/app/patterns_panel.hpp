@@ -4,6 +4,7 @@
 #include <QString>
 #include <QWidget>
 
+#include <functional>
 #include <optional>
 #include <utility>
 
@@ -57,7 +58,8 @@ private:
 // library's) and its picture; none when it is not there.
 std::optional<std::pair<core::Pattern, core::Bytes>> pattern_chosen(const core::Document& book, const QString& choice);
 // A small picture of a pattern for a list.
-QIcon pattern_icon(const core::Pattern& pattern, const core::Bytes& bytes, int side = 32);
+// (its picture read by `load` only when no icon of it is kept yet: by its picture's ref and size)
+QIcon pattern_icon(const core::Pattern& pattern, const std::function<core::Bytes()>& load, int side = 32);
 // A box to choose a pattern in (the book's, then the library's by group), `current` chosen; its items' data the choices.
 QComboBox* pattern_combo(const core::Document& book, const QString& current);
 

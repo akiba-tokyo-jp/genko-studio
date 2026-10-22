@@ -322,7 +322,10 @@ void add_layer(OpContext& c) {
     layer.exportable = true;
     // (a new drawing layer keeps each line in the panel it began in, as CLIP STUDIO's panel folders do)
     layer.panel_each = op.contains("panel_each") ? py_truthy(op["panel_each"]) : (kind_name == "pen" || kind_name == "paint");
-    if (kind_name == "fill" && truthy_at(op, "pattern")) {  // (patterns@1, PC4 E3: Layer › New Fill Layer › Pattern…)
+    const Json* pattern_given = get(op, "pattern");  // (patterns@1, PC4 E3: Layer › New Fill Layer › Pattern…)
+    const bool with_pattern = pattern_given != nullptr && !pattern_given->is_null();
+    if (with_pattern && kind_name != "fill") throw OpError("pattern makes a fill layer (kind: fill)");
+    if (with_pattern) {  // (an empty or broken one refused: pattern_fill_spec)
         layer.fill = fill_spec(Json::object({{"pattern", op["pattern"]}}));
         check_pattern_kept(doc, *layer.fill);
         layer.title = truthy_at(op, "name") ? py_str(op["name"]) : std::string("パターン");

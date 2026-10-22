@@ -148,7 +148,8 @@ PsdPattern read_pattern(Reader& r, std::uint64_t& budget) {
     p.id = std::string(r.take(r.u8()));
     if (p.mode == 2) {
         p.palette = std::string(r.take(768));
-        // (some writers follow the palette with 4 bytes more: ag-psd skips them)
+        // (some writers follow the palette with 4 bytes more, which a reader skips: as ag-psd (MIT) reads them — its
+        // behaviour taken, no code)
         if (r.b.size() - r.p >= 4 && r.b.substr(r.p, 4) != std::string_view("\0\0\0\3", 4)) (void)r.take(4);
     }
     if (const std::uint32_t v = r.u32(); v != 3) broken("a virtual memory array list of version " + std::to_string(v));
@@ -160,8 +161,14 @@ PsdPattern read_pattern(Reader& r, std::uint64_t& budget) {
     if (w > kMaxEdge || h > kMaxEdge) broken("a pattern is larger than " + std::to_string(kMaxEdge) + " pixels a side");
     p.width = w;
     p.height = h;
+    // (one no book takes — past 8192 a side or 64 M pixels —: its channels never decoded; from_psd says why it is not
+    // taken, and the next pattern is read)
+    if (w > core::kMaxPatternSide || h > core::kMaxPatternSide || std::uint64_t(w) * h > std::uint64_t(core::kMaxPatternPixels)) return p;
     const std::uint32_t count = v.u32();
     if (count > 64) broken("a pattern has too many channels");
+    // (its colours and its transparency are what is kept: the arrays past them are not decoded)
+    const unsigned nc = mode_channels(p.mode);
+    const std::uint64_t kept_planes = std::min<std::uint64_t>(std::uint64_t(count) + 2, nc + 1);
     std::vector<std::string> planes;
     for (std::uint32_t k = 0; k < count + 2; ++k) {
         if (v.p >= v.b.size()) break;
@@ -169,6 +176,10 @@ PsdPattern read_pattern(Reader& r, std::uint64_t& budget) {
         const std::uint32_t alen = v.u32();
         if (alen == 0) continue;
         if (alen < 23) broken("a virtual memory array is short");
+        if (planes.size() > nc) {
+            (void)v.take(alen);
+            continue;
+        }
         const std::uint32_t d32 = v.u32();
         const std::int32_t ct = v.i32(), cl = v.i32(), cb = v.i32(), cr = v.i32();
         const std::uint32_t d16 = v.u16();
@@ -183,6 +194,10 @@ PsdPattern read_pattern(Reader& r, std::uint64_t& budget) {
         std::string plane = decode_plane(comp, data, cw, ch, d, budget);
         if (d != 1 && (cw != w || ch != h)) {  // (a channel's rect smaller than the pattern's, placed in a whole plane)
             const std::size_t bpp = d / 8;
+            // (in the budget before any is made — the planes it will keep at most at once —: a small file never makes GBs)
+            const std::uint64_t whole = std::uint64_t(w) * h * bpp;
+            if (whole * (kept_planes - planes.size()) > budget) throw core::Error("too_large", "the patterns decode to more than 512 MiB");
+            budget -= whole;
             std::string full(std::size_t(w) * h * bpp, '\0');
             for (std::uint32_t y = 0; y < ch; ++y) {
                 const std::int64_t ty = std::int64_t(y) + ct - top;
@@ -197,7 +212,6 @@ PsdPattern read_pattern(Reader& r, std::uint64_t& budget) {
         }
         planes.push_back(std::move(plane));
     }
-    const unsigned nc = mode_channels(p.mode);
     if (planes.size() < nc) broken("a pattern has fewer channels than its colour mode");
     if (planes.size() > nc) p.alpha = std::move(planes[nc]);
     planes.resize(nc);
@@ -358,22 +372,23 @@ std::optional<Taken> from_psd(const PsdPattern& p, double dpi, std::string* why)
         return refuse("it is larger than 8192 pixels a side or 64 million pixels");
     }
     const std::size_t n = std::size_t(w) * h;
-    // (1 bit: 8-bit grey — a set bit black)
-    std::vector<std::string> planes = p.channels;
+    // (1 bit: 8-bit grey — a set bit black; other depths read where they are, never copied)
+    std::vector<std::string> ones;
     unsigned depth = p.depth;
     if (depth == 1) {
         const std::size_t rb = (w + 7) / 8;
-        for (std::string& plane : planes) {
+        for (const std::string& plane : p.channels) {
             std::string grey(n, '\0');
             for (std::size_t i = 0; i < n; ++i) {
                 const std::size_t at = (i / w) * rb + (i % w) / 8;
                 const bool set = at < plane.size() && (static_cast<unsigned char>(plane[at]) & (0x80 >> (i % w % 8))) != 0;
                 grey[i] = static_cast<char>(set ? 0 : 255);
             }
-            plane = std::move(grey);
+            ones.push_back(std::move(grey));
         }
         depth = 8;
     }
+    const std::vector<std::string>& planes = p.depth == 1 ? ones : p.channels;
     const std::size_t plane_size = n * (depth / 8);
     for (const std::string& plane : planes)
         if (plane.size() < plane_size) return refuse("a channel is short");
@@ -382,57 +397,43 @@ std::optional<Taken> from_psd(const PsdPattern& p, double dpi, std::string* why)
     t.width = w;
     t.height = h;
     t.depth = static_cast<int>(depth);
-    std::vector<std::vector<float>> colours;
-    const auto plane_values = [&](const std::string& plane) {
-        std::vector<float> v(n);
-        for (std::size_t i = 0; i < n; ++i) v[i] = sample_of(plane, i, depth);
-        return v;
-    };
     switch (p.mode) {
-        case 2: {  // (indexed: RGB through its palette)
+        case 2:  // (indexed: RGB through its palette)
             if (planes.empty() || p.palette.size() < 768) return refuse("its palette cannot be read");
             t.mode = "rgb";
             t.depth = 8;
-            for (unsigned c = 0; c < 3; ++c) {
-                std::vector<float> v(n);
-                for (std::size_t i = 0; i < n; ++i)
-                    v[i] = static_cast<unsigned char>(p.palette[static_cast<unsigned char>(planes[0][i]) * 3 + c]) / 255.0f;
-                colours.push_back(std::move(v));
-            }
+            t.colours = 3;
             break;
-        }
         case 3:
         case 9:
             if (planes.size() < 3) return refuse("it has fewer channels than its colour mode");
             t.mode = p.mode == 3 ? "rgb" : "lab";
-            for (unsigned c = 0; c < 3; ++c) colours.push_back(plane_values(planes[c]));
+            t.colours = 3;
             break;
         case 4:
             if (planes.size() < 4) return refuse("it has fewer channels than its colour mode");
             t.mode = "cmyk";
-            for (unsigned c = 0; c < 4; ++c) {
-                std::vector<float> v = plane_values(planes[c]);
-                for (float& x : v) x = 1.0f - x;  // (a PSD's CMYK: 0 is all ink)
-                colours.push_back(std::move(v));
-            }
+            t.colours = 4;
             break;
         default:  // (grey, duotone, multichannel: the first channel as grey)
             if (planes.empty()) return refuse("it has no channels");
             t.mode = "gray";
-            colours.push_back(plane_values(planes[0]));
+            t.colours = 1;
             break;
     }
-    // (32-bit Lab and CMYK hold 0..1; an 8-bit grey of 32 bits stays as it is)
-    t.colours = static_cast<unsigned>(colours.size());
+    // (each value straight into the tile — 32-bit Lab and CMYK hold 0..1; an 8-bit grey of 32 bits stays as it is)
     const unsigned all = t.colours + 1;
     t.values.assign(n * all, 1.0f);
+    const bool clamped = t.mode != "rgb" && !(t.mode == "gray" && t.depth == 32);
     for (std::size_t i = 0; i < n; ++i) {
+        float* o = t.values.data() + i * all;
         for (unsigned c = 0; c < t.colours; ++c) {
-            float v = colours[c][i];
-            if (t.mode != "rgb" && !(t.mode == "gray" && t.depth == 32)) v = std::clamp(v, 0.0f, 1.0f);
-            t.values[i * all + c] = v;
+            float v = p.mode == 2 ? static_cast<unsigned char>(p.palette[static_cast<unsigned char>(planes[0][i]) * 3 + c]) / 255.0f
+                                  : sample_of(planes[c], i, depth);
+            if (p.mode == 4) v = 1.0f - v;  // (a PSD's CMYK: 0 is all ink)
+            o[c] = clamped ? std::clamp(v, 0.0f, 1.0f) : v;
         }
-        if (p.alpha && p.depth != 1) t.values[i * all + t.colours] = std::clamp(sample_of(*p.alpha, i, depth), 0.0f, 1.0f);
+        if (p.alpha && p.depth != 1) o[t.colours] = std::clamp(sample_of(*p.alpha, i, depth), 0.0f, 1.0f);
     }
     Taken out;
     std::string bytes = patterns::encode(t);

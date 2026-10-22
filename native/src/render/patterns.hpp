@@ -95,8 +95,10 @@ private:
 };
 
 // The pattern of a fill ({"id", …}: core::pattern_fill_spec's form) of the book made ready for `target` at `dpi`;
-// none when the book does not hold it or its picture (a book read so is read-only: nothing is drawn). Made tiles are
-// kept (by the picture's ref and the target) for the next drawing, within a memory budget.
+// none when the book does not hold it or its picture (a book read so is read-only: nothing is drawn) or its picture
+// cannot be made (the fill then draws nothing; the page is still drawn). Made tiles are kept (by the picture's ref and
+// the target) for the next drawing, the least recent let go past 256 MB — the last one made kept however large —; one
+// that threads ask for together is made once.
 std::optional<Laid> laid(const core::Document* book, const core::Json& fill_pattern, const Target& target, double dpi);
 // The same for a pattern and its picture given (the library's, a pattern not in a book yet).
 Laid laid(const core::Pattern& pattern, const core::Bytes& bytes, const core::Json& fill_pattern, const Target& target, double dpi);
@@ -112,7 +114,8 @@ std::size_t kept();
 void forget();
 
 // A pattern made from the page as it shows (image_ops::page_pixels: its own values — 8-bit RGB, 16- and 32-bit RGB, its
-// inks; a multichannel page's colours as 8-bit RGB — on its working grid, whose dpi is the pattern's), cut to the box of
+// inks; a multichannel page's colours as 8-bit RGB — on its layers' grid: raster::working_dpi, a precise or ink page's
+// layer_masks::grid_dpi; that dpi the pattern's), cut to the box of
 // `area` ({poly} or {mask}, core::op_area's; none: the whole page) with what lies outside the area clear: Edit › Define
 // Pattern…, the library's new pattern (its id empty). core::Error("value") when the area covers none of the page or the
 // pattern would be past 8192 pixels a side.

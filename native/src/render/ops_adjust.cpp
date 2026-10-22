@@ -109,7 +109,7 @@ void each_pixel(const core::Document& doc, const core::Page& page, const core::L
             }
         return;
     }
-    const Image picture = raster::layer_pixels(page, layer).convert("RGBA");
+    const Image picture = raster::layer_pixels(page, layer, &doc).convert("RGBA");
     std::string inside;
     if (area != nullptr) {
         const selection::AreaMask mask = selection::area_mask(*area, raster::dpi_across(page, picture.width()));  // (PC4 F-b: its own grid)

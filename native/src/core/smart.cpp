@@ -17,6 +17,7 @@
 #include "core/ink.hpp"
 #include "core/ops_util.hpp"
 #include "core/page_geometry.hpp"
+#include "core/patterns.hpp"
 #include "core/pyconv.hpp"
 #include "core/pyops.hpp"
 #include "core/vector.hpp"
@@ -1165,6 +1166,7 @@ void bring_contents(Document& doc, const Document& from, Page& page) {
         }
     };
     std::function<void(Page&)> bring = [&](Page& on) {
+        bring_patterns(doc, from, on);  // (patterns@1, PC4 E3: the patterns its fills name, under ids of this book)
         for (Layer& layer : on.layers) {
             if (!is_smart(layer)) continue;
             bring_filter_files(layer);

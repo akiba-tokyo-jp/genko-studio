@@ -648,7 +648,7 @@ void edit_shape_part(OpContext& c) {
         if (into != "patch" && into != "lines") throw OpError("to is patch or lines");
         parts.erase(parts.begin() + static_cast<std::ptrdiff_t>(k));
         if (into == "patch") {
-            if (auto patch = sp::as_patch(&page, part)) layer.patches.push_back(std::move(*patch));
+            if (auto patch = sp::as_patch(&page, part, &doc)) layer.patches.push_back(std::move(*patch));
         } else {
             into_lines(doc, page, layer, part);
         }

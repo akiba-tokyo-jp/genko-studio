@@ -11,7 +11,9 @@
 
 #include <cmath>
 #include <filesystem>
+#include <functional>
 #include <string>
+#include <thread>
 #include <vector>
 
 #include "core/error.hpp"
@@ -263,6 +265,95 @@ private slots:
         std::string why;
         QVERIFY(!render::pat::from_psd(none, 300, &why).has_value());
         QVERIFY(!why.empty());
+    }
+
+    // The review's P1-1: a small file whose pattern says it is large and gives each channel a 1 × 1 rect never makes the
+    // pattern's whole planes past the budget — one no book takes (past 8192 a side) is read without its channels and not
+    // taken, one a book could take (8000 × 8000) refused as too large when its planes would pass 512 MiB — in a .pat and
+    // in a PSD's Patt block, at once and without the memory.
+    void aSmallFileOfAHugePatternIsRefused() {
+        const auto u16 = [](std::string& s, std::uint32_t v) {
+            s.push_back(static_cast<char>((v >> 8) & 0xff));
+            s.push_back(static_cast<char>(v & 0xff));
+        };
+        const auto u32 = [](std::string& s, std::uint32_t v) {
+            for (int k = 24; k >= 0; k -= 8) s.push_back(static_cast<char>((v >> k) & 0xff));
+        };
+        // (one RGB pattern of side × side, its 64 channels each a 1 × 1 rect of 32 bits, raw)
+        const auto pattern = [&](std::uint32_t side) {
+            std::string p;
+            u32(p, 1);
+            u32(p, 3);
+            u16(p, side);
+            u16(p, side);
+            u32(p, 1);
+            u16(p, 0);
+            p.push_back('\0');  // (no unique id)
+            std::string vma;
+            for (const std::uint32_t v : {0u, 0u, side, side}) u32(vma, v);
+            u32(vma, 64);
+            for (int c = 0; c < 64; ++c) {
+                u32(vma, 1);
+                u32(vma, 23 + 4);
+                u32(vma, 32);
+                for (const std::uint32_t v : {0u, 0u, 1u, 1u}) u32(vma, v);
+                u16(vma, 32);
+                vma.push_back('\0');
+                vma.append("\x3f\x80\x00\x00", 4);
+            }
+            u32(vma, 0);
+            u32(vma, 0);
+            u32(p, 3);
+            u32(p, static_cast<std::uint32_t>(vma.size()));
+            return p + vma;
+        };
+        const auto pat_file = [&](std::uint32_t side) {
+            std::string f = "8BPT";
+            u16(f, 1);
+            u32(f, 1);
+            return f + pattern(side);
+        };
+        const auto block = [&](std::uint32_t side) {
+            std::string one = pattern(side), b;
+            u32(b, static_cast<std::uint32_t>(one.size()));
+            b += one;
+            b.append((4 - one.size() % 4) % 4, '\0');
+            return b;
+        };
+        QVERIFY(pat_file(30000).size() < 4000);
+        for (const auto& read : {std::function<std::vector<render::pat::PsdPattern>()>([&] { return render::pat::parse_file(pat_file(30000)); }),
+                                 std::function<std::vector<render::pat::PsdPattern>()>([&] { return render::pat::parse_block(block(30000)); })}) {
+            const std::vector<render::pat::PsdPattern> got = read();
+            QCOMPARE(got.size(), std::size_t(1));
+            QCOMPARE(got[0].width, std::uint32_t(30000));
+            QVERIFY(got[0].channels.empty() && !got[0].alpha);
+            std::string why;
+            QVERIFY(!render::pat::from_psd(got[0], 300, &why).has_value());
+            QVERIFY2(why.find("8192") != std::string::npos, why.c_str());
+        }
+        for (const auto& read : {std::function<void()>([&] { (void)render::pat::parse_file(pat_file(8000)); }),
+                                 std::function<void()>([&] { (void)render::pat::parse_block(block(8000)); })}) {
+            try {
+                read();
+                QFAIL("a pattern decoding past 512 MiB was read");
+            } catch (const core::Error& error) {
+                QCOMPARE(error.code(), std::string("too_large"));
+            }
+        }
+    }
+
+    // The review's P2-4: the threads drawing one pattern at once make its tile once (the others wait for it); it is kept.
+    void aTileAskedForTogetherIsMadeOnce() {
+        const pt::Tile t = checker();
+        const std::string bytes = pt::encode(t);
+        const core::Pattern p = pattern_of(t, bytes);
+        const core::Bytes held = std::make_shared<const std::string>(bytes);
+        std::vector<std::thread> threads;
+        for (int k = 0; k < 8; ++k) {
+            threads.emplace_back([&] { (void)pt::laid(p, held, Json{{"id", "pat-1"}}, pt::Target::srgb(), 100.0); });
+        }
+        for (std::thread& th : threads) th.join();
+        QCOMPARE(pt::kept(), std::size_t(1));
     }
 
     // The machine's library: its built-in groups and patterns (made by the program, not files); one added (its picture

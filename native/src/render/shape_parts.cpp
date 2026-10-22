@@ -5,6 +5,7 @@
 
 #include "core/command_bus.hpp"
 #include "core/json.hpp"
+#include "core/patterns.hpp"
 #include "core/pynum.hpp"
 #include "render/fill.hpp"
 #include "render/op_limits.hpp"
@@ -117,6 +118,15 @@ constexpr Box kPlane{-(1 << 29), -(1 << 29), 1 << 29, 1 << 29};
 unsigned char byte(float v) { return static_cast<unsigned char>(std::lround(std::clamp(v, 0.0f, 1.0f) * 255.0f)); }
 
 }  // namespace
+
+bool has_pattern(const core::vector::ShapePart& part) {
+    return core::pattern_of_fill(part.fill) != nullptr || (part.stroke && core::pattern_of_fill(part.stroke->fill) != nullptr);
+}
+
+bool any_pattern(const core::Layer& layer) {
+    if (!any(layer)) return false;
+    return std::any_of(layer.shapes->items.begin(), layer.shapes->items.end(), [](const core::vector::ShapePart& p) { return has_pattern(p); });
+}
 
 bool closed(const Path& path) {
     return std::all_of(path.subpaths.begin(), path.subpaths.end(), [](const Subpath& s) { return s.closed; });

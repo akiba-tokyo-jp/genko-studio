@@ -144,27 +144,45 @@ std::optional<std::string> check_pattern_file(const Pattern& p, std::string_view
 
 bool uses_patterns(const Document& doc) { return !doc.patterns.empty(); }
 
-namespace {
-
-// Each pattern fill of the book's pages and contents (`each(fill, where)`).
-void each_pattern_fill(const Document& doc, const std::function<void(const Json&, const std::string&)>& each) {
-    for (const smart::WrittenPage& written : smart::written_pages(doc)) {
-        for (const Layer& layer : written.page->layers) {
-            if (layer.kind == LayerKind::Fill && layer.fill) {
-                if (const Json* fill = pattern_of_fill(*layer.fill)) each(*fill, "the fill layer " + layer.id);
-            }
-            if (!layer.shapes) continue;
-            for (const vector::ShapePart& part : layer.shapes->items) {
-                if (const Json* fill = pattern_of_fill(part.fill)) each(*fill, "a shape part of the layer " + layer.id);
-                if (part.stroke) {
-                    if (const Json* fill = pattern_of_fill(part.stroke->fill)) each(*fill, "a shape part's stroke of the layer " + layer.id);
-                }
+void each_pattern_fill_on(const Page& page, const std::function<void(const Json&, const std::string&)>& each) {
+    for (const Layer& layer : page.layers) {
+        if (layer.kind == LayerKind::Fill && layer.fill) {
+            if (const Json* fill = pattern_of_fill(*layer.fill)) each(*fill, "the fill layer " + layer.id);
+        }
+        if (!layer.shapes) continue;
+        for (const vector::ShapePart& part : layer.shapes->items) {
+            if (const Json* fill = pattern_of_fill(part.fill)) each(*fill, "a shape part of the layer " + layer.id);
+            if (part.stroke) {
+                if (const Json* fill = pattern_of_fill(part.stroke->fill)) each(*fill, "a shape part's stroke of the layer " + layer.id);
             }
         }
     }
 }
 
+void each_pattern_fill(const Document& doc, const std::function<void(const Json&, const std::string&)>& each) {
+    for (const smart::WrittenPage& written : smart::written_pages(doc)) each_pattern_fill_on(*written.page, each);
+}
+
+namespace {
+
+// A pattern fill as the ops make it, naming a pattern of `ids`.
+void check_pattern_fill(const Json& fill, const std::string& where, const std::set<std::string>& ids) {
+    try {
+        if (!pattern_fill_normal(fill)) throw Error("value", "its pattern fill is not in its normal form");
+    } catch (const Error& error) {
+        throw Error("value", where + ": " + error.what());
+    }
+    const std::string id = fill["id"].get<std::string>();
+    if (!ids.contains(id)) throw Error("value", where + " names the pattern " + id + ", which the book does not keep");
+}
+
 }  // namespace
+
+void validate_pattern_fills(const Document& doc) {
+    std::set<std::string> ids;
+    for (const Pattern& p : doc.patterns) ids.insert(p.id);
+    each_pattern_fill(doc, [&](const Json& fill, const std::string& where) { check_pattern_fill(fill, where, ids); });
+}
 
 void validate_patterns(const Document& doc) {
     if (doc.patterns.size() > kMaxPatterns) throw Error("value", "a book keeps at most " + std::to_string(kMaxPatterns) + " patterns");
@@ -181,15 +199,7 @@ void validate_patterns(const Document& doc) {
         if (const auto why = check_pattern_file(p, *file->second)) throw Error("value", "the pattern " + p.id + ": " + *why);
     }
     // (E3: each pattern fill as the ops make it, naming a pattern the book keeps)
-    each_pattern_fill(doc, [&](const Json& fill, const std::string& where) {
-        try {
-            if (!pattern_fill_normal(fill)) throw Error("value", "its pattern fill is not in its normal form");
-        } catch (const Error& error) {
-            throw Error("value", where + ": " + error.what());
-        }
-        const std::string id = fill["id"].get<std::string>();
-        if (!ids.contains(id)) throw Error("value", where + " names the pattern " + id + ", which the book does not keep");
-    });
+    each_pattern_fill(doc, [&](const Json& fill, const std::string& where) { check_pattern_fill(fill, where, ids); });
 }
 
 bool pattern_fill_normal(const Json& fill) {
@@ -262,20 +272,75 @@ std::set<std::string> patterns_used(const Document& doc) {
 
 std::set<std::string> patterns_on(const Page& page) {
     std::set<std::string> out;
-    const auto take = [&](const Json& fill) {
-        if (const Json* p = pattern_of_fill(fill)) {
-            if (const Json* id = get(*p, "id"); id != nullptr && id->is_string()) out.insert(id->get<std::string>());
+    each_pattern_fill_on(page, [&](const Json& fill, const std::string&) {
+        if (const Json* id = get(fill, "id"); id != nullptr && id->is_string()) out.insert(id->get<std::string>());
+    });
+    return out;
+}
+
+namespace {
+
+// A fill ({"pattern": {"id", …}}) naming one of `ids`' keys pointed at its value; whether it was.
+bool repoint_fill(Json& fill, const std::map<std::string, std::string>& ids) {
+    if (!fill.is_object()) return false;
+    const auto p = fill.find("pattern");
+    if (p == fill.end() || !p->is_object()) return false;
+    const auto id = p->find("id");
+    if (id == p->end() || !id->is_string()) return false;
+    const auto to = ids.find(id->get<std::string>());
+    if (to == ids.end() || to->first == to->second) return false;
+    *id = to->second;
+    return true;
+}
+
+}  // namespace
+
+bool repoint_patterns(Page& page, const std::map<std::string, std::string>& ids) {
+    if (ids.empty()) return false;
+    bool any = false;
+    for (Layer& layer : page.layers) {
+        if (layer.kind == LayerKind::Fill && layer.fill) any = repoint_fill(*layer.fill, ids) || any;
+        if (!layer.shapes || layer.shapes->items.empty()) continue;
+        std::vector<vector::ShapePart> parts = layer.shapes->items;
+        bool changed = false;
+        for (vector::ShapePart& part : parts) {
+            changed = repoint_fill(part.fill, ids) || changed;
+            if (part.stroke) changed = repoint_fill(part.stroke->fill, ids) || changed;
         }
-    };
-    for (const Layer& layer : page.layers) {
-        if (layer.kind == LayerKind::Fill && layer.fill) take(*layer.fill);
-        if (!layer.shapes) continue;
-        for (const vector::ShapePart& part : layer.shapes->items) {
-            take(part.fill);
-            if (part.stroke) take(part.stroke->fill);
+        if (changed) layer.shapes = vector::make_shapes(std::move(parts));
+        any = any || changed;
+    }
+    return any;
+}
+
+std::pair<std::string, bool> carry_pattern(Document& doc, Pattern pattern, const Bytes& bytes) {
+    if (!bytes) throw Error("value", "the pattern " + pattern.id + " has no picture");
+    if (const auto why = check_pattern_file(pattern, *bytes)) throw Error("value", "the pattern " + pattern.id + ": " + *why);
+    for (const Pattern& kept : doc.patterns) {
+        if (kept.asset == pattern.asset && kept.mode == pattern.mode && kept.depth == pattern.depth && kept.dpi == pattern.dpi &&
+            kept.width == pattern.width && kept.height == pattern.height) {
+            return {kept.id, false};
         }
     }
-    return out;
+    if (pattern.id.empty() || find_pattern(doc, pattern.id) != nullptr) pattern.id = next_pattern_id(doc);
+    (void)pattern_from_json(pattern_to_json(pattern));
+    if (doc.patterns.size() >= kMaxPatterns) throw Error("value", "a book keeps at most " + std::to_string(kMaxPatterns) + " patterns");
+    doc.pattern_files[pattern.asset] = bytes;
+    doc.patterns.push_back(pattern);
+    return {pattern.id, true};
+}
+
+void bring_patterns(Document& doc, const Document& from, Page& page) {
+    if (&doc == &from) return;
+    std::map<std::string, std::string> ids;
+    for (const std::string& id : patterns_on(page)) {
+        const Pattern* theirs = find_pattern(from, id);
+        if (theirs == nullptr) continue;  // (named but not kept: the bus's check says so)
+        const auto file = from.pattern_files.find(theirs->asset);
+        if (file == from.pattern_files.end() || !file->second) continue;
+        ids[id] = carry_pattern(doc, *theirs, file->second).first;
+    }
+    (void)repoint_patterns(page, ids);
 }
 
 std::string next_pattern_id(const Document& doc) {

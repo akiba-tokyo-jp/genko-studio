@@ -520,7 +520,7 @@ namespace {
 
 // pen-shapes@1 (PC3 C-b): the parts put on the layer (each through `move`): a pen layer's parts, an id it has already
 // given a new one; on a layer that is not a pen layer, their pictures as patches.
-void drop_parts(core::Layer& layer, std::vector<core::vector::ShapePart> parts, bool fresh_ids, const core::Page* page,
+void drop_parts(core::Layer& layer, std::vector<core::vector::ShapePart> parts, bool fresh_ids, const core::Page* page, const core::Document* book,
                 const std::function<core::vector::ShapePart(const core::vector::ShapePart&)>& move) {
     namespace vec = core::vector;
     if (parts.empty()) return;
@@ -530,7 +530,10 @@ void drop_parts(core::Layer& layer, std::vector<core::vector::ShapePart> parts, 
     for (const vec::ShapePart& part : parts) {
         vec::ShapePart moved = vec::part_from_json(vec::to_json(move(part)));
         if (layer.kind != core::LayerKind::Strokes) {
-            if (auto patch = shape_parts::as_patch(page, moved)) {
+            if (book == nullptr && shape_parts::has_pattern(moved)) {
+                throw core::Error("value", "a shape part filled with a pattern is drawn with its book's pattern (the book was not given)");
+            }
+            if (auto patch = shape_parts::as_patch(page, moved, book)) {
                 if (fresh_ids) patch_set(*patch, "id", core::new_id());
                 layer.patches.push_back(std::move(*patch));
             }
@@ -552,9 +555,9 @@ void drop_parts(core::Layer& layer, std::vector<core::vector::ShapePart> parts, 
 
 }  // namespace
 
-void drop(core::Layer& layer, Items items, const Matrix& m, bool fresh_ids, Resample resample, const core::Page* page) {
+void drop(core::Layer& layer, Items items, const Matrix& m, bool fresh_ids, Resample resample, const core::Page* page, const core::Document* book) {
     const bool identity = m == kIdentity;  // (-0.0 is 0.0 here, as in Python's tuple comparison)
-    drop_parts(layer, std::move(items.shapes), fresh_ids, page, [&](const core::vector::ShapePart& part) {
+    drop_parts(layer, std::move(items.shapes), fresh_ids, page, book, [&](const core::vector::ShapePart& part) {
         return identity ? part : shape_parts::transformed(part, {m[0], m[1], m[2], m[3], m[4], m[5]}, true);
     });
     std::vector<core::StrokePtr> strokes = layer.strokes->items;
@@ -580,8 +583,8 @@ void drop(core::Layer& layer, Items items, const Matrix& m, bool fresh_ids, Resa
     }
 }
 
-void drop_warped(core::Layer& layer, Items items, const WarpFunction& go, Resample resample, const core::Page* page) {
-    drop_parts(layer, std::move(items.shapes), false, page, [&](const core::vector::ShapePart& part) {
+void drop_warped(core::Layer& layer, Items items, const WarpFunction& go, Resample resample, const core::Page* page, const core::Document* book) {
+    drop_parts(layer, std::move(items.shapes), false, page, book, [&](const core::vector::ShapePart& part) {
         core::vector::ShapePart bent = part;
         bent.path = shape_parts::bent(part.path, go);
         bent.live.reset();
@@ -648,6 +651,11 @@ Items items_from_json(const Json& data) {
                 throw core::OpError(std::string("items' shapes: ") + error.what());
             }
         }
+    }
+    // (patterns@1, PC4 E3: the patterns the parts name, carried from another book — paste puts them into its book)
+    if (const Json* patterns = core::get(data, "patterns"); patterns != nullptr && !patterns->is_null()) {
+        if (!patterns->is_array()) throw core::OpError("items' patterns is a list of patterns");
+        items.patterns = *patterns;
     }
     return items;
 }
@@ -1043,6 +1051,7 @@ Json items_to_json(const Items& items) {
         for (const core::vector::ShapePart& part : items.shapes) shapes.push_back(core::vector::to_json(part));
         out["shapes"] = std::move(shapes);
     }
+    if (items.patterns.is_array() && !items.patterns.empty()) out["patterns"] = items.patterns;  // (patterns@1, PC4 E3)
     return out;
 }
 

@@ -120,14 +120,16 @@ void PageCanvas::paint_page(QPainter& painter) {
     draw_shadow(painter, page_rect);
     fill_sheet(painter, page_rect, Qt::white);
     if (pattern_preview && shown_frame_.isNull() && renderer_->any_shown()) {
-        // (PC4 E3: the page's picture laid again around it, as far as the view reaches — its tiles there are)
+        // (PC4 E3: the page's picture laid again around it, as far as the view reaches — its tiles there are —, at most the
+        // 8 pages around it: a view far out never draws a page hundreds of times)
         const double w = p->spec.width_mm.value(), h = p->spec.height_mm.value();
         const QRectF seen = seen_mm();
         const QTransform kept = painter.transform();
         const QTransform to_screen = QTransform(view_.scale, 0, 0, view_.scale, view_.pan.x(), view_.pan.y()) * view_transform();
         if (w > 0 && h > 0) {
-            for (int j = static_cast<int>(std::floor(seen.top() / h)); j <= static_cast<int>(std::floor(seen.bottom() / h)); ++j) {
-                for (int i = static_cast<int>(std::floor(seen.left() / w)); i <= static_cast<int>(std::floor(seen.right() / w)); ++i) {
+            const auto around = [](double at) { return std::clamp(static_cast<int>(std::floor(at)), -1, 1); };
+            for (int j = around(seen.top() / h); j <= around(seen.bottom() / h); ++j) {
+                for (int i = around(seen.left() / w); i <= around(seen.right() / w); ++i) {
                     if (i == 0 && j == 0) continue;
                     const QRectF there = seen.translated(-i * w, -j * h) & QRectF(0, 0, w, h);
                     if (there.isEmpty()) continue;

@@ -31,6 +31,7 @@
 #include "app/ask.hpp"
 #include "app/config.hpp"
 #include "app/main_window.hpp"
+#include "app/off_ui.hpp"
 #include "app/theme.hpp"
 #include "core/patterns.hpp"
 #include "render/pat.hpp"
@@ -70,7 +71,7 @@ QString about(const core::Pattern& p) {
 
 }  // namespace
 
-QIcon pattern_icon(const core::Pattern& pattern, const core::Bytes& bytes, int side) {
+QIcon pattern_icon(const core::Pattern& pattern, const std::function<core::Bytes()>& load, int side) {
     static std::mutex mutex;
     static std::map<std::string, QIcon> made;
     const std::string key = pattern.asset + "|" + std::to_string(side);
@@ -79,7 +80,7 @@ QIcon pattern_icon(const core::Pattern& pattern, const core::Bytes& bytes, int s
         if (const auto it = made.find(key); it != made.end()) return it->second;
     }
     QIcon icon;
-    if (bytes) {
+    if (const core::Bytes bytes = load()) {
         try {
             QImage image(side, side, QImage::Format_RGBA8888);
             image.fill(Qt::white);  // (a pattern with clear pixels over white, as on the paper)
@@ -128,7 +129,8 @@ QComboBox* pattern_combo(const core::Document& book, const QString& current) {
     box->setIconSize(QSize(24, 24));
     for (const core::Pattern& p : book.patterns) {
         const auto file = book.pattern_files.find(p.asset);
-        box->addItem(pattern_icon(p, file != book.pattern_files.end() ? file->second : nullptr, 24),
+        const core::Bytes held = file != book.pattern_files.end() ? file->second : nullptr;
+        box->addItem(pattern_icon(p, [held] { return held; }, 24),
                      QString::fromStdString(p.name) + QStringLiteral("（この原稿）"), QStringLiteral("book:") + QString::fromStdString(p.id));
     }
     const store::Library lib = library::load(config_dir());
@@ -137,7 +139,7 @@ QComboBox* pattern_combo(const core::Document& book, const QString& current) {
             const QString name = QString::fromStdString(item.value("name", std::string()));
             try {
                 core::Pattern p = library::pattern_of(item);
-                box->addItem(pattern_icon(p, library::picture(config_dir(), p), 24), name, QStringLiteral("library:") + name);
+                box->addItem(pattern_icon(p, [p] { return library::picture(config_dir(), p); }, 24), name, QStringLiteral("library:") + name);
             } catch (const core::Error&) {
             }
         }
@@ -262,7 +264,8 @@ void PatternsPanel::refresh() {
         for (const core::Pattern& p : book.patterns) {
             const auto file = book.pattern_files.find(p.asset);
             auto* item = new QTreeWidgetItem(group, {QString::fromStdString(p.name)});
-            item->setIcon(0, pattern_icon(p, file != book.pattern_files.end() ? file->second : nullptr));
+            const core::Bytes held = file != book.pattern_files.end() ? file->second : nullptr;
+            item->setIcon(0, pattern_icon(p, [held] { return held; }));
             item->setToolTip(0, about(p));
             item->setData(0, kRole, QStringLiteral("book:") + QString::fromStdString(p.id));
             if (item->data(0, kRole).toString() == current) chosen_item = item;
@@ -278,7 +281,7 @@ void PatternsPanel::refresh() {
             auto* item = new QTreeWidgetItem(group, {name});
             try {
                 const core::Pattern p = library::pattern_of(it);
-                item->setIcon(0, pattern_icon(p, library::picture(config_dir(), p)));
+                item->setIcon(0, pattern_icon(p, [p] { return library::picture(config_dir(), p); }));
                 item->setToolTip(0, about(p));
             } catch (const core::Error&) {
             }
@@ -358,15 +361,27 @@ bool PatternsPanel::import_pat(const QString& path) {
     QStringList skipped;
     int added = 0;
     try {
-        const std::string bytes = storage::read_file_bounded(storage::path_from_utf8(path.toStdString()), static_cast<std::size_t>(render::pat::kMaxFileBytes));
-        for (const render::pat::PsdPattern& p : render::pat::parse_file(bytes)) {
-            std::string why;
-            auto taken = render::pat::from_psd(p, 300.0, &why);
-            if (!taken) {
-                skipped << QString::fromStdString(render::pat::shown_name(p.name));
-                continue;
+        // (the file read and its patterns made off the window's thread; the library written here)
+        struct Read {
+            std::vector<render::pat::Taken> taken;
+            std::vector<std::string> skipped;
+        };
+        const std::filesystem::path file = storage::path_from_utf8(path.toStdString());
+        const Read read = off_ui([file] {
+            Read out;
+            const std::string bytes = storage::read_file_bounded(file, static_cast<std::size_t>(render::pat::kMaxFileBytes));
+            for (const render::pat::PsdPattern& p : render::pat::parse_file(bytes)) {
+                if (auto one = render::pat::from_psd(p, 300.0)) {
+                    out.taken.push_back(std::move(*one));
+                } else {
+                    out.skipped.push_back(render::pat::shown_name(p.name));
+                }
             }
-            library::add(config_dir(), lib.groups, taken->pattern, taken->bytes, std::nullopt);
+            return out;
+        });
+        for (const std::string& name : read.skipped) skipped << QString::fromStdString(name);
+        for (const render::pat::Taken& one : read.taken) {
+            library::add(config_dir(), lib.groups, one.pattern, one.bytes, std::nullopt);
             ++added;
         }
         library::save(config_dir(), lib.groups);
@@ -383,27 +398,35 @@ bool PatternsPanel::import_pat(const QString& path) {
 }
 
 bool PatternsPanel::export_pat(const QString& path) {
-    std::vector<render::pat::PsdPattern> written;
+    std::size_t count = 0;
     const QString choice = window_->current_pattern();
     try {
+        // (the pictures to write gathered here; turned into the file's and written off the window's thread)
+        std::vector<std::pair<core::Pattern, core::Bytes>> chosen_ones;
         if (const auto chosen = pattern_chosen(window_->book(), choice)) {
-            written.push_back(render::pat::to_psd(chosen->first, *chosen->second, render::pat::file_id(chosen->first)));
+            chosen_ones.push_back(*chosen);
         } else {
             const store::Library lib = library::load(config_dir());
             for (const store::Group& g : lib.groups) {
                 for (const Json& item : g.items) {
                     core::Pattern p = library::pattern_of(item);
                     p.name = item.value("name", std::string());
-                    if (const core::Bytes bytes = library::picture(config_dir(), p)) written.push_back(render::pat::to_psd(p, *bytes, render::pat::file_id(p)));
+                    if (core::Bytes bytes = library::picture(config_dir(), p)) chosen_ones.emplace_back(p, std::move(bytes));
                 }
             }
         }
-        storage::write_atomic(storage::path_from_utf8(path.toStdString()), render::pat::write_file(written));
+        const std::filesystem::path file = storage::path_from_utf8(path.toStdString());
+        count = off_ui([chosen_ones, file] {
+            std::vector<render::pat::PsdPattern> written;
+            for (const auto& [p, bytes] : chosen_ones) written.push_back(render::pat::to_psd(p, *bytes, render::pat::file_id(p)));
+            storage::write_atomic(file, render::pat::write_file(written));
+            return written.size();
+        });
     } catch (const std::exception& error) {
         ask::warning(this, QStringLiteral("パターンを書き出し"), QStringLiteral("書き出せませんでした: %1").arg(QString::fromUtf8(error.what())));
         return false;
     }
-    window_->flash(QStringLiteral("パターンを %1 個書き出しました").arg(written.size()), 4000);
+    window_->flash(QStringLiteral("パターンを %1 個書き出しました").arg(count), 4000);
     return true;
 }
 

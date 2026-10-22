@@ -17,6 +17,7 @@
 #include "core/masks.hpp"
 #include "core/ops_schema.hpp"
 #include "core/ops_util.hpp"
+#include "core/patterns.hpp"
 #include "core/color_raster.hpp"
 #include "core/pyconv.hpp"
 #include "core/pyops.hpp"
@@ -1136,6 +1137,7 @@ ApplyResult CommandBus::apply(const Document& doc, const Json& ops_in, const Act
                     smart::validate_smart(work);  // (smart-objects@1: a smart object, its contents; no pixels drawn on it)
                     validate_masks(work);         // (masks@1, PC3: a mask's settings, a page's Quick Mask)
                     vector::validate_vector(work);  // (PC3: vector@1, pen-shapes@1, transform@1, page-spec@1)
+                    validate_pattern_fills(work);   // (patterns@1, PC4 E3: no fill names a pattern the book does not keep)
                 } catch (const Error& error) {
                     if (error.code() == "not_yet_ported") throw;
                     throw OpError(error.what());

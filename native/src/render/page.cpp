@@ -267,8 +267,27 @@ struct CacheEntry {
     // pen-shapes@1 (PC3 C-b): the layer's shape parts drawn in it (a list never changes once made: the same list, the
     // same parts — the shared empty one for a layer without)
     core::vector::ShapeListPtr shapes;
+    std::string patterns;  // (patterns@1, PC4 E3: the pictures its parts' patterns were drawn with — pattern_sig)
     Image image;
 };
+
+// patterns@1 (PC4 E3): the patterns the parts' fills name as the book holds them (their ids and pictures; "-" drawn
+// without the book, as nothing) — "" for parts of no pattern.
+std::string pattern_sig(const core::Document* book, const std::vector<const core::vector::ShapePart*>& parts) {
+    std::string sig;
+    const auto take = [&](const Json& fill) {
+        const Json* p = core::pattern_of_fill(fill);
+        const Json* id = p != nullptr && p->is_object() ? core::get(*p, "id") : nullptr;
+        if (id == nullptr || !id->is_string()) return;
+        const core::Pattern* kept = book != nullptr ? core::find_pattern(*book, id->get_ref<const std::string&>()) : nullptr;
+        sig += id->get<std::string>() + "=" + (book == nullptr ? std::string("-") : kept != nullptr ? kept->asset : std::string("?")) + ";";
+    };
+    for (const core::vector::ShapePart* part : parts) {
+        take(part->fill);
+        if (part->stroke) take(part->stroke->fill);
+    }
+    return sig;
+}
 
 std::mutex g_cache_mutex;
 std::vector<std::shared_ptr<const CacheEntry>> g_stroke_cache;  // oldest first
@@ -503,10 +522,11 @@ std::optional<Image> draw_strokes(const Ctx& ctx, const Layer& layer, const Stro
     for (const core::StrokePtr& s : set.strokes) sigs.push_back(sig_of(*s));
     std::shared_ptr<const CacheEntry> cached;
     if (!set.id.empty()) cached = cached_strokes(set.id, ctx.dpi, ctx.size, guide, area);
+    const std::string patterns_drawn = pattern_sig(ctx.episode, set.parts);
     Image out;
     std::size_t start = 0;
     // (a picture with parts over its lines takes no more lines on top: it is used only as it is)
-    if (cached && cached->patches == patch_sigs && cached->shapes == set.shapes && cached->sigs.size() <= sigs.size() &&
+    if (cached && cached->patches == patch_sigs && cached->shapes == set.shapes && cached->patterns == patterns_drawn && cached->sigs.size() <= sigs.size() &&
         std::equal(cached->sigs.begin(), cached->sigs.end(), sigs.begin()) && (over.empty() || cached->sigs.size() == sigs.size())) {
         out = cached->area == area ? cached->image.copy() : cached->image.crop(shifted(area, -cached->area.x0, -cached->area.y0));
         start = cached->sigs.size();
@@ -587,6 +607,7 @@ std::optional<Image> draw_strokes(const Ctx& ctx, const Layer& layer, const Stro
         entry->patches = std::move(patch_sigs);
         entry->sigs = std::move(sigs);
         entry->shapes = set.shapes;
+        entry->patterns = patterns_drawn;
         entry->image = out.copy();
         keep_strokes(std::move(entry));
     }

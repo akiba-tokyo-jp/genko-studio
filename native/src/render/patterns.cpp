@@ -2,10 +2,12 @@
 
 #include <algorithm>
 #include <cmath>
+#include <condition_variable>
 #include <functional>
 #include <list>
 #include <mutex>
 #include <numbers>
+#include <set>
 #include <unordered_map>
 
 #include "core/color_model.hpp"
@@ -16,7 +18,9 @@
 #include "render/image_ops.hpp"
 #include "render/ink.hpp"
 #include "render/ink_canvas.hpp"
+#include "render/layer_masks.hpp"
 #include "render/png.hpp"
+#include "render/raster.hpp"
 
 // PhotoCraft v0.2.0 crates/compose/src/pattern.rs (Tile::sample, Placement::map, render; MIT:
 // native/third_party/photocraft/NOTICE.md), placed in mm and on the three ways a page holds its colours.
@@ -144,8 +148,10 @@ struct Kept {
 
 struct Store {
     std::mutex mutex;
+    std::condition_variable made;  // (a tile another thread is making: those wanting it wait for it)
     std::list<Kept> items;  // (most recent first)
     std::size_t bytes = 0;
+    std::set<std::string> making;
 };
 
 Store& store() {
@@ -155,25 +161,43 @@ Store& store() {
 
 std::size_t bytes_of(const Kept& k) { return k.premultiplied ? k.premultiplied->size() * sizeof(float) : 0; }
 
-std::optional<Kept> kept_one(const std::string& key) {
+// The kept tile of `key` (the most recent then), or none — and then this thread is the one making it: another thread
+// making the same tile is waited for (the screen's tiles drawn at once ask for one pattern together), never made twice.
+std::optional<Kept> kept_or_make(const std::string& key) {
     Store& s = store();
-    const std::lock_guard lock(s.mutex);
-    for (auto it = s.items.begin(); it != s.items.end(); ++it) {
-        if (it->key != key) continue;
-        s.items.splice(s.items.begin(), s.items, it);
-        return s.items.front();
+    std::unique_lock lock(s.mutex);
+    for (;;) {
+        for (auto it = s.items.begin(); it != s.items.end(); ++it) {
+            if (it->key != key) continue;
+            s.items.splice(s.items.begin(), s.items, it);
+            return s.items.front();
+        }
+        if (s.making.insert(key).second) return std::nullopt;
+        s.made.wait(lock);
     }
-    return std::nullopt;
 }
 
+// What kept_or_make left to this thread, done (made or not): the threads waiting for it look again.
+struct Making {
+    std::string key;
+    ~Making() {
+        Store& s = store();
+        {
+            const std::lock_guard lock(s.mutex);
+            s.making.erase(key);
+        }
+        s.made.notify_all();
+    }
+};
+
+// A made tile kept, the least recent let go past the budget — the last one made always kept, however large (a large
+// pattern is not made again for each tile of the screen).
 void keep(const Kept& made) {
-    const std::size_t size = bytes_of(made);
-    if (size > kKeptBytes / 2) return;  // (a very large tile is made each time)
     Store& s = store();
     const std::lock_guard lock(s.mutex);
     s.items.push_front(made);
-    s.bytes += size;
-    while (s.bytes > kKeptBytes && !s.items.empty()) {
+    s.bytes += bytes_of(made);
+    while (s.bytes > kKeptBytes && s.items.size() > 1) {
         s.bytes -= bytes_of(s.items.back());
         s.items.pop_back();
     }
@@ -181,7 +205,8 @@ void keep(const Kept& made) {
 
 Kept made(const core::Pattern& pattern, const core::Bytes& bytes, const Target& target) {
     const std::string key = pattern.asset + "|" + pattern.mode + "|" + std::to_string(pattern.depth) + "|" + target.key();
-    if (auto found = kept_one(key)) return *found;
+    if (auto found = kept_or_make(key)) return *found;
+    const Making making{key};
     if (!bytes) throw core::Error("value", "the picture of the pattern " + pattern.id + " is not held");
     const std::uint64_t pixels = std::uint64_t(pattern.width) * std::uint64_t(pattern.height);
     // (the tile decoded, made and premultiplied: in the imaging budget while they are made)
@@ -366,7 +391,11 @@ std::optional<Laid> laid(const core::Document* book, const Json& fill_pattern, c
     if (p == nullptr) return std::nullopt;
     const auto file = book->pattern_files.find(p->asset);
     if (file == book->pattern_files.end() || !file->second) return std::nullopt;
-    return laid(*p, file->second, fill_pattern, target, dpi);
+    try {
+        return laid(*p, file->second, fill_pattern, target, dpi);
+    } catch (const core::Error&) {  // (a picture that cannot be made — not read, past the budget —: the fill draws nothing)
+        return std::nullopt;
+    }
 }
 
 Image rgba8(const Laid& laid, const Box& area) {
@@ -427,11 +456,19 @@ void forget() {
     Store& s = store();
     const std::lock_guard lock(s.mutex);
     s.items.clear();
-    s.bytes = 0;
+    s.bytes = 0;  // (a tile being made is kept when it is done)
+}
+
+static int define_dpi(const core::Page& page) {
+    // (design 2.2: a page's pattern at its layers' grid — an opened picture's, a precise or ink page's finest; any other
+    // page's working 200 dpi)
+    if (page.color || (page.rgb && page.rgb->depth > 8)) return layer_masks::grid_dpi(page);
+    return raster::working_dpi(page);
 }
 
 FromPage from_page(const core::Document& doc, const core::Page& page, const Json* area, const std::string& name) {
-    const image_ops::Pixels p = image_ops::page_pixels(doc, page);
+    const int dpi = define_dpi(page);
+    const image_ops::Pixels p = image_ops::page_pixels(doc, page, dpi);
     const std::uint32_t w = p.width(), h = p.height();
     std::vector<float> cover;
     if (area != nullptr) cover = image_ops::coverage(page, *area, w, h, p.kind() == image_ops::Pixels::Kind::Eight);
@@ -492,7 +529,7 @@ FromPage from_page(const core::Document& doc, const core::Page& page, const Json
     out.pattern.depth = t.depth;
     out.pattern.width = tw;
     out.pattern.height = th;
-    out.pattern.dpi = std::clamp(w / (page.spec.width_mm.value() / 25.4), 50.0, 2400.0);
+    out.pattern.dpi = std::clamp(static_cast<double>(dpi), 50.0, 2400.0);  // (one of its pixels one of the grid's)
     out.bytes = std::make_shared<const std::string>(std::move(bytes));
     return out;
 }

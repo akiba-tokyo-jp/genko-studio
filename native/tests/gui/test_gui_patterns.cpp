@@ -247,6 +247,9 @@ private slots:
         s.window->apply_ops(Json::array({render::pattern_library::add_op(render::pattern_library::builtins()[1].pattern, render::pattern_library::builtins()[1].bytes)}));
         QCOMPARE(s.book().patterns.size(), std::size_t(1));
         s.window->set_current_pattern(QStringLiteral("book:") + QString::fromStdString(s.book().patterns[0].id));
+        // (the book's own: kept with the window, never in the settings — another book's same id is another picture)
+        QVERIFY(!app::settings()->value(QStringLiteral("patterns/current")).toString().startsWith(QLatin1String("book:")));
+        QCOMPARE(s.window->current_pattern(), QStringLiteral("book:") + QString::fromStdString(s.book().patterns[0].id));
         panel->refresh();
         panel->remove();
         QVERIFY(s.book().patterns.empty());

@@ -11,6 +11,7 @@
 #include "app/canvas.hpp"
 #include "app/config.hpp"
 #include "app/main_window.hpp"
+#include "app/off_ui.hpp"
 #include "app/patterns_panel.hpp"
 #include "core/ids.hpp"
 #include "core/patterns.hpp"
@@ -24,8 +25,9 @@ namespace library = render::pattern_library;
 namespace store = render::preset_store;
 
 QString MainWindow::current_pattern() const {
+    if (!book_pattern_.isEmpty() && book_pattern_of_ == session_.get() && pattern_chosen(book(), book_pattern_)) return book_pattern_;
     const QString kept = settings()->value(QStringLiteral("patterns/current")).toString();
-    if (!kept.isEmpty() && pattern_chosen(book(), kept)) return kept;
+    if (!kept.isEmpty() && kept.startsWith(QLatin1String("library:")) && pattern_chosen(book(), kept)) return kept;
     // (none chosen, or one gone: the library's first, as Photoshop's)
     const store::Library lib = library::load(config_dir());
     for (const store::Group& g : lib.groups) {
@@ -34,7 +36,16 @@ QString MainWindow::current_pattern() const {
     return {};
 }
 
-void MainWindow::set_current_pattern(const QString& choice) { settings()->setValue(QStringLiteral("patterns/current"), choice); }
+void MainWindow::set_current_pattern(const QString& choice) {
+    if (choice.startsWith(QLatin1String("book:"))) {  // (the open book's: with the window, not the settings)
+        book_pattern_ = choice;
+        book_pattern_of_ = session_.get();
+        return;
+    }
+    book_pattern_.clear();
+    book_pattern_of_ = nullptr;
+    settings()->setValue(QStringLiteral("patterns/current"), choice);
+}
 
 std::optional<Json> MainWindow::pattern_fill_of(const QString& choice, double scale, double angle, bool link, Json& before) {
     before = Json::array();
@@ -74,7 +85,12 @@ void MainWindow::define_pattern(std::optional<QString> name) {
     }
     const std::optional<Json> area = selection_area();
     try {
-        const render::patterns::FromPage made = render::patterns::from_page(book(), *page, area ? &*area : nullptr, name->toStdString());
+        // (the page drawn and the pattern made off the window's thread, from the book as it is now: PC4 F-b's off_ui)
+        const std::shared_ptr<const core::Document> shown = session_->snapshot();
+        const core::Page seen = *page;
+        const std::string named = name->toStdString();
+        const render::patterns::FromPage made =
+            off_ui([shown, seen, area, named] { return render::patterns::from_page(*shown, seen, area ? &*area : nullptr, named); });
         store::Library lib = library::load(config_dir());
         const Json out = library::add(config_dir(), lib.groups, made.pattern, made.bytes, std::nullopt);
         library::save(config_dir(), lib.groups);
@@ -115,7 +131,7 @@ void MainWindow::build_pattern_actions() {
     make("act_define_pattern", QStringLiteral("パターンを定義…"), [this] { define_pattern(); }, {},
          QStringLiteral("選択範囲（無ければページ全体）を、見えているとおりにパターンのライブラリに加えます"));
     make("act_layer_pattern", QStringLiteral("パターンのレイヤー…"), [this] { new_pattern_layer(); }, {},
-         QStringLiteral("パターンを敷きつめた塗りつぶしレイヤーを作ります（レイヤー → 新規塗りつぶしレイヤー → パターン…）"));
+         QStringLiteral("パターンを敷きつめた塗りつぶしレイヤーを作ります（Photoshop の 新規塗りつぶしレイヤー → パターン…）"));
     QAction* preview = make("act_pattern_preview", QStringLiteral("パターンプレビュー"), [] {}, {},
                             QStringLiteral("ページを上下左右に並べて見せます（パターンにしたときのつながりを見る。原稿は変わりません）"), true);
     connect(preview, &QAction::toggled, this, [this](bool on) {

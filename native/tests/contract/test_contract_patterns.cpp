@@ -27,11 +27,20 @@
 #include "core/ink.hpp"
 #include "core/json.hpp"
 #include "core/patterns.hpp"
+#include "core/strokes.hpp"
+#include "core/vector.hpp"
 #include "render/image.hpp"
+#include "formats/open_file.hpp"
+#include "formats/pillow_save.hpp"
+#include "render/ops_patterns.hpp"
 #include "render/ops_registry.hpp"
+#include "render/raster.hpp"
+#include "render/selection.hpp"
 #include "render/page.hpp"
 #include "render/patterns.hpp"
 #include "render/png.hpp"
+#include "storage/fsutil.hpp"
+#include "storage/reader.hpp"
 #include "testsupport.hpp"
 
 using namespace genko;
@@ -279,7 +288,10 @@ private slots:
         for (const char* mode : {"rgb8", "rgb16", "cmyk"}) {
             const std::string m = mode;
             core::Document book = on_page(m);
-            book = run_ops(book, Json::array({add_checker(), Json{{"op", "add_layer"}, {"page", 1}, {"kind", "paint"}, {"id", "paint1"}}})).doc;
+            // (a layer the panels do not cut: one a precise page's precise pixels can hold — keep_page_modes' rule)
+            book = run_ops(book, Json::array({add_checker(), Json{{"op", "add_layer"}, {"page", 1}, {"kind", "paint"}, {"id", "paint1"}},
+                                              Json{{"op", "set_layer"}, {"page", 1}, {"id", "paint1"}, {"panel_clip", false}}}))
+                       .doc;
             const core::Document filled = run(book, Json{{"op", "fill_area"}, {"page", 1}, {"layer_id", "paint1"},
                                                          {"area", Json{{"rect", Json::array({0, 0, 20.32, 20.32})}}}, {"pattern", Json{{"id", "pat-1"}}}});
             const core::Layer& layer = layer_of(filled.page(0), "paint1");
@@ -397,7 +409,12 @@ private slots:
         genko::test::write_bytes(path(QStringLiteral("c.json")), Json::array({Json{{"op", "rename_pattern"}, {"id", "pat-9"}, {"name", "x"}}}).dump());
         const Json refused = genko({QStringLiteral("apply"), book, path(QStringLiteral("c.json")), QStringLiteral("--agent"), QStringLiteral("human:test")}, &exit);
         QVERIFY(exit != 0);
-        QVERIFY2(refused.dump().find("read_only") != std::string::npos && refused.dump().find("pat-1") != std::string::npos, refused.dump().c_str());
+        // (refused as read-only, or by the bus's check of the fills before that — the book never written either way)
+        QVERIFY2((refused.dump().find("read_only") != std::string::npos || refused.dump().find("does not keep") != std::string::npos) &&
+                     refused.dump().find("pat-1") != std::string::npos,
+                 refused.dump().c_str());
+        QCOMPARE(project(book)["patterns"][0]["id"], Json("pat-9"));
+        QCOMPARE(project(book)["patterns"][0]["name"], saved["patterns"][0]["name"]);
     }
 
     // PSD: the pattern fill layer as Photoshop's (PtFl) and a shape part's pattern fill, their patterns in the Patt
@@ -523,6 +540,189 @@ json.dump(out, open(sys.argv[1], "w"), ensure_ascii=False)
         QVERIFY2(exit == 0, reset.dump().c_str());
         listed = genko({QStringLiteral("patterns"), QStringLiteral("list")}, &exit, env);
         QCOMPARE(listed["groups"].size(), std::size_t(2));
+    }
+
+    // The review's P1-2: a pen layer's shape part filled with a pattern, when the layer becomes pixels — a filter, a fill
+    // keeping its transparency — or the part is put on a paint layer (paste): drawn into the pixels with the book's
+    // pattern, never dropped; on 8- and 16-bit pages.
+    void patternPartsBecomePixelsWithTheirPattern() {
+        for (const char* mode : {"rgb8", "rgb16"}) {
+            const std::string m = mode;
+            core::Document book = on_page(m);
+            const Json square{{"kind", "rect"}, {"rect", Json::array({0, 0, 20.32, 20.32})}};
+            book = run_ops(book, Json::array({add_checker(), Json{{"op", "add_layer"}, {"page", 1}, {"kind", "pen"}, {"id", "pen1"}},
+                                              Json{{"op", "add_shape_part"}, {"page", 1}, {"layer_id", "pen1"}, {"shape", square},
+                                                   {"fill", Json{{"pattern", Json{{"id", "pat-1"}}}}}}}))
+                       .doc;
+            const auto patterned = [&](const core::Document& d, const std::string& what) {
+                const render::Image seen = drawn(d);
+                const auto outside = rgb_at(seen, 150, 150);
+                return reddish(rgb_at(seen, 1, 1)) && bluish(rgb_at(seen, 5, 1)) && outside[0] > 240 && outside[2] > 240 ? std::string()
+                                                                                                                           : m + " " + what;
+            };
+            QVERIFY2(patterned(book, "as a part").empty(), m.c_str());
+            const core::Document filtered = run(book, Json{{"op", "filter_raster"}, {"page", 1}, {"id", "pen1"}, {"kind", "posterize"}, {"levels", 8}});
+            QVERIFY(layer_of(filtered.page(0), "pen1").shapes->items.empty());  // (its parts are its pixels now)
+            QVERIFY2(patterned(filtered, "filtered").empty(), m.c_str());
+            const core::Document kept = run(book, Json{{"op", "fill_area"}, {"page", 1}, {"layer_id", "pen1"}, {"area", Json{{"all", true}}},
+                                                       {"rgb", Json::array({0, 200, 0})}, {"opacity", 0.1}, {"preserve_transparency", true}});
+            QVERIFY2(patterned(kept, "filled keeping its transparency").empty(), m.c_str());
+            // the part pasted on a paint layer (the pen layer hidden): a picture of it with its pattern
+            const Json part = core::vector::to_json(layer_of(book.page(0), "pen1").shapes->items.front());
+            const core::Document pasted = run_ops(book, Json::array({Json{{"op", "set_layer"}, {"page", 1}, {"id", "pen1"}, {"visible", false}},
+                                                                      Json{{"op", "add_layer"}, {"page", 1}, {"kind", "paint"}, {"id", "paint1"}},
+                                                                      Json{{"op", "paste"}, {"page", 1}, {"layer_id", "paint1"},
+                                                                           {"items", Json{{"strokes", Json::array()}, {"patches", Json::array()}, {"shapes", Json::array({part})}}},
+                                                                           {"matrix", Json::array({1, 0, 0, 1, 0, 0})}}}))
+                                              .doc;
+            QCOMPARE(layer_of(pasted.page(0), "paint1").patches.size(), std::size_t(1));
+            QVERIFY2(patterned(pasted, "pasted on a paint layer").empty(), m.c_str());
+        }
+    }
+
+    // The review's P1-3: pages of another book (作品の結合) bring the patterns their fills name — an id this book uses for
+    // another picture given a free one —, saved and opened again with the same look; a shape part copied from it (its
+    // items carry the pattern) pasted the same; one that carries none, naming a pattern the book does not keep, refused.
+    void patternsComeFromAnotherBook() {
+        const QString a = make_book(QStringLiteral("from.genko"));
+        Json reply = apply(a, QStringLiteral("from.json"),
+                           Json::array({add_checker(),
+                                        Json{{"op", "add_layer"}, {"page", 1}, {"kind", "fill"}, {"id", "pl"}, {"name", "模様"}, {"pattern", Json{{"id", "pat-1"}, {"scale", 300}}}},
+                                        Json{{"op", "set_layer"}, {"page", 1}, {"id", "pl"}, {"panel_clip", false}, {"opacity", 0.5}},
+                                        Json{{"op", "add_layer"}, {"page", 1}, {"kind", "pen"}, {"id", "sh"}, {"name", "形"}},
+                                        Json{{"op", "set_layer"}, {"page", 1}, {"id", "sh"}, {"panel_clip", false}, {"panel_each", false}},
+                                        Json{{"op", "add_shape_part"}, {"page", 1}, {"layer_id", "sh"}, {"shape", Json{{"kind", "rect"}, {"rect", Json::array({20, 20, 40, 40})}}},
+                                             {"fill", Json{{"pattern", Json{{"id", "pat-1"}}}}}}}));
+        QVERIFY2(reply.value("ok", false), reply.dump().c_str());
+        const QString b = make_book(QStringLiteral("into.genko"));
+        const std::string grey = render::write_png(render::Image::frombytes("L", render::Size{2, 2}, std::string("\x00\x40\x80\xff", 4)));
+        reply = apply(b, QStringLiteral("other.json"), Json::array({Json{{"op", "add_pattern"}, {"name", "灰"}, {"png", core::b64encode(grey)}, {"id", "pat-1"}}}));
+        QVERIFY2(reply.value("ok", false), reply.dump().c_str());
+        reply = apply(b, QStringLiteral("merge.json"), Json::array({Json{{"op", "import_pages"}, {"from", a.toStdString()}}}));
+        QVERIFY2(reply.value("ok", false), reply.dump().c_str());
+        const Json from_saved = project(a), saved = project(b);
+        QCOMPARE(saved["patterns"].size(), std::size_t(2));
+        std::string carried;
+        for (const Json& layer : saved["pages"][1]["layers"]) {
+            if (layer.value("id", std::string()).empty() || !layer.contains("fill") || !layer["fill"].is_object() || !layer["fill"].contains("pattern")) continue;
+            carried = layer["fill"]["pattern"]["id"].get<std::string>();
+        }
+        QVERIFY(!carried.empty() && carried != "pat-1");
+        bool same_picture = false;
+        for (const Json& p : saved["patterns"])
+            if (p["id"] == Json(carried)) same_picture = p["asset"] == from_saved["patterns"][0]["asset"];
+        QVERIFY(same_picture);
+        // opened again: clean (not read-only), the imported page drawn as the page it came from
+        const storage::LoadResult from = storage::load_document(storage::path_from_utf8(a.toStdString()));
+        const storage::LoadResult into = storage::load_document(storage::path_from_utf8(b.toStdString()));
+        QVERIFY2(from.report.clean(), from.report.to_json().dump().c_str());
+        QVERIFY2(into.report.clean(), into.report.to_json().dump().c_str());
+        render::RenderOptions options;
+        options.mode = "print";
+        options.finish = false;
+        const render::Image was = render::render_page(from.document.page(0), 100, options, &from.document).image.convert("RGB");
+        const render::Image now = render::render_page(into.document.page(1), 100, options, &into.document).image.convert("RGB");
+        const render::Box part{0, 0, 300, 300};
+        QVERIFY(was.crop(part).tobytes() == now.crop(part).tobytes());
+        QVERIFY(reddish(rgb_at(now, 100, 100)) || bluish(rgb_at(now, 100, 100)));
+        // a shape part copied from the other book: its items carry the pattern; pasted, it is the book's (the same picture)
+        const core::Layer* shape_layer = nullptr;
+        for (const core::Layer& layer : from.document.page(0).layers)
+            if (layer.title == "形") shape_layer = &layer;
+        QVERIFY(shape_layer != nullptr && !shape_layer->shapes->items.empty());
+        render::selection::Items items;
+        items.shapes = shape_layer->shapes->items;
+        items.patterns = render::patterns_of_parts(from.document, items.shapes);
+        QCOMPARE(items.patterns.size(), std::size_t(1));
+        core::Document other = small_book();
+        other = run(other, Json{{"op", "add_pattern"}, {"name", "灰"}, {"png", core::b64encode(grey)}, {"id", "pat-1"}});
+        const core::Document with_part = run_ops(other, Json::array({Json{{"op", "add_layer"}, {"page", 1}, {"kind", "pen"}, {"id", "p2"}},
+                                                                     Json{{"op", "paste"}, {"page", 1}, {"layer_id", "p2"}, {"items", render::selection::items_to_json(items)},
+                                                                          {"matrix", Json::array({1, 0, 0, 1, 0, 0})}}}))
+                                             .doc;
+        const Json& pasted_fill = layer_of(with_part.page(0), "p2").shapes->items.front().fill;
+        const std::string named = pasted_fill["pattern"]["id"].get<std::string>();
+        QVERIFY(named != "pat-1");
+        QCOMPARE(core::find_pattern(with_part, named)->asset, from_saved["patterns"][0]["asset"].get<std::string>());
+        // carrying none, onto a book without it: refused (the bus's check), the book as it was
+        render::selection::Items bare;
+        bare.shapes = items.shapes;
+        const std::string why = refusal(small_book(), Json{{"op", "paste"}, {"page", 1}, {"layer", "ink"}, {"items", render::selection::items_to_json(bare)},
+                                                           {"matrix", Json::array({1, 0, 0, 1, 0, 0})}});
+        QVERIFY2(why.find("does not keep") != std::string::npos, why.c_str());
+    }
+
+    // The review's P2-1 and P2-2: on a 16-bit page a pen layer with precise lines stays a pen layer (the pattern a picture
+    // laid on it, its lines kept); a paint layer the panels cut, on a 16-bit page (a picture: not made precise) and a CMYK
+    // page (its inks), gets the pattern inside the panels only.
+    void penLayersAndPanels() {
+        core::Document book = on_page("rgb16");
+        const Json across = Json::array({Json::array({2.0, 30.0}), Json::array({50.0, 30.0})});
+        book = run_ops(book, Json::array({add_checker(), Json{{"op", "add_layer"}, {"page", 1}, {"kind", "pen"}, {"id", "pen1"}},
+                                          Json{{"op", "paste"}, {"page", 1}, {"layer_id", "pen1"}, {"matrix", Json::array({1, 0, 0, 1, 0, 0})},
+                                               {"items", Json{{"strokes", Json::array({Json{{"points", across}, {"width_mm", 1.0}, {"kind", "mili"},
+                                                                                            {"color_rgb", Json{{"precision", "u16"}, {"values", Json::array({0.5, 0.25, 0.125})}}}}})},
+                                                              {"patches", Json::array()}}}}}))
+                   .doc;
+        QVERIFY(core::has_color_strokes(layer_of(book.page(0), "pen1")));
+        const core::Document filled = run(book, Json{{"op", "fill_area"}, {"page", 1}, {"layer_id", "pen1"}, {"area", Json{{"rect", Json::array({0, 0, 20.32, 20.32})}}},
+                                                     {"pattern", Json{{"id", "pat-1"}}}});
+        const core::Layer& pen = layer_of(filled.page(0), "pen1");
+        QVERIFY(pen.kind == core::LayerKind::Strokes);
+        QCOMPARE(pen.stroke_count(), std::size_t(1));
+        QCOMPARE(pen.patches.size(), std::size_t(1));
+        QVERIFY(reddish(rgb_at(drawn(filled), 1, 1)));
+        // the panels: a page of its panels (none taken away)
+        for (const char* mode : {"rgb16", "cmyk"}) {
+            const std::string m = mode;
+            core::PageSpec spec;
+            spec.width_mm = core::Num(60);
+            spec.height_mm = core::Num(80);
+            spec.dpi = core::Num(150);
+            spec.bleed_mm = core::Num(3);
+            spec.inner_margin_mm = core::Num(5);
+            spec.expression = "color";
+            core::Document framed = core::new_episode("patterns", core::Num(1), 1, spec, core::Binding::Right);
+            QVERIFY(!framed.page(0).frames.empty());
+            if (m == "rgb16") framed = run(framed, Json{{"op", "set_color_mode"}, {"page", 1}, {"mode", "rgb"}, {"depth", 16}});
+            if (m == "cmyk") framed = run(framed, Json{{"op", "set_color_mode"}, {"page", 1}, {"mode", "cmyk"}, {"profile", "coated-cmyk"}});
+            framed = run_ops(framed, Json::array({add_checker(), Json{{"op", "add_layer"}, {"page", 1}, {"kind", "paint"}, {"id", "paint1"}}})).doc;
+            QVERIFY(layer_of(framed.page(0), "paint1").panel_clip);
+            const core::Document done = run(framed, Json{{"op", "fill_area"}, {"page", 1}, {"layer_id", "paint1"}, {"area", Json{{"all", true}}},
+                                                         {"pattern", Json{{"id", "pat-1"}}}});
+            const core::Layer& paint = layer_of(done.page(0), "paint1");
+            if (m == "rgb16") QVERIFY2(!paint.color_raster && paint.patches.size() == 1, m.c_str());  // (a picture: a layer the panels cut is not made precise)
+            if (m == "cmyk") QVERIFY2(paint.ink_raster != nullptr, m.c_str());
+            const render::Image seen = drawn(done);
+            const auto margin = rgb_at(seen, 4, 4);  // (1 mm in: outside every panel)
+            QVERIFY2(margin[0] > 240 && margin[1] > 240 && margin[2] > 240, (m + " outside the panels").c_str());
+            const auto inside = rgb_at(seen, seen.width() / 2, seen.height() / 2);
+            QVERIFY2(reddish(inside) || bluish(inside), (m + " inside a panel").c_str());
+        }
+    }
+
+    // The review's P2-3: an opened picture's page (its grid "finest", 600 ppi): Define Pattern makes the pattern at the
+    // grid (600 dpi), and laid back on a paint layer of the page it is the page's pixels exactly.
+    void anOpenedPicturesGrid() {
+        std::string rgb;
+        for (int y = 0; y < 160; ++y)
+            for (int x = 0; x < 240; ++x) {
+                const bool red = (x / 6 + y / 6) % 2 == 0;
+                rgb += red ? std::string("\xd0\x20\x20", 3) : std::string("\x20\x20\xd0", 3);
+            }
+        const std::string png = formats::png_bytes(render::Image::frombytes("RGB", render::Size{240, 160}, rgb), formats::PngSave{std::array<double, 2>{600, 600}, {}, false});
+        core::Document doc = formats::open_file(png, "picture.png").doc;
+        QCOMPARE(render::raster::working_dpi(doc.page(0)), 600);
+        const render::patterns::FromPage made = render::patterns::from_page(doc, doc.page(0), nullptr, "頁");
+        QCOMPARE(made.pattern.dpi, 600.0);
+        QCOMPARE(made.pattern.width, std::int64_t(240));
+        doc = run_ops(doc, Json::array({Json{{"op", "add_pattern"}, {"name", "頁"}, {"png", core::b64encode(*made.bytes)}, {"dpi", 600}},
+                                        Json{{"op", "add_layer"}, {"page", 1}, {"kind", "paint"}, {"id", "back"}},
+                                        Json{{"op", "fill_area"}, {"page", 1}, {"layer_id", "back"}, {"area", Json{{"all", true}}}, {"pattern", Json{{"id", "pat-1"}}}}}))
+                  .doc;
+        const render::Image laid = render::raster::layer_pixels(doc.page(0), layer_of(doc.page(0), "back"), &doc).convert("RGBA");
+        QCOMPARE(laid.size(), (render::Size{240, 160}));
+        QVERIFY(laid.tobytes() == render::read_png(*made.bytes).convert("RGBA").tobytes());
     }
 };
 

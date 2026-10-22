@@ -8,6 +8,8 @@
 
 #include <algorithm>
 #include <cmath>
+#include <map>
+#include <set>
 
 #include "core/base64.hpp"
 #include "core/color_raster.hpp"
@@ -25,6 +27,8 @@
 #include "render/image_ops.hpp"
 #include "render/op_limits.hpp"
 #include "render/ops_paint_tools.hpp"
+#include "render/page_internal.hpp"
+#include "render/pattern_library.hpp"
 #include "render/page.hpp"
 #include "render/patterns.hpp"
 #include "render/png.hpp"
@@ -162,6 +166,9 @@ std::pair<std::string, bool> add_pattern_to(core::Document& doc, const Json& op)
         p.depth = header.depth;
         p.width = header.width;
         p.height = header.height;
+        if (p.width > core::kMaxPatternSide || p.height > core::kMaxPatternSide || p.width * p.height > core::kMaxPatternPixels) {
+            throw OpError("a pattern is at most 8192 pixels a side and 64 million pixels");  // (before its pixels are read)
+        }
         if (p.mode == "gray" && p.depth == 8) {  // (an 8-bit grey pattern is kept as an LA PNG)
             patterns::Tile t;
             try {
@@ -227,19 +234,11 @@ std::pair<std::string, bool> add_pattern_to(core::Document& doc, const Json& op)
 }
 
 std::pair<std::string, bool> keep_pattern(core::Document& doc, core::Pattern p, const core::Bytes& bytes) {
-    if (!bytes) throw OpError("the pattern has no picture");
-    if (const auto why = core::check_pattern_file(p, *bytes)) throw OpError("the pattern's picture: " + *why);
-    if (const core::Pattern* kept = same(doc, p)) return {kept->id, false};
-    if (p.id.empty() || core::find_pattern(doc, p.id) != nullptr) p.id = core::next_pattern_id(doc);
     try {
-        (void)core::pattern_from_json(core::pattern_to_json(p));
+        return core::carry_pattern(doc, std::move(p), bytes);
     } catch (const core::Error& error) {
         throw OpError(error.what());
     }
-    if (doc.patterns.size() >= core::kMaxPatterns) throw OpError("a book keeps at most " + std::to_string(core::kMaxPatterns) + " patterns");
-    doc.pattern_files[p.asset] = bytes;
-    doc.patterns.push_back(p);
-    return {p.id, true};
 }
 
 Json fill_pattern(core::Document& doc, const Json& given) {
@@ -270,6 +269,13 @@ Json fill_pattern(core::Document& doc, const Json& given) {
     return spec;
 }
 
+int pattern_fill_dpi(const core::Page& page) {
+    // (PC4 F-b, image-grid@1: a page of grid "finest" — an opened picture's — at its grid, design 2.2; any other at 300 dpi
+    // as a colour's fill)
+    if (page.spec.grid && *page.spec.grid == "finest") return raster::working_dpi(page);
+    return fills::kFillDpi;
+}
+
 Json fill_with_pattern(core::OpContext& c, std::size_t at, std::size_t ti, const Image& coverage, Point offset, int dpi) {
     core::Document& doc = c.doc;
     const Json& op = c.op;
@@ -290,18 +296,26 @@ Json fill_with_pattern(core::OpContext& c, std::size_t at, std::size_t ti, const
     const bool keep = core::truthy_at(op, "preserve_transparency") || layer.lock_alpha;
     const auto drawn = coverage.getbbox();
     if (!drawn) throw OpError("the area is empty");
-    // (a picture on a pen layer, or on a paint layer of an 8-bit page; a paint layer of a precise page or of inks — one
-    // without pixels yet too — gets them)
-    const bool deep_page = page.color.has_value() || (page.rgb && page.rgb->depth > 8);
-    const bool eight = !layer.color_raster && !layer.ink_raster && !core::has_color_strokes(layer) &&
-                       (layer.kind == core::LayerKind::Strokes || !deep_page);
     if (mode != "normal" && layer.kind != core::LayerKind::Raster) {
         throw OpError("blend paints a paint layer's pixels (a pen layer's fills are pictures laid on it: leave blend out)");
     }
+    const bool pen = layer.kind == core::LayerKind::Strokes;
+    const bool finest = page.spec.grid && *page.spec.grid == "finest";
+    // (a paint layer with no pixels yet that a precise RGB page's precise pixels can hold: keep_page_modes' rule — no
+    // panel cut, no effect, screen or colour, nothing drawn on it)
+    const bool bare = layer.kind == core::LayerKind::Raster && !layer.color_raster && !layer.ink_raster &&
+                      (!layer.raster_png || layer.raster_png->empty()) && layer.stroke_count() == 0 && layer.patches.empty() && !shape_parts::any(layer);
+    const bool to_precise = bare && !page.color && page.rgb && page.rgb->depth > 8 && !page.rgb->table && layer.role != core::LayerRole::Tone &&
+                            !layer.panel_clip && !layer.effect && !layer.screen && !layer.color;
+    // (where a picture is laid, as a colour's fill lays one: a pen layer — whatever its lines and the page —, and a paint
+    // layer of 8 bits on a page that is not of inks nor of the finest grid, or of a precise page it cannot be precise on)
+    const bool picture = mode == "normal" && !keep &&
+                         (pen || (!layer.color_raster && !layer.ink_raster && !core::has_color_strokes(layer) && !page.color && !finest && !to_precise));
     const Json report{{"pattern", spec["id"]}};
-    if (eight && mode == "normal" && !keep) {
-        // (a picture patch at 300 dpi, as fill_area lays a colour: the pattern over the page, by the coverage and opacity)
-        const int patch_dpi = fills::kFillDpi;
+    if (picture) {
+        // (a picture patch at 300 dpi — at the grid of a page of the finest grid —: the pattern over the page, by the coverage
+        // and opacity)
+        const int patch_dpi = pattern_fill_dpi(page);
         const Image placed_cover = [&] {
             if (dpi == patch_dpi) return coverage;
             const Size size{std::max(1, static_cast<int>(std::lround(coverage.width() * double(patch_dpi) / dpi))),
@@ -315,37 +329,34 @@ Json fill_with_pattern(core::OpContext& c, std::size_t at, std::size_t ti, const
         limits::check_picture(area.width(), area.height(), "the area");
         const std::optional<patterns::Laid> laid = patterns::laid(&doc, spec, patterns::Target::srgb(), patch_dpi);
         if (!laid) throw OpError("the book has no picture of the pattern " + spec["id"].get<std::string>());
-        Image picture = patterns::rgba8(*laid, area);
+        Image picture_made = patterns::rgba8(*laid, area);
         const std::string cut = placed_cover.crop(*box).tobytes();
-        std::string alpha = picture.getchannel(3).tobytes();
+        std::string alpha = picture_made.getchannel(3).tobytes();
         for (std::size_t i = 0; i < alpha.size() && i < cut.size(); ++i) {
             alpha[i] = static_cast<char>(std::lround(static_cast<unsigned char>(alpha[i]) * (static_cast<unsigned char>(cut[i]) / 255.0) * opacity));
         }
-        picture.putalpha(Image::frombytes("L", picture.size(), alpha));
+        picture_made.putalpha(Image::frombytes("L", picture_made.size(), alpha));
         core::Patch templ;
         templ.attrs["mode"] = "image";
         templ.attrs["opacity"] = 1.0;
-        auto patch = selection::to_patch(picture, area.x0, area.y0, templ, patch_dpi);
+        auto patch = selection::to_patch(picture_made, area.x0, area.y0, templ, patch_dpi);
         if (!patch) throw OpError("the area is empty");
         core::Page& edited = doc.edit_page(at);
         edited.layers[ti].patches.push_back(std::move(*patch));
         return report;
     }
-    // (into the layer's pixels on its own grid: the coverage placed over the page and laid on the grid)
+    // (into the layer's pixels on its own grid: the coverage placed over the page, laid on the grid and cut at the panels
+    // when the layer is — as a colour's fill is when its picture is drawn in)
     const std::string id = layer.id;
-    {  // (a paint layer of a precise RGB page with no pixels yet: clear precise pixels of the page's precision first, as
-       // fill_area's precise pieces start one)
+    const bool panel_clip = layer.panel_clip;
+    if (to_precise) {  // (clear precise pixels of the page's precision first, as fill_area's precise pieces start one)
         const core::Page& was = doc.page(at);
-        const core::Layer& bare = was.layers[ti];
-        if (!was.color && was.rgb && was.rgb->depth > 8 && bare.kind == core::LayerKind::Raster && !bare.color_raster && !bare.ink_raster &&
-            (!bare.raster_png || bare.raster_png->empty()) && bare.stroke_count() == 0 && bare.patches.empty() && !shape_parts::any(bare)) {
-            const Size size{mm_to_px(was.spec.width_mm.value(), raster::kWorkingDpi), mm_to_px(was.spec.height_mm.value(), raster::kWorkingDpi)};
-            ColorCanvas clear(Image::create("RGBA", size, Ink{0, 0, 0, 0}), RgbSpace::of(was));
-            std::string pixels = clear.color_raster(was.rgb->depth == 16 ? "u16" : "f32");
-            doc.edit_page(at).layers[ti].color_raster = std::make_shared<const std::string>(std::move(pixels));
-            if (std::find(doc.features.begin(), doc.features.end(), core::kColorRasterFeature) == doc.features.end()) {
-                doc.features.emplace_back(core::kColorRasterFeature);
-            }
+        const Size size{mm_to_px(was.spec.width_mm.value(), raster::kWorkingDpi), mm_to_px(was.spec.height_mm.value(), raster::kWorkingDpi)};
+        ColorCanvas clear(Image::create("RGBA", size, Ink{0, 0, 0, 0}), RgbSpace::of(was));
+        std::string pixels = clear.color_raster(was.rgb->depth == 16 ? "u16" : "f32");
+        doc.edit_page(at).layers[ti].color_raster = std::make_shared<const std::string>(std::move(pixels));
+        if (std::find(doc.features.begin(), doc.features.end(), core::kColorRasterFeature) == doc.features.end()) {
+            doc.features.emplace_back(core::kColorRasterFeature);
         }
     }
     image_ops::Window found;
@@ -354,19 +365,29 @@ Json fill_with_pattern(core::OpContext& c, std::size_t at, std::size_t ti, const
     const Size on_page{mm_to_px(now.spec.width_mm.value(), dpi), mm_to_px(now.spec.height_mm.value(), dpi)};
     Image placed = Image::create("L", on_page, Ink(0));
     placed.paste(coverage, offset);
-    const Image on_grid = placed.size() == found.grid ? placed
-                                                      : placed.resize(found.grid, found.grid.width < on_page.width ? Resample::Box : Resample::Bilinear);
+    Image on_grid = placed.size() == found.grid ? placed : placed.resize(found.grid, found.grid.width < on_page.width ? Resample::Box : Resample::Bilinear);
+    const double grid_dpi = found.grid.width / (now.spec.width_mm.value() / 25.4);
+    if (panel_clip) {
+        const int clip_dpi = std::max(1, static_cast<int>(std::lround(grid_dpi)));
+        if (const std::optional<Image> panels = detail::clip_mask(now, found.grid, clip_dpi, Box{0, 0, found.grid.width, found.grid.height})) {
+            on_grid = chops::multiply(on_grid, *panels);
+        }
+    }
     const auto box = on_grid.getbbox();
     if (!box) throw OpError("the area is empty");
     image_ops::Window window;
     image_ops::Pixels p = image_ops::layer_pixels(c, at, id, *box, &window);
     const std::string share = on_grid.crop(window.box).tobytes();
-    const double grid_dpi = found.grid.width / (now.spec.width_mm.value() / 25.4);
     const bool inks = p.kind() == image_ops::Pixels::Kind::Inks;
+    const bool precise = p.kind() == image_ops::Pixels::Kind::Precise;
     const bool direct = !inks || mode == "normal";  // (inks in a blend: through the colours they mean)
     const patterns::Target target = inks ? (direct ? patterns::Target::inks(*now.color) : patterns::Target::srgb()) : patterns::Target::rgb(now);
     const std::optional<patterns::Laid> laid = patterns::laid(&doc, spec, target, grid_dpi);
     if (!laid) throw OpError("the book has no picture of the pattern " + spec["id"].get<std::string>());
+    const RgbSpace space = precise ? RgbSpace::of(now) : RgbSpace();
+    // (the pattern laid over the pixel as a normal layer lays it, its alpha kept: B2's fill_keeping_alpha — precise
+    // values in linear light)
+    const auto over = [](double under, double a, double top, double k) { return (top * k + under * a * (1 - k)) / (k + a * (1 - k)); };
     const unsigned n = p.colours();
     const std::uint32_t w = static_cast<std::uint32_t>(window.box.width());
     float v[core::kPlatesMax + 1];
@@ -377,6 +398,7 @@ Json fill_with_pattern(core::OpContext& c, std::size_t at, std::size_t ti, const
         if (!(k > 0)) continue;
         laid->at(window.box.x0 + static_cast<int>(i % w), window.box.y0 + static_cast<int>(i / w), v);
         if (!direct) {  // (a blend on inks: the colours they mean, back by the page's rules)
+            if (keep && !(rgba[i][3] > 0)) continue;
             image_ops::Rgba out = image_ops::composite(mode, rgba[i], image_ops::Rgba{v[0], v[1], v[2], v[3] * k}, 1.0f);
             if (keep) out[3] = rgba[i][3];
             rgba[i] = out;
@@ -396,6 +418,16 @@ Json fill_with_pattern(core::OpContext& c, std::size_t at, std::size_t ti, const
             px[n] = oa;
             continue;
         }
+        if (keep && mode == "normal") {
+            const float sa = v[3] * k, da = px[3];
+            if (!(da > 0) || !(sa > 0)) continue;  // (a clear pixel stays clear, as it was)
+            for (unsigned ch = 0; ch < 3; ++ch) {
+                px[ch] = precise ? static_cast<float>(space.encode(ch, over(space.decode(ch, px[ch]), da, space.decode(ch, v[ch]), sa)))
+                                 : static_cast<float>(over(px[ch], da, v[ch], sa));
+            }
+            continue;
+        }
+        if (keep && !(px[3] > 0)) continue;
         image_ops::Rgba out = image_ops::composite(mode, image_ops::Rgba{px[0], px[1], px[2], px[3]}, image_ops::Rgba{v[0], v[1], v[2], v[3] * k}, 1.0f);
         if (keep) out[3] = px[3];
         for (unsigned ch = 0; ch < 4; ++ch) px[ch] = out[ch];
@@ -403,6 +435,50 @@ Json fill_with_pattern(core::OpContext& c, std::size_t at, std::size_t ti, const
     if (!direct) image_ops::from_rgba(p, rgba);
     image_ops::put_layer_pixels(doc, at, id, p, window.box);
     return report;
+}
+
+Json patterns_of_parts(const core::Document& book, const std::vector<core::vector::ShapePart>& parts) {
+    std::set<std::string> ids;
+    for (const core::vector::ShapePart& part : parts) {
+        for (const Json* fill : {&part.fill, part.stroke ? &part.stroke->fill : nullptr}) {
+            if (fill == nullptr) continue;
+            if (const Json* p = core::pattern_of_fill(*fill); p != nullptr && p->is_object()) {
+                if (const Json* id = core::get(*p, "id"); id != nullptr && id->is_string()) ids.insert(id->get<std::string>());
+            }
+        }
+    }
+    Json out = Json::array();
+    for (const std::string& id : ids) {
+        const core::Pattern* p = core::find_pattern(book, id);
+        if (p == nullptr) continue;
+        const auto file = book.pattern_files.find(p->asset);
+        if (file == book.pattern_files.end() || !file->second) continue;
+        Json one = pattern_library::add_op(*p, file->second);
+        one.erase("op");
+        one["id"] = id;
+        out.push_back(std::move(one));
+    }
+    return out;
+}
+
+void bring_part_patterns(core::Document& doc, std::vector<core::vector::ShapePart>& parts, const Json& patterns) {
+    if (!patterns.is_array() || patterns.empty() || parts.empty()) return;
+    std::map<std::string, std::string> ids;
+    for (const Json& given : patterns) {
+        if (!given.is_object()) throw OpError("items' patterns is a list of patterns ({id, name?, png | gkcr | gkir, mode?, depth?, dpi?})");
+        const Json* id = core::get(given, "id");
+        if (id == nullptr || !id->is_string()) throw OpError("an item's pattern needs the id its parts name");
+        Json picture = given;
+        picture.erase("id");
+        ids[id->get<std::string>()] = add_pattern_to(doc, picture).first;  // (the book's own of the same picture, else a new one)
+    }
+    core::Page carrier;  // (the parts' fills pointed at the book's patterns, as a page's are)
+    core::Layer holder;
+    holder.kind = core::LayerKind::Strokes;
+    holder.shapes = core::vector::make_shapes(std::move(parts));
+    carrier.layers.push_back(std::move(holder));
+    (void)core::repoint_patterns(carrier, ids);
+    parts = carrier.layers.front().shapes->items;
 }
 
 void register_pattern_ops(core::OpRegistry& registry) {

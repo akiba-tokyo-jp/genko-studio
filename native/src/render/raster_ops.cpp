@@ -309,10 +309,11 @@ void fill_area(OpContext& c) {
     const std::size_t ti = raster_paint_target(page, op);
     const Json area = core::op_area(op);
     if (const Json* pattern = core::get(op, "pattern"); pattern != nullptr && !pattern->is_null()) {  // (patterns@1, PC4 E3)
-        const selection::AreaMask m = selection::area_mask(area, fills::kFillDpi);
+        const int pattern_dpi = pattern_fill_dpi(page);  // (300 dpi; a page of grid "finest" at its grid)
+        const selection::AreaMask m = selection::area_mask(area, pattern_dpi);
         limits::check_coordinate(static_cast<double>(m.x0), "area");
         limits::check_coordinate(static_cast<double>(m.y0), "area");
-        c.report = fill_with_pattern(c, at, ti, m.mask, Point{static_cast<int>(m.x0), static_cast<int>(m.y0)}, fills::kFillDpi);
+        c.report = fill_with_pattern(c, at, ti, m.mask, Point{static_cast<int>(m.x0), static_cast<int>(m.y0)}, pattern_dpi);
         return;
     }
     // (vector@1, PC3 C-a: a blend — Fill Path's mode — paints the paint layer's own pixels; normal, as before, a picture)
@@ -1572,14 +1573,14 @@ void delete_or_transform_area(OpContext& c, bool transform) {
     Layer& target = page.layers[ti];
     if (core::truthy_at(op, "warp")) {
         const warp::Go go = warp::mapping(selection::area_bbox(area), op["warp"]);
-        selection::drop_warped(target, std::move(items), go, interp(op));
+        selection::drop_warped(target, std::move(items), go, interp(op), nullptr, &doc);
         return;
     }
     const std::vector<double> m = matrix_of(op);
     if (m.size() != 6) throw OpError("matrix is [a, b, c, d, e, f]");
     const Resample resample = interp(op);
     try {
-        selection::drop(target, std::move(items), selection::Matrix{m[0], m[1], m[2], m[3], m[4], m[5]}, false, resample);
+        selection::drop(target, std::move(items), selection::Matrix{m[0], m[1], m[2], m[3], m[4], m[5]}, false, resample, nullptr, &doc);
     } catch (const core::PyUncaught&) {
         throw;
     } catch (const core::Error& error) {
@@ -1647,6 +1648,7 @@ void paste(OpContext& c) {
     selection::Items items = selection::items_from_json(core::truthy_at(op, "items") ? op["items"] : Json::object());
     if (items.empty()) throw OpError("nothing to paste");
     validate_patch_items(items);
+    bring_part_patterns(doc, items.shapes, items.patterns);  // (patterns@1, PC4 E3: the patterns its shape parts name, from another book)
     std::vector<double> m = matrix_of(op);
     if (m.size() != 6) {
         throw core::PyValueError(m.size() < 6 ? "not enough values to unpack (expected 6, got " + std::to_string(m.size()) + ")"
@@ -1733,7 +1735,7 @@ void paste(OpContext& c) {
         pasted.kind = LayerKind::Raster;
         pasted.panel_clip = page.layers[ti].panel_clip;
         pasted.panel_each = page.layers[ti].panel_each;
-        selection::drop(pasted, std::move(items), selection::Matrix{m[0], m[1], m[2], m[3], m[4], m[5]}, true, Resample::Bilinear, &page);
+        selection::drop(pasted, std::move(items), selection::Matrix{m[0], m[1], m[2], m[3], m[4], m[5]}, true, Resample::Bilinear, &page, &doc);
         Layer& target = page.layers[ti];
         precise_edit(target, [&] { return color_edit::paste(page, target, pasted, &doc); });
         return;
@@ -1771,7 +1773,7 @@ void paste(OpContext& c) {
     }
     items.patches = std::move(pictures);
     if (items.empty()) return;
-    selection::drop(target, std::move(items), selection::Matrix{m[0], m[1], m[2], m[3], m[4], m[5]}, true, Resample::Bilinear, &page);
+    selection::drop(target, std::move(items), selection::Matrix{m[0], m[1], m[2], m[3], m[4], m[5]}, true, Resample::Bilinear, &page, &doc);
 }
 
 // --- pixels in --------------------------------------------------------------------------------------------------------
@@ -2346,6 +2348,7 @@ void stamp_material(OpContext& c) {
     }
     if(kind=="lines") {
         auto items=selection::items_from_json(material.value("items",Json::object()));validate_patch_items(items,true);auto matrix=selection::kIdentity;
+        bring_part_patterns(c.doc, items.shapes, items.patterns);  // (patterns@1, PC4 E3: the patterns its shape parts name)
         if(c.op.contains("x_mm") && !c.op["x_mm"].is_null() && c.op.contains("y_mm") && !c.op["y_mm"].is_null()){
             double loX=std::numeric_limits<double>::infinity(),loY=loX,hiX=-loX,hiY=-loX;
             const auto point=[&](double x,double y){loX=std::min(loX,x);loY=std::min(loY,y);hiX=std::max(hiX,x);hiY=std::max(hiY,y);};
@@ -2353,7 +2356,7 @@ void stamp_material(OpContext& c) {
             for(const auto& patch:items.patches){const auto& b=patch.attrs.at("box");const double x=core::py_float(b[0]),y=core::py_float(b[1]);point(x,y);point(x+core::py_float(b[2]),y+core::py_float(b[3]));}
             if(std::isfinite(loX)){matrix[4]=core::py_float(c.op["x_mm"])-(loX+hiX)/2;matrix[5]=core::py_float(c.op["y_mm"])-(loY+hiY)/2;}
         }
-        selection::drop(target,std::move(items),matrix,true,Resample::Bilinear,&c.doc.page(at));return;
+        selection::drop(target,std::move(items),matrix,true,Resample::Bilinear,&c.doc.page(at),&c.doc);return;
     }
     throw OpError("unknown material kind " + core::py_str(kind_value));
 }
@@ -2465,10 +2468,10 @@ void filter_raster_pixels(OpContext& c) {
     }
     // (pen lines and shape fills become pixels, so the filter reaches them)
     // (color-model@1: on an RGB page of a profile, into its values — not while a plugin works the page lent as sRGB)
-    if (layer.stroke_count() > 0 || !layer.patches.empty() || shape_parts::any(layer)) raster::bake_vectors(page, layer, core::profiled_rgb(page));
+    if (layer.stroke_count() > 0 || !layer.patches.empty() || shape_parts::any(layer)) raster::bake_vectors(page, layer, &c.doc, core::profiled_rgb(page));
     const std::string kind = core::truthy_at(op, "kind") ? core::py_str(op["kind"]) : std::string();
     // ops.filtered_raster
-    const Image image = raster::layer_pixels(page, layer);
+    const Image image = raster::layer_pixels(page, layer, &c.doc);
     Json params = Json::object();
     for (const auto& [key, value] : op.items()) {
         if (key != "op" && key != "page" && key != "layer" && key != "id" && key != "kind" && key != "area") params[key] = value;
@@ -2582,7 +2585,7 @@ void erase(OpContext& c) {
             return;
         }
         if (target.kind == LayerKind::Raster && !target.patches.empty() && !(target.raster_png && !target.raster_png->empty())) {
-            raster::bake_vectors(page, target, core::profiled_rgb(page));
+            raster::bake_vectors(page, target, &c.doc, core::profiled_rgb(page));
         }
         if (target.raster_png && !target.raster_png->empty()) raster::erase_raster_masked(page, target, mask_of);  // (at its own grid)
         return;
@@ -2601,7 +2604,7 @@ void erase(OpContext& c) {
     }
     const bool has_raster = target.raster_png && !target.raster_png->empty();
     if (target.kind == LayerKind::Raster && !target.patches.empty() && !has_raster) {
-        raster::bake_vectors(page, target, core::profiled_rgb(page));  // (fills on a paint layer are erased like its pixels)
+        raster::bake_vectors(page, target, &c.doc, core::profiled_rgb(page));  // (fills on a paint layer are erased like its pixels)
     }
     if (target.raster_png && !target.raster_png->empty()) {
         raster::erase_raster(page, target, points, width, kWorkingDpi, texture == "hard" ? "" : texture,

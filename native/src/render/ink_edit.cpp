@@ -1072,7 +1072,7 @@ void Lending::take_back(core::Document& doc) const {
                     drawn.strokes = core::empty_strokes();
                     drawn.shapes = core::vector::empty_shapes();
                     drawn.patches.assign(layer.patches.begin() + std::ptrdiff_t(lent->patches), layer.patches.end());
-                    raster::bake_vectors(page, drawn);
+                    raster::bake_vectors(page, drawn, &doc);
                     layer.raster_png = drawn.raster_png;
                     layer.patches.resize(lent->patches);
                 }

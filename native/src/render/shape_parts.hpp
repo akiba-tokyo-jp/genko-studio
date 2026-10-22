@@ -29,6 +29,10 @@ using core::vector::ShapePart;
 
 // Does the layer hold shape parts?
 inline bool any(const core::Layer& layer) { return layer.shapes && !layer.shapes->items.empty(); }
+// patterns@1 (PC4 E3): whether a part's fill or stroke is a pattern's — drawn only with its book — and whether a layer has
+// such a part.
+bool has_pattern(const core::vector::ShapePart& part);
+bool any_pattern(const core::Layer& layer);
 
 // The colour a part's fill or stroke of {"rgb": null} (or a stroke's null fill) is drawn in: the layer's ink, as a pen
 // line without a colour of its own.

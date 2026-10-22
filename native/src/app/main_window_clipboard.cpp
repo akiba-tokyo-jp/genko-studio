@@ -26,6 +26,7 @@
 #include "core/command_bus.hpp"
 #include "core/ids.hpp"
 #include "core/pynum.hpp"
+#include "render/ops_patterns.hpp"
 #include "render/color_edit.hpp"
 #include "render/fill.hpp"
 #include "render/image_ops.hpp"
@@ -60,7 +61,7 @@ std::optional<QImage> items_picture(const core::Page& page, const core::Document
         shown.role = core::LayerRole::User;
         shown.kind = core::LayerKind::Raster;
         shown.panel_clip = false;
-        render::selection::drop(shown, std::move(lifted), render::selection::kIdentity, true);
+        render::selection::drop(shown, std::move(lifted), render::selection::kIdentity, true, render::Resample::Bilinear, nullptr, &doc);
         core::Page bare = page;  // (the items alone: no paper, frames or lines of the page's)
         bare.numero = false;
         const render::Image drawn = render::layer_image(bare, shown, kPictureDpi, &doc, true).convert("RGBA");
@@ -200,6 +201,7 @@ std::optional<Json> MainWindow::copied_items(const std::optional<Json>& area, co
             flash(area ? QStringLiteral("選んだ範囲に、このレイヤーの絵がありません") : QStringLiteral("このレイヤーには、まだ何も描いてありません"), 3000);
             return std::nullopt;
         }
+        lifted.patterns = render::patterns_of_parts(book(), lifted.shapes);  // (patterns@1, PC4 E3: carried to another book)
         items = render::selection::items_to_json(lifted);
     } catch (const std::exception& error) {
         flash(wording::error(QString::fromUtf8(error.what())), 3000, true);
@@ -271,6 +273,7 @@ void MainWindow::copy_merged() {
             flash(QStringLiteral("選んだ範囲に、見えている絵がありません"), 3000);
             return;
         }
+        lifted.patterns = render::patterns_of_parts(book(), lifted.shapes);  // (patterns@1, PC4 E3: carried to another book)
         items = render::selection::items_to_json(lifted);
     } catch (const std::exception& error) {
         flash(wording::error(QString::fromUtf8(error.what())), 3000, true);

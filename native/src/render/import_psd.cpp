@@ -602,35 +602,45 @@ void import_psd(core::OpContext& c) {
         }
         return mask;
     };
-    // (patterns@1, PC4 E3: the file's patterns — its Patt, Pat2, Pat3 blocks —, each taken into the book when a fill names
-    // it: by its unique id, else by its name; its pixel 1/dpi inch as the file's)
-    std::vector<pat::Taken> file_patterns;
+    // (patterns@1, PC4 E3: the file's patterns — its Patt, Pat2, Pat3 blocks, read within their budget —, each made a
+    // pattern of the book only when a fill names it: by its unique id, else by its name; its pixel 1/dpi inch as the
+    // file's. A block that cannot be read — broken, too large, out of memory —: its fills are not read, as of a pattern
+    // the file does not hold; the PSD is still read)
+    std::vector<pat::PsdPattern> file_patterns;
     for (const std::string_view block : file.pattern_blocks()) {
         try {
-            for (const pat::PsdPattern& p : pat::parse_block(block)) {
-                if (auto taken = pat::from_psd(p, file.dpi())) file_patterns.push_back(std::move(*taken));
-            }
-        } catch (const core::Error&) {  // (a block that cannot be read: its fills are not read, as a pattern it does not hold)
+            for (pat::PsdPattern& p : pat::parse_block(block)) file_patterns.push_back(std::move(p));
+        } catch (const std::exception&) {
         }
     }
-    std::map<std::string, std::pair<std::string, double>> patterns_taken;  // (the file's id → the book's pattern and dpi)
+    std::map<std::string, std::optional<std::pair<std::string, double>>> patterns_taken;  // (the file's id → the book's pattern and dpi)
     Json patterns_read = Json::array();
     const auto pattern_of = [&](const std::string& id, const std::string& name) -> std::optional<std::pair<std::string, double>> {
-        const auto found = std::find_if(file_patterns.begin(), file_patterns.end(), [&](const pat::Taken& t) { return !id.empty() && t.file_id == id; });
+        const auto found = std::find_if(file_patterns.begin(), file_patterns.end(), [&](const pat::PsdPattern& t) { return !id.empty() && t.id == id; });
         const auto named = found != file_patterns.end()
                                ? found
-                               : std::find_if(file_patterns.begin(), file_patterns.end(), [&](const pat::Taken& t) { return t.pattern.name == pat::shown_name(name); });
+                               : std::find_if(file_patterns.begin(), file_patterns.end(),
+                                              [&](const pat::PsdPattern& t) { return pat::shown_name(t.name) == pat::shown_name(name); });
         if (named == file_patterns.end()) return std::nullopt;
-        if (const auto kept = patterns_taken.find(named->file_id); kept != patterns_taken.end()) return kept->second;
-        core::Pattern given = named->pattern;
-        if (core::find_pattern(doc, named->file_id) == nullptr && !named->file_id.empty() && named->file_id.size() <= 64 &&
-            std::all_of(named->file_id.begin(), named->file_id.end(), [](char ch) { return std::isalnum(static_cast<unsigned char>(ch)) || ch == '-' || ch == '_'; })) {
-            given.id = named->file_id;  // (its unique id kept: written back the same)
+        if (const auto kept = patterns_taken.find(named->id); kept != patterns_taken.end()) return kept->second;
+        std::optional<pat::Taken> taken;
+        try {
+            taken = pat::from_psd(*named, file.dpi());
+        } catch (const std::exception&) {  // (its picture cannot be made: as one the file does not hold)
         }
-        const auto [book_id, added] = keep_pattern(doc, std::move(given), named->bytes);
+        if (!taken) {
+            patterns_taken[named->id] = std::nullopt;
+            return std::nullopt;
+        }
+        core::Pattern given = taken->pattern;
+        if (core::find_pattern(doc, taken->file_id) == nullptr && !taken->file_id.empty() && taken->file_id.size() <= 64 &&
+            std::all_of(taken->file_id.begin(), taken->file_id.end(), [](char ch) { return std::isalnum(static_cast<unsigned char>(ch)) || ch == '-' || ch == '_'; })) {
+            given.id = taken->file_id;  // (its unique id kept: written back the same)
+        }
+        const auto [book_id, added] = keep_pattern(doc, std::move(given), taken->bytes);
         if (added) patterns_read.push_back(book_id);
-        const std::pair<std::string, double> out{book_id, named->pattern.dpi};
-        patterns_taken[named->file_id] = out;
+        const std::pair<std::string, double> out{book_id, taken->pattern.dpi};
+        patterns_taken[named->id] = out;
         return out;
     };
     std::vector<core::Layer> made;

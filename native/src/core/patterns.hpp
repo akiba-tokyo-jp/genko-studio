@@ -1,9 +1,12 @@
 #pragma once
 
+#include <functional>
+#include <map>
 #include <optional>
 #include <set>
 #include <string>
 #include <string_view>
+#include <utility>
 #include <vector>
 
 #include "core/json.hpp"
@@ -58,11 +61,31 @@ Json pattern_fill_spec(const Json& raw);
 bool pattern_fill_normal(const Json& fill);
 // Is a fill ({"rgb"}, {"gradient"}, {"pattern"} …) a pattern's? Its pattern fill, or null.
 const Json* pattern_of_fill(const Json& fill);
-// The ids of the patterns the book's fills name — its fill layers', its shape parts' fills and strokes' — on its pages
-// and its smart objects' contents (core::smart::written_pages).
+// Each pattern fill on a page — its fill layers', its shape parts' fills and strokes' — with where it is: the one walk
+// every use of the patterns goes through (patterns_on, patterns_used, the checks, repoint_patterns). A group whose
+// fills name patterns too (E6's pattern overlays) adds them here.
+void each_pattern_fill_on(const Page& page, const std::function<void(const Json& fill, const std::string& where)>& each);
+// The same on the book's loaded pages and its smart objects' contents (core::smart::written_pages).
+void each_pattern_fill(const Document& doc, const std::function<void(const Json& fill, const std::string& where)>& each);
+// The ids of the patterns the book's fills name, on its pages and its smart objects' contents.
 std::set<std::string> patterns_used(const Document& doc);
-// The same on one page (its fill layers' and shape parts').
+// The same on one page.
 std::set<std::string> patterns_on(const Page& page);
+// Every pattern fill of the book's loaded pages and contents in its normal form and naming a pattern the book keeps
+// (what the command bus checks after each op: a fill naming a pattern it does not keep is never left in a book).
+// core::Error("value") says which.
+void validate_pattern_fills(const Document& doc);
+// The page's pattern fills naming one of `ids`' keys pointed at its value instead (its shape parts a new list when any
+// changes); whether any was.
+bool repoint_patterns(Page& page, const std::map<std::string, std::string>& ids);
+// A pattern and its picture into the book: the book's own of the same picture, mode, depth, size and dpi when it has
+// one, else this one — its id kept when the book has none of it, else the next free one. → {its id in the book,
+// whether it was added}. core::Error("value") for a picture not of the pattern or a book of kMaxPatterns already.
+std::pair<std::string, bool> carry_pattern(Document& doc, Pattern pattern, const Bytes& bytes);
+// A page coming from another book (import_pages, a smart object's contents brought with it): the patterns of `from` its
+// fills name carried into `doc` (carry_pattern) and the page's fills pointed at them. A fill naming a pattern `from`
+// does not keep is left as it is (the bus's check refuses the op).
+void bring_patterns(Document& doc, const Document& from, Page& page);
 // The next free id of a pattern ("pat-1", "pat-2"…).
 std::string next_pattern_id(const Document& doc);
 

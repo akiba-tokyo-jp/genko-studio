@@ -893,9 +893,10 @@ File File::read(std::string data, const Limits& limits, bool lab) {
                 continue;
             }
         }
-        if (rec.kind == "adjust" && rec.adjust_key.empty() && rec.fill_key == "PtFl" && rec.vmsk_size == 0) {
-            // (patterns@1, PC4 E3: a pattern fill layer — import_psd makes it a pattern fill layer of the book when its
-            // pattern is one of the file's Patt blocks; psd.py leaves it out)
+        if (rec.kind == "adjust" && rec.adjust_key.empty() && rec.fill_key == "PtFl" && rec.vmsk_size == 0 && !f.pattern_blocks_.empty()) {
+            // (patterns@1, PC4 E3: a pattern fill layer of a file that holds patterns — import_psd makes it a pattern fill
+            // layer of the book when its pattern is one of the file's Patt blocks; psd.py leaves it out. In a file of no
+            // patterns it is skipped where it is, as before)
             Layer layer;
             layer.name = rec.name.empty() ? std::string("パターン") : rec.name;
             layer.opacity = rec.opacity / 255.0;

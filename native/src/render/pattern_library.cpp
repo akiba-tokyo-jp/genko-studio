@@ -4,6 +4,8 @@
 #include <array>
 #include <cmath>
 #include <functional>
+#include <map>
+#include <mutex>
 #include <set>
 
 #include "core/base64.hpp"
@@ -167,16 +169,53 @@ Json item_of(const core::Pattern& p, const std::string& name) {
     return out;
 }
 
+namespace {
+
+// The library's pictures read (by the folder and their ref: each file read and hashed once, then kept), 256 MB at most.
+struct Read {
+    std::mutex mutex;
+    std::map<std::string, core::Bytes> items;
+    std::size_t bytes = 0;
+};
+
+Read& read_kept() {
+    static Read r;
+    return r;
+}
+
+void forget_read() {
+    Read& r = read_kept();
+    const std::lock_guard lock(r.mutex);
+    r.items.clear();
+    r.bytes = 0;
+}
+
+}  // namespace
+
 core::Bytes picture(const fs::path& dir, const core::Pattern& p) {
     for (const Builtin& b : builtins()) {
         if (b.pattern.asset == p.asset) return b.bytes;
+    }
+    const std::string key = dir.string() + "|" + p.asset;
+    Read& r = read_kept();
+    {
+        const std::lock_guard lock(r.mutex);
+        if (const auto it = r.items.find(key); it != r.items.end()) return it->second;
     }
     try {
         const fs::path file = file_of(dir, p);
         if (!fs::exists(file)) return nullptr;
         std::string bytes = storage::read_file(file);
         if (core::bytes_ref(bytes) != p.asset) return nullptr;
-        return std::make_shared<const std::string>(std::move(bytes));
+        auto held = std::make_shared<const std::string>(std::move(bytes));
+        const std::lock_guard lock(r.mutex);
+        if (r.bytes + held->size() > (256u << 20)) {
+            r.items.clear();
+            r.bytes = 0;
+        }
+        r.items[key] = held;
+        r.bytes += held->size();
+        return held;
     } catch (const std::exception&) {
         return nullptr;
     }
@@ -193,9 +232,19 @@ Json add(const fs::path& dir, std::vector<preset_store::Group>& groups, core::Pa
     const bool builtin = std::any_of(builtins().begin(), builtins().end(), [&](const Builtin& b) { return b.pattern.asset == p.asset; });
     if (!builtin) {
         const fs::path file = file_of(dir, p);
-        if (!fs::exists(file)) {
+        // (written when it is not there — or when what is there is not its picture: a broken file of its name)
+        bool there = fs::exists(file);
+        if (there) {
+            try {
+                there = core::bytes_ref(storage::read_file(file)) == p.asset;
+            } catch (const std::exception&) {
+                there = false;
+            }
+        }
+        if (!there) {
             fs::create_directories(file.parent_path());
             storage::write_atomic(file, *bytes);
+            forget_read();
         }
     }
     const std::string name = p.name.empty() ? std::string("パターン") : p.name;
@@ -215,6 +264,7 @@ void tidy(const fs::path& dir, const std::vector<preset_store::Group>& groups) {
     }
     std::error_code ec;
     const fs::path folder = dir / "patterns";
+    forget_read();
     if (!fs::is_directory(folder, ec)) return;
     for (const fs::directory_entry& e : fs::directory_iterator(folder, ec)) {
         const std::string leaf = e.path().filename().string();
