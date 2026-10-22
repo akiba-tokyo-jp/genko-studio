@@ -362,7 +362,72 @@ private slots:
         const std::string out = *formats::book_xmp(edited);
         QCOMPARE(core::file_info_from_xmp(out).author, std::string("別の人"));
         QCOMPARE(core::file_info_from_xmp(out).copyright, info.copyright);
-        QCOMPARE(core::xmp_title(out), std::string("photo"));
+        // (the title: the packet's as it was while the book keeps the title it was opened with — its file's name —, the
+        // book's once it is another)
+        QCOMPARE(core::xmp_title(out), std::string("元の題"));
+        const core::Document retitled = run(edited, Json::array({Json{{"op", "set_file_info"}, {"title", "新しい題"}}}));
+        QCOMPARE(core::xmp_title(*formats::book_xmp(retitled)), std::string("新しい題"));
+    }
+
+    // PC4 F-b review P1-1・P3-5・P3-6: a packet's bytes that are not UTF-8 read as U+FFFD (the book opened from it saved and
+    // read back), its character references read as characters, an attribute after a new line or in single quotes found,
+    // xapRights: read and replaced by xmpRights:; an author "Smith, John" one name and a keyword with a comma one keyword
+    // when written again; text that is not UTF-8 refused by the check; a packet of many old items rewritten.
+    void brokenTextAndTheXmpsDetails() {
+        const std::string packet =
+            "<x:xmpmeta xmlns:x=\"adobe:ns:meta/\"><rdf:RDF xmlns:rdf=\"http://www.w3.org/1999/02/22-rdf-syntax-ns#\">"
+            "<rdf:Description rdf:about=\"\" xmlns:dc=\"http://purl.org/dc/elements/1.1/\" xmlns:photoshop=\"http://ns.adobe.com/photoshop/1.0/\""
+            " xmlns:xapRights=\"http://ns.adobe.com/xap/1.0/rights/\"\n photoshop:AuthorsPosition='Editor'>"
+            "<dc:creator><rdf:Seq><rdf:li>Jos\xE9 Garc\xED" "a</rdf:li><rdf:li>Smith, John</rdf:li></rdf:Seq></dc:creator>"
+            "<dc:rights><rdf:Alt><rdf:li xml:lang=\"x-default\">&#169; 2026 &#x5C71;&#x7530; &amp;co &bogus;</rdf:li></rdf:Alt></dc:rights>"
+            "<dc:subject><rdf:Bag><rdf:li>Tokyo, Japan</rdf:li></rdf:Bag></dc:subject>"
+            "<xapRights:Marked>True</xapRights:Marked>"
+            "</rdf:Description></rdf:RDF></x:xmpmeta>";
+        const core::FileInfo read = core::file_info_from_xmp(packet);
+        QCOMPARE(read.author, std::string("Jos\xEF\xBF\xBD Garc\xEF\xBF\xBD" "a; Smith, John"));
+        QCOMPARE(read.copyright, std::string("© 2026 山田 &co &bogus;"));
+        QCOMPARE(read.author_title, std::string("Editor"));
+        QCOMPARE(read.copyright_status, std::string("copyrighted"));
+        QCOMPARE(read.keywords, std::vector<std::string>{"Tokyo, Japan"});
+        core::check_file_info(read);
+        // (text that is not UTF-8: refused by the check the reader, the writer and set_file_info use)
+        core::FileInfo bad;
+        bad.author = "Jos\xE9";
+        std::string code;
+        try {
+            core::check_file_info(bad);
+        } catch (const core::Error& error) {
+            code = error.code();
+        }
+        QCOMPARE(code, std::string("value"));
+        // (a PNG carrying it, of a name not UTF-8: opened, saved, read back; the packet kept as its bytes were)
+        std::string png = render::write_png(distinct(4, 3));
+        png = with_chunk(png, "iTXt", std::string("XML:com.adobe.xmp", 17) + std::string(5, '\0') + packet);
+        const formats::Opened opened = formats::open_file(png, std::string("bad\xFF" "name.png"));
+        QCOMPARE(opened.doc.title, std::string("bad\xEF\xBF\xBD" "name"));
+        QVERIFY(opened.doc.file_info && same_items(*opened.doc.file_info, read));
+        const fs::path dir = at("broken-text.genko");
+        write_book(opened.doc, dir);
+        const storage::LoadResult back = storage::load_document(dir);
+        QVERIFY2(back.document.read_only_reason.empty(), back.document.read_only_reason.c_str());
+        QVERIFY(back.document.file_info && same_items(*back.document.file_info, read));
+        QCOMPARE(back.document.page(0).native_source->name, std::string("bad\xEF\xBF\xBD" "name.png"));
+        QCOMPARE(storage::AssetStore(dir).get_bytes(back.document.file_info->xmp, core::kXmpSuffix).value_or(std::string()), packet);
+        // (written again: one author with a comma, one keyword with a comma, the old prefix gone, the title kept)
+        const std::string again = core::write_xmp(packet, read, std::nullopt);
+        const core::FileInfo reread = core::file_info_from_xmp(again);
+        QCOMPARE(reread.author, read.author);
+        QCOMPARE(reread.keywords, read.keywords);
+        QVERIFY(again.find("xapRights:Marked") == std::string::npos && again.find("<xmpRights:Marked>True</xmpRights:Marked>") != std::string::npos);
+        QVERIFY(again.find("AuthorsPosition='Editor'") == std::string::npos);
+        // (many old items: all of them gone, in one pass)
+        std::string many = "<x:xmpmeta xmlns:x=\"adobe:ns:meta/\"><rdf:RDF><rdf:Description rdf:about=\"\">";
+        for (int i = 0; i < 20000; ++i) many += "<dc:rights>old</dc:rights> ";
+        many += "<dc:format>image/png</dc:format></rdf:Description></rdf:RDF></x:xmpmeta>";
+        const std::string rewritten = core::write_xmp(many, some_info(), "題");
+        QVERIFY(rewritten.find(">old<") == std::string::npos);
+        QVERIFY(rewritten.find("<dc:format>image/png</dc:format>") != std::string::npos);
+        QCOMPARE(core::file_info_from_xmp(rewritten).copyright, some_info().copyright);
     }
 
     // An RGB picture with no profile whose EXIF says sRGB is sRGB, not the working RGB (unless the EXIF's profile tag is

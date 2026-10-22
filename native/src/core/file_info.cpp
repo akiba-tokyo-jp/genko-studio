@@ -69,7 +69,49 @@ double number_of(const Json& value, const std::string& what) {
     return v;
 }
 
+// The length of the well-formed UTF-8 sequence at s[i] (Unicode table 3-7), or 0 — and in `valid` how many of its bytes
+// were (the lead and the good continuation bytes: the maximal subpart one U+FFFD stands for).
+std::size_t utf8_sequence(std::string_view s, std::size_t i, std::size_t& valid) {
+    const auto byte = [&](std::size_t k) { return static_cast<unsigned char>(s[k]); };
+    const unsigned char lead = byte(i);
+    valid = 1;
+    if (lead < 0x80) return 1;
+    std::size_t need = 0;
+    unsigned char lo = 0x80, hi = 0xBF;
+    if (lead >= 0xC2 && lead <= 0xDF) {
+        need = 1;
+    } else if (lead >= 0xE0 && lead <= 0xEF) {
+        need = 2;
+        if (lead == 0xE0) lo = 0xA0;
+        if (lead == 0xED) hi = 0x9F;
+    } else if (lead >= 0xF0 && lead <= 0xF4) {
+        need = 3;
+        if (lead == 0xF0) lo = 0x90;
+        if (lead == 0xF4) hi = 0x8F;
+    } else {
+        return 0;
+    }
+    for (std::size_t k = 1; k <= need; ++k) {
+        if (i + k >= s.size()) return 0;
+        const unsigned char c = byte(i + k);
+        if (c < (k == 1 ? lo : 0x80) || c > (k == 1 ? hi : 0xBF)) return 0;
+        valid = k + 1;
+    }
+    return need + 1;
+}
+
+bool is_utf8(std::string_view text) {
+    std::size_t valid = 0;
+    for (std::size_t i = 0; i < text.size();) {
+        const std::size_t n = utf8_sequence(text, i, valid);
+        if (n == 0) return false;
+        i += n;
+    }
+    return true;
+}
+
 void check_text(const std::string& text, const std::string& what) {
+    if (!is_utf8(text)) refuse(what + " is not UTF-8 text");
     if (code_points(text) > kFileInfoTextMax) refuse(what + " is longer than 2000 characters");
 }
 
@@ -78,6 +120,23 @@ void check_asset(const std::string& ref, const std::string& what) {
 }
 
 }  // namespace
+
+std::string utf8_replaced(std::string_view bytes) {
+    std::string out;
+    out.reserve(bytes.size());
+    std::size_t valid = 0;
+    for (std::size_t i = 0; i < bytes.size();) {
+        const std::size_t n = utf8_sequence(bytes, i, valid);
+        if (n != 0) {
+            out.append(bytes.substr(i, n));
+            i += n;
+        } else {
+            out += "\xEF\xBF\xBD";
+            i += std::max<std::size_t>(valid, 1);
+        }
+    }
+    return out;
+}
 
 bool FileInfo::empty() const {
     return author.empty() && author_title.empty() && description.empty() && keywords.empty() && copyright.empty() &&
@@ -157,11 +216,30 @@ constexpr XmpField kRights{"dc:rights", "Alt"};
 constexpr XmpField kPosition{"photoshop:AuthorsPosition", ""};
 constexpr std::string_view kMarked = "xmpRights:Marked";
 constexpr std::string_view kWebStatement = "xmpRights:WebStatement";
+// (XMP's older prefix of the same namespace: read when the new one is not there, removed when the items are written)
+constexpr std::string_view kOldMarked = "xapRights:Marked";
+constexpr std::string_view kOldWebStatement = "xapRights:WebStatement";
 
-std::string replace_all(std::string text, std::string_view from, std::string_view to) {
-    for (std::size_t at = text.find(from); at != std::string::npos; at = text.find(from, at + to.size())) text.replace(at, from.size(), to);
-    return text;
+bool is_space(char c) { return c == ' ' || c == '\t' || c == '\n' || c == '\r'; }
+
+void append_utf8(std::string& out, std::uint32_t cp) {
+    if (cp < 0x80) {
+        out += static_cast<char>(cp);
+    } else if (cp < 0x800) {
+        out += static_cast<char>(0xC0 | (cp >> 6));
+        out += static_cast<char>(0x80 | (cp & 0x3F));
+    } else if (cp < 0x10000) {
+        out += static_cast<char>(0xE0 | (cp >> 12));
+        out += static_cast<char>(0x80 | ((cp >> 6) & 0x3F));
+        out += static_cast<char>(0x80 | (cp & 0x3F));
+    } else {
+        out += static_cast<char>(0xF0 | (cp >> 18));
+        out += static_cast<char>(0x80 | ((cp >> 12) & 0x3F));
+        out += static_cast<char>(0x80 | ((cp >> 6) & 0x3F));
+        out += static_cast<char>(0x80 | (cp & 0x3F));
+    }
 }
+
 
 std::string xml_escape(std::string_view text) {
     std::string out;
@@ -177,13 +255,53 @@ std::string xml_escape(std::string_view text) {
     return out;
 }
 
+// XML's five entities and its character references (&#169;, &#xA9;) as their characters, in one pass (an entity it does
+// not know, or a reference to no character, left as written); the bytes that are not UTF-8 one U+FFFD each — a packet's
+// text as UTF-8 text, whatever its writer put there.
 std::string xml_unescape(std::string_view text) {
-    std::string out(text);
-    out = replace_all(std::move(out), "&lt;", "<");
-    out = replace_all(std::move(out), "&gt;", ">");
-    out = replace_all(std::move(out), "&quot;", "\"");
-    out = replace_all(std::move(out), "&apos;", "'");
-    return replace_all(std::move(out), "&amp;", "&");
+    std::string out;
+    out.reserve(text.size());
+    for (std::size_t i = 0; i < text.size(); ++i) {
+        const std::size_t semi = text[i] == '&' ? text.find(';', i) : std::string_view::npos;
+        if (semi == std::string_view::npos || semi - i > 12) {
+            out += text[i];
+            continue;
+        }
+        const std::string_view name = text.substr(i + 1, semi - i - 1);
+        std::optional<std::uint32_t> cp;
+        if (name == "lt") {
+            cp = '<';
+        } else if (name == "gt") {
+            cp = '>';
+        } else if (name == "quot") {
+            cp = '"';
+        } else if (name == "apos") {
+            cp = '\'';
+        } else if (name == "amp") {
+            cp = '&';
+        } else if (name.size() > 1 && name[0] == '#') {
+            const bool hex = name[1] == 'x' || name[1] == 'X';
+            const std::string_view digits = name.substr(hex ? 2 : 1);
+            std::uint32_t v = 0;
+            bool ok = !digits.empty();
+            for (const char c : digits) {
+                const int d = c >= '0' && c <= '9' ? c - '0' : hex && c >= 'a' && c <= 'f' ? c - 'a' + 10 : hex && c >= 'A' && c <= 'F' ? c - 'A' + 10 : -1;
+                if (d < 0 || v > 0x10FFFF) {
+                    ok = false;
+                    break;
+                }
+                v = v * (hex ? 16 : 10) + static_cast<std::uint32_t>(d);
+            }
+            if (ok && v != 0 && v <= 0x10FFFF && !(v >= 0xD800 && v <= 0xDFFF)) cp = v;
+        }
+        if (!cp) {
+            out += text[i];
+            continue;
+        }
+        append_utf8(out, *cp);
+        i = semi;
+    }
+    return utf8_replaced(out);
 }
 
 std::string trimmed(std::string_view text) {
@@ -200,14 +318,13 @@ struct Found {
     std::string_view inner;
 };
 
-// The element <tag …>…</tag> (its first), as file_cmds.rs find_element.
-std::optional<Found> find_element(std::string_view xmp, std::string_view tag) {
+// The element <tag …>…</tag> (its first from `from`), as file_cmds.rs find_element.
+std::optional<Found> find_element(std::string_view xmp, std::string_view tag, std::size_t from = 0) {
     const std::string open = "<" + std::string(tag);
-    std::size_t from = 0;
     for (std::size_t i = xmp.find(open, from); i != std::string_view::npos; i = xmp.find(open, from)) {
         const std::size_t after = i + open.size();
         const char next = after < xmp.size() ? xmp[after] : '\0';
-        if (next == '>' || next == ' ' || next == '/' || next == '\n' || next == '\r' || next == '\t') {
+        if (next == '>' || next == '/' || is_space(next)) {
             const std::size_t gt = xmp.find('>', i);
             if (gt == std::string_view::npos) return std::nullopt;
             if (gt > 0 && xmp[gt - 1] == '/') return Found{i, gt + 1, {}};
@@ -221,15 +338,39 @@ std::optional<Found> find_element(std::string_view xmp, std::string_view tag) {
     return std::nullopt;
 }
 
-// The attribute ` prop="value"` (on an rdf:Description).
-std::optional<Found> find_attr(std::string_view xmp, std::string_view prop) {
-    const std::string key = " " + std::string(prop) + "=\"";
-    const std::size_t i = xmp.find(key);
-    if (i == std::string_view::npos) return std::nullopt;
-    const std::size_t v0 = i + key.size();
-    const std::size_t v1 = xmp.find('"', v0);
-    if (v1 == std::string_view::npos) return std::nullopt;
-    return Found{i, v1 + 1, xmp.substr(v0, v1 - v0)};
+// The attribute `prop="value"` or `prop='value'` after a space, a tab or a new line (on an rdf:Description; its start
+// that space), its first from `from`.
+std::optional<Found> find_attr(std::string_view xmp, std::string_view prop, std::size_t from = 0) {
+    const std::string key = std::string(prop) + "=";
+    for (std::size_t i = xmp.find(key, from); i != std::string_view::npos; i = xmp.find(key, i + 1)) {
+        const std::size_t q = i + key.size();
+        if (i == 0 || !is_space(xmp[i - 1]) || q >= xmp.size() || (xmp[q] != '"' && xmp[q] != '\'')) continue;
+        const std::size_t v1 = xmp.find(xmp[q], q + 1);
+        if (v1 == std::string_view::npos) return std::nullopt;
+        return Found{i - 1, v1 + 1, xmp.substr(q + 1, v1 - q - 1)};
+    }
+    return std::nullopt;
+}
+
+// The packet without any element or attribute of the property, in one pass over it.
+std::string without(std::string_view xmp, std::string_view prop) {
+    std::string kept;
+    kept.reserve(xmp.size());
+    std::size_t from = 0;
+    while (const auto element = find_element(xmp, prop, from)) {
+        kept.append(xmp.substr(from, element->start - from));
+        from = element->end;
+    }
+    kept.append(xmp.substr(from));
+    std::string out;
+    out.reserve(kept.size());
+    from = 0;
+    while (const auto attr = find_attr(kept, prop, from)) {
+        out.append(std::string_view(kept).substr(from, attr->start - from));
+        from = attr->end;
+    }
+    out.append(std::string_view(kept).substr(from));
+    return out;
 }
 
 // A container's rdf:li values (or a simple property's text).
@@ -255,12 +396,12 @@ std::string first_of(std::string_view xmp, std::string_view prop) {
     return values.empty() ? std::string() : values.front();
 }
 
-// "a; b, c" as its items (trimmed, the empty ones left out).
+// "a; b" as its items (trimmed, the empty ones left out): the names an author's text joins ("Smith, John" is one).
 std::vector<std::string> split_items(std::string_view text) {
     std::vector<std::string> out;
     std::size_t from = 0;
     for (std::size_t i = 0; i <= text.size(); ++i) {
-        if (i == text.size() || text[i] == ';' || text[i] == ',') {
+        if (i == text.size() || text[i] == ';') {
             std::string item = trimmed(text.substr(from, i - from));
             if (!item.empty()) out.push_back(std::move(item));
             from = i + 1;
@@ -281,24 +422,27 @@ FileInfo file_info_from_xmp(std::string_view packet) {
         if (!keyword.empty()) info.keywords.push_back(std::move(keyword));
     }
     info.copyright = first_of(packet, kRights.prop);
-    const std::string marked = first_of(packet, kMarked);
+    std::string marked = first_of(packet, kMarked);
+    if (marked.empty()) marked = first_of(packet, kOldMarked);
     info.copyright_status = marked == "True" ? "copyrighted" : marked == "False" ? "public_domain" : "";
     info.copyright_url = first_of(packet, kWebStatement);
+    if (info.copyright_url.empty()) info.copyright_url = first_of(packet, kOldWebStatement);
     return info;
 }
 
 std::string xmp_title(std::string_view packet) { return first_of(packet, kTitle.prop); }
 
-std::string write_xmp(std::optional<std::string_view> packet, const FileInfo& info, std::string_view title) {
+std::string write_xmp(std::optional<std::string_view> packet, const FileInfo& info, std::optional<std::string_view> title) {
     std::string x = packet && packet->find("</rdf:RDF>") != std::string_view::npos
                         ? std::string(*packet)
                         : std::string("<?xpacket begin=\"\xEF\xBB\xBF\" id=\"W5M0MpCehiHzreSzNTczkc9d\"?>\n<x:xmpmeta xmlns:x=\"adobe:ns:meta/\">\n"
                                       " <rdf:RDF xmlns:rdf=\"http://www.w3.org/1999/02/22-rdf-syntax-ns#\">\n </rdf:RDF>\n</x:xmpmeta>\n"
                                       "<?xpacket end=\"w\"?>");
-    for (const std::string_view prop : {kTitle.prop, kCreator.prop, kDescription.prop, kSubject.prop, kRights.prop, kPosition.prop, kMarked, kWebStatement}) {
-        while (const auto element = find_element(x, prop)) x.erase(element->start, element->end - element->start);
-        while (const auto attr = find_attr(x, prop)) x.erase(attr->start, attr->end - attr->start);
+    for (const std::string_view prop : {kCreator.prop, kDescription.prop, kSubject.prop, kRights.prop, kPosition.prop, kMarked, kWebStatement, kOldMarked,
+                                        kOldWebStatement}) {
+        x = without(x, prop);
     }
+    if (title) x = without(x, kTitle.prop);  // (no title given: the packet's kept as it was)
     std::string body;
     const auto put = [&](const XmpField& field, const std::vector<std::string>& values) {
         if (values.empty()) return;
@@ -317,12 +461,12 @@ std::string write_xmp(std::optional<std::string_view> packet, const FileInfo& in
         std::string t = trimmed(text);
         return t.empty() ? std::vector<std::string>{} : std::vector<std::string>{std::move(t)};
     };
-    put(kTitle, one(title));
+    if (title) put(kTitle, one(*title));
     put(kCreator, split_items(info.author));
     put(kDescription, one(info.description));
-    std::vector<std::string> keywords;
+    std::vector<std::string> keywords;  // (each as it is: set_file_info splits what it is given)
     for (const std::string& keyword : info.keywords) {
-        for (std::string& item : split_items(keyword)) keywords.push_back(std::move(item));
+        if (std::string item = trimmed(keyword); !item.empty()) keywords.push_back(std::move(item));
     }
     put(kSubject, keywords);
     put(kRights, one(info.copyright));
@@ -412,9 +556,9 @@ NativeSource native_source_from_json(const Json& value) {
 void check_native_source(const NativeSource& source) {
     const std::string what = "a page's native_source";
     if (!in(kSourceFormats, source.format)) refuse(what + "'s format is not one this build knows (" + py_repr_str(source.format) + ")");
-    if (source.name.empty() || code_points(source.name) > kNameMax || source.name.find('/') != std::string::npos ||
+    if (source.name.empty() || !is_utf8(source.name) || code_points(source.name) > kNameMax || source.name.find('/') != std::string::npos ||
         source.name.find('\\') != std::string::npos)
-        refuse(what + "'s name is a file's name (1..255 characters, no folder)");
+        refuse(what + "'s name is a file's name (1..255 characters of UTF-8 text, no folder)");
     if (source.width_px < 1 || source.height_px < 1 || source.width_px > kSideMax || source.height_px > kSideMax)
         refuse(what + "'s size in pixels");
     if (source.dpi && !(source.dpi->first > 0 && source.dpi->first <= 1e6 && source.dpi->second > 0 && source.dpi->second <= 1e6))
@@ -425,8 +569,9 @@ void check_native_source(const NativeSource& source) {
     check_asset(source.xmp, what + "'s xmp");
     if (source.camera) {
         const std::string who = what + "'s camera";
-        if (code_points(source.camera->make) > kNameMax || code_points(source.camera->model) > kNameMax)
-            refuse(who + "'s make and model are at most 255 characters");
+        if (!is_utf8(source.camera->make) || !is_utf8(source.camera->model) || code_points(source.camera->make) > kNameMax ||
+            code_points(source.camera->model) > kNameMax)
+            refuse(who + "'s make and model are at most 255 characters of UTF-8 text");
         for (const auto& v : {source.camera->iso, source.camera->exposure, source.camera->aperture, source.camera->focal}) {
             if (v && !(*v > 0)) refuse(who + "'s iso, exposure, aperture and focal are more than 0");
         }

@@ -20,6 +20,13 @@ std::uint32_t be32(std::string_view b, std::size_t at) {
            (std::uint32_t(static_cast<unsigned char>(b[at + 2])) << 8) | std::uint32_t(static_cast<unsigned char>(b[at + 3]));
 }
 
+// The title a book opened from a file is given (formats::open_file's: the file's name less its extension).
+std::string opened_title(const std::string& name) {
+    const std::size_t dot = name.rfind('.');
+    const std::string stem = dot == std::string::npos || dot == 0 ? name : name.substr(0, dot);
+    return stem.empty() ? std::string("無題") : stem;
+}
+
 }  // namespace
 
 std::optional<std::string> book_xmp(const core::Document& doc) {
@@ -37,7 +44,14 @@ std::optional<std::string> book_xmp(const core::Document& doc) {
             }
         }
     }
-    return core::write_xmp(packet ? std::optional<std::string_view>(*packet) : std::nullopt, info, doc.title);
+    // (the title: the book's, unless it is still the one it was opened with — its file's name —: then the packet's
+    // dc:title stays as it was, File Info's title not edited)
+    std::optional<std::string_view> title = doc.title;
+    if (!doc.pages.empty() && !doc.is_deferred(0)) {
+        const std::optional<core::NativeSource>& source = doc.page(0).native_source;
+        if (source && doc.title == opened_title(source->name)) title.reset();
+    }
+    return core::write_xmp(packet ? std::optional<std::string_view>(*packet) : std::nullopt, info, title);
 }
 
 std::string png_with_xmp(std::string png, std::string_view xmp) {

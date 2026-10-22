@@ -13,7 +13,8 @@
 
 namespace genko::formats {
 
-// The packet the book's files carry, or none for a book with no File Info. The packet it was opened with is read from
+// The packet the book's files carry, or none for a book with no File Info. Its dc:title is the book's title — the
+// packet's as it was while the book of a file keeps the title it was opened with (its file's name). The packet it was opened with is read from
 // the book in memory (Document::native_files) or its assets (Document::asset_dir); one that cannot be read is made anew.
 std::optional<std::string> book_xmp(const core::Document& doc);
 
