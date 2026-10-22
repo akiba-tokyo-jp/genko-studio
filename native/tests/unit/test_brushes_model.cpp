@@ -289,8 +289,10 @@ private slots:
         QVERIFY(core::coerce_stroke(written).tilt.empty());
     }
 
-    // The 描画色's precise values (PC4 E-0): add_stroke's color_rgb kept on the line on a page of 16 or 32 bits (its rgb
-    // the 8-bit picture), refused on an 8-bit page and when it is not native.color_stroke_v1's form.
+    // The 描画色's precise values (PC4 E-0): add_stroke's color_rgb kept on the line on an RGB page of 16 or 32 bits — a
+    // pen layer's and a paint layer's — (its rgb the 8-bit picture), never named an unknown key; refused there when it is
+    // not native.color_stroke_v1's form; on an 8-bit page (and an ink one) not used, the line drawn by its rgb as before,
+    // and the warnings say so.
     void aLineTakesThePreciseColourOnAPrecisePage() {
         const core::CommandBus bus(render::ops_registry());
         const core::Actor actor("human:test");
@@ -299,10 +301,32 @@ private slots:
         for (const int depth : {16, 32}) {
             const core::Document deep =
                 bus.apply(book(), Json::array({Json{{"op", "set_color_mode"}, {"page", 1}, {"mode", "rgb"}, {"depth", depth}}}), actor).doc;
-            const core::Document drawn = bus.apply(deep, Json::array({line_op}), actor).doc;
-            const auto& items = drawn.page(0).first_layer(core::LayerRole::Ink)->strokes->items;
+            const core::ApplyResult drawn = bus.apply(deep, Json::array({line_op}), actor);
+            QCOMPARE(drawn.warnings, Json::array());
+            const auto& items = drawn.doc.page(0).first_layer(core::LayerRole::Ink)->strokes->items;
             QVERIFY(!items.empty());
             QCOMPARE((*items.back()->color_rgb)["values"], Json::array({0.5, 0.25, 0.125}));
+            QCOMPARE(*items.back()->rgb, (std::vector<std::int64_t>{128, 0, 0}));
+            // a paint layer's line (drawn into its precise pixels) keeps it too
+            Json on_paint = line_op;
+            on_paint.erase("layer");
+            on_paint["layer_id"] = "paint";
+            const core::ApplyResult painted =
+                bus.apply(deep, Json::array({Json{{"op", "add_layer"}, {"page", 1}, {"kind", "paint"}, {"id", "paint"}}, on_paint}), actor);
+            QCOMPARE(painted.warnings, Json::array());
+            const core::Layer* paint = nullptr;
+            for (const core::Layer& layer : painted.doc.page(0).layers)
+                if (layer.id == "paint") paint = &layer;
+            QVERIFY(paint != nullptr && paint->strokes && !paint->strokes->items.empty());
+            QCOMPARE((*paint->strokes->items.back()->color_rgb)["values"], Json::array({0.5, 0.25, 0.125}));
+        }
+        // an 8-bit page and an ink one (Lab, 16 bits): the line by its rgb, color_rgb not used and said so
+        const Json lab_mode = Json::parse(R"({"op": "set_color_mode", "page": 1, "mode": "lab", "depth": 16})");
+        for (const core::Document& plain : {book(), bus.apply(book(), Json::array({lab_mode}), actor).doc}) {
+            const core::ApplyResult drawn = bus.apply(plain, Json::array({line_op}), actor);
+            QCOMPARE(drawn.warnings, Json::array({"ops[0] add_stroke: color_rgb is for an RGB page of 16 or 32 bits: the line's rgb is used"}));
+            const auto& items = drawn.doc.page(0).first_layer(core::LayerRole::Ink)->strokes->items;
+            QVERIFY(!items.empty() && !items.back()->color_rgb);
             QCOMPARE(*items.back()->rgb, (std::vector<std::int64_t>{128, 0, 0}));
         }
         const auto refused = [&](const core::Document& doc, const Json& op) {
@@ -313,11 +337,11 @@ private slots:
             }
             return std::string();
         };
-        QVERIFY(refused(book(), line_op).find("color_rgb is for a page of 16 or 32 bits") != std::string::npos);
         const core::Document deep = bus.apply(book(), Json::parse(R"([{"op": "set_color_mode", "page": 1, "mode": "rgb", "depth": 16}])"), actor).doc;
         Json bad = line_op;
         bad["color_rgb"] = Json::parse(R"({"precision": "u8", "values": [0, 0, 0]})");
-        QVERIFY(refused(deep, bad).find("color_rgb") != std::string::npos);
+        const std::string why = refused(deep, bad);
+        QVERIFY2(why.find("color_rgb") != std::string::npos && why.find("unknown keys") == std::string::npos, why.c_str());
     }
 
     // A book with a dab brush (its tip and texture pictures), a line with inputs and the brush state's kind and
@@ -414,8 +438,9 @@ private slots:
     }
 
     // What a book cannot hold opens read-only (and is never written): a dab brush's setting that cannot be, its picture
-    // missing or not a grey picture of its size, "dabs" without the engine, a line's inputs not one a point, the brush
-    // state's kind or background that cannot be.
+    // missing or not a grey picture of its size (a picture the tip and the texture share: the texture's bound), "dabs"
+    // without the engine, a line's inputs not one a point (in the strokes' blob too), the brush state's kind or
+    // background that cannot be.
     void whatCannotBeOpensReadOnly() {
         const std::string tip_png = grey_png(8, 8);
         const std::string tip = ref_of(tip_png);
@@ -458,6 +483,44 @@ private slots:
         genko::test::write_project(doc, dir);
         QVERIFY(storage::load_document(dir).document.read_only_reason.empty());
         QCOMPARE(*storage::load_document(dir).document.page(0).first_layer(core::LayerRole::Ink)->strokes->items.back()->flow, 0.5);
+        // a line in the strokes' blob whose tilt is not an x and a y for each point (the blob rewritten as an asset of its
+        // own, its name its bytes'): read-only, the blob a broken asset
+        {
+            core::Document tilted = book();
+            core::Stroke t = *line(2);
+            t.tilt = {10, 20, 30, 40};
+            add_line(tilted, t);
+            QTemporaryDir tmp3;
+            const fs::path dir3 = fs::path(tmp3.path().toStdString()) / "b";
+            genko::test::write_project(tilted, dir3);
+            Json p = project(dir3);
+            Json* layer_of_blob = nullptr;
+            for (Json& layer : p["pages"][0]["layers"])
+                if (layer.contains("strokes_blob")) layer_of_blob = &layer;
+            QVERIFY(layer_of_blob != nullptr);
+            storage::AssetStore store(dir3);
+            Json list = Json::parse(*store.get_bytes((*layer_of_blob)["strokes_blob"].get<std::string>(), ".strokes.json"));
+            QVERIFY(list.back().contains("tilt"));
+            list.back()["tilt"] = core::pack_doubles(std::vector<double>{10, 20, 30});
+            (*layer_of_blob)["strokes_blob"] = store.put_bytes(list.dump(), ".strokes.json");
+            storage::write_atomic(dir3 / "project.json", core::dump_python_indent2(p));
+            const auto loaded = storage::load_document(dir3);
+            QVERIFY(loaded.document.read_only_reason.find("tilt") != std::string::npos);
+            bool broken = false;
+            for (const auto& issue : loaded.report.issues) broken = broken || issue.kind == "broken_asset";
+            QVERIFY(broken);
+        }
+        // a picture both the tip and the texture use: the texture's bound (1024 a side), the smaller
+        {
+            const std::string wide_png = grey_png(2000, 4);
+            const std::string wide = ref_of(wide_png);
+            core::Document doc2 = book();
+            doc2.brush_tips[wide] = std::make_shared<const std::string>(wide_png);
+            doc2.brush_custom["my_dab"] = Json{{"label", "d"}, {"engine", "dabs"}, {"dabs", Json{{"tip", Json{{"asset", wide}}}}}};
+            QVERIFY(error_of([&] { core::validate_brushes(doc2); }).empty());
+            doc2.brush_custom["my_dab"]["dabs"]["texture"] = Json{{"enabled", true}, {"pattern", Json{{"asset", wide}}}};
+            QVERIFY(error_of([&] { core::validate_brushes(doc2); }).find("1024") != std::string::npos);
+        }
     }
 };
 

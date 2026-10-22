@@ -643,7 +643,7 @@ private slots:
         Studio studio;
         MainWindow* w = studio.window.get();
         studio.answers->responder->colour = [](const QColor&, const QString& title) {
-            return title == QStringLiteral("色") ? std::optional<QColor>(QColor(200, 30, 40)) : std::nullopt;
+            return title == QStringLiteral("カラーピッカー（描画色）") ? std::optional<QColor>(QColor(200, 30, 40)) : std::nullopt;
         };
         studio.trigger("act_color");
         QCOMPARE(w->pen().rgb, (std::vector<std::int64_t>{200, 30, 40}));

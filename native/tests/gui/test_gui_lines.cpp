@@ -1057,7 +1057,7 @@ private slots:
         QVERIFY(drawn_as_book(s));
         find_action(menu.get(), QStringLiteral("描いて決める（次に引く線に沿わせる）"))->trigger();
         QCOMPARE(s.canvas()->tool(), QStringLiteral("pen"));
-        QCOMPARE(s.window->last_notice(), QStringLiteral("文字を沿わせる線を、ペンで 1 本引きます"));
+        QCOMPARE(s.window->last_notice(), QStringLiteral("文字を沿わせる線を、ブラシツールで 1 本引きます"));
         const std::size_t strokes = gui_test::ink_strokes(s.window->book());
         inject::mouse_stroke(s.canvas(), {QPointF(40.0, 150.0), QPointF(60.0, 140.0), QPointF(80.0, 150.0), QPointF(100.0, 160.0)});
         QCOMPARE(gui_test::ink_strokes(s.window->book()), strokes);  // (the line is the words' path, not ink)

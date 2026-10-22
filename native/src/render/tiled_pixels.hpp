@@ -16,8 +16,8 @@
 // Replacement; retouch::apply_dab_stroke) — the tiles of the layer's own grid a stroke reaches, kTile pixels square
 // (smaller at the grid's right and bottom edges), each held as the layer's own values (image_ops::Pixels: 8 bits,
 // precise, inks), read through the windowed read (image_ops::layer_pixels(…, boxes): the layer read once for them all)
-// and written back the same way, only the pixels edited (each changed tile's box of them): the rest of the layer keeps its
-// bytes. A stroke across a 600 dpi
+// and written back the same way, only the pixels edited (each one edit() gave): the rest of the layer keeps its bytes (a
+// clear pixel of an ink layer its inks too). A stroke across a 600 dpi
 // B4 page holds only the tiles along it, never the page in floats; the tiles are held in the imaging budget (past it:
 // too_large, nothing changed).
 
@@ -55,8 +55,8 @@ public:
     // The boxes of the tiles held, and of those changed (in the order of the grid's rows).
     std::vector<Box> held() const;
     std::vector<Box> changed() const;
-    // The pixels edited written back into the layer — each changed tile's box of them, in one write (the pixels outside
-    // them keep their bytes) —, and the box they cover (none: empty). On a copy: core::Error("value").
+    // The pixels edited written back into the layer — those edit() gave, in one write (every other pixel keeps its
+    // bytes) —, and the box they cover (none: empty). On a copy: core::Error("value").
     Box put(core::Document& doc) const;
 
 private:
@@ -64,6 +64,7 @@ private:
         Box box;
         image_ops::Pixels pixels;
         Box edited;  // (the box of its pixels edited; empty: none)
+        std::vector<std::uint8_t> marks;  // (one a pixel of the tile, row by row: 1 edited; empty until the first)
     };
     std::int64_t key(int tx, int ty) const { return std::int64_t(ty) * columns_ + tx; }
     const Tile* tile_at(int x, int y) const;

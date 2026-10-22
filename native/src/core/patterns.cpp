@@ -128,7 +128,11 @@ std::optional<std::string> check_pattern_file(const Pattern& p, std::string_view
         const InkRasterHeader header = ink_raster_header(bytes);
         const InkSpace space = p.mode == "cmyk" ? InkSpace::Cmyk : p.mode == "lab" ? InkSpace::Lab : InkSpace::Gray;
         if (header.space != space || header.depth != p.depth) return std::string("its picture is not of its mode and depth");
-        return size_of(header.width, header.height);
+        if (const auto why = size_of(header.width, header.height)) return why;
+        // (its whole body, row by row as decode_ink_raster checks it — a cut one is read-only now, not when it is drawn —,
+        // never the whole raster held)
+        read_ink_raster_rows(bytes, [](std::uint32_t, const float*) {});
+        return std::nullopt;
     } catch (const Error& error) {
         return std::string("its picture cannot be read: ") + error.what();
     }

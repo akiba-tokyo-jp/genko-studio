@@ -516,7 +516,8 @@ void validate_brushes(const Document& doc) {
         for (const std::string& ref : dab_assets(settings)) {
             const auto held = doc.brush_tips.find(ref);
             if (held == doc.brush_tips.end() || !held->second) throw Error("value", "the picture " + ref + " of the brush " + key + " is not held");
-            const std::uint32_t edge = ref == settings.texture.pattern.asset && ref != settings.tip && ref != settings.dual.tip ? kMaxPatternEdge : kMaxTipEdge;
+            // (a picture a texture uses: the texture's bound, the smaller, though a tip uses it too)
+            const std::uint32_t edge = ref == settings.texture.pattern.asset ? kMaxPatternEdge : kMaxTipEdge;
             if (const auto why = check_tip_png(*held->second, edge)) throw Error("value", "the picture " + ref + " of the brush " + key + ": " + *why);
         }
     }

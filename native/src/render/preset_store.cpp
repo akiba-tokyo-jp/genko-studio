@@ -175,7 +175,10 @@ Json add(std::vector<Group>& groups, const Kind& kind, Json item, std::optional<
     return Json{{"name", made}, {"group", where}};
 }
 
-Json edit(std::vector<Group>& groups, const Kind& kind, const Json& params) {
+namespace {
+
+// edit's work on the groups given (a copy: on a failure part way, a delete or move of several, it is thrown away).
+Json edit_groups(std::vector<Group>& groups, const Kind& kind, const Json& params) {
     if (!params.is_object()) bad("the edit is {action, …}");
     const std::string action = params.value("action", std::string());
     const Json* g = core::get(params, "group");
@@ -256,6 +259,15 @@ Json edit(std::vector<Group>& groups, const Kind& kind, const Json& params) {
         return Json{{"deleted", items}};
     }
     bad("action is rename, delete, move, new_group, rename_group or delete_group");
+}
+
+}  // namespace
+
+Json edit(std::vector<Group>& groups, const Kind& kind, const Json& params) {
+    std::vector<Group> work = groups;  // (all or nothing: a failure leaves the groups as they were)
+    Json done = edit_groups(work, kind, params);
+    groups = std::move(work);
+    return done;
 }
 
 std::vector<Group> reset(const std::vector<Group>& groups, const Kind& kind, bool append) {

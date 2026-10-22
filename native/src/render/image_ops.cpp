@@ -534,33 +534,51 @@ Pixels layer_pixels(core::OpContext& c, std::size_t at, const std::string& id, c
     return std::move(parts.front());
 }
 
-void put_layer_pixels(core::Document& doc, std::size_t at, const std::string& id, const std::vector<std::pair<Box, const Pixels*>>& parts) {
+void put_layer_pixels(core::Document& doc, std::size_t at, const std::string& id, const std::vector<PixelsPart>& parts) {
     if (parts.empty()) return;
-    for (const auto& [box, p] : parts) {
-        if (static_cast<int>(p->width()) != box.width() || static_cast<int>(p->height()) != box.height()) {
+    for (const PixelsPart& part : parts) {
+        const Pixels& p = *part.pixels;
+        if (static_cast<int>(p.width()) != part.box.width() || static_cast<int>(p.height()) != part.box.height()) {
             throw core::Error("value", "the pixels are not the box's size");
         }
-        if (p->kind() != parts.front().second->kind()) throw core::Error("value", "the pixels are not of one kind");
+        if (p.kind() != parts.front().pixels->kind()) throw core::Error("value", "the pixels are not of one kind");
+        if (part.only != nullptr && part.only->size() != p.size()) throw core::Error("value", "the marks are not the box's size");
     }
+    // (whether the part's pixel i is written: every one, or those its marks name)
+    const auto written = [](const PixelsPart& part, std::size_t i) { return part.only == nullptr || (*part.only)[i] != 0; };
     core::Page& page = doc.edit_page(at);
     core::Layer& layer = page.layers[layer_at(page, id)];
-    switch (parts.front().second->kind()) {
+    switch (parts.front().pixels->kind()) {
         case Pixels::Kind::Eight: {
             Image picture = raster::layer_pixels(page, layer).convert("RGBA");
-            for (const auto& [box, p] : parts) picture.paste(to_image(*p), Point{box.x0, box.y0});
+            for (const PixelsPart& part : parts) {
+                if (part.only == nullptr) {
+                    picture.paste(to_image(*part.pixels), Point{part.box.x0, part.box.y0});
+                    continue;
+                }
+                // (the marked pixels through a mask of 255 and 0: those copied as they are, the others left)
+                std::string marks(part.only->size(), '\0');
+                for (std::size_t i = 0; i < marks.size(); ++i) marks[i] = (*part.only)[i] != 0 ? static_cast<char>(255) : '\0';
+                const Image mask = Image::frombytes("L", Size{part.box.width(), part.box.height()}, marks);
+                picture.paste(to_image(*part.pixels), Point{part.box.x0, part.box.y0}, &mask);
+            }
             raster::save_raster(page, layer, picture);
             break;
         }
         case Pixels::Kind::Precise: {
             core::ColorRasterEdit edit(std::string(*layer.color_raster));
-            for (const auto& [box, p] : parts) {
+            for (const PixelsPart& part : parts) {
+                const Pixels& p = *part.pixels;
+                const Box& box = part.box;
                 for (int y = 0; y < box.height(); ++y) {
                     for (int x = 0; x < box.width(); ++x) {
-                        const float* v = p->at(std::size_t(y) * std::size_t(box.width()) + std::size_t(x));
+                        const std::size_t i = std::size_t(y) * std::size_t(box.width()) + std::size_t(x);
+                        if (!written(part, i)) continue;
+                        const float* v = p.at(i);
                         std::array<double, 4> rgba{};
                         for (unsigned k = 0; k < 4; ++k) {
                             if (!std::isfinite(v[k])) throw core::Error("value", "the result exceeds the finite working range");
-                            rgba[k] = p->floating && k < 3 ? static_cast<double>(v[k]) : std::clamp(static_cast<double>(v[k]), 0.0, 1.0);
+                            rgba[k] = p.floating && k < 3 ? static_cast<double>(v[k]) : std::clamp(static_cast<double>(v[k]), 0.0, 1.0);
                         }
                         edit.set(std::size_t(box.y0 + y) * edit.width() + std::size_t(box.x0 + x), rgba);
                     }
@@ -571,12 +589,14 @@ void put_layer_pixels(core::Document& doc, std::size_t at, const std::string& id
         }
         case Pixels::Kind::Inks: {
             core::InkPixels whole = ink_edit::with_marks(page, layer, &doc);
-            for (const auto& [box, p] : parts) {
-                const unsigned n = p->colours();
+            for (const PixelsPart& part : parts) {
+                const Pixels& p = *part.pixels;
+                const Box& box = part.box;
+                const unsigned n = p.colours();
                 for (int y = 0; y < box.height(); ++y) {
                     for (int x = 0; x < box.width(); ++x) {
-                        put_ink_pixel(whole, std::size_t(box.y0 + y) * whole.width + std::size_t(box.x0 + x),
-                                      p->at(std::size_t(y) * std::size_t(box.width()) + std::size_t(x)), n);
+                        const std::size_t i = std::size_t(y) * std::size_t(box.width()) + std::size_t(x);
+                        if (written(part, i)) put_ink_pixel(whole, std::size_t(box.y0 + y) * whole.width + std::size_t(box.x0 + x), p.at(i), n);
                     }
                 }
             }
@@ -592,7 +612,7 @@ void put_layer_pixels(core::Document& doc, std::size_t at, const std::string& id
 }
 
 void put_layer_pixels(core::Document& doc, std::size_t at, const std::string& id, const Pixels& p, const Box& box) {
-    put_layer_pixels(doc, at, id, std::vector<std::pair<Box, const Pixels*>>{{box, &p}});
+    put_layer_pixels(doc, at, id, std::vector<PixelsPart>{PixelsPart{box, &p}});
 }
 
 namespace {

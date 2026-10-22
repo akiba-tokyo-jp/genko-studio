@@ -553,7 +553,7 @@ void MainWindow::set_target_layer(const std::string& layer_id) {
     pen_changed();
     if (const core::Layer* layer = target_layer()) {
         const bool tone = layer->kind == core::LayerKind::Tone;
-        flash(QStringLiteral("描く先: %1").arg(wording::layer_label(*layer)) + (tone ? QStringLiteral("（ペンでトーンを足す・消しゴムで削る）") : QString()), 2500);
+        flash(QStringLiteral("描く先: %1").arg(wording::layer_label(*layer)) + (tone ? QStringLiteral("（ブラシでトーンを足す・消しゴムで削る）") : QString()), 2500);
     }
     if (layer_panel_ != nullptr) layer_panel_->show_target();  // (not built again: a Ctrl / Shift+click keeps the others)
     if (materials_ != nullptr) materials_->refresh();

@@ -233,7 +233,7 @@ void MainWindow::put_tone(const Json& item, bool ask_click) {
     }
     if (apply_ops(Json::array({op}))) {
         after_tone(op["id"].get<std::string>());
-        flash(QStringLiteral("「%1」を貼りました。ペンで足す・消しゴムで削る").arg(QString::fromStdString(core::py_str(core::py_get(item, "name", "")))), 3500);
+        flash(QStringLiteral("「%1」を貼りました。ブラシで足す・消しゴムで削る").arg(QString::fromStdString(core::py_str(core::py_get(item, "name", "")))), 3500);
     }
 }
 

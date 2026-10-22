@@ -191,6 +191,17 @@ private slots:
             const Pixels after = whole(doc);
             QCOMPARE(differing(before, after), (std::vector<std::pair<int, int>>{{300, 301}}));
             QVERIFY2(std::fabs(after.at(std::size_t(301) * after.width() + 300)[after.colours()] - 0.75f) < 1e-3f, kind.c_str());
+            // pixels far apart in one tile (opaque ones, and in the clear corner): only they written, every pixel between
+            // them (a clear one's hidden colours or inks too) as it was
+            TiledPixels again(c, 0, "paint");
+            again.reach({Box{0, 0, 256, 512}});
+            for (const auto& [x, y] : {std::pair{100, 300}, std::pair{200, 400}, std::pair{5, 5}, std::pair{30, 30}}) {
+                float* v = again.edit(x, y);
+                v[0] = 0.5f;
+                v[again.colours()] = 0.75f;
+            }
+            QCOMPARE(again.put(doc), (Box{5, 5, 201, 401}));
+            QCOMPARE(differing(after, whole(doc)), (std::vector<std::pair<int, int>>{{5, 5}, {30, 30}, {100, 300}, {200, 400}}));
         }
     }
 
@@ -223,6 +234,36 @@ private slots:
             QVERIFY(too_large);
         }
         QVERIFY(big.held().empty());
+        // a layer's tiles read past the budget: refused, none held, the layer as it was
+        // (each a budget the layer's own read fits in and its tiles in floats — 600² × 16 bytes, beside what the read
+        // holds — do not: an 8-bit layer's picture is decoded in the budget; a precise layer's samples and an ink layer's
+        // inks are read outside it)
+        for (const auto& [kind, budget_bytes] : {std::pair{std::string("8"), 6u << 20}, std::pair{std::string("32"), 4u << 20},
+                                                 std::pair{std::string("lab"), 4u << 20}}) {
+            core::Document layered = as_kind(book(), kind);
+            const Pixels before = whole(layered);
+            const Json op = Json::object();
+            const core::Actor actor("human:test");
+            core::OpContext c{layered, op, actor};
+            TiledPixels tiles(c, 0, "paint");
+            const Size grid = tiles.grid();
+            {
+                render::ImageAllocationBudget budget(budget_bytes);
+                bool too_large = false;
+                std::string why = "nothing refused";
+                try {
+                    tiles.reach({Box{0, 0, grid.width, grid.height}});
+                } catch (const core::OpError& error) {
+                    why = error.what();
+                    too_large = why.find("too large") != std::string::npos;
+                } catch (const std::exception& error) {
+                    why = error.what();
+                }
+                QVERIFY2(too_large, (kind + ": " + why).c_str());
+            }
+            QVERIFY2(tiles.held().empty() && tiles.changed().empty(), kind.c_str());
+            QVERIFY2(differing(before, whole(layered)).empty(), kind.c_str());
+        }
     }
 
     // upstream's dab_stroke_runs_sequentially_and_respects_selection: the dabs in order on a working copy each sees,

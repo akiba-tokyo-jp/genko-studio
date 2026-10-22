@@ -155,7 +155,7 @@ v3 の行（`rev`・`actor`・`at`・`changes`・`via`）をそのまま残し�
 
 `features`へ`native.color_stroke_v1`を登録する。未対応の読み手は従来の未知feature規則により編集・保存を拒否する。既存のRGB8線とモノクロ線の形式は変えない。
 
-線の辞書形式・packed形式に任意の`color_rgb`を加える。値は`{"precision":"u16"|"f32","values":[r,g,b]}`。RGBはstraight sRGBの正規化値（16bitは整数値/65535、32bitは有限のfloat32範囲、HDRを保持）。値は厳密に3個、未知キー・未知precision・非有限値を拒否する。`opacity`は従来どおり独立の0〜1のalpha。`color_rgb`がある線は`rgb`の8bit previewを色の正本にしない。線の座標・幅・筆圧は既存形式のまま編集可能とする。PC4 E-0 から `add_stroke` も 16・32 bit の RGB のページで `color_rgb` を受ける（描画色が 8 bit より細かいとき画面が送る。`rgb` はその 8 bit の見本。ほかのページでは断る）。
+線の辞書形式・packed形式に任意の`color_rgb`を加える。値は`{"precision":"u16"|"f32","values":[r,g,b]}`。RGBはstraight sRGBの正規化値（16bitは整数値/65535、32bitは有限のfloat32範囲、HDRを保持）。値は厳密に3個、未知キー・未知precision・非有限値を拒否する。`opacity`は従来どおり独立の0〜1のalpha。`color_rgb`がある線は`rgb`の8bit previewを色の正本にしない。線の座標・幅・筆圧は既存形式のまま編集可能とする。PC4 E-0 から `add_stroke` も 16・32 bit の RGB のページで `color_rgb` を受ける（描画色が 8 bit より細かいとき画面が送る。`rgb` はその 8 bit の見本。ほかのページでは使わずに `rgb` で描き、`warnings` で知らせる。未知キーとしては扱わない）。
 
 ## 紙質（paper-texture@1、BRUSH-01）
 

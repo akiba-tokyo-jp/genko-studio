@@ -455,6 +455,7 @@ const core::OpRegistry& ops_registry() {
                     plain(inner);
                     (void)lending.take_back(c.doc);
                     c.report = std::move(inner.report);
+                    c.notes = std::move(inner.notes);
                     color_edit::bake_marks(c.doc);
                     ink_edit::bake_marks(c.doc);
                     return;
@@ -475,6 +476,7 @@ const core::OpRegistry& ops_registry() {
                     plain(inner);
                     const bool changed = lending.take_back(c.doc);
                     c.report = std::move(inner.report);
+                    c.notes = std::move(inner.notes);
                     if (changed && lending.depth() > 8) {  // (a 16- or 32-bit channel: what the op changed, drawn at 8 bits)
                         if (!c.report || c.report->is_null()) c.report = core::Json::object();
                         if (c.report->is_object()) (*c.report)["channel_precision"] = 8;
@@ -490,6 +492,7 @@ const core::OpRegistry& ops_registry() {
                 op(inner);
                 keep.restore(c.doc);
                 c.report = std::move(inner.report);
+                c.notes = std::move(inner.notes);
                 channels::follow_depth(c.doc);
                 keep_page_modes(c.doc, before);
             });

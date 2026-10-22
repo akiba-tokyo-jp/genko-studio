@@ -95,6 +95,8 @@ public:
 
 signals:
     void changed();
+    // A colour set (set_colour), even the one it had (PC4 E-0: the カラー panel's precise 描画色 is let go then).
+    void colour_set();
 
 private:
     void fill_kinds();

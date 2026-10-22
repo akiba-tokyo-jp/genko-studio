@@ -290,7 +290,7 @@ LayerPanel::LayerPanel(MainWindow* window) : window_(window) {
     connect(duplicate_button, &QPushButton::clicked, this, [this] { duplicate(); });
     auto* merge = button(QStringLiteral("下と結合"), QStringLiteral("選んだレイヤーを、すぐ下のレイヤーに合わせます（ペン同士は線のまま）"), QStringLiteral("layer_merge_down"));
     connect(merge, &QPushButton::clicked, this, [this] { merge_down(); });
-    mask_button_ = button(QStringLiteral("マスク ▾"), QStringLiteral("レイヤーの一部を隠す。選択範囲から作り、ペンで見せる所を足し、消しゴムで隠す"),
+    mask_button_ = button(QStringLiteral("マスク ▾"), QStringLiteral("レイヤーの一部を隠す。選択範囲から作り、ブラシで見せる所を足し、消しゴムで隠す"),
                           QStringLiteral("layer_mask"));
     mask_menu_ = new QMenu(mask_button_);
     // (PC3 B2, the user's decision 5: レイヤー → レイヤーマスク by Photoshop's names; マスクを編集する and マスクを反転 Genko's own)
@@ -300,7 +300,8 @@ LayerPanel::LayerPanel(MainWindow* window) : window_(window) {
     mask_menu_->addAction(QStringLiteral("選択範囲をマスク"), this, [this] { hide_selection(); });
     mask_menu_->addAction(QStringLiteral("透明部分から"), this, [this] { mask_from_transparency(); });
     mask_menu_->addSeparator();
-    mask_edit_ = mask_menu_->addAction(QStringLiteral("マスクを編集する（ペンで見せる・消しゴムで隠す）"));
+    // (PC4 E-0, the user's decision 2: the brush tool's name — preferences::renamed())
+    mask_edit_ = mask_menu_->addAction(QStringLiteral("マスクを編集する（ブラシで見せる・消しゴムで隠す）"));
     mask_edit_->setCheckable(true);
     mask_edit_->setProperty("genko_attribute", QStringLiteral("act_mask_edit"));  // (named, as the window's commands: the help finds it by it)
     connect(mask_edit_, &QAction::toggled, this, [this](bool on) { edit_mask(on); });
@@ -420,7 +421,7 @@ void LayerPanel::edit_mask(bool on) {
     const auto [page, layer] = this->layer();
     if (on && layer != nullptr && !layer->mask) mask(Json{{"fill", "show"}});
     window_->mask_edit = on;
-    window_->flash(on ? QStringLiteral("マスクの編集中: ペンで見せる所を足し、消しゴムで隠します") : QStringLiteral("マスクの編集を終えました"), 4000);
+    window_->flash(on ? QStringLiteral("マスクの編集中: ブラシで見せる所を足し、消しゴムで隠します") : QStringLiteral("マスクの編集を終えました"), 4000);
 }
 
 namespace {

@@ -204,7 +204,10 @@ const std::multimap<QString, QString>& renamed() {
                                                      {QStringLiteral("描画色と背景色を入れ替え"), QStringLiteral("メインとサブの色を入れ替える")},
                                                      {QStringLiteral("カラーピッカー（描画色）…"), QStringLiteral("ペンの色…")},
                                                      {QStringLiteral("ブラシサイズを大きく"), QStringLiteral("太く（ペン・消しゴム）")},
-                                                     {QStringLiteral("ブラシサイズを小さく"), QStringLiteral("細く（ペン・消しゴム）")}};
+                                                     {QStringLiteral("ブラシサイズを小さく"), QStringLiteral("細く（ペン・消しゴム）")},
+                                                     {QStringLiteral("選んだ線を描画色にする"), QStringLiteral("選んだ線をペンの色にする")},
+                                                     {QStringLiteral("マスクを編集する（ブラシで見せる・消しゴムで隠す）"),
+                                                      QStringLiteral("マスクを編集する（ペンで見せる・消しゴムで隠す）")}};
     return all;
 }
 
@@ -604,7 +607,7 @@ PreferencesDialog::PreferencesDialog(MainWindow* window) : QDialog(window), wind
     backup_keep->setValue(settings()->value(QStringLiteral("backup/keep"), 10).toInt());
     hold_swap = new QCheckBox(QStringLiteral("道具のキーを押している間だけ持ち替える"));
     hold_swap->setChecked(app::hold_swap());
-    hold_swap->setToolTip(QStringLiteral("道具のキー（E の消しゴムなど）を長く押していると、離したときに前の道具に戻ります。短く押すと持ち替えたまま"));
+    hold_swap->setToolTip(QStringLiteral("道具のキー（E の消しゴムツールなど）を長く押していると、離したときに前の道具に戻ります。短く押すと持ち替えたまま"));
     per_tool = new QPushButton(QStringLiteral("道具ごとの修飾キー…"));
     per_tool->setToolTip(QStringLiteral("ブラシツール・消しゴムツールなど道具ごとに、Alt・Ctrl・Shift を押している間の道具を決めます"));
     connect(per_tool, &QPushButton::clicked, this, [this] { tool_keys_dialog(this, window_); });

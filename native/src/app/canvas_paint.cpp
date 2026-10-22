@@ -32,11 +32,11 @@ bool painted_within(const QPainter& painter, const QRegion& region, const QRectF
     return rect.adjusted(spare, spare, -spare, -spare).contains(back.map(QPolygonF(QRectF(region.boundingRect()))).boundingRect());
 }
 
-// The sheet's rectangle filled (the page's white, a spread's partner): with fillRect while the view is not turned or
-// mirrored (its edges on the pixels as ever); in a turned or mirrored view as a path — Qt's fill of a turned rectangle
-// can put an edge pixel otherwise when it is painted under a clip (a part painted again: a line being drawn asks for
-// its piece) than when the whole canvas is, which a path's fill never does (PC4 E-0: found when the default
-// クイックアクセス's longer names made the canvas narrower).
+// The sheet's rectangle filled (the page's white, a spread's partner): with fillRect while the view is not turned —
+// moved, scaled or mirrored only (TxScale at most: its edges on the pixels as ever) —; in a turned view (TxRotate and
+// beyond) as a path — Qt's fill of a turned rectangle can put an edge pixel otherwise when it is painted under a clip (a
+// part painted again: a line being drawn asks for its piece) than when the whole canvas is, which a path's fill never
+// does (PC4 E-0: found when the default クイックアクセス's longer names made the canvas narrower).
 void fill_sheet(QPainter& painter, const QRectF& rect, const QColor& colour) {
     if (painter.transform().type() <= QTransform::TxScale) {
         painter.fillRect(rect, colour);

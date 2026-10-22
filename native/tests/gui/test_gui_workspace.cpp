@@ -544,7 +544,8 @@ private slots:
             {"act_swap_colour", "メインとサブの色を入れ替える", "描画色と背景色を入れ替え", "X"},
             {"act_color", "ペンの色…", "カラーピッカー（描画色）…", "C"},
             {"act_thicker", "太く（ペン・消しゴム）", "ブラシサイズを大きく", "]"},
-            {"act_thinner", "細く（ペン・消しゴム）", "ブラシサイズを小さく", "["}};
+            {"act_thinner", "細く（ペン・消しゴム）", "ブラシサイズを小さく", "["},
+            {"act_vector_colour", "選んだ線をペンの色にする", "選んだ線を描画色にする", ""}};
         QStringList bar;
         for (const auto& [attribute, before, now, key] : renamed) {
             QAction* act = b.window->action(QString::fromLatin1(attribute));
@@ -555,6 +556,16 @@ private slots:
             QVERIFY2(kept, attribute);
             bar << QString::fromUtf8(before);
         }
+        // the layer mask menu's マスクを編集する (named by its attribute)
+        QAction* mask_edit = nullptr;
+        for (QAction* act : b.window->findChildren<QAction*>())
+            if (act->property("genko_attribute").toString() == QStringLiteral("act_mask_edit")) mask_edit = act;
+        QVERIFY(mask_edit != nullptr);
+        QCOMPARE(mask_edit->text(), QStringLiteral("マスクを編集する（ブラシで見せる・消しゴムで隠す）"));
+        bool mask_kept = false;
+        for (auto [it, end] = app::preferences::renamed().equal_range(mask_edit->text()); it != end; ++it)
+            mask_kept = mask_kept || it->second == QStringLiteral("マスクを編集する（ペンで見せる・消しゴムで隠す）");
+        QVERIFY(mask_kept);
         // the new: 描画色と背景色を初期設定に戻す (D), F5 ブラシ設定, F6 カラー
         QCOMPARE(b.window->action(QStringLiteral("act_default_colours"))->shortcut(), QKeySequence(QStringLiteral("D")));
         const auto toggle = [&](const QString& title) {

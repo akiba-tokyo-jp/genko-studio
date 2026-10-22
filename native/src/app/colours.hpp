@@ -130,7 +130,8 @@ public:
     // PC4 E-0 (描画色・背景色の高精度): the colours as floats — straight sRGB 0..1 (32 bits: beyond 1 too), the form of a
     // precise line's color_rgb (native.color_stroke_v1) — kept beside their 8-bit pictures. choose_precise() chooses the
     // 描画色 so (its 8-bit picture the nearest); foreground() and background() give them, the 8-bit colour / 255 for one
-    // not chosen as floats (or changed since as 8 bits); is_precise() says whether the 描画色 holds more than its 8 bits.
+    // not chosen as floats (or an 8-bit colour chosen since, the same one too: BrushPanel::colour_set); is_precise() says
+    // whether the 描画色 holds more than its 8 bits.
     using Precise = std::array<double, 3>;
     void choose_precise(const Precise& srgb);
     Precise foreground() const;

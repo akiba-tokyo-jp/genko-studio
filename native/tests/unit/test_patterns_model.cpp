@@ -135,7 +135,7 @@ private slots:
     }
 
     // The picture's kind by the mode and depth, and its check: PNG RGBA (8-bit RGB) and LA (8-bit grey), GKCR (16- and
-    // 32-bit RGB), GKIR (grey of more bits, CMYK and Lab).
+    // 32-bit RGB), GKIR (grey of more bits, CMYK and Lab; its body checked whole).
     void thePictureIsOfItsKind() {
         QCOMPARE(core::pattern_suffix(pattern("a", "rgb", 8, 1, 1, "x")), std::string_view(".png"));
         QCOMPARE(core::pattern_suffix(pattern("a", "gray", 8, 1, 1, "x")), std::string_view(".png"));
@@ -163,6 +163,9 @@ private slots:
         QVERIFY(!ok(pattern("a", "lab", 8, 3, 3, lab), lab));
         QVERIFY(!ok(pattern("a", "cmyk", 8, 3, 3, lab), lab));
         QVERIFY(!ok(pattern("a", "cmyk", 8, 3, 3, "bytes"), "bytes"));
+        // (a GKIR picture cut short: its header whole, its body not — read-only now, not when it is drawn)
+        const std::string cut = lab.substr(0, lab.size() - 3);
+        QVERIFY(!ok(pattern("a", "lab", 16, 3, 3, cut), cut));
     }
 
     // A book with patterns of each kind: written with patterns@1 and every picture with its suffix, read back the same

@@ -55,6 +55,8 @@ std::string join(const std::vector<std::string>& items, std::string_view separat
 
 // define_brush's paper (BRUSH-01): this build's own key, never named an unknown key.
 bool paper_key(const Json& op, std::string_view key) { return key == "paper" && is_op(op, "define_brush"); }
+// add_stroke's color_rgb (PC4 E-0: the 描画色's precise values on a page of 16 or 32 bits): this build's own too.
+bool stroke_colour_key(const Json& op, std::string_view key) { return key == "color_rgb" && is_op(op, "add_stroke"); }
 
 bool own_setting(const Json& op, std::string_view name, std::string_view key);
 
@@ -68,7 +70,7 @@ std::string usage(const Json& op, bool channel = false) {
     std::vector<std::string> strange;
     for (const auto& [key, value] : op.items()) {
         if (!schema->contains(key) && key != "op" && key != "area" && !key.starts_with("_") && !paper_key(op, key) &&
-            !(key == "channel" && channel) && !own_setting(op, name, key)) {
+            !stroke_colour_key(op, key) && !(key == "channel" && channel) && !own_setting(op, name, key)) {
             strange.push_back(key);
         }
     }
@@ -84,11 +86,12 @@ std::string usage(const Json& op, bool channel = false) {
 
 // Keys this build's ops take beyond Python's (the precise colour work: merge_visible's flatten, convert_layer's
 // preserve_precision; BRUSH-01: define_brush's paper; TEXT-01's ruby by place: add_line's and edit_line's ruby_spans;
-// channels@1: the pixel ops' channel). They are used, so not reported as ignored; the public list (`genko schema`) stays
-// Python's.
+// channels@1: the pixel ops' channel; PC4 E-0: add_stroke's color_rgb — on a page that does not take it, the op says so
+// in a note of its own). They are used, so not reported as ignored; the public list (`genko schema`) stays Python's.
 bool native_key(std::string_view op, std::string_view key) {
     return (op == "merge_visible" && key == "flatten") || (op == "convert_layer" && key == "preserve_precision") ||
            (op == "define_brush" && key == "paper") || ((op == "add_line" || op == "edit_line") && key == "ruby_spans") ||
+           (op == "add_stroke" && key == "color_rgb") ||
            key == "contents" ||  // (smart-objects@1: any op on a smart object's page)
            // PC3 (masks@1): set_layer_mask's linked, density and feather_mm; a pixel op's layer_mask (its layer's mask
            // painted instead of its pixels)
@@ -1039,6 +1042,7 @@ ApplyResult CommandBus::apply(const Document& doc, const Json& ops_in, const Act
     refuse_unread_pages(doc, ops);
     Document work = doc;  // (the pages stay shared until an op changes one)
     std::vector<char> channels(ops.size(), 0);  // (channels@1: the ops whose "channel" named a channel or plate of their page)
+    std::vector<std::string> notes;             // (PC4: what the ops said they did not use, OpContext::notes)
     for (std::size_t i = 0; i < ops.size(); ++i) {
         Json& op = ops[i];
         if (!op.is_object()) throw ApplyError("ops[" + std::to_string(i) + "] must be an object");
@@ -1094,6 +1098,7 @@ ApplyResult CommandBus::apply(const Document& doc, const Json& ops_in, const Act
                     throw OpError(error.what());
                 }
                 report = std::move(context.report);
+                for (const std::string& note : context.notes) notes.push_back("ops[" + std::to_string(i) + "] " + name_text + ": " + note);
             }
         } catch (const ApplyError&) {
             throw;
@@ -1130,6 +1135,7 @@ ApplyResult CommandBus::apply(const Document& doc, const Json& ops_in, const Act
     refuse_changed_unread_pages(doc, work);
     for (auto& warning : validate_document(work)) result.warnings.push_back(std::move(warning));
     for (auto& warning : unknown_key_warnings(ops, channels)) result.warnings.push_back(std::move(warning));
+    for (std::string& note : notes) result.warnings.push_back(std::move(note));
     for (const Json& op : ops) result.journal_ops.push_back(journal_op(op));
     result.doc = std::move(work);
     return result;

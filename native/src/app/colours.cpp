@@ -477,7 +477,7 @@ ColourPanel::ColourPanel(BrushPanel* brush, QWidget* parent) : QWidget(parent), 
     swap_button->setAccessibleName(swap_button->toolTip());
     connect(swap_button, &QPushButton::clicked, this, [this] { swap(); });
     transparent = new QCheckBox(QStringLiteral("透明色"));
-    transparent->setToolTip(QStringLiteral("透明色で描く: 描いた所が消える（ペンのまま消しゴムになる）"));
+    transparent->setToolTip(QStringLiteral("透明色で描く: 描いた所が消える（ブラシツールのまま消しゴムツールになる）"));
     auto* top = new QHBoxLayout;
     top->addWidget(main);
     top->addWidget(sub);
@@ -594,6 +594,9 @@ ColourPanel::ColourPanel(BrushPanel* brush, QWidget* parent) : QWidget(parent), 
     fill_between();
     show_colour(brush_->rgb());
     connect(brush_, &BrushPanel::changed, this, [this] { show_colour(brush_->rgb()); });
+    // (PC4 E-0: an 8-bit colour chosen anywhere — a swatch, the picker, the sub view —, the same one too, lets the precise
+    // 描画色 go; choose_precise() sets it after its colour is chosen)
+    connect(brush_, &BrushPanel::colour_set, this, [this] { fore_precise_.reset(); });
 }
 
 // --- the colour -----------------------------------------------------------------------------------------------------

@@ -82,7 +82,7 @@ void MainWindow::build_paint_actions() {
     make("act_swap_colour", QStringLiteral("描画色と背景色を入れ替え"), [this] { colours_->swap(); }, key("X"));
     make("act_default_colours", QStringLiteral("描画色と背景色を初期設定に戻す"), [this] { colours_->reset_defaults(); }, key("D"),
          QStringLiteral("描画色を黒に、背景色を白にします"));
-    QAction* transparent = make("act_transparent", QStringLiteral("透明色で描く"), [] {}, {}, QStringLiteral("ペンで描いた所が消える（もう一度で戻る）"), true);
+    QAction* transparent = make("act_transparent", QStringLiteral("透明色で描く"), [] {}, {}, QStringLiteral("ブラシで描いた所が消える（もう一度で戻る）"), true);
     connect(transparent, &QAction::toggled, this, [this](bool on) {
         if (colours_ != nullptr) colours_->transparent->setChecked(on);
     });
@@ -128,7 +128,7 @@ void MainWindow::build_paint_pages(ToolSettings* ts) {
     shl->addRow(QStringLiteral("描き方（ピクセル）"), shape_style_);
     shl->addRow(QStringLiteral("多角形の角"), shape_sides_);
     shl->addRow(QStringLiteral("長方形の角の丸み"), shape_radius_);
-    shl->addRow(hint(QStringLiteral("ピクセルでは線の太さと色はペンと同じ。Shift で 45° と正方形、Alt で中心から。折れ線・曲線はクリックで点を置き、"
+    shl->addRow(hint(QStringLiteral("ピクセルでは線の太さと色はブラシツールと同じ。Shift で 45° と正方形、Alt で中心から。折れ線・曲線はクリックで点を置き、"
                                     "ダブルクリックか Enter で終わり（Shift+Enter で閉じる）。")));
     build_shape_pages(ts, shl);  // (PC3 C-b: モード, 塗り, 線…, and the pen tools' モード: main_window_shapes.cpp)
     ts->add({QStringLiteral("shape")}, shape_page);

@@ -72,7 +72,7 @@ core::Json add(std::vector<Group>& groups, const Kind& kind, core::Json item, st
 // {"action": rename | delete | move | new_group | rename_group | delete_group, "preset": a name or names, "group"?,
 // "name"?, "to"?, "index"?} → what changed (rename: {"name"}; delete: {"deleted"}; move: {"moved", "group"}; new_group,
 // rename_group: {"group"}; delete_group: {"deleted": its items}). core::Error("value") for what cannot be done (a name
-// taken, none named, a group that is not there).
+// taken, none named, a group that is not there), the groups then as they were (no part of the edit done).
 core::Json edit(std::vector<Group>& groups, const Kind& kind, const core::Json& params);
 // The built-in groups (`append`: after the person's, a group's name taken getting " 2"…, an item's name taken getting
 // one too).

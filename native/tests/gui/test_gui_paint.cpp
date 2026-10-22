@@ -117,7 +117,7 @@ private slots:
              "塗った色の間に残った小さなすき間を、同じ色で塗ります。選択範囲があればその中を、無ければなぞった所を", false},
             {"act_swap_colour", "描画色と背景色を入れ替え", "X", "", false},
             {"act_default_colours", "描画色と背景色を初期設定に戻す", "D", "描画色を黒に、背景色を白にします", false},
-            {"act_transparent", "透明色で描く", "", "ペンで描いた所が消える（もう一度で戻る）", true},
+            {"act_transparent", "透明色で描く", "", "ブラシで描いた所が消える（もう一度で戻る）", true},
             {"act_thicker", "ブラシサイズを大きく", "]", "", false},
             {"act_thinner", "ブラシサイズを小さく", "[", "", false},
         };
@@ -391,7 +391,7 @@ private slots:
             {"act_vector", "部分選択ツール", "Shift+Y", "ペンの線を選んで制御点を動かす（Alt+クリックで点を足す、Delete で消す、Shift+クリックで 2 本目）", true},
             {"act_vector_join", "選んだ 2 本の線をつなぐ", "", "", false},
             {"act_vector_cut", "クリックした所で線を切る", "", "オンの間、線をクリックするとそこで 2 本に分かれます", true},
-            {"act_vector_colour", "選んだ線をペンの色にする", "", "", false},
+            {"act_vector_colour", "選んだ線を描画色にする", "", "", false},  // (PC4 E-0)
             {"act_vector_delete", "選んだ線を消す", "", "", false},
             {"act_vector_simplify", "選んだ線の点を減らす", "", "形を保ったまま、制御点を減らします（単純化）", false},
         };
@@ -521,6 +521,15 @@ private slots:
         s.colours().choose(app::Rgb{10, 20, 30});
         QVERIFY(!s.colours().is_precise());
         QCOMPARE(s.colours().foreground()[0], 10.0 / 255.0);
+        // (the same 8-bit colour chosen again — in the panel, or by the brush panel as a swatch or the picker sets it —
+        // lets the floats go too)
+        s.colours().choose_precise({0.5, 0.25, 1.0 / 3.0});
+        s.colours().choose(app::Rgb{128, 64, 85});
+        QVERIFY(!s.colours().is_precise());
+        QCOMPARE(s.colours().foreground()[1], 64.0 / 255.0);
+        s.colours().choose_precise({0.5, 0.25, 1.0 / 3.0});
+        s.brush().set_colour({128, 64, 85});
+        QVERIFY(!s.colours().is_precise());
         // ] and [: the pen's size one step up and down, or the eraser's
         s.window->choose_tool(QStringLiteral("pen"));
         const double width = s.canvas()->brush_width_mm;

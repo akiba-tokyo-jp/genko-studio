@@ -106,7 +106,7 @@ private slots:
         QCOMPARE(groups.back().items.size(), std::size_t(2));
     }
 
-    // Each edit action, and what each refuses.
+    // Each edit action, and what each refuses (nothing of a refused edit done).
     void editActions() {
         std::vector<Group> groups = kind().builtin();
         const auto edit = [&](const char* text) { return store::edit(groups, kind(), Json::parse(text)); };
@@ -121,6 +121,10 @@ private slots:
         QCOMPARE(edit(R"({"action": "move", "preset": "虹", "to": "箱", "index": 1})"), Json({{"moved", 1}, {"group", "箱"}}));
         QCOMPARE(names(groups), (std::vector<std::string>{"[基本]", "[特殊]", "[箱]", "青", "虹", "朱"}));
         QVERIFY(refused(R"({"action": "move", "preset": "虹", "to": "無い"})").find("no group named 無い") != std::string::npos);
+        // (a move or delete of several that fails part way: nothing of it done)
+        QVERIFY(refused(R"({"action": "move", "preset": ["青", "無い名前"], "to": "基本"})").find("no preset named 無い名前") != std::string::npos);
+        QVERIFY(refused(R"({"action": "delete", "preset": ["朱", "無い名前"]})").find("no preset named 無い名前") != std::string::npos);
+        QCOMPARE(names(groups), (std::vector<std::string>{"[基本]", "[特殊]", "[箱]", "青", "虹", "朱"}));
         QCOMPARE(edit(R"({"action": "rename_group", "group": "箱", "name": "箱 2"})"), Json({{"group", "箱 2"}}));
         QVERIFY(refused(R"({"action": "rename_group", "group": "基本", "name": "特殊"})").find("is there already") != std::string::npos);
         QVERIFY(refused(R"({"action": "rename_group", "name": "x"})").find("group names the group") != std::string::npos);

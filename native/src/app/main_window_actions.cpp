@@ -1636,7 +1636,7 @@ void MainWindow::point_width(double factor) {
 
 void MainWindow::pick_colour() {
     const QColor now(static_cast<int>(pen_.rgb[0]), static_cast<int>(pen_.rgb[1]), static_cast<int>(pen_.rgb[2]));
-    if (const auto colour = ask::colour(this, now, QStringLiteral("色"))) brush_->set_colour({colour->red(), colour->green(), colour->blue()});
+    if (const auto colour = ask::colour(this, now, QStringLiteral("カラーピッカー（描画色）"))) brush_->set_colour({colour->red(), colour->green(), colour->blue()});
 }
 
 void MainWindow::ask_zoom() {
