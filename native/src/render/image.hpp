@@ -146,6 +146,11 @@ struct Filter {
 // drawn on several threads at once): each caller works itself, with at most band_threads() − 1 threads besides,
 // shared by all — a caller that finds none free works alone.
 int band_threads();
+// Up to `wanted` band threads besides the caller, from what all callers together may have running (band_threads() − 1
+// at most): how many the caller may start (PC4's filters, render/fx: each its own windows held in the imaging budget
+// first); give_band_threads gives them back when they are over.
+int take_band_threads(int wanted);
+void give_band_threads(int n);
 // How many times they worked in bands, and how many times a band failed and the work was done again by resize(),
 // resize_region() or filter() (for tests: a failure there is a fault of the bands, not of the picture).
 struct BandCounts {

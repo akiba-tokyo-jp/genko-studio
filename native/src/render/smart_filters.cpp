@@ -297,6 +297,34 @@ Json centre_through(const Json& params, const resample::Homography& h, double w,
     return out;
 }
 
+// PC4: a kind's places that are shares of the base box (core::FilterPlace::Kind::Centre) through the map, as a radial
+// blur's centre — in the settings, or in each object of the list holding them.
+Json shares_through(const std::vector<core::FilterPlace>& places, const Json& params, const resample::Homography& h, double w, double hh,
+                    double to_w, double to_h) {
+    Json out = params.is_object() ? params : Json::object();
+    if (!(w > 0) || !(hh > 0) || !(to_w > 0) || !(to_h > 0)) return out;
+    const auto one = [&](Json& object, const core::FilterPlace& place) {
+        if (!object.is_object()) return;
+        const auto share = [&](std::string_view key) {
+            const Json* v = core::get(object, key);
+            return v != nullptr && v->is_number() && !v->is_boolean() ? v->get<double>() : 0.5;
+        };
+        const auto [x, y] = h.apply(share(place.key) * w, share(place.key2) * hh);
+        if (!std::isfinite(x) || !std::isfinite(y)) return;
+        object[std::string(place.key)] = x / to_w;
+        object[std::string(place.key2)] = y / to_h;
+    };
+    for (const core::FilterPlace& place : places) {
+        if (place.kind != core::FilterPlace::Kind::Centre) continue;
+        if (place.within.empty()) {
+            one(out, place);
+        } else if (out.contains(place.within) && out[std::string(place.within)].is_array()) {
+            for (Json& item : out[std::string(place.within)]) one(item, place);
+        }
+    }
+    return out;
+}
+
 // A bending filter's lengths within what its op takes (brought onto the page, a few millionths past its edge: its own).
 Json within_bounds(std::string_view kind, Json params) {
     constexpr double kUnit = 25.4 / 200;  // (a working pixel)
@@ -328,6 +356,11 @@ Json through(std::string_view kind, const Json& params, const resample::Homograp
     const double pw = page.spec.width_mm.value(), ph = page.spec.height_mm.value();
     if (kind == "radial_blur" || kind == "zoom_blur") {
         return onto_page ? centre_through(params, h, box.first, box.second, pw, ph) : centre_through(params, h, pw, ph, box.first, box.second);
+    }
+    if (const core::FilterInfo* info = core::filter_info(kind); info != nullptr && !info->places.empty()) {  // (PC4: by its table)
+        const Json shares = onto_page ? shares_through(info->places, params, h, box.first, box.second, pw, ph)
+                                      : shares_through(info->places, params, h, pw, ph, box.first, box.second);
+        return identity(h) ? shares : core::smart::map_places(info->places, shares, map_of(h));
     }
     if (identity(h)) return params;  // (placed as it is: the same numbers)
     const Json out = core::smart::map_filter_places(kind, params, map_of(h));

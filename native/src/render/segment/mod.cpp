@@ -126,6 +126,8 @@ void check_stop() {
     if (g_stop != nullptr && g_stop->stop_requested()) throw Cancelled();
 }
 
+const std::stop_token* current_stop() { return g_stop; }
+
 // --- images and samplers ----------------------------------------------------------------------------------------------
 
 RgbImage RgbImage::from_rgba(const std::vector<Rgba>& px, std::size_t w, std::size_t h) {

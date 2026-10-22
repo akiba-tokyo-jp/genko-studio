@@ -9,6 +9,7 @@
 #include <string>
 
 #include "core/command_bus.hpp"
+#include "core/filter_kinds.hpp"
 #include "core/pyconv.hpp"
 #include "core/pyops.hpp"
 
@@ -215,6 +216,8 @@ std::vector<AdjustKind> make_table() {
     for (AdjustKind& kind : all) {
         if (kind.group == "PC2c") kind.local = true;
     }
+    // PC4 節 D: フィルター's kinds (core/filter_kinds.cpp: filter_raster only, local, smart filters)
+    for (AdjustKind& kind : filter_kinds()) all.push_back(std::move(kind));
 
     for (const HookTable& hooks : {tone_hooks(), color_hooks()}) {
         for (const auto& [name, given] : hooks) {

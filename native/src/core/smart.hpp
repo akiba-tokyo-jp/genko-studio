@@ -10,6 +10,7 @@
 #include <utility>
 #include <vector>
 
+#include "core/filter_kinds.hpp"
 #include "core/json.hpp"
 #include "core/model.hpp"
 
@@ -114,7 +115,7 @@ bool bend_filter(std::string_view kind);
 // it wherever it is moved; without it (a book of before), the page's, as the op gave them (a page's mm, a share of the
 // page). The ops are given them in the page's (render/smart_filters keeps and draws them).
 inline constexpr std::string_view kContentsSpace = "contents";
-bool placed_filter(std::string_view kind);
+bool placed_filter(std::string_view kind);  // (PC4: a kind whose table names places, too)
 bool in_contents(const Json& filter);
 // A map of places (the page's mm and a smart object's, either way): a place's place, and how it bends there (∂x'/∂x,
 // ∂x'/∂y, ∂y'/∂x, ∂y'/∂y).
@@ -124,8 +125,13 @@ struct PlaceMap {
 };
 // A bending filter's settings through the map: its points and corners moved, its lengths (a stroke's size, the mesh, a
 // puppet's expansion) scaled as it scales them there; mirrored, a twirl and a pin's turn the other way. Its other settings
-// as they are.
+// as they are. (PC4: a kind of フィルター's by its places, core::FilterInfo::places — map_places.)
 Json map_filter_places(std::string_view kind, const Json& params, const PlaceMap& map);
+// PC4 (design 2.3, 3.3): settings' places named by a kind's table (core/filter_kinds.hpp) through the map — points and
+// lists of points moved, lengths in mm scaled as the map scales there (at the first point of the settings or of the
+// object holding them; none: at the origin) —, in the settings themselves or in each object of a list. Shares of the
+// base box (FilterPlace::Kind::Centre) are left as they are: they need the boxes (render/smart_filters maps them).
+Json map_places(const std::vector<FilterPlace>& places, const Json& params, const PlaceMap& map);
 
 // A layer of kind smart, its contents' id (nothing when its settings name none), its matrix (the identity when none).
 bool is_smart(const Layer& layer);

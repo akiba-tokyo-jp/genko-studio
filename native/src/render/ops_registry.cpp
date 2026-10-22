@@ -27,6 +27,7 @@
 #include "render/raster_ops.hpp"
 #include "render/area_kinds.hpp"
 #include "render/layer_masks.hpp"
+#include "render/ops_filters.hpp"
 #include "render/ops_pc3.hpp"
 
 namespace genko::render {
@@ -383,6 +384,8 @@ void register_render_ops(core::OpRegistry& registry) {
     register_vector2_ops(registry);
     register_transform_ops(registry);
     register_pagesize_ops(registry);
+    // PC4 節 D (フィルター): the frames of its new ops (render/ops_filters)
+    register_filter_ops(registry);
     area_kinds::use_keys();
 }
 

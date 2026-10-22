@@ -16,6 +16,7 @@
 #include "core/pyconv.hpp"
 #include "core/vector.hpp"
 #include "core/ruby.hpp"
+#include "core/filter_kinds.hpp"
 #include "core/smart.hpp"
 #include "core/strokes.hpp"
 #include "core/version.hpp"
@@ -457,6 +458,15 @@ Json project_payload_v4(const core::Document& doc, AssetStore& store) {
     }
     std::erase(features, std::string(core::kSmartObjectsFeature));  // (named while a smart object is shown)
     if (!smart_contents.empty()) features.emplace_back(core::kSmartObjectsFeature);
+    // PC4 節 D (filters@1): the files ops gave the smart filters (a displacement map), and the feature while a smart filter
+    // is one of フィルター's kinds or holds a file
+    core::validate_filters(doc);
+    const auto filter_files = core::filter_file_refs(doc);
+    for (const auto& [ref, suffix] : filter_files) {
+        if (const auto file = doc.filter_files.find(ref); file != doc.filter_files.end() && file->second) store.put_known(ref, *file->second, suffix);
+    }
+    std::erase(features, std::string(core::kFiltersFeature));
+    if (core::uses_filters(doc) || !filter_files.empty()) features.emplace_back(core::kFiltersFeature);
     core::validate_ink_document(doc);
     core::validate_color_model(doc);
     bool modes = doc.color.has_value() || doc.rgb.has_value() || doc.text_gamma.has_value();

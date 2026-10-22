@@ -40,6 +40,7 @@ namespace adjust_forms {
 struct FormContext {
     const core::Page* page = nullptr;     // (its mode: which channels a channel switch offers)
     std::array<int, 3> pen{20, 20, 20};   // (the main colour: a colour's default where the kind has none)
+    std::array<int, 3> sub{255, 255, 255};  // (PC4: the sub colour — 背景色 — of a filter that reads both)
     std::optional<std::vector<int>> histogram;  // (the layer's lightness: levels and a tone curve)
     // 「自動」(design 3.3): the settings it finds for the layer; none: no such button.
     std::function<std::optional<core::Json>()> automatic;

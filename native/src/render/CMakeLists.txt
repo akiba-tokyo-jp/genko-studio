@@ -118,6 +118,10 @@ genko_library(genko_render
     matting.cpp
     select_smart.cpp
     ops_matting.cpp
+    # PC4 節 D (フィルター: the table's kinds by one formula on the three ways)
+    fx_engine.cpp
+    fx_blur.cpp
+    ops_filters.cpp
     # PC3 C-a (パスとベクトルマスク)
     path_trace.cpp
     path_areas.cpp
