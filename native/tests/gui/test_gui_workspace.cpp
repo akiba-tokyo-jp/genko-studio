@@ -4,7 +4,7 @@
 // back, はじめの配置に戻す), 道具の名前を表示 and パネルの説明を表示, Python's menus (ファイル → AI と作る…, ヘルプ, the
 // layer panel's menus in the menu bar with their keys, 3D's scenes and poses, このコマの詳細を見る), the first steps over
 // an empty book and what comes next after the first panels (I11), the selection launcher, the tool palette on a short
-// window, and the layers in front at the first show.
+// window, the layers in front at the first show, and every menu item's place as where() finds it.
 
 #include <QtTest>
 
@@ -21,6 +21,8 @@
 #include <QToolBar>
 #include <QToolButton>
 
+#include <functional>
+#include <map>
 #include <memory>
 
 #include "app/canvas.hpp"
@@ -457,6 +459,47 @@ private slots:
         QVERIFY(!b.window->canvas()->selection().has_value());
         b.window->canvas()->update();
         QVERIFY(gui_test::wait_for([&] { return !launcher->isVisible(); }, 5000));
+    }
+
+    // The menu paths walked once (menu_places: the commands named as the window opens, and コマンドを探す) are where()'s for
+    // every item of every menu — one in two menus at its first place — and so every command's name is its words, with its
+    // place when another command has the same words (the user's decision 8).
+    void everyItemsPlaceIsWhereFindsIt() {
+        Book b;
+        QMainWindow* window = b.window.get();
+        const auto known = app::menu_places(window);
+        QSet<const QAction*> items;
+        QStringList wrong;
+        int deep = 0;
+        std::function<void(QMenu*)> walk = [&](QMenu* menu) {
+            for (QAction* item : menu->actions()) {
+                items.insert(item);
+                const auto found = known.find(item);
+                const QString place = found != known.end() ? found->second : QStringLiteral("(none)");
+                if (place != app::where(window, item)) wrong << item->text() + QStringLiteral(": ") + place + QStringLiteral(" / ") + app::where(window, item);
+                if (place.count(QStringLiteral(" → ")) >= 2) ++deep;
+                if (item->menu() != nullptr) walk(item->menu());
+            }
+        };
+        for (QAction* top : window->menuBar()->actions()) {
+            if (top->menu() != nullptr) walk(top->menu());
+        }
+        QCOMPARE(wrong, QStringList());
+        QCOMPARE(static_cast<qsizetype>(known.size()), items.size());
+        QVERIFY(items.size() > 300);
+        QVERIFY(deep > 0);  // (menus inside menus inside menus too)
+        const auto names = app::command_names(window);
+        std::map<QString, int> count;
+        for (const auto& [action, name] : names) ++count[action->text()];
+        int placed = 0;
+        for (const auto& [action, name] : names) {
+            const QString place = count[action->text()] > 1 ? app::where(window, action) : QString();
+            const QString expected = place.isEmpty() ? action->text() : action->text() + QStringLiteral("（") + place + QStringLiteral("）");
+            if (name != expected) wrong << name + QStringLiteral(" / ") + expected;
+            if (!place.isEmpty()) ++placed;
+        }
+        QCOMPARE(wrong, QStringList());
+        QVERIFY(placed > 0);  // (レベル補正… among them: decision 8)
     }
 
     // A command renamed since its name was kept in the quick-access panel or the command bar keeps its place under its new

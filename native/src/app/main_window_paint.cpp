@@ -198,8 +198,8 @@ void MainWindow::build_colour_dock() {
     scroll->setWidgetResizable(true);
     scroll->setFrameShape(QFrame::NoFrame);
     scroll->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
+    dock->setWidget(scroll);  // (in the dock first, then the panel in it: styled once — build_tool_settings)
     scroll->setWidget(colours_);
-    dock->setWidget(scroll);
     dock->setMinimumWidth(200);
     dock->setFeatures(QDockWidget::DockWidgetMovable | QDockWidget::DockWidgetFloatable);
     addDockWidget(Qt::RightDockWidgetArea, dock);

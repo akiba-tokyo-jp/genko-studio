@@ -18,6 +18,8 @@
 
 #include <algorithm>
 #include <functional>
+#include <optional>
+#include <unordered_map>
 
 #include "app/ask.hpp"
 #include "app/config.hpp"
@@ -60,6 +62,24 @@ bool find_in(QMenu* menu, const QAction* action, QStringList& trail) {
     return false;
 }
 
+// Every item of a menu with its menu path, as find_in finds it (the menus walked in the same order, an item before its
+// own menu: its first place), the ones already known kept.
+void places_in(QMenu* menu, QStringList& trail, std::unordered_map<const QAction*, QString>& out) {
+    for (QAction* item : menu->actions()) {
+        if (!out.contains(item)) out.emplace(item, trail.join(QStringLiteral(" → ")));
+        if (item->menu() != nullptr) {
+            trail << item->text();
+            places_in(item->menu(), trail, out);
+            trail.removeLast();
+        }
+    }
+}
+
+QString place_of(const std::unordered_map<const QAction*, QString>& known, const QAction* action) {
+    const auto found = known.find(action);
+    return found != known.end() ? found->second : QString();
+}
+
 const QString kLine = QStringLiteral("――（区切り）");
 
 }  // namespace
@@ -92,28 +112,30 @@ std::vector<QAction*> menu_commands(QMainWindow* window) {
 
 }  // namespace
 
-std::map<const QAction*, QString> command_names(QMainWindow* window) {
-    const std::vector<QAction*> all = menu_commands(window);
+namespace {
+
+// (known: the menu paths, when the caller has them already — else walked here once, when a name needs one)
+std::map<const QAction*, QString> command_names(const std::vector<QAction*>& all, QMainWindow* window,
+                                                const std::unordered_map<const QAction*, QString>* known = nullptr) {
     std::map<QString, int> count;
     for (const QAction* action : all) ++count[action->text()];
     std::map<const QAction*, QString> out;
+    std::optional<std::unordered_map<const QAction*, QString>> walked;
     for (const QAction* action : all) {
-        const QString place = count[action->text()] > 1 ? where(window, action) : QString();
+        QString place;
+        if (count[action->text()] > 1) {
+            if (known == nullptr) known = &walked.emplace(menu_places(window));
+            place = place_of(*known, action);
+        }
         out[action] = place.isEmpty() ? action->text() : QStringLiteral("%1（%2）").arg(action->text(), place);
     }
     return out;
 }
 
-QString command_name(const std::map<const QAction*, QString>& names, const QAction* action) {
-    const auto found = names.find(action);
-    return found != names.end() ? found->second : action->text();
-}
-
-std::vector<QAction*> commands(QMainWindow* window) {
-    const auto names = command_names(window);
+std::vector<QAction*> commands(const std::vector<QAction*>& all, const std::map<const QAction*, QString>& names) {
     std::vector<QAction*> out;
     QSet<QString> seen;
-    for (QAction* action : menu_commands(window)) {
+    for (QAction* action : all) {
         const QString name = command_name(names, action);
         if (seen.contains(name)) continue;
         seen.insert(name);
@@ -122,13 +144,29 @@ std::vector<QAction*> commands(QMainWindow* window) {
     return out;
 }
 
+}  // namespace
+
+std::map<const QAction*, QString> command_names(QMainWindow* window) { return command_names(menu_commands(window), window); }
+
+QString command_name(const std::map<const QAction*, QString>& names, const QAction* action) {
+    const auto found = names.find(action);
+    return found != names.end() ? found->second : action->text();
+}
+
+std::vector<QAction*> commands(QMainWindow* window) {
+    const std::vector<QAction*> all = menu_commands(window);
+    return commands(all, command_names(all, window));
+}
+
 std::map<QString, QAction*> by_text(QMainWindow* window) {
-    const auto names = command_names(window);
+    const std::vector<QAction*> all = menu_commands(window);
+    const auto names = command_names(all, window);
+    const std::vector<QAction*> listed = commands(all, names);
     std::map<QString, QAction*> out;
-    for (QAction* action : commands(window)) out[command_name(names, action)] = action;
+    for (QAction* action : listed) out[command_name(names, action)] = action;
     // (a name kept before others had the same words — the words alone: the first of them in the menus, the one that had
     // them then, as the layer panel's 色調補正のレイヤー's before レイヤー → 色調補正)
-    for (QAction* action : commands(window)) out.emplace(action->text(), action);
+    for (QAction* action : listed) out.emplace(action->text(), action);
     return out;
 }
 
@@ -141,12 +179,24 @@ QString where(QMainWindow* window, const QAction* action) {
     return {};
 }
 
+std::unordered_map<const QAction*, QString> menu_places(QMainWindow* window) {
+    std::unordered_map<const QAction*, QString> out;
+    for (QAction* top : window->menuBar()->actions()) {
+        if (top->menu() == nullptr) continue;
+        QStringList trail{top->text()};
+        places_in(top->menu(), trail, out);
+    }
+    return out;
+}
+
 std::vector<QAction*> search(QMainWindow* window, const QString& words) {
     static const QRegularExpression space(QStringLiteral("\\s+"), QRegularExpression::UseUnicodePropertiesOption);
     const QStringList parts = words.toLower().split(space, Qt::SkipEmptyParts);
     std::vector<QAction*> out;
-    for (QAction* action : commands(window)) {
-        const QString text = (action->text() + QLatin1Char(' ') + where(window, action) + QLatin1Char(' ') + action->statusTip()).toLower();
+    const std::vector<QAction*> all = menu_commands(window);
+    const auto known = menu_places(window);  // (the menus walked once: for the names and the places both)
+    for (QAction* action : commands(all, command_names(all, window, &known))) {
+        const QString text = (action->text() + QLatin1Char(' ') + place_of(known, action) + QLatin1Char(' ') + action->statusTip()).toLower();
         if (std::all_of(parts.begin(), parts.end(), [&text](const QString& part) { return text.contains(part); })) out.push_back(action);
     }
     return out;

@@ -49,8 +49,8 @@ QDockWidget* studio_dock(QMainWindow* window, const QString& title, QWidget* pan
     scroll->setWidgetResizable(true);
     scroll->setFrameShape(QFrame::NoFrame);
     scroll->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
+    dock->setWidget(scroll);  // (in the dock first, then the panel in it: styled once — build_tool_settings)
     scroll->setWidget(panel);
-    dock->setWidget(scroll);
     dock->setMinimumWidth(200);
     QDockWidget::DockWidgetFeatures features = QDockWidget::DockWidgetMovable | QDockWidget::DockWidgetFloatable;
     if (closable) features |= QDockWidget::DockWidgetClosable;  // (Python's OCCASIONAL_PANELS: 資料)

@@ -859,8 +859,9 @@ private slots:
 
     // --- the backups (test_w15_color) -------------------------------------------------------------------------------
 
-    // zip64 (a backup past 4 GiB or 65535 files, Python's zipfile writes it so): its end records written and read back,
-    // and Python's zipfile reading the same archives whole
+    // zip64 (a backup past 4 GiB or 65535 files, Python's zipfile writes it so): its end records written and read back
+    // (Python's zipfile reading the same archives whole: test_contract_materials' bigZipsAreReadWholeByPython, a
+    // contract test, as it needs the reference Python)
     void bigBackupsAreZip64() {
         QTemporaryDir tmp;
         const auto source = gui_test::path_of(tmp.path() + QStringLiteral("/s.txt"));
@@ -888,17 +889,6 @@ private slots:
             const std::uint64_t old_count = number(end + 10, 2);
             QVERIFY(old_count == 0xffff || (count < 0xffff && old_count == count));
             if (count > 0xffff) QCOMPARE(old_count, std::uint64_t{0xffff});
-        }
-        if (genko::test::python_ref().isEmpty()) QSKIP("no reference Python: set GENKO_PYREF or install /opt/pyref/bin/python");
-        for (const auto& [archive, count] : {std::pair{forced, 2}, std::pair{crowded, 65537}}) {
-            const genko::test::Run check = genko::test::run(
-                genko::test::python_ref(),
-                {QStringLiteral("-I"), QStringLiteral("-c"),
-                 QStringLiteral("import sys, zipfile; z = zipfile.ZipFile(sys.argv[1]); assert z.testzip() is None; print(len(z.namelist()))"),
-                 gui_test::qpath(archive)},
-                QProcessEnvironment::systemEnvironment(), 120000);
-            QVERIFY2(check.finished && check.exit_code == 0, qPrintable(check.described()));
-            QCOMPARE(check.out.trimmed().toInt(), count);
         }
     }
 

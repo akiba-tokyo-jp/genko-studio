@@ -136,8 +136,8 @@ void MainWindow::build_line_dock() {
     scroll->setWidgetResizable(true);
     scroll->setFrameShape(QFrame::NoFrame);
     scroll->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
+    dock->setWidget(scroll);  // (in the dock first, then the panel in it: styled once — build_tool_settings)
     scroll->setWidget(story_);
-    dock->setWidget(scroll);
     dock->setMinimumWidth(200);
     dock->setFeatures(QDockWidget::DockWidgetMovable | QDockWidget::DockWidgetFloatable);  // (a tab of the row, as Python's)
     addDockWidget(Qt::RightDockWidgetArea, dock);

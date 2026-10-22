@@ -63,8 +63,8 @@ QDockWidget* occasional_dock(QMainWindow* window, const QString& title, QWidget*
     scroll->setWidgetResizable(true);
     scroll->setFrameShape(QFrame::NoFrame);
     scroll->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
+    dock->setWidget(scroll);  // (in the dock first, then the panel in it: styled once — build_tool_settings)
     scroll->setWidget(panel);
-    dock->setWidget(scroll);
     dock->setMinimumWidth(200);
     // (for occasional work, as Python's OCCASIONAL_PANELS: its tab has a close button and it joins the row when opened)
     dock->setFeatures(QDockWidget::DockWidgetMovable | QDockWidget::DockWidgetFloatable | QDockWidget::DockWidgetClosable);

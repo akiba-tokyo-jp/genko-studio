@@ -69,6 +69,19 @@ void MainWindow::build_tool_settings() {
 
     tool_settings_ = new ToolSettings;
     ToolSettings* ts = tool_settings_;
+    // (the panel in its scroll area and its dock first, its pages added after: a widget that changes parent has the app's
+    // style sheet given again to everything under it, so each page is styled once as it is added — not twice more with
+    // all the others, as the whole panel goes into the scroll area and the dock; it opens the window quicker). Nothing
+    // asks the dock's, the scroll area's or the window's size until the last page is in (no adjustSize, layout()->activate,
+    // sizeHint, nor events run): a scroll area measures its panel again only at setWidget, so it would keep the empty one's.
+    auto* dock = new QDockWidget(QStringLiteral("ツールの設定"), this);
+    auto* scroll = new QScrollArea;
+    scroll->setWidgetResizable(true);
+    scroll->setFrameShape(QFrame::NoFrame);
+    scroll->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
+    scroll->setWidget(ts);
+    scroll->setMinimumHeight(24);  // (on a short screen it scrolls, and the window stays on the screen)
+    dock->setWidget(scroll);
     ts->add({QStringLiteral("pen"), QStringLiteral("fill"), QStringLiteral("lassofill"), QStringLiteral("picker")}, brush_);
     // the eraser
     eraser_size_ = new QDoubleSpinBox;
@@ -140,14 +153,6 @@ void MainWindow::build_tool_settings() {
     build_guide_pages(ts);   // (定規・3D: main_window_guides.cpp)
     build_material_pages(ts);  // (効果線・素材を置く: main_window_materials.cpp)
 
-    auto* dock = new QDockWidget(QStringLiteral("ツールの設定"), this);
-    auto* scroll = new QScrollArea;
-    scroll->setWidgetResizable(true);
-    scroll->setFrameShape(QFrame::NoFrame);
-    scroll->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
-    scroll->setWidget(ts);
-    scroll->setMinimumHeight(24);  // (on a short screen it scrolls, and the window stays on the screen)
-    dock->setWidget(scroll);
     dock->setObjectName(QStringLiteral("ツールの設定"));
     dock->setTitleBarWidget(new QWidget);  // (the tool's own name heads the panel; no second title above it)
     dock->setFeatures(QDockWidget::DockWidgetMovable | QDockWidget::DockWidgetFloatable);
