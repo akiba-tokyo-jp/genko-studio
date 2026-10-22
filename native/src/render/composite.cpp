@@ -9,6 +9,7 @@
 #include <cstring>
 #include <functional>
 #include <numbers>
+#include <optional>
 #include <stdexcept>
 #include <tuple>
 
@@ -170,6 +171,26 @@ struct GradientT {
     }
 };
 
+// (vector@1, PC4 E4) a gradient's transparency stops as an interpolation of their opacities, or none (core::transparency_stops'
+// form: checked when the gradient was taken)
+std::optional<core::NumpyInterp> transparency_of(const Json& spec) {
+    const Json* raw = get(spec, "transparency");
+    if (raw == nullptr || !raw->is_array() || raw->empty()) return std::nullopt;
+    std::vector<std::pair<double, double>> stops;
+    for (const Json& s : *raw) {
+        if (!s.is_array() || s.size() < 2) continue;
+        stops.emplace_back(py_max(0.0, py_min(1.0, core::py_float(s[0]))), py_max(0.0, py_min(1.0, core::py_float(s[1]))));
+    }
+    if (stops.empty()) return std::nullopt;
+    std::stable_sort(stops.begin(), stops.end(), [](const auto& a, const auto& b) { return a.first < b.first; });
+    std::vector<double> xp, fp;
+    for (const auto& [x, f] : stops) {
+        xp.push_back(x);
+        fp.push_back(f);
+    }
+    return core::NumpyInterp(xp, fp);
+}
+
 // render.gradient_image over `area`
 Image gradient_image(Size size, int dpi, const Json& spec, const Box& area) {
     (void)size;
@@ -190,6 +211,7 @@ Image gradient_image(Size size, int dpi, const Json& spec, const Box& area) {
     std::vector<double> alpha_fp;
     for (const Stop& s : stops) alpha_fp.push_back(s.opacity);
     const core::NumpyInterp alpha(pos, alpha_fp);
+    const std::optional<core::NumpyInterp> transparency = transparency_of(spec);
     const int w = area.width();
     const int h = area.height();
     std::string data(static_cast<std::size_t>(w) * static_cast<std::size_t>(h) * 4, '\0');
@@ -201,7 +223,7 @@ Image gradient_image(Size size, int dpi, const Json& spec, const Box& area) {
         for (int i = 0; i < w; ++i) {
             const double t = t_of(gxs[static_cast<std::size_t>(i)], gy);
             for (std::size_t c = 0; c < 3; ++c) data[at++] = static_cast<char>(to_u8(std::nearbyint(colour[c](t))));
-            data[at++] = static_cast<char>(to_u8(std::nearbyint(alpha(t) * 255)));
+            data[at++] = static_cast<char>(to_u8(std::nearbyint((transparency ? alpha(t) * (*transparency)(t) : alpha(t)) * 255)));
         }
     }
     return Image::frombytes("RGBA", Size{w, h}, data);
@@ -210,7 +232,7 @@ Image gradient_image(Size size, int dpi, const Json& spec, const Box& area) {
 }  // namespace
 
 struct GradientColours::Impl {
-    explicit Impl(const Json& spec) : t_of(spec), stops(gradient_stops(spec)) {
+    explicit Impl(const Json& spec) : t_of(spec), stops(gradient_stops(spec)), transparency(transparency_of(spec)) {
         std::vector<double> pos;
         for (const Stop& s : stops) pos.push_back(s.pos);
         for (std::size_t c = 0; c < 3; ++c) {
@@ -225,14 +247,41 @@ struct GradientColours::Impl {
         for (const Stop& s : stops) alpha_fp.push_back(s.opacity);
         alpha.emplace_back(pos, alpha_fp);
     }
+    Impl(const Json& spec, const std::vector<GradientStop>& given) : t_of(spec), transparency(transparency_of(spec)) {
+        std::vector<GradientStop> sorted = given;
+        std::stable_sort(sorted.begin(), sorted.end(), [](const GradientStop& a, const GradientStop& b) { return a.pos < b.pos; });
+        if (sorted.empty()) throw core::OpError("a gradient needs its colours");
+        std::vector<double> pos;
+        for (const GradientStop& s : sorted) pos.push_back(py_max(0.0, py_min(1.0, s.pos)));
+        for (std::size_t c = 0; c < 3; ++c) {
+            std::vector<double> fp;
+            for (const GradientStop& s : sorted) fp.push_back(s.rgb[c]);
+            colour.emplace_back(pos, fp);
+        }
+        std::vector<double> alpha_fp;
+        for (const GradientStop& s : sorted) alpha_fp.push_back(py_max(0.0, py_min(1.0, s.opacity)));
+        alpha.emplace_back(pos, alpha_fp);
+    }
     GradientT t_of;
     std::vector<Stop> stops;
+    std::optional<core::NumpyInterp> transparency;
     std::vector<core::NumpyInterp> colour;
     std::vector<core::NumpyInterp> alpha;
 };
 
 GradientColours::GradientColours(const Json& spec) : impl_(std::make_unique<Impl>(spec)) {}
+GradientColours::GradientColours(const Json& spec, const std::vector<GradientStop>& stops) : impl_(std::make_unique<Impl>(spec, stops)) {}
 GradientColours::~GradientColours() = default;
+
+void GradientColours::at(double gx, double gy, double rgba[4]) const {
+    const double t = impl_->t_of(gx, gy);
+    if (!std::isfinite(t)) throw core::OpError("from and to of the gradient are too far apart or off the page");
+    for (std::size_t c = 0; c < 3; ++c) rgba[c] = impl_->colour[c](t);
+    rgba[3] = impl_->alpha[0](t) * (impl_->transparency ? (*impl_->transparency)(t) : 1.0);
+    if (!std::isfinite(rgba[3]) || !std::isfinite(rgba[0]) || !std::isfinite(rgba[1]) || !std::isfinite(rgba[2])) {
+        throw core::OpError("from and to of the gradient are too far apart or off the page");
+    }
+}
 
 void GradientColours::at(double gx, double gy, unsigned char rgb[3], double& opacity) const {
     const double t = impl_->t_of(gx, gy);
@@ -245,6 +294,7 @@ void GradientColours::at(double gx, double gy, unsigned char rgb[3], double& opa
         rgb[c] = to_u8(v);
     }
     opacity = impl_->alpha[0](t);
+    if (impl_->transparency) opacity *= (*impl_->transparency)(t);
     if (!std::isfinite(opacity)) throw core::OpError("from and to of the gradient are too far apart or off the page");
 }
 

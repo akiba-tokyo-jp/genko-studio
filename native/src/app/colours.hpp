@@ -70,9 +70,14 @@ public:
     explicit Swatch(const Rgb& rgb = {0, 0, 0}, int size = 22, QWidget* parent = nullptr);
     void set_rgb(const Rgb& rgb);
     const Rgb& rgb() const { return rgb_; }
+    // (PC4 E4) the keys held as a swatch is clicked, while its picked() is said (none otherwise): Ctrl+click's 背景色.
+    static Qt::KeyboardModifiers held();
 
 signals:
     void picked(const genko::app::Rgb& rgb);
+
+protected:
+    void mouseReleaseEvent(QMouseEvent* event) override;
 
 private:
     Rgb rgb_{0, 0, 0};
@@ -139,6 +144,15 @@ public:
     bool is_precise() const;
     // The 描画色 as a line's color_rgb ({"precision": "u16" | "f32", "values": [r, g, b]}; u16: rounded to 16 bits, 0..1).
     core::Json foreground_json(std::string_view precision) const;
+    // PC4 E4 (tools.setColors): the 背景色 chosen — an 8-bit colour (its floats let go), or floats (straight sRGB, its 8-bit
+    // picture the nearest) —, kept in the settings as the 背景色 is; and as color_rgb, as foreground_json.
+    void set_background(const Rgb& rgb);
+    void set_background_precise(const Precise& srgb);
+    core::Json background_json(std::string_view precision) const;
+    // A swatch clicked (スウォッチ, 履歴, 中間色, 近似色): the 描画色, or with Ctrl held the 背景色 (Photoshop's).
+    void pick_swatch(const Rgb& rgb);
+    // PC4 E4: the page's RGB depth (16 or 32: the 描画色's floats are shown and can be typed, 高精度; 8 or none: hidden).
+    void set_precise_depth(int depth);
     // A colour just used goes to the front of 履歴.
     void remember(const Rgb& rgb);
     // The current colour added to the chosen set (a built-in set: to one's own copy of it).
@@ -179,12 +193,16 @@ public:
     std::array<QLabel*, 4> ink_labels{};
     QLabel* gamut = nullptr;
     QLabel* table_index = nullptr;  // (an indexed page: the colour's index in its table)
+    QWidget* precise_box = nullptr;                // (PC4 E4: shown on an RGB page of 16 or 32 bits)
+    std::array<QDoubleSpinBox*, 3> precise_spins{};  // the 描画色's R G B as floats (0..1; 32 bits: past 1 too)
 
 signals:
     // スポイト: where the picker takes its colour ("view" | "layer").
     void pick_source_chosen(const QString& source);
     // インキ: these inks chosen for the pen (CMYK 0..1, or L a b); the window gives them an RGB colour (set_inks).
     void inks_chosen(const std::vector<double>& ink);
+    // (PC4 E4) the 背景色 chosen of its own (set_background).
+    void background_set();
 
 private:
     void from_square();
@@ -193,6 +211,8 @@ private:
     void from_hex();
     void show_inks(const Rgb& rgb);
     void from_inks();
+    void show_precise();
+    void from_precise();
     void fill_sets();
     void fill_set();
     void fill_history();
@@ -209,6 +229,7 @@ private:
     bool loading_ = false;
     Rgb sub_rgb_{255, 255, 255};
     std::optional<Precise> fore_precise_, back_precise_;  // (PC4 E-0: as chosen; kept while their 8-bit pictures are shown)
+    int precise_depth_ = 0;
     std::vector<Rgb> history_;
     QTimer* history_write_ = nullptr;  // (履歴 written to the settings a moment after a run of lines)
     std::array<Rgb, 4> corners_{};

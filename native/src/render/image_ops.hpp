@@ -217,6 +217,11 @@ struct PixelsPart {
     const std::vector<std::uint8_t>* only = nullptr;  // (none: every pixel of the box)
 };
 void put_layer_pixels(core::Document& doc, std::size_t at, const std::string& id, const std::vector<PixelsPart>& parts);
+// PC4 E4 (review P2-1, P3-6): a part (`box`, clamped) of an ink raster as layer_pixels gives an ink layer's, and those
+// pixels written back into it (or only those `only` marks) — for a worker that holds the layer's inks itself (its lines
+// left as lines, the inks encoded once).
+Pixels inks_part(const core::InkPixels& raster, const core::PageColor& color, const Box& box);
+void put_inks_part(core::InkPixels& raster, const Pixels& p, const Box& box, const std::vector<std::uint8_t>* only = nullptr);
 
 // An ink layer's pixels set from changed colours and alphas (`px`, one each: rgba_of's form) by the page's rules
 // (render/ink correct: a colour left as it was keeps its inks). Worked in bands, their arrays in the imaging budget.
@@ -227,6 +232,9 @@ void from_rgba(Pixels& p, const std::vector<Rgba>& px);
 Pixels page_pixels(const core::Document& doc, const core::Page& page);
 // The same at `dpi` (PC4 E3: Define Pattern at the page's working grid).
 Pixels page_pixels(const core::Document& doc, const core::Page& page, int dpi);
+// (PC4 E4 review P2-3) Only `region` of it (pixels of the working 200 dpi, within the page): the same pixels, the rest
+// never drawn (RenderOptions::region).
+Pixels page_pixels(const core::Document& doc, const core::Page& page, const Box& region);
 // A layer's pixels, nothing changed: a paint layer's (its lines and fills drawn in on a copy), any other layer as it
 // shows alone (layer_image, 8 bits).
 Pixels shown_layer_pixels(const core::Document& doc, const core::Page& page, const core::Layer& layer);

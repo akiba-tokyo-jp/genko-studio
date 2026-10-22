@@ -553,6 +553,8 @@ bool new_gradient(const Json& fill) {
         const std::string& s = shape->get_ref<const std::string&>();
         if (s == "angle" || s == "reflected" || s == "diamond") return true;
     }
+    // (PC4 E4: transparency stops, which a build before them leaves out)
+    if (const auto transparency = g->find("transparency"); transparency != g->end() && !transparency->is_null()) return true;
     const auto reverse = g->find("reverse");
     return reverse != g->end() && reverse->is_boolean() && reverse->get<bool>();
 }

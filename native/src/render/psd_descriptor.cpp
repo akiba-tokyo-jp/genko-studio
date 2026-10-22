@@ -173,12 +173,15 @@ const Value* Object::get(std::string_view key) const {
 
 std::string read_id(Bytes& b) {
     const std::uint32_t n = b.u32();
-    return std::string(b.take(n == 0 ? 4 : n));
+    const std::string_view id = b.take(n == 0 ? 4 : n);
+    b.spend(id.size());  // (PC4 E4 review P1-1: what is kept, counted)
+    return std::string(id);
 }
 
 std::u16string read_unicode(Bytes& b) {
     const std::uint32_t n = b.u32();
     if (n > b.left() / 2) throw Broken("a text is longer than the block");
+    b.spend(std::size_t(n) * sizeof(char16_t));
     std::u16string out;
     out.reserve(n);
     for (std::uint32_t i = 0; i < n; ++i) out.push_back(static_cast<char16_t>(b.u16()));
@@ -190,6 +193,7 @@ namespace {
 
 Value read_value(Bytes& b, const std::string& type, int depth) {
     if (depth > 32) throw Broken("descriptors nested too deep");  // (lists in lists as well as objects)
+    b.spend(2 * sizeof(Value));  // (PC4 E4 review P1-1: the value and its slot in a list or an object, which grows twice)
     Value v;
     v.type = type;
     if (type == "TEXT") {
@@ -211,6 +215,7 @@ Value read_value(Bytes& b, const std::string& type, int depth) {
         v.unit = std::string(b.take(4));
         const std::uint32_t n = b.u32();
         if (n > b.left() / 8) throw Broken("a list is longer than the block");
+        b.spend(2 * std::size_t(n) * sizeof(double));
         for (std::uint32_t i = 0; i < n; ++i) v.numbers.push_back(b.f64());
         if (!v.numbers.empty()) v.number = v.numbers.front();
     } else if (type == "ObAr") {  // (an object array: the count of each list's items, then a structure of the lists)
@@ -222,12 +227,15 @@ Value read_value(Bytes& b, const std::string& type, int depth) {
         v.object = std::make_shared<Object>(read_structure(b, depth + 1));
     } else if (type == "VlLs") {
         const std::uint32_t n = b.u32();
+        if (n > b.left() / 5) throw Broken("a list is longer than the block");  // (an item: its type and a byte at least)
         for (std::uint32_t i = 0; i < n; ++i) {
             const std::string item_type(b.take(4));
             v.list.push_back(read_value(b, item_type, depth + 1));
         }
     } else if (type == "tdta" || type == "alis" || type == "Pth ") {
-        v.raw = std::string(b.take(b.u32()));
+        const std::string_view raw = b.take(b.u32());
+        b.spend(raw.size());
+        v.raw = std::string(raw);
     } else if (type == "type" || type == "GlbC") {
         (void)read_unicode(b);
         v.enum_value = read_id(b);
@@ -241,11 +249,14 @@ Value read_value(Bytes& b, const std::string& type, int depth) {
 
 Object read_structure(Bytes& b, int depth) {
     if (depth > 32) throw Broken("descriptors nested too deep");
+    b.spend(sizeof(Object) + 2 * sizeof(std::shared_ptr<Object>));  // (PC4 E4 review P1-1: kept behind a value's pointer)
     Object out;
     (void)read_unicode(b);
     out.class_id = read_id(b);
     const std::uint32_t n = b.u32();
+    if (n > b.left() / 10) throw Broken("an object has more items than the block");  // (a key, a type and a byte at least)
     for (std::uint32_t i = 0; i < n; ++i) {
+        b.spend(2 * sizeof(std::string));  // (an item's key in its slot)
         std::string key = read_id(b);
         const std::string type(b.take(4));
         out.items.emplace_back(std::move(key), read_value(b, type, depth));

@@ -533,7 +533,9 @@ private slots:
         int pc3 = 0;
         for (const auto& [name, before] : app::preferences::renamed()) {
             QVERIFY2(alive.contains(name), qPrintable(name));
-            QVERIFY2(!now.contains(before), qPrintable(before));
+            // (PC4 E4: an old name a later command took for its own — the グラデーション panel's — is read by the mark of
+            // the list or the key it is in: preferences::reused_names(), theGradientPanelsNameIsApart)
+            QVERIFY2(!now.contains(before) || app::preferences::reused_name(before), qPrintable(before));
             if (name == QStringLiteral("長方形選択ツール") || name == QStringLiteral("カット") || name == QStringLiteral("移動ツール") ||
                 name == QStringLiteral("自由な形に") || name == QStringLiteral("前面へ"))
                 ++pc3;
@@ -677,6 +679,56 @@ private slots:
         QCOMPARE(b.window->action("act_pen")->shortcut(), QKeySequence(QStringLiteral("B")));
         // the layers and the brushes keep theirs
         QCOMPARE(b.window->action("act_layer_pen")->text(), QStringLiteral("新しいペンのレイヤー"));
+    }
+
+    // PC4 E4 (E-0's promise): グラデーション — the グラデーションツール's old name — is the グラデーション panel's own name since; a
+    // list and the keys kept before the panel (no mark) read it as the tool, those kept since (marked when written) as the
+    // panel: the two never taken for each other, nor one key given to both.
+    void theGradientPanelsNameIsApart() {
+        Book b;
+        const auto store = app::settings();
+        QAction* panel = b.dock(QStringLiteral("グラデーション"))->toggleViewAction();
+        QAction* tool = b.window->action("act_gradient");
+        QCOMPARE(panel->text(), QStringLiteral("グラデーション"));
+        QVERIFY(app::preferences::reused_name(QStringLiteral("グラデーション")));
+        // a list kept before: the tool; kept since (keep() marks it): the panel
+        store->remove(QStringLiteral("names_current/ui/commandbar"));
+        store->setValue(QStringLiteral("ui/commandbar"), QStringLiteral("グラデーション\tペン"));
+        QCOMPARE(app::chosen(QStringLiteral("ui/commandbar"), app::kDefaultCommandBar),
+                 (QStringList{QStringLiteral("グラデーションツール"), QStringLiteral("ブラシツール")}));
+        app::keep(QStringLiteral("ui/commandbar"), {QStringLiteral("グラデーション"), QStringLiteral("ブラシツール")});
+        QVERIFY(app::preferences::names_current(QStringLiteral("ui/commandbar")));
+        QCOMPARE(app::chosen(QStringLiteral("ui/commandbar"), app::kDefaultCommandBar),
+                 (QStringList{QStringLiteral("グラデーション"), QStringLiteral("ブラシツール")}));
+        const auto names = app::by_text(b.window.get());
+        QCOMPARE(names.find(QStringLiteral("グラデーション"))->second, panel);
+        // the list written again by a build before E4 (the mark is of another list): the tool again
+        store->setValue(QStringLiteral("ui/commandbar"), QStringLiteral("ペン\tグラデーション"));
+        QVERIFY(!app::preferences::names_current(QStringLiteral("ui/commandbar")));
+        QCOMPARE(app::chosen(QStringLiteral("ui/commandbar"), app::kDefaultCommandBar),
+                 (QStringList{QStringLiteral("ブラシツール"), QStringLiteral("グラデーションツール")}));
+        store->remove(QStringLiteral("ui/commandbar"));
+        store->remove(QStringLiteral("names_current/ui/commandbar"));
+        // keys kept before: the tool's (the panel takes none of them)
+        store->remove(QStringLiteral("names_current/shortcuts/グラデーション"));
+        store->setValue(QStringLiteral("shortcuts/グラデーション"), QStringLiteral("Ctrl+Alt+G"));
+        app::preferences::apply_shortcuts(b.window.get());
+        QCOMPARE(tool->shortcut(), QKeySequence(QStringLiteral("Ctrl+Alt+G")));
+        QVERIFY(panel->shortcut().isEmpty());
+        // kept since (the preferences mark them as they write them): the panel's, the tool its own key
+        app::preferences::mark_names_current(QStringLiteral("shortcuts/グラデーション"));
+        app::preferences::apply_shortcuts(b.window.get());
+        QCOMPARE(panel->shortcut(), QKeySequence(QStringLiteral("Ctrl+Alt+G")));
+        QCOMPARE(tool->shortcut(), QKeySequence(QStringLiteral("U")));
+        // a key written there again by a build before E4: the tool's again
+        store->setValue(QStringLiteral("shortcuts/グラデーション"), QStringLiteral("Ctrl+Alt+H"));
+        app::preferences::apply_shortcuts(b.window.get());
+        QCOMPARE(tool->shortcut(), QKeySequence(QStringLiteral("Ctrl+Alt+H")));
+        QVERIFY(panel->shortcut().isEmpty());
+        store->remove(QStringLiteral("shortcuts/グラデーション"));
+        store->remove(QStringLiteral("names_current/shortcuts/グラデーション"));
+        app::preferences::apply_shortcuts(b.window.get());
+        QVERIFY(panel->shortcut().isEmpty());
     }
 
     // A short window: the palette's pictures shrink (down to 16 px) so the last tool stays within reach; the layers'

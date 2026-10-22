@@ -455,8 +455,14 @@ BrushPanel::BrushPanel(QWidget* parent) : QWidget(parent) {
     layout->addLayout(form);
     layout->addWidget(section(QStringLiteral("色"), QStringLiteral("スポイトツール（I）で原稿から拾えます")));
     layout->addLayout(colour_row);
-    layout->addWidget(section(QStringLiteral("塗りつぶしツール（G）")));
-    layout->addLayout(fill_form);
+    // (PC4 E4: shown on the 塗りつぶしツール's and 囲って塗る's page, main_window_paint.cpp)
+    fill_section = new QWidget;
+    fill_section->setObjectName(QStringLiteral("fill_lines_section"));
+    auto* fill_box = new QVBoxLayout(fill_section);
+    fill_box->setContentsMargins(0, 0, 0, 0);
+    fill_box->addWidget(section(QStringLiteral("線で囲まれた所・囲って塗る")));
+    fill_box->addLayout(fill_form);
+    layout->addWidget(fill_section);
     layout->addWidget(crossing);
     layout->addStretch(1);
     loading_ = true;

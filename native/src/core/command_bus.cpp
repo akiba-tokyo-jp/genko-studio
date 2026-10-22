@@ -69,6 +69,14 @@ bool dab_key(std::string_view op, std::string_view key) {
     return false;
 }
 
+// PC4 E4 (SPEC.md COLOR-09「塗りつぶし・グラデーション」): gradient_fill's reverse, dither, blend, opacity and transparency,
+// fill's blend and color_rgb.
+bool fill_key(std::string_view op, std::string_view key) {
+    if (op == "gradient_fill") return key == "reverse" || key == "dither" || key == "blend" || key == "opacity" || key == "transparency";
+    if (op == "fill") return key == "blend" || key == "color_rgb";
+    return false;
+}
+
 bool own_setting(const Json& op, std::string_view name, std::string_view key);
 // patterns@1 (PC4 E3): a pattern fill — fill_area's and fill's pattern, add_layer's of kind fill.
 bool pattern_key(std::string_view op, std::string_view key) { return key == "pattern" && (op == "fill_area" || op == "fill" || op == "add_layer"); }
@@ -83,7 +91,8 @@ std::string usage(const Json& op, bool channel = false) {
     std::vector<std::string> strange;
     for (const auto& [key, value] : op.items()) {
         if (!schema->contains(key) && key != "op" && key != "area" && !key.starts_with("_") && !paper_key(op, key) &&
-            !stroke_colour_key(op, key) && !dab_key(name, key) && !pattern_key(name, key) && !(key == "channel" && channel) && !own_setting(op, name, key)) {
+            !stroke_colour_key(op, key) && !dab_key(name, key) && !pattern_key(name, key) && !fill_key(name, key) && !(key == "channel" && channel) &&
+            !own_setting(op, name, key)) {
             strange.push_back(key);
         }
     }
@@ -104,7 +113,7 @@ std::string usage(const Json& op, bool channel = false) {
 bool native_key(std::string_view op, std::string_view key) {
     return (op == "merge_visible" && key == "flatten") || (op == "convert_layer" && key == "preserve_precision") ||
            (op == "define_brush" && key == "paper") || ((op == "add_line" || op == "edit_line") && key == "ruby_spans") ||
-           (op == "add_stroke" && key == "color_rgb") || dab_key(op, key) ||
+           (op == "add_stroke" && key == "color_rgb") || dab_key(op, key) || fill_key(op, key) ||
            key == "contents" ||  // (smart-objects@1: any op on a smart object's page)
            // PC3 (masks@1): set_layer_mask's linked, density and feather_mm; a pixel op's layer_mask (its layer's mask
            // painted instead of its pixels)

@@ -234,21 +234,46 @@ const std::multimap<QString, QString>& renamed() {
     return all;
 }
 
+const std::vector<QString>& reused_names() {
+    static const std::vector<QString> all{QStringLiteral("グラデーション")};
+    return all;
+}
+
+bool reused_name(const QString& name) {
+    const auto& all = reused_names();
+    return std::find(all.begin(), all.end(), name) != all.end();
+}
+
+bool names_current(const QString& key) {
+    const auto store = settings();
+    const QString mark = QStringLiteral("names_current/") + key;
+    return store->contains(mark) && store->value(mark).toString() == store->value(key).toString();
+}
+
+void mark_names_current(const QString& key) {
+    const auto store = settings();
+    store->setValue(QStringLiteral("names_current/") + key, store->value(key).toString());
+}
+
 void apply_shortcuts(MainWindow* window) {
     const auto store = settings();
     std::map<QString, QString> chosen;  // (a key the person gave a command: the command)
     std::vector<QAction*> own;          // (the commands with their own keys)
     const auto names = command_names(window);
     const auto first = by_text(window);  // (the words alone: the first command of them in the menus)
+    // (PC4 E4: keys kept under a reused name before it was a command's own name are the renamed command's — reused_names())
+    const auto current = [](const QString& name) { return names_current(QStringLiteral("shortcuts/") + name); };
     for (QAction* action : preferences::commands(window)) {
         const QString name = command_name(names, action);
         QString key = QStringLiteral("shortcuts/%1").arg(name);
+        if (reused_name(name) && !current(name)) key = QStringLiteral("shortcuts_unread/%1").arg(name);  // (none: the old command's)
         // (keys chosen under an old name: renamed() knows the new words, which another command may also have come to
         // have — the user's decision 8 —: then the first of them in the menus had the old name, as below)
         const auto words = first.find(action->text());
         const bool first_of_words = name != action->text() && words != first.end() && words->second == action;
         for (const QString& now : first_of_words ? QStringList{name, action->text()} : QStringList{name}) {
             for (auto [old, end] = renamed().equal_range(now); !store->contains(key) && old != end; ++old) {
+                if (reused_name(old->second) && current(old->second)) continue;  // (the new command's own key now)
                 if (store->contains(QStringLiteral("shortcuts/%1").arg(old->second))) {
                     key = QStringLiteral("shortcuts/%1").arg(old->second);  // (keys chosen under an old name)
                 }
@@ -885,6 +910,8 @@ void PreferencesDialog::save() {
             store->setValue(key, now.join(QLatin1Char('|')));
         }
     }
+    // (PC4 E4: the keys under a reused name are kept by this build's names)
+    for (const QString& reused : preferences::reused_names()) preferences::mark_names_current(QStringLiteral("shortcuts/") + reused);
     store->setValue(QStringLiteral("ui/font_pt"), font_pt->value());
     store->setValue(QStringLiteral("ui/ui_font"), ui_font->currentData());
     store->setValue(QStringLiteral("new/paper"), paper->currentData());

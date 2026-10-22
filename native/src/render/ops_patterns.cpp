@@ -30,6 +30,7 @@
 #include "render/page_internal.hpp"
 #include "render/pattern_library.hpp"
 #include "render/page.hpp"
+#include "render/paint_fill.hpp"
 #include "render/patterns.hpp"
 #include "render/png.hpp"
 #include "render/raster.hpp"
@@ -302,11 +303,8 @@ Json fill_with_pattern(core::OpContext& c, std::size_t at, std::size_t ti, const
     const bool pen = layer.kind == core::LayerKind::Strokes;
     const bool finest = page.spec.grid && *page.spec.grid == "finest";
     // (a paint layer with no pixels yet that a precise RGB page's precise pixels can hold: keep_page_modes' rule — no
-    // panel cut, no effect, screen or colour, nothing drawn on it)
-    const bool bare = layer.kind == core::LayerKind::Raster && !layer.color_raster && !layer.ink_raster &&
-                      (!layer.raster_png || layer.raster_png->empty()) && layer.stroke_count() == 0 && layer.patches.empty() && !shape_parts::any(layer);
-    const bool to_precise = bare && !page.color && page.rgb && page.rgb->depth > 8 && !page.rgb->table && layer.role != core::LayerRole::Tone &&
-                            !layer.panel_clip && !layer.effect && !layer.screen && !layer.color;
+    // panel cut, no effect, screen or colour, nothing drawn on it —, E4's paint_fill::becomes_precise since the merge)
+    const bool to_precise = paint_fill::becomes_precise(page, layer);
     // (where a picture is laid, as a colour's fill lays one: a pen layer — whatever its lines and the page —, and a paint
     // layer of 8 bits on a page that is not of inks nor of the finest grid, or of a precise page it cannot be precise on)
     const bool picture = mode == "normal" && !keep &&
@@ -345,95 +343,31 @@ Json fill_with_pattern(core::OpContext& c, std::size_t at, std::size_t ti, const
         edited.layers[ti].patches.push_back(std::move(*patch));
         return report;
     }
-    // (into the layer's pixels on its own grid: the coverage placed over the page, laid on the grid and cut at the panels
-    // when the layer is — as a colour's fill is when its picture is drawn in)
+    // (into the layer's pixels on its own grid — render/paint_fill's way since the merge, a colour's fill's and a gradient's:
+    // a layer becomes_precise() names made precise first, the coverage placed over the page, laid on the grid and cut at
+    // the panels when the layer is; an ink layer's lines kept as lines in the 通常 mode)
     const std::string id = layer.id;
-    const bool panel_clip = layer.panel_clip;
-    if (to_precise) {  // (clear precise pixels of the page's precision first, as fill_area's precise pieces start one)
-        const core::Page& was = doc.page(at);
-        const Size size{mm_to_px(was.spec.width_mm.value(), raster::kWorkingDpi), mm_to_px(was.spec.height_mm.value(), raster::kWorkingDpi)};
-        ColorCanvas clear(Image::create("RGBA", size, Ink{0, 0, 0, 0}), RgbSpace::of(was));
-        std::string pixels = clear.color_raster(was.rgb->depth == 16 ? "u16" : "f32");
-        doc.edit_page(at).layers[ti].color_raster = std::make_shared<const std::string>(std::move(pixels));
-        if (std::find(doc.features.begin(), doc.features.end(), core::kColorRasterFeature) == doc.features.end()) {
-            doc.features.emplace_back(core::kColorRasterFeature);
-        }
-    }
-    image_ops::Window found;
-    (void)image_ops::layer_pixels(c, at, id, Box{0, 0, 0, 0}, &found);
-    const core::Page& now = doc.page(at);
-    const Size on_page{mm_to_px(now.spec.width_mm.value(), dpi), mm_to_px(now.spec.height_mm.value(), dpi)};
-    Image placed = Image::create("L", on_page, Ink(0));
-    placed.paste(coverage, offset);
-    Image on_grid = placed.size() == found.grid ? placed : placed.resize(found.grid, found.grid.width < on_page.width ? Resample::Box : Resample::Bilinear);
-    const double grid_dpi = found.grid.width / (now.spec.width_mm.value() / 25.4);
-    if (panel_clip) {
-        const int clip_dpi = std::max(1, static_cast<int>(std::lround(grid_dpi)));
-        if (const std::optional<Image> panels = detail::clip_mask(now, found.grid, clip_dpi, Box{0, 0, found.grid.width, found.grid.height})) {
-            on_grid = chops::multiply(on_grid, *panels);
-        }
-    }
-    const auto box = on_grid.getbbox();
-    if (!box) throw OpError("the area is empty");
-    image_ops::Window window;
-    image_ops::Pixels p = image_ops::layer_pixels(c, at, id, *box, &window);
-    const std::string share = on_grid.crop(window.box).tobytes();
-    const bool inks = p.kind() == image_ops::Pixels::Kind::Inks;
-    const bool precise = p.kind() == image_ops::Pixels::Kind::Precise;
-    const bool direct = !inks || mode == "normal";  // (inks in a blend: through the colours they mean)
-    const patterns::Target target = inks ? (direct ? patterns::Target::inks(*now.color) : patterns::Target::srgb()) : patterns::Target::rgb(now);
-    const std::optional<patterns::Laid> laid = patterns::laid(&doc, spec, target, grid_dpi);
-    if (!laid) throw OpError("the book has no picture of the pattern " + spec["id"].get<std::string>());
-    const RgbSpace space = precise ? RgbSpace::of(now) : RgbSpace();
-    // (the pattern laid over the pixel as a normal layer lays it, its alpha kept: B2's fill_keeping_alpha — precise
-    // values in linear light)
-    const auto over = [](double under, double a, double top, double k) { return (top * k + under * a * (1 - k)) / (k + a * (1 - k)); };
-    const unsigned n = p.colours();
-    const std::uint32_t w = static_cast<std::uint32_t>(window.box.width());
-    float v[core::kPlatesMax + 1];
-    std::vector<image_ops::Rgba> rgba;
-    if (!direct) rgba = image_ops::rgba_of(p);
-    for (std::size_t i = 0; i < p.size(); ++i) {
-        const float k = static_cast<float>(static_cast<unsigned char>(share[i]) / 255.0 * opacity);
-        if (!(k > 0)) continue;
-        laid->at(window.box.x0 + static_cast<int>(i % w), window.box.y0 + static_cast<int>(i / w), v);
-        if (!direct) {  // (a blend on inks: the colours they mean, back by the page's rules)
-            if (keep && !(rgba[i][3] > 0)) continue;
-            image_ops::Rgba out = image_ops::composite(mode, rgba[i], image_ops::Rgba{v[0], v[1], v[2], v[3] * k}, 1.0f);
-            if (keep) out[3] = rgba[i][3];
-            rgba[i] = out;
-            continue;
-        }
-        float* px = p.at(i);
-        if (inks) {  // (normal, in the page's own values: the pattern's inks laid over the layer's)
-            const float sa = v[n] * k, da = px[n];
-            const float oa = sa + da * (1 - sa);
-            if (keep) {
-                if (!(da > 0)) continue;
-                for (unsigned ch = 0; ch < n; ++ch) px[ch] = (v[ch] * sa + px[ch] * da * (1 - sa)) / oa;
-                continue;
-            }
-            if (oa > 0)
-                for (unsigned ch = 0; ch < n; ++ch) px[ch] = (v[ch] * sa + px[ch] * da * (1 - sa)) / oa;
-            px[n] = oa;
-            continue;
-        }
-        if (keep && mode == "normal") {
-            const float sa = v[3] * k, da = px[3];
-            if (!(da > 0) || !(sa > 0)) continue;  // (a clear pixel stays clear, as it was)
-            for (unsigned ch = 0; ch < 3; ++ch) {
-                px[ch] = precise ? static_cast<float>(space.encode(ch, over(space.decode(ch, px[ch]), da, space.decode(ch, v[ch]), sa)))
-                                 : static_cast<float>(over(px[ch], da, v[ch], sa));
-            }
-            continue;
-        }
-        if (keep && !(px[3] > 0)) continue;
-        image_ops::Rgba out = image_ops::composite(mode, image_ops::Rgba{px[0], px[1], px[2], px[3]}, image_ops::Rgba{v[0], v[1], v[2], v[3] * k}, 1.0f);
-        if (keep) out[3] = px[3];
-        for (unsigned ch = 0; ch < 4; ++ch) px[ch] = out[ch];
-    }
-    if (!direct) image_ops::from_rgba(p, rgba);
-    image_ops::put_layer_pixels(doc, at, id, p, window.box);
+    paint_fill::Coverage cover;
+    cover.picture = coverage;
+    cover.offset = offset;
+    cover.dpi = dpi;
+    paint_fill::How how;
+    how.blend = mode;
+    how.opacity = opacity;
+    how.keep_transparency = core::truthy_at(op, "preserve_transparency");
+    paint_fill::LaidValues values;
+    const std::string pattern_id = spec["id"].get<std::string>();
+    values.make = [&doc, &spec, &pattern_id, at](paint_fill::LaidValues::Kind kind, double grid_dpi) -> std::function<void(int, int, float*)> {
+        const core::Page& now = doc.page(at);
+        const patterns::Target target = kind == paint_fill::LaidValues::Kind::Inks   ? patterns::Target::inks(*now.color)
+                                        : kind == paint_fill::LaidValues::Kind::Srgb ? patterns::Target::srgb()
+                                                                                     : patterns::Target::rgb(now);
+        std::optional<patterns::Laid> made = patterns::laid(&doc, spec, target, grid_dpi);
+        if (!made) throw OpError("the book has no picture of the pattern " + pattern_id);
+        auto held = std::make_shared<const patterns::Laid>(std::move(*made));
+        return [held](int x, int y, float* v) { held->at(x, y, v); };
+    };
+    if (!paint_fill::paint_values(c, at, id, cover, values, how)) throw OpError("the area is empty");
     return report;
 }
 

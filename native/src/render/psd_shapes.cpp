@@ -146,18 +146,52 @@ d::Writer gradient_descriptor(const Json& g, const vec::Path& path, const Canvas
     grad.enumerated("GrdF", "GrdF", "CstS");
     grad.number("Intr", 4096.0);
     std::vector<std::pair<std::string, d::Writer>> colours, opacities;
-    for (const Stop& s : stops_of(g)) {
+    const std::vector<Stop> stops = stops_of(g);
+    const auto opacity_stop = [&opacities](double pos, double opacity) {
+        d::Writer op;
+        op.unit("Opct", "#Prc", std::clamp(opacity, 0.0, 1.0) * 100.0);
+        op.integer("Lctn", static_cast<std::int32_t>(std::lround(std::clamp(pos, 0.0, 1.0) * 4096.0)));
+        op.integer("Mdpn", 50);
+        opacities.emplace_back("TrnS", std::move(op));
+    };
+    for (const Stop& s : stops) {
         d::Writer stop;
         stop.object("Clr ", rgbc(s.rgb), "RGBC");
         stop.enumerated("Type", "Clry", "UsrS");
         stop.integer("Lctn", static_cast<std::int32_t>(std::lround(std::clamp(s.pos, 0.0, 1.0) * 4096.0)));
         stop.integer("Mdpn", 50);
         colours.emplace_back("Clrt", std::move(stop));
-        d::Writer op;
-        op.unit("Opct", "#Prc", std::clamp(s.opacity, 0.0, 1.0) * 100.0);
-        op.integer("Lctn", static_cast<std::int32_t>(std::lround(std::clamp(s.pos, 0.0, 1.0) * 4096.0)));
-        op.integer("Mdpn", 50);
-        opacities.emplace_back("TrnS", std::move(op));
+    }
+    // (PC4 E4: a gradient's transparency stops times its colour stops' opacity, at the places of both; none: as before)
+    std::vector<std::pair<double, double>> transparency;
+    if (const auto given = g.find("transparency"); given != g.end() && given->is_array()) {
+        for (const Json& each : *given)
+            if (each.is_array() && each.size() == 2 && each[0].is_number() && each[1].is_number()) transparency.emplace_back(each[0].get<double>(), each[1].get<double>());
+    }
+    if (transparency.empty()) {
+        for (const Stop& s : stops) opacity_stop(s.pos, s.opacity);
+    } else {
+        const auto along = [](const std::vector<std::pair<double, double>>& points, double x) {
+            if (points.empty()) return 1.0;
+            if (x <= points.front().first) return points.front().second;
+            for (std::size_t i = 1; i < points.size(); ++i) {
+                if (x <= points[i].first) {
+                    const double gap = points[i].first - points[i - 1].first;
+                    return gap > 0 ? points[i - 1].second + (points[i].second - points[i - 1].second) * (x - points[i - 1].first) / gap : points[i].second;
+                }
+            }
+            return points.back().second;
+        };
+        std::vector<std::pair<double, double>> own;
+        for (const Stop& s : stops) own.emplace_back(s.pos, s.opacity);
+        std::stable_sort(own.begin(), own.end());
+        std::stable_sort(transparency.begin(), transparency.end());
+        std::vector<double> places;
+        for (const auto& [pos, value] : own) places.push_back(pos);
+        for (const auto& [pos, value] : transparency) places.push_back(pos);
+        std::sort(places.begin(), places.end());
+        places.erase(std::unique(places.begin(), places.end(), [](double one, double other) { return std::fabs(one - other) < 1e-4; }), places.end());
+        for (const double place : places) opacity_stop(place, along(own, place) * along(transparency, place));
     }
     grad.objects("Clrs", colours);
     grad.objects("Trns", opacities);

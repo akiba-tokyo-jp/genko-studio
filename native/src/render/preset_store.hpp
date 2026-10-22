@@ -69,6 +69,10 @@ std::string unique_name(const std::vector<Group>& groups, std::string_view base)
 // default group) → {"name", "group"}. core::Error("value") for an item the kind refuses or one too many.
 core::Json add(std::vector<Group>& groups, const Kind& kind, core::Json item, std::optional<std::string_view> group,
                std::string_view fallback_name);
+// (PC4 E4, review P3-3) Several items kept in `group` at once, as add() keeps each — the names taken counted once, not
+// item by item — → {"names": [their names], "group"}. All or none: on a refusal the groups are as they were.
+core::Json add_many(std::vector<Group>& groups, const Kind& kind, const std::vector<core::Json>& items, std::optional<std::string_view> group,
+                    std::string_view fallback_name);
 // {"action": rename | delete | move | new_group | rename_group | delete_group, "preset": a name or names, "group"?,
 // "name"?, "to"?, "index"?} → what changed (rename: {"name"}; delete: {"deleted"}; move: {"moved", "group"}; new_group,
 // rename_group: {"group"}; delete_group: {"deleted": its items}). core::Error("value") for what cannot be done (a name

@@ -50,6 +50,8 @@
 #include "formats/open_file.hpp"
 #include "formats/pillow_save.hpp"
 #include "formats/smart_files.hpp"
+#include "render/grd.hpp"
+#include "render/gradient_presets.hpp"
 #include "render/anim.hpp"
 #include "render/brushes.hpp"
 #include "render/draw.hpp"
@@ -1488,6 +1490,86 @@ int brushes_command(const QStringList& args, bool ascii) {
     return 0;
 }
 
+// PC4 E4 (gradient.presets.*, SPEC.md COLOR-09「グラデーションのプリセット」, the C++ build's own): the gradients of this
+// machine (the settings folder's gradients.json, render/gradient_presets) — `genko gradients list` (each group's presets with
+// their stops and transparency), `genko gradients new --stops <JSON> [--transparency <JSON>] [--name N] [--group G]`,
+// `genko gradients edit <{"action", …} JSON>`, `genko gradients reset [--append]`, `genko gradients import-grd <file.grd>
+// [--group G] [--keep]` (a group of the file's name, put in place of one of that name unless --keep; what was not read as
+// it is in "warnings"). The ops do not read them (a machine's setting): a preset's stops go to gradient_fill.
+int gradients_command(const QStringList& args, bool ascii) {
+    namespace presets = render::preset_store;
+    const auto& kind = render::gradient_presets::kind();
+    if (args.isEmpty()) return usage("genko gradients list | new | edit | reset | import-grd");
+    const QString what = args.front();
+    const QStringList rest = args.mid(1);
+    const fs::path dir = core::config_dir();
+    presets::Library library = presets::load(dir, kind);
+    if (what == QLatin1String("list")) {
+        Arguments a;
+        if (auto error = parse_arguments(rest, {}, 0, "", a)) return usage("genko gradients list: " + *error);
+        Json groups = Json::array();
+        for (const presets::Group& g : library.groups) groups.push_back(Json{{"name", g.name}, {"presets", g.items}});
+        Json out{{"ok", true}, {"groups", std::move(groups)}};
+        if (!library.problem.empty()) out["problem"] = library.problem;
+        print_json(out, ascii);
+        return 0;
+    }
+    if (what == QLatin1String("new")) {
+        static constexpr Option kOptions[] = {{"--stops", true}, {"--transparency", true}, {"--name", true}, {"--group", true}};
+        Arguments a;
+        if (auto error = parse_arguments(rest, kOptions, 0, "", a)) return usage("genko gradients new: " + *error);
+        const auto stops = a.value("--stops");
+        if (!stops) return usage("genko gradients new: the following arguments are required: --stops");
+        Json params{{"stops", core::parse_python_json(stops->toStdString())}};
+        if (const auto t = a.value("--transparency")) params["transparency"] = core::parse_python_json(t->toStdString());
+        const Json item = render::gradient_presets::item_of(params, a.value("--name").value_or(QStringLiteral("カスタム")).toStdString());
+        const auto group = a.value("--group");
+        const std::string group_text = group ? group->toStdString() : std::string();
+        Json out = presets::add(library.groups, kind, item, group ? std::optional<std::string_view>(group_text) : std::nullopt, "カスタム");
+        presets::save(dir, kind, library.groups);
+        out["ok"] = true;
+        print_json(out, ascii);
+        return 0;
+    }
+    if (what == QLatin1String("edit")) {
+        Arguments a;
+        if (auto error = parse_arguments(rest, {}, 1, "edit", a)) return usage("genko gradients edit: " + *error);
+        Json out = presets::edit(library.groups, kind, core::parse_python_json(a.positional[0].toStdString()));
+        presets::save(dir, kind, library.groups);
+        out["ok"] = true;
+        print_json(out, ascii);
+        return 0;
+    }
+    if (what == QLatin1String("reset")) {
+        static constexpr Option kOptions[] = {{"--append", false}};
+        Arguments a;
+        if (auto error = parse_arguments(rest, kOptions, 0, "", a)) return usage("genko gradients reset: " + *error);
+        library.groups = presets::reset(library.groups, kind, a.flag("--append"));
+        presets::save(dir, kind, library.groups);
+        print_json(Json{{"ok", true}, {"groups", static_cast<std::int64_t>(library.groups.size())}}, ascii);
+        return 0;
+    }
+    if (what == QLatin1String("import-grd")) {
+        static constexpr Option kOptions[] = {{"--group", true}, {"--keep", false}};
+        Arguments a;
+        if (auto error = parse_arguments(rest, kOptions, 1, "file", a)) return usage("genko gradients import-grd: " + *error);
+        const fs::path file = path_arg(a.positional[0]);
+        std::vector<std::string> warnings;
+        const Json items = render::grd::to_presets(render::grd::read(storage::read_file_bounded(file, render::grd::kMaxBytes)), warnings);
+        // (review P3-3: the group's name as a group keeps it; the presets added at once, their names counted once)
+        const std::string group = a.value("--group") ? a.value("--group")->toStdString()
+                                                     : render::grd::kept_name(storage::path_to_utf8(file.stem()), "グラデーション");
+        if (!a.flag("--keep")) {
+            std::erase_if(library.groups, [&](const presets::Group& g) { return g.name == group; });
+        }
+        Json added = presets::add_many(library.groups, kind, std::vector<Json>(items.begin(), items.end()), group, "グラデーション")["names"];
+        presets::save(dir, kind, library.groups);
+        print_json(Json{{"ok", true}, {"group", group}, {"presets", std::move(added)}, {"warnings", warnings}}, ascii);
+        return 0;
+    }
+    return usage("genko gradients: list, new, edit, reset or import-grd");
+}
+
 // patterns@1 (PC4 E3, SPEC.md COLOR-09「パターン」, the C++ build's own): the machine's library of patterns (the settings
 // folder's patterns.json and patterns/, render/pattern_library) — `genko patterns list [--full]`, `genko patterns define
 // <dir> --page N [--area <{poly} | {mask} JSON> | --rect x,y,w,h] [--name N] [--group G]` (パターンを定義…: the page as it
@@ -1749,6 +1831,7 @@ int run_cli(int argc, char** argv) {
         if (command == QLatin1String("shapes")) return shapes_command(args, ascii);    // (pen-shapes@1, PC3 C-b)
         if (command == QLatin1String("brushes")) return brushes_command(args, ascii);  // (brushes@1, PC4 E1: brush.get)
         if (command == QLatin1String("patterns")) return patterns_command(args, ascii);  // (patterns@1, PC4 E3)
+        if (command == QLatin1String("gradients")) return gradients_command(args, ascii);  // (PC4 E4: gradient.presets.*)
         if (command == QLatin1String("studio")) return studio_command(args, ascii);
         if (command == QLatin1String("mcp")) return mcp_command(args);
         if (command == QLatin1String("serve")) return serve_command(args);

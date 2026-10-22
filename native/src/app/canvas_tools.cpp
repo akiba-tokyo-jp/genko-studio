@@ -101,7 +101,8 @@ bool PageCanvas::tool_press(const QPointF& pos, const QPointF& mm, Qt::KeyboardM
         return true;
     }
     if (tool_ == QLatin1String("picker")) {
-        pick_colour(pos);
+        // (PC4 E4: Alt+click — the スポイトツール in hand, not Alt's eyedropper for a moment — picks the 背景色, Photoshop's)
+        pick_colour(pos, (modifiers & Qt::AltModifier) != 0 && !held_tool_);
         return true;
     }
     if (tool_ == QLatin1String("fill")) {
@@ -218,11 +219,12 @@ bool PageCanvas::cancel_shape() {
     return true;
 }
 
-void PageCanvas::pick_colour(const QPointF& pos) {
+void PageCanvas::pick_colour(const QPointF& pos, bool background) {
     const core::Page* p = page();
     if (p == nullptr) return;
     const QPointF mm = mm_of(pos);
     last_pick = std::make_pair(mm, pick_source == QLatin1String("layer"));
+    last_pick_background = background;
     if (pick_source == QLatin1String("layer") && layer_colour_at) {
         if (const auto rgb = layer_colour_at(mm.x(), mm.y())) emit colourPicked(*rgb);
         return;

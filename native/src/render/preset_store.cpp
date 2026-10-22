@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <set>
 #include <system_error>
+#include <unordered_set>
 
 #include "core/error.hpp"
 #include "core/pyops.hpp"
@@ -173,6 +174,39 @@ Json add(std::vector<Group>& groups, const Kind& kind, Json item, std::optional<
     const std::string made = item["name"].get<std::string>();
     it->items.push_back(std::move(item));
     return Json{{"name", made}, {"group", where}};
+}
+
+Json add_many(std::vector<Group>& groups, const Kind& kind, const std::vector<Json>& items, std::optional<std::string_view> group,
+               std::string_view fallback_name) {
+    std::vector<Group> work = groups;
+    std::unordered_set<std::string> names;  // (every name taken, once)
+    for (const Group& g : work) {
+        for (const Json& item : g.items) {
+            if (const auto it = item.is_object() ? item.find("name") : item.end(); it != item.end() && it->is_string()) names.insert(it->get<std::string>());
+        }
+    }
+    if (count(work) + items.size() > kind.max_items) bad("there are too many presets (" + std::to_string(kind.max_items) + " at most)");
+    const std::string where = clean(Json(group ? std::string(*group) : kind.default_group), "a group's name");
+    auto in = group_named(work, where);
+    if (in == work.end()) {
+        if (work.size() >= kind.max_groups) bad("there are too many groups (" + std::to_string(kind.max_groups) + " at most)");
+        work.push_back(Group{where, {}});
+        in = work.end() - 1;
+    }
+    Json made = Json::array();
+    for (Json item : items) {
+        if (!item.is_object()) bad("a preset must be an object");
+        const std::string base = clean(item.contains("name") ? item["name"] : Json(std::string(fallback_name)), "a preset's name");
+        std::string name = base;
+        for (int n = 2; names.contains(name); ++n) name = base + " " + std::to_string(n);
+        item["name"] = name;
+        if (kind.check) kind.check(item);
+        names.insert(name);
+        made.push_back(name);
+        in->items.push_back(std::move(item));
+    }
+    groups = std::move(work);
+    return Json{{"names", std::move(made)}, {"group", where}};
 }
 
 namespace {

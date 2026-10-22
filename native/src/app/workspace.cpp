@@ -265,7 +265,10 @@ QStringList chosen(const QString& key, const QStringList& defaults) {
     const QVariant value = settings()->value(key);
     if (!value.isValid() || value.toString().isEmpty()) return defaults;
     std::map<QString, QString> old_to_new;
-    for (const auto& [now, before] : preferences::renamed()) old_to_new[before] = now;  // (a command renamed later keeps its place)
+    const bool current = preferences::names_current(key);  // (PC4 E4: a reused name is the new command's in a list kept since)
+    for (const auto& [now, before] : preferences::renamed()) {
+        if (!(current && preferences::reused_name(before))) old_to_new[before] = now;  // (a command renamed later keeps its place)
+    }
     QStringList out;
     for (const QString& name : value.toString().split(QLatin1Char('\t'), Qt::SkipEmptyParts)) {
         const auto found = old_to_new.find(name);
@@ -274,7 +277,10 @@ QStringList chosen(const QString& key, const QStringList& defaults) {
     return out;
 }
 
-void keep(const QString& key, const QStringList& names) { settings()->setValue(key, names.join(QLatin1Char('\t'))); }
+void keep(const QString& key, const QStringList& names) {
+    settings()->setValue(key, names.join(QLatin1Char('\t')));
+    preferences::mark_names_current(key);  // (PC4 E4: its names are this build's)
+}
 
 ChooseCommands::ChooseCommands(QMainWindow* window, const QString& title, const QStringList& current, bool separators)
     : QDialog(window), window_(window) {
