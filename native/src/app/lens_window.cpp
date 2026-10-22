@@ -655,10 +655,10 @@ private:
     std::optional<Line> drawing_;
 };
 
-template <typename Window>
+template <typename Dialog>
 void open_window(const FilterWindowCall& call) {
     if (call.window == nullptr || call.page == nullptr || call.layer == nullptr) return;
-    Window dialog(call.window, call);
+    Dialog dialog(call.window, call);
     if (ask::exec(&dialog) != QDialog::Accepted) return;
     Json chosen;
     try {

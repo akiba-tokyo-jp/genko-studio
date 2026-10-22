@@ -7734,9 +7734,22 @@
         "alternate_menus": []
       },
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "未着手",
+      "implementation_status": "実装済み（PC4 D6、未統合）",
       "acceptance_status": "未実施",
-      "evidence": [],
+      "evidence": [
+        "native/src/core/filter_kinds.cpp",
+        "native/src/core/lens.cpp",
+        "native/src/render/fx_engine.cpp",
+        "native/src/render/fx_lens.cpp",
+        "native/src/render/ops_filters.cpp",
+        "native/src/app/filter_menu.cpp",
+        "native/src/app/lens_window.cpp",
+        "native/src/render/resample.cpp",
+        "native/src/core/exif.cpp",
+        "native/tests/unit/test_fx_lens.cpp",
+        "native/tests/unit/test_fx.cpp",
+        "native/tests/gui/test_gui_filters.cpp"
+      ],
       "pc0": {
         "date": "2026-10-16",
         "cpp_base": "962faa4",
@@ -7747,7 +7760,8 @@
         "tests": [],
         "gap": "広角補正（魚眼・遠近・全天球のモデル、焦点距離、直線の拘束）がない",
         "note": "上流は外部ライブラリなし（crates/algo/src/wideangle.rs）。拘束線を引く画面が要る"
-      }
+      },
+      "remaining": "格子は作業の 200 dpi で解いて層へ写す。枠はレイヤーの見えている所（上流はカンバス）。拘束のある広角補正は重いフィルター（裏で、中止できる）。多角形拘束ツールは無い（上流にも無い）"
     },
     {
       "id": "filter.blur.average",
@@ -11325,9 +11339,21 @@
         "alternate_menus": []
       },
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "未着手",
+      "implementation_status": "実装済み（PC4 D6、未統合）",
       "acceptance_status": "未実施",
-      "evidence": [],
+      "evidence": [
+        "native/src/core/filter_kinds.cpp",
+        "native/src/core/lens.cpp",
+        "native/src/render/fx_engine.cpp",
+        "native/src/render/fx_lens.cpp",
+        "native/src/render/ops_filters.cpp",
+        "native/src/app/filter_menu.cpp",
+        "native/src/app/lens_window.cpp",
+        "native/src/core/exif.cpp",
+        "native/tests/unit/test_fx_lens.cpp",
+        "native/tests/unit/test_fx.cpp",
+        "native/tests/gui/test_gui_filters.cpp"
+      ],
       "pc0": {
         "date": "2026-10-16",
         "cpp_base": "962faa4",
@@ -11338,7 +11364,8 @@
         "tests": [],
         "gap": "レンズ補正（歪曲・色収差・周辺光量・縦横の遠近・回転・拡大・端の扱い・自動プロファイル）がない",
         "note": "縦横の遠近だけなら自由変形（遠近・4 隅、transform_area の warp.perspective）で手で近づけられる。上流は外部ライブラリなし（crates/algo/src/lens.rs）"
-      }
+      },
+      "remaining": "プロファイルは上流の一般的なもの（35 mm 換算の焦点距離から。メーカーのデータ・lensfun は使わない: 調整役の判断）。枠はレイヤーの見えている所（上流はカンバス）。自動拡大・縮小は描くたびに枠から解く（結果の filter.scale に値）。プロファイル auto の焦点距離は SO のファイルかページを開いたファイルの EXIF。キーは付けない（Ctrl+Shift+R は定規を表示）。file.automate.lensCorrection（バッチ）は PC5"
     },
     {
       "id": "filter.liquify",
@@ -13599,9 +13626,21 @@
         "alternate_menus": []
       },
       "genko_status": "一部（2026-10-16 照合）",
-      "implementation_status": "未着手",
+      "implementation_status": "実装済み（PC4 D6、未統合）",
       "acceptance_status": "未実施",
-      "evidence": [],
+      "evidence": [
+        "native/src/core/vanishing.cpp",
+        "native/src/render/vanishing.cpp",
+        "native/src/render/ops_filters.cpp",
+        "native/src/render/ops_retouch.cpp",
+        "native/src/storage/reader.cpp",
+        "native/src/storage/writer.cpp",
+        "native/src/app/filter_menu.cpp",
+        "native/src/app/vanishing_window.cpp",
+        "native/tests/unit/test_fx_lens.cpp",
+        "native/tests/unit/test_fx.cpp",
+        "native/tests/gui/test_gui_filters.cpp"
+      ],
       "pc0": {
         "date": "2026-10-16",
         "cpp_base": "962faa4",
@@ -13620,7 +13659,8 @@
         ],
         "gap": "面（plane）の定義・面の継ぎ足し（角度）・面に沿った貼り付け（u,v・幅）・遠近に沿ったコピースタンプがない。Genko には 4 隅を手で決める自由変形（遠近）とパース定規（消失点）だけある",
         "note": ""
-      }
+      },
+      "remaining": "面はページに持つ（vanishing-point@1。調整役の判断）。貼り付けはページのレイヤーか PNG のデータ（op はクリップボードを読まない）。スタンプは PC3 のコピースタンプの重ね方（修復モード・変形・ブラシ・スポイト・測定の道具は無い）。窓の結果の絵はページの見えに重ねた近似"
     },
     {
       "id": "filter.video.deInterlace",

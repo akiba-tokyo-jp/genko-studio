@@ -1,6 +1,7 @@
 #pragma once
 
 #include <QImage>
+#include <QPainter>
 #include <QWidget>
 
 #include <array>

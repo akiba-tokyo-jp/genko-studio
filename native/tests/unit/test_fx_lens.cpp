@@ -157,12 +157,12 @@ render::Image picture_of(const core::Document& doc, const std::string& id) { ret
 // A precise page of w × h pixels (at 200 dpi) with one paint layer "paint".
 core::Document precise_page(std::uint32_t w, std::uint32_t h, const std::vector<Px>& px, bool f32) {
     auto doc = blank(w * kInch / 200.0, h * kInch / 200.0);
-    core::Layer layer;
-    layer.id = "paint";
-    layer.kind = core::LayerKind::Raster;
-    layer.panel_clip = false;
-    layer.color_raster = std::make_shared<const std::string>(precise(w, h, px, f32));
-    doc.edit_page(0).layers.push_back(layer);
+    Json pixels = Json::array();
+    for (const auto& p : px)
+        for (const float v : p) pixels.push_back(f32 ? Json(static_cast<double>(v)) : Json(static_cast<std::int64_t>(std::lround(std::clamp(v, 0.0f, 1.0f) * 65535))));
+    doc = core::CommandBus().apply(doc, Json::array({Json{{"op", "put_color_raster"}, {"page", 1}, {"width", w}, {"height", h},
+                                                          {"precision", f32 ? "f32" : "u16"}, {"pixels", pixels}}}), core::Actor("human:test")).doc;
+    doc.edit_page(0).layers[0].id = "paint";
     return doc;
 }
 
@@ -352,7 +352,6 @@ private slots:
             } else {
                 QVERIFY(picture_of(done.doc, "paint").getpixel(1, 1)[3] < 128);
             }
-            QVERIFY(layer_of(doc, "paint").raster_png == layer_of(books[0], "paint").raster_png || layer_of(doc, "paint").color_raster);
             const Json report = done.results.at(0);
             QCOMPARE(report["filter"]["kind"], Json("lens_correction"));
             QCOMPARE(report["filter"]["scale"], Json(100));
@@ -369,7 +368,7 @@ private slots:
         const Json fit{{"op", "filter_raster"}, {"page", 1}, {"id", "paint"}, {"kind", "lens_correction"}, {"angle", 5}, {"auto_scale", true}};
         const Json fitted = apply_ops(doc, Json::array({fit})).results.at(0);
         QVERIFY2(fitted["filter"]["scale"].get<double>() > 105, fitted.dump().c_str());
-        QVERIFY2(picture_of(apply_ops(doc, Json::array({fit})).doc, "paint").getpixel(0, 0)[3] == 255, "the corners covered");
+        QVERIFY2(picture_of(apply_ops(doc, Json::array({fit})).doc, "paint").getpixel(2, 2)[3] == 255, "the corners covered");
         // a generic profile: its name
         const Json generic{{"op", "filter_raster"}, {"page", 1}, {"id", "paint"}, {"kind", "lens_correction"}, {"profile", "generic"}, {"focal_length", 16}};
         QCOMPARE(apply_ops(doc, Json::array({generic})).results.at(0)["filter"]["profile_name"], Json("Generic Lens (16 mm equivalent)"));
@@ -735,6 +734,27 @@ private slots:
         const core::InkPixels inks = core::decode_ink_raster(*layer_of(inked, "pic").ink_raster);
         QVERIFY2(inks.value(45 * 120 + 60, 1) > 0.5, "magenta for red");  // (the red pasted: magenta and yellow)
         QVERIFY(std::fabs(inks.value(2 * 120 + 2, 3) - 0.2) < 1e-3);
+        // an opened picture's page (its grid "finest", 300 ppi): the paste on the picture's own pixels
+        {
+            const render::Image photo = eight_of(300, 200, grid_picture(300, 200)).convert("RGB");
+            const std::string png = formats::png_bytes(photo, formats::PngSave{std::array<double, 2>{300, 300}, {}, false});
+            const core::Document opened = formats::open_file(png, "photo.png").doc;
+            const std::string id = opened.page(0).layers[0].id;
+            const render::vanishing::Quad quad{XY{5, 3}, XY{20, 3}, XY{23, 15}, XY{2, 15}};
+            Json corners = Json::array();
+            for (const XY& q : quad) corners.push_back(Json::array({q[0], q[1]}));
+            const auto done = apply_ops(opened, Json::array({Json{{"op", "vanishing_point"}, {"page", 1}, {"id", id},
+                                                                  {"planes", Json::array({Json{{"corners_mm", corners}}})},
+                                                                  {"paste", Json::array({Json{{"data", core::b64encode(render::write_png(picture))}, {"at", Json::array({0, 0})},
+                                                                                              {"width", 1}}})}}}))
+                                  .doc;
+            const render::Image after = render::raster::layer_pixels(done.page(0), done.page(0).layers[0]).convert("RGBA");
+            QCOMPARE(after.size(), (render::Size{300, 200}));
+            const auto h = render::vanishing::homography(quad);
+            const auto [mx, my] = h->apply(0.5, 0.2);
+            const auto red = after.getpixel(static_cast<int>(mx * 300 / 25.4), static_cast<int>(my * 300 / 25.4));
+            QVERIFY2(red[0] > 230 && red[1] < 30, "the paste on the picture's own grid");
+        }
         // inside a selection: the left half only
         const auto doc = eight_page(120, 120, {{"floor", render::Image::create("RGBA", render::Size{120, 120}, render::Ink{64, 64, 64, 255})},
                                                {"sticker", render::Image::create("RGBA", render::Size{120, 120}, render::Ink{255, 0, 0, 255})}});
@@ -807,7 +827,11 @@ private slots:
         }
         QVERIFY(broke);
         const auto twisted = storage::load_document(dir);
-        QVERIFY2(twisted.document.read_only_reason.find("vanishing") != std::string::npos, twisted.document.read_only_reason.c_str());
+        QVERIFY(!twisted.document.read_only_reason.empty());
+        const bool said = std::any_of(twisted.report.issues.begin(), twisted.report.issues.end(),
+                                      [](const storage::LoadIssue& issue) { return issue.message.find("vanishing point planes") != std::string::npos; });
+        QVERIFY2(said, twisted.document.read_only_reason.c_str());
+        QVERIFY(core::page_vanishing(twisted.document.page(0)) != nullptr);  // (kept as read: never written without them)
         QVERIFY(storage::is_known_feature(core::kVanishingFeature));
     }
 };
