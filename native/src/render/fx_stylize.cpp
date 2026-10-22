@@ -146,10 +146,8 @@ Kernels stylize_kernels() {
             const float depth = static_cast<float>(std::clamp(number(params, "depth", 30), 1.0, 255.0));
             const bool pyramids = text(params, "type", "blocks") == "pyramids";
             const bool level_based = text(params, "depth_mode", "random") == "level_based";
-            const Json* solid_value = core::get(params, "solid_front_faces");
-            const Json* mask_value = core::get(params, "mask_incomplete_blocks");
-            const bool solid_front = solid_value != nullptr && solid_value->is_boolean() && solid_value->get<bool>();
-            const bool mask_incomplete = mask_value != nullptr && mask_value->is_boolean() && mask_value->get<bool>();
+            const bool solid_front = d2::flag(params, "solid_front_faces", false);
+            const bool mask_incomplete = d2::flag(params, "mask_incomplete_blocks", false);
             const std::uint32_t seed = d2::seed_of(params);
             const Rect& b = ctx.bounds;
             const float bcx = static_cast<float>(b.x0 + b.x1) / 2.0f, bcy = static_cast<float>(b.y0 + b.y1) / 2.0f;
@@ -406,9 +404,9 @@ Kernels stylize_kernels() {
                         const bool me = bright(x, y, c);
                         bool line = false;
                         if (me == upper) {
-                            for (int k = 1; k <= d && !line; ++k)
-                                for (const auto [dx, dy] : {std::pair{1, 0}, std::pair{-1, 0}, std::pair{0, 1}, std::pair{0, -1}})
-                                    if (bright(x + dx * k, y + dy * k, c) != me) line = true;
+                            for (int far = 1; far <= d && !line; ++far)
+                                for (const auto& [dx, dy] : {std::pair{1, 0}, std::pair{-1, 0}, std::pair{0, 1}, std::pair{0, -1}})
+                                    if (bright(x + dx * far, y + dy * far, c) != me) line = true;
                         }
                         res[i + c] = line ? 0.0f : 1.0f;
                     }
@@ -451,14 +449,14 @@ Kernels stylize_kernels() {
                     }
                     float best = 0;
                     int from_x = x;
-                    for (int k = 1; k <= lmax; ++k) {
-                        const int s = x - d * k;
+                    for (int back = 1; back <= lmax; ++back) {
+                        const int s = x - d * back;
                         // (each pixel upwind starts a streak of a random length; only an edge makes it show)
                         const float hh = hash01(s + ctx.x0, gy, 44, seed);
                         const float len = std::max(hh * hh * static_cast<float>(lmax), 1.0f);
-                        if (static_cast<float>(k) > len) continue;
+                        if (static_cast<float>(back) > len) continue;
                         const float edge = std::min(std::fabs(light(ctx, pixel(src, s, y)) - light(ctx, pixel(src, s - d, y))) * strength, 1.0f);
-                        const float w = edge * (1.0f - static_cast<float>(k) / (len + 1.0f));
+                        const float w = edge * (1.0f - static_cast<float>(back) / (len + 1.0f));
                         if (w > best) {
                             best = w;
                             from_x = s;

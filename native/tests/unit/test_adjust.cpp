@@ -410,6 +410,7 @@ private slots:
             Json given = Json::object();
             if (name == "replace_color") given["color"] = Json::array({200, 30, 30});
             if (name == "filter_gallery") given["effects"] = Json::array({Json{{"filter", "cutout"}}});  // (PC4 D3: its stack is required)
+            if (name == "distort_displace") given["map"] = Json{{"layer", "merged"}};  // (PC4 D2: 置き換え's map is required)
             const Json read = core::read_params(kind.params, given, core::ReadMode::Op, name);
             std::vector<std::string> keys, expected;
             for (const auto& [key, value] : read.items()) keys.push_back(key);

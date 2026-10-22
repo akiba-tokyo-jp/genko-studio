@@ -33,6 +33,11 @@ std::string text(const Json& params, std::string_view key, std::string_view fall
     return v != nullptr && v->is_string() ? v->get<std::string>() : std::string(fallback);
 }
 
+bool flag(const Json& params, std::string_view key, bool fallback) {
+    const Json* v = core::get(params, key);
+    return v != nullptr && v->is_boolean() ? v->get<bool>() : fallback;
+}
+
 std::uint32_t seed_of(const Json& params) {
     const double v = number(params, "seed", 0);
     return v >= 0 && v <= 4294967295.0 ? static_cast<std::uint32_t>(std::llround(v)) : 0u;

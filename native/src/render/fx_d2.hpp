@@ -22,6 +22,7 @@ namespace genko::render::fx::d2 {
 double number(const core::Json& params, std::string_view key, double fallback);
 std::string text(const core::Json& params, std::string_view key, std::string_view fallback);
 std::uint32_t seed_of(const core::Json& params);
+bool flag(const core::Json& params, std::string_view key, bool fallback);
 // A colour [r, g, b] 0..255 of the settings as straight 0..1 (none or not a colour: `fallback`).
 std::array<float, 3> colour(const core::Json& params, std::string_view key, std::array<float, 3> fallback);
 

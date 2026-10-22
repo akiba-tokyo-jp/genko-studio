@@ -50,8 +50,7 @@ std::vector<float> oil_paint(const Json& params, const Window& src, const Rect& 
     const float s = static_cast<float>(ctx.s);
     const float stylization = static_cast<float>(number(params, "stylization", 4)), cleanliness = static_cast<float>(number(params, "cleanliness", 5));
     const float scale = static_cast<float>(number(params, "scale", 1)), bristle_detail = static_cast<float>(number(params, "bristle_detail", 5));
-    const Json* lighting_value = core::get(params, "lighting");
-    const bool lighting = lighting_value == nullptr || !lighting_value->is_boolean() || lighting_value->get<bool>();
+    const bool lighting = d2::flag(params, "lighting", true);
     const float angle = static_cast<float>(number(params, "angle", -60)), shine_setting = static_cast<float>(number(params, "shine", 1));
     // 1. the colours premultiplied, cleaned (smoothed) by 筆の清潔さ
     std::vector<float> p(src.base(), src.base() + ww * wh * n);

@@ -107,7 +107,7 @@ Kernels pixelate_kernels() {
             const auto value = [&](float x, float y, std::size_t c) {
                 const float d = cell * 0.25f;
                 float acc = 0;
-                for (const auto [dx, dy] : {std::pair{0.0f, 0.0f}, std::pair{-d, -d}, std::pair{d, -d}, std::pair{-d, d}, std::pair{d, d}}) {
+                for (const auto& [dx, dy] : {std::pair{0.0f, 0.0f}, std::pair{-d, -d}, std::pair{d, -d}, std::pair{-d, d}, std::pair{d, d}}) {
                     const int ix = std::clamp(static_cast<int>(std::floor(x + dx)), clip.x0, clip.x1 - 1);
                     const int iy = std::clamp(static_cast<int>(std::floor(y + dy)), clip.y0, clip.y1 - 1);
                     acc += src.get(ix, iy, c);
@@ -227,7 +227,7 @@ Kernels pixelate_kernels() {
                 for (int x = out.x0; x < out.x1; ++x, i += n) {
                     double best = std::numeric_limits<double>::max();
                     bool found = false;
-                    for (const auto [qx, qy] : {std::pair{-r, -r}, std::pair{0, -r}, std::pair{-r, 0}, std::pair{0, 0}}) {
+                    for (const auto& [qx, qy] : {std::pair{-r, -r}, std::pair{0, -r}, std::pair{-r, 0}, std::pair{0, 0}}) {
                         std::fill(sum.begin(), sum.end(), 0.0);
                         double s1 = 0, s2 = 0, weight = 0;
                         for (int yy = y + qy; yy <= y + qy + r; ++yy)
@@ -276,7 +276,7 @@ Kernels pixelate_kernels() {
             for (int y = out.y0; y < out.y1; ++y)
                 for (int x = out.x0; x < out.x1; ++x, i += n) {
                     std::fill(acc.begin(), acc.end(), 0.0);
-                    for (const auto [dx, dy] : {std::pair{-d, 0}, std::pair{d, 0}, std::pair{0, -d}, std::pair{0, d}}) {
+                    for (const auto& [dx, dy] : {std::pair{-d, 0}, std::pair{d, 0}, std::pair{0, -d}, std::pair{0, d}}) {
                         const int xx = std::clamp(x + dx, src.rect.x0, src.rect.x1 - 1), yy = std::clamp(y + dy, src.rect.y0, src.rect.y1 - 1);
                         add_premultiplied(src.px(xx, yy), n, acc.data(), 0.25);
                     }

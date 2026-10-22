@@ -448,7 +448,7 @@ std::vector<FilterKind> distort_kinds() {
     {
         FilterKind displace = kind(info("distort_displace", "filter.distort.displace", "置き換え", "変形"),
                                    {number("horizontal", 10, -999, 999), number("vertical", 10, -999, 999), choice("fit", {"stretch", "tile"}),
-                                    choice("undefined_areas", {"repeat", "wrap"}), custom("map", true), custom("map_suffix", true), custom("map_data", true)});
+                                    choice("undefined_areas", {"repeat", "wrap"}), custom("map", false), custom("map_suffix", true), custom("map_data", true)});
         displace.info.files = {"map"};
         displace.kind.hooks.normalize = [](Json read, const Page*, LookupTables*) { return read_displacement_map(std::move(read)); };
         out.push_back(std::move(displace));

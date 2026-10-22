@@ -13,6 +13,7 @@
 #include "core/ink.hpp"
 #include "core/command_bus.hpp"
 #include "core/filter_kinds.hpp"
+#include "core/pyconv.hpp"
 #include "core/pyops.hpp"
 #include "render/fx.hpp"
 #include "render/image_ops.hpp"
