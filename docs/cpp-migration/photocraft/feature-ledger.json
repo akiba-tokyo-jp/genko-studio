@@ -8744,9 +8744,23 @@
         "alternate_menus": []
       },
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "未着手",
+      "implementation_status": "実装済み（PC4 D2、未統合）",
       "acceptance_status": "未実施",
-      "evidence": [],
+      "evidence": [
+        "native/src/core/filter_kinds.cpp",
+        "native/src/render/fx_engine.cpp",
+        "native/src/render/fx_d2.hpp",
+        "native/src/render/ops_filters.cpp",
+        "native/src/render/fx_distort.cpp",
+        "native/src/app/filter_menu.cpp",
+        "native/src/app/filter_forms_distort.cpp",
+        "native/src/render/smart_filters.cpp",
+        "native/src/render/ops_smart_filters.cpp",
+        "native/tests/contract/test_contract_filters_pc4.cpp",
+        "native/tests/unit/test_fx_d2.cpp",
+        "native/tests/unit/test_fx.cpp",
+        "native/tests/gui/test_gui_filters.cpp"
+      ],
       "pc0": {
         "date": "2026-10-16",
         "cpp_base": "962faa4",
@@ -8757,7 +8771,8 @@
         "tests": [],
         "gap": "置き換えマップ（別の原稿・ファイル・レイヤー、伸縮/並べる、端の扱い）による変形がない",
         "note": "足すなら 8 ビット（render/filters.cpp）・16/32 ビット（color_filters.cpp）・CMYK/Lab（ink_filters.cpp）の 3 経路と画面の欄に要る。上流は MIT/Apache-2.0（帰属は native/third_party/photocraft）"
-      }
+      },
+      "remaining": "地図はこの原稿の層・統合した絵・PNG か PSD のファイル（32 MiB まで）。スマートフィルターでは地図を原稿の素材で固定（上流は描き直すたびにファイルを読む）。地図の 128 は動かさない（上流は 0.5）、透明な所も動かさない"
     },
     {
       "id": "filter.distort.pinch",
@@ -8787,9 +8802,20 @@
         "alternate_menus": []
       },
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "未着手",
+      "implementation_status": "実装済み（PC4 D2、未統合）",
       "acceptance_status": "未実施",
-      "evidence": [],
+      "evidence": [
+        "native/src/core/filter_kinds.cpp",
+        "native/src/render/fx_engine.cpp",
+        "native/src/render/fx_d2.hpp",
+        "native/src/render/ops_filters.cpp",
+        "native/src/render/fx_distort.cpp",
+        "native/src/app/filter_menu.cpp",
+        "native/src/app/filter_forms_distort.cpp",
+        "native/tests/unit/test_fx_d2.cpp",
+        "native/tests/unit/test_fx.cpp",
+        "native/tests/gui/test_gui_filters.cpp"
+      ],
       "pc0": {
         "date": "2026-10-16",
         "cpp_base": "962faa4",
@@ -8800,7 +8826,8 @@
         "tests": [],
         "gap": "選択範囲・キャンバス全体をつまむフィルターがない（ゆがみの道具の pinch はなぞった所だけ）",
         "note": "中の remap_area（native/src/render/filters.hpp:39）が使える。足すなら 8 ビット（render/filters.cpp）・16/32 ビット（color_filters.cpp）・CMYK/Lab（ink_filters.cpp）の 3 経路と画面の欄に要る。上流は MIT/Apache-2.0（帰属は native/third_party/photocraft）"
-      }
+      },
+      "remaining": "基準の枠（選択範囲の外接、無ければ層）の内接円が中心"
     },
     {
       "id": "filter.distort.polarCoordinates",
@@ -8830,9 +8857,20 @@
         "alternate_menus": []
       },
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "未着手",
+      "implementation_status": "実装済み（PC4 D2、未統合）",
       "acceptance_status": "未実施",
-      "evidence": [],
+      "evidence": [
+        "native/src/core/filter_kinds.cpp",
+        "native/src/render/fx_engine.cpp",
+        "native/src/render/fx_d2.hpp",
+        "native/src/render/ops_filters.cpp",
+        "native/src/render/fx_distort.cpp",
+        "native/src/app/filter_menu.cpp",
+        "native/src/app/filter_forms_distort.cpp",
+        "native/tests/unit/test_fx_d2.cpp",
+        "native/tests/unit/test_fx.cpp",
+        "native/tests/gui/test_gui_filters.cpp"
+      ],
       "pc0": {
         "date": "2026-10-16",
         "cpp_base": "962faa4",
@@ -8843,7 +8881,8 @@
         "tests": [],
         "gap": "直交座標⇔極座標の変換がない",
         "note": "足すなら 8 ビット（render/filters.cpp）・16/32 ビット（color_filters.cpp）・CMYK/Lab（ink_filters.cpp）の 3 経路と画面の欄に要る。上流は MIT/Apache-2.0（帰属は native/third_party/photocraft）"
-      }
+      },
+      "remaining": "基準の枠（選択範囲の外接、無ければ層）が中心"
     },
     {
       "id": "filter.distort.ripple",
@@ -8873,9 +8912,20 @@
         "alternate_menus": []
       },
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "未着手",
+      "implementation_status": "実装済み（PC4 D2、未統合）",
       "acceptance_status": "未実施",
-      "evidence": [],
+      "evidence": [
+        "native/src/core/filter_kinds.cpp",
+        "native/src/render/fx_engine.cpp",
+        "native/src/render/fx_d2.hpp",
+        "native/src/render/ops_filters.cpp",
+        "native/src/render/fx_distort.cpp",
+        "native/src/app/filter_menu.cpp",
+        "native/src/app/filter_forms_distort.cpp",
+        "native/tests/unit/test_fx_d2.cpp",
+        "native/tests/unit/test_fx.cpp",
+        "native/tests/gui/test_gui_filters.cpp"
+      ],
       "pc0": {
         "date": "2026-10-16",
         "cpp_base": "962faa4",
@@ -8886,7 +8936,8 @@
         "tests": [],
         "gap": "波紋（量・大中小）がない。Genko の波形（wave）で近い見た目は作れる",
         "note": "足すなら 8 ビット（render/filters.cpp）・16/32 ビット（color_filters.cpp）・CMYK/Lab（ink_filters.cpp）の 3 経路と画面の欄に要る。上流は MIT/Apache-2.0（帰属は native/third_party/photocraft）"
-      }
+      },
+      "remaining": "長さは 200 dpi の作業の画素（波長 8・16・32）"
     },
     {
       "id": "filter.distort.shear",
@@ -8916,9 +8967,20 @@
         "alternate_menus": []
       },
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "未着手",
+      "implementation_status": "実装済み（PC4 D2、未統合）",
       "acceptance_status": "未実施",
-      "evidence": [],
+      "evidence": [
+        "native/src/core/filter_kinds.cpp",
+        "native/src/render/fx_engine.cpp",
+        "native/src/render/fx_d2.hpp",
+        "native/src/render/ops_filters.cpp",
+        "native/src/render/fx_distort.cpp",
+        "native/src/app/filter_menu.cpp",
+        "native/src/app/filter_forms_distort.cpp",
+        "native/tests/unit/test_fx_d2.cpp",
+        "native/tests/unit/test_fx.cpp",
+        "native/tests/gui/test_gui_filters.cpp"
+      ],
       "pc0": {
         "date": "2026-10-16",
         "cpp_base": "962faa4",
@@ -8929,7 +8991,8 @@
         "tests": [],
         "gap": "曲線に沿って横にずらすシアーがない",
         "note": "曲線を編む画面が要る。足すなら 8 ビット（render/filters.cpp）・16/32 ビット（color_filters.cpp）・CMYK/Lab（ink_filters.cpp）の 3 経路と画面の欄に要る。上流は MIT/Apache-2.0（帰属は native/third_party/photocraft）"
-      }
+      },
+      "remaining": "曲線は 2〜64 点。窓は縦の線の曲線（クリックで足し、ドラッグで横に）"
     },
     {
       "id": "filter.distort.spherize",
@@ -8959,9 +9022,20 @@
         "alternate_menus": []
       },
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "未着手",
+      "implementation_status": "実装済み（PC4 D2、未統合）",
       "acceptance_status": "未実施",
-      "evidence": [],
+      "evidence": [
+        "native/src/core/filter_kinds.cpp",
+        "native/src/render/fx_engine.cpp",
+        "native/src/render/fx_d2.hpp",
+        "native/src/render/ops_filters.cpp",
+        "native/src/render/fx_distort.cpp",
+        "native/src/app/filter_menu.cpp",
+        "native/src/app/filter_forms_distort.cpp",
+        "native/tests/unit/test_fx_d2.cpp",
+        "native/tests/unit/test_fx.cpp",
+        "native/tests/gui/test_gui_filters.cpp"
+      ],
       "pc0": {
         "date": "2026-10-16",
         "cpp_base": "962faa4",
@@ -8972,7 +9046,8 @@
         "tests": [],
         "gap": "球面化（量・普通/水平のみ/垂直のみ）がない（ゆがみの道具の bloat はなぞった所だけ）",
         "note": "足すなら 8 ビット（render/filters.cpp）・16/32 ビット（color_filters.cpp）・CMYK/Lab（ink_filters.cpp）の 3 経路と画面の欄に要る。上流は MIT/Apache-2.0（帰属は native/third_party/photocraft）"
-      }
+      },
+      "remaining": "基準の枠（選択範囲の外接、無ければ層）が中心"
     },
     {
       "id": "filter.distort.twirl",
@@ -9002,9 +9077,20 @@
         "alternate_menus": []
       },
       "genko_status": "一部（2026-10-16 照合）",
-      "implementation_status": "未着手",
+      "implementation_status": "実装済み（PC4 D2、未統合）",
       "acceptance_status": "未実施",
-      "evidence": [],
+      "evidence": [
+        "native/src/core/filter_kinds.cpp",
+        "native/src/render/fx_engine.cpp",
+        "native/src/render/fx_d2.hpp",
+        "native/src/render/ops_filters.cpp",
+        "native/src/render/fx_distort.cpp",
+        "native/src/app/filter_menu.cpp",
+        "native/src/app/filter_forms_distort.cpp",
+        "native/tests/unit/test_fx_d2.cpp",
+        "native/tests/unit/test_fx.cpp",
+        "native/tests/gui/test_gui_filters.cpp"
+      ],
       "pc0": {
         "date": "2026-10-16",
         "cpp_base": "962faa4",
@@ -9026,7 +9112,8 @@
         ],
         "gap": "渦巻き（角度・広さ、試験あり、8/16/32 ビット・CMYK/Lab）はある。中心が常にキャンバスの中央で選択範囲の中心にならない、ねじれの減り方が 2 乗（上流は 1 次）、外側を透明にする（上流は端の画素を繰り返す）",
         "note": ""
-      }
+      },
+      "remaining": "中心は基準の枠（選択範囲の外接、無ければ層）、減り方は 1 次、外は端の画素の繰り返し（上流と同じ）。今の twirl（Python の種類）は op・スマートフィルター・原稿でそのまま効く"
     },
     {
       "id": "filter.distort.wave",
@@ -9056,9 +9143,20 @@
         "alternate_menus": []
       },
       "genko_status": "一部（2026-10-16 照合）",
-      "implementation_status": "未着手",
+      "implementation_status": "実装済み（PC4 D2、未統合）",
       "acceptance_status": "未実施",
-      "evidence": [],
+      "evidence": [
+        "native/src/core/filter_kinds.cpp",
+        "native/src/render/fx_engine.cpp",
+        "native/src/render/fx_d2.hpp",
+        "native/src/render/ops_filters.cpp",
+        "native/src/render/fx_distort.cpp",
+        "native/src/app/filter_menu.cpp",
+        "native/src/app/filter_forms_distort.cpp",
+        "native/tests/unit/test_fx_d2.cpp",
+        "native/tests/unit/test_fx.cpp",
+        "native/tests/gui/test_gui_filters.cpp"
+      ],
       "pc0": {
         "date": "2026-10-16",
         "cpp_base": "962faa4",
@@ -9080,7 +9178,8 @@
         ],
         "gap": "正弦波 1 本の波形（揺れ幅・波の長さ）だけある。波の数（generators）・波長と振幅の最小/最大・三角/矩形・乱数の種・端の扱い（巻き戻す/繰り返す）がない",
         "note": ""
-      }
+      },
+      "remaining": "長さは 200 dpi の作業の画素（波長・振幅）。重ねる生成機能は 64 まで（上流と同じ）。Photoshop の「比率」「ランダマイズ」の欄は無い（上流と同じ）。今の wave（Python の種類）は op・スマートフィルター・原稿でそのまま効く"
     },
     {
       "id": "filter.distort.zigZag",
@@ -9110,9 +9209,20 @@
         "alternate_menus": []
       },
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "未着手",
+      "implementation_status": "実装済み（PC4 D2、未統合）",
       "acceptance_status": "未実施",
-      "evidence": [],
+      "evidence": [
+        "native/src/core/filter_kinds.cpp",
+        "native/src/render/fx_engine.cpp",
+        "native/src/render/fx_d2.hpp",
+        "native/src/render/ops_filters.cpp",
+        "native/src/render/fx_distort.cpp",
+        "native/src/app/filter_menu.cpp",
+        "native/src/app/filter_forms_distort.cpp",
+        "native/tests/unit/test_fx_d2.cpp",
+        "native/tests/unit/test_fx.cpp",
+        "native/tests/gui/test_gui_filters.cpp"
+      ],
       "pc0": {
         "date": "2026-10-16",
         "cpp_base": "962faa4",
@@ -9123,7 +9233,8 @@
         "tests": [],
         "gap": "ジグザグ（量・うね・3 つの型）がない",
         "note": "足すなら 8 ビット（render/filters.cpp）・16/32 ビット（color_filters.cpp）・CMYK/Lab（ink_filters.cpp）の 3 経路と画面の欄に要る。上流は MIT/Apache-2.0（帰属は native/third_party/photocraft）"
-      }
+      },
+      "remaining": "基準の枠（選択範囲の外接、無ければ層）の内接円が中心"
     },
     {
       "id": "filter.filterGallery",
@@ -11907,9 +12018,20 @@
         "alternate_menus": []
       },
       "genko_status": "一部（2026-10-16 照合）",
-      "implementation_status": "未着手",
+      "implementation_status": "実装済み（PC4 D2、未統合）",
       "acceptance_status": "未実施",
-      "evidence": [],
+      "evidence": [
+        "native/src/core/filter_kinds.cpp",
+        "native/src/render/fx_engine.cpp",
+        "native/src/render/fx_d2.hpp",
+        "native/src/render/ops_filters.cpp",
+        "native/src/render/fx_pixelate.cpp",
+        "native/src/app/filter_menu.cpp",
+        "native/src/app/filter_forms_distort.cpp",
+        "native/tests/unit/test_fx_d2.cpp",
+        "native/tests/unit/test_fx.cpp",
+        "native/tests/gui/test_gui_filters.cpp"
+      ],
       "pc0": {
         "date": "2026-10-16",
         "cpp_base": "962faa4",
@@ -11927,7 +12049,8 @@
         ],
         "gap": "レイヤーのトーン化（網点・線数・角度・網の形、印刷と書き出しで網点になる）は黒 1 色だけ。色ごと（C/M/Y/K）に角度を変えた網点・最大半径の指定・画素を直接変えるフィルターがない",
         "note": "Genko のトーン化は非破壊のレイヤーの設定"
-      }
+      },
+      "remaining": "長さは 200 dpi の作業の画素。CMYK は 4 版に 4 つの角度、Lab は意味する色で網。層のトーン化（印刷の網点）は今のまま別の機能"
     },
     {
       "id": "filter.pixelate.crystallize",
@@ -11957,9 +12080,20 @@
         "alternate_menus": []
       },
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "未着手",
+      "implementation_status": "実装済み（PC4 D2、未統合）",
       "acceptance_status": "未実施",
-      "evidence": [],
+      "evidence": [
+        "native/src/core/filter_kinds.cpp",
+        "native/src/render/fx_engine.cpp",
+        "native/src/render/fx_d2.hpp",
+        "native/src/render/ops_filters.cpp",
+        "native/src/render/fx_pixelate.cpp",
+        "native/src/app/filter_menu.cpp",
+        "native/src/app/filter_forms_distort.cpp",
+        "native/tests/unit/test_fx_d2.cpp",
+        "native/tests/unit/test_fx.cpp",
+        "native/tests/gui/test_gui_filters.cpp"
+      ],
       "pc0": {
         "date": "2026-10-16",
         "cpp_base": "962faa4",
@@ -11970,7 +12104,8 @@
         "tests": [],
         "gap": "水晶（ボロノイのセルの平均色）がない",
         "note": "足すなら 8 ビット（render/filters.cpp）・16/32 ビット（color_filters.cpp）・CMYK/Lab（ink_filters.cpp）の 3 経路と画面の欄に要る。上流は MIT/Apache-2.0（帰属は native/third_party/photocraft）"
-      }
+      },
+      "remaining": "長さは 200 dpi の作業の画素。セルの平均は作業の画素の格子の標本"
     },
     {
       "id": "filter.pixelate.facet",
@@ -12000,9 +12135,20 @@
         "alternate_menus": []
       },
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "未着手",
+      "implementation_status": "実装済み（PC4 D2、未統合）",
       "acceptance_status": "未実施",
-      "evidence": [],
+      "evidence": [
+        "native/src/core/filter_kinds.cpp",
+        "native/src/render/fx_engine.cpp",
+        "native/src/render/fx_d2.hpp",
+        "native/src/render/ops_filters.cpp",
+        "native/src/render/fx_pixelate.cpp",
+        "native/src/app/filter_menu.cpp",
+        "native/src/app/filter_forms_distort.cpp",
+        "native/tests/unit/test_fx_d2.cpp",
+        "native/tests/unit/test_fx.cpp",
+        "native/tests/gui/test_gui_filters.cpp"
+      ],
       "pc0": {
         "date": "2026-10-16",
         "cpp_base": "962faa4",
@@ -12013,7 +12159,8 @@
         "tests": [],
         "gap": "ファセット（似た色の塊にまとめる）がない",
         "note": "足すなら 8 ビット（render/filters.cpp）・16/32 ビット（color_filters.cpp）・CMYK/Lab（ink_filters.cpp）の 3 経路と画面の欄に要る。上流は MIT/Apache-2.0（帰属は native/third_party/photocraft）"
-      }
+      },
+      "remaining": "四角の一辺は 2 作業画素 + 1。色は α で重み、層の α は変えない（上流は α も平均）"
     },
     {
       "id": "filter.pixelate.fragment",
@@ -12043,9 +12190,20 @@
         "alternate_menus": []
       },
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "未着手",
+      "implementation_status": "実装済み（PC4 D2、未統合）",
       "acceptance_status": "未実施",
-      "evidence": [],
+      "evidence": [
+        "native/src/core/filter_kinds.cpp",
+        "native/src/render/fx_engine.cpp",
+        "native/src/render/fx_d2.hpp",
+        "native/src/render/ops_filters.cpp",
+        "native/src/render/fx_pixelate.cpp",
+        "native/src/app/filter_menu.cpp",
+        "native/src/app/filter_forms_distort.cpp",
+        "native/tests/unit/test_fx_d2.cpp",
+        "native/tests/unit/test_fx.cpp",
+        "native/tests/gui/test_gui_filters.cpp"
+      ],
       "pc0": {
         "date": "2026-10-16",
         "cpp_base": "962faa4",
@@ -12056,7 +12214,8 @@
         "tests": [],
         "gap": "分割（4 つずらして平均）がない",
         "note": "足すなら 8 ビット（render/filters.cpp）・16/32 ビット（color_filters.cpp）・CMYK/Lab（ink_filters.cpp）の 3 経路と画面の欄に要る。上流は MIT/Apache-2.0（帰属は native/third_party/photocraft）"
-      }
+      },
+      "remaining": "ずらす量は 4 作業画素"
     },
     {
       "id": "filter.pixelate.mezzotint",
@@ -12086,9 +12245,20 @@
         "alternate_menus": []
       },
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "未着手",
+      "implementation_status": "実装済み（PC4 D2、未統合）",
       "acceptance_status": "未実施",
-      "evidence": [],
+      "evidence": [
+        "native/src/core/filter_kinds.cpp",
+        "native/src/render/fx_engine.cpp",
+        "native/src/render/fx_d2.hpp",
+        "native/src/render/ops_filters.cpp",
+        "native/src/render/fx_pixelate.cpp",
+        "native/src/app/filter_menu.cpp",
+        "native/src/app/filter_forms_distort.cpp",
+        "native/tests/unit/test_fx_d2.cpp",
+        "native/tests/unit/test_fx.cpp",
+        "native/tests/gui/test_gui_filters.cpp"
+      ],
       "pc0": {
         "date": "2026-10-16",
         "cpp_base": "962faa4",
@@ -12099,7 +12269,8 @@
         "tests": [],
         "gap": "メゾティント（点・線・ストロークの 10 種の乱数しきい値、色ごと）がない",
         "note": "トーン化の砂目（noise、誤差拡散で黒 1 色）が近い見た目。足すなら 8 ビット（render/filters.cpp）・16/32 ビット（color_filters.cpp）・CMYK/Lab（ink_filters.cpp）の 3 経路と画面の欄に要る。上流は MIT/Apache-2.0（帰属は native/third_party/photocraft）"
-      }
+      },
+      "remaining": "模様は作業の画素ごと。CMYK は版ごとに 0 か 100%"
     },
     {
       "id": "filter.pixelate.mosaic",
@@ -12129,9 +12300,20 @@
         "alternate_menus": []
       },
       "genko_status": "一部（2026-10-16 照合）",
-      "implementation_status": "未着手",
+      "implementation_status": "実装済み（PC4 D2、未統合）",
       "acceptance_status": "未実施",
-      "evidence": [],
+      "evidence": [
+        "native/src/core/filter_kinds.cpp",
+        "native/src/render/fx_engine.cpp",
+        "native/src/render/fx_d2.hpp",
+        "native/src/render/ops_filters.cpp",
+        "native/src/render/fx_pixelate.cpp",
+        "native/src/app/filter_menu.cpp",
+        "native/src/app/filter_forms_distort.cpp",
+        "native/tests/unit/test_fx_d2.cpp",
+        "native/tests/unit/test_fx.cpp",
+        "native/tests/gui/test_gui_filters.cpp"
+      ],
       "pc0": {
         "date": "2026-10-16",
         "cpp_base": "962faa4",
@@ -12153,7 +12335,8 @@
         ],
         "gap": "モザイク（大きさ、試験あり、8/16/32 ビット・CMYK/Lab）はある。セルの平均でなく最近傍の 1 画素を拾う、明るさを 0.88 倍に落とす独自の味付け、セルの起点が選択範囲でなくキャンバス、画面の大きさが 64px まで（上流 200）",
         "note": ""
-      }
+      },
+      "remaining": "長さは 200 dpi の作業の画素。セルは基準の枠の左上から。今の mosaic（Python の種類）は op・スマートフィルター・原稿でそのまま効く"
     },
     {
       "id": "filter.pixelate.pointillize",
@@ -12183,9 +12366,20 @@
         "alternate_menus": []
       },
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "未着手",
+      "implementation_status": "実装済み（PC4 D2、未統合）",
       "acceptance_status": "未実施",
-      "evidence": [],
+      "evidence": [
+        "native/src/core/filter_kinds.cpp",
+        "native/src/render/fx_engine.cpp",
+        "native/src/render/fx_d2.hpp",
+        "native/src/render/ops_filters.cpp",
+        "native/src/render/fx_pixelate.cpp",
+        "native/src/app/filter_menu.cpp",
+        "native/src/app/filter_forms_distort.cpp",
+        "native/tests/unit/test_fx_d2.cpp",
+        "native/tests/unit/test_fx.cpp",
+        "native/tests/gui/test_gui_filters.cpp"
+      ],
       "pc0": {
         "date": "2026-10-16",
         "cpp_base": "962faa4",
@@ -12196,7 +12390,8 @@
         "tests": [],
         "gap": "点描（セルの大きさ・種・背景色）がない",
         "note": "足すなら 8 ビット（render/filters.cpp）・16/32 ビット（color_filters.cpp）・CMYK/Lab（ink_filters.cpp）の 3 経路と画面の欄に要る。上流は MIT/Apache-2.0（帰属は native/third_party/photocraft）"
-      }
+      },
+      "remaining": "長さは 200 dpi の作業の画素。カンバスの α は層の α のまま（上流は不透明にする）"
     },
     {
       "id": "filter.render.clouds",
@@ -12892,9 +13087,20 @@
         "alternate_menus": []
       },
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "未着手",
+      "implementation_status": "実装済み（PC4 D2、未統合）",
       "acceptance_status": "未実施",
-      "evidence": [],
+      "evidence": [
+        "native/src/core/filter_kinds.cpp",
+        "native/src/render/fx_engine.cpp",
+        "native/src/render/fx_d2.hpp",
+        "native/src/render/ops_filters.cpp",
+        "native/src/render/fx_stylize.cpp",
+        "native/src/app/filter_menu.cpp",
+        "native/src/app/filter_forms_distort.cpp",
+        "native/tests/unit/test_fx_d2.cpp",
+        "native/tests/unit/test_fx.cpp",
+        "native/tests/gui/test_gui_filters.cpp"
+      ],
       "pc0": {
         "date": "2026-10-16",
         "cpp_base": "962faa4",
@@ -12905,7 +13111,8 @@
         "tests": [],
         "gap": "拡散（普通・暗い所だけ・明るい所だけ・異方性、種）がない",
         "note": "足すなら 8 ビット（render/filters.cpp）・16/32 ビット（color_filters.cpp）・CMYK/Lab（ink_filters.cpp）の 3 経路と画面の欄に要る。上流は MIT/Apache-2.0（帰属は native/third_party/photocraft）"
-      }
+      },
+      "remaining": "近くは 1 作業画素の中。異方性は α で重みを付けて半分ずつ"
     },
     {
       "id": "filter.stylize.emboss",
@@ -12935,9 +13142,20 @@
         "alternate_menus": []
       },
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "未着手",
+      "implementation_status": "実装済み（PC4 D2、未統合）",
       "acceptance_status": "未実施",
-      "evidence": [],
+      "evidence": [
+        "native/src/core/filter_kinds.cpp",
+        "native/src/render/fx_engine.cpp",
+        "native/src/render/fx_d2.hpp",
+        "native/src/render/ops_filters.cpp",
+        "native/src/render/fx_stylize.cpp",
+        "native/src/app/filter_menu.cpp",
+        "native/src/app/filter_forms_distort.cpp",
+        "native/tests/unit/test_fx_d2.cpp",
+        "native/tests/unit/test_fx.cpp",
+        "native/tests/gui/test_gui_filters.cpp"
+      ],
       "pc0": {
         "date": "2026-10-16",
         "cpp_base": "962faa4",
@@ -12948,7 +13166,8 @@
         "tests": [],
         "gap": "エンボス（角度・高さ・量）がない",
         "note": "中に Pillow の EMBOSS（3×3 固定、native/src/render/image.hpp:137）があるが角度・高さ・量は変えられない。足すなら 8 ビット（render/filters.cpp）・16/32 ビット（color_filters.cpp）・CMYK/Lab（ink_filters.cpp）の 3 経路と画面の欄に要る。上流は MIT/Apache-2.0（帰属は native/third_party/photocraft）"
-      }
+      },
+      "remaining": "長さは 200 dpi の作業の画素（高さ）。CMYK の灰色は K だけ、Lab の a・b は 0"
     },
     {
       "id": "filter.stylize.extrude",
@@ -12978,9 +13197,20 @@
         "alternate_menus": []
       },
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "未着手",
+      "implementation_status": "実装済み（PC4 D2、未統合）",
       "acceptance_status": "未実施",
-      "evidence": [],
+      "evidence": [
+        "native/src/core/filter_kinds.cpp",
+        "native/src/render/fx_engine.cpp",
+        "native/src/render/fx_d2.hpp",
+        "native/src/render/ops_filters.cpp",
+        "native/src/render/fx_stylize.cpp",
+        "native/src/app/filter_menu.cpp",
+        "native/src/app/filter_forms_distort.cpp",
+        "native/tests/unit/test_fx_d2.cpp",
+        "native/tests/unit/test_fx.cpp",
+        "native/tests/gui/test_gui_filters.cpp"
+      ],
       "pc0": {
         "date": "2026-10-16",
         "cpp_base": "962faa4",
@@ -12991,7 +13221,8 @@
         "tests": [],
         "gap": "押し出し（ブロック/ピラミッド・大きさ・奥行き・前面の塗り）がない",
         "note": "足すなら 8 ビット（render/filters.cpp）・16/32 ビット（color_filters.cpp）・CMYK/Lab（ink_filters.cpp）の 3 経路と画面の欄に要る。上流は MIT/Apache-2.0（帰属は native/third_party/photocraft）"
-      }
+      },
+      "remaining": "長さは 200 dpi の作業の画素（サイズ）"
     },
     {
       "id": "filter.stylize.findEdges",
@@ -13021,9 +13252,20 @@
         "alternate_menus": []
       },
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "未着手",
+      "implementation_status": "実装済み（PC4 D2、未統合）",
       "acceptance_status": "未実施",
-      "evidence": [],
+      "evidence": [
+        "native/src/core/filter_kinds.cpp",
+        "native/src/render/fx_engine.cpp",
+        "native/src/render/fx_d2.hpp",
+        "native/src/render/ops_filters.cpp",
+        "native/src/render/fx_stylize.cpp",
+        "native/src/app/filter_menu.cpp",
+        "native/src/app/filter_forms_distort.cpp",
+        "native/tests/unit/test_fx_d2.cpp",
+        "native/tests/unit/test_fx.cpp",
+        "native/tests/gui/test_gui_filters.cpp"
+      ],
       "pc0": {
         "date": "2026-10-16",
         "cpp_base": "962faa4",
@@ -13034,7 +13276,8 @@
         "tests": [],
         "gap": "輪郭検出がフィルターとしてない",
         "note": "中に Pillow の FIND_EDGES（native/src/render/image.hpp:138）があり、写真を線にする lt_convert の method=edges の中だけで使う。足すなら 8 ビット（render/filters.cpp）・16/32 ビット（color_filters.cpp）・CMYK/Lab（ink_filters.cpp）の 3 経路と画面の欄に要る。上流は MIT/Apache-2.0（帰属は native/third_party/photocraft）"
-      }
+      },
+      "remaining": "標本の間は作業の 1 画素。CMYK は紙の上のインキ、Lab の a・b は 0"
     },
     {
       "id": "filter.stylize.oilPaint",
@@ -13064,9 +13307,20 @@
         "alternate_menus": []
       },
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "未着手",
+      "implementation_status": "実装済み（PC4 D2、未統合）",
       "acceptance_status": "未実施",
-      "evidence": [],
+      "evidence": [
+        "native/src/core/filter_kinds.cpp",
+        "native/src/render/fx_engine.cpp",
+        "native/src/render/fx_d2.hpp",
+        "native/src/render/ops_filters.cpp",
+        "native/src/render/fx_oil.cpp",
+        "native/src/app/filter_menu.cpp",
+        "native/src/app/filter_forms_distort.cpp",
+        "native/tests/unit/test_fx_d2.cpp",
+        "native/tests/unit/test_fx.cpp",
+        "native/tests/gui/test_gui_filters.cpp"
+      ],
       "pc0": {
         "date": "2026-10-16",
         "cpp_base": "962faa4",
@@ -13077,7 +13331,8 @@
         "tests": [],
         "gap": "油彩（様式化・きれいさ・拡大・毛の細かさ・照明の角度/光沢）がない",
         "note": "足すなら 8 ビット（render/filters.cpp）・16/32 ビット（color_filters.cpp）・CMYK/Lab（ink_filters.cpp）の 3 経路と画面の欄に要る。上流は MIT/Apache-2.0（帰属は native/third_party/photocraft）"
-      }
+      },
+      "remaining": "筆の長さ・ぼかし・毛の雑音は作業の画素。重いフィルター（大きなページでは裏で掛け、中止できる）"
     },
     {
       "id": "filter.stylize.solarize",
@@ -13107,9 +13362,20 @@
         "alternate_menus": []
       },
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "未着手",
+      "implementation_status": "実装済み（PC4 D2、未統合）",
       "acceptance_status": "未実施",
-      "evidence": [],
+      "evidence": [
+        "native/src/core/filter_kinds.cpp",
+        "native/src/render/fx_engine.cpp",
+        "native/src/render/fx_d2.hpp",
+        "native/src/render/ops_filters.cpp",
+        "native/src/render/fx_stylize.cpp",
+        "native/src/app/filter_menu.cpp",
+        "native/src/app/filter_forms_distort.cpp",
+        "native/tests/unit/test_fx_d2.cpp",
+        "native/tests/unit/test_fx.cpp",
+        "native/tests/gui/test_gui_filters.cpp"
+      ],
       "pc0": {
         "date": "2026-10-16",
         "cpp_base": "962faa4",
@@ -13120,7 +13386,8 @@
         "tests": [],
         "gap": "ソラリゼーションがない（トーンカーブの点を山形にすれば同じ見た目は作れる）",
         "note": "足すなら 8 ビット（render/filters.cpp）・16/32 ビット（color_filters.cpp）・CMYK/Lab（ink_filters.cpp）の 3 経路と画面の欄に要る。上流は MIT/Apache-2.0（帰属は native/third_party/photocraft）"
-      }
+      },
+      "remaining": "CMYK は明るさの向き（RGB と同じ意味）、Lab は L だけ"
     },
     {
       "id": "filter.stylize.tiles",
@@ -13150,9 +13417,20 @@
         "alternate_menus": []
       },
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "未着手",
+      "implementation_status": "実装済み（PC4 D2、未統合）",
       "acceptance_status": "未実施",
-      "evidence": [],
+      "evidence": [
+        "native/src/core/filter_kinds.cpp",
+        "native/src/render/fx_engine.cpp",
+        "native/src/render/fx_d2.hpp",
+        "native/src/render/ops_filters.cpp",
+        "native/src/render/fx_stylize.cpp",
+        "native/src/app/filter_menu.cpp",
+        "native/src/app/filter_forms_distort.cpp",
+        "native/tests/unit/test_fx_d2.cpp",
+        "native/tests/unit/test_fx.cpp",
+        "native/tests/gui/test_gui_filters.cpp"
+      ],
       "pc0": {
         "date": "2026-10-16",
         "cpp_base": "962faa4",
@@ -13163,7 +13441,8 @@
         "tests": [],
         "gap": "タイル（数・ずれ・すき間の塗り方・種）がない",
         "note": "足すなら 8 ビット（render/filters.cpp）・16/32 ビット（color_filters.cpp）・CMYK/Lab（ink_filters.cpp）の 3 経路と画面の欄に要る。上流は MIT/Apache-2.0（帰属は native/third_party/photocraft）"
-      }
+      },
+      "remaining": "隙間の色は描画色・背景色（窓が入れて送る）。インキのページは意味する色で"
     },
     {
       "id": "filter.stylize.traceContour",
@@ -13193,9 +13472,20 @@
         "alternate_menus": []
       },
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "未着手",
+      "implementation_status": "実装済み（PC4 D2、未統合）",
       "acceptance_status": "未実施",
-      "evidence": [],
+      "evidence": [
+        "native/src/core/filter_kinds.cpp",
+        "native/src/render/fx_engine.cpp",
+        "native/src/render/fx_d2.hpp",
+        "native/src/render/ops_filters.cpp",
+        "native/src/render/fx_stylize.cpp",
+        "native/src/app/filter_menu.cpp",
+        "native/src/app/filter_forms_distort.cpp",
+        "native/tests/unit/test_fx_d2.cpp",
+        "native/tests/unit/test_fx.cpp",
+        "native/tests/gui/test_gui_filters.cpp"
+      ],
       "pc0": {
         "date": "2026-10-16",
         "cpp_base": "962faa4",
@@ -13206,7 +13496,8 @@
         "tests": [],
         "gap": "輪郭のトレース（レベル・上/下）がない",
         "note": "中の Pillow の CONTOUR（固定の 3×3 核）とは別物。足すなら 8 ビット（render/filters.cpp）・16/32 ビット（color_filters.cpp）・CMYK/Lab（ink_filters.cpp）の 3 経路と画面の欄に要る。上流は MIT/Apache-2.0（帰属は native/third_party/photocraft）"
-      }
+      },
+      "remaining": "線は 1 作業画素。CMYK は版ごと（紙はインキなし）、Lab の a・b は 0"
     },
     {
       "id": "filter.stylize.wind",
@@ -13236,9 +13527,20 @@
         "alternate_menus": []
       },
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "未着手",
+      "implementation_status": "実装済み（PC4 D2、未統合）",
       "acceptance_status": "未実施",
-      "evidence": [],
+      "evidence": [
+        "native/src/core/filter_kinds.cpp",
+        "native/src/render/fx_engine.cpp",
+        "native/src/render/fx_d2.hpp",
+        "native/src/render/ops_filters.cpp",
+        "native/src/render/fx_stylize.cpp",
+        "native/src/app/filter_menu.cpp",
+        "native/src/app/filter_forms_distort.cpp",
+        "native/tests/unit/test_fx_d2.cpp",
+        "native/tests/unit/test_fx.cpp",
+        "native/tests/gui/test_gui_filters.cpp"
+      ],
       "pc0": {
         "date": "2026-10-16",
         "cpp_base": "962faa4",
@@ -13249,7 +13551,8 @@
         "tests": [],
         "gap": "風（風・強風・ずらし、左右の向き、種）がない",
         "note": "足すなら 8 ビット（render/filters.cpp）・16/32 ビット（color_filters.cpp）・CMYK/Lab（ink_filters.cpp）の 3 経路と画面の欄に要る。上流は MIT/Apache-2.0（帰属は native/third_party/photocraft）"
-      }
+      },
+      "remaining": "長さは 200 dpi の作業の画素（筋の長さ 16・40、ずらし 12）。混ぜは α で重み"
     },
     {
       "id": "filter.vanishingPoint",
