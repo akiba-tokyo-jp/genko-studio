@@ -8991,9 +8991,21 @@
         "alternate_menus": []
       },
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "未着手",
+      "implementation_status": "実装済み（PC4 D3、未統合）",
       "acceptance_status": "未実施",
-      "evidence": [],
+      "evidence": [
+        "native/src/core/gallery_kinds.cpp",
+        "native/src/core/filter_kinds.cpp",
+        "native/src/render/fx_gallery.cpp",
+        "native/src/render/ops_filters.cpp",
+        "native/src/app/filter_gallery_window.cpp",
+        "native/src/app/filter_menu.cpp",
+        "native/src/app/layer_panel_smart_filters.cpp",
+        "native/tests/unit/test_fx_gallery.cpp",
+        "native/tests/unit/test_fx.cpp",
+        "native/tests/contract/test_contract_filters_pc4.cpp",
+        "native/tests/gui/test_gui_filters.cpp"
+      ],
       "pc0": {
         "date": "2026-10-16",
         "cpp_base": "962faa4",
@@ -9004,7 +9016,8 @@
         "tests": [],
         "gap": "フィルターギャラリー（効果の重ね・カタログ・見本の付いた画面）がない",
         "note": "ギャラリーの 47 種と、その共通の土台（crates/algo/src/artistic_fx.rs の補助関数・テクスチャ生成・描画色/背景色の受け渡し）を先に入れる。描画色と背景色は Genko のメイン/サブの色が使える"
-      }
+      },
+      "remaining": "見えは上流（PhotoCraft）の近似で、Photoshop のフィルターギャラリーとは違う（SPEC COLOR-08 の既知の制限）。窓のプレビューと見本は層の見えている絵（8 bit の色）に掛ける"
     },
     {
       "id": "filter.gallery.accentedEdges",
@@ -9019,9 +9032,21 @@
       },
       "upstream_menu": null,
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "未着手",
+      "implementation_status": "実装済み（PC4 D3、未統合）",
       "acceptance_status": "未実施",
-      "evidence": [],
+      "evidence": [
+        "native/src/core/gallery_kinds.cpp",
+        "native/src/core/filter_kinds.cpp",
+        "native/src/render/fx_gallery.cpp",
+        "native/src/render/ops_filters.cpp",
+        "native/src/app/filter_gallery_window.cpp",
+        "native/src/app/filter_menu.cpp",
+        "native/src/app/layer_panel_smart_filters.cpp",
+        "native/tests/unit/test_fx_gallery.cpp",
+        "native/tests/unit/test_fx.cpp",
+        "native/tests/contract/test_contract_filters_pc4.cpp",
+        "native/tests/gui/test_gui_filters.cpp"
+      ],
       "pc0": {
         "date": "2026-10-16",
         "cpp_base": "962faa4",
@@ -9032,7 +9057,8 @@
         "tests": [],
         "gap": "輪郭の強調（幅・明るさ・滑らかさ）がない",
         "note": "ギャラリーの共通の土台（filter.filterGallery 行）に依存。足すなら 8 ビット（render/filters.cpp）・16/32 ビット（color_filters.cpp）・CMYK/Lab（ink_filters.cpp）の 3 経路と画面の欄に要る。上流は MIT/Apache-2.0（帰属は native/third_party/photocraft）"
-      }
+      },
+      "remaining": "フィルターギャラリー（filter_raster の filter_gallery）の効果として閉じる（上流も 47 のコマンドはメニューに出さない）。見えは上流の近似で、Photoshop とは違う（SPEC COLOR-08 の既知の制限）"
     },
     {
       "id": "filter.gallery.angledStrokes",
@@ -9047,9 +9073,21 @@
       },
       "upstream_menu": null,
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "未着手",
+      "implementation_status": "実装済み（PC4 D3、未統合）",
       "acceptance_status": "未実施",
-      "evidence": [],
+      "evidence": [
+        "native/src/core/gallery_kinds.cpp",
+        "native/src/core/filter_kinds.cpp",
+        "native/src/render/fx_gallery.cpp",
+        "native/src/render/ops_filters.cpp",
+        "native/src/app/filter_gallery_window.cpp",
+        "native/src/app/filter_menu.cpp",
+        "native/src/app/layer_panel_smart_filters.cpp",
+        "native/tests/unit/test_fx_gallery.cpp",
+        "native/tests/unit/test_fx.cpp",
+        "native/tests/contract/test_contract_filters_pc4.cpp",
+        "native/tests/gui/test_gui_filters.cpp"
+      ],
       "pc0": {
         "date": "2026-10-16",
         "cpp_base": "962faa4",
@@ -9060,7 +9098,8 @@
         "tests": [],
         "gap": "斜めのストローク（方向の釣り合い・長さ・鋭さ）がない",
         "note": "ギャラリーの共通の土台（filter.filterGallery 行）に依存。足すなら 8 ビット（render/filters.cpp）・16/32 ビット（color_filters.cpp）・CMYK/Lab（ink_filters.cpp）の 3 経路と画面の欄に要る。上流は MIT/Apache-2.0（帰属は native/third_party/photocraft）"
-      }
+      },
+      "remaining": "フィルターギャラリー（filter_raster の filter_gallery）の効果として閉じる（上流も 47 のコマンドはメニューに出さない）。見えは上流の近似で、Photoshop とは違う（SPEC COLOR-08 の既知の制限）"
     },
     {
       "id": "filter.gallery.basRelief",
@@ -9075,9 +9114,21 @@
       },
       "upstream_menu": null,
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "未着手",
+      "implementation_status": "実装済み（PC4 D3、未統合）",
       "acceptance_status": "未実施",
-      "evidence": [],
+      "evidence": [
+        "native/src/core/gallery_kinds.cpp",
+        "native/src/core/filter_kinds.cpp",
+        "native/src/render/fx_gallery.cpp",
+        "native/src/render/ops_filters.cpp",
+        "native/src/app/filter_gallery_window.cpp",
+        "native/src/app/filter_menu.cpp",
+        "native/src/app/layer_panel_smart_filters.cpp",
+        "native/tests/unit/test_fx_gallery.cpp",
+        "native/tests/unit/test_fx.cpp",
+        "native/tests/contract/test_contract_filters_pc4.cpp",
+        "native/tests/gui/test_gui_filters.cpp"
+      ],
       "pc0": {
         "date": "2026-10-16",
         "cpp_base": "962faa4",
@@ -9088,7 +9139,8 @@
         "tests": [],
         "gap": "浅浮き彫り（細部・滑らかさ・光の向き、描画色/背景色）がない",
         "note": "ギャラリーの共通の土台（filter.filterGallery 行）に依存。足すなら 8 ビット（render/filters.cpp）・16/32 ビット（color_filters.cpp）・CMYK/Lab（ink_filters.cpp）の 3 経路と画面の欄に要る。上流は MIT/Apache-2.0（帰属は native/third_party/photocraft）"
-      }
+      },
+      "remaining": "フィルターギャラリー（filter_raster の filter_gallery）の効果として閉じる（上流も 47 のコマンドはメニューに出さない）。見えは上流の近似で、Photoshop とは違う（SPEC COLOR-08 の既知の制限）"
     },
     {
       "id": "filter.gallery.chalkCharcoal",
@@ -9103,9 +9155,21 @@
       },
       "upstream_menu": null,
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "未着手",
+      "implementation_status": "実装済み（PC4 D3、未統合）",
       "acceptance_status": "未実施",
-      "evidence": [],
+      "evidence": [
+        "native/src/core/gallery_kinds.cpp",
+        "native/src/core/filter_kinds.cpp",
+        "native/src/render/fx_gallery.cpp",
+        "native/src/render/ops_filters.cpp",
+        "native/src/app/filter_gallery_window.cpp",
+        "native/src/app/filter_menu.cpp",
+        "native/src/app/layer_panel_smart_filters.cpp",
+        "native/tests/unit/test_fx_gallery.cpp",
+        "native/tests/unit/test_fx.cpp",
+        "native/tests/contract/test_contract_filters_pc4.cpp",
+        "native/tests/gui/test_gui_filters.cpp"
+      ],
       "pc0": {
         "date": "2026-10-16",
         "cpp_base": "962faa4",
@@ -9116,7 +9180,8 @@
         "tests": [],
         "gap": "チョークと木炭（木炭/チョークの範囲・筆圧、描画色/背景色）がない",
         "note": "ギャラリーの共通の土台（filter.filterGallery 行）に依存。足すなら 8 ビット（render/filters.cpp）・16/32 ビット（color_filters.cpp）・CMYK/Lab（ink_filters.cpp）の 3 経路と画面の欄に要る。上流は MIT/Apache-2.0（帰属は native/third_party/photocraft）"
-      }
+      },
+      "remaining": "フィルターギャラリー（filter_raster の filter_gallery）の効果として閉じる（上流も 47 のコマンドはメニューに出さない）。見えは上流の近似で、Photoshop とは違う（SPEC COLOR-08 の既知の制限）"
     },
     {
       "id": "filter.gallery.charcoal",
@@ -9131,9 +9196,21 @@
       },
       "upstream_menu": null,
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "未着手",
+      "implementation_status": "実装済み（PC4 D3、未統合）",
       "acceptance_status": "未実施",
-      "evidence": [],
+      "evidence": [
+        "native/src/core/gallery_kinds.cpp",
+        "native/src/core/filter_kinds.cpp",
+        "native/src/render/fx_gallery.cpp",
+        "native/src/render/ops_filters.cpp",
+        "native/src/app/filter_gallery_window.cpp",
+        "native/src/app/filter_menu.cpp",
+        "native/src/app/layer_panel_smart_filters.cpp",
+        "native/tests/unit/test_fx_gallery.cpp",
+        "native/tests/unit/test_fx.cpp",
+        "native/tests/contract/test_contract_filters_pc4.cpp",
+        "native/tests/gui/test_gui_filters.cpp"
+      ],
       "pc0": {
         "date": "2026-10-16",
         "cpp_base": "962faa4",
@@ -9144,7 +9221,8 @@
         "tests": [],
         "gap": "木炭（太さ・細部・明暗の釣り合い、描画色/背景色）がない",
         "note": "ギャラリーの共通の土台（filter.filterGallery 行）に依存。足すなら 8 ビット（render/filters.cpp）・16/32 ビット（color_filters.cpp）・CMYK/Lab（ink_filters.cpp）の 3 経路と画面の欄に要る。上流は MIT/Apache-2.0（帰属は native/third_party/photocraft）"
-      }
+      },
+      "remaining": "フィルターギャラリー（filter_raster の filter_gallery）の効果として閉じる（上流も 47 のコマンドはメニューに出さない）。見えは上流の近似で、Photoshop とは違う（SPEC COLOR-08 の既知の制限）"
     },
     {
       "id": "filter.gallery.chrome",
@@ -9159,9 +9237,21 @@
       },
       "upstream_menu": null,
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "未着手",
+      "implementation_status": "実装済み（PC4 D3、未統合）",
       "acceptance_status": "未実施",
-      "evidence": [],
+      "evidence": [
+        "native/src/core/gallery_kinds.cpp",
+        "native/src/core/filter_kinds.cpp",
+        "native/src/render/fx_gallery.cpp",
+        "native/src/render/ops_filters.cpp",
+        "native/src/app/filter_gallery_window.cpp",
+        "native/src/app/filter_menu.cpp",
+        "native/src/app/layer_panel_smart_filters.cpp",
+        "native/tests/unit/test_fx_gallery.cpp",
+        "native/tests/unit/test_fx.cpp",
+        "native/tests/contract/test_contract_filters_pc4.cpp",
+        "native/tests/gui/test_gui_filters.cpp"
+      ],
       "pc0": {
         "date": "2026-10-16",
         "cpp_base": "962faa4",
@@ -9172,7 +9262,8 @@
         "tests": [],
         "gap": "クローム（細部・滑らかさ）がない",
         "note": "ギャラリーの共通の土台（filter.filterGallery 行）に依存。足すなら 8 ビット（render/filters.cpp）・16/32 ビット（color_filters.cpp）・CMYK/Lab（ink_filters.cpp）の 3 経路と画面の欄に要る。上流は MIT/Apache-2.0（帰属は native/third_party/photocraft）"
-      }
+      },
+      "remaining": "フィルターギャラリー（filter_raster の filter_gallery）の効果として閉じる（上流も 47 のコマンドはメニューに出さない）。見えは上流の近似で、Photoshop とは違う（SPEC COLOR-08 の既知の制限）"
     },
     {
       "id": "filter.gallery.coloredPencil",
@@ -9187,9 +9278,21 @@
       },
       "upstream_menu": null,
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "未着手",
+      "implementation_status": "実装済み（PC4 D3、未統合）",
       "acceptance_status": "未実施",
-      "evidence": [],
+      "evidence": [
+        "native/src/core/gallery_kinds.cpp",
+        "native/src/core/filter_kinds.cpp",
+        "native/src/render/fx_gallery.cpp",
+        "native/src/render/ops_filters.cpp",
+        "native/src/app/filter_gallery_window.cpp",
+        "native/src/app/filter_menu.cpp",
+        "native/src/app/layer_panel_smart_filters.cpp",
+        "native/tests/unit/test_fx_gallery.cpp",
+        "native/tests/unit/test_fx.cpp",
+        "native/tests/contract/test_contract_filters_pc4.cpp",
+        "native/tests/gui/test_gui_filters.cpp"
+      ],
       "pc0": {
         "date": "2026-10-16",
         "cpp_base": "962faa4",
@@ -9200,7 +9303,8 @@
         "tests": [],
         "gap": "色鉛筆（鉛筆の幅・筆圧・紙の明るさ）がない",
         "note": "ギャラリーの共通の土台（filter.filterGallery 行）に依存。足すなら 8 ビット（render/filters.cpp）・16/32 ビット（color_filters.cpp）・CMYK/Lab（ink_filters.cpp）の 3 経路と画面の欄に要る。上流は MIT/Apache-2.0（帰属は native/third_party/photocraft）"
-      }
+      },
+      "remaining": "フィルターギャラリー（filter_raster の filter_gallery）の効果として閉じる（上流も 47 のコマンドはメニューに出さない）。見えは上流の近似で、Photoshop とは違う（SPEC COLOR-08 の既知の制限）"
     },
     {
       "id": "filter.gallery.conteCrayon",
@@ -9215,9 +9319,21 @@
       },
       "upstream_menu": null,
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "未着手",
+      "implementation_status": "実装済み（PC4 D3、未統合）",
       "acceptance_status": "未実施",
-      "evidence": [],
+      "evidence": [
+        "native/src/core/gallery_kinds.cpp",
+        "native/src/core/filter_kinds.cpp",
+        "native/src/render/fx_gallery.cpp",
+        "native/src/render/ops_filters.cpp",
+        "native/src/app/filter_gallery_window.cpp",
+        "native/src/app/filter_menu.cpp",
+        "native/src/app/layer_panel_smart_filters.cpp",
+        "native/tests/unit/test_fx_gallery.cpp",
+        "native/tests/unit/test_fx.cpp",
+        "native/tests/contract/test_contract_filters_pc4.cpp",
+        "native/tests/gui/test_gui_filters.cpp"
+      ],
       "pc0": {
         "date": "2026-10-16",
         "cpp_base": "962faa4",
@@ -9228,7 +9344,8 @@
         "tests": [],
         "gap": "コンテ（前景/背景のレベル・テクスチャ・凹凸・光）がない",
         "note": "ギャラリーの共通の土台（filter.filterGallery 行）に依存。足すなら 8 ビット（render/filters.cpp）・16/32 ビット（color_filters.cpp）・CMYK/Lab（ink_filters.cpp）の 3 経路と画面の欄に要る。上流は MIT/Apache-2.0（帰属は native/third_party/photocraft）"
-      }
+      },
+      "remaining": "フィルターギャラリー（filter_raster の filter_gallery）の効果として閉じる（上流も 47 のコマンドはメニューに出さない）。見えは上流の近似で、Photoshop とは違う（SPEC COLOR-08 の既知の制限）"
     },
     {
       "id": "filter.gallery.craquelure",
@@ -9243,9 +9360,21 @@
       },
       "upstream_menu": null,
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "未着手",
+      "implementation_status": "実装済み（PC4 D3、未統合）",
       "acceptance_status": "未実施",
-      "evidence": [],
+      "evidence": [
+        "native/src/core/gallery_kinds.cpp",
+        "native/src/core/filter_kinds.cpp",
+        "native/src/render/fx_gallery.cpp",
+        "native/src/render/ops_filters.cpp",
+        "native/src/app/filter_gallery_window.cpp",
+        "native/src/app/filter_menu.cpp",
+        "native/src/app/layer_panel_smart_filters.cpp",
+        "native/tests/unit/test_fx_gallery.cpp",
+        "native/tests/unit/test_fx.cpp",
+        "native/tests/contract/test_contract_filters_pc4.cpp",
+        "native/tests/gui/test_gui_filters.cpp"
+      ],
       "pc0": {
         "date": "2026-10-16",
         "cpp_base": "962faa4",
@@ -9256,7 +9385,8 @@
         "tests": [],
         "gap": "ひび（間隔・深さ・明るさ）がない",
         "note": "ギャラリーの共通の土台（filter.filterGallery 行）に依存。足すなら 8 ビット（render/filters.cpp）・16/32 ビット（color_filters.cpp）・CMYK/Lab（ink_filters.cpp）の 3 経路と画面の欄に要る。上流は MIT/Apache-2.0（帰属は native/third_party/photocraft）"
-      }
+      },
+      "remaining": "フィルターギャラリー（filter_raster の filter_gallery）の効果として閉じる（上流も 47 のコマンドはメニューに出さない）。見えは上流の近似で、Photoshop とは違う（SPEC COLOR-08 の既知の制限）"
     },
     {
       "id": "filter.gallery.crosshatch",
@@ -9271,9 +9401,21 @@
       },
       "upstream_menu": null,
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "未着手",
+      "implementation_status": "実装済み（PC4 D3、未統合）",
       "acceptance_status": "未実施",
-      "evidence": [],
+      "evidence": [
+        "native/src/core/gallery_kinds.cpp",
+        "native/src/core/filter_kinds.cpp",
+        "native/src/render/fx_gallery.cpp",
+        "native/src/render/ops_filters.cpp",
+        "native/src/app/filter_gallery_window.cpp",
+        "native/src/app/filter_menu.cpp",
+        "native/src/app/layer_panel_smart_filters.cpp",
+        "native/tests/unit/test_fx_gallery.cpp",
+        "native/tests/unit/test_fx.cpp",
+        "native/tests/contract/test_contract_filters_pc4.cpp",
+        "native/tests/gui/test_gui_filters.cpp"
+      ],
       "pc0": {
         "date": "2026-10-16",
         "cpp_base": "962faa4",
@@ -9284,7 +9426,8 @@
         "tests": [],
         "gap": "網目（長さ・鋭さ・強さ）がない",
         "note": "ギャラリーの共通の土台（filter.filterGallery 行）に依存。足すなら 8 ビット（render/filters.cpp）・16/32 ビット（color_filters.cpp）・CMYK/Lab（ink_filters.cpp）の 3 経路と画面の欄に要る。上流は MIT/Apache-2.0（帰属は native/third_party/photocraft）"
-      }
+      },
+      "remaining": "フィルターギャラリー（filter_raster の filter_gallery）の効果として閉じる（上流も 47 のコマンドはメニューに出さない）。見えは上流の近似で、Photoshop とは違う（SPEC COLOR-08 の既知の制限）"
     },
     {
       "id": "filter.gallery.cutout",
@@ -9299,9 +9442,21 @@
       },
       "upstream_menu": null,
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "未着手",
+      "implementation_status": "実装済み（PC4 D3、未統合）",
       "acceptance_status": "未実施",
-      "evidence": [],
+      "evidence": [
+        "native/src/core/gallery_kinds.cpp",
+        "native/src/core/filter_kinds.cpp",
+        "native/src/render/fx_gallery.cpp",
+        "native/src/render/ops_filters.cpp",
+        "native/src/app/filter_gallery_window.cpp",
+        "native/src/app/filter_menu.cpp",
+        "native/src/app/layer_panel_smart_filters.cpp",
+        "native/tests/unit/test_fx_gallery.cpp",
+        "native/tests/unit/test_fx.cpp",
+        "native/tests/contract/test_contract_filters_pc4.cpp",
+        "native/tests/gui/test_gui_filters.cpp"
+      ],
       "pc0": {
         "date": "2026-10-16",
         "cpp_base": "962faa4",
@@ -9312,7 +9467,8 @@
         "tests": [],
         "gap": "切り絵（レベル数・単純さ・忠実さ）がない",
         "note": "Genko の階調化（posterize）はあるが輪郭を単純化しない。ギャラリーの共通の土台（filter.filterGallery 行）に依存。足すなら 8 ビット（render/filters.cpp）・16/32 ビット（color_filters.cpp）・CMYK/Lab（ink_filters.cpp）の 3 経路と画面の欄に要る。上流は MIT/Apache-2.0（帰属は native/third_party/photocraft）"
-      }
+      },
+      "remaining": "フィルターギャラリー（filter_raster の filter_gallery）の効果として閉じる（上流も 47 のコマンドはメニューに出さない）。見えは上流の近似で、Photoshop とは違う（SPEC COLOR-08 の既知の制限）"
     },
     {
       "id": "filter.gallery.darkStrokes",
@@ -9327,9 +9483,21 @@
       },
       "upstream_menu": null,
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "未着手",
+      "implementation_status": "実装済み（PC4 D3、未統合）",
       "acceptance_status": "未実施",
-      "evidence": [],
+      "evidence": [
+        "native/src/core/gallery_kinds.cpp",
+        "native/src/core/filter_kinds.cpp",
+        "native/src/render/fx_gallery.cpp",
+        "native/src/render/ops_filters.cpp",
+        "native/src/app/filter_gallery_window.cpp",
+        "native/src/app/filter_menu.cpp",
+        "native/src/app/layer_panel_smart_filters.cpp",
+        "native/tests/unit/test_fx_gallery.cpp",
+        "native/tests/unit/test_fx.cpp",
+        "native/tests/contract/test_contract_filters_pc4.cpp",
+        "native/tests/gui/test_gui_filters.cpp"
+      ],
       "pc0": {
         "date": "2026-10-16",
         "cpp_base": "962faa4",
@@ -9340,7 +9508,8 @@
         "tests": [],
         "gap": "暗いストローク（釣り合い・黒/白の強さ）がない",
         "note": "ギャラリーの共通の土台（filter.filterGallery 行）に依存。足すなら 8 ビット（render/filters.cpp）・16/32 ビット（color_filters.cpp）・CMYK/Lab（ink_filters.cpp）の 3 経路と画面の欄に要る。上流は MIT/Apache-2.0（帰属は native/third_party/photocraft）"
-      }
+      },
+      "remaining": "フィルターギャラリー（filter_raster の filter_gallery）の効果として閉じる（上流も 47 のコマンドはメニューに出さない）。見えは上流の近似で、Photoshop とは違う（SPEC COLOR-08 の既知の制限）"
     },
     {
       "id": "filter.gallery.diffuseGlow",
@@ -9355,9 +9524,21 @@
       },
       "upstream_menu": null,
       "genko_status": "一部（2026-10-16 照合）",
-      "implementation_status": "未着手",
+      "implementation_status": "実装済み（PC4 D3、未統合）",
       "acceptance_status": "未実施",
-      "evidence": [],
+      "evidence": [
+        "native/src/core/gallery_kinds.cpp",
+        "native/src/core/filter_kinds.cpp",
+        "native/src/render/fx_gallery.cpp",
+        "native/src/render/ops_filters.cpp",
+        "native/src/app/filter_gallery_window.cpp",
+        "native/src/app/filter_menu.cpp",
+        "native/src/app/layer_panel_smart_filters.cpp",
+        "native/tests/unit/test_fx_gallery.cpp",
+        "native/tests/unit/test_fx.cpp",
+        "native/tests/contract/test_contract_filters_pc4.cpp",
+        "native/tests/gui/test_gui_filters.cpp"
+      ],
       "pc0": {
         "date": "2026-10-16",
         "cpp_base": "962faa4",
@@ -9379,7 +9560,8 @@
         ],
         "gap": "名前は光彩拡散（glow：明るい所をぼかして重ねる、半径・強さ・しきい値、試験あり）だが方式が違う。粒状感（graininess）・背景色を明るい所に混ぜる・クリア量がない",
         "note": ""
-      }
+      },
+      "remaining": "フィルターギャラリー（filter_raster の filter_gallery）の効果として閉じる（上流も 47 のコマンドはメニューに出さない）。見えは上流の近似で、Photoshop とは違う（SPEC COLOR-08 の既知の制限）"
     },
     {
       "id": "filter.gallery.dryBrush",
@@ -9394,9 +9576,21 @@
       },
       "upstream_menu": null,
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "未着手",
+      "implementation_status": "実装済み（PC4 D3、未統合）",
       "acceptance_status": "未実施",
-      "evidence": [],
+      "evidence": [
+        "native/src/core/gallery_kinds.cpp",
+        "native/src/core/filter_kinds.cpp",
+        "native/src/render/fx_gallery.cpp",
+        "native/src/render/ops_filters.cpp",
+        "native/src/app/filter_gallery_window.cpp",
+        "native/src/app/filter_menu.cpp",
+        "native/src/app/layer_panel_smart_filters.cpp",
+        "native/tests/unit/test_fx_gallery.cpp",
+        "native/tests/unit/test_fx.cpp",
+        "native/tests/contract/test_contract_filters_pc4.cpp",
+        "native/tests/gui/test_gui_filters.cpp"
+      ],
       "pc0": {
         "date": "2026-10-16",
         "cpp_base": "962faa4",
@@ -9407,7 +9601,8 @@
         "tests": [],
         "gap": "ドライブラシ（大きさ・細部・テクスチャ）がない",
         "note": "ギャラリーの共通の土台（filter.filterGallery 行）に依存。足すなら 8 ビット（render/filters.cpp）・16/32 ビット（color_filters.cpp）・CMYK/Lab（ink_filters.cpp）の 3 経路と画面の欄に要る。上流は MIT/Apache-2.0（帰属は native/third_party/photocraft）"
-      }
+      },
+      "remaining": "フィルターギャラリー（filter_raster の filter_gallery）の効果として閉じる（上流も 47 のコマンドはメニューに出さない）。見えは上流の近似で、Photoshop とは違う（SPEC COLOR-08 の既知の制限）"
     },
     {
       "id": "filter.gallery.filmGrain",
@@ -9422,9 +9617,21 @@
       },
       "upstream_menu": null,
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "未着手",
+      "implementation_status": "実装済み（PC4 D3、未統合）",
       "acceptance_status": "未実施",
-      "evidence": [],
+      "evidence": [
+        "native/src/core/gallery_kinds.cpp",
+        "native/src/core/filter_kinds.cpp",
+        "native/src/render/fx_gallery.cpp",
+        "native/src/render/ops_filters.cpp",
+        "native/src/app/filter_gallery_window.cpp",
+        "native/src/app/filter_menu.cpp",
+        "native/src/app/layer_panel_smart_filters.cpp",
+        "native/tests/unit/test_fx_gallery.cpp",
+        "native/tests/unit/test_fx.cpp",
+        "native/tests/contract/test_contract_filters_pc4.cpp",
+        "native/tests/gui/test_gui_filters.cpp"
+      ],
       "pc0": {
         "date": "2026-10-16",
         "cpp_base": "962faa4",
@@ -9435,7 +9642,8 @@
         "tests": [],
         "gap": "フィルムグレイン（粒・ハイライトの範囲・強さ）がない",
         "note": "ギャラリーの共通の土台（filter.filterGallery 行）に依存。足すなら 8 ビット（render/filters.cpp）・16/32 ビット（color_filters.cpp）・CMYK/Lab（ink_filters.cpp）の 3 経路と画面の欄に要る。上流は MIT/Apache-2.0（帰属は native/third_party/photocraft）"
-      }
+      },
+      "remaining": "フィルターギャラリー（filter_raster の filter_gallery）の効果として閉じる（上流も 47 のコマンドはメニューに出さない）。見えは上流の近似で、Photoshop とは違う（SPEC COLOR-08 の既知の制限）"
     },
     {
       "id": "filter.gallery.fresco",
@@ -9450,9 +9658,21 @@
       },
       "upstream_menu": null,
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "未着手",
+      "implementation_status": "実装済み（PC4 D3、未統合）",
       "acceptance_status": "未実施",
-      "evidence": [],
+      "evidence": [
+        "native/src/core/gallery_kinds.cpp",
+        "native/src/core/filter_kinds.cpp",
+        "native/src/render/fx_gallery.cpp",
+        "native/src/render/ops_filters.cpp",
+        "native/src/app/filter_gallery_window.cpp",
+        "native/src/app/filter_menu.cpp",
+        "native/src/app/layer_panel_smart_filters.cpp",
+        "native/tests/unit/test_fx_gallery.cpp",
+        "native/tests/unit/test_fx.cpp",
+        "native/tests/contract/test_contract_filters_pc4.cpp",
+        "native/tests/gui/test_gui_filters.cpp"
+      ],
       "pc0": {
         "date": "2026-10-16",
         "cpp_base": "962faa4",
@@ -9463,7 +9683,8 @@
         "tests": [],
         "gap": "フレスコ（大きさ・細部・テクスチャ）がない",
         "note": "ギャラリーの共通の土台（filter.filterGallery 行）に依存。足すなら 8 ビット（render/filters.cpp）・16/32 ビット（color_filters.cpp）・CMYK/Lab（ink_filters.cpp）の 3 経路と画面の欄に要る。上流は MIT/Apache-2.0（帰属は native/third_party/photocraft）"
-      }
+      },
+      "remaining": "フィルターギャラリー（filter_raster の filter_gallery）の効果として閉じる（上流も 47 のコマンドはメニューに出さない）。見えは上流の近似で、Photoshop とは違う（SPEC COLOR-08 の既知の制限）"
     },
     {
       "id": "filter.gallery.glass",
@@ -9478,9 +9699,21 @@
       },
       "upstream_menu": null,
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "未着手",
+      "implementation_status": "実装済み（PC4 D3、未統合）",
       "acceptance_status": "未実施",
-      "evidence": [],
+      "evidence": [
+        "native/src/core/gallery_kinds.cpp",
+        "native/src/core/filter_kinds.cpp",
+        "native/src/render/fx_gallery.cpp",
+        "native/src/render/ops_filters.cpp",
+        "native/src/app/filter_gallery_window.cpp",
+        "native/src/app/filter_menu.cpp",
+        "native/src/app/layer_panel_smart_filters.cpp",
+        "native/tests/unit/test_fx_gallery.cpp",
+        "native/tests/unit/test_fx.cpp",
+        "native/tests/contract/test_contract_filters_pc4.cpp",
+        "native/tests/gui/test_gui_filters.cpp"
+      ],
       "pc0": {
         "date": "2026-10-16",
         "cpp_base": "962faa4",
@@ -9491,7 +9724,8 @@
         "tests": [],
         "gap": "ガラス（歪み・滑らかさ・4 種のテクスチャ・拡大・反転）がない",
         "note": "ギャラリーの共通の土台（filter.filterGallery 行）に依存。足すなら 8 ビット（render/filters.cpp）・16/32 ビット（color_filters.cpp）・CMYK/Lab（ink_filters.cpp）の 3 経路と画面の欄に要る。上流は MIT/Apache-2.0（帰属は native/third_party/photocraft）"
-      }
+      },
+      "remaining": "フィルターギャラリー（filter_raster の filter_gallery）の効果として閉じる（上流も 47 のコマンドはメニューに出さない）。見えは上流の近似で、Photoshop とは違う（SPEC COLOR-08 の既知の制限）"
     },
     {
       "id": "filter.gallery.glowingEdges",
@@ -9506,9 +9740,21 @@
       },
       "upstream_menu": null,
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "未着手",
+      "implementation_status": "実装済み（PC4 D3、未統合）",
       "acceptance_status": "未実施",
-      "evidence": [],
+      "evidence": [
+        "native/src/core/gallery_kinds.cpp",
+        "native/src/core/filter_kinds.cpp",
+        "native/src/render/fx_gallery.cpp",
+        "native/src/render/ops_filters.cpp",
+        "native/src/app/filter_gallery_window.cpp",
+        "native/src/app/filter_menu.cpp",
+        "native/src/app/layer_panel_smart_filters.cpp",
+        "native/tests/unit/test_fx_gallery.cpp",
+        "native/tests/unit/test_fx.cpp",
+        "native/tests/contract/test_contract_filters_pc4.cpp",
+        "native/tests/gui/test_gui_filters.cpp"
+      ],
       "pc0": {
         "date": "2026-10-16",
         "cpp_base": "962faa4",
@@ -9519,7 +9765,8 @@
         "tests": [],
         "gap": "光る輪郭（幅・明るさ・滑らかさ）がない",
         "note": "ギャラリーの共通の土台（filter.filterGallery 行）に依存。足すなら 8 ビット（render/filters.cpp）・16/32 ビット（color_filters.cpp）・CMYK/Lab（ink_filters.cpp）の 3 経路と画面の欄に要る。上流は MIT/Apache-2.0（帰属は native/third_party/photocraft）"
-      }
+      },
+      "remaining": "フィルターギャラリー（filter_raster の filter_gallery）の効果として閉じる（上流も 47 のコマンドはメニューに出さない）。見えは上流の近似で、Photoshop とは違う（SPEC COLOR-08 の既知の制限）"
     },
     {
       "id": "filter.gallery.grain",
@@ -9534,9 +9781,21 @@
       },
       "upstream_menu": null,
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "未着手",
+      "implementation_status": "実装済み（PC4 D3、未統合）",
       "acceptance_status": "未実施",
-      "evidence": [],
+      "evidence": [
+        "native/src/core/gallery_kinds.cpp",
+        "native/src/core/filter_kinds.cpp",
+        "native/src/render/fx_gallery.cpp",
+        "native/src/render/ops_filters.cpp",
+        "native/src/app/filter_gallery_window.cpp",
+        "native/src/app/filter_menu.cpp",
+        "native/src/app/layer_panel_smart_filters.cpp",
+        "native/tests/unit/test_fx_gallery.cpp",
+        "native/tests/unit/test_fx.cpp",
+        "native/tests/contract/test_contract_filters_pc4.cpp",
+        "native/tests/gui/test_gui_filters.cpp"
+      ],
       "pc0": {
         "date": "2026-10-16",
         "cpp_base": "962faa4",
@@ -9547,7 +9806,8 @@
         "tests": [],
         "gap": "粒状（強さ・コントラスト・10 種の粒、描画色/背景色）がない",
         "note": "regular 型は Genko のノイズ（noise）に近い。ギャラリーの共通の土台（filter.filterGallery 行）に依存。足すなら 8 ビット（render/filters.cpp）・16/32 ビット（color_filters.cpp）・CMYK/Lab（ink_filters.cpp）の 3 経路と画面の欄に要る。上流は MIT/Apache-2.0（帰属は native/third_party/photocraft）"
-      }
+      },
+      "remaining": "フィルターギャラリー（filter_raster の filter_gallery）の効果として閉じる（上流も 47 のコマンドはメニューに出さない）。見えは上流の近似で、Photoshop とは違う（SPEC COLOR-08 の既知の制限）"
     },
     {
       "id": "filter.gallery.graphicPen",
@@ -9562,9 +9822,21 @@
       },
       "upstream_menu": null,
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "未着手",
+      "implementation_status": "実装済み（PC4 D3、未統合）",
       "acceptance_status": "未実施",
-      "evidence": [],
+      "evidence": [
+        "native/src/core/gallery_kinds.cpp",
+        "native/src/core/filter_kinds.cpp",
+        "native/src/render/fx_gallery.cpp",
+        "native/src/render/ops_filters.cpp",
+        "native/src/app/filter_gallery_window.cpp",
+        "native/src/app/filter_menu.cpp",
+        "native/src/app/layer_panel_smart_filters.cpp",
+        "native/tests/unit/test_fx_gallery.cpp",
+        "native/tests/unit/test_fx.cpp",
+        "native/tests/contract/test_contract_filters_pc4.cpp",
+        "native/tests/gui/test_gui_filters.cpp"
+      ],
       "pc0": {
         "date": "2026-10-16",
         "cpp_base": "962faa4",
@@ -9575,7 +9847,8 @@
         "tests": [],
         "gap": "グラフィックペン（長さ・明暗の釣り合い・4 方向、描画色/背景色）がない",
         "note": "ギャラリーの共通の土台（filter.filterGallery 行）に依存。足すなら 8 ビット（render/filters.cpp）・16/32 ビット（color_filters.cpp）・CMYK/Lab（ink_filters.cpp）の 3 経路と画面の欄に要る。上流は MIT/Apache-2.0（帰属は native/third_party/photocraft）"
-      }
+      },
+      "remaining": "フィルターギャラリー（filter_raster の filter_gallery）の効果として閉じる（上流も 47 のコマンドはメニューに出さない）。見えは上流の近似で、Photoshop とは違う（SPEC COLOR-08 の既知の制限）"
     },
     {
       "id": "filter.gallery.halftonePattern",
@@ -9590,9 +9863,21 @@
       },
       "upstream_menu": null,
       "genko_status": "一部（2026-10-16 照合）",
-      "implementation_status": "未着手",
+      "implementation_status": "実装済み（PC4 D3、未統合）",
       "acceptance_status": "未実施",
-      "evidence": [],
+      "evidence": [
+        "native/src/core/gallery_kinds.cpp",
+        "native/src/core/filter_kinds.cpp",
+        "native/src/render/fx_gallery.cpp",
+        "native/src/render/ops_filters.cpp",
+        "native/src/app/filter_gallery_window.cpp",
+        "native/src/app/filter_menu.cpp",
+        "native/src/app/layer_panel_smart_filters.cpp",
+        "native/tests/unit/test_fx_gallery.cpp",
+        "native/tests/unit/test_fx.cpp",
+        "native/tests/contract/test_contract_filters_pc4.cpp",
+        "native/tests/gui/test_gui_filters.cpp"
+      ],
       "pc0": {
         "date": "2026-10-16",
         "cpp_base": "962faa4",
@@ -9610,7 +9895,8 @@
         ],
         "gap": "レイヤーのトーン化（網点・線・交差・砂目、線数・角度・網の形）は印刷と書き出しで黒 1 色の網になる非破壊の設定。画素を変えるフィルターとしてはない、同心円（circle）・コントラスト・描画色/背景色の 2 色がない",
         "note": ""
-      }
+      },
+      "remaining": "フィルターギャラリー（filter_raster の filter_gallery）の効果として閉じる（上流も 47 のコマンドはメニューに出さない）。見えは上流の近似で、Photoshop とは違う（SPEC COLOR-08 の既知の制限）"
     },
     {
       "id": "filter.gallery.inkOutlines",
@@ -9625,9 +9911,21 @@
       },
       "upstream_menu": null,
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "未着手",
+      "implementation_status": "実装済み（PC4 D3、未統合）",
       "acceptance_status": "未実施",
-      "evidence": [],
+      "evidence": [
+        "native/src/core/gallery_kinds.cpp",
+        "native/src/core/filter_kinds.cpp",
+        "native/src/render/fx_gallery.cpp",
+        "native/src/render/ops_filters.cpp",
+        "native/src/app/filter_gallery_window.cpp",
+        "native/src/app/filter_menu.cpp",
+        "native/src/app/layer_panel_smart_filters.cpp",
+        "native/tests/unit/test_fx_gallery.cpp",
+        "native/tests/unit/test_fx.cpp",
+        "native/tests/contract/test_contract_filters_pc4.cpp",
+        "native/tests/gui/test_gui_filters.cpp"
+      ],
       "pc0": {
         "date": "2026-10-16",
         "cpp_base": "962faa4",
@@ -9638,7 +9936,8 @@
         "tests": [],
         "gap": "インクの輪郭（長さ・暗い/明るい強さ）がない",
         "note": "ギャラリーの共通の土台（filter.filterGallery 行）に依存。足すなら 8 ビット（render/filters.cpp）・16/32 ビット（color_filters.cpp）・CMYK/Lab（ink_filters.cpp）の 3 経路と画面の欄に要る。上流は MIT/Apache-2.0（帰属は native/third_party/photocraft）"
-      }
+      },
+      "remaining": "フィルターギャラリー（filter_raster の filter_gallery）の効果として閉じる（上流も 47 のコマンドはメニューに出さない）。見えは上流の近似で、Photoshop とは違う（SPEC COLOR-08 の既知の制限）"
     },
     {
       "id": "filter.gallery.mosaicTiles",
@@ -9653,9 +9952,21 @@
       },
       "upstream_menu": null,
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "未着手",
+      "implementation_status": "実装済み（PC4 D3、未統合）",
       "acceptance_status": "未実施",
-      "evidence": [],
+      "evidence": [
+        "native/src/core/gallery_kinds.cpp",
+        "native/src/core/filter_kinds.cpp",
+        "native/src/render/fx_gallery.cpp",
+        "native/src/render/ops_filters.cpp",
+        "native/src/app/filter_gallery_window.cpp",
+        "native/src/app/filter_menu.cpp",
+        "native/src/app/layer_panel_smart_filters.cpp",
+        "native/tests/unit/test_fx_gallery.cpp",
+        "native/tests/unit/test_fx.cpp",
+        "native/tests/contract/test_contract_filters_pc4.cpp",
+        "native/tests/gui/test_gui_filters.cpp"
+      ],
       "pc0": {
         "date": "2026-10-16",
         "cpp_base": "962faa4",
@@ -9666,7 +9977,8 @@
         "tests": [],
         "gap": "モザイクタイル（大きさ・目地の幅・目地の明るさ）がない",
         "note": "ギャラリーの共通の土台（filter.filterGallery 行）に依存。足すなら 8 ビット（render/filters.cpp）・16/32 ビット（color_filters.cpp）・CMYK/Lab（ink_filters.cpp）の 3 経路と画面の欄に要る。上流は MIT/Apache-2.0（帰属は native/third_party/photocraft）"
-      }
+      },
+      "remaining": "フィルターギャラリー（filter_raster の filter_gallery）の効果として閉じる（上流も 47 のコマンドはメニューに出さない）。見えは上流の近似で、Photoshop とは違う（SPEC COLOR-08 の既知の制限）"
     },
     {
       "id": "filter.gallery.neonGlow",
@@ -9681,9 +9993,21 @@
       },
       "upstream_menu": null,
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "未着手",
+      "implementation_status": "実装済み（PC4 D3、未統合）",
       "acceptance_status": "未実施",
-      "evidence": [],
+      "evidence": [
+        "native/src/core/gallery_kinds.cpp",
+        "native/src/core/filter_kinds.cpp",
+        "native/src/render/fx_gallery.cpp",
+        "native/src/render/ops_filters.cpp",
+        "native/src/app/filter_gallery_window.cpp",
+        "native/src/app/filter_menu.cpp",
+        "native/src/app/layer_panel_smart_filters.cpp",
+        "native/tests/unit/test_fx_gallery.cpp",
+        "native/tests/unit/test_fx.cpp",
+        "native/tests/contract/test_contract_filters_pc4.cpp",
+        "native/tests/gui/test_gui_filters.cpp"
+      ],
       "pc0": {
         "date": "2026-10-16",
         "cpp_base": "962faa4",
@@ -9694,7 +10018,8 @@
         "tests": [],
         "gap": "ネオン光彩（大きさ・明るさ・色）がない",
         "note": "Genko の光彩拡散（glow）は別の方式。ギャラリーの共通の土台（filter.filterGallery 行）に依存。足すなら 8 ビット（render/filters.cpp）・16/32 ビット（color_filters.cpp）・CMYK/Lab（ink_filters.cpp）の 3 経路と画面の欄に要る。上流は MIT/Apache-2.0（帰属は native/third_party/photocraft）"
-      }
+      },
+      "remaining": "フィルターギャラリー（filter_raster の filter_gallery）の効果として閉じる（上流も 47 のコマンドはメニューに出さない）。見えは上流の近似で、Photoshop とは違う（SPEC COLOR-08 の既知の制限）"
     },
     {
       "id": "filter.gallery.notePaper",
@@ -9709,9 +10034,21 @@
       },
       "upstream_menu": null,
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "未着手",
+      "implementation_status": "実装済み（PC4 D3、未統合）",
       "acceptance_status": "未実施",
-      "evidence": [],
+      "evidence": [
+        "native/src/core/gallery_kinds.cpp",
+        "native/src/core/filter_kinds.cpp",
+        "native/src/render/fx_gallery.cpp",
+        "native/src/render/ops_filters.cpp",
+        "native/src/app/filter_gallery_window.cpp",
+        "native/src/app/filter_menu.cpp",
+        "native/src/app/layer_panel_smart_filters.cpp",
+        "native/tests/unit/test_fx_gallery.cpp",
+        "native/tests/unit/test_fx.cpp",
+        "native/tests/contract/test_contract_filters_pc4.cpp",
+        "native/tests/gui/test_gui_filters.cpp"
+      ],
       "pc0": {
         "date": "2026-10-16",
         "cpp_base": "962faa4",
@@ -9722,7 +10059,8 @@
         "tests": [],
         "gap": "便箋（釣り合い・粒・凹凸、描画色/背景色）がない",
         "note": "ギャラリーの共通の土台（filter.filterGallery 行）に依存。足すなら 8 ビット（render/filters.cpp）・16/32 ビット（color_filters.cpp）・CMYK/Lab（ink_filters.cpp）の 3 経路と画面の欄に要る。上流は MIT/Apache-2.0（帰属は native/third_party/photocraft）"
-      }
+      },
+      "remaining": "フィルターギャラリー（filter_raster の filter_gallery）の効果として閉じる（上流も 47 のコマンドはメニューに出さない）。見えは上流の近似で、Photoshop とは違う（SPEC COLOR-08 の既知の制限）"
     },
     {
       "id": "filter.gallery.oceanRipple",
@@ -9737,9 +10075,21 @@
       },
       "upstream_menu": null,
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "未着手",
+      "implementation_status": "実装済み（PC4 D3、未統合）",
       "acceptance_status": "未実施",
-      "evidence": [],
+      "evidence": [
+        "native/src/core/gallery_kinds.cpp",
+        "native/src/core/filter_kinds.cpp",
+        "native/src/render/fx_gallery.cpp",
+        "native/src/render/ops_filters.cpp",
+        "native/src/app/filter_gallery_window.cpp",
+        "native/src/app/filter_menu.cpp",
+        "native/src/app/layer_panel_smart_filters.cpp",
+        "native/tests/unit/test_fx_gallery.cpp",
+        "native/tests/unit/test_fx.cpp",
+        "native/tests/contract/test_contract_filters_pc4.cpp",
+        "native/tests/gui/test_gui_filters.cpp"
+      ],
       "pc0": {
         "date": "2026-10-16",
         "cpp_base": "962faa4",
@@ -9750,7 +10100,8 @@
         "tests": [],
         "gap": "海の波紋（大きさ・強さ）がない",
         "note": "ギャラリーの共通の土台（filter.filterGallery 行）に依存。足すなら 8 ビット（render/filters.cpp）・16/32 ビット（color_filters.cpp）・CMYK/Lab（ink_filters.cpp）の 3 経路と画面の欄に要る。上流は MIT/Apache-2.0（帰属は native/third_party/photocraft）"
-      }
+      },
+      "remaining": "フィルターギャラリー（filter_raster の filter_gallery）の効果として閉じる（上流も 47 のコマンドはメニューに出さない）。見えは上流の近似で、Photoshop とは違う（SPEC COLOR-08 の既知の制限）"
     },
     {
       "id": "filter.gallery.paintDaubs",
@@ -9765,9 +10116,21 @@
       },
       "upstream_menu": null,
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "未着手",
+      "implementation_status": "実装済み（PC4 D3、未統合）",
       "acceptance_status": "未実施",
-      "evidence": [],
+      "evidence": [
+        "native/src/core/gallery_kinds.cpp",
+        "native/src/core/filter_kinds.cpp",
+        "native/src/render/fx_gallery.cpp",
+        "native/src/render/ops_filters.cpp",
+        "native/src/app/filter_gallery_window.cpp",
+        "native/src/app/filter_menu.cpp",
+        "native/src/app/layer_panel_smart_filters.cpp",
+        "native/tests/unit/test_fx_gallery.cpp",
+        "native/tests/unit/test_fx.cpp",
+        "native/tests/contract/test_contract_filters_pc4.cpp",
+        "native/tests/gui/test_gui_filters.cpp"
+      ],
       "pc0": {
         "date": "2026-10-16",
         "cpp_base": "962faa4",
@@ -9778,7 +10141,8 @@
         "tests": [],
         "gap": "塗りのにじみ（大きさ・鋭さ・6 種のブラシ）がない",
         "note": "ギャラリーの共通の土台（filter.filterGallery 行）に依存。足すなら 8 ビット（render/filters.cpp）・16/32 ビット（color_filters.cpp）・CMYK/Lab（ink_filters.cpp）の 3 経路と画面の欄に要る。上流は MIT/Apache-2.0（帰属は native/third_party/photocraft）"
-      }
+      },
+      "remaining": "フィルターギャラリー（filter_raster の filter_gallery）の効果として閉じる（上流も 47 のコマンドはメニューに出さない）。見えは上流の近似で、Photoshop とは違う（SPEC COLOR-08 の既知の制限）"
     },
     {
       "id": "filter.gallery.paletteKnife",
@@ -9793,9 +10157,21 @@
       },
       "upstream_menu": null,
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "未着手",
+      "implementation_status": "実装済み（PC4 D3、未統合）",
       "acceptance_status": "未実施",
-      "evidence": [],
+      "evidence": [
+        "native/src/core/gallery_kinds.cpp",
+        "native/src/core/filter_kinds.cpp",
+        "native/src/render/fx_gallery.cpp",
+        "native/src/render/ops_filters.cpp",
+        "native/src/app/filter_gallery_window.cpp",
+        "native/src/app/filter_menu.cpp",
+        "native/src/app/layer_panel_smart_filters.cpp",
+        "native/tests/unit/test_fx_gallery.cpp",
+        "native/tests/unit/test_fx.cpp",
+        "native/tests/contract/test_contract_filters_pc4.cpp",
+        "native/tests/gui/test_gui_filters.cpp"
+      ],
       "pc0": {
         "date": "2026-10-16",
         "cpp_base": "962faa4",
@@ -9806,7 +10182,8 @@
         "tests": [],
         "gap": "パレットナイフ（大きさ・細部・柔らかさ）がない",
         "note": "ギャラリーの共通の土台（filter.filterGallery 行）に依存。足すなら 8 ビット（render/filters.cpp）・16/32 ビット（color_filters.cpp）・CMYK/Lab（ink_filters.cpp）の 3 経路と画面の欄に要る。上流は MIT/Apache-2.0（帰属は native/third_party/photocraft）"
-      }
+      },
+      "remaining": "フィルターギャラリー（filter_raster の filter_gallery）の効果として閉じる（上流も 47 のコマンドはメニューに出さない）。見えは上流の近似で、Photoshop とは違う（SPEC COLOR-08 の既知の制限）"
     },
     {
       "id": "filter.gallery.patchwork",
@@ -9821,9 +10198,21 @@
       },
       "upstream_menu": null,
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "未着手",
+      "implementation_status": "実装済み（PC4 D3、未統合）",
       "acceptance_status": "未実施",
-      "evidence": [],
+      "evidence": [
+        "native/src/core/gallery_kinds.cpp",
+        "native/src/core/filter_kinds.cpp",
+        "native/src/render/fx_gallery.cpp",
+        "native/src/render/ops_filters.cpp",
+        "native/src/app/filter_gallery_window.cpp",
+        "native/src/app/filter_menu.cpp",
+        "native/src/app/layer_panel_smart_filters.cpp",
+        "native/tests/unit/test_fx_gallery.cpp",
+        "native/tests/unit/test_fx.cpp",
+        "native/tests/contract/test_contract_filters_pc4.cpp",
+        "native/tests/gui/test_gui_filters.cpp"
+      ],
       "pc0": {
         "date": "2026-10-16",
         "cpp_base": "962faa4",
@@ -9834,7 +10223,8 @@
         "tests": [],
         "gap": "パッチワーク（四角の大きさ・凹凸）がない",
         "note": "ギャラリーの共通の土台（filter.filterGallery 行）に依存。足すなら 8 ビット（render/filters.cpp）・16/32 ビット（color_filters.cpp）・CMYK/Lab（ink_filters.cpp）の 3 経路と画面の欄に要る。上流は MIT/Apache-2.0（帰属は native/third_party/photocraft）"
-      }
+      },
+      "remaining": "フィルターギャラリー（filter_raster の filter_gallery）の効果として閉じる（上流も 47 のコマンドはメニューに出さない）。見えは上流の近似で、Photoshop とは違う（SPEC COLOR-08 の既知の制限）"
     },
     {
       "id": "filter.gallery.photocopy",
@@ -9849,9 +10239,21 @@
       },
       "upstream_menu": null,
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "未着手",
+      "implementation_status": "実装済み（PC4 D3、未統合）",
       "acceptance_status": "未実施",
-      "evidence": [],
+      "evidence": [
+        "native/src/core/gallery_kinds.cpp",
+        "native/src/core/filter_kinds.cpp",
+        "native/src/render/fx_gallery.cpp",
+        "native/src/render/ops_filters.cpp",
+        "native/src/app/filter_gallery_window.cpp",
+        "native/src/app/filter_menu.cpp",
+        "native/src/app/layer_panel_smart_filters.cpp",
+        "native/tests/unit/test_fx_gallery.cpp",
+        "native/tests/unit/test_fx.cpp",
+        "native/tests/contract/test_contract_filters_pc4.cpp",
+        "native/tests/gui/test_gui_filters.cpp"
+      ],
       "pc0": {
         "date": "2026-10-16",
         "cpp_base": "962faa4",
@@ -9862,7 +10264,8 @@
         "tests": [],
         "gap": "コピー（細部・暗さ、描画色/背景色）がない",
         "note": "Genko の線画抽出（lineart）は濃い線を拾う別の機能。ギャラリーの共通の土台（filter.filterGallery 行）に依存。足すなら 8 ビット（render/filters.cpp）・16/32 ビット（color_filters.cpp）・CMYK/Lab（ink_filters.cpp）の 3 経路と画面の欄に要る。上流は MIT/Apache-2.0（帰属は native/third_party/photocraft）"
-      }
+      },
+      "remaining": "フィルターギャラリー（filter_raster の filter_gallery）の効果として閉じる（上流も 47 のコマンドはメニューに出さない）。見えは上流の近似で、Photoshop とは違う（SPEC COLOR-08 の既知の制限）"
     },
     {
       "id": "filter.gallery.plaster",
@@ -9877,9 +10280,21 @@
       },
       "upstream_menu": null,
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "未着手",
+      "implementation_status": "実装済み（PC4 D3、未統合）",
       "acceptance_status": "未実施",
-      "evidence": [],
+      "evidence": [
+        "native/src/core/gallery_kinds.cpp",
+        "native/src/core/filter_kinds.cpp",
+        "native/src/render/fx_gallery.cpp",
+        "native/src/render/ops_filters.cpp",
+        "native/src/app/filter_gallery_window.cpp",
+        "native/src/app/filter_menu.cpp",
+        "native/src/app/layer_panel_smart_filters.cpp",
+        "native/tests/unit/test_fx_gallery.cpp",
+        "native/tests/unit/test_fx.cpp",
+        "native/tests/contract/test_contract_filters_pc4.cpp",
+        "native/tests/gui/test_gui_filters.cpp"
+      ],
       "pc0": {
         "date": "2026-10-16",
         "cpp_base": "962faa4",
@@ -9890,7 +10305,8 @@
         "tests": [],
         "gap": "しっくい（釣り合い・滑らかさ・光の向き、描画色/背景色）がない",
         "note": "ギャラリーの共通の土台（filter.filterGallery 行）に依存。足すなら 8 ビット（render/filters.cpp）・16/32 ビット（color_filters.cpp）・CMYK/Lab（ink_filters.cpp）の 3 経路と画面の欄に要る。上流は MIT/Apache-2.0（帰属は native/third_party/photocraft）"
-      }
+      },
+      "remaining": "フィルターギャラリー（filter_raster の filter_gallery）の効果として閉じる（上流も 47 のコマンドはメニューに出さない）。見えは上流の近似で、Photoshop とは違う（SPEC COLOR-08 の既知の制限）"
     },
     {
       "id": "filter.gallery.plasticWrap",
@@ -9905,9 +10321,21 @@
       },
       "upstream_menu": null,
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "未着手",
+      "implementation_status": "実装済み（PC4 D3、未統合）",
       "acceptance_status": "未実施",
-      "evidence": [],
+      "evidence": [
+        "native/src/core/gallery_kinds.cpp",
+        "native/src/core/filter_kinds.cpp",
+        "native/src/render/fx_gallery.cpp",
+        "native/src/render/ops_filters.cpp",
+        "native/src/app/filter_gallery_window.cpp",
+        "native/src/app/filter_menu.cpp",
+        "native/src/app/layer_panel_smart_filters.cpp",
+        "native/tests/unit/test_fx_gallery.cpp",
+        "native/tests/unit/test_fx.cpp",
+        "native/tests/contract/test_contract_filters_pc4.cpp",
+        "native/tests/gui/test_gui_filters.cpp"
+      ],
       "pc0": {
         "date": "2026-10-16",
         "cpp_base": "962faa4",
@@ -9918,7 +10346,8 @@
         "tests": [],
         "gap": "ラップ（ハイライトの強さ・細部・滑らかさ）がない",
         "note": "ギャラリーの共通の土台（filter.filterGallery 行）に依存。足すなら 8 ビット（render/filters.cpp）・16/32 ビット（color_filters.cpp）・CMYK/Lab（ink_filters.cpp）の 3 経路と画面の欄に要る。上流は MIT/Apache-2.0（帰属は native/third_party/photocraft）"
-      }
+      },
+      "remaining": "フィルターギャラリー（filter_raster の filter_gallery）の効果として閉じる（上流も 47 のコマンドはメニューに出さない）。見えは上流の近似で、Photoshop とは違う（SPEC COLOR-08 の既知の制限）"
     },
     {
       "id": "filter.gallery.posterEdges",
@@ -9933,9 +10362,21 @@
       },
       "upstream_menu": null,
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "未着手",
+      "implementation_status": "実装済み（PC4 D3、未統合）",
       "acceptance_status": "未実施",
-      "evidence": [],
+      "evidence": [
+        "native/src/core/gallery_kinds.cpp",
+        "native/src/core/filter_kinds.cpp",
+        "native/src/render/fx_gallery.cpp",
+        "native/src/render/ops_filters.cpp",
+        "native/src/app/filter_gallery_window.cpp",
+        "native/src/app/filter_menu.cpp",
+        "native/src/app/layer_panel_smart_filters.cpp",
+        "native/tests/unit/test_fx_gallery.cpp",
+        "native/tests/unit/test_fx.cpp",
+        "native/tests/contract/test_contract_filters_pc4.cpp",
+        "native/tests/gui/test_gui_filters.cpp"
+      ],
       "pc0": {
         "date": "2026-10-16",
         "cpp_base": "962faa4",
@@ -9946,7 +10387,8 @@
         "tests": [],
         "gap": "エッジのポスタリゼーション（太さ・強さ・階調）がない",
         "note": "Genko の階調化（posterize）はあるが輪郭を描かない。ギャラリーの共通の土台（filter.filterGallery 行）に依存。足すなら 8 ビット（render/filters.cpp）・16/32 ビット（color_filters.cpp）・CMYK/Lab（ink_filters.cpp）の 3 経路と画面の欄に要る。上流は MIT/Apache-2.0（帰属は native/third_party/photocraft）"
-      }
+      },
+      "remaining": "フィルターギャラリー（filter_raster の filter_gallery）の効果として閉じる（上流も 47 のコマンドはメニューに出さない）。見えは上流の近似で、Photoshop とは違う（SPEC COLOR-08 の既知の制限）"
     },
     {
       "id": "filter.gallery.reticulation",
@@ -9961,9 +10403,21 @@
       },
       "upstream_menu": null,
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "未着手",
+      "implementation_status": "実装済み（PC4 D3、未統合）",
       "acceptance_status": "未実施",
-      "evidence": [],
+      "evidence": [
+        "native/src/core/gallery_kinds.cpp",
+        "native/src/core/filter_kinds.cpp",
+        "native/src/render/fx_gallery.cpp",
+        "native/src/render/ops_filters.cpp",
+        "native/src/app/filter_gallery_window.cpp",
+        "native/src/app/filter_menu.cpp",
+        "native/src/app/layer_panel_smart_filters.cpp",
+        "native/tests/unit/test_fx_gallery.cpp",
+        "native/tests/unit/test_fx.cpp",
+        "native/tests/contract/test_contract_filters_pc4.cpp",
+        "native/tests/gui/test_gui_filters.cpp"
+      ],
       "pc0": {
         "date": "2026-10-16",
         "cpp_base": "962faa4",
@@ -9974,7 +10428,8 @@
         "tests": [],
         "gap": "細網（密度・前景/背景のレベル、描画色/背景色）がない",
         "note": "ギャラリーの共通の土台（filter.filterGallery 行）に依存。足すなら 8 ビット（render/filters.cpp）・16/32 ビット（color_filters.cpp）・CMYK/Lab（ink_filters.cpp）の 3 経路と画面の欄に要る。上流は MIT/Apache-2.0（帰属は native/third_party/photocraft）"
-      }
+      },
+      "remaining": "フィルターギャラリー（filter_raster の filter_gallery）の効果として閉じる（上流も 47 のコマンドはメニューに出さない）。見えは上流の近似で、Photoshop とは違う（SPEC COLOR-08 の既知の制限）"
     },
     {
       "id": "filter.gallery.roughPastels",
@@ -9989,9 +10444,21 @@
       },
       "upstream_menu": null,
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "未着手",
+      "implementation_status": "実装済み（PC4 D3、未統合）",
       "acceptance_status": "未実施",
-      "evidence": [],
+      "evidence": [
+        "native/src/core/gallery_kinds.cpp",
+        "native/src/core/filter_kinds.cpp",
+        "native/src/render/fx_gallery.cpp",
+        "native/src/render/ops_filters.cpp",
+        "native/src/app/filter_gallery_window.cpp",
+        "native/src/app/filter_menu.cpp",
+        "native/src/app/layer_panel_smart_filters.cpp",
+        "native/tests/unit/test_fx_gallery.cpp",
+        "native/tests/unit/test_fx.cpp",
+        "native/tests/contract/test_contract_filters_pc4.cpp",
+        "native/tests/gui/test_gui_filters.cpp"
+      ],
       "pc0": {
         "date": "2026-10-16",
         "cpp_base": "962faa4",
@@ -10002,7 +10469,8 @@
         "tests": [],
         "gap": "粗いパステル（長さ・細部・テクスチャ・凹凸・光）がない",
         "note": "ギャラリーの共通の土台（filter.filterGallery 行）に依存。足すなら 8 ビット（render/filters.cpp）・16/32 ビット（color_filters.cpp）・CMYK/Lab（ink_filters.cpp）の 3 経路と画面の欄に要る。上流は MIT/Apache-2.0（帰属は native/third_party/photocraft）"
-      }
+      },
+      "remaining": "フィルターギャラリー（filter_raster の filter_gallery）の効果として閉じる（上流も 47 のコマンドはメニューに出さない）。見えは上流の近似で、Photoshop とは違う（SPEC COLOR-08 の既知の制限）"
     },
     {
       "id": "filter.gallery.smudgeStick",
@@ -10017,9 +10485,21 @@
       },
       "upstream_menu": null,
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "未着手",
+      "implementation_status": "実装済み（PC4 D3、未統合）",
       "acceptance_status": "未実施",
-      "evidence": [],
+      "evidence": [
+        "native/src/core/gallery_kinds.cpp",
+        "native/src/core/filter_kinds.cpp",
+        "native/src/render/fx_gallery.cpp",
+        "native/src/render/ops_filters.cpp",
+        "native/src/app/filter_gallery_window.cpp",
+        "native/src/app/filter_menu.cpp",
+        "native/src/app/layer_panel_smart_filters.cpp",
+        "native/tests/unit/test_fx_gallery.cpp",
+        "native/tests/unit/test_fx.cpp",
+        "native/tests/contract/test_contract_filters_pc4.cpp",
+        "native/tests/gui/test_gui_filters.cpp"
+      ],
       "pc0": {
         "date": "2026-10-16",
         "cpp_base": "962faa4",
@@ -10030,7 +10510,8 @@
         "tests": [],
         "gap": "こすり（長さ・ハイライトの範囲・強さ）がない",
         "note": "ギャラリーの共通の土台（filter.filterGallery 行）に依存。足すなら 8 ビット（render/filters.cpp）・16/32 ビット（color_filters.cpp）・CMYK/Lab（ink_filters.cpp）の 3 経路と画面の欄に要る。上流は MIT/Apache-2.0（帰属は native/third_party/photocraft）"
-      }
+      },
+      "remaining": "フィルターギャラリー（filter_raster の filter_gallery）の効果として閉じる（上流も 47 のコマンドはメニューに出さない）。見えは上流の近似で、Photoshop とは違う（SPEC COLOR-08 の既知の制限）"
     },
     {
       "id": "filter.gallery.spatter",
@@ -10045,9 +10526,21 @@
       },
       "upstream_menu": null,
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "未着手",
+      "implementation_status": "実装済み（PC4 D3、未統合）",
       "acceptance_status": "未実施",
-      "evidence": [],
+      "evidence": [
+        "native/src/core/gallery_kinds.cpp",
+        "native/src/core/filter_kinds.cpp",
+        "native/src/render/fx_gallery.cpp",
+        "native/src/render/ops_filters.cpp",
+        "native/src/app/filter_gallery_window.cpp",
+        "native/src/app/filter_menu.cpp",
+        "native/src/app/layer_panel_smart_filters.cpp",
+        "native/tests/unit/test_fx_gallery.cpp",
+        "native/tests/unit/test_fx.cpp",
+        "native/tests/contract/test_contract_filters_pc4.cpp",
+        "native/tests/gui/test_gui_filters.cpp"
+      ],
       "pc0": {
         "date": "2026-10-16",
         "cpp_base": "962faa4",
@@ -10058,7 +10551,8 @@
         "tests": [],
         "gap": "はね（スプレーの半径・滑らかさ）がない",
         "note": "ギャラリーの共通の土台（filter.filterGallery 行）に依存。足すなら 8 ビット（render/filters.cpp）・16/32 ビット（color_filters.cpp）・CMYK/Lab（ink_filters.cpp）の 3 経路と画面の欄に要る。上流は MIT/Apache-2.0（帰属は native/third_party/photocraft）"
-      }
+      },
+      "remaining": "フィルターギャラリー（filter_raster の filter_gallery）の効果として閉じる（上流も 47 のコマンドはメニューに出さない）。見えは上流の近似で、Photoshop とは違う（SPEC COLOR-08 の既知の制限）"
     },
     {
       "id": "filter.gallery.sponge",
@@ -10073,9 +10567,21 @@
       },
       "upstream_menu": null,
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "未着手",
+      "implementation_status": "実装済み（PC4 D3、未統合）",
       "acceptance_status": "未実施",
-      "evidence": [],
+      "evidence": [
+        "native/src/core/gallery_kinds.cpp",
+        "native/src/core/filter_kinds.cpp",
+        "native/src/render/fx_gallery.cpp",
+        "native/src/render/ops_filters.cpp",
+        "native/src/app/filter_gallery_window.cpp",
+        "native/src/app/filter_menu.cpp",
+        "native/src/app/layer_panel_smart_filters.cpp",
+        "native/tests/unit/test_fx_gallery.cpp",
+        "native/tests/unit/test_fx.cpp",
+        "native/tests/contract/test_contract_filters_pc4.cpp",
+        "native/tests/gui/test_gui_filters.cpp"
+      ],
       "pc0": {
         "date": "2026-10-16",
         "cpp_base": "962faa4",
@@ -10086,7 +10592,8 @@
         "tests": [],
         "gap": "スポンジ（大きさ・定義・滑らかさ）がない",
         "note": "ギャラリーの共通の土台（filter.filterGallery 行）に依存。足すなら 8 ビット（render/filters.cpp）・16/32 ビット（color_filters.cpp）・CMYK/Lab（ink_filters.cpp）の 3 経路と画面の欄に要る。上流は MIT/Apache-2.0（帰属は native/third_party/photocraft）"
-      }
+      },
+      "remaining": "フィルターギャラリー（filter_raster の filter_gallery）の効果として閉じる（上流も 47 のコマンドはメニューに出さない）。見えは上流の近似で、Photoshop とは違う（SPEC COLOR-08 の既知の制限）"
     },
     {
       "id": "filter.gallery.sprayedStrokes",
@@ -10101,9 +10608,21 @@
       },
       "upstream_menu": null,
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "未着手",
+      "implementation_status": "実装済み（PC4 D3、未統合）",
       "acceptance_status": "未実施",
-      "evidence": [],
+      "evidence": [
+        "native/src/core/gallery_kinds.cpp",
+        "native/src/core/filter_kinds.cpp",
+        "native/src/render/fx_gallery.cpp",
+        "native/src/render/ops_filters.cpp",
+        "native/src/app/filter_gallery_window.cpp",
+        "native/src/app/filter_menu.cpp",
+        "native/src/app/layer_panel_smart_filters.cpp",
+        "native/tests/unit/test_fx_gallery.cpp",
+        "native/tests/unit/test_fx.cpp",
+        "native/tests/contract/test_contract_filters_pc4.cpp",
+        "native/tests/gui/test_gui_filters.cpp"
+      ],
       "pc0": {
         "date": "2026-10-16",
         "cpp_base": "962faa4",
@@ -10114,7 +10633,8 @@
         "tests": [],
         "gap": "スプレー（長さ・半径・4 方向）がない",
         "note": "ギャラリーの共通の土台（filter.filterGallery 行）に依存。足すなら 8 ビット（render/filters.cpp）・16/32 ビット（color_filters.cpp）・CMYK/Lab（ink_filters.cpp）の 3 経路と画面の欄に要る。上流は MIT/Apache-2.0（帰属は native/third_party/photocraft）"
-      }
+      },
+      "remaining": "フィルターギャラリー（filter_raster の filter_gallery）の効果として閉じる（上流も 47 のコマンドはメニューに出さない）。見えは上流の近似で、Photoshop とは違う（SPEC COLOR-08 の既知の制限）"
     },
     {
       "id": "filter.gallery.stainedGlass",
@@ -10129,9 +10649,21 @@
       },
       "upstream_menu": null,
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "未着手",
+      "implementation_status": "実装済み（PC4 D3、未統合）",
       "acceptance_status": "未実施",
-      "evidence": [],
+      "evidence": [
+        "native/src/core/gallery_kinds.cpp",
+        "native/src/core/filter_kinds.cpp",
+        "native/src/render/fx_gallery.cpp",
+        "native/src/render/ops_filters.cpp",
+        "native/src/app/filter_gallery_window.cpp",
+        "native/src/app/filter_menu.cpp",
+        "native/src/app/layer_panel_smart_filters.cpp",
+        "native/tests/unit/test_fx_gallery.cpp",
+        "native/tests/unit/test_fx.cpp",
+        "native/tests/contract/test_contract_filters_pc4.cpp",
+        "native/tests/gui/test_gui_filters.cpp"
+      ],
       "pc0": {
         "date": "2026-10-16",
         "cpp_base": "962faa4",
@@ -10142,7 +10674,8 @@
         "tests": [],
         "gap": "ステンドグラス（セルの大きさ・境界の太さ・光の強さ、描画色）がない",
         "note": "ギャラリーの共通の土台（filter.filterGallery 行）に依存。足すなら 8 ビット（render/filters.cpp）・16/32 ビット（color_filters.cpp）・CMYK/Lab（ink_filters.cpp）の 3 経路と画面の欄に要る。上流は MIT/Apache-2.0（帰属は native/third_party/photocraft）"
-      }
+      },
+      "remaining": "フィルターギャラリー（filter_raster の filter_gallery）の効果として閉じる（上流も 47 のコマンドはメニューに出さない）。見えは上流の近似で、Photoshop とは違う（SPEC COLOR-08 の既知の制限）"
     },
     {
       "id": "filter.gallery.stamp",
@@ -10157,9 +10690,21 @@
       },
       "upstream_menu": null,
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "未着手",
+      "implementation_status": "実装済み（PC4 D3、未統合）",
       "acceptance_status": "未実施",
-      "evidence": [],
+      "evidence": [
+        "native/src/core/gallery_kinds.cpp",
+        "native/src/core/filter_kinds.cpp",
+        "native/src/render/fx_gallery.cpp",
+        "native/src/render/ops_filters.cpp",
+        "native/src/app/filter_gallery_window.cpp",
+        "native/src/app/filter_menu.cpp",
+        "native/src/app/layer_panel_smart_filters.cpp",
+        "native/tests/unit/test_fx_gallery.cpp",
+        "native/tests/unit/test_fx.cpp",
+        "native/tests/contract/test_contract_filters_pc4.cpp",
+        "native/tests/gui/test_gui_filters.cpp"
+      ],
       "pc0": {
         "date": "2026-10-16",
         "cpp_base": "962faa4",
@@ -10170,7 +10715,8 @@
         "tests": [],
         "gap": "スタンプ（明暗の釣り合い・滑らかさ、描画色/背景色）がない",
         "note": "Genko の白黒にする（bitonal）は単純なしきい値。ギャラリーの共通の土台（filter.filterGallery 行）に依存。足すなら 8 ビット（render/filters.cpp）・16/32 ビット（color_filters.cpp）・CMYK/Lab（ink_filters.cpp）の 3 経路と画面の欄に要る。上流は MIT/Apache-2.0（帰属は native/third_party/photocraft）"
-      }
+      },
+      "remaining": "フィルターギャラリー（filter_raster の filter_gallery）の効果として閉じる（上流も 47 のコマンドはメニューに出さない）。見えは上流の近似で、Photoshop とは違う（SPEC COLOR-08 の既知の制限）"
     },
     {
       "id": "filter.gallery.sumiE",
@@ -10185,9 +10731,21 @@
       },
       "upstream_menu": null,
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "未着手",
+      "implementation_status": "実装済み（PC4 D3、未統合）",
       "acceptance_status": "未実施",
-      "evidence": [],
+      "evidence": [
+        "native/src/core/gallery_kinds.cpp",
+        "native/src/core/filter_kinds.cpp",
+        "native/src/render/fx_gallery.cpp",
+        "native/src/render/ops_filters.cpp",
+        "native/src/app/filter_gallery_window.cpp",
+        "native/src/app/filter_menu.cpp",
+        "native/src/app/layer_panel_smart_filters.cpp",
+        "native/tests/unit/test_fx_gallery.cpp",
+        "native/tests/unit/test_fx.cpp",
+        "native/tests/contract/test_contract_filters_pc4.cpp",
+        "native/tests/gui/test_gui_filters.cpp"
+      ],
       "pc0": {
         "date": "2026-10-16",
         "cpp_base": "962faa4",
@@ -10198,7 +10756,8 @@
         "tests": [],
         "gap": "墨絵（ストロークの幅・筆圧・コントラスト）がない",
         "note": "ギャラリーの共通の土台（filter.filterGallery 行）に依存。足すなら 8 ビット（render/filters.cpp）・16/32 ビット（color_filters.cpp）・CMYK/Lab（ink_filters.cpp）の 3 経路と画面の欄に要る。上流は MIT/Apache-2.0（帰属は native/third_party/photocraft）"
-      }
+      },
+      "remaining": "フィルターギャラリー（filter_raster の filter_gallery）の効果として閉じる（上流も 47 のコマンドはメニューに出さない）。見えは上流の近似で、Photoshop とは違う（SPEC COLOR-08 の既知の制限）"
     },
     {
       "id": "filter.gallery.texturizer",
@@ -10213,9 +10772,21 @@
       },
       "upstream_menu": null,
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "未着手",
+      "implementation_status": "実装済み（PC4 D3、未統合）",
       "acceptance_status": "未実施",
-      "evidence": [],
+      "evidence": [
+        "native/src/core/gallery_kinds.cpp",
+        "native/src/core/filter_kinds.cpp",
+        "native/src/render/fx_gallery.cpp",
+        "native/src/render/ops_filters.cpp",
+        "native/src/app/filter_gallery_window.cpp",
+        "native/src/app/filter_menu.cpp",
+        "native/src/app/layer_panel_smart_filters.cpp",
+        "native/tests/unit/test_fx_gallery.cpp",
+        "native/tests/unit/test_fx.cpp",
+        "native/tests/contract/test_contract_filters_pc4.cpp",
+        "native/tests/gui/test_gui_filters.cpp"
+      ],
       "pc0": {
         "date": "2026-10-16",
         "cpp_base": "962faa4",
@@ -10226,7 +10797,8 @@
         "tests": [],
         "gap": "テクスチャライザー（4 種のテクスチャ・拡大・凹凸・光・反転）がない",
         "note": "ギャラリーの共通の土台（filter.filterGallery 行）に依存。足すなら 8 ビット（render/filters.cpp）・16/32 ビット（color_filters.cpp）・CMYK/Lab（ink_filters.cpp）の 3 経路と画面の欄に要る。上流は MIT/Apache-2.0（帰属は native/third_party/photocraft）"
-      }
+      },
+      "remaining": "フィルターギャラリー（filter_raster の filter_gallery）の効果として閉じる（上流も 47 のコマンドはメニューに出さない）。見えは上流の近似で、Photoshop とは違う（SPEC COLOR-08 の既知の制限）"
     },
     {
       "id": "filter.gallery.tornEdges",
@@ -10241,9 +10813,21 @@
       },
       "upstream_menu": null,
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "未着手",
+      "implementation_status": "実装済み（PC4 D3、未統合）",
       "acceptance_status": "未実施",
-      "evidence": [],
+      "evidence": [
+        "native/src/core/gallery_kinds.cpp",
+        "native/src/core/filter_kinds.cpp",
+        "native/src/render/fx_gallery.cpp",
+        "native/src/render/ops_filters.cpp",
+        "native/src/app/filter_gallery_window.cpp",
+        "native/src/app/filter_menu.cpp",
+        "native/src/app/layer_panel_smart_filters.cpp",
+        "native/tests/unit/test_fx_gallery.cpp",
+        "native/tests/unit/test_fx.cpp",
+        "native/tests/contract/test_contract_filters_pc4.cpp",
+        "native/tests/gui/test_gui_filters.cpp"
+      ],
       "pc0": {
         "date": "2026-10-16",
         "cpp_base": "962faa4",
@@ -10254,7 +10838,8 @@
         "tests": [],
         "gap": "ぎざぎざの紙（釣り合い・滑らかさ・コントラスト、描画色/背景色）がない",
         "note": "ギャラリーの共通の土台（filter.filterGallery 行）に依存。足すなら 8 ビット（render/filters.cpp）・16/32 ビット（color_filters.cpp）・CMYK/Lab（ink_filters.cpp）の 3 経路と画面の欄に要る。上流は MIT/Apache-2.0（帰属は native/third_party/photocraft）"
-      }
+      },
+      "remaining": "フィルターギャラリー（filter_raster の filter_gallery）の効果として閉じる（上流も 47 のコマンドはメニューに出さない）。見えは上流の近似で、Photoshop とは違う（SPEC COLOR-08 の既知の制限）"
     },
     {
       "id": "filter.gallery.underpainting",
@@ -10269,9 +10854,21 @@
       },
       "upstream_menu": null,
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "未着手",
+      "implementation_status": "実装済み（PC4 D3、未統合）",
       "acceptance_status": "未実施",
-      "evidence": [],
+      "evidence": [
+        "native/src/core/gallery_kinds.cpp",
+        "native/src/core/filter_kinds.cpp",
+        "native/src/render/fx_gallery.cpp",
+        "native/src/render/ops_filters.cpp",
+        "native/src/app/filter_gallery_window.cpp",
+        "native/src/app/filter_menu.cpp",
+        "native/src/app/layer_panel_smart_filters.cpp",
+        "native/tests/unit/test_fx_gallery.cpp",
+        "native/tests/unit/test_fx.cpp",
+        "native/tests/contract/test_contract_filters_pc4.cpp",
+        "native/tests/gui/test_gui_filters.cpp"
+      ],
       "pc0": {
         "date": "2026-10-16",
         "cpp_base": "962faa4",
@@ -10282,7 +10879,8 @@
         "tests": [],
         "gap": "下塗り（大きさ・テクスチャの範囲・テクスチャ・凹凸・光）がない",
         "note": "ギャラリーの共通の土台（filter.filterGallery 行）に依存。足すなら 8 ビット（render/filters.cpp）・16/32 ビット（color_filters.cpp）・CMYK/Lab（ink_filters.cpp）の 3 経路と画面の欄に要る。上流は MIT/Apache-2.0（帰属は native/third_party/photocraft）"
-      }
+      },
+      "remaining": "フィルターギャラリー（filter_raster の filter_gallery）の効果として閉じる（上流も 47 のコマンドはメニューに出さない）。見えは上流の近似で、Photoshop とは違う（SPEC COLOR-08 の既知の制限）"
     },
     {
       "id": "filter.gallery.waterPaper",
@@ -10297,9 +10895,21 @@
       },
       "upstream_menu": null,
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "未着手",
+      "implementation_status": "実装済み（PC4 D3、未統合）",
       "acceptance_status": "未実施",
-      "evidence": [],
+      "evidence": [
+        "native/src/core/gallery_kinds.cpp",
+        "native/src/core/filter_kinds.cpp",
+        "native/src/render/fx_gallery.cpp",
+        "native/src/render/ops_filters.cpp",
+        "native/src/app/filter_gallery_window.cpp",
+        "native/src/app/filter_menu.cpp",
+        "native/src/app/layer_panel_smart_filters.cpp",
+        "native/tests/unit/test_fx_gallery.cpp",
+        "native/tests/unit/test_fx.cpp",
+        "native/tests/contract/test_contract_filters_pc4.cpp",
+        "native/tests/gui/test_gui_filters.cpp"
+      ],
       "pc0": {
         "date": "2026-10-16",
         "cpp_base": "962faa4",
@@ -10310,7 +10920,8 @@
         "tests": [],
         "gap": "水彩紙（繊維の長さ・明るさ・コントラスト）がない",
         "note": "ギャラリーの共通の土台（filter.filterGallery 行）に依存。足すなら 8 ビット（render/filters.cpp）・16/32 ビット（color_filters.cpp）・CMYK/Lab（ink_filters.cpp）の 3 経路と画面の欄に要る。上流は MIT/Apache-2.0（帰属は native/third_party/photocraft）"
-      }
+      },
+      "remaining": "フィルターギャラリー（filter_raster の filter_gallery）の効果として閉じる（上流も 47 のコマンドはメニューに出さない）。見えは上流の近似で、Photoshop とは違う（SPEC COLOR-08 の既知の制限）"
     },
     {
       "id": "filter.gallery.watercolor",
@@ -10325,9 +10936,21 @@
       },
       "upstream_menu": null,
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "未着手",
+      "implementation_status": "実装済み（PC4 D3、未統合）",
       "acceptance_status": "未実施",
-      "evidence": [],
+      "evidence": [
+        "native/src/core/gallery_kinds.cpp",
+        "native/src/core/filter_kinds.cpp",
+        "native/src/render/fx_gallery.cpp",
+        "native/src/render/ops_filters.cpp",
+        "native/src/app/filter_gallery_window.cpp",
+        "native/src/app/filter_menu.cpp",
+        "native/src/app/layer_panel_smart_filters.cpp",
+        "native/tests/unit/test_fx_gallery.cpp",
+        "native/tests/unit/test_fx.cpp",
+        "native/tests/contract/test_contract_filters_pc4.cpp",
+        "native/tests/gui/test_gui_filters.cpp"
+      ],
       "pc0": {
         "date": "2026-10-16",
         "cpp_base": "962faa4",
@@ -10338,7 +10961,8 @@
         "tests": [],
         "gap": "水彩（細部・影の強さ・テクスチャ）がない",
         "note": "ギャラリーの共通の土台（filter.filterGallery 行）に依存。足すなら 8 ビット（render/filters.cpp）・16/32 ビット（color_filters.cpp）・CMYK/Lab（ink_filters.cpp）の 3 経路と画面の欄に要る。上流は MIT/Apache-2.0（帰属は native/third_party/photocraft）"
-      }
+      },
+      "remaining": "フィルターギャラリー（filter_raster の filter_gallery）の効果として閉じる（上流も 47 のコマンドはメニューに出さない）。見えは上流の近似で、Photoshop とは違う（SPEC COLOR-08 の既知の制限）"
     },
     {
       "id": "filter.lastFilter",

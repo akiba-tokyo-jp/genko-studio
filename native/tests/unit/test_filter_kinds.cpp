@@ -55,7 +55,11 @@ private slots:
         // every PC4 kind has its side, its name and its kernel (a group adds both)
         for (const core::FilterInfo& info : core::filter_infos()) {
             QVERIFY(info.upstream.starts_with("filter."));
-            QVERIFY(!info.name.empty() && !info.submenu.empty());
+            QVERIFY(!info.name.empty());
+            // (a kind of the フィルター menu itself — フィルターギャラリー…, Camera Raw フィルター…, レンズ補正…, 広角補正… — has no
+            // submenu: FilterInfo::submenu empty)
+            QVERIFY(!info.submenu.empty() || info.kind == "filter_gallery" || info.kind == "camera_raw" || info.kind == "lens_correction" ||
+                    info.kind == "adaptive_wide_angle");
             QVERIFY2(render::fx::kernel(info.kind) != nullptr, std::string(info.kind).c_str());
             QVERIFY(core::adjust_kind(info.kind) != nullptr);
         }

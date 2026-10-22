@@ -73,6 +73,7 @@ genko_library(genko_core
     adjust.cpp
     adjust_kinds.cpp
     filter_kinds.cpp
+    gallery_kinds.cpp
     adjust_tone.cpp
     adjust_color.cpp
     rulers.cpp

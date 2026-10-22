@@ -539,6 +539,13 @@ const std::vector<Rule>& rules() {
         r.push_back(rule("adjust is set on a correction layer", "補正の設定は、色調補正のレイヤーにだけできます"));
         r.push_back(rule("adjust kind must be one of .*", "色調補正は、レベル補正・トーンカーブ・色相・反転・階調化・2 値化・グラデーションマップ・白黒から選びます"));
         // (PC4 節 D, filters@1 — the C++ build's own: フィルター's kinds' settings and files, core/filter_kinds, render/fx)
+        // (D3: フィルターギャラリー's stack of effects, core/gallery_kinds)
+        r.push_back(rule(R"(adjust filter_gallery\.effects (?:is required|must be a list of).*)", "フィルターギャラリーには、かけるエフェクトレイヤーが 1〜32 個要ります"));
+        r.push_back(rule(R"(adjust filter_gallery\.effects\[\d+\]\.filter: the gallery has no effect '(.*)')", "フィルターギャラリーに「\\1」という効果はありません"));
+        r.push_back(rule(R"(adjust filter_gallery\.effects\[\d+\]\.filter must be .*)", "フィルターギャラリーの効果の名前が要ります（genko inspect --filters の gallery）"));
+        r.push_back(rule(R"(adjust filter_gallery\.effects\[\d+\] has no setting '(.*)')", "フィルターギャラリーの効果に「\\1」という設定はありません"));
+        r.push_back(rule(R"(adjust filter_gallery\.effects\[\d+\]\.(\S+) (?:must|needs|is) .*)", "フィルターギャラリーの効果の「\\1」の値が使えません"));
+        r.push_back(rule(R"(adjust filter_gallery\.effects\[\d+\] must .*)", "フィルターギャラリーのエフェクトレイヤーの書き方が違います（{filter, params, visible}）"));
         r.push_back(rule(R"(adjust ((?:blur|sharpen|noise|other|video|distort|pixelate|stylize|render|filter|camera|lens|adaptive)_\S+?) has no setting '(.*)')",
                          "フィルター（\\1）に「\\2」という設定はありません"));
         r.push_back(rule(R"(adjust ((?:blur|sharpen|noise|other|video|distort|pixelate|stylize|render|filter|camera|lens|adaptive)_\S+?)\.(\S+) (?:must|needs|is) .*)",

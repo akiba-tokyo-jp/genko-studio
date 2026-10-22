@@ -12,6 +12,7 @@
 #include <vector>
 
 #include "core/json.hpp"
+#include "core/model.hpp"
 
 // PC4 節 D (SPEC.md COLOR-08「フィルター」, design 5.1): the フィルター menu's table — its submenus and commands in
 // Photoshop's order and words (the user's decision 1) — and the windows of PC4's groups' own (D3 フィルターギャラリー, D4
@@ -49,6 +50,11 @@ struct FilterWindowCall {
     const FilterItem* item = nullptr;
     core::Json now = core::Json::object();
     std::function<void(const core::Json& params)> send;
+    // (D3) the layer it works on as the book has it now, and — a smart object's smart filter set again from the layer
+    // panel — that filter's index (the window shows what the filters below it make; -1: a filter added)
+    const core::Page* page = nullptr;
+    const core::Layer* layer = nullptr;
+    int filter = -1;
 };
 using FilterWindow = std::function<void(const FilterWindowCall&)>;
 // By the item's kind (D3–D6 add theirs).

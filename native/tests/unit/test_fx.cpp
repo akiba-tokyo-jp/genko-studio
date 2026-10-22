@@ -185,7 +185,8 @@ private slots:
     // every way (8 bits, precise u16 and f32, CMYK, Lab, grey, multichannel) and as a smart filter.
     void everyKindOfTheTable() {
         // (a kind whose defaults change nothing or take long on the test picture: its settings here — each group adds its own)
-        const std::map<std::string, Json> kTestParams{{"blur_gaussian", Json{{"radius", 2.5}}}, {"blur_box", Json{{"radius", 2}}}};
+        const std::map<std::string, Json> kTestParams{{"blur_gaussian", Json{{"radius", 2.5}}}, {"blur_box", Json{{"radius", 2}}},
+                                                      {"filter_gallery", Json{{"effects", Json::array({Json{{"filter", "cutout"}}})}}}};
         QVERIFY(!core::filter_infos().empty());
         for (const core::FilterInfo& info : core::filter_infos()) {
             const std::string kind(info.kind);

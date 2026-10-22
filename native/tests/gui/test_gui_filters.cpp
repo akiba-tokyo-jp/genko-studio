@@ -9,18 +9,22 @@
 #include <QtTest>
 #include <QAction>
 #include <QApplication>
+#include <QComboBox>
 #include <QDialog>
 #include <QDoubleSpinBox>
 #include <QLabel>
+#include <QListWidget>
 #include <QMenu>
 #include <QMenuBar>
 #include <QPointer>
 #include <QProgressDialog>
 #include <QPushButton>
 #include <QTimer>
+#include <QTreeWidget>
 
 #include "gui_support.hpp"
 #include "app/canvas.hpp"
+#include "app/colours.hpp"
 #include "app/history_panel.hpp"
 #include "app/layer_panel.hpp"
 #include "app/config.hpp"
@@ -199,9 +203,9 @@ private slots:
         w->set_target_layer("pic");
         emit filter->aboutToShow();
         for (const char* on : {"act_filter_blur", "act_filter_blur_more", "act_filter_blur_gaussian", "act_filter_blur_box", "act_filter_manga_glow",
-                               "act_filter_manga_lineart"})
+                               "act_filter_manga_lineart", "act_filter_gallery"})
             QVERIFY2(book.act(on)->isEnabled(), on);
-        for (const char* off : {"act_filter_blur_motion", "act_filter_gallery", "act_filter_camera_raw", "act_filter_render_tree", "act_filter_vanishing_point",
+        for (const char* off : {"act_filter_blur_motion", "act_filter_camera_raw", "act_filter_render_tree", "act_filter_vanishing_point",
                                 "act_filter_sharpen", "act_filter_despeckle", "act_filter_last"})
             QVERIFY2(!book.act(off)->isEnabled(), off);
         // 履歴's words of the new ops
@@ -507,6 +511,139 @@ private slots:
         QVERIFY(pressed);
         QCOMPARE(book.layer("deep")->color_raster, before);
         QVERIFY2(book.window->last_notice().contains(QStringLiteral("中止")), qPrintable(book.window->last_notice()));
+    }
+
+    // フィルターギャラリー… (D3): its window — the 47 effects in Photoshop's six folders, each with its small picture made on
+    // a thread while the window answers; an effect chosen from its folder or the list, its settings; the stack (新しいエフェ
+    // クトレイヤー, another order, its eye, エフェクトレイヤーを削除); the result over the layer worked out on a thread — sent as
+    // one op with the main and sub colours (the same pixels as the op itself), one Undo, 前回のフィルター; on a smart object a
+    // smart filter, its window again from the layer panel with its stack.
+    void theGallery() {
+        Book book;
+        gui_test::Answers answers;
+        book.window->set_target_layer("pic");
+        const core::Document start = *book.session->snapshot();
+        const core::Bytes before = book.layer("pic")->raster_png;
+        int windows = 0;
+        std::function<void(QDialog*)> fill;
+        answers.responder->exec = [&](QDialog* d) {
+            if (d->objectName() != QStringLiteral("filter_gallery")) return int(QDialog::Rejected);
+            ++windows;
+            if (fill) fill(d);
+            return int(QDialog::Accepted);
+        };
+        const auto previews = [](QDialog* d) { return d->property("previews").toInt(); };
+        fill = [&](QDialog* d) {
+            QCOMPARE(d->windowTitle(), QStringLiteral("フィルターギャラリー"));
+            auto* folders = d->findChild<QTreeWidget*>(QStringLiteral("gallery_effects"));
+            QVERIFY(folders != nullptr);
+            QCOMPARE(folders->topLevelItemCount(), 6);
+            QStringList names;
+            QList<int> sizes;
+            for (int i = 0; i < 6; ++i) {
+                names << folders->topLevelItem(i)->text(0);
+                sizes << folders->topLevelItem(i)->childCount();
+            }
+            QCOMPARE(names, (QStringList{QStringLiteral("アーティスティック"), QStringLiteral("ブラシストローク"), QStringLiteral("変形"), QStringLiteral("スケッチ"),
+                                         QStringLiteral("表現手法"), QStringLiteral("テクスチャ")}));
+            QCOMPARE(sizes, (QList<int>{15, 8, 3, 14, 1, 6}));
+            QCOMPARE(folders->topLevelItem(0)->child(0)->text(0), QStringLiteral("色鉛筆"));
+            QTreeWidgetItem* stamp_item = folders->topLevelItem(3)->child(11);
+            QCOMPARE(stamp_item->text(0), QStringLiteral("スタンプ"));
+            // the small pictures: every one made, on a thread (the window answering meanwhile)
+            QVERIFY(gui_test::wait_for([&] { return d->property("thumbnails").toInt() == 47; }, 60000));
+            QVERIFY(!stamp_item->icon(0).isNull());
+            // the preview worked out
+            auto* preview = d->findChild<QLabel*>(QStringLiteral("gallery_preview"));
+            QVERIFY(preview != nullptr);
+            QVERIFY(gui_test::wait_for([&] { return previews(d) >= 1; }, 30000));
+            QVERIFY(!preview->pixmap().isNull());
+            // one effect left, スタンプ from its folder
+            auto* stack = d->findChild<QListWidget*>(QStringLiteral("gallery_stack"));
+            auto* remove = d->findChild<QPushButton*>(QStringLiteral("gallery_remove"));
+            while (stack->count() > 1) remove->click();
+            QVERIFY(!remove->isEnabled());
+            emit folders->itemClicked(stamp_item, 0);
+            QCOMPARE(stack->item(0)->text(), QStringLiteral("スタンプ"));
+            // 新しいエフェクトレイヤー: over it, カットアウト chosen from the list, its レベル数 3
+            const int seen = previews(d);
+            d->findChild<QPushButton*>(QStringLiteral("gallery_add"))->click();
+            QCOMPARE(stack->count(), 2);
+            auto* effect = d->findChild<QComboBox*>(QStringLiteral("gallery_effect"));
+            const int cutout = effect->findData(QStringLiteral("cutout"));
+            QVERIFY(cutout >= 0);
+            emit effect->activated(cutout);
+            QCOMPARE(stack->item(0)->text(), QStringLiteral("カットアウト"));
+            QCOMPARE(stack->item(1)->text(), QStringLiteral("スタンプ"));
+            auto* levels = d->findChild<QDoubleSpinBox*>(QStringLiteral("field_number_of_levels"));
+            QVERIFY(levels != nullptr);
+            QCOMPARE(levels->value(), 4.0);
+            levels->setValue(3);
+            QVERIFY(gui_test::wait_for([&] { return previews(d) > seen; }, 30000));
+            // another order (dragged): スタンプ over カットアウト; its eye: スタンプ hidden
+            QVERIFY(stack->model()->moveRow(QModelIndex(), 1, QModelIndex(), 0));
+            QCOMPARE(stack->item(0)->text(), QStringLiteral("スタンプ"));
+            stack->item(0)->setCheckState(Qt::Unchecked);
+            // (a layer added and taken away again)
+            d->findChild<QPushButton*>(QStringLiteral("gallery_add"))->click();
+            QCOMPARE(stack->count(), 3);
+            remove->click();
+            QCOMPARE(stack->count(), 2);
+        };
+        book.act("act_filter_gallery")->trigger();
+        QCOMPARE(windows, 1);
+        // one op: the stack bottom up, the main and sub colours
+        const auto& pen = book.window->pen().rgb;
+        const std::array<int, 3> sub = book.window->colours()->sub_rgb();
+        const Json effects = Json::array({Json{{"filter", "cutout"}, {"params", Json{{"number_of_levels", 3}}}}, Json{{"filter", "stamp"}, {"visible", false}}});
+        const auto expected = core::CommandBus(render::ops_registry())
+                                  .apply(start, Json::array({Json{{"op", "filter_raster"}, {"page", 1}, {"id", "pic"}, {"kind", "filter_gallery"}, {"effects", effects},
+                                                                  {"foreground", Json::array({static_cast<int>(pen[0]), static_cast<int>(pen[1]), static_cast<int>(pen[2])})},
+                                                                  {"background", Json::array({sub[0], sub[1], sub[2]})}}}),
+                                         core::Actor("human:tester"))
+                                  .doc;
+        QVERIFY(book.layer("pic")->raster_png != before);
+        QCOMPARE(*book.layer("pic")->raster_png, *expected.page(0).layers.back().raster_png);
+        emit book.menu("menu_filter")->aboutToShow();
+        QCOMPARE(book.act("act_filter_last")->text(), QStringLiteral("フィルターギャラリー"));
+        emit book.menu("menu_filter")->aboutToHide();
+        book.window->action(QStringLiteral("act_undo"))->trigger();
+        QCOMPARE(book.layer("pic")->raster_png, before);
+        // stopped: nothing changes
+        fill = nullptr;
+        answers.responder->exec = [&](QDialog* d) {
+            if (d->objectName() == QStringLiteral("filter_gallery")) ++windows;
+            return int(QDialog::Rejected);
+        };
+        book.act("act_filter_gallery")->trigger();
+        QCOMPARE(windows, 2);
+        QCOMPARE(book.layer("pic")->raster_png, before);
+        // on a smart object: a smart filter of the stack (the one used last), its window again from the layer panel
+        QVERIFY(book.window->apply_ops(Json::array({Json{{"op", "smart_convert"}, {"page", 1}, {"ids", Json::array({"pic"})}, {"new_id", "so"}}})));
+        book.window->set_target_layer("so");
+        answers.responder->exec = [&](QDialog* d) { return d->objectName() == QStringLiteral("filter_gallery") ? int(QDialog::Accepted) : int(QDialog::Rejected); };
+        book.act("act_filter_gallery")->trigger();
+        const Json filters = (*book.layer("so")->smart)["filters"];
+        QCOMPARE(filters.size(), std::size_t(1));
+        QCOMPARE(filters[0]["kind"], Json("filter_gallery"));
+        QCOMPARE(filters[0]["params"]["effects"].size(), std::size_t(2));
+        QCOMPARE(filters[0]["params"]["effects"][0]["filter"], Json("cutout"));
+        int rows = 0;
+        answers.responder->exec = [&](QDialog* d) {
+            if (d->objectName() != QStringLiteral("filter_gallery")) return int(QDialog::Rejected);
+            auto* stack = d->findChild<QListWidget*>(QStringLiteral("gallery_stack"));
+            rows = stack->count();
+            stack->setCurrentRow(0);  // (スタンプ, hidden: taken away)
+            d->findChild<QPushButton*>(QStringLiteral("gallery_remove"))->click();
+            return int(QDialog::Accepted);
+        };
+        book.window->layer_panel()->edit_smart_filter(0);
+        QCOMPARE(rows, 2);
+        const Json set = (*book.layer("so")->smart)["filters"];
+        QCOMPARE(set.size(), std::size_t(1));
+        QCOMPARE(set[0]["params"]["effects"].size(), std::size_t(1));
+        QCOMPARE(set[0]["params"]["effects"][0]["filter"], Json("cutout"));
+        QCOMPARE(set[0]["params"]["effects"][0]["params"]["number_of_levels"], Json(3));
     }
 };
 

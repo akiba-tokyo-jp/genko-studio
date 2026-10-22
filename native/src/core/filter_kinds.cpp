@@ -10,6 +10,7 @@
 #include <set>
 
 #include "core/command_bus.hpp"
+#include "core/gallery_kinds.hpp"
 #include "core/pyops.hpp"
 #include "core/smart.hpp"
 
@@ -206,7 +207,6 @@ std::vector<FilterKind> video_kinds() { return {}; }         // (D1)
 std::vector<FilterKind> distort_kinds() { return {}; }       // (D2)
 std::vector<FilterKind> pixelate_kinds() { return {}; }      // (D2)
 std::vector<FilterKind> stylize_kinds() { return {}; }       // (D2)
-std::vector<FilterKind> gallery_kinds() { return {}; }       // (D3)
 std::vector<FilterKind> render_kinds() { return {}; }        // (D4)
 std::vector<FilterKind> blur_gallery_kinds() { return {}; }  // (D4)
 std::vector<FilterKind> camera_raw_kinds() { return {}; }    // (D5)
@@ -358,7 +358,7 @@ Json filter_catalogue() {
     return Json{{"units", Json{{"length", "px200"}, {"place", "mm"}, {"centre", "share"}, {"colour", "rgb255"}}},
                 {"kinds", std::move(kinds)},
                 {"presets", std::move(presets)},
-                {"gallery", Json::array()}};  // (D3: the 47 effects of フィルターギャラリー)
+                {"gallery", gallery_catalogue()}};  // (D3: the 47 effects of フィルターギャラリー, core/gallery_kinds.cpp)
 }
 
 }  // namespace genko::core

@@ -165,6 +165,9 @@ genko_test(test_tone_ops SOURCES unit/test_tone_ops.cpp DEPS genko_test_support 
 # the catalogue), without Python.
 genko_test(test_fx SOURCES unit/test_fx.cpp DEPS genko_test_support genko_render_ops LABELS unit TIMEOUT 600)
 genko_test(test_filter_kinds SOURCES unit/test_filter_kinds.cpp DEPS genko_test_support genko_render_ops LABELS unit)
+# PC4 節 D3 (フィルターギャラリー): its 47 effects' table and settings, each effect on every depth, the same bytes whatever the
+# tiling, a flat picture, the stack's order and hidden effects, the colours, the three ways, 200 and 600 dpi, a smart filter.
+genko_test(test_fx_gallery SOURCES unit/test_fx_gallery.cpp DEPS genko_test_support genko_render_ops LABELS unit TIMEOUT 900)
 # PC2c (COLOR-04): Apply Image and Calculations (Blending, the sources, a layer, a channel, inks; the three results),
 # trapping (algo/trap.rs's tests and the op) and the fade (its mix, the op reading the pixels before from the assets).
 genko_test(test_image_calc SOURCES unit/test_image_calc.cpp DEPS genko_test_support genko_render_ops LABELS unit TIMEOUT 600)
