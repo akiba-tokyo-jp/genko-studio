@@ -1054,7 +1054,12 @@ private slots:
         const core::Document deleted = applied(Json::array({Json{{"op", "delete_layer"}, {"page", 1}, {"id", plain->id}}}));
         const std::set<unsigned> left = resource_ids(deleted, QStringLiteral("deleted.psd"));
         QVERIFY(!left.contains(1065) && !left.contains(1050) && left.contains(1037) && left.contains(1054));
-        const core::Document merged = applied(Json::array({Json{{"op", "merge_down"}, {"page", 1}, {"id", blend_if->id}}}));
+        // (Blend If is locked, lock all: unlocked first — 効果 too)
+        const auto unlocked = [](const std::string& id) {
+            return Json{{"op", "set_layer"}, {"page", 1}, {"id", id}, {"locked", false}, {"lock_alpha", false}, {"lock_position", false}};
+        };
+        const core::Document merged =
+            applied(Json::array({unlocked(blend_if->id), unlocked(effects->id), Json{{"op", "merge_down"}, {"page", 1}, {"id", blend_if->id}}}));
         const core::Layer* into = layer_named(merged.page(0), "効果");
         QVERIFY(into != nullptr && !into->native_psd);
         const core::Document twice = applied(Json::array({Json{{"op", "duplicate_layer"}, {"page", 1}, {"id", effects->id}}}));

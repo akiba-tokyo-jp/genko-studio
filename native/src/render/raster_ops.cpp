@@ -1628,6 +1628,7 @@ void merge_down(OpContext& c) {
         into.kind = LayerKind::Raster;
         raster::save_raster(page, into, merged);
     }
+    page.layers[li].native_psd.reset();  // (psd-keep@1, PC4 F-d: a PSD's effects and blocks are not the merged layer's)
     page.layers.erase(page.layers.begin() + static_cast<std::ptrdiff_t>(ui));
 }
 
