@@ -110,16 +110,30 @@ std::string Loss::text() const {
     case Kind::TextDropped: return "文字の情報を書けないため、捨てます";
     case Kind::DimensionsExceeded:
         return "画像が " + fmt + " の大きさの上限（" + std::to_string(max_width) + "×" + std::to_string(max_height) + " px）を超えるため、書けません";
+    case Kind::Binarized: return "白と黒の 2 階調にします";
     }
     return {};
 }
 
-Plan plan(const CodecImage& image, Format format, const EncodeOptions&) {
+Plan plan(const CodecImage& image, Format format, const EncodeOptions& options) {
     const FormatCaps c = caps(format);
-    if (format == Format::Pnm && is_float(image.sample())) {
-        // (Netpbm: integers in any layout (PAM); floats as PFM, which holds grey and RGB only)
+    if (format == Format::Pnm) {
+        // (Netpbm: integers in any layout (PAM); floats as PFM, which holds grey and RGB only; or the kind the extension
+        // names: PBM grey of 8 bits made white and black, PGM grey, PPM RGB, PAM any layout, of 8 or 16 bits; PFM)
         static constexpr std::array<Layout, 2> kPfm{Layout::Gray, Layout::Rgb};
-        return Plan{pick_layout(image.layout(), kPfm, false), Sample::F32};
+        static constexpr std::array<Layout, 1> kGray{Layout::Gray};
+        static constexpr std::array<Layout, 1> kRgb{Layout::Rgb};
+        static constexpr std::array<Sample, 2> kInts{Sample::U8, Sample::U16};
+        switch (options.pnm_kind) {
+        case PnmKind::Bitmap: return Plan{Layout::Gray, Sample::U8};
+        case PnmKind::Graymap: return Plan{pick_layout(image.layout(), kGray, false), pick_sample(image.sample(), kInts)};
+        case PnmKind::Pixmap: return Plan{pick_layout(image.layout(), kRgb, false), pick_sample(image.sample(), kInts)};
+        case PnmKind::Arbitrary: return Plan{pick_layout(image.layout(), c.layouts, c.alpha), pick_sample(image.sample(), kInts)};
+        case PnmKind::Float: return Plan{pick_layout(image.layout(), kPfm, false), Sample::F32};
+        case PnmKind::Any:
+            if (is_float(image.sample())) return Plan{pick_layout(image.layout(), kPfm, false), Sample::F32};
+            break;
+        }
     }
     return Plan{pick_layout(image.layout(), c.layouts, c.alpha), pick_sample(image.sample(), c.depths)};
 }
@@ -167,6 +181,13 @@ std::vector<Loss> losses(const CodecImage& image, Format format, const EncodeOpt
     if (is_cmyk(from_layout) && !is_cmyk(p.layout)) add(Loss::Kind::CmykConverted).layout = p.layout;
     if (!is_gray(from_layout) && is_gray(p.layout)) add(Loss::Kind::ColorToGray);
 
+    // (a PBM: white and black, said when the picture has other greys)
+    if (format == Format::Pnm && options.pnm_kind == PnmKind::Bitmap) {
+        const CodecImage grey = image.convert(Layout::Gray, Sample::U8);
+        if (std::any_of(grey.data().begin(), grey.data().end(), [](char v) { return v != 0 && v != static_cast<char>(255); }))
+            add(Loss::Kind::Binarized);
+    }
+
     // the compression
     if (gif) {
         if (gif->colours > (gif->transparent ? 255u : 256u)) add(Loss::Kind::PaletteQuantized);
@@ -179,7 +200,9 @@ std::vector<Loss> losses(const CodecImage& image, Format format, const EncodeOpt
     const bool icc_kept = c.icc && same_model(from_layout, p.layout) && !(format == Format::Jpeg && image.icc && image.icc->size() > detail::kJpegIccMax);
     if (image.icc && options.embed_icc && !icc_kept && !implied_profile(image, format)) add(Loss::Kind::IccDropped);
     if (options.embed_metadata) {
-        if (image.meta.exif && (!c.exif || (format == Format::Jpeg && image.meta.exif->size() > detail::kJpegExifMax))) add(Loss::Kind::ExifDropped);
+        if (image.meta.exif && (!c.exif || (format == Format::Jpeg && image.meta.exif->size() > detail::kJpegExifMax) ||
+                                (format == Format::Avif && !detail::exif_has_tiff_header(*image.meta.exif))))
+            add(Loss::Kind::ExifDropped);
         if (image.meta.xmp && (!c.xmp || (format == Format::Jpeg && image.meta.xmp->size() > detail::kJpegXmpMax))) add(Loss::Kind::XmpDropped);
         if (image.meta.dpi && !c.dpi) add(Loss::Kind::DpiDropped);
         const bool text_kept = c.text && std::all_of(image.meta.text.begin(), image.meta.text.end(), [format](const auto& kv) {

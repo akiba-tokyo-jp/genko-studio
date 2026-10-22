@@ -85,8 +85,8 @@ const char* const kPsdLab =
 
 // A WebP, 2×2, as Pillow writes one (opened since M6).
 const char* const kWebp = "UklGRh4AAABXRUJQVlA4TBEAAAAvAUAAAAdQhSJXof+BiOh/AAA=";
-// A PPM of 2×2 (netpbm), which Pillow opens and this build does not read (M7: a recorded limit; TIFFs in planes are
-// read since M7).
+// The start of a JPEG 2000 file, which Pillow opens and this build does not read (M7: a recorded limit — a PPM until
+// PC4 F-a, which reads Netpbm; TIFFs in planes are read since M7).
 const char* const kUnreadPicture = "AAAADGpQICANCocKAAAAFGZ0eXBqcDIgAAAAAGpwMiA=";
 
 const genko::core::CommandBus& bus() {

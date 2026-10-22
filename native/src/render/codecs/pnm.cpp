@@ -160,12 +160,14 @@ CodecImage read_pnm(std::string_view b, const Limits& limits) {
         const std::uint32_t w = r.number(), h = r.number();
         limits.check(w, h, Layout::Gray, Sample::U8);
         const std::size_t n = std::size_t(w) * h;
+        // (a P1 digit a pixel, a P4 bit: a file too short for its size is cut short, said before its pixels are made)
+        if (kind == '1' && (r.pos > b.size() || b.size() - r.pos < n)) bad("its pixels are cut short");
+        if (kind == '4') r.one_space();
+        const std::size_t row = (std::size_t(w) + 7) / 8;
+        if (kind == '4' && r.rest().size() / row < h) bad("its pixels are cut short");
         std::string px(n, '\0');
         if (kind == '4') {
-            r.one_space();
-            const std::size_t row = (std::size_t(w) + 7) / 8;
             const std::string_view data = r.rest();
-            if (data.size() / row < h) bad("its pixels are cut short");
             for (std::size_t y = 0; y < h; ++y) {
                 for (std::size_t x = 0; x < w; ++x) {
                     const bool black = ((u8(data, y * row + x / 8) >> (7 - x % 8)) & 1) != 0;
@@ -204,10 +206,11 @@ CodecImage read_pnm(std::string_view b, const Limits& limits) {
     if (kind == 'F' || kind == 'f') {
         const Layout layout = kind == 'F' ? Layout::Rgb : Layout::Gray;
         const std::uint32_t w = r.number(), h = r.number();
-        const std::string scale_text(r.token());
-        char* end = nullptr;
-        const double scale = std::strtod(scale_text.c_str(), &end);
-        if (end != scale_text.c_str() + scale_text.size() || !std::isfinite(scale) || scale == 0) bad("its scale");
+        const std::string_view scale_text = r.token();
+        double scale = 0;  // (from_chars: a point whatever the locale — Qt sets the person's, a comma in some)
+        const char* first = scale_text.data() + (scale_text.starts_with('+') ? 1 : 0);
+        const auto [end, error] = std::from_chars(first, scale_text.data() + scale_text.size(), scale);
+        if (error != std::errc() || end != scale_text.data() + scale_text.size() || !std::isfinite(scale) || scale == 0) bad("its scale");
         r.one_space();
         limits.check(w, h, layout, Sample::F32);
         const std::size_t row = std::size_t(w) * channels(layout);
@@ -228,10 +231,22 @@ CodecImage read_pnm(std::string_view b, const Limits& limits) {
     bad("an unknown Netpbm kind");
 }
 
-std::string write_pnm(const CodecImage& stored, const EncodeOptions&) {
+std::string write_pnm(const CodecImage& stored, const EncodeOptions& options) {
     const std::uint32_t w = stored.width(), h = stored.height();
     const Layout layout = stored.layout();
     std::string out;
+    if (options.pnm_kind == PnmKind::Bitmap) {  // (P4: a bit a pixel, 1 black — a grey below half —, rows of whole bytes)
+        if (layout != Layout::Gray || stored.sample() != Sample::U8) throw core::Error("value", "PBM is written from 8-bit grey");
+        out = "P4\n" + std::to_string(w) + " " + std::to_string(h) + "\n";
+        const std::size_t row = (std::size_t(w) + 7) / 8;
+        std::string bits(row * h, '\0');
+        for (std::size_t y = 0; y < h; ++y) {
+            for (std::size_t x = 0; x < w; ++x) {
+                if (static_cast<unsigned char>(stored.data()[y * w + x]) < 128) bits[y * row + x / 8] = static_cast<char>(bits[y * row + x / 8] | (0x80 >> (x % 8)));
+            }
+        }
+        return out + bits;
+    }
     if (stored.sample() == Sample::F32) {
         if (layout != Layout::Gray && layout != Layout::Rgb) throw core::Error("value", "PFM holds grey and RGB");
         out = std::string(layout == Layout::Gray ? "Pf" : "PF") + "\n" + std::to_string(w) + " " + std::to_string(h) + "\n-1.0\n";
@@ -249,12 +264,18 @@ std::string write_pnm(const CodecImage& stored, const EncodeOptions&) {
     if (stored.sample() != Sample::U8 && stored.sample() != Sample::U16) throw core::Error("value", "Netpbm holds 8 or 16 bits, or 32-bit floats");
     const std::string maxval = stored.sample() == Sample::U8 ? "255" : "65535";
     const std::string size = std::to_string(w) + " " + std::to_string(h);
-    if (layout == Layout::Gray) {
+    const bool pam = options.pnm_kind == PnmKind::Arbitrary;  // (.pam: P7 whatever its layout)
+    if (layout == Layout::Gray && !pam) {
         out = "P5\n" + size + "\n" + maxval + "\n";
-    } else if (layout == Layout::Rgb) {
+    } else if (layout == Layout::Rgb && !pam) {
         out = "P6\n" + size + "\n" + maxval + "\n";
     } else {
-        const char* tuple = layout == Layout::GrayA ? "GRAYSCALE_ALPHA" : layout == Layout::Rgba ? "RGB_ALPHA" : layout == Layout::Cmyk ? "CMYK" : "CMYK_ALPHA";
+        const char* tuple = layout == Layout::Gray    ? "GRAYSCALE"
+                            : layout == Layout::Rgb   ? "RGB"
+                            : layout == Layout::GrayA ? "GRAYSCALE_ALPHA"
+                            : layout == Layout::Rgba  ? "RGB_ALPHA"
+                            : layout == Layout::Cmyk  ? "CMYK"
+                                                      : "CMYK_ALPHA";
         out = "P7\nWIDTH " + std::to_string(w) + "\nHEIGHT " + std::to_string(h) + "\nDEPTH " + std::to_string(channels(layout)) + "\nMAXVAL " + maxval +
               "\nTUPLTYPE " + tuple + "\nENDHDR\n";
     }

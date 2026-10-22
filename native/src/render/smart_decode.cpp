@@ -154,6 +154,10 @@ struct PngReader {
             throw core::Error("memory", "the PNG reader cannot be made");
         }
         png_set_read_fn(png, &source, png_take);
+        // (PC4 F-a review: the text chunks, which this reader does not use, passed over — libpng would inflate each, up to
+        // 8 MB, and hold them, as many as 1000)
+        static constexpr png_byte kText[] = {'t', 'E', 'X', 't', '\0', 'z', 'T', 'X', 't', '\0', 'i', 'T', 'X', 't', '\0'};
+        png_set_keep_unknown_chunks(png, PNG_HANDLE_CHUNK_NEVER, kText, 3);
     }
     ~PngReader() { png_destroy_read_struct(&png, &info, nullptr); }
     PngReader(const PngReader&) = delete;

@@ -11,9 +11,12 @@
 
 #include <QtTest>
 
+#include <algorithm>
 #include <array>
 #include <cmath>
 #include <cstring>
+#include <limits>
+#include <optional>
 #include <set>
 #include <span>
 #include <string>
@@ -103,6 +106,38 @@ std::string png_chunk(const char* type, const std::string& data) {
 
 std::string be32(std::uint32_t v) {
     return {static_cast<char>(v >> 24), static_cast<char>((v >> 16) & 0xff), static_cast<char>((v >> 8) & 0xff), static_cast<char>(v & 0xff)};
+}
+
+std::string le16s(std::uint32_t v) { return {static_cast<char>(v & 0xff), static_cast<char>((v >> 8) & 0xff)}; }
+std::string le32s(std::uint32_t v) { return le16s(v & 0xffff) + le16s(v >> 16); }
+
+// A 1 × 1 grey PNG with these chunks after its header.
+std::string png_with(const std::string& chunks) {
+    std::string out = std::string("\x89PNG\r\n\x1a\n", 8) + png_chunk("IHDR", be32(1) + be32(1) + std::string("\x08\x00\0\0\0", 5)) + chunks;
+    // (one grey pixel of 0x80: filter 0, deflated with zlib's stored block)
+    out += png_chunk("IDAT", std::string("\x78\x01\x01\x02\x00\xfd\xff\x00\x80\x00\x82\x00\x81", 13));
+    return out + png_chunk("IEND", {});
+}
+
+// An icon of one picture, these bytes (its directory saying 256 × 256).
+std::string ico_of(const std::string& picture) {
+    return std::string("\0\0\1\0\1\0", 6) + std::string("\0\0\0\0", 4) + le16s(1) + le16s(32) + le32s(static_cast<std::uint32_t>(picture.size())) + le32s(22) +
+           picture;
+}
+
+// An OpenEXR header of these attributes (name, type, value) and nothing after it — no offsets, no pixels.
+std::string exr_header(const std::vector<std::array<std::string, 3>>& attributes, std::uint32_t flags = 0) {
+    std::string out = le32s(20000630) + le32s(2 | flags);
+    for (const auto& [name, type, value] : attributes) out += name + std::string(1, '\0') + type + std::string(1, '\0') + le32s(static_cast<std::uint32_t>(value.size())) + value;
+    return out + std::string(1, '\0');
+}
+std::string exr_channels(std::size_t n, std::uint32_t pixel_type) {
+    std::string out;
+    for (std::size_t i = 0; i < n; ++i) out += "c" + std::to_string(i) + std::string(1, '\0') + le32s(pixel_type) + std::string(4, '\0') + le32s(1) + le32s(1);
+    return out + std::string(1, '\0');
+}
+std::string exr_box(std::int32_t x0, std::int32_t y0, std::int32_t x1, std::int32_t y1) {
+    return le32s(static_cast<std::uint32_t>(x0)) + le32s(static_cast<std::uint32_t>(y0)) + le32s(static_cast<std::uint32_t>(x1)) + le32s(static_cast<std::uint32_t>(y1));
 }
 
 std::string data_file(const char* relative) {
@@ -1167,6 +1202,156 @@ private slots:
         const std::string jp2("\0\0\0\x0cjP  \r\n\x87\n\0\0\0\x14" "ftypjp2 \0\0\0\0jp2 ", 32);
         QVERIFY(genko::render::unported_image_format(jp2));
         QCOMPARE(code_of([&] { (void)genko::render::open_image(jp2); }), std::string("not_yet_ported:image_format"));
+    }
+
+    // (PC4 F-a review) A PNG's text chunks within 4 MB and 256 chunks: 200 zTXt of 64 MB of zeros each (13 MB of file) read
+    // without inflating them all — the pixel read, the text past what is left not taken —, an icon of it too, as the
+    // drawing reads it.
+    void textPastItsBoundNotRead() {
+        const QByteArray zeros(64 << 20, '\0');
+        const QByteArray packed = qCompress(zeros, 9);  // (Qt's: 4 bytes of the length, then zlib's stream)
+        const std::string stream(packed.constData() + 4, static_cast<std::size_t>(packed.size() - 4));
+        std::string chunks;
+        for (int i = 0; i < 200; ++i) chunks += png_chunk("zTXt", std::string("Comment\0\0", 9) + stream);
+        chunks += png_chunk("tEXt", std::string("Title\0after", 11));
+        const std::string bomb = png_with(chunks);
+        QVERIFY(bomb.size() < (std::size_t(20) << 20));
+        const CodecImage back = codecs::decode(bomb);
+        QCOMPARE(back.width(), 1u);
+        std::size_t text = 0;
+        for (const auto& [key, value] : back.meta.text) text += key.size() + value.size();
+        QVERIFY2(text <= (std::size_t(4) << 20), std::to_string(text).c_str());
+        QVERIFY(back.meta.text.empty());  // (the first past what is left: no text after it either)
+        // (text within the bound read as before; past 256 chunks, not taken)
+        std::string many;
+        for (int i = 0; i < 300; ++i) many += png_chunk("tEXt", std::string("Key\0v", 5) + std::to_string(i));
+        const CodecImage counted = codecs::decode(png_with(many));
+        QCOMPARE(counted.meta.text.size(), std::size_t(256));
+        QCOMPARE(counted.meta.text.front().second, std::string("v0"));
+        // (in an icon: its PNG read the same, as the codecs and the drawing's 8-bit reader read it)
+        const std::string icon = ico_of(bomb);
+        QCOMPARE(codecs::decode(icon).width(), 1u);
+        QCOMPARE(genko::render::open_image(icon, genko::render::kPillowOpenLimits).width(), 1);
+    }
+
+    // (PC4 F-a review; PhotoCraft's limits.rs pnm_bomb_header_rejected and the like for each format read here) A header
+    // that says a size past the limits, with no pixels after it, refused as too large before anything is allocated; one
+    // within the limits but too short for its size, refused as cut short before its pixels are made.
+    void headersThatLie() {
+        const auto too_large = [](const std::string& bytes, const char* what, std::optional<Format> as = std::nullopt) {
+            const std::string code = code_of([&] { (void)(as ? codecs::decode_as(*as, bytes) : codecs::decode(bytes)); });
+            QVERIFY2(code == "image_too_large", (std::string(what) + ": " + code).c_str());
+        };
+        too_large("P6\n200000 200000\n255\n", "P6 200000²");
+        too_large("P7\nWIDTH 99999\nHEIGHT 99999\nDEPTH 3\nMAXVAL 255\nTUPLTYPE RGB\nENDHDR\n", "P7 99999²");
+        too_large("PF\n100000 100000\n-1.0\n", "PF 100000²");
+        too_large("qoif" + be32(100000) + be32(100000) + std::string("\x04\x00", 2) + std::string("\0\0\0\0\0\0\0\x01", 8), "QOI 100000²");
+        too_large(std::string("\0\0\x02\0\0\0\0\0\0\0\0\0", 12) + le16s(65535) + le16s(65535) + std::string("\x20\x28", 2), "TGA 65535²", Format::Tga);
+        too_large("#?RADIANCE\nFORMAT=32-bit_rle_rgbe\n\n-Y 100000 +X 100000\n", "HDR 100000²");
+        const std::string rgb_halves = std::string("R\0", 2) + le32s(1) + std::string(4, '\0') + le32s(1) + le32s(1) + std::string("G\0", 2) + le32s(1) +
+                                       std::string(4, '\0') + le32s(1) + le32s(1) + std::string("B\0", 2) + le32s(1) + std::string(4, '\0') + le32s(1) +
+                                       le32s(1) + std::string(1, '\0');
+        too_large(exr_header({{"channels", "chlist", rgb_halves}, {"compression", "compression", std::string(1, '\x03')},
+                              {"dataWindow", "box2i", exr_box(0, 0, 99999, 99999)}}),
+                  "EXR 100000²");
+        // (OpenEXR: 1000 channels of floats, 100000 × 16 — a block of 16 rows of them is 6.4 GB —; tiles of 1 × 1 in a ripmap)
+        too_large(exr_header({{"channels", "chlist", exr_channels(1000, 2)}, {"compression", "compression", std::string(1, '\x03')},
+                              {"dataWindow", "box2i", exr_box(0, 0, 99999, 15)}}),
+                  "EXR 1000 channels");
+        too_large(exr_header({{"channels", "chlist", exr_channels(4, 2)}, {"compression", "compression", std::string(1, '\x03')},
+                              {"dataWindow", "box2i", exr_box(0, 0, 9999, 11999)}, {"tiles", "tiledesc", le32s(1) + le32s(1) + std::string(1, '\x02')}},
+                             0x200),
+                  "EXR 1×1 tiles, ripmap");
+        too_large(exr_header({{"channels", "chlist", exr_channels(4, 2)}, {"compression", "compression", std::string(1, '\x03')},
+                              {"dataWindow", "box2i", exr_box(0, 0, 9999, 11999)}, {"tiles", "tiledesc", le32s(30000) + le32s(30000) + std::string(1, '\0')}},
+                             0x200),
+                  "EXR tiles larger than the picture");
+        // (AVIF: its ispe saying 16384 × 16384, libavif's own bound and past this build's pixels)
+        std::string avif = codecs::encode(gradient(64, 48, Layout::Rgb, Sample::U8, 1, 0.1f), Format::Avif);
+        const std::size_t ispe = avif.find("ispe");
+        QVERIFY(ispe != std::string::npos);
+        avif.replace(ispe + 8, 8, be32(16384) + be32(16384));
+        too_large(avif, "AVIF 16384²");
+        // (ICO: a PNG in it saying 100000 × 100000; its size from the PNG's header)
+        const std::string huge = std::string("\x89PNG\r\n\x1a\n", 8) + png_chunk("IHDR", be32(100000) + be32(100000) + std::string("\x08\x06\0\0\0", 5)) +
+                                 png_chunk("IDAT", std::string("\x78\x9C\x03\x00\x00\x00\x00\x01", 8)) + png_chunk("IEND", {});
+        too_large(ico_of(huge), "ICO of a PNG 100000²");
+        QCOMPARE(codecs::header_size(ico_of(huge)), (std::optional<std::pair<std::uint32_t, std::uint32_t>>{{100000u, 100000u}}));
+        // (within the limits, cut short: said so before the pixels are made)
+        const auto cut = [](const std::string& bytes, const char* what, std::optional<Format> as = std::nullopt) {
+            const std::string code = code_of([&] { (void)(as ? codecs::decode_as(*as, bytes) : codecs::decode(bytes)); });
+            QVERIFY2(code == "format", (std::string(what) + ": " + code).c_str());
+        };
+        cut("#?RADIANCE\nFORMAT=32-bit_rle_rgbe\n\n-Y 12000 +X 10000\n" + std::string(16, '\x02'), "HDR 10000×12000");
+        cut("qoif" + be32(10000) + be32(12000) + std::string("\x04\x00", 2) + std::string(30, '\xfd') + std::string("\0\0\0\0\0\0\0\x01", 8), "QOI 10000×12000");
+        cut(std::string("\0\0\x0a\0\0\0\0\0\0\0\0\0", 12) + le16s(10000) + le16s(12000) + std::string("\x20\x28", 2) + std::string(40, '\xff'), "TGA RLE 10000×12000",
+            Format::Tga);
+        cut("P4\n10000 12000\n" + std::string(40, '\0'), "P4 10000×12000");
+        cut("P1\n10000 12000\n0 1 0 1", "P1 10000×12000");
+    }
+
+    // (PC4 F-a review) An OpenEXR's values that are not finite read as ones that are: NaN 0, ±infinity ±65504 — halves and
+    // floats alike —, the others as they are (an alpha past 1 too).
+    void exrValuesMadeFinite() {
+        const float inf = std::numeric_limits<float>::infinity();
+        const std::vector<float> values{std::nanf(""), inf, -inf, 2.0f, 0.25f, -0.5f, 1.5f, 3.0f};
+        std::string floats(values.size() * 4, '\0');
+        std::memcpy(floats.data(), values.data(), floats.size());
+        const CodecImage odd = CodecImage::from_bytes(2, 1, Layout::Rgba, Sample::F32, floats);
+        for (const Sample s : {Sample::F32, Sample::F16}) {
+            const CodecImage back = codecs::decode(codecs::encode(odd.convert(Layout::Rgba, s), Format::OpenExr));
+            const std::vector<float> got = back.normalized();
+            QCOMPARE(got[0], 0.0f);
+            QCOMPARE(got[1], 65504.0f);
+            QCOMPARE(got[2], -65504.0f);
+            QCOMPARE(got[3], 2.0f);  // (its alpha)
+            QCOMPARE(got[4], 0.25f);
+            QCOMPARE(got[5], -0.5f);
+            QCOMPARE(got[6], 1.5f);
+            QCOMPARE(got[7], 3.0f);
+            for (const float v : got) QVERIFY(std::isfinite(v));
+        }
+    }
+
+    // (PC4 F-a review) Netpbm written as its extension's kind says: P4 white and black (said when greys are lost), P5, P6,
+    // P7 of any layout, PF; an icon's size from its picture; an AVIF's EXIF without its TIFF header said dropped and left out.
+    void kindsAndSizesAsFilesSayThem() {
+        using codecs::PnmKind;
+        const auto as = [](const CodecImage& img, PnmKind kind) {
+            codecs::EncodeOptions o;
+            o.pnm_kind = kind;
+            return std::make_pair(codecs::encode(img, Format::Pnm, o), codecs::losses(img, Format::Pnm, o));
+        };
+        const CodecImage colour = test_image(Layout::Rgba, Sample::U16);
+        const auto [pbm, pbm_said] = as(colour, PnmKind::Bitmap);
+        QVERIFY(pbm.starts_with("P4\n37 23\n"));
+        QVERIFY(has(pbm_said, Loss::Kind::Binarized) && has(pbm_said, Loss::Kind::ColorToGray) && has(pbm_said, Loss::Kind::AlphaDiscarded));
+        const CodecImage bits = codecs::decode(pbm);
+        QVERIFY(bits.layout() == Layout::Gray && std::all_of(bits.data().begin(), bits.data().end(), [](char v) { return v == 0 || v == static_cast<char>(255); }));
+        QCOMPARE(bits.data(), codecs::decode(as(bits, PnmKind::Bitmap).first).data());  // (white and black: kept)
+        QVERIFY(!has(as(bits, PnmKind::Bitmap).second, Loss::Kind::Binarized));
+        QVERIFY(as(colour, PnmKind::Graymap).first.starts_with("P5\n37 23\n65535\n"));
+        QVERIFY(as(colour, PnmKind::Pixmap).first.starts_with("P6\n37 23\n65535\n"));
+        QVERIFY(as(test_image(Layout::Gray, Sample::U8), PnmKind::Pixmap).first.starts_with("P6\n"));
+        const std::string pam = as(test_image(Layout::Rgb, Sample::U8), PnmKind::Arbitrary).first;
+        QVERIFY(pam.starts_with("P7\n") && pam.find("TUPLTYPE RGB\n") != std::string::npos);
+        QCOMPARE(codecs::decode(pam).data(), test_image(Layout::Rgb, Sample::U8).data());
+        QVERIFY(as(colour, PnmKind::Arbitrary).first.find("TUPLTYPE RGB_ALPHA") != std::string::npos);
+        QVERIFY(as(test_image(Layout::Gray, Sample::U8), PnmKind::Float).first.starts_with("Pf\n"));
+        QVERIFY(as(colour, PnmKind::Float).first.starts_with("PF\n"));
+        QVERIFY(as(colour, PnmKind::Any).first.starts_with("P7\n"));
+        // (an icon's entry of a PNG larger than its directory says)
+        const std::string wide = codecs::encode(test_image(Layout::Rgba, Sample::U8).convert(Layout::Rgba, Sample::U8), Format::Png);
+        QCOMPARE(codecs::header_size(ico_of(wide)), (std::optional<std::pair<std::uint32_t, std::uint32_t>>{{37u, 23u}}));
+        QCOMPARE(genko::render::picture_size(ico_of(wide)).width, 37);
+        QCOMPARE(codecs::decode(ico_of(wide)).width(), 37u);
+        // (AVIF: an EXIF block without its TIFF header)
+        CodecImage tagged = test_image(Layout::Rgb, Sample::U8);
+        tagged.meta.exif = std::string("not a TIFF");
+        QVERIFY(has(codecs::losses(tagged, Format::Avif), Loss::Kind::ExifDropped));
+        QVERIFY(!codecs::decode(codecs::encode(tagged, Format::Avif)).meta.exif);
+        tagged.meta.exif = sample_exif();
+        QVERIFY(!has(codecs::losses(tagged, Format::Avif), Loss::Kind::ExifDropped));
     }
 };
 

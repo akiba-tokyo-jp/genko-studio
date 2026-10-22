@@ -12,6 +12,7 @@
 #include "core/error.hpp"
 #include "render/codecs/codecs.hpp"
 #include "render/codecs/formats.hpp"
+#include "render/not_yet_ported.hpp"
 
 namespace genko::render::codecs {
 
@@ -80,7 +81,8 @@ void parse(Decoder& decoder, std::string_view bytes, const Limits& limits) {
     avifResult r = avifDecoderSetIOMemory(decoder.d, reinterpret_cast<const uint8_t*>(bytes.data()), bytes.size());
     if (r != AVIF_RESULT_OK) failed(r);
     r = avifDecoderParse(decoder.d);
-    if (r == AVIF_RESULT_NOT_IMPLEMENTED || r == AVIF_RESULT_NO_CODEC_AVAILABLE) throw core::Error("format", std::string("the AVIF file cannot be read: ") + avifResultToString(r));
+    // (what this build's libavif and libaom do not read: an AVIF this build does not read yet, as a format it does not)
+    if (r == AVIF_RESULT_NOT_IMPLEMENTED || r == AVIF_RESULT_NO_CODEC_AVAILABLE) throw NotYetPorted("image_format");
     if (r != AVIF_RESULT_OK) failed(r);
 }
 
@@ -147,7 +149,9 @@ std::string write_avif(const CodecImage& stored, const EncodeOptions& options) {
     const auto bytes = [](const std::string& s) { return reinterpret_cast<const uint8_t*>(s.data()); };
     if (icc && avifImageSetProfileICC(e.image, bytes(*stored.icc), stored.icc->size()) != AVIF_RESULT_OK)
         throw core::Error("memory", "cannot write AVIF (its profile)");
-    if (stored.meta.exif && avifImageSetMetadataExif(e.image, bytes(*stored.meta.exif), stored.meta.exif->size()) != AVIF_RESULT_OK)
+    // (an EXIF block without its TIFF header, which libavif refuses: left out, as losses says)
+    if (stored.meta.exif && exif_has_tiff_header(*stored.meta.exif) &&
+        avifImageSetMetadataExif(e.image, bytes(*stored.meta.exif), stored.meta.exif->size()) != AVIF_RESULT_OK)
         throw core::Error("value", "cannot write AVIF (its EXIF)");
     if (stored.meta.xmp && avifImageSetMetadataXMP(e.image, bytes(*stored.meta.xmp), stored.meta.xmp->size()) != AVIF_RESULT_OK)
         throw core::Error("memory", "cannot write AVIF (its XMP)");

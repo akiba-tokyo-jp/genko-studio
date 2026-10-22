@@ -46,6 +46,8 @@ if(CMAKE_HOST_WIN32)
     "lcms2~Little CMS 2~lcms2~MIT~built-in"
     "openexr~OpenEXR (with Imath)~openexr~BSD-3-Clause~built-in" "libavif~libavif~libavif~BSD-2-Clause AND Apache-2.0~built-in"
     "aom~libaom~aom~BSD-2-Clause~built-in"
+    "libdeflate~libdeflate (OpenEXR's)~=1.26~MIT~built-in" "openjph~OpenJPH (OpenEXR's)~=0.32.0~BSD-2-Clause~built-in"
+    "libyuv~libyuv (libavif's)~=1916~BSD-3-Clause~built-in"
     "msvc-runtime~Microsoft Visual C++ runtime~=NOASSERTION~LicenseRef-MSVC-Redistributable~bundled:(^|/)(msvcp|vcruntime|concrt)[0-9_]*\\.dll$")
 else()
   list(APPEND _packages

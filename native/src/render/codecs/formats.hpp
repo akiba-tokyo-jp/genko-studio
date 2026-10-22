@@ -89,6 +89,11 @@ CodecImage from_eight_bit(std::uint32_t width, std::uint32_t height, Layout layo
 CodecImage this_builds_picture(std::string_view bytes, const Limits& limits, bool deep,
                                std::optional<std::pair<std::uint32_t, std::uint32_t>> size = std::nullopt);
 
+// An EXIF block that starts with its TIFF header (II*\0 or MM\0*), as AVIF's writer takes it.
+inline bool exif_has_tiff_header(std::string_view exif) {
+    return exif.starts_with(std::string_view("II*\0", 4)) || exif.starts_with(std::string_view("MM\0*", 4));
+}
+
 // Byte order helpers.
 inline unsigned u8(std::string_view b, std::size_t at) { return static_cast<unsigned char>(b[at]); }
 inline std::uint32_t le16(std::string_view b, std::size_t at) { return u8(b, at) | (u8(b, at + 1) << 8); }

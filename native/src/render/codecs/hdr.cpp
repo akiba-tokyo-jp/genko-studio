@@ -157,6 +157,8 @@ std::pair<std::uint32_t, std::uint32_t> hdr_size(std::string_view bytes) {
 CodecImage read_hdr(std::string_view b, const Limits& limits) {
     const Head h = head_of(b);
     limits.check(h.width, h.height, Layout::Rgb, Sample::F32);
+    // (a scanline takes 4 bytes at the least: a file too short for its height is cut short, said before its pixels are made)
+    if (h.pixels_at > b.size() || (b.size() - h.pixels_at) / 4 < h.height) broken("Radiance HDR", "its pixels are cut short");
     std::string out(std::size_t(h.width) * h.height * 3 * 4, '\0');
     std::vector<unsigned char> line(std::size_t(h.width) * 4);
     std::size_t at = h.pixels_at;

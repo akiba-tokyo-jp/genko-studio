@@ -15,8 +15,10 @@
 //   - .png, .jpg / .jpeg, and since F-a .webp, .gif, .bmp, .tga, .ico, the Netpbm ones (.pnm .pbm .pgm .ppm .pam .pfm),
 //     .qoi, .exr, .hdr, .avif: the page's picture at its resolution (page_picture) through the codecs
 //     (render::codecs::encode: what the format holds of its depth, colours, profile, resolution and the book's XMP; the
-//     losses said in the notes, as the codecs' plan makes them) — for OpenEXR and Radiance HDR its colours as linear light
-//     of sRGB's primaries (Little CMS from its profile);
+//     losses said in the notes of the page's picture as it is, as the codecs' plan makes them; Netpbm's kind as its
+//     extension names it) — for OpenEXR and Radiance HDR its colours as linear light of sRGB's primaries (Little CMS from
+//     its profile; a grey page's OpenEXR its grey; an opened OpenEXR's linear-srgb page as it is), for a format that holds
+//     neither its profile nor its CMYK its colours as sRGB's through its profile;
 //   - .tif / .tiff: the page at its depth as the exports write a page's TIFF (an RGB page's values or an 8-bit picture,
 //     a grey or CMYK page's inks, with its profile);
 //   - .psd: the page with its layers as the exports write a page's PSD; `layers` false, its merged picture alone;

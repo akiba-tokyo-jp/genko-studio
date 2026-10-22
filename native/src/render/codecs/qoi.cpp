@@ -37,6 +37,9 @@ CodecImage read_qoi(std::string_view b, const Limits& limits) {
     const Layout layout = ch == 4 ? Layout::Rgba : Layout::Rgb;
     limits.check(w, h, layout, Sample::U8);
     const std::size_t count = std::size_t(w) * h;
+    // (an op gives at most 62 pixels, a run: a file too short for its size is cut short, said before its pixels are made)
+    const std::size_t ops = b.size() >= 22 ? b.size() - 22 : 0;
+    if (ops * 62 < count) broken("QOI", "its pixels are cut short");
     std::string out(count * ch, '\0');
     std::array<Px, 64> seen{};
     Px px{0, 0, 0, 255};

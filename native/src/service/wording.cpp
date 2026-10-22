@@ -469,6 +469,26 @@ const std::vector<Rule>& rules() {
         r.push_back(rule("the layers are too large to read", "レイヤーの絵が多すぎて読めません"));
         r.push_back(rule("the picture is too large to read", "絵が大きすぎて読めません"));
         r.push_back(rule(R"(the page layer is too large \(.*\))", "用紙の大きさに対して PSD の絵が大きすぎて、レイヤーにできません"));
+        // (PC4 F-a: the codecs' refusals — render/codecs: a picture past the limits, a broken file, what a format holds —
+        // before the PSD's, whose words are of a PSD's layer)
+        r.push_back(rule(R"(the picture is too large \((\d+)×(\d+) pixels; at most (\d+) pixels\))", [](const QRegularExpressionMatch& m) {
+            return QStringLiteral("画像が大きすぎて読めません（%1×%2 px。%3 画素まで）").arg(m.captured(1), m.captured(2), m.captured(3));
+        }));
+        r.push_back(rule(R"(the picture is too large \((\d+)×(\d+) pixels; at most (\d+)×(\d+)\))", [](const QRegularExpressionMatch& m) {
+            return QStringLiteral("画像が大きすぎて読めません（%1×%2 px。幅 %3・高さ %4 px まで）").arg(m.captured(1), m.captured(2), m.captured(3), m.captured(4));
+        }));
+        r.push_back(rule(R"(the picture is too large to read at once \(\d+ bytes; at most \d+\))",
+                         "画像が大きすぎて、一度に読めません（作業に使える記憶の上限 2 GiB を超えます）"));
+        r.push_back(rule("the picture is too large to count in this computer's memory", "画像が大きすぎて読めません"));
+        r.push_back(rule(R"(the (.+) (?:file|picture) is too large to read)", "\\1 の画像が大きすぎて読めません"));
+        r.push_back(rule(R"(the OpenEXR file has too many (?:channels|tiles) \(.*\))", "OpenEXR のファイルのチャンネルかタイルが多すぎて読めません"));
+        r.push_back(rule(R"(the OpenEXR file's tiles are too large \(.*\))", "OpenEXR のファイルのタイルが大きすぎて読めません"));
+        r.push_back(rule(R"(the OpenEXR file has no R, G, B or Y channels)", "OpenEXR のファイルに R・G・B か Y のチャンネルがありません"));
+        r.push_back(rule(R"(the (.+) file cannot be read \(.*\))", "\\1 のファイルが壊れているか途中で切れていて、読めません"));
+        r.push_back(rule(R"(the file is not an? (.+) file)", "\\1 のファイルではありません"));
+        r.push_back(rule(R"(the bytes are not a picture of a format this build knows)", "この版の Genko が知っている形式の画像ではありません"));
+        r.push_back(rule(R"((.+) holds at most (\d+)×(\d+) pixels)", "\\1 には \\2×\\3 px までしか書けません"));
+        r.push_back(rule(R"(cannot write ([A-Za-z]+)(?:: .*| \(.*\)))", "\\1 のファイルを書けませんでした"));
         r.push_back(rule(R"(the picture is too large \(\d+×\d+ pixels.*\))", "PSD の絵が大きすぎて、レイヤーにできません"));
         r.push_back(rule(R"(the layer mask is too large \(.*\))", "用紙が大きすぎて、PSD のレイヤーマスクを作れません"));
         r.push_back(rule("the PSD has no pictures to read", "PSD に読み込める絵がありません"));
@@ -1171,13 +1191,15 @@ QString unported_element(const QString& element) {
         {"text_features", "横書きの文字の字形の指定（OpenType 機能）"}, {"text_warp", "文字のゆがみ"}, {"tones", "トーン"}, {"effects", "効果線"},
         {"prims", "3D"}, {"placed", "配置した画像"}, {"nombre", "ノンブル"}, {"covers", "表紙の折り目"}, {"anim", "アニメーション"},
         {"screen", "トーン化"}, {"finish", "仕上げの白黒化"}, {"brush_library", "自作ブラシの読み込み"},
-        {"image_format", "この版では読めない形式の画像（JPEG 2000・ICNS・DDS など）"},
+        {"image_format", "この版では読めない形式の画像（PPM・ICO・JPEG 2000 など）"},
         // PC4 F-0 (render/codecs): a format this build does not write yet
         {"image_write", "この版では書けない形式の画像"},
         // PC4 F-b (formats/open_file): the files 開く… opens in later groups
         {"psd_file", "PSD・PSB を 1 冊として開くこと（ファイル → PSD をレイヤーのまま読み込む… で読み込めます）"},
         {"raw_file", "カメラ RAW のファイル"},
         {"pcraft_file", "PhotoCraft の原稿（.pcraft）"}};
+    // (PC4 F-a: PPM and ICO are read since; the formats this build still does not read)
+    if (element == QLatin1String("image_format")) return QStringLiteral("この版では読めない形式の画像（JPEG 2000・ICNS・DDS など）");
     if (const auto it = words.find(element); it != words.end()) return it->second;
     if (element.startsWith(QStringLiteral("adjust:"))) return QStringLiteral("色調補正（%1）").arg(element.mid(7));
     if (element.startsWith(QStringLiteral("smart:"))) {  // (smart-objects@1: what PC3's later steps draw)

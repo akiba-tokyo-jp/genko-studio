@@ -561,7 +561,14 @@ std::string picture_bytes(const render::Image& image, const std::string& format,
     // (PC4 F-a: the formats Pillow's rarer writers wrote, through the codecs — one 8-bit picture; AVIF at Pillow's
     // quality 75)
     if (format == "ico") return icon_bytes(image);
-    if (format == "gif" || format == "pnm" || format == "tga" || format == "qoi" || format == "avif") {
+    if (format == "pnm") {  // (Pillow's PpmImagePlugin: whatever the extension, P4 of "1", P5 of "L", P6 of RGB and RGBA)
+        render::codecs::EncodeOptions options;
+        if (image.mode() == "1") options.pnm_kind = render::codecs::PnmKind::Bitmap;
+        const bool grey = image.mode() == "1" || image.mode() == "L";
+        return render::codecs::encode(codec_picture(grey ? image.convert("L") : image.mode() == "RGB" ? image : image.convert("RGB")),
+                                      render::codecs::Format::Pnm, options);
+    }
+    if (format == "gif" || format == "tga" || format == "qoi" || format == "avif") {
         render::codecs::EncodeOptions options;
         if (format == "avif") options.jpeg_quality = 75;
         return render::codecs::encode(codec_picture(image), *render::codecs::from_id(format), options);

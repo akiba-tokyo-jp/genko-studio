@@ -146,6 +146,13 @@ bool other_image_format(std::string_view b) {
 // build" (NotYetPorted("image_format")), not "no picture" (M7: a recorded limit). The netpbm family (PBM, PGM, PPM, PAM,
 // PFM), ICO, QOI and AVIF — and TGA, OpenEXR and Radiance HDR, which Pillow does not open by their first bytes — are read
 // by the codecs since PC4 F-a (codecs_format), before this is asked.
+// (PC4 F-a review) The text chunks (tEXt, zTXt, iTXt), which these readers do not use, passed over: libpng would inflate
+// each — up to 8 MB — and hold them, as many as 1000 (8 GB from a file of a few MB). The pixels are the same.
+void pass_over_text(png_structp png) {
+    static constexpr png_byte kText[] = {'t', 'E', 'X', 't', '\0', 'z', 'T', 'X', 't', '\0', 'i', 'T', 'X', 't', '\0'};
+    png_set_keep_unknown_chunks(png, PNG_HANDLE_CHUNK_NEVER, kText, 3);
+}
+
 bool pillow_only_format(std::string_view b) {
     const auto starts = [&](std::string_view p) { return b.substr(0, p.size()) == p; };
     // (each as the plugin's _accept: netpbm P0–P6, Pf and Py; ICO; CUR; …; AVIF's coding and container brands)
@@ -434,6 +441,7 @@ Image read_png(std::string_view bytes, const PngLimits& limits) {
     if (guard.info == nullptr) throw core::Error("memory", "cannot read PNG");
     png_set_read_fn(guard.png, &state, on_read);
     png_set_user_limits(guard.png, 0x7fffffffU, 0x7fffffffU);
+    pass_over_text(guard.png);
     png_set_benign_errors(guard.png, 1);
 #ifdef PNG_SKIP_sRGB_CHECK_PROFILE
     png_set_option(guard.png, PNG_SKIP_sRGB_CHECK_PROFILE, PNG_OPTION_ON);
@@ -581,6 +589,7 @@ Size picture_size(std::string_view bytes) {
     if (guard.info == nullptr) throw core::Error("memory", "cannot read PNG");
     png_set_read_fn(guard.png, &state, on_read);
     png_set_user_limits(guard.png, 0x7fffffffU, 0x7fffffffU);
+    pass_over_text(guard.png);
     png_set_benign_errors(guard.png, 1);
 #ifdef PNG_SKIP_sRGB_CHECK_PROFILE
     png_set_option(guard.png, PNG_SKIP_sRGB_CHECK_PROFILE, PNG_OPTION_ON);

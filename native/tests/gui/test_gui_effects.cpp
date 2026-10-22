@@ -742,6 +742,33 @@ private slots:
                  QStringLiteral("試し描きのページで決めた絵柄（style.locked）を変えられるのは人だけです"));
     }
 
+    void codecRefusalsInThePersonsWords() {
+        // (PC4 F-a: the codecs' refusals — render/codecs — as the person reads them; a PSD's own still a PSD's)
+        using genko::wording::error;
+        QCOMPARE(error(std::string("the picture is too large (20000×20000 pixels; at most 120000000 pixels)")),
+                 QStringLiteral("画像が大きすぎて読めません（20000×20000 px。120000000 画素まで）"));
+        QCOMPARE(error(std::string("the picture is too large (200000×4 pixels; at most 100000×100000)")),
+                 QStringLiteral("画像が大きすぎて読めません（200000×4 px。幅 100000・高さ 100000 px まで）"));
+        QCOMPARE(error(std::string("the picture is too large to read at once (2400000000 bytes; at most 2147483648)")),
+                 QStringLiteral("画像が大きすぎて、一度に読めません（作業に使える記憶の上限 2 GiB を超えます）"));
+        QCOMPARE(error(std::string("the OpenEXR file is too large to read")), QStringLiteral("OpenEXR の画像が大きすぎて読めません"));
+        QCOMPARE(error(std::string("the OpenEXR file has too many channels (1000; at most 256)")),
+                 QStringLiteral("OpenEXR のファイルのチャンネルかタイルが多すぎて読めません"));
+        QCOMPARE(error(std::string("the TGA file cannot be read (its pixels are cut short)")),
+                 QStringLiteral("TGA のファイルが壊れているか途中で切れていて、読めません"));
+        QCOMPARE(error(std::string("the Radiance HDR file cannot be read (its header)")),
+                 QStringLiteral("Radiance HDR のファイルが壊れているか途中で切れていて、読めません"));
+        QCOMPARE(error(std::string("the file is not a QOI file")), QStringLiteral("QOI のファイルではありません"));
+        QCOMPARE(error(std::string("the file is not an OpenEXR file")), QStringLiteral("OpenEXR のファイルではありません"));
+        QCOMPARE(error(std::string("ICO holds at most 256×256 pixels")), QStringLiteral("ICO には 256×256 px までしか書けません"));
+        QCOMPARE(error(std::string("cannot write AVIF: Encoding of color planes failed")), QStringLiteral("AVIF のファイルを書けませんでした"));
+        QCOMPARE(error(std::string("cannot write WebP (libwebp's error 6)")), QStringLiteral("WebP のファイルを書けませんでした"));
+        // (the PSD's: as before)
+        QCOMPARE(error(std::string("ops[0] import_psd: the picture is too large (200000×200000 pixels; at most 120000000)")),
+                 QStringLiteral("PSD の絵が大きすぎて、レイヤーにできません"));
+        QCOMPARE(error(std::string("the picture is too large to read")), QStringLiteral("絵が大きすぎて読めません"));
+    }
+
     void bookRefusalsInThePersonsWords() {
         // (set_spread's, set_page_spec's and a newer book's refusals, as the person reads them)
         using genko::wording::error;

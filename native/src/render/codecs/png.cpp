@@ -28,7 +28,10 @@ namespace genko::render::codecs::detail {
 
 namespace {
 
-constexpr std::size_t kTextMax = std::size_t(64) << 20;  // (a text past 64 MB, inflated, is not taken)
+// (the text taken from one file: 4 MB in all, inflated and as UTF-8, of at most 256 chunks; what is past them is not read —
+// a few small chunks of zeros would inflate to gigabytes)
+constexpr std::size_t kTextTotal = std::size_t(4) << 20;
+constexpr std::size_t kTextChunks = 256;
 
 std::string latin1_to_utf8(std::string_view latin1) {
     std::string out;
@@ -66,7 +69,8 @@ std::optional<std::string> utf8_to_latin1(std::string_view text) {
     return out;
 }
 
-std::optional<std::string> inflated(std::string_view data) {
+// The zlib stream inflated, or none when it is broken or inflates past `most` bytes (stopped there: `over` set).
+std::optional<std::string> inflated(std::string_view data, std::size_t most, bool* over = nullptr) {
     z_stream z{};
     if (inflateInit(&z) != Z_OK) return std::nullopt;
     std::string out;
@@ -80,7 +84,8 @@ std::optional<std::string> inflated(std::string_view data) {
         status = inflate(&z, Z_NO_FLUSH);
         if (status != Z_OK && status != Z_STREAM_END) break;
         out.append(buffer, sizeof buffer - z.avail_out);
-        if (out.size() > kTextMax) {
+        if (out.size() > most) {
+            if (over != nullptr) *over = true;
             status = Z_DATA_ERROR;
             break;
         }
@@ -113,9 +118,11 @@ std::string chunk(std::string_view type, std::string_view data) {
 }
 
 // What the file says besides its pixels that the eXIf, iTXt XMP and iCCP readers do not: its resolution (pHYs in pixels a
-// metre) and its text (tEXt and zTXt in Latin-1, iTXt in UTF-8 — the XMP's iTXt left out).
+// metre) and its text (tEXt and zTXt in Latin-1, iTXt in UTF-8 — the XMP's iTXt left out), within kTextTotal and
+// kTextChunks: a chunk past what is left is not taken, nor any after it (a broken one is passed over).
 void png_extras(std::string_view b, CodecImage& out) {
     std::size_t at = 8;
+    std::size_t left = kTextTotal, chunks = 0;
     while (at + 12 <= b.size()) {
         const std::uint32_t length = be32(b, at);
         if (length > b.size() - at - 12) break;
@@ -124,16 +131,27 @@ void png_extras(std::string_view b, CodecImage& out) {
         if (type == "pHYs" && data.size() >= 9 && data[8] == 1) {
             const std::uint32_t x = be32(data, 0), y = be32(data, 4);
             if (x > 0 && y > 0) out.meta.dpi = std::make_pair(x * 0.0254, y * 0.0254);
-        } else if (type == "tEXt" || type == "zTXt" || type == "iTXt") {
+        } else if ((type == "tEXt" || type == "zTXt" || type == "iTXt") && left > 0 && chunks < kTextChunks) {
             const std::size_t key_end = data.find('\0');
             if (key_end != std::string_view::npos && key_end > 0) {
                 const std::string key = latin1_to_utf8(data.substr(0, key_end));
+                const std::size_t room = left > key.size() ? left - key.size() : 0;
                 std::optional<std::string> text;
+                bool past = false;  // (more than is left: not taken, and no text after it)
+                const auto within = [&](std::string made) -> std::optional<std::string> {
+                    if (made.size() <= room) return made;
+                    past = true;
+                    return std::nullopt;
+                };
                 if (type == "tEXt") {
-                    text = latin1_to_utf8(data.substr(key_end + 1));
+                    const std::string_view raw = data.substr(key_end + 1);
+                    if (raw.size() > room) past = true;
+                    else text = within(latin1_to_utf8(raw));
                 } else if (type == "zTXt") {
                     if (key_end + 2 <= data.size() && data[key_end + 1] == 0) {
-                        if (const auto raw = inflated(data.substr(key_end + 2))) text = latin1_to_utf8(*raw);
+                        bool over = false;
+                        if (const auto raw = inflated(data.substr(key_end + 2), room, &over)) text = within(latin1_to_utf8(*raw));
+                        else past = over;
                     }
                 } else if (key != "XML:com.adobe.xmp" && key_end + 3 <= data.size()) {
                     const bool compressed = data[key_end + 1] != 0;
@@ -141,10 +159,23 @@ void png_extras(std::string_view b, CodecImage& out) {
                     const std::size_t translated_end = language_end == std::string_view::npos ? language_end : data.find('\0', language_end + 1);
                     if (translated_end != std::string_view::npos) {
                         const std::string_view value = data.substr(translated_end + 1);
-                        text = compressed ? inflated(value) : std::optional<std::string>(std::string(value));
+                        if (!compressed) {
+                            if (value.size() > room) past = true;
+                            else text = std::string(value);
+                        } else {
+                            bool over = false;
+                            if (const auto raw = inflated(value, room, &over)) text = within(*raw);
+                            else past = over;
+                        }
                     }
                 }
-                if (text) out.meta.text.emplace_back(key, std::move(*text));
+                if (text) {
+                    left -= key.size() + text->size();
+                    ++chunks;
+                    out.meta.text.emplace_back(key, std::move(*text));
+                } else if (past) {
+                    left = 0;
+                }
             }
         } else if (type == "IEND") {
             break;

@@ -16,6 +16,7 @@
 #include <cmath>
 #include <cstring>
 #include <filesystem>
+#include <map>
 #include <string>
 #include <vector>
 
@@ -28,6 +29,7 @@
 #include "core/smart.hpp"
 #include "formats/copy.hpp"
 #include "formats/open_file.hpp"
+#include "formats/page_picture.hpp"
 #include "render/codecs/codecs.hpp"
 #include "render/image.hpp"
 #include "render/inspect.hpp"
@@ -352,13 +354,16 @@ private slots:
         info.author = "書いた人";
         const core::Document doc = run(small_book(), Json::array({Json{{"op", "set_file_info"}, {"author", "書いた人"}}}));
         const int w = render::mm_to_px(60, 150), h = render::mm_to_px(80, 150);
-        for (const char* ext : {"webp", "gif", "bmp", "tga", "pnm", "pbm", "qoi", "exr", "hdr", "avif", "png", "jpg"}) {
+        // (Netpbm as its extension says: the page's RGB of 8 bits P6 as .pnm, P4 .pbm, P5 .pgm, P6 .ppm, P7 .pam, PF .pfm)
+        const std::map<std::string, std::string> netpbm{{"pnm", "P6\n"}, {"pbm", "P4\n"}, {"pgm", "P5\n"}, {"ppm", "P6\n"}, {"pam", "P7\n"}, {"pfm", "PF\n"}};
+        for (const char* ext : {"webp", "gif", "bmp", "tga", "pnm", "pbm", "pgm", "ppm", "pam", "pfm", "qoi", "exr", "hdr", "avif", "png", "jpg"}) {
             const fs::path dest = at((std::string("copy.") + ext).c_str());
             formats::CopyResult result;
             QVERIFY2(code_of([&] { result = formats::write_copy(doc, 0, dest); }).empty(), ext);
             const std::string bytes = genko::test::read_bytes(QString::fromStdString(core::path_to_utf8(dest)));
             const CodecImage back = codecs::decode(bytes);
             QVERIFY2(int(back.width()) == w && int(back.height()) == h, ext);
+            if (const auto kind = netpbm.find(ext); kind != netpbm.end()) QVERIFY2(bytes.starts_with(kind->second), ext);
             const bool keeps_xmp = codecs::caps(*codecs::from_extension(ext)).xmp;
             QVERIFY2(back.meta.xmp.has_value() == keeps_xmp, ext);
             if (keeps_xmp) QCOMPARE(core::file_info_from_xmp(*back.meta.xmp).author, info.author);
@@ -371,6 +376,75 @@ private slots:
         }
         QCOMPARE(code_of([&] { (void)formats::write_copy(doc, 0, at("copy.ico")); }), std::string("image_too_large"));
         QVERIFY(!fs::exists(at("copy.ico")));
+    }
+
+    // (PC4 F-a review) コピーを保存… of an opened OpenEXR's page as OpenEXR: its values as they are (floats, and halves
+    // as the floats they are), not taken through sRGB and back.
+    void anOpenedExrCopiedAsItIs() {
+        std::vector<float> values;
+        for (int i = 0; i < 12 * 9 * 3; ++i) values.push_back(static_cast<float>((i * 37) % 101) / 43.0f);  // (0 to 2.3)
+        const CodecImage light = CodecImage::from_normalized(12, 9, Layout::Rgb, Sample::F32, values);
+        for (const Sample s : {Sample::F32, Sample::F16}) {
+            const CodecImage file = light.convert(Layout::Rgb, s);
+            const formats::Opened opened = formats::open_file(codecs::encode(file, Format::OpenExr), "light.exr");
+            const fs::path dest = at(s == Sample::F32 ? "same32.exr" : "same16.exr");
+            formats::CopyResult result;
+            QVERIFY(code_of([&] { result = formats::write_copy(opened.doc, 0, dest); }).empty());
+            const CodecImage back = codecs::decode(genko::test::read_bytes(QString::fromStdString(core::path_to_utf8(dest))));
+            QCOMPARE(back.width(), 12u);
+            QCOMPARE(back.layout(), Layout::Rgb);
+            QVERIFY2(back.normalized() == file.normalized(), codecs::to_string(s).data());
+            QVERIFY2(std::none_of(result.notes.begin(), result.notes.end(), [](const std::string& n) { return n.find("ICC") != std::string::npos; }),
+                     codecs::to_string(s).data());
+        }
+    }
+
+    // (PC4 F-a review) A CMYK page's copies: the conversion said of OpenEXR and Radiance HDR (of the page's picture as it
+    // is), its colours through its profile in every format — PNG, WebP, AVIF and OpenEXR agree —; a grey page's OpenEXR
+    // its grey (Y).
+    void copiesOfACmykPageAgree() {
+        const core::Document cmyk = with_contents(run(small_book(), Json::array({Json{{"op", "set_color_mode"}, {"page", 1}, {"mode", "cmyk"}, {"depth", 8},
+                                                                                     {"profile", "coated-cmyk"}}})),
+                                                  codecs::encode(blocks(40, 30), Format::Png), "a.png");
+        std::map<std::string, CodecImage> copies;
+        for (const char* ext : {"png", "webp", "avif", "exr", "hdr", "qoi"}) {
+            const fs::path dest = at((std::string("cmyk.") + ext).c_str());
+            formats::CopyResult result;
+            QVERIFY2(code_of([&] { result = formats::write_copy(cmyk, 0, dest); }).empty(), ext);
+            const bool converted = std::any_of(result.notes.begin(), result.notes.end(), [](const std::string& n) { return n.find("CMYK を RGB に変換します") != std::string::npos; });
+            QVERIFY2(converted, ext);
+            QVERIFY2(std::none_of(result.notes.begin(), result.notes.end(), [](const std::string& n) { return n.find("ICC") != std::string::npos; }), ext);
+            copies[ext] = codecs::decode(genko::test::read_bytes(QString::fromStdString(core::path_to_utf8(dest))));
+        }
+        // (the middle of the page's four blocks, a pixel inside each, as sRGB's 8 bits)
+        const CodecImage& png = copies["png"];
+        const auto srgb = [&](const CodecImage& picture, std::uint32_t x, std::uint32_t y, unsigned c, bool linear) {
+            const float v = picture.at(x, y, c);
+            return static_cast<int>(std::lround(std::clamp(linear ? (v <= 0.0031308f ? v * 12.92f : 1.055f * std::pow(v, 1 / 2.4f) - 0.055f) : v, 0.0f, 1.0f) * 255));
+        };
+        const std::uint32_t w = png.width(), h = png.height();
+        for (const auto& [x, y] : {std::make_pair(w / 4, h / 4), std::make_pair(3 * w / 4, h / 4), std::make_pair(w / 4, 3 * h / 4), std::make_pair(3 * w / 4, 3 * h / 4)}) {
+            for (unsigned c = 0; c < 3; ++c) {
+                const int want = srgb(png, x, y, c, false);
+                QCOMPARE(srgb(copies["webp"], x, y, c, false), want);
+                QCOMPARE(srgb(copies["qoi"], x, y, c, false), want);
+                QVERIFY2(std::abs(srgb(copies["avif"], x, y, c, false) - want) <= 6, "avif");
+                QVERIFY2(std::abs(srgb(copies["exr"], x, y, c, true) - want) <= 1, "exr");
+                QVERIFY2(std::abs(srgb(copies["hdr"], x, y, c, true) - want) <= 2, "hdr");
+            }
+        }
+        // (not Pillow's plain CMYK → RGB, which the page's profile's colours are not)
+        const CodecImage& from = png;
+        bool off = false;
+        const CodecImage plain = formats::page_picture(cmyk.page(0), cmyk, 150).image.convert(Layout::Rgb, Sample::U8);
+        for (unsigned c = 0; c < 3; ++c) off = off || std::abs(srgb(plain, w / 4, h / 4, c, false) - srgb(from, w / 4, h / 4, c, false)) > 10;
+        QVERIFY(off);
+        // (a grey page's OpenEXR: grey)
+        const core::Document grey = run(small_book(), Json::array({Json{{"op", "set_color_mode"}, {"page", 1}, {"mode", "gray"}, {"depth", 16}}}));
+        QVERIFY(code_of([&] { (void)formats::write_copy(grey, 0, at("grey.exr")); }).empty());
+        const CodecImage y = codecs::decode(genko::test::read_bytes(QString::fromStdString(core::path_to_utf8(at("grey.exr")))));
+        QCOMPARE(y.layout(), Layout::Gray);
+        QVERIFY2(std::abs(y.at(0, 0, 0) - 1.0f) < 1e-3, std::to_string(y.at(0, 0, 0)).c_str());  // (the white paper)
     }
 
     void versionNamesTheLibraries() {

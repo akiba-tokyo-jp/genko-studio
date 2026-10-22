@@ -112,7 +112,14 @@ CodecImage dib(std::string_view d, const Limits& limits) {
 }  // namespace
 
 std::pair<std::uint32_t, std::uint32_t> ico_size(std::string_view bytes) {
+    // (the size its picture says — a PNG's header, a bitmap's —: the directory's, at most 256, may not be it)
     const Entry e = largest(directory(bytes));
+    const std::string_view data = bytes.substr(e.offset, e.size);
+    if (data.starts_with(std::string_view("\x89PNG\r\n\x1a\n", 8)) && data.size() >= 24 && data.substr(12, 4) == "IHDR") return {be32(data, 16), be32(data, 20)};
+    if (!data.starts_with(std::string_view("\x89PNG", 4)) && data.size() >= 40 && le32(data, 0) >= 40) {
+        const auto width = static_cast<std::int32_t>(le32(data, 4)), doubled = static_cast<std::int32_t>(le32(data, 8));
+        if (width > 0 && doubled > 1) return {static_cast<std::uint32_t>(width), static_cast<std::uint32_t>(doubled / 2)};
+    }
     return {e.width, e.height};
 }
 

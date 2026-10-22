@@ -70,10 +70,12 @@ std::string tiff_of(const PagePicture& picture, int dpi, const std::optional<std
     return tiff_bytes(render::Image::frombytes("RGB", render::Size{static_cast<int>(w), static_cast<int>(h)}, rgb.data()), save);
 }
 
-// (PC4 F-a) The page's picture as linear light of sRGB's primaries (OpenEXR, Radiance HDR: their light is linear): its
-// colours to sRGB through its profile (Little CMS in floats, values past 1 kept — render/smart_decode's srgb_floats), then
-// sRGB's curve undone; the built-in linear-srgb as its profile (the formats' own: no loss said of it).
-CodecImage linear_srgb(const CodecImage& picture) {
+// (PC4 F-a) The page's picture in sRGB's colours — through its profile, Little CMS in floats, values past 1 kept
+// (render/smart_decode's srgb_floats) —, for a format that does not hold its profile or its colours: RGB(A), or `grey`
+// a grey picture's grey(A) (a grey's sRGB is grey); `linear` (OpenEXR, Radiance HDR: their light is linear) with sRGB's
+// curve undone, as floats with the built-in linear-srgb (RGB; a grey none) — else at the picture's own depth, with no
+// profile (sRGB's, as a file without one is taken).
+CodecImage srgb_picture(const CodecImage& picture, bool linear, bool grey) {
     render::smart::DeepPicture deep;
     deep.width = picture.width();
     deep.height = picture.height();
@@ -82,25 +84,48 @@ CodecImage linear_srgb(const CodecImage& picture) {
     deep.depth = render::codecs::depth_of(picture.sample());
     deep.mode = std::string(render::codecs::to_string(picture.layout()));
     deep.samples = picture.normalized();
-    std::vector<float> rgba = render::smart::srgb_floats(deep, picture.icc, "relative", true);
-    const auto linear = [](float v) {
+    const std::vector<float> rgba = render::smart::srgb_floats(deep, picture.icc, "relative", true);
+    const auto linear_of = [](float v) {
         if (std::isnan(v)) return 0.0f;
         return v <= 0.04045f ? v / 12.92f : std::pow((v + 0.055f) / 1.055f, 2.4f);
     };
-    for (std::size_t i = 0; i < rgba.size(); ++i) {
-        if (i % 4 != 3) rgba[i] = linear(rgba[i]);
+    grey = grey && render::codecs::is_gray(picture.layout());
+    const unsigned colours = grey ? 1 : 3;
+    std::vector<float> values;
+    values.reserve(rgba.size() / 4 * (colours + (deep.alpha ? 1 : 0)));
+    for (std::size_t i = 0; i < rgba.size(); i += 4) {
+        std::array<float, 3> c{rgba[i], rgba[i + 1], rgba[i + 2]};
+        if (linear) {
+            for (float& v : c) v = linear_of(v);
+        }
+        if (grey) values.push_back(0.2126f * c[0] + 0.7152f * c[1] + 0.0722f * c[2]);
+        else values.insert(values.end(), c.begin(), c.end());
+        if (deep.alpha) values.push_back(rgba[i + 3]);
     }
-    const Layout layout = deep.alpha ? Layout::Rgba : Layout::Rgb;
-    if (!deep.alpha) {
-        std::vector<float> rgb;
-        rgb.reserve(rgba.size() / 4 * 3);
-        for (std::size_t i = 0; i < rgba.size(); i += 4) rgb.insert(rgb.end(), rgba.begin() + static_cast<std::ptrdiff_t>(i), rgba.begin() + static_cast<std::ptrdiff_t>(i + 3));
-        rgba = std::move(rgb);
-    }
-    CodecImage out = CodecImage::from_normalized(picture.width(), picture.height(), layout, Sample::F32, rgba);
+    const Layout layout = grey ? (deep.alpha ? Layout::GrayA : Layout::Gray) : (deep.alpha ? Layout::Rgba : Layout::Rgb);
+    CodecImage out = CodecImage::from_normalized(picture.width(), picture.height(), layout, linear ? Sample::F32 : picture.sample(), values);
     out.meta = picture.meta;
-    if (const core::BuiltinProfile* p = core::builtin_profile("linear-srgb"); p != nullptr && p->bytes) out.icc = *p->bytes;
+    if (linear && !grey) {
+        if (const core::BuiltinProfile* p = core::builtin_profile("linear-srgb"); p != nullptr && p->bytes) out.icc = *p->bytes;
+    }
     return out;
+}
+
+// The page's picture already in the linear-srgb an opened OpenEXR or Radiance HDR has (its RGB): written as it is.
+bool linear_srgb_already(const CodecImage& picture) {
+    const core::BuiltinProfile* p = core::builtin_profile("linear-srgb");
+    return render::codecs::is_rgb(picture.layout()) && picture.icc && p != nullptr && p->bytes && *picture.icc == *p->bytes;
+}
+
+// Netpbm's kind as the extension names it (render/codecs/options.hpp).
+render::codecs::PnmKind pnm_kind_of(std::string_view suffix) {
+    using render::codecs::PnmKind;
+    if (suffix == "pbm") return PnmKind::Bitmap;
+    if (suffix == "pgm") return PnmKind::Graymap;
+    if (suffix == "ppm") return PnmKind::Pixmap;
+    if (suffix == "pam") return PnmKind::Arbitrary;
+    if (suffix == "pfm") return PnmKind::Float;
+    return PnmKind::Any;
 }
 
 }  // namespace
@@ -144,13 +169,32 @@ PlannedCopy plan_copy(const core::Document& doc, std::size_t at, const fs::path&
         plan.bytes = tiff_of(picture, dpi, xmp);
     } else {
         // (PC4 F-a: every other picture through the codecs, the book's XMP and the page's profile and resolution in the
-        // file where its format holds them — what it does not, said in the notes)
+        // file where its format holds them — what it does not, said in the notes, of the page's picture as it is)
+        using render::codecs::Loss;
         const render::codecs::Format format = *render::codecs::from_extension(suffix);
         render::codecs::EncodeOptions encode;
         encode.jpeg_quality = jpeg_quality_of(options.quality.value_or(10));
-        CodecImage image = render::codecs::linear_light(format) ? linear_srgb(picture.image) : std::move(picture.image);
+        encode.pnm_kind = pnm_kind_of(suffix);
+        CodecImage image = std::move(picture.image);
         if (xmp) image.meta.xmp = *xmp;
-        for (const render::codecs::Loss& loss : render::codecs::losses(image, format, encode)) {
+        std::vector<Loss> said = render::codecs::losses(image, format, encode);
+        const auto has = [&](Loss::Kind kind) { return std::any_of(said.begin(), said.end(), [kind](const Loss& l) { return l.kind == kind; }); };
+        // (its colours through its profile when the file cannot hold them: OpenEXR's and Radiance HDR's linear light —
+        // the linear-srgb of an opened one's page as it is —; a format that holds neither the profile nor CMYK, sRGB's
+        // colours — not the profile dropped, nor CMYK's plain formula —)
+        const bool grey = render::codecs::is_gray(render::codecs::plan(image, format, encode).layout);
+        bool converted = false;
+        if (render::codecs::linear_light(format)) {
+            if (!linear_srgb_already(image)) {
+                image = srgb_picture(image, true, grey);
+                converted = true;
+            }
+        } else if (image.icc && !image.icc->empty() && (has(Loss::Kind::IccDropped) || has(Loss::Kind::CmykConverted))) {
+            image = srgb_picture(image, false, grey);
+            converted = true;
+        }
+        if (converted) said.erase(std::remove_if(said.begin(), said.end(), [](const Loss& l) { return l.kind == Loss::Kind::IccDropped; }), said.end());
+        for (const Loss& loss : said) {
             if (!loss.fatal()) plan.notes.push_back(loss.text());
         }
         plan.bytes = render::codecs::encode(image, format, encode);

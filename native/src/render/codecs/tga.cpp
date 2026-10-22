@@ -123,6 +123,10 @@ CodecImage read_tga(std::string_view b, const Limits& limits) {
     }
     const std::size_t bpp = (h.depth + 7) / 8;
     const std::size_t count = std::size_t(h.width) * h.height;
+    // (the bytes its pixels take at the least — every one, or a packet of 128 a header and one pixel —: a file too short
+    // for its size is cut short, said before its pixels are made)
+    const std::size_t least = rle ? (count + 127) / 128 * (1 + bpp) : count * bpp;
+    if (at > b.size() || least > b.size() - at) broken("TGA", "its pixels are cut short");
     std::string pixels(count * out_channels, '\0');
     auto* out = reinterpret_cast<unsigned char*>(pixels.data());
     const auto put = [&](std::size_t i, const unsigned char* p) {

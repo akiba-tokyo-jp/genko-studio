@@ -263,7 +263,9 @@ private slots:
             {"zlib", QStringLiteral("| zlib")}, {"libpng", QStringLiteral("| libpng")}, {"libjpeg-turbo", QStringLiteral("| libjpeg-turbo")},
             {"libtiff", QStringLiteral("| libtiff")}, {"harfbuzz", QStringLiteral("| HarfBuzz")}, {"libwebp", QStringLiteral("| libwebp")},
             {"lcms2", QStringLiteral("| Little CMS 2")}, {"msvc-runtime", QStringLiteral("| Microsoft Visual C++")},
-            {"openexr", QStringLiteral("| OpenEXR")}, {"libavif", QStringLiteral("| libavif")}, {"aom", QStringLiteral("| libaom")}};
+            {"openexr", QStringLiteral("| OpenEXR")}, {"libavif", QStringLiteral("| libavif")}, {"aom", QStringLiteral("| libaom")},
+            // (PC4 F-a review: what vcpkg's OpenEXR and libavif build into the Windows program)
+            {"libdeflate", QStringLiteral("| libdeflate")}, {"openjph", QStringLiteral("| OpenJPH")}, {"libyuv", QStringLiteral("| libyuv")}};
         std::set<std::string> listed;
         std::map<std::string, std::string> relation;
         for (const Json& r : sbom["relationships"]) {
@@ -293,7 +295,7 @@ private slots:
 #ifdef _WIN32
             const bool here = id != "icu" && id != "xcb-extras";
 #else
-            const bool here = id != "msvc-runtime";
+            const bool here = id != "msvc-runtime" && id != "libdeflate" && id != "openjph" && id != "libyuv";
 #endif
             if (here) QVERIFY2(listed.contains(id), id.c_str());
         }
