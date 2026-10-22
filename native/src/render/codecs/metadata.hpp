@@ -12,7 +12,8 @@
 // themselves — PNG's eXIf and iTXt "XML:com.adobe.xmp" chunks (and acTL), JPEG's APP1 "Exif" and XMP segments, TIFF's
 // XMP tag (700) and its IFD chain, WebP's EXIF, XMP and ANMF chunks, GIF's image descriptors —, never by decoding the
 // pixels. Bytes that are cut short or broken give what was read before them (never an error: the pixels' reader says
-// whether the file opens). The codecs' decode does not fill its picture's metadata from these yet (F-a's writers keep it).
+// whether the file opens). The codecs' decode (PC4 F-a) fills its picture's EXIF and XMP from these, and its writers keep
+// them where the format holds them.
 
 namespace genko::render::codecs {
 

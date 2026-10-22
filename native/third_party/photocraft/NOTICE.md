@@ -180,6 +180,11 @@ PhotoCraft v0.2.0（`ad863217386440ca968fccc9bfff65ba24e61142`、MIT、同梱 `L
 - `crates/engine/src/file_cmds.rs`（151-170 行: JPEG の画質 0〜12 の換算、207-290 行: すべてを閉じる・その他を閉じる・復帰・コピーを保存・指定形式で開く、330-497 行: ファイル情報の XMP の読み書き `read_file_info`・`write_file_info`・`find_element`・`li_values`・`find_attr`）→ `native/src/core/file_info.cpp`（`file_info_from_xmp`・`xmp_title`・`write_xmp`）・`native/src/render/ops_formats.cpp`（`set_file_info`）・`native/src/formats/copy.cpp`（`jpeg_quality_of`）・`native/src/app/main_window_file.cpp`・`native/src/app/session.cpp`（`Session::revert`: 復帰は Genko の本の journal の 1 手にした）（PC4 F-b）。
 - `crates/engine/src/commands.rs`（213 行、`file.new` の引数: 幅・高さ・モード・深さ・背景・解像度・名前）→ `native/src/formats/open_file.cpp`（`new_image`）、`crates/engine/src/image_cmds.rs`（425 行、`image.duplicate` の名前と統合だけ）→ `duplicate_page`（PC4 F-b）。
 - `crates/engine/src/prefs.rs`（FileHandling: 最近使用したファイルの数の既定 20）→ `native/src/app/preferences.cpp`（PC4 F-b）。
+- `crates/codecs/src/codecs/pnm.rs`（1-290 行: Netpbm の読み書き。P1〜P7・PFM、PAM の種類、maxval の伸ばし方、書く種類の選び方）→ `native/src/render/codecs/pnm.cpp`（PC4 F-a）。
+- `crates/codecs/src/codecs/exr.rs`（1-133 行: 最初の有効な層、チャンネルを名前の終わりで合わせる、半精度か浮動小数、無損失の圧縮だけを書く）→ `native/src/render/codecs/exr.cpp`（OpenEXR の C++ の API で。PC4 F-a）。
+- `crates/codecs/src/codecs/png.rs`・`jpeg.rs`・`tiff.rs`・`webp.rs`（メタデータの塊の扱い: iCCP・eXIf・iTXt の XMP・tEXt と iTXt の選び方、APP2 の ICC の区切り方・APP1、TIFF の 7 つの文字のタグの名前、WebP の mux）→ `native/src/render/codecs/png.cpp`・`jpeg.cpp`・`tiff.cpp`・`webp.cpp`（libpng・libjpeg・libtiff・libwebp の上で作り直した。PC4 F-a）。
+- `crates/codecs/README.md` の能力の表と `src/format.rs` の `caps`（PC4 F-a で全部の形式を読み書きに）→ `native/src/render/codecs/format.cpp`。
+- `crates/codecs/tests/roundtrip.rs`・`metadata.rs`・`malformed.rs`・`common/mod.rs`（SplitMix64・合成の絵・PSNR・試験の EXIF・ICC・XMP）の試験の考え → `native/tests/unit/test_codecs.cpp`（PC4 F-a）。
 
 ## ブラシ・塗り・パターン・プリセット（brushes@1・patterns@1、PC4 節 E）
 

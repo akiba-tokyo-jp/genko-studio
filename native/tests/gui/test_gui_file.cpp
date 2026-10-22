@@ -36,6 +36,7 @@
 #include "formats/copy.hpp"
 #include "formats/pillow_save.hpp"
 #include "gui_support.hpp"
+#include "render/codecs/codecs.hpp"
 #include "render/image.hpp"
 #include "render/page.hpp"
 #include "render/png.hpp"
@@ -391,13 +392,22 @@ private slots:
         d.trigger("act_save_copy");
         QVERIFY(fs::exists(jpeg));
         QVERIFY(render::open_image(bytes_of(jpeg)).width() > 0);
-        // (an extension of a picture this build does not write yet: said, no folder of that name made)
-        const fs::path webp = path_of(d.dir.filePath("later.webp"));
-        d.save_as_target = qpath(webp);
-        d.answers->asked.clear();
-        d.trigger("act_save_copy");
-        QVERIFY(!fs::exists(webp) && !fs::exists(path_of(d.dir.filePath("later.webp.genko"))));
-        QCOMPARE(d.answers->asked.filter(QStringLiteral("まだ書けません")).size(), 1);
+        // (PC4 F-a: every format the codecs write — a WebP, an OpenEXR —, the page's copy written, no folder of that name
+        // made; 別名で保存… of one writes a copy too)
+        for (const char* name : {"later.webp", "later.exr"}) {
+            const fs::path picture = path_of(d.dir.filePath(QString::fromLatin1(name)));
+            d.save_as_target = qpath(picture);
+            d.answers->asked.clear();
+            d.trigger("act_save_copy");
+            QVERIFY2(fs::exists(picture) && !fs::exists(path_of(d.dir.filePath(QString::fromLatin1(name) + QStringLiteral(".genko")))), name);
+            QVERIFY2(render::codecs::detect(bytes_of(picture)) == render::codecs::from_extension(name), name);
+            QCOMPARE(d.answers->asked.filter(QStringLiteral("まだ書けません")).size(), 0);
+        }
+        const fs::path as_avif = path_of(d.dir.filePath("as.avif"));
+        d.save_as_target = qpath(as_avif);
+        d.trigger("act_save_as");
+        QVERIFY(fs::exists(as_avif) && render::codecs::detect(bytes_of(as_avif)) == render::codecs::Format::Avif);
+        QVERIFY(!d.window->session().path());  // (the book where it was: a copy)
     }
 
     // コンテンツを編集's tab (review P2-4): コピーを保存… and 複製… take the contents' page shown there, never the book's first

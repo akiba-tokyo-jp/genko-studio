@@ -44,12 +44,18 @@ if(CMAKE_HOST_WIN32)
     "zlib~zlib~zlib~Zlib~built-in" "libpng~libpng~libpng~libpng-2.0~built-in" "libjpeg-turbo~libjpeg-turbo~libjpeg_turbo~IJG AND BSD-3-Clause AND Zlib~built-in"
     "libtiff~libtiff~libtiff~libtiff~built-in" "harfbuzz~HarfBuzz~harfbuzz~MIT~built-in" "libwebp~libwebp~webp~BSD-3-Clause~built-in"
     "lcms2~Little CMS 2~lcms2~MIT~built-in"
+    "openexr~OpenEXR (with Imath)~openexr~BSD-3-Clause~built-in" "libavif~libavif~libavif~BSD-2-Clause AND Apache-2.0~built-in"
+    "aom~libaom~aom~BSD-2-Clause~built-in"
+    "libdeflate~libdeflate (OpenEXR's)~=1.26~MIT~built-in" "openjph~OpenJPH (OpenEXR's)~=0.32.0~BSD-2-Clause~built-in"
+    "libyuv~libyuv (libavif's)~=1916~BSD-3-Clause~built-in"
     "msvc-runtime~Microsoft Visual C++ runtime~=NOASSERTION~LicenseRef-MSVC-Redistributable~bundled:(^|/)(msvcp|vcruntime|concrt)[0-9_]*\\.dll$")
 else()
   list(APPEND _packages
     "zlib~zlib~zlib~Zlib~system" "libpng~libpng~libpng~libpng-2.0~system" "libjpeg-turbo~libjpeg-turbo~libjpeg_turbo~IJG AND BSD-3-Clause AND Zlib~system"
     "libtiff~libtiff~libtiff~libtiff~system" "harfbuzz~HarfBuzz~harfbuzz~MIT~system" "libwebp~libwebp~webp~BSD-3-Clause~system"
-    "lcms2~Little CMS 2~lcms2~MIT~system")
+    "lcms2~Little CMS 2~lcms2~MIT~system"
+    "openexr~OpenEXR (with Imath)~openexr~BSD-3-Clause~system" "libavif~libavif~libavif~BSD-2-Clause AND Apache-2.0~system"
+    "aom~libaom~aom~BSD-2-Clause~system")
 endif()
 
 # a file of the folder: its name, its id and its checksums (SPDX 2.3 asks for SHA1; SHA256 for the person)

@@ -40,3 +40,19 @@ else()
   pkg_check_modules(GENKO_LCMS2_PC REQUIRED IMPORTED_TARGET lcms2)
   set(GENKO_LCMS2 PkgConfig::GENKO_LCMS2_PC)
 endif()
+
+# PC4 F-a (the codecs): OpenEXR with Imath (OpenEXR files) and libavif with libaom (AVIF files; this build asks libavif
+# for aom by name, to read and to write). Linux: the distribution's packages through pkg-config (libopenexr-dev,
+# libavif-dev, libaom-dev); Windows: vcpkg's CMake packages (openexr, libavif[aom]).
+if(WIN32)
+  find_package(OpenEXR CONFIG REQUIRED)
+  set(GENKO_OPENEXR OpenEXR::OpenEXR)
+  find_package(libavif CONFIG REQUIRED)
+  set(GENKO_AVIF avif)
+else()
+  find_package(PkgConfig REQUIRED)
+  pkg_check_modules(GENKO_OPENEXR_PC REQUIRED IMPORTED_TARGET OpenEXR)
+  set(GENKO_OPENEXR PkgConfig::GENKO_OPENEXR_PC)
+  pkg_check_modules(GENKO_AVIF_PC REQUIRED IMPORTED_TARGET libavif)
+  set(GENKO_AVIF PkgConfig::GENKO_AVIF_PC)
+endif()

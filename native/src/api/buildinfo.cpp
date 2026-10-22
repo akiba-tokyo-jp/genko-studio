@@ -15,6 +15,7 @@
 #include <zlib.h>
 
 #include "core/version.hpp"
+#include "render/codecs/codecs.hpp"
 
 namespace genko::api {
 
@@ -74,6 +75,9 @@ nlohmann::json build_info() {
         {"harfbuzz", hb_version_string()},
         {"webp", webp_version()},
         {"lcms2", lcms_version()},
+        {"openexr", render::codecs::openexr_version()},
+        {"libavif", render::codecs::libavif_version()},
+        {"aom", render::codecs::aom_version()},
         {"nlohmann_json", std::to_string(NLOHMANN_JSON_VERSION_MAJOR) + "." + std::to_string(NLOHMANN_JSON_VERSION_MINOR) +
                               "." + std::to_string(NLOHMANN_JSON_VERSION_PATCH)},
     };

@@ -62,7 +62,10 @@ bool is_book_folder(const fs::path& path) {
 
 // 別名で保存… and コピーを保存…'s kinds of files: a .genko, or the page as one of formats::write_copy's.
 QString save_filters() {
-    return QStringLiteral("Genko の原稿 (*.genko);;Photoshop (*.psd);;TIFF (*.tif *.tiff);;PNG (*.png);;JPEG (*.jpg *.jpeg)");
+    // (PC4 F-a: and every format the codecs write)
+    return QStringLiteral("Genko の原稿 (*.genko);;Photoshop (*.psd);;TIFF (*.tif *.tiff);;PNG (*.png);;JPEG (*.jpg *.jpeg);;WebP (*.webp);;"
+                          "GIF (*.gif);;BMP (*.bmp);;TGA (*.tga);;ICO (*.ico);;Netpbm (*.pnm *.pbm *.pgm *.ppm *.pam *.pfm);;QOI (*.qoi);;"
+                          "OpenEXR (*.exr);;Radiance HDR (*.hdr);;AVIF (*.avif)");
 }
 
 // The extension of a path a picture is written to (lower case, no dot), "" for none (a .genko).
@@ -352,9 +355,10 @@ bool MainWindow::save_copy_to(const QString& chosen) {
     QString path = chosen;
     if (preferences::lowercase_extension() && !extension.isEmpty()) path = QFileInfo(chosen).path() + QLatin1Char('/') + QFileInfo(chosen).completeBaseName() + QLatin1Char('.') + QFileInfo(chosen).suffix().toLower();
     if (extension.isEmpty() && render::codecs::from_extension(QFileInfo(chosen).suffix().toStdString())) {
-        // (a picture's extension this build does not write yet — .webp, .bmp …: said, not made a book's folder of that name)
+        // (a picture's extension this build does not write — since PC4 F-a none of the codecs' formats —: said, not made a book's
+        // folder of that name)
         ask::warning(this, QStringLiteral("コピーを保存"),
-                     QStringLiteral("この形式（.%1）には、まだ書けません。PSD・TIFF・PNG・JPEG か、Genko の原稿（.genko）を選んでください。").arg(QFileInfo(chosen).suffix()));
+                     QStringLiteral("この形式（.%1）には、まだ書けません。画像の形式か、Genko の原稿（.genko）を選んでください。").arg(QFileInfo(chosen).suffix()));
         return false;
     }
     if (extension.isEmpty()) {

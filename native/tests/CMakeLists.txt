@@ -476,6 +476,11 @@ genko_test(test_contract_open SOURCES contract/test_contract_open.cpp DEPS genko
 # when it is opened, `genko inspect --file-info`.
 genko_test(test_contract_file_info SOURCES contract/test_contract_file_info.cpp DEPS genko_test_support genko_formats genko_render_ops
            LABELS contract TIMEOUT 900)
+# PC4 F-a (SPEC.md FILE-01, the codecs): `genko render --out` of GIF, PPM, PGM, PBM, TGA, ICO, QOI and AVIF; smart objects of
+# the new formats (formats@1) drawn on 8-bit, 16-bit, 32-bit, grey and CMYK pages; a file of each opened as a book;
+# コピーを保存… in each format; `genko --version` naming OpenEXR, libavif and libaom.
+genko_test(test_contract_codecs SOURCES contract/test_contract_codecs.cpp DEPS genko_test_support genko_formats genko_render_ops
+           LABELS contract TIMEOUT 900)
 # The text of a line (M4): tategaki and the text side of balloons (cells, kinsoku, glyphs, ruby, 傍点, the letters set
 # across and down, their effects, text on a path) against Python's (render_harness.py text-cases), byte for byte (a
 # warped line's pictures within ARCHITECTURE.md §9: Python's homography comes from numpy's SVD).

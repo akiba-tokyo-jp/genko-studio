@@ -39,6 +39,7 @@ struct Loss {
         DpiDropped,
         TextDropped,
         DimensionsExceeded,  // larger than the format holds (fatal: max_width × max_height)
+        Binarized,           // grey made white and black (a PBM)
     };
     Kind kind = Kind::LossyCompression;
     Format format = Format::Png;

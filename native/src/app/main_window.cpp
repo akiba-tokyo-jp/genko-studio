@@ -66,6 +66,7 @@
 #include "core/command_bus.hpp"
 #include "core/paths.hpp"
 #include "core/pyconv.hpp"
+#include "formats/copy.hpp"
 #include "render/brushes.hpp"
 #include "render/dabs/lines.hpp"
 #include "render/placed.hpp"
@@ -1367,11 +1368,16 @@ void MainWindow::save_as() {
         flash(QStringLiteral("元の画像は変えず、Genko の原稿（.genko）として保存します。画像に書くときは、ファイル → コピーを保存…"), 8000);
     }
     const QString path = ask::save_path(this, QStringLiteral("原稿を保存する場所"), suggested,
-                                        QStringLiteral("Genko の原稿 (*.genko);;Photoshop (*.psd);;TIFF (*.tif *.tiff);;PNG (*.png);;JPEG (*.jpg *.jpeg)"));
+                                        QStringLiteral("Genko の原稿 (*.genko);;Photoshop (*.psd);;TIFF (*.tif *.tiff);;PNG (*.png);;JPEG (*.jpg *.jpeg);;WebP (*.webp);;"
+                                                       "GIF (*.gif);;BMP (*.bmp);;TGA (*.tga);;ICO (*.ico);;Netpbm (*.pnm *.pbm *.pgm *.ppm *.pam *.pfm);;QOI (*.qoi);;"
+                                                       "OpenEXR (*.exr);;Radiance HDR (*.hdr);;AVIF (*.avif)"));
     if (!alive || path.isEmpty() || session_ != origin) return;
     const QString suffix = QFileInfo(path).suffix().toLower();
-    if (suffix == QLatin1String("psd") || suffix == QLatin1String("tif") || suffix == QLatin1String("tiff") || suffix == QLatin1String("png") ||
-        suffix == QLatin1String("jpg") || suffix == QLatin1String("jpeg")) {
+    // (a picture's format — PSD, TIFF, and since PC4 F-a every one the codecs write —: コピーを保存…)
+    const auto& pictures = formats::copy_extensions();
+    if (suffix == QLatin1String("tiff") || std::any_of(pictures.begin(), pictures.end(), [&suffix](std::string_view e) {
+            return suffix == QString::fromLatin1(e.data(), static_cast<qsizetype>(e.size()));
+        })) {
         save_copy_to(path);
         return;
     }

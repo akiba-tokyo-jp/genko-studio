@@ -59,6 +59,7 @@
 #include "render/shape_presets.hpp"
 #include "render/ops_registry.hpp"
 #include "render/page.hpp"
+#include "render/codecs/codecs.hpp"
 #include "render/png.hpp"
 #include "render/timelapse.hpp"
 #include "storage/doctor.hpp"
@@ -505,77 +506,42 @@ std::string picture_format(const std::string& ext) {
     if (ext == ".webp") return "webp";
     if (ext == ".bmp") return "bmp";
     if (ext == ".dib") return "dib";  // (BmpImagePlugin._dib_save: no file header)
+    // (PC4 F-a: through the codecs)
+    if (ext == ".gif") return "gif";
+    if (ext == ".ppm" || ext == ".pgm" || ext == ".pbm") return "pnm";
+    if (ext == ".tga") return "tga";
+    if (ext == ".ico") return "ico";
+    if (ext == ".qoi") return "qoi";
+    if (ext == ".avif") return "avif";
     return {};
 }
 
-// BmpImagePlugin._save: modes 1, L, P (with their palette), RGB and RGBA; rows bottom-up, each padded to 4 bytes;
-// 96 dpi as pixels a metre. Without the file header: _dib_save.
-std::string bmp_bytes(const render::Image& image, bool file_header = true) {
-    const std::string mode(image.mode());
-    int bits = 0;
-    std::vector<std::array<std::uint8_t, 3>> palette;
-    if (mode == "RGB") {
-        bits = 24;
-    } else if (mode == "RGBA") {
-        bits = 32;
-    } else if (mode == "L") {
-        bits = 8;
-        for (int i = 0; i < 256; ++i) palette.push_back({static_cast<std::uint8_t>(i), static_cast<std::uint8_t>(i), static_cast<std::uint8_t>(i)});
-    } else {
-        throw core::Error("io", "cannot write mode " + mode + " as BMP");
-    }
-    const auto le = [](std::string& out, std::uint64_t v, int n) {
-        for (int i = 0; i < n; ++i) out.push_back(static_cast<char>((v >> (8 * i)) & 0xff));
+// (PC4 F-a) The drawn picture as the codecs' picture: grey, grey and alpha, RGB, RGBA as they are, any other mode as RGBA.
+render::codecs::CodecImage codec_picture(const render::Image& image) {
+    using render::codecs::Layout;
+    const std::string_view mode = image.mode();
+    const auto w = static_cast<std::uint32_t>(image.width()), h = static_cast<std::uint32_t>(image.height());
+    const auto take = [&](const render::Image& p, Layout layout) {
+        return render::codecs::CodecImage::from_bytes(w, h, layout, render::codecs::Sample::U8, p.tobytes());
     };
-    const std::int64_t w = image.width(), h = image.height();
-    const std::int64_t stride = ((w * bits + 7) / 8 + 3) & ~std::int64_t{3};
-    const std::int64_t offset = 14 + 40 + static_cast<std::int64_t>(palette.size()) * 4;
-    const std::int64_t ppm = static_cast<std::int64_t>(96 * 39.3701 + 0.5);
-    std::string out;
-    if (file_header) {
-        if (offset + stride * h > 0xFFFFFFFFLL) throw core::PyValueError("File size is too large for the BMP format");
-        out += "BM";
-        le(out, static_cast<std::uint64_t>(offset + stride * h), 4);
-        le(out, 0, 4);
-        le(out, static_cast<std::uint64_t>(offset), 4);
+    if (mode == "L") return take(image, Layout::Gray);
+    if (mode == "LA") return take(image, Layout::GrayA);
+    if (mode == "RGB") return take(image, Layout::Rgb);
+    return take(image.mode() == "RGBA" ? image : image.convert("RGBA"), Layout::Rgba);
+}
+
+// (PC4 F-a) Pillow's ICO of a picture: one entry for each of its sizes (16, 24, 32, 48, 64, 128, 256) the picture is at
+// least as large as, each the picture made to fit it (thumbnail, Lanczos) — the picture itself when it is smaller than 16.
+std::string icon_bytes(const render::Image& image) {
+    std::vector<render::codecs::CodecImage> sizes;
+    for (const int side : {16, 24, 32, 48, 64, 128, 256}) {
+        if (side > image.width() || side > image.height()) continue;
+        render::Image frame = image.copy();
+        frame.thumbnail(render::Size{side, side}, render::Resample::Lanczos, std::nullopt);
+        sizes.push_back(codec_picture(frame));
     }
-    le(out, 40, 4);
-    le(out, static_cast<std::uint64_t>(w), 4);
-    le(out, static_cast<std::uint64_t>(h), 4);
-    le(out, 1, 2);
-    le(out, static_cast<std::uint64_t>(bits), 2);
-    le(out, 0, 4);
-    le(out, static_cast<std::uint64_t>(stride * h), 4);
-    le(out, static_cast<std::uint64_t>(ppm), 4);
-    le(out, static_cast<std::uint64_t>(ppm), 4);
-    le(out, palette.size(), 4);
-    le(out, palette.size(), 4);
-    for (const auto& c : palette) {
-        out.push_back(static_cast<char>(c[2]));
-        out.push_back(static_cast<char>(c[1]));
-        out.push_back(static_cast<char>(c[0]));
-        out.push_back(0);
-    }
-    const std::string raw = image.tobytes();
-    const int bands = image.bands();
-    for (std::int64_t y = h - 1; y >= 0; --y) {
-        std::string row;
-        row.reserve(static_cast<std::size_t>(stride));
-        for (std::int64_t x = 0; x < w; ++x) {
-            const char* px = raw.data() + (y * w + x) * bands;
-            if (bands == 1) {
-                row.push_back(px[0]);
-            } else {
-                row.push_back(px[2]);
-                row.push_back(px[1]);
-                row.push_back(px[0]);
-                if (bands == 4) row.push_back(px[3]);
-            }
-        }
-        row.resize(static_cast<std::size_t>(stride), '\0');
-        out += row;
-    }
-    return out;
+    if (sizes.empty()) sizes.push_back(codec_picture(image));
+    return render::codecs::encode_icon(sizes);
 }
 
 // Image.save(path) with Pillow's defaults for the format.
@@ -590,8 +556,23 @@ std::string picture_bytes(const render::Image& image, const std::string& format,
     if (format == "pdf") {
         return formats::pdf_bytes({image}, 72.0, core::path_to_utf8(out.stem()), core::utc_time_text("%Y%m%d%H%M%SZ"));
     }
-    if (format == "bmp") return bmp_bytes(image);
-    if (format == "dib") return bmp_bytes(image, false);
+    if (format == "bmp") return render::codecs::pillow_bmp_bytes(image);
+    if (format == "dib") return render::codecs::pillow_bmp_bytes(image, false);
+    // (PC4 F-a: the formats Pillow's rarer writers wrote, through the codecs — one 8-bit picture; AVIF at Pillow's
+    // quality 75)
+    if (format == "ico") return icon_bytes(image);
+    if (format == "pnm") {  // (Pillow's PpmImagePlugin: whatever the extension, P4 of "1", P5 of "L", P6 of RGB and RGBA)
+        render::codecs::EncodeOptions options;
+        if (image.mode() == "1") options.pnm_kind = render::codecs::PnmKind::Bitmap;
+        const bool grey = image.mode() == "1" || image.mode() == "L";
+        return render::codecs::encode(codec_picture(grey ? image.convert("L") : image.mode() == "RGB" ? image : image.convert("RGB")),
+                                      render::codecs::Format::Pnm, options);
+    }
+    if (format == "gif" || format == "tga" || format == "qoi" || format == "avif") {
+        render::codecs::EncodeOptions options;
+        if (format == "avif") options.jpeg_quality = 75;
+        return render::codecs::encode(codec_picture(image), *render::codecs::from_id(format), options);
+    }
     if (format == "webp") {
         // (one picture: WebPEncode, lossy, quality 80, method 4 — what Image.save writes)
         const std::filesystem::path scratch = out.parent_path() / (".genko-render-" + core::new_id() + ".webp");
@@ -690,8 +671,9 @@ int render_command(const QStringList& args, bool ascii) {
         if (std::find(std::begin(kPillowSaves), std::end(kPillowSaves), ext) == std::end(kPillowSaves)) {
             return fail("unknown file extension: " + ext, "value", ascii, 1);
         }
-        // (the formats a picture of a page is saved in: JPEG, TIFF, PDF, WebP and BMP as Image.save writes them; Pillow's
-        // rarer writers — GIF's own palette, PPM, TGA, ICO, JPEG 2000… — are not in the C++ build)
+        // (the formats a picture of a page is saved in: JPEG, TIFF, PDF, WebP and BMP as Image.save writes them; GIF, PPM,
+        // PGM, PBM, TGA, ICO, QOI and AVIF through the codecs (PC4 F-a); Pillow's other writers — JPEG 2000, ICNS, SGI, IM,
+        // PCX, EPS, XBM… — are not in the C++ build)
         if (picture_format(ext).empty()) throw render::NotYetPorted("format:" + ext.substr(1));
     }
 

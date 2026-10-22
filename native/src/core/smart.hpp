@@ -60,9 +60,10 @@ inline constexpr std::array<FileFormat, 8> kFileFormats{{{".png", "png"},
                                                          {".gif", "gif"},
                                                          {".psd", "psd"},
                                                          {".psb", "psd"}}};
-// PC4 節 F: the files the contents of a book can be that a smart object is not placed from yet — formats@1's (F-a reads
-// them) and camera-raw@1's (format "raw": F-e reads them with LibRaw) — known to the reader and the checks, so a book that
-// holds them is read; suffix_of_name does not give them until their group reads them (then they move to kFileFormats).
+// PC4 節 F: the files of the new formats — formats@1's (TGA, ICO, Netpbm, QOI, OpenEXR, Radiance HDR, AVIF: read by the
+// codecs since F-a) and camera-raw@1's (format "raw": F-e reads them with LibRaw) — known to the reader and the checks, so a
+// book that holds them is read; a book's contents of one name their extension (core/smart.cpp uses_formats). Since F-a
+// format_of_suffix and suffix_of_name give formats@1's too (a smart object is placed from one); RAW's when F-e reads them.
 inline constexpr std::array<FileFormat, 33> kLaterFileFormats{{{".tga", "tga"},  {".ico", "ico"},  {".pnm", "pnm"},  {".pbm", "pnm"},
                                                                {".pgm", "pnm"},  {".ppm", "pnm"},  {".pam", "pnm"},  {".pfm", "pnm"},
                                                                {".qoi", "qoi"},  {".exr", "exr"},  {".hdr", "hdr"},  {".avif", "avif"},
@@ -77,7 +78,7 @@ std::optional<std::string> later_format_of_suffix(std::string_view suffix);
 // The suffix a file's name gives it (its extension in lower case; .jpeg as .jpg, .tiff as .tif), or none for a kind of
 // file a smart object cannot hold.
 std::optional<std::string> suffix_of_name(std::string_view name);
-// The format of a suffix (kFileFormats), or none.
+// The format of a suffix a smart object is placed from (kFileFormats, and kLaterFileFormats but RAW's — PC4 F-a), or none.
 std::optional<std::string> format_of_suffix(std::string_view suffix);
 
 // A smart object's matrix: its contents' mm → the page's mm (x' = a x + c y + e, y' = b x + d y + f: transform_area's

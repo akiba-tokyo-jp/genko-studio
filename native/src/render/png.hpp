@@ -42,8 +42,11 @@ Image read_png(std::string_view bytes, const PngLimits& limits = {});
 // GIF87a/89a first-frame P/L pixels: global/local palette, transparency, frame extents and interlace.
 // Other GIF metadata extensions are skipped as Pillow does; the first frame is decoded completely.
 // PSD as one picture (its merged picture, as Pillow's PsdImagePlugin: render/psd_image.hpp), TIFF and WebP
-// (render/tiff_webp.hpp: a TIFF whose samples lie in separate planes throws NotYetPorted("image_format"));
-// anything else core::Error("unidentified_image").
+// (render/tiff_webp.hpp: a TIFF whose samples lie in separate planes throws NotYetPorted("image_format")); PC4 F-a: TGA,
+// ICO, Netpbm (PBM, PGM, PPM, PAM, PFM), QOI, OpenEXR, Radiance HDR and AVIF through the codecs (render/codecs:
+// codecs::eight_bit of their picture — grey "L", "LA", "RGB", "RGBA", "CMYK"; deeper samples rounded, OpenEXR's and
+// Radiance HDR's linear light given sRGB's curve —; the limits' pixels and side as these); other formats Pillow opens
+// (JPEG 2000, ICNS, SGI, DDS…) NotYetPorted("image_format"); anything else core::Error("unidentified_image").
 Image open_image(std::string_view bytes, const PngLimits& limits = {});
 // Image.open(bytes).size: a PNG's from its chunks before the image data, a JPEG's, BMP's or GIF's from its header, a
 // PSD's from its header and sections (psd_image_size; one of Lab colours too, whose size Pillow reads), read as Pillow

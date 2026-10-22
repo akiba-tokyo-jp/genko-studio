@@ -719,7 +719,7 @@ private slots:
                  QStringLiteral("素材の画像を読み込めません（壊れているか、読めない形式の画像です）"));
         QCOMPARE(error(std::string("the finish's line_threshold is not a number")),
                  QStringLiteral("仕上げの線とみなす濃さは数で指定します（この絵は描けません）"));
-        QCOMPARE(genko::wording::unported_element(QStringLiteral("image_format")), QStringLiteral("この版では読めない形式の画像（PPM・ICO・JPEG 2000 など）"));
+        QCOMPARE(genko::wording::unported_element(QStringLiteral("image_format")), QStringLiteral("この版では読めない形式の画像（JPEG 2000・ICNS・DDS など）"));
         QCOMPARE(error(std::string("the screen is too coarse for this resolution (22472 px a side)")),
                  QStringLiteral("網点が粗すぎて、この解像度では作れません（線数を上げるか、解像度を下げてください）"));
         QCOMPARE(error(std::string("ops[0] open_request: a count past 2**64 - 1 is too large for this build (Python's int has no bound)")),
@@ -740,6 +740,33 @@ private slots:
                  QStringLiteral("承認の依頼を変えられるのは人だけです"));
         QCOMPARE(error(std::string("ops[0] set_studio: only a person can change the style fixed by the pilot page (style.locked)")),
                  QStringLiteral("試し描きのページで決めた絵柄（style.locked）を変えられるのは人だけです"));
+    }
+
+    void codecRefusalsInThePersonsWords() {
+        // (PC4 F-a: the codecs' refusals — render/codecs — as the person reads them; a PSD's own still a PSD's)
+        using genko::wording::error;
+        QCOMPARE(error(std::string("the picture is too large (20000×20000 pixels; at most 120000000 pixels)")),
+                 QStringLiteral("画像が大きすぎて読めません（20000×20000 px。120000000 画素まで）"));
+        QCOMPARE(error(std::string("the picture is too large (200000×4 pixels; at most 100000×100000)")),
+                 QStringLiteral("画像が大きすぎて読めません（200000×4 px。幅 100000・高さ 100000 px まで）"));
+        QCOMPARE(error(std::string("the picture is too large to read at once (2400000000 bytes; at most 2147483648)")),
+                 QStringLiteral("画像が大きすぎて、一度に読めません（作業に使える記憶の上限 2 GiB を超えます）"));
+        QCOMPARE(error(std::string("the OpenEXR file is too large to read")), QStringLiteral("OpenEXR の画像が大きすぎて読めません"));
+        QCOMPARE(error(std::string("the OpenEXR file has too many channels (1000; at most 256)")),
+                 QStringLiteral("OpenEXR のファイルのチャンネルかタイルが多すぎて読めません"));
+        QCOMPARE(error(std::string("the TGA file cannot be read (its pixels are cut short)")),
+                 QStringLiteral("TGA のファイルが壊れているか途中で切れていて、読めません"));
+        QCOMPARE(error(std::string("the Radiance HDR file cannot be read (its header)")),
+                 QStringLiteral("Radiance HDR のファイルが壊れているか途中で切れていて、読めません"));
+        QCOMPARE(error(std::string("the file is not a QOI file")), QStringLiteral("QOI のファイルではありません"));
+        QCOMPARE(error(std::string("the file is not an OpenEXR file")), QStringLiteral("OpenEXR のファイルではありません"));
+        QCOMPARE(error(std::string("ICO holds at most 256×256 pixels")), QStringLiteral("ICO には 256×256 px までしか書けません"));
+        QCOMPARE(error(std::string("cannot write AVIF: Encoding of color planes failed")), QStringLiteral("AVIF のファイルを書けませんでした"));
+        QCOMPARE(error(std::string("cannot write WebP (libwebp's error 6)")), QStringLiteral("WebP のファイルを書けませんでした"));
+        // (the PSD's: as before)
+        QCOMPARE(error(std::string("ops[0] import_psd: the picture is too large (200000×200000 pixels; at most 120000000)")),
+                 QStringLiteral("PSD の絵が大きすぎて、レイヤーにできません"));
+        QCOMPARE(error(std::string("the picture is too large to read")), QStringLiteral("絵が大きすぎて読めません"));
     }
 
     void bookRefusalsInThePersonsWords() {

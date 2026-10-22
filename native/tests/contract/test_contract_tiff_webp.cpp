@@ -201,7 +201,7 @@ private slots:
         QCOMPARE(webps, 5);
     }
 
-    void aTiffInPlanesIsReadAndAPpmIsSaidNotRead() {
+    void aTiffInPlanesIsReadAndAJpeg2000IsSaidNotRead() {
         // the samples in three planes (PlanarConfiguration 2): read as Pillow reads them (M7), the pixels Pillow 12.3.0's
         const std::string planar = genko::core::a2b_base64(kPlanar);
         QVERIFY(render::tiff_signature(planar) && !render::unported_image_format(planar));
@@ -209,16 +209,23 @@ private slots:
         QCOMPARE(std::string(read.mode()), std::string("RGB"));
         QCOMPARE(render::picture_size(planar).width, 2);
         QCOMPARE(read.tobytes(), std::string("\xff\0\0\0\xff\0\0\0\xff\xff\0\0", 12));
-        // a format Pillow opens that this build does not read (a PPM): said so by name, not "no picture"
-        const std::string ppm = genko::core::a2b_base64("UDYKMiAyCjI1NQr/AAAA/wAAAP////8=");
-        QVERIFY(render::unported_image_format(ppm));
+        // a format Pillow opens that this build does not read (JPEG 2000): said so by name, not "no picture" — a PPM is read
+        // since PC4 F-a (the codecs: red, green, blue, white)
+        const std::string jp2 = genko::core::a2b_base64("AAAADGpQICANCocKAAAAFGZ0eXBqcDIgAAAAAGpwMiA=");
+        QVERIFY(render::unported_image_format(jp2));
         bool said = false;
         try {
-            (void)render::open_image(ppm, render::kPillowOpenLimits);
+            (void)render::open_image(jp2, render::kPillowOpenLimits);
         } catch (const render::NotYetPorted& e) {
             said = e.element() == "image_format";
         }
         QVERIFY(said);
+        const std::string ppm = genko::core::a2b_base64("UDYKMiAyCjI1NQr/AAAA/wAAAP////8=");
+        QVERIFY(!render::unported_image_format(ppm));
+        const render::Image ppm_read = render::open_image(ppm, render::kPillowOpenLimits);
+        QCOMPARE(std::string(ppm_read.mode()), std::string("RGB"));
+        QCOMPARE(ppm_read.tobytes(), std::string("\xff\0\0\0\xff\0\0\0\xff\xff\xff\xff", 12));
+        QCOMPARE(render::picture_size(ppm).width, 2);
         // bytes that only begin as a TIFF or a WebP are no picture (as Pillow cannot identify them), not "not yet read"
         for (const std::string& broken : {std::string("II*\0", 4) + std::string(60, '\x01'), std::string("RIFF\x10\0\0\0WEBPVP8 ", 16) + std::string(8, '\0'),
                                           std::string("RIFF\x10\0\0\0WEBPABCD", 16)}) {

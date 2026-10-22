@@ -22,6 +22,7 @@
 #include <cstring>
 #include <fstream>
 #include <limits>
+#include <optional>
 #include <vector>
 
 #include <jpeglib.h>
@@ -29,6 +30,7 @@
 
 #include "core/error.hpp"
 #include "core/paths.hpp"
+#include "render/codecs/codecs.hpp"
 #include "render/imaging.hpp"
 #include "render/not_yet_ported.hpp"
 
@@ -139,9 +141,18 @@ bool other_image_format(std::string_view b) {
     return starts("\xff\xd8\xff") || starts("GIF87a") || starts("GIF89a") || starts("BM") || starts("8BPS");
 }
 
-// Formats Pillow opens that this build does not read (known by their first bytes): the netpbm family (PBM, PGM, PPM,
-// PAM), ICO, ICNS, JPEG 2000, QOI, SGI, DDS and AVIF. A picture in one is said "not read by this build"
-// (NotYetPorted("image_format")), not "no picture" (M7: a recorded limit).
+// Formats Pillow opens that this build does not read (known by their first bytes): ICNS, JPEG 2000, SGI, DDS, a cursor
+// (CUR), Pillow's own netpbm variants (P0, Py) and a HEIF that is not an AVIF. A picture in one is said "not read by this
+// build" (NotYetPorted("image_format")), not "no picture" (M7: a recorded limit). The netpbm family (PBM, PGM, PPM, PAM,
+// PFM), ICO, QOI and AVIF — and TGA, OpenEXR and Radiance HDR, which Pillow does not open by their first bytes — are read
+// by the codecs since PC4 F-a (codecs_format), before this is asked.
+// (PC4 F-a review) The text chunks (tEXt, zTXt, iTXt), which these readers do not use, passed over: libpng would inflate
+// each — up to 8 MB — and hold them, as many as 1000 (8 GB from a file of a few MB). The pixels are the same.
+void pass_over_text(png_structp png) {
+    static constexpr png_byte kText[] = {'t', 'E', 'X', 't', '\0', 'z', 'T', 'X', 't', '\0', 'i', 'T', 'X', 't', '\0'};
+    png_set_keep_unknown_chunks(png, PNG_HANDLE_CHUNK_NEVER, kText, 3);
+}
+
 bool pillow_only_format(std::string_view b) {
     const auto starts = [&](std::string_view p) { return b.substr(0, p.size()) == p; };
     // (each as the plugin's _accept: netpbm P0–P6, Pf and Py; ICO; CUR; …; AVIF's coding and container brands)
@@ -154,6 +165,14 @@ bool pillow_only_format(std::string_view b) {
     if (b.size() < 12 || b.substr(4, 4) != "ftyp") return false;
     const std::string_view brand = b.substr(8, 4);
     return brand == "avif" || brand == "avis" || brand == "mif1" || brand == "msf1";
+}
+
+// PC4 F-a: a format the codecs read themselves (render/codecs: TGA, ICO, Netpbm, QOI, OpenEXR, Radiance HDR, AVIF), known by
+// its first bytes (a TGA by its header) — asked once the formats this file reads are not the bytes'.
+std::optional<codecs::Format> codecs_format(std::string_view bytes) {
+    const auto format = codecs::detect(bytes);
+    if (format && codecs::read_here(*format)) return format;
+    return std::nullopt;
 }
 
 // PngImagePlugin._MODES
@@ -422,6 +441,7 @@ Image read_png(std::string_view bytes, const PngLimits& limits) {
     if (guard.info == nullptr) throw core::Error("memory", "cannot read PNG");
     png_set_read_fn(guard.png, &state, on_read);
     png_set_user_limits(guard.png, 0x7fffffffU, 0x7fffffffU);
+    pass_over_text(guard.png);
     png_set_benign_errors(guard.png, 1);
 #ifdef PNG_SKIP_sRGB_CHECK_PROFILE
     png_set_option(guard.png, PNG_SKIP_sRGB_CHECK_PROFILE, PNG_OPTION_ON);
@@ -533,6 +553,7 @@ bool unported_image_format(std::string_view bytes) {
     if (bytes.substr(0, 4) == "8BPS") return false;  // (a PSD of Lab colours too: as Pillow, through Little CMS)
     if (tiff_signature(bytes)) return tiff_unported(bytes);  // (render/tiff_webp: the samples in separate planes, from its directory)
     if (webp_signature(bytes)) return false;
+    if (codecs_format(bytes)) return false;  // (PC4 F-a: read by the codecs)
     return other_image_format(bytes) || pillow_only_format(bytes);  // (Pillow would open these; this build does not)
 }
 
@@ -544,6 +565,18 @@ Size picture_size(std::string_view bytes) {
         if (bytes.substr(0, 4) == "8BPS") return psd_image_size(bytes, kPillowOpenLimits);  // (a Lab one's too)
         if (tiff_signature(bytes)) return tiff_size(bytes, kPillowOpenLimits);
         if (webp_signature(bytes)) return webp_size(bytes, kPillowOpenLimits);
+        if (codecs_format(bytes)) {  // (PC4 F-a: the codecs' formats, from their headers)
+            if (const auto size = codecs::header_size(bytes)) {
+                const std::int64_t pixels = static_cast<std::int64_t>(size->first) * static_cast<std::int64_t>(size->second);
+                if (pixels > kPillowOpenLimits.max_pixels) {
+                    throw core::Error("image_too_large", "Image size (" + std::to_string(pixels) + " pixels) exceeds limit of " +
+                                                             std::to_string(kPillowOpenLimits.max_pixels) +
+                                                             " pixels, could be decompression bomb DOS attack.");
+                }
+                if (size->first > 0x7fffffffU || size->second > 0x7fffffffU) throw core::Error("image_too_large", "image is too wide or too tall");
+                return Size{static_cast<int>(size->first), static_cast<int>(size->second)};
+            }
+        }
         return open_image(bytes, kPillowOpenLimits).size();  // (NotYetPorted, or not a picture)
     }
     ReadState state;
@@ -556,6 +589,7 @@ Size picture_size(std::string_view bytes) {
     if (guard.info == nullptr) throw core::Error("memory", "cannot read PNG");
     png_set_read_fn(guard.png, &state, on_read);
     png_set_user_limits(guard.png, 0x7fffffffU, 0x7fffffffU);
+    pass_over_text(guard.png);
     png_set_benign_errors(guard.png, 1);
 #ifdef PNG_SKIP_sRGB_CHECK_PROFILE
     png_set_option(guard.png, PNG_SKIP_sRGB_CHECK_PROFILE, PNG_OPTION_ON);
@@ -585,6 +619,14 @@ Image open_image(std::string_view bytes, const PngLimits& limits) {
     if (bytes.substr(0, 4) == "8BPS") return read_psd_image(bytes, limits);  // (Lab: a "LAB" picture, as Pillow's)
     if (tiff_signature(bytes)) return read_tiff(bytes, limits);
     if (webp_signature(bytes)) return read_webp(bytes, limits);
+    if (const auto format = codecs_format(bytes)) {
+        // (PC4 F-a: read by the codecs at its depth, then as the drawing's 8-bit picture — linear light given sRGB's curve)
+        codecs::Limits within = codecs::Limits::none();
+        within.max_pixels = limits.max_pixels;
+        if (limits.max_side > 0) within.max_width = within.max_height = limits.max_side;
+        within.max_alloc = codecs::kAllocBudget;
+        return codecs::eight_bit(codecs::decode_as(*format, bytes, within), codecs::linear_light(*format));
+    }
     if (unported_image_format(bytes)) throw NotYetPorted("image_format");
     throw core::Error("unidentified_image", "cannot identify image file");
 }

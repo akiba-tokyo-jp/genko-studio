@@ -681,6 +681,8 @@ std::optional<std::string> format_of_suffix(std::string_view suffix) {
     for (const FileFormat& f : kFileFormats) {
         if (f.suffix == suffix) return std::string(f.format);
     }
+    // (PC4 F-a: formats@1's, read by the codecs; RAW's when F-e reads them)
+    if (auto later = later_format_of_suffix(suffix); later && *later != "raw") return later;
     return std::nullopt;
 }
 
