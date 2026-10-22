@@ -255,9 +255,10 @@ private slots:
         QCOMPARE(edit.mid(0, 4), (QStringList{QStringLiteral("元に戻す"), QStringLiteral("やり直す"), QStringLiteral("履歴…"), QStringLiteral("|")}));
         const QStringList view = menu_items(w, QStringLiteral("表示"));
         const int guides = view.indexOf(QStringLiteral("仕上がり線・基本枠を表示"));
-        // (PC3 B1: 選択範囲の境界線 — Photoshop's 表示 → 表示・非表示 → 選択範囲の境界線 — after 目盛りを表示)
-        QCOMPARE(view.mid(guides, 5), (QStringList{QStringLiteral("仕上がり線・基本枠を表示"), QStringLiteral("スマホの画面の範囲を表示"),
-                                                   QStringLiteral("目盛りを表示"), QStringLiteral("選択範囲の境界線"),
+        // (PC3 B1: 選択範囲の境界線 — Photoshop's 表示 → 表示・非表示 → 選択範囲の境界線 — after 目盛りを表示; PC4 E1: ブラシ
+        // プレビュー — Photoshop's 表示 → 表示・非表示 → ブラシプレビュー — after it)
+        QCOMPARE(view.mid(guides, 6), (QStringList{QStringLiteral("仕上がり線・基本枠を表示"), QStringLiteral("スマホの画面の範囲を表示"),
+                                                   QStringLiteral("目盛りを表示"), QStringLiteral("選択範囲の境界線"), QStringLiteral("ブラシプレビュー"),
                                                    QStringLiteral("前のページを透かす（オニオンスキン）")}));
         const QStringList pages = menu_items(w, QStringLiteral("ページ"));
         // (Python's row: 台詞の検索・置換…, 本の形でプレビュー… (M6), 入稿前の点検)

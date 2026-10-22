@@ -392,8 +392,8 @@ private slots:
         // drawing tools and line editing (test_gui_paint), the effect lines and the material tool (test_gui_effects), the
         // text tool (test_gui_lines); PC3 C-a's three path tools (test_gui_paths); the crop tool (PC3 C-e, test_gui_page_size);
         // PC3 B4's four retouching tools (test_gui_retouch); PC3 C-b's five shape tools besides 長方形ツール (test_gui_shapes)
-        // PC3 B3's オブジェクト選択ツール and クイック選択ツール (test_gui_select_mask)
-        QCOMPARE(w->tools_group()->actions().size(), 43);
+        // PC3 B3's オブジェクト選択ツール and クイック選択ツール (test_gui_select_mask); PC4 E1's 鉛筆ツール (test_gui_brushes)
+        QCOMPARE(w->tools_group()->actions().size(), 44);
     }
 
     // PC4 F-0 (SPEC FILE-01; 節 F 5.1・5.2): ファイル in Photoshop's order and names — the book's export is 書き出し ▸
