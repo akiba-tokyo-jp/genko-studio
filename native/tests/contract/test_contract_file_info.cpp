@@ -423,9 +423,12 @@ private slots:
         write_book(doc, dir);
         const fs::path plain_dir = at("plain-export.genko");
         write_book(small_book(), plain_dir);
-        // (a PSD: none, its resource 1060 read straight)
-        const auto check = [&](const std::string& bytes, std::optional<codecs::Format> format, bool carries, const std::string& what) {
-            const std::optional<std::string> xmp = format ? codecs::read_metadata(*format, bytes).xmp : psd_xmp(bytes);
+        // ("png", "jpg", "tif" by this build's reader; "psd" by its resource 1060, read straight)
+        const auto check = [&](const std::string& bytes, std::string_view kind, bool carries, const std::string& what) {
+            const std::optional<std::string> xmp = kind == "psd"   ? psd_xmp(bytes)
+                                                   : kind == "png" ? codecs::read_metadata(codecs::Format::Png, bytes).xmp
+                                                   : kind == "tif" ? codecs::read_metadata(codecs::Format::Tiff, bytes).xmp
+                                                                    : codecs::read_metadata(codecs::Format::Jpeg, bytes).xmp;
             QVERIFY2(xmp.has_value() == carries, what.c_str());
             if (!carries) return;
             QVERIFY2(same_items(core::file_info_from_xmp(*xmp), info), what.c_str());
@@ -433,17 +436,21 @@ private slots:
         };
         for (const bool with_info : {true, false}) {
             const fs::path book = with_info ? dir : plain_dir;
-            for (const char* format : {"png", "tiff", "psd", "sns"}) {
+            for (const char* format : {"png", "tiff", "psd", "sns", "sns-jpeg"}) {
                 const QString out = QString::fromStdString(core::path_to_utf8(book.parent_path() / (book.stem().string() + "-" + format)));
-                const auto made = genko::test::run_genko({QStringLiteral("export"), QString::fromStdString(core::path_to_utf8(book)), out, QStringLiteral("--format"),
-                                                          QString::fromLatin1(format), QStringLiteral("--dpi"), QStringLiteral("72"), QStringLiteral("--json")});
+                const bool jpeg = std::string_view(format) == "sns-jpeg";
+                QStringList args{QStringLiteral("export"), QString::fromStdString(core::path_to_utf8(book)), out, QStringLiteral("--format"),
+                                 jpeg ? QStringLiteral("sns") : QString::fromLatin1(format), QStringLiteral("--dpi"), QStringLiteral("72"), QStringLiteral("--json")};
+                if (jpeg) args << QStringLiteral("--jpeg");
+                const auto made = genko::test::run_genko(args);
                 QVERIFY2(made.exit_code == 0, qPrintable(made.described()));
                 const Json files = genko::test::one_line(made.out)["files"];
                 QVERIFY(!files.empty());
                 const std::string path = files[0].get<std::string>();
                 const std::string_view f(format);
-                const std::optional<codecs::Format> kind = f == "png" ? std::optional(codecs::Format::Png) : f == "tiff" ? std::optional(codecs::Format::Tiff)
-                                                           : f == "psd" ? std::nullopt : std::optional(codecs::Format::Jpeg);
+                // (sns: a PNG by default)
+                const std::string_view kind = f == "tiff" ? "tif" : f.starts_with("sns") ? (path.ends_with(".jpg") ? "jpg" : "png") : f;
+                if (jpeg) QVERIFY2(path.ends_with(".jpg"), path.c_str());
                 check(genko::test::read_bytes(QString::fromStdString(path)), kind, with_info, std::string(format) + (with_info ? " with" : " without"));
             }
         }
@@ -456,16 +463,14 @@ private slots:
                                          : fs::path(name).extension().string() == ".jpg" ? "jpg"
                                          : fs::path(name).extension().string() == ".tif" ? "tif"
                                                                                           : "psd";
-            const std::optional<codecs::Format> kind = ext == "png" ? std::optional(codecs::Format::Png) : ext == "jpg" ? std::optional(codecs::Format::Jpeg)
-                                                       : ext == "tif" ? std::optional(codecs::Format::Tiff) : std::nullopt;
-            check(bytes, kind, true, name);
+            check(bytes, ext, true, name);
             if (ext != "psd") QVERIFY(codecs::detect(bytes) == (ext == "png" ? codecs::Format::Png : ext == "jpg" ? codecs::Format::Jpeg : codecs::Format::Tiff));
         }
         // (a merged PSD copy too)
         formats::CopyOptions flat;
         flat.layers = false;
         (void)formats::write_copy(doc, 0, at("flat.psd"), flat);
-        check(genko::test::read_bytes(qat("flat.psd")), std::nullopt, true, "flat.psd");
+        check(genko::test::read_bytes(qat("flat.psd")), "psd", true, "flat.psd");
     }
 
     // The reference's readers (Pillow, psd-tools) find the same packet in the files written.

@@ -35,6 +35,7 @@
 #include "render/image.hpp"
 #include "render/png.hpp"
 #include "storage/fsutil.hpp"
+#include "testsupport.hpp"
 
 using namespace gui_test;
 using genko::app::CloseGuard;
