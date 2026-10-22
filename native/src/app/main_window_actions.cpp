@@ -871,8 +871,8 @@ void MainWindow::build_docks() {
     quick_scroll->setWidgetResizable(true);
     quick_scroll->setFrameShape(QFrame::NoFrame);
     quick_scroll->setHorizontalScrollBarPolicy(Qt::ScrollBarAsNeeded);  // (its buttons reachable on a narrow panel too)
+    quick_dock_->setWidget(quick_scroll);  // (in the dock first, then the panel in it: styled once — build_tool_settings)
     quick_scroll->setWidget(quick_access_);
-    quick_dock_->setWidget(quick_scroll);
     quick_dock_->setFeatures(navigator_dock_->features());
     addDockWidget(Qt::LeftDockWidgetArea, quick_dock_);
     tabifyDockWidget(navigator_dock_, quick_dock_);
@@ -910,8 +910,8 @@ void MainWindow::build_docks() {
     layer_scroll->setWidgetResizable(true);
     layer_scroll->setFrameShape(QFrame::NoFrame);
     layer_scroll->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
+    layers->setWidget(layer_scroll);  // (in the dock first, then the panel in it: styled once — build_tool_settings)
     layer_scroll->setWidget(layer_panel_);
-    layers->setWidget(layer_scroll);
     layers->setMinimumWidth(200);
     layers->setFeatures(QDockWidget::DockWidgetMovable | QDockWidget::DockWidgetFloatable | QDockWidget::DockWidgetClosable);
     addDockWidget(Qt::RightDockWidgetArea, layers);

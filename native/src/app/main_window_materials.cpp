@@ -139,8 +139,8 @@ void MainWindow::build_material_dock() {
     scroll->setWidgetResizable(true);
     scroll->setFrameShape(QFrame::NoFrame);
     scroll->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
+    materials_dock_->setWidget(scroll);  // (in the dock first, then the panel in it: styled once — build_tool_settings)
     scroll->setWidget(materials_);
-    materials_dock_->setWidget(scroll);
     materials_dock_->setMinimumWidth(200);
     // (for occasional work: its tab has a close button and it joins the row of tabs when opened)
     materials_dock_->setFeatures(QDockWidget::DockWidgetMovable | QDockWidget::DockWidgetFloatable | QDockWidget::DockWidgetClosable);
