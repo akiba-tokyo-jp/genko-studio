@@ -103,15 +103,20 @@ std::vector<fs::path> export_pack(const core::Document& episode, const fs::path&
 // formats/psd_text.hpp): the lines kept as text layers (editable) — the editable way checks every page written before
 // it draws any (PsdTextRefused, strict) and says what it did in `report`; by default the lines are pictures, Python's
 // file byte for byte.
+// PC4 F-d (SPEC.md FILE-01「PSD・PSB」): with what the page and its layers keep of a PSD (psd-keep@1) after what this
+// writer makes; `psb` a PSB (Photoshop's large document: version 2, 8-byte lengths, 4-byte row counts) — a page past
+// 30000 pixels a side, or whose file is past 2 GiB, is no PSD: core::Error("psd_too_large", …) says to write a PSB.
 fs::path export_page_psd(const core::Document& episode, const core::Page& page, const fs::path& dest,
-                         std::optional<std::int64_t> dpi = std::nullopt, const PsdText& text = {}, PsdTextReport* report = nullptr);
-// psd.export_psd_pages: one PSD a page in the folder `dest` (<stem>_p001.psd, …).
+                         std::optional<std::int64_t> dpi = std::nullopt, const PsdText& text = {}, PsdTextReport* report = nullptr, bool psb = false);
+// psd.export_psd_pages: one PSD a page in the folder `dest` (<stem>_p001.psd, …; a PSB each: .psb).
 std::vector<fs::path> export_psd_pages(const core::Document& episode, const fs::path& dest, std::optional<std::int64_t> dpi = std::nullopt,
-                                       const PsdText& text = {}, PsdTextReport* report = nullptr);
+                                       const PsdText& text = {}, PsdTextReport* report = nullptr, bool psb = false);
 // psd.export_psd: one page (page number `page`) as a PSD at `dest` (core::Error("key") when there is no such page:
 // Python's StopIteration).
 fs::path export_psd(const core::Document& episode, const fs::path& dest, std::int64_t dpi = 150, std::int64_t page = 1,
-                    const PsdText& text = {}, PsdTextReport* report = nullptr);
+                    const PsdText& text = {}, PsdTextReport* report = nullptr, bool psb = false);
+// The largest side of a PSD (Photoshop's): a page past it is written as a PSB.
+inline constexpr std::int64_t kPsdMaxSide = 30000;
 // smart-objects@1 (PC3 A1): a smart object's contents page as a PSD — its layers alone (no paper, no panels' borders),
 // the merged picture its layers over white; a page in precise colour or inks as export_page_psd writes it.
 fs::path export_contents_psd(const core::Document& episode, const core::Page& page, const fs::path& dest,

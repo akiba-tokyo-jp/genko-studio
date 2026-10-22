@@ -497,7 +497,8 @@ private slots:
 
     void whatIsNotOpenedYet() {
         const std::string png = data_file("pyref/png/rgb8.png");
-        QCOMPARE(code_of([] { (void)formats::open_file(std::string("8BPS\0\1", 6) + std::string(40, '\0'), "layers.psd"); }), std::string("not_yet_ported:psd_file"));
+        // (PC4 F-d opens a PSD: one of no pixels is no picture)
+        QCOMPARE(code_of([] { (void)formats::open_file(std::string("8BPS\0\1", 6) + std::string(40, '\0'), "layers.psd"); }), std::string("format"));
         const auto [tiff, values] = tiff16(4, 4);
         QCOMPARE(code_of([&] { (void)formats::open_file(tiff, "photo.DNG"); }), std::string("not_yet_ported:raw_file"));
         QCOMPARE(code_of([&] { (void)formats::open_file(png, "doc.pcraft"); }), std::string("not_yet_ported:pcraft_file"));

@@ -1020,6 +1020,7 @@ std::optional<Json> apply_in_contents(const CommandBus& bus, Document& work, con
     work.pattern_files = after.pattern_files;
     work.smart_files = after.smart_files;
     work.filter_files = after.filter_files;  // (filters@1, PC4 節 D: the files its smart filters were given — a displacement map)
+    work.native_files = after.native_files;  // (psd-keep@1, PC4 F-d: the blocks a PSD read into the contents kept)
     work.smart_contents = after.smart_contents;
     work.features = after.features;
     work.studio = after.studio;

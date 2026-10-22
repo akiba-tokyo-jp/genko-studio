@@ -383,8 +383,12 @@ set_tests_properties(test_ledger_service_b PROPERTIES ENVIRONMENT "QT_QPA_PLATFO
 # import_psd (M4②b): psd.read_psd and the op against Python's on the PSD and PSB files of psd_cases.json (every file,
 # a few cut after every byte, all of them changed at a few bytes; each step's reply, snapshot and payload, the layers'
 # pixels, the book read back), and hostile files refused without the memory Python would take.
+# PC4 F-d (SPEC.md FILE-01「PSD・PSB」): psd-keep@1 — psd-tools' files (data/psd_keep) opened and written again, what
+# this build does not read back byte for byte (psd-tools, this reader), locks, layer ids, comps and slices dropped with
+# their layers, the book saved and read back —, the layers at their depth (16 and 32 bits, CMYK, Lab, grey, Lr16), PSB
+# written (psd-tools, this reader, lnk2), a page past 30000 px a PSB, hostile blocks bounded.
 genko_test(test_contract_psd SOURCES contract/test_contract_psd.cpp contract/opsupport.cpp
-           DEPS genko_test_support genko_render_ops LABELS contract TIMEOUT 1800)
+           DEPS genko_test_support genko_render_ops genko_formats LABELS contract TIMEOUT 1800)
 # PSD-01 against psd-tools (ACCEPTANCE.md §6): the editable PSD book read by psd-tools (tools/migration/psd_text_check.py)
 # and by render::psd::File, the same layers, groups, texts, runs, fonts, transforms and strokes.
 # color-mode@1 (SPEC.md COLOR-02) against the reference Python (tools/migration/ink_check.py): the conversions as Pillow's

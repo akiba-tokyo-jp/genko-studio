@@ -793,6 +793,7 @@ void rasterize(Document& doc, std::size_t at, std::size_t i) {
     }
     if (finished && !finished->is_null() && !(layer.screen && core::py_truthy(*layer.screen))) layer.screen = *finished;
     layer.kind = LayerKind::Raster;
+    layer.native_psd.reset();  // (psd-keep@1, PC4 F-d: rasterized, a PSD's effects and blocks are not its own any more)
     layer.strokes = core::empty_strokes();
     layer.patches.clear();
     layer.shapes = core::vector::empty_shapes();  // (pen-shapes@1: drawn in)

@@ -77,6 +77,9 @@ public:
     PythonView(const PythonView&) = delete;
     PythonView& operator=(const PythonView&) = delete;
 };
+// Is one alive? (PC4 F-d: then import_psd keeps nothing of psd-keep@1, reads no lock, and reads the layers in 8 bits — the
+// Python reference's view too)
+bool python_view();
 
 // An adjustment block read into a correction's adjust; none when no codec reads it (`notes` says why).
 std::optional<core::Json> read_adjustment(std::string_view key, std::string_view payload, std::vector<std::string>& notes,

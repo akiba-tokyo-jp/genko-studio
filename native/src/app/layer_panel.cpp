@@ -39,6 +39,7 @@
 #include "service/wording.hpp"
 #include "core/adjust.hpp"
 #include "core/ids.hpp"
+#include "core/psd_keep.hpp"
 #include "core/pyconv.hpp"
 #include "core/smart.hpp"
 #include "render/ink.hpp"
@@ -450,6 +451,9 @@ void LayerPanel::refresh() {
             if (layer.shapes && !layer.shapes->items.empty()) marks << QStringLiteral("形 %1").arg(layer.shapes->items.size());  // (pen-shapes@1)
             if (layer.locked) marks << QStringLiteral("ロック");
             if (layer.lock_position) marks << QStringLiteral("位置ロック");  // (transform@1, PC3 C-d)
+            // (psd-keep@1, PC4 F-d: a PSD's layer effects, kept and written back, which this build does not draw)
+            const bool psd_effects = core::psd_effects_kept(layer);
+            if (psd_effects) marks << QStringLiteral("効果（PSD）");
             if (layer.link) {  // (transform@1, PC3 C-d: its link group, by its number when it has one)
                 const QString group = QString::fromStdString(*layer.link);
                 marks << (group.startsWith(QStringLiteral("link-")) ? QStringLiteral("リンク %1").arg(group.mid(5)) : QStringLiteral("レイヤーリンク"));
@@ -473,7 +477,8 @@ void LayerPanel::refresh() {
             auto* item = new QListWidgetItem(indent + wording::layer_label(layer) + (marks.isEmpty() ? QString() : QStringLiteral("　· ") + marks.join(QStringLiteral(" · "))));
             item->setData(Qt::UserRole + 2, meta.join(QStringLiteral(" · ")));
             item->setData(Qt::UserRole + 3, indent + wording::layer_label(layer));  // (the name alone: the marks go right)
-            item->setToolTip(kind_name(layer.kind));
+            item->setToolTip(psd_effects ? kind_name(layer.kind) + QStringLiteral("\nPSD のレイヤー効果は Genko では描きません（PSD に書き戻すと Photoshop が描きます）")
+                                         : kind_name(layer.kind));
             // its picture, or (nothing drawn yet) a quiet mark of its kind; every row the same height
             const QIcon picture = thumbnail(*page, layer);
             item->setIcon(picture.isNull() ? kind_mark(layer.kind) : picture);

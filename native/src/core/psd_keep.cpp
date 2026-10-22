@@ -76,6 +76,11 @@ Json to_json(const PsdPageKeep& keep) {
     Json globals = Json::array();
     for (const PsdGlobal& g : keep.globals) globals.push_back(Json::array({g.signature, g.key, g.ref}));
     out["globals"] = std::move(globals);
+    if (!keep.ids.empty()) {  // (PC4 F-d)
+        Json ids = Json::array();
+        for (const std::int64_t id : keep.ids) ids.push_back(id);
+        out["ids"] = std::move(ids);
+    }
     if (keep.from) out["from"] = Json{{"version", keep.from->version}, {"mode", keep.from->mode}, {"depth", keep.from->depth}};
     return out;
 }
@@ -98,7 +103,7 @@ PsdLayerKeep psd_layer_keep_from_json(const Json& value) {
 PsdPageKeep psd_page_keep_from_json(const Json& value) {
     const std::string what = "a page's native_psd";
     if (!value.is_object()) refuse(what + " is an object");
-    only_keys(value, {"resources", "globals", "from"}, what);
+    only_keys(value, {"resources", "globals", "ids", "from"}, what);
     PsdPageKeep keep;
     for (const Json& item : list_of(value, "resources", what)) {
         if (!item.is_array() || item.size() != 3) refuse(what + "'s resources are [id, name, asset]");
@@ -110,6 +115,7 @@ PsdPageKeep psd_page_keep_from_json(const Json& value) {
         keep.globals.push_back(PsdGlobal{text(item[0], what + "'s global signature"), text(item[1], what + "'s global key"),
                                          text(item[2], what + "'s global asset")});
     }
+    for (const Json& id : list_of(value, "ids", what)) keep.ids.push_back(whole(id, what + "'s layer id"));
     if (const Json* from = get(value, "from"); from != nullptr && !from->is_null()) {
         if (!from->is_object()) refuse(what + "'s from is {version, mode, depth}");
         only_keys(*from, {"version", "mode", "depth"}, what + "'s from");
@@ -147,6 +153,10 @@ void check_psd_keep(const PsdPageKeep& keep) {
         if (g.signature != "8BIM" && g.signature != "8B64") refuse(what + "'s global signature is 8BIM or 8B64");
         if (!is_key(g.key)) refuse(what + "'s global key is four characters");
         if (!is_ref(g.ref)) refuse(what + "'s global block is an asset (sha256:…)");
+    }
+    if (keep.ids.size() > 65536) refuse(what + " names more than 65536 layer ids");
+    for (const std::int64_t id : keep.ids) {
+        if (id < 0 || id > 0xffffffffLL) refuse(what + "'s ids are layer ids (0..4294967295)");
     }
     if (keep.from) {
         if (keep.from->version != 1 && keep.from->version != 2) refuse(what + "'s from version is 1 (PSD) or 2 (PSB)");
@@ -193,6 +203,57 @@ std::vector<std::pair<std::string, std::string_view>> psd_keep_assets(const Docu
         }
     }
     return out;
+}
+
+namespace {
+
+bool one_of(std::string_view key, std::initializer_list<std::string_view> keys) { return std::find(keys.begin(), keys.end(), key) != keys.end(); }
+
+}  // namespace
+
+bool psd_layer_block_kept(std::string_view key) {
+    return !one_of(key, {// written by this build, or read into the layer: its name, id, section and locks
+                         "luni", "lyid", "lsct", "lsdk", "lspf",
+                         // the layer info (never a layer's)
+                         "Lr16", "Lr32", "Layr",
+                         // PC2: the adjustment layers' blocks a codec reads (and writes)
+                         "levl", "curv", "brit", "hue2", "hue ", "blnc", "nvrt", "post", "thrs", "grdm", "selc", "mixr", "phfl", "expA",
+                         "vibA", "blwh", "clrL", "CgEd",
+                         // PC3 C-a, C-b, PC4 E3: the fill, shape and vector mask blocks
+                         "SoCo", "GdFl", "PtFl", "vmsk", "vsms", "vscg", "vstk", "vogk",
+                         // PC3 A3: the placed layers
+                         "SoLd", "SoLE", "PlLd",
+                         // PSD-01: the text
+                         "TySh", "tySh"});
+}
+
+bool psd_resource_kept(int id) {
+    if (id >= 2000 && id <= 2999) return false;  // (vector@1: the saved paths and the clipping path)
+    // the resolution, the profile, XMP, EXIF, the version, the thumbnails, the layers' state and groups, the grid and guides,
+    // the channels' names, looks, ids and spot colours, the Quick Mask, the layers' selection, the work path, an indexed
+    // page's table's count and its transparent entry
+    static constexpr int kNot[] = {1005, 1039, 1060, 1058, 1057, 1033, 1036, 1024, 1026, 1032, 1045, 1006,
+                                   1007, 1077, 1053, 1067, 1022, 1069, 1072, 1025, 1046, 1047};
+    return std::find(std::begin(kNot), std::end(kNot), id) == std::end(kNot);
+}
+
+bool psd_global_kept(std::string_view key) {
+    return !one_of(key, {"Lr16", "Lr32", "Layr", "Mtrn", "Mt16", "Mt32", "lnk2", "lnk3", "lnkD", "lnkE"});
+}
+
+bool psd_resource_names_layers(int id) { return id == 1065 || id == 1050; }
+
+bool psd_effect_key(std::string_view key) { return one_of(key, {"lfx2", "lfxs", "lmfx", "lrFX"}); }
+
+bool psd_effects_kept(const Layer& layer) {
+    if (!layer.native_psd) return false;
+    return std::any_of(layer.native_psd->blocks.begin(), layer.native_psd->blocks.end(), [](const auto& block) { return psd_effect_key(block.first); });
+}
+
+bool psd_pattern_key(std::string_view key) { return one_of(key, {"Patt", "Pat2", "Pat3"}); }
+
+bool psb_long_key(std::string_view key) {
+    return one_of(key, {"LMsk", "Lr16", "Lr32", "Layr", "Mt16", "Mt32", "Mtrn", "Alph", "FMsk", "lnk2", "FEid", "FXid", "PxSD"});
 }
 
 }  // namespace genko::core

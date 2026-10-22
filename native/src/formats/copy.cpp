@@ -30,9 +30,9 @@ using render::codecs::CodecImage;
 using render::codecs::Layout;
 using render::codecs::Sample;
 
-// (PC4 F-a: and the codecs' formats, the default extension of each first)
-constexpr std::array<std::string_view, 23> kExtensions{"psd", "tif",  "png", "jpg", "jpeg", "webp", "gif", "bmp", "tga", "ico", "pnm", "pbm",
-                                                       "pgm", "ppm", "pam", "pfm", "qoi", "exr", "hdr", "avif", "jpe", "jfif", "dib"};
+// (PC4 F-a: and the codecs' formats, the default extension of each first; PC4 F-d: and a PSB)
+constexpr std::array<std::string_view, 24> kExtensions{"psd", "tif",  "png", "jpg", "jpeg", "webp", "gif", "bmp", "tga", "ico", "pnm", "pbm",
+                                                       "pgm", "ppm", "pam", "pfm", "qoi", "exr", "hdr", "avif", "jpe", "jfif", "dib", "psb"};
 
 std::string lower_suffix(const fs::path& dest) {
     std::string suffix = dest.extension().string();
@@ -145,7 +145,8 @@ PlannedCopy plan_copy(const core::Document& doc, std::size_t at, const fs::path&
     PlannedCopy plan;
     plan.file = dest;
     plan.dpi = dpi;
-    if (suffix == "psd") {
+    if (suffix == "psd" || suffix == "psb") {
+        plan.psb = suffix == "psb";  // (PC4 F-d)
         if (options.layers) {
             plan.psd_book = doc;  // (the book's XMP in it: put_page_psd)
             plan.psd_page = at;
@@ -208,7 +209,7 @@ CopyResult write_planned(const PlannedCopy& plan) {
     result.notes = plan.notes;
     if (plan.file.has_parent_path()) detail::make_dirs(plan.file.parent_path());
     if (plan.psd_book) {
-        export_page_psd(*plan.psd_book, plan.psd_book->page(plan.psd_page), plan.file, plan.dpi);
+        export_page_psd(*plan.psd_book, plan.psd_book->page(plan.psd_page), plan.file, plan.dpi, {}, nullptr, plan.psb);
         return result;
     }
     detail::Output output;

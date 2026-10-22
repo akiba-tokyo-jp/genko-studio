@@ -828,7 +828,8 @@ int export_command(const QStringList& args, bool ascii) {
                      " (choose from " + listed + ")");
     };
     const std::initializer_list<const char*> kFormats{"png", "tiff",   "pdf",    "strip",  "psd",       "epub",     "pack",
-                                                      "webtoon", "sns", "cmyk", "layers", "kindle", "timelapse", "animation"};
+                                                      "webtoon", "sns", "cmyk", "layers", "kindle", "timelapse", "animation",
+                                                      "psb"};  // (PC4 F-d: Photoshop's large document, a PSD's layers)
     const std::initializer_list<const char*> kColours{"rgb", "cmyk", "gray"};
     const std::initializer_list<const char*> kShapes{"round", "square", "diamond", "ellipse"};
     const std::initializer_list<const char*> kAreas{"paper", "bleed", "trim"};
@@ -844,7 +845,7 @@ int export_command(const QStringList& args, bool ascii) {
     const std::initializer_list<const char*> kPsdTexts{"image", "editable"};
     const auto psd_text = choice("--psd-text", "image", kPsdTexts);
     if (!psd_text) return invalid_choice("--psd-text", kPsdTexts);
-    if (*psd_text == "editable" && *fmt != "psd") return usage("genko export: argument --psd-text: editable is for --format psd");
+    if (*psd_text == "editable" && *fmt != "psd" && *fmt != "psb") return usage("genko export: argument --psd-text: editable is for --format psd");
     if (a.flag("--rasterize-unsupported") && *psd_text != "editable") {
         return usage("genko export: argument --rasterize-unsupported: only with --psd-text editable");
     }
@@ -895,13 +896,13 @@ int export_command(const QStringList& args, bool ascii) {
     }
     if (f == "strip") {
         paths = {formats::export_strip(doc, file_given ? out : formats::detail::join(out, "strip.png"), narrow(dpi.value_or(150)))};
-    } else if (f == "psd") {
-        // a folder gets one layered PSD per page; a .psd path gets the first page
+    } else if (f == "psd" || f == "psb") {
+        // a folder gets one layered PSD per page; a .psd path gets the first page (PC4 F-d: a PSB each, --format psb)
         try {
             if (file_given) {
-                paths = {formats::export_psd(doc, out, dpi.value_or(spec_dpi), 1, psd_choice, &psd_report)};
+                paths = {formats::export_psd(doc, out, dpi.value_or(spec_dpi), 1, psd_choice, &psd_report, f == "psb")};
             } else {
-                paths = formats::export_psd_pages(doc, out, dpi, psd_choice, &psd_report);
+                paths = formats::export_psd_pages(doc, out, dpi, psd_choice, &psd_report, f == "psb");
             }
         } catch (const formats::PsdTextRefused& refused) {  // (strict: nothing written; the lines and what they use)
             const Json items = formats::issues_json(refused.issues());
@@ -957,7 +958,7 @@ int export_command(const QStringList& args, bool ascii) {
     if (animated != nullptr) {
         if (const auto note = formats::ink_note(*animated)) notes.push_back(*note);
     } else if (f != "timelapse") {
-        notes = formats::export_notes(doc, f, f == "cmyk" ? std::string("cmyk") : *color);
+        notes = formats::export_notes(doc, f == "psb" ? std::string("psd") : f, f == "cmyk" ? std::string("cmyk") : *color);  // (a PSB's: a PSD's)
     }
     if (a.flag("--json")) {
         Json files = Json::array();

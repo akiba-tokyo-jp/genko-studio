@@ -992,6 +992,7 @@ std::atomic<int> python_views{0};  // (the PythonView scopes alive)
 
 PythonView::PythonView() { ++python_views; }
 PythonView::~PythonView() { --python_views; }
+bool python_view() { return python_views.load() > 0; }
 
 std::string adjust_label(std::string_view key) {
     static const std::vector<std::pair<std::string_view, std::string_view>> labels{

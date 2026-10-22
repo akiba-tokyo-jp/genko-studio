@@ -492,6 +492,12 @@ const std::vector<Rule>& rules() {
         r.push_back(rule(R"(the picture is too large \(\d+×\d+ pixels.*\))", "PSD の絵が大きすぎて、レイヤーにできません"));
         r.push_back(rule(R"(the layer mask is too large \(.*\))", "用紙が大きすぎて、PSD のレイヤーマスクを作れません"));
         r.push_back(rule("the PSD has no pictures to read", "PSD に読み込める絵がありません"));
+        // (PC4 F-d: a page past what a PSD holds — 30000 px a side, 2 GiB —, written as a PSB instead)
+        r.push_back(rule(R"(the page is too large for a PSD \((\d+)×(\d+) pixels\): write it as a PSB)", [](const QRegularExpressionMatch& m) {
+            return QStringLiteral("ページが大きすぎて PSD に書けません（%1×%2 px。PSD は 1 辺 30000 px まで）。PSB で書き出してください").arg(m.captured(1), m.captured(2));
+        }));
+        r.push_back(rule(R"(the page is too large for a PSD \(past (\d+) GiB\): write it as a PSB)",
+                         "ファイルが PSD に書ける大きさ（2 GB）を超えます。PSB で書き出してください"));
         r.push_back(rule(R"(the colour profile cannot be read \((.*)\))", "カラープロファイルを読み込めません"));
         r.push_back(rule(R"(the file cannot be read \(it is larger than 2 GiB\))", "ファイルが大きすぎて読み込めません（2 GiB まで）"));
         // (this build's own: put_raster reads only a regular file — not a device or a pipe, whose reading may not end)

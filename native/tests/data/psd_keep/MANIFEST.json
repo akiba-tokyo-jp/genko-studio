@@ -1,0 +1,15 @@
+{
+ "about": "PC4 F-d test files (test_contract_psd: psd-keep@1, the layers at their depth, PSB). Made with psd-tools 1.10.9 (Pillow 12.3.0); see make_psd_keep.py for what each holds.",
+ "generators": {
+  "*.psd": "<reference python> native/tests/data/psd_keep/make_psd_keep.py native/tests/data/psd_keep"
+ },
+ "files": {
+  "deep-cmyk16.psd": "07e475cbc1aaf16fe9e47a97bcddafb93b788a72a731002735fea8360553e652",
+  "deep-gray16.psd": "13d0141514b5e1c2ea8fe0b46cb770efdcafc532ad685fff55e6ff242b56031a",
+  "deep-lab16.psd": "b842c99ac30cd6768caea1a373a6357f6c85c3fea12f4cfda93fc44b6d30ac79",
+  "deep-rgb16-lr16.psd": "a4324ee9f8883a333176c3eacb2c51217d40d6f159f9d75cd41ebca53ceb59c3",
+  "deep-rgb16.psd": "94c3d3765e6b8d3ef3b2bd27b0b0c9a04b20b6d2b973291531c95b3c9bf1e497",
+  "deep-rgb32.psd": "d10f85e7819de1cb4b62928e8eb83111b286b41b3b510323cdf61cd6c5674f5a",
+  "keep.psd": "10a5398b1cc6b6745940a3a8749d10446199503c381df356b73161343b5d42b3"
+ }
+}

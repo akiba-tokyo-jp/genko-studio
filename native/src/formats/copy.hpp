@@ -21,7 +21,8 @@
 //     neither its profile nor its CMYK its colours as sRGB's through its profile;
 //   - .tif / .tiff: the page at its depth as the exports write a page's TIFF (an RGB page's values or an 8-bit picture,
 //     a grey or CMYK page's inks, with its profile);
-//   - .psd: the page with its layers as the exports write a page's PSD; `layers` false, its merged picture alone;
+//   - .psd: the page with its layers as the exports write a page's PSD; `layers` false, its merged picture alone; (PC4
+//     F-d) .psb the same as a PSB (a page past 30000 px a side or 2 GiB is no PSD: core::Error("psd_too_large"));
 // each with the book's File Info (formats/file_xmp.hpp; none for a book with none). A .genko copy of the book is the
 // window's (app/session.hpp Session::save_copy). F-c widens this (書き出し形式…, the scale, the metadata, `genko copy`) and
 // F-a the formats the codecs write.
@@ -50,6 +51,7 @@ struct PlannedCopy {
     std::string bytes;                      // (PNG, JPEG, TIFF) the file's bytes
     std::optional<core::Document> psd_book; // (PSD) the book whose page is written as the PSD — the merged one's own book
     std::size_t psd_page = 0;
+    bool psb = false;                       // (PC4 F-d) a PSB
     int dpi = 0;
 };
 PlannedCopy plan_copy(const core::Document& doc, std::size_t page, const std::filesystem::path& dest, const CopyOptions& options = {});

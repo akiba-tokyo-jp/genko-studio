@@ -49,9 +49,10 @@ formats::OpenOptions file_open_options() {
 }
 
 QString open_filters() {
-    // (the formats this build reads; PSD・PSB, Camera Raw and PhotoCraft's .pcraft join when their groups read them)
-    QStringList all{QStringLiteral("*.genko")};
-    QStringList each{QStringLiteral("Genko の原稿 (*.genko)")};
+    // (the formats this build reads — PSD・PSB since PC4 F-d —; Camera Raw and PhotoCraft's .pcraft join when their groups
+    // read them)
+    QStringList all{QStringLiteral("*.genko"), QStringLiteral("*.psd"), QStringLiteral("*.psb")};
+    QStringList each{QStringLiteral("Genko の原稿 (*.genko)"), QStringLiteral("Photoshop (*.psd *.psb)")};
     for (const codecs::Format format : codecs::kFormats) {
         if (!codecs::caps(format).read) continue;
         all << patterns(format);

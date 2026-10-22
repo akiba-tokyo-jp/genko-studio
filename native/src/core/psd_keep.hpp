@@ -18,12 +18,23 @@
 //
 // A layer's `native_psd`: {"blocks": [[key, "sha256:…"], …], "ranges"?: "sha256:…", "id"?: int}
 // A page's `native_psd`: {"resources": [[id, name, "sha256:…"], …], "globals": [[signature, key, "sha256:…"], …],
-//                         "from": {"version": 1 | 2, "mode": int, "depth": int}}
+//                         "ids"?: [int, …], "from": {"version": 1 | 2, "mode": int, "depth": int}}
 // The book names psd-keep@1 while a layer or a page has one.
+//
+// PC4 F-d (SPEC.md FILE-01「PSD・PSB」): what is kept and written back — after PhotoCraft v0.2.0's io/src/psd_import.rs
+// (REGENERATED, MAPPED_RESOURCES) and psd/src/tagged.rs (PSB_LONG_KEYS), MIT, with this build's own rules: a layer keeps
+// every tagged block but those this build writes or reads into the layer (its name, id, section and locks; the
+// adjustment, fill, vector, placed and text blocks PC2 and PC3 read); a page every image resource but those this build
+// writes or reads (resolution, profile, XMP, EXIF, thumbnails, version, paths, channels and their names and looks, the
+// layers' state, groups and selection, the grid and guides, an indexed page's table) and every global block but the
+// layer info (Lr16, Lr32, Layr), the merged transparency (Mtrn, Mt16, Mt32) and the linked files (lnk2, lnk3, lnkD,
+// lnkE: written again from the smart objects). A page's `ids` are the layer ids (lyid) of the layers read with them: its
+// layer comps (1065) and slices (1050), which name layers, are written back only while each of those layers is on it.
 
 namespace genko::core {
 
 struct Document;
+struct Layer;
 
 inline constexpr std::string_view kPsdKeepFeature = "psd-keep@1";
 inline constexpr std::string_view kPsdBlockSuffix = ".psdblock";
@@ -65,9 +76,10 @@ struct PsdFrom {
 struct PsdPageKeep {
     std::vector<PsdResource> resources;
     std::vector<PsdGlobal> globals;
+    std::vector<std::int64_t> ids;  // (PC4 F-d) the lyids of the layers read with them (0..4294967295)
     std::optional<PsdFrom> from;
 
-    bool empty() const { return resources.empty() && globals.empty() && !from; }
+    bool empty() const { return resources.empty() && globals.empty() && ids.empty() && !from; }
     bool operator==(const PsdPageKeep&) const = default;
 };
 
@@ -84,5 +96,23 @@ bool uses_psd_keep(const Document& doc);
 void validate_psd_keep(const Document& doc);
 // The assets psd-keep@1 names (each once, in the order met), with their suffix.
 std::vector<std::pair<std::string, std::string_view>> psd_keep_assets(const Document& doc);
+
+// PC4 F-d: the rules above. Is a layer's tagged block of this key kept (not one this build writes or reads into the
+// layer)? An image resource of this id? A global block of this key?
+bool psd_layer_block_kept(std::string_view key);
+bool psd_resource_kept(int id);
+bool psd_global_kept(std::string_view key);
+// The image resources written back only while the layers read with them are on the page: layer comps and slices.
+bool psd_resource_names_layers(int id);
+// A layer effects' block (lfx2, lfxs, lmfx, lrFX): kept, and not drawn by this build.
+bool psd_effect_key(std::string_view key);
+// Does the layer keep a PSD's layer effects (drawn by Photoshop, not by this build: the layer panel's mark)?
+bool psd_effects_kept(const Layer& layer);
+// A pattern block (Patt, Pat2, Pat3): kept with the patterns no fill of the book took, merged with the book's own.
+bool psd_pattern_key(std::string_view key);
+// The tagged blocks a PSB holds with 8-byte lengths (Adobe's file format specification; PhotoCraft's PSB_LONG_KEYS).
+bool psb_long_key(std::string_view key);
+// The largest block or resource kept (an asset: storage::kAssetMaxBytes); a larger one is not kept.
+inline constexpr std::uint64_t kPsdBlockMaxBytes = std::uint64_t{256} * 1024 * 1024;
 
 }  // namespace genko::core

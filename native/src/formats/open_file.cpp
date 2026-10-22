@@ -5,6 +5,7 @@
 #include <algorithm>
 #include <cctype>
 #include <cmath>
+#include <map>
 #include <unordered_map>
 
 #include "core/actor.hpp"
@@ -23,8 +24,10 @@
 #include "render/ink.hpp"
 #include "render/not_yet_ported.hpp"
 #include "render/ops_registry.hpp"
+#include "render/import_psd.hpp"
 #include "render/png.hpp"
 #include "render/proof.hpp"
+#include "render/psd_image.hpp"
 #include "render/smart_decode.hpp"
 
 namespace genko::formats {
@@ -169,6 +172,32 @@ bool make_bitmap(core::Document& doc) {
     return true;
 }
 
+// A book of one page of `w` × `h` pixels at the resolution a file said (72 ppi when it says none or less, as Photoshop
+// opens it): its paper the pixels at that resolution, its trim the paper, no bleed, margins or panels, bound on the
+// left, no layers yet (picture_book's, and since PC4 F-d a PSD's).
+core::Document pixels_book(std::uint32_t w, std::uint32_t h, double said, std::string_view title, bool mono, bool grid) {
+    const auto dpi = static_cast<std::int64_t>(std::clamp<double>(std::llround(said), 72, 100000));
+    core::PageSpec spec;
+    spec.width_mm = core::Num(static_cast<double>(w) * 25.4 / static_cast<double>(dpi));
+    spec.height_mm = core::Num(static_cast<double>(h) * 25.4 / static_cast<double>(dpi));
+    spec.dpi = core::Num(dpi);
+    spec.bleed_mm = core::Num(std::int64_t{0});
+    spec.inner_margin_mm = core::Num(std::int64_t{0});
+    spec.trim_w_mm = spec.width_mm;
+    spec.trim_h_mm = spec.height_mm;
+    // (the margins as the reader reads them back: floats)
+    spec.margins_mm = core::NumList{core::Num(0.0), core::Num(0.0), core::Num(0.0), core::Num(0.0)};
+    spec.expression = mono ? "mono" : "color";
+    if (grid) spec.grid = "finest";  // (image-grid@1: design 3, 8-2 (b))
+    core::Document doc = core::new_episode(title.empty() ? std::string("無題") : std::string(title), core::Num(std::int64_t{1}), 1, spec,
+                                           core::Binding::Left);
+    core::Page& page = doc.edit_page(0);
+    page.frames.clear();
+    page.numero = false;
+    page.layers.clear();
+    return doc;
+}
+
 }  // namespace
 
 Opened picture_book(CodecImage picture, std::string_view title, const OpenOptions& options) {
@@ -181,26 +210,8 @@ Opened picture_book(CodecImage picture, std::string_view title, const OpenOption
     const bool eight = picture.sample() == Sample::U8;
     // (its resolution: the file's, 72 ppi when it says none or less, as Photoshop opens it)
     const double said = picture.meta.dpi ? picture.meta.dpi->first : 0.0;
-    const auto dpi = static_cast<std::int64_t>(std::clamp<double>(std::llround(said), 72, 100000));
-
-    core::PageSpec spec;
-    spec.width_mm = core::Num(static_cast<double>(w) * 25.4 / static_cast<double>(dpi));
-    spec.height_mm = core::Num(static_cast<double>(h) * 25.4 / static_cast<double>(dpi));
-    spec.dpi = core::Num(dpi);
-    spec.bleed_mm = core::Num(std::int64_t{0});
-    spec.inner_margin_mm = core::Num(std::int64_t{0});
-    spec.trim_w_mm = spec.width_mm;
-    spec.trim_h_mm = spec.height_mm;
-    // (the margins as the reader reads them back: floats)
-    spec.margins_mm = core::NumList{core::Num(0.0), core::Num(0.0), core::Num(0.0), core::Num(0.0)};
-    spec.expression = gray ? "mono" : "color";
-    if (eight && !gray && !cmyk) spec.grid = "finest";  // (image-grid@1: design 3, 8-2 (b))
-
-    core::Document doc = core::new_episode(title.empty() ? std::string("無題") : std::string(title), core::Num(std::int64_t{1}), 1, spec,
-                                           core::Binding::Left);
+    core::Document doc = pixels_book(w, h, said, title, gray, eight && !gray && !cmyk);
     core::Page& page = doc.edit_page(0);
-    page.frames.clear();
-    page.numero = false;
     core::Layer layer;
     layer.id = core::new_id();
     layer.role = core::LayerRole::User;
@@ -261,12 +272,198 @@ Opened picture_book(CodecImage picture, std::string_view title, const OpenOption
     return out;
 }
 
+namespace {
+
+// --- a PSD or PSB as a book (PC4 F-d) -----------------------------------------------------------------------------
+
+// What a PSD's header and image resources say (the layers are import_psd's to read): its version, size, channels, depth
+// and mode; its resolution, profile, XMP and EXIF.
+struct PsdHead {
+    int version = 1;
+    std::uint32_t width = 0, height = 0;
+    unsigned channels = 0;
+    int depth = 8;
+    int mode = 3;
+    double dpi = 0;
+    std::string icc, xmp, exif;
+};
+
+std::uint32_t be32_at(std::string_view d, std::size_t at) {
+    std::uint32_t v = 0;
+    for (std::size_t k = 0; k < 4; ++k) v = (v << 8) | static_cast<unsigned char>(d[at + k]);
+    return v;
+}
+unsigned be16_at(std::string_view d, std::size_t at) { return (static_cast<unsigned>(static_cast<unsigned char>(d[at])) << 8) | static_cast<unsigned char>(d[at + 1]); }
+
+PsdHead psd_head(std::string_view d) {
+    if (d.size() < 30) throw core::Error("format", "the PSD cannot be read (the PSD file is cut short)");
+    PsdHead head;
+    head.version = static_cast<int>(be16_at(d, 4));
+    if (head.version != 1 && head.version != 2) throw core::Error("format", "the PSD cannot be read (unknown PSD version)");
+    head.channels = be16_at(d, 12);
+    head.height = be32_at(d, 14);
+    head.width = be32_at(d, 18);
+    head.depth = static_cast<int>(be16_at(d, 22));
+    head.mode = static_cast<int>(be16_at(d, 24));
+    std::size_t at = 26;
+    const std::uint32_t colour_data = be32_at(d, at);
+    if (colour_data > d.size() - at - 4) throw core::Error("format", "the PSD cannot be read (the PSD file is cut short)");
+    at += 4 + colour_data;
+    if (d.size() - at < 4) throw core::Error("format", "the PSD cannot be read (the PSD file is cut short)");
+    const std::uint32_t length = be32_at(d, at);
+    at += 4;
+    const std::size_t end = length > d.size() - at ? d.size() : at + length;
+    while (end - at >= 12 && d.substr(at, 4) == "8BIM") {
+        const unsigned id = be16_at(d, at + 4);
+        const std::size_t name = static_cast<unsigned char>(d[at + 6]);
+        std::size_t p = at + 6 + name + 1 + ((name + 1) % 2);  // (a Pascal name, padded to even)
+        if (p + 4 > end) break;
+        const std::uint32_t size = be32_at(d, p);
+        p += 4;
+        if (size > end - p) break;
+        const std::string_view data = d.substr(p, size);
+        if (id == 1005 && size >= 4) {
+            const std::uint32_t fixed = be32_at(data, 0);
+            head.dpi = fixed / 65536.0;
+        }
+        if (id == 1039) head.icc = std::string(data);
+        if (id == 1060) head.xmp = std::string(data);
+        if (id == 1058) head.exif = std::string(data);
+        at = p + size + size % 2;
+    }
+    return head;
+}
+
+// A PSD or PSB as a book of one page (formats/open_file.hpp): the page of its pixels at its resolution in its mode and
+// depth — RGB 8 bits an 8-bit page (its grid the finest), 16 and 32 bits a page in precise colour; grey (and duotone, as
+// grey) and CMYK and Lab a page of inks of its depth (CMYK and Lab at most 16); bitmap a bitmap page; indexed and
+// multichannel its merged picture as an opened picture is (an indexed page of its colours) —, in its own profile (else the
+// working one's), and its layers as import_psd reads them onto it, exactly (the file's pixels; at their depth; masks,
+// folders, adjustment, fill, shape, text and placed layers as import_psd makes them; what this build does not read kept
+// to be written back, psd-keep@1).
+Opened open_psd(std::string_view bytes, const std::string& file, const OpenOptions& options) {
+    const PsdHead head = psd_head(bytes);
+    const std::string title = stem_of(file);
+    std::vector<std::string> notes;
+    if (head.width == 0 || head.height == 0) throw core::Error("format", "the PSD cannot be read (it has no pixels)");
+    options.limits.check(head.width, head.height, Layout::Rgba, head.depth > 8 ? Sample::U16 : Sample::U8);
+    Opened out;
+    if (head.mode == 2 || head.mode == 7) {
+        // (indexed and multichannel: the merged picture, as Pillow reads it — an indexed page of its colours)
+        if (head.version != 1) throw core::Error("format", "the PSD cannot be read (an indexed or multichannel PSB)");
+        const render::Image image = render::read_psd_image(bytes);
+        const bool grey = image.mode() == "L" || image.mode() == "1";
+        const render::Image shown = image.convert(grey ? "L" : "RGBA");
+        CodecImage picture = CodecImage::blank(head.width, head.height, grey ? Layout::Gray : Layout::Rgba, Sample::U8);
+        picture.data() = shown.tobytes();
+        if (head.dpi > 0) picture.meta.dpi = std::make_pair(head.dpi, head.dpi);
+        out = picture_book(std::move(picture), title, options);
+        if (head.mode == 2 && eight_bit_rgb(out.doc.page(0)) && !make_indexed(out.doc)) out.notes.push_back("カラーテーブルの色のままでは開けなかったため、RGB で開きました");
+        if (head.mode == 7) out.notes.push_back("マルチチャンネルの PSD は、統合された画像をグレースケールで開きました");
+    } else {
+        const bool rgb = head.mode == 3;
+        const bool grey = head.mode == 0 || head.mode == 1 || head.mode == 8;
+        const bool cmyk = head.mode == 4, lab = head.mode == 9;
+        if (!rgb && !grey && !cmyk && !lab) throw core::Error("format", "the PSD cannot be read (a colour mode this build does not open: " + std::to_string(head.mode) + ")");
+        int depth = head.depth == 1 ? 8 : head.depth;
+        if ((cmyk || lab) && depth == 32) depth = 16;  // (Photoshop has no 32-bit CMYK or Lab)
+        if (depth != 8 && depth != 16 && depth != 32) throw core::Error("format", "the PSD cannot be read (PSD depth " + std::to_string(head.depth) + " is not supported)");
+        core::Document doc = pixels_book(head.width, head.height, head.dpi, title, grey, rgb && depth == 8);
+        // (its colours: its own profile where it is one of its colours, else the working one's — as an opened picture's)
+        const auto space = head.icc.empty() ? std::nullopt : render::ink::profile_space(head.icc);
+        const bool own = options.profile == "keep" && space &&
+                         ((rgb && *space == core::ProfileSpace::Rgb) || (grey && *space == core::ProfileSpace::Gray) || (cmyk && *space == core::ProfileSpace::Cmyk));
+        if (!head.icc.empty() && options.profile == "keep" && !own && !lab) notes.push_back("埋め込みプロファイルが画像の色と合わないため、作業用のプロファイルにしました");
+        out.profile_missing = !lab && !own;
+        if (rgb) {
+            const std::string chosen = own ? head.icc : options.working_rgb;
+            const std::string icc = chosen.empty() || render::proof::same_as_srgb(chosen) ? std::string() : chosen;
+            if (depth != 8 || !icc.empty()) {
+                core::RgbMode mode;
+                mode.depth = depth;
+                if (!icc.empty()) {
+                    mode.icc = std::make_shared<const std::string>(icc);
+                    mode.profile = core::bytes_ref(icc);
+                }
+                doc.edit_page(0).rgb = mode;
+                doc.rgb = mode;
+            }
+        } else if (lab) {
+            try {
+                doc = applied(doc, Json::array({Json{{"op", "set_color_mode"}, {"page", 1}, {"mode", "lab"}, {"depth", depth}, {"default", true}}}));
+            } catch (const core::ApplyError& error) {
+                throw core::Error("format", error.what());
+            }
+        } else {
+            const std::string icc = own ? head.icc
+                                        : grey ? (options.working_gray.empty() ? builtin_bytes("sgray") : options.working_gray)
+                                               : (options.working_cmyk.empty() ? builtin_bytes("coated-cmyk") : options.working_cmyk);
+            const core::PageColor color = ink_mode(grey ? core::InkSpace::Gray : core::InkSpace::Cmyk, depth, icc);
+            doc.edit_page(0).color = color;
+            doc.color = color;
+        }
+        // its layers, as import_psd reads them onto a page of its pixels (a flat file's merged picture its 背景, or with a
+        // transparency its レイヤー 0)
+        const unsigned colours = cmyk ? 4 : rgb || lab ? 3 : 1;
+        const Json op{{"op", "import_psd"}, {"page", 1}, {"fit", "paper"}, {"name", head.channels > colours ? "レイヤー 0" : "背景"}};
+        Json report;
+        try {
+            report = render::import_psd_data(doc, op, std::string(bytes), true);
+        } catch (const core::Error& error) {
+            const std::string why = error.what();
+            if (why.find("too large") != std::string::npos || why.find("too many layers") != std::string::npos) throw core::Error("image_too_large", why);
+            throw core::Error("format", why);
+        }
+        if (head.mode == 0 && !make_bitmap(doc)) notes.push_back("2 階調のままでは開けなかったため、グレースケールで開きました");
+        if (head.mode == 8) notes.push_back("ダブルトーンの PSD はグレースケールで開きました");
+        if (head.depth == 32 && (cmyk || lab)) notes.push_back("32 bit の CMYK・Lab は 16 bit で開きました");
+        if (report.contains("effects")) notes.push_back("レイヤー効果は Genko では描きません（PSD に書き戻すと Photoshop が描きます）");
+        if (report.contains("skipped") && !report["skipped"].empty()) {
+            std::string names;
+            for (const Json& n : report["skipped"]) names += (names.empty() ? "" : "、") + (n.is_string() ? n.get<std::string>() : std::string());
+            notes.push_back("この版で読めないレイヤーは開きませんでした（" + names + "）");
+        }
+        if (report.contains("psd_blocks_cut")) notes.push_back("塊の多すぎるレイヤーの一部の塊は保てませんでした");
+        out.doc = std::move(doc);
+        for (std::string& note : notes) out.notes.push_back(std::move(note));
+    }
+    // what it was opened from, and its XMP's File Info
+    core::Document& doc = out.doc;
+    static const std::map<int, std::string> kModes{{0, "bitmap"}, {1, "gray"}, {2, "indexed"}, {3, "rgb"}, {4, "cmyk"}, {7, "multichannel"}, {8, "duotone"}, {9, "lab"}};
+    core::NativeSource source;
+    source.format = head.version == 2 ? "psb" : "psd";
+    source.name = file.empty() ? std::string("image") : file;
+    if (source.name.find('/') != std::string::npos || source.name.find('\\') != std::string::npos) source.name = "image";
+    source.width_px = head.width;
+    source.height_px = head.height;
+    if (head.dpi > 0 && head.dpi <= 1000000) source.dpi = std::make_pair(head.dpi, head.dpi);
+    source.depth = head.depth == 1 || head.depth == 8 || head.depth == 16 || head.depth == 32 ? head.depth : 8;
+    source.mode = kModes.contains(head.mode) ? kModes.at(head.mode) : std::string("rgb");
+    if (!head.exif.empty()) source.exif = keep_bytes(doc, head.exif);
+    if (!head.xmp.empty()) {
+        source.xmp = keep_bytes(doc, head.xmp);
+        core::FileInfo info = core::file_info_from_xmp(head.xmp);
+        info.xmp = source.xmp;
+        try {
+            core::check_file_info(info);
+        } catch (const core::Error&) {
+            info = core::FileInfo{};
+            info.xmp = source.xmp;
+        }
+        doc.file_info = info;
+    }
+    doc.edit_page(0).native_source = std::move(source);
+    return out;
+}
+
+}  // namespace
+
 Opened open_file(std::string_view bytes, std::string_view name, const OpenOptions& options) {
     const std::string file = core::utf8_replaced(base_name(name));  // (a name not UTF-8: its bytes as U+FFFD — the book's title and source)
     const std::string suffix = suffix_of(file);
     // (F-d: a PSD or PSB as a book of its layers; F-e: a camera RAW file through Camera Raw — a TIFF-shaped RAW is not read
     // as its TIFF —; F-f: a .pcraft)
-    if (bytes.substr(0, 4) == "8BPS") throw render::NotYetPorted("psd_file");
+    if (bytes.substr(0, 4) == "8BPS") return open_psd(bytes, file, options);  // (PC4 F-d)
     if (const auto later = core::smart::later_format_of_suffix(suffix); later && *later == "raw") throw render::NotYetPorted("raw_file");
     if (suffix == ".pcraft") throw render::NotYetPorted("pcraft_file");
     const auto format = options.as ? options.as : render::codecs::detect(bytes);

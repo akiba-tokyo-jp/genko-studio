@@ -41069,9 +41069,22 @@
       "label_ja": "PSD/PSB未知ブロックと編集意味の保持",
       "kind": "cross_cutting",
       "genko_status": "一部（2026-10-16 照合）",
-      "implementation_status": "未着手",
+      "implementation_status": "実装済み（PC4 F-d、未統合）",
       "acceptance_status": "未実施",
-      "evidence": [],
+      "evidence": [
+        "native/src/render/psd.cpp",
+        "native/src/render/import_psd.cpp",
+        "native/src/render/import_psd.hpp",
+        "native/src/render/psd_keep.cpp",
+        "native/src/core/psd_keep.cpp",
+        "native/src/formats/psd_export.cpp",
+        "native/src/formats/open_file.cpp",
+        "native/src/formats/copy.cpp",
+        "native/src/app/layer_panel.cpp",
+        "native/tests/contract/test_contract_psd.cpp",
+        "native/tests/data/psd_keep/make_psd_keep.py",
+        "native/tests/gui/test_gui_file.cpp"
+      ],
       "pc0": {
         "date": "2026-10-16",
         "cpp_base": "962faa4",
@@ -41093,7 +41106,8 @@
         "gap": "PSD/PSB を読む（グレー・ビットマップ・インデックス・ダブルトーン・RGB・CMYK、1/8/16/32 ビット、Lab は Lab のページへ）、ページを PSD に書く（文字レイヤー付き、CMYK/Lab は 8/16 ビット）。未知のタグ付きブロック・リソースを保った往復、RGB を 16/32 ビットのまま読む・書く（8 ビットにする）、調整レイヤー・スマートオブジェクト・レイヤースタイル・ベクターマスク等の編集の意味の保持、PSB の書き出しがない",
         "note": "上流は書き換えなければバイト単位で同じに戻る。document:color-depth-model が前提"
       },
-      "note": "PSD のスマートオブジェクトは PC3 A3（未統合）で済み: 配置レイヤー（SoLd・SoLE・PlLd）と全体のブロック lnk2・lnk3・lnkD の埋め込みファイルを SO として読み、SO を配置レイヤーと lnk2 の liFD として書く（読んだブロックと項目は場所と中身が同じ間そのまま書き戻す）。PSD・PSB を SO の中身のファイルとして 16・32 bit のまま読む（render/psd_smart.cpp、render/import_psd.cpp、formats/psd_export.cpp、render/smart_decode.cpp、試験 test_psd_smart・test_contract_psd_smart）。この行の残り（未知のタグ付きブロック・リソースを保った往復、RGB の 16/32 bit のレイヤーの読み書き、レイヤースタイル・ベクターマスク等、PSB の書き出し）は PC4。"
+      "note": "PSD のスマートオブジェクトは PC3 A3（未統合）で済み: 配置レイヤー（SoLd・SoLE・PlLd）と全体のブロック lnk2・lnk3・lnkD の埋め込みファイルを SO として読み、SO を配置レイヤーと lnk2 の liFD として書く（読んだブロックと項目は場所と中身が同じ間そのまま書き戻す）。PSD・PSB を SO の中身のファイルとして 16・32 bit のまま読む（render/psd_smart.cpp、render/import_psd.cpp、formats/psd_export.cpp、render/smart_decode.cpp、試験 test_psd_smart・test_contract_psd_smart）。この行の残り（未知のタグ付きブロック・リソースを保った往復、RGB の 16/32 bit のレイヤーの読み書き、レイヤースタイル・ベクターマスク等、PSB の書き出し）は PC4。",
+      "remaining": "レイヤー効果・Blend If・塗りの不透明度・ラベルの色は塊のまま保って書き戻すが、描かない・画面に出さない（PC5 のレイヤースタイル・混合オプション）。フォルダーは PSD のグループに書かないので、フォルダーの保った塊は書き戻さない。読み替え（embedded_profile の convert・assign）・引き伸ばしのある 16・32 bit の取り込みと配置レイヤーの絵は 8 bit。PSD で書けない大きさは自動で PSB にせず、断って PSB を勧める。Photoshop の実機では確かめていない（psd-tools とこの版の読み手）"
     },
     {
       "id": "format:camera-RAW",
