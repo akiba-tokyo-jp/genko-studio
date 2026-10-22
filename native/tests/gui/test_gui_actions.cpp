@@ -69,10 +69,11 @@ QKeySequence s(const char* text) { return QKeySequence(QString::fromLatin1(text)
 // Python's words, keys and tips (main.py _build_actions), and the menu each is in.
 const std::vector<Expected>& expected() {
     static const std::vector<Expected> list = {
-        {"act_new", "新しい原稿…", k({QKeySequence(Std::New)}), "", false, "ファイル"},
+        // (PC4 F-0, 節 F 5.1: ファイル's commands by Photoshop's names — 新規…, 別名で保存…, 終了)
+        {"act_new", "新規…", k({QKeySequence(Std::New)}), "", false, "ファイル"},
         {"act_open", "開く…", k({QKeySequence(Std::Open)}), "", false, "ファイル"},
         {"act_save", "保存", k({QKeySequence(Std::Save)}), "変更は自動で保存されます。今すぐ書き込むときに使います", false, "ファイル"},
-        {"act_save_as", "別の場所に保存…", k({QKeySequence(Std::SaveAs)}), "", false, "ファイル"},
+        {"act_save_as", "別名で保存…", k({QKeySequence(Std::SaveAs)}), "", false, "ファイル"},
         {"act_undo", "元に戻す", k({QKeySequence(Std::Undo)}), "", false, "編集"},
         {"act_redo", "やり直す", k({QKeySequence(Std::Redo), s("Ctrl+Y")}), "", false, "編集"},
         {"act_fit", "全体を表示", k({s("Ctrl+0")}), "", false, "表示"},
@@ -131,7 +132,7 @@ const std::vector<Expected>& expected() {
          "ウィンドウ"},
         {"act_next_doc", "次の原稿", k({s("Ctrl+Tab")}), "", false, "ウィンドウ"},
         {"act_prev_doc", "前の原稿", k({s("Ctrl+Shift+Tab")}), "", false, "ウィンドウ"},
-        {"act_quit", "Genko を終わる", k({QKeySequence(Std::Quit)}), "", false, "ファイル"},
+        {"act_quit", "終了", k({QKeySequence(Std::Quit)}), "", false, "ファイル"},
     };
     return list;
 }
@@ -341,7 +342,11 @@ private slots:
         // act_lock_layers), 表示 → スナップ and スナップ先 ▸ (act_snap_on, act_snap_guides, act_snap_grid, act_snap_layers,
         // act_snap_bounds, act_snap_all, act_snap_none) and the move tool's 自動選択・バウンディングボックスを表示
         // (act_move_auto_select, act_move_show_box) — theirs (test_gui_align).
-        QCOMPARE(w->actions_by_name().size(), std::size_t{453});
+        // and the 10 of PC4 F-0 (SPEC FILE-01) — ファイル の 指定形式で開く…・すべてを閉じる・その他を閉じる・コピーを保存…・復帰・
+        // ファイル情報… and 書き出し ▸ PNG としてクイック書き出し・書き出し形式…・書き出しの環境設定…・Web 用に保存（従来）…
+        // (act_open_as, act_close_all, act_close_others, act_save_copy, act_revert, act_file_info, act_quick_export_png,
+        // act_export_as, act_export_prefs, act_save_for_web): frames until F-b and F-c — theFileMenuIsPhotoshops below.
+        QCOMPARE(w->actions_by_name().size(), std::size_t{463});
         QVERIFY(w->action("act_chat_approval"));
         QVERIFY(w->action("act_style"));
         QVERIFY(w->action("act_exposure"));
@@ -380,6 +385,64 @@ private slots:
         // PC3 B4's four retouching tools (test_gui_retouch); PC3 C-b's five shape tools besides 長方形ツール (test_gui_shapes)
         // PC3 B3's オブジェクト選択ツール and クイック選択ツール (test_gui_select_mask)
         QCOMPARE(w->tools_group()->actions().size(), 43);
+    }
+
+    // PC4 F-0 (SPEC FILE-01; 節 F 5.1・5.2): ファイル in Photoshop's order and names — the book's export is 書き出し ▸
+    // 原稿を書き出す… (Ctrl+E) —, and 節 F's new commands in their places with Photoshop's keys: frames that say they are
+    // not in this build yet and change nothing until F-b and F-c connect them.
+    void theFileMenuIsPhotoshops() {
+        Studio studio;
+        MainWindow* w = studio.window.get();
+        QMenu* file = nullptr;
+        for (QAction* top : w->menuBar()->actions()) {
+            if (top->menu() != nullptr && top->menu()->title() == QStringLiteral("ファイル")) file = top->menu();
+        }
+        QVERIFY(file != nullptr);
+        const auto items = [](QMenu* menu) {
+            QStringList out;
+            for (QAction* a : menu->actions()) {
+                if (a->isSeparator()) out << QStringLiteral("|");
+                else if (a->menu() != nullptr) out << a->menu()->title() + QStringLiteral(" ▸");
+                else out << a->text();
+            }
+            return out;
+        };
+        QCOMPARE(items(file),
+                 (QStringList{QStringLiteral("新規…"), QStringLiteral("開く…"), QStringLiteral("指定形式で開く…"), QStringLiteral("最近使用したファイルを開く ▸"),
+                              QStringLiteral("|"), QStringLiteral("AI と作る…"), QStringLiteral("|"), QStringLiteral("閉じる"), QStringLiteral("すべてを閉じる"),
+                              QStringLiteral("その他を閉じる"), QStringLiteral("|"), QStringLiteral("保存"), QStringLiteral("別名で保存…"), QStringLiteral("コピーを保存…"),
+                              QStringLiteral("復帰"), QStringLiteral("|"), QStringLiteral("書き出し ▸"), QStringLiteral("|"), QStringLiteral("埋め込みを配置…"),
+                              QStringLiteral("リンクを配置…"), QStringLiteral("パッケージ…"), QStringLiteral("|"), QStringLiteral("画像を読み込む…"),
+                              QStringLiteral("スキャン画像を線画にして取り込む…"), QStringLiteral("スキャナーから取り込む…"), QStringLiteral("ほかの原稿のページを取り込む…"),
+                              QStringLiteral("PSD をレイヤーのまま読み込む…"), QStringLiteral("|"), QStringLiteral("ファイル情報…"), QStringLiteral("|"),
+                              QStringLiteral("プリント…"), QStringLiteral("|"), QStringLiteral("タイムラプスを記録する"), QStringLiteral("タイムラプスを書き出す…"),
+                              QStringLiteral("|"), QStringLiteral("スクリプト ▸"), QStringLiteral("オートアクション ▸"), QStringLiteral("環境設定…"), QStringLiteral("|"),
+                              QStringLiteral("終了")}));
+        QMenu* exports = w->findChild<QMenu*>(QStringLiteral("menu_export"));
+        QVERIFY(exports != nullptr);
+        QCOMPARE(items(exports), (QStringList{QStringLiteral("PNG としてクイック書き出し"), QStringLiteral("書き出し形式…"), QStringLiteral("|"),
+                                             QStringLiteral("書き出しの環境設定…"), QStringLiteral("|"), QStringLiteral("Web 用に保存（従来）…"), QStringLiteral("|"),
+                                             QStringLiteral("原稿を書き出す…"), QStringLiteral("|"), QStringLiteral("パスを Illustrator へ…"),
+                                             QStringLiteral("カラールックアップテーブル…")}));
+        QCOMPARE(studio.act("act_export")->shortcuts(), QList<QKeySequence>{QKeySequence(QStringLiteral("Ctrl+E"))});
+        QCOMPARE(studio.act("act_print")->text(), QStringLiteral("プリント…"));
+        // (節 F's new ones: Photoshop's keys; each says it is not in this build yet, the book unchanged)
+        const std::vector<std::pair<const char*, const char*>> frames{
+            {"act_open_as", "Ctrl+Alt+Shift+O"}, {"act_close_all", "Ctrl+Alt+W"},   {"act_close_others", "Ctrl+Alt+P"},
+            {"act_save_copy", "Ctrl+Alt+S"},     {"act_revert", "F12"},             {"act_quick_export_png", ""},
+            {"act_export_as", "Ctrl+Alt+Shift+W"}, {"act_export_prefs", ""},        {"act_save_for_web", "Ctrl+Alt+Shift+S"},
+            {"act_file_info", "Ctrl+Alt+Shift+I"}};
+        const std::int64_t revision = studio.doc().revision;
+        const std::size_t books = w->documents().size();
+        for (const auto& [name, key] : frames) {
+            QAction* a = studio.act(name);
+            QVERIFY2(a != nullptr, name);
+            QCOMPARE(a->shortcuts(), *key == '\0' ? QList<QKeySequence>() : QList<QKeySequence>{QKeySequence(QString::fromLatin1(key))});
+            a->trigger();
+            QVERIFY2(w->last_notice().contains(a->text()) && w->last_notice().contains(QStringLiteral("まだ使えません")), qPrintable(w->last_notice()));
+        }
+        QCOMPARE(studio.doc().revision, revision);
+        QCOMPARE(w->documents().size(), books);
     }
 
     // No two commands share a key (Qt would take the key as ambiguous and do neither): PC1b's 色の校正 (Ctrl+Alt+Y — Ctrl+Y
@@ -880,7 +943,7 @@ private slots:
         QCOMPARE(w->book().title, std::string("試し"));
         studio.trigger("act_prev_doc");
         QCOMPARE(w->current_document(), 1);
-        // 新しい原稿…: the dialog makes the book; it opens in a tab
+        // 新規… (新しい原稿…): the dialog makes the book; it opens in a tab
         studio.answers->responder->exec = [&studio](QDialog* dialog) {
             auto* d = qobject_cast<genko::app::NewProjectDialog*>(dialog);
             if (d == nullptr) return 0;
@@ -893,7 +956,7 @@ private slots:
         QCOMPARE(w->book().title, std::string("新しい本"));
         QVERIFY(w->session().path().has_value());
         QVERIFY(fs::exists(*w->session().path() / "project.json"));
-        // 別の場所に保存…: a copy with a new book id; the work goes on there
+        // 別名で保存… (別の場所に保存…): a copy with a new book id; the work goes on there
         const std::string old_id = w->book().book_id;
         const fs::path copy = path_of(studio.dir.filePath("写し"));
         studio.answers->responder->save_path = [copy](const QString& caption, const QString&) {
@@ -916,7 +979,7 @@ private slots:
         QCOMPARE(second->session_ptr(), w->session_ptr());
         second->close();
         QCOMPARE(genko::app::documents::windows().size(), windows);
-        // Genko を終わる: every window (each book saved: nothing asked)
+        // 終了 (Genko を終わる): every window (each book saved: nothing asked)
         studio.trigger("act_quit");
         QVERIFY(w->closed());
         QVERIFY(!studio.answers->asked.contains(QStringLiteral("genko::app::CloseGuard")));

@@ -1509,7 +1509,7 @@ void MainWindow::refresh_first_steps() {
     next_buttons_[QStringLiteral("draw")]->setText(mark(drawn, QStringLiteral("ペンで描く") + key_hint("act_pen")));
     next_buttons_[QStringLiteral("line")]->setText(mark(lines, QStringLiteral("台詞を入れる") + key_hint("act_text")));
     next_buttons_[QStringLiteral("save")]->setText(mark(saved, QStringLiteral("保存")));
-    next_buttons_[QStringLiteral("export")]->setText(QStringLiteral("書き出し…"));
+    next_buttons_[QStringLiteral("export")]->setText(QStringLiteral("原稿を書き出す…"));
     next_steps_->setVisible(next);
 }
 

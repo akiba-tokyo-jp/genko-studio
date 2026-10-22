@@ -101,7 +101,7 @@ SaveFailureBar::SaveFailureBar(QWidget* parent) : QWidget(parent) {
     auto* row = new QHBoxLayout;
     retry_ = new QPushButton(QStringLiteral("再試行"));
     retry_->setToolTip(QStringLiteral("もう一度、原稿に保存します"));
-    save_as_ = new QPushButton(QStringLiteral("別の場所に保存…"));
+    save_as_ = new QPushButton(QStringLiteral("別名で保存…"));
     save_as_->setToolTip(QStringLiteral("書き込める別の場所に、この原稿を保存します"));
     recovery_ = new QPushButton(QStringLiteral("復旧用コピーを作る"));
     recovery_->setToolTip(QStringLiteral("設定フォルダーの復旧用の場所に、今の原稿を書きます（次に開くときに戻せます）"));

@@ -594,7 +594,7 @@ private slots:
         QVERIFY(desk.failure_text().contains(QStringLiteral("変更は復旧用のコピーに書きました")));
         QCOMPARE(desk.window->failure_bar()->where()->path(), qpath(desk.book));
         QCOMPARE(desk.window->failure_bar()->retry_button()->text(), QStringLiteral("再試行"));
-        QCOMPARE(desk.window->failure_bar()->save_as_button()->text(), QStringLiteral("別の場所に保存…"));
+        QCOMPARE(desk.window->failure_bar()->save_as_button()->text(), QStringLiteral("別名で保存…"));  // (PC4 F-0: Photoshop's name)
         QCOMPARE(desk.window->failure_bar()->recovery_button()->text(), QStringLiteral("復旧用コピーを作る"));
         QCOMPARE(ink_strokes(desk.window->book()), strokes + 1);
         QCOMPARE(ink_strokes(read_book(desk.book)), strokes);

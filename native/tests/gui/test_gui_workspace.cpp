@@ -217,7 +217,7 @@ private slots:
             auto* choose = qobject_cast<app::ChooseCommands*>(dialog);
             if (choose == nullptr || choose->line == nullptr) return 0;
             choose->mine->clear();
-            choose->filter->setText(QStringLiteral("書き出し…"));
+            choose->filter->setText(QStringLiteral("原稿を書き出す…"));  // (PC4 F-0: 書き出し…'s new name)
             choose->all->setCurrentRow(0);
             choose->add->click();
             choose->line->click();
@@ -227,7 +227,7 @@ private slots:
             return static_cast<int>(QDialog::Accepted);
         };
         b.act("act_edit_commandbar")->trigger();
-        QCOMPARE(commands_on(), (QStringList{QStringLiteral("書き出し…"), QStringLiteral("|"), QStringLiteral("元に戻す")}));
+        QCOMPARE(commands_on(), (QStringList{QStringLiteral("原稿を書き出す…"), QStringLiteral("|"), QStringLiteral("元に戻す")}));
         QCOMPARE(b.window->doc_tabs()->isVisibleTo(bar), true);
         // ファイル → 環境設定… opens the preferences (asked before another window takes the answers)
         b.answers.asked.clear();
@@ -240,7 +240,7 @@ private slots:
         for (QAction* a : other.window->command_bar()->actions()) {
             if (!a->property("keep").toBool()) on_other << (a->isSeparator() ? QStringLiteral("|") : a->text());
         }
-        QCOMPARE(on_other, (QStringList{QStringLiteral("書き出し…"), QStringLiteral("|"), QStringLiteral("元に戻す")}));
+        QCOMPARE(on_other, (QStringList{QStringLiteral("原稿を書き出す…"), QStringLiteral("|"), QStringLiteral("元に戻す")}));
     }
 
     // Workspaces: the panels kept under a name (asked for), listed in ウィンドウ → ワークスペース, put back, deleted;
@@ -527,6 +527,40 @@ private slots:
         app::settings()->remove(QStringLiteral("shortcuts/自由変形（メッシュ・3×3）"));
         QCOMPARE(b.window->action("act_warp_mesh")->shortcut(), QKeySequence(QStringLiteral("Ctrl+Alt+J")));
         QVERIFY(b.window->action("act_smart_warp")->shortcut() != QKeySequence(QStringLiteral("Ctrl+Alt+J")));
+    }
+
+    // PC4 F-0 (節 F 5.1: ファイル's commands by Photoshop's names): each renamed command is read under its old name — the
+    // command bar's and the quick-access panel's places, a key chosen under it — and the old names are in no menu.
+    void theRenamedFileCommandsAreFound() {
+        Book b;
+        const std::vector<std::pair<const char*, const char*>> renamed{
+            {"act_new", "新しい原稿…"},  {"act_save_as", "別の場所に保存…"}, {"act_export", "書き出し…"},
+            {"act_print", "印刷…"},      {"act_quit", "Genko を終わる"},     {"act_export_lookup", "カラールックアップテーブルを書き出す…"}};
+        QSet<QString> now;
+        for (const auto& [action, name] : app::command_names(b.window.get())) now.insert(name);
+        QStringList bar;
+        for (const auto& [attribute, before] : renamed) {
+            const QString old = QString::fromUtf8(before);
+            const QString name = b.window->action(QString::fromLatin1(attribute))->text();
+            QVERIFY2(name != old, attribute);
+            QVERIFY2(now.contains(name) && !now.contains(old), attribute);
+            bool kept = false;
+            for (auto [it, end] = app::preferences::renamed().equal_range(name); it != end; ++it) kept = kept || it->second == old;
+            QVERIFY2(kept, attribute);
+            bar << old;
+        }
+        app::settings()->setValue(QStringLiteral("ui/commandbar"), bar.join(QLatin1Char('\t')));
+        const QStringList read = app::chosen(QStringLiteral("ui/commandbar"), app::kDefaultCommandBar);
+        app::settings()->remove(QStringLiteral("ui/commandbar"));
+        QCOMPARE(read.size(), static_cast<qsizetype>(renamed.size()));
+        for (std::size_t i = 0; i < renamed.size(); ++i) QCOMPARE(read[static_cast<qsizetype>(i)], b.window->action(QString::fromLatin1(renamed[i].first))->text());
+        // (the default command bar ends with the book's export by its new name)
+        QCOMPARE(app::kDefaultCommandBar.back(), QStringLiteral("原稿を書き出す…"));
+        // a key chosen under the old name
+        app::settings()->setValue(QStringLiteral("shortcuts/Genko を終わる"), QStringLiteral("Ctrl+Alt+Shift+Q"));
+        app::preferences::apply_shortcuts(b.window.get());
+        app::settings()->remove(QStringLiteral("shortcuts/Genko を終わる"));
+        QCOMPARE(b.window->action("act_quit")->shortcut(), QKeySequence(QStringLiteral("Ctrl+Alt+Shift+Q")));
     }
 
     // A short window: the palette's pictures shrink (down to 16 px) so the last tool stays within reach; the layers'

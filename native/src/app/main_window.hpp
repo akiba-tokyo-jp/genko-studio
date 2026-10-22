@@ -636,6 +636,13 @@ private:
     void build_path_actions();
     void build_path_menus(QMenu* file, QMenu* view, QMenu* tools, QMenu* layers);
     void build_path_dock();
+    // PC4 F-0 (節 F 5.1・5.2, app/main_window_file.cpp): ファイル in Photoshop's order and names — 新規…・開く…・指定形式で開く…・
+    // 最近使用したファイルを開く ▸ / AI と作る… / 閉じる・すべてを閉じる・その他を閉じる / 保存・別名で保存…・コピーを保存…・復帰 /
+    // 書き出し ▸ / 配置 / 読み込み / ファイル情報… / プリント… / タイムラプス / スクリプト ▸・オートアクション ▸・環境設定… / 終了 —,
+    // and the frames of 節 F's new commands (F-b, F-c: each says it is not in this build yet until its group connects it).
+    void build_file_actions();
+    void build_file_menu(QMenu* file);
+    QMenu* export_menu_ = nullptr;  // ファイル → 書き出し
     void path_drawn(const core::Json& subpath);
     void path_edited(const core::Json& path);
     // pen-shapes@1 (PC3 C-b, app/main_window_shapes.cpp): the shape tools and the shape parts' commands, their menus

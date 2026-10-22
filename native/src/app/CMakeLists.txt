@@ -145,6 +145,8 @@ genko_library(genko_app
     # PC3 C-d: 表示 → スナップ・スナップ先 (the canvas's snapping), the move tool's options, レイヤー → 整列・分布・重ね順・リンク
     canvas_snap.cpp
     main_window_align.cpp
+    # PC4 F-0: ファイル in Photoshop's order and names, 節 F's new commands as frames
+    main_window_file.cpp
     ${GENKO_APP_RESOURCES}
     ${GENKO_APP_FONTS}
   PUBLIC_DEPS genko_core genko_storage genko_render genko_render_ops genko_formats genko_service Qt6::Core Qt6::Gui Qt6::Widgets Qt6::Svg Qt6::Concurrent

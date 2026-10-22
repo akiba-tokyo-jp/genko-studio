@@ -221,8 +221,9 @@ private slots:
             const char* menu;
         };
         const std::vector<Want> wanted = {
-            {"act_export", "書き出し…", "Ctrl+E", "PDF・TIFF・PSD・縦読み・SNS 用などに書き出します", false, "ファイル"},
-            {"act_print", "印刷…", "Ctrl+P", "プリンターで紙に印刷します（仕上がりで切る・用紙全体）", false, "ファイル"},
+            // (PC4 F-0, 節 F 5.1: 書き出し… is ファイル → 書き出し → 原稿を書き出す…, 印刷… is プリント…)
+            {"act_export", "原稿を書き出す…", "Ctrl+E", "PDF・TIFF・PSD・縦読み・SNS 用などに書き出します", false, "ファイル/書き出し"},
+            {"act_print", "プリント…", "Ctrl+P", "プリンターで紙に印刷します（仕上がりで切る・用紙全体）", false, "ファイル"},
             {"act_history", "履歴…", "Ctrl+H", "変更の一覧。クリックでその時点まで戻る・進む", false, "編集"},
             {"act_phone", "スマホの画面の範囲を表示", "", "縦読みの原稿で、スマホ 1 画面に入る範囲と画面の切れ目", true, "表示"},
             {"act_scale", "目盛りを表示", "Ctrl+R", "上と左に mm の目盛り。目盛りからドラッグするとガイド線を引けます", true, "表示"},
@@ -241,13 +242,15 @@ private slots:
             QCOMPARE(a->isCheckable(), e.checkable);
             QVERIFY2(menus_of(w, a) == QStringList{QString::fromUtf8(e.menu)}, e.name);
         }
-        // their places in Python's menus (among the commands this build has)
+        // their places (PC4 F-0, 節 F 5.2: Photoshop's ファイル — the book's export in 書き出し ▸, then PC3 C-a's パスを
+        // Illustrator へ…; プリント… its own group after ファイル情報…: test_gui_actions' theFileMenuIsPhotoshops)
         const QStringList file = menu_items(w, QStringLiteral("ファイル"));
-        QCOMPARE(file.indexOf(QStringLiteral("書き出し…")), file.indexOf(QStringLiteral("PSD をレイヤーのまま読み込む…")) + 1);
-        // (PC3 C-a: パスを Illustrator へ… — Photoshop's 書き出し → パスを Illustrator へ… — right after 書き出し…)
-        QCOMPARE(file.indexOf(QStringLiteral("パスを Illustrator へ…")), file.indexOf(QStringLiteral("書き出し…")) + 1);
-        QCOMPARE(file.indexOf(QStringLiteral("印刷…")), file.indexOf(QStringLiteral("書き出し…")) + 2);
-        QCOMPARE(file.at(file.indexOf(QStringLiteral("印刷…")) + 1), QStringLiteral("|"));
+        QCOMPARE(file.indexOf(QStringLiteral("プリント…")), file.indexOf(QStringLiteral("ファイル情報…")) + 2);
+        QCOMPARE(file.at(file.indexOf(QStringLiteral("プリント…")) - 1), QStringLiteral("|"));
+        QCOMPARE(file.at(file.indexOf(QStringLiteral("プリント…")) + 1), QStringLiteral("|"));
+        QStringList exports;
+        for (QAction* a : w->findChild<QMenu*>(QStringLiteral("menu_export"))->actions()) exports << (a->isSeparator() ? QStringLiteral("|") : a->text());
+        QCOMPARE(exports.indexOf(QStringLiteral("パスを Illustrator へ…")), exports.indexOf(QStringLiteral("原稿を書き出す…")) + 2);
         const QStringList edit = menu_items(w, QStringLiteral("編集"));
         QCOMPARE(edit.mid(0, 4), (QStringList{QStringLiteral("元に戻す"), QStringLiteral("やり直す"), QStringLiteral("履歴…"), QStringLiteral("|")}));
         const QStringList view = menu_items(w, QStringLiteral("表示"));
@@ -261,7 +264,7 @@ private slots:
         QCOMPARE(pages.indexOf(QStringLiteral("本の形でプレビュー…")), pages.indexOf(QStringLiteral("台詞の検索・置換…")) + 1);
         QCOMPARE(pages.indexOf(QStringLiteral("入稿前の点検")), pages.indexOf(QStringLiteral("本の形でプレビュー…")) + 1);
         QCOMPARE(pages.at(pages.indexOf(QStringLiteral("入稿前の点検")) + 1), QStringLiteral("|"));
-        // 書き出し… at the end of the command bar (workspace.DEFAULT_COMMANDBAR), with its picture
+        // 原稿を書き出す… (書き出し…) at the end of the command bar (workspace.DEFAULT_COMMANDBAR), with its picture
         QToolBar* bar = w->findChild<QToolBar*>(QStringLiteral("commands"));
         QVERIFY(bar != nullptr);
         QCOMPARE(bar->actions().back(), s.act("act_export"));

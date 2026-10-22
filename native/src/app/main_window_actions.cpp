@@ -353,10 +353,11 @@ QAction* MainWindow::make(const QString& attribute, const QString& title, std::f
 
 void MainWindow::build_actions() {
     PageCanvas* c = canvas_;
-    make("act_new", QStringLiteral("新しい原稿…"), [this] { new_book(); }, keys({std_key(Std::New)}));
+    // (PC4 F-0, 節 F 5.1: ファイル's commands by Photoshop's names — 新規…, 別名で保存…, 終了; preferences::renamed())
+    make("act_new", QStringLiteral("新規…"), [this] { new_book(); }, keys({std_key(Std::New)}));
     make("act_open", QStringLiteral("開く…"), [this] { open_book(); }, keys({std_key(Std::Open)}));
     make("act_save", QStringLiteral("保存"), [this] { save(); }, keys({std_key(Std::Save)}), QStringLiteral("変更は自動で保存されます。今すぐ書き込むときに使います"));
-    make("act_save_as", QStringLiteral("別の場所に保存…"), [this] { save_as(); }, keys({std_key(Std::SaveAs)}));
+    make("act_save_as", QStringLiteral("別名で保存…"), [this] { save_as(); }, keys({std_key(Std::SaveAs)}));
     make("act_exposure", QStringLiteral("露光量の調整層…"), [this] { exposure_dialog(); });
     make("act_undo", QStringLiteral("元に戻す"), [this] { undo(); }, keys({std_key(Std::Undo)}));
     make("act_redo", QStringLiteral("やり直す"), [this] { redo(); }, keys({std_key(Std::Redo), QKeySequence(QStringLiteral("Ctrl+Y"))}));
@@ -473,6 +474,7 @@ void MainWindow::build_actions() {
     build_retouch_actions();    // (PC3 B4: the retouching tools, コンテンツに応じた塗りつぶし…: retouch_tools.cpp)
     build_shape_actions();      // (pen-shapes@1, PC3 C-b: the shape tools, シェイプを結合…: main_window_shapes.cpp)
     build_align_actions();      // (PC3 C-d: 重ね順・整列・分布・リンク・ロック, スナップ (with 定規's グリッドにスナップ), the move tool's: main_window_align.cpp)
+    build_file_actions();       // (PC4 F-0: 節 F's new commands of ファイル, frames until F-b and F-c: main_window_file.cpp)
     make("act_point_wider", QStringLiteral("選んだ点を太く"), [this] { point_width(1.25); }, keys({QKeySequence(QStringLiteral("Ctrl+Alt+]"))}),
          QStringLiteral("部分選択ツールで選んだ制御点のところだけ、線を太くします"));
     make("act_color", QStringLiteral("ペンの色…"), [this] { pick_colour(); }, keys({QKeySequence(QStringLiteral("C"))}));
@@ -562,7 +564,7 @@ void MainWindow::build_actions() {
          QStringLiteral("この原稿をもう 1 つのウィンドウで開きます。拡大して描きながら、別の窓で全体を見る"));
     make("act_next_doc", QStringLiteral("次の原稿"), [this] { next_document(1); }, keys({QKeySequence(QStringLiteral("Ctrl+Tab"))}));
     make("act_prev_doc", QStringLiteral("前の原稿"), [this] { next_document(-1); }, keys({QKeySequence(QStringLiteral("Ctrl+Shift+Tab"))}));
-    make("act_quit", QStringLiteral("Genko を終わる"), [] { QApplication::closeAllWindows(); }, keys({std_key(Std::Quit)}));
+    make("act_quit", QStringLiteral("終了"), [] { QApplication::closeAllWindows(); }, keys({std_key(Std::Quit)}));
     // the tools' pictures and their tooltips with their keys
     for (const auto& [name, attribute] : {std::pair{"select", "act_select"}, {"pen", "act_pen"}, {"eraser", "act_eraser"}, {"frame", "act_frame"},
                                           {"picker", "act_picker"}, {"fill", "act_fill"}, {"lassofill", "act_lassofill"},
@@ -585,50 +587,7 @@ void MainWindow::build_actions() {
 void MainWindow::build_menus() {
     QMenuBar* bar = menuBar();
     QMenu* file = bar->addMenu(QStringLiteral("ファイル"));
-    file->addAction(action("act_new"));
-    file->addAction(action("act_open"));
-    recent_menu_ = file->addMenu(QStringLiteral("最近使った原稿"));
-    recent_menu_->setProperty("remade", true);
-    connect(recent_menu_, &QMenu::aboutToShow, this, [this] {
-        recent_menu_->clear();
-        const auto paths = recent_projects();
-        if (paths.empty()) {
-            recent_menu_->addAction(QStringLiteral("（まだありません）"))->setEnabled(false);
-            return;
-        }
-        for (std::size_t i = 0; i < paths.size() && i < 12; ++i) {
-            const auto path = paths[i];
-            QAction* item = recent_menu_->addAction(QString::fromStdString(core::path_to_utf8(path.stem())), this, [this, path] { open_project(path); });
-            item->setToolTip(QDir::toNativeSeparators(QString::fromStdString(core::path_to_utf8(path))));  // (the whole path)
-        }
-    });
-    file->addSeparator();
-    file->addAction(action("act_ai"));
-    file->addSeparator();
-    file->addAction(action("act_save"));
-    file->addAction(action("act_save_as"));
-    file->addSeparator();
-    file->addAction(action("act_import"));
-    file->addAction(action("act_import_scan"));
-    file->addAction(action("act_scanner"));
-    file->addAction(action("act_merge_book"));
-    file->addAction(action("act_import_psd"));
-    file->addAction(action("act_export"));
-    file->addAction(action("act_print"));
-    file->addSeparator();
-    file->addAction(action("act_timelapse"));
-    file->addAction(action("act_timelapse_export"));
-    file->addSeparator();
-    file->addMenu(QStringLiteral("スクリプト"))->addAction(action("act_flatten_masks"));  // (PC3 B2: file.scripts.*)
-    actions_menu_ = file->addMenu(QStringLiteral("オートアクション"));
-    actions_menu_->setProperty("remade", true);
-    connect(actions_menu_, &QMenu::aboutToShow, this, &MainWindow::fill_actions_menu);
-    fill_actions_menu();
-    file->addSeparator();
-    file->addAction(action("act_prefs"));
-    file->addSeparator();
-    file->addAction(action("act_close"));
-    file->addAction(action("act_quit"));
+    build_file_menu(file);  // (PC4 F-0: Photoshop's order and names, 書き出し ▸, 節 F's frames: main_window_file.cpp)
     QMenu* edit = bar->addMenu(QStringLiteral("編集"));
     edit->addAction(action("act_undo"));
     edit->addAction(action("act_redo"));

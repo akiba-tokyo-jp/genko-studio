@@ -256,11 +256,8 @@ void MainWindow::build_smart_actions() {
 }
 
 void MainWindow::build_smart_menus(QMenu* layers, QMenu* file) {
-    // (ファイル: after 画像を読み込む…)
-    const QList<QAction*> items = file->actions();
-    const qsizetype at = items.indexOf(action("act_import"));
-    QAction* before = at >= 0 && at + 1 < items.size() ? items.at(at + 1) : nullptr;
-    for (const char* name : {"act_place_embedded", "act_place_linked", "act_package"}) file->insertAction(before, action(name));
+    // (ファイル: 埋め込みを配置…・リンクを配置…・パッケージ… are put in Photoshop's place by build_file_menu, PC4 F-0)
+    (void)file;
     layers->addSeparator();
     QMenu* smart = layers->addMenu(QStringLiteral("スマートオブジェクト"));
     smart->setObjectName(QStringLiteral("menu_smart"));
