@@ -14,7 +14,8 @@
 // MIT: native/third_party/photocraft/NOTICE.md), a precise layer's samples in float, an ink layer's inks by the page's rules
 // (render/ink correct: a colour left as it was keeps its inks) — with a blend and an opacity, as upstream's composite_area
 // lays them (the W3C general formula, image_ops::composite). The ops gradient_fill and fill take this way for a precise
-// or ink layer and for their new keys; their calls without them on an 8-bit layer keep the pictures they always laid.
+// or ink layer and for a blend; on an 8-bit layer in the 通常 mode they lay pictures (gradient_fill's new keys too, at the
+// layer's grid: the coordinator's decision after the review — its lines stay lines).
 
 namespace genko::render::paint_fill {
 

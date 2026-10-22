@@ -27,6 +27,7 @@
 #include "render/page_internal.hpp"
 #include "render/paint_fill.hpp"
 #include "render/raster.hpp"
+#include "render/selection.hpp"
 #include "storage/lock.hpp"
 #include "storage/reader.hpp"
 #include "storage/transaction.hpp"
@@ -205,7 +206,9 @@ private slots:
             const auto result = run_ops(doc, Json::array({black_white()}));
             QVERIFY2(result.warnings.dump().find("unknown") == std::string::npos, result.warnings.dump().c_str());
             core::Document painted = result.doc;
-            QVERIFY2(painted.page(0).layers[0].patches.empty(), kind.c_str());
+            // (an 8-bit layer in 通常: a picture laid on it — its lines kept as lines, the coordinator's decision —; the others
+            // their values)
+            QVERIFY2(painted.page(0).layers[0].patches.size() == (kind == "8" ? 1u : 0u), kind.c_str());
             QVERIFY(painted.page(0).layers[0].kind == core::LayerKind::Raster);
             const Pixels p = whole(painted);
             const std::vector<Rgba> c = shown(p);
@@ -232,10 +235,11 @@ private slots:
         }
     }
 
-    // dither (an 8-bit layer's): a flat gradient smooth without it, varied a level with it, on the same mean
+    // dither (an 8-bit layer's): a flat gradient between two levels (128.5) one level without it, the two levels around it
+    // with it, on its mean (a band broken: PhotoCraft's gradient_dither_breaks_banding)
     void ditherBreaksBanding() {
         Json flat = black_white();
-        flat["stops"] = Json::parse("[[0, [128, 128, 128]], [1, [128, 128, 128]]]");
+        flat["stops"] = Json::parse("[[0, [128.5, 128.5, 128.5]], [1, [128.5, 128.5, 128.5]]]");
         core::Document smooth = run(paint_book(), flat);
         flat["dither"] = true;
         core::Document noisy = run(paint_book(), flat);
@@ -246,11 +250,11 @@ private slots:
             plain.insert(a.at(i)[0]);
             varied.insert(b.at(i)[0]);
             sum += b.at(i)[0];
-            QVERIFY(std::abs(b.at(i)[0] - 128.0f / 255.0f) <= 1.0f / 255.0f + 1e-6f);
+            QVERIFY(std::abs(b.at(i)[0] - 128.5f / 255.0f) <= 0.5f / 255.0f + 1e-6f);
         }
         QCOMPARE(plain.size(), std::size_t(1));
-        QVERIFY(varied.size() > 1);
-        QVERIFY(std::abs(sum / static_cast<double>(b.size()) - 128.0 / 255.0) < 0.5 / 255.0);
+        QCOMPARE(varied.size(), std::size_t(2));
+        QVERIFY(std::abs(sum / static_cast<double>(b.size()) - 128.5 / 255.0) < 0.1 / 255.0);
         // (the same pixels each time: the noise is of the place)
         core::Document again = run(paint_book(), flat);
         const Pixels c = whole(again);
@@ -467,7 +471,7 @@ private slots:
 
     // a layer larger than a band (4 million pixels): painted in bands, the same gradient across their seams
     void largeLayersInBands() {
-        core::Document doc = paint_book(2400);  // (5.76 million pixels: two bands)
+        core::Document doc = as_kind(paint_book(2400), "16");  // (5.76 million pixels of a precise layer: two bands)
         Json op = black_white(0, 0.01);
         op["from"] = Json::array({25, 0});
         op["to"] = Json::array({25, 50.8});
@@ -516,6 +520,71 @@ private slots:
             const core::Document blended = run(doc, multiplied);
             QCOMPARE(blended.page(0).layers[0].stroke_count(), std::size_t(0));
         }
+    }
+
+    // (the coordinator's decision after E4's review) An 8-bit paint layer with a line on it: gradient_fill with this build's
+    // keys in the 通常 mode lays a picture on it — under the line, which stays a line; its pixels as they were — at the
+    // layer's grid (200 dpi; an opened picture's page its grid), in the box it paints; dither and transparency in the
+    // picture's pixels; saved, opened and undone. A blend makes the line its pixels.
+    void eightBitLayersKeepTheirLines() {
+        const Json line{{"op", "add_stroke"}, {"page", 1}, {"layer_id", "paint"}, {"points", Json::parse("[[5, 10], [45, 10]]")}, {"width_mm", 2.0}};
+        const core::Document doc = run(paint_book(), line);
+        Json op = black_white();
+        op["dither"] = true;
+        op["transparency"] = Json::parse("[[0, 1], [1, 0.5]]");
+        const core::Document painted = run(doc, op);
+        const core::Layer& layer = painted.page(0).layers[0];
+        QCOMPARE(layer.stroke_count(), std::size_t(1));
+        QCOMPARE(layer.patches.size(), std::size_t(1));
+        QVERIFY(layer.raster_png == doc.page(0).layers[0].raster_png);
+        const auto dpi_of = [](const core::Patch& patch) {
+            const render::Image picture = render::selection::open_picture(*patch.png);
+            return picture.width() / (patch.attrs["box"][2].get<double>() / kInch);
+        };
+        QVERIFY2(std::abs(dpi_of(layer.patches[0]) - 200) < 1, qPrintable(QString::number(dpi_of(layer.patches[0]))));
+        {
+            const render::Image picture = render::selection::open_picture(*layer.patches[0].png).convert("RGBA");
+            const std::string bytes = picture.tobytes();
+            // (the end of the drag: half transparent; along a column of one place the dither's levels differ)
+            const auto alpha = [&](int x, int y) { return static_cast<unsigned char>(bytes[(std::size_t(y) * picture.width() + x) * 4 + 3]); };
+            QVERIFY(std::abs(int(alpha(picture.width() - 3, 100)) - 128) <= 1);
+            QCOMPARE(int(alpha(2, 100)), 255);
+            std::set<int> levels;
+            for (int y = 0; y < picture.height(); ++y) levels.insert(static_cast<unsigned char>(bytes[(std::size_t(y) * picture.width() + 200) * 4]));
+            QVERIFY(levels.size() > 1);
+        }
+        // in a selection: the picture its box only
+        Json inside = op;
+        inside["area"] = Json{{"poly", Json::parse("[[10, 20], [30, 20], [30, 40], [10, 40]]")}};
+        const core::Document part = run(doc, inside);
+        const Json box = part.page(0).layers[0].patches.at(0).attrs["box"];
+        QVERIFY2(std::abs(box[0].get<double>() - 10) < 0.2 && std::abs(box[2].get<double>() - 20) < 0.3, box.dump().c_str());
+        // an opened picture's page (its grid "finest", 300 dpi here): the picture at the grid
+        core::Document fine = run(paint_book(600), line);
+        fine.edit_page(0).spec.grid = "finest";
+        const core::Document fine_painted = run(fine, op);
+        QVERIFY2(std::abs(dpi_of(fine_painted.page(0).layers[0].patches.at(0)) - 300) < 1, qPrintable(QString::number(dpi_of(fine_painted.page(0).layers[0].patches.at(0)))));
+        // a blend: the line made the layer's pixels
+        Json multiplied = op;
+        multiplied["blend"] = "multiply";
+        const core::Document blended = run(doc, multiplied);
+        QCOMPARE(blended.page(0).layers[0].stroke_count(), std::size_t(0));
+        QVERIFY(blended.page(0).layers[0].patches.empty());
+        // saved, opened, undone, done again
+        QTemporaryDir scratch;
+        const fs::path dir = core::path_from_utf8(scratch.path().toStdString()) / "e.genko";
+        write_book(doc, dir);
+        const auto done = run_ops(doc, Json::array({op}));
+        save_next(done.doc, dir, done.journal_ops);
+        const auto opened = storage::load_document(dir);
+        QCOMPARE(opened.document.page(0).layers[0].stroke_count(), std::size_t(1));
+        QCOMPARE(opened.document.page(0).layers[0].patches.size(), std::size_t(1));
+        QCOMPARE(render::selection::open_picture(*opened.document.page(0).layers[0].patches[0].png).tobytes(),
+                 render::selection::open_picture(*done.doc.page(0).layers[0].patches[0].png).tobytes());
+        storage::restore(dir, "human:test", false, false);
+        QVERIFY(storage::load_document(dir).document.page(0).layers[0].patches.empty());
+        storage::restore(dir, "human:test", true, false);
+        QCOMPARE(storage::load_document(dir).document.page(0).layers[0].patches.size(), std::size_t(1));
     }
 
     // op Undo and Redo: a gradient on a precise layer and a fill on an ink layer saved as a step of the journal, undone

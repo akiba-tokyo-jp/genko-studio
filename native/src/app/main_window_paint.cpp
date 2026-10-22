@@ -320,7 +320,8 @@ void MainWindow::build_gradient_page(ToolSettings* ts) {
     form->addRow(gradient_reverse_);
     form->addRow(gradient_dither_);
     form->addRow(gradient_transparency_);
-    form->addRow(hint(QStringLiteral("ペイントのレイヤーには画素として塗り、ペンのレイヤーには絵として置きます。描画色・背景色の分岐点は今の色で塗ります。"
+    form->addRow(hint(QStringLiteral("線は線のまま、その下に塗ります（8 bit のペイントのレイヤーとペンのレイヤーには絵として置き、高精度・インキのレイヤーは画素に）。"
+                                     "モードを通常のほかにすると、ペイントのレイヤーの線は画素になります。描画色・背景色の分岐点は今の色で塗ります。"
                                      "16・32 bit のページでも、コマで切るレイヤー（新しいペイントのレイヤーの既定）は 8 bit の値で塗ります"
                                      "（高精度にするには、レイヤーの「コマの外にもはみ出す」を入れる）")));
     fill_gradient_presets();
@@ -839,9 +840,9 @@ void MainWindow::gradient(const QPointF& from, const QPointF& to) {
     if (const auto area = selection_area()) op["area"] = *area;
     // (a paint layer's lines and pictures become its pixels: asked once)
     // (a channel, the Quick Mask or a layer mask drawn on: the layer's own lines are not touched)
-    // (review P2-1: an ink layer's lines stay lines in 通常 — the gradient under them —; an 8-bit layer's become its pixels)
-    const bool ink_layer = page->color.has_value() && !layer->raster_png && !layer->color_raster;
-    if (layer->kind == core::LayerKind::Raster && channel_view().target.empty() && (op.contains("blend") || !ink_layer) &&
+    // (review P2-1 and the coordinator's decision after it: a paint layer's lines stay lines in 通常 — an 8-bit layer's
+    // gradient a picture laid under them, an ink layer's in its inks under them —; another mode makes them its pixels)
+    if (op.contains("blend") && layer->kind == core::LayerKind::Raster && channel_view().target.empty() &&
         !blend_bakes_ok(*page, *layer, QStringLiteral("グラデーションツール")))
         return;
     apply_ops(Json::array({op}));

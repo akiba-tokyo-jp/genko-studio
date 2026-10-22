@@ -268,9 +268,9 @@ Image fill_reference(const Document& doc, const Page& page, std::size_t target, 
 // layer's own values (render/paint_fill) when the layer is precise (its pixels of 16 or 32 bits, or an empty paint layer of
 // an RGB page of 16 or 32 bits: paint_fill::becomes_precise) or of inks (a paint layer of a CMYK, Lab, grey or
 // multichannel page that holds no 8-bit picture — as image_ops::layer_pixels reads it), or when the op asks for what only
-// those values can do (a blend; the gradient's new keys); an 8-bit layer's fill without them keeps the picture it always
-// laid (the same bytes) — a channel's or a mask's lent to the op too (an 8-bit picture on any page) —, a pen or tone
-// layer's too.
+// those values can do (a blend); an 8-bit layer's fill without it keeps the picture it always laid (the same bytes; a
+// gradient with the new keys a picture at the layer's grid: its lines stay lines, the coordinator's decision after the
+// review) — a channel's or a mask's lent to the op too (an 8-bit picture on any page) —, a pen or tone layer's too.
 bool precise_or_inks(const Page& page, const Layer& layer) {
     return layer.color_raster != nullptr || layer.ink_raster != nullptr || (page.color.has_value() && layer.raster_png == nullptr) ||
            paint_fill::becomes_precise(page, layer);
@@ -727,7 +727,9 @@ void gradient_fill_new(OpContext& c, std::size_t at, std::size_t ti, const std::
     const detail::GradientColours colours(spec, stops);
     Page& page = doc.edit_page(at);
     const Layer& target = page.layers[ti];
-    if (target.kind == LayerKind::Raster) {
+    // (the coordinator's decision after E4's review: an 8-bit paint layer in the 通常 mode keeps its lines as lines — the
+    // user's decision 3, and the gradient tool's way before E4 —, the gradient a picture laid on it below)
+    if (target.kind == LayerKind::Raster && (blend || precise_or_inks(page, target))) {
         std::optional<paint_fill::Coverage> coverage;
         if (core::truthy_at(op, "area")) {
             coverage = paint_fill::Coverage{};
@@ -745,9 +747,12 @@ void gradient_fill_new(OpContext& c, std::size_t at, std::size_t ti, const std::
         if (!paint_fill::paint(c, at, id, coverage, colour, how)) throw OpError("the gradient has nothing to show there");
         return;
     }
-    // a pen or tone layer: a picture laid on it, as before (150 dpi)
+    // a pen or tone layer: a picture laid on it, as before (150 dpi); an 8-bit paint layer in the 通常 mode too — over the
+    // pictures laid on it before and under its lines, as the calls without the new keys lay theirs —, at the layer's own
+    // grid (raster::working_dpi: 200 dpi, an opened picture's page its grid), in the box it paints (the selection's, or the
+    // page); the new keys (shapes, reverse, dither, transparency, opacity, colours) in its pixels
     if (blend) throw OpError("blend paints a paint layer's pixels (a pen layer's fills are pictures laid on it: leave blend out)");
-    const int dpi = kGradientDpi;
+    const int dpi = target.kind == LayerKind::Raster ? raster::working_dpi(page) : kGradientDpi;
     Image shown;
     std::int64_t x0 = 0;
     std::int64_t y0 = 0;
@@ -3073,8 +3078,10 @@ bool paints_layer_values(std::string_view name, const core::Json& op, const core
             if (found == page.layers.end()) return false;  // (made as a pen layer)
             ti = static_cast<std::size_t>(found - page.layers.begin());
         }
-        // (a pen or tone layer: lent as before — its picture is the same either way)
-        return page.layers[ti].kind == LayerKind::Raster && (new_gradient_keys(op) || precise_or_inks(page, page.layers[ti]));
+        // (a pen or tone layer, an 8-bit paint layer in the 通常 mode: a picture laid on it, lent as before)
+        if (page.layers[ti].kind != LayerKind::Raster) return false;
+        const Json* blend = core::get(op, "blend");
+        return precise_or_inks(page, page.layers[ti]) || (blend != nullptr && !blend->is_null() && *blend != Json("normal"));
     } catch (const std::exception&) {
         return false;  // (the op says what is wrong)
     }

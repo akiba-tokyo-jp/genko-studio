@@ -240,8 +240,9 @@ private slots:
     }
 
     // PC4 E4 (tool:Gradient, Photoshop's options bar): the current gradient (描画色から背景色へ at first; a preset of the list) with
-    // the 描画色 and 背景色 now, 形, 逆方向, 不透明度, モード, ディザ, 透明部分; a paint layer's pixels take it (no picture laid on
-    // it), undone as one step; in a selection only; too short a drag nothing
+    // the 描画色 and 背景色 now, 形, 逆方向, 不透明度, モード, ディザ, 透明部分; on an 8-bit paint layer in 通常 a picture laid on it
+    // under its line, nothing asked (the coordinator's decision after the review: the lines stay lines), undone as one
+    // step; a モード makes the line its pixels, asked first; in a selection only; too short a drag nothing
     void gradientFromTheDrag() {
         Studio s;
         s.brush().set_colour({200, 100, 0});
@@ -267,7 +268,13 @@ private slots:
             const core::Page& page = s.session->document().page(0);
             return *std::find_if(page.layers.begin(), page.layers.end(), [](const core::Layer& l) { return l.id == "p"; });
         };
+        // (the coordinator's decision after E4's review: an 8-bit paint layer's lines stay lines in 通常 — the gradient a
+        // picture laid on it under them, nothing asked)
+        QVERIFY(s.window->apply_ops(Json::array({Json{{"op", "add_stroke"}, {"page", 1}, {"layer_id", "p"},
+                                                      {"points", Json::parse("[[10, 100], [110, 100]]")}, {"width_mm", 1.0}}})));
+        QCOMPARE(layer_p().stroke_count(), std::size_t(1));
         const auto png_before = layer_p().raster_png;
+        s.answers.asked.clear();
         inject::mouse_stroke(s.canvas(), {QPointF(20, 30), QPointF(50, 31), QPointF(80, 30)});
         Json op = s.last();
         QCOMPARE(op["op"], Json("gradient_fill"));
@@ -276,10 +283,12 @@ private slots:
         QCOMPARE(op["shape"], Json("linear"));
         QCOMPARE(op["dither"], Json(true));
         QVERIFY(!op.contains("transparency") && !op.contains("reverse") && !op.contains("blend") && !op.contains("opacity"));
-        QVERIFY(layer_p().patches.empty());  // (the paint layer's pixels: no picture laid on it)
-        QVERIFY(layer_p().raster_png && !layer_p().raster_png->empty() && layer_p().raster_png != png_before);
+        QVERIFY2(s.answers.asked.isEmpty(), qPrintable(s.answers.asked.join(QLatin1Char('\n'))));
+        QCOMPARE(layer_p().stroke_count(), std::size_t(1));  // (the line a line)
+        QCOMPARE(layer_p().patches.size(), std::size_t(1));  // (the gradient a picture laid on the layer)
+        QVERIFY(layer_p().raster_png == png_before);
         s.trigger("act_undo");
-        QVERIFY(layer_p().raster_png == png_before || (layer_p().raster_png && png_before && *layer_p().raster_png == *png_before));
+        QVERIFY(layer_p().patches.empty() && layer_p().stroke_count() == 1);
         // 描画色から透明に: its transparency; 逆方向, 不透明度, モード and 円形, in a selection
         const int fading = preset->findText(QStringLiteral("基本 / 描画色から透明に"));
         QVERIFY(fading > 0);
@@ -294,7 +303,14 @@ private slots:
         emit shape->activated(shape->currentIndex());
         s.trigger("act_select_all");
         s.window->choose_tool(QStringLiteral("gradient"));
+        // (a モード: the layer's line becomes its pixels — asked first, 描く)
+        s.answers.responder->exec = [&s](QDialog* dialog) {
+            s.answers.asked << dialog->objectName();
+            return int(dialog->objectName() == QStringLiteral("blend_bakes") ? QDialog::Accepted : QDialog::Rejected);
+        };
         inject::mouse_stroke(s.canvas(), {QPointF(50, 50), QPointF(70, 50)});
+        QVERIFY(s.answers.asked.contains(QStringLiteral("blend_bakes")));
+        QCOMPARE(layer_p().stroke_count(), std::size_t(0));
         op = s.last();
         QCOMPARE(op["shape"], Json("radial"));
         QCOMPARE(op["stops"], Json::parse("[[0.0, [200, 100, 0], 1.0], [1.0, [200, 100, 0], 1.0]]"));
