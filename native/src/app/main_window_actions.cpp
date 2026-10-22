@@ -1019,6 +1019,7 @@ void MainWindow::on_stroke(const StrokeInput& stroke) {
     for (const auto& [key, value] : fields.items()) op[key] = value;
     // brushes@1 (PC4 E1): the 鉛筆ツール draws with its own brush (自動消去: from the 描画色, in the 背景色); a blend paints a
     // paint layer's pixels; a dab brush's line keeps the pen's tilt, times and wheel
+    bool in_background = false;  // (自動消去: the 背景色's 8 bits, not the 描画色's precise values below)
     if (stroke.tool == QLatin1String("pencil")) {
         know_pencil();
         op["kind"] = std::string(render::dabs::kPencilKey);
@@ -1031,6 +1032,7 @@ void MainWindow::on_stroke(const StrokeInput& stroke) {
                                          static_cast<int>(std::lround(std::clamp(back[1], 0.0, 1.0) * 255)),
                                          static_cast<int>(std::lround(std::clamp(back[2], 0.0, 1.0) * 255))});
                 op.erase("color_rgb");
+                in_background = true;
             }
         }
     }
@@ -1055,7 +1057,7 @@ void MainWindow::on_stroke(const StrokeInput& stroke) {
     }
     // (PC4 E-0: a 描画色 holding more than its 8 bits, on a page of 16 or 32 bits: its precise values as the line's colour —
     // native.color_stroke_v1's color_rgb —, the 8-bit rgb its picture)
-    if (colours_ != nullptr && op.contains("rgb") && colours_->is_precise() && !page->color && page->rgb && page->rgb->depth != 8) {
+    if (colours_ != nullptr && !in_background && op.contains("rgb") && colours_->is_precise() && !page->color && page->rgb && page->rgb->depth != 8) {
         op["color_rgb"] = colours_->foreground_json(page->rgb->depth == 32 ? "f32" : "u16");
     }
     if (stroke.rotation.size() == stroke.points.size() &&

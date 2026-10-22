@@ -167,7 +167,7 @@ std::vector<InputPoint> smooth_points(const Smoothing& smoothing, double string_
 
 PathWalker::PathWalker(std::optional<double> build_up_interval_ms) : interval_(build_up_interval_ms) {}
 
-void PathWalker::emit(const InputPoint& p, const std::function<void(const StepInput&)>& out) {
+void PathWalker::step_out(const InputPoint& p, const std::function<void(const StepInput&)>& out) {
     out(StepInput{p, dir_, initial_dir_.value_or(dir_), step_});
     ++step_;
 }
@@ -190,12 +190,12 @@ void PathWalker::push(const InputPoint& p, const std::function<double(const Inpu
     if (pending_first_) {
         const InputPoint f = *pending_first_;
         pending_first_.reset();
-        emit(f, out);
+        step_out(f, out);
     }
     if (len > kTiny) {
         while (next_at_ <= len + kTiny) {
             const InputPoint q = lerp_pt(a, p, std::min(next_at_ / len, 1.0));
-            emit(q, out);
+            step_out(q, out);
             next_at_ += std::max(step_len(q), 0.25 * kPx);
         }
         next_at_ -= len;
@@ -206,7 +206,7 @@ void PathWalker::push(const InputPoint& p, const std::function<double(const Inpu
             time_acc_ += dt;
             while (time_acc_ >= *interval_) {
                 time_acc_ -= *interval_;
-                emit(lerp_pt(a, p, std::clamp((dt - time_acc_) / dt, 0.0, 1.0)), out);
+                step_out(lerp_pt(a, p, std::clamp((dt - time_acc_) / dt, 0.0, 1.0)), out);
             }
         }
     }
@@ -217,7 +217,7 @@ void PathWalker::finish(const std::function<void(const StepInput&)>& out) {
     if (pending_first_) {
         const InputPoint f = *pending_first_;
         pending_first_.reset();
-        emit(f, out);
+        step_out(f, out);
     }
 }
 

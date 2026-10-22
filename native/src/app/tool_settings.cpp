@@ -35,6 +35,8 @@ const std::map<QString, std::pair<QString, QString>>& titles() {
         {QStringLiteral("select"), {QStringLiteral("選択（V）"), QStringLiteral("コマをクリックで選ぶ・フキダシをドラッグで動かす・ダブルクリックで打ち直す・何もない所のドラッグで表示を動かす")}},
         {QStringLiteral("pen"), {QStringLiteral("ブラシツール（B）"), QStringLiteral("描く先はレイヤー パネルで選んだレイヤー。Shift で直線、[ ] で太さ")}},
         {QStringLiteral("eraser"), {QStringLiteral("消しゴムツール（E）"), QStringLiteral("ペンの線は触れた所で切れる。トーンの上では削る")}},
+        // (PC4 E1: brushes@1)
+        {QStringLiteral("pencil"), {QStringLiteral("鉛筆ツール"), QStringLiteral("縁のくっきりした線で描く。Shift で直線。「自動消去」で、描画色の所から描き始めると背景色で描く")}},
         {QStringLiteral("text"), {QStringLiteral("テキスト（T）"), QStringLiteral("台詞を入れたい所をクリックして打つ（Ctrl+Enter で決定）")}},
         {QStringLiteral("frame"), {QStringLiteral("コマ割り（F）"), QStringLiteral("コマの中をドラッグで割る（ほぼ水平・垂直に吸い付く、Alt で自由）・間の白をドラッグで動かす・角をドラッグで形を変える。"
                                                                             "「作り方」で長方形・折れ線・フリーハンドにすると、新しいコマを描ける")}},

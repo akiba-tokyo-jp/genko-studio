@@ -101,7 +101,7 @@ public:
     void finish(const std::function<void(const StepInput&)>& out);
 
 private:
-    void emit(const InputPoint& p, const std::function<void(const StepInput&)>& out);
+    void step_out(const InputPoint& p, const std::function<void(const StepInput&)>& out);
     std::optional<InputPoint> last_, pending_first_;
     double next_at_ = 0.0;
     std::optional<double> initial_dir_;

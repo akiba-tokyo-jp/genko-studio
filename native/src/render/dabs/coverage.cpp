@@ -31,11 +31,11 @@ Box meet(const Box& a, const Box& b) {
     return out;
 }
 
-bool empty(const Box& b) { return b.x1 <= b.x0 || b.y1 <= b.y0; }
+bool blank(const Box& b) { return b.x1 <= b.x0 || b.y1 <= b.y0; }
 
 Box join(const Box& a, const Box& b) {
-    if (empty(a)) return b;
-    if (empty(b)) return a;
+    if (blank(a)) return b;
+    if (blank(b)) return a;
     return Box{std::min(a.x0, b.x0), std::min(a.y0, b.y0), std::max(a.x1, b.x1), std::max(a.y1, b.y1)};
 }
 
@@ -231,7 +231,7 @@ std::vector<Box> CoverageMap::tile_boxes() const {
 }
 
 void CoverageMap::accumulate(const Box& rect, const std::vector<float>& vals, float ceiling, bool use_max, const std::array<float, 4>* colour) {
-    if (empty(rect)) return;
+    if (blank(rect)) return;
     const auto w = static_cast<std::size_t>(rect.width());
     const bool want_col = colour_ && colour != nullptr;
     const int t0x = floor_div(rect.x0, kTile), t0y = floor_div(rect.y0, kTile);
@@ -239,7 +239,7 @@ void CoverageMap::accumulate(const Box& rect, const std::vector<float>& vals, fl
     for (int ty = t0y; ty <= t1y; ++ty) {
         for (int tx = t0x; tx <= t1x; ++tx) {
             const Box tr = meet(Box{tx * kTile, ty * kTile, (tx + 1) * kTile, (ty + 1) * kTile}, rect);
-            if (empty(tr)) continue;
+            if (blank(tr)) continue;
             bool any = false;  // (a tile the dab does not touch is not made)
             for (int y = tr.y0; y < tr.y1 && !any; ++y) {
                 const std::size_t row = std::size_t(y - rect.y0) * w;
@@ -294,7 +294,7 @@ void LineCover::fill(const Box& area, std::vector<float>& out) const {
     for (const auto& entry : cov.tiles()) {
         const CoverageMap::Tile& tile = entry.second;
         const Box tr = meet(Box{tile.tx * kT, tile.ty * kT, (tile.tx + 1) * kT, (tile.ty + 1) * kT}, area);
-        if (empty(tr)) continue;
+        if (blank(tr)) continue;
         for (int y = tr.y0; y < tr.y1; ++y) {
             for (int x = tr.x0; x < tr.x1; ++x) {
                 const float c = tile.cov[std::size_t((y - tile.ty * kT) * kT + (x - tile.tx * kT))];
@@ -314,7 +314,7 @@ void LineCover::fill_colours(const Box& area, std::vector<std::array<float, 3>>&
         const CoverageMap::Tile& tile = entry.second;
         if (tile.col.empty()) continue;
         const Box tr = meet(Box{tile.tx * kT, tile.ty * kT, (tile.tx + 1) * kT, (tile.ty + 1) * kT}, area);
-        if (empty(tr)) continue;
+        if (blank(tr)) continue;
         for (int y = tr.y0; y < tr.y1; ++y) {
             for (int x = tr.x0; x < tr.x1; ++x) {
                 const std::size_t ti = std::size_t((y - tile.ty * kT) * kT + (x - tile.tx * kT));
@@ -340,7 +340,7 @@ std::shared_ptr<const LineCover> lay(std::shared_ptr<const BrushContext> ctx, co
     for (const Dab& d : dabs) {
         const Box full = ctx->dab_rect(d, false);
         const Box rect = meet(full, within);
-        if (empty(rect)) continue;
+        if (blank(rect)) continue;
         ctx->rasterize(d, false, rect, scratch);
         const std::array<float, 4>* col = coloured ? &d.color : nullptr;
         out->cov.accumulate(rect, scratch, d.opacity, b.wet_edges, col);
@@ -350,7 +350,7 @@ std::shared_ptr<const LineCover> lay(std::shared_ptr<const BrushContext> ctx, co
         out->dual.emplace(false);
         for (const Dab& d : dual) {
             const Box rect = meet(ctx->dab_rect(d, true), within);
-            if (empty(rect)) continue;
+            if (blank(rect)) continue;
             ctx->rasterize(d, true, rect, scratch);
             out->dual->accumulate(rect, scratch, 1.0f, false, nullptr);
         }

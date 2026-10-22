@@ -7,6 +7,7 @@
 #include "core/error.hpp"
 #include "core/pyconv.hpp"
 #include "core/stroke_geom.hpp"
+#include "core/strokes.hpp"
 #include "render/brushes.hpp"
 #include "render/color_canvas.hpp"
 #include "render/dabs/lines.hpp"

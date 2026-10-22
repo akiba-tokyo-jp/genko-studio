@@ -4,7 +4,8 @@
 // with the pen's fields and the id the live line was drawn with, and the live line's pixels are the committed line's
 // pixels — the renderer's layer_image at the canvas's resolution, 100 % zoom — for every brush, without tolerance:
 // while the pen moves (with the brush's settings that leave the line as drawn) and after it lifts (with the brush's own
-// settings: steadying, tapered ends).
+// settings: steadying, tapered ends). PC4 E1 (brushes@1): a dab brush's line keeps the pen's tilt and times, and its
+// live line is its committed line too.
 
 #include <QtTest>
 
@@ -22,6 +23,7 @@
 #include "app/theme.hpp"
 #include "core/brushes.hpp"
 #include "core/stroke_geom.hpp"
+#include "render/brushes.hpp"
 #include "gui_support.hpp"
 #include "render/page.hpp"
 
@@ -308,6 +310,59 @@ private slots:
         QVERIFY2(inside, "the committed line drew outside the live line's box");
         QVERIFY2(shown.tobytes() == committed.tobytes() && shown.mode() == committed.mode(),
                  qPrintable(kind + QStringLiteral(": ") + describe_difference(shown, committed)));
+    }
+
+    // brushes@1 (PC4 E1): a dab brush's line keeps the pen's tilt and times, one a point, in the op and in the book (the
+    // G pen's line sends neither); while the pen moves, the dab brush's live line — drawn with the same inputs — is the
+    // committed line's pixels.
+    void aDabBrushLineKeepsThePensInputs() {
+        Desk desk;
+        render::brushes::define_brush("my_dab_pen", Json{{"label", "ダブ"}, {"engine", "dabs"},
+                                                         {"dabs", Json::parse(R"({"hardness": 0.6, "spacing": 0.2, "size_mm": 3,
+                                                             "shape": {"enabled": true, "angle": {"control": "tilt"}, "roundness": {"jitter": 0.3}}, "seed": 9})")}});
+        genko::app::PenSettings pen = genko::app::PenSettings::for_kind("my_dab_pen");
+        pen.stabilize = 0;
+        pen.taper = false;
+        desk.pen(pen);
+        auto points = wave(desk.canvas()->seen_mm(), 14);
+        for (std::size_t i = 0; i < points.size(); ++i) {
+            points[i].x_tilt = 10.0 + 2.0 * static_cast<double>(i);
+            points[i].y_tilt = -25.0;
+        }
+        const quint64 t0 = 5000;
+        inject::tablet(desk.canvas(), inject::Phase::Press, points.front(), false, t0);
+        for (std::size_t i = 1; i < points.size(); ++i) {
+            inject::tablet(desk.canvas(), inject::Phase::Move, points[i], false, t0 + 16 * i);
+            QCoreApplication::processEvents();
+        }
+        const genko::app::LiveInk* live = desk.canvas()->live();
+        QVERIFY(live != nullptr);
+        const render::Image shown = live->patch();
+        const QRect box = live->box();
+        inject::tablet(desk.canvas(), inject::Phase::Release, points.back(), false, t0 + 16 * points.size());
+        QCOMPARE(desk.ink().stroke_count(), std::size_t{1});
+        const Json& op = desk.ops.back().back();
+        QCOMPARE(op["op"].get<std::string>(), std::string("add_stroke"));
+        QCOMPARE(op["kind"].get<std::string>(), std::string("my_dab_pen"));
+        const std::size_t n = op["points"].size();
+        QCOMPARE(op["tilt"].size(), n);
+        QCOMPARE(op["time_ms"].size(), n);
+        QCOMPARE(op["tilt"][0], Json::array({10.0, -25.0}));
+        QCOMPARE(op["time_ms"][0].get<double>(), 0.0);
+        QCOMPARE(op["time_ms"][n - 1].get<double>(), 16.0 * static_cast<double>(n - 1));
+        QVERIFY(!op.contains("wheel"));  // (a pen without the airbrush wheel)
+        const core::Stroke& kept = *desk.ink().strokes->items[0];
+        QCOMPARE(kept.tilt.size(), 2 * kept.points.size());
+        QCOMPARE(kept.time_ms.size(), kept.points.size());
+        QVERIFY(desk.session->document().brush_custom.contains("my_dab_pen"));
+        bool inside = false;
+        const render::Image committed = rendered(desk, live->dpi(), box, inside);
+        QVERIFY2(inside, "the committed line drew outside the live line's box");
+        QVERIFY2(shown.tobytes() == committed.tobytes() && shown.mode() == committed.mode(), qPrintable(describe_difference(shown, committed)));
+        // the G pen: no inputs sent
+        desk.pen(genko::app::PenSettings::for_kind("gpen"));
+        inject::tablet_stroke(desk.canvas(), points);
+        QVERIFY(!desk.ops.back().back().contains("tilt") && !desk.ops.back().back().contains("time_ms"));
     }
 
     void theCommittedLineShowsAsItRenders_data() { theLiveLineIsTheCommittedLine_data(); }
