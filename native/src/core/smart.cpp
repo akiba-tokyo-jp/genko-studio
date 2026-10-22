@@ -27,8 +27,10 @@ namespace {
 
 constexpr std::array<std::string_view, 10> kSettingKeys{"contents", "matrix", "perspective", "warp", "interp", "stack",
                                                         "filters", "filters_on", "filter_mask", "psd"};
-constexpr std::array<std::string_view, 13> kFileKeys{"kind", "name", "asset", "suffix", "format", "size_px", "dpi",
-                                                     "depth", "mode", "profile", "link", "psd", "spec"};
+constexpr std::array<std::string_view, 14> kFileKeys{"kind", "name", "asset", "suffix", "format", "size_px", "dpi",
+                                                     "depth", "mode", "profile", "link", "psd", "spec",
+                                                     // camera-raw@1 (PC4)
+                                                     "raw"};
 constexpr std::array<std::string_view, 4> kModes{"gray", "rgb", "cmyk", "lab"};
 constexpr std::array<std::string_view, 3> kUses{"keep", "embedded", "assign"};
 constexpr std::array<std::string_view, 4> kIntents{"perceptual", "relative", "saturation", "absolute"};
@@ -322,7 +324,8 @@ void check_contents(const std::string& id, const SmartContents& c) {
     }
     if (c.kind != "file") refuse(who + ": kind is page or file");
     if (!is_ref(c.asset)) refuse(who + ": its file is an asset (sha256:…)");
-    const auto format = format_of_suffix(c.suffix);
+    auto format = format_of_suffix(c.suffix);
+    if (!format) format = later_format_of_suffix(c.suffix);  // (PC4: formats@1, camera-raw@1)
     if (!format || *format != c.format) refuse(who + ": an unknown kind of file (" + c.suffix + ", " + c.format + ")");
     if (c.width_px < 1 || c.height_px < 1 || c.width_px > kSideMax || c.height_px > kSideMax) refuse(who + ": its size in pixels");
     if (!std::isfinite(c.dpi) || c.dpi <= 0 || c.dpi > 1e6) refuse(who + ": its dpi");
@@ -359,6 +362,14 @@ void check_contents(const std::string& id, const SmartContents& c) {
         if (item == nullptr || !item->is_string() || !is_ref(item->get_ref<const std::string&>())) refuse(who + ": its psd's item is an asset (sha256:…)");
         const Json* at = get(*c.psd, "at");
         if (at == nullptr || !at->is_number_integer() || at->get<std::int64_t>() < 0) refuse(who + ": its psd's at is where the file's bytes go");
+    }
+    // (camera-raw@1, PC4: a RAW file's development settings — their parts are F-e's to check)
+    if (c.raw) {
+        if (c.format != "raw") refuse(who + ": only a RAW file has development settings (raw)");
+        if (!c.raw->is_object()) refuse(who + ": its raw is {develop, adjust?, camera}");
+        for (const auto& [key, value] : c.raw->items()) {
+            if (key != "develop" && key != "adjust" && key != "camera") refuse(who + ": its raw's " + py_repr_str(key) + " is not known to this build");
+        }
     }
 }
 
@@ -606,6 +617,13 @@ std::optional<std::string> format_of_suffix(std::string_view suffix) {
     return std::nullopt;
 }
 
+std::optional<std::string> later_format_of_suffix(std::string_view suffix) {
+    for (const FileFormat& f : kLaterFileFormats) {
+        if (f.suffix == suffix) return std::string(f.format);
+    }
+    return std::nullopt;
+}
+
 Matrix multiply(const Matrix& l, const Matrix& r) {
     return Matrix{l.a * r.a + l.c * r.b, l.b * r.a + l.d * r.b, l.a * r.c + l.c * r.d,
                   l.b * r.c + l.d * r.d, l.a * r.e + l.c * r.f + l.e, l.b * r.e + l.d * r.f + l.f};
@@ -729,6 +747,7 @@ Json file_json(const SmartContents& c) {
     out["profile"] = c.profile;
     if (c.link) out["link"] = *c.link;
     if (c.psd) out["psd"] = *c.psd;
+    if (c.raw) out["raw"] = *c.raw;  // (camera-raw@1, PC4)
     return out;
 }
 
@@ -769,6 +788,7 @@ SmartContents contents_from_json(const Json& value) {
     if (const Json* profile = get(value, "profile"); profile != nullptr) c.profile = *profile;
     if (const Json* link = get(value, "link"); link != nullptr && !link->is_null()) c.link = *link;
     if (const Json* psd = get(value, "psd"); psd != nullptr && !psd->is_null()) c.psd = *psd;
+    if (const Json* raw = get(value, "raw"); raw != nullptr && !raw->is_null()) c.raw = *raw;  // (camera-raw@1, PC4)
     return c;
 }
 
@@ -875,6 +895,23 @@ std::vector<WrittenPage> written_pages(const Document& doc) {
         if (it != doc.smart_contents.end() && it->second && it->second->page) out.push_back(WrittenPage{it->second->page.get(), id});
     }
     return out;
+}
+
+bool uses_formats(const Document& doc) {
+    for (const std::string& id : used_contents(doc)) {
+        const auto it = doc.smart_contents.find(id);
+        if (it == doc.smart_contents.end() || !it->second || it->second->kind != "file") continue;
+        if (it->second->format != "raw" && later_format_of_suffix(it->second->suffix)) return true;
+    }
+    return false;
+}
+
+bool uses_camera_raw(const Document& doc) {
+    for (const std::string& id : used_contents(doc)) {
+        const auto it = doc.smart_contents.find(id);
+        if (it != doc.smart_contents.end() && it->second && it->second->kind == "file" && (it->second->format == "raw" || it->second->raw)) return true;
+    }
+    return false;
 }
 
 bool uses_smart(const Document& doc) {

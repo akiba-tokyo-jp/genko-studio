@@ -489,6 +489,43 @@ FileInfo look_at(std::string_view bytes, std::string_view suffix) {
     return info;
 }
 
+int stored_depth(std::string_view bytes) {
+    const auto kind = sniff(bytes);
+    try {
+        if (kind && kind->first == "png") return png_shape(bytes).bit_depth == 16 ? 16 : 8;
+        if (kind && kind->first == "tiff") {
+            Tiff t(bytes);
+            const TiffShape s = tiff_shape(t.tif);
+            return s.bits == 16 || s.bits == 32 ? s.bits : 8;
+        }
+    } catch (const core::Error&) {
+    }
+    return 8;
+}
+
+double stored_dpi(std::string_view bytes) {
+    const auto kind = sniff(bytes);
+    double dpi = 0;
+    try {
+        if (kind && kind->first == "png") {
+            const PngShape s = png_shape(bytes);
+            if (s.phys && s.unit == PNG_RESOLUTION_METER && s.ppm_x > 0) dpi = s.ppm_x * 0.0254;
+        } else if (kind && kind->first == "tiff") {
+            Tiff t(bytes);
+            const TiffShape s = tiff_shape(t.tif);
+            if (s.xres > 0) dpi = s.unit == RESUNIT_CENTIMETER ? s.xres * 2.54 : s.unit == RESUNIT_INCH ? s.xres : 0;
+        } else if (kind && kind->first == "jpeg") {
+            dpi = jpeg_dpi(bytes);
+        } else if (kind && kind->first == "bmp") {
+            dpi = bmp_dpi(bytes);
+        }
+    } catch (const core::Error&) {
+        return 0;
+    }
+    if (!std::isfinite(dpi) || dpi < 1 || dpi > 100000) return 0;
+    return std::round(dpi * 1000) / 1000;
+}
+
 Image eight_bit_picture(std::string_view bytes) {
     if (const auto kind = sniff(bytes); kind && kind->first == "psd") return psd_eight(psd_file(bytes), bytes);  // (PC3 A3)
     try {

@@ -167,3 +167,13 @@ PhotoCraft v0.2.0（同上、MIT）の次の部分を参照して C++ へ移し�
 - `crates/engine/src/layer_multi_cmds.rs`（196-420 行: `with_links`・`move_layers`・`layer_bounds`・`Edge`・`align`・`dedup_moves`・`distribute`・`link_layers`、485-505 行: `reverse`、試験 795-1006 行）と `crates/engine/src/commands.rs`（516-523 行・1028 行: 重ね順）: 整列（そろえる先の決め方、半画素は上・左へ）・分布（端と中央は外の 2 つの間を等分、水平・垂直方向はすき間を等しく）・リンク（切り替え、1 つだけの組は消す）・逆順・重ね順の動き → `native/src/render/layer_align.cpp`・`native/src/render/layer_bounds.cpp`、`native/tests/unit/test_align.cpp`・`native/tests/contract/test_contract_align.cpp`（C-d。範囲を作業の 200 dpi の格子で求め、台詞を同じ op でそろえ、仕上がり・基本枠・コマの基準と、フォルダーの中の兄弟の重ね順は Genko のもの）。
 - `crates/engine/src/pick_cmds.rs`（1-113 行）: 自動選択（その点に見えている層を上から、隠した層とグループを除く、グループの対象はいちばん外のフォルダー）→ `native/src/render/layer_bounds.cpp`（`layers_at`・`outermost`）・`native/src/api/cli.cpp`（`genko inspect --at`）・`native/src/app/main_window_align.cpp`（C-d）。
 - `crates/engine/src/snap.rs`（1-347 行と試験）: スナップの先（ガイド・グリッド・文書の端と中央・層の端と中央）、点と動く箱の吸い付け方（同じ近さはガイドが先、箱は端か中央のいちばん近い物で、揃った線を全部返す）、スマートガイド → `native/src/core/snap.cpp`、`native/src/app/canvas_snap.cpp`、`native/tests/unit/test_align.cpp`（C-d。単位はページの mm にした）。
+
+## 形式・コーデック・RAW・.pcraft（PC4 節 F）
+
+PhotoCraft v0.2.0（`ad863217386440ca968fccc9bfff65ba24e61142`、MIT、同梱 `LICENSE-MIT`）の次の部分を参照して C++ へ移した。
+
+- `crates/codecs/src/image.rs`（1-502 行と試験）: 1 枚の絵の型（並び・標本・ICC・メタデータ）、標本の正規化と量子化、並びの変換（Rec. 709 の輝度・素朴な CMYK と RGB の式）、α を足す近道 → `native/src/render/codecs/image.cpp`（PC4 F-0。半精度の変換は Genko が書いたもの）。
+- `crates/codecs/src/format.rs`（1-283 行）: 形式の表（名前・拡張子・MIME・能力・大きさの上限・非対称の例外）、先頭のバイトでの判定（AVIF の ftyp、TGA の頭の形）、拡張子からの引き → `native/src/render/codecs/format.cpp`（PC4 F-0。能力の表はこの版の読み手・書き手が実際に残すものにした）。
+- `crates/codecs/src/fidelity.rs`（1-230 行）: 書く計画（標本と並びの選び方）と失うものの一覧 → `native/src/render/codecs/fidelity.cpp`（PC4 F-0。言葉は日本語）。
+- `crates/codecs/src/options.rs`（1-138 行）: 読む上限（ヘッダーで確かめてから確保する）と書く設定 → `native/src/render/codecs/limits.cpp`・`options.hpp`（PC4 F-0。上限の値は Genko の op の上限と作業の記憶の予算にした）。
+- `crates/codecs/tests/detect_caps.rs`・`fidelity.rs`・`limits.rs` の試験の考え（判定の例、拡張子の往復と重なり、対称の保証、失うものの例、ヘッダーの爆弾）→ `native/tests/unit/test_codecs.cpp`（PC4 F-0）。

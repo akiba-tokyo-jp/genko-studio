@@ -26,6 +26,8 @@
 #include "core/strokes.hpp"
 #include "core/masks.hpp"
 #include "core/vector.hpp"
+#include "core/file_info.hpp"
+#include "core/psd_keep.hpp"
 #include "storage/asset_store.hpp"
 #include "storage/fsutil.hpp"
 
@@ -53,8 +55,10 @@ constexpr std::array<std::string_view, 21> kPageKeys{
 
 // The keys Python reads (or recomputes, like stroke_count) at the other levels; any other key there is lost on
 // saving, in Python as here.
-constexpr std::array<std::string_view, 10> kSpecKeys{"width_mm", "height_mm", "dpi", "bleed_mm", "inner_margin_mm",
-                                                     "trim_w_mm", "trim_h_mm", "margins_mm", "expression", "preset"};
+constexpr std::array<std::string_view, 11> kSpecKeys{"width_mm", "height_mm", "dpi", "bleed_mm", "inner_margin_mm",
+                                                     "trim_w_mm", "trim_h_mm", "margins_mm", "expression", "preset",
+                                                     // image-grid@1 (PC4)
+                                                     "grid"};
 constexpr std::array<std::string_view, 6> kBrushKeys{"rgb", "width_mm", "stabilize", "taper", "curve", "custom"};
 constexpr std::array<std::string_view, 3> kBibleKeys{"plot", "characters", "constraints"};
 constexpr std::array<std::string_view, 4> kRectKeys{"x", "y", "width", "height"};
@@ -65,7 +69,7 @@ constexpr std::array<std::string_view, 20> kLineKeys{"id", "page_index", "text",
                                                      "x_mm", "y_mm", "w_mm", "h_mm", "balloon", "tail", "wrap",
                                                      "ruby_runs", "ruby_spans", "path", "emphasis_runs", "style_runs",
                                                      "style", "tails"};
-constexpr std::array<std::string_view, 49> kLayerKeys{
+constexpr std::array<std::string_view, 50> kLayerKeys{
     "id", "role", "kind", "visible", "exportable", "strokes", "raster_relpath", "fill_rgb", "lpi", "density",
     "region", "opacity", "material_id", "angle", "title", "blend", "clip", "lock_alpha", "locked", "panel_clip",
     "panel_each", "patches", "tone", "parent_id", "asset", "mask", "color", "reference", "fill", "adjust", "effect",
@@ -75,7 +79,9 @@ constexpr std::array<std::string_view, 49> kLayerKeys{
     // smart-objects@1
     "smart",
     // PC3 (pen-shapes@1, vector@1, transform@1)
-    "shapes_blob", "shape_count", "vector_mask", "link", "lock_position"};
+    "shapes_blob", "shape_count", "vector_mask", "link", "lock_position",
+    // PC4 (psd-keep@1)
+    "native_psd"};
 constexpr std::array<std::string_view, 5> kPlacedOnlyKeys{"frame_id", "placement_mm", "fit", "clip_to", "finish"};
 constexpr std::array<std::string_view, 5> kMaskKeys{"enabled", "asset",
                                                     // masks@1 (PC3)
@@ -382,6 +388,11 @@ private:
     void read_layer_vectors(core::Layer& layer, const Json& data, const std::string& at);
     core::vector::ShapeListPtr read_shapes_blob(const Json& ref_value, const std::string& at);
     void read_page_vectors(core::Page& page, const std::string& at);
+    // PC4 (file-info@1, psd-keep@1)
+    void read_layer_files(core::Layer& layer, const Json& data, const std::string& at);
+    void read_page_files(core::Page& page, const std::string& at);
+    void read_file_info(core::Document& doc);
+    void check_named(const std::string& ref, std::string_view suffix, const std::string& at, std::string_view noun);
     std::unordered_map<std::string, core::vector::ShapeListPtr> shape_blobs_;  // (shapes read in this load)
 };
 
@@ -405,6 +416,14 @@ core::PageSpec Reader::read_spec(const Json& raw) {
     }
     spec.expression = asis_str(raw, "expression", "mono", at);
     spec.preset = asis_opt_str(raw, "preset", at);
+    // (image-grid@1, PC4: the grid its 8-bit pages work at; one this build does not know is reported: read-only)
+    if (const Json* grid = find(raw, "grid"); grid && !grid->is_null()) {
+        try {
+            spec.grid = core::grid_from_json(*grid);
+        } catch (const core::Error& error) {
+            issue("broken_value", at_key(at, "grid"), {}, error.what());
+        }
+    }
     check_keys(raw, kSpecKeys, at, "spec");
     return spec;
 }
@@ -1113,6 +1132,7 @@ core::Layer Reader::read_layer(const Json& data, const std::string& at) {
         check_keys(*mask, kMaskKeys, here, "mask");
     }
     read_layer_vectors(layer, data, at);  // (PC3: vector@1's vector mask, transform@1's link and position lock)
+    read_layer_files(layer, data, at);    // (PC4: psd-keep@1's kept blocks)
     check_keys(data, kLayerKeys, at, "layer");
     if (!placed && !smart) {
         for (const auto& key : kPlacedOnlyKeys) {
@@ -1392,6 +1412,7 @@ core::Document Reader::migrate(const Json& payload) {
         check_ink_rasters(page, raw, at);
         read_channels(page, at);
         read_page_vectors(page, at);
+        read_page_files(page, at);
         page_list.push_back(std::make_shared<core::Page>(std::move(page)));
         if (skip_assets_) deferred.push_back(page_list.back());
     }
@@ -1439,6 +1460,7 @@ core::Document Reader::migrate(const Json& payload) {
     for (const auto& [key, value] : payload.items()) {
         if (!in(kTopKeys, key)) doc.extra[key] = value;
     }
+    read_file_info(doc);  // (file-info@1, PC4)
     {
         // (color-model@1: the book's text_gamma, under its colour model; a value that is not one is reported: read-only)
         if (const auto it = doc.extra.find("color"); it != doc.extra.end() && it->is_object() && it->contains("text_gamma")) {
@@ -1522,7 +1544,80 @@ core::Document Reader::migrate(const Json& payload) {
     catch (const core::Error& error) { issue("broken_value", "/pages", {}, error.what()); }
     try { core::vector::validate_vector(doc); }
     catch (const core::Error& error) { issue("broken_value", "/pages", {}, error.what()); }
+    // (PC4: file-info@1, image-grid@1, psd-keep@1)
+    try { core::validate_file_info(doc); }
+    catch (const core::Error& error) { issue("broken_value", "/pages", {}, error.what()); }
+    try { core::validate_psd_keep(doc); }
+    catch (const core::Error& error) { issue("broken_value", "/pages", {}, error.what()); }
     return doc;
+}
+
+// PC4: an asset the book names that only its folder holds (file-info@1's XMP and EXIF, psd-keep@1's blocks: read as they
+// are written back), there or reported missing (the book opens read-only).
+void Reader::check_named(const std::string& ref, std::string_view suffix, const std::string& at, std::string_view noun) {
+    if (ref.empty() || dir_.empty() || !AssetStore::is_ref(ref)) return;
+    if (!store_.has(ref, suffix)) issue("missing_asset", at, ref, "the " + std::string(noun) + " " + AssetStore::relpath(ref, suffix) + " is missing");
+}
+
+// psd-keep@1 (PC4): what a PSD's layer held that this build does not read. One not well formed is reported (the book opens
+// read-only: it is never written without it).
+void Reader::read_layer_files(core::Layer& layer, const Json& data, const std::string& at) {
+    const Json* keep = find(data, "native_psd");
+    if (keep == nullptr || keep->is_null()) return;
+    const std::string here = at_key(at, "native_psd");
+    try {
+        layer.native_psd = core::psd_layer_keep_from_json(*keep);
+    } catch (const core::Error& error) {
+        issue("broken_value", here, {}, error.what());
+        return;
+    }
+    for (const auto& [key, ref] : layer.native_psd->blocks) check_named(ref, core::kPsdBlockSuffix, here, "kept PSD block");
+    check_named(layer.native_psd->ranges, core::kPsdBlockSuffix, here, "kept PSD blending ranges");
+}
+
+// file-info@1 and psd-keep@1 (PC4): the file a page was opened from and what its PSD held, kept under "native_source" and
+// "native_psd" (taken out of the keys written back as they were read). What cannot be read is reported (the book opens
+// read-only) and is kept as it was read: the page is never written without it.
+void Reader::read_page_files(core::Page& page, const std::string& at) {
+    if (const auto it = page.extra.find("native_source"); it != page.extra.end()) {
+        try {
+            if (!it->is_null()) page.native_source = core::native_source_from_json(*it);
+            page.extra.erase(it);
+        } catch (const core::Error& error) {
+            issue("broken_value", at_key(at, "native_source"), {}, error.what());
+        }
+        if (page.native_source) {
+            check_named(page.native_source->exif, core::kExifSuffix, at_key(at, "native_source"), "EXIF");
+            check_named(page.native_source->xmp, core::kXmpSuffix, at_key(at, "native_source"), "XMP");
+        }
+    }
+    if (const auto it = page.extra.find("native_psd"); it != page.extra.end()) {
+        try {
+            if (!it->is_null()) page.native_psd = core::psd_page_keep_from_json(*it);
+            page.extra.erase(it);
+        } catch (const core::Error& error) {
+            issue("broken_value", at_key(at, "native_psd"), {}, error.what());
+        }
+        if (page.native_psd) {
+            for (const core::PsdResource& r : page.native_psd->resources) check_named(r.ref, core::kPsdBlockSuffix, at_key(at, "native_psd"), "kept PSD resource");
+            for (const core::PsdGlobal& g : page.native_psd->globals) check_named(g.ref, core::kPsdBlockSuffix, at_key(at, "native_psd"), "kept PSD block");
+        }
+    }
+}
+
+// file-info@1 (PC4): the book's File Info, kept under "file_info" (taken out of the keys written back as they were read; one
+// that cannot be read is reported and kept so: the book is read-only).
+void Reader::read_file_info(core::Document& doc) {
+    const auto it = doc.extra.find("file_info");
+    if (it == doc.extra.end()) return;
+    try {
+        if (!it->is_null()) doc.file_info = core::file_info_from_json(*it);
+        doc.extra.erase(it);
+    } catch (const core::Error& error) {
+        issue("broken_value", "/file_info", {}, error.what());
+        return;
+    }
+    if (doc.file_info) check_named(doc.file_info->xmp, core::kXmpSuffix, "/file_info", "XMP");
 }
 
 std::map<std::string, std::shared_ptr<const core::SmartContents>> Reader::read_smart_contents(const Json& payload, core::Binding binding) {
@@ -1625,6 +1720,7 @@ core::Page Reader::read_contents_page(const Json& raw, const std::string& at, co
     check_ink_rasters(page, raw, at);
     read_channels(page, at);
     read_page_vectors(page, at);
+    read_page_files(page, at);  // (PC4: file-info@1, psd-keep@1)
     return page;
 }
 
@@ -1689,7 +1785,10 @@ bool is_known_feature(std::string_view feature) {
            feature == core::kAdjustmentsFeature || feature == core::kSmartObjectsFeature ||
            // PC3 (core/masks.hpp, core/vector.hpp)
            feature == core::kMasksFeature || feature == core::vector::kVectorFeature || feature == core::vector::kPenShapesFeature ||
-           feature == core::vector::kTransformFeature || feature == core::vector::kPageSpecFeature;
+           feature == core::vector::kTransformFeature || feature == core::vector::kPageSpecFeature ||
+           // PC4 節 F (core/file_info.hpp, core/psd_keep.hpp, core/smart.hpp)
+           feature == core::kFileInfoFeature || feature == core::kImageGridFeature || feature == core::kPsdKeepFeature ||
+           feature == core::kFormatsFeature || feature == core::kCameraRawFeature;
 }
 
 int project_version(const Json& payload) {

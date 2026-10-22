@@ -15,6 +15,8 @@
 #include "core/masks.hpp"
 #include "core/pyconv.hpp"
 #include "core/vector.hpp"
+#include "core/file_info.hpp"
+#include "core/psd_keep.hpp"
 #include "core/ruby.hpp"
 #include "core/smart.hpp"
 #include "core/strokes.hpp"
@@ -185,6 +187,7 @@ Json layer_json(const core::Layer& layer, AssetStore& store, const std::string& 
     if (layer.vector_mask) out["vector_mask"] = core::vector::to_json(*layer.vector_mask);
     if (layer.link) out["link"] = *layer.link;
     if (layer.lock_position) out["lock_position"] = true;
+    if (layer.native_psd) out["native_psd"] = core::to_json(*layer.native_psd);  // (psd-keep@1, PC4)
     if (placed) {
         out["asset"] = opt_string(layer.asset);
         out["frame_id"] = opt_string(layer.frame_id);
@@ -317,6 +320,9 @@ Json page_json(const core::Page& page, AssetStore& store) {
         if (page.spec.trim_origin_mm) spec["trim_origin_mm"] = Json::array({page.spec.trim_origin_mm->first, page.spec.trim_origin_mm->second});
         out["native_spec"] = std::move(spec);
     }
+    // (PC4: file-info@1's source file, psd-keep@1's kept resources and blocks — none: nothing written)
+    if (page.native_source) out["native_source"] = core::to_json(*page.native_source);
+    if (page.native_psd) out["native_psd"] = core::to_json(*page.native_psd);
     for (const auto& [key, value] : page.extra.items()) {
         if (!is_known_page_key(key)) out[key] = value;
     }
@@ -346,6 +352,7 @@ Json spec_to_json(const core::PageSpec& spec) {
         out["trim_h_mm"] = opt_num(spec.trim_h_mm);
     }
     if (spec.margins_mm && !spec.margins_mm->empty()) out["margins_mm"] = nums_json(*spec.margins_mm);
+    if (spec.grid) out["grid"] = *spec.grid;  // (image-grid@1, PC4)
     return out;
 }
 
@@ -481,6 +488,24 @@ Json project_payload_v4(const core::Document& doc, AssetStore& store) {
         std::erase(features, std::string(feature));
         if (used) features.emplace_back(feature);
     }
+    // PC4 節 F: file-info@1, image-grid@1, psd-keep@1, formats@1, camera-raw@1 (each named while the book uses it), and the
+    // metadata and kept PSD blocks it names that only the book in memory holds (a book opened from a file)
+    core::validate_file_info(doc);
+    core::validate_psd_keep(doc);
+    const std::pair<std::string_view, bool> pc4f[] = {{core::kFileInfoFeature, core::uses_file_info(doc)},
+                                                      {core::kImageGridFeature, core::uses_image_grid(doc)},
+                                                      {core::kPsdKeepFeature, core::uses_psd_keep(doc)},
+                                                      {core::kFormatsFeature, core::smart::uses_formats(doc)},
+                                                      {core::kCameraRawFeature, core::smart::uses_camera_raw(doc)}};
+    for (const auto& [feature, used] : pc4f) {
+        std::erase(features, std::string(feature));
+        if (used) features.emplace_back(feature);
+    }
+    for (const auto& named : {core::file_info_assets(doc), core::psd_keep_assets(doc)}) {
+        for (const auto& [ref, suffix] : named) {
+            if (const auto held = doc.native_files.find(ref); held != doc.native_files.end() && held->second) store.put_known(ref, *held->second, suffix);
+        }
+    }
     std::sort(features.begin(), features.end());
     features.erase(std::unique(features.begin(), features.end()), features.end());
 
@@ -522,6 +547,7 @@ Json project_payload_v4(const core::Document& doc, AssetStore& store) {
     out["bible"] = std::move(bible);
     out["tickets"] = doc.tickets;
     out["studio"] = doc.studio;
+    if (doc.file_info && !doc.file_info->empty()) out["file_info"] = core::to_json(*doc.file_info);  // (file-info@1, PC4)
     if (!smart_contents.empty()) out["smart_contents"] = std::move(smart_contents);  // (smart-objects@1)
     Json pages = Json::array();
     for (const auto& page : doc.pages) pages.push_back(page_json(*page, store));

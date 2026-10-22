@@ -59,6 +59,11 @@ v3 から外すもの: なし（未知キーも `extra` として書き戻す）
 | `pen-shapes@1` | PC3-0・C-b | ペンの層の形の部品（`shapes_blob`・`shape_count`）。COLOR-07（末尾の「パスとベクトル」） |
 | `transform@1` | PC3-0（C-d が使う）・C-c | 層の `link`・`lock_position`、台詞の書式の `native_warp`（ワープテキスト）。COLOR-07（末尾の「パスとベクトル」） |
 | `page-spec@1` | PC3-0（C-e が使う） | ページだけの用紙 `native_spec`（`trim_origin_mm` も）。COLOR-07（末尾の「パスとベクトル」） |
+| `file-info@1` | PC4 F-0（F-b が使う） | 本の `file_info`（ファイル情報）、ページの `native_source`（開いた元のファイル）。FILE-01（末尾の「ファイル・形式」） |
+| `image-grid@1` | PC4 F-0（F-b が使う） | 用紙の `grid: "finest"`（8 bit のページも、新しい画素の層・選択範囲・マスクを画素の層の一番細かい格子で）。FILE-01（末尾の「ファイル・形式」） |
+| `psd-keep@1` | PC4 F-0（F-d が使う） | 層とページの `native_psd`（PSD の知らない塊・画像リソース・全体の塊を素材のまま）。FILE-01（末尾の「ファイル・形式」） |
+| `formats@1` | PC4 F-0（F-a が使う） | スマートオブジェクトの中身のファイルの新しい形式（TGA・ICO・Netpbm・QOI・OpenEXR・Radiance HDR・AVIF）。FILE-01（末尾の「ファイル・形式」） |
+| `camera-raw@1` | PC4 F-0（F-e が使う） | スマートオブジェクトの中身のカメラ RAW ファイルと、その現像の設定 `raw`。FILE-01（末尾の「ファイル・形式」） |
 
 拡張を使う op が初めて適用されたときに `features` へ加える。拡張を使わない原稿は `features: []`。
 
@@ -365,3 +370,18 @@ v3 の行（`rev`・`actor`・`at`・`changes`・`via`）をそのまま残し�
 - **ページだけの用紙**（`page-spec@1`）: ページの `"native_spec"`（本の `spec` と同じ形の用紙。本と違う用紙を持つページだけ）。`"trim_origin_mm": [x, y]` は仕上がりの左上の位置（無ければ用紙の真ん中に置いた位置）。
 - 知らないキー・型の違い・範囲外・非有限・名前の重なり・無い名前を指すクリッピングパス・ペンの層でない層の形の部品は、読み取り専用で開く（そのまま書き戻す）。
 - `features` に、使う物があるときだけそれぞれを加える（`vector@1`: パス・作業用パス・クリッピングパス・ベクトルマスク、`pen-shapes@1`: 形の部品を持つ層、`transform@1`: リンクか位置のロックを持つ層・`native_warp` を持つ台詞、`page-spec@1`: ページだけの用紙）。本のページと、書くスマートオブジェクトの中身のページ（`smart_contents` の `page`。ここのキーを本のページと同じに読み書きする）を数える。無くなれば外す。知らない読み手は未知の拡張として読み取り専用で開く。
+
+## ファイル・形式（file-info@1・image-grid@1・psd-keep@1・formats@1・camera-raw@1。FILE-01、PC4 節 F）
+
+ファイル情報・開いた元のファイル・作業の格子・PSD の保った塊・新しい形式のファイル。C++ 版だけの機能。どれも持たない原稿は今までどおりで、形式も画素も変わらない（キーも拡張も増えない）。中身を作る所は F-a・F-b・F-d・F-e が入れる（PC4 F-0 は読み書きと検査の枠）。
+
+- **本の `file_info`**（`file-info@1`。ファイル情報…）: `{"author"?, "author_title"?, "description"?, "keywords"?: [文字…], "copyright"?, "copyright_status"?: "unknown"|"copyrighted"|"public_domain", "copyright_url"?, "xmp"?: "sha256:…"}`（この順。空の項目は書かない。全部空なら `file_info` を書かない）。1 項目（キーワードも）2000 字まで、キーワードは 200 個まで（空のキーワードは無い）。`xmp` は読み込んだ XMP の packet（`assets/<ab>/<64>.xmp`、UTF-8。8 項目のほかの項目を保つ）。Photoshop の「ドキュメントのタイトル」は本の `title`。本の `studio` の後、`smart_contents` の前に書く。
+- **ページの `native_source`**（`file-info@1`。ファイルから開いたページだけ）: `{"format": "png"|"jpeg"|"tiff"|"webp"|"gif"|"bmp"|"tga"|"ico"|"pnm"|"qoi"|"exr"|"hdr"|"avif"|"psd"|"psb"|"raw"|"pcraft", "name": ファイルの名前（1〜255 字、フォルダー無し）, "width_px", "height_px": 1〜1048576, "dpi"?: [x, y]（ファイルが言った解像度。0 より大きく 1000000 まで）, "depth": 1|8|16|32, "mode": "gray"|"graya"|"rgb"|"rgba"|"cmyk"|"cmyka"|"lab"|"laba"|"indexed"|"bitmap"|"duotone"|"multichannel", "exif"?: "sha256:…"（`.exif`: TIFF の形、JPEG の "Exif\0\0" 無し）, "xmp"?: "sha256:…"（`.xmp`）, "camera"?: {"make", "model", "iso"?, "exposure"?（秒）, "aperture"?（F 値）, "focal"?（mm）}}`（この順。数は 0 より大きい）。ページのキーの最後（`native_spec` の後）に書く。
+- **用紙の `grid`**（`image-grid@1`）: `"grid": "finest"`（本の `spec`、ページだけの用紙 `native_spec`、中身のページの `spec` の最後）。8 bit のページの新しい画素の層・選択範囲・マスクを、高精度・インキのページと同じく画素の層の一番細かい格子（200〜600 dpi）で作る（F-b。設計 8-2 (b)）。画像から開いた 8 bit のページと新規の画像に付く。無い用紙は今までどおり（8 bit は 200 dpi・マスク 150 dpi）。
+- **層の `native_psd`**（`psd-keep@1`。F-d）: `{"blocks": [[キー（4 文字）, "sha256:…"]…], "ranges"?: "sha256:…"（混合の範囲（Blend If）の生のバイト。全部が既定なら無し）, "id"?: 0..4294967295（読んだ lyid）}`。層のキーの最後に書く。
+- **ページの `native_psd`**（`psd-keep@1`。F-d）: `{"resources": [[ID 0..65535, 名前（255 バイトまで）, "sha256:…"]…], "globals": [["8BIM"|"8B64", キー（4 文字）, "sha256:…"]…], "from"?: {"version": 1|2, "mode": 0..9, "depth": 1|8|16|32}}`。塊・リソースは `assets/<ab>/<64>.psdblock`（そのバイトのまま）。1 つの層・ページに 4096 まで。
+- **スマートオブジェクトの中身の新しい形式**（`formats@1`。F-a）: 中身のファイルの `suffix`・`format` に `.tga`→`tga`・`.ico`→`ico`・`.pnm` `.pbm` `.pgm` `.ppm` `.pam` `.pfm`→`pnm`・`.qoi`→`qoi`・`.exr`→`exr`・`.hdr`→`hdr`・`.avif`→`avif`。
+- **カメラ RAW の中身**（`camera-raw@1`。F-e）: 中身のファイルの `format: "raw"`（`suffix` は `.dng` `.cr2` `.cr3` `.nef` `.nrw` `.arw` `.srf` `.sr2` `.raf` `.orf` `.rw2` `.pef` `.srw` `.x3f` `.3fr` `.iiq` `.erf` `.mrw` `.dcr` `.kdc` `.mos`）と、中身のキーの最後の `"raw": {"develop", "adjust"?, "camera"}`（現像の設定。各項目の形は F-e）。`raw` は RAW の中身だけが持つ。
+- 素材（`.xmp`・`.exif`・`.psdblock`）は、ファイルから開いてまだ保存していない本ではメモリーに持ち、書き手が名指すものを書く。読み手は `assets/` にあるかを確かめる（無ければ `missing_asset`）。片付け（`genko gc`）・別の場所に保存・復旧用コピーは、ほかの素材と同じく原稿の中の参照で残し写す。
+- 知らないキー・型の違い・範囲外・知らない形式やモード・素材の参照でない値は、読み取り専用で開く（そのまま書き戻す）。
+- `features` に、使う物があるときだけそれぞれを加える（`file-info@1`: 中身のある `file_info`・`native_source` を持つページ、`image-grid@1`: `grid` を持つ用紙、`psd-keep@1`: `native_psd` を持つ層・ページ、`formats@1`: 新しい形式の中身、`camera-raw@1`: RAW の中身）。本のページと、書くスマートオブジェクトの中身のページを数える。無くなれば外す。知らない読み手は未知の拡張として読み取り専用で開く。

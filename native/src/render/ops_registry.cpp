@@ -28,6 +28,7 @@
 #include "render/area_kinds.hpp"
 #include "render/layer_masks.hpp"
 #include "render/ops_pc3.hpp"
+#include "render/ops_file.hpp"
 
 namespace genko::render {
 
@@ -384,6 +385,8 @@ void register_render_ops(core::OpRegistry& registry) {
     register_transform_ops(registry);
     register_pagesize_ops(registry);
     area_kinds::use_keys();
+    // PC4 節 F (形式): the ops that change what a book keeps of its files (frames until their groups: render/ops_file.cpp)
+    register_file_ops(registry);
 }
 
 const core::OpRegistry& ops_registry() {

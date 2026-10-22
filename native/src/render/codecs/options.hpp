@@ -1,0 +1,25 @@
+#pragma once
+
+// How a picture is written (PC4 F-0; PhotoCraft's EncodeOptions, crates/codecs/src/options.rs). The options a writer of
+// this build does not take yet (F-0 writes PNG and JPEG through render::write_png and write_jpeg) are kept for F-a's.
+
+namespace genko::render::codecs {
+
+enum class PngCompression { None, Fast, Default, Best };
+enum class TiffCompression { None, Lzw, Deflate, PackBits };
+// OpenEXR's lossless compressions only.
+enum class ExrCompression { None, Rle, Zip1, Zip16, Piz };
+
+struct EncodeOptions {
+    int jpeg_quality = 90;  // 1..100 (AVIF's quality too)
+    bool jpeg_chroma_subsampling = true;  // 4:2:0 (false: 4:4:4)
+    PngCompression png_compression = PngCompression::Default;
+    bool png_interlaced = false;
+    bool webp_lossless = true;
+    TiffCompression tiff_compression = TiffCompression::Deflate;
+    ExrCompression exr_compression = ExrCompression::Zip16;
+    bool embed_icc = true;       // the ICC profile, where the format holds one
+    bool embed_metadata = true;  // EXIF, XMP, resolution and text, where the format holds them
+};
+
+}  // namespace genko::render::codecs
