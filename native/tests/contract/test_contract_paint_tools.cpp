@@ -90,6 +90,7 @@ class TestContractPaintTools : public QObject {
         ops.push_back(blur);
         Json sharpen = line("sharpen_brush", 20, 120, 180, 120, 10);
         sharpen["strength"] = 100;
+        sharpen["protect_detail"] = false;  // (the stripes' edges are steps: ディテールを保持 keeps a step within its own range)
         ops.push_back(sharpen);
         ops.push_back(line("smudge_brush", 110, 200, 150, 200, 6));  // (white into the black square)
         Json mixer = line("mixer_brush", 20, 20, 180, 20, 6);

@@ -273,10 +273,18 @@ void smudge_values(OpContext& c, std::size_t at, const std::string& id, const st
     cover = cover.filter(Filter::gaussian_blur(core::py_max(1.0, width * scale / 6)));
     cover = cover.point([strength](int v) { return static_cast<int>(v * strength); });
     const std::string share = cover.tobytes();
-    // the worked values: blurred, or carried forward along the line (each step's spot blended with the colour carried)
+    // the worked values: blurred, or carried forward along the line (each step's spot blended with the colour carried) —
+    // premultiplied by the alpha, so a clear pixel lends no colour (its values are no colour: an ink layer's no ink, a
+    // precise layer's black)
+    const unsigned alpha = n - 1;
+    const auto premultiplied = [&](std::size_t i, float* to) {
+        const float* v = p.at(i);
+        for (unsigned ch = 0; ch < alpha; ++ch) to[ch] = v[ch] * v[alpha];
+        to[alpha] = v[alpha];
+    };
     const image_ops::Held held(std::uint64_t(w) * h * n * sizeof(float));
     std::vector<float> worked(w * h * n);
-    for (std::size_t i = 0; i < p.size(); ++i) std::copy_n(p.at(i), n, worked.begin() + static_cast<std::ptrdiff_t>(i * n));
+    for (std::size_t i = 0; i < p.size(); ++i) premultiplied(i, worked.data() + i * n);
     if (mode == "blur" || mode == "blend") {
         image_ops::gauss_blur(worked, w, h, n, static_cast<float>(core::py_max(1.0, width * scale / (mode == "blur" ? 3 : 1.5))));
     } else {
@@ -319,24 +327,23 @@ void smudge_values(OpContext& c, std::size_t at, const std::string& id, const st
             }
         }
     }
-    // the worked values laid through the cover over the layer's (only the pixels they change)
+    // the worked values laid through the cover over the layer's, premultiplied (only the pixels they change: one whose
+    // worked values are its own keeps its bytes)
     std::vector<std::uint8_t> marks(p.size(), 0);
+    std::vector<float> own(n);
     bool changed = false;
     for (std::size_t i = 0; i < p.size(); ++i) {
         const float k = static_cast<unsigned char>(share[i]) / 255.0f;
         if (!(k > 0.0f)) continue;
-        float* v = p.at(i);
         const float* o = worked.data() + i * n;
-        bool differs = false;
-        for (unsigned ch = 0; ch < n; ++ch) {
-            const float r = o[ch] * k + v[ch] * (1.0f - k);
-            differs = differs || r != v[ch];
-            v[ch] = ch + 1 == n ? std::clamp(r, 0.0f, 1.0f) : r;
-        }
-        if (differs) {
-            marks[i] = 1;
-            changed = true;
-        }
+        premultiplied(i, own.data());
+        if (std::equal(own.begin(), own.end(), o)) continue;
+        float* v = p.at(i);
+        const float a = std::clamp(own[alpha] + (o[alpha] - own[alpha]) * k, 0.0f, 1.0f);
+        for (unsigned ch = 0; ch < alpha; ++ch) v[ch] = a > 0.0f ? (own[ch] + (o[ch] - own[ch]) * k) / a : 0.0f;
+        v[alpha] = a;
+        marks[i] = 1;
+        changed = true;
     }
     if (!changed) return;
     if (inks) {

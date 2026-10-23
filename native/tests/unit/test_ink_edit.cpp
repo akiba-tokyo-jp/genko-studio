@@ -624,8 +624,9 @@ private slots:
         QVERIFY2(filled[1] > white[1] + 20000, "the fill: red through the profile");
     }
 
-    // smudge lays what it mixed as a picture of the box it changed: drawn into the picture the layer lent, so what it
-    // did not change there keeps its inks (a rich black whose screen colour is a Genko black's does not become K alone).
+    // smudge works an ink layer's own inks (PC4 E5, design section E 0.4: no picture lent): what it did not reach keeps its
+    // inks, and what it mixed mixes the plates — a rich black whose screen colour is a Genko black's does not become K
+    // alone (as it would through the screen colour).
     void smudgeKeepsTheInksItDidNotMix() {
         core::Document doc = ink_book();
         for (auto& layer : doc.edit_page(0).layers) {
@@ -639,32 +640,31 @@ private slots:
                                  {"points", Json::array({Json::array({33, 40}), Json::array({57, 40})})}, {"width_mm", 6}};
         const core::Document after = run_ops(doc, Json::array({smudge})).doc;
         all_in_inks(after);
-        // the same smudge on an RGB page holding the picture the layer shows: the pixels it did not change
-        const render::Image shown = render::ink::to_rgba8(pixels_of(doc, "pic"), *doc.page(0).color);
-        core::Document rgb = core::new_episode("rgb", core::Num(1), 1, doc.page(0).spec, core::Binding::Right);
-        rgb = run_ops(rgb, Json::array({Json{{"op", "add_layer"}, {"page", 1}, {"kind", "paint"}, {"id", "pic"}}})).doc;
-        for (auto& layer : rgb.edit_page(0).layers) {
-            if (layer.id != "pic") continue;
-            layer.raster_png = std::make_shared<const std::string>(render::write_png(shown));
-            layer.panel_clip = layer.panel_each = false;
-        }
-        rgb = run_ops(rgb, Json::array({smudge})).doc;
-        const std::string was = shown.tobytes();
-        const std::string now = render::raster::layer_pixels(rgb.page(0), layer_of(rgb, "pic")).convert("RGBA").tobytes();
-        QCOMPARE(now.size(), was.size());
         const core::InkPixels before = pixels_of(doc, "pic"), got = pixels_of(after, "pic");
-        int unchanged = 0, changed = 0;
-        for (std::size_t i = 0; i < before.pixel_count(); ++i) {
-            if (now.compare(i * 4, 4, was, i * 4, 4) != 0) {
+        QCOMPARE(got.width, before.width);
+        // (the smudge's box: the line and 1.5 times its width around it, 33..57 × 40 mm with 9 mm: 24..66 × 31..49 mm)
+        const auto reached = [](std::uint32_t x, std::uint32_t y) { return x + 1 >= px(24) && y + 1 >= px(31) && y <= px(49) + 1; };
+        int unchanged = 0, changed = 0, rich = 0;
+        for (std::uint32_t y = 0; y < before.height; ++y) {
+            for (std::uint32_t x = 0; x < before.width; ++x) {
+                const std::uint16_t* a = at(before, x, y);
+                const std::uint16_t* b = at(got, x, y);
+                if (std::equal(a, a + 5, b)) {
+                    ++unchanged;
+                    continue;
+                }
                 ++changed;
-                continue;
+                if (!reached(x, y)) QFAIL(qPrintable(QStringLiteral("pixel (%1, %2) (past the smudge) lost its inks").arg(x).arg(y)));
+                // a rich black mixed stays rich: each plate keeps at least what the strength (0.6) leaves of it
+                if (std::equal(kRich.begin(), kRich.end(), a) && a[4] == 65535) {
+                    ++rich;
+                    for (unsigned c = 0; c < 4; ++c) {
+                        if (b[c] < kRich[c] * 0.35) QFAIL(qPrintable(QStringLiteral("pixel (%1, %2): plate %3 of the rich black %4 → %5").arg(x).arg(y).arg(c).arg(kRich[c]).arg(b[c])));
+                    }
+                }
             }
-            ++unchanged;
-            const std::uint16_t* a = before.samples.data() + i * 5;
-            const std::uint16_t* b = got.samples.data() + i * 5;
-            if (!std::equal(a, a + 5, b)) QFAIL(qPrintable(QStringLiteral("pixel %1 (not changed by the smudge) lost its inks").arg(i)));
         }
-        QVERIFY(changed > 100 && unchanged > 1000);
+        QVERIFY2(changed > 100 && unchanged > 1000 && rich > 100, qPrintable(QStringLiteral("%1 changed, %2 not, %3 rich").arg(changed).arg(unchanged).arg(rich)));
     }
 
     // The eraser taking lines whole or to their crossings takes no pixels (as on an RGB page).

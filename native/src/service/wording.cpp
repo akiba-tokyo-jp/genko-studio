@@ -652,9 +652,11 @@ const std::vector<Rule>& rules() {
         r.push_back(rule("points must lie within 100000 mm of the page", "筆の点は、ページから 100 m の内に置きます"));
         r.push_back(rule(R"(the layer's transparency is locked: the Background Eraser .*)",
                          "透明部分を保護したレイヤーには、背景消しゴムツールは使えません（保護を外してから使います）"));
-        r.push_back(rule(R"(reservoir.*)", "混合ブラシの絵の具（reservoir）の指定が違います"));
-        r.push_back(rule("seed must be a string or a whole number", "seed は文字か整数で指定します"));
-        r.push_back(rule(R"(brush must be a dab brush of the book.*)", "ブラシは、原稿のダブのブラシ（Photoshop 型のブラシ）から選びます"));
+        r.push_back(rule(R"(reservoir.*)", "混合ブラシの絵の具の指定が違います（前のストロークの結果をそのまま渡します）"));
+        r.push_back(rule("seed must be a string or a whole number", "ブラシの揺らぎの種は、文字か整数で指定します"));
+        r.push_back(rule(R"(brush must be a dab brush of the book.*)", "そのブラシは使えません（先端の跡を並べて描くブラシを、原稿のブラシから選びます）"));
+        r.push_back(rule(R"((rgb|foreground_rgb|swatch_rgb) is \[r, g, b\] \(0\.\.255\), "foreground" or "background")",
+                         "色は 0〜255 の 3 つの数か、描画色（foreground）・背景色（background）で指定します"));
         // (PC2, adjustments@1 — the C++ build's own: a correction's native settings and kinds, core/adjust)
         r.push_back(rule(R"(adjust kind '(.*)' is not a correction layer's kind)", "「\\1」は色調補正のレイヤーの種類ではありません"));
         // (PC2a — the tone corrections' own: set_adjustment, auto_adjust and a colour lookup's table, render/ops_adjust, core/lut3d)

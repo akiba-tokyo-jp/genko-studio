@@ -370,8 +370,9 @@ private slots:
             all["mix"] = 100;
             QCOMPARE(pixel(run(doc, all), 40, 180, "top")[3], 0.0f);  // (nothing to pick up on the layer itself)
             all["sample_all"] = true;
-            const Rgba under = pixel(run(doc, all), 40, 180, "top");
-            QVERIFY2(under[3] > 0.5f && under[2] > under[0] + 0.3f, qPrintable(k + " " + text(under)));
+            const Rgba under = pixel(run(doc, all), 40, 180, "top"), below = pixel(doc, 40, 180);  // (CMYK's blue: as its inks show it)
+            QVERIFY2(under[3] > 0.5f && under[2] > under[0] + 0.2f, qPrintable(k + " " + text(under)));
+            for (std::size_t ch = 0; ch < 3; ++ch) QVERIFY2(std::fabs(under[ch] - below[ch]) < 0.08f, qPrintable(k + " " + text(under) + " " + text(below)));
         }
         Json bad = stroke("mixer_brush", {{10, 10}}, 8);
         bad["reservoir"] = Json{{"paint", "red"}};
@@ -550,7 +551,7 @@ private slots:
     void aDabBrushAndTheSameBytes() {
         const core::Document base = book([](int x, int y) { return (x + y) % 2 == 0 ? Colour{0.3, 0.3, 0.3, 1} : Colour{0.7, 0.7, 0.7, 1}; });
         const core::Document doc = run(base, Json{{"op", "define_brush"}, {"key", "my_soft"}, {"label", "やわらか"}, {"engine", "dabs"},
-                                                  {"dabs", Json{{"hardness", 0.0}, {"shape", Json{{"enabled", true}, {"size", Json{{"jitter", 0.5}}}}}}}}});
+                                                  {"dabs", Json{{"hardness", 0.0}, {"shape", Json{{"enabled", true}, {"size", Json{{"jitter", 0.5}}}}}}}});
         Json round = stroke("blur_brush", {{20, 100}, {180, 100}}, 40);
         round["strength"] = 100;
         Json soft = round;
@@ -632,7 +633,7 @@ private slots:
         for (const char* kind : {"16", "32"}) {
             const core::Document doc = as_kind(base, kind);
             const core::Document done = run(doc, op);
-            const core::Layer& l = layer_of(done, "paint");
+            const core::Layer l = layer_of(done, "paint");
             QVERIFY(l.color_raster && l.patches.empty() && !l.raster_png);
             const Shown s = shown(done);
             bool finer = false;

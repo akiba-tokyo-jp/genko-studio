@@ -31,6 +31,7 @@
 #include "core/command_bus.hpp"
 #include "render/ops_registry.hpp"
 #include "render/png.hpp"
+#include "service/wording.hpp"
 
 using namespace genko;
 using core::Json;
@@ -280,6 +281,7 @@ private slots:
         studio.trigger("act_background_eraser");
         studio.field<QComboBox>("pixel_sampling")->setCurrentIndex(studio.field<QComboBox>("pixel_sampling")->findData(QStringLiteral("once")));
         studio.field<QDoubleSpinBox>("pixel_size")->setValue(10);
+        studio.field<QSpinBox>("pixel_hardness")->setValue(100);  // (a soft brush leaves some of the white at its edge)
         inject::mouse_stroke(studio.canvas(), {QPointF(36, 30), QPointF(26, 30)});
         const Json op = studio.ops.back().back();
         QCOMPARE(op["op"], Json("background_eraser"));
@@ -298,6 +300,26 @@ private slots:
         QCOMPARE(studio.ops.back().back()["layer_mask"], Json(true));
         QCOMPARE(*studio.layer("paint")->raster_png, pixels);
         QVERIFY(*studio.layer("paint")->mask->png != mask);
+    }
+
+    // The brushes' refusals read in Japanese (service/wording): no English word of four letters or more left.
+    void theRefusalsReadInJapanese() {
+        static const QRegularExpression english(QStringLiteral("[A-Za-z]{4,}"));
+        for (const char* message :
+             {"ops[0] dodge: range must be one of midtones, shadows, highlights", "ops[0] sponge: mode must be one of desaturate, saturate",
+              "ops[0] color_replacement: mode must be one of color, hue, saturation, luminosity",
+              "ops[0] background_eraser: sampling must be one of continuous, once, swatch",
+              "ops[0] color_replacement: limits must be one of contiguous, discontiguous, find_edges",
+              "ops[0] blur_brush: the stroke is too much work to lay at once (its dabs cover more than 2000000000 pixels): too_large",
+              "ops[0] dodge: points must lie within 100000 mm of the page",
+              "ops[0] background_eraser: the layer's transparency is locked: the Background Eraser takes away its alpha",
+              "ops[0] mixer_brush: reservoir.paint is [r, g, b, a] (finite numbers) or null", "ops[0] mixer_brush: seed must be a string or a whole number",
+              "ops[0] sponge: brush must be a dab brush of the book (its engine dabs)",
+              "ops[0] color_replacement: swatch_rgb is [r, g, b] (0..255), \"foreground\" or \"background\""}) {
+            const QString said = genko::wording::error(QString::fromUtf8(message));
+            QVERIFY2(!english.match(QString(said).remove(QStringLiteral("foreground")).remove(QStringLiteral("background"))).hasMatch(),
+                     qPrintable(QString::fromUtf8(message) + QStringLiteral(" → ") + said));
+        }
     }
 };
 
