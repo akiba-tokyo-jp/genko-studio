@@ -8,6 +8,7 @@
 #include <vector>
 
 #include "core/command_bus.hpp"
+#include "core/ink.hpp"
 #include "render/image.hpp"
 #include "render/image_ops.hpp"
 
@@ -30,6 +31,9 @@ public:
     // The layer `id` of the page at `at` (made ready as image_ops::layer_pixels makes it: refused when locked or not a
     // paint layer; its lines and fills drawn in when it is read), nothing of it held yet.
     TiledPixels(core::OpContext& c, std::size_t at, std::string id);
+    // (PC4 E5) The same, its grid and kind known already (brushing::unread: from the layer's headers), nothing read until a
+    // tile is reached (a read giving another grid: core::Error("value")).
+    TiledPixels(core::OpContext& c, std::size_t at, std::string id, Size grid, const image_ops::Pixels& like);
     // Tiles over a grid of that size, of `like`'s kind (its colours, precision and inks), none held: a copy to work on
     // (each tile made clear when it is reached), or a test's.
     TiledPixels(Size grid, const image_ops::Pixels& like);
@@ -78,6 +82,10 @@ private:
     int columns_ = 0;
     std::unique_ptr<image_ops::Pixels> like_;  // (a pixel of the layer's kind)
     std::unordered_map<std::int64_t, Tile> tiles_;
+    // (PC4 E5, review P3-4) An ink layer's inks with its marks drawn (ink_edit::with_marks), held from the first read
+    // (in the imaging budget) for the tiles read after and for the write: the layer drawn and decoded once a stroke.
+    mutable std::shared_ptr<core::InkPixels> inks_;
+    std::shared_ptr<image_ops::Held> inks_held_;
 };
 
 // The boxes on a grid that `boxes` reach (each grown by `margin` pixels), as kTile tiles: what TiledPixels::reach reads.

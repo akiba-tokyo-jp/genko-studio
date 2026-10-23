@@ -643,7 +643,7 @@ private slots:
         const core::InkPixels before = pixels_of(doc, "pic"), got = pixels_of(after, "pic");
         QCOMPARE(got.width, before.width);
         // (the smudge's box: the line and 1.5 times its width around it, 33..57 × 40 mm with 9 mm: 24..66 × 31..49 mm)
-        const auto reached = [](std::uint32_t x, std::uint32_t y) { return x + 1 >= px(24) && y + 1 >= px(31) && y <= px(49) + 1; };
+        const auto reached = [](std::uint32_t x, std::uint32_t y) { return x + 1 >= px(24) && x <= px(66) + 1 && y + 1 >= px(31) && y <= px(49) + 1; };
         int unchanged = 0, changed = 0, rich = 0;
         for (std::uint32_t y = 0; y < before.height; ++y) {
             for (std::uint32_t x = 0; x < before.width; ++x) {

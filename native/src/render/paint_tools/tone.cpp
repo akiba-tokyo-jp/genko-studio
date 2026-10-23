@@ -153,7 +153,7 @@ std::vector<float> local_sharpen(const Reader& get, Size grid, int ch, int alpha
                     }
                     s = std::clamp(s, lo, hi);
                 }
-                o[c] = s;
+                o[c] = std::max(s, 0.0f);  // (no value below none: a 32-bit layer keeps its HDR above 1, not below 0)
             }
         }
     }

@@ -302,6 +302,34 @@ private slots:
         QVERIFY(*studio.layer("paint")->mask->png != mask);
     }
 
+    // (review P2-1) A colour plate drawn on is the layer's pixels: a layer with lines asks first (やめる: nothing sent); an
+    // alpha channel is not the layer: not asked, the op sent with the channel.
+    void aColourPlateAsksFirst() {
+        Studio studio;
+        QVERIFY(studio.window->apply_ops(Json::array({Json{{"op", "add_stroke"}, {"page", 1}, {"layer_id", "paint"}, {"width_mm", 1},
+                                                           {"points", Json::array({Json::array({40, 10}), Json::array({40, 50})})}},
+                                                      Json{{"op", "add_channel"}, {"page", 1}}})));
+        int asked = 0;
+        studio.answers.responder->exec = [&](QDialog* dialog) {
+            if (dialog->objectName() == QStringLiteral("pixel_tool_bakes")) ++asked;
+            return int(QDialog::Rejected);
+        };
+        studio.trigger("act_mixer_brush");
+        studio.window->target_channel("red");
+        const std::size_t sent = studio.ops.size();
+        inject::mouse_stroke(studio.canvas(), {QPointF(36, 30), QPointF(44, 30)});
+        QCOMPARE(asked, 1);
+        QCOMPARE(studio.ops.size(), sent);  // (やめる: nothing)
+        const std::string alpha = studio.page().channels[0].id;
+        studio.window->target_channel(alpha);
+        inject::mouse_stroke(studio.canvas(), {QPointF(36, 30), QPointF(44, 30)});
+        QCOMPARE(asked, 1);
+        QVERIFY(studio.ops.size() > sent);
+        QCOMPARE(studio.ops.back().back()["op"], Json("mixer_brush"));
+        QCOMPARE(studio.ops.back().back()["channel"], Json(alpha));
+        QCOMPARE(studio.layer("paint")->stroke_count(), std::size_t(1));  // (the layer's line as it was)
+    }
+
     // The brushes' refusals read in Japanese (service/wording): no English word of four letters or more left.
     void theRefusalsReadInJapanese() {
         static const QRegularExpression english(QStringLiteral("[A-Za-z]{4,}"));
@@ -315,7 +343,10 @@ private slots:
               "ops[0] background_eraser: the layer's transparency is locked: the Background Eraser takes away its alpha",
               "ops[0] mixer_brush: reservoir.paint is [r, g, b, a] (finite numbers) or null", "ops[0] mixer_brush: seed must be a string or a whole number",
               "ops[0] sponge: brush must be a dab brush of the book (its engine dabs)",
-              "ops[0] color_replacement: swatch_rgb is [r, g, b] (0..255), \"foreground\" or \"background\""}) {
+              "ops[0] color_replacement: swatch_rgb is [r, g, b] (0..255), \"foreground\" or \"background\"",
+              "ops[0] smudge: the smudge is too wide for the layer (its width is past four times the layer's side): too_large",
+              "ops[0] background_eraser: the Background Eraser takes away the alpha: it cannot work one colour plate",
+              "ops[0] dodge: a stroke has more than 200000 dabs (its points lie too far apart for its brush's spacing)"}) {
             const QString said = genko::wording::error(QString::fromUtf8(message));
             QVERIFY2(!english.match(QString(said).remove(QStringLiteral("foreground")).remove(QStringLiteral("background"))).hasMatch(),
                      qPrintable(QString::fromUtf8(message) + QStringLiteral(" → ") + said));

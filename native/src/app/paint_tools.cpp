@@ -32,6 +32,7 @@
 #include "app/main_window.hpp"
 #include "app/theme.hpp"
 #include "app/tool_settings.hpp"
+#include "core/channels.hpp"
 #include "render/color_canvas.hpp"
 #include "render/shape_parts.hpp"
 
@@ -90,6 +91,9 @@ QComboBox* choices(const char* name, const std::vector<std::pair<QString, QStrin
 
 Json rgb_json(const Rgb& c) { return Json::array({c[0], c[1], c[2]}); }
 
+// The colours the Mixer Brush's paint is in on a page (the op's: an RGB page's profile's values, an ink page's sRGB).
+std::string paint_space(const core::Page& page) { return !page.color && page.rgb ? page.rgb->profile : std::string(); }
+
 }  // namespace
 
 bool PageCanvas::is_pixel_tool(const QString& tool) { return tool_of(tool) != nullptr; }
@@ -145,7 +149,8 @@ void MainWindow::build_paint_tool_pages(ToolSettings* ts) {
     QSpinBox* spacing = percent("pixel_spacing", 1, 1000, s.spacing, &PixelToolSettings::spacing);
     QSpinBox* strength = percent("pixel_strength", 1, 100, s.strength, &PixelToolSettings::strength);
     QCheckBox* detail = check("pixel_protect_detail", QStringLiteral("ディテールを保持"), s.protect_detail, &PixelToolSettings::protect_detail,
-                              QStringLiteral("まわりより明るく・暗くはしない（輪郭のにじみ・ノイズを強めない）"));
+                              QStringLiteral("まわりより明るく・暗くはしない（輪郭のにじみ・ノイズを強めない）。平らな色の境目はくっきりしない"
+                                             "（外すと強まる）"));
     QCheckBox* finger = check("pixel_finger", QStringLiteral("フィンガーペイント"), s.finger_painting, &PixelToolSettings::finger_painting,
                               QStringLiteral("描画色をつけた指でなぞるように、描画色からのばし始める"));
     QComboBox* range = chosen(choices("pixel_range", {{QStringLiteral("シャドウ"), QStringLiteral("shadows")}, {QStringLiteral("中間調"), QStringLiteral("midtones")},
@@ -323,9 +328,11 @@ bool MainWindow::pixel_tool_stroke(const StrokeInput& stroke, const core::Page& 
     if (tool == nullptr || stroke.points.empty()) return false;
     canvas_->stroke_dropped();
     const PixelToolSettings& s = pixel_tool_settings;
-    // (a mask or a channel painted is lent to the op as a picture of its own: the layer's lines stay as they are)
-    const bool on_channel = !channel_view().target.empty();
-    const bool on_mask = mask_edit && !on_channel;
+    // (a mask or a channel painted is lent to the op as a picture of its own: the layer's lines stay as they are — a colour
+    // plate of the layer is the layer's pixels: asked as the layer, review P2-1)
+    const std::string target = channel_view().target;
+    const bool on_channel = !target.empty() && core::find_channel(page, target) != nullptr;
+    const bool on_mask = mask_edit && target.empty();
     if (!on_mask && !on_channel && !pixel_tool_bakes_ok(page, layer, QString::fromUtf8(tool->title))) return true;
     // (the pressure does not change the brush, as Photoshop's retouching tools by default: each point at full size)
     Json points = Json::array();
@@ -368,6 +375,8 @@ bool MainWindow::pixel_tool_stroke(const StrokeInput& stroke, const core::Page& 
         op["load_after"] = s.load_after;
         op["clean_after"] = s.clean_after;
         foreground("rgb");
+        // (the paint kept in another page's colours is let go: its colours mean others here)
+        if (!mixer_reservoir.is_null() && mixer_space_ != paint_space(page)) mixer_reservoir = nullptr;
         if (!mixer_reservoir.is_null()) op["reservoir"] = mixer_reservoir;
     }
     if (op_name == "background_eraser") {
@@ -393,6 +402,7 @@ bool MainWindow::pixel_tool_stroke(const StrokeInput& stroke, const core::Page& 
         for (const Json& item : last_results_) {
             if (item.is_object() && item.value("op", std::string()) == "mixer_brush" && item.contains("reservoir")) mixer_reservoir = item["reservoir"];
         }
+        mixer_space_ = paint_space(page);
         mixer_shown();
     }
     return true;
@@ -402,7 +412,10 @@ void MainWindow::mixer_load() {
     const Rgb fore = colours_ != nullptr ? colours_->rgb() : Rgb{20, 20, 20};
     // (as the op loads it: the 描画色 full, as the colour formulas see the page — an RGB page of a profile's values)
     double rgb[3] = {fore[0] / 255.0, fore[1] / 255.0, fore[2] / 255.0};
-    if (const core::Page* page = current_page(); page != nullptr && !page->color) render::RgbSpace::of(*page).from_srgb(rgb, 1);
+    const core::Page* page = current_page();
+    if (page != nullptr && !page->color) render::RgbSpace::of(*page).from_srgb(rgb, 1);
+    if (page != nullptr && paint_space(*page) != mixer_space_) mixer_reservoir = nullptr;  // (what it picked up elsewhere: let go)
+    mixer_space_ = page != nullptr ? paint_space(*page) : std::string();
     const Json pickup = mixer_reservoir.is_object() && mixer_reservoir.contains("pickup") ? mixer_reservoir["pickup"] : Json(nullptr);
     mixer_reservoir = Json{{"paint", Json::array({rgb[0], rgb[1], rgb[2], 1.0})}, {"amount", 1.0}, {"pickup", pickup}};
     mixer_shown();

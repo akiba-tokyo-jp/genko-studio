@@ -282,6 +282,7 @@ void Smudge::dab(tiled::TiledPixels& work, const Footprint& fp) {
     // (a pixel past the grid: the nearest of it, as upstream's past its work region)
     const auto clamped = [&](int x, int y) { return work.at(std::clamp(x, 0, grid.width - 1), std::clamp(y, 0, grid.height - 1)); };
     if (carry_.empty()) {
+        held_ = std::make_shared<image_ops::Held>(std::uint64_t(side) * side * n * sizeof(float));  // (past the budget: too_large)
         carry_.assign(side * side * n, 0.0f);
         for (std::size_t qy = 0; qy < side; ++qy) {
             for (std::size_t qx = 0; qx < side; ++qx) {

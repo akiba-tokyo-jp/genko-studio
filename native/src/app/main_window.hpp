@@ -1341,6 +1341,7 @@ private:
     QSlider* eraser_flow_ = nullptr;
     std::set<std::string> blend_baked_;  // (PC4 E1: the paint layers whose lines became pixels by a blend, asked: page/layer)
     QLabel* mixer_paint_ = nullptr;  // (PC4 E5: the Mixer Brush's paint shown on its settings page)
+    std::string mixer_space_;  // (PC4 E5, review P3-12: the colours the paint is in — the page's RGB profile, "" sRGB)
     core::Json last_results_ = core::Json::array();  // (PC4 E5: what the ops apply_ops applied last reported — the Mixer Brush's reservoir)
     QCheckBox* eraser_balloons_ = nullptr;  // フキダシを削る (the eraser cuts the balloons it goes over)
     QComboBox* frame_mode_ = nullptr;

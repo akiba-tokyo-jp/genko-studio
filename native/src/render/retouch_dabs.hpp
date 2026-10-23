@@ -3,6 +3,7 @@
 #include <array>
 #include <cstddef>
 #include <functional>
+#include <memory>
 #include <optional>
 #include <string_view>
 #include <utility>
@@ -151,6 +152,7 @@ private:
     std::optional<std::vector<float>> finger_;
     int radius_;
     std::vector<float> carry_;
+    std::shared_ptr<image_ops::Held> held_;  // (PC4 E5, review P2-3: the carried picture in the imaging budget)
 };
 
 // --- the clone source (Window › Clone Source) --------------------------------------------------------------------------

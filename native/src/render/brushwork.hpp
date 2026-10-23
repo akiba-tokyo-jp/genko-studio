@@ -77,6 +77,15 @@ Ready ready(core::OpContext& c, std::size_t at, const std::string& id);
 Grid grid_of(const core::Page& page, Size size, const std::string& id);
 
 const core::Layer& layer_of(const core::Page& page, const std::string& id);
+// (PC4 E5, review P3-3) The grid and the kind of a paint layer's pixels as image_ops::layer_pixels would read them, from
+// the layer's headers alone (nothing decoded or drawn, the layer not changed) — none where only reading tells (precise pen
+// lines made precise pixels, a precise layer's lines). Refused as reading refuses them: a locked layer, one that is not a
+// paint layer.
+struct Unread {
+    Size grid;
+    image_ops::Pixels like;
+};
+std::optional<Unread> unread(const core::Document& doc, std::size_t at, const std::string& id);
 bool lock_alpha_of(const core::Document& doc, std::size_t at, const std::string& id);
 
 // The points on the grid (pixels), and the round brush of the diameter, hardness, opacity, flow and spacing given.

@@ -6,6 +6,7 @@
 
 #include <QtTest>
 
+#include <QElapsedTimer>
 #include <QTemporaryDir>
 
 #include <array>
@@ -161,6 +162,50 @@ private slots:
             QVERIFY(exit != 0);
             QCOMPARE(project(book), saved);
         }
+    }
+
+    // (review P3-2, P3-6) A pen layer's lines become its pixels when a brush changes them (the layer a paint layer after,
+    // saved so); a stroke off the layer changes nothing — the pen layer saved as it was.
+    void penLinesBecomePixelsWhenChanged() {
+        const QString book = make_book(QStringLiteral("pen-book"), "rgb8");
+        QVERIFY(!book.isEmpty());
+        int exit = -1;
+        Json done = apply(book, QStringLiteral("pen.json"),
+                          Json::array({Json{{"op", "add_layer"}, {"page", 1}, {"kind", "pen"}, {"id", "pen"}},
+                                       Json{{"op", "add_stroke"}, {"page", 1}, {"layer_id", "pen"}, {"width_mm", 2}, {"rgb", Json::array({90, 140, 200})},
+                                            {"points", Json::array({Json::array({100, 20}), Json::array({100, 260})})}}}),
+                          &exit);
+        QVERIFY2(exit == 0, done.dump().c_str());
+        const Json before = layer_of(project(book), "pen");
+        QCOMPARE(before["kind"], Json("strokes"));
+        const auto dodge = [](double x0, double x1) {
+            return Json::array({Json{{"op", "dodge"}, {"page", 1}, {"layer_id", "pen"}, {"width_mm", 10},
+                                     {"points", Json::array({Json::array({x0, 150}), Json::array({x1, 150})})}}});
+        };
+        done = apply(book, QStringLiteral("off.json"), dodge(-900, -800), &exit);
+        QVERIFY2(exit == 0 && done["results"][0]["changed"] == Json(false), done.dump().c_str());
+        QCOMPARE(layer_of(project(book), "pen"), before);
+        done = apply(book, QStringLiteral("through.json"), dodge(80, 120), &exit);
+        QVERIFY2(exit == 0 && done["results"][0]["changed"] == Json(true), done.dump().c_str());
+        QCOMPARE(layer_of(project(book), "pen")["kind"], Json("raster"));
+    }
+
+    // (review P1-1) 色混ぜ's 指先 with an absurd width on a 16-bit page: refused at once (too wide: too_large), the book as it was.
+    void aSmudgeTooWide() {
+        const QString book = make_book(QStringLiteral("wide-book"), "rgb16");
+        QVERIFY(!book.isEmpty());
+        const Json saved = project(book);
+        int exit = -1;
+        QElapsedTimer clock;
+        clock.start();
+        const Json done = apply(book, QStringLiteral("wide.json"),
+                                Json::array({Json{{"op", "smudge"}, {"page", 1}, {"layer_id", "pic"}, {"mode", "smudge"}, {"width_mm", 1.0e7},
+                                                  {"points", Json::array({Json::array({30, 30}), Json::array({60, 30})})}}}),
+                                &exit);
+        QVERIFY(exit != 0);
+        QVERIFY2(done.dump().find("too wide") != std::string::npos, done.dump().c_str());
+        QVERIFY(clock.elapsed() < 20000);
+        QCOMPARE(project(book), saved);
     }
 };
 

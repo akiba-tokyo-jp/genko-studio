@@ -22,7 +22,9 @@
 #include "core/color_raster.hpp"
 #include "core/command_bus.hpp"
 #include "core/ink.hpp"
+#include "render/image.hpp"
 #include "render/image_ops.hpp"
+#include "render/ink_edit.hpp"
 #include "render/ops_registry.hpp"
 #include "render/page.hpp"
 #include "render/paint_tools/tone.hpp"
@@ -295,6 +297,18 @@ private slots:
                 for (int x = 40; x < 60; ++x) hi = std::max(hi, kept.at(x, y)[0]);
             QVERIFY2(hi <= 0.55f + 2.5f / 255.0f, qPrintable(k + QStringLiteral(": %1").arg(hi)));
         }
+        // (review P3-11) a 32-bit page's Sharpen without Protect Detail: nothing below 0 (above 1 it may go: HDR)
+        const core::Document hdr = as_kind(book([](int x, int y) { return (x + y) % 2 == 0 ? Colour{0.02, 0.02, 0.02, 1} : Colour{0.95, 0.95, 0.95, 1}; }), "32");
+        Json sharp = stroke("sharpen_brush", {{20, 100}, {180, 100}}, 60);
+        sharp["strength"] = 100;
+        sharp["protect_detail"] = false;
+        const Shown sharpened = shown(run(hdr, sharp));
+        float lo = 1.0f, top = 0.0f;
+        for (const Rgba& p : sharpened.rgba) {
+            lo = std::min({lo, p[0], p[1], p[2]});
+            top = std::max(top, p[0]);
+        }
+        QVERIFY2(lo >= 0.0f && top > 1.0f, qPrintable(QStringLiteral("%1 .. %2").arg(lo).arg(top)));
     }
 
     // Smudge drags the red along, fading with the distance; finger painting starts with the colour given.
@@ -597,6 +611,12 @@ private slots:
         fine["width_mm"] = 0.05;
         fine["spacing"] = 1;
         QVERIFY2(refusal(doc, fine).find("dabs") != std::string::npos, refusal(doc, fine).c_str());
+        // (review P3-8: two hundred thousand dabs a stroke, section E 3.6 — here some 300 000 half a pixel apart)
+        Json many = stroke("dodge", {{10, 10}}, 10);
+        many["points"] = Json::array({Json::array({0, 0}), Json::array({19050, 0})});
+        many["width_mm"] = 0.2;
+        many["spacing"] = 1;
+        QVERIFY2(refusal(doc, many).find("more than 200000 dabs") != std::string::npos, refusal(doc, many).c_str());
         for (const char* op : {"dodge", "burn", "sponge", "blur_brush", "sharpen_brush", "smudge_brush", "mixer_brush", "background_eraser", "color_replacement"}) {
             Json good = stroke(op, {{100, 100}}, 10);
             for (const auto& [key, value] : std::vector<std::pair<std::string, Json>>{{"points", Json::array()}, {"points", "here"}, {"width_mm", 0}, {"hardness", "soft"}}) {
@@ -653,6 +673,274 @@ private slots:
         QCOMPARE(layer_of(done, "paint").stroke_count(), lines);
         QVERIFY(!layer_of(done, "paint").raster_png);
         QVERIFY(*layer_of(done, "paint").ink_raster != *layer_of(inked, "paint").ink_raster);
+    }
+
+    // (review P3-6) Every tool on every kind of layer (8, 16 and 32 bits, CMYK, Lab, grey): only inside the selection (what
+    // lies outside it as it was, inside changed — Sponge and Color Replacement have no colour to move on a grey page), and a
+    // protected transparency kept clear and opaque (the Background Eraser refused there).
+    void everyToolInsideTheSelectionAndTheLock() {
+        const auto colourful = [](int x, int y) { return (x / 4 + y / 4) % 2 == 0 ? Colour{0.8, 0.3, 0.2, 1} : Colour{0.2, 0.5, 0.8, 1}; };
+        const auto halved = [&](int x, int y) { return x < 150 ? colourful(x, y) : Colour{0, 0, 0, 0}; };
+        const std::vector<std::string> ops{"dodge", "burn", "sponge", "blur_brush", "sharpen_brush", "smudge_brush", "mixer_brush", "background_eraser",
+                                           "color_replacement"};
+        const auto with_settings = [](Json s) {
+            s["strength"] = 100;
+            s["protect_detail"] = false;
+            s["wet"] = 100;
+            s["rgb"] = Json::array({0, 160, 40});
+            s["tolerance"] = 60;
+            return s;
+        };
+        for (const std::string& kind : kinds()) {
+            const core::Document doc = as_kind(book(colourful), kind);
+            core::Document locked = as_kind(book(halved), kind);
+            locked.edit_page(0).layers.back().lock_alpha = true;
+            const Shown was = shown(doc), was_half = shown(locked);
+            for (const std::string& op : ops) {
+                const QString k = QString::fromStdString(kind + " " + op);
+                Json s = with_settings(stroke(op.c_str(), {{20, 100}, {180, 100}}, 30));
+                s["area"] = Json{{"rect", Json::array({len(100), 0, len(100), kInch})}};
+                const Shown now = shown(run(doc, s));
+                for (int y = 85; y <= 115; y += 5) {
+                    for (int x = 20; x <= 90; x += 7) QVERIFY2(now.at(x, y) == was.at(x, y), qPrintable(k + QStringLiteral(" outside (%1, %2) ").arg(x).arg(y) + text(now.at(x, y))));
+                }
+                bool inside = false;
+                for (int y = 90; y <= 110 && !inside; ++y) {
+                    for (int x = 110; x <= 170 && !inside; ++x) inside = now.at(x, y) != was.at(x, y);
+                }
+                if (!(kind == "gray" && (op == "sponge" || op == "color_replacement"))) QVERIFY2(inside, qPrintable(k + " inside"));
+                Json l = with_settings(stroke(op.c_str(), {{100, 100}, {190, 100}}, 30));
+                if (op == "background_eraser") {
+                    QVERIFY2(refusal(locked, l).find("transparency is locked") != std::string::npos, qPrintable(k));
+                    continue;
+                }
+                const Shown kept = shown(run(locked, l));
+                for (int y = 90; y <= 110; y += 5) {
+                    for (int x = 156; x < 200; x += 4) QVERIFY2(kept.at(x, y)[3] == 0.0f, qPrintable(k + QStringLiteral(" clear (%1, %2) ").arg(x).arg(y) + text(kept.at(x, y))));
+                    for (int x = 100; x < 146; x += 5) QVERIFY2(kept.at(x, y)[3] == was_half.at(x, y)[3], qPrintable(k + QStringLiteral(" opaque (%1, %2)").arg(x).arg(y)));
+                }
+            }
+        }
+    }
+
+    // (review P3-2, P3-6) A pen layer's lines and a paint layer's become the layer's pixels before a brush changes them (the
+    // line still there, as pixels); a stroke that changes nothing — off the layer, or over colours it cannot move — leaves
+    // the layer and its lines as they were (no pixels made for nothing).
+    void linesBecomePixelsOnlyWhenChanged() {
+        for (const std::string& kind : {std::string("8"), std::string("cmyk")}) {
+            core::Document doc = as_kind(book([](int, int) { return Colour{1, 1, 1, 1}; }), kind);
+            const Json blue = Json::array({90, 140, 200});
+            doc = run_ops(doc, Json::array({Json{{"op", "add_layer"}, {"page", 1}, {"kind", "pen"}, {"id", "pen"}},
+                                            Json{{"op", "add_stroke"}, {"page", 1}, {"layer_id", "pen"}, {"width_mm", 1.5}, {"rgb", blue},
+                                                 {"points", Json::array({Json::array({mm(100), mm(20)}), Json::array({mm(100), mm(180)})})}},
+                                            Json{{"op", "add_stroke"}, {"page", 1}, {"layer_id", "paint"}, {"width_mm", 1.5}, {"rgb", blue},
+                                                 {"points", Json::array({Json::array({mm(60), mm(20)}), Json::array({mm(60), mm(180)})})}},
+                                            Json{{"op", "add_layer"}, {"page", 1}, {"kind", "pen"}, {"id", "black"}},
+                                            Json{{"op", "add_stroke"}, {"page", 1}, {"layer_id", "black"}, {"width_mm", 1.5}, {"rgb", Json::array({0, 0, 0})},
+                                                 {"points", Json::array({Json::array({mm(140), mm(20)}), Json::array({mm(140), mm(180)})})}}}))
+                      .doc;
+            for (const std::string id : {"pen", "paint"}) {
+                const QString k = QString::fromStdString(kind + " " + id);
+                const core::Layer& before = layer_of(doc, id);
+                const core::ApplyResult off = run_ops(doc, Json::array({stroke("dodge", {{-500, -500}}, 10, id)}));
+                QCOMPARE(off.results.at(0)["changed"], Json(false));
+                QVERIFY2(layer_of(off.doc, id).kind == before.kind && layer_of(off.doc, id).stroke_count() == 1, qPrintable(k));
+                QCOMPARE(bytes_of(off.doc, id), bytes_of(doc, id));
+                const int x = id == "pen" ? 100 : 60;
+                const core::ApplyResult through = run_ops(doc, Json::array({stroke("burn", {{double(x - 20), 100}, {double(x + 20), 100}}, 16, id)}));
+                QCOMPARE(through.results.at(0)["changed"], Json(true));
+                const core::Layer& after = layer_of(through.doc, id);
+                QVERIFY2(after.kind == core::LayerKind::Raster && after.stroke_count() == 0, qPrintable(k));
+                const Rgba line = pixel(through.doc, x, 170, id);  // (far from the brush: the line, as pixels)
+                QVERIFY2(line[3] > 0.9f && lum(line) < 0.7f && line[2] > line[0] + 0.15f, qPrintable(k + " " + text(line)));
+            }
+            if (kind != "8") continue;
+            // over a black line the Sponge moves nothing: the line stays a line
+            const core::ApplyResult grey = run_ops(doc, Json::array({stroke("sponge", {{120, 100}, {160, 100}}, 16, "black")}));
+            QCOMPARE(grey.results.at(0)["changed"], Json(false));
+            QCOMPARE(layer_of(grey.doc, "black").stroke_count(), std::size_t(1));
+            QVERIFY(layer_of(grey.doc, "black").kind == core::LayerKind::Strokes);
+        }
+    }
+
+    // (review P2-1, P3-10, P3-6) A colour plate worked alone — "cyan" of a CMYK page, "red" of an RGB one —: the brush's
+    // pixels change that plate only, and every pixel of the layer it did not change shows as before, its lines on every
+    // plate (drawn into the inks with them; filter_raster's plate alike); the Background Eraser refused on a plate. The
+    // tools on an alpha channel, a spot channel and the Quick Mask change the channel, not the layer.
+    void colourPlatesAndChannels() {
+        const auto colourful = [](int x, int y) { return (x / 4 + y / 4) % 2 == 0 ? Colour{0.8, 0.3, 0.2, 1} : Colour{0.2, 0.5, 0.8, 1}; };
+        core::Document cmyk = as_kind(book(colourful), "cmyk");
+        cmyk = run(cmyk, Json{{"op", "add_stroke"}, {"page", 1}, {"layer_id", "paint"}, {"width_mm", 1.5}, {"rgb", Json::array({0, 0, 0})},
+                              {"points", Json::array({Json::array({mm(150), mm(10)}), Json::array({mm(150), mm(190)})})}});
+        const core::InkPixels showed = render::ink_edit::with_marks(cmyk.page(0), layer_of(cmyk, "paint"), &cmyk);
+        const auto on_the_line = [&](const core::Document& done, unsigned from, const char* what) {
+            const core::InkPixels now = render::ink_edit::with_marks(done.page(0), layer_of(done, "paint"), &done);
+            QCOMPARE(now.width, showed.width);
+            for (std::uint32_t y = 10; y < 190; y += 7) {
+                for (std::uint32_t x = 145; x <= 155; ++x) {
+                    const std::size_t i = std::size_t(y) * showed.width + x;
+                    for (unsigned c = from; c < showed.channels(); ++c) {
+                        if (now.value(i, c) != showed.value(i, c)) QFAIL(qPrintable(QStringLiteral("%1: (%2, %3) channel %4").arg(QString::fromLatin1(what)).arg(x).arg(y).arg(c)));
+                    }
+                }
+            }
+        };
+        Json dodge = stroke("dodge", {{20, 60}, {80, 60}}, 20);
+        dodge["channel"] = "cyan";
+        const core::Document dodged = run(cmyk, dodge);
+        on_the_line(dodged, 0, "dodge on cyan");
+        QVERIFY(*layer_of(dodged, "paint").ink_raster != *layer_of(cmyk, "paint").ink_raster);
+        const core::Document levelled = run(cmyk, Json{{"op", "filter_raster"}, {"page", 1}, {"id", "paint"}, {"kind", "levels"}, {"black", 0}, {"white", 128},
+                                                       {"channel", "cyan"}});
+        on_the_line(levelled, 1, "filter_raster on cyan");
+        Json eraser = stroke("background_eraser", {{20, 60}, {80, 60}}, 20);
+        eraser["channel"] = "cyan";
+        QVERIFY(refusal(cmyk, eraser).find("colour plate") != std::string::npos);
+        // an RGB page's red plate
+        const core::Document rgb = book(colourful);
+        Json red = stroke("dodge", {{20, 100}, {180, 100}}, 30);
+        red["channel"] = "red";
+        const Shown was = shown(rgb), now = shown(run(rgb, red));
+        bool reds = false;
+        for (int y = 90; y <= 110; y += 2) {
+            for (int x = 30; x <= 170; x += 3) {
+                reds = reds || now.at(x, y)[0] != was.at(x, y)[0];
+                for (std::size_t c = 1; c < 4; ++c) QCOMPARE(now.at(x, y)[c], was.at(x, y)[c]);
+            }
+        }
+        QVERIFY(reds);
+        // channels: an alpha channel, a spot channel (the left half each), the Quick Mask
+        core::Document channelled = run(rgb, Json{{"op", "add_channel"}, {"page", 1}, {"name", "A"}, {"fill", "area"},
+                                                  {"area", Json{{"rect", Json::array({0, 0, len(100), kInch})}}}});
+        channelled = run(channelled, Json{{"op", "add_channel"}, {"page", 1}, {"kind", "spot"}, {"name", "S"}, {"area", Json{{"rect", Json::array({0, 0, len(100), kInch})}}}});
+        const auto channel_bytes = [](const core::Document& d, const std::string& name) {
+            for (const core::Channel& ch : d.page(0).channels)
+                if (ch.name == name) return ch.raster ? *ch.raster : std::string();
+            return std::string("(none)");
+        };
+        for (const char* op : {"dodge", "burn", "sponge", "blur_brush", "sharpen_brush", "smudge_brush", "mixer_brush", "background_eraser", "color_replacement"}) {
+            Json s = stroke(op, {{40, 100}, {160, 100}}, 30);
+            s["strength"] = 100;
+            s["protect_detail"] = false;
+            s["wet"] = 100;
+            s["rgb"] = Json::array({255, 255, 255});
+            s["channel"] = "A";
+            const core::Document done = run(channelled, s);
+            QVERIFY2(bytes_of(done) == bytes_of(channelled), op);  // (the layer as it was)
+            const std::string o = op;
+            if (o == "blur_brush" || o == "smudge_brush" || o == "mixer_brush" || o == "sharpen_brush") QVERIFY2(channel_bytes(done, "A") != channel_bytes(channelled, "A"), op);
+        }
+        Json blur = stroke("blur_brush", {{40, 100}, {160, 100}}, 30);
+        blur["strength"] = 100;
+        blur["channel"] = "S";
+        const core::Document spotted = run(channelled, blur);
+        QCOMPARE(bytes_of(spotted), bytes_of(channelled));
+        QVERIFY(channel_bytes(spotted, "S") != channel_bytes(channelled, "S"));
+        const core::Document quick = run(channelled, Json{{"op", "quick_mask"}, {"page", 1}, {"on", true}});
+        Json mixer = stroke("mixer_brush", {{40, 100}, {160, 100}}, 30);
+        mixer["rgb"] = Json::array({0, 0, 0});  // (black: masked)
+        mixer["channel"] = "クイックマスク";
+        const core::Document masked = run(quick, mixer);
+        QCOMPARE(bytes_of(masked), bytes_of(quick));
+        const auto quick_bytes = [](const core::Document& d) {
+            for (const core::Channel& ch : d.page(0).channels)
+                if (ch.quick_mask) return ch.raster ? *ch.raster : std::string();
+            return std::string("(none)");
+        };
+        QVERIFY(quick_bytes(quick) != "(none)");
+        QVERIFY(quick_bytes(masked) != quick_bytes(quick));
+    }
+
+    // (review P1-1, P3-6) 色混ぜ's ぼかし and なじませ on precise and ink layers; its 指先 with a brush four times the layer wide
+    // works within a small budget (its spot cut to the box: the same result), a wider brush refused before anything is
+    // held, at once.
+    void smudgeModesAndLimits() {
+        const core::Document base = book([](int x, int) { return x < 100 ? Colour{0.9, 0.1, 0.1, 1} : Colour{0.1, 0.1, 0.9, 1}; });
+        Json op{{"op", "smudge"}, {"page", 1}, {"layer_id", "paint"}, {"width_mm", 4},
+                {"points", Json::array({Json::array({mm(80), mm(100)}), Json::array({mm(150), mm(100)})})}};
+        for (const char* mode : {"blur", "blend"}) {
+            for (const std::string& kind : {std::string("16"), std::string("cmyk")}) {
+                const core::Document doc = as_kind(base, kind);
+                op["mode"] = mode;
+                const core::Document done = run(doc, op);
+                const QString k = QString::fromStdString(kind) + " " + QString::fromLatin1(mode);
+                QVERIFY2(bytes_of(done) != bytes_of(doc), qPrintable(k));
+                const Shown s = shown(done);
+                QVERIFY2(s.at(100, 100)[0] < 0.85f && s.at(100, 100)[2] > 0.15f, qPrintable(k + " " + text(s.at(100, 100))));  // (mixed at the edge)
+                QCOMPARE(s.at(100, 20), shown(doc).at(100, 20));  // (off the stroke)
+                if (kind != "16") continue;
+                bool finer = false;
+                for (int x = 90; x < 115 && !finer; ++x) {
+                    const float v = s.at(x, 100)[0] * 255.0f;
+                    finer = std::fabs(v - std::round(v)) > 0.01f;
+                }
+                QVERIFY2(finer, qPrintable(k));
+            }
+        }
+        for (const std::string& kind : {std::string("16"), std::string("cmyk")}) {
+            const core::Document doc = as_kind(base, kind);
+            Json wide = op;
+            wide["mode"] = "smudge";
+            wide["width_mm"] = 100;  // (787 pixels on the 200-pixel layer: within four times its side)
+            wide["points"] = Json::array({Json::array({mm(10), mm(100)}), Json::array({mm(60), mm(100)}), Json::array({mm(110), mm(100)}),
+                                          Json::array({mm(160), mm(100)})});  // (a step a segment: the colour carried)
+            {
+                const render::ImageAllocationBudget small{12ULL * 1024 * 1024};
+                QVERIFY2(bytes_of(run(doc, wide)) != bytes_of(doc), kind.c_str());
+            }
+            wide["width_mm"] = 1.0e7;
+            const auto t0 = std::chrono::steady_clock::now();
+            const std::string why = refusal(doc, wide);
+            QVERIFY2(why.find("too wide") != std::string::npos && why.find("too_large") != std::string::npos, why.c_str());
+            QVERIFY(std::chrono::steady_clock::now() - t0 < std::chrono::seconds(5));
+        }
+        // (an 8-bit layer: as before, no such limit)
+        Json eight = op;
+        eight["mode"] = "smudge";
+        eight["width_mm"] = 100;
+        QVERIFY(refusal(base, eight).empty());
+    }
+
+    // (review P2-2) 色混ぜ on an ink page's paint layer as before E5: what it shows — its lines too — smudged and laid in
+    // its inks under its lines (they stay lines), on a layer of lines alone, on its second stroke and on a layer with inks:
+    // the same look as the 8-bit picture smudged on the RGB page it was made from (alpha and lightness, within the 8
+    // bits' and the grey's), never refused where only a line lies.
+    void smudgeOnAnInkPageAsBefore() {
+        core::Document rgb = book([](int x, int y) { return x >= 30 && x < 70 && y >= 30 && y < 170 ? Colour{0.5, 0.5, 0.5, 1} : Colour{0, 0, 0, 0}; });
+        const auto line = [](const char* id, double x) {
+            return Json{{"op", "add_stroke"}, {"page", 1}, {"layer_id", id}, {"width_mm", 1.2}, {"rgb", Json::array({0, 0, 0})},
+                        {"points", Json::array({Json::array({mm(x), mm(20)}), Json::array({mm(x), mm(180)})})}};
+        };
+        rgb = run_ops(rgb, Json::array({line("paint", 70), Json{{"op", "add_layer"}, {"page", 1}, {"kind", "paint"}, {"id", "ink"}}, line("ink", 130)})).doc;
+        for (auto& layer : rgb.edit_page(0).layers) layer.panel_clip = layer.panel_each = false;
+        core::Document grey = as_kind(rgb, "gray");
+        QVERIFY(!layer_of(grey, "ink").ink_raster && layer_of(grey, "ink").stroke_count() == 1);  // (a layer of lines alone)
+        const auto smudge_at = [](const char* id, double x0, double x1, double y) {
+            return Json{{"op", "smudge"}, {"page", 1}, {"layer_id", id}, {"mode", "smudge"}, {"width_mm", 4},
+                        {"points", Json::array({Json::array({mm(x0), mm(y)}), Json::array({mm(x1), mm(y)})})}};
+        };
+        const auto alike = [&](const core::Document& a, const core::Document& b, const char* id, int y, const char* what) {
+            const Shown sa = shown(a, id), sb = shown(b, id);
+            int smeared = 0;
+            for (int x = 40; x < 180; ++x) {
+                const Rgba p = sa.at(x, y), q = sb.at(x, y);
+                if (std::fabs(p[3] - q[3]) > 0.05f) QFAIL(qPrintable(QStringLiteral("%1: (%2, %3) alpha %4 / %5").arg(QString::fromLatin1(what)).arg(x).arg(y).arg(p[3]).arg(q[3])));
+                // (the colours where both are nearly opaque: where clear pixels mix in, the 8-bit picture's straight values
+                // darken toward its clear black, the values' premultiplied ones do not — SPEC's 色混ぜ)
+                if (p[3] > 0.9f && q[3] > 0.9f && std::fabs(lum(p) - lum(q)) > 0.08f) QFAIL(qPrintable(QString::fromLatin1(what) + " " + text(p) + " / " + text(q)));
+                smeared += p[3] > 0.05f && p[3] < 0.95f ? 1 : 0;
+            }
+            QVERIFY2(smeared > 3, what);  // (the line smeared, not a hard line)
+        };
+        // a layer of lines alone, then its second stroke (where only the line lies)
+        core::Document rgb1 = run(rgb, smudge_at("ink", 110, 150, 60)), grey1 = run(grey, smudge_at("ink", 110, 150, 60));
+        alike(rgb1, grey1, "ink", 60, "lines alone");
+        QVERIFY(layer_of(grey1, "ink").ink_raster && layer_of(grey1, "ink").stroke_count() == 1);  // (its line still a line)
+        core::Document rgb2 = run(rgb1, smudge_at("ink", 110, 150, 140)), grey2 = run(grey1, smudge_at("ink", 110, 150, 140));
+        alike(rgb2, grey2, "ink", 140, "the second stroke");
+        // a layer with inks and a line
+        alike(run(rgb, smudge_at("paint", 50, 90, 100)), run(grey, smudge_at("paint", 50, 90, 100)), "paint", 100, "inks and a line");
+        QCOMPARE(layer_of(run(grey, smudge_at("paint", 50, 90, 100)), "paint").stroke_count(), std::size_t(1));
     }
 
     // A layer's mask painted through the lending (layer_mask: the brushes' pixels untouched, the mask changed).

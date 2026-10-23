@@ -25,6 +25,7 @@
 #include "render/fill_patches.hpp"
 #include "render/filters.hpp"
 #include "render/image_ops.hpp"
+#include "render/ink_edit.hpp"
 #include "render/page.hpp"
 #include "render/raster.hpp"
 #include "render/raster_ops.hpp"
@@ -221,25 +222,34 @@ constexpr int kSmudgeDpi = 200;
 // 色混ぜ on a precise or ink paint layer (PC4 E5, design section E 0.4: the PC2 task): the same work as the 8-bit one's
 // below — the stroke drawn, blurred and × its strength the cover through which the blurred (ぼかし, なじませ) or carried
 // (指先) values are laid over the layer's — in the layer's own values on its own grid: a precise layer's samples in float
-// (HDR kept), an ink layer's plates (its lines stay lines over them, as before). Only the pixels it changes are written
-// (the others keep their bytes); its work in the imaging budget (past it: too_large).
+// (HDR kept), an ink layer's plates. An ink layer's values are what it shows — its inks with its lines and pictures drawn
+// (ink_edit::with_marks), as the picture it was lent before (review P2-2: its lines smudged too, a layer of lines alone
+// and its second stroke alike) — and what changed goes into its own inks, under its lines (they stay lines). Only the
+// pixels it changes are written (the others keep their bytes); its work in the imaging budget (past it: too_large), a
+// brush wider than four times the layer's side refused (its blurs' work).
 void smudge_values(OpContext& c, std::size_t at, const std::string& id, const std::string& mode, const core::PenPoints& points, double width,
                    double strength) {
     const ImageAllocationBudget budget{2ULL * 1024 * 1024 * 1024};
     const Page& seen = c.doc.page(at);
     const Layer& layer = seen.layers[core::layer_by_id(seen, id)];
-    const bool inks = layer.color_raster == nullptr;
-    std::optional<core::InkPixels> raster;  // (an ink layer's inks, its lines left as lines)
+    const bool inks = seen.color.has_value();
     Size grid;
     if (inks) {
-        raster = core::decode_ink_raster(*layer.ink_raster);
-        grid = Size{static_cast<int>(raster->width), static_cast<int>(raster->height)};
+        if (layer.ink_raster) {
+            const core::InkRasterHeader head = core::ink_raster_header(*layer.ink_raster);
+            grid = Size{static_cast<int>(head.width), static_cast<int>(head.height)};
+        } else {  // (none yet: ink_edit::with_marks's blank)
+            grid = Size{mm_to_px(seen.spec.width_mm.value(), raster::kWorkingDpi), mm_to_px(seen.spec.height_mm.value(), raster::kWorkingDpi)};
+        }
     } else {
         const core::ColorRasterView view(*layer.color_raster);
         grid = Size{static_cast<int>(view.width()), static_cast<int>(view.height())};
     }
     const double w_mm = seen.spec.width_mm.value(), h_mm = seen.spec.height_mm.value();
     const double sx = grid.width / w_mm, sy = grid.height / h_mm, scale = std::sqrt(sx * sy);
+    if (!(width * scale <= 4.0 * std::max(grid.width, grid.height))) {
+        throw OpError("the smudge is too wide for the layer (its width is past four times the layer's side): too_large");
+    }
     const int dpi = std::max(1, static_cast<int>(std::lround(scale * 25.4)));
     double min_x = points.front().x, max_x = points.front().x, min_y = points.front().y, max_y = points.front().y;
     for (const auto& p : points) {
@@ -255,7 +265,24 @@ void smudge_values(OpContext& c, std::size_t at, const std::string& id, const st
     const double bx1 = std::min<double>(core::py_round_whole(x1 * sx), grid.width), by1 = std::min<double>(core::py_round_whole(y1 * sy), grid.height);
     if (bx1 - bx0 < 2 || by1 - by0 < 2) throw OpError("the brush is off the page");
     const Box box{static_cast<int>(bx0), static_cast<int>(by0), static_cast<int>(bx1), static_cast<int>(by1)};
-    image_ops::Pixels p = inks ? image_ops::inks_part(*raster, *seen.color, box) : image_ops::layer_pixels(c, at, id, box);
+    // an ink layer: what it shows (its marks drawn) to work, its own inks to write (both whole, in the budget)
+    std::optional<image_ops::Held> whole;
+    std::optional<core::InkPixels> own_inks;
+    std::optional<image_ops::Pixels> read;
+    if (inks) {
+        const std::uint64_t sample = seen.color->depth == 32 ? sizeof(float) : sizeof(std::uint16_t);
+        whole.emplace(2 * std::uint64_t(grid.width) * std::uint64_t(grid.height) * (seen.color->planes() + 1) * sample);
+        const core::InkPixels shown = ink_edit::with_marks(seen, layer, &c.doc);
+        if (static_cast<int>(shown.width) != grid.width || static_cast<int>(shown.height) != grid.height) {
+            throw core::Error("value", "the layer " + id + "'s inks are not of its grid");
+        }
+        own_inks = layer.ink_raster ? core::decode_ink_raster(*layer.ink_raster)
+                                    : core::blank_ink_pixels(shown.space, shown.depth, shown.width, shown.height, shown.planes);
+        read.emplace(image_ops::inks_part(shown, *seen.color, box));
+    } else {
+        read.emplace(image_ops::layer_pixels(c, at, id, box));
+    }
+    image_ops::Pixels& p = *read;
     const unsigned n = p.all();
     const auto w = static_cast<std::size_t>(box.width()), h = static_cast<std::size_t>(box.height());
     bool any = false;
@@ -289,10 +316,27 @@ void smudge_values(OpContext& c, std::size_t at, const std::string& id, const st
         image_ops::gauss_blur(worked, w, h, n, static_cast<float>(core::py_max(1.0, width * scale / (mode == "blur" ? 3 : 1.5))));
     } else {
         const auto r = static_cast<long>(std::max<std::int64_t>(2, core::py_round_int(width * scale / 2)));
-        const auto side = std::size_t(2 * r);
-        std::vector<float> carried, here(side * side * n), laid(side * side * n);
+        // (the spot's offsets from its centre, -r .. r - 1 each way, cut to those that ever meet the box — review P1-1: an
+        // offset that never meets it neither reads nor lays a pixel of it, so the result is the same —: every step's centre
+        // lies between its segment's ends, rounded as they are)
+        long least_x = 0, most_x = 0, least_y = 0, most_y = 0;
+        for (std::size_t i = 0; i < shifted.size(); ++i) {
+            const long px = held_px(core::py_round_whole(shifted[i].x * sx)), py = held_px(core::py_round_whole(shifted[i].y * sy));
+            least_x = i == 0 ? px : std::min(least_x, px);
+            most_x = i == 0 ? px : std::max(most_x, px);
+            least_y = i == 0 ? py : std::min(least_y, py);
+            most_y = i == 0 ? py : std::max(most_y, py);
+        }
+        // (a pixel more each way: a step's centre rounded as its ends are, to the float)
+        const long lo_x = std::max(-r, -(most_x + 1)), hi_x = std::min(r - 1, long(w) - 1 - (least_x - 1));
+        const long lo_y = std::max(-r, -(most_y + 1)), hi_y = std::min(r - 1, long(h) - 1 - (least_y - 1));
+        const auto span_x = std::size_t(std::max(0L, hi_x - lo_x + 1)), span_y = std::size_t(std::max(0L, hi_y - lo_y + 1));
+        // (the spot, what is carried and what is laid: three of them, in the budget)
+        if (double(span_x) * double(span_y) * double(n) * sizeof(float) * 3.0 > 4.0e18) image_ops::too_large();
+        const image_ops::Held spots(3 * std::uint64_t(span_x) * std::uint64_t(span_y) * n * sizeof(float));
+        std::vector<float> carried, here(span_x * span_y * n), laid(span_x * span_y * n);
         const auto in_box = [&](long x, long y) { return x >= 0 && y >= 0 && x < long(w) && y < long(h); };
-        for (std::size_t i = 0; i + 1 < shifted.size(); ++i) {
+        for (std::size_t i = 0; i + 1 < shifted.size() && span_x > 0 && span_y > 0; ++i) {
             const double ax = shifted[i].x, ay = shifted[i].y, bx = shifted[i + 1].x, by = shifted[i + 1].y;
             const auto steps = std::max<std::int64_t>(1, core::loop_count(core::py_dist(ax, ay, bx, by) * scale / core::py_max(1.0, static_cast<double>(r) / 3.0)));
             for (std::int64_t k = 0; k < steps; ++k) {
@@ -300,10 +344,10 @@ void smudge_values(OpContext& c, std::size_t at, const std::string& id, const st
                 const long cx = held_px(core::py_round_whole((ax + (bx - ax) * t) * sx));
                 const long cy = held_px(core::py_round_whole((ay + (by - ay) * t) * sy));
                 // (the spot as a crop: nothing past the box)
-                for (std::size_t qy = 0; qy < side; ++qy) {
-                    for (std::size_t qx = 0; qx < side; ++qx) {
-                        const long x = cx - r + long(qx), y = cy - r + long(qy);
-                        float* to = here.data() + (qy * side + qx) * n;
+                for (std::size_t qy = 0; qy < span_y; ++qy) {
+                    for (std::size_t qx = 0; qx < span_x; ++qx) {
+                        const long x = cx + lo_x + long(qx), y = cy + lo_y + long(qy);
+                        float* to = here.data() + (qy * span_x + qx) * n;
                         if (!in_box(x, y)) {
                             std::fill_n(to, n, 0.0f);
                         } else {
@@ -317,11 +361,11 @@ void smudge_values(OpContext& c, std::size_t at, const std::string& id, const st
                     for (std::size_t v = 0; v < carried.size(); ++v) carried[v] += (here[v] - carried[v]) * static_cast<float>(1 - strength);
                 }
                 for (std::size_t v = 0; v < laid.size(); ++v) laid[v] = here[v] + (carried[v] - here[v]) * static_cast<float>(strength);
-                for (std::size_t qy = 0; qy < side; ++qy) {  // (pasted where it lies on the box)
-                    for (std::size_t qx = 0; qx < side; ++qx) {
-                        const long x = cx - r + long(qx), y = cy - r + long(qy);
+                for (std::size_t qy = 0; qy < span_y; ++qy) {  // (pasted where it lies on the box)
+                    for (std::size_t qx = 0; qx < span_x; ++qx) {
+                        const long x = cx + lo_x + long(qx), y = cy + lo_y + long(qy);
                         if (!in_box(x, y)) continue;
-                        std::copy_n(laid.data() + (qy * side + qx) * n, n, worked.begin() + static_cast<std::ptrdiff_t>((std::size_t(y) * w + std::size_t(x)) * n));
+                        std::copy_n(laid.data() + (qy * span_x + qx) * n, n, worked.begin() + static_cast<std::ptrdiff_t>((std::size_t(y) * w + std::size_t(x)) * n));
                     }
                 }
             }
@@ -347,10 +391,10 @@ void smudge_values(OpContext& c, std::size_t at, const std::string& id, const st
     }
     if (!changed) return;
     if (inks) {
-        image_ops::put_inks_part(*raster, p, box, &marks);
+        image_ops::put_inks_part(*own_inks, p, box, &marks);  // (into its own inks: its lines and pictures stay as they are)
         core::Page& edited = c.doc.edit_page(at);
         core::Layer& out = edited.layers[core::layer_by_id(edited, id)];
-        out.ink_raster = std::make_shared<const std::string>(core::encode_ink_raster(*raster));
+        out.ink_raster = std::make_shared<const std::string>(core::encode_ink_raster(*own_inks));
         out.ink_memo = {};
     } else {
         image_ops::put_layer_pixels(c.doc, at, id, std::vector<image_ops::PixelsPart>{image_ops::PixelsPart{box, &p, &marks}});
@@ -633,7 +677,11 @@ void liquify(OpContext& c) {
 }  // namespace
 
 bool smudges_values(const core::Page& page, const core::Layer& layer) {
-    return layer.kind == core::LayerKind::Raster && (layer.color_raster != nullptr || (page.color && layer.raster_png == nullptr && layer.ink_raster != nullptr));
+    if (layer.kind != core::LayerKind::Raster) return false;
+    // (an ink page's paint layer — of lines alone too, review P2-2: its lines read with it, and kept lines)
+    if (page.color) return layer.raster_png == nullptr;
+    // (a precise one without lines, pictures or shape parts: with them, lent the 8-bit picture as before — its lines kept)
+    return layer.color_raster != nullptr && layer.stroke_count() == 0 && layer.patches.empty() && !shape_parts::any(layer);
 }
 
 void register_paint_ops(core::OpRegistry& registry) {

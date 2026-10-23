@@ -8,11 +8,16 @@
 #include <utility>
 #include <vector>
 
+#include "core/color_raster.hpp"
+#include "core/ink.hpp"
 #include "core/pyops.hpp"
+#include "core/strokes.hpp"
 #include "render/ink_edit.hpp"
 #include "render/page.hpp"
+#include "render/png.hpp"
 #include "render/raster.hpp"
 #include "render/selection.hpp"
+#include "render/shape_parts.hpp"
 
 // PhotoCraft v0.2.0's engine/src/retouch_cmds.rs (lines 1-120: the brushes' parameters and sampling), MIT
 // (native/third_party/photocraft/NOTICE.md), with Genko's mm, layers and areas (PC3 B4; shared with PC4 E5).
@@ -127,6 +132,40 @@ const core::Layer& layer_of(const core::Page& page, const std::string& id) {
         if (layer.id == id) return layer;
     }
     throw OpError("no layer " + id);
+}
+
+std::optional<Unread> unread(const core::Document& doc, std::size_t at, const std::string& id) {
+    const core::Page& page = doc.page(at);
+    const core::Layer& layer = layer_of(page, id);
+    if (layer.locked) throw OpError("the layer is locked");
+    if (layer.kind != core::LayerKind::Raster && layer.kind != core::LayerKind::Strokes) {
+        throw OpError("the layer " + id + " is not a paint layer (pen or paint)");
+    }
+    const bool marks = layer.stroke_count() > 0 || !layer.patches.empty() || shape_parts::any(layer);
+    if (!page.color && core::has_color_strokes(layer)) return std::nullopt;  // (made precise pixels first: convert_layer)
+    if (layer.color_raster) {
+        if (marks) return std::nullopt;  // (reading says why it cannot)
+        const core::ColorRasterView view(*layer.color_raster);
+        Pixels like(Pixels::Kind::Precise, 1, 1, 3);
+        like.floating = view.metadata("")["precision"] == "f32";
+        return Unread{Size{static_cast<int>(view.width()), static_cast<int>(view.height())}, std::move(like)};
+    }
+    if (page.color && !layer.raster_png) {
+        Pixels like(Pixels::Kind::Inks, 1, 1, page.color->planes());
+        like.ink = *page.color;
+        if (layer.ink_raster) {
+            const core::InkRasterHeader head = core::ink_raster_header(*layer.ink_raster);
+            return Unread{Size{static_cast<int>(head.width), static_cast<int>(head.height)}, std::move(like)};
+        }
+        // (none yet: ink_edit::with_marks's blank, at the working dpi)
+        return Unread{Size{mm_to_px(page.spec.width_mm.value(), raster::kWorkingDpi), mm_to_px(page.spec.height_mm.value(), raster::kWorkingDpi)},
+                      std::move(like)};
+    }
+    Pixels like(Pixels::Kind::Eight, 1, 1, 3);
+    if (layer.raster_png && !layer.raster_png->empty()) return Unread{picture_size(*layer.raster_png), std::move(like)};
+    // (none yet: raster::ensure_raster's clear page — at the page's grid, PC4 F-b)
+    const int dpi = page.spec.grid ? raster::working_dpi(page) : raster::kWorkingDpi;
+    return Unread{Size{mm_to_px(page.spec.width_mm.value(), dpi), mm_to_px(page.spec.height_mm.value(), dpi)}, std::move(like)};
 }
 
 std::vector<retouch::StrokePoint> on_grid(const core::PenPoints& points, const Grid& g) {

@@ -5,6 +5,8 @@
 #include <utility>
 
 #include "core/error.hpp"
+#include "core/model.hpp"
+#include "render/ink_edit.hpp"
 
 namespace genko::render::tiled {
 
@@ -45,12 +47,16 @@ TiledPixels::TiledPixels(core::OpContext& c, std::size_t at, std::string id) : c
     columns_ = (grid_.width + kTile - 1) / kTile;
 }
 
+TiledPixels::TiledPixels(core::OpContext& c, std::size_t at, std::string id, Size grid, const Pixels& like)
+    : context_(&c), at_(at), id_(std::move(id)), grid_(grid), columns_((grid.width + kTile - 1) / kTile),
+      like_(std::make_unique<Pixels>(clear_like(like, Box{0, 0, 1, 1}))) {}
+
 TiledPixels::TiledPixels(Size grid, const Pixels& like)
     : grid_(grid), columns_((grid.width + kTile - 1) / kTile), like_(std::make_unique<Pixels>(clear_like(like, Box{0, 0, 1, 1}))) {}
 
 TiledPixels::TiledPixels(const TiledPixels& other)
     : context_(other.context_), at_(other.at_), id_(other.id_), grid_(other.grid_), columns_(other.columns_),
-      like_(std::make_unique<Pixels>(*other.like_)), tiles_(other.tiles_) {}
+      like_(std::make_unique<Pixels>(*other.like_)), tiles_(other.tiles_), inks_(other.inks_), inks_held_(other.inks_held_) {}
 
 TiledPixels::TiledPixels(TiledPixels&&) noexcept = default;
 TiledPixels::~TiledPixels() = default;
@@ -64,8 +70,38 @@ std::size_t TiledPixels::reach(const std::vector<Box>& boxes) {
         if (!tiles_.contains(key(box.x0 / kTile, box.y0 / kTile))) missing.push_back(box);
     }
     if (missing.empty()) return 0;
-    if (context_ != nullptr) {
-        std::vector<Pixels> read = image_ops::layer_pixels(*context_, at_, id_, missing);
+    if (context_ != nullptr && like_->kind() == Pixels::Kind::Inks) {
+        // (an ink layer: its inks with its marks drawn, once — ink_edit::with_marks, as layer_pixels reads them —, each
+        // tile from them)
+        if (!inks_) {
+            const core::Page& page = context_->doc.page(at_);
+            const core::Layer* layer = nullptr;
+            for (const core::Layer& l : page.layers) {
+                if (l.id == id_) layer = &l;
+            }
+            if (layer == nullptr) throw core::OpError("no layer " + id_);
+            if (layer->locked) throw core::OpError("the layer is locked");
+            if (!page.color || layer->raster_png) throw core::Error("value", "the layer " + id_ + " holds no inks");
+            const std::uint64_t sample = like_->ink && like_->ink->depth == 32 ? sizeof(float) : sizeof(std::uint16_t);
+            const auto bytes = std::uint64_t(grid_.width) * std::uint64_t(grid_.height) * (like_->colours() + 1) * sample;
+            inks_held_ = std::make_shared<image_ops::Held>(bytes);
+            inks_ = std::make_shared<core::InkPixels>(ink_edit::with_marks(page, *layer, &context_->doc));
+            if (static_cast<int>(inks_->width) != grid_.width || static_cast<int>(inks_->height) != grid_.height) {
+                throw core::Error("value", "the layer " + id_ + "'s grid is not the one it was worked at");
+            }
+        }
+        std::vector<Pixels> read;  // (all made before any is held: past the budget, none)
+        read.reserve(missing.size());
+        for (const Box& box : missing) read.push_back(image_ops::inks_part(*inks_, *like_->ink, box));
+        for (std::size_t i = 0; i < missing.size(); ++i) {
+            tiles_.emplace(key(missing[i].x0 / kTile, missing[i].y0 / kTile), Tile{missing[i], std::move(read[i]), Box{}, {}});
+        }
+    } else if (context_ != nullptr) {
+        Size read_grid;
+        std::vector<Pixels> read = image_ops::layer_pixels(*context_, at_, id_, missing, nullptr, &read_grid);
+        if (read_grid.width != grid_.width || read_grid.height != grid_.height) {
+            throw core::Error("value", "the layer " + id_ + "'s grid is not the one it was worked at");
+        }
         for (std::size_t i = 0; i < missing.size(); ++i) {
             tiles_.emplace(key(missing[i].x0 / kTile, missing[i].y0 / kTile), Tile{missing[i], std::move(read[i]), Box{}, {}});
         }
@@ -153,6 +189,24 @@ Box TiledPixels::put(core::Document& doc) const {
         marks.push_back(std::move(only));
         boxes.push_back(e);
         covered = covered.width() <= 0 ? e : Box{std::min(covered.x0, e.x0), std::min(covered.y0, e.y0), std::max(covered.x1, e.x1), std::max(covered.y1, e.y1)};
+    }
+    if (edited.empty()) return covered;
+    if (inks_) {
+        // (an ink layer's inks held from the read: the pixels edited written into them, encoded once — as
+        // put_layer_pixels writes an ink layer's: its marks in its inks after)
+        if (inks_.use_count() > 1) inks_ = std::make_shared<core::InkPixels>(*inks_);  // (a copy still shares them)
+        for (std::size_t i = 0; i < edited.size(); ++i) image_ops::put_inks_part(*inks_, edited[i], boxes[i], &marks[i]);
+        core::Page& page = doc.edit_page(at_);
+        for (core::Layer& layer : page.layers) {
+            if (layer.id != id_) continue;
+            layer.ink_raster = std::make_shared<const std::string>(core::encode_ink_raster(*inks_));
+            layer.ink_memo = {};
+            layer.strokes = core::empty_strokes();
+            layer.shapes = core::vector::empty_shapes();
+            layer.patches.clear();
+            layer.kind = core::LayerKind::Raster;
+        }
+        return covered;
     }
     std::vector<image_ops::PixelsPart> parts;
     for (std::size_t i = 0; i < edited.size(); ++i) parts.push_back(image_ops::PixelsPart{boxes[i], &edited[i], &marks[i]});
