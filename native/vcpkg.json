@@ -14,6 +14,7 @@
     "lcms",
     "openexr",
     {"name": "libavif", "default-features": false, "features": ["aom"]},
-    "zstd"
+    "zstd",
+    {"name": "libraw", "default-features": false, "features": ["dng-lossy"]}
   ]
 }

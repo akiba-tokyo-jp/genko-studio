@@ -39,6 +39,7 @@
 
 #include "app/ask.hpp"
 #include "app/brush_panel.hpp"
+#include "app/camera_raw_open.hpp"
 #include "app/canvas.hpp"
 #include "app/comfort.hpp"
 #include "app/config.hpp"
@@ -790,6 +791,53 @@ PreferencesDialog::PreferencesDialog(MainWindow* window) : QDialog(window), wind
     // 書き出し (PC4 F-c, edit.preferences.export: the same values as ファイル → 書き出し → 書き出しの環境設定…)
     export_form = new ExportPreferencesForm(export_preferences());
     tabs->addTab(export_form, QStringLiteral("書き出し"));
+    // Camera Raw (PC4 F-e, edit.preferences.rawDefaults; PhotoCraft's prefs.rs RawDefaults: Adobe RGB, 16 bits, 300 ppi, no
+    // sharpening, not a smart object, no automatic tone)
+    {
+        const camera_raw_open::Workflow flow = camera_raw_open::workflow();
+        raw_space = choice_box({{QStringLiteral("Adobe RGB (1998)"), QStringLiteral("adobe-rgb-compat")},
+                                {QStringLiteral("sRGB IEC61966-2.1"), QStringLiteral("srgb")},
+                                {QStringLiteral("ProPhoto RGB"), QStringLiteral("prophoto-compat")},
+                                {QStringLiteral("Display P3"), QStringLiteral("display-p3")}},
+                               QString::fromStdString(flow.space));
+        raw_depth = choice_box({{QStringLiteral("8 bit/チャンネル"), QStringLiteral("8")}, {QStringLiteral("16 bit/チャンネル"), QStringLiteral("16")}},
+                               QString::number(flow.depth));
+        raw_resolution = new QSpinBox;
+        raw_resolution->setRange(1, 100000);
+        raw_resolution->setSuffix(QStringLiteral(" ppi"));
+        raw_resolution->setValue(static_cast<int>(std::lround(flow.dpi)));
+        raw_sharpen = choice_box({{QStringLiteral("なし"), QStringLiteral("none")},
+                                  {QStringLiteral("スクリーン"), QStringLiteral("screen")},
+                                  {QStringLiteral("光沢紙"), QStringLiteral("glossy")},
+                                  {QStringLiteral("マット紙"), QStringLiteral("matte")}},
+                                 QString::fromStdString(flow.sharpen));
+        raw_smart = new QCheckBox(QStringLiteral("スマートオブジェクトとして開く"));
+        raw_smart->setChecked(flow.smart);
+        raw_auto = new QCheckBox(QStringLiteral("自動補正を適用"));
+        raw_auto->setChecked(flow.auto_tone);
+        raw_auto->setToolTip(QStringLiteral("RAW を開くとき、露光量を「自動」で決めます（覚えた設定のあるファイルは、その設定のまま）"));
+        for (auto [name, widget] : std::initializer_list<std::pair<const char*, QWidget*>>{{"raw_space", raw_space}, {"raw_depth", raw_depth},
+                                                                                         {"raw_resolution", raw_resolution}, {"raw_sharpen", raw_sharpen},
+                                                                                         {"raw_smart", raw_smart}, {"raw_auto", raw_auto}})
+            widget->setObjectName(QStringLiteral("prefs_%1").arg(QString::fromLatin1(name)));
+        auto* page = new QWidget;
+        QFormLayout* rows = look::form();
+        page->setLayout(rows);
+        rows->addRow(look::section(QStringLiteral("ワークフロー")));
+        rows->addRow(QStringLiteral("色空間"), raw_space);
+        rows->addRow(QStringLiteral("ビット数"), raw_depth);
+        rows->addRow(QStringLiteral("解像度"), raw_resolution);
+        rows->addRow(QStringLiteral("出力のシャープ"), raw_sharpen);
+        rows->addRow(QString(), raw_smart);
+        rows->addRow(look::section(QStringLiteral("既定の画像設定")));
+        rows->addRow(QString(), raw_auto);
+        auto* hint = new QLabel(QStringLiteral("カメラ RAW を開くときの Camera Raw の窓の、はじめの設定です。Shift を押しながら開くと、窓を出さずにこの設定で開きます。"));
+        hint->setWordWrap(true);
+        theme::role(hint, "hint");
+        rows->addRow(QString(), hint);
+        look::quiet_labels(rows);
+        tabs->addTab(page, QStringLiteral("Camera Raw"));
+    }
     auto* buttons = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel);
     buttons->button(QDialogButtonBox::Ok)->setText(QStringLiteral("決める"));
     buttons->button(QDialogButtonBox::Cancel)->setText(QStringLiteral("やめる"));
@@ -802,7 +850,7 @@ PreferencesDialog::PreferencesDialog(MainWindow* window) : QDialog(window), wind
     pages_list->setObjectName(QStringLiteral("prefsNav"));
     pages_list->setFixedWidth(150);
     int page = 0;
-    for (const char* picture : {"search", "pen", "settings", "kind_tone", "open", "export"}) {
+    for (const char* picture : {"search", "pen", "settings", "kind_tone", "open", "export", "kind_placed"}) {
         pages_list->addItem(new QListWidgetItem(icons::icon(picture), tabs->tabText(page++)));
     }
     connect(pages_list, &QListWidget::currentRowChanged, tabs, &QTabWidget::setCurrentIndex);
@@ -948,6 +996,16 @@ void PreferencesDialog::save() {
     store->setValue(QStringLiteral("files/lowercase_extension"), lowercase_extension->isChecked() ? QStringLiteral("true") : QStringLiteral("false"));
     store->setValue(QStringLiteral("files/ignore_exif_profile"), ignore_exif_profile->isChecked() ? QStringLiteral("true") : QStringLiteral("false"));
     set_export_preferences(export_form->value());  // (PC4 F-c: 書き出し)
+    {  // (PC4 F-e: Camera Raw)
+        camera_raw_open::Workflow flow;
+        flow.space = raw_space->currentData().toString().toStdString();
+        flow.depth = raw_depth->currentData().toInt();
+        flow.dpi = raw_resolution->value();
+        flow.sharpen = raw_sharpen->currentData().toString().toStdString();
+        flow.smart = raw_smart->isChecked();
+        flow.auto_tone = raw_auto->isChecked();
+        camera_raw_open::set_workflow(flow);
+    }
     store->setValue(QStringLiteral("view/checker_size"), checker_size->currentData());
     store->setValue(QStringLiteral("view/checker_colors"), checker_colours->currentData());
     store->setValue(QStringLiteral("view/checker_light"), checker_light->property("colour").value<QColor>().name());

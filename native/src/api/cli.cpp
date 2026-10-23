@@ -1052,9 +1052,10 @@ int schema(const QStringList& args, bool ascii) {
     return 0;
 }
 
-// genko new <dest> --from <file> [--as <ext>] and genko new <dest> --image … (PC4 F-b, SPEC.md FILE-01: 開く…・指定形式で開く…
-// and 新規… → 画像 as a book written at once): the book of one page formats::open_file or formats::new_image makes, written
-// to `dest` (never over a book), {"ok", "path", "notes", "snapshot"}.
+// genko new <dest> --from <file> [--as <ext>] [--raw '<JSON>'] and genko new <dest> --image … (PC4 F-b, SPEC.md FILE-01:
+// 開く…・指定形式で開く… and 新規… → 画像 as a book written at once; F-e: a camera RAW file developed as --raw says): the book
+// of one page formats::open_file or formats::new_image makes, written to `dest` (never over a book), {"ok", "path",
+// "notes", "snapshot"}.
 int new_book_of(const Arguments& a, bool ascii) {
     const std::string dest_text = pathlib_text(a.positional[0].toStdString());
     const fs::path dest = storage::path_from_utf8(dest_text);
@@ -1072,11 +1073,34 @@ int new_book_of(const Arguments& a, bool ascii) {
             options.as = render::codecs::from_extension(as->toStdString());
             if (!options.as) return usage("genko new: argument --as: not a format this build knows: " + core::py_repr_str(as->toStdString()));
         }
+        if (const auto raw = a.value("--raw")) {
+            // (PC4 F-e: a camera RAW file's development — camera-raw@1's {"develop"?, "adjust"?}, and Camera Raw's ワークフロー:
+            // "resolution" (ppi) and "smart_object")
+            Json given;
+            try {
+                given = core::parse_python_json(raw->toStdString());
+            } catch (const core::Error&) {
+                return usage("genko new: argument --raw: not JSON: " + core::py_repr_str(raw->toStdString()));
+            }
+            if (!given.is_object()) return usage("genko new: argument --raw: an object {develop?, adjust?, resolution?, smart_object?}");
+            if (const Json* dpi = core::get(given, "resolution"); dpi != nullptr) {
+                if (!dpi->is_number() || dpi->is_boolean()) return usage("genko new: argument --raw: resolution is a number of pixels an inch");
+                options.raw_dpi = dpi->get<double>();
+                given.erase("resolution");
+            }
+            if (const Json* smart = core::get(given, "smart_object"); smart != nullptr) {
+                if (!smart->is_boolean()) return usage("genko new: argument --raw: smart_object is true or false");
+                options.raw_smart = smart->get<bool>();
+                given.erase("smart_object");
+            }
+            options.raw = given;
+        }
         const std::string file = pathlib_text(from->toStdString());
         made = formats::open_file(storage::read_file(storage::path_from_utf8(file)), file, options);
         if (const auto title = a.value("--title")) made.doc.title = title->toStdString();
     } else {
         if (a.value("--as")) return usage("genko new: argument --as: only with --from");
+        if (a.value("--raw")) return usage("genko new: argument --raw: only with --from");
         formats::NewImage image;
         image.title = a.value("--title").value_or(QStringLiteral("無題")).toStdString();
         const auto number = [&](const char* name, double fallback) -> std::optional<double> {
@@ -1137,7 +1161,9 @@ int new_book(const QStringList& args, bool ascii) {
                                           // (PC4 F-b: a book of a file, or of a new image)
                                           {"--from", true},   {"--as", true},      {"--image", false}, {"--width", true},
                                           {"--height", true}, {"--unit", true},    {"--dpi", true},    {"--mode", true},
-                                          {"--depth", true},  {"--background", true}, {"--profile", true}};
+                                          {"--depth", true},  {"--background", true}, {"--profile", true},
+                                          // (PC4 F-e: a camera RAW file's development)
+                                          {"--raw", true}};
     Arguments a;
     if (auto error = parse_arguments(args, kOptions, 1, "dest", a)) return usage("genko new: " + *error);
     if (a.value("--from") || a.flag("--image")) {
@@ -1148,7 +1174,7 @@ int new_book(const QStringList& args, bool ascii) {
         if (a.flag("--webtoon") || a.flag("--b4")) return usage("genko new: argument --webtoon, --b4: not with --from or --image");
         return new_book_of(a, ascii);
     }
-    for (const char* image : {"--as", "--width", "--height", "--unit", "--dpi", "--mode", "--depth", "--background", "--profile"}) {
+    for (const char* image : {"--as", "--width", "--height", "--unit", "--dpi", "--mode", "--depth", "--background", "--profile", "--raw"}) {
         if (a.value(image)) return usage(std::string("genko new: argument ") + image + ": only with --from or --image");
     }
     const auto episode = int_option(a.value("--episode").value_or(QStringLiteral("1")));

@@ -124,6 +124,8 @@ genko_library(genko_core
     # PC4 E-0 (描く道具の土台: brushes@1, patterns@1)
     brush_dabs.cpp
     patterns.cpp
+    # PC4 F-e (カメラ RAW: camera-raw@1 の現像の設定)
+    raw_develop.cpp
     "${CMAKE_CURRENT_BINARY_DIR}/ops_schema_data.cpp"
     "${CMAKE_CURRENT_BINARY_DIR}/pyre_names_data.cpp"
     "${CMAKE_CURRENT_BINARY_DIR}/builtin_profiles_data.cpp"

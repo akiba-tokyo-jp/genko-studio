@@ -7,7 +7,8 @@ namespace genko::api {
 // "code": …} on stdout); 2 a book written by a newer Genko (the same JSON), or bad usage; 3 a v1–v3 book that must
 // be converted (`genko migrate`) before it can be written.
 //   genko new <dir> [--title T] [--episode N] [--pages N] [--webtoon] [--b4] [--preset P] [--paper P] [--json] [--plain]
-//   genko new <dir> --from <file> [--as EXT] [--title T]
+//   genko new <dir> --from <file> [--as EXT] [--title T] [--raw '{"develop"?, "adjust"?, "resolution"?, "smart_object"?}']
+//                                                (PC4 F-e: --raw, a camera RAW file's development — camera-raw@1)
 //   genko new <dir> --image --width W --height H [--unit px|mm|cm|in] [--dpi R] [--mode rgb|gray|cmyk|lab|bitmap]
 //             [--depth 8|16|32] [--background white|black|transparent|#rrggbb] [--profile ID] [--title T]
 //                                                (PC4 F-b) a book of one page of a picture, or of a new image;

@@ -4,7 +4,7 @@
 // (formats/page_picture); saved, it names what it uses and is read back the same. A book of none of PC4 節 F's
 // extensions is written as before (no new key, no new feature); the five extensions' frames (file-info@1, image-grid@1,
 // psd-keep@1, formats@1, camera-raw@1) are written while used and read back, one not well formed opens read-only; the
-// files' ops are registered and refused as not in this build yet. (This build's own contract.)
+// files' ops are registered. (This build's own contract.)
 
 #include <QtTest>
 
@@ -500,7 +500,9 @@ private slots:
         // (PC4 F-d opens a PSD: one of no pixels is no picture)
         QCOMPARE(code_of([] { (void)formats::open_file(std::string("8BPS\0\1", 6) + std::string(40, '\0'), "layers.psd"); }), std::string("format"));
         const auto [tiff, values] = tiff16(4, 4);
-        QCOMPARE(code_of([&] { (void)formats::open_file(tiff, "photo.DNG"); }), std::string("not_yet_ported:raw_file"));
+        // (PC4 F-e reads camera RAW files: a TIFF named .DNG — no RAW LibRaw opens, none of a RAW's marks — opens as the
+        // TIFF it is)
+        QCOMPARE(code_of([&] { (void)formats::open_file(tiff, "photo.DNG"); }), std::string());
         // (PC4 F-f opens a .pcraft: a zip named so that is not one is a broken .pcraft; a PNG named so is opened as the PNG it is)
         QCOMPARE(code_of([] { (void)formats::open_file(std::string("PK\3\4", 4) + std::string(60, '\0'), "doc.pcraft"); }), std::string("format"));
         QCOMPARE(code_of([&] { (void)formats::open_file(png, "doc.pcraft"); }), std::string());
@@ -884,16 +886,14 @@ private slots:
     }
 
     void theFilesOpsAreFrames() {
-        // (PC4 F-b wrote set_file_info: test_contract_file_info)
-        for (const auto& [op, group] : {std::pair{"set_camera_raw", "PC4 F-e"}}) {
-            QVERIFY(render::ops_registry().find(op) != nullptr);
-            try {
-                (void)run(small_book(), Json::array({Json{{"op", op}}}));
-                QFAIL("not refused");
-            } catch (const core::ApplyError& error) {
-                QCOMPARE(error.code(), std::string("not_yet_ported"));
-                QVERIFY2(std::string(error.what()).find(group) != std::string::npos, error.what());
-            }
+        // (PC4 F-b wrote set_file_info: test_contract_file_info; F-e set_camera_raw: test_contract_raw — refused as an op's
+        // own error, not as not in this build, when it names no RAW contents)
+        for (const char* op : {"set_file_info", "set_camera_raw"}) QVERIFY(render::ops_registry().find(op) != nullptr);
+        try {
+            (void)run(small_book(), Json::array({Json{{"op", "set_camera_raw"}}}));
+            QFAIL("not refused");
+        } catch (const core::ApplyError& error) {
+            QCOMPARE(error.code(), std::string("apply"));
         }
     }
 };

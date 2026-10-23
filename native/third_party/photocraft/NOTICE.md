@@ -195,6 +195,14 @@ PhotoCraft v0.2.0（`ad863217386440ca968fccc9bfff65ba24e61142`、MIT、同梱 `L
 - `crates/engine/src/layer_menu_cmds.rs`（649-700 行: `layer_document` — 層だけを描いて中身の外接で切る、790-805 行: `export_layer`）・`crates/ui-egui/src/export_dialog.rs`（1-235 行: 書き出し形式の窓の項目と、512 px の代わりの絵からの見積もり）・`crates/engine/src/file_cmds.rs`（799-824 行: `layers_to_files` の接頭辞・表示中だけ・形式）・`crates/engine/src/prefs.rs`（339-358 行: 書き出しの環境設定の既定）→ `native/src/formats/copy.cpp`・`native/src/formats/export.cpp`・`native/src/app/export_as_dialog.cpp`（PC4 F-c）。
 - `crates/engine/src/web_cmds/tests.rs`・`crates/codecs/src/web.rs` の試験の考え → `native/tests/unit/test_web_export.cpp`（PC4 F-c）。
 - `crates/format/tests/roundtrip.rs`・`corruption.rs`（切る・バイトを変える・タイルを抜く・入れ替える・manifest が JSON でない・版が新しい・上限）の試験の考え → `native/tests/unit/test_pcraft.cpp`、試験の .pcraft は上流の書き手で作る（`tools/migration/pcraft_fixtures`、PC4 F-f）。
+- カメラ RAW（PC4 F-e。上流の自前の現像器 `crates/raw/src` の復号・デモザイクは移さず、復号と現像は LibRaw で行う。次の部分を参照した）:
+  - `crates/raw/src/testgen.rs`（1-1015 行のうち 8-680 行と 960-1015 行: 無損失 JPEG（T.81 の process 14）の符号器 `lj92_encode`、小さな TIFF の書き手 `TiffBuilder`、`DngSpec`（ストリップ・無損失 JPEG のストリップとタイル・LinearRaw・ビッグエンディアン・黒と白・アクティブエリア・既定の切り抜き・色の行列・AsShotNeutral・BaselineExposure）、`Cr2Spec`、`tiff_ep`、`scene`・`mosaic`）→ `native/tests/support/raw_testgen.cpp`（試験だけ。Sony cRAW・RW2・ORF の作り手は移していない。Genko の足し: 知らない圧縮の DNG と、SubIFD の JPEG のプレビュー）。
+  - `crates/raw/tests/hostile.rs`（1-119 行: 切ったファイル・ランダムに壊したファイルで落ちない、嘘の大きさを確保の前に断る）と `crates/raw/src/color.rs` の試験（色温度の基準点・行列の往復）の考え → `native/tests/unit/test_raw.cpp`。
+  - `crates/raw/src/color.rs`（1-260 行: `apply`・`invert`・`xy_to_xyz`、白のカメラの座標とその逆 `xy_to_neutral`・`neutral_to_xy` の考え）→ `native/src/render/raw.cpp`（`multipliers_for`・`temperature_of`。色温度と xy は Kim ら 2002 のプランク軌跡の式、色かぶりは DNG の 1/3000 uv の目盛りで Genko が書いた）。
+  - `crates/raw/src/preview.rs`（1-87 行: DCT の JPEG の大きさ、TIFF の形の RAW の IFD・RAF の頭・RW2 の JpgFromRaw から一番大きいプレビューを探す）→ `native/src/render/raw.cpp`（`container_preview`: LibRaw が開けない RAW の埋め込みプレビュー）。
+  - `crates/io/src/raw.rs`（1-69 行: 現像できない RAW は埋め込みの JPEG プレビューを 8 bit で開いて知らせる、メーカーと機種の名前の重ね方）→ `native/src/formats/open_file.cpp`（`open_raw`）。
+  - `crates/engine/src/prefs.rs`（85-87 行・637-660 行: `RawDefaults` — 色空間 Adobe RGB・16 bit・300 ppi・出力のシャープなし・スマートオブジェクトとして開かない・自動補正なし、選択の値）→ `native/src/app/camera_raw_open.cpp`（環境設定 → Camera Raw）。
+  - `crates/ui-egui/src/camera_raw_ui.rs`（22 行: プレビューの長い辺 900 画素）→ `native/src/app/camera_raw_open.cpp`。
 
 ## ブラシ・塗り・パターン・プリセット（brushes@1・patterns@1、PC4 節 E）
 

@@ -230,11 +230,14 @@ genko_library(genko_render
     zstd.cpp
     pcraft_manifest.cpp
     pcraft_read.cpp
+    # PC4 F-e (カメラ RAW: LibRaw の包み・現像の設定と色・埋め込みプレビュー、RAW のスマートオブジェクトの op)
+    raw.cpp
+    ops_camera_raw.cpp
     ${GENKO_MATERIAL_RESOURCES}
     ${GENKO_TEXT_RESOURCES}
   PUBLIC_DEPS genko_core Qt6::Core
   PRIVATE_DEPS genko_storage pillow_imaging PNG::PNG JPEG::JPEG ZLIB::ZLIB TIFF::TIFF Freetype::Freetype ${GENKO_WEBP} ${GENKO_LCMS2}
-               ${GENKO_OPENEXR} ${GENKO_AVIF} ${GENKO_ZSTD} genko_blake3)
+               ${GENKO_OPENEXR} ${GENKO_AVIF} ${GENKO_ZSTD} genko_blake3 ${GENKO_LIBRAW})
 # (sin, cos, atan2, hypot, pow, log go through core/pymath.cpp, which calls libm exactly as CPython does)
 # (numpy's float32 hypotf, atan2f: called in libm as numpy calls them; sinf, cosf, powf: glibc's, libm_float.cpp, with
 # std::fma where glibc's FMA build fuses. MSVC: /fp:precise, with which these have no intrinsic forms)

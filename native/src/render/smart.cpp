@@ -36,6 +36,7 @@
 #include "render/placed.hpp"
 #include "render/png.hpp"
 #include "render/proof.hpp"
+#include "render/raw.hpp"
 #include "render/smart_decode.hpp"
 #include "render/smart_filters.hpp"
 #include "render/stack.hpp"
@@ -255,6 +256,11 @@ Recent<std::vector<float>>& deep_pictures() {  // (pictures with every bit in a 
 }
 Recent<core::InkPixels>& ink_pictures() {  // (the files and contents as a page's inks)
     static Recent<core::InkPixels> recent(16, kBudget);
+    return recent;
+}
+// (PC4 F-e, camera-raw@1: a RAW file's developed picture — the file its development makes —, by the file and development)
+Recent<std::string>& developed_files() {
+    static Recent<std::string> recent(4, kBudget, kSingle);
     return recent;
 }
 // (PC3 A2: a smart object's filtered picture of the whole page in precise colour; A4: contents stacked in it)
@@ -818,13 +824,37 @@ std::optional<Image> page_8bit(const Ctx& ctx, const core::Layer& layer, const c
 
 std::string file_key(const core::Document& doc, const core::SmartContents& contents) {
     return "file " + (doc.asset_dir ? core::path_to_utf8(*doc.asset_dir) : std::string()) + "\n" + contents.asset + "\n" +
-           core::dump_canonical(contents.profile);
+           core::dump_canonical(contents.profile) + (contents.raw ? "\nraw " + core::dump_canonical(*contents.raw) : std::string());
+}
+
+// What a contents' file is drawn from (PC4 F-e): a camera RAW file's developed picture — the uncompressed TIFF its
+// development makes (render/raw: LibRaw), made once a development and remembered, its work within the budget —, any other
+// file's own bytes.
+core::Bytes drawn_bytes(const core::Document& doc, const core::SmartContents& contents, const Ctx* ctx) {
+    core::Bytes bytes = file_bytes(doc, contents);
+    if (!bytes || contents.format != "raw") return bytes;
+    return developed_files().get_or_make(
+        file_key(doc, contents) + "\ndeveloped",
+        [&]() -> std::pair<std::shared_ptr<const std::string>, std::size_t> {
+            // (LibRaw's sensor data and picture, then Genko's 16-bit picture and its file)
+            const std::uint64_t n = std::uint64_t(std::max<std::int64_t>(1, contents.width_px)) * std::uint64_t(std::max<std::int64_t>(1, contents.height_px));
+            const WorkHold work(n * 22 + bytes->size(), ctx);
+            raw::Options options;
+            if (ctx != nullptr) {
+                const std::stop_token stop = ctx->stop;
+                options.stopped = [stop] { return stop.stop_requested(); };
+            }
+            auto made = std::make_shared<const std::string>(raw::developed_file(*bytes, contents.raw.value_or(Json::object()), options));
+            return {made, made->size()};
+        },
+        ctx);
 }
 
 // The ICC profile the contents' colour use takes its colours from (none: keep, or a file that carries none).
 std::optional<std::string> use_profile(const core::Document& doc, const core::SmartContents& contents, std::string_view bytes) {
     const Json* use = core::get(contents.profile, "use");
-    const std::string way = use != nullptr && use->is_string() ? use->get<std::string>() : "keep";
+    std::string way = use != nullptr && use->is_string() ? use->get<std::string>() : "keep";
+    if (contents.format == "raw") way = "embedded";  // (PC4 F-e: a RAW's development says its colours — its output space's)
     if (way == "embedded") return proof::embedded_profile(bytes);
     if (way != "assign") return std::nullopt;
     const Json* icc = core::get(contents.profile, "icc");
@@ -886,7 +916,7 @@ std::shared_ptr<const std::vector<float>> deep_linear(const Ctx& ctx, const core
     return deep_pictures().get_or_make(
         key,
         [&]() -> std::pair<std::shared_ptr<const std::vector<float>>, std::size_t> {
-            const core::Bytes bytes = file_bytes(doc, contents);
+            const core::Bytes bytes = drawn_bytes(doc, contents, &ctx);
             if (!bytes) return {nullptr, 0};
             const std::uint64_t n = std::uint64_t(contents.width_px) * std::uint64_t(contents.height_px);
             const std::uint64_t channels = (contents.mode.starts_with("gray") ? 1u : 3u) + (contents.mode.ends_with("a") ? 1u : 0u);
@@ -1075,12 +1105,14 @@ std::optional<InkPicture> file_inks_on_page(const Ctx& ctx, const core::Layer& l
     const Box part{std::max(area.x0, limit.x0), std::max(area.y0, limit.y0), std::min(area.x1, limit.x1), std::min(area.y1, limit.y1)};
     if (part.width() <= 0 || part.height() <= 0 || x1 <= part.x0 || y1 <= part.y0 || x0 >= part.x1 || y0 >= part.y1) return out;
     const Json* use = core::get(contents.profile, "use");
-    const std::string way = use != nullptr && use->is_string() ? use->get<std::string>() : "keep";
+    const std::string way = contents.format == "raw" ? std::string("embedded")  // (PC4 F-e: its development's colours)
+                            : use != nullptr && use->is_string() ? use->get<std::string>()
+                                                                 : std::string("keep");
     const std::string key = file_key(doc, contents) + "\ninks " + core::dump_canonical(core::to_json(color)) + " " +
                             core::dump_python(Json::array({x0, y0, x1, y1}));
     std::shared_ptr<const core::InkPixels> fitted = ink_pictures().get(key);
     if (fitted == nullptr) {
-        const core::Bytes bytes = file_bytes(doc, contents);
+        const core::Bytes bytes = drawn_bytes(doc, contents, &ctx);
         if (!bytes) return std::nullopt;
         ++g_files_decoded;
         const core::InkPixels inks = file_inks(*bytes, color, way);
@@ -1533,7 +1565,7 @@ std::shared_ptr<const Image> file_picture(const core::Document& doc, const core:
     return pictures().get_or_make(  // (decoded once while the tiles wait for it)
         key,
         [&]() -> std::pair<std::shared_ptr<const Image>, std::size_t> {
-            const core::Bytes bytes = file_bytes(doc, contents);
+            const core::Bytes bytes = drawn_bytes(doc, contents, nullptr);
             if (!bytes) return {nullptr, 0};
             ++g_files_decoded;
             Image picture = eight_bit_picture(*bytes);

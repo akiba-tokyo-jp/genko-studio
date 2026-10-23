@@ -26,6 +26,7 @@
 #include "render/ops_smart_parts.hpp"
 #include "render/png.hpp"
 #include "render/raster.hpp"
+#include "render/raw.hpp"
 #include "render/smart.hpp"
 #include "render/smart_decode.hpp"
 
@@ -170,6 +171,14 @@ SmartContents file_contents(Document& doc, const Json& op, const Given& g, std::
     c.depth = g.info.depth;
     c.mode = g.info.mode;
     c.profile = smart_ops::colour_use(doc, op, g.info);
+    if (g.info.format == "raw") {  // (PC4 F-e, camera-raw@1: camera-raw@1's defaults, its colours its development's)
+        try {
+            c.raw = raw::default_raw(g.bytes);
+        } catch (const core::Error& error) {
+            throw OpError(std::string("the asset's picture cannot be read (") + error.what() + ")");
+        }
+        c.profile = Json::object({{"use", "embedded"}, {"intent", "relative"}, {"bpc", true}});
+    }
     return c;
 }
 

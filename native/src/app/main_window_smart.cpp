@@ -33,6 +33,7 @@
 #include "app/layer_panel.hpp"
 #include "app/off_ui.hpp"
 #include "app/main_window.hpp"
+#include "app/open_dialog.hpp"
 #include "app/smart_panel.hpp"
 #include "core/base64.hpp"
 #include "core/color_raster.hpp"
@@ -45,6 +46,7 @@
 #include "render/pcraft_read.hpp"
 #include "render/png.hpp"
 #include "render/proof.hpp"
+#include "render/raw.hpp"
 #include "render/smart.hpp"
 #include "render/smart_decode.hpp"
 #include "service/wording.hpp"
@@ -298,7 +300,7 @@ bool MainWindow::place_embedded(std::optional<QString> chosen) {
         return false;
     }
     const QString file =
-        chosen ? *chosen : ask::open_path(this, QStringLiteral("埋め込みを配置"), QStringLiteral("画像 (*.png *.jpg *.jpeg *.tif *.tiff *.bmp *.webp *.gif *.psd *.psb *.tga *.ico *.pnm *.pbm *.pgm *.ppm *.pam *.pfm *.qoi *.exr *.hdr *.avif);;PhotoCraft (*.pcraft)"));
+        chosen ? *chosen : ask::open_path(this, QStringLiteral("埋め込みを配置"), QStringLiteral("画像 (*.png *.jpg *.jpeg *.tif *.tiff *.bmp *.webp *.gif *.psd *.psb *.tga *.ico *.pnm *.pbm *.pgm *.ppm *.pam *.pfm *.qoi *.exr *.hdr *.avif);;PhotoCraft (*.pcraft);;%1").arg(raw_filter()));
     if (file.isEmpty() || !still(asked)) return false;
     return place_smart(file, false);
 }
@@ -310,6 +312,7 @@ bool MainWindow::place_smart(const QString& file, bool as_placed, bool linked) {
     render::smart::FileInfo info;
     Json use;
     std::optional<Json> link;  // (PC3 A1: the file as it is — its sha256 and size —, whatever copy the book keeps)
+    bool raw_file = false;     // (PC4 F-e)
     try {
         std::ifstream in(core::path_from_utf8(file.toStdString()), std::ios::binary | std::ios::ate);
         if (!in) throw core::Error("io", "cannot read " + file.toStdString());
@@ -320,11 +323,20 @@ bool MainWindow::place_smart(const QString& file, bool as_placed, bool linked) {
         }
         in.seekg(0);
         bytes.assign(std::istreambuf_iterator<char>(in), std::istreambuf_iterator<char>());
-        info = render::smart::look_at(bytes, {});  // (the whole picture read first: a file that cannot be drawn is never placed)
+        // (PC4 F-e: a camera RAW file by its suffix too — a TIFF-shaped RAW is not its TIFF —, developed by LibRaw)
+        const std::string suffix = QFileInfo(file).suffix().isEmpty() ? std::string() : "." + QFileInfo(file).suffix().toLower().toStdString();
+        raw_file = render::raw::raw_suffix(suffix) || render::raw::looks_raw(bytes);
+        if (raw_file && as_placed) {
+            flash(QStringLiteral("カメラ RAW は配置画像にできません（埋め込みを配置… でスマートオブジェクトとして置きます）"), 6000, true);
+            return false;
+        }
+        info = render::smart::look_at(bytes, raw_file && render::raw::raw_suffix(suffix) ? suffix : std::string());  // (the whole picture read first: a file that cannot be drawn is never placed)
         if (linked) link = link_record(file, bytes, session_->path());
-        const render::Image picture = render::open_image(bytes, render::kPillowOpenLimits);
-        // (カラー設定's policy for its own profile: the answer kept, its pixels as they are)
-        use = picture_use(bytes, picture.mode());
+        if (!raw_file) {
+            const render::Image picture = render::open_image(bytes, render::kPillowOpenLimits);
+            // (カラー設定's policy for its own profile: the answer kept, its pixels as they are)
+            use = picture_use(bytes, picture.mode());
+        }
         if (!still(asked)) return false;
     } catch (const std::exception& error) {  // (a file that cannot be read as a picture)
         flash(QStringLiteral("読み込めない画像です:\n%1").arg(wording::error(QString::fromUtf8(error.what()))), 6000, true);
@@ -335,6 +347,10 @@ bool MainWindow::place_smart(const QString& file, bool as_placed, bool linked) {
     // (a page of 16 or 32 bits takes a picture of more than 8 bits whole only up to its precise pictures' size: asked)
     const bool deep_page = !page->color && page->rgb && page->rgb->depth > 8;
     if (deep_page && info.depth > 8 && static_cast<std::uint64_t>(info.width) * info.height > core::kColorRasterMaxPixels) {
+        if (raw_file) {  // (PC4 F-e: a RAW's depth is its development's — 8 bits chosen in Camera Raw's window when placed)
+            flash(QStringLiteral("16 bit のままでは大きすぎます（8 bit のページに置いて、Camera Raw でビット数を 8 にします）"), 6000, true);
+            return false;
+        }
         if (!ask::question(this, QStringLiteral("画像を読み込む"), QStringLiteral("16 bit のままでは大きすぎます。8 bit で置きますか"))) return false;
         if (!still(asked)) return false;
         try {
@@ -382,6 +398,18 @@ bool MainWindow::place_smart(const QString& file, bool as_placed, bool linked) {
         flash(QStringLiteral("「%1」をリンクしたスマートオブジェクトとして置きました").arg(named.fileName()), 4000);
     } else {
         flash(QStringLiteral("「%1」をスマートオブジェクトとして置きました").arg(named.fileName()), 4000);
+    }
+    if (raw_file) {  // (PC4 F-e: placed at camera-raw@1's defaults, then its development in Camera Raw's window)
+        std::optional<std::string> placed;
+        if (const core::Page* now = current_page()) {
+            for (auto it = now->layers.rbegin(); it != now->layers.rend(); ++it) {
+                const core::SmartContents* contents = core::smart::contents_of(book(), *it);
+                if (contents == nullptr || contents->asset != ref) continue;
+                placed = core::smart::contents_id(*it);
+                break;
+            }
+        }
+        if (placed) edit_raw_contents(*placed, named.completeBaseName());
     }
     return true;
 }
@@ -834,6 +862,8 @@ bool MainWindow::edit_contents() {
     if (!chosen) return false;
     const QString title = layer_title(*chosen->layer);
     if (chosen->contents->kind == "page") return open_contents_tab(chosen->id, title);
+    // (PC4 F-e: a camera RAW file's contents — embedded or linked —: its development in Camera Raw's window)
+    if (chosen->contents->format == "raw") return edit_raw_contents(chosen->id, title);
     if (chosen->contents->link) {  // (a linked file: opened in its own app, watched; 変更されたコンテンツを更新 takes it)
         const auto found = formats::smart_files::linked_file(*chosen->contents->link, session_->path());
         if (!found) {

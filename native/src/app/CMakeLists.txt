@@ -180,6 +180,9 @@ genko_library(genko_app
     tool_presets_panel.cpp
     preset_manager.cpp
     main_window_brush_presets.cpp
+    # PC4 F-e: Camera Raw's window for a camera RAW file (opening one, a RAW smart object's コンテンツを編集)
+    camera_raw_open.cpp
+    main_window_raw.cpp
     ${GENKO_APP_RESOURCES}
     ${GENKO_APP_FONTS}
   PUBLIC_DEPS genko_core genko_storage genko_render genko_render_ops genko_formats genko_service Qt6::Core Qt6::Gui Qt6::Widgets Qt6::Svg Qt6::Concurrent

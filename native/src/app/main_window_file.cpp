@@ -13,6 +13,7 @@
 #include <QFileInfo>
 #include <QFormLayout>
 #include <QFutureWatcher>
+#include <QGuiApplication>
 #include <QLineEdit>
 #include <QMenu>
 #include <QMenuBar>
@@ -202,6 +203,11 @@ void MainWindow::open_path(const fs::path& path, std::optional<render::codecs::F
             switch_document(static_cast<int>(i));
             return;
         }
+    }
+    // (PC4 F-e: a camera RAW file through Camera Raw's window — Shift held: as 環境設定 → Camera Raw sets it, no window)
+    if (!as && is_raw_path(path)) {
+        open_raw_file(path, !(QGuiApplication::queryKeyboardModifiers() & Qt::ShiftModifier));
+        return;
     }
     remember_file(path);
     flash(QStringLiteral("開いています: %1").arg(QDir::toNativeSeparators(qpath(path))), 30000);

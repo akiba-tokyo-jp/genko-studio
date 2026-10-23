@@ -19,7 +19,7 @@ sudo apt install libgl1 libegl1 libopengl0 libfontconfig1 libfreetype6 libglib2.
   libopenexr-3-1-30 libimath-3-1-29t64 libavif16 libaom3 libzstd1
 ```
 
-Qt（画面の部品）と、Qt が X11 の画面で使う小さなライブラリ（libxcb-cursor など）は配布物の中に入っています。
+Qt（画面の部品）と、Qt が X11 の画面で使う小さなライブラリ（libxcb-cursor など）、カメラ RAW を読む LibRaw（`lib/libraw_r.so.25`。ライセンスと差し替え方は `LIBRAW-LGPL-ja.md`）は配布物の中に入っています。
 
 ## 署名について
 

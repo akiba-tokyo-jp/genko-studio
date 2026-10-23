@@ -25,6 +25,7 @@
 #include "render/png.hpp"
 #include "render/proof.hpp"
 #include "render/psd.hpp"
+#include "render/raw.hpp"
 
 namespace genko::render::smart {
 
@@ -466,6 +467,25 @@ struct Profile {
 
 FileInfo look_at(std::string_view bytes, std::string_view suffix) {
     if (bytes.size() > kFileMaxBytes) throw core::Error("too_large", "the file is larger than 256 MiB");
+    // (PC4 F-e, camera-raw@1: a camera RAW file — its suffix a RAW's, or its marks: a TIFF-shaped RAW is not read as its
+    // TIFF —, its header read and its sensor data decoded once by LibRaw; what it shows is its development's — camera-raw@1's
+    // defaults until set_camera_raw: 16 bits in prophoto-compat, which the developed picture carries)
+    if (raw::raw_suffix(suffix) || raw::looks_raw(bytes)) {
+        if (!suffix.empty() && !raw::raw_suffix(suffix)) throw core::Error("unidentified_image", "the file is not the " + std::string(suffix) + " its name says");
+        const raw::Info read = raw::unpacked(bytes);
+        const core::raw::Develop develop;
+        const auto [w, h] = raw::developed_size(read, develop);
+        FileInfo info;
+        info.format = "raw";
+        info.suffix = suffix.empty() ? raw::suffix_of(read) : std::string(suffix);
+        info.width = w;
+        info.height = h;
+        info.depth = develop.depth;
+        info.mode = "rgb";
+        info.dpi = 0;
+        info.icc = raw::space_bytes(develop.space);
+        return info;
+    }
     const auto kind = sniff(bytes);
     if (!kind) throw core::Error("unidentified_image", "the file is not a picture this build reads");
     FileInfo info;
