@@ -13,7 +13,6 @@
 #include <QDialogButtonBox>
 #include <QDoubleSpinBox>
 #include <QFormLayout>
-#include <QHBoxLayout>
 #include <QLabel>
 #include <QPushButton>
 #include <QSpinBox>
@@ -166,6 +165,7 @@ void MainWindow::build_paint_tool_pages(ToolSettings* ts) {
     mixer_paint_ = new QLabel;
     mixer_paint_->setObjectName(QStringLiteral("pixel_mixer_paint"));
     mixer_paint_->setMinimumHeight(18);
+    mixer_paint_->setWordWrap(true);
     auto* load = new QPushButton(QStringLiteral("現在のブラシに補充"));
     load->setObjectName(QStringLiteral("pixel_mixer_load"));
     load->setToolTip(QStringLiteral("描画色の絵の具をいっぱいに補充します"));
@@ -175,7 +175,7 @@ void MainWindow::build_paint_tool_pages(ToolSettings* ts) {
     clean->setToolTip(QStringLiteral("ブラシの絵の具を洗い落とします"));
     connect(clean, &QPushButton::clicked, this, [this] { mixer_clean(); });
     auto* buttons = new QWidget;
-    auto* row = new QHBoxLayout(buttons);
+    auto* row = new QVBoxLayout(buttons);  // (one above the other: side by side they are wider than the narrow dock)
     row->setContentsMargins(0, 0, 0, 0);
     row->addWidget(load);
     row->addWidget(clean);
