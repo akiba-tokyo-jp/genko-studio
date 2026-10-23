@@ -55,6 +55,10 @@ struct FilterWindowCall {
     const core::Page* page = nullptr;
     const core::Layer* layer = nullptr;
     int filter = -1;
+    // (D4) the result shown on the page as the settings would leave it (none: as it is) — the op as `send` would make it,
+    // a heavy one worked on a thread at the screen's resolution — and whether one is being worked out now
+    std::function<void(const std::optional<core::Json>& params)> preview;
+    std::function<bool()> previewing;
 };
 using FilterWindow = std::function<void(const FilterWindowCall&)>;
 // By the item's kind (D3–D6 add theirs).

@@ -105,6 +105,9 @@ genko_library(genko_app
     filter_gallery_window.cpp
     lens_window.cpp
     vanishing_window.cpp
+    blur_gallery_tool.cpp
+    lighting_window.cpp
+    render_dialogs.cpp
     main_window_adjust.cpp
     main_window_smart.cpp
     main_window_page_size.cpp

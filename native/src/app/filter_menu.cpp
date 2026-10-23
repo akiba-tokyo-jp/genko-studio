@@ -33,8 +33,11 @@
 #include "app/ask.hpp"
 #include "app/colours.hpp"
 #include "app/filter_forms.hpp"
+#include "app/blur_gallery_tool.hpp"
 #include "app/filter_gallery_window.hpp"
 #include "app/lens_window.hpp"
+#include "app/lighting_window.hpp"
+#include "app/render_dialogs.hpp"
 #include "app/vanishing_window.hpp"
 #include "app/layer_dialogs.hpp"
 #include "app/main_window.hpp"
@@ -208,6 +211,16 @@ const std::vector<std::pair<std::string, FilterWindow>>& filter_windows() {
         {"lens_correction", [](const FilterWindowCall& call) { lens_window::open_lens(call); }},  // (D6: app/lens_window.cpp)
         {"adaptive_wide_angle", [](const FilterWindowCall& call) { lens_window::open_wide_angle(call); }},
         {"vanishing_point", [](const FilterWindowCall& call) { vanishing_window::open(call); }},  // (D6: app/vanishing_window.cpp)
+        // (D4: 照明効果's window, 炎・額縁・木's windows, ぼかしギャラリー's work over the canvas)
+        {"render_lighting_effects", [](const FilterWindowCall& call) { lighting_window::open(call); }},  // (app/lighting_window.cpp)
+        {"flame", [](const FilterWindowCall& call) { render_dialogs::open(call); }},  // (app/render_dialogs.cpp)
+        {"picture_frame", [](const FilterWindowCall& call) { render_dialogs::open(call); }},
+        {"tree", [](const FilterWindowCall& call) { render_dialogs::open(call); }},
+        {"blur_field", [](const FilterWindowCall& call) { blur_gallery::open(call); }},  // (app/blur_gallery_tool.cpp)
+        {"blur_iris", [](const FilterWindowCall& call) { blur_gallery::open(call); }},
+        {"blur_tilt_shift", [](const FilterWindowCall& call) { blur_gallery::open(call); }},
+        {"blur_path", [](const FilterWindowCall& call) { blur_gallery::open(call); }},
+        {"blur_spin", [](const FilterWindowCall& call) { blur_gallery::open(call); }},
     };
     return all;
 }
@@ -418,6 +431,8 @@ void MainWindow::filter_command(const FilterItem& item) {
             };
             return given("paste") || given("clone");
         }
+        // (PC4 D4: 炎・額縁・木 — shapes laid over the layer's grid, a flame's thousands of them — always on a thread)
+        if (core::picture_kind(kind) != nullptr) return true;
         return render::fx::work(kind, params, std::uint64_t(grid.width) * grid.height, grid.s, grid.levels) >= render::fx::kHeavyWork;
     };
     const std::string op = item.op;
@@ -436,16 +451,6 @@ void MainWindow::filter_command(const FilterItem& item) {
         send(*item.fixed);
         return;
     }
-    if (const FilterWindow* own = filter_window(kind)) {
-        FilterWindowCall call;
-        call.window = this;
-        call.item = &item;
-        call.send = send;
-        call.page = page;
-        call.layer = layer;
-        (*own)(call);
-        return;
-    }
     const FilterPreview show = [this, op_of, heavy](const std::optional<Json>& values) {
         if (!values) {
             preview_filter(std::nullopt, false);
@@ -453,10 +458,42 @@ void MainWindow::filter_command(const FilterItem& item) {
         }
         preview_filter(Json::array({op_of(adjust_forms::without_nulls(*values))}), heavy(*values));
     };
+    if (const FilterWindow* own = filter_window(kind)) {
+        FilterWindowCall call;
+        call.window = this;
+        call.item = &item;
+        call.send = send;
+        call.page = page;
+        call.layer = layer;
+        call.preview = show;  // (D4)
+        call.previewing = [this] { return filter_previewing(); };
+        (*own)(call);
+        return;
+    }
+    // (D4: a kind whose settings are its seed and the main and sub colours alone — 雲模様 1・2 — has no window, as Photoshop's:
+    // the colours of now)
+    const core::AdjustKind* found = python ? nullptr : core::adjust_kind(kind);
+    const core::FilterInfo* info = python ? nullptr : core::filter_info(kind);
+    if (found != nullptr && info != nullptr && !info->colours.empty() &&
+        std::all_of(found->params.begin(), found->params.end(), [info](const core::AdjustParam& p) {
+            return p.key == "seed" || std::find(info->colours.begin(), info->colours.end(), p.key) != info->colours.end();
+        })) {
+        const auto& rgb = pen().rgb;
+        const Json main_colour = Json::array({static_cast<int>(rgb[0]), static_cast<int>(rgb[1]), static_cast<int>(rgb[2])});
+        Json sub_colour = Json::array({255, 255, 255});
+        if (colours() != nullptr) {
+            const auto sub = colours()->sub_rgb();
+            sub_colour = Json::array({sub[0], sub[1], sub[2]});
+        }
+        Json params = Json::object();
+        for (const std::string_view key : info->colours) params[std::string(key)] = key == "background" ? sub_colour : main_colour;
+        send(params);
+        return;
+    }
     std::optional<Json> params;
     if (python) {  // (漫画's five and the plugins: their old windows)
         params = filter_params(this, kind, Json::object(), show);
-    } else if (const core::AdjustKind* found = core::adjust_kind(kind); found != nullptr && !found->params.empty()) {
+    } else if (found != nullptr && !found->params.empty()) {
         adjust_forms::FormContext context;
         context.page = page;
         context.smart = smart;

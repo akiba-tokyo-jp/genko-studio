@@ -29,6 +29,7 @@
 #include "render/dabs/dynamics.hpp"
 
 class QKeyEvent;
+class QPainter;
 class QVariantAnimation;
 
 namespace genko::app {
@@ -466,6 +467,18 @@ public:
     const LiveInk* overlay(std::size_t i) const { return i < overlays_.size() ? overlays_[i].ink.get() : nullptr; }
     bool coasting() const;
     bool gliding() const { return glide_.has_value(); }
+
+    // (PC4 D4) A piece of work over the page that takes the mouse and the keys before the tools do — ぼかしギャラリー's pins
+    // (app/blur_gallery_tool.cpp) —: what it draws over the page (`at`: a place of the page in mm where the painter draws it;
+    // `per_mm`: the screen's pixels a mm), the left button pressed, dragged and let go (the page's mm, the keys held; true:
+    // taken) and the keys (true: taken). The view still pans (Space, the middle button) and zooms under it. None: the tools.
+    struct CanvasWork {
+        std::function<void(QPainter& painter, const std::function<QPointF(QPointF)>& at, double per_mm)> paint;
+        std::function<bool(QPointF mm, Qt::KeyboardModifiers keys)> press, move, release;
+        std::function<bool(QKeyEvent* event)> key;
+    };
+    void set_work(std::shared_ptr<CanvasWork> work);
+    bool has_work() const { return work_ != nullptr; }
 
 signals:
     void changed();
@@ -943,6 +956,7 @@ private:
         int rows = 3;
     };
     std::optional<Warp> warp_;
+    std::shared_ptr<CanvasWork> work_;  // (PC4 D4: set_work)
     mutable std::optional<std::pair<std::string, QImage>> mask_picture_;  // (the area and the quick mask it shows)
 
     // gliding between views

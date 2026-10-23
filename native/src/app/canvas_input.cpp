@@ -250,6 +250,7 @@ void PageCanvas::mousePressEvent(QMouseEvent* event) {
         return;
     }
     if (page() == nullptr || event->button() != Qt::LeftButton) return;
+    if (work_ && work_->press && work_->press(mm_of(pos), event->modifiers())) return;  // (PC4 D4: the work over the page first)
     if (guide_press(event->position())) return;  // (a guide line pulled from a scale: canvas_scale.cpp)
     const QPointF mm = mm_of(pos);
     if (transform_press(pos, mm, event->modifiers())) return;  // (自由変形 and the warps' box: canvas_transform.cpp)
@@ -314,6 +315,7 @@ void PageCanvas::mouseMoveEvent(QMouseEvent* event) {
     }
     if (guide_move(event->position())) return;
     const QPointF pos = unturned(event->position());
+    if (!panning_ && work_ && work_->move && (event->buttons() & Qt::LeftButton) && work_->move(mm_of(pos), event->modifiers())) return;  // (PC4 D4)
     if (zoom_drag_) {
         zoom_drag_->second = pos;
         update();
@@ -408,6 +410,8 @@ void PageCanvas::mouseReleaseEvent(QMouseEvent* event) {
         turning_.reset();
         return;
     }
+    if (!panning_ && event->button() == Qt::LeftButton && work_ && work_->release && work_->release(to_mm(event->position()), event->modifiers()))
+        return;  // (PC4 D4)
     if (guide_release(event->position())) return;
     if (!snap_lines_.empty()) {  // (PC3 C-d: what a drag snapped to shows while it lasts)
         snap_lines_.clear();
@@ -642,6 +646,7 @@ void PageCanvas::keyPressEvent(QKeyEvent* event) {
         update_cursor();
         return;
     }
+    if (work_ && work_->key && work_->key(event)) return;  // (PC4 D4: the work over the page — Enter, Esc, Delete)
     if (transform_key(event)) return;  // (Enter: the box's change made; Esc: let go)
     if ((event->key() == Qt::Key_Alt || event->key() == Qt::Key_Control || event->key() == Qt::Key_Shift) && !event->isAutoRepeat()) {
         hold_modifier(event->key() == Qt::Key_Alt ? QStringLiteral("alt") : event->key() == Qt::Key_Control ? QStringLiteral("ctrl")

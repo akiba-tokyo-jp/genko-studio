@@ -196,6 +196,10 @@ genko_test(test_fx_d2 SOURCES unit/test_fx_d2.cpp DEPS genko_test_support genko_
 # lens_cmds and vp_cmds, through filter_raster and vanishing_point on 8 bits, precise and CMYK pages; the profile auto from a
 # smart object's JPEG and an opened JPEG's EXIF; smart filters; 200 and 600 dpi; the planes kept (vanishing-point@1).
 genko_test(test_fx_lens SOURCES unit/test_fx_lens.cpp DEPS genko_test_support genko_formats genko_render_ops genko_storage LABELS unit TIMEOUT 900)
+# PC4 節 D4 (描画・ぼかしギャラリー, render_picture): PhotoCraft's tests of render.rs, gallery.rs, extra_cmds.rs's clouds and of
+# render2.rs and render_cmds.rs (炎・木・額縁) through filter_raster and render_picture on 8 bits, precise and ink pages and an
+# opened picture's page; tilings, 200 and 600 dpi, pins moving with a smart object, a channel's bumps, the limits.
+genko_test(test_fx_render SOURCES unit/test_fx_render.cpp DEPS genko_test_support genko_formats genko_render_ops LABELS unit TIMEOUT 900)
 # PC2c (COLOR-04): Apply Image and Calculations (Blending, the sources, a layer, a channel, inks; the three results),
 # trapping (algo/trap.rs's tests and the op) and the fade (its mix, the op reading the pixels before from the assets).
 genko_test(test_image_calc SOURCES unit/test_image_calc.cpp DEPS genko_test_support genko_render_ops LABELS unit TIMEOUT 600)

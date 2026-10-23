@@ -233,6 +233,12 @@ Json kind_params(const std::string& kind) {
         {"stylize_tiles", Json{{"count", 4}, {"max_offset", 20}, {"seed", 6}}},
         {"stylize_trace_contour", Json{{"level", 128}, {"edge", "upper"}}},
         {"stylize_wind", Json{{"method", "blast"}, {"direction", "from_left"}, {"seed", 7}}},
+        // D4 (tests_ext.rs 407-475, 565-588's settings; 雲模様・ファイバー・逆光・照明効果 at their defaults)
+        {"blur_tilt_shift", Json{{"blur", 6}, {"focus", 0.1}, {"transition", 0.2}}},
+        {"blur_iris", Json{{"pins", Json::array({Json{{"blur", 6}, {"radius_x", 0.3}, {"radius_y", 0.3}}})}}},
+        {"blur_field", Json{{"pins", Json::array({Json{{"x", 0.2}, {"blur", 2}}, Json{{"x", 0.8}, {"blur", 6}}})}}},
+        {"blur_spin", Json{{"pins", Json::array({Json{{"radius_x", 0.3}, {"radius_y", 0.3}, {"blur_angle", 40}}})}}},
+        {"blur_path", Json{{"paths", Json::array({Json{{"points", Json::array({Json::array({0.5, 1.9}), Json::array({4.5, 1.9})})}, {"speed", 6}}})}}},
         // D6 (lens_cmds.rs's tests' settings: the defaults change nothing)
         {"lens_correction", Json{{"distortion", -40}, {"vignette_amount", 30}}},
         {"adaptive_wide_angle", Json{{"model", "fisheye"}, {"focal_length", 10}, {"scale", 90}}},
@@ -1474,7 +1480,9 @@ private slots:
 
     void newOpsAreFramesForNow() {
         const auto doc = precise_page(8, 8, pattern(8, 8), false);
-        QVERIFY(refusal(doc, Json{{"op", "render_picture"}, {"page", 1}, {"kind", "tree"}}).starts_with("not_yet_ported"));
+        // (D4: 炎・額縁・木 are the op of their own now — render/render_picture —: a kind it does not know refused for it)
+        QVERIFY(refusal(doc, Json{{"op", "render_picture"}, {"page", 1}, {"kind", "tree"}}).empty());
+        QVERIFY(refusal(doc, Json{{"op", "render_picture"}, {"page", 1}, {"kind", "bonfire"}}).find("kind must be") != std::string::npos);
         // (D6: 消点 is the op of its own now — render/vanishing —: without planes, refused for them)
         QVERIFY(refusal(doc, Json{{"op", "vanishing_point"}, {"page", 1}, {"id", "paint"}}).find("no planes") != std::string::npos);
         // a kind not in the table yet: an unknown filter (D5's)

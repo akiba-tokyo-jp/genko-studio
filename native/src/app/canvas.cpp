@@ -256,6 +256,11 @@ QPointF PageCanvas::to_mm(const QPointF& widget) const { return mm_of(unturned(w
 
 QPointF PageCanvas::to_widget(const QPointF& mm) const { return mm_transform().map(mm); }
 
+void PageCanvas::set_work(std::shared_ptr<CanvasWork> work) {
+    work_ = std::move(work);
+    update();
+}
+
 QRectF PageCanvas::seen_mm() const {
     const QPointF corners[] = {to_mm(QPointF(0, 0)), to_mm(QPointF(width(), 0)), to_mm(QPointF(0, height())),
                                to_mm(QPointF(width(), height()))};

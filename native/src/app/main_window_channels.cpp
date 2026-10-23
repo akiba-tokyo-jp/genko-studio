@@ -150,7 +150,8 @@ Json MainWindow::with_channel_target(const Json& ops) const {
     // than changing the layer under it)
     static const std::set<std::string, std::less<>> kLayerOnly{"clone_stamp", "healing_brush", "spot_healing", "history_brush",
                                                                "content_aware_fill", "magic_erase", "outline_area", "matting",
-                                                               "vanishing_point"};  // (PC4 D6: 消点's pastes and strokes)
+                                                               "vanishing_point",  // (PC4 D6: 消点's pastes and strokes)
+                                                               "render_picture"};  // (PC4 D4: 炎・額縁・木 draw on a layer)
     const auto on_this_page = [&](const Json& op) {
         try {
             return core::Num(core::py_int(op.value("page", Json()))) == page->index;

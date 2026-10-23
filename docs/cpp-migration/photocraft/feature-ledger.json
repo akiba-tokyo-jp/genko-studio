@@ -8443,9 +8443,19 @@
         "alternate_menus": []
       },
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "未着手",
+      "implementation_status": "実装済み（PC4 D4、未統合）",
       "acceptance_status": "未実施",
-      "evidence": [],
+      "evidence": [
+        "native/src/core/filter_kinds.cpp",
+        "native/src/render/fx_gallery_blur.cpp",
+        "native/src/render/ops_filters.cpp",
+        "native/src/app/filter_menu.cpp",
+        "native/src/app/blur_gallery_tool.cpp",
+        "native/src/app/canvas.cpp",
+        "native/tests/unit/test_fx_render.cpp",
+        "native/tests/unit/test_fx.cpp",
+        "native/tests/gui/test_gui_filters.cpp"
+      ],
       "pc0": {
         "date": "2026-10-16",
         "cpp_base": "962faa4",
@@ -8456,7 +8466,8 @@
         "tests": [],
         "gap": "ピンごとにぼけ量を変えるぼかしがない（選択範囲の中だけ一律にぼかすことはできる）",
         "note": "ピンを置く画面の入口も要る。足すなら 8 ビット（render/filters.cpp）・16/32 ビット（color_filters.cpp）・CMYK/Lab（ink_filters.cpp）の 3 経路と画面の欄に要る。上流は MIT/Apache-2.0（帰属は native/third_party/photocraft）"
-      }
+      },
+      "remaining": "ピンは 1〜64 個（キャンバスの上で置く。SO と一緒に動く）。ぼかしは作業の画素の σ を 7 段の正確な和で混ぜる。Photoshop の「効果」（光のぼけ）・「ノイズ」の欄は無い（上流にも無い）"
     },
     {
       "id": "filter.blurGallery.irisBlur",
@@ -8486,9 +8497,19 @@
         "alternate_menus": []
       },
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "未着手",
+      "implementation_status": "実装済み（PC4 D4、未統合）",
       "acceptance_status": "未実施",
-      "evidence": [],
+      "evidence": [
+        "native/src/core/filter_kinds.cpp",
+        "native/src/render/fx_gallery_blur.cpp",
+        "native/src/render/ops_filters.cpp",
+        "native/src/app/filter_menu.cpp",
+        "native/src/app/blur_gallery_tool.cpp",
+        "native/src/app/canvas.cpp",
+        "native/tests/unit/test_fx_render.cpp",
+        "native/tests/unit/test_fx.cpp",
+        "native/tests/gui/test_gui_filters.cpp"
+      ],
       "pc0": {
         "date": "2026-10-16",
         "cpp_base": "962faa4",
@@ -8499,7 +8520,8 @@
         "tests": [],
         "gap": "楕円の範囲・ぼかし始め（feather）・丸み・回転つきの虹彩絞りぼかしがない",
         "note": "画面に楕円の取っ手が要る。足すなら 8 ビット（render/filters.cpp）・16/32 ビット（color_filters.cpp）・CMYK/Lab（ink_filters.cpp）の 3 経路と画面の欄に要る。上流は MIT/Apache-2.0（帰属は native/third_party/photocraft）"
-      }
+      },
+      "remaining": "ピンは 1〜64 個（キャンバスの上で楕円・シャープな範囲の取っ手。SO と一緒に動く）。Photoshop の「効果」（光のぼけ）・「ノイズ」の欄は無い（上流にも無い）"
     },
     {
       "id": "filter.blurGallery.pathBlur",
@@ -8529,9 +8551,19 @@
         "alternate_menus": []
       },
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "未着手",
+      "implementation_status": "実装済み（PC4 D4、未統合）",
       "acceptance_status": "未実施",
-      "evidence": [],
+      "evidence": [
+        "native/src/core/filter_kinds.cpp",
+        "native/src/render/fx_gallery_blur.cpp",
+        "native/src/render/ops_filters.cpp",
+        "native/src/app/filter_menu.cpp",
+        "native/src/app/blur_gallery_tool.cpp",
+        "native/src/app/canvas.cpp",
+        "native/tests/unit/test_fx_render.cpp",
+        "native/tests/unit/test_fx.cpp",
+        "native/tests/gui/test_gui_filters.cpp"
+      ],
       "pc0": {
         "date": "2026-10-16",
         "cpp_base": "962faa4",
@@ -8542,7 +8574,8 @@
         "tests": [],
         "gap": "パスに沿ったぼかし（速度・先細り）がない。Genko の移動ぼかしは直線だけ",
         "note": "パスの入力の画面が要る。足すなら 8 ビット（render/filters.cpp）・16/32 ビット（color_filters.cpp）・CMYK/Lab（ink_filters.cpp）の 3 経路と画面の欄に要る。上流は MIT/Apache-2.0（帰属は native/third_party/photocraft）"
-      }
+      },
+      "remaining": "パスは 64 本、点は全部で 4096 まで。点はページの mm で SO と一緒に動く。点の多いパスは重い（裏で掛ける）。Photoshop の「効果」（光のぼけ）・「ノイズ」の欄は無い（上流にも無い）"
     },
     {
       "id": "filter.blurGallery.spinBlur",
@@ -8572,9 +8605,19 @@
         "alternate_menus": []
       },
       "genko_status": "一部（2026-10-16 照合）",
-      "implementation_status": "未着手",
+      "implementation_status": "実装済み（PC4 D4、未統合）",
       "acceptance_status": "未実施",
-      "evidence": [],
+      "evidence": [
+        "native/src/core/filter_kinds.cpp",
+        "native/src/render/fx_gallery_blur.cpp",
+        "native/src/render/ops_filters.cpp",
+        "native/src/app/filter_menu.cpp",
+        "native/src/app/blur_gallery_tool.cpp",
+        "native/src/app/canvas.cpp",
+        "native/tests/unit/test_fx_render.cpp",
+        "native/tests/unit/test_fx.cpp",
+        "native/tests/gui/test_gui_filters.cpp"
+      ],
       "pc0": {
         "date": "2026-10-16",
         "cpp_base": "962faa4",
@@ -8596,7 +8639,8 @@
         ],
         "gap": "中心まわりに回すぼかしは radial_blur（レイヤー全体・中心と量）である。楕円の範囲・回転・境界のぼかし・複数のピンがない",
         "note": ""
-      }
+      },
+      "remaining": "ピンは 1〜64 個（キャンバスの上で楕円の取っ手）。標本は作業の約 2 画素おき、64 まで。Photoshop の「効果」（光のぼけ）・「ノイズ」の欄は無い（上流にも無い）"
     },
     {
       "id": "filter.blurGallery.tiltShift",
@@ -8626,9 +8670,19 @@
         "alternate_menus": []
       },
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "未着手",
+      "implementation_status": "実装済み（PC4 D4、未統合）",
       "acceptance_status": "未実施",
-      "evidence": [],
+      "evidence": [
+        "native/src/core/filter_kinds.cpp",
+        "native/src/render/fx_gallery_blur.cpp",
+        "native/src/render/ops_filters.cpp",
+        "native/src/app/filter_menu.cpp",
+        "native/src/app/blur_gallery_tool.cpp",
+        "native/src/app/canvas.cpp",
+        "native/tests/unit/test_fx_render.cpp",
+        "native/tests/unit/test_fx.cpp",
+        "native/tests/gui/test_gui_filters.cpp"
+      ],
       "pc0": {
         "date": "2026-10-16",
         "cpp_base": "962faa4",
@@ -8639,7 +8693,8 @@
         "tests": [],
         "gap": "ティルトシフト（ピントの帯・境界の幅・角度）がない",
         "note": "足すなら 8 ビット（render/filters.cpp）・16/32 ビット（color_filters.cpp）・CMYK/Lab（ink_filters.cpp）の 3 経路と画面の欄に要る。上流は MIT/Apache-2.0（帰属は native/third_party/photocraft）"
-      }
+      },
+      "remaining": "中心は基準の枠の割合で SO と一緒に動く。帯と移行の幅は枠の短い辺の割合。Photoshop の「効果」（光のぼけ）・「ノイズ」の欄は無い（上流にも無い）。「ゆがみ」も無い"
     },
     {
       "id": "filter.cameraRaw",
@@ -12467,9 +12522,18 @@
         "alternate_menus": []
       },
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "未着手",
+      "implementation_status": "実装済み（PC4 D4、未統合）",
       "acceptance_status": "未実施",
-      "evidence": [],
+      "evidence": [
+        "native/src/core/filter_kinds.cpp",
+        "native/src/render/fx_engine.cpp",
+        "native/src/render/fx_render.cpp",
+        "native/src/render/ops_filters.cpp",
+        "native/src/app/filter_menu.cpp",
+        "native/tests/unit/test_fx_render.cpp",
+        "native/tests/unit/test_fx.cpp",
+        "native/tests/gui/test_gui_filters.cpp"
+      ],
       "pc0": {
         "date": "2026-10-16",
         "cpp_base": "962faa4",
@@ -12480,7 +12544,8 @@
         "tests": [],
         "gap": "雲模様（描画色と背景色のフラクタルノイズ、種）がない",
         "note": "足すなら 8 ビット（render/filters.cpp）・16/32 ビット（color_filters.cpp）・CMYK/Lab（ink_filters.cpp）の 3 経路と画面の欄に要る。上流は MIT/Apache-2.0（帰属は native/third_party/photocraft）"
-      }
+      },
+      "remaining": "模様の大きさはページの長い辺の作業の画素の 4 分の 1（16〜512。紙の上でどの解像度でも同じ）。窓なし（描画色・背景色と新しい種で）。透明な層にも描く"
     },
     {
       "id": "filter.render.differenceClouds",
@@ -12510,9 +12575,18 @@
         "alternate_menus": []
       },
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "未着手",
+      "implementation_status": "実装済み（PC4 D4、未統合）",
       "acceptance_status": "未実施",
-      "evidence": [],
+      "evidence": [
+        "native/src/core/filter_kinds.cpp",
+        "native/src/render/fx_engine.cpp",
+        "native/src/render/fx_render.cpp",
+        "native/src/render/ops_filters.cpp",
+        "native/src/app/filter_menu.cpp",
+        "native/tests/unit/test_fx_render.cpp",
+        "native/tests/unit/test_fx.cpp",
+        "native/tests/gui/test_gui_filters.cpp"
+      ],
       "pc0": {
         "date": "2026-10-16",
         "cpp_base": "962faa4",
@@ -12523,7 +12597,8 @@
         "tests": [],
         "gap": "雲模様（差の絶対値で重ねる）がない",
         "note": "filter.render.clouds と一緒に入れる。足すなら 8 ビット（render/filters.cpp）・16/32 ビット（color_filters.cpp）・CMYK/Lab（ink_filters.cpp）の 3 経路と画面の欄に要る。上流は MIT/Apache-2.0（帰属は native/third_party/photocraft）"
-      }
+      },
+      "remaining": "雲模様 1 と同じ雲を画素との差で重ねる（雲模様 1 の上に同じ種で掛けると黒）。窓なし（描画色・背景色と新しい種で）"
     },
     {
       "id": "filter.render.fibers",
@@ -12553,9 +12628,19 @@
         "alternate_menus": []
       },
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "未着手",
+      "implementation_status": "実装済み（PC4 D4、未統合）",
       "acceptance_status": "未実施",
-      "evidence": [],
+      "evidence": [
+        "native/src/core/filter_kinds.cpp",
+        "native/src/render/fx_engine.cpp",
+        "native/src/render/fx_render.cpp",
+        "native/src/render/ops_filters.cpp",
+        "native/src/app/filter_menu.cpp",
+        "native/src/app/filter_forms.cpp",
+        "native/tests/unit/test_fx_render.cpp",
+        "native/tests/unit/test_fx.cpp",
+        "native/tests/gui/test_gui_filters.cpp"
+      ],
       "pc0": {
         "date": "2026-10-16",
         "cpp_base": "962faa4",
@@ -12566,7 +12651,8 @@
         "tests": [],
         "gap": "繊維（ばらつき・強さ・種・描画色/背景色）がない",
         "note": "足すなら 8 ビット（render/filters.cpp）・16/32 ビット（color_filters.cpp）・CMYK/Lab（ink_filters.cpp）の 3 経路と画面の欄に要る。上流は MIT/Apache-2.0（帰属は native/third_party/photocraft）"
-      }
+      },
+      "remaining": "模様は作業の画素の場所で。窓は変化・強さ・描画色・背景色・ランダマイズ"
     },
     {
       "id": "filter.render.flame",
@@ -12596,9 +12682,18 @@
         "alternate_menus": []
       },
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "未着手",
+      "implementation_status": "実装済み（PC4 D4、未統合）",
       "acceptance_status": "未実施",
-      "evidence": [],
+      "evidence": [
+        "native/src/core/filter_kinds.cpp",
+        "native/src/render/render_picture.cpp",
+        "native/src/render/ops_filters.cpp",
+        "native/src/app/filter_menu.cpp",
+        "native/src/app/render_dialogs.cpp",
+        "native/tests/unit/test_fx_render.cpp",
+        "native/tests/unit/test_fx.cpp",
+        "native/tests/gui/test_gui_filters.cpp"
+      ],
       "pc0": {
         "date": "2026-10-16",
         "cpp_base": "962faa4",
@@ -12609,7 +12704,8 @@
         "tests": [],
         "gap": "炎（パスに沿う 6 種・長さ・幅・乱れ・品質など）を描く機能がない",
         "note": "パスの入力と、描いたものを返す（primitives）仕組みが要る"
-      }
+      },
+      "remaining": "op render_picture（C++ 版だけ）。道筋はページのパス（作業用パス・保存したパス、無ければ仕上がり枠の下の方の弧）。形は上流の自前の設計（Photoshop と同じ絵ではない）。形は 200 万個まで（作る前に数えて断る）。スマートフィルターにはしない"
     },
     {
       "id": "filter.render.lensFlare",
@@ -12639,9 +12735,19 @@
         "alternate_menus": []
       },
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "未着手",
+      "implementation_status": "実装済み（PC4 D4、未統合）",
       "acceptance_status": "未実施",
-      "evidence": [],
+      "evidence": [
+        "native/src/core/filter_kinds.cpp",
+        "native/src/render/fx_engine.cpp",
+        "native/src/render/fx_render.cpp",
+        "native/src/render/ops_filters.cpp",
+        "native/src/app/filter_menu.cpp",
+        "native/src/app/filter_forms.cpp",
+        "native/tests/unit/test_fx_render.cpp",
+        "native/tests/unit/test_fx.cpp",
+        "native/tests/gui/test_gui_filters.cpp"
+      ],
       "pc0": {
         "date": "2026-10-16",
         "cpp_base": "962faa4",
@@ -12652,7 +12758,8 @@
         "tests": [],
         "gap": "逆光（明るさ・位置・4 種のレンズ）がない",
         "note": "足すなら 8 ビット（render/filters.cpp）・16/32 ビット（color_filters.cpp）・CMYK/Lab（ink_filters.cpp）の 3 経路と画面の欄に要る。上流は MIT/Apache-2.0（帰属は native/third_party/photocraft）"
-      }
+      },
+      "remaining": "大きさは基準の枠の対角に比例。中心はスマートオブジェクトと一緒に動く。見えは上流の近似"
     },
     {
       "id": "filter.render.lightingEffects",
@@ -12682,9 +12789,19 @@
         "alternate_menus": []
       },
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "未着手",
+      "implementation_status": "実装済み（PC4 D4、未統合）",
       "acceptance_status": "未実施",
-      "evidence": [],
+      "evidence": [
+        "native/src/core/filter_kinds.cpp",
+        "native/src/render/fx_engine.cpp",
+        "native/src/render/fx_render.cpp",
+        "native/src/render/ops_filters.cpp",
+        "native/src/app/filter_menu.cpp",
+        "native/src/app/lighting_window.cpp",
+        "native/tests/unit/test_fx_render.cpp",
+        "native/tests/unit/test_fx.cpp",
+        "native/tests/gui/test_gui_filters.cpp"
+      ],
       "pc0": {
         "date": "2026-10-16",
         "cpp_base": "962faa4",
@@ -12695,7 +12812,8 @@
         "tests": [],
         "gap": "照明効果（スポット/点/無限遠、複数の光、光沢・材質・テクスチャチャンネルの凹凸）がない",
         "note": "光の位置を動かす画面が要る。足すなら 8 ビット（render/filters.cpp）・16/32 ビット（color_filters.cpp）・CMYK/Lab（ink_filters.cpp）の 3 経路と画面の欄に要る。上流は MIT/Apache-2.0（帰属は native/third_party/photocraft）"
-      }
+      },
+      "remaining": "光は 64 個まで。光の組（Photoshop のプリセット）は無く、既定のスポットライト 1 つだけ。テクスチャにページのアルファチャンネルも（スマートフィルターでは断る）"
     },
     {
       "id": "filter.render.pictureFrame",
@@ -12725,9 +12843,18 @@
         "alternate_menus": []
       },
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "未着手",
+      "implementation_status": "実装済み（PC4 D4、未統合）",
       "acceptance_status": "未実施",
-      "evidence": [],
+      "evidence": [
+        "native/src/core/filter_kinds.cpp",
+        "native/src/render/render_picture.cpp",
+        "native/src/render/ops_filters.cpp",
+        "native/src/app/filter_menu.cpp",
+        "native/src/app/render_dialogs.cpp",
+        "native/tests/unit/test_fx_render.cpp",
+        "native/tests/unit/test_fx.cpp",
+        "native/tests/gui/test_gui_filters.cpp"
+      ],
       "pc0": {
         "date": "2026-10-16",
         "cpp_base": "962faa4",
@@ -12738,7 +12865,8 @@
         "tests": [],
         "gap": "額縁（16 種の模様・余白・大きさ・色）を描く機能がない",
         "note": "Genko のフチ（レイヤー効果の border）やコマの枠線とは別物"
-      }
+      },
+      "remaining": "op render_picture（C++ 版だけ）。枠は選択範囲の外接、無ければ仕上がり枠（上流はカンバス）。16 の額縁は上流の自前の設計。窓の小さな絵は画面が描く近似。スマートフィルターにはしない"
     },
     {
       "id": "filter.render.tree",
@@ -12768,9 +12896,18 @@
         "alternate_menus": []
       },
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "未着手",
+      "implementation_status": "実装済み（PC4 D4、未統合）",
       "acceptance_status": "未実施",
-      "evidence": [],
+      "evidence": [
+        "native/src/core/filter_kinds.cpp",
+        "native/src/render/render_picture.cpp",
+        "native/src/render/ops_filters.cpp",
+        "native/src/app/filter_menu.cpp",
+        "native/src/app/render_dialogs.cpp",
+        "native/tests/unit/test_fx_render.cpp",
+        "native/tests/unit/test_fx.cpp",
+        "native/tests/gui/test_gui_filters.cpp"
+      ],
       "pc0": {
         "date": "2026-10-16",
         "cpp_base": "962faa4",
@@ -12781,7 +12918,8 @@
         "tests": [],
         "gap": "木（34 種・光の向き・葉の量/大きさ・枝の高さ/太さ・色）を描く機能がない",
         "note": ""
-      }
+      },
+      "remaining": "op render_picture（C++ 版だけ）。枠は選択範囲の外接、無ければ仕上がり枠（上流はカンバス）。34 の木は上流の自前の設計。窓の小さな絵は画面が描く近似。スマートフィルターにはしない"
     },
     {
       "id": "filter.sharpen.sharpen",

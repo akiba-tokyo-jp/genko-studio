@@ -658,6 +658,34 @@ const std::vector<Rule>& rules() {
         r.push_back(rule(R"(a stroke has more than (\d+) dabs.*)", "線が長すぎます（ブラシの間隔で \\1 個を超える跡になります。点を近づけるか、ブラシを大きくします）"));
         r.push_back(rule(R"(a page's vanishing point planes: .*)", "ページの消点の面が正しくありません（原稿は読み取り専用で開きます）"));
         r.push_back(rule(R"(the smart object \S+'s filter \S+_data: .*)", "スマートフィルターのファイルは原稿の素材として持ちます（ファイルのデータのままでは持てません）"));
+        // (PC4 D4: 描画・ぼかしギャラリー's lists, 照明効果's channel, render_picture — 炎・額縁・木)
+        r.push_back(rule(R"(adjust render_lighting_effects\.lights must be a list of at most (\d+) .*)",
+                         "照明効果の光は \\1 個までです（種類・位置・高さ・向き・色・強さ・円錐・ホットスポット・半径）"));
+        r.push_back(rule(R"(adjust render_lighting_effects\.texture must be .*)",
+                         "照明効果のテクスチャは、なし・レッド・グリーン・ブルー・透明部分・輝度か、ページのアルファチャンネルです"));
+        r.push_back(rule(R"(render_lighting_effects: the page has no channel (.*) for the texture)", "照明効果のテクスチャのチャンネル「\\1」がページにありません"));
+        r.push_back(rule(R"(render_lighting_effects: the texture's channel (.*) is not an alpha channel)",
+                         "照明効果のテクスチャには、アルファチャンネルを使います（「\\1」はアルファチャンネルではありません）"));
+        r.push_back(rule(R"(render_lighting_effects: a smart filter's texture cannot be a channel of the page.*)",
+                         "スマートフィルターの照明効果では、テクスチャにページのチャンネルを使えません（なし・レッド・グリーン・ブルー・透明部分・輝度から選びます）"));
+        r.push_back(rule(R"(adjust blur_(?:field|iris|spin)\.pins must be a list of 1 to (\d+) .*)", "ぼかしギャラリーのピンは 1〜\\1 個です"));
+        r.push_back(rule(R"(adjust blur_path\.paths must be a list of at most (\d+) .*)",
+                         "パスぼかしのパスは \\1 本までで、各パスの点は 2〜4096 個（ページの mm）です"));
+        r.push_back(rule(R"(render_picture's kind must be .*)", "描画の種類は、炎（flame）・額縁（picture_frame）・木（tree）から選びます"));
+        r.push_back(rule(R"(render_picture's new_layer must be true or false)", "新しいレイヤーに描くかどうかは true か false で決めます"));
+        r.push_back(rule(R"(render_picture's id must be a layer's id)", "描くレイヤーの指定が違います"));
+        r.push_back(rule(R"(render_picture would draw more than (\d+) shapes.*)",
+                         "描く形が多すぎます（\\1 個を超えます。炎の間隔を広げるか、パスを短くするか、選択範囲を小さくします）"));
+        r.push_back(rule(R"(render_picture flame: the page has no path named '(.*)')", "そのページに「\\1」という名前のパスがありません"));
+        r.push_back(rule(R"(render_picture flame: the path is too long or too finely curved.*)", "炎の道筋のパスが長すぎるか細かすぎて、たどれません"));
+        r.push_back(rule(R"(render_picture (flame|picture_frame|tree) has no setting '(.*)')", [](const QRegularExpressionMatch& m) {
+            const QString kind = m.captured(1) == QStringLiteral("flame") ? QStringLiteral("炎") : m.captured(1) == QStringLiteral("tree") ? QStringLiteral("木") : QStringLiteral("額縁");
+            return QStringLiteral("%1 に「%2」という設定はありません").arg(kind, m.captured(2));
+        }));
+        r.push_back(rule(R"(render_picture (flame|picture_frame|tree)\.(\S+) (?:must|needs|is) .*)", [](const QRegularExpressionMatch& m) {
+            const QString kind = m.captured(1) == QStringLiteral("flame") ? QStringLiteral("炎") : m.captured(1) == QStringLiteral("tree") ? QStringLiteral("木") : QStringLiteral("額縁");
+            return QStringLiteral("%1 の「%2」の値が使えません").arg(kind, m.captured(2));
+        }));
         r.push_back(rule(R"(adjust ((?:blur|sharpen|noise|other|video|distort|pixelate|stylize|render|filter|camera|lens|adaptive)_\S+?) has no setting '(.*)')",
                          "フィルター（\\1）に「\\2」という設定はありません"));
         r.push_back(rule(R"(adjust ((?:blur|sharpen|noise|other|video|distort|pixelate|stylize|render|filter|camera|lens|adaptive)_\S+?)\.(\S+) (?:must|needs|is) .*)",
