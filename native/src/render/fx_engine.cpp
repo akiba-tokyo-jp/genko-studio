@@ -182,7 +182,6 @@ std::vector<float> conv_sep(const Window& src, const Rect& out, const std::vecto
 
 Kernels render_kernels() { return {}; }        // (D4)
 Kernels blur_gallery_kernels() { return {}; }  // (D4)
-Kernels camera_raw_kernels() { return {}; }    // (D5)
 
 const Kernels& kernels() {
     static const Kernels all = [] {
@@ -706,12 +705,18 @@ void apply(Surface& surface, const Kernel& kernel, const Json& params, core::Fil
                                 : nullptr;
     // (its reading: a band of rows at a time, held too — read_window_in_bands)
     const image_ops::Held shared_held(in_place != nullptr ? 0 : std::uint64_t(whole.area()) * kch * sizeof(float) + band_bytes(whole.intersect(grid), way));
+    // (D5: what a whole kind prepares — its own arrays —, held before the threads' share is decided: fewer threads, not a
+    // refusal, when both do not fit — D5's review P3-6)
+    if (kernel.prepare && !halo.bounds)
+        throw std::logic_error("fx: the kernel of " + std::string(kernel.kind) + " prepares on its base box: its halo must be Halo::whole()");
+    const image_ops::Held prepare_held(kernel.prepare && kernel.prepare_bytes ? kernel.prepare_bytes(params, ctx) : 0);
     const auto per_thread_of = [&](int tile_side) {
         const std::uint64_t tile_px = std::uint64_t(tile_side) * tile_side;
         const std::uint64_t reach = std::uint64_t(tile_side) + 2 * std::uint64_t(halo.radius);
         const std::uint64_t window_px = halo.bounds ? 0 : std::min<std::uint64_t>(reach, w) * std::min<std::uint64_t>(reach, h);
         return window_px * (kch * (2 * sizeof(float) + sizeof(std::int64_t)) + sch * sizeof(float) + kernel.work_bytes) +
-               tile_px * (kch + 3 * sch) * sizeof(float) + (way.meaning ? (window_px + tile_px) * (sch + 4) * sizeof(double) : 0);
+               tile_px * (kch + 3 * sch) * sizeof(float) + (way.meaning ? (window_px + tile_px) * (sch + 4) * sizeof(double) : 0) +
+               (kernel.tile_bytes ? kernel.tile_bytes(params, ctx, tile_side) : 0);  // (D5: a tile's own planes)
     };
     std::vector<int> sides{tiling.tile > 0 ? tiling.tile : auto_tile(halo)};
     if (tiling.tile <= 0)
@@ -760,9 +765,13 @@ void apply(Surface& surface, const Kernel& kernel, const Json& params, core::Fil
     // (a whole kind's work done once — 平均's mean —, its tiles given what it found)
     const Json found = kernel.once && shared ? kernel.once(params, *shared, ctx) : Json();
     const Json& given = kernel.once && shared ? found : params;
+    // (D5: what a whole kind prepares once besides its settings — Camera Raw's planes of the whole —, held while its tiles run)
+    const std::shared_ptr<const Prepared> prepared = kernel.prepare && shared ? kernel.prepare(given, *shared, ctx) : nullptr;
+    ctx.prepared = prepared.get();
 
     const std::stop_token* stop = segment::current_stop();
     std::atomic<double>* progress = g_progress;
+    const double start = prepared ? kPrepareShare : 0.0;  // (D5: what prepare said of the run, the tiles the rest)
     std::atomic<std::size_t> next{0}, done{0};
     std::atomic<bool> failed{false};
     std::exception_ptr error;
@@ -814,7 +823,7 @@ void apply(Surface& surface, const Kernel& kernel, const Json& params, core::Fil
                 return;
             }
             const std::size_t now = done.fetch_add(1) + 1;
-            if (progress != nullptr) progress->store(static_cast<double>(now) / static_cast<double>(tiles.size()));
+            if (progress != nullptr) progress->store(start + (1.0 - start) * static_cast<double>(now) / static_cast<double>(tiles.size()));
         }
     };
     const int granted = threads > 1 ? take_band_threads(threads - 1) : 0;

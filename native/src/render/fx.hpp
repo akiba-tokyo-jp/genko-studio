@@ -104,6 +104,12 @@ struct Picture {
     }
 };
 
+// (D5) What a whole kind works out once on its base box's window besides its settings (Kernel::prepare): an object of the
+// kind's own, given to each tile's run (Ctx::prepared).
+struct Prepared {
+    virtual ~Prepared() = default;
+};
+
 // What a kernel runs in (upstream's Ctx, with Genko's scale): the base box (distortions are centred on it and sample
 // within it: a selection's box, else the layer's grid), the samples' space and colours (the alpha after them), and how
 // many of the layer's pixels one pixel of the working 200 dpi spans (s: 1 for an 8-bit layer, 3 on a 600 dpi page).
@@ -141,6 +147,8 @@ struct Ctx {
     // (D6) A page of inks' colour mode (none: not a page of inks): a colour a kind lays of its own (レンズ補正's edge) goes
     // onto the plates by the page's rules (render/ink inks_by_rules).
     const core::PageColor* ink = nullptr;
+    // (D5) What the kind prepared on its base box before its tiles (Kernel::prepare; none: nothing).
+    const Prepared* prepared = nullptr;
 };
 
 // How far outside an output tile a kernel reads (upstream's Halo): a margin of pixels, or the whole base box.
@@ -174,9 +182,24 @@ struct Kernel {
     // object's picture), a part worked alone its PlaceScope's —, not the selection's box: a selection only keeps the result
     // to it (レンズ補正, 広角補正: their centre is the lens's). Nothing shows: nothing changes.
     bool shown_frame = false;
+    // (D5) A whole kind's work done once on the base box's window that is not settings — planes of the whole the tiles
+    // read (Camera Raw's haze and guided tone bases) —, after once, on the caller's thread (stopped as any run: StopScope;
+    // saying how far it is with ProgressScope::put up to kPrepareShare, the tiles the rest). Each tile's run has it as
+    // Ctx::prepared. Only a kind whose halo is Halo::whole() (the run reads its base box's window once) — any other with one
+    // is refused (std::logic_error). None: nothing.
+    std::function<std::shared_ptr<const Prepared>(const core::Json& params, const Window& whole, const Ctx& ctx)> prepare;
+    // (D5) The bytes prepare's arrays take at most: held in the imaging budget by the run before the threads' share is
+    // decided (fewer threads, not a refusal, when both do not fit), for as long as the run. None: nothing.
+    std::function<std::uint64_t(const core::Json& params, const Ctx& ctx)> prepare_bytes;
+    // (D5) The bytes a tile's run holds of its own past the tile and its window — a whole kind working each tile's part of
+    // its base box grown by what it reaches, in planes of its own (Camera Raw's) —, for a tile of `side`: held in the imaging
+    // budget with each thread's tile. None: nothing.
+    std::function<std::uint64_t(const core::Json& params, const Ctx& ctx, int side)> tile_bytes;
 };
 using Kernels = std::vector<Kernel>;
 inline constexpr double kDefaultCost = 50;
+// (D5) How much of a run's progress a kind's prepare says (its tiles the rest).
+inline constexpr double kPrepareShare = 0.1;
 
 // Each group's kernels (its own file; a group fills its own).
 Kernels blur_kernels();          // render/fx_blur.cpp — D0: blur_gaussian, blur_box; D1: the rest of ぼかし

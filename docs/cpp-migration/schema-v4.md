@@ -429,6 +429,7 @@ v3 の行（`rev`・`actor`・`at`・`changes`・`via`）をそのまま残し�
 - `features` に `filters@1` を加える（書くページ・中身のページのスマートフィルターに PC4 の種類があるか、フィルターのファイルを持つとき。無くなれば外す）。filters@1 を知らない読み手（PC3 までの C++ 版）は、未知の拡張として読み取り専用で開く（どちらも原稿を書き換えない）。
 
 - D6 の種類（レンズ補正・広角補正、COLOR-08）はファイルを持たない。レンズ補正 `lens_correction` の `"params"` は解いた値（`"profile"` は `"none"` か `"generic"` と `"focal_length"`。`"auto"` は足すときに絵の EXIF の焦点距離で `"generic"` に、角度補正の線 `"straighten"` は `"angle"` にして持たない。`"auto_scale"` は描くたびに解く）。広角補正 `adaptive_wide_angle` の焦点距離 0 は足すときに絵の EXIF で埋める。場所を名指す設定は広角補正の拘束線の端 `"constraints"[].a`・`.b`（ページの mm。スマートオブジェクトと一緒に動く）。
+- D5 の種類（Camera Raw フィルター、COLOR-08）`camera_raw` はファイルを持たず、場所を名指す設定も無い（周辺光量は枠の中心から）。`"params"` は全部の設定の正規形: 数（範囲に切ったもの）、`"curve_splits"` は 3 つの数、`"hsl_hue"`・`"hsl_sat"`・`"hsl_lum"` は 8 つの数、`"grade_shadows"`・`"grade_midtones"`・`"grade_highlights"`・`"grade_global"` は `{"hue", "sat", "lum"}`、点カーブ `"point_curve"`・`"point_curve_red"`・`"point_curve_green"`・`"point_curve_blue"` は `[]`（直線）か入力の順の 2〜19 点 `[[入力, 出力]…]`（0〜255、半階調より離れる）、`"vignette_style"` は `"highlight_priority"`・`"color_priority"`・`"paint_overlay"`、`"seed"` は整数。
 
 ## 消点の面（vanishing-point@1。COLOR-08、PC4 節 D6）
 

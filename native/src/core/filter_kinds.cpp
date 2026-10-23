@@ -540,7 +540,87 @@ std::vector<FilterKind> stylize_kinds() {
 
 std::vector<FilterKind> render_kinds() { return {}; }        // (D4)
 std::vector<FilterKind> blur_gallery_kinds() { return {}; }  // (D4)
-std::vector<FilterKind> camera_raw_kinds() { return {}; }    // (D5)
+// --- D5: Camera Raw フィルター ---------------------------------------------------------------------------------------------
+
+namespace {
+
+// (D5) An object of the settings `group` (a colour grading wheel's hue, saturation and luminance).
+AdjustParam group(std::string_view key, std::vector<AdjustParam> settings) {
+    AdjustParam p;
+    p.key = key;
+    p.type = Type::Group;
+    p.group = std::move(settings);
+    return p;
+}
+
+// Camera Raw's point curves (camera_raw.rs CameraRaw.point_curve…, design 2.5): none or [] — the straight line, upstream's
+// empty one —, or 2 to 19 points [in, out] in 0..255 (at most 64 given; each clamped), sorted by in, the second of two
+// within half a level left out (PC2's tone curves' rule, core/adjust_kinds read_tone_channels).
+Json read_point_curve(const Json* given, const std::string& where) {
+    if (given == nullptr || given->is_null()) return Json::array();
+    const std::string message = where + " must be [] (the straight line) or a list of 2 to 19 points [in, out] in 0..255";
+    if (!given->is_array() || given->size() == 1 || given->size() > 64) throw OpError(message);
+    std::vector<std::array<double, 2>> points;
+    for (const Json& point : *given) {
+        if (!point.is_array() || point.size() != 2 || !finite_number(point[0]) || !finite_number(point[1])) throw OpError(message);
+        points.push_back({std::clamp(point[0].get<double>(), 0.0, 255.0), std::clamp(point[1].get<double>(), 0.0, 255.0)});
+    }
+    std::stable_sort(points.begin(), points.end(), [](const auto& a, const auto& b) { return a[0] < b[0]; });
+    Json out = Json::array();
+    for (const auto& point : points) {
+        if (!out.empty() && point[0] - out.back()[0].get<double>() < 0.5) continue;
+        out.push_back(Json::array({number_json(point[0]), number_json(point[1])}));
+    }
+    if (!out.empty() && (out.size() < 2 || out.size() > 19)) throw OpError(message);
+    return out;
+}
+
+// camera_raw's settings in their normal form: its point curves read (the rest the table's).
+Json read_camera_raw(Json read) {
+    for (const char* key : {"point_curve", "point_curve_red", "point_curve_green", "point_curve_blue"}) read[key] = read_point_curve(get(read, key), std::string("adjust camera_raw.") + key);
+    return read;
+}
+
+}  // namespace
+
+std::vector<FilterKind> camera_raw_kinds() {
+    // D5 (lens_cmds.rs 376-422 RAW, camera_raw.rs CameraRaw; design 2.5): フィルター's own command (no submenu) — Adobe Camera
+    // Raw's sliders in its units, each a stage of upstream's develop that does nothing at its default (the defaults are the
+    // identity) — worked on the frame of the picture (the box of what shows on the layer: its long side sets the tone's and
+    // the haze's reach, 周辺光量 is about its centre; a selection keeps the result to it), on a page of inks on the colours its
+    // inks mean (back by the page's rules). ディテール's radius in pixels of the working 200 dpi; 粒子 placed by the working
+    // 200 dpi's grid.
+    std::vector<FilterKind> out;
+    const auto wheel = [](std::string_view key) { return group(key, {number("hue", 0, 0, 360), number("sat", 0, 0, 100), number("lum", 0, -100, 100)}); };
+    FilterKind made = kind(info("camera_raw", "filter.cameraRaw", "Camera Raw フィルター", "", FilterInks::Meaning),
+                           {// 基本補正
+                            number("temperature", 0, -100, 100), number("tint", 0, -100, 100), number("exposure", 0, -5, 5), number("contrast", 0, -100, 100),
+                            number("highlights", 0, -100, 100), number("shadows", 0, -100, 100), number("whites", 0, -100, 100), number("blacks", 0, -100, 100),
+                            number("texture", 0, -100, 100), number("clarity", 0, -100, 100), number("dehaze", 0, -100, 100), number("vibrance", 0, -100, 100),
+                            number("saturation", 0, -100, 100),
+                            // トーンカーブ
+                            number("curve_highlights", 0, -100, 100), number("curve_lights", 0, -100, 100), number("curve_darks", 0, -100, 100),
+                            number("curve_shadows", 0, -100, 100), numbers("curve_splits", {25, 50, 75}, 5, 95), custom("point_curve", false),
+                            custom("point_curve_red", false), custom("point_curve_green", false), custom("point_curve_blue", false),
+                            // カラーミキサー (レッド・オレンジ・イエロー・グリーン・アクア・ブルー・パープル・マゼンタ)
+                            numbers("hsl_hue", std::vector<double>(8, 0.0), -100, 100), numbers("hsl_sat", std::vector<double>(8, 0.0), -100, 100),
+                            numbers("hsl_lum", std::vector<double>(8, 0.0), -100, 100),
+                            // カラーグレーディング
+                            wheel("grade_shadows"), wheel("grade_midtones"), wheel("grade_highlights"), wheel("grade_global"), number("grade_blending", 50, 0, 100),
+                            number("grade_balance", 0, -100, 100),
+                            // ディテール
+                            number("sharpen_amount", 0, 0, 150), number("sharpen_radius", 1, 0.5, 3), number("sharpen_detail", 25, 0, 100),
+                            number("sharpen_masking", 0, 0, 100), number("noise_luminance", 0, 0, 100), number("noise_luminance_detail", 50, 0, 100),
+                            number("noise_color", 0, 0, 100), number("noise_color_detail", 50, 0, 100),
+                            // 効果
+                            number("grain_amount", 0, 0, 100), number("grain_size", 25, 0, 100), number("grain_roughness", 50, 0, 100),
+                            number("vignette_amount", 0, -100, 100), number("vignette_midpoint", 50, 0, 100), number("vignette_roundness", 0, -100, 100),
+                            number("vignette_feather", 50, 0, 100), number("vignette_highlights", 0, 0, 100),
+                            choice("vignette_style", {"highlight_priority", "color_priority", "paint_overlay"}), seed()});
+    made.kind.hooks.normalize = [](Json read, const Page*, LookupTables*) { return read_camera_raw(std::move(read)); };
+    out.push_back(std::move(made));
+    return out;
+}
 // --- D6: レンズ補正・広角補正 ----------------------------------------------------------------------------------------------
 
 namespace {

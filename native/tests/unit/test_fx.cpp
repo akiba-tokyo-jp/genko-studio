@@ -236,6 +236,9 @@ Json kind_params(const std::string& kind) {
         // D6 (lens_cmds.rs's tests' settings: the defaults change nothing)
         {"lens_correction", Json{{"distortion", -40}, {"vignette_amount", 30}}},
         {"adaptive_wide_angle", Json{{"model", "fisheye"}, {"focal_length", 10}, {"scale", 90}}},
+        // D5 (camera_raw.rs's tests' settings: the defaults change nothing)
+        {"camera_raw", Json{{"exposure", 0.5}, {"clarity", 30}, {"texture", 40}, {"dehaze", 20}, {"sharpen_amount", 60}, {"noise_luminance", 30},
+                            {"grain_amount", 30}, {"seed", 2}, {"vignette_amount", -40}}},
     };
     return kTestParams.contains(kind) ? kTestParams.at(kind) : core::normalize_filter(kind, Json::object(), nullptr);
 }
@@ -1477,8 +1480,8 @@ private slots:
         QVERIFY(refusal(doc, Json{{"op", "render_picture"}, {"page", 1}, {"kind", "tree"}}).starts_with("not_yet_ported"));
         // (D6: 消点 is the op of its own now — render/vanishing —: without planes, refused for them)
         QVERIFY(refusal(doc, Json{{"op", "vanishing_point"}, {"page", 1}, {"id", "paint"}}).find("no planes") != std::string::npos);
-        // a kind not in the table yet: an unknown filter (D5's)
-        QVERIFY(!refusal(doc, Json{{"op", "filter_raster"}, {"page", 1}, {"id", "paint"}, {"kind", "camera_raw"}}).empty());
+        // a kind not in the table: an unknown filter (D5's camera_raw is in it now: a kind no group makes instead)
+        QVERIFY(!refusal(doc, Json{{"op", "filter_raster"}, {"page", 1}, {"id", "paint"}, {"kind", "neural_style_transfer"}}).empty());
     }
 };
 

@@ -657,6 +657,9 @@ const std::vector<Rule>& rules() {
         r.push_back(rule(R"(clone\[\d+\].*)", "消点のスタンプの指定が違います（{source: [x, y], points: [[x, y]…]（mm）, size_px, hardness, opacity}）"));
         r.push_back(rule(R"(a stroke has more than (\d+) dabs.*)", "線が長すぎます（ブラシの間隔で \\1 個を超える跡になります。点を近づけるか、ブラシを大きくします）"));
         r.push_back(rule(R"(a page's vanishing point planes: .*)", "ページの消点の面が正しくありません（原稿は読み取り専用で開きます）"));
+        // (D5: Camera Raw フィルター's point curves, core/filter_kinds)
+        r.push_back(rule(R"(adjust camera_raw\.point_curve(?:_red|_green|_blue)? must be .*)",
+                         "Camera Raw フィルターのポイントカーブは、[]（直線）か、2〜19 個の点 [入力, 出力]（0〜255）で指定します"));
         r.push_back(rule(R"(the smart object \S+'s filter \S+_data: .*)", "スマートフィルターのファイルは原稿の素材として持ちます（ファイルのデータのままでは持てません）"));
         r.push_back(rule(R"(adjust ((?:blur|sharpen|noise|other|video|distort|pixelate|stylize|render|filter|camera|lens|adaptive)_\S+?) has no setting '(.*)')",
                          "フィルター（\\1）に「\\2」という設定はありません"));

@@ -8667,9 +8667,18 @@
         "alternate_menus": []
       },
       "genko_status": "一部（2026-10-16 照合）",
-      "implementation_status": "未着手",
+      "implementation_status": "実装済み（PC4 D5、未統合）",
       "acceptance_status": "未実施",
-      "evidence": [],
+      "evidence": [
+        "native/src/core/filter_kinds.cpp",
+        "native/src/render/fx_camera_raw.cpp",
+        "native/src/render/fx_engine.cpp",
+        "native/src/app/camera_raw_window.cpp",
+        "native/src/app/filter_menu.cpp",
+        "native/tests/unit/test_fx_camera_raw.cpp",
+        "native/tests/unit/test_fx.cpp",
+        "native/tests/gui/test_gui_filters.cpp"
+      ],
       "pc0": {
         "date": "2026-10-16",
         "cpp_base": "962faa4",
@@ -8688,7 +8697,8 @@
         ],
         "gap": "一つの Camera Raw フィルターはない。露光量（exposure）・明るさ・コントラスト・トーンカーブ（点・色別）・色相彩度は別の補正としてある。色温度・色かぶり・ハイライト/シャドウ/白/黒・テクスチャ・明瞭度・かすみの除去・自然な彩度・パラメトリックカーブ・HSL 8 色・カラーグレーディング・シャープの細部/マスク・ノイズ軽減・粒子・周辺光量がない",
         "note": "露光量の式はすでに PhotoCraft 由来（native/src/core/exposure.hpp）"
-      }
+      },
+      "remaining": "式は上流（PhotoCraft）の 9 段で、Adobe Camera Raw と同じ絵ではない。枠はレイヤーの見えている所（上流はカンバス）。ディテールの半径と粒子は作業の 200 dpi の画素。インキのページは意味する色で掛ける（上流は RGB とグレーだけ）。ホワイトバランスは撮影時の設定からの色温度・色かぶりだけ（白を選ぶツール・プリセットは無い）。窓のプレビューは 8 bit の色に掛ける近似。窓の部品 CameraRawPanel は節 F の F-e（RAW を開く）が使う"
     },
     {
       "id": "filter.convertForSmartFilters",

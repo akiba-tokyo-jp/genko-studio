@@ -31,6 +31,7 @@
 
 #include "app/adjust_forms.hpp"
 #include "app/ask.hpp"
+#include "app/camera_raw_window.hpp"
 #include "app/colours.hpp"
 #include "app/filter_forms.hpp"
 #include "app/filter_gallery_window.hpp"
@@ -208,6 +209,7 @@ const std::vector<std::pair<std::string, FilterWindow>>& filter_windows() {
         {"lens_correction", [](const FilterWindowCall& call) { lens_window::open_lens(call); }},  // (D6: app/lens_window.cpp)
         {"adaptive_wide_angle", [](const FilterWindowCall& call) { lens_window::open_wide_angle(call); }},
         {"vanishing_point", [](const FilterWindowCall& call) { vanishing_window::open(call); }},  // (D6: app/vanishing_window.cpp)
+        {"camera_raw", [](const FilterWindowCall& call) { camera_raw_window::open(call); }},  // (D5: app/camera_raw_window.cpp)
     };
     return all;
 }
@@ -443,6 +445,7 @@ void MainWindow::filter_command(const FilterItem& item) {
         call.send = send;
         call.page = page;
         call.layer = layer;
+        call.seed = seed;  // (D5: the window's preview of the grain the same as the op's)
         (*own)(call);
         return;
     }

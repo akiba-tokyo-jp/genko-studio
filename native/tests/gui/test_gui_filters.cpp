@@ -9,11 +9,14 @@
 // each time ノイズを加える… is applied, ぼかし（レンズ）… on a smart object without the layer mask as its depth. D2: its commands lit
 // — 変形・ピクセレート・表現手法 — in Photoshop's words, 渦巻き…'s window, ぶれ without one, シアー…'s curve, 置き換え…'s map (a layer
 // of the page; on a smart object made the book's file). D6: its commands lit — レンズ補正…・広角補正…・消点… — and their own
-// windows (the result on their pictures, 角度補正ツール, a constraint drawn, a plane made and a layer pasted on it).
+// windows (the result on their pictures, 角度補正ツール, a constraint drawn, a plane made and a layer pasted on it). D5: Camera
+// Raw フィルター… lit — its window's tabs, its result on its picture, 補正前, 初期化, one op and one Undo, a smart filter; its panel's
+// settings untouched as they came, the point curve's 19 points, a new seed each time, F-e's hooks.
 
 #include <QtTest>
 #include <QAction>
 #include <QApplication>
+#include <QCheckBox>
 #include <QComboBox>
 #include <QDialog>
 #include <QDialogButtonBox>
@@ -22,6 +25,7 @@
 #include <QListWidget>
 #include <QMenu>
 #include <QMenuBar>
+#include <QMouseEvent>
 #include <QPointer>
 #include <QProgressDialog>
 #include <QPushButton>
@@ -33,9 +37,11 @@
 
 #include "gui_support.hpp"
 #include "app/adjust_forms.hpp"
+#include "app/camera_raw_window.hpp"
 #include "app/canvas.hpp"
 #include "app/colours.hpp"
 #include "app/history_panel.hpp"
+#include "app/layer_dialogs.hpp"
 #include "app/layer_panel.hpp"
 #include "app/config.hpp"
 #include "app/filter_gallery_window.hpp"
@@ -245,9 +251,11 @@ private slots:
                                "act_filter_stylize_diffuse", "act_filter_stylize_wind", "act_filter_stylize_find_edges", "act_filter_stylize_trace_contour",
                                "act_filter_stylize_oil_paint",
                                // (D6: レンズ補正・広角補正・消点)
-                               "act_filter_lens_correction", "act_filter_adaptive_wide_angle", "act_filter_vanishing_point"})
+                               "act_filter_lens_correction", "act_filter_adaptive_wide_angle", "act_filter_vanishing_point",
+                               // (D5: Camera Raw フィルター)
+                               "act_filter_camera_raw"})
             QVERIFY2(book.act(on)->isEnabled(), on);
-        for (const char* off : {"act_filter_render_fibers", "act_filter_camera_raw", "act_filter_render_tree", "act_filter_blur_tilt_shift", "act_filter_last"})
+        for (const char* off : {"act_filter_render_fibers", "act_filter_render_tree", "act_filter_blur_tilt_shift", "act_filter_last"})
             QVERIFY2(!book.act(off)->isEnabled(), off);
         // 履歴's words of the new ops
         QCOMPARE(app::history::describe(Json::array({Json{{"op", "render_picture"}}})), QStringLiteral("描画した"));
@@ -1087,6 +1095,189 @@ private slots:
         emit book.menu("menu_filter")->aboutToShow();
         QVERIFY(!book.act("act_filter_vanishing_point")->isEnabled());
         QVERIFY(book.act("act_filter_lens_correction")->isEnabled());
+    }
+
+    // D5: Camera Raw フィルター…'s window (Ctrl+Shift+A) — its six tabs in Camera Raw's words, the result on its picture (made
+    // on a thread), 補正前, 初期化 setting the sliders back, OK one op (one Undo), キャンセル nothing; on a smart object a smart
+    // filter, its window again from the layer panel with its settings (unchanged: nothing sent).
+    void theCameraRawWindow() {
+        Book book;
+        gui_test::Answers answers;
+        book.window->set_target_layer("pic");
+        emit book.menu("menu_filter")->aboutToShow();
+        QVERIFY(book.act("act_filter_camera_raw")->isEnabled());
+        const core::Bytes before = book.layer("pic")->raster_png;
+        QStringList titles;
+        int previews = 0;
+        double after_reset = -1;
+        bool before_shown = false;
+        answers.responder->exec = answer(QStringLiteral("camera_raw"), [&](QDialog* d) {
+            QCOMPARE(d->windowTitle(), QStringLiteral("Camera Raw フィルター"));
+            auto* tabs = d->findChild<QTabWidget*>(QStringLiteral("camera_raw_tabs"));
+            QVERIFY(tabs != nullptr);
+            for (int i = 0; i < tabs->count(); ++i) titles << tabs->tabText(i);
+            QWidget* panel = d->findChild<QWidget*>(QStringLiteral("camera_raw_panel"));
+            QVERIFY(panel != nullptr);
+            QTRY_VERIFY(panel->property("previews").toInt() > 0);  // (its picture made, the first result shown)
+            const int first = panel->property("previews").toInt();
+            auto* exposure = d->findChild<QDoubleSpinBox*>(QStringLiteral("camera_raw_exposure"));
+            QVERIFY(exposure != nullptr);
+            exposure->setValue(1.5);
+            d->findChild<QDoubleSpinBox*>(QStringLiteral("camera_raw_vignette_amount"))->setValue(-60);
+            QTRY_VERIFY(panel->property("previews").toInt() > first);
+            previews = panel->property("previews").toInt();
+            // 初期化: every slider back to its default
+            d->findChild<QPushButton*>(QStringLiteral("camera_raw_reset"))->click();
+            after_reset = exposure->value() + d->findChild<QDoubleSpinBox*>(QStringLiteral("camera_raw_vignette_amount"))->value();
+            exposure->setValue(1.0);
+            auto* shown_before = d->findChild<QCheckBox*>(QStringLiteral("camera_raw_before"));
+            shown_before->setChecked(true);
+            before_shown = shown_before->isChecked();
+        });
+        book.act("act_filter_camera_raw")->trigger();
+        QCOMPARE(titles, (QStringList{QStringLiteral("基本補正"), QStringLiteral("トーンカーブ"), QStringLiteral("ディテール"), QStringLiteral("カラーミキサー"),
+                                      QStringLiteral("カラーグレーディング"), QStringLiteral("効果")}));
+        QVERIFY(previews > 1);
+        QCOMPARE(after_reset, 0.0);
+        QVERIFY(before_shown);
+        QVERIFY(book.layer("pic")->raster_png != before);
+        // its op: the settings in their normal form (exposure 1, the rest at the defaults) — the op's pixels
+        const auto expected = core::CommandBus(render::ops_registry())
+                                  .apply(book_doc(), Json::array({Json{{"op", "filter_raster"}, {"page", 1}, {"id", "pic"}, {"kind", "camera_raw"}, {"exposure", 1.0}}}),
+                                         core::Actor("human:tester"))
+                                  .doc;
+        for (const auto& l : expected.page(0).layers)
+            if (l.id == "pic") QCOMPARE(*book.layer("pic")->raster_png, *l.raster_png);
+        // one Undo
+        book.window->action(QStringLiteral("act_undo"))->trigger();
+        QCOMPARE(book.layer("pic")->raster_png, before);
+        // キャンセル: nothing
+        answers.responder->exec = [](QDialog*) { return int(QDialog::Rejected); };
+        book.act("act_filter_camera_raw")->trigger();
+        QCOMPARE(book.layer("pic")->raster_png, before);
+        // on a smart object: a smart filter; its window again from the layer panel shows its settings
+        QVERIFY(book.window->apply_ops(Json::array({Json{{"op", "smart_convert"}, {"page", 1}, {"ids", Json::array({"pic"})}, {"new_id", "so"}}})));
+        book.window->set_target_layer("so");
+        emit book.menu("menu_filter")->aboutToShow();
+        QVERIFY(book.act("act_filter_camera_raw")->isEnabled());
+        answers.responder->exec = answer(QStringLiteral("camera_raw"), [](QDialog* d) {
+            d->findChild<QDoubleSpinBox*>(QStringLiteral("camera_raw_saturation"))->setValue(-100);
+        });
+        book.act("act_filter_camera_raw")->trigger();
+        const Json filters = (*book.layer("so")->smart)["filters"];
+        QCOMPARE(filters.size(), std::size_t(1));
+        QCOMPARE(filters[0]["kind"], Json("camera_raw"));
+        QCOMPARE(filters[0]["params"]["saturation"], Json(-100));
+        double saturation = 0;
+        answers.responder->exec = answer(QStringLiteral("camera_raw"), [&](QDialog* d) {
+            saturation = d->findChild<QDoubleSpinBox*>(QStringLiteral("camera_raw_saturation"))->value();
+        });
+        const auto before_edit = book.session->snapshot();
+        book.window->layer_panel()->edit_smart_filter(0);
+        QCOMPARE(saturation, -100.0);
+        QVERIFY(book.session->snapshot() == before_edit);  // (unchanged: nothing sent)
+    }
+
+    // D5's review: the panel's settings come back as they were given (their normal form — its fields' rounding never changing
+    // one not touched), a touched one its field's; a smart filter of values the fields round, set again from the layer panel
+    // and OK untouched: nothing sent; the point curve holds 19 points (one more not added, said; OK sends); a new seed each
+    // time from the menu (the window's the op's), 前回のフィルター another; F-e's hooks (a widget at the top of 基本補正, the rows
+    // of keys hidden — their values kept —, a picture not well formed refused).
+    void theCameraRawPanelAndItsSettings() {
+        namespace crw = app::camera_raw_window;
+        const Json given{{"temperature", 12.5},
+                         {"exposure", 0.333},
+                         {"grade_shadows", Json{{"hue", 210.4}, {"sat", 33.3}, {"lum", -7.25}}},
+                         {"hsl_sat", Json::array({1.5, 0, 0, 0, 0, 0, 0, -9.75})},
+                         {"point_curve", Json::array({Json::array({0, 0}), Json::array({63.33, 40}), Json::array({255, 255})})},
+                         {"point_curve_blue", Json::array({Json::array({0, 20}), Json::array({255, 230})})},
+                         {"vignette_style", "color_priority"},
+                         {"seed", 77}};
+        const Json normal = core::normalize_filter("camera_raw", given, nullptr);
+        {
+            crw::CameraRawPanel panel;
+            panel.set_settings(given);
+            QVERIFY(panel.settings() == normal);
+            panel.findChild<QDoubleSpinBox*>(QStringLiteral("camera_raw_exposure"))->setValue(1.25);
+            Json expected = normal;
+            expected["exposure"] = 1.25;
+            QVERIFY2(panel.settings() == expected, panel.settings().dump().c_str());
+            // F-e: its own widget at the top of 基本補正, the relative white balance hidden (its value kept)
+            auto* raw = new QLabel(QStringLiteral("RAW"));
+            panel.add_to_basic(raw);
+            QVERIFY(raw->parentWidget() != nullptr);
+            panel.set_hidden({"temperature", "tint"});
+            QVERIFY(panel.findChild<QDoubleSpinBox*>(QStringLiteral("camera_raw_temperature"))->parentWidget()->isHidden());
+            QVERIFY(panel.settings()["temperature"] == Json(12.5));
+            // a picture not well formed: refused, said
+            auto bad = std::make_shared<crw::Picture>();
+            bad->width = 4;
+            bad->height = 4;
+            bad->rgba.assign(10, 0.5f);
+            panel.set_picture(bad);
+            QVERIFY(panel.findChild<QLabel*>(QStringLiteral("camera_raw_status"))->text().contains(QStringLiteral("正しくない")));
+            QVERIFY(crw::shown(*bad).isNull() && crw::developed(*bad, normal).isNull());
+            // 初期化: the defaults, its seed kept
+            panel.reset();
+            Json defaults = core::normalize_filter("camera_raw", Json{{"seed", 77}}, nullptr);
+            QVERIFY(panel.settings() == defaults);
+        }
+        Book book;
+        gui_test::Answers answers;
+        // a smart filter of values the fields round, set again untouched: nothing sent
+        Json add{{"op", "smart_filter_add"}, {"page", 1}, {"id", "so"}, {"kind", "camera_raw"}};
+        add.update(given);
+        QVERIFY(book.window->apply_ops(Json::array({Json{{"op", "smart_convert"}, {"page", 1}, {"ids", Json::array({"pic"})}, {"new_id", "so"}}, add})));
+        book.window->set_target_layer("so");
+        const auto before_edit = book.session->snapshot();
+        bool opened = false;
+        answers.responder->exec = answer(QStringLiteral("camera_raw"), [&](QDialog*) { opened = true; });
+        book.window->layer_panel()->edit_smart_filter(0);
+        QVERIFY(opened);
+        QVERIFY(book.session->snapshot() == before_edit);
+        // a new seed each time from the menu (the window's the op's), 前回のフィルター another
+        std::vector<std::int64_t> seen;
+        answers.responder->exec = answer(QStringLiteral("camera_raw"), [&](QDialog* d) {
+            d->findChild<QDoubleSpinBox*>(QStringLiteral("camera_raw_grain_amount"))->setValue(40);
+            auto* panel = dynamic_cast<crw::CameraRawPanel*>(d->findChild<QWidget*>(QStringLiteral("camera_raw_panel")));
+            QVERIFY(panel != nullptr);
+            seen.push_back(panel->settings()["seed"].get<std::int64_t>());
+        });
+        book.act("act_filter_camera_raw")->trigger();
+        book.act("act_filter_camera_raw")->trigger();
+        Json filters = (*book.layer("so")->smart)["filters"];
+        QCOMPARE(filters.size(), std::size_t(3));
+        QCOMPARE(seen.size(), std::size_t(2));
+        QCOMPARE(filters[1]["params"]["seed"].get<std::int64_t>(), seen[0]);
+        QCOMPARE(filters[2]["params"]["seed"].get<std::int64_t>(), seen[1]);
+        QVERIFY(seen[0] != seen[1]);
+        book.act("act_filter_last")->trigger();
+        filters = (*book.layer("so")->smart)["filters"];
+        QCOMPARE(filters.size(), std::size_t(4));
+        QVERIFY(filters[3]["params"]["seed"] != filters[2]["params"]["seed"] && filters[3]["params"]["grain_amount"] == Json(40));
+        // the point curve: 19 points at most (one more not added, said), OK sends
+        Book paint;
+        paint.window->set_target_layer("pic");
+        const core::Bytes before = paint.layer("pic")->raster_png;
+        std::size_t points = 0;
+        QString said;
+        answers.responder->exec = answer(QStringLiteral("camera_raw"), [&](QDialog* d) {
+            auto* editor = d->findChild<app::CurveEditor*>(QStringLiteral("camera_raw_curve"));
+            QVERIFY(editor != nullptr);
+            for (int i = 0; i < 25; ++i) {
+                const QPointF at(6 + i * 8, 60 + (i % 2) * 4);
+                QMouseEvent press(QEvent::MouseButtonPress, at, at, Qt::LeftButton, Qt::LeftButton, Qt::NoModifier);
+                QApplication::sendEvent(editor, &press);
+                QMouseEvent release(QEvent::MouseButtonRelease, at, at, Qt::LeftButton, Qt::NoButton, Qt::NoModifier);
+                QApplication::sendEvent(editor, &release);
+            }
+            points = editor->points().size();
+            said = d->findChild<QLabel*>(QStringLiteral("camera_raw_status"))->text();
+        });
+        paint.act("act_filter_camera_raw")->trigger();
+        QCOMPARE(points, std::size_t(19));
+        QVERIFY2(said.contains(QStringLiteral("19")), qPrintable(said));
+        QVERIFY(paint.layer("pic")->raster_png != before);
     }
 };
 
