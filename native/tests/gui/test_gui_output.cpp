@@ -258,7 +258,9 @@ private slots:
         QCOMPARE(file.at(file.indexOf(QStringLiteral("プリント…")) + 1), QStringLiteral("|"));
         QStringList exports;
         for (QAction* a : w->findChild<QMenu*>(QStringLiteral("menu_export"))->actions()) exports << (a->isSeparator() ? QStringLiteral("|") : a->text());
-        QCOMPARE(exports.indexOf(QStringLiteral("パスを Illustrator へ…")), exports.indexOf(QStringLiteral("原稿を書き出す…")) + 2);
+        // (PC4 F-c: Photoshop's レイヤーからファイル… first in that group)
+        QCOMPARE(exports.indexOf(QStringLiteral("レイヤーからファイル…")), exports.indexOf(QStringLiteral("原稿を書き出す…")) + 2);
+        QCOMPARE(exports.indexOf(QStringLiteral("パスを Illustrator へ…")), exports.indexOf(QStringLiteral("原稿を書き出す…")) + 3);
         const QStringList edit = menu_items(w, QStringLiteral("編集"));
         QCOMPARE(edit.mid(0, 4), (QStringList{QStringLiteral("元に戻す"), QStringLiteral("やり直す"), QStringLiteral("履歴…"), QStringLiteral("|")}));
         const QStringList view = menu_items(w, QStringLiteral("表示"));

@@ -611,7 +611,11 @@ CopyEstimate estimate_copy(const core::Document& doc, std::size_t at, std::strin
             tiny.scale = kScaleMin;
             tiny.width.reset();
             tiny.height.reset();
-            fixed = std::min<std::uint64_t>(bytes, plan_copy(doc, at, fs::path("estimate." + ext), tiny).bytes.size());
+            try {
+                fixed = std::min<std::uint64_t>(bytes, plan_copy(doc, at, fs::path("estimate." + ext), tiny).bytes.size());
+            } catch (const std::exception&) {
+                fixed = 0;  // (a small layer gone at 1 %: all of it scaled)
+            }
         }
     }
     // (from a proxy: a page's pixels over the proxy's; a layer's — whose size is known only once it is drawn — by the
