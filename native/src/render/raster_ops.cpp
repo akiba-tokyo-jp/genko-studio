@@ -1056,6 +1056,7 @@ void into_pixels(const Page& page, Layer& target, const Image& picture) {
     target.blend = "normal";
     target.opacity = 1.0;
     target.clip = false;
+    target.native_psd.reset();  // (psd-keep@1, PC4 F-d: a PSD's effects and blocks are not the merged or converted layer's)
     raster::save_raster(page, target, picture);
 }
 
@@ -1131,6 +1132,7 @@ void into_color_pixels(Layer& target, std::pair<std::string, bool> pixels) {
     target.fill.reset(); target.adjust.reset(); target.effect.reset(); target.fill_rgb.reset();
     target.screen.reset(); target.color.reset(); target.tone.reset(); target.source.reset();
     target.blend = "normal"; target.opacity = 1; target.clip = pixels.second; target.panel_clip = false;
+    target.native_psd.reset();  // (psd-keep@1, PC4 F-d: a PSD's effects and blocks are not the merged layer's)
     target.color_raster = pixels.first.empty() ? core::Bytes{} : std::make_shared<const std::string>(std::move(pixels.first));
 }
 std::pair<std::string, bool> composite_color_layers(const Document& doc, const Page& page,
@@ -1626,6 +1628,7 @@ void merge_down(OpContext& c) {
         into.kind = LayerKind::Raster;
         raster::save_raster(page, into, merged);
     }
+    page.layers[li].native_psd.reset();  // (psd-keep@1, PC4 F-d: a PSD's effects and blocks are not the merged layer's)
     page.layers.erase(page.layers.begin() + static_cast<std::ptrdiff_t>(ui));
 }
 
@@ -1673,6 +1676,7 @@ void convert_layer(OpContext& c) {
             layer.strokes = core::make_strokes(std::move(strokes));
             layer.color_raster.reset();layer.raster_png.reset();layer.asset.reset();layer.patches.clear();
             layer.kind = LayerKind::Strokes;
+            layer.native_psd.reset();  // (psd-keep@1, PC4 F-d: a kind of its own now)
             if (std::find(doc.features.begin(),doc.features.end(),core::kColorStrokeFeature)==doc.features.end())
                 doc.features.emplace_back(core::kColorStrokeFeature);
             return;
@@ -1717,6 +1721,7 @@ void convert_layer(OpContext& c) {
         layer.shapes = core::vector::empty_shapes();  // (pen-shapes@1, PC3 C-b: traced with the rest)
         layer.raster_png.reset();
         layer.kind = LayerKind::Strokes;
+        layer.native_psd.reset();  // (psd-keep@1, PC4 F-d: a kind of its own now)
         return;
     }
     throw OpError("to must be paint or pen");

@@ -426,10 +426,16 @@ void smart_to_page(OpContext& c) {
         for (const auto& [ref, file] : work.smart_files) doc.smart_files.emplace(ref, file);
         for (const auto& [ref, file] : work.filter_files) doc.filter_files.emplace(ref, file);  // (filters@1, PC4 節 D)
         for (const auto& [ref, table] : work.luts) doc.luts.emplace(ref, table);
+        // (patterns@1, PC4 E3: the patterns its pattern fills took into the book; psd-keep@1, PC4 F-d: the blocks and
+        // resources it and its layers keep — the book was copied, import_psd alone added to them)
+        doc.patterns = work.patterns;
+        doc.pattern_files = work.pattern_files;
+        doc.native_files = work.native_files;
         for (const std::string& feature : work.features) {
             if (std::find(doc.features.begin(), doc.features.end(), feature) == doc.features.end()) doc.features.push_back(feature);
         }
         inner.layers = work.page(0).layers;
+        inner.native_psd = work.page(0).native_psd;  // (psd-keep@1: the file's own resources and global blocks)
         for (Layer& layer : inner.layers) {
             layer.panel_clip = false;
             layer.panel_each = false;

@@ -24,6 +24,7 @@
 #include "app/dialogs.hpp"
 #include "app/file_info_dialog.hpp"
 #include "app/icons.hpp"
+#include "app/layer_panel.hpp"
 #include "app/main_window.hpp"
 #include "app/open_dialog.hpp"
 #include "app/preferences.hpp"
@@ -41,6 +42,7 @@
 #include "render/page.hpp"
 #include "render/png.hpp"
 #include "render/ops_registry.hpp"
+#include "service/wording.hpp"
 #include "storage/fsutil.hpp"
 #include "testsupport.hpp"
 
@@ -202,6 +204,50 @@ private slots:
         fs::create_directories(plain);
         d.window->open_path(plain);
         QVERIFY(std::any_of(d.answers->asked.begin(), d.answers->asked.end(), [](const QString& a) { return a.contains(QStringLiteral("Genko の原稿ではありません")); }));
+    }
+
+    // PC4 F-d (SPEC.md FILE-01「PSD・PSB」): 開く… opens a PSD as a book of its layers in memory (the file never written;
+    // 開く…'s filter lists Photoshop's files), its layer of effects marked in the layer panel (its tip: Photoshop draws
+    // them), what it keeps written back by コピーを保存… as a PSB (はい: its layers); a PSD of a page too large for one is
+    // refused in Japanese words that say to write a PSB.
+    void aPsdOpensAsABookOfItsLayers() {
+        Desk d;
+        QVERIFY(genko::app::open_filters().contains(QStringLiteral("Photoshop (*.psd *.psb)")));
+        const fs::path psd = path_of(d.dir.filePath("keep.psd"));
+        const std::string bytes = genko::test::read_bytes(genko::test::repo_root() + QStringLiteral("/native/tests/data/psd_keep/keep.psd"));
+        genko::test::write_bytes(qpath(psd), bytes);
+        d.open_with({qpath(psd)});
+        QVERIFY(wait_for([&] { return d.tabs() == 2; }));
+        QCOMPARE(d.doc().title, std::string("keep"));
+        QVERIFY(!d.window->session().path());
+        const core::Page& page = d.doc().page(0);
+        QCOMPARE(page.layers.size(), std::size_t{3});
+        QVERIFY(page.native_psd && page.native_source && page.native_source->format == "psd");
+        auto* panel = d.window->layer_panel();
+        bool marked = false;
+        for (int row = 0; row < panel->list()->count(); ++row) {
+            const QListWidgetItem* item = panel->list()->item(row);
+            if (!item->text().contains(QStringLiteral("効果（PSD）"))) continue;
+            marked = true;
+            QVERIFY2(item->toolTip().contains(QStringLiteral("Photoshop が描きます")), qPrintable(item->toolTip()));
+        }
+        QVERIFY(marked);
+        // コピーを保存… as a PSB: its layers, what it keeps
+        const fs::path psb = path_of(d.dir.filePath("keep-copy.psb"));
+        d.save_as_target = qpath(psb);
+        d.answers->responder->question = [&d](const QString& title, const QString& text) {
+            d.questions << title;
+            return title == QStringLiteral("コピーを保存") && text.contains(QStringLiteral("レイヤーを残して")) ? true : d.write_with_losses;
+        };
+        d.trigger("act_save_copy");
+        QVERIFY(wait_for([&] { return fs::exists(psb); }));
+        const std::string written = bytes_of(psb);
+        QCOMPARE(written.substr(0, 6), std::string("8BPS\0\2", 6));
+        QVERIFY(written.find("8BIMAnno") != std::string::npos && written.find("lfx2") != std::string::npos);
+        QCOMPARE(bytes_of(psd), bytes);
+        // a PSD past 30000 px a side: said to be written as a PSB
+        QCOMPARE(genko::wording::error(QStringLiteral("the page is too large for a PSD (30001×2 pixels): write it as a PSB")),
+                 QStringLiteral("ページが大きすぎて PSD に書けません（30001×2 px。PSD は 1 辺 30000 px まで）。PSB で書き出してください"));
     }
 
     // A .genko folder and a picture dropped on the window (not on the page) open.

@@ -1,5 +1,6 @@
 #include "render/psd.hpp"
 
+#include "core/psd_keep.hpp"
 #include "render/ink.hpp"
 #include "render/ink_canvas.hpp"
 #include "render/psd_adjust.hpp"
@@ -179,11 +180,7 @@ const std::map<std::string, std::string, std::less<>>& blend_keys() {
     return keys;
 }
 
-bool long_key(std::string_view tag) {
-    static constexpr std::string_view kKeys[] = {"LMsk", "Lr16", "Lr32", "Layr", "Mt16", "Mt32", "Mtrn",
-                                                 "Alph", "FMsk", "lnk2", "FEid", "FXid", "PxSD"};
-    return std::find(std::begin(kKeys), std::end(kKeys), tag) != std::end(kKeys);
-}
+bool long_key(std::string_view tag) { return core::psb_long_key(tag); }  // (LMsk, Lr16, Lr32, Layr, Mt16, Mt32, Mtrn, Alph, FMsk, lnk2, FEid, FXid, PxSD)
 
 bool adjust_tag(std::string_view tag) {
     static constexpr std::string_view kTags[] = {"SoCo", "GdFl", "PtFl", "levl", "curv", "brit", "hue2",
@@ -356,9 +353,11 @@ Samples depth8(const std::string* raw, std::uint64_t length, std::int64_t width,
 }
 
 // psd._channel(r, width, height, depth, end=end): one channel's samples from the reader's position, as 8-bit; the
-// reader is left at `end`. With `keep` false, only checked (what Python would raise) and counted.
+// reader is left at `end`. With `keep` false, only checked (what Python would raise) and counted. (PC4 F-d) With
+// `raw_out`, its samples as stored — at the file's depth, big-endian, at most the channel's size — go there instead (and
+// none are made 8-bit).
 Samples read_channel(Reader& r, std::int64_t width, std::int64_t height, int depth, std::uint64_t end, bool keep,
-                     Budget& budget, const Limits& limits) {
+                     Budget& budget, const Limits& limits, std::string* raw_out = nullptr) {
     const unsigned compression = r.u16();
     if (width <= 0 || height <= 0) {
         r.pos = end;
@@ -434,6 +433,11 @@ Samples read_channel(Reader& r, std::int64_t width, std::int64_t height, int dep
         psd_error("unknown PSD compression " + std::to_string(compression));
     }
     r.pos = end;
+    if (raw_out != nullptr) {
+        if (raw.size() > length) raw.resize(static_cast<std::size_t>(length));
+        *raw_out = std::move(raw);
+        return Samples{{}, length};
+    }
     return depth8(keep ? &raw : nullptr, length, width, height, depth);
 }
 
@@ -505,8 +509,9 @@ std::uint64_t be64(std::string_view d, std::uint64_t at) {
 // (PC3 A3) the global tagged blocks after the layers (from `from` to `end`: the global layer mask, then the blocks), the
 // places of the linked-layer ones (lnk2, lnk3, lnkD) kept. Nothing past what can be read is looked at, and nothing read
 // here is refused: psd.py does not read these.
+// (PC4 F-d, psd-keep@1: and every global block, in `all`)
 void linked_blocks(std::string_view d, bool psb, std::uint64_t from, std::uint64_t end, std::vector<std::pair<std::uint64_t, std::uint64_t>>& out,
-                   std::vector<std::pair<std::uint64_t, std::uint64_t>>* patterns = nullptr) {
+                   std::vector<std::pair<std::uint64_t, std::uint64_t>>* patterns = nullptr, std::vector<File::Record::BlockAt>* all = nullptr) {
     end = std::min<std::uint64_t>(end, d.size());
     if (from > end || end - from < 4) return;
     std::uint64_t pos = from;
@@ -534,6 +539,8 @@ void linked_blocks(std::string_view d, bool psb, std::uint64_t from, std::uint64
             pos += 4;
         }
         if (length > end - pos) return;
+        if (all != nullptr && all->size() <= core::kPsdKeptMax)  // (one more than a page keeps at most)
+            all->push_back(File::Record::BlockAt{std::string(d.substr(static_cast<std::size_t>(pos - (big ? 16 : 12)), 4)), std::string(key), pos, length});
         if (key == "lnk2" || key == "lnk3" || key == "lnkD") out.emplace_back(pos, length);
         if (patterns != nullptr && (key == "Patt" || key == "Pat2" || key == "Pat3")) patterns->emplace_back(pos, length);  // (patterns@1, PC4 E3)
         pos += length;
@@ -592,6 +599,10 @@ File File::read(std::string data, const Limits& limits, bool lab) {
         const std::string_view resource_name = r.take(nlen + (1 - nlen % 2)).substr(0, nlen);  // (a Pascal name, padded to even)
         const std::uint32_t size = r.u32();
         const std::string_view block = r.take(std::uint64_t{size} + size % 2);
+        // (psd-keep@1, PC4 F-d: one more than a page keeps at most)
+        if (f.resources_.size() <= core::kPsdKeptMax) {
+            f.resources_.push_back(ResourceAt{rid, std::string(resource_name), static_cast<std::uint64_t>(block.data() - d.data()), std::min<std::uint64_t>(size, block.size())});
+        }
         // (vector@1, PC3 C-a: the saved paths, the work path, the clipping path — render/psd_paths reads them)
         if ((rid >= 2000 && rid <= 2997) || rid == 1025 || rid == 2999) {
             f.path_resources_.push_back(PathResource{rid, std::string(resource_name), std::string(block.substr(0, size))});
@@ -621,174 +632,213 @@ File File::read(std::string data, const Limits& limits, bool lab) {
         int id;
         std::uint64_t length;
     };
-    std::vector<std::vector<Entry>> entries;
+    // the layer info from the reader's position — its count, its records and its channels' data —: the records read and
+    // every channel decoded once, in the file's order, for what read_psd would raise (nothing kept). (PC4 F-d: the layer
+    // info section's, or a 16- or 32-bit file's global Lr16 or Lr32 block's)
+    // (psd-keep@1: the blocks whose places are kept, in all — some 70 MB —; a file of more keeps the rest unread)
+    constexpr std::size_t kStoredBlocksMax = std::size_t{1} << 20;
+    std::size_t stored_blocks = 0;
+    const auto read_info = [&](std::vector<Record>& records) {
+        std::vector<std::vector<Entry>> entries;
+        const int count = std::abs(r.i16());
+        for (int n = 0; n < count; ++n) {
+            Record rec;
+            rec.top = r.i32();
+            rec.left = r.i32();
+            rec.bottom = r.i32();
+            rec.right = r.i32();
+            std::vector<Entry> chans;
+            const unsigned nchans = r.u16();
+            for (unsigned k = 0; k < nchans; ++k) {
+                const int id = r.i16();
+                chans.push_back(Entry{id, r.length()});
+            }
+            const std::string_view sig = r.take(4);
+            if (sig != "8BIM" && sig != "8B64") psd_error("broken PSD layer record");
+            rec.blend = blend_of(r.take(4));
+            rec.opacity = static_cast<int>(r.u8());
+            rec.clip = r.u8() == 1;
+            rec.visible = (r.u8() & 2) == 0;
+            r.u8();
+            std::uint64_t extra_end = r.u32();
+            extra_end += r.pos;
+            const std::uint32_t mlen = r.u32();
+            if (mlen != 0) {
+                const std::uint64_t mend = r.pos + mlen;
+                rec.mask_top = r.i32();
+                rec.mask_left = r.i32();
+                rec.mask_bottom = r.i32();
+                rec.mask_right = r.i32();
+                rec.mask_default = static_cast<int>(r.u8());
+                const unsigned flags = r.u8();
+                rec.mask_disabled = (flags & 2) != 0;
+                rec.mask = true;
+                // (PC3 B2, masks@1: the mask parameters after the flags — its user density and feather — and its
+                // position relative to the layer, as PhotoCraft's io reads them; vector@1, PC3 C-a: its vector
+                // mask's density and feather after those, bits 2 and 3)
+                if ((flags & 16) != 0 && r.pos < mend) {
+                    const unsigned held = r.u8();
+                    rec.mask_parameters = true;
+                    rec.mask_unlinked = (flags & 1) != 0;
+                    const auto density = [&r, mend]() -> std::optional<int> {
+                        if (r.pos + 1 > mend) return std::nullopt;
+                        return static_cast<int>(r.u8());
+                    };
+                    const auto feather = [&r, mend]() -> std::optional<double> {
+                        if (r.pos + 8 > mend) return std::nullopt;
+                        const std::uint64_t bits = r.u64();
+                        double px = 0;
+                        std::memcpy(&px, &bits, sizeof px);
+                        return std::isfinite(px) && px >= 0 ? std::optional<double>(px) : std::nullopt;
+                    };
+                    if ((held & 1) != 0) rec.mask_density = density();
+                    if ((held & 2) != 0) rec.mask_feather = feather();
+                    if ((held & 4) != 0) rec.vector_density = density();
+                    if ((held & 8) != 0) rec.vector_feather = feather();
+                }
+                r.pos = mend;
+            }
+            const std::uint32_t ranges = r.u32();  // blending ranges
+            rec.ranges_at = r.pos;  // (psd-keep@1, PC4 F-d: where they are)
+            rec.ranges_size = ranges;
+            r.pos += ranges;
+            const unsigned nlen = r.u8();
+            rec.name = latin1(r.take(nlen));
+            r.pos += (4 - (nlen + 1) % 4) % 4;
+            while (r.pos + 12 <= extra_end) {
+                const std::string_view block_sig = r.take(4);
+                if (block_sig != "8BIM" && block_sig != "8B64") break;
+                const std::string_view tag = r.take(4);
+                const std::uint64_t size = r.psb() && long_key(tag) ? r.u64() : r.u32();
+                const std::string_view body = r.take(size);
+                // (psd-keep@1, PC4 F-d: every block where it is — one more than a layer keeps at most, so a file of
+                // countless small blocks takes no more memory —; its id and locks)
+                if (rec.blocks.size() <= core::kPsdKeptMax && stored_blocks < kStoredBlocksMax) {
+                    rec.blocks.push_back(Record::BlockAt{std::string(block_sig), std::string(tag), static_cast<std::uint64_t>(body.data() - d.data()), body.size()});
+                    ++stored_blocks;
+                } else {
+                    rec.blocks_cut = true;
+                }
+                if (tag == "lyid" && body.size() >= 4) rec.lyid = be32(body);
+                if (tag == "lspf" && body.size() >= 4) rec.lspf = be32(body);
+                if (tag == "luni" && body.size() >= 4) {
+                    const std::uint64_t units = be32(body);
+                    std::string name = utf16be(body.substr(4, static_cast<std::size_t>(std::min<std::uint64_t>(2 * units, body.size() - 4))));
+                    while (!name.empty() && name.back() == '\0') name.pop_back();
+                    rec.name = std::move(name);
+                } else if ((tag == "lsct" || tag == "lsdk") && body.size() >= 4) {
+                    rec.section = be32(body);
+                } else if (tag == "TySh") {
+                    rec.kind = "text";
+                    rec.tysh_at = static_cast<std::uint64_t>(body.data() - d.data());  // (PSD-01: read when asked)
+                    rec.tysh_size = body.size();
+                } else if (tag == "lfx2") {
+                    rec.lfx2_at = static_cast<std::uint64_t>(body.data() - d.data());
+                    rec.lfx2_size = body.size();
+                } else if (tag == "vmsk" || (tag == "vsms" && rec.vmsk_size == 0)) {  // (vector@1, PC3 C-a: its vector mask)
+                    rec.vmsk_at = static_cast<std::uint64_t>(body.data() - d.data());
+                    rec.vmsk_size = body.size();
+                } else if (tag == "CgEd") {  // (PC2a: read with its brit)
+                    rec.cged_at = static_cast<std::uint64_t>(body.data() - d.data());
+                    rec.cged_size = body.size();
+                } else if (tag == "SoLd" || tag == "SoLE" || tag == "PlLd") {  // (PC3 A3: a placed layer, read with its layer)
+                    const auto at = static_cast<std::uint64_t>(body.data() - d.data());
+                    (tag == "SoLd" ? rec.sold_at : tag == "SoLE" ? rec.sole_at : rec.plld_at) = at;
+                    (tag == "SoLd" ? rec.sold_size : tag == "SoLE" ? rec.sole_size : rec.plld_size) = body.size();
+                } else if (tag == "vscg" || tag == "vstk" || tag == "vogk") {  // (pen-shapes@1, PC3 C-b: a shape layer's)
+                    const auto at = static_cast<std::uint64_t>(body.data() - d.data());
+                    (tag == "vscg" ? rec.vscg_at : tag == "vstk" ? rec.vstk_at : rec.vogk_at) = at;
+                    (tag == "vscg" ? rec.vscg_size : tag == "vstk" ? rec.vstk_size : rec.vogk_size) = body.size();
+                } else if (adjust_tag(tag)) {
+                    rec.kind = "adjust";
+                    if (tag != "SoCo" && tag != "GdFl" && tag != "PtFl") {  // (PC2: an adjustment, not a fill layer)
+                        rec.adjust_key = std::string(tag);
+                        rec.adjust_at = static_cast<std::uint64_t>(body.data() - d.data());
+                        rec.adjust_size = body.size();
+                    } else {  // (a fill layer's, or a shape layer's fill: pen-shapes@1)
+                        rec.fill_key = std::string(tag);
+                        rec.fill_at = static_cast<std::uint64_t>(body.data() - d.data());
+                        rec.fill_size = body.size();
+                    }
+                }
+                if (size % 2 != 0 && r.pos < extra_end) {
+                    const std::string_view next = r.pos < d.size() ? d.substr(static_cast<std::size_t>(r.pos), 4) : std::string_view();
+                    if (next != "8BIM" && next != "8B64") r.pos += 1;
+                }
+            }
+            r.pos = extra_end;
+            // (pen-shapes@1, PC3 C-b: a fill with a vector mask is a shape layer — a pen layer's shape part, import_psd)
+            if (rec.vmsk_size > 0 && rec.adjust_key.empty() && (rec.fill_size > 0 || rec.vscg_size > 0) &&
+                (rec.kind == "adjust" || rec.kind == "pixels")) {
+                rec.kind = "shape";
+            }
+            records.push_back(std::move(rec));
+            entries.push_back(std::move(chans));
+        }
+        // every channel decoded once, in the file's order, for what read_psd would raise (nothing kept)
+        Budget budget(limits.max_decoded_bytes);
+        for (std::size_t n = 0; n < records.size(); ++n) {
+            Record& rec = records[n];
+            const std::int64_t w = rec.right - rec.left;
+            const std::int64_t h = rec.bottom - rec.top;
+            for (const Entry& entry : entries[n]) {
+                const std::uint64_t end = past(r.pos, entry.length);
+                if (entry.length < 2) {
+                    r.pos = end;
+                    continue;
+                }
+                ChannelRef ref;
+                ref.id = entry.id;
+                ref.start = r.pos;
+                ref.end = end;
+                if (entry.id == -2 && rec.mask) {
+                    ref.width = rec.mask_right - rec.mask_left;
+                    ref.height = rec.mask_bottom - rec.mask_top;
+                } else if (entry.id < -2) {
+                    r.pos = end;
+                    continue;
+                } else {
+                    ref.width = w;
+                    ref.height = h;
+                }
+                ref.length = read_channel(r, ref.width, ref.height, f.depth_, end, false, budget, limits).length;
+                const auto same = std::find_if(rec.data.begin(), rec.data.end(), [&](const ChannelRef& c) { return c.id == ref.id; });
+                if (same != rec.data.end()) {
+                    *same = ref;
+                } else {
+                    rec.data.push_back(ref);
+                }
+            }
+        }
+    };
     const std::uint64_t lm_len = r.length();
     const std::uint64_t lm_end = past(r.pos, lm_len);
     if (lm_len != 0) {
         const std::uint64_t li_len = r.length();
         const std::uint64_t li_end = past(r.pos, li_len);
-        if (li_len != 0) {
-            const int count = std::abs(r.i16());
-            for (int n = 0; n < count; ++n) {
-                Record rec;
-                rec.top = r.i32();
-                rec.left = r.i32();
-                rec.bottom = r.i32();
-                rec.right = r.i32();
-                std::vector<Entry> chans;
-                const unsigned nchans = r.u16();
-                for (unsigned k = 0; k < nchans; ++k) {
-                    const int id = r.i16();
-                    chans.push_back(Entry{id, r.length()});
+        if (li_len != 0) read_info(f.records_);
+        r.pos = li_end;
+        // (PC3 A3: the files of its placed layers; PC4 E3: its patterns; PC4 F-d: every global block)
+        linked_blocks(d, f.psb_, li_end, lm_end, f.linked_blocks_, &f.pattern_blocks_, &f.globals_);
+        // (PC4 F-d, not psd.py's: a 16- or 32-bit file whose section holds no layers keeps them in its global Lr16 or Lr32
+        // block, as Photoshop writes one. One this reader cannot read leaves the file as before: its merged picture. The
+        // merged picture's transparency stays as before — the section's having no layers says it, `flat_` —, and the
+        // Python reference's view reads no Lr16 or Lr32: psd.py does not)
+        f.flat_ = f.records_.empty();
+        if (f.records_.empty() && !python_view()) {
+            for (const Record::BlockAt& block : f.globals_) {
+                if (block.key != "Lr16" && block.key != "Lr32") continue;
+                std::vector<Record> records;
+                try {
+                    r.pos = block.at;
+                    read_info(records);
+                } catch (const ReadError&) {
+                    records.clear();
                 }
-                const std::string_view sig = r.take(4);
-                if (sig != "8BIM" && sig != "8B64") psd_error("broken PSD layer record");
-                rec.blend = blend_of(r.take(4));
-                rec.opacity = static_cast<int>(r.u8());
-                rec.clip = r.u8() == 1;
-                rec.visible = (r.u8() & 2) == 0;
-                r.u8();
-                std::uint64_t extra_end = r.u32();
-                extra_end += r.pos;
-                const std::uint32_t mlen = r.u32();
-                if (mlen != 0) {
-                    const std::uint64_t mend = r.pos + mlen;
-                    rec.mask_top = r.i32();
-                    rec.mask_left = r.i32();
-                    rec.mask_bottom = r.i32();
-                    rec.mask_right = r.i32();
-                    rec.mask_default = static_cast<int>(r.u8());
-                    const unsigned flags = r.u8();
-                    rec.mask_disabled = (flags & 2) != 0;
-                    rec.mask = true;
-                    // (PC3 B2, masks@1: the mask parameters after the flags — its user density and feather — and its
-                    // position relative to the layer, as PhotoCraft's io reads them; vector@1, PC3 C-a: its vector
-                    // mask's density and feather after those, bits 2 and 3)
-                    if ((flags & 16) != 0 && r.pos < mend) {
-                        const unsigned held = r.u8();
-                        rec.mask_parameters = true;
-                        rec.mask_unlinked = (flags & 1) != 0;
-                        const auto density = [&r, mend]() -> std::optional<int> {
-                            if (r.pos + 1 > mend) return std::nullopt;
-                            return static_cast<int>(r.u8());
-                        };
-                        const auto feather = [&r, mend]() -> std::optional<double> {
-                            if (r.pos + 8 > mend) return std::nullopt;
-                            const std::uint64_t bits = r.u64();
-                            double px = 0;
-                            std::memcpy(&px, &bits, sizeof px);
-                            return std::isfinite(px) && px >= 0 ? std::optional<double>(px) : std::nullopt;
-                        };
-                        if ((held & 1) != 0) rec.mask_density = density();
-                        if ((held & 2) != 0) rec.mask_feather = feather();
-                        if ((held & 4) != 0) rec.vector_density = density();
-                        if ((held & 8) != 0) rec.vector_feather = feather();
-                    }
-                    r.pos = mend;
-                }
-                const std::uint32_t ranges = r.u32();  // blending ranges
-                r.pos += ranges;
-                const unsigned nlen = r.u8();
-                rec.name = latin1(r.take(nlen));
-                r.pos += (4 - (nlen + 1) % 4) % 4;
-                while (r.pos + 12 <= extra_end) {
-                    const std::string_view block_sig = r.take(4);
-                    if (block_sig != "8BIM" && block_sig != "8B64") break;
-                    const std::string_view tag = r.take(4);
-                    const std::uint64_t size = r.psb() && long_key(tag) ? r.u64() : r.u32();
-                    const std::string_view body = r.take(size);
-                    if (tag == "luni" && body.size() >= 4) {
-                        const std::uint64_t units = be32(body);
-                        std::string name = utf16be(body.substr(4, static_cast<std::size_t>(std::min<std::uint64_t>(2 * units, body.size() - 4))));
-                        while (!name.empty() && name.back() == '\0') name.pop_back();
-                        rec.name = std::move(name);
-                    } else if ((tag == "lsct" || tag == "lsdk") && body.size() >= 4) {
-                        rec.section = be32(body);
-                    } else if (tag == "TySh") {
-                        rec.kind = "text";
-                        rec.tysh_at = static_cast<std::uint64_t>(body.data() - d.data());  // (PSD-01: read when asked)
-                        rec.tysh_size = body.size();
-                    } else if (tag == "lfx2") {
-                        rec.lfx2_at = static_cast<std::uint64_t>(body.data() - d.data());
-                        rec.lfx2_size = body.size();
-                    } else if (tag == "vmsk" || (tag == "vsms" && rec.vmsk_size == 0)) {  // (vector@1, PC3 C-a: its vector mask)
-                        rec.vmsk_at = static_cast<std::uint64_t>(body.data() - d.data());
-                        rec.vmsk_size = body.size();
-                    } else if (tag == "CgEd") {  // (PC2a: read with its brit)
-                        rec.cged_at = static_cast<std::uint64_t>(body.data() - d.data());
-                        rec.cged_size = body.size();
-                    } else if (tag == "SoLd" || tag == "SoLE" || tag == "PlLd") {  // (PC3 A3: a placed layer, read with its layer)
-                        const auto at = static_cast<std::uint64_t>(body.data() - d.data());
-                        (tag == "SoLd" ? rec.sold_at : tag == "SoLE" ? rec.sole_at : rec.plld_at) = at;
-                        (tag == "SoLd" ? rec.sold_size : tag == "SoLE" ? rec.sole_size : rec.plld_size) = body.size();
-                    } else if (tag == "vscg" || tag == "vstk" || tag == "vogk") {  // (pen-shapes@1, PC3 C-b: a shape layer's)
-                        const auto at = static_cast<std::uint64_t>(body.data() - d.data());
-                        (tag == "vscg" ? rec.vscg_at : tag == "vstk" ? rec.vstk_at : rec.vogk_at) = at;
-                        (tag == "vscg" ? rec.vscg_size : tag == "vstk" ? rec.vstk_size : rec.vogk_size) = body.size();
-                    } else if (adjust_tag(tag)) {
-                        rec.kind = "adjust";
-                        if (tag != "SoCo" && tag != "GdFl" && tag != "PtFl") {  // (PC2: an adjustment, not a fill layer)
-                            rec.adjust_key = std::string(tag);
-                            rec.adjust_at = static_cast<std::uint64_t>(body.data() - d.data());
-                            rec.adjust_size = body.size();
-                        } else {  // (a fill layer's, or a shape layer's fill: pen-shapes@1)
-                            rec.fill_key = std::string(tag);
-                            rec.fill_at = static_cast<std::uint64_t>(body.data() - d.data());
-                            rec.fill_size = body.size();
-                        }
-                    }
-                    if (size % 2 != 0 && r.pos < extra_end) {
-                        const std::string_view next = r.pos < d.size() ? d.substr(static_cast<std::size_t>(r.pos), 4) : std::string_view();
-                        if (next != "8BIM" && next != "8B64") r.pos += 1;
-                    }
-                }
-                r.pos = extra_end;
-                // (pen-shapes@1, PC3 C-b: a fill with a vector mask is a shape layer — a pen layer's shape part, import_psd)
-                if (rec.vmsk_size > 0 && rec.adjust_key.empty() && (rec.fill_size > 0 || rec.vscg_size > 0) &&
-                    (rec.kind == "adjust" || rec.kind == "pixels")) {
-                    rec.kind = "shape";
-                }
-                f.records_.push_back(std::move(rec));
-                entries.push_back(std::move(chans));
-            }
-            // every channel decoded once, in the file's order, for what read_psd would raise (nothing kept)
-            Budget budget(limits.max_decoded_bytes);
-            for (std::size_t n = 0; n < f.records_.size(); ++n) {
-                Record& rec = f.records_[n];
-                const std::int64_t w = rec.right - rec.left;
-                const std::int64_t h = rec.bottom - rec.top;
-                for (const Entry& entry : entries[n]) {
-                    const std::uint64_t end = past(r.pos, entry.length);
-                    if (entry.length < 2) {
-                        r.pos = end;
-                        continue;
-                    }
-                    ChannelRef ref;
-                    ref.id = entry.id;
-                    ref.start = r.pos;
-                    ref.end = end;
-                    if (entry.id == -2 && rec.mask) {
-                        ref.width = rec.mask_right - rec.mask_left;
-                        ref.height = rec.mask_bottom - rec.mask_top;
-                    } else if (entry.id < -2) {
-                        r.pos = end;
-                        continue;
-                    } else {
-                        ref.width = w;
-                        ref.height = h;
-                    }
-                    ref.length = read_channel(r, ref.width, ref.height, f.depth_, end, false, budget, limits).length;
-                    const auto same = std::find_if(rec.data.begin(), rec.data.end(), [&](const ChannelRef& c) { return c.id == ref.id; });
-                    if (same != rec.data.end()) {
-                        *same = ref;
-                    } else {
-                        rec.data.push_back(ref);
-                    }
-                }
+                f.records_ = std::move(records);
+                break;
             }
         }
-        r.pos = li_end;
-        linked_blocks(d, f.psb_, li_end, lm_end, f.linked_blocks_, &f.pattern_blocks_);  // (PC3 A3: the files of its placed layers; PC4 E3: its patterns)
     }
     r.pos = lm_end;
     f.merged_at_ = r.pos;
@@ -821,6 +871,7 @@ File File::read(std::string data, const Limits& limits, bool lab) {
             folder.blend = rec.blend;
             folder.folder = true;
             folder.kind = "folder";
+            folder.record = n;  // (PC4 F-d: its blocks)
             std::vector<std::size_t> kids;
             if (!pending.empty()) {
                 kids = std::move(pending.back());
@@ -1029,6 +1080,63 @@ std::string File::samples(const ChannelRef& channel) const {
     return read_channel(r, channel.width, channel.height, depth_, channel.end, true, budget, limits_).bytes;
 }
 
+std::string File::raw_samples(const ChannelRef& channel) const {
+    Reader r(data_, psb_);
+    r.pos = channel.start;
+    Budget budget(limits_.max_decoded_bytes);
+    std::string raw;
+    (void)read_channel(r, channel.width, channel.height, depth_, channel.end, true, budget, limits_, &raw);
+    return raw;
+}
+
+// --- psd-keep@1 (PC4 F-d) ---------------------------------------------------------------------------------------------
+
+namespace {
+
+// The bytes at a place of the file (none past its end).
+std::string_view at_place(std::string_view d, std::uint64_t at, std::uint64_t size) {
+    if (at > d.size() || size > d.size() - at) return {};
+    return d.substr(static_cast<std::size_t>(at), static_cast<std::size_t>(size));
+}
+
+}  // namespace
+
+std::vector<File::TaggedBlock> File::blocks(const Layer& layer) const {
+    std::vector<TaggedBlock> out;
+    if (layer.record >= records_.size()) return out;
+    for (const Record::BlockAt& block : records_[layer.record].blocks) out.push_back(TaggedBlock{block.signature, block.key, at_place(data_, block.at, block.size)});
+    return out;
+}
+
+bool File::blocks_cut(const Layer& layer) const { return layer.record < records_.size() && records_[layer.record].blocks_cut; }
+
+std::string_view File::ranges(const Layer& layer) const {
+    if (layer.record >= records_.size()) return {};
+    const Record& rec = records_[layer.record];
+    return at_place(data_, rec.ranges_at, rec.ranges_size);
+}
+
+std::optional<std::uint32_t> File::layer_id(const Layer& layer) const {
+    return layer.record < records_.size() ? records_[layer.record].lyid : std::nullopt;
+}
+
+std::optional<std::uint32_t> File::protection(const Layer& layer) const {
+    return layer.record < records_.size() ? records_[layer.record].lspf : std::nullopt;
+}
+
+std::vector<File::ImageResource> File::resources() const {
+    std::vector<ImageResource> out;
+    out.reserve(resources_.size());
+    for (const ResourceAt& r : resources_) out.push_back(ImageResource{r.id, r.name, at_place(data_, r.at, r.size)});
+    return out;
+}
+
+std::vector<File::TaggedBlock> File::global_blocks() const {
+    std::vector<TaggedBlock> out;
+    for (const Record::BlockAt& block : globals_) out.push_back(TaggedBlock{block.signature, block.key, at_place(data_, block.at, block.size)});
+    return out;
+}
+
 std::map<int, std::string> File::part_channels(const Record& record) const {
     std::map<int, std::string> channels;
     std::vector<int> used = bands_of(mode_);
@@ -1170,7 +1278,7 @@ std::optional<std::map<int, std::string>> File::merged_raw() const {
     std::map<int, std::string> channels;
     const int colour = colour_bands(mode_);
     for (int c = 0; c < colour; ++c) channels[c] = plane_samples(static_cast<std::size_t>(c));
-    if (static_cast<std::uint64_t>(nchan_) > static_cast<std::uint64_t>(colour) && records_.empty()) {
+    if (static_cast<std::uint64_t>(nchan_) > static_cast<std::uint64_t>(colour) && flat_) {  // (PC4 F-d: its section's)
         channels[-1] = plane_samples(static_cast<std::size_t>(colour));  // (a flat file's transparency)
     }
     return channels;
@@ -1260,6 +1368,78 @@ std::optional<File::Deep> File::merged_deep() const {
     return out;
 }
 
+float File::DeepPart::value(unsigned channel, std::size_t pixel) const {
+    static const std::string none;
+    const std::string& plane = channel < planes.size() ? planes[channel] : none;
+    const bool alpha = channel >= colours;
+    if (plane.empty()) {  // (none in the record: as psd._to_rgba fills a band — no ink, white, Lab's neutral, black —, opaque)
+        if (alpha) return 1.0f;
+        if (mode == 4) return 0.0f;
+        if (mode == 9) return channel == 0 ? 1.0f : 128.0f / 255.0f;
+        return mode == 3 ? 0.0f : 1.0f;
+    }
+    float v = 0.0f;
+    if (depth == 1) {
+        const std::size_t w = static_cast<std::size_t>(std::max<std::int64_t>(1, width));
+        const std::size_t row = (w + 7) / 8;
+        const std::size_t y = pixel / w, x = pixel % w;
+        const std::size_t at = y * row + x / 8;
+        v = at < plane.size() && ((byte_at(plane, at) >> (7 - x % 8)) & 1) != 0 ? 0.0f : 1.0f;
+    } else if (depth == 8) {
+        v = pixel < plane.size() ? byte_at(plane, pixel) / 255.0f : 0.0f;
+    } else if (depth == 16) {
+        v = 2 * pixel + 1 < plane.size() ? static_cast<float>((byte_at(plane, 2 * pixel) << 8) | byte_at(plane, 2 * pixel + 1)) / 65535.0f : 0.0f;
+    } else if (depth == 32 && 4 * pixel + 3 < plane.size()) {
+        const std::uint32_t bits = be32(std::string_view(plane).substr(4 * pixel, 4));
+        std::memcpy(&v, &bits, 4);
+        if (!std::isfinite(v)) v = 0.0f;
+    }
+    return mode == 4 && !alpha ? 1.0f - v : v;  // (a CMYK plate is stored as 1 for no ink)
+}
+
+std::optional<File::DeepPart> File::layer_deep(const Layer& layer) const {
+    if (layer.folder || layer.record >= records_.size()) return std::nullopt;
+    canvas_fits(width_, height_);
+    const Record& record = records_[layer.record];
+    DeepPart out;
+    out.left = record.left;
+    out.top = record.top;
+    out.width = record.right - record.left;
+    out.height = record.bottom - record.top;
+    out.colours = static_cast<unsigned>(colour_bands(mode_));
+    out.depth = depth_;
+    out.mode = mode_;
+    if (out.width <= 0 || out.height <= 0) return std::nullopt;
+    if (static_cast<std::uint64_t>(out.width) * static_cast<std::uint64_t>(out.height) > static_cast<std::uint64_t>(limits_.max_layer_pixels)) {
+        too_large("a layer is too large to read");
+    }
+    const std::uint64_t plane = row_bytes(out.width, depth_) * static_cast<std::uint64_t>(out.height);
+    for (unsigned c = 0; c <= out.colours; ++c) {
+        const ChannelRef* channel = record.channel(c < out.colours ? static_cast<int>(c) : -1);
+        std::string raw;
+        if (channel != nullptr && channel->width > 0 && channel->height > 0) raw = raw_samples(*channel);
+        if (!raw.empty() && raw.size() < plane) value_error("not enough image data");
+        out.planes.push_back(std::move(raw));
+    }
+    return out;
+}
+
+std::optional<File::DeepPart> File::merged_part() const {
+    auto raw = merged_raw();
+    if (!raw) return std::nullopt;
+    DeepPart out;
+    out.width = width_;
+    out.height = height_;
+    out.colours = static_cast<unsigned>(colour_bands(mode_));
+    out.depth = depth_;
+    out.mode = mode_;
+    for (unsigned c = 0; c <= out.colours; ++c) {
+        const auto found = raw->find(c < out.colours ? static_cast<int>(c) : -1);
+        out.planes.push_back(found != raw->end() ? std::move(found->second) : std::string());
+    }
+    return out;
+}
+
 Image File::composited() const {
     canvas_fits(width_, height_);
     Image out = Image::create("RGBA", Size{as_int(width_), as_int(height_)}, Ink{0, 0, 0, 0});
@@ -1310,7 +1490,7 @@ std::vector<File::ExtraChannel> File::extra_channels() const {
     const MergedPlan plan = plan_merged();
     if (!plan.exists || depth_ == 1) return {};
     const int colour = colour_bands(mode_);
-    const int first = colour + (records_.empty() ? 1 : 0);  // (a flat file's transparency is not one)
+    const int first = colour + (flat_ ? 1 : 0);  // (a flat file's transparency is not one; PC4 F-d: its section's)
     if (nchan_ <= first) return {};
     canvas_fits(width_, height_);
     const std::uint64_t rowbytes = row_bytes(width_, depth_);

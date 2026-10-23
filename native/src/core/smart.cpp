@@ -1167,6 +1167,19 @@ void bring_contents(Document& doc, const Document& from, Page& page) {
     };
     std::function<void(Page&)> bring = [&](Page& on) {
         bring_patterns(doc, from, on);  // (patterns@1, PC4 E3: the patterns its fills name, under ids of this book)
+        // (psd-keep@1, PC4 F-d: the PSD's blocks it and its layers keep that the book it comes from holds in memory)
+        const auto bring_native = [&](const std::string& ref) {
+            if (const auto bytes = from.native_files.find(ref); bytes != from.native_files.end()) doc.native_files.emplace(ref, bytes->second);
+        };
+        if (on.native_psd) {
+            for (const PsdResource& r : on.native_psd->resources) bring_native(r.ref);
+            for (const PsdGlobal& g : on.native_psd->globals) bring_native(g.ref);
+        }
+        for (const Layer& layer : on.layers) {
+            if (!layer.native_psd) continue;
+            for (const auto& [key, ref] : layer.native_psd->blocks) bring_native(ref);
+            bring_native(layer.native_psd->ranges);
+        }
         for (Layer& layer : on.layers) {
             if (!is_smart(layer)) continue;
             bring_filter_files(layer);

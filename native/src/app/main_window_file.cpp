@@ -62,10 +62,10 @@ bool is_book_folder(const fs::path& path) {
 
 // 別名で保存… and コピーを保存…'s kinds of files: a .genko, or the page as one of formats::write_copy's.
 QString save_filters() {
-    // (PC4 F-a: and every format the codecs write)
+    // (PC4 F-a: and every format the codecs write; PC4 F-d: and a PSB, Photoshop's ラージドキュメント形式)
     return QStringLiteral("Genko の原稿 (*.genko);;Photoshop (*.psd);;TIFF (*.tif *.tiff);;PNG (*.png);;JPEG (*.jpg *.jpeg);;WebP (*.webp);;"
                           "GIF (*.gif);;BMP (*.bmp);;TGA (*.tga);;ICO (*.ico);;Netpbm (*.pnm *.pbm *.pgm *.ppm *.pam *.pfm);;QOI (*.qoi);;"
-                          "OpenEXR (*.exr);;Radiance HDR (*.hdr);;AVIF (*.avif)");
+                          "OpenEXR (*.exr);;Radiance HDR (*.hdr);;AVIF (*.avif);;ラージドキュメント形式 (*.psb)");
 }
 
 // The extension of a path a picture is written to (lower case, no dot), "" for none (a .genko).
@@ -407,7 +407,7 @@ bool MainWindow::save_copy_to(const QString& chosen) {
         const auto quality = ask::get_int(this, QStringLiteral("JPEG のオプション"), QStringLiteral("画質（0〜12。12 が最高）"), 10, 0, 12);
         if (!quality) return false;
         options.quality = *quality;
-    } else if (extension == QLatin1String("psd")) {
+    } else if (extension == QLatin1String("psd") || extension == QLatin1String("psb")) {
         options.layers = ask::question(this, QStringLiteral("コピーを保存"), QStringLiteral("レイヤーを残して書きますか？（いいえ: 統合した 1 枚の画像）"));
     }
     try {

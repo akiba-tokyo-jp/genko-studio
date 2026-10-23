@@ -88,7 +88,7 @@ struct Layer {
     // parameters' bits 2 and 3, whether or not it has a mask of its own.
     std::optional<int> vector_density;
     std::optional<double> vector_feather;
-    std::size_t record = 0;  // (pixel layers) the layer record it was read from
+    std::size_t record = 0;  // (pixel layers; and since PC4 F-d every layer, a folder too) the layer record it was read from
     // (PC2, the user's decision 5) an adjustment layer a codec read (render/psd_adjust.hpp): the correction's adjust.
     // One no codec reads is left out (skipped), as psd.py leaves every one out.
     std::optional<core::Json> adjust;
@@ -134,6 +134,50 @@ public:
     std::optional<core::InkPixels> merged_inks(const core::PageColor& color, bool own_profile = true) const;
     // The ICC profile the file carries (image resource 1039), or "".
     const std::string& icc() const { return icc_; }
+
+    // psd-keep@1 (PC4 F-d, not psd.py's; core/psd_keep.hpp): a tagged block as the file holds it — its signature (8BIM,
+    // 8B64), its key and its payload (the bytes its length covers) —, an image resource (its id, its Pascal name as its
+    // bytes, its data).
+    struct TaggedBlock {
+        std::string signature;
+        std::string key;
+        std::string_view data;
+    };
+    struct ImageResource {
+        unsigned id = 0;
+        std::string name;
+        std::string_view data;
+    };
+    // A layer's (a folder's too) tagged blocks in the file's order; the bytes of its blending ranges (Blend If; "" for
+    // none); its layer id (lyid) and its locks (lspf), each when it has one.
+    std::vector<TaggedBlock> blocks(const Layer& layer) const;
+    bool blocks_cut(const Layer& layer) const;  // (more than a layer keeps — or than a file's layers do together — are not among them)
+    std::string_view ranges(const Layer& layer) const;
+    std::optional<std::uint32_t> layer_id(const Layer& layer) const;
+    std::optional<std::uint32_t> protection(const Layer& layer) const;
+    // The file's image resources and the global tagged blocks after its layers (its Lr16 or Lr32 among them: a 16- or 32-bit
+    // file's layer info, which this reader reads its layers from when the layer info section holds none), in its order.
+    // (each a view into the file's bytes made when asked: a File copied and the original gone leaves none dangling — keep
+    // the vector while its views are used)
+    std::vector<ImageResource> resources() const;
+    std::vector<TaggedBlock> global_blocks() const;
+
+    // PC4 F-d (the layers at their depth: a page in precise colour or of inks of the file's mode, the user's decision 3): a
+    // pixel layer's picture over its own box with every bit — its colour channels in the file's order and its transparency,
+    // each plane's samples as stored (big-endian, the file's depth) —; the merged picture so (a flat file's transparency
+    // its alpha). value() reads a sample as merged_deep does (0..1 for 1, 8 and 16 bits — a CMYK plate as ink, 0 none —,
+    // as stored for 32; a plane the record lacks: no ink, white, Lab's neutral, black; an opaque alpha). Nothing for a
+    // layer of no pixels; ReadError(too_large) for a canvas past what an op makes.
+    struct DeepPart {
+        std::int64_t left = 0, top = 0, width = 0, height = 0;
+        unsigned colours = 3;
+        int depth = 8;
+        int mode = 3;
+        std::vector<std::string> planes;  // (colours, then the alpha; "" where the record has none)
+        float value(unsigned channel, std::size_t pixel) const;
+    };
+    std::optional<DeepPart> layer_deep(const Layer& layer) const;
+    std::optional<DeepPart> merged_part() const;
 
     // PC3 A3 (smart-objects@1: a PSD or PSB as a smart object's file, and its placed layers). The header's depth (1, 8,
     // 16, 32), colour mode number and channels; whether it is a PSB.
@@ -250,6 +294,16 @@ public:
         // (pen-shapes@1, PC3 C-b: a shape layer's fill layer block — its key — and its vscg, vstk, vogk blocks)
         std::string fill_key;
         std::uint64_t fill_at = 0, fill_size = 0, vscg_at = 0, vscg_size = 0, vstk_at = 0, vstk_size = 0, vogk_at = 0, vogk_size = 0;
+        // (psd-keep@1, PC4 F-d) every tagged block — its signature, key and payload's place —, the blending ranges' place,
+        // its lyid and lspf
+        struct BlockAt {
+            std::string signature, key;
+            std::uint64_t at = 0, size = 0;
+        };
+        std::vector<BlockAt> blocks;
+        bool blocks_cut = false;  // (more than a layer keeps, or than a file's layers keep together: not all in `blocks`)
+        std::uint64_t ranges_at = 0, ranges_size = 0;
+        std::optional<std::uint32_t> lyid, lspf;
         const ChannelRef* channel(int id) const;
     };
 
@@ -272,9 +326,17 @@ private:
     std::vector<std::pair<std::uint64_t, std::uint64_t>> pattern_blocks_;  // (PC4 E3: the global Patt, Pat2, Pat3)
     std::optional<unsigned> quick_mask_;  // (1022: the Quick Mask's channel)
     std::vector<PathResource> path_resources_;  // (vector@1: 2000–2997, 1025, 2999)
+    struct ResourceAt {
+        unsigned id = 0;
+        std::string name;
+        std::uint64_t at = 0, size = 0;
+    };
+    std::vector<ResourceAt> resources_;         // (psd-keep@1: every one — one more than a page keeps at most —, by its place)
+    std::vector<Record::BlockAt> globals_;      // (psd-keep@1: the global tagged blocks)
     std::uint64_t merged_at_ = 0;
     Limits limits_{};
     std::vector<Record> records_;
+    bool flat_ = true;  // (PC4 F-d: its layer info section held no layers — a flat file's merged picture has its transparency)
     std::vector<Layer> layers_;
     std::vector<std::string> skipped_;
     std::vector<std::string> python_skipped_;
@@ -290,6 +352,7 @@ private:
     };
     MergedPlan plan_merged() const;
     std::string samples(const ChannelRef& channel) const;
+    std::string raw_samples(const ChannelRef& channel) const;  // (PC4 F-d: as stored, at the file's depth)
     Image part(const Record& record) const;
     std::map<int, std::string> part_channels(const Record& record) const;
     std::optional<std::map<int, std::string>> merged_channels() const;
