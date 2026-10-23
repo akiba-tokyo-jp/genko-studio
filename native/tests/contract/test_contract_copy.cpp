@@ -162,8 +162,9 @@ private slots:
         // most on each side)
         const std::uint32_t wide = formats::write_copy(doc, 0, dir / "layer2.png", twice).width;
         QVERIFY2(wide >= 80 && wide <= 82, qPrintable(QString::number(wide)));
-        // (its estimate from a proxy: the layer's own size, not its page's — the layer at 1 % gone, all of it scaled)
-        const formats::CopyEstimate guess = formats::estimate_copy(doc, 0, "png", layer, 16);
+        // (its estimate from a proxy: the layer's own size, not its page's — the layer at 1 % gone, all of it scaled; a
+        // proxy about half the page's size, its soft edge a pixel or so)
+        const formats::CopyEstimate guess = formats::estimate_copy(doc, 0, "png", layer, 64);
         QVERIFY(!guess.exact);
         QVERIFY2(guess.width >= 34 && guess.width <= 46 && guess.bytes > 0, qPrintable(QStringLiteral("%1 %2").arg(guess.width).arg(guess.bytes)));
         formats::CopyOptions sized = layer;
