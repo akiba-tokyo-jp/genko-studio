@@ -226,9 +226,14 @@ void BrushesPanel::refresh() {
     loading_ = true;
     const std::string current = window_->brush_panel() != nullptr ? window_->brush_panel()->kind() : std::string();
     const std::string chosen_now = chosen_key();
+    // (the brush in hand chosen — a built-in dab brush by its library key, whatever key the book took for it —, else
+    // the row chosen before)
+    std::string in_hand = current;
+    if (const presets::Preset* builtin = presets::builtin_dab_of(current)) in_hand = builtin->key;
     tree_->clear();
     pending_.clear();
     QTreeWidgetItem* chosen_item = nullptr;
+    QTreeWidgetItem* chosen_before = nullptr;
     const presets::Library lib = presets::load(config_dir());  // (the file only: no picture is read here)
     for (const presets::Group& g : lib.groups) {
         auto* group = new QTreeWidgetItem(tree_, {QString::fromStdString(g.name)});
@@ -255,7 +260,8 @@ void BrushesPanel::refresh() {
                 if (!made) pending_.push_back(Pending{p.key, tip.ref, tip.hardness, tip.roundness});
                 item->setToolTip(0, tip.ref.empty() ? QStringLiteral("円の先端") : QStringLiteral("サンプルの先端"));
             }
-            if (p.key == (chosen_now.empty() ? current : chosen_now)) chosen_item = item;
+            if (p.key == in_hand) chosen_item = item;
+            if (p.key == chosen_now) chosen_before = item;
         }
         group->setExpanded(true);
     }
@@ -263,6 +269,7 @@ void BrushesPanel::refresh() {
         auto* note = new QTreeWidgetItem(tree_, {QStringLiteral("（ブラシのライブラリのファイルを読めないので、入っているブラシだけを見せています）")});
         note->setFlags(Qt::ItemIsEnabled);
     }
+    if (chosen_item == nullptr) chosen_item = chosen_before;
     if (chosen_item != nullptr) tree_->setCurrentItem(chosen_item);
     loading_ = false;
     if (!pending_.empty()) picture_timer_.start();

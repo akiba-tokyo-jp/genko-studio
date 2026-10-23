@@ -1006,7 +1006,10 @@ Defined define_from(const core::Document& doc, const core::Page& page, const Jso
     if (w == 0 || h == 0) throw core::Error("value", "nothing there holds paint (all white or transparent)");
     const double dpi = static_cast<double>(w) / (page.spec.width_mm.value() / 25.4);
     std::vector<float> cover;
-    if (area != nullptr) cover = image_ops::coverage(page, *area, w, h, p.kind() == image_ops::Pixels::Kind::Eight);
+    // (an 8-bit grid at the working dpi takes the area as filter_raster does; a layer's picture of another size, stretched
+    // over the page, through the area's coverage of its own grid)
+    const bool eight = p.kind() == image_ops::Pixels::Kind::Eight && image_ops::grid_scale(page, w, h) == 1.0;
+    if (area != nullptr) cover = image_ops::coverage(page, *area, w, h, eight);
     // the box the area covers, then its paint (darkness × alpha × the area)
     std::uint32_t bx0 = w, by0 = h, bx1 = 0, by1 = 0;
     for (std::uint32_t y = 0; y < h; ++y) {

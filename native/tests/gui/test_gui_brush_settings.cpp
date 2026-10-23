@@ -265,6 +265,7 @@ private slots:
         delete mine;
         QVERIFY(render::brushes::library_tip(app::config_dir(), tip) != nullptr);
         QCOMPARE(s.window->brush_panel()->kind(), key);
+        QCOMPARE(panel->chosen_key(), key);  // (the panel shows the brush in hand)
         panel->rename(QStringLiteral("チョーク（自分）"));
         QVERIFY(own_named("チョーク（自分）") != nullptr);
         panel->tree()->setCurrentItem(item_named(panel->tree(), QStringLiteral("チョーク（自分）")));

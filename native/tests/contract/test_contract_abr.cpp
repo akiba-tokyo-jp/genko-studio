@@ -598,7 +598,7 @@ private slots:
         // the manager's list: every kind, by its groups
         std::tie(code, out) = cli_in(config, {QStringLiteral("presets"), QStringLiteral("list")});
         QCOMPARE(code, 0);
-        for (const char* kind : {"brushes", "gradients", "patterns", "shapes", "tool_presets"}) QVERIFY2(out["kinds"].contains(kind), kind);
+        for (const char* kind : {"brushes", "gradients", "patterns", "shapes", "tool_presets"}) QVERIFY2(out.contains(kind) && out[kind].contains("groups"), kind);
         std::tie(code, out) = cli_in(config, {QStringLiteral("presets"), QStringLiteral("edit"), QStringLiteral("tool_presets"),
                                               QStringLiteral("{\"action\": \"rename\", \"preset\": \"細ペン\", \"name\": \"極細ペン\"}")});
         QVERIFY2(code == 0, out.dump().c_str());
