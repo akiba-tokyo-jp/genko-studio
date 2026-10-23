@@ -3509,9 +3509,13 @@
         "alternate_menus": []
       },
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "未着手",
+      "implementation_status": "実装済み（PC4 F-e、未統合）",
       "acceptance_status": "未実施",
-      "evidence": [],
+      "evidence": [
+        "native/src/app/preferences.cpp",
+        "native/src/app/camera_raw_open.cpp",
+        "native/tests/gui/test_gui_camera_raw.cpp"
+      ],
       "pc0": {
         "date": "2026-10-16",
         "cpp_base": "962faa4",
@@ -3522,7 +3526,8 @@
         "tests": [],
         "gap": "Camera Raw の既定（色空間・ビット深度・解像度・シャープ・スマートオブジェクト・自動補正）の設定が無い",
         "note": "RAW の読み込み自体が Genko に無い（LibRaw: LGPL-2.1/CDDL-1.0 か自前の現像が要り XL）。設定だけなら S"
-      }
+      },
+      "remaining": "自動補正は露光量だけ（プレビューの幾何平均を中間の灰色に）。上流の自動のトーン（コントラスト・白・黒）とは違う"
     },
     {
       "id": "edit.preferences.scratchDisks",
@@ -41564,9 +41569,21 @@
       "label_ja": "RAW復号・現像",
       "kind": "cross_cutting",
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "未着手",
+      "implementation_status": "実装済み（PC4 F-e、未統合）",
       "acceptance_status": "未実施",
-      "evidence": [],
+      "evidence": [
+        "native/src/render/raw.cpp",
+        "native/src/core/raw_develop.cpp",
+        "native/src/render/ops_camera_raw.cpp",
+        "native/src/formats/open_file.cpp",
+        "native/src/render/smart.cpp",
+        "native/src/render/smart_decode.cpp",
+        "native/src/app/camera_raw_open.cpp",
+        "native/src/app/main_window_raw.cpp",
+        "native/tests/unit/test_raw.cpp",
+        "native/tests/contract/test_contract_raw.cpp",
+        "native/tests/gui/test_gui_camera_raw.cpp"
+      ],
       "pc0": {
         "date": "2026-10-16",
         "cpp_base": "962faa4",
@@ -41577,7 +41594,8 @@
         "tests": [],
         "gap": "カメラ RAW（DNG・CR2・NEF/ARW/PEF 等の TIFF/EP、ソニー cRAW、RW2、ORF）の復号と現像（デモザイク・ホワイトバランス・露光・ProPhoto 16 ビット・埋め込みプレビュー）がない",
         "note": "上流は自前実装（約 5 千行）。C++ に移すか、LibRaw（LGPL-2.1 / CDDL-1.0）を使うかの判断が要る。16 ビットの受け皿として document:color-depth-model が前提"
-      }
+      },
+      "remaining": "復号と現像は LibRaw 0.22.2（上流の自前の現像器ではない）なので、色・デモザイクの画素は上流・Adobe Camera Raw と同じにならない（試験は合成 RAW の値と許しで見る）。カスタムのホワイトバランスは 1 つの行列で（DNG の 2 つの較正の補間なし）。RAW の EXIF の塊は持たない（LibRaw が読めた撮影の項目だけ）。出力のシャープは 3 つの強さの固定。実機の RAW と Windows の DLL（vcpkg の三つ組の上書き）は確かめていない"
     },
     {
       "id": "render:GPU-CPU-parity",
