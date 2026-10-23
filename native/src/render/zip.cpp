@@ -601,7 +601,7 @@ std::uint32_t crc32_of(std::string_view data, std::uint32_t crc) {
 }
 
 void StoreWriter::add(std::string_view name, std::string_view data) {
-    add_known(name, data.size(), crc_of_view(data), [data](const std::function<void(std::string_view)>& emit) { emit(data); });
+    add_known(name, data.size(), crc_of_view(data), [data](const std::function<void(std::string_view)>& put) { put(data); });
 }
 
 void StoreWriter::add_known(std::string_view name, std::uint64_t size, std::uint32_t crc,

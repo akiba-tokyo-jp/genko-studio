@@ -41,6 +41,7 @@
 #include "render/page.hpp"
 #include "render/pcraft_manifest.hpp"
 #include "render/png.hpp"
+#include "render/shape_parts.hpp"
 #include "render/zip.hpp"
 #include "render/zstd.hpp"
 #include "storage/asset_store.hpp"
@@ -92,14 +93,14 @@ public:
         end_ += bytes.size();
         return at;
     }
-    void read(std::uint64_t at, std::uint64_t size, const std::function<void(std::string_view)>& emit) {
+    void read(std::uint64_t at, std::uint64_t size, const std::function<void(std::string_view)>& put) {
         std::string part(std::size_t(1) << 20, '\0');
         file_.seekg(static_cast<std::streamoff>(at));
         while (size > 0) {
             const auto n = static_cast<std::size_t>(std::min<std::uint64_t>(size, part.size()));
             file_.read(part.data(), static_cast<std::streamsize>(n));
             if (!file_) throw core::Error("io", "cannot read " + core::path_to_utf8(path_) + " (a temporary file of the .pcraft)");
-            emit(std::string_view(part.data(), n));
+            put(std::string_view(part.data(), n));
             size -= n;
         }
     }
@@ -154,7 +155,7 @@ public:
     // Each into the archive after what is there (the manifest and previews), from the spool.
     void write_into(render::zip::StoreWriter& zip) {
         for (const auto& [name, entry] : files_) {
-            zip.add_known(name, entry.size, entry.crc, [&](const std::function<void(std::string_view)>& emit) { spool_.read(entry.at, entry.size, emit); });
+            zip.add_known(name, entry.size, entry.crc, [&](const std::function<void(std::string_view)>& put) { spool_.read(entry.at, entry.size, put); });
         }
     }
 
@@ -859,9 +860,18 @@ std::optional<Json> layer_of(Ctx& ctx, const core::Layer& layer, const render::P
     const bool drawn = layer.kind != core::LayerKind::Raster || layer.stroke_count() > 0 || !layer.patches.empty() || (layer.shapes && !layer.shapes->items.empty()) ||
                        (layer.tone && !layer.tone->is_null()) || (layer.effect && !layer.effect->is_null()) || (layer.screen && !layer.screen->is_null());
     if (drawn) ctx.note("ペンの線・トーン・効果など Genko の描いたものを、画素のレイヤーにしました（「" + name + "」）");
-    if (shown != nullptr) return layer_json(ctx, name, &layer, raster_content(picture_surface(ctx, shown->image, shown->inks, shown->page_values)), nullptr);
-    const render::Image picture = render::layer_image(ctx.page, layer, ctx.dpi, &ctx.doc);
-    return layer_json(ctx, name, &layer, raster_content(picture_surface(ctx, picture, nullptr, layer.raster_png && core::holds_page_values(ctx.page, layer))), nullptr);
+    // (a pen layer's lines are not in page_layers' picture of it — the PSD's, its pixels alone —: the layer's own picture
+    // then, its lines with its pixels)
+    const bool lines = layer.stroke_count() > 0 || !layer.patches.empty();
+    if (shown != nullptr && !lines) return layer_json(ctx, name, &layer, raster_content(picture_surface(ctx, shown->image, shown->inks, shown->page_values)), nullptr);
+    // (its picture alone: its mask, vector mask and opacity are the layer's, written with it — not drawn into it too)
+    core::Layer alone = layer;
+    alone.visible = true;
+    alone.opacity = 1.0;
+    alone.mask.reset();
+    alone.vector_mask.reset();
+    const render::Image picture = render::layer_image(ctx.page, alone, ctx.dpi, &ctx.doc);
+    return layer_json(ctx, name, &layer, raster_content(picture_surface(ctx, picture, nullptr, !lines && layer.raster_png && core::holds_page_values(ctx.page, layer))), nullptr);
 }
 
 // A contents page as a .pcraft's bytes (written as a book of that page alone, at its own resolution).
@@ -1011,9 +1021,13 @@ Json document_json(Ctx& ctx) {
     const auto hidden_until = [&](std::size_t index) {
         for (; next < index && next < page.layers.size(); ++next) {
             const core::Layer& l = page.layers[next];
-            // (the layers page_layers does not give: the hidden ones, and a fill layer of a colour or a gradient, which it
-            // draws into the page's picture only)
-            const bool unseen = !l.visible || (l.kind == core::LayerKind::Fill && l.fill && core::pattern_of_fill(*l.fill) == nullptr);
+            // (the layers page_layers does not give: the hidden ones, a fill layer of a colour or a gradient, which it draws
+            // into the page's picture only, and a pen layer of lines and no pixels — the ink layer's too: its lines as they look,
+            // not as the PSD's ペン入れ, below)
+            const bool pen = l.kind == core::LayerKind::Strokes && l.role != core::LayerRole::Tone && (l.stroke_count() > 0 || !l.patches.empty()) &&
+                             !render::shape_parts::any(l) && !(l.raster_png && !l.raster_png->empty()) && !l.color_raster && !l.ink_raster;
+            // (and a smart object page_layers gives no picture of — its file not in the book —: written, and said)
+            const bool unseen = !l.visible || pen || l.kind == core::LayerKind::Smart || (l.kind == core::LayerKind::Fill && l.fill && core::pattern_of_fill(*l.fill) == nullptr);
             if (!unseen || l.kind == core::LayerKind::Folder || !l.exportable || l.role == core::LayerRole::Name || l.role == core::LayerRole::Draft) continue;
             if (auto made = layer_of(ctx, l, nullptr, patterns)) flat.push_back(Out{std::move(*made), folder_of(l)});
         }
@@ -1045,6 +1059,7 @@ Json document_json(Ctx& ctx) {
         const core::Layer* layer = shown.id.empty() ? nullptr : find_layer(page, shown.id);
         if (layer == nullptr) {
             if (!shown.image.getbbox() && !(groups.size() > 0 && shown.settings)) return;  // (nothing drawn)
+            if (shown.name == "ペン入れ") return;  // (the ink layer's lines as Python's PSD draws them: the layer is written itself)
             if (shown.name == "紙" && picture_page) return;  // (an opened picture's page: its own layers, no paper)
             if (groups.empty()) drawn = true;
             Json made = shown.shape != nullptr ? *layer_of(ctx, core::Layer{}, &shown, patterns)

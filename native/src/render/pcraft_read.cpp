@@ -1024,7 +1024,7 @@ core::Layer base_layer(Ctx& ctx, const Json& m, const std::string& name, const J
     if (const Json* mask = optional_field(m, "mask"); mask != nullptr && !group) layer.mask = mask_of(ctx, *mask, name, ctx.mask_frame);
     if (const Json* vm = optional_field(m, "vector_mask")) layer.vector_mask = vector_mask_from(*vm, ctx.mm);
     // (psd-keep@1: the PSD's blocks it carried that a PSD's reader keeps — PC4 F-d's rules: not those this build writes or
-    // reads into the layer —, and its PSD layer id when the page keeps what names layers by it)
+    // reads into the layer —, and its PSD layer id with them or when the page keeps what names layers by it)
     core::PsdLayerKeep keep;
     if (const Json* blocks = optional_field(m, "psd_blocks"); blocks != nullptr && blocks->is_array()) {
         for (const Json& b : *blocks) {
@@ -1045,7 +1045,8 @@ core::Layer base_layer(Ctx& ctx, const Json& m, const std::string& name, const J
             keep.blocks.emplace_back(*key, ref);
         }
     }
-    if (const Json* id = optional_field(m, "psd_id"); id != nullptr && ctx.names_layers) {
+    // (as PC4 F-d's reader: with what it keeps, or when the page keeps what names layers by their ids)
+    if (const Json* id = optional_field(m, "psd_id"); id != nullptr && (ctx.names_layers || !keep.blocks.empty())) {
         keep.id = whole(*id, "layer.psd_id");
         ctx.kept_ids.push_back(*keep.id);
     }

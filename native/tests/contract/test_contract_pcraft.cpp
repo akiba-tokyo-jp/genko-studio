@@ -245,6 +245,7 @@ void write_book(const core::Document& doc, const fs::path& dir) {
     storage::SaveRequest request;
     request.actor = "human:test";
     request.ops = Json::array();
+    request.base_revision = doc.revision;  // (a book read from its folder: saved over the revision it was read at)
     storage::Saver(lock).save(doc, request);
 }
 
@@ -297,6 +298,31 @@ void same_layers(const core::Document& a, const core::Document& b, const std::st
     for (const Json& r : pa.rulers) guides_a += r.value("kind", std::string()) == "guide";
     for (const Json& r : pb.rulers) guides_b += r.value("kind", std::string()) == "guide";
     QCOMPARE(guides_b, guides_a);
+}
+
+// (placedContentsAreSavedWhole, its errors said)
+void placed_whole(const fs::path& dir) {
+    write_book(small_book(), dir);
+    core::Document book = storage::load_document(dir).document;
+    for (const char* name : {"rich_rgb8.pcraft", "adjustments.pcraft"}) {
+        const std::string ref = storage::AssetStore(dir).put_bytes(fixture(name), ".pcraft");
+        book = run(book, Json::array({Json{{"op", "smart_place"}, {"page", 1}, {"asset", ref}, {"name", name}}}));
+    }
+    write_book(book, dir);
+    const storage::LoadResult again = storage::load_document(dir);
+    QVERIFY2(again.report.clean(), again.report.to_json().dump().c_str());
+    bool lut = false, lnsr = false;
+    for (const auto& [id, contents] : again.document.smart_contents) {
+        if (!contents->page) continue;
+        for (const core::Layer& l : contents->page->layers) {
+            if (l.adjust && l.adjust->value("kind", std::string()) == "color_lookup") lut = again.document.luts.contains(l.adjust->value("lut", std::string()));
+            if (l.native_psd) {
+                for (const auto& [key, ref] : l.native_psd->blocks) lnsr = lnsr || key == "lnsr";
+            }
+        }
+    }
+    QVERIFY(lut);
+    QVERIFY(lnsr);
 }
 
 }  // namespace
@@ -873,28 +899,11 @@ private slots:
     // PC4 F-f review P1-3: a .pcraft placed in a saved book (its contents a page), the book saved and read again whole — the
     // PSD's blocks and resources, the lookup tables, the filter masks its page names brought into the book —, never read-only.
     void placedContentsAreSavedWhole() {
-        const fs::path dir = at("placed-whole.genko");
-        write_book(small_book(), dir);
-        core::Document book = storage::load_document(dir).document;
-        for (const char* name : {"rich_rgb8.pcraft", "adjustments.pcraft"}) {
-            const std::string ref = storage::AssetStore(dir).put_bytes(fixture(name), ".pcraft");
-            book = run(book, Json::array({Json{{"op", "smart_place"}, {"page", 1}, {"asset", ref}, {"name", name}}}));
+        try {
+            placed_whole(at("placed-whole.genko"));
+        } catch (const std::exception& error) {
+            QFAIL(error.what());
         }
-        write_book(book, dir);
-        const storage::LoadResult again = storage::load_document(dir);
-        QVERIFY2(again.report.clean(), again.report.to_json().dump().c_str());
-        bool lut = false, lnsr = false;
-        for (const auto& [id, contents] : again.document.smart_contents) {
-            if (!contents->page) continue;
-            for (const core::Layer& l : contents->page->layers) {
-                if (l.adjust && (*l.adjust)["kind"] == Json("color_lookup")) lut = again.document.luts.contains((*l.adjust)["lut"].get<std::string>());
-                if (l.native_psd) {
-                    for (const auto& [key, ref] : l.native_psd->blocks) lnsr = lnsr || key == "lnsr";
-                }
-            }
-        }
-        QVERIFY(lut);
-        QVERIFY(lnsr);
     }
 
     // PC4 F-f review P2-2: names cut by characters, never inside one: long Japanese names of paths, channels and inks made
@@ -1115,7 +1124,8 @@ private slots:
             // a text's pixels are its picture, kept as they are; what Genko draws again — shapes, smart objects — not compared)
             const std::string file = fs::path(v["file"].get<std::string>()).filename().string();
             if (!file.starts_with("again_")) continue;
-            const Json& up = upstream_read(file.substr(6));
+            const std::string fixture_name = file.substr(6);
+            const Json& up = upstream_read(fixture_name);
             std::map<std::string, const Json*> theirs;
             std::vector<std::pair<const Json*, bool>> flat;
             flattened(up["layers"], true, flat);
