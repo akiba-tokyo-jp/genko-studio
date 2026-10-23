@@ -250,6 +250,7 @@ void PageCanvas::mousePressEvent(QMouseEvent* event) {
         return;
     }
     if (page() == nullptr || event->button() != Qt::LeftButton) return;
+    if (work_ && work_->press && work_->press(mm_of(pos), event->modifiers())) return;  // (PC4 D4: the work over the page first)
     if (guide_press(event->position())) return;  // (a guide line pulled from a scale: canvas_scale.cpp)
     const QPointF mm = mm_of(pos);
     if (transform_press(pos, mm, event->modifiers())) return;  // (自由変形 and the warps' box: canvas_transform.cpp)
@@ -314,6 +315,7 @@ void PageCanvas::mouseMoveEvent(QMouseEvent* event) {
     }
     if (guide_move(event->position())) return;
     const QPointF pos = unturned(event->position());
+    if (!panning_ && work_ && work_->move && (event->buttons() & Qt::LeftButton) && work_->move(mm_of(pos), event->modifiers())) return;  // (PC4 D4)
     if (zoom_drag_) {
         zoom_drag_->second = pos;
         update();
@@ -408,6 +410,8 @@ void PageCanvas::mouseReleaseEvent(QMouseEvent* event) {
         turning_.reset();
         return;
     }
+    if (!panning_ && event->button() == Qt::LeftButton && work_ && work_->release && work_->release(to_mm(event->position()), event->modifiers()))
+        return;  // (PC4 D4)
     if (guide_release(event->position())) return;
     if (!snap_lines_.empty()) {  // (PC3 C-d: what a drag snapped to shows while it lasts)
         snap_lines_.clear();
@@ -490,6 +494,10 @@ void PageCanvas::mouseReleaseEvent(QMouseEvent* event) {
 void PageCanvas::mouseDoubleClickEvent(QMouseEvent* event) {
     if (event->button() == Qt::MiddleButton) {
         fit_page();
+        return;
+    }
+    if (work_ && event->button() == Qt::LeftButton) {  // (PC4 D4: the second press of a double click is the work's press too)
+        mousePressEvent(event);
         return;
     }
     if (tool_ == QLatin1String("marquee") && !poly_points_.empty()) {
@@ -642,6 +650,7 @@ void PageCanvas::keyPressEvent(QKeyEvent* event) {
         update_cursor();
         return;
     }
+    if (work_ && work_->key && work_->key(event)) return;  // (PC4 D4: the work over the page — Enter, Esc, Delete)
     if (transform_key(event)) return;  // (Enter: the box's change made; Esc: let go)
     if ((event->key() == Qt::Key_Alt || event->key() == Qt::Key_Control || event->key() == Qt::Key_Shift) && !event->isAutoRepeat()) {
         hold_modifier(event->key() == Qt::Key_Alt ? QStringLiteral("alt") : event->key() == Qt::Key_Control ? QStringLiteral("ctrl")
@@ -741,6 +750,21 @@ void PageCanvas::tabletEvent(QTabletEvent* event) {
             request_tiles();
         }
         event->accept();
+        return;
+    }
+    // (PC4 D4: a work over the page — ぼかしギャラリー's pins — takes the pen as it takes the mouse, not the tool under it nor
+    // the eraser end's; Space still pans with it as with the mouse)
+    if (work_ && page() != nullptr && !space_) {
+        const QPointF mm = to_mm(event->position());
+        if (type == QEvent::TabletPress && event->button() == Qt::LeftButton) {
+            setFocus();
+            if (work_->press) work_->press(mm, event->modifiers());
+        } else if (type == QEvent::TabletMove && (event->buttons() & Qt::LeftButton)) {
+            if (work_->move) work_->move(mm, event->modifiers());
+        } else if (type == QEvent::TabletRelease && event->button() == Qt::LeftButton) {
+            if (work_->release) work_->release(mm, event->modifiers());
+        }
+        event->accept();  // (no mouse made of it: the work had it once)
         return;
     }
     const bool eraser_end = event->pointerType() == QPointingDevice::PointerType::Eraser;

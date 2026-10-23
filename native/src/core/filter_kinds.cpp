@@ -538,8 +538,6 @@ std::vector<FilterKind> stylize_kinds() {
     return out;
 }
 
-std::vector<FilterKind> render_kinds() { return {}; }        // (D4)
-std::vector<FilterKind> blur_gallery_kinds() { return {}; }  // (D4)
 // --- D5: Camera Raw フィルター ---------------------------------------------------------------------------------------------
 
 namespace {
@@ -621,6 +619,398 @@ std::vector<FilterKind> camera_raw_kinds() {
     out.push_back(std::move(made));
     return out;
 }
+
+// --- D4: 描画・ぼかしギャラリー ------------------------------------------------------------------------------------------
+
+namespace {
+
+// (D4) A number of an object of a list (lights, pins, paths): clamped to lo..hi, its fallback when not given; refused
+// when it is not a finite number.
+double list_number(const Json& object, const char* key, double fallback, double lo, double hi, const std::string& wrong) {
+    const Json* v = get(object, key);
+    if (v == nullptr || v->is_null()) return fallback;
+    if (!finite_number(*v)) throw OpError(wrong);
+    return std::clamp(v->get<double>(), lo, hi);
+}
+
+// (D4) The keys an object of a list may have; any other refused.
+void only_keys(const Json& object, std::initializer_list<std::string_view> keys, const std::string& wrong) {
+    if (!object.is_object()) throw OpError(wrong);
+    for (const auto& [key, value] : object.items()) {
+        if (std::find(keys.begin(), keys.end(), key) == keys.end()) throw OpError(wrong + " (no setting " + py_repr_str(key) + ")");
+    }
+}
+
+// 照明効果's lights (filters_ext.rs 191-216, params_ext.rs Light): at most kLightingMostLights, each its kind (spot,
+// point, infinite), its place x, y (shares of the base box) and height z (a share of its shorter side), a spot's target
+// (shares), an infinite light's angle and elevation (degrees), its colour [r, g, b] 0..255, intensity, a spot's cone and
+// hotspot, a point light's radius (a share of the shorter side). None given: upstream's one spot light; [] none (the
+// ambience alone). The texture: none, red, green, blue, alpha, luminance (of the layer) or {"channel": id} (an alpha
+// channel of the page: design 2.6, the C++ build's own).
+Json read_lighting(Json read) {
+    const std::string where = "adjust render_lighting_effects";
+    const std::string wrong = where + ".lights must be a list of at most " + std::to_string(kLightingMostLights) + " lights";
+    const std::string item = where + ".lights' each light is {\"kind\": spot, point or infinite, \"x\", \"y\", \"z\", \"target_x\", \"target_y\", "
+                                     "\"angle\", \"elevation\", \"color\": [r, g, b], \"intensity\", \"cone\", \"hotspot\", \"radius\"}";
+    Json out = Json::array();
+    const Json* given = get(read, "lights");
+    if (given == nullptr || given->is_null()) {
+        out.push_back(Json{{"kind", "spot"}, {"x", 0.25}, {"y", 0.2}, {"z", 0.6}, {"target_x", 0.5}, {"target_y", 0.55}, {"angle", 135}, {"elevation", 45},
+                           {"color", Json::array({255, 255, 255})}, {"intensity", 75}, {"cone", 45}, {"hotspot", 50}, {"radius", 0.8}});
+    } else {
+        if (!given->is_array() || given->size() > kLightingMostLights) throw OpError(wrong);
+        for (const Json& light : *given) {
+            only_keys(light, {"kind", "x", "y", "z", "target_x", "target_y", "angle", "elevation", "color", "intensity", "cone", "hotspot", "radius"}, item);
+            std::string kind = "spot";
+            if (const Json* k = get(light, "kind"); k != nullptr && !k->is_null()) {
+                if (!k->is_string() || (*k != "spot" && *k != "point" && *k != "infinite")) throw OpError(item);
+                kind = k->get<std::string>();
+            }
+            Json colour = Json::array({255, 255, 255});
+            if (const Json* c = get(light, "color"); c != nullptr && !c->is_null()) {
+                if (!c->is_array() || c->size() != 3) throw OpError(item);
+                colour = Json::array();
+                for (const Json& v : *c) {
+                    if (!finite_number(v)) throw OpError(item);
+                    colour.push_back(static_cast<int>(std::lround(std::clamp(v.get<double>(), 0.0, 255.0))));
+                }
+            }
+            out.push_back(Json{{"kind", kind},
+                               {"x", number_json(list_number(light, "x", 0.25, -10, 10, item))},
+                               {"y", number_json(list_number(light, "y", 0.2, -10, 10, item))},
+                               {"z", number_json(list_number(light, "z", 0.6, 0, 10, item))},
+                               {"target_x", number_json(list_number(light, "target_x", 0.5, -10, 10, item))},
+                               {"target_y", number_json(list_number(light, "target_y", 0.55, -10, 10, item))},
+                               {"angle", number_json(list_number(light, "angle", 135, -360, 360, item))},
+                               {"elevation", number_json(list_number(light, "elevation", 45, 0, 90, item))},
+                               {"color", std::move(colour)},
+                               {"intensity", number_json(list_number(light, "intensity", 75, -100, 100, item))},
+                               {"cone", number_json(list_number(light, "cone", 45, 1, 89, item))},
+                               {"hotspot", number_json(list_number(light, "hotspot", 50, 0, 100, item))},
+                               {"radius", number_json(list_number(light, "radius", 0.8, 0.01, 10, item))}});
+        }
+    }
+    read["lights"] = std::move(out);
+    const std::string texture_wrong =
+        where + ".texture must be none, red, green, blue, alpha, luminance or an alpha channel of the page ({\"channel\": its id or name})";
+    const Json* texture = get(read, "texture");
+    if (texture == nullptr || texture->is_null()) {
+        read["texture"] = "none";
+    } else if (texture->is_string()) {
+        static const std::array<std::string_view, 6> kTextures{"none", "red", "green", "blue", "alpha", "luminance"};
+        if (std::find(kTextures.begin(), kTextures.end(), texture->get_ref<const std::string&>()) == kTextures.end()) throw OpError(texture_wrong);
+    } else if (texture->is_object()) {
+        const Json* channel = get(*texture, "channel");
+        if (texture->size() != 1 || channel == nullptr || !channel->is_string() || channel->get_ref<const std::string&>().empty() ||
+            channel->get_ref<const std::string&>().size() > 255)
+            throw OpError(texture_wrong);
+    } else {
+        throw OpError(texture_wrong);
+    }
+    return read;
+}
+
+// ぼかしギャラリー's pins (params_ext.rs IrisPin, FieldPin, SpinPin; filters_ext.rs 297-336): at most
+// kBlurGalleryMostPins, each its place x, y (shares of the base box) and its own settings; none given: upstream's one pin.
+// An iris and a spin's ellipse: its radii shares of the base box's shorter side, its angle (degrees); an iris's
+// roundness (0 an ellipse, 100 a rounded square) and feather (the sharp core, a share of the ellipse); blur in pixels of
+// the working 200 dpi (field, iris), a spin's blur_angle in degrees.
+Json read_pins(Json read, std::string_view kind) {
+    const std::string where = "adjust " + std::string(kind);
+    const bool iris = kind == "blur_iris", spin = kind == "blur_spin";
+    const std::string wrong = where + ".pins must be a list of 1 to " + std::to_string(kBlurGalleryMostPins) + " pins";
+    const std::string item =
+        where + ".pins' each pin is {\"x\", \"y\"" +
+        (iris ? ", \"radius_x\", \"radius_y\", \"angle\", \"roundness\", \"feather\", \"blur\"}" : spin ? ", \"radius_x\", \"radius_y\", \"angle\", \"blur_angle\"}" : ", \"blur\"}");
+    const Json* given = get(read, "pins");
+    const Json defaults = Json::array({Json::object()});
+    const Json& pins = given == nullptr || given->is_null() ? defaults : *given;
+    if (!pins.is_array() || pins.empty() || pins.size() > kBlurGalleryMostPins) throw OpError(wrong);
+    Json out = Json::array();
+    for (const Json& pin : pins) {
+        if (iris) {
+            only_keys(pin, {"x", "y", "radius_x", "radius_y", "angle", "roundness", "feather", "blur"}, item);
+        } else if (spin) {
+            only_keys(pin, {"x", "y", "radius_x", "radius_y", "angle", "blur_angle"}, item);
+        } else {
+            only_keys(pin, {"x", "y", "blur"}, item);
+        }
+        Json made{{"x", number_json(list_number(pin, "x", 0.5, -10, 10, item))}, {"y", number_json(list_number(pin, "y", 0.5, -10, 10, item))}};
+        if (iris) {
+            made["radius_x"] = number_json(list_number(pin, "radius_x", 0.35, 0.001, 10, item));
+            made["radius_y"] = number_json(list_number(pin, "radius_y", 0.25, 0.001, 10, item));
+            made["angle"] = number_json(list_number(pin, "angle", 0, -360, 360, item));
+            made["roundness"] = number_json(list_number(pin, "roundness", 0, 0, 100, item));
+            made["feather"] = number_json(list_number(pin, "feather", 0.5, 0, 0.99, item));
+        } else if (spin) {
+            made["radius_x"] = number_json(list_number(pin, "radius_x", 0.3, 0.001, 10, item));
+            made["radius_y"] = number_json(list_number(pin, "radius_y", 0.3, 0.001, 10, item));
+            made["angle"] = number_json(list_number(pin, "angle", 0, -360, 360, item));
+            made["blur_angle"] = number_json(list_number(pin, "blur_angle", 15, 0, 360, item));
+        }
+        if (!spin) made["blur"] = number_json(list_number(pin, "blur", 15, 0, 500, item));
+        out.push_back(std::move(made));
+    }
+    read["pins"] = std::move(out);
+    return read;
+}
+
+// パスぼかし's paths (params_ext.rs BlurPath): at most kBlurPathMostPaths, each at least 2 points [x, y] on the page (mm:
+// they move with a smart object) and kBlurPathMostPoints points in all (each pixel looks at every segment), its speed (the
+// blur's length, pixels of the working 200 dpi, 0..500) and taper (0..100: how much the blur fades toward the path's end).
+// None given: upstream's one path across the middle of the base box (its kernel's); [] none.
+Json read_blur_paths(Json read) {
+    const std::string where = "adjust blur_path";
+    const std::string wrong = where + ".paths must be a list of at most " + std::to_string(kBlurPathMostPaths) + " paths, their points " +
+                              std::to_string(kBlurPathMostPoints) + " in all";
+    const std::string item = where + ".paths' each path is {\"points\": [[x, y], …] (2 or more places on the page, mm, within 100000), \"speed\", \"taper\"}";
+    const Json* given = get(read, "paths");
+    if (given == nullptr || given->is_null()) {
+        read.erase("paths");
+        return read;
+    }
+    if (!given->is_array() || given->size() > kBlurPathMostPaths) throw OpError(wrong);
+    std::size_t all = 0;  // (the points of every path together: counted before any is read)
+    for (const Json& path : *given) {
+        const Json* points = path.is_object() ? get(path, "points") : nullptr;
+        if (points != nullptr && points->is_array()) all += points->size();
+    }
+    if (all > kBlurPathMostPoints) throw OpError(wrong);
+    Json out = Json::array();
+    for (const Json& path : *given) {
+        only_keys(path, {"points", "speed", "taper"}, item);
+        const Json* points = get(path, "points");
+        if (points == nullptr || !points->is_array() || points->size() < 2) throw OpError(item);
+        Json kept = Json::array();
+        for (const Json& p : *points) {
+            if (!p.is_array() || p.size() != 2 || !finite_number(p[0]) || !finite_number(p[1])) throw OpError(item);
+            const double x = p[0].get<double>(), y = p[1].get<double>();
+            if (std::fabs(x) > 1e5 || std::fabs(y) > 1e5) throw OpError(item);  // (as a path's knots: vector@1's reach)
+            kept.push_back(Json::array({number_json(x), number_json(y)}));
+        }
+        out.push_back(Json{{"points", std::move(kept)},
+                           {"speed", number_json(list_number(path, "speed", 50, 0, 500, item))},
+                           {"taper", number_json(list_number(path, "taper", 0, 0, 100, item))}});
+    }
+    read["paths"] = std::move(out);
+    return read;
+}
+
+}  // namespace
+
+std::vector<FilterKind> render_kinds() {
+    // D4 (extra_cmds.rs 208-260, filters_ext.rs 174-229): 雲模様 1・2 and ファイバー between the main and sub colours (描画色・
+    // 背景色, recorded: a smart filter and 前回のフィルター draw the same), 逆光 about a centre of shares of the base box, 照明効果
+    // with its lights; all on the colours the inks mean on a page of inks. Their patterns are of the working 200 dpi (the
+    // same on the paper at every resolution: design 2.2).
+    std::vector<FilterKind> out;
+    {
+        FilterInfo clouds = info("render_clouds", "filter.render.clouds", "雲模様 1", "描画", FilterInks::Meaning);
+        clouds.colours = {"foreground", "background"};
+        out.push_back(kind(std::move(clouds), {seed(), rgb("foreground", {0, 0, 0}), rgb("background", {255, 255, 255})}));
+    }
+    {
+        FilterInfo clouds = info("render_difference_clouds", "filter.render.differenceClouds", "雲模様 2", "描画", FilterInks::Meaning);
+        clouds.colours = {"foreground", "background"};
+        out.push_back(kind(std::move(clouds), {seed(), rgb("foreground", {0, 0, 0}), rgb("background", {255, 255, 255})}));
+    }
+    {
+        FilterInfo fibers = info("render_fibers", "filter.render.fibers", "ファイバー", "描画", FilterInks::Meaning);
+        fibers.colours = {"foreground", "background"};
+        out.push_back(kind(std::move(fibers), {number("variance", 16, 1, 64), number("strength", 4, 1, 64), seed(), rgb("foreground", {0, 0, 0}),
+                                               rgb("background", {255, 255, 255})}));
+    }
+    {
+        FilterInfo flare = info("render_lens_flare", "filter.render.lensFlare", "逆光", "描画", FilterInks::Meaning);
+        flare.places = {{FilterPlace::Kind::Centre, "center_x", "center_y", {}}};
+        out.push_back(kind(std::move(flare), {number("brightness", 100, 10, 300), number("center_x", 0.5, -0.5, 1.5), number("center_y", 0.5, -0.5, 1.5),
+                                              choice("lens", {"zoom", "prime35", "prime105", "movie_prime"})}));
+    }
+    {
+        FilterInfo lighting = info("render_lighting_effects", "filter.render.lightingEffects", "照明効果", "描画", FilterInks::Meaning);
+        lighting.places = {{FilterPlace::Kind::Centre, "x", "y", "lights"}, {FilterPlace::Kind::Centre, "target_x", "target_y", "lights"}};
+        FilterKind made = kind(std::move(lighting), {custom("lights", true), number("gloss", 0, -100, 100), number("metallic", 0, -100, 100),
+                                                     number("exposure", 0, -100, 100), number("ambience", 8, -100, 100), custom("texture", true),
+                                                     number("height", 50, 0, 100), boolean("white_is_high", true)});
+        made.kind.hooks.normalize = [](Json read, const Page*, LookupTables*) { return read_lighting(std::move(read)); };
+        out.push_back(std::move(made));
+    }
+    return out;
+}
+
+std::vector<FilterKind> blur_gallery_kinds() {
+    // D4 (filters_ext.rs 297-336, algo/src/gallery.rs): ぼかしギャラリー's five, each a blur that changes over the base box —
+    // its pins' places shares of it (they move with a smart object), its blurs pixels of the working 200 dpi; each plate of a
+    // page of inks blurred as it is.
+    std::vector<FilterKind> out;
+    {
+        FilterInfo field = info("blur_field", "filter.blurGallery.fieldBlur", "フィールドぼかし", "ぼかしギャラリー");
+        field.places = {{FilterPlace::Kind::Centre, "x", "y", "pins"}};
+        FilterKind made = kind(std::move(field), {custom("pins", true)});
+        made.kind.hooks.normalize = [](Json read, const Page*, LookupTables*) { return read_pins(std::move(read), "blur_field"); };
+        out.push_back(std::move(made));
+    }
+    {
+        FilterInfo iris = info("blur_iris", "filter.blurGallery.irisBlur", "虹彩絞りぼかし", "ぼかしギャラリー");
+        iris.places = {{FilterPlace::Kind::Centre, "x", "y", "pins"}};
+        FilterKind made = kind(std::move(iris), {custom("pins", true)});
+        made.kind.hooks.normalize = [](Json read, const Page*, LookupTables*) { return read_pins(std::move(read), "blur_iris"); };
+        out.push_back(std::move(made));
+    }
+    {
+        FilterInfo tilt = info("blur_tilt_shift", "filter.blurGallery.tiltShift", "チルトシフト", "ぼかしギャラリー");
+        tilt.places = {{FilterPlace::Kind::Centre, "center_x", "center_y", {}}};
+        out.push_back(kind(std::move(tilt), {number("blur", 15, 0, 500), number("center_x", 0.5, -10, 10), number("center_y", 0.5, -10, 10),
+                                             number("angle", 0, -360, 360), number("focus", 0.1, 0, 2), number("transition", 0.15, 0.001, 2)}));
+    }
+    {
+        FilterInfo path = info("blur_path", "filter.blurGallery.pathBlur", "パスぼかし", "ぼかしギャラリー");
+        path.places = {{FilterPlace::Kind::Points, "points", {}, "paths"}};
+        FilterKind made = kind(std::move(path), {custom("paths", true)});
+        made.kind.hooks.normalize = [](Json read, const Page*, LookupTables*) { return read_blur_paths(std::move(read)); };
+        out.push_back(std::move(made));
+    }
+    {
+        FilterInfo spin = info("blur_spin", "filter.blurGallery.spinBlur", "スピンぼかし", "ぼかしギャラリー");
+        spin.places = {{FilterPlace::Kind::Centre, "x", "y", "pins"}};
+        FilterKind made = kind(std::move(spin), {custom("pins", true)});
+        made.kind.hooks.normalize = [](Json read, const Page*, LookupTables*) { return read_pins(std::move(read), "blur_spin"); };
+        out.push_back(std::move(made));
+    }
+    return out;
+}
+
+// --- D4: render_picture's kinds (炎・額縁・木) ---------------------------------------------------------------------------
+
+const std::vector<std::string_view>& tree_type_names() {
+    static const std::vector<std::string_view> all{
+        "oak",         "maple",       "pine",         "palm",         "birch",       "weeping_willow", "cherry_blossom", "bamboo",  "cypress",
+        "baobab",      "ginkgo",      "spruce",       "bare_winter_tree", "apple",   "acacia",         "poplar",         "elm",     "magnolia",
+        "banana",      "bonsai",      "jacaranda",    "autumn_maple", "golden_autumn", "olive",        "fir",            "cedar",   "lemon",
+        "wisteria",    "young_sapling", "dead_tree",  "coconut_palm", "shrub",       "plum_blossom",   "cloud_pine"};
+    return all;
+}
+
+const std::vector<std::string_view>& frame_style_names() {
+    static const std::vector<std::string_view> all{"vine_with_flowers", "vine_with_leaves", "ivy",   "roses",        "daisies", "berries",
+                                                   "bamboo",            "waves",            "zigzag", "dots",        "rope",    "scallops",
+                                                   "double_line",       "snowflakes",       "stars",  "hearts"};
+    return all;
+}
+
+const std::vector<PictureKind>& picture_kinds() {
+    static const std::vector<PictureKind> all = [] {
+        std::vector<PictureKind> out;
+        // 炎… (render2.rs FlameSpec): along the page's path ("path": a saved path's name or "work"; none: the work path, else
+        // the first saved one, else upstream's arc across the lower part of the frame)
+        out.push_back(PictureKind{"flame", "filter.render.flame", "炎",
+                                  {choice("flame_type", {"one_flame_along_path", "multiple_flames_along_path", "multiple_flames_path_directions",
+                                                         "multiple_flames_various_length", "candle_light", "multiple_flames_one_direction"}),
+                                   number("length", 150, 1, 1000), boolean("randomize_length", false), number("width", 40, 1, 1000),
+                                   number("angle", 0, -180, 180), number("interval", 60, 1, 1000), boolean("adjust_interval_for_loops", true),
+                                   custom("use_custom_color", true), rgb("color", {255, 140, 26}), number("turbulent", 25, 0, 100), number("jag", 25, 0, 100),
+                                   number("opacity", 75, 0, 100), number("flame_lines", 20, 1, 100), number("flame_bottom_alignment", 20, 0, 100),
+                                   choice("flame_style", {"normal", "violent", "flat"}), choice("flame_shape", {"parallel", "to_center", "spread", "oval", "pointed"}),
+                                   boolean("randomize_shapes", false), seed(), custom("quality", true), custom("path", true)}});
+        // 額縁… (render2.rs FrameSpec): inside the frame (the selection's box, else the trim)
+        out.push_back(PictureKind{"picture_frame", "filter.render.pictureFrame", "額縁",
+                                  {custom("frame", true), number("margin", 4, 0, 30), number("size", 50, 1, 100), number("arrangement", 50, 1, 100),
+                                   whole("lines", 1, 1, 5), number("thickness", 30, 1, 100), number("fade", 0, 0, 100), rgb("vine_color", {64, 102, 38}),
+                                   rgb("flower_color", {230, 77, 115}), rgb("leaf_color", {77, 153, 51}), seed()}});
+        // 木… (render2.rs TreeSpec): its base at x, y and its height size (shares of the frame)
+        out.push_back(PictureKind{"tree", "filter.render.tree", "木",
+                                  {custom("base_tree_type", true), whole("light_direction", 3, 1, 5), number("leaves_amount", 50, 0, 100),
+                                   number("leaves_size", 100, 0, 200), number("branches_height", 100, 50, 300), number("branches_thickness", 100, 50, 200),
+                                   custom("default_leaves", true), rgb("leaves_color", {61, 133, 41}), custom("custom_branch_color", true),
+                                   rgb("branches_color", {92, 64, 41}), boolean("flat_shading", false), seed(), number("x", 0.5, 0, 1), number("y", 0.95, 0, 1),
+                                   number("size", 0.8, 0.05, 2)}});
+        return out;
+    }();
+    return all;
+}
+
+const PictureKind* picture_kind(std::string_view kind) {
+    for (const PictureKind& each : picture_kinds())
+        if (each.kind == kind) return &each;
+    return nullptr;
+}
+
+namespace {
+
+// A name as render_cmds.rs index_param compares it: lower case, without spaces, hyphens and underscores.
+std::string bare_name(std::string_view name) {
+    std::string out;
+    for (const char ch : name) {
+        if (ch == ' ' || ch == '-' || ch == '_') continue;
+        out.push_back(static_cast<char>(ch >= 'A' && ch <= 'Z' ? ch - 'A' + 'a' : ch));
+    }
+    return out;
+}
+
+// A type or design given by its number (1..count) or name, as its number; its fallback when not given.
+int numbered(const Json* given, const std::vector<std::string_view>& names, int fallback, const std::string& wrong) {
+    if (given == nullptr || given->is_null()) return fallback;
+    if (given->is_string()) {
+        const std::string bare = bare_name(given->get_ref<const std::string&>());
+        for (std::size_t i = 0; i < names.size(); ++i)
+            if (bare_name(names[i]) == bare) return static_cast<int>(i) + 1;
+        throw OpError(wrong);
+    }
+    if (!finite_number(*given)) throw OpError(wrong);
+    return static_cast<int>(std::clamp(std::llround(given->get<double>()), 1LL, static_cast<long long>(names.size())));
+}
+
+bool given_flag(const Json& settings, const char* key, bool fallback, const std::string& where) {
+    const Json* v = get(settings, key);
+    if (v == nullptr || v->is_null()) return fallback;
+    if (!v->is_boolean()) throw OpError(where + "." + key + " must be true or false");
+    return v->get<bool>();
+}
+
+}  // namespace
+
+Json normalize_picture(std::string_view kind, const Json& settings) {
+    const PictureKind* found = picture_kind(kind);
+    if (found == nullptr) throw OpError("render_picture's kind must be flame, picture_frame or tree");
+    const std::string where = "render_picture " + std::string(kind);
+    Json read = read_params(found->params, settings, ReadMode::Op, where);
+    if (kind == "flame") {
+        // (a colour given is the custom colour unless said otherwise: render_cmds.rs run_flame)
+        read["use_custom_color"] = given_flag(settings, "use_custom_color", get(settings, "color") != nullptr && !(*get(settings, "color")).is_null(), where);
+        static const std::array<std::string_view, 5> kQualities{"draft", "low", "medium", "high", "fine"};
+        const std::string wrong = where + ".quality must be draft, low, medium, high or fine (or 0 to 4)";
+        std::string quality = "medium";
+        if (const Json* q = get(settings, "quality"); q != nullptr && !q->is_null()) {
+            if (q->is_string()) {
+                if (std::find(kQualities.begin(), kQualities.end(), q->get_ref<const std::string&>()) == kQualities.end()) throw OpError(wrong);
+                quality = q->get<std::string>();
+            } else if (finite_number(*q)) {
+                quality = std::string(kQualities[static_cast<std::size_t>(std::clamp(std::llround(q->get<double>()), 0LL, 4LL))]);
+            } else {
+                throw OpError(wrong);
+            }
+        }
+        read["quality"] = quality;
+        if (const Json* path = get(settings, "path"); path != nullptr && !path->is_null()) {
+            if (!path->is_string() || path->get_ref<const std::string&>().empty() || path->get_ref<const std::string&>().size() > 1024)
+                throw OpError(where + ".path must be the name of a path of the page, or \"work\" (the work path)");
+            read["path"] = *path;
+        } else {
+            read.erase("path");
+        }
+    } else if (kind == "picture_frame") {
+        read["frame"] = numbered(get(settings, "frame"), frame_style_names(), 1, where + ".frame must be a design 1 to 16 or its name (vine_with_flowers …)");
+    } else {
+        read["base_tree_type"] =
+            numbered(get(settings, "base_tree_type"), tree_type_names(), 1, where + ".base_tree_type must be a type 1 to 34 or its name (oak …)");
+        // (a colour given is used unless said otherwise: render_cmds.rs run_tree)
+        read["default_leaves"] = given_flag(settings, "default_leaves", get(settings, "leaves_color") == nullptr || get(settings, "leaves_color")->is_null(), where);
+        read["custom_branch_color"] =
+            given_flag(settings, "custom_branch_color", get(settings, "branches_color") != nullptr && !get(settings, "branches_color")->is_null(), where);
+    }
+    return read;
+}
+
 // --- D6: レンズ補正・広角補正 ----------------------------------------------------------------------------------------------
 
 namespace {
@@ -874,11 +1264,26 @@ Json filter_catalogue() {
                                {"params", preset.params},
                                {"usable", pc4_filter(preset.kind)}});
     }
+    // (D4: render_picture's kinds — 炎・額縁・木 —, their settings, the trees' types and the frames' designs)
+    Json pictures = Json::array();
+    for (const PictureKind& each : picture_kinds()) {
+        Json settings = Json::array();
+        for (const AdjustParam& p : each.params) settings.push_back(param_json(p));
+        Json item{{"kind", std::string(each.kind)}, {"upstream", std::string(each.upstream)}, {"name", std::string(each.name)}, {"settings", std::move(settings)}};
+        const std::vector<std::string_view>* names = each.kind == "tree" ? &tree_type_names() : each.kind == "picture_frame" ? &frame_style_names() : nullptr;
+        if (names != nullptr) {
+            Json list = Json::array();
+            for (const std::string_view name : *names) list.push_back(std::string(name));
+            item[each.kind == "tree" ? "tree_types" : "frames"] = std::move(list);
+        }
+        pictures.push_back(std::move(item));
+    }
     // (the lengths: the working 200 dpi's pixels; places: the page's mm or shares of the base box; colours 0..255)
     return Json{{"units", Json{{"length", "px200"}, {"place", "mm"}, {"centre", "share"}, {"colour", "rgb255"}}},
                 {"kinds", std::move(kinds)},
                 {"presets", std::move(presets)},
-                {"gallery", gallery_catalogue()}};  // (D3: the 47 effects of フィルターギャラリー, core/gallery_kinds.cpp)
+                {"gallery", gallery_catalogue()},  // (D3: the 47 effects of フィルターギャラリー, core/gallery_kinds.cpp)
+                {"pictures", std::move(pictures)}};
 }
 
 }  // namespace genko::core

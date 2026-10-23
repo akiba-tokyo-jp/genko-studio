@@ -59,6 +59,10 @@ struct FilterWindowCall {
     // (D5) The seed the command gives a kind with one — a new one each time it is applied (D1's review: 前回のフィルター too)
     // —, which `send` puts in the op when the settings have none: a window's preview of the grain uses it (none: no seed).
     std::optional<std::uint32_t> seed;
+    // (D4) the result shown on the page as the settings would leave it (none: as it is) — the op as `send` would make it,
+    // a heavy one worked on a thread at the screen's resolution — and whether one is being worked out now
+    std::function<void(const std::optional<core::Json>& params)> preview;
+    std::function<bool()> previewing;
 };
 using FilterWindow = std::function<void(const FilterWindowCall&)>;
 // By the item's kind (D3–D6 add theirs).

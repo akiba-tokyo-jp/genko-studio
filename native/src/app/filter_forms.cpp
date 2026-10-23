@@ -5,12 +5,18 @@
 #include <QCheckBox>
 #include <QDialog>
 #include <QDialogButtonBox>
+#include <QDoubleSpinBox>
 #include <QFormLayout>
 #include <QLabel>
+#include <QMouseEvent>
+#include <QPainter>
 #include <QPushButton>
+#include <QRadialGradient>
+#include <QRandomGenerator>
 #include <QTimer>
 
 #include <algorithm>
+#include <memory>
 
 #include "app/ask.hpp"
 #include "core/adjust_kinds.hpp"
@@ -197,8 +203,130 @@ std::vector<FilterForm> blur_forms() {
     }
     return out;
 }
-std::vector<FilterForm> render_forms() { return {}; }        // (D4)
-std::vector<FilterForm> blur_gallery_forms() { return {}; }  // (D4)
+namespace {
+
+// (D4) 逆光's centre: a box of the base box's shape (the page's, the selection's) where a click puts it — the result shows on
+// the page while the window is open.
+class CentrePad : public QWidget {
+public:
+    CentrePad(double aspect, QWidget* parent) : QWidget(parent), aspect_(aspect) {
+        setObjectName(QStringLiteral("flare_centre"));
+        setMinimumSize(180, static_cast<int>(std::clamp(180.0 / std::max(aspect, 0.1), 80.0, 240.0)));
+    }
+    std::function<void(double, double)> moved;
+    void set(double x, double y) {
+        x_ = x;
+        y_ = y;
+        update();
+    }
+
+protected:
+    QRectF box() const {
+        const double w = width() - 8.0, h = height() - 8.0;
+        const double bw = std::min(w, h * aspect_), bh = bw / aspect_;
+        return QRectF((width() - bw) / 2.0, (height() - bh) / 2.0, bw, bh);
+    }
+    void paintEvent(QPaintEvent*) override {
+        QPainter p(this);
+        p.setRenderHint(QPainter::Antialiasing, true);
+        const QRectF b = box();
+        p.fillRect(b, QColor(40, 40, 40));
+        const QPointF c(b.left() + x_ * b.width(), b.top() + y_ * b.height());
+        QRadialGradient glow(c, b.width() / 4.0);
+        glow.setColorAt(0.0, QColor(255, 250, 220));
+        glow.setColorAt(1.0, QColor(255, 250, 220, 0));
+        p.setBrush(glow);
+        p.setPen(Qt::NoPen);
+        p.drawEllipse(c, b.width() / 4.0, b.width() / 4.0);
+        p.setPen(QPen(QColor(255, 255, 255), 1.5));
+        p.drawLine(c - QPointF(8, 0), c + QPointF(8, 0));
+        p.drawLine(c - QPointF(0, 8), c + QPointF(0, 8));
+    }
+    void mousePressEvent(QMouseEvent* event) override { put(event->position()); }
+    void mouseMoveEvent(QMouseEvent* event) override {
+        if (event->buttons() & Qt::LeftButton) put(event->position());
+    }
+
+private:
+    void put(QPointF at) {
+        const QRectF b = box();
+        set(std::clamp((at.x() - b.left()) / b.width(), -0.5, 1.5), std::clamp((at.y() - b.top()) / b.height(), -0.5, 1.5));
+        if (moved) moved(x_, y_);
+    }
+    double aspect_ = 1.0, x_ = 0.5, y_ = 0.5;
+};
+
+}  // namespace
+
+std::vector<FilterForm> render_forms() {
+    std::vector<FilterForm> out;
+    {  // ファイバー… (Photoshop: 変化 1–64, 強さ 1–64, ランダマイズ; between 描画色 and 背景色)
+        FilterForm f;
+        f.kind = "render_fibers";
+        f.labels = {{"variance", QStringLiteral("変化")}, {"strength", QStringLiteral("強さ")}, {"foreground", QStringLiteral("描画色")},
+                    {"background", QStringLiteral("背景色")}};
+        f.decimals = {{"variance", 0}, {"strength", 0}};
+        f.more = [](adjust_forms::Form& form, const adjust_forms::FormContext&) {
+            auto* random = new QPushButton(QStringLiteral("ランダマイズ"));
+            auto seed = std::make_shared<std::uint32_t>(QRandomGenerator::global()->generate());
+            form.custom(
+                "seed", QString(), random, [seed] { return Json(*seed); },
+                [seed](const Json& v) {
+                    if (v.is_number_unsigned() || v.is_number_integer()) *seed = static_cast<std::uint32_t>(v.get<std::int64_t>());
+                },
+                Json(*seed));
+            QObject::connect(random, &QPushButton::clicked, &form, [seed, &form] {
+                *seed = QRandomGenerator::global()->generate();
+                emit form.changed();
+            });
+        };
+        f.note = QStringLiteral("模様は 200 dpi の画素で決まります（解像度が違っても、紙の上で同じ大きさです）。");
+        out.push_back(std::move(f));
+    }
+    {  // 逆光… (Photoshop: 明るさ 10–300 %, 逆光の中心, レンズの種類)
+        FilterForm f;
+        f.kind = "render_lens_flare";
+        f.labels = {{"brightness", QStringLiteral("明るさ（%）")}, {"lens", QStringLiteral("レンズの種類")}};
+        f.choices = {{"lens",
+                      {{QStringLiteral("50-300mm ズーム"), Json("zoom")}, {QStringLiteral("35mm プライム"), Json("prime35")},
+                       {QStringLiteral("105mm プライム"), Json("prime105")}, {QStringLiteral("ムービープライム"), Json("movie_prime")}}}};
+        f.decimals = {{"brightness", 0}};
+        f.more = [](adjust_forms::Form& form, const adjust_forms::FormContext& context) {
+            const double aspect = context.base_aspect                                                     ? *context.base_aspect
+                                  : context.page != nullptr && context.page->spec.height_mm.value() > 0 ? context.page->spec.width_mm.value() / context.page->spec.height_mm.value()
+                                                                                                         : 1.0;
+            auto* pad = new CentrePad(aspect, nullptr);
+            auto* x = new QDoubleSpinBox;
+            auto* y = new QDoubleSpinBox;
+            for (QDoubleSpinBox* box : {x, y}) {
+                box->setRange(-0.5, 1.5);
+                box->setDecimals(2);
+                box->setSingleStep(0.05);
+            }
+            x->setObjectName(QStringLiteral("field_center_x"));
+            y->setObjectName(QStringLiteral("field_center_y"));
+            pad->moved = [x, y](double cx, double cy) {
+                x->setValue(cx);
+                y->setValue(cy);
+            };
+            const auto follow = [pad, x, y, &form] {
+                pad->set(x->value(), y->value());
+                emit form.changed();
+            };
+            QObject::connect(x, &QDoubleSpinBox::valueChanged, pad, follow);
+            QObject::connect(y, &QDoubleSpinBox::valueChanged, pad, follow);
+            form.custom("center_x", QStringLiteral("逆光の中心（横）"), x, [x] { return Json(x->value()); },
+                        [x](const Json& v) { x->setValue(v.is_number() ? v.get<double>() : 0.5); }, Json(0.5));
+            form.custom("center_y", QStringLiteral("逆光の中心（縦）"), y, [y] { return Json(y->value()); },
+                        [y](const Json& v) { y->setValue(v.is_number() ? v.get<double>() : 0.5); }, Json(0.5));
+            form.layout_form()->addRow(QString(), pad);
+        };
+        f.note = QStringLiteral("中心は、選択範囲（無ければレイヤー）の幅と高さに対する割合です。枠をクリックして決めます。");
+        out.push_back(std::move(f));
+    }
+    return out;
+}
+std::vector<FilterForm> blur_gallery_forms() { return {}; }  // (D4: their work over the canvas, app/blur_gallery_tool.cpp)
 
 const std::vector<FilterForm>& filter_forms() {
     static const std::vector<FilterForm> all = [] {

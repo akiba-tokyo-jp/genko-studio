@@ -9,9 +9,11 @@
 // each time ノイズを加える… is applied, ぼかし（レンズ）… on a smart object without the layer mask as its depth. D2: its commands lit
 // — 変形・ピクセレート・表現手法 — in Photoshop's words, 渦巻き…'s window, ぶれ without one, シアー…'s curve, 置き換え…'s map (a layer
 // of the page; on a smart object made the book's file). D6: its commands lit — レンズ補正…・広角補正…・消点… — and their own
-// windows (the result on their pictures, 角度補正ツール, a constraint drawn, a plane made and a layer pasted on it). D5: Camera
-// Raw フィルター… lit — its window's tabs, its result on its picture, 補正前, 初期化, one op and one Undo, a smart filter; its panel's
-// settings untouched as they came, the point curve's 19 points, a new seed each time, F-e's hooks.
+// windows (the result on their pictures, 角度補正ツール, a constraint drawn, a plane made and a layer pasted on it). D4: its
+// commands lit — 描画・ぼかしギャラリー —, 雲模様 1・2 without a window, ファイバー…・逆光… from their tables, 照明効果…'s window,
+// 炎…・額縁…・木…'s windows (render_picture on a thread), ぼかしギャラリー's work over the canvas (and from the layer panel).
+// D5: Camera Raw フィルター… lit — its window's tabs, its result on its picture, 補正前, 初期化, one op and one Undo, a smart
+// filter; its panel's settings untouched as they came, the point curve's 19 points, a new seed each time, F-e's hooks.
 
 #include <QtTest>
 #include <QAction>
@@ -42,8 +44,10 @@
 #include "app/colours.hpp"
 #include "app/history_panel.hpp"
 #include "app/layer_dialogs.hpp"
+#include "app/inject.hpp"
 #include "app/layer_panel.hpp"
 #include "app/config.hpp"
+#include "app/blur_gallery_tool.hpp"
 #include "app/filter_gallery_window.hpp"
 #include "app/lens_window.hpp"
 #include "app/main_window.hpp"
@@ -253,9 +257,14 @@ private slots:
                                // (D6: レンズ補正・広角補正・消点)
                                "act_filter_lens_correction", "act_filter_adaptive_wide_angle", "act_filter_vanishing_point",
                                // (D5: Camera Raw フィルター)
-                               "act_filter_camera_raw"})
+                               "act_filter_camera_raw",
+                               // (D4: 描画・ぼかしギャラリー)
+                               "act_filter_render_flame", "act_filter_render_picture_frame", "act_filter_render_tree", "act_filter_render_fibers",
+                               "act_filter_render_clouds", "act_filter_render_difference_clouds", "act_filter_render_lighting_effects",
+                               "act_filter_render_lens_flare", "act_filter_blur_field", "act_filter_blur_iris", "act_filter_blur_tilt_shift",
+                               "act_filter_blur_path", "act_filter_blur_spin"})
             QVERIFY2(book.act(on)->isEnabled(), on);
-        for (const char* off : {"act_filter_render_fibers", "act_filter_render_tree", "act_filter_blur_tilt_shift", "act_filter_last"})
+        for (const char* off : {"act_filter_last"})
             QVERIFY2(!book.act(off)->isEnabled(), off);
         // 履歴's words of the new ops
         QCOMPARE(app::history::describe(Json::array({Json{{"op", "render_picture"}}})), QStringLiteral("描画した"));
@@ -1278,6 +1287,366 @@ private slots:
         QCOMPARE(points, std::size_t(19));
         QVERIFY2(said.contains(QStringLiteral("19")), qPrintable(said));
         QVERIFY(paint.layer("pic")->raster_png != before);
+
+    // D4's 描画: 雲模様 1・2 without a window (the main and sub colours, a new seed each time: the op's pixels, one Undo);
+    // ファイバー… from its table (ランダマイズ a new seed); 逆光… (its centre, レンズの種類); 照明効果…'s window (a point light
+    // added and dragged on its picture, the result on it, the page's alpha channel offered as its texture); 木…・額縁… — the 34
+    // types' and 16 designs' small pictures made on a thread, one chosen, 新しいレイヤーに描く —, 炎… along the page's work path:
+    // render_picture on a thread, the op's pixels; on a smart object 炎・額縁・木 grey, 照明効果 a smart filter without the
+    // page's channels offered.
+    void theRenderCommands() {
+        core::Document doc = core::CommandBus(render::ops_registry())
+                                 .apply(book_doc(), Json::array({Json{{"op", "add_channel"}, {"page", 1}, {"fill", "area"}, {"area", Json{{"rect", Json::array({0, 0, 20, 40})}}}}}),
+                                        core::Actor("human:tester"))
+                                 .doc;
+        core::vector::Subpath across;
+        across.closed = false;
+        across.knots = {core::vector::Knot::corner(8, 34), core::vector::Knot::corner(32, 30)};
+        core::vector::Path work;
+        work.subpaths = {across};
+        doc.edit_page(0).work_path = work;
+        Book book(doc);
+        gui_test::Answers answers;
+        book.window->set_target_layer("pic");
+        const core::Document start = *book.session->snapshot();
+        const core::Bytes before = book.layer("pic")->raster_png;
+        const auto last_op = [&] { return book.session->history().done.back().ops.at(0); };
+        const auto op_doc = [&](const Json& op) { return core::CommandBus(render::ops_registry()).apply(start, Json::array({op}), core::Actor("human:tester")).doc; };
+        const auto undo = [&] { book.window->action(QStringLiteral("act_undo"))->trigger(); };
+        // 雲模様 1・雲模様 2: no window, the colours of now, a new seed each time
+        int windows = 0;
+        answers.responder->exec = [&](QDialog*) {
+            ++windows;
+            return int(QDialog::Rejected);
+        };
+        const auto& pen = book.window->pen().rgb;
+        const Json main_colour = Json::array({static_cast<int>(pen[0]), static_cast<int>(pen[1]), static_cast<int>(pen[2])});
+        const std::array<int, 3> sub = book.window->colours()->sub_rgb();
+        const Json sub_colour = Json::array({sub[0], sub[1], sub[2]});
+        std::vector<Json> seeds;
+        for (const std::string name : {"act_filter_render_clouds", "act_filter_render_difference_clouds", "act_filter_render_clouds"}) {
+            book.act(name.c_str())->trigger();
+            QCOMPARE(windows, 0);
+            const Json sent = last_op();
+            QCOMPARE(sent["kind"], Json(name == "act_filter_render_clouds" ? "render_clouds" : "render_difference_clouds"));
+            QCOMPARE(sent["foreground"], main_colour);
+            QCOMPARE(sent["background"], sub_colour);
+            QVERIFY(sent["seed"].is_number());
+            seeds.push_back(sent["seed"]);
+            QVERIFY(book.layer("pic")->raster_png != before);
+            QCOMPARE(*book.layer("pic")->raster_png, *op_doc(sent).page(0).layers.back().raster_png);
+            undo();
+            QCOMPARE(book.layer("pic")->raster_png, before);
+        }
+        QVERIFY(seeds[0] != seeds[2]);
+        // ファイバー…: its table's window (変化), ランダマイズ a new seed
+        Json fibers_seed;
+        answers.responder->exec = answer(QStringLiteral("render_fibers"), [&](QDialog* d) {
+            QCOMPARE(d->windowTitle(), QStringLiteral("ファイバー"));
+            d->findChild<QDoubleSpinBox*>(QStringLiteral("field_variance"))->setValue(30);
+            auto* form = d->findChild<app::adjust_forms::Form*>();
+            const Json first = form->values()["seed"];
+            d->findChild<QPushButton*>(QStringLiteral("field_seed"))->click();  // (ランダマイズ)
+            fibers_seed = form->values()["seed"];
+            QVERIFY(fibers_seed.is_number() && fibers_seed != first);
+        });
+        book.act("act_filter_render_fibers")->trigger();
+        Json sent = last_op();
+        QCOMPARE(sent["kind"], Json("render_fibers"));
+        QCOMPARE(sent["variance"], Json(30));
+        QCOMPARE(sent["seed"], fibers_seed);
+        QCOMPARE(*book.layer("pic")->raster_png, *op_doc(sent).page(0).layers.back().raster_png);
+        undo();
+        // 逆光…: its centre (the box to click and its fields), レンズの種類
+        answers.responder->exec = answer(QStringLiteral("render_lens_flare"), [&](QDialog* d) {
+            QVERIFY(d->findChild<QWidget*>(QStringLiteral("flare_centre")) != nullptr);
+            d->findChild<QDoubleSpinBox*>(QStringLiteral("field_center_x"))->setValue(0.25);
+            auto* lens = d->findChild<QComboBox*>(QStringLiteral("field_lens"));
+            QVERIFY(lens != nullptr);
+            lens->setCurrentIndex(lens->findText(QStringLiteral("105mm プライム")));
+        });
+        book.act("act_filter_render_lens_flare")->trigger();
+        sent = last_op();
+        QCOMPARE(sent["center_x"], Json(0.25));
+        QCOMPARE(sent["lens"], Json("prime105"));
+        QCOMPARE(*book.layer("pic")->raster_png, *op_doc(sent).page(0).layers.back().raster_png);
+        undo();
+        // 照明効果…: upstream's spot light, a point light added (強度) and dragged, the page's alpha channel as the texture
+        QStringList textures;
+        answers.responder->exec = answer(QStringLiteral("render_lighting_effects"), [&](QDialog* d) {
+            QCOMPARE(d->windowTitle(), QStringLiteral("照明効果"));
+            auto* lights = d->findChild<QListWidget*>(QStringLiteral("lighting_lights"));
+            QCOMPARE(lights->count(), 1);
+            d->findChild<QPushButton*>(QStringLiteral("lighting_add_point"))->click();
+            QCOMPARE(lights->count(), 2);
+            QCOMPARE(lights->item(1)->text(), QStringLiteral("点光源"));
+            d->findChild<QDoubleSpinBox*>(QStringLiteral("lighting_intensity"))->setValue(40);
+            auto* texture = d->findChild<QComboBox*>(QStringLiteral("lighting_texture"));
+            for (int i = 0; i < texture->count(); ++i) textures << texture->itemText(i);
+            texture->setCurrentIndex(texture->count() - 1);
+            auto* view = dynamic_cast<app::lens_window::PictureView*>(d->findChild<QWidget*>(QStringLiteral("lighting_view")));
+            QVERIFY(view != nullptr);
+            view->press({20, 16}, Qt::NoModifier, Qt::LeftButton);  // (the point light, at 0.5, 0.4 of the page)
+            view->drag({15, 16}, Qt::NoModifier);
+            view->drag({10, 16}, Qt::NoModifier);
+            view->release({10, 16}, Qt::NoModifier);
+            QVERIFY(gui_test::wait_for([&] { return d->property("previews").toInt() > 0; }, 30000));
+        });
+        book.act("act_filter_render_lighting_effects")->trigger();
+        QCOMPARE(textures.size(), 7);
+        QCOMPARE(textures.back(), QString::fromStdString(book.page().channels.at(0).name));
+        sent = last_op();
+        QCOMPARE(sent["lights"].size(), std::size_t(2));
+        QCOMPARE(sent["lights"][1]["kind"], Json("point"));
+        QCOMPARE(sent["lights"][1]["intensity"], Json(40));
+        QVERIFY2(std::fabs(sent["lights"][1]["x"].get<double>() - 0.25) < 0.02, sent.dump().c_str());
+        QCOMPARE(sent["texture"], (Json{{"channel", book.page().channels.at(0).id}}));
+        QVERIFY(book.layer("pic")->raster_png != before);
+        QCOMPARE(*book.layer("pic")->raster_png, *op_doc(sent).page(0).layers.back().raster_png);
+        undo();
+        // 木…: the 34 types with their small pictures (made on a thread), マツ, 新しいレイヤーに描く — render_picture on a thread
+        answers.responder->exec = answer(QStringLiteral("tree"), [&](QDialog* d) {
+            QCOMPARE(d->windowTitle(), QStringLiteral("木"));
+            auto* types = d->findChild<QListWidget*>(QStringLiteral("render_tree_types"));
+            QVERIFY(types != nullptr);
+            QCOMPARE(types->count(), 34);
+            QCOMPARE(types->item(2)->text(), QStringLiteral("マツ"));
+            QVERIFY(gui_test::wait_for([&] { return d->property("pictures").toInt() == 34; }, 60000));
+            QVERIFY(!types->item(2)->icon().isNull());
+            types->setCurrentRow(2);
+            d->findChild<QCheckBox*>(QStringLiteral("render_new_layer"))->setChecked(true);
+        });
+        const std::size_t layers = book.page().layers.size();
+        book.act("act_filter_render_tree")->trigger();
+        sent = last_op();
+        QCOMPARE(sent["op"], Json("render_picture"));
+        QCOMPARE(sent["kind"], Json("tree"));
+        QCOMPARE(sent["base_tree_type"], Json(3));
+        QCOMPARE(sent["new_layer"], Json(true));
+        QVERIFY(sent["seed"].is_number());
+        QCOMPARE(book.page().layers.size(), layers + 1);
+        QCOMPARE(book.page().layers.back().title, std::string("木"));
+        QCOMPARE(book.layer("pic")->raster_png, before);
+        QCOMPARE(*book.page().layers.back().raster_png, *op_doc(sent).page(0).layers.back().raster_png);
+        undo();
+        QCOMPARE(book.page().layers.size(), layers);
+        // 額縁…: the 16 designs, バラ, on the layer itself
+        answers.responder->exec = answer(QStringLiteral("picture_frame"), [&](QDialog* d) {
+            QCOMPARE(d->windowTitle(), QStringLiteral("額縁"));
+            auto* designs = d->findChild<QListWidget*>(QStringLiteral("render_frames"));
+            QCOMPARE(designs->count(), 16);
+            QCOMPARE(designs->item(3)->text(), QStringLiteral("バラ"));
+            designs->setCurrentRow(3);
+        });
+        book.act("act_filter_render_picture_frame")->trigger();
+        sent = last_op();
+        QCOMPARE(sent["frame"], Json(4));
+        QVERIFY(!sent.contains("new_layer"));
+        QCOMPARE(book.page().layers.size(), layers);
+        QVERIFY(book.layer("pic")->raster_png != before);
+        QCOMPARE(*book.layer("pic")->raster_png, *op_doc(sent).page(0).layers.back().raster_png);
+        undo();
+        // 炎…: along the page's work path (offered first)
+        answers.responder->exec = answer(QStringLiteral("flame"), [&](QDialog* d) {
+            QCOMPARE(d->windowTitle(), QStringLiteral("炎"));
+            auto* path = d->findChild<QComboBox*>(QStringLiteral("field_path"));
+            QVERIFY(path != nullptr);
+            QCOMPARE(path->currentText(), QStringLiteral("作業用パス"));
+            d->findChild<QDoubleSpinBox*>(QStringLiteral("field_length"))->setValue(40);
+            d->findChild<QDoubleSpinBox*>(QStringLiteral("field_width"))->setValue(12);
+        });
+        book.act("act_filter_render_flame")->trigger();
+        sent = last_op();
+        QCOMPARE(sent["kind"], Json("flame"));
+        QCOMPARE(sent["path"], Json("work"));
+        QCOMPARE(sent["length"], Json(40));
+        QVERIFY(book.layer("pic")->raster_png != before);
+        QCOMPARE(*book.layer("pic")->raster_png, *op_doc(sent).page(0).layers.back().raster_png);
+        undo();
+        // a pen layer's lines: asked about after the window, only when the shapes go on that layer (review P3-7)
+        QVERIFY(book.window->apply_ops(Json::array({Json{{"op", "add_layer"}, {"page", 1}, {"kind", "pen"}, {"id", "pen"}},
+                                                    Json{{"op", "add_stroke"}, {"page", 1}, {"layer_id", "pen"}, {"points", Json::array({Json::array({8, 20}), Json::array({30, 20})})},
+                                                         {"width_mm", 1}, {"rgb", Json::array({0, 0, 0})}}})));
+        book.window->set_target_layer("pen");
+        answers.asked.clear();
+        bool new_layer = true;
+        answers.responder->exec = answer(QStringLiteral("picture_frame"), [&](QDialog* d) {
+            QVERIFY(answers.asked.isEmpty());  // (nothing asked before the window)
+            d->findChild<QCheckBox*>(QStringLiteral("render_new_layer"))->setChecked(new_layer);
+        });
+        const std::size_t before_pen = book.page().layers.size();
+        book.act("act_filter_render_picture_frame")->trigger();
+        QVERIFY2(answers.asked.isEmpty(), qPrintable(answers.asked.join(QStringLiteral(" / "))));
+        QCOMPARE(book.page().layers.size(), before_pen + 1);
+        QVERIFY(book.layer("pen")->stroke_count() > 0);
+        undo();
+        new_layer = false;
+        book.act("act_filter_render_picture_frame")->trigger();  // (asked; no: nothing drawn)
+        QCOMPARE(answers.asked.size(), 1);
+        QVERIFY2(answers.asked.front().contains(QStringLiteral("そのレイヤーに「額縁」を描きますか")), qPrintable(answers.asked.front()));
+        QCOMPARE(book.page().layers.size(), before_pen);
+        QVERIFY(book.layer("pen")->stroke_count() > 0);
+        QVERIFY(book.window->apply_ops(Json::array({Json{{"op", "delete_layer"}, {"page", 1}, {"id", "pen"}}})));
+        book.window->set_target_layer("pic");
+        // on a smart object: 炎・額縁・木 on a new layer above it (the op's: a layer not a paint layer); 照明効果 a smart
+        // filter, the page's channels not offered
+        QVERIFY(book.window->apply_ops(Json::array({Json{{"op", "smart_convert"}, {"page", 1}, {"ids", Json::array({"pic"})}, {"new_id", "so"}}})));
+        book.window->set_target_layer("so");
+        emit book.menu("menu_filter")->aboutToShow();
+        for (const char* on : {"act_filter_render_flame", "act_filter_render_picture_frame", "act_filter_render_tree", "act_filter_render_clouds",
+                               "act_filter_render_lighting_effects", "act_filter_blur_iris"})
+            QVERIFY2(book.act(on)->isEnabled(), on);
+        emit book.menu("menu_filter")->aboutToHide();
+        const auto so_before = *book.layer("so")->smart;
+        const std::size_t before_so = book.page().layers.size();
+        answers.responder->exec = answer(QStringLiteral("tree"));
+        book.act("act_filter_render_tree")->trigger();
+        QCOMPARE(book.page().layers.size(), before_so + 1);
+        QCOMPARE(book.page().layers.back().title, std::string("木"));
+        QCOMPARE(*book.layer("so")->smart, so_before);
+        undo();
+        textures.clear();
+        answers.responder->exec = answer(QStringLiteral("render_lighting_effects"), [&](QDialog* d) {
+            auto* texture = d->findChild<QComboBox*>(QStringLiteral("lighting_texture"));
+            for (int i = 0; i < texture->count(); ++i) textures << texture->itemText(i);
+        });
+        book.act("act_filter_render_lighting_effects")->trigger();
+        QCOMPARE(textures.size(), 6);
+        const Json filters = (*book.layer("so")->smart)["filters"];
+        QCOMPARE(filters.size(), std::size_t(1));
+        QCOMPARE(filters[0]["kind"], Json("render_lighting_effects"));
+    }
+
+    // ぼかしギャラリー (D4): not a window but a work over the canvas — 虹彩絞りぼかし…'s pin, a second one added by a click and
+    // dragged, the ぼかしツール panel's ぼかし, the result shown on the page meanwhile —; Enter sends the op (its pixels, one
+    // Undo), キャンセル nothing; パスぼかし's path across the middle, a click adding a point at its end, Delete taking it back;
+    // on a smart object a smart filter, its work again from the layer panel with its pins, sent as smart_filter_set.
+    void theBlurGalleryOverTheCanvas() {
+        Book book;
+        gui_test::Answers answers;
+        book.window->set_target_layer("pic");
+        const core::Document start = *book.session->snapshot();
+        const core::Bytes before = book.layer("pic")->raster_png;
+        auto* canvas = book.window->canvas();
+        const auto panel = [&]() -> QDialog* {  // (the one shown: a panel let go is hidden, then deleted later)
+            for (QDialog* d : book.window->findChildren<QDialog*>(QStringLiteral("blur_gallery_panel")))
+                if (d->isVisible()) return d;
+            return nullptr;
+        };
+        const auto pins = [] { return app::blur_gallery::settings()["pins"]; };
+        const auto op_pixels = [&](const Json& op) {
+            Json sent{{"op", "filter_raster"}, {"page", 1}, {"id", "pic"}};
+            sent.update(op);
+            return *core::CommandBus(render::ops_registry()).apply(start, Json::array({sent}), core::Actor("human:tester")).doc.page(0).layers.back().raster_png;
+        };
+        // 虹彩絞りぼかし…: its pin; a click adds one there, the panel's ぼかし its, a drag moves it
+        book.act("act_filter_blur_iris")->trigger();
+        QVERIFY(app::blur_gallery::working());
+        QVERIFY(canvas->has_work());
+        QVERIFY(panel() != nullptr && panel()->isVisible());
+        QCOMPARE(panel()->property("kind").toString(), QStringLiteral("blur_iris"));
+        QCOMPARE(pins().size(), std::size_t(1));
+        const QPoint at = canvas->to_widget(QPointF(8, 30)).toPoint();
+        QTest::mouseClick(canvas, Qt::LeftButton, {}, at);
+        QCOMPARE(pins().size(), std::size_t(2));
+        QVERIFY2(std::fabs(pins()[1]["x"].get<double>() - 0.2) < 0.05, pins().dump().c_str());
+        panel()->findChild<QDoubleSpinBox*>(QStringLiteral("gallery_blur"))->setValue(40);
+        QCOMPARE(pins()[1]["blur"], Json(40));
+        QTest::mousePress(canvas, Qt::LeftButton, {}, at);
+        QTest::mouseMove(canvas, at + QPoint(20, 0));
+        QTest::mouseMove(canvas, at + QPoint(40, 0));
+        QTest::mouseRelease(canvas, Qt::LeftButton, {}, at + QPoint(40, 0));
+        QVERIFY2(pins()[1]["x"].get<double>() > 0.2 + 0.01, pins().dump().c_str());
+        QCOMPARE(pins().size(), std::size_t(2));
+        // the result on the page meanwhile, the book as it was
+        QVERIFY(gui_test::wait_for([&] { return canvas->doc() != book.session->snapshot(); }, 30000));
+        QCOMPARE(book.layer("pic")->raster_png, before);
+        // Enter: sent, the op's pixels; one Undo
+        const Json chosen = pins();
+        QTest::keyClick(canvas, Qt::Key_Return);
+        QVERIFY(!app::blur_gallery::working());
+        QVERIFY(!canvas->has_work());
+        QVERIFY(gui_test::wait_for([&] { return panel() == nullptr; }, 5000));
+        QVERIFY(book.layer("pic")->raster_png != before);
+        QCOMPARE(*book.layer("pic")->raster_png, op_pixels(Json{{"kind", "blur_iris"}, {"pins", chosen}}));
+        book.window->action(QStringLiteral("act_undo"))->trigger();
+        QCOMPARE(book.layer("pic")->raster_png, before);
+        // a pen — and its eraser end — with a drawing tool chosen: the work's, not the tool's (a pin, no line, the tool kept); a
+        // double click: a pin; 切り取り with a selection: nothing cut, the pins kept (review P2-1, P3-1)
+        book.act("act_pen")->trigger();
+        const QString tool = canvas->tool();
+        const std::size_t steps = book.session->history().done.size();
+        book.act("act_filter_blur_iris")->trigger();
+        QVERIFY(app::blur_gallery::working());
+        QCOMPARE(pins().size(), std::size_t(1));
+        app::inject::tablet(canvas, app::inject::Phase::Press, app::inject::PenInput{QPointF(30, 10)});
+        app::inject::tablet(canvas, app::inject::Phase::Release, app::inject::PenInput{QPointF(30, 10)});
+        QCOMPARE(pins().size(), std::size_t(2));
+        app::inject::tablet(canvas, app::inject::Phase::Press, app::inject::PenInput{QPointF(10, 10)}, true);
+        app::inject::tablet(canvas, app::inject::Phase::Release, app::inject::PenInput{QPointF(10, 10)}, true);
+        QCOMPARE(pins().size(), std::size_t(3));
+        QCOMPARE(canvas->tool(), tool);
+        QVERIFY(app::blur_gallery::working());
+        QCOMPARE(book.layer("pic")->raster_png, before);
+        QCOMPARE(book.session->history().done.size(), steps);  // (no line drawn)
+        QTest::mouseDClick(canvas, Qt::LeftButton, {}, canvas->to_widget(QPointF(30, 32)).toPoint());
+        QCOMPARE(pins().size(), std::size_t(4));
+        canvas->set_selection(Json{{"poly", Json::array({Json::array({2, 2}), Json::array({20, 2}), Json::array({20, 20}), Json::array({2, 20})})}});
+        book.window->action(QStringLiteral("act_cut"))->trigger();
+        QCOMPARE(pins().size(), std::size_t(4));
+        QVERIFY(app::blur_gallery::working());
+        QCOMPARE(book.layer("pic")->raster_png, before);
+        QCOMPARE(book.session->history().done.size(), steps);
+        canvas->set_selection(std::nullopt);
+        panel()->findChild<QDialogButtonBox*>()->button(QDialogButtonBox::Cancel)->click();
+        QVERIFY(!app::blur_gallery::working());
+        QCOMPARE(book.layer("pic")->raster_png, before);
+        // チルトシフト…: its centre moved, キャンセル — nothing
+        book.act("act_filter_blur_tilt_shift")->trigger();
+        QVERIFY(app::blur_gallery::working());
+        QTest::mouseClick(canvas, Qt::LeftButton, {}, canvas->to_widget(QPointF(20, 8)).toPoint());
+        QVERIFY(app::blur_gallery::settings()["center_y"].get<double>() < 0.3);
+        panel()->findChild<QDialogButtonBox*>()->button(QDialogButtonBox::Cancel)->click();
+        QVERIFY(!app::blur_gallery::working());
+        QVERIFY(!canvas->has_work());
+        QCOMPARE(book.layer("pic")->raster_png, before);
+        // パスぼかし…: upstream's path across the middle, a point added at its end by a click, Delete taking it back, Enter
+        book.act("act_filter_blur_path")->trigger();
+        Json paths = app::blur_gallery::settings()["paths"];
+        QCOMPARE(paths.size(), std::size_t(1));
+        QCOMPARE(paths[0]["points"].size(), std::size_t(2));
+        QTest::mouseClick(canvas, Qt::LeftButton, {}, canvas->to_widget(QPointF(36, 8)).toPoint());
+        QCOMPARE(app::blur_gallery::settings()["paths"][0]["points"].size(), std::size_t(3));
+        QTest::keyClick(canvas, Qt::Key_Delete);
+        QCOMPARE(app::blur_gallery::settings()["paths"][0]["points"].size(), std::size_t(2));
+        panel()->findChild<QDoubleSpinBox*>(QStringLiteral("gallery_speed"))->setValue(20);
+        paths = app::blur_gallery::settings()["paths"];
+        QTest::keyClick(canvas, Qt::Key_Return);
+        QVERIFY(!app::blur_gallery::working());
+        QCOMPARE(paths[0]["speed"], Json(20));
+        QCOMPARE(*book.layer("pic")->raster_png, op_pixels(Json{{"kind", "blur_path"}, {"paths", paths}}));
+        book.window->action(QStringLiteral("act_undo"))->trigger();
+        // on a smart object: a smart filter; its work again from the layer panel with its pins, one more, smart_filter_set
+        QVERIFY(book.window->apply_ops(Json::array({Json{{"op", "smart_convert"}, {"page", 1}, {"ids", Json::array({"pic"})}, {"new_id", "so"}}})));
+        book.window->set_target_layer("so");
+        book.act("act_filter_blur_field")->trigger();
+        QVERIFY(app::blur_gallery::working());
+        QTest::mouseClick(canvas, Qt::LeftButton, {}, canvas->to_widget(QPointF(30, 30)).toPoint());
+        QCOMPARE(pins().size(), std::size_t(2));
+        QTest::keyClick(canvas, Qt::Key_Return);
+        Json filters = (*book.layer("so")->smart)["filters"];
+        QCOMPARE(filters.size(), std::size_t(1));
+        QCOMPARE(filters[0]["kind"], Json("blur_field"));
+        QCOMPARE(filters[0]["params"]["pins"].size(), std::size_t(2));
+        book.window->layer_panel()->edit_smart_filter(0);
+        QVERIFY(app::blur_gallery::working());
+        QCOMPARE(pins().size(), std::size_t(2));
+        QTest::mouseClick(canvas, Qt::LeftButton, {}, canvas->to_widget(QPointF(10, 10)).toPoint());
+        QCOMPARE(pins().size(), std::size_t(3));
+        QTest::keyClick(canvas, Qt::Key_Return);
+        filters = (*book.layer("so")->smart)["filters"];
+        QCOMPARE(filters.size(), std::size_t(1));
+        QCOMPARE(filters[0]["params"]["pins"].size(), std::size_t(3));
     }
 };
 

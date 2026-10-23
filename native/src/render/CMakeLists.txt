@@ -137,6 +137,10 @@ genko_library(genko_render
     fx_camera_raw.cpp
     vanishing.cpp
     ops_filters.cpp
+    # PC4 D4 (描画・ぼかしギャラリー, op render_picture)
+    fx_render.cpp
+    fx_gallery_blur.cpp
+    render_picture.cpp
     # PC3 C-a (パスとベクトルマスク)
     path_trace.cpp
     path_areas.cpp

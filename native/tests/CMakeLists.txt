@@ -201,6 +201,10 @@ genko_test(test_fx_lens SOURCES unit/test_fx_lens.cpp DEPS genko_test_support ge
 # the tiling, through filter_raster on 8, 16 and 32 bits and inside a selection, a smart filter, pages of inks on the colours
 # they mean, 200 and 600 dpi, the frame, the budget and stopping, the settings' table.
 genko_test(test_fx_camera_raw SOURCES unit/test_fx_camera_raw.cpp DEPS genko_test_support genko_render_ops genko_storage LABELS unit TIMEOUT 900)
+# PC4 節 D4 (描画・ぼかしギャラリー, render_picture): PhotoCraft's tests of render.rs, gallery.rs, extra_cmds.rs's clouds and of
+# render2.rs and render_cmds.rs (炎・木・額縁) through filter_raster and render_picture on 8 bits, precise and ink pages and an
+# opened picture's page; tilings, 200 and 600 dpi, pins moving with a smart object, a channel's bumps, the limits.
+genko_test(test_fx_render SOURCES unit/test_fx_render.cpp DEPS genko_test_support genko_formats genko_render_ops LABELS unit TIMEOUT 900)
 # PC2c (COLOR-04): Apply Image and Calculations (Blending, the sources, a layer, a channel, inks; the three results),
 # trapping (algo/trap.rs's tests and the op) and the fade (its mix, the op reading the pixels before from the assets).
 genko_test(test_image_calc SOURCES unit/test_image_calc.cpp DEPS genko_test_support genko_render_ops LABELS unit TIMEOUT 600)

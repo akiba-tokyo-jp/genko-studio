@@ -182,6 +182,11 @@ void PageCanvas::paint_page(QPainter& painter) {
     draw_snap(painter);       // (what a drag snapped to: canvas_snap.cpp)
     draw_prims(painter);    // (the 3D tool's handles: canvas_guides.cpp)
     draw_effect_handles(painter);  // (the effect tool's centres: canvas_effects.cpp)
+    if (work_ && work_->paint) {   // (PC4 D4: a piece of work over the page — ぼかしギャラリー's pins)
+        painter.save();
+        work_->paint(painter, [this](QPointF mm) { return pt(mm.x(), mm.y()); }, view_.scale);
+        painter.restore();
+    }
     draw_highlight(painter);       // (a problem the checks found: canvas_scale.cpp)
     if (zoom_drag_) {  // (the area the magnifier will fill the view with)
         painter.setBrush(Qt::NoBrush);

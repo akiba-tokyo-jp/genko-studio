@@ -50,6 +50,12 @@ inline constexpr std::size_t kDisplacementMapMaxBytes = 32u * 1024 * 1024;
 inline constexpr std::size_t kShearMostPoints = 64;
 // (D6) 広角補正's constraints: at most this many lines.
 inline constexpr std::size_t kWideAngleMostConstraints = 64;
+// (D4) 照明効果's lights, ぼかしギャラリー's pins and パスぼかし's paths: at most this many (design 2.3); the paths' points at
+// most kBlurPathMostPoints in all (each pixel looks at every segment).
+inline constexpr std::size_t kLightingMostLights = 64;
+inline constexpr std::size_t kBlurGalleryMostPins = 64;
+inline constexpr std::size_t kBlurPathMostPaths = 64;
+inline constexpr std::size_t kBlurPathMostPoints = 4096;
 
 // A setting that names a place on the picture (design 2.2, 3.3): moved and scaled with a smart object (its "space":
 // "contents"), as PC3's bending filters' points.
@@ -140,5 +146,26 @@ void validate_filters(const Document& doc, const std::function<bool(const std::s
 // settings (type, default, range, choices), whether it can be a smart filter, how it is laid on a page of inks — and the
 // presets.
 Json filter_catalogue();
+
+// (D4, design 3.2) render_picture's kinds — フィルター → 描画 → 炎…・額縁…・木…: not filter_raster's (they draw on a
+// layer, never a smart filter) — each its upstream command, Photoshop's name and its settings' table (PhotoCraft's
+// render_cmds.rs 185-219 in snake_case: colours [r, g, b] 0..255, lengths pixels of the working 200 dpi; a tree's type and
+// a frame's design by number or name).
+struct PictureKind {
+    std::string_view kind;      // flame, picture_frame, tree
+    std::string_view upstream;  // filter.render.flame …
+    std::string_view name;      // 炎 …
+    std::vector<AdjustParam> params;
+};
+const std::vector<PictureKind>& picture_kinds();
+const PictureKind* picture_kind(std::string_view kind);
+// 木's 34 types and 額縁's 16 designs (render2.rs TREES, FRAME_STYLES; snake_case), numbered from 1.
+const std::vector<std::string_view>& tree_type_names();
+const std::vector<std::string_view>& frame_style_names();
+// render_picture's settings of a kind in their normal form (the defaults filled, ranges clamped; a type or design named
+// becomes its number, 炎's quality its name): OpError for a key it does not know, a value of the wrong type.
+Json normalize_picture(std::string_view kind, const Json& settings);
+// (D4) At most this many shapes a render_picture draws (each some 64 bytes: refused before they are made).
+inline constexpr std::size_t kPictureMostShapes = 2'000'000;
 
 }  // namespace genko::core

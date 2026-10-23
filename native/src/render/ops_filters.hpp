@@ -11,7 +11,7 @@
 
 namespace genko::render {
 
-// render_picture (D4: 炎・額縁・木, refused — not_yet_ported — until its group writes it) and vanishing_point (D6: 消点,
+// render_picture (D4: 炎・額縁・木, render/render_picture) and vanishing_point (D6: 消点,
 // render/vanishing).
 void register_filter_ops(core::OpRegistry& registry);
 

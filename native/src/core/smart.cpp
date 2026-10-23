@@ -233,6 +233,10 @@ void check_filter(const std::string& who, const Json& f) {
     // (a lookup table of a file is a correction layer's: a smart filter's colour lookup is one of the looks)
     if (name == "color_lookup" && (settings.contains("lut") || settings.contains("data")))
         refuse(who + ": a smart filter's colour lookup is one of the looks (look), not a table");
+    // (PC4 D4: a smart filter's 照明効果 cannot read a channel of the page — its smart object's page has none — : as the
+    // ops that add and set it refuse it)
+    if (const Json* texture = name == "render_lighting_effects" ? get(settings, "texture") : nullptr; texture != nullptr && texture->is_object())
+        refuse(who + ": a smart filter's lighting texture cannot be a channel of the page");
 }
 
 // A PSD's placed layer as a smart object keeps (PC3 A3): {"block": its key, "raw": its payload (an asset), "shown"?:

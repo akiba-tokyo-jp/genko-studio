@@ -147,6 +147,9 @@ struct Ctx {
     // (D6) A page of inks' colour mode (none: not a page of inks): a colour a kind lays of its own (レンズ補正's edge) goes
     // onto the plates by the page's rules (render/ink inks_by_rules).
     const core::PageColor* ink = nullptr;
+    // (D4) The surface's height (grid_width its width: the layer's grid — the page — but for a part of it, PlaceScope): 雲模様's
+    // pattern is as large as the page is (PhotoCraft's extra_cmds.rs clouds: a quarter of the document's longer side).
+    std::uint32_t grid_height = 0;
     // (D5) What the kind prepared on its base box before its tiles (Kernel::prepare; none: nothing).
     const Prepared* prepared = nullptr;
 };
@@ -185,8 +188,9 @@ struct Kernel {
     // (D5) A whole kind's work done once on the base box's window that is not settings — planes of the whole the tiles
     // read (Camera Raw's haze and guided tone bases) —, after once, on the caller's thread (stopped as any run: StopScope;
     // saying how far it is with ProgressScope::put up to kPrepareShare, the tiles the rest). Each tile's run has it as
-    // Ctx::prepared. Only a kind whose halo is Halo::whole() (the run reads its base box's window once) — any other with one
-    // is refused (std::logic_error). None: nothing.
+    // Ctx::prepared. Called only when the kind's halo for these settings is Halo::whole() (the run reads its base box's
+    // window once); with a margin it is not and Ctx::prepared is none — the run works without it (D4's ぼかしギャラリー
+    // prepares its reduced levels only for the large blurs). None: nothing.
     std::function<std::shared_ptr<const Prepared>(const core::Json& params, const Window& whole, const Ctx& ctx)> prepare;
     // (D5) The bytes prepare's arrays take at most: held in the imaging budget by the run before the threads' share is
     // decided (fewer threads, not a refusal, when both do not fit), for as long as the run. None: nothing.
@@ -213,9 +217,9 @@ Kernels pixelate_kernels();      // render/fx_pixelate.cpp — D2: ピクセレ�
 Kernels stylize_kernels();       // render/fx_stylize.cpp — D2: 表現手法 (油彩: render/fx_oil.cpp, oil_kernel)
 Kernel oil_kernel();             // render/fx_oil.cpp — D2: 油彩 (stylize_kernels takes it)
 Kernels gallery_kernels();       // D3
-Kernels render_kernels();        // D4
-Kernels blur_gallery_kernels();  // D4
-Kernels camera_raw_kernels();    // D5
+Kernels render_kernels();        // render/fx_render.cpp — D4: 雲模様 1・2, ファイバー, 逆光, 照明効果
+Kernels blur_gallery_kernels();  // render/fx_gallery_blur.cpp — D4: ぼかしギャラリー
+Kernels camera_raw_kernels();    // render/fx_camera_raw.cpp — D5: Camera Raw フィルター
 Kernels lens_kernels();          // render/fx_lens.cpp — D6: lens_correction, adaptive_wide_angle
 const Kernels& kernels();
 const Kernel* kernel(std::string_view kind);

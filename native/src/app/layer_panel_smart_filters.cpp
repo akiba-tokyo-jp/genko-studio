@@ -171,6 +171,17 @@ void LayerPanel::edit_smart_filter(int index) {
             window_->send_filter(Json::array({Json{{"op", "smart_filter_set"}, {"page", page_index}, {"id", layer_id}, {"index", index}, {"params", values}}}),
                                  filter_forms::title(kind), heavy);
         };
+        // (D4: a window that shows the result on the page — ぼかしギャラリー's work over the canvas —: the filter set again on a
+        // copy of the book, a heavy one on a thread)
+        call.preview = [this, page_index, layer_id, index, kind, grid](const std::optional<Json>& values) {
+            if (!values) {
+                window_->preview_filter(std::nullopt, false);
+                return;
+            }
+            const bool heavy = render::fx::work(kind, *values, std::uint64_t(grid.width) * grid.height, grid.s, grid.levels) >= render::fx::kHeavyWork;
+            window_->preview_filter(Json::array({Json{{"op", "smart_filter_set"}, {"page", page_index}, {"id", layer_id}, {"index", index}, {"params", *values}}}), heavy);
+        };
+        call.previewing = [this] { return window_->filter_previewing(); };
         (*own)(call);
         return;
     }

@@ -189,6 +189,9 @@ std::string to_inks(const Pixels& p);
 // ink layer's into its inks: the layer holds them as pixels after). OpError for no such layer, a locked one, one that is
 // not a paint layer (pen or paint).
 Pixels layer_pixels(core::OpContext& c, std::size_t at, const std::string& id);
+// (PC4 D4) What layer_pixels does first, without reading the pixels: OpError for no such layer, a locked one, one that is
+// not a paint layer; precise pen lines made precise paint (convert_layer). A caller that draws reads them itself.
+void ready_paint_layer(core::OpContext& c, std::size_t at, const std::string& id);
 // The pixels written back into that layer as its kind holds them (it is a paint layer after).
 void put_layer_pixels(core::Document& doc, std::size_t at, const std::string& id, const Pixels& p);
 // PC3 (B-0): a part of them — `box` on the layer's own grid (pixels; clamped to it: grid() says how big it is) — as

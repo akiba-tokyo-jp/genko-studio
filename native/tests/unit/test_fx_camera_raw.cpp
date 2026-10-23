@@ -567,15 +567,31 @@ private slots:
             (void)run_precise(raster, Json{{"dehaze", 40}, {"clarity", 30}});
             QCOMPARE(done.load(), 1.0);
         }
-        // (D5's review P3-11: a kind that prepares reads its base box once — any other is refused)
+        // (D5's review P3-11: prepare runs only for a halo of the whole base box — with a margin it is not called and the
+        // tiles have no Ctx::prepared: D4's ぼかしギャラリー prepares only for its large blurs)
         {
+            std::atomic<int> prepared{0}, tiles_with{0};
             render::fx::Kernel odd;
             odd.kind = "test_prepares";
-            odd.halo = [](const Json&, const render::fx::Ctx&) { return render::fx::Halo::margin(1); };
-            odd.prepare = [](const Json&, const render::fx::Window&, const render::fx::Ctx&) { return std::make_shared<render::fx::Prepared>(); };
-            odd.run = [](const Json&, const render::fx::Window& src, const Rect& out, const render::fx::Ctx&) { return src.crop(out); };
+            odd.halo = [](const Json& params, const render::fx::Ctx&) {
+                return params.value("whole", false) ? render::fx::Halo::whole() : render::fx::Halo::margin(1);
+            };
+            odd.prepare = [&prepared](const Json&, const render::fx::Window&, const render::fx::Ctx&) {
+                ++prepared;
+                return std::make_shared<render::fx::Prepared>();
+            };
+            odd.prepare_bytes = [](const Json&, const render::fx::Ctx&) { return std::uint64_t(1024); };
+            odd.run = [&tiles_with](const Json&, const render::fx::Window& src, const Rect& out, const render::fx::Ctx& ctx) {
+                if (ctx.prepared != nullptr) ++tiles_with;
+                return src.crop(out);
+            };
             const auto surface = render::fx::precise_surface(raster);
-            QVERIFY_EXCEPTION_THROWN(render::fx::apply(*surface, odd, Json::object(), core::FilterInks::Plates, Rect{0, 0, 300, 300}, nullptr, 1), std::logic_error);
+            render::fx::apply(*surface, odd, Json::object(), core::FilterInks::Plates, Rect{0, 0, 300, 300}, nullptr, 1);
+            QCOMPARE(prepared.load(), 0);
+            QCOMPARE(tiles_with.load(), 0);
+            render::fx::apply(*surface, odd, Json{{"whole", true}}, core::FilterInks::Plates, Rect{0, 0, 300, 300}, nullptr, 1);
+            QCOMPARE(prepared.load(), 1);
+            QVERIFY(tiles_with.load() > 0);
         }
         std::stop_source stop;
         stop.request_stop();
