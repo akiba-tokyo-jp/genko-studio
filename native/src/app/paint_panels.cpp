@@ -103,9 +103,9 @@ QDockWidget* MainWindow::paint_dock(const QString& title, const char* name, cons
 void MainWindow::build_paint_docks() {
     const QString soon = QStringLiteral("（準備中）");
     QDockWidget* settings_dock = paint_dock(QStringLiteral("ブラシ設定"), "brush_settings_panel",
-                                            QStringLiteral("ブラシ先端のシェイプ・散布・テクスチャ・デュアルブラシなど、ブラシの細かい設定") + soon);
+                                            QStringLiteral("ブラシ先端のシェイプ・散布・テクスチャ・デュアルブラシなど、ブラシの細かい設定"));
     settings_dock->toggleViewAction()->setShortcut(QKeySequence(QStringLiteral("F5")));  // (Photoshop's ブラシ設定)
-    paint_dock(QStringLiteral("ブラシ"), "brushes_panel", QStringLiteral("グループに分けたブラシの一覧と、ブラシの読み込み・書き出し") + soon);
+    QDockWidget* brushes_dock = paint_dock(QStringLiteral("ブラシ"), "brushes_panel", QStringLiteral("グループに分けたブラシの一覧と、ブラシの読み込み・書き出し"));
     // (グラデーション, PC4 E4: its name is the gradient tool's old one — preferences::reused_names() keeps the two apart)
     build_gradients_dock();
     // (PC4 E3: the Patterns panel — the library and this book's patterns, app/patterns_panel.cpp — in the dock E-0 made)
@@ -118,7 +118,9 @@ void MainWindow::build_paint_docks() {
         if (shown) patterns_panel_->refresh();
     });
     paint_dock(QStringLiteral("スタイル"), "styles_panel", QStringLiteral("レイヤースタイルのプリセット") + soon);
-    paint_dock(QStringLiteral("ツールプリセット"), "tool_presets_panel", QStringLiteral("道具と設定をまとめたプリセット") + soon);
+    QDockWidget* tools_dock = paint_dock(QStringLiteral("ツールプリセット"), "tool_presets_panel", QStringLiteral("道具と設定をまとめたプリセット"));
+    // (PC4 E2: the ブラシ設定, ブラシ and ツールプリセット panels in these docks — main_window_brush_presets.cpp)
+    build_brush_preset_docks(settings_dock, brushes_dock, tools_dock);
     layers_dock_->raise();
     // スウォッチ: the カラー panel's tab (colorsets.json), opened from ウィンドウ as Photoshop's panel
     view_menu_->addAction(make("act_swatches", QStringLiteral("スウォッチ"), [this] {

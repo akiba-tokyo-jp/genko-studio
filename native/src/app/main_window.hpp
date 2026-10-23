@@ -62,6 +62,9 @@ class ChannelPanel;
 class CloneSourcePanel;
 class PathsPanel;
 class PatternsPanel;
+class BrushesPanel;
+class BrushSettingsPanel;
+class ToolPresetsPanel;
 class ShapesPanel;
 class HistogramPanel;
 class InfoPanel;
@@ -249,6 +252,9 @@ public:
         std::string replace_mode = "color";  // (色の置き換え: モード hue | saturation | color | luminosity)
         double replace_tolerance = 30;  // (色の置き換え: 許容値 %)
         bool antialias = true;          // (色の置き換え: アンチエイリアス)
+        // (PC4 E2, E5's promise) ブラシ: a dab brush of the library (its key: a built-in's or one's own) the tools lay their
+        // dabs with — its tip, shape, scatter… — through the op's "brush" (put into the book first) and "seed"; "" round
+        std::string brush;
     };
     PixelToolSettings pixel_tool_settings;
     // The Mixer Brush's paint after the last stroke (the op's "reservoir"; null: clean and unloaded).
@@ -1103,7 +1109,48 @@ public:
     void new_pattern_layer(const QString& choice = {});
     PatternsPanel* patterns_panel() const { return patterns_panel_; }
     QDockWidget* patterns_dock() const { return patterns_dock_; }
+    // PC4 E2 (main_window_brush_presets.cpp; SPEC.md COLOR-09「ブラシのプリセット」「ツールプリセット」「プリセットマネージャー」):
+    // the brush in hand chosen from the library (render/brush_presets: a built-in dab brush made known under the key this
+    // book takes for it — book_key_for —, one of the library's registered), the panels' lists and the brush list followed
+    // after the library changed (`select`: that brush chosen; `forgotten`: one taken out of it), 編集 → ブラシを定義… (the
+    // selection's paint, the layer drawn on alone when it is a paint layer), a tool preset taken (its tool, brush, fields
+    // and 描画色) and made (the tool page's fields by their objectName), and 編集 → プリセット ▸.
+    void choose_brush(const std::string& key);
+    void brushes_changed(std::optional<std::string> select, std::optional<std::string> forgotten = std::nullopt);
+    std::string book_key_for(const std::string& key) const;
+    void define_brush_preset(std::optional<QString> name = std::nullopt);
+    BrushesPanel* brushes_panel() const { return brushes_panel_; }
+    BrushSettingsPanel* brush_settings_panel();
+    ToolPresetsPanel* tool_presets_panel() const { return tool_presets_panel_; }
+    QDockWidget* brush_settings_dock() const { return brush_settings_dock_; }
+    QDockWidget* brushes_dock() const { return brushes_dock_; }
+    QDockWidget* tool_presets_dock() const { return tool_presets_dock_; }
+    void edit_brush_settings();
+    void make_brush_settings();
+    QString tool_in_hand() const;
+    QString tool_title(const QString& tool) const;
+    core::Json tool_fields(const QString& tool) const;
+    void apply_tool_fields(const QString& tool, const core::Json& fields);
+    core::Json tool_preset_options(const QString& tool, bool include_colour) const;
+    void use_tool_preset(const core::Json& item);
+    void presets_changed();
+    void preset_manager();
+    void export_import_presets_dialog();
+    void migrate_presets_dialog();
+    core::Json export_presets(const QString& path, const std::vector<std::string>& kinds, bool builtins);
+    core::Json import_presets(const QString& path, const std::vector<std::string>& kinds);
+    core::Json migrate_presets(const QString& from);
 private:
+    void build_brush_preset_actions();
+    void build_brush_preset_menus(QMenu* edit);
+    void build_brush_preset_docks(QDockWidget* settings_dock, QDockWidget* brushes_dock, QDockWidget* tools_dock);
+    BrushesPanel* brushes_panel_ = nullptr;
+    BrushSettingsPanel* brush_settings_panel_ = nullptr;
+    ToolPresetsPanel* tool_presets_panel_ = nullptr;
+    QDockWidget* brush_settings_dock_ = nullptr;
+    QDockWidget* brushes_dock_ = nullptr;
+    QDockWidget* tool_presets_dock_ = nullptr;
+    std::string brush_shown_;  // (the brush the ブラシ設定 panel last showed: it follows a change of brush, not of size)
     void build_pattern_actions();
     void build_pattern_menus(QMenu* edit, QMenu* view);
     PatternsPanel* patterns_panel_ = nullptr;
@@ -1343,6 +1390,11 @@ private:
     QSlider* eraser_flow_ = nullptr;
     std::set<std::string> blend_baked_;  // (PC4 E1: the paint layers whose lines became pixels by a blend, asked: page/layer)
     QLabel* mixer_paint_ = nullptr;  // (PC4 E5: the Mixer Brush's paint shown on its settings page)
+    QComboBox* pixel_brush_ = nullptr;  // (PC4 E2: the pixel tools' ブラシ — the library's dab brushes)
+public:
+    // (PC4 E2) The pixel tools' ブラシ list again (the library's dab brushes; the one chosen kept).
+    void fill_pixel_brushes();
+private:
     std::string mixer_space_;  // (PC4 E5, review P3-12: the colours the paint is in — the page's RGB profile, "" sRGB)
     core::Json last_results_ = core::Json::array();  // (PC4 E5: what the ops apply_ops applied last reported — the Mixer Brush's reservoir)
     QCheckBox* eraser_balloons_ = nullptr;  // フキダシを削る (the eraser cuts the balloons it goes over)

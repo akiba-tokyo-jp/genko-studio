@@ -177,6 +177,7 @@ v3 の行（`rev`・`actor`・`at`・`changes`・`via`）をそのまま残し�
 - 拡張を使う op が初めて適用されたとき（`define_brush` の `paper`）に `features` へ `paper-texture@1` を加える。書き手もブラシが紙質を持てば加える。紙質を使わない原稿は変わらない。
 - op: `define_brush` の `paper` は上の設定に加えて、画像を `"png"`（画像ファイルの base64。`asset` とどちらか一つ）で受ける。履歴の op 記録では `png` を `"<N base64 chars>"` に縮める。`genko schema`（公開スキーマ）は Python のまま。
 - 自分のブラシのライブラリ: Python 版と共有する `brushes.json` には紙質を書かない（Python 版の編集が `paper` を落とすため）。C++ 版は隣の `brush_papers.json`（`{"genko_brush_papers": 1, "papers": {<key>: 紙質}}`）と `brush_papers/<64桁>.png` に置く（`brushes.json` に無くなったブラシの紙質は次の保存で落とし、どれも名指さない画像は 1 時間を過ぎたものを消す。保存が名指す画像は既にあれば更新時刻を新しくする。`genko_brush_papers` が整数の 1 でない・無いファイルは読めないものとして扱い、書き換えず、その画像も消さない）。`.genkobrush` は紙質の画像を `paper.png`（base64）で含む。
+- 自分のブラシのライブラリのグループ（PC4 E2。機械の設定で原稿ではない）: C++ 版は `brushes.json` の項目に `"group"`（グループ名、1〜200 字。無ければ「自分のブラシ」）を、ファイルの一番上に並びを持つときだけ `"groups": [名前…]`（空のグループもここで持つ）を足す。グループを持たないファイルは今と同じバイト（Python 版と同じ字）。ダブのブラシ（`engine: "dabs"`）の先端・模様の絵は隣の `brush_tips/<64桁>.png`（名前は絵の sha256。読むときに確かめる。どのブラシも名指さない絵は 1 時間を過ぎたら消す）。Python 版がこのファイルを保存すると、項目の `group` は残り（Python の編集で作り直したブラシは「自分のブラシ」へ）、`groups` の並びと空のグループは落ちる。ツールプリセットは隣の `tool_presets.json`（「プリセット」の形）。
 
 ## ルビの位置と組み方（ruby-layout@1。TEXT-01、M4）
 

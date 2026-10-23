@@ -42,6 +42,8 @@
 #include "core/ids.hpp"
 #include "core/paths.hpp"
 #include "render/abr.hpp"
+#include "app/brush_settings_panel.hpp"
+#include "render/brush_presets.hpp"
 #include "render/brushes.hpp"
 #include "storage/fsutil.hpp"
 
@@ -206,6 +208,11 @@ void MainWindow::brush_changed() {
     pen_ = brush_->pen();
     pen_changed();
     canvas_->update();
+    // (PC4 E2: the ブラシ設定 panel follows a change of brush — not of its size or colour)
+    if (brush_->kind() != brush_shown_) {
+        brush_shown_ = brush_->kind();
+        if (brush_settings_panel_ != nullptr && brush_settings_dock_ != nullptr && brush_settings_dock_->isVisible()) brush_settings_panel_->refresh();
+    }
 }
 
 void MainWindow::make_brush() {
@@ -227,7 +234,7 @@ void MainWindow::make_brush() {
 void MainWindow::edit_brush() {
     // サブツール詳細: one of the person's own brushes opened again, every setting, and kept under its name
     const std::string key = brush_->kind();
-    if (!key.starts_with("my_")) {
+    if (!render::brush_presets::is_own(key)) {
         flash(QStringLiteral("直せるのは自分のブラシ（★）です。元のブラシは「複製して調整…」で自分のブラシにしてから"), 5000);
         return;
     }
@@ -257,7 +264,7 @@ void MainWindow::edit_brush() {
 
 void MainWindow::forget_brush() {
     const std::string key = brush_->kind();
-    if (!key.starts_with("my_")) return;
+    if (!render::brush_presets::is_own(key)) return;
     try {
         render::brushes::save_to_library(config_dir(), key, std::nullopt);
     } catch (const std::exception& error) {
@@ -441,10 +448,18 @@ std::string MainWindow::pencil_key() const {
 bool MainWindow::own_brush_op(const std::string& kind, Json& ops) {
     if (!kind.starts_with("my_") || book().brush_custom.contains(kind)) return true;
     render::brushes::Brush own = render::brushes::brush(kind);
-    if (own.key != kind) {  // (not known: from the library again, never the G pen's settings under its name)
-        try {
-            render::brushes::register_brushes(render::brushes::load_own_brushes(config_dir()));
-        } catch (const std::exception&) {
+    if (own.key != kind) {
+        if (const render::brush_presets::Preset* builtin = render::brush_presets::builtin_dab_of(kind)) {
+            // (PC4 E2: a built-in dab brush under the key this book takes for it)
+            try {
+                render::brushes::define_brush(kind, builtin->settings);
+            } catch (const std::exception&) {
+            }
+        } else {  // (not known: from the library again, never the G pen's settings under its name)
+            try {
+                render::brushes::register_brushes(render::brushes::load_own_brushes(config_dir()));
+            } catch (const std::exception&) {
+            }
         }
         own = render::brushes::brush(kind);
     }
@@ -460,6 +475,20 @@ bool MainWindow::own_brush_op(const std::string& kind, Json& ops) {
         } catch (const std::exception&) {
             flash(QStringLiteral("このブラシ（%1）の紙質の画像が見つからないため使えませんでした").arg(QString::fromStdString(own.label)), 5000, true);
             return false;
+        }
+    }
+    // (PC4 E2, E1's promise: a dab brush's pictures — its tip, the dual brush's, its texture — given as pictures when the
+    // book does not hold them, read from this process or the library)
+    if (own.dabs) {
+        bool held = true;
+        for (const std::string& ref : core::dab_assets(*own.dabs)) held = held && book().brush_tips.contains(ref);
+        if (!held) {
+            try {
+                settings_of = render::brushes::with_pictures(settings_of);
+            } catch (const std::exception&) {
+                flash(QStringLiteral("このブラシ（%1）の先端・テクスチャの画像が見つからないため使えませんでした").arg(QString::fromStdString(own.label)), 5000, true);
+                return false;
+            }
         }
     }
     for (const auto& [key, value] : settings_of.items()) define[key] = value;

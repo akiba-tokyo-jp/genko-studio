@@ -6,6 +6,7 @@
 #include <functional>
 #include <iterator>
 #include <optional>
+#include <stdexcept>
 
 #include "core/base64.hpp"
 #include "core/error.hpp"
@@ -280,6 +281,435 @@ std::string tip_from_picture(const std::filesystem::path& path) {
     if (!file) throw core::PyUncaught("FileNotFoundError", "[Errno 2] No such file or directory: '" + path.string() + "'");
     const std::string bytes((std::istreambuf_iterator<char>(file)), std::istreambuf_iterator<char>());
     return tip_from_picture(open_image(bytes, kPillowOpenLimits));
+}
+
+// --- the whole file (PC4 E2: upstream's crates/psd/src/abr.rs) ---------------------------------------------------------
+
+namespace {
+
+// What one brush (or section) could not be read for: it is left out with a warning.
+struct Bad : std::runtime_error {
+    using std::runtime_error::runtime_error;
+};
+
+class Rd {
+public:
+    explicit Rd(std::string_view b) : b_(b) {}
+    std::size_t left() const { return b_.size() - p_; }
+    std::size_t at() const { return p_; }
+    std::string_view take(std::size_t n) {
+        if (n > left()) throw Bad("途中で終わっています（" + std::to_string(p_) + " バイト目で " + std::to_string(n - left()) + " バイト足りません）");
+        const std::string_view out = b_.substr(p_, n);
+        p_ += n;
+        return out;
+    }
+    std::uint32_t u8() { return static_cast<std::uint8_t>(take(1)[0]); }
+    std::uint32_t u16() {
+        const std::string_view s = take(2);
+        return (std::uint32_t(static_cast<std::uint8_t>(s[0])) << 8) | static_cast<std::uint8_t>(s[1]);
+    }
+    std::uint32_t u32() {
+        const std::uint32_t high = u16();
+        return (high << 16) | u16();
+    }
+    std::int32_t i32() { return static_cast<std::int32_t>(u32()); }
+    void skip(std::size_t n) { (void)take(n); }
+    std::string_view rest() { return take(left()); }
+    void move_to(std::size_t p) { p_ = std::min(p, b_.size()); }
+    std::string_view peek(std::size_t from, std::size_t n) const {
+        return from <= b_.size() && n <= b_.size() - from ? b_.substr(from, n) : std::string_view();
+    }
+
+private:
+    std::string_view b_;
+    std::size_t p_ = 0;
+};
+
+// The bytes the tips of one file may unpack to, spent before each is unpacked.
+struct Budget {
+    std::size_t left = kMaxSampleBytes;
+    std::size_t most = kMaxSampleBytes;
+    void spend(std::size_t n) {
+        if (n > left) {
+            throw core::Error("too_large", "the brush file's tips are too large to read (more than " + std::to_string(most >> 20) + " MB unpacked)");
+        }
+        left -= n;
+    }
+};
+
+// PackBits rows (a u16 count for each row first): exactly `row_bytes` a row, else Bad.
+std::string unpack_rows(std::string_view data, std::uint32_t rows, std::size_t row_bytes) {
+    Rd r(data);
+    if (std::size_t(rows) * 2 > r.left()) throw Bad("行の長さの表が切れています");
+    std::vector<std::uint32_t> counts(rows);
+    for (std::uint32_t y = 0; y < rows; ++y) counts[y] = r.u16();
+    // (PackBits makes at most 64 times its bytes: a tip larger than that of what is left is broken, not unpacked)
+    if (std::uint64_t(rows) * row_bytes > std::uint64_t(r.left()) * 64) throw Bad("圧縮した行が大きさに足りません");
+    std::string out;
+    out.reserve(std::size_t(rows) * row_bytes);
+    for (const std::uint32_t count : counts) {
+        const std::string_view in = r.take(count);
+        const std::size_t start = out.size();
+        std::size_t i = 0;
+        while (i < in.size() && out.size() - start < row_bytes) {
+            const int n = static_cast<std::int8_t>(in[i]);
+            ++i;
+            if (n >= 0) {
+                const std::size_t len = std::size_t(n) + 1;
+                if (len > in.size() - i || len > row_bytes - (out.size() - start)) throw Bad("圧縮した行が壊れています");
+                out.append(in.substr(i, len));
+                i += len;
+            } else if (n > -128) {
+                const std::size_t len = std::size_t(1 - n);
+                if (i >= in.size() || len > row_bytes - (out.size() - start)) throw Bad("圧縮した行が壊れています");
+                out.append(len, in[i]);
+                ++i;
+            }
+        }
+        if (out.size() - start != row_bytes) throw Bad("圧縮した行が短すぎます");
+    }
+    return out;
+}
+
+std::string pack_row(std::string_view row) {
+    std::string out;
+    std::size_t i = 0;
+    while (i < row.size()) {
+        std::size_t run = 1;
+        while (i + run < row.size() && run < 128 && row[i + run] == row[i]) ++run;
+        if (run >= 3) {
+            out.push_back(static_cast<char>(1 - static_cast<int>(run)));
+            out.push_back(row[i]);
+            i += run;
+            continue;
+        }
+        std::size_t n = 0;
+        while (i + n < row.size() && n < 128) {
+            if (i + n + 2 < row.size() && row[i + n] == row[i + n + 1] && row[i + n] == row[i + n + 2]) break;
+            ++n;
+        }
+        out.push_back(static_cast<char>(n - 1));
+        out.append(row.substr(i, n));
+        i += n;
+    }
+    return out;
+}
+
+void put_u16(std::string& o, std::uint32_t v) {
+    o.push_back(static_cast<char>((v >> 8) & 0xff));
+    o.push_back(static_cast<char>(v & 0xff));
+}
+void put_u32(std::string& o, std::uint32_t v) {
+    put_u16(o, v >> 16);
+    put_u16(o, v & 0xffff);
+}
+
+// bounds, depth, compression and the pixels of a tip (the rest of its entry)
+Sample sample_body(Rd& r, std::string id, Budget& budget) {
+    const std::int64_t top = r.i32(), left = r.i32(), bottom = r.i32(), right = r.i32();
+    const std::int64_t w = right - left, h = bottom - top;
+    if (w <= 0 || h <= 0) throw Bad("先端の大きさが " + std::to_string(w) + " × " + std::to_string(h) + " 画素です");
+    if (w > kMaxEdge || h > kMaxEdge) throw Bad("先端が一辺 " + std::to_string(kMaxEdge) + " 画素より大きい");
+    const std::uint32_t depth = r.u16();
+    if (depth != 8 && depth != 16) throw Bad("先端が " + std::to_string(depth) + " bit です（8・16 bit を読みます）");
+    const std::uint32_t compression = r.u8();
+    if (compression > 1) throw Bad("先端の圧縮 " + std::to_string(compression) + " は読みません");
+    const std::size_t row_bytes = std::size_t(w) * (depth / 8);
+    const std::size_t total = row_bytes * std::size_t(h);
+    budget.spend(total);  // (before anything is unpacked)
+    Sample s;
+    s.id = std::move(id);
+    s.width = static_cast<std::uint32_t>(w);
+    s.height = static_cast<std::uint32_t>(h);
+    s.depth = static_cast<std::uint16_t>(depth);
+    if (compression == 0) {
+        if (r.left() < total) throw Bad("先端の画素が切れています");
+        s.data = std::string(r.take(total));
+    } else {
+        s.data = unpack_rows(r.rest(), s.height, row_bytes);
+    }
+    return s;
+}
+
+std::string ucs2(Rd& r) {
+    const std::uint32_t n = r.u32();
+    if (n > 4096) throw Bad("名前が長すぎます");
+    const std::string_view bytes = r.take(std::size_t(n) * 2);
+    std::u16string text;
+    for (std::size_t i = 0; i + 1 < bytes.size(); i += 2) {
+        text.push_back(static_cast<char16_t>((static_cast<std::uint8_t>(bytes[i]) << 8) | static_cast<std::uint8_t>(bytes[i + 1])));
+    }
+    while (!text.empty() && text.back() == char16_t(0)) text.pop_back();
+    return psd::utf8_of(text);
+}
+
+void parse_v12(Rd& r, int version, File& out, std::size_t most) {
+    const std::uint32_t count = r.u16();
+    Budget budget{most, most};
+    for (std::uint32_t i = 0; i < count; ++i) {
+        if (r.left() == 0) {
+            out.warnings.push_back("ファイルが " + std::to_string(count) + " 本のうち " + std::to_string(i) + " 本の後で終わっています");
+            break;
+        }
+        std::string_view body;
+        std::uint32_t type = 0;
+        try {
+            type = r.u16();
+            const std::uint32_t length = r.u32();
+            body = r.take(length);
+        } catch (const Bad&) {
+            out.warnings.push_back("ブラシ " + std::to_string(i + 1) + ": 途中で切れています");
+            break;
+        }
+        Rd b(body);
+        try {
+            LegacyBrush brush;
+            if (type == 1) {
+                (void)b.u32();
+                brush.spacing = static_cast<std::uint16_t>(b.u16());
+                brush.computed = true;
+                brush.diameter = static_cast<std::uint16_t>(b.u16());
+                brush.roundness = static_cast<std::uint16_t>(b.u16());
+                brush.angle = static_cast<std::int16_t>(static_cast<std::uint16_t>(b.u16()));
+                brush.hardness = static_cast<std::uint16_t>(b.u16());
+            } else if (type == 2) {
+                (void)b.u32();
+                brush.spacing = static_cast<std::uint16_t>(b.u16());
+                if (version == 2) brush.name = ucs2(b);
+                brush.anti_alias = b.u8() != 0;
+                b.skip(8);  // (the short bounds: the 32-bit ones follow)
+                brush.sample = sample_body(b, {}, budget);
+            } else {
+                out.warnings.push_back("ブラシ " + std::to_string(i + 1) + ": 種類 " + std::to_string(type) + " のブラシは読みません");
+                continue;
+            }
+            out.legacy.push_back(std::move(brush));
+        } catch (const Bad& why) {
+            out.warnings.push_back("ブラシ " + std::to_string(i + 1) + ": " + why.what() + "（外しました）");
+        }
+    }
+}
+
+void read_samp(std::string_view data, int subversion, File& out, Budget& budget) {
+    Rd r(data);
+    while (r.left() >= 4) {
+        if (out.samples.size() >= kMaxBrushes) {
+            out.warnings.push_back("先端が " + std::to_string(kMaxBrushes) + " を越えるので、残りは外しました");
+            break;
+        }
+        const std::uint32_t length = r.u32();
+        if (length == 0) break;
+        const std::size_t padded = (std::size_t(length) + 3) & ~std::size_t(3);
+        const std::string_view body = r.take(std::min(padded, r.left()));
+        if (body.size() < length) {
+            out.warnings.push_back("先端 " + std::to_string(out.samples.size() + 1) + ": 途中で切れています");
+            break;
+        }
+        Rd b(body.substr(0, length));
+        try {
+            const std::uint32_t n = b.u8();
+            std::string id(b.take(n));
+            b.skip(subversion == 1 ? 10 : 264);
+            out.samples.push_back(sample_body(b, std::move(id), budget));
+        } catch (const Bad& why) {
+            out.warnings.push_back("先端 " + std::to_string(out.samples.size() + 1) + ": " + why.what() + "（外しました）");
+        }
+    }
+}
+
+void read_desc(std::string_view data, File& out) {
+    try {
+        const psd::descriptor::Object root = psd::descriptor::read_versioned(data);
+        const psd::descriptor::Value* list = root.get("Brsh");
+        if (list == nullptr || list->type != "VlLs") {
+            out.warnings.push_back("ブラシの設定（desc）にブラシの一覧がありません");
+            return;
+        }
+        for (const psd::descriptor::Value& v : list->list) {
+            if (out.presets.size() >= kMaxBrushes) {
+                out.warnings.push_back("ブラシが " + std::to_string(kMaxBrushes) + " 本を越えるので、残りは外しました");
+                break;
+            }
+            if ((v.type == "Objc" || v.type == "GlbO") && v.object) out.presets.push_back(*v.object);
+        }
+    } catch (const psd::descriptor::Broken& why) {
+        out.warnings.push_back(std::string("ブラシの設定（desc）を読めませんでした: ") + why.what());
+    }
+}
+
+void parse_v6(Rd& r, File& out, std::size_t most) {
+    out.subversion = static_cast<int>(r.u16());
+    if (out.subversion != 1 && out.subversion != 2) {
+        throw core::Error("format", "brush files of subversion " + std::to_string(out.subversion) + " are not read");
+    }
+    Budget budget{most, most};
+    while (r.left() >= 12) {
+        if (r.take(4) != "8BIM") {
+            out.warnings.push_back(std::to_string(r.at() - 4) + " バイト目からは節でないので読みません");
+            break;
+        }
+        const std::string key(r.take(4));
+        const std::uint32_t length = r.u32();
+        std::string_view data;
+        if (length <= r.left()) {
+            data = r.take(length);
+        } else {
+            out.warnings.push_back("節 " + key + " が途中で切れています");
+            data = r.rest();
+        }
+        // (sections are padded to 4 bytes; a writer that does not pad them is read too)
+        const std::size_t pad = (4 - length % 4) % 4;
+        if (pad > 0 && r.peek(r.at(), 4) != "8BIM" && r.peek(r.at() + pad, 4) == "8BIM") r.move_to(r.at() + pad);
+        if (key == "samp") {
+            read_samp(data, out.subversion, out, budget);
+        } else if (key == "patt") {
+            try {
+                std::vector<pat::PsdPattern> held = pat::parse_block(data);
+                for (pat::PsdPattern& p : held) out.patterns.push_back(std::move(p));
+            } catch (const core::Error& why) {
+                if (why.code() == "too_large") throw;
+                out.warnings.push_back(std::string("ファイルの中のパターンを読めませんでした: ") + why.what());
+            }
+        } else if (key == "desc") {
+            read_desc(data, out);
+        } else if (key == "phry" || key == "lPdc") {
+            // (the presets' folders and the tool presets: not the brushes)
+        } else {
+            out.warnings.push_back("節 " + key + " は読みません");
+        }
+    }
+}
+
+void sample_out(std::string& o, const Sample& s, bool rle) {
+    if (s.width == 0 || s.height == 0 || s.width > kMaxEdge || s.height > kMaxEdge || (s.depth != 8 && s.depth != 16) ||
+        s.data.size() != std::size_t(s.width) * s.height * (s.depth / 8)) {
+        throw core::Error("value", "a tip of " + std::to_string(s.width) + " × " + std::to_string(s.height) + " pixels of " +
+                                       std::to_string(s.depth) + " bits cannot be written");
+    }
+    put_u32(o, 0);
+    put_u32(o, 0);
+    put_u32(o, s.height);
+    put_u32(o, s.width);
+    put_u16(o, s.depth);
+    o.push_back(static_cast<char>(rle ? 1 : 0));
+    if (!rle) {
+        o += s.data;
+        return;
+    }
+    const std::size_t row = std::size_t(s.width) * (s.depth / 8);
+    std::vector<std::string> rows;
+    for (std::uint32_t y = 0; y < s.height; ++y) rows.push_back(pack_row(std::string_view(s.data).substr(std::size_t(y) * row, row)));
+    for (const std::string& packed : rows) put_u16(o, static_cast<std::uint32_t>(packed.size()));
+    for (const std::string& packed : rows) o += packed;
+}
+
+void section(std::string& o, std::string_view key, std::string_view data) {
+    o += "8BIM";
+    o += key;
+    const std::size_t pad = (4 - data.size() % 4) % 4;
+    put_u32(o, static_cast<std::uint32_t>(data.size() + pad));
+    o += data;
+    o.append(pad, char(0));
+}
+
+}  // namespace
+
+float Sample::unit(std::size_t i) const {
+    if (depth == 16) {
+        const auto hi = static_cast<std::uint8_t>(data[2 * i]), lo = static_cast<std::uint8_t>(data[2 * i + 1]);
+        return static_cast<float>((hi << 8) | lo) / 65535.0f;
+    }
+    return static_cast<float>(static_cast<std::uint8_t>(data[i])) / 255.0f;
+}
+
+File parse(std::string_view data, std::size_t max_sample_bytes) {
+    if (data.size() > kMaxFileBytes) {
+        throw core::Error("too_large", "the brush file is larger than " + std::to_string(kMaxFileBytes >> 20) + " MB");
+    }
+    Rd r(data);
+    File out;
+    try {
+        out.version = static_cast<int>(r.u16());
+        if (out.version == 1 || out.version == 2) {
+            parse_v12(r, out.version, out, max_sample_bytes);
+        } else if (out.version >= 6 && out.version <= 10) {
+            parse_v6(r, out, max_sample_bytes);
+        } else {
+            throw core::Error("format", "brush files of version " + std::to_string(out.version) + " are not read");
+        }
+    } catch (const Bad& why) {
+        throw core::Error("format", std::string("not a brush file that can be read: ") + why.what());
+    }
+    if (out.legacy.empty() && out.samples.empty() && out.presets.empty()) {
+        throw core::Error("format", "the brush file holds no brush that can be read" +
+                                        (out.warnings.empty() ? std::string() : " (" + out.warnings.front() + ")"));
+    }
+    return out;
+}
+
+std::string write_v12(int version, const std::vector<LegacyBrush>& brushes, bool rle) {
+    if ((version != 1 && version != 2) || brushes.size() > 0xffff) {
+        throw core::Error("value", "brush files of version " + std::to_string(version) + " are not written");
+    }
+    std::string o;
+    put_u16(o, static_cast<std::uint32_t>(version));
+    put_u16(o, static_cast<std::uint32_t>(brushes.size()));
+    for (const LegacyBrush& b : brushes) {
+        std::string body;
+        put_u32(body, 0);
+        put_u16(body, b.spacing);
+        if (b.computed) {
+            put_u16(body, b.diameter);
+            put_u16(body, b.roundness);
+            put_u16(body, static_cast<std::uint16_t>(b.angle));
+            put_u16(body, b.hardness);
+        } else {
+            if (version == 2) {
+                std::u16string name = psd::utf16(b.name);
+                name.push_back(char16_t(0));
+                put_u32(body, static_cast<std::uint32_t>(name.size()));
+                for (const char16_t c : name) put_u16(body, c);
+            }
+            body.push_back(static_cast<char>(b.anti_alias ? 1 : 0));
+            put_u16(body, 0);
+            put_u16(body, 0);
+            put_u16(body, std::min<std::uint32_t>(b.sample.height, 0xffff));
+            put_u16(body, std::min<std::uint32_t>(b.sample.width, 0xffff));
+            sample_out(body, b.sample, rle);
+        }
+        put_u16(o, b.computed ? 1 : 2);
+        put_u32(o, static_cast<std::uint32_t>(body.size()));
+        o += body;
+    }
+    return o;
+}
+
+std::string write_v6(int subversion, const std::vector<Sample>& samples, const std::vector<pat::PsdPattern>& patterns,
+                     const std::vector<std::pair<std::string, psd::descriptor::Writer>>& presets, bool rle) {
+    if (subversion != 1 && subversion != 2) {
+        throw core::Error("value", "brush files of subversion " + std::to_string(subversion) + " are not written");
+    }
+    std::string o;
+    put_u16(o, 6);
+    put_u16(o, static_cast<std::uint32_t>(subversion));
+    std::string samp;
+    for (const Sample& s : samples) {
+        std::string e;
+        const std::size_t n = std::min<std::size_t>(s.id.size(), 255);
+        e.push_back(static_cast<char>(n));
+        e += s.id.substr(0, n);
+        e.append(subversion == 1 ? 10 : 264, char(0));
+        sample_out(e, s, rle);
+        put_u32(samp, static_cast<std::uint32_t>(e.size()));
+        samp += e;
+        samp.append((4 - e.size() % 4) % 4, char(0));
+    }
+    section(o, "samp", samp);
+    if (!patterns.empty()) section(o, "patt", pat::write_block(patterns));
+    psd::descriptor::Writer root;
+    root.objects("Brsh", presets);
+    section(o, "desc", root.versioned("null"));
+    return o;
 }
 
 }  // namespace genko::render::abr

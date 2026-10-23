@@ -32,9 +32,16 @@
       },
       "upstream_menu": null,
       "genko_status": "一部（2026-10-16 照合）",
-      "implementation_status": "未着手",
+      "implementation_status": "実装済み（PC4 E2、未統合）",
       "acceptance_status": "未実施",
-      "evidence": [],
+      "evidence": [
+        "native/src/render/brush_presets.cpp",
+        "native/src/app/main_window_brush_presets.cpp",
+        "native/src/api/cli.cpp",
+        "native/tests/unit/test_brush_presets.cpp",
+        "native/tests/contract/test_contract_abr.cpp",
+        "native/tests/gui/test_gui_brush_settings.cpp"
+      ],
       "pc0": {
         "date": "2026-10-16",
         "cpp_base": "962faa4",
@@ -106,9 +113,16 @@
       },
       "upstream_menu": null,
       "genko_status": "一部（2026-10-16 照合）",
-      "implementation_status": "未着手",
+      "implementation_status": "実装済み（PC4 E2、未統合）",
       "acceptance_status": "未実施",
-      "evidence": [],
+      "evidence": [
+        "native/src/render/brush_presets.cpp",
+        "native/src/api/cli.cpp",
+        "native/src/app/brushes_panel.cpp",
+        "native/tests/unit/test_brush_presets.cpp",
+        "native/tests/contract/test_contract_abr.cpp",
+        "native/tests/gui/test_gui_brush_settings.cpp"
+      ],
       "pc0": {
         "date": "2026-10-16",
         "cpp_base": "962faa4",
@@ -140,9 +154,19 @@
       },
       "upstream_menu": null,
       "genko_status": "一部（2026-10-16 照合）",
-      "implementation_status": "未着手",
+      "implementation_status": "実装済み（PC4 E2、未統合）",
       "acceptance_status": "未実施",
-      "evidence": [],
+      "evidence": [
+        "native/src/render/abr.cpp",
+        "native/src/render/abr_map.cpp",
+        "native/src/render/brush_presets.cpp",
+        "native/src/api/cli.cpp",
+        "native/src/app/brushes_panel.cpp",
+        "native/tests/unit/test_abr_map.cpp",
+        "native/tests/unit/test_brush_presets.cpp",
+        "native/tests/contract/test_contract_abr.cpp",
+        "native/tests/gui/test_gui_brush_settings.cpp"
+      ],
       "pc0": {
         "date": "2026-10-16",
         "cpp_base": "962faa4",
@@ -175,9 +199,16 @@
       },
       "upstream_menu": null,
       "genko_status": "一部（2026-10-16 照合）",
-      "implementation_status": "未着手",
+      "implementation_status": "実装済み（PC4 E2、未統合）",
       "acceptance_status": "未実施",
-      "evidence": [],
+      "evidence": [
+        "native/src/render/brush_presets.cpp",
+        "native/src/api/cli.cpp",
+        "native/src/app/brushes_panel.cpp",
+        "native/tests/unit/test_brush_presets.cpp",
+        "native/tests/contract/test_contract_abr.cpp",
+        "native/tests/gui/test_gui_brush_settings.cpp"
+      ],
       "pc0": {
         "date": "2026-10-16",
         "cpp_base": "962faa4",
@@ -209,9 +240,18 @@
       },
       "upstream_menu": null,
       "genko_status": "一部（2026-10-16 照合）",
-      "implementation_status": "未着手",
+      "implementation_status": "実装済み（PC4 E2、未統合）",
       "acceptance_status": "未実施",
-      "evidence": [],
+      "evidence": [
+        "native/src/render/brush_presets.cpp",
+        "native/src/render/brushes.cpp",
+        "native/src/api/cli.cpp",
+        "native/src/app/brushes_panel.cpp",
+        "native/src/app/brush_settings_panel.cpp",
+        "native/tests/unit/test_brush_presets.cpp",
+        "native/tests/contract/test_contract_abr.cpp",
+        "native/tests/gui/test_gui_brush_settings.cpp"
+      ],
       "pc0": {
         "date": "2026-10-16",
         "cpp_base": "962faa4",
@@ -2201,9 +2241,13 @@
         "alternate_menus": []
       },
       "genko_status": "一部（2026-10-16 照合）",
-      "implementation_status": "未着手",
+      "implementation_status": "実装済み（PC4 E2、未統合）",
       "acceptance_status": "未実施",
-      "evidence": [],
+      "evidence": [
+        "native/src/app/main_window_brush_presets.cpp",
+        "native/src/render/brush_presets.cpp",
+        "native/tests/gui/test_gui_brush_settings.cpp"
+      ],
       "pc0": {
         "date": "2026-10-16",
         "cpp_base": "962faa4",
@@ -3780,9 +3824,16 @@
         "alternate_menus": []
       },
       "genko_status": "一部（2026-10-16 照合）",
-      "implementation_status": "未着手",
+      "implementation_status": "実装済み（PC4 E2、未統合）",
       "acceptance_status": "未実施",
-      "evidence": [],
+      "evidence": [
+        "native/src/render/preset_files.cpp",
+        "native/src/app/main_window_brush_presets.cpp",
+        "native/src/api/cli.cpp",
+        "native/tests/unit/test_brush_presets.cpp",
+        "native/tests/contract/test_contract_abr.cpp",
+        "native/tests/gui/test_gui_brush_settings.cpp"
+      ],
       "pc0": {
         "date": "2026-10-16",
         "cpp_base": "962faa4",
@@ -3830,9 +3881,16 @@
         "alternate_menus": []
       },
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "未着手",
+      "implementation_status": "実装済み（PC4 E2、未統合）",
       "acceptance_status": "未実施",
-      "evidence": [],
+      "evidence": [
+        "native/src/render/preset_files.cpp",
+        "native/src/app/main_window_brush_presets.cpp",
+        "native/src/api/cli.cpp",
+        "native/tests/unit/test_brush_presets.cpp",
+        "native/tests/contract/test_contract_abr.cpp",
+        "native/tests/gui/test_gui_brush_settings.cpp"
+      ],
       "pc0": {
         "date": "2026-10-16",
         "cpp_base": "962faa4",
@@ -3873,9 +3931,17 @@
         "alternate_menus": []
       },
       "genko_status": "一部（2026-10-16 照合）",
-      "implementation_status": "未着手",
+      "implementation_status": "実装済み（PC4 E2、未統合）",
       "acceptance_status": "未実施",
-      "evidence": [],
+      "evidence": [
+        "native/src/render/preset_files.cpp",
+        "native/src/app/preset_manager.cpp",
+        "native/src/app/main_window_brush_presets.cpp",
+        "native/src/api/cli.cpp",
+        "native/tests/unit/test_brush_presets.cpp",
+        "native/tests/contract/test_contract_abr.cpp",
+        "native/tests/gui/test_gui_brush_settings.cpp"
+      ],
       "pc0": {
         "date": "2026-10-16",
         "cpp_base": "962faa4",
@@ -31401,9 +31467,15 @@
       },
       "upstream_menu": null,
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "未着手",
+      "implementation_status": "実装済み（PC4 E2、未統合）",
       "acceptance_status": "未実施",
-      "evidence": [],
+      "evidence": [
+        "native/src/render/tool_presets.cpp",
+        "native/src/app/tool_presets_panel.cpp",
+        "native/src/api/cli.cpp",
+        "native/tests/unit/test_tool_presets.cpp",
+        "native/tests/gui/test_gui_tool_presets.cpp"
+      ],
       "pc0": {
         "date": "2026-10-16",
         "cpp_base": "962faa4",
@@ -31429,9 +31501,16 @@
       },
       "upstream_menu": null,
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "未着手",
+      "implementation_status": "実装済み（PC4 E2、未統合）",
       "acceptance_status": "未実施",
-      "evidence": [],
+      "evidence": [
+        "native/src/render/tool_presets.cpp",
+        "native/src/app/tool_presets_panel.cpp",
+        "native/src/api/cli.cpp",
+        "native/tests/unit/test_tool_presets.cpp",
+        "native/tests/contract/test_contract_abr.cpp",
+        "native/tests/gui/test_gui_tool_presets.cpp"
+      ],
       "pc0": {
         "date": "2026-10-16",
         "cpp_base": "962faa4",
@@ -31457,9 +31536,16 @@
       },
       "upstream_menu": null,
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "未着手",
+      "implementation_status": "実装済み（PC4 E2、未統合）",
       "acceptance_status": "未実施",
-      "evidence": [],
+      "evidence": [
+        "native/src/render/tool_presets.cpp",
+        "native/src/app/tool_presets_panel.cpp",
+        "native/src/app/main_window_brush_presets.cpp",
+        "native/src/api/cli.cpp",
+        "native/tests/unit/test_tool_presets.cpp",
+        "native/tests/gui/test_gui_tool_presets.cpp"
+      ],
       "pc0": {
         "date": "2026-10-16",
         "cpp_base": "962faa4",
@@ -31485,9 +31571,15 @@
       },
       "upstream_menu": null,
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "未着手",
+      "implementation_status": "実装済み（PC4 E2、未統合）",
       "acceptance_status": "未実施",
-      "evidence": [],
+      "evidence": [
+        "native/src/render/tool_presets.cpp",
+        "native/src/app/tool_presets_panel.cpp",
+        "native/src/api/cli.cpp",
+        "native/tests/unit/test_tool_presets.cpp",
+        "native/tests/gui/test_gui_tool_presets.cpp"
+      ],
       "pc0": {
         "date": "2026-10-16",
         "cpp_base": "962faa4",
@@ -31513,9 +31605,17 @@
       },
       "upstream_menu": null,
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "未着手",
+      "implementation_status": "実装済み（PC4 E2、未統合）",
       "acceptance_status": "未実施",
-      "evidence": [],
+      "evidence": [
+        "native/src/render/tool_presets.cpp",
+        "native/src/app/tool_presets_panel.cpp",
+        "native/src/app/main_window_brush_presets.cpp",
+        "native/src/api/cli.cpp",
+        "native/tests/unit/test_tool_presets.cpp",
+        "native/tests/contract/test_contract_abr.cpp",
+        "native/tests/gui/test_gui_tool_presets.cpp"
+      ],
       "pc0": {
         "date": "2026-10-16",
         "cpp_base": "962faa4",
@@ -38129,9 +38229,15 @@
         "alternate_menus": []
       },
       "genko_status": "一部（2026-10-16 照合）",
-      "implementation_status": "未着手",
+      "implementation_status": "実装済み（PC4 E2、未統合）",
       "acceptance_status": "未実施",
-      "evidence": [],
+      "evidence": [
+        "native/src/app/brush_settings_panel.cpp",
+        "native/src/app/paint_panels.cpp",
+        "native/src/app/main_window_brush_presets.cpp",
+        "native/src/app/paint_tools.cpp",
+        "native/tests/gui/test_gui_brush_settings.cpp"
+      ],
       "pc0": {
         "date": "2026-10-16",
         "cpp_base": "962faa4",
@@ -38167,9 +38273,14 @@
         "alternate_menus": []
       },
       "genko_status": "一部（2026-10-16 照合）",
-      "implementation_status": "未着手",
+      "implementation_status": "実装済み（PC4 E2、未統合）",
       "acceptance_status": "未実施",
-      "evidence": [],
+      "evidence": [
+        "native/src/app/brushes_panel.cpp",
+        "native/src/app/paint_panels.cpp",
+        "native/src/app/main_window_brush_presets.cpp",
+        "native/tests/gui/test_gui_brush_settings.cpp"
+      ],
       "pc0": {
         "date": "2026-10-16",
         "cpp_base": "962faa4",
@@ -39162,9 +39273,14 @@
         "alternate_menus": []
       },
       "genko_status": "一部（2026-10-16 照合）",
-      "implementation_status": "未着手",
+      "implementation_status": "実装済み（PC4 E2、未統合）",
       "acceptance_status": "未実施",
-      "evidence": [],
+      "evidence": [
+        "native/src/app/tool_presets_panel.cpp",
+        "native/src/app/paint_panels.cpp",
+        "native/src/app/main_window_brush_presets.cpp",
+        "native/tests/gui/test_gui_tool_presets.cpp"
+      ],
       "pc0": {
         "date": "2026-10-16",
         "cpp_base": "962faa4",
@@ -41501,9 +41617,16 @@
       "label_ja": "ABR/GRD/PAT等の形式別プリセット互換",
       "kind": "cross_cutting",
       "genko_status": "一部（2026-10-16 照合）",
-      "implementation_status": "未着手",
+      "implementation_status": "実装済み（PC4 E2、未統合）",
       "acceptance_status": "未実施",
-      "evidence": [],
+      "evidence": [
+        "native/src/render/abr.cpp",
+        "native/src/render/abr_map.cpp",
+        "native/src/render/grd.cpp",
+        "native/src/render/pat.cpp",
+        "native/tests/unit/test_abr_map.cpp",
+        "native/tests/contract/test_contract_abr.cpp"
+      ],
       "pc0": {
         "date": "2026-10-16",
         "cpp_base": "962faa4",

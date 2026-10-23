@@ -216,6 +216,11 @@ genko_library(genko_render
     brushwork.cpp
     paint_tools/tone.cpp
     paint_tools/effects.cpp
+    # PC4 E2 (ブラシのプリセット・Adobe の読み込み・ツールプリセット・プリセット管理)
+    abr_map.cpp
+    brush_presets.cpp
+    tool_presets.cpp
+    preset_files.cpp
     # PC4 F-f (.pcraft: zip by name and stored, zstd, BLAKE3, the manifest, a .pcraft read as a page)
     blake3.cpp
     zstd.cpp

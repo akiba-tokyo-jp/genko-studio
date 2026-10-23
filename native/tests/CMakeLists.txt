@@ -143,6 +143,13 @@ genko_test(test_tiled_pixels SOURCES unit/test_tiled_pixels.cpp DEPS genko_test_
 # and Color Replacement as PhotoCraft's tests check them, on 8-bit, 16-bit, 32-bit, CMYK, Lab and grey layers; 色混ぜ's
 # precise and ink values.
 genko_test(test_paint_tools SOURCES unit/test_paint_tools.cpp DEPS genko_test_support genko_render_ops LABELS unit TIMEOUT 900)
+# PC4 E2 (SPEC.md COLOR-09「ブラシのプリセット」「ツールプリセット」「プリセットマネージャー」): Photoshop brush files read whole
+# and mapped onto the dab brushes (PhotoCraft's abr.rs and abr_map tests, their writers ported), the brush library (the
+# built-in groups, the person's groups and pictures, a file taken in, a brush defined from the pixels), the presets
+# written, read back and migrated, the tool presets and `genko tool-presets`.
+genko_test(test_abr_map SOURCES unit/test_abr_map.cpp DEPS genko_test_support genko_render_ops LABELS unit)
+genko_test(test_brush_presets SOURCES unit/test_brush_presets.cpp DEPS genko_test_support genko_render_ops LABELS unit TIMEOUT 600)
+genko_test(test_tool_presets SOURCES unit/test_tool_presets.cpp DEPS genko_test_support genko_render_ops LABELS unit)
 # PC4 E1 (SPEC.md COLOR-09「ブラシのダブの描き方」): the dab engine (render/dabs) against PhotoCraft's own brush tests in mm
 # (spacing, tips, dynamics, scatter, colour, transfer, build-up, the textures' modes, dual, wet edges, noise, smoothing,
 # pose), the same dabs at every resolution and in parts; and the line ops with a dab brush (define_brush's dabs and
@@ -655,6 +662,11 @@ if(GENKO_BUILD_APP)
   genko_test(test_gui_paint SOURCES gui/test_gui_paint.cpp DEPS genko_app GUI TIMEOUT 600)
   genko_test(test_gui_patterns SOURCES gui/test_gui_patterns.cpp DEPS genko_app GUI TIMEOUT 600)  # (PC4 E3)
   genko_test(test_gui_paint_tools SOURCES gui/test_gui_paint_tools.cpp DEPS genko_app genko_test_support GUI TIMEOUT 600)  # (PC4 E5)
+  # PC4 E2: ブラシ設定 (F5: its sections, a change copying a built-in brush, the sample, a Genko brush made a dab brush),
+  # ブラシ panel (groups, a brush chosen, saved, renamed, deleted, an .abr read off the window's thread), 編集 → ブラシを定義…,
+  # the pixel tools' ブラシ, a dab brush's pictures put into the book with it; ツールプリセット panel, プリセット ▸
+  genko_test(test_gui_brush_settings SOURCES gui/test_gui_brush_settings.cpp DEPS genko_app genko_test_support GUI TIMEOUT 600)
+  genko_test(test_gui_tool_presets SOURCES gui/test_gui_tool_presets.cpp DEPS genko_app genko_test_support GUI TIMEOUT 600)
   genko_test(test_gui_guides SOURCES gui/test_gui_guides.cpp DEPS genko_app GUI TIMEOUT 900)
   genko_test(test_gui_colours SOURCES gui/test_gui_colours.cpp DEPS genko_app genko_test_support GUI TIMEOUT 600)
   genko_test(test_gui_workspace SOURCES gui/test_gui_workspace.cpp DEPS genko_app genko_test_support GUI TIMEOUT 600)
