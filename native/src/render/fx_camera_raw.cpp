@@ -17,7 +17,10 @@
 // the tone's bases, the haze's proxy and テクスチャ (upstream: the canvas's), 周辺光量 is about its centre. ディテール's radii
 // are pixels of the working 200 dpi (upstream's pixel_scale: Ctx::s), 粒子 is placed by the working 200 dpi's grid. A page
 // of inks is worked on the colours its inks mean (FilterInks::Meaning); a 32-bit precise layer keeps values past 1
-// (upstream's float documents); a clear pixel keeps its values (upstream changes their colours unseen).
+// (upstream's float documents); a clear pixel keeps its values (upstream changes their colours unseen), and what does not
+// show never counts (D5's review P2-1: a cut-out photo's clear pixels, their colours unseen): the haze's proxy and the
+// tone's bases are means weighted by the alpha (a cell where nothing shows the mean of what shows about it), the local
+// stages' blurs are weighted by it too (each plane × α over α, in whole numbers), as PC4's other filters weigh it.
 
 #include "render/fx_camera_raw.hpp"
 
@@ -545,12 +548,91 @@ std::vector<float> guided(const std::vector<float>& i, const std::vector<float>&
     return out;
 }
 
+// The cells of a w × h plane of `n` sums each (`sums`: a cell's values × α summed) and their weights (`weights`: its α
+// summed) as means: a cell with weight its sums over it; one without (nothing shows there) the mean of the smallest square
+// about it — of sides 3, 5, 9, 17… — that holds any (as D3 fills what is clear), so what does not show never counts (D5's
+// review P2-1: a cut-out photo's clear pixels' colours, unseen, are no part of the haze nor the tone's bases).
+std::vector<float> weighted_means(const std::vector<double>& sums, const std::vector<double>& weights, int w, int h, std::size_t n) {
+    const std::size_t cells = std::size_t(w) * std::size_t(h);
+    std::vector<float> out(cells * n, 0.0f);
+    // (a summed-area table of the sums and weights: a square's in four reads)
+    const std::size_t sw = std::size_t(w) + 1, m = n + 1;
+    std::vector<double> table(sw * (std::size_t(h) + 1) * m, 0.0);
+    for (int y = 0; y < h; ++y)
+        for (int x = 0; x < w; ++x) {
+            const std::size_t i = std::size_t(y) * std::size_t(w) + std::size_t(x);
+            double* t = table.data() + ((std::size_t(y) + 1) * sw + std::size_t(x) + 1) * m;
+            const double* up = table.data() + (std::size_t(y) * sw + std::size_t(x) + 1) * m;
+            const double* left = table.data() + ((std::size_t(y) + 1) * sw + std::size_t(x)) * m;
+            const double* corner = table.data() + (std::size_t(y) * sw + std::size_t(x)) * m;
+            for (std::size_t c = 0; c < m; ++c) t[c] = (c < n ? sums[i * n + c] : weights[i]) + up[c] + left[c] - corner[c];
+        }
+    const auto square = [&](int x0, int y0, int x1, int y1, std::size_t c) {  // ([x0, x1) × [y0, y1), within the plane)
+        const auto at = [&](int x, int y) { return table[(std::size_t(y) * sw + std::size_t(x)) * m + c]; };
+        return at(x1, y1) - at(x0, y1) - at(x1, y0) + at(x0, y0);
+    };
+    for (int y = 0; y < h; ++y)
+        for (int x = 0; x < w; ++x) {
+            const std::size_t i = std::size_t(y) * std::size_t(w) + std::size_t(x);
+            if (weights[i] > 0) {
+                for (std::size_t c = 0; c < n; ++c) out[i * n + c] = static_cast<float>(sums[i * n + c] / weights[i]);
+                continue;
+            }
+            for (int r = 1; r < 2 * std::max(w, h); r *= 2) {
+                const int x0 = std::max(0, x - r), y0 = std::max(0, y - r), x1 = std::min(w, x + r + 1), y1 = std::min(h, y + r + 1);
+                const double weight = square(x0, y0, x1, y1, n);
+                if (!(weight > 0)) continue;
+                for (std::size_t c = 0; c < n; ++c) out[i * n + c] = static_cast<float>(square(x0, y0, x1, y1, c) / weight);
+                break;
+            }
+        }
+    return out;
+}
+
+// The proxies prepare works out: the haze's (at most 768 a side) and the tone's bases' (squares of r/8 pixels — 1 to 8 — of
+// the frame), each `cells` of them, for the bytes they take (prepare_bytes) and their making.
+struct Proxies {
+    int k = 1, sw = 0, sh = 0;
+    std::uint64_t haze = 0;  // (its cells; 0: no haze)
+    bool bases = false;
+    int base_r = 2, clarity_r = 3, base_step = 1, clarity_step = 1;
+    std::uint64_t base = 0;  // (the bases' cells, both)
+};
+
+Proxies proxies_of(const cr::Settings& p, int w, int h) {
+    Proxies out;
+    out.k = std::max(1, (std::max(w, h) + 767) / 768);
+    out.sw = (w + out.k - 1) / out.k;
+    out.sh = (h + out.k - 1) / out.k;
+    out.haze = p.dehaze != 0 ? std::uint64_t(out.sw) * std::uint64_t(out.sh) : 0;
+    const float long_f = static_cast<float>(std::max(w, h));
+    out.bases = !p.tone_neutral() && (p.highlights != 0 || p.shadows != 0 || p.clarity != 0);
+    out.base_r = std::max(static_cast<int>(long_f * 0.015f), 2);
+    out.clarity_r = std::max(static_cast<int>(long_f * 0.02f), 3);
+    out.base_step = std::clamp(out.base_r / 8, 1, 8);
+    out.clarity_step = std::clamp(out.clarity_r / 8, 1, 8);
+    const auto cells = [w, h](int step) { return std::uint64_t((w + step - 1) / step) * std::uint64_t((h + step - 1) / step); };
+    if (out.bases && (p.highlights != 0 || p.shadows != 0)) out.base += cells(out.base_step);
+    if (out.bases && p.clarity != 0) out.base += cells(out.clarity_step);
+    return out;
+}
+
+// The bytes prepare's arrays take at most (Kernel::prepare_bytes): the haze's proxy — its weighted sums and their table
+// (8 doubles a cell), its colours, channels and the guided filter's planes (28 floats), the order of its dark channel and
+// the sort's own (2 words) — and the bases' — their weighted sums and table (4 doubles), their guided planes (12 floats).
+std::uint64_t prepare_bytes(const cr::Settings& p, int w, int h) {
+    if (p.identity() || w <= 0 || h <= 0) return 0;
+    const Proxies sizes = proxies_of(p, w, h);
+    return sizes.haze * (8 * sizeof(double) + 28 * sizeof(float) + 2 * sizeof(std::size_t)) + sizes.base * (4 * sizeof(double) + 12 * sizeof(float));
+}
+
 // What Camera Raw works out once on the whole frame (Kernel::prepare): the gains, the haze's atmospheric light and
 // transmission (camera_raw.rs dehaze: the dark channel of a proxy of at most 768 pixels, its brightest 0.1 %, refined by
 // the guided filter), the tone's guided bases (guided_fast: the frame's clamped luminance after stages 1–2 averaged over
-// squares of r/8 pixels — 1 to 8 —, their coefficients upsampled bilinearly), the colour stages' tables. Its planes held in
-// the imaging budget while it lives.
-std::shared_ptr<const Prepared> prepare(const Json& params, const Window& whole, const Ctx& ctx) {
+// squares of r/8 pixels — 1 to 8 —, their coefficients upsampled bilinearly), the colour stages' tables. The proxies are
+// means weighted by the alpha (what is clear never counts: D5's review P2-1). Its planes held in the imaging budget — by
+// the run (prepare_bytes) or, `hold`, by itself while it lives.
+std::shared_ptr<const Prepared> prepare_held(const Json& params, const Window& whole, const Ctx& ctx, bool hold) {
     auto d = std::make_shared<Developing>();
     d->p = cr::settings_of(params);
     d->identity = d->p.identity();
@@ -575,36 +657,36 @@ std::shared_ptr<const Prepared> prepare(const Json& params, const Window& whole,
         for (float& v : g) v = v / norm * std::pow(2.0f, p.exposure);
         d->gain = g;
     }
-    // (the planes worked out here, held before they are had)
-    const int k = std::max(1, (std::max(w, h) + 767) / 768);
-    const int sw = (w + k - 1) / k, sh = (h + k - 1) / k;
-    const std::uint64_t haze_px = p.dehaze != 0 ? std::uint64_t(sw) * std::uint64_t(sh) : 0;
-    const float long_f = static_cast<float>(d->long_side);
-    const bool bases = !p.tone_neutral() && (p.highlights != 0 || p.shadows != 0 || p.clarity != 0);
-    const int base_r = std::max(static_cast<int>(long_f * 0.015f), 2), clarity_r = std::max(static_cast<int>(long_f * 0.02f), 3);
-    const int base_step = std::clamp(base_r / 8, 1, 8), clarity_step = std::clamp(clarity_r / 8, 1, 8);
-    const auto cells = [w, h](int step) { return std::uint64_t((w + step - 1) / step) * std::uint64_t((h + step - 1) / step); };
-    std::uint64_t base_px = 0;
-    if (bases && (p.highlights != 0 || p.shadows != 0)) base_px += cells(base_step);
-    if (bases && p.clarity != 0) base_px += cells(clarity_step);
-    // (the proxy's colours, counts, channels and the guided filter's planes; the bases' sums and their guided planes)
-    d->held.emplace(haze_px * (28 * sizeof(float) + sizeof(std::size_t)) + base_px * (2 * sizeof(double) + 12 * sizeof(float)));
-    // 2. かすみの除去
-    if (p.dehaze != 0) {
-        std::vector<float> small(std::size_t(sw) * std::size_t(sh) * 3, 0.0f), count(std::size_t(sw) * std::size_t(sh), 0.0f);
+    // (the planes worked out here, held before they are had: by the run, or here)
+    const Proxies sizes = proxies_of(p, w, h);
+    if (hold) d->held.emplace(prepare_bytes(p, w, h));
+    // (how far it is: its passes over the frame share kPrepareShare of the run)
+    const int passes = (sizes.haze > 0 ? 1 : 0) + (sizes.bases ? 1 : 0);
+    int pass = 0;
+    const auto said = [&pass, passes, h](int row) { ProgressScope::put(kPrepareShare * (pass + (row + 1.0) / h) / std::max(passes, 1)); };
+    // 2. かすみの除去 (its proxy's colours means weighted by the alpha)
+    if (sizes.haze > 0) {
+        const int k = sizes.k, sw = sizes.sw, sh = sizes.sh;
+        const std::size_t n = std::size_t(sw) * std::size_t(sh);
+        std::vector<double> sums(n * 3, 0.0), weights(n, 0.0);
         for (int ly = 0; ly < h; ++ly) {
             segment::check_stop();
             for (int lx = 0; lx < w; ++lx) {
                 float q[4];
                 std::copy_n(pixel_at(whole, d->frame.x0 + lx, d->frame.y0 + ly), 4, q);
+                const double alpha = std::clamp(q[3], 0.0f, 1.0f);
+                if (!(alpha > 0)) continue;
                 early(*d, q, lx, ly);  // (stage 1: the haze is not there yet)
                 const std::size_t i = std::size_t(ly / k) * std::size_t(sw) + std::size_t(lx / k);
-                for (std::size_t c = 0; c < 3; ++c) small[i * 3 + c] += std::clamp(q[c], 0.0f, 1.0f);
-                count[i] += 1.0f;
+                for (std::size_t c = 0; c < 3; ++c) sums[i * 3 + c] += std::clamp(q[c], 0.0f, 1.0f) * alpha;
+                weights[i] += alpha;
             }
+            said(ly);
         }
-        for (std::size_t i = 0; i < count.size(); ++i)
-            for (std::size_t c = 0; c < 3; ++c) small[i * 3 + c] /= std::max(count[i], 1.0f);
+        ++pass;
+        const std::vector<float> small = weighted_means(sums, weights, sw, sh, 3);
+        sums = {};
+        weights = {};
         const int r = std::max(std::max(sw, sh) / 60, 2);
         const auto min_filter = [sw, sh, r](const std::vector<float>& v) {
             std::vector<float> a(v.size()), b(v.size());
@@ -622,7 +704,6 @@ std::shared_ptr<const Prepared> prepare(const Json& params, const Window& whole,
                 }
             return b;
         };
-        const std::size_t n = std::size_t(sw) * std::size_t(sh);
         std::vector<float> channel(n);
         for (std::size_t i = 0; i < n; ++i) channel[i] = std::min({small[i * 3], small[i * 3 + 1], small[i * 3 + 2]});
         const std::vector<float> dark = min_filter(channel);
@@ -649,43 +730,47 @@ std::shared_ptr<const Prepared> prepare(const Json& params, const Window& whole,
         d->air = air;
         d->haze = true;
     }
-    // 3. the tone's guided bases: the frame's clamped luminance after stages 1–2, averaged over squares of `step`
-    if (bases) {
+    // 3. the tone's guided bases: the frame's clamped luminance after stages 1–2, its means over squares of `step` weighted
+    // by the alpha
+    if (sizes.bases) {
         struct Wanted {
             int step, r;
             float eps;
             std::optional<Base>* into;
-            std::vector<double> sum, count;
+            std::vector<double> sum, weight;
             int bw = 0, bh = 0;
         };
         std::vector<Wanted> wanted;
-        if (p.highlights != 0 || p.shadows != 0) wanted.push_back(Wanted{base_step, base_r, 0.02f, &d->base, {}, {}});
-        if (p.clarity != 0) wanted.push_back(Wanted{clarity_step, clarity_r, 0.005f, &d->clarity, {}, {}});
+        if (p.highlights != 0 || p.shadows != 0) wanted.push_back(Wanted{sizes.base_step, sizes.base_r, 0.02f, &d->base, {}, {}});
+        if (p.clarity != 0) wanted.push_back(Wanted{sizes.clarity_step, sizes.clarity_r, 0.005f, &d->clarity, {}, {}});
         for (Wanted& one : wanted) {
             one.bw = (w + one.step - 1) / one.step;
             one.bh = (h + one.step - 1) / one.step;
             one.sum.assign(std::size_t(one.bw) * std::size_t(one.bh), 0.0);
-            one.count.assign(one.sum.size(), 0.0);
+            one.weight.assign(one.sum.size(), 0.0);
         }
         for (int ly = 0; ly < h; ++ly) {
             segment::check_stop();
             for (int lx = 0; lx < w; ++lx) {
                 float q[4];
                 std::copy_n(pixel_at(whole, d->frame.x0 + lx, d->frame.y0 + ly), 4, q);
+                const double alpha = std::clamp(q[3], 0.0f, 1.0f);
+                if (!(alpha > 0)) continue;
                 early(*d, q, lx, ly);
                 const float lc = std::min(std::max(luma(q), 0.0f), 1.0f);
                 for (Wanted& one : wanted) {
                     const std::size_t i = std::size_t(ly / one.step) * std::size_t(one.bw) + std::size_t(lx / one.step);
-                    one.sum[i] += lc;
-                    one.count[i] += 1.0;
+                    one.sum[i] += lc * alpha;
+                    one.weight[i] += alpha;
                 }
             }
+            said(ly);
         }
+        ++pass;
         for (Wanted& one : wanted) {
-            std::vector<float> si(one.sum.size());
-            for (std::size_t i = 0; i < si.size(); ++i) si[i] = static_cast<float>(one.sum[i] / std::max(one.count[i], 1.0));
+            const std::vector<float> si = weighted_means(one.sum, one.weight, one.bw, one.bh, 1);
             one.sum = {};
-            one.count = {};
+            one.weight = {};
             Base base;
             base.w = one.bw;
             base.h = one.bh;
@@ -777,38 +862,54 @@ void colours(const Developing& d, float* q) {
     q[2] = c[2];
 }
 
-// A box mean of radius r of a w × h plane in whole numbers of `unit` (exact sums: fx::whole_box_passes), its edges repeated.
-void box_whole(std::vector<float>& v, int w, int h, int r, double unit) {
-    if (r > 0) whole_box_passes(v, std::size_t(w), std::size_t(h), 1, {r}, unit, kMost);
+// Box passes of `radii` over planes weighted by the alpha (D5's review P2-1: what is clear never counts — a cut-out photo's
+// clear pixels' colours, unseen, are no part of テクスチャ's, the detail's blurs): each plane × α and α itself passed together
+// in whole numbers of `unit` (exact sums: fx::whole_box_passes — the same bytes whatever the tile), each plane then their
+// ratio; a pixel whose squares hold no α keeps its value. Opaque, the passes of the planes themselves (α's are exactly 1).
+void weighted_passes(const std::vector<std::vector<float>*>& planes, const std::vector<float>& alpha, int w, int h, const std::vector<int>& radii,
+                     double unit) {
+    if (std::all_of(radii.begin(), radii.end(), [](int r) { return r <= 0; })) return;
+    const std::size_t n = planes.size() + 1, count = alpha.size();
+    std::vector<float> packed(count * n);
+    for (std::size_t i = 0; i < count; ++i) {
+        for (std::size_t k = 0; k + 1 < n; ++k) packed[i * n + k] = (*planes[k])[i] * alpha[i];
+        packed[i * n + n - 1] = alpha[i];
+    }
+    whole_box_passes(packed, std::size_t(w), std::size_t(h), n, radii, unit, kMost);
+    for (std::size_t i = 0; i < count; ++i) {
+        const float weight = packed[i * n + n - 1];
+        if (!(weight > 0)) continue;
+        for (std::size_t k = 0; k + 1 < n; ++k) (*planes[k])[i] = packed[i * n + k] / weight;
+    }
 }
 
-// The guided filter of a plane guiding itself (camera_raw.rs detail's luminance noise reduction), its box means in whole
-// numbers.
-void guided_whole(std::vector<float>& y, int w, int h, int r, float eps) {
+// The guided filter of a plane guiding itself (camera_raw.rs detail's luminance noise reduction), its box means weighted by
+// the alpha in whole numbers.
+void guided_whole(std::vector<float>& y, const std::vector<float>& alpha, int w, int h, int r, float eps) {
     std::vector<float> mi = y, mii(y.size());
     for (std::size_t k = 0; k < y.size(); ++k) mii[k] = y[k] * y[k];
-    box_whole(mi, w, h, r, kFineUnit);
-    box_whole(mii, w, h, r, kFineUnit);
+    weighted_passes({&mi, &mii}, alpha, w, h, {r}, kFineUnit);
     std::vector<float>& a = mii;  // (in place: what is left of them is a and b)
-    std::vector<float> b(y.size());
+    std::vector<float>& b = mi;
     for (std::size_t k = 0; k < y.size(); ++k) {
         const float var = mii[k] - mi[k] * mi[k];
+        const float m = mi[k];
         a[k] = var / (var + eps);
-        b[k] = mi[k] - a[k] * mi[k];
+        b[k] = m - a[k] * m;
     }
-    mi = {};
-    box_whole(a, w, h, r, kUnit);
-    box_whole(b, w, h, r, kUnit);
+    weighted_passes({&a, &b}, alpha, w, h, {r}, kUnit);
     for (std::size_t k = 0; k < y.size(); ++k) y[k] = a[k] * y[k] + b[k];
 }
 
 // The bytes a tile's run holds (Kernel::tile_bytes): its part grown by the local stages' reach — the pixels, their
-// luminance and テクスチャ's plane in floats and whole numbers —, and the detail's planes over the part grown by its reach.
+// luminance and テクスチャ's planes in floats and whole numbers —, and the detail's planes over the part grown by its reach.
 std::uint64_t tile_bytes(const cr::Settings& p, double s, int long_side, int side) {
     if (p.identity()) return 0;
     const Reach r = reach(p, s, long_side);
     const std::uint64_t r1 = std::uint64_t(side) + 2 * std::uint64_t(r.detail), r2 = r1 + 2 * std::uint64_t(r.tex);
-    return r2 * r2 * (7 * sizeof(float) + sizeof(std::int64_t)) + (r.detail > 0 ? r1 * r1 * (10 * sizeof(float) + sizeof(std::int64_t)) : 0);
+    // (R2: the pixels, l, lc, テクスチャ's two weighted planes and their whole numbers; R1: Y, the colour differences, the alpha,
+    // three weighted planes and their whole numbers, the mask)
+    return r2 * r2 * (8 * sizeof(float) + 2 * sizeof(std::int64_t)) + (r.detail > 0 ? r1 * r1 * (12 * sizeof(float) + 3 * sizeof(std::int64_t)) : 0);
 }
 
 // One tile: its part of the frame grown by what the local stages reach (R2: stages 1–2, the luminance, テクスチャ's
@@ -818,7 +919,7 @@ std::vector<float> develop(const Json& params, const Window& src, const Rect& ou
     std::shared_ptr<const Prepared> own;
     const auto* d = dynamic_cast<const Developing*>(ctx.prepared);
     if (d == nullptr) {  // (a run without the engine's prepare: the whole window its frame's)
-        own = prepare(params, src, ctx);
+        own = prepare_held(params, src, ctx, true);
         d = static_cast<const Developing*>(own.get());
     }
     std::vector<float> res = src.crop(out);
@@ -847,9 +948,11 @@ std::vector<float> develop(const Json& params, const Window& src, const Rect& ou
     // 3. tone on the luminance (over R1), the colour's ratios kept
     if (!p.tone_neutral()) {
         std::vector<float> tex;
-        if (!reach.texture.empty()) {
+        if (!reach.texture.empty()) {  // (its Gaussian weighted by the alpha)
             tex = lc;
-            whole_box_passes(tex, std::size_t(w2), std::size_t(h2), 1, reach.texture, kUnit, 1.0);
+            std::vector<float> alpha(n2);
+            for (std::size_t i = 0; i < n2; ++i) alpha[i] = std::clamp(px[i * 4 + 3], 0.0f, 1.0f);
+            weighted_passes({&tex}, alpha, w2, h2, reach.texture, kUnit);
         }
         const float k_con = p.contrast / 100.0f * 0.6f;
         const float tau = 2.0f * std::numbers::pi_v<float>;
@@ -891,7 +994,7 @@ std::vector<float> develop(const Json& params, const Window& src, const Rect& ou
     if (p.noise_luminance > 0 || p.noise_color > 0 || p.sharpen_amount > 0) {
         const int w1 = r1.width(), h1 = r1.height();
         const std::size_t n1 = r1.area();
-        std::vector<float> yl(n1), cb(n1), cr(n1);
+        std::vector<float> yl(n1), cb(n1), cr(n1), alpha(n1);
         for (int y = r1.y0; y < r1.y1; ++y)
             for (int x = r1.x0; x < r1.x1; ++x) {
                 const std::size_t j = std::size_t(y - r1.y0) * std::size_t(w1) + std::size_t(x - r1.x0);
@@ -899,35 +1002,42 @@ std::vector<float> develop(const Json& params, const Window& src, const Rect& ou
                 yl[j] = luma(q);
                 cb[j] = q[2] - yl[j];
                 cr[j] = q[0] - yl[j];
+                alpha[j] = std::clamp(q[3], 0.0f, 1.0f);
             }
+        // (each blur weighted by the alpha: what is clear never counts)
         if (p.noise_luminance > 0) {
             std::vector<float> smooth = yl;
-            guided_whole(smooth, w1, h1, reach.nl_radius, reach.nl_eps);
+            guided_whole(smooth, alpha, w1, h1, reach.nl_radius, reach.nl_eps);
             const float keep = p.noise_luminance_detail / 100.0f * 0.5f;
             for (std::size_t j = 0; j < n1; ++j) yl[j] = smooth[j] + (yl[j] - smooth[j]) * keep;
         }
         if (p.noise_color > 0 && !reach.colour.empty()) {
             const float keep = p.noise_color_detail / 100.0f * 0.3f;
-            for (std::vector<float>* plane : {&cb, &cr}) {
-                std::vector<float> blurred = *plane;
-                whole_box_passes(blurred, std::size_t(w1), std::size_t(h1), 1, reach.colour, kUnit, kMost);
-                for (std::size_t j = 0; j < n1; ++j) (*plane)[j] = blurred[j] + ((*plane)[j] - blurred[j]) * keep;
+            std::vector<float> bcb = cb, bcr = cr;
+            weighted_passes({&bcb, &bcr}, alpha, w1, h1, reach.colour, kUnit);
+            for (std::size_t j = 0; j < n1; ++j) {
+                cb[j] = bcb[j] + (cb[j] - bcb[j]) * keep;
+                cr[j] = bcr[j] + (cr[j] - bcr[j]) * keep;
             }
         }
         if (p.sharpen_amount > 0) {
             std::vector<float> blur = yl;
-            whole_box_passes(blur, std::size_t(w1), std::size_t(h1), 1, reach.sharpen, kUnit, kMost);
+            weighted_passes({&blur}, alpha, w1, h1, reach.sharpen, kUnit);
             // (masking: an edge mask from the slope of a smoothed luminance)
             std::vector<float> mask;
             if (p.sharpen_masking > 0) {
                 std::vector<float> sm = yl;
-                whole_box_passes(sm, std::size_t(w1), std::size_t(h1), 1, reach.mask, kUnit, kMost);
+                weighted_passes({&sm}, alpha, w1, h1, reach.mask, kUnit);
                 const float t = p.sharpen_masking / 100.0f * 0.08f;
                 mask.resize(n1);
-                const auto s_at = [&sm, w1, h1](int x, int y) { return sm[std::size_t(std::clamp(y, 0, h1 - 1)) * std::size_t(w1) + std::size_t(std::clamp(x, 0, w1 - 1))]; };
+                // (a neighbour that is clear: no slope across it — the pixel's own value)
+                const auto s_at = [&sm, &alpha, w1, h1](int x, int y, int fx, int fy) {
+                    const std::size_t at = std::size_t(std::clamp(y, 0, h1 - 1)) * std::size_t(w1) + std::size_t(std::clamp(x, 0, w1 - 1));
+                    return alpha[at] > 0 ? sm[at] : sm[std::size_t(fy) * std::size_t(w1) + std::size_t(fx)];
+                };
                 for (int y = 0; y < h1; ++y)
                     for (int x = 0; x < w1; ++x) {
-                        const float gx = s_at(x + 1, y) - s_at(x - 1, y), gy = s_at(x, y + 1) - s_at(x, y - 1);
+                        const float gx = s_at(x + 1, y, x, y) - s_at(x - 1, y, x, y), gy = s_at(x, y + 1, x, y) - s_at(x, y - 1, x, y);
                         mask[std::size_t(y) * std::size_t(w1) + std::size_t(x)] = smoothstep(t * 0.5f, t + 1e-4f, std::hypot(gx, gy));
                     }
             }
@@ -1033,7 +1143,8 @@ Kernel camera_raw_kernel() {
         if (p.grain_amount > 0) cost += 40;
         return cost;
     };
-    k.prepare = prepare;
+    k.prepare = [](const Json& params, const Window& whole, const Ctx& ctx) { return prepare_held(params, whole, ctx, false); };
+    k.prepare_bytes = [](const Json& params, const Ctx& ctx) { return prepare_bytes(cr::settings_of(params), ctx.bounds.width(), ctx.bounds.height()); };
     k.tile_bytes = [](const Json& params, const Ctx& ctx, int side) {
         return tile_bytes(cr::settings_of(params), ctx.s, std::max(ctx.bounds.width(), ctx.bounds.height()), side);
     };

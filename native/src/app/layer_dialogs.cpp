@@ -239,6 +239,10 @@ void CurveEditor::mousePressEvent(QMouseEvent* event) {
     if (!index) {
         const auto v = to_value(pos);
         if (std::any_of(points_.begin(), points_.end(), [&](const auto& p) { return std::abs(p[0] - v[0]) < 3; })) return;
+        if (most_ > 0 && points_.size() >= most_) {  // (PC4 D5: no more than it holds)
+            if (full) full();
+            return;
+        }
         points_.push_back(v);
         std::sort(points_.begin(), points_.end());
         index = static_cast<std::size_t>(std::find(points_.begin(), points_.end(), v) - points_.begin());

@@ -4,13 +4,18 @@
 // a selection, as a smart filter) on Genko's surfaces and ops; each stage changing the picture alone; the same bytes whatever
 // the tiling and the threads; a page of inks worked on the colours it means (its inks as they were at the defaults, a grey
 // on the plates' rules); the same look at 200 and 600 dpi; the frame what shows of the layer; its planes held in the imaging
-// budget and its work stopped when asked; the settings' table (the point curves, the wheels, the catalogue).
+// budget and its work stopped when asked; the settings' table (the point curves, the wheels, the catalogue). D5's review: what is
+// clear never counts (a hole, a cut-out disc), the same bytes on a part of the layer and on a page of inks, a selection
+// keeps the frame, a smart filter saved and read back, prepare's memory held before the threads' and its progress.
 
+#include <QTemporaryDir>
 #include <QtTest/QtTest>
 
 #include <algorithm>
 #include <array>
+#include <atomic>
 #include <cmath>
+#include <filesystem>
 #include <functional>
 #include <stop_token>
 #include <string>
@@ -30,6 +35,10 @@
 #include "render/page.hpp"
 #include "render/raster.hpp"
 #include "render/segment/segment.hpp"
+#include "storage/lock.hpp"
+#include "storage/reader.hpp"
+#include "storage/transaction.hpp"
+#include "storage/writer.hpp"
 #include "testsupport.hpp"
 
 using namespace genko;
@@ -545,10 +554,159 @@ private slots:
             }
             QVERIFY(refused);
         }
+        // (D5's review P3-6: prepare's arrays — some 25 MB here — held before the threads' share is decided: a budget that holds
+        // them, the window and one thread's tile works it on fewer threads, not refused)
+        {
+            const render::ImageAllocationBudget budget{40ull * 1024 * 1024};
+            QVERIFY(run_precise(raster, Json{{"dehaze", 40}, {"clarity", 30}}, {256, 4}) != raster);
+        }
+        // (D5's review P3-7: prepare says how far it is — its share — and the tiles the rest, to the whole)
+        {
+            std::atomic<double> done{0.0};
+            const render::fx::ProgressScope progress(done);
+            (void)run_precise(raster, Json{{"dehaze", 40}, {"clarity", 30}});
+            QCOMPARE(done.load(), 1.0);
+        }
+        // (D5's review P3-11: a kind that prepares reads its base box once — any other is refused)
+        {
+            render::fx::Kernel odd;
+            odd.kind = "test_prepares";
+            odd.halo = [](const Json&, const render::fx::Ctx&) { return render::fx::Halo::margin(1); };
+            odd.prepare = [](const Json&, const render::fx::Window&, const render::fx::Ctx&) { return std::make_shared<render::fx::Prepared>(); };
+            odd.run = [](const Json&, const render::fx::Window& src, const Rect& out, const render::fx::Ctx&) { return src.crop(out); };
+            const auto surface = render::fx::precise_surface(raster);
+            QVERIFY_EXCEPTION_THROWN(render::fx::apply(*surface, odd, Json::object(), core::FilterInks::Plates, Rect{0, 0, 300, 300}, nullptr, 1), std::logic_error);
+        }
         std::stop_source stop;
         stop.request_stop();
         const render::segment::StopScope scope(stop.get_token());
         QVERIFY_EXCEPTION_THROWN((void)run_precise(raster, Json{{"dehaze", 40}}), render::Cancelled);
+    }
+
+    // What is clear never counts (D5's review P2-1): a photo with a hole, a photo cut out as a disc — their clear pixels black
+    // or white, unseen — come out the same where they show, for the haze, the tone's bases, テクスチャ, 明瞭度, sharpening, noise
+    // reduction and everything; a flat photo stays flat at the hole's edge (no rim of the clear pixels' colour); the defaults
+    // the identity; the same bytes whatever the tiling.
+    void whatIsClearNeverCounts() {
+        const std::uint32_t w = 120, h = 90;
+        const auto holed = [&](const Px& clear, bool disc, const std::vector<Px>& photo) {
+            std::vector<Px> px = photo;
+            for (std::uint32_t y = 0; y < h; ++y)
+                for (std::uint32_t x = 0; x < w; ++x) {
+                    const double dx = x + 0.5 - w / 2.0, dy = y + 0.5 - h / 2.0;
+                    const bool hole = x >= 50 && x < 70 && y >= 35 && y < 55;
+                    const bool outside = disc && dx * dx / (55.0 * 55.0) + dy * dy / (42.0 * 42.0) > 1.0;
+                    if (hole || outside) px[std::size_t(y) * w + x] = clear;
+                }
+            return px;
+        };
+        const auto shows = [&](const std::vector<Px>& a, const std::vector<Px>& b, const std::vector<Px>& mask, const std::string& what) {
+            for (std::size_t i = 0; i < a.size(); ++i) {
+                if (!(mask[i][3] > 0)) continue;
+                for (std::size_t c = 0; c < 4; ++c)
+                    if (a[i][c] != b[i][c]) {
+                        QFAIL(qPrintable(QStringLiteral("%1: pixel %2 differs (%3 vs %4)").arg(QString::fromStdString(what)).arg(i).arg(a[i][c]).arg(b[i][c])));
+                        return;
+                    }
+            }
+        };
+        Json all = everything();
+        for (const bool disc : {false, true}) {
+            const auto black = holed({0, 0, 0, 0}, disc, ramp(w, h)), white = holed({1, 1, 1, 0}, disc, ramp(w, h));
+            for (const Json& given : {Json{{"dehaze", 50}}, Json{{"dehaze", -50}}, Json{{"highlights", -60}, {"shadows", 60}}, Json{{"clarity", 80}}, Json{{"texture", 80}},
+                                      Json{{"sharpen_amount", 120}, {"sharpen_masking", 40}}, Json{{"noise_luminance", 70}}, Json{{"noise_color", 70}}, all}) {
+                const auto a = developed(w, h, black, given), b = developed(w, h, white, given);
+                shows(a, b, black, given.dump() + (disc ? " (a disc)" : " (a hole)"));
+                // (the same bytes whatever the tiling)
+                QVERIFY2(run_precise(precise(w, h, black, false), given, {9, 3}) == run_precise(precise(w, h, black, false), given, {256, 1}), given.dump().c_str());
+            }
+            QCOMPARE(run_precise(precise(w, h, black, false), Json::object()), precise(w, h, black, false));
+        }
+        // a flat photo: flat where it shows, at the hole's edge too
+        const auto flat_holed = holed({0, 0, 0, 0}, false, flat(w, h, {0.5f, 0.5f, 0.5f, 1}));
+        for (const Json& given : {Json{{"sharpen_amount", 150}}, Json{{"dehaze", 60}}, Json{{"clarity", 100}}, Json{{"texture", 100}}, Json{{"noise_luminance", 100}}}) {
+            const auto out = developed(w, h, flat_holed, given);
+            const float centre = out[10 * w + 10][1];
+            for (std::uint32_t y = 30; y < 60; ++y)
+                for (std::uint32_t x = 45; x < 75; ++x) {
+                    const std::size_t i = std::size_t(y) * w + x;
+                    if (!(flat_holed[i][3] > 0)) continue;
+                    QVERIFY2(std::fabs(out[i][1] - centre) < 0.004f, qPrintable(QStringLiteral("%1 at %2, %3: %4 vs %5").arg(QString::fromStdString(given.dump())).arg(x).arg(y).arg(out[i][1]).arg(centre)));
+                }
+        }
+    }
+
+    // On a part of the layer (a photo placed with clear pixels about it and a hole in it) and on a page of inks, the same bytes
+    // whatever the tiling and the threads.
+    void theSameBytesOnAPartAndOnInks() {
+        render::Image layer = render::Image::create("RGBA", render::Size{110, 80}, render::Ink{200, 30, 30, 0});
+        render::Image photo = eight_of(60, 44, ramp(60, 44));
+        photo.paste(render::Ink{10, 250, 10, 0}, render::Box{25, 15, 35, 25});
+        layer.paste(photo, render::Box{30, 20, 90, 64});
+        const std::string whole = run_eight(layer, everything(), 1, {256, 1});
+        QVERIFY(whole != layer.tobytes());
+        for (const render::fx::Tiling tiling : {render::fx::Tiling{7, 3}, render::fx::Tiling{13, 2}, render::fx::Tiling{5, 4}})
+            QVERIFY2(run_eight(layer, everything(), 1, tiling) == whole, qPrintable(QString::number(tiling.tile)));
+        QCOMPARE(run_eight(layer, everything(), 1.7, {11, 3}), run_eight(layer, everything(), 1.7, {256, 1}));
+        for (const Json& mode : {Json{{"mode", "cmyk"}, {"profile", "coated-cmyk"}}, Json{{"mode", "lab"}}}) {
+            const auto doc = ink_page(mode, 40, [](std::uint32_t x, std::uint32_t y, unsigned c) { return ((x * 7 + y * 5 + c * 13) % 50) / 60.0 + 0.1; });
+            const core::InkPixels inks = core::decode_ink_raster(*layer_of(doc, "pic").ink_raster);
+            const auto run = [&](const render::fx::Tiling& tiling) {
+                const auto surface = render::fx::ink_surface(inks, *doc.page(0).color);
+                render::fx::apply(*surface, kernel(), normal(everything()), core::FilterInks::Meaning, Rect{0, 0, 40, 40}, nullptr, 1, nullptr, tiling);
+                return render::fx::take_bytes(*surface);
+            };
+            const std::string a = run({256, 1});
+            QVERIFY(a != core::encode_ink_raster(inks));
+            QVERIFY2(run({7, 3}) == a && run({13, 2}) == a, mode.dump().c_str());
+        }
+    }
+
+    // A selection keeps the result to it; the frame is still the photo's (周辺光量 about its centre, as the whole one's).
+    void aSelectionKeepsTheFrame() {
+        const auto doc = eight_page(120, 80, eight_of(120, 80, flat(120, 80, {0.6f, 0.6f, 0.6f, 1})));
+        const Json params{{"vignette_amount", -80}, {"dehaze", 30}};
+        Json inside{{"op", "filter_raster"}, {"page", 1}, {"id", "paint"}, {"kind", "camera_raw"}, {"area", Json{{"rect", Json::array({0, 0, 60 * kInch / 200.0, 80 * kInch / 200.0})}}}};
+        Json whole_op{{"op", "filter_raster"}, {"page", 1}, {"id", "paint"}, {"kind", "camera_raw"}};
+        inside.update(params);
+        whole_op.update(params);
+        const render::Image part = picture_of(apply_ops(doc, Json::array({inside})).doc);
+        const render::Image whole = picture_of(apply_ops(doc, Json::array({whole_op})).doc);
+        for (const auto& [x, y] : std::vector<std::pair<int, int>>{{2, 2}, {30, 40}, {55, 70}, {10, 78}}) QCOMPARE(part.getpixel(x, y), whole.getpixel(x, y));
+        QCOMPARE(part.getpixel(110, 2), picture_of(doc).getpixel(110, 2));  // (outside: as it was)
+        QVERIFY(part.getpixel(2, 2)[1] < part.getpixel(58, 40)[1]);  // (the photo's corner darker than near its centre)
+    }
+
+    // A smart filter with its point curves, wheels and colour mixer saved and read back (filters@1): the book not read-only,
+    // the settings as they were, the picture drawn the same.
+    void aSmartFilterSavedAndReadBack() {
+        const auto doc = apply_ops(eight_page(120, 80, eight_of(120, 80, ramp(120, 80))),
+                                   Json::array({Json{{"op", "smart_convert"}, {"page", 1}, {"ids", Json::array({"paint"})}, {"new_id", "so"}}}))
+                             .doc;
+        Json add{{"op", "smart_filter_add"}, {"page", 1}, {"id", "so"}, {"kind", "camera_raw"}};
+        add.update(everything());
+        const auto done = apply_ops(doc, Json::array({add})).doc;
+        QTemporaryDir tmp;
+        const std::filesystem::path dir = std::filesystem::path(tmp.path().toStdString()) / "b";
+        {
+            storage::ProjectLock lock(dir, "human:test");
+            lock.try_acquire();
+            storage::SaveRequest request;
+            request.actor = "human:test";
+            request.ops = Json::array();
+            storage::Saver(lock).save(done, request);
+        }
+        const auto loaded = storage::load_document(dir);
+        QVERIFY2(loaded.document.read_only_reason.empty(), loaded.document.read_only_reason.c_str());
+        QVERIFY(std::find(loaded.document.features.begin(), loaded.document.features.end(), std::string(core::kFiltersFeature)) != loaded.document.features.end());
+        const Json stored = (*layer_of(loaded.document, "so").smart)["filters"][0];
+        QCOMPARE(stored["kind"], Json("camera_raw"));
+        QCOMPARE(stored["params"], (*layer_of(done, "so").smart)["filters"][0]["params"]);
+        QCOMPARE(stored["params"]["grade_shadows"], (Json{{"hue", 220}, {"sat", 40}, {"lum", 10}}));
+        QCOMPARE(stored["params"]["point_curve"].size(), std::size_t(3));
+        const render::Image before = render::layer_image(done.page(0), layer_of(done, "so"), 200, &done);
+        const render::Image after = render::layer_image(loaded.document.page(0), layer_of(loaded.document, "so"), 200, &loaded.document);
+        QCOMPARE(after.tobytes(), before.tobytes());
     }
 
     // The settings' table: the defaults (the identity), each in its range, the point curves read (straight, sorted, half a

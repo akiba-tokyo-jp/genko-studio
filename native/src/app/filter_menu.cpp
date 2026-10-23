@@ -445,6 +445,7 @@ void MainWindow::filter_command(const FilterItem& item) {
         call.send = send;
         call.page = page;
         call.layer = layer;
+        call.seed = seed;  // (D5: the window's preview of the grain the same as the op's)
         (*own)(call);
         return;
     }

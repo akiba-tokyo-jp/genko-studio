@@ -39,6 +39,9 @@ public:
     // cubic spline: native.method upstream) or Genko's (Python's monotone cubic).
     void set_points(std::vector<std::array<double, 2>> points);
     void set_upstream(bool upstream);
+    // (PC4 D5) At most this many points (0: any): a click past it adds none and calls `full`.
+    void set_most_points(std::size_t most) { most_ = most; }
+    std::function<void()> full;
 signals:
     void changed();
 protected:
@@ -53,6 +56,7 @@ private:
     std::vector<std::array<double, 2>> points_;
     std::optional<std::size_t> drag_;
     bool upstream_ = false;
+    std::size_t most_ = 0;
 };
 
 // The colours of a gradient: each a colour, a place (0..100 %) and how strong it is; ＋ adds one; ready-made rows

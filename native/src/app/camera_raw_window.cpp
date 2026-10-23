@@ -26,7 +26,9 @@
 
 #include <algorithm>
 #include <cmath>
+#include <map>
 #include <optional>
+#include <set>
 #include <stop_token>
 #include <string>
 #include <vector>
@@ -43,7 +45,6 @@
 #include "render/fx.hpp"
 #include "render/fx_camera_raw.hpp"
 #include "render/image.hpp"
-#include "render/raster_ops.hpp"
 #include "render/segment/segment.hpp"
 #include "service/wording.hpp"
 
@@ -52,6 +53,10 @@ namespace genko::app::camera_raw_window {
 using core::Json;
 
 // --- the picture -----------------------------------------------------------------------------------------------------------
+
+bool well_formed(const Picture& p) {
+    return p.width > 0 && p.height > 0 && p.rgba.size() == std::size_t(p.width) * std::size_t(p.height) * 4 && std::isfinite(p.s) && p.s > 0;
+}
 
 namespace {
 
@@ -70,10 +75,6 @@ render::fx::Rect frame_of(const Picture& p) {
     return render::fx::Rect{x0, y0, x1, y1};
 }
 
-QImage qimage_of(const std::string& rgba, int w, int h) {
-    return QImage(reinterpret_cast<const uchar*>(rgba.data()), w, h, w * 4, QImage::Format_RGBA8888).copy();
-}
-
 std::string bytes_of(const std::vector<float>& rgba) {
     std::string out(rgba.size(), '\0');
     for (std::size_t i = 0; i < rgba.size(); ++i)
@@ -81,27 +82,37 @@ std::string bytes_of(const std::vector<float>& rgba) {
     return out;
 }
 
+// The picture's values as the screen shows them (its own conversion, else as they are: sRGB's).
+QImage screen_of(const Picture& p, std::vector<float> rgba) {
+    if (p.to_screen) p.to_screen(rgba.data(), rgba.size() / 4);
+    const std::string bytes = bytes_of(rgba);
+    return QImage(reinterpret_cast<const uchar*>(bytes.data()), p.width, p.height, p.width * 4, QImage::Format_RGBA8888).copy();
+}
+
 }  // namespace
 
 QImage shown(const Picture& picture) {
-    if (picture.width <= 0 || picture.height <= 0) return QImage();
-    return qimage_of(bytes_of(picture.rgba), picture.width, picture.height);
+    if (!well_formed(picture)) return QImage();
+    return screen_of(picture, picture.rgba);
 }
 
 QImage developed(const Picture& picture, const Json& settings) {
     const render::fx::Kernel* kernel = render::fx::kernel("camera_raw");
-    if (kernel == nullptr || picture.width <= 0 || picture.height <= 0) return QImage();
+    if (kernel == nullptr || !well_formed(picture)) return QImage();
     const render::ImageAllocationBudget budget{1ULL << 30};
     const render::fx::Rect frame = frame_of(picture);
     // (the op's run on a part: the picture's place on its grid — 粒子 —, its frame what shows)
     const render::fx::PlaceScope place(picture.x0, picture.y0,
                                        render::fx::Rect{picture.x0 + frame.x0, picture.y0 + frame.y0, picture.x0 + frame.x1, picture.y0 + frame.y1});
     const render::fx::Rect all{0, 0, picture.width, picture.height};
-    if (!picture.floats) {  // (an 8-bit one: worked as an 8-bit layer, its result within 0..1)
+    std::vector<float> out(picture.rgba.size());
+    if (!picture.floats) {  // (worked as an 8-bit layer: its result within 0..1)
         const render::Image rgba = render::Image::frombytes("RGBA", render::Size{picture.width, picture.height}, bytes_of(picture.rgba));
         const auto surface = render::fx::eight_surface(rgba);
         render::fx::apply(*surface, *kernel, settings, core::FilterInks::Meaning, all, nullptr, picture.s);
-        return qimage_of(render::fx::take_image(*surface).tobytes(), picture.width, picture.height);
+        const std::string bytes = render::fx::take_image(*surface).tobytes();
+        for (std::size_t i = 0; i < out.size(); ++i) out[i] = static_cast<unsigned char>(bytes[i]) / 255.0f;
+        return screen_of(picture, std::move(out));
     }
     const std::string raster = core::encode_color_pixels(std::uint32_t(picture.width), std::uint32_t(picture.height), "f32", [&picture](std::size_t i) {
         return std::array<double, 4>{picture.rgba[i * 4], picture.rgba[i * 4 + 1], picture.rgba[i * 4 + 2], std::clamp(picture.rgba[i * 4 + 3], 0.0f, 1.0f)};
@@ -109,12 +120,11 @@ QImage developed(const Picture& picture, const Json& settings) {
     const auto surface = render::fx::precise_surface(raster);
     render::fx::apply(*surface, *kernel, settings, core::FilterInks::Meaning, all, nullptr, picture.s);
     const core::ColorRasterView view(render::fx::take_bytes(*surface));
-    std::vector<float> out(std::size_t(picture.width) * std::size_t(picture.height) * 4);
     for (std::size_t i = 0; i < out.size() / 4; ++i) {
         const auto p = view.pixel(i);
         for (std::size_t c = 0; c < 4; ++c) out[i * 4 + c] = static_cast<float>(p[c]);
     }
-    return qimage_of(bytes_of(out), picture.width, picture.height);
+    return screen_of(picture, std::move(out));
 }
 
 // --- the panel ---------------------------------------------------------------------------------------------------------------
@@ -132,31 +142,9 @@ QString words(const char* text) { return QString::fromUtf8(text); }
 
 const std::array<const char*, 8> kBands{"レッド", "オレンジ", "イエロー", "グリーン", "アクア", "ブルー", "パープル", "マゼンタ"};
 
-}  // namespace
-
-struct CameraRawPanel::Parts {
-    std::vector<adjust_forms::Form*> forms;
-    lens_window::PictureView* view = nullptr;
-    QLabel* status = nullptr;
-    QCheckBox* before = nullptr;
-    QTabWidget* tabs = nullptr;
-    // トーンカーブ's point curves: RGB, レッド, グリーン, ブルー (shown one at a time)
-    std::array<std::vector<std::array<double, 2>>, 4> curves;
-    int curve = 0;
-    CurveEditor* editor = nullptr;
-    QComboBox* channel = nullptr;
-    Json seed = Json(0);  // (粒子's seed as it came: kept)
-    std::shared_ptr<const Picture> picture;
-    QImage original, result;
-    QTimer* timer = nullptr;
-    std::shared_ptr<std::stop_source> stop;
-    int previews = 0;
-    bool quiet = false;
-};
-
-namespace {
-
 constexpr std::array<const char*, 4> kCurveKeys{"point_curve", "point_curve_red", "point_curve_green", "point_curve_blue"};
+// (core/filter_kinds read_point_curve: at most 19 points)
+constexpr std::size_t kMostCurvePoints = 19;
 
 std::vector<std::array<double, 2>> straight() { return {{0, 0}, {255, 255}}; }
 
@@ -173,15 +161,59 @@ Json curve_json(const std::vector<std::array<double, 2>>& points) {
     for (const auto& p : points) linear = linear && std::fabs(p[0] - p[1]) < 1e-3;
     Json out = Json::array();
     if (linear) return out;  // (the straight line: [], upstream's empty curve)
-    for (const auto& p : points) out.push_back(Json::array({std::lround(p[0] * 10) / 10.0, std::lround(p[1] * 10) / 10.0}));
+    for (const auto& p : points) out.push_back(Json::array({p[0], p[1]}));
     return out;
+}
+
+// A key's value in settings ("grade_shadows.hue": the wheel's hue), and its place to be set.
+const Json* at_path(const Json& v, const std::string& path) {
+    const std::size_t dot = path.find('.');
+    const Json* here = core::get(v, dot == std::string::npos ? path : path.substr(0, dot));
+    if (here == nullptr || dot == std::string::npos) return here;
+    return core::get(*here, path.substr(dot + 1));
+}
+
+void put_at(Json& v, const std::string& path, const Json& value) {
+    const std::size_t dot = path.find('.');
+    if (dot == std::string::npos) {
+        v[path] = value;
+        return;
+    }
+    Json& group = v[path.substr(0, dot)];
+    if (!group.is_object()) group = Json::object();
+    group[path.substr(dot + 1)] = value;
 }
 
 }  // namespace
 
+struct CameraRawPanel::Parts {
+    std::vector<adjust_forms::Form*> forms;
+    adjust_forms::Form* basic = nullptr;
+    std::map<std::string, std::pair<adjust_forms::Form*, QWidget*>> rows;  // (each key's row: to hide it)
+    lens_window::PictureView* view = nullptr;
+    QLabel* status = nullptr;
+    QCheckBox* before = nullptr;
+    QTabWidget* tabs = nullptr;
+    // トーンカーブ's point curves: RGB, レッド, グリーン, ブルー (shown one at a time)
+    std::array<std::vector<std::array<double, 2>>, 4> curves;
+    int curve = 0;
+    CurveEditor* editor = nullptr;
+    QComboBox* channel = nullptr;
+    // the settings it started from (their normal form) and the keys the person touched since (D5's review P3-2)
+    Json base;
+    std::set<std::string> touched;
+    std::shared_ptr<const Picture> picture;
+    QImage original, result;
+    QTimer* timer = nullptr;
+    std::shared_ptr<std::stop_source> stop;
+    int previews = 0;
+    bool quiet = false;
+};
+
 CameraRawPanel::CameraRawPanel(QWidget* parent) : QWidget(parent), parts_(std::make_unique<Parts>()) {
     setObjectName(QStringLiteral("camera_raw_panel"));
     Parts& parts = *parts_;
+    parts.base = core::normalize_filter("camera_raw", Json::object(), nullptr);
     auto* outer = new QHBoxLayout(this);
     outer->setContentsMargins(0, 0, 0, 0);
     // (the picture, its status and 補正前)
@@ -216,12 +248,14 @@ CameraRawPanel::CameraRawPanel(QWidget* parent) : QWidget(parent), parts_(std::m
     parts.timer->setSingleShot(true);
     parts.timer->setInterval(150);
 
-    const auto touched = [this] {
+    // (a key the person changed: its field's value from now on, the preview a moment later)
+    const auto touched = [this](const std::string& key) {
         if (parts_->quiet) return;
+        parts_->touched.insert(key);
         parts_->timer->start();
         if (changed) changed();
     };
-    const auto tab = [&parts, touched](const QString& title) {
+    const auto tab = [&parts](const QString& title) {
         auto* scroll = new QScrollArea;
         scroll->setWidgetResizable(true);
         scroll->setFrameShape(QFrame::NoFrame);
@@ -229,11 +263,11 @@ CameraRawPanel::CameraRawPanel(QWidget* parent) : QWidget(parent), parts_(std::m
         auto* form = new adjust_forms::Form;
         scroll->setWidget(form);
         parts.forms.push_back(form);
-        QObject::connect(form, &adjust_forms::Form::changed, form, touched);
         return form;
     };
     // A slider (Camera Raw's: lo..hi, `decimals` places) with its number for `key` (a path into a group: "grade_shadows.hue").
-    const auto slider = [touched](adjust_forms::Form* form, const std::string& key, const QString& label, double lo, double hi, double fallback, int decimals = 0) {
+    const auto slider = [&parts, touched](adjust_forms::Form* form, const std::string& key, const QString& label, double lo, double hi, double fallback,
+                                          int decimals = 0) {
         const double scale = std::pow(10.0, decimals);
         auto* row = new QWidget;
         auto* line = new QHBoxLayout(row);
@@ -257,15 +291,15 @@ CameraRawPanel::CameraRawPanel(QWidget* parent) : QWidget(parent), parts_(std::m
             s.slider->setValue(static_cast<int>(std::lround(v * scale)));
         };
         set(fallback);
-        QObject::connect(s.slider, &QSlider::valueChanged, row, [s, scale, touched](int v) {
+        QObject::connect(s.slider, &QSlider::valueChanged, row, [s, scale, touched, key](int v) {
             const QSignalBlocker b(s.spin);
             s.spin->setValue(v / scale);
-            touched();
+            touched(key);
         });
-        QObject::connect(s.spin, &QDoubleSpinBox::valueChanged, row, [s, scale, touched](double v) {
+        QObject::connect(s.spin, &QDoubleSpinBox::valueChanged, row, [s, scale, touched, key](double v) {
             const QSignalBlocker a(s.slider);
             s.slider->setValue(static_cast<int>(std::lround(v * scale)));
-            touched();
+            touched(key);
         });
         form->custom(
             key, label, row,
@@ -274,6 +308,7 @@ CameraRawPanel::CameraRawPanel(QWidget* parent) : QWidget(parent), parts_(std::m
                 return decimals == 0 ? Json(static_cast<std::int64_t>(std::lround(v))) : Json(std::lround(v * std::pow(10.0, decimals)) / std::pow(10.0, decimals));
             },
             [set, fallback](const Json& v) { set(v.is_number() ? v.get<double>() : fallback); }, Json(fallback));
+        parts.rows[key] = {form, row};
     };
     const auto heading = [](adjust_forms::Form* form, const QString& text) {
         auto* label = new QLabel(QStringLiteral("<b>%1</b>").arg(text));
@@ -283,6 +318,7 @@ CameraRawPanel::CameraRawPanel(QWidget* parent) : QWidget(parent), parts_(std::m
     // 基本補正
     {
         adjust_forms::Form* form = tab(QStringLiteral("基本補正"));
+        parts.basic = form;
         heading(form, QStringLiteral("ホワイトバランス: 撮影時の設定"));
         slider(form, "temperature", words("色温度"), -100, 100, 0);
         slider(form, "tint", words("色かぶり補正"), -100, 100, 0);
@@ -320,7 +356,7 @@ CameraRawPanel::CameraRawPanel(QWidget* parent) : QWidget(parent), parts_(std::m
             boxes[i]->setDecimals(0);
             boxes[i]->setValue(fallback[i]);
             line->addWidget(boxes[i]);
-            QObject::connect(boxes[i], &QDoubleSpinBox::valueChanged, splits, touched);
+            QObject::connect(boxes[i], &QDoubleSpinBox::valueChanged, splits, [touched] { touched("curve_splits"); });
         }
         form->custom(
             "curve_splits", words("領域の区切り"), splits,
@@ -332,6 +368,7 @@ CameraRawPanel::CameraRawPanel(QWidget* parent) : QWidget(parent), parts_(std::m
                 }
             },
             Json::array({25, 50, 75}));
+        parts.rows["curve_splits"] = {form, splits};
         heading(form, QStringLiteral("ポイントカーブ"));
         parts.channel = new QComboBox;
         parts.channel->setObjectName(QStringLiteral("camera_raw_curve_channel"));
@@ -339,6 +376,9 @@ CameraRawPanel::CameraRawPanel(QWidget* parent) : QWidget(parent), parts_(std::m
         form->layout_form()->addRow(words("チャンネル"), parts.channel);
         parts.editor = new CurveEditor(straight());
         parts.editor->setObjectName(QStringLiteral("camera_raw_curve"));
+        // (at most 19 points: one more is not added, and the window says so — D5's review P3-1)
+        parts.editor->set_most_points(kMostCurvePoints);
+        parts.editor->full = [this] { parts_->status->setText(QStringLiteral("ポイントカーブの点は %1 個までです").arg(kMostCurvePoints)); };
         form->layout_form()->addRow(parts.editor);
         for (auto& c : parts.curves) c = straight();
         QObject::connect(parts.channel, &QComboBox::currentIndexChanged, parts.editor, [this](int index) {
@@ -350,7 +390,7 @@ CameraRawPanel::CameraRawPanel(QWidget* parent) : QWidget(parent), parts_(std::m
         QObject::connect(parts.editor, &CurveEditor::changed, parts.editor, [this, touched] {
             Parts& p = *parts_;
             p.curves[static_cast<std::size_t>(p.curve)] = p.editor->points();
-            touched();
+            touched(kCurveKeys[static_cast<std::size_t>(p.curve)]);
         });
     }
     // ディテール
@@ -380,6 +420,7 @@ CameraRawPanel::CameraRawPanel(QWidget* parent) : QWidget(parent), parts_(std::m
             rows->setContentsMargins(0, 0, 0, 0);
             auto values = std::make_shared<std::array<QDoubleSpinBox*, 8>>();
             auto sliders = std::make_shared<std::array<QSlider*, 8>>();
+            const std::string name(key);
             for (std::size_t i = 0; i < 8; ++i) {
                 auto* row = new QWidget(group);
                 auto* line = new QHBoxLayout(row);
@@ -387,7 +428,7 @@ CameraRawPanel::CameraRawPanel(QWidget* parent) : QWidget(parent), parts_(std::m
                 auto* sl = new QSlider(Qt::Horizontal, row);
                 sl->setRange(-100, 100);
                 auto* spin = new QDoubleSpinBox(row);
-                spin->setObjectName(QStringLiteral("camera_raw_%1_%2").arg(QString::fromLatin1(key)).arg(i));
+                spin->setObjectName(QStringLiteral("camera_raw_%1_%2").arg(QString::fromStdString(name)).arg(i));
                 spin->setRange(-100, 100);
                 spin->setDecimals(0);
                 spin->setMinimumWidth(72);
@@ -396,19 +437,19 @@ CameraRawPanel::CameraRawPanel(QWidget* parent) : QWidget(parent), parts_(std::m
                 rows->addRow(words(kBands[i]), row);
                 (*values)[i] = spin;
                 (*sliders)[i] = sl;
-                QObject::connect(sl, &QSlider::valueChanged, row, [spin, touched](int v) {
+                QObject::connect(sl, &QSlider::valueChanged, row, [spin, touched, name](int v) {
                     const QSignalBlocker b(spin);
                     spin->setValue(v);
-                    touched();
+                    touched(name);
                 });
-                QObject::connect(spin, &QDoubleSpinBox::valueChanged, row, [sl, touched](double v) {
+                QObject::connect(spin, &QDoubleSpinBox::valueChanged, row, [sl, touched, name](double v) {
                     const QSignalBlocker a(sl);
                     sl->setValue(static_cast<int>(std::lround(v)));
-                    touched();
+                    touched(name);
                 });
             }
             form->custom(
-                key, QString(), group,
+                name, QString(), group,
                 [values] {
                     Json out = Json::array();
                     for (QDoubleSpinBox* spin : *values) out.push_back(std::lround(spin->value()));
@@ -423,6 +464,7 @@ CameraRawPanel::CameraRawPanel(QWidget* parent) : QWidget(parent), parts_(std::m
                     }
                 },
                 Json::array({0, 0, 0, 0, 0, 0, 0, 0}));
+            parts.rows[name] = {form, group};
         }
     }
     // カラーグレーディング
@@ -449,6 +491,10 @@ CameraRawPanel::CameraRawPanel(QWidget* parent) : QWidget(parent), parts_(std::m
         form->choice("vignette_style", words("スタイル"),
                      {{words("ハイライト優先"), Json("highlight_priority")}, {words("カラー優先"), Json("color_priority")}, {words("ペイントオーバーレイ"), Json("paint_overlay")}},
                      Json("highlight_priority"));
+        if (auto* style = form->findChild<QComboBox*>(QStringLiteral("field_vignette_style"))) {
+            QObject::connect(style, &QComboBox::currentIndexChanged, style, [touched] { touched("vignette_style"); });
+            parts.rows["vignette_style"] = {form, style};
+        }
         slider(form, "vignette_amount", words("適用量"), -100, 100, 0);
         slider(form, "vignette_midpoint", words("中心点"), 0, 100, 50);
         slider(form, "vignette_roundness", words("丸み"), -100, 100, 0);
@@ -473,6 +519,7 @@ CameraRawPanel::CameraRawPanel(QWidget* parent) : QWidget(parent), parts_(std::m
         try {
             params = settings();
         } catch (const std::exception& error) {
+            setProperty("previewing", false);
             p.status->setText(wording::error(QString::fromUtf8(error.what())));
             return;
         }
@@ -513,6 +560,11 @@ CameraRawPanel::~CameraRawPanel() {
 
 void CameraRawPanel::set_picture(std::shared_ptr<const Picture> picture) {
     Parts& p = *parts_;
+    if (picture && !well_formed(*picture)) {  // (its values not its size's, or no scale: none worked — D5's review P3-5)
+        p.picture.reset();
+        p.status->setText(QStringLiteral("画像の形が正しくないので、プレビューを作れません"));
+        return;
+    }
     p.picture = std::move(picture);
     if (!p.picture) {
         p.status->setText(QStringLiteral("画像を読み込んでいます…"));
@@ -527,33 +579,63 @@ void CameraRawPanel::set_picture(std::shared_ptr<const Picture> picture) {
 
 void CameraRawPanel::set_settings(const Json& settings) {
     Parts& p = *parts_;
-    const Json now = settings.is_object() ? settings : Json::object();
+    Json now = settings.is_object() ? settings : Json::object();
+    try {
+        p.base = core::normalize_filter("camera_raw", now, nullptr);
+    } catch (const std::exception&) {  // (what the table refuses: the defaults, the seed kept)
+        Json kept = Json::object();
+        if (now.contains("seed") && now["seed"].is_number_integer()) kept["seed"] = now["seed"];
+        p.base = core::normalize_filter("camera_raw", kept, nullptr);
+    }
+    p.touched.clear();
     p.quiet = true;
-    for (adjust_forms::Form* form : p.forms) form->set_values(now);
-    for (std::size_t i = 0; i < 4; ++i) p.curves[i] = curve_of(core::py_get(now, kCurveKeys[i], Json::array()));
+    for (adjust_forms::Form* form : p.forms) form->set_values(p.base);
+    for (std::size_t i = 0; i < 4; ++i) p.curves[i] = curve_of(core::py_get(p.base, kCurveKeys[i], Json::array()));
     {
         const QSignalBlocker hold(p.editor);
         p.editor->set_points(p.curves[static_cast<std::size_t>(p.curve)]);
     }
-    p.seed = now.contains("seed") && now["seed"].is_number_integer() ? now["seed"] : Json(0);
     p.quiet = false;
     p.timer->start();
 }
 
 Json CameraRawPanel::settings() const {
     const Parts& p = *parts_;
-    Json values = Json::object();
-    for (const adjust_forms::Form* form : p.forms) values.update(form->values());
-    for (std::size_t i = 0; i < 4; ++i) values[kCurveKeys[i]] = curve_json(p.curves[i]);
-    values["seed"] = p.seed;
+    // (what it started from, each key the person touched as its field shows it)
+    Json values = p.base;
+    Json shown = Json::object();
+    for (const adjust_forms::Form* form : p.forms) shown.update(form->values());
+    for (const std::string& key : p.touched) {
+        bool curve = false;
+        for (std::size_t i = 0; i < 4; ++i) {
+            if (key != kCurveKeys[i]) continue;
+            values[key] = curve_json(p.curves[i]);
+            curve = true;
+        }
+        if (curve) continue;
+        if (const Json* field = at_path(shown, key)) put_at(values, key, *field);
+    }
     return core::normalize_filter("camera_raw", values, nullptr);
 }
 
 void CameraRawPanel::reset() {
     Json kept = Json::object();
-    kept["seed"] = parts_->seed;
+    kept["seed"] = core::py_get(parts_->base, "seed", Json(0));
     set_settings(kept);
     if (changed) changed();
+}
+
+void CameraRawPanel::add_to_basic(QWidget* widget) {
+    if (widget == nullptr || parts_->basic == nullptr) return;
+    parts_->basic->layout_form()->insertRow(0, widget);
+}
+
+void CameraRawPanel::set_hidden(const std::vector<std::string>& keys, bool hidden) {
+    for (const std::string& key : keys) {
+        const auto found = parts_->rows.find(key);
+        if (found == parts_->rows.end()) continue;
+        found->second.first->layout_form()->setRowVisible(found->second.second, !hidden);
+    }
 }
 
 // --- the window ----------------------------------------------------------------------------------------------------------------
@@ -603,7 +685,12 @@ public:
         connect(buttons, &QDialogButtonBox::accepted, this, &QDialog::accept);
         connect(buttons, &QDialogButtonBox::rejected, this, &QDialog::reject);
         layout->addWidget(buttons);
-        panel_->set_settings(call.now);
+        // (from the command: the command's seed — a new grain each time —, its preview's the same; a smart filter set again:
+        // its own)
+        Json now = call.now.is_object() ? call.now : Json::object();
+        command_seed_ = call.filter < 0 && call.seed.has_value() && !now.contains("seed");
+        if (command_seed_) now["seed"] = *call.seed;
+        panel_->set_settings(now);
         // (the picture made on a thread: the window answers meanwhile)
         const filter_gallery::Source source = filter_gallery::source_of(*call.window, *call.page, *call.layer, call.filter);
         auto* watcher = new QFutureWatcher<std::shared_ptr<const Picture>>(this);
@@ -613,23 +700,42 @@ public:
         });
         watcher->setFuture(QtConcurrent::run([source]() { return picture_of(source); }));
     }
-    Json settings() const { return panel_->settings(); }
+    // The settings chosen; from the command without its seed (the command gives its own, the same: 前回のフィルター then
+    // a new one).
+    Json settings() const {
+        Json chosen = panel_->settings();
+        if (command_seed_) chosen.erase("seed");
+        return chosen;
+    }
+
+protected:
+    // (OK with settings the table refuses: said, the window kept with them — D5's review P3-1)
+    void accept() override {
+        try {
+            (void)panel_->settings();
+        } catch (const std::exception& error) {
+            ask::warning(this, windowTitle(), wording::error(QString::fromUtf8(error.what())));
+            return;
+        }
+        QDialog::accept();
+    }
 
 private:
     CameraRawPanel* panel_ = nullptr;
+    bool command_seed_ = false;
 };
 
 }  // namespace
 
 void open(const FilterWindowCall& call) {
     if (call.window == nullptr || call.page == nullptr || call.layer == nullptr) return;
-    render::use_brushes_of(call.window->book());
     CameraRawDialog dialog(call.window, call);
     if (ask::exec(&dialog) != QDialog::Accepted) return;
     Json chosen;
     try {
         chosen = dialog.settings();
-    } catch (const std::exception&) {
+    } catch (const std::exception& error) {  // (said, nothing sent)
+        ask::warning(call.window, dialog.windowTitle(), wording::error(QString::fromUtf8(error.what())));
         return;
     }
     if (call.send) call.send(chosen);

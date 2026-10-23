@@ -183,10 +183,14 @@ struct Kernel {
     // to it (レンズ補正, 広角補正: their centre is the lens's). Nothing shows: nothing changes.
     bool shown_frame = false;
     // (D5) A whole kind's work done once on the base box's window that is not settings — planes of the whole the tiles
-    // read (Camera Raw's haze and guided tone bases) —, after once, on the caller's thread: its arrays held in the imaging
-    // budget by itself while the object lives (the run keeps it until its tiles are done), the run stopped as any (StopScope).
-    // Each tile's run has it as Ctx::prepared. None: nothing.
+    // read (Camera Raw's haze and guided tone bases) —, after once, on the caller's thread (stopped as any run: StopScope;
+    // saying how far it is with ProgressScope::put up to kPrepareShare, the tiles the rest). Each tile's run has it as
+    // Ctx::prepared. Only a kind whose halo is Halo::whole() (the run reads its base box's window once) — any other with one
+    // is refused (std::logic_error). None: nothing.
     std::function<std::shared_ptr<const Prepared>(const core::Json& params, const Window& whole, const Ctx& ctx)> prepare;
+    // (D5) The bytes prepare's arrays take at most: held in the imaging budget by the run before the threads' share is
+    // decided (fewer threads, not a refusal, when both do not fit), for as long as the run. None: nothing.
+    std::function<std::uint64_t(const core::Json& params, const Ctx& ctx)> prepare_bytes;
     // (D5) The bytes a tile's run holds of its own past the tile and its window — a whole kind working each tile's part of
     // its base box grown by what it reaches, in planes of its own (Camera Raw's) —, for a tile of `side`: held in the imaging
     // budget with each thread's tile. None: nothing.
@@ -194,6 +198,8 @@ struct Kernel {
 };
 using Kernels = std::vector<Kernel>;
 inline constexpr double kDefaultCost = 50;
+// (D5) How much of a run's progress a kind's prepare says (its tiles the rest).
+inline constexpr double kPrepareShare = 0.1;
 
 // Each group's kernels (its own file; a group fills its own).
 Kernels blur_kernels();          // render/fx_blur.cpp — D0: blur_gaussian, blur_box; D1: the rest of ぼかし

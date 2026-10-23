@@ -4,6 +4,7 @@
 #include <QList>
 #include <QString>
 
+#include <cstdint>
 #include <functional>
 #include <optional>
 #include <string>
@@ -55,6 +56,9 @@ struct FilterWindowCall {
     const core::Page* page = nullptr;
     const core::Layer* layer = nullptr;
     int filter = -1;
+    // (D5) The seed the command gives a kind with one — a new one each time it is applied (D1's review: 前回のフィルター too)
+    // —, which `send` puts in the op when the settings have none: a window's preview of the grain uses it (none: no seed).
+    std::optional<std::uint32_t> seed;
 };
 using FilterWindow = std::function<void(const FilterWindowCall&)>;
 // By the item's kind (D3–D6 add theirs).
