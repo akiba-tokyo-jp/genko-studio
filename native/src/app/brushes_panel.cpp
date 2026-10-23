@@ -183,10 +183,10 @@ BrushesPanel::BrushesPanel(MainWindow* window) : window_(window) {
         if (!path.isEmpty()) export_file(path);
     });
     menu->addSeparator();
-    menu->addAction(QStringLiteral("新規グループ…"), this, [this] { new_group(); });
-    menu->addAction(QStringLiteral("グループ名を変更…"), this, [this] { rename_group(); });
-    menu->addAction(QStringLiteral("グループを削除"), this, [this] { remove_group(); });
-    QMenu* move = menu->addMenu(QStringLiteral("グループに移動"));
+    menu->addAction(QStringLiteral("新規ブラシグループ…"), this, [this] { new_group(); });
+    menu->addAction(QStringLiteral("ブラシグループ名を変更…"), this, [this] { rename_group(); });
+    menu->addAction(QStringLiteral("ブラシグループを削除"), this, [this] { remove_group(); });
+    QMenu* move = menu->addMenu(QStringLiteral("ブラシグループに移動"));
     move->setObjectName(QStringLiteral("brush_preset_move"));
     connect(move, &QMenu::aboutToShow, this, [this, move] {
         move->clear();
@@ -195,7 +195,7 @@ BrushesPanel::BrushesPanel(MainWindow* window) : window_(window) {
             const QString name = QString::fromStdString(g.name);
             move->addAction(name, this, [this, name] { move_to_group(name); });
         }
-        move->addAction(QStringLiteral("新規グループ…"), this, [this] {
+        move->addAction(QStringLiteral("新しいブラシグループへ…"), this, [this] {
             const auto name = ask::get_text(this, QStringLiteral("グループに移動"), QStringLiteral("新しいグループ名"), QStringLiteral("グループ 1"));
             if (name && !name->trimmed().isEmpty()) move_to_group(name->trimmed());
         });

@@ -388,6 +388,7 @@ private slots:
         QVERIFY(item_named(manager.tree(), QStringLiteral("赤と緑")) != nullptr);
         manager.show_kind("brushes");
         QVERIFY(!manager.apply(Json{{"action", "rename"}, {"preset", "チョーク"}, {"name", "x"}}));  // (a built-in brush: said)
+        QVERIFY(!s.answers.asked.isEmpty() && s.answers.asked.back().contains(QStringLiteral("組み込みのブラシ（チョーク）は変えられません")));
         presets::save(app::config_dir(), std::nullopt, Json{{"label", "自分の線"}, {"base", "gpen"}}, std::nullopt, std::nullopt);
         const QString file = s.tmp.path() + QStringLiteral("/持っていく.genkopresets");
         const Json counts = s.window->export_presets(file, {}, false);

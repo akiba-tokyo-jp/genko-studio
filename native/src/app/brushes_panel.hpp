@@ -21,8 +21,8 @@ class QTreeWidgetItem;
 // メディア・ウェットメディア・特殊効果, and the person's from brushes.json), each with a small picture of its tip. A click
 // makes it the brush in hand (the ブラシツール's, ツールの設定's list follows). The buttons: 新規ブラシプリセット… (the brush in
 // hand kept as one's own), 名前を変更…, 削除 (one's own), and the panel's menu: ブラシを読み込み… (.abr: the window's thread
-// stays free while it is read; .genkobrush), ブラシを書き出し… (.genkobrush), 新規グループ…, グループ名を変更…, グループを
-// 削除, グループに移動. The library is read again for every change and every refresh, the pictures of the tips are made
+// stays free while it is read; .genkobrush), ブラシを書き出し… (.genkobrush), 新規ブラシグループ…, ブラシグループ名を変更…, ブラシグループを
+// 削除, ブラシグループに移動. The library is read again for every change and every refresh, the pictures of the tips are made
 // once (by their ref, small) off the window's thread and kept for the next refresh.
 
 namespace genko::app {

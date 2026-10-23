@@ -728,6 +728,8 @@ const std::vector<Rule>& rules() {
         r.push_back(rule(R"(a brush named (.+) is there already)", "「\\1」という名前のブラシがもうあります"));
         r.push_back(rule(R"(the group (.+) is the built-in brushes'.*)", "「\\1」は組み込みのブラシのグループです（自分のブラシには別のグループ名を付けます）"));
         r.push_back(rule("a group's name is 1 to 200 characters", "グループ名は 1〜200 文字にします"));
+        r.push_back(rule(R"(a group named (.+) is there already)", "「\\1」というグループがもうあります"));
+        r.push_back(rule(R"(no group named (.+))", "「\\1」というグループはありません"));
         r.push_back(rule("a brush's name is 1 to 40 characters", "ブラシ名は 1〜40 文字にします"));
         r.push_back(rule("rename names one brush", "名前を変えるブラシを 1 つ選びます"));
         r.push_back(rule("preset names (?:no brush|a brush by its key or name.*)", "ブラシを選びます"));
