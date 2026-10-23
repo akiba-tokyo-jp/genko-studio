@@ -874,7 +874,7 @@ PhotoCraft v0.2.0 の描く道具・ブラシエンジン・パターン・グ�
   - 上限（確保の前に断る）: manifest 32 MiB、blob 1 つ 256 MiB、タイルと blob の展開の合計 8 GiB（ZIP・zstd の爆弾）、キャンバスは画像の上限（1 辺 100000・1.2 億画素）、層の画素は作業の記憶の予算、zstd の窓 2^27、タイルは名前のハッシュ・大きさ・重なりを確かめる。壊れた .pcraft は `format`「.pcraft のファイルが壊れているか途中で切れていて、読めません」、新しい版は `unsupported_version`「新しい PhotoCraft で書かれた .pcraft なので読めません（形式 N。この版の Genko が読めるのは形式 1 です）」、大きすぎるものは `image_too_large`。
   - 書く（`formats::write_pcraft`。`genko export <book> <out> --format pcraft [--dpi R]`: フォルダーには `<題>_ep01_p001.pcraft`…（PSD のページと同じ名前）、.pcraft のパスには 1 ページ目。コピーを保存…・別名で保存… の .pcraft は前のページ）: 開くときの表の逆。ペンの線・コマの枠線・台詞・トーン・効果線・3D・ルーラー・本のページの紙は PSD と同じく画素の層にする。タイルは同じ中身を 1 つに、背景だけのタイルは書かない。ZIP64 は書かない（4 GiB・65535 ファイルまで）。マルチチャンネルのページは書かない（断る）。CLI の出力の `notes` に書けなかったもの。
   - 埋め込みを配置…（設計 2.8）: .pcraft はスマートオブジェクトの中身のページ（中身の種類 page）になる。窓は裏のスレッドで読んでから op `smart_place`（`asset` の .pcraft か `data`）で置く。書けなかったものは op の `notes`。
-  - 既知の制限: 文字レイヤーは画素（編集できる文字にしない）。.pcraft のフォルダーは読むだけ（書くのは ZIP）。グラデーションの塗りの中心はキャンバスの中心。上流の読み手で読めるかの確かめは任意の試験（`tools/migration/pcraft_fixtures check`）。
+  - 既知の制限: 文字レイヤーは画素（編集できる文字にしない）。.pcraft のフォルダーは読むだけ（書くのは ZIP）。グラデーションの塗りの中心はキャンバスの中心。上流の読み手で読めるかの確かめは任意の試験（`tools/migration/pcraft_fixtures` の `check` を作って `GENKO_PCRAFT_CHECK` に置くと test_contract_pcraft がこの版の書いたファイルを上流に読ませる）。
 
 ### COMP-03 入出力・API
 
