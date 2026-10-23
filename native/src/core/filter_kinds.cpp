@@ -567,9 +567,9 @@ void only_keys(const Json& object, std::initializer_list<std::string_view> keys,
 // channel of the page: design 2.6, the C++ build's own).
 Json read_lighting(Json read) {
     const std::string where = "adjust render_lighting_effects";
-    const std::string wrong = where + ".lights must be a list of at most " + std::to_string(kLightingMostLights) +
-                              " lights {\"kind\": spot, point or infinite, \"x\", \"y\", \"z\", \"target_x\", \"target_y\", \"angle\", \"elevation\", "
-                              "\"color\": [r, g, b], \"intensity\", \"cone\", \"hotspot\", \"radius\"}";
+    const std::string wrong = where + ".lights must be a list of at most " + std::to_string(kLightingMostLights) + " lights";
+    const std::string item = where + ".lights' each light is {\"kind\": spot, point or infinite, \"x\", \"y\", \"z\", \"target_x\", \"target_y\", "
+                                     "\"angle\", \"elevation\", \"color\": [r, g, b], \"intensity\", \"cone\", \"hotspot\", \"radius\"}";
     Json out = Json::array();
     const Json* given = get(read, "lights");
     if (given == nullptr || given->is_null()) {
@@ -578,34 +578,34 @@ Json read_lighting(Json read) {
     } else {
         if (!given->is_array() || given->size() > kLightingMostLights) throw OpError(wrong);
         for (const Json& light : *given) {
-            only_keys(light, {"kind", "x", "y", "z", "target_x", "target_y", "angle", "elevation", "color", "intensity", "cone", "hotspot", "radius"}, wrong);
+            only_keys(light, {"kind", "x", "y", "z", "target_x", "target_y", "angle", "elevation", "color", "intensity", "cone", "hotspot", "radius"}, item);
             std::string kind = "spot";
             if (const Json* k = get(light, "kind"); k != nullptr && !k->is_null()) {
-                if (!k->is_string() || (*k != "spot" && *k != "point" && *k != "infinite")) throw OpError(wrong);
+                if (!k->is_string() || (*k != "spot" && *k != "point" && *k != "infinite")) throw OpError(item);
                 kind = k->get<std::string>();
             }
             Json colour = Json::array({255, 255, 255});
             if (const Json* c = get(light, "color"); c != nullptr && !c->is_null()) {
-                if (!c->is_array() || c->size() != 3) throw OpError(wrong);
+                if (!c->is_array() || c->size() != 3) throw OpError(item);
                 colour = Json::array();
                 for (const Json& v : *c) {
-                    if (!finite_number(v)) throw OpError(wrong);
+                    if (!finite_number(v)) throw OpError(item);
                     colour.push_back(static_cast<int>(std::lround(std::clamp(v.get<double>(), 0.0, 255.0))));
                 }
             }
             out.push_back(Json{{"kind", kind},
-                               {"x", number_json(list_number(light, "x", 0.25, -10, 10, wrong))},
-                               {"y", number_json(list_number(light, "y", 0.2, -10, 10, wrong))},
-                               {"z", number_json(list_number(light, "z", 0.6, 0, 10, wrong))},
-                               {"target_x", number_json(list_number(light, "target_x", 0.5, -10, 10, wrong))},
-                               {"target_y", number_json(list_number(light, "target_y", 0.55, -10, 10, wrong))},
-                               {"angle", number_json(list_number(light, "angle", 135, -360, 360, wrong))},
-                               {"elevation", number_json(list_number(light, "elevation", 45, 0, 90, wrong))},
+                               {"x", number_json(list_number(light, "x", 0.25, -10, 10, item))},
+                               {"y", number_json(list_number(light, "y", 0.2, -10, 10, item))},
+                               {"z", number_json(list_number(light, "z", 0.6, 0, 10, item))},
+                               {"target_x", number_json(list_number(light, "target_x", 0.5, -10, 10, item))},
+                               {"target_y", number_json(list_number(light, "target_y", 0.55, -10, 10, item))},
+                               {"angle", number_json(list_number(light, "angle", 135, -360, 360, item))},
+                               {"elevation", number_json(list_number(light, "elevation", 45, 0, 90, item))},
                                {"color", std::move(colour)},
-                               {"intensity", number_json(list_number(light, "intensity", 75, -100, 100, wrong))},
-                               {"cone", number_json(list_number(light, "cone", 45, 1, 89, wrong))},
-                               {"hotspot", number_json(list_number(light, "hotspot", 50, 0, 100, wrong))},
-                               {"radius", number_json(list_number(light, "radius", 0.8, 0.01, 10, wrong))}});
+                               {"intensity", number_json(list_number(light, "intensity", 75, -100, 100, item))},
+                               {"cone", number_json(list_number(light, "cone", 45, 1, 89, item))},
+                               {"hotspot", number_json(list_number(light, "hotspot", 50, 0, 100, item))},
+                               {"radius", number_json(list_number(light, "radius", 0.8, 0.01, 10, item))}});
         }
     }
     read["lights"] = std::move(out);
@@ -636,8 +636,9 @@ Json read_lighting(Json read) {
 Json read_pins(Json read, std::string_view kind) {
     const std::string where = "adjust " + std::string(kind);
     const bool iris = kind == "blur_iris", spin = kind == "blur_spin";
-    const std::string wrong =
-        where + ".pins must be a list of 1 to " + std::to_string(kBlurGalleryMostPins) + " pins {\"x\", \"y\"" +
+    const std::string wrong = where + ".pins must be a list of 1 to " + std::to_string(kBlurGalleryMostPins) + " pins";
+    const std::string item =
+        where + ".pins' each pin is {\"x\", \"y\"" +
         (iris ? ", \"radius_x\", \"radius_y\", \"angle\", \"roundness\", \"feather\", \"blur\"}" : spin ? ", \"radius_x\", \"radius_y\", \"angle\", \"blur_angle\"}" : ", \"blur\"}");
     const Json* given = get(read, "pins");
     const Json defaults = Json::array({Json::object()});
@@ -646,61 +647,68 @@ Json read_pins(Json read, std::string_view kind) {
     Json out = Json::array();
     for (const Json& pin : pins) {
         if (iris) {
-            only_keys(pin, {"x", "y", "radius_x", "radius_y", "angle", "roundness", "feather", "blur"}, wrong);
+            only_keys(pin, {"x", "y", "radius_x", "radius_y", "angle", "roundness", "feather", "blur"}, item);
         } else if (spin) {
-            only_keys(pin, {"x", "y", "radius_x", "radius_y", "angle", "blur_angle"}, wrong);
+            only_keys(pin, {"x", "y", "radius_x", "radius_y", "angle", "blur_angle"}, item);
         } else {
-            only_keys(pin, {"x", "y", "blur"}, wrong);
+            only_keys(pin, {"x", "y", "blur"}, item);
         }
-        Json made{{"x", number_json(list_number(pin, "x", 0.5, -10, 10, wrong))}, {"y", number_json(list_number(pin, "y", 0.5, -10, 10, wrong))}};
+        Json made{{"x", number_json(list_number(pin, "x", 0.5, -10, 10, item))}, {"y", number_json(list_number(pin, "y", 0.5, -10, 10, item))}};
         if (iris) {
-            made["radius_x"] = number_json(list_number(pin, "radius_x", 0.35, 0.001, 10, wrong));
-            made["radius_y"] = number_json(list_number(pin, "radius_y", 0.25, 0.001, 10, wrong));
-            made["angle"] = number_json(list_number(pin, "angle", 0, -360, 360, wrong));
-            made["roundness"] = number_json(list_number(pin, "roundness", 0, 0, 100, wrong));
-            made["feather"] = number_json(list_number(pin, "feather", 0.5, 0, 0.99, wrong));
+            made["radius_x"] = number_json(list_number(pin, "radius_x", 0.35, 0.001, 10, item));
+            made["radius_y"] = number_json(list_number(pin, "radius_y", 0.25, 0.001, 10, item));
+            made["angle"] = number_json(list_number(pin, "angle", 0, -360, 360, item));
+            made["roundness"] = number_json(list_number(pin, "roundness", 0, 0, 100, item));
+            made["feather"] = number_json(list_number(pin, "feather", 0.5, 0, 0.99, item));
         } else if (spin) {
-            made["radius_x"] = number_json(list_number(pin, "radius_x", 0.3, 0.001, 10, wrong));
-            made["radius_y"] = number_json(list_number(pin, "radius_y", 0.3, 0.001, 10, wrong));
-            made["angle"] = number_json(list_number(pin, "angle", 0, -360, 360, wrong));
-            made["blur_angle"] = number_json(list_number(pin, "blur_angle", 15, 0, 360, wrong));
+            made["radius_x"] = number_json(list_number(pin, "radius_x", 0.3, 0.001, 10, item));
+            made["radius_y"] = number_json(list_number(pin, "radius_y", 0.3, 0.001, 10, item));
+            made["angle"] = number_json(list_number(pin, "angle", 0, -360, 360, item));
+            made["blur_angle"] = number_json(list_number(pin, "blur_angle", 15, 0, 360, item));
         }
-        if (!spin) made["blur"] = number_json(list_number(pin, "blur", 15, 0, 500, wrong));
+        if (!spin) made["blur"] = number_json(list_number(pin, "blur", 15, 0, 500, item));
         out.push_back(std::move(made));
     }
     read["pins"] = std::move(out);
     return read;
 }
 
-// パスぼかし's paths (params_ext.rs BlurPath): at most kBlurPathMostPaths, each 2 to kBlurPathMostPoints points [x, y] on
-// the page (mm: they move with a smart object), its speed (the blur's length, pixels of the working 200 dpi, 0..500) and
-// taper (0..100: how much the blur fades toward the path's end). None given: upstream's one path across the middle of the
-// base box (its kernel's); [] none.
+// パスぼかし's paths (params_ext.rs BlurPath): at most kBlurPathMostPaths, each at least 2 points [x, y] on the page (mm:
+// they move with a smart object) and kBlurPathMostPoints points in all (each pixel looks at every segment), its speed (the
+// blur's length, pixels of the working 200 dpi, 0..500) and taper (0..100: how much the blur fades toward the path's end).
+// None given: upstream's one path across the middle of the base box (its kernel's); [] none.
 Json read_blur_paths(Json read) {
     const std::string where = "adjust blur_path";
-    const std::string wrong = where + ".paths must be a list of at most " + std::to_string(kBlurPathMostPaths) + " paths {\"points\": [[x, y], …] (2 to " +
-                              std::to_string(kBlurPathMostPoints) + " places on the page, mm), \"speed\", \"taper\"}";
+    const std::string wrong = where + ".paths must be a list of at most " + std::to_string(kBlurPathMostPaths) + " paths, their points " +
+                              std::to_string(kBlurPathMostPoints) + " in all";
+    const std::string item = where + ".paths' each path is {\"points\": [[x, y], …] (2 or more places on the page, mm, within 100000), \"speed\", \"taper\"}";
     const Json* given = get(read, "paths");
     if (given == nullptr || given->is_null()) {
         read.erase("paths");
         return read;
     }
     if (!given->is_array() || given->size() > kBlurPathMostPaths) throw OpError(wrong);
+    std::size_t all = 0;  // (the points of every path together: counted before any is read)
+    for (const Json& path : *given) {
+        const Json* points = path.is_object() ? get(path, "points") : nullptr;
+        if (points != nullptr && points->is_array()) all += points->size();
+    }
+    if (all > kBlurPathMostPoints) throw OpError(wrong);
     Json out = Json::array();
     for (const Json& path : *given) {
-        only_keys(path, {"points", "speed", "taper"}, wrong);
+        only_keys(path, {"points", "speed", "taper"}, item);
         const Json* points = get(path, "points");
-        if (points == nullptr || !points->is_array() || points->size() < 2 || points->size() > kBlurPathMostPoints) throw OpError(wrong);
+        if (points == nullptr || !points->is_array() || points->size() < 2) throw OpError(item);
         Json kept = Json::array();
         for (const Json& p : *points) {
-            if (!p.is_array() || p.size() != 2 || !finite_number(p[0]) || !finite_number(p[1])) throw OpError(wrong);
+            if (!p.is_array() || p.size() != 2 || !finite_number(p[0]) || !finite_number(p[1])) throw OpError(item);
             const double x = p[0].get<double>(), y = p[1].get<double>();
-            if (std::fabs(x) > 1e5 || std::fabs(y) > 1e5) throw OpError(wrong);  // (as a path's knots: vector@1's reach)
+            if (std::fabs(x) > 1e5 || std::fabs(y) > 1e5) throw OpError(item);  // (as a path's knots: vector@1's reach)
             kept.push_back(Json::array({number_json(x), number_json(y)}));
         }
         out.push_back(Json{{"points", std::move(kept)},
-                           {"speed", number_json(list_number(path, "speed", 50, 0, 500, wrong))},
-                           {"taper", number_json(list_number(path, "taper", 0, 0, 100, wrong))}});
+                           {"speed", number_json(list_number(path, "speed", 50, 0, 500, item))},
+                           {"taper", number_json(list_number(path, "taper", 0, 0, 100, item))}});
     }
     read["paths"] = std::move(out);
     return read;

@@ -178,7 +178,7 @@ std::optional<fx::Picture> lighting_texture(const core::Page& page, const Json& 
     for (const core::Channel& channel : page.channels) {
         if (channel.id != name && channel.name != name) continue;
         if (channel.kind != core::ChannelKind::Alpha) throw core::OpError("render_lighting_effects: the texture's channel " + name + " is not an alpha channel");
-        held.emplace(std::uint64_t(w) * h * 5);
+        held.emplace(std::uint64_t(w) * h * 6);  // (the mask, its bytes, the picture of four: all at once)
         const Image mask = channels::mask_of(channel, Size{static_cast<int>(w), static_cast<int>(h)});
         const std::string bytes = mask.tobytes();
         fx::Picture out;

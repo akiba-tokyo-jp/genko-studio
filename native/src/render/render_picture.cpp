@@ -16,6 +16,7 @@
 #include <string>
 
 #include "core/areas.hpp"
+#include "core/color_model.hpp"
 #include "core/error.hpp"
 #include "core/filter_kinds.hpp"
 #include "core/ids.hpp"
@@ -32,6 +33,7 @@
 #include "render/raster.hpp"
 #include "render/segment/segment.hpp"
 #include "render/selection.hpp"
+#include "render/shape_parts.hpp"
 
 namespace genko::render::picture {
 
@@ -702,11 +704,13 @@ void star(Sink& out, XY c, float r, int points, const Rgba& col, float rot) {
 
 constexpr int kCell = 128;  // (render2.rs CTILE: the shapes binned by cells of the grid)
 
-// The shapes binned by the cells of `used` they reach (each cell's indices in the shapes' order).
+// The shapes of each cell of kCell × kCell pixels over what they reach (a flat table: cell c's shapes are items[start[c]] up
+// to items[start[c + 1]], in their order), and the most any cell holds.
 struct Bins {
     fx::Rect used;
     int nx = 0, ny = 0, cx0 = 0, cy0 = 0;
-    std::vector<std::vector<std::uint32_t>> cells;
+    std::vector<std::uint32_t> start, items;
+    std::size_t most = 0;
 };
 
 int floor_div(int a, int b) { return a >= 0 ? a / b : -((-a + b - 1) / b); }
@@ -718,19 +722,26 @@ fx::Kernel laying(std::shared_ptr<const std::vector<Prim>> prims, std::shared_pt
     fx::Kernel k;
     k.kind = "render_picture";
     k.halo = [](const Json&, const fx::Ctx&) { return fx::Halo::margin(0); };
+    // (a tile's list of the shapes of the cells it reaches: at most the most a cell holds, each cell it touches; and its
+    // coverage of four floats a pixel)
+    k.tile_bytes = [bins](const Json&, const fx::Ctx&, int side) {
+        const std::uint64_t across = std::uint64_t(side) / kCell + 2;
+        return std::min<std::uint64_t>(bins->items.size(), std::uint64_t(bins->most) * across * across) * sizeof(std::uint32_t) +
+               std::uint64_t(side) * std::uint64_t(side) * sizeof(Rgba);
+    };
     k.run = [prims, bins](const Json&, const fx::Window& src, const fx::Rect& out, const fx::Ctx&) {
         const std::size_t n = src.ch;
         std::vector<float> res = src.crop(out);
         const fx::Rect t = out.intersect(bins->used);
         if (t.empty()) return res;
-        // (the shapes of the cells the tile reaches, in their order)
+        // (the shapes of the cells the tile reaches, in their order; at most what tile_bytes holds)
         std::vector<std::uint32_t> idx;
         for (int cy = floor_div(t.y0, kCell); cy <= floor_div(t.y1 - 1, kCell); ++cy)
             for (int cx = floor_div(t.x0, kCell); cx <= floor_div(t.x1 - 1, kCell); ++cx) {
                 const int ix = cx - bins->cx0, iy = cy - bins->cy0;
                 if (ix < 0 || iy < 0 || ix >= bins->nx || iy >= bins->ny) continue;
-                const auto& cell = bins->cells[std::size_t(iy) * std::size_t(bins->nx) + std::size_t(ix)];
-                idx.insert(idx.end(), cell.begin(), cell.end());
+                const std::size_t c = std::size_t(iy) * std::size_t(bins->nx) + std::size_t(ix);
+                idx.insert(idx.end(), bins->items.begin() + bins->start[c], bins->items.begin() + bins->start[c + 1]);
             }
         std::sort(idx.begin(), idx.end());
         idx.erase(std::unique(idx.begin(), idx.end()), idx.end());
@@ -857,6 +868,47 @@ double round3(double v) { return std::round(v * 1000.0) / 1000.0; }
 // --- the shapes of each kind -----------------------------------------------------------------------------------------------
 
 std::uint64_t flame_shapes_at_most(const Json& spec, const std::vector<std::vector<XY>>& paths) { return count_shapes(flame_spec(spec), paths); }
+
+fx::Rect lay(fx::Surface& surface, std::vector<Prim> shapes, const fx::Rect& clip, const std::string* cover, double s, const fx::Tiling& tiling) {
+    fx::Rect used;
+    for (const Prim& p : shapes) used = used.unite(bounds_of(p).intersect(clip));
+    if (used.empty()) return used;
+    auto bins = std::make_shared<Bins>();
+    bins->used = used;
+    bins->cx0 = floor_div(used.x0, kCell);
+    bins->cy0 = floor_div(used.y0, kCell);
+    bins->nx = floor_div(used.x1 - 1, kCell) - bins->cx0 + 1;
+    bins->ny = floor_div(used.y1 - 1, kCell) - bins->cy0 + 1;
+    std::uint64_t entries = 0;
+    for (const Prim& p : shapes) {
+        const fx::Rect r = bounds_of(p).intersect(used);
+        if (r.empty()) continue;
+        entries += std::uint64_t(floor_div(r.x1 - 1, kCell) - floor_div(r.x0, kCell) + 1) * std::uint64_t(floor_div(r.y1 - 1, kCell) - floor_div(r.y0, kCell) + 1);
+    }
+    const std::uint64_t cells = std::uint64_t(bins->nx) * std::uint64_t(bins->ny);
+    const image_ops::Held bins_held((entries + 2 * cells + 1) * sizeof(std::uint32_t));  // (the table and its filling, counted before they are had)
+    const auto each_cell = [&](const auto& visit) {
+        for (std::size_t i = 0; i < shapes.size(); ++i) {
+            const fx::Rect r = bounds_of(shapes[i]).intersect(used);
+            if (r.empty()) continue;
+            for (int cy = floor_div(r.y0, kCell); cy <= floor_div(r.y1 - 1, kCell); ++cy)
+                for (int cx = floor_div(r.x0, kCell); cx <= floor_div(r.x1 - 1, kCell); ++cx)
+                    visit(std::size_t(cy - bins->cy0) * std::size_t(bins->nx) + std::size_t(cx - bins->cx0), static_cast<std::uint32_t>(i));
+        }
+    };
+    bins->start.assign(std::size_t(cells) + 1, 0);
+    each_cell([&](std::size_t c, std::uint32_t) { ++bins->start[c + 1]; });
+    for (std::size_t c = 0; c < std::size_t(cells); ++c) {
+        bins->most = std::max<std::size_t>(bins->most, bins->start[c + 1]);
+        bins->start[c + 1] += bins->start[c];
+    }
+    bins->items.resize(std::size_t(entries));
+    std::vector<std::uint32_t> at(bins->start.begin(), bins->start.end() - 1);
+    each_cell([&](std::size_t c, std::uint32_t i) { bins->items[at[c]++] = i; });
+    const auto prims = std::make_shared<const std::vector<Prim>>(std::move(shapes));
+    fx::apply(surface, laying(prims, bins), Json::object(), core::FilterInks::Meaning, clip, cover, s, &used, tiling);
+    return used;
+}
 
 std::vector<Prim> flame(const Json& spec_json, const std::vector<std::vector<XY>>& paths) {
     const FlameSpec spec = flame_spec(spec_json);
@@ -1285,24 +1337,28 @@ void render_picture(core::OpContext& c) {
         id = layer.id;
         page.layers.insert(page.layers.begin() + static_cast<std::ptrdiff_t>(index), std::move(layer));
     }
-    // (an RGB page of 16 or 32 bits: an empty paint layer of its precision; the named one ready — locked refused, its lines
-    // and fills made pixels as filter_raster makes them)
+    // (an RGB page of 16 or 32 bits: an empty paint layer of its precision; the named one ready — locked refused, not a
+    // paint layer refused, precise pen lines made precise paint —, its pixels read once below)
     if (paint_fill::becomes_precise(doc.page(at), doc.page(at).layers[core::layer_by_id(doc.page(at), id)])) paint_fill::make_precise(doc, at, id);
-    (void)image_ops::layer_pixels(c, at, id, Box{0, 0, 1, 1});
+    image_ops::ready_paint_layer(c, at, id);
     core::Page& page = doc.edit_page(at);
     core::Layer& layer = page.layers[core::layer_by_id(page, id)];
 
     const ImageAllocationBudget budget{2ULL * 1024 * 1024 * 1024};
-    // the surface of its pixels (one of the three ways)
+    // the surface of its pixels (one of the three ways; an 8-bit layer's lines and fills made pixels — as filter_raster
+    // bakes them — only when something is drawn, below)
     std::unique_ptr<fx::Surface> surface;
     std::optional<core::InkPixels> inks;
     Image eight;
+    bool bake = false;
     if (layer.color_raster) {
+        if (layer.stroke_count() > 0 || !layer.patches.empty()) throw OpError("the lines of the layer " + id + " are not in its precise pixels yet");
         surface = fx::precise_surface(*layer.color_raster);
     } else if (page.color && !layer.raster_png) {
         inks = ink_edit::with_marks(page, layer, &doc);
         surface = fx::ink_surface(*inks, *page.color);
     } else {
+        bake = layer.stroke_count() > 0 || !layer.patches.empty() || shape_parts::any(layer);
         eight = raster::layer_pixels(page, layer, &doc).convert("RGBA");
         surface = fx::eight_surface(eight);
     }
@@ -1358,7 +1414,12 @@ void render_picture(core::OpContext& c) {
         if (const Json* p = core::get(spec, "path"); p != nullptr && p->is_string()) path_name = p->get<std::string>();
         auto paths = flame_paths(page, path_name);
         report["used_path"] = paths.has_value();
-        if (!paths) paths = std::vector<std::vector<XY>>{default_flame_path(canvas)};
+        if (!paths) {  // (none: upstream's arc across the lower part of the frame; a candle at one place, the middle at 0.75 down)
+            if (flame_spec(spec).type == FlameType::CandleLight)
+                paths = std::vector<std::vector<XY>>{{XY{canvas.x0 + canvas.width * 0.5f, canvas.y0 + canvas.height * 0.75f}}};
+            else
+                paths = std::vector<std::vector<XY>>{default_flame_path(canvas)};
+        }
         const std::uint64_t most = flame_shapes_at_most(spec, *paths);
         if (most > core::kPictureMostShapes) Sink::refuse();  // (counted before any is made)
         shapes = flame(spec, *paths);                          // (held a block at a time while they are made)
@@ -1381,34 +1442,16 @@ void render_picture(core::OpContext& c) {
         used = used.unite(bounds_of(p).intersect(clip));
     }
     const std::size_t count = shapes.size();
-    auto bins = std::make_shared<Bins>();
-    bins->used = used;
     if (!used.empty()) {
-        bins->cx0 = floor_div(used.x0, kCell);
-        bins->cy0 = floor_div(used.y0, kCell);
-        bins->nx = floor_div(used.x1 - 1, kCell) - bins->cx0 + 1;
-        bins->ny = floor_div(used.y1 - 1, kCell) - bins->cy0 + 1;
-        std::uint64_t entries = 0;
-        for (const Prim& p : shapes) {
-            const fx::Rect r = bounds_of(p).intersect(used);
-            if (r.empty()) continue;
-            entries += std::uint64_t(floor_div(r.x1 - 1, kCell) - floor_div(r.x0, kCell) + 1) * std::uint64_t(floor_div(r.y1 - 1, kCell) - floor_div(r.y0, kCell) + 1);
+        if (bake) {  // (an 8-bit layer's lines and fills first: the shapes laid over them)
+            raster::bake_vectors(page, layer, &doc, core::profiled_rgb(page));
+            eight = raster::layer_pixels(page, layer, &doc).convert("RGBA");
+            surface = fx::eight_surface(eight);
         }
-        const image_ops::Held bins_held(entries * sizeof(std::uint32_t) + std::uint64_t(bins->nx) * std::uint64_t(bins->ny) * sizeof(std::vector<std::uint32_t>));
-        bins->cells.resize(std::size_t(bins->nx) * std::size_t(bins->ny));
-        for (std::size_t i = 0; i < shapes.size(); ++i) {
-            const fx::Rect r = bounds_of(shapes[i]).intersect(used);
-            if (r.empty()) continue;
-            for (int cy = floor_div(r.y0, kCell); cy <= floor_div(r.y1 - 1, kCell); ++cy)
-                for (int cx = floor_div(r.x0, kCell); cx <= floor_div(r.x1 - 1, kCell); ++cx)
-                    bins->cells[std::size_t(cy - bins->cy0) * std::size_t(bins->nx) + std::size_t(cx - bins->cx0)].push_back(static_cast<std::uint32_t>(i));
-        }
-        const auto prims = std::make_shared<const std::vector<Prim>>(std::move(shapes));
-        const fx::Kernel kernel = laying(prims, bins);
         // (the shapes laid over the colours the layer's pixels mean; the 8-bit way kept to the selection after, as filter_raster
         // keeps it; the others mixed by its coverage)
         const bool eight_way = !inks && !layer.color_raster;
-        fx::apply(*surface, kernel, Json::object(), core::FilterInks::Meaning, clip, eight_way || cover.empty() ? nullptr : &cover, s, &used);
+        (void)lay(*surface, std::move(shapes), clip, eight_way || cover.empty() ? nullptr : &cover, s);
         if (layer.color_raster) {
             layer.color_raster = std::make_shared<const std::string>(fx::take_bytes(*surface));
         } else if (inks) {

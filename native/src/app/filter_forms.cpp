@@ -292,9 +292,9 @@ std::vector<FilterForm> render_forms() {
                        {QStringLiteral("105mm プライム"), Json("prime105")}, {QStringLiteral("ムービープライム"), Json("movie_prime")}}}};
         f.decimals = {{"brightness", 0}};
         f.more = [](adjust_forms::Form& form, const adjust_forms::FormContext& context) {
-            const double aspect = context.page != nullptr && context.page->spec.height_mm.value() > 0
-                                      ? context.page->spec.width_mm.value() / context.page->spec.height_mm.value()
-                                      : 1.0;
+            const double aspect = context.base_aspect                                                     ? *context.base_aspect
+                                  : context.page != nullptr && context.page->spec.height_mm.value() > 0 ? context.page->spec.width_mm.value() / context.page->spec.height_mm.value()
+                                                                                                         : 1.0;
             auto* pad = new CentrePad(aspect, nullptr);
             auto* x = new QDoubleSpinBox;
             auto* y = new QDoubleSpinBox;

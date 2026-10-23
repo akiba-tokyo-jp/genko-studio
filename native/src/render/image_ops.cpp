@@ -382,6 +382,8 @@ core::Layer& ready_layer(core::OpContext& c, std::size_t at, const std::string& 
 
 }  // namespace
 
+void ready_paint_layer(core::OpContext& c, std::size_t at, const std::string& id) { (void)ready_layer(c, at, id); }
+
 Pixels layer_pixels(core::OpContext& c, std::size_t at, const std::string& id) {
     core::Document& doc = c.doc;
     core::Layer& layer = ready_layer(c, at, id);

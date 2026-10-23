@@ -710,7 +710,8 @@ void apply(Surface& surface, const Kernel& kernel, const Json& params, core::Fil
         const std::uint64_t reach = std::uint64_t(tile_side) + 2 * std::uint64_t(halo.radius);
         const std::uint64_t window_px = halo.bounds ? 0 : std::min<std::uint64_t>(reach, w) * std::min<std::uint64_t>(reach, h);
         return window_px * (kch * (2 * sizeof(float) + sizeof(std::int64_t)) + sch * sizeof(float) + kernel.work_bytes) +
-               tile_px * (kch + 3 * sch) * sizeof(float) + (way.meaning ? (window_px + tile_px) * (sch + 4) * sizeof(double) : 0);
+               tile_px * (kch + 3 * sch) * sizeof(float) + (way.meaning ? (window_px + tile_px) * (sch + 4) * sizeof(double) : 0) +
+               (kernel.tile_bytes ? kernel.tile_bytes(params, ctx, tile_side) : 0);  // (D5: a tile's own planes)
     };
     std::vector<int> sides{tiling.tile > 0 ? tiling.tile : auto_tile(halo)};
     if (tiling.tile <= 0)
@@ -759,6 +760,9 @@ void apply(Surface& surface, const Kernel& kernel, const Json& params, core::Fil
     // (a whole kind's work done once — 平均's mean —, its tiles given what it found)
     const Json found = kernel.once && shared ? kernel.once(params, *shared, ctx) : Json();
     const Json& given = kernel.once && shared ? found : params;
+    // (D5: what a whole kind prepares once besides its settings — Camera Raw's planes of the whole —, held while its tiles run)
+    const std::shared_ptr<const Prepared> prepared = kernel.prepare && shared ? kernel.prepare(given, *shared, ctx) : nullptr;
+    ctx.prepared = prepared.get();
 
     const std::stop_token* stop = segment::current_stop();
     std::atomic<double>* progress = g_progress;

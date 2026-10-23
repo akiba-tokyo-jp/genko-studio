@@ -661,6 +661,8 @@ const std::vector<Rule>& rules() {
         // (PC4 D4: 描画・ぼかしギャラリー's lists, 照明効果's channel, render_picture — 炎・額縁・木)
         r.push_back(rule(R"(adjust render_lighting_effects\.lights must be a list of at most (\d+) .*)",
                          "照明効果の光は \\1 個までです（種類・位置・高さ・向き・色・強さ・円錐・ホットスポット・半径）"));
+        r.push_back(rule(R"(adjust render_lighting_effects\.lights' each light is .*)",
+                         "照明効果の光の設定が正しくありません（種類はスポットライト・点光源・無限光、カラーは [r, g, b]、ほかは数です）"));
         r.push_back(rule(R"(adjust render_lighting_effects\.texture must be .*)",
                          "照明効果のテクスチャは、なし・レッド・グリーン・ブルー・透明部分・輝度か、ページのアルファチャンネルです"));
         r.push_back(rule(R"(render_lighting_effects: the page has no channel (.*) for the texture)", "照明効果のテクスチャのチャンネル「\\1」がページにありません"));
@@ -669,8 +671,11 @@ const std::vector<Rule>& rules() {
         r.push_back(rule(R"(render_lighting_effects: a smart filter's texture cannot be a channel of the page.*)",
                          "スマートフィルターの照明効果では、テクスチャにページのチャンネルを使えません（なし・レッド・グリーン・ブルー・透明部分・輝度から選びます）"));
         r.push_back(rule(R"(adjust blur_(?:field|iris|spin)\.pins must be a list of 1 to (\d+) .*)", "ぼかしギャラリーのピンは 1〜\\1 個です"));
+        r.push_back(rule(R"(adjust blur_(?:field|iris|spin)\.pins' each pin is .*)", "ぼかしギャラリーのピンの設定が正しくありません（場所・ぼかしなどは数です）"));
+        r.push_back(rule(R"(adjust blur_path\.paths' each path is .*)",
+                         "パスぼかしのパスの設定が正しくありません（点は 2 個以上の [x, y]（ページの mm）、速度・先細りは数です）"));
         r.push_back(rule(R"(adjust blur_path\.paths must be a list of at most (\d+) .*)",
-                         "パスぼかしのパスは \\1 本までで、各パスの点は 2〜4096 個（ページの mm）です"));
+                         "パスぼかしのパスは \\1 本までで、点は各パス 2 個以上・全部で 4096 個まで（ページの mm）です"));
         r.push_back(rule(R"(render_picture's kind must be .*)", "描画の種類は、炎（flame）・額縁（picture_frame）・木（tree）から選びます"));
         r.push_back(rule(R"(render_picture's new_layer must be true or false)", "新しいレイヤーに描くかどうかは true か false で決めます"));
         r.push_back(rule(R"(render_picture's id must be a layer's id)", "描くレイヤーの指定が違います"));

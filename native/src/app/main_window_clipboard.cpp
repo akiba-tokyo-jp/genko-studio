@@ -229,6 +229,10 @@ bool MainWindow::copy() {
 }
 
 void MainWindow::cut() {
+    if (canvas_->has_work()) {  // (PC4 D4: a work over the page holds 消去's keys — ぼかしギャラリー's pins —: nothing cut meanwhile)
+        flash(QStringLiteral("ぼかしギャラリーの作業を Enter で確定するか Esc でやめてから切り取ります"), 4000, true);
+        return;
+    }
     const bool chosen = selection_area().has_value();
     if (!copy()) return;
     if (chosen) {

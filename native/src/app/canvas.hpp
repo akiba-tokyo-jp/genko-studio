@@ -470,7 +470,7 @@ public:
 
     // (PC4 D4) A piece of work over the page that takes the mouse and the keys before the tools do — ぼかしギャラリー's pins
     // (app/blur_gallery_tool.cpp) —: what it draws over the page (`at`: a place of the page in mm where the painter draws it;
-    // `per_mm`: the screen's pixels a mm), the left button pressed, dragged and let go (the page's mm, the keys held; true:
+    // `per_mm`: the screen's pixels a mm), the left button — or the pen, its eraser end too; a double click's second press a press — pressed, dragged and let go (the page's mm, the keys held; true:
     // taken) and the keys (true: taken). The view still pans (Space, the middle button) and zooms under it. None: the tools.
     // `remove`: 消去's keys (Delete, Backspace — 編集's command holds them) while it is on: its chosen part taken away.
     struct CanvasWork {

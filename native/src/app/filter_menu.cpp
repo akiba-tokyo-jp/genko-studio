@@ -315,8 +315,10 @@ void MainWindow::follow_filter_menu() {
             QAction* act = action(item.name);
             if (act == nullptr) continue;
             // (grey: not in this build yet; the layer drawn on not a paint, pen or smart object layer; a smart object and a
-            // command that cannot be a smart filter — 炎・額縁・木 and 消点 are not: ラスタライズしてから)
-            const bool on = paint || (smart && item.op == "filter_raster" && (item.python || core::smart::filter_kind(item.kind)));
+            // command that cannot be a smart filter — 消点 is not: ラスタライズしてから. 炎・額縁・木 draw on any page: on a
+            // layer that is not a paint layer, or none, a new one — PC4 D4, review P3-7)
+            const bool on = item.op == "render_picture" ? current_page() != nullptr
+                                                         : paint || (smart && item.op == "filter_raster" && (item.python || core::smart::filter_kind(item.kind)));
             act->setEnabled(filter_available(item) && on);
         }
     }
@@ -362,34 +364,39 @@ void MainWindow::filter_command(const FilterItem& item) {
     const core::Layer* layer = target_layer();
     const bool paint = layer != nullptr && (layer->kind == core::LayerKind::Raster || layer->kind == core::LayerKind::Strokes);
     const bool smart = layer != nullptr && layer->kind == core::LayerKind::Smart;
-    if (page == nullptr || (!paint && !smart)) {
+    // (PC4 D4, review P3-7: 炎・額縁・木 draw on any page — on the paint or pen layer chosen, else on a new one above what is
+    // chosen, or on top —; their own questions after their window)
+    const bool drawing = item.op == "render_picture";
+    if (page == nullptr || (!drawing && !paint && !smart)) {
         flash(QStringLiteral("「%1」は、ペン・ペイントのレイヤーかスマートオブジェクトを選んでから使います").arg(name), 4000, true);
         return;
     }
-    if (smart && (item.op != "filter_raster" || item.kind.starts_with(render::plugins::kPrefix) ||
-                  (!item.python && !core::smart::filter_kind(item.kind)))) {
+    if (!drawing && smart && (item.op != "filter_raster" || item.kind.starts_with(render::plugins::kPrefix) ||
+                              (!item.python && !core::smart::filter_kind(item.kind)))) {
         flash(QStringLiteral("「%1」はスマートオブジェクトには使えません（ラスタライズしてから使います）").arg(name), 5000, true);
         return;
     }
-    if (layer->locked) {
+    if ((!drawing || paint) && layer->locked) {  // (炎・額縁・木 on a locked layer that is not a paint layer: a new one)
         flash(QStringLiteral("レイヤーがロックされています"), 4000, true);
         return;
     }
     const auto asked = asking();
     const std::optional<Json> area = selection_area();
     // (a pen layer's lines, its fills and shapes become pixels — as filter_raster bakes them —: asked first, as the layer
-    // panel's かける… did; Photoshop asks to rasterize a type layer before a filter. A channel drawn on leaves them as they are)
-    const bool lines = layer->stroke_count() > 0;
-    if (paint && (lines || !layer->patches.empty() || render::shape_parts::any(*layer)) && channel_view().target.empty()) {
-        const QString what = lines ? QStringLiteral("ペンの線は画像になり、あとから線として消せなくなります")
-                                   : QStringLiteral("図形・塗りは画像になり、あとから図形として直せなくなります");
-        if (!ask::question(this, name, QStringLiteral("レイヤー「%1」の%2。「%3」をかけますか\n（元に戻す で取り消せます）").arg(wording::layer_label(*layer), what, name)) ||
+    // panel's かける… did; Photoshop asks to rasterize a type layer before a filter. A channel drawn on leaves them as they are.
+    // 炎・額縁・木: asked after their window, unless they go on a new layer)
+    const bool lines = layer != nullptr && layer->stroke_count() > 0;
+    const bool vectors = paint && (lines || !layer->patches.empty() || render::shape_parts::any(*layer)) && channel_view().target.empty();
+    const QString vectors_words = lines ? QStringLiteral("ペンの線は画像になり、あとから線として消せなくなります")
+                                        : QStringLiteral("図形・塗りは画像になり、あとから図形として直せなくなります");
+    if (!drawing && vectors) {
+        if (!ask::question(this, name, QStringLiteral("レイヤー「%1」の%2。「%3」をかけますか\n（元に戻す で取り消せます）").arg(wording::layer_label(*layer), vectors_words, name)) ||
             !still(asked))
             return;
     }
     // (on a smart object: a smart filter, as Photoshop adds it, not asked — but when Photoshop's picture of it goes, its
     // filters drawn again by Genko, or a selection is not used for a filter mask it has already: the layer panel's words)
-    if (smart && layer->smart && layer->smart->is_object()) {
+    if (!drawing && smart && layer->smart && layer->smart->is_object()) {
         const Json* psd = core::get(*layer->smart, "psd");
         const bool photoshops = psd != nullptr && psd->is_object() && psd->contains("shown") && !(*psd)["shown"].is_null();
         const Json* mask = core::get(*layer->smart, "filter_mask");
@@ -402,9 +409,9 @@ void MainWindow::filter_command(const FilterItem& item) {
             if (!ask::question(this, name, text) || !still(asked)) return;
         }
     }
-    const std::string layer_id = layer->id, kind = item.kind;
+    const std::string layer_id = layer != nullptr ? layer->id : std::string(), kind = item.kind;
     const Json index = page->index.json();
-    const std::string op_name = smart ? "smart_filter_add" : item.op;
+    const std::string op_name = smart && !drawing ? "smart_filter_add" : item.op;
     // (a kind with a seed — ノイズを加える, ぼかし（レンズ）'s noise —: a new one each time it is applied, as Photoshop's grains
     // differ each time — 前回のフィルター too —; the window's preview and its かける the same one; the op holds it)
     const bool python = item.python;
@@ -413,14 +420,15 @@ void MainWindow::filter_command(const FilterItem& item) {
                         std::any_of(table->params.begin(), table->params.end(), [](const core::AdjustParam& p) { return p.key == "seed"; });
     const std::optional<std::uint32_t> seed = seeded ? std::optional<std::uint32_t>(QRandomGenerator::global()->generate()) : std::nullopt;
     const auto op_of = [op_name, index, layer_id, kind, area, seed](const Json& params) {
-        Json op{{"op", op_name}, {"page", index}, {"id", layer_id}, {"kind", kind}};
+        Json op{{"op", op_name}, {"page", index}, {"kind", kind}};
+        if (!layer_id.empty()) op["id"] = layer_id;  // (炎・額縁・木 with no layer chosen: a new one on top)
         op.update(params);
         if (seed && !op.contains("seed")) op["seed"] = *seed;
         if (area) op["area"] = *area;
         return op;
     };
     // (heavy: its work on the layer's grid past what a moment takes — render::fx; Python's and the plugins' as before)
-    const render::fx::Grid grid = render::fx::layer_grid(*page, *layer);
+    const render::fx::Grid grid = layer != nullptr ? render::fx::layer_grid(*page, *layer) : render::fx::Grid{};
     const auto heavy = [grid, kind](const Json& params) {
         // (PC4 D6: 消点 — a kind without a kernel — on a thread whenever it pastes or stamps: its pictures over the page's
         // grid, its strokes' footprints; the planes alone at once)
@@ -436,8 +444,16 @@ void MainWindow::filter_command(const FilterItem& item) {
         return render::fx::work(kind, params, std::uint64_t(grid.width) * grid.height, grid.s, grid.levels) >= render::fx::kHeavyWork;
     };
     const std::string op = item.op;
-    const auto send = [this, op_of, heavy, name, kind, op, python, asked](const Json& params) {
+    // (炎・額縁・木 on the pen layer itself, not a new one: its lines asked about now, after the window — PC4 D4, review P3-7)
+    const QString lines_question =
+        drawing && vectors ? QStringLiteral("レイヤー「%1」の%2。そのレイヤーに「%3」を描きますか（「新しいレイヤーに描く」なら線はそのままです）\n（元に戻す で取り消せます）")
+                                 .arg(wording::layer_label(*layer), vectors_words, name)
+                           : QString();
+    const auto send = [this, op_of, heavy, name, kind, op, python, asked, lines_question](const Json& params) {
         if (!still(asked)) return;
+        if (!lines_question.isEmpty() && !(params.contains("new_layer") && params["new_layer"] == Json(true)) &&
+            (!ask::question(this, name, lines_question) || !still(asked)))
+            return;
         if (!send_filter(Json::array({op_of(params)}), name, heavy(params))) return;  // (refused, stopped: not remembered)
         if (op != "vanishing_point") {  // (消点 is not 前回のフィルター: PhotoCraft's lastFilter neither)
             last_filter_ = Json{{"title", name.toStdString()}, {"kind", kind}, {"op", op}, {"python", python}, {"params", params}};
@@ -497,6 +513,10 @@ void MainWindow::filter_command(const FilterItem& item) {
         adjust_forms::FormContext context;
         context.page = page;
         context.smart = smart;
+        if (!smart && area) {  // (D4: the selection's box, its places' frame)
+            const auto box = canvas()->selection_box();
+            if (box[2] > box[0] && box[3] > box[1]) context.base_aspect = (box[2] - box[0]) / (box[3] - box[1]);
+        }
         const auto& rgb = pen().rgb;
         context.pen = {static_cast<int>(rgb[0]), static_cast<int>(rgb[1]), static_cast<int>(rgb[2])};
         if (colours() != nullptr) context.sub = colours()->sub_rgb();

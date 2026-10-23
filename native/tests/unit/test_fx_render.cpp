@@ -25,6 +25,7 @@
 #include "core/error.hpp"
 #include "core/filter_kinds.hpp"
 #include "core/ink.hpp"
+#include "core/smart.hpp"
 #include "formats/open_file.hpp"
 #include "formats/pillow_save.hpp"
 #include "render/fx.hpp"
@@ -343,6 +344,19 @@ private slots:
         const std::string smart = refusal(so, Json{{"op", "smart_filter_add"}, {"page", 1}, {"id", "so"}, {"kind", "render_lighting_effects"}, {"texture", Json{{"channel", name}}}});
         QVERIFY2(smart.find("cannot be a channel") != std::string::npos, smart.c_str());
         QVERIFY(refusal(so, Json{{"op", "smart_filter_add"}, {"page", 1}, {"id", "so"}, {"kind", "render_lighting_effects"}, {"texture", "luminance"}}).empty());
+        // (a book that holds one anyway — written by hand, another tool —: refused by the reader, opened read only)
+        core::Document held = apply_ops(so, Json::array({Json{{"op", "smart_filter_add"}, {"page", 1}, {"id", "so"}, {"kind", "render_lighting_effects"},
+                                                              {"texture", "luminance"}}}))
+                                  .doc;
+        core::smart::validate_smart(held);
+        for (core::Layer& layer : held.edit_page(0).layers)
+            if (layer.id == "so") (*layer.smart)["filters"][0]["params"]["texture"] = Json{{"channel", name}};
+        try {
+            core::smart::validate_smart(held);
+            QFAIL("a smart filter's lighting texture of a channel read");
+        } catch (const std::exception& error) {
+            QVERIFY2(std::string(error.what()).find("cannot be a channel of the page") != std::string::npos, error.what());
+        }
     }
 
     // --- ぼかしギャラリー (gallery.rs; tests_ext.rs 565-588) ----------------------------------------------------------------------
@@ -390,7 +404,11 @@ private slots:
             {"render_lighting_effects", Json{{"texture", "luminance"}}},
             {"render_lens_flare", Json{{"center_x", 0.3}}},
             {"render_clouds", Json{{"seed", 4}}},
-            {"render_fibers", Json{{"seed", 4}}}};
+            {"render_fibers", Json{{"seed", 4}}},
+            // (review P2-3: large blurs — their large levels reduced once on the base box, the rest by each tile)
+            {"blur_iris", Json{{"pins", Json::array({Json{{"blur", 120}, {"radius_x", 0.2}, {"radius_y", 0.3}}, Json{{"x", 0.8}, {"blur", 9}}})}}},
+            {"blur_tilt_shift", Json{{"blur", 150}, {"angle", 20}, {"focus", 0.05}}},
+            {"blur_field", Json{{"pins", Json::array({Json{{"x", 0.2}, {"blur", 0}}, Json{{"x", 0.8}, {"y", 0.2}, {"blur", 200}}})}}}};
         for (const auto& [kind, params] : cases) {
             for (const double s : {1.0, 1.7}) {
                 const std::string a = run_precise(raster, kind, params, {256, 1}, s);
@@ -407,7 +425,8 @@ private slots:
             {"blur_tilt_shift", Json{{"blur", 4}, {"angle", 20}, {"focus", 0.05}}},
             {"blur_iris", Json{{"pins", Json::array({Json{{"blur", 5}, {"radius_x", 0.25}, {"radius_y", 0.2}}})}}},
             {"blur_spin", Json{{"pins", Json::array({Json{{"radius_x", 0.4}, {"radius_y", 0.4}, {"blur_angle", 30}}})}}},
-            {"blur_path", Json{{"paths", Json::array({Json{{"points", Json::array({Json::array({mm(4), mm(15)}), Json::array({mm(36), mm(15)})})}, {"speed", 6}}})}}}};
+            {"blur_path", Json{{"paths", Json::array({Json{{"points", Json::array({Json::array({mm(4), mm(15)}), Json::array({mm(36), mm(15)})})}, {"speed", 6}}})}}},
+            {"blur_iris", Json{{"pins", Json::array({Json{{"blur", 40}, {"radius_x", 0.25}, {"radius_y", 0.2}}})}}}};  // (600 dpi: reduced)
         const std::string big_in = precise(120, 90, smooth(120, 90), true), small_in = precise(40, 30, smooth(40, 30), true);
         for (const auto& [kind, params] : cases) {
             const std::string big = run_precise(big_in, kind, params, {}, 3.0);
@@ -498,8 +517,24 @@ private slots:
         for (std::size_t i = 0; i <= core::kBlurPathMostPoints; ++i) far.push_back(Json::array({static_cast<double>(i % 7), static_cast<double>(i % 5)}));
         paths["paths"] = Json::array({Json{{"points", far}}});
         QVERIFY(refusal(doc, paths).find("paths must be") != std::string::npos);
+        // (the points of every path together: 64 paths of 100 — 6400 — refused, two of 2048 — 4096 — drawn)
+        Json hundred = Json::array();
+        for (int i = 0; i < 100; ++i) hundred.push_back(Json::array({static_cast<double>(i % 7), static_cast<double>(i % 5)}));
+        paths["paths"] = many(Json{{"points", hundred}}, core::kBlurPathMostPaths);
+        QVERIFY2(refusal(doc, paths).find("4096 in all") != std::string::npos, refusal(doc, paths).c_str());
+        Json half = Json::array();
+        for (std::size_t i = 0; i < core::kBlurPathMostPoints / 2; ++i) half.push_back(Json::array({static_cast<double>(i % 7), static_cast<double>(i % 5)}));
+        paths["paths"] = many(Json{{"points", half}}, 2);
+        QVERIFY2(refusal(doc, paths).empty(), refusal(doc, paths).c_str());
         paths["paths"] = Json::array({Json{{"points", Json::array({Json::array({0, 0}), Json::array({1e7, 0})})}}});
-        QVERIFY(refusal(doc, paths).find("paths must be") != std::string::npos);
+        QVERIFY(refusal(doc, paths).find("paths' each path is") != std::string::npos);
+        // (what is wrong in one light or pin said as such, not as their number)
+        lights["lights"] = Json::array({Json{{"color", Json::array({1, 2})}}});
+        QVERIFY2(refusal(doc, lights).find("each light is") != std::string::npos, refusal(doc, lights).c_str());
+        Json pin = op;
+        pin["kind"] = "blur_iris";
+        pin["pins"] = Json::array({Json{{"blur_angle", 3}}});
+        QVERIFY2(refusal(doc, pin).find("each pin is") != std::string::npos, refusal(doc, pin).c_str());
     }
 
     // --- render_picture (render2.rs, render_cmds.rs) -----------------------------------------------------------------------------
@@ -663,6 +698,90 @@ private slots:
         const render::Image after = render::raster::layer_pixels(done.page(0), layer_of(done, id)).convert("RGBA");
         QCOMPARE(after.width(), 300);  // (the picture's own pixels)
         QVERIFY(after.tobytes() != render::raster::layer_pixels(opened.page(0), layer_of(opened, id)).convert("RGBA").tobytes());
+    }
+
+    // A large blur (review P2-3): its large levels made on blocks of the grid, reduced — near the full blur (just below and just
+    // above where they are reduced); at 600 dpi not refused, in the time of a heavy filter. GENKO_D4_PERF=1 works a B4 page at
+    // 600 dpi (6071 × 8598, RGB 16 bits) and says how long it took.
+    void aLargeBlurReducedAndItsTime() {
+        const std::string picture = precise(400, 300, smooth(400, 300), false);
+        const auto iris = [](double blur) { return Json{{"pins", Json::array({Json{{"blur", blur}, {"radius_x", 0.15}, {"radius_y", 0.15}}})}}; };
+        const std::string full = run_precise(picture, "blur_iris", iris(106));     // (σ 63.6: each tile's own)
+        const std::string reduced = run_precise(picture, "blur_iris", iris(107));  // (σ 64.2: reduced by 4)
+        double total = 0;
+        for (std::uint32_t y = 0; y < 300; y += 3)
+            for (std::uint32_t x = 0; x < 400; x += 3)
+                for (unsigned c = 0; c < 4; ++c) total += std::fabs(pixel(full, x, y)[c] - pixel(reduced, x, y)[c]);
+        QVERIFY2(total / (134.0 * 100.0 * 4.0) < 0.01, qPrintable(QString::number(total / (134.0 * 100.0 * 4.0))));
+        const bool b4 = qEnvironmentVariableIsSet("GENKO_D4_PERF");
+        const std::uint32_t w = b4 ? 6071 : 1800, h = b4 ? 8598 : 1300;
+        const std::string big = core::encode_color_pixels(w, h, "u16", [w](std::size_t i) {
+            const double x = static_cast<double>(i % w), y = static_cast<double>(i / w);
+            return std::array<double, 4>{x / w, std::fmod(y, 997.0) / 997.0, 0.5 + 0.4 * std::sin((x + y) / 211.0), 1.0};
+        });
+        const auto surface = render::fx::precise_surface(big);
+        const render::ImageAllocationBudget budget{2ULL * 1024 * 1024 * 1024};
+        QElapsedTimer clock;
+        clock.start();
+        render::fx::apply(*surface, kernel("blur_iris"), core::normalize_filter("blur_iris", iris(300), nullptr), core::filter_info("blur_iris")->inks,
+                          Rect{0, 0, int(w), int(h)}, nullptr, 3.0);
+        const qint64 ms = clock.elapsed();
+        qInfo("blur_iris 300 at 600 dpi on %u x %u: %lld ms, the budget's peak %llu MB", w, h, static_cast<long long>(ms),
+              static_cast<unsigned long long>(budget.peak() >> 20));
+        QVERIFY2(ms < (b4 ? 180000 : 60000), qPrintable(QString::number(ms)));
+        const std::string after = render::fx::take_bytes(*surface);
+        QVERIFY(pixel(after, 10, 10) != pixel(big, 10, 10));  // (blurred far from the pin)
+        // (the largest blur — 500 — not refused either)
+        const auto again = render::fx::precise_surface(big);
+        render::fx::apply(*again, kernel("blur_iris"), core::normalize_filter("blur_iris", iris(500), nullptr), core::filter_info("blur_iris")->inks,
+                          Rect{0, 0, int(w), int(h)}, nullptr, 3.0);
+        QVERIFY(pixel(render::fx::take_bytes(*again), 10, 10) != pixel(big, 10, 10));
+    }
+
+    // The shapes laid the same whatever the tiling and threads (each pixel its shapes in their order: review P3-13).
+    void picturesLaidTheSameWhateverTheTiling() {
+        const std::string raster = precise(200, 150, pattern(200, 150), true);
+        const render::picture::Canvas canvas{0, 0, 200, 150};
+        const std::vector<std::vector<render::picture::Prim>> all{
+            render::picture::tree(core::normalize_picture("tree", Json{{"base_tree_type", 2}}), canvas),
+            render::picture::picture_frame(core::normalize_picture("picture_frame", Json{{"frame", 4}}), canvas),
+            render::picture::flame(core::normalize_picture("flame", Json{{"flame_type", "multiple_flames_along_path"}, {"interval", 20}}),
+                                   {render::picture::default_flame_path(canvas)})};
+        for (const auto& shapes : all) {
+            const auto laid = [&](render::fx::Tiling tiling) {
+                const auto surface = render::fx::precise_surface(raster);
+                (void)render::picture::lay(*surface, shapes, Rect{0, 0, 200, 150}, nullptr, 1.0, tiling);
+                return render::fx::take_bytes(*surface);
+            };
+            const std::string a = laid({256, 1});
+            QVERIFY(a != raster);
+            QVERIFY(a == laid({37, 3}));
+            QVERIFY(a == laid({64, 2}));
+            QVERIFY(a == laid({13, 4}));
+        }
+    }
+
+    // A pen layer's lines under what is drawn on it (8 bit: baked as filter_raster bakes them; a page of inks: its marks in
+    // its inks); nothing drawn — a selection off the page —: the layer as it was, its lines kept (review P3-3, P3-13).
+    void onAPenLayerItsLinesUnderTheShapes() {
+        for (const std::string mode : {"rgb", "cmyk"}) {
+            const core::Document base = mode == "cmyk" ? ink_page("cmyk", 160, 120) : rgb_page(8, 160, 120);
+            const core::Document empty = apply_ops(base, Json::array({Json{{"op", "add_layer"}, {"page", 1}, {"kind", "pen"}, {"id", "pen"}}})).doc;
+            const core::Document lined = apply_ops(empty, Json::array({Json{{"op", "add_stroke"}, {"page", 1}, {"layer_id", "pen"},
+                                                                            {"points", Json::array({Json::array({4, 8}), Json::array({16, 8})})},
+                                                                            {"width_mm", 1}, {"rgb", Json::array({0, 0, 0})}}}))
+                                             .doc;
+            QVERIFY(layer_of(lined, "pen").stroke_count() > 0);
+            const auto none = apply_ops(lined, Json::array({Json{{"op", "render_picture"}, {"page", 1}, {"id", "pen"}, {"kind", "tree"},
+                                                                 {"area", Json{{"rect", Json::array({mm(200), mm(200), mm(10), mm(10)})}}}}}));
+            QVERIFY(none.results.at(0)["bounds_mm"].is_null());
+            QVERIFY2(layer_of(none.doc, "pen").stroke_count() > 0 && layer_of(none.doc, "pen").kind == core::LayerKind::Strokes, mode.c_str());
+            const Json frame{{"op", "render_picture"}, {"page", 1}, {"id", "pen"}, {"kind", "picture_frame"}, {"frame", 13}};
+            const auto drawn = apply_ops(lined, Json::array({frame}));
+            QVERIFY2(layer_of(drawn.doc, "pen").kind == core::LayerKind::Raster && layer_of(drawn.doc, "pen").stroke_count() == 0, mode.c_str());
+            const auto alone = apply_ops(empty, Json::array({frame}));
+            QVERIFY2(shown(drawn.doc, "pen") > shown(alone.doc, "pen") + 50, mode.c_str());
+        }
     }
 
     // Refused before the shapes are had: flames past kPictureMostShapes, a path too long to follow.

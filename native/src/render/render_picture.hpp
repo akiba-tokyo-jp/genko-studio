@@ -7,6 +7,7 @@
 
 #include "core/command_bus.hpp"
 #include "core/json.hpp"
+#include "render/fx.hpp"
 
 // PC4 節 D4 (SPEC.md COLOR-08「フィルター」, design 3.2): フィルター → 描画 → 炎…・額縁…・木… — the op render_picture.
 // PhotoCraft v0.2.0's algo/src/render2.rs (1-1530: the shapes — tapered capsules and shaded ellipses, laid normally,
@@ -56,6 +57,11 @@ std::uint64_t flame_shapes_at_most(const core::Json& spec, const std::vector<std
 // paint layer (above it). The frame of 木 and 額縁 (and 炎's arc) is the selection's box, else the page's trim. Its report:
 // {"id", "new_layer", "bounds_mm" ([x, y, w, h] of what it drew, or null), "primitives", and "used_path" (炎), "tree_type" (木)
 // or "frame" (額縁)}.
+// The shapes (on the layer's grid: working pixels × s) laid over `surface` within `clip` — mixed by a coverage, or none —,
+// tiled and threaded by the engine (`tiling`: tests), the colours the layer's pixels mean; what they reach within the clip
+// (none: nothing laid). The cells' table and each tile's list held in the imaging budget.
+fx::Rect lay(fx::Surface& surface, std::vector<Prim> shapes, const fx::Rect& clip, const std::string* cover, double s, const fx::Tiling& tiling = {});
+
 void render_picture(core::OpContext& c);
 
 }  // namespace genko::render::picture

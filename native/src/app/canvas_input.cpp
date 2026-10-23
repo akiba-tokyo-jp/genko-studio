@@ -496,6 +496,10 @@ void PageCanvas::mouseDoubleClickEvent(QMouseEvent* event) {
         fit_page();
         return;
     }
+    if (work_ && event->button() == Qt::LeftButton) {  // (PC4 D4: the second press of a double click is the work's press too)
+        mousePressEvent(event);
+        return;
+    }
     if (tool_ == QLatin1String("marquee") && !poly_points_.empty()) {
         finish_points();
         return;
@@ -746,6 +750,21 @@ void PageCanvas::tabletEvent(QTabletEvent* event) {
             request_tiles();
         }
         event->accept();
+        return;
+    }
+    // (PC4 D4: a work over the page — ぼかしギャラリー's pins — takes the pen as it takes the mouse, not the tool under it nor
+    // the eraser end's; Space still pans with it as with the mouse)
+    if (work_ && page() != nullptr && !space_) {
+        const QPointF mm = to_mm(event->position());
+        if (type == QEvent::TabletPress && event->button() == Qt::LeftButton) {
+            setFocus();
+            if (work_->press) work_->press(mm, event->modifiers());
+        } else if (type == QEvent::TabletMove && (event->buttons() & Qt::LeftButton)) {
+            if (work_->move) work_->move(mm, event->modifiers());
+        } else if (type == QEvent::TabletRelease && event->button() == Qt::LeftButton) {
+            if (work_->release) work_->release(mm, event->modifiers());
+        }
+        event->accept();  // (no mouse made of it: the work had it once)
         return;
     }
     const bool eraser_end = event->pointerType() == QPointingDevice::PointerType::Eraser;

@@ -46,6 +46,9 @@ struct FormContext {
     std::function<std::optional<core::Json>()> automatic;
     // (PC4) A smart filter's window: settings that read the layer itself (ぼかし（レンズ）'s layer mask) not offered.
     bool smart = false;
+    // (PC4 D4) The width over the height of the base box a filter's places are shares of (逆光's centre: the selection's box,
+    // else the page); none: the page's.
+    std::optional<double> base_aspect;
 };
 
 // The fields of one correction's settings, laid out as a form. A field's key may be a path into its native

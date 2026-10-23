@@ -39,6 +39,7 @@
 #include "app/canvas.hpp"
 #include "app/colours.hpp"
 #include "app/history_panel.hpp"
+#include "app/inject.hpp"
 #include "app/layer_panel.hpp"
 #include "app/config.hpp"
 #include "app/blur_gallery_tool.hpp"
@@ -1273,13 +1274,48 @@ private slots:
         QVERIFY(book.layer("pic")->raster_png != before);
         QCOMPARE(*book.layer("pic")->raster_png, *op_doc(sent).page(0).layers.back().raster_png);
         undo();
-        // on a smart object: 炎・額縁・木 grey (ラスタライズしてから); 照明効果 a smart filter, the page's channels not offered
+        // a pen layer's lines: asked about after the window, only when the shapes go on that layer (review P3-7)
+        QVERIFY(book.window->apply_ops(Json::array({Json{{"op", "add_layer"}, {"page", 1}, {"kind", "pen"}, {"id", "pen"}},
+                                                    Json{{"op", "add_stroke"}, {"page", 1}, {"layer_id", "pen"}, {"points", Json::array({Json::array({8, 20}), Json::array({30, 20})})},
+                                                         {"width_mm", 1}, {"rgb", Json::array({0, 0, 0})}}})));
+        book.window->set_target_layer("pen");
+        answers.asked.clear();
+        bool new_layer = true;
+        answers.responder->exec = answer(QStringLiteral("picture_frame"), [&](QDialog* d) {
+            QVERIFY(answers.asked.isEmpty());  // (nothing asked before the window)
+            d->findChild<QCheckBox*>(QStringLiteral("render_new_layer"))->setChecked(new_layer);
+        });
+        const std::size_t before_pen = book.page().layers.size();
+        book.act("act_filter_render_picture_frame")->trigger();
+        QVERIFY2(answers.asked.isEmpty(), qPrintable(answers.asked.join(QStringLiteral(" / "))));
+        QCOMPARE(book.page().layers.size(), before_pen + 1);
+        QVERIFY(book.layer("pen")->stroke_count() > 0);
+        undo();
+        new_layer = false;
+        book.act("act_filter_render_picture_frame")->trigger();  // (asked; no: nothing drawn)
+        QCOMPARE(answers.asked.size(), 1);
+        QVERIFY2(answers.asked.front().contains(QStringLiteral("そのレイヤーに「額縁」を描きますか")), qPrintable(answers.asked.front()));
+        QCOMPARE(book.page().layers.size(), before_pen);
+        QVERIFY(book.layer("pen")->stroke_count() > 0);
+        QVERIFY(book.window->apply_ops(Json::array({Json{{"op", "delete_layer"}, {"page", 1}, {"id", "pen"}}})));
+        book.window->set_target_layer("pic");
+        // on a smart object: 炎・額縁・木 on a new layer above it (the op's: a layer not a paint layer); 照明効果 a smart
+        // filter, the page's channels not offered
         QVERIFY(book.window->apply_ops(Json::array({Json{{"op", "smart_convert"}, {"page", 1}, {"ids", Json::array({"pic"})}, {"new_id", "so"}}})));
         book.window->set_target_layer("so");
         emit book.menu("menu_filter")->aboutToShow();
-        for (const char* off : {"act_filter_render_flame", "act_filter_render_picture_frame", "act_filter_render_tree"}) QVERIFY2(!book.act(off)->isEnabled(), off);
-        for (const char* on : {"act_filter_render_clouds", "act_filter_render_lighting_effects", "act_filter_blur_iris"}) QVERIFY2(book.act(on)->isEnabled(), on);
+        for (const char* on : {"act_filter_render_flame", "act_filter_render_picture_frame", "act_filter_render_tree", "act_filter_render_clouds",
+                               "act_filter_render_lighting_effects", "act_filter_blur_iris"})
+            QVERIFY2(book.act(on)->isEnabled(), on);
         emit book.menu("menu_filter")->aboutToHide();
+        const auto so_before = *book.layer("so")->smart;
+        const std::size_t before_so = book.page().layers.size();
+        answers.responder->exec = answer(QStringLiteral("tree"));
+        book.act("act_filter_render_tree")->trigger();
+        QCOMPARE(book.page().layers.size(), before_so + 1);
+        QCOMPARE(book.page().layers.back().title, std::string("木"));
+        QCOMPARE(*book.layer("so")->smart, so_before);
+        undo();
         textures.clear();
         answers.responder->exec = answer(QStringLiteral("render_lighting_effects"), [&](QDialog* d) {
             auto* texture = d->findChild<QComboBox*>(QStringLiteral("lighting_texture"));
@@ -1345,6 +1381,36 @@ private slots:
         QVERIFY(book.layer("pic")->raster_png != before);
         QCOMPARE(*book.layer("pic")->raster_png, op_pixels(Json{{"kind", "blur_iris"}, {"pins", chosen}}));
         book.window->action(QStringLiteral("act_undo"))->trigger();
+        QCOMPARE(book.layer("pic")->raster_png, before);
+        // a pen — and its eraser end — with a drawing tool chosen: the work's, not the tool's (a pin, no line, the tool kept); a
+        // double click: a pin; 切り取り with a selection: nothing cut, the pins kept (review P2-1, P3-1)
+        book.act("act_pen")->trigger();
+        const QString tool = canvas->tool();
+        const std::size_t steps = book.session->history().done.size();
+        book.act("act_filter_blur_iris")->trigger();
+        QVERIFY(app::blur_gallery::working());
+        QCOMPARE(pins().size(), std::size_t(1));
+        app::inject::tablet(canvas, app::inject::Phase::Press, app::inject::PenInput{QPointF(30, 10)});
+        app::inject::tablet(canvas, app::inject::Phase::Release, app::inject::PenInput{QPointF(30, 10)});
+        QCOMPARE(pins().size(), std::size_t(2));
+        app::inject::tablet(canvas, app::inject::Phase::Press, app::inject::PenInput{QPointF(10, 10)}, true);
+        app::inject::tablet(canvas, app::inject::Phase::Release, app::inject::PenInput{QPointF(10, 10)}, true);
+        QCOMPARE(pins().size(), std::size_t(3));
+        QCOMPARE(canvas->tool(), tool);
+        QVERIFY(app::blur_gallery::working());
+        QCOMPARE(book.layer("pic")->raster_png, before);
+        QCOMPARE(book.session->history().done.size(), steps);  // (no line drawn)
+        QTest::mouseDClick(canvas, Qt::LeftButton, {}, canvas->to_widget(QPointF(30, 32)).toPoint());
+        QCOMPARE(pins().size(), std::size_t(4));
+        canvas->set_selection(Json{{"poly", Json::array({Json::array({2, 2}), Json::array({20, 2}), Json::array({20, 20}), Json::array({2, 20})})}});
+        book.window->action(QStringLiteral("act_cut"))->trigger();
+        QCOMPARE(pins().size(), std::size_t(4));
+        QVERIFY(app::blur_gallery::working());
+        QCOMPARE(book.layer("pic")->raster_png, before);
+        QCOMPARE(book.session->history().done.size(), steps);
+        canvas->set_selection(std::nullopt);
+        panel()->findChild<QDialogButtonBox*>()->button(QDialogButtonBox::Cancel)->click();
+        QVERIFY(!app::blur_gallery::working());
         QCOMPARE(book.layer("pic")->raster_png, before);
         // チルトシフト…: its centre moved, キャンセル — nothing
         book.act("act_filter_blur_tilt_shift")->trigger();

@@ -50,8 +50,8 @@ inline constexpr std::size_t kDisplacementMapMaxBytes = 32u * 1024 * 1024;
 inline constexpr std::size_t kShearMostPoints = 64;
 // (D6) 広角補正's constraints: at most this many lines.
 inline constexpr std::size_t kWideAngleMostConstraints = 64;
-// (D4) 照明効果's lights, ぼかしギャラリー's pins and パスぼかし's paths: at most this many (design 2.3); a path's points at
-// most kBlurPathMostPoints.
+// (D4) 照明効果's lights, ぼかしギャラリー's pins and パスぼかし's paths: at most this many (design 2.3); the paths' points at
+// most kBlurPathMostPoints in all (each pixel looks at every segment).
 inline constexpr std::size_t kLightingMostLights = 64;
 inline constexpr std::size_t kBlurGalleryMostPins = 64;
 inline constexpr std::size_t kBlurPathMostPaths = 64;

@@ -81,7 +81,7 @@ struct Shown {
 std::shared_ptr<const render::fx::Picture> channel_over(const core::Channel& channel, const Shown& shown) {
     const render::Image mask =
         render::channels::mask_of(channel, render::Size{static_cast<int>(shown.page_w), static_cast<int>(shown.page_h)}).crop(shown.area);
-    const render::image_ops::Held held(std::uint64_t(mask.width()) * std::uint64_t(mask.height()) * 4);
+    const render::image_ops::Held held(std::uint64_t(mask.width()) * std::uint64_t(mask.height()) * 5);  // (its bytes and the picture of four)
     const std::string bytes = mask.tobytes();
     auto out = std::make_shared<render::fx::Picture>();
     out->width = mask.width();

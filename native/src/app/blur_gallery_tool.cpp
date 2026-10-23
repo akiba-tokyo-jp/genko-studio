@@ -102,6 +102,13 @@ std::weak_ptr<Work>& current() {
 }
 
 double dot(QPointF a, QPointF b) { return a.x() * b.x() + a.y() * b.y(); }
+
+// パスぼかし's points, every path's together (core::kBlurPathMostPoints in all).
+std::size_t all_points(const Json& paths) {
+    std::size_t n = 0;
+    for (const Json& path : paths) n += path["points"].size();
+    return n;
+}
 double length(QPointF a) { return std::hypot(a.x(), a.y()); }
 
 // The settings shown on the page a moment after a change (none: as it is).
@@ -126,6 +133,14 @@ void show_now(const std::shared_ptr<Work>& work) {
 // The work let go (`sent`: its settings sent first), the canvas and the panel as they were.
 void finish(const std::shared_ptr<Work>& work, bool sent) {
     if (work->done) return;
+    if (sent && work->send) {  // (settings the kind cannot take — a path of one point —: said, the work kept to mend them)
+        try {
+            (void)core::normalize_filter(work->kind, work->params, nullptr);
+        } catch (const std::exception& error) {
+            if (work->window != nullptr) work->window->flash(wording::error(QString::fromUtf8(error.what())), 5000, true);
+            return;
+        }
+    }
     work->done = true;
     if (work->preview) work->preview(std::nullopt);
     if (work->window != nullptr && work->window->canvas() != nullptr) work->window->canvas()->set_work(nullptr);
@@ -330,13 +345,16 @@ bool press(const std::shared_ptr<Work>& work, QPointF mm, double per_mm) {
             }
         }
     }
+    if (all_points(paths) >= core::kBlurPathMostPoints) {
+        if (work->window != nullptr) work->window->flash(QStringLiteral("パスの点は全部で %1 個までです").arg(core::kBlurPathMostPoints), 3000);
+        return true;
+    }
     if (work->chosen < 0 || work->chosen >= static_cast<int>(paths.size())) {
         if (paths.size() >= core::kBlurPathMostPaths) return true;
         paths.push_back(Json{{"points", Json::array()}, {"speed", 50}, {"taper", 0}});
         work->chosen = static_cast<int>(paths.size()) - 1;
     }
     Json& points = paths[static_cast<std::size_t>(work->chosen)]["points"];
-    if (points.size() >= core::kBlurPathMostPoints) return true;
     points.push_back(Json::array({mm.x(), mm.y()}));
     work->point = static_cast<int>(points.size()) - 1;
     work->grip = Grip::Point;
@@ -505,7 +523,7 @@ void make_panel(const std::shared_ptr<Work>& work) {
         add->setObjectName(QStringLiteral("gallery_new_path"));
         QObject::connect(add, &QPushButton::clicked, panel, [work] {
             Json& paths = work->paths();
-            if (paths.size() >= core::kBlurPathMostPaths) return;
+            if (paths.size() >= core::kBlurPathMostPaths || all_points(paths) + 2 > core::kBlurPathMostPoints) return;
             const double y = work->box[1] + work->h() * (0.3 + 0.1 * static_cast<double>(paths.size() % 5));
             paths.push_back(Json{{"points", Json::array({Json::array({work->box[0] + 0.3 * work->w(), y}), Json::array({work->box[0] + 0.7 * work->w(), y})})},
                                  {"speed", 50},

@@ -12,12 +12,14 @@
 #include <cmath>
 #include <cstdint>
 #include <limits>
+#include <memory>
 #include <numbers>
 #include <vector>
 
 #include "core/pyops.hpp"
 #include "render/fx.hpp"
 #include "render/fx_d2.hpp"
+#include "render/image_ops.hpp"
 #include "render/segment/segment.hpp"
 
 namespace genko::render::fx {
@@ -48,16 +50,152 @@ float short_side(const Rect& b) { return std::max(static_cast<float>(std::min(b.
 
 constexpr std::size_t kLevels = 6;
 
-// `src` blurred over `out` with each pixel's σ (`sigma(x, y)` at its centre, ≤ smax): the Gaussian levels of the window
-// (σ 0, then smax / 2^(kLevels − 1) … smax) mixed by hat weights (gallery.rs variable_blur).
+// The levels of a variable blur of largest σ `smax`: σ 0, then smax / 2^(kLevels − 1) … smax.
+std::vector<float> levels_of(float smax) {
+    std::vector<float> lv{0.0f};
+    for (std::size_t k = 0; k < kLevels; ++k) lv.push_back(smax / std::pow(2.0f, static_cast<float>(kLevels - 1 - k)));
+    return lv;
+}
+
+// (review P2-3) A level of σ at least kReduceFrom is made on the picture reduced by f = 2^m — blocks of f × f of the
+// grid's own places (the same blocks whatever the tile, a preview's part too), averaged, blurred there with what is left
+// of σ (σ² − f²/4: the blocks' and the bilinear read's own spread) and read back bilinearly —, f the largest that keeps
+// 16 pixels of σ: its work and memory the reduced picture's, made once for the whole base box (Kernel::prepare,
+// Halo::whole). A smaller level is made by each tile over its part of the window grown by the level's own reach.
+constexpr float kReduceFrom = 64.0f;
+int reduction_of(float sigma) {
+    int f = 1;
+    while (sigma / static_cast<float>(2 * f) >= 16.0f && f < (1 << 20)) f *= 2;
+    return f;
+}
+bool reduced_kind(float smax) { return smax >= kReduceFrom; }
+
+int floor_div(int a, int b) { return a >= 0 ? a / b : -((-a + b - 1) / b); }
+
+// The reduced levels of a whole base box (Kernel::prepare): each its factor, its first block's place on the grid (in
+// blocks), its size and its premultiplied blurred samples; held in the imaging budget while it lives.
+struct Reduced : Prepared {
+    struct Level {
+        std::size_t k = 0;
+        int f = 1, bx0 = 0, by0 = 0, bw = 0, bh = 0;
+        std::vector<float> data;
+    };
+    std::vector<Level> levels;
+    std::unique_ptr<image_ops::Held> held;
+    const Level* level(std::size_t k) const {
+        for (const Level& l : levels)
+            if (l.k == k) return &l;
+        return nullptr;
+    }
+};
+
+std::shared_ptr<const Prepared> reduce_levels(float smax, const Window& whole, const Ctx& ctx) {
+    if (!reduced_kind(smax) || whole.rect.empty()) return nullptr;
+    const std::size_t n = whole.ch;
+    const std::vector<float> lv = levels_of(smax);
+    int fmin = 0;
+    for (std::size_t k = 1; k < lv.size(); ++k)
+        if (lv[k] >= kReduceFrom) fmin = fmin == 0 ? reduction_of(lv[k]) : std::min(fmin, reduction_of(lv[k]));
+    if (fmin < 2) return nullptr;
+    const Rect& w = whole.rect;
+    const auto blocks = [&](int f) {  // (the blocks of f the window touches: first and count, across and down)
+        const int bx0 = floor_div(w.x0 + ctx.x0, f), by0 = floor_div(w.y0 + ctx.y0, f);
+        return std::array<int, 4>{bx0, by0, floor_div(w.x1 - 1 + ctx.x0, f) - bx0 + 1, floor_div(w.y1 - 1 + ctx.y0, f) - by0 + 1};
+    };
+    // what it keeps (every reduced level), then the sums of the finest blocks and their counts while it works
+    auto out = std::make_shared<Reduced>();
+    std::uint64_t kept = 0;
+    for (std::size_t k = 1; k < lv.size(); ++k) {
+        if (lv[k] < kReduceFrom) continue;
+        const auto b = blocks(reduction_of(lv[k]));
+        kept += std::uint64_t(b[2]) * std::uint64_t(b[3]) * n * sizeof(float);
+    }
+    out->held = std::make_unique<image_ops::Held>(kept);
+    auto b = blocks(fmin);
+    const image_ops::Held working(std::uint64_t(b[2]) * std::uint64_t(b[3]) *
+                                  (n * (2 * sizeof(double) + sizeof(std::int64_t)) + 2 * sizeof(std::uint32_t)));
+    std::vector<double> sum(std::size_t(b[2]) * std::size_t(b[3]) * n, 0.0);
+    std::vector<std::uint32_t> count(std::size_t(b[2]) * std::size_t(b[3]), 0);
+    for (int y = w.y0; y < w.y1; ++y) {
+        if ((y & 63) == 0) segment::check_stop();
+        const std::size_t by = std::size_t(floor_div(y + ctx.y0, fmin) - b[1]);
+        for (int x = w.x0; x < w.x1; ++x) {
+            const std::size_t i = by * std::size_t(b[2]) + std::size_t(floor_div(x + ctx.x0, fmin) - b[0]);
+            const float* px = whole.px(x, y);
+            const double a = ctx.alpha ? static_cast<double>(px[n - 1]) : 1.0;
+            for (std::size_t c = 0; c < n; ++c) sum[i * n + c] += ctx.alpha && c + 1 < n ? static_cast<double>(px[c]) * a : static_cast<double>(px[c]);
+            ++count[i];
+        }
+    }
+    int f = fmin;
+    for (;;) {
+        for (std::size_t k = 1; k < lv.size(); ++k) {
+            if (lv[k] < kReduceFrom || reduction_of(lv[k]) != f) continue;
+            Reduced::Level level;
+            level.k = k;
+            level.f = f;
+            level.bx0 = b[0];
+            level.by0 = b[1];
+            level.bw = b[2];
+            level.bh = b[3];
+            level.data.resize(sum.size());
+            for (std::size_t i = 0; i < count.size(); ++i)
+                for (std::size_t c = 0; c < n; ++c) level.data[i * n + c] = count[i] > 0 ? static_cast<float>(sum[i * n + c] / count[i]) : 0.0f;
+            const float ff = static_cast<float>(f);
+            const float rest = std::sqrt(std::max(lv[k] * lv[k] / (ff * ff) - 0.25f, 0.25f));
+            d2::gauss_blur_exact(level.data, std::size_t(b[2]), std::size_t(b[3]), n, rest, ctx.largest);
+            out->levels.push_back(std::move(level));
+            segment::check_stop();
+        }
+        // (the next factor's blocks: four of these, the grid's places nesting)
+        bool more = false;
+        for (std::size_t k = 1; k < lv.size(); ++k) more = more || (lv[k] >= kReduceFrom && reduction_of(lv[k]) > f);
+        if (!more) break;
+        const auto c2 = blocks(2 * f);
+        std::vector<double> sum2(std::size_t(c2[2]) * std::size_t(c2[3]) * n, 0.0);
+        std::vector<std::uint32_t> count2(std::size_t(c2[2]) * std::size_t(c2[3]), 0);
+        for (int j = 0; j < b[3]; ++j)
+            for (int i = 0; i < b[2]; ++i) {
+                const std::size_t from = std::size_t(j) * std::size_t(b[2]) + std::size_t(i);
+                const std::size_t to = std::size_t(floor_div(b[1] + j, 2) - c2[1]) * std::size_t(c2[2]) + std::size_t(floor_div(b[0] + i, 2) - c2[0]);
+                for (std::size_t c = 0; c < n; ++c) sum2[to * n + c] += sum[from * n + c];
+                count2[to] += count[from];
+            }
+        sum = std::move(sum2);
+        count = std::move(count2);
+        b = c2;
+        f *= 2;
+    }
+    return out;
+}
+
+// The premultiplied sample of a reduced level at the pixel (x, y) of the surface (bilinear between the blocks' centres).
+void add_reduced(const Reduced::Level& l, int x, int y, const Ctx& ctx, std::size_t n, float wk, float* acc) {
+    const float ff = static_cast<float>(l.f);
+    const float u = std::clamp((static_cast<float>(x + ctx.x0) + 0.5f) / ff - 0.5f - static_cast<float>(l.bx0), 0.0f, static_cast<float>(l.bw - 1));
+    const float v = std::clamp((static_cast<float>(y + ctx.y0) + 0.5f) / ff - 0.5f - static_cast<float>(l.by0), 0.0f, static_cast<float>(l.bh - 1));
+    const int i0 = static_cast<int>(u), j0 = static_cast<int>(v);
+    const int i1 = std::min(i0 + 1, l.bw - 1), j1 = std::min(j0 + 1, l.bh - 1);
+    const float au = u - static_cast<float>(i0), av = v - static_cast<float>(j0);
+    const float* p00 = &l.data[(std::size_t(j0) * std::size_t(l.bw) + std::size_t(i0)) * n];
+    const float* p10 = &l.data[(std::size_t(j0) * std::size_t(l.bw) + std::size_t(i1)) * n];
+    const float* p01 = &l.data[(std::size_t(j1) * std::size_t(l.bw) + std::size_t(i0)) * n];
+    const float* p11 = &l.data[(std::size_t(j1) * std::size_t(l.bw) + std::size_t(i1)) * n];
+    for (std::size_t c = 0; c < n; ++c) {
+        const float top = p00[c] + (p10[c] - p00[c]) * au, bottom = p01[c] + (p11[c] - p01[c]) * au;
+        acc[c] += (top + (bottom - top) * av) * wk;
+    }
+}
+
+// `src` blurred over `out` with each pixel's σ (`sigma(x, y)` at its centre, ≤ smax): the Gaussian levels (σ 0, then
+// smax / 2^(kLevels − 1) … smax) mixed by hat weights (gallery.rs variable_blur) — a level a tile makes over its part of the
+// window grown by the level's reach (the same sums whatever the tile), a large one read from the base box's reduced levels.
 template <typename Sigma>
 std::vector<float> variable_blur(const Window& src, const Rect& out, const Ctx& ctx, float smax, Sigma&& sigma) {
     const std::size_t n = src.ch;
     if (smax < 0.3f) return src.crop(out);
-    const Rect win = src.rect;
-    const std::size_t ww = static_cast<std::size_t>(win.width()), wh = static_cast<std::size_t>(win.height());
-    std::vector<float> lv{0.0f};
-    for (std::size_t k = 0; k < kLevels; ++k) lv.push_back(smax / std::pow(2.0f, static_cast<float>(kLevels - 1 - k)));
+    const std::vector<float> lv = levels_of(smax);
+    const auto* reduced = dynamic_cast<const Reduced*>(ctx.prepared);
     std::vector<float> sig(out.area());
     {
         std::size_t i = 0;
@@ -71,29 +209,44 @@ std::vector<float> variable_blur(const Window& src, const Rect& out, const Ctx& 
         if (k + 1 == lv.size() && s >= c) return 1.0f;
         return 0.0f;
     };
-    // (the window premultiplied: read past the grid's edge as its edge pixel — the window is cut to the grid)
-    std::vector<float> p(ww * wh * n);
-    for (std::size_t y = 0; y < wh; ++y) {
-        const float* row = src.px(win.x0, win.y0 + static_cast<int>(y));
-        std::copy(row, row + ww * n, p.begin() + static_cast<std::ptrdiff_t>(y * ww * n));
-    }
-    premultiply(p, n, ctx.alpha);
     std::vector<float> acc(out.area() * n, 0.0f), buf;
     for (std::size_t k = 0; k < lv.size(); ++k) {
         if (std::none_of(sig.begin(), sig.end(), [&](float s) { return weight(k, s) > 0.0f; })) continue;
-        const std::vector<float>* level = &p;
-        if (k > 0) {
-            buf = p;
-            d2::gauss_blur_exact(buf, ww, wh, n, lv[k], ctx.largest);
-            level = &buf;
+        const Reduced::Level* small = reduced != nullptr ? reduced->level(k) : nullptr;
+        if (k == 0 || small != nullptr) {  // (σ 0: the pixel itself; a large level: the reduced one)
+            std::size_t i = 0;
+            for (int y = out.y0; y < out.y1; ++y)
+                for (int x = out.x0; x < out.x1; ++x, ++i) {
+                    const float wk = weight(k, sig[i]);
+                    if (wk <= 0.0f) continue;
+                    if (small != nullptr) {
+                        add_reduced(*small, x, y, ctx, n, wk, &acc[i * n]);
+                        continue;
+                    }
+                    const float* px = src.px(x, y);
+                    const float a = ctx.alpha ? px[n - 1] : 1.0f;
+                    for (std::size_t c = 0; c < n; ++c) acc[i * n + c] += (ctx.alpha && c + 1 < n ? px[c] * a : px[c]) * wk;
+                }
+            continue;
         }
+        // (the window premultiplied over the tile grown by this level's reach, cut to the window: past the grid's edge its
+        // edge pixel — the window is cut to the grid)
+        const Rect part = out.inflate(reach_of(lv[k])).intersect(src.rect);
+        const std::size_t pw = static_cast<std::size_t>(part.width()), ph = static_cast<std::size_t>(part.height());
+        buf.resize(pw * ph * n);
+        for (std::size_t y = 0; y < ph; ++y) {
+            const float* row = src.px(part.x0, part.y0 + static_cast<int>(y));
+            std::copy(row, row + pw * n, buf.begin() + static_cast<std::ptrdiff_t>(y * pw * n));
+        }
+        premultiply(buf, n, ctx.alpha);
+        d2::gauss_blur_exact(buf, pw, ph, n, lv[k], ctx.largest);
         std::size_t i = 0;
         for (int y = out.y0; y < out.y1; ++y)
             for (int x = out.x0; x < out.x1; ++x, ++i) {
                 const float wk = weight(k, sig[i]);
                 if (wk <= 0.0f) continue;
-                const std::size_t o = (std::size_t(y - win.y0) * ww + std::size_t(x - win.x0)) * n;
-                for (std::size_t c = 0; c < n; ++c) acc[i * n + c] += (*level)[o + c] * wk;
+                const std::size_t o = (std::size_t(y - part.y0) * pw + std::size_t(x - part.x0)) * n;
+                for (std::size_t c = 0; c < n; ++c) acc[i * n + c] += buf[o + c] * wk;
             }
     }
     unpremultiply(acc, n, ctx.alpha);
@@ -403,44 +556,70 @@ double largest_speed(const Json& params) {
 // What a variable blur holds a pixel of its window past the engine's count (its level's float copy beside the
 // premultiplied one and the exact sums: a word a sample of at most five).
 constexpr std::size_t kLevelBytes = 5 * sizeof(float);
+constexpr int kWholeTile = 256;  // (the engine's tile of a whole kind)
 
-// A variable blur's work a pixel: its levels' box passes over a window wider than the tile.
-double levels_cost(float sigma) {
-    const double margin = reach_of(sigma), tile = std::max(256.0, std::ceil(2.0 * margin / 64.0) * 64.0);
-    return 20.0 + 7.0 * 14.0 * std::pow((tile + 2.0 * margin) / tile, 2.0);
+// A level's own box passes over the tile grown by its reach: their work a pixel of the tile.
+double level_cost(float sigma, double tile) {
+    const double margin = reach_of(sigma);
+    return 14.0 * std::pow((tile + 2.0 * margin) / tile, 2.0);
+}
+
+// A variable blur's work a pixel (review P2-3: as the tiles do it): each level a tile makes itself over the tile grown by
+// its reach — the tile the engine takes for that reach —; a reduced level once on its blocks and a bilinear read.
+double levels_cost(float smax) {
+    double each = 20.0;
+    const double tile = reduced_kind(smax) ? kWholeTile : std::min(2048.0, std::max(256.0, std::ceil(2.0 * reach_of(smax) / 64.0) * 64.0));
+    for (const float s : levels_of(smax)) {
+        if (s <= 0.0f) continue;
+        each += reduced_kind(smax) && s >= kReduceFrom ? 8.0 + 4.0 / static_cast<double>(reduction_of(s)) : level_cost(s, tile);
+    }
+    return each;
+}
+
+// The bytes a tile of a whole variable blur holds of its own (its largest level made by the tile: the tile grown by its
+// reach, a float copy and the exact sums a sample).
+std::uint64_t level_tile_bytes(float smax, const Ctx& ctx, int side) {
+    if (!reduced_kind(smax)) return 0;
+    float most = 0.0f;
+    for (const float s : levels_of(smax))
+        if (s < kReduceFrom) most = std::max(most, s);
+    const std::uint64_t part = std::uint64_t(side) + 2 * std::uint64_t(reach_of(most));
+    return part * part * (std::uint64_t(ctx.colours) + 1) * (sizeof(float) + sizeof(std::int64_t));
+}
+
+// A variable blur's kernel: its window the tile grown by its reach, or — a large blur — the whole base box with its
+// large levels reduced once (Kernel::prepare).
+template <typename Smax, typename Run>
+Kernel variable_kernel(std::string_view kind, Smax smax_of, Run run, double each) {
+    Kernel k;
+    k.kind = kind;
+    k.halo = [smax_of](const Json& params, const Ctx& ctx) {
+        const float smax = smax_of(params, ctx);
+        return reduced_kind(smax) ? Halo::whole() : Halo::margin(reach_of(smax));
+    };
+    k.work_bytes = kLevelBytes;
+    k.run = run;
+    k.prepare = [smax_of](const Json& params, const Window& whole, const Ctx& ctx) { return reduce_levels(smax_of(params, ctx), whole, ctx); };
+    k.tile_bytes = [smax_of](const Json& params, const Ctx& ctx, int side) { return level_tile_bytes(smax_of(params, ctx), ctx, side); };
+    k.cost = [smax_of, each](const Json& params, const Ctx& ctx) { return levels_cost(smax_of(params, ctx)) + each * static_cast<double>(pins_of(params).size()); };
+    return k;
 }
 
 }  // namespace
 
 Kernels blur_gallery_kernels() {
     Kernels all;
-    {  // フィールドぼかし (filter.blurGallery.fieldBlur)
-        Kernel k;
-        k.kind = "blur_field";
-        k.halo = [](const Json& params, const Ctx& ctx) { return Halo::margin(reach_of(sigma_of(largest_blur(pins_of(params)), ctx.s))); };
-        k.work_bytes = kLevelBytes;
-        k.run = [](const Json& params, const Window& src, const Rect& out, const Ctx& ctx) { return field(params, src, out, ctx); };
-        k.cost = [](const Json& params, const Ctx& ctx) { return levels_cost(sigma_of(largest_blur(pins_of(params)), ctx.s)) + 2.0 * pins_of(params).size(); };
-        all.push_back(std::move(k));
-    }
-    {  // 虹彩絞りぼかし (filter.blurGallery.irisBlur)
-        Kernel k;
-        k.kind = "blur_iris";
-        k.halo = [](const Json& params, const Ctx& ctx) { return Halo::margin(reach_of(sigma_of(largest_blur(pins_of(params)), ctx.s))); };
-        k.work_bytes = kLevelBytes;
-        k.run = [](const Json& params, const Window& src, const Rect& out, const Ctx& ctx) { return iris(params, src, out, ctx); };
-        k.cost = [](const Json& params, const Ctx& ctx) { return levels_cost(sigma_of(largest_blur(pins_of(params)), ctx.s)) + 20.0 * pins_of(params).size(); };
-        all.push_back(std::move(k));
-    }
-    {  // チルトシフト (filter.blurGallery.tiltShift)
-        Kernel k;
-        k.kind = "blur_tilt_shift";
-        k.halo = [](const Json& params, const Ctx& ctx) { return Halo::margin(reach_of(sigma_of(number(params, "blur", 15), ctx.s))); };
-        k.work_bytes = kLevelBytes;
-        k.run = [](const Json& params, const Window& src, const Rect& out, const Ctx& ctx) { return tilt_shift(params, src, out, ctx); };
-        k.cost = [](const Json& params, const Ctx& ctx) { return levels_cost(sigma_of(number(params, "blur", 15), ctx.s)); };
-        all.push_back(std::move(k));
-    }
+    const auto pins_smax = [](const Json& params, const Ctx& ctx) { return sigma_of(largest_blur(pins_of(params)), ctx.s); };
+    // フィールドぼかし (filter.blurGallery.fieldBlur)
+    all.push_back(variable_kernel(
+        "blur_field", pins_smax, [](const Json& params, const Window& src, const Rect& out, const Ctx& ctx) { return field(params, src, out, ctx); }, 2.0));
+    // 虹彩絞りぼかし (filter.blurGallery.irisBlur)
+    all.push_back(variable_kernel(
+        "blur_iris", pins_smax, [](const Json& params, const Window& src, const Rect& out, const Ctx& ctx) { return iris(params, src, out, ctx); }, 20.0));
+    // チルトシフト (filter.blurGallery.tiltShift)
+    all.push_back(variable_kernel(
+        "blur_tilt_shift", [](const Json& params, const Ctx& ctx) { return sigma_of(number(params, "blur", 15), ctx.s); },
+        [](const Json& params, const Window& src, const Rect& out, const Ctx& ctx) { return tilt_shift(params, src, out, ctx); }, 0.0));
     {  // パスぼかし (filter.blurGallery.pathBlur)
         Kernel k;
         k.kind = "blur_path";
