@@ -1287,6 +1287,7 @@ private slots:
         QCOMPARE(points, std::size_t(19));
         QVERIFY2(said.contains(QStringLiteral("19")), qPrintable(said));
         QVERIFY(paint.layer("pic")->raster_png != before);
+    }
 
     // D4's 描画: 雲模様 1・2 without a window (the main and sub colours, a new seed each time: the op's pixels, one Undo);
     // ファイバー… from its table (ランダマイズ a new seed); 逆光… (its centre, レンズの種類); 照明効果…'s window (a point light
