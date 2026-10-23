@@ -17,6 +17,7 @@
 #include <filesystem>
 #include <map>
 #include <string>
+#include <tuple>
 #include <vector>
 
 #include "core/command_bus.hpp"
@@ -309,6 +310,19 @@ private slots:
         formats::WebSize big;
         big.percent = 1000;
         QVERIFY_THROWS_EXCEPTION(core::Error, formats::save_for_web(doc, 0, formats::WebSettings{}, big));
+        // (larger than the format holds — a GIF of 70000 px, an icon of 300 —: in the codecs' words, before it is drawn)
+        const core::Document small = square_book();
+        for (const auto& [ext, side, words] : {std::tuple<const char*, std::uint32_t, const char*>{"gif", 70000, "GIF holds at most 65535×65535 pixels"},
+                                               {"ico", 300, "ICO holds at most 256×256 pixels"}}) {
+            formats::CopyOptions wide;
+            wide.width = side;
+            try {
+                formats::plan_copy(small, 0, fs::path(std::string("x.") + ext), wide);
+                QFAIL(ext);
+            } catch (const core::Error& error) {
+                QCOMPARE(std::string(error.what()), std::string(words));
+            }
+        }
     }
 
     // The estimate: exact — the file's own size — for each format; from a proxy, near it (and the size of the file).

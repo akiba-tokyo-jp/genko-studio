@@ -506,6 +506,17 @@ PlannedCopy plan_copy(const core::Document& doc, std::size_t at, const fs::path&
         plan.part = std::move(part);
         return plan;
     }
+    // (a page larger than its format holds — GIF's, WebP's, an icon's —: refused before it is drawn, in the codecs' words)
+    const render::codecs::Format format = suffix == "tif" ? render::codecs::Format::Tiff : *render::codecs::from_extension(suffix);
+    if (!options.layer) {
+        if (const auto most = render::codecs::max_dimensions(format)) {
+            const CopySize size = copy_size(doc, at, options);
+            if (size.width > most->first || size.height > most->second) {
+                throw core::Error("image_too_large", std::string(render::codecs::name(format)) + " holds at most " + std::to_string(most->first) + "×" +
+                                                         std::to_string(most->second) + " pixels");
+            }
+        }
+    }
     PagePicture picture = copy_picture(doc, at, options);
     plan.notes = picture.notes;
     plan.width = picture.image.width();
@@ -521,7 +532,6 @@ PlannedCopy plan_copy(const core::Document& doc, std::size_t at, const fs::path&
         plan.bytes = tiff_of(image, file_dpi, image.meta.xmp);
     } else {
         // (every other picture — a layer's TIFF with its alpha too — through the codecs, one way for every format)
-        const render::codecs::Format format = suffix == "tif" ? render::codecs::Format::Tiff : *render::codecs::from_extension(suffix);
         plan.bytes = encode_for(std::move(picture.image), format, encode_options(options, suffix), options.srgb, plan.notes);
     }
     return plan;

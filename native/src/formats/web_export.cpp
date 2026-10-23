@@ -578,6 +578,10 @@ WebPicture web_picture(const core::Document& doc, std::size_t page, const WebSet
     const CopySize full = copy_size(doc, page, copy);
     out.full_width = full.width;
     out.full_height = full.height;
+    // (a page larger than a GIF holds: refused before it is drawn)
+    if (!layer && st.format == WebFormat::Gif && (full.width > 65535 || full.height > 65535)) {
+        throw core::Error("image_too_large", "GIF holds at most 65535×65535 pixels");
+    }
     if (proxy && *proxy > 0 && std::max(full.width, full.height) > *proxy) {
         const double k = double(*proxy) / double(std::max(full.width, full.height));
         copy.scale = std::clamp(copy.scale * k, 1.0, 1000.0);
