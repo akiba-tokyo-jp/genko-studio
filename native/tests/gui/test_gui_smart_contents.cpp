@@ -36,6 +36,7 @@
 #include "service/human_service.hpp"
 #include "service/studio_service.hpp"
 #include "storage/asset_store.hpp"
+#include "testsupport.hpp"
 
 using namespace genko;
 using core::Json;
@@ -431,6 +432,28 @@ private slots:
         options.mode = "proof";
         options.skip_unported = true;
         QCOMPARE(after, as_qimage(render::render_page(changed->page(0), 40, options, changed.get()).image.convert("RGB")));
+    }
+
+    // PC4 F-f (design 2.8): 埋め込みを配置… of PhotoCraft's .pcraft — read on a worker thread, then placed by the op: a smart
+    // object whose contents are its page (kind page: its layers, channels), what it could not keep said.
+    void placingAPcraft() {
+        Book book;
+        app::MainWindow* w = book.window.get();
+        const std::string bytes = genko::test::read_bytes(genko::test::test_data(QStringLiteral("pcraft/rich_rgb8.pcraft")));
+        const QString file = book.write(QStringLiteral("rich.pcraft"), bytes);
+        QVERIFY(w->place_embedded(file));
+        const std::string so = book.smart_id();
+        QVERIFY(!so.empty());
+        const core::SmartContents* c = book.contents(so);
+        QVERIFY(c != nullptr && c->kind == "page" && c->page);
+        QVERIFY(c->page->layers.size() > 10);
+        QVERIFY(!c->page->channels.empty());
+        QCOMPARE(book.layer(so)->title, std::string("rich"));
+        // (a broken one: said, nothing placed)
+        const std::size_t layers = book.page().layers.size();
+        const QString broken = book.write(QStringLiteral("broken.pcraft"), bytes.substr(0, bytes.size() / 2));
+        QVERIFY(!w->place_embedded(broken));
+        QCOMPARE(book.page().layers.size(), layers);
     }
 };
 
