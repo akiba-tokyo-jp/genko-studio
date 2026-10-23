@@ -1,8 +1,8 @@
 // PC4 節 D (SPEC.md COLOR-08「フィルター」): フィルター's kinds as filter_raster's local filters — each kind of the table
 // (core/filter_kinds.hpp) whose kernel is in this build (render/fx.hpp) on all three ways: an 8-bit layer (its RGBA; the
 // op keeps the result inside the selection, filters.within), a precise layer (its new GKCR bytes) and an ink layer (its
-// new GKIR bytes), the selection mixing the result by its coverage — and the frames of PC4's new ops (render_picture:
-// D4, vanishing_point: D6), refused until their groups write them (not_yet_ported naming them).
+// new GKIR bytes), the selection mixing the result by its coverage — and PC4's new ops (render_picture:
+// D4: render/render_picture, vanishing_point: D6: render/vanishing).
 
 #include "render/ops_filters.hpp"
 
@@ -24,7 +24,9 @@
 #include "render/page.hpp"
 #include "render/png.hpp"
 #include "render/raster.hpp"
+#include "render/render_picture.hpp"
 #include "render/selection.hpp"
+#include "render/channels.hpp"
 #include "render/smart.hpp"
 #include "render/smart_decode.hpp"
 #include "render/codecs/format.hpp"
@@ -164,6 +166,34 @@ std::optional<fx::Picture> displacement_map(const core::Document& doc, const cor
     return out;
 }
 
+// --- 照明効果's channel (D4, design 2.6) ---------------------------------------------------------------------------------
+
+// 照明効果's bumps read from an alpha channel of the page ("texture": {"channel": its id or name}) as the kernel reads them:
+// the channel over the layer's grid of w × h (a pixel of it a pixel of the grid; its density in each colour), held in the
+// imaging budget while `held` lives; none for any other texture. A channel the page does not have is refused.
+std::optional<fx::Picture> lighting_texture(const core::Page& page, const Json& params, std::uint32_t w, std::uint32_t h, std::optional<image_ops::Held>& held) {
+    const Json* texture = core::get(params, "texture");
+    if (texture == nullptr || !texture->is_object()) return std::nullopt;
+    const std::string name = core::py_str(core::py_get(*texture, "channel", Json("")));
+    for (const core::Channel& channel : page.channels) {
+        if (channel.id != name && channel.name != name) continue;
+        if (channel.kind != core::ChannelKind::Alpha) throw core::OpError("render_lighting_effects: the texture's channel " + name + " is not an alpha channel");
+        held.emplace(std::uint64_t(w) * h * 5);
+        const Image mask = channels::mask_of(channel, Size{static_cast<int>(w), static_cast<int>(h)});
+        const std::string bytes = mask.tobytes();
+        fx::Picture out;
+        out.width = static_cast<int>(w);
+        out.height = static_cast<int>(h);
+        out.rgba.resize(bytes.size() * 4);
+        for (std::size_t i = 0; i < bytes.size(); ++i) {
+            out.rgba[i * 4] = out.rgba[i * 4 + 1] = out.rgba[i * 4 + 2] = bytes[i];
+            out.rgba[i * 4 + 3] = static_cast<char>(255);
+        }
+        return out;
+    }
+    throw core::OpError("render_lighting_effects: the page has no channel " + name + " for the texture");
+}
+
 // The coverage of an area (a resolved {poly} or {mask}) on a grid of w × h over the page, a byte a pixel: an 8-bit layer's
 // as filter_raster draws its area (the working 200 dpi), any other's by render/ink_edit.
 std::string cover_of(const core::Page& page, const Json& area, std::uint32_t w, std::uint32_t h, bool eight) {
@@ -202,7 +232,9 @@ void run(fx::Surface& surface, const fx::Kernel& kernel, core::FilterInks inks, 
     fx::Reads reads;
     reads.plane = plane ? &*plane : nullptr;
     std::optional<image_ops::Held> map_held;  // (D2: 置き換え's map)
-    const std::optional<fx::Picture> map = kernel.kind == "distort_displace" ? displacement_map(doc, page, params, map_held) : std::nullopt;
+    const std::optional<fx::Picture> map = kernel.kind == "distort_displace"          ? displacement_map(doc, page, params, map_held)
+                                           : kernel.kind == "render_lighting_effects" ? lighting_texture(page, params, w, h, map_held)  // (D4)
+                                                                                      : std::nullopt;
     reads.map = map ? &*map : nullptr;
     if (area == nullptr) {
         fx::apply(surface, kernel, params, inks, grid, nullptr, s, nullptr, {}, reads);
@@ -247,11 +279,6 @@ adjust_ops::LocalFilter local_of(const fx::Kernel& kernel, core::FilterInks inks
         return fx::take_bytes(*surface);
     };
     return out;
-}
-
-// PC4's new ops, refused until their groups write them.
-[[noreturn]] void op_not_yet(std::string_view op, std::string_view group) {
-    core::not_yet_ported(std::string(op) + " is not in the C++ build yet (PC4 " + std::string(group) + ")");
 }
 
 }  // namespace
@@ -440,6 +467,12 @@ std::optional<Json> filter_report(const core::Document& doc, const Json& op) {
 }
 
 Json keep_filter_files(core::Document& doc, const core::Page& page, std::string_view kind, Json params) {
+    // (D4: 照明効果's bumps from a channel of the page — a smart object's picture is drawn on a page of its own, without the
+    // page's channels: refused)
+    if (kind == "render_lighting_effects" && params.is_object()) {
+        if (const Json* texture = core::get(params, "texture"); texture != nullptr && texture->is_object())
+            throw core::OpError("render_lighting_effects: a smart filter's texture cannot be a channel of the page (none, red, green, blue, alpha or luminance)");
+    }
     const core::FilterInfo* info = core::filter_info(kind);
     if (info == nullptr || info->files.empty() || !params.is_object()) return params;
     for (const std::string_view name : info->files) {
@@ -476,7 +509,7 @@ Json keep_filter_files(core::Document& doc, const core::Page& page, std::string_
 
 void register_filter_ops(core::OpRegistry& registry) {
     // フィルター → 描画 → 炎…・額縁…・木… (D4: render/render_picture.cpp) and 消点… (D6: render/vanishing.cpp)
-    registry.add("render_picture", [](core::OpContext&) { op_not_yet("render_picture", "D4"); });
+    registry.add("render_picture", picture::render_picture);
     registry.add("vanishing_point", vanishing::vanishing_point);
 }
 

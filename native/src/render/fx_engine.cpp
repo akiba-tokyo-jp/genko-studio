@@ -180,8 +180,6 @@ std::vector<float> conv_sep(const Window& src, const Rect& out, const std::vecto
 
 // --- the kernels -----------------------------------------------------------------------------------------------------
 
-Kernels render_kernels() { return {}; }        // (D4)
-Kernels blur_gallery_kernels() { return {}; }  // (D4)
 Kernels camera_raw_kernels() { return {}; }    // (D5)
 
 const Kernels& kernels() {
@@ -671,6 +669,7 @@ void apply(Surface& surface, const Kernel& kernel, const Json& params, core::Fil
     ctx.s = s > 0 ? s : 1.0;
     ctx.cover = cover != nullptr ? cover : reads.within;
     ctx.grid_width = w;
+    ctx.grid_height = h;  // (D4)
     ctx.plane = reads.plane;
     ctx.map = reads.map;
     ctx.ink = surface.ink();  // (D6)

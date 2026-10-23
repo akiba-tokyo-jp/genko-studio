@@ -141,6 +141,9 @@ struct Ctx {
     // (D6) A page of inks' colour mode (none: not a page of inks): a colour a kind lays of its own (レンズ補正's edge) goes
     // onto the plates by the page's rules (render/ink inks_by_rules).
     const core::PageColor* ink = nullptr;
+    // (D4) The surface's height (grid_width its width: the layer's grid — the page — but for a part of it, PlaceScope): 雲模様's
+    // pattern is as large as the page is (PhotoCraft's extra_cmds.rs clouds: a quarter of the document's longer side).
+    std::uint32_t grid_height = 0;
 };
 
 // How far outside an output tile a kernel reads (upstream's Halo): a margin of pixels, or the whole base box.
@@ -190,8 +193,8 @@ Kernels pixelate_kernels();      // render/fx_pixelate.cpp — D2: ピクセレ�
 Kernels stylize_kernels();       // render/fx_stylize.cpp — D2: 表現手法 (油彩: render/fx_oil.cpp, oil_kernel)
 Kernel oil_kernel();             // render/fx_oil.cpp — D2: 油彩 (stylize_kernels takes it)
 Kernels gallery_kernels();       // D3
-Kernels render_kernels();        // D4
-Kernels blur_gallery_kernels();  // D4
+Kernels render_kernels();        // render/fx_render.cpp — D4: 雲模様 1・2, ファイバー, 逆光, 照明効果
+Kernels blur_gallery_kernels();  // render/fx_gallery_blur.cpp — D4: ぼかしギャラリー
 Kernels camera_raw_kernels();    // D5
 Kernels lens_kernels();          // render/fx_lens.cpp — D6: lens_correction, adaptive_wide_angle
 const Kernels& kernels();
