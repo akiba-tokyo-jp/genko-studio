@@ -268,7 +268,6 @@ std::vector<FilterForm> render_forms() {
         f.decimals = {{"variance", 0}, {"strength", 0}};
         f.more = [](adjust_forms::Form& form, const adjust_forms::FormContext&) {
             auto* random = new QPushButton(QStringLiteral("ランダマイズ"));
-            random->setObjectName(QStringLiteral("fibers_randomize"));
             auto seed = std::make_shared<std::uint32_t>(QRandomGenerator::global()->generate());
             form.custom(
                 "seed", QString(), random, [seed] { return Json(*seed); },

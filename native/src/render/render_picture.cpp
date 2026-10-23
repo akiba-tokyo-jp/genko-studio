@@ -122,10 +122,19 @@ Rgba lerp4(const Rgba& a, const Rgba& b, float t) { return {a[0] + (b[0] - a[0])
 
 // The shapes made, at most kPictureMostShapes (refused past it: render_picture refuses before it makes them where it can
 // tell — 炎's — and here as a last guard).
+// (the shapes' memory taken from the imaging budget a block at a time as they are made — twice a block, the list's growth —:
+// past it the work is refused, not run out of memory; outside a budget — the windows' small pictures — nothing)
+inline constexpr std::size_t kShapeBlock = std::size_t(1) << 16;
+void hold_block(std::vector<std::unique_ptr<image_ops::Held>>& held, std::size_t made, std::size_t each) {
+    if (made % kShapeBlock == 0) held.push_back(std::make_unique<image_ops::Held>(std::uint64_t(kShapeBlock) * each * 2));
+}
+
 struct Sink {
     std::vector<Prim> out;
+    std::vector<std::unique_ptr<image_ops::Held>> held;
     void push(const Prim& p) {
         if (out.size() >= core::kPictureMostShapes) refuse();
+        hold_block(held, out.size(), sizeof(Prim));
         out.push_back(p);
     }
     [[noreturn]] static void refuse() {
@@ -541,12 +550,14 @@ struct TreeCtx {
     Rng rng;
     Sink branches;
     std::vector<std::pair<float, Prim>> leaves;
+    std::vector<std::unique_ptr<image_ops::Held>> leaves_held;
     std::array<float, 3> bark, leaf;
     XY light, centre;
     float leaf_px = 1;
 
     void leaf_push(float order, const Prim& p) {
         if (branches.out.size() + leaves.size() >= core::kPictureMostShapes) Sink::refuse();
+        hold_block(leaves_held, leaves.size(), sizeof(std::pair<float, Prim>));
         leaves.emplace_back(order, p);
     }
 
@@ -893,6 +904,7 @@ std::vector<Prim> tree(const Json& spec, const Canvas& canvas) {
               leaves_size,
               flag(spec, "flat_shading", false),
               Rng::make(seed_of(spec), 0x7EEull + static_cast<std::uint64_t>(type)),
+              {},
               {},
               {},
               bark,
@@ -1330,6 +1342,12 @@ void render_picture(core::OpContext& c) {
         const core::Rect trim = page.trim_rect_mm();
         canvas = Canvas{static_cast<float>(trim.x.value() * kWorkingPerMm), static_cast<float>(trim.y.value() * kWorkingPerMm),
                         static_cast<float>(trim.width.value() * kWorkingPerMm), static_cast<float>(trim.height.value() * kWorkingPerMm)};
+        // (木・額縁 within it, as upstream's within its canvas; 炎 follows the page's path wherever it goes)
+        if (kind != "flame") {
+            const fx::Rect within{static_cast<int>(std::floor(canvas.x0 * s)), static_cast<int>(std::floor(canvas.y0 * s)),
+                                  static_cast<int>(std::ceil((canvas.x0 + canvas.width) * s)), static_cast<int>(std::ceil((canvas.y0 + canvas.height) * s))};
+            clip = clip.intersect(within);
+        }
     }
     // the shapes (working pixels), held in the budget while they live
     Json report = Json::object();
@@ -1342,16 +1360,16 @@ void render_picture(core::OpContext& c) {
         report["used_path"] = paths.has_value();
         if (!paths) paths = std::vector<std::vector<XY>>{default_flame_path(canvas)};
         const std::uint64_t most = flame_shapes_at_most(spec, *paths);
-        if (most > core::kPictureMostShapes) Sink::refuse();
-        shapes_held.emplace(most * sizeof(Prim) * 2);
-        shapes = flame(spec, *paths);
+        if (most > core::kPictureMostShapes) Sink::refuse();  // (counted before any is made)
+        shapes = flame(spec, *paths);                          // (held a block at a time while they are made)
+        shapes_held.emplace(std::uint64_t(shapes.size()) * sizeof(Prim));
     } else if (kind == "tree") {
-        shapes_held.emplace(std::uint64_t(core::kPictureMostShapes / 8) * sizeof(Prim));
-        shapes = tree(spec, canvas);
+        shapes = tree(spec, canvas);  // (held a block at a time while they are made)
+        shapes_held.emplace(std::uint64_t(shapes.size()) * sizeof(Prim));
         report["tree_type"] = std::string(core::tree_type_names()[static_cast<std::size_t>(spec["base_tree_type"].get<int>() - 1)]);
     } else {
-        shapes_held.emplace(std::uint64_t(core::kPictureMostShapes / 8) * sizeof(Prim));
         shapes = picture_frame(spec, canvas);
+        shapes_held.emplace(std::uint64_t(shapes.size()) * sizeof(Prim));
         report["frame"] = std::string(core::frame_style_names()[static_cast<std::size_t>(spec["frame"].get<int>() - 1)]);
     }
     segment::check_stop();

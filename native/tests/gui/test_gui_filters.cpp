@@ -1156,7 +1156,7 @@ private slots:
             d->findChild<QDoubleSpinBox*>(QStringLiteral("field_variance"))->setValue(30);
             auto* form = d->findChild<app::adjust_forms::Form*>();
             const Json first = form->values()["seed"];
-            d->findChild<QPushButton*>(QStringLiteral("fibers_randomize"))->click();
+            d->findChild<QPushButton*>(QStringLiteral("field_seed"))->click();  // (ランダマイズ)
             fibers_seed = form->values()["seed"];
             QVERIFY(fibers_seed.is_number() && fibers_seed != first);
         });
@@ -1303,7 +1303,11 @@ private slots:
         const core::Document start = *book.session->snapshot();
         const core::Bytes before = book.layer("pic")->raster_png;
         auto* canvas = book.window->canvas();
-        const auto panel = [&] { return book.window->findChild<QDialog*>(QStringLiteral("blur_gallery_panel")); };
+        const auto panel = [&]() -> QDialog* {  // (the one shown: a panel let go is hidden, then deleted later)
+            for (QDialog* d : book.window->findChildren<QDialog*>(QStringLiteral("blur_gallery_panel")))
+                if (d->isVisible()) return d;
+            return nullptr;
+        };
         const auto pins = [] { return app::blur_gallery::settings()["pins"]; };
         const auto op_pixels = [&](const Json& op) {
             Json sent{{"op", "filter_raster"}, {"page", 1}, {"id", "pic"}};

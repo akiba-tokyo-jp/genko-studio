@@ -30,6 +30,7 @@
 #include "app/theme.hpp"
 #include "core/adjust.hpp"
 #include "core/filter_kinds.hpp"
+#include "core/pyconv.hpp"
 #include "core/pyops.hpp"
 #include "service/wording.hpp"
 
@@ -439,7 +440,7 @@ QDoubleSpinBox* spin(QWidget* parent, const char* name, double lo, double hi, in
 }
 
 // A field of the chosen pin's (or the settings' own, `own`) setting `key`, its value shown ×`k`.
-void bind(const std::shared_ptr<Work>& work, QFormLayout* form, const QString& label, QDoubleSpinBox* box, const char* key, double fallback,
+void bind_field(const std::shared_ptr<Work>& work, QFormLayout* form, const QString& label, QDoubleSpinBox* box, const char* key, double fallback,
           bool own, double k, std::vector<std::function<void()>>& shows) {
     form->addRow(label, box);
     const std::string field = key;
@@ -479,27 +480,27 @@ void make_panel(const std::shared_ptr<Work>& work) {
     std::vector<std::function<void()>> shows;
     const std::string& kind = work->kind;
     if (kind == "blur_field" || kind == "blur_iris") {
-        bind(work, form, QStringLiteral("ぼかし（px）"), spin(panel, "gallery_blur", 0, 500, 0, 1), "blur", 15, false, 1, shows);
+        bind_field(work, form, QStringLiteral("ぼかし（px）"), spin(panel, "gallery_blur", 0, 500, 0, 1), "blur", 15, false, 1, shows);
     }
     if (kind == "blur_iris") {
-        bind(work, form, QStringLiteral("丸み（%）"), spin(panel, "gallery_roundness", 0, 100, 0, 5), "roundness", 0, false, 1, shows);
-        bind(work, form, QStringLiteral("シャープな範囲（%）"), spin(panel, "gallery_feather", 0, 99, 0, 5), "feather", 0.5, false, 100, shows);
+        bind_field(work, form, QStringLiteral("丸み（%）"), spin(panel, "gallery_roundness", 0, 100, 0, 5), "roundness", 0, false, 1, shows);
+        bind_field(work, form, QStringLiteral("シャープな範囲（%）"), spin(panel, "gallery_feather", 0, 99, 0, 5), "feather", 0.5, false, 100, shows);
     }
     if (kind == "blur_iris" || kind == "blur_spin") {
-        bind(work, form, QStringLiteral("角度（°）"), spin(panel, "gallery_angle", -360, 360, 0, 5), "angle", 0, false, 1, shows);
+        bind_field(work, form, QStringLiteral("角度（°）"), spin(panel, "gallery_angle", -360, 360, 0, 5), "angle", 0, false, 1, shows);
     }
     if (kind == "blur_spin") {
-        bind(work, form, QStringLiteral("ぼかしの角度（°）"), spin(panel, "gallery_blur_angle", 0, 360, 0, 1), "blur_angle", 15, false, 1, shows);
+        bind_field(work, form, QStringLiteral("ぼかしの角度（°）"), spin(panel, "gallery_blur_angle", 0, 360, 0, 1), "blur_angle", 15, false, 1, shows);
     }
     if (kind == "blur_tilt_shift") {
-        bind(work, form, QStringLiteral("ぼかし（px）"), spin(panel, "gallery_blur", 0, 500, 0, 1), "blur", 15, true, 1, shows);
-        bind(work, form, QStringLiteral("角度（°）"), spin(panel, "gallery_angle", -360, 360, 0, 5), "angle", 0, true, 1, shows);
-        bind(work, form, QStringLiteral("シャープな範囲（%）"), spin(panel, "gallery_focus", 0, 200, 1, 1), "focus", 0.1, true, 100, shows);
-        bind(work, form, QStringLiteral("移行の範囲（%）"), spin(panel, "gallery_transition", 0.1, 200, 1, 1), "transition", 0.15, true, 100, shows);
+        bind_field(work, form, QStringLiteral("ぼかし（px）"), spin(panel, "gallery_blur", 0, 500, 0, 1), "blur", 15, true, 1, shows);
+        bind_field(work, form, QStringLiteral("角度（°）"), spin(panel, "gallery_angle", -360, 360, 0, 5), "angle", 0, true, 1, shows);
+        bind_field(work, form, QStringLiteral("シャープな範囲（%）"), spin(panel, "gallery_focus", 0, 200, 1, 1), "focus", 0.1, true, 100, shows);
+        bind_field(work, form, QStringLiteral("移行の範囲（%）"), spin(panel, "gallery_transition", 0.1, 200, 1, 1), "transition", 0.15, true, 100, shows);
     }
     if (kind == "blur_path") {
-        bind(work, form, QStringLiteral("速度（px）"), spin(panel, "gallery_speed", 0, 500, 0, 1), "speed", 50, false, 1, shows);
-        bind(work, form, QStringLiteral("先細り（%）"), spin(panel, "gallery_taper", 0, 100, 0, 5), "taper", 0, false, 1, shows);
+        bind_field(work, form, QStringLiteral("速度（px）"), spin(panel, "gallery_speed", 0, 500, 0, 1), "speed", 50, false, 1, shows);
+        bind_field(work, form, QStringLiteral("先細り（%）"), spin(panel, "gallery_taper", 0, 100, 0, 5), "taper", 0, false, 1, shows);
         auto* add = new QPushButton(QStringLiteral("新しいパス"), panel);
         add->setObjectName(QStringLiteral("gallery_new_path"));
         QObject::connect(add, &QPushButton::clicked, panel, [work] {
@@ -643,6 +644,12 @@ void open(const FilterWindowCall& call) {
             case Qt::Key_Backspace: delete_chosen(w); return true;
             default: return false;
         }
+    };
+    hook->remove = [weak] {  // (消去's keys — Delete, Backspace — reach 編集's command first: it asks the work)
+        auto w = weak.lock();
+        if (!w) return false;
+        delete_chosen(w);
+        return true;
     };
     // (the work holds itself through the canvas's hook and its panel until it is let go)
     hook->paint = [work, paint_one = hook->paint](QPainter& painter, const std::function<QPointF(QPointF)>& at, double per_mm) {

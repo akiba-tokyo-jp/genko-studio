@@ -38,10 +38,12 @@
 #include "app/theme.hpp"
 #include "core/adjust.hpp"
 #include "core/filter_kinds.hpp"
+#include "core/pyconv.hpp"
 #include "core/pyops.hpp"
 #include "render/channels.hpp"
 #include "render/fx.hpp"
 #include "render/image_ops.hpp"
+#include "render/page.hpp"
 #include "render/segment/segment.hpp"
 #include "service/wording.hpp"
 

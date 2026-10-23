@@ -151,12 +151,14 @@ core::Document precise_page(std::uint32_t w, std::uint32_t h, const std::vector<
     return doc;
 }
 
-// An RGB page of `depth` bits (8, 16 or 32) of w × h working pixels with an empty paint layer "paint".
+// An RGB page of `depth` bits (8, 16 or 32) of w × h working pixels with an empty paint layer "paint" (past the panels: on
+// a deep page it becomes one of the page's precision when drawn on, as a fill's does).
 core::Document rgb_page(int depth, int w, int h) {
     auto doc = blank(mm(w), mm(h));
     Json ops = Json::array();
     if (depth != 8) ops.push_back(Json{{"op", "set_color_mode"}, {"page", 1}, {"mode", "rgb"}, {"depth", depth}});
     ops.push_back(Json{{"op", "add_layer"}, {"page", 1}, {"kind", "paint"}, {"id", "paint"}});
+    ops.push_back(Json{{"op", "set_layer"}, {"page", 1}, {"id", "paint"}, {"panel_clip", false}});
     return apply_ops(doc, ops).doc;
 }
 
@@ -459,7 +461,7 @@ private slots:
 
     // The lists refused past their limits before anything is had (lights, pins, paths, a path's points); refused, not cut.
     void listsAreRefusedPastTheirLimits() {
-        const auto doc = precise_page(16, 16, pattern(16, 16), false);
+        const auto doc = precise_page(64, 64, pattern(64, 64), false);
         const auto many = [](const Json& one, std::size_t n) {
             Json out = Json::array();
             for (std::size_t i = 0; i < n; ++i) out.push_back(one);
@@ -597,6 +599,7 @@ private slots:
         const Json& b = r["bounds_mm"];
         QVERIFY2(b[0].get<double>() >= 1.0 - 0.15 && b[1].get<double>() >= 1.0 - 0.15, r.dump().c_str());
         QVERIFY2(b[0].get<double>() + b[2].get<double>() <= mm(160) - 1.0 + 0.15, r.dump().c_str());
+        QVERIFY2(b[1].get<double>() + b[3].get<double>() <= mm(120) - 1.0 + 0.15, r.dump().c_str());
         // a selection: the left half — its box the frame, nothing drawn past it
         const Json area{{"rect", Json::array({0, 0, mm(80), mm(120)})}};
         const core::ApplyResult done = apply_ops(page, Json::array({Json{{"op", "render_picture"}, {"page", 1}, {"new_layer", true}, {"kind", "tree"},
@@ -652,7 +655,7 @@ private slots:
 
     // Refused before the shapes are had: flames past kPictureMostShapes, a path too long to follow.
     void tooManyShapesAreRefusedBeforeTheyAreMade() {
-        core::Document page = rgb_page(8, 400, 300);
+        core::Document page = rgb_page(8, 800, 300);  // (its arc across the trim 0.7 × 784 px: some 550 flames of 63 lines)
         const Json op{{"op", "render_picture"}, {"page", 1}, {"id", "paint"}, {"kind", "flame"}, {"flame_type", "multiple_flames_along_path"},
                       {"interval", 1}, {"length", 1000}, {"flame_lines", 100}};
         QElapsedTimer clock;

@@ -472,13 +472,16 @@ public:
     // (app/blur_gallery_tool.cpp) —: what it draws over the page (`at`: a place of the page in mm where the painter draws it;
     // `per_mm`: the screen's pixels a mm), the left button pressed, dragged and let go (the page's mm, the keys held; true:
     // taken) and the keys (true: taken). The view still pans (Space, the middle button) and zooms under it. None: the tools.
+    // `remove`: 消去's keys (Delete, Backspace — 編集's command holds them) while it is on: its chosen part taken away.
     struct CanvasWork {
         std::function<void(QPainter& painter, const std::function<QPointF(QPointF)>& at, double per_mm)> paint;
         std::function<bool(QPointF mm, Qt::KeyboardModifiers keys)> press, move, release;
         std::function<bool(QKeyEvent* event)> key;
+        std::function<bool()> remove;
     };
     void set_work(std::shared_ptr<CanvasWork> work);
     bool has_work() const { return work_ != nullptr; }
+    bool work_remove() { return work_ && work_->remove && work_->remove(); }
 
 signals:
     void changed();
