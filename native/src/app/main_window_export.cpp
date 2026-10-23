@@ -6,6 +6,9 @@
 #include <QDir>
 #include <QFileInfo>
 
+#include <algorithm>
+#include <cmath>
+
 #include "app/ask.hpp"
 #include "app/documents.hpp"
 #include "app/export_as_dialog.hpp"

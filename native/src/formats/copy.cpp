@@ -268,15 +268,15 @@ CodecImage srgb_picture(const CodecImage& picture, bool linear, bool grey) {
     const std::uint32_t band = std::max<std::uint32_t>(1, static_cast<std::uint32_t>((std::size_t(1) << 20) / std::max<std::uint32_t>(1, w)));
     const std::size_t row_bytes = std::size_t(w) * keep * render::codecs::sample_bytes(sample);
     render::smart::DeepPicture deep;
-    deep.width = static_cast<int>(w);
-    deep.channels = static_cast<int>(all);
+    deep.width = w;
+    deep.channels = all;
     deep.alpha = alpha;
     deep.depth = render::codecs::depth_of(picture.sample());
     deep.mode = std::string(render::codecs::to_string(picture.layout()));
     std::vector<float> values;
     for (std::uint32_t y0 = 0; y0 < picture.height(); y0 += band) {
         const std::uint32_t rows = std::min(band, picture.height() - y0);
-        deep.height = static_cast<int>(rows);
+        deep.height = rows;
         deep.samples.resize(std::size_t(w) * rows * all);
         const std::size_t first = std::size_t(y0) * w * all;
         for (std::size_t i = 0; i < deep.samples.size(); ++i) deep.samples[i] = picture.value(first + i);
@@ -605,10 +605,26 @@ CopyEstimate estimate_copy(const core::Document& doc, std::size_t at, std::strin
         h = plan.height;
         out.notes = std::move(plan.notes);
     }
-    const double ratio = !out.exact && w > 0 && h > 0 ? double(full.width) * full.height / (double(w) * h) : 1.0;
+    // (from a proxy: a page's pixels over the proxy's; a layer's — whose size is known only once it is drawn — by the
+    // factor the proxy was made smaller by)
+    double ratio = 1.0;
+    out.width = w;
+    out.height = h;
+    if (!out.exact && w > 0 && h > 0) {
+        if (options.layer) {
+            const double k = options.width    ? double(*asked.width) / double(*options.width)
+                             : options.height ? double(*asked.height) / double(*options.height)
+                                              : asked.scale / options.scale;
+            ratio = 1.0 / (k * k);
+            out.width = static_cast<std::uint32_t>(std::max(1LL, std::llround(w / k)));
+            out.height = static_cast<std::uint32_t>(std::max(1LL, std::llround(h / k)));
+        } else {
+            ratio = double(full.width) * full.height / (double(w) * h);
+            out.width = full.width;
+            out.height = full.height;
+        }
+    }
     out.bytes = static_cast<std::uint64_t>(std::llround(double(bytes) * ratio));
-    out.width = out.exact && w > 0 ? w : full.width;
-    out.height = out.exact && h > 0 ? h : full.height;
     return out;
 }
 

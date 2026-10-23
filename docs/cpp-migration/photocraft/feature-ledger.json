@@ -7401,7 +7401,9 @@
         "native/src/app/session.cpp",
         "native/src/app/main_window_file.cpp",
         "native/tests/contract/test_contract_file_info.cpp",
-        "native/tests/gui/test_gui_file.cpp"
+        "native/tests/gui/test_gui_file.cpp",
+        "native/src/api/cli.cpp",
+        "native/tests/contract/test_contract_copy.cpp"
       ],
       "pc0": {
         "date": "2026-10-16",
@@ -7420,7 +7422,7 @@
         "gap": "書き出し（PSD はレイヤー付き、PNG/TIFF/JPEG は統合）で文書を変えずに複製を書けるが、パスの拡張子で形式を選ぶ 1 本の操作、レイヤー有無の切替、JPEG 品質 0..12、.genko の複製を作る操作がない",
         "note": ""
       },
-      "remaining": "PSD・TIFF・PNG・JPEG と .genko の複製まで。書き出し形式・メタデータの選び方・`genko copy`・ほかの形式は F-c・F-a"
+      "remaining": "コピーを保存… の窓で聞く画質は JPEG の 0〜12 だけ（大きさ・メタデータ・sRGB・ほかの形式の画質は PC4 F-c の 書き出し形式… と `genko copy`）"
     },
     {
       "id": "file.saveAs",

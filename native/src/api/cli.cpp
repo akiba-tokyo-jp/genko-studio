@@ -37,6 +37,7 @@
 #include "core/actor.hpp"
 #include "core/clock.hpp"
 #include "core/command_bus.hpp"
+#include "core/covers.hpp"
 #include "core/error.hpp"
 #include "core/file_info.hpp"
 #include "core/ids.hpp"

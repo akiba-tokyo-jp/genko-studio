@@ -599,12 +599,12 @@ std::vector<fs::path> export_layers(const core::Document& episode, const fs::pat
     std::vector<fs::path> written;
     for (const auto& page_ptr : episode.pages) {
         // (PC4 F-c: the hidden layers too — the page's layers all shown —, when asked)
-        std::optional<core::Page> shown;
+        std::optional<core::Page> every_layer;
         if (!files.visible_only) {
-            shown = *page_ptr;
-            for (core::Layer& own : shown->layers) own.visible = true;
+            every_layer = *page_ptr;
+            for (core::Layer& own : every_layer->layers) own.visible = true;
         }
-        const core::Page& page = shown ? *shown : *page_ptr;
+        const core::Page& page = every_layer ? *every_layer : *page_ptr;
         const fs::path folder = detail::join(dest, stem(episode) + "_" + core::file_stem(page));
         detail::make_dirs(folder);
         int n = 0;

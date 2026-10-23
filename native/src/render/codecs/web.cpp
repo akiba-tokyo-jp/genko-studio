@@ -130,7 +130,7 @@ void write_gif_indexed(std::uint32_t width, std::uint32_t height, std::span<cons
     std::vector<std::uint8_t> order;
     if (interlaced) {  // (every 8th row from 0, every 8th from 4, every 4th from 2, every 2nd from 1)
         order.reserve(indices.size());
-        for (const auto [start, step] : {std::pair<std::uint32_t, std::uint32_t>{0, 8}, {4, 8}, {2, 4}, {1, 2}}) {
+        for (const auto& [start, step] : {std::pair<std::uint32_t, std::uint32_t>{0, 8}, {4, 8}, {2, 4}, {1, 2}}) {
             for (std::uint32_t y = start; y < height; y += step) {
                 const auto row = indices.subspan(std::size_t(y) * width, width);
                 order.insert(order.end(), row.begin(), row.end());

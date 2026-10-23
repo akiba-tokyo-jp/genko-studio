@@ -273,7 +273,7 @@ private slots:
     void gifIndicesReadBack() {
         std::vector<codecs::web::Rgb8> pal;
         for (int i = 0; i < 200; ++i) pal.push_back({static_cast<std::uint8_t>(i), static_cast<std::uint8_t>(255 - i), static_cast<std::uint8_t>(i * 3 % 256)});
-        for (const auto [w, h, interlaced] : {std::tuple{1u, 1u, false}, {37u, 23u, false}, {37u, 23u, true}, {300u, 200u, false}}) {
+        for (const auto& [w, h, interlaced] : {std::tuple{1u, 1u, false}, {37u, 23u, false}, {37u, 23u, true}, {300u, 200u, false}}) {
             std::vector<std::uint8_t> idx(std::size_t(w) * h);
             for (std::size_t i = 0; i < idx.size(); ++i) idx[i] = static_cast<std::uint8_t>(((i % w) * 7 + (i / w) * 13 + (i * i) % 5) % pal.size());
             const CodecImage back = rgba(codecs::web::encode_gif_indexed(w, h, idx, pal, std::nullopt, interlaced));
