@@ -591,14 +591,27 @@ std::string NamedReader::read(std::string_view name, std::uint64_t max) const {
 
 StoreWriter::StoreWriter(std::function<void(std::string_view)> sink) : sink_(std::move(sink)) {}
 
+std::uint32_t crc32_of(std::string_view data, std::uint32_t crc) {
+    while (!data.empty()) {
+        const auto n = static_cast<uInt>(std::min<std::size_t>(data.size(), 1u << 30));
+        crc = static_cast<std::uint32_t>(::crc32(crc, reinterpret_cast<const Bytef*>(data.data()), n));
+        data.remove_prefix(n);
+    }
+    return crc;
+}
+
 void StoreWriter::add(std::string_view name, std::string_view data) {
+    add_known(name, data.size(), crc_of_view(data), [data](const std::function<void(std::string_view)>& emit) { emit(data); });
+}
+
+void StoreWriter::add_known(std::string_view name, std::uint64_t size, std::uint32_t crc,
+                            const std::function<void(const std::function<void(std::string_view)>&)>& data) {
     if (finished_) throw core::Error("value", "the archive is finished");
-    const std::uint64_t record = 30 + name.size() + data.size();
+    const std::uint64_t record = 30 + name.size() + size;
     // (what the archive would be with this file and the central directory and end record after it)
-    if (count_ >= 0xffff || data.size() > 0xffffffffull || offset_ + record + central_.size() + 46 + name.size() + 22 > 0xffffffffull || name.size() > 0xffff) {
+    if (count_ >= 0xffff || size > 0xffffffffull || offset_ + record + central_.size() + 46 + name.size() + 22 > 0xffffffffull || name.size() > 0xffff) {
         throw core::Error("image_too_large", "the .pcraft would be larger than 4 GiB or hold more than 65535 files (a zip without zip64)");
     }
-    const std::uint32_t crc = crc_of_view(data);
     std::string head;
     put32(head, 0x04034b50);
     put16(head, 20);      // (version needed)
@@ -607,8 +620,8 @@ void StoreWriter::add(std::string_view name, std::string_view data) {
     put16(head, 0);       // (time)
     put16(head, 0x21);    // (1980-01-01)
     put32(head, crc);
-    put32(head, static_cast<std::uint32_t>(data.size()));
-    put32(head, static_cast<std::uint32_t>(data.size()));
+    put32(head, static_cast<std::uint32_t>(size));
+    put32(head, static_cast<std::uint32_t>(size));
     put16(head, static_cast<std::uint32_t>(name.size()));
     put16(head, 0);
     head.append(name);
@@ -620,15 +633,21 @@ void StoreWriter::add(std::string_view name, std::string_view data) {
     put16(central_, 0);
     put16(central_, 0x21);
     put32(central_, crc);
-    put32(central_, static_cast<std::uint32_t>(data.size()));
-    put32(central_, static_cast<std::uint32_t>(data.size()));
+    put32(central_, static_cast<std::uint32_t>(size));
+    put32(central_, static_cast<std::uint32_t>(size));
     put16(central_, static_cast<std::uint32_t>(name.size()));
     central_.append(8, '\0');  // (extra and comment lengths, disk, internal attributes)
     put32(central_, 0);        // (external attributes)
     put32(central_, static_cast<std::uint32_t>(offset_));
     central_.append(name);
     sink_(head);
-    sink_(data);
+    std::uint64_t given = 0;
+    data([&](std::string_view part) {
+        given += part.size();
+        if (given > size) throw core::Error("io", "an archive's file is longer than it said");
+        sink_(part);
+    });
+    if (given != size) throw core::Error("io", "an archive's file is shorter than it said");
     offset_ += record;
     ++count_;
 }

@@ -128,4 +128,8 @@ std::pair<std::string, const core::Json*> variant(const core::Json& value, std::
 std::optional<std::string> key_from_hex(std::string_view hex);
 std::string hex_of(std::string_view bytes);
 
+// Text (UTF-8, as core::utf8_replaced makes it) cut to its first `count` characters — never inside one — and, when
+// `max_bytes` is given, to its first characters that fit in that many bytes.
+std::string first_chars(std::string_view text, std::size_t count, std::size_t max_bytes = std::string_view::npos);
+
 }  // namespace genko::render::pcraft

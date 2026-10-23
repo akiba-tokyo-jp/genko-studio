@@ -15,6 +15,7 @@
 #include "core/filters.hpp"
 #include "core/ids.hpp"
 #include "core/ink.hpp"
+#include "core/lut3d.hpp"
 #include "core/ops_util.hpp"
 #include "core/page_geometry.hpp"
 #include "core/patterns.hpp"
@@ -1179,6 +1180,17 @@ void bring_contents(Document& doc, const Document& from, Page& page) {
             if (!layer.native_psd) continue;
             for (const auto& [key, ref] : layer.native_psd->blocks) bring_native(ref);
             bring_native(layer.native_psd->ranges);
+        }
+        // (adjustments@1, PC4 F-f review P1-3: the lookup tables its color_lookup corrections name)
+        for (const std::string& ref : lut3d::refs_of(on)) {
+            if (const auto table = from.luts.find(ref); table != from.luts.end()) doc.luts.emplace(ref, table->second);
+        }
+        // (and its smart objects' filter masks, files of the book they come from: PC4 F-f review P1-3)
+        for (const Layer& layer : on.layers) {
+            const Json* mask = layer.smart && layer.smart->is_object() ? get(*layer.smart, "filter_mask") : nullptr;
+            const Json* ref = mask != nullptr && mask->is_object() ? get(*mask, "asset") : nullptr;
+            if (ref == nullptr || !ref->is_string()) continue;
+            if (const auto file = from.smart_files.find(ref->get_ref<const std::string&>()); file != from.smart_files.end()) doc.smart_files.emplace(file->first, file->second);
         }
         for (Layer& layer : on.layers) {
             if (!is_smart(layer)) continue;

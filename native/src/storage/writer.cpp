@@ -392,8 +392,17 @@ Json project_payload_v4(const core::Document& doc, AssetStore& store) {
     for (const auto& line : doc.story) {
         if (core::ruby::uses_feature(line)) features.emplace_back(core::kRubyLayoutFeature);
     }
-    // PC2a (adjustments@1): the 3D lookup tables the book's color_lookup corrections use (only those)
-    for (const std::string& ref : core::lut3d::refs_of(doc)) {
+    // PC2a (adjustments@1): the 3D lookup tables the book's color_lookup corrections use (only those) — on its pages and
+    // (PC4 F-f review P1-3) on the pages of the smart objects' contents its pages show, which the reader reads too
+    std::vector<std::string> lut_refs = core::lut3d::refs_of(doc);
+    for (const std::string& id : core::smart::used_contents(doc)) {
+        const auto found = doc.smart_contents.find(id);
+        if (found == doc.smart_contents.end() || !found->second || !found->second->page) continue;
+        for (const std::string& ref : core::lut3d::refs_of(*found->second->page)) {
+            if (std::find(lut_refs.begin(), lut_refs.end(), ref) == lut_refs.end()) lut_refs.push_back(ref);
+        }
+    }
+    for (const std::string& ref : lut_refs) {
         const auto table = doc.luts.find(ref);
         if (table == doc.luts.end() || !table->second) {
             throw core::Error("value", "the lookup table " + ref + " of a color_lookup correction is not held: the book is not written");

@@ -394,6 +394,7 @@ bool MainWindow::place_pcraft(const QString& file) {
     std::string bytes;
     std::string ref;
     std::vector<std::string> notes;
+    std::optional<render::pcraft::Read> read;
     try {
         std::ifstream in(core::path_from_utf8(file.toStdString()), std::ios::binary | std::ios::ate);
         if (!in) throw core::Error("io", "cannot read " + file.toStdString());
@@ -405,10 +406,8 @@ bool MainWindow::place_pcraft(const QString& file) {
         in.seekg(0);
         bytes.assign(std::istreambuf_iterator<char>(in), std::istreambuf_iterator<char>());
         const std::string name = QFileInfo(file).completeBaseName().toStdString();
-        render::pcraft::Read read = off_ui([&bytes, &name] { return render::pcraft::read(bytes, name); });
-        notes = read.notes;
-        ref = storage::AssetStore::ref(bytes);
-        render::pcraft::remember_read(ref, std::move(read));
+        read = off_ui([&bytes, &name] { return render::pcraft::read(bytes, name); });
+        notes = read->notes;
         if (!still(asked)) return false;
     } catch (const std::exception& error) {
         flash(QStringLiteral("読み込めない .pcraft です:\n%1").arg(wording::error(QString::fromUtf8(error.what()))), 6000, true);
@@ -428,7 +427,11 @@ bool MainWindow::place_pcraft(const QString& file) {
     const QFileInfo named(file);
     const Json place{{"op", "smart_place"}, {"page", page->index.json()}, {"asset", ref}, {"name", named.fileName().toStdString()}, {"to", "art"},
                      {"title", named.completeBaseName().toStdString()}};
-    if (!apply_ops(Json::array({place}))) return false;
+    // (what was read on the worker the op's, once — never kept past it for another placing)
+    render::pcraft::remember_read(ref, std::move(*read));
+    const bool placed = apply_ops(Json::array({place}));
+    render::pcraft::forget_read();
+    if (!placed) return false;
     QString said = QStringLiteral("「%1」をスマートオブジェクトとして置きました").arg(named.fileName());
     for (const std::string& note : notes) said += QStringLiteral("。") + QString::fromStdString(note);
     flash(said, notes.empty() ? 4000 : 8000);

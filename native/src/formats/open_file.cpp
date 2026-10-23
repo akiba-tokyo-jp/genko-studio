@@ -500,7 +500,11 @@ Opened open_file(std::string_view bytes, std::string_view name, const OpenOption
     // as its TIFF —; F-f: a .pcraft)
     if (bytes.substr(0, 4) == "8BPS") return open_psd(bytes, file, options);  // (PC4 F-d)
     if (const auto later = core::smart::later_format_of_suffix(suffix); later && *later == "raw") throw render::NotYetPorted("raw_file");
-    if (suffix == ".pcraft" || render::pcraft::is_pcraft(bytes)) return pcraft_book(render::pcraft::read(bytes, stem_of(file)), file);
+    // (a .pcraft by what it holds — a zip whose first file is manifest.json —, or a zip named so; a picture named .pcraft is
+    // opened as the picture it is)
+    if (render::pcraft::is_pcraft(bytes) || (suffix == ".pcraft" && bytes.starts_with(std::string_view("PK", 2)))) {
+        return pcraft_book(render::pcraft::read(bytes, stem_of(file)), file);
+    }
     const auto format = options.as ? options.as : render::codecs::detect(bytes);
     if (!format) throw core::Error("unidentified_image", "the file is not a picture of a format this build knows");
     CodecImage picture = render::codecs::decode_as(*format, bytes, options.limits);

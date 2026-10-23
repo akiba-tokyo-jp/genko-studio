@@ -365,46 +365,30 @@ void smart_convert(OpContext& c) {
 
 // --- smart_place -----------------------------------------------------------------------------------------------------
 
-// PC4 F-f (design 2.8): 埋め込みを配置… of a .pcraft — its page read (render/pcraft_read) made the contents of a smart object
-// (PC3's contents of kind page: a page of its own, its layers, channels and paths), laid as smart_place lays a picture
-// (at its own size in the middle of the page, made smaller to fit; or over a panel or a box). What it could not keep is
-// said in the op's notes.
-void place_pcraft(OpContext& c, std::size_t at, const std::string& bytes, const std::string& name) {
-    Document& doc = c.doc;
-    const std::string to = text_at(c.op, "to", "art");
+// smart_place's `to` (art, bg, draft, name) as the layer's role, the strict gates asked of art and bg.
+LayerRole place_role(const OpContext& c, const Document& doc, std::size_t at, const std::string& to) {
     LayerRole role = LayerRole::User;
     if (to == "bg") role = LayerRole::Bg;
     else if (to == "draft") role = LayerRole::Draft;
     else if (to == "name") role = LayerRole::Name;
     else if (to != "art") throw OpError("to must be art, bg, draft or name");
-    if ((to == "art" || to == "bg") && doc.strict_gates && !doc.page(at).name_ok) {
-        throw OpError("page " + doc.page(at).index.repr() + ": approve the name first (strict_gates)");
-    }
-    std::vector<std::string> notes;
-    std::string contents_id;
-    try {
-        contents_id = pcraft::place_as_contents(doc, bytes, name.empty() ? std::string("contents.pcraft") : name, notes);
-    } catch (const NotYetPorted&) {
-        throw;
-    } catch (const core::Error& error) {
-        throw OpError(std::string("the .pcraft cannot be read (") + error.what() + ")");
-    }
-    for (std::string& note : notes) c.notes.push_back(std::move(note));
-    const core::SmartContents& contents = *doc.smart_contents.at(contents_id);
-    const auto [cw, ch] = core::smart::size_mm(contents);
     const Page& seen = doc.page(at);
-    Layer layer;
-    layer.id = fresh_layer_id(seen, c.op);
-    layer.role = role;
-    layer.kind = LayerKind::Smart;
-    layer.exportable = to == "art" || to == "bg";
-    std::string stem = name;
-    if (const auto slash = stem.find_last_of("/\\"); slash != std::string::npos) stem = stem.substr(slash + 1);
-    if (const auto dot = stem.rfind('.'); dot != std::string::npos && dot > 0) stem = stem.substr(0, dot);
-    layer.title = text_at(c.op, "title", stem.empty() ? std::string("スマートオブジェクト") : stem);
-    layer.source = Json::object({{"to", to}, {"by", c.actor.name()}});
+    if ((to == "art" || to == "bg") && doc.strict_gates && !seen.name_ok) {
+        throw OpError("page " + seen.index.repr() + ": approve the name first (strict_gates)");
+    }
+    (void)c;
+    return role;
+}
+
+// Where smart_place lays contents of cw × ch mm (w × h pixels: their shape for `fit`): covering a panel, or stretched over
+// the box given (as place_asset lays a picture — the same place, the same pixels); else at its own size in the middle of
+// the page, made smaller to fit the page when it is larger (PhotoCraft's), or at `scale` and `center_mm`. The layer's
+// frame_id and clip_to set so.
+Matrix place_matrix(const OpContext& c, const Page& seen, Layer& layer, double cw, double ch, std::int64_t w, std::int64_t h) {
     Matrix m;
-    if (core::truthy_at(c.op, "frame_id") || core::truthy_at(c.op, "placement_mm") || core::truthy_at(c.op, "fit") || core::truthy_at(c.op, "clip_to")) {
+    const bool as_placed = core::truthy_at(c.op, "frame_id") || core::truthy_at(c.op, "placement_mm") || core::truthy_at(c.op, "fit") ||
+                           core::truthy_at(c.op, "clip_to");
+    if (as_placed) {
         core::Rect placement;
         if (core::truthy_at(c.op, "placement_mm")) {
             const std::vector<double> box = core::unpack_floats(c.op["placement_mm"], 4);
@@ -424,7 +408,7 @@ void place_pcraft(OpContext& c, std::size_t at, const std::string& bytes, const 
             if (frame == nullptr) target = core::Rect{Num(0), Num(0), seen.spec.width_mm, seen.spec.height_mm};
             else if (layer.clip_to == "bleed") target = core::default_target(seen, *frame, layer.clip_to);
             else target = frame->rect;
-            placement = core::fit_rect(target, std::max<std::int64_t>(1, std::llround(cw * 100)), std::max<std::int64_t>(1, std::llround(ch * 100)), fit, 0.0, 0.0, 1.0);
+            placement = core::fit_rect(target, w, h, fit, 0.0, 0.0, 1.0);
         }
         core::require_finite(core::rect_to_json(placement), "placement_mm");
         m = Matrix{placement.width.value() / cw, 0, 0, placement.height.value() / ch, placement.x.value(), placement.y.value()};
@@ -442,11 +426,51 @@ void place_pcraft(OpContext& c, std::size_t at, const std::string& bytes, const 
         layer.clip_to = "none";
     }
     if (std::abs(m.det()) <= core::smart::kDetMin) throw OpError("the picture would be laid too small");
+    return m;
+}
+
+// A file's name without its folders and its suffix (the layer's title).
+std::string name_stem(std::string stem) {
+    if (const auto slash = stem.find_last_of("/\\"); slash != std::string::npos) stem = stem.substr(slash + 1);
+    if (const auto dot = stem.rfind('.'); dot != std::string::npos && dot > 0) stem = stem.substr(0, dot);
+    return stem;
+}
+
+// PC4 F-f (design 2.8): 埋め込みを配置… of a .pcraft — its page read (render/pcraft_read) made the contents of a smart object
+// (PC3's contents of kind page: a page of its own, its layers, channels and paths), laid as smart_place lays a picture
+// (at its own size in the middle of the page, made smaller to fit; or over a panel or a box). What it could not keep is
+// said in the op's notes.
+void place_pcraft(OpContext& c, std::size_t at, const std::string& bytes, const std::string& name) {
+    Document& doc = c.doc;
+    const std::string to = text_at(c.op, "to", "art");
+    const LayerRole role = place_role(c, doc, at, to);
+    std::vector<std::string> notes;
+    std::string contents_id;
+    try {
+        contents_id = pcraft::place_as_contents(doc, bytes, name.empty() ? std::string("contents.pcraft") : name, notes);
+    } catch (const NotYetPorted&) {
+        throw;
+    } catch (const core::Error& error) {
+        throw OpError(std::string("the .pcraft cannot be read (") + error.what() + ")");
+    }
+    for (std::string& note : notes) c.notes.push_back(std::move(note));
+    const core::SmartContents& contents = *doc.smart_contents.at(contents_id);
+    const auto [cw, ch] = core::smart::size_mm(contents);
+    const core::PageSpec& spec = contents.page->spec;
+    const std::int64_t w = std::llround(spec.width_mm.value() / 25.4 * spec.dpi.value()), h = std::llround(spec.height_mm.value() / 25.4 * spec.dpi.value());
+    const Page& seen = doc.page(at);
+    Layer layer;
+    layer.id = fresh_layer_id(seen, c.op);
+    layer.role = role;
+    layer.kind = LayerKind::Smart;
+    layer.exportable = to == "art" || to == "bg";
+    const std::string stem = name_stem(name);
+    layer.title = text_at(c.op, "title", stem.empty() ? std::string("スマートオブジェクト") : stem);
+    layer.source = Json::object({{"to", to}, {"by", c.actor.name()}});
+    const Matrix m = place_matrix(c, seen, layer, cw, ch, std::max<std::int64_t>(1, w), std::max<std::int64_t>(1, h));
     layer.smart = core::smart::settings(contents_id, m, "bicubic");
     const std::size_t placed = insert_under_ink(doc.edit_page(at), std::move(layer));
-    const core::PageSpec& spec = contents.page->spec;
-    c.report = Json{{"id", doc.page(at).layers[placed].id}, {"contents", contents_id},
-                    {"size_px", Json::array({std::llround(spec.width_mm.value() / 25.4 * spec.dpi.value()), std::llround(spec.height_mm.value() / 25.4 * spec.dpi.value())})}};
+    c.report = Json{{"id", doc.page(at).layers[placed].id}, {"contents", contents_id}, {"size_px", Json::array({w, h})}};
     if (!c.notes.empty()) (*c.report)["notes"] = c.notes;
 }
 
@@ -488,15 +512,8 @@ void smart_place(OpContext& c) {
         throw OpError(std::string("the asset's picture cannot be read (") + error.what() + ")");
     }
     const std::string to = text_at(c.op, "to", "art");
-    LayerRole role = LayerRole::User;
-    if (to == "bg") role = LayerRole::Bg;
-    else if (to == "draft") role = LayerRole::Draft;
-    else if (to == "name") role = LayerRole::Name;
-    else if (to != "art") throw OpError("to must be art, bg, draft or name");
+    const LayerRole role = place_role(c, doc, at, to);
     const Page& seen = doc.page(at);
-    if ((to == "art" || to == "bg") && doc.strict_gates && !seen.name_ok) {
-        throw OpError("page " + seen.index.repr() + ": approve the name first (strict_gates)");
-    }
     const bool precise_page = !seen.color && seen.rgb && seen.rgb->depth > 8;
     if (precise_page && info.depth > 8 && static_cast<std::uint64_t>(info.width) * info.height > core::kColorRasterMaxPixels) {
         throw OpError("the picture is too large to keep its 16 or 32 bits on this page (at most " + std::to_string(core::kColorRasterMaxPixels) +
@@ -525,54 +542,10 @@ void smart_place(OpContext& c) {
     layer.role = role;
     layer.kind = LayerKind::Smart;
     layer.exportable = to == "art" || to == "bg";
-    std::string stem = name;
-    if (const auto slash = stem.find_last_of("/\\"); slash != std::string::npos) stem = stem.substr(slash + 1);
-    if (const auto dot = stem.rfind('.'); dot != std::string::npos && dot > 0) stem = stem.substr(0, dot);
+    const std::string stem = name_stem(name);
     layer.title = text_at(c.op, "title", stem.empty() ? std::string("画像") : stem);
     layer.source = Json::object({{"asset", ref}, {"to", to}, {"by", c.actor.name()}});
-    Matrix m;
-    const bool as_placed = core::truthy_at(c.op, "frame_id") || core::truthy_at(c.op, "placement_mm") || core::truthy_at(c.op, "fit") ||
-                           core::truthy_at(c.op, "clip_to");
-    if (as_placed) {
-        // (as place_asset lays a picture: cover the panel, or stretch over the box given — the same place, the same pixels)
-        core::Rect placement;
-        if (core::truthy_at(c.op, "placement_mm")) {
-            const std::vector<double> box = core::unpack_floats(c.op["placement_mm"], 4);
-            placement = core::Rect{Num(box[0]), Num(box[1]), Num(box[2]), Num(box[3])};
-            layer.clip_to = text_at(c.op, "clip_to", "none");
-        } else {
-            const core::Frame* frame = nullptr;
-            if (core::truthy_at(c.op, "frame_id")) {
-                frame = seen.find_frame(core::py_str(c.op["frame_id"]));
-                if (frame == nullptr) throw core::OpKeyError(core::py_repr(c.op["frame_id"]));
-                if (!frame->children.empty()) throw OpError("frame " + frame->id + " is not a panel (it is split)");
-                layer.frame_id = frame->id;
-            }
-            const std::string fit = text_at(c.op, "fit", "cover");
-            layer.clip_to = text_at(c.op, "clip_to", frame != nullptr ? "frame" : "none");
-            core::Rect target;
-            if (frame == nullptr) target = core::Rect{Num(0), Num(0), seen.spec.width_mm, seen.spec.height_mm};
-            else if (layer.clip_to == "bleed") target = core::default_target(seen, *frame, layer.clip_to);
-            else target = frame->rect;
-            placement = core::fit_rect(target, info.width, info.height, fit, 0.0, 0.0, 1.0);
-        }
-        core::require_finite(core::rect_to_json(placement), "placement_mm");
-        m = Matrix{placement.width.value() / cw, 0, 0, placement.height.value() / ch, placement.x.value(), placement.y.value()};
-    } else {
-        // (PhotoCraft's: at its own resolution, in the middle of the page, made smaller to fit the page when it is larger)
-        const double pw = seen.spec.width_mm.value(), ph = seen.spec.height_mm.value();
-        double s = number_at(c.op, "scale", 0) / 100.0;
-        if (s <= 0) s = std::min({1.0, pw / cw, ph / ch});
-        double cx = pw / 2, cy = ph / 2;
-        if (const Json* center = core::get(c.op, "center_mm"); center != nullptr && !center->is_null()) {
-            const std::vector<double> xy = core::unpack_floats(*center, 2);
-            cx = xy[0];
-            cy = xy[1];
-        }
-        m = Matrix{s, 0, 0, s, cx - s * cw / 2, cy - s * ch / 2};
-        layer.clip_to = "none";
-    }
-    if (std::abs(m.det()) <= core::smart::kDetMin) throw OpError("the picture would be laid too small");
+    const Matrix m = place_matrix(c, seen, layer, cw, ch, info.width, info.height);
     const std::string contents_id = fresh_contents_id(doc);
     doc.smart_contents[contents_id] = contents;
     layer.smart = core::smart::settings(contents_id, m, "lanczos");

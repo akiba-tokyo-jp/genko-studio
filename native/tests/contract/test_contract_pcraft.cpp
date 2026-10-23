@@ -11,12 +11,14 @@
 #include <QtTest>
 
 #include <QCryptographicHash>
+#include <QElapsedTimer>
 #include <QProcess>
 #include <QTemporaryDir>
 
 #include <algorithm>
 #include <cmath>
 #include <filesystem>
+#include <functional>
 #include <map>
 #include <set>
 #include <string>
@@ -30,16 +32,22 @@
 #include "core/json.hpp"
 #include "core/paths.hpp"
 #include "core/smart.hpp"
+#include "formats/copy.hpp"
+#include "formats/export.hpp"
 #include "formats/open_file.hpp"
 #include "formats/page_picture.hpp"
 #include "formats/pcraft_write.hpp"
+#include "render/blake3.hpp"
+#include "render/color_canvas.hpp"
 #include "render/image.hpp"
 #include "render/ops_registry.hpp"
 #include "render/page.hpp"
 #include "render/pcraft_read.hpp"
 #include "render/png.hpp"
+#include "render/psd.hpp"
 #include "render/raster.hpp"
 #include "render/zip.hpp"
+#include "render/zstd.hpp"
 #include "storage/asset_store.hpp"
 #include "storage/lock.hpp"
 #include "storage/reader.hpp"
@@ -151,6 +159,74 @@ const core::Layer* titled(const core::Page& page, const std::string& title) {
         if (l.title == title) return &l;
     }
     return nullptr;
+}
+
+// The manifest of a .pcraft's bytes, as JSON.
+Json manifest_of(const std::string& bytes) { return Json::parse(render::zip::NamedReader(bytes).read("manifest.json", 1u << 26)); }
+
+// A .pcraft of `manifest`, the objects of `from` (an archive whose tiles and blobs it names) and `more` (name → bytes),
+// the manifest first.
+std::string bundle(const Json& manifest, const std::string& from, const std::map<std::string, std::string>& more = {}) {
+    std::string out;
+    render::zip::StoreWriter w([&out](std::string_view b) { out.append(b); });
+    w.add("manifest.json", manifest.dump());
+    if (!from.empty()) {
+        const render::zip::NamedReader r(from);
+        for (const std::string& name : r.names()) {
+            if (name != "manifest.json" && !more.contains(name)) w.add(name, r.read(name, ~0ull));
+        }
+    }
+    for (const auto& [name, data] : more) w.add(name, data);
+    w.finish();
+    return out;
+}
+
+// A blob of these bytes: its name in the archive and its zstd frame.
+std::pair<std::string, std::string> blob_of(const std::string& bytes) {
+    return {"blobs/" + render::blake3::hex(bytes) + ".zst", render::zstd::compress(bytes, 1)};
+}
+
+// An upstream layer of `content` (the other fields of a plain layer: shown, normal, nothing kept).
+Json upstream_layer(const std::string& name, Json content) {
+    return Json{{"id", 1},
+                {"name", name},
+                {"visible", true},
+                {"locks", Json{{"transparency", false}, {"pixels", false}, {"position", false}, {"artboard", false}, {"all", false}}},
+                {"blend", "Normal"},
+                {"opacity", 1.0},
+                {"fill_opacity", 1.0},
+                {"clipped", false},
+                {"mask", nullptr},
+                {"vector_mask", nullptr},
+                {"effects", Json{{"enabled", true}, {"items", Json::array()}, {"psd_raw", nullptr}, {"reference", nullptr}}},
+                {"label", "None"},
+                {"content", std::move(content)},
+                {"psd_blocks", Json::array()},
+                {"psd_id", nullptr},
+                {"fill_cache", nullptr},
+                {"link_group", nullptr}};
+}
+
+// A document of w × h of `mode` and `depth` with these layers (bottom first).
+Json upstream_document(int w, int h, const char* mode, const char* depth, Json layers) {
+    return Json{{"format_version", 1},
+                {"generator", "test"},
+                {"document", Json{{"id", 1},
+                                  {"name", "test"},
+                                  {"size", Json{{"width", w}, {"height", h}}},
+                                  {"resolution_dpi", 300.0},
+                                  {"mode", mode},
+                                  {"depth", depth},
+                                  {"icc_profile", nullptr},
+                                  {"layers", std::move(layers)}}}};
+}
+
+// A raster layer's surface of a format: its tiles (none: nothing drawn).
+Json raster_content(const char* mode, const char* sample, Json tiles = Json::array()) {
+    const std::size_t bytes = std::string_view(sample) == "U8" ? 1 : std::string_view(sample) == "U16" ? 2 : 4;
+    const std::size_t channels = std::string_view(mode) == "Grayscale" ? 2 : std::string_view(mode) == "Cmyk" ? 5 : 4;
+    return Json{{"kind", "raster"},
+                {"surface", Json{{"format", Json{{"mode", mode}, {"sample", sample}, {"alpha", true}}}, {"default", std::string(bytes * channels * 2, '0')}, {"tiles", std::move(tiles)}}}};
 }
 
 core::Document small_book() {
@@ -693,26 +769,381 @@ private slots:
         QCOMPARE(from.page(0).native_source->format, std::string("pcraft"));
     }
 
-    // (with $GENKO_PCRAFT_CHECK, the tool built: upstream's reader reads what this build wrote)
+    // PC4 F-f review P1-1: the read's memory — a layer of nothing made of nothing; a page in precise colour past the book's
+    // precise budget read at 8 bits (said), as is a canvas past a precise raster's; past the layers', planes' and kept
+    // bytes' limits refused (image_too_large), before what is past them is made.
+    void hostileSizesAreRefusedBeforeTheyAreMade() {
+        // (a manifest of a few KB: 40 layers of nothing on a canvas of 8192 × 8191 at 16 bits — the most a precise layer holds)
+        Json layers = Json::array();
+        for (int i = 0; i < 40; ++i) layers.push_back(upstream_layer("空 " + std::to_string(i), raster_content("Rgb", "U16")));
+        const std::string empty = bundle(upstream_document(8192, 8191, "Rgb", "U16", layers), "");
+        QVERIFY(empty.size() < 64 * 1024);
+        QElapsedTimer clock;
+        clock.start();
+        const pc::Read read = pc::read(empty, "empty");
+        QVERIFY(clock.elapsed() < 30000);
+        QCOMPARE(read.doc.page(0).layers.size(), std::size_t(40));
+        for (const core::Layer& l : read.doc.page(0).layers) QVERIFY(!l.raster_png && !l.color_raster && !l.ink_raster);
+        QVERIFY(read.doc.page(0).rgb && read.doc.page(0).rgb->depth == 16);
+        // (3 layers of one tile each at 16 bits on 7000 × 7000: past the book's 1 GiB of precise pixels — 8 bits, said)
+        const std::string tile(std::size_t(256) * 256 * 8, '\x40');
+        const std::string hash = render::blake3::hex(tile);
+        const std::map<std::string, std::string> tiles{{"tiles/" + hash + ".zst", render::zstd::compress(tile, 1)}};
+        Json three = Json::array();
+        for (int i = 0; i < 3; ++i) three.push_back(upstream_layer("絵 " + std::to_string(i), raster_content("Rgb", "U16", Json::array({Json{{"tx", i}, {"ty", 0}, {"hash", hash}}}))));
+        const std::string deep = bundle(upstream_document(7000, 7000, "Rgb", "U16", three), "", tiles);
+        const pc::Read shallow = pc::read(deep, "deep");
+        QVERIFY(!shallow.doc.page(0).rgb || shallow.doc.page(0).rgb->depth == 8);
+        QVERIFY2(said(shallow.notes, "8 bit で読みました"), joined(shallow.notes).c_str());
+        QVERIFY(shallow.doc.page(0).layers[0].raster_png);
+        // (those that fit: kept at 16 bits)
+        const pc::Read precise = pc::read(bundle(upstream_document(512, 512, "Rgb", "U16", three), "", tiles), "three");
+        QVERIFY(precise.doc.page(0).rgb && precise.doc.page(0).rgb->depth == 16);
+        QVERIFY(precise.doc.page(0).layers[0].color_raster);
+        // (a canvas past a precise raster's pixels — 8193 × 8192 at 16 bits —: 8 bits, said)
+        Json one = Json::array({upstream_layer("絵", raster_content("Rgb", "U16", Json::array({Json{{"tx", 0}, {"ty", 0}, {"hash", hash}}})))});
+        const pc::Read wide = pc::read(bundle(upstream_document(8193, 8192, "Rgb", "U16", one), "", tiles), "wide");
+        QVERIFY(!wide.doc.page(0).rgb || wide.doc.page(0).rgb->depth == 8);
+        QVERIFY(said(wide.notes, "8 bit で読みました"));
+        // (the limits: layers, planes, kept bytes — refused, never "broken")
+        const auto code_of = [](const std::function<void()>& f) -> std::string {
+            try {
+                f();
+            } catch (const core::Error& error) {
+                return error.code();
+            }
+            return {};
+        };
+        pc::ReadLimits few;
+        few.max_layers = 10;
+        QCOMPARE(code_of([&] { (void)pc::read(empty, "few", few); }), std::string("image_too_large"));
+        pc::ReadLimits planes;
+        planes.max_plane_pixels = std::uint64_t(7000) * 7000 * 2;
+        QCOMPARE(code_of([&] { (void)pc::read(deep, "planes", planes); }), std::string("image_too_large"));
+        pc::ReadLimits kept;
+        kept.max_kept_bytes = 1000;
+        QCOMPARE(code_of([&] { (void)pc::read(fixture("rich_rgb8.pcraft"), "kept", kept); }), std::string("image_too_large"));
+        // (8001 layers: past Photoshop's most)
+        Json many = Json::array();
+        for (int i = 0; i < 8001; ++i) many.push_back(upstream_layer("l", raster_content("Rgb", "U8")));
+        QCOMPARE(code_of([&] { (void)pc::read(bundle(upstream_document(16, 16, "Rgb", "U8", many), ""), "many"); }), std::string("image_too_large"));
+    }
+
+    // PC4 F-f review P1-2: a .pcraft inside, shown by many smart objects, read once — its contents shared —; nesting counts in
+    // the outer read's limits (1000 smart objects of a .pcraft of 1000 smart objects of a .pcraft: two reads, not a million).
+    void nestedDocumentsAreReadOnce() {
+        const auto smart_of = [](const std::string& hash, const std::string& file) {
+            return Json{{"kind", "smart"},
+                        {"source", Json{{"kind", "embedded"}, {"file_name", file}, {"blob", hash}}},
+                        {"transform", Json{{"m", Json::array({1.0, 0.0, 0.0, 1.0, 0.0, 0.0})}}},
+                        {"smart_filters", Json::array()},
+                        {"cache", nullptr},
+                        {"psd_raw", nullptr},
+                        {"filters_enabled", true},
+                        {"filter_mask", nullptr},
+                        {"warp", nullptr},
+                        {"stack_mode", nullptr}};
+        };
+        const std::string inner = bundle(upstream_document(40, 30, "Rgb", "U8", Json::array()), "");
+        const auto [inner_name, inner_frame] = blob_of(inner);
+        const std::string inner_hash = render::blake3::hex(inner);
+        Json middle_layers = Json::array();
+        for (int i = 0; i < 1000; ++i) middle_layers.push_back(upstream_layer("中 " + std::to_string(i), smart_of(inner_hash, "inner.pcraft")));
+        const std::string middle = bundle(upstream_document(80, 60, "Rgb", "U8", middle_layers), "", {{inner_name, inner_frame}});
+        const auto [middle_name, middle_frame] = blob_of(middle);
+        const std::string middle_hash = render::blake3::hex(middle);
+        Json outer_layers = Json::array();
+        for (int i = 0; i < 1000; ++i) outer_layers.push_back(upstream_layer("外 " + std::to_string(i), smart_of(middle_hash, "middle.pcraft")));
+        const std::string outer = bundle(upstream_document(160, 120, "Rgb", "U8", outer_layers), "", {{middle_name, middle_frame}});
+        QElapsedTimer clock;
+        clock.start();
+        const formats::Opened opened = formats::open_file(outer, "outer.pcraft");
+        QVERIFY2(clock.elapsed() < 60000, std::to_string(clock.elapsed()).c_str());
+        QCOMPARE(opened.doc.page(0).layers.size(), std::size_t(1000));
+        QCOMPARE(opened.doc.smart_contents.size(), std::size_t(2));  // (middle's page, and inner's inside it)
+        std::set<std::string> ids;
+        for (const core::Layer& l : opened.doc.page(0).layers) ids.insert((*l.smart)["contents"].get<std::string>());
+        QCOMPARE(ids.size(), std::size_t(1));
+        // (the layers inside count in the outer read's: past them, refused)
+        pc::ReadLimits few;
+        few.max_layers = 1500;
+        QVERIFY_THROWS_EXCEPTION(core::Error, (void)pc::read(outer, "outer", few));
+    }
+
+    // PC4 F-f review P1-3: a .pcraft placed in a saved book (its contents a page), the book saved and read again whole — the
+    // PSD's blocks and resources, the lookup tables, the filter masks its page names brought into the book —, never read-only.
+    void placedContentsAreSavedWhole() {
+        const fs::path dir = at("placed-whole.genko");
+        write_book(small_book(), dir);
+        core::Document book = storage::load_document(dir).document;
+        for (const char* name : {"rich_rgb8.pcraft", "adjustments.pcraft"}) {
+            const std::string ref = storage::AssetStore(dir).put_bytes(fixture(name), ".pcraft");
+            book = run(book, Json::array({Json{{"op", "smart_place"}, {"page", 1}, {"asset", ref}, {"name", name}}}));
+        }
+        write_book(book, dir);
+        const storage::LoadResult again = storage::load_document(dir);
+        QVERIFY2(again.report.clean(), again.report.to_json().dump().c_str());
+        bool lut = false, lnsr = false;
+        for (const auto& [id, contents] : again.document.smart_contents) {
+            if (!contents->page) continue;
+            for (const core::Layer& l : contents->page->layers) {
+                if (l.adjust && (*l.adjust)["kind"] == Json("color_lookup")) lut = again.document.luts.contains((*l.adjust)["lut"].get<std::string>());
+                if (l.native_psd) {
+                    for (const auto& [key, ref] : l.native_psd->blocks) lnsr = lnsr || key == "lnsr";
+                }
+            }
+        }
+        QVERIFY(lut);
+        QVERIFY(lnsr);
+    }
+
+    // PC4 F-f review P2-2: names cut by characters, never inside one: long Japanese names of paths, channels and inks made
+    // one each, the book saved and read again.
+    void longNamesStayText() {
+        const std::string bytes = fixture("rich_rgb8.pcraft");
+        Json m = manifest_of(bytes);
+        const auto times = [](const std::string& part, int n) {
+            std::string out;
+            for (int i = 0; i < n; ++i) out += part;
+            return out;
+        };
+        const std::string long_name = times("長い名前", 18);  // (72 characters, 216 bytes: past the 64 characters a name holds)
+        Json& d = m["document"];
+        for (Json& path : d["paths"]) path["name"] = long_name;
+        d["channels"][0]["name"] = long_name;
+        d["channels"][1] = d["channels"][0];
+        d["patterns"][0]["name"] = times("模様", 150);  // (300 characters: past the 255 a pattern's name holds)
+        const formats::Opened opened = formats::open_file(bundle(m, bytes), "names.pcraft");
+        const core::Page& page = opened.doc.page(0);
+        const auto text = [](const std::string& name) { return QString::fromStdString(name).toStdString() == name; };
+        QCOMPARE(page.paths.size(), std::size_t(2));
+        QVERIFY(page.paths[0].name != page.paths[1].name);
+        for (const auto& path : page.paths) QVERIFY2(text(path.name), path.name.c_str());
+        std::vector<std::string> channels;
+        for (const auto& ch : page.channels) {
+            QVERIFY2(text(ch.name), ch.name.c_str());
+            if (ch.name.starts_with("長い名前")) channels.push_back(ch.name);
+        }
+        QCOMPARE(channels.size(), std::size_t(2));
+        QVERIFY(channels[0] != channels[1]);
+        QCOMPARE(opened.doc.patterns.size(), std::size_t(1));
+        QVERIFY(text(opened.doc.patterns[0].name));
+        const fs::path dir = at("names.genko");
+        write_book(opened.doc, dir);
+        const storage::LoadResult again = storage::load_document(dir);
+        QVERIFY2(again.report.clean(), again.report.to_json().dump().c_str());
+        QCOMPARE(again.document.page(0).paths[1].name, page.paths[1].name);
+    }
+
+    // PC4 F-f review P2-4: a fill layer's gradient laid out in upstream's frame — a hide-all mask's painted area —, read and
+    // written back the same.
+    void aFillsFrameIsItsMasksPaintedArea() {
+        const std::string bytes = fixture("rich_rgb8.pcraft");
+        Json m = manifest_of(bytes);
+        Json* gradient = nullptr;
+        Json* solid = nullptr;
+        for (Json& l : m["document"]["layers"]) {
+            if (l["name"] == Json("Gradient")) gradient = &l;
+            if (l["name"] == Json("Solid")) solid = &l;
+        }
+        QVERIFY(gradient && solid);
+        (*gradient)["mask"] = (*solid)["mask"];  // (hide all, 200..260 × 150..190 shown)
+        (*gradient)["visible"] = true;
+        const pc::Read read = pc::read(bundle(m, bytes), "frame");
+        const core::Layer* layer = titled(read.doc.page(0), "Gradient");
+        QVERIFY(layer && layer->fill && layer->fill->contains("gradient") && layer->mask);
+        // (the frame: where its mask shows)
+        const render::Image mask = render::open_image(*layer->mask->png).convert("L");
+        const std::string grey = mask.tobytes();
+        int x0 = mask.width(), y0 = mask.height(), x1 = -1, y1 = -1;
+        for (int y = 0; y < mask.height(); ++y) {
+            for (int x = 0; x < mask.width(); ++x) {
+                if (grey[std::size_t(y) * mask.width() + x] == 0) continue;
+                x0 = std::min(x0, x);
+                y0 = std::min(y0, y);
+                x1 = std::max(x1, x);
+                y1 = std::max(y1, y);
+            }
+        }
+        QVERIFY(x1 >= x0 && (x1 - x0 + 1) * (y1 - y0 + 1) < mask.width() * mask.height() / 2);
+        const Json& g = (*layer->fill)["gradient"];
+        const double mm = 25.4 / static_cast<double>(read.doc.page(0).spec.dpi.value());
+        const double cx = (g["from"][0].get<double>() + g["to"][0].get<double>()) / 2 / mm, cy = (g["from"][1].get<double>() + g["to"][1].get<double>()) / 2 / mm;
+        QVERIFY2(std::abs(cx - (x0 + x1 + 1) / 2.0) < 1 && std::abs(cy - (y0 + y1 + 1) / 2.0) < 1,
+                 (std::to_string(cx) + " " + std::to_string(cy) + " / " + std::to_string(x0) + ".." + std::to_string(x1) + " " + std::to_string(y0) + ".." +
+                  std::to_string(y1))
+                     .c_str());
+        // (written back: the same angle and scale over the same frame)
+        const Json written = manifest_of(formats::pcraft_bytes(read.doc, 0));
+        bool found = false;
+        for (const Json& l : written["document"]["layers"]) {
+            if (l["name"] != Json("Gradient")) continue;
+            found = true;
+            const Json& f = l["content"]["fill"]["Gradient"];
+            QVERIFY2(std::abs(f["angle"].get<double>() - 45.0) < 0.01, f.dump().c_str());
+            QVERIFY2(std::abs(f["scale"].get<double>() - 1.0) < 0.01, f.dump().c_str());
+            QCOMPARE(l["mask"]["surface"]["default"].get<std::string>(), std::string("00"));
+        }
+        QVERIFY(found);
+    }
+
+    // PC4 F-f review P2-3: on an RGB page of a profile, what Genko draws (sRGB: a pen's line) is written as the page's values.
+    void anSrgbPictureIsWrittenAsThePagesValues() {
+        formats::Opened opened = formats::open_file(fixture("rgb16.pcraft"), "p3.pcraft");
+        core::Document doc = run(opened.doc, Json::array({Json{{"op", "set_color_mode"}, {"page", 1}, {"mode", "rgb"}, {"depth", 16}, {"profile", "display-p3"}},
+                                                          Json{{"op", "add_layer"}, {"page", 1}, {"kind", "pen"}, {"id", "pen"}, {"name", "線"}},
+                                                          Json{{"op", "add_stroke"}, {"page", 1}, {"layer_id", "pen"},
+                                                               {"points", Json::array({Json::array({1.0, 4.0}), Json::array({11.0, 4.0})})}, {"width_mm", 2.0},
+                                                               {"rgb", Json::array({255, 0, 0})}}}));
+        QVERIFY(doc.page(0).rgb && !doc.page(0).rgb->profile.empty());
+        std::vector<std::string> notes;
+        const pc::Read back = pc::read(formats::pcraft_bytes(doc, 0, formats::PcraftOptions{}, &notes), "p3");
+        QVERIFY2(said(notes, "ペンの線"), joined(notes).c_str());
+        const core::Layer* line = titled(back.doc.page(0), "線");
+        QVERIFY(line && line->color_raster);
+        const auto px = pixels_of(*line);
+        const int dpi = static_cast<int>(back.doc.page(0).spec.dpi.value());
+        const int x = render::mm_to_px(6.0, dpi), y = render::mm_to_px(4.0, dpi);
+        QCOMPARE(px->at(x, y, 3), 1.0);
+        double rgb[3] = {1.0, 0.0, 0.0};
+        render::RgbSpace::of(back.doc.page(0)).from_srgb(rgb, 1);
+        for (unsigned c = 0; c < 3; ++c) QVERIFY2(std::abs(px->at(x, y, c) - rgb[c]) <= 1.5 / 255, (std::to_string(c) + ": " + std::to_string(px->at(x, y, c))).c_str());
+        QVERIFY(std::abs(px->at(x, y, 0) - 1.0) > 2.0 / 255);  // (not sRGB's red as it is)
+    }
+
+    // PC4 F-f review P2-5: what upstream kept of a PSD, as PC4 F-d keeps it — the blocks of a kind made pixels left out (a
+    // text's TySh), the resources this build writes not kept twice —, and the PSD written of it so.
+    void psdBlocksAreKeptAsAPsdsAre() {
+        const std::string bytes = fixture("rich_rgb8.pcraft");
+        Json m = manifest_of(bytes);
+        std::string lnsr;
+        for (Json& l : m["document"]["layers"]) {
+            if (l["name"] == Json("Paint")) lnsr = l["psd_blocks"][0][1].get<std::string>();
+        }
+        for (Json& l : m["document"]["layers"]) {
+            if (l["name"] == Json("Type")) l["psd_blocks"] = Json::array({Json::array({"54795368", lnsr}), Json::array({"6c6e7372", lnsr})});  // (TySh, lnsr)
+            if (l["name"] == Json("Paint")) l["psd_blocks"].push_back(Json::array({"54795368", lnsr}));  // (a TySh on a raster layer: not kept)
+        }
+        m["document"]["metadata"]["psd_resources"].push_back(Json::array({2999, "", lnsr}));  // (the clipping path: this build's)
+        m["document"]["metadata"]["psd_resources"].push_back(Json::array({1046, "", lnsr}));  // (an indexed page's count)
+        const formats::Opened opened = formats::open_file(bundle(m, bytes), "kept.pcraft");
+        const core::Page& page = opened.doc.page(0);
+        QVERIFY(!titled(page, "Type")->native_psd);  // (made pixels: what it kept of its text left out)
+        for (const auto& [key, ref] : titled(page, "Paint")->native_psd->blocks) QVERIFY(key != "TySh");
+        std::set<int> ids;
+        for (const core::PsdResource& r : page.native_psd->resources) ids.insert(r.id);
+        QCOMPARE(ids, (std::set<int>{1037}));
+        // (its PSD: no TySh on a layer, one clipping path resource at most)
+        const fs::path psd = at("kept.psd");
+        formats::export_page_psd(opened.doc, page, psd);
+        const render::psd::File file = render::psd::File::read(genko::test::read_bytes(QString::fromStdString(core::path_to_utf8(psd))));
+        for (const auto& layer : file.layers()) {
+            for (const auto& block : file.blocks(layer)) QVERIFY(block.key != "TySh");
+        }
+        int clipping = 0, counts = 0;
+        for (const auto& r : file.resources()) {
+            clipping += r.id == 2999;
+            counts += r.id == 1046;
+        }
+        QVERIFY(clipping <= 1 && counts == 0);
+    }
+
+    // PC4 F-f review P2-6 and P2-1: what a .pcraft cannot hold said when it is written — a pen's lines made pixels, a
+    // smart object whose file the book does not hold made pixels —; コピーを保存 of a .pcraft written beside its place and
+    // moved there.
+    void whatIsNotWrittenIsSaid() {
+        core::Document doc = run(small_book(), Json::array({Json{{"op", "add_layer"}, {"page", 1}, {"kind", "pen"}, {"id", "pen"}, {"name", "ペン"}},
+                                                            Json{{"op", "add_stroke"}, {"page", 1}, {"layer_id", "pen"},
+                                                                 {"points", Json::array({Json::array({5, 5}), Json::array({30, 30})})}},
+                                                            Json{{"op", "smart_place"}, {"page", 1}, {"data", core::b64encode(fixture("rich_rgb8.pcraft"))},
+                                                                 {"name", "x.pcraft"}}}));
+        // (a smart object of a file the book no longer holds)
+        core::Document lost = run(small_book(), Json::array({Json{{"op", "smart_place"}, {"page", 1},
+                                                                 {"data", core::b64encode(render::write_png(render::Image::create("RGB", render::Size{8, 8}, render::Ink{1, 2, 3})))},
+                                                                 {"name", "lost.png"}}}));
+        lost.smart_files.clear();
+        std::vector<std::string> notes;
+        (void)formats::pcraft_bytes(doc, 0, formats::PcraftOptions{}, &notes);
+        QVERIFY2(said(notes, "ペンの線"), joined(notes).c_str());
+        std::vector<std::string> lost_notes;
+        (void)formats::pcraft_bytes(lost, 0, formats::PcraftOptions{}, &lost_notes);
+        QVERIFY2(said(lost_notes, "中身のファイルが本に無い"), joined(lost_notes).c_str());
+        // (コピーを保存: the file whole, nothing left beside it)
+        const fs::path folder = at("copy-out");
+        fs::create_directories(folder);
+        const formats::CopyResult copied = formats::write_copy(doc, 0, folder / "copy.pcraft");
+        QVERIFY(pc::is_pcraft(genko::test::read_bytes(QString::fromStdString(core::path_to_utf8(copied.file)))));
+        std::size_t files = 0;
+        for (const auto& entry : fs::directory_iterator(folder)) files += entry.is_regular_file();
+        QCOMPARE(files, std::size_t(1));
+    }
+
+    // (with $GENKO_PCRAFT_CHECK, the tool built: upstream's reader reads what this build wrote — every fixture read and
+    // written again, its layers' samples where upstream read the fixture's; a Genko book's page)
     void upstreamReadsWhatThisBuildWrites() {
         const QString tool = qEnvironmentVariable("GENKO_PCRAFT_CHECK");
         if (tool.isEmpty()) QSKIP("GENKO_PCRAFT_CHECK is not set (tools/migration/pcraft_fixtures built)");
         QStringList files;
         for (const char* name : kFixtures) files << QString::fromStdString(core::path_to_utf8(at(std::string("again_") + name)));
+        // (a Genko book's page: paper, a pen's lines, a shape, a fill, a correction, a smart object of a picture)
+        core::Document book = run(small_book(), Json::array({Json{{"op", "add_layer"}, {"page", 1}, {"kind", "pen"}, {"id", "pen"}},
+                                                             Json{{"op", "add_stroke"}, {"page", 1}, {"layer_id", "pen"},
+                                                                  {"points", Json::array({Json::array({5, 5}), Json::array({30, 30})})}},
+                                                             Json{{"op", "add_layer"}, {"page", 1}, {"kind", "pen"}, {"id", "sh"}},
+                                                             Json{{"op", "add_shape_part"}, {"page", 1}, {"layer_id", "sh"},
+                                                                  {"shape", Json{{"kind", "rect"}, {"rect", Json::array({10, 10, 20, 15})}}}, {"fill", Json{{"rgb", Json::array({0, 0, 0})}}}},
+                                                             Json{{"op", "add_layer"}, {"page", 1}, {"kind", "fill"}, {"id", "fl"}},
+                                                             Json{{"op", "add_layer"}, {"page", 1}, {"kind", "adjust"}, {"id", "adj"}, {"adjust", Json{{"kind", "invert"}}}},
+                                                             Json{{"op", "smart_place"}, {"page", 1}, {"data", core::b64encode(fixture("rich_rgb8.pcraft"))},
+                                                                  {"name", "x.pcraft"}}}));
+        const fs::path written = at("genko_book.pcraft");
+        genko::test::write_bytes(QString::fromStdString(core::path_to_utf8(written)), formats::pcraft_bytes(book, 0));
+        files << QString::fromStdString(core::path_to_utf8(written));
         for (const QString& f : files) QVERIFY2(QFileInfo::exists(f), qPrintable(f));
         QProcess process;
         process.start(tool, QStringList{QStringLiteral("check")} + files);
         QVERIFY(process.waitForFinished(600000));
         const QByteArray out = process.readAllStandardOutput();
         QVERIFY2(process.exitCode() == 0, out.constData());
-        int lines = 0;
+        int lines = 0, compared = 0;
         for (const QByteArray& line : out.split('\n')) {
             if (line.trimmed().isEmpty()) continue;
             const Json v = Json::parse(line.toStdString());
             QVERIFY2(v["ok"].get<bool>(), line.constData());
             ++lines;
+            // (a fixture's: its pixel layers' samples as upstream read the fixture's — the same layer by name, the first of it;
+            // a text's pixels are its picture, kept as they are; what Genko draws again — shapes, smart objects — not compared)
+            const std::string file = fs::path(v["file"].get<std::string>()).filename().string();
+            if (!file.starts_with("again_")) continue;
+            const Json& up = upstream_read(file.substr(6));
+            std::map<std::string, const Json*> theirs;
+            std::vector<std::pair<const Json*, bool>> flat;
+            flattened(up["layers"], true, flat);
+            for (const auto& [l, shown] : flat) theirs.emplace((*l)["name"].get<std::string>(), l);
+            std::vector<std::pair<const Json*, bool>> mine;
+            flattened(v["layers"], true, mine);
+            const double step = step_of(up["depth"].get<std::string>());
+            for (const auto& [l, shown] : mine) {
+                const auto found = theirs.find((*l)["name"].get<std::string>());
+                if (found == theirs.end() || !l->contains("pixels") || !found->second->contains("pixels")) continue;
+                if ((*l)["kind"] != Json("raster") || ((*found->second)["kind"] != Json("raster") && (*found->second)["kind"] != Json("text"))) continue;
+                ++compared;
+                const Json& a = (*l)["pixels"];
+                const Json& b = (*found->second)["pixels"];
+                QCOMPARE(a.size(), b.size());
+                for (std::size_t i = 0; i < a.size(); ++i) {
+                    const Json& pa = a[i][2];
+                    const Json& pb = b[i][2];
+                    if (pa.back().get<double>() == 0.0 && pb.back().get<double>() == 0.0) continue;
+                    for (std::size_t c = 0; c < pa.size(); ++c) {
+                        QVERIFY2(std::abs(pa[c].get<double>() - pb[c].get<double>()) <= step,
+                                 qPrintable(QString::fromStdString(file + " " + (*l)["name"].get<std::string>() + " " + a[i].dump() + " / " + b[i].dump())));
+                    }
+                }
+            }
         }
         QCOMPARE(lines, static_cast<int>(files.size()));
+        QVERIFY(compared >= static_cast<int>(std::size(kFixtures)));
     }
 };
 

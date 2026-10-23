@@ -182,7 +182,10 @@ void MainWindow::open_dialog(bool as) {
 
 void MainWindow::open_path(const fs::path& path, std::optional<render::codecs::Format> as) {
     std::error_code ec;
-    if (fs::is_directory(path, ec) && fs::is_regular_file(path / "manifest.json", ec) && !is_book_folder(path)) {  // (PC4 F-f)
+    // (PC4 F-f: a .pcraft folder — its name says so, as the open window's — read as PhotoCraft's)
+    if (fs::is_directory(path, ec) && qpath(path.filename().empty() ? path.parent_path() : path).endsWith(QStringLiteral(".pcraft"), Qt::CaseInsensitive) &&
+        fs::is_regular_file(path / "manifest.json", ec) &&
+        !is_book_folder(path)) {
         open_pcraft_folder(path);
         return;
     }

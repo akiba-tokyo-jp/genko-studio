@@ -478,6 +478,17 @@ const std::vector<Rule>& rules() {
                          ".pcraft の中身が大きすぎて、一度に読めません（展開して 8 GiB まで）"));
         r.push_back(rule(R"((?:the \.pcraft cannot be read \()?the \.pcraft holds a (?:blob|file) too large to read \(.*\)\)?)",
                          ".pcraft の中に、大きすぎて読めないファイルがあります"));
+        // (PC4 F-f review: the read's budgets — its layers, the pixels it makes, what the book keeps, the documents inside)
+        r.push_back(rule(R"((?:the \.pcraft cannot be read \()?the \.pcraft holds more layers than this build reads \(at most (\d+)\)\)?)",
+                         ".pcraft のレイヤーが多すぎて読めません（\\1 枚まで）"));
+        r.push_back(rule(R"((?:the \.pcraft cannot be read \()?the \.pcraft holds more pixels than this build reads at once \(.*\)\)?)",
+                         ".pcraft のレイヤーとマスクの画素が多すぎて、一度に読めません"));
+        r.push_back(rule(R"((?:the \.pcraft cannot be read \()?the \.pcraft makes a book larger than this build holds.*)",
+                         ".pcraft の画素とファイルが大きすぎて、本に入りません（作業に使える記憶の上限を超えます）"));
+        r.push_back(rule(R"((?:the \.pcraft cannot be read \()?the \.pcraft holds more documents inside it than this build reads \(at most (\d+)\)\)?)",
+                         ".pcraft の中の .pcraft が多すぎて読めません（\\1 個まで）"));
+        r.push_back(rule(R"((?:the \.pcraft cannot be read \()?the \.pcraft is too large a page of inks for this build \((\d+)×(\d+) pixels\)\)?)",
+                         ".pcraft の画像が大きすぎて、インキのページにできません（\\1×\\2 px）"));
         r.push_back(rule(R"(the \.pcraft would be larger than 4 GiB or hold more than 65535 files.*)",
                          ".pcraft が 4 GiB を超えるか、中のファイルが 65535 を超えるので書けません"));
         r.push_back(rule(R"(a multichannel page is not written as a \.pcraft by this build.*)",

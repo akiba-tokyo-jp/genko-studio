@@ -1,6 +1,7 @@
 #pragma once
 
 #include <filesystem>
+#include <memory>
 #include <optional>
 #include <span>
 #include <string>
@@ -8,6 +9,10 @@
 #include <vector>
 
 #include "core/model.hpp"
+
+namespace genko::formats::detail {
+class PartFile;  // (formats/output.hpp)
+}
 
 // コピーを保存… (file.saveACopy, PC4 F-b; PhotoCraft's file_cmds.rs save_a_copy; SPEC.md FILE-01): one page of the book as
 // one file of the format its extension names, the book unchanged (its place, its name and its history as they were). PC4
@@ -55,6 +60,8 @@ struct PlannedCopy {
     std::size_t psd_page = 0;
     bool psb = false;                       // (PC4 F-d) a PSB
     int dpi = 0;
+    // (PC4 F-f: a .pcraft) the file written beside `file`, moved over it by write_planned (removed when the plan is let go)
+    std::shared_ptr<detail::PartFile> part;
 };
 PlannedCopy plan_copy(const core::Document& doc, std::size_t page, const std::filesystem::path& dest, const CopyOptions& options = {});
 CopyResult write_planned(const PlannedCopy& plan);

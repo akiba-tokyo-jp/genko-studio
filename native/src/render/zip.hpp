@@ -99,10 +99,17 @@ private:
 // bytes handed to `sink` as they are made — each file's local header and bytes when it is added, the central directory
 // when it is finished —, so a large .pcraft is never held whole. core::Error("image_too_large", "the .pcraft would be
 // larger than 4 GiB …") past what a zip without zip64 holds (4 GiB, 65535 files) — before the file is written.
+// zlib's CRC-32 of `data` after `crc` (0 to start).
+std::uint32_t crc32_of(std::string_view data, std::uint32_t crc = 0);
+
 class StoreWriter {
 public:
     explicit StoreWriter(std::function<void(std::string_view)> sink);
     void add(std::string_view name, std::string_view data);
+    // A file of `size` bytes and this CRC-32, its bytes given in parts by `data` to the function it is handed (a file
+    // held elsewhere — on disk — never held whole here). core::Error("io") when they are not `size` bytes.
+    void add_known(std::string_view name, std::uint64_t size, std::uint32_t crc,
+                   const std::function<void(const std::function<void(std::string_view)>&)>& data);
     void finish();
     std::uint64_t written() const { return offset_; }
 

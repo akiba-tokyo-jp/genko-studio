@@ -4,9 +4,13 @@
 
 #include <algorithm>
 #include <array>
+#include <atomic>
 #include <cctype>
+#include <chrono>
 #include <cmath>
 #include <exception>
+#include <fstream>
+#include <functional>
 #include <map>
 #include <set>
 #include <thread>
@@ -21,6 +25,7 @@
 #include "core/filter_kinds.hpp"
 #include "core/ink.hpp"
 #include "core/lut3d.hpp"
+#include "core/paths.hpp"
 #include "core/patterns.hpp"
 #include "core/psd_keep.hpp"
 #include "core/smart.hpp"
@@ -29,6 +34,7 @@
 #include "formats/file_xmp.hpp"
 #include "formats/output.hpp"
 #include "render/blake3.hpp"
+#include "render/color_canvas.hpp"
 #include "render/image.hpp"
 #include "render/ink.hpp"
 #include "render/ink_canvas.hpp"
@@ -55,7 +61,57 @@ double r6(double v) { return std::round(v * 1e6) / 1e6; }
 
 // --- the bundle's objects ----------------------------------------------------------------------------------------------
 
-// The tiles and blobs of the file, each once by its BLAKE3 hash, held compressed until the manifest (written first) is made.
+// A temporary file beside the system's others that the compressed tiles and blobs wait in until the manifest — written
+// first, naming them — is made (never all held in memory), removed when done.
+class Spool {
+public:
+    Spool() {
+        static std::atomic<std::uint64_t> made{0};
+        std::error_code ec;
+        std::filesystem::path dir = std::filesystem::temp_directory_path(ec);
+        if (ec || dir.empty()) dir = std::filesystem::current_path(ec);
+        const auto now = static_cast<std::uint64_t>(std::chrono::steady_clock::now().time_since_epoch().count());
+        path_ = dir / ("genko-pcraft-" + std::to_string(now) + "-" + std::to_string(made.fetch_add(1)) + "-" +
+                       std::to_string(reinterpret_cast<std::uintptr_t>(this)) + ".spool");
+        file_.open(path_, std::ios::binary | std::ios::in | std::ios::out | std::ios::trunc);
+        if (!file_) throw core::Error("io", "cannot write " + core::path_to_utf8(path_) + " (a temporary file of the .pcraft)");
+    }
+    ~Spool() {
+        file_.close();
+        std::error_code ec;
+        std::filesystem::remove(path_, ec);
+    }
+    Spool(const Spool&) = delete;
+    Spool& operator=(const Spool&) = delete;
+
+    std::uint64_t put(std::string_view bytes) {
+        const std::uint64_t at = end_;
+        file_.seekp(static_cast<std::streamoff>(at));
+        file_.write(bytes.data(), static_cast<std::streamsize>(bytes.size()));
+        if (!file_) throw core::Error("io", "cannot write " + core::path_to_utf8(path_) + " (a temporary file of the .pcraft)");
+        end_ += bytes.size();
+        return at;
+    }
+    void read(std::uint64_t at, std::uint64_t size, const std::function<void(std::string_view)>& emit) {
+        std::string part(std::size_t(1) << 20, '\0');
+        file_.seekg(static_cast<std::streamoff>(at));
+        while (size > 0) {
+            const auto n = static_cast<std::size_t>(std::min<std::uint64_t>(size, part.size()));
+            file_.read(part.data(), static_cast<std::streamsize>(n));
+            if (!file_) throw core::Error("io", "cannot read " + core::path_to_utf8(path_) + " (a temporary file of the .pcraft)");
+            emit(std::string_view(part.data(), n));
+            size -= n;
+        }
+    }
+
+private:
+    std::filesystem::path path_;
+    std::fstream file_;
+    std::uint64_t end_ = 0;
+};
+
+// The tiles and blobs of the file, each once by its BLAKE3 hash, compressed into the spool until the manifest (written
+// first) is made.
 class Objects {
 public:
     std::string blob(std::string_view bytes) {
@@ -64,14 +120,14 @@ public:
         if (!files_.contains(name)) add(name, render::zstd::compress(bytes, 1));
         return hash;
     }
-    // Raw tiles (each its little-endian samples) compressed on as many threads as the machine has (at most 8).
-    std::vector<std::string> tiles(std::vector<std::string> raw) {
+    // Raw tiles (each its little-endian samples) hashed and compressed on as many threads as the machine has (at most 8).
+    std::vector<std::string> tiles(const std::vector<std::string>& raw) {
         std::vector<std::string> hashes(raw.size()), packed(raw.size());
         const unsigned threads = std::clamp(std::thread::hardware_concurrency(), 1u, 8u);
         std::vector<std::exception_ptr> failed(threads);  // (a thread's error, thrown here once they have all ended)
-        const auto work = [&](std::size_t from) {
+        const auto work = [&](std::size_t from, std::size_t step) {
             try {
-                for (std::size_t i = from; i < raw.size(); i += threads) {
+                for (std::size_t i = from; i < raw.size(); i += step) {
                     hashes[i] = render::blake3::hex(raw[i]);
                     if (!files_.contains("tiles/" + hashes[i] + ".zst")) packed[i] = render::zstd::compress(raw[i], 1);
                 }
@@ -80,43 +136,49 @@ public:
             }
         };
         if (raw.size() < 4 || threads < 2) {
-            for (std::size_t i = 0; i < raw.size(); ++i) {
-                hashes[i] = render::blake3::hex(raw[i]);
-                if (!files_.contains("tiles/" + hashes[i] + ".zst")) packed[i] = render::zstd::compress(raw[i], 1);
-            }
+            work(0, 1);
         } else {
             std::vector<std::thread> pool;
-            for (unsigned t = 0; t < threads; ++t) pool.emplace_back(work, t);
+            for (unsigned t = 0; t < threads; ++t) pool.emplace_back(work, t, threads);
             for (std::thread& t : pool) t.join();
-            for (const std::exception_ptr& e : failed) {
-                if (e) std::rethrow_exception(e);
-            }
+        }
+        for (const std::exception_ptr& e : failed) {
+            if (e) std::rethrow_exception(e);
         }
         for (std::size_t i = 0; i < raw.size(); ++i) {
             const std::string name = "tiles/" + hashes[i] + ".zst";
-            if (!files_.contains(name)) add(name, std::move(packed[i]));
+            if (!files_.contains(name)) add(name, packed[i]);
         }
         return hashes;
     }
-    const std::map<std::string, std::string>& files() const { return files_; }
-
-private:
-    void add(const std::string& name, std::string packed) {
-        held_ += packed.size();
-        if (held_ > 0xffffffffull) {
-            throw core::Error("image_too_large", "the .pcraft would be larger than 4 GiB or hold more than 65535 files (a zip without zip64)");
-        }
-        files_.emplace(name, std::move(packed));
-        if (files_.size() >= 0xfff0) {
-            throw core::Error("image_too_large", "the .pcraft would be larger than 4 GiB or hold more than 65535 files (a zip without zip64)");
+    // Each into the archive after what is there (the manifest and previews), from the spool.
+    void write_into(render::zip::StoreWriter& zip) {
+        for (const auto& [name, entry] : files_) {
+            zip.add_known(name, entry.size, entry.crc, [&](const std::function<void(std::string_view)>& emit) { spool_.read(entry.at, entry.size, emit); });
         }
     }
-    std::map<std::string, std::string> files_;
+
+private:
+    struct Entry {
+        std::uint64_t at = 0, size = 0;
+        std::uint32_t crc = 0;
+    };
+    void add(const std::string& name, std::string_view packed) {
+        held_ += packed.size() + 30 + 46 + 2 * name.size();
+        if (held_ > 0xffffffffull || files_.size() + 1 >= 0xfff0) {
+            throw core::Error("image_too_large", "the .pcraft would be larger than 4 GiB or hold more than 65535 files (a zip without zip64)");
+        }
+        const std::uint64_t at = spool_.put(packed);
+        files_.emplace(name, Entry{at, packed.size(), render::zip::crc32_of(packed)});
+    }
+    Spool spool_;
+    std::map<std::string, Entry> files_;
     std::uint64_t held_ = 0;
 };
 
 // A surface of the canvas (w × h) in `format`: each tile made by `row` (row y from x0, n pixels: the format's channels,
-// normalized, into `out`), the tiles of nothing but `background` left out.
+// normalized, into `out`), the tiles of nothing but `background` left out; the tiles made a band at a time and handed to
+// the objects (never a whole plane's raw tiles held).
 using RowFn = std::function<void(int y, int x0, int n, double* out)>;
 
 Json surface(Objects& objects, int w, int h, const PixelFormat& format, const std::vector<double>& background, const RowFn& row) {
@@ -128,10 +190,10 @@ Json surface(Objects& objects, int w, int h, const PixelFormat& format, const st
     pc::Surface s;
     s.format = format;
     s.background = background;
-    std::vector<std::string> raw;
-    std::vector<std::pair<int, int>> where;
     std::vector<double> values(std::size_t(kTile) * channels);
     for (int ty = 0; ty * kTile < h; ++ty) {
+        std::vector<std::string> raw;  // (a band of tiles)
+        std::vector<int> where;
         for (int tx = 0; tx * kTile < w; ++tx) {
             std::string tile;
             tile.reserve(format.tile_bytes());
@@ -148,11 +210,11 @@ Json surface(Objects& objects, int w, int h, const PixelFormat& format, const st
             }
             if (!any) continue;
             raw.push_back(std::move(tile));
-            where.emplace_back(tx, ty);
+            where.push_back(tx);
         }
+        const std::vector<std::string> hashes = objects.tiles(raw);
+        for (std::size_t i = 0; i < hashes.size(); ++i) s.tiles.push_back(pc::TileRef{where[i], ty, hashes[i]});
     }
-    const std::vector<std::string> hashes = objects.tiles(std::move(raw));
-    for (std::size_t i = 0; i < hashes.size(); ++i) s.tiles.push_back(pc::TileRef{where[i].first, where[i].second, hashes[i]});
     return pc::to_json(s);
 }
 
@@ -176,9 +238,21 @@ struct Ctx {
     std::uint64_t next_id = 1;
     std::set<std::string> said;
     int depth = 0;
+    render::RgbSpace space;                                         // (an RGB page's: its profile's, or sRGB)
+    std::map<const core::SmartContents*, std::string> written;      // (contents written as a .pcraft inside: its blob, once)
 
     void note(const std::string& text) {
         if (said.insert(text).second) notes.push_back(text);
+    }
+    // A layer's untouched pixel: transparent (a page of inks: its transparent pixel — grey and Lab white, no ink —, so the
+    // tiles of nothing are left out there too).
+    std::vector<double> untouched(const PixelFormat& f) const {
+        std::vector<double> out(f.channels(), 0.0);
+        if (way == Way::Inks && page.color) {
+            const core::InkPixels blank = core::blank_ink_pixels(page.color->space, page.color->depth, 1, 1);
+            for (unsigned c = 0; c < f.channels() && c < blank.channels(); ++c) out[c] = blank.value(0, c);
+        }
+        return out;
     }
     PixelFormat layer_format() const {
         const Mode m = mode == Mode::Indexed || mode == Mode::Multichannel ? Mode::Rgb : mode == Mode::Bitmap || mode == Mode::Duotone ? Mode::Grayscale : mode;
@@ -198,11 +272,11 @@ std::optional<std::string> file_bytes(const core::Document& doc, const std::stri
 
 // An 8-bit RGBA picture of the canvas as a layer surface at the page's depth (an RGB page's values: sRGB's, or the page's
 // own when `page_values`; a page of inks: its colours by the page's rules — `inks`, a paint layer's own, when given).
-Json picture_surface(Ctx& ctx, const render::Image& image, const std::shared_ptr<const std::vector<double>>& inks) {
+Json picture_surface(Ctx& ctx, const render::Image& image, const std::shared_ptr<const std::vector<double>>& inks, bool page_values) {
     const render::Image rgba = image.mode() == "RGBA" ? image : image.convert("RGBA");
     const PixelFormat f = ctx.layer_format();
     const unsigned colours = pc::colour_channels(f.mode);
-    std::vector<double> background(f.channels(), 0.0);
+    const std::vector<double> background = ctx.untouched(f);
     if (ctx.way == Way::Inks) {
         std::shared_ptr<const std::vector<double>> values = inks;
         if (!values) values = std::make_shared<const std::vector<double>>(render::ink_picture(rgba, *ctx.page.color).values);
@@ -215,10 +289,24 @@ Json picture_surface(Ctx& ctx, const render::Image& image, const std::shared_ptr
         });
     }
     const std::string bytes = rgba.tobytes();
+    // (an RGB page of a profile: an sRGB picture — Genko's own elements, a shape's, a smart object's — made the page's values,
+    // as the PSD's writer does; a paint layer's pixels are its values already: `page_values`)
+    const bool convert = !page_values && !ctx.space.is_srgb();
+    std::vector<double> rgb;
     return surface(ctx.objects, ctx.w, ctx.h, f, background, [&](int y, int x0, int n, double* out) {
         for (int i = 0; i < n; ++i) {
             const auto* p = reinterpret_cast<const unsigned char*>(bytes.data()) + (std::size_t(y) * ctx.w + x0 + i) * 4;
             for (unsigned c = 0; c < 4; ++c) out[std::size_t(i) * 4 + c] = p[c] / 255.0;
+        }
+        if (convert) {
+            rgb.resize(std::size_t(n) * 3);
+            for (int i = 0; i < n; ++i) {
+                for (unsigned c = 0; c < 3; ++c) rgb[std::size_t(i) * 3 + c] = out[std::size_t(i) * 4 + c];
+            }
+            ctx.space.from_srgb(rgb.data(), static_cast<std::size_t>(n));
+            for (int i = 0; i < n; ++i) {
+                for (unsigned c = 0; c < 3; ++c) out[std::size_t(i) * 4 + c] = rgb[std::size_t(i) * 3 + c];
+            }
         }
     });
 }
@@ -231,7 +319,7 @@ std::optional<Json> own_pixels(Ctx& ctx, const core::Layer& layer) {
         (layer.tone && !layer.tone->is_null()) || (layer.panel_clip && !ctx.page.frames.empty()))  // (the panels cut what it shows)
         return std::nullopt;
     const PixelFormat f = ctx.layer_format();
-    const std::vector<double> background(f.channels(), 0.0);
+    const std::vector<double> background = ctx.untouched(f);
     if (ctx.way == Way::Precise && layer.color_raster) {
         const core::ColorRasterView view(*layer.color_raster);
         if (static_cast<int>(view.width()) != ctx.w || static_cast<int>(view.height()) != ctx.h) return std::nullopt;
@@ -255,23 +343,60 @@ std::optional<Json> own_pixels(Ctx& ctx, const core::Layer& layer) {
     if (ctx.way == Way::Rgb8 && layer.raster_png && !layer.raster_png->empty()) {
         render::Image image = render::open_image(*layer.raster_png);
         if (image.width() != ctx.w || image.height() != ctx.h) return std::nullopt;
-        return picture_surface(ctx, image, nullptr);
+        return picture_surface(ctx, image, nullptr, core::holds_page_values(ctx.page, layer));
     }
     return std::nullopt;
 }
 
 // A grey picture of any size stretched over the canvas as a mask's surface (white: shown).
-Json mask_surface(Ctx& ctx, const core::Bytes& png, double untouched) {
+// A mask's grey picture stretched over the canvas (its bytes, a row after another).
+std::string mask_plane(Ctx& ctx, const core::Bytes& png) {
     render::Image image = render::open_image(*png).convert("L");
     if (image.width() != ctx.w || image.height() != ctx.h) image = image.resize(render::Size{ctx.w, ctx.h}, render::Resample::Bilinear);
-    const std::string bytes = image.tobytes();
+    return image.tobytes();
+}
+
+// Does a mask hide more of the canvas than it shows? (written so — its untouched pixel 0 —, upstream lays a fill out in
+// its painted area: compose's fill_frame)
+bool mostly_hidden(const std::string& plane) { return std::count(plane.begin(), plane.end(), '\0') * 2 > static_cast<std::ptrdiff_t>(plane.size()); }
+
+Json mask_surface(Ctx& ctx, const std::string& plane, double untouched) {
     return surface(ctx.objects, ctx.w, ctx.h, PixelFormat{Mode::Grayscale, Sample::U8, false}, {untouched}, [&](int y, int x0, int n, double* out) {
-        for (int i = 0; i < n; ++i) out[i] = static_cast<unsigned char>(bytes[std::size_t(y) * ctx.w + x0 + i]) / 255.0;
+        for (int i = 0; i < n; ++i) out[i] = static_cast<unsigned char>(plane[std::size_t(y) * ctx.w + x0 + i]) / 255.0;
     });
+}
+Json mask_surface(Ctx& ctx, const core::Bytes& png, double untouched) { return mask_surface(ctx, mask_plane(ctx, png), untouched); }
+
+// The frame upstream lays a fill out in (compose's fill_frame, as the mask is written): an enabled mask's painted area when
+// it hides more than it shows, then its vector mask's box within that; else the canvas. Pixels: x, y, width, height.
+std::array<double, 4> fill_frame(Ctx& ctx, const core::Layer& layer) {
+    std::array<double, 4> frame{0, 0, static_cast<double>(ctx.w), static_cast<double>(ctx.h)};
+    if (layer.mask && layer.mask->enabled && layer.mask->png && !layer.mask->png->empty()) {
+        const std::string plane = mask_plane(ctx, layer.mask->png);
+        if (mostly_hidden(plane)) {
+            int x0 = ctx.w, y0 = ctx.h, x1 = -1, y1 = -1;
+            for (int y = 0; y < ctx.h; ++y) {
+                for (int x = 0; x < ctx.w; ++x) {
+                    if (plane[std::size_t(y) * ctx.w + x] == '\0') continue;
+                    x0 = std::min(x0, x), y0 = std::min(y0, y), x1 = std::max(x1, x), y1 = std::max(y1, y);
+                }
+            }
+            if (x1 >= x0) frame = {double(x0), double(y0), double(x1 - x0 + 1), double(y1 - y0 + 1)};
+        }
+    }
+    if (layer.vector_mask && layer.vector_mask->enabled && !layer.vector_mask->path.inverted) {
+        if (const auto b = layer.vector_mask->path.control_bounds()) {
+            const double x0 = std::max(frame[0], std::floor(b->at(0) * ctx.px)), y0 = std::max(frame[1], std::floor(b->at(1) * ctx.px));
+            const double x1 = std::min(frame[0] + frame[2], std::ceil(b->at(2) * ctx.px)), y1 = std::min(frame[1] + frame[3], std::ceil(b->at(3) * ctx.px));
+            if (x1 > x0 && y1 > y0) frame = {x0, y0, x1 - x0, y1 - y0};
+        }
+    }
+    return frame;
 }
 
 Json mask_json(Ctx& ctx, const core::Mask& mask) {
-    return Json{{"surface", mask_surface(ctx, mask.png, 1.0)},
+    const std::string plane = mask_plane(ctx, mask.png);
+    return Json{{"surface", mask_surface(ctx, plane, mostly_hidden(plane) ? 0.0 : 1.0)},
                 {"enabled", mask.enabled},
                 {"linked", mask.linked},
                 {"density", mask.density},
@@ -297,9 +422,9 @@ double num(const Json& object, const char* key, double fallback) {
 
 // --- fills -------------------------------------------------------------------------------------------------------------
 
-// A gradient fill's from → to (mm) as upstream's angle and scale over the canvas (the inverse of render/pcraft_read's
-// layout): the centre where it lands is the canvas's (a gradient off it: said).
-Json gradient_of(Ctx& ctx, const Json& g) {
+// A gradient fill's from → to (mm) as upstream's angle and scale over its frame (pixels: fill_frame's — the inverse of
+// render/pcraft_read's layout): the centre where it lands is the frame's (a gradient off it: said).
+Json gradient_of(Ctx& ctx, const Json& g, const std::array<double, 4>& frame) {
     const auto point = [&](const char* key, std::array<double, 2> fallback) {
         const auto it = g.find(key);
         if (it == g.end() || !it->is_array() || it->size() < 2) return fallback;
@@ -311,7 +436,7 @@ Json gradient_of(Ctx& ctx, const Json& g) {
     const double span = std::hypot(dx, dy);
     const double angle = span > 0 ? std::atan2(-dy, dx) * 180.0 / 3.14159265358979323846 : 90.0;
     const double a = angle * 3.14159265358979323846 / 180.0, c = std::cos(a), s = std::sin(a);
-    const double w = ctx.w, h = ctx.h;
+    const double w = std::max(1.0, frame[2]), h = std::max(1.0, frame[3]);
     const double chord = std::max(1.0, std::min(w / std::max(std::fabs(c), 1e-6), h / std::max(std::fabs(s), 1e-6)));
     const double len = std::max(1.0, std::hypot(c * w, s * h));
     std::string style = "Linear";
@@ -326,7 +451,9 @@ Json gradient_of(Ctx& ctx, const Json& g) {
         centre = from;
         if (shape == "ellipse") ctx.note("楕円のグラデーションは円形（Radial）として書きました");
     }
-    if (std::hypot(centre[0] - w / 2, centre[1] - h / 2) > 0.5) ctx.note("グラデーションの塗りの中心は、PhotoCraft では画像の中心になります");
+    if (std::hypot(centre[0] - (frame[0] + w / 2), centre[1] - (frame[1] + h / 2)) > 0.5) {
+        ctx.note("グラデーションの塗りの中心は、PhotoCraft では塗りの枠（マスクの見える所か画像）の中心になります");
+    }
     Json stops = Json::array();
     if (const auto list = g.find("stops"); list != g.end() && list->is_array() && list->size() >= 2) {
         for (const Json& st : *list) {
@@ -342,7 +469,7 @@ Json gradient_of(Ctx& ctx, const Json& g) {
 }
 
 // A fill of Genko's (a colour, a gradient, a pattern of the book's) as upstream's Fill; none for one it has no form of.
-std::optional<Json> fill_json(Ctx& ctx, const Json& fill, std::set<std::string>& patterns) {
+std::optional<Json> fill_json(Ctx& ctx, const Json& fill, std::set<std::string>& patterns, const std::array<double, 4>& frame) {
     if (!fill.is_object()) return std::nullopt;
     if (const Json* pattern = core::pattern_of_fill(fill)) {
         const std::string id = pattern->value("id", std::string());
@@ -357,7 +484,7 @@ std::optional<Json> fill_json(Ctx& ctx, const Json& fill, std::set<std::string>&
                                      {"link", pattern->value("link", true)},
                                      {"phase", Json::array({r6(phase[0].get<double>() * ctx.px), r6(phase[1].get<double>() * ctx.px)})}}}};
     }
-    if (const auto g = fill.find("gradient"); g != fill.end() && g->is_object()) return gradient_of(ctx, *g);
+    if (const auto g = fill.find("gradient"); g != fill.end() && g->is_object()) return gradient_of(ctx, *g, frame);
     if (const auto rgb = fill.find("rgb"); rgb != fill.end()) {
         if (rgb->is_null()) return std::nullopt;  // (a part's: the layer's ink)
         return Json{{"Solid", color_of_rgb(rgb_from(*rgb))}};
@@ -548,6 +675,7 @@ std::optional<Json> adjustment_of(Ctx& ctx, const Json& adjust, const std::strin
                 } catch (const core::Error&) {
                 }
             }
+            if (!table) ctx.note("カラールックアップの表が本に無いか読めないため、補正レイヤー「" + name + "」を書けませんでした");
         } else if (const auto look = adjust.find("look"); look != adjust.end() && look->is_string()) {
             if (const core::lut3d::Table* builtin = core::lut3d::builtin(look->get<std::string>())) table = std::make_shared<const core::lut3d::Table>(*builtin);
         }
@@ -609,7 +737,11 @@ Json layer_json(Ctx& ctx, const std::string& name, const core::Layer* layer, Jso
         if (layer->native_psd) {
             Json blocks = Json::array();
             for (const auto& [key, ref] : layer->native_psd->blocks) {
-                if (const auto bytes = file_bytes(ctx.doc, ref, core::kPsdBlockSuffix)) blocks.push_back(Json::array({pc::hex_of(key), ctx.objects.blob(*bytes)}));
+                if (const auto bytes = file_bytes(ctx.doc, ref, core::kPsdBlockSuffix)) {
+                    blocks.push_back(Json::array({pc::hex_of(key), ctx.objects.blob(*bytes)}));
+                } else {
+                    ctx.note("PSD の塊のファイルが本に無いため外しました（「" + name + "」）");
+                }
             }
             out["psd_blocks"] = std::move(blocks);
             if (layer->native_psd->id && *layer->native_psd->id >= 0 && *layer->native_psd->id <= 0xffffffff) out["psd_id"] = *layer->native_psd->id;
@@ -662,22 +794,28 @@ std::optional<Json> layer_of(Ctx& ctx, const core::Layer& layer, const render::P
         return out;
     }
     if (layer.kind == core::LayerKind::Fill && layer.fill) {
-        if (auto fill = fill_json(ctx, *layer.fill, patterns)) return layer_json(ctx, name, &layer, Json{{"kind", "fill"}, {"fill", std::move(*fill)}}, nullptr);
+        if (auto fill = fill_json(ctx, *layer.fill, patterns, fill_frame(ctx, layer))) {
+            return layer_json(ctx, name, &layer, Json{{"kind", "fill"}, {"fill", std::move(*fill)}}, nullptr);
+        }
+        ctx.note("塗りつぶしレイヤー「" + name + "」は PhotoCraft の塗り（色・グラデーション・本のパターン）に書けないため、画素にしました");
     }
     if (layer.kind == core::LayerKind::Smart) {
         if (auto content = smart_content(ctx, layer, shown, name)) return layer_json(ctx, name, &layer, std::move(*content), nullptr);
     }
     if (shown != nullptr && shown->shape != nullptr) {
         const core::vector::ShapePart& part = *shown->shape;
-        Json content{{"kind", "shape"}, {"fill", nullptr}, {"cache", picture_surface(ctx, shown->image, nullptr)}, {"psd_raw", nullptr},
+        Json content{{"kind", "shape"}, {"fill", nullptr}, {"cache", picture_surface(ctx, shown->image, nullptr, shown->page_values)}, {"psd_raw", nullptr},
                      {"path", pc::path_json(part.path, ctx.px)}, {"stroke", nullptr}, {"live", nullptr}};
+        // (a shape's fill laid out over its path's box, as render/pcraft_read reads it)
+        std::array<double, 4> box{0, 0, static_cast<double>(ctx.w), static_cast<double>(ctx.h)};
+        if (const auto b = part.path.control_bounds()) box = {b->at(0) * ctx.px, b->at(1) * ctx.px, (b->at(2) - b->at(0)) * ctx.px, (b->at(3) - b->at(1)) * ctx.px};
         if (!part.fill.is_null()) {
-            if (auto fill = fill_json(ctx, part.fill, patterns)) content["fill"] = std::move(*fill);
+            if (auto fill = fill_json(ctx, part.fill, patterns, box)) content["fill"] = std::move(*fill);
             else if (part.fill.is_object() && part.fill.contains("rgb")) content["fill"] = Json{{"Solid", color_of_rgb({20, 20, 20})}};
         }
         if (part.stroke) {
             const core::vector::ShapeStroke& s = *part.stroke;
-            std::optional<Json> paint = s.fill.is_null() ? std::nullopt : fill_json(ctx, s.fill, patterns);
+            std::optional<Json> paint = s.fill.is_null() ? std::nullopt : fill_json(ctx, s.fill, patterns, box);
             content["stroke"] = Json{{"width", r6(s.width_mm * ctx.px)},
                                      {"paint", paint ? *paint : Json{{"Solid", color_of_rgb({20, 20, 20})}}},
                                      {"opacity", s.opacity},
@@ -717,9 +855,13 @@ std::optional<Json> layer_of(Ctx& ctx, const core::Layer& layer, const render::P
     }
     // its pixels: its own at the page's depth, else its picture
     if (auto own = own_pixels(ctx, layer)) return layer_json(ctx, name, &layer, raster_content(std::move(*own)), nullptr);
-    if (shown != nullptr) return layer_json(ctx, name, &layer, raster_content(picture_surface(ctx, shown->image, shown->inks)), nullptr);
+    // (what Genko draws on it — its lines, tones, effects, pictures — as its picture: said)
+    const bool drawn = layer.kind != core::LayerKind::Raster || layer.stroke_count() > 0 || !layer.patches.empty() || (layer.shapes && !layer.shapes->items.empty()) ||
+                       (layer.tone && !layer.tone->is_null()) || (layer.effect && !layer.effect->is_null()) || (layer.screen && !layer.screen->is_null());
+    if (drawn) ctx.note("ペンの線・トーン・効果など Genko の描いたものを、画素のレイヤーにしました（「" + name + "」）");
+    if (shown != nullptr) return layer_json(ctx, name, &layer, raster_content(picture_surface(ctx, shown->image, shown->inks, shown->page_values)), nullptr);
     const render::Image picture = render::layer_image(ctx.page, layer, ctx.dpi, &ctx.doc);
-    return layer_json(ctx, name, &layer, raster_content(picture_surface(ctx, picture, nullptr)), nullptr);
+    return layer_json(ctx, name, &layer, raster_content(picture_surface(ctx, picture, nullptr, layer.raster_png && core::holds_page_values(ctx.page, layer))), nullptr);
 }
 
 // A contents page as a .pcraft's bytes (written as a book of that page alone, at its own resolution).
@@ -729,17 +871,28 @@ std::optional<Json> smart_content(Ctx& ctx, const core::Layer& layer, const rend
     const core::SmartContents* contents = core::smart::contents_of(ctx.doc, layer);
     if (contents == nullptr) return std::nullopt;
     std::string file_name = contents->name.empty() ? std::string("contents") : contents->name;
-    std::string bytes;
+    std::string blob;  // (its file's: a .pcraft of its page, written once however many layers show it — or its file)
     double cdpi = 72;
     if (contents->kind == "page" && contents->page) {
-        if (ctx.depth + 1 >= core::smart::kDepthMax) return std::nullopt;
-        bytes = contents_bytes(ctx, *contents);
+        if (ctx.depth + 1 >= core::smart::kDepthMax) {
+            ctx.note("スマートオブジェクト「" + name + "」の中身は入れ子が深すぎて書けないため、画素にしました");
+            return std::nullopt;
+        }
+        if (const auto known = ctx.written.find(contents); known != ctx.written.end()) {
+            blob = known->second;
+        } else {
+            blob = ctx.objects.blob(contents_bytes(ctx, *contents));
+            ctx.written.emplace(contents, blob);
+        }
         cdpi = contents->page->spec.dpi.value();
         if (!file_name.ends_with(".pcraft")) file_name += ".pcraft";
     } else {
         const auto read = file_bytes(ctx.doc, contents->asset, contents->suffix);
-        if (!read) return std::nullopt;
-        bytes = *read;
+        if (!read) {
+            ctx.note("スマートオブジェクト「" + name + "」の中身のファイルが本に無いため、画素にしました");
+            return std::nullopt;
+        }
+        blob = ctx.objects.blob(*read);
         cdpi = contents->dpi > 0 ? contents->dpi : ctx.dpi;
         if (!contents->suffix.empty() && !file_name.ends_with(contents->suffix)) file_name += contents->suffix;
     }
@@ -764,7 +917,9 @@ std::optional<Json> smart_content(Ctx& ctx, const core::Layer& layer, const rend
     }
     Json filter_mask = nullptr;
     if (const auto fm = layer.smart->find("filter_mask"); fm != layer.smart->end() && fm->is_object() && fm->contains("asset")) {
-        if (const auto png = file_bytes(ctx.doc, (*fm)["asset"].get<std::string>(), ".png")) {
+        const auto png = file_bytes(ctx.doc, (*fm)["asset"].get<std::string>(), ".png");
+        if (!png) ctx.note("スマートオブジェクト「" + name + "」のフィルターマスクのファイルが本に無いため外しました");
+        if (png) {
             filter_mask = Json{{"surface", mask_surface(ctx, std::make_shared<const std::string>(*png), 1.0)},
                                {"enabled", fm->value("enabled", true)},
                                {"linked", false},
@@ -788,10 +943,10 @@ std::optional<Json> smart_content(Ctx& ctx, const core::Layer& layer, const rend
     }
     const auto on = layer.smart->find("filters_on");
     return Json{{"kind", "smart"},
-                {"source", Json{{"kind", "embedded"}, {"file_name", file_name}, {"blob", ctx.objects.blob(bytes)}}},
+                {"source", Json{{"kind", "embedded"}, {"file_name", file_name}, {"blob", blob}}},
                 {"transform", pc::to_json(t)},
                 {"smart_filters", std::move(filters)},
-                {"cache", shown != nullptr ? picture_surface(ctx, shown->image, shown->inks) : Json(nullptr)},
+                {"cache", shown != nullptr ? picture_surface(ctx, shown->image, shown->inks, shown->page_values) : Json(nullptr)},
                 {"psd_raw", nullptr},
                 {"filters_enabled", !(on != layer.smart->end() && on->is_boolean() && !on->get<bool>())},
                 {"filter_mask", std::move(filter_mask)},
@@ -893,7 +1048,7 @@ Json document_json(Ctx& ctx) {
             if (shown.name == "紙" && picture_page) return;  // (an opened picture's page: its own layers, no paper)
             if (groups.empty()) drawn = true;
             Json made = shown.shape != nullptr ? *layer_of(ctx, core::Layer{}, &shown, patterns)
-                                               : layer_json(ctx, shown.name, nullptr, raster_content(picture_surface(ctx, shown.image, shown.inks)), &shown);
+                                               : layer_json(ctx, shown.name, nullptr, raster_content(picture_surface(ctx, shown.image, shown.inks, shown.page_values)), &shown);
             if (!groups.empty()) groups.back().push_back(Out{std::move(made), {}});
             else flat.push_back(Out{std::move(made), {}});
             return;
@@ -977,15 +1132,26 @@ Json document_json(Ctx& ctx) {
     Json metadata{{"xmp", nullptr}, {"exif", nullptr}, {"psd_resources", Json::array()}, {"psd_global_blocks", Json::array()}};
     if (const auto xmp = book_xmp(ctx.doc)) metadata["xmp"] = *xmp;
     if (page.native_source && !page.native_source->exif.empty()) {
-        if (const auto exif = file_bytes(ctx.doc, page.native_source->exif, core::kExifSuffix)) metadata["exif"] = ctx.objects.blob(*exif);
+        if (const auto exif = file_bytes(ctx.doc, page.native_source->exif, core::kExifSuffix)) {
+            metadata["exif"] = ctx.objects.blob(*exif);
+        } else {
+            ctx.note("EXIF のファイルが本に無いため外しました");
+        }
     }
     if (page.native_psd) {
         for (const core::PsdResource& r : page.native_psd->resources) {
-            if (const auto bytes = file_bytes(ctx.doc, r.ref, core::kPsdBlockSuffix)) metadata["psd_resources"].push_back(Json::array({r.id, r.name, ctx.objects.blob(*bytes)}));
+            if (const auto bytes = file_bytes(ctx.doc, r.ref, core::kPsdBlockSuffix)) {
+                metadata["psd_resources"].push_back(Json::array({r.id, r.name, ctx.objects.blob(*bytes)}));
+            } else {
+                ctx.note("PSD のリソースのファイルが本に無いため外しました");
+            }
         }
         for (const core::PsdGlobal& g : page.native_psd->globals) {
-            if (const auto bytes = file_bytes(ctx.doc, g.ref, core::kPsdBlockSuffix))
+            if (const auto bytes = file_bytes(ctx.doc, g.ref, core::kPsdBlockSuffix)) {
                 metadata["psd_global_blocks"].push_back(Json::array({pc::hex_of(g.signature), pc::hex_of(g.key), ctx.objects.blob(*bytes)}));
+            } else {
+                ctx.note("PSD の全体の塊のファイルが本に無いため外しました");
+            }
         }
     }
     doc["metadata"] = std::move(metadata);
@@ -1003,7 +1169,10 @@ Json document_json(Ctx& ctx) {
         const core::Pattern* p = core::find_pattern(ctx.doc, id);
         if (p == nullptr) continue;
         const auto bytes = file_bytes(ctx.doc, p->asset, core::pattern_suffix(*p));
-        if (!bytes) continue;
+        if (!bytes) {
+            ctx.note("パターン「" + p->name + "」の絵が本に無いため、PhotoCraft のパターンに書けませんでした");
+            continue;
+        }
         const int w = static_cast<int>(p->width), h = static_cast<int>(p->height);
         Json surf;
         if (p->mode == "rgb" && p->depth == 8) {
@@ -1114,6 +1283,7 @@ std::vector<std::string> write_page(const core::Document& doc, const core::Page&
     } else {
         const int bits = page.rgb ? page.rgb->depth : 8;
         ctx.way = bits == 8 ? Way::Rgb8 : Way::Precise;
+        ctx.space = render::RgbSpace::of(page);
         ctx.mode = page.rgb && page.rgb->table ? Mode::Indexed : Mode::Rgb;
         ctx.sample = bits == 32 ? Sample::F32 : bits == 16 ? Sample::U16 : Sample::U8;
     }
@@ -1129,7 +1299,7 @@ std::vector<std::string> write_page(const core::Document& doc, const core::Page&
     zip.add(pc::kManifest, text);
     zip.add(pc::kThumb, thumb);
     zip.add(pc::kComposite, composite);
-    for (const auto& [name, packed] : objects.files()) zip.add(name, packed);
+    objects.write_into(zip);
     zip.finish();
     return notes;
 }

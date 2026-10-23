@@ -7,6 +7,7 @@
 #include <cmath>
 #include <fstream>
 #include <map>
+#include <memory>
 #include <mutex>
 #include <optional>
 #include <set>
@@ -99,18 +100,41 @@ private:
 
 // --- the bundle's objects: each checked against its hash, all of them against the budget ----------------------------
 
+// What one read — the .pcraft files inside it counted in — has used of ReadLimits.
+struct Tally {
+    std::uint64_t unpacked = 0;  // tiles and blobs unpacked
+    std::uint64_t layers = 0;    // layers read
+    std::uint64_t planes = 0;    // canvas pixels of the planes of pixels made
+    std::uint64_t kept = 0;      // bytes the books keep
+    std::uint64_t contents = 0;  // contents pages made of .pcraft files inside
+};
+
+[[noreturn]] void too_large(const std::string& what) { throw core::Error("image_too_large", "the .pcraft " + what); }
+
+// n more of something counted against its most: refused before it is made.
+void count(std::uint64_t& used, std::uint64_t n, std::uint64_t most, const char* what) {
+    if (n > most || used > most - n) too_large(std::string(what) + " (at most " + std::to_string(most) + ")");
+    used += n;
+}
+
 class Loader {
 public:
-    Loader(const Source& source, const ReadLimits& limits) : source_(source), limits_(limits) {}
+    Loader(const Source& source, const ReadLimits& limits, Tally& tally) : source_(source), limits_(limits), tally_(tally) {}
 
     // n more bytes unpacked: refused past the budget before they are made.
     void account(std::uint64_t n) {
-        if (n > limits_.max_unpacked_bytes || unpacked_ > limits_.max_unpacked_bytes - n) {
+        if (n > limits_.max_unpacked_bytes || tally_.unpacked > limits_.max_unpacked_bytes - n) {
             throw core::Error("image_too_large", "the .pcraft unpacks to more than this build reads at once (at most " +
                                                      std::to_string(limits_.max_unpacked_bytes) + " bytes)");
         }
-        unpacked_ += n;
+        tally_.unpacked += n;
     }
+    // A plane of the canvas's pixels about to be made; bytes the book is about to keep; a layer read; a contents page.
+    void plane(std::uint64_t pixels) { count(tally_.planes, pixels, limits_.max_plane_pixels, "holds more pixels than this build reads at once"); }
+    void keep(std::uint64_t bytes) { count(tally_.kept, bytes, limits_.max_kept_bytes, "makes a book larger than this build holds at once (bytes)"); }
+    void layer() { count(tally_.layers, 1, limits_.max_layers, "holds more layers than this build reads"); }
+    void contents() { count(tally_.contents, 1, limits_.max_contents, "holds more documents inside it than this build reads"); }
+    Tally& tally() { return tally_; }
 
     std::string tile(const std::string& hash, std::size_t length) {
         if (!blake3::is_hex_hash(hash)) broken("a tile named by something that is not a hash");
@@ -128,12 +152,15 @@ public:
         return data;
     }
 
+    // A blob, unpacked (one still held — by the book, or by its reader — given again; one let go read again, counted again).
     core::Bytes blob(const std::string& hash) {
-        if (const auto known = blobs_.find(hash); known != blobs_.end()) return known->second;
+        if (const auto known = blobs_.find(hash); known != blobs_.end()) {
+            if (core::Bytes held = known->second.lock()) return held;
+        }
         if (!blake3::is_hex_hash(hash)) broken("a blob named by something that is not a hash");
         const std::string name = "blobs/" + hash + ".zst";
         const std::string packed = source_.get(name, limits_.max_blob_bytes + limits_.max_blob_bytes / 8 + 4096);
-        const std::uint64_t room = limits_.max_unpacked_bytes - unpacked_;
+        const std::uint64_t room = limits_.max_unpacked_bytes - tally_.unpacked;
         std::string data;
         try {
             data = zstd::decompress_bounded(packed, static_cast<std::size_t>(std::min<std::uint64_t>(limits_.max_blob_bytes, room)));
@@ -144,19 +171,25 @@ public:
         account(data.size());
         if (blake3::hex(data) != hash) broken(name + ": its content does not match its hash");
         auto bytes = std::make_shared<const std::string>(std::move(data));
-        blobs_.emplace(hash, bytes);
+        blobs_[hash] = bytes;
+        return bytes;
+    }
+
+    // A blob the book keeps (a smart object's file, a PSD block, a profile): counted once against what the book holds.
+    core::Bytes kept_blob(const std::string& hash) {
+        core::Bytes bytes = blob(hash);
+        if (kept_.insert(hash).second) keep(bytes->size());
         return bytes;
     }
 
     const ReadLimits& limits() const { return limits_; }
-    std::uint64_t unpacked() const { return unpacked_; }
-    std::uint64_t remaining() const { return limits_.max_unpacked_bytes - unpacked_; }
 
 private:
     const Source& source_;
     ReadLimits limits_;
-    std::uint64_t unpacked_ = 0;
-    std::map<std::string, core::Bytes> blobs_;
+    Tally& tally_;
+    std::map<std::string, std::weak_ptr<const std::string>> blobs_;
+    std::set<std::string> kept_;
 };
 
 Json parse_manifest(const Source& source, const ReadLimits& limits) {
@@ -306,7 +339,12 @@ struct Ctx {
     std::map<std::string, std::string> patterns;  // (upstream's id, and "name:" its name → the book's pattern id)
     std::string title;
     int depth = 0;
-    std::vector<std::string> cut;  // (layers whose pixels beyond the canvas were cut)
+    int groups = 0;                                       // (how deep in groups the layer being read is)
+    std::optional<std::array<double, 4>> mask_frame;      // (the layer being read: its hide-all mask's painted area)
+    bool names_layers = false;                            // (its PSD resources kept name layers by their ids)
+    std::vector<std::int64_t> kept_ids;                   // (the PSD layer ids kept)
+    std::map<std::string, std::string> nested;            // (a blob of a smart object's file → its contents' id: read once)
+    std::map<std::string, std::string> unread;            // (… or why it could not be: tried once)
 
     core::Page& page() { return doc.edit_page(0); }
 };
@@ -334,6 +372,9 @@ bool fits(const Ctx& ctx, const PixelFormat& f) {
     }
 }
 
+// A value as 0..1 (one not finite: 0).
+double unit(double v) { return std::isfinite(v) ? std::clamp(v, 0.0, 1.0) : 0.0; }
+
 // A pixel of the surface as the page's colours and alpha (out: page_colours() + 1 values, normalized).
 void page_pixel(const Ctx& ctx, const Sampled& s, const unsigned char* px, double* out) {
     const PixelFormat& f = s.format();
@@ -342,9 +383,31 @@ void page_pixel(const Ctx& ctx, const Sampled& s, const unsigned char* px, doubl
     out[wanted] = f.alpha ? s.sample(px, colours) : 1.0;
 }
 
-// The surface as a layer's pixels on the page (its picture, precise raster or inks).
-void put_pixels(Ctx& ctx, core::Layer& layer, const Surface& surface, const std::string& name) {
+// Does any of the surface's tiles meet the canvas? (a tile wholly outside it is never read)
+bool meets_canvas(const Ctx& ctx, const Surface& surface) {
+    return std::any_of(surface.tiles.begin(), surface.tiles.end(), [&](const TileRef& t) {
+        const std::int64_t x0 = std::int64_t(t.tx) * kTileSize, y0 = std::int64_t(t.ty) * kTileSize;
+        return !(x0 >= ctx.w || y0 >= ctx.h || x0 + kTileSize <= 0 || y0 + kTileSize <= 0);
+    });
+}
+
+// Is anything drawn on the canvas: a tile meeting it, or an untouched pixel that shows (its alpha, or for a plane of no
+// alpha its value, not 0)?
+bool drawn_on_canvas(const Ctx& ctx, const Surface& surface) {
+    if (meets_canvas(ctx, surface)) return true;
+    const std::size_t last = surface.format.channels() - 1;
+    return last < surface.background.size() && surface.background[last] != 0.0;
+}
+
+// The surface as a layer's pixels on the page (its picture, precise raster or inks). False — the layer left with no
+// pixels, nothing made — when nothing is drawn on the canvas.
+bool put_pixels(Ctx& ctx, core::Layer& layer, const Surface& surface, const std::string& name) {
     if (!fits(ctx, surface.format)) throw Unreadable("pixels of another colour mode than the page's");
+    if (!drawn_on_canvas(ctx, surface)) {
+        if (!surface.tiles.empty()) ctx.notes.name("用紙の外にあった画素を切りました", name);
+        return false;
+    }
+    ctx.load.plane(std::uint64_t(ctx.w) * ctx.h);
     const Sampled s(ctx.load, surface, ctx.w, ctx.h);
     if (s.cut()) ctx.notes.name("用紙の外にあった画素を切りました", name);
     const unsigned colours = page_colours(ctx);
@@ -355,11 +418,12 @@ void put_pixels(Ctx& ctx, core::Layer& layer, const Surface& surface, const std:
             for (int i = 0; i < n; ++i) {
                 page_pixel(ctx, s, px != nullptr ? px + std::size_t(i) * s.format().pixel_bytes() : s.background(), v.data());
                 char* out = rgba.data() + (std::size_t(y) * ctx.w + x + i) * 4;
-                for (unsigned c = 0; c < 4; ++c) out[c] = static_cast<char>(std::lround(std::clamp(v[c], 0.0, 1.0) * 255.0));
+                for (unsigned c = 0; c < 4; ++c) out[c] = static_cast<char>(std::lround(unit(v[c]) * 255.0));
             }
         });
         const Image image = Image::frombytes("RGBA", Size{ctx.w, ctx.h}, rgba);
         layer.raster_png = std::make_shared<const std::string>(write_png(image));
+        ctx.load.keep(layer.raster_png->size());
     } else if (ctx.way == Way::Precise) {
         std::vector<float> rgba(std::size_t(ctx.w) * ctx.h * 4);
         s.each_row([&](int x, int y, int n, const unsigned char* px) {
@@ -367,7 +431,7 @@ void put_pixels(Ctx& ctx, core::Layer& layer, const Surface& surface, const std:
                 page_pixel(ctx, s, px != nullptr ? px + std::size_t(i) * s.format().pixel_bytes() : s.background(), v.data());
                 float* out = rgba.data() + (std::size_t(y) * ctx.w + x + i) * 4;
                 for (unsigned c = 0; c < 3; ++c) out[c] = static_cast<float>(std::isfinite(v[c]) ? v[c] : 0.0);
-                out[3] = static_cast<float>(std::clamp(v[3], 0.0, 1.0));
+                out[3] = static_cast<float>(unit(v[3]));
             }
         });
         const int depth = ctx.sample == Sample::F32 ? 32 : 16;
@@ -376,37 +440,52 @@ void put_pixels(Ctx& ctx, core::Layer& layer, const Surface& surface, const std:
                 const float* p = rgba.data() + i * 4;
                 return std::array<double, 4>{p[0], p[1], p[2], p[3]};
             }));
+        ctx.load.keep(layer.color_raster->size());
     } else {
         core::InkPixels inks = core::blank_ink_pixels(ctx.inks->space, ctx.inks->depth, static_cast<std::uint32_t>(ctx.w), static_cast<std::uint32_t>(ctx.h));
         s.each_row([&](int x, int y, int n, const unsigned char* px) {
             for (int i = 0; i < n; ++i) {
                 page_pixel(ctx, s, px != nullptr ? px + std::size_t(i) * s.format().pixel_bytes() : s.background(), v.data());
                 const std::size_t at = std::size_t(y) * ctx.w + x + i;
-                for (unsigned c = 0; c <= colours; ++c) inks.set(at, c, v[c]);
+                // (a grey 32-bit plane keeps any finite value, as the page does; else 0..1)
+                for (unsigned c = 0; c <= colours; ++c) inks.set(at, c, c < colours && ctx.inks->depth == 32 && std::isfinite(v[c]) ? v[c] : unit(v[c]));
             }
         });
         layer.ink_raster = std::make_shared<const std::string>(core::encode_ink_raster(inks));
+        ctx.load.keep(layer.ink_raster->size());
     }
+    return true;
 }
 
-// A grey surface (a mask, a channel) over the canvas: its first channel, 0..1.
-std::vector<float> grey_plane(Ctx& ctx, const Surface& surface, bool& cut) {
+// A grey surface (a mask, a channel) over the canvas, its first channel 0..1 given pixel by pixel to `f(i, value)` (i: the
+// canvas's pixel, row by row); `cut`: pixels of it beyond the canvas were not its untouched ones. The plane is counted
+// (ReadLimits::max_plane_pixels) before it is walked.
+template <class F>
+void each_grey(Ctx& ctx, const Surface& surface, bool& cut, F&& f) {
+    ctx.load.plane(std::uint64_t(ctx.w) * ctx.h);
+    if (!meets_canvas(ctx, surface)) {  // (nothing on it but its untouched value: no tile read)
+        cut = !surface.tiles.empty();
+        const double v = surface.background.empty() ? 0.0 : unit(surface.background[0]);
+        for (std::size_t i = 0, n = std::size_t(ctx.w) * ctx.h; i < n; ++i) f(i, v);
+        return;
+    }
     const Sampled s(ctx.load, surface, ctx.w, ctx.h);
     cut = s.cut();
-    std::vector<float> out(std::size_t(ctx.w) * ctx.h);
     s.each_row([&](int x, int y, int n, const unsigned char* px) {
         for (int i = 0; i < n; ++i) {
             const unsigned char* p = px != nullptr ? px + std::size_t(i) * s.format().pixel_bytes() : s.background();
-            out[std::size_t(y) * ctx.w + x + i] = static_cast<float>(std::clamp(s.sample(p, 0), 0.0, 1.0));
+            f(std::size_t(y) * ctx.w + x + i, unit(s.sample(p, 0)));
         }
     });
-    return out;
 }
 
-core::Bytes grey_png(const Ctx& ctx, const std::vector<float>& plane) {
-    std::string bytes(plane.size(), '\0');
-    for (std::size_t i = 0; i < plane.size(); ++i) bytes[i] = static_cast<char>(std::lround(plane[i] * 255.0));
-    return std::make_shared<const std::string>(write_png(Image::frombytes("L", Size{ctx.w, ctx.h}, bytes)));
+// A grey surface over the canvas as a PNG "L" (a mask's, a filter mask's), counted against what the book keeps.
+core::Bytes grey_png(Ctx& ctx, const Surface& surface, bool& cut) {
+    std::string bytes(std::size_t(ctx.w) * ctx.h, '\0');
+    each_grey(ctx, surface, cut, [&](std::size_t i, double v) { bytes[i] = static_cast<char>(std::lround(v * 255.0)); });
+    auto png = std::make_shared<const std::string>(write_png(Image::frombytes("L", Size{ctx.w, ctx.h}, bytes)));
+    ctx.load.keep(png->size());
+    return png;
 }
 
 // --- colours -----------------------------------------------------------------------------------------------------
@@ -810,12 +889,12 @@ void take_patterns(Ctx& ctx, const Json& list) {
                           : std::string();
             std::string shown = name;
             if (const std::size_t eq = shown.find('='); shown.starts_with("$$$/") && eq != std::string::npos) shown = shown.substr(eq + 1);
-            made.name = shown.empty() ? std::string("パターン") : shown.substr(0, 255);
+            made.name = shown.empty() ? std::string("パターン") : first_chars(core::utf8_replaced(shown), 255);
             made.width = w;
             made.height = h;
             made.dpi = std::clamp(ctx.dpi, 50.0, 2400.0);
             core::Layer holder;
-            put_pixels(sub, holder, surface, name);
+            if (!put_pixels(sub, holder, surface, name)) throw Unreadable("pattern: no pixels");
             core::Bytes bytes;
             if (holder.raster_png) {
                 made.mode = "rgb";
@@ -861,28 +940,35 @@ void read_layers(Ctx& ctx, const Json& list, const Json& parent, bool hidden, st
 std::string layer_name(const Json& m) {
     const Json* name = optional_field(m, "name");
     std::string text = name != nullptr && name->is_string() ? name->get<std::string>() : std::string();
-    text = core::utf8_replaced(text);
-    std::size_t at = 0, count = 0;
-    while (at < text.size() && count < 255) {
-        ++at;
-        while (at < text.size() && (static_cast<unsigned char>(text[at]) & 0xC0) == 0x80) ++at;
-        ++count;
-    }
-    text.resize(at);
+    text = first_chars(core::utf8_replaced(text), 255);
     return text.empty() ? std::string("レイヤー") : text;
 }
 
 // A layer's mask as Genko's (a PNG "L" of the page's pixels).
-core::Mask mask_of(Ctx& ctx, const Json& m, const std::string& name) {
+// A layer's mask as Genko's (a PNG "L" of the page's pixels). `frame`: what upstream lays a fill out in — a hide-all mask's
+// painted area (the box of its pixels not 0) on the canvas — when it is one, enabled (compose's fill_frame).
+core::Mask mask_of(Ctx& ctx, const Json& m, const std::string& name, std::optional<std::array<double, 4>>& frame) {
     core::Mask mask;
     const Surface surface = surface_from(field(m, "surface", "mask"));
     bool cut = false;
-    mask.png = grey_png(ctx, grey_plane(ctx, surface, cut));
+    const bool hides = !surface.background.empty() && !(surface.background[0] > 0.0);
+    int x0 = ctx.w, y0 = ctx.h, x1 = -1, y1 = -1;
+    std::string bytes(std::size_t(ctx.w) * ctx.h, '\0');
+    each_grey(ctx, surface, cut, [&](std::size_t i, double v) {
+        bytes[i] = static_cast<char>(std::lround(v * 255.0));
+        if (hides && v > 0.0) {
+            const int x = static_cast<int>(i % std::size_t(ctx.w)), y = static_cast<int>(i / std::size_t(ctx.w));
+            x0 = std::min(x0, x), y0 = std::min(y0, y), x1 = std::max(x1, x), y1 = std::max(y1, y);
+        }
+    });
+    if (cut) ctx.notes.name("用紙の外にあったマスクを切りました", name);
+    mask.png = std::make_shared<const std::string>(write_png(Image::frombytes("L", Size{ctx.w, ctx.h}, bytes)));
+    ctx.load.keep(mask.png->size());
     mask.enabled = boolean(field(m, "enabled", "mask"), "mask.enabled");
+    if (mask.enabled && hides && x1 >= x0) frame = std::array<double, 4>{double(x0), double(y0), double(x1 - x0 + 1), double(y1 - y0 + 1)};
     mask.linked = boolean(field(m, "linked", "mask"), "mask.linked");
     mask.density = r4(std::clamp(number(field(m, "density", "mask"), "mask.density"), 0.0, 1.0));
     mask.feather_mm = r4(std::clamp(number(field(m, "feather", "mask"), "mask.feather") * ctx.mm, 0.0, core::kMaskFeatherMax));
-    (void)name;
     return mask;
 }
 
@@ -928,38 +1014,55 @@ core::Layer base_layer(Ctx& ctx, const Json& m, const std::string& name, const J
     layer.clip = boolean(field(m, "clipped", "layer"), "layer.clipped");
     const Json& locks = field(m, "locks", "layer");
     const bool all = boolean(field(locks, "all", "locks"), "locks.all");
-    layer.lock_alpha = boolean(field(locks, "transparency", "locks"), "locks.transparency");
+    layer.lock_alpha = all || boolean(field(locks, "transparency", "locks"), "locks.transparency");
     layer.locked = all || boolean(field(locks, "pixels", "locks"), "locks.pixels");
     layer.lock_position = all || boolean(field(locks, "position", "locks"), "locks.position");
     if (const Json* group = optional_field(m, "link_group")) layer.link = "pcraft-" + std::to_string(whole(*group, "layer.link_group"));
-    if (const Json* mask = optional_field(m, "mask")) layer.mask = mask_of(ctx, *mask, name);
+    ctx.mask_frame.reset();
+    // (a group's mask is not a folder's: not made — read_layer says so)
+    const bool group = field(field(m, "content", "layer"), "kind", "layer.content") == Json("group");
+    if (const Json* mask = optional_field(m, "mask"); mask != nullptr && !group) layer.mask = mask_of(ctx, *mask, name, ctx.mask_frame);
     if (const Json* vm = optional_field(m, "vector_mask")) layer.vector_mask = vector_mask_from(*vm, ctx.mm);
-    // (psd-keep@1: the PSD's blocks it carried, and its PSD layer id)
+    // (psd-keep@1: the PSD's blocks it carried that a PSD's reader keeps — PC4 F-d's rules: not those this build writes or
+    // reads into the layer —, and its PSD layer id when the page keeps what names layers by it)
     core::PsdLayerKeep keep;
     if (const Json* blocks = optional_field(m, "psd_blocks"); blocks != nullptr && blocks->is_array()) {
         for (const Json& b : *blocks) {
             if (!b.is_array() || b.size() != 2) throw Unreadable("psd_blocks: [key, blob]");
             const std::optional<std::string> key = key_from_hex(text(b[0], "psd_blocks"));
-            if (!key || !std::all_of(key->begin(), key->end(), [](char c) { return c >= 0x20 && c < 0x7f; })) continue;
-            const core::Bytes bytes = ctx.load.blob(text(b[1], "psd_blocks"));
+            if (!key || key->size() != 4 || !std::all_of(key->begin(), key->end(), [](char c) { return c >= 0x20 && c < 0x7f; })) {
+                ctx.notes.name("読めない PSD の塊を外しました", name);
+                continue;
+            }
+            if (!core::psd_layer_block_kept(*key)) continue;
+            if (keep.blocks.size() >= core::kPsdKeptMax) {
+                ctx.notes.name("PSD の塊が多すぎるため、" + std::to_string(core::kPsdKeptMax) + " 個までにしました", name);
+                break;
+            }
+            const core::Bytes bytes = ctx.load.kept_blob(text(b[1], "psd_blocks"));
             const std::string ref = core::bytes_ref(*bytes);
             ctx.doc.native_files[ref] = bytes;
-            if (keep.blocks.size() < core::kPsdKeptMax) keep.blocks.emplace_back(*key, ref);
+            keep.blocks.emplace_back(*key, ref);
         }
     }
-    if (const Json* id = optional_field(m, "psd_id")) keep.id = whole(*id, "layer.psd_id");
+    if (const Json* id = optional_field(m, "psd_id"); id != nullptr && ctx.names_layers) {
+        keep.id = whole(*id, "layer.psd_id");
+        ctx.kept_ids.push_back(*keep.id);
+    }
     if (!keep.empty()) layer.native_psd = std::move(keep);
     note_extras(ctx, m, name);
     return layer;
 }
 
-// The layer's own frame in pixels (upstream's fill_frame: its hiding mask's content, its vector mask's box, else the canvas).
+// The layer's own frame in pixels (upstream's compose fill_frame: a hide-all mask's painted area on the canvas, then the
+// box of its vector mask within that; else the canvas).
 std::array<double, 4> frame_of(const Ctx& ctx, const core::Layer& layer) {
     std::array<double, 4> frame{0, 0, static_cast<double>(ctx.w), static_cast<double>(ctx.h)};
+    if (ctx.mask_frame) frame = *ctx.mask_frame;
     if (layer.vector_mask && layer.vector_mask->enabled && !layer.vector_mask->path.inverted) {
         if (const auto b = layer.vector_mask->path.control_bounds()) {
-            const double x0 = std::max(0.0, std::floor(b->at(0) / ctx.mm)), y0 = std::max(0.0, std::floor(b->at(1) / ctx.mm));
-            const double x1 = std::min<double>(ctx.w, std::ceil(b->at(2) / ctx.mm)), y1 = std::min<double>(ctx.h, std::ceil(b->at(3) / ctx.mm));
+            const double x0 = std::max(frame[0], std::floor(b->at(0) / ctx.mm)), y0 = std::max(frame[1], std::floor(b->at(1) / ctx.mm));
+            const double x1 = std::min(frame[0] + frame[2], std::ceil(b->at(2) / ctx.mm)), y1 = std::min(frame[1] + frame[3], std::ceil(b->at(3) / ctx.mm));
             if (x1 > x0 && y1 > y0) frame = {x0, y0, x1 - x0, y1 - y0};
         }
     }
@@ -967,9 +1070,18 @@ std::array<double, 4> frame_of(const Ctx& ctx, const core::Layer& layer) {
 }
 
 // A layer of pixels made of a surface upstream drew (a text's, a shape's or a smart object's picture of it).
+// Its kind changed (a text, a shape or a smart object made pixels, a shape a pen layer's part): what the PSD's blocks it
+// carried said of its kind no longer holds — they are left out, as PC4 F-d's conversions leave them (its id with them).
+void forget_psd(Ctx& ctx, core::Layer& layer) {
+    if (!layer.native_psd) return;
+    if (layer.native_psd->id) std::erase(ctx.kept_ids, *layer.native_psd->id);
+    layer.native_psd.reset();
+}
+
 bool as_pixels(Ctx& ctx, core::Layer& layer, const Json* cache, const std::string& name) {
     if (cache == nullptr) return false;
     layer.kind = core::LayerKind::Raster;
+    forget_psd(ctx, layer);
     put_pixels(ctx, layer, surface_from(*cache), name);
     return true;
 }
@@ -1050,6 +1162,9 @@ std::optional<core::vector::ShapePart> shape_part(Ctx& ctx, const Json& d) {
     }
 }
 
+// A .pcraft inside a smart object of one, read within the outer read's limits (below).
+Read read_nested(std::string_view bytes, std::string_view title, const ReadLimits& limits, Tally& tally);
+
 // The contents of an embedded file (a picture or PSD the smart objects read, or a .pcraft: its page), and their dpi.
 std::optional<std::string> contents_of(Ctx& ctx, const std::string& file_name, const core::Bytes& bytes, double& dpi, std::string& why) {
     const auto suffix_at = file_name.rfind('.');
@@ -1060,13 +1175,12 @@ std::optional<std::string> contents_of(Ctx& ctx, const std::string& file_name, c
             why = "入れ子が深すぎる";
             return std::nullopt;
         }
-        // (the .pcraft inside unpacks within what is left of this one's budget, and counts in it: nesting never
-        // multiplies what may be unpacked)
+        // (the .pcraft inside is read within this one's limits — what it unpacks, its layers and pixels count in them: nesting
+        // never multiplies them —, once however many layers show it: smart_layer keeps its contents by its blob)
         ReadLimits inner = ctx.load.limits();
         inner.depth = ctx.depth + 1;
-        inner.max_unpacked_bytes = ctx.load.remaining();
-        Read read = pcraft::read(*bytes, file_name, inner);
-        ctx.load.account(read.unpacked);
+        ctx.load.contents();
+        Read read = read_nested(*bytes, file_name, inner, ctx.load.tally());
         for (std::string& note : read.notes) ctx.notes.add("埋め込まれた .pcraft「" + file_name + "」: " + note);
         core::Page page = read.doc.page(0);
         page.index = core::Num(std::int64_t{1});
@@ -1074,7 +1188,7 @@ std::optional<std::string> contents_of(Ctx& ctx, const std::string& file_name, c
         core::smart::bring_contents(ctx.doc, read.doc, page);
         auto contents = std::make_shared<core::SmartContents>();
         contents->kind = "page";
-        contents->name = file_name.substr(0, core::smart::kNameMax);
+        contents->name = first_chars(file_name, core::smart::kNameMax);
         contents->page = std::make_shared<core::Page>(std::move(page));
         dpi = contents->page->spec.dpi.value();
         const std::string id = smart_ops::fresh_contents_id(ctx.doc);
@@ -1104,9 +1218,9 @@ std::optional<std::string> contents_of(Ctx& ctx, const std::string& file_name, c
     contents->kind = "file";
     const auto named = core::smart::suffix_of_name(file_name);
     contents->suffix = named && core::smart::format_of_suffix(*named) == info.format ? *named : info.suffix;
-    contents->name = (file_name.empty() ? std::string("スマートオブジェクト") + contents->suffix : file_name).substr(0, core::smart::kNameMax);
+    contents->name = first_chars(file_name.empty() ? std::string("スマートオブジェクト") + contents->suffix : file_name, core::smart::kNameMax);
     contents->asset = core::bytes_ref(*bytes);
-    ctx.doc.smart_files[contents->asset] = bytes;
+    if (ctx.doc.smart_files.emplace(contents->asset, bytes).second) ctx.load.keep(bytes->size());
     contents->format = info.format;
     contents->width_px = info.width;
     contents->height_px = info.height;
@@ -1142,15 +1256,28 @@ bool smart_layer(Ctx& ctx, core::Layer& layer, const Json& d, const std::string&
     }
     if (kind != "embedded") throw Unreadable("smart: a source this build does not know");
     const std::string file_name = core::utf8_replaced(text(field(source, "file_name", "smart.source"), "smart.source.file_name"));
-    const core::Bytes bytes = ctx.load.blob(text(field(source, "blob", "smart.source"), "smart.source.blob"));
+    const std::string hash = text(field(source, "blob", "smart.source"), "smart.source.blob");
     double contents_dpi = ctx.dpi;
     std::string unread;
     std::optional<std::string> id;
-    try {
-        id = contents_of(ctx, file_name, bytes, contents_dpi, unread);
-    } catch (const core::Error& error) {
-        if (error.code() == "image_too_large") throw;
-        unread = "読めない";
+    if (const auto known = ctx.nested.find(hash); known != ctx.nested.end()) {  // (its file read already: its contents shared)
+        id = known->second;
+        const core::SmartContents& c = *ctx.doc.smart_contents.at(*id);
+        contents_dpi = c.kind == "page" && c.page ? c.page->spec.dpi.value() : c.dpi;
+    } else if (const auto failed = ctx.unread.find(hash); failed != ctx.unread.end()) {
+        unread = failed->second;
+    } else {
+        try {
+            id = contents_of(ctx, file_name, ctx.load.blob(hash), contents_dpi, unread);
+        } catch (const core::Error& error) {
+            // (a file past what one blob may be — "… too large to read …" —: this layer's pixels; past what the whole may take: the
+            // whole refused)
+            const bool one = std::string_view(error.what()).find("too large to read") != std::string_view::npos;
+            if (error.code() == "image_too_large" && !one) throw;
+            unread = error.code() == "image_too_large" ? "大きすぎる" : "読めない";
+        }
+        if (id) ctx.nested.emplace(hash, *id);
+        else ctx.unread.emplace(hash, unread);
     }
     if (!id) {
         why = "スマートオブジェクトの中身（" + file_name + "）が" + unread + "ため画素にしました";
@@ -1161,8 +1288,9 @@ bool smart_layer(Ctx& ctx, core::Layer& layer, const Json& d, const std::string&
     const double k = contents_dpi / ctx.dpi;
     core::smart::Matrix m{t[0] * k, t[1] * k, t[2] * k, t[3] * k, t[4] * ctx.mm, t[5] * ctx.mm};
     m = core::smart::snapped(m);
-    if (!(std::fabs(m.det()) > core::smart::kDetMin)) {
-        why = "スマートオブジェクトの変形が潰れているため画素にしました";
+    const bool finite = std::isfinite(m.a) && std::isfinite(m.b) && std::isfinite(m.c) && std::isfinite(m.d) && std::isfinite(m.e) && std::isfinite(m.f);
+    if (!finite || !(std::fabs(m.det()) > core::smart::kDetMin)) {
+        why = finite ? "スマートオブジェクトの変形が潰れているため画素にしました" : "スマートオブジェクトの変形が大きすぎるため画素にしました";
         return false;
     }
     Json settings = core::smart::settings(*id, m, ctx.doc.smart_contents.at(*id)->kind == "page" ? "bicubic" : "lanczos");
@@ -1178,6 +1306,10 @@ bool smart_layer(Ctx& ctx, core::Layer& layer, const Json& d, const std::string&
     Json filters = Json::array();
     if (const Json* list = optional_field(d, "smart_filters"); list != nullptr && list->is_array()) {
         for (const Json& f : *list) {
+            if (filters.size() >= core::smart::kFiltersMax) {
+                ctx.notes.name("スマートフィルターが多すぎるため、" + std::to_string(core::smart::kFiltersMax) + " 個までにしました", name);
+                break;
+            }
             const std::string command = text(field(f, "command", "smart filter"), "smart filter.command");
             const auto mapped = core::from_upstream(command, field(f, "params", "smart filter"), ctx.dpi);
             if (!mapped) {
@@ -1191,7 +1323,6 @@ bool smart_layer(Ctx& ctx, core::Layer& layer, const Json& d, const std::string&
                                    {"blend", genko ? *genko : std::string("normal")},
                                    {"opacity", std::round(std::clamp(number(field(f, "opacity", "smart filter"), "smart filter.opacity"), 0.0, 1.0) * 1000.0) / 1000.0},
                                    {"visible", boolean(field(f, "visible", "smart filter"), "smart filter.visible")}});
-            if (filters.size() >= core::smart::kFiltersMax) break;
         }
     }
     if (!filters.empty()) {
@@ -1202,7 +1333,8 @@ bool smart_layer(Ctx& ctx, core::Layer& layer, const Json& d, const std::string&
         if (const Json* fm = optional_field(d, "filter_mask")) {
             const Surface surface = surface_from(field(*fm, "surface", "filter mask"));
             bool cut = false;
-            const core::Bytes png = grey_png(ctx, grey_plane(ctx, surface, cut));
+            const core::Bytes png = grey_png(ctx, surface, cut);
+            if (cut) ctx.notes.name("用紙の外にあったフィルターマスクを切りました", name);
             const std::string ref = core::bytes_ref(*png);
             ctx.doc.smart_files[ref] = png;
             core::smart::put_setting(layer, "filter_mask", Json{{"asset", ref}, {"enabled", boolean(field(*fm, "enabled", "filter mask"), "filter mask.enabled")}});
@@ -1216,12 +1348,15 @@ void read_layer(Ctx& ctx, const Json& m, const Json& parent, bool hidden, std::v
     const std::string name = layer_name(m);
     const Json& content = field(m, "content", "layer");
     const std::string kind = text(field(content, "kind", "layer.content"), "layer.content.kind");
+    ctx.load.layer();
     core::Layer layer = base_layer(ctx, m, name, parent, hidden);
     if (kind == "group") {
         layer.kind = core::LayerKind::Folder;
-        if (layer.opacity < 1.0 || (layer.blend != "normal" && blend_from(m["blend"]) != "PassThrough") || layer.mask || layer.vector_mask) {
+        if (layer.opacity < 1.0 || (layer.blend != "normal" && blend_from(m["blend"]) != "PassThrough") || optional_field(m, "mask") != nullptr ||
+            layer.vector_mask) {
             ctx.notes.name("フォルダーの不透明度・描画モード・マスクは Genko のフォルダーに無いため外しました", name);
         }
+        if (layer.clip) ctx.notes.name("フォルダーのクリッピングは Genko のフォルダーに無いため外しました", name);
         if (optional_field(content, "artboard") != nullptr) ctx.notes.name("アートボードは PC5 で入るまで普通のフォルダーにしました", name);
         layer.opacity = 1.0;
         layer.blend = "normal";
@@ -1229,7 +1364,13 @@ void read_layer(Ctx& ctx, const Json& m, const Json& parent, bool hidden, std::v
         layer.vector_mask.reset();
         layer.clip = false;
         const bool shut = !layer.visible;
-        read_layers(ctx, field(content, "children", "group"), Json(layer.id), shut, out);
+        if (ctx.groups >= kGroupsDeepMax) {
+            ctx.notes.name("グループの入れ子が深すぎるため、中のレイヤーを外しました（" + std::to_string(kGroupsDeepMax) + " 段まで）", name);
+        } else {
+            ++ctx.groups;
+            read_layers(ctx, field(content, "children", "group"), Json(layer.id), shut, out);
+            --ctx.groups;
+        }
         out.push_back(std::move(layer));
         return;
     }
@@ -1287,6 +1428,7 @@ void read_layer(Ctx& ctx, const Json& m, const Json& parent, bool hidden, std::v
         }
         if (part) {
             layer.kind = core::LayerKind::Strokes;
+            forget_psd(ctx, layer);
             layer.shapes = core::vector::make_shapes({std::move(*part)});
         } else if (as_pixels(ctx, layer, optional_field(content, "cache"), name)) {
             ctx.notes.name("シェイプレイヤーは Genko の形の部品にできないため画素にしました", name);
@@ -1336,6 +1478,31 @@ bool empty_value(const Json& v) {
     return false;
 }
 
+// How many layers' pixels a page of the document holds, at most: the surfaces drawn on its canvas (raster layers', and the
+// pictures of texts, shapes and smart objects — a shape made a part or a smart object of its file holds none, counted all
+// the same).
+std::uint64_t pixel_layers(const Ctx& ctx, const Json& list, int deep) {
+    std::uint64_t n = 0;
+    if (!list.is_array() || deep > kGroupsDeepMax) return 0;
+    for (const Json& m : list) {
+        const Json* content = optional_field(m, "content");
+        if (content == nullptr || !content->is_object()) continue;
+        const Json* kind = optional_field(*content, "kind");
+        if (kind != nullptr && *kind == Json("group")) {
+            if (const Json* children = optional_field(*content, "children")) n += pixel_layers(ctx, *children, deep + 1);
+            continue;
+        }
+        const Json* surface = optional_field(*content, kind != nullptr && *kind == Json("raster") ? "surface" : "cache");
+        if (surface == nullptr) continue;
+        try {
+            if (drawn_on_canvas(ctx, surface_from(*surface))) ++n;
+        } catch (const std::exception&) {
+            ++n;  // (one not read: its layer is left out later, and said)
+        }
+    }
+    return n;
+}
+
 Read build(Loader& load, const Json& manifest, std::string_view title, int depth) {
     const Json& d = field(manifest, "document", "manifest");
     Ctx ctx(load);
@@ -1353,6 +1520,9 @@ Read build(Loader& load, const Json& manifest, std::string_view title, int depth
     const double said = number(field(d, "resolution_dpi", "document"), "document.resolution_dpi");
     ctx.dpi = static_cast<double>(std::clamp<std::int64_t>(std::llround(said > 0 ? said : 72.0), 72, 100000));
     ctx.mm = 25.4 / ctx.dpi;
+    if (std::isfinite(said) && said > 0 && std::llround(said) < 72) {
+        ctx.notes.add("解像度 " + std::to_string(std::llround(said)) + " ppi の原稿は 72 ppi で開きました（書き出すと 72 ppi になります）");
+    }
 
     // the page: the picture's paper at its resolution (formats/open_file's picture_book), its colour model the document's
     core::PageSpec spec;
@@ -1367,7 +1537,17 @@ Read build(Loader& load, const Json& manifest, std::string_view title, int depth
     const bool grey = ctx.mode == Mode::Grayscale || ctx.mode == Mode::Bitmap || ctx.mode == Mode::Duotone;
     spec.expression = grey ? "mono" : "color";
     const bool rgb = ctx.mode == Mode::Rgb || ctx.mode == Mode::Indexed || ctx.mode == Mode::Multichannel;
-    if (rgb && ctx.sample == Sample::U8) spec.grid = "finest";  // (image-grid@1, as an opened picture's)
+    // (a page in precise colour holds its layers' pixels within the book's precise budget — as a PSD's are read, PC4 F-d —:
+    // past it, they are read at 8 bits, said)
+    bool shallow = false;
+    if (rgb && ctx.sample != Sample::U8) {
+        const std::uint64_t pixels = std::uint64_t(w) * std::uint64_t(h);
+        const std::uint64_t per = pixels * (ctx.sample == Sample::U16 ? 8 : 16) + 16;
+        const std::uint64_t n = pixel_layers(ctx, field(d, "layers", "document"), 0);
+        shallow = pixels > core::kColorRasterMaxPixels || (n > 0 && per > core::kColorRasterBookBytes / n);
+        if (shallow) ctx.notes.add("高精度の画素が本の上限（1 GiB）を越えるため、レイヤーを 8 bit で読みました");
+    }
+    if (rgb && (ctx.sample == Sample::U8 || shallow)) spec.grid = "finest";  // (image-grid@1, as an opened picture's)
     ctx.doc = core::new_episode(ctx.title, core::Num(std::int64_t{1}), 1, spec, core::Binding::Left);
     {
         core::Page& page = ctx.page();
@@ -1376,10 +1556,10 @@ Read build(Loader& load, const Json& manifest, std::string_view title, int depth
         page.layers.clear();
     }
     core::Bytes icc;
-    if (const Json* h_icc = optional_field(d, "icc_profile")) icc = load.blob(text(*h_icc, "document.icc_profile"));
+    if (const Json* h_icc = optional_field(d, "icc_profile")) icc = load.kept_blob(text(*h_icc, "document.icc_profile"));
     if (ctx.mode == Mode::Multichannel) ctx.notes.add("マルチチャンネルの原稿は RGB として開きました");
     if (rgb) {
-        ctx.way = ctx.sample == Sample::U8 ? Way::Rgb8 : Way::Precise;
+        ctx.way = ctx.sample == Sample::U8 || shallow ? Way::Rgb8 : Way::Precise;
         std::optional<core::RgbMode> mode;
         const bool own = icc && ink::profile_space(*icc) == core::ProfileSpace::Rgb && !proof::same_as_srgb(*icc);
         if (icc && !own && !(ink::profile_space(*icc) == core::ProfileSpace::Rgb)) ctx.notes.add("埋め込みプロファイルが画像の色と合わないため、sRGB にしました");
@@ -1403,6 +1583,15 @@ Read build(Loader& load, const Json& manifest, std::string_view title, int depth
             color.depth = 16;
             ctx.sample = Sample::U16;
         }
+        // (a layer of inks holds at most core::kInkRasterMaxBytes of samples: past it at its depth, 8 bits, said; past it at 8,
+        // refused)
+        const std::uint64_t samples = std::uint64_t(w) * std::uint64_t(h) * (core::colour_channels(color.space) + 1);
+        if (color.depth > 8 && samples * static_cast<std::uint64_t>(color.depth / 8) > core::kInkRasterMaxBytes) {
+            ctx.notes.add("インキの画素が 1 枚の上限（1 GiB）を越えるため、レイヤーを 8 bit で読みました");
+            color.depth = 8;
+            ctx.sample = Sample::U8;
+        }
+        if (samples > core::kInkRasterMaxBytes) too_large("is too large a page of inks for this build (" + std::to_string(w) + "×" + std::to_string(h) + " pixels)");
         if (color.space != core::InkSpace::Lab) {
             const core::ProfileSpace wanted = grey ? core::ProfileSpace::Gray : core::ProfileSpace::Cmyk;
             core::Bytes profile = icc && ink::profile_space(*icc) == wanted ? icc : nullptr;
@@ -1429,14 +1618,21 @@ Read build(Loader& load, const Json& manifest, std::string_view title, int depth
                 try {
                     for (const Json& ink : field(*duo, "inks", "duotone")) {
                         core::DuotoneInk made;
-                        made.name = text(field(ink, "name", "duotone"), "duotone.name").substr(0, core::kInkNameMax);
+                        made.name = first_chars(core::utf8_replaced(text(field(ink, "name", "duotone"), "duotone.name")), core::kInkNameMax);
                         made.color = rgb_array(rgb3(field(ink, "color", "duotone"), "duotone.color"));
                         made.curve.clear();
                         for (const Json& p : field(ink, "curve", "duotone")) {
                             made.curve.push_back({r4(number(field(p, "input", "duotone"), "duotone") * 100.0), r4(number(field(p, "output", "duotone"), "duotone") * 100.0)});
                         }
                         if (made.curve.size() < 2) made.curve = {{0.0, 0.0}, {100.0, 100.0}};
-                        if (color.duotone.size() < core::kDuotoneInksMax && !made.name.empty()) color.duotone.push_back(std::move(made));
+                        if (made.name.empty()) {
+                            ctx.notes.add("名前の無いダブルトーンのインキを外しました");
+                        } else if (color.duotone.size() >= core::kDuotoneInksMax) {
+                            ctx.notes.add("ダブルトーンのインキが多すぎるため、" + std::to_string(core::kDuotoneInksMax) + " 色までにしました");
+                            break;
+                        } else {
+                            color.duotone.push_back(std::move(made));
+                        }
                     }
                 } catch (const Unreadable&) {
                     color.duotone.clear();
@@ -1451,6 +1647,17 @@ Read build(Loader& load, const Json& manifest, std::string_view title, int depth
 
     take_patterns(ctx, optional_field(d, "patterns") ? d["patterns"] : Json::array());
 
+    // (the PSD's resources it keeps that name layers by their ids — layer comps, slices —: the layers keep their ids)
+    if (const Json* meta = optional_field(d, "metadata")) {
+        if (const Json* resources = optional_field(*meta, "psd_resources"); resources != nullptr && resources->is_array()) {
+            for (const Json& r : *resources) {
+                if (!r.is_array() || r.size() != 3 || !r[0].is_number_integer()) continue;
+                const std::int64_t id = r[0].get<std::int64_t>();
+                if (id >= 0 && id <= 65535 && core::psd_resource_kept(static_cast<int>(id)) && core::psd_resource_names_layers(static_cast<int>(id)))
+                    ctx.names_layers = true;
+            }
+        }
+    }
     std::vector<core::Layer> layers;
     read_layers(ctx, field(d, "layers", "document"), Json(nullptr), false, layers);
     ctx.page().layers = std::move(layers);
@@ -1485,22 +1692,33 @@ Read build(Loader& load, const Json& manifest, std::string_view title, int depth
         ch.id = core::new_channel_id();
         std::string name = core::utf8_replaced(text(field(c, "name", "channel"), "channel.name"));
         try {
-            name = core::channel_name(name.substr(0, 64 * 4));
+            name = core::channel_name(first_chars(name, core::kChannelNameMax));
         } catch (const core::Error&) {
             name = quick ? "クイックマスク" : core::next_channel_name(ctx.doc.page(0), core::ChannelKind::Alpha);
         }
-        for (int n = 2; core::find_channel(ctx.doc.page(0), name) != nullptr; ++n) name = core::channel_name(name.substr(0, 50) + " " + std::to_string(n));
+        const std::string base = name;
+        for (int n = 2; core::find_channel(ctx.doc.page(0), name) != nullptr; ++n) {
+            const std::string number = " " + std::to_string(n);
+            name = core::channel_name(first_chars(base, core::kChannelNameMax - number.size()) + number);
+        }
         ch.name = name;
         const Surface surface = surface_from(field(c, "surface", "channel"));
-        bool cut = false;
-        const std::vector<float> plane = grey_plane(ctx, surface, cut);
-        core::InkPixels mask = core::blank_ink_pixels(core::InkSpace::Mask, channel_depth, static_cast<std::uint32_t>(ctx.w), static_cast<std::uint32_t>(ctx.h));
-        bool any = false;
-        for (std::size_t i = 0; i < plane.size(); ++i) {
-            mask.set(i, 0, plane[i]);
-            any = any || plane[i] != 0.0f;
+        if (drawn_on_canvas(ctx, surface)) {  // (one of nothing: no raster, nothing made)
+            bool cut = false;
+            core::InkPixels mask = core::blank_ink_pixels(core::InkSpace::Mask, channel_depth, static_cast<std::uint32_t>(ctx.w), static_cast<std::uint32_t>(ctx.h));
+            bool any = false;
+            each_grey(ctx, surface, cut, [&](std::size_t i, double v) {
+                mask.set(i, 0, v);
+                any = any || v != 0.0;
+            });
+            if (cut) ctx.notes.name("用紙の外にあったチャンネルの画素を切りました", ch.name);
+            if (any) {
+                ch.raster = std::make_shared<const std::string>(core::encode_ink_raster(mask));
+                ctx.load.keep(ch.raster->size());
+            }
+        } else if (!surface.tiles.empty()) {
+            ctx.notes.name("用紙の外にあったチャンネルの画素を切りました", ch.name);
         }
-        if (any) ch.raster = std::make_shared<const std::string>(core::encode_ink_raster(mask));
         if (const Json* spot = optional_field(c, "spot")) {
             if (!spot->is_array() || spot->size() != 2) throw Unreadable("channel: spot is [colour, solidity]");
             ch.kind = core::ChannelKind::Spot;
@@ -1552,18 +1770,21 @@ Read build(Loader& load, const Json& manifest, std::string_view title, int depth
     std::map<std::string, std::string> renamed;
     if (const Json* paths = optional_field(d, "paths"); paths != nullptr && paths->is_array()) {
         for (const Json& p : *paths) {
-            if (ctx.doc.page(0).paths.size() >= core::vector::kPathsMax) break;
+            if (ctx.doc.page(0).paths.size() >= core::vector::kPathsMax) {
+                ctx.notes.add("パスが多すぎるため、" + std::to_string(core::vector::kPathsMax) + " 個までにしました");
+                break;
+            }
             try {
                 std::string given = core::utf8_replaced(text(field(p, "name", "path"), "path.name"));
                 std::string name;
                 try {
-                    name = core::vector::path_name(given.substr(0, 200));
+                    name = core::vector::path_name(first_chars(given, core::vector::kPathNameMax));
                 } catch (const core::Error&) {
                     name = "パス";
                 }
                 const std::string base = name;
                 for (int n = 2; std::any_of(ctx.doc.page(0).paths.begin(), ctx.doc.page(0).paths.end(), [&](const core::vector::NamedPath& q) { return q.name == name; }); ++n)
-                    name = base.substr(0, 56) + " " + std::to_string(n);
+                    name = first_chars(base, core::vector::kPathNameMax - 1 - std::to_string(n).size()) + " " + std::to_string(n);
                 renamed.emplace(given, name);
                 ctx.page().paths.push_back(core::vector::NamedPath{name, path_from(field(p, "path", "path"), ctx.mm)});
             } catch (const Unreadable&) {
@@ -1579,9 +1800,11 @@ Read build(Loader& load, const Json& manifest, std::string_view title, int depth
         }
     }
     if (const Json* clip = optional_field(d, "clipping_path")) {
-        const std::string name = optional_field(*clip, "name") ? text((*clip)["name"], "clipping_path.name") : std::string();
+        const std::string name = optional_field(*clip, "name") ? core::utf8_replaced(text((*clip)["name"], "clipping_path.name")) : std::string();
         if (const auto found = renamed.find(name); found != renamed.end()) {
             ctx.page().clipping_path = core::vector::ClippingPath{found->second, std::clamp(optional_field(*clip, "flatness") ? number((*clip)["flatness"], "clipping_path") : 0.0, 0.0, 100.0)};
+        } else {
+            ctx.notes.add("クリッピングパス「" + first_chars(name, 64) + "」が保存したパスに無いため外しました");
         }
     }
 
@@ -1620,27 +1843,58 @@ Read build(Loader& load, const Json& manifest, std::string_view title, int depth
             }
             ctx.doc.file_info = info;
         }
-        if (const Json* exif = optional_field(*meta, "exif")) source.exif = keep(load.blob(text(*exif, "metadata.exif")));
+        if (const Json* exif = optional_field(*meta, "exif")) source.exif = keep(load.kept_blob(text(*exif, "metadata.exif")));
+        // (psd-keep@1: the PSD's image resources and global blocks a PSD's reader keeps — PC4 F-d's rules —; those naming
+        // layers by their ids only with the ids kept)
+        bool unread = false, many = false;
         if (const Json* resources = optional_field(*meta, "psd_resources"); resources != nullptr && resources->is_array()) {
             for (const Json& r : *resources) {
-                if (!r.is_array() || r.size() != 3 || psd.resources.size() >= core::kPsdKeptMax) continue;
+                if (!r.is_array() || r.size() != 3) {
+                    unread = true;
+                    continue;
+                }
                 const std::int64_t id = whole(r[0], "psd_resources");
                 std::string name = text(r[1], "psd_resources");
-                if (id < 0 || id > 65535 || name.size() > 255) continue;
-                psd.resources.push_back(core::PsdResource{static_cast<int>(id), std::move(name), keep(load.blob(text(r[2], "psd_resources")))});
+                if (id < 0 || id > 65535 || name.size() > 255) {
+                    unread = true;
+                    continue;
+                }
+                if (!core::psd_resource_kept(static_cast<int>(id))) continue;
+                if (core::psd_resource_names_layers(static_cast<int>(id)) && ctx.kept_ids.empty()) continue;
+                if (psd.resources.size() >= core::kPsdKeptMax) {
+                    many = true;
+                    break;
+                }
+                psd.resources.push_back(core::PsdResource{static_cast<int>(id), std::move(name), keep(load.kept_blob(text(r[2], "psd_resources")))});
             }
         }
         if (const Json* globals = optional_field(*meta, "psd_global_blocks"); globals != nullptr && globals->is_array()) {
             for (const Json& g : *globals) {
-                if (!g.is_array() || g.size() != 3 || psd.globals.size() >= core::kPsdKeptMax) continue;
+                if (!g.is_array() || g.size() != 3) {
+                    unread = true;
+                    continue;
+                }
                 const auto signature = key_from_hex(text(g[0], "psd_global_blocks")), key = key_from_hex(text(g[1], "psd_global_blocks"));
-                if (!signature || !key || (*signature != "8BIM" && *signature != "8B64")) continue;
-                if (!std::all_of(key->begin(), key->end(), [](char c) { return c >= 0x20 && c < 0x7f; })) continue;
-                psd.globals.push_back(core::PsdGlobal{*signature, *key, keep(load.blob(text(g[2], "psd_global_blocks")))});
+                if (!signature || !key || (*signature != "8BIM" && *signature != "8B64") ||
+                    !std::all_of(key->begin(), key->end(), [](char c) { return c >= 0x20 && c < 0x7f; })) {
+                    unread = true;
+                    continue;
+                }
+                if (!core::psd_global_kept(*key)) continue;
+                if (psd.globals.size() >= core::kPsdKeptMax) {
+                    many = true;
+                    break;
+                }
+                psd.globals.push_back(core::PsdGlobal{*signature, *key, keep(load.kept_blob(text(g[2], "psd_global_blocks")))});
             }
         }
+        if (unread) ctx.notes.add("読めない PSD のリソース・全体の塊を外しました");
+        if (many) ctx.notes.add("PSD のリソース・全体の塊が多すぎるため、" + std::to_string(core::kPsdKeptMax) + " 個までにしました");
     }
-    if (!psd.empty()) ctx.page().native_psd = std::move(psd);
+    if (!psd.resources.empty() || !psd.globals.empty()) {
+        if (ctx.names_layers) psd.ids = ctx.kept_ids;
+        ctx.page().native_psd = std::move(psd);
+    }
     ctx.page().native_source = std::move(source);
 
     // what Genko has no place for yet (PC5's), said
@@ -1681,24 +1935,34 @@ Read build(Loader& load, const Json& manifest, std::string_view title, int depth
         core::validate_file_info(ctx.doc);
     } catch (const core::Error& error) {
         if (error.code() == "not_yet_ported") throw;
+        // (past a book's budget — its precise pixels, an ink raster — is too large, not broken)
+        const std::string_view why = error.what();
+        if (error.code() == "image_too_large" || why.find("budget") != std::string_view::npos || why.find("too large") != std::string_view::npos ||
+            why.find("oversized") != std::string_view::npos) {
+            too_large(std::string("makes a book larger than this build holds (") + error.what() + ")");
+        }
         broken(std::string("it does not make a Genko page: ") + error.what());
     }
     Read out;
     out.doc = std::move(ctx.doc);
     out.notes = ctx.notes.take();
+    out.unpacked = load.tally().unpacked;
     return out;
 }
 
-Read read_from(const Source& source, std::string_view title, const ReadLimits& limits) {
-    Loader load(source, limits);
+Read read_from(const Source& source, std::string_view title, const ReadLimits& limits, Tally& tally) {
+    Loader load(source, limits, tally);
     const Json manifest = parse_manifest(source, limits);
     try {
-        Read out = build(load, manifest, title, limits.depth);
-        out.unpacked = load.unpacked();
-        return out;
+        return build(load, manifest, title, limits.depth);
     } catch (const Unreadable& error) {
         broken(std::string("its document cannot be read: ") + error.what());
     }
+}
+
+Read read_nested(std::string_view bytes, std::string_view title, const ReadLimits& limits, Tally& tally) {
+    const ZipSource source(bytes);
+    return read_from(source, title, limits, tally);
 }
 
 }  // namespace
@@ -1711,12 +1975,14 @@ bool is_pcraft(std::string_view bytes) {
 
 Read read(std::string_view bytes, std::string_view title, const ReadLimits& limits) {
     const ZipSource source(bytes);
-    return read_from(source, title, limits);
+    Tally tally;
+    return read_from(source, title, limits, tally);
 }
 
 Read read_folder(const std::filesystem::path& folder, std::string_view title, const ReadLimits& limits) {
     const FolderSource source(folder);
-    return read_from(source, title, limits);
+    Tally tally;
+    return read_from(source, title, limits, tally);
 }
 
 Json read_manifest(std::string_view bytes) {
@@ -1734,6 +2000,11 @@ std::optional<std::pair<std::string, Read>> remembered;
 void remember_read(const std::string& ref, Read read) {
     const std::lock_guard<std::mutex> hold(remembered_lock);
     remembered.emplace(ref, std::move(read));
+}
+
+void forget_read() {
+    const std::lock_guard<std::mutex> hold(remembered_lock);
+    remembered.reset();
 }
 
 std::string place_as_contents(core::Document& doc, std::string_view bytes, std::string_view name, std::vector<std::string>& notes, const ReadLimits& limits) {
@@ -1755,7 +2026,7 @@ std::string place_as_contents(core::Document& doc, std::string_view bytes, std::
     core::smart::bring_contents(doc, read.doc, page);
     auto contents = std::make_shared<core::SmartContents>();
     contents->kind = "page";
-    contents->name = std::string(name).substr(0, core::smart::kNameMax);
+    contents->name = first_chars(core::utf8_replaced(name), core::smart::kNameMax);
     contents->page = std::make_shared<core::Page>(std::move(page));
     const std::string id = smart_ops::fresh_contents_id(doc);
     doc.smart_contents[id] = std::move(contents);

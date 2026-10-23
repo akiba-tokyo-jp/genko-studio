@@ -409,4 +409,16 @@ std::string hex_of(std::string_view bytes) {
     return out;
 }
 
+std::string first_chars(std::string_view text, std::size_t count, std::size_t max_bytes) {
+    std::size_t at = 0, n = 0;
+    while (at < text.size() && n < count) {
+        std::size_t next = at + 1;
+        while (next < text.size() && (static_cast<unsigned char>(text[next]) & 0xC0) == 0x80) ++next;
+        if (next > max_bytes) break;
+        at = next;
+        ++n;
+    }
+    return std::string(text.substr(0, at));
+}
+
 }  // namespace genko::render::pcraft

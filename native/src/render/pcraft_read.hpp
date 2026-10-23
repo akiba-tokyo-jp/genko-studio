@@ -27,25 +27,37 @@
 // the timeline, measurements, text styles, a group's own opacity, blend and mask, labels, a video layer's frames — left
 // out and said in `notes` (in Japanese), never silently (the user's design 8-5 (a): PC5 takes them in as it adds them).
 //
-// What is untrusted is checked before anything is made of it: the manifest's size, the format version (a newer one
-// refused: core::Error("unsupported_version")), each tile's and blob's hash, size and zstd frame, the canvas's size against
-// the picture limits and each layer's pixels against the memory budget, and all the bytes unpacked together against
-// ReadLimits — before they are allocated (a zip or zstd bomb is refused, not unpacked). A broken file is
-// core::Error("format", "the .pcraft is broken (…)"); one too large core::Error("image_too_large").
+// What is untrusted is checked before anything is made of it (ReadLimits; a .pcraft inside a smart object of one counts in
+// the outer's, and is read once however many layers show it):
+//   - the manifest's size, the format version (a newer one refused: core::Error("unsupported_version")), each tile's and
+//     blob's hash, size and zstd frame, all the bytes unpacked together (a zip or zstd bomb refused, not unpacked);
+//   - the canvas against the picture limits; the layers read, the canvas-size planes of pixels made (layers, masks,
+//     channels: a layer of no tiles and nothing drawn is a layer of no pixels, made of nothing), and the bytes the book
+//     keeps of them and of the files its smart objects and PSD blocks hold — each before it is made;
+//   - a page in precise colour whose layers would pass the book's precise budget (core::kColorRasterBookBytes, 1 GiB) is
+//     read at 8 bits instead (said), as a PSD is (PC4 F-d);
+//   - groups nested at most kGroupsDeepMax deep, .pcraft files inside at most core::smart::kDepthMax.
+// A broken file is core::Error("format", "the .pcraft is broken (…)"); one too large core::Error("image_too_large").
 
 namespace genko::render::pcraft {
 
+inline constexpr int kGroupsDeepMax = 64;
+
 struct ReadLimits {
-    std::uint64_t max_manifest_bytes = 32ull << 20;   // manifest.json
-    std::uint64_t max_blob_bytes = 256ull << 20;      // one blob unpacked (an embedded file: render::smart's limit)
-    std::uint64_t max_unpacked_bytes = 8ull << 30;    // every tile and blob unpacked, together (upstream: 16 GiB)
-    int depth = 0;                                    // (a .pcraft inside a smart object of one: how deep)
+    std::uint64_t max_manifest_bytes = 64ull << 20;       // manifest.json (upstream: 256 MiB; large lookup tables are text)
+    std::uint64_t max_blob_bytes = 256ull << 20;          // one blob unpacked (an embedded file: render::smart's limit)
+    std::uint64_t max_unpacked_bytes = 8ull << 30;        // every tile and blob unpacked, together (upstream: 16 GiB)
+    std::uint64_t max_layers = 8000;                      // layers read (Photoshop's most)
+    std::uint64_t max_plane_pixels = 4'000'000'000ull;    // canvas pixels of every plane of pixels made, together
+    std::uint64_t max_kept_bytes = 2ull << 30;            // what the book keeps: layers' pixels, masks, channels, files
+    std::uint64_t max_contents = 1000;                    // contents pages made of the .pcraft files inside
+    int depth = 0;                                        // (a .pcraft inside a smart object of one: how deep)
 };
 
 struct Read {
     core::Document doc;              // a book of one page, in memory (no folder)
     std::vector<std::string> notes;  // what it could not keep, in Japanese
-    std::uint64_t unpacked = 0;      // the bytes its tiles and blobs unpacked to (a .pcraft inside one counts in the outer's)
+    std::uint64_t unpacked = 0;      // the bytes its tiles and blobs unpacked to (the .pcraft files inside counted in)
 };
 
 // Bytes that look like a .pcraft written as a zip (a zip whose first file is manifest.json: how PhotoCraft and Genko write
@@ -69,5 +81,7 @@ std::string place_as_contents(core::Document& doc, std::string_view bytes, std::
 // thread): the read kept here by its bytes' asset ref ("sha256:…"), taken — once — by place_as_contents for the same bytes
 // (the op), which otherwise reads them itself (the command line, MCP). One at a time; thread-safe.
 void remember_read(const std::string& ref, Read read);
+// What remember_read kept, let go (the op that would take it was not run).
+void forget_read();
 
 }  // namespace genko::render::pcraft
