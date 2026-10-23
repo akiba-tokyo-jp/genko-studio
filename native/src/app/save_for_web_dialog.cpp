@@ -109,8 +109,8 @@ SaveForWebDialog::SaveForWebDialog(QWidget* parent, std::shared_ptr<const core::
         captions.push_back(caption);
     }
     const auto pane = [](std::initializer_list<std::pair<QLabel*, QLabel*>> panes, int columns) {
-        auto* page = new QWidget;
-        auto* grid = new QGridLayout(page);
+        auto* sheet = new QWidget;
+        auto* grid = new QGridLayout(sheet);
         int i = 0;
         for (const auto& [picture, caption] : panes) {
             auto* box = new QVBoxLayout;
@@ -119,7 +119,7 @@ SaveForWebDialog::SaveForWebDialog(QWidget* parent, std::shared_ptr<const core::
             grid->addLayout(box, i / columns, i % columns);
             ++i;
         }
-        return page;
+        return sheet;
     };
     // (each pane's labels live in one tab at a time: the tabs are made again as they are chosen)
     views->addTab(new QWidget, QStringLiteral("元の画像"));
@@ -386,7 +386,7 @@ void SaveForWebDialog::start() {
             for (const formats::WebSettings& v : variants(st)) all.push_back(v);
             for (std::size_t i = 0; i < all.size(); ++i) {
                 const formats::Optimized o = formats::optimize(picture.rgba, all[i], icc, xmp, picture.dpi, true, nullptr);
-                const auto bytes = static_cast<std::uint64_t>(double(o.bytes) * ratio);
+                const std::uint64_t bytes = formats::estimated_bytes(picture.rgba, all[i], icc, xmp, picture.dpi, o.bytes, ratio);
                 if (i == 0) r.bytes = bytes;
                 r.panes.push_back(Pane{image_of(o.preview, o.width, o.height), caption_of(all[i], bytes, o.colors)});
             }

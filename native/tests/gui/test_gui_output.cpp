@@ -25,6 +25,7 @@
 #include <QDialogButtonBox>
 #include <QDockWidget>
 #include <QDoubleSpinBox>
+#include <QElapsedTimer>
 #include <QLabel>
 #include <QLineEdit>
 #include <QListWidget>
@@ -1429,7 +1430,13 @@ private slots:
             ++asked_where;
             return save_to;
         };
-        studio.answers.responder->existing_dir = [&](const QString&, const QString&) { return qs(core::path_to_utf8(out / "folder")); };
+        // (a window's work waited for: its estimates and panes come from a worker)
+        const auto wait_for = [](const std::function<bool()>& done, int ms) {
+            QElapsedTimer clock;
+            clock.start();
+            while (!done() && clock.elapsed() < ms) QCoreApplication::processEvents(QEventLoop::AllEvents, 50);
+            return done();
+        };
         std::function<int(QDialog*)> handle;
         const auto previous = studio.answers.responder->exec;
         studio.answers.responder->exec = [&](QDialog* dialog) -> int {
@@ -1440,24 +1447,30 @@ private slots:
             return previous(dialog);
         };
         // 書き出し形式…: the estimate and the preview follow the choices; JPEG at 50 % written
-        handle = [&](QDialog* dialog) {
+        QStringList seen;
+        bool estimated = false, again = false, previewed = false;
+        int width_shown = 0;
+        handle = [&](QDialog* dialog) -> int {
             auto* d = qobject_cast<app::ExportAsDialog*>(dialog);
-            QTRY_VERIFY_WITH_TIMEOUT(d->estimates() >= 1 && !d->estimating(), 20000);
-            QVERIFY2(d->estimate->text().contains(QStringLiteral("約")), qPrintable(d->estimate->text()));
-            QVERIFY(!d->preview->pixmap().isNull());
+            estimated = wait_for([d] { return d->estimates() >= 1 && !d->estimating(); }, 20000);
+            seen << d->estimate->text();
+            previewed = !d->preview->pixmap().isNull();
             const int done = d->estimates();
             d->format->setCurrentIndex(d->format->findData(QStringLiteral("jpg")));
             d->scale->setValue(50.0);
-            QTRY_VERIFY_WITH_TIMEOUT(d->estimates() > done && !d->estimating(), 20000);
-            QVERIFY2(d->estimate->text().startsWith(QStringLiteral("JPG")), qPrintable(d->estimate->text()));
-            QCOMPARE(d->width->value(), static_cast<int>(std::lround(render::mm_to_px(spec.width_mm.value(), 72) / 2.0)));
+            again = wait_for([d, done] { return d->estimates() > done && !d->estimating(); }, 20000);
+            seen << d->estimate->text();
+            width_shown = d->width->value();
             return int(QDialog::Accepted);
         };
         save_to = qs(core::path_to_utf8(out / "half.jpg"));
         studio.act("act_export_as")->trigger();
+        const int half_width = static_cast<int>(std::lround(render::mm_to_px(spec.width_mm.value(), 72) / 2.0));
+        QVERIFY(estimated && again && previewed);
+        QVERIFY2(seen.value(0).contains(QStringLiteral("約")) && seen.value(1).startsWith(QStringLiteral("JPG")), qPrintable(seen.join(QStringLiteral(" / "))));
+        QCOMPARE(width_shown, half_width);
         QVERIFY2(fs::is_regular_file(out / "half.jpg"), qPrintable(w->last_notice()));
-        const render::Image half = render::open_image(storage::read_file(out / "half.jpg"));
-        QCOMPARE(half.width(), static_cast<int>(std::lround(render::mm_to_px(spec.width_mm.value(), 72) / 2.0)));
+        QCOMPARE(render::open_image(storage::read_file(out / "half.jpg")).width(), half_width);
         // PNG としてクイック書き出し: asked where (the preferences ask); then beside the book, unasked
         asked_where = 0;
         save_to = qs(core::path_to_utf8(out / "quick.png"));
@@ -1472,7 +1485,7 @@ private slots:
         QCOMPARE(asked_where, 1);
         QVERIFY2(fs::is_regular_file(studio.path.parent_path() / "book_p001.png"), qPrintable(w->last_notice()));
         // 書き出しの環境設定…: JPG kept, and 環境設定 → 書き出し shows it
-        handle = [&](QDialog* dialog) {
+        handle = [&](QDialog* dialog) -> int {
             auto* d = qobject_cast<app::ExportPreferencesDialog*>(dialog);
             d->form->format->setCurrentIndex(d->form->format->findData(QStringLiteral("jpg")));
             d->form->quality->setValue(40);
@@ -1497,28 +1510,37 @@ private slots:
         for (const char* key : {"export/quick_format", "export/quick_location", "export/jpeg_quality", "export/metadata", "export/srgb"})
             app::settings()->remove(QString::fromLatin1(key));
         // Web 用に保存（従来）…: a preset's settings, the panes and the estimate, the GIF written
-        handle = [&](QDialog* dialog) {
+        seen.clear();
+        bool panes = false, four = false;
+        QString format_after, preset_after;
+        int colours_after = 0;
+        handle = [&](QDialog* dialog) -> int {
             auto* d = qobject_cast<app::SaveForWebDialog*>(dialog);
-            QTRY_VERIFY_WITH_TIMEOUT(d->previews() >= 1 && !d->working(), 20000);
-            QVERIFY2(d->estimate->text().startsWith(QStringLiteral("PNG-24")), qPrintable(d->estimate->text()));
+            panes = wait_for([d] { return d->previews() >= 1 && !d->working(); }, 20000);
+            seen << d->estimate->text();
             const int done = d->previews();
             d->preset->setCurrentIndex(d->preset->findData(QStringLiteral("GIF 32 Dithered")));
-            QCOMPARE(d->format->currentData().toString(), QStringLiteral("gif"));
-            QCOMPARE(d->colors->value(), 32);
-            QTRY_VERIFY_WITH_TIMEOUT(d->previews() > done && !d->working(), 20000);
-            QVERIFY2(d->estimate->text().startsWith(QStringLiteral("GIF")), qPrintable(d->estimate->text()));
+            format_after = d->format->currentData().toString();
+            colours_after = d->colors->value();
+            again = wait_for([d, done] { return d->previews() > done && !d->working(); }, 20000);
+            seen << d->estimate->text();
             d->views->setCurrentIndex(3);  // (4 アップ)
-            QVERIFY(!d->pictures[3]->pixmap().isNull());
+            four = !d->pictures[3]->pixmap().isNull();
             d->colors->setValue(20);  // (a hand's change: no preset's any more)
-            QCOMPARE(d->preset->currentIndex(), 0);
+            preset_after = d->preset->currentText();
             return int(QDialog::Accepted);
         };
         save_to = qs(core::path_to_utf8(out / "web.gif"));
         studio.act("act_save_for_web")->trigger();
+        QVERIFY(panes && again && four);
+        QVERIFY2(seen.value(0).startsWith(QStringLiteral("PNG-24")) && seen.value(1).startsWith(QStringLiteral("GIF")), qPrintable(seen.join(QStringLiteral(" / "))));
+        QCOMPARE(format_after, QStringLiteral("gif"));
+        QCOMPARE(colours_after, 32);
+        QCOMPARE(preset_after, QStringLiteral("（カスタム）"));
         QVERIFY2(fs::is_regular_file(out / "web.gif"), qPrintable(w->last_notice()));
         QVERIFY(storage::read_file(out / "web.gif").starts_with("GIF89a"));
         // レイヤーからファイル…: a folder a page
-        handle = [&](QDialog* dialog) {
+        handle = [&](QDialog* dialog) -> int {
             auto* d = qobject_cast<app::LayersToFilesDialog*>(dialog);
             d->folder->setText(qs(core::path_to_utf8(out / "layers")));
             d->prefix->setText(QStringLiteral("p"));
@@ -1530,8 +1552,7 @@ private slots:
         for (const auto& entry : fs::recursive_directory_iterator(out / "layers")) files += entry.is_regular_file() && core::path_to_utf8(entry.path().filename()).starts_with("p_");
         QVERIFY2(files > 0, qPrintable(w->last_notice()));
         // レイヤー → PNG としてクイック書き出し of a layer of nothing: said, nothing written
-        const std::string ink = studio.ink();
-        w->set_target_layer(ink);
+        w->set_target_layer(studio.ink());
         save_to = qs(core::path_to_utf8(out / "nothing.png"));
         studio.act("act_layer_quick_export_png")->trigger();
         QVERIFY(!fs::exists(out / "nothing.png"));

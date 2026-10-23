@@ -584,7 +584,7 @@ CopyEstimate estimate_copy(const core::Document& doc, std::size_t at, std::strin
     }
     std::string ext(extension);
     std::transform(ext.begin(), ext.end(), ext.begin(), [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
-    std::uint64_t bytes = 0;
+    std::uint64_t bytes = 0, fixed = 0;
     std::uint32_t w = 0, h = 0;
     if (ext == "psd" || ext == "psb" || ext == "pcraft") {
         // (a PSD's or a .pcraft's writer writes a file: one of its own in the temporary folder, measured and removed)
@@ -604,6 +604,15 @@ CopyEstimate estimate_copy(const core::Document& doc, std::size_t at, std::strin
         w = plan.width;
         h = plan.height;
         out.notes = std::move(plan.notes);
+        if (!out.exact) {
+            // (what a file has whatever its size — its headers, profile, metadata —, from the same file of the page at 1 %:
+            // not scaled with the pixels)
+            CopyOptions tiny = asked;
+            tiny.scale = kScaleMin;
+            tiny.width.reset();
+            tiny.height.reset();
+            fixed = std::min<std::uint64_t>(bytes, plan_copy(doc, at, fs::path("estimate." + ext), tiny).bytes.size());
+        }
     }
     // (from a proxy: a page's pixels over the proxy's; a layer's — whose size is known only once it is drawn — by the
     // factor the proxy was made smaller by)
@@ -624,7 +633,7 @@ CopyEstimate estimate_copy(const core::Document& doc, std::size_t at, std::strin
             out.height = full.height;
         }
     }
-    out.bytes = static_cast<std::uint64_t>(std::llround(double(bytes) * ratio));
+    out.bytes = fixed + static_cast<std::uint64_t>(std::llround(double(bytes - fixed) * ratio));
     return out;
 }
 

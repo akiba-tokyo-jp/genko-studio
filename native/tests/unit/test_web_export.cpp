@@ -148,9 +148,9 @@ private slots:
             for (int x = 1; x < 256; ++x) n += px(image, x, 1)[0] != px(image, x - 1, 1)[0];
             return n;
         };
-        const CodecImage flat = rgba(optimised(p, settings(Json{{"format", "gif"}, {"colors", 2}, {"dither", "none"}, {"palette", "uniform"}})));
-        const CodecImage diffused = rgba(optimised(p, settings(Json{{"format", "gif"}, {"colors", 2}, {"dither", "diffusion"}, {"palette", "uniform"}})));
-        const CodecImage noisy = rgba(optimised(p, settings(Json{{"format", "png8"}, {"colors", 2}, {"dither", "noise"}, {"ditherAmount", 100}, {"palette", "uniform"}})));
+        const CodecImage flat = rgba(optimised(p, settings(Json{{"format", "gif"}, {"colors", 2}, {"dither", "none"}, {"palette", "adaptive"}})));
+        const CodecImage diffused = rgba(optimised(p, settings(Json{{"format", "gif"}, {"colors", 2}, {"dither", "diffusion"}, {"palette", "adaptive"}})));
+        const CodecImage noisy = rgba(optimised(p, settings(Json{{"format", "png8"}, {"colors", 2}, {"dither", "noise"}, {"ditherAmount", 100}, {"palette", "adaptive"}})));
         QVERIFY2(changes(flat) <= 1, qPrintable(QString::number(changes(flat))));
         QVERIFY2(changes(diffused) > 20, qPrintable(QString::number(changes(diffused))));
         QVERIFY2(changes(noisy) > 4, qPrintable(QString::number(changes(noisy))));

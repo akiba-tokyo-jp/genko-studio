@@ -5,6 +5,7 @@
 
 #include <QDir>
 #include <QFileInfo>
+#include <QLineEdit>
 
 #include <algorithm>
 #include <cmath>

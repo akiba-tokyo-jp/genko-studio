@@ -157,7 +157,10 @@ private slots:
         QCOMPARE(px(read(dir / "layer.png"), 0, 0), (std::array<int, 4>{255, 0, 0, 255}));
         formats::CopyOptions twice = layer;
         twice.scale = 200;
-        QCOMPARE(formats::write_copy(doc, 0, dir / "layer2.png", twice).width, 80u);
+        // (drawn at twice the resolution: the square's edge as the page draws a picture larger — a pixel of soft edge at
+        // most on each side)
+        const std::uint32_t wide = formats::write_copy(doc, 0, dir / "layer2.png", twice).width;
+        QVERIFY2(wide >= 80 && wide <= 82, qPrintable(QString::number(wide)));
         formats::CopyOptions sized = layer;
         sized.width = 10;
         QCOMPARE(formats::write_copy(doc, 0, dir / "layer10.png", sized).height, 10u);
@@ -319,11 +322,16 @@ private slots:
             QVERIFY2(e.bytes > 0, ext);
             (void)r;
         }
-        const formats::CopyEstimate guess = formats::estimate_copy(doc, 0, "png", o, 64);
-        QVERIFY(!guess.exact);
-        QCOMPARE(guess.width, 360u);
-        const std::uint64_t actual = size_of(dir / "e.png");
-        QVERIFY2(guess.bytes > actual / 5 && guess.bytes < actual * 5, qPrintable(QStringLiteral("%1 / %2").arg(guess.bytes).arg(actual)));
+        // (from a proxy at most 512 long, as the window makes it: the file 1200 × 900)
+        formats::CopyOptions big;
+        big.scale = 1000;
+        for (const char* ext : {"png", "jpg"}) {
+            const formats::CopyEstimate guess = formats::estimate_copy(doc, 0, ext, big, 512);
+            QVERIFY(!guess.exact);
+            QCOMPARE(guess.width, 1200u);
+            const std::uint64_t actual = formats::write_copy(doc, 0, dir / (std::string("big.") + ext), big).bytes;
+            QVERIFY2(guess.bytes > actual / 3 && guess.bytes < actual * 3, qPrintable(QStringLiteral("%1: %2 / %3").arg(ext).arg(guess.bytes).arg(actual)));
+        }
         // (nothing written by an estimate)
         QVERIFY(!fs::exists(fs::path("estimate.png")));
     }
@@ -392,11 +400,11 @@ private slots:
             }
             if (std::string(format) != "psd") (void)read(made.front());
         }
-        // (a hidden layer: left out by default, written when asked)
-        core::Document hidden = doc;
+        // (a hidden layer — the picture's — left out by default, written when asked)
+        core::Document hidden = square_book();
         bool hid = false;
         for (core::Layer& l : hidden.edit_page(0).layers) {
-            if (!hid && l.kind == core::LayerKind::Strokes && l.visible) {
+            if (!hid && l.kind == core::LayerKind::Raster && l.visible) {
                 l.visible = false;
                 hid = true;
             }

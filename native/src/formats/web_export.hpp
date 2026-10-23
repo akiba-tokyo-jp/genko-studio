@@ -102,6 +102,11 @@ struct Optimized {
 Optimized optimize(const Rgba8& picture, const WebSettings& settings, const std::optional<std::string>& icc, const std::optional<std::string>& xmp,
                    double dpi, bool preview, const render::codecs::web::Sink* sink = nullptr);
 
+// The size of a file whose proxy made `bytes` and that has `ratio` times its pixels: what a file has whatever its size (from
+// the same file of one pixel) and the rest scaled by the pixels (the dialog's estimates).
+std::uint64_t estimated_bytes(const Rgba8& proxy, const WebSettings& settings, const std::optional<std::string>& icc,
+                              const std::optional<std::string>& xmp, double dpi, std::uint64_t bytes, double ratio);
+
 // The picture Save for Web works on: the page (or its layer alone, cut to what it holds) at the size, its colours sRGB's
 // (`icc` none) or, an RGB page of a profile kept as it is, its own (`icc` its profile); `proxy`: at most that long.
 struct WebPicture {

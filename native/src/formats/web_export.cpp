@@ -203,6 +203,19 @@ std::vector<std::uint8_t> map_colours(const Work& work, std::size_t w, std::size
 
 }  // namespace
 
+std::uint64_t estimated_bytes(const Rgba8& proxy, const WebSettings& st, const std::optional<std::string>& icc, const std::optional<std::string>& xmp,
+                              double dpi, std::uint64_t bytes, double ratio) {
+    // (what the file has whatever its size — headers, a palette, a profile, metadata — from the same file of the proxy's
+    // first pixel, not scaled with the pixels)
+    Rgba8 one;
+    one.width = 1;
+    one.height = 1;
+    one.px.assign(proxy.px.begin(), proxy.px.begin() + std::min<std::size_t>(4, proxy.px.size()));
+    std::uint64_t fixed = 0;
+    if (one.px.size() == 4) fixed = std::min<std::uint64_t>(bytes, optimize(one, st, icc, xmp, dpi, false, nullptr).bytes);
+    return fixed + static_cast<std::uint64_t>(std::llround(double(bytes - fixed) * ratio));
+}
+
 std::optional<WebFormat> web_format_of(std::string_view id) {
     std::string s(id);
     std::transform(s.begin(), s.end(), s.begin(), [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
@@ -622,7 +635,8 @@ WebResult save_for_web(const core::Document& doc, std::size_t page, const WebSet
         const Optimized o = optimize(picture.rgba, st, icc, xmp, picture.dpi, false, nullptr);
         const bool scaled = o.width != picture.full_width || o.height != picture.full_height;
         const double ratio = scaled ? double(picture.full_width) * picture.full_height / (double(o.width) * o.height) : 1.0;
-        out.bytes = static_cast<std::uint64_t>(std::llround(double(o.bytes) * ratio));
+        out.bytes = o.bytes;
+        if (scaled) out.bytes = estimated_bytes(picture.rgba, st, icc, xmp, picture.dpi, o.bytes, ratio);
         out.width = picture.full_width;
         out.height = picture.full_height;
         out.colors = o.colors;
