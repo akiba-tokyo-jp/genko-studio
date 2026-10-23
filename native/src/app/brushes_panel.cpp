@@ -3,6 +3,7 @@
 
 #include "app/brushes_panel.hpp"
 
+#include <QDoubleSpinBox>
 #include <QFileInfo>
 #include <QFutureWatcher>
 #include <QHBoxLayout>
@@ -119,7 +120,8 @@ TipOf tip_of(const Json& settings) {
     if (core::is_dab_brush(settings)) {
         out.dab = true;
         try {
-            const core::DabSettings d = core::dabs_from_json(settings["dabs"].is_null() ? Json::object() : settings["dabs"]);
+            const Json given = settings.value("dabs", Json::object());
+            const core::DabSettings d = core::dabs_from_json(given.is_null() ? Json::object() : given);
             out.ref = d.tip;
             out.hardness = d.hardness;
             out.roundness = d.roundness;

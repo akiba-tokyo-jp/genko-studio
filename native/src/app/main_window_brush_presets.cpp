@@ -74,11 +74,11 @@ std::string MainWindow::book_key_for(const std::string& key) const {
     return preset->key;
 }
 
-void MainWindow::choose_brush(const std::string& key) {
+void MainWindow::choose_brush(const std::string& key, bool keep_tool) {
     if (brush_ == nullptr) return;
     // (E5's promise: with a pixel tool in hand — ぼかし, 覆い焼き, 混合ブラシ… — a dab brush chosen is that tool's ブラシ, as
     // Photoshop's Brushes panel sets the tip of the tool in hand)
-    if (canvas_ != nullptr && pixel_brush_ != nullptr && PageCanvas::is_pixel_tool(canvas_->tool())) {
+    if (!keep_tool && canvas_ != nullptr && pixel_brush_ != nullptr && PageCanvas::is_pixel_tool(canvas_->tool())) {
         const presets::Library lib = presets::load(config_dir());
         if (const presets::Preset* p = presets::find(lib, key); p != nullptr && core::is_dab_brush(p->settings)) {
             pixel_tool_settings.brush = p->key;
@@ -96,9 +96,12 @@ void MainWindow::choose_brush(const std::string& key) {
         } catch (const std::exception&) {
         }
     }
-    if (brush_->kind() == kind) return;
-    brush_->reload_kinds(kind);
-    if (tool_settings_ != nullptr && !PageCanvas::draws_line(canvas_->tool())) choose_tool(QStringLiteral("pen"));
+    if (brush_->kind() != kind) brush_->reload_kinds(kind);
+    // (the brush tools take it in hand; the eraser draws with the brush in hand too, so it keeps its tool)
+    if (!keep_tool && tool_settings_ != nullptr && canvas_ != nullptr && !PageCanvas::draws_line(canvas_->tool()) &&
+        canvas_->tool() != QLatin1String("eraser")) {
+        choose_tool(QStringLiteral("pen"));
+    }
 }
 
 void MainWindow::brushes_changed(std::optional<std::string> select, std::optional<std::string> forgotten) {
@@ -273,7 +276,7 @@ void MainWindow::use_tool_preset(const Json& item) {
         const std::string key = options["brush"].get<std::string>();
         if (core::find_builtin(key) != nullptr || presets::builtin(key) != nullptr || render::brushes::brush(key).key == key ||
             presets::find(presets::load(config_dir()), key) != nullptr) {
-            choose_brush(key);
+            choose_brush(key, true);  // (the preset's tool kept in hand)
         } else {
             flash(QStringLiteral("このツールプリセットのブラシ（%1）が見つかりません。ほかの設定だけ使います").arg(QString::fromStdString(key)), 4000);
         }

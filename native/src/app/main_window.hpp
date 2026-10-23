@@ -1115,7 +1115,7 @@ public:
     // after the library changed (`select`: that brush chosen; `forgotten`: one taken out of it), 編集 → ブラシを定義… (the
     // selection's paint, the layer drawn on alone when it is a paint layer), a tool preset taken (its tool, brush, fields
     // and 描画色) and made (the tool page's fields by their objectName), and 編集 → プリセット ▸.
-    void choose_brush(const std::string& key);
+    void choose_brush(const std::string& key, bool keep_tool = false);
     void brushes_changed(std::optional<std::string> select, std::optional<std::string> forgotten = std::nullopt);
     std::string book_key_for(const std::string& key) const;
     void define_brush_preset(std::optional<QString> name = std::nullopt);

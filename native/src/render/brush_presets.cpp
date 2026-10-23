@@ -485,14 +485,6 @@ std::string clean(const std::string& text, std::size_t most) {
     return out.substr(0, std::min(at, out.size()));
 }
 
-std::size_t characters(const std::string& text) {
-    std::size_t n = 0;
-    for (const char c : text) {
-        if ((static_cast<unsigned char>(c) & 0xc0) != 0x80) ++n;
-    }
-    return n;
-}
-
 // A brush's name no other brush has: `base`, else "base 2", "base 3"… (40 characters at most: the base cut to fit).
 std::string unique_name(const std::set<std::string>& taken, const std::string& base_in) {
     const std::string base = clean(base_in, 40).empty() ? std::string("ブラシ") : clean(base_in, 40);
@@ -535,7 +527,8 @@ Own read_own(const std::filesystem::path& config_dir) {
         out.problem = "the brush library " + core::path_to_utf8(path) + " cannot be read (" + error.what() + "): it is left as it is";
         return out;
     }
-    for (const auto& [key, entry] : brushes::load_library(config_dir).items()) {
+    const Json library = brushes::load_library(config_dir);  // (held: a temporary's items() would outlive it)
+    for (const auto& [key, entry] : library.items()) {
         if (entry.is_object()) out.brushes[key] = entry;
     }
     out.order = brushes::library_groups(config_dir);

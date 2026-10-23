@@ -742,6 +742,11 @@ const std::vector<Rule>& rules() {
         r.push_back(rule("not a Genko presets file.*", "Genko のプリセットのファイルではありません"));
         r.push_back(rule(R"((?:the presets are larger than|a presets file is at most) .*)", "プリセットのファイルが大きすぎます（256 MB まで）"));
         r.push_back(rule("the settings folder is this one: .*", "移行元が今の設定のフォルダーです（別の設定のフォルダーか、書き出したプリセットのファイルを選びます）"));
+        r.push_back(rule(R"(the brush file's tips are too large to read.*)", "ブラシのファイルの先端が大きすぎて読めません（ほどくと 512 MB を越えます）"));
+        r.push_back(rule(R"(the brush file is larger than (\d+) MB)", "ブラシのファイルが大きすぎます（\\1 MB まで）"));
+        r.push_back(rule(R"(brush files of (?:sub)?version (\d+) are not read)", "この版（\\1）のブラシのファイルは読めません（版 1・2・6〜10 を読みます）"));
+        r.push_back(rule(R"(not a brush file that can be read: (.*))", "ブラシのファイルとして読めません（\\1）"));
+        r.push_back(rule(R"(the brush file holds no brush that can be read.*)", "読めるブラシがファイルに入っていません"));
         // (PC2, adjustments@1 — the C++ build's own: a correction's native settings and kinds, core/adjust)
         r.push_back(rule(R"(adjust kind '(.*)' is not a correction layer's kind)", "「\\1」は色調補正のレイヤーの種類ではありません"));
         // (PC2a — the tone corrections' own: set_adjustment, auto_adjust and a colour lookup's table, render/ops_adjust, core/lut3d)

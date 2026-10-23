@@ -364,7 +364,10 @@ private slots:
         // 焼き込みツール・スポンジツール・混合ブラシツール・背景消しゴムツール・色の置き換えツール (act_blur_tool, act_sharpen_tool,
         // act_smudge_tool, act_dodge_tool, act_burn_tool, act_sponge_tool, act_mixer_brush, act_background_eraser,
         // act_color_replacement) — theirs (test_gui_paint_tools).
-        QCOMPARE(w->actions_by_name().size(), std::size_t{558});
+        // and the 4 of PC4 E2 (SPEC COLOR-09「ブラシのプリセット」「プリセットマネージャー」) — 編集 → ブラシを定義… (act_define_brush)
+        // and プリセット ▸ プリセットマネージャー…・プリセットを移行・プリセットを書き出し／読み込み… (act_preset_manager,
+        // act_migrate_presets, act_export_import_presets) — theirs (test_gui_brush_settings).
+        QCOMPARE(w->actions_by_name().size(), std::size_t{562});
         QVERIFY(w->action("act_chat_approval"));
         QVERIFY(w->action("act_style"));
         QVERIFY(w->action("act_exposure"));

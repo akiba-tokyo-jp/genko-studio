@@ -8,6 +8,7 @@
 #include <filesystem>
 #include <fstream>
 #include "core/base64.hpp"
+#include "core/brush_dabs.hpp"
 #include "core/error.hpp"
 #include "core/json.hpp"
 #include "core/paths.hpp"
@@ -448,17 +449,17 @@ private slots:
         QCOMPARE(listed_code, 0);
         const Json* deep = brush_named(listed, "画材", "深いブラシ");
         QVERIFY(deep != nullptr);
-        const Json& d = (*deep)["settings"]["dabs"];
+        const core::DabSettings d = core::dabs_from_json((*deep)["settings"]["dabs"]);
         QCOMPARE((*deep)["engine"].get<std::string>(), std::string("dabs"));
-        QVERIFY(std::abs(d["size_mm"].get<double>() - 64 * 25.4 / 200) < 1e-9);  // (Photoshop's pixels at 200 dpi)
-        QVERIFY(std::abs(d["spacing"].get<double>() - 0.4) < 1e-9);
-        QVERIFY(std::abs(d["roundness"].get<double>() - 0.8) < 1e-9);
-        QVERIFY(std::abs(d["angle"].get<double>() - 30) < 1e-9);
-        QVERIFY(d["scatter"]["enabled"].get<bool>());
-        QVERIFY(d["texture"]["enabled"].get<bool>() && !d["texture"]["asset"].get<std::string>().empty());
-        QVERIFY(d["wet_edges"].get<bool>());
+        QVERIFY(std::abs(d.size_mm - 64 * 25.4 / 200) < 1e-9);  // (Photoshop's pixels at 200 dpi)
+        QVERIFY(std::abs(d.spacing - 0.4) < 1e-9);
+        QVERIFY(std::abs(d.roundness - 0.8) < 1e-9);
+        QVERIFY(std::abs(d.angle - 30) < 1e-9);
+        QVERIFY(d.scatter.enabled);
+        QVERIFY(d.texture.enabled && !d.texture.pattern.asset.empty());  // (the file's pattern)
+        QVERIFY(d.wet_edges);
         // the 16-bit tip kept in 16 bits (its PNG's bit depth), by its hash in brush_tips/
-        const std::string ref = d["tip"].get<std::string>();
+        const std::string ref = d.tip;
         QVERIFY(!ref.empty());
         const auto tip_file = render::brushes::library_tip_path(std::filesystem::path(config.toStdString()), ref);
         const std::string png = genko::test::read_bytes(QString::fromStdString(tip_file.string()));
@@ -468,7 +469,7 @@ private slots:
         auto [got_code, got] = cli_in(config, {QStringLiteral("brushes"), QStringLiteral("get"), QString::fromStdString((*deep)["key"].get<std::string>())});
         QCOMPARE(got_code, 0);
         QCOMPARE(got["from"].get<std::string>(), std::string("library"));
-        QCOMPARE(got["dabs"]["tip"].get<std::string>(), ref);
+        QCOMPARE(core::dabs_from_json(got["dabs"]).tip, ref);
         // version 2: a computed tip as a round one of its hardness, roundness, angle and spacing; a 16-bit sampled one
         std::tie(code, out) = cli_in(config, {QStringLiteral("brushes"), QStringLiteral("import-abr"), v2, QStringLiteral("--group"), QStringLiteral("丸")});
         QVERIFY2(code == 0, out.dump().c_str());
@@ -476,13 +477,13 @@ private slots:
         std::tie(listed_code, listed) = cli_in(config, {QStringLiteral("brushes"), QStringLiteral("list"), QStringLiteral("--full")});
         const Json* round = brush_named(listed, "丸", "円ブラシ 30 px");
         QVERIFY(round != nullptr);
-        const Json& r = (*round)["settings"]["dabs"];
-        QCOMPARE(r.value("tip", std::string()), std::string());
-        QVERIFY(std::abs(r["hardness"].get<double>() - 0.5) < 1e-9);
-        QVERIFY(std::abs(r["roundness"].get<double>() - 0.6) < 1e-9);
-        QVERIFY(std::abs(r["angle"].get<double>() - 45) < 1e-9);
-        QVERIFY(std::abs(r["spacing"].get<double>() - 0.2) < 1e-9);
-        QVERIFY(std::abs(r["size_mm"].get<double>() - 30 * 25.4 / 200) < 1e-9);
+        const core::DabSettings r = core::dabs_from_json((*round)["settings"]["dabs"]);
+        QCOMPARE(r.tip, std::string());  // (round)
+        QVERIFY(std::abs(r.hardness - 0.5) < 1e-9);
+        QVERIFY(std::abs(r.roundness - 0.6) < 1e-9);
+        QVERIFY(std::abs(r.angle - 45) < 1e-9);
+        QVERIFY(std::abs(r.spacing - 0.2) < 1e-9);
+        QVERIFY(std::abs(r.size_mm - 30 * 25.4 / 200) < 1e-9);
         QVERIFY(brush_named(listed, "丸", "細かい点") != nullptr);
         // read again with --replace: the group's brushes in their place, not twice
         std::tie(code, out) = cli_in(config, {QStringLiteral("brushes"), QStringLiteral("import-abr"), v2, QStringLiteral("--group"), QStringLiteral("丸"),
