@@ -27080,9 +27080,14 @@
       },
       "upstream_menu": null,
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "未着手",
+      "implementation_status": "実装済み（PC4 E5、未統合）",
       "acceptance_status": "未実施",
-      "evidence": [],
+      "evidence": [
+        "native/src/render/ops_paint_tools.cpp",
+        "native/src/render/paint_tools/effects.cpp",
+        "native/tests/unit/test_paint_tools.cpp",
+        "native/tests/contract/test_contract_paint_tools.cpp"
+      ],
       "pc0": {
         "date": "2026-10-16",
         "cpp_base": "962faa4",
@@ -27093,7 +27098,8 @@
         "tests": [],
         "gap": "背景消しゴム（サンプリング 連続/一度/背景色、制限 隣接/非隣接/エッジ検出、許容値、描画色を保護）がない",
         "note": "Genko の消しゴムは線を切る・画素を消すだけ。上流の算法は crates/paint/src/bg_erase.rs"
-      }
+      },
+      "remaining": "op の brush（本のダブのブラシ）は線全体に掛けるデュアルブラシ・テクスチャを使わない。窓でダブのブラシ（先端）を選ぶ欄は E2（ブラシのパネル）。上流の preset（プリセットの名前）は無い"
     },
     {
       "id": "paint.blur",
@@ -27108,9 +27114,15 @@
       },
       "upstream_menu": null,
       "genko_status": "一部（2026-10-16 照合）",
-      "implementation_status": "未着手",
+      "implementation_status": "実装済み（PC4 E5、未統合）",
       "acceptance_status": "未実施",
-      "evidence": [],
+      "evidence": [
+        "native/src/render/ops_paint_tools.cpp",
+        "native/src/render/paint_tools/effects.cpp",
+        "native/src/render/paint_tools/tone.cpp",
+        "native/tests/unit/test_paint_tools.cpp",
+        "native/tests/contract/test_contract_paint_tools.cpp"
+      ],
       "pc0": {
         "date": "2026-10-16",
         "cpp_base": "962faa4",
@@ -27128,7 +27140,8 @@
         ],
         "gap": "「色混ぜ」の「ぼかし」でなぞった所をぼかせる（強さ 0.05..1・太さ mm）。硬さ・流量・間隔・不透明度の指定がなく、結果は 8 ビット RGBA の貼り付けとして重なる。16/32 ビット・CMYK/Lab での動作がない（高精度の画素では未確認）",
         "note": "ラスタのダブ描画（paint.stroke）と共通化するのが自然"
-      }
+      },
+      "remaining": "op の brush（本のダブのブラシ）は線全体に掛けるデュアルブラシ・テクスチャを使わない。窓でダブのブラシ（先端）を選ぶ欄は E2（ブラシのパネル）"
     },
     {
       "id": "paint.bucket",
@@ -27189,9 +27202,15 @@
       },
       "upstream_menu": null,
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "未着手",
+      "implementation_status": "実装済み（PC4 E5、未統合）",
       "acceptance_status": "未実施",
-      "evidence": [],
+      "evidence": [
+        "native/src/render/ops_paint_tools.cpp",
+        "native/src/render/paint_tools/effects.cpp",
+        "native/src/render/paint_tools/tone.cpp",
+        "native/tests/unit/test_paint_tools.cpp",
+        "native/tests/contract/test_contract_paint_tools.cpp"
+      ],
       "pc0": {
         "date": "2026-10-16",
         "cpp_base": "962faa4",
@@ -27202,7 +27221,8 @@
         "tests": [],
         "gap": "焼き込みのブラシ（範囲 シャドウ/中間調/ハイライト・露光量・階調の保護）がない（焼き込みはレイヤーの描画モードとしてだけある）",
         "note": "paint.dodge と共通実装（符号違い）。上流は 8/16/32 ビット"
-      }
+      },
+      "remaining": "op の brush（本のダブのブラシ）は線全体に掛けるデュアルブラシ・テクスチャを使わない。窓でダブのブラシ（先端）を選ぶ欄は E2（ブラシのパネル）"
     },
     {
       "id": "paint.cloneStamp",
@@ -27252,9 +27272,15 @@
       },
       "upstream_menu": null,
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "未着手",
+      "implementation_status": "実装済み（PC4 E5、未統合）",
       "acceptance_status": "未実施",
-      "evidence": [],
+      "evidence": [
+        "native/src/render/ops_paint_tools.cpp",
+        "native/src/render/paint_tools/effects.cpp",
+        "native/tests/unit/test_paint_tools.cpp",
+        "native/tests/contract/test_contract_paint_tools.cpp",
+        "native/src/app/paint_tools.cpp"
+      ],
       "pc0": {
         "date": "2026-10-16",
         "cpp_base": "962faa4",
@@ -27265,7 +27291,8 @@
         "tests": [],
         "gap": "色の置き換えブラシ（色相/彩度/カラー/輝度、サンプリング、制限、許容値、アンチエイリアス）がない",
         "note": "近いもの: 線の編集の「選んだ線をペンの色にする」（ベクターの線の色替えで画素ではない）。上流の算法は crates/paint/src/replace.rs"
-      }
+      },
+      "remaining": "op の brush（本のダブのブラシ）は線全体に掛けるデュアルブラシ・テクスチャを使わない。窓でダブのブラシ（先端）を選ぶ欄は E2（ブラシのパネル）"
     },
     {
       "id": "paint.dodge",
@@ -27280,9 +27307,15 @@
       },
       "upstream_menu": null,
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "未着手",
+      "implementation_status": "実装済み（PC4 E5、未統合）",
       "acceptance_status": "未実施",
-      "evidence": [],
+      "evidence": [
+        "native/src/render/ops_paint_tools.cpp",
+        "native/src/render/paint_tools/effects.cpp",
+        "native/src/render/paint_tools/tone.cpp",
+        "native/tests/unit/test_paint_tools.cpp",
+        "native/tests/contract/test_contract_paint_tools.cpp"
+      ],
       "pc0": {
         "date": "2026-10-16",
         "cpp_base": "962faa4",
@@ -27293,7 +27326,8 @@
         "tests": [],
         "gap": "覆い焼きのブラシ（範囲 シャドウ/中間調/ハイライト・露光量・階調の保護）がない（覆い焼きはレイヤーの描画モードとしてだけある）",
         "note": "16/32 ビットで動かすには PC1 の土台（document:color-depth-model）が要る"
-      }
+      },
+      "remaining": "op の brush（本のダブのブラシ）は線全体に掛けるデュアルブラシ・テクスチャを使わない。窓でダブのブラシ（先端）を選ぶ欄は E2（ブラシのパネル）"
     },
     {
       "id": "paint.gradient",
@@ -27464,9 +27498,16 @@
       },
       "upstream_menu": null,
       "genko_status": "一部（2026-10-16 照合）",
-      "implementation_status": "未着手",
+      "implementation_status": "実装済み（PC4 E5、未統合）",
       "acceptance_status": "未実施",
-      "evidence": [],
+      "evidence": [
+        "native/src/render/ops_paint_tools.cpp",
+        "native/src/render/paint_tools/effects.cpp",
+        "native/src/app/paint_tools.cpp",
+        "native/tests/unit/test_paint_tools.cpp",
+        "native/tests/contract/test_contract_paint_tools.cpp",
+        "native/tests/gui/test_gui_paint_tools.cpp"
+      ],
       "pc0": {
         "date": "2026-10-16",
         "cpp_base": "962faa4",
@@ -27482,7 +27523,8 @@
         ],
         "gap": "ブラシの「下地混色」(mix)・「色の伸び」(stretch) で下の色を拾って運べる（線を色違いの小片に分ける方式）。ウェット・補充・流量、全レイヤーから取る、ストローク後に洗う/補充する、画素での混色がない。高精度の色・CMYK/Lab のページでは混色を断る",
         "note": "ラスタのブラシエンジン（paint.stroke）が前提。上流は crates/paint/src/mixer.rs"
-      }
+      },
+      "remaining": "op の brush（本のダブのブラシ）は線全体に掛けるデュアルブラシ・テクスチャを使わない。窓でダブのブラシ（先端）を選ぶ欄は E2（ブラシのパネル）。上流の preset（プリセットの名前）は無い（窓・CLI が設定を渡す）"
     },
     {
       "id": "paint.pencil",
@@ -27538,9 +27580,15 @@
       },
       "upstream_menu": null,
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "未着手",
+      "implementation_status": "実装済み（PC4 E5、未統合）",
       "acceptance_status": "未実施",
-      "evidence": [],
+      "evidence": [
+        "native/src/render/ops_paint_tools.cpp",
+        "native/src/render/paint_tools/effects.cpp",
+        "native/src/render/paint_tools/tone.cpp",
+        "native/tests/unit/test_paint_tools.cpp",
+        "native/tests/contract/test_contract_paint_tools.cpp"
+      ],
       "pc0": {
         "date": "2026-10-16",
         "cpp_base": "962faa4",
@@ -27553,7 +27601,8 @@
         "tests": [],
         "gap": "シャープのブラシ（強さ・ディテールを保護）がない。レイヤー・選択範囲全体のシャープのフィルター（filter_raster）はある",
         "note": ""
-      }
+      },
+      "remaining": "op の brush（本のダブのブラシ）は線全体に掛けるデュアルブラシ・テクスチャを使わない。窓でダブのブラシ（先端）を選ぶ欄は E2（ブラシのパネル）"
     },
     {
       "id": "paint.smudge",
@@ -27568,9 +27617,16 @@
       },
       "upstream_menu": null,
       "genko_status": "一部（2026-10-16 照合）",
-      "implementation_status": "未着手",
+      "implementation_status": "実装済み（PC4 E5、未統合）",
       "acceptance_status": "未実施",
-      "evidence": [],
+      "evidence": [
+        "native/src/render/ops_paint_tools.cpp",
+        "native/src/render/paint_tools/effects.cpp",
+        "native/src/render/retouch_dabs.cpp",
+        "native/src/render/ops_paint.cpp",
+        "native/tests/unit/test_paint_tools.cpp",
+        "native/tests/contract/test_contract_paint_tools.cpp"
+      ],
       "pc0": {
         "date": "2026-10-16",
         "cpp_base": "962faa4",
@@ -27587,7 +27643,8 @@
         ],
         "gap": "「色混ぜ」の「指先」で色をのばせる（強さ・太さ）。フィンガーペイント（描画色から始める）、硬さ・流量・間隔・不透明度の指定がない。8 ビット RGB の画素だけ（上流は 8/16/32 ビット・CMYK/Lab 等の各色モデルで動く）",
         "note": ""
-      }
+      },
+      "remaining": "op の brush（本のダブのブラシ）は線全体に掛けるデュアルブラシ・テクスチャを使わない。窓でダブのブラシ（先端）を選ぶ欄は E2（ブラシのパネル）。色混ぜ（smudge）の値の道は筆の箱を丸ごと float で持つ"
     },
     {
       "id": "paint.sponge",
@@ -27602,9 +27659,15 @@
       },
       "upstream_menu": null,
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "未着手",
+      "implementation_status": "実装済み（PC4 E5、未統合）",
       "acceptance_status": "未実施",
-      "evidence": [],
+      "evidence": [
+        "native/src/render/ops_paint_tools.cpp",
+        "native/src/render/paint_tools/effects.cpp",
+        "native/src/render/paint_tools/tone.cpp",
+        "native/tests/unit/test_paint_tools.cpp",
+        "native/tests/contract/test_contract_paint_tools.cpp"
+      ],
       "pc0": {
         "date": "2026-10-16",
         "cpp_base": "962faa4",
@@ -27615,7 +27678,8 @@
         "tests": [],
         "gap": "スポンジ（彩度を下げる/上げる・自然な彩度）のブラシがない",
         "note": ""
-      }
+      },
+      "remaining": "op の brush（本のダブのブラシ）は線全体に掛けるデュアルブラシ・テクスチャを使わない。窓でダブのブラシ（先端）を選ぶ欄は E2（ブラシのパネル）"
     },
     {
       "id": "paint.spotHealing",
@@ -39778,9 +39842,13 @@
       "kind": "tool",
       "upstream_source": "crates/ui-egui/src/state.rs",
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "未着手",
+      "implementation_status": "実装済み（PC4 E5、未統合）",
       "acceptance_status": "未実施",
-      "evidence": [],
+      "evidence": [
+        "native/src/app/paint_tools.cpp",
+        "native/src/app/paint_panels.cpp",
+        "native/tests/gui/test_gui_paint_tools.cpp"
+      ],
       "pc0": {
         "date": "2026-10-16",
         "cpp_base": "962faa4",
@@ -39791,7 +39859,8 @@
         "tests": [],
         "gap": "背景消しゴムの道具がない",
         "note": "エンジン側は paint.backgroundEraser（L）。ここは道具の画面分"
-      }
+      },
+      "remaining": "描いている間は効き目を見せない（線で見せ、離したら描く: 修復の道具と同じ）。窓は筆圧を使わない（Photoshop の既定）"
     },
     {
       "id": "tool:MagicEraser",
@@ -40066,9 +40135,13 @@
       "kind": "tool",
       "upstream_source": "crates/ui-egui/src/state.rs",
       "genko_status": "一部（2026-10-16 照合）",
-      "implementation_status": "未着手",
+      "implementation_status": "実装済み（PC4 E5、未統合）",
       "acceptance_status": "未実施",
-      "evidence": [],
+      "evidence": [
+        "native/src/app/paint_tools.cpp",
+        "native/src/app/paint_panels.cpp",
+        "native/tests/gui/test_gui_paint_tools.cpp"
+      ],
       "pc0": {
         "date": "2026-10-16",
         "cpp_base": "962faa4",
@@ -40084,16 +40157,21 @@
         ],
         "gap": "「色混ぜ」の道具で「ぼかし」を選べる。ぼかしツールとしての入口、強さ以外のオプション（硬さ・流量等）がない",
         "note": "エンジン側は paint.blur の行"
-      }
+      },
+      "remaining": "描いている間は効き目を見せない（線で見せ、離したら描く: 修復の道具と同じ）。窓は筆圧を使わない（Photoshop の既定）"
     },
     {
       "id": "tool:Sharpen",
       "kind": "tool",
       "upstream_source": "crates/ui-egui/src/state.rs",
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "未着手",
+      "implementation_status": "実装済み（PC4 E5、未統合）",
       "acceptance_status": "未実施",
-      "evidence": [],
+      "evidence": [
+        "native/src/app/paint_tools.cpp",
+        "native/src/app/paint_panels.cpp",
+        "native/tests/gui/test_gui_paint_tools.cpp"
+      ],
       "pc0": {
         "date": "2026-10-16",
         "cpp_base": "962faa4",
@@ -40104,16 +40182,21 @@
         "tests": [],
         "gap": "シャープの道具がない",
         "note": "エンジン側は paint.sharpen（M）。ここは道具の画面分"
-      }
+      },
+      "remaining": "描いている間は効き目を見せない（線で見せ、離したら描く: 修復の道具と同じ）。窓は筆圧を使わない（Photoshop の既定）"
     },
     {
       "id": "tool:Smudge",
       "kind": "tool",
       "upstream_source": "crates/ui-egui/src/state.rs",
       "genko_status": "一部（2026-10-16 照合）",
-      "implementation_status": "未着手",
+      "implementation_status": "実装済み（PC4 E5、未統合）",
       "acceptance_status": "未実施",
-      "evidence": [],
+      "evidence": [
+        "native/src/app/paint_tools.cpp",
+        "native/src/app/paint_panels.cpp",
+        "native/tests/gui/test_gui_paint_tools.cpp"
+      ],
       "pc0": {
         "date": "2026-10-16",
         "cpp_base": "962faa4",
@@ -40129,16 +40212,21 @@
         ],
         "gap": "「色混ぜ」の「指先」で色をのばせる。指先ツールとしての入口、フィンガーペイントのオプションがない",
         "note": "エンジン側は paint.smudge の行"
-      }
+      },
+      "remaining": "描いている間は効き目を見せない（線で見せ、離したら描く: 修復の道具と同じ）。窓は筆圧を使わない（Photoshop の既定）"
     },
     {
       "id": "tool:Dodge",
       "kind": "tool",
       "upstream_source": "crates/ui-egui/src/state.rs",
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "未着手",
+      "implementation_status": "実装済み（PC4 E5、未統合）",
       "acceptance_status": "未実施",
-      "evidence": [],
+      "evidence": [
+        "native/src/app/paint_tools.cpp",
+        "native/src/app/paint_panels.cpp",
+        "native/tests/gui/test_gui_paint_tools.cpp"
+      ],
       "pc0": {
         "date": "2026-10-16",
         "cpp_base": "962faa4",
@@ -40149,16 +40237,21 @@
         "tests": [],
         "gap": "覆い焼きの道具がない",
         "note": "エンジン側は paint.dodge（M）。ここは道具の画面分"
-      }
+      },
+      "remaining": "描いている間は効き目を見せない（線で見せ、離したら描く: 修復の道具と同じ）。窓は筆圧を使わない（Photoshop の既定）"
     },
     {
       "id": "tool:Burn",
       "kind": "tool",
       "upstream_source": "crates/ui-egui/src/state.rs",
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "未着手",
+      "implementation_status": "実装済み（PC4 E5、未統合）",
       "acceptance_status": "未実施",
-      "evidence": [],
+      "evidence": [
+        "native/src/app/paint_tools.cpp",
+        "native/src/app/paint_panels.cpp",
+        "native/tests/gui/test_gui_paint_tools.cpp"
+      ],
       "pc0": {
         "date": "2026-10-16",
         "cpp_base": "962faa4",
@@ -40169,16 +40262,21 @@
         "tests": [],
         "gap": "焼き込みの道具がない",
         "note": "エンジン側は paint.burn。ここは道具の画面分"
-      }
+      },
+      "remaining": "描いている間は効き目を見せない（線で見せ、離したら描く: 修復の道具と同じ）。窓は筆圧を使わない（Photoshop の既定）"
     },
     {
       "id": "tool:Sponge",
       "kind": "tool",
       "upstream_source": "crates/ui-egui/src/state.rs",
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "未着手",
+      "implementation_status": "実装済み（PC4 E5、未統合）",
       "acceptance_status": "未実施",
-      "evidence": [],
+      "evidence": [
+        "native/src/app/paint_tools.cpp",
+        "native/src/app/paint_panels.cpp",
+        "native/tests/gui/test_gui_paint_tools.cpp"
+      ],
       "pc0": {
         "date": "2026-10-16",
         "cpp_base": "962faa4",
@@ -40189,7 +40287,8 @@
         "tests": [],
         "gap": "スポンジの道具がない",
         "note": "エンジン側は paint.sponge（M）。ここは道具の画面分"
-      }
+      },
+      "remaining": "描いている間は効き目を見せない（線で見せ、離したら描く: 修復の道具と同じ）。窓は筆圧を使わない（Photoshop の既定）"
     },
     {
       "id": "tool:QuickSelection",

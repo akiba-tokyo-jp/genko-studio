@@ -110,6 +110,10 @@ const std::map<std::string, const char*>& names() {
         {"render_picture", "描画した"}, {"vanishing_point", "消点で描いた"},
         // (PC4 F-b: render/ops_formats; 復帰 is the session's, app/session.cpp Session::revert)
         {"set_file_info", "ファイル情報を変えた"}, {"revert", "復帰"},
+        // (PC4 E5: render/ops_paint_tools)
+        {"dodge", "覆い焼きした"}, {"burn", "焼き込んだ"}, {"sponge", "スポンジで直した"}, {"blur_brush", "ぼかした"},
+        {"sharpen_brush", "シャープにした"}, {"smudge_brush", "指先でのばした"}, {"mixer_brush", "混合ブラシで描いた"},
+        {"background_eraser", "背景を消した"}, {"color_replacement", "色を置き換えた"},
     };
     return table;
 }

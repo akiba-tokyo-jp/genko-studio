@@ -223,6 +223,39 @@ public:
     CloneSourcePanel* clone_source_panel() const { return clone_source_panel_; }
     // ヒストリーブラシのソース: 履歴's row painted back from (none: （はじめ）, the first row).
     std::optional<int> history_brush_row;
+    // 画素を変える筆 (PC4 E5, paint_tools.cpp): ぼかしツール・シャープツール・指先ツール・覆い焼きツール・焼き込みツール・スポンジ
+    // ツール・混合ブラシツール・背景消しゴムツール・色の置き換えツール — the brush (直径 mm; 硬さ・間隔 %) and each tool's own
+    // settings (Photoshop's options bar), and the Mixer Brush's paint (the reservoir the last stroke left: the window's, as
+    // Photoshop keeps it; the op takes and gives it back).
+    struct PixelToolSettings {
+        double size_mm = 5;
+        double hardness = 0;
+        double spacing = 25;
+        double strength = 50;          // (ぼかし・シャープ・指先: 強さ %)
+        bool protect_detail = true;    // (シャープ: ディテールを保持)
+        bool finger_painting = false;  // (指先: フィンガーペイント)
+        std::string range = "midtones";  // (覆い焼き・焼き込み: 範囲 shadows | midtones | highlights)
+        double exposure = 50;           // (覆い焼き・焼き込み: 露光量 %)
+        bool protect_tones = true;      // (覆い焼き・焼き込み: トーンを保護)
+        std::string sponge_mode = "desaturate";  // (スポンジ: モード desaturate | saturate)
+        double sponge_flow = 50;        // (スポンジ: 流量 %)
+        bool vibrance = true;           // (スポンジ: 自然な彩度)
+        double wet = 50, load = 50, mix = 50, mixer_flow = 100;  // (混合ブラシ: ウェット・補充量・ミックス・流量 %)
+        bool load_after = true, clean_after = true, sample_all = false;  // (ストローク後にブラシを補充・クリーン、全レイヤーを対象)
+        std::string sampling = "continuous";  // (背景消しゴム・色の置き換え: サンプル continuous | once | swatch)
+        std::string limits = "contiguous";    // (制限 discontiguous | contiguous | find_edges)
+        double eraser_tolerance = 50;   // (背景消しゴム: 許容値 %)
+        bool protect_foreground = false;  // (背景消しゴム: 描画色を保護)
+        std::string replace_mode = "color";  // (色の置き換え: モード hue | saturation | color | luminosity)
+        double replace_tolerance = 30;  // (色の置き換え: 許容値 %)
+        bool antialias = true;          // (色の置き換え: アンチエイリアス)
+    };
+    PixelToolSettings pixel_tool_settings;
+    // The Mixer Brush's paint after the last stroke (the op's "reservoir"; null: clean and unloaded).
+    core::Json mixer_reservoir;
+    // 現在のブラシに補充 (the 描画色, full) and ブラシをクリーン (no paint) — the Mixer Brush's buttons.
+    void mixer_load();
+    void mixer_clean();
     // コンテンツに応じた塗りつぶし… (編集; retouch_tools.cpp).
     void content_aware_fill_dialog();
     // PC3 B3 (main_window_smart_select.cpp): クイック選択ツール's エッジを強調, and whether the smart selection (クイック選択・
@@ -1104,6 +1137,13 @@ private:
     void clone_source_picked(double x_mm, double y_mm);
     void clone_overlay_picture();
     std::optional<core::Json> history_brush_from(const core::Page& page, const core::Layer& layer);
+    // PC4 E5 (paint_tools.cpp): the brushes that change pixels — their tools, settings page, a stroke made their op (the
+    // layer's lines and pictures become its pixels first: asked once a layer, pixel_tool_bakes_ok), the Mixer Brush's paint.
+    void build_paint_tool_actions();
+    void build_paint_tool_pages(ToolSettings* ts);
+    bool pixel_tool_stroke(const StrokeInput& stroke, const core::Page& page, const core::Layer& layer);
+    bool pixel_tool_bakes_ok(const core::Page& page, const core::Layer& layer, const QString& tool);
+    void mixer_shown();
     bool selection_context_menu(const QPoint& global);
     void build_selection_pages(ToolSettings* ts);
     void color_range_dialog();
@@ -1300,6 +1340,9 @@ private:
     QSlider* eraser_opacity_ = nullptr;
     QSlider* eraser_flow_ = nullptr;
     std::set<std::string> blend_baked_;  // (PC4 E1: the paint layers whose lines became pixels by a blend, asked: page/layer)
+    QLabel* mixer_paint_ = nullptr;  // (PC4 E5: the Mixer Brush's paint shown on its settings page)
+    std::string mixer_space_;  // (PC4 E5, review P3-12: the colours the paint is in — the page's RGB profile, "" sRGB)
+    core::Json last_results_ = core::Json::array();  // (PC4 E5: what the ops apply_ops applied last reported — the Mixer Brush's reservoir)
     QCheckBox* eraser_balloons_ = nullptr;  // フキダシを削る (the eraser cuts the balloons it goes over)
     QComboBox* frame_mode_ = nullptr;
     QComboBox* marquee_mode_ = nullptr;

@@ -474,6 +474,7 @@ void MainWindow::build_actions() {
     build_path_actions();       // (vector@1, PC3 C-a: ペンツール, パス選択ツール, ベクトルマスク: main_window_paths.cpp)
     build_page_size_actions();  // (PC3 C-e: 画像解像度…, カンバスサイズ…, 画像の回転, 切り抜き(ツール): main_window_page_size.cpp)
     build_retouch_actions();    // (PC3 B4: the retouching tools, コンテンツに応じた塗りつぶし…: retouch_tools.cpp)
+    build_paint_tool_actions();  // (PC4 E5: the brushes that change pixels — ぼかし・シャープ・指先・覆い焼き・焼き込み・スポンジ・混合ブラシ・背景消しゴム・色の置き換え: paint_tools.cpp)
     build_shape_actions();      // (pen-shapes@1, PC3 C-b: the shape tools, シェイプを結合…: main_window_shapes.cpp)
     build_pattern_actions();    // (PC4 E3: パターンを定義…, パターンのレイヤー…, パターンプレビュー: main_window_patterns.cpp)
     build_align_actions();      // (PC3 C-d: 重ね順・整列・分布・リンク・ロック, スナップ (with 定規's グリッドにスナップ), the move tool's: main_window_align.cpp)
@@ -1000,6 +1001,7 @@ void MainWindow::on_stroke(const StrokeInput& stroke) {
         return;
     }
     if (retouch_stroke(stroke, *page, *layer)) return;  // (PC3 B4: the retouching brushes, retouch_tools.cpp)
+    if (pixel_tool_stroke(stroke, *page, *layer)) return;  // (PC4 E5: the brushes that change pixels, paint_tools.cpp)
     if (paint_stroke(stroke, *page, *layer)) return;  // (透明色, ゆがみ, 色混ぜ: main_window_paint.cpp)
     const bool rulers = canvas_->snap_rulers && page->rulers.is_array() && !page->rulers.empty();
     if (stroke.tool == QLatin1String("eraser")) {

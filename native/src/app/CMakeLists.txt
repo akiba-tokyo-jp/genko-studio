@@ -164,6 +164,8 @@ genko_library(genko_app
     main_window_patterns.cpp
     # PC4 E4: グラデーション (the panel, the library and the current gradient, the グラデーションエディター)
     gradients_panel.cpp
+    # PC4 E5: the brushes that change pixels (ぼかし・シャープ・指先・覆い焼き・焼き込み・スポンジ・混合ブラシ・背景消しゴム・色の置き換え)
+    paint_tools.cpp
     ${GENKO_APP_RESOURCES}
     ${GENKO_APP_FONTS}
   PUBLIC_DEPS genko_core genko_storage genko_render genko_render_ops genko_formats genko_service Qt6::Core Qt6::Gui Qt6::Widgets Qt6::Svg Qt6::Concurrent

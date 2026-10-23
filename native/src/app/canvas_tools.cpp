@@ -50,7 +50,8 @@ std::optional<core::vector::Path> tool_figure(const QString& kind, const std::ar
 
 bool PageCanvas::is_stroke_tool(const QString& tool) {
     return draws_line(tool) || tool == QLatin1String("eraser") || tool == QLatin1String("blend") || tool == QLatin1String("liquify") ||
-           is_retouch_tool(tool);  // (PC3 B4: the retouching brushes, retouch_tools.cpp)
+           is_retouch_tool(tool) ||  // (PC3 B4: the retouching brushes, retouch_tools.cpp)
+           is_pixel_tool(tool);      // (PC4 E5: the brushes that change pixels, paint_tools.cpp)
 }
 
 bool PageCanvas::draws_line(const QString& tool) { return tool == QLatin1String("pen") || tool == QLatin1String("pencil"); }

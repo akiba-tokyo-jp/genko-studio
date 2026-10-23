@@ -251,9 +251,12 @@ std::optional<std::size_t> plate_index(const Page& page, std::string_view name) 
 }
 
 bool channel_target_op(std::string_view op) {
-    static constexpr std::array<std::string_view, 15> kOps{"add_stroke", "erase", "erase_raster", "fill", "fill_area", "fill_enclosed",
+    static constexpr std::array<std::string_view, 24> kOps{"add_stroke", "erase", "erase_raster", "fill", "fill_area", "fill_enclosed",
                                                          "flood_fill", "gradient_fill", "filter_raster", "delete_area", "transform_area",
-                                                         "smudge", "liquify", "add_shape", "fill_gaps"};
+                                                         "smudge", "liquify", "add_shape", "fill_gaps",
+                                                         // (PC4 E5: the brushes that change pixels paint a channel or a mask too)
+                                                         "dodge", "burn", "sponge", "blur_brush", "sharpen_brush", "smudge_brush", "mixer_brush",
+                                                         "background_eraser", "color_replacement"};
     return std::find(kOps.begin(), kOps.end(), op) != kOps.end();
 }
 

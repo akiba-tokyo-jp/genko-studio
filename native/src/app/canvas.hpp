@@ -253,6 +253,11 @@ public:
     // (clone), ヒストリーブラシツール (historybrush); the two that sample a source (heal, clone: Alt+click sets it).
     static bool is_retouch_tool(const QString& tool);
     static bool is_clone_tool(const QString& tool);
+    // 画素を変える筆 (PC4 E5, app/paint_tools.cpp): ぼかしツール (blurtool), シャープツール (sharpentool), 指先ツール (smudgetool),
+    // 覆い焼きツール (dodge), 焼き込みツール (burn), スポンジツール (sponge), 混合ブラシツール (mixer), 背景消しゴムツール (bgeraser),
+    // 色の置き換えツール (colorreplace); their brush's diameter (mm).
+    static bool is_pixel_tool(const QString& tool);
+    double pixel_tool_mm = 5.0;
     // Their brush's diameter (mm), and the clone source as the window keeps it (コピーソース): where it was set (mm), the
     // destination paired with it by the first stroke after (調整あり; none: the stroke's own start), how the destination's
     // offsets map to the source's (W/H, rotation, flips: clone_matrix's), and the overlay — a picture of what is sampled

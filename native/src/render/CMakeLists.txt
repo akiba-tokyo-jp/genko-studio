@@ -207,6 +207,10 @@ genko_library(genko_render
     paint_fill.cpp
     gradient_presets.cpp
     grd.cpp
+    # PC4 E5 (画素の道具: 覆い焼き・焼き込み・スポンジ・ぼかし・シャープ・指先・混合ブラシ・背景消しゴム・色の置き換え。修復の筆の引数は B4 と共通)
+    brushwork.cpp
+    paint_tools/tone.cpp
+    paint_tools/effects.cpp
     ${GENKO_MATERIAL_RESOURCES}
     ${GENKO_TEXT_RESOURCES}
   PUBLIC_DEPS genko_core Qt6::Core

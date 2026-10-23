@@ -701,7 +701,8 @@ bool MainWindow::apply_ops(const Json& ops, const std::vector<std::string>& ids)
     clock.start();
     try {
         // (channels@1: the pixel ops on the channel targeted; smart-objects@1: in a contents' tab, on its contents)
-        session_->apply(with_contents_target(with_channel_target(ops)), ids);
+        last_results_ = core::Json::array();
+        last_results_ = session_->apply(with_contents_target(with_channel_target(ops)), ids).results;  // (PC4 E5: what the ops reported)
     } catch (const core::Error& error) {
         flash(wording::error(QString::fromUtf8(error.what())), 6000, true);
         return false;
@@ -741,6 +742,7 @@ void MainWindow::on_book_changed(const BookChange& change) {
     const core::Document& b = book();
     if (page_index_ >= static_cast<int>(b.pages.size())) page_index_ = std::max(0, static_cast<int>(b.pages.size()) - 1);
     if (change.why == BookChange::Why::Undo || change.why == BookChange::Why::Redo) perf::event("undo_shown_model");
+    if (change.why == BookChange::Why::Undo) blend_baked_.clear();  // (PC4 E5, review P3-9: lines put back are asked about again)
     if (pages_->count() != static_cast<int>(b.pages.size())) {
         reload_pages();
     } else {

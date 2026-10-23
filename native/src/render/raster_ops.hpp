@@ -49,6 +49,11 @@ void register_raster_ops(core::OpRegistry& registry);
 // Adds the paint ops of M3④ (add_shape, smudge, liquify: render/ops_paint.cpp).
 void register_paint_ops(core::OpRegistry& registry);
 
+// PC4 E5 (design section E 0.4): whether 色混ぜ (smudge) works the layer's own values — a precise paint layer's samples, an
+// ink paint layer's inks — rather than laying a 200 dpi picture (render/ops_paint.cpp); such a layer is not lent the 8-bit
+// pictures of an ink or profiled page either (paints_layer_values).
+bool smudges_values(const core::Page& page, const core::Layer& layer);
+
 // ops.shape_points: a figure's outline (mm) and whether it is closed — line, polyline, curve (Catmull–Rom through the
 // points) from op["points"]; rect (op["radius_mm"] rounds its corners), ellipse, polygon (op["sides"], op["angle"]) from
 // op["box"]. The 図形 tool draws its preview with it. Throws core::OpError.

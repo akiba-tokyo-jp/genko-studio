@@ -359,15 +359,13 @@ private slots:
         }
     }
 
-    // The drawing tools' ops are frames until their group writes them. (The patterns' three ops are PC4 E3's now — what
-    // they do is test_contract_patterns' —: an op of them without its keys is refused as theirs, not as a frame.)
+    // The drawing tools' ops were frames until their groups wrote them. (The patterns' three ops are PC4 E3's, the brushes
+    // that change pixels PC4 E5's — what they do is test_contract_patterns' and test_paint_tools' —: an op of them without
+    // its keys is refused as theirs, not as a frame.)
     void theNewOpsAreFrames() {
         const core::Document doc = book();
         for (const char* op : {"dodge", "burn", "sponge", "blur_brush", "sharpen_brush", "smudge_brush", "mixer_brush", "background_eraser",
-                               "color_replacement"}) {
-            QCOMPARE(refusal(doc, Json{{"op", op}, {"page", 1}}), "not_yet_ported: ops[0] " + std::string(op) + ": " + op + " is not in the C++ build yet (PC4 E5)");
-        }
-        for (const char* op : {"add_pattern", "rename_pattern", "delete_pattern"}) {
+                               "color_replacement", "add_pattern", "rename_pattern", "delete_pattern"}) {
             const std::string why = refusal(doc, Json{{"op", op}});
             QVERIFY2(!why.empty() && why.find("not_yet_ported") == std::string::npos && why.find("not in the C++ build") == std::string::npos, why.c_str());
         }
