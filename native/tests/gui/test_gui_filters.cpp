@@ -9,11 +9,13 @@
 // each time ノイズを加える… is applied, ぼかし（レンズ）… on a smart object without the layer mask as its depth. D2: its commands lit
 // — 変形・ピクセレート・表現手法 — in Photoshop's words, 渦巻き…'s window, ぶれ without one, シアー…'s curve, 置き換え…'s map (a layer
 // of the page; on a smart object made the book's file). D6: its commands lit — レンズ補正…・広角補正…・消点… — and their own
-// windows (the result on their pictures, 角度補正ツール, a constraint drawn, a plane made and a layer pasted on it).
+// windows (the result on their pictures, 角度補正ツール, a constraint drawn, a plane made and a layer pasted on it). D5: Camera
+// Raw フィルター… lit — its window's tabs, its result on its picture, 補正前, 初期化, one op and one Undo, a smart filter.
 
 #include <QtTest>
 #include <QAction>
 #include <QApplication>
+#include <QCheckBox>
 #include <QComboBox>
 #include <QDialog>
 #include <QDialogButtonBox>
@@ -245,9 +247,11 @@ private slots:
                                "act_filter_stylize_diffuse", "act_filter_stylize_wind", "act_filter_stylize_find_edges", "act_filter_stylize_trace_contour",
                                "act_filter_stylize_oil_paint",
                                // (D6: レンズ補正・広角補正・消点)
-                               "act_filter_lens_correction", "act_filter_adaptive_wide_angle", "act_filter_vanishing_point"})
+                               "act_filter_lens_correction", "act_filter_adaptive_wide_angle", "act_filter_vanishing_point",
+                               // (D5: Camera Raw フィルター)
+                               "act_filter_camera_raw"})
             QVERIFY2(book.act(on)->isEnabled(), on);
-        for (const char* off : {"act_filter_render_fibers", "act_filter_camera_raw", "act_filter_render_tree", "act_filter_blur_tilt_shift", "act_filter_last"})
+        for (const char* off : {"act_filter_render_fibers", "act_filter_render_tree", "act_filter_blur_tilt_shift", "act_filter_last"})
             QVERIFY2(!book.act(off)->isEnabled(), off);
         // 履歴's words of the new ops
         QCOMPARE(app::history::describe(Json::array({Json{{"op", "render_picture"}}})), QStringLiteral("描画した"));
@@ -1087,6 +1091,87 @@ private slots:
         emit book.menu("menu_filter")->aboutToShow();
         QVERIFY(!book.act("act_filter_vanishing_point")->isEnabled());
         QVERIFY(book.act("act_filter_lens_correction")->isEnabled());
+    }
+
+    // D5: Camera Raw フィルター…'s window (Ctrl+Shift+A) — its six tabs in Camera Raw's words, the result on its picture (made
+    // on a thread), 補正前, 初期化 setting the sliders back, OK one op (one Undo), キャンセル nothing; on a smart object a smart
+    // filter, its window again from the layer panel with its settings (unchanged: nothing sent).
+    void theCameraRawWindow() {
+        Book book;
+        gui_test::Answers answers;
+        book.window->set_target_layer("pic");
+        emit book.menu("menu_filter")->aboutToShow();
+        QVERIFY(book.act("act_filter_camera_raw")->isEnabled());
+        const core::Bytes before = book.layer("pic")->raster_png;
+        QStringList titles;
+        int previews = 0;
+        double after_reset = -1;
+        bool before_shown = false;
+        answers.responder->exec = answer(QStringLiteral("camera_raw"), [&](QDialog* d) {
+            QCOMPARE(d->windowTitle(), QStringLiteral("Camera Raw フィルター"));
+            auto* tabs = d->findChild<QTabWidget*>(QStringLiteral("camera_raw_tabs"));
+            QVERIFY(tabs != nullptr);
+            for (int i = 0; i < tabs->count(); ++i) titles << tabs->tabText(i);
+            QWidget* panel = d->findChild<QWidget*>(QStringLiteral("camera_raw_panel"));
+            QVERIFY(panel != nullptr);
+            QTRY_VERIFY(panel->property("previews").toInt() > 0);  // (its picture made, the first result shown)
+            const int first = panel->property("previews").toInt();
+            auto* exposure = d->findChild<QDoubleSpinBox*>(QStringLiteral("camera_raw_exposure"));
+            QVERIFY(exposure != nullptr);
+            exposure->setValue(1.5);
+            d->findChild<QDoubleSpinBox*>(QStringLiteral("camera_raw_vignette_amount"))->setValue(-60);
+            QTRY_VERIFY(panel->property("previews").toInt() > first);
+            previews = panel->property("previews").toInt();
+            // 初期化: every slider back to its default
+            d->findChild<QPushButton*>(QStringLiteral("camera_raw_reset"))->click();
+            after_reset = exposure->value() + d->findChild<QDoubleSpinBox*>(QStringLiteral("camera_raw_vignette_amount"))->value();
+            exposure->setValue(1.0);
+            auto* shown_before = d->findChild<QCheckBox*>(QStringLiteral("camera_raw_before"));
+            shown_before->setChecked(true);
+            before_shown = shown_before->isChecked();
+        });
+        book.act("act_filter_camera_raw")->trigger();
+        QCOMPARE(titles, (QStringList{QStringLiteral("基本補正"), QStringLiteral("トーンカーブ"), QStringLiteral("ディテール"), QStringLiteral("カラーミキサー"),
+                                      QStringLiteral("カラーグレーディング"), QStringLiteral("効果")}));
+        QVERIFY(previews > 1);
+        QCOMPARE(after_reset, 0.0);
+        QVERIFY(before_shown);
+        QVERIFY(book.layer("pic")->raster_png != before);
+        // its op: the settings in their normal form (exposure 1, the rest at the defaults) — the op's pixels
+        const auto expected = core::CommandBus(render::ops_registry())
+                                  .apply(book_doc(), Json::array({Json{{"op", "filter_raster"}, {"page", 1}, {"id", "pic"}, {"kind", "camera_raw"}, {"exposure", 1.0}}}),
+                                         core::Actor("human:tester"))
+                                  .doc;
+        for (const auto& l : expected.page(0).layers)
+            if (l.id == "pic") QCOMPARE(*book.layer("pic")->raster_png, *l.raster_png);
+        // one Undo
+        book.window->action(QStringLiteral("act_undo"))->trigger();
+        QCOMPARE(book.layer("pic")->raster_png, before);
+        // キャンセル: nothing
+        answers.responder->exec = [](QDialog*) { return int(QDialog::Rejected); };
+        book.act("act_filter_camera_raw")->trigger();
+        QCOMPARE(book.layer("pic")->raster_png, before);
+        // on a smart object: a smart filter; its window again from the layer panel shows its settings
+        QVERIFY(book.window->apply_ops(Json::array({Json{{"op", "smart_convert"}, {"page", 1}, {"ids", Json::array({"pic"})}, {"new_id", "so"}}})));
+        book.window->set_target_layer("so");
+        emit book.menu("menu_filter")->aboutToShow();
+        QVERIFY(book.act("act_filter_camera_raw")->isEnabled());
+        answers.responder->exec = answer(QStringLiteral("camera_raw"), [](QDialog* d) {
+            d->findChild<QDoubleSpinBox*>(QStringLiteral("camera_raw_saturation"))->setValue(-100);
+        });
+        book.act("act_filter_camera_raw")->trigger();
+        const Json filters = (*book.layer("so")->smart)["filters"];
+        QCOMPARE(filters.size(), std::size_t(1));
+        QCOMPARE(filters[0]["kind"], Json("camera_raw"));
+        QCOMPARE(filters[0]["params"]["saturation"], Json(-100));
+        double saturation = 0;
+        answers.responder->exec = answer(QStringLiteral("camera_raw"), [&](QDialog* d) {
+            saturation = d->findChild<QDoubleSpinBox*>(QStringLiteral("camera_raw_saturation"))->value();
+        });
+        const auto before_edit = book.session->snapshot();
+        book.window->layer_panel()->edit_smart_filter(0);
+        QCOMPARE(saturation, -100.0);
+        QVERIFY(book.session->snapshot() == before_edit);  // (unchanged: nothing sent)
     }
 };
 

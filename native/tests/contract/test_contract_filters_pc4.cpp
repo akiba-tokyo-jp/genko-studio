@@ -134,7 +134,7 @@ private slots:
         QCOMPARE(layer_in(channelled, 1, "pic1")["asset"], layer_in(with_channel, 1, "pic1")["asset"]);
         QVERIFY2(channelled["pages"][0]["channels"] != with_channel["pages"][0]["channels"], channelled["pages"][0]["channels"].dump().c_str());
         // refused: a kind not in this build's table yet, a setting the kind has not
-        const Json unknown = apply(book, QStringLiteral("unknown.json"), Json::array({Json{{"op", "filter_raster"}, {"page", 1}, {"id", "pic1"}, {"kind", "camera_raw"}}}), &exit);
+        const Json unknown = apply(book, QStringLiteral("unknown.json"), Json::array({Json{{"op", "filter_raster"}, {"page", 1}, {"id", "pic1"}, {"kind", "neural_style_transfer"}}}), &exit);
         QVERIFY2(exit != 0 && !unknown.value("ok", true), unknown.dump().c_str());
         const Json wrong = apply(book, QStringLiteral("wrong.json"),
                                  Json::array({Json{{"op", "filter_raster"}, {"page", 1}, {"id", "pic1"}, {"kind", "blur_gaussian"}, {"sigma", 2}}}), &exit);
