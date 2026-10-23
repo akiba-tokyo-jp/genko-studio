@@ -367,7 +367,10 @@ private slots:
         // and the 4 of PC4 E2 (SPEC COLOR-09「ブラシのプリセット」「プリセットマネージャー」) — 編集 → ブラシを定義… (act_define_brush)
         // and プリセット ▸ プリセットマネージャー…・プリセットを移行・プリセットを書き出し／読み込み… (act_preset_manager,
         // act_migrate_presets, act_export_import_presets) — theirs (test_gui_brush_settings).
-        QCOMPARE(w->actions_by_name().size(), std::size_t{562});
+        // and the 3 of PC4 F-c (SPEC FILE-01) — ファイル → 書き出し → レイヤーからファイル… (act_layers_to_files), レイヤー の
+        // PNG としてクイック書き出し・書き出し形式… (act_layer_quick_export_png, act_layer_export_as) — theirs (test_gui_output), which
+        // connects F-0's four frames of 書き出し ▸ too.
+        QCOMPARE(w->actions_by_name().size(), std::size_t{565});
         QVERIFY(w->action("act_chat_approval"));
         QVERIFY(w->action("act_style"));
         QVERIFY(w->action("act_exposure"));
@@ -444,12 +447,12 @@ private slots:
         QVERIFY(exports != nullptr);
         QCOMPARE(items(exports), (QStringList{QStringLiteral("PNG としてクイック書き出し"), QStringLiteral("書き出し形式…"), QStringLiteral("|"),
                                              QStringLiteral("書き出しの環境設定…"), QStringLiteral("|"), QStringLiteral("Web 用に保存（従来）…"), QStringLiteral("|"),
-                                             QStringLiteral("原稿を書き出す…"), QStringLiteral("|"), QStringLiteral("パスを Illustrator へ…"),
-                                             QStringLiteral("カラールックアップテーブル…")}));
+                                             QStringLiteral("原稿を書き出す…"), QStringLiteral("|"), QStringLiteral("レイヤーからファイル…"),
+                                             QStringLiteral("パスを Illustrator へ…"), QStringLiteral("カラールックアップテーブル…")}));
         QCOMPARE(studio.act("act_export")->shortcuts(), QList<QKeySequence>{QKeySequence(QStringLiteral("Ctrl+E"))});
         QCOMPARE(studio.act("act_print")->text(), QStringLiteral("プリント…"));
-        // (節 F's new ones: Photoshop's keys — F-b's connected (PC4 F-b: test_gui_file says what they do) —; F-c's each say
-        // they are not in this build yet, the book unchanged)
+        // (節 F's new ones: Photoshop's keys — F-b's connected (PC4 F-b: test_gui_file says what they do), F-c's too (PC4 F-c:
+        // test_gui_output) —; F-c's open their windows, the book unchanged when they are closed)
         const std::vector<std::pair<const char*, const char*>> connected{
             {"act_open_as", "Ctrl+Alt+Shift+O"}, {"act_close_all", "Ctrl+Alt+W"}, {"act_close_others", "Ctrl+Alt+P"},
             {"act_save_copy", "Ctrl+Alt+S"},     {"act_revert", "F12"},           {"act_file_info", "Ctrl+Alt+Shift+I"}};
@@ -466,8 +469,8 @@ private slots:
             QAction* a = studio.act(name);
             QVERIFY2(a != nullptr, name);
             QCOMPARE(a->shortcuts(), *key == '\0' ? QList<QKeySequence>() : QList<QKeySequence>{QKeySequence(QString::fromLatin1(key))});
-            a->trigger();
-            QVERIFY2(w->last_notice().contains(a->text()) && w->last_notice().contains(QStringLiteral("まだ使えません")), qPrintable(w->last_notice()));
+            a->trigger();  // (its window shut, or — クイック書き出し — no place given: nothing written)
+            QVERIFY2(!w->last_notice().contains(QStringLiteral("まだ使えません")), qPrintable(w->last_notice()));
         }
         QCOMPARE(studio.doc().revision, revision);
         QCOMPARE(w->documents().size(), books);

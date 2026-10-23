@@ -1,6 +1,7 @@
 // 環境設定 (Python's genko/app/preferences.py).
 
 #include "app/preferences.hpp"
+#include "app/export_as_dialog.hpp"
 
 #include <QAction>
 #include <QApplication>
@@ -786,6 +787,9 @@ PreferencesDialog::PreferencesDialog(MainWindow* window) : QDialog(window), wind
         show_checker();
     }
     tabs->addTab(files_page, QStringLiteral("ファイル管理"));
+    // 書き出し (PC4 F-c, edit.preferences.export: the same values as ファイル → 書き出し → 書き出しの環境設定…)
+    export_form = new ExportPreferencesForm(export_preferences());
+    tabs->addTab(export_form, QStringLiteral("書き出し"));
     auto* buttons = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel);
     buttons->button(QDialogButtonBox::Ok)->setText(QStringLiteral("決める"));
     buttons->button(QDialogButtonBox::Cancel)->setText(QStringLiteral("やめる"));
@@ -798,7 +802,7 @@ PreferencesDialog::PreferencesDialog(MainWindow* window) : QDialog(window), wind
     pages_list->setObjectName(QStringLiteral("prefsNav"));
     pages_list->setFixedWidth(150);
     int page = 0;
-    for (const char* picture : {"search", "pen", "settings", "kind_tone", "open"}) {
+    for (const char* picture : {"search", "pen", "settings", "kind_tone", "open", "export"}) {
         pages_list->addItem(new QListWidgetItem(icons::icon(picture), tabs->tabText(page++)));
     }
     connect(pages_list, &QListWidget::currentRowChanged, tabs, &QTabWidget::setCurrentIndex);
@@ -943,6 +947,7 @@ void PreferencesDialog::save() {
     store->setValue(QStringLiteral("files/recent_count"), recent_count->value());
     store->setValue(QStringLiteral("files/lowercase_extension"), lowercase_extension->isChecked() ? QStringLiteral("true") : QStringLiteral("false"));
     store->setValue(QStringLiteral("files/ignore_exif_profile"), ignore_exif_profile->isChecked() ? QStringLiteral("true") : QStringLiteral("false"));
+    set_export_preferences(export_form->value());  // (PC4 F-c: 書き出し)
     store->setValue(QStringLiteral("view/checker_size"), checker_size->currentData());
     store->setValue(QStringLiteral("view/checker_colors"), checker_colours->currentData());
     store->setValue(QStringLiteral("view/checker_light"), checker_light->property("colour").value<QColor>().name());

@@ -161,6 +161,10 @@ genko_library(genko_app
     # PC4 F-b: 開く…・指定形式で開く… (Genko's own open window), ファイル情報…
     open_dialog.cpp
     file_info_dialog.cpp
+    # PC4 F-c: ファイル → 書き出し ▸ (書き出し形式…・書き出しの環境設定…・Web 用に保存（従来）…・クイック書き出し・レイヤーからファイル…) and レイヤー's
+    main_window_export.cpp
+    export_as_dialog.cpp
+    save_for_web_dialog.cpp
     # PC4 E-0: the drawing tools' groups (the ツール menu, the palette's long press) and the frames of their panels
     paint_panels.cpp
     # PC4 E3: the Patterns panel, パターンを定義…, the pattern fill layer, パターンプレビュー

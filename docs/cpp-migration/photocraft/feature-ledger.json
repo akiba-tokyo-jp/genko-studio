@@ -3063,9 +3063,13 @@
         "alternate_menus": []
       },
       "genko_status": "一部（2026-10-16 照合）",
-      "implementation_status": "未着手",
+      "implementation_status": "実装済み（PC4 F-c、未統合）",
       "acceptance_status": "未実施",
-      "evidence": [],
+      "evidence": [
+        "native/src/app/export_as_dialog.cpp",
+        "native/src/app/preferences.cpp",
+        "native/tests/gui/test_gui_output.cpp"
+      ],
       "pc0": {
         "date": "2026-10-16",
         "cpp_base": "962faa4",
@@ -6184,9 +6188,17 @@
         "alternate_menus": []
       },
       "genko_status": "一部（2026-10-16 照合）",
-      "implementation_status": "未着手",
+      "implementation_status": "実装済み（PC4 F-c、未統合）",
       "acceptance_status": "未実施",
-      "evidence": [],
+      "evidence": [
+        "native/src/formats/copy.cpp",
+        "native/src/render/codecs/resize.cpp",
+        "native/src/app/export_as_dialog.cpp",
+        "native/src/app/main_window_export.cpp",
+        "native/src/api/cli.cpp",
+        "native/tests/contract/test_contract_copy.cpp",
+        "native/tests/gui/test_gui_output.cpp"
+      ],
       "pc0": {
         "date": "2026-10-16",
         "cpp_base": "962faa4",
@@ -6204,7 +6216,8 @@
         ],
         "gap": "「書き出し…」はあるが PNG/JPG/WebP（可逆）/TIFF を倍率（%）・透明の有無・品質で 1 枚書き出す形でない（dpi・範囲・色で指定）。可逆 WebP なし、ファイルサイズの見積もり表示なし",
         "note": ""
-      }
+      },
+      "remaining": "「選んだページ」は複数選択が無いのですべてのページ（CLI は --pages）"
     },
     {
       "id": "file.export.exportPreferences",
@@ -6234,9 +6247,14 @@
         "alternate_menus": []
       },
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "未着手",
+      "implementation_status": "実装済み（PC4 F-c、未統合）",
       "acceptance_status": "未実施",
-      "evidence": [],
+      "evidence": [
+        "native/src/formats/web_export.cpp",
+        "native/src/app/export_as_dialog.cpp",
+        "native/src/app/main_window_export.cpp",
+        "native/tests/gui/test_gui_output.cpp"
+      ],
       "pc0": {
         "date": "2026-10-16",
         "cpp_base": "962faa4",
@@ -6320,9 +6338,16 @@
         "alternate_menus": []
       },
       "genko_status": "一部（2026-10-16 照合）",
-      "implementation_status": "未着手",
+      "implementation_status": "実装済み（PC4 F-c、未統合）",
       "acceptance_status": "未実施",
-      "evidence": [],
+      "evidence": [
+        "native/src/formats/export.cpp",
+        "native/src/app/export_as_dialog.cpp",
+        "native/src/app/main_window_export.cpp",
+        "native/src/api/cli.cpp",
+        "native/tests/contract/test_contract_copy.cpp",
+        "native/tests/gui/test_gui_output.cpp"
+      ],
       "pc0": {
         "date": "2026-10-16",
         "cpp_base": "962faa4",
@@ -6403,9 +6428,14 @@
       },
       "upstream_menu": null,
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "未着手",
+      "implementation_status": "実装済み（PC4 F-c、未統合）",
       "acceptance_status": "未実施",
-      "evidence": [],
+      "evidence": [
+        "native/src/formats/web_export.cpp",
+        "native/src/app/main_window_export.cpp",
+        "native/tests/contract/test_contract_copy.cpp",
+        "native/tests/gui/test_gui_output.cpp"
+      ],
       "pc0": {
         "date": "2026-10-16",
         "cpp_base": "962faa4",
@@ -6416,7 +6446,8 @@
         "tests": [],
         "gap": "設定済みの形式と保存先で 1 回で書き出す機能がない",
         "note": "file.export.exportPreferences が前提"
-      }
+      },
+      "remaining": "項目の名前は形式によらず「PNG としてクイック書き出し」"
     },
     {
       "id": "file.export.quickExportAsPng",
@@ -6436,9 +6467,14 @@
         "alternate_menus": []
       },
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "未着手",
+      "implementation_status": "実装済み（PC4 F-c、未統合）",
       "acceptance_status": "未実施",
-      "evidence": [],
+      "evidence": [
+        "native/src/formats/web_export.cpp",
+        "native/src/app/main_window_export.cpp",
+        "native/tests/contract/test_contract_copy.cpp",
+        "native/tests/gui/test_gui_output.cpp"
+      ],
       "pc0": {
         "date": "2026-10-16",
         "cpp_base": "962faa4",
@@ -6530,9 +6566,19 @@
         "alternate_menus": []
       },
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "未着手",
+      "implementation_status": "実装済み（PC4 F-c、未統合）",
       "acceptance_status": "未実施",
-      "evidence": [],
+      "evidence": [
+        "native/src/formats/web_export.cpp",
+        "native/src/render/codecs/web.cpp",
+        "native/src/render/codecs/jpeg.cpp",
+        "native/src/app/save_for_web_dialog.cpp",
+        "native/src/app/main_window_export.cpp",
+        "native/src/api/cli.cpp",
+        "native/tests/unit/test_web_export.cpp",
+        "native/tests/contract/test_contract_copy.cpp",
+        "native/tests/gui/test_gui_output.cpp"
+      ],
       "pc0": {
         "date": "2026-10-16",
         "cpp_base": "962faa4",
@@ -6543,7 +6589,8 @@
         "tests": [],
         "gap": "GIF/PNG-8/PNG-24/JPEG/WBMP の Web 用保存（減色方式 8 種・ディザ・Web スナップ・マット・スライス毎の書き出しと HTML・容量見積もり）がない",
         "note": "Genko の減色はアニメ GIF 用のメディアンカット 128 色のみ（render/movie.cpp）。スライス（slice.*）が前提"
-      }
+      },
+      "remaining": "スライスごとの書き出しと HTML は PC5（スライスの群）。窓の画像サイズはパーセントだけ（CLI は幅・高さも）"
     },
     {
       "id": "file.fileInfo",
@@ -19178,9 +19225,16 @@
         "alternate_menus": []
       },
       "genko_status": "一部（2026-10-16 照合）",
-      "implementation_status": "未着手",
+      "implementation_status": "実装済み（PC4 F-c、未統合）",
       "acceptance_status": "未実施",
-      "evidence": [],
+      "evidence": [
+        "native/src/formats/copy.cpp",
+        "native/src/app/export_as_dialog.cpp",
+        "native/src/app/main_window_export.cpp",
+        "native/src/app/layer_panel_smart_filters.cpp",
+        "native/src/api/cli.cpp",
+        "native/tests/contract/test_contract_copy.cpp"
+      ],
       "pc0": {
         "date": "2026-10-16",
         "cpp_base": "962faa4",
@@ -19196,7 +19250,8 @@
         ],
         "gap": "書き出しの「レイヤーごとの PNG」（全ページの全層を透明 PNG で、dpi 指定）しか無い。1 枚の層を選び、拡張子で形式（PNG 以外も）を決め、scale（1〜1000%）で拡大縮小して 1 つのファイルに書く入口・op が無い",
         "note": ""
-      }
+      },
+      "remaining": "フォルダーのレイヤーは書き出さない（中のレイヤーを選ぶ）"
     },
     {
       "id": "layer.flattenImage",
@@ -23015,9 +23070,15 @@
         "alternate_menus": []
       },
       "genko_status": "一部（2026-10-16 照合）",
-      "implementation_status": "未着手",
+      "implementation_status": "実装済み（PC4 F-c、未統合）",
       "acceptance_status": "未実施",
-      "evidence": [],
+      "evidence": [
+        "native/src/formats/web_export.cpp",
+        "native/src/app/main_window_export.cpp",
+        "native/src/app/layer_panel_smart_filters.cpp",
+        "native/tests/contract/test_contract_copy.cpp",
+        "native/tests/gui/test_gui_output.cpp"
+      ],
       "pc0": {
         "date": "2026-10-16",
         "cpp_base": "962faa4",

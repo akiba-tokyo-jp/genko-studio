@@ -756,8 +756,27 @@ public:
     // The place of the page shown in `doc` (the session's book, or コンテンツを編集's view of its contents), by its id; none
     // — said — when it is not read yet or not there (never another page in its place).
     std::optional<std::size_t> shown_page_at(const std::shared_ptr<const core::Document>& doc, const core::Page* page);
+    // PC4 F-c (app/main_window_export.cpp; SPEC.md FILE-01): ファイル → 書き出し ▸ and レイヤー's.
+    // PNG としてクイック書き出し (file.export.quickExportAsPng; layer.quickExportAsPng with `layer`): the page in front — or
+    // that layer alone, cut to what it holds — in the format 書き出しの環境設定 names, written where they name for a saved
+    // book, else where asked; false when nothing was written.
+    bool quick_export(const std::optional<std::string>& layer = std::nullopt);
+    // 書き出し形式… (file.export.exportAs; layer.exportAs with `layer`): app/export_as_dialog.hpp, then where to write.
+    void export_as(const std::optional<std::string>& layer = std::nullopt);
+    // 書き出しの環境設定… (file.export.exportPreferences: the same values as 環境設定 → 書き出し).
+    void export_preferences_dialog();
+    // Web 用に保存（従来）… (file.export.saveForWebLegacy): app/save_for_web_dialog.hpp, then where to write.
+    void save_for_web();
+    // レイヤーからファイル… (file.export.layersToFiles): formats::export_layers with its choices.
+    void layers_to_files();
 
 private:
+    void build_export_actions();
+    // (PC4 F-c) The book to write from and the page in front's place in it (none: said).
+    std::optional<std::size_t> export_page(std::shared_ptr<const core::Document>& doc);
+    // (PC4 F-c) True — said — when `path` is a picture a book here was opened from (never written).
+    bool writes_over_a_source(const std::filesystem::path& path);
+
     void path_drawn(const core::Json& subpath);
     void path_edited(const core::Json& path);
     // pen-shapes@1 (PC3 C-b, app/main_window_shapes.cpp): the shape tools and the shape parts' commands, their menus

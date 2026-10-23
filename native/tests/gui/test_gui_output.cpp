@@ -40,6 +40,7 @@
 #include <QSpinBox>
 #include <QStandardItemModel>
 #include <QStatusBar>
+#include <QTabWidget>
 #include <QToolBar>
 
 #include <functional>
@@ -48,13 +49,16 @@
 #include "app/canvas.hpp"
 #include "app/check_panel.hpp"
 #include "app/config.hpp"
+#include "app/export_as_dialog.hpp"
 #include "app/export_dialog.hpp"
 #include "app/fit_preview.hpp"
 #include "app/path_label.hpp"
 #include "app/history_panel.hpp"
 #include "app/icons.hpp"
 #include "app/main_window.hpp"
+#include "app/preferences.hpp"
 #include "app/print_dialog.hpp"
+#include "app/save_for_web_dialog.hpp"
 #include "app/theme.hpp"
 #include "app/tool_settings.hpp"
 #include "service/wording.hpp"
@@ -62,6 +66,9 @@
 #include "core/pynum.hpp"
 #include "formats/checks.hpp"
 #include "formats/export.hpp"
+#include "formats/web_export.hpp"
+#include "core/paths.hpp"
+#include "storage/fsutil.hpp"
 #include "gui_support.hpp"
 #include "render/page.hpp"
 #include "render/png.hpp"
@@ -1404,6 +1411,133 @@ private slots:
     }
 
     // A book without pages: its export dialog opens, with nothing to show.
+    // PC4 F-c (SPEC.md FILE-01; 節 F 5.2・5.3・5.4): ファイル → 書き出し ▸ — 書き出し形式… (its estimate and preview made on a worker,
+    // following the choices; the page at half its size written where asked), PNG としてクイック書き出し (asked where while the
+    // preferences ask; beside the book, unasked, when they say so), 書き出しの環境設定… (its values kept, the same as 環境設定 →
+    // 書き出し), Web 用に保存（従来）… (its panes and estimate from a worker, a preset's settings, the file written), レイヤーからファイル…
+    // (a folder a page) — and レイヤー's: a layer of nothing says so and writes nothing.
+    void theExportMenuWritesPictures() {
+        core::PageSpec spec = core::PageSpec::a4_mono();
+        spec.dpi = core::Num(72);
+        Studio studio(core::new_episode("書き出し", core::Num(1), 2, spec));
+        app::MainWindow* w = studio.window.get();
+        const fs::path out = gui_test::path_of(studio.tmp.path() + QStringLiteral("/out"));
+        fs::create_directories(out);
+        QString save_to;
+        int asked_where = 0;
+        studio.answers.responder->save_path = [&](const QString&, const QString&) {
+            ++asked_where;
+            return save_to;
+        };
+        studio.answers.responder->existing_dir = [&](const QString&, const QString&) { return qs(core::path_to_utf8(out / "folder")); };
+        std::function<int(QDialog*)> handle;
+        const auto previous = studio.answers.responder->exec;
+        studio.answers.responder->exec = [&](QDialog* dialog) -> int {
+            if (handle && (qobject_cast<app::ExportAsDialog*>(dialog) || qobject_cast<app::SaveForWebDialog*>(dialog) ||
+                           qobject_cast<app::ExportPreferencesDialog*>(dialog) || qobject_cast<app::LayersToFilesDialog*>(dialog))) {
+                return handle(dialog);
+            }
+            return previous(dialog);
+        };
+        // 書き出し形式…: the estimate and the preview follow the choices; JPEG at 50 % written
+        handle = [&](QDialog* dialog) {
+            auto* d = qobject_cast<app::ExportAsDialog*>(dialog);
+            QTRY_VERIFY_WITH_TIMEOUT(d->estimates() >= 1 && !d->estimating(), 20000);
+            QVERIFY2(d->estimate->text().contains(QStringLiteral("約")), qPrintable(d->estimate->text()));
+            QVERIFY(!d->preview->pixmap().isNull());
+            const int done = d->estimates();
+            d->format->setCurrentIndex(d->format->findData(QStringLiteral("jpg")));
+            d->scale->setValue(50.0);
+            QTRY_VERIFY_WITH_TIMEOUT(d->estimates() > done && !d->estimating(), 20000);
+            QVERIFY2(d->estimate->text().startsWith(QStringLiteral("JPG")), qPrintable(d->estimate->text()));
+            QCOMPARE(d->width->value(), static_cast<int>(std::lround(render::mm_to_px(spec.width_mm.value(), 72) / 2.0)));
+            return int(QDialog::Accepted);
+        };
+        save_to = qs(core::path_to_utf8(out / "half.jpg"));
+        studio.act("act_export_as")->trigger();
+        QVERIFY2(fs::is_regular_file(out / "half.jpg"), qPrintable(w->last_notice()));
+        const render::Image half = render::open_image(storage::read_file(out / "half.jpg"));
+        QCOMPARE(half.width(), static_cast<int>(std::lround(render::mm_to_px(spec.width_mm.value(), 72) / 2.0)));
+        // PNG としてクイック書き出し: asked where (the preferences ask); then beside the book, unasked
+        asked_where = 0;
+        save_to = qs(core::path_to_utf8(out / "quick.png"));
+        studio.act("act_quick_export_png")->trigger();
+        QCOMPARE(asked_where, 1);
+        QVERIFY2(fs::is_regular_file(out / "quick.png"), qPrintable(w->last_notice()));
+        formats::ExportPreferences prefs = app::export_preferences();
+        QCOMPARE(prefs.format, std::string("png"));
+        prefs.location = formats::QuickLocation::SameFolder;
+        app::set_export_preferences(prefs);
+        studio.act("act_quick_export_png")->trigger();
+        QCOMPARE(asked_where, 1);
+        QVERIFY2(fs::is_regular_file(studio.path.parent_path() / "book_p001.png"), qPrintable(w->last_notice()));
+        // 書き出しの環境設定…: JPG kept, and 環境設定 → 書き出し shows it
+        handle = [&](QDialog* dialog) {
+            auto* d = qobject_cast<app::ExportPreferencesDialog*>(dialog);
+            d->form->format->setCurrentIndex(d->form->format->findData(QStringLiteral("jpg")));
+            d->form->quality->setValue(40);
+            d->buttons->button(QDialogButtonBox::Ok)->click();
+            return d->result();
+        };
+        studio.act("act_export_prefs")->trigger();
+        QCOMPARE(app::export_preferences().format, std::string("jpg"));
+        QCOMPARE(app::export_preferences().jpeg_quality, 40);
+        {
+            app::preferences::PreferencesDialog dialog(w);
+            QStringList pages;
+            for (int i = 0; i < dialog.tabs->count(); ++i) pages << dialog.tabs->tabText(i);
+            QVERIFY2(pages.contains(QStringLiteral("書き出し")), qPrintable(pages.join(QStringLiteral(" | "))));
+            QCOMPARE(dialog.export_form->format->currentData().toString(), QStringLiteral("jpg"));
+            dialog.export_form->srgb->setChecked(false);
+            dialog.save();
+            QVERIFY(!app::export_preferences().srgb);
+        }
+        studio.act("act_quick_export_png")->trigger();
+        QVERIFY2(fs::is_regular_file(studio.path.parent_path() / "book_p001.jpg"), qPrintable(w->last_notice()));
+        for (const char* key : {"export/quick_format", "export/quick_location", "export/jpeg_quality", "export/metadata", "export/srgb"})
+            app::settings()->remove(QString::fromLatin1(key));
+        // Web 用に保存（従来）…: a preset's settings, the panes and the estimate, the GIF written
+        handle = [&](QDialog* dialog) {
+            auto* d = qobject_cast<app::SaveForWebDialog*>(dialog);
+            QTRY_VERIFY_WITH_TIMEOUT(d->previews() >= 1 && !d->working(), 20000);
+            QVERIFY2(d->estimate->text().startsWith(QStringLiteral("PNG-24")), qPrintable(d->estimate->text()));
+            const int done = d->previews();
+            d->preset->setCurrentIndex(d->preset->findData(QStringLiteral("GIF 32 Dithered")));
+            QCOMPARE(d->format->currentData().toString(), QStringLiteral("gif"));
+            QCOMPARE(d->colors->value(), 32);
+            QTRY_VERIFY_WITH_TIMEOUT(d->previews() > done && !d->working(), 20000);
+            QVERIFY2(d->estimate->text().startsWith(QStringLiteral("GIF")), qPrintable(d->estimate->text()));
+            d->views->setCurrentIndex(3);  // (4 アップ)
+            QVERIFY(!d->pictures[3]->pixmap().isNull());
+            d->colors->setValue(20);  // (a hand's change: no preset's any more)
+            QCOMPARE(d->preset->currentIndex(), 0);
+            return int(QDialog::Accepted);
+        };
+        save_to = qs(core::path_to_utf8(out / "web.gif"));
+        studio.act("act_save_for_web")->trigger();
+        QVERIFY2(fs::is_regular_file(out / "web.gif"), qPrintable(w->last_notice()));
+        QVERIFY(storage::read_file(out / "web.gif").starts_with("GIF89a"));
+        // レイヤーからファイル…: a folder a page
+        handle = [&](QDialog* dialog) {
+            auto* d = qobject_cast<app::LayersToFilesDialog*>(dialog);
+            d->folder->setText(qs(core::path_to_utf8(out / "layers")));
+            d->prefix->setText(QStringLiteral("p"));
+            return int(QDialog::Accepted);
+        };
+        studio.act("act_layers_to_files")->trigger();
+        QVERIFY2(fs::is_directory(out / "layers"), qPrintable(w->last_notice()));
+        int files = 0;
+        for (const auto& entry : fs::recursive_directory_iterator(out / "layers")) files += entry.is_regular_file() && core::path_to_utf8(entry.path().filename()).starts_with("p_");
+        QVERIFY2(files > 0, qPrintable(w->last_notice()));
+        // レイヤー → PNG としてクイック書き出し of a layer of nothing: said, nothing written
+        const std::string ink = studio.ink();
+        w->set_target_layer(ink);
+        save_to = qs(core::path_to_utf8(out / "nothing.png"));
+        studio.act("act_layer_quick_export_png")->trigger();
+        QVERIFY(!fs::exists(out / "nothing.png"));
+        QVERIFY2(w->last_notice().contains(QStringLiteral("書き出すものがありません")), qPrintable(w->last_notice()));
+    }
+
     void exportDialogOfABookWithoutPages() {
         Studio s;
         core::Document empty = gui_test::new_doc(1);

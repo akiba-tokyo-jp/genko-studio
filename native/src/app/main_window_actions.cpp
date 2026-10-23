@@ -672,6 +672,8 @@ void MainWindow::build_menus() {
     for (const char* name : {"act_layer_via_copy", "act_layer_via_cut"}) made->addAction(action(name));
     layers->addSeparator();
     for (const char* name : {"act_layer_dup", "act_layer_merge", "act_layer_delete"}) layers->addAction(action(name));
+    // (PC4 F-c: Photoshop's place, after 削除 — the layer alone, cut to what it holds)
+    for (const char* name : {"act_layer_quick_export_png", "act_layer_export_as"}) layers->addAction(action(name));
     layers->addSeparator();
     // (Python's submenus, filled with the layer panel's own commands when it is made: their keys — Ctrl+G, Ctrl+Shift+Alt+E —
     // work from the menu bar)

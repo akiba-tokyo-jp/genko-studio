@@ -137,6 +137,13 @@ PagePicture page_picture(const core::Page& page, const core::Document& doc, int 
     return out;
 }
 
+std::pair<std::uint32_t, std::uint32_t> page_picture_size(const core::Page& page, int dpi, std::string_view area) {
+    check_dpi(dpi);
+    const int w = render::mm_to_px(page.spec.width_mm.value(), dpi), h = render::mm_to_px(page.spec.height_mm.value(), dpi);
+    const render::Box box = area_box(page, area, dpi, std::max(1, w), std::max(1, h));
+    return {static_cast<std::uint32_t>(std::max(1, box.width())), static_cast<std::uint32_t>(std::max(1, box.height()))};
+}
+
 PagePicture layer_picture(const core::Page& page, const core::Layer& layer, const core::Document& doc, int dpi) {
     check_dpi(dpi);
     const int w = render::mm_to_px(page.spec.width_mm.value(), dpi), h = render::mm_to_px(page.spec.height_mm.value(), dpi);

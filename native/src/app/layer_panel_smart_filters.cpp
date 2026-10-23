@@ -279,7 +279,14 @@ void LayerPanel::smart_filter_menu(const QPoint& at) {
     if (item == nullptr) return;
     const int row = list_->row(item);
     const int kind = row_kind(row);
-    if (kind == kLayerRow) return;
+    if (kind == kLayerRow) {  // (PC4 F-c: a layer's own — PNG としてクイック書き出し・書き出し形式…, as レイヤー's)
+        list_->setCurrentRow(row);
+        QMenu menu(this);
+        for (const char* name : {"act_layer_quick_export_png", "act_layer_export_as"})
+            if (QAction* act = window_->action(QString::fromLatin1(name))) menu.addAction(act);
+        if (!menu.isEmpty()) menu.exec(list_->viewport()->mapToGlobal(at));
+        return;
+    }
     list_->setCurrentRow(row);
     const auto [page, layer] = this->layer();
     if (page == nullptr || layer == nullptr) return;

@@ -524,6 +524,22 @@ const std::vector<Rule>& rules() {
         }));
         r.push_back(rule(R"(the page is too large for a PSD \(past (\d+) GiB\): write it as a PSB)",
                          "ファイルが PSD に書ける大きさ（2 GB）を超えます。PSB で書き出してください"));
+        // (PC4 F-c: 書き出し形式…, クイック書き出し, Web 用に保存, レイヤーからファイル…, `genko copy`)
+        r.push_back(rule(R"(the picture to write is too large \((\d+)×(\d+) pixels; .*\))", [](const QRegularExpressionMatch& m) {
+            return QStringLiteral("書き出す画像が大きすぎます（%1×%2 px。1 億 2 千万画素・1 辺 10 万 px・作業の記憶 2 GiB まで）。倍率か大きさを下げてください")
+                .arg(m.captured(1), m.captured(2));
+        }));
+        r.push_back(rule("the scale is 1 to 1000 percent", "拡大・縮小は 1〜1000 % です"));
+        r.push_back(rule("a side is 1 to 100000 pixels", "幅と高さは 1〜100000 px です"));
+        r.push_back(rule("the quality is 0 to 12", "画質は 0〜12 です"));
+        r.push_back(rule("the quality is 1 to 100", "画質は 1〜100 です"));
+        r.push_back(rule("a folder is written by its layers: choose one of them", "フォルダーは書き出せません。中のレイヤーを選んでください"));
+        r.push_back(rule("the layer has nothing to write", "このレイヤーには書き出すものがありません（空のレイヤーです）"));
+        r.push_back(rule(R"(no such layer: .*)", "そのレイヤーはこのページにありません"));
+        r.push_back(rule(R"(the image has (\d+) colours; Exact needs 256 or fewer)", "この画像には \\1 色あります。減色の「すべての色」は 256 色までです"));
+        r.push_back(rule(R"(unknown (preset|format|palette|dither|metadata|resample) `(.*)`.*)", "Web 用に保存の設定が正しくありません（\\1: \\2）"));
+        r.push_back(rule("the quick export's format is png, jpg, gif or webp", "クイック書き出しの形式は PNG・JPG・GIF・WebP です"));
+        r.push_back(rule("the layers' format is png, jpeg, tiff, psd or webp", "レイヤーからファイルの形式は PNG・JPEG・TIFF・PSD・WebP です"));
         r.push_back(rule(R"(the colour profile cannot be read \((.*)\))", "カラープロファイルを読み込めません"));
         r.push_back(rule(R"(the file cannot be read \(it is larger than 2 GiB\))", "ファイルが大きすぎて読み込めません（2 GiB まで）"));
         // (this build's own: put_raster reads only a regular file — not a device or a pipe, whose reading may not end)
