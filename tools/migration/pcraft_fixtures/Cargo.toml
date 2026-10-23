@@ -1,0 +1,28 @@
+# PC4 F-f (SPEC.md FILE-01): the fixed .pcraft files of native/tests/data/pcraft/, made by upstream PhotoCraft's own
+# writer (crates/format), and a check that a .pcraft loads in upstream's reader. A development tool (not built with
+# Genko): `upstream` beside this file is a checkout of PhotoCraft at the pinned commit (see src/main.rs).
+[package]
+name = "pcraft-fixtures"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.90"
+license = "MIT OR Apache-2.0"
+publish = false
+
+[workspace]
+exclude = ["upstream"]
+
+[dependencies]
+photocraft-format = { path = "upstream/crates/format" }
+photocraft-doc = { path = "upstream/crates/doc" }
+photocraft-color = { path = "upstream/crates/color" }
+photocraft-geom = { path = "upstream/crates/geom" }
+photocraft-raster = { path = "upstream/crates/raster" }
+photocraft-codecs = { path = "upstream/crates/codecs" }
+serde_json = "1"
+
+[profile.dev]
+opt-level = 1
+
+[profile.dev.package."*"]
+opt-level = 2

@@ -13,6 +13,7 @@
 #include "core/color_model.hpp"
 #include "core/color_raster.hpp"
 #include "core/command_bus.hpp"
+#include "core/paths.hpp"
 #include "core/error.hpp"
 #include "core/file_info.hpp"
 #include "core/ids.hpp"
@@ -23,6 +24,7 @@
 #include "render/image.hpp"
 #include "render/ink.hpp"
 #include "render/not_yet_ported.hpp"
+#include "render/pcraft_read.hpp"
 #include "render/ops_registry.hpp"
 #include "render/import_psd.hpp"
 #include "render/png.hpp"
@@ -198,7 +200,23 @@ core::Document pixels_book(std::uint32_t w, std::uint32_t h, double said, std::s
     return doc;
 }
 
+// (PC4 F-f) A .pcraft read (render/pcraft_read) as the book open_file gives: its page's native_source the file's name.
+Opened pcraft_book(render::pcraft::Read read, const std::string& file) {
+    Opened out;
+    out.doc = std::move(read.doc);
+    out.notes = std::move(read.notes);
+    core::Page& page = out.doc.edit_page(0);
+    if (page.native_source && !file.empty() && file.find('/') == std::string::npos && file.find('\\') == std::string::npos) page.native_source->name = file;
+    return out;
+}
+
 }  // namespace
+
+Opened open_folder(const std::filesystem::path& folder, const OpenOptions&) {
+    std::string name = core::utf8_replaced(core::path_to_utf8(folder.filename()));
+    if (name.empty()) name = core::utf8_replaced(core::path_to_utf8(folder.parent_path().filename()));
+    return pcraft_book(render::pcraft::read_folder(folder, stem_of(name)), name);
+}
 
 Opened picture_book(CodecImage picture, std::string_view title, const OpenOptions& options) {
     if (picture.empty()) throw core::Error("value", "a picture of no pixels cannot be opened");
@@ -482,7 +500,11 @@ Opened open_file(std::string_view bytes, std::string_view name, const OpenOption
     // as its TIFF —; F-f: a .pcraft)
     if (bytes.substr(0, 4) == "8BPS") return open_psd(bytes, file, options);  // (PC4 F-d)
     if (const auto later = core::smart::later_format_of_suffix(suffix); later && *later == "raw") throw render::NotYetPorted("raw_file");
-    if (suffix == ".pcraft") throw render::NotYetPorted("pcraft_file");
+    // (a .pcraft by what it holds — a zip whose first file is manifest.json —, or a zip named so; a picture named .pcraft is
+    // opened as the picture it is)
+    if (render::pcraft::is_pcraft(bytes) || (suffix == ".pcraft" && bytes.starts_with(std::string_view("PK", 2)))) {
+        return pcraft_book(render::pcraft::read(bytes, stem_of(file)), file);
+    }
     const auto format = options.as ? options.as : render::codecs::detect(bytes);
     if (!format) throw core::Error("unidentified_image", "the file is not a picture of a format this build knows");
     CodecImage picture = render::codecs::decode_as(*format, bytes, options.limits);

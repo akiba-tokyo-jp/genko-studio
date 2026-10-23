@@ -23,5 +23,7 @@ genko_library(genko_formats
     # PC4 F-b (ファイルの入口: 本のファイル情報をファイルに、コピーを保存)
     file_xmp.cpp
     copy.cpp
+    # PC4 F-f (.pcraft: a page written as PhotoCraft's document)
+    pcraft_write.cpp
   PUBLIC_DEPS genko_render genko_core Qt6::Core
   PRIVATE_DEPS genko_storage ZLIB::ZLIB JPEG::JPEG TIFF::TIFF ${GENKO_LCMS2})

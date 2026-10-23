@@ -62,10 +62,10 @@ bool is_book_folder(const fs::path& path) {
 
 // 別名で保存… and コピーを保存…'s kinds of files: a .genko, or the page as one of formats::write_copy's.
 QString save_filters() {
-    // (PC4 F-a: and every format the codecs write; PC4 F-d: and a PSB, Photoshop's ラージドキュメント形式)
+    // (PC4 F-a: and every format the codecs write; PC4 F-d: and a PSB, Photoshop's ラージドキュメント形式; PC4 F-f: PhotoCraft's .pcraft)
     return QStringLiteral("Genko の原稿 (*.genko);;Photoshop (*.psd);;TIFF (*.tif *.tiff);;PNG (*.png);;JPEG (*.jpg *.jpeg);;WebP (*.webp);;"
                           "GIF (*.gif);;BMP (*.bmp);;TGA (*.tga);;ICO (*.ico);;Netpbm (*.pnm *.pbm *.pgm *.ppm *.pam *.pfm);;QOI (*.qoi);;"
-                          "OpenEXR (*.exr);;Radiance HDR (*.hdr);;AVIF (*.avif);;ラージドキュメント形式 (*.psb)");
+                          "OpenEXR (*.exr);;Radiance HDR (*.hdr);;AVIF (*.avif);;ラージドキュメント形式 (*.psb);;PhotoCraft (*.pcraft)");
 }
 
 // The extension of a path a picture is written to (lower case, no dot), "" for none (a .genko).
@@ -182,6 +182,13 @@ void MainWindow::open_dialog(bool as) {
 
 void MainWindow::open_path(const fs::path& path, std::optional<render::codecs::Format> as) {
     std::error_code ec;
+    // (PC4 F-f: a .pcraft folder — its name says so, as the open window's — read as PhotoCraft's)
+    if (fs::is_directory(path, ec) && qpath(path.filename().empty() ? path.parent_path() : path).endsWith(QStringLiteral(".pcraft"), Qt::CaseInsensitive) &&
+        fs::is_regular_file(path / "manifest.json", ec) &&
+        !is_book_folder(path)) {
+        open_pcraft_folder(path);
+        return;
+    }
     if (fs::is_directory(path, ec)) {
         if (!is_book_folder(path)) {
             ask::warning(this, QStringLiteral("Genko"), QStringLiteral("Genko の原稿ではありません（.genko のフォルダか、画像のファイルを選びます）"));
@@ -226,6 +233,33 @@ void MainWindow::open_path(const fs::path& path, std::optional<render::codecs::F
         try {
             const std::string bytes = file_bytes(path);
             return {formats::open_file(bytes, core::path_to_utf8(path.filename()), options), QString()};
+        } catch (const std::exception& error) {
+            return {std::nullopt, QString::fromUtf8(error.what())};
+        }
+    }));
+}
+
+// PC4 F-f: a .pcraft folder (PhotoCraft's folder bundle) opened as a .pcraft's zip is: a book of one page in memory, read on a
+// worker thread.
+void MainWindow::open_pcraft_folder(const fs::path& path) {
+    remember_file(path);
+    flash(QStringLiteral("開いています: %1").arg(QDir::toNativeSeparators(qpath(path))), 30000);
+    using Read = std::pair<std::optional<formats::Opened>, QString>;
+    auto* watcher = new QFutureWatcher<Read>(this);
+    connect(watcher, &QFutureWatcher<Read>::finished, this, [this, watcher, path] {
+        Read read = watcher->result();
+        watcher->deleteLater();
+        flash_timer_.stop();
+        if (!read.first) {
+            ask::warning(this, QStringLiteral("Genko"), QStringLiteral("ファイルを開けませんでした:\n%1\n%2").arg(QDir::toNativeSeparators(qpath(path)), wording::error(read.second)));
+            refresh_status();
+            return;
+        }
+        add_picture_book(std::move(read.first->doc), read.first->notes, path);
+    });
+    watcher->setFuture(QtConcurrent::run([path]() -> Read {
+        try {
+            return {formats::open_folder(path), QString()};
         } catch (const std::exception& error) {
             return {std::nullopt, QString::fromUtf8(error.what())};
         }

@@ -48,6 +48,7 @@
 #include "formats/export.hpp"
 #include "formats/exporting.hpp"
 #include "formats/open_file.hpp"
+#include "formats/pcraft_write.hpp"
 #include "formats/pillow_save.hpp"
 #include "formats/smart_files.hpp"
 #include "render/grd.hpp"
@@ -829,7 +830,8 @@ int export_command(const QStringList& args, bool ascii) {
     };
     const std::initializer_list<const char*> kFormats{"png", "tiff",   "pdf",    "strip",  "psd",       "epub",     "pack",
                                                       "webtoon", "sns", "cmyk", "layers", "kindle", "timelapse", "animation",
-                                                      "psb"};  // (PC4 F-d: Photoshop's large document, a PSD's layers)
+                                                      "psb",      // (PC4 F-d: Photoshop's large document, a PSD's layers)
+                                                      "pcraft"};  // (PC4 F-f: PhotoCraft's document, a page a file)
     const std::initializer_list<const char*> kColours{"rgb", "cmyk", "gray"};
     const std::initializer_list<const char*> kShapes{"round", "square", "diamond", "ellipse"};
     const std::initializer_list<const char*> kAreas{"paper", "bleed", "trim"};
@@ -887,6 +889,7 @@ int export_command(const QStringList& args, bool ascii) {
     render::brushes::register_book(doc);  // (the book's own brushes, as Python's reader registers them, and their papers)
     const std::int64_t spec_dpi = doc.spec.dpi.truthy() ? core::py_int(doc.spec.dpi) : 0;
     std::vector<fs::path> paths;
+    std::vector<std::string> pcraft_notes;  // (PC4 F-f: what the .pcraft files could not keep)
     const core::Page* animated = nullptr;  // (an animation: its page)
     const std::string& f = *fmt;
     // (the resolution of a format that takes one, 1 to 100000 dpi: refused before anything is drawn or made)
@@ -908,6 +911,10 @@ int export_command(const QStringList& args, bool ascii) {
             const Json items = formats::issues_json(refused.issues());
             return fail(refused.what(), refused.code(), ascii, 1, &items);
         }
+    } else if (f == "pcraft") {
+        // (PC4 F-f: a page = a .pcraft — a folder gets <title>_ep01_p001.pcraft … as the PSD's pages, a .pcraft path the first
+        // page —, its notes said)
+        paths = formats::export_pcraft(doc, out, file_given, dpi ? std::optional<int>(narrow(*dpi)) : std::nullopt, "", &pcraft_notes);
     } else if (f == "epub") {
         paths = {formats::export_epub(doc, file_given ? out : formats::detail::join(out, "out.epub"), narrow(dpi.value_or(150)))};
     } else if (f == "webtoon") {
@@ -957,6 +964,8 @@ int export_command(const QStringList& args, bool ascii) {
     std::vector<std::string> notes;
     if (animated != nullptr) {
         if (const auto note = formats::ink_note(*animated)) notes.push_back(*note);
+    } else if (f == "pcraft") {
+        notes = std::move(pcraft_notes);
     } else if (f != "timelapse") {
         notes = formats::export_notes(doc, f == "psb" ? std::string("psd") : f, f == "cmyk" ? std::string("cmyk") : *color);  // (a PSB's: a PSD's)
     }

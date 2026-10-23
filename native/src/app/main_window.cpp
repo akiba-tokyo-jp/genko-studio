@@ -679,7 +679,7 @@ bool MainWindow::apply_ops(const Json& ops, const std::vector<std::string>& ids)
         {"trace_prims", QStringLiteral("3D を線にしています…")},          {"add_cover", QStringLiteral("表紙を作っています…")},
         {"add_scene", QStringLiteral("3D の背景を置いています…")},        {"add_prim3d", QStringLiteral("3D を置いています…")},
         {"pose_figure", QStringLiteral("3D のポーズを変えています…")},    {"pose_mannequin", QStringLiteral("3D のポーズを変えています…")},
-        {"import_pages", QStringLiteral("ページを取り込んでいます…")}};
+        {"import_pages", QStringLiteral("ページを取り込んでいます…")},       {"smart_place", QStringLiteral("スマートオブジェクトを置いています…")}};
     struct Busy {
         bool on = false;
         ~Busy() {
@@ -1388,7 +1388,7 @@ void MainWindow::save_as() {
     const QString path = ask::save_path(this, QStringLiteral("原稿を保存する場所"), suggested,
                                         QStringLiteral("Genko の原稿 (*.genko);;Photoshop (*.psd);;TIFF (*.tif *.tiff);;PNG (*.png);;JPEG (*.jpg *.jpeg);;WebP (*.webp);;"
                                                        "GIF (*.gif);;BMP (*.bmp);;TGA (*.tga);;ICO (*.ico);;Netpbm (*.pnm *.pbm *.pgm *.ppm *.pam *.pfm);;QOI (*.qoi);;"
-                                                       "OpenEXR (*.exr);;Radiance HDR (*.hdr);;AVIF (*.avif)"));
+                                                       "OpenEXR (*.exr);;Radiance HDR (*.hdr);;AVIF (*.avif);;PhotoCraft (*.pcraft)"));
     if (!alive || path.isEmpty() || session_ != origin) return;
     const QString suffix = QFileInfo(path).suffix().toLower();
     // (a picture's format — PSD, TIFF, and since PC4 F-a every one the codecs write —: コピーを保存…)

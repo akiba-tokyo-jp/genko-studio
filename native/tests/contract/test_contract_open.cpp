@@ -501,7 +501,9 @@ private slots:
         QCOMPARE(code_of([] { (void)formats::open_file(std::string("8BPS\0\1", 6) + std::string(40, '\0'), "layers.psd"); }), std::string("format"));
         const auto [tiff, values] = tiff16(4, 4);
         QCOMPARE(code_of([&] { (void)formats::open_file(tiff, "photo.DNG"); }), std::string("not_yet_ported:raw_file"));
-        QCOMPARE(code_of([&] { (void)formats::open_file(png, "doc.pcraft"); }), std::string("not_yet_ported:pcraft_file"));
+        // (PC4 F-f opens a .pcraft: a zip named so that is not one is a broken .pcraft; a PNG named so is opened as the PNG it is)
+        QCOMPARE(code_of([] { (void)formats::open_file(std::string("PK\3\4", 4) + std::string(60, '\0'), "doc.pcraft"); }), std::string("format"));
+        QCOMPARE(code_of([&] { (void)formats::open_file(png, "doc.pcraft"); }), std::string());
         QCOMPARE(code_of([] { (void)formats::open_file("not a picture at all", "x.png"); }), std::string("unidentified_image"));
         formats::OpenOptions as_jpeg;
         as_jpeg.as = codecs::Format::Jpeg;

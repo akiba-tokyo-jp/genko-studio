@@ -1,5 +1,6 @@
 #pragma once
 
+#include <filesystem>
 #include <optional>
 #include <string>
 #include <string_view>
@@ -61,9 +62,15 @@ struct Opened {
 
 // The file of `name` (its name, no folder: the book's title is its stem) with these bytes as a book. core::Error as
 // render::codecs::decode throws them ("unidentified_image", "format", "image_too_large"), render::NotYetPorted for a kind
-// of file this build does not open yet: "psd_file" (a PSD or PSB: F-d), "raw_file" (a camera RAW file: F-e), "pcraft_file"
-// (a .pcraft: F-f), "image_format" (a picture of a format the codecs do not read yet: F-a).
+// of file this build does not open yet: "psd_file" (a PSD or PSB: F-d), "raw_file" (a camera RAW file: F-e), "image_format"
+// (a picture of a format the codecs do not read yet: F-a). PC4 F-f: a .pcraft (its name's extension, or a zip whose first
+// file is manifest.json) is read by render/pcraft_read — its layers, channels, paths, guides and what it carried, and what
+// it could not keep in `notes` —; its errors (core::Error "format" for a broken one, "unsupported_version" for one of a
+// newer PhotoCraft, "image_too_large" past the limits).
 Opened open_file(std::string_view bytes, std::string_view name, const OpenOptions& options = {});
+
+// PC4 F-f: a .pcraft folder (PhotoCraft's folder bundle: manifest.json, tiles/, blobs/) as a book, as open_file opens its zip.
+Opened open_folder(const std::filesystem::path& folder, const OpenOptions& options = {});
 
 // A picture (what the codecs read) as such a book — what open_file makes of a picture, and what 新規… (an image of a
 // size, mode and depth) and 複製… (a page's merged picture) make.

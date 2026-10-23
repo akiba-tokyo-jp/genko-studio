@@ -16,7 +16,7 @@ sudo apt install libgl1 libegl1 libopengl0 libfontconfig1 libfreetype6 libglib2.
   libx11-6 libx11-xcb1 libxcb1 libxkbcommon0 libxkbcommon-x11-0 libxcb-glx0 libxcb-randr0 libxcb-render0 \
   libxcb-shape0 libxcb-shm0 libxcb-sync1 libxcb-xfixes0 libxcb-xkb1 libpng16-16t64 libjpeg-turbo8 libtiff6 \
   libwebp7 libwebpdemux2 libwebpmux3 liblcms2-2 libharfbuzz0b libgssapi-krb5-2 zlib1g \
-  libopenexr-3-1-30 libimath-3-1-29t64 libavif16 libaom3
+  libopenexr-3-1-30 libimath-3-1-29t64 libavif16 libaom3 libzstd1
 ```
 
 Qt（画面の部品）と、Qt が X11 の画面で使う小さなライブラリ（libxcb-cursor など）は配布物の中に入っています。

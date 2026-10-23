@@ -15,6 +15,7 @@
 #include "formats/open_file.hpp"
 #include "formats/output.hpp"
 #include "formats/page_picture.hpp"
+#include "formats/pcraft_write.hpp"
 #include "formats/pillow_save.hpp"
 #include "core/color_model.hpp"
 #include "render/codecs/codecs.hpp"
@@ -30,9 +31,9 @@ using render::codecs::CodecImage;
 using render::codecs::Layout;
 using render::codecs::Sample;
 
-// (PC4 F-a: and the codecs' formats, the default extension of each first; PC4 F-d: and a PSB)
-constexpr std::array<std::string_view, 24> kExtensions{"psd", "tif",  "png", "jpg", "jpeg", "webp", "gif", "bmp", "tga", "ico", "pnm", "pbm",
-                                                       "pgm", "ppm", "pam", "pfm", "qoi", "exr", "hdr", "avif", "jpe", "jfif", "dib", "psb"};
+// (PC4 F-a: and the codecs' formats, the default extension of each first; PC4 F-d: and a PSB; PC4 F-f: PhotoCraft's .pcraft)
+constexpr std::array<std::string_view, 25> kExtensions{"psd", "tif",  "png", "jpg", "jpeg", "webp", "gif", "bmp", "tga", "ico", "pnm", "pbm", "pgm",
+                                                       "ppm", "pam", "pfm", "qoi", "exr", "hdr", "avif", "jpe", "jfif", "dib", "psb", "pcraft"};
 
 std::string lower_suffix(const fs::path& dest) {
     std::string suffix = dest.extension().string();
@@ -163,6 +164,28 @@ PlannedCopy plan_copy(const core::Document& doc, std::size_t at, const fs::path&
         plan.psd_page = 0;
         return plan;
     }
+    if (suffix == "pcraft") {  // (PC4 F-f: its layers as PhotoCraft's, or its merged picture alone)
+        // (written as it is made into a file beside `dest` — never held whole —, moved over it by write_planned; the file
+        // removed if the copy is not made)
+        if (dest.has_parent_path()) detail::make_dirs(dest.parent_path());
+        auto part = std::make_shared<detail::PartFile>(dest);
+        const auto sink = [&part](std::string_view bytes) { part->write(bytes); };
+        if (options.layers) {
+            plan.notes = write_pcraft(doc, at, sink, PcraftOptions{});
+        } else {
+            Opened merged = duplicate_page(doc, at, doc.title, true);
+            merged.doc.file_info = doc.file_info;
+            merged.doc.native_files = doc.native_files;
+            merged.doc.asset_dir = doc.asset_dir;
+            merged.doc.title = doc.title;
+            std::vector<std::string> notes = write_pcraft(merged.doc, 0, sink, PcraftOptions{});
+            plan.notes = std::move(merged.notes);
+            for (std::string& note : notes) plan.notes.push_back(std::move(note));
+        }
+        part->close();
+        plan.part = std::move(part);
+        return plan;
+    }
     const std::optional<std::string> xmp = book_xmp(doc);
     PagePicture picture = page_picture(page, doc, dpi);
     plan.notes = picture.notes;
@@ -210,6 +233,10 @@ CopyResult write_planned(const PlannedCopy& plan) {
     if (plan.file.has_parent_path()) detail::make_dirs(plan.file.parent_path());
     if (plan.psd_book) {
         export_page_psd(*plan.psd_book, plan.psd_book->page(plan.psd_page), plan.file, plan.dpi, {}, nullptr, plan.psb);
+        return result;
+    }
+    if (plan.part) {  // (PC4 F-f: the .pcraft written beside it, moved into place)
+        plan.part->commit();
         return result;
     }
     detail::Output output;

@@ -261,6 +261,11 @@ set_tests_properties(test_psd_text PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offsc
 # capability table and its symmetric guarantee, the losses said and their round trips, the limits before the pixels, the
 # picture's conversions) on this build's table, and the wrapped formats read through this build's readers.
 genko_test(test_codecs SOURCES unit/test_codecs.cpp DEPS genko_test_support genko_render genko_formats LABELS unit)
+# PC4 F-f (SPEC.md FILE-01, .pcraft): BLAKE3, zstd and the zip read by name and written stored, against PhotoCraft's tests of
+# crates/format (a bundle cut, flipped, missing a tile or swapping one, a manifest not JSON or of a newer version, the limits,
+# a folder bundle, one zipped again with deflate) on bundles upstream's writer made (data/pcraft), and the bombs: zstd frames
+# and zip files that unpack or say they unpack past what may be read, a canvas and tiles past the limits — refused before.
+genko_test(test_pcraft SOURCES unit/test_pcraft.cpp DEPS genko_test_support genko_render_ops genko_formats ${GENKO_ZSTD} LABELS unit TIMEOUT 900)
 
 # Against the Python baseline (skipped when there is no reference Python: $GENKO_PYREF or /opt/pyref/bin/python).
 genko_test(test_contract_storage SOURCES contract/test_contract_storage.cpp DEPS genko_test_support LABELS contract
@@ -504,6 +509,12 @@ genko_test(test_contract_open SOURCES contract/test_contract_open.cpp DEPS genko
 # (read back here and by the reference's Pillow and psd-tools), a picture's EXIF and XMP kept and its orientation applied
 # when it is opened, `genko inspect --file-info`.
 genko_test(test_contract_file_info SOURCES contract/test_contract_file_info.cpp DEPS genko_test_support genko_formats genko_render_ops
+           LABELS contract TIMEOUT 900)
+# PC4 F-f (SPEC.md FILE-01, .pcraft): the .pcraft files PhotoCraft v0.2.0's writer made (data/pcraft) opened as books — their
+# layers, pixels, masks and channels as upstream's reader reads them (MANIFEST.json) —, a book written as a .pcraft and read
+# back, every file read, written and read again, the refusals, 埋め込みを配置 of a .pcraft (contents of kind page), `genko
+# export --format pcraft` and `genko new --from`; with $GENKO_PCRAFT_CHECK, upstream's reader reads what this build wrote.
+genko_test(test_contract_pcraft SOURCES contract/test_contract_pcraft.cpp DEPS genko_test_support genko_formats genko_render_ops
            LABELS contract TIMEOUT 900)
 # PC4 F-a (SPEC.md FILE-01, the codecs): `genko render --out` of GIF, PPM, PGM, PBM, TGA, ICO, QOI and AVIF; smart objects of
 # the new formats (formats@1) drawn on 8-bit, 16-bit, 32-bit, grey and CMYK pages; a file of each opened as a book;

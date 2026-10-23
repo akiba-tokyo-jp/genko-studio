@@ -610,6 +610,8 @@ public:
     bool place_embedded(std::optional<QString> path = std::nullopt);
     // (`linked`, PC3 A1: リンクを配置… — the file's place kept with its copy)
     bool place_smart(const QString& file, bool as_placed, bool linked = false);
+    bool place_pcraft(const QString& file);  // (PC4 F-f: 埋め込みを配置… of a .pcraft)
+    void open_pcraft_folder(const std::filesystem::path& path);  // (PC4 F-f: 開く… of a .pcraft folder)
     // レイヤー → スマートオブジェクト・スマートフィルター・ラスタライズ, レイヤーの内容オプション…
     void smart_convert();
     void smart_copy();

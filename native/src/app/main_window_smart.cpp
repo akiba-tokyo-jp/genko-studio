@@ -31,6 +31,7 @@
 #include "app/ask.hpp"
 #include "app/color_settings_dialog.hpp"
 #include "app/layer_panel.hpp"
+#include "app/off_ui.hpp"
 #include "app/main_window.hpp"
 #include "app/smart_panel.hpp"
 #include "core/base64.hpp"
@@ -41,6 +42,7 @@
 #include "core/pyops.hpp"
 #include "core/smart.hpp"
 #include "formats/smart_files.hpp"
+#include "render/pcraft_read.hpp"
 #include "render/png.hpp"
 #include "render/proof.hpp"
 #include "render/smart.hpp"
@@ -296,12 +298,13 @@ bool MainWindow::place_embedded(std::optional<QString> chosen) {
         return false;
     }
     const QString file =
-        chosen ? *chosen : ask::open_path(this, QStringLiteral("埋め込みを配置"), QStringLiteral("画像 (*.png *.jpg *.jpeg *.tif *.tiff *.bmp *.webp *.gif *.psd *.psb *.tga *.ico *.pnm *.pbm *.pgm *.ppm *.pam *.pfm *.qoi *.exr *.hdr *.avif)"));
+        chosen ? *chosen : ask::open_path(this, QStringLiteral("埋め込みを配置"), QStringLiteral("画像 (*.png *.jpg *.jpeg *.tif *.tiff *.bmp *.webp *.gif *.psd *.psb *.tga *.ico *.pnm *.pbm *.pgm *.ppm *.pam *.pfm *.qoi *.exr *.hdr *.avif);;PhotoCraft (*.pcraft)"));
     if (file.isEmpty() || !still(asked)) return false;
     return place_smart(file, false);
 }
 
 bool MainWindow::place_smart(const QString& file, bool as_placed, bool linked) {
+    if (!as_placed && !linked && file.endsWith(QStringLiteral(".pcraft"), Qt::CaseInsensitive)) return place_pcraft(file);  // (PC4 F-f)
     const Asked asked = asking();
     std::string bytes;
     render::smart::FileInfo info;
@@ -380,6 +383,58 @@ bool MainWindow::place_smart(const QString& file, bool as_placed, bool linked) {
     } else {
         flash(QStringLiteral("「%1」をスマートオブジェクトとして置きました").arg(named.fileName()), 4000);
     }
+    return true;
+}
+
+// PC4 F-f (design 2.8): 埋め込みを配置… of a .pcraft — its page the contents of a smart object (the op smart_place of the
+// book's asset of it). The file is read on a worker thread first (render/pcraft_read: the heavy part, kept for the op),
+// so the window keeps drawing; what it could not keep is said.
+bool MainWindow::place_pcraft(const QString& file) {
+    const Asked asked = asking();
+    std::string bytes;
+    std::string ref;
+    std::vector<std::string> notes;
+    std::optional<render::pcraft::Read> read;
+    try {
+        std::ifstream in(core::path_from_utf8(file.toStdString()), std::ios::binary | std::ios::ate);
+        if (!in) throw core::Error("io", "cannot read " + file.toStdString());
+        const auto size = static_cast<std::uint64_t>(in.tellg());
+        if (size > render::smart::kFileMaxBytes) {
+            flash(QStringLiteral("ファイルが大きすぎます（256 MiB まで）"), 6000, true);
+            return false;
+        }
+        in.seekg(0);
+        bytes.assign(std::istreambuf_iterator<char>(in), std::istreambuf_iterator<char>());
+        const std::string name = QFileInfo(file).completeBaseName().toStdString();
+        read = off_ui([&bytes, &name] { return render::pcraft::read(bytes, name); });
+        notes = read->notes;
+        if (!still(asked)) return false;
+    } catch (const std::exception& error) {
+        flash(QStringLiteral("読み込めない .pcraft です:\n%1").arg(wording::error(QString::fromUtf8(error.what()))), 6000, true);
+        return false;
+    }
+    const core::Page* page = current_page();
+    if (page == nullptr) return false;
+    session_->save_now();
+    try {
+        ref = storage::AssetStore(*session_->path()).put_bytes(bytes, ".pcraft");
+    } catch (const std::exception& error) {
+        flash(wording::error(QString::fromUtf8(error.what())), 6000, true);
+        return false;
+    }
+    page = current_page();
+    if (page == nullptr) return false;
+    const QFileInfo named(file);
+    const Json place{{"op", "smart_place"}, {"page", page->index.json()}, {"asset", ref}, {"name", named.fileName().toStdString()}, {"to", "art"},
+                     {"title", named.completeBaseName().toStdString()}};
+    // (what was read on the worker the op's, once — never kept past it for another placing)
+    render::pcraft::remember_read(ref, std::move(*read));
+    const bool placed = apply_ops(Json::array({place}));
+    render::pcraft::forget_read();
+    if (!placed) return false;
+    QString said = QStringLiteral("「%1」をスマートオブジェクトとして置きました").arg(named.fileName());
+    for (const std::string& note : notes) said += QStringLiteral("。") + QString::fromStdString(note);
+    flash(said, notes.empty() ? 4000 : 8000);
     return true;
 }
 

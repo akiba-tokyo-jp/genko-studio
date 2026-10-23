@@ -469,6 +469,32 @@ const std::vector<Rule>& rules() {
         r.push_back(rule("the layers are too large to read", "レイヤーの絵が多すぎて読めません"));
         r.push_back(rule("the picture is too large to read", "絵が大きすぎて読めません"));
         r.push_back(rule(R"(the page layer is too large \(.*\))", "用紙の大きさに対して PSD の絵が大きすぎて、レイヤーにできません"));
+        // (PC4 F-f: a .pcraft read or written — render/pcraft_read, formats/pcraft_write; the op smart_place's "the .pcraft
+        // cannot be read (…)" around them)
+        r.push_back(rule(R"((?:the \.pcraft cannot be read \()?the \.pcraft is broken \(.*\)\)?)", ".pcraft のファイルが壊れているか途中で切れていて、読めません"));
+        r.push_back(rule(R"((?:the \.pcraft cannot be read \()?the \.pcraft was written by a newer PhotoCraft \(format (\d+); this build reads format (\d+)\)\)?)",
+                         "新しい PhotoCraft で書かれた .pcraft なので読めません（形式 \\1。この版の Genko が読めるのは形式 \\2 です）"));
+        r.push_back(rule(R"((?:the \.pcraft cannot be read \()?the \.pcraft unpacks to more than this build reads at once \(.*\)\)?)",
+                         ".pcraft の中身が大きすぎて、一度に読めません（展開して 8 GiB まで）"));
+        r.push_back(rule(R"((?:the \.pcraft cannot be read \()?the \.pcraft holds a (?:blob|file) too large to read \(.*\)\)?)",
+                         ".pcraft の中に、大きすぎて読めないファイルがあります"));
+        // (PC4 F-f review: the read's budgets — its layers, the pixels it makes, what the book keeps, the documents inside)
+        r.push_back(rule(R"((?:the \.pcraft cannot be read \()?the \.pcraft holds more layers than this build reads \(at most (\d+)\)\)?)",
+                         ".pcraft のレイヤーが多すぎて読めません（\\1 枚まで）"));
+        r.push_back(rule(R"((?:the \.pcraft cannot be read \()?the \.pcraft holds more pixels than this build reads at once \(.*\)\)?)",
+                         ".pcraft のレイヤーとマスクの画素が多すぎて、一度に読めません"));
+        r.push_back(rule(R"((?:the \.pcraft cannot be read \()?the \.pcraft makes a book larger than this build holds.*)",
+                         ".pcraft の画素とファイルが大きすぎて、本に入りません（作業に使える記憶の上限を超えます）"));
+        r.push_back(rule(R"((?:the \.pcraft cannot be read \()?the \.pcraft holds more documents inside it than this build reads \(at most (\d+)\)\)?)",
+                         ".pcraft の中の .pcraft が多すぎて読めません（\\1 個まで）"));
+        r.push_back(rule(R"((?:the \.pcraft cannot be read \()?the \.pcraft is too large a page of inks for this build \((\d+)×(\d+) pixels\)\)?)",
+                         ".pcraft の画像が大きすぎて、インキのページにできません（\\1×\\2 px）"));
+        r.push_back(rule(R"(the \.pcraft would be larger than 4 GiB or hold more than 65535 files.*)",
+                         ".pcraft が 4 GiB を超えるか、中のファイルが 65535 を超えるので書けません"));
+        r.push_back(rule(R"(a multichannel page is not written as a \.pcraft by this build.*)",
+                         "マルチチャンネルのページは .pcraft に書き出せません（先に RGB・CMYK・グレースケールにします）"));
+        r.push_back(rule(R"(the asset's \.pcraft cannot be read \(.*\))", "素材の .pcraft を読めません（中身が名前と違います）"));
+        r.push_back(rule(R"(the \.pcraft cannot be read \(.*\))", "読み込めない .pcraft です"));
         // (PC4 F-a: the codecs' refusals — render/codecs: a picture past the limits, a broken file, what a format holds —
         // before the PSD's, whose words are of a PSD's layer)
         r.push_back(rule(R"(the picture is too large \((\d+)×(\d+) pixels; at most (\d+) pixels\))", [](const QRegularExpressionMatch& m) {
