@@ -525,6 +525,18 @@ private slots:
         QCOMPARE(core::normalize_picture("tree", Json{{"leaves_color", Json::array({0, 0, 255})}})["default_leaves"], Json(false));
         QVERIFY_THROWS_EXCEPTION(core::OpError, core::normalize_picture("tree", Json{{"base_tree_type", "baobob"}}));
         QVERIFY_THROWS_EXCEPTION(core::OpError, core::normalize_picture("flame", Json{{"flames", 3}}));
+        // (genko inspect --filters: the three, their settings, the trees' types and the frames' designs)
+        const Json pictures = core::filter_catalogue()["pictures"];
+        QCOMPARE(pictures.size(), std::size_t(3));
+        QStringList kinds;
+        for (const Json& p : pictures) {
+            kinds << QString::fromStdString(p["kind"].get<std::string>());
+            QVERIFY(!p["settings"].empty());
+        }
+        QCOMPARE(kinds, (QStringList{QStringLiteral("flame"), QStringLiteral("picture_frame"), QStringLiteral("tree")}));
+        QCOMPARE(pictures[1]["frames"].size(), std::size_t(16));
+        QCOMPARE(pictures[2]["tree_types"].size(), std::size_t(34));
+        QCOMPARE(pictures[2]["tree_types"][5], Json("weeping_willow"));
     }
 
     void eachRendererDrawsIsSeededAndTheSameTwiceAtEveryDepth() {
