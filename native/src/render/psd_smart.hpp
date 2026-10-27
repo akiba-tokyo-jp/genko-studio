@@ -36,7 +36,7 @@ struct Placed {
     // "mesh"?: {"us": [0, 1], "vs": [0, 1], "points": [[x, y] × 16]}}; none when it has no warp (warpNone, or one that
     // leaves the contents as they are).
     std::optional<core::Json> warp;
-    bool filters = false;  // (SoLd) Photoshop's smart filters on it (filterFX): its picture shows them, this build has none
+    bool filters = false;  // (SoLd) Photoshop's smart filters on it (filterFX): read as Genko's by render/psd_filters (PC4 D7) when all are in the table
 };
 
 // The block read (its payload, as the layer record holds it); none when it cannot be read: another kind or version, a

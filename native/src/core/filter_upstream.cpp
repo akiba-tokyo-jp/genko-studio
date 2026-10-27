@@ -16,6 +16,7 @@
 #include "core/adjust.hpp"
 #include "core/error.hpp"
 #include "core/gallery_kinds.hpp"
+#include "core/pyops.hpp"
 
 namespace genko::core {
 
@@ -374,7 +375,8 @@ Json gallery_out(const Json& read) {
         const GalleryEffectKind* kind = gallery_effect(effect.at("filter").get<std::string>());
         if (kind == nullptr) throw Unmapped{};
         Json params = Json::object();
-        for (const auto& [key, value] : effect.value("params", Json::object()).items()) {
+        const Json given = effect.value("params", Json::object());
+        for (const auto& [key, value] : given.items()) {
             const AdjustParam* p = param_of(kind->params, key);
             params[camel(key)] = p != nullptr && p->type == AdjustParam::Type::Rgb ? colour_out(value) : value;
         }
@@ -486,6 +488,7 @@ std::optional<std::pair<std::string, Json>> to_upstream(std::string_view kind, c
             read.erase("pins");
         } else if (kind == "render_lighting_effects") {
             if (const Json* texture = get(read, "texture"); texture != nullptr && !texture->is_string()) return std::nullopt;  // (a channel of the page)
+            if (read.at("lights").empty()) return std::nullopt;  // (no light: upstream's empty list is its one light)
             lights = Json::array();
             for (const Json& light : read.at("lights")) {
                 Json one = light;
@@ -495,6 +498,7 @@ std::optional<std::pair<std::string, Json>> to_upstream(std::string_view kind, c
             read.erase("lights");
         } else if (kind == "blur_path" && read.contains("paths")) {
             if (!(canvas.width_mm > 0) || !(canvas.height_mm > 0)) return std::nullopt;
+            if (read["paths"].empty()) return std::nullopt;  // (no path: upstream's empty list is its one path)
             paths = Json::array();
             for (const Json& path : read["paths"]) {
                 Json one = path;

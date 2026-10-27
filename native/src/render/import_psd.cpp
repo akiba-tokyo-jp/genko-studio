@@ -49,6 +49,7 @@
 #include "render/psd.hpp"
 #include "render/psd_adjust.hpp"
 #include "render/psd_filters.hpp"
+#include "render/smart_filters.hpp"
 #include "render/psd_keep.hpp"
 #include "render/psd_paths.hpp"
 #include "render/psd_shapes.hpp"
@@ -1131,6 +1132,7 @@ Json import_data(core::Document& doc, const Json& op, std::string data, bool exa
                     if (filtered) {
                         core::smart::put_setting(layer, "filters", std::move(*fx->filters));
                         if (!fx->on) core::smart::put_setting(layer, "filters_on", false);
+                        smart_filters::settle_places(doc, page, layer);  // (their places go with it, as smart_filter_add's)
                     }
                     smart_objects.push_back(Json{{"id", layer.id}, {"contents", smart->contents}});
                 } else {

@@ -497,8 +497,9 @@ Read read(std::string_view sold, const psd::Placed& placed, const Placement& whe
         Bytes b(sold.substr(8), budget.left);
         try {
             d = psd::descriptor::read_versioned(b);
-        } catch (const Broken&) {
-            budget.left -= std::min(budget.left, b.spent());
+        } catch (const Broken& broken) {
+            // (past the budget: nothing more for the file's other layers either; else what it took)
+            budget.left = std::string_view(broken.what()).find("too large") != std::string_view::npos ? 0 : budget.left - std::min(budget.left, b.spent());
             throw;
         }
         budget.left -= std::min(budget.left, b.spent());
