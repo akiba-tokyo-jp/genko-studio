@@ -114,6 +114,8 @@ const std::map<std::string, const char*>& names() {
         {"dodge", "覆い焼きした"}, {"burn", "焼き込んだ"}, {"sponge", "スポンジで直した"}, {"blur_brush", "ぼかした"},
         {"sharpen_brush", "シャープにした"}, {"smudge_brush", "指先でのばした"}, {"mixer_brush", "混合ブラシで描いた"},
         {"background_eraser", "背景を消した"}, {"color_replacement", "色を置き換えた"},
+        // (PC4 F-e: render/ops_camera_raw — a RAW smart object's development, an op of the book's)
+        {"set_camera_raw", "Camera Raw で現像の設定を変えた"},
     };
     return table;
 }
@@ -133,7 +135,10 @@ QString describe(const Json& ops) {
     }
     if (named.isEmpty()) return QStringLiteral("原稿を変えた");
     // (smart-objects@1, PC3 A1: a step made in a smart object's contents — コンテンツを編集's tab — says where)
-    const bool inside = ops.is_array() && std::any_of(ops.begin(), ops.end(), [](const Json& op) { return op.is_object() && op.contains("contents"); });
+    // (PC4 F-e: set_camera_raw names the contents it develops, an op of the book's own)
+    const bool inside = ops.is_array() && std::any_of(ops.begin(), ops.end(), [](const Json& op) {
+                            return op.is_object() && op.contains("contents") && op.value("op", Json()) != Json("set_camera_raw");
+                        });
     const QString where = inside ? QStringLiteral("中身: ") : QString();
     const QString first = named.front();
     const bool same = std::all_of(named.begin(), named.end(), [&](const QString& n) { return n == first; });

@@ -50,6 +50,12 @@ struct OpenOptions {
     // working RGB all the same.
     bool ignore_exif_profile = false;
     render::codecs::Limits limits;
+    // PC4 F-e: a camera RAW file's development (camera-raw@1's {"develop"?, "adjust"?}: Camera Raw's window, `genko new
+    // --raw`; none: camera-raw@1's defaults), its resolution (ppi: the window's ワークフロー, 300 unless given) and whether
+    // it opens as a smart object of the RAW file (オブジェクトを開く: its development kept and set again by set_camera_raw).
+    std::optional<core::Json> raw;
+    double raw_dpi = 300;
+    bool raw_smart = false;
 };
 
 struct Opened {
@@ -62,8 +68,11 @@ struct Opened {
 
 // The file of `name` (its name, no folder: the book's title is its stem) with these bytes as a book. core::Error as
 // render::codecs::decode throws them ("unidentified_image", "format", "image_too_large"), render::NotYetPorted for a kind
-// of file this build does not open yet: "psd_file" (a PSD or PSB: F-d), "raw_file" (a camera RAW file: F-e), "image_format"
-// (a picture of a format the codecs do not read yet: F-a). PC4 F-f: a .pcraft (its name's extension, or a zip whose first
+// of file this build does not open yet: "image_format" (a picture of a format the codecs do not read). PC4 F-e: a camera
+// RAW file (its suffix a RAW's, or its marks: render/raw) is developed by LibRaw (OpenOptions::raw, raw_dpi; render/raw's
+// errors) into a page of its output space and depth — its profile the page's, its camera in native_source —, or opens as
+// a smart object of the RAW file (raw_smart: camera-raw@1); one LibRaw cannot develop (a camera it does not know) opens its
+// embedded preview at 8 bits, said in `notes`. PC4 F-f: a .pcraft (its name's extension, or a zip whose first
 // file is manifest.json) is read by render/pcraft_read — its layers, channels, paths, guides and what it carried, and what
 // it could not keep in `notes` —; its errors (core::Error "format" for a broken one, "unsupported_version" for one of a
 // newer PhotoCraft, "image_too_large" past the limits).

@@ -99,6 +99,14 @@ jobs:
             libharfbuzz-dev liblcms2-dev libpng-dev libjpeg-turbo8-dev libtiff-dev libwebp-dev zlib1g-dev libopenexr-dev libavif-dev libaom-dev libzstd-dev \
             nlohmann-json3-dev libxcb-cursor0 libxcb-icccm4 libxcb-image0 libxcb-keysyms1 libxcb-render-util0 \
             libxcb-xinerama0 libxcb-xkb1 libxcb-randr0 libxcb-shape0 xvfb fonts-ipafont-gothic fonts-ipafont-mincho poppler-utils
+      - name: LibRaw 0.22.2 (libraw.org's source, a shared library of its own — LGPL-2.1; PC4 F-e)
+        uses: actions/cache@v4
+        id: libraw-cache
+        with:
+          path: ${{ runner.temp }}/libraw
+          key: libraw-0.22.2-${{ hashFiles('tools/ci/build_libraw.sh') }}
+      - if: steps.libraw-cache.outputs.cache-hit != 'true'
+        run: bash tools/ci/build_libraw.sh "${{ runner.temp }}/libraw"
       - name: Qt (official binaries, LGPL modules only)
         uses: actions/cache@v4
         id: qt-cache
@@ -117,6 +125,7 @@ jobs:
       - name: Configure, build, test
         env:
           CMAKE_PREFIX_PATH: ${{ runner.temp }}/qt/${{ env.QT_VERSION }}/gcc_64
+          GENKO_LIBRAW_ROOT: ${{ runner.temp }}/libraw
           QT_QPA_PLATFORM: offscreen
         run: |
           set -euo pipefail

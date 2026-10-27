@@ -11,6 +11,7 @@
 #include "app/color_settings_dialog.hpp"
 #include "app/preferences.hpp"
 #include "core/paths.hpp"
+#include "core/smart.hpp"
 
 namespace genko::app {
 
@@ -51,6 +52,18 @@ formats::OpenOptions file_open_options() {
     return options;
 }
 
+QString raw_patterns() {
+    QStringList out;
+    for (const core::smart::FileFormat& f : core::smart::kLaterFileFormats) {
+        if (f.format != "raw") continue;
+        const QString suffix = QString::fromLatin1(f.suffix.data(), static_cast<qsizetype>(f.suffix.size()));
+        out << QStringLiteral("*%1").arg(suffix) << QStringLiteral("*%1").arg(suffix.toUpper());
+    }
+    return out.join(QLatin1Char(' '));
+}
+
+QString raw_filter() { return QStringLiteral("Camera Raw (%1)").arg(raw_patterns()); }
+
 QString open_filters() {
     // (the formats this build reads — PSD・PSB since PC4 F-d, PhotoCraft's .pcraft since F-f (below) —; Camera Raw joins when
     // its group reads it)
@@ -64,6 +77,8 @@ QString open_filters() {
     }
     all << QStringLiteral("*.pcraft *.PCRAFT");  // (PC4 F-f: PhotoCraft's document)
     each << QStringLiteral("PhotoCraft (*.pcraft *.PCRAFT)");
+    all << raw_patterns();  // (PC4 F-e: camera RAW files, through Camera Raw)
+    each << raw_filter();
     return QStringLiteral("すべての形式 (%1);;%2;;すべてのファイル (*)").arg(all.join(QLatin1Char(' ')), each.join(QStringLiteral(";;")));
 }
 

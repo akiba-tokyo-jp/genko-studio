@@ -192,6 +192,13 @@ public:
     QCheckBox* ignore_exif_profile = nullptr;
     // 書き出し (PC4 F-c, edit.preferences.export: 書き出しの環境設定…'s values)
     ExportPreferencesForm* export_form = nullptr;
+    // Camera Raw (PC4 F-e, edit.preferences.rawDefaults: the ワークフロー a camera RAW file opens with — app/camera_raw_open)
+    QComboBox* raw_space = nullptr;
+    QComboBox* raw_depth = nullptr;
+    QSpinBox* raw_resolution = nullptr;
+    QComboBox* raw_sharpen = nullptr;
+    QCheckBox* raw_smart = nullptr;
+    QCheckBox* raw_auto = nullptr;
     // 透明部分・色域
     QComboBox* checker_size = nullptr;
     QComboBox* checker_colours = nullptr;

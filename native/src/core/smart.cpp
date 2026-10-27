@@ -21,6 +21,7 @@
 #include "core/patterns.hpp"
 #include "core/pyconv.hpp"
 #include "core/pyops.hpp"
+#include "core/raw_develop.hpp"
 #include "core/vector.hpp"
 
 namespace genko::core::smart {
@@ -377,12 +378,13 @@ void check_contents(const std::string& id, const SmartContents& c) {
         const Json* at = get(*c.psd, "at");
         if (at == nullptr || !at->is_number_integer() || at->get<std::int64_t>() < 0) refuse(who + ": its psd's at is where the file's bytes go");
     }
-    // (camera-raw@1, PC4: a RAW file's development settings — their parts are F-e's to check)
+    // (camera-raw@1, PC4 F-e: a RAW file's development settings, core/raw_develop)
     if (c.raw) {
         if (c.format != "raw") refuse(who + ": only a RAW file has development settings (raw)");
-        if (!c.raw->is_object()) refuse(who + ": its raw is {develop, adjust?, camera}");
-        for (const auto& [key, value] : c.raw->items()) {
-            if (key != "develop" && key != "adjust" && key != "camera") refuse(who + ": its raw's " + py_repr_str(key) + " is not known to this build");
+        try {
+            raw::check_raw(*c.raw);
+        } catch (const Error& error) {
+            refuse(who + ": " + error.what());
         }
     }
 }
@@ -711,8 +713,8 @@ std::optional<std::string> format_of_suffix(std::string_view suffix) {
     for (const FileFormat& f : kFileFormats) {
         if (f.suffix == suffix) return std::string(f.format);
     }
-    // (PC4 F-a: formats@1's, read by the codecs; RAW's when F-e reads them)
-    if (auto later = later_format_of_suffix(suffix); later && *later != "raw") return later;
+    // (PC4 F-a: formats@1's, read by the codecs; F-e: camera-raw@1's, read by LibRaw)
+    if (auto later = later_format_of_suffix(suffix)) return later;
     return std::nullopt;
 }
 

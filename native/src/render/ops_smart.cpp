@@ -40,6 +40,7 @@
 #include "render/raster.hpp"
 #include "render/smart.hpp"
 #include "render/screentone.hpp"
+#include "render/raw.hpp"
 #include "render/smart_decode.hpp"
 #include "render/smart_filters.hpp"
 #include "render/text/balloons.hpp"
@@ -155,9 +156,8 @@ std::pair<std::string, std::string> asset_file(const Document& doc, const std::s
     if (!storage::AssetStore::is_ref(ref)) throw OpError("asset must be sha256:…, got " + core::py_repr_str(ref));
     const storage::AssetStore store(*doc.asset_dir);
     std::vector<core::smart::FileFormat> formats(core::smart::kFileFormats.begin(), core::smart::kFileFormats.end());
-    for (const core::smart::FileFormat& later : core::smart::kLaterFileFormats) {  // (PC4 F-a: formats@1's)
-        if (later.format != "raw") formats.push_back(later);
-    }
+    // (PC4 F-a: formats@1's; F-e: camera-raw@1's)
+    for (const core::smart::FileFormat& later : core::smart::kLaterFileFormats) formats.push_back(later);
     for (const core::smart::FileFormat& format : formats) {
         if (!store.has(ref, format.suffix)) continue;
         std::optional<std::string> bytes;
@@ -170,7 +170,7 @@ std::pair<std::string, std::string> asset_file(const Document& doc, const std::s
         if (storage::AssetStore::ref(*bytes) != ref) throw OpError("the asset's picture cannot be read (its bytes are not what its name says)");
         return {std::move(*bytes), std::string(format.suffix)};
     }
-    throw OpError("no asset " + ref + " of a picture (png, jpg, tif, webp, bmp, gif, psd, tga, ico, pnm, qoi, exr, hdr, avif)");
+    throw OpError("no asset " + ref + " of a picture (png, jpg, tif, webp, bmp, gif, psd, tga, ico, pnm, qoi, exr, hdr, avif, a camera RAW file)");
 }
 
 // The contents' colour use the op asks for: embedded_profile keep (its numbers), convert (from the profile the file
@@ -486,6 +486,8 @@ void smart_place(OpContext& c) {
             throw OpError("data is the file's bytes in base64");
         }
         if (bytes.size() > smart::kFileMaxBytes) throw OpError("the file is larger than 256 MiB");
+        // (PC4 F-e: a TIFF-shaped camera RAW — NEF, ARW, PEF… — is known by its name's suffix alone)
+        if (const auto named = core::smart::suffix_of_name(name); named && raw::raw_suffix(*named)) suffix = *named;
     } else {
         const std::string ref = text_at(c.op, "asset");
         if (!ref.starts_with("sha256:")) throw OpError("smart_place takes an asset ref (sha256:…) or data, not a path");
@@ -533,6 +535,16 @@ void smart_place(OpContext& c) {
     contents->depth = info.depth;
     contents->mode = info.mode;
     contents->profile = colour_use(doc, c.op, info);
+    if (info.format == "raw") {
+        // (PC4 F-e, camera-raw@1: developed with camera-raw@1's defaults until set_camera_raw — its colours its output
+        // space's, which the developed picture carries)
+        try {
+            contents->raw = raw::default_raw(bytes);
+        } catch (const core::Error& error) {
+            throw OpError(std::string("the asset's picture cannot be read (") + error.what() + ")");
+        }
+        contents->profile = Json::object({{"use", "embedded"}, {"intent", "relative"}, {"bpc", true}});
+    }
     if (const Json* link = core::get(c.op, "link"); link != nullptr && !link->is_null()) contents->link = smart_ops::link_of(c.op, bytes);  // (PC3 A1)
     if (core::truthy_at(c.op, "data")) doc.smart_files[ref] = std::make_shared<const std::string>(std::move(bytes));
     const auto [cw, ch] = core::smart::size_mm(*contents);
@@ -564,6 +576,9 @@ void smart_profile(OpContext& c) {
     const core::SmartContents* contents = core::smart::contents_of(doc, layer);
     if (!id || contents == nullptr) throw OpError("the smart object has no contents");
     if (contents->kind != "file") throw OpError("the smart object's contents are a page, not a file: their colours are their layers'");
+    if (contents->format == "raw") {  // (PC4 F-e)
+        throw OpError("the smart object's contents are a camera RAW file: their colours are their development's output space (set_camera_raw)");
+    }
     const core::Bytes bytes = smart::file_bytes(doc, *contents);
     if (!bytes) throw OpError("the smart object's file is not in the book");
     smart::FileInfo info;

@@ -45,6 +45,7 @@
 #include "render/ink.hpp"
 #include "render/plugins.hpp"
 #include "render/page.hpp"
+#include "render/smart.hpp"
 
 namespace genko::app {
 
@@ -539,6 +540,9 @@ QIcon LayerPanel::thumbnail(const core::Page& page, const core::Layer& layer) {
     }
     if (const core::SmartContents* contents = core::smart::contents_of(window_->book(), layer)) {  // (its contents as they are now)
         made.state += "|" + std::to_string(reinterpret_cast<std::uintptr_t>(contents));
+        // (PC4 F-e: a camera RAW is never developed here, on the window's thread — its kind's picture until the drawing
+        // has developed it, then the development; asked again at the next refresh)
+        if (contents->format == "raw" && !render::smart::developed_ready(window_->book(), *contents)) return icons::icon("kind_placed");
     }
     if (const auto found = thumbs_.find(key); found != thumbs_.end()) {
         const Thumb& was = found->second;
@@ -550,6 +554,7 @@ QIcon LayerPanel::thumbnail(const core::Page& page, const core::Layer& layer) {
     const preferences::Checker checker = preferences::checker();
     made.checker = checker_key(checker);
     try {
+        const render::smart::QuickScope quick;  // (a camera RAW's contents: what the drawing developed, never developed here)
         const render::Image image = render::layer_image(page, layer, 10, &window_->book(), true);
         if (checker.square <= 0) {  // (no checker: on white)
             render::Image paper = render::Image::create("RGBA", image.size(), render::Ink{255, 255, 255, 255});

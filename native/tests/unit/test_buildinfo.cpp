@@ -9,7 +9,7 @@ private slots:
     void reportsEveryLibrary() {
         const auto info = genko::api::build_info();
         for (const char* key : {"genko", "format", "qt", "zlib", "libpng", "libjpeg", "libjpeg_turbo", "libtiff", "freetype", "harfbuzz",
-                                "webp", "lcms2", "openexr", "libavif", "aom", "zstd", "blake3", "nlohmann_json"}) {
+                                "webp", "lcms2", "openexr", "libavif", "aom", "zstd", "blake3", "libraw", "nlohmann_json"}) {
             QVERIFY2(info.contains(key), key);
         }
         QCOMPARE(info["format"].get<int>(), genko::kWriteFormatVersion);

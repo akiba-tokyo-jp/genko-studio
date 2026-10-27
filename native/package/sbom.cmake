@@ -39,7 +39,8 @@ set(_packages
   "cpython-re~CPython re (ported)~=3.12.3~PSF-2.0 AND Unicode-3.0~built-in"
   "fonts~Bundled fonts (Dela Gothic One, Reggae One, Yomogi, Zen Kaku Gothic New, Zen Maru Gothic, Zen Old Mincho, IBM Plex Sans JP)~=NOASSERTION~OFL-1.1~built-in"
   "lucide~Lucide icons~=NOASSERTION~ISC~built-in"
-  "blake3~BLAKE3 (its C implementation: the .pcraft's hashes)~blake3~CC0-1.0 OR Apache-2.0 OR Apache-2.0 WITH LLVM-exception~built-in")
+  "blake3~BLAKE3 (its C implementation: the .pcraft's hashes)~blake3~CC0-1.0 OR Apache-2.0 OR Apache-2.0 WITH LLVM-exception~built-in"
+  "libraw~LibRaw (camera RAW: a shared library of its own)~libraw~LGPL-2.1-only OR CDDL-1.0~bundled:(^lib/libraw_r\\.so|(^|/)raw_r\\.dll$)")
 if(CMAKE_HOST_WIN32)
   list(APPEND _packages
     "zlib~zlib~zlib~Zlib~built-in" "libpng~libpng~libpng~libpng-2.0~built-in" "libjpeg-turbo~libjpeg-turbo~libjpeg_turbo~IJG AND BSD-3-Clause AND Zlib~built-in"
@@ -50,6 +51,7 @@ if(CMAKE_HOST_WIN32)
     "libdeflate~libdeflate (OpenEXR's)~=1.26~MIT~built-in" "openjph~OpenJPH (OpenEXR's)~=0.32.0~BSD-2-Clause~built-in"
     "libyuv~libyuv (libavif's)~=1916~BSD-3-Clause~built-in"
     "zstd~Zstandard~zstd~BSD-3-Clause OR GPL-2.0-only~built-in"
+    "jasper~JasPer (LibRaw's, inside its DLL)~=4.2.9~JasPer-2.0~built-in"
     "msvc-runtime~Microsoft Visual C++ runtime~=NOASSERTION~LicenseRef-MSVC-Redistributable~bundled:(^|/)(msvcp|vcruntime|concrt)[0-9_]*\\.dll$")
 else()
   list(APPEND _packages

@@ -73,3 +73,31 @@ else()
   set(GENKO_ZSTD PkgConfig::GENKO_ZSTD_PC)
 endif()
 add_subdirectory("${CMAKE_CURRENT_LIST_DIR}/../third_party/blake3" "${CMAKE_CURRENT_BINARY_DIR}/third_party/blake3")
+
+# PC4 F-e (camera RAW): LibRaw 0.22 (LGPL-2.1-only or CDDL-1.0), always a shared library of its own beside the program
+# (never linked statically: native/package/LIBRAW-LGPL-ja.md). Linux: libraw.org's source built by
+# tools/ci/build_libraw.sh into a prefix of its own (GENKO_LIBRAW_ROOT, or the environment's), found through its
+# pkg-config file (libraw_r: the reentrant library) and installed into the distribution's lib/. Windows: vcpkg's libraw,
+# a DLL by the triplet overlay of native/cmake/triplets (the rest stays static).
+if(WIN32)
+  find_package(libraw CONFIG REQUIRED)
+  set(GENKO_LIBRAW libraw::raw_r)
+else()
+  set(GENKO_LIBRAW_ROOT "$ENV{GENKO_LIBRAW_ROOT}" CACHE PATH "LibRaw 0.22's prefix (tools/ci/build_libraw.sh)")
+  find_package(PkgConfig REQUIRED)
+  if(GENKO_LIBRAW_ROOT)
+    set(_genko_pc_path "$ENV{PKG_CONFIG_PATH}")
+    set(ENV{PKG_CONFIG_PATH} "${GENKO_LIBRAW_ROOT}/lib/pkgconfig:${_genko_pc_path}")
+  endif()
+  pkg_check_modules(GENKO_LIBRAW_PC IMPORTED_TARGET libraw_r>=0.22)
+  if(GENKO_LIBRAW_ROOT)
+    set(ENV{PKG_CONFIG_PATH} "${_genko_pc_path}")
+  endif()
+  if(NOT GENKO_LIBRAW_PC_FOUND)
+    message(FATAL_ERROR
+      "LibRaw 0.22 (libraw_r) was not found. Genko needs LibRaw 0.22.x built from libraw.org's source as a shared library "
+      "(the computer's own LibRaw is older): build it with tools/ci/build_libraw.sh <prefix> and configure with "
+      "GENKO_LIBRAW_ROOT=<prefix> (an environment variable or -DGENKO_LIBRAW_ROOT=...). See docs/cpp-migration/ARCHITECTURE.md (camera RAW).")
+  endif()
+  set(GENKO_LIBRAW PkgConfig::GENKO_LIBRAW_PC)
+endif()

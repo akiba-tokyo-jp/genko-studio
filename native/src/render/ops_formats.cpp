@@ -16,13 +16,6 @@ namespace {
 
 using core::Json;
 
-// A frame for an op whose work is not written yet: refused with not_yet_ported ("<op> is not in the C++ build yet (PC4
-// <group>)"), nothing changed.
-core::OpFunction later(const char* op, const char* group) {
-    const std::string message = std::string(op) + " is not in the C++ build yet (PC4 " + group + ")";
-    return [message](core::OpContext&) { core::not_yet_ported(message); };
-}
-
 constexpr std::string_view kFileInfoUsage =
     "set_file_info takes {title?: str, author?: str, author_title?: str, description?: str, keywords?: [str] | \"a; b\", copyright?: str, "
     "copyright_status?: \"unknown\" | \"copyrighted\" | \"public_domain\", copyright_url?: str}";
@@ -128,8 +121,9 @@ void register_format_ops(core::OpRegistry& registry) {
     // "copyright_status"?: "unknown" | "copyrighted" | "public_domain", "copyright_url"?} → {"file_info", "title"}: the book's
     // file_info, file-info@1; the title is set_meta's)
     registry.add("set_file_info", set_file_info);
-    // F-e: a RAW smart object's development ({"contents", "develop"?, "adjust"?} → {"contents", "raw"}: camera-raw@1)
-    registry.add("set_camera_raw", later("set_camera_raw", "F-e"));
+    // F-e: a RAW smart object's development ({"contents", "develop"?, "adjust"?} → {"contents", "raw", "size_px", "depth"}:
+    // camera-raw@1; render/ops_camera_raw.cpp)
+    registry.add("set_camera_raw", set_camera_raw);
 }
 
 }  // namespace genko::render

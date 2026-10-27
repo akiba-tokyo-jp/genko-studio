@@ -737,6 +737,12 @@ public:
     // A book in memory (an opened file, a new image, a page duplicated) in a tab of its own, its notes said; カラー設定's
     // policies applied to it as to a book opened.
     void add_picture_book(core::Document doc, const std::vector<std::string>& notes, std::optional<std::filesystem::path> source = std::nullopt);
+    // PC4 F-e (app/main_window_raw.cpp): a camera RAW file (its suffix a RAW's, or its first bytes' marks) opened through
+    // Camera Raw's window (`window`; without it — Shift held — as 環境設定 → Camera Raw and 完了 set it), and a RAW smart
+    // object's コンテンツを編集 in the same window (set_camera_raw). False when nothing was changed.
+    static bool is_raw_path(const std::filesystem::path& path);
+    void open_raw_file(const std::filesystem::path& path, bool window = true);
+    bool edit_raw_contents(const std::string& contents_id, const QString& title = {});
     // カラー設定's "ask when a picture has no profile", for a file opened with none (formats::Opened::profile_missing): the
     // working space's profile kept, or none chosen — as part of opening it.
     void ask_missing_profile(formats::Opened& opened);

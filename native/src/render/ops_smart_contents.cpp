@@ -26,6 +26,8 @@
 #include "render/ops_smart_parts.hpp"
 #include "render/png.hpp"
 #include "render/raster.hpp"
+#include "core/raw_develop.hpp"
+#include "render/raw.hpp"
 #include "render/smart.hpp"
 #include "render/smart_decode.hpp"
 
@@ -91,6 +93,8 @@ std::optional<Given> given_file(const Document& doc, const Json& op) {
         }
         if (g.bytes.size() > smart::kFileMaxBytes) throw OpError("the file is larger than 256 MiB");
         g.data = true;
+        // (PC4 F-e: a TIFF-shaped camera RAW — NEF, ARW, PEF… — is known by its name's suffix alone)
+        if (const auto named = core::smart::suffix_of_name(text_at(op, "name")); named && raw::raw_suffix(*named)) suffix = *named;
     } else if (core::truthy_at(op, "asset")) {
         const std::string ref = text_at(op, "asset");
         if (!ref.starts_with("sha256:")) throw OpError("the file is an asset ref (sha256:…) or data, not a path");
@@ -170,6 +174,14 @@ SmartContents file_contents(Document& doc, const Json& op, const Given& g, std::
     c.depth = g.info.depth;
     c.mode = g.info.mode;
     c.profile = smart_ops::colour_use(doc, op, g.info);
+    if (g.info.format == "raw") {  // (PC4 F-e, camera-raw@1: camera-raw@1's defaults, its colours its development's)
+        try {
+            c.raw = raw::default_raw(g.bytes);
+        } catch (const core::Error& error) {
+            throw OpError(std::string("the asset's picture cannot be read (") + error.what() + ")");
+        }
+        c.profile = Json::object({{"use", "embedded"}, {"intent", "relative"}, {"bpc", true}});
+    }
     return c;
 }
 
@@ -289,8 +301,29 @@ void smart_update(OpContext& c) {
         (*c.report)["updated"] = false;
         return;
     }
-    fits_deep_pages(doc, t.id, g.info);
-    const smart::FileInfo& info = g.info;
+    smart::FileInfo info = g.info;
+    std::optional<Json> developed;  // (PC4 F-e: a RAW file's development, kept)
+    const bool was_raw = t.contents->format == "raw";
+    if (info.format == "raw") {
+        // (a camera RAW: its size, depth and colours as the contents' development makes them — its orientation and depth —,
+        // its camera read again)
+        try {
+            const core::raw::Develop develop = core::raw::develop_of(t.contents->raw);
+            const auto [w, h] = raw::developed_size(raw::identify(g.bytes), develop);
+            info.width = w;
+            info.height = h;
+            info.depth = develop.depth;
+            info.icc = raw::space_bytes(develop.space);
+            Json now = t.contents->raw ? *t.contents->raw : Json::object();
+            const Json fresh = raw::default_raw(g.bytes);
+            now["camera"] = fresh["camera"];
+            if (!now.contains("develop")) now["develop"] = fresh["develop"];
+            developed = core::raw::normal_raw(now);
+        } catch (const core::Error& error) {
+            throw OpError(std::string("the asset's picture cannot be read (") + error.what() + ")");
+        }
+    }
+    fits_deep_pages(doc, t.id, info);
     if (g.data) doc.smart_files[g.ref] = std::make_shared<const std::string>(g.bytes);
     SmartContents& next = doc.edit_contents(t.id);
     next.asset = g.ref;
@@ -305,7 +338,13 @@ void smart_update(OpContext& c) {
     next.psd.reset();
     // (its colour use as it was — from the profile the file now carries — unless the op says; one it no longer carries:
     // its numbers)
-    if (core::truthy_at(c.op, "embedded_profile")) {
+    if (developed) {  // (PC4 F-e: a RAW's colours are its development's)
+        next.raw = developed;
+        next.profile = Json::object({{"use", "embedded"}, {"intent", "relative"}, {"bpc", true}});
+    } else if (was_raw) {  // (a RAW no longer: no development, its colour use the file's as when placed)
+        next.raw.reset();
+        next.profile = smart_ops::colour_use(doc, c.op, info);
+    } else if (core::truthy_at(c.op, "embedded_profile")) {
         next.profile = smart_ops::colour_use(doc, c.op, info);
     } else if (core::py_get(next.profile, "use", Json("keep")) == Json("embedded") && !info.icc) {
         next.profile = Json::object({{"use", "keep"}});

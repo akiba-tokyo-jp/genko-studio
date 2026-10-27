@@ -198,7 +198,8 @@ private slots:
         static const QString own;
 #endif
         static const QRegularExpression allowed(QStringLiteral(
-            "^lib/(libQt6[A-Za-z]+\\.so(\\.[0-9]+)*|libicu(data|i18n|uc|io|tu|test)\\.so\\.[0-9.]+|libxcb-(cursor|icccm|image|keysyms|render-util|util)\\.so\\.[0-9.]+")
+            "^lib/(libQt6[A-Za-z]+\\.so(\\.[0-9]+)*|libicu(data|i18n|uc|io|tu|test)\\.so\\.[0-9.]+|libxcb-(cursor|icccm|image|keysyms|render-util|util)\\.so\\.[0-9.]+"
+            "|libraw_r\\.so\\.[0-9.]+")  // (PC4 F-e: LibRaw, LGPL-2.1, a library of its own)
             + own + QStringLiteral(")$"));
         static const QRegularExpression util(QStringLiteral("^lib/(libxcb-[a-z-]+)\\.so"));
         std::set<QString> xcb;
@@ -219,7 +220,8 @@ private slots:
                                   "licenses/cpython/LICENSE", "licenses/cpython/LICENSE-SRE", "licenses/cpython/LICENSE-Unicode",
                                   "licenses/optimized-routines/LICENSE-MIT", "licenses/lucide/LICENSE", "licenses/photocraft/LICENSE-MIT",
                                   "licenses/photocraft/NOTICE.md", "licenses/blake3/LICENSE_CC0", "licenses/blake3/LICENSE_A2",
-                                  "licenses/blake3/LICENSE_A2LLVM"}) {  // (PC4 F-f: BLAKE3)
+                                  "licenses/blake3/LICENSE_A2LLVM",  // (PC4 F-f: BLAKE3)
+                                  "LIBRAW-LGPL-ja.md", "licenses/libraw/COPYRIGHT", "licenses/libraw/LICENSE.LGPL", "licenses/libraw/LICENSE.CDDL"}) {  // (PC4 F-e)
             QVERIFY2(QFileInfo(doc + QLatin1Char('/') + QString::fromLatin1(there)).size() > 0, there);
         }
         QCOMPARE(QDir(doc + QStringLiteral("/licenses/fonts")).entryList({QStringLiteral("*-OFL.txt")}, QDir::Files).size(), 7);
@@ -268,7 +270,9 @@ private slots:
             // (PC4 F-a review: what vcpkg's OpenEXR and libavif build into the Windows program)
             {"libdeflate", QStringLiteral("| libdeflate")}, {"openjph", QStringLiteral("| OpenJPH")}, {"libyuv", QStringLiteral("| libyuv")},
             // (PC4 F-f: the .pcraft's compression and hashes)
-            {"zstd", QStringLiteral("| Zstandard")}, {"blake3", QStringLiteral("| BLAKE3")}};
+            {"zstd", QStringLiteral("| Zstandard")}, {"blake3", QStringLiteral("| BLAKE3")},
+            // (PC4 F-e: camera RAW — LibRaw, and the JasPer inside its Windows DLL)
+            {"libraw", QStringLiteral("| LibRaw")}, {"jasper", QStringLiteral("| JasPer")}};
         std::set<std::string> listed;
         std::map<std::string, std::string> relation;
         for (const Json& r : sbom["relationships"]) {
@@ -298,7 +302,8 @@ private slots:
 #ifdef _WIN32
             const bool here = id != "icu" && id != "xcb-extras";
 #else
-            const bool here = id != "msvc-runtime" && id != "libdeflate" && id != "openjph" && id != "libyuv";
+            const bool here = id != "msvc-runtime" && id != "libdeflate" && id != "openjph" && id != "libyuv" &&
+                              id != "jasper";  // (PC4 F-e: inside the Windows LibRaw DLL only)
 #endif
             if (here) QVERIFY2(listed.contains(id), id.c_str());
         }

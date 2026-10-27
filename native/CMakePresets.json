@@ -36,7 +36,8 @@
       "toolchainFile": "$env{VCPKG_ROOT}/scripts/buildsystems/vcpkg.cmake",
       "cacheVariables": {
         "VCPKG_TARGET_TRIPLET": "x64-windows-static-md",
-        "VCPKG_MANIFEST_DIR": "${sourceDir}"
+        "VCPKG_MANIFEST_DIR": "${sourceDir}",
+        "VCPKG_OVERLAY_TRIPLETS": "${sourceDir}/cmake/triplets"
       }
     },
     {

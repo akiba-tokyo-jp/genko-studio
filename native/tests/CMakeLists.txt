@@ -286,6 +286,12 @@ genko_test(test_web_export SOURCES unit/test_web_export.cpp DEPS genko_test_supp
 # a folder bundle, one zipped again with deflate) on bundles upstream's writer made (data/pcraft), and the bombs: zstd frames
 # and zip files that unpack or say they unpack past what may be read, a canvas and tiles past the limits — refused before.
 genko_test(test_pcraft SOURCES unit/test_pcraft.cpp DEPS genko_test_support genko_render_ops genko_formats ${GENKO_ZSTD} LABELS unit TIMEOUT 900)
+# PC4 F-e (SPEC.md FILE-01, カメラ RAW): LibRaw reading PhotoCraft's synthetic RAW files (support/raw_testgen: testgen.rs's DNG
+# — uncompressed, lossless-JPEG strips and tiles, LinearRaw —, CR2, TIFF/EP) — the levels, the white balance, the
+# orientation, the size, the temperature and tint both ways, the exposure, depth and spaces, the adjustments and the
+# sharpening, the window's preview, the embedded preview, the limits before the sensor data, files cut short or corrupted
+# (hostile.rs) —, and camera-raw@1's settings.
+genko_test(test_raw SOURCES unit/test_raw.cpp support/raw_testgen.cpp DEPS genko_test_support genko_render_ops genko_formats LABELS unit TIMEOUT 900)
 
 # Against the Python baseline (skipped when there is no reference Python: $GENKO_PYREF or /opt/pyref/bin/python).
 genko_test(test_contract_storage SOURCES contract/test_contract_storage.cpp DEPS genko_test_support LABELS contract
@@ -310,6 +316,11 @@ genko_test(test_contract_render_cli SOURCES contract/test_contract_render_cli.cp
 # PC4 節 D (COLOR-08) through the command line: フィルター's kinds on 8 and 16 bits, a selection, a channel, saved, undone,
 # the journal; as smart filters (filters@1, read-only for a reader that does not know it); a book without them as it was;
 # genko inspect --filters.
+# PC4 F-e (SPEC.md FILE-01, カメラ RAW): a RAW file opened as a book (developed into a page of its space and depth, or a smart
+# object of it), placed and developed again (set_camera_raw, Undo from the command line), camera-raw@1 read back, a camera
+# LibRaw does not know opened as its preview, `genko new --from x.dng --raw`, the limits.
+genko_test(test_contract_raw SOURCES contract/test_contract_raw.cpp support/raw_testgen.cpp DEPS genko_test_support genko_render_ops genko_formats genko_storage
+           LABELS contract TIMEOUT 900)
 genko_test(test_contract_filters_pc4 SOURCES contract/test_contract_filters_pc4.cpp DEPS genko_test_support genko_render_ops genko_storage
            LABELS contract TIMEOUT 900)
 genko_test(test_contract_tone_ops SOURCES contract/test_contract_tone_ops.cpp DEPS genko_test_support genko_render_ops
@@ -747,6 +758,9 @@ if(GENKO_BUILD_APP)
   # file never written), 指定形式で開く…, the drop, 最近使用したファイルを開く, a picture's book closed, すべてを閉じる・その他を閉じる,
   # 復帰 undone, 別名で保存… of another format and コピーを保存…, ファイル情報…, 複製…, 新規… → 画像, 環境設定 → ファイル管理
   genko_test(test_gui_file SOURCES gui/test_gui_file.cpp DEPS genko_app genko_test_support GUI TIMEOUT 900)
+  # PC4 F-e: Camera Raw's window when a RAW is opened (the RAW stage, the preview, 画像を開く, Shift: オブジェクトを開く, 完了,
+  # キャンセル), a RAW opened with Shift held, 環境設定 → Camera Raw, a placed RAW's コンテンツを編集 (set_camera_raw, undone)
+  genko_test(test_gui_camera_raw SOURCES gui/test_gui_camera_raw.cpp support/raw_testgen.cpp DEPS genko_app genko_test_support GUI TIMEOUT 900)
   # the windows on 1024×640 … 1920×1080 at 100–200 %, the long path, the preview, typed Japanese, the picture cache
   genko_test(test_gui_layout SOURCES gui/test_gui_layout.cpp DEPS genko_app genko_test_support GUI TIMEOUT 1200)
   # `genko app` in processes of its own: draw, undo, save, quit, open again; the autosave and the recovery copy across

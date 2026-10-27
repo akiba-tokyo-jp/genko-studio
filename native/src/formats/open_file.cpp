@@ -14,10 +14,12 @@
 #include "core/color_raster.hpp"
 #include "core/command_bus.hpp"
 #include "core/paths.hpp"
+#include "core/pyops.hpp"
 #include "core/error.hpp"
 #include "core/file_info.hpp"
 #include "core/ids.hpp"
 #include "core/ink.hpp"
+#include "core/raw_develop.hpp"
 #include "core/smart.hpp"
 #include "formats/page_picture.hpp"
 #include "render/codecs/metadata.hpp"
@@ -30,6 +32,7 @@
 #include "render/png.hpp"
 #include "render/proof.hpp"
 #include "render/psd_image.hpp"
+#include "render/raw.hpp"
 #include "render/smart_decode.hpp"
 
 namespace genko::formats {
@@ -516,6 +519,168 @@ Opened open_psd(std::string_view bytes, const std::string& file, const OpenOptio
     return out;
 }
 
+// --- a camera RAW file (PC4 F-e) --------------------------------------------------------------------------------------
+
+std::string space_name(std::string_view space) {
+    if (space == "srgb") return "sRGB";
+    if (space == "adobe-rgb-compat") return "Adobe RGB";
+    if (space == "display-p3") return "Display P3";
+    return "ProPhoto RGB";
+}
+
+core::CameraInfo camera_info(const render::raw::Camera& camera) {
+    core::CameraInfo out;
+    out.make = camera.make.substr(0, core::raw::kCameraTextMax);
+    out.model = camera.model.substr(0, core::raw::kCameraTextMax);
+    out.iso = camera.iso;
+    out.exposure = camera.shutter;
+    out.aperture = camera.aperture;
+    out.focal = camera.focal;
+    return out;
+}
+
+// "Canon EOS 80D" of "Canon" and "Canon EOS 80D", "Photocraft Synthetic" of the two (PhotoCraft's io/src/raw.rs).
+std::string camera_words(const render::raw::Camera& camera) {
+    const auto lower = [](std::string text) {
+        for (char& c : text) c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+        return text;
+    };
+    if (camera.make.empty()) return camera.model;
+    if (lower(camera.model).starts_with(lower(camera.make))) return camera.model;
+    return camera.model.empty() ? camera.make : camera.make + " " + camera.model;
+}
+
+std::string raw_said(const render::raw::Camera& camera) {
+    const std::string who = camera_words(camera);
+    return "カメラ RAW（" + camera.format + (who.empty() ? std::string() : "、" + who) + "）";
+}
+
+// A camera RAW file as a book: developed by LibRaw into a page of its output space and depth (its profile the page's own:
+// the colours are its development's), or a page of one smart object of the RAW file (its development kept: camera-raw@1);
+// a RAW LibRaw cannot develop opens the camera's embedded preview, said so.
+Opened open_raw(std::string_view bytes, const std::string& file, const OpenOptions& options) {
+    Json raw;
+    try {
+        raw = core::raw::normal_raw(options.raw.value_or(Json::object()));
+    } catch (const core::OpError& error) {
+        throw core::Error("value", std::string("the camera RAW development: ") + error.what());
+    }
+    if (!std::isfinite(options.raw_dpi) || options.raw_dpi < 1 || options.raw_dpi > 100000) throw core::Error("value", "the resolution is 1 to 100000 ppi");
+    const core::raw::Develop develop = core::raw::develop_from(core::get(raw, "develop"));
+    // (the colours are the development's: its output space, never the working space)
+    OpenOptions as_said = options;
+    as_said.profile = "keep";
+    as_said.working_rgb.clear();
+    Opened out;
+    render::raw::Info info;
+    std::vector<std::string> notes;
+    std::int64_t width = 0, height = 0;
+    int depth = develop.depth;
+    try {
+        render::raw::Options how;
+        how.limits = options.limits;
+        if (options.raw_smart) {
+            info = render::raw::unpacked(bytes, options.limits);  // (its sensor data decoded once: one that cannot be is refused)
+            std::tie(width, height) = render::raw::developed_size(info, develop);
+            // (a page of the developed picture's size at the resolution, of its space and depth, and one smart object of the
+            // RAW file over it)
+            const std::optional<std::string> icc = render::raw::space_bytes(develop.space);
+            core::Document doc = pixels_book(static_cast<std::uint32_t>(width), static_cast<std::uint32_t>(height), options.raw_dpi, stem_of(file), false,
+                                             develop.depth == 8 && !icc);
+            core::Page& page = doc.edit_page(0);
+            if (develop.depth != 8 || icc) {
+                core::RgbMode mode;
+                mode.depth = develop.depth;
+                if (icc) {
+                    mode.icc = std::make_shared<const std::string>(*icc);
+                    mode.profile = core::bytes_ref(*icc);
+                }
+                page.rgb = mode;
+                doc.rgb = mode;
+            }
+            auto contents = std::make_shared<core::SmartContents>();
+            contents->kind = "file";
+            contents->name = file.empty() ? std::string("RAW") : file;
+            const auto letters = std::count_if(contents->name.begin(), contents->name.end(), [](char c) { return (static_cast<unsigned char>(c) & 0xC0) != 0x80; });
+            if (static_cast<std::size_t>(letters) > core::smart::kNameMax) contents->name = "RAW" + suffix_of(file);  // (a name too long: the kind's)
+            contents->asset = core::bytes_ref(bytes);
+            const std::string suffix = suffix_of(file);
+            contents->suffix = render::raw::raw_suffix(suffix) ? suffix : render::raw::suffix_of(info);
+            contents->format = "raw";
+            contents->width_px = width;
+            contents->height_px = height;
+            contents->dpi = options.raw_dpi;
+            contents->depth = develop.depth;
+            contents->mode = "rgb";
+            contents->profile = Json::object({{"use", "embedded"}, {"intent", "relative"}, {"bpc", true}});
+            Json camera = Json::object();
+            camera["make"] = info.camera.make.substr(0, core::raw::kCameraTextMax);
+            camera["model"] = info.camera.model.substr(0, core::raw::kCameraTextMax);
+            camera["format"] = info.camera.format;
+            camera["libraw"] = render::raw::libraw_version();
+            raw["camera"] = camera;
+            contents->raw = raw;
+            const std::string id = core::smart::new_contents_id();
+            doc.smart_contents[id] = contents;
+            doc.smart_files[contents->asset] = std::make_shared<const std::string>(bytes);
+            core::Layer layer;
+            layer.id = core::new_id();
+            layer.role = core::LayerRole::User;
+            layer.kind = core::LayerKind::Smart;
+            layer.title = stem_of(file).empty() ? std::string("RAW") : stem_of(file);
+            layer.exportable = true;
+            layer.panel_clip = false;
+            layer.panel_each = false;
+            layer.smart = core::smart::settings(id, core::smart::Matrix{}, "lanczos");
+            page.layers = {std::move(layer)};
+            out.doc = std::move(doc);
+            notes.push_back(raw_said(info.camera) + "をスマートオブジェクトとして開きました（" + space_name(develop.space) + "・" + std::to_string(develop.depth) +
+                            " bit。コンテンツを編集で現像の設定を変えられます）");
+        } else {
+            render::raw::Developed made = render::raw::develop(bytes, raw, how);
+            info = made.info;
+            width = made.picture.width();
+            height = made.picture.height();
+            made.picture.meta.dpi = std::make_pair(options.raw_dpi, options.raw_dpi);
+            out = picture_book(std::move(made.picture), stem_of(file), as_said);
+            notes.push_back(raw_said(info.camera) + "を現像して開きました（" + space_name(develop.space) + "・" + std::to_string(develop.depth) + " bit）");
+            for (std::string& note : made.notes) notes.push_back(std::move(note));
+        }
+    } catch (const core::Error& error) {
+        // (a RAW LibRaw cannot develop — a camera or a compression it does not know, or sensor data it found broken or cut
+        // short —: the camera's own preview, said so)
+        if (error.code() != "unidentified_image" && error.code() != "format") throw;
+        std::optional<CodecImage> preview = render::raw::embedded_preview(bytes, options.limits);
+        if (!preview) throw;
+        width = preview->width();
+        height = preview->height();
+        depth = 8;
+        out = picture_book(std::move(*preview), stem_of(file), as_said);
+        const std::string why =
+            error.code() == "format" ? "このカメラ RAW はデータが壊れているか途中で切れていて現像できないため" : "このカメラ RAW は現像できないため";
+        notes = {why + "、カメラが埋め込んだプレビュー（" + std::to_string(width) + "×" + std::to_string(height) +
+                 " px・8 bit）を開きました（RAW のデータではありません）"};
+        try {
+            info = render::raw::identify(bytes, options.limits);
+        } catch (const core::Error&) {
+            info = render::raw::Info{};
+        }
+    }
+    for (std::string& note : notes) out.notes.push_back(std::move(note));
+    core::NativeSource source;
+    source.format = "raw";
+    source.name = file.empty() ? std::string("image") : file;
+    if (source.name.find('/') != std::string::npos || source.name.find('\\') != std::string::npos) source.name = "image";
+    source.width_px = width;
+    source.height_px = height;
+    source.dpi = std::make_pair(options.raw_dpi, options.raw_dpi);
+    source.depth = depth;
+    source.mode = "rgb";
+    if (!info.camera.make.empty() || !info.camera.model.empty()) source.camera = camera_info(info.camera);
+    out.doc.edit_page(0).native_source = std::move(source);
+    return out;
+}
+
 }  // namespace
 
 Opened open_file(std::string_view bytes, std::string_view name, const OpenOptions& options) {
@@ -524,7 +689,15 @@ Opened open_file(std::string_view bytes, std::string_view name, const OpenOption
     // (F-d: a PSD or PSB as a book of its layers; F-e: a camera RAW file through Camera Raw — a TIFF-shaped RAW is not read
     // as its TIFF —; F-f: a .pcraft)
     if (bytes.substr(0, 4) == "8BPS") return open_psd(bytes, file, options);  // (PC4 F-d)
-    if (const auto later = core::smart::later_format_of_suffix(suffix); later && *later == "raw") throw render::NotYetPorted("raw_file");
+    if (render::raw::raw_suffix(suffix) || render::raw::looks_raw(bytes)) {  // (PC4 F-e)
+        try {
+            return open_raw(bytes, file, options);
+        } catch (const core::Error& error) {
+            // (a picture named as a RAW that is none — LibRaw does not open it and it carries no RAW's marks —: opened as the
+            // picture it is, as a picture named .pcraft is)
+            if (error.code() != "unidentified_image" || render::raw::looks_raw(bytes) || !render::codecs::detect(bytes)) throw;
+        }
+    }
     // (a .pcraft by what it holds — a zip whose first file is manifest.json —, or a zip named so; a picture named .pcraft is
     // opened as the picture it is)
     if (render::pcraft::is_pcraft(bytes) || (suffix == ".pcraft" && bytes.starts_with(std::string_view("PK", 2)))) {

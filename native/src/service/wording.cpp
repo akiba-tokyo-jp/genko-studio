@@ -495,6 +495,18 @@ const std::vector<Rule>& rules() {
                          "マルチチャンネルのページは .pcraft に書き出せません（先に RGB・CMYK・グレースケールにします）"));
         r.push_back(rule(R"(the asset's \.pcraft cannot be read \(.*\))", "素材の .pcraft を読めません（中身が名前と違います）"));
         r.push_back(rule(R"(the \.pcraft cannot be read \(.*\))", "読み込めない .pcraft です"));
+        // (PC4 F-e: a camera RAW file — render/raw: LibRaw's refusals, the limits —, its development and set_camera_raw)
+        r.push_back(rule(R"((?:the asset's picture cannot be read \()?the camera RAW file is not one this build reads \(.*)",
+                         "この版の Genko では現像できないカメラ RAW です（LibRaw が知らないカメラか圧縮の形式です）"));
+        r.push_back(rule(R"((?:the asset's picture cannot be read \()?the camera RAW file is too large to read at once \(.*)",
+                         "カメラ RAW が大きすぎて、一度に読めません"));
+        r.push_back(rule(R"((?:the asset's picture cannot be read \()?the camera RAW file cannot be read \(.*)",
+                         "カメラ RAW のファイルが壊れているか途中で切れていて、読めません"));
+        r.push_back(rule(R"(the camera RAW file is empty)", "カメラ RAW のファイルが空です"));
+        r.push_back(rule(R"(the camera RAW development: (.*))", "現像の設定が正しくありません（\\1）"));
+        r.push_back(rule(R"(the smart object contents \S+ are not a camera RAW file.*)", "このスマートオブジェクトの中身はカメラ RAW ではありません"));
+        r.push_back(rule(R"(the smart object's contents are a camera RAW file: their colours are.*)",
+                         "中身はカメラ RAW のため、色は現像の色空間で決まります（コンテンツを編集の Camera Raw で変えます）"));
         // (PC4 F-a: the codecs' refusals — render/codecs: a picture past the limits, a broken file, what a format holds —
         // before the PSD's, whose words are of a PSD's layer)
         r.push_back(rule(R"(the picture is too large \((\d+)×(\d+) pixels; at most (\d+) pixels\))", [](const QRegularExpressionMatch& m) {

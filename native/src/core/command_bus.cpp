@@ -460,6 +460,14 @@ void check_page_lock(Document& doc, const Json& op, const Actor& actor) {
             }
         }
     }
+    if (named && name == "set_camera_raw") {
+        // (PC4 F-e: its "contents" a RAW file's development, not a page to work in — every page showing them is asked)
+        const Json* id = get(op, "contents");
+        if (id != nullptr && id->is_string() && doc.smart_contents.contains(id->get<std::string>())) {
+            for (const std::size_t at : smart::pages_using(doc, id->get<std::string>())) check_held(doc, doc.page(at), doc.page(at).index, actor);
+        }
+        return;
+    }
     // (Python takes a lock on a page the book does not have, and lets it go, without a word: refused here)
     const bool lock_op = named && (name == "lock_page" || name == "unlock_page");
     if (const Json* page_value = get(op, "page"); lock_op && page_value != nullptr) {
@@ -1108,7 +1116,9 @@ ApplyResult CommandBus::apply(const Document& doc, const Json& ops_in, const Act
         Json resolved;
         Json* current = &op;
         std::optional<Json> report;
-        if (get(op, "contents") != nullptr) {  // (smart-objects@1: an op on a smart object's page)
+        // (smart-objects@1: an op on a smart object's page; PC4 F-e's set_camera_raw names a RAW file's contents to develop
+        // again, an op of the book's own)
+        if (get(op, "contents") != nullptr && name_text != "set_camera_raw") {
             report = apply_in_contents(*this, work, op, actor, dry_run, result.warnings, prefix, name_text);
         } else try {
             if (const Json* area = get(op, "area"); area != nullptr && area_needs_resolving(*area)) {

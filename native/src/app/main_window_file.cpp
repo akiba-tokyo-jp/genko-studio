@@ -13,6 +13,7 @@
 #include <QFileInfo>
 #include <QFormLayout>
 #include <QFutureWatcher>
+#include <QGuiApplication>
 #include <QLineEdit>
 #include <QMenu>
 #include <QMenuBar>
@@ -203,6 +204,11 @@ void MainWindow::open_path(const fs::path& path, std::optional<render::codecs::F
             return;
         }
     }
+    // (PC4 F-e: a camera RAW file through Camera Raw's window — Shift held: as 環境設定 → Camera Raw sets it, no window)
+    if (!as && is_raw_path(path)) {
+        open_raw_file(path, !(QGuiApplication::queryKeyboardModifiers() & Qt::ShiftModifier));
+        return;
+    }
     remember_file(path);
     flash(QStringLiteral("開いています: %1").arg(QDir::toNativeSeparators(qpath(path))), 30000);
     // (decoded on a worker thread: a large picture takes a moment, the window keeps answering)
@@ -294,6 +300,9 @@ void MainWindow::ask_missing_profile(formats::Opened& opened) {
 void MainWindow::add_picture_book(core::Document doc, const std::vector<std::string>& notes, std::optional<fs::path> source) {
     Session::Options options;
     options.idle = std::min(options.longest, std::chrono::milliseconds(preferences::save_after_ms()));
+    // (PC4 F-e: a camera RAW's colours are its development's — Camera Raw's ワークフロー chose its space —, never the
+    // colour settings' policies)
+    const bool developed = !doc.pages.empty() && doc.page(0).native_source && doc.page(0).native_source->format == "raw";
     auto session = std::make_shared<Session>(std::move(doc), std::nullopt, options);
     const std::shared_ptr<Session> added = session;
     add_document(std::move(session));
@@ -305,7 +314,7 @@ void MainWindow::add_picture_book(core::Document doc, const std::vector<std::str
     }
     if (session_ == added) {
         refresh_status();
-        color_policy_on_open(added);  // (カラー設定's policies: a profile not the working one kept, converted or asked)
+        if (!developed) color_policy_on_open(added);  // (カラー設定's policies: a profile not the working one kept, converted or asked)
     }
     if (!notes.empty()) {
         QStringList said;

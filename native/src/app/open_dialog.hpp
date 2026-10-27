@@ -22,6 +22,9 @@ namespace genko::app {
 // How a file opened in a window is read: this computer's カラー設定 (the working spaces, a picture's own profile kept —
 // the policies are the window's after it is open: color_policy_on_open) and 環境設定 → ファイル管理 (EXIF's profile tag).
 formats::OpenOptions file_open_options();
+// PC4 F-e: the camera RAW files' patterns ("*.dng *.DNG …") and their filter ("Camera Raw (…)").
+QString raw_patterns();
+QString raw_filter();
 
 // The kinds of files 開く… lists ("すべての形式 (…);;Genko の原稿 (*.genko);;…").
 QString open_filters();
