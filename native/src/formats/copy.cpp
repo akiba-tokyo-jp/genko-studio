@@ -20,6 +20,9 @@
 #include "formats/page_picture.hpp"
 #include "formats/pcraft_write.hpp"
 #include "formats/pillow_save.hpp"
+#include "formats/smart_files.hpp"
+#include "core/pyconv.hpp"
+#include "core/pyops.hpp"
 #include "core/color_model.hpp"
 #include "render/codecs/codecs.hpp"
 #include "render/not_yet_ported.hpp"
@@ -638,6 +641,56 @@ CopyResult write_planned(const PlannedCopy& plan) {
     output.commit();
     result.bytes = plan.bytes.size();
     return result;
+}
+
+namespace {
+
+// A path as the file system names it (its folders' links followed, `..` gone), whether or not it is there yet.
+fs::path resolved(const fs::path& path) {
+    std::error_code ec;
+    fs::path out = fs::weakly_canonical(fs::absolute(path, ec), ec);
+    if (ec) out = fs::absolute(path, ec).lexically_normal();
+    while (!out.empty() && out.filename().empty() && out.has_relative_path()) out = out.parent_path();  // (no trailing slash)
+    return out;
+}
+
+bool same_file(const fs::path& a, const fs::path& b) {
+    std::error_code ec;
+    if (fs::exists(a, ec) && fs::exists(b, ec) && fs::equivalent(a, b, ec)) return true;  // (a link, another case of the name)
+    return resolved(a) == resolved(b);
+}
+
+}  // namespace
+
+WriteGuard write_guard(const core::Document& doc, const std::optional<fs::path>& book, std::vector<fs::path> sources) {
+    WriteGuard guard;
+    if (book && !book->empty()) guard.books.push_back(*book);
+    for (const auto& [id, contents] : doc.smart_contents) {
+        if (!contents || !contents->link) continue;
+        const std::string path = core::py_str(core::py_get(*contents->link, "path", core::Json("")));
+        if (!path.empty()) guard.linked.push_back(core::path_from_utf8(path));
+        if (const auto found = smart_files::linked_file(*contents->link, book)) guard.linked.push_back(*found);
+    }
+    guard.sources = std::move(sources);
+    return guard;
+}
+
+void check_target(const WriteGuard& guard, const fs::path& dest) {
+    const std::string shown = core::path_to_utf8(dest);
+    const fs::path here = resolved(dest);
+    for (const fs::path& book : guard.books) {
+        if (same_file(book, dest)) throw core::Error("refused_target", "cannot write over the book: " + shown);
+        const fs::path inside = here.lexically_relative(resolved(book));
+        if (!inside.empty() && *inside.begin() != ".." && inside != ".") {
+            throw core::Error("refused_target", "cannot write inside the book's folder: " + shown);
+        }
+    }
+    for (const fs::path& linked : guard.linked) {
+        if (same_file(linked, dest)) throw core::Error("refused_target", "cannot write over a file the book links: " + shown);
+    }
+    for (const fs::path& source : guard.sources) {
+        if (same_file(source, dest)) throw core::Error("refused_target", "cannot write over the picture a book was opened from: " + shown);
+    }
 }
 
 CopyResult write_copy(const core::Document& doc, std::size_t at, const fs::path& dest, const CopyOptions& options) {

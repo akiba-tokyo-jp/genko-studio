@@ -1486,6 +1486,11 @@ private slots:
         studio.act("act_quick_export_png")->trigger();
         QCOMPARE(asked_where, 1);
         QVERIFY2(fs::is_regular_file(studio.path.parent_path() / "book_p001.png"), qPrintable(w->last_notice()));
+        // (again: the file there kept, the next free name written — the coordinator's P3-8)
+        const std::string first = storage::read_file(studio.path.parent_path() / "book_p001.png");
+        studio.act("act_quick_export_png")->trigger();
+        QVERIFY2(fs::is_regular_file(studio.path.parent_path() / "book_p001-2.png"), qPrintable(w->last_notice()));
+        QCOMPARE(storage::read_file(studio.path.parent_path() / "book_p001.png"), first);
         // 書き出しの環境設定…: JPG kept, and 環境設定 → 書き出し shows it
         handle = [&](QDialog* dialog) -> int {
             auto* d = qobject_cast<app::ExportPreferencesDialog*>(dialog);
@@ -1589,6 +1594,86 @@ private slots:
         studio.act("act_layer_quick_export_png")->trigger();
         QVERIFY(!fs::exists(out / "nothing.png"));
         QVERIFY2(w->last_notice().contains(QStringLiteral("書き出すものがありません")), qPrintable(w->last_notice()));
+    }
+
+    // (PC4 F-c, the coordinator's P3-8) No way out writes into the book: 書き出し形式… (a page, every page), Web 用に保存,
+    // PNG としてクイック書き出し and レイヤーからファイル… refuse its folder and what is in it, said in Japanese, nothing written.
+    // 書き出し形式…'s every page asks once — before anything is written — when files of those names are there: no keeps
+    // them, yes writes over them; a folder of none asks nothing.
+    void exportsGuardTheBookAndAskBeforeReplacing() {
+        core::PageSpec spec = core::PageSpec::a4_mono();
+        spec.dpi = core::Num(72);
+        Studio studio(core::new_episode("守り", core::Num(1), 2, spec));
+        const fs::path out = gui_test::path_of(studio.tmp.path() + QStringLiteral("/pages"));
+        fs::create_directories(out);
+        QString target = QStringLiteral("all");
+        QString folder = qs(core::path_to_utf8(out));
+        QString save_to;
+        int questions = 0;
+        bool replace = false;
+        const auto previous = studio.answers.responder->exec;
+        studio.answers.responder->exec = [&](QDialog* dialog) -> int {
+            if (auto* d = qobject_cast<app::ExportAsDialog*>(dialog)) {
+                d->target->setCurrentIndex(d->target->findData(target));
+                return int(QDialog::Accepted);
+            }
+            if (qobject_cast<app::SaveForWebDialog*>(dialog) != nullptr) return int(QDialog::Accepted);
+            if (auto* d = qobject_cast<app::LayersToFilesDialog*>(dialog)) {
+                d->folder->setText(folder);
+                return int(QDialog::Accepted);
+            }
+            return previous(dialog);
+        };
+        studio.answers.responder->existing_dir = [&](const QString&, const QString&) { return folder; };
+        studio.answers.responder->save_path = [&](const QString&, const QString&) { return save_to; };
+        studio.answers.responder->question = [&](const QString& title, const QString& text) {
+            ++questions;
+            studio.answers.asked << title + QStringLiteral(": ") + text;
+            return replace;
+        };
+        // every page into a folder of none: nothing asked
+        studio.act("act_export_as")->trigger();
+        QCOMPARE(questions, 0);
+        QVERIFY2(fs::is_regular_file(out / "p001.png") && fs::is_regular_file(out / "p002.png"), qPrintable(studio.window->last_notice()));
+        storage::write_atomic(out / "p001.png", "old");
+        // again: asked once; no — nothing written
+        studio.act("act_export_as")->trigger();
+        QCOMPARE(questions, 1);
+        QVERIFY2(studio.answers.asked.last().contains(QStringLiteral("置き換えますか")), qPrintable(studio.answers.asked.last()));
+        QCOMPARE(storage::read_file(out / "p001.png"), std::string("old"));
+        // yes — written over
+        replace = true;
+        studio.act("act_export_as")->trigger();
+        QCOMPARE(questions, 2);
+        QVERIFY(storage::read_file(out / "p001.png") != std::string("old"));
+        // the book's folder: refused by every way out, nothing written
+        const auto refused = [&](const char* what) {
+            const QString said = studio.answers.asked.isEmpty() ? QString() : studio.answers.asked.last();
+            return said.contains(QStringLiteral("原稿")) ? QString() : QString::fromLatin1(what) + QStringLiteral(": ") + said;
+        };
+        folder = qs(core::path_to_utf8(studio.path / "pages"));
+        studio.act("act_export_as")->trigger();
+        QCOMPARE(refused("every page"), QString());
+        QVERIFY(!fs::exists(studio.path / "pages"));
+        target = QStringLiteral("page");
+        save_to = qs(core::path_to_utf8(studio.path / "page.png"));
+        studio.act("act_export_as")->trigger();
+        QCOMPARE(refused("a page"), QString());
+        save_to = qs(core::path_to_utf8(studio.path));
+        studio.act("act_export_as")->trigger();
+        QVERIFY2(studio.answers.asked.last().contains(QStringLiteral("原稿そのもの")), qPrintable(studio.answers.asked.last()));
+        save_to = qs(core::path_to_utf8(studio.path / "web.png"));
+        studio.act("act_save_for_web")->trigger();
+        QCOMPARE(refused("Save for Web"), QString());
+        save_to = qs(core::path_to_utf8(studio.path / "quick.png"));
+        studio.act("act_quick_export_png")->trigger();
+        QCOMPARE(refused("quick"), QString());
+        folder = qs(core::path_to_utf8(studio.path / "layers"));
+        studio.act("act_layers_to_files")->trigger();
+        QCOMPARE(refused("layers"), QString());
+        for (const char* name : {"pages", "page.png", "web.png", "quick.png", "layers"}) QVERIFY2(!fs::exists(studio.path / name), name);
+        QVERIFY(fs::is_directory(studio.path));  // (the book as it was)
+        QVERIFY(fs::is_regular_file(studio.path / "project.json"));
     }
 
     // A book without pages: its export dialog opens, with nothing to show.

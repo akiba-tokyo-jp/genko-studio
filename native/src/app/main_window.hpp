@@ -55,6 +55,10 @@ namespace genko::formats {
 struct Opened;
 }
 
+namespace genko::formats {
+struct WriteGuard;
+}  // namespace genko::formats
+
 namespace genko::app {
 
 class BrushPanel;
@@ -774,8 +778,11 @@ private:
     void build_export_actions();
     // (PC4 F-c) The book to write from and the page in front's place in it (none: said).
     std::optional<std::size_t> export_page(std::shared_ptr<const core::Document>& doc);
-    // (PC4 F-c) True — said — when `path` is a picture a book here was opened from (never written).
+    // (PC4 F-c; the coordinator's P3-8) True — said — when `path` is a place no export writes to (formats::check_target:
+    // the book or its folder, a linked file, a picture a book here was opened from).
     bool writes_over_a_source(const std::filesystem::path& path);
+    // Those places: this book's, and every open book's folder and source.
+    formats::WriteGuard export_guard() const;
 
     void path_drawn(const core::Json& subpath);
     void path_edited(const core::Json& path);

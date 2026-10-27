@@ -517,6 +517,82 @@ private slots:
         QCOMPARE(formats::plan_copy(doc, 0, dir / "a.tif").bytes, tiff);
     }
 
+    // (the coordinator's P3-8) The places no way out writes to: the book itself and anything in its folder, a file a smart
+    // object links (its path, and where it is found), a picture a book was opened from — beside them is fine —; レイヤーからファイル…
+    // refuses a linked file among its files and writes none; クイック書き出し's place never a file that is there (name-2,
+    // name-3 …); `genko copy` and `genko export --format layers` into the book are a usage error, nothing written.
+    void noWayOutWritesOverTheBook() {
+        QTemporaryDir tmp;
+        const fs::path dir = path_of(tmp.path());
+        core::Document doc = square_book();
+        const fs::path book = dir / "本.genko";
+        write_book(doc, book);
+        const fs::path linked = dir / "linked.png";
+        storage::write_atomic(linked, "a linked picture");
+        auto contents = std::make_shared<core::SmartContents>();
+        contents->link = Json{{"path", core::path_to_utf8(linked)}};
+        doc.smart_contents["sc-1"] = contents;
+        const formats::WriteGuard guard = formats::write_guard(doc, book, {dir / "opened.jpg"});
+        const auto said = [&](const fs::path& dest) -> std::string {
+            try {
+                formats::check_target(guard, dest);
+                return "";
+            } catch (const core::Error& error) {
+                if (std::string(error.code()) != "refused_target") return "the code " + std::string(error.code());
+                return error.what();
+            }
+        };
+        QVERIFY(said(book).starts_with("cannot write over the book"));
+        QVERIFY(said(book / "x.png").starts_with("cannot write inside the book's folder"));
+        QVERIFY(said(book / "assets" / "deep" / "x.png").starts_with("cannot write inside the book's folder"));
+        QVERIFY(said(book / ".." / "本.genko" / "y.png").starts_with("cannot write inside the book's folder"));
+        QVERIFY(said(linked).starts_with("cannot write over a file the book links"));
+        QVERIFY(said(dir / "opened.jpg").starts_with("cannot write over the picture a book was opened from"));
+        QCOMPARE(said(dir / "x.png"), std::string());
+        QCOMPARE(said(dir / "本.genko-out" / "x.png"), std::string());
+        QCOMPARE(said(dir), std::string());
+        // (レイヤーからファイル… with a linked file among its files: none written)
+        formats::LayerFiles files;
+        int checked = 0;
+        files.check = [&](const fs::path& file) {
+            ++checked;
+            if (checked == 2) formats::check_target(formats::WriteGuard{{}, {file}, {}}, file);
+        };
+        const core::Document pages = core::new_episode("層", core::Num(1), 2, core::PageSpec::a4_mono());
+        QVERIFY_THROWS_EXCEPTION(core::Error, formats::export_layers(pages, dir / "layers", 72, "paper", files));
+        QCOMPARE(checked, 2);
+        std::size_t left = 0;
+        if (fs::exists(dir / "layers")) {
+            for (const auto& entry : fs::recursive_directory_iterator(dir / "layers")) left += entry.is_regular_file() ? 1 : 0;
+        }
+        QCOMPARE(left, std::size_t(0));
+        // (クイック書き出し: the next free name)
+        formats::ExportPreferences prefs;
+        prefs.location = formats::QuickLocation::SameFolder;
+        const fs::path first = *formats::quick_export_place(prefs, book, doc.page(0));
+        QCOMPARE(first, dir / "本_p001.png");
+        storage::write_atomic(first, "one");
+        QCOMPARE(*formats::quick_export_place(prefs, book, doc.page(0)), dir / "本_p001-2.png");
+        storage::write_atomic(dir / "本_p001-2.png", "two");
+        QCOMPARE(*formats::quick_export_place(prefs, book, doc.page(0)), dir / "本_p001-3.png");
+        // (the command line: a usage error, nothing written)
+        const auto copy = [&](const QStringList& more) { return genko::test::run_genko(QStringList{QStringLiteral("copy"), q(book)} + more); };
+        for (const fs::path& dest : {book / "x.png", book / "folder"}) {
+            const auto r = copy({q(dest)});
+            QVERIFY2(r.exit_code == 2, qPrintable(r.described()));
+            QVERIFY(!fs::exists(dest));
+        }
+        QCOMPARE(copy({q(book)}).exit_code, 2);
+        auto r = genko::test::run_genko({QStringLiteral("export"), q(book), q(book / "layers"), QStringLiteral("--format"), QStringLiteral("layers")});
+        QVERIFY2(r.exit_code == 2, qPrintable(r.described()));
+        QVERIFY(!fs::exists(book / "layers"));
+        r = copy({q(dir / "beside.png")});
+        QVERIFY2(r.exit_code == 0, qPrintable(r.described()));
+        // (a file there is written over by the command line, as before)
+        r = copy({q(dir / "beside.png")});
+        QVERIFY2(r.exit_code == 0, qPrintable(r.described()));
+    }
+
     // A CMYK page's colours the same in every format and every way out (Little CMS from its profile to sRGB, never a
     // format's plain formula): コピーを保存… as PNG, WebP, GIF, QOI, TGA; sRGB asked (a JPEG then RGB); クイック書き出し; Save
     // for Web's PNG-24 and JPEG.
