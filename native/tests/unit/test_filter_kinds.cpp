@@ -256,7 +256,7 @@ private slots:
             QVERIFY2(alike(back->second, settings), (kind + "\n" + settings.dump() + "\n" + back->second.dump()).c_str());
             ++mapped;
         }
-        QVERIFY(mapped >= 60);
+        QCOMPARE(mapped + 4, core::filter_infos().size());  // (all but 置き換え and the three upstream draws not as smart filters)
         // (settings of their own: places, lists, colours, choices, lengths)
         const std::vector<std::pair<std::string, Json>> own{
             {"blur_radial", Json{{"amount", 30}, {"method", "zoom"}, {"center_x", 0.25}, {"center_y", 0.75}}},
