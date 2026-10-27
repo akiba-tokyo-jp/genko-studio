@@ -64,7 +64,21 @@ bool needs_precision(const core::Page& page, const core::Document* doc, bool pri
 // The smart object's contents' file as the 8-bit page draws it: open_image's "RGBA" (a placed picture's) through its colour
 // use (keep: its numbers; embedded, assign: from that profile to sRGB). Read from the book's assets (or the files ops
 // were given, Document::smart_files) and remembered. core::Error when it cannot be read.
-std::shared_ptr<const Image> file_picture(const core::Document& doc, const core::SmartContents& contents);
+std::shared_ptr<const Image> file_picture(const core::Document& doc, const core::SmartContents& contents, const detail::Ctx* ctx = nullptr);
+// (PC4 F-e) On this thread while it lives, a camera RAW's contents are drawn only from a development already made — the
+// drawing's, remembered —, never developed here (none: not drawn): the layer panel's thumbnails on the window's thread.
+class QuickScope {
+public:
+    QuickScope();
+    ~QuickScope();
+    QuickScope(const QuickScope&) = delete;
+    QuickScope& operator=(const QuickScope&) = delete;
+
+private:
+    bool was_;
+};
+// Has a camera RAW's contents a development made (and remembered) to draw from, as they are now?
+bool developed_ready(const core::Document& doc, const core::SmartContents& contents);
 // The file's bytes (null when the book does not hold them).
 core::Bytes file_bytes(const core::Document& doc, const core::SmartContents& contents);
 

@@ -18,11 +18,13 @@
 #include <vector>
 
 #include "core/color_model.hpp"
+#include "core/color_raster.hpp"
 #include "core/command_bus.hpp"
 #include "core/error.hpp"
 #include "core/raw_develop.hpp"
 #include "raw_testgen.hpp"
 #include "render/codecs/codecs.hpp"
+#include "render/fx.hpp"
 #include "render/page.hpp"
 #include "render/raw.hpp"
 
@@ -383,6 +385,34 @@ private slots:
         QVERIFY(std::abs(at(sharp, 5) - at(soft, 5)) < 0.005);
     }
 
+    // (review F-e P2-1) Camera Raw's adjustments see what the development put past white — the exposure and the DNG's
+    // baseline exposure —, in the file's development as in the window's preview (the kernel over prophoto-compat floats).
+    void adjustmentsSeePastWhite() {
+        rawgen::DngSpec spec = neutral_dng(0.7);
+        spec.baseline_exposure = 0.5;
+        const std::string bytes = spec.build();
+        const Json develop{{"exposure_ev", 1}};
+        const Json adjust = genko::core::raw::normal_raw(Json{{"adjust", Json{{"exposure", -2.0}}}})["adjust"];
+        const double made = middle_mean(developed(bytes, develop, adjust))[1];
+        // (the window's way: the preview's floats — unclipped, or clipped at white as the development once was — with the kernel)
+        const raw::Preview p = raw::preview(bytes, genko::core::raw::develop_from(&develop), 64);
+        const auto worked = [&](bool clip) {
+            const std::string raster = genko::core::encode_color_pixels(std::uint32_t(p.width), std::uint32_t(p.height), "f32", [&](std::size_t i) {
+                const auto v = [&](std::size_t c) { return clip ? std::min(1.0f, p.rgba[i * 4 + c]) : p.rgba[i * 4 + c]; };
+                return std::array<double, 4>{v(0), v(1), v(2), 1.0};
+            });
+            const auto surface = genko::render::fx::precise_surface(raster);
+            genko::render::fx::apply(*surface, *genko::render::fx::kernel("camera_raw"), adjust, genko::core::FilterInks::Meaning,
+                                     genko::render::fx::Rect{0, 0, p.width, p.height}, nullptr, double(p.width) / 64.0);
+            const std::string out = genko::render::fx::take_bytes(*surface);
+            const genko::core::ColorRasterView view(out);
+            return view.pixel(std::size_t(p.height / 2) * std::size_t(p.width) + std::size_t(p.width / 2))[1];
+        };
+        const double window = worked(false), clipped = worked(true);
+        QVERIFY2(std::abs(made - window) < 0.02, (std::to_string(made) + " " + std::to_string(window)).c_str());
+        QVERIFY2(std::abs(made - clipped) > 0.05, (std::to_string(made) + " " + std::to_string(clipped)).c_str());
+    }
+
     // The window's preview: half the size and at most max_side, floats in prophoto-compat, shown as sRGB.
     void thePreview() {
         const std::string bytes = neutral_dng(0.18, {0.5, 1.0, 0.7}, 200, 120).build();
@@ -543,7 +573,7 @@ private slots:
         rawgen::DngSpec d = scene_dng(32, 24);
         samples.push_back(d.build());
         d.storage = rawgen::DngStorage::Lj92Tiles;
-        d.tile_width = 16;
+        d.tile_width = 8;  // (not 16: a tile of two components twice as wide as the picture is read as a row)
         d.tile_height = 8;
         d.active_area = std::array<std::uint32_t, 4>{1, 2, 23, 30};
         d.default_crop = std::make_pair(std::array<std::uint32_t, 2>{1, 1}, std::array<std::uint32_t, 2>{24, 20});
@@ -578,16 +608,21 @@ private slots:
             } catch (const genko::core::Error&) {
             }
         };
-        int developed_ok = 0;
-        for (const std::string& b : samples) {
+        // (whole, each develops — but the lossless JPEG DNG of many strips, whose first strip alone LibRaw reads: SPEC's
+        // known limits —; cut short at every few bytes, none crashes)
+        const char* names[] = {"uncompressed", "lossless JPEG tiles", "lossless JPEG strips", "CR2", "TIFF/EP"};
+        for (std::size_t i = 0; i < samples.size(); ++i) {
+            const std::string& b = samples[i];
+            bool developed = false;
+            std::string why;
             try {
-                (void)raw::develop(b, Json::object(), options);
-                ++developed_ok;
-            } catch (const genko::core::Error&) {
+                developed = raw::develop(b, Json::object(), options).picture.width() > 0;
+            } catch (const genko::core::Error& error) {
+                why = error.what();
             }
+            if (i != 2) QVERIFY2(developed, (std::string(names[i]) + ": " + why).c_str());
             for (std::size_t n = 0; n < b.size(); n += std::max<std::size_t>(3, b.size() / 400)) exercise(b.substr(0, n));
         }
-        QVERIFY(developed_ok >= 3);
         std::uint64_t s = 0xDEADBEEFull;
         const auto next = [&s] {
             s = s * 6364136223846793005ull + 1442695040888963407ull;

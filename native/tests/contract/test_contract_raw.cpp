@@ -391,6 +391,86 @@ private slots:
         }
     }
 
+    // (review F-e P2-3) A TIFF-shaped RAW without a RAW's marks (NEF) is known by the name given with its data — MCP's
+    // {data, name} —; a TIFF named so is the picture it is.
+    void aRawByItsName() {
+        const std::string nef = rawgen::tiff_ep("NIKON", "D3X", 64, 48, rawgen::mosaic(rawgen::scene(64, 48), 64, {0, 1, 1, 2}, 0, 4095), {0, 1, 1, 2}, 12);
+        QVERIFY(!render::raw::looks_raw(nef));
+        const core::Document doc = run(small_book(), Json::array({Json{{"op", "smart_place"}, {"page", 1}, {"data", core::b64encode(nef)}, {"name", "x.nef"}}}));
+        const std::string id = contents_id_of(doc);
+        QVERIFY(!id.empty());
+        QCOMPARE(doc.smart_contents.at(id)->suffix, std::string(".nef"));
+        QCOMPARE(doc.smart_contents.at(id)->width_px, std::int64_t(64));
+        QVERIFY(doc.smart_contents.at(id)->raw);
+        const std::string tiff = codecs::encode(codecs::CodecImage::blank(30, 20, codecs::Layout::Rgb, codecs::Sample::U8), codecs::Format::Tiff);
+        const core::Document named = run(small_book(), Json::array({Json{{"op", "smart_place"}, {"page", 1}, {"data", core::b64encode(tiff)}, {"name", "fake.nef"}}}));
+        QCOMPARE(named.smart_contents.begin()->second->format, std::string("tif"));
+        QVERIFY(!named.smart_contents.begin()->second->raw);
+    }
+
+    // (review F-e P2-4) A linked RAW developed with its orientation none and 8 bits, updated from a changed file: its size
+    // and depth still its development's, its camera read again; updated to a file no longer a RAW: no development.
+    void aLinkedRawUpdated() {
+        const std::string first = grey_dng(0.18, 6).build();
+        core::Document doc = run(small_book(), Json::array({Json{{"op", "smart_place"}, {"page", 1}, {"data", core::b64encode(first)}, {"name", "a.dng"},
+                                                                 {"new_id", "so"}, {"link", Json{{"path", "/nowhere/a.dng"}}}}}));
+        const std::string id = contents_id_of(doc);
+        doc = run(doc, Json::array({Json{{"op", "set_camera_raw"}, {"contents", id}, {"develop", Json{{"orientation", "none"}, {"depth", 8}}}}}));
+        QCOMPARE(doc.smart_contents.at(id)->width_px, std::int64_t(96));
+        rawgen::DngSpec other = grey_dng(0.3, 6);
+        other.model = "Other";
+        doc = run(doc, Json::array({Json{{"op", "smart_update"}, {"page", 1}, {"id", "so"}, {"data", core::b64encode(other.build())}, {"name", "a.dng"}}}));
+        const core::SmartContents& updated = *doc.smart_contents.at(id);
+        QCOMPARE(updated.width_px, std::int64_t(96));  // (orientation none: the sensor's sides)
+        QCOMPARE(updated.height_px, std::int64_t(64));
+        QCOMPARE(updated.depth, 8);
+        QCOMPARE((*updated.raw)["develop"]["orientation"], Json("none"));
+        QCOMPARE((*updated.raw)["camera"]["model"], Json("Other"));
+        QCOMPARE(updated.profile["use"], Json("embedded"));
+        const std::string png = render::write_png(render::Image::create("RGB", {8, 6}, render::Ink{1, 2, 3}));
+        doc = run(doc, Json::array({Json{{"op", "smart_update"}, {"page", 1}, {"id", "so"}, {"data", core::b64encode(png)}, {"name", "a.png"}}}));
+        QCOMPARE(doc.smart_contents.at(id)->format, std::string("png"));
+        QVERIFY(!doc.smart_contents.at(id)->raw);
+        QCOMPARE(doc.smart_contents.at(id)->width_px, std::int64_t(8));
+    }
+
+    // (review F-e P3-1) set_camera_raw asks the lock of every page showing the contents; smart_profile refuses a RAW's.
+    // (P2-2) A thumbnail's drawing (QuickScope) never develops a RAW: only what a drawing developed.
+    void locksAndColours() {
+        core::Document doc = run(small_book(), Json::array({Json{{"op", "smart_place"}, {"page", 1}, {"data", core::b64encode(grey_dng(0.21).build())},
+                                                                 {"name", "x.dng"}, {"new_id", "so"}}}));
+        const std::string id = contents_id_of(doc);
+        const core::Document placed = doc;
+        const core::SmartContents& contents = *placed.smart_contents.at(id);
+        QVERIFY(!render::smart::developed_ready(placed, contents));
+        {
+            const render::smart::QuickScope quick;
+            QVERIFY(!render::smart::file_picture(placed, contents));
+        }
+        QVERIFY(render::smart::file_picture(placed, contents));
+        QVERIFY(render::smart::developed_ready(placed, contents));
+        {
+            const render::smart::QuickScope quick;
+            QVERIFY(render::smart::file_picture(placed, contents));
+        }
+        core::CommandBus bus(render::ops_registry());
+        doc = bus.apply(doc, Json::array({Json{{"op", "lock_page"}, {"page", 1}, {"agent", "ai:y"}}}), core::Actor("ai:y")).doc;
+        const Json op{{"op", "set_camera_raw"}, {"contents", id}, {"develop", Json{{"exposure_ev", 1}}}};
+        try {
+            (void)bus.apply(doc, Json::array({op}), core::Actor("ai:x"));
+            QFAIL("a page another holds");
+        } catch (const core::ApplyError& error) {
+            QVERIFY2(std::string(error.what()).find("lock") != std::string::npos, error.what());
+        }
+        QCOMPARE((*bus.apply(doc, Json::array({op}), core::Actor("ai:y")).doc.smart_contents.at(id)->raw)["develop"]["exposure_ev"], Json(1.0));
+        try {
+            (void)run(placed, Json::array({Json{{"op", "smart_profile"}, {"page", 1}, {"id", "so"}, {"use", "keep"}}}));
+            QFAIL("a RAW's colour use");
+        } catch (const core::ApplyError& error) {
+            QVERIFY2(std::string(error.what()).find("camera RAW") != std::string::npos, error.what());
+        }
+    }
+
     // The limits: refused before LibRaw unpacks the sensor data.
     void theLimits() {
         formats::OpenOptions options;

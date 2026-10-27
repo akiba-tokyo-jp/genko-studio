@@ -830,7 +830,10 @@ std::string file_key(const core::Document& doc, const core::SmartContents& conte
 // What a contents' file is drawn from (PC4 F-e): a camera RAW file's developed picture — the uncompressed TIFF its
 // development makes (render/raw: LibRaw), made once a development and remembered, its work within the budget —, any other
 // file's own bytes.
+thread_local bool g_quick = false;  // (QuickScope)
+
 core::Bytes drawn_bytes(const core::Document& doc, const core::SmartContents& contents, const Ctx* ctx) {
+    if (contents.format == "raw" && g_quick) return developed_files().get(file_key(doc, contents) + "\ndeveloped");
     core::Bytes bytes = file_bytes(doc, contents);
     if (!bytes || contents.format != "raw") return bytes;
     return developed_files().get_or_make(
@@ -881,9 +884,9 @@ std::optional<Image> file_8bit(const Ctx& ctx, const core::Layer& layer, const c
     const core::Document& doc = *ctx.episode;
     const std::string key = file_key(doc, contents) + (one ? "\nstack " + mode : std::string());
     const auto picture = [&]() -> std::shared_ptr<const Image> {
-        if (!one) return file_picture(doc, contents);
+        if (!one) return file_picture(doc, contents, &ctx);
         if (auto kept = pictures().get(key)) return kept;
-        const std::shared_ptr<const Image> shown = file_picture(doc, contents);
+        const std::shared_ptr<const Image> shown = file_picture(doc, contents, &ctx);
         if (shown == nullptr) return nullptr;
         const int v = static_cast<int>(std::lround(std::clamp(*one, 0.0, 1.0) * 255.0));
         Image flat = Image::create("RGBA", shown->size(), Ink{v, v, v, 255});
@@ -1560,12 +1563,24 @@ core::Bytes file_bytes(const core::Document& doc, const core::SmartContents& con
     return std::make_shared<const std::string>(std::move(*bytes));
 }
 
-std::shared_ptr<const Image> file_picture(const core::Document& doc, const core::SmartContents& contents) {
+QuickScope::QuickScope() : was_(g_quick) { g_quick = true; }
+QuickScope::~QuickScope() { g_quick = was_; }
+
+bool developed_ready(const core::Document& doc, const core::SmartContents& contents) {
     const std::string key = file_key(doc, contents);
+    return pictures().get(key) != nullptr || developed_files().get(key + "\ndeveloped") != nullptr;
+}
+
+std::shared_ptr<const Image> file_picture(const core::Document& doc, const core::SmartContents& contents, const Ctx* ctx) {
+    const std::string key = file_key(doc, contents);
+    if (contents.format == "raw" && g_quick) {  // (a thumbnail: what is made, or nothing — never developed here)
+        if (auto kept = pictures().get(key)) return kept;
+        if (!developed_files().get(key + "\ndeveloped")) return nullptr;
+    }
     return pictures().get_or_make(  // (decoded once while the tiles wait for it)
         key,
         [&]() -> std::pair<std::shared_ptr<const Image>, std::size_t> {
-            const core::Bytes bytes = drawn_bytes(doc, contents, nullptr);
+            const core::Bytes bytes = drawn_bytes(doc, contents, ctx);
             if (!bytes) return {nullptr, 0};
             ++g_files_decoded;
             Image picture = eight_bit_picture(*bytes);
@@ -1583,7 +1598,7 @@ std::shared_ptr<const Image> file_picture(const core::Document& doc, const core:
             auto out = std::make_shared<const Image>(std::move(picture));
             return {out, image_bytes(*out)};
         },
-        nullptr);
+        ctx);
 }
 
 std::optional<Image> picture_8bit(const Ctx& ctx, const core::Layer& layer, const Box& area) {

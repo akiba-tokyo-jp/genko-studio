@@ -486,6 +486,8 @@ void smart_place(OpContext& c) {
             throw OpError("data is the file's bytes in base64");
         }
         if (bytes.size() > smart::kFileMaxBytes) throw OpError("the file is larger than 256 MiB");
+        // (PC4 F-e: a TIFF-shaped camera RAW — NEF, ARW, PEF… — is known by its name's suffix alone)
+        if (const auto named = core::smart::suffix_of_name(name); named && raw::raw_suffix(*named)) suffix = *named;
     } else {
         const std::string ref = text_at(c.op, "asset");
         if (!ref.starts_with("sha256:")) throw OpError("smart_place takes an asset ref (sha256:…) or data, not a path");
@@ -574,6 +576,9 @@ void smart_profile(OpContext& c) {
     const core::SmartContents* contents = core::smart::contents_of(doc, layer);
     if (!id || contents == nullptr) throw OpError("the smart object has no contents");
     if (contents->kind != "file") throw OpError("the smart object's contents are a page, not a file: their colours are their layers'");
+    if (contents->format == "raw") {  // (PC4 F-e)
+        throw OpError("the smart object's contents are a camera RAW file: their colours are their development's output space (set_camera_raw)");
+    }
     const core::Bytes bytes = smart::file_bytes(doc, *contents);
     if (!bytes) throw OpError("the smart object's file is not in the book");
     smart::FileInfo info;

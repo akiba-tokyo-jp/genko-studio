@@ -130,11 +130,15 @@ std::string read_picture(const QString& file, render::smart::FileInfo* info) {
     if (static_cast<std::uint64_t>(in.tellg()) > render::smart::kFileMaxBytes) throw core::Error("too_large", "the file is larger than 256 MiB");
     in.seekg(0);
     std::string bytes((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
-    *info = render::smart::look_at(bytes, {});
+    // (PC4 F-e: a TIFF-shaped camera RAW — NEF, ARW, PEF… — is known by its name's suffix alone)
+    const auto named = core::smart::suffix_of_name(QFileInfo(file).fileName().toStdString());
+    *info = render::smart::look_at(bytes, named && render::raw::raw_suffix(*named) ? *named : std::string());
     return bytes;
 }
 
 constexpr const char* kPictures = "画像 (*.png *.jpg *.jpeg *.tif *.tiff *.bmp *.webp *.gif *.psd *.psb *.tga *.ico *.pnm *.pbm *.pgm *.ppm *.pam *.pfm *.qoi *.exr *.hdr *.avif)";
+// The pictures a smart object's file may be, and (PC4 F-e) camera RAW files.
+QString picture_filters() { return QString::fromUtf8(kPictures) + QStringLiteral(";;") + raw_filter(); }
 
 
 // レイヤー → スマートフィルター's commands on the smart object drawn on (PC3 A2, render/ops_smart_filters.cpp): "off"
@@ -330,7 +334,11 @@ bool MainWindow::place_smart(const QString& file, bool as_placed, bool linked) {
             flash(QStringLiteral("カメラ RAW は配置画像にできません（埋め込みを配置… でスマートオブジェクトとして置きます）"), 6000, true);
             return false;
         }
-        info = render::smart::look_at(bytes, raw_file && render::raw::raw_suffix(suffix) ? suffix : std::string());  // (the whole picture read first: a file that cannot be drawn is never placed)
+        // (the whole picture read first: a file that cannot be drawn is never placed — a RAW's sensor data decoded on a
+        // worker, the window drawing meanwhile)
+        const std::string given = raw_file && render::raw::raw_suffix(suffix) ? suffix : std::string();
+        info = raw_file ? off_ui([&bytes, &given] { return render::smart::look_at(bytes, given); }) : render::smart::look_at(bytes, given);
+        raw_file = info.format == "raw";  // (a picture named as a RAW that is none: the picture it is)
         if (linked) link = link_record(file, bytes, session_->path());
         if (!raw_file) {
             const render::Image picture = render::open_image(bytes, render::kPillowOpenLimits);
@@ -953,7 +961,9 @@ std::optional<Taken> take_picture(MainWindow& window, Session& session, const QS
     Taken out;
     out.name = QFileInfo(file).fileName();
     out.link = link_record(file, bytes, session.path());
-    if (ask_colours) {
+    if (ask_colours && info.format == "raw") {
+        out.use = Json::object();  // (PC4 F-e: a RAW's colours are its development's)
+    } else if (ask_colours) {
         try {
             const render::Image picture = render::open_image(bytes, render::kPillowOpenLimits);
             out.use = window.picture_use(bytes, picture.mode());
@@ -981,7 +991,7 @@ bool MainWindow::replace_contents(std::optional<QString> path) {
         return false;
     }
     const Asked asked = asking();
-    const QString file = path ? *path : ask::open_path(this, QStringLiteral("コンテンツを置換"), QString::fromLatin1(kPictures));
+    const QString file = path ? *path : ask::open_path(this, QStringLiteral("コンテンツを置換"), picture_filters());
     if (file.isEmpty() || !still(asked)) return false;
     const std::string layer = chosen->layer->id;
     const std::optional<Taken> taken = take_picture(*this, *session_, file, true);
@@ -1003,7 +1013,7 @@ bool MainWindow::relink_contents(std::optional<QString> path) {
         return false;
     }
     const Asked asked = asking();
-    const QString file = path ? *path : ask::open_path(this, QStringLiteral("ファイルに再リンク"), QString::fromLatin1(kPictures));
+    const QString file = path ? *path : ask::open_path(this, QStringLiteral("ファイルに再リンク"), picture_filters());
     if (file.isEmpty() || !still(asked)) return false;
     const std::string layer = chosen->layer->id;
     const std::optional<Taken> taken = take_picture(*this, *session_, file, true);
@@ -1195,7 +1205,7 @@ bool MainWindow::place_linked(std::optional<QString> chosen) {
         flash(QStringLiteral("画像を置く前に、原稿を保存します（ファイル → 別名で保存…）"), 6000);
         return false;
     }
-    const QString file = chosen ? *chosen : ask::open_path(this, QStringLiteral("リンクを配置"), QString::fromLatin1(kPictures));
+    const QString file = chosen ? *chosen : ask::open_path(this, QStringLiteral("リンクを配置"), picture_filters());
     if (file.isEmpty() || !still(asked)) return false;
     if (!place_smart(file, false, true)) return false;
     check_links();

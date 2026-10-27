@@ -505,6 +505,8 @@ const std::vector<Rule>& rules() {
         r.push_back(rule(R"(the camera RAW file is empty)", "カメラ RAW のファイルが空です"));
         r.push_back(rule(R"(the camera RAW development: (.*))", "現像の設定が正しくありません（\\1）"));
         r.push_back(rule(R"(the smart object contents \S+ are not a camera RAW file.*)", "このスマートオブジェクトの中身はカメラ RAW ではありません"));
+        r.push_back(rule(R"(the smart object's contents are a camera RAW file: their colours are.*)",
+                         "中身はカメラ RAW のため、色は現像の色空間で決まります（コンテンツを編集の Camera Raw で変えます）"));
         // (PC4 F-a: the codecs' refusals — render/codecs: a picture past the limits, a broken file, what a format holds —
         // before the PSD's, whose words are of a PSD's layer)
         r.push_back(rule(R"(the picture is too large \((\d+)×(\d+) pixels; at most (\d+) pixels\))", [](const QRegularExpressionMatch& m) {

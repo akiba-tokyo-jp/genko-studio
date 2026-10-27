@@ -206,12 +206,14 @@ void check_size(const Info& info, bool half, const codecs::Limits& limits, bool 
     limits.check(std::max(w, h), std::max(w, h) == w ? h : w, codecs::Layout::Rgb, codecs::Sample::U16);
     limits.check(info.raw_width, info.raw_height, codecs::Layout::Gray, codecs::Sample::U16);
     // (LibRaw: the sensor data — 4 samples a pixel for a sensor of more colours or none of a mosaic — and its picture of 4
-    // samples, its 16-bit RGB; then Genko's: that RGB and — Camera Raw's adjustments — two precise rasters)
+    // samples, its 16-bit RGB; then Genko's: that RGB (6 a pixel) with the 16-bit output (6), or — Camera Raw's adjustments —
+    // the float raster of prophoto-compat (16) held three times as the kernel's surface takes it (its source and its result),
+    // then the result (16) with the 16-bit output (6))
     const std::uint64_t raw_px = std::uint64_t(info.raw_width) * std::uint64_t(info.raw_height);
     const std::uint64_t px = std::uint64_t(info.width) * std::uint64_t(info.height) / std::uint64_t(div * div);
     const std::uint64_t sensor = raw_px * (info.mosaic ? 2 : 8);
     const std::uint64_t libraw = sensor + px * 8 + px * 6;
-    const std::uint64_t genko = px * 6 + (adjust ? px * 16 : px * 2);
+    const std::uint64_t genko = adjust ? px * 48 : px * 12;
     const std::uint64_t peak = std::max(libraw, genko);
     if (peak > limits.max_alloc) {
         throw core::Error("image_too_large", "the picture is too large to read at once (" + std::to_string(info.width) + "×" + std::to_string(info.height) +
@@ -751,8 +753,10 @@ Developed develop(std::string_view bytes, const Json& raw, const Options& option
     const Profile working(space_profile("prophoto-compat"));
     const Profile output(space_profile(d.space));
     const auto first = float_transform(linear.p, adjust != nullptr ? working.p : output.p);
-    std::string rgb16(std::size_t(w) * std::size_t(h) * 6, '\0');
-    {
+    std::string rgb16;
+    std::string worked;
+    if (adjust == nullptr) {
+        rgb16.assign(std::size_t(w) * std::size_t(h) * 6, '\0');
         std::vector<float> row(std::size_t(w) * 3);
         auto* out = reinterpret_cast<std::uint16_t*>(rgb16.data());
         for (int y = 0; y < h; ++y) {
@@ -761,22 +765,38 @@ Developed develop(std::string_view bytes, const Json& raw, const Options& option
             cmsDoTransform(first->t, row.data(), row.data(), static_cast<cmsUInt32Number>(w));
             for (std::size_t i = 0; i < row.size(); ++i) out[std::size_t(y) * row.size() + i] = to_u16(row[i]);
         }
-    }
-    stage.mem.reset();
-    if (adjust != nullptr) {
-        // (Camera Raw's adjustments: 節 D's kernel over the picture in prophoto-compat — its lengths in the file's pixels —,
-        // then into the output space)
+        stage.mem.reset();
+    } else {
+        // (Camera Raw's adjustments: 節 D's kernel over the picture in prophoto-compat as floats — what is past white kept,
+        // as the window's preview gives it, so ハイライト・白レベル bring it back —, its lengths in the file's pixels; then
+        // into the output space)
         const fx::Kernel* kernel = fx::kernel("camera_raw");
         if (kernel == nullptr) throw core::Error("value", "the camera_raw kernel is not in this build");
-        std::string worked;
+        std::string raster;
         {
-            const auto* in = reinterpret_cast<const std::uint16_t*>(rgb16.data());
-            const std::string raster = core::encode_color_pixels(std::uint32_t(w), std::uint32_t(h), "u16", [in](std::size_t i) {
-                return std::array<double, 4>{in[i * 3] / 65535.0, in[i * 3 + 1] / 65535.0, in[i * 3 + 2] / 65535.0, 1.0};
+            std::vector<float> row(std::size_t(w) * 3);
+            int at = -1;
+            raster = core::encode_color_pixels(std::uint32_t(w), std::uint32_t(h), "f32", [&](std::size_t i) {
+                const int y = static_cast<int>(i / std::size_t(w));
+                if (y != at) {
+                    if (y % 64 == 0 && options.stopped && options.stopped()) throw Cancelled();
+                    linear_row(stage, y, row.data());
+                    cmsDoTransform(first->t, row.data(), row.data(), static_cast<cmsUInt32Number>(w));
+                    at = y;
+                }
+                const std::size_t x = i % std::size_t(w);
+                const auto v = [&](std::size_t c) {
+                    const float f = row[x * 3 + c];
+                    return std::isfinite(f) ? std::max(0.0, static_cast<double>(f)) : 0.0;
+                };
+                return std::array<double, 4>{v(0), v(1), v(2), 1.0};
             });
-            std::string().swap(rgb16);
+        }
+        stage.mem.reset();
+        {
             const ImageAllocationBudget budget{options.limits.max_alloc};
             const auto surface = fx::precise_surface(raster);
+            std::string().swap(raster);
             fx::apply(*surface, *kernel, *adjust, core::FilterInks::Meaning, fx::Rect{0, 0, w, h}, nullptr, 1.0);
             worked = fx::take_bytes(*surface);
         }

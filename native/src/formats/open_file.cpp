@@ -647,15 +647,18 @@ Opened open_raw(std::string_view bytes, const std::string& file, const OpenOptio
             for (std::string& note : made.notes) notes.push_back(std::move(note));
         }
     } catch (const core::Error& error) {
-        if (error.code() != "unidentified_image") throw;
-        // (a RAW LibRaw cannot develop — a camera or a compression it does not know —: the camera's own preview)
+        // (a RAW LibRaw cannot develop — a camera or a compression it does not know, or sensor data it found broken or cut
+        // short —: the camera's own preview, said so)
+        if (error.code() != "unidentified_image" && error.code() != "format") throw;
         std::optional<CodecImage> preview = render::raw::embedded_preview(bytes, options.limits);
         if (!preview) throw;
         width = preview->width();
         height = preview->height();
         depth = 8;
         out = picture_book(std::move(*preview), stem_of(file), as_said);
-        notes = {"このカメラ RAW は現像できないため、カメラが埋め込んだプレビュー（" + std::to_string(width) + "×" + std::to_string(height) +
+        const std::string why =
+            error.code() == "format" ? "このカメラ RAW はデータが壊れているか途中で切れていて現像できないため" : "このカメラ RAW は現像できないため";
+        notes = {why + "、カメラが埋め込んだプレビュー（" + std::to_string(width) + "×" + std::to_string(height) +
                  " px・8 bit）を開きました（RAW のデータではありません）"};
         try {
             info = render::raw::identify(bytes, options.limits);

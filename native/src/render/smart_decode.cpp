@@ -472,7 +472,16 @@ FileInfo look_at(std::string_view bytes, std::string_view suffix) {
     // defaults until set_camera_raw: 16 bits in prophoto-compat, which the developed picture carries)
     if (raw::raw_suffix(suffix) || raw::looks_raw(bytes)) {
         if (!suffix.empty() && !raw::raw_suffix(suffix)) throw core::Error("unidentified_image", "the file is not the " + std::string(suffix) + " its name says");
-        const raw::Info read = raw::unpacked(bytes);
+        std::optional<raw::Info> unpacked;
+        try {
+            unpacked = raw::unpacked(bytes);
+        } catch (const core::Error& error) {
+            // (a picture named as a RAW that is none — LibRaw does not open it and it carries no RAW's marks —: the picture it
+            // is, as formats::open_file reads it)
+            if (error.code() != "unidentified_image" || raw::looks_raw(bytes) || !sniff(bytes)) throw;
+        }
+        if (!unpacked) return look_at(bytes, {});
+        const raw::Info& read = *unpacked;
         const core::raw::Develop develop;
         const auto [w, h] = raw::developed_size(read, develop);
         FileInfo info;

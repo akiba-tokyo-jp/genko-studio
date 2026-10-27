@@ -14,6 +14,7 @@
 #include "app/camera_raw_open.hpp"
 #include "app/dialogs.hpp"
 #include "app/main_window.hpp"
+#include "app/off_ui.hpp"
 #include "app/open_dialog.hpp"
 #include "core/paths.hpp"
 #include "core/pyops.hpp"
@@ -144,7 +145,11 @@ bool MainWindow::edit_raw_contents(const std::string& contents_id, const QString
     const auto found = book().smart_contents.find(contents_id);
     if (found == book().smart_contents.end() || !found->second || found->second->format != "raw") return false;
     const core::SmartContents contents = *found->second;
-    const core::Bytes bytes = render::smart::file_bytes(book(), contents);
+    // (its bytes — up to 256 MiB from the book's assets — read on a worker, the window drawing meanwhile)
+    core::Document holder;
+    holder.asset_dir = book().asset_dir;
+    if (const auto held = book().smart_files.find(contents.asset); held != book().smart_files.end()) holder.smart_files[contents.asset] = held->second;
+    const core::Bytes bytes = off_ui([&holder, &contents] { return render::smart::file_bytes(holder, contents); });
     if (!bytes) {
         flash(QStringLiteral("スマートオブジェクトの RAW ファイルが原稿にありません"), 6000, true);
         return false;

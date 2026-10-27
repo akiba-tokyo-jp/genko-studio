@@ -19,6 +19,7 @@
 
 #include "app/camera_raw_open.hpp"
 #include "app/camera_raw_window.hpp"
+#include "app/history_panel.hpp"
 #include "app/icons.hpp"
 #include "app/main_window.hpp"
 #include "app/preferences.hpp"
@@ -306,6 +307,19 @@ private slots:
         d.window->action(QStringLiteral("act_undo"))->trigger();
         QVERIFY(wait_for([&] { return d.doc().smart_contents.at(id)->depth == 16; }));
         QCOMPARE((*d.doc().smart_contents.at(id)->raw)["develop"]["exposure_ev"], Json(1.0));
+        // (review F-e P3-2: its step's name in 作業の履歴 — an op of the book's, not one inside the contents)
+        QCOMPARE(genko::app::history::describe(Json::array({Json{{"op", "set_camera_raw"}, {"contents", id}}})),
+                 QStringLiteral("Camera Raw で現像の設定を変えた"));
+        // (review F-e P2-3: コンテンツを置換 with a NEF — a TIFF-shaped RAW, known by its name —: a RAW's contents)
+        const fs::path nef = d.file("other.nef", rawgen::tiff_ep("NIKON", "D3X", 64, 48,
+                                                                 rawgen::mosaic(rawgen::scene(64, 48), 64, {0, 1, 1, 2}, 0, 4095), {0, 1, 1, 2}, 12));
+        QVERIFY(d.window->replace_contents(qpath(nef)));
+        const core::SmartContents* replaced = nullptr;
+        for (const core::Layer& l : d.doc().page(0).layers)
+            if (l.kind == core::LayerKind::Smart) replaced = core::smart::contents_of(d.doc(), l);
+        QVERIFY(replaced != nullptr);
+        QCOMPARE(replaced->format, std::string("raw"));
+        QCOMPARE(replaced->suffix, std::string(".nef"));
     }
 };
 

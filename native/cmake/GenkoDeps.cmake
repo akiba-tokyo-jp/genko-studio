@@ -89,9 +89,15 @@ else()
     set(_genko_pc_path "$ENV{PKG_CONFIG_PATH}")
     set(ENV{PKG_CONFIG_PATH} "${GENKO_LIBRAW_ROOT}/lib/pkgconfig:${_genko_pc_path}")
   endif()
-  pkg_check_modules(GENKO_LIBRAW_PC REQUIRED IMPORTED_TARGET libraw_r>=0.22)
+  pkg_check_modules(GENKO_LIBRAW_PC IMPORTED_TARGET libraw_r>=0.22)
   if(GENKO_LIBRAW_ROOT)
     set(ENV{PKG_CONFIG_PATH} "${_genko_pc_path}")
+  endif()
+  if(NOT GENKO_LIBRAW_PC_FOUND)
+    message(FATAL_ERROR
+      "LibRaw 0.22 (libraw_r) was not found. Genko needs LibRaw 0.22.x built from libraw.org's source as a shared library "
+      "(the computer's own LibRaw is older): build it with tools/ci/build_libraw.sh <prefix> and configure with "
+      "GENKO_LIBRAW_ROOT=<prefix> (an environment variable or -DGENKO_LIBRAW_ROOT=...). See docs/cpp-migration/ARCHITECTURE.md (camera RAW).")
   endif()
   set(GENKO_LIBRAW PkgConfig::GENKO_LIBRAW_PC)
 endif()
