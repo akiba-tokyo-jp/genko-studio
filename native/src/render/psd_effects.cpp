@@ -556,8 +556,8 @@ std::string blend_id(std::string_view mode) {
 }
 
 std::optional<std::string> blend_of_id(std::string_view id) {
-    for (const auto& [name, key] : kBlends)
-        if (key == id) return std::string(name);
+    // (PC4 D7: the one table of the descriptors' modes; the ids it has not that older files write)
+    if (auto mode = d::genko_blend(id)) return mode;
     if (id == "Lddg") return std::string("add");  // (an older id of 覆い焼き（リニア）)
     if (id == "lbrn") return std::string("linear_burn");
     return std::nullopt;
@@ -618,12 +618,24 @@ Json effects_of(const d::Object& o, const psd_shapes::Placement& placement, std:
     return style;
 }
 
-std::optional<Json> style_of(std::string_view payload, const psd_shapes::Placement& placement, std::vector<std::string>& notes) {
+std::optional<Json> style_of(std::string_view payload, const psd_shapes::Placement& placement, std::vector<std::string>& notes,
+                             std::size_t* budget) {
     try {
         d::Bytes b(payload);
         if (b.u32() != 0) throw d::Broken("an effects block of another version");
-        if (b.u32() != 16) throw d::Broken("a descriptor version other than 16");
-        const d::Object o = d::read_structure(b, 0);
+        d::Object o;
+        if (budget != nullptr) {
+            // (PC4 D7: the file's one budget — what it takes spent from it; past it, nothing more for its other layers)
+            try {
+                o = d::read_versioned(payload, 4, *budget);
+            } catch (const d::TooLarge&) {
+                *budget = 0;
+                throw;
+            }
+        } else {
+            if (b.u32() != 16) throw d::Broken("a descriptor version other than 16");
+            o = d::read_structure(b, 0);
+        }
         const Json style = core::layer_style_spec(effects_of(o, placement, notes));
         if (style.is_null()) return std::nullopt;
         return style;

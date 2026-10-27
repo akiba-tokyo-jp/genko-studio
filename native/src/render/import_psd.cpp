@@ -633,9 +633,9 @@ std::vector<std::string> blend_if_names(int mode) {
 // layer-styles@1 (PC4 E6): a record's effects (lmfx, else lfx2), fill opacity (iOpa) and Blend If (its blending ranges) as
 // the layer's style (render/psd_effects) — the effects' blocks still kept, written back as they were while the style is
 // unchanged; the fill opacity and the ranges read so not kept besides. `light`: the file's global light when it is not
-// the book's (an effect that takes the global light takes this one as its own). Whether a style was made.
+// the book's (an effect that takes the global light takes this one as its own). Whether a style was made. `budget`: the file's one descriptor budget (its smart filters' too).
 bool style_from_record(core::Layer& layer, const psd::File& file, const psd::Layer& item, const psd_shapes::Placement& placement,
-                       const std::optional<std::array<double, 2>>& light, std::vector<std::string>& notes) {
+                       const std::optional<std::array<double, 2>>& light, std::vector<std::string>& notes, std::size_t& budget) {
     std::string_view effects;
     bool multi = false;
     std::optional<double> fill;
@@ -651,7 +651,7 @@ bool style_from_record(core::Layer& layer, const psd::File& file, const psd::Lay
     }
     Json style = Json{{"effects", Json::array()}};
     if (!effects.empty()) {
-        if (std::optional<Json> read = psd_effects::style_of(effects, placement, notes)) style = std::move(*read);
+        if (std::optional<Json> read = psd_effects::style_of(effects, placement, notes, &budget)) style = std::move(*read);
     }
     const bool filled = fill && *fill < 1.0;
     if (filled) style["fill_opacity"] = *fill;
@@ -1264,7 +1264,7 @@ Json import_data(core::Document& doc, const Json& op, std::string data, bool exa
             layer.native_psd = layer_keep(doc, file, item, names_layers, effect, kept_so_far);
             // (layer-styles@1, PC4 E6: its effects, fill opacity and Blend If as its style — drawn by this build)
             if (!item.folder && core::takes_layer_style(layer) &&
-                style_from_record(layer, file, item, style_placement, light_differs, style_notes)) {
+                style_from_record(layer, file, item, style_placement, light_differs, style_notes, filters_budget.left)) {
                 styled.push_back(layer.id);
                 if (core::style_shows_effects(*layer.style) || !(*layer.style)["effects"].empty()) effect = false;
             }

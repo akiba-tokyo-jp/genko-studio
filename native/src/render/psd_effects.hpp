@@ -25,7 +25,9 @@ psd::descriptor::Writer effects_descriptor(const core::Json& style, const psd_sh
 
 // An lfx2's or lmfx's payload read back: {"effects": [...], "enabled"?: false} in its normal form (core::layer_style_spec;
 // none when it holds no effect). Broken, the payload ends early or is too large to read: none, said.
-std::optional<core::Json> style_of(std::string_view payload, const psd_shapes::Placement& placement, std::vector<std::string>& notes);
+// `budget`: the file's one descriptor budget (psd::File::descriptor_left, shared with its smart filters), spent from.
+std::optional<core::Json> style_of(std::string_view payload, const psd_shapes::Placement& placement, std::vector<std::string>& notes,
+                                   std::size_t* budget = nullptr);
 // The same from an effects descriptor (an .asl style's "Lefx").
 core::Json effects_of(const psd::descriptor::Object& effects, const psd_shapes::Placement& placement, std::vector<std::string>& notes);
 

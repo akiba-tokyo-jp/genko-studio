@@ -26,15 +26,17 @@ const d::Object* object_at(const d::Object& o, std::string_view key) {
 }
 
 // One style's data (its two descriptors) read.
-Style style_of(std::string_view data, const psd_shapes::Placement& placement, std::vector<std::string>& notes, std::size_t index) {
+Style style_of(std::string_view data, const psd_shapes::Placement& placement, std::vector<std::string>& notes, std::size_t index,
+               std::size_t& budget) {
     Style out;
-    d::Bytes b(data);
+    d::Bytes b(data, budget);  // (the file's one budget: what each style takes spent from it)
     if (b.u32() != 16) throw d::Broken("its name's descriptor is not of version 16");
     const d::Object head = d::read_structure(b, 0);
     if (const d::Value* name = head.get("Nm  "); name != nullptr && name->type == "TEXT") out.name = psd::utf8_of(name->text);
     if (out.name.empty()) out.name = "スタイル " + std::to_string(index + 1);
     if (b.u32() != 16) throw d::Broken("its style's descriptor is not of version 16");
     const d::Object body = d::read_structure(b, 0);
+    budget -= std::min(budget, b.spent());
     const d::Object* effects = object_at(body, "Lefx");
     std::vector<std::string> own;
     Json style = effects != nullptr ? psd_effects::effects_of(*effects, placement, own) : Json{{"effects", Json::array()}};
@@ -103,6 +105,7 @@ File read(std::string_view data, double dpi) {
     };
 
     out.styles.reserve(count);
+    std::size_t budget = d::kUnpackedBudget;  // (one for the whole file: its descriptors past it refuse the file)
     for (std::size_t i = 0; i < count; ++i) {
         std::string_view chunk;
         try {
@@ -116,7 +119,9 @@ File read(std::string_view data, double dpi) {
             break;
         }
         try {
-            out.styles.push_back(style_of(chunk, placement, out.notes, i));
+            out.styles.push_back(style_of(chunk, placement, out.notes, i, budget));
+        } catch (const d::TooLarge& error) {
+            throw core::Error("too_large", std::string("the .asl cannot be read: ") + error.what());
         } catch (const std::exception& error) {
             out.notes.push_back(std::string("スタイル ") + std::to_string(i + 1) + " を読めませんでした（" + error.what() + "）");
         }

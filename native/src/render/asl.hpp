@@ -22,7 +22,8 @@
 //              blendOptions?: its blend mode and fill opacity)
 //
 // Bounds: a file past kMaxFileBytes and more styles than kMaxStyles are refused before anything is read into memory; each
-// style's descriptors are read within its own length and render/psd_descriptor's budget, the patterns within render/pat's.
+// style's descriptors are read within its own length and one render/psd_descriptor budget for the whole file (past it:
+// core::Error("too_large"), nothing kept), the patterns within render/pat's.
 
 namespace genko::render::asl {
 
