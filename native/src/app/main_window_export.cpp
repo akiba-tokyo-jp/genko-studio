@@ -77,18 +77,28 @@ std::optional<std::size_t> MainWindow::export_page(std::shared_ptr<const core::D
 }
 
 // Not over a picture a book here was opened from (the user's decision 4: its copy goes to another file).
-bool MainWindow::writes_over_a_source(const fs::path& path) {
+formats::WriteGuard MainWindow::export_guard() const {
+    std::vector<fs::path> sources;
+    std::vector<fs::path> books;
     for (MainWindow* window : documents::windows()) {
         for (const Document& d : window->documents()) {
-            std::error_code ec;
-            if (d.source && fs::exists(path, ec) && fs::equivalent(*d.source, path, ec)) {
-                ask::warning(this, QStringLiteral("書き出し"),
-                             QStringLiteral("開いた元の画像には書きません。別の名前か場所を選んでください:\n%1").arg(QDir::toNativeSeparators(qpath(path))));
-                return true;
-            }
+            if (d.source) sources.push_back(*d.source);
+            if (d.session && d.session->path()) books.push_back(*d.session->path());
         }
     }
-    return false;
+    formats::WriteGuard guard = formats::write_guard(book(), session_->path(), std::move(sources));
+    for (fs::path& b : books) guard.books.push_back(std::move(b));
+    return guard;
+}
+
+bool MainWindow::writes_over_a_source(const fs::path& path) {
+    try {
+        formats::check_target(export_guard(), path);
+        return false;
+    } catch (const core::Error& error) {
+        ask::warning(this, QStringLiteral("書き出し"), wording::error(QString::fromUtf8(error.what())));
+        return true;
+    }
 }
 
 bool MainWindow::quick_export(const std::optional<std::string>& layer) {
@@ -148,8 +158,20 @@ void MainWindow::export_as(const std::optional<std::string>& layer) {
             std::vector<std::size_t> pages;
             for (std::size_t i = 0; i < doc->pages.size(); ++i) pages.push_back(i);
             const fs::path where = fpath(folder);
+            if (writes_over_a_source(where)) return;
+            int there = 0;
             for (const std::size_t i : pages) {
-                if (writes_over_a_source(where / core::path_from_utf8(core::file_stem(doc->page(i)) + "." + ext.toStdString()))) return;
+                const fs::path file = where / core::path_from_utf8(core::file_stem(doc->page(i)) + "." + ext.toStdString());
+                if (writes_over_a_source(file)) return;
+                std::error_code ec;
+                if (fs::exists(file, ec)) ++there;
+            }
+            // (the coordinator's P3-8: files of those names there — asked once, before anything is written)
+            if (there > 0 && !ask::question(this, QStringLiteral("書き出し形式"),
+                                            QStringLiteral("書き出し先に同じ名前のファイルが %1 個あります。置き換えますか？\n%2")
+                                                .arg(there)
+                                                .arg(QDir::toNativeSeparators(folder)))) {
+                return;
             }
             const std::vector<formats::CopyResult> written =
                 off_ui([doc, pages, where, ext, options] { return formats::copy_pages(*doc, pages, where, ext.toStdString(), options); });
@@ -233,9 +255,11 @@ void MainWindow::layers_to_files() {
     const QString folder = book ? qpath(book->parent_path() / core::path_from_utf8(core::path_to_utf8(book->stem()) + "_書き出し")) : QDir::homePath() + QStringLiteral("/genko_書き出し");
     LayersToFilesDialog dialog(this, folder, QString::fromStdString(doc->title));
     if (ask::exec(&dialog) != QDialog::Accepted) return;
-    const formats::LayerFiles files = dialog.files();
     const fs::path where = fpath(QDir::fromNativeSeparators(dialog.folder->text().trimmed()));
     if (where.empty()) return;
+    if (writes_over_a_source(where)) return;
+    formats::LayerFiles files = dialog.files();
+    files.check = [guard = export_guard()](const fs::path& file) { formats::check_target(guard, file); };
     try {
         const int dpi = std::max(1, static_cast<int>(std::lround(doc->spec.dpi.value())));
         const auto [written, notes] = off_ui([doc, where, dpi, files] {

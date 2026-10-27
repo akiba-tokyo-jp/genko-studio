@@ -87,6 +87,20 @@ struct CopyResult {
     std::uint64_t bytes = 0;
 };
 
+// (PC4 F-c, the coordinator's P3-8) Where no way out writes a picture — 書き出し形式…, クイック書き出し, Web 用に保存,
+// レイヤーからファイル…, `genko copy`, `genko export --format layers` —, lest the book be lost: the book itself (its folder)
+// and anything in it, a file a smart object of the book links (its path, and where it is found), and the pictures the
+// open books were opened from.
+struct WriteGuard {
+    std::vector<std::filesystem::path> books;   // the books' folders (the one written from; the window's other open ones)
+    std::vector<std::filesystem::path> linked;  // the files its smart objects link
+    std::vector<std::filesystem::path> sources; // the pictures books were opened from
+};
+WriteGuard write_guard(const core::Document& doc, const std::optional<std::filesystem::path>& book,
+                       std::vector<std::filesystem::path> sources = {});
+// core::Error("refused_target", …) when `dest` — a file, or a folder written into — is one of them or lies in the book.
+void check_target(const WriteGuard& guard, const std::filesystem::path& dest);
+
 // The extensions write_copy writes (lower case, no dot), the default first.
 std::span<const std::string_view> copy_extensions();
 

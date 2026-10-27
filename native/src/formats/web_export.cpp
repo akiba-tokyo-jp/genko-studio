@@ -701,10 +701,17 @@ std::optional<fs::path> quick_export_place(const ExportPreferences& prefs, const
     const std::string stem = core::path_to_utf8(folder.stem());
     std::string name = stem + "_" + core::file_stem(page);
     if (layer != nullptr) name += "_" + layer->title;
-    // (a name every OS takes, cut by characters — never inside one —, as the exports' names are)
-    name = safe_name(name, "genko") + "." + prefs.format;
+    // (a name every OS takes, cut by characters as the exports' names are)
+    const std::string base = safe_name(name, "genko");
     const fs::path where = prefs.location == QuickLocation::SameFolder ? folder.parent_path() : folder.parent_path() / core::path_from_utf8(stem + "_書き出し");
-    return where / core::path_from_utf8(name);
+    // (the coordinator's P3-8: a file already there never written over — the next free name-2, name-3 … —)
+    fs::path place = where / core::path_from_utf8(base + "." + prefs.format);
+    std::error_code ec;
+    for (int n = 2; fs::exists(place, ec) || fs::is_symlink(place, ec); ++n) {
+        if (n > 9999) throw core::Error("refused_target", "too many files of that name: " + core::path_to_utf8(place));
+        place = where / core::path_from_utf8(base + "-" + std::to_string(n) + "." + prefs.format);
+    }
+    return place;
 }
 
 CopyResult quick_export(const core::Document& doc, std::size_t page, const fs::path& dest, const ExportPreferences& prefs, const std::optional<std::string>& layer) {

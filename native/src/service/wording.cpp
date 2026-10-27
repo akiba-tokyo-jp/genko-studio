@@ -540,6 +540,12 @@ const std::vector<Rule>& rules() {
         r.push_back(rule(R"(unknown (preset|format|palette|dither|metadata|resample) `(.*)`.*)", "Web 用に保存の設定が正しくありません（\\1: \\2）"));
         r.push_back(rule("the quick export's format is png, jpg, gif or webp", "クイック書き出しの形式は PNG・JPG・GIF・WebP です"));
         r.push_back(rule("the layers' format is png, jpeg, tiff, psd or webp", "レイヤーからファイルの形式は PNG・JPEG・TIFF・PSD・WebP です"));
+        // (PC4 F-c, the coordinator's P3-8: the places no way out writes to)
+        r.push_back(rule(R"(cannot write over the book: (.*))", "原稿そのものには書き出しません。別の名前か場所を選んでください: \\1"));
+        r.push_back(rule(R"(cannot write inside the book's folder: (.*))", "原稿のフォルダーの中には書き出しません。別の場所を選んでください: \\1"));
+        r.push_back(rule(R"(cannot write over a file the book links: (.*))", "配置・リンクした元のファイルには書き出しません。別の名前か場所を選んでください: \\1"));
+        r.push_back(rule(R"(too many files of that name: (.*))", "同じ名前のファイルが多すぎて、クイック書き出しの名前を決められません: \\1"));
+        r.push_back(rule(R"(cannot write over the picture a book was opened from: (.*))", "開いた元の画像には書き出しません。別の名前か場所を選んでください: \\1"));
         r.push_back(rule(R"(the colour profile cannot be read \((.*)\))", "カラープロファイルを読み込めません"));
         r.push_back(rule(R"(the file cannot be read \(it is larger than 2 GiB\))", "ファイルが大きすぎて読み込めません（2 GiB まで）"));
         // (this build's own: put_raster reads only a regular file — not a device or a pipe, whose reading may not end)

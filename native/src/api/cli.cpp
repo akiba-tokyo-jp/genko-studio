@@ -960,7 +960,20 @@ int export_command(const QStringList& args, bool ascii) {
     } else if (f == "pack") {
         paths = formats::export_pack(doc, out, "shueisha", dpi);
     } else if (f == "layers") {
-        paths = formats::export_layers(doc, out, narrow(dpi.value_or(spec_dpi)), *area, layer_files, &layer_notes);
+        // (the coordinator's P3-8: never into the book or over a file it links)
+        const formats::WriteGuard guard = formats::write_guard(doc, src);
+        try {
+            formats::check_target(guard, out);
+        } catch (const core::Error& error) {
+            return usage(std::string("genko export: ") + error.what());
+        }
+        layer_files.check = [guard](const fs::path& file) { formats::check_target(guard, file); };
+        try {
+            paths = formats::export_layers(doc, out, narrow(dpi.value_or(spec_dpi)), *area, layer_files, &layer_notes);
+        } catch (const core::Error& error) {
+            if (std::string_view(error.code()) != "refused_target") throw;
+            return usage(std::string("genko export: ") + error.what());
+        }
     } else if (f == "kindle") {
         const std::int64_t given = int_or("--long-edge", 2048);
         const std::int64_t long_edge = given != 2048 ? given : formats::kKindleLongEdge;
@@ -2247,6 +2260,17 @@ int copy_command(const QStringList& args, bool ascii) {
     if (options.layer && pages.size() > 1) return usage("genko copy: argument --layer: with one page (--page N)");
 
     const auto dest_of = [&](std::size_t at) { return file_given ? out : out / core::path_from_utf8(core::file_stem(doc.page(at)) + "." + ext); };
+    // (the coordinator's P3-8: never the book, its folder or a file it links — every place checked before anything is
+    // written; a file there is written over, as before)
+    if (!a.flag("--estimate")) {
+        const formats::WriteGuard guard = formats::write_guard(doc, src);
+        try {
+            if (!file_given) formats::check_target(guard, out);
+            for (const std::size_t at : pages) formats::check_target(guard, dest_of(at));
+        } catch (const core::Error& error) {
+            return usage(std::string("genko copy: ") + error.what());
+        }
+    }
     Json listed = Json::array();
     std::vector<std::string> notes;
     const auto note = [&notes](const std::vector<std::string>& said) {

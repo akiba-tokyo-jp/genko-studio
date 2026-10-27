@@ -167,7 +167,8 @@ struct ExportPreferences {
 inline constexpr std::array<std::string_view, 4> kQuickFormats{"png", "jpg", "gif", "webp"};
 
 // The file a quick export writes without asking — <book>_<page>[_<layer>].<format> beside the book, or in its export
-// folder —, or none (asking each time, or a book never saved: the window asks).
+// folder —, or none (asking each time, or a book never saved: the window asks). (The coordinator's P3-8) A file already
+// there is never the place: <name>-2.<format>, -3 … the first free one.
 std::optional<std::filesystem::path> quick_export_place(const ExportPreferences& prefs, const std::optional<std::filesystem::path>& book,
                                                         const core::Page& page, const core::Layer* layer = nullptr);
 // The quick export (PhotoCraft's quick_export): png, jpg and gif through Save for Web's optimiser (PNG-24 — a layer's

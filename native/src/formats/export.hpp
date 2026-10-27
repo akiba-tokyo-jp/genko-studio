@@ -3,6 +3,7 @@
 #include <array>
 #include <cstdint>
 #include <filesystem>
+#include <functional>
 #include <optional>
 #include <string>
 #include <string_view>
@@ -78,6 +79,8 @@ struct LayerFiles {
     std::string prefix;          // "": none
     bool visible_only = true;
     std::optional<int> quality;  // (jpeg) 0..12
+    // (the coordinator's P3-8) each file's place before it is written: throws to write none (formats::check_target)
+    std::function<void(const fs::path&)> check;
 };
 inline constexpr std::array<std::string_view, 5> kLayerFileFormats{"png", "jpeg", "tiff", "psd", "webp"};
 std::vector<fs::path> export_layers(const core::Document& episode, const fs::path& dest, int dpi, std::string_view area, const LayerFiles& files,

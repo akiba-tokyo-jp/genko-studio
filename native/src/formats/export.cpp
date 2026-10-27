@@ -530,6 +530,7 @@ fs::path layer_file(detail::Output& output, const Image& image, const fs::path& 
         // (a book of its picture, written as a PSD beside its place and taken into the export as it is copied — never held
         // whole)
         const fs::path path = detail::join(folder, name + ".psd");
+        if (files.check) files.check(path);
         Opened alone = picture_book(std::move(picture), name);
         const fs::path made = detail::join(folder, "." + name + ".psd-layer");
         export_page_psd(alone.doc, alone.doc.page(0), made, dpi);
@@ -573,6 +574,7 @@ fs::path layer_file(detail::Output& output, const Image& image, const fs::path& 
         ext = ".webp";
     }
     const fs::path path = detail::join(folder, name + ext);
+    if (files.check) files.check(path);
     const std::string bytes = encode_for(std::move(picture), format, encode, false, said);
     output.put(path, bytes);
     if (notes != nullptr) {
@@ -634,6 +636,7 @@ std::vector<fs::path> export_layers(const core::Document& episode, const fs::pat
                                      safe_name(layer.name, "layer");
             if (files.format == "png") {  // (the files as before)
                 const fs::path path = detail::join(folder, name + ".png");
+                if (files.check) files.check(path);
                 output.put(path, png_bytes(crop_to(image, page, area, dpi), PngSave{dpi_pair(dpi), {}, false}));
                 written.push_back(path);
                 return;
