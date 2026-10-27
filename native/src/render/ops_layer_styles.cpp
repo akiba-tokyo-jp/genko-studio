@@ -316,6 +316,7 @@ Json style_with_patterns(core::Document& doc, const Json& style) {
 void forget_psd_effects(core::Layer& layer) {
     if (!layer.native_psd) return;
     std::erase_if(layer.native_psd->blocks, [](const auto& block) { return core::psd_effect_key(block.first); });
+    layer.native_psd->ranges.clear();  // (its Blend If is the style's now: a style taken off does not bring the file's back)
     if (layer.native_psd->empty()) layer.native_psd.reset();
 }
 

@@ -18,7 +18,7 @@ class QTreeWidgetItem;
 // each with its swatch — made off the window's thread, small, kept by the preset's settings, so a refresh reads only the
 // small styles.json again and never the patterns' pictures it has drawn already. A click applies the style to the chosen
 // layers (Shift+click: its effects added to theirs); the buttons: 新規スタイル… (the target layer's effects and blending
-// options), 削除, and the panel's menu: 名前を変更…, 新規グループ…, スタイルを読み込み… (.asl), スタイルを初期設定に戻す,
+// options), 削除, and the panel's menu: 名前を変更…, 新規スタイルグループ…, スタイルを読み込み… (.asl), スタイルを初期設定に戻す,
 // 初期設定のスタイルを追加. Every change reads the file again first (what another window or `genko styles` wrote is
 // kept) and writes it at once; the window never keeps its own copy of the library.
 

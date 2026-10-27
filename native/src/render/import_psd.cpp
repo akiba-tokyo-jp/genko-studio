@@ -679,7 +679,7 @@ bool style_from_record(core::Layer& layer, const psd::File& file, const psd::Lay
     layer.style = std::move(normal);
     if (layer.native_psd) {
         if (fill) std::erase_if(layer.native_psd->blocks, [](const auto& block) { return block.first == "iOpa"; });
-        if (!blend_if.empty()) layer.native_psd->ranges.clear();
+        // (the ranges kept as they are: written back while they say the style's Blend If)
         if (layer.native_psd->empty()) layer.native_psd.reset();
     }
     return true;

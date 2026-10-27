@@ -107,7 +107,7 @@ StylesPanel::StylesPanel(MainWindow* window) : window_(window) {
     auto* menu = new QMenu(more);
     menu->setObjectName(QStringLiteral("style_menu"));
     menu->addAction(QStringLiteral("名前を変更…"), this, [this] { rename(); });
-    menu->addAction(QStringLiteral("新規グループ…"), this, [this] { new_group(); });
+    menu->addAction(QStringLiteral("新規スタイルグループ…"), this, [this] { new_group(); });
     menu->addSeparator();
     menu->addAction(QStringLiteral("スタイルを読み込み…"), this, [this] {
         const QString path = ask::open_path(this, QStringLiteral("スタイルを読み込み"), QStringLiteral("スタイル (*.asl)"));
@@ -244,7 +244,7 @@ void StylesPanel::remove() {
 
 void StylesPanel::new_group(std::optional<QString> name) {
     if (!name) {
-        name = ask::get_text(this, QStringLiteral("新規グループ"), QStringLiteral("グループ名"), QStringLiteral("グループ 1"));
+        name = ask::get_text(this, QStringLiteral("新規スタイルグループ"), QStringLiteral("グループ名"), QStringLiteral("グループ 1"));
         if (!name) return;
     }
     if (name->trimmed().isEmpty()) return;
@@ -253,7 +253,7 @@ void StylesPanel::new_group(std::optional<QString> name) {
         store::edit(lib.groups, styles::kind(), Json{{"action", "new_group"}, {"group", name->trimmed().toStdString()}});
         store::save(config_dir(), styles::kind(), lib.groups);
     } catch (const core::Error& error) {
-        ask::warning(this, QStringLiteral("新規グループ"), QString::fromUtf8(error.what()));
+        ask::warning(this, QStringLiteral("新規スタイルグループ"), QString::fromUtf8(error.what()));
     }
     refresh();
 }

@@ -370,7 +370,12 @@ private slots:
         // and the 3 of PC4 F-c (SPEC FILE-01) — ファイル → 書き出し → レイヤーからファイル… (act_layers_to_files), レイヤー の
         // PNG としてクイック書き出し・書き出し形式… (act_layer_quick_export_png, act_layer_export_as) — theirs (test_gui_output), which
         // connects F-0's four frames of 書き出し ▸ too.
-        QCOMPARE(w->actions_by_name().size(), std::size_t{565});
+        // and the 19 of PC4 E6 (SPEC COLOR-09「レイヤースタイル」) — レイヤー → レイヤースタイル ▸ 混合オプション…・each effect's 10
+        // (act_layer_style_blending, act_layer_style_<kind>), レイヤースタイルをコピー・ペースト・消去 (act_layer_style_copy,
+        // act_layer_style_paste, act_layer_style_clear), 包括光源… (act_global_light), レイヤーを作成 (act_layer_style_layers),
+        // すべての効果を隠す・表示 (act_layer_style_hide_all, act_layer_style_show_all), 効果を拡大・縮小… (act_layer_style_scale)
+        // — theirs (test_gui_styles).
+        QCOMPARE(w->actions_by_name().size(), std::size_t{584});
         QVERIFY(w->action("act_chat_approval"));
         QVERIFY(w->action("act_style"));
         QVERIFY(w->action("act_exposure"));

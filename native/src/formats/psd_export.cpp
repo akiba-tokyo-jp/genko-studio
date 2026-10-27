@@ -644,9 +644,14 @@ private:
         const core::Layer* keep = std::exchange(keep_, nullptr);  // (psd-keep@1, PC4 F-d: its blending ranges and blocks kept)
         const core::Layer* styled = std::exchange(style_, nullptr);  // (layer-styles@1, PC4 E6: its Blend If)
         const core::Json* blend_if = styled != nullptr ? core::get(*styled->style, "blend_if") : nullptr;
-        const std::string ranges = blend_if != nullptr ? render::psd_effects::ranges_of(*blend_if, channel_names())
-                                   : keep != nullptr  ? kept_ranges(*keep)
-                                                      : std::string();
+        // (the ranges the file had, as they were, while they say the style's Blend If — Photoshop may write more channels'
+        // pairs than this writer does —; else the style's)
+        std::string ranges = keep != nullptr ? kept_ranges(*keep) : std::string();
+        if (styled != nullptr) {
+            const core::Json now = blend_if != nullptr ? *blend_if : core::Json::array();
+            if (ranges.empty() || !core::same_json_unordered(render::psd_effects::blend_if_of(ranges, channel_names()), now))
+                ranges = blend_if != nullptr ? render::psd_effects::ranges_of(*blend_if, channel_names()) : std::string();
+        }
         put_u32(extra, u32_of(ranges.size()));
         extra += ranges;
         extra += pascal(name) + unicode_name(name) + blocks;
