@@ -69,6 +69,14 @@ public:
     // `mode` (its native.blend) laid on the inks first by the page's formula.
     void correct(const InkPicture& changed, double opacity, bool clip, const Image* mask = nullptr, std::string_view mode = "normal");
 
+    // PC4 E6 (layer-styles@1, render/layer_styles): a layer drawn with its style over `part` of the canvas — `run` gets its
+    // values there (channels() and the alpha a pixel) and what the layer's opacity is multiplied by at each (the alpha of
+    // the layer before when `clip`, else 1), and leaves the result in them; `own` (the part's size): the layer's own alpha,
+    // what a layer clipped to it clips to. styled_done() after the last part.
+    void styled(const Box& part, bool clip, const std::vector<float>& own,
+                const std::function<void(std::vector<float>& values, const std::vector<float>& weight)>& run);
+    void styled_done();
+
     // The page as the screen shows it ("RGB", sRGB).
     Image display() const;
     // The page's inks at a depth (opaque: alpha full).
@@ -102,6 +110,10 @@ core::InkPixels crop_inks(const core::InkPixels& pixels, Box box);
 void paste_inks(core::InkPixels& into, const core::InkPixels& part, Point at);
 // Ink pixels at another size, as Pillow resizes (premultiplied by their alpha): Bicubic or Lanczos.
 core::InkPixels resize_inks(const core::InkPixels& pixels, Size size, Resample resample);
+
+// PC4 E6: the page's formula of a blend mode on its canvas values (B(below, above), `n` channels): what InkCanvas lays a
+// layer by (CMYK on the inverted plates, Lab on its values, grey on its lightness).
+void ink_blend(core::InkSpace space, unsigned n, std::string_view mode, const double* below, const double* above, double* out);
 
 // A canvas value of one channel from the stored ink (CMYK 0..1 as is; Lab L/100, (a+128)/255, (b+128)/255) and back.
 double to_canvas(core::InkSpace space, unsigned channel, double ink);

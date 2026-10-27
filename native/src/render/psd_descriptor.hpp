@@ -49,6 +49,11 @@ public:
     // items; and a list of unit floats (VlLs of UntF: a shape stroke's dashes).
     void objects(std::string_view key, const std::vector<std::pair<std::string, Writer>>& items);
     void units(std::string_view key, std::string_view unit, const std::vector<double>& values);
+    // (PC4 E6) another writer's items after these (an effect's descriptor made of parts)
+    void append(const Writer& other) {
+        body_ += other.body_;
+        count_ += other.count_;
+    }
     // The class structure (an empty name, the class id), its count and items.
     std::string structure(std::string_view class_id) const;
     // A versioned descriptor: version 16, then the structure.

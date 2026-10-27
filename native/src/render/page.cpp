@@ -9,6 +9,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <functional>
 #include <memory>
 #include <mutex>
 #include <unordered_map>
@@ -17,6 +18,7 @@
 #include <QFileInfo>
 
 #include "core/adjust.hpp"
+#include "core/layer_styles.hpp"
 #include "core/anim.hpp"
 #include "core/command_bus.hpp"
 #include "core/covers.hpp"
@@ -41,7 +43,9 @@
 #include "render/ink.hpp"
 #include "render/ink_canvas.hpp"
 #include "render/ink_filters.hpp"
+#include "render/layer_bounds.hpp"
 #include "render/layer_masks.hpp"
+#include "render/layer_styles.hpp"
 #include "render/op_limits.hpp"
 #include "render/page_internal.hpp"
 #include "render/paper.hpp"
@@ -1614,6 +1618,417 @@ void ink_correction(InkCanvas& canvas, const Ctx& ctx, const Layer& layer, const
 // color-mode@1: one layer of a CMYK or Lab page into the page's canvas (SPEC.md COLOR-02). Its own inks (an ink raster,
 // resampled as a paint layer is) are composited as they are; everything drawn in 8 bits (lines, fills, placed
 // pictures, a raster in RGB) as the page's inks of its colours; tones as drawn over the page.
+// --- PC4 E6 (layer-styles@1): a layer drawn with its style (render/layer_styles) -----------------------------------------
+//
+// Its picture is made as the page's way makes it (its pixels and lines, its 境界効果, its screen, its mask, its colour) over
+// each tile of the area grown by the effects' reach, and laid over what is beneath with its style by the way's own
+// colours and blends: the 8-bit page in sRGB values, a page in precise colour in its linear light, a page of inks in its
+// plates' values.
+
+bool styled_here(const Layer& layer) { return core::has_layer_style(layer) && core::takes_layer_style(layer) && !is_tone(layer); }
+
+std::array<double, 2> light_of(const Ctx& ctx) {
+    return ctx.episode != nullptr ? core::global_light(*ctx.episode) : std::array<double, 2>{core::kDefaultLightAngle, core::kDefaultLightAltitude};
+}
+
+// Does a gradient of the style lie over the layer's box (aligned with the layer)?
+bool style_aligns(const Json& style) {
+    const Json* effects = get(style, "effects");
+    if (effects == nullptr || !effects->is_array()) return false;
+    for (const Json& e : *effects) {
+        const Json* g = get(e, "gradient");
+        if (g != nullptr && g->is_object() && g->value("align", true)) return true;
+    }
+    return false;
+}
+
+// What the layer shows as its box depends on (layer_bounds: its pictures, lines, parts, fill, place, its page's panels),
+// with the shared parts held weakly: a box remembered for it is its box while they live.
+std::string layer_box_key(const Page& page, const Layer& layer, std::vector<std::weak_ptr<const void>>& held) {
+    std::string key = page.id + '\x1f' + layer.id + '\x1f' + std::string(core::to_string(layer.kind)) + '\x1f';
+    const auto pointer = [&](const auto& shared) {
+        if (shared) held.emplace_back(std::static_pointer_cast<const void>(shared));
+        key += std::to_string(reinterpret_cast<std::uintptr_t>(shared.get())) + ',';
+    };
+    pointer(layer.strokes);
+    pointer(layer.raster_png);
+    pointer(layer.color_raster);
+    pointer(layer.ink_raster);
+    pointer(layer.shapes);
+    for (const core::Patch& patch : layer.patches) {
+        pointer(patch.png);
+        key += patch.attrs.dump();
+    }
+    for (const std::optional<Json>* v : {&layer.fill, &layer.smart, &layer.tone, &layer.effect, &layer.screen})
+        key += (*v ? (*v)->dump() : std::string("-")) + '\x1f';
+    if (layer.placement_mm) key += layer.placement_mm->x.repr() + ',' + layer.placement_mm->y.repr() + ',' + layer.placement_mm->width.repr() + ',' + layer.placement_mm->height.repr();
+    key += layer.frame_id.value_or("") + layer.clip_to + layer.fit + (layer.panel_clip ? "c" : "") + (layer.panel_each ? "e" : "") + '\x1f';
+    key += page.spec.width_mm.repr() + 'x' + page.spec.height_mm.repr() + '\x1f';
+    const std::function<void(const core::Frame&)> frame = [&](const core::Frame& f) {
+        key += f.id + ':' + f.rect.x.repr() + ',' + f.rect.y.repr() + ',' + f.rect.width.repr() + ',' + f.rect.height.repr() + (f.clip ? "c" : "") + (f.bleed ? "b" : "");
+        if (f.poly)
+            for (const core::Point& p : *f.poly) key += ';' + p.x.repr() + ',' + p.y.repr();
+        if (f.curves)
+            for (const double v : *f.curves) key += '~' + std::to_string(v);
+        key += '{';
+        for (const core::Frame& child : f.children) frame(child);
+        key += '}';
+    };
+    for (const core::Frame& f : page.frames) frame(f);
+    return key;
+}
+
+struct BoxMemo {
+    std::string key;
+    std::vector<std::weak_ptr<const void>> held;
+    std::optional<layer_bounds::Box> box;
+};
+
+std::optional<layer_bounds::Box> remembered_layer_box(const core::Document& doc, const Page& page, const Layer& layer) {
+    static std::mutex mutex;
+    static std::vector<BoxMemo> memos;  // (the last 32, most recent last)
+    std::vector<std::weak_ptr<const void>> held;
+    const std::string key = layer_box_key(page, layer, held);
+    {
+        const std::lock_guard lock(mutex);
+        for (auto it = memos.begin(); it != memos.end(); ++it) {
+            if (it->key != key) continue;
+            if (std::any_of(it->held.begin(), it->held.end(), [](const std::weak_ptr<const void>& w) { return w.expired(); })) {
+                memos.erase(it);
+                break;
+            }
+            BoxMemo hit = std::move(*it);
+            memos.erase(it);
+            memos.push_back(hit);
+            return hit.box;
+        }
+    }
+    const std::optional<layer_bounds::Box> box = layer_bounds::of_layer(doc, page, layer.id);
+    const std::lock_guard lock(mutex);
+    memos.push_back(BoxMemo{key, std::move(held), box});
+    if (memos.size() > 32) memos.erase(memos.begin());
+    return box;
+}
+
+// The layer's box in page pixels (gradients aligned with it); none: the page's.
+std::optional<Box> styled_layer_box(const Ctx& ctx, const Layer& layer) {
+    if (ctx.episode == nullptr || !style_aligns(*layer.style)) return std::nullopt;
+    std::optional<layer_bounds::Box> mm;
+    try {
+        mm = remembered_layer_box(*ctx.episode, *ctx.page, layer);
+    } catch (const core::Error&) {
+        return std::nullopt;
+    }
+    if (!mm) return std::nullopt;
+    const double k = ctx.dpi / 25.4;
+    return Box{static_cast<int>(std::floor((*mm)[0] * k)), static_cast<int>(std::floor((*mm)[1] * k)), static_cast<int>(std::ceil((*mm)[2] * k)),
+               static_cast<int>(std::ceil((*mm)[3] * k))};
+}
+
+// The tiles of `area` a styled layer is drawn by: each grown by `margin` stays within some 1.5 M pixels.
+std::vector<Box> style_tiles(const Box& area, int margin) {
+    int side = 2048;
+    while (side > 256 && static_cast<std::int64_t>(side + 2 * margin) * (side + 2 * margin) > 1'500'000) side /= 2;
+    std::vector<Box> out;
+    for (int y = area.y0; y < area.y1; y += side)
+        for (int x = area.x0; x < area.x1; x += side) out.push_back(Box{x, y, std::min(area.x1, x + side), std::min(area.y1, y + side)});
+    return out;
+}
+
+// The layer's 8-bit picture over `box` as the 8-bit page lays it (its pixels and lines with its 境界効果, its screen, its
+// mask, its colour; a fill layer's fill cut at its panels), "RGBA"; `values`: its colours are the page's values (a paint
+// layer's pixels on a page of a profile), not sRGB. None: it shows nothing.
+std::optional<Image> styled_picture_8bit(const Ctx& ctx, const Layer& layer, const Box& box, bool mono, bool& values) {
+    values = false;
+    const std::optional<Image> box_panel = clip_mask(*ctx.page, ctx.size, ctx.dpi, box);
+    if (layer.kind == LayerKind::Fill) {
+        if (!truthy_json(layer.fill)) return std::nullopt;
+        Image raster = fill_layer_image(layer, ctx.size, ctx.dpi, mono, box, ctx.episode);
+        if (box_panel && layer.panel_clip) raster.putalpha(chops::multiply(alpha_of(raster), *box_panel));
+        return masked(ctx, layer, std::move(raster), box);
+    }
+    std::optional<Image> raster = layer_with_effects(ctx, layer, box, box_panel ? &*box_panel : nullptr, ctx.rough);
+    if (!raster) return std::nullopt;
+    const bool screened = screened_here(ctx, layer);
+    if (screened) raster = screened_layer(ctx, layer, *raster, box, box_panel ? &*box_panel : nullptr);
+    Image picture = masked(ctx, layer, std::move(*raster), box);
+    const bool tint = layer.color && !layer.color->empty() && (ctx.mode != "print" || layer.color_prints);
+    if (tint) picture = tinted(picture, *layer.color);
+    values = drawn_in_values(ctx, layer) && !tint;
+    return picture.mode() == "RGBA" ? picture : picture.convert("RGBA");
+}
+
+// An "RGBA" picture as 4 floats a pixel (0..1).
+std::vector<float> floats_of(const Image& rgba) {
+    const std::string bytes = rgba.tobytes();
+    std::vector<float> out(bytes.size());
+    for (std::size_t i = 0; i < bytes.size(); ++i) out[i] = static_cast<unsigned char>(bytes[i]) / 255.0f;
+    return out;
+}
+
+// The alpha of a part (`tile`, inside `wide`) of a picture of n + 1 values a pixel.
+std::vector<float> alpha_part(const std::vector<float>& content, unsigned n, const Box& wide, const Box& tile) {
+    std::vector<float> out(std::size_t(tile.width()) * tile.height());
+    for (int y = 0; y < tile.height(); ++y)
+        for (int x = 0; x < tile.width(); ++x)
+            out[std::size_t(y) * tile.width() + x] =
+                content[(std::size_t(y + tile.y0 - wide.y0) * wide.width() + x + tile.x0 - wide.x0) * (n + 1) + n];
+    return out;
+}
+
+layer_styles::Inputs style_inputs(const Ctx& ctx, const Layer& layer) {
+    layer_styles::Inputs in;
+    in.style = &*layer.style;
+    in.light = light_of(ctx);
+    in.dpi = ctx.dpi;
+    in.book = ctx.episode;
+    in.page = ctx.size;
+    in.blend = layer.blend.empty() ? std::string("normal") : layer.blend;
+    in.opacity = layer.opacity;
+    in.layer_box = styled_layer_box(ctx, layer);
+    return in;
+}
+
+// Each tile of the area: its box grown by the margin (cut to the page) and the tile.
+template <class Each>
+void for_style_tiles(const Ctx& ctx, const Layer& layer, const Box& area, Each each) {
+    const int margin = layer_styles::margin_px(*layer.style, ctx.dpi);
+    for (const Box& tile : style_tiles(area, margin)) {
+        check_cancel(ctx);
+        const Box wide = intersection(Box{tile.x0 - margin, tile.y0 - margin, tile.x1 + margin, tile.y1 + margin}, Box{0, 0, ctx.size.width, ctx.size.height});
+        each(wide, tile);
+    }
+}
+
+// The 8-bit page: the layer with its style over `rgba` (the area's picture), and the alpha a layer clipped to it clips to.
+void styled_8bit(const Ctx& ctx, const Layer& layer, const Box& area, Image& rgba, std::optional<Image>& prev_alpha) {
+    if (rgba.mode() != "RGBA") rgba = rgba.convert("RGBA");
+    const layer_styles::Mixing mixing = layer_styles::srgb_mixing();
+    layer_styles::Inputs in = style_inputs(ctx, layer);
+    const bool mono = ctx.page->spec.expression != "color";
+    std::string own_alpha(std::size_t(area.width()) * area.height(), '\0');
+    const std::string clip_alpha = layer.clip && prev_alpha ? prev_alpha->tobytes() : std::string();
+    for_style_tiles(ctx, layer, area, [&](const Box& wide, const Box& tile) {
+        bool values = false;
+        const std::optional<Image> picture = styled_picture_8bit(ctx, layer, wide, mono, values);
+        const std::vector<float> content = picture ? floats_of(*picture) : std::vector<float>(std::size_t(wide.width()) * wide.height() * 4, 0.0f);
+        const std::vector<float> own = alpha_part(content, 3, wide, tile);
+        std::vector<float> backdrop(std::size_t(tile.width()) * tile.height() * 4), weight(own.size(), 1.0f);
+        for (int y = 0; y < tile.height(); ++y) {
+            const auto* row = reinterpret_cast<const unsigned char*>(rgba.raw()->image[y + tile.y0 - area.y0]) + std::size_t(tile.x0 - area.x0) * 4;
+            for (int x = 0; x < tile.width() * 4; ++x) backdrop[std::size_t(y) * tile.width() * 4 + x] = row[x] / 255.0f;
+            if (!clip_alpha.empty())
+                for (int x = 0; x < tile.width(); ++x)
+                    weight[std::size_t(y) * tile.width() + x] =
+                        static_cast<unsigned char>(clip_alpha[std::size_t(y + tile.y0 - area.y0) * area.width() + x + tile.x0 - area.x0]) / 255.0f;
+        }
+        in.wide = wide;
+        in.area = tile;
+        layer_styles::composite(in, mixing, content, backdrop, clip_alpha.empty() ? nullptr : &weight);
+        for (int y = 0; y < tile.height(); ++y) {
+            auto* row = reinterpret_cast<unsigned char*>(rgba.raw()->image[y + tile.y0 - area.y0]) + std::size_t(tile.x0 - area.x0) * 4;
+            for (int x = 0; x < tile.width() * 4; ++x)
+                row[x] = static_cast<unsigned char>(std::lround(std::clamp(backdrop[std::size_t(y) * tile.width() * 4 + x], 0.0f, 1.0f) * 255.0f));
+            for (int x = 0; x < tile.width(); ++x)
+                own_alpha[std::size_t(y + tile.y0 - area.y0) * area.width() + x + tile.x0 - area.x0] =
+                    static_cast<char>(std::lround(std::clamp(own[std::size_t(y) * tile.width() + x], 0.0f, 1.0f) * 255.0f));
+        }
+    });
+    prev_alpha = Image::frombytes("L", size_of(area), own_alpha);
+}
+
+layer_styles::Mixing precise_mixing(const Page& page, const RgbSpace& space) {
+    layer_styles::Mixing mx;
+    mx.n = 3;
+    mx.clamp = false;  // (HDR kept, as the canvas keeps it)
+    mx.blend = [](std::string_view mode, const float* b, const float* s, float* out) {
+        const std::array<double, 3> r = blend_linear(mode, {b[0], b[1], b[2]}, {s[0], s[1], s[2]});
+        for (unsigned c = 0; c < 3; ++c) out[c] = static_cast<float>(r[c]);
+    };
+    mx.colour = [space](const std::array<double, 3>& rgb, float* out) {
+        std::array<double, 3> v = rgb;
+        if (!space.is_srgb()) space.from_srgb(v.data(), 1);
+        for (unsigned c = 0; c < 3; ++c) out[c] = static_cast<float>(space.decode(c, v[c]));
+    };
+    mx.pattern_target = patterns::Target::rgb(page);
+    mx.pattern_in = [space](float* v) {
+        for (unsigned c = 0; c < 3; ++c) v[c] = static_cast<float>(space.decode(c, v[c]));
+    };
+    mx.blend_if_values = [space](const float* p, float* out) {  // (on the page's encoded values, as Photoshop's 0..255)
+        float e[3];
+        for (unsigned c = 0; c < 3; ++c) e[c] = static_cast<float>(std::clamp(space.encode(c, p[c]), 0.0, 1.0) * 255.0);
+        out[0] = 0.299f * e[0] + 0.587f * e[1] + 0.114f * e[2];
+        for (unsigned c = 0; c < 3; ++c) out[c + 1] = e[c];
+    };
+    mx.blend_if_names = {"red", "green", "blue"};
+    return mx;
+}
+
+// A page in precise colour: the layer with its style over the canvas (its precise pixels and lines in its linear light, a
+// pattern fill's pattern in its values, any other layer's 8-bit picture brought in).
+void styled_precise(ColorCanvas& canvas, const Ctx& ctx, const Layer& layer, const Box& area) {
+    const RgbSpace& space = canvas.space();
+    const layer_styles::Mixing mixing = precise_mixing(*ctx.page, space);
+    layer_styles::Inputs in = style_inputs(ctx, layer);
+    const bool tint = layer.color && !layer.color->empty() && (ctx.mode != "print" || layer.color_prints);
+    const bool own_precise = (core::has_color_strokes(layer) || layer.color_raster) && !screened_here(ctx, layer);
+    const Json* pattern = pattern_fill_here(ctx, layer);
+    const bool pattern_precise = pattern != nullptr && ctx.page->spec.expression == "color";
+    for_style_tiles(ctx, layer, area, [&](const Box& wide, const Box& tile) {
+        ColorPicture picture{size_of(wide), {}};
+        if (own_precise || pattern_precise) {
+            const std::optional<Image> box_panel = clip_mask(*ctx.page, ctx.size, ctx.dpi, wide);
+            if (own_precise) {
+                picture = precise_with_effects(ctx, layer, wide, box_panel ? &*box_panel : nullptr, space);
+            } else {
+                const std::optional<patterns::Laid> laid = patterns::laid(ctx.episode, *pattern, patterns::Target::rgb(*ctx.page), ctx.dpi);
+                picture = laid ? patterns::linear(*laid, wide, space)
+                               : ColorPicture{size_of(wide), std::vector<std::array<double, 4>>(std::size_t(wide.width()) * wide.height(), {0, 0, 0, 0})};
+                if (box_panel && layer.panel_clip) {
+                    const std::string cut = box_panel->tobytes();
+                    for (std::size_t i = 0; i < picture.pixels.size() && i < cut.size(); ++i) picture.pixels[i][3] *= static_cast<unsigned char>(cut[i]) / 255.0;
+                }
+            }
+            if (tint && own_precise) {
+                const auto rgb = first3(*layer.color);
+                const auto at = [&](std::size_t k) { return static_cast<int>(std::clamp<std::int64_t>(rgb.size() > k ? rgb[k] : 0, 0, 255)); };
+                const auto colour = linear_colour(space, {at(0), at(1), at(2)});
+                for (auto& p : picture.pixels) p = {colour[0], colour[1], colour[2], p[3]};
+            }
+            if (const std::optional<Image> shown = mask_shown(ctx, layer, wide, Resample::Bilinear)) {
+                const std::string m = shown->tobytes();
+                for (std::size_t i = 0; i < picture.pixels.size() && i < m.size(); ++i) picture.pixels[i][3] *= static_cast<unsigned char>(m[i]) / 255.0;
+            }
+        } else {
+            bool values = false;
+            const std::optional<Image> drawn = styled_picture_8bit(ctx, layer, wide, ctx.page->spec.expression != "color", values);
+            picture = drawn ? color_picture(*drawn, space, values)
+                            : ColorPicture{size_of(wide), std::vector<std::array<double, 4>>(std::size_t(wide.width()) * wide.height(), {0, 0, 0, 0})};
+        }
+        std::vector<float> content(picture.pixels.size() * 4);
+        for (std::size_t i = 0; i < picture.pixels.size(); ++i)
+            for (unsigned c = 0; c < 4; ++c) content[i * 4 + c] = static_cast<float>(picture.pixels[i][c]);
+        const std::vector<float> own = alpha_part(content, 3, wide, tile);
+        in.wide = wide;
+        in.area = tile;
+        canvas.styled(shifted(tile, -area.x0, -area.y0), layer.clip, own, [&](std::vector<float>& pixels, const std::vector<float>& weight) {
+            layer_styles::composite(in, mixing, content, pixels, &weight);
+        });
+    });
+    canvas.styled_done();
+}
+
+layer_styles::Mixing ink_mixing(const core::PageColor& color) {
+    layer_styles::Mixing mx;
+    mx.n = color.planes();
+    mx.clamp = !(color.space == core::InkSpace::Gray && color.depth == 32);
+    const core::InkSpace space = color.space;
+    const unsigned n = mx.n;
+    mx.blend = [space, n](std::string_view mode, const float* b, const float* s, float* out) {
+        double below[core::kPlatesMax], above[core::kPlatesMax], mixed[core::kPlatesMax];
+        for (unsigned c = 0; c < n; ++c) {
+            below[c] = b[c];
+            above[c] = s[c];
+        }
+        ink_blend(space, n, mode, below, above, mixed);
+        for (unsigned c = 0; c < n; ++c) out[c] = static_cast<float>(mixed[c]);
+    };
+    mx.colour = [color](const std::array<double, 3>& rgb, float* out) {
+        const unsigned char c[3] = {static_cast<unsigned char>(std::lround(std::clamp(rgb[0], 0.0, 1.0) * 255.0)),
+                                    static_cast<unsigned char>(std::lround(std::clamp(rgb[1], 0.0, 1.0) * 255.0)),
+                                    static_cast<unsigned char>(std::lround(std::clamp(rgb[2], 0.0, 1.0) * 255.0))};
+        std::array<double, core::kPlatesMax> ink{};
+        ink::inks_of(color, c, nullptr, ink.data(), 1);
+        for (unsigned k = 0; k < color.planes(); ++k) out[k] = static_cast<float>(to_canvas(color.space, k, ink[k]));
+    };
+    mx.pattern_target = patterns::Target::inks(color);
+    if (color.space == core::InkSpace::Gray) {  // (Blend If on the grey's lightness; kept, not applied, on CMYK and Lab pages)
+        mx.blend_if_values = [](const float* p, float* out) { out[0] = std::clamp(p[0], 0.0f, 1.0f) * 255.0f; };
+    }
+    return mx;
+}
+
+// The picture of an ink paint layer over `box` as ink_layer makes it (its inks, its lines over them inside the box's
+// panels, its 境界効果).
+InkPicture ink_raster_picture(const Ctx& ctx, const Layer& layer, const Box& box, const Image* box_panel) {
+    const core::PageColor& color = *ctx.page->color;
+    const int margin = effect_margin(layer, ctx.dpi);
+    const Box wide = margin == 0 ? box : intersection(Box{box.x0 - margin, box.y0 - margin, box.x1 + margin, box.y1 + margin}, Box{0, 0, ctx.size.width, ctx.size.height});
+    std::optional<Image> wide_mask;
+    if (margin != 0 && box_panel != nullptr) wide_mask = clip_mask(*ctx.page, ctx.size, ctx.dpi, wide);
+    InkPicture picture = sample_ink_raster(*decoded_ink(layer.ink_raster), ctx.size, wide);
+    if (layer.stroke_count() > 0 || !layer.patches.empty() || shape_parts::any(layer)) {
+        const Image kept = ink_alpha_rgba(picture);
+        if (auto lines = layer_strokes(ctx, layer, wide, margin == 0 ? box_panel : (wide_mask ? &*wide_mask : nullptr), &kept, ctx.rough, true)) {
+            ink_over(picture, ink_picture(*lines, color));
+        }
+    }
+    ink_layer_effects(layer, picture, ctx.dpi, color);
+    if (margin != 0) picture = crop_picture(picture, shifted(box, -wide.x0, -wide.y0));
+    return picture;
+}
+
+// A page of inks: the layer with its style over the canvas (an ink paint layer's inks, a pattern fill's in the page's
+// values, any other layer's 8-bit picture as inks by the page's rules).
+void styled_ink(InkCanvas& canvas, const Ctx& ctx, const Layer& layer, const Box& area) {
+    const core::PageColor& color = *ctx.page->color;
+    const layer_styles::Mixing mixing = ink_mixing(color);
+    const unsigned n = mixing.n;
+    layer_styles::Inputs in = style_inputs(ctx, layer);
+    const bool tint = layer.color && !layer.color->empty() && (ctx.mode != "print" || layer.color_prints);
+    const Json* pattern = pattern_fill_here(ctx, layer);
+    for_style_tiles(ctx, layer, area, [&](const Box& wide, const Box& tile) {
+        InkPicture picture;
+        const std::optional<Image> box_panel = clip_mask(*ctx.page, ctx.size, ctx.dpi, wide);
+        if ((layer.ink_raster && !screened_here(ctx, layer)) || pattern != nullptr) {
+            if (layer.ink_raster) {
+                picture = ink_raster_picture(ctx, layer, wide, box_panel ? &*box_panel : nullptr);
+            } else {
+                const std::optional<patterns::Laid> laid = patterns::laid(ctx.episode, *pattern, patterns::Target::inks(color), ctx.dpi);
+                picture = laid ? patterns::inks(*laid, wide) : InkPicture{size_of(wide), n, std::vector<double>(std::size_t(wide.width()) * wide.height() * (n + 1), 0.0)};
+                if (box_panel && layer.panel_clip) {
+                    const std::string cut = box_panel->tobytes();
+                    for (std::size_t i = 0; i * (n + 1) < picture.values.size() && i < cut.size(); ++i)
+                        picture.values[i * (n + 1) + n] *= static_cast<unsigned char>(cut[i]) / 255.0;
+                }
+            }
+            if (tint && layer.ink_raster) {
+                const std::vector<std::int64_t> rgb = *layer.color;
+                const unsigned char c[3] = {static_cast<unsigned char>(std::clamp<std::int64_t>(rgb.size() > 0 ? rgb[0] : 0, 0, 255)),
+                                            static_cast<unsigned char>(std::clamp<std::int64_t>(rgb.size() > 1 ? rgb[1] : 0, 0, 255)),
+                                            static_cast<unsigned char>(std::clamp<std::int64_t>(rgb.size() > 2 ? rgb[2] : 0, 0, 255))};
+                std::array<double, core::kPlatesMax> ink{};
+                ink::inks_of(color, c, nullptr, ink.data(), 1);
+                for (std::size_t i = 0; i < picture.values.size() / (n + 1); ++i)
+                    for (unsigned k = 0; k < n; ++k) picture.values[i * (n + 1) + k] = to_canvas(color.space, k, ink[k]);
+            }
+            if (const std::optional<Image> shown = mask_shown(ctx, layer, wide, Resample::Bilinear)) {
+                const std::string m = shown->tobytes();
+                for (std::size_t i = 0; i * (n + 1) < picture.values.size() && i < m.size(); ++i)
+                    picture.values[i * (n + 1) + n] *= static_cast<unsigned char>(m[i]) / 255.0;
+            }
+        } else if (layer.ink_raster) {  // (screened: its greys as dots, in 8 bits, as ink_layer lays them)
+            Image dots = tones::screened(meant_rgba(ink_raster_picture(ctx, layer, wide, box_panel ? &*box_panel : nullptr), color), *layer.screen, ctx.dpi,
+                                         ctx.size, wide);
+            dots = masked(ctx, layer, std::move(dots), wide);
+            if (tint) dots = tinted(dots, *layer.color);
+            picture = ink_picture(dots.mode() == "RGBA" ? dots : dots.convert("RGBA"), color);
+        } else {
+            bool values = false;
+            const std::optional<Image> drawn = styled_picture_8bit(ctx, layer, wide, false, values);
+            picture = drawn ? ink_picture(*drawn, color) : InkPicture{size_of(wide), n, std::vector<double>(std::size_t(wide.width()) * wide.height() * (n + 1), 0.0)};
+        }
+        std::vector<float> content(picture.values.begin(), picture.values.end());
+        const std::vector<float> own = alpha_part(content, n, wide, tile);
+        in.wide = wide;
+        in.area = tile;
+        canvas.styled(shifted(tile, -area.x0, -area.y0), layer.clip, own, [&](std::vector<float>& values, const std::vector<float>& weight) {
+            layer_styles::composite(in, mixing, content, values, &weight);
+        });
+    });
+    canvas.styled_done();
+}
+
 void ink_layer(InkCanvas& canvas, const Ctx& ctx, const Layer& layer, const Box& area, const Image* panel) {
     const bool print = ctx.mode == "print";
     if (is_tone(layer)) {  // (tones sit in the layer order as drawn over the page; a layer above clips to nothing)
@@ -1630,6 +2045,10 @@ void ink_layer(InkCanvas& canvas, const Ctx& ctx, const Layer& layer, const Box&
     }
     if (!canvas.supports_blend(layer.blend)) {
         skip_unported(ctx, "ink_blend:" + layer.blend);
+        return;
+    }
+    if (styled_here(layer)) {  // (PC4 E6, layer-styles@1: with its style)
+        styled_ink(canvas, ctx, layer, area);
         return;
     }
     if (layer.kind == LayerKind::Smart && smart_ink_layer(canvas, ctx, layer, area)) return;  // (smart-objects@1)
@@ -1935,6 +2354,15 @@ RenderResult render(const Page& page_in, int dpi, const RenderOptions& options, 
         if (!layer.visible) continue;
         if (print && !layer.exportable) continue;
         if (guide_role(layer.role) && print) continue;
+        if (styled_here(layer)) {  // (PC4 E6, layer-styles@1: the layer with its style, render/layer_styles)
+            if (precision) {
+                if (!ColorCanvas::supports_blend(layer.blend)) throw NotYetPorted("high_precision_blend:" + layer.blend);
+                styled_precise(*precision, ctx, layer, area);
+            } else {
+                styled_8bit(ctx, layer, area, rgba, prev_alpha);
+            }
+            continue;
+        }
         if (precision && layer.kind == LayerKind::Smart && smart_precise_layer(*precision, ctx, layer, area)) continue;  // (smart-objects@1)
         if (precision && pattern_precise_layer(*precision, ctx, layer, area, panel)) continue;                          // (patterns@1, PC4 E3)
         if (precision && (core::has_color_strokes(layer) || layer.color_raster)) {
@@ -2617,6 +3045,52 @@ RenderResult render_page(const core::Page& page, int dpi, const RenderOptions& o
     in_table(out, page);
     channels::finish(out, page, dpi, options);
     if (lent_inks) out.inks.reset();
+    return out;
+}
+
+namespace {
+
+Ctx merge_ctx(const core::Page& page, int dpi, const core::Document* episode, std::vector<std::string>& omitted) {
+    Ctx ctx;
+    ctx.page = &page;
+    ctx.episode = episode;
+    ctx.dpi = dpi;
+    ctx.mode = "proof";
+    ctx.omitted = &omitted;
+    ctx.finish = false;
+    ctx.size = Size{mm_to_px(page.spec.width_mm.value(), dpi), mm_to_px(page.spec.height_mm.value(), dpi)};
+    return ctx;
+}
+
+}  // namespace
+
+void blend_styled_8bit(const core::Page& page, const core::Layer& layer, int dpi, const core::Document* episode, Image& out, std::optional<Image>& prev) {
+    std::vector<std::string> omitted;
+    const Ctx ctx = merge_ctx(page, dpi, episode, omitted);
+    styled_8bit(ctx, layer, Box{0, 0, ctx.size.width, ctx.size.height}, out, prev);
+}
+
+void blend_styled_precise(ColorCanvas& canvas, const core::Page& page, const core::Layer& layer, int dpi, const core::Document* episode) {
+    std::vector<std::string> omitted;
+    const Ctx ctx = merge_ctx(page, dpi, episode, omitted);
+    styled_precise(canvas, ctx, layer, Box{0, 0, ctx.size.width, ctx.size.height});
+}
+
+Alone composite_alone(const core::Page& page, std::vector<core::Layer> layers, int dpi, const core::Document* episode) {
+    Alone out;
+    if (page.color) {
+        out.inks = composite_ink_layers(page, layers, dpi, episode, false);
+        return out;
+    }
+    core::Page alone = page;
+    alone.layers = std::move(layers);
+    alone.extra = Json::object();  // (no animation's frames: the layers as they are)
+    RenderOptions options;
+    options.mode = "proof";
+    options.precise = true;
+    const RenderResult drawn = render_contents(alone, dpi, options, episode);
+    out.image = drawn.image.mode() == "RGBA" ? drawn.image : drawn.image.convert("RGBA");
+    out.precise = drawn.precise;
     return out;
 }
 

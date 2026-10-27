@@ -24,6 +24,7 @@
 #include "core/strokes.hpp"
 #include "core/version.hpp"
 #include "core/brush_dabs.hpp"
+#include "core/layer_styles.hpp"
 #include "core/patterns.hpp"
 #include "storage/fsutil.hpp"
 #include "storage/reader.hpp"
@@ -192,6 +193,7 @@ Json layer_json(const core::Layer& layer, AssetStore& store, const std::string& 
     if (layer.link) out["link"] = *layer.link;
     if (layer.lock_position) out["lock_position"] = true;
     if (layer.native_psd) out["native_psd"] = core::to_json(*layer.native_psd);  // (psd-keep@1, PC4)
+    if (layer.style) out["style"] = *layer.style;  // (layer-styles@1, PC4 E6)
     if (placed) {
         out["asset"] = opt_string(layer.asset);
         out["frame_id"] = opt_string(layer.frame_id);
@@ -544,8 +546,11 @@ Json project_payload_v4(const core::Document& doc, AssetStore& store) {
     }
     core::validate_patterns(doc);
     for (const core::Pattern& pattern : doc.patterns) store.put_known(pattern.asset, *doc.pattern_files.at(pattern.asset), core::pattern_suffix(pattern));
+    // PC4 E6: layer-styles@1 (the layers' styles and the global light), named while the book uses it
+    core::validate_layer_styles(doc);
     const std::pair<std::string_view, bool> pc4[] = {{core::kBrushesFeature, core::uses_brushes(doc)},
-                                                     {core::kPatternsFeature, core::uses_patterns(doc)}};
+                                                     {core::kPatternsFeature, core::uses_patterns(doc)},
+                                                     {core::kLayerStylesFeature, core::uses_layer_styles(doc)}};
     for (const auto& [feature, used] : pc4) {
         std::erase(features, std::string(feature));
         if (used) features.emplace_back(feature);
@@ -584,6 +589,7 @@ Json project_payload_v4(const core::Document& doc, AssetStore& store) {
         for (const core::Pattern& pattern : doc.patterns) patterns.push_back(core::pattern_to_json(pattern));
         out["patterns"] = std::move(patterns);
     }
+    if (doc.global_light) out["global_light"] = core::global_light_json(*doc.global_light);  // (layer-styles@1, PC4 E6)
     out["spec"] = spec_to_json(doc.spec);
     if (Json color = color_json(store, doc.color, doc.rgb); !color.is_null() || doc.text_gamma) {
         // (the book's text_gamma, last, under its colour model: a default RGB one written for it)

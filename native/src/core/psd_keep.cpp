@@ -248,6 +248,8 @@ bool psd_effect_key(std::string_view key) { return one_of(key, {"lfx2", "lfxs", 
 
 bool psd_effects_kept(const Layer& layer) {
     if (!layer.native_psd || layer.kind == LayerKind::Folder) return false;  // (a folder's are not written back)
+    // (PC4 E6: effects read into the layer's style are drawn by this build)
+    if (layer.style && layer.style->is_object() && layer.style->contains("effects") && !(*layer.style)["effects"].empty()) return false;
     return std::any_of(layer.native_psd->blocks.begin(), layer.native_psd->blocks.end(), [](const auto& block) { return psd_effect_key(block.first); });
 }
 

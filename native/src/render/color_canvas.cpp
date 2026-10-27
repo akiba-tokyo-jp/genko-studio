@@ -603,6 +603,40 @@ ColorPicture ColorCanvas::picture() const {
     for (const Pixel& p : impl_->pixels) out.pixels.push_back({p[0], p[1], p[2], p[3]});
     return out;
 }
+void ColorCanvas::styled(const Box& part, bool clip, const std::vector<float>& own,
+                         const std::function<void(std::vector<float>&, const std::vector<float>&)>& run) {
+    const Size s = impl_->size;
+    if (part.x0 < 0 || part.y0 < 0 || part.x1 > s.width || part.y1 > s.height || part.width() <= 0 || part.height() <= 0)
+        throw core::Error("value", "color canvas part does not match");
+    const std::size_t count = std::size_t(part.width()) * part.height();
+    if (own.size() != count) throw core::Error("value", "color canvas styled layer does not match");
+    std::vector<float> px(count * 4), weight(count, 1.0f);
+    for (int y = 0; y < part.height(); ++y) {
+        for (int x = 0; x < part.width(); ++x) {
+            const std::size_t i = std::size_t(y) * part.width() + x;
+            const Pixel& p = impl_->pixels[std::size_t(y + part.y0) * s.width + x + part.x0];
+            for (unsigned c = 0; c < 4; ++c) px[i * 4 + c] = static_cast<float>(p[c]);
+            if (clip && impl_->previous) weight[i] = static_cast<float>(p[4]);
+        }
+    }
+    run(px, weight);
+    for (int y = 0; y < part.height(); ++y) {
+        for (int x = 0; x < part.width(); ++x) {
+            const std::size_t i = std::size_t(y) * part.width() + x;
+            Pixel& p = impl_->pixels[std::size_t(y + part.y0) * s.width + x + part.x0];
+            for (unsigned c = 0; c < 4; ++c) {
+                if (!std::isfinite(px[i * 4 + c])) throw core::Error("value", "high-precision composite exceeds finite working range");
+                p[c] = px[i * 4 + c];
+            }
+            p[4] = own[i];
+        }
+    }
+}
+void ColorCanvas::styled_done() { impl_->previous = true; }
+std::array<double, 3> blend_linear(std::string_view mode, const std::array<double, 3>& below, const std::array<double, 3>& above) {
+    if (mode.empty() || mode == "normal") return above;
+    return blend_rgb(mode, below, above);
+}
 core::AdjustPtr correction_of(const core::Layer& layer, const core::Page& page, const core::Document* doc) {
     if (!layer.adjust || !layer.adjust->is_object()) return nullptr;
     // (another kind: as apply_filter's "unknown filter", the layer does nothing; a plugin and the filters that move shapes

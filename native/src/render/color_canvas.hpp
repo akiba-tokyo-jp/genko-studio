@@ -101,6 +101,14 @@ public:
     std::string color_raster(std::string_view precision) const;
     // PC2d: the pixels as a layer's picture (what is drawn on a canvas of a layer's own).
     ColorPicture picture() const;
+    // PC4 E6 (layer-styles@1, render/layer_styles): a layer drawn with its style over `part` of the canvas — `run` gets its
+    // pixels there (straight linear RGB and the alpha, 4 a pixel) and what the layer's opacity is multiplied by at each
+    // (the alpha of the layer before when `clip`, else 1), and leaves the result in the pixels; `own` (the part's size):
+    // the layer's own alpha, what a layer clipped to it clips to.
+    void styled(const Box& part, bool clip, const std::vector<float>& own,
+                const std::function<void(std::vector<float>& pixels, const std::vector<float>& weight)>& run);
+    // (after the last part) the next layer clips to the styled one
+    void styled_done();
 private:
     struct Impl;
     std::unique_ptr<Impl> impl_;
@@ -119,6 +127,8 @@ Image picture_rgba(const ColorPicture& picture, const RgbSpace& space);
 Image picture_alpha(const ColorPicture& picture);
 // PC2d: an sRGB colour (0..255) as the space's linear light.
 std::array<double, 3> linear_colour(const RgbSpace& space, const std::array<int, 3>& rgb);
+// PC4 E6: PhotoCraft's formula of a blend mode (color/blend.rs, the precise canvas's: B(below, above)) on three values.
+std::array<double, 3> blend_linear(std::string_view mode, const std::array<double, 3>& below, const std::array<double, 3>& above);
 // An 8-bit RGBA picture's sRGB colours as the space's values (its alpha kept; sRGB: the picture itself).
 Image srgb_into(const Image& rgba, const RgbSpace& space);
 // And back: an 8-bit RGBA picture of the space's values as the sRGB the screen shows (relative colorimetric, black point

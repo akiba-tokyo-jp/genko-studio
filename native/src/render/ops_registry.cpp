@@ -32,6 +32,7 @@
 #include "render/ops_pc3.hpp"
 #include "render/ops_formats.hpp"
 #include "render/ops_paint_tools.hpp"
+#include "render/ops_layer_styles.hpp"
 
 namespace genko::render {
 
@@ -400,6 +401,8 @@ void register_render_ops(core::OpRegistry& registry) {
     // PC4 節 E (描く道具・パターン): the new ops, frames until their groups write them (render/ops_paint_tools.hpp)
     register_paint_tool_ops(registry);
     register_pattern_ops(registry);
+    // PC4 E6 (layer-styles@1: a layer's style and the book's global light, render/ops_layer_styles)
+    register_layer_style_ops(registry);
 }
 
 const core::OpRegistry& ops_registry() {

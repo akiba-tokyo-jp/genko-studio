@@ -1,5 +1,6 @@
 #include "render/raster_ops.hpp"
 
+#include "core/layer_styles.hpp"
 #include "render/dab_ops.hpp"
 #include "render/ink.hpp"
 #include "render/ink_edit.hpp"
@@ -1075,6 +1076,11 @@ Image composite_layers(const Document& doc, const Page& page, const std::vector<
             out = detail::adjusted(ctx, std::move(out), layer, layer.clip && prev ? &*prev : nullptr, Box{0, 0, size.width, size.height});
             continue;
         }
+        if (core::has_layer_style(layer) && core::takes_layer_style(layer)) {  // (PC4 E6: drawn with its style, merged into pixels)
+            if (out.mode() != "RGBA") out = out.convert("RGBA");
+            blend_styled_8bit(page, layer, dpi, &doc, out, prev);
+            continue;
+        }
         const Image picture = layer_image(page, layer, dpi, &doc);
         const double opacity = layer.opacity;
         const Image* clip = layer.clip && prev ? &*prev : nullptr;
@@ -1212,6 +1218,11 @@ std::pair<std::string, bool> composite_color_layers(const Document& doc, const P
                 throw NotYetPorted("high-precision merge adjustment depends on external background");
             out.expose(exposure, layer.opacity, layer.clip, mask ? &*mask : nullptr, blend);
             floating = true; // An adjustment can produce HDR even from a u16 input.
+        } else if (core::has_layer_style(layer) && core::takes_layer_style(layer) && layer.kind != LayerKind::Tone && layer.role != LayerRole::Tone) {
+            // (PC4 E6: drawn with its style, merged into pixels)
+            participate(layer);
+            floating = true;
+            blend_styled_precise(out, page, layer, dpi, &doc);
         } else if (precise_layer_styled(layer)) {
             // (PC2d: with what is drawn on it — lines on its pixels, pictures, effects, its colour — as the page draws it)
             participate(layer);
@@ -1318,6 +1329,7 @@ void merge_layers(OpContext& c) {
         into_pixels(page, page.layers[layers.front()], picture);
     }
     Layer& target = page.layers[layers.front()];
+    target.style.reset();  // (PC4 E6: the styles are drawn into the merged pixels)
     if (core::truthy_at(op, "name")) target.title = core::py_str(op["name"]);
     after_merge(page, layers);
 }
@@ -1369,6 +1381,7 @@ void merge_visible(OpContext& c) {
     }
     if (!copy) check_mergeable(page, removed);
     const auto finish = [&] {
+        page.layers[shown.front()].style.reset();  // (PC4 E6: the styles are drawn into the merged pixels)
         if (flatten) {
             Layer& target=page.layers[shown.front()];target.lock_alpha=true;
             target.title=core::truthy_at(op,"name")?core::py_str(op["name"]):std::string("背景（フラット化）");
@@ -1427,6 +1440,7 @@ void merge_visible(OpContext& c) {
         return;
     }
     into_pixels(page, page.layers[shown.front()], picture);
+    page.layers[shown.front()].style.reset();  // (PC4 E6: the styles are drawn into the merged pixels)
     after_merge(page, shown);
 }
 
@@ -1574,9 +1588,36 @@ void merge_down(OpContext& c) {
         }
         if (item.locked) throw OpError("the layer is locked");
     }
+    // (PC4 E6, layer-styles@1: a layer with a style is merged with its style drawn in — the merged layer has none)
+    const bool styled = core::has_layer_style(page.layers[ui]) || core::has_layer_style(page.layers[li]);
     if (has_precision(page, {li, ui})) {
         auto bytes = composite_color_layers(doc, page, {li, ui});
         into_color_pixels(page.layers[li], std::move(bytes));
+        page.layers[li].style.reset();
+        page.layers.erase(page.layers.begin() + static_cast<std::ptrdiff_t>(ui));
+        return;
+    }
+    if (styled) {
+        Page alone = page;
+        Layer ground = page.layers[li];  // (the lower as the ground: its opacity, blend and clipping stay the layer's)
+        ground.opacity = 1.0;
+        ground.blend = "normal";
+        ground.clip = false;
+        alone.layers = {ground, page.layers[ui]};
+        const Image merged = composite_layers(doc, alone, {0, 1}, raster::working_dpi(page));
+        Layer& into = page.layers[li];
+        into.strokes = core::empty_strokes();
+        into.patches.clear();
+        into.shapes = core::vector::empty_shapes();
+        into.mask.reset();
+        into.vector_mask.reset();
+        into.kind = LayerKind::Raster;
+        into.fill.reset();
+        into.fill_rgb.reset();
+        into.effect.reset();  // (its 境界効果 drawn in, as layer_image draws them)
+        into.style.reset();
+        raster::save_raster(page, into, merged);
+        page.layers[li].native_psd.reset();
         page.layers.erase(page.layers.begin() + static_cast<std::ptrdiff_t>(ui));
         return;
     }

@@ -568,7 +568,7 @@ bool writable(const vec::ShapePart& part) {
 }
 
 Plan plan(const core::Layer& layer) {
-    if (layer.clip || (layer.screen && core::py_truthy(*layer.screen)) || (layer.color && !layer.color->empty()) ||
+    if (layer.clip || layer.style || (layer.screen && core::py_truthy(*layer.screen)) || (layer.color && !layer.color->empty()) ||
         (layer.effect && core::py_truthy(*layer.effect))) {
         return Plan::Pixels;
     }
@@ -605,6 +605,10 @@ std::string blocks(const vec::ShapePart& given, const Canvas& canvas) {
 }
 
 std::string pattern_block(const Json& pattern, const Canvas& canvas) { return pattern_descriptor(pattern, canvas).versioned("null"); }
+
+d::Writer pattern_items(const Json& pattern, const Canvas& canvas) { return pattern_descriptor(pattern, canvas); }
+
+std::optional<Json> pattern_of_items(const d::Object& effect, const Placement& placement) { return pattern_read(effect, placement); }
 
 std::optional<Json> pattern_fill_of(std::string_view payload, const Placement& at) {
     const std::optional<d::Object> o = versioned_at(payload, 0);

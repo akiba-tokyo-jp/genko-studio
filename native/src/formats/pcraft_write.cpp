@@ -783,6 +783,8 @@ std::string title_of(const core::Layer& layer) { return !layer.title.empty() ? l
 // A layer of the page (the picture page_layers drew of it, when it did) as an upstream layer.
 std::optional<Json> layer_of(Ctx& ctx, const core::Layer& layer, const render::PageLayer* shown, std::set<std::string>& patterns) {
     const std::string name = title_of(layer);
+    // (layer-styles@1, PC4 E6: a style is not mapped to PhotoCraft's effects yet — its layer written without it, said)
+    if (layer.style) ctx.note("レイヤースタイルは .pcraft に書いていません（「" + name + "」）");
     if (layer.kind == core::LayerKind::Adjust) {
         if (!layer.adjust) return std::nullopt;
         std::optional<Json> adjustment = adjustment_of(ctx, *layer.adjust, name);

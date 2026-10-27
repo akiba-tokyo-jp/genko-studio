@@ -8,6 +8,7 @@
 
 #include "core/model.hpp"
 #include "core/vector.hpp"
+#include "render/psd_descriptor.hpp"
 
 // pen-shapes@1 in a PSD (PC3 C-b, the user's decisions 3 and 7: always read and written; SPEC.md COLOR-07「PSD のシェイプ」):
 // a pen layer's shape part as Photoshop's shape layer — PhotoCraft v0.2.0's io/src/vector_map.rs (vscg, vstk, vogk) and
@@ -73,6 +74,10 @@ std::optional<core::vector::ShapePart> part_of(const Blocks& blocks, const Place
 // it names no pattern of the file.
 std::string pattern_block(const core::Json& pattern, const Canvas& canvas);
 std::optional<core::Json> pattern_fill_of(std::string_view payload, const Placement& placement);
+// PC4 E6 (layer-styles@1): the same items (Scl, Ptrn, Angl, Algn, phase) in an effect's descriptor — a pattern overlay's, a
+// pattern stroke's, a bevel's texture — and read back from one.
+psd::descriptor::Writer pattern_items(const core::Json& pattern, const Canvas& canvas);
+std::optional<core::Json> pattern_of_items(const psd::descriptor::Object& effect, const Placement& placement);
 
 // What a PSD of the book says of its shape parts (the export's notes): layers written as pixels, gradients Photoshop's
 // cannot be (an ellipse's, a repeated one), a rule of even and odd baked.

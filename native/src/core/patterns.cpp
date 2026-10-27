@@ -10,6 +10,7 @@
 #include "core/color_raster.hpp"
 #include "core/error.hpp"
 #include "core/ink.hpp"
+#include "core/layer_styles.hpp"
 #include "core/pynum.hpp"
 #include "core/pyops.hpp"
 #include "core/ruby.hpp"
@@ -149,6 +150,8 @@ void each_pattern_fill_on(const Page& page, const std::function<void(const Json&
         if (layer.kind == LayerKind::Fill && layer.fill) {
             if (const Json* fill = pattern_of_fill(*layer.fill)) each(*fill, "the fill layer " + layer.id);
         }
+        // (PC4 E6, layer-styles@1: a style's pattern overlays, pattern strokes and bevel textures)
+        if (layer.style) each_style_pattern(*layer.style, each, "the style of the layer " + layer.id);
         if (!layer.shapes) continue;
         for (const vector::ShapePart& part : layer.shapes->items) {
             if (const Json* fill = pattern_of_fill(part.fill)) each(*fill, "a shape part of the layer " + layer.id);
@@ -300,6 +303,7 @@ bool repoint_patterns(Page& page, const std::map<std::string, std::string>& ids)
     bool any = false;
     for (Layer& layer : page.layers) {
         if (layer.kind == LayerKind::Fill && layer.fill) any = repoint_fill(*layer.fill, ids) || any;
+        if (layer.style) any = repoint_style_patterns(*layer.style, ids) || any;  // (PC4 E6, layer-styles@1)
         if (!layer.shapes || layer.shapes->items.empty()) continue;
         std::vector<vector::ShapePart> parts = layer.shapes->items;
         bool changed = false;

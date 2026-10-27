@@ -92,6 +92,7 @@ bool same_layer_look(const core::Layer& a, const core::Layer& b) {
            a.color == b.color && a.fill == b.fill && a.adjust == b.adjust && a.effect == b.effect && a.color_prints == b.color_prints &&
            a.screen == b.screen && a.asset == b.asset && a.region.has_value() == b.region.has_value() && a.angle == b.angle &&
            a.smart == b.smart &&  // (smart-objects@1: its matrix and settings)
+           a.style == b.style &&  // (layer-styles@1, PC4 E6: its style)
            a.shapes == b.shapes && a.vector_mask == b.vector_mask;  // (pen-shapes@1: its shape parts, a list made anew when changed; vector@1)
 }
 
@@ -141,7 +142,8 @@ bool same_story(const core::Document& a, const core::Document& b, const core::Nu
 // font_path), the nombre's settings, the side the book starts on (where the nombre goes) and the gamma its letters are
 // mixed in (set_text_gamma).
 bool same_book_look(const core::Document& a, const core::Document& b) {
-    return a.font_path == b.font_path && a.nombre == b.nombre && a.start_side == b.start_side && a.text_gamma == b.text_gamma;
+    return a.font_path == b.font_path && a.nombre == b.nombre && a.start_side == b.start_side && a.text_gamma == b.text_gamma &&
+           a.global_light == b.global_light;  // (layer-styles@1, PC4 E6: 包括光源)
 }
 
 // How many covers come before the page (by number): the nombre counts the pages from the first that is not one
@@ -405,7 +407,8 @@ void PageRenderer::show(DocPtr doc, std::size_t index) {
                     break;
                 }
                 if (a.strokes == b.strokes) continue;
-                if (b.effect && core::py_truthy(*b.effect)) {  // (border effects reach beyond a line's own box)
+                // (border effects and a layer style reach beyond a line's own box — a style's gradient follows the layer's box)
+                if ((b.effect && core::py_truthy(*b.effect)) || b.style) {
                     whole = true;
                     break;
                 }
