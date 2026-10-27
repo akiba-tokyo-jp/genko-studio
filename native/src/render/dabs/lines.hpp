@@ -1,6 +1,7 @@
 #pragma once
 
 #include <array>
+#include <functional>
 #include <map>
 #include <memory>
 #include <optional>
@@ -34,6 +35,12 @@ bool keep_picture(const std::string& ref, core::Bytes png);
 void keep_pictures(const std::map<std::string, core::Bytes>& pictures);
 core::Bytes picture(const std::string& ref);
 void clear_pictures();
+// (PC4 E2) Where a picture this process does not hold yet is looked for when it is asked for (the window's: the person's
+// brush library, render/brush_presets use_library_pictures) — read then, only the one asked, kept when its bytes hash to
+// its ref; none: nowhere. The ops never look there (a book keeps its own pictures).
+void set_picture_source(std::function<core::Bytes(const std::string& ref)> source);
+// Whether a picture is held now (without looking for it).
+bool holds_picture(const std::string& ref);
 
 // What a line gives its dab brush beyond its points: the pen's inputs (brushes@1, one per point; lists that do not fit
 // the points are not used, as the writer does not write them), the flow the window drew it with, and the colours of the

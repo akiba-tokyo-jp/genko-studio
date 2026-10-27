@@ -51,6 +51,7 @@
 #include "app/material_tabs.hpp"
 #include "app/subview.hpp"
 #include "app/main_window.hpp"
+#include "app/tool_presets_panel.hpp"
 #include "app/studio_widgets.hpp"
 #include "app/navigator.hpp"
 #include "app/pages_panel.hpp"
@@ -477,6 +478,7 @@ void MainWindow::build_actions() {
     build_paint_tool_actions();  // (PC4 E5: the brushes that change pixels — ぼかし・シャープ・指先・覆い焼き・焼き込み・スポンジ・混合ブラシ・背景消しゴム・色の置き換え: paint_tools.cpp)
     build_shape_actions();      // (pen-shapes@1, PC3 C-b: the shape tools, シェイプを結合…: main_window_shapes.cpp)
     build_pattern_actions();    // (PC4 E3: パターンを定義…, パターンのレイヤー…, パターンプレビュー: main_window_patterns.cpp)
+    build_brush_preset_actions();  // (PC4 E2: ブラシを定義…, プリセット ▸: main_window_brush_presets.cpp)
     build_align_actions();      // (PC3 C-d: 重ね順・整列・分布・リンク・ロック, スナップ (with 定規's グリッドにスナップ), the move tool's: main_window_align.cpp)
     build_file_actions();       // (PC4 F-0: 節 F's new commands of ファイル, frames until F-b and F-c: main_window_file.cpp)
     build_filter_actions();     // (PC4 節 D: フィルター's commands, 前回のフィルター: filter_menu.cpp)
@@ -742,6 +744,7 @@ void MainWindow::build_menus() {
     build_path_menus(file, view, tools, layers);  // (PC3 C-a: the paths' commands — ページ → 台詞's too —, app/main_window_paths.cpp)
     build_shape_menus(edit, view, tools, layers);  // (PC3 C-b: the shape tools and the shape parts' commands, app/main_window_shapes.cpp)
     build_pattern_menus(edit, view);  // (PC4 E3: パターンを定義…, パターンプレビュー: app/main_window_patterns.cpp)
+    build_brush_preset_menus(edit);  // (PC4 E2: ブラシを定義…, プリセット ▸: app/main_window_brush_presets.cpp)
     pages->addAction(action("act_book_preview"));
     pages->addAction(action("act_checks"));
     pages->addSeparator();
@@ -941,6 +944,8 @@ void MainWindow::choose_tool(const QString& tool) {
     // (PC4 E4 after E3's merge: the 塗りつぶしツール's パターン as the book and the library hold them now)
     if (tool == QLatin1String("fill") || tool == QLatin1String("lassofill")) refresh_fill_pattern();
     panel_for_tool(becomes);  // (the lines for the text tool, the layers for the drawing tools: main_window_lines.cpp)
+    // (PC4 E2: ツールプリセット's 現在のツールのみ follows the tool in hand)
+    if (tool_presets_panel_ != nullptr && tool_presets_dock_->isVisible() && tool_presets_panel_->current_only->isChecked()) tool_presets_panel_->refresh();
     pen_changed();
 }
 
@@ -1050,6 +1055,7 @@ void MainWindow::on_stroke(const StrokeInput& stroke) {
         op["blend"] = pen_.blend;
     }
     if (render::brushes::is_dab(op.value("kind", std::string()))) {
+        add_background(op);  // (PC4 E2, review P2-4: the 背景色 a brush's colour moves to, with the line)
         const std::size_t n = stroke.points.size();
         if (stroke.tilt.size() == 2 * n && std::any_of(stroke.tilt.begin(), stroke.tilt.end(), [](double v) { return std::abs(v) > 0.05; })) {
             Json tilt = Json::array();
@@ -1080,36 +1086,15 @@ void MainWindow::on_stroke(const StrokeInput& stroke) {
     }
     Json ops = Json::array({op});
     const std::string kind = op.value("kind", std::string());
+    // the book keeps the brush's settings, so the line looks the same on any computer (PC4 E2: a dab brush's pictures with
+    // them, a built-in dab brush's under its key: own_brush_op)
     if (kind.starts_with("my_") && !book().brush_custom.contains(kind)) {
-        // the book keeps the brush's settings, so the line looks the same on any computer
-        render::brushes::Brush own = render::brushes::brush(kind);
-        if (own.key != kind) {  // (not known: from the library again, never the G pen's settings under its name)
-            try {
-                render::brushes::register_brushes(render::brushes::load_own_brushes(config_dir()));
-            } catch (const std::exception&) {
-            }
-            own = render::brushes::brush(kind);
-        }
-        if (own.key != kind) {
-            flash(QStringLiteral("このブラシ（%1）が見つからないため描けませんでした。一覧から選び直してください").arg(QString::fromStdString(kind)), 5000, true);
+        Json before = Json::array();
+        if (!own_brush_op(kind, before, true)) {
             canvas_->stroke_dropped();
             return;
         }
-        Json define{{"op", "define_brush"}, {"key", kind}};
-        Json settings_of = core::brush_to_dict(own);
-        if (own.paper && !book().papers.contains(own.paper->asset)) {
-            try {
-                settings_of = render::brushes::with_paper_picture(settings_of);  // (the book keeps its paper's picture)
-            } catch (const std::exception&) {
-                flash(QStringLiteral("このブラシ（%1）の紙質の画像が見つからないため描けませんでした。ブラシの詳細で紙質の画像を読み込み直してください")
-                          .arg(QString::fromStdString(own.label)),
-                      5000, true);
-                canvas_->stroke_dropped();
-                return;
-            }
-        }
-        for (const auto& [key, value] : settings_of.items()) define[key] = value;
-        ops.insert(ops.begin(), define);
+        for (auto it = before.rbegin(); it != before.rend(); ++it) ops.insert(ops.begin(), *it);
     }
     if (rulers) ops.back()["snap_ruler"] = true;
     if (apply_ops(ops, {stroke.id})) {

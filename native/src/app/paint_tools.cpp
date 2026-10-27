@@ -27,9 +27,12 @@
 
 #include "app/ask.hpp"
 #include "app/canvas.hpp"
+#include "app/config.hpp"
 #include "app/colours.hpp"
 #include "app/fields.hpp"
 #include "app/main_window.hpp"
+#include "render/brush_presets.hpp"
+#include "render/brushes.hpp"
 #include "app/theme.hpp"
 #include "app/tool_settings.hpp"
 #include "core/channels.hpp"
@@ -222,6 +225,13 @@ void MainWindow::build_paint_tool_pages(ToolSettings* ts) {
     form->setContentsMargins(0, 0, 0, 0);
     form->setRowWrapPolicy(QFormLayout::WrapLongRows);
     form->addRow(QStringLiteral("直径"), slider_for(size, true));
+    // (PC4 E2, E5's promise: a dab brush of the library — its tip, shape, scatter… — instead of the round one)
+    pixel_brush_ = new QComboBox;
+    pixel_brush_->setObjectName(QStringLiteral("pixel_brush"));
+    pixel_brush_->setToolTip(QStringLiteral("ブラシ: 円（下の硬さ・間隔で）か、ライブラリのダブのブラシ（その先端・シェイプ・散布・伝達で。硬さ・間隔はそのブラシのもの）"));
+    connect(pixel_brush_, &QComboBox::activated, this, [this](int) { pixel_tool_settings.brush = pixel_brush_->currentData().toString().toStdString(); });
+    fill_pixel_brushes();
+    form->addRow(QStringLiteral("ブラシ"), pixel_brush_);
     form->addRow(QStringLiteral("硬さ"), hardness);
     form->addRow(QStringLiteral("間隔"), spacing);
     form->addRow(QStringLiteral("強さ"), strength);
@@ -340,6 +350,19 @@ bool MainWindow::pixel_tool_stroke(const StrokeInput& stroke, const core::Page& 
     const std::string op_name = tool->op;
     Json op{{"op", op_name}, {"page", page.index.json()}, {"layer_id", layer.id}, {"points", points},
             {"width_mm", s.size_mm}, {"hardness", s.hardness}, {"spacing", s.spacing}};
+    // (PC4 E2: a dab brush of the library — the book keeps it first, under the key it takes for it —, its hardness and
+    // spacing its own; the stroke's id its jitter's seed, so the journal draws it again the same)
+    Json before = Json::array();
+    if (!s.brush.empty()) {
+        const std::string kind = book_key_for(s.brush);
+        if (render::brushes::brush(kind).key == kind || render::brush_presets::builtin_dab_of(kind) != nullptr) {
+            if (!own_brush_op(kind, before)) return true;
+            op["brush"] = kind;
+            op["seed"] = stroke.id;
+            op.erase("hardness");
+            op.erase("spacing");
+        }
+    }
     if (on_mask) op["layer_mask"] = true;
     if (const auto area = selection_area()) op["area"] = *area;
     const Rgb fore = colours_ != nullptr ? colours_->rgb() : Rgb{20, 20, 20};
@@ -396,7 +419,8 @@ bool MainWindow::pixel_tool_stroke(const StrokeInput& stroke, const core::Page& 
         op["swatch_rgb"] = rgb_json(back);
         foreground("rgb");
     }
-    const bool done = apply_ops(Json::array({op}));
+    before.push_back(op);
+    const bool done = apply_ops(before);
     if (done && op_name == "mixer_brush") {
         // (the paint the stroke left, for the next: what the op reported)
         for (const Json& item : last_results_) {
@@ -445,6 +469,22 @@ void MainWindow::mixer_shown() {
     if (paint) text += QStringLiteral("<span style='background:%1'>&nbsp;&nbsp;&nbsp;&nbsp;</span> 補充 %2 %").arg(paint->name()).arg(std::lround(amount * 100));
     if (pickup) text += QStringLiteral("　<span style='background:%1'>&nbsp;&nbsp;&nbsp;&nbsp;</span> 取り込んだ色").arg(pickup->name());
     mixer_paint_->setText(text);
+}
+
+void MainWindow::fill_pixel_brushes() {
+    if (pixel_brush_ == nullptr) return;
+    const QString kept = QString::fromStdString(pixel_tool_settings.brush);
+    pixel_brush_->clear();
+    pixel_brush_->addItem(QStringLiteral("円（硬さ・間隔で）"), QString());
+    for (const render::brush_presets::Group& g : render::brush_presets::load(config_dir()).groups) {
+        for (const render::brush_presets::Preset& p : g.items) {
+            if (!core::is_dab_brush(p.settings)) continue;  // (Genko's way of drawing lays no dabs)
+            pixel_brush_->addItem(QString::fromStdString(p.name), QString::fromStdString(p.key));
+        }
+    }
+    const int at = pixel_brush_->findData(kept);
+    pixel_brush_->setCurrentIndex(std::max(0, at));
+    if (at < 0) pixel_tool_settings.brush.clear();
 }
 
 }  // namespace genko::app

@@ -52,6 +52,9 @@ inline constexpr std::uint64_t kMaxDecodedBytes = 512ull << 20;
 // A Patt / Pat2 / Pat3 block's data, and back; a .pat file, and back. core::Error("format") for what cannot be read
 // (a file past kMaxFileBytes, patterns decoding past kMaxDecodedBytes: core::Error("too_large")).
 std::vector<PsdPattern> parse_block(std::string_view data);
+// (PC4 E2, review P1-1) The same, what it decodes spent from `budget` (bytes, shared with the rest of a file: an ABR's
+// tips, patterns and descriptors together); core::Error("too_large") past it, nothing more decoded.
+std::vector<PsdPattern> parse_block(std::string_view data, std::uint64_t& budget);
 std::string write_block(const std::vector<PsdPattern>& patterns);
 std::vector<PsdPattern> parse_file(std::string_view data);
 std::string write_file(const std::vector<PsdPattern>& patterns);

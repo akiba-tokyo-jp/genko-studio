@@ -562,23 +562,103 @@ void forget_unnamed_pictures(const std::filesystem::path& config_dir, const core
 core::Json load_library(const std::filesystem::path& config_dir) { return read_library(config_dir, false); }
 
 void save_to_library(const std::filesystem::path& config_dir, std::string_view key, const std::optional<core::Json>& data) {
-    core::Json brushes = read_library(config_dir, true);
-    // BRUSH-01: the paper beside brushes.json (Python's app reads and writes that file, and would drop it)
-    std::optional<core::Paper> kept;
-    if (data) {
-        core::Json entry = *data;
-        if (const auto given = entry.find("paper"); given != entry.end()) {
-            if (core::is_paper(*given)) kept = core::paper_from_json(*given);
-            entry.erase(given);
+    save_many(config_dir, {{std::string(key), data}});
+}
+
+namespace {
+
+// (PC4 E2) The pictures brush_tips/ holds that no brush of the library names (and that were not written in the last hour:
+// another Genko may be saving a brush that names it) taken away. Only files named as pictures are touched.
+void forget_unnamed_tips(const std::filesystem::path& config_dir, const core::Json& brushes) {
+    std::set<std::string> named;
+    for (const auto& [key, entry] : brushes.items()) {
+        if (!core::is_dab_brush(entry)) continue;
+        try {
+            const core::Json& dabs = entry["dabs"];
+            for (const std::string& ref : core::dab_assets(core::dabs_from_json(dabs.is_null() ? core::Json::object() : dabs))) named.insert(ref);
+        } catch (const core::Error&) {
+            return;  // (a brush whose settings cannot be read: none of the pictures taken away)
         }
-        brushes[std::string(key)] = entry;
-    } else {
-        brushes.erase(std::string(key));
+    }
+    std::error_code ec;
+    const std::filesystem::path folder = config_dir / "brush_tips";
+    const auto old = std::filesystem::file_time_type::clock::now() - std::chrono::hours(1);
+    for (auto it = std::filesystem::directory_iterator(folder, ec); !ec && it != std::filesystem::directory_iterator(); it.increment(ec)) {
+        const std::string name = core::path_to_utf8(it->path().filename());
+        if (name.size() != 68 || !name.ends_with(".png") || !storage::AssetStore::is_ref("sha256:" + name.substr(0, 64))) continue;
+        if (named.contains("sha256:" + name.substr(0, 64))) continue;
+        std::error_code age;
+        const auto written = std::filesystem::last_write_time(it->path(), age);
+        if (age || written > old) continue;
+        std::error_code gone;
+        std::filesystem::remove(it->path(), gone);
+    }
+}
+
+}  // namespace
+
+std::vector<std::string> library_groups(const std::filesystem::path& config_dir) {
+    std::vector<std::string> out;
+    try {
+        const std::filesystem::path path = library_path(config_dir);
+        std::error_code missing;
+        if (!std::filesystem::exists(path, missing)) return out;
+        const std::string text = storage::read_file_bounded(path, std::size_t(256) << 20);
+        if (core::utf8_error(text)) return out;
+        const core::Json data = core::parse_python_json(text);
+        const auto groups = data.is_object() ? data.find("groups") : data.end();
+        if (groups == data.end() || !groups->is_array()) return out;
+        for (const core::Json& g : *groups) {
+            if (g.is_string() && !g.get<std::string>().empty() && std::find(out.begin(), out.end(), g.get<std::string>()) == out.end()) {
+                out.push_back(g.get<std::string>());
+            }
+        }
+    } catch (const core::Error&) {
+        out.clear();
+    }
+    return out;
+}
+
+std::filesystem::path library_tip_path(const std::filesystem::path& config_dir, const std::string& ref) {
+    return config_dir / "brush_tips" / (ref.substr(ref.find(':') + 1) + ".png");
+}
+
+core::Bytes library_tip(const std::filesystem::path& config_dir, const std::string& ref) {
+    if (!storage::AssetStore::is_ref(ref)) return nullptr;
+    const std::filesystem::path file = library_tip_path(config_dir, ref);
+    std::error_code missing;
+    if (!std::filesystem::is_regular_file(file, missing)) return nullptr;
+    try {
+        auto png = std::make_shared<const std::string>(storage::read_file_bounded(file, paper::kMaxFileBytes));
+        return storage::AssetStore::ref(*png) == ref ? png : nullptr;
+    } catch (const core::Error&) {
+        return nullptr;
+    }
+}
+
+void save_many(const std::filesystem::path& config_dir, const std::vector<std::pair<std::string, std::optional<core::Json>>>& changes,
+               const std::optional<std::vector<std::string>>& groups, const std::map<std::string, core::Bytes>& pictures) {
+    core::Json brushes = read_library(config_dir, true);
+    std::vector<std::string> order = groups ? *groups : library_groups(config_dir);
+    // BRUSH-01: the papers beside brushes.json (Python's app reads and writes that file, and would drop them)
+    std::map<std::string, core::Paper> kept;
+    for (const auto& [key, data] : changes) {
+        if (data) {
+            core::Json entry = *data;
+            if (const auto given = entry.find("paper"); given != entry.end()) {
+                if (core::is_paper(*given)) kept[key] = core::paper_from_json(*given);
+                entry.erase(given);
+            }
+            brushes[key] = entry;
+        } else {
+            brushes.erase(key);
+            kept.erase(key);
+        }
     }
     // brush_papers.json: a brush with a paper needs it readable (else it is refused and the file left as it is); one that
     // cannot be read is left as it is for the others, which are saved and forgotten as before
     std::optional<core::Json> papers = read_library_papers(config_dir);
-    if (kept && !papers) {
+    if (!kept.empty() && !papers) {
         throw core::PyUncaught("OSError", "the brush paper library cannot be read, so it is left as it is: " +
                                               core::path_to_utf8(library_papers_path(config_dir)));
     }
@@ -590,30 +670,56 @@ void save_to_library(const std::filesystem::path& config_dir, std::string_view k
             throw core::PyUncaught("OSError", "the brush library cannot be written: " + core::path_to_utf8(path) + " (" + error.what() + ")");
         }
     };
-    if (kept) {  // (its picture first: brush_papers.json never names a picture that is not there, or a broken one)
-        const core::Bytes png = paper::bytes(kept->asset);
-        if (!png) throw core::Error("missing_asset", "the paper picture " + kept->asset + " is not known here");
-        const std::filesystem::path file = picture_path(config_dir, kept->asset);
+    // (a picture there already: made new, so another Genko that read the library before this names it does not take it
+    // for one nothing has named for an hour; written again when its time cannot be set)
+    const auto keep_file = [&](const std::filesystem::path& file, bool there, const core::Bytes& png) {
         std::error_code touched;
-        if (library_picture(config_dir, kept->asset)) {
-            // (there already: made new, so another Genko that read brush_papers.json before this names it does not take
-            // it for one nothing has named for an hour; written again when its time cannot be set)
+        if (there) {
             std::filesystem::last_write_time(file, std::filesystem::file_time_type::clock::now(), touched);
             if (touched) write(file, *png);
         } else {
             write(file, *png);
         }
+    };
+    for (const auto& [key, paper_of] : kept) {  // (its picture first: brush_papers.json never names a picture that is not there)
+        const core::Bytes png = paper::bytes(paper_of.asset);
+        if (!png) throw core::Error("missing_asset", "the paper picture " + paper_of.asset + " is not known here");
+        keep_file(picture_path(config_dir, paper_of.asset), library_picture(config_dir, paper_of.asset) != nullptr, png);
+    }
+    // (PC4 E2) a dab brush's pictures, before brushes.json names them
+    for (const auto& [key, data] : changes) {
+        if (!data || !core::is_dab_brush(*data)) continue;
+        const core::Json& dabs = (*data)["dabs"];
+        std::vector<std::string> refs;
+        try {
+            refs = core::dab_assets(core::dabs_from_json(dabs.is_null() ? core::Json::object() : dabs));
+        } catch (const core::Error& error) {
+            throw core::Error("value", "brush " + std::string(error.what()));
+        }
+        for (const std::string& ref : refs) {
+            if (const core::Bytes there = library_tip(config_dir, ref)) {
+                keep_file(library_tip_path(config_dir, ref), true, there);
+                continue;
+            }
+            const auto given = pictures.find(ref);
+            const core::Bytes png = given != pictures.end() ? given->second : dabs::picture(ref);
+            if (!png || storage::AssetStore::ref(*png) != ref) throw core::Error("missing_asset", "the brush picture " + ref + " is not known here");
+            write(library_tip_path(config_dir, ref), *png);
+        }
     }
     core::DumpOptions options;
     options.indent = 1;
     options.item_separator = ",";
-    write(library_path(config_dir), core::dump(core::Json{{"brushes", brushes}}, options));
+    core::Json file{{"brushes", brushes}};
+    if (!order.empty()) file["groups"] = order;  // (PC4 E2: only when there is an order to keep)
+    write(library_path(config_dir), core::dump(file, options));
+    forget_unnamed_tips(config_dir, brushes);
     if (!papers) return;  // (one that cannot be read, or of another layout: nothing in it dropped, none of its pictures)
-    // the key's paper set or taken away, and the papers of brushes brushes.json no longer has (forgotten here or by
+    // the keys' papers set or taken away, and the papers of brushes brushes.json no longer has (forgotten here or by
     // Python's app) dropped
     bool changed = false;
-    if (kept) {
-        (*papers)[std::string(key)] = core::paper_to_json(*kept);
+    for (const auto& [key, paper_of] : kept) {
+        (*papers)[key] = core::paper_to_json(paper_of);
         changed = true;
     }
     for (auto it = papers->begin(); it != papers->end();) {
@@ -626,6 +732,25 @@ void save_to_library(const std::filesystem::path& config_dir, std::string_view k
     }
     if (changed) write(library_papers_path(config_dir), core::dump(core::Json{{"genko_brush_papers", 1}, {"papers", *papers}}, options));
     forget_unnamed_pictures(config_dir, *papers);
+}
+
+core::Json with_pictures(const core::Json& definition) {
+    core::Json out = with_paper_picture(definition);
+    if (!core::is_dab_brush(out) || !out.contains("dabs") || !out["dabs"].is_object()) return out;
+    core::Json& dabs = out["dabs"];
+    const auto give = [](core::Json& holder, const char* key) {
+        if (!holder.is_object() || !holder.contains(key)) return;
+        core::Json& v = holder[key];
+        if (!v.is_object() || !v.contains("asset") || !v["asset"].is_string()) return;
+        const std::string ref = v["asset"].get<std::string>();
+        const core::Bytes png = dabs::picture(ref);
+        if (!png) throw core::Error("missing_asset", "the brush picture " + ref + " is not known here");
+        v = core::Json{{"png", core::b64encode(*png)}};
+    };
+    give(dabs, "tip");
+    if (dabs.contains("dual")) give(dabs["dual"], "tip");
+    if (dabs.contains("texture") && dabs["texture"].is_object()) give(dabs["texture"], "pattern");
+    return out;
 }
 
 std::filesystem::path library_papers_path(const std::filesystem::path& config_dir) { return config_dir / "brush_papers.json"; }

@@ -54,7 +54,11 @@
 #include "render/grd.hpp"
 #include "render/gradient_presets.hpp"
 #include "render/anim.hpp"
+#include "render/abr.hpp"
+#include "render/brush_presets.hpp"
 #include "render/brushes.hpp"
+#include "render/preset_files.hpp"
+#include "render/tool_presets.hpp"
 #include "render/draw.hpp"
 #include "render/inspect.hpp"
 #include "render/layer_bounds.hpp"
@@ -1465,39 +1469,311 @@ int shapes_command(const QStringList& args, bool ascii) {
     return usage("genko shapes: list, path, new, edit or reset");
 }
 
-// brushes@1 (PC4 E1, brush.get; the C++ build's own): `genko brushes get <key> [--book <dir>]` — a brush's whole settings
-// (Genko's, as a book keeps them, and a dab brush's every dab setting, the defaults too): a built-in brush, one of the
-// book's own, or one of the person's own (the config folder's library). core::Error("key") for one that is not there.
+// brushes@1 (PC4 E1 brush.get, PC4 E2 brush.presets.*; SPEC.md COLOR-09「ブラシのプリセット」, the C++ build's own): the
+// brushes of this machine (render/brush_presets: the built-in groups and the person's, the settings folder's
+// brushes.json) — `genko brushes list [--full]`, `genko brushes get <key> [--book <dir>]` (a brush's whole settings:
+// Genko's, as a book keeps them, and a dab brush's every dab setting, the defaults too — a built-in brush, one of the
+// book's own, or one of the library's), `genko brushes save [<key>] --brush <JSON> [--name N] [--group G]` (the settings as
+// define_brush takes them, kept as one's own: a new key when none is given), `genko brushes delete <key or name>…`,
+// `genko brushes import-abr <file.abr> [--group G] [--replace]` (a Photoshop brush file: what was not read as it is in
+// "warnings"), `genko brushes define <dir> --page N [--area <JSON> | --rect x,y,w,h] [--layer <id>] [--name N] [--group G]`
+// (ブラシを定義…: a sampled tip from the page as it shows, or the layer alone, within the area), `genko brushes edit
+// <{"action", …} JSON>` (rename, delete, move, new_group, rename_group, delete_group). The ops never read the library: a
+// brush goes into a book with define_brush. core::Error("key") for a brush that is not there.
 int brushes_command(const QStringList& args, bool ascii) {
-    if (args.isEmpty() || args.front() != QLatin1String("get")) return usage("genko brushes get <key> [--book <dir>]");
-    static constexpr Option kOptions[] = {{"--book", true}};
-    Arguments a;
-    if (auto error = parse_arguments(args.mid(1), kOptions, 1, "key", a)) return usage("genko brushes get: " + *error);
-    const std::string key = a.positional[0].toStdString();
-    std::vector<core::Brush> known;
-    std::string from = "builtin";
-    if (const auto book = a.value("--book")) {
-        const fs::path dir = path_arg(*book);
-        refuse_legacy(dir);
-        const auto loaded = storage::load_document(dir);
-        render::brushes::register_book(loaded.document);  // (its pictures made known too)
-        core::register_brushes(loaded.document.brush_custom, known);
-        if (loaded.document.brush_custom.contains(key)) from = "book";
+    namespace presets = render::brush_presets;
+    if (args.isEmpty()) return usage("genko brushes list | get | save | delete | import-abr | define | edit");
+    const QString what = args.front();
+    const QStringList rest = args.mid(1);
+    const fs::path dir = core::config_dir();
+    if (what == QLatin1String("list")) {
+        static constexpr Option kOptions[] = {{"--full", false}};
+        Arguments a;
+        if (auto error = parse_arguments(rest, kOptions, 0, "", a)) return usage("genko brushes list: " + *error);
+        Json out = presets::list(presets::load(dir), a.flag("--full"));
+        out["ok"] = true;
+        print_json(out, ascii);
+        return 0;
     }
-    if (from != "book" && core::find_builtin(key) == nullptr) {
-        try {
-            core::register_brushes(render::brushes::load_own_brushes(core::config_dir()), known);
-        } catch (const std::exception&) {
+    if (what == QLatin1String("get")) {
+        static constexpr Option kOptions[] = {{"--book", true}};
+        Arguments a;
+        if (auto error = parse_arguments(rest, kOptions, 1, "key", a)) return usage("genko brushes get: " + *error);
+        const std::string key = a.positional[0].toStdString();
+        std::vector<core::Brush> known;
+        std::string from = "builtin";
+        if (const auto book = a.value("--book")) {
+            const fs::path book_dir = path_arg(*book);
+            refuse_legacy(book_dir);
+            const auto loaded = storage::load_document(book_dir);
+            render::brushes::register_book(loaded.document);  // (its pictures made known too)
+            core::register_brushes(loaded.document.brush_custom, known);
+            if (loaded.document.brush_custom.contains(key)) from = "book";
         }
-        from = "library";
+        if (from != "book" && core::find_builtin(key) == nullptr) {
+            if (const presets::Preset* dab = presets::builtin(key)) {  // (PC4 E2: a built-in dab brush)
+                core::register_brushes(Json{{key, dab->settings}}, known);
+                from = "preset";
+            } else {
+                try {
+                    core::register_brushes(render::brushes::load_own_brushes(dir), known);
+                } catch (const std::exception&) {
+                }
+                from = "library";
+            }
+        }
+        const core::Brush brush = core::find_brush(Json(key), known);
+        if (brush.key != key) throw core::Error("key", "no brush " + key);
+        Json out{{"ok", true}, {"key", brush.key}, {"label", brush.label}, {"from", from}, {"settings", core::brush_to_dict(brush)},
+                 {"engine", brush.dabs ? Json(std::string(core::kDabEngine)) : Json(nullptr)}};
+        if (brush.dabs) out["dabs"] = core::dabs_to_json(*brush.dabs, true);
+        print_json(out, ascii);
+        return 0;
     }
-    const core::Brush brush = core::find_brush(Json(key), known);
-    if (brush.key != key) throw core::Error("key", "no brush " + key);
-    Json out{{"ok", true}, {"key", brush.key}, {"label", brush.label}, {"from", from}, {"settings", core::brush_to_dict(brush)},
-             {"engine", brush.dabs ? Json(std::string(core::kDabEngine)) : Json(nullptr)}};
-    if (brush.dabs) out["dabs"] = core::dabs_to_json(*brush.dabs, true);
-    print_json(out, ascii);
-    return 0;
+    if (what == QLatin1String("save")) {
+        static constexpr Option kOptions[] = {{"--brush", true}, {"--name", true}, {"--group", true}};
+        Arguments a;
+        if (auto error = parse_arguments(rest, kOptions, 1, "key", a)) {
+            a = Arguments{};
+            if (auto again = parse_arguments(rest, kOptions, 0, "", a)) return usage("genko brushes save: " + *error);
+        }
+        const auto given = a.value("--brush");
+        if (!given) return usage("genko brushes save: the following arguments are required: --brush");
+        const auto opt = [&a](const char* name) { return a.value(name) ? std::optional<std::string>(a.value(name)->toStdString()) : std::nullopt; };
+        Json out = presets::save(dir, a.positional.empty() ? std::nullopt : std::optional<std::string>(a.positional[0].toStdString()),
+                                 core::parse_python_json(given->toStdString()), opt("--name"), opt("--group"));
+        out["ok"] = true;
+        print_json(out, ascii);
+        return 0;
+    }
+    if (what == QLatin1String("delete")) {
+        if (rest.isEmpty()) return usage("genko brushes delete <key or name>…");
+        std::vector<std::string> names;
+        for (const QString& n : rest) names.push_back(n.toStdString());
+        Json out = presets::remove(dir, names);
+        out["ok"] = true;
+        print_json(out, ascii);
+        return 0;
+    }
+    if (what == QLatin1String("import-abr")) {
+        static constexpr Option kOptions[] = {{"--group", true}, {"--replace", false}};
+        Arguments a;
+        if (auto error = parse_arguments(rest, kOptions, 1, "file", a)) return usage("genko brushes import-abr: " + *error);
+        const fs::path file = path_arg(a.positional[0]);
+        // (refused unread past what a brush file may be: render/abr kMaxFileBytes, too_large)
+        const std::string bytes = render::abr::read_file(file);
+        const std::string group = a.value("--group") ? a.value("--group")->toStdString() : presets::import_group(storage::path_to_utf8(file.stem()));
+        Json out = presets::import_abr(dir, bytes, group, a.flag("--replace"));
+        out["ok"] = true;
+        print_json(out, ascii);
+        return 0;
+    }
+    if (what == QLatin1String("define")) {
+        static constexpr Option kOptions[] = {{"--page", true}, {"--area", true}, {"--rect", true}, {"--layer", true}, {"--name", true}, {"--group", true}};
+        Arguments a;
+        if (auto error = parse_arguments(rest, kOptions, 1, "src", a)) return usage("genko brushes define: " + *error);
+        std::int64_t wanted = 1;
+        if (const auto value = a.value("--page")) {
+            const auto n = int_option(*value);
+            if (!n) return usage("genko brushes define: argument --page: invalid int value: " + core::py_repr_str(value->toStdString()));
+            wanted = *n;
+        }
+        std::optional<Json> area;
+        if (const auto given = a.value("--area")) area = core::op_area(Json{{"area", core::parse_python_json(given->toStdString())}});
+        if (const auto rect = a.value("--rect")) {
+            const QStringList box = rect->split(QLatin1Char(','));
+            std::array<double, 4> r{};
+            bool ok = box.size() == 4;
+            for (int i = 0; ok && i < 4; ++i) r[static_cast<std::size_t>(i)] = box[i].trimmed().toDouble(&ok);
+            if (!ok) return usage("genko brushes define: --rect is x,y,w,h (mm)");
+            area = Json{{"poly", Json::array({Json::array({r[0], r[1]}), Json::array({r[0] + r[2], r[1]}), Json::array({r[0] + r[2], r[1] + r[3]}),
+                                              Json::array({r[0], r[1] + r[3]})})}};
+        }
+        const fs::path src = path_arg(a.positional[0]);
+        refuse_legacy(src);
+        const auto loaded = storage::load_document(src);
+        const core::Document& doc = loaded.document;
+        render::brushes::register_book(doc);
+        const core::Page* page = nullptr;
+        for (std::size_t i = 0; i < doc.pages.size(); ++i) {
+            if (doc.pages[i]->index == core::Num(wanted) && !doc.is_deferred(i)) page = &doc.page(i);
+        }
+        if (page == nullptr) return usage("no page " + std::to_string(wanted), 1);
+        const std::string layer = a.value("--layer").value_or(QString()).toStdString();
+        const presets::Library library = presets::load(dir);
+        const std::string name = a.value("--name") ? a.value("--name")->toStdString() : presets::next_sample_name(library);
+        const presets::Defined made = presets::define_from(doc, *page, area ? &*area : nullptr, layer.empty() ? nullptr : &layer, name);
+        const auto group = a.value("--group");
+        Json out = presets::save(dir, std::nullopt, made.settings, name, group ? std::optional<std::string>(group->toStdString()) : std::nullopt, made.pictures);
+        out["ok"] = true;
+        out["width"] = made.width;
+        out["height"] = made.height;
+        out["dpi"] = made.dpi;
+        out["size_mm"] = made.settings["dabs"].value("size_mm", 2.54);
+        print_json(out, ascii);
+        return 0;
+    }
+    if (what == QLatin1String("edit")) {
+        Arguments a;
+        if (auto error = parse_arguments(rest, {}, 1, "edit", a)) return usage("genko brushes edit: " + *error);
+        Json out = presets::edit(dir, core::parse_python_json(a.positional[0].toStdString()));
+        out["ok"] = true;
+        print_json(out, ascii);
+        return 0;
+    }
+    return usage("genko brushes: list, get, save, delete, import-abr, define or edit");
+}
+
+// PC4 E2 (tool.presets.*, SPEC.md COLOR-09「ツールプリセット」, the C++ build's own): the tool presets of this machine (the
+// settings folder's tool_presets.json, render/tool_presets) — `genko tool-presets list [--tool T]` (現在のツールのみ),
+// `genko tool-presets new --tool T [--name N] [--options <JSON>] [--foreground r,g,b] [--group G]`, `genko tool-presets
+// edit <{"action", …} JSON>`, `genko tool-presets reset [--append]`, `genko tool-presets select <name>` (the preset: the
+// window switches to its tool and sets its settings; here it is said).
+int tool_presets_command(const QStringList& args, bool ascii) {
+    namespace store = render::preset_store;
+    const auto& kind = render::tool_presets::kind();
+    if (args.isEmpty()) return usage("genko tool-presets list | new | edit | reset | select");
+    const QString what = args.front();
+    const QStringList rest = args.mid(1);
+    const fs::path dir = core::config_dir();
+    store::Library library = store::load(dir, kind);
+    if (what == QLatin1String("list")) {
+        static constexpr Option kOptions[] = {{"--tool", true}};
+        Arguments a;
+        if (auto error = parse_arguments(rest, kOptions, 0, "", a)) return usage("genko tool-presets list: " + *error);
+        const auto tool = a.value("--tool");
+        const std::string tool_text = tool ? tool->toStdString() : std::string();
+        Json out = render::tool_presets::list(library.groups, tool ? std::optional<std::string_view>(tool_text) : std::nullopt);
+        out["ok"] = true;
+        if (!library.problem.empty()) out["problem"] = library.problem;
+        print_json(out, ascii);
+        return 0;
+    }
+    if (what == QLatin1String("new")) {
+        static constexpr Option kOptions[] = {{"--tool", true}, {"--name", true}, {"--options", true}, {"--foreground", true}, {"--group", true}};
+        Arguments a;
+        if (auto error = parse_arguments(rest, kOptions, 0, "", a)) return usage("genko tool-presets new: " + *error);
+        const auto tool = a.value("--tool");
+        if (!tool) return usage("genko tool-presets new: the following arguments are required: --tool");
+        Json options = a.value("--options") ? core::parse_python_json(a.value("--options")->toStdString()) : Json::object();
+        if (const auto fg = a.value("--foreground")) {
+            const QStringList parts = fg->split(QLatin1Char(','));
+            Json rgb = Json::array();
+            for (const QString& part : parts) {
+                bool ok = false;
+                const int v = part.trimmed().toInt(&ok);
+                if (!ok) return usage("genko tool-presets new: --foreground is r,g,b (0..255)");
+                rgb.push_back(v);
+            }
+            if (options.is_object()) options["foreground"] = rgb;
+        }
+        const Json item = render::tool_presets::item_of(tool->toStdString(),
+                                                        a.value("--name") ? std::optional<std::string>(a.value("--name")->toStdString()) : std::nullopt, options);
+        const auto group = a.value("--group");
+        const std::string group_text = group ? group->toStdString() : std::string();
+        Json out = store::add(library.groups, kind, item, group ? std::optional<std::string_view>(group_text) : std::nullopt, tool->toStdString());
+        store::save(dir, kind, library.groups);
+        out["ok"] = true;
+        out["tool"] = item["tool"];
+        print_json(out, ascii);
+        return 0;
+    }
+    if (what == QLatin1String("edit")) {
+        Arguments a;
+        if (auto error = parse_arguments(rest, {}, 1, "edit", a)) return usage("genko tool-presets edit: " + *error);
+        Json out = store::edit(library.groups, kind, core::parse_python_json(a.positional[0].toStdString()));
+        store::save(dir, kind, library.groups);
+        out["ok"] = true;
+        print_json(out, ascii);
+        return 0;
+    }
+    if (what == QLatin1String("reset")) {
+        static constexpr Option kOptions[] = {{"--append", false}};
+        Arguments a;
+        if (auto error = parse_arguments(rest, kOptions, 0, "", a)) return usage("genko tool-presets reset: " + *error);
+        library.groups = store::reset(library.groups, kind, a.flag("--append"));
+        store::save(dir, kind, library.groups);
+        std::int64_t n = 0;
+        for (const store::Group& g : library.groups) n += static_cast<std::int64_t>(g.items.size());
+        print_json(Json{{"ok", true}, {"presets", n}}, ascii);
+        return 0;
+    }
+    if (what == QLatin1String("select")) {
+        Arguments a;
+        if (auto error = parse_arguments(rest, {}, 1, "name", a)) return usage("genko tool-presets select: " + *error);
+        const Json& item = render::tool_presets::select(library.groups, a.positional[0].toStdString());
+        print_json(Json{{"ok", true}, {"name", item["name"]}, {"tool", item["tool"]}, {"options", item.value("options", Json::object())}}, ascii);
+        return 0;
+    }
+    return usage("genko tool-presets: list, new, edit, reset or select");
+}
+
+// PC4 E2 (edit.presets.*, SPEC.md COLOR-09「プリセットマネージャー」, the C++ build's own): the presets of every kind together
+// (render/preset_files) — `genko presets list [--kinds k,…]` (プリセットマネージャー), `genko presets edit <kind> <{"action",
+// …} JSON>`, `genko presets export <file> [--kinds k,…] [--builtins]` (プリセットを書き出し), `genko presets import <file>
+// [--kinds k,…]` (読み込み), `genko presets migrate <settings folder | file>` (プリセットを移行: the groups not here yet). The
+// kinds: brushes, gradients, patterns, shapes, tool_presets.
+int presets_command(const QStringList& args, bool ascii) {
+    namespace files = render::preset_files;
+    if (args.isEmpty()) return usage("genko presets list | edit | export | import | migrate");
+    const QString what = args.front();
+    const QStringList rest = args.mid(1);
+    const fs::path dir = core::config_dir();
+    const auto kinds_of = [](const Arguments& a) {
+        std::vector<std::string> out;
+        if (const auto given = a.value("--kinds")) {
+            for (const QString& k : given->split(QLatin1Char(','), Qt::SkipEmptyParts)) out.push_back(k.trimmed().toStdString());
+        }
+        return out;
+    };
+    if (what == QLatin1String("list")) {
+        static constexpr Option kOptions[] = {{"--kinds", true}};
+        Arguments a;
+        if (auto error = parse_arguments(rest, kOptions, 0, "", a)) return usage("genko presets list: " + *error);
+        Json out = files::manager_list(dir, kinds_of(a));
+        out["ok"] = true;
+        print_json(out, ascii);
+        return 0;
+    }
+    if (what == QLatin1String("edit")) {
+        Arguments a;
+        if (auto error = parse_arguments(rest, {}, 2, "kind edit", a)) return usage("genko presets edit: " + *error);
+        Json out = files::manager_edit(dir, a.positional[0].toStdString(), core::parse_python_json(a.positional[1].toStdString()));
+        out["ok"] = true;
+        print_json(out, ascii);
+        return 0;
+    }
+    if (what == QLatin1String("export")) {
+        static constexpr Option kOptions[] = {{"--kinds", true}, {"--builtins", false}};
+        Arguments a;
+        if (auto error = parse_arguments(rest, kOptions, 1, "file", a)) return usage("genko presets export: " + *error);
+        Json counts;
+        const std::string text = files::export_text(dir, kinds_of(a), a.flag("--builtins"), &counts);
+        const fs::path out_path = path_arg(a.positional[0]);
+        if (out_path.has_parent_path()) fs::create_directories(out_path.parent_path());
+        storage::write_atomic(out_path, text);
+        print_json(Json{{"ok", true}, {"path", storage::path_to_utf8(out_path)}, {"presets", counts}, {"bytes", static_cast<std::int64_t>(text.size())}}, ascii);
+        return 0;
+    }
+    if (what == QLatin1String("import")) {
+        static constexpr Option kOptions[] = {{"--kinds", true}};
+        Arguments a;
+        if (auto error = parse_arguments(rest, kOptions, 1, "file", a)) return usage("genko presets import: " + *error);
+        const std::string text = storage::read_file_bounded(path_arg(a.positional[0]), files::kMaxFileBytes);
+        Json out = files::import_text(dir, text, kinds_of(a));
+        out["ok"] = true;
+        print_json(out, ascii);
+        return 0;
+    }
+    if (what == QLatin1String("migrate")) {
+        Arguments a;
+        if (auto error = parse_arguments(rest, {}, 1, "from", a)) return usage("genko presets migrate: " + *error);
+        Json out = files::migrate(dir, path_arg(a.positional[0]));
+        out["ok"] = true;
+        print_json(out, ascii);
+        return 0;
+    }
+    return usage("genko presets: list, edit, export, import or migrate");
 }
 
 // PC4 E4 (gradient.presets.*, SPEC.md COLOR-09「グラデーションのプリセット」, the C++ build's own): the gradients of this
@@ -1842,6 +2118,8 @@ int run_cli(int argc, char** argv) {
         if (command == QLatin1String("brushes")) return brushes_command(args, ascii);  // (brushes@1, PC4 E1: brush.get)
         if (command == QLatin1String("patterns")) return patterns_command(args, ascii);  // (patterns@1, PC4 E3)
         if (command == QLatin1String("gradients")) return gradients_command(args, ascii);  // (PC4 E4: gradient.presets.*)
+        if (command == QLatin1String("tool-presets")) return tool_presets_command(args, ascii);  // (PC4 E2: tool.presets.*)
+        if (command == QLatin1String("presets")) return presets_command(args, ascii);  // (PC4 E2: edit.presets.*)
         if (command == QLatin1String("studio")) return studio_command(args, ascii);
         if (command == QLatin1String("mcp")) return mcp_command(args);
         if (command == QLatin1String("serve")) return serve_command(args);

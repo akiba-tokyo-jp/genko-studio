@@ -170,6 +170,12 @@ genko_library(genko_app
     gradients_panel.cpp
     # PC4 E5: the brushes that change pixels (ぼかし・シャープ・指先・覆い焼き・焼き込み・スポンジ・混合ブラシ・背景消しゴム・色の置き換え)
     paint_tools.cpp
+    # PC4 E2: ブラシ・ブラシ設定 (F5)・ツールプリセット panels, ブラシを定義…, プリセット ▸ (プリセットマネージャー…・書き出し／読み込み…・移行)
+    brushes_panel.cpp
+    brush_settings_panel.cpp
+    tool_presets_panel.cpp
+    preset_manager.cpp
+    main_window_brush_presets.cpp
     ${GENKO_APP_RESOURCES}
     ${GENKO_APP_FONTS}
   PUBLIC_DEPS genko_core genko_storage genko_render genko_render_ops genko_formats genko_service Qt6::Core Qt6::Gui Qt6::Widgets Qt6::Svg Qt6::Concurrent

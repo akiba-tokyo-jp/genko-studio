@@ -41,6 +41,7 @@
 #include "core/pynum.hpp"
 #include "core/stroke_geom.hpp"
 #include "render/abr.hpp"
+#include "render/brush_presets.hpp"
 #include "render/brushes.hpp"
 #include "render/paper.hpp"
 #include "render/patterns.hpp"
@@ -207,6 +208,14 @@ QPixmap stroke_preview(const std::string& kind, const std::array<int, 3>& ink, Q
     return pixmap;
 }
 
+void forget_stroke_previews() { previews().clear(); }
+
+void forget_stroke_previews(const std::vector<std::string>& kinds) {
+    std::erase_if(previews(), [&kinds](const auto& entry) {
+        return std::any_of(kinds.begin(), kinds.end(), [&entry](const std::string& k) { return entry.first.starts_with(k + "/"); });
+    });
+}
+
 std::vector<double> size_presets() {
     const QString raw = settings()->value(QStringLiteral("brush/sizes"), QString()).toString();
     std::set<double> values;
@@ -234,6 +243,19 @@ BrushPanel::BrushPanel(QWidget* parent) : QWidget(parent) {
         render::brushes::register_brushes(render::brushes::load_own_brushes(config_dir()));  // the person's own brushes (and papers)
     } catch (const std::exception&) {
         // (a library that cannot be read: the built-in brushes)
+    }
+    // (PC4 E2: a dab brush's pictures read from the library when it is drawn — never all of them now —, and the built-in
+    // dab brush kept in hand last made known again under its key)
+    render::brush_presets::use_library_pictures(config_dir());
+    {
+        const std::string kept = settings()->value(QStringLiteral("brush/kind")).toString().toStdString();
+        if (const render::brush_presets::Preset* builtin = render::brush_presets::builtin_dab_of(kept);
+            builtin != nullptr && render::brushes::brush(kept).key != kept) {
+            try {
+                render::brushes::define_brush(kept, builtin->settings);
+            } catch (const std::exception&) {
+            }
+        }
     }
     kinds = new QListWidget;
     kinds->setObjectName(QStringLiteral("brush_kinds"));
@@ -469,7 +491,7 @@ BrushPanel::BrushPanel(QWidget* parent) : QWidget(parent) {
     set_personal_pressure(preferences::tablet_gamma());  // (offered before the kept choice is read, so it can be the one)
     load();
     loading_ = false;
-    forget->setEnabled(kind().starts_with("my_"));
+    forget->setEnabled(render::brush_presets::is_own(kind()));
 }
 
 void BrushPanel::fill_kinds() {
@@ -482,10 +504,16 @@ void BrushPanel::fill_kinds() {
     kinds->setIconSize(QSize(72, 20));
     for (const core::Brush& brush : render::brushes::everything()) {
         if (render::dabs::is_pencil(core::brush_to_dict(brush))) continue;  // (brushes@1: the 鉛筆ツール's own, not one to pick)
-        auto* item = new QListWidgetItem((brush.key.starts_with("my_") ? QStringLiteral("★ ") : QString()) + QString::fromStdString(brush.label));
-        item->setIcon(QIcon(stroke_preview(brush.key, {text.red(), text.green(), text.blue()}, QSize(72, 20))));
+        auto* item = new QListWidgetItem((render::brush_presets::is_own(brush.key) ? QStringLiteral("★ ") : QString()) + QString::fromStdString(brush.label));
+        // (PC4 E2: a dab brush whose pictures this process does not hold yet is listed without its line — drawing it would
+        // read its pictures from the library now, every brush's at once; it is drawn once the brush is used)
+        bool pictures = true;
+        if (brush.dabs) {
+            for (const std::string& ref : core::dab_assets(*brush.dabs)) pictures = pictures && render::dabs::holds_picture(ref);
+        }
+        if (pictures) item->setIcon(QIcon(stroke_preview(brush.key, {text.red(), text.green(), text.blue()}, QSize(72, 20))));
         item->setData(Qt::UserRole, key_of(brush.key));
-        if (brush.key.starts_with("my_") && !mine.contains(brush.key)) item->setToolTip(QStringLiteral("この原稿に入っていたブラシ"));
+        if (render::brush_presets::is_own(brush.key) && !mine.contains(brush.key)) item->setToolTip(QStringLiteral("この原稿に入っていたブラシ"));
         if (brush.paper) {
             const QString paper = render::paper::bytes(brush.paper->asset)
                                       ? QStringLiteral("紙質あり")
@@ -506,7 +534,7 @@ void BrushPanel::reload_kinds(const std::optional<std::string>& select) {
         if (kinds->item(i)->data(Qt::UserRole).toString().toStdString() == current) row = i;
     kinds->setCurrentRow(row);
     loading_ = false;
-    forget->setEnabled(kind().starts_with("my_"));
+    forget->setEnabled(render::brush_presets::is_own(kind()));
     if (select) kind_changed();
 }
 
@@ -640,7 +668,7 @@ void BrushPanel::kind_changed() {
     loading_ = true;
     apply_kind_defaults(kind(), true);
     loading_ = false;
-    forget->setEnabled(kind().starts_with("my_"));
+    forget->setEnabled(render::brush_presets::is_own(kind()));
     save();
 }
 

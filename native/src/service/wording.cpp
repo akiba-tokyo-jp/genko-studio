@@ -722,6 +722,33 @@ const std::vector<Rule>& rules() {
         r.push_back(rule(R"(the smudge is too wide for the layer.*)", "色混ぜの太さが大きすぎます（レイヤーの辺の 4 倍まで）"));
         r.push_back(rule(R"(the Background Eraser takes away the alpha: it cannot work one colour plate)",
                          "背景消しゴムツールは透明にする道具なので、色の版 1 つには使えません（描く先をレイヤーに戻します）"));
+        // (PC4 E2: the brush library, tool presets and the presets' files — render/brush_presets, tool_presets, preset_files)
+        r.push_back(rule(R"(the built-in brush (.+) cannot be changed.*)", "組み込みのブラシ（\\1）は変えられません（自分のブラシにしてから変えます）"));
+        r.push_back(rule(R"(no brush of one's own named (.+))", "「\\1」という自分のブラシはありません"));
+        r.push_back(rule(R"(a brush named (.+) is there already)", "「\\1」という名前のブラシがもうあります"));
+        r.push_back(rule(R"(the group (.+) is the built-in brushes'.*)", "「\\1」は組み込みのブラシのグループです（自分のブラシには別のグループ名を付けます）"));
+        r.push_back(rule("a group's name is 1 to 200 characters", "グループ名は 1〜200 文字にします"));
+        r.push_back(rule(R"(a group named (.+) is there already)", "「\\1」というグループがもうあります"));
+        r.push_back(rule(R"(no group named (.+))", "「\\1」というグループはありません"));
+        r.push_back(rule("a brush's name is 1 to 40 characters", "ブラシ名は 1〜40 文字にします"));
+        r.push_back(rule("rename names one brush", "名前を変えるブラシを 1 つ選びます"));
+        r.push_back(rule("preset names (?:no brush|a brush by its key or name.*)", "ブラシを選びます"));
+        r.push_back(rule("a brush of one's own has a key starting with my_.*", "自分のブラシの鍵は my_ で始めます（40 文字まで）"));
+        r.push_back(rule(R"(the library holds (\d+) brushes of one's own at most)", "自分のブラシは \\1 本までです"));
+        r.push_back(rule("nothing there holds paint.*", "そこには描いたもの（白でも透明でもない所）がありません"));
+        r.push_back(rule("the area covers none of the page", "選択範囲がページの外にあります"));
+        r.push_back(rule(R"(the area is too large for a brush tip.*)", "ブラシの先端にするには大きすぎます（2500 画素四方まで。選択範囲を小さくします）"));
+        r.push_back(rule(R"(no tool preset named (.+) \(see tool-presets list\))", "「\\1」というツールプリセットはありません"));
+        r.push_back(rule(R"((?:a tool preset(?:'s)? |options\.|the field ).*)", "ツールプリセットの中身が正しくありません"));
+        r.push_back(rule("the kinds of presets are .*", "プリセットの種類は、ブラシ・グラデーション・パターン・シェイプ・ツールプリセットから選びます"));
+        r.push_back(rule("not a Genko presets file.*", "Genko のプリセットのファイルではありません"));
+        r.push_back(rule(R"((?:the presets are larger than|a presets file is at most) .*)", "プリセットのファイルが大きすぎます（256 MB まで）"));
+        r.push_back(rule("the settings folder is this one: .*", "移行元が今の設定のフォルダーです（別の設定のフォルダーか、書き出したプリセットのファイルを選びます）"));
+        r.push_back(rule(R"(the brush file's tips are too large to read.*)", "ブラシのファイルの先端が大きすぎて読めません（ほどくと 512 MB を越えます）"));
+        r.push_back(rule(R"(the brush file is larger than (\d+) MB)", "ブラシのファイルが大きすぎます（\\1 MB まで）"));
+        r.push_back(rule(R"(brush files of (?:sub)?version (\d+) are not read)", "この版（\\1）のブラシのファイルは読めません（版 1・2・6〜10 を読みます）"));
+        r.push_back(rule(R"(not a brush file that can be read: (.*))", "ブラシのファイルとして読めません（\\1）"));
+        r.push_back(rule(R"(the brush file holds no brush that can be read.*)", "読めるブラシがファイルに入っていません"));
         // (PC2, adjustments@1 — the C++ build's own: a correction's native settings and kinds, core/adjust)
         r.push_back(rule(R"(adjust kind '(.*)' is not a correction layer's kind)", "「\\1」は色調補正のレイヤーの種類ではありません"));
         // (PC2a — the tone corrections' own: set_adjustment, auto_adjust and a colour lookup's table, render/ops_adjust, core/lut3d)

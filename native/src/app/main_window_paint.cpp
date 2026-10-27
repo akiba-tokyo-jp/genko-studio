@@ -495,6 +495,7 @@ void MainWindow::build_colour_dock() {
     };
     connect(brush_, &BrushPanel::colour_set, this, colours_now);
     connect(colours_, &ColourPanel::background_set, this, colours_now);
+    connect(colours_, &ColourPanel::background_set, this, [this] { pen_changed(); });  // (PC4 E2: a dab brush's 背景色 as it is drawn)
     auto* dock = new QDockWidget(QStringLiteral("カラー"), this);
     dock->setObjectName(QStringLiteral("カラー"));
     auto* scroll = new QScrollArea;  // (a tall panel scrolls on a small screen instead of making the window taller)

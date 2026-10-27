@@ -2,6 +2,7 @@
 
 #include <cstdint>
 #include <filesystem>
+#include <map>
 #include <optional>
 #include <span>
 #include <string>
@@ -74,6 +75,29 @@ core::Json load_library(const std::filesystem::path& config_dir);
 // ("missing_asset") for a paper whose picture this process does not know; PyUncaught OSError when a file cannot be
 // written (brushes.json is written first).
 void save_to_library(const std::filesystem::path& config_dir, std::string_view key, const std::optional<core::Json>& data);
+
+// (PC4 E2, brush.presets.*: SPEC.md COLOR-09「ブラシのプリセット」) Several of the person's brushes saved or forgotten at once
+// (each as save_to_library saves or forgets one, the file read again and written once), with:
+// - the order of the person's groups when `groups` is given (brushes.json's "groups": [names], beside "brushes" — written
+//   only when there is an order to keep, so a library without groups is written as before), else the file's own;
+// - a dab brush's pictures (its tip, the dual brush's tip, its texture: brushes@1) in brush_tips/<64 hex>.png beside it
+//   (as the papers' brush_papers/), each written before brushes.json names it — from `pictures` or the pictures this
+//   process knows (render/dabs/lines.hpp picture; core::Error("missing_asset") for one it does not) —, the ones no brush
+//   names any more (and not written in the last hour) taken away.
+// A brush's "group" is kept in its entry (the brushes read and drawn as before: no op or book reads it).
+void save_many(const std::filesystem::path& config_dir, const std::vector<std::pair<std::string, std::optional<core::Json>>>& changes,
+               const std::optional<std::vector<std::string>>& groups = std::nullopt,
+               const std::map<std::string, core::Bytes>& pictures = {});
+// The order of the person's groups as brushes.json keeps it (none: no "groups", or a file that cannot be read).
+std::vector<std::string> library_groups(const std::filesystem::path& config_dir);
+// Where the library keeps a dab brush's picture, and the picture there when it holds what its name says (else null).
+std::filesystem::path library_tip_path(const std::filesystem::path& config_dir, const std::string& ref);
+core::Bytes library_tip(const std::filesystem::path& config_dir, const std::string& ref);
+// A brush's settings with its dab pictures given as picture files ("tip": {"png": base64}, the dual brush's and the
+// texture's too: as define_brush and a .genkobrush take them) for a book or a computer that does not hold them, its paper
+// as with_paper_picture gives it; settings without them as they are. core::Error("missing_asset") for a picture this
+// process cannot find (render/dabs/lines.hpp picture: the library's too when the window reads it).
+core::Json with_pictures(const core::Json& definition);
 
 // BRUSH-01: the papers of the person's own brushes (this build only).
 std::filesystem::path library_papers_path(const std::filesystem::path& config_dir);

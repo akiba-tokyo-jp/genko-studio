@@ -36,6 +36,31 @@ Pictures& pictures() {
     return p;
 }
 
+// (PC4 E2) where a picture not held is looked for
+std::mutex& source_mutex() {
+    static std::mutex m;
+    return m;
+}
+std::function<core::Bytes(const std::string&)>& source() {
+    static std::function<core::Bytes(const std::string&)> s;
+    return s;
+}
+core::Bytes looked_for(const std::string& ref) {
+    std::function<core::Bytes(const std::string&)> find;
+    {
+        std::lock_guard lock(source_mutex());
+        find = source();
+    }
+    if (!find) return nullptr;
+    core::Bytes png;
+    try {
+        png = find(ref);
+    } catch (const std::exception&) {
+        return nullptr;
+    }
+    return keep_picture(ref, png) ? png : nullptr;
+}
+
 std::shared_ptr<const GrayTile> tile(const std::string& ref) {
     Pictures& r = pictures();
     core::Bytes png;
@@ -44,6 +69,7 @@ std::shared_ptr<const GrayTile> tile(const std::string& ref) {
         if (const auto it = r.tiles.find(ref); it != r.tiles.end()) return it->second;
         if (const auto it = r.png.find(ref); it != r.png.end()) png = it->second;
     }
+    if (!png) png = looked_for(ref);
     if (!png) throw core::Error("missing_asset", "the brush picture " + ref + " is not known here (its book's brushes are not read)");
     auto made = std::make_shared<const GrayTile>(tile_of_png(*png));
     std::unique_lock lock(r.mutex);
@@ -138,10 +164,24 @@ void keep_pictures(const std::map<std::string, core::Bytes>& given) {
 }
 
 core::Bytes picture(const std::string& ref) {
+    {
+        Pictures& r = pictures();
+        std::shared_lock lock(r.mutex);
+        const auto it = r.png.find(ref);
+        if (it != r.png.end()) return it->second;
+    }
+    return looked_for(ref);
+}
+
+void set_picture_source(std::function<core::Bytes(const std::string& ref)> find) {
+    std::lock_guard lock(source_mutex());
+    source() = std::move(find);
+}
+
+bool holds_picture(const std::string& ref) {
     Pictures& r = pictures();
     std::shared_lock lock(r.mutex);
-    const auto it = r.png.find(ref);
-    return it == r.png.end() ? nullptr : it->second;
+    return r.png.contains(ref);
 }
 
 void clear_pictures() {
