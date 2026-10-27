@@ -244,7 +244,15 @@ void check_filter(const std::string& who, const Json& f) {
 void check_layer_psd(const std::string& who, const Json& psd) {
     if (!psd.is_object()) refuse(who + ": a smart object's psd is {block, raw, shown}");
     for (const auto& [key, value] : psd.items()) {
-        if (key != "block" && key != "raw" && key != "shown") refuse(who + ": the psd key " + py_repr_str(key) + " is not known to this build");
+        if (key != "block" && key != "raw" && key != "shown" && key != "filters_read")
+            refuse(who + ": the psd key " + py_repr_str(key) + " is not known to this build");
+    }
+    // (PC4 D7, review P2-5: the digest of Photoshop's smart filters read from its block, 64 hexadecimal digits)
+    if (const Json* read = get(psd, "filters_read"); read != nullptr) {
+        const bool hex = read->is_string() && read->get_ref<const std::string&>().size() == 64 &&
+                         std::all_of(read->get_ref<const std::string&>().begin(), read->get_ref<const std::string&>().end(),
+                                     [](char c) { return (c >= '0' && c <= '9') || (c >= 'a' && c <= 'f'); });
+        if (!hex) refuse(who + ": a smart object's psd filters_read is a digest (64 hexadecimal digits)");
     }
     const Json* block = get(psd, "block");
     if (block == nullptr || !block->is_string() || (*block != "SoLd" && *block != "SoLE" && *block != "PlLd"))
@@ -668,6 +676,22 @@ bool filters_drawn(const Layer& layer) {
         const Json* visible = f.is_object() ? get(f, "visible") : nullptr;
         return f.is_object() && !(visible != nullptr && visible->is_boolean() && !visible->get<bool>());
     });
+}
+
+std::string filters_digest(const Layer& layer) {
+    Json stack{{"filters", Json::array()}, {"filters_on", true}};
+    if (layer.smart && layer.smart->is_object()) {
+        if (const Json* filters = get(*layer.smart, "filters"); filters != nullptr) stack["filters"] = *filters;
+        if (const Json* on = get(*layer.smart, "filters_on"); on != nullptr) stack["filters_on"] = *on;
+    }
+    return bytes_ref(stack.dump()).substr(7);  // (its sha256, without "sha256:")
+}
+
+bool photoshop_filters_kept(const Layer& layer) {
+    if (!layer.smart || !layer.smart->is_object()) return false;
+    const Json* psd = get(*layer.smart, "psd");
+    const Json* read = psd != nullptr && psd->is_object() ? get(*psd, "filters_read") : nullptr;
+    return read != nullptr && read->is_string() && read->get<std::string>() == filters_digest(layer);
 }
 
 std::optional<std::string> suffix_of_name(std::string_view name) {

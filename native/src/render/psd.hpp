@@ -12,6 +12,7 @@
 #include "core/ink.hpp"
 #include "core/json.hpp"
 #include "render/image.hpp"
+#include "render/psd_descriptor.hpp"
 #include "render/psd_smart.hpp"
 #include "render/psd_text.hpp"
 
@@ -185,6 +186,10 @@ public:
     int mode() const { return mode_; }
     int channel_count() const { return nchan_; }
     bool psb() const { return psb_; }
+    // (PC4 D7, review P2-6) One descriptor budget for the whole file (psd::descriptor::kUnpackedBudget): what is left of it
+    // after its placed layers' blocks were read (read_placed), for what reads its descriptors after (import_psd: the smart
+    // filters, render/psd_filters; the layer effects) — never started again for a layer.
+    std::size_t descriptor_left() const { return descriptor_left_; }
     // Whether its merged picture is Photoshop's picture of the layers (image resource 1057's hasRealMergedData; true when
     // the file does not say): a file saved without maximised compatibility holds a blank one.
     bool real_merged() const { return real_merged_; }
@@ -310,6 +315,7 @@ public:
 private:
     std::string data_;
     bool psb_ = false;
+    std::size_t descriptor_left_ = descriptor::kUnpackedBudget;
     std::int64_t width_ = 0;
     std::int64_t height_ = 0;
     int nchan_ = 0;

@@ -2,8 +2,9 @@
 // the correction kinds' table (group PC4: filter_raster's, local, a smart filter), its settings read as an op's (clamped,
 // defaults filled) and a book's (out of range refused), its side (PhotoCraft's command id, Photoshop's name, its
 // submenu, how a page of inks takes it), its kernel in this build; the presets; .pcraft's commands read and written back
-// (D0's own); a kind's places moved with a smart object; filters@1 named while a smart filter is one of them and not
-// otherwise; the catalogue of genko inspect --filters.
+// (D0's blurs; D7's table: every kind written as PhotoCraft's command and read back, PhotoCraft's words and units); a
+// kind's places moved with a smart object; filters@1 named while a smart filter is one of them and not otherwise; the
+// catalogue of genko inspect --filters.
 
 #include <QtTest/QtTest>
 
@@ -33,6 +34,31 @@ std::string refused(const std::function<void()>& work) {
         return error.what();
     }
     return {};
+}
+
+// (D7) Two settings the same, their numbers within `tolerance` (a way and back through other units).
+bool alike(const Json& a, const Json& b, double tolerance = 1e-9) {
+    if (a.is_number() && b.is_number() && !a.is_boolean() && !b.is_boolean()) return std::fabs(a.get<double>() - b.get<double>()) <= tolerance;
+    if (a.is_array() && b.is_array()) {
+        if (a.size() != b.size()) return false;
+        for (std::size_t i = 0; i < a.size(); ++i)
+            if (!alike(a[i], b[i], tolerance)) return false;
+        return true;
+    }
+    if (a.is_object() && b.is_object()) {
+        if (a.size() != b.size()) return false;
+        for (const auto& [key, value] : a.items())
+            if (!b.contains(key) || !alike(value, b[key], tolerance)) return false;
+        return true;
+    }
+    return a == b;
+}
+
+// (D7) A kind's settings at its defaults (the ones it needs given).
+Json defaults_of(const std::string& kind) {
+    Json given = Json::object();
+    if (kind == "filter_gallery") given["effects"] = Json::array({Json{{"filter", "colored_pencil"}}});
+    return core::normalize_filter(kind, given, nullptr);
 }
 
 }  // namespace
@@ -192,6 +218,186 @@ private slots:
         QVERIFY(std::fabs(blur->second["radius"].get<double>() - 0.3) < 1e-12);
         QVERIFY(!core::from_upstream("filter.render.tree", Json::object(), 200).has_value());
         QVERIFY(!core::to_upstream("blur", Json::object(), 200).has_value());
+    }
+
+    // D7: every kind of フィルター with PhotoCraft's command written as it and read back the same (at 300 dpi: its lengths
+    // through the document's pixels), at its defaults and at settings of its own; the one whose file the book holds
+    // (置き換え's map) not.
+    void everyKindToPhotoCraftAndBack() {
+        const core::UpstreamCanvas canvas{120, 160};
+        std::size_t mapped = 0;
+        for (const core::FilterInfo& info : core::filter_infos()) {
+            const std::string kind(info.kind);
+            if (kind == "distort_displace") {
+                QVERIFY(!core::to_upstream(kind, Json{{"map", "sha256:" + std::string(64, 'a')}, {"map_suffix", ".png"}}, 300, canvas));
+                QVERIFY(!core::from_upstream(info.upstream, Json{{"horizontal", 10}}, 300, canvas));
+                QVERIFY(core::upstream_filter(info.upstream));
+                continue;
+            }
+            if (kind == "blur_average" || kind == "render_clouds" || kind == "render_difference_clouds") {
+                // (review P2-3: not PhotoCraft's smart filters — it leaves the pixels alone for them —: not written, and a
+                // .pcraft's one draws nothing; a PSD's Photoshop filter of them is read)
+                QVERIFY2(!core::to_upstream(kind, defaults_of(kind), 300, canvas), kind.c_str());
+                QVERIFY2(!core::upstream_filter(info.upstream), kind.c_str());
+                QVERIFY2(core::from_upstream(info.upstream, Json::object(), 300, canvas).has_value(), kind.c_str());
+                continue;
+            }
+            Json settings = defaults_of(kind);
+            if (kind == "blur_path") {  // (Genko's own path across the middle, written out as upstream's — review P2-2)
+                settings["paths"] = Json::array({Json{{"points", Json::array({Json::array({24, 80}), Json::array({96, 80})})}, {"speed", 50}, {"taper", 0}}});
+            }
+            const auto out = core::to_upstream(kind, settings, 300, canvas);
+            QVERIFY2(out.has_value(), kind.c_str());
+            QCOMPARE(out->first, std::string(info.upstream));
+            QVERIFY2(core::upstream_filter(out->first), kind.c_str());
+            const auto back = core::from_upstream(out->first, out->second, 300, canvas);
+            QVERIFY2(back.has_value(), (kind + " " + out->second.dump()).c_str());
+            QCOMPARE(back->first, kind);
+            QVERIFY2(alike(back->second, settings), (kind + "\n" + settings.dump() + "\n" + back->second.dump()).c_str());
+            ++mapped;
+        }
+        QCOMPARE(mapped + 4, core::filter_infos().size());  // (all but 置き換え and the three upstream draws not as smart filters)
+        // (settings of their own: places, lists, colours, choices, lengths)
+        const std::vector<std::pair<std::string, Json>> own{
+            {"blur_radial", Json{{"amount", 30}, {"method", "zoom"}, {"center_x", 0.25}, {"center_y", 0.75}}},
+            {"stylize_wind", Json{{"method", "stagger"}, {"direction", "from_left"}}},
+            {"pixelate_mezzotint", Json{{"type", "medium_lines"}, {"seed", 7}}},
+            {"pixelate_pointillize", Json{{"cell_size", 9}, {"background", Json::array({10, 20, 30})}}},
+            {"stylize_tiles", Json{{"fill", "inverse"}, {"foreground", Json::array({255, 0, 0})}}},
+            {"other_offset", Json{{"horizontal", 12}, {"vertical", -6}, {"undefined_areas", "transparent"}}},
+            {"distort_wave", Json{{"wavelength_min", 20}, {"wavelength_max", 40}, {"type", "square"}}},
+            {"blur_iris", Json{{"pins", Json::array({Json{{"x", 0.3}, {"y", 0.6}, {"radius_x", 0.2}, {"blur", 24}}})}}},
+            {"blur_spin", Json{{"pins", Json::array({Json{{"x", 0.5}, {"y", 0.5}, {"blur_angle", 40}}, Json{{"x", 0.1}, {"y", 0.9}}})}}},
+            {"blur_path", Json{{"paths", Json::array({Json{{"points", Json::array({Json::array({12, 40}), Json::array({60, 80})})}, {"speed", 30}, {"taper", 20}}})}}},
+            {"render_lighting_effects", Json{{"lights", Json::array({Json{{"kind", "point"}, {"x", 0.4}, {"color", Json::array({255, 128, 0})}}})}, {"texture", "luminance"}}},
+            {"adaptive_wide_angle", Json{{"model", "full_spherical"}, {"constraints", Json::array({Json{{"a", Json::array({10, 20})}, {"b", Json::array({50, 22})}, {"orientation", "horizontal"}}})}}},
+            {"lens_correction", Json{{"profile", "generic"}, {"focal_length", 24}, {"correct_ca", false}, {"edge", "color"}, {"edge_color", Json::array({0, 0, 255})}}},
+            {"camera_raw", Json{{"exposure", 0.5}, {"sharpen_amount", 40}, {"sharpen_radius", 1.5}, {"vignette_style", "paint_overlay"},
+                                {"grade_shadows", Json{{"hue", 200}, {"sat", 30}, {"lum", -10}}}, {"point_curve", Json::array({Json::array({0, 10}), Json::array({255, 240})})}}},
+            {"filter_gallery", Json{{"effects", Json::array({Json{{"filter", "neon_glow"}, {"params", Json{{"glow_color", Json::array({0, 255, 0})}}}},
+                                                             Json{{"filter", "rough_pastels"}, {"params", Json{{"light", "bottomLeft"}}}, {"visible", false},
+                                                                  {"foreground", Json::array({1, 2, 3})}}})},
+                                    {"background", Json::array({250, 240, 230})}}},
+        };
+        for (const auto& [kind, given] : own) {
+            const Json settings = core::normalize_filter(kind, given, nullptr);
+            const auto out = core::to_upstream(kind, settings, 300, canvas);
+            QVERIFY2(out.has_value(), kind.c_str());
+            const auto back = core::from_upstream(out->first, out->second, 300, canvas);
+            QVERIFY2(back.has_value() && back->first == kind, (kind + " " + out->second.dump()).c_str());
+            QVERIFY2(alike(back->second, settings, 1e-9), (kind + "\n" + settings.dump() + "\n" + back->second.dump()).c_str());
+        }
+    }
+
+    // D7: PhotoCraft's words and units as Genko's — camelCase keys and choices, colours 0..1 or hexadecimal, the document's
+    // pixels, a path's shares of its canvas, its flat settings of one pin, light or path, its one-step presets, the
+    // gallery's commands —; what is not mapped.
+    void photoCraftsWordsAndUnits() {
+        const auto in = [](const char* command, const Json& params, double dpi = 300, core::UpstreamCanvas canvas = {}) {
+            const auto read = core::from_upstream(command, params, dpi, canvas);
+            return read ? read->second : Json(nullptr);
+        };
+        Json wind = in("filter.stylize.wind", Json{{"method", "blast"}, {"direction", "fromLeft"}, {"seed", 3}});
+        QCOMPARE(wind["direction"], Json("from_left"));
+        QCOMPARE(wind["method"], Json("blast"));
+        QCOMPARE(in("filter.pixelate.mezzotint", Json{{"type", "mediumLines"}})["type"], Json("medium_lines"));
+        QCOMPARE(in("filter.blur.smartBlur", Json{{"mode", "overlayEdge"}})["mode"], Json("overlay_edge"));
+        // (keys it has none of: left out, as PhotoCraft reads only its own)
+        QCOMPARE(in("filter.cameraRaw", Json{{"pixelScale", 3}, {"vignetteStyle", "paintOverlay"}})["vignette_style"], Json("paint_overlay"));
+        const Json lens = in("filter.lensCorrection", Json{{"correctCA", false}, {"edge", "edgeExtension"}, {"profile", "generic"}, {"focalLength", 35}});
+        QCOMPARE(lens["correct_ca"], Json(false));
+        QCOMPARE(lens["edge"], Json("extension"));
+        // colours: 0..1 and #rrggbb
+        std::string green(1, '#');
+        green += "00ff00";
+        const Json tiles = in("filter.stylize.tiles", Json{{"foreground", Json::array({1.0, 0.5, 0.0, 1.0})}, {"background", green}});
+        QCOMPARE(tiles["foreground"], Json::array({255, 128, 0}));
+        QCOMPARE(tiles["background"], Json::array({0, 255, 0}));
+        QVERIFY(in("filter.stylize.tiles", Json{{"foreground", "red"}}).is_null());
+        // lengths: the document's pixels at 300 dpi as the working 200 dpi's
+        QVERIFY(std::fabs(in("filter.noise.median", Json{{"radius", 6}})["radius"].get<double>() - 4) < 1e-12);
+        QVERIFY(std::fabs(in("filter.distort.wave", Json{{"wavelengthMax", 150}})["wavelength_max"].get<double>() - 100) < 1e-12);
+        QVERIFY(std::fabs(in("filter.cameraRaw", Json{{"sharpenRadius", 2.4}}, 400)["sharpen_radius"].get<double>() - 1.2) < 1e-12);
+        // (one pin of the flat settings; an empty list is upstream's one pin)
+        const Json iris = in("filter.blurGallery.irisBlur", Json{{"centerX", 0.3}, {"radiusX", 0.2}, {"blur", 30}}, 600);
+        QCOMPARE(iris["pins"].size(), std::size_t(1));
+        QVERIFY(std::fabs(iris["pins"][0]["x"].get<double>() - 0.3) < 1e-12 && std::fabs(iris["pins"][0]["blur"].get<double>() - 10) < 1e-12);
+        // (an empty list: upstream's one pin, its blur 15 of the document's pixels — 10 working pixels at 300 dpi)
+        const Json field = in("filter.blurGallery.fieldBlur", Json{{"pins", Json::array()}});
+        QCOMPARE(field["pins"].size(), std::size_t(1));
+        QCOMPARE(field["pins"][0]["x"].get<double>(), 0.5);
+        QVERIFY(std::fabs(field["pins"][0]["blur"].get<double>() - 10) < 1e-12);
+        // review P2-2: lengths not given are upstream's defaults of the document's pixels (300 dpi: × 2/3)
+        QVERIFY(std::fabs(in("filter.blur.gaussianBlur", Json::object())["radius"].get<double>() - 2.0 / 3.0) < 1e-12);
+        QVERIFY(std::fabs(in("filter.blur.motionBlur", Json{{"angle", 45}})["distance"].get<double>() - 20.0 / 3.0) < 1e-12);
+        QVERIFY(std::fabs(in("filter.cameraRaw", Json::object())["sharpen_radius"].get<double>() - 2.0 / 3.0) < 1e-12);
+        QVERIFY(std::fabs(in("filter.blurGallery.irisBlur", Json{{"centerX", 0.3}})["pins"][0]["blur"].get<double>() - 10) < 1e-12);
+        // review P2-1: シアー without points is its window's amount — upstream's three points
+        QCOMPARE(in("filter.distort.shear", Json{{"amount", 40}, {"undefinedAreas", "repeat"}})["points"],
+                 Json::array({Json::array({0, 0}), Json::array({0.5, 0.4}), Json::array({1, 0})}));
+        QCOMPARE(in("filter.distort.shear", Json{{"amount", 40}, {"undefinedAreas", "repeat"}})["undefined_areas"], Json("repeat"));
+        QCOMPARE(in("filter.distort.shear", Json{{"points", Json::array({Json::array({0, 0.1}), Json::array({1, -0.1})})}})["points"],
+                 Json::array({Json::array({0, 0.1}), Json::array({1, -0.1})}));
+        const Json spin = in("filter.blurGallery.spinBlur", Json{{"pins", Json::array({Json{{"x", 0.1}, {"blurAngle", 90}, {"radiusY", 0.4}}})}});
+        QCOMPARE(spin["pins"][0]["blur_angle"].get<double>(), 90.0);
+        QCOMPARE(spin["pins"][0]["radius_y"].get<double>(), 0.4);
+        // (a path's points shares of the canvas: the page's mm; without the canvas, not mapped)
+        const Json path = in("filter.blurGallery.pathBlur", Json{{"startX", 0.25}, {"endX", 0.75}, {"speed", 60}}, 400, core::UpstreamCanvas{100, 200});
+        QCOMPARE(path["paths"][0]["points"], Json::array({Json::array({25.0, 100.0}), Json::array({75.0, 100.0})}));
+        QVERIFY(std::fabs(path["paths"][0]["speed"].get<double>() - 30) < 1e-12);
+        QVERIFY(in("filter.blurGallery.pathBlur", Json{{"paths", Json::array({Json{{"points", Json::array({Json::array({0, 0}), Json::array({1, 1})})}}})}}).is_null());
+        // (upstream's own path across the middle, its speed 50 of the document's pixels: written out; without the canvas, not)
+        const Json middle = in("filter.blurGallery.pathBlur", Json::object(), 400, core::UpstreamCanvas{100, 200});
+        QCOMPARE(middle["paths"][0]["points"], Json::array({Json::array({20.0, 100.0}), Json::array({80.0, 100.0})}));
+        QVERIFY(std::fabs(middle["paths"][0]["speed"].get<double>() - 25) < 1e-12);
+        QVERIFY(in("filter.blurGallery.pathBlur", Json::object()).is_null());
+        // (a light of the flat settings, its colour 0..1; a constraint's ends the document's pixels as mm)
+        const Json light = in("filter.render.lightingEffects", Json{{"lightType", "infinite"}, {"color", Json::array({0, 0.5, 1})}, {"whiteIsHigh", false}});
+        QCOMPARE(light["lights"][0]["kind"], Json("infinite"));
+        QCOMPARE(light["lights"][0]["color"], Json::array({0, 128, 255}));
+        QCOMPARE(light["white_is_high"], Json(false));
+        const Json wide = in("filter.adaptiveWideAngle", Json{{"model", "fullSpherical"}, {"constraints", Json::array({Json{{"a", Json::array({300, 0})}, {"b", Json::array({600, 300})}}})}});
+        QCOMPARE(wide["model"], Json("full_spherical"));
+        QVERIFY(std::fabs(wide["constraints"][0]["a"][0].get<double>() - 25.4) < 1e-12 && std::fabs(wide["constraints"][0]["b"][1].get<double>() - 25.4) < 1e-12);
+        // the presets and the gallery
+        const auto sharpen = core::from_upstream("filter.sharpen.sharpenMore", Json::object(), 200);
+        QVERIFY(sharpen && sharpen->first == "sharpen_unsharp_mask");
+        QCOMPARE(sharpen->second["amount"].get<double>(), 150.0);
+        const auto pencil = core::from_upstream("filter.gallery.coloredPencil", Json{{"pencilWidth", 6}, {"foreground", Json::array({1, 0, 0})}}, 300);
+        QVERIFY(pencil && pencil->first == "filter_gallery");
+        QCOMPARE(pencil->second["effects"][0]["filter"], Json("colored_pencil"));
+        QCOMPARE(pencil->second["effects"][0]["params"]["pencil_width"].get<double>(), 6.0);
+        QCOMPARE(pencil->second["effects"][0]["foreground"], Json::array({255, 0, 0}));
+        const auto neon = core::from_upstream("filter.filterGallery",
+                                              Json{{"effects", Json::array({Json{{"filter", "noSuchEffect"}, {"visible", false}}, Json{{"filter", "neonGlow"}, {"glowSize", 8}}})},
+                                                   {"glowColor", Json::array({1, 1, 0})}},
+                                              300);
+        QVERIFY(neon && neon->second["effects"].size() == 1);  // (a hidden effect upstream does not know: drawn by neither)
+        QCOMPARE(neon->second["effects"][0]["params"]["glow_color"], Json::array({255, 255, 0}));
+        QCOMPARE(neon->second["effects"][0]["params"]["glow_size"].get<double>(), 8.0);
+        QVERIFY(!core::from_upstream("filter.filterGallery", Json{{"effects", Json::array({Json{{"filter", "noSuchEffect"}}})}}, 300));
+        // not mapped: PhotoCraft's filters Genko has no kind of, a displacement map's file, settings the kind refuses, a
+        // texture of a channel, a resolution of none; commands PhotoCraft does not know
+        for (const char* command : {"filter.liquify", "edit.puppetWarp", "layer.smartObjects.perspectiveWarp", "plugin.run"}) {
+            QVERIFY(!core::from_upstream(command, Json::object(), 300));
+            QVERIFY(core::upstream_filter(command));
+        }
+        QVERIFY(!core::from_upstream("filter.distort.displace", Json{{"map", "/tmp/map.psd"}}, 300));
+        QVERIFY(!core::from_upstream("filter.blur.gaussianBlur", Json{{"radius", "big"}}, 300));
+        QVERIFY(!core::from_upstream("filter.blur.gaussianBlur", Json{{"radius", 1}}, 0));
+        QVERIFY(!core::upstream_filter("filter.unknown.later"));
+        QVERIFY(!core::upstream_filter("filter.render.tree"));
+        QVERIFY(!core::to_upstream("render_lighting_effects", Json{{"texture", Json{{"channel", "a1"}}}}, 300));
+        QVERIFY(!core::to_upstream("adaptive_wide_angle", Json{{"interpolation", "bilinear"}}, 300));
+        QVERIFY(!core::to_upstream("blur_path", Json{{"paths", Json::array({Json{{"points", Json::array({Json::array({0, 0}), Json::array({5, 5})})}}})}}, 300));
+        // written: camelCase, colours 0..1, the document's pixels
+        const auto written = core::to_upstream("stylize_tiles", Json{{"fill", "foreground"}, {"background", Json::array({0, 0, 255})}, {"max_offset", 20}}, 300);
+        QVERIFY(written);
+        QCOMPARE(written->second["maxOffset"].get<double>(), 20.0);
+        QCOMPARE(written->second["background"], Json::array({0.0, 0.0, 1.0}));
+        QCOMPARE(written->second["fill"], Json("foreground"));
+        const auto moved = core::to_upstream("blur_motion", Json{{"distance", 10}}, 600);
+        QCOMPARE(moved->second["distance"].get<double>(), 30.0);
     }
 
     void placesGoWithASmartObject() {

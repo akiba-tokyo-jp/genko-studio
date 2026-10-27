@@ -211,15 +211,6 @@ bool is_ref(const std::string& ref) {
 // The suffixes a filter's file may have (the displacement map: a PNG or a PSD, design 2.6).
 bool known_suffix(const std::string& suffix) { return suffix == ".png" || suffix == ".psd"; }
 
-// Photoshop's units (the document's pixels at `dpi`) and the working 200 dpi's.
-double to_working(double px, double dpi) { return dpi > 0 ? px * 200.0 / dpi : px; }
-double from_working(double px, double dpi) { return dpi > 0 ? px * dpi / 200.0 : px; }
-
-double number_at(const Json& params, const char* key, double fallback) {
-    const Json* v = params.is_object() ? get(params, key) : nullptr;
-    return v != nullptr && v->is_number() && !v->is_boolean() ? v->get<double>() : fallback;
-}
-
 }  // namespace
 
 std::string_view to_string(FilterInks inks) {
@@ -1158,25 +1149,7 @@ const std::vector<FilterPreset>& filter_presets() {
     return all;
 }
 
-std::optional<std::pair<std::string, Json>> from_upstream(std::string_view command, const Json& params, double dpi) {
-    for (const FilterPreset& preset : filter_presets()) {
-        if (preset.upstream != command || !pc4_filter(preset.kind)) continue;
-        if (preset.kind == "blur_gaussian") {  // (its radius is the document's pixels upstream)
-            return std::make_pair(std::string(preset.kind), Json{{"radius", to_working(preset.params["radius"].get<double>(), dpi)}});
-        }
-    }
-    if (command == "filter.blur.gaussianBlur") return std::make_pair(std::string("blur_gaussian"), Json{{"radius", to_working(number_at(params, "radius", 1), dpi)}});
-    if (command == "filter.blur.boxBlur") return std::make_pair(std::string("blur_box"), Json{{"radius", to_working(number_at(params, "radius", 1), dpi)}});
-    return std::nullopt;  // (D7: the rest of the table)
-}
-
-std::optional<std::pair<std::string, Json>> to_upstream(std::string_view kind, const Json& params, double dpi) {
-    const FilterInfo* found = filter_info(kind);
-    if (found == nullptr) return std::nullopt;
-    if (kind == "blur_gaussian" || kind == "blur_box")
-        return std::make_pair(std::string(found->upstream), Json{{"radius", from_working(number_at(params, "radius", 1), dpi)}});
-    return std::nullopt;  // (D7)
-}
+// (D7: from_upstream and to_upstream — core/filter_upstream.cpp)
 
 // --- filters@1 -------------------------------------------------------------------------------------------------------
 

@@ -40,6 +40,7 @@ genko_library(genko_render
     psd_keep.cpp
     psd_descriptor.cpp
     psd_smart.cpp
+    psd_filters.cpp
     psd_text.cpp
     movie.cpp
     anim.cpp

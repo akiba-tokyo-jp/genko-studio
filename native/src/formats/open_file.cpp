@@ -453,6 +453,31 @@ Opened open_psd(std::string_view bytes, const std::string& file, const OpenOptio
             notes.push_back("この版で読めないレイヤーは開きませんでした（" + names + "）");
         }
         if (report.contains("psd_blocks_cut")) notes.push_back("PSD の塊の一部は、多すぎるか大きすぎるため保てませんでした");
+        // (PC4 D7: Photoshop's smart filters — read as Genko's, or the smart objects left as Photoshop's picture: at most 8
+        // of them named)
+        if (report.contains("smart_filters_read"))
+            notes.push_back("Photoshop のスマートフィルターを Genko のスマートフィルターとして読みました（見えは Genko の描き方になります）");
+        if (report.contains("smart_filters_shown") && report["smart_filters_shown"].is_array()) {
+            std::size_t said = 0, rest = report.value("smart_filters_shown_more", std::size_t{0});
+            for (const Json& s : report["smart_filters_shown"]) {
+                if (said >= 8) {
+                    ++rest;
+                    continue;
+                }
+                ++said;
+                std::string names;
+                if (s.contains("filters"))
+                    for (const Json& n : s["filters"]) names += (names.empty() ? "" : "、") + (n.is_string() ? n.get<std::string>() : std::string());
+                if (s.value("more", std::size_t{0}) > 0) names += " ほか " + std::to_string(s.value("more", std::size_t{0})) + " 個";
+                const std::string why = s.value("why", std::string());
+                const std::string what = why == "unknown"    ? "のスマートフィルター（" + names + "）はこの版の Genko に写せないため"
+                                         : why == "mask"     ? "のスマートフィルターはフィルターマスクを読めないため"
+                                         : why == "too_many" ? "のスマートフィルターが多すぎるため"
+                                                             : "のスマートフィルターが読めないため";
+                notes.push_back("スマートオブジェクト「" + s.value("title", std::string()) + "」" + what + "、Photoshop の絵のまま表示します");
+            }
+            if (rest > 0) notes.push_back("ほか " + std::to_string(rest) + " 個のスマートオブジェクトも、Photoshop のスマートフィルターを写せないため Photoshop の絵のまま表示します");
+        }
         if (report.contains("in_8_bits")) {
             const std::string why = report["in_8_bits"].is_string() ? report["in_8_bits"].get<std::string>() : std::string();
             notes.push_back(why == "budget" ? "高精度の画素が本の上限（1 GiB）を越えるため、レイヤーを 8 bit で読みました"

@@ -3,6 +3,7 @@
 
 #include "render/psd_descriptor.hpp"
 
+#include <array>
 #include <cstring>
 
 namespace genko::render::psd::descriptor {
@@ -278,6 +279,18 @@ Object read_versioned(std::string_view payload, std::size_t at, std::size_t& bud
     Object out = read_structure(b, 0);
     budget -= b.spent();
     return out;
+}
+
+std::optional<std::string> genko_blend(std::string_view blnm) {
+    static const std::array<std::pair<std::string_view, std::string_view>, 20> kModes{{
+        {"Nrml", "normal"},        {"Drkn", "darken"},      {"Mltp", "multiply"},   {"CBrn", "color_burn"},  {"linearBurn", "linear_burn"},
+        {"Lghn", "lighten"},       {"Scrn", "screen"},      {"CDdg", "color_dodge"}, {"linearDodge", "add"}, {"Ovrl", "overlay"},
+        {"SftL", "soft_light"},    {"HrdL", "hard_light"},  {"Dfrn", "difference"}, {"Xclu", "exclusion"},   {"blendSubtraction", "subtract"},
+        {"blendDivide", "divide"}, {"H   ", "hue"},         {"Strt", "saturation"}, {"Clr ", "color"},       {"Lmns", "luminosity"},
+    }};
+    for (const auto& [psd, genko] : kModes)
+        if (blnm == psd) return std::string(genko);
+    return std::nullopt;
 }
 
 }  // namespace genko::render::psd::descriptor

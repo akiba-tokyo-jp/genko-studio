@@ -22,6 +22,7 @@
 #include <map>
 #include <set>
 #include <string>
+#include <tuple>
 #include <vector>
 
 #include "core/base64.hpp"
@@ -572,6 +573,156 @@ private slots:
                                  "高度な合成のチャンネル", "フォルダーの不透明度", "filter.unknown.later"}) {
             QVERIFY2(said(notes, part), qPrintable(QString::fromUtf8(part) + QStringLiteral("\n") + QString::fromStdString(joined(notes))));
         }
+    }
+
+    // PC4 D7: .pcraft's smart filters through the table (core::from_upstream, to_upstream) both ways — the fixture's Gaussian
+    // in the working 200 dpi's pixels; a stack in PhotoCraft's words (camelCase, colours 0..1, a pin's blur in the document's
+    // pixels, a hidden one) read as Genko's, one PhotoCraft does not know left out and said; written back as PhotoCraft's
+    // commands and read the same —; a filter PhotoCraft draws that Genko cannot take, a blend Genko has not, or more filters
+    // than a smart object holds make the smart object its picture (the stack never read in part), said; a Genko filter
+    // PhotoCraft has none of makes the written smart object its picture, said.
+    void smartFiltersBothWays() {
+        const std::string rich = fixture("rich_rgb8.pcraft");
+        const Json base = manifest_of(rich);
+        const double dpi = base["document"]["resolution_dpi"].get<double>();
+        const std::function<Json*(Json&, const std::string&)> find = [&find](Json& layers, const std::string& name) -> Json* {
+            for (Json& l : layers) {
+                if (l.value("name", std::string()) == name) return &l;
+                if (l["content"].value("kind", std::string()) == "group")
+                    if (Json* inside = find(l["content"]["children"], name)) return inside;
+            }
+            return nullptr;
+        };
+        const auto with_filters = [&](const Json& filters) {
+            Json m = base;
+            Json* smart = find(m["document"]["layers"], "Smart");
+            if (smart == nullptr) throw std::runtime_error("no Smart layer");
+            (*smart)["content"]["smart_filters"] = filters;
+            return bundle(m, rich);
+        };
+        const auto sf = [](const std::string& command, Json params, const std::string& blend = "Normal", bool visible = true) {
+            return Json{{"command", command}, {"params", std::move(params)}, {"blend", blend}, {"opacity", 0.75}, {"visible", visible}};
+        };
+        // (the fixture's: a Gaussian of 2 of its pixels)
+        {
+            const formats::Opened opened = formats::open_file(rich, "rich_rgb8.pcraft");
+            const core::Layer* smart = titled(opened.doc.page(0), "Smart");
+            QVERIFY(smart && smart->smart);
+            const Json& f = (*smart->smart)["filters"][0];
+            QCOMPARE(f["kind"], Json("blur_gaussian"));
+            QVERIFY(std::abs(f["params"]["radius"].get<double>() - 2 * 200 / dpi) < 1e-9);
+        }
+        // read: PhotoCraft's words and units
+        const formats::Opened read = formats::open_file(
+            with_filters(Json::array({sf("filter.stylize.wind", Json{{"direction", "fromLeft"}, {"method", "stagger"}}),
+                                      sf("filter.pixelate.pointillize", Json{{"cellSize", 12}, {"background", Json::array({0.0, 0.5, 1.0})}}, "Multiply"),
+                                      sf("filter.blurGallery.irisBlur", Json{{"pins", Json::array({Json{{"x", 0.25}, {"y", 0.5}, {"blur", 30}}})}}, "Normal", false),
+                                      sf("filter.unknown.later", Json::object())})),
+            "words.pcraft");
+        const core::Layer* smart = titled(read.doc.page(0), "Smart");
+        QVERIFY(smart && smart->kind == core::LayerKind::Smart);
+        const Json filters = (*smart->smart)["filters"];
+        QCOMPARE(filters.size(), std::size_t(3));
+        QCOMPARE(filters[0]["kind"], Json("stylize_wind"));
+        QCOMPARE(filters[0]["params"]["direction"], Json("from_left"));
+        QCOMPARE(filters[0]["params"]["method"], Json("stagger"));
+        QCOMPARE(filters[0]["opacity"].get<double>(), 0.75);
+        QCOMPARE(filters[1]["kind"], Json("pixelate_pointillize"));
+        QVERIFY(std::abs(filters[1]["params"]["cell_size"].get<double>() - 12 * 200 / dpi) < 1e-9);
+        QCOMPARE(filters[1]["params"]["background"], Json::array({0, 128, 255}));
+        QCOMPARE(filters[1]["blend"], Json("multiply"));
+        QCOMPARE(filters[2]["kind"], Json("blur_iris"));
+        QVERIFY(std::abs(filters[2]["params"]["pins"][0]["blur"].get<double>() - 30 * 200 / dpi) < 1e-9);
+        QCOMPARE(filters[2]["visible"], Json(false));
+        QVERIFY2(said(read.notes, "filter.unknown.later"), joined(read.notes).c_str());
+        core::smart::validate_smart(read.doc);
+        // written back: PhotoCraft's commands, read the same
+        std::vector<std::string> notes;
+        const std::string bytes = formats::pcraft_bytes(read.doc, 0, formats::PcraftOptions{}, &notes);
+        Json written = manifest_of(bytes);
+        const Json* layer = find(written["document"]["layers"], "Smart");
+        QVERIFY(layer && (*layer)["content"]["kind"] == Json("smart"));
+        const Json& stack = (*layer)["content"]["smart_filters"];
+        QCOMPARE(stack.size(), std::size_t(3));
+        QCOMPARE(stack[0]["command"], Json("filter.stylize.wind"));
+        QCOMPARE(stack[0]["params"]["direction"], Json("fromLeft"));
+        QCOMPARE(stack[1]["command"], Json("filter.pixelate.pointillize"));
+        QVERIFY(std::abs(stack[1]["params"]["cellSize"].get<double>() - 12) < 1e-9);
+        QVERIFY(std::abs(stack[1]["params"]["background"][1].get<double>() - 128 / 255.0) < 1e-9);
+        QCOMPARE(stack[1]["blend"], Json("Multiply"));
+        QCOMPARE(stack[2]["command"], Json("filter.blurGallery.irisBlur"));
+        QVERIFY(std::abs(stack[2]["params"]["pins"][0]["blur"].get<double>() - 30) < 1e-9);
+        QCOMPARE(stack[2]["visible"], Json(false));
+        const formats::Opened again = formats::open_file(bytes, "again.pcraft");
+        const core::Layer* back = titled(again.doc.page(0), "Smart");
+        QVERIFY(back && back->smart);
+        QCOMPARE((*back->smart)["filters"].size(), std::size_t(3));
+        for (std::size_t i = 0; i < 3; ++i) {
+            QCOMPARE((*back->smart)["filters"][i]["kind"], filters[i]["kind"]);
+            QCOMPARE((*back->smart)["filters"][i]["blend"], filters[i]["blend"]);
+        }
+        QCOMPARE((*back->smart)["filters"][1]["params"]["background"], Json::array({0, 128, 255}));
+        // not mapped: the smart object its picture, the stack never read in part
+        Json lots = Json::array();
+        for (int i = 0; i < 300; ++i) lots.push_back(sf("filter.blur.gaussianBlur", Json{{"radius", 1}}));
+        const std::vector<std::pair<Json, std::string>> unmapped{
+            {Json::array({sf("filter.blur.gaussianBlur", Json{{"radius", 2}}), sf("filter.liquify", Json::object())}), "filter.liquify"},
+            {Json::array({sf("filter.blur.gaussianBlur", Json{{"radius", 2}}, "VividLight")}), "VividLight"},
+            {Json::array({sf("filter.distort.displace", Json{{"map", "/tmp/map.psd"}})}), "filter.distort.displace"},
+            {lots, "64 個を超える"},
+        };
+        for (const auto& [stack_given, part] : unmapped) {
+            const formats::Opened opened = formats::open_file(with_filters(stack_given), "unmapped.pcraft");
+            const core::Layer* pixels = titled(opened.doc.page(0), "Smart");
+            QVERIFY2(pixels && pixels->kind == core::LayerKind::Raster && !pixels->smart, part.c_str());
+            QVERIFY2(said(opened.notes, part) && said(opened.notes, "見えのまま画素にしました"), (part + "\n" + joined(opened.notes)).c_str());
+        }
+        // review P2-4 and P3-5: one that does not show (hidden, or the stack off), or a smart object without upstream's
+        // picture, keeps the smart object — the filter left out, said; one upstream does not draw as a smart filter (平均・
+        // 雲模様) left out as upstream leaves it
+        const auto kept_without = [&](Json stack_given, const std::function<void(Json&)>& edit) {
+            Json m = base;
+            Json* layer_given = find(m["document"]["layers"], "Smart");
+            (*layer_given)["content"]["smart_filters"] = std::move(stack_given);
+            edit((*layer_given)["content"]);
+            return formats::open_file(bundle(m, rich), "kept.pcraft");
+        };
+        const Json liquify_hidden = Json::array({sf("filter.blur.gaussianBlur", Json{{"radius", 2}}), sf("filter.liquify", Json::object(), "Normal", false)});
+        const Json liquify_shown = Json::array({sf("filter.blur.gaussianBlur", Json{{"radius", 2}}), sf("filter.liquify", Json::object())});
+        const Json average = Json::array({sf("filter.blur.gaussianBlur", Json{{"radius", 2}}), sf("filter.blur.average", Json::object())});
+        const std::vector<std::tuple<std::string, Json, std::function<void(Json&)>, std::string>> kept_cases{
+            {"hidden", liquify_hidden, [](Json&) {}, "filter.liquify"},
+            {"stack off", liquify_shown, [](Json& c) { c["filters_enabled"] = false; }, "filter.liquify"},
+            {"no cache", liquify_shown, [](Json& c) { c["cache"] = nullptr; }, "filter.liquify"},
+            {"VividLight, no cache", Json::array({sf("filter.blur.gaussianBlur", Json{{"radius", 2}}), sf("filter.blur.boxBlur", Json{{"radius", 2}}, "VividLight")}),
+             [](Json& c) { c["cache"] = nullptr; }, "filter.blur.boxBlur"},
+            {"average", average, [](Json&) {}, "filter.blur.average"},
+        };
+        for (const auto& [what, stack_given, edit, part] : kept_cases) {
+            const formats::Opened opened = kept_without(stack_given, edit);
+            const core::Layer* kept = titled(opened.doc.page(0), "Smart");
+            QVERIFY2(kept && kept->kind == core::LayerKind::Smart && kept->smart, what.c_str());
+            QCOMPARE((*kept->smart)["filters"].size(), std::size_t(1));
+            QCOMPARE((*kept->smart)["filters"][0]["kind"], Json("blur_gaussian"));
+            QVERIFY2(said(opened.notes, part) && said(opened.notes, "外しました"), (what + "\n" + joined(opened.notes)).c_str());
+            core::smart::validate_smart(opened.doc);
+        }
+        // (the Genko kinds upstream does not draw as smart filters are written as the smart object's picture)
+        const core::Document averaged =
+            run(read.doc, Json::array({Json{{"op", "smart_filter_add"}, {"page", 1}, {"id", smart->id}, {"kind", "blur_average"}}}));
+        std::vector<std::string> average_notes;
+        Json average_written = manifest_of(formats::pcraft_bytes(averaged, 0, formats::PcraftOptions{}, &average_notes));
+        const Json* average_layer = find(average_written["document"]["layers"], "Smart");
+        QVERIFY(average_layer && (*average_layer)["content"]["kind"] == Json("raster"));
+        QVERIFY2(said(average_notes, "平均"), joined(average_notes).c_str());
+        // a Genko filter PhotoCraft has none of (Python's blur): written as its picture, said
+        const core::Document blurred =
+            run(read.doc, Json::array({Json{{"op", "smart_filter_add"}, {"page", 1}, {"id", smart->id}, {"kind", "blur"}, {"radius", 2}}}));
+        std::vector<std::string> said_notes;
+        Json picture = manifest_of(formats::pcraft_bytes(blurred, 0, formats::PcraftOptions{}, &said_notes));
+        const Json* as_pixels = find(picture["document"]["layers"], "Smart");
+        QVERIFY(as_pixels && (*as_pixels)["content"]["kind"] == Json("raster"));
+        QVERIFY2(said(said_notes, "PhotoCraft に同じものが無いため、スマートオブジェクトを見えのまま画素にしました"), joined(said_notes).c_str());
     }
 
     // The adjustments as correction layers of Genko's kinds; the one Genko has not, said.

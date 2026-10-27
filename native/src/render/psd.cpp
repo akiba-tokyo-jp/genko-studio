@@ -550,12 +550,12 @@ void linked_blocks(std::string_view d, bool psb, std::uint64_t from, std::uint64
 }
 
 // (PC3 A3) a pixel layer's placed layer block read: SoLd, else SoLE, else PlLd — PlLd's corners where SoLd has none.
-std::optional<Placed> placed_of(std::string_view d, const File::Record& rec) {
+std::optional<Placed> placed_of(std::string_view d, const File::Record& rec, std::size_t& budget) {
     const auto block = [&](std::uint64_t at, std::uint64_t size) { return d.substr(static_cast<std::size_t>(at), static_cast<std::size_t>(size)); };
-    std::optional<Placed> legacy = rec.plld_size > 0 ? read_placed("PlLd", block(rec.plld_at, rec.plld_size)) : std::nullopt;
+    std::optional<Placed> legacy = rec.plld_size > 0 ? read_placed("PlLd", block(rec.plld_at, rec.plld_size), budget) : std::nullopt;
     std::optional<Placed> out;
-    if (rec.sold_size > 0) out = read_placed("SoLd", block(rec.sold_at, rec.sold_size));
-    if (!out && rec.sole_size > 0) out = read_placed("SoLE", block(rec.sole_at, rec.sole_size));
+    if (rec.sold_size > 0) out = read_placed("SoLd", block(rec.sold_at, rec.sold_size), budget);
+    if (!out && rec.sole_size > 0) out = read_placed("SoLE", block(rec.sole_at, rec.sole_size), budget);
     if (!out) return legacy;
     if (!out->has_corners && legacy && legacy->has_corners) {
         out->corners = legacy->corners;
@@ -995,7 +995,7 @@ File File::read(std::string data, const Limits& limits, bool lab) {
         layer.kind = rec.kind;
         layer.record = n;
         if (rec.kind == "pixels") {  // (PC3 A3, the user's decision 3: a placed layer is a smart object)
-            if (auto placed = placed_of(f.data_, rec)) {
+            if (auto placed = placed_of(f.data_, rec, f.descriptor_left_)) {
                 layer.kind = "smart";
                 layer.placed = std::move(placed);
             }
