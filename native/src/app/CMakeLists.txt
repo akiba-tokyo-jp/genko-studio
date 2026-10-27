@@ -183,6 +183,10 @@ genko_library(genko_app
     # PC4 F-e: Camera Raw's window for a camera RAW file (opening one, a RAW smart object's コンテンツを編集)
     camera_raw_open.cpp
     main_window_raw.cpp
+    # PC4 E6: レイヤー → レイヤースタイル (the window), the スタイル panel
+    layer_style_dialog.cpp
+    styles_panel.cpp
+    main_window_styles.cpp
     ${GENKO_APP_RESOURCES}
     ${GENKO_APP_FONTS}
   PUBLIC_DEPS genko_core genko_storage genko_render genko_render_ops genko_formats genko_service Qt6::Core Qt6::Gui Qt6::Widgets Qt6::Svg Qt6::Concurrent

@@ -479,6 +479,7 @@ void MainWindow::build_actions() {
     build_shape_actions();      // (pen-shapes@1, PC3 C-b: the shape tools, シェイプを結合…: main_window_shapes.cpp)
     build_pattern_actions();    // (PC4 E3: パターンを定義…, パターンのレイヤー…, パターンプレビュー: main_window_patterns.cpp)
     build_brush_preset_actions();  // (PC4 E2: ブラシを定義…, プリセット ▸: main_window_brush_presets.cpp)
+    build_layer_style_actions();  // (PC4 E6: レイヤー → レイヤースタイル ▸: main_window_styles.cpp)
     build_align_actions();      // (PC3 C-d: 重ね順・整列・分布・リンク・ロック, スナップ (with 定規's グリッドにスナップ), the move tool's: main_window_align.cpp)
     build_file_actions();       // (PC4 F-0: 節 F's new commands of ファイル, frames until F-b and F-c: main_window_file.cpp)
     build_filter_actions();     // (PC4 節 D: フィルター's commands, 前回のフィルター: filter_menu.cpp)
@@ -747,6 +748,7 @@ void MainWindow::build_menus() {
     build_shape_menus(edit, view, tools, layers);  // (PC3 C-b: the shape tools and the shape parts' commands, app/main_window_shapes.cpp)
     build_pattern_menus(edit, view);  // (PC4 E3: パターンを定義…, パターンプレビュー: app/main_window_patterns.cpp)
     build_brush_preset_menus(edit);  // (PC4 E2: ブラシを定義…, プリセット ▸: app/main_window_brush_presets.cpp)
+    build_layer_style_menus(layers);  // (PC4 E6: レイヤースタイル ▸ before レイヤーマスク: app/main_window_styles.cpp)
     pages->addAction(action("act_book_preview"));
     pages->addAction(action("act_checks"));
     pages->addSeparator();

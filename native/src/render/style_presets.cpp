@@ -403,7 +403,7 @@ Json import_asl(std::string_view data, double dpi, const std::filesystem::path& 
     return Json{{"items", std::move(items)}, {"patterns", std::move(added_patterns)}, {"notes", notes}};
 }
 
-Image thumbnail(const Json& item, int size, const std::filesystem::path& config_dir, const std::vector<preset_store::Group>& pattern_groups) {
+Image swatch(const Json& style, const core::Document* book, int size, const std::string& blend, const std::array<double, 2>& light) {
     size = std::clamp(size, 16, 256);
     const std::size_t pixels = static_cast<std::size_t>(size) * static_cast<std::size_t>(size);
     // (upstream's swatch: a rounded square of light grey, 1 px of anti-aliasing)
@@ -422,6 +422,34 @@ Image thumbnail(const Json& item, int size, const std::filesystem::path& config_
         }
     }
     std::vector<float> backdrop(pixels * 4, 0.0f);
+    Json normal;
+    try {
+        normal = style.is_null() ? Json(nullptr) : core::layer_style_spec(style);
+    } catch (const core::Error&) {
+        normal = nullptr;
+    }
+    if (normal.is_null()) {
+        backdrop = content;
+    } else {
+        layer_styles::Inputs in;
+        in.style = &normal;
+        in.light = light;
+        in.dpi = 150.0 * size / 64.0;
+        in.book = book;
+        in.wide = in.area = Box{0, 0, size, size};
+        in.layer_box = Box{static_cast<int>(x0), static_cast<int>(x0), static_cast<int>(x1), static_cast<int>(x1)};
+        in.page = Size{size, size};
+        in.blend = blend.empty() ? std::string("normal") : blend;
+        layer_styles::composite(in, layer_styles::srgb_mixing(), content, backdrop);
+    }
+    std::string bytes(pixels * 4, '\0');
+    for (std::size_t i = 0; i < pixels * 4; ++i) {
+        bytes[i] = static_cast<char>(static_cast<std::uint8_t>(std::lround(std::clamp(backdrop[i], 0.0f, 1.0f) * 255.0f)));
+    }
+    return Image::frombytes("RGBA", Size{size, size}, bytes);
+}
+
+Image thumbnail(const Json& item, int size, const std::filesystem::path& config_dir, const std::vector<preset_store::Group>& pattern_groups) {
     // (its patterns into a book of its own: one the library has not is left out with its effect)
     core::Document book;
     Json style = style_part(item);
@@ -447,30 +475,8 @@ Image thumbnail(const Json& item, int size, const std::filesystem::path& config_
         if (keep) kept.push_back(std::move(e));
     }
     style["effects"] = std::move(kept);
-    Json normal;
-    try {
-        normal = core::layer_style_spec(style);
-    } catch (const core::Error&) {
-        normal = nullptr;
-    }
-    if (normal.is_null()) {
-        backdrop = content;
-    } else {
-        layer_styles::Inputs in;
-        in.style = &normal;
-        in.dpi = 150.0 * size / 64.0;
-        in.book = &book;
-        in.wide = in.area = Box{0, 0, size, size};
-        in.layer_box = Box{static_cast<int>(x0), static_cast<int>(x0), static_cast<int>(x1), static_cast<int>(x1)};
-        in.page = Size{size, size};
-        in.blend = item.value("blend", std::string("normal"));
-        layer_styles::composite(in, layer_styles::srgb_mixing(), content, backdrop);
-    }
-    std::string bytes(pixels * 4, '\0');
-    for (std::size_t i = 0; i < pixels * 4; ++i) {
-        bytes[i] = static_cast<char>(static_cast<std::uint8_t>(std::lround(std::clamp(backdrop[i], 0.0f, 1.0f) * 255.0f)));
-    }
-    return Image::frombytes("RGBA", Size{size, size}, bytes);
+    return swatch(style, &book, size, item.value("blend", std::string("normal")), {core::kDefaultLightAngle, core::kDefaultLightAltitude});
 }
+
 
 }  // namespace genko::render::style_presets

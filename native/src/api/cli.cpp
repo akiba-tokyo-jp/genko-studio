@@ -2019,7 +2019,7 @@ int styles_command(const QStringList& args, bool ascii) {
         presets::Library patterns = render::pattern_library::load(dir);
         if (!patterns.problem.empty()) throw core::Error("io", "the pattern library cannot be read: " + patterns.problem);
         bool pattern_added = false;
-        const std::string name = a.value("--name").value_or(QString::fromStdString(layer->name.empty() ? std::string("スタイル") : layer->name)).toStdString();
+        const std::string name = a.value("--name").value_or(QString::fromStdString(layer->title.empty() ? std::string("スタイル") : layer->title)).toStdString();
         const Json item = styles::item_of_layer(doc, *layer, !a.flag("--no-effects"), !a.flag("--no-blending"), name, dir, patterns.groups, pattern_added);
         const auto group = group_of(a);
         // (the styles' file checked first: a library that cannot be written gets no pattern either)

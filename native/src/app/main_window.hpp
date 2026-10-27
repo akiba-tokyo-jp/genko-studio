@@ -69,6 +69,7 @@ class PatternsPanel;
 class BrushesPanel;
 class BrushSettingsPanel;
 class ToolPresetsPanel;
+class StylesPanel;
 class ShapesPanel;
 class HistogramPanel;
 class InfoPanel;
@@ -1596,6 +1597,35 @@ private:
     // The linked file of the smart object chosen, read for an op (asked first when the book named it, not the person:
     // a path an agent wrote is shown before anything is read). Its bytes put in the book's assets, and their ref.
     std::optional<std::pair<std::string, std::string>> read_linked(const QString& file, bool chosen_here);
+
+public:
+    // PC4 E6 (main_window_styles.cpp, layer_style_dialog.cpp, styles_panel.cpp; SPEC.md COLOR-09「レイヤースタイル」「スタイル」):
+    // レイヤー → レイヤースタイル ▸ and the スタイル panel. The レイヤースタイル window on the target layer, opened at `kind`
+    // ("" 混合オプション): false when it is cancelled or nothing could be set.
+    bool edit_layer_style(const std::string& kind = {});
+    void copy_layer_style();
+    bool paste_layer_style();
+    bool clear_layer_style();
+    bool global_light_dialog();
+    bool scale_layer_style_dialog(std::optional<double> percent = std::nullopt);
+    bool layer_style_to_layers();
+    bool show_all_effects(bool show);
+    // A preset (render/style_presets) applied to the chosen layers (`add`: its effects after theirs: Shift+click).
+    bool apply_style_preset(const core::Json& preset, bool add);
+    // 新規スタイル…: the target layer's effects and blending options into the styles' library (asked when no name).
+    bool new_style_preset(std::optional<QString> name = std::nullopt, bool effects = true, bool blending = true);
+    // The layers a style command acts on: the ones chosen in the layer panel that take a style, else the target layer.
+    std::vector<std::string> style_targets() const;
+    StylesPanel* styles_panel() const { return styles_panel_; }
+    QDockWidget* styles_dock() const { return styles_dock_; }
+
+private:
+    void build_layer_style_actions();
+    void build_layer_style_menus(QMenu* layers);
+    void build_styles_dock(QDockWidget* frame);
+    StylesPanel* styles_panel_ = nullptr;
+    QDockWidget* styles_dock_ = nullptr;
+    QMenu* layer_style_menu_ = nullptr;
 };
 
 // The app-wide watcher of key releases for キーを押している間だけ持ち替え: on from a tool's key until the next key let go

@@ -459,7 +459,9 @@ private slots:
             "set_file_info", "set_camera_raw",  // (PC4 節 F's ops, frames until F-b and F-e: SPEC.md FILE-01)
             "dodge", "burn", "sponge", "blur_brush", "sharpen_brush", "smudge_brush", "mixer_brush", "background_eraser",
             "color_replacement", "add_pattern", "rename_pattern", "delete_pattern",  // (PC4 節 E's ops, frames until their groups: SPEC.md COLOR-09)
-            "render_picture", "vanishing_point"};  // (PC4 節 D's ops: D4 炎・額縁・木, D6 消点 — SPEC.md COLOR-08)
+            "render_picture", "vanishing_point",  // (PC4 節 D's ops: D4 炎・額縁・木, D6 消点 — SPEC.md COLOR-08)
+            "set_layer_style", "add_layer_effect", "set_global_light", "scale_layer_style", "show_layer_effects",
+            "layer_style_to_layers"};  // (PC4 E6: layer-styles@1, SPEC.md COLOR-09)
         expected.insert(drawing_names.begin(), drawing_names.end());
         const std::set<std::string> actual(all_names.begin(), all_names.end());
         QCOMPARE(actual, expected);

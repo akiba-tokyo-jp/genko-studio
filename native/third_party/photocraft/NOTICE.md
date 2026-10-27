@@ -233,6 +233,10 @@ PhotoCraft v0.2.0（`ad863217386440ca968fccc9bfff65ba24e61142`、MIT、同梱 `L
 - `crates/engine/src/brush_cmds.rs`（375-492 行: `presets_list`・`presets_save`・`presets_delete`・`define_from_selection`）: ブラシのプリセットの一覧・保存・削除、選択範囲からブラシ（暗さ × α × 選択）→ `native/src/render/brush_presets.cpp`（E2。ライブラリは今の brushes.json に群を足した形）。
 - `crates/engine/src/presets/tools.rs`（1-193 行: `ToolPreset`・`builtin`・`list`・`new_preset`・`select`・`edit`・`reset`）と試験 `crates/engine/src/presets/tests.rs`（311-359 行 `tool_presets_save_filter_select`）: ツールプリセット → `native/src/render/tool_presets.*`・`native/tests/unit/test_tool_presets.cpp`（E2。設定は窓の道具のページの欄の名前で持つ）。
 - `crates/engine/src/edit_menu_cmds.rs`（495-540 行 `define_brush_preset`、741-962 行 `preset_manager`・`export_import`）と `crates/engine/src/migrate_cmds.rs`（1-116 行 `migrate`）: プリセットマネージャー・書き出し／読み込み・移行（ここに無い群だけ足す）→ `native/src/render/preset_files.*`（E2。ファイルは Genko の JSON）。
+- `crates/compose/src/effects.rs`（1-1511 行: 距離場（Felzenszwalb の EDT・5×5 の chamfer）・テントのぼかし・広げ・各効果の覆い（シャドウ・光彩・サテン・ベベルの高さとハイライト・シャドウ）・輪郭の表・`gradient_t`・効果を描く順と試験）と `crates/compose/src/lib.rs`（708-790 行: `blend_if_active`・`blend_if_weight`・`apply_blend_if`）: レイヤースタイルの描き方 → `native/src/render/layer_styles.*`（E6。長さは mm を描く解像度の画素に、3 つの道の合成の式と色で、タイルに分けて）・`native/src/render/page.cpp` の styled_*・`native/tests/unit/test_layer_styles.cpp`
+- `crates/doc/src/effects.rs`（1-341 行: 効果の型・既定）・`crates/doc/src/blend_if.rs`（1-149 行）・`crates/engine/src/layer_style.rs`（1-374 行: `effect_from_params`・効果を足す・置く鍵）: レイヤースタイルの形・既定・範囲 → `native/src/core/layer_styles.*`（E6。Genko の正規形の JSON、長さは mm）・`native/src/render/ops_layer_styles.*`
+- `crates/io/src/effects_map.rs`（1-759 行: lfx2 の効果ごとの鍵・「…Multi」の並び・輪郭・描画モードの id・色）: PSD のレイヤー効果 → `native/src/render/psd_effects.*`（E6。Genko の記述子の読み手・書き手 `render/psd_descriptor` の上に、長さはファイルの画素と mm の間で直す）。同じ記述子で .asl を読む `native/src/render/asl.*` は上流に無く、Adobe の公開の記述子の説明から書いた
+- `crates/engine/src/presets/styles.rs`（18-150 行: スタイルのプリセットと混合オプション、既定の組 Basics・Text Effects・Buttons とその効果、237-290 行: 見本）→ `native/src/render/style_presets.*`（E6。名前は日本語、画素は 150 dpi の mm、パターンはライブラリの名前と絵で）・`native/tests/unit/test_style_presets.cpp`
 
 ## フィルター（filters@1、PC4 節 D）
 

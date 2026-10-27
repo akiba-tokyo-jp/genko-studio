@@ -68,6 +68,7 @@ v3 から外すもの: なし（未知キーも `extra` として書き戻す）
 | `patterns@1` | PC4 E-0（E3・E6 が使う） | 本の `patterns`（使ったパターンの写しとその絵）。COLOR-09（末尾の「パターン」） |
 | `filters@1` | PC4（D0） | スマートフィルターがフィルター メニューの種類（`blur_gaussian` など、PC4 の種類）を持つか、フィルターのファイル（置き換えの地図）を持つこと。COLOR-08（末尾の「フィルター」） |
 | `vanishing-point@1` | PC4（D6） | ページの `vanishing`（消点の面）。COLOR-08（末尾の「消点の面」） |
+| `layer-styles@1` | PC4 E6 | 層の `style`（レイヤースタイル: 効果・塗りの不透明度・ブレンド条件）と本の `global_light`（包括光源）。COLOR-09（「レイヤースタイル」）、この文書の「レイヤースタイル」 |
 
 拡張を使う op が初めて適用されたときに `features` へ加える。拡張を使わない原稿は `features: []`。
 
@@ -421,6 +422,17 @@ v3 の行（`rev`・`actor`・`at`・`changes`・`via`）をそのまま残し�
 - 書き手は本に `patterns` があれば `features` に `patterns@1` を加え、無くなれば外す。読み手は id の重なり・欄の範囲外・欠けた絵・合わない絵を読み取り専用にする。
 - op（E3）: `add_pattern`・`rename_pattern`・`delete_pattern`（どこからも使われていないものだけ消せる）。書き手が黙って落とすことはしない。塗りの層・形の部品・パターンオーバーレイの `pattern`（id で名指す）は E3・E6 が足す。
 - E3 のパターンの塗り（`patterns@1`）: 塗りの層の `"fill": {"pattern": {"id", "scale", "angle", "phase_mm", "link"}}`、形の部品の `"fill"`・線の `"fill"` の `{"pattern": {…}}`（`pen-shapes@1` の「パターンの塗りは読み取り専用」はこれで外れる）。どのキーもこの順で書く: `id`（本のパターンの id）、`scale`（1..1000 %）、`angle`（−360..360°、反時計回り）、`phase_mm`（[x, y] mm、±100000）、`link`（true・false）（形の部品は `shapes_blob` の正規形の JSON なのでキーの名前の順）。書き手は正規形のまま書き、読み手はキーの順を問わず、正規形でない・本が持たないパターンを名指す塗りを読み取り専用にする。画素に塗る op（`fill_area`・`fill`）の結果は画素（パッチ・層の画素）で、パターンの写しは本の `patterns` に残る（どこからも使われなければ `delete_pattern` で消せる）。
+
+## レイヤースタイル（layer-styles@1。COLOR-09、PC4 E6）
+
+Photoshop のレイヤー効果と混合オプションの一部（塗りの不透明度・ブレンド条件）を層に、包括光源を本に持つ（core/layer_styles.hpp が正規形と検査）。
+
+- 層の `"style": {"effects": [効果, …], "enabled"?: false, "fill_opacity"?: 0..1, "blend_if"?: [{"channel", "this": [4], "under": [4]}, …]}`（`native_psd` の後に書く）。`enabled` は false のときだけ、`fill_opacity` は 1 でないときだけ、`blend_if` は何かを隠す範囲があるときだけ書く。効果は 64 まで、Photoshop の窓の並び（ベベル、境界線、シャドウ（内側）、光彩（内側）、サテン、カラー・グラデーション・パターンのオーバーレイ、光彩（外側）、ドロップシャドウ）の順。効果は `{"kind", "enabled", "blend", "opacity", …}` でその種類の欄をすべて書く（`drop_shadow`・`inner_shadow`: rgb・angle・global_light・distance_mm・spread（内側は choke）・size_mm・noise・anti_alias・contour?・knocks_out（ドロップシャドウだけ）、`outer_glow`・`inner_glow`: rgb か gradient・technique（softer・precise）・spread（内側は choke）・size_mm・range・jitter・noise・anti_alias・contour?・source（内側だけ: edge・center）、`bevel`: style（inner・outer・emboss・pillow・stroke）・technique（smooth・chisel_hard・chisel_soft）・depth（0.01..10）・direction（up・down）・size_mm・soften_mm・angle・altitude・global_light・highlight・shadow（{blend, opacity, rgb}）・gloss_contour?・contour?・texture?（{pattern, depth −10..10, invert}）、`satin`: rgb・angle・distance_mm・size_mm・invert・anti_alias・contour?、`color_overlay`: rgb、`gradient_overlay`: gradient・dither、`pattern_overlay`: pattern、`stroke`: size_mm・position（outside・inside・center）・rgb か gradient か pattern）。長さは 0..100 mm、角度は −360..360°、高度は 0..90°、不透明度などは 0..1。色は sRGB の [r, g, b]。グラデーションは `{"stops": [[位置, [r, g, b]], …]（2..16）, "transparency"?, "style", "angle", "scale"（0.1..1.5）, "reverse", "align", "offset"}`、輪郭は `{"name", "points": [[入, 出], …]（2..32）}`、パターンは `patterns@1` のパターンの塗りの正規形（本の `patterns` を名指す。使用中になり、PSD の Patt に入る）。数は小数 4 桁に丸め、整数は整数で書く。
+- ブレンド条件のチャンネル: `gray`、ページの `red`・`green`・`blue` | `cyan`・`magenta`・`yellow`・`black` | `lightness`・`a`・`b`。範囲は 0..255 の [黒の下, 黒の上, 白の下, 白の上]。
+- 本の `"global_light": {"angle": −180..180, "altitude": 0..90}`（`patterns` の後に書く）。既定（120・30）なら書かない。
+- スタイルを取れるのは描画（Raster）・ペン（Strokes）・塗りつぶし（Fill）・配置（Placed）・スマートオブジェクト（Smart）の層。ほかの層（フォルダー・補正・トーン）の `style` と、正規形でない・範囲外のスタイルは読み手が読み取り専用にする。
+- 書き手はどれかの層に `style` があるか `global_light` があれば `features` に `layer-styles@1` を加え、無ければ外す。持たない原稿は今と同じバイト。
+- op（C++ 版だけ）: `set_layer_style`・`add_layer_effect`・`set_global_light`・`scale_layer_style`・`show_layer_effects`・`layer_style_to_layers`（COLOR-09「レイヤースタイル」）。
 
 ## フィルター（filters@1。COLOR-08、PC4 節 D）
 

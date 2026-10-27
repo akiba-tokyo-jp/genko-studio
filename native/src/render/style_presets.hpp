@@ -1,5 +1,6 @@
 #pragma once
 
+#include <array>
 #include <filesystem>
 #include <optional>
 #include <string>
@@ -64,5 +65,8 @@ core::Json import_asl(std::string_view data, double dpi, const std::filesystem::
 // The panel's swatch: the preset on a rounded grey square, `size`² (16..256) RGBA (transparent around it). Its patterns
 // from the library of `config_dir` (one it does not have is left out). Made off the window's thread.
 Image thumbnail(const core::Json& item, int size, const std::filesystem::path& config_dir, const std::vector<preset_store::Group>& pattern_groups);
+// The same of a style in the book's form (its patterns `book`'s; the レイヤースタイル window's preview), the layer in
+// `blend`, the global light `light`.
+Image swatch(const core::Json& style, const core::Document* book, int size, const std::string& blend, const std::array<double, 2>& light);
 
 }  // namespace genko::render::style_presets

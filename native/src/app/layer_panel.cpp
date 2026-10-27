@@ -39,6 +39,7 @@
 #include "service/wording.hpp"
 #include "core/adjust.hpp"
 #include "core/ids.hpp"
+#include "core/layer_styles.hpp"
 #include "core/psd_keep.hpp"
 #include "core/pyconv.hpp"
 #include "core/smart.hpp"
@@ -455,6 +456,9 @@ void LayerPanel::refresh() {
             // (psd-keep@1, PC4 F-d: a PSD's layer effects, kept and written back, which this build does not draw)
             const bool psd_effects = core::psd_effects_kept(layer);
             if (psd_effects) marks << QStringLiteral("効果（PSD）");
+            // (layer-styles@1, PC4 E6: its layer style — fx, as Photoshop's panel; its effects hidden said)
+            if (layer.style && layer.style->contains("effects") && !(*layer.style)["effects"].empty())
+                marks << (core::style_shows_effects(*layer.style) ? QStringLiteral("fx") : QStringLiteral("fx（非表示）"));
             if (layer.link) {  // (transform@1, PC3 C-d: its link group, by its number when it has one)
                 const QString group = QString::fromStdString(*layer.link);
                 marks << (group.startsWith(QStringLiteral("link-")) ? QStringLiteral("リンク %1").arg(group.mid(5)) : QStringLiteral("レイヤーリンク"));
