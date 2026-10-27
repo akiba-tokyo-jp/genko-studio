@@ -865,7 +865,9 @@ private slots:
         r = genko::test::run_genko({QStringLiteral("export"), q(book), q(dir / "layers"), QStringLiteral("--format"), QStringLiteral("layers"), QStringLiteral("--layer-format"),
                                     QStringLiteral("jpeg"), QStringLiteral("--prefix"), QStringLiteral("x"), QStringLiteral("--json")});
         QVERIFY2(r.exit_code == 0, qPrintable(r.described()));
-        for (const Json& f : genko::test::one_line(r.out)["files"]) QVERIFY(f.get<std::string>().ends_with(".jpg"));
+        const Json written = genko::test::one_line(r.out);  // (held: a range over a temporary's member dangles)
+        QVERIFY(!written["files"].empty());
+        for (const Json& f : written["files"]) QVERIFY(f.get<std::string>().ends_with(".jpg"));
         r = genko::test::run_genko({QStringLiteral("export"), q(book), q(dir / "nolayers"), QStringLiteral("--prefix"), QStringLiteral("x")});
         QCOMPARE(r.exit_code, 2);
     }

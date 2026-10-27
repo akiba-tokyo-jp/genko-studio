@@ -795,11 +795,12 @@ Developed develop(std::string_view bytes, const Json& raw, const Options& option
         stage.mem.reset();
         {
             const ImageAllocationBudget budget{options.limits.max_alloc};
+            // (the surface reads the f32 raster's rows in place: it lives until the surface is taken)
             const auto surface = fx::precise_surface(raster);
-            std::string().swap(raster);
             fx::apply(*surface, *kernel, *adjust, core::FilterInks::Meaning, fx::Rect{0, 0, w, h}, nullptr, 1.0);
             worked = fx::take_bytes(*surface);
         }
+        std::string().swap(raster);
         const core::ColorRasterView view(worked);
         const auto second = float_transform(working.p, output.p);
         rgb16.assign(std::size_t(w) * std::size_t(h) * 6, '\0');
