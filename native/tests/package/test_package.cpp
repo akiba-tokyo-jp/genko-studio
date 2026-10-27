@@ -302,7 +302,8 @@ private slots:
 #ifdef _WIN32
             const bool here = id != "icu" && id != "xcb-extras";
 #else
-            const bool here = id != "msvc-runtime" && id != "libdeflate" && id != "openjph" && id != "libyuv";
+            const bool here = id != "msvc-runtime" && id != "libdeflate" && id != "openjph" && id != "libyuv" &&
+                              id != "jasper";  // (PC4 F-e: inside the Windows LibRaw DLL only)
 #endif
             if (here) QVERIFY2(listed.contains(id), id.c_str());
         }
