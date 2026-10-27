@@ -58,6 +58,9 @@ struct Inputs {
     Size page;
     std::string blend = "normal";  // the layer's mode
     double opacity = 1.0;          // the layer's opacity
+    // a shape (a pen layer of shape parts alone, written to a PSD as Photoshop's shape layer): an outer stroke lies only
+    // around it, not beneath it too (upstream effects.rs's vector_shape, review P3-11)
+    bool vector_shape = false;
 };
 
 // How far beyond `area` the content must be drawn for the effects within it to be exact (pixels at `dpi`).

@@ -216,6 +216,9 @@ struct PageLayer {
     // patterns@1 (PC4 E3): a pattern fill layer's pattern fill (a PSD writes the layer as Photoshop's pattern fill layer,
     // its PtFl block; `image` its look)
     const core::Json* pattern = nullptr;
+    // layer-styles@1 (PC4 E6, review P2-6): the page layer whose style goes with a picture given without its id — a placed
+    // picture's, the ink layer's lines (a PSD writes the style with it: lfx2, iOpa, blending ranges); none: by `id`
+    const core::Layer* styled = nullptr;
 };
 
 // psd.page_layers(page, episode, dpi), bottom to top: the paper, the page's fills, each visible exported pixel layer

@@ -92,8 +92,12 @@ bool MainWindow::edit_layer_style(const std::string& kind) {
 void MainWindow::copy_layer_style() {
     const core::Layer* layer = target_layer();
     if (layer == nullptr) return;
+    if (!layer->style) {  // (review P3-10: nothing to copy — Photoshop's is grey —; what was copied before kept)
+        flash(QStringLiteral("このレイヤーにはレイヤースタイルがありません"), 2500);
+        return;
+    }
     // (its patterns as their pictures: pasted into another book, they come with it)
-    Json style = layer->style ? *layer->style : Json(nullptr);
+    Json style = *layer->style;
     if (!style.is_null()) {
         core::change_style_patterns(style, [this](Json& fill) {
             const core::Pattern* p = core::find_pattern(book(), fill.value("id", std::string()));

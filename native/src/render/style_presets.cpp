@@ -315,7 +315,11 @@ Json apply_op(const Json& item, const Json& page, const std::vector<std::string>
               const std::vector<preset_store::Group>& pattern_groups) {
     Json op{{"op", "set_layer_style"}, {"page", page}, {"ids", ids}, {"style", style_for(item, config_dir, pattern_groups)}};
     if (add) op["add"] = true;
-    if (const auto blend = item.find("blend"); blend != item.end() && blend->is_string()) op["blend"] = *blend;
+    // (review P3-9, as Photoshop: a preset with its blending options — the layer's mode, fill opacity, Blend If — gives
+    // them; one without keeps the layer's, and Shift (add) adds its effects only)
+    const bool blending = !add && (item.contains("blend") || item.contains("fill_opacity") || item.contains("blend_if"));
+    if (!blending) op["keep_blending"] = true;
+    if (const auto blend = item.find("blend"); blending && blend != item.end() && blend->is_string()) op["blend"] = *blend;
     return op;
 }
 

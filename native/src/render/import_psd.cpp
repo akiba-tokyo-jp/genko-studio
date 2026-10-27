@@ -660,12 +660,14 @@ bool style_from_record(core::Layer& layer, const psd::File& file, const psd::Lay
         blend_if = psd_effects::blend_if_of(ranges, blend_if_names(file.mode()));
         if (!blend_if.empty()) style["blend_if"] = blend_if;
     }
+    bool relit = false;
     if (light) {  // (the book has another light: the file's taken by each effect that took it)
         for (Json& e : style["effects"]) {
             if (!e.value("global_light", false)) continue;
             e["global_light"] = false;
             e["angle"] = (*light)[0];
             if (e.contains("altitude")) e["altitude"] = (*light)[1];
+            relit = true;
         }
     }
     Json normal;
@@ -678,7 +680,12 @@ bool style_from_record(core::Layer& layer, const psd::File& file, const psd::Lay
     if (normal.is_null()) return false;
     layer.style = std::move(normal);
     if (layer.native_psd) {
-        if (fill) std::erase_if(layer.native_psd->blocks, [](const auto& block) { return block.first == "iOpa"; });
+        // (review P3-2: an iOpa of 255 says no fill opacity — kept to be written back as it was; one read as the style's
+        // fill opacity is written from it)
+        if (filled) std::erase_if(layer.native_psd->blocks, [](const auto& block) { return block.first == "iOpa"; });
+        // (review P2-7: effects that took the file's global light now hold its angle as their own — the file's effects
+        // block, written back, would take the book's: forgotten, the effects written from the style)
+        if (relit) std::erase_if(layer.native_psd->blocks, [](const auto& block) { return core::psd_effect_key(block.first); });
         // (the ranges kept as they are: written back while they say the style's Blend If)
         if (layer.native_psd->empty()) layer.native_psd.reset();
     }
@@ -1001,13 +1008,8 @@ Json import_data(core::Document& doc, const Json& op, std::string data, bool exa
         }
     }
     std::optional<std::array<double, 2>> light_differs;
-    if (exact && keeping) {
-        doc.global_light = file_light[0] == core::kDefaultLightAngle && file_light[1] == core::kDefaultLightAltitude
-                               ? std::nullopt
-                               : std::optional<std::array<double, 2>>(core::global_light_of(Json{{"angle", file_light[0]}, {"altitude", file_light[1]}}));
-    } else if (file_light != core::global_light(doc)) {
-        light_differs = file_light;
-    }
+    const bool book_lit = exact && keeping;  // (the file's light the book's — once a style is read: review P3-1)
+    if (!book_lit && file_light != core::global_light(doc)) light_differs = file_light;
     Json styled = Json::array();
     std::vector<std::string> style_notes;
     std::vector<core::Layer> made;
@@ -1378,8 +1380,25 @@ Json import_data(core::Document& doc, const Json& op, std::string data, bool exa
         report["psd_page"] = "earlier";  // (the page keeps an earlier PSD's resources and global blocks: this file's are not kept)
     }
     if (!effects.empty()) report["effects"] = std::move(effects);
+    if (book_lit && !styled.empty()) {  // (no style read: the book's light left as it is, the file's kept in its resources)
+        doc.global_light = file_light[0] == core::kDefaultLightAngle && file_light[1] == core::kDefaultLightAltitude
+                               ? std::nullopt
+                               : std::optional<std::array<double, 2>>(core::global_light_of(Json{{"angle", file_light[0]}, {"altitude", file_light[1]}}));
+    }
     if (!styled.empty()) report["layer_styles"] = std::move(styled);  // (layer-styles@1, PC4 E6: the layers whose style was read)
-    if (!style_notes.empty()) report["layer_style_notes"] = style_notes;
+    if (!style_notes.empty()) {  // (review P3-3: each note once, how many layers it was said of; at most 20 of them)
+        std::vector<std::pair<std::string, std::size_t>> once;
+        for (const std::string& note : style_notes) {
+            const auto it = std::find_if(once.begin(), once.end(), [&](const auto& seen) { return seen.first == note; });
+            if (it != once.end()) ++it->second;
+            else once.emplace_back(note, 1);
+        }
+        Json notes = Json::array();
+        for (std::size_t i = 0; i < once.size() && i < 20; ++i)
+            notes.push_back(once[i].second > 1 ? once[i].first + "（" + std::to_string(once[i].second) + " 層）" : once[i].first);
+        if (once.size() > 20) notes.push_back("ほか " + std::to_string(once.size() - 20) + " 件の知らせ");
+        report["layer_style_notes"] = std::move(notes);
+    }
     if (kept_so_far.cut) report["psd_blocks_cut"] = true;
     if (!shallow.empty()) report["in_8_bits"] = shallow;  // (PC4 F-d review: why not at its depth)
     return report;

@@ -18,8 +18,10 @@
 #include <vector>
 
 #include "core/base64.hpp"
+#include "core/color_raster.hpp"
 #include "core/command_bus.hpp"
 #include "core/error.hpp"
+#include "core/ink.hpp"
 #include "core/layer_styles.hpp"
 #include "core/paths.hpp"
 #include "core/patterns.hpp"
@@ -34,6 +36,7 @@
 #include "render/png.hpp"
 #include "render/psd_effects.hpp"
 #include "render/raster.hpp"
+#include "storage/asset_store.hpp"
 #include "storage/fsutil.hpp"
 #include "storage/lock.hpp"
 #include "storage/reader.hpp"
@@ -67,8 +70,8 @@ std::string refusal(const core::Document& doc, const Json& ops) {
 }
 
 // A page of one 8-bit paint layer "paint": a grey (200) square from 12.7 to 38.1 mm both ways, clear around it.
-core::Document square_book() {
-    core::Document doc = core::new_episode("スタイル", core::Num(1), 1, core::PageSpec::custom(2 * kInch, 2 * kInch, 40, 40, 1, 2, 2, 2, 2, 200, "color"));
+core::Document square_book(const std::string& expression = "color") {
+    core::Document doc = core::new_episode("スタイル", core::Num(1), 1, core::PageSpec::custom(2 * kInch, 2 * kInch, 40, 40, 1, 2, 2, 2, 2, 200, expression));
     doc.edit_page(0).frames.clear();
     doc.edit_page(0).numero = false;
     auto& p = doc.edit_page(0);
@@ -294,6 +297,158 @@ private slots:
         }
     }
 
+    // (review P2-2) an effect reaching past the cap (a drop shadow 60 mm away, 60 mm soft, at 350 dpi: 1654 px) is scaled
+    // down to it as the margin is: drawn in tiles of any size, the same pixels as drawn whole
+    void bigReachSameAcrossTiles() {
+        const Json style = one(Json{{"kind", "drop_shadow"}, {"blend", "normal"}, {"opacity", 1}, {"distance_mm", 60}, {"size_mm", 60}});
+        const double dpi = 350;
+        const int margin = render::layer_styles::margin_px(style, dpi);
+        QVERIFY2(margin <= 1026, qPrintable(QString::number(margin)));
+        const int W = 2600, H = 700;
+        const render::layer_styles::Mixing mx = render::layer_styles::srgb_mixing();
+        std::vector<float> content(std::size_t(W) * H * 4, 0.0f);
+        for (int y = 250; y < 450; ++y)
+            for (int x = 200; x < 400; ++x) {
+                float* p = content.data() + (std::size_t(y) * W + x) * 4;
+                p[0] = p[1] = p[2] = 0.8f;
+                p[3] = 1;
+            }
+        const auto draw = [&](const render::Box& area) {
+            render::layer_styles::Inputs in;
+            in.style = &style;
+            in.light = {180, 30};  // (the light from the left: the shadow falls right, along the row of tiles)
+            in.dpi = dpi;
+            in.page = Size{W, H};
+            in.area = area;
+            in.wide = render::Box{std::max(0, area.x0 - margin), std::max(0, area.y0 - margin), std::min(W, area.x1 + margin), std::min(H, area.y1 + margin)};
+            std::vector<float> wide(std::size_t(in.wide.width()) * in.wide.height() * 4);
+            for (int y = in.wide.y0; y < in.wide.y1; ++y)
+                std::copy_n(content.data() + (std::size_t(y) * W + in.wide.x0) * 4, std::size_t(in.wide.width()) * 4,
+                            wide.data() + (std::size_t(y - in.wide.y0) * in.wide.width()) * 4);
+            std::vector<float> back(std::size_t(area.width()) * area.height() * 4, 1.0f);
+            render::layer_styles::composite(in, mx, wide, back);
+            return back;
+        };
+        const std::vector<float> whole = draw(render::Box{0, 0, W, H});
+        const auto byte = [](float v) { return int(std::lround(std::clamp(v, 0.0f, 1.0f) * 255)); };
+        // (the shadow reaches well past the shape: some 500 px right of it, spread thin by its size)
+        QVERIFY2(byte(whole[(std::size_t(350) * W + 812) * 4]) < 240, qPrintable(QString::number(whole[(std::size_t(350) * W + 812) * 4])));
+        for (const int side : {173, 256, 600}) {
+            int worst = 0;
+            for (int y0 = 0; y0 < H; y0 += side)
+                for (int x0 = 0; x0 < W; x0 += side) {
+                    const render::Box tile{x0, y0, std::min(W, x0 + side), std::min(H, y0 + side)};
+                    const std::vector<float> got = draw(tile);
+                    for (int y = tile.y0; y < tile.y1; ++y)
+                        for (int x = tile.x0; x < tile.x1; ++x)
+                            for (int k = 0; k < 4; ++k)
+                                worst = std::max(worst, std::abs(byte(got[(std::size_t(y - tile.y0) * tile.width() + (x - tile.x0)) * 4 + k]) -
+                                                                 byte(whole[(std::size_t(y) * W + x) * 4 + k])));
+                }
+            QVERIFY2(worst == 0, qPrintable(QStringLiteral("tiles of %1: %2 levels apart").arg(side).arg(worst)));
+        }
+        // (the page drawn so, whole and by its parts: the same pixels — review P2-3's tiles of a margin past the cap)
+        const core::Document doc = styled(square_book(), style);
+        render::RenderOptions options = render::proof_options();
+        const render::Image whole_page = render::render_page(doc.page(0), int(dpi), options, &doc).image;
+        const int side_px = whole_page.width();
+        for (const render::RenderRegion part : {render::RenderRegion{0, 0, side_px / 2, side_px / 2}, render::RenderRegion{side_px / 2, side_px / 3, side_px - side_px / 2, side_px / 2}}) {
+            options.region = part;
+            const render::Image got = render::render_page(doc.page(0), int(dpi), options, &doc).image;
+            QVERIFY2(got.tobytes() == whole_page.crop(render::Box{part.x, part.y, part.x + part.w, part.y + part.h}).tobytes(),
+                     qPrintable(QStringLiteral("part at %1, %2").arg(part.x).arg(part.y)));
+        }
+    }
+
+    // (review P2-1) 描画レイヤーに変換 keeps the layer's style on it, its effects not drawn into its pixels as well — on an
+    // RGB page and on a page of inks alike: the page as before
+    void convertedKeepsItsStyle() {
+        const Json style = one(Json{{"kind", "drop_shadow"}, {"blend", "normal"}, {"opacity", 0.5}, {"distance_mm", 3}, {"size_mm", 0}});
+        for (const std::string kind : {"8", "cmyk"}) {
+            core::Document doc = as_kind(square_book(), kind);
+            doc = run(doc, Json{{"op", "add_layer"}, {"page", 1}, {"kind", "pen"}, {"id", "pen"}});
+            doc = run(doc, Json{{"op", "add_stroke"}, {"page", 1}, {"layer_id", "pen"}, {"points", Json::array({Json::array({8, 25}), Json::array({43, 25})})}, {"width_mm", 2}});
+            doc = styled(doc, style, "pen");
+            const std::vector<Rgba> before = shown(doc);
+            const core::Document converted = run(doc, Json{{"op", "convert_layer"}, {"page", 1}, {"id", "pen"}, {"to", "paint"}});
+            const core::Layer* pen = nullptr;
+            for (const core::Layer& l : converted.page(0).layers)
+                if (l.id == "pen") pen = &l;
+            QVERIFY(pen != nullptr && pen->style.has_value());
+            const std::vector<Rgba> after = shown(converted);
+            // (the shadow below the line, over the grey square and over the paper: once, not twice)
+            for (const auto& [x, y] : {std::pair{26.5, 27.8}, {41.0, 27.8}, {25.4, 25.0}})
+                QVERIFY2(near(at(after, x, y), at(before, x, y)[0], at(before, x, y)[1], at(before, x, y)[2], 0.03f),
+                         qPrintable(QString::fromStdString(kind) + told(at(after, x, y)) + told(at(before, x, y))));
+        }
+    }
+
+    // (review P2-4) a layer from a PSD on a monochrome page is finished — grey — with its effects, in a proof
+    void monochromePsdLayerFinished() {
+        core::Document doc = square_book("mono");
+        doc.edit_page(0).layers[0].source = Json{{"kind", "psd"}};
+        const core::Document red = styled(doc, Json{{"effects", Json::array({Json{{"kind", "color_overlay"}, {"rgb", Json::array({255, 0, 0})}},
+                                                                            Json{{"kind", "drop_shadow"}, {"blend", "normal"}, {"opacity", 1}, {"rgb", Json::array({0, 0, 255})}, {"distance_mm", 3}, {"size_mm", 0}}})}});
+        const render::Image page = render::render_page(red.page(0), 200, render::proof_options(), &red).image.convert("RGB");
+        const std::string bytes = page.tobytes();
+        const auto px = [&](double x_mm, double y_mm) {
+            const std::size_t x = std::size_t(x_mm * 200 / kInch), y = std::size_t(y_mm * 200 / kInch);
+            const std::size_t i = (y * std::size_t(page.width()) + x) * 3;
+            return std::array<int, 3>{static_cast<unsigned char>(bytes[i]), static_cast<unsigned char>(bytes[i + 1]), static_cast<unsigned char>(bytes[i + 2])};
+        };
+        for (const auto& [x, y] : {std::pair{25.4, 25.4}, {39.2, 30.0}}) {
+            const auto c = px(x, y);
+            QVERIFY2(c[0] == c[1] && c[1] == c[2] && c[0] < 250, qPrintable(QStringLiteral("(%1, %2, %3)").arg(c[0]).arg(c[1]).arg(c[2])));
+        }
+        // (by its parts the same)
+        render::RenderOptions options = render::proof_options();
+        options.region = render::RenderRegion{100, 120, 150, 100};
+        QCOMPARE(render::render_page(red.page(0), 200, options, &red).image.convert("RGB").tobytes(), page.crop(render::Box{100, 120, 250, 220}).tobytes());
+    }
+
+    // (review P2-5) a smart object with a style keeps its own inks on a page of inks and its own bits on a page in precise
+    // colour: inside it, the same values as without the style
+    void smartObjectsKeepTheirOwnValues() {
+        const Json style = one(Json{{"kind", "drop_shadow"}, {"blend", "normal"}, {"opacity", 1}, {"distance_mm", 3}, {"size_mm", 0}});
+        {
+            core::Document doc = as_kind(square_book(), "cmyk");
+            doc = run(doc, Json{{"op", "smart_convert"}, {"page", 1}, {"ids", Json::array({"paint"})}, {"new_id", "so"}});
+            render::RenderOptions options = render::proof_options();
+            options.inks = true;
+            const auto inks_at = [&](const core::Document& d) {
+                const render::RenderResult out = render::render_page(d.page(0), 200, options, &d);
+                const core::InkPixels& inks = *out.inks;
+                const std::size_t i = (std::size_t(200) * inks.width + 200) * inks.channels();
+                return std::vector<std::uint16_t>(inks.samples.begin() + std::ptrdiff_t(i), inks.samples.begin() + std::ptrdiff_t(i + inks.colours()));
+            };
+            const std::vector<std::uint16_t> plain = inks_at(doc), with = inks_at(styled(doc, style, "so"));
+            QCOMPARE(with.size(), plain.size());
+            for (std::size_t k = 0; k < plain.size(); ++k)
+                QVERIFY2(std::abs(int(with[k]) - int(plain[k])) <= 2, qPrintable(QStringLiteral("plate %1: %2 for %3").arg(k).arg(with[k]).arg(plain[k])));
+        }
+        {
+            core::Document doc = square_book();
+            doc = run(doc, Json{{"op", "set_color_mode"}, {"page", 1}, {"mode", "rgb"}, {"depth", 16}});
+            render::Image grey = render::Image::create("I;16", Size{4, 4}, render::Ink(1000));
+            const core::Rect b = doc.page(0).bleed_rect_mm();
+            doc = run(doc, Json{{"op", "smart_place"}, {"page", 1}, {"data", core::b64encode(render::write_png(grey))}, {"name", "g.png"},
+                                {"placement_mm", Json::array({b.x.json(), b.y.json(), b.width.json(), b.height.json()})}});
+            std::string id;
+            for (const core::Layer& l : doc.page(0).layers)
+                if (l.kind == core::LayerKind::Smart) id = l.id;
+            QVERIFY(!id.empty());
+            render::RenderOptions options = render::proof_options();
+            options.precise = true;
+            // (an inside stroke: the middle of the picture its own, in more than 8 bits)
+            const core::Document with = styled(doc, Json{{"effects", Json::array({Json{{"kind", "stroke"}, {"size_mm", 1}, {"position", "inside"}, {"rgb", Json::array({255, 0, 0})}}})}}, id);
+            const render::RenderResult got = render::render_page(with.page(0), 100, options, &with);
+            QVERIFY(got.precise.has_value());
+            const core::ColorRasterView values(*got.precise);
+            const auto p = values.pixel(std::size_t(values.width()) * (values.height() / 2) + values.width() / 2);
+            QVERIFY2(std::abs(p[0] - 1000 / 65535.0) < 1e-4, qPrintable(QString::number(p[0] * 65535)));
+        }
+    }
+
     // the ops: an effect of a kind merged into the layer's own (add: another), scaled, hidden and shown, the global light,
     // レイヤーを作成, a merge down drawn as before; a folder refused; the journal's pictures kept small
     void theOps() {
@@ -338,18 +493,32 @@ private slots:
             QVERIFY2(near(at(made_px, x, y), at(styled_px, x, y)[0], at(styled_px, x, y)[1], at(styled_px, x, y)[2], 0.02f),
                      qPrintable(told(at(made_px, x, y)) + told(at(styled_px, x, y))));
         // merged down onto a layer below: the shadow baked in, drawn as before
-        core::Document below = run(two_fx, Json{{"op", "add_layer"}, {"page", 1}, {"kind", "paint"}, {"id", "under"}, {"before", "paint"}});
-        if (below.page(0).layers.front().id != "under") below = run(two_fx, Json{{"op", "add_layer"}, {"page", 1}, {"kind", "paint"}, {"id", "under"}});
-        const auto& order = below.page(0).layers;
-        if (order.front().id == "under") {
-            const core::Document merged = run(below, Json{{"op", "merge_down"}, {"page", 1}, {"id", "paint"}});
-            QCOMPARE(merged.page(0).layers.size(), std::size_t(1));
-            QVERIFY(!merged.page(0).layers[0].style);
-            const auto merged_px = shown(merged);
-            for (const auto& [x, y] : {std::pair{39.2, 30.0}, {25.4, 25.4}, {5.0, 5.0}})
-                QVERIFY2(near(at(merged_px, x, y), at(styled_px, x, y)[0], at(styled_px, x, y)[1], at(styled_px, x, y)[2], 0.02f),
-                         qPrintable(told(at(merged_px, x, y)) + told(at(styled_px, x, y))));
-        }
+        // (review P3-12: the layer below put there itself, so the merge is always tried)
+        core::Document below = two_fx;
+        core::Layer under;
+        under.id = "under";
+        under.title = "下";
+        under.role = core::LayerRole::User;
+        under.kind = core::LayerKind::Raster;
+        under.panel_clip = false;
+        below.edit_page(0).layers.insert(below.edit_page(0).layers.begin(), under);
+        QCOMPARE(below.page(0).layers.front().id, std::string("under"));
+        const core::Document merged = run(below, Json{{"op", "merge_down"}, {"page", 1}, {"id", "paint"}});
+        QCOMPARE(merged.page(0).layers.size(), std::size_t(1));
+        QVERIFY(!merged.page(0).layers[0].style);
+        const auto merged_px = shown(merged);
+        for (const auto& [x, y] : {std::pair{39.2, 30.0}, {25.4, 25.4}, {5.0, 5.0}})
+            QVERIFY2(near(at(merged_px, x, y), at(styled_px, x, y)[0], at(styled_px, x, y)[1], at(styled_px, x, y)[2], 0.02f),
+                     qPrintable(told(at(merged_px, x, y)) + told(at(styled_px, x, y))));
+        // (and on a page of inks: drawn in, once)
+        const core::Document ink_below = as_kind(below, "cmyk");
+        const auto ink_styled = shown(ink_below);
+        const core::Document ink_merged = run(ink_below, Json{{"op", "merge_down"}, {"page", 1}, {"id", "paint"}});
+        QVERIFY(!ink_merged.page(0).layers[0].style);
+        const auto ink_merged_px = shown(ink_merged);
+        for (const auto& [x, y] : {std::pair{39.2, 30.0}, {25.4, 25.4}, {5.0, 5.0}})
+            QVERIFY2(near(at(ink_merged_px, x, y), at(ink_styled, x, y)[0], at(ink_styled, x, y)[1], at(ink_styled, x, y)[2], 0.03f),
+                     qPrintable(told(at(ink_merged_px, x, y)) + told(at(ink_styled, x, y))));
         // refused: a kind of layer that takes none, an unknown effect, a length past 100 mm
         core::Document folder = run(doc, Json{{"op", "add_layer"}, {"page", 1}, {"folder", true}, {"id", "f"}});
         QVERIFY(!refusal(folder, Json::array({Json{{"op", "set_layer_style"}, {"page", 1}, {"id", "f"}, {"style", one(Json{{"kind", "stroke"}})}}})).empty());
@@ -414,6 +583,69 @@ private slots:
         const storage::LoadResult read = storage::load_document(dir);
         QVERIFY(!read.report.clean());
         QVERIFY2(read.report.to_json().dump().find("style") != std::string::npos, read.report.to_json().dump().c_str());
+    }
+
+    // (review P2-6) the style of a placed picture and of the ink layer's lines goes into a PSD with them
+    void psdOfPlacedAndInkLines() {
+        QTemporaryDir scratch;
+        const fs::path dir = core::path_from_utf8(scratch.path().toStdString());
+        const Json style = one(Json{{"kind", "drop_shadow"}, {"distance_mm", 1}});
+        const auto written = [&](const core::Document& doc, const char* name) {
+            formats::export_page_psd(doc, doc.page(0), dir / name, 200);
+            return read_text(dir / name);
+        };
+        // the ink layer's lines (「ペン入れ」)
+        core::Document doc = square_book();
+        core::Layer pen;
+        pen.id = "ink";
+        pen.title = "線";
+        pen.role = core::LayerRole::Ink;
+        pen.kind = core::LayerKind::Strokes;
+        doc.edit_page(0).layers.push_back(pen);
+        doc = run(doc, Json{{"op", "add_stroke"}, {"page", 1}, {"layer_id", "ink"}, {"points", Json::array({Json::array({8, 25}), Json::array({43, 25})})}, {"width_mm", 1}});
+        QVERIFY(written(doc, "lines.psd").find("lfx2") == std::string::npos);
+        QVERIFY(written(styled(doc, style, "ink"), "lines-styled.psd").find("lfx2") != std::string::npos);
+        // a placed picture
+        core::Document placed = square_book();
+        placed.asset_dir = dir;
+        placed.edit_page(0).name_ok = true;
+        std::string bytes;
+        for (int i = 0; i < 16 * 16; ++i) bytes += std::string("\x20\x80\xC0\xFF", 4);
+        const std::string ref = storage::AssetStore(*placed.asset_dir).put_bytes(render::write_png(render::Image::frombytes("RGBA", Size{16, 16}, bytes)), ".png");
+        placed = run(placed, Json{{"op", "place_asset"}, {"page", 1}, {"asset", ref}, {"placement_mm", Json::array({10, 10, 20, 20})}});
+        std::string id;
+        for (const core::Layer& l : placed.page(0).layers)
+            if (l.kind == core::LayerKind::Placed) id = l.id;
+        QVERIFY(!id.empty());
+        QVERIFY(written(placed, "placed.psd").find("lfx2") == std::string::npos);
+        QVERIFY(written(styled(placed, style, id), "placed-styled.psd").find("lfx2") != std::string::npos);
+    }
+
+    // (review P2-7) a PSD read into a book of another global light: its effects that took the file's light hold its angle
+    // as their own, and the file's effects block is not kept (written back from the style: Photoshop draws them so too)
+    void psdReadUnderAnotherLight() {
+        const core::Document doc = styled(square_book(), one(Json{{"kind", "drop_shadow"}, {"distance_mm", 1.27}, {"size_mm", 0.5}}));
+        QTemporaryDir scratch;
+        const fs::path file = core::path_from_utf8(scratch.path().toStdString()) / "lit.psd";
+        formats::export_page_psd(doc, doc.page(0), file, 200);
+        const std::string bytes = read_text(file);
+        core::Document read = core::new_episode("読む", core::Num(1), 1, core::PageSpec::custom(2 * kInch, 2 * kInch, 40, 40, 1, 2, 2, 2, 2, 200, "color"));
+        read = run(read, Json{{"op", "set_global_light"}, {"angle", 90}, {"altitude", 30}});
+        // (taken into a page of the book: not opened as a book of its own, which takes the file's light)
+        const Json report = render::import_psd_data(read, Json{{"page", 1}, {"id", "ps"}, {"fit", "paper"}}, bytes, false);
+        const core::Layer* got = nullptr;
+        for (const core::Layer& l : read.page(0).layers)
+            if (l.style) got = &l;
+        QVERIFY2(got != nullptr, report.dump().c_str());
+        const Json& effect = (*got->style)["effects"][0];
+        QCOMPARE(effect["global_light"], Json(false));
+        QCOMPARE(effect["angle"], Json(120.0));
+        if (got->native_psd)
+            for (const auto& block : got->native_psd->blocks) QVERIFY2(!core::psd_effect_key(block.first), block.first.c_str());
+        // (written back: the effects from the style)
+        const fs::path again = core::path_from_utf8(scratch.path().toStdString()) / "again.psd";
+        formats::export_page_psd(read, read.page(0), again, 200);
+        QVERIFY(read_text(again).find("lfx2") != std::string::npos);
     }
 
     // a PSD: the style as lfx2 (and iOpa, the blending ranges), read back by this build's import as the same style

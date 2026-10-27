@@ -222,6 +222,7 @@ private slots:
         s.trigger("act_layer_style_copy");
         s.trigger("act_layer_style_clear");
         QVERIFY(!s.ink().style);
+        s.trigger("act_layer_style_copy");  // (review P3-10: a layer of no style copies nothing — what was copied kept)
         s.trigger("act_layer_style_paste");
         QCOMPARE(kinds_of(s.ink()), (QStringList{QStringLiteral("drop_shadow"), QStringLiteral("color_overlay")}));
         // 包括光源…

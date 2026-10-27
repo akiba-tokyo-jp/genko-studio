@@ -607,7 +607,8 @@ void validate_layer_styles(const Document& doc) {
     for (const smart::WrittenPage& written : smart::written_pages(doc)) {
         for (const Layer& layer : written.page->layers) {
             if (!layer.style) continue;
-            if (!takes_layer_style(layer)) bad("the layer " + layer.id + " (a folder, correction or tone layer) cannot have a style");
+            if (!takes_layer_style(layer))  // (review P3-13: an op that makes a styled layer one of these says what to do)
+                bad("the layer " + layer.id + " has a layer style and a folder, correction or tone layer cannot have one: clear its style first (レイヤースタイルを消去)");
             if (!layer_style_normal(*layer.style)) {
                 try {
                     (void)layer_style_spec(*layer.style);

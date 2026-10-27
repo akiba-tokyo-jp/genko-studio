@@ -5,6 +5,7 @@
 #include "render/ink.hpp"
 #include "render/ink_edit.hpp"
 #include "render/ink_filters.hpp"
+#include "render/ops_layer_styles.hpp"
 #include "render/plugins.hpp"
 
 #include <QCryptographicHash>
@@ -1294,6 +1295,8 @@ void after_merge(Page& page, const std::vector<std::size_t>& merged) {
             layer.shapes = core::vector::empty_shapes();  // (pen-shapes@1)
             layer.raster_png.reset();
             layer.color_raster.reset();
+            layer.style.reset();  // (layer-styles@1, PC4 E6 review P3-8: its style drawn into the merge, not left for what comes next)
+            forget_psd_effects(layer);
             if (!merged.empty() && page.layers[merged.front()].color_raster) {
                 layer.fill.reset(); layer.adjust.reset(); layer.kind = LayerKind::Strokes;
             }

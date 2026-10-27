@@ -859,8 +859,32 @@ Mixing srgb_mixing() {
     return mx;
 }
 
+static Json within_reach(const Json& style, double dpi) {
+    // (review P2-2: one rule for each effect and the margin — an effect whose lengths together, distance and size or size
+    // and softness, reach past kMaxReachPx at `dpi` has them scaled down together to reach that far, so what it draws
+    // always lies within the margin: tiles meet without a seam)
+    if (!style.is_object() || !style.contains("effects") || !style["effects"].is_array()) return style;
+    const double px_mm = dpi / 25.4;
+    Json out = style;
+    for (Json& e : out["effects"]) {
+        if (!e.is_object()) continue;
+        const std::string kind = e.value("kind", std::string());
+        std::vector<const char*> keys;
+        if (kind == "drop_shadow" || kind == "inner_shadow" || kind == "satin") keys = {"distance_mm", "size_mm"};
+        else if (kind == "bevel") keys = {"size_mm", "soften_mm"};
+        else if (kind == "outer_glow" || kind == "inner_glow" || kind == "stroke") keys = {"size_mm"};
+        double sum = 0;
+        for (const char* k : keys) sum += std::max(0.0, num(e, k, 0));
+        if (sum * px_mm <= kMaxReachPx) continue;
+        const double scale = kMaxReachPx / (sum * px_mm);
+        for (const char* k : keys)
+            if (e.contains(k) && e[k].is_number()) e[k] = e[k].get<double>() * scale;
+    }
+    return out;
+}
+
 int margin_px(const Json& style, double dpi) {
-    const double reach = core::style_reach_mm(style);
+    const double reach = core::style_reach_mm(within_reach(style, dpi));
     if (reach <= 0) return 0;
     return static_cast<int>(std::ceil(std::min(reach * dpi / 25.4, kMaxReachPx))) + 2;
 }
@@ -884,7 +908,7 @@ void composite(const Inputs& in, const Mixing& mx, const std::vector<float>& con
     if (w <= 0 || h <= 0 || W <= 0 || H <= 0 || in.style == nullptr) return;
     const std::size_t count = static_cast<std::size_t>(w) * h;
     if (content.size() != static_cast<std::size_t>(W) * H * st || backdrop.size() != count * st) throw core::Error("value", "layer style: the pictures do not match");
-    const Json& style = *in.style;
+    const Json style = within_reach(*in.style, in.dpi);  // (lengths past the reach scaled to it: the margin's rule)
     const Ctx c{in, mx, in.dpi / 25.4};
     const int ox = in.area.x0 - in.wide.x0, oy = in.area.y0 - in.wide.y0;
     const auto wide_at = [&](std::size_t i) {  // (the wide index of area pixel i)
@@ -1028,7 +1052,7 @@ void composite(const Inputs& in, const Mixing& mx, const std::vector<float>& con
             const float opacity = static_cast<float>(num(e, "opacity", 1));
             std::vector<float> share(count, 0.0f), ones(count, 0.0f);
             for (std::size_t i = 0; i < count; ++i) {
-                const float k = inside(a[i]) ? 1.0f : std::clamp(static_cast<float>(out_w) + 0.5f - dout[i], 0.0f, 1.0f);
+                const float k = inside(a[i]) ? (in.vector_shape ? 0.0f : 1.0f) : std::clamp(static_cast<float>(out_w) + 0.5f - dout[i], 0.0f, 1.0f);
                 share[i] = k * opacity * (1.0f - cover[i]);
                 cover[i] += share[i];
                 ones[i] = share[i] > 0 ? 1.0f : 0.0f;

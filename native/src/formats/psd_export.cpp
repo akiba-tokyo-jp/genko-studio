@@ -282,8 +282,14 @@ public:
     // layer-styles@1 (PC4 E6): the next record is of the page's layer `id` — its style goes with it: its effects as an lfx2
     // block (unless it keeps the effects of the PSD it was read from, unchanged since: those written back as they were),
     // its fill opacity as iOpa, its Blend If as the record's blending ranges
-    void note_style(const std::string& id) {
+    void note_style(const render::PageLayer& layer) {
         style_ = nullptr;
+        if (!layer.section.empty()) return;  // (a pen layer's group: its layers' records carry its style)
+        if (layer.styled != nullptr && layer.id.empty()) {  // (a placed picture's, the ink layer's lines: review P2-6)
+            if (layer.styled->style) style_ = layer.styled;
+            return;
+        }
+        const std::string& id = layer.id;
         if (page_ == nullptr || id.empty()) return;
         for (const core::Layer& own : page_->layers) {
             if (own.id != id) continue;
@@ -360,7 +366,7 @@ public:
         }
         note_mask(layer);  // (PC3 B2: its mask's masks@1 settings — a pen layer's group's too)
         note_keep(layer.id);  // (psd-keep@1, PC4 F-d)
-        note_style(layer.section.empty() ? layer.id : std::string());  // (layer-styles@1, PC4 E6: a layer's own record)
+        note_style(layer);  // (layer-styles@1, PC4 E6: a layer's own record)
         if (layer.section == "group") {
             section(layer.name, 1, blend_key(layer.settings ? layer.blend : std::string("normal")), layer.settings ? layer.opacity : 1.0,
                     layer.mask ? &*layer.mask : nullptr, vector_block(layer.vector_mask));

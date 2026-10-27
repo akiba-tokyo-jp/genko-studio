@@ -100,6 +100,7 @@ void set_layer_style(core::OpContext& c) {
     const std::vector<std::size_t> layers = named_layers(doc.page(at), c.op);
     for (const std::size_t i : layers) check_takes(doc.page(at).layers[i]);
     const bool add = core::truthy_at(c.op, "add");
+    const bool keep_blending = core::truthy_at(c.op, "keep_blending");  // (the layer's fill opacity and Blend If kept)
     std::optional<std::string> blend;
     if (const Json* b = core::get(c.op, "blend"); b != nullptr && !b->is_null()) blend = core::blend_mode(*b);
     Json given = c.op["style"].is_null() ? Json(nullptr) : style_with_patterns(doc, c.op["style"]);
@@ -117,6 +118,12 @@ void set_layer_style(core::OpContext& c) {
             style["effects"] = std::move(effects);
             for (const char* key : {"enabled", "fill_opacity", "blend_if"})
                 if (given.contains(key)) style[key] = given[key];
+        }
+        if (keep_blending && style.is_object()) {
+            for (const char* key : {"fill_opacity", "blend_if"}) {
+                style.erase(key);
+                if (layer.style && layer.style->is_object() && layer.style->contains(key)) style[key] = (*layer.style)[key];
+            }
         }
         put_style(layer, spec_of(style));
         if (blend) layer.blend = *blend;
@@ -260,7 +267,7 @@ void layer_style_to_layers(core::OpContext& c) {
         made.id = core::new_id();
         made.role = core::LayerRole::User;
         made.kind = core::LayerKind::Raster;
-        made.title = "「" + source.title + "」の" + kind_label(e.value("kind", std::string()));
+        made.title = "「" + (source.title.empty() ? source.id : source.title) + "」の" + kind_label(e.value("kind", std::string()));
         made.blend = e.contains("blend") ? e["blend"].get<std::string>() : std::string("normal");
         made.opacity = e.contains("opacity") ? e["opacity"].get<double>() : 1.0;
         made.parent_id = source.parent_id;
