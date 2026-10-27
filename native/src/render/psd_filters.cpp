@@ -12,8 +12,10 @@
 #include <initializer_list>
 #include <utility>
 
+#include "core/file_info.hpp"
 #include "core/filter_kinds.hpp"
 #include "core/smart.hpp"
+#include "render/pcraft_manifest.hpp"
 
 namespace genko::render::psd_filters {
 
@@ -383,15 +385,7 @@ std::pair<std::string, Json> upstream_of(const Object& item, const Placement& wh
 std::optional<std::string> blend_of(const Object& options) {
     const Value* v = options.get("Md  ");
     if (v == nullptr || v->type != "enum") return std::nullopt;
-    static const std::array<std::pair<std::string_view, std::string_view>, 20> kModes{{
-        {"Nrml", "normal"},       {"Drkn", "darken"},      {"Mltp", "multiply"},     {"CBrn", "color_burn"},          {"linearBurn", "linear_burn"},
-        {"Lghn", "lighten"},      {"Scrn", "screen"},      {"CDdg", "color_dodge"},  {"linearDodge", "add"},          {"Ovrl", "overlay"},
-        {"SftL", "soft_light"},   {"HrdL", "hard_light"},  {"Dfrn", "difference"},   {"Xclu", "exclusion"},           {"blendSubtraction", "subtract"},
-        {"blendDivide", "divide"}, {"H   ", "hue"},        {"Strt", "saturation"},   {"Clr ", "color"},               {"Lmns", "luminosity"},
-    }};
-    for (const auto& [psd, genko] : kModes)
-        if (v->enum_value == psd) return std::string(genko);
-    return std::nullopt;
+    return psd::descriptor::genko_blend(v->enum_value);  // (the one table of them, review P3-12)
 }
 
 std::string name_of(const Object& item) {
@@ -401,14 +395,8 @@ std::string name_of(const Object& item) {
         const Object* f = object_at(item, "Fltr");
         out = f != nullptr ? f->class_id : std::string("?");
     }
-    // (at most 64 characters: the file's words)
-    std::size_t chars = 0, at = 0;
-    while (at < out.size() && chars < 64) {
-        const auto lead = static_cast<unsigned char>(out[at]);
-        at += lead < 0x80 ? 1 : lead < 0xE0 ? 2 : lead < 0xF0 ? 3 : 4;
-        ++chars;
-    }
-    return out.substr(0, std::min(at, out.size()));
+    // (the file's words: valid UTF-8 — a class id is any bytes, review P3-2 —, at most 64 characters)
+    return pcraft::first_chars(core::utf8_replaced(out), 64);
 }
 
 // A mask's bytes (a rectangle's rows, compression 0 raw or 1 PackBits with the rows' 2-byte counts first) all 255?
@@ -471,16 +459,22 @@ Masks read_masks(const std::vector<psd::File::TaggedBlock>& globals) {
                 const std::uint64_t body = (static_cast<std::uint64_t>(e.u32()) << 32) | e.u32();
                 if (body > e.left()) throw Broken("it ends early");
                 (void)e.take(static_cast<std::size_t>(body));  // (its rectangle, depth and channels: the filtered picture)
-                bool hides = false;
+                Masks::Entry entry;
                 if (e.left() >= 1 && e.u8() != 0) {
                     // (its mask: a rectangle, its length, compression and data)
-                    const std::int64_t top = e.i32(), left = e.i32(), bottom = e.i32(), right = e.i32();
+                    entry.written = true;
+                    entry.top = e.i32();
+                    entry.left = e.i32();
+                    entry.bottom = e.i32();
+                    entry.right = e.i32();
                     const std::uint64_t size = (static_cast<std::uint64_t>(e.u32()) << 32) | e.u32();
                     if (size < 2 || size > e.left()) throw Broken("it ends early");
                     const unsigned compression = e.u16();
-                    hides = !all_white(e.take(static_cast<std::size_t>(size - 2)), right - left, bottom - top, compression);
+                    entry.hides = !all_white(e.take(static_cast<std::size_t>(size - 2)), entry.right - entry.left, entry.bottom - entry.top, compression);
                 }
-                out.hides[id] = out.hides[id] || hides;
+                // (an id met twice: what either says it hides — or is not written — counts)
+                if (const auto at = out.entries.find(id); at != out.entries.end()) entry.hides = entry.hides || at->second.hides || !at->second.written || !entry.written;
+                out.entries[id] = entry;
             }
         } catch (const Broken&) {
             out.unread = true;
@@ -493,16 +487,11 @@ Read read(std::string_view sold, const psd::Placed& placed, const Placement& whe
     Read out;
     std::optional<Object> d;
     try {
-        if (sold.size() < 8) throw Broken("it ends early");
-        Bytes b(sold.substr(8), budget.left);
-        try {
-            d = psd::descriptor::read_versioned(b);
-        } catch (const Broken& broken) {
-            // (past the budget: nothing more for the file's other layers either; else what it took)
-            budget.left = std::string_view(broken.what()).find("too large") != std::string_view::npos ? 0 : budget.left - std::min(budget.left, b.spent());
-            throw;
-        }
-        budget.left -= std::min(budget.left, b.spent());
+        d = psd::descriptor::read_versioned(sold, 8, budget.left);  // (what it takes spent from the file's budget)
+    } catch (const psd::descriptor::TooLarge&) {
+        budget.left = 0;  // (past the budget: nothing more for the file's other layers either)
+        out.why = "unreadable";
+        return out;
     } catch (const Broken&) {
         out.why = "unreadable";
         return out;
@@ -566,15 +555,27 @@ Read read(std::string_view sold, const psd::Placed& placed, const Placement& whe
     }
     // (its filter mask, when on: Genko does not read it — a stack it hides something of stays Photoshop's picture)
     if (const Value* mask = fx->get("filterMaskEnable"); mask != nullptr && mask->type == "bool" && mask->boolean) {
+        // (review P3-1: read only when what it shows can be told — its layer's entry found, its mask written and white over a
+        // rectangle covering the placed layer; anything else may hide something)
         bool hides = masks.unread;
         bool found = false;
-        for (const std::string* key : {&placed.placed, &placed.uuid}) {
-            if (const auto at = masks.hides.find(*key); !key->empty() && at != masks.hides.end()) {
-                found = true;
-                hides = hides || at->second;
-            }
+        double x0 = placed.corners[0], y0 = placed.corners[1], x1 = x0, y1 = y0;
+        for (std::size_t i = 0; i < 4; ++i) {
+            x0 = std::min(x0, placed.corners[2 * i]);
+            x1 = std::max(x1, placed.corners[2 * i]);
+            y0 = std::min(y0, placed.corners[2 * i + 1]);
+            y1 = std::max(y1, placed.corners[2 * i + 1]);
         }
-        if (!found) hides = hides || std::any_of(masks.hides.begin(), masks.hides.end(), [](const auto& e) { return e.second; });
+        for (const std::string* key : {&placed.placed, &placed.uuid}) {
+            const auto at = key->empty() ? masks.entries.end() : masks.entries.find(*key);
+            if (at == masks.entries.end()) continue;
+            found = true;
+            const Masks::Entry& e = at->second;
+            const bool covers = static_cast<double>(e.left) <= std::floor(x0) && static_cast<double>(e.top) <= std::floor(y0) &&
+                                static_cast<double>(e.right) >= std::ceil(x1) && static_cast<double>(e.bottom) >= std::ceil(y1);
+            hides = hides || !e.written || e.hides || !covers;
+        }
+        if (!found) hides = true;
         if (hides) {
             out.why = "mask";
             return out;

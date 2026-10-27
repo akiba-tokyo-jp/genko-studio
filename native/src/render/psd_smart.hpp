@@ -42,6 +42,9 @@ struct Placed {
 // The block read (its payload, as the layer record holds it); none when it cannot be read: another kind or version, a
 // descriptor cut short, no id.
 std::optional<Placed> read_placed(std::string_view key, std::string_view data);
+// (PC4 D7, review P2-6) The same within `budget` — a file's descriptors' budget (psd::descriptor::kUnpackedBudget), shared
+// by its placed layers and what reads them after (render/psd_filters) —, what it takes spent from it (all of it past it).
+std::optional<Placed> read_placed(std::string_view key, std::string_view data, std::size_t& budget);
 
 // A placed layer whose corners are a parallelogram is its contents moved by a matrix (within `tolerance` pixels).
 bool parallelogram(const std::array<double, 8>& corners, double tolerance = 1e-6);

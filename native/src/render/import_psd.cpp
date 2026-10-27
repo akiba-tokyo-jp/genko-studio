@@ -910,7 +910,7 @@ Json import_data(core::Document& doc, const Json& op, std::string data, bool exa
     // the file's filter effects read when a placed layer has smart filters; the layers read so and those not, at most
     // kFilterReportsMax of each said)
     constexpr std::size_t kFilterReportsMax = 256;
-    psd_filters::Budget filters_budget;
+    psd_filters::Budget filters_budget{file.descriptor_left()};  // (what the file's placed layers left of its one budget)
     std::optional<psd_filters::Masks> filter_masks;
     std::optional<std::vector<psd::File::TaggedBlock>> filter_globals;
     Json filters_read = Json::array(), filters_shown = Json::array();
@@ -1133,6 +1133,8 @@ Json import_data(core::Document& doc, const Json& op, std::string data, bool exa
                         core::smart::put_setting(layer, "filters", std::move(*fx->filters));
                         if (!fx->on) core::smart::put_setting(layer, "filters_on", false);
                         smart_filters::settle_places(doc, page, layer);  // (their places go with it, as smart_filter_add's)
+                        // (review P2-5: what was read, so that a PSD written while they are the same keeps Photoshop's)
+                        (*layer.smart)["psd"]["filters_read"] = core::smart::filters_digest(layer);
                     }
                     smart_objects.push_back(Json{{"id", layer.id}, {"contents", smart->contents}});
                 } else {

@@ -874,7 +874,11 @@ public:
                 const std::string block = key->get<std::string>();
                 if (const core::Bytes bytes = kept_bytes(episode_, raw->get<std::string>(), ".bin")) {
                     const auto read = render::psd::read_placed(block, *bytes);
-                    if (read && read->has_corners && read->uuid == uuid && same(read->corners, out.corners)) {
+                    // (PC4 D7, review P2-5: a block with Photoshop's smart filters only while they say what the layer
+                    // draws — Photoshop's picture still shown, or the filters read from it unchanged —; else this build's,
+                    // without them: the filters in the layer's pixels)
+                    const bool filters_hold = !read || !read->filters || core::get(*psd, "shown") != nullptr || core::smart::photoshop_filters_kept(layer);
+                    if (read && read->has_corners && read->uuid == uuid && same(read->corners, out.corners) && filters_hold) {
                         return tagged(block, *bytes) + (block == "PlLd" ? tagged("SoLd", render::psd::sold_block(out)) : tagged("PlLd", render::psd::plld_block(out)));
                     }
                 }
@@ -2041,12 +2045,15 @@ fs::path export_contents_psd(const core::Document& episode, const core::Page& pa
 }
 
 std::vector<std::string> psd_smart_notes(const core::Document& episode) {
-    bool filtered = false, linked = false;
+    bool filtered = false, linked = false, kept = false;
     for (std::size_t i = 0; i < episode.pages.size(); ++i) {
         if (episode.is_deferred(i)) continue;
         for (const core::Layer& layer : episode.pages[i]->layers) {
             if (!core::smart::is_smart(layer) || !layer.visible || !layer.exportable) continue;
-            filtered = filtered || core::smart::filters_drawn(layer);
+            // (PC4 D7, review P2-5: Photoshop's smart filters read and unchanged go back with the block they came in)
+            const bool photoshops = core::smart::photoshop_filters_kept(layer);
+            kept = kept || photoshops;
+            filtered = filtered || (core::smart::filters_drawn(layer) && !photoshops);
             const core::SmartContents* contents = core::smart::contents_of(episode, layer);
             linked = linked || (contents != nullptr && contents->link.has_value());
         }
@@ -2054,6 +2061,10 @@ std::vector<std::string> psd_smart_notes(const core::Document& episode) {
     std::vector<std::string> notes;
     if (filtered) {
         notes.push_back("スマートフィルターは配置レイヤーの画素に焼き込んで書き出しました（Photoshop でコンテンツを編集すると、スマートフィルターは外れます）");
+    }
+    if (kept) {
+        notes.push_back(
+            "PSD から読んだ Photoshop のスマートフィルターは、変えていないので読んだブロックのまま書き戻しました（読んだときと同じ解像度・同じ所のとき。層の画素は Genko の描いた絵です）");
     }
     if (linked) notes.push_back("リンクしたスマートオブジェクトは、その写しを埋め込んだ配置レイヤーとして書き出しました");
     return notes;

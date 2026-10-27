@@ -232,10 +232,14 @@ Json pins_in(std::string_view kind, const Json& given, double dpi) {
         for (const auto& [up, genko] : kFlat) {
             if (const Json* v = get(given, up); v != nullptr && takes.contains(genko)) pin[std::string(genko)] = *v;
         }
-        if (pin.empty()) return Json(nullptr);  // (upstream's one pin by default: Genko's too)
+        if (pin.empty() && kind == "blur_spin") return Json(nullptr);  // (upstream's one pin by default: Genko's too — no length)
         pins.push_back(std::move(pin));
     }
-    for (Json& pin : pins) scale_at(pin, "blur", [dpi](double v) { return to_working(v, dpi); });
+    // (review P2-2: a blur not given is upstream's 15 of the document's pixels, not Genko's 15 working pixels)
+    for (Json& pin : pins) {
+        if (kind != "blur_spin" && pin.is_object() && !pin.contains("blur")) pin["blur"] = 15;
+        scale_at(pin, "blur", [dpi](double v) { return to_working(v, dpi); });
+    }
     return pins;
 }
 
@@ -268,9 +272,7 @@ Json paths_in(const Json& given, double dpi, UpstreamCanvas canvas) {
     if (const Json* list = listed(given, "paths")) {
         for (const Json& path : *list) paths.push_back(keys_in(path));
     } else {
-        static constexpr std::array<const char*, 6> kFlat{"startX", "startY", "endX", "endY", "speed", "taper"};
-        const bool flat = std::any_of(kFlat.begin(), kFlat.end(), [&given](const char* key) { return get(given, key) != nullptr; });
-        if (!flat) return Json(nullptr);  // (upstream's path across the middle: Genko's by default too)
+        // (none given: upstream's path across the middle, its speed 50 of the document's pixels — written out, review P2-2)
         const auto at = [&given](const char* key, double fallback) {
             const Json* v = get(given, key);
             if (v == nullptr) return fallback;
@@ -284,6 +286,7 @@ Json paths_in(const Json& given, double dpi, UpstreamCanvas canvas) {
     }
     if (!(canvas.width_mm > 0) || !(canvas.height_mm > 0)) throw Unmapped{};  // (its shares need the canvas)
     for (Json& path : paths) {
+        if (path.is_object() && !path.contains("speed")) path["speed"] = 50;  // (upstream's, the document's pixels)
         if (const auto points = path.find("points"); points != path.end() && points->is_array()) {
             for (Json& p : *points) {
                 if (!p.is_array() || p.size() != 2 || !finite_number(p[0]) || !finite_number(p[1])) throw Unmapped{};
@@ -339,6 +342,8 @@ Json gallery_in(std::string_view command, const Json& given) {
     if (command == "filter.filterGallery") {
         const Json* list = get(given, "effects");
         if (list == nullptr || !list->is_array()) throw Unmapped{};
+        // (more than Genko holds — a few hidden ones it leaves out besides —: not looked through, review P3-11)
+        if (list->size() > 4 * kGalleryMostEffects) throw Unmapped{};
         for (const Json& item : *list) {
             if (!item.is_object()) throw Unmapped{};
             const Json* visible = get(item, "visible");
@@ -407,6 +412,10 @@ std::optional<std::pair<std::string, Json>> kind_of(std::string_view command, co
 // Upstream's smart filters this build has no kind of (distort_cmds.rs, plugin_cmds.rs).
 constexpr std::array<std::string_view, 6> kUpstreamOnly{"filter.liquify",           "edit.puppetWarp",    "layer.smartObjects.puppetWarp",
                                                         "edit.perspectiveWarp",     "layer.smartObjects.perspectiveWarp", "plugin.run"};
+// (review P2-3) Upstream's commands that are not its smart filters (extra_cmds.rs 676-678: not through run_filter, no
+// params_for — apply_smart_filters leaves the pixels alone for them): Genko's kinds of them are not written, and one read is
+// drawn by neither. (A PSD's Photoshop filters of them are read: Photoshop draws them.)
+constexpr std::array<std::string_view, 3> kNotSmart{"filter.blur.average", "filter.render.clouds", "filter.render.differenceClouds"};
 
 }  // namespace
 
@@ -455,8 +464,24 @@ std::optional<std::pair<std::string, Json>> from_upstream(std::string_view comma
                 }
             } else if (kind == "distort_displace") {
                 throw Unmapped{};  // (its map is a file of the person's machine upstream: a book holds its own)
+            } else if (kind == "distort_shear") {
+                // (review P2-1: no points upstream reads — filters_ext.rs 158-162 — is its window's amount: three points)
+                const Json* points = get(given, "points");
+                const bool listed_points = points != nullptr && points->is_array() && std::any_of(points->begin(), points->end(), [](const Json& p) {
+                    return p.is_array() && p.size() == 2 && p[0].is_number() && p[1].is_number();
+                });
+                if (!listed_points) {
+                    const Json* amount = get(given, "amount");
+                    const double a = amount != nullptr && finite_number(*amount) ? std::clamp(amount->get<double>(), -100.0, 100.0) / 100.0 : 0.0;
+                    read["points"] = Json::array({Json::array({0, 0}), Json::array({0.5, a}), Json::array({1, 0})});
+                }
             }
-            for (const std::string& key : lengths_of(kind)) scale_at(read, key, [dpi](double v) { return to_working(v, dpi); });
+            // (review P2-2: a length not given is upstream's default — the table's, the same number — of the document's
+            // pixels, then the working 200 dpi's)
+            for (const std::string& key : lengths_of(kind)) {
+                if (const AdjustParam* p = param_of(table->params, key); p != nullptr && !read.contains(key)) read[key] = p->fallback;
+                scale_at(read, key, [dpi](double v) { return to_working(v, dpi); });
+            }
         }
         Json normal = normalize_filter(kind, read, nullptr);
         return std::make_pair(kind, std::move(normal));
@@ -471,7 +496,7 @@ std::optional<std::pair<std::string, Json>> to_upstream(std::string_view kind, c
     if (!(dpi > 0) || !std::isfinite(dpi)) return std::nullopt;
     const FilterInfo* info = filter_info(kind);
     const AdjustKind* table = adjust_kind(kind);
-    if (info == nullptr || table == nullptr || info->upstream.empty()) return std::nullopt;
+    if (info == nullptr || table == nullptr || info->upstream.empty() || !upstream_filter(info->upstream)) return std::nullopt;
     try {
         Json read = normalize_filter(kind, params.is_object() ? params : Json::object(), nullptr);
         if (kind == "filter_gallery") return std::make_pair(std::string("filter.filterGallery"), gallery_out(read));
@@ -496,8 +521,14 @@ std::optional<std::pair<std::string, Json>> to_upstream(std::string_view kind, c
                 lights.push_back(keys_out(one));
             }
             read.erase("lights");
-        } else if (kind == "blur_path" && read.contains("paths")) {
+        } else if (kind == "blur_path") {
             if (!(canvas.width_mm > 0) || !(canvas.height_mm > 0)) return std::nullopt;
+            // (none: Genko's path across the middle at 50 working pixels — written out, upstream's 50 being the document's)
+            if (!read.contains("paths"))
+                read["paths"] = Json::array({Json{{"points", Json::array({Json::array({0.2 * canvas.width_mm, 0.5 * canvas.height_mm}),
+                                                                          Json::array({0.8 * canvas.width_mm, 0.5 * canvas.height_mm})})},
+                                                  {"speed", 50},
+                                                  {"taper", 0}}});
             if (read["paths"].empty()) return std::nullopt;  // (no path: upstream's empty list is its one path)
             paths = Json::array();
             for (const Json& path : read["paths"]) {
@@ -532,6 +563,7 @@ std::optional<std::pair<std::string, Json>> to_upstream(std::string_view kind, c
 }
 
 bool upstream_filter(std::string_view command) {
+    if (std::find(kNotSmart.begin(), kNotSmart.end(), command) != kNotSmart.end()) return false;
     if (std::find(kUpstreamOnly.begin(), kUpstreamOnly.end(), command) != kUpstreamOnly.end()) return true;
     if (command == "filter.filterGallery") return true;
     if (command.starts_with("filter.gallery.")) {

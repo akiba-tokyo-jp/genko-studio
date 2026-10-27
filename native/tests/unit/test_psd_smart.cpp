@@ -759,7 +759,29 @@ private slots:
             if (l.kind == "smart") placed = &l;
         QVERIFY(placed != nullptr && placed->placed && placed->placed->filters);
         QCOMPARE(std::string(written.placed_block(*placed)), made.sold);
-        QVERIFY(noted(genko::formats::psd_smart_notes(doc), "焼き込んで"));
+        // (review P2-5: Photoshop's filters unchanged go back with it — not burnt in, said so)
+        QVERIFY(!noted(genko::formats::psd_smart_notes(doc), "焼き込んで"));
+        QVERIFY(noted(genko::formats::psd_smart_notes(doc), "読んだブロックのまま書き戻しました"));
+        QVERIFY((*so->smart)["psd"].contains("filters_read"));
+        // (changed — a radius of the Gaussian, or one more filter —: this build's block without Photoshop's filters, the
+        // filters in the layer's pixels, said)
+        for (const Json& op : {Json{{"op", "smart_filter_set"}, {"page", 1}, {"id", "ps-2"}, {"index", 0}, {"params", Json{{"radius", 3}}}},
+                               Json{{"op", "smart_filter_add"}, {"page", 1}, {"id", "ps-2"}, {"kind", "noise_median"}, {"radius", 2}}}) {
+            const core::Document changed = run(doc, Json::array({op}));
+            const core::Layer* edited = layer_of(changed, "ps-2");
+            QVERIFY(edited && !core::smart::photoshop_filters_kept(*edited));
+            core::smart::validate_smart(changed);
+            genko::formats::export_page_psd(changed, changed.page(0), out, 100);
+            const psd::File again = psd::File::read(genko::test::read_bytes(dir.filePath(QStringLiteral("p.psd"))));
+            const psd::Layer* rewritten = nullptr;
+            for (const psd::Layer& l : again.layers())
+                if (l.kind == "smart") rewritten = &l;
+            QVERIFY2(rewritten != nullptr && rewritten->placed && !rewritten->placed->filters, op.dump().c_str());
+            QVERIFY(std::string(again.placed_block(*rewritten)) != made.sold);
+            QCOMPARE(rewritten->placed->uuid, std::string("uuid-1"));
+            QVERIFY(noted(genko::formats::psd_smart_notes(changed), "焼き込んで"));
+            QVERIFY(!noted(genko::formats::psd_smart_notes(changed), "読んだブロックのまま"));
+        }
         // (the stack off: read off)
         const PlacedPsd off = placed_psd({100, 150, 140, 150, 140, 182, 100, 182},
                                          sold_with(filter_fx({filter_item("g", std::make_pair(std::string("GsnB"), gaussian(2)), id4("GsnB"))}, false, false)));
@@ -811,6 +833,11 @@ private slots:
             {"a painted mask", filter_fx({g("g")}, true), filter_effects("placed-1", std::make_pair(0u, painted)), "mask", {}},
             {"a mask of another layer painted", filter_fx({g("g")}, true), filter_effects("someone-else", std::make_pair(0u, painted)), "mask", {}},
             {"filter effects unread", filter_fx({g("g")}, true), build::block("FEid", std::string("\0\0\0\x09garbage!", 12)), "mask", {}},
+            // (review P3-1: what cannot be told — its entry not found, its mask not written, a white rectangle not covering
+            // the layer — may hide something)
+            {"no entry of its own", filter_fx({g("g")}, true), filter_effects("someone-else", std::make_pair(0u, white)), "mask", {}},
+            {"its mask not written", filter_fx({g("g")}, true), filter_effects("uuid-1", std::nullopt), "mask", {}},
+            {"a white mask short of the layer", filter_fx({g("g")}, true), filter_effects("placed-1", std::make_pair(0u, std::string(20 * 32, '\xff')), 20, 32), "mask", {}},
         };
         for (const Case& c : cases) {
             const PlacedPsd made = placed_psd({100, 150, 140, 150, 140, 182, 100, 182}, sold_with(c.fx), c.more);
@@ -826,9 +853,10 @@ private slots:
             QCOMPARE(at(page_picture(result.doc), 110, 160), (std::vector<double>{0, 0, 255}));  // (Photoshop's picture)
             core::smart::validate_smart(result.doc);
         }
-        // (a mask on that hides nothing — white, raw or PackBits —, or one of another layer white: read)
+        // (a mask on that hides nothing — its own, white over the layer, raw or PackBits, found by its layer's id or its
+        // contents' —: read)
         for (const std::string& more : {filter_effects("placed-1", std::make_pair(0u, white)), filter_effects("placed-1", std::make_pair(1u, rle)),
-                                        filter_effects("uuid-1", std::nullopt), filter_effects("someone-else", std::make_pair(0u, white))}) {
+                                        filter_effects("uuid-1", std::make_pair(0u, white))}) {
             const Json report = imported(placed_psd({100, 150, 140, 150, 140, 182, 100, 182}, sold_with(filter_fx({g("g")}, true)), more).bytes).results.at(0);
             QVERIFY2(report.contains("smart_filters_read"), report.dump().c_str());
         }
@@ -894,7 +922,7 @@ private slots:
         for (int r = 0; r < 32; ++r) build::u16(bad_rle, 2);
         for (int r = 0; r < 32; ++r) bad_rle += std::string("\x7f\xff", 2);  // (a literal run of 128 claiming bytes it has not)
         const render::psd_filters::Masks rle = masks_of(filter_effects("placed-1", std::make_pair(1u, bad_rle)));
-        QVERIFY(!rle.unread && rle.hides.at("placed-1"));
+        QVERIFY(!rle.unread && rle.entries.at("placed-1").hides);
         std::string entries;
         build::u32(entries, 3);
         std::string one;

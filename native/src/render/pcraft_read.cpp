@@ -1269,46 +1269,61 @@ bool smart_layer(Ctx& ctx, core::Layer& layer, const Json& d, const std::string&
     if (kind != "embedded") throw Unreadable("smart: a source this build does not know");
     // (PC4 D7: its smart filters as Genko's — core::from_upstream —, before its contents are read. A filter PhotoCraft draws
     // that this build cannot take, or a blend Genko has not, makes the whole its picture: without it the others would lay
-    // over another picture — the order's meaning changed —; one PhotoCraft does not know it draws nothing for, left out and
-    // said.)
+    // over another picture — the order's meaning changed —; one PhotoCraft does not know (or does not draw as a smart
+    // filter) it draws nothing for, left out and said. Review P2-4 and P3-5: one that does not show — hidden, or the stack
+    // off — changes nothing seen, and a smart object without upstream's picture (no cache) is never lost for one: each such
+    // filter left out, the smart object kept, said.)
     Json filters = Json::array();
-    std::vector<std::string> dropped;
+    std::vector<std::string> dropped, unmapped;
+    const Json* cache = optional_field(d, "cache");
+    const bool cached = cache != nullptr && !cache->is_null();
+    const Json* enabled = optional_field(d, "filters_enabled");
+    const bool stack_on = !(enabled != nullptr && enabled->is_boolean() && !enabled->get<bool>());
     if (const Json* list = optional_field(d, "smart_filters"); list != nullptr && list->is_array()) {
         // (more than a smart object holds — counted before any is read; a few PhotoCraft does not know besides)
-        if (list->size() > 4 * core::smart::kFiltersMax) {
+        const std::size_t most = 4 * core::smart::kFiltersMax;
+        if (list->size() > most && cached) {
             why = "スマートフィルターが " + std::to_string(core::smart::kFiltersMax) + " 個を超えるため、見えのまま画素にしました";
             return false;
         }
         const core::UpstreamCanvas canvas{ctx.w * ctx.mm, ctx.h * ctx.mm};
+        std::size_t looked = 0;
         for (const Json& f : *list) {
+            if (++looked > most) break;  // (no picture to show instead: the first ones, said below)
             const std::string command = text(field(f, "command", "smart filter"), "smart filter.command");
             const std::string said = first_chars(core::utf8_replaced(command), 64);
-            const auto mapped = core::from_upstream(command, field(f, "params", "smart filter"), ctx.dpi, canvas);
-            if (!mapped) {
-                if (core::upstream_filter(command)) {
-                    why = filter_note(ctx, "スマートフィルター「" + said + "」をこの版の Genko に写せないため、見えのまま画素にしました",
-                                      "この版の Genko に写せないスマートフィルターがあるため、見えのまま画素にしました");
-                    return false;
-                }
+            const bool visible = boolean(field(f, "visible", "smart filter"), "smart filter.visible");
+            if (!core::upstream_filter(command)) {
                 if (std::find(dropped.begin(), dropped.end(), said) == dropped.end()) dropped.push_back(said);
                 continue;
             }
+            const auto mapped = core::from_upstream(command, field(f, "params", "smart filter"), ctx.dpi, canvas);
             const std::string blend = blend_from(field(f, "blend", "smart filter"));
             const auto genko = genko_blend(blend);
-            if (!genko) {
-                why = filter_note(ctx, "スマートフィルター「" + said + "」の描画モード（" + blend + "）が Genko に無いため、見えのまま画素にしました",
-                                  "Genko に無い描画モードのスマートフィルターがあるため、見えのまま画素にしました");
-                return false;
+            if (!mapped || !genko) {
+                if (cached && visible && stack_on) {
+                    why = !mapped ? filter_note(ctx, "スマートフィルター「" + said + "」をこの版の Genko に写せないため、見えのまま画素にしました",
+                                                "この版の Genko に写せないスマートフィルターがあるため、見えのまま画素にしました")
+                                  : filter_note(ctx, "スマートフィルター「" + said + "」の描画モード（" + blend + "）が Genko に無いため、見えのまま画素にしました",
+                                                "Genko に無い描画モードのスマートフィルターがあるため、見えのまま画素にしました");
+                    return false;
+                }
+                if (std::find(unmapped.begin(), unmapped.end(), said) == unmapped.end()) unmapped.push_back(said);
+                continue;
             }
             filters.push_back(Json{{"kind", mapped->first},
                                    {"params", mapped->second},
                                    {"blend", *genko},
                                    {"opacity", std::round(std::clamp(number(field(f, "opacity", "smart filter"), "smart filter.opacity"), 0.0, 1.0) * 1000.0) / 1000.0},
-                                   {"visible", boolean(field(f, "visible", "smart filter"), "smart filter.visible")}});
+                                   {"visible", visible}});
         }
-        if (filters.size() > core::smart::kFiltersMax) {
-            why = "スマートフィルターが " + std::to_string(core::smart::kFiltersMax) + " 個を超えるため、見えのまま画素にしました";
-            return false;
+        if (filters.size() > core::smart::kFiltersMax || looked > most) {
+            if (cached) {
+                why = "スマートフィルターが " + std::to_string(core::smart::kFiltersMax) + " 個を超えるため、見えのまま画素にしました";
+                return false;
+            }
+            if (filters.size() > core::smart::kFiltersMax) filters.erase(filters.begin() + static_cast<std::ptrdiff_t>(core::smart::kFiltersMax), filters.end());
+            ctx.notes.name("スマートフィルターが多すぎ、PhotoCraft の絵も無いため、" + std::to_string(core::smart::kFiltersMax) + " 個までにしました", name);
         }
     }
     const std::string file_name = core::utf8_replaced(text(field(source, "file_name", "smart.source"), "smart.source.file_name"));
@@ -1362,6 +1377,11 @@ bool smart_layer(Ctx& ctx, core::Layer& layer, const Json& d, const std::string&
     for (const std::string& said : dropped) {
         ctx.notes.name(filter_note(ctx, "スマートフィルター「" + said + "」は PhotoCraft も描かないもののため外しました",
                                    "PhotoCraft も描かないスマートフィルターを外しました"),
+                       name);
+    }
+    for (const std::string& said : unmapped) {
+        ctx.notes.name(filter_note(ctx, "スマートフィルター「" + said + "」はこの版の Genko に写せないため外しました（表示していないか、PhotoCraft の絵が無いため）",
+                                   "この版の Genko に写せないスマートフィルターを外しました（表示していないか、PhotoCraft の絵が無いため）"),
                        name);
     }
     if (!filters.empty()) {

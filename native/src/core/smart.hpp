@@ -121,6 +121,12 @@ inline constexpr std::array<std::string_view, 6> kFilterKeys{"kind", "params", "
 bool filter_kind(std::string_view kind);
 // Are the smart object's filters drawn: on, and one of them shown?
 bool filters_drawn(const Layer& layer);
+// (PC4 D7, review P2-5) The digest (sha256, 64 hexadecimal digits) of a smart object's filters and whether they show: a
+// PSD's placed layer whose Photoshop smart filters were read as Genko's keeps it in its psd record ("filters_read"); while
+// the filters are still those (photoshop_filters_kept), the PSD writer writes back the block it was read with — Photoshop's
+// filters with it —, else a block of this build's without them (the filters in the layer's pixels).
+std::string filters_digest(const Layer& layer);
+bool photoshop_filters_kept(const Layer& layer);
 // PC3 A5: the smart filters that bend the picture — 節 C's Liquify (its strokes), Perspective Warp (its planes) and Puppet
 // Warp (its pins), kept with their settings in the page's mm and drawn again on the picture below them each time
 // (render/smart_filters; PhotoCraft keeps them so, engine/src/distort_cmds.rs:233-272). Their settings: {"strokes",

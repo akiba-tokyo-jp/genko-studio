@@ -22,6 +22,7 @@
 #include <map>
 #include <set>
 #include <string>
+#include <tuple>
 #include <vector>
 
 #include "core/base64.hpp"
@@ -676,6 +677,44 @@ private slots:
             QVERIFY2(pixels && pixels->kind == core::LayerKind::Raster && !pixels->smart, part.c_str());
             QVERIFY2(said(opened.notes, part) && said(opened.notes, "見えのまま画素にしました"), (part + "\n" + joined(opened.notes)).c_str());
         }
+        // review P2-4 and P3-5: one that does not show (hidden, or the stack off), or a smart object without upstream's
+        // picture, keeps the smart object — the filter left out, said; one upstream does not draw as a smart filter (平均・
+        // 雲模様) left out as upstream leaves it
+        const auto kept_without = [&](Json stack_given, const std::function<void(Json&)>& edit) {
+            Json m = base;
+            Json* layer_given = find(m["document"]["layers"], "Smart");
+            (*layer_given)["content"]["smart_filters"] = std::move(stack_given);
+            edit((*layer_given)["content"]);
+            return formats::open_file(bundle(m, rich), "kept.pcraft");
+        };
+        const Json liquify_hidden = Json::array({sf("filter.blur.gaussianBlur", Json{{"radius", 2}}), sf("filter.liquify", Json::object(), "Normal", false)});
+        const Json liquify_shown = Json::array({sf("filter.blur.gaussianBlur", Json{{"radius", 2}}), sf("filter.liquify", Json::object())});
+        const Json average = Json::array({sf("filter.blur.gaussianBlur", Json{{"radius", 2}}), sf("filter.blur.average", Json::object())});
+        const std::vector<std::tuple<std::string, Json, std::function<void(Json&)>, std::string>> kept_cases{
+            {"hidden", liquify_hidden, [](Json&) {}, "filter.liquify"},
+            {"stack off", liquify_shown, [](Json& c) { c["filters_enabled"] = false; }, "filter.liquify"},
+            {"no cache", liquify_shown, [](Json& c) { c["cache"] = nullptr; }, "filter.liquify"},
+            {"VividLight, no cache", Json::array({sf("filter.blur.gaussianBlur", Json{{"radius", 2}}), sf("filter.blur.boxBlur", Json{{"radius", 2}}, "VividLight")}),
+             [](Json& c) { c["cache"] = nullptr; }, "filter.blur.boxBlur"},
+            {"average", average, [](Json&) {}, "filter.blur.average"},
+        };
+        for (const auto& [what, stack_given, edit, part] : kept_cases) {
+            const formats::Opened opened = kept_without(stack_given, edit);
+            const core::Layer* kept = titled(opened.doc.page(0), "Smart");
+            QVERIFY2(kept && kept->kind == core::LayerKind::Smart && kept->smart, what.c_str());
+            QCOMPARE((*kept->smart)["filters"].size(), std::size_t(1));
+            QCOMPARE((*kept->smart)["filters"][0]["kind"], Json("blur_gaussian"));
+            QVERIFY2(said(opened.notes, part) && said(opened.notes, "外しました"), (what + "\n" + joined(opened.notes)).c_str());
+            core::smart::validate_smart(opened.doc);
+        }
+        // (the Genko kinds upstream does not draw as smart filters are written as the smart object's picture)
+        const core::Document averaged =
+            run(read.doc, Json::array({Json{{"op", "smart_filter_add"}, {"page", 1}, {"id", smart->id}, {"kind", "blur_average"}}}));
+        std::vector<std::string> average_notes;
+        Json average_written = manifest_of(formats::pcraft_bytes(averaged, 0, formats::PcraftOptions{}, &average_notes));
+        const Json* average_layer = find(average_written["document"]["layers"], "Smart");
+        QVERIFY(average_layer && (*average_layer)["content"]["kind"] == Json("raster"));
+        QVERIFY2(said(average_notes, "平均"), joined(average_notes).c_str());
         // a Genko filter PhotoCraft has none of (Python's blur): written as its picture, said
         const core::Document blurred =
             run(read.doc, Json::array({Json{{"op", "smart_filter_add"}, {"page", 1}, {"id", smart->id}, {"kind", "blur"}, {"radius", 2}}}));

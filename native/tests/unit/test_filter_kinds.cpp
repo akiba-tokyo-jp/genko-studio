@@ -234,7 +234,18 @@ private slots:
                 QVERIFY(core::upstream_filter(info.upstream));
                 continue;
             }
-            const Json settings = defaults_of(kind);
+            if (kind == "blur_average" || kind == "render_clouds" || kind == "render_difference_clouds") {
+                // (review P2-3: not PhotoCraft's smart filters — it leaves the pixels alone for them —: not written, and a
+                // .pcraft's one draws nothing; a PSD's Photoshop filter of them is read)
+                QVERIFY2(!core::to_upstream(kind, defaults_of(kind), 300, canvas), kind.c_str());
+                QVERIFY2(!core::upstream_filter(info.upstream), kind.c_str());
+                QVERIFY2(core::from_upstream(info.upstream, Json::object(), 300, canvas).has_value(), kind.c_str());
+                continue;
+            }
+            Json settings = defaults_of(kind);
+            if (kind == "blur_path") {  // (Genko's own path across the middle, written out as upstream's — review P2-2)
+                settings["paths"] = Json::array({Json{{"points", Json::array({Json::array({24, 80}), Json::array({96, 80})})}, {"speed", 50}, {"taper", 0}}});
+            }
             const auto out = core::to_upstream(kind, settings, 300, canvas);
             QVERIFY2(out.has_value(), kind.c_str());
             QCOMPARE(out->first, std::string(info.upstream));
@@ -311,7 +322,22 @@ private slots:
         const Json iris = in("filter.blurGallery.irisBlur", Json{{"centerX", 0.3}, {"radiusX", 0.2}, {"blur", 30}}, 600);
         QCOMPARE(iris["pins"].size(), std::size_t(1));
         QVERIFY(std::fabs(iris["pins"][0]["x"].get<double>() - 0.3) < 1e-12 && std::fabs(iris["pins"][0]["blur"].get<double>() - 10) < 1e-12);
-        QCOMPARE(in("filter.blurGallery.fieldBlur", Json{{"pins", Json::array()}})["pins"], core::normalize_filter("blur_field", Json::object(), nullptr)["pins"]);
+        // (an empty list: upstream's one pin, its blur 15 of the document's pixels — 10 working pixels at 300 dpi)
+        const Json field = in("filter.blurGallery.fieldBlur", Json{{"pins", Json::array()}});
+        QCOMPARE(field["pins"].size(), std::size_t(1));
+        QCOMPARE(field["pins"][0]["x"].get<double>(), 0.5);
+        QVERIFY(std::fabs(field["pins"][0]["blur"].get<double>() - 10) < 1e-12);
+        // review P2-2: lengths not given are upstream's defaults of the document's pixels (300 dpi: × 2/3)
+        QVERIFY(std::fabs(in("filter.blur.gaussianBlur", Json::object())["radius"].get<double>() - 2.0 / 3.0) < 1e-12);
+        QVERIFY(std::fabs(in("filter.blur.motionBlur", Json{{"angle", 45}})["distance"].get<double>() - 20.0 / 3.0) < 1e-12);
+        QVERIFY(std::fabs(in("filter.cameraRaw", Json::object())["sharpen_radius"].get<double>() - 2.0 / 3.0) < 1e-12);
+        QVERIFY(std::fabs(in("filter.blurGallery.irisBlur", Json{{"centerX", 0.3}})["pins"][0]["blur"].get<double>() - 10) < 1e-12);
+        // review P2-1: シアー without points is its window's amount — upstream's three points
+        QCOMPARE(in("filter.distort.shear", Json{{"amount", 40}, {"undefinedAreas", "repeat"}})["points"],
+                 Json::array({Json::array({0, 0}), Json::array({0.5, 0.4}), Json::array({1, 0})}));
+        QCOMPARE(in("filter.distort.shear", Json{{"amount", 40}, {"undefinedAreas", "repeat"}})["undefined_areas"], Json("repeat"));
+        QCOMPARE(in("filter.distort.shear", Json{{"points", Json::array({Json::array({0, 0.1}), Json::array({1, -0.1})})}})["points"],
+                 Json::array({Json::array({0, 0.1}), Json::array({1, -0.1})}));
         const Json spin = in("filter.blurGallery.spinBlur", Json{{"pins", Json::array({Json{{"x", 0.1}, {"blurAngle", 90}, {"radiusY", 0.4}}})}});
         QCOMPARE(spin["pins"][0]["blur_angle"].get<double>(), 90.0);
         QCOMPARE(spin["pins"][0]["radius_y"].get<double>(), 0.4);
@@ -320,7 +346,11 @@ private slots:
         QCOMPARE(path["paths"][0]["points"], Json::array({Json::array({25.0, 100.0}), Json::array({75.0, 100.0})}));
         QVERIFY(std::fabs(path["paths"][0]["speed"].get<double>() - 30) < 1e-12);
         QVERIFY(in("filter.blurGallery.pathBlur", Json{{"paths", Json::array({Json{{"points", Json::array({Json::array({0, 0}), Json::array({1, 1})})}}})}}).is_null());
-        QVERIFY(!in("filter.blurGallery.pathBlur", Json::object()).is_null());  // (upstream's own path: Genko's by default)
+        // (upstream's own path across the middle, its speed 50 of the document's pixels: written out; without the canvas, not)
+        const Json middle = in("filter.blurGallery.pathBlur", Json::object(), 400, core::UpstreamCanvas{100, 200});
+        QCOMPARE(middle["paths"][0]["points"], Json::array({Json::array({20.0, 100.0}), Json::array({80.0, 100.0})}));
+        QVERIFY(std::fabs(middle["paths"][0]["speed"].get<double>() - 25) < 1e-12);
+        QVERIFY(in("filter.blurGallery.pathBlur", Json::object()).is_null());
         // (a light of the flat settings, its colour 0..1; a constraint's ends the document's pixels as mm)
         const Json light = in("filter.render.lightingEffects", Json{{"lightType", "infinite"}, {"color", Json::array({0, 0.5, 1})}, {"whiteIsHigh", false}});
         QCOMPARE(light["lights"][0]["kind"], Json("infinite"));

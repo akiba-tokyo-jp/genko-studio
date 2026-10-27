@@ -1,6 +1,7 @@
 #pragma once
 
 #include <cstddef>
+#include <cstdint>
 #include <map>
 #include <optional>
 #include <string>
@@ -35,11 +36,18 @@ struct Placement {
     double file_w = 1, file_h = 1;  // the file's canvas in its pixels
 };
 
-// What the file's filter effects (its global FEid and FXid blocks) say of the smart filters' masks: by the id of each
-// layer it holds one for, whether the mask hides something (or cannot be read); and whether one of an id no layer has
-// does.
+// What the file's filter effects (its global FEid and FXid blocks) say of the smart filters' masks, by the id of each
+// layer it holds one for: whether its mask is written, whether it hides something within its rectangle (or cannot be
+// read), and the rectangle (the canvas's pixels). A stack whose mask is on is read only when its layer's entry is found,
+// its mask written, white, and its rectangle covers the placed layer (review P3-1: else what is outside it, or a mask
+// this build cannot find, may hide something).
 struct Masks {
-    std::map<std::string, bool> hides;
+    struct Entry {
+        bool written = false;
+        bool hides = false;
+        std::int64_t top = 0, left = 0, bottom = 0, right = 0;
+    };
+    std::map<std::string, Entry> entries;
     bool unread = false;  // (a block or an entry it could not read: any stack's mask may hide something)
 };
 // At most this many entries a file (the rest: unread).

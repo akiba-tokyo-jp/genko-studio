@@ -138,6 +138,11 @@ Object read_versioned(std::string_view payload, std::size_t at = 0);
 // past it.
 Object read_versioned(std::string_view payload, std::size_t at, std::size_t& budget);
 
+// (PC4 D7, review P3-12) Photoshop's blend mode enumeration (BlnM: a smart filter's blending options, a layer effect's mode)
+// as Genko's of the 20 (core::blend_mode); none for one Genko has not (Dslv, vividLight, linearLight, pinLight, hardMix,
+// darkerColor, lighterColor, Sbtr…). The one table of them for every descriptor reader.
+std::optional<std::string> genko_blend(std::string_view blnm);
+
 }  // namespace genko::render::psd::descriptor
 
 namespace genko::render::psd {

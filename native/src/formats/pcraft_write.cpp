@@ -883,15 +883,25 @@ std::optional<Json> smart_content(Ctx& ctx, const core::Layer& layer, const rend
     if (contents == nullptr) return std::nullopt;
     // (PC4 D7: its smart filters as PhotoCraft's — core::to_upstream, their places as the page has them —, before its
     // contents are written. One PhotoCraft has none of makes the whole its picture, said: without it the others would lay
-    // over another picture — the order's meaning changed.)
+    // over another picture — the order's meaning changed. Review P3-5: one that does not show — hidden, or the stack off —
+    // changes nothing seen: left out, the smart object kept, said.)
     Json filters = Json::array();
     if (const auto list = layer.smart->find("filters"); list != layer.smart->end() && list->is_array()) {
         const core::UpstreamCanvas canvas{ctx.page.spec.width_mm.value(), ctx.page.spec.height_mm.value()};
+        const auto on = layer.smart->find("filters_on");
+        const bool stack_on = !(on != layer.smart->end() && on->is_boolean() && !on->get<bool>());
         for (const Json& f : *list) {
             const std::string kind = f.value("kind", std::string());
             const auto mapped = core::to_upstream(kind, render::smart_filters::params_on_page(ctx.doc, ctx.page, layer, f), ctx.dpi, canvas);
             if (!mapped) {
-                ctx.note("スマートフィルター「" + kind + "」は PhotoCraft に同じものが無いため、スマートオブジェクトを見えのまま画素にしました（「" + name + "」）");
+                // (its name in Photoshop's words where it is one of フィルター's kinds — review P3-7 —, else its kind)
+                const core::FilterInfo* info = core::filter_info(kind);
+                const std::string said = info != nullptr ? std::string(info->name) : kind;
+                if (!stack_on || !f.value("visible", true)) {
+                    ctx.note("表示していないスマートフィルター「" + said + "」は PhotoCraft に同じものが無いため外しました（「" + name + "」）");
+                    continue;
+                }
+                ctx.note("スマートフィルター「" + said + "」は PhotoCraft に同じものが無いため、スマートオブジェクトを見えのまま画素にしました（「" + name + "」）");
                 return std::nullopt;
             }
             filters.push_back(Json{{"command", mapped->first}, {"params", mapped->second}, {"blend", pc::upstream_blend(f.value("blend", std::string("normal")))},
