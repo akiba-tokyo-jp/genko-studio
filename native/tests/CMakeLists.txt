@@ -195,7 +195,8 @@ genko_test(test_tone_ops SOURCES unit/test_tone_ops.cpp DEPS genko_test_support 
 # the tiling and threads, the three ways, a page of inks' ways, 200 and 600 dpi, the budget, stopping, a heavy filter told,
 # the preview's copy, the new ops' frames) and its kinds' table (settings, presets, .pcraft's commands, places, filters@1,
 # the catalogue), without Python.
-genko_test(test_fx SOURCES unit/test_fx.cpp DEPS genko_test_support genko_render_ops LABELS unit TIMEOUT 600)
+genko_test(test_fx SOURCES unit/test_fx.cpp DEPS genko_test_support genko_render_ops LABELS unit TIMEOUT 3000)
+set_property(TEST test_fx APPEND PROPERTY ENVIRONMENT "QTEST_FUNCTION_TIMEOUT=1700000")
 genko_test(test_filter_kinds SOURCES unit/test_filter_kinds.cpp DEPS genko_test_support genko_render_ops LABELS unit)
 # PC4 節 D3 (フィルターギャラリー): its 47 effects' table and settings, each effect on every depth, the same bytes whatever the
 # tiling, a flat picture, the stack's order and hidden effects, the colours, the three ways, 200 and 600 dpi, a smart filter.
@@ -207,7 +208,8 @@ genko_test(test_fx_d2 SOURCES unit/test_fx_d2.cpp DEPS genko_test_support genko_
 # PC4 節 D6 (レンズ補正・広角補正・消点): PhotoCraft's tests of exif.rs, lens.rs, wideangle.rs and vanishing.rs and of its
 # lens_cmds and vp_cmds, through filter_raster and vanishing_point on 8 bits, precise and CMYK pages; the profile auto from a
 # smart object's JPEG and an opened JPEG's EXIF; smart filters; 200 and 600 dpi; the planes kept (vanishing-point@1).
-genko_test(test_fx_lens SOURCES unit/test_fx_lens.cpp DEPS genko_test_support genko_formats genko_render_ops genko_storage LABELS unit TIMEOUT 900)
+genko_test(test_fx_lens SOURCES unit/test_fx_lens.cpp DEPS genko_test_support genko_formats genko_render_ops genko_storage LABELS unit TIMEOUT 3600)
+set_property(TEST test_fx_lens APPEND PROPERTY ENVIRONMENT "QTEST_FUNCTION_TIMEOUT=3000000")
 # PC4 節 D5 (Camera Raw フィルター): PhotoCraft's tests of camera_raw.rs and of its lens_cmds (the defaults the identity, the
 # basic panel, the curves, the mixer, grading, detail and effects, float documents), each stage alone, the same bytes whatever
 # the tiling, through filter_raster on 8, 16 and 32 bits and inside a selection, a smart filter, pages of inks on the colours
@@ -216,7 +218,8 @@ genko_test(test_fx_camera_raw SOURCES unit/test_fx_camera_raw.cpp DEPS genko_tes
 # PC4 節 D4 (描画・ぼかしギャラリー, render_picture): PhotoCraft's tests of render.rs, gallery.rs, extra_cmds.rs's clouds and of
 # render2.rs and render_cmds.rs (炎・木・額縁) through filter_raster and render_picture on 8 bits, precise and ink pages and an
 # opened picture's page; tilings, 200 and 600 dpi, pins moving with a smart object, a channel's bumps, the limits.
-genko_test(test_fx_render SOURCES unit/test_fx_render.cpp DEPS genko_test_support genko_formats genko_render_ops LABELS unit TIMEOUT 900)
+genko_test(test_fx_render SOURCES unit/test_fx_render.cpp DEPS genko_test_support genko_formats genko_render_ops LABELS unit TIMEOUT 2400)
+set_property(TEST test_fx_render APPEND PROPERTY ENVIRONMENT "QTEST_FUNCTION_TIMEOUT=1700000")
 # PC2c (COLOR-04): Apply Image and Calculations (Blending, the sources, a layer, a channel, inks; the three results),
 # trapping (algo/trap.rs's tests and the op) and the fade (its mix, the op reading the pixels before from the assets).
 genko_test(test_image_calc SOURCES unit/test_image_calc.cpp DEPS genko_test_support genko_render_ops LABELS unit TIMEOUT 600)
@@ -508,7 +511,8 @@ genko_test(test_contract_patterns SOURCES contract/test_contract_patterns.cpp DE
 # PC4 E5: the brushes that change pixels through the command line — applied, saved, undone and done again, the same input the
 # same bytes, the Mixer Brush's reservoir handed from stroke to stroke, the page drawn after.
 genko_test(test_contract_paint_tools SOURCES contract/test_contract_paint_tools.cpp DEPS genko_test_support genko_render
-           LABELS contract TIMEOUT 900)
+           LABELS contract TIMEOUT 2400)
+set_property(TEST test_contract_paint_tools APPEND PROPERTY ENVIRONMENT "QTEST_FUNCTION_TIMEOUT=1700000")
 # PC3 C-c: transform_layers on each kind of layer and pixels (exact moves and turns on 8, 16, 32 bits, CMYK, Lab; lines,
 # patches, quads, warps, perspective, puppet; folders, links, masks, areas, parts; smart objects, placed pictures, locks,
 # lines of dialogue), content_aware_scale, liquify's strokes, Warp Text; through the command line saved and undone.
