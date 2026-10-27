@@ -19,6 +19,7 @@
 
 #include <QtTest>
 
+#include <QApplication>
 #include <QCheckBox>
 #include <QClipboard>
 #include <QComboBox>
@@ -1413,7 +1414,6 @@ private slots:
                  QStringLiteral("その間に原稿が変わったため、復旧用コピーを採用していません（元に戻すか、別名で保存してください）"));
     }
 
-    // A book without pages: its export dialog opens, with nothing to show.
     // PC4 F-c (SPEC.md FILE-01; 節 F 5.2・5.3・5.4): ファイル → 書き出し ▸ — 書き出し形式… (its estimate and preview made on a worker,
     // following the choices; the page at half its size written where asked), PNG としてクイック書き出し (asked where while the
     // preferences ask; beside the book, unasked, when they say so), 書き出しの環境設定… (its values kept, the same as 環境設定 →
@@ -1553,14 +1553,45 @@ private slots:
         int files = 0;
         for (const auto& entry : fs::recursive_directory_iterator(out / "layers")) files += entry.is_regular_file() && core::path_to_utf8(entry.path().filename()).starts_with("p_");
         QVERIFY2(files > 0, qPrintable(w->last_notice()));
-        // レイヤー → PNG としてクイック書き出し of a layer of nothing: said, nothing written
+        // レイヤー → 書き出し形式…: 透明部分 on for a PNG; greyed and off for a JPEG (no alpha: over white); as it was again for
+        // a PNG (PC4 F-c's review P2-1)
         w->set_target_layer(studio.ink());
+        std::vector<std::pair<bool, bool>> transparency;
+        handle = [&](QDialog* dialog) -> int {
+            auto* d = qobject_cast<app::ExportAsDialog*>(dialog);
+            for (const char* ext : {"png", "jpg", "png"}) {
+                d->format->setCurrentIndex(d->format->findData(QString::fromLatin1(ext)));
+                transparency.emplace_back(d->transparency->isEnabled(), d->transparency->isChecked());
+            }
+            return int(QDialog::Rejected);
+        };
+        studio.act("act_layer_export_as")->trigger();
+        QCOMPARE(transparency, (std::vector<std::pair<bool, bool>>{{true, true}, {false, false}, {true, true}}));
+        // the layer panel's right click on a layer: レイヤー's two (PNG としてクイック書き出し・書き出し形式…)
+        {
+            auto* list = w->findChild<QListWidget*>(QStringLiteral("layerList"));
+            QVERIFY(list != nullptr);
+            const int row = list->currentRow();  // (the layer chosen above)
+            QVERIFY(row >= 0);
+            QList<QAction*> offered;
+            QTimer::singleShot(0, [&offered] {
+                if (auto* menu = qobject_cast<QMenu*>(QApplication::activePopupWidget())) {
+                    for (QAction* a : menu->actions()) offered << a;
+                    menu->close();
+                }
+            });
+            const QRect place = list->visualItemRect(list->item(row));
+            QMetaObject::invokeMethod(list, "customContextMenuRequested", Qt::DirectConnection, Q_ARG(QPoint, place.center()));
+            QCOMPARE(offered, (QList<QAction*>{studio.act("act_layer_quick_export_png"), studio.act("act_layer_export_as")}));
+        }
+        // レイヤー → PNG としてクイック書き出し of a layer of nothing: said, nothing written
         save_to = qs(core::path_to_utf8(out / "nothing.png"));
         studio.act("act_layer_quick_export_png")->trigger();
         QVERIFY(!fs::exists(out / "nothing.png"));
         QVERIFY2(w->last_notice().contains(QStringLiteral("書き出すものがありません")), qPrintable(w->last_notice()));
     }
 
+    // A book without pages: its export dialog opens, with nothing to show.
     void exportDialogOfABookWithoutPages() {
         Studio s;
         core::Document empty = gui_test::new_doc(1);

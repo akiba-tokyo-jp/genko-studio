@@ -127,8 +127,9 @@ SaveForWebDialog::SaveForWebDialog(QWidget* parent, std::shared_ptr<const core::
     views->addTab(new QWidget, QStringLiteral("2 アップ"));
     views->addTab(new QWidget, QStringLiteral("4 アップ"));
     const auto lay_out = [this, pane](int tab) {
-        for (QLabel* l : pictures) l->setParent(nullptr);
-        for (QLabel* l : captions) l->setParent(nullptr);
+        // (the dialog's between tabs: never without a parent, let go with it)
+        for (QLabel* l : pictures) l->setParent(this);
+        for (QLabel* l : captions) l->setParent(this);
         QWidget* made = tab == 0   ? pane({{pictures[0], captions[0]}}, 1)
                         : tab == 1 ? pane({{pictures[1], captions[1]}}, 1)
                         : tab == 2 ? pane({{pictures[0], captions[0]}, {pictures[1], captions[1]}}, 2)
@@ -183,6 +184,7 @@ SaveForWebDialog::SaveForWebDialog(QWidget* parent, std::shared_ptr<const core::
     metadata = choices({{QStringLiteral("なし"), QStringLiteral("none")}, {QStringLiteral("著作権"), QStringLiteral("copyright")},
                         {QStringLiteral("著作権情報と連絡先情報"), QStringLiteral("copyrightAndContact")}, {QStringLiteral("すべて"), QStringLiteral("all")}},
                        QStringLiteral("copyright"));
+    metadata->setToolTip(QStringLiteral("すべて: 本のファイル情報と、JPEG には写真から開いたページの EXIF（カメラの情報・位置情報（GPS）も含みます。縮小画像は外します）"));
     srgb = new QCheckBox(QStringLiteral("sRGB に変換"));
     srgb->setChecked(true);
     percent = new QDoubleSpinBox;
@@ -270,7 +272,8 @@ SaveForWebDialog::SaveForWebDialog(QWidget* parent, std::shared_ptr<const core::
 }
 
 SaveForWebDialog::~SaveForWebDialog() {
-    if (watcher_ != nullptr) watcher_->waitForFinished();  // (the worker reads the book this dialog holds)
+    // (the worker holds the book itself: let go, its panes never shown — the window closes at once)
+    if (watcher_ != nullptr) watcher_->disconnect(this);
 }
 
 bool SaveForWebDialog::working() const { return timer_.isActive() || (watcher_ != nullptr && watcher_->isRunning()); }
@@ -385,8 +388,8 @@ void SaveForWebDialog::start() {
             std::vector<formats::WebSettings> all{st};
             for (const formats::WebSettings& v : variants(st)) all.push_back(v);
             for (std::size_t i = 0; i < all.size(); ++i) {
-                const formats::Optimized o = formats::optimize(picture.rgba, all[i], icc, xmp, picture.dpi, true, nullptr);
-                const std::uint64_t bytes = formats::estimated_bytes(picture.rgba, all[i], icc, xmp, picture.dpi, o.bytes, ratio);
+                const formats::Optimized o = formats::optimize(picture.rgba, all[i], icc, xmp, picture.dpi, true, nullptr, picture.exif);
+                const std::uint64_t bytes = formats::estimated_bytes(picture.rgba, all[i], icc, xmp, picture.dpi, o.bytes, ratio, picture.exif);
                 if (i == 0) r.bytes = bytes;
                 r.panes.push_back(Pane{image_of(o.preview, o.width, o.height), caption_of(all[i], bytes, o.colors)});
             }

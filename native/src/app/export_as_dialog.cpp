@@ -112,6 +112,7 @@ ExportPreferencesForm::ExportPreferencesForm(const formats::ExportPreferences& p
     metadata = choices({{QStringLiteral("なし"), QStringLiteral("none")}, {QStringLiteral("著作権情報と連絡先情報"), QStringLiteral("copyright")},
                         {QStringLiteral("すべて"), QStringLiteral("all")}},
                        QString::fromLatin1(formats::to_string(prefs.metadata).data()));
+    metadata->setToolTip(QStringLiteral("すべて: 本のファイル情報と、写真から開いたページの EXIF（カメラの情報・位置情報（GPS）も含みます。縮小画像は外します）"));
     srgb = new QCheckBox(QStringLiteral("sRGB に変換"));
     srgb->setChecked(prefs.srgb);
     for (auto [name, widget] : std::initializer_list<std::pair<const char*, QWidget*>>{
@@ -205,6 +206,7 @@ ExportAsDialog::ExportAsDialog(QWidget* parent, std::shared_ptr<const core::Docu
     metadata = choices({{QStringLiteral("なし"), QStringLiteral("none")}, {QStringLiteral("著作権情報と連絡先情報"), QStringLiteral("copyright")},
                         {QStringLiteral("すべて"), QStringLiteral("all")}},
                        QString::fromLatin1(formats::to_string(export_preferences().metadata).data()));
+    metadata->setToolTip(QStringLiteral("すべて: 本のファイル情報と、写真から開いたページの EXIF（カメラの情報・位置情報（GPS）も含みます。縮小画像は外します）"));
     srgb = new QCheckBox(QStringLiteral("sRGB に変換"));
     srgb->setChecked(true);
     preview = new QLabel;
@@ -281,7 +283,8 @@ ExportAsDialog::ExportAsDialog(QWidget* parent, std::shared_ptr<const core::Docu
 }
 
 ExportAsDialog::~ExportAsDialog() {
-    if (watcher_ != nullptr) watcher_->waitForFinished();  // (the worker reads the book this dialog holds)
+    // (the worker holds the book itself: let go, its estimate never shown — the window closes at once)
+    if (watcher_ != nullptr) watcher_->disconnect(this);
 }
 
 QString ExportAsDialog::extension() const { return format->currentData().toString(); }
@@ -334,6 +337,21 @@ void ExportAsDialog::changed() {
     const QString ext = extension();
     quality->setEnabled(ext == QLatin1String("jpg") || ext == QLatin1String("avif") || (ext == QLatin1String("webp") && !lossless->isChecked()));
     lossless->setVisible(ext == QLatin1String("webp"));
+    if (layer_) {
+        // (PC4 F-c's review P2-1: a JPEG holds no alpha — the layer written over white —: 透明部分 greyed and off, as it was
+        // when another format is chosen again)
+        const bool holds = ext != QLatin1String("jpg");
+        if (holds != transparency->isEnabled()) {
+            const QSignalBlocker quiet(transparency);
+            if (!holds) {
+                transparency_asked_ = transparency->isChecked();
+                transparency->setChecked(false);
+            } else {
+                transparency->setChecked(transparency_asked_);
+            }
+            transparency->setEnabled(holds);
+        }
+    }
     estimate->setText(QStringLiteral("見積もっています…"));
     timer_.start();
 }

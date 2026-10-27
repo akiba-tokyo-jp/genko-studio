@@ -42,12 +42,14 @@ class PartFile;  // (formats/output.hpp)
 // layer_menu_cmds.rs layer_document, MIT): the same copy at another size — the page drawn at the resolution its scale asks
 // (its book's × scale; a width or a height asked exactly: drawn at the nearest resolution, then made that size by the
 // resample chosen), its resolution in the file the one that keeps its size on paper —, cut to its finished size (area),
-// one layer alone (drawn over nothing, cut to what it holds; without transparency over white), its colours converted to
-// sRGB when asked, the metadata chosen (none; the copyright and contact; all — the book's File Info and the page's EXIF,
-// upright —), JPEG's, a lossy WebP's and AVIF's quality in 1..100. Every picture format's colours go one way (encode_for):
+// one layer alone (drawn over nothing, cut to what it holds; without transparency — or in a format without alpha, JPEG's
+// and the others' — over white), its colours converted to sRGB when asked, the metadata chosen (none; the copyright and
+// contact; all — the book's File Info and the page's EXIF, upright, its thumbnail gone and its sizes the picture's —; a
+// PSD's, a PSB's and a .pcraft's book trimmed alike), JPEG's, a lossy WebP's and AVIF's quality in 1..100. Every picture format's colours go one way (encode_for):
 // what the format cannot hold of the page's colours — a profile, CMYK — through Little CMS to sRGB, the same for every
 // format. A picture past the codecs' limits (render/codecs/limits.hpp: 120 million pixels, 100000 a side, its bytes and
-// the work's within 2 GiB) is refused before it is drawn (core::Error("image_too_large")).
+// the work's within 2 GiB, counted as 8 bytes a pixel a byte of depth: a measure, not the heap's peak) is refused before it
+// is drawn (core::Error("image_too_large")).
 
 namespace genko::formats {
 
@@ -125,6 +127,12 @@ struct CopySize {
     int drawn_dpi = 0;  // the page drawn at
 };
 CopySize copy_size(const core::Document& doc, std::size_t page, const CopyOptions& options = {});
+// The size checks a copy as `extension` makes before anything is drawn (core::Error("image_too_large")): the codecs'
+// limits of what is drawn and written, and what the format holds (GIF's, an icon's, WebP's …) — estimate_copy's too.
+void check_copy_size(const core::Document& doc, std::size_t page, std::string_view extension, const CopyOptions& options = {});
+// The page's EXIF a copy carries with all its metadata (a picture it was opened from; none for any other): upright, the
+// camera's thumbnail gone and the sizes it says the written picture's (render::codecs::exif_for_copy).
+std::optional<std::string> copy_exif(const core::Document& doc, const core::Page& page, std::uint32_t width, std::uint32_t height);
 
 // The picture a copy writes: the page — or its layer alone — at the options' size and area, with the metadata chosen and
 // its resolution; its colours as the page has them (encode_for converts them). The size is checked against the codecs'

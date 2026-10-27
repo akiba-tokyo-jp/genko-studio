@@ -21,6 +21,7 @@
 #include <vector>
 
 #include "core/command_bus.hpp"
+#include "core/exif.hpp"
 #include "core/model.hpp"
 #include "render/codecs/metadata.hpp"
 #include "core/file_info.hpp"
@@ -28,9 +29,13 @@
 #include "core/paths.hpp"
 #include "formats/copy.hpp"
 #include "formats/export.hpp"
+#include "formats/file_xmp.hpp"
 #include "formats/open_file.hpp"
+#include "formats/page_picture.hpp"
+#include "formats/pillow_save.hpp"
 #include "formats/web_export.hpp"
 #include "render/codecs/codecs.hpp"
+#include "render/image.hpp"
 #include "render/ops_registry.hpp"
 #include "storage/fsutil.hpp"
 #include "storage/lock.hpp"
@@ -90,6 +95,88 @@ std::array<int, 4> px(const CodecImage& image, std::uint32_t x, std::uint32_t y)
 }
 
 std::uint64_t size_of(const fs::path& path) { return fs::file_size(path); }
+
+// A picture book whose layer is a red square (20..60, 30..70) with a soft top band (its first 10 rows at alpha 128) and a
+// hole (10 × 10 clear at its left, rows 15..25): what a JPEG of the layer alone shows over white.
+core::Document soft_book() {
+    CodecImage image = CodecImage::blank(120, 90, Layout::Rgba, Sample::U8);
+    for (int y = 30; y < 70; ++y)
+        for (int x = 20; x < 60; ++x) {
+            if (y >= 45 && y < 55 && x < 30) continue;  // (the hole)
+            char* p = image.data().data() + (std::size_t(y) * 120 + x) * 4;
+            p[0] = static_cast<char>(255);
+            p[3] = static_cast<char>(y < 40 ? 128 : 255);
+        }
+    image.meta.dpi = std::make_pair(150.0, 150.0);
+    return formats::picture_book(std::move(image), "soft").doc;
+}
+
+// The image resources' ids of a PSD (after its header and colour mode data).
+std::vector<int> psd_resources(const std::string& b) {
+    const auto be32 = [&](std::size_t at) {
+        return (std::uint32_t(static_cast<unsigned char>(b[at])) << 24) | (std::uint32_t(static_cast<unsigned char>(b[at + 1])) << 16) |
+               (std::uint32_t(static_cast<unsigned char>(b[at + 2])) << 8) | std::uint32_t(static_cast<unsigned char>(b[at + 3]));
+    };
+    std::vector<int> ids;
+    if (b.size() < 30) return ids;
+    std::size_t at = 26;
+    at += 4 + be32(at);  // (colour mode data)
+    const std::size_t end = at + 4 + be32(at);
+    at += 4;
+    while (at + 12 <= end && b.compare(at, 4, "8BIM") == 0) {
+        const int id = (static_cast<unsigned char>(b[at + 4]) << 8) | static_cast<unsigned char>(b[at + 5]);
+        std::size_t name = 1 + static_cast<unsigned char>(b[at + 6]);
+        name += name % 2;
+        const std::uint32_t size = be32(at + 6 + name);
+        ids.push_back(id);
+        at += 6 + name + 4 + size + size % 2;
+    }
+    return ids;
+}
+
+// A little-endian EXIF of a camera: IFD0 (turned 90° right; the Exif IFD) → the Exif IFD (PixelXDimension 4000 as a LONG,
+// PixelYDimension 3000 as a SHORT) → IFD1, the thumbnail of the shot before it was edited (JPEGInterchangeFormat).
+std::string camera_exif() {
+    std::string b("II*\0\x08\0\0\0", 8);
+    const auto u16 = [&](std::uint16_t v) { b += static_cast<char>(v & 0xFF); b += static_cast<char>(v >> 8); };
+    const auto u32 = [&](std::uint32_t v) {
+        for (int k = 0; k < 4; ++k) b += static_cast<char>((v >> (8 * k)) & 0xFF);
+    };
+    const auto entry = [&](std::uint16_t tag, std::uint16_t type, std::uint32_t value) {
+        u16(tag);
+        u16(type);
+        u32(1);
+        if (type == 3) {
+            u16(static_cast<std::uint16_t>(value));
+            u16(0);
+        } else {
+            u32(value);
+        }
+    };
+    const std::string thumbnail = std::string("\xFF\xD8", 2) + "THUMBNAIL-OF-THE-SHOT-BEFORE-IT-WAS-CUT" + std::string("\xFF\xD9", 2);
+    u16(2);  // IFD0 at 8
+    entry(0x0112, 3, 6);
+    entry(0x8769, 4, 38);
+    u32(68);  // → IFD1
+    u16(2);   // the Exif IFD at 38
+    entry(0xA002, 4, 4000);
+    entry(0xA003, 3, 3000);
+    u32(0);
+    u16(2);  // IFD1 at 68
+    entry(0x0201, 4, 98);
+    entry(0x0202, 4, static_cast<std::uint32_t>(thumbnail.size()));
+    u32(0);
+    b += thumbnail;  // at 98
+    return b;
+}
+
+// What an EXIF says of the size and of what follows IFD0.
+std::tuple<std::uint32_t, std::uint32_t, std::size_t> exif_size(const std::string& exif) {
+    const core::exif::Tiff t(exif);
+    const std::size_t ifd0 = t.first_ifd();
+    const std::size_t sub = t.whole(*t.entry(ifd0, 0x8769)).value_or(0);
+    return {t.whole(*t.entry(sub, 0xA002)).value_or(0), t.whole(*t.entry(sub, 0xA003)).value_or(0), t.next_ifd(ifd0)};
+}
 
 QString q(const fs::path& path) { return QString::fromStdString(core::path_to_utf8(path)); }
 
@@ -243,6 +330,193 @@ private slots:
         QVERIFY(!read(dir / "copy.jpg").meta.exif);
     }
 
+    // (PC4 F-c's review P2-1) A layer in a format without alpha — JPEG — over white by every way in: its hole white, its
+    // soft edge mixed with white; never its alpha merely dropped. The same layer's PNG keeps its alpha.
+    void aLayerInJpegIsOverWhite() {
+        QTemporaryDir tmp;
+        const fs::path dir = path_of(tmp.path());
+        const core::Document doc = soft_book();
+        formats::CopyOptions layer;
+        layer.layer = raster_of(doc);
+        layer.quality_percent = 100;
+        QVERIFY(layer.transparency);  // (asked to keep it: a JPEG cannot)
+        const formats::CopyResult r = formats::write_copy(doc, 0, dir / "layer.jpg", layer);
+        QCOMPARE(r.width, 40u);
+        const CodecImage jpeg = read(dir / "layer.jpg");
+        const auto near = [](std::array<int, 4> c, std::array<int, 3> want, int tolerance) {
+            for (int k = 0; k < 3; ++k) {
+                if (std::abs(c[k] - want[k]) > tolerance) return false;
+            }
+            return true;
+        };
+        const auto hole = px(jpeg, 4, 20), edge = px(jpeg, 30, 4), inside = px(jpeg, 30, 30);
+        QVERIFY2(near(hole, {255, 255, 255}, 8), qPrintable(QStringLiteral("%1 %2 %3").arg(hole[0]).arg(hole[1]).arg(hole[2])));
+        QVERIFY2(near(edge, {255, 128, 128}, 12), qPrintable(QStringLiteral("%1 %2 %3").arg(edge[0]).arg(edge[1]).arg(edge[2])));
+        QVERIFY2(near(inside, {255, 0, 0}, 8), qPrintable(QStringLiteral("%1 %2 %3").arg(inside[0]).arg(inside[1]).arg(inside[2])));
+        // (the PNG keeps the hole clear and the edge half)
+        const CodecImage png = read(formats::write_copy(doc, 0, dir / "layer.png", layer).file);
+        QCOMPARE(px(png, 4, 20)[3], 0);
+        QVERIFY(std::abs(px(png, 30, 4)[3] - 128) <= 1);
+        // (`genko copy --layer` to a JPEG: the same)
+        core::Document saved = doc;
+        const fs::path book = dir / "soft.genko";
+        write_book(saved, book);
+        const auto run = genko::test::run_genko({QStringLiteral("copy"), q(book), q(dir / "cli.jpg"), QStringLiteral("--layer"), QString::fromStdString(*layer.layer),
+                                                 QStringLiteral("--quality"), QStringLiteral("100%")});
+        QVERIFY2(run.exit_code == 0, qPrintable(run.described()));
+        const CodecImage cli = read(dir / "cli.jpg");
+        QVERIFY(near(px(cli, 4, 20), {255, 255, 255}, 8));
+        QVERIFY(near(px(cli, 30, 4), {255, 128, 128}, 12));
+    }
+
+    // (PC4 F-c's review P2-2) A PSD's, a PSB's and a .pcraft's copy with the metadata chosen: none — no XMP (resource 1060),
+    // no File Info, no EXIF —; the copyright and contact — the copyright and the author, not the private description —;
+    // none chosen as コピーを保存… writes it (the File Info whole). A layer's PSD alike.
+    void theMetadataOfAPsdOrAPcraft() {
+        QTemporaryDir tmp;
+        const fs::path dir = path_of(tmp.path());
+        CodecImage photo = CodecImage::blank(30, 20, Layout::Rgb, Sample::U8);
+        photo.meta.exif = camera_exif();
+        core::Document doc = formats::open_file(codecs::encode(photo, codecs::Format::Jpeg), "photo.jpg").doc;
+        QVERIFY(doc.page(0).native_source && !doc.page(0).native_source->exif.empty());
+        core::FileInfo info;
+        info.copyright = "© Someone";
+        info.author = "An Author";
+        info.description = "a private note";
+        doc.file_info = info;
+        formats::CopyOptions none, copyright, layer_none;
+        none.metadata = formats::Metadata::None;
+        copyright.metadata = formats::Metadata::Copyright;
+        layer_none = none;
+        layer_none.layer = raster_of(doc);
+        QVERIFY(!layer_none.layer->empty());
+        for (const char* ext : {"psd", "psb"}) {
+            const std::string e(ext);
+            formats::write_copy(doc, 0, dir / ("none." + e), none);
+            formats::write_copy(doc, 0, dir / ("copyright." + e), copyright);
+            formats::write_copy(doc, 0, dir / ("default." + e));
+            const std::vector<int> ids = psd_resources(storage::read_file(dir / ("none." + e)));
+            QVERIFY2(!ids.empty() && std::find(ids.begin(), ids.end(), 1060) == ids.end(), ext);
+            const std::string c = storage::read_file(dir / ("copyright." + e));
+            QVERIFY2(c.find("Someone") != std::string::npos && c.find("An Author") != std::string::npos, ext);
+            QVERIFY2(c.find("private note") == std::string::npos, ext);
+            QVERIFY2(storage::read_file(dir / ("default." + e)).find("private note") != std::string::npos, ext);
+        }
+        formats::CopyOptions flat = none;
+        flat.layers = false;
+        formats::write_copy(doc, 0, dir / "flat.psd", flat);
+        formats::write_copy(doc, 0, dir / "layer.psd", layer_none);
+        for (const char* name : {"flat.psd", "layer.psd"}) {
+            const std::string b = storage::read_file(dir / name);
+            QVERIFY2(b.find("private note") == std::string::npos && b.find("Someone") == std::string::npos, name);
+        }
+        // (a .pcraft read back: its File Info and its EXIF as chosen)
+        formats::write_copy(doc, 0, dir / "none.pcraft", none);
+        formats::write_copy(doc, 0, dir / "copyright.pcraft", copyright);
+        formats::write_copy(doc, 0, dir / "default.pcraft");
+        const core::Document n = formats::open_file(storage::read_file(dir / "none.pcraft"), "none.pcraft").doc;
+        QVERIFY(!n.file_info || n.file_info->empty());
+        QVERIFY(!n.page(0).native_source || n.page(0).native_source->exif.empty());
+        const core::Document c = formats::open_file(storage::read_file(dir / "copyright.pcraft"), "copyright.pcraft").doc;
+        QVERIFY(c.file_info && c.file_info->copyright == "© Someone" && c.file_info->description.empty());
+        QVERIFY(!c.page(0).native_source || c.page(0).native_source->exif.empty());
+        const core::Document d = formats::open_file(storage::read_file(dir / "default.pcraft"), "default.pcraft").doc;
+        QVERIFY(d.file_info && d.file_info->description == "a private note");
+        QVERIFY(d.page(0).native_source && !d.page(0).native_source->exif.empty());
+        // (the book itself unchanged)
+        QCOMPARE(doc.file_info->description, std::string("a private note"));
+        QVERIFY(!doc.page(0).native_source->exif.empty());
+        // (`genko copy … --metadata none` to a PSD: no XMP)
+        const fs::path book = dir / "photo.genko";
+        write_book(doc, book);
+        const auto run = genko::test::run_genko({QStringLiteral("copy"), q(book), q(dir / "cli.psd"), QStringLiteral("--metadata"), QStringLiteral("none")});
+        QVERIFY2(run.exit_code == 0, qPrintable(run.described()));
+        const std::vector<int> cli = psd_resources(storage::read_file(dir / "cli.psd"));
+        QVERIFY(!cli.empty() && std::find(cli.begin(), cli.end(), 1060) == cli.end());
+    }
+
+    // (PC4 F-c's review P2-3) All the metadata: the page's EXIF without the camera's thumbnail (IFD1: the shot before it was
+    // edited or cut), the sizes it says the written picture's — at another scale too —, upright; the camera's own kept. The
+    // same in a Save for Web or クイック書き出し JPEG; none in their PNG (JPEG alone, as Photoshop's Save for Web).
+    void allTheMetadataLeavesTheThumbnailOut() {
+        QTemporaryDir tmp;
+        const fs::path dir = path_of(tmp.path());
+        CodecImage photo = CodecImage::blank(30, 20, Layout::Rgb, Sample::U8);
+        photo.meta.exif = camera_exif();
+        QVERIFY(photo.meta.exif->find("THUMBNAIL") != std::string::npos);
+        const core::Document doc = formats::open_file(codecs::encode(photo, codecs::Format::Jpeg), "photo.jpg").doc;
+        formats::CopyOptions all;
+        all.metadata = formats::Metadata::All;
+        const auto check = [&](const fs::path& path) {
+            const CodecImage back = read(path);
+            if (!back.meta.exif) return QStringLiteral("no EXIF");
+            const std::string& exif = *back.meta.exif;
+            if (exif.find("THUMBNAIL") != std::string::npos) return QStringLiteral("the thumbnail");
+            const auto [w, h, next] = exif_size(exif);
+            if (w != back.width() || h != back.height()) return QStringLiteral("size %1×%2 for %3×%4").arg(w).arg(h).arg(back.width()).arg(back.height());
+            if (next != 0) return QStringLiteral("an IFD after IFD0");
+            if (codecs::exif_orientation(exif) != 1) return QStringLiteral("not upright");
+            return QString();
+        };
+        formats::write_copy(doc, 0, dir / "all.jpg", all);
+        QCOMPARE(check(dir / "all.jpg"), QString());
+        QCOMPARE(read(dir / "all.jpg").width(), 20u);  // (turned upright: 20 × 30)
+        formats::CopyOptions twice = all;
+        twice.scale = 200;
+        formats::write_copy(doc, 0, dir / "twice.webp", twice);
+        QCOMPARE(check(dir / "twice.webp"), QString());
+        QCOMPARE(std::get<0>(exif_size(*read(dir / "twice.webp").meta.exif)), 40u);
+        formats::ExportPreferences prefs;
+        prefs.metadata = formats::Metadata::All;
+        prefs.format = "jpg";
+        formats::quick_export(doc, 0, dir / "quick.jpg", prefs);
+        QCOMPARE(check(dir / "quick.jpg"), QString());
+        prefs.format = "png";
+        formats::quick_export(doc, 0, dir / "quick.png", prefs);
+        QVERIFY(!read(dir / "quick.png").meta.exif);
+        formats::save_for_web(doc, 0, formats::web_settings_from_json(Json{{"format", "jpeg"}, {"metadata", "all"}}), {}, dir / "web.jpg");
+        QCOMPARE(check(dir / "web.jpg"), QString());
+        formats::save_for_web(doc, 0, formats::web_settings_from_json(Json{{"format", "jpeg"}, {"metadata", "copyright"}}), {}, dir / "web-c.jpg");
+        QVERIFY(!read(dir / "web-c.jpg").meta.exif);
+        // (the block itself: IFD1 and the thumbnail cut off its end, the Exif IFD's SHORT kept a SHORT)
+        const std::string cleaned = codecs::exif_for_copy(camera_exif(), 300, 200);
+        QCOMPARE(cleaned.size(), std::size_t(68));
+        QCOMPARE(exif_size(cleaned), (std::tuple<std::uint32_t, std::uint32_t, std::size_t>{300, 200, 0}));
+        const core::exif::Tiff t(cleaned);
+        QCOMPARE(t.entry(38, 0xA003)->type, std::uint16_t(3));
+        // (a size past a SHORT's: made a LONG in its own field)
+        const std::string wide = codecs::exif_for_copy(camera_exif(), 300, 70000);
+        QCOMPARE(std::get<1>(exif_size(wide)), 70000u);
+        QCOMPARE(codecs::exif_for_copy(std::string("not a TIFF"), 1, 1), std::string("not a TIFF"));
+    }
+
+    // (PC4 F-c's review P3-16) コピーを保存…'s default bytes are F-b's: the page drawn at its resolution with the book's XMP,
+    // encoded as F-b encoded it (the codecs at Photoshop's quality 10; the exports' TIFF writer) — a recipe of its own, not
+    // the new code's.
+    void theCopysDefaultBytesAreAsBefore() {
+        QTemporaryDir tmp;
+        const fs::path dir = path_of(tmp.path());
+        core::Document doc = square_book();
+        core::FileInfo info;
+        info.copyright = "© Someone";
+        info.description = "a note";
+        doc.file_info = info;
+        const formats::PagePicture picture = formats::page_picture(doc.page(0), doc, 150);
+        CodecImage image = picture.image;
+        image.meta.xmp = formats::book_xmp(doc);
+        QVERIFY(image.meta.xmp.has_value());
+        codecs::EncodeOptions encode;
+        encode.jpeg_quality = formats::jpeg_quality_of(10);
+        QCOMPARE(formats::plan_copy(doc, 0, dir / "a.png").bytes, codecs::encode(image, codecs::Format::Png, encode));
+        QCOMPARE(formats::plan_copy(doc, 0, dir / "a.jpg").bytes, codecs::encode(image, codecs::Format::Jpeg, encode));
+        QCOMPARE(formats::plan_copy(doc, 0, dir / "a.webp").bytes, codecs::encode(image, codecs::Format::WebP, encode));
+        const CodecImage rgb = picture.image.convert(Layout::Rgb, Sample::U8);
+        formats::TiffSave save{"tiff_lzw", std::array<double, 2>{150.0, 150.0}, picture.image.icc.value_or(std::string()), *image.meta.xmp};
+        const std::string tiff = formats::tiff_bytes(
+            render::Image::frombytes("RGB", render::Size{static_cast<int>(rgb.width()), static_cast<int>(rgb.height())}, rgb.data()), save);
+        QCOMPARE(formats::plan_copy(doc, 0, dir / "a.tif").bytes, tiff);
+    }
+
     // A CMYK page's colours the same in every format and every way out (Little CMS from its profile to sRGB, never a
     // format's plain formula): コピーを保存… as PNG, WebP, GIF, QOI, TGA; sRGB asked (a JPEG then RGB); クイック書き出し; Save
     // for Web's PNG-24 and JPEG.
@@ -323,7 +597,25 @@ private slots:
             } catch (const core::Error& error) {
                 QCOMPARE(std::string(error.what()), std::string(words));
             }
+            // (the window's estimate refuses it as the copy does: not a proxy's estimate of a file never made)
+            try {
+                formats::estimate_copy(small, 0, ext, wide, 512);
+                QFAIL(ext);
+            } catch (const core::Error& error) {
+                QCOMPARE(std::string(error.what()), std::string(words));
+            }
         }
+        // (Save for Web's and クイック書き出し's JPEG past 65500 px a side: before it is drawn)
+        formats::WebSize jpeg_wide;
+        jpeg_wide.width = 66000;
+        clock.restart();
+        try {
+            formats::save_for_web(small, 0, formats::web_settings_from_json(Json{{"format", "jpeg"}}), jpeg_wide);
+            QFAIL("a JPEG past 65500 px");
+        } catch (const core::Error& error) {
+            QCOMPARE(std::string(error.what()), std::string("JPEG holds at most 65500×65500 pixels"));
+        }
+        QVERIFY2(clock.elapsed() < 5000, qPrintable(QString::number(clock.elapsed())));
     }
 
     // The estimate: exact — the file's own size — for each format; from a proxy, near it (and the size of the file).

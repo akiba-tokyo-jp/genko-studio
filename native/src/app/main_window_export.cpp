@@ -107,8 +107,10 @@ bool MainWindow::quick_export(const std::optional<std::string>& layer) {
     std::optional<fs::path> place = formats::quick_export_place(prefs, contents_ ? std::nullopt : session_->path(), page, chosen);
     if (!place) {
         const QString ext = QString::fromStdString(prefs.format);
-        QString stem = QString::fromStdString(doc->title.empty() ? std::string("無題") : doc->title);
-        if (chosen != nullptr) stem += QStringLiteral("_") + QString::fromStdString(chosen->title);
+        std::string name = doc->title.empty() ? std::string("無題") : doc->title;
+        if (chosen != nullptr) name += "_" + chosen->title;
+        // (a name every OS takes — a / or a : in the title never a folder —, cut by characters as the exports' are)
+        const QString stem = QString::fromStdString(formats::safe_name(name, "genko"));
         const QString path = ask::save_path(this, QStringLiteral("クイック書き出し"), stem + QStringLiteral(".") + ext, filter_of(ext));
         if (path.isEmpty()) return false;
         place = fpath(QFileInfo(path).suffix().isEmpty() ? path + QStringLiteral(".") + ext : path);
@@ -139,6 +141,10 @@ void MainWindow::export_as(const std::optional<std::string>& layer) {
         if (dialog.all_pages()) {
             const QString folder = ask::existing_dir(this, QStringLiteral("書き出し先のフォルダー"));
             if (folder.isEmpty()) return;
+            if (!doc->deferred.empty()) {  // (never some pages written and the rest not: every one read first)
+                flash(wording::error(QStringLiteral("the book's pages are still being read: try again in a moment")), 6000, true);
+                return;
+            }
             std::vector<std::size_t> pages;
             for (std::size_t i = 0; i < doc->pages.size(); ++i) pages.push_back(i);
             const fs::path where = fpath(folder);
@@ -158,12 +164,13 @@ void MainWindow::export_as(const std::optional<std::string>& layer) {
             flash(words, 6000);
             return;
         }
-        QString stem = QString::fromStdString(doc->title.empty() ? std::string("無題") : doc->title);
+        std::string name = doc->title.empty() ? std::string("無題") : doc->title;
         if (layer) {
             for (const core::Layer& l : doc->page(*at).layers) {
-                if (l.id == *layer) stem += QStringLiteral("_") + QString::fromStdString(l.title);
+                if (l.id == *layer) name += "_" + l.title;
             }
         }
+        const QString stem = QString::fromStdString(formats::safe_name(name, "genko"));
         const QString path = ask::save_path(this, QStringLiteral("書き出し形式"), stem + QStringLiteral(".") + ext, filter_of(ext));
         if (path.isEmpty()) return;
         const fs::path dest = fpath(QFileInfo(path).suffix().isEmpty() ? path + QStringLiteral(".") + ext : path);
@@ -196,7 +203,7 @@ void MainWindow::save_for_web() {
         const formats::WebSettings settings = dialog.settings();
         const formats::WebSize size = dialog.size();
         const QString ext = dialog.extension();
-        const QString stem = QString::fromStdString(doc->title.empty() ? std::string("無題") : doc->title);
+        const QString stem = QString::fromStdString(formats::safe_name(doc->title.empty() ? std::string("無題") : doc->title, "genko"));
         const QString path = ask::save_path(this, QStringLiteral("Web 用に保存"), stem + QStringLiteral(".") + ext, filter_of(ext));
         if (path.isEmpty()) return;
         const fs::path dest = fpath(QFileInfo(path).suffix().isEmpty() ? path + QStringLiteral(".") + ext : path);

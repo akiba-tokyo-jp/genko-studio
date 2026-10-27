@@ -465,13 +465,29 @@ private slots:
             {"act_quick_export_png", ""}, {"act_export_as", "Ctrl+Alt+Shift+W"}, {"act_export_prefs", ""}, {"act_save_for_web", "Ctrl+Alt+Shift+S"}};
         const std::int64_t revision = studio.doc().revision;
         const std::size_t books = w->documents().size();
+        // (each opens its window — or, クイック書き出し, asks where —: counted as the responder is asked)
+        int opened = 0;
+        const auto shown = studio.answers->responder->exec;
+        const auto where = studio.answers->responder->save_path;
+        studio.answers->responder->exec = [&](QDialog* dialog) {
+            ++opened;
+            return shown ? shown(dialog) : int(QDialog::Rejected);
+        };
+        studio.answers->responder->save_path = [&](const QString& caption, const QString& suggested) {
+            ++opened;
+            return where ? where(caption, suggested) : QString();
+        };
         for (const auto& [name, key] : frames) {
             QAction* a = studio.act(name);
             QVERIFY2(a != nullptr, name);
             QCOMPARE(a->shortcuts(), *key == '\0' ? QList<QKeySequence>() : QList<QKeySequence>{QKeySequence(QString::fromLatin1(key))});
+            const int before = opened;
             a->trigger();  // (its window shut, or — クイック書き出し — no place given: nothing written)
             QVERIFY2(!w->last_notice().contains(QStringLiteral("まだ使えません")), qPrintable(w->last_notice()));
+            QVERIFY2(opened == before + 1, name);
         }
+        studio.answers->responder->exec = shown;
+        studio.answers->responder->save_path = where;
         QCOMPARE(studio.doc().revision, revision);
         QCOMPARE(w->documents().size(), books);
     }

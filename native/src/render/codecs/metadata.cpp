@@ -7,6 +7,8 @@
 #include <algorithm>
 #include <cstdint>
 #include <cstring>
+#include <utility>
+#include <vector>
 
 #include "core/exif.hpp"
 
@@ -245,6 +247,118 @@ std::string exif_upright(std::string exif) {
         // (a LONG — some writers' —: its four bytes)
         for (int k = 0; k < 4; ++k) exif[e->field + static_cast<std::size_t>(k)] = (little ? k == 0 : k == 3) ? '\x01' : '\0';
     }
+    return exif;
+}
+
+std::string exif_for_copy(std::string exif, std::uint32_t width, std::uint32_t height) {
+    const Tiff t(exif);
+    if (!t.ok()) return exif;
+    const bool little = t.little();
+    const auto put16 = [&](std::size_t at, std::uint16_t v) {
+        exif[at] = static_cast<char>(little ? v & 0xFF : v >> 8);
+        exif[at + 1] = static_cast<char>(little ? v >> 8 : v & 0xFF);
+    };
+    const auto put32 = [&](std::size_t at, std::uint32_t v) {
+        for (std::size_t k = 0; k < 4; ++k) exif[at + k] = static_cast<char>((v >> (little ? 8 * k : 8 * (3 - k))) & 0xFF);
+    };
+    const auto unit = [](std::uint16_t type) -> std::uint64_t {
+        switch (type) {
+        case 1: case 2: case 6: case 7: return 1;
+        case 3: case 8: return 2;
+        case 4: case 9: case 11: case 13: return 4;
+        case 5: case 10: case 12: return 8;
+        default: return 0;
+        }
+    };
+    // (the IFD itself and every value of its entries kept outside their fields: where it lies in the block)
+    using Span = std::pair<std::uint64_t, std::uint64_t>;
+    const auto spans_of = [&](std::size_t ifd, std::vector<Span>& out) {
+        const auto n = t.u16(ifd);
+        if (!n) return;
+        out.emplace_back(ifd, std::min<std::uint64_t>(exif.size(), ifd + 2 + std::uint64_t(*n) * 12 + 4));
+        for (const Tiff::Entry& e : t.ifd(ifd)) {
+            const std::uint64_t size = unit(e.type) * e.count;
+            if (size > 4) {
+                if (const auto at = t.u32(e.field); at && *at < exif.size()) out.emplace_back(*at, std::min<std::uint64_t>(exif.size(), *at + size));
+            }
+        }
+    };
+    const std::size_t ifd0 = t.first_ifd();
+    const auto n0 = t.u16(ifd0);
+    if (!n0) return exif;
+    // the IFDs that stay: IFD0, the Exif IFD, GPS and Interoperability
+    std::vector<Span> kept;
+    spans_of(ifd0, kept);
+    std::size_t exif_ifd = 0;
+    if (const auto e = t.entry(ifd0, 0x8769)) exif_ifd = t.whole(*e).value_or(0);
+    if (const auto e = t.entry(ifd0, 0x8825); e && t.whole(*e).value_or(0) != 0) spans_of(*t.whole(*e), kept);
+    if (exif_ifd != 0) {
+        spans_of(exif_ifd, kept);
+        if (const auto e = t.entry(exif_ifd, 0xA005); e && t.whole(*e).value_or(0) != 0) spans_of(*t.whole(*e), kept);
+    }
+    // the IFDs that go: IFD1 and any after it, with the thumbnail's bytes (JPEGInterchangeFormat, or its strips)
+    std::vector<Span> gone;
+    const auto value_at = [&](std::size_t at, std::size_t size, std::uint32_t i) -> std::optional<std::uint32_t> {
+        if (size == 2) {
+            const auto v = t.u16(at + i * 2);
+            return v ? std::optional<std::uint32_t>(*v) : std::nullopt;
+        }
+        return t.u32(at + std::size_t(i) * 4);
+    };
+    const std::size_t next_at = ifd0 + 2 + std::size_t(*n0) * 12;
+    std::size_t ifd = t.next_ifd(ifd0);
+    for (int k = 0; k < 8 && ifd != 0 && ifd < exif.size() && ifd != ifd0; ++k) {
+        spans_of(ifd, gone);
+        const auto whole = [&](std::uint16_t tag) -> std::optional<std::uint32_t> {
+            const auto e = t.entry(ifd, tag);
+            return e ? t.whole(*e) : std::nullopt;
+        };
+        if (const auto at = whole(0x0201), length = whole(0x0202); at && length && *at < exif.size()) {
+            gone.emplace_back(*at, std::min<std::uint64_t>(exif.size(), std::uint64_t(*at) + *length));
+        }
+        const auto offsets = t.entry(ifd, 0x0111), counts = t.entry(ifd, 0x0117);
+        if (offsets && counts && offsets->count == counts->count && offsets->count <= 4096) {
+            const auto o = t.data_at(*offsets), c = t.data_at(*counts);
+            const std::size_t ou = static_cast<std::size_t>(unit(offsets->type)), cu = static_cast<std::size_t>(unit(counts->type));
+            for (std::uint32_t i = 0; o && c && (ou == 2 || ou == 4) && (cu == 2 || cu == 4) && i < offsets->count; ++i) {
+                const auto at = value_at(*o, ou, i), length = value_at(*c, cu, i);
+                if (at && length && *at < exif.size()) gone.emplace_back(*at, std::min<std::uint64_t>(exif.size(), std::uint64_t(*at) + *length));
+            }
+        }
+        ifd = t.next_ifd(ifd);
+    }
+    // the sizes it says: the written picture's (a SHORT that cannot hold one made a LONG: the same 4-byte field)
+    const auto set_size = [&](std::size_t in, std::uint16_t tag, std::uint32_t value) {
+        const auto e = t.entry(in, tag);
+        if (!e || e->count != 1) return;
+        if (e->type == 3 && value <= 0xFFFF) {
+            put16(e->field, static_cast<std::uint16_t>(value));
+            put16(e->field + 2, 0);
+        } else if (e->type == 3 || e->type == 4) {
+            put16(e->field - 6, 4);
+            put32(e->field, value);
+        }
+    };
+    set_size(ifd0, 0x0100, width);
+    set_size(ifd0, 0x0101, height);
+    if (exif_ifd != 0) {
+        set_size(exif_ifd, 0xA002, width);
+        set_size(exif_ifd, 0xA003, height);
+    }
+    if (gone.empty() || !t.has(next_at, 4)) return exif;
+    put32(next_at, 0);  // (IFD0 the last)
+    std::uint64_t first_gone = exif.size();
+    for (const auto& [from, to] : gone) {
+        // (cleared — what IFD0 and the others hold left as it is, should a broken block share its bytes with them —)
+        for (std::uint64_t i = from; i < to; ++i) {
+            const bool shared = std::any_of(kept.begin(), kept.end(), [i](const Span& s) { return i >= s.first && i < s.second; });
+            if (!shared) exif[static_cast<std::size_t>(i)] = '\0';
+        }
+        first_gone = std::min(first_gone, from);
+    }
+    std::uint64_t last_kept = 8;
+    for (const auto& span : kept) last_kept = std::max(last_kept, span.second);
+    if (last_kept <= first_gone) exif.resize(static_cast<std::size_t>(first_gone));  // (nothing of the rest past it: cut off)
     return exif;
 }
 

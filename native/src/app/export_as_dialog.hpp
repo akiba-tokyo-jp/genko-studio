@@ -119,6 +119,7 @@ private:
     std::size_t page_ = 0;
     std::optional<std::string> layer_;
     int sized_by_ = 0;  // the field last edited: 0 scale, 1 width, 2 height
+    bool transparency_asked_ = true;  // (a layer) 透明部分 as it was before a JPEG greyed it
     QTimer timer_;
     QFutureWatcher<Result>* watcher_ = nullptr;
     bool pending_ = false;

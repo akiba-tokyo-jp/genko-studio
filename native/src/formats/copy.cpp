@@ -3,6 +3,7 @@
 #include "formats/copy.hpp"
 
 #include <algorithm>
+#include <random>
 #include <array>
 #include <cctype>
 #include <cmath>
@@ -186,8 +187,11 @@ CodecImage over_white(const CodecImage& image) {
     return out;
 }
 
-// The page's EXIF (a picture it was opened from), upright, or none.
-std::optional<std::string> page_exif(const core::Document& doc, const core::Page& page) {
+void put_metadata(CodecImage& image, const core::Document& doc, const core::Page& page, const std::optional<Metadata>& metadata);
+
+}  // namespace
+
+std::optional<std::string> copy_exif(const core::Document& doc, const core::Page& page, std::uint32_t width, std::uint32_t height) {
     if (!page.native_source || page.native_source->exif.empty()) return std::nullopt;
     const std::string& ref = page.native_source->exif;
     std::optional<std::string> bytes;
@@ -201,15 +205,19 @@ std::optional<std::string> page_exif(const core::Document& doc, const core::Page
         }
     }
     if (!bytes) return std::nullopt;
-    return render::codecs::exif_upright(std::move(*bytes));  // (the pixels are upright: never turned twice)
+    // (the pixels are upright: never turned twice; PC4 F-c's review P2-3: the camera's thumbnail — the picture before it
+    // was edited — gone, the sizes it says the written picture's)
+    return render::codecs::exif_for_copy(render::codecs::exif_upright(std::move(*bytes)), width, height);
 }
+
+namespace {
 
 void put_metadata(CodecImage& image, const core::Document& doc, const core::Page& page, const std::optional<Metadata>& metadata) {
     image.meta.xmp.reset();
     image.meta.exif.reset();
     if (!metadata || *metadata == Metadata::All) {
         if (auto xmp = book_xmp(doc)) image.meta.xmp = std::move(*xmp);
-        if (metadata) image.meta.exif = page_exif(doc, page);
+        if (metadata) image.meta.exif = copy_exif(doc, page, image.width(), image.height());
         return;
     }
     if (*metadata == Metadata::Copyright && doc.file_info) {
@@ -221,6 +229,40 @@ void put_metadata(CodecImage& image, const core::Document& doc, const core::Page
         kept.copyright_url = doc.file_info->copyright_url;
         if (!kept.empty()) image.meta.xmp = core::write_xmp(std::nullopt, kept, std::nullopt);
     }
+}
+
+// The image resources of an opened PSD that say who made it or of the shot (IPTC, the copyright flag and URL, thumbnails,
+// EXIF, XMP, the caption digest): the ones a PSD's or a .pcraft's copy without all its metadata leaves out.
+bool metadata_resource(int id) { return id == 1028 || id == 1033 || id == 1034 || id == 1035 || id == 1036 || (id >= 1058 && id <= 1061); }
+
+bool trims(const std::optional<Metadata>& metadata) { return metadata && *metadata != Metadata::All; }
+
+// (PC4 F-c's review P2-2) A PSD's, a PSB's or a .pcraft's book with only the metadata chosen: none — no File Info, no
+// packet it was opened with, no EXIF, none of an opened PSD's resources of the kind —; the copyright and contact — those
+// five items of File Info alone, in a packet of their own —; all (or none chosen): as it is.
+void trim_metadata(core::Document& book, std::size_t at, const std::optional<Metadata>& metadata) {
+    if (!trims(metadata)) return;
+    if (book.file_info) {
+        core::FileInfo kept;
+        if (*metadata == Metadata::Copyright) {
+            kept.author = book.file_info->author;
+            kept.author_title = book.file_info->author_title;
+            kept.copyright = book.file_info->copyright;
+            kept.copyright_status = book.file_info->copyright_status;
+            kept.copyright_url = book.file_info->copyright_url;
+        }
+        if (kept.empty()) book.file_info.reset();
+        else book.file_info = std::move(kept);
+    }
+    if (at >= book.pages.size() || book.is_deferred(at)) return;
+    const core::Page& seen = book.page(at);
+    const bool exif = seen.native_source && !seen.native_source->exif.empty();
+    const bool resources = seen.native_psd && std::any_of(seen.native_psd->resources.begin(), seen.native_psd->resources.end(),
+                                                          [](const core::PsdResource& r) { return metadata_resource(r.id); });
+    if (!exif && !resources) return;
+    core::Page& page = book.edit_page(at);
+    if (exif) page.native_source->exif.clear();
+    if (resources) std::erase_if(page.native_psd->resources, [](const core::PsdResource& r) { return metadata_resource(r.id); });
 }
 
 }  // namespace
@@ -402,10 +444,12 @@ PagePicture copy_picture(const core::Document& doc, std::size_t at, const CopyOp
         double file_dpi = dpi;
         if (exact) {
             const std::uint32_t bw = out.image.width(), bh = out.image.height();
-            std::uint32_t w = options.width.value_or(0), h = options.height.value_or(0);
-            if (!options.height) h = static_cast<std::uint32_t>(std::max(1LL, std::llround(double(bh) * w / bw)));
-            if (!options.width) w = static_cast<std::uint32_t>(std::max(1LL, std::llround(double(bw) * h / bh)));
-            check_size(page, w, h);
+            // (counted in 64 bits — a thin layer made wide can ask past 2^32 —, checked, then made that size)
+            std::uint64_t w64 = options.width.value_or(0), h64 = options.height.value_or(0);
+            if (!options.height) h64 = static_cast<std::uint64_t>(std::max(1LL, std::llround(double(bh) * double(w64) / bw)));
+            if (!options.width) w64 = static_cast<std::uint64_t>(std::max(1LL, std::llround(double(bw) * double(h64) / bh)));
+            check_size(page, w64, h64);
+            const auto w = static_cast<std::uint32_t>(w64), h = static_cast<std::uint32_t>(h64);
             out.image = render::codecs::resized(out.image, w, h, options.resample);
             file_dpi = dpi * double(w) / double(bw);
         }
@@ -422,6 +466,33 @@ PagePicture copy_picture(const core::Document& doc, std::size_t at, const CopyOp
     }
     put_metadata(out.image, doc, page, options.metadata);
     return out;
+}
+
+void check_copy_size(const core::Document& doc, std::size_t at, std::string_view extension, const CopyOptions& options) {
+    const CopySize size = copy_size(doc, at, options);
+    const core::Page& page = doc.page(at);
+    if (options.layer) {
+        // (what is drawn before a layer's size is known: its page at the resolution it is drawn at; a size asked exactly)
+        const bool exact = options.width || options.height;
+        const auto [pw, ph] = page_picture_size(page, exact ? page_dpi(page) : size.drawn_dpi, "paper");
+        check_size(page, pw, ph);
+        if (options.width && options.height) check_size(page, *options.width, *options.height);
+        return;
+    }
+    // (what the format holds first — in its own words —, then the codecs' limits)
+    std::string ext(extension);
+    std::transform(ext.begin(), ext.end(), ext.begin(), [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+    const std::optional<render::codecs::Format> format = ext == "tif" ? std::optional(render::codecs::Format::Tiff) : render::codecs::from_extension(ext);
+    if (format && ext != "psd" && ext != "psb" && ext != "pcraft") {
+        if (const auto most = render::codecs::max_dimensions(*format)) {
+            if (size.width > most->first || size.height > most->second) {
+                throw core::Error("image_too_large", std::string(render::codecs::name(*format)) + " holds at most " + std::to_string(most->first) + "×" +
+                                                         std::to_string(most->second) + " pixels");
+            }
+        }
+    }
+    const auto [dw, dh] = page_picture_size(page, size.drawn_dpi, options.area);
+    check_size(page, std::max(dw, size.width), std::max(dh, size.height));
 }
 
 PlannedCopy plan_copy(const core::Document& doc, std::size_t at, const fs::path& dest, const CopyOptions& options) {
@@ -451,6 +522,7 @@ PlannedCopy plan_copy(const core::Document& doc, std::size_t at, const fs::path&
         alone->doc.file_info = doc.file_info;
         alone->doc.native_files = doc.native_files;
         alone->doc.asset_dir = doc.asset_dir;
+        trim_metadata(alone->doc, 0, options.metadata);
         alone->notes.insert(alone->notes.begin(), notes.begin(), notes.end());
         plan.dpi = std::max(1, static_cast<int>(std::lround(file_dpi)));
     }
@@ -464,6 +536,7 @@ PlannedCopy plan_copy(const core::Document& doc, std::size_t at, const fs::path&
         }
         if (options.layers) {
             plan.psd_book = doc;  // (the book's XMP in it: put_page_psd)
+            trim_metadata(*plan.psd_book, at, options.metadata);
             plan.psd_page = at;
             return plan;
         }
@@ -473,6 +546,7 @@ PlannedCopy plan_copy(const core::Document& doc, std::size_t at, const fs::path&
         merged.doc.native_files = doc.native_files;
         merged.doc.asset_dir = doc.asset_dir;
         merged.doc.title = doc.title;
+        trim_metadata(merged.doc, 0, options.metadata);
         plan.notes = std::move(merged.notes);
         plan.psd_book = std::move(merged.doc);
         plan.psd_page = 0;
@@ -490,6 +564,10 @@ PlannedCopy plan_copy(const core::Document& doc, std::size_t at, const fs::path&
             std::vector<std::string> notes = write_pcraft(alone->doc, 0, sink, pcraft);
             plan.notes = std::move(alone->notes);
             for (std::string& note : notes) plan.notes.push_back(std::move(note));
+        } else if (options.layers && trims(options.metadata)) {
+            core::Document book = doc;  // (its pages shared until one is changed)
+            trim_metadata(book, at, options.metadata);
+            plan.notes = write_pcraft(book, at, sink, pcraft);
         } else if (options.layers) {
             plan.notes = write_pcraft(doc, at, sink, pcraft);
         } else {
@@ -498,6 +576,7 @@ PlannedCopy plan_copy(const core::Document& doc, std::size_t at, const fs::path&
             merged.doc.native_files = doc.native_files;
             merged.doc.asset_dir = doc.asset_dir;
             merged.doc.title = doc.title;
+            trim_metadata(merged.doc, 0, options.metadata);
             std::vector<std::string> notes = write_pcraft(merged.doc, 0, sink, pcraft);
             plan.notes = std::move(merged.notes);
             for (std::string& note : notes) plan.notes.push_back(std::move(note));
@@ -508,20 +587,18 @@ PlannedCopy plan_copy(const core::Document& doc, std::size_t at, const fs::path&
     }
     // (a page larger than its format holds — GIF's, WebP's, an icon's —: refused before it is drawn, in the codecs' words)
     const render::codecs::Format format = suffix == "tif" ? render::codecs::Format::Tiff : *render::codecs::from_extension(suffix);
-    if (!options.layer) {
-        if (const auto most = render::codecs::max_dimensions(format)) {
-            const CopySize size = copy_size(doc, at, options);
-            if (size.width > most->first || size.height > most->second) {
-                throw core::Error("image_too_large", std::string(render::codecs::name(format)) + " holds at most " + std::to_string(most->first) + "×" +
-                                                         std::to_string(most->second) + " pixels");
-            }
-        }
-    }
+    check_copy_size(doc, at, suffix, options);
     PagePicture picture = copy_picture(doc, at, options);
     plan.notes = picture.notes;
     plan.width = picture.image.width();
     plan.height = picture.image.height();
     const double file_dpi = picture.image.meta.dpi ? picture.image.meta.dpi->first : dpi;
+    const render::codecs::EncodeOptions encode = encode_options(options, suffix);
+    // (PC4 F-c's review P2-1: a layer's picture in a format without alpha — JPEG's and the others' — over white, its
+    // edges mixed with it, as クイック書き出し and レイヤーからファイル… write it; never its alpha merely dropped)
+    if (render::codecs::has_alpha(picture.image.layout()) && !render::codecs::has_alpha(render::codecs::plan(picture.image, format, encode).layout)) {
+        picture.image = over_white(picture.image);
+    }
     if (suffix == "tif" && !render::codecs::has_alpha(picture.image.layout())) {
         // (a page's TIFF as the exports write it; PC4 F-c: its colours in sRGB when asked)
         CodecImage image = std::move(picture.image);
@@ -532,7 +609,7 @@ PlannedCopy plan_copy(const core::Document& doc, std::size_t at, const fs::path&
         plan.bytes = tiff_of(image, file_dpi, image.meta.xmp);
     } else {
         // (every other picture — a layer's TIFF with its alpha too — through the codecs, one way for every format)
-        plan.bytes = encode_for(std::move(picture.image), format, encode_options(options, suffix), options.srgb, plan.notes);
+        plan.bytes = encode_for(std::move(picture.image), format, encode, options.srgb, plan.notes);
     }
     return plan;
 }
@@ -584,6 +661,8 @@ CopyEstimate estimate_copy(const core::Document& doc, std::size_t at, std::strin
     CopyOptions asked = options;
     CopyEstimate out;
     const CopySize full = copy_size(doc, at, options);
+    // (PC4 F-c's review P3-2: a size the copy cannot be written at refused as the copy refuses it — not a proxy's estimate)
+    if (at < doc.pages.size() && !doc.is_deferred(at)) check_copy_size(doc, at, extension, options);
     if (proxy && *proxy > 0 && std::max(full.width, full.height) > *proxy) {
         // (made at most `proxy` long: the scale and any size asked brought down alike)
         const double k = double(*proxy) / double(std::max(full.width, full.height));
@@ -597,9 +676,11 @@ CopyEstimate estimate_copy(const core::Document& doc, std::size_t at, std::strin
     std::uint64_t bytes = 0, fixed = 0;
     std::uint32_t w = 0, h = 0;
     if (ext == "psd" || ext == "psb" || ext == "pcraft") {
-        // (a PSD's or a .pcraft's writer writes a file: one of its own in the temporary folder, measured and removed)
-        const fs::path temp = fs::temp_directory_path() /
-                              core::path_from_utf8("genko-estimate-" + std::to_string(reinterpret_cast<std::uintptr_t>(&out)) + "." + ext);
+        // (a PSD's or a .pcraft's writer writes a file: one of its own in the temporary folder, measured and removed — its
+        // name random, never another process's estimate)
+        std::random_device random;
+        const std::uint64_t tag = (std::uint64_t(random()) << 32) ^ random() ^ reinterpret_cast<std::uintptr_t>(&out);
+        const fs::path temp = fs::temp_directory_path() / core::path_from_utf8("genko-estimate-" + std::to_string(tag) + "." + ext);
         CopyResult written = write_copy(doc, at, temp, asked);
         std::error_code ec;
         bytes = written.bytes;

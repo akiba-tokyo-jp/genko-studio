@@ -204,7 +204,7 @@ std::vector<std::uint8_t> map_colours(const Work& work, std::size_t w, std::size
 }  // namespace
 
 std::uint64_t estimated_bytes(const Rgba8& proxy, const WebSettings& st, const std::optional<std::string>& icc, const std::optional<std::string>& xmp,
-                              double dpi, std::uint64_t bytes, double ratio) {
+                              double dpi, std::uint64_t bytes, double ratio, const std::optional<std::string>& exif) {
     // (what the file has whatever its size — headers, a palette, a profile, metadata — from the same file of the proxy's
     // first pixel, not scaled with the pixels)
     Rgba8 one;
@@ -212,7 +212,7 @@ std::uint64_t estimated_bytes(const Rgba8& proxy, const WebSettings& st, const s
     one.height = 1;
     one.px.assign(proxy.px.begin(), proxy.px.begin() + std::min<std::size_t>(4, proxy.px.size()));
     std::uint64_t fixed = 0;
-    if (one.px.size() == 4) fixed = std::min<std::uint64_t>(bytes, optimize(one, st, icc, xmp, dpi, false, nullptr).bytes);
+    if (one.px.size() == 4) fixed = std::min<std::uint64_t>(bytes, optimize(one, st, icc, xmp, dpi, false, nullptr, exif).bytes);
     return fixed + static_cast<std::uint64_t>(std::llround(double(bytes - fixed) * ratio));
 }
 
@@ -409,7 +409,7 @@ WebSize web_size_from_json(const Json& params) {
 }
 
 Optimized optimize(const Rgba8& picture, const WebSettings& st, const std::optional<std::string>& icc, const std::optional<std::string>& xmp, double dpi,
-                   bool preview, const render::codecs::web::Sink* sink) {
+                   bool preview, const render::codecs::web::Sink* sink, const std::optional<std::string>& exif) {
     const std::size_t w = picture.width, h = picture.height, n = w * h;
     if (w == 0 || h == 0 || picture.px.size() != n * 4) throw core::Error("value", "a picture of no pixels");
     Optimized out;
@@ -450,6 +450,7 @@ Optimized optimize(const Rgba8& picture, const WebSettings& st, const std::optio
         if (st.embed_icc && icc && !icc->empty()) image.icc = *icc;
         image.meta.dpi = std::make_pair(dpi, dpi);
         image.meta.xmp = xmp;
+        if (st.format == WebFormat::Jpeg) image.meta.exif = exif;
         render::codecs::EncodeOptions encode;
         encode.embed_icc = st.embed_icc && icc.has_value();
         encode.embed_metadata = true;
@@ -578,11 +579,17 @@ WebPicture web_picture(const core::Document& doc, std::size_t page, const WebSet
     const CopySize full = copy_size(doc, page, copy);
     out.full_width = full.width;
     out.full_height = full.height;
-    // (a page larger than a GIF holds: refused before it is drawn)
+    // (a page larger than a GIF or a JPEG holds: refused before it is drawn)
     if (!layer && st.format == WebFormat::Gif && (full.width > 65535 || full.height > 65535)) {
         throw core::Error("image_too_large", "GIF holds at most 65535×65535 pixels");
     }
-    if (proxy && *proxy > 0 && std::max(full.width, full.height) > *proxy) {
+    if (!layer && st.format == WebFormat::Jpeg) {
+        if (const auto most = render::codecs::max_dimensions(render::codecs::Format::Jpeg); most && (full.width > most->first || full.height > most->second)) {
+            throw core::Error("image_too_large", "JPEG holds at most " + std::to_string(most->first) + "×" + std::to_string(most->second) + " pixels");
+        }
+    }
+    const bool proxied = proxy && *proxy > 0 && std::max(full.width, full.height) > *proxy;
+    if (proxied) {
         const double k = double(*proxy) / double(std::max(full.width, full.height));
         copy.scale = std::clamp(copy.scale * k, 1.0, 1000.0);
         if (copy.width) copy.width = std::max<std::uint32_t>(1, static_cast<std::uint32_t>(std::lround(*copy.width * k)));
@@ -597,6 +604,10 @@ WebPicture web_picture(const core::Document& doc, std::size_t page, const WebSet
     // CMYK page among them — goes to sRGB through Little CMS, as every way out converts it)
     if (render::codecs::is_rgb(image.layout()) && !(st.convert_to_srgb && profiled)) {
         out.icc = profiled ? image.icc : std::nullopt;
+        // (PC4 F-c's review P3-12: its values written without the profile they mean — a GIF, a PNG-8 or a WBMP holds none,
+        // a JPEG or a PNG-24 not embedding it —: said, as Photoshop's own would not)
+        const bool holds = (st.format == WebFormat::Jpeg || st.format == WebFormat::Png24) && st.embed_icc;
+        if (profiled && !holds) out.notes.emplace_back("カラープロファイルを持たないファイルに、sRGB に変換せずにページの値をそのまま書きます（色が変わって見えることがあります）");
     } else if (profiled || !render::codecs::is_rgb(image.layout())) {
         image = srgb_picture(image, false, false);
         out.icc = std::nullopt;
@@ -606,6 +617,11 @@ WebPicture web_picture(const core::Document& doc, std::size_t page, const WebSet
     out.rgba.width = rgba.width();
     out.rgba.height = rgba.height();
     out.rgba.px.assign(rgba.data().begin(), rgba.data().end());
+    if (st.format == WebFormat::Jpeg && st.metadata == WebMetadata::All) {
+        // (the size the file is written at: the picture's, or — a proxy — the page's)
+        const bool page_size = proxied && !layer;
+        out.exif = copy_exif(doc, doc.page(page), page_size ? full.width : out.rgba.width, page_size ? full.height : out.rgba.height);
+    }
     return out;
 }
 
@@ -636,11 +652,11 @@ WebResult save_for_web(const core::Document& doc, std::size_t page, const WebSet
     out.notes = std::move(picture.notes);
     out.ext = std::string(web_extension(st.format));
     if (!dest) {
-        const Optimized o = optimize(picture.rgba, st, icc, xmp, picture.dpi, false, nullptr);
+        const Optimized o = optimize(picture.rgba, st, icc, xmp, picture.dpi, false, nullptr, picture.exif);
         const bool scaled = o.width != picture.full_width || o.height != picture.full_height;
         const double ratio = scaled ? double(picture.full_width) * picture.full_height / (double(o.width) * o.height) : 1.0;
         out.bytes = o.bytes;
-        if (scaled) out.bytes = estimated_bytes(picture.rgba, st, icc, xmp, picture.dpi, o.bytes, ratio);
+        if (scaled) out.bytes = estimated_bytes(picture.rgba, st, icc, xmp, picture.dpi, o.bytes, ratio, picture.exif);
         out.width = picture.full_width;
         out.height = picture.full_height;
         out.colors = o.colors;
@@ -651,7 +667,7 @@ WebResult save_for_web(const core::Document& doc, std::size_t page, const WebSet
     // (written as it is made, beside its place; moved in when it is whole — removed if it is not)
     detail::PartFile part(*dest);
     const render::codecs::web::Sink sink = [&part](std::string_view bytes) { part.write(bytes); };
-    const Optimized o = optimize(picture.rgba, st, icc, xmp, picture.dpi, false, &sink);
+    const Optimized o = optimize(picture.rgba, st, icc, xmp, picture.dpi, false, &sink, picture.exif);
     part.close();
     part.commit();
     out.file = *dest;

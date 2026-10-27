@@ -98,20 +98,25 @@ struct Optimized {
     std::vector<std::uint8_t> preview;   // (asked) what the file shows, straight RGBA8
 };
 // The picture optimised as the settings say, its bytes handed to `sink` (none: only counted); `icc` embedded in a JPEG or a
-// PNG-24 when embed_icc, `xmp` put in them, `dpi` their resolution.
+// PNG-24 when embed_icc, `xmp` put in them, `exif` in a JPEG, `dpi` their resolution.
 Optimized optimize(const Rgba8& picture, const WebSettings& settings, const std::optional<std::string>& icc, const std::optional<std::string>& xmp,
-                   double dpi, bool preview, const render::codecs::web::Sink* sink = nullptr);
+                   double dpi, bool preview, const render::codecs::web::Sink* sink = nullptr, const std::optional<std::string>& exif = std::nullopt);
 
 // The size of a file whose proxy made `bytes` and that has `ratio` times its pixels: what a file has whatever its size (from
 // the same file of one pixel) and the rest scaled by the pixels (the dialog's estimates).
 std::uint64_t estimated_bytes(const Rgba8& proxy, const WebSettings& settings, const std::optional<std::string>& icc,
-                              const std::optional<std::string>& xmp, double dpi, std::uint64_t bytes, double ratio);
+                              const std::optional<std::string>& xmp, double dpi, std::uint64_t bytes, double ratio,
+                              const std::optional<std::string>& exif = std::nullopt);
 
 // The picture Save for Web works on: the page (or its layer alone, cut to what it holds) at the size, its colours sRGB's
-// (`icc` none) or, an RGB page of a profile kept as it is, its own (`icc` its profile); `proxy`: at most that long.
+// (`icc` none) or, an RGB page of a profile kept as it is, its own (`icc` its profile); `proxy`: at most that long. A page
+// larger than its format holds (GIF's 65535, JPEG's 65500 a side) is refused before it is drawn.
 struct WebPicture {
     Rgba8 rgba;
     std::optional<std::string> icc;
+    // (a JPEG with all the metadata: the page's EXIF as a copy carries it — formats::copy_exif —, as Photoshop's Save for
+    // Web puts it in a JPEG alone)
+    std::optional<std::string> exif;
     double dpi = 72;
     std::uint32_t full_width = 0;   // (proxy) the size the file would be
     std::uint32_t full_height = 0;
