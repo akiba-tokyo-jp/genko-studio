@@ -244,7 +244,7 @@ set_property(TEST test_smart_filters APPEND PROPERTY ENVIRONMENT "QTEST_FUNCTION
 # PC3 A3 (SPEC.md COLOR-05「PSD のスマートオブジェクト」): a PSD's placed layer blocks and linked files (upstream's
 # linked.rs and blocks.rs tests, this build's SoLd and PlLd read back), a PSD or PSB as a smart object's file (16 and 32 bits
 # kept, CMYK inks, Lab, a blank merged picture), import_psd's smart objects drawn and written back byte for byte.
-genko_test(test_psd_smart SOURCES unit/test_psd_smart.cpp DEPS genko_test_support genko_render_ops genko_formats LABELS unit TIMEOUT 600)
+genko_test(test_psd_smart SOURCES unit/test_psd_smart.cpp support/raw_testgen.cpp DEPS genko_test_support genko_render_ops genko_formats LABELS unit TIMEOUT 600)
 # PC3 A4 (SPEC.md COLOR-05「スタックモード」): a smart object's stack mode — PhotoCraft's statistics, the shots combined in
 # the three ways (the median taking the passer-by out), a folder, hidden layers, a part the whole cut there, a file one
 # layer, rasterized; rasterize_lines drawing the lines as the page drew them; a tone rasterized on precise and ink pages.

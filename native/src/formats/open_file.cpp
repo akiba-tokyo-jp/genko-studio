@@ -481,6 +481,12 @@ Opened open_psd(std::string_view bytes, const std::string& file, const OpenOptio
             }
             if (rest > 0) notes.push_back("ほか " + std::to_string(rest) + " 個のスマートオブジェクトも、Photoshop のスマートフィルターを写せないため Photoshop の絵のまま表示します");
         }
+        // (PC4 F-e: a camera RAW's smart objects, Photoshop's Camera Raw settings not read)
+        if (report.contains("smart_raw_shown") && report["smart_raw_shown"].is_array()) {
+            std::string names;
+            for (const Json& s : report["smart_raw_shown"]) names += (names.empty() ? "「" : "」「") + s.value("title", std::string());
+            notes.push_back("スマートオブジェクト" + names + "」の中身はカメラ RAW のため、Photoshop の見えのまま表示します（描き直すと Genko の既定の現像になります。現像の設定はコンテンツを編集の Camera Raw で決めます）");
+        }
         if (report.contains("in_8_bits")) {
             const std::string why = report["in_8_bits"].is_string() ? report["in_8_bits"].get<std::string>() : std::string();
             notes.push_back(why == "budget" ? "高精度の画素が本の上限（1 GiB）を越えるため、レイヤーを 8 bit で読みました"
