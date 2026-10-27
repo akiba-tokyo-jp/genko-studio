@@ -825,6 +825,7 @@ void rasterize(Document& doc, std::size_t at, std::size_t i) {
     look.visible = true;
     look.screen.reset();
     look.color.reset();
+    look.style.reset();  // (PC4 E6: its style stays the layer's, drawn over its pixels as before)
     const int dpi = raster::kWorkingDpi;
     const Size size{mm_to_px(page.spec.width_mm.value(), dpi), mm_to_px(page.spec.height_mm.value(), dpi)};
     core::Bytes ink_raster, color_raster;

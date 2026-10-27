@@ -435,7 +435,7 @@ private slots:
             render::preset_store::save(app::config_dir(), render::gradient_presets::kind(), lib.groups);
         }
         app::PresetManager manager(s.window.get());
-        QCOMPARE(manager.kinds->count(), 5);
+        QCOMPARE(manager.kinds->count(), 6);  // (ブラシ・グラデーション・パターン・シェイプ・ツールプリセット、PC4 E6 のスタイル)
         manager.show_kind("gradients");
         QVERIFY(item_named(manager.tree(), QStringLiteral("赤緑")) != nullptr);
         QVERIFY(manager.apply(Json{{"action", "rename"}, {"preset", "赤緑"}, {"name", "赤と緑"}}));

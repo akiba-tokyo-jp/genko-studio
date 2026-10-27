@@ -225,6 +225,12 @@ genko_library(genko_render
     brush_presets.cpp
     tool_presets.cpp
     preset_files.cpp
+    # PC4 E6 (レイヤースタイル: 効果の描き方・スタイルのプリセット・.asl と PSD の lfx2)
+    layer_styles.cpp
+    ops_layer_styles.cpp
+    psd_effects.cpp
+    asl.cpp
+    style_presets.cpp
     # PC4 F-f (.pcraft: zip by name and stored, zstd, BLAKE3, the manifest, a .pcraft read as a page)
     blake3.cpp
     zstd.cpp

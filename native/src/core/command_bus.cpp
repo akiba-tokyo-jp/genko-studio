@@ -17,6 +17,7 @@
 #include "core/masks.hpp"
 #include "core/ops_schema.hpp"
 #include "core/ops_util.hpp"
+#include "core/layer_styles.hpp"
 #include "core/patterns.hpp"
 #include "core/color_raster.hpp"
 #include "core/pyconv.hpp"
@@ -816,6 +817,26 @@ Json journal_op(const Json& op) {
         };
         if (is_op(out, "add_pattern")) pattern_picture(out);
         if (const auto pattern = out.find("pattern"); pattern != out.end() && pattern->is_object()) pattern_picture(*pattern);
+        // (layer-styles@1, PC4 E6: a style's patterns given whole — set_layer_style's and add_layer_effect's)
+        const auto style_pictures = [&pattern_picture](Json& effects) {
+            if (!effects.is_array()) return;
+            for (Json& e : effects) {
+                if (!e.is_object()) continue;
+                if (const auto p = e.find("pattern"); p != e.end() && p->is_object()) pattern_picture(*p);
+                if (const auto t = e.find("texture"); t != e.end() && t->is_object()) {
+                    if (const auto p = t->find("pattern"); p != t->end() && p->is_object()) pattern_picture(*p);
+                }
+            }
+        };
+        if (is_op(out, "set_layer_style")) {
+            if (const auto style = out.find("style"); style != out.end() && style->is_object() && style->contains("effects")) style_pictures((*style)["effects"]);
+        } else if (is_op(out, "add_layer_effect")) {
+            if (const auto effect = out.find("effect"); effect != out.end() && effect->is_object()) {
+                Json one = Json::array({*effect});
+                style_pictures(one);
+                *effect = one[0];
+            }
+        }
         // (PC2a: a 3D LUT file's text a color_lookup gives — add_layer's and set_layer's adjust, set_adjustment's and
         // filter_raster's own —: its table is the book's asset, and an op is not done again from the journal)
         const auto file_text = [](Json& holder) {
@@ -1158,6 +1179,7 @@ ApplyResult CommandBus::apply(const Document& doc, const Json& ops_in, const Act
                     validate_masks(work);         // (masks@1, PC3: a mask's settings, a page's Quick Mask)
                     vector::validate_vector(work);  // (PC3: vector@1, pen-shapes@1, transform@1, page-spec@1)
                     validate_pattern_fills(work);   // (patterns@1, PC4 E3: no fill names a pattern the book does not keep)
+                    validate_layer_styles(work);    // (layer-styles@1, PC4 E6: a style in its normal form, on a layer that takes one)
                 } catch (const Error& error) {
                     if (error.code() == "not_yet_ported") throw;
                     throw OpError(error.what());

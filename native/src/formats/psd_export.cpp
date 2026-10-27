@@ -39,7 +39,9 @@
 #include "render/psd_paths.hpp"
 #include "render/psd_shapes.hpp"
 #include "render/pat.hpp"
+#include "core/layer_styles.hpp"
 #include "core/patterns.hpp"
+#include "render/psd_effects.hpp"
 #include "render/psd_text.hpp"
 #include "render/smart.hpp"
 #include "render/text/balloons.hpp"
@@ -277,6 +279,43 @@ public:
     }
     // patterns@1 (PC4 E3): the book whose patterns its pattern fills name (their names, unique ids and dpi)
     void patterns_of(const core::Document& book) { book_ = &book; }
+    // layer-styles@1 (PC4 E6): the next record is of the page's layer `id` — its style goes with it: its effects as an lfx2
+    // block (unless it keeps the effects of the PSD it was read from, unchanged since: those written back as they were),
+    // its fill opacity as iOpa, its Blend If as the record's blending ranges
+    void note_style(const render::PageLayer& layer) {
+        style_ = nullptr;
+        if (!layer.section.empty()) return;  // (a pen layer's group: its layers' records carry its style)
+        if (layer.styled != nullptr && layer.id.empty()) {  // (a placed picture's, the ink layer's lines: review P2-6)
+            if (layer.styled->style) style_ = layer.styled;
+            return;
+        }
+        const std::string& id = layer.id;
+        if (page_ == nullptr || id.empty()) return;
+        for (const core::Layer& own : page_->layers) {
+            if (own.id != id) continue;
+            if (own.style) style_ = &own;
+            return;
+        }
+    }
+    std::string style_blocks() const {
+        if (style_ == nullptr) return {};
+        const core::Json& style = *style_->style;
+        std::string out;
+        const bool kept_effects = style_->native_psd && std::any_of(style_->native_psd->blocks.begin(), style_->native_psd->blocks.end(),
+                                                                    [](const auto& block) { return core::psd_effect_key(block.first); });
+        if (!kept_effects) {
+            render::psd_shapes::Canvas canvas;
+            canvas.width_mm = paper_[0];
+            canvas.height_mm = paper_[1];
+            canvas.width_px = size_.width;
+            canvas.height_px = size_.height;
+            canvas.dpi = paper_[0] > 0 ? size_.width / (paper_[0] / 25.4) : 72.0;
+            canvas.book = book_;
+            if (const std::string payload = render::psd_effects::lfx2(style, canvas); !payload.empty()) out += tagged("lfx2", payload);
+        }
+        if (const double fill = core::style_fill_opacity(style); fill < 1.0) out += tagged("iOpa", render::psd_effects::iopa(fill));
+        return out;
+    }
     // The next record's mask settings: the page layer's mask, when it has masks@1's (one not used is written too, as
     // Photoshop keeps it, disabled); none for a mask without them (written as before).
     void note_mask(render::PageLayer& layer) {
@@ -327,6 +366,7 @@ public:
         }
         note_mask(layer);  // (PC3 B2: its mask's masks@1 settings — a pen layer's group's too)
         note_keep(layer.id);  // (psd-keep@1, PC4 F-d)
+        note_style(layer);  // (layer-styles@1, PC4 E6: a layer's own record)
         if (layer.section == "group") {
             section(layer.name, 1, blend_key(layer.settings ? layer.blend : std::string("normal")), layer.settings ? layer.opacity : 1.0,
                     layer.mask ? &*layer.mask : nullptr, vector_block(layer.vector_mask));
@@ -334,7 +374,8 @@ public:
         }
         if (layer.shape != nullptr) flags_ = 0x18;  // (bits 3 and 4: its pixel data is not what it shows)
         const std::string blocks = vector_block(layer.vector_mask) + placed_blocks(layer) + (layer.shape != nullptr ? shape_blocks(*layer.shape) : std::string()) +
-                                   pattern_blocks(layer);  // (patterns@1, PC4 E3)
+                                   pattern_blocks(layer) +  // (patterns@1, PC4 E3)
+                                   style_blocks();          // (layer-styles@1, PC4 E6)
         const Image rgba = layer.image.mode() == "RGBA" ? std::move(layer.image) : layer.image.convert("RGBA");
         if (ink_) {  // (its colours by the page's rules)
             add_inks(layer.name, render::ink_picture(rgba, *ink_).values, ink_->space, ink_->depth, layer.settings ? layer.opacity : 1.0,
@@ -607,7 +648,16 @@ private:
         put_u8(records_, 0);
         std::string extra = mask_data;
         const core::Layer* keep = std::exchange(keep_, nullptr);  // (psd-keep@1, PC4 F-d: its blending ranges and blocks kept)
-        const std::string ranges = keep != nullptr ? kept_ranges(*keep) : std::string();
+        const core::Layer* styled = std::exchange(style_, nullptr);  // (layer-styles@1, PC4 E6: its Blend If)
+        const core::Json* blend_if = styled != nullptr ? core::get(*styled->style, "blend_if") : nullptr;
+        // (the ranges the file had, as they were, while they say the style's Blend If — Photoshop may write more channels'
+        // pairs than this writer does —; else the style's)
+        std::string ranges = keep != nullptr ? kept_ranges(*keep) : std::string();
+        if (styled != nullptr) {
+            const core::Json now = blend_if != nullptr ? *blend_if : core::Json::array();
+            if (ranges.empty() || !core::same_json_unordered(render::psd_effects::blend_if_of(ranges, channel_names()), now))
+                ranges = blend_if != nullptr ? render::psd_effects::ranges_of(*blend_if, channel_names()) : std::string();
+        }
         put_u32(extra, u32_of(ranges.size()));
         extra += ranges;
         extra += pascal(name) + unicode_name(name) + blocks;
@@ -698,6 +748,15 @@ private:
     // (the page's PSD: its version, mode and depth, when it keeps them)
     const core::PsdFrom* page_from() const { return page_ != nullptr && page_->native_psd && page_->native_psd->from ? &*page_->native_psd->from : nullptr; }
 
+    // (PC4 E6) the colour channels of the file written, as Blend If names them
+    std::vector<std::string> channel_names() const {
+        if (!ink_) return {"red", "green", "blue"};
+        if (ink_->space == core::InkSpace::Cmyk) return {"cyan", "magenta", "yellow", "black"};
+        if (ink_->space == core::InkSpace::Lab) return {"lightness", "a", "b"};
+        if (ink_->space == core::InkSpace::Gray) return {"gray"};
+        return std::vector<std::string>(core::colour_channels(ink_->space), "-");
+    }
+
     // Its blending ranges as kept, when they are ranges of this file's channels: read from a file of the mode written (its
     // page says so: its native_psd's `from`), the composite's and each colour's at least (a file of another mode's are not
     // written: their channels are other ones).
@@ -782,6 +841,7 @@ private:
 
     bool psb_ = false;
     const core::Layer* keep_ = nullptr;  // (the next record's layer and what it keeps: note_keep)
+    const core::Layer* style_ = nullptr;  // (the next record's layer and its style: note_style)
     std::set<std::string> kept_layers_;  // (the layers whose kept blocks are written)
     std::set<std::int64_t> used_ids_;    // (the layer ids written)
 
@@ -1540,10 +1600,19 @@ std::string latin1_bytes(const std::string& text) {
 // The page's resources (`sized_resources`: their length and blocks) and after them the image resources the page keeps
 // from its PSD — layer comps and slices while their layers are there —, their length again.
 std::string with_kept(const std::string& sized_resources, const core::Page& page, const core::Document& doc) {
-    if (!page.native_psd || page.native_psd->resources.empty()) return sized_resources;
+    // (layer-styles@1, PC4 E6: a page with a layer's style says the book's global light — 1037 its angle, 1049 its
+    // altitude —, in place of the ones its PSD had)
+    const bool styled = std::any_of(page.layers.begin(), page.layers.end(), [](const core::Layer& l) { return l.style.has_value(); });
+    if (!styled && (!page.native_psd || page.native_psd->resources.empty())) return sized_resources;
     const bool layers_there = kept_layers_there(page);
     std::string blocks = sized_resources.substr(4);
-    for (const core::PsdResource& r : page.native_psd->resources) {
+    if (styled) {
+        const std::array<double, 2> light = core::global_light(doc);
+        blocks += image_resource(1037, render::psd_effects::light_resource(light[0]));
+        blocks += image_resource(1049, render::psd_effects::light_resource(light[1]));
+    }
+    for (const core::PsdResource& r : page.native_psd ? page.native_psd->resources : std::vector<core::PsdResource>{}) {
+        if (styled && (r.id == 1037 || r.id == 1049)) continue;
         if (core::psd_resource_names_layers(r.id) && !layers_there) continue;
         const core::Bytes data = kept_psd_file(doc, r.ref);
         if (!data) continue;

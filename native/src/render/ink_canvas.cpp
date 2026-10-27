@@ -286,6 +286,48 @@ const core::PageColor& InkCanvas::color() const { return impl_->color; }
 Size InkCanvas::size() const { return impl_->size; }
 unsigned InkCanvas::channels() const { return impl_->n; }
 
+void InkCanvas::styled(const Box& part, bool clip, const std::vector<float>& own,
+                       const std::function<void(std::vector<float>&, const std::vector<float>&)>& run) {
+    const Size s = impl_->size;
+    if (part.x0 < 0 || part.y0 < 0 || part.x1 > s.width || part.y1 > s.height || part.width() <= 0 || part.height() <= 0)
+        throw core::Error("value", "the ink canvas part does not match");
+    const std::size_t count = std::size_t(part.width()) * part.height();
+    if (own.size() != count) throw core::Error("value", "the styled ink layer does not match the canvas");
+    const unsigned n = impl_->n, st = impl_->stride;
+    std::vector<float> values(count * (n + 1)), weight(count, 1.0f);
+    for (int y = 0; y < part.height(); ++y) {
+        for (int x = 0; x < part.width(); ++x) {
+            const std::size_t i = std::size_t(y) * part.width() + x;
+            const double* p = impl_->px.data() + (std::size_t(y + part.y0) * s.width + x + part.x0) * st;
+            for (unsigned c = 0; c <= n; ++c) values[i * (n + 1) + c] = static_cast<float>(p[c]);
+            if (clip && impl_->previous) weight[i] = static_cast<float>(p[n + 1]);
+        }
+    }
+    run(values, weight);
+    for (int y = 0; y < part.height(); ++y) {
+        for (int x = 0; x < part.width(); ++x) {
+            const std::size_t i = std::size_t(y) * part.width() + x;
+            double* p = impl_->px.data() + (std::size_t(y + part.y0) * s.width + x + part.x0) * st;
+            for (unsigned c = 0; c <= n; ++c) {
+                const double v = values[i * (n + 1) + c];
+                if (!std::isfinite(v)) throw core::Error("value", "the ink composite exceeds the finite working range");
+                p[c] = c < n && !impl_->hdr ? std::clamp(v, 0.0, 1.0) : v;
+            }
+            p[n + 1] = own[i];
+        }
+    }
+}
+
+void InkCanvas::styled_done() { impl_->previous = true; }
+
+void ink_blend(core::InkSpace space, unsigned n, std::string_view mode, const double* below, const double* above, double* out) {
+    if (mode.empty() || mode == "normal") {
+        for (unsigned c = 0; c < n; ++c) out[c] = above[c];
+        return;
+    }
+    mix(space, n, mode, below, above, out);
+}
+
 bool InkCanvas::supports_blend(std::string_view mode) const {
     if (impl_->color.space == InkSpace::Lab) return core::lab_blend(mode);
     if (impl_->color.space == InkSpace::Multi && !core::multi_blend(mode)) return false;

@@ -236,6 +236,10 @@ struct Layer {
     bool lock_position = false;
     // PC4 (psd-keep@1, core/psd_keep.hpp): what a PSD's layer held that this build does not read, written back with it
     std::optional<PsdLayerKeep> native_psd;
+    // PC4 E6 (layer-styles@1, core/layer_styles.hpp): its layer style — Photoshop's effects (shadows, glows, bevel and
+    // emboss, satin, the overlays, the stroke), its fill opacity and Blend If — in its normal form (none: no style, as every
+    // layer before it)
+    std::optional<Json> style;
 
     std::size_t stroke_count() const { return strokes ? strokes->items.size() : 0; }
 };
@@ -481,6 +485,9 @@ struct Document {
     // their asset ref (written with the suffix their kind takes: core::pattern_suffix).
     std::vector<Pattern> patterns;
     std::map<std::string, Bytes> pattern_files;
+    // PC4 E6 (layer-styles@1, core/layer_styles.hpp): 包括光源 — the angle and altitude (degrees) of the light its layer
+    // styles' effects take when they use the global light (none: Photoshop's 120° and 30°)
+    std::optional<std::array<double, 2>> global_light;
     // PC2a (adjustments@1): the 3D lookup tables its color_lookup corrections use (their "lut"), by their asset ref
     // (core/lut3d: GKLU bytes). Written as assets/<ab>/<64 hex>.gklut; only those a correction uses are written and read.
     std::map<std::string, Bytes> luts;

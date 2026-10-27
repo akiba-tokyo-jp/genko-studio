@@ -208,8 +208,8 @@ private slots:
     }
 
     // PC4 F-d (SPEC.md FILE-01「PSD・PSB」): 開く… opens a PSD as a book of its layers in memory (the file never written;
-    // 開く…'s filter lists Photoshop's files), its layer of effects marked in the layer panel (its tip: Photoshop draws
-    // them), what it keeps written back by コピーを保存… as a PSB (はい: its layers); a PSD of a page too large for one is
+    // 開く…'s filter lists Photoshop's files), its layer of effects marked 「fx」 in the layer panel (PC4 E6: read as its
+    // layer style, drawn here), what it keeps written back by コピーを保存… as a PSB (はい: its layers); a PSD of a page too large for one is
     // refused in Japanese words that say to write a PSB.
     void aPsdOpensAsABookOfItsLayers() {
         Desk d;
@@ -225,12 +225,13 @@ private slots:
         QCOMPARE(page.layers.size(), std::size_t{3});
         QVERIFY(page.native_psd && page.native_source && page.native_source->format == "psd");
         auto* panel = d.window->layer_panel();
+        // (PC4 E6, layer-styles@1: the layer's effects (lfx2) are read as its layer style, drawn by this build — marked
+        // 「fx」 as Photoshop's panel; 「効果（PSD）」 is left for effects that could not become a style, and keep.psd has none)
         bool marked = false;
         for (int row = 0; row < panel->list()->count(); ++row) {
             const QListWidgetItem* item = panel->list()->item(row);
-            if (!item->text().contains(QStringLiteral("効果（PSD）"))) continue;
-            marked = true;
-            QVERIFY2(item->toolTip().contains(QStringLiteral("Photoshop が描きます")), qPrintable(item->toolTip()));
+            QVERIFY2(!item->text().contains(QStringLiteral("効果（PSD）")), qPrintable(item->text()));
+            if (item->text().contains(QStringLiteral("fx"))) marked = true;
         }
         QVERIFY(marked);
         // コピーを保存… as a PSB: its layers, what it keeps

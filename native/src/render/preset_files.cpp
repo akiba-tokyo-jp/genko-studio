@@ -20,6 +20,8 @@
 #include "render/pattern_library.hpp"
 #include "render/preset_store.hpp"
 #include "render/shape_presets.hpp"
+#include "core/layer_styles.hpp"
+#include "render/style_presets.hpp"
 #include "render/tool_presets.hpp"
 #include "storage/asset_store.hpp"
 #include "storage/fsutil.hpp"
@@ -37,7 +39,7 @@ struct Collection {
     std::set<std::string> kinds;
     std::vector<std::pair<std::string, std::vector<std::pair<std::string, Json>>>> brushes;  // (group: its brushes' keys and settings)
     std::map<std::string, core::Bytes> brush_pictures;
-    std::vector<store::Group> gradients, patterns, tool_presets;
+    std::vector<store::Group> gradients, patterns, tool_presets, styles;  // (styles: PC4 E6)
     std::map<std::string, core::Bytes> pattern_pictures;
     std::vector<shape_presets::Group> shapes;
 };
@@ -46,7 +48,7 @@ std::vector<std::string> asked(const std::vector<std::string>& wanted) {
     if (wanted.empty()) return kinds();
     for (const std::string& k : wanted) {
         if (std::find(kinds().begin(), kinds().end(), k) == kinds().end()) {
-            throw core::Error("value", "the kinds of presets are brushes, gradients, patterns, shapes and tool_presets (not " + k + ")");
+            throw core::Error("value", "the kinds of presets are brushes, gradients, patterns, shapes, tool_presets and styles (not " + k + ")");
         }
     }
     return wanted;
@@ -61,13 +63,15 @@ const store::Kind& store_kind(const std::string& kind) {
     if (kind == "gradients") return gradient_presets::kind();
     if (kind == "patterns") return pattern_library::kind();
     if (kind == "tool_presets") return tool_presets::kind();
-    throw core::Error("value", "the kinds of presets are brushes, gradients, patterns, shapes and tool_presets (not " + kind + ")");
+    if (kind == "styles") return style_presets::kind();  // (PC4 E6)
+    throw core::Error("value", "the kinds of presets are brushes, gradients, patterns, shapes, tool_presets and styles (not " + kind + ")");
 }
 
 // (what each kind is called on the screen: the one table — kinds() is its keys)
 const std::vector<std::pair<std::string, std::string>>& kind_table() {
     static const std::vector<std::pair<std::string, std::string>> t{
-        {"brushes", "ブラシ"}, {"gradients", "グラデーション"}, {"patterns", "パターン"}, {"shapes", "シェイプ"}, {"tool_presets", "ツールプリセット"}};
+        {"brushes", "ブラシ"}, {"gradients", "グラデーション"}, {"patterns", "パターン"}, {"shapes", "シェイプ"}, {"tool_presets", "ツールプリセット"},
+        {"styles", "スタイル"}};  // (PC4 E6: スタイル, render/style_presets)
     return t;
 }
 
@@ -121,13 +125,13 @@ Collection from_folder(const std::filesystem::path& dir, const std::vector<std::
             c.brushes.emplace_back(g.name, std::move(items));
         }
     }
-    for (const char* kind : {"gradients", "tool_presets"}) {
+    for (const char* kind : {"gradients", "tool_presets", "styles"}) {
         if (!wants(kinds_asked, kind)) continue;
         c.kinds.insert(kind);
         const store::Library lib = store::load(dir, store_kind(kind));
         if (!lib.problem.empty()) throw core::Error("io", lib.problem);
         if (!lib.from_file && !builtins) continue;
-        (std::string(kind) == "gradients" ? c.gradients : c.tool_presets) = lib.groups;
+        (std::string(kind) == "gradients" ? c.gradients : std::string(kind) == "styles" ? c.styles : c.tool_presets) = lib.groups;
     }
     if (wants(kinds_asked, "patterns")) {
         c.kinds.insert("patterns");
@@ -228,6 +232,7 @@ Json to_json(const Collection& c) {
         out["shapes"] = std::move(groups);
     }
     if (c.kinds.contains("tool_presets")) out["tool_presets"] = groups_json(c.tool_presets);
+    if (c.kinds.contains("styles")) out["styles"] = groups_json(c.styles);
     return out;
 }
 
@@ -287,6 +292,10 @@ Collection from_json(const Json& data, const std::vector<std::string>& kinds_ask
     if (wants(kinds_asked, "tool_presets") && data.contains("tool_presets")) {
         c.kinds.insert("tool_presets");
         c.tool_presets = groups_of(data["tool_presets"], "tool_presets");
+    }
+    if (wants(kinds_asked, "styles") && data.contains("styles")) {  // (PC4 E6)
+        c.kinds.insert("styles");
+        c.styles = groups_of(data["styles"], "styles");
     }
     return c;
 }
@@ -375,10 +384,10 @@ Json merge(const std::filesystem::path& config_dir, const Collection& c, bool wh
         }
         added["brushes"] = n;
     }
-    for (const char* kind : {"gradients", "tool_presets", "patterns"}) {
+    for (const char* kind : {"gradients", "tool_presets", "styles", "patterns"}) {
         if (!c.kinds.contains(kind)) continue;
         const std::string k = kind;
-        const std::vector<store::Group>& source = k == "gradients" ? c.gradients : k == "patterns" ? c.patterns : c.tool_presets;
+        const std::vector<store::Group>& source = k == "gradients" ? c.gradients : k == "patterns" ? c.patterns : k == "styles" ? c.styles : c.tool_presets;
         store::Library lib = k == "patterns" ? pattern_library::load(config_dir) : store::load(config_dir, store_kind(k));
         if (!lib.problem.empty()) throw core::Error("io", lib.problem);
         std::int64_t n = 0;
@@ -390,7 +399,8 @@ Json merge(const std::filesystem::path& config_dir, const Collection& c, bool wh
             std::vector<Json> items;
             for (const Json& item : g.items) {
                 const bool held = std::any_of(lib.groups.begin(), lib.groups.end(), [&](const store::Group& have) {
-                    return std::find(have.items.begin(), have.items.end(), item) != have.items.end();
+                    // (PC4 E6: the same presets whatever the order of their keys — the file is written with them sorted)
+                    return std::any_of(have.items.begin(), have.items.end(), [&](const Json& x) { return core::same_json_unordered(x, item); });
                 });
                 if (!whole && held) continue;
                 items.push_back(item);
@@ -413,11 +423,13 @@ Json merge(const std::filesystem::path& config_dir, const Collection& c, bool wh
                 for (const Json& item : items) {
                     try {
                         if (store_kind(k).check) store_kind(k).check(item);
-                        kept.push_back(item);
+                        // (PC4 E6: a style in its normal form — its keys in the order the library writes them)
+                        kept.push_back(k == "styles" ? style_presets::item_of(item, item.value("name", std::string("スタイル"))) : item);
                     } catch (const core::Error&) {
                     }
                 }
-                if (!kept.empty() || whole) store::add_many(lib.groups, store_kind(k), kept, g.name, k == "gradients" ? "グラデーション" : "ツールプリセット");
+                if (!kept.empty() || whole)
+                    store::add_many(lib.groups, store_kind(k), kept, g.name, k == "gradients" ? "グラデーション" : k == "styles" ? "スタイル" : "ツールプリセット");
                 n += static_cast<std::int64_t>(kept.size());
             }
         }
@@ -554,6 +566,7 @@ std::string export_text(const std::filesystem::path& config_dir, const std::vect
             (*counts)["shapes"] = n;
         }
         if (c.kinds.contains("tool_presets")) (*counts)["tool_presets"] = items(c.tool_presets);
+        if (c.kinds.contains("styles")) (*counts)["styles"] = items(c.styles);
     }
     core::DumpOptions options;
     options.indent = 1;

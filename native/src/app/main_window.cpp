@@ -680,7 +680,8 @@ bool MainWindow::apply_ops(const Json& ops, const std::vector<std::string>& ids)
         {"trace_prims", QStringLiteral("3D を線にしています…")},          {"add_cover", QStringLiteral("表紙を作っています…")},
         {"add_scene", QStringLiteral("3D の背景を置いています…")},        {"add_prim3d", QStringLiteral("3D を置いています…")},
         {"pose_figure", QStringLiteral("3D のポーズを変えています…")},    {"pose_mannequin", QStringLiteral("3D のポーズを変えています…")},
-        {"import_pages", QStringLiteral("ページを取り込んでいます…")},       {"smart_place", QStringLiteral("スマートオブジェクトを置いています…")}};
+        {"import_pages", QStringLiteral("ページを取り込んでいます…")},       {"smart_place", QStringLiteral("スマートオブジェクトを置いています…")},
+        {"layer_style_to_layers", QStringLiteral("レイヤースタイルをレイヤーにしています…")}};  // (PC4 E6 review P3-6)
     struct Busy {
         bool on = false;
         ~Busy() {

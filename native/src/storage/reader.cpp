@@ -32,6 +32,7 @@
 #include "core/psd_keep.hpp"
 #include "core/brush_dabs.hpp"
 #include "core/patterns.hpp"
+#include "core/layer_styles.hpp"
 #include "storage/asset_store.hpp"
 #include "storage/fsutil.hpp"
 
@@ -45,7 +46,7 @@ using core::Point;
 
 namespace {
 
-constexpr std::array<std::string_view, 24> kTopKeys{
+constexpr std::array<std::string_view, 25> kTopKeys{
     "version", "revision", "title", "episode", "binding", "start_side", "strict_gates", "autosave",
     "font_path", "page_locks", "brush", "nombre", "spec", "bible", "tickets", "studio", "pages", "story",
     // v4
@@ -53,7 +54,9 @@ constexpr std::array<std::string_view, 24> kTopKeys{
     // smart-objects@1
     "smart_contents",
     // patterns@1 (PC4)
-    "patterns"};
+    "patterns",
+    // layer-styles@1 (PC4 E6)
+    "global_light"};
 
 constexpr std::array<std::string_view, 21> kPageKeys{
     "id", "art_ok", "plan", "index", "note", "name_ok", "stage", "spread_with", "numero", "onion_from", "lt_threshold",
@@ -77,7 +80,7 @@ constexpr std::array<std::string_view, 20> kLineKeys{"id", "page_index", "text",
                                                      "x_mm", "y_mm", "w_mm", "h_mm", "balloon", "tail", "wrap",
                                                      "ruby_runs", "ruby_spans", "path", "emphasis_runs", "style_runs",
                                                      "style", "tails"};
-constexpr std::array<std::string_view, 50> kLayerKeys{
+constexpr std::array<std::string_view, 51> kLayerKeys{
     "id", "role", "kind", "visible", "exportable", "strokes", "raster_relpath", "fill_rgb", "lpi", "density",
     "region", "opacity", "material_id", "angle", "title", "blend", "clip", "lock_alpha", "locked", "panel_clip",
     "panel_each", "patches", "tone", "parent_id", "asset", "mask", "color", "reference", "fill", "adjust", "effect",
@@ -89,7 +92,9 @@ constexpr std::array<std::string_view, 50> kLayerKeys{
     // PC3 (pen-shapes@1, vector@1, transform@1)
     "shapes_blob", "shape_count", "vector_mask", "link", "lock_position",
     // PC4 (psd-keep@1)
-    "native_psd"};
+    "native_psd",
+    // PC4 E6 (layer-styles@1)
+    "style"};
 constexpr std::array<std::string_view, 5> kPlacedOnlyKeys{"frame_id", "placement_mm", "fit", "clip_to", "finish"};
 constexpr std::array<std::string_view, 5> kMaskKeys{"enabled", "asset",
                                                     // masks@1 (PC3)
@@ -1146,6 +1151,12 @@ core::Layer Reader::read_layer(const Json& data, const std::string& at) {
     layer.adjust = dict_if_dict(data, "adjust");
     if (layer.adjust) read_lut(*layer.adjust, at_key(at, "adjust"));
     layer.effect = dict_if_dict(data, "effect");
+    // (layer-styles@1, PC4 E6: its style as the writer writes it — in its normal form —; one that is not, the book
+    // read-only: core::validate_layer_styles below)
+    if (const Json* style = find(data, "style"); style != nullptr && !style->is_null()) {
+        // (a snapshot of the history holds its keys sorted: in the order the writer writes them again)
+        layer.style = core::layer_style_normal(*style) ? core::layer_style_spec(*style) : *style;
+    }
     layer.color_prints = to_bool(data, "color_prints", false);
     layer.screen = dict_if_dict(data, "screen");
     layer.source = dict_if_dict(data, "source");
@@ -1533,6 +1544,16 @@ core::Document Reader::migrate(const Json& payload) {
         read_brush_tips(doc);
     }
     read_patterns(payload, doc);
+    // (layer-styles@1, PC4 E6: the book's global light; one that cannot be read, the book read-only)
+    if (const Json* light = find(payload, "global_light"); light != nullptr && !light->is_null()) {
+        try {
+            const std::array<double, 2> values = core::global_light_of(*light);
+            if (!core::same_json_unordered(*light, core::global_light_json(values))) throw core::Error("value", "the global light is not as the writer writes it");
+            doc.global_light = values;
+        } catch (const core::Error& error) {
+            issue("broken_value", "/global_light", {}, error.what());
+        }
+    }
     doc.nombre = dict_or_empty(payload, "nombre");
     if (const Json* bible = find(payload, "bible"); bible && core::py_truthy(*bible)) {
         if (!bible->is_object()) format_error("/bible", "the bible must be an object, not " + core::py_repr(*bible));
@@ -1649,6 +1670,9 @@ core::Document Reader::migrate(const Json& payload) {
     catch (const core::Error& error) { issue("broken_value", "/brush", {}, error.what()); }
     try { core::validate_patterns(doc); }
     catch (const core::Error& error) { issue("broken_value", "/patterns", {}, error.what()); }
+    // (PC4 E6: layer-styles@1's styles, each in its normal form on a layer that takes one)
+    try { core::validate_layer_styles(doc); }
+    catch (const core::Error& error) { issue("broken_value", "/pages", {}, error.what()); }
     return doc;
 }
 
@@ -1892,7 +1916,9 @@ bool is_known_feature(std::string_view feature) {
            // PC4 E-0 (core/brush_dabs.hpp, core/patterns.hpp)
            feature == core::kBrushesFeature || feature == core::kPatternsFeature ||
            // PC4 節 D (core/filter_kinds.hpp, core/vanishing.hpp)
-           feature == core::kFiltersFeature || feature == core::kVanishingFeature;
+           feature == core::kFiltersFeature || feature == core::kVanishingFeature ||
+           // PC4 E6 (core/layer_styles.hpp)
+           feature == core::kLayerStylesFeature;
 }
 
 int project_version(const Json& payload) {

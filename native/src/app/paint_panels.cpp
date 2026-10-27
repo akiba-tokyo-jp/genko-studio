@@ -101,7 +101,6 @@ QDockWidget* MainWindow::paint_dock(const QString& title, const char* name, cons
 }
 
 void MainWindow::build_paint_docks() {
-    const QString soon = QStringLiteral("（準備中）");
     QDockWidget* settings_dock = paint_dock(QStringLiteral("ブラシ設定"), "brush_settings_panel",
                                             QStringLiteral("ブラシ先端のシェイプ・散布・テクスチャ・デュアルブラシなど、ブラシの細かい設定"));
     settings_dock->toggleViewAction()->setShortcut(QKeySequence(QStringLiteral("F5")));  // (Photoshop's ブラシ設定)
@@ -117,7 +116,8 @@ void MainWindow::build_paint_docks() {
     connect(patterns_dock_, &QDockWidget::visibilityChanged, this, [this](bool shown) {
         if (shown) patterns_panel_->refresh();
     });
-    paint_dock(QStringLiteral("スタイル"), "styles_panel", QStringLiteral("レイヤースタイルのプリセット") + soon);
+    // (PC4 E6: the スタイル panel — the styles of this machine, app/styles_panel.cpp — in the dock E-0 made)
+    build_styles_dock(paint_dock(QStringLiteral("スタイル"), "styles_panel_frame", QStringLiteral("レイヤースタイルのプリセット")));
     QDockWidget* tools_dock = paint_dock(QStringLiteral("ツールプリセット"), "tool_presets_panel", QStringLiteral("道具と設定をまとめたプリセット"));
     // (PC4 E2: the ブラシ設定, ブラシ and ツールプリセット panels in these docks — main_window_brush_presets.cpp)
     build_brush_preset_docks(settings_dock, brushes_dock, tools_dock);

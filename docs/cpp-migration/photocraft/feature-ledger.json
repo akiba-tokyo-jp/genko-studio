@@ -19982,9 +19982,18 @@
         "alternate_menus": []
       },
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "未着手",
+      "implementation_status": "実装済み（PC4 E6、未統合）",
       "acceptance_status": "未実施",
-      "evidence": [],
+      "evidence": [
+        "native/src/core/layer_styles.cpp",
+        "native/src/render/layer_styles.cpp",
+        "native/src/render/ops_layer_styles.cpp",
+        "native/src/render/psd_effects.cpp",
+        "native/src/app/layer_style_dialog.cpp",
+        "native/src/app/main_window_styles.cpp",
+        "native/tests/unit/test_layer_styles.cpp",
+        "native/tests/gui/test_gui_styles.cpp"
+      ],
       "pc0": {
         "date": "2026-10-16",
         "cpp_base": "962faa4",
@@ -20025,9 +20034,18 @@
         "alternate_menus": []
       },
       "genko_status": "一部（2026-10-16 照合）",
-      "implementation_status": "未着手",
+      "implementation_status": "実装済み（PC4 E6、未統合）",
       "acceptance_status": "未実施",
-      "evidence": [],
+      "evidence": [
+        "native/src/core/layer_styles.cpp",
+        "native/src/render/layer_styles.cpp",
+        "native/src/render/ops_layer_styles.cpp",
+        "native/src/render/psd_effects.cpp",
+        "native/src/app/layer_style_dialog.cpp",
+        "native/src/app/main_window_styles.cpp",
+        "native/tests/unit/test_layer_styles.cpp",
+        "native/tests/gui/test_gui_styles.cpp"
+      ],
       "pc0": {
         "date": "2026-10-16",
         "cpp_base": "962faa4",
@@ -20076,9 +20094,14 @@
         "alternate_menus": []
       },
       "genko_status": "同等（C++ のソースと試験あり。2026-10-16 照合）",
-      "implementation_status": "未着手",
+      "implementation_status": "実装済み（PC4 E6、未統合）",
       "acceptance_status": "未実施",
-      "evidence": [],
+      "evidence": [
+        "native/src/render/ops_layer_styles.cpp",
+        "native/src/app/main_window_styles.cpp",
+        "native/tests/unit/test_layer_styles.cpp",
+        "native/tests/gui/test_gui_styles.cpp"
+      ],
       "pc0": {
         "date": "2026-10-16",
         "cpp_base": "962faa4",
@@ -20125,9 +20148,18 @@
         "alternate_menus": []
       },
       "genko_status": "一部（2026-10-16 照合）",
-      "implementation_status": "未着手",
+      "implementation_status": "実装済み（PC4 E6、未統合）",
       "acceptance_status": "未実施",
-      "evidence": [],
+      "evidence": [
+        "native/src/core/layer_styles.cpp",
+        "native/src/render/layer_styles.cpp",
+        "native/src/render/ops_layer_styles.cpp",
+        "native/src/render/psd_effects.cpp",
+        "native/src/app/layer_style_dialog.cpp",
+        "native/src/app/main_window_styles.cpp",
+        "native/tests/unit/test_layer_styles.cpp",
+        "native/tests/gui/test_gui_styles.cpp"
+      ],
       "pc0": {
         "date": "2026-10-16",
         "cpp_base": "962faa4",
@@ -20177,9 +20209,14 @@
         "alternate_menus": []
       },
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "未着手",
+      "implementation_status": "実装済み（PC4 E6、未統合）",
       "acceptance_status": "未実施",
-      "evidence": [],
+      "evidence": [
+        "native/src/render/ops_layer_styles.cpp",
+        "native/src/app/main_window_styles.cpp",
+        "native/tests/unit/test_layer_styles.cpp",
+        "native/tests/gui/test_gui_styles.cpp"
+      ],
       "pc0": {
         "date": "2026-10-16",
         "cpp_base": "962faa4",
@@ -20222,9 +20259,14 @@
         "alternate_menus": []
       },
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "未着手",
+      "implementation_status": "実装済み（PC4 E6、未統合）",
       "acceptance_status": "未実施",
-      "evidence": [],
+      "evidence": [
+        "native/src/render/ops_layer_styles.cpp",
+        "native/src/app/main_window_styles.cpp",
+        "native/tests/unit/test_layer_styles.cpp",
+        "native/tests/gui/test_gui_styles.cpp"
+      ],
       "pc0": {
         "date": "2026-10-16",
         "cpp_base": "962faa4",
@@ -20265,9 +20307,18 @@
         "alternate_menus": []
       },
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "未着手",
+      "implementation_status": "実装済み（PC4 E6、未統合）",
       "acceptance_status": "未実施",
-      "evidence": [],
+      "evidence": [
+        "native/src/core/layer_styles.cpp",
+        "native/src/render/layer_styles.cpp",
+        "native/src/render/ops_layer_styles.cpp",
+        "native/src/render/psd_effects.cpp",
+        "native/src/app/layer_style_dialog.cpp",
+        "native/src/app/main_window_styles.cpp",
+        "native/tests/unit/test_layer_styles.cpp",
+        "native/tests/gui/test_gui_styles.cpp"
+      ],
       "pc0": {
         "date": "2026-10-16",
         "cpp_base": "962faa4",
@@ -20308,9 +20359,14 @@
         "alternate_menus": []
       },
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "未着手",
+      "implementation_status": "実装済み（PC4 E6、未統合）",
       "acceptance_status": "未実施",
-      "evidence": [],
+      "evidence": [
+        "native/src/render/ops_layer_styles.cpp",
+        "native/src/app/main_window_styles.cpp",
+        "native/tests/unit/test_layer_styles.cpp",
+        "native/tests/gui/test_gui_styles.cpp"
+      ],
       "pc0": {
         "date": "2026-10-16",
         "cpp_base": "962faa4",
@@ -20351,9 +20407,18 @@
         "alternate_menus": []
       },
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "未着手",
+      "implementation_status": "実装済み（PC4 E6、未統合）",
       "acceptance_status": "未実施",
-      "evidence": [],
+      "evidence": [
+        "native/src/core/layer_styles.cpp",
+        "native/src/render/layer_styles.cpp",
+        "native/src/render/ops_layer_styles.cpp",
+        "native/src/render/psd_effects.cpp",
+        "native/src/app/layer_style_dialog.cpp",
+        "native/src/app/main_window_styles.cpp",
+        "native/tests/unit/test_layer_styles.cpp",
+        "native/tests/gui/test_gui_styles.cpp"
+      ],
       "pc0": {
         "date": "2026-10-16",
         "cpp_base": "962faa4",
@@ -20394,9 +20459,14 @@
         "alternate_menus": []
       },
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "未着手",
+      "implementation_status": "実装済み（PC4 E6、未統合）",
       "acceptance_status": "未実施",
-      "evidence": [],
+      "evidence": [
+        "native/src/render/ops_layer_styles.cpp",
+        "native/src/app/main_window_styles.cpp",
+        "native/tests/unit/test_layer_styles.cpp",
+        "native/tests/gui/test_gui_styles.cpp"
+      ],
       "pc0": {
         "date": "2026-10-16",
         "cpp_base": "962faa4",
@@ -20439,9 +20509,18 @@
         "alternate_menus": []
       },
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "未着手",
+      "implementation_status": "実装済み（PC4 E6、未統合）",
       "acceptance_status": "未実施",
-      "evidence": [],
+      "evidence": [
+        "native/src/core/layer_styles.cpp",
+        "native/src/render/layer_styles.cpp",
+        "native/src/render/ops_layer_styles.cpp",
+        "native/src/render/psd_effects.cpp",
+        "native/src/app/layer_style_dialog.cpp",
+        "native/src/app/main_window_styles.cpp",
+        "native/tests/unit/test_layer_styles.cpp",
+        "native/tests/gui/test_gui_styles.cpp"
+      ],
       "pc0": {
         "date": "2026-10-16",
         "cpp_base": "962faa4",
@@ -20482,9 +20561,18 @@
         "alternate_menus": []
       },
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "未着手",
+      "implementation_status": "実装済み（PC4 E6、未統合）",
       "acceptance_status": "未実施",
-      "evidence": [],
+      "evidence": [
+        "native/src/core/layer_styles.cpp",
+        "native/src/render/layer_styles.cpp",
+        "native/src/render/ops_layer_styles.cpp",
+        "native/src/render/psd_effects.cpp",
+        "native/src/app/layer_style_dialog.cpp",
+        "native/src/app/main_window_styles.cpp",
+        "native/tests/unit/test_layer_styles.cpp",
+        "native/tests/gui/test_gui_styles.cpp"
+      ],
       "pc0": {
         "date": "2026-10-16",
         "cpp_base": "962faa4",
@@ -20525,9 +20613,18 @@
         "alternate_menus": []
       },
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "未着手",
+      "implementation_status": "実装済み（PC4 E6、未統合）",
       "acceptance_status": "未実施",
-      "evidence": [],
+      "evidence": [
+        "native/src/core/layer_styles.cpp",
+        "native/src/render/layer_styles.cpp",
+        "native/src/render/ops_layer_styles.cpp",
+        "native/src/render/psd_effects.cpp",
+        "native/src/app/layer_style_dialog.cpp",
+        "native/src/app/main_window_styles.cpp",
+        "native/tests/unit/test_layer_styles.cpp",
+        "native/tests/gui/test_gui_styles.cpp"
+      ],
       "pc0": {
         "date": "2026-10-16",
         "cpp_base": "962faa4",
@@ -20568,9 +20665,14 @@
         "alternate_menus": []
       },
       "genko_status": "一部（2026-10-16 照合）",
-      "implementation_status": "未着手",
+      "implementation_status": "実装済み（PC4 E6、未統合）",
       "acceptance_status": "未実施",
-      "evidence": [],
+      "evidence": [
+        "native/src/render/ops_layer_styles.cpp",
+        "native/src/app/main_window_styles.cpp",
+        "native/tests/unit/test_layer_styles.cpp",
+        "native/tests/gui/test_gui_styles.cpp"
+      ],
       "pc0": {
         "date": "2026-10-16",
         "cpp_base": "962faa4",
@@ -20615,9 +20717,18 @@
         "alternate_menus": []
       },
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "未着手",
+      "implementation_status": "実装済み（PC4 E6、未統合）",
       "acceptance_status": "未実施",
-      "evidence": [],
+      "evidence": [
+        "native/src/core/layer_styles.cpp",
+        "native/src/render/layer_styles.cpp",
+        "native/src/render/ops_layer_styles.cpp",
+        "native/src/render/psd_effects.cpp",
+        "native/src/app/layer_style_dialog.cpp",
+        "native/src/app/main_window_styles.cpp",
+        "native/tests/unit/test_layer_styles.cpp",
+        "native/tests/gui/test_gui_styles.cpp"
+      ],
       "pc0": {
         "date": "2026-10-16",
         "cpp_base": "962faa4",
@@ -20658,9 +20769,18 @@
         "alternate_menus": []
       },
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "未着手",
+      "implementation_status": "実装済み（PC4 E6、未統合）",
       "acceptance_status": "未実施",
-      "evidence": [],
+      "evidence": [
+        "native/src/core/layer_styles.cpp",
+        "native/src/render/layer_styles.cpp",
+        "native/src/render/ops_layer_styles.cpp",
+        "native/src/render/psd_effects.cpp",
+        "native/src/app/layer_style_dialog.cpp",
+        "native/src/app/main_window_styles.cpp",
+        "native/tests/unit/test_layer_styles.cpp",
+        "native/tests/gui/test_gui_styles.cpp"
+      ],
       "pc0": {
         "date": "2026-10-16",
         "cpp_base": "962faa4",
@@ -20701,9 +20821,14 @@
         "alternate_menus": []
       },
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "未着手",
+      "implementation_status": "実装済み（PC4 E6、未統合）",
       "acceptance_status": "未実施",
-      "evidence": [],
+      "evidence": [
+        "native/src/render/ops_layer_styles.cpp",
+        "native/src/app/main_window_styles.cpp",
+        "native/tests/unit/test_layer_styles.cpp",
+        "native/tests/gui/test_gui_styles.cpp"
+      ],
       "pc0": {
         "date": "2026-10-16",
         "cpp_base": "962faa4",
@@ -20729,9 +20854,14 @@
       },
       "upstream_menu": null,
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "未着手",
+      "implementation_status": "実装済み（PC4 E6、未統合）",
       "acceptance_status": "未実施",
-      "evidence": [],
+      "evidence": [
+        "native/src/render/ops_layer_styles.cpp",
+        "native/src/app/main_window_styles.cpp",
+        "native/tests/unit/test_layer_styles.cpp",
+        "native/tests/gui/test_gui_styles.cpp"
+      ],
       "pc0": {
         "date": "2026-10-16",
         "cpp_base": "962faa4",
@@ -20772,9 +20902,18 @@
         "alternate_menus": []
       },
       "genko_status": "一部（2026-10-16 照合）",
-      "implementation_status": "未着手",
+      "implementation_status": "実装済み（PC4 E6、未統合）",
       "acceptance_status": "未実施",
-      "evidence": [],
+      "evidence": [
+        "native/src/core/layer_styles.cpp",
+        "native/src/render/layer_styles.cpp",
+        "native/src/render/ops_layer_styles.cpp",
+        "native/src/render/psd_effects.cpp",
+        "native/src/app/layer_style_dialog.cpp",
+        "native/src/app/main_window_styles.cpp",
+        "native/tests/unit/test_layer_styles.cpp",
+        "native/tests/gui/test_gui_styles.cpp"
+      ],
       "pc0": {
         "date": "2026-10-16",
         "cpp_base": "962faa4",
@@ -31166,9 +31305,15 @@
       },
       "upstream_menu": null,
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "未着手",
+      "implementation_status": "実装済み（PC4 E6、未統合）",
       "acceptance_status": "未実施",
-      "evidence": [],
+      "evidence": [
+        "native/src/render/style_presets.cpp",
+        "native/src/api/cli.cpp",
+        "native/tests/unit/test_style_presets.cpp",
+        "native/src/app/styles_panel.cpp",
+        "native/tests/gui/test_gui_styles.cpp"
+      ],
       "pc0": {
         "date": "2026-10-16",
         "cpp_base": "962faa4",
@@ -31194,9 +31339,15 @@
       },
       "upstream_menu": null,
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "未着手",
+      "implementation_status": "実装済み（PC4 E6、未統合）",
       "acceptance_status": "未実施",
-      "evidence": [],
+      "evidence": [
+        "native/src/render/style_presets.cpp",
+        "native/src/api/cli.cpp",
+        "native/tests/unit/test_style_presets.cpp",
+        "native/src/app/styles_panel.cpp",
+        "native/tests/gui/test_gui_styles.cpp"
+      ],
       "pc0": {
         "date": "2026-10-16",
         "cpp_base": "962faa4",
@@ -31222,9 +31373,15 @@
       },
       "upstream_menu": null,
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "未着手",
+      "implementation_status": "実装済み（PC4 E6、未統合）",
       "acceptance_status": "未実施",
-      "evidence": [],
+      "evidence": [
+        "native/src/render/style_presets.cpp",
+        "native/src/api/cli.cpp",
+        "native/tests/unit/test_style_presets.cpp",
+        "native/src/app/styles_panel.cpp",
+        "native/tests/gui/test_gui_styles.cpp"
+      ],
       "pc0": {
         "date": "2026-10-16",
         "cpp_base": "962faa4",
@@ -31250,9 +31407,15 @@
       },
       "upstream_menu": null,
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "未着手",
+      "implementation_status": "実装済み（PC4 E6、未統合）",
       "acceptance_status": "未実施",
-      "evidence": [],
+      "evidence": [
+        "native/src/render/style_presets.cpp",
+        "native/src/api/cli.cpp",
+        "native/tests/unit/test_style_presets.cpp",
+        "native/src/app/styles_panel.cpp",
+        "native/tests/gui/test_gui_styles.cpp"
+      ],
       "pc0": {
         "date": "2026-10-16",
         "cpp_base": "962faa4",
@@ -31278,9 +31441,15 @@
       },
       "upstream_menu": null,
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "未着手",
+      "implementation_status": "実装済み（PC4 E6、未統合）",
       "acceptance_status": "未実施",
-      "evidence": [],
+      "evidence": [
+        "native/src/render/style_presets.cpp",
+        "native/src/api/cli.cpp",
+        "native/tests/unit/test_style_presets.cpp",
+        "native/src/app/styles_panel.cpp",
+        "native/tests/gui/test_gui_styles.cpp"
+      ],
       "pc0": {
         "date": "2026-10-16",
         "cpp_base": "962faa4",
@@ -39228,9 +39397,14 @@
         "alternate_menus": []
       },
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "未着手",
+      "implementation_status": "実装済み（PC4 E6、未統合）",
       "acceptance_status": "未実施",
-      "evidence": [],
+      "evidence": [
+        "native/src/app/styles_panel.cpp",
+        "native/src/app/paint_panels.cpp",
+        "native/src/app/main_window_styles.cpp",
+        "native/tests/gui/test_gui_styles.cpp"
+      ],
       "pc0": {
         "date": "2026-10-16",
         "cpp_base": "962faa4",

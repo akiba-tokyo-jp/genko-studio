@@ -72,6 +72,8 @@
 #include "render/shape_presets.hpp"
 #include "render/pat.hpp"
 #include "render/pattern_library.hpp"
+#include "render/asl.hpp"
+#include "render/style_presets.hpp"
 #include "render/patterns.hpp"
 #include "render/ops_registry.hpp"
 #include "render/page.hpp"
@@ -1930,6 +1932,193 @@ int gradients_command(const QStringList& args, bool ascii) {
     return usage("genko gradients: list, new, edit, reset or import-grd");
 }
 
+// PC4 E6 (style.presets.*, SPEC.md COLOR-09「スタイル」, the C++ build's own): the layer styles of this machine (the settings
+// folder's styles.json, render/style_presets; their patterns the pattern library's) — `genko styles list [--full]`,
+// `genko styles new --style <JSON> [--name N] [--group G]`, `genko styles define <dir> --page N --layer ID [--name N]
+// [--group G] [--no-effects | --no-blending]` (新規スタイル…: a layer's effects and blending options, its patterns put
+// into the pattern library), `genko styles edit <{"action", …} JSON>`, `genko styles reset [--append]`, `genko styles
+// import-asl <file.asl> [--group G] [--keep] [--dpi D]` (a group of the file's name, put in place of one of that name
+// unless --keep; its patterns into the pattern library's group of that name; lengths the file's pixels at D dpi, 150),
+// `genko styles op <name> --page N --ids a,b [--add]` (the set_layer_style that applies it: スタイルを適用, Shift: add),
+// `genko styles thumbnail <name> [--size N] [--out <file.png>]` (the panel's swatch). The ops never read the library.
+int styles_command(const QStringList& args, bool ascii) {
+    namespace presets = render::preset_store;
+    namespace styles = render::style_presets;
+    const auto& kind = styles::kind();
+    if (args.isEmpty()) return usage("genko styles list | new | define | edit | reset | import-asl | op | thumbnail");
+    const QString what = args.front();
+    const QStringList rest = args.mid(1);
+    const fs::path dir = core::config_dir();
+    presets::Library library = presets::load(dir, kind);
+    const auto group_of = [](const Arguments& a) {
+        const auto g = a.value("--group");
+        return g ? std::optional<std::string>(g->toStdString()) : std::nullopt;
+    };
+    const auto named = [&](const std::string& name) {
+        const Json* item = presets::find(library.groups, name);
+        if (item == nullptr) throw core::Error("key", "no style named " + name);
+        return *item;
+    };
+    if (what == QLatin1String("list")) {
+        static constexpr Option kOptions[] = {{"--full", false}};
+        Arguments a;
+        if (auto error = parse_arguments(rest, kOptions, 0, "", a)) return usage("genko styles list: " + *error);
+        Json out;
+        if (a.flag("--full")) {
+            Json groups = Json::array();
+            for (const presets::Group& g : library.groups) groups.push_back(Json{{"name", g.name}, {"styles", g.items}});
+            out = Json{{"groups", std::move(groups)}};
+        } else {
+            out = styles::list(library.groups);
+        }
+        out["ok"] = true;
+        if (!library.problem.empty()) out["problem"] = library.problem;
+        print_json(out, ascii);
+        return 0;
+    }
+    if (what == QLatin1String("new")) {
+        static constexpr Option kOptions[] = {{"--style", true}, {"--name", true}, {"--group", true}};
+        Arguments a;
+        if (auto error = parse_arguments(rest, kOptions, 0, "", a)) return usage("genko styles new: " + *error);
+        const auto style = a.value("--style");
+        if (!style) return usage("genko styles new: the following arguments are required: --style");
+        const std::string name = a.value("--name").value_or(QStringLiteral("スタイル")).toStdString();
+        const Json item = styles::item_of(core::parse_python_json(style->toStdString()), name);
+        const auto group = group_of(a);
+        Json out = presets::add(library.groups, kind, item, group ? std::optional<std::string_view>(*group) : std::nullopt, "スタイル");
+        presets::save(dir, kind, library.groups);
+        out["ok"] = true;
+        print_json(out, ascii);
+        return 0;
+    }
+    if (what == QLatin1String("define")) {
+        static constexpr Option kOptions[] = {{"--page", true}, {"--layer", true}, {"--name", true}, {"--group", true}, {"--no-effects", false}, {"--no-blending", false}};
+        Arguments a;
+        if (auto error = parse_arguments(rest, kOptions, 1, "src", a)) return usage("genko styles define: " + *error);
+        std::int64_t wanted = 1;
+        if (const auto value = a.value("--page")) {
+            const auto n = int_option(*value);
+            if (!n) return usage("genko styles define: argument --page: invalid int value: " + core::py_repr_str(value->toStdString()));
+            wanted = *n;
+        }
+        const auto layer_id = a.value("--layer");
+        if (!layer_id) return usage("genko styles define: the following arguments are required: --layer");
+        const fs::path src = path_arg(a.positional[0]);
+        refuse_legacy(src);
+        const auto loaded = storage::load_document(src);
+        const core::Document& doc = loaded.document;
+        const core::Page* page = nullptr;
+        for (std::size_t i = 0; i < doc.pages.size(); ++i) {
+            if (doc.pages[i]->index == core::Num(wanted) && !doc.is_deferred(i)) page = &doc.page(i);
+        }
+        if (page == nullptr) return usage("no page " + std::to_string(wanted), 1);
+        const core::Layer* layer = nullptr;
+        for (const core::Layer& l : page->layers)
+            if (l.id == layer_id->toStdString()) layer = &l;
+        if (layer == nullptr) return usage("no layer " + layer_id->toStdString(), 1);
+        presets::Library patterns = render::pattern_library::load(dir);
+        if (!patterns.problem.empty()) throw core::Error("io", "the pattern library cannot be read: " + patterns.problem);
+        bool pattern_added = false;
+        const std::string name = a.value("--name").value_or(QString::fromStdString(layer->title.empty() ? std::string("スタイル") : layer->title)).toStdString();
+        const Json item = styles::item_of_layer(doc, *layer, !a.flag("--no-effects"), !a.flag("--no-blending"), name, dir, patterns.groups, pattern_added);
+        const auto group = group_of(a);
+        // (the styles' file checked first: a library that cannot be written gets no pattern either)
+        Json out = presets::add(library.groups, kind, item, group ? std::optional<std::string_view>(*group) : std::nullopt, "スタイル");
+        if (pattern_added) render::pattern_library::save(dir, patterns.groups);
+        presets::save(dir, kind, library.groups);
+        out["ok"] = true;
+        out["effects"] = item["effects"].size();
+        print_json(out, ascii);
+        return 0;
+    }
+    if (what == QLatin1String("edit")) {
+        Arguments a;
+        if (auto error = parse_arguments(rest, {}, 1, "edit", a)) return usage("genko styles edit: " + *error);
+        Json out = presets::edit(library.groups, kind, core::parse_python_json(a.positional[0].toStdString()));
+        presets::save(dir, kind, library.groups);
+        out["ok"] = true;
+        print_json(out, ascii);
+        return 0;
+    }
+    if (what == QLatin1String("reset")) {
+        static constexpr Option kOptions[] = {{"--append", false}};
+        Arguments a;
+        if (auto error = parse_arguments(rest, kOptions, 0, "", a)) return usage("genko styles reset: " + *error);
+        library.groups = presets::reset(library.groups, kind, a.flag("--append"));
+        presets::save(dir, kind, library.groups);
+        print_json(Json{{"ok", true}, {"groups", static_cast<std::int64_t>(library.groups.size())}}, ascii);
+        return 0;
+    }
+    if (what == QLatin1String("import-asl")) {
+        static constexpr Option kOptions[] = {{"--group", true}, {"--keep", false}, {"--dpi", true}};
+        Arguments a;
+        if (auto error = parse_arguments(rest, kOptions, 1, "file", a)) return usage("genko styles import-asl: " + *error);
+        double dpi = 150.0;
+        if (const auto value = a.value("--dpi")) {
+            bool ok = false;
+            dpi = value->toDouble(&ok);
+            if (!ok || !(dpi >= 50 && dpi <= 2400)) return usage("genko styles import-asl: --dpi is 50..2400");
+        }
+        if (!library.problem.empty()) throw core::Error("io", "the styles' file cannot be read: " + library.problem);
+        const fs::path file = path_arg(a.positional[0]);
+        const std::string group = a.value("--group") ? a.value("--group")->toStdString()
+                                                     : render::grd::kept_name(storage::path_to_utf8(file.stem()), "スタイル");
+        presets::Library patterns = render::pattern_library::load(dir);
+        if (!patterns.problem.empty()) throw core::Error("io", "the pattern library cannot be read: " + patterns.problem);
+        bool pattern_added = false;
+        const Json read = styles::import_asl(storage::read_file_bounded(file, render::asl::kMaxFileBytes), dpi, dir, patterns.groups, group, pattern_added);
+        if (!a.flag("--keep")) {
+            std::erase_if(library.groups, [&](const presets::Group& g) { return g.name == group; });
+        }
+        const Json& items = read["items"];
+        Json added = presets::add_many(library.groups, kind, std::vector<Json>(items.begin(), items.end()), group, "スタイル")["names"];
+        if (pattern_added) render::pattern_library::save(dir, patterns.groups);
+        presets::save(dir, kind, library.groups);
+        print_json(Json{{"ok", true}, {"group", group}, {"styles", std::move(added)}, {"patterns", read["patterns"]}, {"warnings", read["notes"]}}, ascii);
+        return 0;
+    }
+    if (what == QLatin1String("op")) {
+        static constexpr Option kOptions[] = {{"--page", true}, {"--ids", true}, {"--add", false}};
+        Arguments a;
+        if (auto error = parse_arguments(rest, kOptions, 1, "name", a)) return usage("genko styles op: " + *error);
+        const auto page = a.value("--page");
+        const auto ids = a.value("--ids");
+        if (!page || !ids) return usage("genko styles op: the following arguments are required: --page, --ids");
+        const auto n = int_option(*page);
+        if (!n) return usage("genko styles op: argument --page: invalid int value: " + core::py_repr_str(page->toStdString()));
+        std::vector<std::string> layers;
+        for (const QString& id : ids->split(QLatin1Char(','), Qt::SkipEmptyParts)) layers.push_back(id.trimmed().toStdString());
+        const presets::Library patterns = render::pattern_library::load(dir);
+        print_json(styles::apply_op(named(a.positional[0].toStdString()), Json(*n), layers, a.flag("--add"), dir, patterns.groups), ascii);
+        return 0;
+    }
+    if (what == QLatin1String("thumbnail")) {
+        static constexpr Option kOptions[] = {{"--size", true}, {"--out", true}};
+        Arguments a;
+        if (auto error = parse_arguments(rest, kOptions, 1, "name", a)) return usage("genko styles thumbnail: " + *error);
+        int size = 64;
+        if (const auto value = a.value("--size")) {
+            const auto n = int_option(*value);
+            if (!n || *n < 16 || *n > 256) return usage("genko styles thumbnail: --size is 16..256");
+            size = static_cast<int>(*n);
+        }
+        const presets::Library patterns = render::pattern_library::load(dir);
+        const std::string png = render::write_png(styles::thumbnail(named(a.positional[0].toStdString()), size, dir, patterns.groups));
+        Json out{{"ok", true}, {"name", a.positional[0].toStdString()}, {"size", size}};
+        if (const auto file = a.value("--out")) {
+            const fs::path path = path_arg(*file);
+            if (path.has_parent_path()) fs::create_directories(path.parent_path());
+            storage::write_atomic(path, png);
+            out["path"] = storage::path_to_utf8(path);
+        } else {
+            out["png"] = core::b64encode(png);
+        }
+        print_json(out, ascii);
+        return 0;
+    }
+    return usage("genko styles: list, new, define, edit, reset, import-asl, op or thumbnail");
+}
+
 // patterns@1 (PC4 E3, SPEC.md COLOR-09「パターン」, the C++ build's own): the machine's library of patterns (the settings
 // folder's patterns.json and patterns/, render/pattern_library) — `genko patterns list [--full]`, `genko patterns define
 // <dir> --page N [--area <{poly} | {mask} JSON> | --rect x,y,w,h] [--name N] [--group G]` (パターンを定義…: the page as it
@@ -2416,6 +2605,7 @@ int run_cli(int argc, char** argv) {
         if (command == QLatin1String("gradients")) return gradients_command(args, ascii);  // (PC4 E4: gradient.presets.*)
         if (command == QLatin1String("tool-presets")) return tool_presets_command(args, ascii);  // (PC4 E2: tool.presets.*)
         if (command == QLatin1String("presets")) return presets_command(args, ascii);  // (PC4 E2: edit.presets.*)
+        if (command == QLatin1String("styles")) return styles_command(args, ascii);  // (PC4 E6: style.presets.*)
         if (command == QLatin1String("studio")) return studio_command(args, ascii);
         if (command == QLatin1String("mcp")) return mcp_command(args);
         if (command == QLatin1String("serve")) return serve_command(args);

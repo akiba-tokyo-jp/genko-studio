@@ -985,7 +985,11 @@ Lending::Lending(core::Document& doc, std::size_t at, std::string_view op, const
             const auto to = text_at(args, "to");
             if (id && to && *to == "paint" && by_id(*id) != nullptr) {
                 merge.target = *id;
-                merge.layers = {as_ground(*by_id(*id))};
+                core::Layer ground = as_ground(*by_id(*id));
+                // (PC4 E6: 描画レイヤーに変換 keeps the layer's style on it, as on an RGB page — its effects not drawn into
+                // its inks as well: they would show twice)
+                ground.style.reset();
+                merge.layers = {ground};
             }
         }
         if (!merge.layers.empty()) {

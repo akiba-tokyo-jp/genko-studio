@@ -53,6 +53,8 @@
 #include "render/psd_keep.hpp"
 #include "render/psd_paths.hpp"
 #include "render/psd_shapes.hpp"
+#include "render/psd_effects.hpp"
+#include "core/layer_styles.hpp"
 #include "render/raster.hpp"
 #include "render/not_yet_ported.hpp"
 #include "render/ops_smart_parts.hpp"
@@ -619,6 +621,77 @@ std::optional<core::PsdLayerKeep> layer_keep(core::Document& doc, const psd::Fil
     return keep;
 }
 
+// layer-styles@1 (PC4 E6): the colour channels of a file's mode as Blend If names them.
+std::vector<std::string> blend_if_names(int mode) {
+    if (mode == 3) return {"red", "green", "blue"};
+    if (mode == 4) return {"cyan", "magenta", "yellow", "black"};
+    if (mode == 9) return {"lightness", "a", "b"};
+    if (mode == 1 || mode == 8) return {"gray"};
+    return {};
+}
+
+// layer-styles@1 (PC4 E6): a record's effects (lmfx, else lfx2), fill opacity (iOpa) and Blend If (its blending ranges) as
+// the layer's style (render/psd_effects) — the effects' blocks still kept, written back as they were while the style is
+// unchanged; the fill opacity and the ranges read so not kept besides. `light`: the file's global light when it is not
+// the book's (an effect that takes the global light takes this one as its own). Whether a style was made. `budget`: the file's one descriptor budget (its smart filters' too).
+bool style_from_record(core::Layer& layer, const psd::File& file, const psd::Layer& item, const psd_shapes::Placement& placement,
+                       const std::optional<std::array<double, 2>>& light, std::vector<std::string>& notes, std::size_t& budget) {
+    std::string_view effects;
+    bool multi = false;
+    std::optional<double> fill;
+    for (const psd::File::TaggedBlock& b : file.blocks(item)) {
+        if (b.key == "lmfx") {
+            effects = b.data;
+            multi = true;
+        } else if (b.key == "lfx2" && !multi) {
+            effects = b.data;
+        } else if (b.key == "iOpa") {
+            fill = psd_effects::fill_of_iopa(b.data);
+        }
+    }
+    Json style = Json{{"effects", Json::array()}};
+    if (!effects.empty()) {
+        if (std::optional<Json> read = psd_effects::style_of(effects, placement, notes, &budget)) style = std::move(*read);
+    }
+    const bool filled = fill && *fill < 1.0;
+    if (filled) style["fill_opacity"] = *fill;
+    Json blend_if = Json::array();
+    if (const std::string_view ranges = file.ranges(item); !ranges.empty() && !blend_if_names(file.mode()).empty()) {
+        blend_if = psd_effects::blend_if_of(ranges, blend_if_names(file.mode()));
+        if (!blend_if.empty()) style["blend_if"] = blend_if;
+    }
+    bool relit = false;
+    if (light) {  // (the book has another light: the file's taken by each effect that took it)
+        for (Json& e : style["effects"]) {
+            if (!e.value("global_light", false)) continue;
+            e["global_light"] = false;
+            e["angle"] = (*light)[0];
+            if (e.contains("altitude")) e["altitude"] = (*light)[1];
+            relit = true;
+        }
+    }
+    Json normal;
+    try {
+        normal = core::layer_style_spec(style);
+    } catch (const core::Error& error) {
+        notes.push_back(std::string("レイヤースタイルを読めませんでした（") + error.what() + "）");
+        return false;
+    }
+    if (normal.is_null()) return false;
+    layer.style = std::move(normal);
+    if (layer.native_psd) {
+        // (review P3-2: an iOpa of 255 says no fill opacity — kept to be written back as it was; one read as the style's
+        // fill opacity is written from it)
+        if (filled) std::erase_if(layer.native_psd->blocks, [](const auto& block) { return block.first == "iOpa"; });
+        // (review P2-7: effects that took the file's global light now hold its angle as their own — the file's effects
+        // block, written back, would take the book's: forgotten, the effects written from the style)
+        if (relit) std::erase_if(layer.native_psd->blocks, [](const auto& block) { return core::psd_effect_key(block.first); });
+        // (the ranges kept as they are: written back while they say the style's Blend If)
+        if (layer.native_psd->empty()) layer.native_psd.reset();
+    }
+    return true;
+}
+
 // Photoshop's locks (lspf: bit 0 transparency, 1 the pixels, 2 the position, 31 all) as the layer's own.
 void take_locks(core::Layer& layer, std::uint32_t locks) {
     const bool all = (locks & 0x80000000u) != 0;
@@ -915,6 +988,30 @@ Json import_data(core::Document& doc, const Json& op, std::string data, bool exa
         patterns_taken[named->id] = out;
         return out;
     };
+    // (layer-styles@1, PC4 E6: the layers' styles in the page's mm as the picture is placed; the file's global light —
+    // resources 1037 and 1049 — the book's when the book is made of the file, else taken by the effects when it differs)
+    psd_shapes::Placement style_placement;
+    style_placement.mm_x = static_cast<double>(where.shown_w) / std::max<double>(1.0, static_cast<double>(file.width())) * mm_x;
+    style_placement.mm_y = static_cast<double>(where.shown_h) / std::max<double>(1.0, static_cast<double>(file.height())) * mm_y;
+    style_placement.x0_mm = static_cast<double>(where.at_x) * mm_x;
+    style_placement.y0_mm = static_cast<double>(where.at_y) * mm_y;
+    style_placement.width_px = static_cast<double>(file.width());
+    style_placement.height_px = static_cast<double>(file.height());
+    style_placement.dpi = file.dpi();
+    style_placement.pattern = pattern_of;
+    std::array<double, 2> file_light{core::kDefaultLightAngle, core::kDefaultLightAltitude};
+    for (const psd::File::ImageResource& r : file_resources) {
+        if (r.id == 1037) {
+            if (const auto v = psd_effects::light_of_resource(r.data)) file_light[0] = std::clamp(*v, -180.0, 180.0);
+        } else if (r.id == 1049) {
+            if (const auto v = psd_effects::light_of_resource(r.data)) file_light[1] = std::clamp(*v, 0.0, 90.0);
+        }
+    }
+    std::optional<std::array<double, 2>> light_differs;
+    const bool book_lit = exact && keeping;  // (the file's light the book's — once a style is read: review P3-1)
+    if (!book_lit && file_light != core::global_light(doc)) light_differs = file_light;
+    Json styled = Json::array();
+    std::vector<std::string> style_notes;
     std::vector<core::Layer> made;
     std::vector<std::string> patterns_filled;  // (patterns@1: the pattern fill layers read)
     std::vector<std::string> shapes_skipped, shapes_read;  // (pen-shapes@1: shape layers this build cannot read, and those read)
@@ -1167,6 +1264,12 @@ Json import_data(core::Document& doc, const Json& op, std::string data, bool exa
         if (keeping && !merged_only) {
             bool effect = false;
             layer.native_psd = layer_keep(doc, file, item, names_layers, effect, kept_so_far);
+            // (layer-styles@1, PC4 E6: its effects, fill opacity and Blend If as its style — drawn by this build)
+            if (!item.folder && core::takes_layer_style(layer) &&
+                style_from_record(layer, file, item, style_placement, light_differs, style_notes, filters_budget.left)) {
+                styled.push_back(layer.id);
+                if (core::style_shows_effects(*layer.style) || !(*layer.style)["effects"].empty()) effect = false;
+            }
             if (effect) effects.push_back(layer.id);
             if (layer.native_psd && layer.native_psd->id) kept_ids.push_back(*layer.native_psd->id);
             ranges_kept = ranges_kept || (layer.native_psd && !layer.native_psd->ranges.empty());
@@ -1277,6 +1380,25 @@ Json import_data(core::Document& doc, const Json& op, std::string data, bool exa
         report["psd_page"] = "earlier";  // (the page keeps an earlier PSD's resources and global blocks: this file's are not kept)
     }
     if (!effects.empty()) report["effects"] = std::move(effects);
+    if (book_lit && !styled.empty()) {  // (no style read: the book's light left as it is, the file's kept in its resources)
+        doc.global_light = file_light[0] == core::kDefaultLightAngle && file_light[1] == core::kDefaultLightAltitude
+                               ? std::nullopt
+                               : std::optional<std::array<double, 2>>(core::global_light_of(Json{{"angle", file_light[0]}, {"altitude", file_light[1]}}));
+    }
+    if (!styled.empty()) report["layer_styles"] = std::move(styled);  // (layer-styles@1, PC4 E6: the layers whose style was read)
+    if (!style_notes.empty()) {  // (review P3-3: each note once, how many layers it was said of; at most 20 of them)
+        std::vector<std::pair<std::string, std::size_t>> once;
+        for (const std::string& note : style_notes) {
+            const auto it = std::find_if(once.begin(), once.end(), [&](const auto& seen) { return seen.first == note; });
+            if (it != once.end()) ++it->second;
+            else once.emplace_back(note, 1);
+        }
+        Json notes = Json::array();
+        for (std::size_t i = 0; i < once.size() && i < 20; ++i)
+            notes.push_back(once[i].second > 1 ? once[i].first + "（" + std::to_string(once[i].second) + " 層）" : once[i].first);
+        if (once.size() > 20) notes.push_back("ほか " + std::to_string(once.size() - 20) + " 件の知らせ");
+        report["layer_style_notes"] = std::move(notes);
+    }
     if (kept_so_far.cut) report["psd_blocks_cut"] = true;
     if (!shallow.empty()) report["in_8_bits"] = shallow;  // (PC4 F-d review: why not at its depth)
     return report;

@@ -165,6 +165,11 @@ genko_test(test_dab_lines SOURCES unit/test_dab_lines.cpp DEPS genko_test_suppor
 genko_test(test_gradient_tool SOURCES unit/test_gradient_tool.cpp DEPS genko_test_support genko_render_ops LABELS unit TIMEOUT 600)
 genko_test(test_gradient_presets SOURCES unit/test_gradient_presets.cpp DEPS genko_test_support genko_render_ops LABELS unit)
 genko_test(test_grd SOURCES unit/test_grd.cpp DEPS genko_test_support genko_render_ops LABELS unit)
+# PC4 E6 (SPEC.md COLOR-09「レイヤースタイル」「スタイル」): each effect drawn on 8-bit, 16-bit, 32-bit, CMYK, Lab and grey pages
+# (a page without styles drawn and written as before), the ops, Blend If and the fill, merges, PSD's lfx2 written and read
+# back, saved, opened and undone; the styles' library (upstream's built-in groups), .asl files and `genko styles`.
+genko_test(test_layer_styles SOURCES unit/test_layer_styles.cpp DEPS genko_test_support genko_render_ops genko_formats LABELS unit TIMEOUT 600)
+genko_test(test_style_presets SOURCES unit/test_style_presets.cpp DEPS genko_test_support genko_render_ops LABELS unit)
 genko_test(test_resample SOURCES unit/test_resample.cpp DEPS genko_test_support genko_render_ops LABELS unit)
 genko_test(test_page_geometry SOURCES unit/test_page_geometry.cpp DEPS genko_test_support LABELS unit)
 # PC3 C-e (SPEC.md COLOR-07「判型」): the page size ops on a book in memory — each thing on a page where the map takes it,
@@ -683,6 +688,7 @@ if(GENKO_BUILD_APP)
   genko_test(test_gui_anim SOURCES gui/test_gui_anim.cpp DEPS genko_app genko_test_support GUI TIMEOUT 900)
   genko_test(test_gui_paint SOURCES gui/test_gui_paint.cpp DEPS genko_app GUI TIMEOUT 600)
   genko_test(test_gui_patterns SOURCES gui/test_gui_patterns.cpp DEPS genko_app GUI TIMEOUT 600)  # (PC4 E3)
+  genko_test(test_gui_styles SOURCES gui/test_gui_styles.cpp DEPS genko_app GUI TIMEOUT 600)  # (PC4 E6)
   genko_test(test_gui_paint_tools SOURCES gui/test_gui_paint_tools.cpp DEPS genko_app genko_test_support GUI TIMEOUT 600)  # (PC4 E5)
   # PC4 E2: ブラシ設定 (F5: its sections, a change copying a built-in brush, the sample, a Genko brush made a dab brush),
   # ブラシ panel (groups, a brush chosen, saved, renamed, deleted, an .abr read off the window's thread), 編集 → ブラシを定義…,

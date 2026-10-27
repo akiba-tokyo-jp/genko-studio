@@ -1041,17 +1041,23 @@ private slots:
         QVERIFY(effects != nullptr && blend_if != nullptr && plain != nullptr);
         std::set<std::string> kept;
         for (const auto& [key, ref] : effects->native_psd->blocks) kept.insert(key);
-        // (not luni, lyid: this build's own; lspf kept as it locks something — its other bits so —, written from the locks)
-        QCOMPARE(kept, (std::set<std::string>{"lfx2", "lclr", "iOpa", "fxrp", "lnsr", "lspf"}));
+        // (not luni, lyid: this build's own; lspf kept as it locks something — its other bits so —, written from the locks;
+        // PC4 E6: not iOpa — the fill opacity of the layer's style now, written from it —; lfx2 kept to be written back as
+        // it is while the style read from it is not changed)
+        QCOMPARE(kept, (std::set<std::string>{"lfx2", "lclr", "fxrp", "lnsr", "lspf"}));
         QCOMPARE(effects->native_psd->id, (std::optional<std::int64_t>(7)));
         QVERIFY(effects->native_psd->ranges.empty());
-        QVERIFY(!blend_if->native_psd->ranges.empty());
-        QVERIFY(core::psd_effects_kept(*effects) && !core::psd_effects_kept(*blend_if));
+        // (PC4 E6: the effects and Blend If read into the layers' styles — drawn by this build, written from the styles)
+        QVERIFY(effects->style.has_value() && !(*effects->style)["effects"].empty());
+        QVERIFY(blend_if->style.has_value() && blend_if->style->contains("blend_if"));
+        QVERIFY(!blend_if->native_psd->ranges.empty());  // (kept: written back as they were while they say the same)
+        QVERIFY(!core::psd_effects_kept(*effects) && !core::psd_effects_kept(*blend_if));
         // (the locks: 5 = transparency and position, 0x80000000 = all)
         QVERIFY(effects->lock_alpha && effects->lock_position && !effects->locked);
         QVERIFY(blend_if->lock_alpha && blend_if->lock_position && blend_if->locked);
         QVERIFY(!plain->lock_alpha && !plain->lock_position && !plain->locked);
-        QVERIFY(std::any_of(opened.notes.begin(), opened.notes.end(), [](const std::string& n) { return n.find("レイヤー効果") != std::string::npos; }));
+        // (PC4 E6: its effects drawn now — not said to be Photoshop's only)
+        QVERIFY(std::none_of(opened.notes.begin(), opened.notes.end(), [](const std::string& n) { return n.find("レイヤー効果は Genko では描きません") != std::string::npos; }));
         QVERIFY(doc.file_info.has_value() && !doc.file_info->author.empty());  // (its XMP's File Info)
 
         const QString written = path(QStringLiteral("keep/written.psd"));
@@ -1184,10 +1190,11 @@ private slots:
         const psd::File twice_read = psd::File::read(genko::test::read_bytes(twice_file));
         for (const psd::Layer& l : twice_read.layers()) sevens += twice_read.layer_id(l) == std::optional<std::uint32_t>(7) ? 1 : 0;
         QCOMPARE(sevens, 1);
-        // import_psd's report: the layers keeping effects
+        // import_psd's report: the layers keeping effects this build does not draw — none since PC4 E6: the effects and the
+        // Blend If read as the layers' styles ("layer_styles")
         const auto made = bus.apply(core::new_episode("t", core::Num(std::int64_t{1}), 1, core::PageSpec::a4_mono()),
                                     Json::array({Json{{"op", "import_psd"}, {"page", 1}, {"psd", core::b64encode(source)}}}), core::Actor("human:test"));
-        QVERIFY2(made.results[0].contains("effects") && made.results[0]["effects"].size() == 1, made.results[0].dump().c_str());
+        QVERIFY2(!made.results[0].contains("effects") && made.results[0]["layer_styles"].size() == 2, made.results[0].dump().c_str());
         // the Python reference's view keeps nothing (its import cases above)
         {
             const psd::PythonView python_view;

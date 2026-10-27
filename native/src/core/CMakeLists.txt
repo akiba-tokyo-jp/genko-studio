@@ -126,6 +126,8 @@ genko_library(genko_core
     patterns.cpp
     # PC4 F-e (カメラ RAW: camera-raw@1 の現像の設定)
     raw_develop.cpp
+    # PC4 E6 (レイヤースタイル: layer-styles@1)
+    layer_styles.cpp
     "${CMAKE_CURRENT_BINARY_DIR}/ops_schema_data.cpp"
     "${CMAKE_CURRENT_BINARY_DIR}/pyre_names_data.cpp"
     "${CMAKE_CURRENT_BINARY_DIR}/builtin_profiles_data.cpp"

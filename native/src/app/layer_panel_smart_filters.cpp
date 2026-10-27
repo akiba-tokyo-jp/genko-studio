@@ -284,6 +284,10 @@ void LayerPanel::smart_filter_menu(const QPoint& at) {
         QMenu menu(this);
         for (const char* name : {"act_layer_quick_export_png", "act_layer_export_as"})
             if (QAction* act = window_->action(QString::fromLatin1(name))) menu.addAction(act);
+        // (PC4 E6: 混合オプション… and the style's copy, paste and clear, as Photoshop's layer menu has them)
+        if (window_->action(QStringLiteral("act_layer_style_blending")) != nullptr) menu.addSeparator();
+        for (const char* name : {"act_layer_style_blending", "act_layer_style_copy", "act_layer_style_paste", "act_layer_style_clear"})
+            if (QAction* act = window_->action(QString::fromLatin1(name))) menu.addAction(act);
         if (!menu.isEmpty()) menu.exec(list_->viewport()->mapToGlobal(at));
         return;
     }

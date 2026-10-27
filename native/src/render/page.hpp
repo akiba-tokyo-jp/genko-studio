@@ -128,6 +128,22 @@ Image page_background(const core::Page& page, Size size, bool name_or_proof);
 core::InkPixels composite_ink_layers(const core::Page& page, const std::vector<core::Layer>& layers, int dpi, const core::Document* episode,
                                      bool paper = false);
 
+// PC4 E6 (layer-styles@1): `layers` (of `page`, in their order) composited alone over nothing as the page draws them —
+// their styles too — over the whole page at `dpi`: on a page of inks its inks (with their alpha, at its depth); else the
+// "RGBA" picture and, where the page composites them in precise colour, their values (GKCR f32). What baking a style
+// into pixels makes (a merge of a styled layer, レイヤーを作成).
+struct Alone {
+    Image image;
+    std::optional<std::string> precise;
+    std::optional<core::InkPixels> inks;
+};
+Alone composite_alone(const core::Page& page, std::vector<core::Layer> layers, int dpi, const core::Document* episode);
+// PC4 E6: a merge's step for a layer with its style (as the page draws it, proof): laid over `out` (the whole page at
+// dpi, "RGBA"; `prev`: the alpha a layer clipped to it clips to, and after it the layer's own), or over a precise
+// canvas (the whole page at dpi).
+void blend_styled_8bit(const core::Page& page, const core::Layer& layer, int dpi, const core::Document* episode, Image& out, std::optional<Image>& prev);
+void blend_styled_precise(ColorCanvas& canvas, const core::Page& page, const core::Layer& layer, int dpi, const core::Document* episode);
+
 RenderResult render_page(const core::Page& page, int dpi, const RenderOptions& options = {},
                          const core::Document* episode = nullptr);
 
@@ -200,6 +216,9 @@ struct PageLayer {
     // patterns@1 (PC4 E3): a pattern fill layer's pattern fill (a PSD writes the layer as Photoshop's pattern fill layer,
     // its PtFl block; `image` its look)
     const core::Json* pattern = nullptr;
+    // layer-styles@1 (PC4 E6, review P2-6): the page layer whose style goes with a picture given without its id — a placed
+    // picture's, the ink layer's lines (a PSD writes the style with it: lfx2, iOpa, blending ranges); none: by `id`
+    const core::Layer* styled = nullptr;
 };
 
 // psd.page_layers(page, episode, dpi), bottom to top: the paper, the page's fills, each visible exported pixel layer

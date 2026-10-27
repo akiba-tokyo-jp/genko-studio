@@ -450,6 +450,10 @@ Opened open_psd(std::string_view bytes, const std::string& file, const OpenOptio
         if (head.mode == 8) notes.push_back("ダブルトーンの PSD はグレースケールで開きました");
         if (head.depth == 32 && (cmyk || lab)) notes.push_back("32 bit の CMYK・Lab は 16 bit で開きました");
         if (report.contains("effects")) notes.push_back("レイヤー効果は Genko では描きません（PSD に書き戻すと Photoshop が描きます）");
+        // (PC4 E6: the effects read as the layers' styles — what of them was not read as it is)
+        if (const auto said = report.find("layer_style_notes"); said != report.end() && said->is_array())
+            for (const Json& n : *said)
+                if (n.is_string()) notes.push_back(n.get<std::string>());
         if (report.contains("skipped") && !report["skipped"].empty()) {
             std::string names;
             for (const Json& n : report["skipped"]) names += (names.empty() ? "" : "、") + (n.is_string() ? n.get<std::string>() : std::string());
