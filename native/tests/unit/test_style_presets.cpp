@@ -28,6 +28,7 @@
 #include "render/pat.hpp"
 #include "render/pattern_library.hpp"
 #include "render/png.hpp"
+#include "render/preset_files.hpp"
 #include "render/preset_store.hpp"
 #include "render/style_presets.hpp"
 #include "storage/fsutil.hpp"
@@ -301,6 +302,28 @@ private slots:
         broken[broken.size() - 9] = '\x7F';
         const render::asl::File partly = render::asl::read(broken, 150);
         QVERIFY(partly.styles.size() + partly.notes.size() >= 2);
+    }
+
+    // E2's プリセットマネージャー: スタイル among its kinds — listed, edited, written to a .genkopresets file and read into
+    // another settings folder, migrated
+    void inThePresetManager() {
+        QTemporaryDir one, other;
+        const fs::path from = core::path_from_utf8(one.path().toStdString()), to = core::path_from_utf8(other.path().toStdString());
+        QCOMPARE(render::preset_files::kind_title("styles"), std::string("スタイル"));
+        Json listed = render::preset_files::manager_list(from, {"styles"});
+        QCOMPARE(listed["styles"]["groups"][0]["name"], Json("基本"));
+        store::Library lib = store::load(from, styles::kind());
+        store::add(lib.groups, styles::kind(), styles::item_of(Json{{"effects", Json::array({core::default_effect("stroke")})}}, "線だけ"), std::string("自分の"), "スタイル");
+        store::save(from, styles::kind(), lib.groups);
+        render::preset_files::manager_edit(from, "styles", Json{{"action", "rename"}, {"preset", "線だけ"}, {"name", "線"}});
+        QVERIFY(store::find(store::load(from, styles::kind()).groups, "線") != nullptr);
+        Json counts;
+        const std::string text = render::preset_files::export_text(from, {"styles"}, false, &counts);
+        QCOMPARE(counts["styles"], Json(1));
+        const Json added = render::preset_files::import_text(to, text, {"styles"});
+        QCOMPARE(added["added"]["styles"], Json(1));
+        QVERIFY(store::find(store::load(to, styles::kind()).groups, "線", std::string_view("自分の")) != nullptr);
+        QCOMPARE(render::preset_files::import_text(to, text, {"styles"})["added"]["styles"], Json(0));  // (one it has: not again)
     }
 
     // `genko styles`: list, new, define, edit, reset, op, thumbnail, import-asl (the CLI on a settings folder of its own)

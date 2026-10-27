@@ -15,11 +15,11 @@
 // (PhotoCraft v0.2.0's engine/src/edit_menu_cmds.rs preset_manager and export_import, migrate_cmds.rs; MIT:
 // native/third_party/photocraft/NOTICE.md), and taken from another settings folder or such a file (プリセットを移行: the
 // groups the library does not have yet). Each kind's library is read again before each change and written whole, so
-// what another window or `genko …` wrote is never written over. (スタイル joins when its group, E6, makes its library.)
+// what another window or `genko …` wrote is never written over. (PC4 E6: スタイル, render/style_presets, among them.)
 //
 // The file (.genkopresets, JSON, 256 MB at most): {"genko_presets": 1, "brushes": [{"name", "brushes": [{"key",
 // "settings"}]}], "brush_pictures": {ref: base64 PNG}, "gradients": [{"name", "items"}], "patterns": [{"name", "items"}],
-// "pattern_pictures": {ref: base64}, "shapes": [{"name", "shapes": [{"name", "path"}]}], "tool_presets": [{"name",
+// "pattern_pictures": {ref: base64}, "shapes": [{"name", "shapes": [{"name", "path"}]}], "tool_presets", "styles" (E6): [{"name",
 // "items"}]} — each kind only when it was asked for.
 
 namespace genko::render::preset_files {
@@ -27,7 +27,7 @@ namespace genko::render::preset_files {
 inline constexpr std::size_t kMaxFileBytes = std::size_t(256) << 20;
 inline constexpr int kVersion = 1;
 
-// The kinds in the Preset Manager's order: brushes, gradients, patterns, shapes, tool_presets (review P3-13: this table
+// The kinds in the Preset Manager's order: brushes, gradients, patterns, shapes, tool_presets, styles (review P3-13: this table
 // alone names them — a kind added here, E6's styles, is listed by the Preset Manager and the 書き出し／読み込み window,
 // and refused by every function below until each knows it).
 const std::vector<std::string>& kinds();
