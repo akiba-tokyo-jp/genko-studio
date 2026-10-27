@@ -319,9 +319,12 @@ private slots:
         QVERIFY(store::find(store::load(from, styles::kind()).groups, "線") != nullptr);
         Json counts;
         const std::string text = render::preset_files::export_text(from, {"styles"}, false, &counts);
-        QCOMPARE(counts["styles"], Json(1));
+        // (the file written: every style it holds — the built-in groups written with the person's own)
+        std::int64_t held = 0;
+        for (const store::Group& g : store::load(from, styles::kind()).groups) held += static_cast<std::int64_t>(g.items.size());
+        QCOMPARE(counts["styles"], Json(held));
         const Json added = render::preset_files::import_text(to, text, {"styles"});
-        QCOMPARE(added["added"]["styles"], Json(1));
+        QCOMPARE(added["added"]["styles"], Json(1));  // (the built-in ones the other folder has as they are: not again)
         QVERIFY(store::find(store::load(to, styles::kind()).groups, "線", std::string_view("自分の")) != nullptr);
         QCOMPARE(render::preset_files::import_text(to, text, {"styles"})["added"]["styles"], Json(0));  // (one it has: not again)
     }
