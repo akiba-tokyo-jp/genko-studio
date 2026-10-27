@@ -210,6 +210,12 @@ QPixmap stroke_preview(const std::string& kind, const std::array<int, 3>& ink, Q
 
 void forget_stroke_previews() { previews().clear(); }
 
+void forget_stroke_previews(const std::vector<std::string>& kinds) {
+    std::erase_if(previews(), [&kinds](const auto& entry) {
+        return std::any_of(kinds.begin(), kinds.end(), [&entry](const std::string& k) { return entry.first.starts_with(k + "/"); });
+    });
+}
+
 std::vector<double> size_presets() {
     const QString raw = settings()->value(QStringLiteral("brush/sizes"), QString()).toString();
     std::set<double> values;

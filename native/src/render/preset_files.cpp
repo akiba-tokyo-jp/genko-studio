@@ -56,10 +56,19 @@ bool wants(const std::vector<std::string>& kinds_asked, const char* kind) {
     return std::find(kinds_asked.begin(), kinds_asked.end(), kind) != kinds_asked.end();
 }
 
+// (review P3-13: a kind kept by render/preset_store; another is refused — never written to another kind's file)
 const store::Kind& store_kind(const std::string& kind) {
     if (kind == "gradients") return gradient_presets::kind();
     if (kind == "patterns") return pattern_library::kind();
-    return tool_presets::kind();
+    if (kind == "tool_presets") return tool_presets::kind();
+    throw core::Error("value", "the kinds of presets are brushes, gradients, patterns, shapes and tool_presets (not " + kind + ")");
+}
+
+// (what each kind is called on the screen: the one table — kinds() is its keys)
+const std::vector<std::pair<std::string, std::string>>& kind_table() {
+    static const std::vector<std::pair<std::string, std::string>> t{
+        {"brushes", "ブラシ"}, {"gradients", "グラデーション"}, {"patterns", "パターン"}, {"shapes", "シェイプ"}, {"tool_presets", "ツールプリセット"}};
+    return t;
 }
 
 bool file_there(const std::filesystem::path& dir, const std::string& name) {
@@ -293,18 +302,29 @@ Json merge(const std::filesystem::path& config_dir, const Collection& c, bool wh
         if (!lib.problem.empty()) throw core::Error("io", lib.problem);
         std::set<std::string> names, keys, groups;
         std::vector<std::string> order;
-        std::vector<std::pair<std::string, Json>> own;
+        std::size_t own_count = 0;
+        // (each brush's settings as one form, made once: a file of thousands is compared in one pass — review P3-6)
+        const auto form_of = [](const Json& settings) -> std::string {
+            try {
+                return core::brush_to_dict(core::brush_from_dict("my_a", settings, std::nullopt, {})).dump();
+            } catch (const core::Error&) {
+                return {};
+            }
+        };
+        std::set<std::string> own_forms;
         for (const brush_presets::Group& g : lib.groups) {
             if (!g.builtin) order.push_back(g.name);
             for (const brush_presets::Preset& p : g.items) {
                 names.insert(p.name);
                 if (!g.builtin) {
                     keys.insert(p.key);
-                    own.emplace_back(p.key, p.settings);
+                    ++own_count;
+                    if (!whole) own_forms.insert(form_of(p.settings));
                 }
             }
             groups.insert(g.name);
         }
+        const std::vector<std::string> order_before = order;
         std::vector<std::pair<std::string, std::optional<Json>>> changes;
         std::int64_t n = 0;
         for (const auto& [group, items] : c.brushes) {
@@ -321,7 +341,7 @@ Json merge(const std::filesystem::path& config_dir, const Collection& c, bool wh
                 } catch (const core::Error&) {
                     continue;  // (settings a brush cannot have: left out)
                 }
-                if (!whole && std::any_of(own.begin(), own.end(), [&](const auto& o) { return brush_presets::same_settings(o.second, settings); })) continue;
+                if (!whole && own_forms.contains(form_of(settings))) continue;
                 if (core::is_dab_brush(settings)) {  // (its pictures with it, or held here: else it cannot be drawn)
                     bool all = true;
                     const Json& d = settings["dabs"];
@@ -345,10 +365,14 @@ Json merge(const std::filesystem::path& config_dir, const Collection& c, bool wh
             if (whole && here == 0 && !builtin_group && std::find(order.begin(), order.end(), group) == order.end()) order.push_back(group);
             n += here;
         }
-        if (own.size() + changes.size() > brush_presets::kMaxOwn) {
+        if (own_count + changes.size() > brush_presets::kMaxOwn) {
             throw core::Error("value", "the library holds " + std::to_string(brush_presets::kMaxOwn) + " brushes of one's own at most");
         }
-        if (!changes.empty() || whole) brushes::save_many(config_dir, changes, order, c.brush_pictures);
+        if (!changes.empty() || order != order_before) {
+            const bool plain = order.empty() || (order.size() == 1 && order.front() == brush_presets::kOwnGroup);
+            const bool kept_order = !brushes::library_groups(config_dir).empty();
+            brushes::save_many(config_dir, changes, plain && !kept_order ? std::nullopt : std::optional<std::vector<std::string>>(order), c.brush_pictures);
+        }
         added["brushes"] = n;
     }
     for (const char* kind : {"gradients", "tool_presets", "patterns"}) {
@@ -358,9 +382,11 @@ Json merge(const std::filesystem::path& config_dir, const Collection& c, bool wh
         store::Library lib = k == "patterns" ? pattern_library::load(config_dir) : store::load(config_dir, store_kind(k));
         if (!lib.problem.empty()) throw core::Error("io", lib.problem);
         std::int64_t n = 0;
+        bool grouped = false;  // (a group made though nothing was added to it: written too)
         for (const store::Group& g : source) {
             const bool there = std::any_of(lib.groups.begin(), lib.groups.end(), [&](const store::Group& have) { return have.name == g.name; });
             if (whole && there) continue;
+            grouped = grouped || (whole && !there);
             std::vector<Json> items;
             for (const Json& item : g.items) {
                 const bool held = std::any_of(lib.groups.begin(), lib.groups.end(), [&](const store::Group& have) {
@@ -395,11 +421,13 @@ Json merge(const std::filesystem::path& config_dir, const Collection& c, bool wh
                 n += static_cast<std::int64_t>(kept.size());
             }
         }
-        if (k == "patterns") {
-            pattern_library::save(config_dir, lib.groups);
-            pattern_library::tidy(config_dir, lib.groups);
-        } else {
-            store::save(config_dir, store_kind(k), lib.groups);
+        if (n > 0 || grouped) {  // (nothing added: the file as it was — review P3-1)
+            if (k == "patterns") {
+                pattern_library::save(config_dir, lib.groups);
+                pattern_library::tidy(config_dir, lib.groups);
+            } else {
+                store::save(config_dir, store_kind(k), lib.groups);
+            }
         }
         added[kind] = n;
     }
@@ -431,8 +459,19 @@ Json merge(const std::filesystem::path& config_dir, const Collection& c, bool wh
 }  // namespace
 
 const std::vector<std::string>& kinds() {
-    static const std::vector<std::string> k{"brushes", "gradients", "patterns", "shapes", "tool_presets"};
+    static const std::vector<std::string> k = [] {
+        std::vector<std::string> out;
+        for (const auto& [kind, title] : kind_table()) out.push_back(kind);
+        return out;
+    }();
     return k;
+}
+
+std::string kind_title(std::string_view kind) {
+    for (const auto& [k, title] : kind_table()) {
+        if (k == kind) return title;
+    }
+    return std::string(kind);
 }
 
 Json manager_list(const std::filesystem::path& config_dir, const std::vector<std::string>& wanted) {

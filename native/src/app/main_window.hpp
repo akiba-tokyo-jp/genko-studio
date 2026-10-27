@@ -857,7 +857,7 @@ private:
     core::Json eraser_fields(const core::Layer& layer) const;
     // brushes@1 (PC4 E1): the define_brush that puts a brush of one's own (or the 鉛筆ツール's) into the book before a
     // line or an eraser uses it (none: the book has it, or it is a built-in one); false when it cannot be found (said).
-    bool own_brush_op(const std::string& kind, core::Json& ops);
+    bool own_brush_op(const std::string& kind, core::Json& ops, bool drawing = false);  // (PC4 E2: `drawing` a line: its words say so)
     // The 鉛筆ツール's brush (render/dabs/lines.hpp pencil_brush): its key for this book — kPencilKey, or the first of
     // kPencilKey_2 … that neither the book nor this process holds as a brush of other settings —, made known to this
     // process under it.
@@ -1116,7 +1116,13 @@ public:
     // selection's paint, the layer drawn on alone when it is a paint layer), a tool preset taken (its tool, brush, fields
     // and 描画色) and made (the tool page's fields by their objectName), and 編集 → プリセット ▸.
     void choose_brush(const std::string& key, bool keep_tool = false);
-    void brushes_changed(std::optional<std::string> select, std::optional<std::string> forgotten = std::nullopt);
+    // (`forgotten`: brushes taken out of the library — those no open book holds are forgotten by this process, with any
+    // other of one's own the library has no longer —; `changed`: brushes whose settings changed, their lines drawn again)
+    void brushes_changed(std::optional<std::string> select, const std::vector<std::string>& forgotten = {}, const std::vector<std::string>& changed = {});
+    // Whether a book open in this window (any tab) holds a brush of this key.
+    bool any_book_holds_brush(const std::string& key) const;
+    // (review P2-4) A dab brush that takes colours between the 描画色 and the 背景色: its line's fields given the 背景色.
+    void add_background(core::Json& fields) const;
     std::string book_key_for(const std::string& key) const;
     void define_brush_preset(std::optional<QString> name = std::nullopt);
     BrushesPanel* brushes_panel() const { return brushes_panel_; }

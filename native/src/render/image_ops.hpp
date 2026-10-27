@@ -238,6 +238,8 @@ Pixels page_pixels(const core::Document& doc, const core::Page& page, int dpi);
 // (PC4 E4 review P2-3) Only `region` of it (pixels of the working 200 dpi, within the page): the same pixels, the rest
 // never drawn (RenderOptions::region).
 Pixels page_pixels(const core::Document& doc, const core::Page& page, const Box& region);
+// (PC4 E2, review P3-7) The same at `dpi` (the region in pixels of that dpi): ブラシを定義… draws the selection's box only.
+Pixels page_pixels(const core::Document& doc, const core::Page& page, const Box& region, int dpi);
 // A layer's pixels, nothing changed: a paint layer's (its lines and fills drawn in on a copy), any other layer as it
 // shows alone (layer_image, 8 bits).
 Pixels shown_layer_pixels(const core::Document& doc, const core::Page& page, const core::Layer& layer);

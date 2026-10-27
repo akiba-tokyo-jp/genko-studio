@@ -35,7 +35,8 @@ public:
     void new_preset(std::optional<QString> name = std::nullopt, std::optional<bool> include_colour = std::nullopt);
     void rename(std::optional<QString> name = std::nullopt);
     void remove();
-    void reset();
+    // 初期設定に戻す (`append`: the built-in ones added after one's own); in place of one's own asked first unless `sure`.
+    void reset(bool append = false, std::optional<bool> sure = std::nullopt);
     // The preset named made the tool in hand with its settings (false: none of that name).
     bool select(const QString& name);
 

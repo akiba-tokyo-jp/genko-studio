@@ -18,7 +18,9 @@
 #include "render/dabs/tile.hpp"
 #include "render/image_ops.hpp"
 #include "render/layer_masks.hpp"
+#include "render/page.hpp"
 #include "render/raster.hpp"
+#include "render/selection.hpp"
 #include "storage/asset_store.hpp"
 #include "storage/fsutil.hpp"
 
@@ -505,7 +507,8 @@ std::string group_name(const std::string& given) {
     return g;
 }
 
-// The library file as it is read (a brush that is not an object left out), and why it cannot be read (else "").
+// The library file as it is read, and why it cannot be written (else ""). A brush that is not an object is left out and
+// said (review P2-2: the window starts with the others, as before E2; the file is not written over then).
 struct Own {
     Json brushes = Json::object();  // (key → entry, the file's order)
     std::vector<std::string> order;
@@ -516,22 +519,43 @@ Own read_own(const std::filesystem::path& config_dir) {
     const std::filesystem::path path = brushes::library_path(config_dir);
     std::error_code missing;
     if (!std::filesystem::exists(path, missing)) return out;
+    Json data;
     try {
         const std::string text = storage::read_file_bounded(path, std::size_t(256) << 20);
         if (core::utf8_error(text)) throw core::Error("format", "it is not UTF-8");
-        const Json data = core::parse_python_json(text);
+        data = core::parse_python_json(text);
         if (!data.is_object()) throw core::Error("format", "it is not an object");
         const auto found = data.find("brushes");
         if (found != data.end() && !found->is_null() && !found->is_object()) throw core::Error("format", "its brushes are not an object");
-    } catch (const core::Error& error) {
+    } catch (const std::exception& error) {
         out.problem = "the brush library " + core::path_to_utf8(path) + " cannot be read (" + error.what() + "): it is left as it is";
         return out;
     }
-    const Json library = brushes::load_library(config_dir);  // (held: a temporary's items() would outlive it)
-    for (const auto& [key, entry] : library.items()) {
-        if (entry.is_object()) out.brushes[key] = entry;
+    std::vector<std::string> strange;
+    if (const auto found = data.find("brushes"); found != data.end() && found->is_object()) {
+        for (const auto& [key, entry] : found->items()) {
+            if (entry.is_object()) {
+                out.brushes[key] = entry;
+            } else {
+                strange.push_back(key);
+            }
+        }
     }
-    out.order = brushes::library_groups(config_dir);
+    if (!strange.empty()) {
+        std::string named;
+        for (std::size_t i = 0; i < strange.size() && i < 5; ++i) named += (named.empty() ? "" : ", ") + strange[i];
+        if (strange.size() > 5) named += " …";
+        out.problem = "the brush library " + core::path_to_utf8(path) + " holds entries that are not brushes (" + named +
+                      "): they are left out, and the file is left as it is";
+    }
+    if (const auto groups = data.find("groups"); groups != data.end() && groups->is_array()) {
+        for (const Json& g : *groups) {
+            if (g.is_string() && !g.get<std::string>().empty() &&
+                std::find(out.order.begin(), out.order.end(), g.get<std::string>()) == out.order.end()) {
+                out.order.push_back(g.get<std::string>());
+            }
+        }
+    }
     return out;
 }
 
@@ -566,6 +590,14 @@ std::set<std::string> names_taken(const Own& own, std::string_view except = {}) 
 
 void refuse(const std::string& problem) {
     if (!problem.empty()) throw core::Error("io", problem);
+}
+
+// The groups' order to write: none for a library of 自分のブラシ alone that keeps none (review P3-1: such a file stays
+// as it was, whatever is changed), else `order`.
+std::optional<std::vector<std::string>> order_to_write(const Own& own, const std::vector<std::string>& order) {
+    const bool plain = order.empty() || (order.size() == 1 && order.front() == kOwnGroup);
+    if (plain && own.order.empty()) return std::nullopt;
+    return order;
 }
 
 // The key of the person's brush a key or a name names (its key first). core::Error("value") for a built-in one,
@@ -785,9 +817,7 @@ Json save(const std::filesystem::path& config_dir, std::optional<std::string> ke
     if (kept_group != kOwnGroup) entry["group"] = kept_group;
     std::vector<std::string> order = groups_of(own);
     if (std::find(order.begin(), order.end(), kept_group) == order.end()) order.push_back(kept_group);
-    // (only an order to keep is written: a library of 自分のブラシ alone keeps none)
-    const bool ordered = !(order.size() == 1 && order.front() == kOwnGroup) || !own.order.empty();
-    brushes::save_many(config_dir, {{*key, entry}}, ordered ? std::optional<std::vector<std::string>>(order) : std::nullopt, pictures);
+    brushes::save_many(config_dir, {{*key, entry}}, order_to_write(own, order), pictures);
     for (const auto& [ref, png] : pictures) dabs::keep_picture(ref, png);  // (drawn in this process at once)
     return Json{{"key", *key}, {"name", label}, {"group", kept_group}};
 }
@@ -828,7 +858,7 @@ Json edit(const std::filesystem::path& config_dir, const Json& params) {
         std::vector<std::pair<std::string, std::optional<Json>>> changes;
         for (const auto& [key, entry] : own.brushes.items()) changes.emplace_back(key, std::nullopt);
         for (const auto& [key, entry] : brushes_now.items()) changes.emplace_back(key, entry);
-        brushes::save_many(config_dir, changes, order);
+        brushes::save_many(config_dir, changes, order_to_write(own, order));
     };
     if (action == "rename") {
         const std::vector<std::string> named = names_in(params.contains("preset") ? params["preset"] : Json());
@@ -839,7 +869,7 @@ Json edit(const std::filesystem::path& config_dir, const Json& params) {
         if (names_taken(own, key).contains(wanted)) throw core::Error("value", "a brush named " + wanted + " is there already");
         Json entry = own.brushes[key];
         entry["label"] = wanted;
-        brushes::save_many(config_dir, {{key, entry}}, order);
+        brushes::save_many(config_dir, {{key, entry}}, order_to_write(own, order));
         return Json{{"name", wanted}, {"key", key}};
     }
     if (action == "delete") {
@@ -850,16 +880,21 @@ Json edit(const std::filesystem::path& config_dir, const Json& params) {
             changes.emplace_back(key, std::nullopt);
             deleted.push_back(key);
         }
-        brushes::save_many(config_dir, changes, order);
+        brushes::save_many(config_dir, changes, order_to_write(own, order));
         return Json{{"deleted", std::move(deleted)}};
     }
     if (action == "move") {
         std::vector<std::string> keys;
         for (const std::string& n : names_in(params.contains("preset") ? params["preset"] : Json())) keys.push_back(own_key(own, n));
-        // (the group moved to: "to", as the other kinds' edits name it — or "group")
-        const std::string to = params.contains("to")      ? group_name(text_of("to"))
-                               : params.contains("group") ? group_name(text_of("group"))
-                                                          : group_of(own.brushes[keys.front()]);
+        // (review P3-14, as the other kinds' edits name them: "to" the group moved to — made when it is not there, unlike
+        // theirs —, "group" the group the brushes are in now, checked when given)
+        if (params.contains("group")) {
+            const std::string from = text_of("group");
+            for (const std::string& k : keys) {
+                if (group_of(own.brushes[k]) != from) throw core::Error("value", "the brush " + k + " is not in the group " + from);
+            }
+        }
+        const std::string to = group_name(text_of("to"));
         if (std::find(order.begin(), order.end(), to) == order.end()) order.push_back(to);
         // (the group's brushes in their order; the moved ones taken out and put at `index` of what is left, else last)
         std::vector<std::string> in_group;
@@ -905,7 +940,7 @@ Json edit(const std::filesystem::path& config_dir, const Json& params) {
         const std::string g = group_name(params.contains("name") ? text_of("name") : text_of("group"));
         if (std::find(order.begin(), order.end(), g) != order.end()) throw core::Error("value", "a group named " + g + " is there already");
         order.push_back(g);
-        brushes::save_many(config_dir, {}, order);
+        brushes::save_many(config_dir, {}, order_to_write(own, order));
         return Json{{"group", g}};
     }
     if (action == "rename_group") {
@@ -921,7 +956,7 @@ Json edit(const std::filesystem::path& config_dir, const Json& params) {
             if (to == kOwnGroup) e.erase("group"); else e["group"] = to;
             changes.emplace_back(key, e);
         }
-        brushes::save_many(config_dir, changes, order);
+        brushes::save_many(config_dir, changes, order_to_write(own, order));
         return Json{{"group", to}};
     }
     if (action == "delete_group") {
@@ -935,7 +970,7 @@ Json edit(const std::filesystem::path& config_dir, const Json& params) {
             changes.emplace_back(key, std::nullopt);
             deleted.push_back(key);
         }
-        brushes::save_many(config_dir, changes, order);
+        brushes::save_many(config_dir, changes, order_to_write(own, order));
         return Json{{"deleted", std::move(deleted)}, {"group", g}};
     }
     throw core::Error("value", "action must be rename, delete, move, new_group, rename_group or delete_group");
@@ -979,8 +1014,22 @@ Json import_mapped(const std::filesystem::path& config_dir, const abr_map::Impor
     }
     std::vector<std::string> order = groups_of(own);
     if (std::find(order.begin(), order.end(), group) == order.end()) order.push_back(group);
-    brushes::save_many(config_dir, changes, order, mapped.pictures);
-    return Json{{"group", group}, {"brushes", std::move(made)}, {"warnings", mapped.warnings}, {"version", mapped.version}};
+    brushes::save_many(config_dir, changes, order_to_write(own, order), mapped.pictures);
+    Json out{{"group", group}, {"brushes", std::move(made)}, {"warnings", mapped.warnings}, {"version", mapped.version}};
+    if (!forgotten.empty()) out["replaced"] = Json(std::vector<std::string>(forgotten.begin(), forgotten.end()));  // (review P3-10)
+    return out;
+}
+
+std::string import_group(const std::string& stem) {
+    const std::string base = clean(stem, 200).empty() ? std::string("読み込んだブラシ") : clean(stem, 200);
+    const auto builtin_name = [](const std::string& name) {
+        return std::any_of(built().groups.begin(), built().groups.end(), [&](const Group& g) { return g.name == name; });
+    };
+    if (!builtin_name(base)) return base;
+    for (int n = 2;; ++n) {
+        const std::string name = clean(base, 190) + " " + std::to_string(n);
+        if (!builtin_name(name)) return name;
+    }
 }
 
 Json import_abr(const std::filesystem::path& config_dir, std::string_view bytes, const std::string& group, bool replace) {
@@ -991,6 +1040,8 @@ Defined define_from(const core::Document& doc, const core::Page& page, const Jso
     // (the page's working grid: an opened picture's, a precise or ink page's finest, else 200 dpi — as パターンを定義…)
     const int page_dpi = (page.color || (page.rgb && page.rgb->depth > 8)) ? layer_masks::grid_dpi(page) : raster::working_dpi(page);
     std::optional<image_ops::Pixels> held;
+    std::vector<float> cover;
+    double dpi = page_dpi;
     if (layer_id != nullptr) {
         const core::Layer* layer = nullptr;
         for (const core::Layer& l : page.layers) {
@@ -998,18 +1049,41 @@ Defined define_from(const core::Document& doc, const core::Page& page, const Jso
         }
         if (layer == nullptr) throw core::Error("value", "no layer " + *layer_id + " on the page");
         held.emplace(image_ops::shown_layer_pixels(doc, page, *layer));
+        const std::uint32_t lw = held->width(), lh = held->height();
+        if (lw == 0 || lh == 0) throw core::Error("value", "nothing there holds paint (all white or transparent)");
+        dpi = static_cast<double>(lw) / (page.spec.width_mm.value() / 25.4);
+        // (an 8-bit grid at the working dpi takes the area as filter_raster does; a layer's picture of another size, stretched
+        // over the page, through the area's coverage of its own grid)
+        const bool eight = held->kind() == image_ops::Pixels::Kind::Eight && image_ops::grid_scale(page, lw, lh) == 1.0;
+        if (area != nullptr) cover = image_ops::coverage(page, *area, lw, lh, eight);
+    } else if (area != nullptr) {
+        // (review P3-7: the page drawn within the area's box only, its coverage from the area's own mask at that grid)
+        const selection::AreaMask inside = selection::area_mask(*area, page_dpi);
+        const int pw = mm_to_px(page.spec.width_mm.value(), page_dpi), ph = mm_to_px(page.spec.height_mm.value(), page_dpi);
+        const int mw = inside.mask.width(), mh = inside.mask.size().height;
+        const Box box{static_cast<int>(std::clamp<std::int64_t>(inside.x0, 0, pw)), static_cast<int>(std::clamp<std::int64_t>(inside.y0, 0, ph)),
+                      static_cast<int>(std::clamp<std::int64_t>(inside.x0 + mw, 0, pw)), static_cast<int>(std::clamp<std::int64_t>(inside.y0 + mh, 0, ph))};
+        if (box.width() <= 0 || box.height() <= 0) throw core::Error("value", "the area covers none of the page");
+        held.emplace(image_ops::page_pixels(doc, page, box, page_dpi));
+        const std::uint32_t rw = held->width(), rh = held->height();
+        const std::string mask = inside.mask.tobytes();
+        cover.assign(std::size_t(rw) * rh, 0.0f);
+        for (std::uint32_t y = 0; y < rh; ++y) {
+            const std::int64_t my = box.y0 + static_cast<std::int64_t>(y) - inside.y0;
+            if (my < 0 || my >= mh) continue;
+            for (std::uint32_t x = 0; x < rw; ++x) {
+                const std::int64_t mx = box.x0 + static_cast<std::int64_t>(x) - inside.x0;
+                if (mx < 0 || mx >= mw) continue;
+                cover[std::size_t(y) * rw + x] = static_cast<unsigned char>(mask[std::size_t(my) * mw + std::size_t(mx)]) / 255.0f;
+            }
+        }
     } else {
         held.emplace(image_ops::page_pixels(doc, page, page_dpi));
+        if (held->width() > 0) dpi = static_cast<double>(held->width()) / (page.spec.width_mm.value() / 25.4);
     }
     const image_ops::Pixels& p = *held;
     const std::uint32_t w = p.width(), h = p.height();
     if (w == 0 || h == 0) throw core::Error("value", "nothing there holds paint (all white or transparent)");
-    const double dpi = static_cast<double>(w) / (page.spec.width_mm.value() / 25.4);
-    std::vector<float> cover;
-    // (an 8-bit grid at the working dpi takes the area as filter_raster does; a layer's picture of another size, stretched
-    // over the page, through the area's coverage of its own grid)
-    const bool eight = p.kind() == image_ops::Pixels::Kind::Eight && image_ops::grid_scale(page, w, h) == 1.0;
-    if (area != nullptr) cover = image_ops::coverage(page, *area, w, h, eight);
     // the box the area covers, then its paint (darkness × alpha × the area)
     std::uint32_t bx0 = w, by0 = h, bx1 = 0, by1 = 0;
     for (std::uint32_t y = 0; y < h; ++y) {

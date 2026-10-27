@@ -445,7 +445,8 @@ std::string MainWindow::pencil_key() const {
     return std::string(render::dabs::kPencilKey);
 }
 
-bool MainWindow::own_brush_op(const std::string& kind, Json& ops) {
+bool MainWindow::own_brush_op(const std::string& kind, Json& ops, bool drawing) {
+    const QString failed = drawing ? QStringLiteral("描けませんでした") : QStringLiteral("使えませんでした");  // (review P3-19: the line's words as before E2)
     if (!kind.starts_with("my_") || book().brush_custom.contains(kind)) return true;
     render::brushes::Brush own = render::brushes::brush(kind);
     if (own.key != kind) {
@@ -464,7 +465,7 @@ bool MainWindow::own_brush_op(const std::string& kind, Json& ops) {
         own = render::brushes::brush(kind);
     }
     if (own.key != kind) {
-        flash(QStringLiteral("このブラシ（%1）が見つからないため使えませんでした。一覧から選び直してください").arg(QString::fromStdString(kind)), 5000, true);
+        flash(QStringLiteral("このブラシ（%1）が見つからないため%2。一覧から選び直してください").arg(QString::fromStdString(kind), failed), 5000, true);
         return false;
     }
     Json define{{"op", "define_brush"}, {"key", kind}};
@@ -473,7 +474,7 @@ bool MainWindow::own_brush_op(const std::string& kind, Json& ops) {
         try {
             settings_of = render::brushes::with_paper_picture(settings_of);
         } catch (const std::exception&) {
-            flash(QStringLiteral("このブラシ（%1）の紙質の画像が見つからないため使えませんでした").arg(QString::fromStdString(own.label)), 5000, true);
+            flash(QStringLiteral("このブラシ（%1）の紙質の画像が見つからないため%2。ブラシの詳細で紙質の画像を読み込み直してください").arg(QString::fromStdString(own.label), failed), 5000, true);
             return false;
         }
     }
@@ -486,7 +487,7 @@ bool MainWindow::own_brush_op(const std::string& kind, Json& ops) {
             try {
                 settings_of = render::brushes::with_pictures(settings_of);
             } catch (const std::exception&) {
-                flash(QStringLiteral("このブラシ（%1）の先端・テクスチャの画像が見つからないため使えませんでした").arg(QString::fromStdString(own.label)), 5000, true);
+                flash(QStringLiteral("このブラシ（%1）の先端・テクスチャの画像が見つからないため%2").arg(QString::fromStdString(own.label), failed), 5000, true);
                 return false;
             }
         }

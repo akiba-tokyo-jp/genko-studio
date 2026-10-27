@@ -1055,6 +1055,7 @@ void MainWindow::on_stroke(const StrokeInput& stroke) {
         op["blend"] = pen_.blend;
     }
     if (render::brushes::is_dab(op.value("kind", std::string()))) {
+        add_background(op);  // (PC4 E2, review P2-4: the 背景色 a brush's colour moves to, with the line)
         const std::size_t n = stroke.points.size();
         if (stroke.tilt.size() == 2 * n && std::any_of(stroke.tilt.begin(), stroke.tilt.end(), [](double v) { return std::abs(v) > 0.05; })) {
             Json tilt = Json::array();
@@ -1089,7 +1090,7 @@ void MainWindow::on_stroke(const StrokeInput& stroke) {
     // them, a built-in dab brush's under its key: own_brush_op)
     if (kind.starts_with("my_") && !book().brush_custom.contains(kind)) {
         Json before = Json::array();
-        if (!own_brush_op(kind, before)) {
+        if (!own_brush_op(kind, before, true)) {
             canvas_->stroke_dropped();
             return;
         }

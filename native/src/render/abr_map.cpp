@@ -7,6 +7,7 @@
 #include <map>
 #include <optional>
 #include <set>
+#include <unordered_set>
 
 #include "core/brush_dabs.hpp"
 #include "core/error.hpp"
@@ -144,77 +145,83 @@ std::string keep(const Plane& plane, std::map<std::string, core::Bytes>& picture
     return ref;
 }
 
-// A pattern of the file as a texture: its lightness (transparent parts white: upstream reads the planes only), none
+// A pattern of the file as a texture: its lightness (transparent parts white: upstream reads the planes only), made
+// straight into the texture's plane (at most 1024 a side: review P2-1 — no plane of the pattern's own size is made), none
 // for one that cannot be.
 std::optional<Plane> pattern_plane(const pat::PsdPattern& p) {
     const std::size_t n = std::size_t(p.width) * p.height;
     if (n == 0) return std::nullopt;
-    const auto plane = [&](std::size_t c) -> std::optional<std::vector<float>> {
-        if (c >= p.channels.size()) return std::nullopt;
+    const std::size_t bytes = p.depth == 8 ? 1 : p.depth == 16 ? 2 : p.depth == 32 ? 4 : 0;
+    if (bytes == 0) return std::nullopt;
+    const auto holds = [&](std::size_t c) { return c < p.channels.size() && p.channels[c].size() >= n * bytes; };
+    // (a channel's value at a pixel as 0..1)
+    const auto at = [&p, bytes](std::size_t c, std::size_t i) -> float {
         const std::string& ch = p.channels[c];
-        std::vector<float> v;
-        if (p.depth == 8 && ch.size() >= n) {
-            v.resize(n);
-            for (std::size_t i = 0; i < n; ++i) v[i] = static_cast<float>(static_cast<std::uint8_t>(ch[i])) / 255.0f;
-        } else if (p.depth == 16 && ch.size() >= 2 * n) {
-            v.resize(n);
-            for (std::size_t i = 0; i < n; ++i) {
-                v[i] = static_cast<float>((static_cast<std::uint8_t>(ch[2 * i]) << 8) | static_cast<std::uint8_t>(ch[2 * i + 1])) / 65535.0f;
-            }
-        } else if (p.depth == 32 && ch.size() >= 4 * n) {
-            v.resize(n);
-            for (std::size_t i = 0; i < n; ++i) {
-                const std::uint32_t bits = (std::uint32_t(static_cast<std::uint8_t>(ch[4 * i])) << 24) | (std::uint32_t(static_cast<std::uint8_t>(ch[4 * i + 1])) << 16) |
-                                           (std::uint32_t(static_cast<std::uint8_t>(ch[4 * i + 2])) << 8) | std::uint32_t(static_cast<std::uint8_t>(ch[4 * i + 3]));
-                float f = 0.0f;
-                std::memcpy(&f, &bits, sizeof f);
-                v[i] = std::isfinite(f) ? std::clamp(f, 0.0f, 1.0f) : 0.0f;
-            }
-        } else {
-            return std::nullopt;
-        }
-        return v;
+        if (bytes == 1) return static_cast<float>(static_cast<std::uint8_t>(ch[i])) / 255.0f;
+        if (bytes == 2) return static_cast<float>((static_cast<std::uint8_t>(ch[2 * i]) << 8) | static_cast<std::uint8_t>(ch[2 * i + 1])) / 65535.0f;
+        const std::uint32_t bits = (std::uint32_t(static_cast<std::uint8_t>(ch[4 * i])) << 24) | (std::uint32_t(static_cast<std::uint8_t>(ch[4 * i + 1])) << 16) |
+                                   (std::uint32_t(static_cast<std::uint8_t>(ch[4 * i + 2])) << 8) | std::uint32_t(static_cast<std::uint8_t>(ch[4 * i + 3]));
+        float f = 0.0f;
+        std::memcpy(&f, &bits, sizeof f);
+        return std::isfinite(f) ? std::clamp(f, 0.0f, 1.0f) : 0.0f;
     };
-    std::vector<float> grey;
+    std::function<float(std::size_t)> grey;
     if (p.mode == 3) {
-        const auto r = plane(0), g = plane(1), b = plane(2);
-        if (!r || !g || !b) return std::nullopt;
-        grey.resize(n);
-        for (std::size_t i = 0; i < n; ++i) grey[i] = 0.299f * (*r)[i] + 0.587f * (*g)[i] + 0.114f * (*b)[i];
+        if (!holds(0) || !holds(1) || !holds(2)) return std::nullopt;
+        grey = [at](std::size_t i) { return 0.299f * at(0, i) + 0.587f * at(1, i) + 0.114f * at(2, i); };
     } else if (p.mode == 2) {
         if (p.palette.size() < 768 || p.channels.empty() || p.channels[0].size() < n) return std::nullopt;
-        grey.resize(n);
-        for (std::size_t i = 0; i < n; ++i) {
+        grey = [&p](std::size_t i) {
             const std::size_t k = std::size_t(static_cast<std::uint8_t>(p.channels[0][i])) * 3;
             const auto c = [&](std::size_t o) { return static_cast<float>(static_cast<std::uint8_t>(p.palette[k + o])) / 255.0f; };
-            grey[i] = 0.299f * c(0) + 0.587f * c(1) + 0.114f * c(2);
-        }
+            return 0.299f * c(0) + 0.587f * c(1) + 0.114f * c(2);
+        };
     } else if (p.mode == 4) {  // (CMYK planes are kept inverted: 0 is full ink)
-        const auto c = plane(0), k = plane(3);
-        if (!c || !k) return std::nullopt;
-        grey.resize(n);
-        for (std::size_t i = 0; i < n; ++i) grey[i] = std::clamp((*c)[i] * (*k)[i], 0.0f, 1.0f);
+        if (!holds(0) || !holds(3)) return std::nullopt;
+        grey = [at](std::size_t i) { return std::clamp(at(0, i) * at(3, i), 0.0f, 1.0f); };
     } else {
-        auto first = plane(0);
-        if (!first) return std::nullopt;
-        grey = std::move(*first);
+        if (!holds(0)) return std::nullopt;
+        grey = [at](std::size_t i) { return at(0, i); };
     }
-    return fit(p.width, p.height, [&grey](std::size_t i) { return grey[i]; }, core::kMaxPatternEdge);
+    return fit(p.width, p.height, grey, core::kMaxPatternEdge);
 }
 
 struct Mapper {
     const abr::File& file;
     Import& out;
-    std::set<std::string> warnings;
+    // (the warnings, each once and in order: the first kMaxWarnings kept, the rest counted — review P1-2)
+    std::vector<std::string> warnings;
+    std::unordered_set<std::size_t> said;
+    std::size_t more = 0;
     std::set<std::string> unknown;
     std::map<const abr::Sample*, std::pair<std::string, double>> tips;  // (each tip kept once)
+    std::map<const pat::PsdPattern*, std::optional<std::string>> textures;  // (each pattern made a texture once: P2-1)
+    std::map<std::string, const abr::Sample*> samples_by_id;                // (review P3-6: found once, not searched)
+    std::map<std::string, const pat::PsdPattern*> patterns_by_id, patterns_by_name;
+
+    Mapper(const abr::File& f, Import& o) : file(f), out(o) {
+        for (const abr::Sample& s : f.samples) samples_by_id.emplace(s.id, &s);  // (the first of an id, as a search finds)
+        for (const pat::PsdPattern& p : f.patterns) {
+            if (!p.id.empty()) patterns_by_id.emplace(p.id, &p);
+            if (!p.name.empty()) patterns_by_name.emplace(p.name, &p);
+        }
+    }
+
+    void note(std::string words) {
+        if (!said.insert(std::hash<std::string>{}(words)).second) return;
+        if (warnings.size() < abr::kMaxWarnings) {
+            warnings.push_back(std::move(words));
+        } else {
+            ++more;
+        }
+    }
 
     // A sampled tip (made no larger than 2500 a side) and its size (its larger side, pixels).
     std::pair<std::string, double> tip(const abr::Sample& s) {
         if (const auto it = tips.find(&s); it != tips.end()) return it->second;
         const Plane plane = fit(s.width, s.height, [&s](std::size_t i) { return s.unit(i); }, core::kMaxTipEdge);
         if (plane.width != s.width || plane.height != s.height) {
-            warnings.insert("一辺 " + std::to_string(core::kMaxTipEdge) + " 画素より大きい先端は小さくしました");
+            note("一辺 " + std::to_string(core::kMaxTipEdge) + " 画素より大きい先端は小さくしました");
         }
         auto made = std::pair<std::string, double>{keep(plane, out.pictures), static_cast<double>(std::max(s.width, s.height))};
         tips.emplace(&s, made);
@@ -225,7 +232,8 @@ struct Mapper {
         core::DabDynamic out_dyn;
         if (d == nullptr) return out_dyn;
         using C = core::DabControl;
-        switch (static_cast<long long>(num(*d, "bVTy").value_or(0.0))) {
+        // (review P3-5: within the controls' numbers before it is made a whole number)
+        switch (static_cast<int>(std::clamp(num(*d, "bVTy").value_or(0.0), -1.0, 100.0))) {
             case 1: out_dyn.control = C::Fade; break;
             case 2: out_dyn.control = C::Pressure; break;
             case 3: out_dyn.control = C::Tilt; break;
@@ -233,7 +241,7 @@ struct Mapper {
             case 5: out_dyn.control = C::InitialDirection; break;
             case 6: out_dyn.control = C::Direction; break;
             case 7:
-                warnings.insert("コントロールの「初期回転」は「回転」にしました");
+                note("コントロールの「初期回転」は「回転」にしました");
                 out_dyn.control = C::Rotation;
                 break;
             case 8: out_dyn.control = C::Rotation; break;
@@ -252,7 +260,7 @@ struct Mapper {
     // A brush's size in pixels as mm (0.01..500), saying when it is past what a brush holds.
     double mm(double px) {
         const double v = px * kMmPerPixel;
-        if (v > 500.0) warnings.insert("500 mm より大きいブラシは 500 mm にしました");
+        if (v > 500.0) note("500 mm より大きいブラシは 500 mm にしました");
         return std::clamp(v, 0.01, 500.0);
     }
 
@@ -262,13 +270,8 @@ struct Mapper {
         const bool sampled = t.class_id == "sampledBrush" || t.get("sampledData") != nullptr;
         if (!sampled) return std::pair<std::string, std::optional<double>>{std::string(), std::nullopt};
         const std::string id = text(t, "sampledData").value_or(std::string());
-        const abr::Sample* found = nullptr;
-        for (const abr::Sample& s : file.samples) {
-            if (s.id == id) {
-                found = &s;
-                break;
-            }
-        }
+        const auto it = samples_by_id.find(id);
+        const abr::Sample* found = it != samples_by_id.end() ? it->second : nullptr;
         if (found == nullptr && file.samples.size() == 1) found = &file.samples.front();
         if (found == nullptr) return std::nullopt;
         const auto [ref, size] = tip(*found);
@@ -279,28 +282,21 @@ struct Mapper {
         const std::string id = text(t, "Idnt").value_or(std::string());
         const std::string name = text(t, "Nm  ").value_or(std::string());
         const pat::PsdPattern* found = nullptr;
-        for (const pat::PsdPattern& p : file.patterns) {
-            if (!id.empty() && p.id == id) {
-                found = &p;
-                break;
-            }
-        }
-        if (found == nullptr) {
-            for (const pat::PsdPattern& p : file.patterns) {
-                if (!name.empty() && p.name == name) {
-                    found = &p;
-                    break;
-                }
-            }
-        }
+        if (const auto by_id = patterns_by_id.find(id); !id.empty() && by_id != patterns_by_id.end()) found = by_id->second;
+        if (const auto by_name = patterns_by_name.find(name); found == nullptr && !name.empty() && by_name != patterns_by_name.end()) found = by_name->second;
         core::DabPattern out_pattern;
         if (found != nullptr) {
-            if (const auto plane = pattern_plane(*found)) {
-                out_pattern.asset = keep(*plane, out.pictures);
+            auto made = textures.find(found);
+            if (made == textures.end()) {  // (made once for every preset that names it)
+                const auto plane = pattern_plane(*found);
+                made = textures.emplace(found, plane ? std::optional<std::string>(keep(*plane, out.pictures)) : std::nullopt).first;
+            }
+            if (made->second) {
+                out_pattern.asset = *made->second;
                 return out_pattern;
             }
         }
-        warnings.insert("テクスチャのパターン「" + pat::shown_name(name.empty() ? id : name) + "」はファイルに入っていないので、紙の模様で代えました");
+        note("テクスチャのパターン「" + pat::shown_name(name.empty() ? id : name) + "」はファイルに入っていないので、紙の模様で代えました");
         return out_pattern;  // (the default: the program's paper, 128 pixels, seed 1)
     }
 
@@ -337,8 +333,8 @@ struct Mapper {
             b.shape.roundness = roundness;
             b.shape.flip_x_jitter = boolean(d, "flipX").value_or(false);
             b.shape.flip_y_jitter = boolean(d, "flipY").value_or(false);
-            if (pct(d, "tiltScale").value_or(0.0) > 0.0) warnings.insert("シェイプの「傾きの比率」は使えません");
-            if (boolean(d, "brushProjection") == std::optional<bool>(true)) warnings.insert("「ブラシ投影」は使えません");
+            if (pct(d, "tiltScale").value_or(0.0) > 0.0) note("シェイプの「傾きの比率」は使えません");
+            if (boolean(d, "brushProjection") == std::optional<bool>(true)) note("「ブラシ投影」は使えません");
         }
         if (boolean(d, "useScatter") == std::optional<bool>(true)) {
             b.scatter.enabled = true;
@@ -355,7 +351,7 @@ struct Mapper {
             t.scale = std::clamp(pct(d, "textureScale").value_or(1.0), 0.01, 10.0);
             t.brightness = std::clamp(num(d, "textureBrightness").value_or(0.0) / 150.0, -1.0, 1.0);
             const double contrast = num(d, "textureContrast").value_or(0.0) / 50.0;
-            if (contrast > 1.0) warnings.insert("テクスチャのコントラストが 50 を越えるものは 50 にしました");
+            if (contrast > 1.0) note("テクスチャのコントラストが 50 を越えるものは 50 にしました");
             t.contrast = std::clamp(contrast, -1.0, 1.0);
             t.mode = mask_mode(enum_value(d, "textureBlendMode")).value_or(core::DabMaskMode::Multiply);
             t.depth = std::clamp(pct(d, "textureDepth").value_or(1.0), 0.0, 1.0);
@@ -374,7 +370,7 @@ struct Mapper {
                     dual.tip = shape->first;
                     dual_px = std::clamp(num(*t, "Dmtr").value_or(shape->second.value_or(dual_px)), 1.0, 5000.0);
                 } else {
-                    warnings.insert("デュアルブラシの先端がファイルに入っていないので、円の先端で代えました");
+                    note("デュアルブラシの先端がファイルに入っていないので、円の先端で代えました");
                 }
                 dual.hardness = std::clamp(pct(*t, "Hrdn").value_or(1.0), 0.0, 1.0);
                 dual.roundness = std::clamp(pct(*t, "Rndn").value_or(1.0), 0.01, 1.0);
@@ -407,7 +403,7 @@ struct Mapper {
             for (const auto& [k, what] : {std::pair{"wtVr", "ウェット"}, std::pair{"mxVr", "ミックス"}}) {
                 const core::DabDynamic v = dynamic(obj(d, k));
                 if (v.jitter > 0.0 || v.control != core::DabControl::Off) {
-                    warnings.insert(std::string("伝達の「") + what + "」の揺らぎ（混合ブラシ）は使えません");
+                    note(std::string("伝達の「") + what + "」の揺らぎ（混合ブラシ）は使えません");
                 }
             }
         }
@@ -433,10 +429,10 @@ struct Mapper {
             b.pressure_size = boolean(*to, "usePressureOverridesSize").value_or(false);
             b.pressure_opacity = boolean(*to, "usePressureOverridesOpacity").value_or(false);
             if (boolean(*to, "smoothing").value_or(false) && pct(*to, "smoothingValue").value_or(0.0) > 0.0) {
-                warnings.insert("プリセットの「滑らかさ」は使いません（ツールの設定の滑らかさで描きます）");
+                note("プリセットの「滑らかさ」は使いません（ツールの設定の滑らかさで描きます）");
             }
             if (const auto mode = enum_value(*to, "Md  "); mode && *mode != "Nrml") {
-                warnings.insert("プリセットに保存された描画モードは使いません（ブラシ パネルのモードで描きます）");
+                note("プリセットに保存された描画モードは使いません（ブラシ パネルのモードで描きます）");
             }
         }
         return b;
@@ -454,8 +450,7 @@ Json settings_of(const std::string& name, const core::DabSettings& dabs) {
 Import map_file(const abr::File& f) {
     Import out;
     out.version = f.version;
-    out.warnings = f.warnings;
-    Mapper m{f, out, {}, {}, {}};
+    Mapper m(f, out);
     if (!f.legacy.empty()) {
         for (std::size_t i = 0; i < f.legacy.size(); ++i) {
             const abr::LegacyBrush& b = f.legacy[i];
@@ -498,16 +493,29 @@ Import map_file(const abr::File& f) {
             if (const auto s = m.preset(d)) {
                 out.presets.push_back(Preset{name, settings_of(name, *s)});
             } else {
-                m.warnings.insert("「" + name + "」はサンプルの先端がファイルに入っていないので読み込みませんでした");
+                m.note("「" + name + "」はサンプルの先端がファイルに入っていないので読み込みませんでした");
             }
         }
     }
-    for (const std::string& w : m.warnings) out.warnings.push_back(w);
     if (!m.unknown.empty()) {
         std::string list;
-        for (const std::string& k : m.unknown) list += (list.empty() ? "" : ", ") + k;
-        out.warnings.push_back("Genko に当たる物の無い設定は使いませんでした: " + list);
+        std::size_t shown = 0;
+        for (const std::string& k : m.unknown) {
+            if (shown == 30) break;
+            list += (list.empty() ? "" : ", ") + k;
+            ++shown;
+        }
+        if (m.unknown.size() > shown) list += " ほか " + std::to_string(m.unknown.size() - shown) + " 個";
+        m.note("Genko に当たる物の無い設定は使いませんでした: " + list);
     }
+    // (the file's warnings, then the mapping's: kMaxWarnings at most, then how many more — review P1-2)
+    out.warnings = f.warnings;
+    const std::size_t all = f.warning_count + m.warnings.size() + m.more;
+    for (std::string& w : m.warnings) {
+        if (out.warnings.size() >= abr::kMaxWarnings) break;
+        out.warnings.push_back(std::move(w));
+    }
+    if (all > out.warnings.size()) out.warnings.push_back("ほか " + std::to_string(all - out.warnings.size()) + " 件の知らせがあります");
     // (only the pictures the presets kept name)
     std::set<std::string> named;
     for (const Preset& p : out.presets) {

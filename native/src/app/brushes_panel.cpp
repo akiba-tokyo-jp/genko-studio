@@ -371,7 +371,7 @@ void BrushesPanel::remove() {
     }
     try {
         presets::remove(config_dir(), {key});
-        window_->brushes_changed(std::nullopt, key);
+        window_->brushes_changed(std::nullopt, {key});
         window_->flash(QStringLiteral("ブラシをライブラリから消しました（描いた線はそのまま）"), 3000);
     } catch (const std::exception& error) {
         ask::warning(this, QStringLiteral("削除"), QStringLiteral("消せませんでした: %1").arg(wording::error(QString::fromUtf8(error.what()))));
@@ -391,7 +391,8 @@ bool BrushesPanel::import_file(const QString& path, std::optional<bool> replace)
             return false;
         }
     }
-    const std::string group = QFileInfo(path).completeBaseName().toStdString();
+    // (the file's name; one named as a built-in group goes to "一般 2"… — review P3-11)
+    const std::string group = presets::import_group(QFileInfo(path).completeBaseName().toStdString());
     // (a group of the file's name there already: put in its place, or added to it — asked, as Photoshop adds)
     if (!replace) {
         bool there = false;
@@ -406,7 +407,7 @@ bool BrushesPanel::import_file(const QString& path, std::optional<bool> replace)
         const std::filesystem::path config = config_dir();
         const bool put_in_place = *replace;
         out = off_ui([file, config, group, put_in_place] {
-            const std::string bytes = storage::read_file_bounded(file, render::abr::kMaxFileBytes);
+            const std::string bytes = render::abr::read_file(file);  // (past 512 MB: refused unread, too_large)
             return presets::import_abr(config, bytes, group, put_in_place);
         });
     } catch (const std::exception& error) {
@@ -415,7 +416,9 @@ bool BrushesPanel::import_file(const QString& path, std::optional<bool> replace)
     }
     for (const Json& w : out.value("warnings", Json::array())) last_warnings.push_back(w.get<std::string>());
     const Json& made = out["brushes"];
-    window_->brushes_changed(made.empty() ? std::nullopt : std::optional<std::string>(made.front().value("key", std::string())));
+    std::vector<std::string> replaced;  // (the group's brushes put out of their place: forgotten here too — review P3-10)
+    for (const Json& k : out.value("replaced", Json::array())) replaced.push_back(k.get<std::string>());
+    window_->brushes_changed(made.empty() ? std::nullopt : std::optional<std::string>(made.front().value("key", std::string())), replaced);
     QString words = QStringLiteral("ブラシを %1 本、グループ「%2」に読み込みました").arg(made.size()).arg(QString::fromStdString(out.value("group", group)));
     if (!last_warnings.empty()) {
         words += QStringLiteral("\n\nそのままでは読み込めなかったもの:");
@@ -472,8 +475,7 @@ void BrushesPanel::remove_group() {
         const Json out = presets::edit(config_dir(), Json{{"action", "delete_group"}, {"group", group.toStdString()}});
         std::vector<std::string> gone;
         for (const Json& k : out.value("deleted", Json::array())) gone.push_back(k.get<std::string>());
-        window_->brushes_changed(std::nullopt, gone.empty() ? std::string() : gone.front());
-        for (std::size_t i = 1; i < gone.size(); ++i) window_->brushes_changed(std::nullopt, gone[i]);
+        window_->brushes_changed(std::nullopt, gone);  // (once for them all — review P2-3)
     } catch (const std::exception& error) {
         ask::warning(this, QStringLiteral("グループを削除"), QStringLiteral("消せませんでした: %1").arg(wording::error(QString::fromUtf8(error.what()))));
     }
@@ -486,7 +488,7 @@ void BrushesPanel::move_to_group(const QString& group) {
         return;
     }
     try {
-        presets::edit(config_dir(), Json{{"action", "move"}, {"preset", key}, {"group", group.toStdString()}});
+        presets::edit(config_dir(), Json{{"action", "move"}, {"preset", key}, {"to", group.toStdString()}});
         refresh();
     } catch (const std::exception& error) {
         ask::warning(this, QStringLiteral("グループに移動"), QStringLiteral("移せませんでした: %1").arg(wording::error(QString::fromUtf8(error.what()))));

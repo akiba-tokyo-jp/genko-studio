@@ -65,7 +65,8 @@ ToolPresetsPanel::ToolPresetsPanel(MainWindow* window) : window_(window) {
     more->setPopupMode(QToolButton::InstantPopup);
     auto* menu = new QMenu(more);
     menu->setObjectName(QStringLiteral("tool_preset_menu"));
-    menu->addAction(QStringLiteral("ツールプリセットを初期設定に戻す"), this, [this] { reset(); });
+    menu->addAction(QStringLiteral("ツールプリセットを初期設定に戻す…"), this, [this] { reset(false); });
+    menu->addAction(QStringLiteral("初期設定のツールプリセットを追加"), this, [this] { reset(true); });
     more->setMenu(menu);
     row->addWidget(more);
     layout->addLayout(row);
@@ -167,11 +168,17 @@ void ToolPresetsPanel::remove() {
     refresh();
 }
 
-void ToolPresetsPanel::reset() {
+void ToolPresetsPanel::reset(bool append, std::optional<bool> sure) {
+    // (review P3-12: putting the built-in ones back in place of one's own is asked first, as the gradients' is)
+    if (!append && !sure) {
+        sure = ask::question(this, QStringLiteral("初期設定に戻す"),
+                             QStringLiteral("ツールプリセットを初期設定に戻すと、自分で作ったツールプリセットは消えます。戻しますか？\n（消さずに足すには「初期設定のツールプリセットを追加」）"));
+    }
+    if (!append && !*sure) return;
     try {
         store::Library lib = store::load(config_dir(), render::tool_presets::kind());
         if (!lib.problem.empty()) throw core::Error("io", lib.problem);
-        lib.groups = store::reset(lib.groups, render::tool_presets::kind(), false);
+        lib.groups = store::reset(lib.groups, render::tool_presets::kind(), append);
         store::save(config_dir(), render::tool_presets::kind(), lib.groups);
     } catch (const std::exception& e) {
         ask::warning(this, QStringLiteral("初期設定に戻す"), QStringLiteral("戻せませんでした: %1").arg(wording::error(QString::fromUtf8(e.what()))));

@@ -29,6 +29,7 @@
 #include "app/config.hpp"
 #include "app/fields.hpp"
 #include "app/main_window.hpp"
+#include "app/off_ui.hpp"
 #include "app/patterns_panel.hpp"
 #include "app/theme.hpp"
 #include "core/brushes.hpp"
@@ -40,6 +41,7 @@
 #include "render/patterns.hpp"
 #include "render/png.hpp"
 #include "service/wording.hpp"
+#include "storage/fsutil.hpp"
 
 namespace genko::app {
 
@@ -311,14 +313,17 @@ void BrushSettingsPanel::build_dab_page(QWidget* page) {
             const auto chosen = pattern_chosen(window_->book(), choose->currentData().toString());
             if (!chosen) return;
             try {
-                // (its lightness, at most 1024 pixels a side: a texture's)
-                const std::string grey = render::patterns::grey(chosen->first, *chosen->second);
-                render::Image image = render::Image::frombytes(
-                    "L", render::Size{static_cast<int>(chosen->first.width), static_cast<int>(chosen->first.height)}, grey);
-                if (image.width() > static_cast<int>(core::kMaxPatternEdge) || image.height() > static_cast<int>(core::kMaxPatternEdge)) {
-                    image.thumbnail(render::Size{static_cast<int>(core::kMaxPatternEdge), static_cast<int>(core::kMaxPatternEdge)});
-                }
-                const auto made = render::dabs::take_in_picture(render::write_png(image, 6), false, core::kMaxPatternEdge);
+                // (its lightness, at most 1024 pixels a side: a texture's — made off the window's thread, review P3-17)
+                const auto pattern = chosen->first;
+                const auto bytes = chosen->second;
+                const auto made = off_ui([pattern, bytes] {
+                    const std::string grey = render::patterns::grey(pattern, *bytes);
+                    render::Image image = render::Image::frombytes("L", render::Size{static_cast<int>(pattern.width), static_cast<int>(pattern.height)}, grey);
+                    if (image.width() > static_cast<int>(core::kMaxPatternEdge) || image.height() > static_cast<int>(core::kMaxPatternEdge)) {
+                        image.thumbnail(render::Size{static_cast<int>(core::kMaxPatternEdge), static_cast<int>(core::kMaxPatternEdge)});
+                    }
+                    return render::dabs::take_in_picture(render::write_png(image, 6), false, core::kMaxPatternEdge);
+                });
                 render::dabs::keep_picture(made.first, made.second);
                 texture_asset_ = made.first;
                 kind->setCurrentIndex(kind->findData(QStringLiteral("asset")));
@@ -409,6 +414,9 @@ void BrushSettingsPanel::build_dab_page(QWidget* page) {
     number("build_up_rate", QStringLiteral("ビルドアップの速さ"), 1, 1000, 1, 0, QStringLiteral(" 点/秒"), [](const S& s) { return s.build_up_rate; },
            [](S& s, double v) { s.build_up_rate = v; });
     flag("protect_texture", QStringLiteral("テクスチャを保護"), [](const S& s) { return s.protect_texture; }, [](S& s, bool v) { s.protect_texture = v; });
+    // (review P3-20, E1 review P3-13: Photoshop's オプションバーの筆圧の 2 つ, kept with the brush as a preset keeps them)
+    flag("pressure_size", QStringLiteral("筆圧でサイズを変える"), [](const S& s) { return s.pressure_size; }, [](S& s, bool v) { s.pressure_size = v; });
+    flag("pressure_opacity", QStringLiteral("筆圧で不透明度を変える"), [](const S& s) { return s.pressure_opacity; }, [](S& s, bool v) { s.pressure_opacity = v; });
     outer->addWidget(hint(QStringLiteral("滑らかさ・流量・描画モードはツールの設定で（ブラシごとに覚えます）。")));
     outer->addStretch(1);
 }
@@ -460,8 +468,9 @@ void BrushSettingsPanel::changed() {
     Json settings_of = core::brush_to_dict(brush);
     settings_of["engine"] = std::string(core::kDabEngine);
     settings_of["dabs"] = core::dabs_to_json(now);
-    // (a built-in brush, or one the open book draws lines with: copied as one's own first — no line drawn already changes)
-    if (!presets::is_own(key_) || window_->book().brush_custom.contains(key_)) {
+    // (a built-in brush, or one an open book draws lines with — any tab's, review P3-8: copied as one's own first — no line
+    // drawn already changes)
+    if (!presets::is_own(key_) || window_->any_book_holds_brush(key_)) {
         try {
             const Json made = presets::save(config_dir(), std::nullopt, settings_of, brush.label + "のコピー", std::nullopt);
             key_ = made.value("key", std::string());
@@ -481,7 +490,7 @@ void BrushSettingsPanel::changed() {
         return;
     }
     shown_ = now;
-    forget_stroke_previews();
+    forget_stroke_previews({key_});  // (its line only — review P2-3)
     if (sample != nullptr) sample->refresh();
     keep_waiting_ = true;
     keep_timer_.start();  // (the library a moment after the last change)
@@ -526,9 +535,11 @@ void BrushSettingsPanel::pick_tip() {
     const QString path = ask::open_path(this, QStringLiteral("先端の画像"), QStringLiteral("画像 (*.png *.jpg *.jpeg *.bmp *.webp *.tif *.tiff)"));
     if (path.isEmpty()) return;
     try {
-        std::ifstream file(core::path_from_utf8(path.toStdString()), std::ios::binary);
-        const std::string bytes((std::istreambuf_iterator<char>(file)), std::istreambuf_iterator<char>());
-        const auto made = render::dabs::take_in_picture(bytes, true, core::kMaxTipEdge);
+        // (review P3-17: read within a bound and made a tip off the window's thread)
+        const std::filesystem::path file = core::path_from_utf8(path.toStdString());
+        const auto made = off_ui([file] {
+            return render::dabs::take_in_picture(storage::read_file_bounded(file, std::size_t(256) << 20), true, core::kMaxTipEdge);
+        });
         render::dabs::keep_picture(made.first, made.second);
         tip_ = made.first;
         changed();

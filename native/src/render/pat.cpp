@@ -306,8 +306,12 @@ void put_sample(std::string& plane, float v, unsigned depth) {
 }  // namespace
 
 std::vector<PsdPattern> parse_block(std::string_view data) {
-    if (data.size() > kMaxFileBytes) throw core::Error("too_large", "the patterns are larger than 512 MiB");
     std::uint64_t budget = kMaxDecodedBytes;
+    return parse_block(data, budget);
+}
+
+std::vector<PsdPattern> parse_block(std::string_view data, std::uint64_t& budget) {
+    if (data.size() > kMaxFileBytes) throw core::Error("too_large", "the patterns are larger than 512 MiB");
     Reader r{data};
     std::vector<PsdPattern> out;
     while (data.size() - r.p >= 4) {

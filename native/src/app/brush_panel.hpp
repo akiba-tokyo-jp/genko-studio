@@ -39,6 +39,8 @@ QPixmap stroke_preview(const std::string& kind, const std::array<int, 3>& ink, Q
 
 // (PC4 E2) The lines drawn for the lists forgotten (a brush changed in this process: drawn again when next shown).
 void forget_stroke_previews();
+// (PC4 E2, review P2-3) Those of these brushes only (the others kept: the list is not drawn again whole).
+void forget_stroke_previews(const std::vector<std::string>& kinds);
 
 // The sizes offered as chips: the person's own (brush/sizes), or the usual nine.
 std::vector<double> size_presets();

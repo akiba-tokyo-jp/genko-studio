@@ -271,6 +271,15 @@ Object read_versioned(std::string_view payload, std::size_t at) {
     return read_structure(b, 0);
 }
 
+Object read_versioned(std::string_view payload, std::size_t at, std::size_t& budget) {
+    if (at > payload.size()) throw Broken("it ends early");
+    Bytes b(payload.substr(at), budget);
+    if (b.u32() != 16) throw Broken("its descriptor is not of version 16");
+    Object out = read_structure(b, 0);
+    budget -= b.spent();
+    return out;
+}
+
 }  // namespace genko::render::psd::descriptor
 
 namespace genko::render::psd {

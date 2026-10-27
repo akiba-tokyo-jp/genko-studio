@@ -18,7 +18,10 @@
 #include <QSpinBox>
 #include <QVBoxLayout>
 
+#include <algorithm>
+#include <cmath>
 #include <filesystem>
+#include <set>
 
 #include "app/ask.hpp"
 #include "app/brush_panel.hpp"
@@ -104,23 +107,63 @@ void MainWindow::choose_brush(const std::string& key, bool keep_tool) {
     }
 }
 
-void MainWindow::brushes_changed(std::optional<std::string> select, std::optional<std::string> forgotten) {
+void MainWindow::brushes_changed(std::optional<std::string> select, const std::vector<std::string>& forgotten, const std::vector<std::string>& changed) {
+    // (review P2-3: once for a change, however many brushes it touched — the library read, the lists made again)
     try {
         render::brushes::register_brushes(render::brushes::load_own_brushes(config_dir()));
     } catch (const std::exception&) {
     }
-    if (forgotten && !forgotten->empty() && !book().brush_custom.contains(*forgotten)) render::brushes::forget_brush(*forgotten);
-    forget_stroke_previews();
+    // (review P3-10: one's own brushes this process knows that the library has no longer — taken out here or by another
+    // window, the Preset Manager, `genko brushes` — forgotten unless an open book holds them; their lines stay)
+    std::set<std::string> in_library;
+    const presets::Library lib = presets::load(config_dir());
+    for (const presets::Group& g : lib.groups) {
+        for (const presets::Preset& p : g.items) in_library.insert(p.key);
+    }
+    std::vector<std::string> gone(forgotten.begin(), forgotten.end());
+    if (lib.problem.empty()) {  // (a library that cannot be read forgets nothing)
+        for (const core::Brush& b : render::brushes::everything()) {
+            if (presets::is_own(b.key) && !in_library.contains(b.key)) gone.push_back(b.key);
+        }
+    }
+    std::vector<std::string> redraw = changed;
+    for (const std::string& key : gone) {
+        if (key.empty() || in_library.contains(key) || any_book_holds_brush(key)) continue;
+        render::brushes::forget_brush(key);
+        redraw.push_back(key);
+    }
+    if (!redraw.empty()) forget_stroke_previews(redraw);  // (those brushes' lines only: the others kept)
     if (brush_ != nullptr) {
+        const bool lost = std::find(gone.begin(), gone.end(), brush_->kind()) != gone.end() && render::brushes::brush(brush_->kind()).key != brush_->kind();
         if (select && !select->empty()) {
             brush_->reload_kinds(*select);
         } else {
-            brush_->reload_kinds(forgotten && brush_->kind() == *forgotten ? std::optional<std::string>(std::string(core::kDefaultBrush)) : std::nullopt);
+            brush_->reload_kinds(lost ? std::optional<std::string>(std::string(core::kDefaultBrush)) : std::nullopt);
         }
     }
-    if (brushes_panel_ != nullptr) brushes_panel_->refresh();
-    if (brush_settings_panel_ != nullptr) brush_settings_panel_->refresh();
+    // (a panel in a dock not shown is made again when it is shown)
+    if (brushes_panel_ != nullptr && brushes_dock_ != nullptr && brushes_dock_->isVisible()) brushes_panel_->refresh();
+    if (brush_settings_panel_ != nullptr && brush_settings_dock_ != nullptr && brush_settings_dock_->isVisible()) brush_settings_panel_->refresh();
     fill_pixel_brushes();
+}
+
+bool MainWindow::any_book_holds_brush(const std::string& key) const {
+    if (book().brush_custom.contains(key)) return true;
+    for (const Document& d : documents_) {
+        if (d.session != nullptr && d.session->document().brush_custom.contains(key)) return true;
+    }
+    return false;
+}
+
+void MainWindow::add_background(Json& fields) const {
+    // (review P2-4: a dab brush whose colour moves between the 描画色 and the 背景色 takes the カラー panel's 背景色 with
+    // the line — the book keeps it with the line, as the brush state's would be; other lines get nothing, as before)
+    if (colours_ == nullptr) return;
+    const core::Brush b = render::brushes::brush(fields.value("kind", std::string()));
+    if (!b.dabs || !b.dabs->color.enabled || (b.dabs->color.fg_bg.jitter <= 0.0 && b.dabs->color.fg_bg.control == core::DabControl::Off)) return;
+    const auto back = colours_->background();
+    fields["background_rgb"] = Json::array({static_cast<int>(std::lround(std::clamp(back[0], 0.0, 1.0) * 255)), static_cast<int>(std::lround(std::clamp(back[1], 0.0, 1.0) * 255)),
+                                            static_cast<int>(std::lround(std::clamp(back[2], 0.0, 1.0) * 255))});
 }
 
 void MainWindow::edit_brush_settings() { edit_brush(); }
@@ -234,12 +277,17 @@ void MainWindow::apply_tool_fields(const QString& tool, const Json& fields) {
     for (const auto& [key, value] : fields.items()) {
         QWidget* w = page->findChild<QWidget*>(QString::fromStdString(key));
         if (w == nullptr) continue;
+        // (review P3-5: a number within the field's range before it is made a whole number)
+        const auto within = [&value](double lo, double hi) {
+            const double v = value.get<double>();
+            return std::isfinite(v) ? std::clamp(v, lo, hi) : lo;
+        };
         if (auto* box = qobject_cast<QDoubleSpinBox*>(w); box != nullptr && value.is_number()) {
-            box->setValue(value.get<double>());
+            box->setValue(within(box->minimum(), box->maximum()));
         } else if (auto* spin = qobject_cast<QSpinBox*>(w); spin != nullptr && value.is_number()) {
-            spin->setValue(static_cast<int>(value.get<double>()));
+            spin->setValue(static_cast<int>(std::lround(within(spin->minimum(), spin->maximum()))));
         } else if (auto* slider = qobject_cast<QSlider*>(w); slider != nullptr && value.is_number()) {
-            slider->setValue(static_cast<int>(value.get<double>()));
+            slider->setValue(static_cast<int>(std::lround(within(slider->minimum(), slider->maximum()))));
         } else if (auto* check = qobject_cast<QCheckBox*>(w); check != nullptr && value.is_boolean()) {
             check->setChecked(value.get<bool>());
         } else if (auto* combo = qobject_cast<QComboBox*>(w); combo != nullptr && value.is_string()) {
@@ -254,8 +302,9 @@ void MainWindow::apply_tool_fields(const QString& tool, const Json& fields) {
 
 Json MainWindow::tool_preset_options(const QString& tool, bool include_colour) const {
     Json options{{"fields", tool_fields(tool)}};
-    // (a tool that draws with a brush keeps the brush in hand: its key, as Photoshop's tool preset keeps the brush)
-    if (brush_ != nullptr && (PageCanvas::draws_line(tool) || tool == QLatin1String("eraser"))) {
+    // (a tool that draws with the brush in hand keeps it: its key, as Photoshop's tool preset keeps the brush — the ブラシツール
+    // and the 消しゴム (its ブラシ way); the 鉛筆ツール draws with its own — review P3-9)
+    if (brush_ != nullptr && (tool == QLatin1String("pen") || tool == QLatin1String("eraser"))) {
         std::string kind = brush_->kind();
         if (const presets::Preset* builtin = presets::builtin_dab_of(kind)) kind = builtin->key;  // (the library's key)
         options["brush"] = kind;
@@ -271,7 +320,12 @@ void MainWindow::use_tool_preset(const Json& item) {
     const QString tool = QString::fromStdString(item.value("tool", std::string()));
     if (tool.isEmpty()) return;
     const Json options = item.value("options", Json::object());
-    if (tool_actions_.contains(tool) || tool == QLatin1String("marquee") || tool == QLatin1String("shape")) choose_tool(tool);
+    // (review P3-9: a tool this window does not have — a later version's — is said; its settings are not put on another's)
+    if (!tool_actions_.contains(tool) && tool != QLatin1String("marquee") && tool != QLatin1String("shape")) {
+        flash(QStringLiteral("このツールプリセットの道具（%1）はこの版にありません").arg(tool), 4000);
+        return;
+    }
+    choose_tool(tool);
     if (options.contains("brush") && options["brush"].is_string() && brush_ != nullptr) {
         const std::string key = options["brush"].get<std::string>();
         if (core::find_builtin(key) != nullptr || presets::builtin(key) != nullptr || render::brushes::brush(key).key == key ||
@@ -337,14 +391,9 @@ Json MainWindow::migrate_presets(const QString& from) {
 namespace {
 
 QString counts_text(const Json& counts) {
-    static const std::vector<std::pair<std::string, QString>> kinds{{"brushes", QStringLiteral("ブラシ")},
-                                                                    {"gradients", QStringLiteral("グラデーション")},
-                                                                    {"patterns", QStringLiteral("パターン")},
-                                                                    {"shapes", QStringLiteral("シェイプ")},
-                                                                    {"tool_presets", QStringLiteral("ツールプリセット")}};
     QStringList parts;
-    for (const auto& [k, label] : kinds) {
-        if (counts.contains(k)) parts << QStringLiteral("%1 %2").arg(label).arg(counts[k].get<std::int64_t>());
+    for (const std::string& k : render::preset_files::kinds()) {
+        if (counts.contains(k)) parts << QStringLiteral("%1 %2").arg(QString::fromStdString(render::preset_files::kind_title(k))).arg(counts[k].get<std::int64_t>());
     }
     return parts.join(QStringLiteral("・"));
 }
@@ -358,12 +407,8 @@ void MainWindow::export_import_presets_dialog() {
     auto* layout = new QVBoxLayout(&dialog);
     layout->addWidget(new QLabel(QStringLiteral("書き出す・読み込むプリセット")));
     std::vector<std::pair<std::string, QCheckBox*>> boxes;
-    for (const auto& [k, label] : std::vector<std::pair<std::string, QString>>{{"brushes", QStringLiteral("ブラシ")},
-                                                                               {"gradients", QStringLiteral("グラデーション")},
-                                                                               {"patterns", QStringLiteral("パターン")},
-                                                                               {"shapes", QStringLiteral("シェイプ")},
-                                                                               {"tool_presets", QStringLiteral("ツールプリセット")}}) {
-        auto* box = new QCheckBox(label);
+    for (const std::string& k : render::preset_files::kinds()) {  // (render/preset_files' one table — review P3-13)
+        auto* box = new QCheckBox(QString::fromStdString(render::preset_files::kind_title(k)));
         box->setObjectName(QStringLiteral("preset_kind_") + QString::fromStdString(k));
         box->setChecked(true);
         layout->addWidget(box);

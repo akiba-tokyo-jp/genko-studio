@@ -1560,9 +1560,9 @@ int brushes_command(const QStringList& args, bool ascii) {
         Arguments a;
         if (auto error = parse_arguments(rest, kOptions, 1, "file", a)) return usage("genko brushes import-abr: " + *error);
         const fs::path file = path_arg(a.positional[0]);
-        // (refused unread past what a brush file may be: render/abr kMaxFileBytes)
-        const std::string bytes = storage::read_file_bounded(file, render::abr::kMaxFileBytes);
-        const std::string group = a.value("--group") ? a.value("--group")->toStdString() : storage::path_to_utf8(file.stem());
+        // (refused unread past what a brush file may be: render/abr kMaxFileBytes, too_large)
+        const std::string bytes = render::abr::read_file(file);
+        const std::string group = a.value("--group") ? a.value("--group")->toStdString() : presets::import_group(storage::path_to_utf8(file.stem()));
         Json out = presets::import_abr(dir, bytes, group, a.flag("--replace"));
         out["ok"] = true;
         print_json(out, ascii);

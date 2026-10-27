@@ -639,6 +639,7 @@ void MainWindow::pen_changed() {
         if (own != nullptr && own->isEnabled() && own->currentData().toString() != QLatin1String("normal")) badge = QStringLiteral("モード: ") + own->currentText();
         tool_settings_->set_badge(badge);
     }
+    add_background(fields);  // (PC4 E2, review P2-4: the line drawn as it goes takes the 背景色 the brush moves to)
     canvas_->set_live_pen(fields, layer != nullptr && drawable(*layer) ? std::optional<std::string>(layer->id) : std::nullopt);
     canvas_->brush_width_mm = pen_.width_mm;
     canvas_->eraser_mm = eraser_mm_;

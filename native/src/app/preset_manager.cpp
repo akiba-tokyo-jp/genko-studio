@@ -25,14 +25,6 @@ namespace {
 constexpr int kNameRole = Qt::UserRole + 1;   // (a preset's name)
 constexpr int kGroupRole = Qt::UserRole + 2;  // (its group's name)
 
-const std::vector<std::pair<std::string, QString>>& kind_names() {
-    static const std::vector<std::pair<std::string, QString>> k{{"brushes", QStringLiteral("ブラシ")},
-                                                                {"gradients", QStringLiteral("グラデーション")},
-                                                                {"patterns", QStringLiteral("パターン")},
-                                                                {"shapes", QStringLiteral("シェイプ")},
-                                                                {"tool_presets", QStringLiteral("ツールプリセット")}};
-    return k;
-}
 
 }  // namespace
 
@@ -42,7 +34,8 @@ PresetManager::PresetManager(MainWindow* window) : QDialog(window), window_(wind
     auto* layout = new QVBoxLayout(this);
     kinds = new QComboBox;
     kinds->setObjectName(QStringLiteral("preset_manager_kind"));
-    for (const auto& [k, label] : kind_names()) kinds->addItem(label, QString::fromStdString(k));
+    // (the kinds and their names: render/preset_files' one table — review P3-13)
+    for (const std::string& k : render::preset_files::kinds()) kinds->addItem(QString::fromStdString(render::preset_files::kind_title(k)), QString::fromStdString(k));
     connect(kinds, &QComboBox::currentIndexChanged, this, [this] { refresh(); });
     layout->addWidget(kinds);
     problem = new QLabel;

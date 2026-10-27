@@ -704,6 +704,10 @@ Pixels page_pixels(const core::Document& doc, const core::Page& page, int dpi) {
 }
 
 Pixels page_pixels(const core::Document& doc, const core::Page& page, const Box& region) {
+    return page_pixels(doc, page, region, raster::kWorkingDpi);
+}
+
+Pixels page_pixels(const core::Document& doc, const core::Page& page, const Box& region, int dpi) {
     RenderOptions options;
     options.mode = "print";
     options.finish = false;
@@ -715,7 +719,7 @@ Pixels page_pixels(const core::Document& doc, const core::Page& page, const Box&
     options.region = RenderRegion{region.x0, region.y0, region.width(), region.height()};
     core::Page shown = page;  // (without its nombre)
     shown.numero = false;
-    const RenderResult made = render_page(shown, raster::kWorkingDpi, options, &doc);
+    const RenderResult made = render_page(shown, dpi, options, &doc);
     if (page.color && made.inks) return from_inks(*made.inks, *page.color);
     if (deep && made.precise) return from_precise(*made.precise);
     return from_image(made.image);

@@ -109,17 +109,26 @@ struct File {
     std::vector<Sample> samples;
     std::vector<pat::PsdPattern> patterns;
     std::vector<psd::descriptor::Object> presets;  // (the brushPreset objects of "desc", in the file's order)
-    std::vector<std::string> warnings;            // (what did not stop the reading: skipped brushes, unknown sections…)
+    std::vector<std::string> warnings;            // (what did not stop the reading: skipped brushes, unknown sections… —
+                                                  // the first kMaxWarnings of them)
+    std::size_t warning_count = 0;                // (all of them, those not kept too)
 };
 
 inline constexpr std::uint32_t kMaxEdge = 8192;                         // (a tip's largest side read; Photoshop's: 5000)
 inline constexpr std::size_t kMaxBrushes = 20000;                       // (brushes read from one file)
 inline constexpr std::size_t kMaxSampleBytes = std::size_t(512) << 20;  // (the tips' unpacked bytes of one file)
 inline constexpr std::size_t kMaxFileBytes = std::size_t(512) << 20;    // (a file read: larger ones are refused unread)
+inline constexpr std::size_t kMaxWarnings = 100;                        // (warnings kept; the rest counted: "ほか N 件")
 
 // The file read. core::Error("format") for one that is not a brush file of these versions or holds no brush that can be
-// read (the first warning says why); core::Error("too_large") for one whose tips unpack past kMaxSampleBytes.
-File parse(std::string_view data, std::size_t max_sample_bytes = kMaxSampleBytes);
+// read (the first warning says why); core::Error("too_large") for one whose tips, patterns and descriptors together
+// unpack past `max_unpacked_bytes` (review P1-1: one budget for the whole file, spent before anything is unpacked). At
+// most kMaxBrushes brushes (or tips, or presets) are read, those that cannot be read counted with them.
+File parse(std::string_view data, std::size_t max_unpacked_bytes = kMaxSampleBytes);
+
+// A brush file's bytes from disk: core::Error("too_large", "the brush file is larger than 512 MB") past kMaxFileBytes,
+// before it is read (review P3-3); the file's own errors as storage reads them.
+std::string read_file(const std::filesystem::path& path);
 
 // Files of the same layouts (tests; upstream's write_v12, write_v6): version 1 or 2, the tips PackBits-compressed when
 // `rle`; version 6 of `subversion` 1 or 2, the tips, the patterns and the brushPreset descriptors (each a class id and its

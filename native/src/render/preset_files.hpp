@@ -27,8 +27,13 @@ namespace genko::render::preset_files {
 inline constexpr std::size_t kMaxFileBytes = std::size_t(256) << 20;
 inline constexpr int kVersion = 1;
 
-// The kinds in the Preset Manager's order: brushes, gradients, patterns, shapes, tool_presets.
+// The kinds in the Preset Manager's order: brushes, gradients, patterns, shapes, tool_presets (review P3-13: this table
+// alone names them — a kind added here, E6's styles, is listed by the Preset Manager and the 書き出し／読み込み window,
+// and refused by every function below until each knows it).
 const std::vector<std::string>& kinds();
+// A kind's name on the screen (UTF-8): ブラシ, グラデーション, パターン, シェイプ, ツールプリセット; the kind itself for one not
+// known.
+std::string kind_title(std::string_view kind);
 
 // {kind: {"groups": [{"name", "builtin"?, "presets": [names]}], "problem"?}} for the kinds asked (none: all).
 core::Json manager_list(const std::filesystem::path& config_dir, const std::vector<std::string>& wanted = {});

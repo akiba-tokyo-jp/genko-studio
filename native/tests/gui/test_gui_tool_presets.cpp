@@ -181,7 +181,12 @@ private slots:
         s.panel()->remove();
         QVERIFY(kept("ペン B") == nullptr);
         QVERIFY(!s.shown().contains(QStringLiteral("ペン B")));
-        s.panel()->reset();
+        s.panel()->reset();  // (asked first: no — nothing changes)
+        QVERIFY(kept("よその消しゴム") != nullptr);
+        QVERIFY(!s.answers.asked.isEmpty() && s.answers.asked.back().contains(QStringLiteral("自分で作ったツールプリセットは消えます")));
+        s.panel()->reset(true);  // (added after one's own)
+        QVERIFY(kept("よその消しゴム") != nullptr);
+        s.panel()->reset(false, true);
         QVERIFY(kept("よその消しゴム") == nullptr);
         QVERIFY(kept("G ペン 0.6 mm") != nullptr);
         // a file that cannot be read: shown as the built-in ones, never written over (said)

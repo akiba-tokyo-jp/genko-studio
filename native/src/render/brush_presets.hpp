@@ -46,7 +46,8 @@ struct Group {
 
 struct Library {
     std::vector<Group> groups;  // (the built-in groups, then the person's)
-    std::string problem;        // (brushes.json is there but cannot be read: why — it is never written over)
+    std::string problem;        // (brushes.json is there but cannot be read, or holds entries that are not brushes: why —
+                                // it is never written over then)
 };
 
 // The built-in groups (made once: their tips' pictures made known to the dab engine).
@@ -62,7 +63,8 @@ bool is_own(std::string_view key);
 bool same_settings(const core::Json& a, const core::Json& b);
 
 // The library: the built-in groups and the person's (brushes.json; one that cannot be read: `problem`, and none of its
-// brushes).
+// brushes; one with entries that are not brushes: `problem`, and the others — review P2-2). It never throws for what the
+// file holds.
 Library load(const std::filesystem::path& config_dir);
 // The brush of a key or a name (its key first), or none.
 const Preset* find(const Library& library, std::string_view key_or_name);
@@ -83,16 +85,21 @@ core::Json save(const std::filesystem::path& config_dir, std::optional<std::stri
 // for one that is not there, ("value") for a built-in one (nothing is forgotten then).
 core::Json remove(const std::filesystem::path& config_dir, const std::vector<std::string>& keys_or_names);
 // The Preset Manager's edits of the person's brushes: {"action": rename | delete | move | new_group | rename_group |
-// delete_group, "preset": a key or name, or several, "name"?, "group"?, "index"?} → what changed (as
-// render/preset_store's edit says it). core::Error("value") for what cannot be done (a built-in brush or group, a name
-// taken, none named); nothing is written then.
+// delete_group, "preset": a key or name, or several, "name"?, "group"?, "to"?, "index"?} → what changed (as
+// render/preset_store's edit says it; move: "to" the group moved to — made when it is not there —, "group" the group the
+// brushes are in, checked when given, as the other kinds' edits name them). core::Error("value") for what cannot be done
+// (a built-in brush or group, a name taken, none named); nothing is written then. A library without groups is written
+// without them still (the file as it was).
 core::Json edit(const std::filesystem::path& config_dir, const core::Json& params);
 
 // brush.presets.importAbr: the brushes of a Photoshop file (render/abr_map) kept as the person's, in `group` (made when it
 // is not there; `replace`: its brushes forgotten first, as a file read again) → {"group", "brushes": [{"key", "name"}],
-// "warnings", "version"}. abr::parse's errors, core::Error("value") past kMaxOwn.
+// "warnings", "version", "replaced"?: [the keys forgotten]}. abr::parse's errors, core::Error("value") past kMaxOwn.
 core::Json import_abr(const std::filesystem::path& config_dir, std::string_view bytes, const std::string& group, bool replace);
 core::Json import_mapped(const std::filesystem::path& config_dir, const abr_map::Import& mapped, const std::string& group, bool replace);
+// The group a file's brushes go to when none is given: its name (review P3-11: "一般 2" for a file named as a built-in
+// group, "読み込んだブラシ" for none).
+std::string import_group(const std::string& stem);
 
 // brush.defineFromSelection (ブラシを定義…): a sampled tip from the page as it shows (or the layer `layer_id` alone) within
 // `area` (op_area's form; none: the whole page) — its paint is darkness × alpha × the area (black is full paint, as
