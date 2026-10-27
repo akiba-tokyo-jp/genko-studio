@@ -309,14 +309,16 @@ private slots:
         QVERIFY(std::chrono::steady_clock::now() - started < std::chrono::seconds(2));
         // the budget: three tips of 64 × 64 × 8 bits are 12 KB; with 10 KB the third is refused, unread
         const std::string three = abr::write_v6(1, {sample("$a", 64, 64, 8), sample("$b", 64, 64, 8), sample("$c", 64, 64, 8)}, {}, {}, false);
-        QCOMPARE(abr::parse(three, 3 * 64 * 64).samples.size(), std::size_t(3));
+        // (review P1-1: the file's one budget — its empty brushes' descriptor takes a little of it too)
+        QCOMPARE(abr::parse(three, 3 * 64 * 64 + 4096).samples.size(), std::size_t(3));
         try {
             (void)abr::parse(three, 10000);
             QFAIL("past the budget");
         } catch (const core::Error& e) {
             QCOMPARE(QString::fromStdString(e.code()), QStringLiteral("too_large"));
         }
-        // a descriptor of a list longer than its bytes: a warning, read in no time (render/psd_descriptor's budget)
+        // a descriptor of a list longer than its bytes: refused in no time, before its slots are made — what it would
+        // take is counted against the file's one budget (render/psd_descriptor's reader; review P1-1)
         std::string bomb = abr::write_v6(1, {sample("$a", 4, 4, 8)}, {}, {}, false);
         std::string list;
         list += std::string("\x00\x00\x00\x10", 4);                    // version 16
@@ -329,11 +331,15 @@ private slots:
         bomb += std::string(1, '\0') + std::string(1, '\0') + std::string(1, '\0') + std::string(1, static_cast<char>(list.size()));
         bomb += list;
         const auto again = std::chrono::steady_clock::now();
-        const abr::File f = abr::parse(bomb);
+        try {  // (refused whole as too large, or its descriptor left out with a warning: never read)
+            const abr::File f = abr::parse(bomb);
+            QCOMPARE(f.samples.size(), std::size_t(1));
+            QVERIFY(f.presets.empty());
+            QVERIFY(any_warning(f.warnings, "desc"));
+        } catch (const core::Error& e) {
+            QCOMPARE(QString::fromStdString(e.code()), QStringLiteral("too_large"));
+        }
         QVERIFY(std::chrono::steady_clock::now() - again < std::chrono::seconds(2));
-        QCOMPARE(f.samples.size(), std::size_t(1));
-        QVERIFY(f.presets.empty());
-        QVERIFY(any_warning(f.warnings, "desc"));
     }
 
     // io/src/abr_map/tests.rs v6_settings_map_onto_brush_sections

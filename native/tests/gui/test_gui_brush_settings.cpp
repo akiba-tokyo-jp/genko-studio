@@ -31,6 +31,7 @@
 #include "app/brush_settings_panel.hpp"
 #include "app/brushes_panel.hpp"
 #include "app/canvas.hpp"
+#include "app/colours.hpp"
 #include "app/config.hpp"
 #include "app/fields.hpp"
 #include "app/inject.hpp"
