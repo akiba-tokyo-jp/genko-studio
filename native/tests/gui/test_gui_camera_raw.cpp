@@ -180,7 +180,9 @@ private slots:
             held = open->text();
             QTest::keyRelease(w, Qt::Key_Shift);
             let_go = open->text();
-            return press(w, "raw_open", Qt::ShiftModifier);
+            const int pressed = press(w, "raw_open", Qt::ShiftModifier);
+            QTest::keyRelease(w, Qt::Key_Shift);  // (the application's keys let go: the next 開く… is not one with Shift held)
+            return pressed;
         };
         d.window->open_path(dng);
         QVERIFY(wait_for([&] { return d.tabs() == 2; }, 30000));

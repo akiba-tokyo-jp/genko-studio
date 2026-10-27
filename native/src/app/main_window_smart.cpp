@@ -310,7 +310,7 @@ bool MainWindow::place_smart(const QString& file, bool as_placed, bool linked) {
     const Asked asked = asking();
     std::string bytes;
     render::smart::FileInfo info;
-    Json use;
+    Json use = Json::object();  // (a RAW: none — its development carries its colours)
     std::optional<Json> link;  // (PC3 A1: the file as it is — its sha256 and size —, whatever copy the book keeps)
     bool raw_file = false;     // (PC4 F-e)
     try {
