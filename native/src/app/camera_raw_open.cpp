@@ -238,7 +238,14 @@ public:
         }
         line->addWidget(new QLabel(QStringLiteral("出力のシャープ")));
         line->addWidget(sharpen_);
-        if (!editing_) line->addWidget(smart_);
+        if (!editing_) {
+            line->addWidget(smart_);
+        } else {  // (a smart object's window shows neither, yet they are its own: never left behind as windows of their own)
+            for (QWidget* unused : {static_cast<QWidget*>(resolution_), static_cast<QWidget*>(smart_)}) {
+                unused->setParent(flow);
+                unused->hide();
+            }
+        }
         line->addStretch(1);
         layout->addWidget(flow);
 
