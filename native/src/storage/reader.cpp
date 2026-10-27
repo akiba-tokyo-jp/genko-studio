@@ -1153,7 +1153,10 @@ core::Layer Reader::read_layer(const Json& data, const std::string& at) {
     layer.effect = dict_if_dict(data, "effect");
     // (layer-styles@1, PC4 E6: its style as the writer writes it — in its normal form —; one that is not, the book
     // read-only: core::validate_layer_styles below)
-    if (const Json* style = find(data, "style"); style != nullptr && !style->is_null()) layer.style = *style;
+    if (const Json* style = find(data, "style"); style != nullptr && !style->is_null()) {
+        // (a snapshot of the history holds its keys sorted: in the order the writer writes them again)
+        layer.style = core::layer_style_normal(*style) ? core::layer_style_spec(*style) : *style;
+    }
     layer.color_prints = to_bool(data, "color_prints", false);
     layer.screen = dict_if_dict(data, "screen");
     layer.source = dict_if_dict(data, "source");
@@ -1545,7 +1548,7 @@ core::Document Reader::migrate(const Json& payload) {
     if (const Json* light = find(payload, "global_light"); light != nullptr && !light->is_null()) {
         try {
             const std::array<double, 2> values = core::global_light_of(*light);
-            if (*light != core::global_light_json(values)) throw core::Error("value", "the global light is not as the writer writes it");
+            if (!core::same_json_unordered(*light, core::global_light_json(values))) throw core::Error("value", "the global light is not as the writer writes it");
             doc.global_light = values;
         } catch (const core::Error& error) {
             issue("broken_value", "/global_light", {}, error.what());

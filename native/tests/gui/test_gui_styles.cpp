@@ -55,6 +55,7 @@ struct Studio {
     std::shared_ptr<app::Session> session;
     std::unique_ptr<app::MainWindow> window;
     gui_test::Answers answers;
+    std::string ink_id = "ink";
     Studio() {
         (void)gui_test::config_folder();
         const auto path = gui_test::path_of(tmp.path() + "/book");
@@ -64,12 +65,14 @@ struct Studio {
         window->resize(1200, 860);
         window->show();
         window->canvas()->fit_page();
-        window->set_target_layer("ink");
+        for (const core::Layer& l : book().page(0).layers)
+            if (l.role == core::LayerRole::Ink) ink_id = l.id;
+        window->set_target_layer(ink_id);
     }
     const core::Document& book() const { return session->document(); }
     const core::Layer& ink() const {
         for (const core::Layer& l : book().page(0).layers)
-            if (l.id == "ink") return l;
+            if (l.id == ink_id) return l;
         return book().page(0).layers.front();
     }
     void trigger(const char* name) {
@@ -214,13 +217,13 @@ private slots:
     // コピー・ペースト・消去, 包括光源…, 効果を拡大・縮小…, すべての効果を隠す・表示, レイヤーを作成
     void theCommands() {
         Studio s;
-        QVERIFY(s.window->apply_ops(Json::array({Json{{"op", "set_layer_style"}, {"page", 1}, {"id", "ink"},
+        QVERIFY(s.window->apply_ops(Json::array({Json{{"op", "set_layer_style"}, {"page", 1}, {"id", s.ink_id},
                                                       {"style", Json{{"effects", Json::array({Json{{"kind", "drop_shadow"}, {"size_mm", 1}}, Json{{"kind", "color_overlay"}}})}}}}})));
         s.trigger("act_layer_style_copy");
         s.trigger("act_layer_style_clear");
         QVERIFY(!s.ink().style);
         s.trigger("act_layer_style_paste");
-        QCOMPARE(kinds_of(s.ink()), (QStringList{QStringLiteral("color_overlay"), QStringLiteral("drop_shadow")}));
+        QCOMPARE(kinds_of(s.ink()), (QStringList{QStringLiteral("drop_shadow"), QStringLiteral("color_overlay")}));
         // 包括光源…
         s.answers.responder->exec = [](QDialog* dialog) {
             if (dialog->objectName() != QStringLiteral("global_light_dialog")) return int(QDialog::Rejected);
@@ -232,7 +235,7 @@ private slots:
         // 効果を拡大・縮小…
         s.answers.responder->get_double = [](const QString&, const QString&, double, double, double, int) { return std::optional<double>(300); };
         s.trigger("act_layer_style_scale");
-        QCOMPARE((*s.ink().style)["effects"][1]["size_mm"], Json(3));
+        QCOMPARE((*s.ink().style)["effects"][0]["size_mm"], Json(3));
         // すべての効果を隠す・表示
         s.trigger("act_layer_style_hide_all");
         QVERIFY(!core::style_shows_effects(*s.ink().style));
@@ -271,7 +274,7 @@ private slots:
         emit tree->itemClicked(item_named(tree, QStringLiteral("ドロップシャドウ")), 0);
         QCOMPARE(kinds_of(s.ink()), QStringList{QStringLiteral("drop_shadow")});
         QVERIFY(panel->apply("黒の境界線", true));
-        QCOMPARE(kinds_of(s.ink()), (QStringList{QStringLiteral("stroke"), QStringLiteral("drop_shadow")}));
+        QCOMPARE(kinds_of(s.ink()), (QStringList{QStringLiteral("drop_shadow"), QStringLiteral("stroke")}));
         QVERIFY(panel->apply("デフォルトスタイル（なし）", false));
         QVERIFY(!s.ink().style);
         QVERIFY(panel->apply("中抜き", false));

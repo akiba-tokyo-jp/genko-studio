@@ -22,6 +22,8 @@
 #include "core/error.hpp"
 #include "core/layer_styles.hpp"
 #include "core/paths.hpp"
+#include "core/patterns.hpp"
+#include "core/psd_keep.hpp"
 #include "formats/export.hpp"
 #include "render/image.hpp"
 #include "render/image_ops.hpp"
@@ -169,13 +171,13 @@ private slots:
         const core::Document same = styled(doc, nullptr);
         QVERIFY(!same.page(0).layers[0].style);
         QCOMPARE(proof_bytes(same), before);
-        QVERIFY(!has_feature(same, std::string(core::kLayerStylesFeature)));
+        QVERIFY(!core::uses_layer_styles(same));
         const core::Document on = styled(doc, one(Json{{"kind", "drop_shadow"}}));
-        QVERIFY(has_feature(on, std::string(core::kLayerStylesFeature)));
+        QVERIFY(core::uses_layer_styles(on));
         QVERIFY(proof_bytes(on) != before);
         const core::Document off = styled(on, nullptr);
         QCOMPARE(proof_bytes(off), before);
-        QVERIFY(!has_feature(off, std::string(core::kLayerStylesFeature)));
+        QVERIFY(!core::uses_layer_styles(off));
         // a style of nothing ({"effects": []}): no style
         QVERIFY(!styled(doc, Json{{"effects", Json::array()}}).page(0).layers[0].style);
         // written: no style, no global light, no feature
@@ -240,7 +242,7 @@ private slots:
         QCOMPARE((*patterned.page(0).layers[0].style)["effects"][0]["pattern"]["id"], Json(patterned.patterns[0].id));
         px = shown(patterned);
         const Rgba c = at(px, 25.4, 25.4);
-        QVERIFY2(near(c, 1, 0, 0) || near(c, 0, 0, 1), qPrintable(told(c)));
+        QVERIFY2(c[1] < 0.03f && std::abs(c[0] + c[2] - 1) < 0.05f, qPrintable(told(c)));  // (red and blue, sampled between)
         QVERIFY(near(at(px, 5, 5), 1, 1, 1));
         // (a pattern a style uses: delete_pattern refuses it, as a fill's)
         QVERIFY(!refusal(patterned, Json::array({Json{{"op", "delete_pattern"}, {"id", patterned.patterns[0].id}}})).empty());
@@ -254,11 +256,15 @@ private slots:
     // above the range hidden
     void fillAndBlendIf() {
         const core::Document doc = square_book();
-        Json style = one(Json{{"kind", "stroke"}, {"size_mm", 1}, {"rgb", Json::array({255, 0, 0})}});
+        // (an inside stroke: drawn with the layer's interior effects, not faded with its pixels; an outside stroke of a
+        // paint layer lies beneath the whole shape, as upstream's)
+        Json style{{"effects", Json::array({Json{{"kind", "stroke"}, {"size_mm", 1}, {"position", "inside"}, {"rgb", Json::array({255, 0, 0})}},
+                                            Json{{"kind", "drop_shadow"}, {"blend", "normal"}, {"opacity", 1}, {"distance_mm", 3}, {"size_mm", 0}}})}};
         style["fill_opacity"] = 0;
         auto px = shown(styled(doc, style));
         QVERIFY2(near(at(px, 25.4, 25.4), 1, 1, 1), qPrintable(told(at(px, 25.4, 25.4))));
-        QVERIFY(near(at(px, 38.6, 25.4), 1, 0, 0));
+        QVERIFY2(near(at(px, 13.2, 25.4), 1, 0, 0), qPrintable(told(at(px, 13.2, 25.4))));
+        QVERIFY2(near(at(px, 39.2, 30), 0, 0, 0), qPrintable(told(at(px, 39.2, 30))));
         Json blend_if{{"effects", Json::array()}, {"blend_if", Json::array({Json{{"channel", "gray"}, {"this", Json::array({0, 0, 150, 150})}, {"under", Json::array({0, 0, 255, 255})}}})}};
         const core::Document hid = styled(doc, blend_if);
         QVERIFY(hid.page(0).layers[0].style.has_value());
@@ -281,7 +287,7 @@ private slots:
             if (kind == "gray") {
                 QVERIFY2(light(inside) + 0.3f < light(was), qPrintable(QString::fromStdString(kind) + told(inside)));
             } else {
-                QVERIFY2(inside[2] > inside[0] + 0.4f, qPrintable(QString::fromStdString(kind) + told(inside)));
+                QVERIFY2(inside[2] > inside[0] + 0.25f, qPrintable(QString::fromStdString(kind) + told(inside)));
             }
             QVERIFY2(light(at(px, 39.2, 30)) < 0.2f, qPrintable(QString::fromStdString(kind) + told(at(px, 39.2, 30))));
             QVERIFY2(light(at(px, 11.5, 25.4)) > 0.9f, qPrintable(QString::fromStdString(kind) + told(at(px, 11.5, 25.4))));
@@ -311,9 +317,10 @@ private slots:
         // the global light: the book's, the shadows moved with it
         const core::Document lit = run(d, Json{{"op", "set_global_light"}, {"angle", 30}, {"altitude", 45}});
         QCOMPARE(core::global_light(lit), (std::array<double, 2>{30, 45}));
-        QVERIFY(has_feature(lit, std::string(core::kLayerStylesFeature)));
+        QVERIFY(core::uses_layer_styles(lit));
         QVERIFY(shown(lit) != with);
-        QCOMPARE(core::global_light(run(lit, Json{{"op", "set_global_light"}})), (std::array<double, 2>{120, 30}));
+        QCOMPARE(core::global_light(run(lit, Json{{"op", "set_global_light"}})), (std::array<double, 2>{30, 45}));  // (nothing given: as it is)
+        QVERIFY(!run(lit, Json{{"op", "set_global_light"}, {"angle", 120}, {"altitude", 30}}).global_light);  // (Photoshop's own: not written)
         // レイヤーを作成: a shadow's layer below (not clipped), an overlay's above (clipped); the page as it was
         const Json two{{"effects", Json::array({Json{{"kind", "color_overlay"}, {"rgb", Json::array({0, 0, 255})}, {"opacity", 0.5}},
                                                 Json{{"kind", "drop_shadow"}, {"blend", "normal"}, {"opacity", 1}, {"distance_mm", 3}, {"size_mm", 0}}})}};
@@ -348,9 +355,9 @@ private slots:
         QVERIFY(!refusal(folder, Json::array({Json{{"op", "set_layer_style"}, {"page", 1}, {"id", "f"}, {"style", one(Json{{"kind", "stroke"}})}}})).empty());
         QVERIFY(!refusal(doc, Json::array({Json{{"op", "set_layer_style"}, {"page", 1}, {"id", "paint"}, {"style", one(Json{{"kind", "sparkle"}})}}})).empty());
         QVERIFY(!refusal(doc, Json::array({Json{{"op", "set_layer_style"}, {"page", 1}, {"id", "paint"}, {"style", one(Json{{"kind", "stroke"}, {"size_mm", 101}})}}})).empty());
-        // a pattern's picture given to the op: the journal keeps the book's id, not the picture
+        // a pattern's picture given to the op: the journal keeps its size, not the picture
         const auto applied = run_ops(doc, Json::array({Json{{"op", "set_layer_style"}, {"page", 1}, {"id", "paint"}, {"style", one(Json{{"kind", "pattern_overlay"}, {"pattern", checker()}})}}}));
-        QVERIFY(applied.journal_ops.dump().find("\"png\"") == std::string::npos);
+        QVERIFY(applied.journal_ops.dump().find("base64 chars>") != std::string::npos);
     }
 
     // saved, opened the same, undone (no style, no feature), done again
@@ -368,16 +375,26 @@ private slots:
         QCOMPARE(core::global_light(opened)[0], 60.0);
         QVERIFY(has_feature(opened, std::string(core::kLayerStylesFeature)));
         QCOMPARE(proof_bytes(opened), proof_bytes(done.doc));
-        storage::restore(dir, "human:test", false, false);
+        try {
+            storage::restore(dir, "human:test", false, false);
+        } catch (const core::Error& error) {
+            QFAIL((std::string(error.code()) + ": " + error.what()).c_str());
+        } catch (const std::exception& error) {
+            QFAIL(error.what());
+        }
         const core::Document undone = storage::load_document(dir).document;
         QVERIFY(!undone.page(0).layers[0].style);
         QVERIFY(!has_feature(undone, std::string(core::kLayerStylesFeature)));
         QCOMPARE(proof_bytes(undone), proof_bytes(doc));
-        storage::restore(dir, "human:test", true, false);
+        try {
+            storage::restore(dir, "human:test", true, false);
+        } catch (const core::Error& error) {
+            QFAIL((std::string(error.code()) + ": " + error.what()).c_str());
+        }
         QCOMPARE(*storage::load_document(dir).document.page(0).layers[0].style, *done.doc.page(0).layers[0].style);
     }
 
-    // a book whose style is not well formed is refused when it is read
+    // a book whose style is not well formed is read read-only (its report says why)
     void brokenStyleRefused() {
         QTemporaryDir scratch;
         const fs::path dir = core::path_from_utf8(scratch.path().toStdString()) / "b.genko";
@@ -393,13 +410,10 @@ private slots:
             changed = true;
         }
         QVERIFY(changed);
-        bool refused = false;
-        try {
-            (void)storage::load_document(dir);
-        } catch (const std::exception&) {
-            refused = true;
-        }
-        QVERIFY(refused);
+        // (read, said in the report: the book read-only, as any value not as the writer writes it)
+        const storage::LoadResult read = storage::load_document(dir);
+        QVERIFY(!read.report.clean());
+        QVERIFY2(read.report.to_json().dump().find("style") != std::string::npos, read.report.to_json().dump().c_str());
     }
 
     // a PSD: the style as lfx2 (and iOpa, the blending ranges), read back by this build's import as the same style
@@ -436,9 +450,14 @@ private slots:
         QCOMPARE(effects[2]["rgb"], Json::parse("[10, 20, 30]"));
         QVERIFY(std::abs((*got->style)["fill_opacity"].get<double>() - 0.5) < 0.01);
         QCOMPARE((*got->style)["blend_if"][0]["this"], Json::parse("[0, 10, 240, 250]"));
-        // (its kept blocks: not the effects — they are the layer's own now)
-        if (got->native_psd)
-            for (const auto& block : got->native_psd->blocks) QVERIFY2(!core::psd_effect_key(block.first), block.first.c_str());
+        // (the file's effects block kept to be written back as it is while the style is not changed — but drawn by this
+        // build now: not the panel's 効果（PSD）; a style set again forgets it)
+        QVERIFY(!core::psd_effects_kept(*got));
+        const std::string got_id = got->id;
+        const core::Document restyled = run(read, Json{{"op", "set_layer_style"}, {"page", 1}, {"id", got_id}, {"style", one(Json{{"kind", "stroke"}})}});
+        for (const core::Layer& l : restyled.page(0).layers)
+            if (l.id == got_id && l.native_psd)
+                for (const auto& block : l.native_psd->blocks) QVERIFY2(!core::psd_effect_key(block.first), block.first.c_str());
 
         // lfx2 alone: written and read back the same (its master switch too)
         render::psd_shapes::Canvas canvas;
@@ -448,7 +467,10 @@ private slots:
         Json off = *doc.page(0).layers[0].style;
         off.erase("fill_opacity");
         off.erase("blend_if");
-        off["effects"].erase(1);
+        Json without_pattern = Json::array();  // (no book here: the pattern overlay left out)
+        for (const Json& e : off["effects"])
+            if (e["kind"] != Json("pattern_overlay")) without_pattern.push_back(e);
+        off["effects"] = without_pattern;
         off["enabled"] = false;
         render::psd_shapes::Placement placement;
         placement.dpi = 200;

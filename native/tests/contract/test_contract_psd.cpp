@@ -1041,17 +1041,23 @@ private slots:
         QVERIFY(effects != nullptr && blend_if != nullptr && plain != nullptr);
         std::set<std::string> kept;
         for (const auto& [key, ref] : effects->native_psd->blocks) kept.insert(key);
-        // (not luni, lyid: this build's own; lspf kept as it locks something — its other bits so —, written from the locks)
-        QCOMPARE(kept, (std::set<std::string>{"lfx2", "lclr", "iOpa", "fxrp", "lnsr", "lspf"}));
+        // (not luni, lyid: this build's own; lspf kept as it locks something — its other bits so —, written from the locks;
+        // PC4 E6: not iOpa — the fill opacity of the layer's style now, written from it —; lfx2 kept to be written back as
+        // it is while the style read from it is not changed)
+        QCOMPARE(kept, (std::set<std::string>{"lfx2", "lclr", "fxrp", "lnsr", "lspf"}));
         QCOMPARE(effects->native_psd->id, (std::optional<std::int64_t>(7)));
         QVERIFY(effects->native_psd->ranges.empty());
-        QVERIFY(!blend_if->native_psd->ranges.empty());
-        QVERIFY(core::psd_effects_kept(*effects) && !core::psd_effects_kept(*blend_if));
+        // (PC4 E6: the effects and Blend If read into the layers' styles — drawn by this build, written from the styles)
+        QVERIFY(effects->style.has_value() && !(*effects->style)["effects"].empty());
+        QVERIFY(blend_if->style.has_value() && blend_if->style->contains("blend_if"));
+        QVERIFY(blend_if->native_psd->ranges.empty());
+        QVERIFY(!core::psd_effects_kept(*effects) && !core::psd_effects_kept(*blend_if));
         // (the locks: 5 = transparency and position, 0x80000000 = all)
         QVERIFY(effects->lock_alpha && effects->lock_position && !effects->locked);
         QVERIFY(blend_if->lock_alpha && blend_if->lock_position && blend_if->locked);
         QVERIFY(!plain->lock_alpha && !plain->lock_position && !plain->locked);
-        QVERIFY(std::any_of(opened.notes.begin(), opened.notes.end(), [](const std::string& n) { return n.find("レイヤー効果") != std::string::npos; }));
+        // (PC4 E6: its effects drawn now — not said to be Photoshop's only)
+        QVERIFY(std::none_of(opened.notes.begin(), opened.notes.end(), [](const std::string& n) { return n.find("レイヤー効果は Genko では描きません") != std::string::npos; }));
         QVERIFY(doc.file_info.has_value() && !doc.file_info->author.empty());  // (its XMP's File Info)
 
         const QString written = path(QStringLiteral("keep/written.psd"));

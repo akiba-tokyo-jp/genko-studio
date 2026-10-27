@@ -512,10 +512,28 @@ Json layer_style_spec(const Json& raw) {
     return out;
 }
 
+bool same_json_unordered(const Json& a, const Json& b) {
+    if (a.is_object() && b.is_object()) {
+        if (a.size() != b.size()) return false;
+        for (const auto& [key, value] : a.items()) {
+            const Json* other = get(b, key);
+            if (other == nullptr || !same_json_unordered(value, *other)) return false;
+        }
+        return true;
+    }
+    if (a.is_array() && b.is_array()) {
+        if (a.size() != b.size()) return false;
+        for (std::size_t i = 0; i < a.size(); ++i)
+            if (!same_json_unordered(a[i], b[i])) return false;
+        return true;
+    }
+    return a == b;
+}
+
 bool layer_style_normal(const Json& style) {
     try {
         const Json normal = layer_style_spec(style);
-        return !normal.is_null() && normal == style;
+        return !normal.is_null() && same_json_unordered(normal, style);
     } catch (const Error&) {
         return false;
     }

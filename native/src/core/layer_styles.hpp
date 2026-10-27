@@ -64,8 +64,11 @@ Json layer_style_spec(const Json& raw);
 Json layer_effect_spec(const Json& raw, const Json* base = nullptr);
 // The normal form of a kind's effect with its defaults.
 Json default_effect(std::string_view kind);
-// Is a style in its normal form (layer_style_spec gives it back)?
+// Is a style in its normal form (layer_style_spec gives it back), its keys in any order — the history's snapshots are
+// written with their keys sorted?
 bool layer_style_normal(const Json& style);
+// The same values, objects' keys in any order.
+bool same_json_unordered(const Json& a, const Json& b);
 
 // Does the layer have a style? Does its kind take one (paint, pen, fill, placed, smart)?
 bool has_layer_style(const Layer& layer);

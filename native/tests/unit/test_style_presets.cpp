@@ -111,9 +111,9 @@ private slots:
         QCOMPARE((*store::find(groups, "中抜き"))["fill_opacity"], Json(0));
         // ゴールド: its gradient's two colours, the bevel's depth 180 % → 1.8
         const Json* gold = store::find(groups, "ゴールド");
-        QCOMPARE((*gold)["effects"][0]["kind"], Json("bevel"));
-        QCOMPARE((*gold)["effects"][0]["depth"], Json(1.8));
-        QCOMPARE((*gold)["effects"][1]["gradient"]["stops"][0][1], Json::parse("[138, 90, 18]"));
+        QCOMPARE((*gold)["effects"][1]["kind"], Json("bevel"));
+        QCOMPARE((*gold)["effects"][1]["depth"], Json(1.8));
+        QCOMPARE((*gold)["effects"][0]["gradient"]["stops"][0][1], Json::parse("[138, 90, 18]"));
         // every built-in style as the kind checks it, each effect in its normal form
         for (const store::Group& g : groups) {
             for (const Json& item : g.items) {
@@ -124,7 +124,7 @@ private slots:
         // the listing
         const Json list = styles::list(groups);
         QCOMPARE(list["groups"][1]["styles"][0]["name"], Json("ネオン（青）"));
-        QCOMPARE(list["groups"][1]["styles"][0]["effects"], Json::parse(R"(["inner_glow", "color_overlay", "outer_glow"])"));
+        QCOMPARE(list["groups"][1]["styles"][0]["effects"], Json::parse(R"(["color_overlay", "inner_glow", "outer_glow"])"));
         QCOMPARE(list["groups"][1]["styles"][6]["fill_opacity"], Json(0));
     }
 
@@ -140,7 +140,7 @@ private slots:
         QCOMPARE(item["effects"][0]["pattern"]["scale"], Json(50));
         QCOMPARE(item["effects"][0]["pattern"]["link"], Json(true));
         QCOMPARE(item["blend"], Json("screen"));
-        QCOMPARE(styles::patterns_of(item), std::vector<Json>{Json{{"library", "木目"}}});
+        QCOMPARE(styles::patterns_of(item), (std::vector<Json>{Json{{"library", "木目"}}}));
         QVERIFY(!refused([] { styles::item_of(Json{{"effects", Json::array()}, {"blend", "sparkle"}}, "x"); }).empty());
         QVERIFY(!refused([] { styles::item_of(Json{{"effects", Json::array()}, {"fill_opacity", 2}}, "x"); }).empty());
     }
@@ -225,8 +225,8 @@ private slots:
         const render::Image none = styles::thumbnail(plain, 48, config, patterns.groups);
         QCOMPARE(none.width(), 48);
         QCOMPARE(none.mode(), std::string("RGBA"));
-        const Json* red = store::find(styles::kind().builtin(), "黒の境界線");
-        const render::Image stroked = styles::thumbnail(*red, 48, config, patterns.groups);
+        const Json red = *store::find(styles::kind().builtin(), "黒の境界線");
+        const render::Image stroked = styles::thumbnail(red, 48, config, patterns.groups);
         QVERIFY(stroked.tobytes() != none.tobytes());
         // (just outside the square's left edge, half way down: the black stroke there, nothing on the plain one)
         const auto alpha_at = [](const render::Image& image, int x, int y) { return static_cast<unsigned char>(image.tobytes()[std::size_t(y * image.width() + x) * 4 + 3]); };
@@ -259,7 +259,8 @@ private slots:
         QCOMPARE(read.styles[0].style["fill_opacity"], Json(0.25));
         QCOMPARE(read.styles[0].style["effects"][0]["pattern"]["id"], Json("asl-0"));
         QVERIFY(std::abs(read.styles[0].style["effects"][1]["distance_mm"].get<double>() - 1.016) < 0.01);
-        QVERIFY(std::abs(read.styles[0].style["effects"][0]["pattern"]["scale"].get<double>() - 50) < 0.5);
+        // (its scale at the file's dpi: the book's 300 dpi pattern at 50 % is the file's 150 dpi one at 25 %, the same size)
+        QVERIFY(std::abs(read.styles[0].style["effects"][0]["pattern"]["scale"].get<double>() - 25) < 0.5);
         QVERIFY(!read.styles[1].blend);
 
         store::Library patterns = render::pattern_library::load(config);
