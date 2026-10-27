@@ -46,6 +46,7 @@
 #include "core/ops_schema.hpp"
 #include "core/paths.hpp"
 #include "core/pyconv.hpp"
+#include "core/pyops.hpp"
 #include "formats/copy.hpp"
 #include "formats/export.hpp"
 #include "formats/exporting.hpp"

@@ -110,38 +110,38 @@ Encoded encode(const TiffBuilder& t, const Val& v, const std::vector<std::size_t
         }
     };
     Encoded out;
-    if (const auto* x = std::get_if<Byte>(&v)) {
-        out = {1, static_cast<std::uint32_t>(x->v.size()), std::string(x->v.begin(), x->v.end())};
-    } else if (const auto* x = std::get_if<Undefined>(&v)) {
-        out = {7, static_cast<std::uint32_t>(x->v.size()), std::string(x->v.begin(), x->v.end())};
-    } else if (const auto* x = std::get_if<Ascii>(&v)) {
-        out = {2, static_cast<std::uint32_t>(x->v.size() + 1), x->v + std::string(1, '\0')};
-    } else if (const auto* x = std::get_if<Short>(&v)) {
-        out = {3, static_cast<std::uint32_t>(x->v.size()), {}};
-        for (const auto s : x->v) b16(out.bytes, s);
-    } else if (const auto* x = std::get_if<Long>(&v)) {
-        out = {4, static_cast<std::uint32_t>(x->v.size()), {}};
-        for (const auto l : x->v) b32(out.bytes, l);
-    } else if (const auto* x = std::get_if<Rational>(&v)) {
-        out = {5, static_cast<std::uint32_t>(x->v.size()), {}};
-        for (const auto& [n, d] : x->v) {
+    if (const auto* v1 = std::get_if<Byte>(&v)) {
+        out = {1, static_cast<std::uint32_t>(v1->v.size()), std::string(v1->v.begin(), v1->v.end())};
+    } else if (const auto* v2 = std::get_if<Undefined>(&v)) {
+        out = {7, static_cast<std::uint32_t>(v2->v.size()), std::string(v2->v.begin(), v2->v.end())};
+    } else if (const auto* v3 = std::get_if<Ascii>(&v)) {
+        out = {2, static_cast<std::uint32_t>(v3->v.size() + 1), v3->v + std::string(1, '\0')};
+    } else if (const auto* v4 = std::get_if<Short>(&v)) {
+        out = {3, static_cast<std::uint32_t>(v4->v.size()), {}};
+        for (const auto s : v4->v) b16(out.bytes, s);
+    } else if (const auto* v5 = std::get_if<Long>(&v)) {
+        out = {4, static_cast<std::uint32_t>(v5->v.size()), {}};
+        for (const auto l : v5->v) b32(out.bytes, l);
+    } else if (const auto* v6 = std::get_if<Rational>(&v)) {
+        out = {5, static_cast<std::uint32_t>(v6->v.size()), {}};
+        for (const auto& [n, d] : v6->v) {
             b32(out.bytes, n);
             b32(out.bytes, d);
         }
-    } else if (const auto* x = std::get_if<SRational>(&v)) {
-        out = {10, static_cast<std::uint32_t>(x->v.size()), {}};
-        for (const auto& [n, d] : x->v) {
+    } else if (const auto* v7 = std::get_if<SRational>(&v)) {
+        out = {10, static_cast<std::uint32_t>(v7->v.size()), {}};
+        for (const auto& [n, d] : v7->v) {
             b32(out.bytes, static_cast<std::uint32_t>(n));
             b32(out.bytes, static_cast<std::uint32_t>(d));
         }
-    } else if (const auto* x = std::get_if<Blobs>(&v)) {
-        out = {4, static_cast<std::uint32_t>(x->v.size()), {}};
-        for (const auto i : x->v) b32(out.bytes, static_cast<std::uint32_t>(blob_pos[i]));
-    } else if (const auto* x = std::get_if<Ifds>(&v)) {
-        out = {4, static_cast<std::uint32_t>(x->v.size()), {}};
-        for (const auto i : x->v) b32(out.bytes, static_cast<std::uint32_t>(ifd_pos[i]));
-    } else if (const auto* x = std::get_if<IfdBytes>(&v)) {
-        out = {7, static_cast<std::uint32_t>(ifd_size(t, x->ifd)), std::string(8, '\0')};
+    } else if (const auto* v8 = std::get_if<Blobs>(&v)) {
+        out = {4, static_cast<std::uint32_t>(v8->v.size()), {}};
+        for (const auto i : v8->v) b32(out.bytes, static_cast<std::uint32_t>(blob_pos[i]));
+    } else if (const auto* v9 = std::get_if<Ifds>(&v)) {
+        out = {4, static_cast<std::uint32_t>(v9->v.size()), {}};
+        for (const auto i : v9->v) b32(out.bytes, static_cast<std::uint32_t>(ifd_pos[i]));
+    } else if (const auto* v10 = std::get_if<IfdBytes>(&v)) {
+        out = {7, static_cast<std::uint32_t>(ifd_size(t, v10->ifd)), std::string(8, '\0')};
     }
     return out;
 }

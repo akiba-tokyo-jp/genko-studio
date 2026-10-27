@@ -175,16 +175,28 @@ private slots:
             QCOMPARE(other.width(), base.width());
             QCOMPARE(other.height(), base.height());
             double most = 0;
-            for (std::size_t i = 0; i < std::size_t(base.width()) * base.height() * 3; ++i) most = std::max<double>(most, std::abs(other.value(i) - base.value(i)));
-            QVERIFY2(most < 1e-4, (std::string(what) + ": " + std::to_string(most)).c_str());
+            std::size_t where = 0, off = 0;
+            for (std::size_t i = 0; i < std::size_t(base.width()) * base.height() * 3; ++i) {
+                const double d = std::abs(other.value(i) - base.value(i));
+                if (d > 1e-4) ++off;
+                if (d > most) {
+                    most = d;
+                    where = i;
+                }
+            }
+            QVERIFY2(most < 1e-4, (std::string(what) + ": " + std::to_string(most) + " at pixel " + std::to_string(where / 3 % base.width()) + "," +
+                                   std::to_string(where / 3 / base.width()) + " (" + std::to_string(off) + " values differ)")
+                                      .c_str());
         };
         rawgen::DngSpec lj = scene_dng();
+        // (one strip: LibRaw reads a lossless JPEG DNG's first strip only — cameras and Adobe's converter write tiles)
         lj.storage = rawgen::DngStorage::Lj92Strips;
-        lj.rows = 16;
-        same(lj, "lossless JPEG strips");
+        lj.rows = 48;
+        same(lj, "lossless JPEG strip");
+        // (tiles of 16: a tile of two components whose doubled width is the picture's is read by LibRaw as one of a row)
         rawgen::DngSpec tiles = scene_dng();
         tiles.storage = rawgen::DngStorage::Lj92Tiles;
-        tiles.tile_width = 32;
+        tiles.tile_width = 16;
         tiles.tile_height = 16;
         same(tiles, "lossless JPEG tiles");
         rawgen::DngSpec bands = scene_dng();

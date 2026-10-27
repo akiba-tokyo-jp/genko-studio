@@ -14,6 +14,7 @@
 #include "core/color_raster.hpp"
 #include "core/command_bus.hpp"
 #include "core/paths.hpp"
+#include "core/pyops.hpp"
 #include "core/error.hpp"
 #include "core/file_info.hpp"
 #include "core/ids.hpp"

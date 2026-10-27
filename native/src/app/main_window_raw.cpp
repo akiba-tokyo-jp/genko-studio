@@ -12,6 +12,7 @@
 
 #include "app/ask.hpp"
 #include "app/camera_raw_open.hpp"
+#include "app/dialogs.hpp"
 #include "app/main_window.hpp"
 #include "app/open_dialog.hpp"
 #include "core/paths.hpp"
@@ -154,6 +155,18 @@ bool MainWindow::edit_raw_contents(const std::string& contents_id, const QString
     if (chosen.ending != camera_raw_open::Ending::Open || !still(asked)) return false;
     Json op{{"op", "set_camera_raw"}, {"contents", contents_id}, {"develop", chosen.raw["develop"]}};
     op["adjust"] = chosen.raw.contains("adjust") ? chosen.raw["adjust"] : Json(nullptr);
+    try {  // (nothing changed: no step to undo)
+        Json now = start;
+        now["develop"] = op["develop"];
+        if (op["adjust"].is_null()) {
+            now.erase("adjust");
+        } else {
+            now["adjust"] = op["adjust"];
+        }
+        if (start.is_object() && core::raw::normal_raw(now) == core::raw::normal_raw(start)) return false;
+    } catch (const std::exception&) {
+        // (what it refuses: the op says so)
+    }
     if (!apply_ops(Json::array({op}))) return false;
     flash(QStringLiteral("「%1」の現像の設定を変えました").arg(title.isEmpty() ? QString::fromStdString(contents.name) : title), 4000);
     return true;

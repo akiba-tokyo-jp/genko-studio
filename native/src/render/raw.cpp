@@ -18,6 +18,7 @@
 #include "core/color_raster.hpp"
 #include "core/error.hpp"
 #include "core/file_info.hpp"
+#include "core/pyops.hpp"
 #include "core/smart.hpp"
 #include "render/codecs/codecs.hpp"
 #include "render/fx.hpp"
@@ -164,6 +165,26 @@ Info info_of(std::string_view bytes, const LibRaw& lr) {
             out.xyz_to_camera[r][c] = d.color.cam_xyz[r][c];
             any = any || (std::isfinite(d.color.cam_xyz[r][c]) && d.color.cam_xyz[r][c] != 0);
         }
+    if (!any) {  // (a DNG's own: its ColorMatrix of D65's light, else the later calibration's, else the first)
+        const auto filled = [&](int i) {
+            bool some = false;
+            for (int r = 0; r < 3; ++r)
+                for (int c = 0; c < 3; ++c) {
+                    if (!std::isfinite(d.color.dng_color[i].colormatrix[r][c])) return false;
+                    some = some || d.color.dng_color[i].colormatrix[r][c] != 0;
+                }
+            return some;
+        };
+        int pick = -1;
+        for (int i = 0; i < 2; ++i)
+            if (filled(i) && d.color.dng_color[i].illuminant == 21) pick = i;
+        if (pick < 0) pick = filled(1) ? 1 : filled(0) ? 0 : -1;
+        if (pick >= 0) {
+            for (int r = 0; r < 3; ++r)
+                for (int c = 0; c < 3; ++c) out.xyz_to_camera[r][c] = d.color.dng_color[pick].colormatrix[r][c];
+            any = true;
+        }
+    }
     out.matrix = any;
     if (!any)  // (no matrix: the camera's colours taken as sRGB's primaries, as LibRaw's rgb_cam then is)
         out.xyz_to_camera = Mat3{{{3.2404542, -1.5371385, -0.4985314}, {-0.9692660, 1.8760108, 0.0415560}, {0.0556434, -0.2040259, 1.0572252}}};
@@ -209,7 +230,7 @@ void open(Run& run, std::string_view bytes, const codecs::Limits& limits) {
 
 // --- colour ----------------------------------------------------------------------------------------------------------------
 
-std::array<double, 3> apply(const Mat3& m, const std::array<double, 3>& v) {
+std::array<double, 3> times(const Mat3& m, const std::array<double, 3>& v) {
     return {m[0][0] * v[0] + m[0][1] * v[1] + m[0][2] * v[2], m[1][0] * v[0] + m[1][1] * v[1] + m[1][2] * v[2],
             m[2][0] * v[0] + m[2][1] * v[1] + m[2][2] * v[2]};
 }
@@ -697,7 +718,7 @@ std::pair<double, double> temperature_tint(const std::array<double, 2>& xy) {
 }
 
 std::array<double, 3> multipliers_for(const Info& info, double temperature_k, double tint) {
-    const auto cam = apply(info.xyz_to_camera, xy_to_xyz(white_xy(temperature_k, tint)));
+    const auto cam = times(info.xyz_to_camera, xy_to_xyz(white_xy(temperature_k, tint)));
     if (!(cam[0] > 1e-9 && cam[1] > 1e-9 && cam[2] > 1e-9) || !std::isfinite(cam[0] + cam[1] + cam[2])) return info.daylight;
     return {cam[1] / cam[0], 1.0, cam[1] / cam[2]};
 }
@@ -705,7 +726,7 @@ std::array<double, 3> multipliers_for(const Info& info, double temperature_k, do
 std::pair<double, double> temperature_of(const Info& info, const std::array<double, 3>& m) {
     const auto inverse = invert(info.xyz_to_camera);
     if (!inverse || !(m[0] > 0 && m[1] > 0 && m[2] > 0)) return {5500, 0};
-    const auto xyz = apply(*inverse, {1.0 / m[0], 1.0 / m[1], 1.0 / m[2]});
+    const auto xyz = times(*inverse, {1.0 / m[0], 1.0 / m[1], 1.0 / m[2]});
     const double s = xyz[0] + xyz[1] + xyz[2];
     if (!std::isfinite(s) || s <= 1e-9) return {5500, 0};
     return temperature_tint({xyz[0] / s, xyz[1] / s});
