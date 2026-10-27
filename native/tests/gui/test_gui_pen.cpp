@@ -339,6 +339,7 @@ private slots:
         QVERIFY(live != nullptr);
         const render::Image shown = live->patch();
         const QRect box = live->box();
+        const auto live_dpi = live->dpi();  // (the live line goes with the release)
         inject::tablet(desk.canvas(), inject::Phase::Release, points.back(), false, t0 + 16 * points.size());
         QCOMPARE(desk.ink().stroke_count(), std::size_t{1});
         const Json& op = desk.ops.back().back();
@@ -356,7 +357,7 @@ private slots:
         QCOMPARE(kept.time_ms.size(), kept.points.size());
         QVERIFY(desk.session->document().brush_custom.contains("my_dab_pen"));
         bool inside = false;
-        const render::Image committed = rendered(desk, live->dpi(), box, inside);
+        const render::Image committed = rendered(desk, live_dpi, box, inside);
         QVERIFY2(inside, "the committed line drew outside the live line's box");
         QVERIFY2(shown.tobytes() == committed.tobytes() && shown.mode() == committed.mode(), qPrintable(describe_difference(shown, committed)));
         // the G pen: no inputs sent

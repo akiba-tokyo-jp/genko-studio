@@ -25,6 +25,7 @@
 
 #include <filesystem>
 #include <fstream>
+#include <optional>
 
 #include "gui_support.hpp"
 #include "app/brush_panel.hpp"
@@ -132,13 +133,13 @@ QTreeWidgetItem* item_named(QTreeWidget* tree, const QString& name) {
     return nullptr;
 }
 
-const presets::Preset* own_named(const std::string& name) {
+std::optional<presets::Preset> own_named(const std::string& name) {
     for (const presets::Group& g : presets::load(app::config_dir()).groups) {
         if (g.builtin) continue;
         for (const presets::Preset& p : g.items)
-            if (p.name == name) return new presets::Preset(p);  // (the test's own copy)
+            if (p.name == name) return p;  // (the test's own copy)
     }
-    return nullptr;
+    return std::nullopt;
 }
 
 }  // namespace
@@ -202,8 +203,8 @@ private slots:
         const std::string copy = s.window->brush_panel()->kind();
         QVERIFY(copy.starts_with("my_") && presets::is_own(copy));
         QCOMPARE(panel->key(), copy);
-        const presets::Preset* kept = own_named("ソフト円ブラシのコピー");
-        QVERIFY(kept != nullptr);
+        std::optional<presets::Preset> kept = own_named("ソフト円ブラシのコピー");
+        QVERIFY(kept.has_value());
         QCOMPARE(kept->key, copy);
         QVERIFY(std::abs(core::dabs_from_json(presets::builtin("my_genko_soft_round")->settings["dabs"]).hardness) < 1e-9);  // (the built-in as it was)
         // a change to the copy: in its place, at once in this process, a moment later in the library
@@ -212,10 +213,8 @@ private slots:
         QVERIFY(render::brushes::brush(copy).dabs->scatter.enabled);
         QVERIFY(std::abs(render::brushes::brush(copy).dabs->hardness - 0.4) < 1e-9);
         panel->keep_now();
-        delete kept;
         kept = own_named("ソフト円ブラシのコピー");
         QVERIFY(core::dabs_from_json(kept->settings["dabs"]).scatter.enabled);
-        delete kept;
         // its line drawn below
         panel->sample->draw();
         QVERIFY(!panel->sample->pixmap().isNull());
@@ -259,24 +258,22 @@ private slots:
         QCOMPARE(s.window->brush_panel()->kind(), std::string("my_genko_chalk"));
         // ＋: the brush in hand as one's own (its pictures with it), renamed, moved, deleted
         panel->new_preset(QStringLiteral("自分のチョーク"));
-        const presets::Preset* mine = own_named("自分のチョーク");
-        QVERIFY(mine != nullptr);
+        std::optional<presets::Preset> mine = own_named("自分のチョーク");
+        QVERIFY(mine.has_value());
         const std::string key = mine->key;
         const std::string tip = core::dabs_from_json(mine->settings["dabs"]).tip;
-        delete mine;
         QVERIFY(render::brushes::library_tip(app::config_dir(), tip) != nullptr);
         QCOMPARE(s.window->brush_panel()->kind(), key);
         QCOMPARE(panel->chosen_key(), key);  // (the panel shows the brush in hand)
         panel->rename(QStringLiteral("チョーク（自分）"));
-        QVERIFY(own_named("チョーク（自分）") != nullptr);
+        QVERIFY(own_named("チョーク（自分）") != std::nullopt);
         panel->tree()->setCurrentItem(item_named(panel->tree(), QStringLiteral("チョーク（自分）")));
         panel->move_to_group(QStringLiteral("画材"));
         mine = own_named("チョーク（自分）");
         QCOMPARE(mine->group, std::string("画材"));
-        delete mine;
         panel->tree()->setCurrentItem(item_named(panel->tree(), QStringLiteral("チョーク（自分）")));
         panel->remove();
-        QVERIFY(own_named("チョーク（自分）") == nullptr);
+        QVERIFY(own_named("チョーク（自分）") == std::nullopt);
         // a built-in brush is not renamed or deleted (said)
         panel->tree()->setCurrentItem(item_named(panel->tree(), QStringLiteral("チョーク")));
         panel->remove();
@@ -295,9 +292,8 @@ private slots:
         std::ofstream(gui_test::path_of(file), std::ios::binary) << render::abr::write_v12(2, {round, picture}, false);
         QVERIFY(panel->import_file(file, false));
         mine = own_named("点々");
-        QVERIFY(mine != nullptr);
+        QVERIFY(mine.has_value());
         QCOMPARE(mine->group, std::string("画材"));
-        delete mine;
         QVERIFY(item_named(panel->tree(), QStringLiteral("点々")) != nullptr);
         // a file that is not one: said, nothing added
         const QString broken = s.tmp.path() + QStringLiteral("/壊れ.abr");
@@ -331,13 +327,12 @@ private slots:
                                               {"area", Json{{"poly", Json::array({Json::array({8.0, 28.0}), Json::array({22.0, 28.0}), Json::array({22.0, 38.0}),
                                                                                    Json::array({8.0, 38.0})})}}}}}));
         s.window->define_brush_preset(QStringLiteral("四角"));
-        const presets::Preset* made = own_named("四角");
-        QVERIFY(made != nullptr);
+        std::optional<presets::Preset> made = own_named("四角");
+        QVERIFY(made.has_value());
         const core::DabSettings d = core::dabs_from_json(made->settings["dabs"]);
         QVERIFY(!d.tip.empty());
         QVERIFY(std::abs(d.size_mm - 10.0) < 0.4);  // (the box's larger side, 10 mm)
         QCOMPARE(s.window->brush_panel()->kind(), made->key);
-        delete made;
     }
 
     // The pixel tools' ブラシ: the library's dab brushes; chosen, the stroke's op names it (the book keeps it first) with
@@ -408,7 +403,7 @@ private slots:
         const int before = s.window->brushes_changed_count();
         panel->remove_group();
         QCOMPARE(s.window->brushes_changed_count(), before + 1);
-        QVERIFY(own_named("一") == nullptr && own_named("四") == nullptr);
+        QVERIFY(own_named("一") == std::nullopt && own_named("四") == std::nullopt);
     }
 
     // (review P2-2) A library holding an entry that is not a brush: the window starts, the others listed.
@@ -450,13 +445,13 @@ private slots:
         presets::remove(app::config_dir(), {"自分の線"});
         const Json added = s.window->import_presets(file, {"brushes"});
         QCOMPARE(added["added"]["brushes"].get<int>(), 1);
-        QVERIFY(own_named("自分の線") != nullptr);
+        QVERIFY(own_named("自分の線") != std::nullopt);
         // from another settings folder: its groups not here yet
         QTemporaryDir other;
         presets::save(gui_test::path_of(other.path()), std::nullopt, Json{{"label", "よそのペン"}, {"base", "maru"}}, std::nullopt, std::string("よそ"));
         const Json moved = s.window->migrate_presets(other.path());
         QCOMPARE(moved["added"]["brushes"].get<int>(), 1);
-        QVERIFY(own_named("よそのペン") != nullptr);
+        QVERIFY(own_named("よそのペン") != std::nullopt);
     }
 };
 

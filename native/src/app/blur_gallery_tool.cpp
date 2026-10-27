@@ -462,7 +462,10 @@ void bind_field(const std::shared_ptr<Work>& work, QFormLayout* form, const QStr
           bool own, double k, std::vector<std::function<void()>>& shows) {
     form->addRow(label, box);
     const std::string field = key;
-    const auto target = [work, own]() -> Json* {
+    // (weak: the work holds these through its fields — a strong one would be a ring and the work never let go)
+    const auto target = [weak = std::weak_ptr<Work>(work), own]() -> Json* {
+        const auto work = weak.lock();
+        if (!work) return nullptr;
         if (own) return &work->params;
         if (work->kind == "blur_path") {
             Json& paths = work->paths();
@@ -477,7 +480,9 @@ void bind_field(const std::shared_ptr<Work>& work, QFormLayout* form, const QStr
         box->setEnabled(at != nullptr);
         box->setValue(at != nullptr ? num(*at, field.c_str(), fallback) * k : fallback * k);
     });
-    QObject::connect(box, &QDoubleSpinBox::valueChanged, box, [work, target, field, k](double value) {
+    QObject::connect(box, &QDoubleSpinBox::valueChanged, box, [weak = std::weak_ptr<Work>(work), target, field, k](double value) {
+        const auto work = weak.lock();
+        if (!work) return;
         if (Json* at = target()) {
             (*at)[field] = value / k;
             schedule(work);

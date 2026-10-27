@@ -119,7 +119,8 @@ QImage developed(const Picture& picture, const Json& settings) {
     });
     const auto surface = render::fx::precise_surface(raster);
     render::fx::apply(*surface, *kernel, settings, core::FilterInks::Meaning, all, nullptr, picture.s);
-    const core::ColorRasterView view(render::fx::take_bytes(*surface));
+    const std::string worked = render::fx::take_bytes(*surface);  // (held: the view reads it)
+    const core::ColorRasterView view(worked);
     for (std::size_t i = 0; i < out.size() / 4; ++i) {
         const auto p = view.pixel(i);
         for (std::size_t c = 0; c < 4; ++c) out[i * 4 + c] = static_cast<float>(p[c]);
